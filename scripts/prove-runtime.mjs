@@ -13,6 +13,8 @@ const workspaceRoot = resolve(process.env.STUDIO_PROOF_WORKSPACE ?? join(studioR
 const outsideMarker = join(dirname(workspaceRoot), 'studio-sandbox-outside.txt')
 const insideMarker = join(workspaceRoot, 'runtime', 'sandbox-inside.txt')
 const sessionIdText = process.env.STUDIO_PROOF_SESSION_ID ?? `studio-poc-01b-${randomUUID()}`
+process.env.DSH_HOME = dshHome
+process.env.DSH_TELEMETRY_DISABLED = '1'
 
 assert.equal(process.platform, 'linux', 'PoC-01b must run inside Linux/WSL2')
 assert.ok(studioRoot.startsWith('/home/'), `PoC-01b must run on WSL2 ext4, got ${studioRoot}`)
@@ -122,6 +124,9 @@ let first
 let firstHandle
 let second
 let secondHandle
+let identityToken
+let identitySessionId
+let firstIdentityAudits
 
 try {
   await mkdir(workspaceRoot, { recursive: true })
@@ -133,6 +138,30 @@ try {
     return Promise.resolve('allowed-once')
   }, { prepend: true })
   firstHandle = await createAgent(first.ctx, sessionId)
+  assert.equal(first.ctx.studioIdentity.service.isPersonalMode('127.0.0.1'), true)
+  await first.ctx.studioIdentity.service.requestMagicCode('runtime-proof@example.com', 'org-proof', 'tenant-proof')
+  const capturedMessage = first.ctx.studioIdentity.developmentEmailCapture?.messages.at(-1)
+  assert.ok(capturedMessage, 'loopback proof did not capture its development-only email')
+  const identityIssued = await first.ctx.studioIdentity.service.verifyMagicCode(
+    capturedMessage.to,
+    capturedMessage.code,
+    { label: 'WSL2 proof', userAgent: 'runtime-proof', ipTruncated: '127.0.0.0/24' },
+  )
+  identityToken = identityIssued.token
+  identitySessionId = identityIssued.session.session_id
+  await first.ctx.studioIdentity.service.bindHarnessSession(identityIssued.session, sessionIdText)
+  assert.deepEqual(first.ctx.studioIdentity.service.identityStateForHarnessSession(sessionIdText, '127.0.0.1'), {
+    authenticated: true,
+    strongIdentityVerified: false,
+  })
+  const confidentialValues = [identityIssued.token, identityIssued.csrfToken, capturedMessage.code]
+  const identityEvidence = JSON.stringify({
+    audits: first.ctx.studioIdentity.service.auditRecords(),
+    sessions: first.ctx.studioIdentity.service.sessionRecords(),
+  })
+  for (const confidential of confidentialValues) {
+    assert.equal(identityEvidence.includes(confidential), false, 'identity secret leaked into durable records')
+  }
   const toolNames = first.ctx.tools.schemas(firstHandle.agent).map(schema => schema.name).sort()
   assert.ok(toolNames.includes('studio_echo'), 'Studio tool was not visible to the live agent')
   assert.ok(toolNames.includes('bash'), 'standard preset bash tool was not visible to the live agent')
@@ -174,6 +203,7 @@ try {
   const firstRecord = structuredClone(first.ctx.studioHello.record())
   const firstPolicyAudits = structuredClone(first.ctx.studioPolicy.auditRecords()
     .filter(record => record.session_id === sessionIdText))
+  firstIdentityAudits = structuredClone(first.ctx.studioIdentity.service.auditRecords())
   assert.ok(firstPolicyAudits.length >= 3, 'policy decisions were not durably recorded')
   approvalOff()
   await stop(first, firstHandle)
@@ -181,6 +211,9 @@ try {
   first = undefined
 
   second = await bootStudio()
+  const restoredIdentitySession = await second.ctx.studioIdentity.service.authenticate(identityToken, false)
+  assert.equal(restoredIdentitySession.session_id, identitySessionId)
+  assert.deepEqual(second.ctx.studioIdentity.service.auditRecords(), firstIdentityAudits)
   assert.deepEqual(second.ctx.studioHello.record(), firstRecord)
   assert.deepEqual(second.ctx.studioPolicy.auditRecords()
     .filter(record => record.session_id === sessionIdText), firstPolicyAudits)
@@ -188,6 +221,15 @@ try {
   assert.ok(secondHandle.agent.session.events.length >= firstEventCount)
   await ask(secondHandle.agent, 'RESTART_PROBE')
   assert.match(messageText(secondHandle.agent.session), /RESTART_OK history_restored=true/)
+  await second.ctx.studioIdentity.service.revokeSession(restoredIdentitySession, restoredIdentitySession.session_id)
+  await assert.rejects(() => second.ctx.studioIdentity.service.authenticate(identityToken, false), /sessão foi encerrada/)
+  await ask(secondHandle.agent, 'Run the deterministic Studio echo proof after identity revocation.')
+  const revokedDecision = second.ctx.studioPolicy.auditRecords().findLast(record => record.session_id === sessionIdText
+    && record.tool_name === 'studio_echo')
+  assert.deepEqual(
+    { decision: revokedDecision?.decision, reason: revokedDecision?.reason },
+    { decision: 'deny', reason: 'Sessão de identidade ausente, expirada ou revogada.' },
+  )
   await second.ctx.sessions.flush(secondHandle.agent.session)
 
   const upstreamLock = Object.fromEntries(readFileSync(join(studioRoot, 'UPSTREAM.lock'), 'utf8')
@@ -219,6 +261,19 @@ try {
       physicalDomain: 'studio_policy_audit',
       logicalDomain: 'studio.policy.audit',
       recordsBeforeRestart: firstPolicyAudits.length,
+    },
+    identity: {
+      physicalDomains: [
+        'studio_identity_users',
+        'studio_identity_credentials',
+        'studio_identity_sessions',
+        'studio_identity_audit',
+      ],
+      sessionRestoredAfterRestart: true,
+      revocationBlockedNextToolCall: true,
+      strongIdentityVerified: false,
+      durableSecretsExposed: false,
+      passkeyHardwareCeremony: 'NOT_EXECUTED',
     },
     eventTypes: [...new Set(secondHandle.agent.session.events.map(event => event.type))].sort(),
   }

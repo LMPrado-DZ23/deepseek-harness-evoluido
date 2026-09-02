@@ -64,6 +64,12 @@ export type PolicyAuditRecord = z.infer<typeof policyAuditRecordSchema>
 
 export interface StudioPolicyRuntime {
   auditRecords(): readonly PolicyAuditRecord[]
+  setIdentityResolver(resolver: (execution: ToolExecution) => PolicyIdentityState): () => void
+}
+
+export interface PolicyIdentityState {
+  readonly authenticated: boolean
+  readonly strongIdentityVerified: boolean
 }
 
 declare const policyAuditKeyBrand: unique symbol
@@ -249,13 +255,25 @@ function toPreToolDecision(decision: PolicyDecision): PreToolDecision {
 /** Mounts the policy at the authoritative host-side pre-execution seam. */
 export async function apply(ctx: Context, config: PolicyPluginConfig = {}): Promise<void> {
   const engine = new StudioPolicyEngine(config)
+  let identityResolver = (execution: ToolExecution): PolicyIdentityState => ({
+    authenticated: true,
+    strongIdentityVerified: config.strongIdentityVerified?.(execution) === true,
+  })
   const domain: Domain<typeof studioPolicyAuditDomainSpec> = await ctx.storageDomain.open(studioPolicyAuditDomainSpec)
   ctx.effect(() => () => domain.close(), 'dz23-studio-policy.domainClose')
   const decisions = domain.table('decisions')
   ctx.provide('studioPolicy', {
     auditRecords: () => [...decisions.entries()].map(([, record]) => record),
+    setIdentityResolver: (resolver) => {
+      const previous = identityResolver
+      identityResolver = resolver
+      return () => { identityResolver = previous }
+    },
   })
   ctx.on('tools/pre-execute', async (execution, next): Promise<PreToolDecision> => {
+    const identity = execution.agent === undefined
+      ? { authenticated: false, strongIdentityVerified: false }
+      : identityResolver(execution)
     let decision = execution.agent === undefined
       ? {
           toolName: execution.name,
@@ -264,9 +282,17 @@ export async function apply(ctx: Context, config: PolicyPluginConfig = {}): Prom
           reason: 'Execução sem sessão auditável foi bloqueada.',
           ruleSource: 'safe-default' as const,
         }
-      : engine.evaluate(execution.name, {
-          strongIdentityVerified: config.strongIdentityVerified?.(execution) === true,
-        })
+        : !identity.authenticated
+            ? {
+                toolName: execution.name,
+                effectiveTier: 'T2' as const,
+                kind: 'deny' as const,
+                reason: 'Sessão de identidade ausente, expirada ou revogada.',
+                ruleSource: 'safe-default' as const,
+              }
+            : engine.evaluate(execution.name, {
+                strongIdentityVerified: identity.strongIdentityVerified,
+              })
 
     if (decision.kind === 'allow') {
       const downstream = await next()

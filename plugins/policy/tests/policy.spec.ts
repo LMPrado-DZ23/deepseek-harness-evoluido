@@ -230,8 +230,13 @@ describe('authoritative tools/pre-execute integration', () => {
     expect(STUDIO_POLICY_AUDIT_PHYSICAL_DOMAIN).toBe('studio_policy_audit')
     expect(STUDIO_POLICY_AUDIT_LOGICAL_DOMAIN).toBe('studio.policy.audit')
     expect(ctx.storageDomain.open).toHaveBeenCalledWith(studioPolicyAuditDomainSpec)
-    const runtime = ctx.provide.mock.calls[0]?.[1] as { auditRecords(): readonly unknown[] }
+    const runtime = ctx.provide.mock.calls[0]?.[1] as {
+      auditRecords(): readonly unknown[]
+      setIdentityResolver(resolver: () => { authenticated: boolean; strongIdentityVerified: boolean }): () => void
+    }
     expect(runtime.auditRecords()).toHaveLength(1)
+    const unsetStrongIdentity = runtime.setIdentityResolver(() => ({ authenticated: true, strongIdentityVerified: true }))
+    unsetStrongIdentity()
     await cleanup?.()
     expect(close).toHaveBeenCalledOnce()
   })
@@ -253,6 +258,19 @@ describe('authoritative tools/pre-execute integration', () => {
     const next = vi.fn<() => Promise<PreToolDecision>>().mockResolvedValue({ kind: 'allow' })
     const { hook } = await mounted({ rules: { external: rule({ inferredTier: 'T2' }) } })
     await expect(hook?.(execution('external'), next)).resolves.toMatchObject({ kind: 'ask' })
+    expect(next).not.toHaveBeenCalled()
+  })
+
+  it('blocks the next tool call immediately when the identity session is invalid', async () => {
+    const next = vi.fn<() => Promise<PreToolDecision>>().mockResolvedValue({ kind: 'allow' })
+    const { ctx, hook } = await mounted({ rules: { safe: rule({ inferredTier: 'T0' }) } })
+    const runtime = ctx.provide.mock.calls[0]?.[1] as {
+      setIdentityResolver(resolver: () => { authenticated: boolean; strongIdentityVerified: boolean }): () => void
+    }
+    runtime.setIdentityResolver(() => ({ authenticated: false, strongIdentityVerified: false }))
+    await expect(hook?.(execution('safe'), next)).resolves.toMatchObject({
+      kind: 'deny', reason: 'Sessão de identidade ausente, expirada ou revogada.',
+    })
     expect(next).not.toHaveBeenCalled()
   })
 

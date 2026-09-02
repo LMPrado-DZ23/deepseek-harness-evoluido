@@ -9,5 +9,7 @@
 - insert:
     - id: dz23-studio-policy
       name: '@dz23-studio/policy'
+    - id: dz23-studio-identity
+      name: '@dz23-studio/identity'
     - id: studio-hello
       name: '@studio/hello'

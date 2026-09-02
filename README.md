@@ -9,6 +9,10 @@ O checkout de execução continua fixado no commit
 em construção é o motor de permissões `@dz23-studio/policy`, aplicado no seam
 host-side `tools/pre-execute`; decisões de segurança não dependem da interface.
 
+O produto será **open source e sem cobrança, assinatura, créditos ou paywall**.
+A licença OSI exata ainda precisa ser escolhida antes da publicação; enquanto
+`LICENSE.md` não for substituído, o checkout continua juridicamente privado.
+
 ## Decisão
 
 **O gate literal original foi encerrado com errata aceita.** O commit fixado rejeita o nome físico `studio.hello`: `defineDomain` aceita somente `/^[a-z][a-z0-9_]*$/`. A convenção geral agora usa `studio_hello` como identificador físico e `studio.hello` como nome lógico.
@@ -28,6 +32,8 @@ Decisões relacionadas:
 - `dsh-home/profiles/studio`: profile Studio que estende os bundles oficiais `@deepseek-ai/dsh-base` e `@deepseek-ai/dsh-web-app`.
 - `plugins/hello`: plugin externo `@studio/hello`; o upstream não recebe arquivos ou alterações.
 - `plugins/policy`: motor TypeScript + Zod dos tiers T0–T3, com auditoria por sessão.
+- `plugins/identity`: passkeys, código temporário por e-mail, sessões opacas,
+  dispositivos, CSRF e revogação ligados ao motor de permissões.
 - `apps/studio-web/public/brand`: identidade visual oficial do DZ23 STUDIO.
 - `UPSTREAM.lock`: identidade do repositório e commit usados.
 
@@ -40,4 +46,8 @@ No WSL Ubuntu, a partir da raiz deste repositório:
 node node_modules/vitest/vitest.mjs run --coverage
 ```
 
-Resultado observado: quatro testes aprovados e 100% de statements, branches, functions e lines para `plugins/hello/src/index.ts`.
+Resultado atual do gate completo P29-A: 107 testes aprovados e 100% de
+statements, branches, functions e lines em `hello`, `policy` e `identity`. A
+prova viva restaura a sessão de identidade após reinício e comprova que a
+revogação bloqueia a chamada de ferramenta seguinte. Isso não inclui cerimônia
+de passkey com hardware nem exposição pública.
