@@ -4,6 +4,8 @@
 
 **Snapshot avaliado:** `OmniRoute-release-v3.8.51`
 
+**Referência preservada do PoC-01b aprovado:** `227948723c7121e88bdcf3fb1ca5a56a7c7fa6f8`
+
 **Regra aplicada:** o PoC deve parar, sem contorno, se a instalação, build ou primeira inicialização exigir CA, alteração de DNS/hosts, proxy do sistema, Agent Bridge, MITM ou TPROXY nativo.
 
 ## Resultado executivo
