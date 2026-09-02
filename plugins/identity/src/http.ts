@@ -10,10 +10,7 @@ export const SESSION_COOKIE = 'dz23_studio_session'
 export const CSRF_COOKIE = 'dz23_studio_csrf'
 
 const emailSchema = z.object({ email: z.email() }).strict()
-const magicStartSchema = emailSchema.extend({
-  org_id: z.string().min(1).default('org_local'),
-  tenant_id: z.string().min(1).default('tenant_local'),
-}).strict()
+const magicStartSchema = emailSchema
 const magicVerifySchema = emailSchema.extend({
   code: z.string().regex(/^\d{6}$/),
   device_label: z.string().min(1).max(100),
@@ -68,7 +65,7 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
       const route = path.slice('/api/studio/identity'.length)
       if (request.method === 'POST' && route === '/magic/start') {
         const body = magicStartSchema.parse(await readJson(request))
-        await config.service.requestMagicCode(body.email, body.org_id, body.tenant_id)
+        await config.service.requestMagicCode(body.email)
         json(response, 202, { message: 'Se o e-mail puder receber acesso, enviaremos um código temporário.' })
         return
       }

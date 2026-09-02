@@ -1,4 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
+import { isIP } from 'node:net'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { Domain, KvTable } from '@deepseek-ai/dsh-storage-domain'
@@ -25,6 +26,7 @@ export * from './crypto.js'
 export * from './email.js'
 export * from './http.js'
 export * from './model.js'
+export * from './mutex.js'
 export * from './passkey.js'
 export * from './service.js'
 
@@ -35,6 +37,9 @@ export interface IdentityPluginConfig {
   readonly rpName?: string
   readonly rpId?: string
   readonly expectedOrigin?: string
+  readonly defaultOrgId?: string
+  readonly defaultTenantId?: string
+  readonly enrollment?: 'closed' | 'open'
   readonly allowedHosts?: readonly string[]
   readonly allowedOrigins?: readonly string[]
   readonly email?: { readonly kind: 'memory' } | { readonly kind: 'smtp'; readonly secretRef: string }
@@ -86,6 +91,8 @@ function values<T>(table: KvTable<IdentityKey, T>): T[] {
 }
 
 export async function apply(ctx: Context, config: IdentityPluginConfig = {}): Promise<void> {
+  const rpId = config.rpId ?? 'localhost'
+  assertValidRpId(rpId)
   const [usersDomain, credentialsDomain, sessionsDomain, auditDomain]: [
     Domain<typeof identityUsersDomainSpec>,
     Domain<typeof identityCredentialsDomainSpec>,
@@ -111,15 +118,18 @@ export async function apply(ctx: Context, config: IdentityPluginConfig = {}): Pr
   )
   const port = ctx.webServer.port
   const defaultHost = `127.0.0.1:${port}`
-  const defaultOrigin = `http://${defaultHost}`
+  const defaultOrigin = `http://localhost:${port}`
   const email = resolveEmailSender(ctx, config)
   const service = new StudioIdentityService({
     repository,
     passkeys: config.passkeys ?? new SimpleWebAuthnProvider(),
     emailSender: email.sender,
     rpName: config.rpName ?? 'DZ23 STUDIO',
-    rpId: config.rpId ?? '127.0.0.1',
+    rpId,
     expectedOrigin: config.expectedOrigin ?? defaultOrigin,
+    defaultOrgId: config.defaultOrgId ?? 'org_local',
+    defaultTenantId: config.defaultTenantId ?? 'tenant_local',
+    enrollment: config.enrollment ?? (ctx.webServer.host === '127.0.0.1' ? 'open' : 'closed'),
     ...(config.now === undefined ? {} : { now: config.now }),
     ...(config.createId === undefined ? {} : { createId: config.createId }),
     ...(config.createSecret === undefined ? {} : { createSecret: config.createSecret }),
@@ -141,9 +151,17 @@ export async function apply(ctx: Context, config: IdentityPluginConfig = {}): Pr
       service,
       bindHost: ctx.webServer.host,
       allowedHosts: config.allowedHosts ?? [defaultHost, `localhost:${port}`],
-      allowedOrigins: config.allowedOrigins ?? [defaultOrigin, `http://localhost:${port}`],
+      allowedOrigins: config.allowedOrigins ?? [defaultOrigin, `http://${defaultHost}`],
     }),
   }), 'dz23-studio-identity.http')
+}
+
+export function assertValidRpId(rpId: string): void {
+  const domain = rpId.toLowerCase()
+  const validDomain = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/u
+  if (isIP(rpId) !== 0 || (domain !== 'localhost' && !validDomain.test(domain))) {
+    throw new Error('rpId deve ser localhost ou um nome de domínio, nunca um endereço IP, porta ou URL.')
+  }
 }
 
 function resolveEmailSender(ctx: Context, config: IdentityPluginConfig): { sender: EmailSender; capture?: MemoryEmailSender } {

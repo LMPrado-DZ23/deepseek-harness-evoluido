@@ -138,8 +138,8 @@ try {
     return Promise.resolve('allowed-once')
   }, { prepend: true })
   firstHandle = await createAgent(first.ctx, sessionId)
-  assert.equal(first.ctx.studioIdentity.service.isPersonalMode('127.0.0.1'), true)
-  await first.ctx.studioIdentity.service.requestMagicCode('runtime-proof@example.com', 'org-proof', 'tenant-proof')
+  const personalModeBeforeLogin = first.ctx.studioIdentity.service.isPersonalMode('127.0.0.1')
+  assert.equal(await first.ctx.studioIdentity.service.requestMagicCode('runtime-proof@example.com'), 'sent')
   const capturedMessage = first.ctx.studioIdentity.developmentEmailCapture?.messages.at(-1)
   assert.ok(capturedMessage, 'loopback proof did not capture its development-only email')
   const identityIssued = await first.ctx.studioIdentity.service.verifyMagicCode(
@@ -149,6 +149,9 @@ try {
   )
   identityToken = identityIssued.token
   identitySessionId = identityIssued.session.session_id
+  assert.equal(first.ctx.studioIdentity.service.isEnrollmentOpen(), false)
+  assert.ok(first.ctx.studioIdentity.service.auditRecords()
+    .some(record => record.event_type === 'enrollment_closed'))
   await first.ctx.studioIdentity.service.bindHarnessSession(identityIssued.session, sessionIdText)
   assert.deepEqual(first.ctx.studioIdentity.service.identityStateForHarnessSession(sessionIdText, '127.0.0.1'), {
     authenticated: true,
@@ -271,6 +274,8 @@ try {
       ],
       sessionRestoredAfterRestart: true,
       revocationBlockedNextToolCall: true,
+      personalModeBeforeLogin,
+      enrollmentClosedAfterFirstUser: true,
       strongIdentityVerified: false,
       durableSecretsExposed: false,
       passkeyHardwareCeremony: 'NOT_EXECUTED',

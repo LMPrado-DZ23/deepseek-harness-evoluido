@@ -21,6 +21,15 @@ O Studio mantém uma camada fina de identidade própria:
 - não existem senhas;
 - no modo pessoal, somente em `127.0.0.1` e antes do primeiro cadastro, a pessoa
   recebe a identidade canônica `org_local`/`tenant_local` sem tela de login;
+- organização e tenant nunca são aceitos do corpo anônimo da solicitação de
+  código; são definidos exclusivamente pela configuração do servidor;
+- o cadastro inicial (`enrollment: open`) aceita somente a primeira pessoa,
+  cria-a como `owner` nos escopos padrão do servidor e se fecha automaticamente
+  com evento de auditoria; o padrão é aberto apenas em loopback e fechado em
+  bind servidor;
+- depois do fechamento, e-mail desconhecido recebe a mesma resposta genérica,
+  mas nenhum código é enviado e nenhuma pessoa é criada; convites entram em
+  P29-B;
 - qualquer bind não loopback exige identidade e um provedor real de e-mail;
 - o capturador de e-mail em memória existe apenas para desenvolvimento/teste,
   nunca escreve código ou link em log e é recusado no modo servidor.
@@ -29,6 +38,10 @@ O servidor WebAuthn usa `@simplewebauthn/server` 13.3.2, versão que contém a
 correção de validação de cadeia de confiança publicada no advisory
 GHSA-6hxq-p678-4hr2. O cliente de navegador ainda é `NOT_PRESENT`; por isso uma
 cerimônia com autenticador físico não foi reivindicada nesta fatia.
+
+O RP ID padrão é `localhost`. Endereços IP, URLs e valores com porta são
+recusados; em servidor, o RP ID deve ser o domínio HTTPS publicado pelo Caddy e
+permanece `NOT_CONFIGURED` até P29-C.
 
 ## Consequências
 

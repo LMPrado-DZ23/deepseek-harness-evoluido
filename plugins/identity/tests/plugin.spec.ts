@@ -84,7 +84,7 @@ describe('identity Cordis plugin composition', () => {
     }))
     expect(f.getRoute()).toMatchObject({ kind: 'prefix', path: '/api/studio/identity' })
     const runtime = f.provided.identity!
-    await runtime.service.requestMagicCode('owner@example.com', 'org', 'tenant')
+    await runtime.service.requestMagicCode('owner@example.com')
     const code = runtime.developmentEmailCapture!.messages[0]!.code
     const issued = await runtime.service.verifyMagicCode('owner@example.com', code, {
       label: 'Notebook', userAgent: 'Vitest', ipTruncated: '127.0.0.0/24',
@@ -103,7 +103,7 @@ describe('identity Cordis plugin composition', () => {
   })
 
   it('accepts an explicitly injected sender without exposing a development capture', async () => {
-    const f = context()
+    const f = context('0.0.0.0')
     const sender: EmailSender = { sendMagicCode: vi.fn(() => Promise.resolve()) }
     await apply(f.ctx as never, {
       emailSender: sender,
@@ -114,6 +114,8 @@ describe('identity Cordis plugin composition', () => {
       allowedOrigins: ['https://studio.example'],
     })
     expect(f.provided.identity).not.toHaveProperty('developmentEmailCapture')
+    await expect(f.provided.identity!.service.requestMagicCode('unknown@example.com')).resolves.toBe('suppressed')
+    expect(sender.sendMagicCode).not.toHaveBeenCalled()
   })
 
   it('constructs SMTP only from a credential reference and rejects memory email on a server bind', async () => {
@@ -122,5 +124,14 @@ describe('identity Cordis plugin composition', () => {
     expect(smtp.provided.identity).not.toHaveProperty('developmentEmailCapture')
     const remote = context('0.0.0.0')
     await expect(apply(remote.ctx as never, { passkeys })).rejects.toThrow(/SMTP/)
+  })
+
+  it('uses localhost as the default WebAuthn RP and rejects IP RP identifiers before opening storage', async () => {
+    const local = context()
+    await apply(local.ctx as never, { passkeys, enrollment: 'closed' })
+    await expect(local.provided.identity!.service.requestMagicCode('unknown@example.com')).resolves.toBe('suppressed')
+    const invalid = context()
+    await expect(apply(invalid.ctx as never, { passkeys, rpId: '127.0.0.1' })).rejects.toThrow(/nunca um endereço IP/)
+    expect(invalid.ctx.storageDomain.open).not.toHaveBeenCalled()
   })
 })

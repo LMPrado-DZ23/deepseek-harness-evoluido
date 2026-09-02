@@ -73,7 +73,7 @@ class FakePasskeys implements PasskeyProvider {
   }
 }
 
-function makeHarness() {
+function makeHarness(enrollment: 'closed' | 'open' = 'open') {
   const repository = new MemoryRepository()
   const email = new CaptureEmail()
   const passkeys = new FakePasskeys()
@@ -88,6 +88,9 @@ function makeHarness() {
     rpName: 'DZ23 STUDIO',
     rpId: 'localhost',
     expectedOrigin: 'https://localhost',
+    defaultOrgId: 'org-a',
+    defaultTenantId: 'tenant-a',
+    enrollment,
     now: () => new Date(now),
     createId: () => `id-${++id}`,
     createSecret: () => `secret-${++secret}`,
@@ -105,7 +108,7 @@ const authResponse = (id = 'credential-one') => ({ id }) as AuthenticationRespon
 const registrationResponse = { id: 'new' } as RegistrationResponse
 
 async function login(harness: ReturnType<typeof makeHarness>) {
-  await harness.service.requestMagicCode(' Owner@Example.com ', 'org-a', 'tenant-a')
+  await harness.service.requestMagicCode(' Owner@Example.com ')
   return harness.service.verifyMagicCode('owner@example.com', '123456', device)
 }
 
@@ -125,16 +128,36 @@ describe('StudioIdentityService', () => {
       authenticated: false, strongIdentityVerified: false,
     })
     expect(h.email.messages).toEqual([{ to: 'owner@example.com', code: '123456', expiresInMinutes: 10 }])
+    expect(h.repository.users()[0]).toMatchObject({ role: 'owner', org_id: 'org-a', tenant_id: 'tenant-a' })
     expect(h.service.auditRecords().map(record => record.event_type)).toContain('personal_mode_disabled')
+    expect(h.service.auditRecords().map(record => record.event_type)).toContain('enrollment_closed')
+  })
+
+  it('does not create or email unknown users when enrollment is closed', async () => {
+    const h = makeHarness('closed')
+    await expect(h.service.requestMagicCode('unknown@example.com')).resolves.toBe('suppressed')
+    expect(h.email.messages).toHaveLength(0)
+    expect(h.repository.users()).toHaveLength(0)
+    expect(h.repository.magicCodes()).toHaveLength(0)
+    expect(h.service.auditRecords()).toContainEqual(expect.objectContaining({ event_type: 'magic_code_suppressed' }))
+  })
+
+  it('refuses an already-issued unknown-user code after another person closes enrollment', async () => {
+    const h = makeHarness()
+    await h.service.requestMagicCode('late@example.com')
+    await h.service.requestMagicCode('owner@example.com')
+    await h.service.verifyMagicCode('owner@example.com', '123456', device)
+    await expect(h.service.verifyMagicCode('late@example.com', '123456', device)).rejects.toMatchObject({ code: 'invalid' })
+    expect(h.repository.users()).toHaveLength(1)
   })
 
   it('rejects invalid requests and locks a magic code after five wrong attempts', async () => {
     const h = makeHarness()
-    await expect(h.service.requestMagicCode('bad', 'org', 'tenant')).rejects.toMatchObject({ code: 'invalid' })
+    await expect(h.service.requestMagicCode('bad')).rejects.toMatchObject({ code: 'invalid' })
     h.setCode('abc')
-    await expect(h.service.requestMagicCode('a@b.com', 'org', 'tenant')).rejects.toMatchObject({ code: 'invalid' })
+    await expect(h.service.requestMagicCode('a@b.com')).rejects.toMatchObject({ code: 'invalid' })
     h.setCode('123456')
-    await h.service.requestMagicCode('a@b.com', 'org', 'tenant')
+    await h.service.requestMagicCode('a@b.com')
     for (let attempt = 1; attempt <= 4; attempt += 1) {
       await expect(h.service.verifyMagicCode('a@b.com', '000000', device)).rejects.toMatchObject({ code: 'invalid' })
     }
@@ -145,11 +168,11 @@ describe('StudioIdentityService', () => {
 
   it('expires and consumes magic codes exactly once', async () => {
     const h = makeHarness()
-    await h.service.requestMagicCode('a@b.com', 'org', 'tenant')
+    await h.service.requestMagicCode('a@b.com')
     h.setNow('2026-09-02T12:10:00.000Z')
     await expect(h.service.verifyMagicCode('a@b.com', '123456', device)).rejects.toMatchObject({ code: 'expired' })
     h.setNow('2026-09-02T12:00:00.000Z')
-    await h.service.requestMagicCode('a@b.com', 'org', 'tenant')
+    await h.service.requestMagicCode('a@b.com')
     await h.service.verifyMagicCode('a@b.com', '123456', device)
     await expect(h.service.verifyMagicCode('a@b.com', '123456', device)).rejects.toMatchObject({ code: 'not-found' })
   })
@@ -160,10 +183,10 @@ describe('StudioIdentityService', () => {
       magic_code_id: 'old', email: 'a@b.com', code_hash: '0'.repeat(64), org_id: 'old-org', tenant_id: 'old-tenant',
       attempts: 0, created_at: '2026-09-02T11:00:00.000Z', expires_at: '2026-09-02T13:00:00.000Z', consumed_at: null,
     })
-    await h.service.requestMagicCode('a@b.com', 'new-org', 'new-tenant')
+    await h.service.requestMagicCode('a@b.com')
     h.repository.codeMap.set('old', { ...h.repository.codeMap.get('old')!, consumed_at: null })
     const issued = await h.service.verifyMagicCode('a@b.com', '123456', device)
-    expect(issued.session.org_id).toBe('new-org')
+    expect(issued.session.org_id).toBe('org-a')
   })
 
   it('uses opaque revocable sessions with sliding and absolute expiry plus CSRF', async () => {
@@ -174,6 +197,7 @@ describe('StudioIdentityService', () => {
     await expect(h.service.authenticate('wrong')).rejects.toMatchObject({ code: 'invalid' })
     await expect(h.service.authenticate('')).rejects.toMatchObject({ code: 'invalid' })
     await expect(h.service.authenticate(issued.token, false)).resolves.toEqual(issued.session)
+    await expect(h.service.authenticate(issued.token)).resolves.toBe(issued.session)
     expect(() => h.service.validateCsrf(issued.session, issued.csrfToken, issued.csrfToken)).not.toThrow()
     for (const [cookie, header] of [[undefined, issued.csrfToken], [issued.csrfToken, undefined], ['wrong', 'wrong']]) {
       expect(() => h.service.validateCsrf(issued.session, cookie, header)).toThrow(IdentityError)
@@ -203,7 +227,7 @@ describe('StudioIdentityService', () => {
     const first = await login(h)
     const second = await h.service.verifyMagicCode(
       'owner@example.com',
-      await (async () => { await h.service.requestMagicCode('owner@example.com', 'org-a', 'tenant-a'); return '123456' })(),
+      await (async () => { await h.service.requestMagicCode('owner@example.com'); return '123456' })(),
       { ...device, label: 'Celular' },
     )
     expect(h.service.listDevices(first.session.user_id)).toHaveLength(2)
@@ -233,6 +257,8 @@ describe('StudioIdentityService', () => {
     const second = await h.service.beginPasskeyRegistration(issued.token)
     await expect(h.service.finishPasskeyRegistration(issued.token, second.challengeId, registrationResponse, 'Duplicada'))
       .rejects.toMatchObject({ code: 'replay' })
+    await expect(h.service.finishPasskeyRegistration(issued.token, second.challengeId, registrationResponse, 'Duplicada novamente'))
+      .rejects.toMatchObject({ code: 'replay' })
     await expect(h.service.finishPasskeyRegistration(issued.token, ceremony.challengeId, registrationResponse, 'Reuso'))
       .rejects.toMatchObject({ code: 'replay' })
     const third = await h.service.beginPasskeyRegistration(issued.token)
@@ -261,8 +287,9 @@ describe('StudioIdentityService', () => {
       emailSender: email,
       passkeys: new FakePasskeys(),
       rpName: 'DZ23', rpId: 'localhost', expectedOrigin: 'https://localhost',
+      defaultOrgId: 'org', defaultTenantId: 'tenant', enrollment: 'open',
     })
-    await service.requestMagicCode('secure@example.com', 'org', 'tenant')
+    await service.requestMagicCode('secure@example.com')
     expect(repository.magicCodes()[0]!.magic_code_id).toMatch(/^[0-9a-f-]{36}$/)
     expect(email.messages[0]!.code).toMatch(/^\d{6}$/)
   })
@@ -294,6 +321,7 @@ describe('StudioIdentityService', () => {
     h.passkeys.userVerified = false
     const failed = await h.service.beginStepUp(issued.token)
     await expect(h.service.finishStepUp(issued.token, failed.challengeId, authResponse())).rejects.toMatchObject({ code: 'invalid' })
+    await expect(h.service.finishStepUp(issued.token, failed.challengeId, authResponse())).rejects.toMatchObject({ code: 'replay' })
     h.passkeys.userVerified = true
     const stepUp = await h.service.beginStepUp(issued.token)
     await h.service.finishStepUp(issued.token, stepUp.challengeId, authResponse())
@@ -303,5 +331,25 @@ describe('StudioIdentityService', () => {
     })
     h.setNow('2026-09-02T12:05:00.000Z')
     expect(h.service.strongIdentityForHarnessSession('agent-strong')).toBe(false)
+  })
+
+  it('serializes concurrent one-time code and challenge consumption', async () => {
+    const h = makeHarness()
+    const issued = await login(h)
+    await h.service.requestMagicCode('owner@example.com')
+    const magicResults = await Promise.allSettled([
+      h.service.verifyMagicCode('owner@example.com', '123456', device),
+      h.service.verifyMagicCode('owner@example.com', '123456', device),
+    ])
+    expect(magicResults.filter(result => result.status === 'fulfilled')).toHaveLength(1)
+    expect(magicResults.filter(result => result.status === 'rejected')).toHaveLength(1)
+
+    const registration = await h.service.beginPasskeyRegistration(issued.token)
+    const challengeResults = await Promise.allSettled([
+      h.service.finishPasskeyRegistration(issued.token, registration.challengeId, registrationResponse, 'Primeira'),
+      h.service.finishPasskeyRegistration(issued.token, registration.challengeId, registrationResponse, 'Segunda'),
+    ])
+    expect(challengeResults.filter(result => result.status === 'fulfilled')).toHaveLength(1)
+    expect(challengeResults.filter(result => result.status === 'rejected')).toHaveLength(1)
   })
 })

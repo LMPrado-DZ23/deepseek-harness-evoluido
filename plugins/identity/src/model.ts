@@ -5,6 +5,7 @@ export const identityUserSchema = z.object({
   user_id: z.string().min(1),
   email: z.email(),
   display_name: z.string().min(1),
+  role: z.enum(['owner', 'admin', 'builder', 'viewer']).default('owner'),
   org_id: z.string().min(1),
   tenant_id: z.string().min(1),
   created_at: z.iso.datetime(),
@@ -68,9 +69,9 @@ export const magicCodeRecordSchema = z.object({
 export const identityAuditRecordSchema = z.object({
   audit_id: z.string().min(1),
   event_type: z.enum([
-    'magic_code_requested', 'login_succeeded', 'login_failed', 'passkey_registered',
+    'magic_code_requested', 'magic_code_suppressed', 'login_succeeded', 'login_failed', 'passkey_registered',
     'step_up_succeeded', 'session_revoked', 'all_sessions_revoked',
-    'harness_session_bound', 'personal_mode_disabled',
+    'harness_session_bound', 'personal_mode_disabled', 'enrollment_closed',
   ]),
   user_id: z.string().min(1).nullable(),
   session_id: z.string().min(1).nullable(),

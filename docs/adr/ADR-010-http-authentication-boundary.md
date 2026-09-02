@@ -17,9 +17,24 @@ por allowlist e recusa e-mail de desenvolvimento em bind `0.0.0.0`. O Harness
 permanece em loopback.
 
 O gate “toda rota do produto exige sessão em bind público” não será falsamente
-declarado como concluído. Ele será satisfeito em P29-C por Caddy como borda única,
-mantendo o Harness em `127.0.0.1`, ou por um seam de middleware aceito pelo
-upstream. Até lá, exposição pública é proibida.
+declarado como concluído. Em P29-C, o Caddy será a única borda e aplicará
+`forward_auth` a **todas** as rotas, inclusive as rotas nativas do Harness. O
+Harness continuará acessível apenas em loopback/rede privada de contêiner, com
+firewall impedindo acesso direto. Um seam `webserver/pre-route` no upstream será
+proposto separadamente, mas não será dependência do release. Até essa defesa em
+profundidade ser provada, exposição pública é proibida.
 
 Rate limiting global e headers de borda também pertencem a P29-C. Esta separação
 preserva zero diff no upstream e mantém o risco visível.
+
+## Prova exigida em P29-C
+
+- rota do Studio sem sessão: bloqueada pelo Caddy;
+- rota nativa do Harness sem sessão: bloqueada pelo Caddy;
+- tentativa de acesso direto ao Harness a partir de fora da rede autorizada:
+  conexão recusada;
+- sessão revogada: próxima requisição bloqueada;
+- rate limit e headers de segurança verificados na borda.
+
+O texto proposto para a issue upstream está em
+`docs/upstream/webserver-pre-route-issue-draft.md` e não foi publicado.

@@ -24,13 +24,18 @@ Implementado:
 - `authenticated` e `strongIdentityVerified` consultados no hook autoritativo do
   P30 antes de cada ferramenta;
 - rotas de identidade em linguagem simples e allowlist de Host/Origin.
+- escopo de organização/tenant definido pelo servidor, cadastro inicial de um
+  único `owner` e fechamento automático auditado;
+- serialização de código, challenge e contador para impedir consumo duplo;
+- challenge consumido em toda tentativa válida de verificação, inclusive falha;
+- RP ID padrão `localhost`, com recusa explícita de endereços IP.
 
 ## Verificações reais
 
 Na cópia limpa WSL2/ext4:
 
 - `pnpm typecheck`: PASS;
-- `pnpm test:coverage`: 107/107 PASS;
+- `pnpm test:coverage`: 111/111 PASS;
 - statements/branches/functions/lines: 100%;
 - `pnpm build`: PASS;
 - `pnpm prove:runtime`: GO;
@@ -53,11 +58,34 @@ O gate P37 passou sem caminho proibido. Dependências novas e justificadas:
 
 - núcleo identidade/sessão: `PASS`;
 - SMTP real: `NOT_CONFIGURED`;
+- RP ID/domínio HTTPS de produção: `NOT_CONFIGURED`;
 - cliente `@simplewebauthn/browser`: `NOT_PRESENT`;
 - passkey com autenticador físico: `NOT_EXECUTED`;
 - proteção global em bind público: `BLOCKED` pelo seam HTTP ausente e destinada
   ao P29-C; bind público continua proibido;
 - P29-B e P29-C: `NOT_EXECUTED`.
+
+Risco conhecido destinado ao P29-B/UI: a cerimônia atual de login por passkey
+recebe e-mail e pode variar `allowCredentials`; o fluxo final deverá usar
+credenciais descobríveis sem e-mail ou identificadores falsos determinísticos,
+com teste explícito contra enumeração.
+
+## Correções após revisão independente
+
+O parecer P29-A do Claude não encontrou bloqueador e pediu duas correções altas e
+duas médias antes da integração. Esta revisão implementa:
+
+- `HIGH-1`: remoção do escopo controlado pelo cliente e cadastro desconhecido
+  fechado por padrão;
+- `HIGH-2`: contrato de P29-C congelado em `forward_auth` para todas as rotas,
+  Harness sem acesso público e rascunho de seam upstream;
+- `MEDIUM-1`: exclusão mútua por chave, consumo único de challenge também em
+  falhas e atualização serializada de contador;
+- `MEDIUM-2`: `localhost` como RP ID local e rejeição de IP.
+
+As otimizações de lookup de sessão e touch máximo uma vez por minuto também
+foram aplicadas. Nenhuma publicação, bind público, deploy ou mudança de licença
+foi realizada.
 
 ## Próximo gate
 

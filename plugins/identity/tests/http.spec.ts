@@ -106,7 +106,11 @@ describe('identity HTTP boundary', () => {
     const started = await f.request('/magic/start', { method: 'POST', body: JSON.stringify({ email: 'a@example.com' }) })
     expect(started.status).toBe(202)
     expect(await started.json()).toEqual({ message: expect.stringContaining('código temporário') })
-    expect(f.service.requestMagicCode).toHaveBeenCalledWith('a@example.com', 'org_local', 'tenant_local')
+    expect(f.service.requestMagicCode).toHaveBeenCalledWith('a@example.com')
+    const clientScoped = await f.request('/magic/start', {
+      method: 'POST', body: JSON.stringify({ email: 'a@example.com', org_id: 'attacker-org' }),
+    })
+    expect(clientScoped.status).toBe(400)
     const verified = await f.request('/magic/verify', {
       method: 'POST',
       body: JSON.stringify({ email: 'a@example.com', code: '123456', device_label: 'Notebook' }),

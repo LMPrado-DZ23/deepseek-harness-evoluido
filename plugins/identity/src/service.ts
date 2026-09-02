@@ -16,6 +16,7 @@ import type {
   PasskeyCredential,
   SessionRecord,
 } from './model.js'
+import { KeyedMutex } from './mutex.js'
 
 const MINUTE = 60_000
 const DAY = 24 * 60 * MINUTE
@@ -25,6 +26,10 @@ const SLIDING_TTL = 14 * DAY
 const ABSOLUTE_TTL = 90 * DAY
 const STRONG_AUTH_TTL = 5 * MINUTE
 const MAX_MAGIC_ATTEMPTS = 5
+const SESSION_TOUCH_INTERVAL = MINUTE
+
+export type EnrollmentMode = 'closed' | 'open'
+export type MagicCodeRequestResult = 'sent' | 'suppressed'
 
 export interface IdentityRepository {
   users(): readonly IdentityUser[]
@@ -86,6 +91,9 @@ export interface IdentityServiceOptions {
   readonly rpName: string
   readonly rpId: string
   readonly expectedOrigin: string
+  readonly defaultOrgId: string
+  readonly defaultTenantId: string
+  readonly enrollment: EnrollmentMode
   readonly now?: () => Date
   readonly createId?: () => string
   readonly createSecret?: () => string
@@ -99,10 +107,14 @@ export class StudioIdentityService {
   readonly #rpName: string
   readonly #rpId: string
   readonly #expectedOrigin: string
+  readonly #defaultOrgId: string
+  readonly #defaultTenantId: string
+  readonly #enrollment: EnrollmentMode
   readonly #now: () => Date
   readonly #createId: () => string
   readonly #createSecret: () => string
   readonly #createMagicCode: () => string
+  readonly #mutex = new KeyedMutex()
 
   constructor(options: IdentityServiceOptions) {
     this.#repository = options.repository
@@ -111,6 +123,9 @@ export class StudioIdentityService {
     this.#rpName = options.rpName
     this.#rpId = options.rpId
     this.#expectedOrigin = options.expectedOrigin
+    this.#defaultOrgId = options.defaultOrgId
+    this.#defaultTenantId = options.defaultTenantId
+    this.#enrollment = options.enrollment
     this.#now = options.now ?? (() => new Date())
     this.#createId = options.createId ?? randomUUID
     this.#createSecret = options.createSecret ?? newOpaqueSecret
@@ -126,32 +141,53 @@ export class StudioIdentityService {
     return { userId: 'user_local', orgId: 'org_local', tenantId: 'tenant_local', sessionId: 'session_local' }
   }
 
-  async requestMagicCode(email: string, orgId: string, tenantId: string): Promise<void> {
+  isEnrollmentOpen(): boolean {
+    return this.#enrollment === 'open' && this.#repository.users().length === 0
+  }
+
+  async requestMagicCode(email: string): Promise<MagicCodeRequestResult> {
     const normalized = normalizeEmail(email)
-    const code = this.#createMagicCode()
-    if (!/^\d{6}$/.test(code)) throw new IdentityError('invalid', 'O gerador de código retornou um valor inválido.')
-    const now = this.#now()
-    await Promise.all(this.#repository.magicCodes()
-      .filter(previous => previous.email === normalized && previous.consumed_at === null)
-      .map(previous => this.#repository.putMagicCode({ ...previous, consumed_at: now.toISOString() })))
-    const record: MagicCodeRecord = {
-      magic_code_id: this.#createId(),
-      email: normalized,
-      code_hash: secretHash(code),
-      org_id: orgId,
-      tenant_id: tenantId,
-      attempts: 0,
-      created_at: now.toISOString(),
-      expires_at: new Date(now.getTime() + MAGIC_TTL).toISOString(),
-      consumed_at: null,
-    }
-    await this.#repository.putMagicCode(record)
-    await this.#emailSender.sendMagicCode({ to: normalized, code, expiresInMinutes: 10 })
-    await this.#audit('magic_code_requested', null, null, orgId, tenantId, 'success', 'Código temporário solicitado.')
+    return this.#mutex.run(`magic-request:${normalized}`, async () => {
+      const existing = this.#repository.users().find(user => user.email === normalized)
+      if (existing === undefined && !this.isEnrollmentOpen()) {
+        await this.#audit(
+          'magic_code_suppressed', null, null, this.#defaultOrgId, this.#defaultTenantId,
+          'failure', 'Solicitação genérica recusada: não existe convite nem cadastro inicial aberto.',
+        )
+        return 'suppressed'
+      }
+      const code = this.#createMagicCode()
+      if (!/^\d{6}$/.test(code)) throw new IdentityError('invalid', 'O gerador de código retornou um valor inválido.')
+      const now = this.#now()
+      await Promise.all(this.#repository.magicCodes()
+        .filter(previous => previous.email === normalized && previous.consumed_at === null)
+        .map(previous => this.#repository.putMagicCode({ ...previous, consumed_at: now.toISOString() })))
+      const orgId = existing?.org_id ?? this.#defaultOrgId
+      const tenantId = existing?.tenant_id ?? this.#defaultTenantId
+      const record: MagicCodeRecord = {
+        magic_code_id: this.#createId(),
+        email: normalized,
+        code_hash: secretHash(code),
+        org_id: orgId,
+        tenant_id: tenantId,
+        attempts: 0,
+        created_at: now.toISOString(),
+        expires_at: new Date(now.getTime() + MAGIC_TTL).toISOString(),
+        consumed_at: null,
+      }
+      await this.#repository.putMagicCode(record)
+      await this.#emailSender.sendMagicCode({ to: normalized, code, expiresInMinutes: 10 })
+      await this.#audit('magic_code_requested', existing?.user_id ?? null, null, orgId, tenantId, 'success', 'Código temporário solicitado.')
+      return 'sent'
+    })
   }
 
   async verifyMagicCode(email: string, code: string, device: DeviceInput): Promise<IssuedSession> {
     const normalized = normalizeEmail(email)
+    return this.#mutex.run('magic-verify', async () => this.#verifyMagicCodeLocked(normalized, code, device))
+  }
+
+  async #verifyMagicCodeLocked(normalized: string, code: string, device: DeviceInput): Promise<IssuedSession> {
     const candidate = this.#repository.magicCodes()
       .filter(record => record.email === normalized && record.consumed_at === null)
       .sort((left, right) => right.created_at.localeCompare(left.created_at))[0]
@@ -175,10 +211,15 @@ export class StudioIdentityService {
     }
     await this.#repository.putMagicCode({ ...candidate, consumed_at: now.toISOString() })
     const existing = this.#repository.users().find(user => user.email === normalized)
+    if (existing === undefined && !this.isEnrollmentOpen()) {
+      await this.#audit('login_failed', null, null, candidate.org_id, candidate.tenant_id, 'failure', 'Cadastro inicial já encerrado.')
+      throw new IdentityError('invalid', 'Código inválido ou expirado.')
+    }
     const user: IdentityUser = existing ?? {
       user_id: this.#createId(),
       email: normalized,
       display_name: normalized.split('@')[0]!,
+      role: 'owner',
       org_id: candidate.org_id,
       tenant_id: candidate.tenant_id,
       created_at: now.toISOString(),
@@ -186,6 +227,7 @@ export class StudioIdentityService {
     if (existing === undefined) {
       await this.#repository.putUser(user)
       await this.#audit('personal_mode_disabled', user.user_id, null, user.org_id, user.tenant_id, 'success', 'Primeiro acesso cadastrado.')
+      await this.#audit('enrollment_closed', user.user_id, null, user.org_id, user.tenant_id, 'success', 'Cadastro inicial encerrado após criar a pessoa proprietária.')
     }
     const issued = await this.#issueSession(user, device)
     await this.#audit('login_succeeded', user.user_id, issued.session.session_id, user.org_id, user.tenant_id, 'success', 'Entrada por código temporário.')
@@ -197,6 +239,7 @@ export class StudioIdentityService {
     const now = this.#now()
     this.#assertSessionUsable(session, now)
     if (!touch) return session
+    if (now.getTime() - Date.parse(session.last_seen_at) < SESSION_TOUCH_INTERVAL) return session
     const sliding = Math.min(now.getTime() + SLIDING_TTL, Date.parse(session.expires_absolute_at))
     const updated = {
       ...session,
@@ -302,27 +345,26 @@ export class StudioIdentityService {
 
   async finishPasskeyRegistration(token: string, challengeId: string, response: RegistrationResponse, deviceLabel: string): Promise<void> {
     const session = await this.authenticate(token)
-    const challenge = this.#challenge(challengeId, 'registration', session.user_id, session.session_id)
-    const verified = await this.#passkeys.verifyRegistration({
-      response,
-      challengeMatches: value => secretMatches(value, challenge.challenge_hash),
-      expectedOrigin: this.#expectedOrigin,
-      expectedRpId: this.#rpId,
-    })
-    if (this.#repository.credentials().some(credential => credential.credential_id === verified.id)) {
-      throw new IdentityError('replay', 'Esta chave de acesso já está cadastrada.')
-    }
-    const now = this.#now().toISOString()
-    await this.#consumeChallenge(challenge)
-    await this.#repository.putCredential({
-      credential_id: verified.id,
-      user_id: session.user_id,
-      public_key: Buffer.from(verified.publicKey).toString('base64url'),
-      counter: verified.counter,
-      transports: verified.transports,
-      device_label: deviceLabel,
-      created_at: now,
-      last_used_at: null,
+    await this.#withChallenge(challengeId, 'registration', session.user_id, session.session_id, async challenge => {
+      const verified = await this.#passkeys.verifyRegistration({
+        response,
+        challengeMatches: value => secretMatches(value, challenge.challenge_hash),
+        expectedOrigin: this.#expectedOrigin,
+        expectedRpId: this.#rpId,
+      })
+      if (this.#repository.credentials().some(credential => credential.credential_id === verified.id)) {
+        throw new IdentityError('replay', 'Esta chave de acesso já está cadastrada.')
+      }
+      await this.#repository.putCredential({
+        credential_id: verified.id,
+        user_id: session.user_id,
+        public_key: Buffer.from(verified.publicKey).toString('base64url'),
+        counter: verified.counter,
+        transports: verified.transports,
+        device_label: deviceLabel,
+        created_at: this.#now().toISOString(),
+        last_used_at: null,
+      })
     })
     await this.#audit('passkey_registered', session.user_id, session.session_id, session.org_id, session.tenant_id, 'success', 'Chave de acesso cadastrada.')
   }
@@ -341,15 +383,17 @@ export class StudioIdentityService {
   }
 
   async finishPasskeyLogin(challengeId: string, response: AuthenticationResponse, device: DeviceInput): Promise<IssuedSession> {
-    const challenge = this.#challenge(challengeId, 'authentication')
-    const credential = this.#credentialForResponse(response.id, challenge.user_id)
-    const verified = await this.#verifyAuthentication(response, challenge, credential, false)
-    await this.#updateCounter(credential, verified.newCounter)
-    await this.#consumeChallenge(challenge)
-    const user = this.#user(challenge.user_id)
-    const issued = await this.#issueSession(user, device)
-    await this.#audit('login_succeeded', user.user_id, issued.session.session_id, user.org_id, user.tenant_id, 'success', 'Entrada por chave de acesso.')
-    return issued
+    return this.#withChallenge(challengeId, 'authentication', undefined, undefined, challenge => (
+      this.#mutex.run(`credential:${response.id}`, async () => {
+        const credential = this.#credentialForResponse(response.id, challenge.user_id)
+        const verified = await this.#verifyAuthentication(response, challenge, credential, false)
+        await this.#updateCounter(credential, verified.newCounter)
+        const user = this.#user(challenge.user_id)
+        const issued = await this.#issueSession(user, device)
+        await this.#audit('login_succeeded', user.user_id, issued.session.session_id, user.org_id, user.tenant_id, 'success', 'Entrada por chave de acesso.')
+        return issued
+      })
+    ))
   }
 
   async beginStepUp(token: string): Promise<PasskeyCeremony<AuthenticationOptions>> {
@@ -367,18 +411,19 @@ export class StudioIdentityService {
 
   async finishStepUp(token: string, challengeId: string, response: AuthenticationResponse): Promise<void> {
     const session = await this.authenticate(token)
-    const challenge = this.#challenge(challengeId, 'step-up', session.user_id, session.session_id)
-    const credential = this.#credentialForResponse(response.id, session.user_id)
-    const verified = await this.#verifyAuthentication(response, challenge, credential, true)
-    if (!verified.userVerified) throw new IdentityError('invalid', 'A biometria ou o PIN do dispositivo não foi confirmado.')
-    await this.#updateCounter(credential, verified.newCounter)
-    await this.#consumeChallenge(challenge)
-    const strongAt = this.#now().toISOString()
-    await this.#repository.putSession({
-      ...session,
-      last_strong_auth_at: strongAt,
-      last_strong_auth_method: 'passkey',
-    })
+    await this.#withChallenge(challengeId, 'step-up', session.user_id, session.session_id, challenge => (
+      this.#mutex.run(`credential:${response.id}`, async () => {
+        const credential = this.#credentialForResponse(response.id, session.user_id)
+        const verified = await this.#verifyAuthentication(response, challenge, credential, true)
+        if (!verified.userVerified) throw new IdentityError('invalid', 'A biometria ou o PIN do dispositivo não foi confirmado.')
+        await this.#updateCounter(credential, verified.newCounter)
+        await this.#repository.putSession({
+          ...session,
+          last_strong_auth_at: this.#now().toISOString(),
+          last_strong_auth_method: 'passkey',
+        })
+      })
+    ))
     await this.#audit('step_up_succeeded', session.user_id, session.session_id, session.org_id, session.tenant_id, 'success', 'Identidade forte confirmada por chave de acesso.')
   }
 
@@ -420,7 +465,8 @@ export class StudioIdentityService {
 
   #findSessionByToken(token: string): SessionRecord {
     if (token === '') throw new IdentityError('invalid', 'Sessão inválida.')
-    const session = this.#repository.sessions().find(candidate => secretMatches(token, candidate.token_hash))
+    const tokenHash = secretHash(token)
+    const session = this.#repository.sessions().find(candidate => candidate.token_hash === tokenHash)
     if (session === undefined) throw new IdentityError('invalid', 'Sessão inválida.')
     return session
   }
@@ -443,16 +489,28 @@ export class StudioIdentityService {
     return credential
   }
 
-  #challenge(challengeId: string, purpose: ChallengeRecord['purpose'], userId?: string, sessionId?: string): ChallengeRecord {
-    const challenge = this.#repository.challenges().find(candidate => candidate.challenge_id === challengeId)
-    if (challenge === undefined || challenge.purpose !== purpose
-      || (userId !== undefined && challenge.user_id !== userId)
-      || (sessionId !== undefined && challenge.session_id !== sessionId)) {
-      throw new IdentityError('not-found', 'Confirmação não encontrada.')
-    }
-    if (challenge.consumed_at !== null) throw new IdentityError('replay', 'Esta confirmação já foi usada.')
-    if (Date.parse(challenge.expires_at) <= this.#now().getTime()) throw new IdentityError('expired', 'Esta confirmação expirou.')
-    return challenge
+  async #withChallenge<T>(
+    challengeId: string,
+    purpose: ChallengeRecord['purpose'],
+    userId: string | undefined,
+    sessionId: string | undefined,
+    work: (challenge: ChallengeRecord) => Promise<T>,
+  ): Promise<T> {
+    return this.#mutex.run(`challenge:${challengeId}`, async () => {
+      const challenge = this.#repository.challenges().find(candidate => candidate.challenge_id === challengeId)
+      if (challenge === undefined || challenge.purpose !== purpose
+        || (userId !== undefined && challenge.user_id !== userId)
+        || (sessionId !== undefined && challenge.session_id !== sessionId)) {
+        throw new IdentityError('not-found', 'Confirmação não encontrada.')
+      }
+      if (challenge.consumed_at !== null) throw new IdentityError('replay', 'Esta confirmação já foi usada.')
+      try {
+        if (Date.parse(challenge.expires_at) <= this.#now().getTime()) throw new IdentityError('expired', 'Esta confirmação expirou.')
+        return await work(challenge)
+      } finally {
+        await this.#consumeChallenge(challenge)
+      }
+    })
   }
 
   async #storeChallenge(purpose: ChallengeRecord['purpose'], userId: string, sessionId: string | null, challenge: string): Promise<string> {
