@@ -1,14 +1,16 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { createHash, timingSafeEqual } from 'node:crypto'
 import { z } from 'zod'
 import { truncateIp } from './crypto.js'
 import type { AuthenticationResponse, RegistrationResponse } from './passkey.js'
 import type { SessionRecord } from './model.js'
 import { IdentityError, type StudioIdentityService } from './service.js'
 import { assertRouteContracts, type StudioRouteContract } from '@dz23-studio/policy'
+import { CSRF_COOKIE, parseCookies, SESSION_COOKIE } from './cookies.js'
+import { InMemoryIdentityRateLimiter, rateLimitBuckets, rateLimitKey } from './rate-limit.js'
 
 const JSON_LIMIT = 64 * 1024
-export const SESSION_COOKIE = 'dz23_studio_session'
-export const CSRF_COOKIE = 'dz23_studio_csrf'
+export { CSRF_COOKIE, parseCookies, SESSION_COOKIE } from './cookies.js'
 
 const emailSchema = z.object({ email: z.email() }).strict()
 const magicStartSchema = emailSchema
@@ -27,6 +29,7 @@ export const IDENTITY_ROUTE_CONTRACTS = [
   { method: 'POST', path: '/passkey/login/options', access: 'public', permission: null, scope: 'none' },
   { method: 'POST', path: '/passkey/login/verify', access: 'public', permission: null, scope: 'none' },
   { method: 'GET', path: '/session', access: 'public', permission: null, scope: 'identity' },
+  { method: 'GET', path: '/harness/session', access: 'authorized', permission: 'identity.self', scope: 'identity' },
   { method: 'POST', path: '/passkey/register/options', access: 'authorized', permission: 'identity.self', scope: 'identity' },
   { method: 'POST', path: '/passkey/register/verify', access: 'authorized', permission: 'identity.self', scope: 'identity' },
   { method: 'POST', path: '/passkey/step-up/options', access: 'authorized', permission: 'identity.self', scope: 'identity' },
@@ -44,6 +47,10 @@ export interface IdentityHttpConfig {
   readonly bindHost: '127.0.0.1' | '0.0.0.0'
   readonly allowedHosts: readonly string[]
   readonly allowedOrigins: readonly string[]
+  readonly edgeRequired?: boolean
+  readonly resolveEdgeSecret?: () => Promise<string | undefined>
+  readonly harnessAuthenticationUrl?: (baseUrl: string) => string | undefined
+  readonly rateLimiter?: InMemoryIdentityRateLimiter
 }
 
 export function serializeSessionCookies(token: string, csrfToken: string): readonly string[] {
@@ -60,24 +67,11 @@ export function clearSessionCookies(): readonly string[] {
   ]
 }
 
-export function parseCookies(header: string | undefined): Readonly<Record<string, string>> {
-  if (header === undefined) return {}
-  return Object.fromEntries(header.split(';').map(part => {
-    const at = part.indexOf('=')
-    if (at < 1) return [part.trim(), '']
-    const key = part.slice(0, at).trim()
-    const raw = part.slice(at + 1).trim()
-    try {
-      return [key, decodeURIComponent(raw)]
-    } catch {
-      return [key, '']
-    }
-  }))
-}
-
 export function createIdentityHttpHandler(config: IdentityHttpConfig) {
+  const limiter = config.rateLimiter ?? new InMemoryIdentityRateLimiter()
   return async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     try {
+      await assertEdgeTrust(request, config)
       assertRequestTrust(request, config)
       /* v8 ignore next -- node:http always supplies a URL for server requests. */
       const path = new URL(request.url ?? '/', 'http://local').pathname
@@ -85,6 +79,23 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
       if (!IDENTITY_ROUTE_CONTRACTS.some(contract => contract.method === request.method && contract.path === route)) {
         json(response, 404, { error: 'Rota não encontrada.' })
         return
+      }
+      const forwardedAddress = config.edgeRequired === true
+        ? singleHeader(request.headers['x-forwarded-for'])?.split(',')[0]?.trim()
+        : undefined
+      const publicAuthentication = route === '/magic/start'
+        || route === '/magic/verify'
+        || route.startsWith('/passkey/login/')
+      const key = rateLimitKey(request, forwardedAddress, !publicAuthentication)
+      for (const bucket of rateLimitBuckets(route)) {
+        const decision = limiter.consume(bucket, key)
+        if (!decision.allowed) {
+          response.setHeader('retry-after', String(decision.retryAfterSeconds))
+          response.setHeader('x-ratelimit-limit', String(decision.limit))
+          response.setHeader('x-ratelimit-remaining', '0')
+          json(response, 429, { error: 'Muitas tentativas. Aguarde um pouco e tente novamente.' })
+          return
+        }
       }
       if (request.method === 'POST' && route === '/magic/start') {
         const body = magicStartSchema.parse(await readJson(request))
@@ -118,13 +129,38 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
       if (request.method === 'GET' && route === '/session') {
         const token = parseCookies(request.headers.cookie)[SESSION_COOKIE]
         if (token === undefined) {
-          const principal = config.service.personalPrincipal(config.bindHost)
+          const principal = config.edgeRequired === true
+            ? undefined
+            : config.service.personalPrincipal(config.bindHost)
           if (principal === undefined) throw new IdentityError('invalid', 'Entre para continuar.')
           json(response, 200, { mode: 'personal', principal })
           return
         }
         const session = await config.service.authenticate(token)
         json(response, 200, { mode: 'authenticated', principal: principalOf(session) })
+        return
+      }
+
+      if (request.method === 'GET' && route === '/harness/session') {
+        await authenticatedMutation(request, config.service)
+        const host = singleHeader(request.headers.host)!
+        const forwardedProtocol = config.edgeRequired === true
+          ? singleHeader(request.headers['x-forwarded-proto'])
+          : undefined
+        const protocol = forwardedProtocol === 'https' || forwardedProtocol === 'http'
+          ? forwardedProtocol
+          : config.bindHost === '127.0.0.1' ? 'http' : 'https'
+        const location = config.harnessAuthenticationUrl?.(`${protocol}://${host}/`)
+        if (location === undefined) {
+          json(response, 503, { error: 'A interface do Harness ainda não está disponível.' })
+          return
+        }
+        response.writeHead(303, {
+          'cache-control': 'no-store',
+          location,
+          'referrer-policy': 'no-referrer',
+        })
+        response.end()
         return
       }
 
@@ -197,7 +233,23 @@ export function requiredSessionToken(request: IncomingMessage): string {
   return token
 }
 
-export function assertRequestTrust(request: IncomingMessage, config: Pick<IdentityHttpConfig, 'allowedHosts' | 'allowedOrigins'>): void {
+async function assertEdgeTrust(
+  request: IncomingMessage,
+  config: Pick<IdentityHttpConfig, 'edgeRequired' | 'resolveEdgeSecret'>,
+): Promise<void> {
+  if (config.edgeRequired === true) {
+    const actual = singleHeader(request.headers['x-dz23-edge'])
+    const expected = await config.resolveEdgeSecret?.()
+    if (actual === undefined || expected === undefined || expected === '' || !secretMatches(actual, expected)) {
+      throw new IdentityError('invalid', 'Borda de acesso não autorizada.')
+    }
+  }
+}
+
+export function assertRequestTrust(
+  request: IncomingMessage,
+  config: Pick<IdentityHttpConfig, 'allowedHosts' | 'allowedOrigins'>,
+): void {
   const host = singleHeader(request.headers.host)?.toLowerCase()
   if (host === undefined || !config.allowedHosts.map(value => value.toLowerCase()).includes(host)) {
     throw new IdentityError('invalid', 'Host não autorizado.')
@@ -208,6 +260,12 @@ export function assertRequestTrust(request: IncomingMessage, config: Pick<Identi
       throw new IdentityError('invalid', 'Origem não autorizada.')
     }
   }
+}
+
+function secretMatches(actual: string, expected: string): boolean {
+  const actualDigest = createHash('sha256').update(actual).digest()
+  const expectedDigest = createHash('sha256').update(expected).digest()
+  return timingSafeEqual(actualDigest, expectedDigest)
 }
 
 export function singleHeader(value: string | string[] | undefined): string | undefined {

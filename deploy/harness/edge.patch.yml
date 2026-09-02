@@ -1,0 +1,22 @@
+# Overlay loaded only when Caddy is the entry point. Values remain references
+# or deployment facts; no secret value is stored in this file.
+- id: connection
+  config:
+    trustedHosts:
+      - !!js process.env.DZ23_PUBLIC_HOST
+
+- id: dz23-studio-identity
+  config:
+    rpId: !!js process.env.DZ23_RP_ID
+    expectedOrigin: !!js process.env.DZ23_PUBLIC_ORIGIN
+    allowedHosts:
+      - !!js process.env.DZ23_PUBLIC_HOST
+    allowedOrigins:
+      - !!js process.env.DZ23_PUBLIC_ORIGIN
+    enrollment: open
+    edge:
+      required: true
+      secretRef: DZ23_EDGE_SECRET
+    email:
+      kind: smtp
+      secretRef: DZ23_SMTP_SECRET

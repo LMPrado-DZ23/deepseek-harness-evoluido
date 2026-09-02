@@ -43,7 +43,7 @@ function context(host: '127.0.0.1' | '0.0.0.0' = '127.0.0.1') {
       port: 4321,
       register: vi.fn((candidate: WebRoute) => { route = candidate; return routeDispose }),
     },
-    credentials: { resolve: vi.fn() } as unknown as CredentialProvider,
+    credentials: { resolve: vi.fn(() => Promise.resolve({ value: 'edge-secret', source: 'test' })) } as unknown as CredentialProvider,
     studioPolicy: {
       auditRecords: () => [],
       setIdentityResolver: vi.fn((resolver: (execution: never) => { authenticated: boolean; strongIdentityVerified: boolean }) => {
@@ -53,6 +53,10 @@ function context(host: '127.0.0.1' | '0.0.0.0' = '127.0.0.1') {
       setAuthorizationResolver: vi.fn(() => vi.fn()),
     } satisfies StudioPolicyRuntime,
     effect: vi.fn((factory: () => () => void | Promise<void>) => { cleanups.push(factory()) }),
+    inject: vi.fn((_dependencies: string[], callback: (injected: { connection: { authenticatedUrl: (baseUrl: string) => string } }) => () => void) => {
+      const cleanup = callback({ connection: { authenticatedUrl: baseUrl => `${baseUrl}?token=harness` } })
+      cleanups.push(cleanup)
+    }),
     provide: vi.fn((_name: string, runtime: StudioIdentityRuntime) => { provided.identity = runtime }),
   }
   return { ctx, tables, close, cleanups, provided, getRoute: () => route, getResolver: () => strongResolver, routeDispose, resolverDispose }
@@ -116,18 +120,84 @@ describe('identity Cordis plugin composition', () => {
       expectedOrigin: 'https://studio.example',
       allowedHosts: ['studio.example'],
       allowedOrigins: ['https://studio.example'],
+      edge: { secretRef: 'DZ23_EDGE_SECRET' },
+      email: { kind: 'memory' },
     })
     expect(f.provided.identity).not.toHaveProperty('developmentEmailCapture')
     await expect(f.provided.identity!.service.requestMagicCode('unknown@example.com')).resolves.toBe('suppressed')
     expect(sender.sendMagicCode).not.toHaveBeenCalled()
+
+    const owner = context('0.0.0.0')
+    const captured: string[] = []
+    await apply(owner.ctx as never, {
+      emailSender: {
+        sendMagicCode: message => { captured.push(message.code); return Promise.resolve() },
+        sendInvitation: () => Promise.resolve(),
+      },
+      enrollment: 'open',
+      edge: { secretRef: 'DZ23_EDGE_SECRET' },
+      email: { kind: 'memory' },
+      allowedHosts: ['studio.example'],
+      allowedOrigins: ['https://studio.example'],
+    })
+    await owner.provided.identity!.service.requestMagicCode('owner@example.com')
+    const ownerIssued = await owner.provided.identity!.service.verifyMagicCode('owner@example.com', captured[0]!, {
+      label: 'Test', userAgent: 'Vitest', ipTruncated: '127.0.0.0/24',
+    })
+    const result = { status: 0, headers: {} as Record<string, string> }
+    await owner.getRoute()!.handler({
+      method: 'GET',
+      url: '/api/studio/identity/harness/session',
+      headers: {
+        host: 'studio.example',
+        cookie: `dz23_studio_session=${ownerIssued.token}`,
+        'x-dz23-edge': 'edge-secret',
+        'x-forwarded-proto': 'https',
+      },
+      socket: { remoteAddress: '127.0.0.1' },
+    } as never, {
+      writableEnded: false,
+      setHeader: () => undefined,
+      writeHead: (status: number, headers: Record<string, string>) => { result.status = status; result.headers = headers },
+      end: () => undefined,
+    } as never)
+    expect(result).toEqual({
+      status: 303,
+      headers: {
+        'cache-control': 'no-store',
+        location: 'https://studio.example/?token=harness',
+        'referrer-policy': 'no-referrer',
+      },
+    })
   })
 
   it('constructs SMTP only from a credential reference and rejects memory email on a server bind', async () => {
     const smtp = context()
     await apply(smtp.ctx as never, { passkeys, email: { kind: 'smtp', secretRef: 'DZ23_SMTP' } })
     expect(smtp.provided.identity).not.toHaveProperty('developmentEmailCapture')
+    const disabled = context('0.0.0.0')
+    await expect(apply(disabled.ctx as never, { passkeys, edge: { required: false } })).rejects.toThrow(/desativar/)
+    const noEdgeSecret = context('0.0.0.0')
+    await expect(apply(noEdgeSecret.ctx as never, { passkeys })).rejects.toThrow(/edge.secretRef/)
     const remote = context('0.0.0.0')
-    await expect(apply(remote.ctx as never, { passkeys })).rejects.toThrow(/SMTP/)
+    await expect(apply(remote.ctx as never, { passkeys, edge: { secretRef: 'DZ23_EDGE_SECRET' } })).rejects.toThrow(/SMTP/)
+    const loopbackEdge = context()
+    await expect(apply(loopbackEdge.ctx as never, {
+      passkeys, edge: { required: true, secretRef: 'DZ23_EDGE_SECRET' },
+    })).rejects.toThrow(/SMTP/)
+    const explicitLocalMemory = context()
+    await apply(explicitLocalMemory.ctx as never, {
+      passkeys,
+      edge: { required: true, secretRef: 'DZ23_EDGE_SECRET' },
+      email: { kind: 'memory' },
+    })
+    expect(explicitLocalMemory.provided.identity).toHaveProperty('developmentEmailCapture')
+    const remoteMemory = context('0.0.0.0')
+    await expect(apply(remoteMemory.ctx as never, {
+      passkeys,
+      edge: { secretRef: 'DZ23_EDGE_SECRET' },
+      email: { kind: 'memory' },
+    })).rejects.toThrow(/SMTP/)
   })
 
   it('uses localhost as the default WebAuthn RP and rejects IP RP identifiers before opening storage', async () => {

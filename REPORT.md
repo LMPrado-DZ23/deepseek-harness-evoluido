@@ -1,4 +1,10 @@
-# Relatório técnico — Harness Studio PoC-01
+# Relatório técnico — DZ23 STUDIO
+
+> Atualização de 2026-09-02: o histórico do PoC-01 abaixo foi preservado. A
+> errata do domínio foi aceita, o PoC-01b fechou a viabilidade do núcleo e o
+> P29-C comprovou a borda Caddy para HTTP, RPC e WebSocket. O resultado atual e
+> seus limites estão em `docs/pocs/P29-C-edge-proof.md` e
+> `docs/CAPABILITY_MATRIX.md`; nada foi implantado em produção.
 
 Data: 2026-09-01  
 Decisão do gate literal: **NO-GO**  

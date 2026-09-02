@@ -1,0 +1,84 @@
+(dz23_edge) {
+	header {
+		-Server
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(self), microphone=(), geolocation=(), payment=(), usb=()"
+		Cross-Origin-Opener-Policy "same-origin"
+		Cross-Origin-Resource-Policy "same-origin"
+		Content-Security-Policy "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; form-action 'self'; img-src 'self' data: blob:; font-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self' ws: wss:; worker-src 'self' blob:; manifest-src 'self'; media-src 'self' blob:"
+	}
+
+	route {
+		rate_limit {
+			zone global_per_ip {
+				key {remote_host}
+				events {$DZ23_GLOBAL_RATE_EVENTS:300}
+				window {$DZ23_GLOBAL_RATE_WINDOW:1m}
+			}
+			zone magic_start_per_ip {
+				match {
+					method POST
+					path /api/studio/identity/magic/start
+				}
+				key {remote_host}
+				events {$DZ23_MAGIC_START_RATE_EVENTS:5}
+				window {$DZ23_MAGIC_START_RATE_WINDOW:15m}
+			}
+			zone magic_verify_per_ip {
+				match {
+					method POST
+					path /api/studio/identity/magic/verify
+				}
+				key {remote_host}
+				events {$DZ23_MAGIC_VERIFY_RATE_EVENTS:10}
+				window {$DZ23_MAGIC_VERIFY_RATE_WINDOW:1m}
+			}
+			zone passkey_per_ip {
+				match {
+					path /api/studio/identity/passkey/*
+				}
+				key {remote_host}
+				events {$DZ23_PASSKEY_RATE_EVENTS:20}
+				window {$DZ23_PASSKEY_RATE_WINDOW:1m}
+			}
+			disable_metrics
+		}
+
+		handle /healthz {
+			respond "ok" 200
+		}
+
+		@studio_login path /login /login/
+		handle @studio_login {
+			root * /srv/login
+			rewrite * /index.html
+			file_server
+		}
+
+		handle_path /assets/login/* {
+			root * /srv/login-assets
+			file_server
+		}
+
+		@public_identity path /api/studio/identity/magic/* /api/studio/identity/passkey/login/*
+		handle @public_identity {
+			reverse_proxy {$DZ23_HARNESS_UPSTREAM:127.0.0.1:3210} {
+				header_up X-DZ23-Edge "{$DZ23_EDGE_SECRET}"
+			}
+		}
+
+		handle {
+			forward_auth {$DZ23_HARNESS_UPSTREAM:127.0.0.1:3210} {
+				uri /api/studio/identity/session
+				header_up X-DZ23-Edge "{$DZ23_EDGE_SECRET}"
+				header_up -Connection
+				header_up -Upgrade
+			}
+			reverse_proxy {$DZ23_HARNESS_UPSTREAM:127.0.0.1:3210} {
+				header_up X-DZ23-Edge "{$DZ23_EDGE_SECRET}"
+			}
+		}
+	}
+}

@@ -46,7 +46,10 @@ function fakeService() {
 const servers: ReturnType<typeof createServer>[] = []
 afterEach(async () => Promise.all(servers.splice(0).map(server => new Promise<void>(resolve => server.close(() => resolve())))))
 
-async function fixture(bindHost: '127.0.0.1' | '0.0.0.0' = '127.0.0.1') {
+async function fixture(
+  bindHost: '127.0.0.1' | '0.0.0.0' = '127.0.0.1',
+  edge?: { secret?: string; harnessAuthenticationUrl?: (baseUrl: string) => string | undefined },
+) {
   const service = fakeService()
   const allowedHosts: string[] = []
   const allowedOrigins: string[] = []
@@ -55,6 +58,9 @@ async function fixture(bindHost: '127.0.0.1' | '0.0.0.0' = '127.0.0.1') {
     bindHost,
     allowedHosts,
     allowedOrigins,
+    edgeRequired: edge !== undefined,
+    ...(edge?.secret === undefined ? {} : { resolveEdgeSecret: () => Promise.resolve(edge.secret) }),
+    ...(edge?.harnessAuthenticationUrl === undefined ? {} : { harnessAuthenticationUrl: edge.harnessAuthenticationUrl }),
   }))
   servers.push(server)
   await new Promise<void>((resolve, reject) => {
@@ -146,6 +152,71 @@ describe('identity HTTP boundary', () => {
       mode: 'authenticated',
       principal: { userId: 'user-1', orgId: 'org-1', tenantId: 'tenant-1', sessionId: 'session-1' },
     })
+  })
+
+  it('requires the rotatable edge secret and creates the native Harness session exchange', async () => {
+    const edgeOnLoopback = await fixture('127.0.0.1', { secret: 'edge-secret' })
+    expect((await edgeOnLoopback.request('/session', {
+      method: 'GET', headers: { 'x-dz23-edge': 'edge-secret' },
+    })).status).toBe(401)
+    const f = await fixture('0.0.0.0', {
+      secret: 'edge-secret',
+      harnessAuthenticationUrl: baseUrl => `${baseUrl}?token=native-launch`,
+    })
+    expect((await f.request('/session', { method: 'GET' })).status).toBe(401)
+    expect((await f.request('/session', { method: 'GET', headers: { 'x-dz23-edge': 'wrong' } })).status).toBe(401)
+    const sessionResponse = await f.request('/session', {
+      method: 'GET', headers: { 'x-dz23-edge': 'edge-secret', cookie: `${SESSION_COOKIE}=session-token` },
+    })
+    expect(sessionResponse.status).toBe(200)
+    const exchange = await f.request('/harness/session', {
+      method: 'GET', redirect: 'manual', headers: {
+        'x-dz23-edge': 'edge-secret',
+        'x-forwarded-for': '198.51.100.7, 127.0.0.1',
+        'x-forwarded-proto': 'https',
+        cookie: `${SESSION_COOKIE}=session-token`,
+      },
+    })
+    expect(exchange.status).toBe(303)
+    expect(exchange.headers.get('location')).toBe(`https://${f.host}/?token=native-launch`)
+    expect(exchange.headers.get('referrer-policy')).toBe('no-referrer')
+    const invalidForwardedProtocol = await f.request('/harness/session', {
+      method: 'GET', redirect: 'manual', headers: {
+        'x-dz23-edge': 'edge-secret',
+        'x-forwarded-proto': 'ftp',
+        cookie: `${SESSION_COOKIE}=session-token`,
+      },
+    })
+    expect(invalidForwardedProtocol.headers.get('location')).toBe(`https://${f.host}/?token=native-launch`)
+  })
+
+  it('fails closed when the edge secret or Harness connection is unavailable', async () => {
+    const noSecret = await fixture('0.0.0.0', {})
+    expect((await noSecret.request('/session', { method: 'GET', headers: { 'x-dz23-edge': 'anything' } })).status).toBe(401)
+    const noHarness = await fixture()
+    const response = await noHarness.request('/harness/session', {
+      method: 'GET', headers: { cookie: `${SESSION_COOKIE}=session-token` },
+    })
+    expect(response.status).toBe(503)
+  })
+
+  it('limits magic-code requests in the application and returns retry guidance', async () => {
+    const f = await fixture()
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      expect((await f.request('/magic/start', {
+        method: 'POST', body: JSON.stringify({ email: 'limited@example.com' }),
+      })).status).toBe(202)
+    }
+    const limited = await f.request('/magic/start', {
+      method: 'POST',
+      headers: { cookie: `${SESSION_COOKIE}=attacker-chosen-value` },
+      body: JSON.stringify({ email: 'limited@example.com' }),
+    })
+    expect(limited.status).toBe(429)
+    expect(Number(limited.headers.get('retry-after'))).toBeGreaterThan(0)
+    expect(limited.headers.get('x-ratelimit-limit')).toBe('5')
+    expect(limited.headers.get('x-ratelimit-remaining')).toBe('0')
+    expect(await limited.json()).toEqual({ error: expect.stringContaining('Muitas tentativas') })
   })
 
   it('handles every authenticated passkey and device operation with CSRF', async () => {

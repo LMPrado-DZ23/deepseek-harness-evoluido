@@ -8,6 +8,8 @@
     "plugins/*"
   ],
   "scripts": {
+    "build:edge": "docker build -f deploy/caddy/Dockerfile -t dz23-studio-caddy:p29c .",
+    "prove:edge": "node scripts/prove-edge.mjs",
     "prove:runtime": "node scripts/prove-runtime.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <title>Entrar — DZ23 STUDIO</title>
+    <link rel="stylesheet" href="/assets/login/style.css">
+    <script type="module" src="/assets/login/app.js"></script>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="card" aria-labelledby="title">
+        <img src="/assets/login/dz23-studio-logo.jpg" alt="DZ23 STUDIO" class="logo">
+        <p class="eyebrow">Seu espaço de criação com inteligência artificial</p>
+        <h1 id="title">Entre no DZ23 STUDIO</h1>
+        <p class="intro">Informe seu e-mail. Você receberá um código de seis números para entrar com segurança.</p>
+
+        <form id="email-form">
+          <label for="email">Seu e-mail</label>
+          <input id="email" name="email" type="email" autocomplete="email" required>
+          <button type="submit">Enviar meu código</button>
+        </form>
+
+        <form id="code-form" hidden>
+          <label for="code">Código recebido</label>
+          <input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required>
+          <button type="submit">Entrar com segurança</button>
+          <button id="back" class="secondary" type="button">Usar outro e-mail</button>
+        </form>
+
+        <p id="status" role="status" aria-live="polite"></p>
+        <noscript>Ative o JavaScript para entrar no DZ23 STUDIO.</noscript>
+      </section>
+    </main>
+  </body>
+</html>

@@ -47,6 +47,9 @@ importers:
       '@deepseek-ai/cordis':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/vendor/cordis
         version: link:../../../harness-studio-poc02/deepseek-harness/vendor/cordis
+      '@deepseek-ai/dsh-client-connection':
+        specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/client/connection
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/client/connection
       '@deepseek-ai/dsh-credentials':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/credentials/credentials
         version: link:../../../harness-studio-poc02/deepseek-harness/packages/credentials/credentials

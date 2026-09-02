@@ -1,0 +1,53 @@
+services:
+  harness:
+    image: ${DZ23_STUDIO_IMAGE:?Defina DZ23_STUDIO_IMAGE com a imagem auditada do DZ23 STUDIO}
+    command: ["--profile", "studio", "--patch", "/opt/dz23-studio/deploy/harness/edge.patch.yml", "--host", "127.0.0.1", "--port", "3210", "--no-open"]
+    environment:
+      DSH_HOME: /var/lib/dz23-studio
+      DZ23_EDGE_SECRET: ${DZ23_EDGE_SECRET:?Defina DZ23_EDGE_SECRET}
+      DZ23_PUBLIC_HOST: ${DZ23_PUBLIC_HOST:?Defina o dominio publico sem protocolo}
+      DZ23_PUBLIC_ORIGIN: ${DZ23_PUBLIC_ORIGIN:?Defina a origem HTTPS publica}
+      DZ23_RP_ID: ${DZ23_RP_ID:?Defina o dominio WebAuthn sem porta}
+      DZ23_SMTP_SECRET: ${DZ23_SMTP_SECRET:?Defina a configuracao SMTP por segredo}
+    volumes:
+      - studio-data:/var/lib/dz23-studio
+    network_mode: service:caddy
+    depends_on:
+      - caddy
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+
+  caddy:
+    build:
+      context: .
+      dockerfile: deploy/caddy/Dockerfile
+    ports:
+      - "${DZ23_HTTP_PORT:-80}:80"
+      - "${DZ23_HTTPS_PORT:-443}:443"
+    environment:
+      DZ23_EDGE_SECRET: ${DZ23_EDGE_SECRET:?Defina DZ23_EDGE_SECRET}
+      DZ23_HARNESS_UPSTREAM: 127.0.0.1:3210
+      DZ23_SITE_ADDRESS: ${DZ23_SITE_ADDRESS:?Defina o dominio publico, por exemplo studio.exemplo.com}
+      DZ23_ACME_EMAIL: ${DZ23_ACME_EMAIL:?Defina o email administrativo do certificado}
+    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: ["ALL"]
+    cap_add: ["NET_BIND_SERVICE"]
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  studio-data:
+  caddy-data:
+  caddy-config:

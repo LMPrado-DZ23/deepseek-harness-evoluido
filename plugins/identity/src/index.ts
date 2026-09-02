@@ -2,6 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { isIP } from 'node:net'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import type {} from '@deepseek-ai/dsh-host-webserver'
+import type {} from '@deepseek-ai/dsh-client-connection'
 import type { Domain, KvTable } from '@deepseek-ai/dsh-storage-domain'
 import type {} from '@dz23-studio/policy'
 import { createIdentityHttpHandler } from './http.js'
@@ -28,6 +29,7 @@ export * from './http.js'
 export * from './model.js'
 export * from './mutex.js'
 export * from './passkey.js'
+export * from './rate-limit.js'
 export * from './service.js'
 
 export const name = 'dz23-studio-identity'
@@ -42,6 +44,7 @@ export interface IdentityPluginConfig {
   readonly enrollment?: 'closed' | 'open'
   readonly allowedHosts?: readonly string[]
   readonly allowedOrigins?: readonly string[]
+  readonly edge?: { readonly required?: boolean; readonly secretRef?: string }
   readonly email?: { readonly kind: 'memory' } | { readonly kind: 'smtp'; readonly secretRef: string }
   readonly now?: () => Date
   readonly createId?: () => string
@@ -93,6 +96,14 @@ function values<T>(table: KvTable<IdentityKey, T>): T[] {
 export async function apply(ctx: Context, config: IdentityPluginConfig = {}): Promise<void> {
   const rpId = config.rpId ?? 'localhost'
   assertValidRpId(rpId)
+  if (ctx.webServer.host !== '127.0.0.1' && config.edge?.required === false) {
+    throw new Error('O modo servidor não permite desativar edge.required.')
+  }
+  const edgeRequired = config.edge?.required ?? ctx.webServer.host !== '127.0.0.1'
+  const edgeSecretRef = config.edge?.secretRef === undefined ? undefined : credentialRef(config.edge.secretRef)
+  if (edgeRequired && edgeSecretRef === undefined) {
+    throw new Error('O modo servidor exige edge.secretRef para validar a borda Caddy.')
+  }
   const [usersDomain, credentialsDomain, sessionsDomain, auditDomain]: [
     Domain<typeof identityUsersDomainSpec>,
     Domain<typeof identityCredentialsDomainSpec>,
@@ -119,7 +130,12 @@ export async function apply(ctx: Context, config: IdentityPluginConfig = {}): Pr
   const port = ctx.webServer.port
   const defaultHost = `127.0.0.1:${port}`
   const defaultOrigin = `http://localhost:${port}`
-  const email = resolveEmailSender(ctx, config)
+  const email = resolveEmailSender(ctx, config, edgeRequired)
+  let harnessAuthenticationUrl: ((baseUrl: string) => string) | undefined
+  ctx.inject(['connection'], (connectionCtx) => {
+    harnessAuthenticationUrl = baseUrl => connectionCtx.connection.authenticatedUrl(baseUrl)
+    return () => { harnessAuthenticationUrl = undefined }
+  })
   const service = new StudioIdentityService({
     repository,
     passkeys: config.passkeys ?? new SimpleWebAuthnProvider(),
@@ -152,6 +168,11 @@ export async function apply(ctx: Context, config: IdentityPluginConfig = {}): Pr
       bindHost: ctx.webServer.host,
       allowedHosts: config.allowedHosts ?? [defaultHost, `localhost:${port}`],
       allowedOrigins: config.allowedOrigins ?? [defaultOrigin, `http://${defaultHost}`],
+      edgeRequired,
+      ...(edgeSecretRef === undefined ? {} : {
+        resolveEdgeSecret: async () => (await ctx.credentials.resolve(edgeSecretRef))?.value,
+      }),
+      harnessAuthenticationUrl: baseUrl => harnessAuthenticationUrl?.(baseUrl),
     }),
   }), 'dz23-studio-identity.http')
 }
@@ -164,12 +185,20 @@ export function assertValidRpId(rpId: string): void {
   }
 }
 
-function resolveEmailSender(ctx: Context, config: IdentityPluginConfig): { sender: EmailSender; capture?: MemoryEmailSender } {
+function resolveEmailSender(
+  ctx: Context,
+  config: IdentityPluginConfig,
+  edgeRequired: boolean,
+): { sender: EmailSender; capture?: MemoryEmailSender } {
   if (config.emailSender !== undefined) return { sender: config.emailSender }
   if (config.email?.kind === 'smtp') {
     return { sender: new SmtpEmailSender(ctx.credentials, credentialRef(config.email.secretRef)) }
   }
-  if (ctx.webServer.host !== '127.0.0.1') {
+  if (config.email?.kind === 'memory' && ctx.webServer.host === '127.0.0.1') {
+    const capture = new MemoryEmailSender()
+    return { sender: capture, capture }
+  }
+  if (ctx.webServer.host !== '127.0.0.1' || edgeRequired) {
     throw new Error('O modo servidor exige um provedor SMTP configurado por referência de segredo.')
   }
   const capture = new MemoryEmailSender()

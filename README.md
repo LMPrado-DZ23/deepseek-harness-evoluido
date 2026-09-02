@@ -19,6 +19,13 @@ A licença OSI exata ainda precisa ser escolhida antes da publicação; enquanto
 
 **Viabilidade arquitetural do núcleo aprovada.** O PoC-01b executado em WSL2 ext4 comprovou sessão live, aprovação, sandbox com negação fora do workspace e preservação após reinício.
 
+O P29-C também comprovou a borda Caddy autenticada para HTTP, RPC e WebSocket.
+Essa capacidade está em **BETA**: não houve deploy, domínio ACME real nem teste em
+celular físico. Consulte [ADR-012](./docs/adr/ADR-012-single-caddy-edge.md), a
+[prova P29-C](./docs/pocs/P29-C-edge-proof.md), a
+[matriz de capacidades](./docs/CAPABILITY_MATRIX.md) e o
+[guia de acesso móvel](./docs/guides/mobile-secure-access.md).
+
 Consulte [REPORT.md](./REPORT.md) para comandos, resultados, erros e limitações.
 
 Decisões relacionadas:
@@ -35,6 +42,8 @@ Decisões relacionadas:
 - `plugins/identity`: passkeys, código temporário por e-mail, sessões opacas,
   dispositivos, CSRF e revogação ligados ao motor de permissões.
 - `apps/studio-web/public/brand`: identidade visual oficial do DZ23 STUDIO.
+- `deploy/caddy`: borda única, login simples e configurações TLS separadas para
+  servidor e uso local.
 - `UPSTREAM.lock`: identidade do repositório e commit usados.
 
 ## Verificação focada
@@ -42,12 +51,15 @@ Decisões relacionadas:
 No WSL Ubuntu, a partir da raiz deste repositório:
 
 ```sh
-/home/leandro/harness-studio-poc02/deepseek-harness/node_modules/.bin/tsc -p tsconfig.json --noEmit
-node node_modules/vitest/vitest.mjs run --coverage
+pnpm typecheck
+pnpm test:coverage
+pnpm build
+pnpm build:edge
+pnpm prove:edge
 ```
 
-Resultado atual do gate completo P29-A: 107 testes aprovados e 100% de
-statements, branches, functions e lines em `hello`, `policy` e `identity`. A
-prova viva restaura a sessão de identidade após reinício e comprova que a
-revogação bloqueia a chamada de ferramenta seguinte. Isso não inclui cerimônia
-de passkey com hardware nem exposição pública.
+Resultado atual: 147 testes aprovados e 100% de statements, branches, functions
+e lines nos pacotes do Studio. A prova de borda usa Docker e exige que as
+dependências do profile também tenham sido instaladas com
+`pnpm --dir dsh-home/profiles/studio install --frozen-lockfile`. Isso não inclui
+cerimônia de passkey com hardware, aparelho móvel físico ou deploy.
