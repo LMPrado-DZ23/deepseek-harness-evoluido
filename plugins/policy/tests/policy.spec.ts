@@ -1,0 +1,329 @@
+import { describe, expect, it, vi } from 'vitest'
+import { Context } from '@deepseek-ai/cordis'
+import { ToolCallId } from '@deepseek-ai/dsh-llm'
+import SessionStore from '@deepseek-ai/dsh-session'
+import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+import ToolRuntime, { defineTool, type PreToolDecision, type ToolExecution } from '@deepseek-ai/dsh-tools'
+import {
+  StudioPolicyEngine,
+  STUDIO_POLICY_AUDIT_LOGICAL_DOMAIN,
+  STUDIO_POLICY_AUDIT_PHYSICAL_DOMAIN,
+  apply,
+  policyAuditRecordSchema,
+  policyDecisionEventSchema,
+  policyDecisionSchema,
+  studioPolicyAuditDomainSpec,
+  type PolicyPluginConfig,
+  type PolicyTier,
+  type ToolPolicyRule,
+} from '../src/index.ts'
+
+const TIERS = ['T0', 'T1', 'T2', 'T3'] as const
+const RANK: Readonly<Record<PolicyTier, number>> = { T0: 0, T1: 1, T2: 2, T3: 3 }
+
+function rule(overrides: Partial<ToolPolicyRule> = {}): ToolPolicyRule {
+  return {
+    source: { kind: 'studio' },
+    ...overrides,
+  }
+}
+
+function expectedKind(tier: PolicyTier): 'allow' | 'ask' {
+  return RANK[tier] <= RANK.T1 ? 'allow' : 'ask'
+}
+
+interface TableCase {
+  readonly label: string
+  readonly rule: ToolPolicyRule
+  readonly expectedTier: PolicyTier
+}
+
+const conflictCases: TableCase[] = TIERS.flatMap(inferred => TIERS.map(manifest => ({
+  label: `conflito ${inferred} x ${manifest}`,
+  rule: rule({ inferredTier: inferred, manifestTier: manifest }),
+  expectedTier: TIERS[Math.max(RANK[inferred], RANK[manifest])]!,
+})))
+
+const singleDeclarationCases: TableCase[] = (['inferredTier', 'manifestTier', 'policyTier'] as const)
+  .flatMap(field => TIERS.map(tier => ({
+    label: `${field} sozinho ${tier}`,
+    rule: rule({ [field]: tier }),
+    expectedTier: tier,
+  })))
+
+const invalidTierCases: TableCase[] = (['inferredTier', 'manifestTier', 'policyTier'] as const)
+  .flatMap(field => ['t0', 'T4', '', 2].map(value => ({
+    label: `${field} inválido ${JSON.stringify(value)}`,
+    rule: rule({ [field]: value }),
+    expectedTier: 'T2' as const,
+  })))
+
+const mcpCases: TableCase[] = TIERS.map(tier => ({
+  label: `MCP externo declarado ${tier}`,
+  rule: rule({ source: { kind: 'mcp', external: true }, inferredTier: tier }),
+  expectedTier: tier === 'T0' ? 'T1' : tier,
+}))
+
+const dangerCases: TableCase[] = TIERS.map(tier => ({
+  label: `danger-full-access partindo de ${tier}`,
+  rule: rule({ inferredTier: tier, sandboxMode: 'danger-full-access' }),
+  expectedTier: 'T3',
+}))
+
+const downgradeCases: TableCase[] = [
+  {
+    label: 'rebaixamento bilateral explícito T2 para T0/T1',
+    rule: rule({ inferredTier: 'T2', manifestTier: 'T0', policyTier: 'T1', allowManifestDowngrade: true }),
+    expectedTier: 'T1',
+  },
+  {
+    label: 'rebaixamento unilateral continua mais restritivo',
+    rule: rule({ inferredTier: 'T3', manifestTier: 'T0', policyTier: 'T1' }),
+    expectedTier: 'T3',
+  },
+]
+
+const TABLE_CASES = [
+  ...conflictCases,
+  ...singleDeclarationCases,
+  ...invalidTierCases,
+  ...mcpCases,
+  ...dangerCases,
+  ...downgradeCases,
+]
+
+describe('DZ23 STUDIO policy engine', () => {
+  it('keeps the mandatory decision table at or above fifty cases', () => {
+    expect(TABLE_CASES).toHaveLength(50)
+  })
+
+  it.each(TABLE_CASES)('$label', ({ rule: current, expectedTier }) => {
+    const decision = new StudioPolicyEngine({ rules: { tool: current } })
+      .evaluate('tool', { strongIdentityVerified: true })
+    expect(decision).toMatchObject({
+      toolName: 'tool',
+      effectiveTier: expectedTier,
+      kind: expectedKind(expectedTier),
+      ruleSource: 'catalog',
+    })
+    expect(policyDecisionSchema.parse(decision)).toEqual(decision)
+  })
+
+  it('uses the safe T2 default for an unclassified tool and rejects an empty identity', () => {
+    const engine = new StudioPolicyEngine()
+    expect(engine.evaluate('unknown')).toMatchObject({ effectiveTier: 'T2', kind: 'ask', ruleSource: 'safe-default' })
+    expect(engine.evaluate('  ')).toMatchObject({ toolName: '<invalid>', kind: 'deny', ruleSource: 'invalid-rule' })
+  })
+
+  it('blocks invalid rules, explicit blocks, and unsigned stable plugins', () => {
+    const engine = new StudioPolicyEngine({
+      rules: {
+        invalid: { source: { kind: 'studio' }, inferredTier: 'T0', extra: true } as never,
+        blocked: rule({ inferredTier: 'T0', blocked: true }),
+        unsigned: rule({ source: { kind: 'plugin', stableChannel: true }, inferredTier: 'T0' }),
+        signed: rule({ source: { kind: 'plugin', signed: true }, inferredTier: 'T0' }),
+        preview: rule({ source: { kind: 'plugin', stableChannel: false }, inferredTier: 'T1' }),
+      },
+    })
+    expect(engine.evaluate('invalid')).toMatchObject({ kind: 'deny', ruleSource: 'invalid-rule' })
+    expect(engine.evaluate('blocked')).toMatchObject({ kind: 'deny' })
+    expect(engine.evaluate('unsigned')).toMatchObject({ kind: 'deny' })
+    expect(engine.evaluate('signed')).toMatchObject({ kind: 'allow' })
+    expect(engine.evaluate('preview')).toMatchObject({ kind: 'allow' })
+  })
+
+  it('fails T3 closed without strong identity and asks after strong identity', () => {
+    const engine = new StudioPolicyEngine({ rules: { deploy: rule({ inferredTier: 'T3' }) } })
+    expect(engine.evaluate('deploy')).toMatchObject({ kind: 'deny', effectiveTier: 'T3' })
+    expect(engine.evaluate('deploy', { strongIdentityVerified: true }))
+      .toMatchObject({ kind: 'ask', effectiveTier: 'T3' })
+  })
+})
+
+function execution(name = 'safe') {
+  return {
+    name,
+    callId: 'call-1',
+    agent: { session: { id: 'session-1' } },
+  } as unknown as ToolExecution
+}
+
+async function mounted(config: PolicyPluginConfig = {}, useRuntimeDefaults = false) {
+  let hook: ((exec: ToolExecution, next: () => Promise<PreToolDecision>) => Promise<PreToolDecision>) | undefined
+  let cleanup: (() => Promise<void>) | undefined
+  const records = new Map<string, unknown>()
+  const put = vi.fn(async (key: string, value: unknown) => { records.set(key, value) })
+  const close = vi.fn<() => Promise<void>>().mockResolvedValue(undefined)
+  const domain = { table: vi.fn().mockReturnValue({ put, entries: () => new Map(records).entries() }), close }
+  const emit = vi.fn()
+  const ctx = {
+    on: vi.fn((_event, listener) => { hook = listener }),
+    emit,
+    storageDomain: { open: vi.fn().mockResolvedValue(domain) },
+    effect: vi.fn((factory: () => () => Promise<void>) => { cleanup = factory() }),
+    provide: vi.fn(),
+  }
+  const effectiveConfig = useRuntimeDefaults
+    ? config
+    : {
+        createAuditId: () => 'audit-1',
+        now: () => new Date('2026-09-02T12:00:00.000Z'),
+        ...config,
+      }
+  await apply(ctx as never, effectiveConfig)
+  return { ctx, hook, put, close, cleanup }
+}
+
+describe('authoritative tools/pre-execute integration', () => {
+  it('delegates an allowed action and writes the final audit event', async () => {
+    const { ctx, hook, put, close, cleanup } = await mounted({
+      rules: { safe: rule({ inferredTier: 'T0' }) },
+      resolveScope: () => ({ orgId: 'org-23', tenantId: 'tenant-23' }),
+    })
+    await expect(hook?.(execution('safe'), async () => ({ kind: 'allow' })))
+      .resolves.toEqual({ kind: 'allow' })
+    const event = policyDecisionEventSchema.parse(ctx.emit.mock.calls[0]?.[1])
+    expect(event).toMatchObject({ toolName: 'safe', callId: 'call-1', effectiveTier: 'T0', kind: 'allow' })
+    expect(put).toHaveBeenCalledWith('audit-1', policyAuditRecordSchema.parse({
+      audit_id: 'audit-1',
+      session_id: 'session-1',
+      org_id: 'org-23',
+      tenant_id: 'tenant-23',
+      created_at: '2026-09-02T12:00:00.000Z',
+      tool_name: event.toolName,
+      call_id: event.callId,
+      effective_tier: event.effectiveTier,
+      decision: event.kind,
+      reason: event.reason,
+      rule_source: event.ruleSource,
+    }))
+    expect(STUDIO_POLICY_AUDIT_PHYSICAL_DOMAIN).toBe('studio_policy_audit')
+    expect(STUDIO_POLICY_AUDIT_LOGICAL_DOMAIN).toBe('studio.policy.audit')
+    expect(ctx.storageDomain.open).toHaveBeenCalledWith(studioPolicyAuditDomainSpec)
+    const runtime = ctx.provide.mock.calls[0]?.[1] as { auditRecords(): readonly unknown[] }
+    expect(runtime.auditRecords()).toHaveLength(1)
+    await cleanup?.()
+    expect(close).toHaveBeenCalledOnce()
+  })
+
+  it.each([
+    { downstream: { kind: 'ask', reason: 'outra política pede confirmação' } as const, expected: 'ask' },
+    { downstream: { kind: 'ask' } as const, expected: 'ask' },
+    { downstream: { kind: 'deny', reason: 'outra política bloqueou' } as const, expected: 'deny' },
+  ])('preserves a more restrictive downstream $expected decision %#', async ({ downstream, expected }) => {
+    const { ctx, hook } = await mounted({ rules: { safe: rule({ inferredTier: 'T0' }) } })
+    await expect(hook?.(execution(), async () => downstream)).resolves.toMatchObject({ kind: expected })
+    const event = ctx.emit.mock.calls[0]?.[1]
+    expect(event).toMatchObject({ kind: expected })
+    if ('reason' in downstream) expect(event).toMatchObject({ reason: downstream.reason })
+    else expect(event).toMatchObject({ reason: 'Leitura segura autorizada automaticamente.' })
+  })
+
+  it('does not delegate an action that requires approval', async () => {
+    const next = vi.fn<() => Promise<PreToolDecision>>().mockResolvedValue({ kind: 'allow' })
+    const { hook } = await mounted({ rules: { external: rule({ inferredTier: 'T2' }) } })
+    await expect(hook?.(execution('external'), next)).resolves.toMatchObject({ kind: 'ask' })
+    expect(next).not.toHaveBeenCalled()
+  })
+
+  it('blocks an agent-less call because it cannot create a session audit event', async () => {
+    const { ctx, hook, put } = await mounted()
+    const exec = { name: 'unknown', callId: 'agentless' } as unknown as ToolExecution
+    await expect(hook?.(exec, async () => ({ kind: 'allow' }))).resolves.toMatchObject({ kind: 'deny' })
+    expect(ctx.emit.mock.calls[0]?.[1]).toMatchObject({ callId: 'agentless', kind: 'deny' })
+    expect(put.mock.calls[0]?.[1]).toMatchObject({ session_id: 'agentless' })
+  })
+
+  it('fails closed if the durable audit cannot be written', async () => {
+    const { ctx, hook, put } = await mounted({ rules: { safe: rule({ inferredTier: 'T0' }) } })
+    put.mockRejectedValueOnce(new Error('storage unavailable'))
+    await expect(hook?.(execution(), async () => ({ kind: 'allow' }))).resolves.toMatchObject({
+      kind: 'deny',
+      reason: 'Não foi possível registrar a auditoria; a ação foi bloqueada.',
+    })
+    expect(ctx.emit.mock.calls[0]?.[1]).toMatchObject({ kind: 'deny' })
+  })
+
+  it('fails closed if tenant scope is invalid before the audit write', async () => {
+    const { ctx, hook, put } = await mounted({
+      rules: { safe: rule({ inferredTier: 'T0' }) },
+      resolveScope: () => ({ orgId: '', tenantId: '' }),
+    })
+    await expect(hook?.(execution(), async () => ({ kind: 'allow' }))).resolves.toMatchObject({ kind: 'deny' })
+    expect(put).not.toHaveBeenCalled()
+    expect(ctx.emit.mock.calls[0]?.[1]).toMatchObject({ kind: 'deny' })
+  })
+
+  it('creates production audit identifiers and timestamps when no test clock is supplied', async () => {
+    const { hook, put } = await mounted({
+      rules: { sensitive: rule({ inferredTier: 'T3' }) },
+      strongIdentityVerified: () => true,
+    }, true)
+    await expect(hook?.(execution('sensitive'), async () => ({ kind: 'allow' })))
+      .resolves.toMatchObject({ kind: 'ask' })
+    const record = policyAuditRecordSchema.parse(put.mock.calls[0]?.[1])
+    expect(record.audit_id).toMatch(/^[0-9a-f-]{36}$/)
+    expect(Number.isNaN(Date.parse(record.created_at))).toBe(false)
+    expect(record).toMatchObject({ org_id: 'org_local', tenant_id: 'tenant_local' })
+  })
+
+  it('enforces policy inside the real Harness tool registry and durable session', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(ToolRuntime)
+    const put = vi.fn().mockResolvedValue(undefined)
+    ctx.provide('storageDomain', {
+      open: vi.fn().mockResolvedValue({ table: vi.fn().mockReturnValue({ put }), close: vi.fn() }),
+    } as never)
+    let dispatches = 0
+    const probe = defineTool({
+      name: 'real_safe_tool',
+      description: 'Real policy seam probe.',
+      parameters: {},
+      output: {
+        schema: { type: 'string' },
+        render: (_args, value) => [{ type: 'text', text: value }],
+      },
+      async execute() {
+        dispatches += 1
+        return 'executed'
+      },
+    })
+    ctx.tools.register(probe)
+    ctx.tools.register({ ...probe, name: 'unclassified_tool' })
+    await apply(ctx, {
+      rules: { real_safe_tool: rule({ inferredTier: 'T0' }) },
+      createAuditId: () => 'real-audit',
+      now: () => new Date('2026-09-02T12:00:00.000Z'),
+    })
+    const session = ctx.sessions.create()
+    const agent = { session } as never
+    const signal = new AbortController().signal
+
+    const allowed = await ctx.tools.execute({
+      signal,
+      callId: ToolCallId('real-allowed'),
+      name: 'real_safe_tool',
+      arguments: {},
+      agent,
+    })
+    expect(allowed).toMatchObject({ isError: false, value: 'executed' })
+    expect(dispatches).toBe(1)
+    expect(put.mock.calls[0]?.[1])
+      .toMatchObject({ call_id: 'real-allowed', effective_tier: 'T0', decision: 'allow' })
+
+    const unknown = await ctx.tools.execute({
+      signal,
+      callId: ToolCallId('real-unclassified'),
+      name: 'unclassified_tool',
+      arguments: {},
+      agent,
+    })
+    expect(unknown.isError).toBe(true)
+    expect(dispatches).toBe(1)
+    expect(put.mock.calls[1]?.[1])
+      .toMatchObject({ call_id: 'real-unclassified', effective_tier: 'T2', decision: 'ask' })
+    await ctx.fiber.dispose()
+  })
+})

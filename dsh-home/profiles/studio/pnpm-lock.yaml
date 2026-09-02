@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@dz23-studio/policy':
+        specifier: link:../../../plugins/policy
+        version: link:../../../plugins/policy
       '@studio/hello':
         specifier: link:../../../plugins/hello
         version: link:../../../plugins/hello

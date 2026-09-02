@@ -132,10 +132,6 @@ try {
     approvals.push({ toolName: request.toolName, callId: String(request.callId), reason: request.reason })
     return Promise.resolve('allowed-once')
   }, { prepend: true })
-  const gateOff = first.ctx.on('tools/pre-execute', (execution, next) => execution.name === 'studio_echo'
-    ? Promise.resolve({ kind: 'ask', reason: 'PoC-01b requires an explicit one-shot approval.' })
-    : next(), { prepend: true })
-
   firstHandle = await createAgent(first.ctx, sessionId)
   const toolNames = first.ctx.tools.schemas(firstHandle.agent).map(schema => schema.name).sort()
   assert.ok(toolNames.includes('studio_echo'), 'Studio tool was not visible to the live agent')
@@ -176,7 +172,9 @@ try {
   const firstEventCount = firstHandle.agent.session.events.length
   await first.ctx.sessions.flush(firstHandle.agent.session)
   const firstRecord = structuredClone(first.ctx.studioHello.record())
-  gateOff()
+  const firstPolicyAudits = structuredClone(first.ctx.studioPolicy.auditRecords()
+    .filter(record => record.session_id === sessionIdText))
+  assert.ok(firstPolicyAudits.length >= 3, 'policy decisions were not durably recorded')
   approvalOff()
   await stop(first, firstHandle)
   firstHandle = undefined
@@ -184,6 +182,8 @@ try {
 
   second = await bootStudio()
   assert.deepEqual(second.ctx.studioHello.record(), firstRecord)
+  assert.deepEqual(second.ctx.studioPolicy.auditRecords()
+    .filter(record => record.session_id === sessionIdText), firstPolicyAudits)
   secondHandle = await resumeAgent(second.ctx, sessionId)
   assert.ok(secondHandle.agent.session.events.length >= firstEventCount)
   await ask(secondHandle.agent, 'RESTART_PROBE')
@@ -213,6 +213,12 @@ try {
       sessionResumed: true,
       historyRestored: true,
       domainRecordRestored: true,
+      policyAuditDomainRestored: true,
+    },
+    policyAudit: {
+      physicalDomain: 'studio_policy_audit',
+      logicalDomain: 'studio.policy.audit',
+      recordsBeforeRestart: firstPolicyAudits.length,
     },
     eventTypes: [...new Set(secondHandle.agent.session.events.map(event => event.type))].sort(),
   }

@@ -2,10 +2,10 @@ import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
   test: {
-    include: ['plugins/hello/tests/**/*.spec.ts'],
+    include: ['plugins/*/tests/**/*.spec.ts'],
     coverage: {
       provider: 'v8',
-      include: ['plugins/hello/src/**/*.ts'],
+      include: ['plugins/*/src/**/*.ts'],
       reporter: ['text', 'json-summary'],
       thresholds: {
         branches: 100,
@@ -16,4 +16,3 @@ export default defineConfig({
     },
   },
 })
-

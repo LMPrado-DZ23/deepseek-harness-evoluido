@@ -1,6 +1,13 @@
-# Harness Studio PoC-01
+# DZ23 STUDIO
 
-PoC isolado para avaliar os seams públicos do DeepSeek Harness sem alterar o upstream. O checkout de execução está fixado no commit `6c705be1ce6774a000d061da41d1823b03a3d42c`; `git status --short`, `git diff --stat` e `git diff --cached --stat` terminaram sem saída.
+Produto local composto sobre os seams públicos do DeepSeek Harness sem alterar o
+upstream. O nome oficial e o logotipo foram decididos pelo proprietário em
+[ADR-003](./docs/adr/ADR-003-product-identity-dz23-studio.md).
+
+O checkout de execução continua fixado no commit
+`6c705be1ce6774a000d061da41d1823b03a3d42c`. O primeiro componente de produção
+em construção é o motor de permissões `@dz23-studio/policy`, aplicado no seam
+host-side `tools/pre-execute`; decisões de segurança não dependem da interface.
 
 ## Decisão
 
@@ -20,6 +27,8 @@ Decisões relacionadas:
 
 - `dsh-home/profiles/studio`: profile Studio que estende os bundles oficiais `@deepseek-ai/dsh-base` e `@deepseek-ai/dsh-web-app`.
 - `plugins/hello`: plugin externo `@studio/hello`; o upstream não recebe arquivos ou alterações.
+- `plugins/policy`: motor TypeScript + Zod dos tiers T0–T3, com auditoria por sessão.
+- `apps/studio-web/public/brand`: identidade visual oficial do DZ23 STUDIO.
 - `UPSTREAM.lock`: identidade do repositório e commit usados.
 
 ## Verificação focada

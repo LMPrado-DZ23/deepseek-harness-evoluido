@@ -1,6 +1,6 @@
 {
-  "name": "harness-studio-poc-01",
-  "version": "0.0.0",
+  "name": "dz23-studio",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.7.0",
@@ -11,7 +11,8 @@
     "prove:runtime": "node scripts/prove-runtime.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "build": "pnpm --recursive run build"
   },
   "devDependencies": {
     "@types/node": "22.20.0",

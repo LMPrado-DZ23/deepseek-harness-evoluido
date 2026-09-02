@@ -2,6 +2,7 @@
   "name": "dsh-profile-studio",
   "private": true,
   "dependencies": {
+    "@dz23-studio/policy": "link:../../../plugins/policy",
     "@studio/hello": "link:../../../plugins/hello"
   },
   "dsh": {
