@@ -134,12 +134,18 @@ describe('identity Cordis plugin composition', () => {
         sendMagicCode: message => { captured.push(message.code); return Promise.resolve() },
         sendInvitation: () => Promise.resolve(),
       },
-      enrollment: 'open',
+      enrollment: { mode: 'bootstrap-email', email: ' Owner@Example.com ' },
       edge: { secretRef: 'DZ23_EDGE_SECRET' },
       email: { kind: 'memory' },
       allowedHosts: ['studio.example'],
       allowedOrigins: ['https://studio.example'],
     })
+    expect(owner.provided.identity!.service.identityStateForHarnessSession('unbound', '127.0.0.1')).toEqual({
+      authenticated: false,
+      strongIdentityVerified: false,
+    })
+    await expect(owner.provided.identity!.service.requestMagicCode('competitor@example.com')).resolves.toBe('suppressed')
+    expect(captured).toHaveLength(0)
     await owner.provided.identity!.service.requestMagicCode('owner@example.com')
     const ownerIssued = await owner.provided.identity!.service.verifyMagicCode('owner@example.com', captured[0]!, {
       label: 'Test', userAgent: 'Vitest', ipTruncated: '127.0.0.0/24',
@@ -185,6 +191,14 @@ describe('identity Cordis plugin composition', () => {
     await expect(apply(loopbackEdge.ctx as never, {
       passkeys, edge: { required: true, secretRef: 'DZ23_EDGE_SECRET' },
     })).rejects.toThrow(/SMTP/)
+    const unsafeEnrollment = context()
+    await expect(apply(unsafeEnrollment.ctx as never, {
+      passkeys,
+      edge: { required: true, secretRef: 'DZ23_EDGE_SECRET' },
+      enrollment: 'open',
+      email: { kind: 'memory' },
+    })).rejects.toThrow(/proíbe enrollment aberto/)
+    expect(unsafeEnrollment.ctx.storageDomain.open).not.toHaveBeenCalled()
     const explicitLocalMemory = context()
     await apply(explicitLocalMemory.ctx as never, {
       passkeys,

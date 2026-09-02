@@ -44,6 +44,14 @@ redireciona uma única vez para o mecanismo oficial de troca do Harness. O naveg
 passa a carregar os dois cookies HttpOnly. Isso preserva a autenticação nativa sem
 alterar o upstream.
 
+O primeiro proprietário nunca é escolhido por corrida pública. Em instalação de
+servidor, `DZ23_BOOTSTRAP_OWNER_EMAIL` é obrigatório e o enrollment usa o modo
+`bootstrap-email`. Enquanto não existe usuário, somente esse e-mail normalizado
+recebe código e pode se tornar `bootstrap_owner`; qualquer outro endereço recebe
+a mesma resposta genérica, sem envio nem criação. Depois do primeiro cadastro, o
+enrollment se fecha. Quando `edge.required=true`, o modo pessoal é desativado no
+serviço de identidade e na camada HTTP, mesmo com o Harness em loopback.
+
 Os limites são aplicados em duas camadas:
 
 | Escopo | Limite |
@@ -80,3 +88,11 @@ da porta interna a um contêiner externo.
 Isso autoriza a capacidade como BETA, não como produção pronta. Ainda não foram
 executados: ACME num domínio real, aparelho físico, Tailscale, instalação da imagem
 final do Studio ou teste de navegador completo da CSP.
+
+Se outro proxy ficar à frente do Caddy, seus CIDRs precisam ser configurados
+explicitamente em `trusted_proxies`; até isso ser testado, um proxy compartilhado
+pode fazer usuários dividirem o mesmo limite por IP. `includeSubDomains` no HSTS
+do servidor também exige que todos os subdomínios do operador estejam prontos para
+HTTPS. A CSP mantém `ws:`/`wss:` até um E2E de navegador provar que somente
+`'self'` preserva o cliente real; ela não autoriza conexão sem a autenticação da
+borda.

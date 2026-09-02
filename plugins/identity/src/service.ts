@@ -28,7 +28,10 @@ const STRONG_AUTH_TTL = 5 * MINUTE
 const MAX_MAGIC_ATTEMPTS = 5
 const SESSION_TOUCH_INTERVAL = MINUTE
 
-export type EnrollmentMode = 'closed' | 'open'
+export type EnrollmentMode = 'closed' | 'open' | {
+  readonly mode: 'bootstrap-email'
+  readonly email: string
+}
 export type MagicCodeRequestResult = 'sent' | 'suppressed'
 
 export interface EnrollmentGrant {
@@ -102,6 +105,7 @@ export interface IdentityServiceOptions {
   readonly defaultOrgId: string
   readonly defaultTenantId: string
   readonly enrollment: EnrollmentMode
+  readonly personalModeAllowed?: boolean
   readonly now?: () => Date
   readonly createId?: () => string
   readonly createSecret?: () => string
@@ -118,6 +122,7 @@ export class StudioIdentityService {
   readonly #defaultOrgId: string
   readonly #defaultTenantId: string
   readonly #enrollment: EnrollmentMode
+  readonly #personalModeAllowed: boolean
   readonly #now: () => Date
   readonly #createId: () => string
   readonly #createSecret: () => string
@@ -135,7 +140,10 @@ export class StudioIdentityService {
     this.#expectedOrigin = options.expectedOrigin
     this.#defaultOrgId = options.defaultOrgId
     this.#defaultTenantId = options.defaultTenantId
-    this.#enrollment = options.enrollment
+    this.#enrollment = typeof options.enrollment === 'string'
+      ? options.enrollment
+      : { mode: 'bootstrap-email', email: normalizeEmail(options.enrollment.email) }
+    this.#personalModeAllowed = options.personalModeAllowed ?? true
     this.#now = options.now ?? (() => new Date())
     this.#createId = options.createId ?? randomUUID
     this.#createSecret = options.createSecret ?? newOpaqueSecret
@@ -143,7 +151,7 @@ export class StudioIdentityService {
   }
 
   isPersonalMode(bindHost: '127.0.0.1' | '0.0.0.0'): boolean {
-    return bindHost === '127.0.0.1' && this.#repository.users().length === 0
+    return this.#personalModeAllowed && bindHost === '127.0.0.1' && this.#repository.users().length === 0
   }
 
   personalPrincipal(bindHost: '127.0.0.1' | '0.0.0.0'): IdentityPrincipal | undefined {
@@ -151,8 +159,12 @@ export class StudioIdentityService {
     return { userId: 'user_local', orgId: 'org_local', tenantId: 'tenant_local', sessionId: 'session_local' }
   }
 
-  isEnrollmentOpen(): boolean {
-    return this.#enrollment === 'open' && this.#repository.users().length === 0
+  isEnrollmentOpen(email?: string): boolean {
+    if (this.#repository.users().length !== 0) return false
+    if (this.#enrollment === 'open') return true
+    return typeof this.#enrollment !== 'string'
+      && email !== undefined
+      && this.#enrollment.email === normalizeEmail(email)
   }
 
   setEnrollmentResolver(resolver: (email: string) => EnrollmentGrant | undefined): () => void {
@@ -180,7 +192,7 @@ export class StudioIdentityService {
     return this.#mutex.run(`magic-request:${normalized}`, async () => {
       const existing = this.#repository.users().find(user => user.email === normalized)
       const grant = this.#enrollmentResolver(normalized)
-      if (existing === undefined && !this.isEnrollmentOpen() && grant === undefined) {
+      if (existing === undefined && !this.isEnrollmentOpen(normalized) && grant === undefined) {
         await this.#audit(
           'magic_code_suppressed', null, null, this.#defaultOrgId, this.#defaultTenantId,
           'failure', 'Solicitação genérica recusada: não existe convite nem cadastro inicial aberto.',
@@ -244,7 +256,7 @@ export class StudioIdentityService {
     const existing = this.#repository.users().find(user => user.email === normalized)
     const grant = this.#enrollmentResolver(normalized)
     const validGrant = grant !== undefined && grant.orgId === candidate.org_id && grant.tenantId === candidate.tenant_id
-    if (existing === undefined && !this.isEnrollmentOpen() && !validGrant) {
+    if (existing === undefined && !this.isEnrollmentOpen(normalized) && !validGrant) {
       await this.#audit('login_failed', null, null, candidate.org_id, candidate.tenant_id, 'failure', 'Cadastro inicial já encerrado.')
       throw new IdentityError('invalid', 'Código inválido ou expirado.')
     }

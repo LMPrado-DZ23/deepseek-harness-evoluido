@@ -64,7 +64,7 @@ async function bootStudio(edgePort) {
       config: {
         rpId: 'localhost',
         expectedOrigin: origin,
-        enrollment: 'open',
+        enrollment: { mode: 'bootstrap-email', email: 'edge-proof@example.com' },
         allowedHosts: [authority],
         allowedOrigins: [origin],
         edge: { required: true, secretRef: 'DZ23_EDGE_SECRET' },
@@ -215,6 +215,15 @@ try {
   })()
   assert.notEqual(foreignExit, 0, 'foreign container reached the loopback-only Harness port')
 
+  const competitorStart = await fetch(`${edgeOrigin}/api/studio/identity/magic/start`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', origin: edgeOrigin },
+    body: JSON.stringify({ email: 'competitor@example.com' }),
+  })
+  assert.equal(competitorStart.status, 202)
+  assert.equal(booted.ctx.studioIdentity.developmentEmailCapture?.messages.length, 0)
+  assert.equal(booted.ctx.studioIdentity.service.userRecords().length, 0)
+
   const start = await fetch(`${edgeOrigin}/api/studio/identity/magic/start`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', origin: edgeOrigin },
@@ -223,12 +232,17 @@ try {
   assert.equal(start.status, 202)
   const code = booted.ctx.studioIdentity.developmentEmailCapture?.messages.at(-1)?.code
   assert.ok(code, 'development-only proof code was not captured')
+  assert.equal(booted.ctx.studioIdentity.developmentEmailCapture?.messages.at(-1)?.to, 'edge-proof@example.com')
   const verified = await fetch(`${edgeOrigin}/api/studio/identity/magic/verify`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', origin: edgeOrigin },
     body: JSON.stringify({ email: 'edge-proof@example.com', code, device_label: 'P29-C proof' }),
   })
   assert.equal(verified.status, 200)
+  assert.deepEqual(
+    booted.ctx.studioIdentity.service.userRecords().map(user => ({ email: user.email, owner: user.bootstrap_owner })),
+    [{ email: 'edge-proof@example.com', owner: true }],
+  )
   const studioCookies = cookieHeader(verified)
 
   const exchange = await fetch(`${edgeOrigin}/api/studio/identity/harness/session`, {
@@ -300,6 +314,7 @@ try {
       websocket: { path: '/api/remote.mux', unauthenticated: 401, authenticated: 101 },
     },
     nativeSessionBridge: true,
+    bootstrapOwnerRace: 'configured-email-only',
     revocationNextRequest: 401,
     directInternalFromForeignContainer: 'connection-refused',
     directInternalFromHost: '401-edge-required',

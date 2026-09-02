@@ -22,6 +22,8 @@ de deploy em produção.
 Também passaram:
 
 - troca autenticada entre sessão DZ23 e cookie nativo do Harness;
+- concorrente de bootstrap recebe 202 genérico, mas nenhum código ou usuário;
+- somente o e-mail configurado recebe código e se torna `bootstrap_owner`;
 - sessão revogada produz 401 na requisição seguinte;
 - acesso direto no host produz 401 por `edge.required`;
 - contêiner externo recebe conexão recusada na porta loopback do Harness;
@@ -29,7 +31,12 @@ Também passaram:
 - headers de segurança presentes e HSTS ausente no modo HTTP de teste;
 - Caddy sem `--privileged`, com `CapDrop=ALL` e sem `NET_ADMIN`;
 - cliente React fixado sem script ou estilo inline incompatível com a CSP;
-- 147 testes dos pacotes Studio e 100% de statements, branches, functions e lines.
+- 149 testes dos pacotes Studio e 100% de statements, branches, functions e lines.
+
+Após a revisão independente, o enrollment de servidor passou a aceitar somente
+o e-mail obrigatório de bootstrap e o modo pessoal foi desativado também no
+serviço quando a borda é exigida. O gate de correção comprova dois e-mails
+concorrentes: somente o configurado recebe código e se torna proprietário.
 
 O endpoint `/api/edge-proof` e o canal `/edge-proof` existem somente durante a
 prova e são registrados no carrier do processo em execução; não entram no produto.

@@ -8,6 +8,7 @@ services:
       DZ23_PUBLIC_HOST: ${DZ23_PUBLIC_HOST:?Defina o dominio publico sem protocolo}
       DZ23_PUBLIC_ORIGIN: ${DZ23_PUBLIC_ORIGIN:?Defina a origem HTTPS publica}
       DZ23_RP_ID: ${DZ23_RP_ID:?Defina o dominio WebAuthn sem porta}
+      DZ23_BOOTSTRAP_OWNER_EMAIL: ${DZ23_BOOTSTRAP_OWNER_EMAIL:?Defina o email da primeira pessoa proprietaria}
       DZ23_SMTP_SECRET: ${DZ23_SMTP_SECRET:?Defina a configuracao SMTP por segredo}
     volumes:
       - studio-data:/var/lib/dz23-studio

@@ -26,6 +26,10 @@ celular físico. Consulte [ADR-012](./docs/adr/ADR-012-single-caddy-edge.md), a
 [matriz de capacidades](./docs/CAPABILITY_MATRIX.md) e o
 [guia de acesso móvel](./docs/guides/mobile-secure-access.md).
 
+Em servidor, `DZ23_BOOTSTRAP_OWNER_EMAIL` é obrigatório: somente esse endereço
+pode criar a primeira conta proprietária. A borda autenticada também desativa o
+modo pessoal no núcleo, ainda que o Harness permaneça em loopback.
+
 Consulte [REPORT.md](./REPORT.md) para comandos, resultados, erros e limitações.
 
 Decisões relacionadas:
@@ -58,7 +62,7 @@ pnpm build:edge
 pnpm prove:edge
 ```
 
-Resultado atual: 147 testes aprovados e 100% de statements, branches, functions
+Resultado atual: 149 testes aprovados e 100% de statements, branches, functions
 e lines nos pacotes do Studio. A prova de borda usa Docker e exige que as
 dependências do profile também tenham sido instaladas com
 `pnpm --dir dsh-home/profiles/studio install --frozen-lockfile`. Isso não inclui

@@ -21,7 +21,7 @@ import {
   type SessionRecord,
 } from './model.js'
 import { SimpleWebAuthnProvider, type PasskeyProvider } from './passkey.js'
-import { StudioIdentityService, type IdentityRepository } from './service.js'
+import { StudioIdentityService, type EnrollmentMode, type IdentityRepository } from './service.js'
 
 export * from './crypto.js'
 export * from './email.js'
@@ -41,7 +41,7 @@ export interface IdentityPluginConfig {
   readonly expectedOrigin?: string
   readonly defaultOrgId?: string
   readonly defaultTenantId?: string
-  readonly enrollment?: 'closed' | 'open'
+  readonly enrollment?: EnrollmentMode
   readonly allowedHosts?: readonly string[]
   readonly allowedOrigins?: readonly string[]
   readonly edge?: { readonly required?: boolean; readonly secretRef?: string }
@@ -104,6 +104,9 @@ export async function apply(ctx: Context, config: IdentityPluginConfig = {}): Pr
   if (edgeRequired && edgeSecretRef === undefined) {
     throw new Error('O modo servidor exige edge.secretRef para validar a borda Caddy.')
   }
+  if (edgeRequired && config.enrollment === 'open') {
+    throw new Error('A borda autenticada proíbe enrollment aberto; configure bootstrap-email ou closed.')
+  }
   const [usersDomain, credentialsDomain, sessionsDomain, auditDomain]: [
     Domain<typeof identityUsersDomainSpec>,
     Domain<typeof identityCredentialsDomainSpec>,
@@ -145,7 +148,8 @@ export async function apply(ctx: Context, config: IdentityPluginConfig = {}): Pr
     expectedOrigin: config.expectedOrigin ?? defaultOrigin,
     defaultOrgId: config.defaultOrgId ?? 'org_local',
     defaultTenantId: config.defaultTenantId ?? 'tenant_local',
-    enrollment: config.enrollment ?? (ctx.webServer.host === '127.0.0.1' ? 'open' : 'closed'),
+    enrollment: config.enrollment ?? (!edgeRequired && ctx.webServer.host === '127.0.0.1' ? 'open' : 'closed'),
+    personalModeAllowed: !edgeRequired,
     ...(config.now === undefined ? {} : { now: config.now }),
     ...(config.createId === undefined ? {} : { createId: config.createId }),
     ...(config.createSecret === undefined ? {} : { createSecret: config.createSecret }),

@@ -13,7 +13,9 @@
       - !!js process.env.DZ23_PUBLIC_HOST
     allowedOrigins:
       - !!js process.env.DZ23_PUBLIC_ORIGIN
-    enrollment: open
+    enrollment:
+      mode: bootstrap-email
+      email: !!js process.env.DZ23_BOOTSTRAP_OWNER_EMAIL
     edge:
       required: true
       secretRef: DZ23_EDGE_SECRET

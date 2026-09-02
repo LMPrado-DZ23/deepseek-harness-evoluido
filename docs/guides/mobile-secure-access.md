@@ -8,6 +8,10 @@
 4. Configure o domínio HTTPS fornecido pelo Tailscale no Studio.
 5. No celular, abra `/login`, informe seu e-mail e digite o código recebido.
 
+Antes da primeira inicialização, o responsável define
+`DZ23_BOOTSTRAP_OWNER_EMAIL`. Somente esse endereço pode criar a primeira conta
+proprietária; não deixe a variável vazia nem use uma caixa de e-mail compartilhada.
+
 O endereço do Harness nunca deve ser aberto ou encaminhado diretamente. Somente o
 endereço HTTPS do Caddy é compartilhado.
 
@@ -35,6 +39,9 @@ Para pessoas leigas, use Tailscale com HTTPS válido.
 - nunca envie `DZ23_EDGE_SECRET` por mensagem ou coloque-o no repositório;
 - não ignore aviso de certificado em uma rede pública;
 - não publique 443 antes de configurar domínio, ACME, firewall e backup;
+- `includeSubDomains` exige HTTPS válido em todos os subdomínios do domínio;
+- se houver Cloudflare, Funnel ou outro proxy à frente, configure apenas os CIDRs
+  confiáveis no Caddy antes de liberar acesso, para evitar um limite por IP comum;
 - se um acesso for perdido ou suspeito, revogue o dispositivo no Studio.
 
 O Compose é referência técnica. A imagem distribuível `DZ23_STUDIO_IMAGE` ainda

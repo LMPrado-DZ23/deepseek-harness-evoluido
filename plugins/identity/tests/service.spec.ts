@@ -18,6 +18,7 @@ import type {
 import {
   IdentityError,
   StudioIdentityService,
+  type EnrollmentMode,
   type IdentityRepository,
 } from '../src/service.ts'
 
@@ -75,7 +76,7 @@ class FakePasskeys implements PasskeyProvider {
   }
 }
 
-function makeHarness(enrollment: 'closed' | 'open' = 'open') {
+function makeHarness(enrollment: EnrollmentMode = 'open', personalModeAllowed = true) {
   const repository = new MemoryRepository()
   const email = new CaptureEmail()
   const passkeys = new FakePasskeys()
@@ -93,6 +94,7 @@ function makeHarness(enrollment: 'closed' | 'open' = 'open') {
     defaultOrgId: 'org-a',
     defaultTenantId: 'tenant-a',
     enrollment,
+    personalModeAllowed,
     now: () => new Date(now),
     createId: () => `id-${++id}`,
     createSecret: () => `secret-${++secret}`,
@@ -133,6 +135,33 @@ describe('StudioIdentityService', () => {
     expect(h.repository.users()[0]).toMatchObject({ bootstrap_owner: true, org_id: 'org-a', tenant_id: 'tenant-a' })
     expect(h.service.auditRecords().map(record => record.event_type)).toContain('personal_mode_disabled')
     expect(h.service.auditRecords().map(record => record.event_type)).toContain('enrollment_closed')
+  })
+
+  it('disables personal mode in the service when an authenticated edge is required', () => {
+    const h = makeHarness('open', false)
+    expect(h.service.isPersonalMode('127.0.0.1')).toBe(false)
+    expect(h.service.personalPrincipal('127.0.0.1')).toBeUndefined()
+    expect(h.service.identityStateForHarnessSession('unbound-agent', '127.0.0.1')).toEqual({
+      authenticated: false, strongIdentityVerified: false,
+    })
+  })
+
+  it('allows only the configured email to win bootstrap enrollment', async () => {
+    const h = makeHarness({ mode: 'bootstrap-email', email: ' Owner@Example.com ' }, false)
+    const [competitor, owner] = await Promise.all([
+      h.service.requestMagicCode('competitor@example.com'),
+      h.service.requestMagicCode('owner@example.com'),
+    ])
+    expect({ competitor, owner }).toEqual({ competitor: 'suppressed', owner: 'sent' })
+    expect(h.email.messages).toEqual([{ to: 'owner@example.com', code: '123456', expiresInMinutes: 10 }])
+    expect(h.repository.magicCodes()).toHaveLength(1)
+    expect(h.repository.users()).toHaveLength(0)
+
+    await h.service.verifyMagicCode('owner@example.com', '123456', device)
+    expect(h.repository.users()).toEqual([
+      expect.objectContaining({ email: 'owner@example.com', bootstrap_owner: true }),
+    ])
+    await expect(h.service.requestMagicCode('competitor@example.com')).resolves.toBe('suppressed')
   })
 
   it('does not create or email unknown users when enrollment is closed', async () => {

@@ -25,8 +25,9 @@ O Studio mantém uma camada fina de identidade própria:
   código; são definidos exclusivamente pela configuração do servidor;
 - o cadastro inicial (`enrollment: open`) aceita somente a primeira pessoa,
   cria-a como `owner` nos escopos padrão do servidor e se fecha automaticamente
-  com evento de auditoria; o padrão é aberto apenas em loopback e fechado em
-  bind servidor;
+  com evento de auditoria; desde P29-C, esse modo aberto existe apenas no modo
+  pessoal sem borda. Com borda autenticada, `open` é recusado e o servidor exige
+  `bootstrap-email` ou cadastro fechado;
 - depois do fechamento, e-mail desconhecido recebe a mesma resposta genérica,
   mas nenhum código é enviado e nenhuma pessoa é criada; convites entram em
   P29-B;
