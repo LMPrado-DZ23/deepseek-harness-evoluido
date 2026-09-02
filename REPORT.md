@@ -6,7 +6,7 @@
 > seus limites estão em `docs/pocs/P29-C-edge-proof.md` e
 > `docs/CAPABILITY_MATRIX.md`; nada foi implantado em produção.
 >
-> O P31-A está implementado em branch de revisão: PostgreSQL 16 real, 173/173
+> O P31-A está implementado em branch de revisão: PostgreSQL 16 real, 174/174
 > testes, 100% de cobertura, escritor único cross-process, migração lógica e
 > restauração após reinício do Harness. O relatório vinculante desta fatia é
 > `docs/pocs/P31-A-storage-postgres-proof.md`; não houve merge, push ou deploy.

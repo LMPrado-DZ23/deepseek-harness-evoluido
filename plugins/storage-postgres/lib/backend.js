@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Client, Pool } from 'pg';
 import { StorageError, UNIT_NAME_RE } from '@deepseek-ai/dsh-storage';
 import { StudioStorageError } from './errors.js';
-import { ensureSchema, leasesTable, unitsTable } from './schema.js';
+import { ensureSchema, leasesTable, storageUnitLockName, unitsTable } from './schema.js';
 import { PostgresKvUnit } from './unit.js';
 /** PostgreSQL KV backend with one dedicated, locked connection per open unit. */
 export class PostgresStorageBackend {
@@ -45,7 +45,7 @@ export class PostgresStorageBackend {
         const client = new Client({ ...this.connectionConfig(), application_name: `dz23-storage:${descriptor.name}` });
         try {
             await client.connect();
-            const lockName = this.lockName(descriptor.name);
+            const lockName = storageUnitLockName(this.config.schema, descriptor.name);
             const lock = await client.query('SELECT pg_try_advisory_lock(hashtext($1)) AS acquired', [lockName]);
             if (lock.rows[0]?.acquired !== true) {
                 throw new StudioStorageError(`kv unit '${descriptor.name}' already has an active writer`);
@@ -104,9 +104,6 @@ export class PostgresStorageBackend {
             ssl: this.config.ssl,
             ...(max === undefined ? {} : { max }),
         };
-    }
-    lockName(unit) {
-        return `dz23-storage-unit:${this.config.schema}:${unit}`;
     }
 }
 function assertDescriptor(descriptor) {

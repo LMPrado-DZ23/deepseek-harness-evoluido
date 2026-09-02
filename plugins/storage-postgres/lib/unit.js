@@ -1,6 +1,6 @@
 import { StorageError } from '@deepseek-ai/dsh-storage';
 import { StudioStorageError } from './errors.js';
-import { globalsTable, leasesTable, recordsTable } from './schema.js';
+import { globalsTable, leasesTable, recordsTable, storageUnitLockName } from './schema.js';
 /** One unit and its session-scoped writer lock share the same connection. */
 export class PostgresKvUnit {
     options;
@@ -133,7 +133,7 @@ export class PostgresKvUnit {
         return error instanceof Error ? error : new Error(String(error));
     }
     lockName() {
-        return `dz23-storage-unit:${this.options.schema}:${this.options.descriptor.name}`;
+        return storageUnitLockName(this.options.schema, this.options.descriptor.name);
     }
 }
 function encodeJson(value) {

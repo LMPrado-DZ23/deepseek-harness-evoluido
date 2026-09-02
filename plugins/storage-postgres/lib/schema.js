@@ -1,16 +1,29 @@
 import { StorageError, UNIT_NAME_RE } from '@deepseek-ai/dsh-storage';
 export const STORAGE_POSTGRES_LAYOUT_VERSION = 1;
 export const POSTGRES_SCHEMA_MAX_LENGTH = 40;
+export const POSTGRES_IDENTIFIER_MAX_LENGTH = 63;
 export function assertIdentifier(value, label) {
     if (!UNIT_NAME_RE.test(value))
         throw new Error(`${label} '${value}' violates ${UNIT_NAME_RE}`);
+    if (value.length > POSTGRES_IDENTIFIER_MAX_LENGTH) {
+        throw new Error(`${label} exceeds the ${String(POSTGRES_IDENTIFIER_MAX_LENGTH)} character limit`);
+    }
+}
+export function assertConfiguredSchemaName(value) {
+    assertIdentifier(value, 'postgres schema');
     if (value.length > POSTGRES_SCHEMA_MAX_LENGTH) {
-        throw new Error(`${label} exceeds the ${String(POSTGRES_SCHEMA_MAX_LENGTH)} character limit`);
+        throw new Error(`postgres schema exceeds the ${String(POSTGRES_SCHEMA_MAX_LENGTH)} character limit`);
     }
 }
 export function quoteIdentifier(value) {
     assertIdentifier(value, 'postgres identifier');
     return `"${value}"`;
+}
+export function storageUnitLockName(schema, unit) {
+    assertIdentifier(schema, 'postgres schema');
+    if (!UNIT_NAME_RE.test(unit))
+        throw new Error(`kv unit name '${unit}' violates ${UNIT_NAME_RE}`);
+    return `dz23-storage-unit:${schema}:${unit}`;
 }
 export function recordsTable(schema) {
     return `${quoteIdentifier(schema)}."records"`;

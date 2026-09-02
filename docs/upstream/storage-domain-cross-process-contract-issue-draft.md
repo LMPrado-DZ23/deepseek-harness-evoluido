@@ -30,3 +30,12 @@ Adicionar um contrato opcional, sem quebrar os backends atuais, para:
 
 Até existir esse contrato, a documentação deveria afirmar expressamente que o
 formulário é single-process e que trocar a mídia por PostgreSQL não muda isso.
+
+## Vocabulário de erros extensível
+
+O tipo fechado atual de `StorageError.code` também impede backends externos de
+declarar condições seguras como `unit-locked`. O Studio mantém `instanceof
+StorageError`, usa `code: 'unit-locked'` em runtime e expõe adicionalmente
+`studioCode: 'unit-locked'` no tipo. Uma solução upstream poderia exportar uma
+interface ampliável ou permitir um parâmetro genérico sem quebrar os três códigos
+oficiais existentes.

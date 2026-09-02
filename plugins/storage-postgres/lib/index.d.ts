@@ -4,7 +4,7 @@ import z from '@deepseek-ai/schemastery';
 export { PostgresStorageBackend } from './backend.js';
 export type { PostgresStorageBackendConfig } from './backend.js';
 export { StudioStorageError } from './errors.js';
-export { POSTGRES_SCHEMA_MAX_LENGTH, STORAGE_POSTGRES_LAYOUT_VERSION } from './schema.js';
+export { POSTGRES_IDENTIFIER_MAX_LENGTH, POSTGRES_SCHEMA_MAX_LENGTH, STORAGE_POSTGRES_LAYOUT_VERSION, assertConfiguredSchemaName, storageUnitLockName, } from './schema.js';
 export declare const name = "storage-postgres";
 export declare const inject: string[];
 export interface Config {

@@ -40,6 +40,9 @@ permissão de dono e nunca sobrescreve outro arquivo.
 
 ## Importar no PostgreSQL
 
+Pare o DZ23 STUDIO no servidor antes de importar. A ferramenta também verifica
+as travas e recusa continuar se encontrar uma unidade ainda aberta.
+
 Coloque a DSN numa variável de ambiente, por exemplo `DZ23_POSTGRES_DSN`. Nunca
 passe a senha na linha de comando. Faça primeiro o dry-run:
 
@@ -50,6 +53,8 @@ pnpm storage:import-postgres -- --input /caminho/export.json --dsn-ref DZ23_POST
 Para escrever, instale `pg_dump`, escolha um arquivo de backup novo e acrescente
 `--write --backup /caminho/antes.dump`. Se o alvo já tiver dados, pare e confira.
 A ferramenta recusa sobrescrever um backup que já existe.
+A primeira importação num servidor sem schema não cria dump, pois ainda não há
+dado anterior; o relatório mostra `not-needed-empty-target`.
 A substituição exige `--force --confirm REPLACE_DZ23_STORAGE` e só deve ocorrer
 com janela de manutenção e Harness parado.
 

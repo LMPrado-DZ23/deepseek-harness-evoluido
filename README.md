@@ -73,9 +73,9 @@ pnpm build:edge
 pnpm prove:edge
 ```
 
-Resultado atual com PostgreSQL 16 real: 173 testes aprovados e 100% de
+Resultado atual com PostgreSQL 16 real: 174 testes aprovados e 100% de
 statements, branches, functions e lines nos pacotes do Studio. Sem Docker, 156
-passam e os 17 casos PostgreSQL ficam explicitamente pulados. A prova de borda
+passam e os 18 casos PostgreSQL ficam explicitamente pulados. A prova de borda
 usa Docker e exige que as
 dependências do profile também tenham sido instaladas com
 `pnpm --dir dsh-home/profiles/studio install --frozen-lockfile`. Isso não inclui

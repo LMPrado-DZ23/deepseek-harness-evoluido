@@ -3,11 +3,12 @@ import { dirname, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { Client } from 'pg'
 import { PostgresStorageBackend } from '../plugins/storage-postgres/src/backend.ts'
-import { assertIdentifier, quoteIdentifier } from '../plugins/storage-postgres/src/schema.ts'
+import { assertConfiguredSchemaName, assertIdentifier, quoteIdentifier, storageUnitLockName } from '../plugins/storage-postgres/src/schema.ts'
 import { importStorage, type StorageExportBundle, validateBundle } from './storage-migration.ts'
 
 const args = parseArgs(process.argv.slice(2))
-assertIdentifier(args.schema, 'postgres schema')
+assertConfiguredSchemaName(args.schema)
+if (args.write && args.backup === undefined) throw new Error('--backup is mandatory with --write')
 const dsn = process.env[args.dsnRef]
 if (dsn === undefined || dsn === '') throw new Error(`Credential reference '${args.dsnRef}' is not configured.`)
 const bundle = JSON.parse(await readFile(resolve(args.input), 'utf8')) as StorageExportBundle
@@ -15,6 +16,12 @@ validateBundle(bundle)
 const client = new Client({ connectionString: dsn, ssl: args.ssl === 'off' ? false : { rejectUnauthorized: args.ssl === 'verify-full' } })
 await client.connect()
 try {
+  if (args.write) await acquireTargetLocks(client, args.schema, bundle)
+  const namespace = await client.query<{ present: boolean }>(
+    'SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = $1) AS present',
+    [args.schema],
+  )
+  const targetSchemaExists = namespace.rows[0]?.present === true
   const current = await client.query<{ count: string }>(
     `SELECT count(*) FROM pg_catalog.pg_tables WHERE schemaname = $1 AND tablename = 'units'`,
     [args.schema],
@@ -28,12 +35,18 @@ try {
     throw new Error('Target has Studio units. Use --force --confirm REPLACE_DZ23_STORAGE only after reviewing the backup.')
   }
   if (!args.write) {
-    process.stdout.write(`${JSON.stringify({ mode: 'dry-run', domains: bundle.domains.length, existingUnits }, null, 2)}\n`)
+    process.stdout.write(`${JSON.stringify({ mode: 'dry-run', domains: bundle.domains.length, existingUnits, targetSchemaExists }, null, 2)}\n`)
     process.exitCode = 0
   } else {
-    if (args.backup === undefined) throw new Error('--backup is mandatory with --write')
-    await mkdir(dirname(resolve(args.backup)), { recursive: true })
-    await pgDump(dsn, args.schema, resolve(args.backup))
+    const backupPath = resolve(args.backup!)
+    let backup: string | null = null
+    let backupStatus = 'not-needed-empty-target'
+    if (targetSchemaExists) {
+      await mkdir(dirname(backupPath), { recursive: true })
+      await pgDump(dsn, args.schema, backupPath)
+      backup = backupPath
+      backupStatus = 'created'
+    }
     const staging = `${args.schema}_staging_${Date.now().toString(36)}`
     assertIdentifier(staging, 'staging schema')
     const backend = new PostgresStorageBackend({ connectionString: dsn, schema: staging, ssl: args.ssl === 'off' ? false : { rejectUnauthorized: args.ssl === 'verify-full' }, poolMax: 4 })
@@ -48,10 +61,22 @@ try {
       await client.query('ROLLBACK')
       throw error
     }
-    process.stdout.write(`${JSON.stringify({ mode: 'write', domains: bundle.domains.length, backup: resolve(args.backup) }, null, 2)}\n`)
+    process.stdout.write(`${JSON.stringify({ mode: 'write', domains: bundle.domains.length, backup, backupStatus }, null, 2)}\n`)
   }
 } finally {
   await client.end()
+}
+
+async function acquireTargetLocks(client: Client, schema: string, bundle: StorageExportBundle): Promise<void> {
+  for (const domain of bundle.domains) {
+    const result = await client.query<{ acquired: boolean }>(
+      'SELECT pg_try_advisory_lock(hashtext($1)) AS acquired',
+      [storageUnitLockName(schema, domain.descriptor.name)],
+    )
+    if (result.rows[0]?.acquired !== true) {
+      throw new Error('O DZ23 STUDIO ainda está em execução no servidor. Pare-o antes de importar.')
+    }
+  }
 }
 
 async function pgDump(dsn: string, schema: string, output: string): Promise<void> {

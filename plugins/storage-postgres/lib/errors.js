@@ -1,6 +1,7 @@
 import { StorageError } from '@deepseek-ai/dsh-storage';
 /** Studio-only storage failures that extend the upstream runtime vocabulary. */
 export class StudioStorageError extends StorageError {
+    studioCode = 'unit-locked';
     constructor(message, options) {
         super('closed', message, options);
         // The upstream union cannot be widened out of tree. Keep inheritance for

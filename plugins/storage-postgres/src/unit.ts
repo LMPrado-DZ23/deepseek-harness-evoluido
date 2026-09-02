@@ -2,7 +2,7 @@ import type { Client } from 'pg'
 import { StorageError } from '@deepseek-ai/dsh-storage'
 import type { KvUnit, KvUnitDescriptor } from '@deepseek-ai/dsh-storage'
 import { StudioStorageError } from './errors.js'
-import { globalsTable, leasesTable, recordsTable } from './schema.js'
+import { globalsTable, leasesTable, recordsTable, storageUnitLockName } from './schema.js'
 
 interface StoredRecord {
   table: string
@@ -174,7 +174,7 @@ export class PostgresKvUnit implements KvUnit {
   }
 
   private lockName(): string {
-    return `dz23-storage-unit:${this.options.schema}:${this.options.descriptor.name}`
+    return storageUnitLockName(this.options.schema, this.options.descriptor.name)
   }
 }
 

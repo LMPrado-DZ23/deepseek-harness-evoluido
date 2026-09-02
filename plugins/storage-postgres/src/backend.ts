@@ -4,7 +4,7 @@ import type { ClientConfig, PoolConfig } from 'pg'
 import { StorageError, UNIT_NAME_RE } from '@deepseek-ai/dsh-storage'
 import type { KvFacet, KvUnit, KvUnitDescriptor, StorageBackend } from '@deepseek-ai/dsh-storage'
 import { StudioStorageError } from './errors.js'
-import { ensureSchema, leasesTable, unitsTable } from './schema.js'
+import { ensureSchema, leasesTable, storageUnitLockName, unitsTable } from './schema.js'
 import { PostgresKvUnit } from './unit.js'
 
 export interface PostgresStorageBackendConfig {
@@ -57,7 +57,7 @@ export class PostgresStorageBackend implements StorageBackend {
     const client = new Client({ ...this.connectionConfig(), application_name: `dz23-storage:${descriptor.name}` })
     try {
       await client.connect()
-      const lockName = this.lockName(descriptor.name)
+      const lockName = storageUnitLockName(this.config.schema, descriptor.name)
       const lock = await client.query<{ acquired: boolean }>(
         'SELECT pg_try_advisory_lock(hashtext($1)) AS acquired',
         [lockName],
@@ -127,10 +127,6 @@ export class PostgresStorageBackend implements StorageBackend {
       ssl: this.config.ssl,
       ...(max === undefined ? {} : { max }),
     }
-  }
-
-  private lockName(unit: string): string {
-    return `dz23-storage-unit:${this.config.schema}:${unit}`
   }
 }
 

@@ -1,16 +1,17 @@
-import { spawn } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { access, chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { promisify } from 'node:util'
 import { afterAll, describe, expect, it, vi } from 'vitest'
 import { Client } from 'pg'
 import { SqliteStorageBackend } from '@deepseek-ai/dsh-storage-sqlite'
 import { runKvBackendContract } from '/home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage/tests/contract.ts'
 import { PostgresStorageBackend } from '../src/backend.ts'
 import { StudioStorageError } from '../src/errors.ts'
-import { quoteIdentifier, STORAGE_POSTGRES_LAYOUT_VERSION } from '../src/schema.ts'
+import { quoteIdentifier, STORAGE_POSTGRES_LAYOUT_VERSION, storageUnitLockName } from '../src/schema.ts'
 import { StudioTenancyService, type TenancyRepository } from '../../tenancy/src/service.ts'
 import type { Invitation, Membership, Organization, Workspace } from '../../tenancy/src/model.ts'
 import { descriptorOf } from '@deepseek-ai/dsh-storage-domain'
@@ -19,8 +20,10 @@ import { STUDIO_DOMAIN_SPECS } from '../../../scripts/studio-domain-specs.ts'
 import { apply } from '../src/index.ts'
 
 const dsn = process.env.DZ23_POSTGRES_TEST_DSN
+const postgresContainer = process.env.DZ23_POSTGRES_TEST_CONTAINER
 const describePostgres = dsn === undefined ? describe.skip : describe
 const schemas: string[] = []
+const run = promisify(execFile)
 
 function schemaName(prefix = 'p31'): string {
   const schema = `${prefix}_${randomUUID().replaceAll('-', '').slice(0, 16)}`
@@ -49,6 +52,8 @@ describePostgres('postgres backend against PostgreSQL 16', () => {
 
   it('rejects invalid descriptors before touching PostgreSQL', async () => {
     const instance = backend(schemaName())
+    expect(() => quoteIdentifier('a'.repeat(64))).toThrow('63 character limit')
+    expect(() => storageUnitLockName('valid_schema', 'bad-unit')).toThrow('kv unit name')
     await expect(instance.kv!.open({ name: 'bad-name', version: 1, tables: [], hasGlobal: false })).rejects.toThrow('violates')
     await expect(instance.kv!.open({ name: 'valid', version: -1, tables: [], hasGlobal: false })).rejects.toThrow('non-negative')
     await expect(instance.kv!.open({ name: 'valid', version: 1, tables: ['bad-name'], hasGlobal: false })).rejects.toThrow('violates')
@@ -225,10 +230,80 @@ describePostgres('postgres backend against PostgreSQL 16', () => {
     }
   })
 
+  it('runs the write CLI for a new server, backs up replacements and refuses an active Studio', async () => {
+    if (postgresContainer === undefined) throw new Error('NOT_EXECUTED: real pg_dump/pg_restore container is not configured')
+    const temporary = await mkdtemp(join(tmpdir(), 'dz23-p31-import-cli-'))
+    try {
+      const source = new SqliteStorageBackend({ path: join(temporary, 'source.sqlite'), journalMode: 'delete' })
+      const helloDescriptor = descriptorOf(STUDIO_DOMAIN_SPECS[0]!)
+      const sourceUnit = await source.kv!.open(helloDescriptor)
+      await sourceUnit.putRecord('records', 'new', { tenant_id: 'workspace-new', created_at: '2026-09-02T00:00:00.000Z', note: 'new' })
+      await sourceUnit.close()
+      const bundle = await exportStorage(source, STUDIO_DOMAIN_SPECS, 'b'.repeat(64), '2026-09-02T00:00:00.000Z')
+      const input = join(temporary, 'input.json')
+      await writeFile(input, JSON.stringify(bundle), { flag: 'wx', mode: 0o600 })
+
+      const toolDirectory = join(temporary, 'bin')
+      await mkdir(toolDirectory)
+      const pgDump = join(toolDirectory, 'pg_dump')
+      await writeFile(pgDump, `#!/bin/sh\nexec docker exec -i "$DZ23_POSTGRES_TEST_CONTAINER" pg_dump --username "$PGUSER" --dbname "$PGDATABASE" "$@"\n`)
+      await chmod(pgDump, 0o700)
+      const cliEnvironment = {
+        ...process.env,
+        PATH: `${toolDirectory}${delimiter}${process.env.PATH ?? ''}`,
+        DZ23_IMPORT_TEST_DSN: dsn!,
+      }
+      const cli = resolve('scripts/import-postgres-storage.ts')
+      const invoke = (schema: string, backup: string, extra: string[] = []) => run(process.execPath, [
+        '--import', 'tsx', cli, '--input', input, '--dsn-ref', 'DZ23_IMPORT_TEST_DSN',
+        '--schema', schema, '--ssl', 'off', '--write', '--backup', backup, ...extra,
+      ], { env: cliEnvironment })
+
+      const freshSchema = schemaName('cli_fresh')
+      const unusedBackup = join(temporary, 'fresh.dump')
+      const fresh = JSON.parse((await invoke(freshSchema, unusedBackup)).stdout) as Record<string, unknown>
+      expect(fresh).toMatchObject({ mode: 'write', backup: null, backupStatus: 'not-needed-empty-target' })
+      await expect(access(unusedBackup)).rejects.toThrow()
+
+      const targetSchema = schemaName('cli_replace')
+      const oldBackend = backend(targetSchema)
+      const oldUnit = await oldBackend.kv!.open(helloDescriptor)
+      await oldUnit.putRecord('records', 'old', { tenant_id: 'workspace-old' })
+      await oldUnit.close()
+      await oldBackend.close()
+      const backup = join(temporary, 'before-replace.dump')
+      await expect(invoke(targetSchema, backup)).rejects.toThrow('Target has Studio units')
+
+      const activeBackend = backend(targetSchema)
+      await activeBackend.kv!.open(helloDescriptor)
+      await expect(invoke(targetSchema, backup, ['--force', '--confirm', 'REPLACE_DZ23_STORAGE']))
+        .rejects.toThrow('ainda está em execução no servidor')
+      await activeBackend.close()
+
+      const replaced = JSON.parse((await invoke(targetSchema, backup, ['--force', '--confirm', 'REPLACE_DZ23_STORAGE'])).stdout) as Record<string, unknown>
+      expect(replaced).toMatchObject({ mode: 'write', backup, backupStatus: 'created' })
+      await access(backup)
+      expect((await stat(backup)).mode & 0o777).toBe(0o600)
+      const listed = await runWithInput(
+        'docker',
+        ['exec', '-i', postgresContainer, 'pg_restore', '--list'],
+        await readFile(backup),
+      )
+      expect(listed).toContain(targetSchema)
+
+      const restored = backend(targetSchema)
+      const restoredUnit = await restored.kv!.open(helloDescriptor)
+      expect(await restoredUnit.loadAll()).toEqual(bundle.domains[0]!.snapshot)
+      await restored.close()
+    } finally {
+      await rm(temporary, { recursive: true, force: true })
+    }
+  }, 30_000)
+
   it('exposes the Studio lock error as an upstream StorageError subclass', () => {
     const error = new StudioStorageError('locked')
     expect(error).toBeInstanceOf(Error)
-    expect(error).toMatchObject({ name: 'StudioStorageError', code: 'unit-locked' })
+    expect(error).toMatchObject({ name: 'StudioStorageError', code: 'unit-locked', studioCode: 'unit-locked' })
   })
 
   it('registers and disposes the postgres backend through the credential seam', async () => {
@@ -317,4 +392,19 @@ function readOnlyRepository(workspaces: Workspace[], memberships: Membership[]):
     invitations: () => [] as Invitation[],
     putInvitation: readonlyError,
   }
+}
+
+function runWithInput(command: string, args: string[], input: Buffer): Promise<string> {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'] })
+    let stdout = ''
+    let stderr = ''
+    child.stdout.on('data', chunk => { stdout += String(chunk) })
+    child.stderr.on('data', chunk => { stderr += String(chunk) })
+    child.once('error', reject)
+    child.once('exit', code => code === 0
+      ? resolvePromise(stdout)
+      : reject(new Error(`${command} exited with code ${String(code)}: ${stderr}`)))
+    child.stdin.end(input)
+  })
 }

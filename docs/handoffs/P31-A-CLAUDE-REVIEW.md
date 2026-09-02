@@ -47,9 +47,9 @@ Executada em WSL2/ext4 numa cópia descartável da árvore final:
 - `pnpm typecheck`: PASS;
 - `pnpm build`: PASS;
 - `pnpm gate:domain-scopes`: PASS;
-- `pnpm test`: 156 PASS, 17 PostgreSQL SKIPPED por DSN ausente;
+- `pnpm test`: 156 PASS, 18 PostgreSQL SKIPPED por DSN ausente;
 - `pnpm test:coverage`: 156 PASS e 100% nos plugins não dependentes de PG;
-- `pnpm test:postgres:coverage`: 173/173 PASS, 100% statements, branches,
+- `pnpm test:postgres:coverage`: 174/174 PASS, 100% statements, branches,
   functions e lines, inclusive `storage-postgres`;
 - `pnpm test:postgres:runtime`: GO, nove domínios em PostgreSQL e persistência
   depois de reinício;
@@ -61,6 +61,25 @@ Executada em WSL2/ext4 numa cópia descartável da árvore final:
 Casos PostgreSQL incluem o contrato KV upstream importado diretamente, dois
 processos Node reais, `SIGKILL`, `pg_terminate_backend`, incompatibilidade de
 versão, dois tenants na mesma base, SQLite real → PostgreSQL e alvo ocupado.
+
+## Correções após o primeiro parecer do Claude
+
+- Servidor novo sem o schema alvo não chama `pg_dump`; a CLI informa
+  `backupStatus: not-needed-empty-target` e prossegue com staging/cutover.
+- Quando o schema existe, `pg_dump` real cria arquivo exclusivo `0600`, e o teste
+  confirma o arquivo com `pg_restore --list` antes de aceitar a prova.
+- Antes de backup ou cutover, a CLI tenta as mesmas advisory locks de todos os
+  domínios do bundle. Uma unidade aberta aborta em linguagem comum; as travas
+  ficam na conexão da CLI até o commit e impedem novas aberturas concorrentes.
+- `StudioStorageError` agora expõe também `studioCode: 'unit-locked'` de forma
+  tipada, sem fingir que o enum fechado do upstream já conhece o código.
+- O `.git/index.lock` vazio deixado pela sessão de revisão foi removido somente
+  depois de confirmar ausência de processo Git; nenhuma outra entrada de `.git`
+  foi alterada manualmente.
+
+O arquivo recebido com o primeiro parecer termina literalmente em “Valores
+JSONB não aceitam `”. Essa segunda observação BAIXA veio truncada e precisa ser
+reenviada caso o Claude queira que ela seja avaliada nesta fatia.
 
 ## Pontos de revisão prioritários
 

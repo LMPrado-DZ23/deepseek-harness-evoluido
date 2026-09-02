@@ -2,10 +2,10 @@ import { credentialRef } from '@deepseek-ai/dsh-credentials';
 import { storageBackendServiceKey } from '@deepseek-ai/dsh-storage';
 import z from '@deepseek-ai/schemastery';
 import { PostgresStorageBackend } from './backend.js';
-import { assertIdentifier } from './schema.js';
+import { assertConfiguredSchemaName } from './schema.js';
 export { PostgresStorageBackend } from './backend.js';
 export { StudioStorageError } from './errors.js';
-export { POSTGRES_SCHEMA_MAX_LENGTH, STORAGE_POSTGRES_LAYOUT_VERSION } from './schema.js';
+export { POSTGRES_IDENTIFIER_MAX_LENGTH, POSTGRES_SCHEMA_MAX_LENGTH, STORAGE_POSTGRES_LAYOUT_VERSION, assertConfiguredSchemaName, storageUnitLockName, } from './schema.js';
 export const name = 'storage-postgres';
 export const inject = ['storage', 'credentials'];
 export const Config = z.object({
@@ -16,7 +16,7 @@ export const Config = z.object({
 });
 export async function apply(ctx, config) {
     const schema = config.schema ?? 'dz23_storage';
-    assertIdentifier(schema, 'postgres schema');
+    assertConfiguredSchemaName(schema);
     const resolved = await ctx.credentials.resolve(credentialRef(config.dsnRef));
     if (resolved === undefined) {
         throw new Error(`storage-postgres: credential reference '${config.dsnRef}' is not configured`);

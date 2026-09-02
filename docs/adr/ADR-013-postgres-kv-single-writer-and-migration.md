@@ -75,6 +75,13 @@ e só então troca o schema numa transação. Alvo ocupado falha; substituição
 simultaneamente `--force --confirm REPLACE_DZ23_STORAGE`. Não existe merge/upsert
 silencioso.
 
+Antes do backup e do cutover, a CLI tenta adquirir na própria conexão as mesmas
+advisory locks de cada unidade do bundle. Qualquer trava ocupada aborta a
+importação com instrução para parar o Studio; as travas já adquiridas permanecem
+até o fim da conexão. Se o schema ainda não existe, `pg_dump` é dispensado e o
+relatório marca `not-needed-empty-target`. Se existe, o dump é obrigatório,
+exclusivo, modo `0600` e nunca sobrescreve arquivo anterior.
+
 O perfil atual do Studio herda `storage-json`, não SQLite. Assim, a ferramenta
 SQLite serve instalações que realmente usaram esse backend; ela não é apresentada
 como migração do estado atual nem inclui sessões JSONL.

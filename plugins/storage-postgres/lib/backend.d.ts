@@ -24,6 +24,5 @@ export declare class PostgresStorageBackend implements StorageBackend {
     close(): Promise<void>;
     private doClose;
     private connectionConfig;
-    private lockName;
 }
 //# sourceMappingURL=backend.d.ts.map

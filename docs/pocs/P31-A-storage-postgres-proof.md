@@ -14,8 +14,8 @@ Estado: **BETA / implementação em revisão, sem merge**
 
 ## Evidência executada
 
-`pnpm test:postgres:coverage` passou **173/173 testes** em 14 arquivos, incluindo
-os gates anteriores e 17 casos PostgreSQL. A cobertura final foi **100%** em
+`pnpm test:postgres:coverage` passou **174/174 testes** em 14 arquivos, incluindo
+os gates anteriores e 18 casos PostgreSQL. A cobertura final foi **100%** em
 statements, branches, functions e lines para todos os plugins. Entre os casos reais:
 
 - os cinco testes importados diretamente de `runKvBackendContract`;
@@ -30,6 +30,9 @@ statements, branches, functions e lines para todos os plugins. Entre os casos re
 - SQLite real com os nove domínios e registros de identidade/tenancy → bundle
   lógico com SHA-256 → PostgreSQL vazio → releitura registro a registro idêntica;
 - importação sobre unidade ocupada recusada.
+- CLI `--write` real em servidor novo sem schema, substituição confirmada com
+  `pg_dump`, arquivo novo `0600`, validação por `pg_restore --list` e recusa
+  enquanto uma unidade do Studio permanece aberta.
 
 Também passaram `typecheck`, build de todos os plugins, gate de domínios e a
 suíte sem Docker. Sem Docker, os testes PostgreSQL são marcados como não
@@ -56,8 +59,9 @@ multi-instância ativa, transações de negócio ou RLS. O processo concorrente 
 recusado; não é promovido a standby quente. A causa é o contrato atual do
 `storage-domain`, documentada na ADR-013 e no rascunho upstream.
 
-O caminho operacional completo de importação com `pg_dump` e restore de um
-dataset real permanece `NOT_EXECUTED`. O E2E desta fase cobriu SQLite real,
-bundle com checksums, staging PostgreSQL, releitura e recusa de alvo ocupado.
+O caminho de importação com `pg_dump`, staging, cutover e inspeção do arquivo por
+`pg_restore --list` foi executado com dataset de teste. Restaurar esse dump numa
+base separada como exercício de recuperação de desastre permanece
+`NOT_EXECUTED`.
 
 Nada foi enviado, publicado ou implantado.

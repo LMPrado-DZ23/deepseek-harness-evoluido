@@ -10,11 +10,14 @@ const runtime = process.argv.includes('--runtime')
 try {
   await run('docker', [...compose, 'up', '-d', '--wait'], composeEnv)
   const endpoint = (await capture('docker', [...compose, 'port', 'postgres-test', '5432'], composeEnv)).trim()
+  const container = (await capture('docker', [...compose, 'ps', '-q', 'postgres-test'], composeEnv)).trim()
   const port = endpoint.slice(endpoint.lastIndexOf(':') + 1)
   if (!/^\d+$/.test(port)) throw new Error('PostgreSQL test port was not published')
+  if (container === '') throw new Error('PostgreSQL test container was not found')
   const testEnv = {
     ...process.env,
     DZ23_POSTGRES_TEST_DSN: `postgresql://dz23_test:${password}@127.0.0.1:${port}/dz23_test`,
+    DZ23_POSTGRES_TEST_CONTAINER: container,
   }
   if (runtime) testEnv.DZ23_POSTGRES_DSN = testEnv.DZ23_POSTGRES_TEST_DSN
   const vitest = runtime
