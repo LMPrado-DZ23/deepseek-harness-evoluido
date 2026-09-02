@@ -22,7 +22,7 @@ function table() {
 }
 
 const owner: IdentityUser = {
-  user_id: 'owner', email: 'owner@example.com', display_name: 'Owner', role: 'owner',
+  user_id: 'owner', email: 'owner@example.com', display_name: 'Owner', bootstrap_owner: true,
   org_id: 'org-a', tenant_id: 'workspace-a', created_at: '2026-09-02T12:00:00.000Z',
 }
 
@@ -46,7 +46,7 @@ function context(users: readonly IdentityUser[] = [owner]) {
   const provided: { tenancy?: StudioTenancyRuntime } = {}
   const sendInvitation = vi.fn(() => Promise.resolve())
   const principalForHarnessSession = vi.fn((id: string) => id === 'agent-1'
-    ? { userId: owner.user_id, orgId: owner.org_id, tenantId: owner.tenant_id, sessionId: 'session-1', role: 'owner' as const }
+    ? { userId: owner.user_id, orgId: owner.org_id, tenantId: owner.tenant_id, sessionId: 'session-1' }
     : undefined)
   const ctx = {
     storageDomain: { open: vi.fn((_spec: { readonly name: string }) => Promise.resolve(domains[opened++]!)) },

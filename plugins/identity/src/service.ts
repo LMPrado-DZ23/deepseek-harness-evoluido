@@ -34,7 +34,7 @@ export type MagicCodeRequestResult = 'sent' | 'suppressed'
 export interface EnrollmentGrant {
   readonly orgId: string
   readonly tenantId: string
-  readonly role: IdentityUser['role']
+  readonly role: InvitationMessage['role']
 }
 
 export type IdentityUserProvisioningSource = 'bootstrap' | 'invitation'
@@ -248,18 +248,18 @@ export class StudioIdentityService {
       await this.#audit('login_failed', null, null, candidate.org_id, candidate.tenant_id, 'failure', 'Cadastro inicial já encerrado.')
       throw new IdentityError('invalid', 'Código inválido ou expirado.')
     }
+    const source: IdentityUserProvisioningSource = validGrant ? 'invitation' : 'bootstrap'
     const user: IdentityUser = existing ?? {
       user_id: this.#createId(),
       email: normalized,
       display_name: normalized.split('@')[0]!,
-      role: grant?.role ?? 'owner',
+      bootstrap_owner: source === 'bootstrap',
       org_id: candidate.org_id,
       tenant_id: candidate.tenant_id,
       created_at: now.toISOString(),
     }
     if (existing === undefined) {
       await this.#repository.putUser(user)
-      const source: IdentityUserProvisioningSource = validGrant ? 'invitation' : 'bootstrap'
       await this.#userProvisioner(user, source)
       if (source === 'bootstrap') {
         await this.#audit('personal_mode_disabled', user.user_id, null, user.org_id, user.tenant_id, 'success', 'Primeiro acesso cadastrado.')
@@ -476,14 +476,14 @@ export class StudioIdentityService {
     return this.#user(session.user_id)
   }
 
-  principalForHarnessSession(harnessSessionId: string): IdentityPrincipal & { readonly role: IdentityUser['role'] } | undefined {
+  principalForHarnessSession(harnessSessionId: string): IdentityPrincipal | undefined {
     const now = this.#now()
     const session = this.#repository.sessions().find(candidate => candidate.harness_session_ids.includes(harnessSessionId))
     if (session === undefined) return undefined
     try {
       this.#assertSessionUsable(session, now)
       const user = this.#user(session.user_id)
-      return { userId: user.user_id, orgId: session.org_id, tenantId: session.tenant_id, sessionId: session.session_id, role: user.role }
+      return { userId: user.user_id, orgId: session.org_id, tenantId: session.tenant_id, sessionId: session.session_id }
     } catch {
       return undefined
     }

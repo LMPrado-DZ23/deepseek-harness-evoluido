@@ -131,6 +131,7 @@ let identitySessionId
 let invitedIdentityToken
 let invitedIdentitySessionId
 let invitedUserId
+let pendingOwnerUserId
 let firstIdentityAudits
 
 try {
@@ -199,6 +200,23 @@ try {
   assert.equal(first.ctx.studioTenancy.service.authorizationFor(
     invitedUser.user_id, invitedIssued.session.org_id, invitedIssued.session.tenant_id,
   )?.role, 'builder')
+  const pendingOwnerInvitation = await first.ctx.studioTenancy.service.invite(
+    ownerActor, ownerActor.tenantId, 'runtime-pending-owner@example.com', 'owner',
+  )
+  assert.equal(await first.ctx.studioIdentity.service.requestMagicCode('runtime-pending-owner@example.com'), 'sent')
+  const pendingOwnerCode = first.ctx.studioIdentity.developmentEmailCapture?.messages.at(-1)
+  assert.ok(pendingOwnerCode, 'pending owner identity did not receive its development-only access code')
+  const pendingOwnerIssued = await first.ctx.studioIdentity.service.verifyMagicCode(
+    pendingOwnerCode.to,
+    pendingOwnerCode.code,
+    { label: 'WSL2 pending owner proof', userAgent: 'runtime-proof', ipTruncated: '127.0.0.0/24' },
+  )
+  const pendingOwnerUser = first.ctx.studioIdentity.service.userForSession(pendingOwnerIssued.session)
+  pendingOwnerUserId = pendingOwnerUser.user_id
+  await first.ctx.studioTenancy.service.ensureBootstrap(pendingOwnerUser)
+  assert.equal(first.ctx.studioTenancy.service.authorizationFor(
+    pendingOwnerUser.user_id, pendingOwnerInvitation.invitation.org_id, pendingOwnerInvitation.invitation.workspace_id,
+  ), undefined)
   assert.equal(first.ctx.studioTenancy.service.authorizationFor(
     invitedUser.user_id, 'org-attacker', invitedIssued.session.tenant_id,
   ), undefined)
@@ -258,6 +276,9 @@ try {
   assert.equal(second.ctx.studioTenancy.service.authorizationFor(
     invitedUserId, restoredInvitedSession.org_id, restoredInvitedSession.tenant_id,
   )?.role, 'builder')
+  assert.equal(second.ctx.studioTenancy.service.authorizationFor(
+    pendingOwnerUserId, restoredInvitedSession.org_id, restoredInvitedSession.tenant_id,
+  ), undefined)
   assert.deepEqual(second.ctx.studioIdentity.service.auditRecords(), firstIdentityAudits)
   assert.deepEqual(second.ctx.studioHello.record(), firstRecord)
   assert.deepEqual(second.ctx.studioPolicy.auditRecords()
@@ -327,6 +348,7 @@ try {
       logicalDomains: ['studio.orgs', 'studio.workspaces', 'studio.memberships'],
       ownerBootstrap: true,
       invitationAccepted: true,
+      ownerInvitationRequiresTokenAcceptanceAfterRestart: true,
       invitationTokenPersistedInPlaintext: false,
       invitedRole: 'builder',
       crossOrganizationAuthorization: 'denied',

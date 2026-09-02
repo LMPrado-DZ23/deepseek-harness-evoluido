@@ -23,7 +23,7 @@ export type StudioPermission = z.infer<typeof studioPermissionSchema>
 const ROLE_PERMISSIONS: Readonly<Record<StudioRole, ReadonlySet<StudioPermission>>> = {
   owner: new Set(studioPermissionSchema.options),
   admin: new Set([
-    'identity.self', 'workspace.read', 'workspace.create', 'workspace.manage',
+    'identity.self', 'workspace.read',
     'members.read', 'members.manage', 'integrations.manage', 'project.read',
     'project.write', 'project.publish_staging', 'audit.read', 'invitation.accept',
   ]),

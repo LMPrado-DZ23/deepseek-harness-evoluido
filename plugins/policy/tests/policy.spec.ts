@@ -192,6 +192,7 @@ describe('DZ23 STUDIO policy engine', () => {
     })).toMatchObject({ kind: 'allow' })
     expect(roleAllows('owner', 'project.delete')).toBe(true)
     expect(roleAllows('admin', 'project.delete')).toBe(false)
+    expect(roleAllows('admin', 'workspace.create')).toBe(false)
     expect(roleAllows('builder', 'project.publish_staging')).toBe(true)
     expect(roleAllows('viewer', 'project.write')).toBe(false)
     expect(roleCanAssign('owner', 'owner')).toBe(true)

@@ -69,7 +69,7 @@ export class StudioTenancyService {
   }
 
   async ensureBootstrap(user: IdentityUser): Promise<void> {
-    if (user.role !== 'owner') return
+    if (user.bootstrap_owner !== true) return
     const now = this.#now().toISOString()
     if (!this.#repository.organizations().some(org => org.org_id === user.org_id)) {
       await this.#repository.putOrganization({
@@ -77,16 +77,6 @@ export class StudioTenancyService {
         name: 'Meu DZ23 STUDIO',
         owner_user_id: user.user_id,
         created_at: now,
-      })
-    }
-    if (!this.#repository.workspaces().some(workspace => workspace.workspace_id === user.tenant_id)) {
-      await this.#repository.putWorkspace({
-        workspace_id: user.tenant_id,
-        org_id: user.org_id,
-        name: 'Meu espaço de trabalho',
-        created_by: user.user_id,
-        created_at: now,
-        archived_at: null,
       })
     }
     if (!this.#membership(user.user_id, user.tenant_id)) {
@@ -99,6 +89,16 @@ export class StudioTenancyService {
         role: 'owner',
         created_at: now,
         updated_at: now,
+      })
+    }
+    if (!this.#repository.workspaces().some(workspace => workspace.workspace_id === user.tenant_id)) {
+      await this.#repository.putWorkspace({
+        workspace_id: user.tenant_id,
+        org_id: user.org_id,
+        name: 'Meu espaço de trabalho',
+        created_by: user.user_id,
+        created_at: now,
+        archived_at: null,
       })
     }
   }
@@ -142,7 +142,7 @@ export class StudioTenancyService {
   }
 
   async createWorkspace(actor: TenancyActor, name: string): Promise<Workspace> {
-    const current = this.#authorize(actor, actor.tenantId, 'workspace.create')
+    this.#authorize(actor, actor.tenantId, 'workspace.create')
     const normalizedName = name.trim()
     if (normalizedName === '') throw new TenancyError('invalid', 'Digite um nome para o espaço de trabalho.')
     const now = this.#now().toISOString()
@@ -154,17 +154,17 @@ export class StudioTenancyService {
       created_at: now,
       archived_at: null,
     }
-    await this.#repository.putWorkspace(workspace)
     await this.#repository.putMembership({
       membership_id: membershipId(actor.userId, workspace.workspace_id),
       org_id: actor.orgId,
       workspace_id: workspace.workspace_id,
       user_id: actor.userId,
       email: actor.email,
-      role: current.role,
+      role: 'owner',
       created_at: now,
       updated_at: now,
     })
+    await this.#repository.putWorkspace(workspace)
     await this.#identity.recordAdministrationEvent('workspace_created', actor.userId, actor.orgId, workspace.workspace_id, 'Espaço de trabalho criado.')
     return workspace
   }
@@ -177,6 +177,10 @@ export class StudioTenancyService {
     const actorMembership = this.#authorize(actor, workspaceId, 'members.manage')
     if (!roleCanAssign(actorMembership.role, role)) throw new TenancyError('forbidden', 'Seu papel não pode atribuir esse nível de acesso.')
     const normalized = normalizeEmail(email)
+    const existingUser = this.#identity.userRecords().find(user => user.email === normalized)
+    if (existingUser !== undefined && existingUser.org_id !== actor.orgId) {
+      throw new TenancyError('forbidden', 'Este e-mail já pertence a outra organização.')
+    }
     if (this.#repository.memberships().some(member => member.workspace_id === workspaceId && member.email === normalized)) {
       throw new TenancyError('invalid', 'Esta pessoa já participa do espaço de trabalho.')
     }
@@ -210,14 +214,27 @@ export class StudioTenancyService {
 
   async acceptInvitation(user: IdentityUser, token: string): Promise<Membership> {
     const tokenHash = secretHash(token)
-    return this.#mutex.run(`invitation:${tokenHash}`, () => this.#acceptInvitationLocked(user, tokenHash))
+    return this.#mutex.run(`invitation:${tokenHash}`, async () => {
+      const invitation = this.#invitationForUser(user, tokenHash)
+      return this.#mutex.run(
+        `invite:${invitation.workspace_id}:${invitation.email}`,
+        () => this.#mutex.run(
+          `membership:${membershipId(user.user_id, invitation.workspace_id)}`,
+          () => this.#acceptInvitationLocked(user, tokenHash),
+        ),
+      )
+    })
   }
 
   async #acceptInvitationLocked(user: IdentityUser, tokenHash: string): Promise<Membership> {
-    const invitation = this.#repository.invitations().find(candidate => candidate.token_hash === tokenHash)
-    if (invitation === undefined || invitation.email !== user.email) throw new TenancyError('not-found', 'Convite inválido ou não encontrado.')
+    const invitation = this.#invitationForUser(user, tokenHash)
     if (invitation.revoked_at !== null || invitation.accepted_at !== null) throw new TenancyError('replay', 'Este convite não está mais disponível.')
     if (Date.parse(invitation.expires_at) <= this.#now().getTime()) throw new TenancyError('expired', 'Este convite expirou.')
+    if (user.org_id !== invitation.org_id) throw new TenancyError('forbidden', 'Este convite pertence a outra organização.')
+    this.#workspace(invitation.org_id, invitation.workspace_id)
+    if (this.#membership(user.user_id, invitation.workspace_id) !== undefined) {
+      throw new TenancyError('replay', 'Esta pessoa já participa do espaço de trabalho.')
+    }
     const now = this.#now().toISOString()
     const membership: Membership = {
       membership_id: membershipId(user.user_id, invitation.workspace_id),
@@ -233,6 +250,14 @@ export class StudioTenancyService {
     await this.#repository.putInvitation({ ...invitation, accepted_at: now })
     await this.#identity.recordAdministrationEvent('invitation_accepted', user.user_id, invitation.org_id, invitation.workspace_id, 'Convite aceito.')
     return membership
+  }
+
+  #invitationForUser(user: IdentityUser, tokenHash: string): Invitation {
+    const invitation = this.#repository.invitations().find(candidate => candidate.token_hash === tokenHash)
+    if (invitation === undefined || invitation.email !== user.email) {
+      throw new TenancyError('not-found', 'Convite inválido ou não encontrado.')
+    }
+    return invitation
   }
 
   async changeRole(actor: TenancyActor, membershipIdValue: string, role: StudioRole): Promise<Membership> {

@@ -130,7 +130,7 @@ describe('StudioIdentityService', () => {
       authenticated: false, strongIdentityVerified: false,
     })
     expect(h.email.messages).toEqual([{ to: 'owner@example.com', code: '123456', expiresInMinutes: 10 }])
-    expect(h.repository.users()[0]).toMatchObject({ role: 'owner', org_id: 'org-a', tenant_id: 'tenant-a' })
+    expect(h.repository.users()[0]).toMatchObject({ bootstrap_owner: true, org_id: 'org-a', tenant_id: 'tenant-a' })
     expect(h.service.auditRecords().map(record => record.event_type)).toContain('personal_mode_disabled')
     expect(h.service.auditRecords().map(record => record.event_type)).toContain('enrollment_closed')
   })
@@ -373,10 +373,10 @@ describe('StudioIdentityService', () => {
     await h.service.requestMagicCode('invited@example.com')
     const issued = await h.service.verifyMagicCode('invited@example.com', '123456', device)
     const user = h.service.userForSession(issued.session)
-    expect(user).toMatchObject({ org_id: 'org-invite', tenant_id: 'workspace-invite', role: 'builder' })
+    expect(user).toMatchObject({ org_id: 'org-invite', tenant_id: 'workspace-invite', bootstrap_owner: false })
     expect(provisioned).toEqual([{ user, source: 'invitation' }])
     await h.service.bindHarnessSession(issued.session, 'agent-invited')
-    expect(h.service.principalForHarnessSession('agent-invited')).toMatchObject({ role: 'builder', orgId: 'org-invite' })
+    expect(h.service.principalForHarnessSession('agent-invited')).toMatchObject({ orgId: 'org-invite' })
     expect(h.service.principalForHarnessSession('missing')).toBeUndefined()
     h.setNow('2027-01-01T00:00:00.000Z')
     expect(h.service.principalForHarnessSession('agent-invited')).toBeUndefined()
@@ -387,4 +387,5 @@ describe('StudioIdentityService', () => {
     unsetProvisioner()
     unsetEnrollment()
   })
+
 })

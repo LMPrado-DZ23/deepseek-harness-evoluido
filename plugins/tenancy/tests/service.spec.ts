@@ -8,10 +8,18 @@ class MemoryRepository implements TenancyRepository {
   readonly workspaceMap = new Map<string, Workspace>()
   readonly membershipMap = new Map<string, Membership>()
   readonly invitationMap = new Map<string, Invitation>()
+  failNextWorkspaceWrite = false
   organizations() { return [...this.orgMap.values()] }
   putOrganization(value: Organization) { this.orgMap.set(value.org_id, value); return Promise.resolve() }
   workspaces() { return [...this.workspaceMap.values()] }
-  putWorkspace(value: Workspace) { this.workspaceMap.set(value.workspace_id, value); return Promise.resolve() }
+  putWorkspace(value: Workspace) {
+    if (this.failNextWorkspaceWrite) {
+      this.failNextWorkspaceWrite = false
+      return Promise.reject(new Error('simulated workspace write failure'))
+    }
+    this.workspaceMap.set(value.workspace_id, value)
+    return Promise.resolve()
+  }
   memberships() { return [...this.membershipMap.values()] }
   putMembership(value: Membership) { this.membershipMap.set(value.membership_id, value); return Promise.resolve() }
   invitations() { return [...this.invitationMap.values()] }
@@ -19,7 +27,7 @@ class MemoryRepository implements TenancyRepository {
 }
 
 const owner: IdentityUser = {
-  user_id: 'owner', email: 'owner@example.com', display_name: 'Owner', role: 'owner',
+  user_id: 'owner', email: 'owner@example.com', display_name: 'Owner', bootstrap_owner: true,
   org_id: 'org-a', tenant_id: 'workspace-a', created_at: '2026-09-02T12:00:00.000Z',
 }
 const actor: TenancyActor = { userId: 'owner', email: owner.email, orgId: 'org-a', tenantId: 'workspace-a' }
@@ -30,6 +38,7 @@ function harness() {
   const identity = {
     recordAdministrationEvent: vi.fn(() => Promise.resolve()),
     userForSession: vi.fn(() => owner),
+    userRecords: vi.fn(() => [owner]),
   } as unknown as StudioIdentityService
   let now = new Date('2026-09-02T12:00:00.000Z')
   let id = 0
@@ -53,7 +62,7 @@ describe('StudioTenancyService', () => {
     const h = harness()
     await boot(h)
     await boot(h)
-    await h.service.ensureBootstrap({ ...owner, user_id: 'viewer', role: 'viewer' })
+    await h.service.ensureBootstrap({ ...owner, user_id: 'viewer', bootstrap_owner: false })
     expect(h.repository.organizations()).toEqual([expect.objectContaining({ org_id: 'org-a', owner_user_id: 'owner' })])
     expect(h.repository.workspaces()).toEqual([expect.objectContaining({ workspace_id: 'workspace-a', org_id: 'org-a' })])
     expect(h.repository.memberships()).toEqual([expect.objectContaining({ user_id: 'owner', role: 'owner' })])
@@ -99,7 +108,7 @@ describe('StudioTenancyService', () => {
     })
     expect(h.service.enrollmentGrantFor('new@example.com')).toMatchObject({ role: 'admin' })
     h.repository.invitationMap.delete('newer-active')
-    const invitedUser = { ...owner, user_id: 'new-user', email: 'new@example.com', role: 'viewer' as const }
+    const invitedUser = { ...owner, user_id: 'new-user', email: 'new@example.com', bootstrap_owner: false }
     await expect(h.service.acceptInvitation({ ...invitedUser, email: 'wrong@example.com' }, second.token)).rejects.toMatchObject({ code: 'not-found' })
     const accepted = await h.service.acceptInvitation(invitedUser, second.token)
     expect(accepted).toMatchObject({ user_id: 'new-user', workspace_id: 'workspace-a', role: 'viewer' })
@@ -118,7 +127,7 @@ describe('StudioTenancyService', () => {
       .rejects.toMatchObject({ code: 'expired' })
     h.setNow('2026-09-02T12:00:00.000Z')
     const current = await h.service.invite(actor, 'workspace-a', 'race@example.com', 'builder')
-    const raceUser = { ...owner, user_id: 'race', email: 'race@example.com', role: 'builder' as const }
+    const raceUser = { ...owner, user_id: 'race', email: 'race@example.com', bootstrap_owner: false }
     const results = await Promise.allSettled([
       h.service.acceptInvitation(raceUser, current.token),
       h.service.acceptInvitation(raceUser, current.token),
@@ -185,5 +194,106 @@ describe('StudioTenancyService', () => {
     })
     await expect(h.service.changeRole(actor, 'target-viewer', 'admin'))
       .rejects.toMatchObject({ code: 'forbidden' })
+  })
+
+  it('does not turn an owner invitation into ownership before token acceptance', async () => {
+    const h = harness()
+    await boot(h)
+    await h.service.invite(actor, 'workspace-a', 'pending-owner@example.com', 'owner')
+    await h.service.ensureBootstrap({
+      ...owner, user_id: 'pending-owner', email: 'pending-owner@example.com', bootstrap_owner: false,
+    })
+    expect(h.service.authorizationFor('pending-owner', 'org-a', 'workspace-a')).toBeUndefined()
+  })
+
+  it('fails closed when a legacy identity has no explicit bootstrap provenance', async () => {
+    const h = harness()
+    const { bootstrap_owner: _bootstrapOwner, ...legacyUser } = owner
+    await h.service.ensureBootstrap(legacyUser)
+    expect(h.repository.organizations()).toEqual([])
+    expect(h.repository.workspaces()).toEqual([])
+    expect(h.repository.memberships()).toEqual([])
+  })
+
+  it('rejects multi-organization acceptance while sessions have a single active organization', async () => {
+    const h = harness()
+    await boot(h)
+    vi.mocked(h.identity.userRecords).mockReturnValueOnce([
+      owner,
+      { ...owner, user_id: 'registered-elsewhere', email: 'registered@example.com', org_id: 'org-b', bootstrap_owner: false },
+    ])
+    await expect(h.service.invite(actor, 'workspace-a', 'registered@example.com', 'viewer'))
+      .rejects.toMatchObject({ code: 'forbidden' })
+    const invitation = await h.service.invite(actor, 'workspace-a', 'other-org@example.com', 'viewer')
+    await expect(h.service.acceptInvitation({
+      ...owner, user_id: 'other-org', email: 'other-org@example.com', org_id: 'org-b', bootstrap_owner: false,
+    }, invitation.token)).rejects.toMatchObject({ code: 'forbidden' })
+  })
+
+  it('does not let an admin create an ownerless workspace', async () => {
+    const h = harness()
+    await boot(h)
+    const membership = h.repository.membershipMap.get('membership:workspace-a:owner')!
+    h.repository.membershipMap.set(membership.membership_id, { ...membership, role: 'admin' })
+    await expect(h.service.createWorkspace(actor, 'Sem proprietário')).rejects.toMatchObject({ code: 'forbidden' })
+  })
+
+  it('never exposes an active workspace before its owner membership is durable', async () => {
+    const h = harness()
+    await boot(h)
+    h.repository.failNextWorkspaceWrite = true
+    await expect(h.service.createWorkspace(actor, 'Falha segura')).rejects.toThrow(/simulated workspace write failure/)
+    expect(h.repository.workspaceMap.has('id-1')).toBe(false)
+    expect(h.repository.membershipMap.get('membership:id-1:owner')).toMatchObject({ role: 'owner' })
+  })
+
+  it('never exposes the bootstrap workspace before its owner membership is durable', async () => {
+    const h = harness()
+    h.repository.failNextWorkspaceWrite = true
+    await expect(boot(h)).rejects.toThrow(/simulated workspace write failure/)
+    expect(h.repository.workspaceMap.has('workspace-a')).toBe(false)
+    expect(h.repository.membershipMap.get('membership:workspace-a:owner')).toMatchObject({ role: 'owner' })
+    await expect(boot(h)).resolves.toBeUndefined()
+    expect(h.repository.workspaceMap.has('workspace-a')).toBe(true)
+  })
+
+  it('rejects invitation acceptance for archived workspaces and existing memberships', async () => {
+    const archived = harness()
+    await boot(archived)
+    const archivedInvite = await archived.service.invite(actor, 'workspace-a', 'archived-user@example.com', 'viewer')
+    const workspace = archived.repository.workspaceMap.get('workspace-a')!
+    archived.repository.workspaceMap.set('workspace-a', { ...workspace, archived_at: '2026-09-02T12:01:00.000Z' })
+    await expect(archived.service.acceptInvitation({
+      ...owner, user_id: 'archived-user', email: 'archived-user@example.com', bootstrap_owner: false,
+    }, archivedInvite.token)).rejects.toMatchObject({ code: 'not-found' })
+
+    const existing = harness()
+    await boot(existing)
+    const existingInvite = await existing.service.invite(actor, 'workspace-a', 'existing@example.com', 'viewer')
+    existing.repository.membershipMap.set('membership:workspace-a:existing', {
+      membership_id: 'membership:workspace-a:existing', org_id: 'org-a', workspace_id: 'workspace-a',
+      user_id: 'existing', email: 'existing@example.com', role: 'builder',
+      created_at: '2026-09-02T12:00:00.000Z', updated_at: '2026-09-02T12:00:00.000Z',
+    })
+    await expect(existing.service.acceptInvitation({
+      ...owner, user_id: 'existing', email: 'existing@example.com', bootstrap_owner: false,
+    }, existingInvite.token)).rejects.toMatchObject({ code: 'replay' })
+    expect(existing.service.authorizationFor('existing', 'org-a', 'workspace-a')?.role).toBe('builder')
+  })
+
+  it('serializes different active tokens that target the same membership', async () => {
+    const h = harness()
+    await boot(h)
+    const first = await h.service.invite(actor, 'workspace-a', 'same@example.com', 'builder')
+    const second = await h.service.invite(actor, 'workspace-a', 'same@example.com', 'viewer')
+    h.repository.invitationMap.set(first.invitation.invitation_id, { ...first.invitation, revoked_at: null })
+    const user = { ...owner, user_id: 'same', email: 'same@example.com', bootstrap_owner: false }
+    const results = await Promise.allSettled([
+      h.service.acceptInvitation(user, first.token),
+      h.service.acceptInvitation(user, second.token),
+    ])
+    expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1)
+    expect(results.filter(result => result.status === 'rejected')).toHaveLength(1)
+    expect(h.repository.memberships().filter(member => member.user_id === 'same')).toHaveLength(1)
   })
 })

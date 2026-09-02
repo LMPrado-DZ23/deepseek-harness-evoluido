@@ -1,15 +1,19 @@
 import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 import { z } from 'zod'
 
-export const identityUserSchema = z.object({
+const storedIdentityUserSchema = z.object({
   user_id: z.string().min(1),
   email: z.email(),
   display_name: z.string().min(1),
-  role: z.enum(['owner', 'admin', 'builder', 'viewer']).default('owner'),
+  bootstrap_owner: z.boolean().optional(),
+  role: z.enum(['owner', 'admin', 'builder', 'viewer']).optional(),
   org_id: z.string().min(1),
   tenant_id: z.string().min(1),
   created_at: z.iso.datetime(),
 }).strict()
+
+/** Accepts the pre-P29-B `role` field only for storage migration and strips it. */
+export const identityUserSchema = storedIdentityUserSchema.transform(({ role: _legacyRole, ...user }) => user)
 
 export const passkeyCredentialSchema = z.object({
   credential_id: z.string().min(1),

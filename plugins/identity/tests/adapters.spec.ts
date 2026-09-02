@@ -73,8 +73,11 @@ describe('identity primitives and schemas', () => {
     expect(() => identityUserSchema.parse({})).toThrow()
     expect(identityUserSchema.parse({
       user_id: 'legacy-user', email: 'legacy@example.com', display_name: 'Legacy',
+      role: 'owner', org_id: 'org', tenant_id: 'tenant', created_at: '2026-09-02T00:00:00.000Z',
+    })).toEqual({
+      user_id: 'legacy-user', email: 'legacy@example.com', display_name: 'Legacy',
       org_id: 'org', tenant_id: 'tenant', created_at: '2026-09-02T00:00:00.000Z',
-    }).role).toBe('owner')
+    })
     expect(() => passkeyCredentialSchema.parse({})).toThrow()
     expect(() => sessionRecordSchema.parse({})).toThrow()
     expect(() => identityAuditRecordSchema.parse({})).toThrow()
