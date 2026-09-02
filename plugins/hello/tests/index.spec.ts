@@ -96,6 +96,14 @@ describe('@studio/hello', () => {
     const sandboxDone = await collect(adapter.stream(options([user('SANDBOX_PROBE'), toolResult('sandbox-ok')])))
     expect(sandboxDone.find(chunk => chunk.type === 'text-delta')).toMatchObject({ text: 'SANDBOX_OK sandbox-ok' })
 
+    const escape = await collect(adapter.stream(options([user('SANDBOX_ESCAPE_PROBE')])))
+    expect(escape.find(chunk => chunk.type === 'tool-call-delta')).toMatchObject({
+      name: 'bash',
+      argumentsDelta: expect.stringContaining('../studio-sandbox-outside.txt'),
+    })
+    const escapeDone = await collect(adapter.stream(options([user('SANDBOX_ESCAPE_PROBE'), toolResult('denied')])))
+    expect(escapeDone.find(chunk => chunk.type === 'text-delta')).toMatchObject({ text: 'SANDBOX_ESCAPE_RESULT denied' })
+
     const restart = await collect(adapter.stream(options([
       user('old'),
       { id: 'a' as never, role: 'assistant', source: { kind: 'model', provider: STUDIO_PROVIDER, model: STUDIO_MODEL }, content: [{ type: 'text', text: 'STUDIO_ECHO_OK old' }] },

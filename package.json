@@ -8,6 +8,7 @@
     "plugins/*"
   ],
   "scripts": {
+    "prove:runtime": "node scripts/prove-runtime.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage"
@@ -20,4 +21,3 @@
     "vitest": "4.1.8"
   }
 }
-

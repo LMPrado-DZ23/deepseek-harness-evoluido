@@ -1,0 +1,9 @@
+# PoC-only explicit sandbox runner. The host profile probes the same pinned
+# Bubblewrap binary; the absolute invocation also survives shell environment
+# sanitization when the confined subprocess is spawned.
+- id: sandbox
+  config:
+    runnerCommand:
+      - !!js process.env.STUDIO_BWRAP_PATH
+    runnerFailureSignatures:
+      - 'bwrap:'
