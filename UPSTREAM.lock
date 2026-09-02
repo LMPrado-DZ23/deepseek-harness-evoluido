@@ -1,0 +1,4 @@
+repository=https://github.com/deepseek-ai/deepseek-harness.git
+commit=6c705be1ce6774a000d061da41d1823b03a3d42c
+execution_checkout=/home/leandro/harness-studio-poc02/deepseek-harness
+

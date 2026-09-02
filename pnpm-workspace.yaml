@@ -1,0 +1,7 @@
+packages:
+  - plugins/*
+
+nodeLinker: hoisted
+autoInstallPeers: false
+allowBuilds:
+  esbuild: true

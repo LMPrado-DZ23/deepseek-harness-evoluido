@@ -1,0 +1,11 @@
+# Harness Studio PoC-01 profile layer. The profile manifest composes the exact
+# official web stack first; this file changes only the default model route and
+# inserts the out-of-tree Studio plugin.
+- id: agent-default-model
+  config:
+    provider: studio-fake
+    model: studio-deterministic
+
+- insert:
+    - id: studio-hello
+      name: '@studio/hello'

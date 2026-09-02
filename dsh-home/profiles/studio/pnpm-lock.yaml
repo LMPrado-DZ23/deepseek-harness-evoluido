@@ -1,0 +1,13 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: false
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      '@studio/hello':
+        specifier: link:../../../plugins/hello
+        version: link:../../../plugins/hello

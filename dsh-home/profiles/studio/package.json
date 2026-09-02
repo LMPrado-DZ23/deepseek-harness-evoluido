@@ -1,0 +1,16 @@
+{
+  "name": "dsh-profile-studio",
+  "private": true,
+  "dependencies": {
+    "@studio/hello": "link:../../../plugins/hello"
+  },
+  "dsh": {
+    "profile": {
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "@deepseek-ai/dsh-web-app"
+      ],
+      "patchReload": "startup"
+    }
+  }
+}
