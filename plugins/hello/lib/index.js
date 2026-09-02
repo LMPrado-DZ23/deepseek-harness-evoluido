@@ -81,6 +81,14 @@ export class StudioFakeAdapter extends LlmAdapter {
             const restored = options.messages.some(message => message.content.some(block => block.type === 'text' && block.text.includes('STUDIO_ECHO_OK')));
             chunks = textChunks(`RESTART_OK history_restored=${String(restored)}`);
         }
+        else if (prompt.includes('SANDBOX_ESCAPE_PROBE')) {
+            chunks = result === undefined
+                ? toolChunks('bash', {
+                    command: "printf 'escape-must-not-land' > ../studio-sandbox-outside.txt",
+                    description: 'Attempt a deterministic write immediately outside the Studio workspace; the sandbox must deny it.',
+                }, 'studio-sandbox-escape-call')
+                : textChunks(`SANDBOX_ESCAPE_RESULT ${result}`);
+        }
         else if (prompt.includes('SANDBOX_PROBE')) {
             chunks = result === undefined
                 ? toolChunks('bash', {
