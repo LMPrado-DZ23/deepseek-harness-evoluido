@@ -25,6 +25,10 @@ Regras fechadas:
 - `danger-full-access` é sempre T3;
 - conflito usa o tier mais restritivo;
 - rebaixamento só ocorre quando manifest e policy concordam explicitamente;
+- uma classificação inferida T3 nunca pode ser rebaixada;
+- T1 só permanece automático quando o sandbox é `read-only` ou
+  `workspace-write` e a ação não declara efeito externo; caso contrário, sobe
+  para T2;
 - plugin não assinado é bloqueado no canal estável;
 - regra estruturalmente inválida é bloqueada;
 - chamada sem sessão auditável é bloqueada;

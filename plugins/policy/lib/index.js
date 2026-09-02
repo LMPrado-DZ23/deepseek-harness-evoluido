@@ -76,6 +76,7 @@ function resolveTier(rule) {
     const hasInvalid = present.some(value => value !== undefined && validTier(value) === undefined);
     let effective;
     if (inferred !== undefined
+        && inferred !== 'T3'
         && manifest !== undefined
         && policy !== undefined
         && rule.allowManifestDowngrade
@@ -94,6 +95,10 @@ function resolveTier(rule) {
     }
     if (rule.sandboxMode === 'danger-full-access')
         effective = 'T3';
+    if (effective === 'T1'
+        && (rule.source.external || (rule.sandboxMode !== 'read-only' && rule.sandboxMode !== 'workspace-write'))) {
+        effective = 'T2';
+    }
     return effective;
 }
 function decisionForTier(toolName, effectiveTier, strongIdentityVerified) {

@@ -27,7 +27,7 @@
 
 ```text
 pnpm typecheck       PASS
-pnpm test:coverage   68 PASS
+pnpm test:coverage   73 PASS
 pnpm build           PASS
 release license gate PASS (403 arquivos, zero achado)
 ```
@@ -41,7 +41,8 @@ functions  100%
 lines      100%
 ```
 
-A suíte contém 50 casos tabulares de policy e 18 provas adicionais. Uma delas
+A suíte contém 55 casos tabulares de policy e 14 provas adicionais no pacote
+de segurança, além dos quatro testes preservados do PoC-01. Uma das provas
 inicializa `Context`, `SystemPrompt`, `SessionStore` e `ToolRuntime` reais do
 Harness, executa uma ferramenta T0 e verifica a auditoria persistida; em
 seguida, comprova que uma ferramenta sem classificação não é despachada sem

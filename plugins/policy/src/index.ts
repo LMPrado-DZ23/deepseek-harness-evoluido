@@ -121,6 +121,7 @@ function resolveTier(rule: ParsedToolPolicyRule): PolicyTier {
 
   let effective: PolicyTier
   if (inferred !== undefined
+    && inferred !== 'T3'
     && manifest !== undefined
     && policy !== undefined
     && rule.allowManifestDowngrade
@@ -137,6 +138,10 @@ function resolveTier(rule: ParsedToolPolicyRule): PolicyTier {
     effective = mostRestrictive([effective, 'T1'])
   }
   if (rule.sandboxMode === 'danger-full-access') effective = 'T3'
+  if (effective === 'T1'
+    && (rule.source.external || (rule.sandboxMode !== 'read-only' && rule.sandboxMode !== 'workspace-write'))) {
+    effective = 'T2'
+  }
   return effective
 }
 

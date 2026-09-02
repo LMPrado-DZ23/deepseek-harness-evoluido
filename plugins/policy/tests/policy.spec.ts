@@ -24,6 +24,7 @@ const RANK: Readonly<Record<PolicyTier, number>> = { T0: 0, T1: 1, T2: 2, T3: 3 
 function rule(overrides: Partial<ToolPolicyRule> = {}): ToolPolicyRule {
   return {
     source: { kind: 'studio' },
+    sandboxMode: 'workspace-write',
     ...overrides,
   }
 }
@@ -61,7 +62,7 @@ const invalidTierCases: TableCase[] = (['inferredTier', 'manifestTier', 'policyT
 const mcpCases: TableCase[] = TIERS.map(tier => ({
   label: `MCP externo declarado ${tier}`,
   rule: rule({ source: { kind: 'mcp', external: true }, inferredTier: tier }),
-  expectedTier: tier === 'T0' ? 'T1' : tier,
+  expectedTier: tier === 'T3' ? 'T3' : 'T2',
 }))
 
 const dangerCases: TableCase[] = TIERS.map(tier => ({
@@ -83,6 +84,34 @@ const downgradeCases: TableCase[] = [
   },
 ]
 
+const sandboxAndT3Cases: TableCase[] = [
+  {
+    label: 'T1 com workspace-write continua automático',
+    rule: rule({ inferredTier: 'T1', sandboxMode: 'workspace-write' }),
+    expectedTier: 'T1',
+  },
+  {
+    label: 'T1 sem sandbox sobe para T2',
+    rule: { source: { kind: 'studio' }, inferredTier: 'T1' },
+    expectedTier: 'T2',
+  },
+  {
+    label: 'T1 com sandbox indisponível sobe para T2',
+    rule: rule({ inferredTier: 'T1', sandboxMode: 'unavailable' }),
+    expectedTier: 'T2',
+  },
+  {
+    label: 'T1 com efeito externo sobe para T2 mesmo em workspace-write',
+    rule: rule({ source: { kind: 'studio', external: true }, inferredTier: 'T1' }),
+    expectedTier: 'T2',
+  },
+  {
+    label: 'T3 nunca aceita rebaixamento bilateral para T0',
+    rule: rule({ inferredTier: 'T3', manifestTier: 'T0', policyTier: 'T0', allowManifestDowngrade: true }),
+    expectedTier: 'T3',
+  },
+]
+
 const TABLE_CASES = [
   ...conflictCases,
   ...singleDeclarationCases,
@@ -90,11 +119,12 @@ const TABLE_CASES = [
   ...mcpCases,
   ...dangerCases,
   ...downgradeCases,
+  ...sandboxAndT3Cases,
 ]
 
 describe('DZ23 STUDIO policy engine', () => {
   it('keeps the mandatory decision table at or above fifty cases', () => {
-    expect(TABLE_CASES).toHaveLength(50)
+    expect(TABLE_CASES.length).toBeGreaterThanOrEqual(50)
   })
 
   it.each(TABLE_CASES)('$label', ({ rule: current, expectedTier }) => {
