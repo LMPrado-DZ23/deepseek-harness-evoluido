@@ -1,0 +1,105 @@
+import type { EmailSender, InvitationMessage } from './email.js';
+import type { AuthenticationOptions, AuthenticationResponse, PasskeyProvider, RegistrationOptions, RegistrationResponse } from './passkey.js';
+import type { ChallengeRecord, IdentityAuditRecord, IdentityUser, MagicCodeRecord, PasskeyCredential, SessionRecord } from './model.js';
+export type EnrollmentMode = 'closed' | 'open' | {
+    readonly mode: 'bootstrap-email';
+    readonly email: string;
+};
+export type MagicCodeRequestResult = 'sent' | 'suppressed';
+export interface EnrollmentGrant {
+    readonly orgId: string;
+    readonly tenantId: string;
+    readonly role: InvitationMessage['role'];
+}
+export type IdentityUserProvisioningSource = 'bootstrap' | 'invitation';
+export interface IdentityRepository {
+    users(): readonly IdentityUser[];
+    putUser(record: IdentityUser): Promise<void>;
+    credentials(): readonly PasskeyCredential[];
+    putCredential(record: PasskeyCredential): Promise<void>;
+    challenges(): readonly ChallengeRecord[];
+    putChallenge(record: ChallengeRecord): Promise<void>;
+    magicCodes(): readonly MagicCodeRecord[];
+    putMagicCode(record: MagicCodeRecord): Promise<void>;
+    sessions(): readonly SessionRecord[];
+    putSession(record: SessionRecord): Promise<void>;
+    audits(): readonly IdentityAuditRecord[];
+    putAudit(record: IdentityAuditRecord): Promise<void>;
+}
+export interface DeviceInput {
+    readonly label: string;
+    readonly userAgent: string;
+    readonly ipTruncated: string;
+}
+export interface IssuedSession {
+    readonly token: string;
+    readonly csrfToken: string;
+    readonly session: SessionRecord;
+}
+export interface IdentityPrincipal {
+    readonly userId: string;
+    readonly orgId: string;
+    readonly tenantId: string;
+    readonly sessionId: string;
+}
+export interface IdentityExecutionState {
+    readonly authenticated: boolean;
+    readonly strongIdentityVerified: boolean;
+}
+export interface PasskeyCeremony<TOptions> {
+    readonly challengeId: string;
+    readonly options: TOptions;
+}
+export declare class IdentityError extends Error {
+    readonly code: 'invalid' | 'expired' | 'revoked' | 'locked' | 'not-found' | 'csrf' | 'replay' | 'counter';
+    constructor(code: 'invalid' | 'expired' | 'revoked' | 'locked' | 'not-found' | 'csrf' | 'replay' | 'counter', message: string);
+}
+export interface IdentityServiceOptions {
+    readonly repository: IdentityRepository;
+    readonly passkeys: PasskeyProvider;
+    readonly emailSender: EmailSender;
+    readonly rpName: string;
+    readonly rpId: string;
+    readonly expectedOrigin: string;
+    readonly defaultOrgId: string;
+    readonly defaultTenantId: string;
+    readonly enrollment: EnrollmentMode;
+    readonly personalModeAllowed?: boolean;
+    readonly now?: () => Date;
+    readonly createId?: () => string;
+    readonly createSecret?: () => string;
+    readonly createMagicCode?: () => string;
+}
+export declare class StudioIdentityService {
+    #private;
+    constructor(options: IdentityServiceOptions);
+    isPersonalMode(bindHost: '127.0.0.1' | '0.0.0.0'): boolean;
+    personalPrincipal(bindHost: '127.0.0.1' | '0.0.0.0'): IdentityPrincipal | undefined;
+    isEnrollmentOpen(email?: string): boolean;
+    setEnrollmentResolver(resolver: (email: string) => EnrollmentGrant | undefined): () => void;
+    setUserProvisioner(provisioner: (user: IdentityUser, source: IdentityUserProvisioningSource) => Promise<void>): () => void;
+    userRecords(): readonly IdentityUser[];
+    sendInvitation(message: InvitationMessage): Promise<void>;
+    requestMagicCode(email: string): Promise<MagicCodeRequestResult>;
+    verifyMagicCode(email: string, code: string, device: DeviceInput): Promise<IssuedSession>;
+    authenticate(token: string, touch?: boolean): Promise<SessionRecord>;
+    validateCsrf(session: SessionRecord, cookieToken: string | undefined, headerToken: string | undefined): void;
+    listDevices(userId: string): readonly Omit<SessionRecord, 'token_hash' | 'csrf_hash'>[];
+    revokeSession(actor: SessionRecord, sessionId: string, reason?: string): Promise<void>;
+    revokeAllSessions(actor: SessionRecord): Promise<void>;
+    bindHarnessSession(session: SessionRecord, harnessSessionId: string): Promise<void>;
+    strongIdentityForHarnessSession(harnessSessionId: string): boolean;
+    identityStateForHarnessSession(harnessSessionId: string, bindHost: '127.0.0.1' | '0.0.0.0'): IdentityExecutionState;
+    beginPasskeyRegistration(token: string): Promise<PasskeyCeremony<RegistrationOptions>>;
+    finishPasskeyRegistration(token: string, challengeId: string, response: RegistrationResponse, deviceLabel: string): Promise<void>;
+    beginPasskeyLogin(email: string): Promise<PasskeyCeremony<AuthenticationOptions>>;
+    finishPasskeyLogin(challengeId: string, response: AuthenticationResponse, device: DeviceInput): Promise<IssuedSession>;
+    beginStepUp(token: string): Promise<PasskeyCeremony<AuthenticationOptions>>;
+    finishStepUp(token: string, challengeId: string, response: AuthenticationResponse): Promise<void>;
+    auditRecords(): readonly IdentityAuditRecord[];
+    sessionRecords(): readonly SessionRecord[];
+    userForSession(session: SessionRecord): IdentityUser;
+    principalForHarnessSession(harnessSessionId: string): IdentityPrincipal | undefined;
+    recordAdministrationEvent(eventType: Extract<IdentityAuditRecord['event_type'], 'invitation_created' | 'invitation_accepted' | 'role_changed' | 'workspace_created'>, userId: string, orgId: string, tenantId: string, reason: string): Promise<void>;
+}
+//# sourceMappingURL=service.d.ts.map

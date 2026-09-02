@@ -14,6 +14,9 @@ importers:
       '@dz23-studio/policy':
         specifier: link:../../../plugins/policy
         version: link:../../../plugins/policy
+      '@dz23-studio/storage-postgres':
+        specifier: link:../../../plugins/storage-postgres
+        version: link:../../../plugins/storage-postgres
       '@dz23-studio/tenancy':
         specifier: link:../../../plugins/tenancy
         version: link:../../../plugins/tenancy

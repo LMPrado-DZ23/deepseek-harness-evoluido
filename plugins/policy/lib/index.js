@@ -1,6 +1,8 @@
 import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { roleAllows, studioPermissionSchema, studioRoleSchema, } from './rbac.js';
+export * from './rbac.js';
 export const name = 'dz23-studio-policy';
 export const inject = ['tools', 'storageDomain'];
 export const policyTierSchema = z.enum(['T0', 'T1', 'T2', 'T3']);
@@ -18,6 +20,8 @@ export const toolPolicyRuleSchema = z.object({
     allowManifestDowngrade: z.boolean().default(false),
     blocked: z.boolean().default(false),
     sandboxMode: z.string().optional(),
+    requiredPermission: studioPermissionSchema.optional(),
+    scope: z.enum(['none', 'org', 'workspace', 'project']).default('none'),
 }).strict();
 export const policyDecisionSchema = z.object({
     toolName: z.string().min(1),
@@ -130,8 +134,10 @@ function decisionForTier(toolName, effectiveTier, strongIdentityVerified) {
 }
 export class StudioPolicyEngine {
     #rules;
+    #requireAuthorizationDeclarations;
     constructor(options = {}) {
         this.#rules = options.rules ?? {};
+        this.#requireAuthorizationDeclarations = options.requireAuthorizationDeclarations ?? false;
     }
     evaluate(toolName, context = {}) {
         if (toolName.trim().length === 0) {
@@ -148,8 +154,10 @@ export class StudioPolicyEngine {
             return {
                 toolName,
                 effectiveTier: 'T2',
-                kind: 'ask',
-                reason: 'Ferramenta ainda não classificada: confirmação obrigatória.',
+                kind: this.#requireAuthorizationDeclarations ? 'deny' : 'ask',
+                reason: this.#requireAuthorizationDeclarations
+                    ? 'Ferramenta sem declaração de permissão foi bloqueada.'
+                    : 'Ferramenta ainda não classificada: confirmação obrigatória.',
                 ruleSource: 'safe-default',
             };
         }
@@ -165,6 +173,18 @@ export class StudioPolicyEngine {
         }
         const rule = parsed.data;
         const effectiveTier = resolveTier(rule);
+        if (this.#requireAuthorizationDeclarations && rule.requiredPermission === undefined) {
+            return { toolName, effectiveTier, kind: 'deny', reason: 'Ferramenta sem permissão declarada foi bloqueada.', ruleSource: 'invalid-rule' };
+        }
+        if (rule.requiredPermission !== undefined) {
+            const authorization = context.authorization;
+            if (authorization === undefined) {
+                return { toolName, effectiveTier, kind: 'deny', reason: 'Nenhum vínculo ativo autoriza esta ação.', ruleSource: 'catalog' };
+            }
+            if (!roleAllows(authorization.role, rule.requiredPermission)) {
+                return { toolName, effectiveTier, kind: 'deny', reason: 'Seu papel neste espaço não permite esta ação.', ruleSource: 'catalog' };
+            }
+        }
         if (rule.blocked) {
             return { toolName, effectiveTier, kind: 'deny', reason: 'Ação bloqueada pela política do DZ23 STUDIO.', ruleSource: 'catalog' };
         }
@@ -173,6 +193,16 @@ export class StudioPolicyEngine {
         }
         return decisionForTier(toolName, effectiveTier, context.strongIdentityVerified === true);
     }
+}
+function requestedScope(execution) {
+    const args = execution.arguments;
+    if (typeof args !== 'object' || args === null)
+        return {};
+    const values = args;
+    return {
+        ...(typeof values.org_id === 'string' ? { orgId: values.org_id } : {}),
+        ...(typeof values.tenant_id === 'string' ? { tenantId: values.tenant_id } : {}),
+    };
 }
 function toPreToolDecision(decision) {
     if (decision.kind === 'allow')
@@ -184,13 +214,33 @@ function toPreToolDecision(decision) {
 /** Mounts the policy at the authoritative host-side pre-execution seam. */
 export async function apply(ctx, config = {}) {
     const engine = new StudioPolicyEngine(config);
+    let identityResolver = (execution) => ({
+        authenticated: true,
+        strongIdentityVerified: config.strongIdentityVerified?.(execution) === true,
+    });
+    let authorizationResolver = (_execution) => undefined;
     const domain = await ctx.storageDomain.open(studioPolicyAuditDomainSpec);
     ctx.effect(() => () => domain.close(), 'dz23-studio-policy.domainClose');
     const decisions = domain.table('decisions');
     ctx.provide('studioPolicy', {
         auditRecords: () => [...decisions.entries()].map(([, record]) => record),
+        setIdentityResolver: (resolver) => {
+            const previous = identityResolver;
+            identityResolver = resolver;
+            return () => { identityResolver = previous; };
+        },
+        setAuthorizationResolver: (resolver) => {
+            const previous = authorizationResolver;
+            authorizationResolver = resolver;
+            return () => { authorizationResolver = previous; };
+        },
     });
     ctx.on('tools/pre-execute', async (execution, next) => {
+        const identity = execution.agent === undefined
+            ? { authenticated: false, strongIdentityVerified: false }
+            : identityResolver(execution);
+        const authorization = execution.agent === undefined ? undefined : authorizationResolver(execution);
+        const requested = requestedScope(execution);
         let decision = execution.agent === undefined
             ? {
                 toolName: execution.name,
@@ -199,9 +249,27 @@ export async function apply(ctx, config = {}) {
                 reason: 'Execução sem sessão auditável foi bloqueada.',
                 ruleSource: 'safe-default',
             }
-            : engine.evaluate(execution.name, {
-                strongIdentityVerified: config.strongIdentityVerified?.(execution) === true,
-            });
+            : !identity.authenticated
+                ? {
+                    toolName: execution.name,
+                    effectiveTier: 'T2',
+                    kind: 'deny',
+                    reason: 'Sessão de identidade ausente, expirada ou revogada.',
+                    ruleSource: 'safe-default',
+                }
+                : engine.evaluate(execution.name, {
+                    strongIdentityVerified: identity.strongIdentityVerified,
+                    ...(authorization === undefined ? {} : { authorization }),
+                });
+        if (decision.kind !== 'deny' && authorization !== undefined
+            && ((requested.orgId !== undefined && requested.orgId !== authorization.orgId)
+                || (requested.tenantId !== undefined && requested.tenantId !== authorization.tenantId))) {
+            decision = {
+                ...decision,
+                kind: 'deny',
+                reason: 'A ação tentou acessar outra organização ou espaço de trabalho.',
+            };
+        }
         if (decision.kind === 'allow') {
             const downstream = await next();
             if (downstream.kind !== 'allow') {
@@ -213,7 +281,7 @@ export async function apply(ctx, config = {}) {
             callId: String(execution.callId),
         });
         try {
-            const scope = config.resolveScope?.(execution) ?? { orgId: 'org_local', tenantId: 'tenant_local' };
+            const scope = authorization ?? config.resolveScope?.(execution) ?? { orgId: 'org_local', tenantId: 'tenant_local' };
             const auditId = config.createAuditId?.() ?? randomUUID();
             const record = policyAuditRecordSchema.parse({
                 audit_id: auditId,

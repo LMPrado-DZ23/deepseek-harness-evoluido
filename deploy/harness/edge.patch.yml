@@ -1,5 +1,28 @@
 # Overlay loaded only when Caddy is the entry point. Values remain references
 # or deployment facts; no secret value is stored in this file.
+- insert:
+    - id: dz23-studio-storage-postgres
+      name: '@dz23-studio/storage-postgres'
+      config:
+        dsnRef: DZ23_POSTGRES_DSN
+        schema: dz23_storage
+        ssl: off
+        poolMax: 4
+
+- id: storage-domain
+  config:
+    backend: json
+    routes:
+      studio_hello: postgres
+      studio_identity_users: postgres
+      studio_identity_credentials: postgres
+      studio_identity_sessions: postgres
+      studio_identity_audit: postgres
+      studio_orgs: postgres
+      studio_workspaces: postgres
+      studio_memberships: postgres
+      studio_policy_audit: postgres
+
 - id: connection
   config:
     trustedHosts:

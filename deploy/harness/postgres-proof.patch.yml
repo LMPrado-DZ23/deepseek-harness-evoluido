@@ -1,0 +1,24 @@
+# P31-A runtime proof: keep official Harness domains on JSON and route only
+# Studio-owned units to PostgreSQL.
+- insert:
+    - id: dz23-studio-storage-postgres
+      name: '@dz23-studio/storage-postgres'
+      config:
+        dsnRef: DZ23_POSTGRES_DSN
+        schema: dz23_storage_proof
+        ssl: off
+        poolMax: 4
+
+- id: storage-domain
+  config:
+    backend: json
+    routes:
+      studio_hello: postgres
+      studio_identity_users: postgres
+      studio_identity_credentials: postgres
+      studio_identity_sessions: postgres
+      studio_identity_audit: postgres
+      studio_orgs: postgres
+      studio_workspaces: postgres
+      studio_memberships: postgres
+      studio_policy_audit: postgres

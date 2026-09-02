@@ -5,9 +5,9 @@ upstream. O nome oficial e o logotipo foram decididos pelo proprietário em
 [ADR-003](./docs/adr/ADR-003-product-identity-dz23-studio.md).
 
 O checkout de execução continua fixado no commit
-`6c705be1ce6774a000d061da41d1823b03a3d42c`. O primeiro componente de produção
-em construção é o motor de permissões `@dz23-studio/policy`, aplicado no seam
-host-side `tools/pre-execute`; decisões de segurança não dependem da interface.
+`6c705be1ce6774a000d061da41d1823b03a3d42c`. O núcleo atual reúne policy,
+identidade, tenancy, borda Caddy e o backend PostgreSQL BETA pelos seams públicos
+do Harness; decisões de segurança não dependem da interface.
 
 O produto será **open source e sem cobrança, assinatura, créditos ou paywall**.
 A licença OSI exata ainda precisa ser escolhida antes da publicação; enquanto
@@ -30,6 +30,13 @@ Em servidor, `DZ23_BOOTSTRAP_OWNER_EMAIL` é obrigatório: somente esse endereç
 pode criar a primeira conta proprietária. A borda autenticada também desativa o
 modo pessoal no núcleo, ainda que o Harness permaneça em loopback.
 
+O P31-A acrescenta PostgreSQL 16 para os nove domínios próprios `studio_*`, sem
+mudar o backend padrão dos domínios oficiais do Harness. O banco não publica
+porta e um segundo escritor da mesma unidade falha fechado. Isso ainda não é
+alta disponibilidade, RLS ou multi-instância ativa; consulte a
+[ADR-013](./docs/adr/ADR-013-postgres-kv-single-writer-and-migration.md) e a
+[prova P31-A](./docs/pocs/P31-A-storage-postgres-proof.md).
+
 Consulte [REPORT.md](./REPORT.md) para comandos, resultados, erros e limitações.
 
 Decisões relacionadas:
@@ -45,6 +52,8 @@ Decisões relacionadas:
 - `plugins/policy`: motor TypeScript + Zod dos tiers T0–T3, com auditoria por sessão.
 - `plugins/identity`: passkeys, código temporário por e-mail, sessões opacas,
   dispositivos, CSRF e revogação ligados ao motor de permissões.
+- `plugins/storage-postgres`: persistência KV PostgreSQL, lock cross-process e
+  falha fechada após perda da conexão autoritativa.
 - `apps/studio-web/public/brand`: identidade visual oficial do DZ23 STUDIO.
 - `deploy/caddy`: borda única, login simples e configurações TLS separadas para
   servidor e uso local.
@@ -57,13 +66,17 @@ No WSL Ubuntu, a partir da raiz deste repositório:
 ```sh
 pnpm typecheck
 pnpm test:coverage
+pnpm test:postgres:coverage
+pnpm test:postgres:runtime
 pnpm build
 pnpm build:edge
 pnpm prove:edge
 ```
 
-Resultado atual: 149 testes aprovados e 100% de statements, branches, functions
-e lines nos pacotes do Studio. A prova de borda usa Docker e exige que as
+Resultado atual com PostgreSQL 16 real: 173 testes aprovados e 100% de
+statements, branches, functions e lines nos pacotes do Studio. Sem Docker, 156
+passam e os 17 casos PostgreSQL ficam explicitamente pulados. A prova de borda
+usa Docker e exige que as
 dependências do profile também tenham sido instaladas com
 `pnpm --dir dsh-home/profiles/studio install --frozen-lockfile`. Isso não inclui
 cerimônia de passkey com hardware, aparelho móvel físico ou deploy.

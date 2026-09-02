@@ -4,6 +4,7 @@
   "dependencies": {
     "@dz23-studio/identity": "link:../../../plugins/identity",
     "@dz23-studio/policy": "link:../../../plugins/policy",
+    "@dz23-studio/storage-postgres": "link:../../../plugins/storage-postgres",
     "@dz23-studio/tenancy": "link:../../../plugins/tenancy",
     "@studio/hello": "link:../../../plugins/hello"
   },

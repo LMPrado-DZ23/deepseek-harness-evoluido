@@ -1,6 +1,8 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { ToolExecution } from '@deepseek-ai/dsh-tools';
 import { z } from 'zod';
+import { type StudioRole } from './rbac.js';
+export * from './rbac.js';
 export declare const name = "dz23-studio-policy";
 export declare const inject: string[];
 export declare const policyTierSchema: z.ZodEnum<{
@@ -39,6 +41,27 @@ export declare const toolPolicyRuleSchema: z.ZodObject<{
     allowManifestDowngrade: z.ZodDefault<z.ZodBoolean>;
     blocked: z.ZodDefault<z.ZodBoolean>;
     sandboxMode: z.ZodOptional<z.ZodString>;
+    requiredPermission: z.ZodOptional<z.ZodEnum<{
+        "identity.self": "identity.self";
+        "workspace.read": "workspace.read";
+        "workspace.create": "workspace.create";
+        "workspace.manage": "workspace.manage";
+        "members.read": "members.read";
+        "members.manage": "members.manage";
+        "integrations.manage": "integrations.manage";
+        "project.read": "project.read";
+        "project.write": "project.write";
+        "project.publish_staging": "project.publish_staging";
+        "project.delete": "project.delete";
+        "audit.read": "audit.read";
+        "invitation.accept": "invitation.accept";
+    }>>;
+    scope: z.ZodDefault<z.ZodEnum<{
+        none: "none";
+        org: "org";
+        workspace: "workspace";
+        project: "project";
+    }>>;
 }, z.core.$strict>;
 export type ToolPolicyRule = z.input<typeof toolPolicyRuleSchema>;
 export declare const policyDecisionSchema: z.ZodObject<{
@@ -113,6 +136,18 @@ export declare const policyAuditRecordSchema: z.ZodObject<{
 export type PolicyAuditRecord = z.infer<typeof policyAuditRecordSchema>;
 export interface StudioPolicyRuntime {
     auditRecords(): readonly PolicyAuditRecord[];
+    setIdentityResolver(resolver: (execution: ToolExecution) => PolicyIdentityState): () => void;
+    setAuthorizationResolver(resolver: (execution: ToolExecution) => PolicyAuthorizationState | undefined): () => void;
+}
+export interface PolicyIdentityState {
+    readonly authenticated: boolean;
+    readonly strongIdentityVerified: boolean;
+}
+export interface PolicyAuthorizationState {
+    readonly userId: string;
+    readonly orgId: string;
+    readonly tenantId: string;
+    readonly role: StudioRole;
 }
 declare const policyAuditKeyBrand: unique symbol;
 export type PolicyAuditKey = string & {
@@ -149,9 +184,11 @@ declare module '@deepseek-ai/cordis' {
 }
 export interface PolicyEvaluationContext {
     readonly strongIdentityVerified?: boolean;
+    readonly authorization?: PolicyAuthorizationState;
 }
 export interface StudioPolicyOptions {
     readonly rules?: Readonly<Record<string, ToolPolicyRule>>;
+    readonly requireAuthorizationDeclarations?: boolean;
 }
 export declare class StudioPolicyEngine {
     #private;
@@ -169,5 +206,4 @@ export interface PolicyPluginConfig extends StudioPolicyOptions {
 }
 /** Mounts the policy at the authoritative host-side pre-execution seam. */
 export declare function apply(ctx: Context, config?: PolicyPluginConfig): Promise<void>;
-export {};
 //# sourceMappingURL=index.d.ts.map
