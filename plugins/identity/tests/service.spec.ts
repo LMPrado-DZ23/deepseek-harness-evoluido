@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { EmailSender, MagicCodeMessage } from '../src/email.ts'
+import type { EmailSender, InvitationMessage, MagicCodeMessage } from '../src/email.ts'
 import type {
   ChallengeRecord,
   IdentityAuditRecord,
@@ -44,7 +44,9 @@ class MemoryRepository implements IdentityRepository {
 
 class CaptureEmail implements EmailSender {
   readonly messages: MagicCodeMessage[] = []
+  readonly invitations: InvitationMessage[] = []
   sendMagicCode(message: MagicCodeMessage) { this.messages.push(message); return Promise.resolve() }
+  sendInvitation(message: InvitationMessage) { this.invitations.push(message); return Promise.resolve() }
 }
 
 class FakePasskeys implements PasskeyProvider {
@@ -351,5 +353,38 @@ describe('StudioIdentityService', () => {
     ])
     expect(challengeResults.filter(result => result.status === 'fulfilled')).toHaveLength(1)
     expect(challengeResults.filter(result => result.status === 'rejected')).toHaveLength(1)
+  })
+
+  it('provisions invited identities from server-owned grants and exposes only usable principals', async () => {
+    const h = makeHarness('closed')
+    const provisioned: Array<{ user: IdentityUser; source: string }> = []
+    const unsetEnrollment = h.service.setEnrollmentResolver(email => email === 'invited@example.com'
+      ? { orgId: 'org-invite', tenantId: 'workspace-invite', role: 'builder' }
+      : undefined)
+    const unsetProvisioner = h.service.setUserProvisioner((user, source) => {
+      provisioned.push({ user, source })
+      return Promise.resolve()
+    })
+    expect(h.service.userRecords()).toEqual([])
+    await h.service.sendInvitation({
+      to: 'invited@example.com', token: 'secret', workspaceName: 'Produto', role: 'builder', expiresInHours: 72,
+    })
+    expect(h.email.invitations).toHaveLength(1)
+    await h.service.requestMagicCode('invited@example.com')
+    const issued = await h.service.verifyMagicCode('invited@example.com', '123456', device)
+    const user = h.service.userForSession(issued.session)
+    expect(user).toMatchObject({ org_id: 'org-invite', tenant_id: 'workspace-invite', role: 'builder' })
+    expect(provisioned).toEqual([{ user, source: 'invitation' }])
+    await h.service.bindHarnessSession(issued.session, 'agent-invited')
+    expect(h.service.principalForHarnessSession('agent-invited')).toMatchObject({ role: 'builder', orgId: 'org-invite' })
+    expect(h.service.principalForHarnessSession('missing')).toBeUndefined()
+    h.setNow('2027-01-01T00:00:00.000Z')
+    expect(h.service.principalForHarnessSession('agent-invited')).toBeUndefined()
+    await h.service.recordAdministrationEvent(
+      'invitation_accepted', user.user_id, user.org_id, user.tenant_id, 'Convite aceito.',
+    )
+    expect(h.service.auditRecords()).toContainEqual(expect.objectContaining({ event_type: 'invitation_accepted' }))
+    unsetProvisioner()
+    unsetEnrollment()
   })
 })

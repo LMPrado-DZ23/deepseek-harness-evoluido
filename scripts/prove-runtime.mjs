@@ -1,14 +1,16 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
-import { mkdir, rm } from 'node:fs/promises'
+import { mkdir, rm, symlink } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const upstreamRoot = resolve(process.env.DSH_UPSTREAM_ROOT
   ?? '/home/leandro/harness-studio-poc02/deepseek-harness')
 const studioRoot = resolve(process.cwd())
-const dshHome = resolve(process.env.DSH_HOME ?? join(studioRoot, 'dsh-home'))
+const profileHome = join(studioRoot, 'dsh-home')
+const proofRunId = randomUUID()
+const dshHome = join(studioRoot, 'runtime', `proof-dsh-home-${proofRunId}`)
 const workspaceRoot = resolve(process.env.STUDIO_PROOF_WORKSPACE ?? join(studioRoot, 'runtime', 'workspace'))
 const outsideMarker = join(dirname(workspaceRoot), 'studio-sandbox-outside.txt')
 const insideMarker = join(workspaceRoot, 'runtime', 'sandbox-inside.txt')
@@ -126,9 +128,14 @@ let second
 let secondHandle
 let identityToken
 let identitySessionId
+let invitedIdentityToken
+let invitedIdentitySessionId
+let invitedUserId
 let firstIdentityAudits
 
 try {
+  await mkdir(join(dshHome, 'profiles'), { recursive: true })
+  await symlink(join(profileHome, 'profiles', 'studio'), join(dshHome, 'profiles', 'studio'), 'dir')
   await mkdir(workspaceRoot, { recursive: true })
   await rm(insideMarker, { force: true })
   await rm(outsideMarker, { force: true })
@@ -165,6 +172,36 @@ try {
   for (const confidential of confidentialValues) {
     assert.equal(identityEvidence.includes(confidential), false, 'identity secret leaked into durable records')
   }
+  const ownerActor = first.ctx.studioTenancy.service.actorFromSession(identityIssued.session)
+  assert.deepEqual(first.ctx.studioTenancy.service.authorizationFor(
+    ownerActor.userId, ownerActor.orgId, ownerActor.tenantId,
+  ), { userId: ownerActor.userId, orgId: ownerActor.orgId, tenantId: ownerActor.tenantId, role: 'owner' })
+  const invitation = await first.ctx.studioTenancy.service.invite(
+    ownerActor, ownerActor.tenantId, 'runtime-member@example.com', 'builder',
+  )
+  const capturedInvitation = first.ctx.studioIdentity.developmentEmailCapture?.invitations.at(-1)
+  assert.equal(capturedInvitation?.token, invitation.token)
+  assert.equal(JSON.stringify(invitation.invitation).includes(invitation.token), false)
+  assert.equal(await first.ctx.studioIdentity.service.requestMagicCode('runtime-member@example.com'), 'sent')
+  const invitedCode = first.ctx.studioIdentity.developmentEmailCapture?.messages.at(-1)
+  assert.ok(invitedCode, 'invited identity did not receive its development-only access code')
+  const invitedIssued = await first.ctx.studioIdentity.service.verifyMagicCode(
+    invitedCode.to,
+    invitedCode.code,
+    { label: 'WSL2 invited proof', userAgent: 'runtime-proof', ipTruncated: '127.0.0.0/24' },
+  )
+  invitedIdentityToken = invitedIssued.token
+  invitedIdentitySessionId = invitedIssued.session.session_id
+  const invitedUser = first.ctx.studioIdentity.service.userForSession(invitedIssued.session)
+  invitedUserId = invitedUser.user_id
+  const acceptedMembership = await first.ctx.studioTenancy.service.acceptInvitation(invitedUser, invitation.token)
+  assert.equal(acceptedMembership.role, 'builder')
+  assert.equal(first.ctx.studioTenancy.service.authorizationFor(
+    invitedUser.user_id, invitedIssued.session.org_id, invitedIssued.session.tenant_id,
+  )?.role, 'builder')
+  assert.equal(first.ctx.studioTenancy.service.authorizationFor(
+    invitedUser.user_id, 'org-attacker', invitedIssued.session.tenant_id,
+  ), undefined)
   const toolNames = first.ctx.tools.schemas(firstHandle.agent).map(schema => schema.name).sort()
   assert.ok(toolNames.includes('studio_echo'), 'Studio tool was not visible to the live agent')
   assert.ok(toolNames.includes('bash'), 'standard preset bash tool was not visible to the live agent')
@@ -216,6 +253,11 @@ try {
   second = await bootStudio()
   const restoredIdentitySession = await second.ctx.studioIdentity.service.authenticate(identityToken, false)
   assert.equal(restoredIdentitySession.session_id, identitySessionId)
+  const restoredInvitedSession = await second.ctx.studioIdentity.service.authenticate(invitedIdentityToken, false)
+  assert.equal(restoredInvitedSession.session_id, invitedIdentitySessionId)
+  assert.equal(second.ctx.studioTenancy.service.authorizationFor(
+    invitedUserId, restoredInvitedSession.org_id, restoredInvitedSession.tenant_id,
+  )?.role, 'builder')
   assert.deepEqual(second.ctx.studioIdentity.service.auditRecords(), firstIdentityAudits)
   assert.deepEqual(second.ctx.studioHello.record(), firstRecord)
   assert.deepEqual(second.ctx.studioPolicy.auditRecords()
@@ -280,11 +322,22 @@ try {
       durableSecretsExposed: false,
       passkeyHardwareCeremony: 'NOT_EXECUTED',
     },
+    tenancy: {
+      physicalDomains: ['studio_orgs', 'studio_workspaces', 'studio_memberships'],
+      logicalDomains: ['studio.orgs', 'studio.workspaces', 'studio.memberships'],
+      ownerBootstrap: true,
+      invitationAccepted: true,
+      invitationTokenPersistedInPlaintext: false,
+      invitedRole: 'builder',
+      crossOrganizationAuthorization: 'denied',
+      membershipRestoredAfterRestart: true,
+      smtpDelivery: 'NOT_CONFIGURED',
+    },
     eventTypes: [...new Set(secondHandle.agent.session.events.map(event => event.type))].sort(),
   }
   process.stdout.write(`${JSON.stringify(proof, null, 2)}\n`)
 } finally {
   if (second !== undefined) await stop(second, secondHandle)
   if (first !== undefined) await stop(first, firstHandle)
-  await rm(join(dshHome, '.credentials.yaml'), { force: true })
+  await rm(dshHome, { recursive: true, force: true })
 }

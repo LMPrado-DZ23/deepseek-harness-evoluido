@@ -3,6 +3,15 @@ import type { PreToolDecision, ToolExecution } from '@deepseek-ai/dsh-tools'
 import { defineDomain, domainTable, type Domain } from '@deepseek-ai/dsh-storage-domain'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
+import {
+  roleAllows,
+  studioPermissionSchema,
+  studioRoleSchema,
+  type StudioPermission,
+  type StudioRole,
+} from './rbac.js'
+
+export * from './rbac.js'
 
 export const name = 'dz23-studio-policy'
 export const inject = ['tools', 'storageDomain']
@@ -25,6 +34,8 @@ export const toolPolicyRuleSchema = z.object({
   allowManifestDowngrade: z.boolean().default(false),
   blocked: z.boolean().default(false),
   sandboxMode: z.string().optional(),
+  requiredPermission: studioPermissionSchema.optional(),
+  scope: z.enum(['none', 'org', 'workspace', 'project']).default('none'),
 }).strict()
 
 export type ToolPolicyRule = z.input<typeof toolPolicyRuleSchema>
@@ -65,11 +76,19 @@ export type PolicyAuditRecord = z.infer<typeof policyAuditRecordSchema>
 export interface StudioPolicyRuntime {
   auditRecords(): readonly PolicyAuditRecord[]
   setIdentityResolver(resolver: (execution: ToolExecution) => PolicyIdentityState): () => void
+  setAuthorizationResolver(resolver: (execution: ToolExecution) => PolicyAuthorizationState | undefined): () => void
 }
 
 export interface PolicyIdentityState {
   readonly authenticated: boolean
   readonly strongIdentityVerified: boolean
+}
+
+export interface PolicyAuthorizationState {
+  readonly userId: string
+  readonly orgId: string
+  readonly tenantId: string
+  readonly role: StudioRole
 }
 
 declare const policyAuditKeyBrand: unique symbol
@@ -181,17 +200,21 @@ function decisionForTier(toolName: string, effectiveTier: PolicyTier, strongIden
 
 export interface PolicyEvaluationContext {
   readonly strongIdentityVerified?: boolean
+  readonly authorization?: PolicyAuthorizationState
 }
 
 export interface StudioPolicyOptions {
   readonly rules?: Readonly<Record<string, ToolPolicyRule>>
+  readonly requireAuthorizationDeclarations?: boolean
 }
 
 export class StudioPolicyEngine {
   readonly #rules: Readonly<Record<string, ToolPolicyRule>>
+  readonly #requireAuthorizationDeclarations: boolean
 
   constructor(options: StudioPolicyOptions = {}) {
     this.#rules = options.rules ?? {}
+    this.#requireAuthorizationDeclarations = options.requireAuthorizationDeclarations ?? false
   }
 
   evaluate(toolName: string, context: PolicyEvaluationContext = {}): PolicyDecision {
@@ -210,8 +233,10 @@ export class StudioPolicyEngine {
       return {
         toolName,
         effectiveTier: 'T2',
-        kind: 'ask',
-        reason: 'Ferramenta ainda não classificada: confirmação obrigatória.',
+        kind: this.#requireAuthorizationDeclarations ? 'deny' : 'ask',
+        reason: this.#requireAuthorizationDeclarations
+          ? 'Ferramenta sem declaração de permissão foi bloqueada.'
+          : 'Ferramenta ainda não classificada: confirmação obrigatória.',
         ruleSource: 'safe-default',
       }
     }
@@ -229,6 +254,18 @@ export class StudioPolicyEngine {
 
     const rule = parsed.data
     const effectiveTier = resolveTier(rule)
+    if (this.#requireAuthorizationDeclarations && rule.requiredPermission === undefined) {
+      return { toolName, effectiveTier, kind: 'deny', reason: 'Ferramenta sem permissão declarada foi bloqueada.', ruleSource: 'invalid-rule' }
+    }
+    if (rule.requiredPermission !== undefined) {
+      const authorization = context.authorization
+      if (authorization === undefined) {
+        return { toolName, effectiveTier, kind: 'deny', reason: 'Nenhum vínculo ativo autoriza esta ação.', ruleSource: 'catalog' }
+      }
+      if (!roleAllows(authorization.role, rule.requiredPermission)) {
+        return { toolName, effectiveTier, kind: 'deny', reason: 'Seu papel neste espaço não permite esta ação.', ruleSource: 'catalog' }
+      }
+    }
     if (rule.blocked) {
       return { toolName, effectiveTier, kind: 'deny', reason: 'Ação bloqueada pela política do DZ23 STUDIO.', ruleSource: 'catalog' }
     }
@@ -246,6 +283,16 @@ export interface PolicyPluginConfig extends StudioPolicyOptions {
   readonly now?: () => Date
 }
 
+function requestedScope(execution: ToolExecution): { orgId?: string; tenantId?: string } {
+  const args = execution.arguments
+  if (typeof args !== 'object' || args === null) return {}
+  const values = args as Readonly<Record<string, unknown>>
+  return {
+    ...(typeof values.org_id === 'string' ? { orgId: values.org_id } : {}),
+    ...(typeof values.tenant_id === 'string' ? { tenantId: values.tenant_id } : {}),
+  }
+}
+
 function toPreToolDecision(decision: PolicyDecision): PreToolDecision {
   if (decision.kind === 'allow') return { kind: 'allow' }
   if (decision.kind === 'ask') return { kind: 'ask', reason: decision.reason }
@@ -259,6 +306,7 @@ export async function apply(ctx: Context, config: PolicyPluginConfig = {}): Prom
     authenticated: true,
     strongIdentityVerified: config.strongIdentityVerified?.(execution) === true,
   })
+  let authorizationResolver = (_execution: ToolExecution): PolicyAuthorizationState | undefined => undefined
   const domain: Domain<typeof studioPolicyAuditDomainSpec> = await ctx.storageDomain.open(studioPolicyAuditDomainSpec)
   ctx.effect(() => () => domain.close(), 'dz23-studio-policy.domainClose')
   const decisions = domain.table('decisions')
@@ -269,11 +317,18 @@ export async function apply(ctx: Context, config: PolicyPluginConfig = {}): Prom
       identityResolver = resolver
       return () => { identityResolver = previous }
     },
+    setAuthorizationResolver: (resolver) => {
+      const previous = authorizationResolver
+      authorizationResolver = resolver
+      return () => { authorizationResolver = previous }
+    },
   })
   ctx.on('tools/pre-execute', async (execution, next): Promise<PreToolDecision> => {
     const identity = execution.agent === undefined
       ? { authenticated: false, strongIdentityVerified: false }
       : identityResolver(execution)
+    const authorization = execution.agent === undefined ? undefined : authorizationResolver(execution)
+    const requested = requestedScope(execution)
     let decision = execution.agent === undefined
       ? {
           toolName: execution.name,
@@ -292,7 +347,18 @@ export async function apply(ctx: Context, config: PolicyPluginConfig = {}): Prom
               }
             : engine.evaluate(execution.name, {
                 strongIdentityVerified: identity.strongIdentityVerified,
+                ...(authorization === undefined ? {} : { authorization }),
               })
+
+    if (decision.kind !== 'deny' && authorization !== undefined
+      && ((requested.orgId !== undefined && requested.orgId !== authorization.orgId)
+        || (requested.tenantId !== undefined && requested.tenantId !== authorization.tenantId))) {
+      decision = {
+        ...decision,
+        kind: 'deny',
+        reason: 'A ação tentou acessar outra organização ou espaço de trabalho.',
+      }
+    }
 
     if (decision.kind === 'allow') {
       const downstream = await next()
@@ -306,7 +372,7 @@ export async function apply(ctx: Context, config: PolicyPluginConfig = {}): Prom
       callId: String(execution.callId),
     })
     try {
-      const scope = config.resolveScope?.(execution) ?? { orgId: 'org_local', tenantId: 'tenant_local' }
+      const scope = authorization ?? config.resolveScope?.(execution) ?? { orgId: 'org_local', tenantId: 'tenant_local' }
       const auditId = config.createAuditId?.() ?? randomUUID()
       const record = policyAuditRecordSchema.parse({
         audit_id: auditId,

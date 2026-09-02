@@ -50,6 +50,7 @@ function context(host: '127.0.0.1' | '0.0.0.0' = '127.0.0.1') {
         strongResolver = resolver
         return resolverDispose
       }),
+      setAuthorizationResolver: vi.fn(() => vi.fn()),
     } satisfies StudioPolicyRuntime,
     effect: vi.fn((factory: () => () => void | Promise<void>) => { cleanups.push(factory()) }),
     provide: vi.fn((_name: string, runtime: StudioIdentityRuntime) => { provided.identity = runtime }),
@@ -104,7 +105,10 @@ describe('identity Cordis plugin composition', () => {
 
   it('accepts an explicitly injected sender without exposing a development capture', async () => {
     const f = context('0.0.0.0')
-    const sender: EmailSender = { sendMagicCode: vi.fn(() => Promise.resolve()) }
+    const sender: EmailSender = {
+      sendMagicCode: vi.fn(() => Promise.resolve()),
+      sendInvitation: vi.fn(() => Promise.resolve()),
+    }
     await apply(f.ctx as never, {
       emailSender: sender,
       rpName: 'Custom Studio',

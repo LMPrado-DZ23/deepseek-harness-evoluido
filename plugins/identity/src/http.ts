@@ -4,6 +4,7 @@ import { truncateIp } from './crypto.js'
 import type { AuthenticationResponse, RegistrationResponse } from './passkey.js'
 import type { SessionRecord } from './model.js'
 import { IdentityError, type StudioIdentityService } from './service.js'
+import { assertRouteContracts, type StudioRouteContract } from '@dz23-studio/policy'
 
 const JSON_LIMIT = 64 * 1024
 export const SESSION_COOKIE = 'dz23_studio_session'
@@ -19,6 +20,24 @@ const challengeSchema = z.object({ challenge_id: z.string().min(1), response: z.
 const registerVerifySchema = challengeSchema.extend({ device_label: z.string().min(1).max(100) }).strict()
 const revokeSchema = z.object({ session_id: z.string().min(1) }).strict()
 const bindSchema = z.object({ harness_session_id: z.string().min(1) }).strict()
+
+export const IDENTITY_ROUTE_CONTRACTS = [
+  { method: 'POST', path: '/magic/start', access: 'public', permission: null, scope: 'none' },
+  { method: 'POST', path: '/magic/verify', access: 'public', permission: null, scope: 'none' },
+  { method: 'POST', path: '/passkey/login/options', access: 'public', permission: null, scope: 'none' },
+  { method: 'POST', path: '/passkey/login/verify', access: 'public', permission: null, scope: 'none' },
+  { method: 'GET', path: '/session', access: 'public', permission: null, scope: 'identity' },
+  { method: 'POST', path: '/passkey/register/options', access: 'authorized', permission: 'identity.self', scope: 'identity' },
+  { method: 'POST', path: '/passkey/register/verify', access: 'authorized', permission: 'identity.self', scope: 'identity' },
+  { method: 'POST', path: '/passkey/step-up/options', access: 'authorized', permission: 'identity.self', scope: 'identity' },
+  { method: 'POST', path: '/passkey/step-up/verify', access: 'authorized', permission: 'identity.self', scope: 'identity' },
+  { method: 'GET', path: '/devices', access: 'authorized', permission: 'identity.self', scope: 'identity' },
+  { method: 'POST', path: '/devices/revoke', access: 'authorized', permission: 'identity.self', scope: 'identity' },
+  { method: 'POST', path: '/devices/revoke-all', access: 'authorized', permission: 'identity.self', scope: 'identity' },
+  { method: 'POST', path: '/bind-agent', access: 'authorized', permission: 'identity.self', scope: 'identity' },
+] as const satisfies readonly StudioRouteContract[]
+
+assertRouteContracts(IDENTITY_ROUTE_CONTRACTS)
 
 export interface IdentityHttpConfig {
   readonly service: StudioIdentityService
@@ -63,6 +82,10 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
       /* v8 ignore next -- node:http always supplies a URL for server requests. */
       const path = new URL(request.url ?? '/', 'http://local').pathname
       const route = path.slice('/api/studio/identity'.length)
+      if (!IDENTITY_ROUTE_CONTRACTS.some(contract => contract.method === request.method && contract.path === route)) {
+        json(response, 404, { error: 'Rota não encontrada.' })
+        return
+      }
       if (request.method === 'POST' && route === '/magic/start') {
         const body = magicStartSchema.parse(await readJson(request))
         await config.service.requestMagicCode(body.email)
@@ -145,13 +168,9 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
         json(response, 200, { message: 'Todos os dispositivos foram desconectados.' })
         return
       }
-      if (request.method === 'POST' && route === '/bind-agent') {
-        const body = bindSchema.parse(await readJson(request))
-        await config.service.bindHarnessSession(session, body.harness_session_id)
-        json(response, 200, { message: 'Sessão de trabalho protegida.' })
-        return
-      }
-      json(response, 404, { error: 'Rota não encontrada.' })
+      const body = bindSchema.parse(await readJson(request))
+      await config.service.bindHarnessSession(session, body.harness_session_id)
+      json(response, 200, { message: 'Sessão de trabalho protegida.' })
     } catch (error) {
       const status = error instanceof IdentityError
         ? error.code === 'not-found' ? 404 : error.code === 'locked' ? 429 : 401
@@ -161,7 +180,7 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
   }
 }
 
-async function authenticatedMutation(request: IncomingMessage, service: StudioIdentityService): Promise<SessionRecord> {
+export async function authenticatedMutation(request: IncomingMessage, service: StudioIdentityService): Promise<SessionRecord> {
   const token = requiredSessionToken(request)
   const session = await service.authenticate(token)
   if (request.method !== 'GET' && request.method !== 'HEAD') {
@@ -172,13 +191,13 @@ async function authenticatedMutation(request: IncomingMessage, service: StudioId
   return session
 }
 
-function requiredSessionToken(request: IncomingMessage): string {
+export function requiredSessionToken(request: IncomingMessage): string {
   const token = parseCookies(request.headers.cookie)[SESSION_COOKIE]
   if (token === undefined || token === '') throw new IdentityError('invalid', 'Entre para continuar.')
   return token
 }
 
-function assertRequestTrust(request: IncomingMessage, config: IdentityHttpConfig): void {
+export function assertRequestTrust(request: IncomingMessage, config: Pick<IdentityHttpConfig, 'allowedHosts' | 'allowedOrigins'>): void {
   const host = singleHeader(request.headers.host)?.toLowerCase()
   if (host === undefined || !config.allowedHosts.map(value => value.toLowerCase()).includes(host)) {
     throw new IdentityError('invalid', 'Host não autorizado.')

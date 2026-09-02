@@ -9,7 +9,26 @@
 - insert:
     - id: dz23-studio-policy
       name: '@dz23-studio/policy'
+      config:
+        requireAuthorizationDeclarations: true
+        rules:
+          studio_echo:
+            source:
+              kind: studio
+            inferredTier: T2
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          bash:
+            source:
+              kind: harness
+            inferredTier: T2
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
     - id: dz23-studio-identity
       name: '@dz23-studio/identity'
+    - id: dz23-studio-tenancy
+      name: '@dz23-studio/tenancy'
     - id: studio-hello
       name: '@studio/hello'

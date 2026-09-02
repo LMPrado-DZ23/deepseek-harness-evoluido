@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { newMagicCode, newOpaqueSecret, secretHash, secretMatches } from './crypto.js'
-import type { EmailSender } from './email.js'
+import type { EmailSender, InvitationMessage } from './email.js'
 import type {
   AuthenticationOptions,
   AuthenticationResponse,
@@ -30,6 +30,14 @@ const SESSION_TOUCH_INTERVAL = MINUTE
 
 export type EnrollmentMode = 'closed' | 'open'
 export type MagicCodeRequestResult = 'sent' | 'suppressed'
+
+export interface EnrollmentGrant {
+  readonly orgId: string
+  readonly tenantId: string
+  readonly role: IdentityUser['role']
+}
+
+export type IdentityUserProvisioningSource = 'bootstrap' | 'invitation'
 
 export interface IdentityRepository {
   users(): readonly IdentityUser[]
@@ -115,6 +123,8 @@ export class StudioIdentityService {
   readonly #createSecret: () => string
   readonly #createMagicCode: () => string
   readonly #mutex = new KeyedMutex()
+  #enrollmentResolver: (email: string) => EnrollmentGrant | undefined = () => undefined
+  #userProvisioner: (user: IdentityUser, source: IdentityUserProvisioningSource) => Promise<void> = () => Promise.resolve()
 
   constructor(options: IdentityServiceOptions) {
     this.#repository = options.repository
@@ -145,11 +155,32 @@ export class StudioIdentityService {
     return this.#enrollment === 'open' && this.#repository.users().length === 0
   }
 
+  setEnrollmentResolver(resolver: (email: string) => EnrollmentGrant | undefined): () => void {
+    const previous = this.#enrollmentResolver
+    this.#enrollmentResolver = resolver
+    return () => { this.#enrollmentResolver = previous }
+  }
+
+  setUserProvisioner(provisioner: (user: IdentityUser, source: IdentityUserProvisioningSource) => Promise<void>): () => void {
+    const previous = this.#userProvisioner
+    this.#userProvisioner = provisioner
+    return () => { this.#userProvisioner = previous }
+  }
+
+  userRecords(): readonly IdentityUser[] {
+    return this.#repository.users()
+  }
+
+  sendInvitation(message: InvitationMessage): Promise<void> {
+    return this.#emailSender.sendInvitation(message)
+  }
+
   async requestMagicCode(email: string): Promise<MagicCodeRequestResult> {
     const normalized = normalizeEmail(email)
     return this.#mutex.run(`magic-request:${normalized}`, async () => {
       const existing = this.#repository.users().find(user => user.email === normalized)
-      if (existing === undefined && !this.isEnrollmentOpen()) {
+      const grant = this.#enrollmentResolver(normalized)
+      if (existing === undefined && !this.isEnrollmentOpen() && grant === undefined) {
         await this.#audit(
           'magic_code_suppressed', null, null, this.#defaultOrgId, this.#defaultTenantId,
           'failure', 'Solicitação genérica recusada: não existe convite nem cadastro inicial aberto.',
@@ -162,8 +193,8 @@ export class StudioIdentityService {
       await Promise.all(this.#repository.magicCodes()
         .filter(previous => previous.email === normalized && previous.consumed_at === null)
         .map(previous => this.#repository.putMagicCode({ ...previous, consumed_at: now.toISOString() })))
-      const orgId = existing?.org_id ?? this.#defaultOrgId
-      const tenantId = existing?.tenant_id ?? this.#defaultTenantId
+      const orgId = existing?.org_id ?? grant?.orgId ?? this.#defaultOrgId
+      const tenantId = existing?.tenant_id ?? grant?.tenantId ?? this.#defaultTenantId
       const record: MagicCodeRecord = {
         magic_code_id: this.#createId(),
         email: normalized,
@@ -211,7 +242,9 @@ export class StudioIdentityService {
     }
     await this.#repository.putMagicCode({ ...candidate, consumed_at: now.toISOString() })
     const existing = this.#repository.users().find(user => user.email === normalized)
-    if (existing === undefined && !this.isEnrollmentOpen()) {
+    const grant = this.#enrollmentResolver(normalized)
+    const validGrant = grant !== undefined && grant.orgId === candidate.org_id && grant.tenantId === candidate.tenant_id
+    if (existing === undefined && !this.isEnrollmentOpen() && !validGrant) {
       await this.#audit('login_failed', null, null, candidate.org_id, candidate.tenant_id, 'failure', 'Cadastro inicial já encerrado.')
       throw new IdentityError('invalid', 'Código inválido ou expirado.')
     }
@@ -219,15 +252,19 @@ export class StudioIdentityService {
       user_id: this.#createId(),
       email: normalized,
       display_name: normalized.split('@')[0]!,
-      role: 'owner',
+      role: grant?.role ?? 'owner',
       org_id: candidate.org_id,
       tenant_id: candidate.tenant_id,
       created_at: now.toISOString(),
     }
     if (existing === undefined) {
       await this.#repository.putUser(user)
-      await this.#audit('personal_mode_disabled', user.user_id, null, user.org_id, user.tenant_id, 'success', 'Primeiro acesso cadastrado.')
-      await this.#audit('enrollment_closed', user.user_id, null, user.org_id, user.tenant_id, 'success', 'Cadastro inicial encerrado após criar a pessoa proprietária.')
+      const source: IdentityUserProvisioningSource = validGrant ? 'invitation' : 'bootstrap'
+      await this.#userProvisioner(user, source)
+      if (source === 'bootstrap') {
+        await this.#audit('personal_mode_disabled', user.user_id, null, user.org_id, user.tenant_id, 'success', 'Primeiro acesso cadastrado.')
+        await this.#audit('enrollment_closed', user.user_id, null, user.org_id, user.tenant_id, 'success', 'Cadastro inicial encerrado após criar a pessoa proprietária.')
+      }
     }
     const issued = await this.#issueSession(user, device)
     await this.#audit('login_succeeded', user.user_id, issued.session.session_id, user.org_id, user.tenant_id, 'success', 'Entrada por código temporário.')
@@ -433,6 +470,33 @@ export class StudioIdentityService {
 
   sessionRecords(): readonly SessionRecord[] {
     return this.#repository.sessions()
+  }
+
+  userForSession(session: SessionRecord): IdentityUser {
+    return this.#user(session.user_id)
+  }
+
+  principalForHarnessSession(harnessSessionId: string): IdentityPrincipal & { readonly role: IdentityUser['role'] } | undefined {
+    const now = this.#now()
+    const session = this.#repository.sessions().find(candidate => candidate.harness_session_ids.includes(harnessSessionId))
+    if (session === undefined) return undefined
+    try {
+      this.#assertSessionUsable(session, now)
+      const user = this.#user(session.user_id)
+      return { userId: user.user_id, orgId: session.org_id, tenantId: session.tenant_id, sessionId: session.session_id, role: user.role }
+    } catch {
+      return undefined
+    }
+  }
+
+  recordAdministrationEvent(
+    eventType: Extract<IdentityAuditRecord['event_type'], 'invitation_created' | 'invitation_accepted' | 'role_changed' | 'workspace_created'>,
+    userId: string,
+    orgId: string,
+    tenantId: string,
+    reason: string,
+  ): Promise<void> {
+    return this.#audit(eventType, userId, null, orgId, tenantId, 'success', reason)
   }
 
   async #issueSession(user: IdentityUser, device: DeviceInput): Promise<IssuedSession> {

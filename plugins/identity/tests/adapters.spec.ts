@@ -93,6 +93,10 @@ describe('email adapters', () => {
     await sender.sendMagicCode(message)
     expect(sender.messages).toEqual([message])
     expect(sender.messages[0]).not.toBe(message)
+    await sender.sendInvitation({
+      to: 'b@example.com', token: 'invite-token', workspaceName: 'Produto', role: 'builder', expiresInHours: 72,
+    })
+    expect(sender.invitations).toEqual([expect.objectContaining({ to: 'b@example.com', role: 'builder' })])
   })
 
   it('resolves SMTP configuration for each send and does not cache secrets', async () => {
@@ -108,6 +112,11 @@ describe('email adapters', () => {
       host: 'smtp.example.com', port: 465, secure: true, auth: { user: 'u', pass: 'p' },
     })
     expect(sendMail).toHaveBeenCalledWith(expect.objectContaining({ to: 'a@example.com', subject: expect.stringContaining('DZ23 STUDIO') }))
+    await sender.sendInvitation({
+      to: 'b@example.com', token: 'invite-token', workspaceName: 'Produto', role: 'viewer', expiresInHours: 72,
+    })
+    expect(resolve).toHaveBeenCalledTimes(2)
+    expect(sendMail).toHaveBeenLastCalledWith(expect.objectContaining({ to: 'b@example.com', subject: expect.stringContaining('Produto') }))
   })
 
   it('fails closed when SMTP secret is absent or malformed', async () => {

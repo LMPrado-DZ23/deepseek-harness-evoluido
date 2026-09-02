@@ -72,6 +72,7 @@ export const identityAuditRecordSchema = z.object({
     'magic_code_requested', 'magic_code_suppressed', 'login_succeeded', 'login_failed', 'passkey_registered',
     'step_up_succeeded', 'session_revoked', 'all_sessions_revoked',
     'harness_session_bound', 'personal_mode_disabled', 'enrollment_closed',
+    'invitation_created', 'invitation_accepted', 'role_changed', 'workspace_created',
   ]),
   user_id: z.string().min(1).nullable(),
   session_id: z.string().min(1).nullable(),

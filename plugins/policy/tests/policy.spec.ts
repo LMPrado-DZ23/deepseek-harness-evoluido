@@ -13,6 +13,10 @@ import {
   policyDecisionEventSchema,
   policyDecisionSchema,
   studioPolicyAuditDomainSpec,
+  assertRouteContracts,
+  roleAllows,
+  roleCanAssign,
+  studioRouteContractSchema,
   type PolicyPluginConfig,
   type PolicyTier,
   type ToolPolicyRule,
@@ -168,12 +172,48 @@ describe('DZ23 STUDIO policy engine', () => {
     expect(engine.evaluate('deploy', { strongIdentityVerified: true }))
       .toMatchObject({ kind: 'ask', effectiveTier: 'T3' })
   })
+
+  it('enforces permission declarations and the four roles without billing concepts', () => {
+    const secured = new StudioPolicyEngine({
+      requireAuthorizationDeclarations: true,
+      rules: {
+        write: rule({ inferredTier: 'T1', requiredPermission: 'project.write', scope: 'project' }),
+        undeclared: rule({ inferredTier: 'T0' }),
+      },
+    })
+    expect(secured.evaluate('missing')).toMatchObject({ kind: 'deny', ruleSource: 'safe-default' })
+    expect(secured.evaluate('undeclared')).toMatchObject({ kind: 'deny', ruleSource: 'invalid-rule' })
+    expect(secured.evaluate('write')).toMatchObject({ kind: 'deny', reason: expect.stringContaining('vínculo') })
+    expect(secured.evaluate('write', {
+      authorization: { userId: 'viewer', orgId: 'org', tenantId: 'tenant', role: 'viewer' },
+    })).toMatchObject({ kind: 'deny', reason: expect.stringContaining('papel') })
+    expect(secured.evaluate('write', {
+      authorization: { userId: 'builder', orgId: 'org', tenantId: 'tenant', role: 'builder' },
+    })).toMatchObject({ kind: 'allow' })
+    expect(roleAllows('owner', 'project.delete')).toBe(true)
+    expect(roleAllows('admin', 'project.delete')).toBe(false)
+    expect(roleAllows('builder', 'project.publish_staging')).toBe(true)
+    expect(roleAllows('viewer', 'project.write')).toBe(false)
+    expect(roleCanAssign('owner', 'owner')).toBe(true)
+    expect(roleCanAssign('admin', 'builder')).toBe(true)
+    expect(roleCanAssign('admin', 'admin')).toBe(false)
+    expect(roleCanAssign('viewer', 'viewer')).toBe(false)
+  })
+
+  it('validates route contracts and rejects missing permissions or duplicates', () => {
+    const route = { method: 'GET', path: '/workspaces', access: 'authorized', permission: 'workspace.read', scope: 'org' } as const
+    expect(studioRouteContractSchema.parse(route)).toEqual(route)
+    expect(() => assertRouteContracts([route, route])).toThrow(/duplicado/)
+    expect(() => studioRouteContractSchema.parse({ ...route, permission: null })).toThrow()
+    expect(() => studioRouteContractSchema.parse({ ...route, access: 'public' })).toThrow()
+  })
 })
 
-function execution(name = 'safe') {
+function execution(name = 'safe', args: unknown = {}) {
   return {
     name,
     callId: 'call-1',
+    arguments: args,
     agent: { session: { id: 'session-1' } },
   } as unknown as ToolExecution
 }
@@ -272,6 +312,25 @@ describe('authoritative tools/pre-execute integration', () => {
       kind: 'deny', reason: 'Sessão de identidade ausente, expirada ou revogada.',
     })
     expect(next).not.toHaveBeenCalled()
+  })
+
+  it('uses membership authorization for role and scope and blocks cross-tenant arguments', async () => {
+    const next = vi.fn<() => Promise<PreToolDecision>>().mockResolvedValue({ kind: 'allow' })
+    const { ctx, hook, put } = await mounted({
+      requireAuthorizationDeclarations: true,
+      rules: { safe: rule({ inferredTier: 'T0', requiredPermission: 'project.read', scope: 'project' }) },
+    })
+    const runtime = ctx.provide.mock.calls[0]?.[1] as {
+      setAuthorizationResolver(resolver: () => { userId: string; orgId: string; tenantId: string; role: 'viewer' }): () => void
+    }
+    const unset = runtime.setAuthorizationResolver(() => ({ userId: 'user', orgId: 'org-a', tenantId: 'tenant-a', role: 'viewer' }))
+    await expect(hook?.(execution('safe', { org_id: 'org-a', tenant_id: 'tenant-a' }), next)).resolves.toEqual({ kind: 'allow' })
+    expect(put.mock.calls[0]?.[1]).toMatchObject({ org_id: 'org-a', tenant_id: 'tenant-a' })
+    await expect(hook?.(execution('safe', { tenant_id: 'tenant-b' }), next)).resolves.toMatchObject({
+      kind: 'deny', reason: expect.stringContaining('outra organização ou espaço'),
+    })
+    await expect(hook?.(execution('safe', null), next)).resolves.toEqual({ kind: 'allow' })
+    unset()
   })
 
   it('blocks an agent-less call because it cannot create a session audit event', async () => {
