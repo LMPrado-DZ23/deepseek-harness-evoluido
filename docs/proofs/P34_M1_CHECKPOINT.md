@@ -13,6 +13,8 @@ Data: 03/09/2026. Branch: `codex/missao-m1-preview`. Base imutável:
 - `068a212`: jornada visual com iframe de origem separada, sandbox,
   `referrerPolicy=no-referrer`, troca do ticket via `postMessage`, aviso de
   prévia não publicada, códigos locais e ação de encerramento.
+- `09348fb`: prova Playwright determinística composta com serviço, extensão
+  HTTP e gateway reais; apenas supervisor e encaminhamento são doubles.
 
 O Harness upstream permaneceu no pin
 `6c705be1ce6774a000d061da41d1823b03a3d42c` sem alteração.
@@ -27,6 +29,8 @@ Ambiente canônico desta rodada: cópia limpa em ext4 no WSL2, pnpm 11.7.0.
 - gate i18n: `PASS`, 208 chaves pt-BR;
 - gate de escopo tenant: `PASS`;
 - build dos 11 pacotes: `PASS`;
+- P37 self-test positivo/negativo e scan da árvore: `PASS`, incluindo recusa
+  de artefato vazio, MITM, `freestyle`, `caveman-shrink` e licença ausente;
 - revisão adversarial independente do núcleo: `GO`, zero ALTA/MÉDIA.
 
 A cobertura global mais recente antes do checkpoint passou com 377 testes e
@@ -41,9 +45,10 @@ lines; o gate crítico de importação ficou em 100% nas quatro métricas.
 - cookie/admissão no navegador real e revogação no request seguinte:
   `NOT_EXECUTED`;
 - HTTPS/ACME, celular e domínio público: `NOT_EXECUTED`;
-- Playwright visual desta rodada: `BLOCKED_EXTERNAL` pelas bibliotecas nativas
-  ausentes no WSL. O teste HTTP de recusa sem sessão passou antes da tentativa
-  de abrir o navegador.
+- Playwright visual desta rodada: teste escrito e compilado, mas execução do
+  navegador `BLOCKED_EXTERNAL` pelas bibliotecas nativas ausentes no WSL e
+  pelo executável Chromium ausente no host Windows. O teste HTTP de recusa sem
+  sessão passou antes da tentativa de abrir o navegador.
 
 Docker Desktop estava desligado/indisponível. Nenhum privilégio, CA, trust
 store, arquivo de hosts, MITM, TPROXY, push, PR ou deploy foi usado.

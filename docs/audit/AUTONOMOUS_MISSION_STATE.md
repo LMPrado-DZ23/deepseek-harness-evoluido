@@ -51,6 +51,8 @@ Entregar, em branches empilhadas e sem push/deploy, as etapas M1 a M6: preview s
 - Jornada visual local concluída em `068a212`: iframe isolado, ticket entregue
   por `postMessage`, aviso permanente de não publicação, códigos
   `studio-preview` e encerramento pela pessoa.
+- Prova Playwright da jornada registrada em `09348fb`; compila e inclui casos
+  adversariais, mas o navegador não executou neste host por runtime ausente.
 - Revisão adversarial do núcleo: `GO`, sem achado ALTO/MÉDIO. Residual: o
   supervisor real deve provar que respeita `AbortSignal` e não deixa runtime
   órfão após timeout.
