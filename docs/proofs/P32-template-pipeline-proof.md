@@ -1,7 +1,7 @@
 # P32 — Prova executável do template v1
 
 - Resultado: **PASS**
-- Imagem fixada: `sha256:51af5f3dbaebc1e9fa37512160a114fdd339eaffacca40e2e3a9b1a1520e5a03`
+- Imagem fixada: `sha256:0019ae56c58bb6a3f4d26c3330a5bb15402908f8a4cb14f2e866d8e301839a63`
 - Instalação: offline, lockfile congelado e scripts de pacote desativados.
 - Build: PASS
 - Teste unitário: PASS

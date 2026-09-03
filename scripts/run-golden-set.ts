@@ -28,7 +28,7 @@ const digest = (await readFile(resolve(root, 'runtime/builder-image-digest'), 'u
 const uid = typeof process.getuid === 'function' ? process.getuid() : 1000
 const gid = typeof process.getgid === 'function' ? process.getgid() : 1000
 const builder = new ContainerBuilder({
-  engine: 'docker', imageDigest: digest, templateStore: resolve(root, 'runtime/template-store-v1'),
+  engine: 'docker', imageDigest: digest, templateStore: resolve(root, 'runtime/template-store-v2'),
   user: `${uid}:${gid}`, limits: { pids: 256, memory: '2g', cpus: '2', timeoutMs: 180_000 },
 })
 const preflight = await builder.preflight()
@@ -51,8 +51,10 @@ try {
     }
 
     const runDirectory = resolve(scratch, criterion.id)
-    await cp(resolve(root, 'templates/static-site@1'), runDirectory, { recursive: true })
+    await cp(resolve(root, 'templates/nextjs-app@1'), runDirectory, { recursive: true })
     await mkdir(resolve(runDirectory, 'content'), { recursive: true })
+    await mkdir(resolve(runDirectory, 'src/generated'), { recursive: true })
+    await writeFile(resolve(runDirectory, 'src/generated/design-tokens.css'), ':root { --background: 0 0% 100%; --foreground: 222 47% 11%; --card: 0 0% 100%; --card-foreground: 222 47% 11%; --primary: 222 72% 32%; --primary-foreground: 0 0% 100%; --secondary: 214 32% 91%; --secondary-foreground: 222 47% 11%; --muted: 210 40% 96%; --muted-foreground: 215 16% 40%; --accent: 214 100% 93%; --accent-foreground: 222 72% 26%; --destructive: 0 72% 45%; --border: 214 32% 88%; --input: 214 32% 88%; --ring: 217 91% 50%; --radius: 0.75rem; }\n')
     const title = criterion.category === 'catalog' ? 'Catálogo local' : 'Página de apresentação'
     const description = criterion.category === 'catalog'
       ? 'Produtos e serviços apresentados de forma clara e acessível.'

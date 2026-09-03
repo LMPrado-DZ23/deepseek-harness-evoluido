@@ -71,6 +71,8 @@ export class PromptToAppPipeline {
       if (isAborted(runOptions.signal)) return this.cancelled(actor, projectId, plan.plan_id, operationId, ownerSessionId, attempt - 1)
       const runId = attempt === 1 ? operationId : `${operationId}-attempt-${attempt}`; const runDirectory = resolve(this.options.runsRoot, runId)
       await mkdir(this.options.runsRoot, { recursive: true }); await cp(this.options.templateDirectory, runDirectory, { recursive: true, errorOnExist: true })
+      await mkdir(resolve(runDirectory, 'src', 'generated'), { recursive: true })
+      await writeFile(resolve(runDirectory, 'src', 'generated', 'design-tokens.css'), defaultDesignTokens(), { encoding: 'utf8', flag: 'wx' })
       await this.options.service.putRun(actor, this.runRecord(actor, projectId, plan.plan_id, 'generate', attempt, 'RUNNING', 'full', runDirectory, null, null, runId, operationId, ownerSessionId))
       const protectedTemplatePaths = await listTreeFiles(runDirectory)
       const immutableBefore = await immutableHash(runDirectory, protectedTemplatePaths)
@@ -176,3 +178,26 @@ async function readAcceptanceChecks(runDirectory: string): Promise<readonly Acce
 }
 
 function isAborted(signal: AbortSignal | undefined): boolean { return signal?.aborted === true }
+
+function defaultDesignTokens(): string {
+  return `:root {
+  --background: 0 0% 100%;
+  --foreground: 222 47% 11%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+  --primary: 222 72% 32%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 214 32% 91%;
+  --secondary-foreground: 222 47% 11%;
+  --muted: 210 40% 96%;
+  --muted-foreground: 215 16% 40%;
+  --accent: 214 100% 93%;
+  --accent-foreground: 222 72% 26%;
+  --destructive: 0 72% 45%;
+  --border: 214 32% 88%;
+  --input: 214 32% 88%;
+  --ring: 217 91% 50%;
+  --radius: 0.75rem;
+}
+`
+}

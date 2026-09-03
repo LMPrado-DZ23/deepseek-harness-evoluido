@@ -9,8 +9,11 @@ RUN curl --fail --silent --show-error --location "https://nodejs.org/dist/v${NOD
     && npm install --global pnpm@11.7.0 \
     && groupadd --gid 10001 studio \
     && useradd --uid 10001 --gid 10001 --create-home studio
-WORKDIR /opt/template
+WORKDIR /opt/template/static
 COPY templates/static-site@1/package.json templates/static-site@1/pnpm-lock.yaml ./
+RUN pnpm fetch --frozen-lockfile --store-dir /opt/pnpm-store
+WORKDIR /opt/template/nextjs
+COPY templates/nextjs-app@1/package.json templates/nextjs-app@1/pnpm-lock.yaml ./
 RUN pnpm fetch --frozen-lockfile --store-dir /opt/pnpm-store && chmod -R a=rX /opt/pnpm-store
 USER 10001:10001
 ENV HOME=/home/studio PLAYWRIGHT_BROWSERS_PATH=/ms-playwright

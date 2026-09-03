@@ -45,7 +45,7 @@ const digest = (await readFile(resolve(root, 'runtime/builder-image-digest'), 'u
 const uid = typeof process.getuid === 'function' ? process.getuid() : 1000
 const gid = typeof process.getgid === 'function' ? process.getgid() : 1000
 const builder = new ContainerBuilder({
-  engine: 'docker', imageDigest: digest, templateStore: resolve(root, 'runtime/template-store-v1'), user: `${uid}:${gid}`,
+  engine: 'docker', imageDigest: digest, templateStore: resolve(root, 'runtime/template-store-v2'), user: `${uid}:${gid}`,
   limits: { pids: 256, memory: '2g', cpus: '2', timeoutMs: 180_000 },
 })
 
@@ -67,7 +67,7 @@ try {
     ],
   }) }
   const pipeline = new PromptToAppPipeline({
-    service, builder, templateDirectory: resolve(root, 'templates/static-site@1'), runsRoot,
+    service, builder, templateDirectory: resolve(root, 'templates/nextjs-app@1'), runsRoot,
     now: () => new Date('2026-09-03T12:00:00.000Z'), createId: () => `proof-${++sequence}`,
   })
   const result = await pipeline.run(actor, project.project_id, generator)

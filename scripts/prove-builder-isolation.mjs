@@ -13,7 +13,7 @@ const trustBefore = sha256(readFileSync(trustStore))
 const proofRoot = mkdtempSync(join(tmpdir(), 'dz23-builder-proof-'))
 const workspace = resolve(proofRoot, 'workspace')
 mkdirSync(workspace)
-const templateStore = resolve(root, 'runtime/template-store-v1')
+const templateStore = resolve(root, 'runtime/template-store-v2')
 const name = `dz23-builder-proof-${randomUUID()}`
 const uid = typeof process.getuid === 'function' ? process.getuid() : 1000
 const gid = typeof process.getgid === 'function' ? process.getgid() : 1000

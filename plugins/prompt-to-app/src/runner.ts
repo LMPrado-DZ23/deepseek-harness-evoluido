@@ -57,6 +57,7 @@ export class ContainerBuilder {
       '--security-opt', 'no-new-privileges', '--read-only',
       '--tmpfs', '/tmp:rw,noexec,nosuid,size=256m', '--pids-limit', String(this.config.limits.pids),
       '--env', 'HOME=/tmp', '--env', 'XDG_CONFIG_HOME=/tmp/.config', '--env', 'CI=true',
+      '--env', 'NEXT_TELEMETRY_DISABLED=1',
       '--shm-size', '256m',
       '--memory', this.config.limits.memory, '--cpus', this.config.limits.cpus,
     ]

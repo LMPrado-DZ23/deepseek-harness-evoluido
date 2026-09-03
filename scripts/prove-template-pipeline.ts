@@ -11,18 +11,26 @@ const uid = typeof process.getuid === 'function' ? process.getuid() : 1000
 const gid = typeof process.getgid === 'function' ? process.getgid() : 1000
 const builder = new ContainerBuilder({
   engine: 'docker', imageDigest: digest,
-  templateStore: resolve(root, 'runtime/template-store-v1'), user: `${uid}:${gid}`,
+  templateStore: resolve(root, 'runtime/template-store-v2'), user: `${uid}:${gid}`,
   limits: { pids: 256, memory: '2g', cpus: '2', timeoutMs: 180_000 },
 })
 
 try {
-  cpSync(resolve(root, 'templates/static-site@1'), runDirectory, { recursive: true })
+  cpSync(resolve(root, 'templates/nextjs-app@1'), runDirectory, { recursive: true })
   mkdirSync(resolve(runDirectory, 'content'), { recursive: true })
+  mkdirSync(resolve(runDirectory, 'src/generated'), { recursive: true })
+  writeFileSync(resolve(runDirectory, 'src/generated/design-tokens.css'), `:root {
+  --background: 0 0% 100%; --foreground: 222 47% 11%; --card: 0 0% 100%; --card-foreground: 222 47% 11%;
+  --primary: 222 72% 32%; --primary-foreground: 0 0% 100%; --secondary: 214 32% 91%; --secondary-foreground: 222 47% 11%;
+  --muted: 210 40% 96%; --muted-foreground: 215 16% 40%; --accent: 214 100% 93%; --accent-foreground: 222 72% 26%;
+  --destructive: 0 72% 45%; --border: 214 32% 88%; --input: 214 32% 88%; --ring: 217 91% 50%; --radius: 0.75rem;
+}\n`)
   writeFileSync(resolve(runDirectory, 'content/app.json'), JSON.stringify({
     title: 'Ateliê Aurora', description: 'Uma apresentação local e acessível dos serviços do ateliê.',
   }, null, 2))
-  writeFileSync(resolve(runDirectory, 'src/GeneratedApp.tsx'), `export default function GeneratedApp() {
-  return <main><h1>Ateliê Aurora</h1><p>Conheça nossos serviços e fale com a equipe.</p></main>
+  writeFileSync(resolve(runDirectory, 'src/GeneratedApp.tsx'), `import { Card, CardContent, CardHeader, CardTitle } from '@/src/components/ui/card'
+export default function GeneratedApp() {
+  return <main className="mx-auto max-w-6xl px-6 py-16"><h1 className="text-4xl font-bold">Ateliê Aurora</h1><p className="mt-4 text-muted-foreground">Conheça nossos serviços e fale com a equipe.</p><Card className="mt-8"><CardHeader><CardTitle>Serviços</CardTitle></CardHeader><CardContent>Projetos feitos com cuidado.</CardContent></Card></main>
 }
 `)
 

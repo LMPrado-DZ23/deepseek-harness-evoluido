@@ -1,6 +1,6 @@
 # ADR-019 — Template estático v1 como desvio temporário
 
-Status: aceito para a fatia 1; revisar na fatia 2.
+Status: substituído pelo ADR-021; preservado como fallback explícito de manutenção.
 
 A fatia 1 usa `templates/static-site@1`: Vite, React 18, TypeScript estrito,
 Tailwind, Vitest, Playwright e axe, com versões e lockfile fixados. O objetivo é
@@ -12,3 +12,7 @@ O setup com rede é T2 e acontece uma vez. A geração usa store offline, lockfi
 congelado e scripts de dependências desativados. O modelo só escreve em `src/`
 e `content/`, somente nos arquivos aprovados no plano, e nunca altera arquivos
 originais do template.
+
+Desde a fatia 2, nenhuma categoria usa este template por padrão. Selecioná-lo
+exige configuração explícita e nunca ocorre como fallback silencioso de uma
+falha no template Next.js.
