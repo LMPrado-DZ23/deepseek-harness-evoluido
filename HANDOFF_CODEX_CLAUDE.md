@@ -1,32 +1,57 @@
 # Handoff Codex → Claude — E4 e abertura de P32/P33/P31-B
 
-## P32/P33 fatia 2 — blocos 6 e 7 construídos, aguardando revisão final
+## P32/P33 fatia 2 — correções do parecer `16ea5ec` prontas para revisão
 
-Branch `codex/p32-fatia2-prompt-to-app`, sobre `9cd958c`. Ainda sem merge,
-push, PR ou deploy. O Studio agora gera acesso sem senha para formulário
-sensível e todo painel CRUD: owner fixado por `APP_OWNER_EMAIL`, member por
-convite, código de seis dígitos/10 minutos/5 tentativas, sessão opaca hasheada,
-cookie seguro, CSRF duplo e revogação. SMTP usa somente referências por env;
-`studio-capture` é recusado em produção.
+Branch `codex/p32-fatia2-prompt-to-app`, commit corretivo
+`635edb9f5665f907d49c2209fe67ae32335949a6`, sobre `16ea5ec`. Ainda sem
+merge, push, PR ou deploy. Peço ao Claude revisar somente se a ALTA-1 e as
+MÉDIAS 1–4 do parecer de 03/09/2026 foram fechadas, sem reabrir mérito.
 
-O painel CRUD determinístico exige login e CSRF para criar, editar e excluir;
-exclusão pede confirmação. Relações entre entidades continuam recusadas até
-existir seletor seguro. O backend só fornece códigos capturados ao projeto
-autorizado após estado `VERIFIED_PROTOTYPE`, e a interface os mostra apenas em
-Verificação com aviso de que a prova já os consumiu.
+Fechamentos implementados:
 
-Provas atuais: typecheck PASS; 80 testes do Prompt-to-App PASS; prova real
-`AUTH_CRUD_PROOF=PASS`, com `docker inspect NetworkMode=none`, conexão externa
-bloqueada, 18 caminhos protegidos, rota 401→200 e fluxo
-login→listar→criar→editar→excluir. Golden set: 18 total, 12
-`PASS_DETERMINISTIC`, 6 `NOT_IMPLEMENTED`, LLM real `NOT_EXECUTED`. Imagem
-regenerada e fixada no ambiente de prova:
+1. todo formulário gera acesso; envio não sensível continua público, mas toda
+   lista/leitura exige sessão owner/member; `public_list=false` inclusive para
+   entidades não sensíveis;
+2. código de acesso ligado a `request_id` em cookie HttpOnly, tentativas
+   isoladas por pedido, três emissões por e-mail em 15 minutos, intervalo de
+   60 segundos e limpeza de códigos expirados; pedido suprimido não substitui
+   o cookie de um pedido válido;
+3. política AST recusa `process`, `globalThis`, `eval`, `Function`,
+   `import.meta`, `'use server'`, `dangerouslySetInnerHTML` e JSX
+   `script`/`iframe`/`object`; `'use client'` permanece permitido;
+4. verificação canônica executa `next start` com `NODE_ENV=production` e
+   captura só com `DZ23_STUDIO_VERIFICATION=1`; sem a flag, falha fechado em
+   qualquer ambiente;
+5. logotipo validado é copiado para `public/brand/logo.png`, entra na foto de
+   integridade e é renderizado pelo layout com texto alternativo.
+
+Gates no WSL2/ext4: typecheck e build recursivo PASS; 293 testes PASS, 18
+integrações PostgreSQL explicitamente puladas; cobertura global 94,94% de
+statements/91,45% branches e núcleo Prompt-to-App 90,41% statements; i18n PASS
+com 199 chaves; escopos de domínio PASS. Provas `auth-crud`,
+`form-database`, `generated-data`, `design-spec`, isolamento, template e fluxo
+Prompt-to-App: PASS. A interface passou 2/2 Playwright + axe no contêiner com
+`NetworkMode=none`, usuário 10001, raiz e mounts somente leitura,
+`CapDrop=ALL` e `no-new-privileges`. Imagem fixada:
 `sha256:c2011c57e0d8a2a66abb8626b53b2ef0abeedd7675ba4593924ee7bb99f2b33e`.
 
-Ainda é preciso executar os gates globais, fechar o commit e então revisar a
-fatia. Preview/publicação seguem `NOT_PRESENT`; SaaS/dashboard/agendamento
+Golden set: 18 fixtures, 12 `PASS_DETERMINISTIC`, 6 `NOT_IMPLEMENTED` e 36
+critérios declarados como `NOT_AUTOMATED`; promoção continua inelegível e LLM
+real `NOT_EXECUTED`. P37 válido examinou 424 arquivos e 14 manifests, sem
+achados. Uma tentativa anterior sobre diretório temporário ausente retornou
+PASS com zero arquivos; foi rejeitada como inválida antes do gate final.
+Varredura de segredos: somente o token falso do teste adversarial, nenhum
+arquivo sensível rastreado. Upstream permanece limpo no pin
+`6c705be1ce6774a000d061da41d1823b03a3d42c`.
+
+Baixas não bloqueantes preservadas: catálogo separado para textos do app
+gerado; retenção de logotipos/sessões/códigos; inventário redistribuível de
+`sharp` 0.35.4 (Apache-2.0), binários libvips e demais dependências; prova SMTP
+real; HTTPS do P34 para cookies `Secure`; custo de abrir/migrar SQLite por
+ação. Preview/publicação seguem `NOT_PRESENT`; SaaS/dashboard/agendamento
 `NOT_IMPLEMENTED`; passkey no app gerado `NOT_PRESENT`; experiência leiga
-`NOT_VALIDATED`.
+`NOT_VALIDATED`. O próximo build continua sendo P34, somente após este
+fechamento e a decisão de integração.
 
 ## P32/P33 fatia 2 — blocos 1 a 3 prontos para revisão
 

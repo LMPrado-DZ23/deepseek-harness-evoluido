@@ -13,7 +13,9 @@
 > set fechou 12/18 casos executáveis e expôs 36 critérios `NOT_AUTOMATED`, mantendo
 > SaaS e dashboard como `NOT_IMPLEMENTED`. LLM real é `NOT_EXECUTED`, preview e
 > publicação são `NOT_PRESENT`, e experiência leiga é `NOT_VALIDATED`. Não
-> houve merge, push, PR ou deploy.
+> houve merge, push, PR ou deploy. Redistribuição e primeiro push continuam
+> bloqueados até a licença do Studio e o inventário completo de dependências,
+> incluindo `sharp`/libvips, Nodemailer, fontes, Next, Tailwind e componentes.
 >
 > Atualização de 2026-09-02: o histórico do PoC-01 abaixo foi preservado. A
 > errata do domínio foi aceita, o PoC-01b fechou a viabilidade do núcleo e o
