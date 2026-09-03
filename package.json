@@ -14,6 +14,7 @@
     "gate:domain-routes": "tsx scripts/check-domain-routes.ts",
     "storage:export-sqlite": "tsx scripts/export-sqlite-storage.ts",
     "storage:import-postgres": "tsx scripts/import-postgres-storage.ts",
+    "storage:backup-postgres": "tsx scripts/backup-postgres-storage.ts",
     "studio:setup-templates": "node scripts/setup-templates.mjs",
     "prove:edge": "node scripts/prove-edge.mjs",
     "prove:fase3-agents": "node scripts/prove-fase3-agents.mjs",

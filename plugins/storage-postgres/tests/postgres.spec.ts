@@ -318,7 +318,38 @@ describePostgres('postgres backend against PostgreSQL 16', () => {
     await apply(context as never, { dsnRef: 'DZ23_POSTGRES_TEST_DSN', schema: schemaName('plugin'), ssl: 'off', poolMax: 2 })
     expect(registered).toHaveBeenCalledWith('postgres', expect.any(PostgresStorageBackend))
     expect(provided).toHaveBeenCalledWith('storage.backend.postgres', expect.any(PostgresStorageBackend))
+    const backupService = provided.mock.calls.find(call => call[0] === 'studioStorageBackup')?.[1] as { runOnce(): Promise<unknown>; lastResult(): unknown; snapshot(): Promise<{ domains: unknown[] }> }
+    expect(backupService.lastResult()).toBeUndefined()
+    await expect(backupService.runOnce()).rejects.toThrow('scheduled backup is not configured')
+    expect((await backupService.snapshot()).domains).toEqual([])
     await Promise.all(disposers.map(dispose => dispose()))
+  })
+
+  it('schedules logical backups when configured and exposes the last result', async () => {
+    const temporary = await mkdtemp(join(tmpdir(), 'dz23-p31-backup-plugin-'))
+    const disposers: Array<() => void | Promise<void>> = []
+    const provided = vi.fn()
+    const logged: string[] = []
+    const context = {
+      credentials: { resolve: vi.fn(() => Promise.resolve({ value: dsn!, source: 'env' })) },
+      storage: { backend: { register: vi.fn(() => vi.fn()) } },
+      provide: provided,
+      effect: (factory: () => () => void | Promise<void>) => { disposers.push(factory()) },
+      logger: { info: (line: string) => logged.push(line) },
+    }
+    try {
+      const schema = schemaName('plugin_backup')
+      await apply(context as never, { dsnRef: 'DZ23_POSTGRES_TEST_DSN', schema, ssl: 'off', poolMax: 2, backup: { directory: join(temporary, 'backups'), intervalMinutes: 5, keep: 2 } })
+      const service = provided.mock.calls.find(call => call[0] === 'studioStorageBackup')?.[1] as { runOnce(): Promise<{ status: string; file: string | null }>; lastResult(): unknown }
+      const result = await service.runOnce()
+      expect(result.status).toBe('created')
+      expect(service.lastResult()).toEqual(result)
+      expect((await stat(result.file!)).mode & 0o777).toBe(0o600)
+      expect(logged.some(line => line.includes('backup created'))).toBe(true)
+    } finally {
+      await Promise.all(disposers.map(dispose => dispose()))
+      await rm(temporary, { recursive: true, force: true })
+    }
   })
 
   it('fails startup without a configured DSN or usable TLS', async () => {

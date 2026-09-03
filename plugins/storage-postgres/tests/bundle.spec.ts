@@ -1,0 +1,29 @@
+import { describe, expect, it } from 'vitest'
+import { bundleRecordCount, exportedDomain, sealBundle, validateBundle, type StorageExportBundle } from '../src/bundle.ts'
+
+const descriptor = { name: 'studio_hello', version: 1, tables: ['records'], hasGlobal: false }
+const sealed = () => sealBundle({ kind: 'json', sha256: 'b'.repeat(64) }, [
+  exportedDomain(descriptor, { tables: { records: { a: { note: 'a' }, b: { note: 'b' } } }, global: null }),
+], '2026-09-03T12:00:00.000Z')
+
+describe('storage export bundle', () => {
+  it('seals a bundle that validates and counts records', () => {
+    const bundle = sealed()
+    expect(() => validateBundle(bundle)).not.toThrow()
+    expect(bundleRecordCount(bundle)).toBe(2)
+  })
+
+  it('rejects a foreign format or pin, an unknown source kind, a payload edit, a duplicate domain and a domain edit', () => {
+    expect(() => validateBundle({ ...sealed(), format: 'other' } as unknown as StorageExportBundle)).toThrow('incompatible')
+    expect(() => validateBundle({ ...sealed(), upstreamCommit: 'deadbeef' } as unknown as StorageExportBundle)).toThrow('incompatible')
+    const kind = sealed(); (kind.source as { kind: string }).kind = 'mystery'
+    expect(() => validateBundle(kind)).toThrow('source kind is unknown')
+    expect(() => validateBundle({ ...sealed(), createdAt: '2026-09-04T00:00:00.000Z' })).toThrow('payload checksum mismatch')
+    const duplicated = sealBundle({ kind: 'sqlite', sha256: 'c'.repeat(64) }, [sealed().domains[0]!, sealed().domains[0]!], '2026-09-03T12:00:00.000Z')
+    expect(() => validateBundle(duplicated)).toThrow('duplicate exported domain')
+    const edited = sealed()
+    ;(edited.domains[0]!.snapshot.tables.records as Record<string, unknown>).a = { note: 'tampered' }
+    const resealed = { ...edited, payloadSha256: sealBundle(edited.source, edited.domains, edited.createdAt).payloadSha256 }
+    expect(() => validateBundle(resealed)).toThrow('domain checksum mismatch')
+  })
+})

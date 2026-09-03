@@ -4,11 +4,16 @@ import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { storageBackendServiceKey } from '@deepseek-ai/dsh-storage'
 import z from '@deepseek-ai/schemastery'
 import { PostgresStorageBackend } from './backend.js'
+import { StorageBackupScheduler, type BackupResult } from './backup.js'
 import { assertConfiguredSchemaName } from './schema.js'
+import { snapshotPostgresStorage } from './snapshot.js'
 
 export { PostgresStorageBackend } from './backend.js'
 export type { PostgresStorageBackendConfig } from './backend.js'
 export { StudioStorageError } from './errors.js'
+export * from './bundle.js'
+export { snapshotPostgresStorage, type SnapshotOptions } from './snapshot.js'
+export { BACKUP_FILE_PATTERN, BACKUP_LEDGER_FILE, BACKUP_MIN_INTERVAL_MS, StorageBackupScheduler, verifyBackupFile, type BackupResult, type BackupSchedulerOptions } from './backup.js'
 export {
   POSTGRES_IDENTIFIER_MAX_LENGTH,
   POSTGRES_SCHEMA_MAX_LENGTH,
@@ -20,11 +25,20 @@ export {
 export const name = 'storage-postgres'
 export const inject = ['storage', 'credentials']
 
+export interface BackupConfig {
+  /** Directory that receives `studio-backup-<stamp>.json` bundles (created 0700). */
+  directory: string
+  intervalMinutes?: number
+  keep?: number
+}
+
 export interface Config {
   dsnRef: string
   schema?: string
   ssl?: 'off' | 'require' | 'verify-full'
   poolMax?: number
+  /** Optional scheduled logical backup; absent means no automatic backup. */
+  backup?: BackupConfig
 }
 
 export const Config: z<Config> = z.object({
@@ -32,7 +46,24 @@ export const Config: z<Config> = z.object({
   schema: z.string().default('dz23_storage'),
   ssl: z.union(['off', 'require', 'verify-full'] as const).default('verify-full'),
   poolMax: z.number().step(1).min(1).max(32).default(4),
+  backup: z.object({
+    directory: z.string().required(),
+    intervalMinutes: z.number().step(1).min(5).max(24 * 60).default(60),
+    keep: z.number().step(1).min(1).max(1000).default(48),
+  }),
 })
+
+export interface StudioStorageBackupService {
+  runOnce(): Promise<BackupResult>
+  lastResult(): BackupResult | undefined
+  snapshot(): Promise<ReturnType<typeof snapshotPostgresStorage>>
+}
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    studioStorageBackup?: StudioStorageBackupService
+  }
+}
 
 export async function apply(ctx: Context, config: Config): Promise<void> {
   const schema = config.schema ?? 'dz23_storage'
@@ -65,4 +96,27 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     }
   }, 'storage-postgres.registerBackend')
   ctx.provide(storageBackendServiceKey('postgres'), backend)
+
+  // Descriptors are derived from the medium: every unit stamped on this schema.
+  const snapshot = () => snapshotPostgresStorage({ connectionString: resolved.value, ssl, schema })
+  if (config.backup !== undefined) {
+    const scheduler = new StorageBackupScheduler({
+      snapshot,
+      directory: config.backup.directory,
+      intervalMs: (config.backup.intervalMinutes ?? 60) * 60_000,
+      keep: config.backup.keep ?? 48,
+      log: line => ctx.logger.info(line),
+    })
+    ctx.effect(() => {
+      scheduler.start()
+      return () => scheduler.stop()
+    }, 'storage-postgres.backupSchedule')
+    ctx.provide('studioStorageBackup', { runOnce: () => scheduler.runOnce(), lastResult: () => scheduler.lastResult, snapshot })
+  } else {
+    ctx.provide('studioStorageBackup', {
+      runOnce: () => Promise.reject(new Error('storage-postgres: scheduled backup is not configured (config.backup)')),
+      lastResult: () => undefined,
+      snapshot,
+    })
+  }
 }
