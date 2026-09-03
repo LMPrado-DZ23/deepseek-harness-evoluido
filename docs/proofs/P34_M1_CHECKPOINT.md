@@ -15,6 +15,10 @@ Data: 03/09/2026. Branch: `codex/missao-m1-preview`. Base imutável:
   prévia não publicada, códigos locais e ação de encerramento.
 - `09348fb`: prova Playwright determinística composta com serviço, extensão
   HTTP e gateway reais; apenas supervisor e encaminhamento são doubles.
+- `a251fc5`: singleton físico fail-closed, readiness, heartbeat limitado a
+  duas horas e mutex único de admissões. A revisão adversarial encontrou e a
+  correção fechou uma corrida que poderia restaurar ticket consumido; cleanup
+  incompleto permanece `STOPPING` e impede novo runtime.
 
 O Harness upstream permaneceu no pin
 `6c705be1ce6774a000d061da41d1823b03a3d42c` sem alteração.
@@ -33,9 +37,10 @@ Ambiente canônico desta rodada: cópia limpa em ext4 no WSL2, pnpm 11.7.0.
   de artefato vazio, MITM, `freestyle`, `caveman-shrink` e licença ausente;
 - revisão adversarial independente do núcleo: `GO`, zero ALTA/MÉDIA.
 
-A cobertura global mais recente antes do checkpoint passou com 377 testes e
-18 pulados: 94,65% statements, 90,92% branches, 94,94% functions e 97,34%
-lines; o gate crítico de importação ficou em 100% nas quatro métricas.
+A cobertura global no snapshot endurecido passou com 387 testes e 18 pulados:
+94,83% statements, 90,97% branches, 95,64% functions e 97,36% lines; o gate
+crítico de importação ficou em 100% nas quatro métricas. A suíte focada final
+do preview passou 65/65.
 
 ## Provas que não aconteceram
 
@@ -56,6 +61,7 @@ store, arquivo de hosts, MITM, TPROXY, push, PR ou deploy foi usado.
 ## Veredito honesto
 
 O núcleo e a interface da prévia são `BETA`; a capacidade utilizável permanece
-`NOT_CONFIGURED`. Não há base para `PREVIEW_OK`, publicação ou aplicação pronta.
-M1 só fecha quando supervisor, Caddy, isolamento físico e jornada de navegador
-passarem no artefato exato.
+`NOT_CONFIGURED`. A revisão final do núcleo foi `GO`, sem ALTA/MÉDIA. Não há
+base para `PREVIEW_OK`, publicação ou aplicação pronta. M1 só fecha quando
+supervisor, Caddy, isolamento físico e jornada de navegador passarem no
+artefato exato.

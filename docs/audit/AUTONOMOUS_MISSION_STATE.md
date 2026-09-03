@@ -53,11 +53,15 @@ Entregar, em branches empilhadas e sem push/deploy, as etapas M1 a M6: preview s
   `studio-preview` e encerramento pela pessoa.
 - Prova Playwright da jornada registrada em `09348fb`; compila e inclui casos
   adversariais, mas o navegador não executou neste host por runtime ausente.
+- Lifecycle endurecido em `a251fc5`: só um preview físico pode avançar;
+  readiness é obrigatória; heartbeat e ticket usam locks compatíveis; cleanup
+  incompleto permanece `STOPPING`, observável e bloqueia novo runtime.
 - Revisão adversarial do núcleo: `GO`, sem achado ALTO/MÉDIO. Residual: o
   supervisor real deve provar que respeita `AbortSignal` e não deixa runtime
   órfão após timeout.
-- Gates em WSL/ext4: typecheck `PASS`; 64 testes focados `PASS`; i18n 208 chaves
-  `PASS`; domínios `PASS`; builds `PASS`. A suíte Playwright iniciou, mas o
+- Gates em WSL/ext4: typecheck `PASS`; 65 testes focados `PASS`; cobertura
+  global 387 `PASS` e 18 integrações Postgres puladas; i18n 209 chaves `PASS`;
+  domínios `PASS`; builds `PASS`. A suíte Playwright iniciou, mas o
   navegador não abriu por bibliotecas nativas ausentes no host; não é prova E2E.
 - Docker Desktop está indisponível. Supervisor Docker, rede interna sem egress,
   Caddy real e jornada completa de navegador permanecem `NOT_EXECUTED`.
