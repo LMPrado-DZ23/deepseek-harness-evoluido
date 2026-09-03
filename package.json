@@ -22,6 +22,7 @@
     "prove:builder-isolation": "node scripts/prove-builder-isolation.mjs",
     "prove:template-pipeline": "tsx scripts/prove-template-pipeline.ts",
     "prove:generated-data": "tsx scripts/prove-generated-data.ts",
+    "prove:form-database": "tsx scripts/prove-form-database.ts",
     "test:postgres": "node scripts/test-postgres.mjs",
     "test:postgres:coverage": "node scripts/test-postgres.mjs --coverage",
     "test:postgres:runtime": "node scripts/test-postgres.mjs --runtime",

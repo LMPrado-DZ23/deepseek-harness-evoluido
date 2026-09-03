@@ -7,9 +7,11 @@ import { generateDataLayer, writeDataLayer } from './data-generator.js'
 import { renderDesignTokens } from './design.js'
 import { writeAcceptanceArtifacts, type AcceptanceCheck } from './acceptance.js'
 import { generatedFileSchema, writeGeneratedFiles, type GeneratedFile } from './generator.js'
+import { generateFormLayer, writeFormLayer } from './form-generator.js'
 import { assertGeneratedImports } from './import-policy.js'
 import { t } from './i18n.js'
 import type { StudioPlan, StudioRun } from './model.js'
+import { assertCategoryCanGenerate } from './planner.js'
 import type { PromptModelPort } from './ports.js'
 import { ContainerBuilder, listTreeFiles, OFFLINE_PIPELINE_COMMANDS } from './runner.js'
 import { scanGeneratedContent } from './security.js'
@@ -61,6 +63,7 @@ export class PromptToAppPipeline {
     const operationId = runOptions.operationId ?? this.#createId()
     const ownerSessionId = runOptions.ownerSessionId ?? actor.sessionId ?? 'direct-execution'
     const spec = this.options.service.latestSpec(actor, projectId).app_spec
+    assertCategoryCanGenerate(project.category, spec)
     const design = this.options.service.designOrDefault(actor, projectId)
     await this.options.service.putRun(actor, this.runRecord(actor, projectId, plan.plan_id, 'generate', 1, 'PENDING', 'full', 'not-created', null, null, operationId, operationId, ownerSessionId))
     if (isAborted(runOptions.signal)) return this.cancelled(actor, projectId, plan.plan_id, operationId, ownerSessionId, 0)
@@ -79,6 +82,7 @@ export class PromptToAppPipeline {
       await mkdir(resolve(runDirectory, 'src', 'styles'), { recursive: true })
       await writeFile(resolve(runDirectory, 'src', 'styles', 'tokens.css'), renderDesignTokens(design), { encoding: 'utf8', flag: 'wx' })
       await writeDataLayer(runDirectory, generateDataLayer(spec))
+      await writeFormLayer(runDirectory, generateFormLayer(spec, project.category))
       await this.options.service.putRun(actor, this.runRecord(actor, projectId, plan.plan_id, 'generate', attempt, 'RUNNING', 'full', runDirectory, null, null, runId, operationId, ownerSessionId))
       const protectedTemplatePaths = await listTreeFiles(runDirectory)
       const immutableBefore = await immutableHash(runDirectory, protectedTemplatePaths)
@@ -92,7 +96,7 @@ export class PromptToAppPipeline {
           plannedPaths: plan.slices.flatMap(slice => slice.planned_files),
           protectedTemplatePaths,
         })
-        await writeAcceptanceArtifacts(runDirectory, spec)
+        await writeAcceptanceArtifacts(runDirectory, spec, project.category)
       } catch (error) {
         diagnostic = error instanceof Error ? error.message : 'GENERATED_OUTPUT_REJECTED'
         finalFailureState = 'BUILD_FAILED'

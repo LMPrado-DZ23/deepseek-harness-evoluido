@@ -40,7 +40,7 @@ async function fixture(options: { readonly preflight?: 'OK' | 'BLOCKED_EXTERNAL'
   let state = 'PLAN_APPROVED'
   const runs: StudioRun[] = []; const transitions: string[] = []; const evidence: unknown[] = []
   const service = {
-    project: vi.fn(() => ({ state })), plan: vi.fn(() => plan), latestSpec: vi.fn(() => ({ app_spec: spec })),
+    project: vi.fn(() => ({ state, category: 'landing-page' })), plan: vi.fn(() => plan), latestSpec: vi.fn(() => ({ app_spec: spec })),
     designOrDefault: vi.fn(() => createDesignSpec({ preset: 'modern' })),
     transition: vi.fn(async (_actor, _projectId, to: string) => { state = to; transitions.push(to); return { state } }),
     putRun: vi.fn(async (_actor, run: StudioRun) => { runs.push(run) }),

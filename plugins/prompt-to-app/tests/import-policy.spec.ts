@@ -50,7 +50,7 @@ describe('generated import policy', () => {
   it('accepts every explicit protected facade prefix with a safe suffix', () => {
     expect(() => assertGeneratedImports([{ path: 'src/a.ts', content: [
       "import a from '@/src/server/repositories/a'", "import b from '@/server/repositories/b'",
-      "import c from '@/src/components/ui/c'", "import d from '@/components/ui/d'", 'void a; void b; void c; void d',
+      "import c from '@/src/components/ui/c'", "import d from '@/components/ui/d'", "import e from '@/src/components/generated/contato-manager'", "import f from '@/components/generated/contato-manager'", 'void a; void b; void c; void d; void e; void f',
     ].join(';') }])).not.toThrow()
   })
 })

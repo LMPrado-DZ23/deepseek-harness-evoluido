@@ -92,13 +92,18 @@ pnpm build:edge
 pnpm prove:edge
 pnpm preflight:fase3
 pnpm prove:fase3-agents
+pnpm prove:generated-data
+pnpm prove:form-database
+pnpm golden
 ```
 
-No gate puro atual, 268 testes passam e os 18 casos que exigem PostgreSQL real
+No gate puro atual, os testes unitários passam e os 18 casos que exigem PostgreSQL real
 ficam explicitamente pulados; a execução PostgreSQL do P31-A permanece
 registrada na prova própria, sem ser apresentada como reexecução desta fatia.
-O gerador de dados e o gate estrutural de imports estão em 100% nas quatro
-métricas, e a cobertura global permanece acima de 90%. A prova de borda
+O gerador de dados, o gerador de cadastro/lista e o gate estrutural de imports
+são medidos separadamente, e a cobertura global permanece acima de 90%. A
+prova executável da categoria de cadastro preenche, salva em SQLite e encontra
+o registro na lista. A prova de borda
 usa Docker e exige que as
 dependências do profile também tenham sido instaladas com
 `pnpm --dir dsh-home/profiles/studio install --frozen-lockfile`. Isso não inclui

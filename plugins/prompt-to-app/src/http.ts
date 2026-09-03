@@ -16,7 +16,8 @@ import { t } from './i18n.js'
 import { intakeAnswerSchema, nextIntakeQuestion, type IntakeConversation, type IntakeEngine } from './intake.js'
 import type { CodeGeneratorPort } from './pipeline.js'
 import type { PromptToAppJobService } from './jobs.js'
-import type { PlannerEngine } from './planner.js'
+import { FormCategoryCapabilityError, type PlannerEngine } from './planner.js'
+import { studioProjectCategorySchema } from './model.js'
 import type { LogoProcessorPort } from './logo.js'
 import { PromptToAppError, type PromptToAppActor, type PromptToAppService } from './service.js'
 import { InvalidTransitionError } from './state.js'
@@ -26,7 +27,7 @@ const LOGO_LIMIT = 2 * 1024 * 1024
 const createProjectSchema = z.object({
   name: z.string().trim().min(1).max(120),
   original_brief: z.string().trim().min(10).max(10_000),
-  category: z.enum(['landing-page', 'catalog']),
+  category: studioProjectCategorySchema,
   privacy: z.enum(['local-only', 'any']),
 }).strict()
 const answerSchema = intakeAnswerSchema.extend({ confirm_sensitive: z.boolean().optional() }).strict()
@@ -122,7 +123,7 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
         const spec = config.service.latestSpec(actor, projectId)
         const previous = optional(() => config.service.plan(actor, projectId))
         const output = await config.planner.plan(
-          { orgId: actor.orgId, tenantId: actor.tenantId }, project.privacy, spec.app_spec,
+          { orgId: actor.orgId, tenantId: actor.tenantId }, project.privacy, spec.app_spec, project.category,
           previous?.status === 'CHANGE_REQUESTED' ? previous.change_request ?? undefined : undefined,
         )
         return json(response, 201, { plan: await config.service.proposePlan(actor, projectId, output.slices) })
@@ -234,6 +235,7 @@ function statusOf(error: unknown): number {
   if (error instanceof IdentityError) return error.code === 'locked' ? 429 : 401
   if (error instanceof TenancyError) return error.code === 'not-found' ? 404 : error.code === 'forbidden' ? 403 : 400
   if (error instanceof PromptToAppError) return error.code === 'NOT_FOUND' ? 404 : error.code === 'FORBIDDEN' ? 403 : error.code === 'REPLAY' ? 409 : 400
+  if (error instanceof FormCategoryCapabilityError) return 409
   if (error instanceof InvalidTransitionError) return 409
   if (error instanceof z.ZodError || error instanceof SyntaxError) return 400
   return 500

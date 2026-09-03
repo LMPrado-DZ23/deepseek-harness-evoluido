@@ -165,11 +165,12 @@ function decodeExpression(field: PreparedField, expression: string): string { re
 function quoteId(value: string): string { return `"${value.replaceAll('"', '""')}"` }
 function sqlString(value: string): string { return `'${value.replaceAll("'", "''")}'` }
 function comparable(value: string): string { return value.normalize('NFKC').trim().toLocaleLowerCase('pt-BR') }
-function identifier(value: string): string {
+export function dataIdentifier(value: string): string {
   const normalized = value.normalize('NFD').replace(/[\u0300-\u036f]/gu, '').toLocaleLowerCase('en-US').replace(/[^a-z0-9]+/gu, '_').replace(/^_+|_+$/gu, '')
   const safe = normalized || 'item'
   return /^\d/u.test(safe) ? `item_${safe}` : safe
 }
+const identifier = dataIdentifier
 function pascal(value: string): string { return value.split('_').map(part => `${part.charAt(0).toUpperCase()}${part.slice(1)}`).join('') }
 function fixtureValue(field: PreparedField, alternate: boolean): unknown {
   if (!field.required && !alternate) return undefined

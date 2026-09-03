@@ -6,7 +6,8 @@
     "title": "Vamos criar seu aplicativo", "subtitle": "Conte com suas palavras o que você precisa",
     "placeholder": "Ex.: Preciso de uma página para apresentar meu trabalho e receber contatos.",
     "suggestions": "Sugestões para começar", "landing": "Quero uma página para apresentar meu trabalho ou negócio.",
-    "catalog": "Quero um catálogo para mostrar meus produtos ou serviços.", "coming": "Outros tipos estarão disponíveis em breve.",
+    "catalog": "Quero um catálogo para mostrar meus produtos ou serviços.",
+    "formDatabase": "Quero cadastrar informações e vê-las em uma lista.", "coming": "Agenda, painéis completos e áreas de acesso estarão disponíveis em etapas futuras.",
     "continue": "Continuar", "advanced": "Opções avançadas", "counter": "de 1000 caracteres",
     "empty": "Conte sua ideia para continuar."
   },

@@ -17,12 +17,15 @@ const scope = {
 const timestamp = z.iso.datetime()
 const sha256 = z.string().regex(/^[a-f0-9]{64}$/)
 
+export const studioProjectCategorySchema = z.enum(['landing-page', 'catalog', 'form-database', 'crud-panel', 'saas-authenticated', 'dashboard'])
+export type StudioProjectCategory = z.infer<typeof studioProjectCategorySchema>
+
 export const studioProjectSchema = z.object({
   project_id: z.string().min(1), ...scope,
   name: z.string().min(1).max(120),
   state: projectStateSchema,
   original_brief: z.string().min(1).max(10_000),
-  category: z.enum(['landing-page', 'catalog']),
+  category: studioProjectCategorySchema,
   created_by: z.string().min(1),
   privacy: z.enum(['local-only', 'any']),
   created_at: timestamp,
@@ -75,8 +78,15 @@ export const studioRunSchema = z.object({
   failure_code: z.string().nullable(),
   acceptance_checks: z.array(z.object({
     id: z.string().min(1), label: z.string().min(1),
-    kind: z.enum(['language', 'title', 'page', 'section', 'entity', 'criterion']),
+    kind: z.enum(['language', 'title', 'page', 'section', 'entity', 'criterion', 'flow']),
     expected: z.string().optional(),
+    flow: z.object({
+      form_test_id: z.string().min(1), list_test_id: z.string().min(1), marker_field: z.string().min(1),
+      fields: z.array(z.object({
+        name: z.string().min(1), type: z.enum(['text', 'number', 'date', 'boolean', 'email', 'phone', 'selection', 'reference']),
+        required: z.boolean(), options: z.array(z.string()).optional(),
+      }).strict()).min(1),
+    }).strict().optional(),
     status: z.enum(['PENDING', 'PASSED', 'FAILED', 'NOT_AUTOMATED']),
   }).strict()),
 }).strict()
@@ -110,7 +120,7 @@ export const studioAppSpecsDomainSpec = defineDomain({ name: 'studio_app_specs',
 export const studioDesignSpecsDomainSpec = defineDomain({ name: 'studio_design_specs', version: 1, tables: { designs: domainTable<PromptToAppKey, StudioDesignSpecRecord>(studioDesignSpecRecordSchema) } })
 export const studioIntakeTurnsDomainSpec = defineDomain({ name: 'studio_intake_turns', version: 1, tables: { turns: domainTable<PromptToAppKey, StudioIntakeTurn>(studioIntakeTurnSchema) } })
 export const studioPlansDomainSpec = defineDomain({ name: 'studio_plans', version: 1, tables: { plans: domainTable<PromptToAppKey, StudioPlan>(studioPlanSchema) } })
-export const studioRunsDomainSpec = defineDomain({ name: 'studio_runs', version: 2, tables: { runs: domainTable<PromptToAppKey, StudioRun>(studioRunSchema) } })
+export const studioRunsDomainSpec = defineDomain({ name: 'studio_runs', version: 3, tables: { runs: domainTable<PromptToAppKey, StudioRun>(studioRunSchema) } })
 export const studioEvidenceDomainSpec = defineDomain({ name: 'studio_evidence', version: 1, tables: { evidence: domainTable<PromptToAppKey, StudioEvidence>(studioEvidenceSchema) } })
 export const studioApprovalsDomainSpec = defineDomain({ name: 'studio_approvals', version: 1, tables: { approvals: domainTable<PromptToAppKey, StudioApproval>(studioApprovalSchema) } })
 

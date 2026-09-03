@@ -111,6 +111,11 @@ describe('prompt-to-app HTTP boundary', () => {
     const details = await (await f.request(`/projects/${f.repository.projectRows[0]!.project_id}`)).json() as { design: { version: number }; runs: unknown[] }
     expect(details).toMatchObject({ design: { version: 2 }, runs: [] })
     expect((await f.request('/projects')).status).toBe(200)
+    const form = await f.request('/projects', { method: 'POST', body: JSON.stringify({
+      name: 'Cadastro', original_brief: 'Quero cadastrar contatos e consultar uma lista.', category: 'form-database', privacy: 'local-only',
+    }) })
+    expect(form.status).toBe(201)
+    expect(f.repository.projectRows.at(-1)).toMatchObject({ category: 'form-database', org_id: 'org-a', tenant_id: 'tenant-a' })
   })
 
   it('runs idea through questions, plan approval and generation without skipping approval', async () => {

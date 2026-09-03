@@ -7,10 +7,12 @@ import { t } from './i18n.js'
 const ALLOWED_MODULES = new Set([
   'react', 'react/jsx-runtime', 'next/link', 'next/navigation',
   'react-hook-form', '@hookform/resolvers/zod', 'zod',
+  '@/src/components/generated', '@/components/generated',
   '@/src/lib/utils', '@/lib/utils',
 ])
 const ALLOWED_PREFIXES = [
   '@/src/server/repositories/', '@/server/repositories/',
+  '@/src/components/generated/', '@/components/generated/',
   '@/src/components/ui/', '@/components/ui/',
 ] as const
 

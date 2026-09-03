@@ -151,9 +151,10 @@ o E2E móvel mostra o plano inteiro antes da aprovação.
 - upstream permanece limpo no pin
   `6c705be1ce6774a000d061da41d1823b03a3d42c`.
 
-Classificação mantida: landing/catalog = **BETA**; agenda/CRM/painel/portal =
-`NOT_IMPLEMENTED`; preview/publicação = `NOT_PRESENT`; LLM real e celular físico
-= `NOT_EXECUTED`; experiência leiga = `NOT_VALIDATED`. O repositório continua
+Classificação naquele fechamento: landing/catalog = **BETA**; formulário+banco,
+painel CRUD, SaaS autenticado e dashboard = `NOT_IMPLEMENTED`;
+preview/publicação = `NOT_PRESENT`; LLM real e celular físico = `NOT_EXECUTED`;
+experiência leiga = `NOT_VALIDATED`. O repositório continua
 não redistribuível até a escolha e aplicação da licença open source.
 
 Base anterior à E4: `codex/p30-policy-foundation@c8d73f5`. A Fase 3 está fechada e integrada
@@ -218,3 +219,38 @@ métricas; PoC 3A, runtime, edge, Postgres runtime, domínios e P37 em PASS/GO.
 
 Arquivos principais: `plugins/agents`, `plugins/route-health`,
 `dsh-home/profiles/studio/cordis.patch.yml`, ADR-014, ADR-015 e prova P35.
+
+## P32/P33 fatia 2 — bloco 5 cadastro e lista
+
+Branch de trabalho: `codex/p32-fatia2-prompt-to-app`. Base dos blocos 1–4:
+`c13ce6e`. Este bloco ainda não foi mesclado, enviado ou implantado.
+
+- A taxonomia foi alinhada à D21: `form-database`, `crud-panel`,
+  `saas-authenticated`, `landing-page`, `catalog` e `dashboard`. A interface
+  mostra “cadastrar informações e vê-las em uma lista”, não o identificador.
+- `FormCategoryCapabilityError` recusa falta de entidade, dados sensíveis,
+  referência obrigatória sem painel e plano sem `src/GeneratedApp.tsx` antes
+  de a saída do modelo ser aplicada.
+- O Studio gera Server Actions e componentes de formulário/lista protegidos;
+  o modelo pode importá-los, mas não altera banco, migrações, repositórios ou
+  ações.
+- O compilador de aceitação gera Playwright para preencher, salvar e exigir o
+  valor na lista. A prova `pnpm prove:form-database` passou com SQLite em
+  arquivo, 9 caminhos protegidos, 12 checks e 4 etapas offline na imagem
+  `sha256:c5708d3fff608da8d916fb5ae79dc3e4eba495fca376134a7c607a8e2216405d`.
+- Golden set: 18 totais, 8 `PASS_DETERMINISTIC`, 10 `NOT_IMPLEMENTED`, LLM
+  real `NOT_EXECUTED`. `form-database-02` continua bloqueado até a autenticação
+  gerada.
+- Gates da árvore antes do commit: typecheck PASS; 273 testes PASS e 18 casos
+  PostgreSQL pulados no gate puro; cobertura global 94,70% statements e 90,83%
+  branches; `form-generator.ts` e `planner.ts` em 100% nas quatro métricas;
+  i18n PASS com 195 chaves; domínios PASS; build dos 10 pacotes PASS; P37 no
+  `git archive` PASS com 414 arquivos, 14 manifestos e zero achado, e self-test
+  negativo PASS para MITM, `freestyle` e `caveman-shrink`.
+- Não há preview, publicação, deploy, segredo ou alteração no upstream.
+
+Arquivos centrais para revisão: `src/form-generator.ts`, `src/planner.ts`,
+`src/acceptance.ts`, `src/pipeline.ts`, `scripts/prove-form-database.ts`,
+`scripts/run-golden-set.ts`, ADR-026 e a capability matrix. Confirmar em
+especial que nenhum dado sensível chega ao modelo nessa categoria e que os
+componentes determinísticos entram na foto imutável antes da geração.

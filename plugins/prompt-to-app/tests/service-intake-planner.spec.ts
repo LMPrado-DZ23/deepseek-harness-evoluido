@@ -126,4 +126,24 @@ describe('intake and planner', () => {
     await expect(new PlannerEngine(model).plan({ orgId: 'o', tenantId: 't' }, 'local-only', validSpec)).resolves.toMatchObject({ slices: [{ title: 'Página' }] })
     expect(complete.mock.calls.every(call => call[2] === 'local-only')).toBe(true)
   })
+
+  it('plans the public form category and refuses sensitive or incomplete forms until login exists', async () => {
+    const databaseSpec: AppSpecV1 = { ...validSpec, entities: [{
+      name: 'Contato', kind: 'database', sensitive: false,
+      fields: [{ name: 'Nome', type: 'text', required: true }, { name: 'E-mail', type: 'email', required: false }],
+    }] }
+    const complete = vi.fn().mockResolvedValue({
+      value: { slices: [{ slice_id: 'form', title: 'Cadastro e lista', description: 'Cadastrar e consultar', acceptance_criteria: ['O cadastro aparece na lista'], planned_files: ['src/GeneratedApp.tsx'] }] },
+      route: 'ollama', model: 'qwen',
+    })
+    const planner = new PlannerEngine({ complete })
+    await expect(planner.plan({ orgId: 'o', tenantId: 't' }, 'local-only', databaseSpec, 'form-database')).resolves.toMatchObject({ slices: [{ slice_id: 'form' }] })
+    expect(complete.mock.calls[0]![3]).toContain('@/src/components/generated/')
+    await expect(planner.plan({ orgId: 'o', tenantId: 't' }, 'local-only', validSpec, 'form-database')).rejects.toMatchObject({ code: 'FORM_DATABASE_REQUIRED' })
+    await expect(planner.plan({ orgId: 'o', tenantId: 't' }, 'local-only', {
+      ...databaseSpec, sensitive_data: { detected: ['financial'], confirmed_by_user: true },
+    }, 'form-database')).rejects.toMatchObject({ code: 'AUTH_REQUIRED_FOR_SENSITIVE_FORM' })
+    complete.mockResolvedValueOnce({ value: { slices: [{ slice_id: 'bad', title: 'Incompleto', description: 'Sem entrada', acceptance_criteria: ['Visível'], planned_files: ['content/app.json'] }] }, route: 'ollama', model: 'qwen' })
+    await expect(planner.plan({ orgId: 'o', tenantId: 't' }, 'local-only', databaseSpec, 'form-database')).rejects.toMatchObject({ code: 'FORM_ENTRY_FILE_REQUIRED' })
+  })
 })

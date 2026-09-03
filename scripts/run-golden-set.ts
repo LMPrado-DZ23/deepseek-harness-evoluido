@@ -3,11 +3,15 @@ import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { ContainerBuilder, OFFLINE_PIPELINE_COMMANDS } from '../plugins/prompt-to-app/src/runner.js'
 import { scanGeneratedContent } from '../plugins/prompt-to-app/src/security.js'
+import type { AppSpecV1 } from '../plugins/prompt-to-app/src/appspec.js'
+import { generateDataLayer, writeDataLayer } from '../plugins/prompt-to-app/src/data-generator.js'
+import { generateFormLayer, writeFormLayer } from '../plugins/prompt-to-app/src/form-generator.js'
+import { writeAcceptanceArtifacts } from '../plugins/prompt-to-app/src/acceptance.js'
 
 type GoldenState = 'PASS_DETERMINISTIC' | 'NOT_IMPLEMENTED'
 interface Criterion {
   readonly id: string
-  readonly category: 'landing-page' | 'catalog' | 'scheduling' | 'crm' | 'dashboard' | 'portal'
+  readonly category: 'landing-page' | 'catalog' | 'form-database' | 'crud-panel' | 'saas-authenticated' | 'dashboard'
   readonly sensitive: boolean
   readonly acceptance: readonly string[]
 }
@@ -16,7 +20,7 @@ const root = process.cwd()
 const briefsDir = resolve(root, 'golden-set/briefs')
 const criteriaDir = resolve(root, 'golden-set/criteria')
 const reportsDir = resolve(root, 'golden-set/reports')
-const implemented = new Set<Criterion['category']>(['landing-page', 'catalog'])
+const implemented = new Set<Criterion['category']>(['landing-page', 'catalog', 'form-database'])
 const realLlmRequested = process.env.DZ23_GOLDEN_LLM === '1'
 
 if (realLlmRequested) {
@@ -45,7 +49,7 @@ try {
     const briefPath = resolve(briefsDir, `${criterion.id}.md`)
     const brief = await readFile(briefPath, 'utf8')
     if (brief.trim().length < 40 || criterion.acceptance.length < 3) throw new Error(`Fixture incompleta: ${criterion.id}`)
-    if (!implemented.has(criterion.category)) {
+    if (!implemented.has(criterion.category) || (criterion.category === 'form-database' && criterion.sensitive)) {
       results.push({ id: criterion.id, category: criterion.category, state: 'NOT_IMPLEMENTED', critical: 'NOT_EXECUTED', detail: 'Categoria declarada, ainda sem executor.' })
       continue
     }
@@ -55,7 +59,7 @@ try {
     await mkdir(resolve(runDirectory, 'content'), { recursive: true })
     await mkdir(resolve(runDirectory, 'src/styles'), { recursive: true })
     await writeFile(resolve(runDirectory, 'src/styles/tokens.css'), ':root { --background: 0 0% 100%; --foreground: 222 47% 11%; --card: 0 0% 100%; --card-foreground: 222 47% 11%; --primary: 222 72% 32%; --primary-foreground: 0 0% 100%; --secondary: 214 32% 91%; --secondary-foreground: 222 47% 11%; --muted: 210 40% 96%; --muted-foreground: 215 16% 40%; --accent: 214 100% 93%; --accent-foreground: 222 72% 26%; --destructive: 0 72% 45%; --border: 214 32% 88%; --input: 214 32% 88%; --ring: 217 91% 50%; --radius: 0.75rem; --font-body: sans-serif; }\n')
-    const title = criterion.category === 'catalog' ? 'Catálogo local' : 'Página de apresentação'
+    const title = criterion.category === 'catalog' ? 'Catálogo local' : criterion.category === 'form-database' ? 'Reservas' : 'Página de apresentação'
     const description = criterion.category === 'catalog'
       ? 'Produtos e serviços apresentados de forma clara e acessível.'
       : criterion.id === 'landing-01'
@@ -66,11 +70,19 @@ try {
       if (scanGeneratedContent({ fixture: 'CPF 123.456.789-00' }).length !== 0) throw new Error('catalog-03: CPF inválido virou falso positivo.')
     }
     const content = JSON.stringify({ title, description }, null, 2)
-    const component = `export default function GeneratedApp() {\n  return <main><h1>${title}</h1><p>${escapeJsx(description)}</p></main>\n}\n`
+    const formSpec = criterion.category === 'form-database' ? formDatabaseSpec(criterion, brief) : undefined
+    const component = formSpec === undefined
+      ? `export default function GeneratedApp() {\n  return <main><h1>${title}</h1><p>${escapeJsx(description)}</p></main>\n}\n`
+      : `import ReservaManager from '@/src/components/generated/reserva-manager'\n\nexport default function GeneratedApp() {\n  return <main><h1>Reservas</h1><p>Cadastro</p><p>Lista</p><ReservaManager /></main>\n}\n`
     const findings = scanGeneratedContent({ 'content/app.json': content, 'src/GeneratedApp.tsx': component })
     if (findings.length > 0) throw new Error(`${criterion.id}: controle crítico recusou ${findings.join(', ')}`)
     await writeFile(resolve(runDirectory, 'content/app.json'), content)
     await writeFile(resolve(runDirectory, 'src/GeneratedApp.tsx'), component)
+    if (formSpec !== undefined) {
+      await writeDataLayer(runDirectory, generateDataLayer(formSpec))
+      await writeFormLayer(runDirectory, generateFormLayer(formSpec, 'form-database'))
+      await writeAcceptanceArtifacts(runDirectory, formSpec, 'form-database')
+    }
     for (const command of OFFLINE_PIPELINE_COMMANDS) {
       const result = await builder.execute(runDirectory, command)
       if (result.exitCode !== 0 || result.timedOut) throw new Error(`${criterion.id}: ${command} falhou.`)
@@ -102,7 +114,7 @@ await writeFile(resolve(reportsDir, `${stamp}-deterministic.md`), [
   '# Golden set — execução determinística', '',
   '- LLM real: **NOT_EXECUTED**', '- Elegível para promoção: **não**',
   `- Fixtures: ${report.counts.total}; executáveis: ${report.counts.pass_deterministic}; NOT_IMPLEMENTED: ${report.counts.not_implemented}.`,
-  '- As seis fixtures executáveis passaram por build, Vitest, Playwright, axe e scan dentro do contêiner sem rede.',
+  `- As ${report.counts.pass_deterministic} fixtures executáveis passaram por build, Vitest, Playwright, axe e scan dentro do contêiner sem rede.`,
   '', '| Brief | Categoria | Estado | Controle crítico |', '| --- | --- | --- | --- |',
   ...results.map(value => `| ${value.id} | ${value.category} | ${value.state} | ${value.critical} |`), '',
   'Este relatório não valida qualidade com modelo real e não promove o produto.', '',
@@ -111,4 +123,18 @@ process.stdout.write(`GOLDEN_SET=PASS_DETERMINISTIC total=${results.length} exec
 
 function escapeJsx(value: string): string {
   return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('{', '&#123;').replaceAll('}', '&#125;').replaceAll('`', "'")
+}
+
+function formDatabaseSpec(criterion: Criterion, brief: string): AppSpecV1 {
+  return {
+    schema_version: 1, problem: brief.trim(), audience: 'Clientes e equipe da pequena empresa', journeys: ['Cadastrar e consultar reservas'],
+    pages: [{ name: 'Reservas', sections: ['Cadastro', 'Lista'] }],
+    entities: [{
+      name: 'Reserva', kind: 'database', sensitive: false,
+      fields: [{ name: 'Nome', type: 'text', required: true }, { name: 'Data', type: 'date', required: true }, { name: 'Horário', type: 'text', required: true }],
+    }],
+    sensitive_data: { detected: [], confirmed_by_user: false },
+    accessibility: { wcag_level: 'AA', keyboard_required: true, reduced_motion: true }, language: 'pt-BR',
+    acceptance_criteria: [...criterion.acceptance],
+  }
 }

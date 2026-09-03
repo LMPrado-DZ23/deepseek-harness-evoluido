@@ -58,6 +58,10 @@
     "designContrast": "A combinação de cores não atinge contraste AA.",
     "designPrimary": "Escolha a cor principal da sua marca.",
     "invalidLogo": "Envie uma imagem PNG ou JPEG de até 2 MB."
+    ,"formDatabaseRequired": "Para criar cadastro e lista, diga quais informações precisam ser guardadas."
+    ,"sensitiveFormRequiresLogin": "Este cadastro envolve dados sensíveis. O Studio só poderá criá-lo depois que a proteção por login estiver instalada na próxima etapa."
+    ,"formReferenceRequiresCrud": "Este cadastro depende de outro cadastro obrigatório. Essa ligação será liberada junto com o painel completo na próxima etapa."
+    ,"formEntryFileRequired": "O plano precisa incluir a tela principal de cadastro e lista."
   },
   "pipeline": {
     "verified": "Protótipo verificado — não está publicado nem disponível para outras pessoas",
@@ -82,6 +86,7 @@
     "planCriteria": "Cada fatia precisa de título, descrição e critérios de aceite testáveis.",
     "planFiles": "Cada fatia precisa listar planned_files. Use somente caminhos sob src/ ou content/.",
     "planFirst": "A primeira fatia deve criar content/app.json e src/GeneratedApp.tsx; estilos adicionais ficam em src/generated.css.",
+    "planFormDatabase": "Para a categoria de cadastro e lista, a tela principal deve importar os componentes protegidos de @/src/components/generated/, mostrar os campos, salvar e exibir a lista. O modelo nunca cria banco, migração, repositório ou ação de gravação.",
     "changeRequest": "Pedido de mudança da pessoa: {reason}",
     "generateOnly": "Produza somente JSON com files[].path e files[].content.",
     "generatePaths": "Caminhos permitidos: src/ e content/. Não gere configuração, dependências ou scripts.",

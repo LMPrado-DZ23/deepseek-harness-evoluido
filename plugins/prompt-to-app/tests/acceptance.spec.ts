@@ -27,4 +27,19 @@ describe('AppSpec acceptance compiler', () => {
     expect(await readFile(resolve(root, 'tests/e2e/appspec.spec.ts'), 'utf8')).toContain("getByText(\"Fale conosco\"")
     expect(JSON.parse(await readFile(resolve(root, 'evidence/appspec-report.json'), 'utf8')).checks).toHaveLength(checks.length)
   })
+
+  it('compiles fill, save and list evidence for a database form', async () => {
+    const databaseSpec = { ...spec, entities: [{ name: 'Contato', kind: 'database' as const, sensitive: false, fields: [
+      { name: 'Nome', type: 'text' as const, required: true },
+      { name: 'E-mail', type: 'email' as const, required: false },
+    ] }] }
+    const checks = acceptanceChecks(databaseSpec, 'form-database')
+    expect(checks).toContainEqual(expect.objectContaining({ kind: 'flow', flow: expect.objectContaining({ form_test_id: 'contato-form', list_test_id: 'contato-list', marker_field: 'nome' }) }))
+    const root = await mkdtemp(join(tmpdir(), 'dz23-acceptance-flow-')); roots.push(root)
+    await writeAcceptanceArtifacts(root, databaseSpec, 'form-database')
+    const generated = await readFile(resolve(root, 'tests/e2e/appspec.spec.ts'), 'utf8')
+    expect(generated).toContain('getByTestId("contato-form")')
+    expect(generated).toContain('getByTestId("contato-list")')
+    expect(generated).toContain("getByRole('button', { name: 'Salvar' })")
+  })
 })
