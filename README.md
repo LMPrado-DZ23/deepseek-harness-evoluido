@@ -45,6 +45,13 @@ Claude Code reais continuam `NOT_EXECUTED`. Consulte
 [ADR-015](./docs/adr/ADR-015-isolated-agents.md) e a
 [prova P35](./docs/pocs/P35-phase3-agents-routes-proof.md).
 
+O bloco 4 da fatia 2 gera a camada de dados dos protótipos em `node:sqlite`:
+esquema Zod, migrações versionadas e repositórios são protegidos e nunca vêm do
+modelo de linguagem. A prova executou CRUD real dentro do construtor sem rede.
+Formulários, autenticação, preview e publicação ainda não fazem parte dessa
+capacidade; consulte a [ADR-023](./docs/adr/ADR-023-generated-sqlite-data-layer.md)
+e a [prova focada](./docs/proofs/P32-generated-data-proof.md).
+
 Consulte [REPORT.md](./REPORT.md) para comandos, resultados, erros e limitações.
 
 Decisões relacionadas:
@@ -87,9 +94,11 @@ pnpm preflight:fase3
 pnpm prove:fase3-agents
 ```
 
-Resultado atual com PostgreSQL 16 real: 174 testes aprovados e 100% de
-statements, branches, functions e lines nos pacotes do Studio. Sem Docker, 156
-passam e os 18 casos PostgreSQL ficam explicitamente pulados. A prova de borda
+No gate puro atual, 268 testes passam e os 18 casos que exigem PostgreSQL real
+ficam explicitamente pulados; a execução PostgreSQL do P31-A permanece
+registrada na prova própria, sem ser apresentada como reexecução desta fatia.
+O gerador de dados e o gate estrutural de imports estão em 100% nas quatro
+métricas, e a cobertura global permanece acima de 90%. A prova de borda
 usa Docker e exige que as
 dependências do profile também tenham sido instaladas com
 `pnpm --dir dsh-home/profiles/studio install --frozen-lockfile`. Isso não inclui

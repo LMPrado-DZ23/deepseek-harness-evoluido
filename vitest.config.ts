@@ -38,6 +38,7 @@ export default defineConfig({
         'plugins/agents/src/{model,service}.ts': { 100: true },
         'plugins/route-health/src/{model,service}.ts': { 100: true },
         'plugins/prompt-to-app/src/{model,security,state}.ts': { 100: true },
+        'plugins/prompt-to-app/src/{data-generator,import-policy}.ts': { 100: true },
       },
     },
   },

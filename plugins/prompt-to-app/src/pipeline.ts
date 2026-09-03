@@ -3,9 +3,11 @@ import { cp, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { z } from 'zod'
 import type { AppSpecV1 } from './appspec.js'
+import { generateDataLayer, writeDataLayer } from './data-generator.js'
 import { renderDesignTokens } from './design.js'
 import { writeAcceptanceArtifacts, type AcceptanceCheck } from './acceptance.js'
 import { generatedFileSchema, writeGeneratedFiles, type GeneratedFile } from './generator.js'
+import { assertGeneratedImports } from './import-policy.js'
 import { t } from './i18n.js'
 import type { StudioPlan, StudioRun } from './model.js'
 import type { PromptModelPort } from './ports.js'
@@ -76,6 +78,7 @@ export class PromptToAppPipeline {
       await mkdir(this.options.runsRoot, { recursive: true }); await cp(this.options.templateDirectory, runDirectory, { recursive: true, errorOnExist: true })
       await mkdir(resolve(runDirectory, 'src', 'styles'), { recursive: true })
       await writeFile(resolve(runDirectory, 'src', 'styles', 'tokens.css'), renderDesignTokens(design), { encoding: 'utf8', flag: 'wx' })
+      await writeDataLayer(runDirectory, generateDataLayer(spec))
       await this.options.service.putRun(actor, this.runRecord(actor, projectId, plan.plan_id, 'generate', attempt, 'RUNNING', 'full', runDirectory, null, null, runId, operationId, ownerSessionId))
       const protectedTemplatePaths = await listTreeFiles(runDirectory)
       const immutableBefore = await immutableHash(runDirectory, protectedTemplatePaths)
@@ -84,6 +87,7 @@ export class PromptToAppPipeline {
       try {
         generated = await generator.generate(spec, plan, previousDiagnostic)
         diagnostic = undefined
+        assertGeneratedImports(generated.files)
         await writeGeneratedFiles(runDirectory, generated.files, {
           plannedPaths: plan.slices.flatMap(slice => slice.planned_files),
           protectedTemplatePaths,

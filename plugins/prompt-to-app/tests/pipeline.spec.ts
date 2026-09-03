@@ -124,6 +124,19 @@ describe('Prompt-to-App pipeline', () => {
     expect(f.transitions).toEqual(['GENERATING', 'BUILD_FAILED'])
   })
 
+  it('rejects forbidden imports before writing or running builder commands', async () => {
+    const f = await fixture()
+    const generator = { generate: vi.fn(async () => ({
+      ...cleanGeneration,
+      files: [{ path: 'src/GeneratedApp.tsx', content: "import { readFile } from 'node:fs'; export default function App(){ return null }; void readFile" }],
+    })) }
+    const result = await f.pipeline.run(actor, 'project', generator)
+    expect(result).toMatchObject({ state: 'BUILD_FAILED', attempts: 3 })
+    expect(result.message).toContain('node:fs')
+    expect(f.execute).not.toHaveBeenCalled()
+    expect(f.runs.filter(run => run.state === 'FAILED')).toHaveLength(3)
+  })
+
   it('blocks before generation when the isolated builder is unavailable', async () => {
     const f = await fixture({ preflight: 'BLOCKED_EXTERNAL' }); const generator = { generate: vi.fn(async () => cleanGeneration) }
     await expect(f.pipeline.run(actor, 'project', generator)).resolves.toEqual({ state: 'BLOCKED_EXTERNAL', attempts: 0, message: 'Construtor indisponível.' })

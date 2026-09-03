@@ -5,6 +5,46 @@ import { t } from './i18n.js'
 export const sensitiveDataKindSchema = z.enum(['cpf', 'health', 'financial', 'minors'])
 export type SensitiveDataKind = z.infer<typeof sensitiveDataKindSchema>
 
+export const entityFieldTypeSchema = z.enum([
+  'text', 'number', 'date', 'boolean', 'email', 'phone', 'selection', 'reference',
+])
+export type EntityFieldType = z.infer<typeof entityFieldTypeSchema>
+
+const databaseFieldSchema = z.object({
+  name: z.string().min(1).max(80),
+  type: entityFieldTypeSchema,
+  required: z.boolean().default(false),
+  options: z.array(z.string().min(1).max(120)).min(1).max(50).optional(),
+  reference_entity: z.string().min(1).max(80).optional(),
+}).strict().superRefine((field, context) => {
+  if (field.type === 'selection' && field.options === undefined) {
+    context.addIssue({ code: 'custom', path: ['options'], message: t('errors.selectionOptionsRequired') })
+  }
+  if (field.type !== 'selection' && field.options !== undefined) {
+    context.addIssue({ code: 'custom', path: ['options'], message: t('errors.selectionOptionsForbidden') })
+  }
+  if (field.type === 'reference' && field.reference_entity === undefined) {
+    context.addIssue({ code: 'custom', path: ['reference_entity'], message: t('errors.referenceEntityRequired') })
+  }
+  if (field.type !== 'reference' && field.reference_entity !== undefined) {
+    context.addIssue({ code: 'custom', path: ['reference_entity'], message: t('errors.referenceEntityForbidden') })
+  }
+})
+
+const entitySchema = z.discriminatedUnion('kind', [
+  z.object({
+    name: z.string().min(1).max(80),
+    kind: z.literal('static-content'),
+    fields: z.array(z.string().min(1).max(80)).max(20),
+  }).strict(),
+  z.object({
+    name: z.string().min(1).max(80),
+    kind: z.literal('database'),
+    fields: z.array(databaseFieldSchema).min(1).max(30),
+    sensitive: z.boolean().default(false),
+  }).strict(),
+])
+
 export const appSpecV1Schema = z.object({
   schema_version: z.literal(1),
   problem: z.string().min(10).max(2_000),
@@ -14,11 +54,7 @@ export const appSpecV1Schema = z.object({
     name: z.string().min(1).max(80),
     sections: z.array(z.string().min(1).max(120)).min(1).max(12),
   }).strict()).min(1).max(12),
-  entities: z.array(z.object({
-    name: z.string().min(1).max(80),
-    kind: z.literal('static-content'),
-    fields: z.array(z.string().min(1).max(80)).max(20),
-  }).strict()).max(12),
+  entities: z.array(entitySchema).max(12),
   sensitive_data: z.object({
     detected: z.array(sensitiveDataKindSchema),
     confirmed_by_user: z.boolean(),
@@ -34,7 +70,23 @@ export const appSpecV1Schema = z.object({
   }).strict(),
   language: z.literal('pt-BR'),
   acceptance_criteria: z.array(z.string().min(5).max(300)).min(1).max(30),
-}).strict()
+}).strict().superRefine((value, context) => {
+  const databaseNames = new Set(value.entities.filter(entity => entity.kind === 'database').map(entity => entity.name.normalize('NFKC').trim().toLocaleLowerCase('pt-BR')))
+  value.entities.forEach((entity, entityIndex) => {
+    if (entity.kind !== 'database') return
+    if (entity.sensitive && (value.sensitive_data.detected.length === 0 || !value.sensitive_data.confirmed_by_user)) {
+      context.addIssue({ code: 'custom', path: ['entities', entityIndex, 'sensitive'], message: t('errors.sensitiveSpec') })
+    }
+    if (!entity.fields.some(field => field.type !== 'reference')) {
+      context.addIssue({ code: 'custom', path: ['entities', entityIndex, 'fields'], message: t('errors.entityNeedsOwnField') })
+    }
+    entity.fields.forEach((field, fieldIndex) => {
+      if (field.type === 'reference' && !databaseNames.has(field.reference_entity!.normalize('NFKC').trim().toLocaleLowerCase('pt-BR'))) {
+        context.addIssue({ code: 'custom', path: ['entities', entityIndex, 'fields', fieldIndex, 'reference_entity'], message: t('errors.unknownReference') })
+      }
+    })
+  })
+})
 
 export type AppSpecV1 = z.infer<typeof appSpecV1Schema>
 

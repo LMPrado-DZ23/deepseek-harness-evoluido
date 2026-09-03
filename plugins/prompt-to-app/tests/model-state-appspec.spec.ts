@@ -59,6 +59,31 @@ describe('Prompt-to-App domains, state and AppSpec', () => {
     expect(appSpecHash(result)).toBe(appSpecHash(result))
   })
 
+  it('validates database field contracts and sensitive entity confirmation', () => {
+    const databaseSpec = {
+      ...validSpec,
+      entities: [
+        {
+          name: 'Cliente', kind: 'database' as const, sensitive: false,
+          fields: [
+            { name: 'nome', type: 'text' as const, required: true },
+            { name: 'situação', type: 'selection' as const, required: true, options: ['ativo', 'inativo'] },
+            { name: 'empresa', type: 'reference' as const, required: false, reference_entity: 'Empresa' },
+          ],
+        },
+        { name: 'Empresa', kind: 'database' as const, sensitive: false, fields: [{ name: 'nome', type: 'text' as const, required: true }] },
+      ],
+    }
+    expect(appSpecV1Schema.parse(databaseSpec).entities[0]).toMatchObject({ kind: 'database', sensitive: false })
+    expect(() => appSpecV1Schema.parse({ ...databaseSpec, entities: [{ ...databaseSpec.entities[0], fields: [{ name: 'x', type: 'selection', required: true }] }] })).toThrow()
+    expect(() => appSpecV1Schema.parse({ ...databaseSpec, entities: [{ ...databaseSpec.entities[0], fields: [{ name: 'x', type: 'text', required: true, options: ['não permitido'] }] }] })).toThrow()
+    expect(() => appSpecV1Schema.parse({ ...databaseSpec, entities: [{ ...databaseSpec.entities[0], fields: [{ name: 'x', type: 'reference', required: true }] }] })).toThrow()
+    expect(() => appSpecV1Schema.parse({ ...databaseSpec, entities: [{ ...databaseSpec.entities[0], fields: [{ name: 'x', type: 'text', required: true, reference_entity: 'Cliente' }] }] })).toThrow()
+    expect(() => appSpecV1Schema.parse({ ...databaseSpec, entities: [{ ...databaseSpec.entities[0], fields: [{ name: 'x', type: 'reference', required: true, reference_entity: 'Ausente' }] }] })).toThrow()
+    expect(() => appSpecV1Schema.parse({ ...databaseSpec, entities: [{ ...databaseSpec.entities[0], sensitive: true }] })).toThrow()
+    expect(() => appSpecV1Schema.parse({ ...databaseSpec, entities: [{ name: 'Única', kind: 'database', sensitive: false, fields: [{ name: 'ela', type: 'reference', required: false, reference_entity: 'Única' }] }] })).toThrow()
+  })
+
   it('repairs exactly once and asks for clarification when repair remains invalid', async () => {
     const repair = vi.fn().mockResolvedValue(validSpec)
     await expect(parseAppSpecWithSingleRepair('{', repair)).resolves.toEqual(validSpec)

@@ -25,7 +25,7 @@ export function acceptanceChecks(spec: AppSpecV1): readonly AcceptanceCheck[] {
   spec.entities.forEach((entity, entityIndex) => {
     checks.push({ id: `entity-${entityIndex}`, label: `entity:${entity.name}`, kind: 'entity', expected: entity.name, status: 'PENDING' })
     entity.fields.forEach((field, fieldIndex) => checks.push({
-      id: `entity-${entityIndex}-field-${fieldIndex}`, label: `field:${field}`, kind: 'entity', expected: field, status: 'PENDING',
+      id: `entity-${entityIndex}-field-${fieldIndex}`, label: `field:${typeof field === 'string' ? field : field.name}`, kind: 'entity', expected: typeof field === 'string' ? field : field.name, status: 'PENDING',
     }))
   })
   spec.acceptance_criteria.forEach((criterion, index) => {

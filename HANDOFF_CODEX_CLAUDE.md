@@ -69,6 +69,36 @@ do app gerado, painel CRUD e golden set de 12 executáveis. Permanecem
 `NOT_IMPLEMENTED`; preview/publicação continuam `NOT_PRESENT`; LLM real
 `NOT_EXECUTED`; experiência leiga `NOT_VALIDATED`.
 
+## P32/P33 fatia 2 — bloco 4: banco gerado (em revisão)
+
+Branch: `codex/p32-fatia2-prompt-to-app`, sobre os commits isolados dos blocos
+1 a 3. Nenhum merge, push, PR ou deploy.
+
+O Studio agora aceita entidades de banco tipadas na AppSpec e gera, sem LLM,
+`src/db/**`, `src/server/repositories/**` e um teste CRUD. O contrato cobre
+texto, número, data, booleano, e-mail, telefone, seleção e referência; recusa
+colisões de identificadores, referências ausentes e entidade sensível sem
+confirmação. SQLite usa chaves estrangeiras, WAL e migrações idempotentes por
+`user_version`.
+
+Um gate de imports baseado no parser TypeScript recusa imports, reexports,
+`require` e `import()` fora das facades permitidas com
+`GENERATED_FILE_REJECTED`. A camada determinística é escrita antes da saída do
+modelo, portanto entra em `protectedTemplatePaths` e no hash imutável.
+
+Provas executadas em WSL2/ext4 e no construtor fixado:
+
+- typecheck: PASS;
+- 268 testes Studio PASS; 18 integrações PostgreSQL puladas no gate puro;
+- cobertura global acima de 90%; gerador de banco e gate de imports em 100%;
+- build Next, teste CRUD e E2E Playwright+axe dentro do contêiner sem rede:
+  PASS; camada protegida permaneceu idêntica;
+- autenticação, formulário, painel, preview, LLM real e publicação continuam
+  fora desta prova.
+
+Arquivos centrais: `plugins/prompt-to-app/src/data-generator.ts`,
+`import-policy.ts`, ADR-023 e `docs/proofs/P32-generated-data-proof.md`.
+
 ## P32/P33 + P31-B fatia 1 — correções para segunda revisão Claude
 
 Base do parecer: `b44ffe4`. Alvo da nova revisão: `b44ffe4..HEAD` na branch

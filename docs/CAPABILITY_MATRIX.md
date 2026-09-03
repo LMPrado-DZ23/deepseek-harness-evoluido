@@ -21,6 +21,7 @@ o código pode existir, mas ainda não foi validado com pessoas leigas.
 | Experiência para pessoas leigas | NOT_VALIDATED | E4 reposicionou a fase 0.5 após o gate Windows; kit `cdd2edb` preservado como base metodológica | produto completo, preflight adaptado e cinco sessões `VALID` com gate 4/5 |
 | Prompt-to-App: landing page e catálogo | BETA | Next.js 16 App Router, build standalone, job assíncrono cancelável, API tenant-aware e critérios AppSpec em contêiner comprovadamente sem rede | LLM real, fase 0.5 e operação prolongada |
 | DesignSpec e identidade visual do protótipo | BETA | domínio tenant-aware, seis papéis de cor com contraste AA, fontes locais, tokens protegidos e PNG/JPEG reprocessado | LLM real, preview, fase 0.5 e operação prolongada |
+| Banco SQLite do aplicativo gerado | BETA | esquema, migração e repositórios Zod determinísticos; CRUD real no contêiner sem rede | auth gerada, fluxo formulário+lista e operação prolongada |
 | Prompt-to-App: agenda, CRM, painel e portal | NOT_IMPLEMENTED | briefs e critérios existem no golden set | implementação e prova por categoria |
 | Preview autenticado | NOT_PRESENT | excluído da fatia 1 | P34 com iframe isolado, TTL e CSP |
 | Publicação | NOT_PRESENT | nenhuma rota, estado ou botão de publicação | fase autorizada, staging antes de produção e aprovação humana |
