@@ -8,12 +8,30 @@ importers:
 
   .:
     dependencies:
+      '@deepseek-ai/dsh-llm-pi-ai':
+        specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/llm/llm-pi-ai
+        version: link:../../../../../../../../../../../../../home/leandro/harness-studio-poc02/deepseek-harness/packages/llm/llm-pi-ai
+      '@deepseek-ai/dsh-subagent-claude-code':
+        specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/subagent/subagent-claude-code
+        version: link:../../../../../../../../../../../../../home/leandro/harness-studio-poc02/deepseek-harness/packages/subagent/subagent-claude-code
+      '@deepseek-ai/dsh-subagent-codex':
+        specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/subagent/subagent-codex
+        version: link:../../../../../../../../../../../../../home/leandro/harness-studio-poc02/deepseek-harness/packages/subagent/subagent-codex
+      '@deepseek-ai/dsh-subagent-spawn-in-process':
+        specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/subagent/subagent-spawn-in-process
+        version: link:../../../../../../../../../../../../../home/leandro/harness-studio-poc02/deepseek-harness/packages/subagent/subagent-spawn-in-process
+      '@dz23-studio/agents':
+        specifier: link:../../../plugins/agents
+        version: link:../../../plugins/agents
       '@dz23-studio/identity':
         specifier: link:../../../plugins/identity
         version: link:../../../plugins/identity
       '@dz23-studio/policy':
         specifier: link:../../../plugins/policy
         version: link:../../../plugins/policy
+      '@dz23-studio/route-health':
+        specifier: link:../../../plugins/route-health
+        version: link:../../../plugins/route-health
       '@dz23-studio/storage-postgres':
         specifier: link:../../../plugins/storage-postgres
         version: link:../../../plugins/storage-postgres

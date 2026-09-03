@@ -10,6 +10,11 @@
 > testes, 100% de cobertura, escritor único cross-process, migração lógica e
 > restauração após reinício do Harness. O relatório vinculante desta fatia é
 > `docs/pocs/P31-A-storage-postgres-proof.md`; não houve merge, push ou deploy.
+>
+> A Fase 3 está implementada na branch `codex/fase3-agents-routes`: PoC 3A GO
+> para isolamento e composição in-process, 196 testes e 100% de cobertura da
+> lógica determinística. Codex/Claude reais, provedores externos e deploy seguem
+> `NOT_EXECUTED`. Relatório vinculante: `docs/pocs/P35-phase3-agents-routes-proof.md`.
 
 Data: 2026-09-01  
 Decisão do gate literal: **NO-GO**  

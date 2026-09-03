@@ -138,6 +138,7 @@ export interface StudioPolicyRuntime {
     auditRecords(): readonly PolicyAuditRecord[];
     setIdentityResolver(resolver: (execution: ToolExecution) => PolicyIdentityState): () => void;
     setAuthorizationResolver(resolver: (execution: ToolExecution) => PolicyAuthorizationState | undefined): () => void;
+    setDelegationGrantResolver(resolver: (execution: ToolExecution) => PolicyDelegationGrant | undefined): () => void;
 }
 export interface PolicyIdentityState {
     readonly authenticated: boolean;
@@ -148,6 +149,10 @@ export interface PolicyAuthorizationState {
     readonly orgId: string;
     readonly tenantId: string;
     readonly role: StudioRole;
+}
+export interface PolicyDelegationGrant {
+    readonly approvedTier: Extract<PolicyTier, 'T2' | 'T3'>;
+    readonly reason: string;
 }
 declare const policyAuditKeyBrand: unique symbol;
 export type PolicyAuditKey = string & {

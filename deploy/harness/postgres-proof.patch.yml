@@ -22,3 +22,6 @@
       studio_workspaces: postgres
       studio_memberships: postgres
       studio_policy_audit: postgres
+      studio_agent_runs: postgres
+      studio_agent_leases: postgres
+      studio_route_health: postgres

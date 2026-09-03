@@ -97,6 +97,30 @@ export class StudioFakeAdapter extends LlmAdapter {
                 }, 'studio-sandbox-call')
                 : textChunks(`SANDBOX_OK ${result}`);
         }
+        else if (prompt.includes('PHASE3_WORKTREE_PROBE')) {
+            chunks = result === undefined
+                ? toolChunks('write', {
+                    file_path: 'src/poc3a.txt',
+                    content: 'poc-3a-isolated\n',
+                }, 'studio-phase3-worktree-call')
+                : textChunks(`PHASE3_WORKTREE_OK ${result}`);
+        }
+        else if (prompt.includes('PHASE3_ESCAPE_PROBE')) {
+            chunks = result === undefined
+                ? toolChunks('write', {
+                    file_path: '../phase3-outside.txt',
+                    content: 'must-never-land\n',
+                }, 'studio-phase3-escape-call')
+                : textChunks(`PHASE3_ESCAPE_BLOCKED ${result}`);
+        }
+        else if (prompt.includes('PHASE3_TOOL_DENIAL_PROBE')) {
+            chunks = result === undefined
+                ? toolChunks('bash', {
+                    command: "printf 'must-never-run' > src/denied.txt",
+                    description: 'This tool is deliberately absent from the delegated child catalog.',
+                }, 'studio-phase3-tool-denial-call')
+                : textChunks(`PHASE3_TOOL_DENIED ${result}`);
+        }
         else {
             chunks = result === undefined
                 ? toolChunks('studio_echo', { note: 'PoC-01 deterministic echo' }, 'studio-echo-call')

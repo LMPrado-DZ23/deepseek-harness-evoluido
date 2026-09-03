@@ -1,7 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { Domain, KvTable } from '@deepseek-ai/dsh-storage-domain'
-import type {} from '@dz23-studio/identity'
+import { principalForAgent } from '@dz23-studio/identity'
 import type {} from '@dz23-studio/policy'
 import { createTenancyHttpHandler } from './http.js'
 import {
@@ -21,7 +21,7 @@ export * from './model.js'
 export * from './service.js'
 
 export const name = 'dz23-studio-tenancy'
-export const inject = ['storageDomain', 'webServer', 'studioIdentity', 'studioPolicy']
+export const inject = ['agents', 'storageDomain', 'webServer', 'studioIdentity', 'studioPolicy']
 
 export interface TenancyPluginConfig {
   readonly allowedHosts?: readonly string[]
@@ -97,8 +97,7 @@ export async function apply(ctx: Context, config: TenancyPluginConfig = {}): Pro
     source === 'bootstrap' ? service.ensureBootstrap(user) : Promise.resolve()
   ))
   const unsetAuthorization = ctx.studioPolicy.setAuthorizationResolver(execution => {
-    const harnessSessionId = execution.agent === undefined ? '' : String(execution.agent.session.id)
-    const principal = ctx.studioIdentity.service.principalForHarnessSession(harnessSessionId)
+    const principal = principalForAgent(ctx.studioIdentity.service, ctx.agents, execution.agent)
     return principal === undefined
       ? undefined
       : service.authorizationFor(principal.userId, principal.orgId, principal.tenantId)

@@ -14,6 +14,21 @@ export interface DomainScopeEntry {
 /** Explicit and reviewable classification; there is deliberately no wildcard. */
 export const STUDIO_DOMAIN_SCOPES: readonly DomainScopeEntry[] = [
   {
+    source: 'plugins/agents/src/model.ts', exportName: 'studioAgentRunsDomainSpec', physicalName: 'studio_agent_runs',
+    tables: { runs: { scope: 'workspace-tenant', requiredFields: ['org_id', 'tenant_id', 'workspace_id'], reason: 'An agent run belongs to one approved workspace.' } },
+  },
+  {
+    source: 'plugins/agents/src/model.ts', exportName: 'studioAgentLeasesDomainSpec', physicalName: 'studio_agent_leases',
+    tables: { leases: { scope: 'workspace-tenant', requiredFields: ['org_id', 'tenant_id', 'workspace_id'], reason: 'A path lease excludes writers inside one workspace.' } },
+  },
+  {
+    source: 'plugins/route-health/src/model.ts', exportName: 'studioRouteHealthDomainSpec', physicalName: 'studio_route_health',
+    tables: {
+      routes: { scope: 'org-tenant', requiredFields: ['org_id', 'tenant_id'] },
+      events: { scope: 'org-tenant', requiredFields: ['org_id', 'tenant_id'] },
+    },
+  },
+  {
     source: 'plugins/hello/src/index.ts', exportName: 'studioHelloDomainSpec', physicalName: 'studio_hello',
     tables: { records: { scope: 'tenant-only-poc', requiredFields: ['tenant_id'], reason: 'PoC domain predates organizations.' } },
   },

@@ -77,6 +77,7 @@ export interface StudioPolicyRuntime {
   auditRecords(): readonly PolicyAuditRecord[]
   setIdentityResolver(resolver: (execution: ToolExecution) => PolicyIdentityState): () => void
   setAuthorizationResolver(resolver: (execution: ToolExecution) => PolicyAuthorizationState | undefined): () => void
+  setDelegationGrantResolver(resolver: (execution: ToolExecution) => PolicyDelegationGrant | undefined): () => void
 }
 
 export interface PolicyIdentityState {
@@ -89,6 +90,11 @@ export interface PolicyAuthorizationState {
   readonly orgId: string
   readonly tenantId: string
   readonly role: StudioRole
+}
+
+export interface PolicyDelegationGrant {
+  readonly approvedTier: Extract<PolicyTier, 'T2' | 'T3'>
+  readonly reason: string
 }
 
 declare const policyAuditKeyBrand: unique symbol
@@ -307,6 +313,7 @@ export async function apply(ctx: Context, config: PolicyPluginConfig = {}): Prom
     strongIdentityVerified: config.strongIdentityVerified?.(execution) === true,
   })
   let authorizationResolver = (_execution: ToolExecution): PolicyAuthorizationState | undefined => undefined
+  let delegationGrantResolver = (_execution: ToolExecution): PolicyDelegationGrant | undefined => undefined
   const domain: Domain<typeof studioPolicyAuditDomainSpec> = await ctx.storageDomain.open(studioPolicyAuditDomainSpec)
   ctx.effect(() => () => domain.close(), 'dz23-studio-policy.domainClose')
   const decisions = domain.table('decisions')
@@ -321,6 +328,11 @@ export async function apply(ctx: Context, config: PolicyPluginConfig = {}): Prom
       const previous = authorizationResolver
       authorizationResolver = resolver
       return () => { authorizationResolver = previous }
+    },
+    setDelegationGrantResolver: (resolver) => {
+      const previous = delegationGrantResolver
+      delegationGrantResolver = resolver
+      return () => { delegationGrantResolver = previous }
     },
   })
   ctx.on('tools/pre-execute', async (execution, next): Promise<PreToolDecision> => {
@@ -357,6 +369,13 @@ export async function apply(ctx: Context, config: PolicyPluginConfig = {}): Prom
         ...decision,
         kind: 'deny',
         reason: 'A ação tentou acessar outra organização ou espaço de trabalho.',
+      }
+    }
+
+    if (decision.kind === 'ask') {
+      const grant = delegationGrantResolver(execution)
+      if (grant !== undefined && TIER_RANK[grant.approvedTier] >= TIER_RANK[decision.effectiveTier]) {
+        decision = { ...decision, kind: 'allow', reason: grant.reason }
       }
     }
 

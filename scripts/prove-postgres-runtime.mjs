@@ -53,6 +53,9 @@ let second
 try {
   first = await boot()
   assert.ok(first.ctx.storage.backend.get('postgres'))
+  for (const name of ['studio_agent_runs', 'studio_agent_leases', 'studio_route_health']) {
+    assert.ok(first.ctx.storageDomain.get(name), `${name} did not open on its configured backend`)
+  }
   const firstDomain = first.ctx.storageDomain.get('studio_hello')
   assert.ok(firstDomain, 'studio_hello did not open on PostgreSQL')
   await firstDomain.table('records').put(recordKey, {
@@ -77,7 +80,7 @@ try {
     filesystem: 'WSL2 ext4 (/home)',
     backend: 'postgres',
     defaultBackend: 'json',
-    routedStudioDomains: 9,
+    routedStudioDomains: 12,
     restartRestored: true,
   }, null, 2)}\n`)
 } finally {

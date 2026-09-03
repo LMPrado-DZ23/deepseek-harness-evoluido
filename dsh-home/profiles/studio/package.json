@@ -2,8 +2,14 @@
   "name": "dsh-profile-studio",
   "private": true,
   "dependencies": {
+    "@deepseek-ai/dsh-llm-pi-ai": "link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/llm/llm-pi-ai",
+    "@deepseek-ai/dsh-subagent-claude-code": "link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/subagent/subagent-claude-code",
+    "@deepseek-ai/dsh-subagent-codex": "link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/subagent/subagent-codex",
+    "@deepseek-ai/dsh-subagent-spawn-in-process": "link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/subagent/subagent-spawn-in-process",
+    "@dz23-studio/agents": "link:../../../plugins/agents",
     "@dz23-studio/identity": "link:../../../plugins/identity",
     "@dz23-studio/policy": "link:../../../plugins/policy",
+    "@dz23-studio/route-health": "link:../../../plugins/route-health",
     "@dz23-studio/storage-postgres": "link:../../../plugins/storage-postgres",
     "@dz23-studio/tenancy": "link:../../../plugins/tenancy",
     "@studio/hello": "link:../../../plugins/hello"

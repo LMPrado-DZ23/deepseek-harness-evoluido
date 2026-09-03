@@ -1,3 +1,4 @@
+import { principalForAgent } from '@dz23-studio/identity';
 import { createTenancyHttpHandler } from './http.js';
 import { studioMembershipsDomainSpec, studioOrgsDomainSpec, studioWorkspacesDomainSpec, } from './model.js';
 import { StudioTenancyService } from './service.js';
@@ -5,7 +6,7 @@ export * from './http.js';
 export * from './model.js';
 export * from './service.js';
 export const name = 'dz23-studio-tenancy';
-export const inject = ['storageDomain', 'webServer', 'studioIdentity', 'studioPolicy'];
+export const inject = ['agents', 'storageDomain', 'webServer', 'studioIdentity', 'studioPolicy'];
 class DomainTenancyRepository {
     orgTable;
     workspaceTable;
@@ -51,8 +52,7 @@ export async function apply(ctx, config = {}) {
     const unsetEnrollment = ctx.studioIdentity.service.setEnrollmentResolver(email => service.enrollmentGrantFor(email));
     const unsetProvisioner = ctx.studioIdentity.service.setUserProvisioner((user, source) => (source === 'bootstrap' ? service.ensureBootstrap(user) : Promise.resolve()));
     const unsetAuthorization = ctx.studioPolicy.setAuthorizationResolver(execution => {
-        const harnessSessionId = execution.agent === undefined ? '' : String(execution.agent.session.id);
-        const principal = ctx.studioIdentity.service.principalForHarnessSession(harnessSessionId);
+        const principal = principalForAgent(ctx.studioIdentity.service, ctx.agents, execution.agent);
         return principal === undefined
             ? undefined
             : service.authorizationFor(principal.userId, principal.orgId, principal.tenantId);

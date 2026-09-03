@@ -219,6 +219,7 @@ export async function apply(ctx, config = {}) {
         strongIdentityVerified: config.strongIdentityVerified?.(execution) === true,
     });
     let authorizationResolver = (_execution) => undefined;
+    let delegationGrantResolver = (_execution) => undefined;
     const domain = await ctx.storageDomain.open(studioPolicyAuditDomainSpec);
     ctx.effect(() => () => domain.close(), 'dz23-studio-policy.domainClose');
     const decisions = domain.table('decisions');
@@ -233,6 +234,11 @@ export async function apply(ctx, config = {}) {
             const previous = authorizationResolver;
             authorizationResolver = resolver;
             return () => { authorizationResolver = previous; };
+        },
+        setDelegationGrantResolver: (resolver) => {
+            const previous = delegationGrantResolver;
+            delegationGrantResolver = resolver;
+            return () => { delegationGrantResolver = previous; };
         },
     });
     ctx.on('tools/pre-execute', async (execution, next) => {
@@ -269,6 +275,12 @@ export async function apply(ctx, config = {}) {
                 kind: 'deny',
                 reason: 'A ação tentou acessar outra organização ou espaço de trabalho.',
             };
+        }
+        if (decision.kind === 'ask') {
+            const grant = delegationGrantResolver(execution);
+            if (grant !== undefined && TIER_RANK[grant.approvedTier] >= TIER_RANK[decision.effectiveTier]) {
+                decision = { ...decision, kind: 'allow', reason: grant.reason };
+            }
         }
         if (decision.kind === 'allow') {
             const downstream = await next();

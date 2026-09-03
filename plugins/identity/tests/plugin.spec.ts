@@ -19,6 +19,7 @@ function table() {
 }
 
 function context(host: '127.0.0.1' | '0.0.0.0' = '127.0.0.1') {
+  const agents = new Map<string, unknown>()
   const tables = Object.fromEntries([
     'users', 'magic_codes', 'credentials', 'challenges', 'sessions', 'events',
   ].map(name => [name, table()]))
@@ -37,6 +38,7 @@ function context(host: '127.0.0.1' | '0.0.0.0' = '127.0.0.1') {
   const routeDispose = vi.fn()
   const resolverDispose = vi.fn()
   const ctx = {
+    agents: { get: vi.fn((id: string) => agents.get(String(id))) },
     storageDomain: { open: vi.fn(() => Promise.resolve(domains[opened++]!)) },
     webServer: {
       host,
@@ -51,6 +53,7 @@ function context(host: '127.0.0.1' | '0.0.0.0' = '127.0.0.1') {
         return resolverDispose
       }),
       setAuthorizationResolver: vi.fn(() => vi.fn()),
+      setDelegationGrantResolver: vi.fn(() => vi.fn()),
     } satisfies StudioPolicyRuntime,
     effect: vi.fn((factory: () => () => void | Promise<void>) => { cleanups.push(factory()) }),
     inject: vi.fn((_dependencies: string[], callback: (injected: { connection: { authenticatedUrl: (baseUrl: string) => string } }) => () => void) => {
@@ -59,7 +62,7 @@ function context(host: '127.0.0.1' | '0.0.0.0' = '127.0.0.1') {
     }),
     provide: vi.fn((_name: string, runtime: StudioIdentityRuntime) => { provided.identity = runtime }),
   }
-  return { ctx, tables, close, cleanups, provided, getRoute: () => route, getResolver: () => strongResolver, routeDispose, resolverDispose }
+  return { ctx, agents, tables, close, cleanups, provided, getRoute: () => route, getResolver: () => strongResolver, routeDispose, resolverDispose }
 }
 
 const passkeys: PasskeyProvider = {
@@ -98,6 +101,12 @@ describe('identity Cordis plugin composition', () => {
     await runtime.service.finishPasskeyRegistration(issued.token, registration.challengeId, {} as never, 'Windows Hello')
     await runtime.service.bindHarnessSession(issued.session, 'agent-1')
     expect(f.getResolver()?.({ agent: { session: { id: 'agent-1' } } } as never)).toEqual({ authenticated: true, strongIdentityVerified: false })
+    const parent = { session: { id: 'agent-1', header: {} } }
+    const coordinator = { session: { id: 'coordinator', header: { parentSession: 'agent-1' } } }
+    const child = { session: { id: 'child', header: { parentSession: 'coordinator' } } }
+    f.agents.set('agent-1', parent)
+    f.agents.set('coordinator', coordinator)
+    expect(f.getResolver()?.({ agent: child } as never)).toEqual({ authenticated: true, strongIdentityVerified: false })
     expect(f.getResolver()?.({} as never)).toEqual({ authenticated: false, strongIdentityVerified: false })
     expect(runtime.service.auditRecords().length).toBeGreaterThan(0)
     expect(runtime.service.sessionRecords()).toHaveLength(1)

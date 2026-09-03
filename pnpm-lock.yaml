@@ -10,13 +10,13 @@ importers:
     devDependencies:
       '@deepseek-ai/dsh-storage':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage
-        version: link:../../../../../../../../../../home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage
+        version: link:../harness-studio-poc02/deepseek-harness/packages/storage/storage
       '@deepseek-ai/dsh-storage-domain':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage-domain
-        version: link:../../../../../../../../../../home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage-domain
+        version: link:../harness-studio-poc02/deepseek-harness/packages/storage/storage-domain
       '@deepseek-ai/dsh-storage-sqlite':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage-sqlite
-        version: link:../../../../../../../../../../home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage-sqlite
+        version: link:../harness-studio-poc02/deepseek-harness/packages/storage/storage-sqlite
       '@types/node':
         specifier: 22.20.0
         version: 22.20.0
@@ -33,20 +33,56 @@ importers:
         specifier: 4.1.8
         version: 4.1.8(@types/node@22.20.0)(@vitest/coverage-v8@4.1.8)(esbuild@0.28.2)(tsx@4.22.4)
 
+  plugins/agents:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/vendor/cordis
+        version: link:../../../harness-studio-poc02/deepseek-harness/vendor/cordis
+      '@deepseek-ai/dsh-agent':
+        specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/core/agent
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/core/agent
+      '@deepseek-ai/dsh-agent-presets':
+        specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/preset/agent-presets
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/preset/agent-presets
+      '@deepseek-ai/dsh-jobs':
+        specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/jobs/jobs
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/jobs/jobs
+      '@deepseek-ai/dsh-llm':
+        specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/llm/llm
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/llm/llm
+      '@deepseek-ai/dsh-session':
+        specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/core/session
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/core/session
+      '@deepseek-ai/dsh-session-controller':
+        specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/api/session-controller
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/api/session-controller
+      '@deepseek-ai/dsh-storage-domain':
+        specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage-domain
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/storage/storage-domain
+      '@deepseek-ai/dsh-subagent':
+        specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/subagent/subagent
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/subagent/subagent
+      '@dz23-studio/policy':
+        specifier: workspace:*
+        version: link:../policy
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
+
   plugins/hello:
     dependencies:
       '@deepseek-ai/cordis':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/vendor/cordis
-        version: link:../../../../../../../../../../../../home/leandro/harness-studio-poc02/deepseek-harness/vendor/cordis
+        version: link:../../../harness-studio-poc02/deepseek-harness/vendor/cordis
       '@deepseek-ai/dsh-llm':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/llm/llm
-        version: link:../../../../../../../../../../../../home/leandro/harness-studio-poc02/deepseek-harness/packages/llm/llm
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/llm/llm
       '@deepseek-ai/dsh-storage-domain':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage-domain
-        version: link:../../../../../../../../../../../../home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage-domain
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/storage/storage-domain
       '@deepseek-ai/dsh-tools':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/core/tools
-        version: link:../../../../../../../../../../../../home/leandro/harness-studio-poc02/deepseek-harness/packages/core/tools
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/core/tools
       zod:
         specifier: 4.4.3
         version: 4.4.3
@@ -55,19 +91,25 @@ importers:
     dependencies:
       '@deepseek-ai/cordis':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/vendor/cordis
-        version: link:../../../../../../../../../../../../home/leandro/harness-studio-poc02/deepseek-harness/vendor/cordis
+        version: link:../../../harness-studio-poc02/deepseek-harness/vendor/cordis
+      '@deepseek-ai/dsh-agent':
+        specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/core/agent
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/core/agent
       '@deepseek-ai/dsh-client-connection':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/client/connection
-        version: link:../../../../../../../../../../../../home/leandro/harness-studio-poc02/deepseek-harness/packages/client/connection
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/client/connection
       '@deepseek-ai/dsh-credentials':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/credentials/credentials
-        version: link:../../../../../../../../../../../../home/leandro/harness-studio-poc02/deepseek-harness/packages/credentials/credentials
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/credentials/credentials
       '@deepseek-ai/dsh-host-webserver':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/host/webserver
-        version: link:../../../../../../../../../../../../home/leandro/harness-studio-poc02/deepseek-harness/packages/host/webserver
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/host/webserver
+      '@deepseek-ai/dsh-session':
+        specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/core/session
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/core/session
       '@deepseek-ai/dsh-storage-domain':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage-domain
-        version: link:../../../../../../../../../../../../home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage-domain
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/storage/storage-domain
       '@dz23-studio/policy':
         specifier: link:../policy
         version: link:../policy
@@ -89,22 +131,43 @@ importers:
     dependencies:
       '@deepseek-ai/cordis':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/vendor/cordis
-        version: link:../../../../../../../../../../../../home/leandro/harness-studio-poc02/deepseek-harness/vendor/cordis
+        version: link:../../../harness-studio-poc02/deepseek-harness/vendor/cordis
       '@deepseek-ai/dsh-llm':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/llm/llm
-        version: link:../../../../../../../../../../../../home/leandro/harness-studio-poc02/deepseek-harness/packages/llm/llm
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/llm/llm
       '@deepseek-ai/dsh-session':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/core/session
-        version: link:../../../../../../../../../../../../home/leandro/harness-studio-poc02/deepseek-harness/packages/core/session
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/core/session
       '@deepseek-ai/dsh-storage-domain':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage-domain
-        version: link:../../../../../../../../../../../../home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage-domain
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/storage/storage-domain
       '@deepseek-ai/dsh-system-prompt':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/core/system-prompt
-        version: link:../../../../../../../../../../../../home/leandro/harness-studio-poc02/deepseek-harness/packages/core/system-prompt
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/core/system-prompt
       '@deepseek-ai/dsh-tools':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/core/tools
-        version: link:../../../../../../../../../../../../home/leandro/harness-studio-poc02/deepseek-harness/packages/core/tools
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/core/tools
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
+
+  plugins/route-health:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/vendor/cordis
+        version: link:../../../harness-studio-poc02/deepseek-harness/vendor/cordis
+      '@deepseek-ai/dsh-host-webserver':
+        specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/host/webserver
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/host/webserver
+      '@deepseek-ai/dsh-llm':
+        specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/llm/llm
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/llm/llm
+      '@deepseek-ai/dsh-storage-domain':
+        specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage-domain
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/storage/storage-domain
+      '@dz23-studio/identity':
+        specifier: link:../identity
+        version: link:../identity
       zod:
         specifier: 4.4.3
         version: 4.4.3
@@ -113,22 +176,22 @@ importers:
     dependencies:
       '@deepseek-ai/cordis':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/vendor/cordis
-        version: link:../../../../../../../../../../../../home/leandro/harness-studio-poc02/deepseek-harness/vendor/cordis
+        version: link:../../../harness-studio-poc02/deepseek-harness/vendor/cordis
       '@deepseek-ai/dsh-credentials':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/credentials/credentials
-        version: link:../../../../../../../../../../../../home/leandro/harness-studio-poc02/deepseek-harness/packages/credentials/credentials
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/credentials/credentials
       '@deepseek-ai/dsh-storage':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage
-        version: link:../../../../../../../../../../../../home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/storage/storage
       '@deepseek-ai/dsh-storage-domain':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage-domain
-        version: link:../../../../../../../../../../../../home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage-domain
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/storage/storage-domain
       '@deepseek-ai/dsh-storage-sqlite':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage-sqlite
-        version: link:../../../../../../../../../../../../home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage-sqlite
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/storage/storage-sqlite
       '@deepseek-ai/schemastery':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/vendor/schemastery
-        version: link:../../../../../../../../../../../../home/leandro/harness-studio-poc02/deepseek-harness/vendor/schemastery
+        version: link:../../../harness-studio-poc02/deepseek-harness/vendor/schemastery
       pg:
         specifier: 8.23.0
         version: 8.23.0
@@ -141,13 +204,13 @@ importers:
     dependencies:
       '@deepseek-ai/cordis':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/vendor/cordis
-        version: link:../../../../../../../../../../../../home/leandro/harness-studio-poc02/deepseek-harness/vendor/cordis
+        version: link:../../../harness-studio-poc02/deepseek-harness/vendor/cordis
       '@deepseek-ai/dsh-host-webserver':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/host/webserver
-        version: link:../../../../../../../../../../../../home/leandro/harness-studio-poc02/deepseek-harness/packages/host/webserver
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/host/webserver
       '@deepseek-ai/dsh-storage-domain':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage-domain
-        version: link:../../../../../../../../../../../../home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage-domain
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/storage/storage-domain
       '@dz23-studio/identity':
         specifier: link:../identity
         version: link:../identity

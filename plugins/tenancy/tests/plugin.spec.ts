@@ -49,6 +49,7 @@ function context(users: readonly IdentityUser[] = [owner]) {
     ? { userId: owner.user_id, orgId: owner.org_id, tenantId: owner.tenant_id, sessionId: 'session-1' }
     : undefined)
   const ctx = {
+    agents: { get: vi.fn(() => undefined) },
     storageDomain: { open: vi.fn((_spec: { readonly name: string }) => Promise.resolve(domains[opened++]!)) },
     webServer: { host: '127.0.0.1', port: 4321, register: vi.fn((candidate: WebRoute) => { route = candidate; return vi.fn() }) },
     studioIdentity: { service: {

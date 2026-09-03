@@ -17,7 +17,14 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['plugins/*/src/**/*.ts'],
-      exclude: postgresEnabled ? [] : ['plugins/storage-postgres/src/**/*.ts'],
+      // Composition and operating-system adapters are exercised by real integration
+      // proofs; the 100% threshold below is specifically for deterministic product logic.
+      exclude: [
+        ...(postgresEnabled ? [] : ['plugins/storage-postgres/src/**/*.ts']),
+        'plugins/agents/src/index.ts',
+        'plugins/agents/src/git.ts',
+        'plugins/route-health/src/index.ts',
+      ],
       reporter: ['text', 'json-summary'],
       thresholds: {
         branches: 100,

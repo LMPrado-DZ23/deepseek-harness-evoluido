@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { identityAuditDomainSpec, identityCredentialsDomainSpec, identitySessionsDomainSpec, identityUsersDomainSpec } from '../../identity/src/model.ts'
 import { studioPolicyAuditDomainSpec } from '../../policy/src/index.ts'
+import { studioAgentLeasesDomainSpec, studioAgentRunsDomainSpec } from '../../agents/src/model.ts'
+import { studioRouteHealthDomainSpec } from '../../route-health/src/model.ts'
 import { studioMembershipsDomainSpec, studioOrgsDomainSpec, studioWorkspacesDomainSpec } from '../../tenancy/src/model.ts'
 import { studioHelloDomainSpec } from '../../hello/src/index.ts'
 import { assertDomainScopeManifest, STUDIO_DOMAIN_SCOPES } from '../../../scripts/domain-scope-gate.ts'
@@ -15,6 +17,9 @@ const SPECS = [
   studioWorkspacesDomainSpec,
   studioMembershipsDomainSpec,
   studioPolicyAuditDomainSpec,
+  studioAgentRunsDomainSpec,
+  studioAgentLeasesDomainSpec,
+  studioRouteHealthDomainSpec,
 ]
 
 describe('Studio domain tenant-scope gate', () => {

@@ -104,6 +104,22 @@ describe('@studio/hello', () => {
     const escapeDone = await collect(adapter.stream(options([user('SANDBOX_ESCAPE_PROBE'), toolResult('denied')])))
     expect(escapeDone.find(chunk => chunk.type === 'text-delta')).toMatchObject({ text: 'SANDBOX_ESCAPE_RESULT denied' })
 
+    const worktree = await collect(adapter.stream(options([user('PHASE3_WORKTREE_PROBE')])))
+    expect(worktree.find(chunk => chunk.type === 'tool-call-delta')).toMatchObject({
+      name: 'write', argumentsDelta: expect.stringContaining('src/poc3a.txt'),
+    })
+    const worktreeDone = await collect(adapter.stream(options([user('PHASE3_WORKTREE_PROBE'), toolResult('created')])))
+    expect(worktreeDone.find(chunk => chunk.type === 'text-delta')).toMatchObject({ text: 'PHASE3_WORKTREE_OK created' })
+
+    const phase3Escape = await collect(adapter.stream(options([user('PHASE3_ESCAPE_PROBE')])))
+    expect(phase3Escape.find(chunk => chunk.type === 'block-end')).toMatchObject({ block: { name: 'write' } })
+    const phase3EscapeDone = await collect(adapter.stream(options([user('PHASE3_ESCAPE_PROBE'), toolResult('denied')])))
+    expect(phase3EscapeDone.find(chunk => chunk.type === 'text-delta')).toMatchObject({ text: 'PHASE3_ESCAPE_BLOCKED denied' })
+    const denied = await collect(adapter.stream(options([user('PHASE3_TOOL_DENIAL_PROBE')])))
+    expect(denied.find(chunk => chunk.type === 'block-end')).toMatchObject({ block: { name: 'bash' } })
+    const deniedDone = await collect(adapter.stream(options([user('PHASE3_TOOL_DENIAL_PROBE'), toolResult('unknown tool')])))
+    expect(deniedDone.find(chunk => chunk.type === 'text-delta')).toMatchObject({ text: 'PHASE3_TOOL_DENIED unknown tool' })
+
     const restart = await collect(adapter.stream(options([
       user('old'),
       { id: 'a' as never, role: 'assistant', source: { kind: 'model', provider: STUDIO_PROVIDER, model: STUDIO_MODEL }, content: [{ type: 'text', text: 'STUDIO_ECHO_OK old' }] },

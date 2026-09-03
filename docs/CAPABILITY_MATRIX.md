@@ -17,3 +17,9 @@ Estados seguem ADR-005 e nunca transformam uma prova focada em “aplicação pr
 | Transação de negócio multi-registro | NOT_PRESENT | contrato KV é atômico por chamada | extensão batch/CAS transacional |
 | Migração SQLite lógica | BETA | bundle versionado e E2E focado P31-A | restore operacional e dataset real |
 | Pesquisa de linguagem com pessoas leigas | NOT_EXECUTED | kit da fase 0.5 e preflight fail-closed preparados | IA local válida e cinco sessões `VALID` |
+| Rotas DeepSeek/OmniRoute/Ollama no profile | BETA | PoC 3A carregou as três; retry OmniRoute/Ollama = 0 | provedores reais e operação prolongada |
+| Saúde, custo e fallback por rota | BETA | falhas determinísticas antes/depois do primeiro conteúdo | telemetria com rotas reais |
+| Agente in-process isolado | BETA | PoC 3A real em worktree, diff proposto, nega saída/tool | jornadas do produto e teste com leigos |
+| Codex CLI como subagente | NOT_EXECUTED | provider registrado; preflight WSL = NOT_PRESENT | CLI/autenticação explícitas e prova real |
+| Claude Code como subagente | NOT_EXECUTED | provider registrado; preflight WSL = OK | variável explícita e prova real em worktree |
+| Hermes Agent | NOT_PRESENT | prova 7.6 somente leitura | adapter JSON-RPC v1.x e auditoria de segurança |

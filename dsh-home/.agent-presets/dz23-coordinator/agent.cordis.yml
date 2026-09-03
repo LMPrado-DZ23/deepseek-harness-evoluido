@@ -1,0 +1,9 @@
+# Internal coordinator: no shell, editor, network, delegation tool or UI.
+# Its only responsibility is carrying the isolated cwd consumed by the
+# official Codex and Claude Code providers.
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    text: Sessão coordenadora interna do DZ23 STUDIO. Não execute ferramentas nem responda à pessoa.
+    complete: true
+    includeRuntimeContext: false

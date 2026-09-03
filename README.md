@@ -30,12 +30,20 @@ Em servidor, `DZ23_BOOTSTRAP_OWNER_EMAIL` é obrigatório: somente esse endereç
 pode criar a primeira conta proprietária. A borda autenticada também desativa o
 modo pessoal no núcleo, ainda que o Harness permaneça em loopback.
 
-O P31-A acrescenta PostgreSQL 16 para os nove domínios próprios `studio_*`, sem
+O P31-A acrescenta PostgreSQL 16 para os domínios próprios `studio_*`, sem
 mudar o backend padrão dos domínios oficiais do Harness. O banco não publica
 porta e um segundo escritor da mesma unidade falha fechado. Isso ainda não é
 alta disponibilidade, RLS ou multi-instância ativa; consulte a
 [ADR-013](./docs/adr/ADR-013-postgres-kv-single-writer-and-migration.md) e a
 [prova P31-A](./docs/pocs/P31-A-storage-postgres-proof.md).
+
+A Fase 3 compõe DeepSeek direto, OmniRoute opcional e Ollama local, com saúde
+por rota e sem 9Router. Delegações usam uma cópia Git isolada, pedem confirmação
+antes de iniciar e outra antes de aplicar. O PoC in-process passou; Codex e
+Claude Code reais continuam `NOT_EXECUTED`. Consulte
+[ADR-014](./docs/adr/ADR-014-model-routes-and-health.md),
+[ADR-015](./docs/adr/ADR-015-isolated-agents.md) e a
+[prova P35](./docs/pocs/P35-phase3-agents-routes-proof.md).
 
 Consulte [REPORT.md](./REPORT.md) para comandos, resultados, erros e limitações.
 
@@ -54,6 +62,8 @@ Decisões relacionadas:
   dispositivos, CSRF e revogação ligados ao motor de permissões.
 - `plugins/storage-postgres`: persistência KV PostgreSQL, lock cross-process e
   falha fechada após perda da conexão autoritativa.
+- `plugins/route-health`: saúde, uso, custo e fallback seguro por rota.
+- `plugins/agents`: delegação aprovada em worktree, budgets, leases e propostas.
 - `apps/studio-web/public/brand`: identidade visual oficial do DZ23 STUDIO.
 - `deploy/caddy`: borda única, login simples e configurações TLS separadas para
   servidor e uso local.
@@ -71,6 +81,8 @@ pnpm test:postgres:runtime
 pnpm build
 pnpm build:edge
 pnpm prove:edge
+pnpm preflight:fase3
+pnpm prove:fase3-agents
 ```
 
 Resultado atual com PostgreSQL 16 real: 174 testes aprovados e 100% de

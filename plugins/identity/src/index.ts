@@ -1,10 +1,12 @@
 import type { Context } from '@deepseek-ai/cordis'
+import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { SessionId } from '@deepseek-ai/dsh-session'
 import { isIP } from 'node:net'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import type { Domain, KvTable } from '@deepseek-ai/dsh-storage-domain'
-import type {} from '@dz23-studio/policy'
+import type { PolicyIdentityState } from '@dz23-studio/policy'
 import { createIdentityHttpHandler } from './http.js'
 import { MemoryEmailSender, SmtpEmailSender, type EmailSender } from './email.js'
 import {
@@ -21,7 +23,7 @@ import {
   type SessionRecord,
 } from './model.js'
 import { SimpleWebAuthnProvider, type PasskeyProvider } from './passkey.js'
-import { StudioIdentityService, type EnrollmentMode, type IdentityRepository } from './service.js'
+import { StudioIdentityService, type EnrollmentMode, type IdentityPrincipal, type IdentityRepository } from './service.js'
 
 export * from './crypto.js'
 export * from './email.js'
@@ -33,7 +35,47 @@ export * from './rate-limit.js'
 export * from './service.js'
 
 export const name = 'dz23-studio-identity'
-export const inject = ['storageDomain', 'webServer', 'studioPolicy', 'credentials']
+
+export interface AgentLookup { get(id: SessionId): Agent | undefined }
+
+/** Resolve identity through an explicitly recorded agent lineage, never through ambient process state. */
+export function identityStateForAgent(
+  service: StudioIdentityService,
+  agents: AgentLookup,
+  agent: Agent | undefined,
+  bindHost: '127.0.0.1' | '0.0.0.0',
+): PolicyIdentityState {
+  for (const candidate of agentLineage(agents, agent)) {
+    const state = service.identityStateForHarnessSession(String(candidate.session.id), bindHost)
+    if (state.authenticated) return state
+  }
+  return { authenticated: false, strongIdentityVerified: false }
+}
+
+/** Resolve the tenant principal through the same durable parentSession lineage. */
+export function principalForAgent(
+  service: StudioIdentityService,
+  agents: AgentLookup,
+  agent: Agent | undefined,
+): IdentityPrincipal | undefined {
+  for (const candidate of agentLineage(agents, agent)) {
+    const principal = service.principalForHarnessSession(String(candidate.session.id))
+    if (principal !== undefined) return principal
+  }
+  return undefined
+}
+
+function* agentLineage(agents: AgentLookup, start: Agent | undefined): Generator<Agent> {
+  const seen = new Set<string>()
+  let current = start
+  while (current !== undefined && !seen.has(String(current.session.id))) {
+    seen.add(String(current.session.id))
+    yield current
+    const parent = current.session.header?.parentSession
+    current = parent === undefined ? undefined : agents.get(parent)
+  }
+}
+export const inject = ['agents', 'storageDomain', 'webServer', 'studioPolicy', 'credentials']
 
 export interface IdentityPluginConfig {
   readonly rpName?: string
@@ -160,8 +202,7 @@ export async function apply(ctx: Context, config: IdentityPluginConfig = {}): Pr
     ...(email.capture === undefined ? {} : { developmentEmailCapture: email.capture }),
   })
   const unsetResolver = ctx.studioPolicy.setIdentityResolver(execution => {
-    const harnessSessionId = execution.agent === undefined ? '' : String(execution.agent.session.id)
-    return service.identityStateForHarnessSession(harnessSessionId, ctx.webServer.host)
+    return identityStateForAgent(service, ctx.agents, execution.agent, ctx.webServer.host)
   })
   ctx.effect(() => unsetResolver, 'dz23-studio-identity.policyResolver')
   ctx.effect(() => ctx.webServer.register({

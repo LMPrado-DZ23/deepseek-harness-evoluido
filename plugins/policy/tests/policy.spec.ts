@@ -302,6 +302,29 @@ describe('authoritative tools/pre-execute integration', () => {
     expect(next).not.toHaveBeenCalled()
   })
 
+  it('converts only a matching, sufficiently strong delegation grant into a scoped allow', async () => {
+    const next = vi.fn<() => Promise<PreToolDecision>>().mockResolvedValue({ kind: 'allow' })
+    const { ctx, hook, put } = await mounted({
+      strongIdentityVerified: () => true,
+      rules: {
+        write: rule({ inferredTier: 'T2' }),
+        deploy: rule({ inferredTier: 'T3', sandboxMode: 'danger-full-access' }),
+      },
+    })
+    const runtime = ctx.provide.mock.calls[0]?.[1] as {
+      setDelegationGrantResolver(resolver: (execution: ToolExecution) => { approvedTier: 'T2' | 'T3'; reason: string } | undefined): () => void
+    }
+    const unset = runtime.setDelegationGrantResolver(current => current.name === 'write'
+      ? { approvedTier: 'T2', reason: 'delegação isolada aprovada' }
+      : { approvedTier: 'T2', reason: 'insuficiente' })
+    await expect(hook?.(execution('write'), next)).resolves.toEqual({ kind: 'allow' })
+    expect(next).toHaveBeenCalledOnce()
+    expect(put.mock.calls[0]?.[1]).toMatchObject({ decision: 'allow', reason: 'delegação isolada aprovada' })
+    await expect(hook?.(execution('deploy'), next)).resolves.toMatchObject({ kind: 'ask' })
+    unset()
+    await expect(hook?.(execution('write'), next)).resolves.toMatchObject({ kind: 'ask' })
+  })
+
   it('blocks the next tool call immediately when the identity session is invalid', async () => {
     const next = vi.fn<() => Promise<PreToolDecision>>().mockResolvedValue({ kind: 'allow' })
     const { ctx, hook } = await mounted({ rules: { safe: rule({ inferredTier: 'T0' }) } })

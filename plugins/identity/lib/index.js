@@ -14,7 +14,35 @@ export * from './passkey.js';
 export * from './rate-limit.js';
 export * from './service.js';
 export const name = 'dz23-studio-identity';
-export const inject = ['storageDomain', 'webServer', 'studioPolicy', 'credentials'];
+/** Resolve identity through an explicitly recorded agent lineage, never through ambient process state. */
+export function identityStateForAgent(service, agents, agent, bindHost) {
+    for (const candidate of agentLineage(agents, agent)) {
+        const state = service.identityStateForHarnessSession(String(candidate.session.id), bindHost);
+        if (state.authenticated)
+            return state;
+    }
+    return { authenticated: false, strongIdentityVerified: false };
+}
+/** Resolve the tenant principal through the same durable parentSession lineage. */
+export function principalForAgent(service, agents, agent) {
+    for (const candidate of agentLineage(agents, agent)) {
+        const principal = service.principalForHarnessSession(String(candidate.session.id));
+        if (principal !== undefined)
+            return principal;
+    }
+    return undefined;
+}
+function* agentLineage(agents, start) {
+    const seen = new Set();
+    let current = start;
+    while (current !== undefined && !seen.has(String(current.session.id))) {
+        seen.add(String(current.session.id));
+        yield current;
+        const parent = current.session.header?.parentSession;
+        current = parent === undefined ? undefined : agents.get(parent);
+    }
+}
+export const inject = ['agents', 'storageDomain', 'webServer', 'studioPolicy', 'credentials'];
 class DomainIdentityRepository {
     userTable;
     credentialTable;
@@ -100,8 +128,7 @@ export async function apply(ctx, config = {}) {
         ...(email.capture === undefined ? {} : { developmentEmailCapture: email.capture }),
     });
     const unsetResolver = ctx.studioPolicy.setIdentityResolver(execution => {
-        const harnessSessionId = execution.agent === undefined ? '' : String(execution.agent.session.id);
-        return service.identityStateForHarnessSession(harnessSessionId, ctx.webServer.host);
+        return identityStateForAgent(service, ctx.agents, execution.agent, ctx.webServer.host);
     });
     ctx.effect(() => unsetResolver, 'dz23-studio-identity.policyResolver');
     ctx.effect(() => ctx.webServer.register({

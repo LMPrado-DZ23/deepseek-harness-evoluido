@@ -6,6 +6,67 @@
     provider: studio-fake
     model: studio-deterministic
 
+- id: agent-presets
+  config:
+    default: standard
+    roots: !!js >-
+      process.env.DZ23_COORDINATOR_PRESET_ROOT
+        ? [{ path: process.env.DZ23_COORDINATOR_PRESET_ROOT, trust: 'system' }]
+        : []
+
+# The official DeepSeek route is already supplied by dsh-base under its
+# physical id `deepseek-official`. These two declared OpenAI-compatible routes
+# add no second gateway and resolve every credential by reference.
+- id: llm-pi-ai
+  config:
+    providers:
+      omniroute:
+        displayName: OmniRoute (externo opcional)
+        api: openai-completions
+        baseURL: !!js process.env.DZ23_OMNIROUTE_BASE_URL ?? 'http://127.0.0.1:20128/v1'
+        apiKeyEnv: DZ23_OMNIROUTE_KEY
+        retryPolicy:
+          mode: normal
+          maxRetries: 0
+        models:
+          - id: auto
+            name: OmniRoute Auto
+            contextWindow: 262144
+            maxTokens: 32768
+      ollama:
+        displayName: Ollama local
+        api: openai-completions
+        baseURL: !!js process.env.DZ23_OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434/v1'
+        apiKeyEnv: DZ23_OLLAMA_PLACEHOLDER
+        retryPolicy:
+          mode: normal
+          maxRetries: 0
+        models:
+          - id: !!js process.env.DZ23_OLLAMA_MODEL ?? 'qwen3-coder'
+            name: Modelo local configurado
+            contextWindow: 131072
+            maxTokens: 32768
+
+- insert:
+    # Providers are registered but never exposed through the generic
+    # tool-subagent. @dz23-studio/agents is the only approved entry point.
+    - id: dz23-subagent-codex
+      name: '@deepseek-ai/dsh-subagent-codex'
+      config:
+        providerName: codex
+        permissionMode: approve-for-me
+        env: {}
+    - id: dz23-subagent-claude-code
+      name: '@deepseek-ai/dsh-subagent-claude-code'
+      config:
+        providerName: claude-code
+        permissionMode: acceptEdits
+        env: {}
+    - id: dz23-subagent-spawn-in-process
+      name: '@deepseek-ai/dsh-subagent-spawn-in-process'
+      config:
+        providerName: spawn-in-process
+
 - insert:
     - id: dz23-studio-policy
       name: '@dz23-studio/policy'
@@ -26,9 +87,26 @@
             sandboxMode: workspace-write
             requiredPermission: project.write
             scope: project
+          write:
+            source:
+              kind: harness
+            inferredTier: T2
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
     - id: dz23-studio-identity
       name: '@dz23-studio/identity'
     - id: dz23-studio-tenancy
       name: '@dz23-studio/tenancy'
+    - id: dz23-studio-agents
+      name: '@dz23-studio/agents'
+      config:
+        coordinatorPreset: dz23-coordinator
+        inProcessCoordinatorPreset: dz23-coordinator-in-process
+        worktreeRoot: !!js process.env.DZ23_AGENT_WORKTREE_ROOT
+        inProcessProvider: studio-fake
+        inProcessModel: studio-deterministic
+    - id: dz23-studio-route-health
+      name: '@dz23-studio/route-health'
     - id: studio-hello
       name: '@studio/hello'
