@@ -68,7 +68,8 @@ try {
   const inspector = new pg.Client({ connectionString: process.env.DZ23_POSTGRES_DSN })
   await inspector.connect()
   try {
-    const stamped = await inspector.query('SELECT name FROM "dz23_storage_proof"."units"')
+    const proofSchema = process.env.DZ23_POSTGRES_PROOF_SCHEMA ?? 'dz23_storage_proof'
+    const stamped = await inspector.query(`SELECT name FROM "${proofSchema}"."units"`)
     const onPostgres = new Set(stamped.rows.map(row => row.name))
     for (const name of routedStudioDomains) assert.ok(onPostgres.has(name), `${name} opened on the json fallback, not on postgres`)
   } finally {

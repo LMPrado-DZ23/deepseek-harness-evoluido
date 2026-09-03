@@ -339,7 +339,7 @@ describePostgres('postgres backend against PostgreSQL 16', () => {
     }
     try {
       const schema = schemaName('plugin_backup')
-      await apply(context as never, { dsnRef: 'DZ23_POSTGRES_TEST_DSN', schema, ssl: 'off', poolMax: 2, backup: { directory: join(temporary, 'backups'), intervalMinutes: 5, keep: 2 } })
+      await apply(context as never, { dsnRef: 'DZ23_POSTGRES_TEST_DSN', schema, ssl: 'off', poolMax: 2, backupDirectory: join(temporary, 'backups'), backupIntervalMinutes: 5, backupKeep: 2 })
       const service = provided.mock.calls.find(call => call[0] === 'studioStorageBackup')?.[1] as { runOnce(): Promise<{ status: string; file: string | null }>; lastResult(): unknown }
       const result = await service.runOnce()
       expect(result.status).toBe('created')

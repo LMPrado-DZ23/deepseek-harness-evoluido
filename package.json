@@ -20,6 +20,7 @@
     "prove:fase3-agents": "node scripts/prove-fase3-agents.mjs",
     "preflight:fase3": "node scripts/preflight-fase3.mjs",
     "prove:postgres-runtime": "node scripts/prove-postgres-runtime.mjs",
+    "prove:postgres-soak": "node scripts/prove-postgres-soak.mjs",
     "prove:runtime": "node scripts/prove-runtime.mjs",
     "prove:builder-isolation": "node scripts/prove-builder-isolation.mjs",
     "prove:template-pipeline": "tsx scripts/prove-template-pipeline.ts",

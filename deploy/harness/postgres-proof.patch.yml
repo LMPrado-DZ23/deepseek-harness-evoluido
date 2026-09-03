@@ -5,9 +5,13 @@
       name: '@dz23-studio/storage-postgres'
       config:
         dsnRef: DZ23_POSTGRES_DSN
-        schema: dz23_storage_proof
+        schema: !!js process.env.DZ23_POSTGRES_PROOF_SCHEMA ?? 'dz23_storage_proof'
         ssl: off
         poolMax: 4
+        # Scheduled backup, enabled by the soak proof; empty = disabled in the plain runtime proof.
+        backupDirectory: !!js process.env.DZ23_POSTGRES_BACKUP_DIR ?? ''
+        backupIntervalMinutes: 5
+        backupKeep: 6
 
 - id: storage-domain
   config:
