@@ -12,8 +12,8 @@ o código pode existir, mas ainda não foi validado com pessoas leigas.
 | Bind público da porta interna do Harness | BLOCKED | ADR-012 proíbe | não deve ser liberado |
 | TLS ACME em domínio real | NOT_EXECUTED | configuração validada | emissão e renovação reais |
 | Deploy de produção | NOT_EXECUTED | nenhum deploy | fase própria com aprovação humana |
-| Domínios Studio em PostgreSQL | BETA | P31-A: contrato KV, durabilidade e falha fechada reais | carga, backup/restore e servidor real |
-| Escritor único cross-process | BETA | P31-A: dois processos e SIGKILL | operação prolongada e observabilidade |
+| Domínios Studio em PostgreSQL | BETA | P31-A + P31-B: 20/20 domínios roteados e provados no esquema; backup lógico a quente agendado; migração json→PostgreSQL de instância real; gate sem pular integrações | Compose executado em servidor real, restauração ensaiada em produção, RLS |
+| Escritor único cross-process | BETA | P31-A + P31-B: operação contínua de 30 min com backups a quente, contenda recusada o tempo todo e tomada após `SIGKILL` (`docs/proofs/P31-B-postgres-soak-proof.md`) | observabilidade do lease na interface |
 | Multi-instância ativa/standby quente | BLOCKED | ADR-013: estado autoritativo em memória | contrato de fencing/reload upstream |
 | RLS PostgreSQL por tenant | NOT_PRESENT | KV armazena JSON opaco | repositório tenant-aware + role sem BYPASSRLS |
 | Transação de negócio multi-registro | NOT_PRESENT | contrato KV é atômico por chamada | extensão batch/CAS transacional |

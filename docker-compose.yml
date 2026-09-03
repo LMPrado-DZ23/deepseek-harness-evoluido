@@ -11,8 +11,12 @@ services:
       DZ23_BOOTSTRAP_OWNER_EMAIL: ${DZ23_BOOTSTRAP_OWNER_EMAIL:?Defina o email da primeira pessoa proprietaria}
       DZ23_SMTP_SECRET: ${DZ23_SMTP_SECRET:?Defina a configuracao SMTP por segredo}
       DZ23_POSTGRES_DSN: ${DZ23_POSTGRES_DSN:?Defina a DSN PostgreSQL como segredo no servidor}
+      DZ23_POSTGRES_BACKUP_DIR: /var/lib/dz23-studio-backups
+      DZ23_POSTGRES_BACKUP_INTERVAL_MINUTES: ${DZ23_POSTGRES_BACKUP_INTERVAL_MINUTES:-60}
+      DZ23_POSTGRES_BACKUP_KEEP: ${DZ23_POSTGRES_BACKUP_KEEP:-48}
     volumes:
       - studio-data:/var/lib/dz23-studio
+      - studio-backups:/var/lib/dz23-studio-backups
     network_mode: service:caddy
     depends_on:
       caddy:
@@ -78,6 +82,7 @@ services:
 
 volumes:
   studio-data:
+  studio-backups:
   caddy-data:
   caddy-config:
   postgres-data:

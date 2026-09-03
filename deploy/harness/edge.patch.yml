@@ -8,6 +8,12 @@
         schema: dz23_storage
         ssl: off
         poolMax: 4
+        # Scheduled logical backup (P31-B). The directory is a dedicated volume in
+        # docker-compose.yml; empty disables the schedule (operators then run
+        # `pnpm storage:backup-postgres` themselves).
+        backupDirectory: !!js process.env.DZ23_POSTGRES_BACKUP_DIR ?? '/var/lib/dz23-studio-backups'
+        backupIntervalMinutes: !!js Number(process.env.DZ23_POSTGRES_BACKUP_INTERVAL_MINUTES ?? 60)
+        backupKeep: !!js Number(process.env.DZ23_POSTGRES_BACKUP_KEEP ?? 48)
 
 - id: storage-domain
   config:

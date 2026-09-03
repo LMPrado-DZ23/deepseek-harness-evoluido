@@ -24,7 +24,8 @@ Essa capacidade está em **BETA**: não houve deploy, domínio ACME real nem tes
 celular físico. Consulte [ADR-012](./docs/adr/ADR-012-single-caddy-edge.md), a
 [prova P29-C](./docs/pocs/P29-C-edge-proof.md), a
 [matriz de capacidades](./docs/CAPABILITY_MATRIX.md) e o
-[guia de acesso móvel](./docs/guides/mobile-secure-access.md).
+[guia de acesso móvel](./docs/guides/mobile-secure-access.md) e o
+[guia de cópia de segurança e restauração](./docs/guides/backup-e-restauracao.md).
 
 Em servidor, `DZ23_BOOTSTRAP_OWNER_EMAIL` é obrigatório: somente esse endereço
 pode criar a primeira conta proprietária. A borda autenticada também desativa o
@@ -90,9 +91,13 @@ No WSL Ubuntu, a partir da raiz deste repositório:
 ```sh
 pnpm typecheck
 pnpm test:coverage
+pnpm gate:domain-routes
+pnpm build
+# PostgreSQL: DZ23_POSTGRES_TEST_DSN aponta para qualquer PostgreSQL 16; sem DSN o gate sobe o Compose descartável.
 pnpm test:postgres:coverage
 pnpm test:postgres:runtime
-pnpm build
+DZ23_POSTGRES_DSN=... pnpm prove:storage-migration
+DZ23_POSTGRES_DSN=... pnpm prove:postgres-soak --minutes 30
 pnpm build:edge
 pnpm prove:edge
 pnpm preflight:fase3
