@@ -1,0 +1,140 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-09-03T09:22:07.973Z",
+  "route": "deterministic-fixture",
+  "real_llm": "NOT_EXECUTED",
+  "promotion_eligible": false,
+  "counts": {
+    "total": 18,
+    "pass_deterministic": 6,
+    "not_implemented": 12
+  },
+  "results": [
+    {
+      "id": "catalog-01",
+      "category": "catalog",
+      "state": "PASS_DETERMINISTIC",
+      "critical": "NO_SENSITIVE_DATA_DETECTED",
+      "detail": "Build, teste unitário, Playwright, axe e scan passaram em contêiner sem rede."
+    },
+    {
+      "id": "catalog-02",
+      "category": "catalog",
+      "state": "PASS_DETERMINISTIC",
+      "critical": "NO_SENSITIVE_DATA_DETECTED",
+      "detail": "Build, teste unitário, Playwright, axe e scan passaram em contêiner sem rede."
+    },
+    {
+      "id": "catalog-03",
+      "category": "catalog",
+      "state": "PASS_DETERMINISTIC",
+      "critical": "SENSITIVE_QUESTION_REQUIRED",
+      "detail": "Build, teste unitário, Playwright, axe e scan passaram em contêiner sem rede."
+    },
+    {
+      "id": "crm-01",
+      "category": "crm",
+      "state": "NOT_IMPLEMENTED",
+      "critical": "NOT_EXECUTED",
+      "detail": "Categoria declarada, ainda sem executor."
+    },
+    {
+      "id": "crm-02",
+      "category": "crm",
+      "state": "NOT_IMPLEMENTED",
+      "critical": "NOT_EXECUTED",
+      "detail": "Categoria declarada, ainda sem executor."
+    },
+    {
+      "id": "crm-03",
+      "category": "crm",
+      "state": "NOT_IMPLEMENTED",
+      "critical": "NOT_EXECUTED",
+      "detail": "Categoria declarada, ainda sem executor."
+    },
+    {
+      "id": "dashboard-01",
+      "category": "dashboard",
+      "state": "NOT_IMPLEMENTED",
+      "critical": "NOT_EXECUTED",
+      "detail": "Categoria declarada, ainda sem executor."
+    },
+    {
+      "id": "dashboard-02",
+      "category": "dashboard",
+      "state": "NOT_IMPLEMENTED",
+      "critical": "NOT_EXECUTED",
+      "detail": "Categoria declarada, ainda sem executor."
+    },
+    {
+      "id": "dashboard-03",
+      "category": "dashboard",
+      "state": "NOT_IMPLEMENTED",
+      "critical": "NOT_EXECUTED",
+      "detail": "Categoria declarada, ainda sem executor."
+    },
+    {
+      "id": "landing-01",
+      "category": "landing-page",
+      "state": "PASS_DETERMINISTIC",
+      "critical": "NO_SENSITIVE_DATA_DETECTED",
+      "detail": "Build, teste unitário, Playwright, axe e scan passaram em contêiner sem rede."
+    },
+    {
+      "id": "landing-02",
+      "category": "landing-page",
+      "state": "PASS_DETERMINISTIC",
+      "critical": "NO_SENSITIVE_DATA_DETECTED",
+      "detail": "Build, teste unitário, Playwright, axe e scan passaram em contêiner sem rede."
+    },
+    {
+      "id": "landing-03",
+      "category": "landing-page",
+      "state": "PASS_DETERMINISTIC",
+      "critical": "SENSITIVE_QUESTION_REQUIRED",
+      "detail": "Build, teste unitário, Playwright, axe e scan passaram em contêiner sem rede."
+    },
+    {
+      "id": "portal-01",
+      "category": "portal",
+      "state": "NOT_IMPLEMENTED",
+      "critical": "NOT_EXECUTED",
+      "detail": "Categoria declarada, ainda sem executor."
+    },
+    {
+      "id": "portal-02",
+      "category": "portal",
+      "state": "NOT_IMPLEMENTED",
+      "critical": "NOT_EXECUTED",
+      "detail": "Categoria declarada, ainda sem executor."
+    },
+    {
+      "id": "portal-03",
+      "category": "portal",
+      "state": "NOT_IMPLEMENTED",
+      "critical": "NOT_EXECUTED",
+      "detail": "Categoria declarada, ainda sem executor."
+    },
+    {
+      "id": "scheduling-01",
+      "category": "scheduling",
+      "state": "NOT_IMPLEMENTED",
+      "critical": "NOT_EXECUTED",
+      "detail": "Categoria declarada, ainda sem executor."
+    },
+    {
+      "id": "scheduling-02",
+      "category": "scheduling",
+      "state": "NOT_IMPLEMENTED",
+      "critical": "NOT_EXECUTED",
+      "detail": "Categoria declarada, ainda sem executor."
+    },
+    {
+      "id": "scheduling-03",
+      "category": "scheduling",
+      "state": "NOT_IMPLEMENTED",
+      "critical": "NOT_EXECUTED",
+      "detail": "Categoria declarada, ainda sem executor."
+    }
+  ]
+}

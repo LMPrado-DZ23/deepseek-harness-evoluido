@@ -108,5 +108,9 @@
         inProcessModel: studio-deterministic
     - id: dz23-studio-route-health
       name: '@dz23-studio/route-health'
+    - id: dz23-studio-prompt-to-app
+      name: '@dz23-studio/prompt-to-app'
+    - id: dz23-studio-web
+      name: '@dz23-studio/web'
     - id: studio-hello
       name: '@studio/hello'

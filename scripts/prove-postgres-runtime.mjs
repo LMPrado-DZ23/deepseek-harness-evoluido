@@ -10,6 +10,14 @@ const studioRoot = resolve(process.cwd())
 const dshHome = join(studioRoot, 'runtime', `postgres-proof-${randomUUID()}`)
 const profile = join(studioRoot, 'dsh-home', 'profiles', 'studio')
 const recordKey = `p31_${randomUUID()}`
+const routedStudioDomains = [
+  'studio_hello', 'studio_policy_audit',
+  'studio_identity_users', 'studio_identity_credentials', 'studio_identity_sessions', 'studio_identity_audit',
+  'studio_orgs', 'studio_workspaces', 'studio_memberships',
+  'studio_agent_runs', 'studio_agent_leases', 'studio_route_health',
+  'studio_projects', 'studio_app_specs', 'studio_intake_turns', 'studio_plans',
+  'studio_runs', 'studio_evidence', 'studio_approvals',
+]
 process.env.DSH_HOME = dshHome
 process.env.DSH_TELEMETRY_DISABLED = '1'
 
@@ -53,7 +61,7 @@ let second
 try {
   first = await boot()
   assert.ok(first.ctx.storage.backend.get('postgres'))
-  for (const name of ['studio_agent_runs', 'studio_agent_leases', 'studio_route_health']) {
+  for (const name of routedStudioDomains) {
     assert.ok(first.ctx.storageDomain.get(name), `${name} did not open on its configured backend`)
   }
   const firstDomain = first.ctx.storageDomain.get('studio_hello')
@@ -80,7 +88,7 @@ try {
     filesystem: 'WSL2 ext4 (/home)',
     backend: 'postgres',
     defaultBackend: 'json',
-    routedStudioDomains: 12,
+    routedStudioDomains: routedStudioDomains.length,
     restartRestored: true,
   }, null, 2)}\n`)
 } finally {

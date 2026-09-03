@@ -1,0 +1,19 @@
+{
+  "questions": {
+    "audience": "Para quem você quer criar este projeto?",
+    "goal": "O que a pessoa deve conseguir fazer ou entender?",
+    "content": "Quais informações ou itens precisam aparecer?",
+    "sensitive": "Sua ideia parece envolver dados sensíveis ({kinds}). Você confirma que isso é necessário?"
+  },
+  "errors": {
+    "notFound": "Projeto não encontrado neste espaço de trabalho.",
+    "forbidden": "Seu papel não permite esta ação.",
+    "crossTenant": "A ação tentou acessar outro espaço de trabalho.",
+    "planRequired": "A criação só começa depois que você aprovar o plano.",
+    "builderUnavailable": "O ambiente isolado para criar seu projeto não está disponível neste computador."
+  },
+  "pipeline": {
+    "verified": "Protótipo verificado localmente. Nada foi publicado.",
+    "failed": "A verificação encontrou um problema e a criação foi interrompida."
+  }
+}

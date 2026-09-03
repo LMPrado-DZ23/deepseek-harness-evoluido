@@ -43,6 +43,12 @@ describe('@dz23-studio/route-health composition', () => {
     })())) output.push(chunk)
     expect(output).toHaveLength(1)
     expect(runtime.service.list({ orgId: 'org', tenantId: 'tenant' })[0]).toMatchObject({ route: 'ollama', requests: 1 })
+    const webOptions: GenerateOptions = { provider: 'ollama', model: 'qwen', messages: [] }
+    expect(runtime.markScope(webOptions, { orgId: 'web-org', tenantId: 'web-tenant' })).toBe(webOptions)
+    for await (const _chunk of listener(webOptions, () => (async function* () {
+      yield { type: 'finish', reason: { kind: 'stop' } } as StreamChunk
+    })())) { /* drain */ }
+    expect(runtime.service.list({ orgId: 'web-org', tenantId: 'web-tenant' })[0]).toMatchObject({ route: 'ollama', requests: 1 })
     expect(ctx.studioIdentity.service.principalForHarnessSession).toHaveBeenCalledWith('session')
     expect(ctx.webServer.register).toHaveBeenCalledWith(expect.objectContaining({ kind: 'exact', path: '/api/studio/routes/health' }))
     expect(handler).toBeTypeOf('function')

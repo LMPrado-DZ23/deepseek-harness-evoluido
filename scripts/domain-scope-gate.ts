@@ -14,6 +14,34 @@ export interface DomainScopeEntry {
 /** Explicit and reviewable classification; there is deliberately no wildcard. */
 export const STUDIO_DOMAIN_SCOPES: readonly DomainScopeEntry[] = [
   {
+    source: 'plugins/prompt-to-app/src/model.ts', exportName: 'studioProjectsDomainSpec', physicalName: 'studio_projects',
+    tables: { projects: { scope: 'org-tenant', requiredFields: ['org_id', 'tenant_id'] } },
+  },
+  {
+    source: 'plugins/prompt-to-app/src/model.ts', exportName: 'studioAppSpecsDomainSpec', physicalName: 'studio_app_specs',
+    tables: { specs: { scope: 'org-tenant', requiredFields: ['org_id', 'tenant_id'] } },
+  },
+  {
+    source: 'plugins/prompt-to-app/src/model.ts', exportName: 'studioIntakeTurnsDomainSpec', physicalName: 'studio_intake_turns',
+    tables: { turns: { scope: 'org-tenant', requiredFields: ['org_id', 'tenant_id'] } },
+  },
+  {
+    source: 'plugins/prompt-to-app/src/model.ts', exportName: 'studioPlansDomainSpec', physicalName: 'studio_plans',
+    tables: { plans: { scope: 'org-tenant', requiredFields: ['org_id', 'tenant_id'] } },
+  },
+  {
+    source: 'plugins/prompt-to-app/src/model.ts', exportName: 'studioRunsDomainSpec', physicalName: 'studio_runs',
+    tables: { runs: { scope: 'org-tenant', requiredFields: ['org_id', 'tenant_id'] } },
+  },
+  {
+    source: 'plugins/prompt-to-app/src/model.ts', exportName: 'studioEvidenceDomainSpec', physicalName: 'studio_evidence',
+    tables: { evidence: { scope: 'org-tenant', requiredFields: ['org_id', 'tenant_id'] } },
+  },
+  {
+    source: 'plugins/prompt-to-app/src/model.ts', exportName: 'studioApprovalsDomainSpec', physicalName: 'studio_approvals',
+    tables: { approvals: { scope: 'org-tenant', requiredFields: ['org_id', 'tenant_id'] } },
+  },
+  {
     source: 'plugins/agents/src/model.ts', exportName: 'studioAgentRunsDomainSpec', physicalName: 'studio_agent_runs',
     tables: { runs: { scope: 'workspace-tenant', requiredFields: ['org_id', 'tenant_id', 'workspace_id'], reason: 'An agent run belongs to one approved workspace.' } },
   },

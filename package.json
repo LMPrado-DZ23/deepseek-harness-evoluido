@@ -5,25 +5,32 @@
   "type": "module",
   "packageManager": "pnpm@11.7.0",
   "workspaces": [
-    "plugins/*"
+    "plugins/*",
+    "apps/studio-web"
   ],
   "scripts": {
     "build:edge": "docker build -f deploy/caddy/Dockerfile -t dz23-studio-caddy:p29c .",
     "gate:domain-scopes": "tsx scripts/check-domain-scopes.ts",
     "storage:export-sqlite": "tsx scripts/export-sqlite-storage.ts",
     "storage:import-postgres": "tsx scripts/import-postgres-storage.ts",
+    "studio:setup-templates": "node scripts/setup-templates.mjs",
     "prove:edge": "node scripts/prove-edge.mjs",
     "prove:fase3-agents": "node scripts/prove-fase3-agents.mjs",
     "preflight:fase3": "node scripts/preflight-fase3.mjs",
     "prove:postgres-runtime": "node scripts/prove-postgres-runtime.mjs",
     "prove:runtime": "node scripts/prove-runtime.mjs",
+    "prove:builder-isolation": "node scripts/prove-builder-isolation.mjs",
+    "prove:template-pipeline": "tsx scripts/prove-template-pipeline.ts",
     "test:postgres": "node scripts/test-postgres.mjs",
     "test:postgres:coverage": "node scripts/test-postgres.mjs --coverage",
     "test:postgres:runtime": "node scripts/test-postgres.mjs --runtime",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "build": "pnpm --recursive run build"
+    "build": "pnpm --recursive run build",
+    "gate:i18n": "node scripts/check-i18n.mjs",
+    "golden": "tsx scripts/run-golden-set.ts",
+    "prove:prompt-to-app": "tsx scripts/prove-prompt-to-app.ts"
   },
   "devDependencies": {
     "@deepseek-ai/dsh-storage": "link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage",

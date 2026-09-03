@@ -5,6 +5,7 @@ import { studioPolicyAuditDomainSpec } from '../plugins/policy/src/index.ts'
 import { studioAgentLeasesDomainSpec, studioAgentRunsDomainSpec } from '../plugins/agents/src/model.ts'
 import { studioRouteHealthDomainSpec } from '../plugins/route-health/src/model.ts'
 import { studioMembershipsDomainSpec, studioOrgsDomainSpec, studioWorkspacesDomainSpec } from '../plugins/tenancy/src/model.ts'
+import { PROMPT_TO_APP_DOMAIN_SPECS } from '../plugins/prompt-to-app/src/model.ts'
 
 /** The only units migration tools may touch. Session/event logs use another seam. */
 export const STUDIO_DOMAIN_SPECS: readonly DomainSpec[] = [
@@ -20,4 +21,5 @@ export const STUDIO_DOMAIN_SPECS: readonly DomainSpec[] = [
   studioAgentRunsDomainSpec,
   studioAgentLeasesDomainSpec,
   studioRouteHealthDomainSpec,
+  ...PROMPT_TO_APP_DOMAIN_SPECS,
 ]

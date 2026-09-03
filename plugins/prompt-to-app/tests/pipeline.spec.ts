@@ -1,0 +1,106 @@
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { AppSpecV1 } from '../src/appspec.js'
+import type { StudioPlan, StudioRun } from '../src/model.js'
+import { PromptToAppPipeline, type CodeGeneratorPort } from '../src/pipeline.js'
+import type { ContainerBuilder } from '../src/runner.js'
+import { PromptToAppError, type PromptToAppActor, type PromptToAppService } from '../src/service.js'
+
+const actor: PromptToAppActor = { userId: 'owner', orgId: 'org-a', tenantId: 'tenant-a', role: 'owner' }
+const spec: AppSpecV1 = {
+  schema_version: 1, problem: 'Apresentar serviços.', audience: 'Clientes', journeys: ['Conhecer serviços'],
+  pages: [{ name: 'Início', sections: ['Serviços'] }], entities: [], sensitive_data: { detected: [], confirmed_by_user: false },
+  accessibility: { wcag_level: 'AA', keyboard_required: true, reduced_motion: true }, language: 'pt-BR',
+  acceptance_criteria: ['A página tem um título.'],
+}
+const plan: StudioPlan = {
+  plan_id: 'plan', spec_id: 'spec', project_id: 'project', org_id: actor.orgId, tenant_id: actor.tenantId,
+  slices: [{ slice_id: 'slice', title: 'Página', description: 'Criar página', acceptance_criteria: ['Compila'], planned_files: ['content/app.json', 'src/GeneratedApp.tsx'] }],
+  status: 'APPROVED', created_at: '2026-09-03T12:00:00.000Z', updated_at: '2026-09-03T12:00:00.000Z',
+}
+const cleanGeneration = {
+  files: [
+    { path: 'content/app.json', content: '{"title":"Aurora","description":"Serviços"}' },
+    { path: 'src/GeneratedApp.tsx', content: 'export default function GeneratedApp(){ return <h1>Aurora</h1> }' },
+  ], route: 'ollama', model: 'qwen', inputTokens: 10, outputTokens: 20,
+} as const
+const roots: string[] = []
+afterEach(async () => Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))))
+
+async function fixture(options: { readonly preflight?: 'OK' | 'BLOCKED_EXTERNAL'; readonly execute?: (directory: string, command: string) => Promise<{ exitCode: number; stdout: string; stderr: string; timedOut: boolean }> } = {}) {
+  const root = await mkdtemp(join(tmpdir(), 'dz23-pipeline-test-')); roots.push(root)
+  const templateDirectory = resolve(root, 'template'); const runsRoot = resolve(root, 'runs')
+  await mkdir(resolve(templateDirectory, 'src'), { recursive: true })
+  await writeFile(resolve(templateDirectory, 'package.json'), '{"private":true}')
+  await writeFile(resolve(templateDirectory, 'src/App.tsx'), 'export default function App(){ return null }')
+  let state = 'PLAN_APPROVED'
+  const runs: StudioRun[] = []; const transitions: string[] = []; const evidence: unknown[] = []
+  const service = {
+    project: vi.fn(() => ({ state })), plan: vi.fn(() => plan), latestSpec: vi.fn(() => ({ app_spec: spec })),
+    transition: vi.fn(async (_actor, _projectId, to: string) => { state = to; transitions.push(to); return { state } }),
+    putRun: vi.fn(async (_actor, run: StudioRun) => { runs.push(run) }),
+    putEvidence: vi.fn(async (_actor, item: unknown) => { evidence.push(item) }),
+  }
+  const execute = vi.fn(options.execute ?? (async () => ({ exitCode: 0, stdout: 'ok', stderr: '', timedOut: false })))
+  const builder = {
+    preflight: vi.fn(async () => options.preflight === 'BLOCKED_EXTERNAL'
+      ? { state: 'BLOCKED_EXTERNAL' as const, message: 'Construtor indisponível.' }
+      : { state: 'OK' as const, message: 'ok' }),
+    execute,
+  }
+  let id = 0
+  const pipeline = new PromptToAppPipeline({
+    service: service as unknown as PromptToAppService, builder: builder as unknown as ContainerBuilder,
+    templateDirectory, runsRoot, now: () => new Date('2026-09-03T12:00:00.000Z'), createId: () => `id-${++id}`,
+  })
+  return { pipeline, service, builder, execute, runs, transitions, evidence, templateDirectory }
+}
+
+describe('Prompt-to-App pipeline', () => {
+  it('records a verified prototype only after every offline step passes', async () => {
+    const f = await fixture(); const generator = { generate: vi.fn(async () => cleanGeneration) }
+    const result = await f.pipeline.run(actor, 'project', generator)
+    expect({ result, runs: f.runs, transitions: f.transitions }).toMatchObject({ result: { state: 'VERIFIED_PROTOTYPE', attempts: 1 } })
+    expect(f.transitions).toEqual(['GENERATING', 'BUILD_OK', 'TESTS_OK', 'VERIFIED_PROTOTYPE'])
+    expect(f.execute).toHaveBeenCalledTimes(4)
+    expect(f.runs[0]).toMatchObject({ stage: 'verify', state: 'PASSED', route: 'ollama', input_tokens: 10, output_tokens: 20, failure_code: null })
+    expect(f.evidence).toHaveLength(1)
+  })
+
+  it('distinguishes a test failure from a build failure after three attempts', async () => {
+    const f = await fixture({ execute: async (_directory, command) => ({ exitCode: command === 'pnpm run test' ? 1 : 0, stdout: '', stderr: '', timedOut: false }) })
+    const result = await f.pipeline.run(actor, 'project', { generate: vi.fn(async () => cleanGeneration) })
+    expect(result).toMatchObject({ state: 'TESTS_FAILED', attempts: 3 })
+    expect(f.transitions).toEqual(['GENERATING', 'BUILD_OK', 'TESTS_FAILED'])
+    expect(f.runs).toHaveLength(3)
+    expect(f.runs.every(run => run.stage === 'test' && run.failure_code === 'pnpm run test: exit 1')).toBe(true)
+  })
+
+  it('retries rejected model output with the prior diagnostic and closes as build failed', async () => {
+    const f = await fixture()
+    const generator: CodeGeneratorPort = { generate: vi.fn(async (_spec, _plan, diagnostic) => { throw new Error(diagnostic === undefined ? 'JSON inválido' : diagnostic) }) }
+    const result = await f.pipeline.run(actor, 'project', generator)
+    expect(result).toMatchObject({ state: 'BUILD_FAILED', attempts: 3, message: 'JSON inválido' })
+    expect(generator.generate).toHaveBeenNthCalledWith(2, spec, plan, 'JSON inválido')
+    expect(f.execute).not.toHaveBeenCalled()
+    expect(f.runs.every(run => run.stage === 'generate' && run.failure_code === 'JSON inválido')).toBe(true)
+    expect(f.transitions).toEqual(['GENERATING', 'BUILD_FAILED'])
+  })
+
+  it('blocks before generation when the isolated builder is unavailable', async () => {
+    const f = await fixture({ preflight: 'BLOCKED_EXTERNAL' }); const generator = { generate: vi.fn(async () => cleanGeneration) }
+    await expect(f.pipeline.run(actor, 'project', generator)).resolves.toEqual({ state: 'BLOCKED_EXTERNAL', attempts: 0, message: 'Construtor indisponível.' })
+    expect(generator.generate).not.toHaveBeenCalled()
+    expect(f.transitions).toEqual([])
+    expect(f.runs[0]).toMatchObject({ stage: 'build', state: 'BLOCKED_EXTERNAL', sandbox: 'unavailable', failure_code: 'BUILDER_UNAVAILABLE' })
+  })
+
+  it('refuses to start without the approved plan and approved project state', async () => {
+    const f = await fixture()
+    f.service.plan.mockReturnValueOnce({ ...plan, status: 'PROPOSED' })
+    await expect(f.pipeline.run(actor, 'project', { generate: vi.fn() })).rejects.toBeInstanceOf(PromptToAppError)
+    expect(f.builder.preflight).not.toHaveBeenCalled()
+  })
+})

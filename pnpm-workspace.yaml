@@ -1,5 +1,6 @@
 packages:
   - plugins/*
+  - apps/studio-web
 
 nodeLinker: hoisted
 autoInstallPeers: false

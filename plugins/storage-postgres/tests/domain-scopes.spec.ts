@@ -1,26 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { identityAuditDomainSpec, identityCredentialsDomainSpec, identitySessionsDomainSpec, identityUsersDomainSpec } from '../../identity/src/model.ts'
-import { studioPolicyAuditDomainSpec } from '../../policy/src/index.ts'
-import { studioAgentLeasesDomainSpec, studioAgentRunsDomainSpec } from '../../agents/src/model.ts'
-import { studioRouteHealthDomainSpec } from '../../route-health/src/model.ts'
-import { studioMembershipsDomainSpec, studioOrgsDomainSpec, studioWorkspacesDomainSpec } from '../../tenancy/src/model.ts'
-import { studioHelloDomainSpec } from '../../hello/src/index.ts'
 import { assertDomainScopeManifest, STUDIO_DOMAIN_SCOPES } from '../../../scripts/domain-scope-gate.ts'
-
-const SPECS = [
-  studioHelloDomainSpec,
-  identityUsersDomainSpec,
-  identityCredentialsDomainSpec,
-  identitySessionsDomainSpec,
-  identityAuditDomainSpec,
-  studioOrgsDomainSpec,
-  studioWorkspacesDomainSpec,
-  studioMembershipsDomainSpec,
-  studioPolicyAuditDomainSpec,
-  studioAgentRunsDomainSpec,
-  studioAgentLeasesDomainSpec,
-  studioRouteHealthDomainSpec,
-]
+import { STUDIO_DOMAIN_SPECS } from '../../../scripts/studio-domain-specs.ts'
 
 describe('Studio domain tenant-scope gate', () => {
   it('classifies every defineDomain declaration with no wildcard', async () => {
@@ -28,9 +8,9 @@ describe('Studio domain tenant-scope gate', () => {
   })
 
   it('matches every physical domain and table and requires its structural scope fields', () => {
-    expect(STUDIO_DOMAIN_SCOPES).toHaveLength(SPECS.length)
+    expect(STUDIO_DOMAIN_SCOPES).toHaveLength(STUDIO_DOMAIN_SPECS.length)
     for (const entry of STUDIO_DOMAIN_SCOPES) {
-      const spec = SPECS.find(candidate => candidate.name === entry.physicalName)
+      const spec = STUDIO_DOMAIN_SPECS.find(candidate => candidate.name === entry.physicalName)
       expect(spec, entry.physicalName).toBeDefined()
       expect(Object.keys(spec!.tables).sort()).toEqual(Object.keys(entry.tables).sort())
       for (const [tableName, rule] of Object.entries(entry.tables)) {

@@ -22,6 +22,7 @@ export const inject = ['llm', 'storageDomain', 'studioIdentity', 'webServer']
 export interface StudioRouteHealthRuntime {
   readonly service: StudioRouteHealthService
   markExplicit(options: GenerateOptions): GenerateOptions
+  markScope(options: GenerateOptions, scope: RouteScope): GenerateOptions
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -57,15 +58,19 @@ export async function apply(ctx: Context): Promise<void> {
   const configured = new Set(ctx.llm.listProviders().map(provider => provider.id))
   await service.initialize({ orgId: 'studio-system', tenantId: 'studio-system' }, configured)
   const explicitRequests = new WeakSet<GenerateOptions>()
+  const requestScopes = new WeakMap<GenerateOptions, RouteScope>()
   ctx.provide('studioRouteHealth', {
     service,
     markExplicit(options) { explicitRequests.add(options); return options },
+    markScope(options, scope) { requestScopes.set(options, scope); return options },
   })
 
   const bypass = new WeakSet<GenerateOptions>()
   ctx.on('llm/stream', (options, next): AsyncIterable<StreamChunk> => {
     if (bypass.delete(options)) return next()
-    const scope = scopeFor(ctx.studioIdentity.service, options.sessionId === undefined ? undefined : String(options.sessionId))
+    const scope = requestScopes.get(options)
+      ?? scopeFor(ctx.studioIdentity.service, options.sessionId === undefined ? undefined : String(options.sessionId))
+    requestScopes.delete(options)
     const explicit = explicitRequests.delete(options)
     return service.streamWithFallback(scope, options, next, fallbackOptions => {
       bypass.add(fallbackOptions)

@@ -10,16 +10,16 @@ importers:
     dependencies:
       '@deepseek-ai/dsh-llm-pi-ai':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/llm/llm-pi-ai
-        version: link:../../../../../../../../../../../../../home/leandro/harness-studio-poc02/deepseek-harness/packages/llm/llm-pi-ai
+        version: link:../../../../harness-studio-poc02/deepseek-harness/packages/llm/llm-pi-ai
       '@deepseek-ai/dsh-subagent-claude-code':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/subagent/subagent-claude-code
-        version: link:../../../../../../../../../../../../../home/leandro/harness-studio-poc02/deepseek-harness/packages/subagent/subagent-claude-code
+        version: link:../../../../harness-studio-poc02/deepseek-harness/packages/subagent/subagent-claude-code
       '@deepseek-ai/dsh-subagent-codex':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/subagent/subagent-codex
-        version: link:../../../../../../../../../../../../../home/leandro/harness-studio-poc02/deepseek-harness/packages/subagent/subagent-codex
+        version: link:../../../../harness-studio-poc02/deepseek-harness/packages/subagent/subagent-codex
       '@deepseek-ai/dsh-subagent-spawn-in-process':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/subagent/subagent-spawn-in-process
-        version: link:../../../../../../../../../../../../../home/leandro/harness-studio-poc02/deepseek-harness/packages/subagent/subagent-spawn-in-process
+        version: link:../../../../harness-studio-poc02/deepseek-harness/packages/subagent/subagent-spawn-in-process
       '@dz23-studio/agents':
         specifier: link:../../../plugins/agents
         version: link:../../../plugins/agents
@@ -29,6 +29,9 @@ importers:
       '@dz23-studio/policy':
         specifier: link:../../../plugins/policy
         version: link:../../../plugins/policy
+      '@dz23-studio/prompt-to-app':
+        specifier: link:../../../plugins/prompt-to-app
+        version: link:../../../plugins/prompt-to-app
       '@dz23-studio/route-health':
         specifier: link:../../../plugins/route-health
         version: link:../../../plugins/route-health
@@ -38,6 +41,9 @@ importers:
       '@dz23-studio/tenancy':
         specifier: link:../../../plugins/tenancy
         version: link:../../../plugins/tenancy
+      '@dz23-studio/web':
+        specifier: link:../../../plugins/studio-web
+        version: link:../../../plugins/studio-web
       '@studio/hello':
         specifier: link:../../../plugins/hello
         version: link:../../../plugins/hello
