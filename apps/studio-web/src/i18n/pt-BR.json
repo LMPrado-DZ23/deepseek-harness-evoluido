@@ -45,6 +45,17 @@
     "pending": "Em conferência", "notAutomated": "Não verificado automaticamente",
     "testCodes": "Códigos usados na verificação", "testCodesHelp": "Estes códigos locais já foram usados pelos testes automáticos. Quando o preview existir, novos códigos de teste aparecerão somente aqui."
   },
+  "preview": {
+    "title": "Seu protótipo local",
+    "open": "Ver meu protótipo",
+    "stop": "Encerrar prévia",
+    "frameTitle": "Prévia isolada do protótipo",
+    "localOnly": "Esta visualização roda somente neste computador e termina automaticamente.",
+    "notPublished": "Isto é uma prévia local. Seu aplicativo não foi publicado na internet.",
+    "closed": "A prévia foi encerrada. O protótipo continua salvo no projeto.",
+    "accessCodes": "Código de acesso da prévia",
+    "accessCodesHelp": "Use este código somente dentro do protótipo. Ele não foi enviado por e-mail."
+  },
   "privacy": {
     "title": "Privacidade", "local": "Somente no meu computador", "configured": "Permitir IA configurada",
     "localNotice": "Seus dados não são enviados para serviços externos. Tudo fica no seu computador.",

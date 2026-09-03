@@ -1,5 +1,5 @@
 import { Bell, CircleHelp, Eye, FolderKanban, Home, LineChart, Menu, Settings, Sparkles, UserRound } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, type HealthState } from './api'
 import t from './i18n/pt-BR.json'
 import { currentStepIndex, permanentTruthKind, privacyNotice, type ProjectUiState } from './presentation'
@@ -12,6 +12,7 @@ type AcceptanceCheck = { id: string; label: string; status: 'PENDING' | 'PASSED'
 type VerificationCode = { email: string; code: string; expires_at: string }
 type PipelineResult = { state: 'VERIFIED_PROTOTYPE' | 'BUILD_FAILED' | 'TESTS_FAILED' | 'BLOCKED_EXTERNAL' | 'CANCELLED'; attempts: number; message: string; checks?: AcceptanceCheck[]; verificationCodes?: VerificationCode[] }
 type ProjectDetails = { project: { state: ProjectUiState }; current_run: null | { operation_id: string; state: 'PENDING' | 'RUNNING' | 'PASSED' | 'FAILED' | 'BLOCKED_EXTERNAL' | 'BUDGET_EXCEEDED' | 'CANCELLED'; stage: string; attempt: number; failure_code: string | null; acceptance_checks: AcceptanceCheck[]; verification_codes?: VerificationCode[] } }
+type Preview = { preview_id: string; state: 'REQUESTED' | 'STARTING' | 'READY' | 'STOPPING' | 'STOPPED' | 'FAILED' | 'EXPIRED'; health: 'PENDING' | 'OK' | 'DOWN'; url: string; expires_at: string }
 const steps = [
   [t.progress.idea, t.progress.ideaDetail], [t.progress.questions, t.progress.questionsDetail],
   [t.progress.plan, t.progress.planDetail], [t.progress.creation, t.progress.creationDetail],
@@ -40,7 +41,39 @@ export function App() {
   const [result, setResult] = useState<PipelineResult | null>(null)
   const [health, setHealth] = useState<HealthState>({ state: 'ATTENTION', route: null, builder: 'BLOCKED_EXTERNAL', disk: 'ATTENTION' })
   const [error, setError] = useState('')
+  const [preview, setPreview] = useState<Preview | null>(null)
+  const [admissionTicket, setAdmissionTicket] = useState<string | null>(null)
+  const [previewCodes, setPreviewCodes] = useState<VerificationCode[]>([])
+  const previewFrame = useRef<HTMLIFrameElement>(null)
   useEffect(() => { void api<HealthState>('/health').then(value => { setHealth(value); setRoute(value.route) }).catch(() => undefined) }, [])
+  useEffect(() => {
+    if (preview === null) return
+    const previewOrigin = new URL(preview.url).origin
+    const receive = (event: MessageEvent) => {
+      if (event.origin !== previewOrigin || event.source !== previewFrame.current?.contentWindow || typeof event.data !== 'object' || event.data === null) return
+      const type = (event.data as { readonly type?: unknown }).type
+      if (type === 'DZ23_PREVIEW_READY' && admissionTicket !== null) {
+        previewFrame.current?.contentWindow?.postMessage({ type: 'DZ23_PREVIEW_ADMISSION', ticket: admissionTicket }, previewOrigin)
+      }
+      if (type === 'DZ23_PREVIEW_ADMITTED') setAdmissionTicket(null)
+    }
+    window.addEventListener('message', receive)
+    return () => window.removeEventListener('message', receive)
+  }, [preview, admissionTicket])
+  useEffect(() => {
+    if (projectId === null || preview?.state !== 'READY') return
+    let active = true
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const refresh = async () => {
+      try {
+        const response = await api<{ messages: VerificationCode[] }>(`/projects/${projectId}/previews/${encodeURIComponent(preview.preview_id)}/messages`)
+        if (active) setPreviewCodes(response.messages)
+      } catch { /* A prévia continua utilizável; a falha é mostrada na próxima ação explícita. */ }
+      if (active) timer = setTimeout(() => { void refresh() }, 1_500)
+    }
+    void refresh()
+    return () => { active = false; if (timer !== undefined) clearTimeout(timer) }
+  }, [projectId, preview?.preview_id, preview?.state])
   const ready = useMemo(() => brief.trim().length >= 10, [brief])
   async function safely(action: () => Promise<void>) { setError(''); try { await action() } catch (cause) { setError(cause instanceof Error ? cause.message : t.health.attention) } }
   async function create() {
@@ -113,6 +146,24 @@ export function App() {
     if (projectId === null) return
     await safely(async () => { await api(`/projects/${projectId}/generate/cancel`, { method: 'POST', body: '{}' }) })
   }
+  async function startPreview() {
+    if (projectId === null) return
+    await safely(async () => {
+      const started = await api<{ preview: Preview; admission: { ticket: string } }>(`/projects/${projectId}/previews`, { method: 'POST', body: '{}' })
+      setPreview(started.preview)
+      setAdmissionTicket(started.admission.ticket)
+      setPreviewCodes([])
+    })
+  }
+  async function stopPreview() {
+    if (projectId === null || preview === null) return
+    await safely(async () => {
+      const stopped = await api<{ preview: Preview }>(`/projects/${projectId}/previews/${encodeURIComponent(preview.preview_id)}`, { method: 'DELETE', body: '{}' })
+      setPreview(stopped.preview)
+      setAdmissionTicket(null)
+      setPreviewCodes([])
+    })
+  }
   function chooseSuggestion(value: string, selected: Category) { setBrief(value); setCategory(selected) }
   return <div className="shell">
     <aside className="sidebar"><img src="/studio/brand/dz23-studio-logo.jpg" alt={t.brand} className="brand" /><nav aria-label={t.brand}>
@@ -130,7 +181,9 @@ export function App() {
         {projectState === 'PLAN_PROPOSED' && plan === null ? <Action title={t.plan.title} detail={t.progress.planDetail} button={t.plan.revision} action={preparePlan} /> : null}
         {projectState === 'PLAN_APPROVED' ? <Action title={t.creation.title} detail={t.truth.creation} button={t.creation.start} action={generate} /> : null}
         {projectState === 'GENERATING' || projectState === 'BUILD_OK' || projectState === 'TESTS_OK' ? <Action title={t.creation.title} detail={t.creation.working} button={t.creation.cancel} action={cancelGeneration} /> : null}
-        {result !== null ? <Verification result={result} /> : null}
+        {result !== null ? <Verification result={result} startPreview={startPreview} /> : null}
+        {preview?.state === 'READY' ? <section className="preview-card"><div className="preview-heading"><div><h2>{t.preview.title}</h2><p>{t.preview.localOnly}</p></div><button className="secondary compact" onClick={() => void stopPreview()}>{t.preview.stop}</button></div><p className="truth">{t.preview.notPublished}</p>{previewCodes.length === 0 ? null : <section className="preview-codes" aria-live="polite"><h3>{t.preview.accessCodes}</h3><p>{t.preview.accessCodesHelp}</p><ul>{previewCodes.map(item => <li key={`${item.email}-${item.expires_at}-${item.code}`}><strong>{item.email}</strong>: <code>{item.code}</code></li>)}</ul></section>}<iframe ref={previewFrame} title={t.preview.frameTitle} src={`${preview.url}/__dz23/admission`} sandbox="allow-scripts allow-forms allow-same-origin" referrerPolicy="no-referrer" /></section> : null}
+        {preview !== null && ['FAILED', 'EXPIRED', 'STOPPED'].includes(preview.state) ? <p className="context-note">{t.preview.closed}</p> : null}
         {error === '' ? null : <p className="error" role="alert">{error}</p>}
       </section><Progress state={projectState} /></main>
     </section>
@@ -170,7 +223,7 @@ function Questions({ question, answer, setAnswer, submit }: { question: Question
 }
 function PlanView({ plan, approve, reason, setReason, requestChange }: { plan: Plan; approve(): Promise<void>; reason: string; setReason(v: string): void; requestChange(): Promise<void> }) { return <><div className="heading"><Sparkles/><div><h1>{t.plan.title}</h1><p>{t.progress.planDetail}</p></div></div><div className="plan-list">{plan.slices.map(slice => <section className="task-card" key={slice.slice_id}><h2>{slice.title}</h2><p>{slice.description}</p><strong>{t.plan.criterion}</strong><ul>{slice.acceptance_criteria.map(value => <li key={value}>{value}</li>)}</ul></section>)}</div><button className="primary" onClick={() => void approve()}>{t.plan.approve}</button><section className="task-card"><h2>{t.plan.change}</h2><label htmlFor="change-reason">{t.plan.changeLabel}</label><textarea id="change-reason" value={reason} onChange={event => setReason(event.target.value)} placeholder={t.plan.changePlaceholder}/><button className="secondary" disabled={reason.trim().length < 3} onClick={() => void requestChange()}>{t.plan.sendChange}</button></section></> }
 function Action({ title, detail, button, action }: { title: string; detail: string; button?: string; action?: () => Promise<void> }) { return <><div className="heading"><Sparkles/><div><h1>{title}</h1><p>{detail}</p></div></div>{button === undefined || action === undefined ? null : <button className="primary" onClick={() => void action()}>{button}</button>}</> }
-function Verification({ result }: { result: PipelineResult }) { const ok = result.state === 'VERIFIED_PROTOTYPE'; const cancelled = result.state === 'CANCELLED'; return <section className="task-card"><h1>{t.verification.title}</h1><p>{ok ? t.verification.success : cancelled ? t.verification.cancelled : t.verification.failure}</p><p>{t.verification.attempts}: {result.attempts}</p><code>{result.state}</code><p>{result.message}</p>{result.verificationCodes === undefined || result.verificationCodes.length === 0 ? null : <section><h2>{t.verification.testCodes}</h2><p>{t.verification.testCodesHelp}</p><ul>{result.verificationCodes.map(item => <li key={`${item.email}-${item.expires_at}-${item.code}`}><strong>{item.email}</strong>: <code>{item.code}</code></li>)}</ul></section>}{result.checks === undefined ? null : <><h2>{t.verification.checks}</h2><ul>{result.checks.map(check => <li key={check.id}>{check.label}: {checkStatus(check.status)}</li>)}</ul></>}</section> }
+function Verification({ result, startPreview }: { result: PipelineResult; startPreview(): Promise<void> }) { const ok = result.state === 'VERIFIED_PROTOTYPE'; const cancelled = result.state === 'CANCELLED'; return <section className="task-card"><h1>{t.verification.title}</h1><p>{ok ? t.verification.success : cancelled ? t.verification.cancelled : t.verification.failure}</p><p>{t.verification.attempts}: {result.attempts}</p><code>{result.state}</code><p>{result.message}</p>{ok ? <><p className="truth">{t.preview.notPublished}</p><button className="primary" onClick={() => void startPreview()}>{t.preview.open}</button></> : null}{result.verificationCodes === undefined || result.verificationCodes.length === 0 ? null : <section><h2>{t.verification.testCodes}</h2><p>{t.verification.testCodesHelp}</p><ul>{result.verificationCodes.map(item => <li key={`${item.email}-${item.expires_at}-${item.code}`}><strong>{item.email}</strong>: <code>{item.code}</code></li>)}</ul></section>}{result.checks === undefined ? null : <><h2>{t.verification.checks}</h2><ul>{result.checks.map(check => <li key={check.id}>{check.label}: {checkStatus(check.status)}</li>)}</ul></>}</section> }
 function checkStatus(status: AcceptanceCheck['status']): string { return status === 'PASSED' ? t.verification.passed : status === 'FAILED' ? t.verification.failed : status === 'NOT_AUTOMATED' ? t.verification.notAutomated : t.verification.pending }
 function Nav({ icon, label, active = false }: { icon: React.ReactNode; label: string; active?: boolean }) { return <button className={active ? 'nav active' : 'nav'}>{icon}<span>{label}</span></button> }
 function Status({ health }: { health: HealthState }) { const ok = health.state === 'OK'; return <button className={ok ? 'status ok' : 'status attention'} aria-label={ok ? t.health.ok : t.health.attention}><span />{ok ? t.health.ok : t.health.attention}</button> }
