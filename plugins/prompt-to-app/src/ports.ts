@@ -1,6 +1,7 @@
 import { BlockAssembler, createUserMessage, type GenerateOptions, type LlmRuntime, type TokenUsage } from '@deepseek-ai/dsh-llm'
 import type { StudioRouteHealthService } from '@dz23-studio/route-health'
 import type { RoutePrivacy, RouteScope } from '@dz23-studio/route-health'
+import { t } from './i18n.js'
 
 export interface ModelResult {
   readonly value: unknown
@@ -31,7 +32,7 @@ export class HarnessPromptModel implements PromptModelPort {
     const selected = await this.options.routes.chooseRoute(scope, purpose, { privacy })
     if (selected.route === undefined) throw new ModelRouteUnavailableError(selected.reason)
     const model = this.options.modelByRoute[selected.route]
-    if (model === undefined) throw new ModelRouteUnavailableError('A rota escolhida ainda não possui um modelo configurado.')
+    if (model === undefined) throw new ModelRouteUnavailableError(t('errors.routeModel'))
     const assembler = new BlockAssembler()
     const options: GenerateOptions = {
       provider: selected.route,

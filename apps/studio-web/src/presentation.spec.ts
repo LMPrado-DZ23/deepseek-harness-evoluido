@@ -6,7 +6,7 @@ describe('truthful presentation for nontechnical users', () => {
   it('maps the real machine states to the five visible stages', () => {
     const expected: Record<ProjectUiState, number> = {
       DRAFT: 1, SPEC_READY: 2, PLAN_PROPOSED: 2, PLAN_APPROVED: 3, GENERATING: 3,
-      BUILD_OK: 3, BUILD_FAILED: 3, TESTS_OK: 4, TESTS_FAILED: 4, VERIFIED_PROTOTYPE: 4,
+      BUILD_OK: 3, BUILD_FAILED: 3, TESTS_OK: 4, TESTS_FAILED: 4, CANCELLED: 4, VERIFIED_PROTOTYPE: 4,
     }
     for (const [state, step] of Object.entries(expected)) expect(currentStepIndex(state as ProjectUiState)).toBe(step)
   })

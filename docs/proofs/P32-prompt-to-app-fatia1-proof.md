@@ -8,7 +8,8 @@
 - Tentativas: 1/3
 - Isolamento tenant adversarial: PASS (`org-b` recebeu `NOT_FOUND`)
 - Arquivo sentinela fora da raiz: hash antes/depois idêntico `aaa8d3c8d74ad3e8f6b1772aa9c7e0eaa528cb42fc93599ce2f125b00d4c424c`
-- Evidência gravada: SHA-256 `00d67ea022aee1345ea55eb6609c0aa624ea52bdd9fbc9d272a71ad919c1683a`
+- Evidências gravadas: `build-log:1d56478527ae601b4cd7ed3a835a8c250ede5a36505c24e27e90f21de119b002`, `test-report:34a15399c606892b6c9d2e2fbdfe5d1ac08db575256520adcbb86cbe9e86babc`
+- Critérios AppSpec: páginas, seções, idioma, título e texto literal passaram; o critério subjetivo ficou `NOT_AUTOMATED`.
 - Preview: `NOT_PRESENT`; publicação: `NOT_PRESENT`; experiência leiga: `NOT_VALIDATED`
 
 Esta prova valida a composição técnica determinística da fatia. Ela não valida qualidade com LLM real, uso por pessoas leigas, celular físico, preview ou deploy.

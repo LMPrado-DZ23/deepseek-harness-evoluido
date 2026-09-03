@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { readdir, readFile, realpath, stat } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import { t } from './i18n.js'
 
 export interface ProcessResult { readonly exitCode: number; readonly stdout: string; readonly stderr: string; readonly timedOut: boolean }
 export interface ProcessPort { run(command: string, args: readonly string[], timeoutMs: number): Promise<ProcessResult> }
@@ -36,7 +37,7 @@ export class ContainerBuilder {
   constructor(private readonly config: ContainerBuilderConfig, private readonly process: ProcessPort = new NodeProcessPort()) {}
 
   async preflight(): Promise<BuilderPreflight> {
-    if (!/^sha256:[a-f0-9]{64}$/u.test(this.config.imageDigest)) return { state: 'BLOCKED_EXTERNAL', message: 'A imagem segura do construtor não está fixada corretamente.' }
+    if (!/^sha256:[a-f0-9]{64}$/u.test(this.config.imageDigest)) return { state: 'BLOCKED_EXTERNAL', message: t('errors.builderImage') }
     const checks: readonly (readonly string[])[] = [
       ['version', '--format', '{{.Server.Version}}'],
       ['image', 'inspect', this.config.imageDigest, '--format', '{{.Id}}'],
@@ -47,7 +48,7 @@ export class ContainerBuilder {
         if (result.exitCode !== 0 || result.timedOut) return blocked()
       } catch { return blocked() }
     }
-    return { state: 'OK', message: 'Ambiente isolado disponível.' }
+    return { state: 'OK', message: t('errors.builderAvailable') }
   }
 
   commandArgs(runDirectory: string, command: string): readonly string[] {
@@ -75,7 +76,7 @@ export class ContainerBuilder {
   }
 }
 
-function blocked(): BuilderPreflight { return { state: 'BLOCKED_EXTERNAL', message: 'O ambiente isolado para criar seu projeto não está disponível neste computador.' } }
+function blocked(): BuilderPreflight { return { state: 'BLOCKED_EXTERNAL', message: t('errors.builderUnavailable') } }
 
 export async function hashTree(root: string, ignored: ReadonlySet<string> = new Set()): Promise<string> {
   const files = await listTreeFiles(root)
@@ -96,7 +97,7 @@ async function walk(root: string): Promise<string[]> {
   const entries = await readdir(root, { withFileTypes: true })
   const nested = await Promise.all(entries.sort((a, b) => a.name.localeCompare(b.name)).map(async entry => {
     const path = resolve(root, entry.name)
-    if (entry.isSymbolicLink()) throw new Error(`Link simbólico proibido no template: ${path}`)
+    if (entry.isSymbolicLink()) throw new Error(t('errors.templateSymlink', { path }))
     if (entry.isDirectory()) return walk(path)
     const info = await stat(path)
     return info.isFile() ? [path] : []

@@ -56,7 +56,13 @@ try {
     const title = criterion.category === 'catalog' ? 'Catálogo local' : 'Página de apresentação'
     const description = criterion.category === 'catalog'
       ? 'Produtos e serviços apresentados de forma clara e acessível.'
-      : 'Serviços, horários e contato apresentados de forma clara e acessível.'
+      : criterion.id === 'landing-01'
+        ? 'Serviços, horários e contato pelo telefone 11987654321.'
+        : 'Serviços, horários e contato apresentados de forma clara e acessível.'
+    if (criterion.id === 'catalog-03') {
+      if (scanGeneratedContent({ fixture: 'CPF 529.982.247-25' }).length !== 1) throw new Error('catalog-03: CPF válido não foi recusado.')
+      if (scanGeneratedContent({ fixture: 'CPF 123.456.789-00' }).length !== 0) throw new Error('catalog-03: CPF inválido virou falso positivo.')
+    }
     const content = JSON.stringify({ title, description }, null, 2)
     const component = `export default function GeneratedApp() {\n  return <main><h1>${title}</h1><p>${escapeJsx(description)}</p></main>\n}\n`
     const findings = scanGeneratedContent({ 'content/app.json': content, 'src/GeneratedApp.tsx': component })

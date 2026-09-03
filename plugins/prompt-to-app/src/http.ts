@@ -11,8 +11,10 @@ import {
 import { assertRouteContracts, type StudioRouteContract } from '@dz23-studio/policy'
 import { TenancyError, type StudioTenancyService } from '@dz23-studio/tenancy'
 import { z } from 'zod'
+import { t } from './i18n.js'
 import { intakeAnswerSchema, nextIntakeQuestion, type IntakeConversation, type IntakeEngine } from './intake.js'
-import type { CodeGeneratorPort, PipelineResult, PromptToAppPipeline } from './pipeline.js'
+import type { CodeGeneratorPort } from './pipeline.js'
+import type { PromptToAppJobService } from './jobs.js'
 import type { PlannerEngine } from './planner.js'
 import { PromptToAppError, type PromptToAppActor, type PromptToAppService } from './service.js'
 import { InvalidTransitionError } from './state.js'
@@ -44,6 +46,7 @@ export const PROMPT_TO_APP_ROUTE_CONTRACTS = [
   { method: 'POST', path: '/projects/:projectId/plan/approve', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'POST', path: '/projects/:projectId/plan/change', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'POST', path: '/projects/:projectId/generate', access: 'authorized', permission: 'project.write', scope: 'project' },
+  { method: 'POST', path: '/projects/:projectId/generate/cancel', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'DELETE', path: '/projects/:projectId', access: 'authorized', permission: 'project.delete', scope: 'project' },
 ] as const satisfies readonly StudioRouteContract[]
 
@@ -55,7 +58,7 @@ export interface PromptToAppHttpConfig {
   readonly tenancy: StudioTenancyService
   readonly intake: IntakeEngine
   readonly planner: PlannerEngine
-  readonly pipeline: PromptToAppPipeline
+  readonly jobs: PromptToAppJobService
   readonly generatorFor: (actor: PromptToAppActor, projectId: string) => CodeGeneratorPort
   readonly health: (actor: PromptToAppActor) => Promise<StudioAppsHealth>
   readonly allowedHosts: readonly string[]
@@ -69,7 +72,7 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
       const path = new URL(request.url ?? '/', 'http://local').pathname
       const route = path.slice('/api/studio/apps'.length)
       const matched = matchRoute(request.method, route)
-      if (matched === undefined) return json(response, 404, { error: 'Rota não encontrada.' })
+      if (matched === undefined) return json(response, 404, { error: t('errors.routeNotFound') })
       const actor = await authenticatedActor(request, config)
 
       if (request.method === 'GET' && route === '/health') return json(response, 200, await config.health(actor))
@@ -81,14 +84,16 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
       }
 
       const projectId = matched.projectId
-      if (projectId === undefined) return json(response, 404, { error: 'Rota não encontrada.' })
+      if (projectId === undefined) return json(response, 404, { error: t('errors.routeNotFound') })
       if (request.method === 'GET' && matched.suffix === '') {
         const project = config.service.project(actor, projectId)
+        const runs = config.service.runs(actor, projectId)
         return json(response, 200, {
           project,
           turns: config.service.intakeTurns(actor, projectId),
           plan: optional(() => config.service.plan(actor, projectId)),
-          runs: config.service.runs(actor, projectId),
+          runs,
+          current_run: [...runs].sort((left, right) => right.started_at.localeCompare(left.started_at) || right.attempt - left.attempt)[0] ?? null,
           evidence: config.service.evidence(actor, projectId),
         })
       }
@@ -114,16 +119,19 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
       }
       if (request.method === 'POST' && matched.suffix === '/generate') {
         const plan = config.service.plan(actor, projectId)
-        if (plan.status !== 'APPROVED') throw new PromptToAppError('INVALID', 'A criação só começa depois que você aprovar o plano.')
-        const result: PipelineResult = await config.pipeline.run(actor, projectId, config.generatorFor(actor, projectId))
-        return json(response, result.state === 'BLOCKED_EXTERNAL' ? 503 : result.state === 'VERIFIED_PROTOTYPE' ? 200 : 422, result)
+        if (plan.status !== 'APPROVED') throw new PromptToAppError('INVALID', t('errors.planRequired'))
+        const accepted = await config.jobs.start(actor, projectId, config.generatorFor(actor, projectId))
+        return json(response, 202, { run_id: accepted.runId })
+      }
+      if (request.method === 'POST' && matched.suffix === '/generate/cancel') {
+        return json(response, 202, { status: config.jobs.cancel(actor, projectId) })
       }
       if (request.method === 'DELETE' && matched.suffix === '') {
         return json(response, 200, { project: await config.service.archive(actor, projectId) })
       }
-      return json(response, 404, { error: 'Rota não encontrada.' })
+      return json(response, 404, { error: t('errors.routeNotFound') })
     } catch (error) {
-      return json(response, statusOf(error), { error: error instanceof Error ? error.message : 'Solicitação inválida.' })
+      return json(response, statusOf(error), { error: error instanceof Error ? error.message : t('errors.invalidRequest') })
     }
   }
 }
@@ -138,15 +146,15 @@ async function answerIntake(
   const input = answerSchema.parse(await readJson(request))
   const conversation = conversationFor(config.service, actor, projectId)
   const question = nextIntakeQuestion(conversation)
-  if (question === undefined) throw new PromptToAppError('REPLAY', 'As perguntas deste projeto já foram respondidas.')
+  if (question === undefined) throw new PromptToAppError('REPLAY', t('errors.questionsAnswered'))
   if (question.id === 'sensitive-confirmation') {
-    if (input.confirm_sensitive === undefined) throw new PromptToAppError('INVALID', 'Confirme se o uso desses dados sensíveis é necessário.')
+    if (input.confirm_sensitive === undefined) throw new PromptToAppError('INVALID', t('errors.sensitiveConfirmation'))
     await config.service.recordTurn(actor, projectId, {
       question_id: question.id, question: question.text,
-      answer: input.confirm_sensitive ? 'confirmado' : 'não confirmado', recommended: false, route: null, model: null,
+      answer: input.confirm_sensitive ? t('values.confirmed') : t('values.notConfirmed'), recommended: false, route: null, model: null,
     })
     if (!input.confirm_sensitive) {
-      return json(response, 200, { blocked: true, message: 'O projeto não continuará com dados sensíveis sem sua confirmação.' })
+      return json(response, 200, { blocked: true, message: t('errors.sensitiveBlocked') })
     }
   } else {
     let answer = input.answer.trim(); let route: string | null = null; let model: string | null = null
@@ -155,7 +163,7 @@ async function answerIntake(
       answer = z.string().trim().min(1).max(2_000).parse(result.value)
       route = result.route; model = result.model
     }
-    if (answer === '') throw new PromptToAppError('INVALID', 'Responda à pergunta para continuar.')
+    if (answer === '') throw new PromptToAppError('INVALID', t('errors.answerRequired'))
     await config.service.recordTurn(actor, projectId, {
       question_id: question.id, question: question.text, answer, recommended: input.recommend, route, model,
     })
@@ -176,7 +184,7 @@ function conversationFor(service: PromptToAppService, actor: PromptToAppActor, p
   const sensitive = turns.find(turn => turn.question_id === 'sensitive-confirmation')
   return {
     project, answers,
-    ...(sensitive === undefined ? {} : { sensitiveConfirmed: sensitive.answer === 'confirmado' }),
+    ...(sensitive === undefined ? {} : { sensitiveConfirmed: sensitive.answer === t('values.confirmed') }),
   }
 }
 
@@ -187,13 +195,13 @@ async function authenticatedActor(request: IncomingMessage, config: PromptToAppH
     config.identity.validateCsrf(session, cookies[CSRF_COOKIE], singleHeader(request.headers['x-dz23-csrf']))
   }
   const authorization = config.tenancy.authorizationFor(session.user_id, session.org_id, session.tenant_id)
-  if (authorization === undefined) throw new PromptToAppError('FORBIDDEN', 'Você não participa deste espaço de trabalho.')
-  return authorization
+  if (authorization === undefined) throw new PromptToAppError('FORBIDDEN', t('errors.membershipRequired'))
+  return { ...authorization, sessionId: session.session_id }
 }
 
 function matchRoute(method: string | undefined, path: string): { readonly projectId?: string; readonly suffix: string } | undefined {
   if ((method === 'GET' && (path === '/health' || path === '/projects')) || (method === 'POST' && path === '/projects')) return { suffix: path }
-  const match = /^\/projects\/([^/]+)(\/intake\/answer|\/plan\/approve|\/plan\/change|\/plan|\/generate)?$/u.exec(path)
+  const match = /^\/projects\/([^/]+)(\/intake\/answer|\/plan\/approve|\/plan\/change|\/plan|\/generate\/cancel|\/generate)?$/u.exec(path)
   if (match === null) return undefined
   const suffix = match[2] ?? ''
   const allowed = (method === 'GET' && suffix === '') || (method === 'DELETE' && suffix === '') || (method === 'POST' && suffix !== '')
@@ -215,12 +223,12 @@ function statusOf(error: unknown): number {
 }
 
 async function readJson(request: IncomingMessage): Promise<unknown> {
-  if (!singleHeader(request.headers['content-type'])?.toLowerCase().startsWith('application/json')) throw new Error('Envie os dados em formato JSON.')
+  if (!singleHeader(request.headers['content-type'])?.toLowerCase().startsWith('application/json')) throw new Error(t('errors.jsonRequired'))
   const chunks: Buffer[] = []; let size = 0
   for await (const chunk of request) {
     const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
     size += bytes.length
-    if (size > JSON_LIMIT) throw new Error('Solicitação grande demais.')
+    if (size > JSON_LIMIT) throw new Error(t('errors.requestTooLarge'))
     chunks.push(bytes)
   }
   return JSON.parse(Buffer.concat(chunks).toString('utf8'))

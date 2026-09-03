@@ -7,10 +7,11 @@ import type { AppSpecV1 } from '../src/appspec.js'
 import { createPromptToAppHttpHandler, PROMPT_TO_APP_ROUTE_CONTRACTS } from '../src/http.js'
 import { IntakeEngine } from '../src/intake.js'
 import type { StudioApproval, StudioAppSpecRecord, StudioEvidence, StudioIntakeTurn, StudioPlan, StudioProject, StudioRun } from '../src/model.js'
-import type { PromptToAppPipeline } from '../src/pipeline.js'
+import type { PromptToAppJobService } from '../src/jobs.js'
+import type { CodeGeneratorPort } from '../src/pipeline.js'
 import { PlannerEngine } from '../src/planner.js'
 import type { PromptModelPort } from '../src/ports.js'
-import { PromptToAppService, type PromptToAppRepository } from '../src/service.js'
+import { PromptToAppService, type PromptToAppActor, type PromptToAppRepository } from '../src/service.js'
 
 class MemoryRepository implements PromptToAppRepository {
   projectRows: StudioProject[] = []; specRows: StudioAppSpecRecord[] = []; turnRows: StudioIntakeTurn[] = []
@@ -49,13 +50,18 @@ async function fixture() {
       ? { value: { slices: [{ slice_id: 'slice', title: 'Página', description: 'Criar a página', acceptance_criteria: ['Compila'], planned_files: ['content/app.json', 'src/GeneratedApp.tsx'] }] }, route: 'ollama', model: 'qwen' }
       : { value: validSpec, route: 'ollama', model: 'qwen' })),
   }
-  const pipeline = { run: vi.fn(() => Promise.resolve({ state: 'VERIFIED_PROTOTYPE', attempts: 1, message: 'verificado' })) }
+  const jobs = {
+    start: vi.fn(async (_actor: PromptToAppActor, _projectId: string, _generator: CodeGeneratorPort) => (
+      { runId: 'run-1', jobId: 'studio-prompt-to-app-1' }
+    )),
+    cancel: vi.fn((_actor: PromptToAppActor, _projectId: string) => 'requested' as const),
+  }
   const allowedHosts: string[] = []; const allowedOrigins: string[] = []
   const server = createServer(createPromptToAppHttpHandler({
     service, identity: identity as unknown as StudioIdentityService,
     tenancy: tenancy as unknown as StudioTenancyService,
     intake: new IntakeEngine(model), planner: new PlannerEngine(model),
-    pipeline: pipeline as unknown as PromptToAppPipeline,
+    jobs: jobs as unknown as PromptToAppJobService,
     generatorFor: () => ({ generate: vi.fn() }),
     health: vi.fn(() => Promise.resolve({ state: 'OK', route: 'ollama', builder: 'OK', disk: 'OK' } as const)),
     allowedHosts, allowedOrigins,
@@ -69,12 +75,12 @@ async function fixture() {
     cookie: `${SESSION_COOKIE}=session; ${CSRF_COOKIE}=csrf`, 'x-dz23-csrf': 'csrf',
   }
   const request = (path: string, init: RequestInit = {}) => fetch(`${origin}/api/studio/apps${path}`, { ...init, headers: { ...headers, ...(init.headers ?? {}) } })
-  return { request, service, repository, identity, tenancy, pipeline, allowedHosts, host }
+  return { request, service, repository, identity, tenancy, jobs, allowedHosts, host }
 }
 
 describe('prompt-to-app HTTP boundary', () => {
   it('declares every route with authorization and no client-owned scope', () => {
-    expect(PROMPT_TO_APP_ROUTE_CONTRACTS).toHaveLength(10)
+    expect(PROMPT_TO_APP_ROUTE_CONTRACTS).toHaveLength(11)
     expect(PROMPT_TO_APP_ROUTE_CONTRACTS.every(route => route.access === 'authorized' && route.permission !== null)).toBe(true)
   })
 
@@ -108,8 +114,13 @@ describe('prompt-to-app HTTP boundary', () => {
     expect((await f.request(`/projects/${projectId}/plan`, { method: 'POST', body: '{}' })).status).toBe(201)
     expect(f.repository.planRows).toHaveLength(2)
     expect((await f.request(`/projects/${projectId}/plan/approve`, { method: 'POST', body: '{}' })).status).toBe(200)
-    expect((await f.request(`/projects/${projectId}/generate`, { method: 'POST', body: '{}' })).status).toBe(200)
-    expect(f.pipeline.run).toHaveBeenCalledOnce()
+    const accepted = await f.request(`/projects/${projectId}/generate`, { method: 'POST', body: '{}' })
+    expect(accepted.status).toBe(202)
+    expect(await accepted.json()).toEqual({ run_id: 'run-1' })
+    expect(f.jobs.start).toHaveBeenCalledOnce()
+    expect(f.jobs.start.mock.calls[0]![0]).toMatchObject({ sessionId: 'session', orgId: 'org-a', tenantId: 'tenant-a' })
+    expect((await f.request(`/projects/${projectId}/generate/cancel`, { method: 'POST', body: '{}' })).status).toBe(202)
+    expect(f.jobs.cancel).toHaveBeenCalledOnce()
   })
 
   it('requires membership, session, CSRF, trusted host and a known route', async () => {

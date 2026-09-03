@@ -6,12 +6,14 @@ import type {
   StudioIntakeTurn, StudioPlan, StudioProject, StudioRun,
 } from './model.js'
 import { assertProjectTransition } from './state.js'
+import { t } from './i18n.js'
 
 export interface PromptToAppActor {
   readonly userId: string
   readonly orgId: string
   readonly tenantId: string
   readonly role: StudioRole
+  readonly sessionId?: string
 }
 
 export interface PromptToAppRepository {
@@ -59,7 +61,7 @@ export class PromptToAppService {
   project(actor: PromptToAppActor, projectId: string): StudioProject {
     this.#authorize(actor, 'project.read')
     const value = this.#repository.projects().find(candidate => candidate.project_id === projectId && this.#sameScope(actor, candidate))
-    if (value === undefined) throw new PromptToAppError('NOT_FOUND', 'Projeto não encontrado neste espaço de trabalho.')
+    if (value === undefined) throw new PromptToAppError('NOT_FOUND', t('errors.notFound'))
     return value
   }
 
@@ -105,7 +107,7 @@ export class PromptToAppService {
     this.project(actor, projectId)
     const value = this.#repository.specs().filter(candidate => candidate.project_id === projectId && this.#sameScope(actor, candidate))
       .sort((left, right) => right.version - left.version)[0]
-    if (value === undefined) throw new PromptToAppError('NOT_FOUND', 'A especificação deste projeto ainda não existe.')
+    if (value === undefined) throw new PromptToAppError('NOT_FOUND', t('errors.specNotFound'))
     return value
   }
 
@@ -116,7 +118,7 @@ export class PromptToAppService {
     const existing = this.#repository.plans().filter(candidate => candidate.project_id === projectId && this.#sameScope(actor, candidate))
     const previous = [...existing].sort((left, right) => (right.revision ?? 0) - (left.revision ?? 0) || right.created_at.localeCompare(left.created_at))[0]
     const revising = project.state === 'PLAN_PROPOSED' && previous?.status === 'CHANGE_REQUESTED'
-    if (project.state !== 'SPEC_READY' && !revising) throw new PromptToAppError('INVALID', 'O plano só pode ser criado depois das perguntas ou de um pedido de mudança.')
+    if (project.state !== 'SPEC_READY' && !revising) throw new PromptToAppError('INVALID', t('errors.planOrder'))
     const value: StudioPlan = {
       plan_id: this.#createId(), spec_id: spec.spec_id, project_id: projectId, org_id: actor.orgId, tenant_id: actor.tenantId,
       revision: existing.length + 1, slices, status: 'PROPOSED', created_at: now, updated_at: now,
@@ -130,13 +132,13 @@ export class PromptToAppService {
     this.project(actor, projectId)
     const value = this.#repository.plans().filter(candidate => candidate.project_id === projectId && this.#sameScope(actor, candidate))
       .sort((left, right) => (right.revision ?? 0) - (left.revision ?? 0) || right.created_at.localeCompare(left.created_at))[0]
-    if (value === undefined) throw new PromptToAppError('NOT_FOUND', 'O plano deste projeto ainda não existe.')
+    if (value === undefined) throw new PromptToAppError('NOT_FOUND', t('errors.planNotFound'))
     return value
   }
 
   async approvePlan(actor: PromptToAppActor, projectId: string): Promise<StudioPlan> {
     this.#authorize(actor, 'project.write'); const value = this.plan(actor, projectId)
-    if (value.status !== 'PROPOSED') throw new PromptToAppError('REPLAY', 'Este plano não está disponível para aprovação.')
+    if (value.status !== 'PROPOSED') throw new PromptToAppError('REPLAY', t('errors.planUnavailable'))
     const updated = { ...value, status: 'APPROVED' as const, updated_at: this.#now().toISOString() }
     await this.#repository.putPlan(updated)
     await this.#approval(actor, projectId, 'plan', value.plan_id, 'T1', false)
@@ -146,9 +148,9 @@ export class PromptToAppService {
 
   async requestPlanChange(actor: PromptToAppActor, projectId: string, reason: string): Promise<StudioPlan> {
     this.#authorize(actor, 'project.write')
-    if (reason.trim().length < 3 || reason.trim().length > 2_000) throw new PromptToAppError('INVALID', 'Explique a mudança em até 2.000 caracteres.')
+    if (reason.trim().length < 3 || reason.trim().length > 2_000) throw new PromptToAppError('INVALID', t('errors.planChangeLength'))
     const value = this.plan(actor, projectId)
-    if (value.status !== 'PROPOSED') throw new PromptToAppError('REPLAY', 'Este plano não aceita outro pedido de mudança.')
+    if (value.status !== 'PROPOSED') throw new PromptToAppError('REPLAY', t('errors.planChangeUnavailable'))
     const updated = { ...value, status: 'CHANGE_REQUESTED' as const, change_request: reason.trim(), updated_at: this.#now().toISOString() }
     await this.#repository.putPlan(updated)
     return updated
@@ -173,16 +175,16 @@ export class PromptToAppService {
   evidence(actor: PromptToAppActor, projectId: string) { this.project(actor, projectId); return this.#repository.evidence().filter(value => value.project_id === projectId && this.#sameScope(actor, value)) }
 
   async archive(actor: PromptToAppActor, projectId: string): Promise<StudioProject> {
-    if (actor.role !== 'owner' && actor.role !== 'admin') throw new PromptToAppError('FORBIDDEN', 'Seu papel não permite arquivar projetos.')
+    if (actor.role !== 'owner' && actor.role !== 'admin') throw new PromptToAppError('FORBIDDEN', t('errors.archiveForbidden'))
     const value = this.project(actor, projectId); const updated = { ...value, archived_at: this.#now().toISOString(), updated_at: this.#now().toISOString() }
     await this.#repository.putProject(updated); return updated
   }
 
   #authorize(actor: PromptToAppActor, permission: 'project.read' | 'project.write'): void {
-    if (!roleAllows(actor.role, permission)) throw new PromptToAppError('FORBIDDEN', 'Seu papel não permite esta ação.')
+    if (!roleAllows(actor.role, permission)) throw new PromptToAppError('FORBIDDEN', t('errors.forbidden'))
   }
   #sameScope(actor: PromptToAppActor, value: { org_id: string; tenant_id: string }): boolean { return value.org_id === actor.orgId && value.tenant_id === actor.tenantId }
-  #assertOwned(actor: PromptToAppActor, value: { org_id: string; tenant_id: string }): void { if (!this.#sameScope(actor, value)) throw new PromptToAppError('FORBIDDEN', 'A ação tentou acessar outro espaço de trabalho.') }
+  #assertOwned(actor: PromptToAppActor, value: { org_id: string; tenant_id: string }): void { if (!this.#sameScope(actor, value)) throw new PromptToAppError('FORBIDDEN', t('errors.crossTenant')) }
   async #approval(actor: PromptToAppActor, projectId: string, subject: StudioApproval['subject'], subjectId: string, tier: StudioApproval['tier'], strong: boolean, from: ProjectState | null = null, to: ProjectState | null = null) {
     const approval: StudioApproval = {
       approval_id: this.#createId(), project_id: projectId, org_id: actor.orgId, tenant_id: actor.tenantId,

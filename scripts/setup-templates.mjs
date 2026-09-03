@@ -1,12 +1,17 @@
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-if (process.argv[2] !== '--approve-t2') {
+if (!process.argv.includes('--approve-t2')) {
   process.stderr.write('Setup recusado: confirme a instalação de dependências com --approve-t2.\n')
   process.exit(2)
 }
 const root = process.cwd()
+const digestFile = resolve(root, 'runtime/builder-image-digest')
+if (existsSync(digestFile) && !process.argv.includes('--replace-existing')) {
+  process.stderr.write('Setup recusado: a imagem local já está fixada; use --replace-existing para confirmar a substituição.\n')
+  process.exit(3)
+}
 const template = resolve(root, 'templates/static-site@1')
 const store = resolve(root, 'runtime/template-store-v1')
 mkdirSync(store, { recursive: true })
@@ -16,5 +21,5 @@ const build = spawnSync('docker', ['build', '--file', 'deploy/builder/Dockerfile
 if (build.status !== 0) process.exit(build.status ?? 1)
 const inspect = spawnSync('docker', ['image', 'inspect', 'dz23-studio-builder:local', '--format', '{{.Id}}'], { cwd: root, encoding: 'utf8', shell: process.platform === 'win32' })
 if (inspect.status !== 0 || !inspect.stdout.trim().startsWith('sha256:')) process.exit(1)
-writeFileSync(resolve(root, 'runtime/builder-image-digest'), `${inspect.stdout.trim()}\n`, { mode: 0o600 })
+writeFileSync(digestFile, `${inspect.stdout.trim()}\n`, { mode: 0o600 })
 process.stdout.write(`BUILDER_IMAGE=${inspect.stdout.trim()}\n`)

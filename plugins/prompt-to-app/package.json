@@ -15,8 +15,11 @@
     "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
+    "@deepseek-ai/dsh-agent": "link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/core/agent",
     "@deepseek-ai/cordis": "link:/home/leandro/harness-studio-poc02/deepseek-harness/vendor/cordis",
     "@deepseek-ai/dsh-host-webserver": "link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/host/webserver",
+    "@deepseek-ai/dsh-jobs": "link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/jobs/jobs",
+    "@deepseek-ai/dsh-session": "link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/core/session",
     "@deepseek-ai/dsh-llm": "link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/llm/llm",
     "@deepseek-ai/dsh-storage-domain": "link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage-domain",
     "@dz23-studio/identity": "workspace:*",

@@ -1,12 +1,12 @@
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { basename, extname, relative, resolve } from 'node:path'
 import ts from 'typescript'
 
 const root = process.cwd()
 const catalogPath = resolve(root, 'apps/studio-web/src/i18n/pt-BR.json')
 const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'))
 const serverCatalog = JSON.parse(readFileSync(resolve(root, 'plugins/prompt-to-app/i18n/pt-BR.json'), 'utf8'))
-const appSource = readFileSync(resolve(root, 'apps/studio-web/src/App.tsx'), 'utf8')
 const styles = readFileSync(resolve(root, 'apps/studio-web/src/styles.css'), 'utf8')
 const modelSource = readFileSync(resolve(root, 'plugins/prompt-to-app/src/model.ts'), 'utf8')
 
@@ -40,12 +40,19 @@ for (const [path, value] of flatten(serverCatalog)) {
   if (/\bpront[oa]s?\b/iu.test(value)) failures.push(`alegação de prontidão proibida no servidor em ${path}`)
 }
 if (/['"](?:READY|DONE|PUBLISHED|DEPLOYED)['"]/u.test(modelSource)) failures.push('estado absoluto proibido na máquina de estados')
+const appSource = readFileSync(resolve(root, 'apps/studio-web/src/App.tsx'), 'utf8')
 if (!appSource.includes('permanentTruthKind(state)')) failures.push('aviso permanente não está condicionado ao estado real')
 
-const sourceFile = ts.createSourceFile('App.tsx', appSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
 const directText = []
-visit(sourceFile)
-if (directText.length > 0) failures.push(`texto visível fora do catálogo: ${directText.join(' | ')}`)
+const sourceRoots = [{ path: resolve(root, 'apps/studio-web/src'), strict: true }]
+for (const plugin of readdirSync(resolve(root, 'plugins'), { withFileTypes: true })) {
+  if (plugin.isDirectory() && exists(resolve(root, 'plugins', plugin.name, 'src'))) sourceRoots.push({
+    path: resolve(root, 'plugins', plugin.name, 'src'),
+    strict: exists(resolve(root, 'plugins', plugin.name, 'i18n', 'pt-BR.json')),
+  })
+}
+for (const sourceRoot of sourceRoots) for (const file of walk(sourceRoot.path)) scanSource(file, sourceRoot.strict)
+if (directText.length > 0) failures.push(`texto pt-BR fora do catálogo: ${directText.join(' | ')}`)
 const cssText = [...styles.matchAll(/content\s*:\s*['"]([^'"]+)['"]/gu)].map(match => match[1].trim()).filter(Boolean)
 if (cssText.length > 0) failures.push(`texto visível no CSS fora do catálogo: ${cssText.join(' | ')}`)
 
@@ -60,10 +67,54 @@ function flatten(value, prefix = '') {
   return Object.entries(value).flatMap(([key, child]) => flatten(child, prefix === '' ? key : `${prefix}.${key}`))
 }
 
-function visit(node) {
+function scanSource(path, strict) {
+  const source = readFileSync(path, 'utf8')
+  const sourceFile = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, extname(path) === '.tsx' ? ts.ScriptKind.TSX : ts.ScriptKind.TS)
+  const grandfathered = strict ? new Set() : legacyPortugueseLiterals(path)
+  visit(sourceFile, sourceFile, path, grandfathered)
+}
+
+function visit(node, sourceFile, path, grandfathered) {
   if (node.kind === ts.SyntaxKind.JsxText && /[\p{L}\p{N}]/u.test(node.text)) {
     const { line } = sourceFile.getLineAndCharacterOfPosition(node.getStart())
-    directText.push(`linha ${line + 1}: ${node.text.trim()}`)
+    directText.push(`${basename(path)}:${line + 1}:${node.text.trim()}`)
   }
-  ts.forEachChild(node, visit)
+  const raw = node.getText(sourceFile)
+  if ((ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateExpression(node)) && portugueseText(raw) && !grandfathered.has(raw)) {
+    const { line } = sourceFile.getLineAndCharacterOfPosition(node.getStart())
+    directText.push(`${basename(path)}:${line + 1}:${node.getText(sourceFile).slice(0, 80)}`)
+  }
+  ts.forEachChild(node, child => visit(child, sourceFile, path, grandfathered))
+}
+
+function portugueseText(value) {
+  return /[áéíóúàâêôãõç]/iu.test(value) || /\b(projeto|plano|criação|verificação|pergunta|serviços|diretório|arquivo|modelo|confirmação|solicitação|produza|caminhos|gere)\b/iu.test(value)
+}
+
+function walk(directory) {
+  return readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+    const path = resolve(directory, entry.name)
+    if (entry.isDirectory()) return entry.name === 'i18n' || entry.name === 'tests' ? [] : walk(path)
+    return /\.tsx?$/u.test(entry.name) && !/\.spec\.tsx?$/u.test(entry.name) ? [path] : []
+  })
+}
+
+function exists(path) {
+  try { return statSync(path).isFile() } catch { return false }
+}
+
+function legacyPortugueseLiterals(path) {
+  const repoPath = relative(root, path).replaceAll('\\', '/')
+  try {
+    const source = execFileSync('git', ['show', `ab0fe506928dacd736262a024d202f3e96e2689d:${repoPath}`], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+    const sourceFile = ts.createSourceFile(repoPath, source, ts.ScriptTarget.Latest, true, extname(path) === '.tsx' ? ts.ScriptKind.TSX : ts.ScriptKind.TS)
+    const found = new Set()
+    const collect = node => {
+      const raw = node.getText(sourceFile)
+      if ((ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateExpression(node)) && portugueseText(raw)) found.add(raw)
+      ts.forEachChild(node, collect)
+    }
+    collect(sourceFile)
+    return found
+  } catch { return new Set() }
 }

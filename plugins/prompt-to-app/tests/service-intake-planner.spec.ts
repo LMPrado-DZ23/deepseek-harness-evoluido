@@ -48,7 +48,7 @@ describe('PromptToAppService', () => {
     await expect(service.proposePlan(builderB, project.project_id, [{ slice_id: 's', title: 'Página', description: 'Criar página', acceptance_criteria: ['Compila'], planned_files: ['src/GeneratedApp.tsx'] }])).rejects.toMatchObject({ code: 'NOT_FOUND' })
     expect(() => service.project(builderB, project.project_id)).toThrow(PromptToAppError)
     expect(service.listProjects(builderB)).toEqual([])
-    await expect(service.putRun(builderB, { run_id: 'r', plan_id: 'p', project_id: project.project_id, org_id: 'org-a', tenant_id: 'tenant-a', stage: 'build', attempt: 1, state: 'RUNNING', started_at: '2026-09-03T12:00:00.000Z', finished_at: null, sandbox: 'full', route: null, model: null, input_tokens: null, output_tokens: null, estimated_cost_usd: null, run_directory: 'run', failure_code: null })).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    await expect(service.putRun(builderB, { run_id: 'r', operation_id: 'op', owner_session_id: 'session', plan_id: 'p', project_id: project.project_id, org_id: 'org-a', tenant_id: 'tenant-a', stage: 'build', attempt: 1, state: 'RUNNING', started_at: '2026-09-03T12:00:00.000Z', finished_at: null, sandbox: 'full', route: null, model: null, input_tokens: null, output_tokens: null, estimated_cost_usd: null, run_directory: 'run', failure_code: null, acceptance_checks: [] })).rejects.toMatchObject({ code: 'FORBIDDEN' })
     expect(repository.projectRows).toHaveLength(1)
   })
 

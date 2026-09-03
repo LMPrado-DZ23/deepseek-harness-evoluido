@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
+import { t } from './i18n.js'
 
 export const sensitiveDataKindSchema = z.enum(['cpf', 'health', 'financial', 'minors'])
 export type SensitiveDataKind = z.infer<typeof sensitiveDataKindSchema>
@@ -23,7 +24,7 @@ export const appSpecV1Schema = z.object({
     confirmed_by_user: z.boolean(),
   }).strict().superRefine((value, context) => {
     if (value.detected.length > 0 && !value.confirmed_by_user) {
-      context.addIssue({ code: 'custom', message: 'Dados sensíveis detectados exigem confirmação da pessoa.' })
+      context.addIssue({ code: 'custom', message: t('errors.sensitiveSpec') })
     }
   }),
   accessibility: z.object({
@@ -50,7 +51,7 @@ export function detectSensitiveData(text: string): SensitiveDataKind[] {
 
 export function sensitiveDataQuestion(kinds: readonly SensitiveDataKind[]): string | undefined {
   if (kinds.length === 0) return undefined
-  return `Sua ideia parece usar dados sensíveis (${kinds.join(', ')}). Isso é realmente necessário?`
+  return t('questions.sensitive', { kinds: kinds.join(', ') })
 }
 
 export class AppSpecClarificationRequired extends Error {
@@ -71,7 +72,7 @@ export async function parseAppSpecWithSingleRepair(
   const repaired = await repair(value, first.issues)
   const second = await safeParse(repaired)
   if (second.success) return second.data
-  throw new AppSpecClarificationRequired('Não consegui confirmar alguns detalhes. Responda à próxima pergunta para continuarmos.')
+  throw new AppSpecClarificationRequired(t('errors.specClarification'))
 }
 
 async function safeParse(value: unknown): Promise<{ success: true; data: AppSpecV1 } | { success: false; issues: string[] }> {
@@ -81,7 +82,7 @@ async function safeParse(value: unknown): Promise<{ success: true; data: AppSpec
       ? { success: true, data: result.data }
       : { success: false, issues: result.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`) }
   } catch (error) {
-    return { success: false, issues: [error instanceof Error ? error.message : 'JSON inválido'] }
+    return { success: false, issues: [error instanceof Error ? error.message : t('errors.invalidJson')] }
   }
 }
 

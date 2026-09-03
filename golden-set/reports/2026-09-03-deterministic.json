@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-03T09:22:07.973Z",
+  "generated_at": "2026-09-03T10:40:35.100Z",
   "route": "deterministic-fixture",
   "real_llm": "NOT_EXECUTED",
   "promotion_eligible": false,

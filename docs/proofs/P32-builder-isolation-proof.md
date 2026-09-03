@@ -4,7 +4,7 @@
 - Imagem: `sha256:51af5f3dbaebc1e9fa37512160a114fdd339eaffacca40e2e3a9b1a1520e5a03`
 - NetworkMode: `none`
 - Tentativa de conexão dentro do contêiner: `NETWORK_BLOCKED`
-- Usuário: `10001:10001`
+- Usuário: `1001:1001`
 - Privileged: `false`
 - CapDrop: `ALL`
 - SecurityOpt: `no-new-privileges`

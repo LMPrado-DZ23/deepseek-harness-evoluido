@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -23,7 +23,7 @@ const plan: StudioPlan = {
 const cleanGeneration = {
   files: [
     { path: 'content/app.json', content: '{"title":"Aurora","description":"Serviços"}' },
-    { path: 'src/GeneratedApp.tsx', content: 'export default function GeneratedApp(){ return <h1>Aurora</h1> }' },
+    { path: 'src/GeneratedApp.tsx', content: 'export default function GeneratedApp(){ return <main><h1>Início</h1><h2>Serviços</h2></main> }' },
   ], route: 'ollama', model: 'qwen', inputTokens: 10, outputTokens: 20,
 } as const
 const roots: string[] = []
@@ -43,7 +43,15 @@ async function fixture(options: { readonly preflight?: 'OK' | 'BLOCKED_EXTERNAL'
     putRun: vi.fn(async (_actor, run: StudioRun) => { runs.push(run) }),
     putEvidence: vi.fn(async (_actor, item: unknown) => { evidence.push(item) }),
   }
-  const execute = vi.fn(options.execute ?? (async () => ({ exitCode: 0, stdout: 'ok', stderr: '', timedOut: false })))
+  const execute = vi.fn(options.execute ?? (async (directory: string, command: string) => {
+    if (command === 'pnpm run test:e2e') {
+      const reportPath = resolve(directory, 'evidence/appspec-report.json')
+      const report = JSON.parse(await readFile(reportPath, 'utf8')) as { checks: Array<{ status: string }> }
+      report.checks = report.checks.map(check => check.status === 'PENDING' ? { ...check, status: 'PASSED' } : check)
+      await writeFile(reportPath, JSON.stringify(report))
+    }
+    return { exitCode: 0, stdout: 'ok', stderr: '', timedOut: false }
+  }))
   const builder = {
     preflight: vi.fn(async () => options.preflight === 'BLOCKED_EXTERNAL'
       ? { state: 'BLOCKED_EXTERNAL' as const, message: 'Construtor indisponível.' }
@@ -65,8 +73,11 @@ describe('Prompt-to-App pipeline', () => {
     expect({ result, runs: f.runs, transitions: f.transitions }).toMatchObject({ result: { state: 'VERIFIED_PROTOTYPE', attempts: 1 } })
     expect(f.transitions).toEqual(['GENERATING', 'BUILD_OK', 'TESTS_OK', 'VERIFIED_PROTOTYPE'])
     expect(f.execute).toHaveBeenCalledTimes(4)
-    expect(f.runs[0]).toMatchObject({ stage: 'verify', state: 'PASSED', route: 'ollama', input_tokens: 10, output_tokens: 20, failure_code: null })
-    expect(f.evidence).toHaveLength(1)
+    expect(f.runs.at(-1)).toMatchObject({ stage: 'verify', state: 'PASSED', route: 'ollama', input_tokens: 10, output_tokens: 20, failure_code: null })
+    expect(f.runs.at(-1)?.acceptance_checks.filter(check => check.status === 'PASSED').length).toBeGreaterThanOrEqual(4)
+    expect(f.runs.at(-1)?.acceptance_checks).toContainEqual(expect.objectContaining({ kind: 'criterion', status: 'NOT_AUTOMATED' }))
+    expect(f.runs.at(-1)).toMatchObject({ operation_id: expect.any(String), owner_session_id: 'direct-execution' })
+    expect(f.evidence).toHaveLength(2)
   })
 
   it('distinguishes a test failure from a build failure after three attempts', async () => {
@@ -74,8 +85,9 @@ describe('Prompt-to-App pipeline', () => {
     const result = await f.pipeline.run(actor, 'project', { generate: vi.fn(async () => cleanGeneration) })
     expect(result).toMatchObject({ state: 'TESTS_FAILED', attempts: 3 })
     expect(f.transitions).toEqual(['GENERATING', 'BUILD_OK', 'TESTS_FAILED'])
-    expect(f.runs).toHaveLength(3)
-    expect(f.runs.every(run => run.stage === 'test' && run.failure_code === 'pnpm run test: exit 1')).toBe(true)
+    const failures = f.runs.filter(run => run.state === 'FAILED')
+    expect(failures).toHaveLength(3)
+    expect(failures.every(run => run.stage === 'test' && run.failure_code === 'pnpm run test: exit 1')).toBe(true)
   })
 
   it('retries rejected model output with the prior diagnostic and closes as build failed', async () => {
@@ -85,7 +97,9 @@ describe('Prompt-to-App pipeline', () => {
     expect(result).toMatchObject({ state: 'BUILD_FAILED', attempts: 3, message: 'JSON inválido' })
     expect(generator.generate).toHaveBeenNthCalledWith(2, spec, plan, 'JSON inválido')
     expect(f.execute).not.toHaveBeenCalled()
-    expect(f.runs.every(run => run.stage === 'generate' && run.failure_code === 'JSON inválido')).toBe(true)
+    const failures = f.runs.filter(run => run.state === 'FAILED')
+    expect(failures).toHaveLength(3)
+    expect(failures.every(run => run.stage === 'generate' && run.failure_code === 'JSON inválido')).toBe(true)
     expect(f.transitions).toEqual(['GENERATING', 'BUILD_FAILED'])
   })
 
@@ -94,7 +108,7 @@ describe('Prompt-to-App pipeline', () => {
     await expect(f.pipeline.run(actor, 'project', generator)).resolves.toEqual({ state: 'BLOCKED_EXTERNAL', attempts: 0, message: 'Construtor indisponível.' })
     expect(generator.generate).not.toHaveBeenCalled()
     expect(f.transitions).toEqual([])
-    expect(f.runs[0]).toMatchObject({ stage: 'build', state: 'BLOCKED_EXTERNAL', sandbox: 'unavailable', failure_code: 'BUILDER_UNAVAILABLE' })
+    expect(f.runs.at(-1)).toMatchObject({ stage: 'build', state: 'BLOCKED_EXTERNAL', sandbox: 'unavailable', failure_code: 'BUILDER_UNAVAILABLE' })
   })
 
   it('refuses to start without the approved plan and approved project state', async () => {
@@ -102,5 +116,14 @@ describe('Prompt-to-App pipeline', () => {
     f.service.plan.mockReturnValueOnce({ ...plan, status: 'PROPOSED' })
     await expect(f.pipeline.run(actor, 'project', { generate: vi.fn() })).rejects.toBeInstanceOf(PromptToAppError)
     expect(f.builder.preflight).not.toHaveBeenCalled()
+  })
+
+  it('records cancellation against the owning browser session before the next builder step', async () => {
+    const controller = new AbortController()
+    const f = await fixture({ execute: async () => { controller.abort('cancelled-by-user'); return { exitCode: 0, stdout: '', stderr: '', timedOut: false } } })
+    const result = await f.pipeline.run({ ...actor, sessionId: 'browser-session' }, 'project', { generate: vi.fn(async () => cleanGeneration) }, { operationId: 'operation', ownerSessionId: 'browser-session', signal: controller.signal })
+    expect(result).toMatchObject({ state: 'CANCELLED', attempts: 1 })
+    expect(f.runs.at(-1)).toMatchObject({ run_id: 'operation', operation_id: 'operation', owner_session_id: 'browser-session', state: 'CANCELLED' })
+    expect(f.transitions).toEqual(['GENERATING', 'CANCELLED'])
   })
 })

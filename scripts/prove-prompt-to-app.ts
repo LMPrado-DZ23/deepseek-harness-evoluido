@@ -36,10 +36,10 @@ const actor: PromptToAppActor = { userId: 'owner-a', orgId: 'org-a', tenantId: '
 const attacker: PromptToAppActor = { userId: 'owner-b', orgId: 'org-b', tenantId: 'tenant-b', role: 'owner' }
 const spec: AppSpecV1 = {
   schema_version: 1, problem: 'Apresentar serviços com clareza.', audience: 'Clientes locais',
-  journeys: ['Conhecer os serviços'], pages: [{ name: 'Início', sections: ['Serviços', 'Contato'] }], entities: [],
+  journeys: ['Conhecer os serviços'], pages: [{ name: 'Ateliê Aurora', sections: ['Serviços locais', 'Contato'] }], entities: [],
   sensitive_data: { detected: [], confirmed_by_user: false },
   accessibility: { wcag_level: 'AA', keyboard_required: true, reduced_motion: true },
-  language: 'pt-BR', acceptance_criteria: ['Título e contato aparecem na página.'],
+  language: 'pt-BR', acceptance_criteria: ['Mostrar o texto “Fale com a equipe”.', 'A página deve ser clara.'],
 }
 const digest = (await readFile(resolve(root, 'runtime/builder-image-digest'), 'utf8')).trim() as `sha256:${string}`
 const uid = typeof process.getuid === 'function' ? process.getuid() : 1000
@@ -63,7 +63,7 @@ try {
     route: 'deterministic-fixture', model: 'fixture-v1', inputTokens: 0, outputTokens: 0,
     files: [
       { path: 'content/app.json', content: '{"title":"Ateliê Aurora","description":"Serviços locais e contato."}' },
-      { path: 'src/GeneratedApp.tsx', content: 'export default function GeneratedApp() { return <main><h1>Ateliê Aurora</h1><p>Serviços locais e contato.</p></main> }\n' },
+      { path: 'src/GeneratedApp.tsx', content: 'export default function GeneratedApp() { return <main><h1>Ateliê Aurora</h1><section><h2>Serviços locais</h2></section><section><h2>Contato</h2><p>Fale com a equipe</p></section></main> }\n' },
     ],
   }) }
   const pipeline = new PromptToAppPipeline({
@@ -79,7 +79,8 @@ try {
   let isolated = false
   try { service.project(attacker, project.project_id) } catch (error) { isolated = error instanceof PromptToAppError && error.code === 'NOT_FOUND' }
   if (!isolated) throw new Error('Isolamento tenant não foi provado.')
-  if (repository.runRows.length !== 1 || repository.evidenceRows.length !== 1) throw new Error('Run ou evidência ausente.')
+  if (repository.runRows.length !== 1 || repository.evidenceRows.length !== 2) throw new Error('Run ou evidência ausente.')
+  if (repository.runRows[0]!.acceptance_checks.some(check => check.status !== 'PASSED' && check.status !== 'NOT_AUTOMATED')) throw new Error('Critério automático não passou.')
   if (!(await stat(resolve(result.runDirectory, 'pipeline.log'))).isFile()) throw new Error('Log do pipeline ausente.')
 
   const proof = [
@@ -88,7 +89,8 @@ try {
     `- Imagem do construtor: \`${digest}\``, '- Build, Vitest, Playwright e axe: PASS em contêiner sem rede',
     '- Tentativas: 1/3', '- Isolamento tenant adversarial: PASS (`org-b` recebeu `NOT_FOUND`)',
     `- Arquivo sentinela fora da raiz: hash antes/depois idêntico \`${outsideBefore}\``,
-    `- Evidência gravada: SHA-256 \`${repository.evidenceRows[0]!.sha256}\``,
+    `- Evidências gravadas: ${repository.evidenceRows.map(value => `\`${value.kind}:${value.sha256}\``).join(', ')}`,
+    '- Critérios AppSpec: páginas, seções, idioma, título e texto literal passaram; o critério subjetivo ficou `NOT_AUTOMATED`.',
     '- Preview: `NOT_PRESENT`; publicação: `NOT_PRESENT`; experiência leiga: `NOT_VALIDATED`', '',
     'Esta prova valida a composição técnica determinística da fatia. Ela não valida qualidade com LLM real, uso por pessoas leigas, celular físico, preview ou deploy.', '',
   ].join('\n')

@@ -193,12 +193,21 @@ importers:
 
   plugins/prompt-to-app:
     dependencies:
+      '@deepseek-ai/dsh-agent':
+        specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/core/agent
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/core/agent
       '@deepseek-ai/cordis':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/vendor/cordis
         version: link:../../../harness-studio-poc02/deepseek-harness/vendor/cordis
       '@deepseek-ai/dsh-host-webserver':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/host/webserver
         version: link:../../../harness-studio-poc02/deepseek-harness/packages/host/webserver
+      '@deepseek-ai/dsh-jobs':
+        specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/jobs/jobs
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/jobs/jobs
+      '@deepseek-ai/dsh-session':
+        specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/core/session
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/core/session
       '@deepseek-ai/dsh-llm':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/llm/llm
         version: link:../../../harness-studio-poc02/deepseek-harness/packages/llm/llm

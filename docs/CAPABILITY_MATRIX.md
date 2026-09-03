@@ -19,7 +19,7 @@ o código pode existir, mas ainda não foi validado com pessoas leigas.
 | Transação de negócio multi-registro | NOT_PRESENT | contrato KV é atômico por chamada | extensão batch/CAS transacional |
 | Migração SQLite lógica | BETA | bundle versionado e E2E focado P31-A | restore operacional e dataset real |
 | Experiência para pessoas leigas | NOT_VALIDATED | E4 reposicionou a fase 0.5 após o gate Windows; kit `cdd2edb` preservado como base metodológica | produto completo, preflight adaptado e cinco sessões `VALID` com gate 4/5 |
-| Prompt-to-App: landing page e catálogo | BETA | pipeline determinístico, build/testes/axe em contêiner sem rede e API tenant-aware | LLM real, fase 0.5 e operação prolongada |
+| Prompt-to-App: landing page e catálogo | BETA | job assíncrono cancelável, API tenant-aware real no E2E, pipeline determinístico e critérios AppSpec executáveis em contêiner sem rede | LLM real, fase 0.5 e operação prolongada |
 | Prompt-to-App: agenda, CRM, painel e portal | NOT_IMPLEMENTED | briefs e critérios existem no golden set | implementação e prova por categoria |
 | Preview autenticado | NOT_PRESENT | excluído da fatia 1 | P34 com iframe isolado, TTL e CSP |
 | Publicação | NOT_PRESENT | nenhuma rota, estado ou botão de publicação | fase autorizada, staging antes de produção e aprovação humana |

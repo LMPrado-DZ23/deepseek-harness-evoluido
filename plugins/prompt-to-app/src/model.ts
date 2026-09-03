@@ -5,7 +5,7 @@ import { appSpecV1Schema } from './appspec.js'
 
 export const projectStateSchema = z.enum([
   'DRAFT', 'SPEC_READY', 'PLAN_PROPOSED', 'PLAN_APPROVED', 'GENERATING',
-  'BUILD_OK', 'BUILD_FAILED', 'TESTS_OK', 'TESTS_FAILED', 'VERIFIED_PROTOTYPE',
+  'BUILD_OK', 'BUILD_FAILED', 'TESTS_OK', 'TESTS_FAILED', 'CANCELLED', 'VERIFIED_PROTOTYPE',
 ])
 export type ProjectState = z.infer<typeof projectStateSchema>
 
@@ -57,14 +57,21 @@ export const studioPlanSchema = z.object({
 }).strict()
 
 export const studioRunSchema = z.object({
-  run_id: z.string().min(1), plan_id: z.string().min(1), project_id: z.string().min(1), ...scope,
+  run_id: z.string().min(1), operation_id: z.string().min(1), owner_session_id: z.string().min(1),
+  plan_id: z.string().min(1), project_id: z.string().min(1), ...scope,
   stage: z.enum(['generate', 'build', 'test', 'verify']), attempt: z.number().int().min(1).max(3),
-  state: z.enum(['PENDING', 'RUNNING', 'PASSED', 'FAILED', 'BLOCKED_EXTERNAL', 'BUDGET_EXCEEDED']),
+  state: z.enum(['PENDING', 'RUNNING', 'PASSED', 'FAILED', 'BLOCKED_EXTERNAL', 'BUDGET_EXCEEDED', 'CANCELLED']),
   started_at: timestamp, finished_at: timestamp.nullable(),
   sandbox: z.enum(['full', 'unavailable']), route: z.string().nullable(), model: z.string().nullable(),
   input_tokens: z.number().int().nonnegative().nullable(), output_tokens: z.number().int().nonnegative().nullable(),
   estimated_cost_usd: z.number().nonnegative().nullable(), run_directory: z.string().min(1),
   failure_code: z.string().nullable(),
+  acceptance_checks: z.array(z.object({
+    id: z.string().min(1), label: z.string().min(1),
+    kind: z.enum(['language', 'title', 'page', 'section', 'entity', 'criterion']),
+    expected: z.string().optional(),
+    status: z.enum(['PENDING', 'PASSED', 'FAILED', 'NOT_AUTOMATED']),
+  }).strict()),
 }).strict()
 
 export const studioEvidenceSchema = z.object({
@@ -94,7 +101,7 @@ export const studioProjectsDomainSpec = defineDomain({ name: 'studio_projects', 
 export const studioAppSpecsDomainSpec = defineDomain({ name: 'studio_app_specs', version: 1, tables: { specs: domainTable<PromptToAppKey, StudioAppSpecRecord>(studioAppSpecRecordSchema) } })
 export const studioIntakeTurnsDomainSpec = defineDomain({ name: 'studio_intake_turns', version: 1, tables: { turns: domainTable<PromptToAppKey, StudioIntakeTurn>(studioIntakeTurnSchema) } })
 export const studioPlansDomainSpec = defineDomain({ name: 'studio_plans', version: 1, tables: { plans: domainTable<PromptToAppKey, StudioPlan>(studioPlanSchema) } })
-export const studioRunsDomainSpec = defineDomain({ name: 'studio_runs', version: 1, tables: { runs: domainTable<PromptToAppKey, StudioRun>(studioRunSchema) } })
+export const studioRunsDomainSpec = defineDomain({ name: 'studio_runs', version: 2, tables: { runs: domainTable<PromptToAppKey, StudioRun>(studioRunSchema) } })
 export const studioEvidenceDomainSpec = defineDomain({ name: 'studio_evidence', version: 1, tables: { evidence: domainTable<PromptToAppKey, StudioEvidence>(studioEvidenceSchema) } })
 export const studioApprovalsDomainSpec = defineDomain({ name: 'studio_approvals', version: 1, tables: { approvals: domainTable<PromptToAppKey, StudioApproval>(studioApprovalSchema) } })
 

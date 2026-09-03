@@ -21,11 +21,13 @@
     "changePlaceholder": "Explique com suas palavras.", "sendChange": "Enviar pedido de mudança", "revision": "Montar plano revisado"
   },
   "creation": {
-    "title": "Criar e testar o protótipo", "start": "Iniciar criação", "working": "Criando e conferindo dentro do ambiente isolado…"
+    "title": "Criar e testar o protótipo", "start": "Iniciar criação", "working": "Criando e conferindo dentro do ambiente isolado…", "cancel": "Cancelar criação"
   },
   "verification": {
     "title": "Resultado da verificação", "success": "As verificações declaradas passaram neste computador.",
-    "failure": "A criação parou porque uma verificação encontrou um problema.", "attempts": "Tentativas realizadas"
+    "failure": "A criação parou porque uma verificação encontrou um problema.", "cancelled": "A criação foi cancelada.",
+    "attempts": "Tentativas realizadas", "checks": "Critérios conferidos", "passed": "Passou", "failed": "Falhou",
+    "pending": "Em conferência", "notAutomated": "Não verificado automaticamente"
   },
   "privacy": {
     "title": "Privacidade", "local": "Somente no meu computador", "configured": "Permitir IA configurada",

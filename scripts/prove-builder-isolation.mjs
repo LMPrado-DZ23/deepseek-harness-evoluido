@@ -15,9 +15,11 @@ const workspace = resolve(proofRoot, 'workspace')
 mkdirSync(workspace)
 const templateStore = resolve(root, 'runtime/template-store-v1')
 const name = `dz23-builder-proof-${randomUUID()}`
+const uid = typeof process.getuid === 'function' ? process.getuid() : 1000
+const gid = typeof process.getgid === 'function' ? process.getgid() : 1000
 
 const securityArgs = [
-  '--network', 'none', '--user', '10001:10001', '--cap-drop', 'ALL',
+  '--network', 'none', '--user', `${uid}:${gid}`, '--cap-drop', 'ALL',
   '--security-opt', 'no-new-privileges', '--read-only',
   '--tmpfs', '/tmp:rw,noexec,nosuid,size=256m', '--pids-limit', '256',
   '--env', 'HOME=/tmp', '--env', 'XDG_CONFIG_HOME=/tmp/.config', '--env', 'CI=true',
@@ -52,7 +54,7 @@ const checks = {
   noNewPrivileges: inspection.HostConfig.SecurityOpt?.includes('no-new-privileges') === true,
   readOnlyRoot: inspection.HostConfig.ReadonlyRootfs === true,
   privateSharedMemory: inspection.HostConfig.IpcMode === 'private' && inspection.HostConfig.ShmSize === 268435456,
-  nonRootUser: inspection.Config.User === '10001:10001',
+  nonRootUser: inspection.Config.User === `${uid}:${gid}` && uid !== 0,
   ephemeralHome: inspection.Config.Env.includes('HOME=/tmp') && inspection.Config.Env.includes('XDG_CONFIG_HOME=/tmp/.config') && inspection.Config.Env.includes('CI=true'),
   workspaceOnlyWritableMount: mounts.filter(mount => mount.rw).length === 1 && mounts.some(mount => mount.destination === '/workspace' && mount.rw),
   templateStoreReadOnly: mounts.some(mount => mount.destination === '/template-store' && !mount.rw),

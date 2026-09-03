@@ -1,6 +1,7 @@
 import { lstat, mkdir, realpath, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import { z } from 'zod'
+import { t } from './i18n.js'
 
 export const generatedFileSchema = z.object({
   path: z.string().min(1),
@@ -21,15 +22,15 @@ export interface GeneratedWritePolicy {
 export function validateGeneratedPath(path: string): string {
   const normalized = validateRelativePath(path)
   const parts = normalized.split('/')
-  if (parts[0] !== 'src' && parts[0] !== 'content') throw new GeneratedFileRejectedError('O modelo só pode alterar src/ e content/.')
+  if (parts[0] !== 'src' && parts[0] !== 'content') throw new GeneratedFileRejectedError(t('errors.generatedPathRoot'))
   return normalized
 }
 
 function validateRelativePath(path: string): string {
   const normalized = path.replaceAll('\\', '/')
-  if (isAbsolute(path) || normalized.startsWith('/') || normalized.includes('\0')) throw new GeneratedFileRejectedError('O modelo tentou usar um caminho absoluto.')
+  if (isAbsolute(path) || normalized.startsWith('/') || normalized.includes('\0')) throw new GeneratedFileRejectedError(t('errors.generatedAbsolutePath'))
   const parts = normalized.split('/')
-  if (parts.some(part => part === '..' || part === '' || part === '.')) throw new GeneratedFileRejectedError('O modelo tentou sair do diretório permitido.')
+  if (parts.some(part => part === '..' || part === '' || part === '.')) throw new GeneratedFileRejectedError(t('errors.generatedTraversal'))
   return normalized
 }
 
@@ -47,22 +48,22 @@ export async function writeGeneratedFiles(runDirectory: string, files: readonly 
   for (const input of files) {
     const file = generatedFileSchema.parse(input)
     const safe = validateGeneratedPath(file.path)
-    if (planned !== undefined && !planned.has(safe)) throw new GeneratedFileRejectedError(`Arquivo fora do plano aprovado: ${safe}`)
-    if (seen.has(safe)) throw new GeneratedFileRejectedError(`Arquivo repetido: ${safe}`)
+    if (planned !== undefined && !planned.has(safe)) throw new GeneratedFileRejectedError(t('errors.generatedOutsidePlan', { path: safe }))
+    if (seen.has(safe)) throw new GeneratedFileRejectedError(t('errors.generatedDuplicate', { path: safe }))
     seen.add(safe)
     const target = resolve(root, safe)
     const boundary = `${root}${sep}`
-    if (!target.startsWith(boundary) || relative(root, target).startsWith('..')) throw new GeneratedFileRejectedError('O arquivo saiu do diretório da execução.')
-    await mkdir(dirname(target), { recursive: true })
+    if (!target.startsWith(boundary) || relative(root, target).startsWith('..')) throw new GeneratedFileRejectedError(t('errors.generatedOutsideRun'))
     const existing = await lstat(target).catch(() => undefined)
-    if (existing?.isSymbolicLink()) throw new GeneratedFileRejectedError('Link simbólico proibido na saída gerada.')
-    if (existing !== undefined && protectedTemplate.has(safe)) throw new GeneratedFileRejectedError(`Arquivo protegido do template: ${safe}`)
-    if (existing !== undefined && !mutable.has(safe)) throw new GeneratedFileRejectedError(`O plano não autorizou alterar o arquivo existente: ${safe}`)
+    if (existing?.isSymbolicLink()) throw new GeneratedFileRejectedError(t('errors.generatedSymlink'))
+    if (existing !== undefined && protectedTemplate.has(safe)) throw new GeneratedFileRejectedError(t('errors.generatedProtected', { path: safe }))
+    if (existing !== undefined && !mutable.has(safe)) throw new GeneratedFileRejectedError(t('errors.generatedMutation', { path: safe }))
+    await mkdir(dirname(target), { recursive: true })
     try {
       await writeFile(target, file.content, { encoding: 'utf8', flag: existing === undefined ? 'wx' : 'w' })
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-        throw new GeneratedFileRejectedError(`O modelo tentou substituir um arquivo existente: ${safe}`)
+        throw new GeneratedFileRejectedError(t('errors.generatedOverwrite', { path: safe }))
       }
       throw error
     }

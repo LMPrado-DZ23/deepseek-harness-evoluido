@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { GeneratedFileRejectedError, validateGeneratedPath, writeGeneratedFiles } from '../src/generator.js'
 import { ContainerBuilder, hashTree, OFFLINE_PIPELINE_COMMANDS, type ProcessPort } from '../src/runner.js'
-import { scanGeneratedContent } from '../src/security.js'
+import { isValidCpf, scanGeneratedContent } from '../src/security.js'
 
 const temporary: string[] = []
 afterEach(async () => { await Promise.all(temporary.splice(0).map(path => rm(path, { recursive: true, force: true }))) })
@@ -65,10 +65,17 @@ describe('container builder', () => {
     expect(OFFLINE_PIPELINE_COMMANDS[0]).toContain('--offline')
   })
 
-  it('hashes immutable trees, rejects symlinks and scans secrets and PII', async () => {
+  it('hashes immutable trees, rejects symlinks and scans secrets and valid CPF without blocking phones', async () => {
     const root = await temp(); await writeFile(join(root, 'a'), 'one'); const first = await hashTree(root)
     expect(first).toMatch(/^[a-f0-9]{64}$/u); await writeFile(join(root, 'a'), 'two'); expect(await hashTree(root)).not.toBe(first)
-    expect(scanGeneratedContent({ 'src/a.ts': 'const key="sk-abcdefghijklmnopqrstuvwxyz"', 'content/a': '123.456.789-01' })).toEqual(['src/a.ts:SECRET_PATTERN', 'content/a:PII_PATTERN'])
-    expect(scanGeneratedContent({ 'src/a.ts': 'safe' })).toEqual([])
+    expect(isValidCpf('529.982.247-25')).toBe(true)
+    expect(isValidCpf('111.444.777-35')).toBe(true)
+    expect(isValidCpf('123.456.789-00')).toBe(false)
+    expect(isValidCpf('11111111111')).toBe(false)
+    expect(isValidCpf('123')).toBe(false)
+    expect(isValidCpf('52998224724')).toBe(false)
+    expect(scanGeneratedContent({ 'src/a.ts': 'const key="sk-abcdefghijklmnopqrstuvwxyz"', 'content/a': 'CPF 529.982.247-25' })).toEqual(['src/a.ts:SECRET_PATTERN', 'content/a:PII_PATTERN'])
+    expect(scanGeneratedContent({ 'content/a': 'CPF informado: 52998224725' })).toEqual(['content/a:PII_PATTERN'])
+    expect(scanGeneratedContent({ 'src/a.ts': 'Telefone 11987654321', 'content/a': 'CPF 123.456.789-00' })).toEqual([])
   })
 })

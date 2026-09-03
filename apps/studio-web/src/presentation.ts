@@ -1,6 +1,6 @@
 export type ProjectUiState =
   | 'DRAFT' | 'SPEC_READY' | 'PLAN_PROPOSED' | 'PLAN_APPROVED' | 'GENERATING'
-  | 'BUILD_OK' | 'BUILD_FAILED' | 'TESTS_OK' | 'TESTS_FAILED' | 'VERIFIED_PROTOTYPE'
+  | 'BUILD_OK' | 'BUILD_FAILED' | 'TESTS_OK' | 'TESTS_FAILED' | 'CANCELLED' | 'VERIFIED_PROTOTYPE'
 
 export type PermanentTruthKind = 'creation' | 'verified' | null
 

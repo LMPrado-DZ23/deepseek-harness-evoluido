@@ -1,5 +1,8 @@
 import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-host-webserver'
+import type { JobId, JobStart } from '@deepseek-ai/dsh-jobs'
+import { SessionId } from '@deepseek-ai/dsh-session'
 import type { Domain, KvTable } from '@deepseek-ai/dsh-storage-domain'
 import type {} from '@dz23-studio/identity'
 import type {} from '@dz23-studio/route-health'
@@ -9,6 +12,7 @@ import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createPromptToAppHttpHandler, type StudioAppsHealth } from './http.js'
+import { PromptToAppJobService, type PromptToAppJobRegistry } from './jobs.js'
 import {
   studioAppSpecsDomainSpec,
   studioApprovalsDomainSpec,
@@ -35,8 +39,10 @@ import { PromptToAppService, type PromptToAppRepository } from './service.js'
 
 export * from './appspec.js'
 export * from './generator.js'
+export * from './acceptance.js'
 export * from './http.js'
 export * from './intake.js'
+export * from './jobs.js'
 export * from './model.js'
 export * from './planner.js'
 export * from './pipeline.js'
@@ -46,7 +52,7 @@ export * from './service.js'
 export * from './state.js'
 
 export const name = 'dz23-studio-prompt-to-app'
-export const inject = ['llm', 'storageDomain', 'studioIdentity', 'studioRouteHealth', 'studioTenancy', 'webServer']
+export const inject = ['agents', 'jobs', 'llm', 'storageDomain', 'studioIdentity', 'studioRouteHealth', 'studioTenancy', 'webServer']
 
 export interface PromptToAppPluginConfig {
   readonly allowedHosts?: readonly string[]
@@ -137,7 +143,7 @@ export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}):
   await mkdir(runsRoot, { recursive: true })
   const builder = new ContainerBuilder({
     engine: config.builder?.engine ?? 'docker', imageDigest, templateStore,
-    user: config.builder?.user ?? '1000:1000',
+    user: config.builder?.user ?? defaultContainerUser(),
     limits: {
       pids: config.builder?.limits?.pids ?? 256,
       memory: config.builder?.limits?.memory ?? '2g',
@@ -146,6 +152,24 @@ export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}):
     },
   }, new NodeProcessPort())
   const pipeline = new PromptToAppPipeline({ service, builder, templateDirectory, runsRoot })
+  const registry: PromptToAppJobRegistry = {
+    start: spec => ctx.jobs.start(spec as JobStart) as JobId,
+    kill: (id, owner, reason) => ctx.jobs.kill(id, owner, reason),
+  }
+  const jobs = new PromptToAppJobService({
+    service, pipeline, registry,
+    owners: {
+      async create(_actor, runId) {
+        const handle = await ctx.agents.create({
+          sessionId: SessionId(`studio-prompt-job-${runId}`),
+          meta: { cwd: runsRoot, origin: 'subagent', delegationDepth: 0, agentPreset: 'dz23-prompt-job-owner' },
+          setup: () => undefined,
+        })
+        return { owner: handle.agent, dispose: () => handle.dispose() }
+      },
+    },
+  })
+  ctx.jobs.attachController('dz23-studio-prompt-to-app')
   const intake = new IntakeEngine(model); const planner = new PlannerEngine(model)
   const healthFor = async (scope: { readonly orgId: string; readonly tenantId: string }): Promise<StudioAppsHealth> => {
     const routes = ctx.studioRouteHealth.service.list(scope)
@@ -163,13 +187,19 @@ export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}):
     kind: 'prefix', path: '/api/studio/apps',
     handler: createPromptToAppHttpHandler({
       service, identity: ctx.studioIdentity.service, tenancy: ctx.studioTenancy.service,
-      intake, planner, pipeline,
+      intake, planner, jobs,
       generatorFor: (actor, projectId) => new ModelCodeGenerator(model, actor, service.project(actor, projectId).privacy),
       health: actor => healthFor({ orgId: actor.orgId, tenantId: actor.tenantId }),
       allowedHosts: config.allowedHosts ?? [defaultHost, `localhost:${port}`],
       allowedOrigins: config.allowedOrigins ?? [defaultOrigin, `http://${defaultHost}`],
     }),
   }), 'studio-prompt-to-app.http')
+}
+
+function defaultContainerUser(): `${number}:${number}` {
+  const uid = typeof process.getuid === 'function' ? process.getuid() : 1000
+  const gid = typeof process.getgid === 'function' ? process.getgid() : 1000
+  return `${uid}:${gid}`
 }
 
 async function readDigest(path: string): Promise<`sha256:${string}`> {

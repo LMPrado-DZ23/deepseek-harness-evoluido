@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { appSpecV1Schema, detectSensitiveData, parseAppSpecWithSingleRepair, sensitiveDataQuestion, type AppSpecV1 } from './appspec.js'
 import type { StudioProject } from './model.js'
 import type { ModelResult, PromptModelPort } from './ports.js'
+import { t } from './i18n.js'
 
 export const intakeAnswerSchema = z.object({ answer: z.string().max(2_000), recommend: z.boolean().default(false) }).strict()
 
@@ -22,9 +23,9 @@ export function nextIntakeQuestion(conversation: IntakeConversation): IntakeQues
   if (sensitive.length > 0 && conversation.sensitiveConfirmed === undefined) {
     return { id: 'sensitive-confirmation', text: sensitiveDataQuestion(sensitive)!, sensitiveKinds: sensitive }
   }
-  if (conversation.answers.audience === undefined) return { id: 'audience', text: 'Para quem você quer criar este projeto?' }
-  if (conversation.answers.goal === undefined) return { id: 'goal', text: 'O que a pessoa deve conseguir fazer ou entender?' }
-  if (conversation.answers.content === undefined) return { id: 'content', text: 'Quais informações ou itens precisam aparecer?' }
+  if (conversation.answers.audience === undefined) return { id: 'audience', text: t('questions.audience') }
+  if (conversation.answers.goal === undefined) return { id: 'goal', text: t('questions.goal') }
+  if (conversation.answers.content === undefined) return { id: 'content', text: t('questions.content') }
   return undefined
 }
 
@@ -35,19 +36,19 @@ export class IntakeEngine {
     return this.model.complete(
       { orgId: conversation.project.org_id, tenantId: conversation.project.tenant_id },
       'intake', conversation.project.privacy,
-      `Recomende uma resposta curta, em português comum, para a pergunta "${question.text}". Ideia: ${conversation.project.original_brief}`,
+      t('prompts.recommend', { question: question.text, brief: conversation.project.original_brief }),
     )
   }
 
   async buildSpec(conversation: IntakeConversation): Promise<{ spec: AppSpecV1; model: ModelResult }> {
     const sensitive = detectSensitiveData([conversation.project.original_brief, ...Object.values(conversation.answers)].join('\n'))
     const prompt = [
-      'Produza somente JSON válido para AppSpec v1.',
-      `Categoria: ${conversation.project.category}.`,
-      `Ideia: ${conversation.project.original_brief}`,
-      `Respostas: ${JSON.stringify(conversation.answers)}`,
-      `Dados sensíveis: ${JSON.stringify(sensitive)}; confirmação: ${String(conversation.sensitiveConfirmed === true)}.`,
-      `Schema: ${JSON.stringify(appSpecV1Schema.toJSONSchema())}`,
+      t('prompts.specOnly'),
+      t('prompts.category', { category: conversation.project.category }),
+      t('prompts.idea', { brief: conversation.project.original_brief }),
+      t('prompts.answers', { answers: JSON.stringify(conversation.answers) }),
+      t('prompts.sensitive', { sensitive: JSON.stringify(sensitive), confirmed: String(conversation.sensitiveConfirmed === true) }),
+      t('prompts.schema', { schema: JSON.stringify(appSpecV1Schema.toJSONSchema()) }),
     ].join('\n')
     const result = await this.model.complete(
       { orgId: conversation.project.org_id, tenantId: conversation.project.tenant_id },
@@ -57,7 +58,7 @@ export class IntakeEngine {
       const repair = await this.model.complete(
         { orgId: conversation.project.org_id, tenantId: conversation.project.tenant_id },
         'intake', conversation.project.privacy,
-        `Corrija uma única vez este AppSpec. Erros: ${issues.join('; ')}. Valor: ${JSON.stringify(invalid)}`,
+        t('prompts.repair', { issues: issues.join('; '), value: JSON.stringify(invalid) }),
       )
       return repair.value
     })

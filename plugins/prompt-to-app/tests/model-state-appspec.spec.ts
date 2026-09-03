@@ -32,7 +32,7 @@ describe('Prompt-to-App domains, state and AppSpec', () => {
   it('covers every valid transition and rejects every other state pair', () => {
     expect(projectStateSchema.options).toEqual([
       'DRAFT', 'SPEC_READY', 'PLAN_PROPOSED', 'PLAN_APPROVED', 'GENERATING',
-      'BUILD_OK', 'BUILD_FAILED', 'TESTS_OK', 'TESTS_FAILED', 'VERIFIED_PROTOTYPE',
+      'BUILD_OK', 'BUILD_FAILED', 'TESTS_OK', 'TESTS_FAILED', 'CANCELLED', 'VERIFIED_PROTOTYPE',
     ])
     expect(projectStateSchema.options).not.toEqual(expect.arrayContaining(['READY', 'DONE', 'PUBLISHED', 'DEPLOYED']))
     for (const from of projectStateSchema.options) {
