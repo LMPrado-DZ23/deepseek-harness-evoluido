@@ -50,6 +50,8 @@ Consulte [REPORT.md](./REPORT.md) para comandos, resultados, erros e limitaçõe
 Decisões relacionadas:
 
 - [ADR-001 — identificadores físicos e nomes lógicos](./docs/adr/ADR-001-storage-domain-naming.md)
+- [ADR-016 / E4 — usabilidade depois do produto completo](./docs/adr/ADR-016-errata-e4-phase05-order.md)
+- [Plano Mestre v2.0 consolidado](./docs/PLANO_MESTRE_v2_HARNESS_STUDIO.md)
 - [BASELINE-001 — DeepSeek Harness 6c705be](./docs/baselines/BASELINE-001-deepseek-harness-6c705be.md)
 - [PoC-01b — prova viva do núcleo no WSL2 ext4](./docs/pocs/POC-01B-runtime-proof.md)
 
@@ -97,6 +99,6 @@ cerimônia de passkey com hardware, aparelho móvel físico ou deploy.
 
 O kit controlado da fase 0.5 está em
 [`docs/research/phase-0.5/README.md`](docs/research/phase-0.5/README.md). Ele
-mede a compreensão do fluxo antes de iniciar o Prompt-to-App. O kit não contém
-código do OmniSeek, não habilita deploy e ainda não foi executado com os cinco
-participantes.
+será adaptado depois do gate Windows para medir o DZ23 STUDIO completo antes do
+piloto. Por E4, P32/P33/P31-B estão liberados para construção, mas a experiência
+para leigos permanece `NOT_VALIDATED` até cinco sessões `VALID` e gate `GO`.

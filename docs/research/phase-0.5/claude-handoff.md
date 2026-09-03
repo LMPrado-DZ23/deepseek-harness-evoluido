@@ -1,4 +1,4 @@
-# Handoff Claude × Codex — preparação da fase 0.5
+# Handoff Claude × Codex — fase 0.5 reposicionada pela E4
 
 ## Estado
 
@@ -6,10 +6,15 @@
 - branch do kit: `codex/p05-usability-kit`;
 - worktree: `C:\Users\zodyp\Documents\Codex\2026-09-01\com\work\p05-usability-kit`;
 - OmniSeek P40 separado: `codex/p40-prototype-hardening@d9a8109528839a9f6c691cab9d71f3fce7e91e02`;
-- fase humana: `NOT_EXECUTED`;
+- fase humana: `SCHEDULED_AFTER_PHASE_9`;
 - preflight atual: `BLOCKED_LOCAL_AI` — a porta 8000 responde com uma página de
   login, não com uma lista OpenAI-compatible de modelos;
-- P32/P31-B: bloqueados até `GO` da fase 0.5.
+- P32/P33/P31-B: liberados para construção pela E4;
+- alvo final do teste: DZ23 STUDIO completo, não OmniSeek P40.
+
+O estado técnico abaixo descreve o kit histórico `cdd2edb`. Seus lançadores
+P40 não devem ser usados no gate final: depois da fase 9 serão adaptados ao
+DZ23 STUDIO, preservando o protocolo e a prova negativa de rotas externas.
 
 ## Decisão de empacotamento
 

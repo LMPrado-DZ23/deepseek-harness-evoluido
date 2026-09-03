@@ -98,6 +98,8 @@ Os dois contêineres e a rede privada foram removidos. A imagem local fixada per
 
 O OmniRoute deixa de ser pré-requisito da v1.0 e passa a integração externa opcional para usuário avançado, desligada por padrão e nunca empacotada pelo Studio. A v1.0 segue com DeepSeek direto e adapters do `llm-pi-ai` para OpenRouter e Ollama.
 
-A fase 0.5 passa a depender somente da fase 0 e do PoC-01b. Como o PoC-01b é GO, a fase 0.5 está tecnicamente liberada; recrutar as cinco pessoas leigas é uma decisão operacional do responsável pelo produto.
+A fase 0.5 passava a depender somente da fase 0 e do PoC-01b. Essa ordem foi
+substituída pela E4 em 03/09/2026: o teste agora ocorre depois da fase 9 e antes
+do piloto, sem bloquear P32/P33/P31-B.
 
 Uma futura reavaliação do OmniRoute exige release exato reproduzível, criação funcional de conexão pelo contrato suportado, execução sem privilégios e todos os testes de streaming, tools, uso, falha e limite de tier.

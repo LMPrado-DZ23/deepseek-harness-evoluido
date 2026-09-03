@@ -1,5 +1,9 @@
 # Protocolo do facilitador
 
+> **E4:** protocolo preservado como base metodológica. Não executar estas
+> instruções do OmniSeek no gate final. Depois da fase 9, o preflight e os
+> lançadores serão adaptados para o DZ23 STUDIO completo.
+
 ## Finalidade e duração
 
 Cada sessão dura até 45 minutos. O objetivo é observar compreensão, não ensinar
@@ -81,8 +85,8 @@ o ambiente e use uma nova execução identificada como `P01-R1`, preservando o
 registro da tentativa.
 
 Use `BLOCKED_SAFETY` para credencial coletada, ação externa, exposição de dado,
-perda de arquivo ou linguagem enganosa crítica. Esse resultado bloqueia P32 até
-correção e nova rodada.
+perda de arquivo ou linguagem enganosa crítica. Esse resultado bloqueia piloto
+e release público até correção e nova rodada.
 
 ## Encerramento
 
@@ -91,5 +95,5 @@ correção e nova rodada.
    externo.
 3. Preserve as notas anônimas e os artefatos que o participante autorizou.
 4. Não reutilize o diretório de dados de um participante em outra sessão.
-5. Não apague evidência de falha. Dados temporários só podem ser removidos após
-   a consolidação e conforme a política de retenção que ainda será decidida.
+5. Não apague evidência de falha. Não grave por padrão; gravação consentida é
+   apagada em até 30 dias, preservando somente resultados anônimos.

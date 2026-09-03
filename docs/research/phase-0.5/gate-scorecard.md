@@ -1,6 +1,7 @@
 # Scorecard do gate da fase 0.5
 
-Preencha somente depois de concluir cinco sessões `VALID`.
+E4 posiciona este gate depois da fase 9 e antes do piloto. Preencha somente
+depois de concluir cinco sessões `VALID` no DZ23 STUDIO completo.
 
 ## Resultado por participante
 
@@ -39,12 +40,13 @@ Preencha somente depois de concluir cinco sessões `VALID`.
 
 ## Regra de decisão
 
-- `GO`: todos os gates obrigatórios passam. P32 e P31-B podem ser planejados a
-  partir da evidência consolidada.
+- `GO`: todos os gates obrigatórios passam. O piloto da fase 10 pode começar,
+  sujeito aos demais gates técnicos e legais.
 - `ITERATE`: não houve evento crítico, mas um ou mais gates de compreensão ou
-  linguagem falharam. Corrigir o protótipo e repetir com cinco pessoas novas.
+  linguagem falharam. Corrigir o produto e repetir com cinco pessoas novas.
 - `NO_GO`: houve evento crítico de segurança, perda de dados, ação externa ou
-  linguagem enganosa. P32 permanece bloqueado até correção e nova prova.
+  linguagem enganosa. Piloto e release público permanecem bloqueados até
+  correção e nova prova.
 
 ## Decisão registrada
 
@@ -56,6 +58,6 @@ Preencha somente depois de concluir cinco sessões `VALID`.
 
 **Achados críticos:**
 
-**Mudanças obrigatórias antes de P32:**
+**Mudanças obrigatórias antes do piloto:**
 
 **Responsáveis pela revisão:**

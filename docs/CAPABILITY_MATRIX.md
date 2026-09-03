@@ -1,6 +1,8 @@
 # Matriz de capacidades — DZ23 STUDIO
 
-Estados seguem ADR-005 e nunca transformam uma prova focada em “aplicação pronta”.
+Estados seguem ADR-005 e nunca transformam uma prova focada em “aplicação
+pronta”. E4 acrescenta `NOT_VALIDATED` exclusivamente para experiência humana:
+o código pode existir, mas ainda não foi validado com pessoas leigas.
 
 | Capacidade | Estado | Evidência | Falta para ESTÁVEL |
 | --- | --- | --- | --- |
@@ -16,7 +18,7 @@ Estados seguem ADR-005 e nunca transformam uma prova focada em “aplicação pr
 | RLS PostgreSQL por tenant | NOT_PRESENT | KV armazena JSON opaco | repositório tenant-aware + role sem BYPASSRLS |
 | Transação de negócio multi-registro | NOT_PRESENT | contrato KV é atômico por chamada | extensão batch/CAS transacional |
 | Migração SQLite lógica | BETA | bundle versionado e E2E focado P31-A | restore operacional e dataset real |
-| Pesquisa de linguagem com pessoas leigas | NOT_EXECUTED | kit da fase 0.5 e preflight fail-closed preparados | IA local válida e cinco sessões `VALID` |
+| Experiência para pessoas leigas | NOT_VALIDATED | E4 reposicionou a fase 0.5 após o gate Windows; kit `cdd2edb` preservado como base metodológica | produto completo, preflight adaptado e cinco sessões `VALID` com gate 4/5 |
 | Rotas DeepSeek/OmniRoute/Ollama no profile | BETA | PoC 3A carregou as três; retry OmniRoute/Ollama = 0 | provedores reais e operação prolongada |
 | Saúde, custo e fallback por rota | BETA | falhas determinísticas antes/depois do primeiro conteúdo | telemetria com rotas reais |
 | Agente in-process isolado | BETA | PoC 3A real em worktree, diff proposto, nega saída/tool | jornadas do produto e teste com leigos |

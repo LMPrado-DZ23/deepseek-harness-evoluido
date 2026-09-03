@@ -1,7 +1,7 @@
 # Consentimento opcional para gravação — fase 0.5
 
-Este termo só é necessário quando a sessão tiver gravação de áudio, vídeo ou
-tela. Participar da pesquisa não depende de aceitar gravação.
+Não há gravação por padrão. Este termo só é necessário quando a pessoa autorizar
+gravação de áudio, vídeo ou tela; participar da pesquisa não depende disso.
 
 **Identificador anônimo:** `P0_`  
 **Data:**  
@@ -16,8 +16,8 @@ Entendi que:
 - meu nome, e-mail, telefone, documentos, empresa e credenciais não devem ser
   falados, digitados ou incluídos na gravação;
 - este termo será guardado separadamente dos dados do protótipo;
-- o prazo de retenção e a data de exclusão devem ser preenchidos antes de eu
-  assinar.
+- a gravação será apagada em até 30 dias; somente resultados anônimos podem ser
+  conservados.
 
 Autorizo, marcando somente as opções aceitas:
 
@@ -26,7 +26,7 @@ Autorizo, marcando somente as opções aceitas:
 - [ ] tela do protótipo
 - [ ] não autorizo gravação; aceito apenas notas anônimas
 
-**Prazo de retenção informado:**  
+**Prazo de retenção informado:** 30 dias
 **Data prevista para exclusão:**
 
 **Assinatura ou confirmação escrita da pessoa participante:**

@@ -25,6 +25,9 @@ O OmniRoute é uma conveniência de roteamento e custo. Ele não é um component
 
 ## Gate da fase 0.5
 
+> Histórico: esta ordem foi substituída pela E4 em 03/09/2026. A fase 0.5 agora
+> ocorre depois da fase 9 e antes do piloto; P32/P33/P31-B não dependem dela.
+
 A dependência da fase 0.5 é corrigida para:
 
 ```text
