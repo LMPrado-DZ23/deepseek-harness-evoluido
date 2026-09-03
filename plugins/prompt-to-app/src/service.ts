@@ -53,6 +53,10 @@ export class PromptToAppService {
     this.#createId = options.createId ?? randomUUID
   }
 
+  assertAuthorized(actor: PromptToAppActor, permission: 'project.read' | 'project.write'): void {
+    this.#authorize(actor, permission)
+  }
+
   listProjects(actor: PromptToAppActor): readonly StudioProject[] {
     this.#authorize(actor, 'project.read')
     return this.#repository.projects().filter(value => this.#sameScope(actor, value) && value.archived_at === null)

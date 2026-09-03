@@ -42,6 +42,7 @@ export class PromptToAppJobService {
   }) {}
 
   async start(actor: PromptToAppActor, projectId: string, generator: CodeGeneratorPort): Promise<PromptToAppJobAccepted> {
+    this.options.service.assertAuthorized(actor, 'project.write')
     const project = this.options.service.project(actor, projectId)
     const plan = this.options.service.plan(actor, projectId)
     if (project.state !== 'PLAN_APPROVED' || plan.status !== 'APPROVED') throw new PromptToAppError('INVALID', t('errors.planRequired'))
@@ -80,6 +81,7 @@ export class PromptToAppJobService {
   }
 
   cancel(actor: PromptToAppActor, projectId: string): 'requested' | 'already-finished' {
+    this.options.service.assertAuthorized(actor, 'project.write')
     this.options.service.project(actor, projectId)
     const active = this.#active.get(scopeKey(actor, projectId))
     if (active === undefined) throw new PromptToAppError('NOT_FOUND', t('errors.generationNotActive'))

@@ -3,7 +3,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { describe, expect, it, vi } from 'vitest'
 import { PromptToAppJobService, type PromptToAppJobRegistry } from '../src/jobs.js'
 import type { PromptToAppPipeline } from '../src/pipeline.js'
-import type { PromptToAppService } from '../src/service.js'
+import { PromptToAppError, type PromptToAppService } from '../src/service.js'
 
 const actor = { userId: 'owner', orgId: 'org-a', tenantId: 'tenant-a', role: 'owner' as const, sessionId: 'browser-session' }
 
@@ -16,7 +16,7 @@ describe('Prompt-to-App background jobs', () => {
       start: vi.fn(spec => { hooks = spec.run(); return 'studio-prompt-to-app-1' as JobId }),
       kill: vi.fn((_id, _owner) => { hooks.cancel(); return 'requested' as const }),
     }
-    const service = { project: vi.fn(() => ({ state: 'PLAN_APPROVED' })), plan: vi.fn(() => ({ status: 'APPROVED' })) }
+    const service = { assertAuthorized: vi.fn(), project: vi.fn(() => ({ state: 'PLAN_APPROVED' })), plan: vi.fn(() => ({ status: 'APPROVED' })) }
     const pipeline = { run: vi.fn(() => done) }
     const dispose = vi.fn(async () => undefined)
     const jobs = new PromptToAppJobService({
@@ -39,7 +39,7 @@ describe('Prompt-to-App background jobs', () => {
       start: vi.fn(() => { throw new Error('no-controller-for-owner') }),
       kill: vi.fn(() => 'already-finished' as const),
     }
-    const service = { project: vi.fn(() => ({ state: 'PLAN_APPROVED' })), plan: vi.fn(() => ({ status: 'APPROVED' })) }
+    const service = { assertAuthorized: vi.fn(), project: vi.fn(() => ({ state: 'PLAN_APPROVED' })), plan: vi.fn(() => ({ status: 'APPROVED' })) }
     const pipeline = { run: vi.fn() }
     const dispose = vi.fn(async () => undefined)
     const jobs = new PromptToAppJobService({
@@ -50,5 +50,31 @@ describe('Prompt-to-App background jobs', () => {
     await expect(jobs.start(actor, 'project', { generate: vi.fn() })).rejects.toThrow('no-controller-for-owner')
     expect(pipeline.run).not.toHaveBeenCalled()
     expect(dispose).toHaveBeenCalledOnce()
+  })
+
+  it('rejects a viewer before reading project state or touching the job registry', async () => {
+    const forbidden = new PromptToAppError('FORBIDDEN', 'Você não pode alterar este projeto.')
+    const registry: PromptToAppJobRegistry = {
+      start: vi.fn(() => 'studio-prompt-to-app-1' as JobId),
+      kill: vi.fn(() => 'requested' as const),
+    }
+    const service = {
+      assertAuthorized: vi.fn(() => { throw forbidden }),
+      project: vi.fn(), plan: vi.fn(),
+    }
+    const pipeline = { run: vi.fn() }
+    const jobs = new PromptToAppJobService({
+      service: service as unknown as PromptToAppService, pipeline: pipeline as unknown as PromptToAppPipeline, registry,
+      owners: { create: vi.fn() }, createId: () => 'run-forbidden',
+    })
+    const viewer = { ...actor, role: 'viewer' as const }
+
+    await expect(jobs.start(viewer, 'project', { generate: vi.fn() })).rejects.toBe(forbidden)
+    expect(() => jobs.cancel(viewer, 'project')).toThrow(forbidden)
+    expect(service.project).not.toHaveBeenCalled()
+    expect(service.plan).not.toHaveBeenCalled()
+    expect(registry.start).not.toHaveBeenCalled()
+    expect(registry.kill).not.toHaveBeenCalled()
+    expect(pipeline.run).not.toHaveBeenCalled()
   })
 })

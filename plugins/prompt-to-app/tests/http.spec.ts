@@ -51,10 +51,14 @@ async function fixture() {
       : { value: validSpec, route: 'ollama', model: 'qwen' })),
   }
   const jobs = {
-    start: vi.fn(async (_actor: PromptToAppActor, _projectId: string, _generator: CodeGeneratorPort) => (
-      { runId: 'run-1', jobId: 'studio-prompt-to-app-1' }
-    )),
-    cancel: vi.fn((_actor: PromptToAppActor, _projectId: string) => 'requested' as const),
+    start: vi.fn(async (actor: PromptToAppActor, _projectId: string, _generator: CodeGeneratorPort) => {
+      service.assertAuthorized(actor, 'project.write')
+      return { runId: 'run-1', jobId: 'studio-prompt-to-app-1' }
+    }),
+    cancel: vi.fn((actor: PromptToAppActor, _projectId: string) => {
+      service.assertAuthorized(actor, 'project.write')
+      return 'requested' as const
+    }),
   }
   const allowedHosts: string[] = []; const allowedOrigins: string[] = []
   const server = createServer(createPromptToAppHttpHandler({
@@ -135,6 +139,26 @@ describe('prompt-to-app HTTP boundary', () => {
     expect((await f.request('/projects')).status).toBe(401)
     f.allowedHosts.push(f.host)
     expect((await f.request('/missing')).status).toBe(404)
+  })
+
+  it('returns 403 when a viewer tries to start or cancel generation', async () => {
+    const f = await fixture()
+    const owner = { userId: 'owner', orgId: 'org-a', tenantId: 'tenant-a', role: 'owner' as const }
+    const project = await f.service.createProject(owner, {
+      name: 'Projeto protegido', original_brief: 'Quero um projeto protegido por permissões.', category: 'landing-page', privacy: 'local-only',
+    })
+    await f.service.saveSpec(owner, project.project_id, validSpec, 'intake')
+    await f.service.proposePlan(owner, project.project_id, [{
+      slice_id: 'slice-protected', title: 'Página', description: 'Criar a página protegida.',
+      acceptance_criteria: ['Compila'], planned_files: ['content/app.json', 'src/GeneratedApp.tsx'],
+    }])
+    await f.service.approvePlan(owner, project.project_id)
+    f.tenancy.authorizationFor.mockReturnValue({ userId: 'owner', orgId: 'org-a', tenantId: 'tenant-a', role: 'viewer' } as never)
+
+    expect((await f.request(`/projects/${project.project_id}/generate`, { method: 'POST', body: '{}' })).status).toBe(403)
+    expect((await f.request(`/projects/${project.project_id}/generate/cancel`, { method: 'POST', body: '{}' })).status).toBe(403)
+    expect(f.jobs.start).toHaveBeenCalledOnce()
+    expect(f.jobs.cancel).toHaveBeenCalledOnce()
   })
 
   it('keeps a project invisible across organizations even with adversarial route and body input', async () => {
