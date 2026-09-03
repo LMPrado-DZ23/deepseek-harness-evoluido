@@ -15,7 +15,7 @@ import { t } from './i18n.js'
 import type { StudioPlan, StudioRun } from './model.js'
 import { assertCategoryCanGenerate } from './planner.js'
 import type { PromptModelPort } from './ports.js'
-import { ContainerBuilder, listTreeFiles, OFFLINE_PIPELINE_COMMANDS } from './runner.js'
+import { ContainerBuilder, hashTree, listTreeFiles, OFFLINE_PIPELINE_COMMANDS } from './runner.js'
 import { scanGeneratedContent } from './security.js'
 import { PromptToAppError, type PromptToAppActor, type PromptToAppService } from './service.js'
 
@@ -137,7 +137,8 @@ export class PromptToAppPipeline {
       const state = diagnostic === undefined && buildPassed && testPassed ? 'PASSED' : diagnostic === 'BUDGET_EXCEEDED' ? 'BUDGET_EXCEEDED' : 'FAILED'
       if (state !== 'PASSED') finalFailureState = failedStage === 'test' ? 'TESTS_FAILED' : 'BUILD_FAILED'
       await writeFile(resolve(runDirectory, 'pipeline.log'), log, 'utf8')
-      await this.options.service.putRun(actor, this.runRecord(actor, projectId, plan.plan_id, state === 'PASSED' ? 'verify' : failedStage, attempt, state, 'full', runDirectory, generated, diagnostic ?? null, runId, operationId, ownerSessionId, acceptanceChecks))
+      const artifactSha256 = state === 'PASSED' ? await hashTree(runDirectory) : null
+      await this.options.service.putRun(actor, this.runRecord(actor, projectId, plan.plan_id, state === 'PASSED' ? 'verify' : failedStage, attempt, state, 'full', runDirectory, generated, diagnostic ?? null, runId, operationId, ownerSessionId, acceptanceChecks, artifactSha256))
       await this.recordEvidence(actor, projectId, runId, runDirectory, 'pipeline.log', 'build-log')
       await this.recordEvidence(actor, projectId, runId, runDirectory, 'evidence/appspec-report.json', 'test-report')
       if (state === 'PASSED') {
@@ -155,9 +156,9 @@ export class PromptToAppPipeline {
     return { state: finalFailureState, attempts: 3, message: diagnostic ?? t('pipeline.failed') }
   }
 
-  private runRecord(actor: PromptToAppActor, projectId: string, planId: string, stage: StudioRun['stage'], attempt: number, state: StudioRun['state'], sandbox: StudioRun['sandbox'], runDirectory: string, generation: CodeGenerationResult | null, failure: string | null, runId = this.#createId(), operationId = runId, ownerSessionId = actor.sessionId ?? 'direct-execution', acceptanceChecks: readonly AcceptanceCheck[] = []): StudioRun {
+  private runRecord(actor: PromptToAppActor, projectId: string, planId: string, stage: StudioRun['stage'], attempt: number, state: StudioRun['state'], sandbox: StudioRun['sandbox'], runDirectory: string, generation: CodeGenerationResult | null, failure: string | null, runId = this.#createId(), operationId = runId, ownerSessionId = actor.sessionId ?? 'direct-execution', acceptanceChecks: readonly AcceptanceCheck[] = [], artifactSha256: string | null = null): StudioRun {
     const now = this.#now().toISOString()
-    return { run_id: runId, operation_id: operationId, owner_session_id: ownerSessionId, plan_id: planId, project_id: projectId, org_id: actor.orgId, tenant_id: actor.tenantId, stage, attempt, state, started_at: now, finished_at: state === 'RUNNING' || state === 'PENDING' ? null : now, sandbox, route: generation?.route ?? null, model: generation?.model ?? null, input_tokens: generation?.inputTokens ?? null, output_tokens: generation?.outputTokens ?? null, estimated_cost_usd: null, run_directory: runDirectory || 'not-created', failure_code: failure, acceptance_checks: [...acceptanceChecks] }
+    return { run_id: runId, operation_id: operationId, owner_session_id: ownerSessionId, plan_id: planId, project_id: projectId, org_id: actor.orgId, tenant_id: actor.tenantId, stage, attempt, state, started_at: now, finished_at: state === 'RUNNING' || state === 'PENDING' ? null : now, sandbox, route: generation?.route ?? null, model: generation?.model ?? null, input_tokens: generation?.inputTokens ?? null, output_tokens: generation?.outputTokens ?? null, estimated_cost_usd: null, run_directory: runDirectory || 'not-created', artifact_sha256: artifactSha256, failure_code: failure, acceptance_checks: [...acceptanceChecks] }
   }
 
   private async recordFailure(actor: PromptToAppActor, projectId: string, planId: string, runId: string, directory: string, attempt: number, generation: CodeGenerationResult | null, diagnostic: string, stage: StudioRun['stage'], operationId: string, ownerSessionId: string) {

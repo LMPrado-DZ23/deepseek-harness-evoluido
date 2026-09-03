@@ -98,6 +98,7 @@ describe('generated import policy', () => {
     ['indirect Function constructor', "export const global = (()=>{}).constructor('return this')()"],
     ['computed Function constructor', "const global = (()=>{})['con' + 'structor']('return this')(); export const value = global['fet' + 'ch']"],
     ['navigator network access', "export const sent = navigator.sendBeacon('/collect', 'x')"],
+    ['forbidden global as property receiver', 'export const value = fetch.name'],
   ])('rejects nested directives and network access: %s', (_case, content) => {
     expect(() => assertGeneratedSource([{ path: 'src/GeneratedApp.tsx', content }])).toThrow(GeneratedFileRejectedError)
   })
@@ -118,5 +119,30 @@ describe('generated import policy', () => {
       path: 'src/GeneratedApp.tsx',
       content: "interface Labels { fetch: string; WebSocket: string } export const labels: Labels = { fetch: 'buscar', WebSocket: 'tempo real' }",
     }])).not.toThrow()
+  })
+
+  it('leaves non-static application property lookup to the no-egress runtime boundary', () => {
+    expect(() => assertGeneratedSource([{
+      path: 'src/GeneratedApp.tsx',
+      content: "const labels = { status: 'Tudo certo' }; const key = 'status'; export const values = [labels[key as keyof typeof labels], labels[key + 'x' as keyof typeof labels], labels['x' + key as keyof typeof labels]]",
+    }])).not.toThrow()
+  })
+
+  it('accepts harmless method, class and wrapped property labels', () => {
+    expect(() => assertGeneratedSource([{
+      path: 'src/GeneratedApp.ts',
+      content: [
+        "interface Labels { fetch: string; WebSocket(): void }",
+        "class LabelsImpl { fetch = 'buscar'; WebSocket() {} }",
+        "const labels = { status: 'Tudo certo', fetch: 'buscar', WebSocket() {} }",
+        "export const values = [labels.status, labels[('status')], labels['status' as string], labels[<'status'>'status'], labels['status'!], labels['status' satisfies string], new LabelsImpl()]",
+      ].join(';'),
+    }])).not.toThrow()
+  })
+
+  it('still rejects a forbidden global hidden behind shorthand syntax', () => {
+    expect(() => assertGeneratedSource([{
+      path: 'src/GeneratedApp.tsx', content: 'export const globals = { fetch }',
+    }])).toThrow(GeneratedFileRejectedError)
   })
 })

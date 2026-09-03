@@ -25,6 +25,8 @@
       studio_agent_runs: postgres
       studio_agent_leases: postgres
       studio_route_health: postgres
+      studio_previews: postgres
+      studio_preview_admissions: postgres
 
 - id: connection
   config:

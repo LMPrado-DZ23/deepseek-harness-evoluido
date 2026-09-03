@@ -6,7 +6,7 @@ import type { AppSpecV1 } from '../src/appspec.js'
 import { createDesignSpec } from '../src/design.js'
 import type { StudioPlan, StudioRun } from '../src/model.js'
 import { PromptToAppPipeline, type CodeGeneratorPort } from '../src/pipeline.js'
-import type { ContainerBuilder } from '../src/runner.js'
+import { hashTree, type ContainerBuilder } from '../src/runner.js'
 import { PromptToAppError, type PromptToAppActor, type PromptToAppService } from '../src/service.js'
 
 const actor: PromptToAppActor = { userId: 'owner', orgId: 'org-a', tenantId: 'tenant-a', role: 'owner' }
@@ -77,6 +77,13 @@ describe('Prompt-to-App pipeline', () => {
     expect(f.transitions).toEqual(['GENERATING', 'BUILD_OK', 'TESTS_OK', 'VERIFIED_PROTOTYPE'])
     expect(f.execute).toHaveBeenCalledTimes(4)
     expect(f.runs.at(-1)).toMatchObject({ stage: 'verify', state: 'PASSED', route: 'ollama', input_tokens: 10, output_tokens: 20, failure_code: null })
+    expect(result.runDirectory).toBeDefined()
+    const passedRun = f.runs.at(-1)
+    expect(passedRun?.artifact_sha256).toMatch(/^[a-f0-9]{64}$/u)
+    expect(passedRun?.artifact_sha256).toBe(await hashTree(result.runDirectory!))
+    expect(f.runs.filter(run => run.state !== 'PASSED').every(run => run.artifact_sha256 == null)).toBe(true)
+    await writeFile(resolve(result.runDirectory!, 'src/GeneratedApp.tsx'), 'export default function Tampered(){ return null }')
+    expect(await hashTree(result.runDirectory!)).not.toBe(passedRun?.artifact_sha256)
     expect(f.runs.at(-1)?.acceptance_checks.filter(check => check.status === 'PASSED').length).toBeGreaterThanOrEqual(4)
     expect(f.runs.at(-1)?.acceptance_checks).toContainEqual(expect.objectContaining({ kind: 'criterion', status: 'NOT_AUTOMATED' }))
     expect(f.runs.at(-1)).toMatchObject({ operation_id: expect.any(String), owner_session_id: 'direct-execution' })
@@ -109,6 +116,7 @@ describe('Prompt-to-App pipeline', () => {
     const failures = f.runs.filter(run => run.state === 'FAILED')
     expect(failures).toHaveLength(3)
     expect(failures.every(run => run.stage === 'test' && run.failure_code === 'pnpm run test: exit 1')).toBe(true)
+    expect(failures.every(run => run.artifact_sha256 == null)).toBe(true)
   })
 
   it('retries rejected model output with the prior diagnostic and closes as build failed', async () => {
@@ -142,7 +150,7 @@ describe('Prompt-to-App pipeline', () => {
     await expect(f.pipeline.run(actor, 'project', generator)).resolves.toEqual({ state: 'BLOCKED_EXTERNAL', attempts: 0, message: 'Construtor indisponível.' })
     expect(generator.generate).not.toHaveBeenCalled()
     expect(f.transitions).toEqual([])
-    expect(f.runs.at(-1)).toMatchObject({ stage: 'build', state: 'BLOCKED_EXTERNAL', sandbox: 'unavailable', failure_code: 'BUILDER_UNAVAILABLE' })
+    expect(f.runs.at(-1)).toMatchObject({ stage: 'build', state: 'BLOCKED_EXTERNAL', sandbox: 'unavailable', artifact_sha256: null, failure_code: 'BUILDER_UNAVAILABLE' })
   })
 
   it('refuses to start without the approved plan and approved project state', async () => {
@@ -157,7 +165,7 @@ describe('Prompt-to-App pipeline', () => {
     const f = await fixture({ execute: async () => { controller.abort('cancelled-by-user'); return { exitCode: 0, stdout: '', stderr: '', timedOut: false } } })
     const result = await f.pipeline.run({ ...actor, sessionId: 'browser-session' }, 'project', { generate: vi.fn(async () => cleanGeneration) }, { operationId: 'operation', ownerSessionId: 'browser-session', signal: controller.signal })
     expect(result).toMatchObject({ state: 'CANCELLED', attempts: 1 })
-    expect(f.runs.at(-1)).toMatchObject({ run_id: 'operation', operation_id: 'operation', owner_session_id: 'browser-session', state: 'CANCELLED' })
+    expect(f.runs.at(-1)).toMatchObject({ run_id: 'operation', operation_id: 'operation', owner_session_id: 'browser-session', state: 'CANCELLED', artifact_sha256: null })
     expect(f.transitions).toEqual(['GENERATING', 'CANCELLED'])
   })
 })

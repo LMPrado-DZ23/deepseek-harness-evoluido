@@ -105,6 +105,14 @@ export const STUDIO_DOMAIN_SCOPES: readonly DomainScopeEntry[] = [
     source: 'plugins/policy/src/index.ts', exportName: 'studioPolicyAuditDomainSpec', physicalName: 'studio_policy_audit',
     tables: { decisions: { scope: 'org-tenant', requiredFields: ['org_id', 'tenant_id'] } },
   },
+  {
+    source: 'plugins/preview/src/model.ts', exportName: 'studioPreviewsDomainSpec', physicalName: 'studio_previews',
+    tables: { previews: { scope: 'org-tenant', requiredFields: ['org_id', 'tenant_id'] } },
+  },
+  {
+    source: 'plugins/preview/src/model.ts', exportName: 'studioPreviewAdmissionsDomainSpec', physicalName: 'studio_preview_admissions',
+    tables: { admissions: { scope: 'org-tenant', requiredFields: ['org_id', 'tenant_id'] } },
+  },
 ] as const
 
 export interface DomainDeclaration {

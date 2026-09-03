@@ -9,6 +9,7 @@
     "@dz23-studio/agents": "link:../../../plugins/agents",
     "@dz23-studio/identity": "link:../../../plugins/identity",
     "@dz23-studio/policy": "link:../../../plugins/policy",
+    "@dz23-studio/preview": "link:../../../plugins/preview",
     "@dz23-studio/prompt-to-app": "link:../../../plugins/prompt-to-app",
     "@dz23-studio/route-health": "link:../../../plugins/route-health",
     "@dz23-studio/storage-postgres": "link:../../../plugins/storage-postgres",

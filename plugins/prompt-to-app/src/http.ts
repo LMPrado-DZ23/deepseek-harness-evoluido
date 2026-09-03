@@ -35,6 +35,23 @@ const createProjectSchema = z.object({
 const answerSchema = intakeAnswerSchema.extend({ confirm_sensitive: z.boolean().optional() }).strict()
 const changeRequestSchema = z.object({ reason: z.string().trim().min(3).max(2_000) }).strict()
 
+export interface PromptToAppHttpExtensionRequest {
+  readonly request: IncomingMessage
+  readonly response: ServerResponse
+  readonly actor: PromptToAppActor
+  readonly projectId: string
+  readonly suffix: string
+}
+
+export type PromptToAppHttpExtension = (input: PromptToAppHttpExtensionRequest) => Promise<boolean>
+const HTTP_EXTENSIONS = new Set<PromptToAppHttpExtension>()
+
+/** Registers a Studio-owned vertical slice without adding another `/api/studio/apps` authority. */
+export function registerPromptToAppHttpExtension(extension: PromptToAppHttpExtension): () => void {
+  HTTP_EXTENSIONS.add(extension)
+  return () => { HTTP_EXTENSIONS.delete(extension) }
+}
+
 export interface StudioAppsHealth {
   readonly state: 'OK' | 'ATTENTION'
   readonly route: string | null
@@ -81,8 +98,20 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
       const path = new URL(request.url ?? '/', 'http://local').pathname
       const route = path.slice('/api/studio/apps'.length)
       const matched = matchRoute(request.method, route)
-      if (matched === undefined) return json(response, 404, { error: t('errors.routeNotFound') })
+      const extension = /^\/projects\/([^/]+)(\/previews(?:\/[^/]+)?(?:\/(?:logs|messages))?)$/u.exec(route)
+      if (matched === undefined && extension === null) return json(response, 404, { error: t('errors.routeNotFound') })
       const actor = await authenticatedActor(request, config)
+      if (extension !== null) {
+        const input: PromptToAppHttpExtensionRequest = {
+          request, response, actor,
+          projectId: decodeURIComponent(extension[1]!), suffix: extension[2]!,
+        }
+        for (const handler of HTTP_EXTENSIONS) {
+          if (await handler(input)) return
+        }
+        return json(response, 404, { error: t('errors.routeNotFound') })
+      }
+      if (matched === undefined) return json(response, 404, { error: t('errors.routeNotFound') })
 
       if (request.method === 'GET' && route === '/health') return json(response, 200, await config.health(actor))
       if (request.method === 'GET' && route === '/projects') return json(response, 200, { projects: config.service.listProjects(actor) })

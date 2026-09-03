@@ -66,7 +66,8 @@ export function migrateAuth(database: DatabaseSync): void {
 }
 `
 
-const AUTH_EMAIL = `import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
+const AUTH_EMAIL = `import { randomUUID } from 'node:crypto'
+import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import nodemailer from 'nodemailer'
 
@@ -79,6 +80,11 @@ export function createEmailSender(env: Readonly<Record<string, string | undefine
   const mode = env.APP_EMAIL_MODE ?? 'studio-capture'
   if (mode === 'studio-capture' && env.DZ23_STUDIO_VERIFICATION !== '1') throw new Error('STUDIO_CAPTURE_FORBIDDEN_OUTSIDE_VERIFICATION')
   if (mode === 'studio-capture') return new StudioCaptureEmailSender(env.DATA_DIR ?? './data')
+  if (mode === 'studio-preview') {
+    const previewId = required(env.DZ23_PREVIEW_ID, 'DZ23_PREVIEW_ID')
+    if (!/^[a-zA-Z0-9-]{1,100}$/u.test(previewId)) throw new Error('DZ23_PREVIEW_ID_INVALID')
+    return new StudioPreviewEmailSender(required(env.DATA_DIR, 'DATA_DIR'), previewId)
+  }
   if (mode !== 'smtp') throw new Error('APP_EMAIL_MODE_INVALID')
   const url = required(env.APP_SMTP_URL, 'APP_SMTP_URL')
   const from = required(env.APP_EMAIL_FROM, 'APP_EMAIL_FROM')
@@ -103,6 +109,36 @@ export class StudioCaptureEmailSender implements EmailSender {
     await writeFile(this.path, JSON.stringify([...current.slice(-19), message], null, 2) + '\\n', { encoding: 'utf8', mode: 0o600 })
     await chmod(this.path, 0o600)
   }
+}
+
+export class StudioPreviewEmailSender implements EmailSender {
+  readonly path: string
+  constructor(dataDirectory: string, previewId: string) { this.path = resolve(dataDirectory, previewId, 'preview-capture.json') }
+  async sendCode(message: { email: string; code: string; expiresAt: string }): Promise<void> { await this.append({ kind: 'code', ...message }) }
+  async sendInvitation(message: { email: string; expiresAt: string }): Promise<void> { await this.append({ kind: 'invitation', ...message }) }
+  private async append(message: object): Promise<void> {
+    await serializePreviewCapture(this.path, async () => {
+      await mkdir(dirname(this.path), { recursive: true })
+      let current: unknown[] = []
+      try { current = JSON.parse(await readFile(this.path, 'utf8')) as unknown[] } catch {}
+      const temporary = \`\${this.path}.\${randomUUID()}.tmp\`
+      try {
+        await writeFile(temporary, JSON.stringify([...current.slice(-19), message], null, 2) + '\\n', { encoding: 'utf8', mode: 0o600 })
+        await chmod(temporary, 0o600)
+        await rename(temporary, this.path)
+      } finally { await rm(temporary, { force: true }) }
+    })
+  }
+}
+
+const previewCaptureTails = new Map<string, Promise<void>>()
+async function serializePreviewCapture(path: string, work: () => Promise<void>): Promise<void> {
+  const previous = previewCaptureTails.get(path) ?? Promise.resolve()
+  let release!: () => void
+  const current = new Promise<void>(resolve => { release = resolve })
+  previewCaptureTails.set(path, current)
+  await previous
+  try { await work() } finally { release(); if (previewCaptureTails.get(path) === current) previewCaptureTails.delete(path) }
 }
 
 function required(value: string | undefined, name: string): string { if (value === undefined || value === '') throw new Error(\`\${name}_REQUIRED\`); return value }
@@ -252,7 +288,7 @@ export async function GET() { const session=await currentSession(); return sessi
 `
 
 const AUTH_TEST = `// @vitest-environment node
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -266,6 +302,7 @@ describe('acesso real gerado pelo Studio',()=>{
   it('cria o primeiro owner e valida sessão e CSRF',async()=>{const f=fixture();try{const request=await f.service.requestCode('owner@example.test');expect(request.status).toBe('sent');const issued=f.service.verifyCode('owner@example.test',request.requestId,f.sent[0]!);expect(f.service.authenticate(issued.token)).toMatchObject({email:'owner@example.test',role:'owner'});expect(()=>f.service.validateCsrf(issued.session,issued.csrf,undefined)).toThrow(AppAuthError);expect(()=>f.service.validateCsrf(issued.session,issued.csrf,issued.csrf)).not.toThrow();f.service.revoke(issued.token);expect(()=>f.service.authenticate(issued.token)).toThrow('Sessão encerrada')}finally{f.close()}})
   it('isola tentativas por navegador e expira a sessão',async()=>{const f=fixture();try{const first=await f.service.requestCode('owner@example.test');f.advance(61_000);const second=await f.service.requestCode('owner@example.test');for(let attempt=1;attempt<=5;attempt++)expect(()=>f.service.verifyCode('owner@example.test',first.requestId,'000000')).toThrow(attempt===5?'Código bloqueado':'Código inválido');const issued=f.service.verifyCode('owner@example.test',second.requestId,'123456');f.advance(15*24*60*60*1000);expect(()=>f.service.authenticate(issued.token)).toThrow('Sessão expirada')}finally{f.close()}})
   it('permite que o owner convide um member sem elevar o papel',async()=>{const f=fixture();try{const ownerRequest=await f.service.requestCode('owner@example.test');const owner=f.service.verifyCode('owner@example.test',ownerRequest.requestId,'123456');await f.service.invite(owner.token,owner.csrf,owner.csrf,'member@example.test');const memberRequest=await f.service.requestCode('member@example.test');expect(memberRequest.status).toBe('sent');const member=f.service.verifyCode('member@example.test',memberRequest.requestId,'123456');expect(f.service.authenticate(member.token)).toMatchObject({email:'member@example.test',role:'member'});await expect(f.service.invite(member.token,member.csrf,member.csrf,'other@example.test')).rejects.toThrow('Somente o proprietário')}finally{f.close()}})
-  it('limita emissão e só permite captura no verificador do Studio',async()=>{const f=fixture();try{expect((await f.service.requestCode('other@example.test')).status).toBe('suppressed');expect((await f.service.requestCode('owner@example.test')).status).toBe('sent');f.advance(61_000);expect((await f.service.requestCode('owner@example.test')).status).toBe('sent');f.advance(61_000);expect((await f.service.requestCode('owner@example.test')).status).toBe('sent');f.advance(61_000);expect((await f.service.requestCode('owner@example.test')).status).toBe('suppressed');expect(()=>createEmailSender({NODE_ENV:'production',APP_EMAIL_MODE:'studio-capture'})).toThrow('STUDIO_CAPTURE_FORBIDDEN_OUTSIDE_VERIFICATION');expect(()=>createEmailSender({NODE_ENV:'development',APP_EMAIL_MODE:'studio-capture'})).toThrow('STUDIO_CAPTURE_FORBIDDEN_OUTSIDE_VERIFICATION');expect(createEmailSender({NODE_ENV:'production',APP_EMAIL_MODE:'studio-capture',DZ23_STUDIO_VERIFICATION:'1'})).toBeInstanceOf(Object);expect(()=>createEmailSender({APP_EMAIL_MODE:'invalid'})).toThrow('APP_EMAIL_MODE_INVALID');expect(()=>createEmailSender({APP_EMAIL_MODE:'smtp',APP_SMTP_URL:'http://example.test',APP_EMAIL_FROM:'owner@example.test'})).toThrow('APP_SMTP_URL_INVALID')}finally{f.close()}})
+  it('limita emissão e só permite captura nos modos controlados pelo Studio',async()=>{const f=fixture();try{expect((await f.service.requestCode('other@example.test')).status).toBe('suppressed');expect((await f.service.requestCode('owner@example.test')).status).toBe('sent');f.advance(61_000);expect((await f.service.requestCode('owner@example.test')).status).toBe('sent');f.advance(61_000);expect((await f.service.requestCode('owner@example.test')).status).toBe('sent');f.advance(61_000);expect((await f.service.requestCode('owner@example.test')).status).toBe('suppressed');expect(()=>createEmailSender({NODE_ENV:'production',APP_EMAIL_MODE:'studio-capture'})).toThrow('STUDIO_CAPTURE_FORBIDDEN_OUTSIDE_VERIFICATION');expect(()=>createEmailSender({NODE_ENV:'development',APP_EMAIL_MODE:'studio-capture'})).toThrow('STUDIO_CAPTURE_FORBIDDEN_OUTSIDE_VERIFICATION');expect(createEmailSender({NODE_ENV:'production',APP_EMAIL_MODE:'studio-capture',DZ23_STUDIO_VERIFICATION:'1'})).toBeInstanceOf(Object);expect(()=>createEmailSender({APP_EMAIL_MODE:'studio-preview',DZ23_PREVIEW_ID:'preview-1'})).toThrow('DATA_DIR_REQUIRED');expect(()=>createEmailSender({APP_EMAIL_MODE:'studio-preview',DZ23_PREVIEW_ID:'../escape',DATA_DIR:'./data'})).toThrow('DZ23_PREVIEW_ID_INVALID');expect(createEmailSender({APP_EMAIL_MODE:'studio-preview',DZ23_PREVIEW_ID:'preview-1',DATA_DIR:'./data'})).toBeInstanceOf(Object);expect(()=>createEmailSender({APP_EMAIL_MODE:'invalid'})).toThrow('APP_EMAIL_MODE_INVALID');expect(()=>createEmailSender({APP_EMAIL_MODE:'smtp',APP_SMTP_URL:'http://example.test',APP_EMAIL_FROM:'owner@example.test'})).toThrow('APP_SMTP_URL_INVALID')}finally{f.close()}})
+  it('separa previews e preserva mensagens emitidas ao mesmo tempo',async()=>{const directory=mkdtempSync(join(tmpdir(),'dz23-preview-mail-'));try{const first=createEmailSender({APP_EMAIL_MODE:'studio-preview',DZ23_PREVIEW_ID:'preview-1',DATA_DIR:directory});const second=createEmailSender({APP_EMAIL_MODE:'studio-preview',DZ23_PREVIEW_ID:'preview-2',DATA_DIR:directory});await Promise.all([first.sendCode({email:'one@example.test',code:'111111',expiresAt:'2026-09-03T12:10:00.000Z'}),first.sendCode({email:'two@example.test',code:'222222',expiresAt:'2026-09-03T12:10:00.000Z'}),second.sendCode({email:'other@example.test',code:'333333',expiresAt:'2026-09-03T12:10:00.000Z'})]);const one=JSON.parse(readFileSync(join(directory,'preview-1','preview-capture.json'),'utf8')) as Array<{code:string}>;const two=JSON.parse(readFileSync(join(directory,'preview-2','preview-capture.json'),'utf8')) as Array<{code:string}>;expect(one.map(message=>message.code).sort()).toEqual(['111111','222222']);expect(two.map(message=>message.code)).toEqual(['333333'])}finally{rmSync(directory,{recursive:true,force:true})}})
 })
 `

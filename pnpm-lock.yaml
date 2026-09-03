@@ -191,6 +191,33 @@ importers:
         specifier: 4.4.3
         version: 4.4.3
 
+  plugins/preview:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/vendor/cordis
+        version: link:../../../harness-studio-poc02/deepseek-harness/vendor/cordis
+      '@deepseek-ai/dsh-host-webserver':
+        specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/host/webserver
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/host/webserver
+      '@deepseek-ai/dsh-storage-domain':
+        specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage-domain
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/storage/storage-domain
+      '@dz23-studio/identity':
+        specifier: workspace:*
+        version: link:../identity
+      '@dz23-studio/policy':
+        specifier: workspace:*
+        version: link:../policy
+      '@dz23-studio/prompt-to-app':
+        specifier: workspace:*
+        version: link:../prompt-to-app
+      '@dz23-studio/tenancy':
+        specifier: workspace:*
+        version: link:../tenancy
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
+
   plugins/prompt-to-app:
     dependencies:
       '@deepseek-ai/cordis':

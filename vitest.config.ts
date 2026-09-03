@@ -8,6 +8,7 @@ export default defineConfig({
     alias: {
       '@dz23-studio/identity': fileURLToPath(new URL('./plugins/identity/src/index.ts', import.meta.url)),
       '@dz23-studio/policy': fileURLToPath(new URL('./plugins/policy/src/index.ts', import.meta.url)),
+      '@dz23-studio/preview': fileURLToPath(new URL('./plugins/preview/src/index.ts', import.meta.url)),
       '@dz23-studio/prompt-to-app': fileURLToPath(new URL('./plugins/prompt-to-app/src/index.ts', import.meta.url)),
       '@dz23-studio/route-health': fileURLToPath(new URL('./plugins/route-health/src/index.ts', import.meta.url)),
       '@dz23-studio/storage-postgres': fileURLToPath(new URL('./plugins/storage-postgres/src/index.ts', import.meta.url)),
@@ -26,6 +27,7 @@ export default defineConfig({
         'plugins/agents/src/index.ts',
         'plugins/agents/src/git.ts',
         'plugins/prompt-to-app/src/index.ts',
+        'plugins/preview/src/index.ts',
         'plugins/route-health/src/index.ts',
       ],
       reporter: ['text', 'json-summary'],

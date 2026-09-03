@@ -1,0 +1,27 @@
+{
+  "name": "@dz23-studio/preview",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./lib/index.js",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./lib/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@deepseek-ai/cordis": "link:/home/leandro/harness-studio-poc02/deepseek-harness/vendor/cordis",
+    "@deepseek-ai/dsh-host-webserver": "link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/host/webserver",
+    "@deepseek-ai/dsh-storage-domain": "link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage-domain",
+    "@dz23-studio/identity": "workspace:*",
+    "@dz23-studio/policy": "workspace:*",
+    "@dz23-studio/prompt-to-app": "workspace:*",
+    "@dz23-studio/tenancy": "workspace:*",
+    "zod": "4.4.3"
+  }
+}

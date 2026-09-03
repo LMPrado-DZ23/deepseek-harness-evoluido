@@ -75,6 +75,7 @@ export const studioRunSchema = z.object({
   sandbox: z.enum(['full', 'unavailable']), route: z.string().nullable(), model: z.string().nullable(),
   input_tokens: z.number().int().nonnegative().nullable(), output_tokens: z.number().int().nonnegative().nullable(),
   estimated_cost_usd: z.number().nonnegative().nullable(), run_directory: z.string().min(1),
+  artifact_sha256: sha256.nullable().optional(),
   failure_code: z.string().nullable(),
   acceptance_checks: z.array(z.object({
     id: z.string().min(1), label: z.string().min(1),
@@ -121,7 +122,7 @@ export const studioAppSpecsDomainSpec = defineDomain({ name: 'studio_app_specs',
 export const studioDesignSpecsDomainSpec = defineDomain({ name: 'studio_design_specs', version: 1, tables: { designs: domainTable<PromptToAppKey, StudioDesignSpecRecord>(studioDesignSpecRecordSchema) } })
 export const studioIntakeTurnsDomainSpec = defineDomain({ name: 'studio_intake_turns', version: 1, tables: { turns: domainTable<PromptToAppKey, StudioIntakeTurn>(studioIntakeTurnSchema) } })
 export const studioPlansDomainSpec = defineDomain({ name: 'studio_plans', version: 1, tables: { plans: domainTable<PromptToAppKey, StudioPlan>(studioPlanSchema) } })
-export const studioRunsDomainSpec = defineDomain({ name: 'studio_runs', version: 4, tables: { runs: domainTable<PromptToAppKey, StudioRun>(studioRunSchema) } })
+export const studioRunsDomainSpec = defineDomain({ name: 'studio_runs', version: 5, tables: { runs: domainTable<PromptToAppKey, StudioRun>(studioRunSchema) } })
 export const studioEvidenceDomainSpec = defineDomain({ name: 'studio_evidence', version: 1, tables: { evidence: domainTable<PromptToAppKey, StudioEvidence>(studioEvidenceSchema) } })
 export const studioApprovalsDomainSpec = defineDomain({ name: 'studio_approvals', version: 1, tables: { approvals: domainTable<PromptToAppKey, StudioApproval>(studioApprovalSchema) } })
 
