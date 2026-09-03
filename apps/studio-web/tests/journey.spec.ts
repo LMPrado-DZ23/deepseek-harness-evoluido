@@ -9,6 +9,25 @@ test('recusa interface e API sem sessão', async () => {
 })
 
 test('percorre as cinco etapas, muda privacidade e termina sem alegar publicação', async ({ context, page }) => {
+  const postedMessages: Array<{ readonly hasTicket: boolean; readonly targetOrigin: string; readonly receiverUrl: string }> = []
+  const requestedUrls: string[] = []
+  await context.exposeBinding('__recordDz23PostMessage', ({ frame }, payload: { hasTicket: boolean; targetOrigin: string }) => {
+    postedMessages.push({ ...payload, receiverUrl: frame.url() })
+  })
+  await context.addInitScript(() => {
+    type Recorder = (payload: { hasTicket: boolean; targetOrigin: string }) => Promise<void>
+    const scope = globalThis as typeof globalThis & { __recordDz23PostMessage: Recorder }
+    const original = window.postMessage
+    window.postMessage = function (...args: Parameters<Window['postMessage']>): void {
+      const message = args[0]
+      const target = args[1]
+      const targetOrigin = typeof target === 'string' ? target : target.targetOrigin
+      const hasTicket = typeof message === 'object' && message !== null && 'ticket' in message
+      void scope.__recordDz23PostMessage({ hasTicket, targetOrigin })
+      Reflect.apply(original, this, args)
+    } as Window['postMessage']
+  })
+  page.on('request', request => requestedUrls.push(request.url()))
   await context.addCookies([
     { name: 'dz23_studio_session', value: 'e2e', url: 'http://127.0.0.1:4179' },
     { name: 'dz23_studio_csrf', value: 'csrf-e2e', url: 'http://127.0.0.1:4179' },
@@ -41,6 +60,47 @@ test('percorre as cinco etapas, muda privacidade e termina sem alegar publicaç�
   await expect(page.getByText('não está publicado nem disponível para outras pessoas', { exact: false }).first()).toBeVisible()
   await expect(page.getByText('page:Início: Passou')).toBeVisible()
   await expect(page.getByText('A navegação deve ser simples.: Não verificado automaticamente')).toBeVisible()
+
+  const openPreview = page.getByRole('button', { name: 'Ver meu protótipo' })
+  await expect(openPreview).toBeVisible()
+  await openPreview.click()
+  const previewFrameElement = page.getByTitle('Prévia isolada do protótipo')
+  await expect(previewFrameElement).toHaveAttribute('sandbox', 'allow-scripts allow-forms allow-same-origin')
+  await expect(page.getByText('Isto é uma prévia local. Seu aplicativo não foi publicado na internet.')).toBeVisible()
+  const previewFrame = page.frameLocator('iframe[title="Prévia isolada do protótipo"]')
+  await expect(previewFrame.getByRole('heading', { name: 'Protótipo E2E carregado' })).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByText('cliente@preview.local')).toBeVisible()
+  await expect(page.getByText('482901')).toBeVisible()
+
+  const frameUrl = await previewFrameElement.getAttribute('src').then(src => new URL(src!, page.url()))
+  const loadedPreviewFrame = page.frames().find(frame => frame !== page.mainFrame() && frame.url().includes('.localhost:4179/'))
+  expect(loadedPreviewFrame).toBeDefined()
+  expect(page.url()).not.toMatch(/[?&#]ticket=/iu)
+  expect(frameUrl.href).not.toMatch(/[?&#]ticket=/iu)
+  expect(loadedPreviewFrame!.url()).not.toMatch(/[?&#]ticket=/iu)
+  expect(requestedUrls.every(url => !/[?&#]ticket=/iu.test(url))).toBe(true)
+  await expect.poll(() => postedMessages.filter(message => message.hasTicket).length).toBe(1)
+  const ticketPost = postedMessages.find(message => message.hasTicket)!
+  expect(ticketPost.targetOrigin).toBe(frameUrl.origin)
+  expect(new URL(ticketPost.receiverUrl).origin).toBe(frameUrl.origin)
+
+  const beforeForgery = postedMessages.filter(message => message.hasTicket).length
+  await page.evaluate(previewOrigin => {
+    const frame = document.querySelector<HTMLIFrameElement>('iframe[title="Prévia isolada do protótipo"]')
+    if (frame?.contentWindow == null) throw new Error('preview frame missing')
+    window.dispatchEvent(new MessageEvent('message', {
+      origin: 'http://attacker.example', source: frame.contentWindow, data: { type: 'DZ23_PREVIEW_READY' },
+    }))
+    window.dispatchEvent(new MessageEvent('message', {
+      origin: previewOrigin, source: window, data: { type: 'DZ23_PREVIEW_READY' },
+    }))
+  }, frameUrl.origin)
+  await page.waitForTimeout(100)
+  expect(postedMessages.filter(message => message.hasTicket)).toHaveLength(beforeForgery)
+
+  await page.getByRole('button', { name: 'Encerrar prévia' }).click()
+  await expect(previewFrameElement).toHaveCount(0)
+  await expect(page.getByText('A prévia foi encerrada. O protótipo continua salvo no projeto.')).toBeVisible()
   const accessibility = await new AxeBuilder({ page }).analyze()
   expect(accessibility.violations).toEqual([])
 })
