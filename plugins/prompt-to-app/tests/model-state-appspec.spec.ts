@@ -17,9 +17,9 @@ const validSpec = {
 }
 
 describe('Prompt-to-App domains, state and AppSpec', () => {
-  it('declares the seven physical domains with tenant fields in every record', () => {
+  it('declares the eight physical domains with tenant fields in every record', () => {
     expect(PROMPT_TO_APP_DOMAIN_SPECS.map(spec => spec.name)).toEqual([
-      'studio_projects', 'studio_app_specs', 'studio_intake_turns', 'studio_plans',
+      'studio_projects', 'studio_app_specs', 'studio_design_specs', 'studio_intake_turns', 'studio_plans',
       'studio_runs', 'studio_evidence', 'studio_approvals',
     ])
     const records = [

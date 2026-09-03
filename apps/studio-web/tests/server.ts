@@ -10,7 +10,7 @@ import type { StudioTenancyService } from '../../../plugins/tenancy/src/index.js
 import { createPromptToAppHttpHandler } from '../../../plugins/prompt-to-app/src/http.js'
 import { IntakeEngine } from '../../../plugins/prompt-to-app/src/intake.js'
 import { PromptToAppJobService, type PromptToAppJobRegistry } from '../../../plugins/prompt-to-app/src/jobs.js'
-import type { StudioApproval, StudioAppSpecRecord, StudioEvidence, StudioIntakeTurn, StudioPlan, StudioProject, StudioRun } from '../../../plugins/prompt-to-app/src/model.js'
+import type { StudioApproval, StudioAppSpecRecord, StudioDesignSpecRecord, StudioEvidence, StudioIntakeTurn, StudioPlan, StudioProject, StudioRun } from '../../../plugins/prompt-to-app/src/model.js'
 import { ModelCodeGenerator, PromptToAppPipeline } from '../../../plugins/prompt-to-app/src/pipeline.js'
 import { PlannerEngine } from '../../../plugins/prompt-to-app/src/planner.js'
 import type { PromptModelPort } from '../../../plugins/prompt-to-app/src/ports.js'
@@ -18,12 +18,13 @@ import type { ContainerBuilder } from '../../../plugins/prompt-to-app/src/runner
 import { PromptToAppService, type PromptToAppRepository } from '../../../plugins/prompt-to-app/src/service.js'
 
 class MemoryRepository implements PromptToAppRepository {
-  projectRows: StudioProject[] = []; specRows: StudioAppSpecRecord[] = []; turnRows: StudioIntakeTurn[] = []
+  projectRows: StudioProject[] = []; specRows: StudioAppSpecRecord[] = []; designRows: StudioDesignSpecRecord[] = []; turnRows: StudioIntakeTurn[] = []
   planRows: StudioPlan[] = []; runRows: StudioRun[] = []; evidenceRows: StudioEvidence[] = []; approvalRows: StudioApproval[] = []
-  projects = () => this.projectRows; specs = () => this.specRows; turns = () => this.turnRows; plans = () => this.planRows
+  projects = () => this.projectRows; specs = () => this.specRows; designs = () => this.designRows; turns = () => this.turnRows; plans = () => this.planRows
   runs = () => this.runRows; evidence = () => this.evidenceRows; approvals = () => this.approvalRows
   putProject = async (value: StudioProject) => { this.projectRows = upsert(this.projectRows, value, 'project_id') }
   putSpec = async (value: StudioAppSpecRecord) => { this.specRows = upsert(this.specRows, value, 'spec_id') }
+  putDesign = async (value: StudioDesignSpecRecord) => { this.designRows = upsert(this.designRows, value, 'design_id') }
   putTurn = async (value: StudioIntakeTurn) => { this.turnRows = upsert(this.turnRows, value, 'turn_id') }
   putPlan = async (value: StudioPlan) => { this.planRows = upsert(this.planRows, value, 'plan_id') }
   putRun = async (value: StudioRun) => { this.runRows = upsert(this.runRows, value, 'run_id') }
@@ -93,6 +94,10 @@ const jobs = new PromptToAppJobService({
 const host = '127.0.0.1:4179'
 const apiHandler = createPromptToAppHttpHandler({
   service, identity, tenancy, intake: new IntakeEngine(model), planner: new PlannerEngine(model), jobs,
+  logos: { process: async () => ({
+    sha256: 'a'.repeat(64), relative_path: `logos/${'b'.repeat(64)}/${'a'.repeat(64)}.png`, mime: 'image/png' as const,
+    size_bytes: 100, width: 10, height: 10, extracted_primary: { h: 217, s: 91, l: 50 },
+  }) },
   generatorFor: (actor, projectId) => new ModelCodeGenerator(model, actor, service.project(actor, projectId).privacy),
   health: async () => ({ state: 'OK', route: 'ollama-local', builder: 'OK', disk: 'OK' }), allowedHosts: [host], allowedOrigins: [`http://${host}`],
 })

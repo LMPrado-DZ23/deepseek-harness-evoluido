@@ -36,7 +36,7 @@ test('percorre as cinco etapas, muda privacidade e termina sem alegar publicaç�
   expect(await lastSlice.evaluate((node, approve) => Boolean(node.compareDocumentPosition(approve as Node) & Node.DOCUMENT_POSITION_FOLLOWING), await approveButton.elementHandle())).toBe(true)
   await approveButton.click()
   await page.getByRole('button', { name: 'Iniciar criação' }).click()
-  await expect(page.getByText('VERIFIED_PROTOTYPE')).toBeVisible()
+  await expect(page.getByText('VERIFIED_PROTOTYPE')).toBeVisible({ timeout: 20_000 })
   await expect(page.getByText('não está publicado nem disponível para outras pessoas', { exact: false }).first()).toBeVisible()
   await expect(page.getByText('page:Início: Passou')).toBeVisible()
   await expect(page.getByText('A navegação deve ser simples.: Não verificado automaticamente')).toBeVisible()

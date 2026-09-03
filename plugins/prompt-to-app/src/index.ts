@@ -16,6 +16,7 @@ import { PromptToAppJobService, type PromptToAppJobRegistry } from './jobs.js'
 import {
   studioAppSpecsDomainSpec,
   studioApprovalsDomainSpec,
+  studioDesignSpecsDomainSpec,
   studioEvidenceDomainSpec,
   studioIntakeTurnsDomainSpec,
   studioPlansDomainSpec,
@@ -24,6 +25,7 @@ import {
   type PromptToAppKey,
   type StudioApproval,
   type StudioAppSpecRecord,
+  type StudioDesignSpecRecord,
   type StudioEvidence,
   type StudioIntakeTurn,
   type StudioPlan,
@@ -36,9 +38,12 @@ import { PlannerEngine } from './planner.js'
 import { HarnessPromptModel } from './ports.js'
 import { ContainerBuilder, NodeProcessPort } from './runner.js'
 import { PromptToAppService, type PromptToAppRepository } from './service.js'
+import { SharpLogoProcessor } from './logo.js'
 
 export * from './appspec.js'
 export * from './generator.js'
+export * from './design.js'
+export * from './logo.js'
 export * from './acceptance.js'
 export * from './http.js'
 export * from './intake.js'
@@ -60,6 +65,7 @@ export interface PromptToAppPluginConfig {
   readonly modelByRoute?: Readonly<Record<string, string>>
   readonly templateDirectory?: string
   readonly runsRoot?: string
+  readonly logoStoreRoot?: string
   readonly builder?: {
     readonly engine?: 'docker' | 'podman'
     readonly imageDigest?: `sha256:${string}`
@@ -84,6 +90,7 @@ class DomainPromptToAppRepository implements PromptToAppRepository {
   constructor(
     private readonly projectTable: KvTable<PromptToAppKey, StudioProject>,
     private readonly specTable: KvTable<PromptToAppKey, StudioAppSpecRecord>,
+    private readonly designTable: KvTable<PromptToAppKey, StudioDesignSpecRecord>,
     private readonly turnTable: KvTable<PromptToAppKey, StudioIntakeTurn>,
     private readonly planTable: KvTable<PromptToAppKey, StudioPlan>,
     private readonly runTable: KvTable<PromptToAppKey, StudioRun>,
@@ -94,6 +101,8 @@ class DomainPromptToAppRepository implements PromptToAppRepository {
   putProject(value: StudioProject) { return this.projectTable.put(value.project_id as PromptToAppKey, value) }
   specs() { return tableValues(this.specTable) }
   putSpec(value: StudioAppSpecRecord) { return this.specTable.put(value.spec_id as PromptToAppKey, value) }
+  designs() { return tableValues(this.designTable) }
+  putDesign(value: StudioDesignSpecRecord) { return this.designTable.put(value.design_id as PromptToAppKey, value) }
   turns() { return tableValues(this.turnTable) }
   putTurn(value: StudioIntakeTurn) { return this.turnTable.put(value.turn_id as PromptToAppKey, value) }
   plans() { return tableValues(this.planTable) }
@@ -110,21 +119,23 @@ function tableValues<T>(table: KvTable<PromptToAppKey, T>): T[] { return [...tab
 
 export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}): Promise<void> {
   const projectRoot = resolve(fileURLToPath(new URL('../../../', import.meta.url)))
-  const [projects, specs, turns, plans, runs, evidence, approvals]: [
+  const [projects, specs, designs, turns, plans, runs, evidence, approvals]: [
     Domain<typeof studioProjectsDomainSpec>, Domain<typeof studioAppSpecsDomainSpec>,
+    Domain<typeof studioDesignSpecsDomainSpec>,
     Domain<typeof studioIntakeTurnsDomainSpec>, Domain<typeof studioPlansDomainSpec>,
     Domain<typeof studioRunsDomainSpec>, Domain<typeof studioEvidenceDomainSpec>,
     Domain<typeof studioApprovalsDomainSpec>,
   ] = await Promise.all([
     ctx.storageDomain.open(studioProjectsDomainSpec), ctx.storageDomain.open(studioAppSpecsDomainSpec),
+    ctx.storageDomain.open(studioDesignSpecsDomainSpec),
     ctx.storageDomain.open(studioIntakeTurnsDomainSpec), ctx.storageDomain.open(studioPlansDomainSpec),
     ctx.storageDomain.open(studioRunsDomainSpec), ctx.storageDomain.open(studioEvidenceDomainSpec),
     ctx.storageDomain.open(studioApprovalsDomainSpec),
   ])
-  ctx.effect(() => async () => { await Promise.all([projects.close(), specs.close(), turns.close(), plans.close(), runs.close(), evidence.close(), approvals.close()]) }, 'studio-prompt-to-app.domainClose')
+  ctx.effect(() => async () => { await Promise.all([projects.close(), specs.close(), designs.close(), turns.close(), plans.close(), runs.close(), evidence.close(), approvals.close()]) }, 'studio-prompt-to-app.domainClose')
 
   const repository = new DomainPromptToAppRepository(
-    projects.table('projects'), specs.table('specs'), turns.table('turns'), plans.table('plans'),
+    projects.table('projects'), specs.table('specs'), designs.table('designs'), turns.table('turns'), plans.table('plans'),
     runs.table('runs'), evidence.table('evidence'), approvals.table('approvals'),
   )
   const service = new PromptToAppService({ repository })
@@ -137,10 +148,11 @@ export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}):
     },
   })
   const runsRoot = resolve(config.runsRoot ?? resolve(homedir(), '.dz23-studio', 'generated-runs'))
+  const logoStoreRoot = resolve(config.logoStoreRoot ?? resolve(homedir(), '.dz23-studio', 'assets'))
   const templateDirectory = resolve(config.templateDirectory ?? resolve(projectRoot, 'templates', 'nextjs-app@1'))
   const templateStore = resolve(config.builder?.templateStore ?? resolve(projectRoot, 'runtime', 'template-store-v2'))
   const imageDigest = config.builder?.imageDigest ?? await readDigest(config.builder?.imageDigestFile ?? resolve(projectRoot, 'runtime', 'builder-image-digest'))
-  await mkdir(runsRoot, { recursive: true })
+  await Promise.all([mkdir(runsRoot, { recursive: true }), mkdir(logoStoreRoot, { recursive: true })])
   const builder = new ContainerBuilder({
     engine: config.builder?.engine ?? 'docker', imageDigest, templateStore,
     user: config.builder?.user ?? defaultContainerUser(),
@@ -188,6 +200,7 @@ export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}):
     handler: createPromptToAppHttpHandler({
       service, identity: ctx.studioIdentity.service, tenancy: ctx.studioTenancy.service,
       intake, planner, jobs,
+      logos: new SharpLogoProcessor(logoStoreRoot),
       generatorFor: (actor, projectId) => new ModelCodeGenerator(model, actor, service.project(actor, projectId).privacy),
       health: actor => healthFor({ orgId: actor.orgId, tenantId: actor.tenantId }),
       allowedHosts: config.allowedHosts ?? [defaultHost, `localhost:${port}`],

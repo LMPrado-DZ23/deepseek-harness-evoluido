@@ -46,7 +46,11 @@
     "routeModel": "A rota escolhida ainda não possui um modelo configurado.",
     "sensitiveSpec": "Dados sensíveis detectados exigem confirmação da pessoa.",
     "specClarification": "Não consegui confirmar alguns detalhes. Responda à próxima pergunta para continuarmos.",
-    "invalidJson": "JSON inválido"
+    "invalidJson": "JSON inválido",
+    "designNotFound": "As escolhas visuais deste projeto ainda não existem.",
+    "designContrast": "A combinação de cores não atinge contraste AA.",
+    "designPrimary": "Escolha a cor principal da sua marca.",
+    "invalidLogo": "Envie uma imagem PNG ou JPEG de até 2 MB."
   },
   "pipeline": {
     "verified": "Protótipo verificado — não está publicado nem disponível para outras pessoas",

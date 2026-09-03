@@ -53,8 +53,8 @@ try {
     const runDirectory = resolve(scratch, criterion.id)
     await cp(resolve(root, 'templates/nextjs-app@1'), runDirectory, { recursive: true })
     await mkdir(resolve(runDirectory, 'content'), { recursive: true })
-    await mkdir(resolve(runDirectory, 'src/generated'), { recursive: true })
-    await writeFile(resolve(runDirectory, 'src/generated/design-tokens.css'), ':root { --background: 0 0% 100%; --foreground: 222 47% 11%; --card: 0 0% 100%; --card-foreground: 222 47% 11%; --primary: 222 72% 32%; --primary-foreground: 0 0% 100%; --secondary: 214 32% 91%; --secondary-foreground: 222 47% 11%; --muted: 210 40% 96%; --muted-foreground: 215 16% 40%; --accent: 214 100% 93%; --accent-foreground: 222 72% 26%; --destructive: 0 72% 45%; --border: 214 32% 88%; --input: 214 32% 88%; --ring: 217 91% 50%; --radius: 0.75rem; }\n')
+    await mkdir(resolve(runDirectory, 'src/styles'), { recursive: true })
+    await writeFile(resolve(runDirectory, 'src/styles/tokens.css'), ':root { --background: 0 0% 100%; --foreground: 222 47% 11%; --card: 0 0% 100%; --card-foreground: 222 47% 11%; --primary: 222 72% 32%; --primary-foreground: 0 0% 100%; --secondary: 214 32% 91%; --secondary-foreground: 222 47% 11%; --muted: 210 40% 96%; --muted-foreground: 215 16% 40%; --accent: 214 100% 93%; --accent-foreground: 222 72% 26%; --destructive: 0 72% 45%; --border: 214 32% 88%; --input: 214 32% 88%; --ring: 217 91% 50%; --radius: 0.75rem; --font-body: sans-serif; }\n')
     const title = criterion.category === 'catalog' ? 'Catálogo local' : 'Página de apresentação'
     const description = criterion.category === 'catalog'
       ? 'Produtos e serviços apresentados de forma clara e acessível.'

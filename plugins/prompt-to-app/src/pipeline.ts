@@ -3,6 +3,7 @@ import { cp, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { z } from 'zod'
 import type { AppSpecV1 } from './appspec.js'
+import { renderDesignTokens } from './design.js'
 import { writeAcceptanceArtifacts, type AcceptanceCheck } from './acceptance.js'
 import { generatedFileSchema, writeGeneratedFiles, type GeneratedFile } from './generator.js'
 import { t } from './i18n.js'
@@ -13,6 +14,7 @@ import { scanGeneratedContent } from './security.js'
 import { PromptToAppError, type PromptToAppActor, type PromptToAppService } from './service.js'
 
 const generatedOutputSchema = z.object({ files: z.array(generatedFileSchema).min(1).max(80) }).strict()
+const FRAMEWORK_GENERATED_MUTABLE_PATHS = new Set(['next-env.d.ts'])
 export interface CodeGenerationResult { readonly files: readonly GeneratedFile[]; readonly route: string; readonly model: string; readonly inputTokens?: number; readonly outputTokens?: number }
 export interface CodeGeneratorPort { generate(spec: AppSpecV1, plan: StudioPlan, diagnostic?: string): Promise<CodeGenerationResult> }
 
@@ -57,6 +59,7 @@ export class PromptToAppPipeline {
     const operationId = runOptions.operationId ?? this.#createId()
     const ownerSessionId = runOptions.ownerSessionId ?? actor.sessionId ?? 'direct-execution'
     const spec = this.options.service.latestSpec(actor, projectId).app_spec
+    const design = this.options.service.designOrDefault(actor, projectId)
     await this.options.service.putRun(actor, this.runRecord(actor, projectId, plan.plan_id, 'generate', 1, 'PENDING', 'full', 'not-created', null, null, operationId, operationId, ownerSessionId))
     if (isAborted(runOptions.signal)) return this.cancelled(actor, projectId, plan.plan_id, operationId, ownerSessionId, 0)
     const preflight = await this.options.builder.preflight()
@@ -71,8 +74,8 @@ export class PromptToAppPipeline {
       if (isAborted(runOptions.signal)) return this.cancelled(actor, projectId, plan.plan_id, operationId, ownerSessionId, attempt - 1)
       const runId = attempt === 1 ? operationId : `${operationId}-attempt-${attempt}`; const runDirectory = resolve(this.options.runsRoot, runId)
       await mkdir(this.options.runsRoot, { recursive: true }); await cp(this.options.templateDirectory, runDirectory, { recursive: true, errorOnExist: true })
-      await mkdir(resolve(runDirectory, 'src', 'generated'), { recursive: true })
-      await writeFile(resolve(runDirectory, 'src', 'generated', 'design-tokens.css'), defaultDesignTokens(), { encoding: 'utf8', flag: 'wx' })
+      await mkdir(resolve(runDirectory, 'src', 'styles'), { recursive: true })
+      await writeFile(resolve(runDirectory, 'src', 'styles', 'tokens.css'), renderDesignTokens(design), { encoding: 'utf8', flag: 'wx' })
       await this.options.service.putRun(actor, this.runRecord(actor, projectId, plan.plan_id, 'generate', attempt, 'RUNNING', 'full', runDirectory, null, null, runId, operationId, ownerSessionId))
       const protectedTemplatePaths = await listTreeFiles(runDirectory)
       const immutableBefore = await immutableHash(runDirectory, protectedTemplatePaths)
@@ -166,7 +169,10 @@ export class PromptToAppPipeline {
 
 async function immutableHash(root: string, files: readonly string[]): Promise<string> {
   const hash = createHash('sha256')
-  for (const file of [...files].sort()) hash.update(file).update('\0').update(await readFile(resolve(root, file))).update('\0')
+  for (const file of [...files].sort()) {
+    if (FRAMEWORK_GENERATED_MUTABLE_PATHS.has(file)) continue
+    hash.update(file).update('\0').update(await readFile(resolve(root, file))).update('\0')
+  }
   return hash.digest('hex')
 }
 
@@ -178,26 +184,3 @@ async function readAcceptanceChecks(runDirectory: string): Promise<readonly Acce
 }
 
 function isAborted(signal: AbortSignal | undefined): boolean { return signal?.aborted === true }
-
-function defaultDesignTokens(): string {
-  return `:root {
-  --background: 0 0% 100%;
-  --foreground: 222 47% 11%;
-  --card: 0 0% 100%;
-  --card-foreground: 222 47% 11%;
-  --primary: 222 72% 32%;
-  --primary-foreground: 0 0% 100%;
-  --secondary: 214 32% 91%;
-  --secondary-foreground: 222 47% 11%;
-  --muted: 210 40% 96%;
-  --muted-foreground: 215 16% 40%;
-  --accent: 214 100% 93%;
-  --accent-foreground: 222 72% 26%;
-  --destructive: 0 72% 45%;
-  --border: 214 32% 88%;
-  --input: 214 32% 88%;
-  --ring: 217 91% 50%;
-  --radius: 0.75rem;
-}
-`
-}

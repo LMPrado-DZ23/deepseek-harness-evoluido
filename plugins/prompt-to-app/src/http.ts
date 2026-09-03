@@ -11,15 +11,18 @@ import {
 import { assertRouteContracts, type StudioRouteContract } from '@dz23-studio/policy'
 import { TenancyError, type StudioTenancyService } from '@dz23-studio/tenancy'
 import { z } from 'zod'
+import { designSelectionSchema } from './design.js'
 import { t } from './i18n.js'
 import { intakeAnswerSchema, nextIntakeQuestion, type IntakeConversation, type IntakeEngine } from './intake.js'
 import type { CodeGeneratorPort } from './pipeline.js'
 import type { PromptToAppJobService } from './jobs.js'
 import type { PlannerEngine } from './planner.js'
+import type { LogoProcessorPort } from './logo.js'
 import { PromptToAppError, type PromptToAppActor, type PromptToAppService } from './service.js'
 import { InvalidTransitionError } from './state.js'
 
 const JSON_LIMIT = 64 * 1024
+const LOGO_LIMIT = 2 * 1024 * 1024
 const createProjectSchema = z.object({
   name: z.string().trim().min(1).max(120),
   original_brief: z.string().trim().min(10).max(10_000),
@@ -42,6 +45,8 @@ export const PROMPT_TO_APP_ROUTE_CONTRACTS = [
   { method: 'POST', path: '/projects', access: 'authorized', permission: 'project.write', scope: 'workspace' },
   { method: 'GET', path: '/projects/:projectId', access: 'authorized', permission: 'project.read', scope: 'project' },
   { method: 'POST', path: '/projects/:projectId/intake/answer', access: 'authorized', permission: 'project.write', scope: 'project' },
+  { method: 'POST', path: '/projects/:projectId/design', access: 'authorized', permission: 'project.write', scope: 'project' },
+  { method: 'POST', path: '/projects/:projectId/design/logo', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'POST', path: '/projects/:projectId/plan', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'POST', path: '/projects/:projectId/plan/approve', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'POST', path: '/projects/:projectId/plan/change', access: 'authorized', permission: 'project.write', scope: 'project' },
@@ -59,6 +64,7 @@ export interface PromptToAppHttpConfig {
   readonly intake: IntakeEngine
   readonly planner: PlannerEngine
   readonly jobs: PromptToAppJobService
+  readonly logos: LogoProcessorPort
   readonly generatorFor: (actor: PromptToAppActor, projectId: string) => CodeGeneratorPort
   readonly health: (actor: PromptToAppActor) => Promise<StudioAppsHealth>
   readonly allowedHosts: readonly string[]
@@ -92,6 +98,7 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
           project,
           turns: config.service.intakeTurns(actor, projectId),
           plan: optional(() => config.service.plan(actor, projectId)),
+          design: optional(() => config.service.latestDesign(actor, projectId)),
           runs,
           current_run: [...runs].sort((left, right) => right.started_at.localeCompare(left.started_at) || right.attempt - left.attempt)[0] ?? null,
           evidence: config.service.evidence(actor, projectId),
@@ -99,6 +106,16 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
       }
       if (request.method === 'POST' && matched.suffix === '/intake/answer') {
         return await answerIntake(request, response, config, actor, projectId)
+      }
+      if (request.method === 'POST' && matched.suffix === '/design') {
+        const input = designSelectionSchema.parse(await readJson(request))
+        return json(response, 200, { design: await config.service.saveDesign(actor, projectId, input) })
+      }
+      if (request.method === 'POST' && matched.suffix === '/design/logo') {
+        config.service.assertAuthorized(actor, 'project.write'); config.service.project(actor, projectId)
+        const contentType = singleHeader(request.headers['content-type'])?.split(';', 1)[0]?.toLowerCase() ?? ''
+        const logo = await config.logos.process({ orgId: actor.orgId, tenantId: actor.tenantId }, await readBytes(request, LOGO_LIMIT), contentType)
+        return json(response, 200, { design: await config.service.attachLogo(actor, projectId, logo) })
       }
       if (request.method === 'POST' && matched.suffix === '/plan') {
         const project = config.service.project(actor, projectId)
@@ -201,7 +218,7 @@ async function authenticatedActor(request: IncomingMessage, config: PromptToAppH
 
 function matchRoute(method: string | undefined, path: string): { readonly projectId?: string; readonly suffix: string } | undefined {
   if ((method === 'GET' && (path === '/health' || path === '/projects')) || (method === 'POST' && path === '/projects')) return { suffix: path }
-  const match = /^\/projects\/([^/]+)(\/intake\/answer|\/plan\/approve|\/plan\/change|\/plan|\/generate\/cancel|\/generate)?$/u.exec(path)
+  const match = /^\/projects\/([^/]+)(\/intake\/answer|\/design\/logo|\/design|\/plan\/approve|\/plan\/change|\/plan|\/generate\/cancel|\/generate)?$/u.exec(path)
   if (match === null) return undefined
   const suffix = match[2] ?? ''
   const allowed = (method === 'GET' && suffix === '') || (method === 'DELETE' && suffix === '') || (method === 'POST' && suffix !== '')
@@ -232,6 +249,17 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
     chunks.push(bytes)
   }
   return JSON.parse(Buffer.concat(chunks).toString('utf8'))
+}
+
+async function readBytes(request: IncomingMessage, limit: number): Promise<Buffer> {
+  const chunks: Buffer[] = []; let size = 0
+  for await (const chunk of request) {
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+    size += bytes.length
+    if (size > limit) throw new PromptToAppError('INVALID', t('errors.invalidLogo'))
+    chunks.push(bytes)
+  }
+  return Buffer.concat(chunks)
 }
 
 function json(response: ServerResponse, status: number, body: unknown): void {

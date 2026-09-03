@@ -1,5 +1,74 @@
 # Handoff Codex → Claude — E4 e abertura de P32/P33/P31-B
 
+## P32/P33 fatia 2 — blocos 1 a 3 prontos para revisão
+
+Branch de trabalho: `codex/p32-fatia2-prompt-to-app`. Base:
+`05d91f01eec191e727c1296b9190371678e17363`. Não houve merge, push, PR ou
+deploy.
+
+### Commits fechados
+
+1. `36907ccb954ed93680fd4dd174ccc0ad7cb34a07` — autorização
+   `project.write` antes de iniciar ou cancelar jobs, incluindo viewer → 403.
+2. `5b16beb21cdd6815045e03a92557dedbe97279d3` — template
+   `nextjs-app@1`, pipeline offline e fallback estático somente explícito.
+3. DesignSpec, logotipo e correções do preparador estão no commit seguinte
+   desta branch, informado no relatório do executor.
+
+### Bloco DesignSpec
+
+- domínio `studio_design_specs` versionado, com `org_id`, `tenant_id`, projeto,
+  autor e SHA-256;
+- quatro presets neutros próprios; seis papéis de cor, todos com par de texto
+  validado em contraste WCAG AA 4,5:1;
+- Geist Sans e Source Serif 4 locais por `next/font/local`, pesos fixos;
+- `src/styles/tokens.css` determinístico, escrito pelo Studio e protegido do
+  modelo;
+- PNG/JPEG até 2 MB, assinatura e conteúdo conferidos, reencode PNG sem
+  metadados, máximo 1.600 px, hash e armazenamento separado por tenant; SVG
+  recusado;
+- interface na etapa Ideia com cartões e opções avançadas; API e leitura
+  adversarial não aceitam escopo do cliente.
+
+### Achados fechados durante a prova
+
+`setup-templates.mjs` deixava 104 MB/502 MB de `node_modules` dentro dos
+templates-fonte. O fetch agora usa cópias temporárias somente dos manifests e
+foi provado com `TEMPLATE_SOURCES_CLEAN=PASS`. O Next 16 reescreve
+`next-env.d.ts` durante o build; esse é o único caminho excluído da comparação
+pós-build, mas continua proibido para o modelo. Um teste negativo altera outro
+arquivo protegido e recebe `TEMPLATE_INTEGRITY_FAILED`.
+
+### Gates em WSL2/ext4
+
+- typecheck e build recursivo: PASS;
+- 246 testes: PASS; 18 integrações PostgreSQL puladas neste gate puro;
+- cobertura: 94,13% statements e 90,96% branches; módulos críticos de
+  identidade, policy, tenant e estado continuam em 100%;
+- i18n: PASS, 182 chaves; domínios: PASS;
+- P37 no artefato da árvore de commit: PASS, 401 arquivos, 14 manifests e zero
+  achado; self-test negativo: PASS;
+- interface web: 3 unitários e 2/2 E2E Playwright + axe: PASS;
+- pipeline Next real: `VERIFIED_PROTOTYPE`, uma tentativa, LLM real
+  `NOT_EXECUTED`;
+- isolamento e template offline: PASS; `NetworkMode=none`, conexão bloqueada,
+  não-root, `CapDrop=ALL`, `no-new-privileges`, raiz somente leitura e trust
+  store do host idêntico;
+- imagem fixada:
+  `sha256:c5708d3fff608da8d916fb5ae79dc3e4eba495fca376134a7c607a8e2216405d`.
+
+ADRs corrigidos conforme o prompt vinculante: ADR-021 é a autoridade de
+segurança determinística, ADR-022 é o template Next.js e ADR-025 é o
+DesignSpec. ADR-023 (dados) e ADR-024 (acesso) só serão fechados com os blocos
+implementados.
+
+### Ainda não implementado nesta branch
+
+Blocos 4 a 8: gerador `node:sqlite`, categoria formulário+banco, autenticação
+do app gerado, painel CRUD e golden set de 12 executáveis. Permanecem
+`NOT_IMPLEMENTED`; preview/publicação continuam `NOT_PRESENT`; LLM real
+`NOT_EXECUTED`; experiência leiga `NOT_VALIDATED`.
+
 ## P32/P33 + P31-B fatia 1 — correções para segunda revisão Claude
 
 Base do parecer: `b44ffe4`. Alvo da nova revisão: `b44ffe4..HEAD` na branch

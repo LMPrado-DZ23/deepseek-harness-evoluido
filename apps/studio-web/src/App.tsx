@@ -5,6 +5,7 @@ import t from './i18n/pt-BR.json'
 import { currentStepIndex, permanentTruthKind, privacyNotice, type ProjectUiState } from './presentation'
 
 type Category = 'landing-page' | 'catalog'
+type DesignPreset = 'modern' | 'professional' | 'colorful' | 'brand'
 type Question = { id: 'audience' | 'goal' | 'content' | 'sensitive-confirmation'; text: string }
 type Plan = { slices: Array<{ slice_id: string; title: string; description: string; acceptance_criteria: string[] }> }
 type AcceptanceCheck = { id: string; label: string; status: 'PENDING' | 'PASSED' | 'FAILED' | 'NOT_AUTOMATED' }
@@ -20,6 +21,14 @@ export function App() {
   const [brief, setBrief] = useState('')
   const [category, setCategory] = useState<Category>('landing-page')
   const [privacy, setPrivacy] = useState<'local-only' | 'any'>('local-only')
+  const [designPreset, setDesignPreset] = useState<DesignPreset>('modern')
+  const [brandColor, setBrandColor] = useState('#075ee5')
+  const [font, setFont] = useState<'geist-sans' | 'source-serif'>('geist-sans')
+  const [radius, setRadius] = useState<'compact' | 'balanced' | 'rounded'>('balanced')
+  const [density, setDensity] = useState<'compact' | 'comfortable'>('comfortable')
+  const [tone, setTone] = useState<'friendly' | 'formal'>('friendly')
+  const [logo, setLogo] = useState<File | null>(null)
+  const [showDesignAdvanced, setShowDesignAdvanced] = useState(false)
   const [route, setRoute] = useState<string | null>(null)
   const [projectId, setProjectId] = useState<string | null>(null)
   const [projectState, setProjectState] = useState<ProjectUiState | null>(null)
@@ -40,6 +49,10 @@ export function App() {
         method: 'POST', body: JSON.stringify({ name: brief.trim().slice(0, 60), original_brief: brief.trim(), category, privacy }),
       })
       setProjectId(created.project.project_id); setProjectState(created.project.state); setQuestion(created.next)
+      await api(`/projects/${created.project.project_id}/design`, {
+        method: 'POST', body: JSON.stringify({ preset: designPreset, ...(designPreset === 'brand' ? { primary: hexToHsl(brandColor) } : {}), font, radius, density, tone }),
+      })
+      if (logo !== null) await api(`/projects/${created.project.project_id}/design/logo`, { method: 'POST', body: logo, headers: { 'content-type': logo.type } })
     })
   }
   async function submitAnswer(recommend: boolean, confirmSensitive?: boolean) {
@@ -106,7 +119,10 @@ export function App() {
     </nav><div className="sidebar-footer"><button aria-label={t.nav.help}><CircleHelp /></button><button aria-label={t.nav.settings}><Settings /></button></div></aside>
     <section className="workspace"><header className="topbar"><button className="mobile-menu" aria-label={t.mobile.menu}><Menu /></button><Status health={health} /><div className="top-actions"><Bell /><UserRound /></div></header>
       <main className="canvas"><section className="idea-panel">
-        {projectState === null ? <Idea brief={brief} setBrief={setBrief} privacy={privacy} setPrivacy={setPrivacy} route={route ?? health.route} ready={ready} chooseSuggestion={chooseSuggestion} create={create} /> : null}
+        {projectState === null ? <Idea brief={brief} setBrief={setBrief} privacy={privacy} setPrivacy={setPrivacy} route={route ?? health.route} ready={ready} chooseSuggestion={chooseSuggestion} create={create}
+          designPreset={designPreset} setDesignPreset={setDesignPreset} brandColor={brandColor} setBrandColor={setBrandColor}
+          font={font} setFont={setFont} radius={radius} setRadius={setRadius} density={density} setDensity={setDensity}
+          tone={tone} setTone={setTone} logo={logo} setLogo={setLogo} showDesignAdvanced={showDesignAdvanced} setShowDesignAdvanced={setShowDesignAdvanced} /> : null}
         {projectState === 'DRAFT' && question !== null ? <Questions question={question} answer={answer} setAnswer={setAnswer} submit={submitAnswer} /> : null}
         {projectState === 'SPEC_READY' ? <Action title={t.plan.title} detail={t.progress.planDetail} button={t.plan.prepare} action={preparePlan} /> : null}
         {projectState === 'PLAN_PROPOSED' && plan !== null ? <PlanView plan={plan} approve={approvePlan} reason={changeReason} setReason={setChangeReason} requestChange={requestPlanChange} /> : null}
@@ -120,12 +136,32 @@ export function App() {
   </div>
 }
 
-function Idea(props: { brief: string; setBrief(v: string): void; privacy: 'local-only' | 'any'; setPrivacy(v: 'local-only' | 'any'): void; route: string | null; ready: boolean; chooseSuggestion(v: string, c: Category): void; create(): Promise<void> }) {
+function Idea(props: {
+  brief: string; setBrief(v: string): void; privacy: 'local-only' | 'any'; setPrivacy(v: 'local-only' | 'any'): void; route: string | null; ready: boolean; chooseSuggestion(v: string, c: Category): void; create(): Promise<void>
+  designPreset: DesignPreset; setDesignPreset(v: DesignPreset): void; brandColor: string; setBrandColor(v: string): void
+  font: 'geist-sans' | 'source-serif'; setFont(v: 'geist-sans' | 'source-serif'): void; radius: 'compact' | 'balanced' | 'rounded'; setRadius(v: 'compact' | 'balanced' | 'rounded'): void
+  density: 'compact' | 'comfortable'; setDensity(v: 'compact' | 'comfortable'): void; tone: 'friendly' | 'formal'; setTone(v: 'friendly' | 'formal'): void
+  logo: File | null; setLogo(v: File | null): void; showDesignAdvanced: boolean; setShowDesignAdvanced(v: boolean): void
+}) {
+  const presets: Array<[DesignPreset, string, string]> = [
+    ['modern', t.design.modern, t.design.modernDetail], ['professional', t.design.professional, t.design.professionalDetail],
+    ['colorful', t.design.colorful, t.design.colorfulDetail], ['brand', t.design.brand, t.design.brandDetail],
+  ]
   return <><div className="heading"><Sparkles aria-hidden="true"/><div><h1>{t.idea.title}</h1><p>{t.idea.subtitle}</p></div></div><label className="sr-only" htmlFor="brief">{t.idea.title}</label>
     <textarea id="brief" maxLength={1000} value={props.brief} onChange={event => props.setBrief(event.target.value)} placeholder={t.idea.placeholder} /><div className="counter" aria-live="polite">{props.brief.length} {t.idea.counter}</div>
     <h2>{t.idea.suggestions}</h2><button className="suggestion" onClick={() => props.chooseSuggestion(t.idea.landing, 'landing-page')}>{t.idea.landing}</button><button className="suggestion" onClick={() => props.chooseSuggestion(t.idea.catalog, 'catalog')}>{t.idea.catalog}</button><p className="coming">{t.idea.coming}</p>
+    <h2>{t.design.title}</h2><p className="coming">{t.design.subtitle}</p><div className="design-grid">{presets.map(([value, label, detail]) => <button type="button" key={value} className={props.designPreset === value ? 'design-card selected' : 'design-card'} aria-pressed={props.designPreset === value} onClick={() => props.setDesignPreset(value)}><strong>{label}</strong><span>{detail}</span></button>)}</div>
+    <button type="button" className="advanced" aria-expanded={props.showDesignAdvanced} onClick={() => props.setShowDesignAdvanced(!props.showDesignAdvanced)}>{props.showDesignAdvanced ? t.design.hideAdvanced : t.design.advanced}</button>
+    {props.showDesignAdvanced ? <section className="design-advanced">
+      {props.designPreset === 'brand' ? <label>{t.design.primaryColor}<input type="color" value={props.brandColor} onChange={event => props.setBrandColor(event.target.value)} /></label> : null}
+      <label>{t.design.font}<select value={props.font} onChange={event => props.setFont(event.target.value as typeof props.font)}><option value="geist-sans">{t.design.fontSans}</option><option value="source-serif">{t.design.fontSerif}</option></select></label>
+      <label>{t.design.radius}<select value={props.radius} onChange={event => props.setRadius(event.target.value as typeof props.radius)}><option value="compact">{t.design.radiusCompact}</option><option value="balanced">{t.design.radiusBalanced}</option><option value="rounded">{t.design.radiusRounded}</option></select></label>
+      <label>{t.design.density}<select value={props.density} onChange={event => props.setDensity(event.target.value as typeof props.density)}><option value="compact">{t.design.densityCompact}</option><option value="comfortable">{t.design.densityComfortable}</option></select></label>
+      <label>{t.design.tone}<select value={props.tone} onChange={event => props.setTone(event.target.value as typeof props.tone)}><option value="friendly">{t.design.toneFriendly}</option><option value="formal">{t.design.toneFormal}</option></select></label>
+      <label>{t.design.logo}<input type="file" accept="image/png,image/jpeg" onChange={event => props.setLogo(event.target.files?.[0] ?? null)} /></label><small>{props.logo === null ? t.design.logoHelp : props.logo.name}</small>
+    </section> : null}
     <fieldset><legend>{t.privacy.title}</legend><label><input type="radio" checked={props.privacy === 'local-only'} onChange={() => props.setPrivacy('local-only')} />{t.privacy.local}</label><label><input type="radio" checked={props.privacy === 'any'} onChange={() => props.setPrivacy('any')} />{t.privacy.configured}{props.route === null ? '' : ` (${props.route})`}</label></fieldset>
-    <p className="privacy-notice">{privacyNotice(props.privacy, props.route, t.privacy)}</p><p className="context-note">{t.truth.idea}</p><button className="primary" disabled={!props.ready} onClick={() => void props.create()}>{t.idea.continue}</button><button className="advanced">{t.idea.advanced}</button></>
+    <p className="privacy-notice">{privacyNotice(props.privacy, props.route, t.privacy)}</p><p className="context-note">{t.truth.idea}</p><button className="primary" disabled={!props.ready} onClick={() => void props.create()}>{t.idea.continue}</button></>
 }
 function Questions({ question, answer, setAnswer, submit }: { question: Question; answer: string; setAnswer(v: string): void; submit(recommend: boolean, confirm?: boolean): Promise<void> }) {
   const sensitive = question.id === 'sensitive-confirmation'
@@ -138,3 +174,12 @@ function checkStatus(status: AcceptanceCheck['status']): string { return status 
 function Nav({ icon, label, active = false }: { icon: React.ReactNode; label: string; active?: boolean }) { return <button className={active ? 'nav active' : 'nav'}>{icon}<span>{label}</span></button> }
 function Status({ health }: { health: HealthState }) { const ok = health.state === 'OK'; return <button className={ok ? 'status ok' : 'status attention'} aria-label={ok ? t.health.ok : t.health.attention}><span />{ok ? t.health.ok : t.health.attention}</button> }
 function Progress({ state }: { state: ProjectUiState | null }) { const current = currentStepIndex(state); const truthKind = permanentTruthKind(state); return <section className="progress-panel" aria-label={t.progress.title}><h2>{t.progress.title}</h2><p className="mobile-progress-subtitle">{t.mobile.subtitle}</p><ol>{steps.map(([title, detail], index) => <li key={title} className={index === current ? 'current' : ''}><span className="step-number">{index + 1}</span><div><strong>{index + 1}. {title}</strong><p>{detail}</p><small>{index < current ? t.progress.done : index === current ? t.progress.current : t.progress.waiting}</small></div></li>)}</ol>{truthKind === null ? null : <p className="truth">{t.truth[truthKind]}</p>}</section> }
+
+function hexToHsl(hex: string): { h: number; s: number; l: number } {
+  const value = Number.parseInt(hex.slice(1), 16); const r = ((value >> 16) & 255) / 255; const g = ((value >> 8) & 255) / 255; const b = (value & 255) / 255
+  const max = Math.max(r, g, b); const min = Math.min(r, g, b); const delta = max - min; const l = (max + min) / 2
+  let h = 0
+  if (delta !== 0) h = max === r ? 60 * (((g - b) / delta) % 6) : max === g ? 60 * ((b - r) / delta + 2) : 60 * ((r - g) / delta + 4)
+  const s = delta === 0 ? 0 : delta / (1 - Math.abs(2 * l - 1))
+  return { h: Math.round((h + 360) % 360), s: Math.round(s * 100), l: Math.round(l * 100) }
+}

@@ -1,7 +1,8 @@
+import { createHash } from 'node:crypto'
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { ContainerBuilder, OFFLINE_PIPELINE_COMMANDS } from '../plugins/prompt-to-app/src/runner.js'
+import { ContainerBuilder, listTreeFiles, OFFLINE_PIPELINE_COMMANDS } from '../plugins/prompt-to-app/src/runner.js'
 
 const root = process.cwd()
 const proofRoot = mkdtempSync(join(tmpdir(), 'dz23-template-proof-'))
@@ -18,8 +19,8 @@ const builder = new ContainerBuilder({
 try {
   cpSync(resolve(root, 'templates/nextjs-app@1'), runDirectory, { recursive: true })
   mkdirSync(resolve(runDirectory, 'content'), { recursive: true })
-  mkdirSync(resolve(runDirectory, 'src/generated'), { recursive: true })
-  writeFileSync(resolve(runDirectory, 'src/generated/design-tokens.css'), `:root {
+  mkdirSync(resolve(runDirectory, 'src/styles'), { recursive: true })
+  writeFileSync(resolve(runDirectory, 'src/styles/tokens.css'), `:root {
   --background: 0 0% 100%; --foreground: 222 47% 11%; --card: 0 0% 100%; --card-foreground: 222 47% 11%;
   --primary: 222 72% 32%; --primary-foreground: 0 0% 100%; --secondary: 214 32% 91%; --secondary-foreground: 222 47% 11%;
   --muted: 210 40% 96%; --muted-foreground: 215 16% 40%; --accent: 214 100% 93%; --accent-foreground: 222 72% 26%;
@@ -33,6 +34,8 @@ export default function GeneratedApp() {
   return <main className="mx-auto max-w-6xl px-6 py-16"><h1 className="text-4xl font-bold">Ateliê Aurora</h1><p className="mt-4 text-muted-foreground">Conheça nossos serviços e fale com a equipe.</p><Card className="mt-8"><CardHeader><CardTitle>Serviços</CardTitle></CardHeader><CardContent>Projetos feitos com cuidado.</CardContent></Card></main>
 }
 `)
+  const initialFiles = await listTreeFiles(runDirectory)
+  const initialHashes = new Map(initialFiles.map(file => [file, createHash('sha256').update(readFileSync(resolve(runDirectory, file))).digest('hex')]))
 
   const preflight = await builder.preflight()
   if (preflight.state !== 'OK') throw new Error(preflight.message)
@@ -44,13 +47,19 @@ export default function GeneratedApp() {
       throw new Error(`${command} falhou (exit=${result.exitCode}, timeout=${result.timedOut})\n${result.stdout.slice(-2000)}\n${result.stderr.slice(-2000)}`)
     }
   }
+  const changedInitialFiles = initialFiles.filter(file => createHash('sha256').update(readFileSync(resolve(runDirectory, file))).digest('hex') !== initialHashes.get(file))
+  const unexpectedChanges = changedInitialFiles.filter(file => file !== 'next-env.d.ts')
+  if (unexpectedChanges.length > 0) throw new Error(`Arquivos iniciais alterados pelo build: ${unexpectedChanges.join(', ')}`)
+  process.stdout.write(`TEMPLATE_INITIAL_FILE_CHANGES=${changedInitialFiles.length === 0 ? 'none' : changedInitialFiles.join(',')} (framework-generated only)\n`)
 
   const report = `# P32 — Prova executável do template v1\n\n` +
     `- Resultado: **PASS**\n` +
     `- Imagem fixada: \`${digest}\`\n` +
     `- Instalação: offline, lockfile congelado e scripts de pacote desativados.\n` +
+    `- Fontes: Geist Sans e Source Serif 4 locais via next/font/local; nenhum download no build.\n` +
     `- Build: PASS\n- Teste unitário: PASS\n- E2E Playwright + axe: PASS\n` +
     `- Execuções: ${results.map(result => `\`${result.command}\` → exit ${result.exitCode}`).join('; ')}.\n` +
+    `- Arquivos iniciais alterados pelo framework: ${changedInitialFiles.map(file => `\`${file}\``).join(', ') || 'nenhum'}; nenhuma alteração inesperada.\n` +
     `- Isolamento: todos os comandos foram emitidos pelo \`ContainerBuilder\` com rede desativada e limites de recursos.\n\n` +
     `O artefato é somente um protótipo verificado dentro do contêiner; não houve preview público nem deploy.\n`
   mkdirSync(resolve(root, 'docs/proofs'), { recursive: true })

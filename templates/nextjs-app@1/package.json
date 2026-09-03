@@ -10,6 +10,7 @@
     "test:e2e": "NEXT_TELEMETRY_DISABLED=1 playwright test"
   },
   "dependencies": {
+    "@fontsource-variable/source-serif-4": "5.3.0",
     "@hookform/resolvers": "5.2.2",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",

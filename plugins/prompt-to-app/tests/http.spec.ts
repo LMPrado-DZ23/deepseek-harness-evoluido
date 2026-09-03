@@ -6,7 +6,7 @@ import type { StudioTenancyService } from '@dz23-studio/tenancy'
 import type { AppSpecV1 } from '../src/appspec.js'
 import { createPromptToAppHttpHandler, PROMPT_TO_APP_ROUTE_CONTRACTS } from '../src/http.js'
 import { IntakeEngine } from '../src/intake.js'
-import type { StudioApproval, StudioAppSpecRecord, StudioEvidence, StudioIntakeTurn, StudioPlan, StudioProject, StudioRun } from '../src/model.js'
+import type { StudioApproval, StudioAppSpecRecord, StudioDesignSpecRecord, StudioEvidence, StudioIntakeTurn, StudioPlan, StudioProject, StudioRun } from '../src/model.js'
 import type { PromptToAppJobService } from '../src/jobs.js'
 import type { CodeGeneratorPort } from '../src/pipeline.js'
 import { PlannerEngine } from '../src/planner.js'
@@ -14,12 +14,13 @@ import type { PromptModelPort } from '../src/ports.js'
 import { PromptToAppService, type PromptToAppActor, type PromptToAppRepository } from '../src/service.js'
 
 class MemoryRepository implements PromptToAppRepository {
-  projectRows: StudioProject[] = []; specRows: StudioAppSpecRecord[] = []; turnRows: StudioIntakeTurn[] = []
+  projectRows: StudioProject[] = []; specRows: StudioAppSpecRecord[] = []; designRows: StudioDesignSpecRecord[] = []; turnRows: StudioIntakeTurn[] = []
   planRows: StudioPlan[] = []; runRows: StudioRun[] = []; evidenceRows: StudioEvidence[] = []; approvalRows: StudioApproval[] = []
-  projects = () => this.projectRows; specs = () => this.specRows; turns = () => this.turnRows; plans = () => this.planRows
+  projects = () => this.projectRows; specs = () => this.specRows; designs = () => this.designRows; turns = () => this.turnRows; plans = () => this.planRows
   runs = () => this.runRows; evidence = () => this.evidenceRows; approvals = () => this.approvalRows
   putProject = async (v: StudioProject) => { this.projectRows = upsert(this.projectRows, v, 'project_id') }
   putSpec = async (v: StudioAppSpecRecord) => { this.specRows = upsert(this.specRows, v, 'spec_id') }
+  putDesign = async (v: StudioDesignSpecRecord) => { this.designRows = upsert(this.designRows, v, 'design_id') }
   putTurn = async (v: StudioIntakeTurn) => { this.turnRows = upsert(this.turnRows, v, 'turn_id') }
   putPlan = async (v: StudioPlan) => { this.planRows = upsert(this.planRows, v, 'plan_id') }
   putRun = async (v: StudioRun) => { this.runRows = upsert(this.runRows, v, 'run_id') }
@@ -66,6 +67,10 @@ async function fixture() {
     tenancy: tenancy as unknown as StudioTenancyService,
     intake: new IntakeEngine(model), planner: new PlannerEngine(model),
     jobs: jobs as unknown as PromptToAppJobService,
+    logos: { process: vi.fn(async () => ({
+      sha256: 'a'.repeat(64), relative_path: `logos/${'b'.repeat(64)}/${'a'.repeat(64)}.png`, mime: 'image/png' as const,
+      size_bytes: 100, width: 10, height: 10, extracted_primary: { h: 217, s: 91, l: 50 },
+    })) },
     generatorFor: () => ({ generate: vi.fn() }),
     health: vi.fn(() => Promise.resolve({ state: 'OK', route: 'ollama', builder: 'OK', disk: 'OK' } as const)),
     allowedHosts, allowedOrigins,
@@ -84,7 +89,7 @@ async function fixture() {
 
 describe('prompt-to-app HTTP boundary', () => {
   it('declares every route with authorization and no client-owned scope', () => {
-    expect(PROMPT_TO_APP_ROUTE_CONTRACTS).toHaveLength(11)
+    expect(PROMPT_TO_APP_ROUTE_CONTRACTS).toHaveLength(13)
     expect(PROMPT_TO_APP_ROUTE_CONTRACTS.every(route => route.access === 'authorized' && route.permission !== null)).toBe(true)
   })
 
@@ -99,6 +104,13 @@ describe('prompt-to-app HTTP boundary', () => {
     expect((await f.request('/projects', { method: 'POST', body: JSON.stringify({
       name: 'Ataque', original_brief: 'Tentar trocar a organização.', category: 'landing-page', privacy: 'any', org_id: 'other',
     }) })).status).toBe(400)
+    expect((await f.request(`/projects/${f.repository.projectRows[0]!.project_id}/design`, { method: 'POST', body: JSON.stringify({ preset: 'professional' }) })).status).toBe(200)
+    expect(f.repository.designRows[0]).toMatchObject({ org_id: 'org-a', tenant_id: 'tenant-a', design_spec: { preset: 'professional' } })
+    expect((await f.request(`/projects/${f.repository.projectRows[0]!.project_id}/design`, { method: 'POST', body: JSON.stringify({ preset: 'brand' }) })).status).toBe(400)
+    expect((await f.request(`/projects/${f.repository.projectRows[0]!.project_id}/design/logo`, { method: 'POST', body: new Uint8Array([137, 80, 78, 71]), headers: { 'content-type': 'image/png' } })).status).toBe(200)
+    const details = await (await f.request(`/projects/${f.repository.projectRows[0]!.project_id}`)).json() as { design: { version: number }; runs: unknown[] }
+    expect(details).toMatchObject({ design: { version: 2 }, runs: [] })
+    expect((await f.request('/projects')).status).toBe(200)
   })
 
   it('runs idea through questions, plan approval and generation without skipping approval', async () => {
@@ -157,6 +169,7 @@ describe('prompt-to-app HTTP boundary', () => {
 
     expect((await f.request(`/projects/${project.project_id}/generate`, { method: 'POST', body: '{}' })).status).toBe(403)
     expect((await f.request(`/projects/${project.project_id}/generate/cancel`, { method: 'POST', body: '{}' })).status).toBe(403)
+    expect((await f.request(`/projects/${project.project_id}/design`, { method: 'POST', body: JSON.stringify({ preset: 'modern' }) })).status).toBe(403)
     expect(f.jobs.start).toHaveBeenCalledOnce()
     expect(f.jobs.cancel).toHaveBeenCalledOnce()
   })
@@ -178,6 +191,7 @@ describe('prompt-to-app HTTP boundary', () => {
       method: 'POST', body: JSON.stringify({ answer: 'Roubar escopo', recommend: false, org_id: 'org-a', tenant_id: 'tenant-a' }),
     })).status).toBe(400)
     expect((await asAttacker(`/projects/${projectId}/plan`, { method: 'POST', body: JSON.stringify({ org_id: 'org-a' }) })).status).toBe(404)
+    expect((await asAttacker(`/projects/${projectId}/design`, { method: 'POST', body: JSON.stringify({ preset: 'modern' }) })).status).toBe(404)
     expect((await asAttacker(`/projects/${projectId}/plan/change`, { method: 'POST', body: JSON.stringify({ reason: 'Tentar alterar o plano alheio.' }) })).status).toBe(404)
     expect((await asAttacker(`/projects/${projectId}`, { method: 'DELETE', body: JSON.stringify({ org_id: 'org-a' }) })).status).toBe(404)
     expect(f.repository.projectRows).toHaveLength(1)

@@ -10,6 +10,19 @@
     "continue": "Continuar", "advanced": "Opções avançadas", "counter": "de 1000 caracteres",
     "empty": "Conte sua ideia para continuar."
   },
+  "design": {
+    "title": "Escolha o jeito do seu aplicativo", "subtitle": "Você pode mudar essas escolhas antes de criar.",
+    "modern": "Moderno", "modernDetail": "Limpo, direto e com bastante espaço.",
+    "professional": "Profissional", "professionalDetail": "Sóbrio e adequado para empresas.",
+    "colorful": "Colorido", "colorfulDetail": "Mais vivo, mantendo leitura confortável.",
+    "brand": "Minha marca", "brandDetail": "Usa sua cor e seu logotipo.",
+    "advanced": "Ajustar aparência", "hideAdvanced": "Ocultar ajustes",
+    "primaryColor": "Cor principal", "font": "Tipo de letra", "fontSans": "Simples e fácil de ler", "fontSerif": "Clássica e elegante",
+    "radius": "Formato dos cantos", "radiusCompact": "Discreto", "radiusBalanced": "Equilibrado", "radiusRounded": "Arredondado",
+    "density": "Espaçamento", "densityCompact": "Mais compacto", "densityComfortable": "Mais confortável",
+    "tone": "Tom dos textos", "toneFriendly": "Acolhedor", "toneFormal": "Formal",
+    "logo": "Logotipo", "logoHelp": "PNG ou JPEG, até 2 MB. O arquivo será limpo antes do uso."
+  },
   "questions": {
     "title": "Só mais alguns detalhes", "subtitle": "Uma pergunta por vez, sem termos técnicos.",
     "answer": "Sua resposta", "answerPlaceholder": "Escreva do seu jeito.", "continue": "Responder e continuar",

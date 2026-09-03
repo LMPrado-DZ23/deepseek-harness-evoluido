@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto'
 import { roleAllows, type StudioRole } from '@dz23-studio/policy'
 import { appSpecHash, type AppSpecV1 } from './appspec.js'
+import { createDesignSpec, designSpecHash, designSpecV1Schema, type DesignLogo, type DesignSelection, type DesignSpecV1 } from './design.js'
 import type {
   PromptToAppKey, ProjectState, StudioApproval, StudioAppSpecRecord, StudioEvidence,
-  StudioIntakeTurn, StudioPlan, StudioProject, StudioRun,
+  StudioDesignSpecRecord, StudioIntakeTurn, StudioPlan, StudioProject, StudioRun,
 } from './model.js'
 import { assertProjectTransition } from './state.js'
 import { t } from './i18n.js'
@@ -21,6 +22,8 @@ export interface PromptToAppRepository {
   putProject(value: StudioProject): Promise<void>
   specs(): readonly StudioAppSpecRecord[]
   putSpec(value: StudioAppSpecRecord): Promise<void>
+  designs(): readonly StudioDesignSpecRecord[]
+  putDesign(value: StudioDesignSpecRecord): Promise<void>
   turns(): readonly StudioIntakeTurn[]
   putTurn(value: StudioIntakeTurn): Promise<void>
   plans(): readonly StudioPlan[]
@@ -115,6 +118,31 @@ export class PromptToAppService {
     return value
   }
 
+  async saveDesign(actor: PromptToAppActor, projectId: string, input: DesignSelection): Promise<StudioDesignSpecRecord> {
+    return this.#saveDesign(actor, projectId, createDesignSpec(input))
+  }
+
+  async attachLogo(actor: PromptToAppActor, projectId: string, logo: DesignLogo): Promise<StudioDesignSpecRecord> {
+    const current = this.designOrDefault(actor, projectId)
+    return this.#saveDesign(actor, projectId, designSpecV1Schema.parse({ ...current, logo }))
+  }
+
+  latestDesign(actor: PromptToAppActor, projectId: string): StudioDesignSpecRecord {
+    this.project(actor, projectId)
+    const value = this.#repository.designs().filter(candidate => candidate.project_id === projectId && this.#sameScope(actor, candidate))
+      .sort((left, right) => right.version - left.version)[0]
+    if (value === undefined) throw new PromptToAppError('NOT_FOUND', t('errors.designNotFound'))
+    return value
+  }
+
+  designOrDefault(actor: PromptToAppActor, projectId: string): DesignSpecV1 {
+    this.project(actor, projectId)
+    try { return this.latestDesign(actor, projectId).design_spec } catch (error) {
+      if (!(error instanceof PromptToAppError) || error.code !== 'NOT_FOUND') throw error
+      return createDesignSpec({ preset: 'modern' })
+    }
+  }
+
   async proposePlan(actor: PromptToAppActor, projectId: string, slices: StudioPlan['slices']): Promise<StudioPlan> {
     this.#authorize(actor, 'project.write')
     const spec = this.latestSpec(actor, projectId); const now = this.#now().toISOString()
@@ -182,6 +210,18 @@ export class PromptToAppService {
     if (actor.role !== 'owner' && actor.role !== 'admin') throw new PromptToAppError('FORBIDDEN', t('errors.archiveForbidden'))
     const value = this.project(actor, projectId); const updated = { ...value, archived_at: this.#now().toISOString(), updated_at: this.#now().toISOString() }
     await this.#repository.putProject(updated); return updated
+  }
+
+  async #saveDesign(actor: PromptToAppActor, projectId: string, designSpec: DesignSpecV1): Promise<StudioDesignSpecRecord> {
+    this.#authorize(actor, 'project.write'); this.project(actor, projectId)
+    const previous = this.#repository.designs().filter(value => value.project_id === projectId && this.#sameScope(actor, value))
+    const value: StudioDesignSpecRecord = {
+      design_id: this.#createId(), project_id: projectId, org_id: actor.orgId, tenant_id: actor.tenantId,
+      version: previous.length + 1, design_spec: designSpecV1Schema.parse(designSpec), sha256: designSpecHash(designSpec),
+      created_by: actor.userId, created_at: this.#now().toISOString(),
+    }
+    await this.#repository.putDesign(value)
+    return value
   }
 
   #authorize(actor: PromptToAppActor, permission: 'project.read' | 'project.write'): void {

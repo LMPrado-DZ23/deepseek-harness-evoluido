@@ -3,18 +3,19 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 import type { AppSpecV1 } from '../plugins/prompt-to-app/src/appspec.js'
-import type { StudioApproval, StudioAppSpecRecord, StudioEvidence, StudioIntakeTurn, StudioPlan, StudioProject, StudioRun } from '../plugins/prompt-to-app/src/model.js'
+import type { StudioApproval, StudioAppSpecRecord, StudioDesignSpecRecord, StudioEvidence, StudioIntakeTurn, StudioPlan, StudioProject, StudioRun } from '../plugins/prompt-to-app/src/model.js'
 import { PromptToAppPipeline, type CodeGeneratorPort } from '../plugins/prompt-to-app/src/pipeline.js'
 import { ContainerBuilder } from '../plugins/prompt-to-app/src/runner.js'
 import { PromptToAppError, PromptToAppService, type PromptToAppActor, type PromptToAppRepository } from '../plugins/prompt-to-app/src/service.js'
 
 class MemoryRepository implements PromptToAppRepository {
-  projectRows: StudioProject[] = []; specRows: StudioAppSpecRecord[] = []; turnRows: StudioIntakeTurn[] = []
+  projectRows: StudioProject[] = []; specRows: StudioAppSpecRecord[] = []; designRows: StudioDesignSpecRecord[] = []; turnRows: StudioIntakeTurn[] = []
   planRows: StudioPlan[] = []; runRows: StudioRun[] = []; evidenceRows: StudioEvidence[] = []; approvalRows: StudioApproval[] = []
-  projects = () => this.projectRows; specs = () => this.specRows; turns = () => this.turnRows; plans = () => this.planRows
+  projects = () => this.projectRows; specs = () => this.specRows; designs = () => this.designRows; turns = () => this.turnRows; plans = () => this.planRows
   runs = () => this.runRows; evidence = () => this.evidenceRows; approvals = () => this.approvalRows
   putProject = async (value: StudioProject) => { this.projectRows = upsert(this.projectRows, value, 'project_id') }
   putSpec = async (value: StudioAppSpecRecord) => { this.specRows = upsert(this.specRows, value, 'spec_id') }
+  putDesign = async (value: StudioDesignSpecRecord) => { this.designRows = upsert(this.designRows, value, 'design_id') }
   putTurn = async (value: StudioIntakeTurn) => { this.turnRows = upsert(this.turnRows, value, 'turn_id') }
   putPlan = async (value: StudioPlan) => { this.planRows = upsert(this.planRows, value, 'plan_id') }
   putRun = async (value: StudioRun) => { this.runRows = upsert(this.runRows, value, 'run_id') }
@@ -71,7 +72,10 @@ try {
     now: () => new Date('2026-09-03T12:00:00.000Z'), createId: () => `proof-${++sequence}`,
   })
   const result = await pipeline.run(actor, project.project_id, generator)
-  if (result.state !== 'VERIFIED_PROTOTYPE' || result.runDirectory === undefined) throw new Error(`Pipeline terminou em ${result.state}`)
+  if (result.state !== 'VERIFIED_PROTOTYPE' || result.runDirectory === undefined) {
+    const failure = [...repository.runRows].sort((left, right) => right.attempt - left.attempt)[0]
+    throw new Error(`Pipeline terminou em ${result.state}: ${failure?.failure_code ?? result.message}`)
+  }
   if (!result.runDirectory.startsWith(`${runsRoot}${sep}`)) throw new Error('Diretório de execução saiu da raiz autorizada.')
   if (await readFile(outside, 'utf8') !== 'unchanged') throw new Error('Arquivo fora do sandbox foi alterado.')
   const outsideAfter = createHash('sha256').update(await readFile(outside)).digest('hex')

@@ -22,6 +22,10 @@ export const STUDIO_DOMAIN_SCOPES: readonly DomainScopeEntry[] = [
     tables: { specs: { scope: 'org-tenant', requiredFields: ['org_id', 'tenant_id'] } },
   },
   {
+    source: 'plugins/prompt-to-app/src/model.ts', exportName: 'studioDesignSpecsDomainSpec', physicalName: 'studio_design_specs',
+    tables: { designs: { scope: 'org-tenant', requiredFields: ['org_id', 'tenant_id'] } },
+  },
+  {
     source: 'plugins/prompt-to-app/src/model.ts', exportName: 'studioIntakeTurnsDomainSpec', physicalName: 'studio_intake_turns',
     tables: { turns: { scope: 'org-tenant', requiredFields: ['org_id', 'tenant_id'] } },
   },

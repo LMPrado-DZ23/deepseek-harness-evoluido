@@ -1,5 +1,5 @@
 @import "tailwindcss";
-@import "../src/generated/design-tokens.css";
+@import "../src/styles/tokens.css";
 
 @theme inline {
   --color-background: hsl(var(--background));
@@ -25,7 +25,7 @@
 }
 
 * { border-color: hsl(var(--border)); }
-body { margin: 0; background: hsl(var(--background)); color: hsl(var(--foreground)); }
+body { margin: 0; background: hsl(var(--background)); color: hsl(var(--foreground)); font-family: var(--font-body); }
 button, input, textarea, select { font: inherit; }
 *:focus-visible { outline: 3px solid hsl(var(--ring) / 0.45); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }

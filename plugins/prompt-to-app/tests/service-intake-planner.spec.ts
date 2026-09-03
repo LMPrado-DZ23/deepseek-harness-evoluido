@@ -1,18 +1,19 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { AppSpecV1 } from '../src/appspec.js'
 import { IntakeEngine, nextIntakeQuestion } from '../src/intake.js'
-import type { StudioApproval, StudioAppSpecRecord, StudioEvidence, StudioIntakeTurn, StudioPlan, StudioProject, StudioRun } from '../src/model.js'
+import type { StudioApproval, StudioAppSpecRecord, StudioDesignSpecRecord, StudioEvidence, StudioIntakeTurn, StudioPlan, StudioProject, StudioRun } from '../src/model.js'
 import { PlannerEngine } from '../src/planner.js'
 import type { PromptModelPort } from '../src/ports.js'
 import { PromptToAppError, PromptToAppService, type PromptToAppActor, type PromptToAppRepository } from '../src/service.js'
 
 class MemoryRepository implements PromptToAppRepository {
-  projectRows: StudioProject[] = []; specRows: StudioAppSpecRecord[] = []; turnRows: StudioIntakeTurn[] = []
+  projectRows: StudioProject[] = []; specRows: StudioAppSpecRecord[] = []; designRows: StudioDesignSpecRecord[] = []; turnRows: StudioIntakeTurn[] = []
   planRows: StudioPlan[] = []; runRows: StudioRun[] = []; evidenceRows: StudioEvidence[] = []; approvalRows: StudioApproval[] = []
-  projects = () => this.projectRows; specs = () => this.specRows; turns = () => this.turnRows; plans = () => this.planRows
+  projects = () => this.projectRows; specs = () => this.specRows; designs = () => this.designRows; turns = () => this.turnRows; plans = () => this.planRows
   runs = () => this.runRows; evidence = () => this.evidenceRows; approvals = () => this.approvalRows
   putProject = async (v: StudioProject) => { this.projectRows = upsert(this.projectRows, v, 'project_id') }
   putSpec = async (v: StudioAppSpecRecord) => { this.specRows = upsert(this.specRows, v, 'spec_id') }
+  putDesign = async (v: StudioDesignSpecRecord) => { this.designRows = upsert(this.designRows, v, 'design_id') }
   putTurn = async (v: StudioIntakeTurn) => { this.turnRows = upsert(this.turnRows, v, 'turn_id') }
   putPlan = async (v: StudioPlan) => { this.planRows = upsert(this.planRows, v, 'plan_id') }
   putRun = async (v: StudioRun) => { this.runRows = upsert(this.runRows, v, 'run_id') }
@@ -80,6 +81,24 @@ describe('PromptToAppService', () => {
     await service.approvePlan(ownerA, project.project_id)
     await expect(service.approvePlan(ownerA, project.project_id)).rejects.toMatchObject({ code: 'REPLAY' })
     expect((await service.archive(ownerA, project.project_id)).archived_at).not.toBeNull()
+  })
+
+  it('versions tenant-scoped design choices and attaches a sanitized logo', async () => {
+    const { service } = fixture()
+    const project = await service.createProject(ownerA, { name: 'Marca', original_brief: 'Quero criar uma página para minha marca.', category: 'landing-page', privacy: 'local-only' })
+    expect(service.designOrDefault(ownerA, project.project_id).preset).toBe('modern')
+    expect(() => service.latestDesign(ownerA, project.project_id)).toThrow(PromptToAppError)
+    const first = await service.saveDesign(ownerA, project.project_id, { preset: 'brand', primary: { h: 31, s: 92, l: 44 }, font: 'source-serif', tone: 'formal' })
+    expect(first).toMatchObject({ version: 1, design_spec: { preset: 'brand', typography: { family: 'source-serif' } } })
+    const logo = {
+      sha256: 'a'.repeat(64), relative_path: `logos/${'b'.repeat(64)}/${'a'.repeat(64)}.png`, mime: 'image/png' as const,
+      size_bytes: 100, width: 10, height: 10, extracted_primary: { h: 31, s: 92, l: 44 },
+    }
+    const second = await service.attachLogo(ownerA, project.project_id, logo)
+    expect(second).toMatchObject({ version: 2, design_spec: { logo } })
+    expect(service.latestDesign(ownerA, project.project_id).design_id).toBe(second.design_id)
+    await expect(service.saveDesign(viewerA, project.project_id, { preset: 'modern' })).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    expect(() => service.latestDesign(builderB, project.project_id)).toThrow(PromptToAppError)
   })
 })
 

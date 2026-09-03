@@ -2,6 +2,7 @@ import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 import { policyTierSchema } from '@dz23-studio/policy'
 import { z } from 'zod'
 import { appSpecV1Schema } from './appspec.js'
+import { designSpecV1Schema } from './design.js'
 
 export const projectStateSchema = z.enum([
   'DRAFT', 'SPEC_READY', 'PLAN_PROPOSED', 'PLAN_APPROVED', 'GENERATING',
@@ -33,6 +34,12 @@ export const studioAppSpecRecordSchema = z.object({
   spec_id: z.string().min(1), project_id: z.string().min(1), ...scope,
   version: z.number().int().positive(), app_spec: appSpecV1Schema,
   sha256, origin: z.enum(['intake', 'edit']), created_at: timestamp,
+}).strict()
+
+export const studioDesignSpecRecordSchema = z.object({
+  design_id: z.string().min(1), project_id: z.string().min(1), ...scope,
+  version: z.number().int().positive(), design_spec: designSpecV1Schema,
+  sha256, created_by: z.string().min(1), created_at: timestamp,
 }).strict()
 
 export const studioIntakeTurnSchema = z.object({
@@ -89,6 +96,7 @@ export const studioApprovalSchema = z.object({
 
 export type StudioProject = z.infer<typeof studioProjectSchema>
 export type StudioAppSpecRecord = z.infer<typeof studioAppSpecRecordSchema>
+export type StudioDesignSpecRecord = z.infer<typeof studioDesignSpecRecordSchema>
 export type StudioIntakeTurn = z.infer<typeof studioIntakeTurnSchema>
 export type StudioPlan = z.infer<typeof studioPlanSchema>
 export type StudioRun = z.infer<typeof studioRunSchema>
@@ -99,6 +107,7 @@ export type PromptToAppKey = string & { readonly [promptKeyBrand]: true }
 
 export const studioProjectsDomainSpec = defineDomain({ name: 'studio_projects', version: 1, tables: { projects: domainTable<PromptToAppKey, StudioProject>(studioProjectSchema) } })
 export const studioAppSpecsDomainSpec = defineDomain({ name: 'studio_app_specs', version: 1, tables: { specs: domainTable<PromptToAppKey, StudioAppSpecRecord>(studioAppSpecRecordSchema) } })
+export const studioDesignSpecsDomainSpec = defineDomain({ name: 'studio_design_specs', version: 1, tables: { designs: domainTable<PromptToAppKey, StudioDesignSpecRecord>(studioDesignSpecRecordSchema) } })
 export const studioIntakeTurnsDomainSpec = defineDomain({ name: 'studio_intake_turns', version: 1, tables: { turns: domainTable<PromptToAppKey, StudioIntakeTurn>(studioIntakeTurnSchema) } })
 export const studioPlansDomainSpec = defineDomain({ name: 'studio_plans', version: 1, tables: { plans: domainTable<PromptToAppKey, StudioPlan>(studioPlanSchema) } })
 export const studioRunsDomainSpec = defineDomain({ name: 'studio_runs', version: 2, tables: { runs: domainTable<PromptToAppKey, StudioRun>(studioRunSchema) } })
@@ -106,6 +115,6 @@ export const studioEvidenceDomainSpec = defineDomain({ name: 'studio_evidence', 
 export const studioApprovalsDomainSpec = defineDomain({ name: 'studio_approvals', version: 1, tables: { approvals: domainTable<PromptToAppKey, StudioApproval>(studioApprovalSchema) } })
 
 export const PROMPT_TO_APP_DOMAIN_SPECS = [
-  studioProjectsDomainSpec, studioAppSpecsDomainSpec, studioIntakeTurnsDomainSpec,
+  studioProjectsDomainSpec, studioAppSpecsDomainSpec, studioDesignSpecsDomainSpec, studioIntakeTurnsDomainSpec,
   studioPlansDomainSpec, studioRunsDomainSpec, studioEvidenceDomainSpec, studioApprovalsDomainSpec,
 ] as const

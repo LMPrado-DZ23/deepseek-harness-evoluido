@@ -7,10 +7,13 @@ function csrf(): string {
 }
 
 export async function api<T>(path: string, init: RequestInit = {}, acceptDeclaredResult = false): Promise<T> {
+  const bodyHeaders = init.body === undefined ? {} : typeof init.body === 'string'
+    ? { 'content-type': 'application/json', 'x-dz23-csrf': csrf() }
+    : { 'x-dz23-csrf': csrf() }
   const response = await fetch(`/api/studio/apps${path}`, {
     ...init,
     credentials: 'same-origin',
-    headers: { ...(init.body === undefined ? {} : { 'content-type': 'application/json', 'x-dz23-csrf': csrf() }), ...init.headers },
+    headers: { ...bodyHeaders, ...init.headers },
   })
   const body = await response.json() as T & { error?: string }
   if (!response.ok && !(acceptDeclaredResult && typeof body === 'object' && body !== null && 'state' in body)) {

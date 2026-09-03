@@ -6,6 +6,8 @@
 - `/studio` sem sessão: `401`.
 - `/api/studio/apps/health` sem sessão: `401`.
 - Sessão e CSRF na jornada autenticada: PASS.
+- Quatro cartões de aparência e gravação tenant-aware do DesignSpec antes das
+  perguntas: PASS.
 - Jornada: Ideia → Perguntas → Plano → pedido de mudança → plano revisado →
   aprovação → Criação → Verificação: PASS.
 - Texto de privacidade local e identificação da rota `ollama-local`: PASS.
@@ -17,6 +19,7 @@
 - Execução: contêiner Playwright fixado, `--network none`, usuário não root,
   `CapDrop=ALL`, `no-new-privileges`, raiz somente leitura e limites de CPU,
   memória, processos e memória compartilhada.
+- Imagem: `sha256:c5708d3fff608da8d916fb5ae79dc3e4eba495fca376134a7c607a8e2216405d`.
 
 O LLM e o construtor são portas determinísticas, mas toda a jornada usa o
 handler, os schemas, o serviço, a máquina de estados e o job service reais. O

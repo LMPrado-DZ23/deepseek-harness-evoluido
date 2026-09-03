@@ -1,6 +1,19 @@
 import type { Metadata } from 'next'
-import { GeistSans } from 'geist/font/sans'
+import localFont from 'next/font/local'
 import './globals.css'
+
+const dz23Sans = localFont({
+  src: '../node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2',
+  variable: '--font-dz23-sans',
+  weight: '100 900',
+  display: 'swap',
+})
+const dz23Serif = localFont({
+  src: '../node_modules/@fontsource-variable/source-serif-4/files/source-serif-4-latin-wght-normal.woff2',
+  variable: '--font-dz23-serif',
+  weight: '200 900',
+  display: 'swap',
+})
 
 export const metadata: Metadata = {
   title: 'Aplicativo criado no DZ23 STUDIO',
@@ -8,5 +21,5 @@ export const metadata: Metadata = {
 }
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="pt-BR"><body className={GeistSans.className}>{children}</body></html>
+  return <html lang="pt-BR"><body className={`${dz23Sans.variable} ${dz23Serif.variable}`}>{children}</body></html>
 }

@@ -26,6 +26,7 @@
     "@dz23-studio/policy": "workspace:*",
     "@dz23-studio/route-health": "workspace:*",
     "@dz23-studio/tenancy": "workspace:*",
+    "sharp": "0.35.4",
     "zod": "4.4.3"
   }
 }
