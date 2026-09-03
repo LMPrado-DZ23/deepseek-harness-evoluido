@@ -7,7 +7,9 @@ Status: aceito na branch de revisão da Fase 3.
 Codex e Claude Code só podem ser iniciados pela ação controlada do Studio. A
 ferramenta genérica `tool-subagent` não é exposta a eles. Cada delegação:
 
-1. exige aprovação T2; sobe para T3 se declarar deploy, segredo ou rede externa;
+1. exige aprovação T2; sobe para T3 se declarar deploy, segredo ou rede externa,
+   e T3 exige passkey com identidade forte recente verificada pelo serviço de
+   identidade, não apenas um campo de entrada;
 2. cria um `git worktree` destacado no commit atual;
 3. cria uma sessão coordenadora interna com `cwd` exatamente nesse worktree;
 4. inicia um filho one-shot pelo provider oficial;
@@ -23,9 +25,15 @@ coordenador e filho. O worktree é preservado quando há proposta ou falha.
 
 `studio_agent_leases` impede duas delegações vivas com caminhos sobrepostos no
 mesmo workspace. Ao aplicar, o diff e seu SHA-256 são recalculados. Alteração da
-proposta, arquivo ocupado no checkout ou segunda proposta baseada no mesmo
-arquivo produzem falha fechada (`PROPOSAL_TAMPERED` ou `WRITE_CONFLICT`). Nunca
-há merge ou commit automático.
+proposta, arquivo ocupado no checkout ou commit posterior à base que toque o
+mesmo arquivo produzem falha fechada (`PROPOSAL_TAMPERED` ou `WRITE_CONFLICT`).
+Uma edição concorrente do projeto principal durante a execução é registrada em
+`main_changed_during_run`, com aviso neutro, mas não descarta a proposta; a
+aplicação faz a decisão real de conflito. O fingerprint não percorre o conteúdo
+de árvores não rastreadas. Nunca há merge ou commit automático.
+
+Cada run grava a pessoa e o instante da aprovação inicial (`approved_by` e
+`approved_at`).
 
 O policy engine aceita a aprovação da delegação somente para descendentes da
 sessão coordenadora cujo `cwd` continue igual ao worktree concedido. Uma regra
@@ -50,4 +58,3 @@ A lógica determinística (`service.ts`, schemas, policy e route-health) tem 100
 de statements, branches, funções e linhas. O glue de composição do Cordis e o
 adaptador Git/SO são excluídos dessa métrica e cobertos por testes de integração
 com repositório e worktree reais e pelo PoC 3A em WSL2/ext4.
-

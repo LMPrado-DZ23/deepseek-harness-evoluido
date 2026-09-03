@@ -27,6 +27,9 @@ export const agentRunSchema = z.object({
   changed_files: z.array(z.string()),
   diff_bytes: z.number().int().nonnegative(),
   diff_sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  main_changed_during_run: z.boolean(),
+  approved_by: z.string().min(1),
+  approved_at: z.iso.datetime(),
   diagnostic: z.string().nullable(),
   created_at: z.iso.datetime(),
   updated_at: z.iso.datetime(),
@@ -60,7 +63,7 @@ export const STUDIO_AGENT_LEASES_LOGICAL_DOMAIN = 'studio.agent.leases'
 
 export const studioAgentRunsDomainSpec = defineDomain({
   name: STUDIO_AGENT_RUNS_PHYSICAL_DOMAIN,
-  version: 1,
+  version: 2,
   tables: { runs: domainTable<AgentRunKey, AgentRunRecord>(agentRunSchema) },
 })
 

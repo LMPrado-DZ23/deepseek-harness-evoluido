@@ -53,18 +53,41 @@ describe('StudioRouteHealthService', () => {
     expect(h.service.list(scope).map(record => [record.route, record.state])).toEqual([
       ['ollama', 'OK'], ['omniroute', 'NOT_CONFIGURED'], ['deepseek-official', 'OK'],
     ])
-    expect(h.service.chooseRoute(scope, 'T0')).toMatchObject({ route: 'ollama', explicit: false })
-    expect(h.service.chooseRoute({ orgId: 'org-2', tenantId: 'tenant-2' }, 'T0')).toMatchObject({ route: 'ollama' })
+    await expect(h.service.chooseRoute(scope, 'T0', { privacy: 'local-only' })).resolves.toEqual({
+      route: 'ollama', explicit: false, reason: 'Perfil privado restrito à IA local.',
+    })
+    await expect(h.service.chooseRoute(scope, 'T0', {
+      privacy: 'local-only', explicitRoute: 'ollama',
+    })).resolves.toMatchObject({ route: 'ollama', explicit: true })
+    await expect(h.service.chooseRoute(scope, 'T0')).resolves.toMatchObject({ route: 'ollama', explicit: false })
+    await expect(h.service.chooseRoute({ orgId: 'org-2', tenantId: 'tenant-2' }, 'T0')).resolves.toMatchObject({ route: 'ollama' })
     expect(h.service.list({ orgId: 'org-2', tenantId: 'tenant-2' })).toHaveLength(3)
-    expect(h.service.chooseRoute(scope, 'T2', 'omniroute')).toEqual({
+    await expect(h.service.chooseRoute(scope, 'T2', { privacy: 'any', explicitRoute: 'omniroute' })).resolves.toEqual({
       route: 'omniroute', explicit: true, reason: 'Rota escolhida pela pessoa.',
     })
-    expect(h.service.chooseRoute(scope, 'T2')).toMatchObject({ route: 'ollama' })
+    await expect(h.service.chooseRoute(scope, 'T2')).resolves.toMatchObject({ route: 'ollama' })
 
     await h.service.initialize(scope, new Set())
-    expect(h.service.chooseRoute(scope, 'T2')).toMatchObject({ route: 'deepseek-official' })
+    await expect(h.service.chooseRoute(scope, 'T2')).resolves.toMatchObject({ route: 'deepseek-official' })
     expect(h.service.list({ orgId: 'other', tenantId: 'other' }).every(record => record.state === 'NOT_CONFIGURED')).toBe(true)
     expect(h.service.switches(scope)).toEqual([])
+  })
+
+  it('never sends a local-only request to an external route and audits the refusal', async () => {
+    const h = service()
+    await h.service.initialize(scope, new Set(['omniroute', 'deepseek-official']))
+    await expect(h.service.chooseRoute(scope, 'T0', { privacy: 'local-only' })).resolves.toEqual({
+      route: undefined,
+      explicit: false,
+      reason: 'IA local indisponível; nenhuma informação foi enviada para uma rota externa.',
+    })
+    expect(h.service.switches(scope)[0]).toMatchObject({
+      from_route: 'ollama', to_route: 'blocked', explicit_route: false,
+    })
+    await expect(h.service.chooseRoute(scope, 'T0', { privacy: 'any' })).resolves.toMatchObject({ route: 'omniroute' })
+    await expect(h.service.chooseRoute(scope, 'T0', {
+      privacy: 'local-only', explicitRoute: 'deepseek-official',
+    })).resolves.toMatchObject({ route: undefined, explicit: true })
   })
 
   it('records latency, usage and configured cost on success', async () => {

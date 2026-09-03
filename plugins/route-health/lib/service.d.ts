@@ -8,6 +8,7 @@ export interface RoutePrice {
     readonly inputPerMillion: number;
     readonly outputPerMillion: number;
 }
+export type RoutePrivacy = 'local-only' | 'any';
 export interface RouteHealthRepository {
     routes(): readonly RouteHealthRecord[];
     events(): readonly RouteSwitchEvent[];
@@ -15,9 +16,13 @@ export interface RouteHealthRepository {
     putEvent(record: RouteSwitchEvent): Promise<void>;
 }
 export interface RouteSelection {
-    readonly route: string;
+    readonly route: string | undefined;
     readonly explicit: boolean;
     readonly reason: string;
+}
+export interface RouteSelectionOptions {
+    readonly privacy: RoutePrivacy;
+    readonly explicitRoute?: string;
 }
 export interface RouteHealthConfig {
     readonly routes: readonly string[];
@@ -36,7 +41,7 @@ export declare class StudioRouteHealthService {
     initialize(scope: RouteScope, configured: ReadonlySet<string>): Promise<void[]>;
     list(scope: RouteScope): readonly RouteHealthRecord[];
     switches(scope: RouteScope): readonly RouteSwitchEvent[];
-    chooseRoute(scope: RouteScope, purpose: string, explicitRoute?: string): RouteSelection;
+    chooseRoute(scope: RouteScope, purpose: string, options?: RouteSelectionOptions): Promise<RouteSelection>;
     streamWithFallback(scope: RouteScope, options: GenerateOptions, next: () => AsyncIterable<StreamChunk>, fallback: (options: GenerateOptions) => AsyncIterable<StreamChunk>, explicitRoute?: boolean): AsyncIterable<StreamChunk>;
     private get;
     private baseRecord;

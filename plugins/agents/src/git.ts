@@ -1,6 +1,5 @@
 import { spawn, execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { lstat, readFile, readdir, readlink } from 'node:fs/promises'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 import { promisify } from 'node:util'
 import type { AgentRunRecord } from './model.js'
@@ -33,38 +32,6 @@ async function gitWithInput(cwd: string, args: readonly string[], input: string)
   })
 }
 
-async function untrackedFingerprint(root: string, status: string): Promise<string> {
-  const entries = status.split('\0').filter(Boolean).filter(line => line.startsWith('?? '))
-  const hash = createHash('sha256')
-  for (const entry of entries.sort()) {
-    const path = resolve(root, entry.slice(3))
-    hash.update(entry)
-    await hashPath(path, hash)
-  }
-  return hash.digest('hex')
-}
-
-async function hashPath(path: string, hash: ReturnType<typeof createHash>): Promise<void> {
-  const stat = await lstat(path)
-  if (stat.isSymbolicLink()) {
-    hash.update('symlink\0').update(await readlink(path))
-    return
-  }
-  if (stat.isFile()) {
-    hash.update('file\0').update(await readFile(path))
-    return
-  }
-  if (!stat.isDirectory()) {
-    hash.update(`other:${String(stat.mode)}\0`)
-    return
-  }
-  hash.update('directory\0')
-  for (const name of (await readdir(path)).sort()) {
-    hash.update(name).update('\0')
-    await hashPath(resolve(path, name), hash)
-  }
-}
-
 export class GitWorktreeManager implements WorktreePort {
   constructor(private readonly worktreeRoot: string) {}
 
@@ -95,8 +62,9 @@ export class GitWorktreeManager implements WorktreePort {
     const root = resolve(repositoryPath)
     const status = await git(root, ['status', '--porcelain=v1', '-z'])
     const diff = await git(root, ['diff', '--binary', 'HEAD', '--'])
-    const untracked = await untrackedFingerprint(root, status)
-    return createHash('sha256').update(status).update(diff).update(untracked).digest('hex')
+    // This fingerprint is diagnostic only. Do not recursively hash untracked trees:
+    // a dependency/cache directory could make every delegation scan unbounded.
+    return createHash('sha256').update(status).update(diff).digest('hex')
   }
 
   async applyProposal(record: AgentRunRecord): Promise<void> {
@@ -117,6 +85,12 @@ export class GitWorktreeManager implements WorktreePort {
     const occupied = status.split('\0').filter(Boolean).map(line => line.slice(3).replaceAll('\\', '/'))
     if (pathsOverlap(occupied, record.changed_files)) {
       throw new DelegationError('WRITE_CONFLICT', 'O projeto mudou nos mesmos arquivos desde a criação da proposta.')
+    }
+    const committedSinceBase = (await git(record.repository_path, [
+      'diff', '--name-only', '-z', record.base_commit, 'HEAD', '--',
+    ])).split('\0').filter(Boolean).map(path => path.replaceAll('\\', '/'))
+    if (pathsOverlap(committedSinceBase, record.changed_files)) {
+      throw new DelegationError('WRITE_CONFLICT', 'O projeto mudou nesses arquivos desde que o assistente começou.')
     }
     await gitWithInput(record.repository_path, ['apply', '--check', '--binary', '--whitespace=nowarn', '-'], current.text)
     await gitWithInput(record.repository_path, ['apply', '--binary', '--whitespace=nowarn', '-'], current.text)

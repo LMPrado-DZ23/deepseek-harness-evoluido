@@ -37,6 +37,9 @@ export declare const agentRunSchema: z.ZodObject<{
     changed_files: z.ZodArray<z.ZodString>;
     diff_bytes: z.ZodNumber;
     diff_sha256: z.ZodString;
+    main_changed_during_run: z.ZodBoolean;
+    approved_by: z.ZodString;
+    approved_at: z.ZodISODateTime;
     diagnostic: z.ZodNullable<z.ZodString>;
     created_at: z.ZodISODateTime;
     updated_at: z.ZodISODateTime;
@@ -86,6 +89,9 @@ export declare const studioAgentRunsDomainSpec: {
             changed_files: string[];
             diff_bytes: number;
             diff_sha256: string;
+            main_changed_during_run: boolean;
+            approved_by: string;
+            approved_at: string;
             diagnostic: string | null;
             created_at: string;
             updated_at: string;

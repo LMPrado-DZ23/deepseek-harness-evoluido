@@ -17,8 +17,11 @@ profile.
 
 `@dz23-studio/route-health` observa o stream, grava saúde, latência, uso e custo
 estimado por `org_id`/`tenant_id` em `studio_route_health` e oferece
-`chooseRoute`. Para T0, Ollama saudável é preferido. Escolha explícita da pessoa
-nunca é substituída.
+`chooseRoute`. Toda seleção declara `privacy: local-only | any`. Em
+`local-only`, somente Ollama saudável pode ser escolhido; se estiver
+indisponível, o Studio recusa e audita sem transmitir dados para DeepSeek ou
+OmniRoute. Em `any`, para T0, Ollama saudável é preferido. Escolha explícita da
+pessoa nunca é substituída dentro do limite de privacidade escolhido.
 
 Só existe fallback automático de `omniroute` para `deepseek-official` quando a
 falha ocorre antes de qualquer conteúdo visível ou tool call. Depois disso, o
@@ -37,4 +40,3 @@ configurado e uso reportado.
 Não há cascata silenciosa do perfil privado local para serviço externo. Não há
 retry no meio do stream. O OmniRoute continua opcional conforme E1/E2 e nenhum
 subsistema MITM, TPROXY ou instalador de CA entra no Studio.
-

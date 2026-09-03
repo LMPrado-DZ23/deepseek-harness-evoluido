@@ -49,10 +49,20 @@ export class StudioRouteHealthService {
     switches(scope) {
         return this.repository.events().filter(event => event.org_id === scope.orgId && event.tenant_id === scope.tenantId);
     }
-    chooseRoute(scope, purpose, explicitRoute) {
-        if (explicitRoute !== undefined)
-            return { route: explicitRoute, explicit: true, reason: 'Rota escolhida pela pessoa.' };
+    async chooseRoute(scope, purpose, options = { privacy: 'any' }) {
         const local = this.get(scope, this.config.localRoute);
+        if (options.privacy === 'local-only') {
+            const localSelected = options.explicitRoute === undefined || options.explicitRoute === this.config.localRoute;
+            if (localSelected && local?.state === 'OK') {
+                return { route: this.config.localRoute, explicit: options.explicitRoute !== undefined, reason: 'Perfil privado restrito à IA local.' };
+            }
+            const reason = 'IA local indisponível; nenhuma informação foi enviada para uma rota externa.';
+            await this.auditSwitch(scope, options.explicitRoute ?? this.config.localRoute, 'blocked', reason, options.explicitRoute !== undefined);
+            return { route: undefined, explicit: options.explicitRoute !== undefined, reason };
+        }
+        if (options.explicitRoute !== undefined) {
+            return { route: options.explicitRoute, explicit: true, reason: 'Rota escolhida pela pessoa.' };
+        }
         if (purpose === 'T0' && local?.state === 'OK') {
             return { route: this.config.localRoute, explicit: false, reason: 'Modelo local saudável preferido para leitura segura.' };
         }

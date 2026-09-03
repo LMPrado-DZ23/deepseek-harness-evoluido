@@ -48,6 +48,7 @@ describe('GitWorktreeManager', () => {
       worktree_path: snapshot.worktreePath, repository_path: root, base_commit: snapshot.baseCommit,
       status: 'PROPOSED', changed_files: [...diff.files], diff_bytes: diff.bytes,
       diff_sha256: (await import('node:crypto')).createHash('sha256').update(diff.text).digest('hex'),
+      main_changed_during_run: false, approved_by: 'person', approved_at: new Date().toISOString(),
       diagnostic: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
     })
     expect(await readFile(join(root, 'src', 'a.ts'), 'utf8')).toBe('export const value = 2\n')
@@ -70,6 +71,7 @@ describe('GitWorktreeManager', () => {
       worktree_path: snapshot.worktreePath, repository_path: root, base_commit: snapshot.baseCommit,
       status: 'PROPOSED' as const, changed_files: [...diff.files], diff_bytes: diff.bytes,
       diff_sha256: (await import('node:crypto')).createHash('sha256').update(diff.text).digest('hex'),
+      main_changed_during_run: false, approved_by: 'person', approved_at: new Date().toISOString(),
       diagnostic: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
     }
     await writeFile(join(root, 'src', 'a.ts'), 'person\n')
@@ -102,6 +104,7 @@ describe('GitWorktreeManager', () => {
         worktree_path: worktreePath, repository_path: root, base_commit: first.baseCommit,
         status: 'PROPOSED' as const, changed_files: [...diff.files], diff_bytes: diff.bytes,
         diff_sha256: (await import('node:crypto')).createHash('sha256').update(diff.text).digest('hex'),
+        main_changed_during_run: false, approved_by: 'person', approved_at: new Date().toISOString(),
         diagnostic: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
       }
     }
@@ -109,6 +112,8 @@ describe('GitWorktreeManager', () => {
     const firstProposal = await proposal('run-first', first.worktreePath)
     const secondProposal = await proposal('run-second', second.worktreePath)
     await expect(manager.applyProposal(firstProposal)).resolves.toBeUndefined()
+    await exec('git', ['add', '.'], { cwd: root })
+    await exec('git', ['commit', '-qm', 'apply first proposal'], { cwd: root })
     await expect(manager.applyProposal(secondProposal)).rejects.toMatchObject({ code: 'WRITE_CONFLICT' })
     expect(await readFile(join(root, 'src', 'a.ts'), 'utf8')).toBe('export const value = 2\n')
   })

@@ -8,7 +8,7 @@ import { GitWorktreeManager, StudioAgentService, } from './service.js';
 export * from './model.js';
 export * from './service.js';
 export const name = 'dz23-studio-agents';
-export const inject = ['agentPresets', 'agents', 'jobs', 'storageDomain', 'studioPolicy', 'subagents'];
+export const inject = ['agentPresets', 'agents', 'jobs', 'storageDomain', 'studioIdentity', 'studioPolicy', 'subagents'];
 class DomainAgentRepository {
     runTable;
     leaseTable;
@@ -41,8 +41,8 @@ function providerState(ctx, name) {
     if (!present)
         return 'NOT_PRESENT';
     const configured = name === 'codex'
-        ? Boolean(process.env.OPENAI_API_KEY || process.env.CODEX_API_KEY || existsSync(join(homedir(), '.codex', 'auth.json')))
-        : Boolean(process.env.ANTHROPIC_API_KEY || existsSync(join(homedir(), '.claude', '.credentials.json')) || existsSync(join(homedir(), '.claude.json')));
+        ? existsSync(join(homedir(), '.codex', 'auth.json'))
+        : existsSync(join(homedir(), '.claude', '.credentials.json')) || existsSync(join(homedir(), '.claude.json'));
     return configured ? 'OK' : 'NOT_CONFIGURED';
 }
 /** Mount the Studio-only delegation gate. Generic tool-subagent is deliberately not exposed. */
@@ -110,6 +110,12 @@ export async function apply(ctx, config = {}) {
                         ? { persona: inProcess.persona }
                         : {}),
                 });
+            },
+        },
+        identity: {
+            strongIdentityVerified(parentSessionId) {
+                return ctx.studioIdentity.service
+                    .strongIdentityForHarnessSession(String(parentSessionId));
             },
         },
         jobs: {

@@ -52,10 +52,9 @@ async function localRouteState(baseUrl, fallback, configured = true) {
 
 const home = homedir()
 const states = {
-  codex: await cliState('codex', Boolean(process.env.OPENAI_API_KEY || process.env.CODEX_API_KEY
-    || existsSync(join(home, '.codex', 'auth.json')))),
-  claude: await cliState('claude', Boolean(process.env.ANTHROPIC_API_KEY
-    || existsSync(join(home, '.claude', '.credentials.json')) || existsSync(join(home, '.claude.json')))),
+  codex: await cliState('codex', existsSync(join(home, '.codex', 'auth.json'))),
+  claude: await cliState('claude', existsSync(join(home, '.claude', '.credentials.json'))
+    || existsSync(join(home, '.claude.json'))),
   ollama: await localRouteState(process.env.DZ23_OLLAMA_BASE_URL, 'http://127.0.0.1:11434/v1'),
   omniroute: await localRouteState(
     process.env.DZ23_OMNIROUTE_BASE_URL,

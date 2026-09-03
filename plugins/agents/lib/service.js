@@ -43,6 +43,9 @@ export class StudioAgentService {
                 ? 'Esta tarefa sensível precisa de confirmação reforçada antes de começar.'
                 : 'Confirme antes de o assistente trabalhar numa cópia do projeto.');
         }
+        if (tier === 'T3' && !this.dependencies.identity.strongIdentityVerified(request.parent.session.id)) {
+            throw new DelegationError('APPROVAL_REQUIRED', 'Confirme com sua passkey antes de iniciar esta tarefa sensível.');
+        }
         const paths = request.intendedPaths.map(normalizeLeasePath);
         if (paths.length === 0)
             throw new DelegationError('INVALID_PATH', 'Declare ao menos um caminho que o assistente pretende alterar.');
@@ -128,6 +131,7 @@ export class StudioAgentService {
                 coordinator_session_id: String(coordinator.sessionId), provider: request.provider,
                 worktree_path: snapshot.worktreePath, repository_path: snapshot.repositoryPath, base_commit: snapshot.baseCommit,
                 status: 'RUNNING', changed_files: [], diff_bytes: 0, diff_sha256: createHash('sha256').update('').digest('hex'), diagnostic: null,
+                main_changed_during_run: false, approved_by: request.approval.approvedBy, approved_at: createdAt,
                 created_at: createdAt, updated_at: createdAt,
             });
             child = await this.dependencies.subagents.start(request.provider, {
@@ -153,14 +157,16 @@ export class StudioAgentService {
             const measuredTokens = this.dependencies.usage?.tokensFor(child);
             const tokenExceeded = request.budget?.maxTokens !== undefined
                 && measuredTokens !== undefined && measuredTokens > request.budget.maxTokens;
-            if (outsideChanged || pathViolation || diff.files.length > maxFiles || diff.bytes > maxDiffBytes || tokenExceeded) {
-                const reason = outsideChanged ? 'alteração detectada fora do worktree'
-                    : pathViolation ? 'arquivo fora dos caminhos aprovados'
-                        : tokenExceeded ? 'limite de tokens excedido'
-                            : diff.files.length > maxFiles ? 'limite de arquivos excedido' : 'limite de bytes do diff excedido';
-                return await this.#finish(runId, request, snapshot, coordinator, lease, 'BUDGET_EXCEEDED', reason, now, diff);
+            if (pathViolation || diff.files.length > maxFiles || diff.bytes > maxDiffBytes || tokenExceeded) {
+                const reason = pathViolation ? 'arquivo fora dos caminhos aprovados'
+                    : tokenExceeded ? 'limite de tokens excedido'
+                        : diff.files.length > maxFiles ? 'limite de arquivos excedido' : 'limite de bytes do diff excedido';
+                return await this.#finish(runId, request, snapshot, coordinator, lease, 'BUDGET_EXCEEDED', reason, now, diff, outsideChanged);
             }
-            return await this.#finish(runId, request, snapshot, coordinator, lease, 'PROPOSED', terminalText(result), now, diff);
+            const diagnostic = outsideChanged
+                ? 'Seu projeto mudou enquanto o assistente trabalhava; confira antes de aplicar.'
+                : terminalText(result);
+            return await this.#finish(runId, request, snapshot, coordinator, lease, 'PROPOSED', diagnostic, now, diff, outsideChanged);
         }
         catch (error) {
             if (snapshot === undefined || coordinator === undefined) {
@@ -179,7 +185,7 @@ export class StudioAgentService {
             await coordinator?.dispose().catch(() => undefined);
         }
     }
-    async #finish(runId, request, snapshot, coordinator, lease, status, diagnostic, now, diff = { text: '', bytes: 0, files: [] }) {
+    async #finish(runId, request, snapshot, coordinator, lease, status, diagnostic, now, diff = { text: '', bytes: 0, files: [] }, mainChangedDuringRun = false) {
         const updatedAt = now().toISOString();
         await this.dependencies.repository.putRun({
             run_id: runId, org_id: request.orgId, tenant_id: request.tenantId,
@@ -188,6 +194,9 @@ export class StudioAgentService {
             worktree_path: snapshot.worktreePath, repository_path: snapshot.repositoryPath, base_commit: snapshot.baseCommit,
             status, changed_files: [...diff.files], diff_bytes: diff.bytes,
             diff_sha256: createHash('sha256').update(diff.text).digest('hex'), diagnostic,
+            main_changed_during_run: mainChangedDuringRun,
+            approved_by: request.approval.approvedBy,
+            approved_at: this.dependencies.repository.runs().find(record => record.run_id === runId)?.approved_at ?? updatedAt,
             created_at: this.dependencies.repository.runs().find(record => record.run_id === runId)?.created_at ?? updatedAt,
             updated_at: updatedAt,
         });

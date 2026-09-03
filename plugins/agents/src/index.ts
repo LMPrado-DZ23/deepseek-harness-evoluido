@@ -6,6 +6,7 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import type { Domain, KvTable } from '@deepseek-ai/dsh-storage-domain'
 import type { SubagentRun } from '@deepseek-ai/dsh-subagent'
 import type { PolicyDelegationGrant, StudioPolicyRuntime } from '@dz23-studio/policy'
+import type { StudioIdentityRuntime } from '@dz23-studio/identity'
 import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { delimiter, extname, join, resolve } from 'node:path'
@@ -31,7 +32,7 @@ export * from './model.js'
 export * from './service.js'
 
 export const name = 'dz23-studio-agents'
-export const inject = ['agentPresets', 'agents', 'jobs', 'storageDomain', 'studioPolicy', 'subagents']
+export const inject = ['agentPresets', 'agents', 'jobs', 'storageDomain', 'studioIdentity', 'studioPolicy', 'subagents']
 
 export interface Config {
   readonly worktreeRoot?: string
@@ -82,8 +83,8 @@ function providerState(ctx: Context, name: 'codex' | 'claude-code') {
   }))
   if (!present) return 'NOT_PRESENT' as const
   const configured = name === 'codex'
-    ? Boolean(process.env.OPENAI_API_KEY || process.env.CODEX_API_KEY || existsSync(join(homedir(), '.codex', 'auth.json')))
-    : Boolean(process.env.ANTHROPIC_API_KEY || existsSync(join(homedir(), '.claude', '.credentials.json')) || existsSync(join(homedir(), '.claude.json')))
+    ? existsSync(join(homedir(), '.codex', 'auth.json'))
+    : existsSync(join(homedir(), '.claude', '.credentials.json')) || existsSync(join(homedir(), '.claude.json'))
   return configured ? 'OK' as const : 'NOT_CONFIGURED' as const
 }
 
@@ -149,6 +150,12 @@ export async function apply(ctx: Context, config: Config = {}): Promise<void> {
             ? { persona: inProcess.persona }
             : {}),
         })
+      },
+    },
+    identity: {
+      strongIdentityVerified(parentSessionId) {
+        return (ctx.studioIdentity as StudioIdentityRuntime).service
+          .strongIdentityForHarnessSession(String(parentSessionId))
       },
     },
     jobs: {

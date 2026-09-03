@@ -56,6 +56,7 @@ describe('@dz23-studio/agents composition', () => {
       provide: vi.fn((_name: string, value: StudioAgentsRuntime) => { runtime = value }),
       on: vi.fn(() => vi.fn()),
       studioPolicy: { setDelegationGrantResolver: vi.fn(() => vi.fn()) },
+      studioIdentity: { service: { strongIdentityForHarnessSession: vi.fn(() => true) } },
       agentPresets: { mount: vi.fn(() => Promise.resolve()) },
       agents: {
         create: vi.fn((options: { sessionId: ReturnType<typeof SessionId>; meta: { cwd: string }; setup(agentCtx: unknown): Promise<void> }) => {

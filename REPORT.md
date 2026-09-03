@@ -12,7 +12,8 @@
 > `docs/pocs/P31-A-storage-postgres-proof.md`; não houve merge, push ou deploy.
 >
 > A Fase 3 está implementada na branch `codex/fase3-agents-routes`: PoC 3A GO
-> para isolamento e composição in-process, 196 testes e 100% de cobertura da
+> para isolamento e composição in-process, 198 testes sem PostgreSQL e 216/216
+> com PostgreSQL real, ambos com 100% de cobertura da
 > lógica determinística. Codex/Claude reais, provedores externos e deploy seguem
 > `NOT_EXECUTED`. Relatório vinculante: `docs/pocs/P35-phase3-agents-routes-proof.md`.
 

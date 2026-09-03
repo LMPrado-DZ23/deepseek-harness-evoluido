@@ -84,6 +84,7 @@ function harness(options: {
   createId?: () => string
   omitId?: boolean
   omitClock?: boolean
+  strongIdentity?: boolean
 } = {}) {
   const repository = new MemoryRepository(options.hideLeases, options.hideRuns)
   const jobs = new MemoryJobs()
@@ -123,6 +124,7 @@ function harness(options: {
         return Promise.resolve({ ...runWith(promise), dispose: childDispose })
       }),
     },
+    identity: { strongIdentityVerified: vi.fn(() => options.strongIdentity ?? true) },
     ...(options.usage === undefined ? {} : { usage: { tokensFor: () => options.usage } }),
     ...(options.omitClock ? {} : { now: () => new Date('2026-09-03T00:00:00.000Z') }),
     ...(options.omitId ? {} : { createId: options.createId ?? (() => 'run-1') }),
@@ -155,6 +157,7 @@ describe('StudioAgentService PoC 3A', () => {
     expect(h.repository.runs()[0]).toMatchObject({
       parent_session_id: 'person-session', coordinator_session_id: 'coordinator',
       worktree_path: '/copies/run', status: 'PROPOSED', changed_files: ['src/a.ts'], diff_bytes: 35,
+      main_changed_during_run: false, approved_by: 'user-1', approved_at: '2026-09-03T00:00:00.000Z',
     })
     expect(h.repository.leases()[0]).toMatchObject({ active: false, paths: ['src'], released_at: expect.any(String) })
     expect(h.childDispose).toHaveBeenCalledOnce()
@@ -197,11 +200,15 @@ describe('StudioAgentService PoC 3A', () => {
     expect(h.repository.runs()[0]).toMatchObject({ status: 'BUDGET_EXCEEDED', diagnostic: reason })
   })
 
-  it('detects a mutation in the person workspace and a measurable token overrun', async () => {
+  it('reports a person workspace mutation without discarding the proposal and detects a token overrun', async () => {
     const outside = harness({ mainAfter: 'changed' })
     outside.service.start(request())
-    await outside.jobs.entries[0]!.done
-    expect(outside.repository.runs()[0]?.diagnostic).toBe('alteração detectada fora do worktree')
+    await expect(outside.jobs.entries[0]!.done).resolves.toMatchObject({ status: 'completed' })
+    expect(outside.repository.runs()[0]).toMatchObject({
+      status: 'PROPOSED',
+      main_changed_during_run: true,
+      diagnostic: 'Seu projeto mudou enquanto o assistente trabalhava; confira antes de aplicar.',
+    })
 
     const tokens = harness({ usage: 101 })
     tokens.service.start(request({ budget: { maxTokens: 100 } }))
@@ -256,6 +263,18 @@ describe('StudioAgentService PoC 3A', () => {
     const h = harness()
     h.service.start(request({ ...flags, approval: { approved: true, tier: 'T3', approvedBy: 'u' } }))
     await expect(h.jobs.entries[0]!.done).resolves.toMatchObject({ status: 'completed' })
+  })
+
+  it('requires recent strong identity for T3 even when the approval object says approved', () => {
+    const h = harness({ strongIdentity: false })
+    expect(() => h.service.start(request({
+      touchesDeploy: true,
+      approval: { approved: true, tier: 'T3', approvedBy: 'user-1' },
+    }))).toThrowError(new DelegationError(
+      'APPROVAL_REQUIRED',
+      'Confirme com sua passkey antes de iniciar esta tarefa sensível.',
+    ))
+    expect(h.repository.runs()).toHaveLength(0)
   })
 
   it('normalizes wildcard paths and permits simultaneous non-overlapping leases', async () => {

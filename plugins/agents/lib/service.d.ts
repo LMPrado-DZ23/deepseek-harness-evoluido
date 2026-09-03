@@ -73,6 +73,9 @@ export interface SubagentPort {
 export interface UsagePort {
     tokensFor(run: SubagentRun): number | undefined;
 }
+export interface StrongIdentityPort {
+    strongIdentityVerified(parentSessionId: SessionId): boolean;
+}
 export interface AgentRepository {
     runs(): readonly AgentRunRecord[];
     leases(): readonly AgentLeaseRecord[];
@@ -112,6 +115,7 @@ export declare class StudioAgentService {
         readonly worktrees: WorktreePort;
         readonly coordinators: CoordinatorPort;
         readonly subagents: SubagentPort;
+        readonly identity: StrongIdentityPort;
         readonly usage?: UsagePort;
         readonly jobs: JobPort;
         readonly now?: () => Date;

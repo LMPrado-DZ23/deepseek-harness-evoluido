@@ -4,6 +4,7 @@ import type { RouteHealthRecord, RouteState, RouteSwitchEvent } from './model.js
 
 export interface RouteScope { readonly orgId: string; readonly tenantId: string }
 export interface RoutePrice { readonly inputPerMillion: number; readonly outputPerMillion: number }
+export type RoutePrivacy = 'local-only' | 'any'
 export interface RouteHealthRepository {
   routes(): readonly RouteHealthRecord[]
   events(): readonly RouteSwitchEvent[]
@@ -12,9 +13,14 @@ export interface RouteHealthRepository {
 }
 
 export interface RouteSelection {
-  readonly route: string
+  readonly route: string | undefined
   readonly explicit: boolean
   readonly reason: string
+}
+
+export interface RouteSelectionOptions {
+  readonly privacy: RoutePrivacy
+  readonly explicitRoute?: string
 }
 
 export interface RouteHealthConfig {
@@ -83,9 +89,24 @@ export class StudioRouteHealthService {
     return this.repository.events().filter(event => event.org_id === scope.orgId && event.tenant_id === scope.tenantId)
   }
 
-  chooseRoute(scope: RouteScope, purpose: string, explicitRoute?: string): RouteSelection {
-    if (explicitRoute !== undefined) return { route: explicitRoute, explicit: true, reason: 'Rota escolhida pela pessoa.' }
+  async chooseRoute(
+    scope: RouteScope,
+    purpose: string,
+    options: RouteSelectionOptions = { privacy: 'any' },
+  ): Promise<RouteSelection> {
     const local = this.get(scope, this.config.localRoute)
+    if (options.privacy === 'local-only') {
+      const localSelected = options.explicitRoute === undefined || options.explicitRoute === this.config.localRoute
+      if (localSelected && local?.state === 'OK') {
+        return { route: this.config.localRoute, explicit: options.explicitRoute !== undefined, reason: 'Perfil privado restrito à IA local.' }
+      }
+      const reason = 'IA local indisponível; nenhuma informação foi enviada para uma rota externa.'
+      await this.auditSwitch(scope, options.explicitRoute ?? this.config.localRoute, 'blocked', reason, options.explicitRoute !== undefined)
+      return { route: undefined, explicit: options.explicitRoute !== undefined, reason }
+    }
+    if (options.explicitRoute !== undefined) {
+      return { route: options.explicitRoute, explicit: true, reason: 'Rota escolhida pela pessoa.' }
+    }
     if (purpose === 'T0' && local?.state === 'OK') {
       return { route: this.config.localRoute, explicit: false, reason: 'Modelo local saudável preferido para leitura segura.' }
     }
