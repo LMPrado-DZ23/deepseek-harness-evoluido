@@ -14,6 +14,9 @@ importers:
       '@deepseek-ai/dsh-storage-domain':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage-domain
         version: link:../harness-studio-poc02/deepseek-harness/packages/storage/storage-domain
+      '@deepseek-ai/dsh-storage-json':
+        specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage-json
+        version: link:../harness-studio-poc02/deepseek-harness/packages/storage/storage-json
       '@deepseek-ai/dsh-storage-sqlite':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage-sqlite
         version: link:../harness-studio-poc02/deepseek-harness/packages/storage/storage-sqlite
