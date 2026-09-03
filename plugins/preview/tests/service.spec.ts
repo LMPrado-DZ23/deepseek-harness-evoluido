@@ -428,7 +428,12 @@ describe('StudioPreviewService maintenance and diagnostics', () => {
   })
 
   it('bounds a stuck runtime inventory call', async () => {
-    const h = createHarness({ runtimeTimeoutMs: 15, runtime: { listManaged: vi.fn(() => new Promise(() => undefined)) } })
+    const h = createHarness({
+      runtimeTimeoutMs: 15,
+      runtime: {
+        listManaged: vi.fn(() => new Promise<readonly { runtimeRef: string; previewId: string }[]>(() => undefined)),
+      },
+    })
     await expect(h.service.reconcile()).rejects.toMatchObject({ code: 'UNAVAILABLE' })
   })
 
