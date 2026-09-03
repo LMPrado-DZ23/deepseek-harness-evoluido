@@ -73,4 +73,50 @@ describe('generated import policy', () => {
   it('keeps ordinary client components valid', () => {
     expect(() => assertGeneratedSource([{ path: 'src/GeneratedApp.tsx', content: "'use client'; export default function App(){return <main><h1>Projeto</h1></main>}" }])).not.toThrow()
   })
+
+  it.each([
+    ['function directive', "export async function save(){'use server'; return 1}"],
+    ['arrow directive', "export const save = async () => {'use server'; return 1}"],
+    ['direct fetch', "export async function load(){return fetch('/api')}"],
+    ['indirect fetch', "export async function load(){return (0, fetch)('/api')}"],
+    ['window.fetch', "export async function load(){return window.fetch('/api')}"],
+    ['window element fetch', "export async function load(){return window['fetch']('/api')}"],
+    ['WebSocket', "export const socket = new WebSocket('ws://localhost')"],
+    ['window element WebSocket', "export const socket = new window['WebSocket']('ws://localhost')"],
+    ['XMLHttpRequest', 'export const request = new XMLHttpRequest()'],
+    ['window element XMLHttpRequest', "export const request = new window['XMLHttpRequest']()"],
+    ['EventSource', "export const events = new EventSource('/events')"],
+    ['window element EventSource', "export const events = new window['EventSource']('/events')"],
+    ['computed window fetch', "export async function load(){return window['fet' + 'ch']('/api')}"],
+    ['computed window WebSocket', "export const socket = new window['Web' + 'Socket']('ws://localhost')"],
+    ['reflective window fetch', "export async function load(){return Reflect.get(window, 'fetch')('/api')}"],
+    ['aliased window fetch', "const browser = window; export async function load(){return browser.fetch('/api')}"],
+    ['worker self fetch', "const worker = self; export async function load(){return worker['fetch']('/api')}"],
+    ['document defaultView fetch', "export async function load(){return Reflect.get(document.defaultView, 'fetch')('/api')}"],
+    ['computed document fetch', "export async function load(){return document.defaultView!['fet' + 'ch']('/api')}"],
+    ['frames global fetch', "export async function load(){return frames[0]!['fetch']('/api')}"],
+    ['indirect Function constructor', "export const global = (()=>{}).constructor('return this')()"],
+    ['computed Function constructor', "const global = (()=>{})['con' + 'structor']('return this')(); export const value = global['fet' + 'ch']"],
+    ['navigator network access', "export const sent = navigator.sendBeacon('/collect', 'x')"],
+  ])('rejects nested directives and network access: %s', (_case, content) => {
+    expect(() => assertGeneratedSource([{ path: 'src/GeneratedApp.tsx', content }])).toThrow(GeneratedFileRejectedError)
+  })
+
+  it('does not treat comments or ordinary strings as executable constructs', () => {
+    expect(() => assertGeneratedSource([{
+      path: 'src/GeneratedApp.tsx',
+      content: [
+        "// fetch, WebSocket, XMLHttpRequest, EventSource and 'use server' are documentation terms",
+        "export const help = \"Do not call fetch or add a 'use server' directive\"",
+        'export default function App(){return <p>{help}</p>}',
+      ].join('\n'),
+    }])).not.toThrow()
+  })
+
+  it('does not reject harmless object and type property labels', () => {
+    expect(() => assertGeneratedSource([{
+      path: 'src/GeneratedApp.tsx',
+      content: "interface Labels { fetch: string; WebSocket: string } export const labels: Labels = { fetch: 'buscar', WebSocket: 'tempo real' }",
+    }])).not.toThrow()
+  })
 })

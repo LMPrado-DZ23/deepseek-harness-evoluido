@@ -15,6 +15,12 @@ const ALLOWED_PREFIXES = [
   '@/src/components/generated/', '@/components/generated/',
   '@/src/components/ui/', '@/components/ui/',
 ] as const
+const FORBIDDEN_GLOBALS = new Set([
+  'process', 'globalThis', 'window', 'self', 'document', 'frames', 'top', 'parent',
+  'navigator', 'location', 'Reflect', 'eval', 'Function',
+])
+const FORBIDDEN_NETWORK_APIS = new Set(['fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource'])
+const FORBIDDEN_ESCAPE_PROPERTIES = new Set(['constructor', '__proto__', 'prototype'])
 
 export function assertGeneratedSource(files: readonly GeneratedFile[]): void {
   const generatedPaths = new Set(files.map(file => normalizePath(file.path)))
@@ -43,16 +49,38 @@ function visitImports(source: ts.SourceFile, inspect: (moduleName: string | unde
 }
 
 function assertNoServerOrUnsafeSource(path: string, source: ts.SourceFile): void {
-  const directive = source.statements.find(statement => ts.isExpressionStatement(statement) && ts.isStringLiteral(statement.expression) && statement.expression.text === 'use server')
-  if (directive !== undefined) throw rejectedSource(path, 'use server')
   const walk = (node: ts.Node): void => {
-    if (ts.isIdentifier(node) && ['process', 'globalThis', 'eval', 'Function'].includes(node.text)) throw rejectedSource(path, node.text)
+    if (ts.isExpressionStatement(node) && ts.isStringLiteral(node.expression) && node.expression.text === 'use server') throw rejectedSource(path, 'use server')
+    if (ts.isIdentifier(node) && !isPropertyLabel(node) && (FORBIDDEN_GLOBALS.has(node.text) || FORBIDDEN_NETWORK_APIS.has(node.text))) throw rejectedSource(path, node.text)
+    if (ts.isPropertyAccessExpression(node) && FORBIDDEN_NETWORK_APIS.has(node.name.text)) throw rejectedSource(path, node.name.text)
+    const elementName = ts.isElementAccessExpression(node) ? staticPropertyName(node.argumentExpression) : undefined
+    if (elementName !== undefined && FORBIDDEN_NETWORK_APIS.has(elementName)) throw rejectedSource(path, elementName)
+    if (ts.isPropertyAccessExpression(node) && FORBIDDEN_ESCAPE_PROPERTIES.has(node.name.text)) throw rejectedSource(path, node.name.text)
+    if (elementName !== undefined && FORBIDDEN_ESCAPE_PROPERTIES.has(elementName)) throw rejectedSource(path, elementName)
     if (ts.isMetaProperty(node) && node.keywordToken === ts.SyntaxKind.ImportKeyword) throw rejectedSource(path, 'import.meta')
     if (ts.isJsxAttribute(node) && node.name.getText(source) === 'dangerouslySetInnerHTML') throw rejectedSource(path, 'dangerouslySetInnerHTML')
     if ((ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) && ['script', 'iframe', 'object'].includes(node.tagName.getText(source).toLowerCase())) throw rejectedSource(path, `<${node.tagName.getText(source)}>`)
     ts.forEachChild(node, walk)
   }
   walk(source)
+}
+
+function staticPropertyName(node: ts.Expression): string | undefined {
+  if (ts.isStringLiteralLike(node)) return node.text
+  if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isTypeAssertionExpression(node) || ts.isNonNullExpression(node) || ts.isSatisfiesExpression(node)) return staticPropertyName(node.expression)
+  if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+    const left = staticPropertyName(node.left)
+    const right = staticPropertyName(node.right)
+    return left === undefined || right === undefined ? undefined : left + right
+  }
+  return undefined
+}
+
+function isPropertyLabel(node: ts.Identifier): boolean {
+  const parent = node.parent
+  if (ts.isPropertyAccessExpression(parent) && parent.name === node) return true
+  if ((ts.isPropertyAssignment(parent) || ts.isShorthandPropertyAssignment(parent) || ts.isMethodDeclaration(parent) || ts.isPropertyDeclaration(parent) || ts.isPropertySignature(parent) || ts.isMethodSignature(parent)) && parent.name === node) return !ts.isShorthandPropertyAssignment(parent)
+  return false
 }
 
 function assertAllowedModule(fromPath: string, moduleName: string | undefined, generatedPaths: ReadonlySet<string>): void {
