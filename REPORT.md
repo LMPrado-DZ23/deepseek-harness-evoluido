@@ -12,8 +12,10 @@
 > com 94,94% de statements globais e 90,41% no núcleo Prompt-to-App; o golden
 > set fechou 12/18 casos executáveis e expôs 36 critérios `NOT_AUTOMATED`, mantendo
 > SaaS e dashboard como `NOT_IMPLEMENTED`. LLM real é `NOT_EXECUTED`, preview e
-> publicação são `NOT_PRESENT`, e experiência leiga é `NOT_VALIDATED`. Não
-> houve merge, push, PR ou deploy. Redistribuição e primeiro push continuam
+> publicação são `NOT_PRESENT`, e experiência leiga é `NOT_VALIDATED`. O
+> fechamento verificado pelo Claude foi integrado por fast-forward local em
+> `codex/p30-policy-foundation@58f77d3`; não houve push, PR ou deploy.
+> Redistribuição e primeiro push continuam
 > bloqueados até a licença do Studio e o inventário completo de dependências,
 > incluindo `sharp`/libvips, Nodemailer, fontes, Next, Tailwind e componentes.
 >

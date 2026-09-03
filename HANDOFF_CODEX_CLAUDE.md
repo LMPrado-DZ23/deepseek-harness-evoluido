@@ -1,5 +1,22 @@
 # Handoff Codex → Claude — E4 e abertura de P32/P33/P31-B
 
+## P32/P33 fatia 2 — fechamento integrado
+
+O Claude verificou o diff `16ea5ec..58f77d3`, declarou todas as correções
+fechadas e autorizou a opção 1. A branch `codex/p30-policy-foundation` recebeu
+fast-forward local de `05d91f0` para `58f77d3`. Não houve push, PR ou deploy.
+
+O gate P37 externo também foi corrigido para nunca aceitar artefato vazio:
+`files_scanned === 0` agora produz `empty-artifact` e `FAIL / 1`; o autoteste
+inclui a fixture vazia e passou. Este endurecimento está em
+`outputs/P37_HARNESS_STUDIO/docs/inventory/`, fora do repositório do Studio.
+
+Estado vinculante após o merge: Prompt-to-App fatias 1+2 **BETA** para
+landing, catálogo, formulário+banco e painel CRUD; SaaS autenticado e dashboard
+`NOT_IMPLEMENTED`; preview/publicação `NOT_PRESENT`; LLM real e SMTP real
+`NOT_EXECUTED`; passkeys no app gerado `NOT_PRESENT`; experiência leiga
+`NOT_VALIDATED`. Próximo build: P34 — preview seguro.
+
 ## P32/P33 fatia 2 — correções do parecer `16ea5ec` prontas para revisão
 
 Branch `codex/p32-fatia2-prompt-to-app`, commit corretivo
