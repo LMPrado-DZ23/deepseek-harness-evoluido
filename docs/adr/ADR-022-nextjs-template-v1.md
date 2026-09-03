@@ -13,7 +13,7 @@ O template também fixa os cabeçalhos CSP, `Referrer-Policy`,
 `X-Content-Type-Options`, `X-Frame-Options` e `Permissions-Policy`. A CSP
 mantém script e estilo inline somente pela compatibilidade atual do runtime do
 Next; reduzi-los com nonce fica para um hardening posterior e não autoriza
-origens externas.
+origens externas. Portanto, a CSP atual é explicitamente de nível protótipo.
 
 As versões são exatas e o lockfile passou pelas políticas de idade mínima da
 cadeia de suprimentos. Pacotes publicados no mesmo dia foram recusados e
@@ -28,6 +28,12 @@ não-root, raiz somente leitura, `CapDrop=ALL`, `no-new-privileges` e limites de
 recursos. O `playwright.config.ts` inicia `next start` dentro do mesmo
 contêiner do teste. A prova inspeciona a configuração Docker e tenta uma
 conexão de saída, que deve falhar.
+
+O servidor da prova roda com `NODE_ENV=production`. O entregador local de
+códigos só é habilitado pela flag interna `DZ23_STUDIO_VERIFICATION=1` definida
+no arquivo protegido do Playwright. Cookies `Secure` exigem HTTPS fora da
+exceção de loopback dos navegadores; por isso o P34 deve expor qualquer preview
+por HTTPS através da borda Caddy.
 
 Os componentes em `src/components/ui` são cópias adaptadas e reduzidas do
 registro oficial `new-york-v4` do shadcn/ui 4.20.1 (MIT); não há cliente do

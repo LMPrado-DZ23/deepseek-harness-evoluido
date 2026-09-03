@@ -16,10 +16,12 @@
 - Plano completo com duas fatias apareceu antes da aprovação no viewport móvel.
 - Resultado mostrou por critério `Passou` ou `Não verificado automaticamente`.
 - Auditoria axe no estado final: zero violações.
-- Execução: contêiner Playwright fixado, `--network none`, usuário não root,
-  `CapDrop=ALL`, `no-new-privileges`, raiz somente leitura e limites de CPU,
-  memória, processos e memória compartilhada.
-- Imagem: `sha256:c5708d3fff608da8d916fb5ae79dc3e4eba495fca376134a7c607a8e2216405d`.
+- Execução final após as correções: **2/2 PASS** no contêiner Playwright
+  fixado, com `--network none`, usuário `10001:10001`, `CapDrop=ALL`,
+  `no-new-privileges`, raiz e dois bind mounts somente leitura, além de limites
+  de CPU, memória, processos e memória compartilhada. O Harness fixado foi
+  montado separadamente e somente para resolver os links locais dos pacotes.
+- Imagem: `sha256:c2011c57e0d8a2a66abb8626b53b2ef0abeedd7675ba4593924ee7bb99f2b33e`.
 
 O LLM e o construtor são portas determinísticas, mas toda a jornada usa o
 handler, os schemas, o serviço, a máquina de estados e o job service reais. O

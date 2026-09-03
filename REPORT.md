@@ -5,7 +5,12 @@
 > painel CRUD. Banco, migrações, repositórios, autenticação, sessão, CSRF,
 > papéis e ações são determinísticos e protegidos do modelo. A prova de acesso
 > executou 401→200 e login→criar→editar→excluir em contêiner com
-> `NetworkMode=none`; o golden set fechou 12/18 casos executáveis, mantendo
+> `NetworkMode=none`. Após a revisão independente, as listas de todo formulário
+> exigem owner/member, códigos ficam ligados ao navegador e limitados, a saída
+> do modelo passa por política AST, a verificação roda com `NODE_ENV=production`
+> e o logotipo é copiado, protegido e renderizado. Foram aprovados 293 testes,
+> com 94,94% de statements globais e 90,41% no núcleo Prompt-to-App; o golden
+> set fechou 12/18 casos executáveis e expôs 36 critérios `NOT_AUTOMATED`, mantendo
 > SaaS e dashboard como `NOT_IMPLEMENTED`. LLM real é `NOT_EXECUTED`, preview e
 > publicação são `NOT_PRESENT`, e experiência leiga é `NOT_VALIDATED`. Não
 > houve merge, push, PR ou deploy.

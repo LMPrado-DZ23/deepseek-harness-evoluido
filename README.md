@@ -46,6 +46,8 @@ Claude Code reais continuam `NOT_EXECUTED`. Consulte
 [prova P35](./docs/pocs/P35-phase3-agents-routes-proof.md).
 
 A fatia 2 gera dados, formulários, acesso e painel CRUD sobre `node:sqlite`.
+Envios comuns podem ser públicos, mas listas de cadastros nunca são públicas;
+dados sensíveis exigem acesso também no envio.
 Esquema, migrações, repositórios, auth, sessão, CSRF e ações são protegidos e
 nunca vêm do modelo. As provas executaram cadastro/lista e o ciclo completo
 login→criar→editar→excluir em contêiner sem rede. Consulte as ADRs

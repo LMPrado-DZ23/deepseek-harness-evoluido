@@ -34,12 +34,13 @@ describe('AppSpec acceptance compiler', () => {
       { name: 'E-mail', type: 'email' as const, required: false },
     ] }] }
     const checks = acceptanceChecks(databaseSpec, 'form-database')
-    expect(checks).toContainEqual(expect.objectContaining({ kind: 'flow', flow: expect.objectContaining({ form_test_id: 'contato-form', list_test_id: 'contato-list', marker_field: 'nome' }) }))
+    expect(checks).toContainEqual(expect.objectContaining({ kind: 'flow', flow: expect.objectContaining({ form_test_id: 'contato-form', list_test_id: 'contato-list', marker_field: 'nome', submit_requires_auth: false, list_requires_auth: true }) }))
     const root = await mkdtemp(join(tmpdir(), 'dz23-acceptance-flow-')); roots.push(root)
     await writeAcceptanceArtifacts(root, databaseSpec, 'form-database')
     const generated = await readFile(resolve(root, 'tests/e2e/appspec.spec.ts'), 'utf8')
     expect(generated).toContain('getByTestId("contato-form")')
     expect(generated).toContain('getByTestId("contato-list")')
+    expect(generated).toContain('toHaveCount(0);await loginAsOwner(page)')
     expect(generated).toContain("getByRole('button',{name:'Salvar'})")
   })
 
@@ -50,7 +51,7 @@ describe('AppSpec acceptance compiler', () => {
     ] }] }
     const checks = acceptanceChecks(databaseSpec, 'crud-panel')
     expect(checks).toContainEqual(expect.objectContaining({ kind: 'auth' }))
-    expect(checks).toContainEqual(expect.objectContaining({ kind: 'crud', flow: expect.objectContaining({ form_test_id: 'cliente-create-form', requires_auth: true }) }))
+    expect(checks).toContainEqual(expect.objectContaining({ kind: 'crud', flow: expect.objectContaining({ form_test_id: 'cliente-create-form', submit_requires_auth: true, list_requires_auth: true }) }))
     const root = await mkdtemp(join(tmpdir(), 'dz23-acceptance-crud-')); roots.push(root)
     await writeAcceptanceArtifacts(root, databaseSpec, 'crud-panel')
     const generated = await readFile(resolve(root, 'tests/e2e/appspec.spec.ts'), 'utf8')

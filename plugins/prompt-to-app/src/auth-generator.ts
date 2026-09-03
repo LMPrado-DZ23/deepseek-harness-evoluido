@@ -11,9 +11,13 @@ export interface GeneratedAuthLayer {
 }
 
 export function requiresGeneratedAuth(spec: AppSpecV1, category: StudioProjectCategory): boolean {
-  return category === 'crud-panel' || (category === 'form-database' && (
+  return category === 'crud-panel' || category === 'form-database'
+}
+
+export function requiresFormSubmissionAuth(spec: AppSpecV1): boolean {
+  return (
     spec.sensitive_data.detected.length > 0 || spec.entities.some(entity => entity.kind === 'database' && entity.sensitive)
-  ))
+  )
 }
 
 export function generateAuthLayer(spec: AppSpecV1, category: StudioProjectCategory): GeneratedAuthLayer {
@@ -51,7 +55,7 @@ export function migrateAuth(database: DatabaseSync): void {
     database.exec(\`
       CREATE TABLE IF NOT EXISTS auth_users (id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, role TEXT NOT NULL CHECK (role IN ('owner','member')), created_at TEXT NOT NULL) STRICT;
       CREATE TABLE IF NOT EXISTS auth_invites (id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, invited_by TEXT NOT NULL REFERENCES auth_users(id), expires_at TEXT NOT NULL, used_at TEXT) STRICT;
-      CREATE TABLE IF NOT EXISTS auth_codes (id TEXT PRIMARY KEY, email TEXT NOT NULL, code_hash TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts BETWEEN 0 AND 5), expires_at TEXT NOT NULL, consumed_at TEXT) STRICT;
+      CREATE TABLE IF NOT EXISTS auth_codes (id TEXT PRIMARY KEY, request_id TEXT NOT NULL UNIQUE, email TEXT NOT NULL, code_hash TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts BETWEEN 0 AND 5), issued_at TEXT NOT NULL, expires_at TEXT NOT NULL, consumed_at TEXT) STRICT;
       CREATE INDEX IF NOT EXISTS auth_codes_email ON auth_codes(email, expires_at);
       CREATE TABLE IF NOT EXISTS auth_sessions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES auth_users(id), token_hash TEXT NOT NULL UNIQUE, csrf_hash TEXT NOT NULL, expires_at TEXT NOT NULL, revoked_at TEXT) STRICT;
       CREATE INDEX IF NOT EXISTS auth_sessions_token ON auth_sessions(token_hash);
@@ -73,7 +77,7 @@ export interface EmailSender {
 
 export function createEmailSender(env: Readonly<Record<string, string | undefined>> = process.env): EmailSender {
   const mode = env.APP_EMAIL_MODE ?? 'studio-capture'
-  if (env.NODE_ENV === 'production' && mode !== 'smtp') throw new Error('STUDIO_CAPTURE_FORBIDDEN_IN_PRODUCTION')
+  if (mode === 'studio-capture' && env.DZ23_STUDIO_VERIFICATION !== '1') throw new Error('STUDIO_CAPTURE_FORBIDDEN_OUTSIDE_VERIFICATION')
   if (mode === 'studio-capture') return new StudioCaptureEmailSender(env.DATA_DIR ?? './data')
   if (mode !== 'smtp') throw new Error('APP_EMAIL_MODE_INVALID')
   const url = required(env.APP_SMTP_URL, 'APP_SMTP_URL')
@@ -110,6 +114,8 @@ import type { EmailSender } from './email'
 import { migrateAuth } from './migrations'
 
 const TEN_MINUTES = 10 * 60 * 1000
+const FIFTEEN_MINUTES = 15 * 60 * 1000
+const MINIMUM_ISSUE_INTERVAL = 60 * 1000
 const DAY = 24 * 60 * 60 * 1000
 const SESSION_TTL = 14 * DAY
 
@@ -133,20 +139,25 @@ export class GeneratedAuthService {
     this.createCode = options.createCode ?? (() => String(randomInt(0, 1_000_000)).padStart(6, '0'))
     migrateAuth(this.database)
   }
-  async requestCode(rawEmail: string): Promise<'sent' | 'suppressed'> {
-    const email = normalizeEmail(rawEmail); const now = this.now(); const users = Number(this.database.prepare('SELECT count(*) AS total FROM auth_users').get()?.total ?? 0)
+  async requestCode(rawEmail: string): Promise<{ status: 'sent' | 'suppressed'; requestId: string }> {
+    const email = normalizeEmail(rawEmail); const now = this.now(); const requestId = this.createSecret(); const nowIso = now.toISOString()
+    this.database.prepare('DELETE FROM auth_codes WHERE expires_at <= ?').run(nowIso)
+    const users = Number(this.database.prepare('SELECT count(*) AS total FROM auth_users').get()?.total ?? 0)
     const user = this.database.prepare('SELECT id FROM auth_users WHERE email = ?').get(email)
-    const invite = this.database.prepare('SELECT id FROM auth_invites WHERE email = ? AND used_at IS NULL AND expires_at > ?').get(email, now.toISOString())
-    if (user === undefined && invite === undefined && !(users === 0 && email === this.ownerEmail)) return 'suppressed'
-    this.database.prepare('UPDATE auth_codes SET consumed_at = ? WHERE email = ? AND consumed_at IS NULL').run(now.toISOString(), email)
+    const invite = this.database.prepare('SELECT id FROM auth_invites WHERE email = ? AND used_at IS NULL AND expires_at > ?').get(email, nowIso)
+    if (user === undefined && invite === undefined && !(users === 0 && email === this.ownerEmail)) return { status: 'suppressed', requestId }
+    const windowStart = new Date(now.getTime() - FIFTEEN_MINUTES).toISOString(); const intervalStart = new Date(now.getTime() - MINIMUM_ISSUE_INTERVAL).toISOString()
+    const recent = Number(this.database.prepare('SELECT count(*) AS total FROM auth_codes WHERE email = ? AND issued_at > ?').get(email, windowStart)?.total ?? 0)
+    const tooSoon = this.database.prepare('SELECT 1 FROM auth_codes WHERE email = ? AND issued_at > ? LIMIT 1').get(email, intervalStart) !== undefined
+    if (recent >= 3 || tooSoon) return { status: 'suppressed', requestId }
     const code = this.createCode(); if (!/^\\d{6}$/u.test(code)) throw new AppAuthError('INVALID', 'Código inválido.')
     const expiresAt = new Date(now.getTime() + TEN_MINUTES).toISOString()
-    this.database.prepare('INSERT INTO auth_codes (id,email,code_hash,attempts,expires_at,consumed_at) VALUES (?,?,?,?,?,NULL)').run(this.createId(), email, hashCode(code), 0, expiresAt)
-    await this.sender.sendCode({ email, code, expiresAt }); return 'sent'
+    this.database.prepare('INSERT INTO auth_codes (id,request_id,email,code_hash,attempts,issued_at,expires_at,consumed_at) VALUES (?,?,?,?,?,?,?,NULL)').run(this.createId(), requestId, email, hashCode(code), 0, nowIso, expiresAt)
+    await this.sender.sendCode({ email, code, expiresAt }); return { status: 'sent', requestId }
   }
-  verifyCode(rawEmail: string, code: string): { token: string; csrf: string; session: AuthSession } {
+  verifyCode(rawEmail: string, requestId: string, code: string): { token: string; csrf: string; session: AuthSession } {
     const email = normalizeEmail(rawEmail); const now = this.now()
-    const row = this.database.prepare('SELECT * FROM auth_codes WHERE email = ? AND consumed_at IS NULL ORDER BY expires_at DESC LIMIT 1').get(email) as Record<string, unknown> | undefined
+    const row = this.database.prepare('SELECT * FROM auth_codes WHERE request_id = ? AND email = ? AND consumed_at IS NULL LIMIT 1').get(requestId, email) as Record<string, unknown> | undefined
     if (row === undefined) throw new AppAuthError('INVALID', 'Código inválido.')
     if (Number(row.attempts) >= 5) throw new AppAuthError('LOCKED', 'Código bloqueado.')
     if (Date.parse(String(row.expires_at)) <= now.getTime()) throw new AppAuthError('EXPIRED', 'Código expirado.')
@@ -205,11 +216,12 @@ import { GeneratedAuthService, type AppRole, type AuthSession } from './service'
 
 export const SESSION_COOKIE = 'dz23_app_session'
 export const CSRF_COOKIE = 'dz23_app_csrf'
+export const CODE_REQUEST_COOKIE = 'dz23_app_code_request'
 
 function ownerEmail(): string { const value=process.env.APP_OWNER_EMAIL; if (value===undefined || value==='') throw new Error('APP_OWNER_EMAIL_REQUIRED'); return value }
 async function useService<T>(work: (service: GeneratedAuthService) => Promise<T> | T): Promise<T> { const database=openDatabase(); try { return await work(new GeneratedAuthService({ database, sender:createEmailSender(), ownerEmail:ownerEmail() })) } finally { database.close() } }
-export async function requestAccessCode(email: string): Promise<'sent'|'suppressed'> { return useService(service => service.requestCode(email)) }
-export async function verifyAccessCode(email: string, code: string): Promise<{ token:string; csrf:string }> { return useService(service => service.verifyCode(email,code)) }
+export async function requestAccessCode(email: string): Promise<'sent'|'suppressed'> { const result=await useService(service => service.requestCode(email)); if(result.status==='sent'){const jar=await cookies();jar.set(CODE_REQUEST_COOKIE,result.requestId,{secure:true,httpOnly:true,sameSite:'lax',path:'/',maxAge:10*60})} return result.status }
+export async function verifyAccessCode(email: string, code: string): Promise<{ token:string; csrf:string }> { const jar=await cookies(); const requestId=jar.get(CODE_REQUEST_COOKIE)?.value; if(requestId===undefined)throw new Error('CODE_REQUEST_REQUIRED'); const issued=await useService(service => service.verifyCode(email,requestId,code)); jar.delete(CODE_REQUEST_COOKIE); return issued }
 export async function currentSession(): Promise<AuthSession | null> { const jar=await cookies(); const token=jar.get(SESSION_COOKIE)?.value; if (token===undefined) return null; try { return await useService(service => service.authenticate(token)) } catch { return null } }
 export async function requireFormSession(formData: FormData, roles: readonly AppRole[]=['owner','member']): Promise<AuthSession> { const jar=await cookies(); const token=jar.get(SESSION_COOKIE)?.value; if (token===undefined) throw new Error('AUTH_REQUIRED'); return useService(service => { const session=service.authenticate(token); service.validateCsrf(session,jar.get(CSRF_COOKIE)?.value,String(formData.get('_csrf')??'')); if (!roles.includes(session.role)) throw new Error('ROLE_FORBIDDEN'); return session }) }
 export async function setSessionCookies(issued: { token:string; csrf:string }): Promise<void> { const jar=await cookies(); const common={ secure:true, sameSite:'lax' as const, path:'/', maxAge:14*24*60*60 }; jar.set(SESSION_COOKIE,issued.token,{...common,httpOnly:true}); jar.set(CSRF_COOKIE,issued.csrf,{...common,httpOnly:false}) }
@@ -251,9 +263,9 @@ import { AppAuthError, GeneratedAuthService } from '../src/auth/service'
 function fixture() { const directory=mkdtempSync(join(tmpdir(),'dz23-auth-')); const database=openDatabase(directory); let now=new Date('2026-09-03T12:00:00.000Z'); let secret=0; const sent:string[]=[]; const service=new GeneratedAuthService({ database,ownerEmail:'owner@example.test',sender:{sendCode:async m=>{sent.push(m.code)},sendInvitation:async()=>{}},now:()=>now,createId:()=>\`id-\${++secret}\`,createSecret:()=>\`secret-\${++secret}\`,createCode:()=> '123456' }); return {directory,database,service,sent,advance:(ms:number)=>{now=new Date(now.getTime()+ms)},close:()=>{database.close();rmSync(directory,{recursive:true,force:true})}} }
 describe('acesso real gerado pelo Studio',()=>{
   it('versiona auth sem avançar as migrações de dados',()=>{const f=fixture();try{expect(f.database.prepare('PRAGMA user_version').get()).toMatchObject({user_version:1});expect(f.database.prepare('SELECT max(version) AS version FROM auth_schema_migrations').get()).toMatchObject({version:1})}finally{f.close()}})
-  it('cria o primeiro owner e valida sessão e CSRF',async()=>{const f=fixture();try{expect(await f.service.requestCode('owner@example.test')).toBe('sent');const issued=f.service.verifyCode('owner@example.test',f.sent[0]!);expect(f.service.authenticate(issued.token)).toMatchObject({email:'owner@example.test',role:'owner'});expect(()=>f.service.validateCsrf(issued.session,issued.csrf,undefined)).toThrow(AppAuthError);expect(()=>f.service.validateCsrf(issued.session,issued.csrf,issued.csrf)).not.toThrow();f.service.revoke(issued.token);expect(()=>f.service.authenticate(issued.token)).toThrow('Sessão encerrada')}finally{f.close()}})
-  it('expira sessões e bloqueia o quinto código errado',async()=>{const f=fixture();try{await f.service.requestCode('owner@example.test');for(let attempt=1;attempt<=5;attempt++)expect(()=>f.service.verifyCode('owner@example.test','000000')).toThrow(attempt===5?'Código bloqueado':'Código inválido');expect(()=>f.service.verifyCode('owner@example.test','123456')).toThrow();await f.service.requestCode('owner@example.test');const issued=f.service.verifyCode('owner@example.test','123456');f.advance(15*24*60*60*1000);expect(()=>f.service.authenticate(issued.token)).toThrow('Sessão expirada')}finally{f.close()}})
-  it('permite que o owner convide um member sem elevar o papel',async()=>{const f=fixture();try{await f.service.requestCode('owner@example.test');const owner=f.service.verifyCode('owner@example.test','123456');await f.service.invite(owner.token,owner.csrf,owner.csrf,'member@example.test');expect(await f.service.requestCode('member@example.test')).toBe('sent');const member=f.service.verifyCode('member@example.test','123456');expect(f.service.authenticate(member.token)).toMatchObject({email:'member@example.test',role:'member'});await expect(f.service.invite(member.token,member.csrf,member.csrf,'other@example.test')).rejects.toThrow('Somente o proprietário')}finally{f.close()}})
-  it('suprime desconhecido e recusa entrega insegura',async()=>{const f=fixture();try{expect(await f.service.requestCode('other@example.test')).toBe('suppressed');expect(()=>createEmailSender({NODE_ENV:'production',APP_EMAIL_MODE:'studio-capture'})).toThrow('STUDIO_CAPTURE_FORBIDDEN_IN_PRODUCTION');expect(()=>createEmailSender({APP_EMAIL_MODE:'invalid'})).toThrow('APP_EMAIL_MODE_INVALID');expect(()=>createEmailSender({APP_EMAIL_MODE:'smtp',APP_SMTP_URL:'http://example.test',APP_EMAIL_FROM:'owner@example.test'})).toThrow('APP_SMTP_URL_INVALID')}finally{f.close()}})
+  it('cria o primeiro owner e valida sessão e CSRF',async()=>{const f=fixture();try{const request=await f.service.requestCode('owner@example.test');expect(request.status).toBe('sent');const issued=f.service.verifyCode('owner@example.test',request.requestId,f.sent[0]!);expect(f.service.authenticate(issued.token)).toMatchObject({email:'owner@example.test',role:'owner'});expect(()=>f.service.validateCsrf(issued.session,issued.csrf,undefined)).toThrow(AppAuthError);expect(()=>f.service.validateCsrf(issued.session,issued.csrf,issued.csrf)).not.toThrow();f.service.revoke(issued.token);expect(()=>f.service.authenticate(issued.token)).toThrow('Sessão encerrada')}finally{f.close()}})
+  it('isola tentativas por navegador e expira a sessão',async()=>{const f=fixture();try{const first=await f.service.requestCode('owner@example.test');f.advance(61_000);const second=await f.service.requestCode('owner@example.test');for(let attempt=1;attempt<=5;attempt++)expect(()=>f.service.verifyCode('owner@example.test',first.requestId,'000000')).toThrow(attempt===5?'Código bloqueado':'Código inválido');const issued=f.service.verifyCode('owner@example.test',second.requestId,'123456');f.advance(15*24*60*60*1000);expect(()=>f.service.authenticate(issued.token)).toThrow('Sessão expirada')}finally{f.close()}})
+  it('permite que o owner convide um member sem elevar o papel',async()=>{const f=fixture();try{const ownerRequest=await f.service.requestCode('owner@example.test');const owner=f.service.verifyCode('owner@example.test',ownerRequest.requestId,'123456');await f.service.invite(owner.token,owner.csrf,owner.csrf,'member@example.test');const memberRequest=await f.service.requestCode('member@example.test');expect(memberRequest.status).toBe('sent');const member=f.service.verifyCode('member@example.test',memberRequest.requestId,'123456');expect(f.service.authenticate(member.token)).toMatchObject({email:'member@example.test',role:'member'});await expect(f.service.invite(member.token,member.csrf,member.csrf,'other@example.test')).rejects.toThrow('Somente o proprietário')}finally{f.close()}})
+  it('limita emissão e só permite captura no verificador do Studio',async()=>{const f=fixture();try{expect((await f.service.requestCode('other@example.test')).status).toBe('suppressed');expect((await f.service.requestCode('owner@example.test')).status).toBe('sent');f.advance(61_000);expect((await f.service.requestCode('owner@example.test')).status).toBe('sent');f.advance(61_000);expect((await f.service.requestCode('owner@example.test')).status).toBe('sent');f.advance(61_000);expect((await f.service.requestCode('owner@example.test')).status).toBe('suppressed');expect(()=>createEmailSender({NODE_ENV:'production',APP_EMAIL_MODE:'studio-capture'})).toThrow('STUDIO_CAPTURE_FORBIDDEN_OUTSIDE_VERIFICATION');expect(()=>createEmailSender({NODE_ENV:'development',APP_EMAIL_MODE:'studio-capture'})).toThrow('STUDIO_CAPTURE_FORBIDDEN_OUTSIDE_VERIFICATION');expect(createEmailSender({NODE_ENV:'production',APP_EMAIL_MODE:'studio-capture',DZ23_STUDIO_VERIFICATION:'1'})).toBeInstanceOf(Object);expect(()=>createEmailSender({APP_EMAIL_MODE:'invalid'})).toThrow('APP_EMAIL_MODE_INVALID');expect(()=>createEmailSender({APP_EMAIL_MODE:'smtp',APP_SMTP_URL:'http://example.test',APP_EMAIL_FROM:'owner@example.test'})).toThrow('APP_SMTP_URL_INVALID')}finally{f.close()}})
 })
 `

@@ -9,8 +9,11 @@ nem alterar esses componentes.
 
 O modelo fica limitado a páginas, textos, layout e aos consumidores públicos
 explicitamente permitidos dos repositórios gerados. A lista de arquivos do
-plano não concede acesso aos caminhos protegidos. A validação estrutural de
-imports e a comparação de integridade do template são gates independentes.
+plano não concede acesso aos caminhos protegidos. O parser TypeScript recusa,
+além de imports fora da lista, `process`, `globalThis`, `eval`, `Function`,
+`import.meta`, a diretiva `use server`, HTML cru e elementos `script`, `iframe`
+ou `object`. `use client` e JSX comum continuam permitidos. A validação
+estrutural e a comparação de integridade do template são gates independentes.
 
 Os módulos determinísticos entram em `src/server/**`, `src/db/**`,
 `src/auth/**`, `middleware.ts`, migrações e `src/styles/tokens.css`. Eles são

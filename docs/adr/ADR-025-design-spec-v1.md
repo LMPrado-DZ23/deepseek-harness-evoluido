@@ -24,6 +24,11 @@ são conferidos, a imagem é rotacionada conforme orientação, limitada a
 separado por organização e tenant. SVG é recusado nesta versão. A cor dominante
 é extraída, mas a pessoa também pode informar a cor principal de sua marca.
 
+Quando há logotipo, o pipeline confere novamente seu SHA-256, copia o PNG para
+`public/brand/logo.png` antes da saída do modelo e inclui esse caminho na foto
+imutável. O layout protegido só renderiza a imagem quando ela existe, com texto
+alternativo baseado no título do aplicativo.
+
 Estado BETA significa que contrato, persistência, API, interface, isolamento e
 processamento foram testados. Ainda faltam uso por pessoas leigas, LLM real,
 preview e publicação; nenhum desses itens é inferido por este ADR.

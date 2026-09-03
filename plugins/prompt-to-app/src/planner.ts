@@ -8,7 +8,7 @@ const planOutputSchema = z.object({ slices: z.array(planSliceSchema).min(1).max(
 export type PlanOutput = z.infer<typeof planOutputSchema>
 
 export class FormCategoryCapabilityError extends Error {
-  constructor(readonly code: 'FORM_DATABASE_REQUIRED' | 'AUTH_REQUIRED_FOR_SENSITIVE_FORM' | 'FORM_REFERENCE_REQUIRES_CRUD' | 'FORM_ENTRY_FILE_REQUIRED', message: string) {
+  constructor(readonly code: 'FORM_DATABASE_REQUIRED' | 'FORM_REFERENCE_REQUIRES_CRUD' | 'FORM_ENTRY_FILE_REQUIRED', message: string) {
     super(message)
   }
 }

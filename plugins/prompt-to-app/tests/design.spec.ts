@@ -1,5 +1,13 @@
-import { describe, expect, it } from 'vitest'
+import { createHash } from 'node:crypto'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
 import { contrastRatio, createDesignSpec, designSpecV1Schema, renderDesignTokens, rgbToHsl } from '../src/design.js'
+import { writeDesignAssets } from '../src/pipeline.js'
+
+const roots: string[] = []
+afterEach(async () => Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))))
 
 describe('DesignSpec v1', () => {
   it('rejects an unknown preset and a palette below contrast AA', () => {
@@ -30,5 +38,18 @@ describe('DesignSpec v1', () => {
     expect(rgbToHsl(127.5, 127.5, 127.5)).toEqual({ h: 0, s: 0, l: 50 })
     const valid = createDesignSpec({ preset: 'modern' })
     expect(designSpecV1Schema.safeParse({ ...valid, typography: { ...valid.typography, weights: [400, 400] } }).success).toBe(false)
+  })
+
+  it('copies a verified brand logo into the protected generated app path', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dz23-design-assets-')); roots.push(root)
+    const store = resolve(root, 'store'); const run = resolve(root, 'run'); const bytes = Buffer.from('verified-png-fixture')
+    const sha256 = createHash('sha256').update(bytes).digest('hex'); const relativePath = `logos/${'a'.repeat(64)}/${sha256}.png`
+    await mkdir(resolve(store, relativePath, '..'), { recursive: true }); await mkdir(run)
+    await writeFile(resolve(store, relativePath), bytes)
+    const spec = createDesignSpec({ preset: 'brand', primary: { h: 217, s: 91, l: 50 } }, { sha256, relative_path: relativePath, mime: 'image/png', size_bytes: bytes.length, width: 10, height: 10, extracted_primary: { h: 217, s: 91, l: 50 } })
+    await writeDesignAssets(run, spec, store)
+    await expect(readFile(resolve(run, 'public/brand/logo.png'))).resolves.toEqual(bytes)
+    await expect(writeDesignAssets(run, spec, store)).rejects.toMatchObject({ code: 'EEXIST' })
+    await expect(writeDesignAssets(resolve(root, 'missing-store-run'), spec, resolve(root, 'missing'))).rejects.toThrow()
   })
 })

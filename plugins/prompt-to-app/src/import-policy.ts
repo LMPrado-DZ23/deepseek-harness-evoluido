@@ -16,16 +16,19 @@ const ALLOWED_PREFIXES = [
   '@/src/components/ui/', '@/components/ui/',
 ] as const
 
-export function assertGeneratedImports(files: readonly GeneratedFile[]): void {
+export function assertGeneratedSource(files: readonly GeneratedFile[]): void {
   const generatedPaths = new Set(files.map(file => normalizePath(file.path)))
   for (const file of files) {
     if (!/\.[cm]?[jt]sx?$/u.test(file.path)) continue
     const source = ts.createSourceFile(file.path, file.content, ts.ScriptTarget.Latest, true, scriptKind(file.path))
-    visit(source, moduleName => assertAllowedModule(file.path, moduleName, generatedPaths))
+    assertNoServerOrUnsafeSource(file.path, source)
+    visitImports(source, moduleName => assertAllowedModule(file.path, moduleName, generatedPaths))
   }
 }
 
-function visit(source: ts.SourceFile, inspect: (moduleName: string | undefined) => void): void {
+export const assertGeneratedImports = assertGeneratedSource
+
+function visitImports(source: ts.SourceFile, inspect: (moduleName: string | undefined) => void): void {
   const walk = (node: ts.Node): void => {
     if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
       if (node.moduleSpecifier !== undefined) inspect(literalModule(node.moduleSpecifier))
@@ -34,6 +37,19 @@ function visit(source: ts.SourceFile, inspect: (moduleName: string | undefined) 
     } else if (ts.isCallExpression(node) && (node.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(node.expression) && node.expression.text === 'require'))) {
       inspect(node.arguments.length === 1 ? literalModule(node.arguments[0]!) : undefined)
     }
+    ts.forEachChild(node, walk)
+  }
+  walk(source)
+}
+
+function assertNoServerOrUnsafeSource(path: string, source: ts.SourceFile): void {
+  const directive = source.statements.find(statement => ts.isExpressionStatement(statement) && ts.isStringLiteral(statement.expression) && statement.expression.text === 'use server')
+  if (directive !== undefined) throw rejectedSource(path, 'use server')
+  const walk = (node: ts.Node): void => {
+    if (ts.isIdentifier(node) && ['process', 'globalThis', 'eval', 'Function'].includes(node.text)) throw rejectedSource(path, node.text)
+    if (ts.isMetaProperty(node) && node.keywordToken === ts.SyntaxKind.ImportKeyword) throw rejectedSource(path, 'import.meta')
+    if (ts.isJsxAttribute(node) && node.name.getText(source) === 'dangerouslySetInnerHTML') throw rejectedSource(path, 'dangerouslySetInnerHTML')
+    if ((ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) && ['script', 'iframe', 'object'].includes(node.tagName.getText(source).toLowerCase())) throw rejectedSource(path, `<${node.tagName.getText(source)}>`)
     ts.forEachChild(node, walk)
   }
   walk(source)
@@ -56,6 +72,10 @@ function literalModule(node: ts.Expression): string | undefined {
 
 function rejected(path: string, moduleName: string): GeneratedFileRejectedError {
   return new GeneratedFileRejectedError(t('errors.generatedImport', { path, module: moduleName }))
+}
+
+function rejectedSource(path: string, construct: string): GeneratedFileRejectedError {
+  return new GeneratedFileRejectedError(t('errors.generatedSource', { path, construct }))
 }
 
 function normalizePath(path: string): string {

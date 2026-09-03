@@ -44,7 +44,7 @@ if (preflight.state !== 'OK') throw new Error(preflight.message)
 const criteriaFiles = (await readdir(criteriaDir)).filter(file => file.endsWith('.yml')).sort()
 if (criteriaFiles.length < 18) throw new Error(`Golden set incompleto: ${criteriaFiles.length}/18 critérios.`)
 const scratch = await mkdtemp(join(tmpdir(), 'dz23-golden-'))
-const results: Array<{ id: string; category: string; state: GoldenState; critical: string; detail: string }> = []
+const results: Array<{ id: string; category: string; state: GoldenState; critical: string; not_automated: number | null; detail: string }> = []
 
 try {
   for (const file of criteriaFiles) {
@@ -53,7 +53,7 @@ try {
     const brief = await readFile(briefPath, 'utf8')
     if (brief.trim().length < 40 || criterion.acceptance.length < 3) throw new Error(`Fixture incompleta: ${criterion.id}`)
     if (!implemented.has(criterion.category)) {
-      results.push({ id: criterion.id, category: criterion.category, state: 'NOT_IMPLEMENTED', critical: 'NOT_EXECUTED', detail: 'Categoria declarada, ainda sem executor.' })
+      results.push({ id: criterion.id, category: criterion.category, state: 'NOT_IMPLEMENTED', critical: 'NOT_EXECUTED', not_automated: null, detail: 'Categoria declarada, ainda sem executor.' })
       continue
     }
 
@@ -92,10 +92,14 @@ try {
       const result = await builder.execute(runDirectory, command)
       if (result.exitCode !== 0 || result.timedOut) throw new Error(`${criterion.id}: ${command} falhou.`)
     }
+    const notAutomated = appSpec === undefined
+      ? criterion.acceptance.length
+      : (JSON.parse(await readFile(resolve(runDirectory, 'evidence/appspec-report.json'), 'utf8')) as { checks: Array<{ status: string }> }).checks.filter(check => check.status === 'NOT_AUTOMATED').length
     results.push({
       id: criterion.id, category: criterion.category, state: 'PASS_DETERMINISTIC',
       critical: criterion.sensitive ? 'SENSITIVE_QUESTION_REQUIRED' : 'NO_SENSITIVE_DATA_DETECTED',
-      detail: 'Build, teste unitário, Playwright, axe e scan passaram em contêiner sem rede.',
+      not_automated: notAutomated,
+      detail: `Build, teste unitário, Playwright, axe e scan passaram em contêiner sem rede; ${notAutomated} critérios declarados não foram automatizados.`,
     })
   }
 } finally {
@@ -111,6 +115,7 @@ const report = {
     total: results.length,
     pass_deterministic: results.filter(value => value.state === 'PASS_DETERMINISTIC').length,
     not_implemented: results.filter(value => value.state === 'NOT_IMPLEMENTED').length,
+    not_automated_criteria: results.reduce((total, value) => total + (value.not_automated ?? 0), 0),
   },
   results,
 }
@@ -120,8 +125,9 @@ await writeFile(resolve(reportsDir, `${stamp}-deterministic.md`), [
   '- LLM real: **NOT_EXECUTED**', '- Elegível para promoção: **não**',
   `- Fixtures: ${report.counts.total}; executáveis: ${report.counts.pass_deterministic}; NOT_IMPLEMENTED: ${report.counts.not_implemented}.`,
   `- As ${report.counts.pass_deterministic} fixtures executáveis passaram por build, Vitest, Playwright, axe e scan dentro do contêiner sem rede.`,
-  '', '| Brief | Categoria | Estado | Controle crítico |', '| --- | --- | --- | --- |',
-  ...results.map(value => `| ${value.id} | ${value.category} | ${value.state} | ${value.critical} |`), '',
+  `- Critérios declarados não automatizados nas fixtures executáveis: **${report.counts.not_automated_criteria}**.`,
+  '', '| Brief | Categoria | Estado | Controle crítico | Critérios não automatizados |', '| --- | --- | --- | --- | ---: |',
+  ...results.map(value => `| ${value.id} | ${value.category} | ${value.state} | ${value.critical} | ${value.not_automated ?? 'NOT_EXECUTED'} |`), '',
   'Este relatório não valida qualidade com modelo real e não promove o produto.', '',
 ].join('\n'))
 process.stdout.write(`GOLDEN_SET=PASS_DETERMINISTIC total=${results.length} executable=${report.counts.pass_deterministic} real_llm=NOT_EXECUTED\n`)

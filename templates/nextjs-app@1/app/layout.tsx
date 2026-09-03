@@ -1,5 +1,8 @@
 import type { Metadata } from 'next'
+import { existsSync } from 'node:fs'
+import { resolve } from 'node:path'
 import localFont from 'next/font/local'
+import appContent from '../content/app.json'
 import './globals.css'
 
 const dz23Sans = localFont({
@@ -21,5 +24,9 @@ export const metadata: Metadata = {
 }
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="pt-BR"><body className={`${dz23Sans.variable} ${dz23Serif.variable}`}>{children}</body></html>
+  const hasBrandLogo = existsSync(resolve(process.cwd(), 'public', 'brand', 'logo.png'))
+  return <html lang="pt-BR"><body className={`${dz23Sans.variable} ${dz23Serif.variable}`}>
+    {hasBrandLogo ? <header aria-label="Marca do aplicativo"><img src="/brand/logo.png" alt={`Logotipo de ${appContent.title}`} /></header> : null}
+    {children}
+  </body></html>
 }

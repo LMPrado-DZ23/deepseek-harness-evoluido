@@ -20,8 +20,10 @@ idempotentes versionadas por `PRAGMA user_version`.
 
 Entidades marcadas como sensíveis só são geradas após confirmação registrada
 na AppSpec. O contrato gerado marca `sensitive`, `requires_login` e
-`public_list`; a autenticação do ADR-024 faz cumprir o acesso nos formulários
-sensíveis e em todo painel CRUD. Não há rota pública de dados nesta fatia.
+`public_list`. `public_list` é sempre falso nesta versão: visitante pode enviar
+um formulário comum, mas somente owner/member consulta os registros. Quando o
+dado é sensível, autenticação também é exigida no envio. Todo painel CRUD exige
+sessão e CSRF. Não há rota pública de leitura de dados nesta fatia.
 
 Arquivos em `src/db/**`, `src/server/repositories/**` e o teste de dados gerado
 são gravados antes da saída do modelo e entram na lista protegida. Um parser

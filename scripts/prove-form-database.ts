@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { writeAcceptanceArtifacts } from '../plugins/prompt-to-app/src/acceptance.js'
 import type { AppSpecV1 } from '../plugins/prompt-to-app/src/appspec.js'
+import { generateAuthLayer, writeAuthLayer } from '../plugins/prompt-to-app/src/auth-generator.js'
 import { generateDataLayer, writeDataLayer } from '../plugins/prompt-to-app/src/data-generator.js'
 import { generateFormLayer, writeFormLayer } from '../plugins/prompt-to-app/src/form-generator.js'
 import { ContainerBuilder, OFFLINE_PIPELINE_COMMANDS } from '../plugins/prompt-to-app/src/runner.js'
@@ -38,11 +39,13 @@ try {
   writeFileSync(resolve(runDirectory, 'content/app.json'), '{"title":"Contatos","description":"Cadastro e consulta local"}\n')
   writeFileSync(resolve(runDirectory, 'src/GeneratedApp.tsx'), "import ContatoManager from '@/src/components/generated/contato-manager'\n\nexport default function GeneratedApp(){ return <main><h1>Contatos</h1><p>Cadastro</p><p>Lista</p><p>Cadastre e consulte seus contatos</p><ContatoManager /></main> }\n")
   const data = generateDataLayer(spec)
+  const auth = generateAuthLayer(spec, 'form-database')
   const form = generateFormLayer(spec, 'form-database')
   await writeDataLayer(runDirectory, data)
+  await writeAuthLayer(runDirectory, auth)
   await writeFormLayer(runDirectory, form)
   await writeAcceptanceArtifacts(runDirectory, spec, 'form-database')
-  const protectedPaths = [...data.protectedPaths, ...form.protectedPaths]
+  const protectedPaths = [...data.protectedPaths, ...auth.protectedPaths, ...form.protectedPaths]
   const before = new Map(protectedPaths.map(path => [path, hash(resolve(runDirectory, path))]))
 
   const preflight = await builder.preflight()
@@ -63,7 +66,7 @@ try {
   if (!readFileSync(resolve(runDirectory, 'data/app.sqlite')).byteLength) throw new Error('O banco em arquivo não foi criado.')
   if (process.platform !== 'win32' && (statSync(resolve(runDirectory, 'data/app.sqlite')).mode & 0o777) !== 0o600) throw new Error('O banco não ficou restrito ao usuário do processo.')
 
-  const proof = `# P32/P33 — Prova da categoria cadastro e lista\n\n- Resultado: **PASS**\n- Imagem fixada: \`${digest}\`\n- Rede do contêiner: \`none\`; capacidades removidas e filesystem raiz somente leitura.\n- Fluxo real no navegador: preencher → salvar no SQLite → aparecer na lista: PASS.\n- Banco: arquivo \`data/app.sqlite\` criado pela aplicação gerada, restrito a modo \`0600\` no Linux; migração e repositório protegidos pelo Studio.\n- Build Next.js, Vitest, Playwright, acessibilidade e scan offline: PASS.\n- Arquivos protegidos alterados durante build/teste: nenhum.\n- Dados sensíveis confirmados recebem autenticação; esta prova focada usa dados comuns.\n\nO resultado é um protótipo local verificado. Não houve preview remoto, publicação ou modelo real.\n`
+  const proof = `# P32/P33 — Prova da categoria cadastro e lista\n\n- Resultado: **PASS**\n- Imagem fixada: \`${digest}\`\n- Rede do contêiner: \`none\`; capacidades removidas e filesystem raiz somente leitura.\n- Fluxo real no navegador: preencher anonimamente → lista ausente para visitante → entrar como proprietário → registro aparece na lista: PASS.\n- Banco: arquivo \`data/app.sqlite\` criado pela aplicação gerada, restrito a modo \`0600\` no Linux; migração e repositório protegidos pelo Studio.\n- Build Next.js, Vitest, Playwright, acessibilidade e scan offline: PASS.\n- Arquivos protegidos alterados durante build/teste: nenhum.\n- Dados sensíveis confirmados exigem autenticação também no envio; esta prova usa dados comuns com envio público e leitura privada.\n\nO resultado é um protótipo local verificado. Não houve preview remoto, publicação ou modelo real.\n`
   mkdirSync(resolve(root, 'docs/proofs'), { recursive: true })
   writeFileSync(resolve(root, 'docs/proofs/P32-form-database-proof.md'), proof)
   process.stdout.write(`FORM_DATABASE_PROOF=PASS protected=${protectedPaths.length} checks=${report.checks.length} steps=${results.length}\n`)

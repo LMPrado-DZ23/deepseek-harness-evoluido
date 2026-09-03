@@ -32,9 +32,11 @@ describe('deterministic form and list layer', () => {
     const manager = layer.files[1]!.content
     expect(action).toContain("'use server'")
     expect(action).toContain('new ContatoRepository(database).create')
+    expect(action).not.toContain('requireFormSession')
     expect(action).toContain("revalidatePath('/')")
     expect(manager).toContain('data-testid="contato-form"')
     expect(manager).toContain('data-testid="contato-list"')
+    expect(manager).toContain('session === null ? <section aria-label="Área de gestão">')
     expect(manager).toContain('<label htmlFor="contato-nome">{"Nome"}</label>')
     expect(manager).toContain('name="situacao"')
     expect(layer.protectedPaths).toEqual(layer.files.map(file => file.path))

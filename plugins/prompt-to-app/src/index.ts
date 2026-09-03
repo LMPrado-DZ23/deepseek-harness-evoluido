@@ -168,7 +168,7 @@ export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}):
       timeoutMs: config.builder?.limits?.timeoutMs ?? 180_000,
     },
   }, new NodeProcessPort())
-  const pipeline = new PromptToAppPipeline({ service, builder, templateDirectory, runsRoot })
+  const pipeline = new PromptToAppPipeline({ service, builder, templateDirectory, runsRoot, logoStoreRoot })
   const registry: PromptToAppJobRegistry = {
     start: spec => ctx.jobs.start(spec as JobStart) as JobId,
     kill: (id, owner, reason) => ctx.jobs.kill(id, owner, reason),

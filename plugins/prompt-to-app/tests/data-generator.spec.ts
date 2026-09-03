@@ -53,6 +53,15 @@ describe('deterministic generated data layer', () => {
     const selected = Object.fromEntries(layer.files.filter(file => ['src/db/schema.ts', 'src/db/migrations.ts'].includes(file.path)).map(file => [file.path, file.content]))
     expect(selected).toMatchSnapshot()
     expect(selected['src/db/schema.ts']).toContain('sensitive: true, requires_login: true, public_list: false')
+    const nonSensitiveSchema = generateDataLayer({
+      ...databaseSpec,
+      entities: [{
+        name: 'Pedido', kind: 'database', sensitive: false,
+        fields: [{ name: 'Descrição', type: 'text', required: true }],
+      }],
+      sensitive_data: { detected: [], confirmed_by_user: false },
+    }).files.find(file => file.path === 'src/db/schema.ts')?.content
+    expect(nonSensitiveSchema).toContain('sensitive: false, requires_login: true, public_list: false')
     expect(selected['src/db/migrations.ts']).toContain('PRAGMA user_version')
     expect(selected['src/db/migrations.ts']).toContain('ON DELETE RESTRICT')
     expect(layer.files.find(file => file.path === 'src/db/client.ts')?.content).toContain('chmodSync(databasePath, 0o600)')

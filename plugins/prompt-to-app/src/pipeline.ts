@@ -10,7 +10,7 @@ import { renderDesignTokens } from './design.js'
 import { writeAcceptanceArtifacts, type AcceptanceCheck } from './acceptance.js'
 import { generatedFileSchema, writeGeneratedFiles, type GeneratedFile } from './generator.js'
 import { generateFormLayer, writeFormLayer } from './form-generator.js'
-import { assertGeneratedImports } from './import-policy.js'
+import { assertGeneratedSource } from './import-policy.js'
 import { t } from './i18n.js'
 import type { StudioPlan, StudioRun } from './model.js'
 import { assertCategoryCanGenerate } from './planner.js'
@@ -45,6 +45,7 @@ export interface PipelineOptions {
   readonly builder: ContainerBuilder
   readonly templateDirectory: string
   readonly runsRoot: string
+  readonly logoStoreRoot?: string
   readonly now?: () => Date
   readonly createId?: () => string
 }
@@ -81,8 +82,7 @@ export class PromptToAppPipeline {
       if (isAborted(runOptions.signal)) return this.cancelled(actor, projectId, plan.plan_id, operationId, ownerSessionId, attempt - 1)
       const runId = attempt === 1 ? operationId : `${operationId}-attempt-${attempt}`; const runDirectory = resolve(this.options.runsRoot, runId)
       await mkdir(this.options.runsRoot, { recursive: true }); await cp(this.options.templateDirectory, runDirectory, { recursive: true, errorOnExist: true })
-      await mkdir(resolve(runDirectory, 'src', 'styles'), { recursive: true })
-      await writeFile(resolve(runDirectory, 'src', 'styles', 'tokens.css'), renderDesignTokens(design), { encoding: 'utf8', flag: 'wx' })
+      await writeDesignAssets(runDirectory, design, this.options.logoStoreRoot)
       await writeDataLayer(runDirectory, generateDataLayer(spec))
       await writeAuthLayer(runDirectory, generateAuthLayer(spec, project.category))
       await writeFormLayer(runDirectory, generateFormLayer(spec, project.category))
@@ -95,7 +95,7 @@ export class PromptToAppPipeline {
       try {
         generated = await generator.generate(spec, plan, previousDiagnostic)
         diagnostic = undefined
-        assertGeneratedImports(generated.files)
+        assertGeneratedSource(generated.files)
         await writeGeneratedFiles(runDirectory, generated.files, {
           plannedPaths: plan.slices.flatMap(slice => slice.planned_files),
           protectedTemplatePaths,
@@ -177,6 +177,17 @@ export class PromptToAppPipeline {
     await this.options.service.putRun(actor, this.runRecord(actor, projectId, planId, 'verify', Math.max(1, attempts), 'CANCELLED', 'full', runDirectory, null, 'CANCELLED_BY_USER', operationId, operationId, ownerSessionId))
     return { state: 'CANCELLED', attempts, message: t('pipeline.cancelled') }
   }
+}
+
+export async function writeDesignAssets(runDirectory: string, design: ReturnType<PromptToAppService['designOrDefault']>, logoStoreRoot?: string): Promise<void> {
+  await mkdir(resolve(runDirectory, 'src', 'styles'), { recursive: true })
+  await writeFile(resolve(runDirectory, 'src', 'styles', 'tokens.css'), renderDesignTokens(design), { encoding: 'utf8', flag: 'wx' })
+  if (design.logo === null) return
+  if (logoStoreRoot === undefined) throw new Error('LOGO_STORE_NOT_CONFIGURED')
+  const bytes = await readFile(resolve(logoStoreRoot, design.logo.relative_path))
+  if (createHash('sha256').update(bytes).digest('hex') !== design.logo.sha256) throw new Error('LOGO_INTEGRITY_FAILED')
+  await mkdir(resolve(runDirectory, 'public', 'brand'), { recursive: true })
+  await writeFile(resolve(runDirectory, 'public', 'brand', 'logo.png'), bytes, { flag: 'wx' })
 }
 
 async function immutableHash(root: string, files: readonly string[]): Promise<string> {

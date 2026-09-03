@@ -22,8 +22,8 @@ o código pode existir, mas ainda não foi validado com pessoas leigas.
 | Prompt-to-App: landing page e catálogo | BETA | Next.js 16 App Router, build standalone, job assíncrono cancelável, API tenant-aware e critérios AppSpec em contêiner comprovadamente sem rede | LLM real, fase 0.5 e operação prolongada |
 | DesignSpec e identidade visual do protótipo | BETA | domínio tenant-aware, seis papéis de cor com contraste AA, fontes locais, tokens protegidos e PNG/JPEG reprocessado | LLM real, preview, fase 0.5 e operação prolongada |
 | Banco SQLite do aplicativo gerado | BETA | esquema, migração e repositórios Zod determinísticos; SQLite em arquivo, auth e CRUD reais no contêiner sem rede | operação prolongada e staging |
-| Acesso do aplicativo gerado | BETA | owner/member, convite, código, sessão opaca, CSRF e 401→200 exercitados; captura recusada em produção | SMTP real, passkey, preview e operação prolongada |
-| Prompt-to-App: formulário e banco | BETA | três fixtures; fluxo preencher→salvar→listar, incluindo saúde com login obrigatório | LLM real, preview e fase 0.5 |
+| Acesso do aplicativo gerado | BETA | owner/member, convite, código ligado ao navegador, limite de emissão, sessão opaca, CSRF e 401→200 exercitados; captura restrita ao verificador protegido | SMTP real, passkey, preview HTTPS e operação prolongada |
+| Prompt-to-App: formulário e banco | BETA | três fixtures; envio público comum com lista privada e fluxo sensível inteiramente autenticado | LLM real, preview e fase 0.5 |
 | Prompt-to-App: painel CRUD | BETA | três fixtures; login→listar→criar→editar→excluir com confirmação em Playwright | relações entre entidades, LLM real, preview e fase 0.5 |
 | Prompt-to-App: SaaS autenticado e dashboard | NOT_IMPLEMENTED | briefs e critérios existem no golden set | implementação e prova por categoria |
 | Passkeys no aplicativo gerado | NOT_PRESENT | código por e-mail é a única cerimônia atual | domínio real e fatia própria |

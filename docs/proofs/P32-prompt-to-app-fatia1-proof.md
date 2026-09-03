@@ -8,7 +8,7 @@
 - Tentativas: 1/3
 - Isolamento tenant adversarial: PASS (`org-b` recebeu `NOT_FOUND`)
 - Arquivo sentinela fora da raiz: hash antes/depois idêntico `aaa8d3c8d74ad3e8f6b1772aa9c7e0eaa528cb42fc93599ce2f125b00d4c424c`
-- Evidências gravadas: `build-log:62e6a262f614886e10db991dbc8c643bbe7f9ff77d20513989c7807dcb1df3cd`, `test-report:34a15399c606892b6c9d2e2fbdfe5d1ac08db575256520adcbb86cbe9e86babc`
+- Evidências gravadas: `build-log:ac124de224b2f986eebeb316ff1cb89fae00735bbf56b0289cacab51c6540761`, `test-report:34a15399c606892b6c9d2e2fbdfe5d1ac08db575256520adcbb86cbe9e86babc`
 - Critérios AppSpec: páginas, seções, idioma, título e texto literal passaram; o critério subjetivo ficou `NOT_AUTOMATED`.
 - Preview: `NOT_PRESENT`; publicação: `NOT_PRESENT`; experiência leiga: `NOT_VALIDATED`
 
