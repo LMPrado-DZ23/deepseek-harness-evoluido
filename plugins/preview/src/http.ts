@@ -23,7 +23,7 @@ export function createPreviewProjectHttpExtension(service: StudioPreviewService)
         }
         return false
       }
-      const match = /^\/previews\/([^/]+)(\/(?:logs|messages))?$/u.exec(input.suffix)
+      const match = /^\/previews\/([^/]+)(\/(?:logs|messages|heartbeat))?$/u.exec(input.suffix)
       if (match === null) return false
       const previewId = decodeURIComponent(match[1]!)
       if (input.request.method === 'GET' && match[2] === '/logs') {
@@ -34,6 +34,9 @@ export function createPreviewProjectHttpExtension(service: StudioPreviewService)
         return respond(input.response, 200, {
           messages: messages.map(message => ({ email: message.email, code: message.code, expires_at: message.expiresAt })),
         })
+      }
+      if (input.request.method === 'POST' && match[2] === '/heartbeat') {
+        return respond(input.response, 200, { preview: await service.heartbeat(actor, input.projectId, previewId) })
       }
       if (input.request.method === 'GET' && match[2] === undefined) {
         return respond(input.response, 200, { preview: await service.health(actor, input.projectId, previewId) })

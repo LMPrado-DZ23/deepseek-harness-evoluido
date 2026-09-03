@@ -74,6 +74,18 @@ export function App() {
     void refresh()
     return () => { active = false; if (timer !== undefined) clearTimeout(timer) }
   }, [projectId, preview?.preview_id, preview?.state])
+  useEffect(() => {
+    if (projectId === null || preview?.state !== 'READY') return
+    let active = true
+    const heartbeat = () => {
+      void api<{ preview: Preview }>(`/projects/${projectId}/previews/${encodeURIComponent(preview.preview_id)}/heartbeat`, { method: 'POST', body: '{}' })
+        .then(response => { if (active) { setPreview(response.preview); setError('') } })
+        .catch(() => { if (active) setError(t.preview.heartbeatFailed) })
+    }
+    heartbeat()
+    const timer = setInterval(heartbeat, 30_000)
+    return () => { active = false; clearInterval(timer) }
+  }, [projectId, preview?.preview_id, preview?.state])
   const ready = useMemo(() => brief.trim().length >= 10, [brief])
   async function safely(action: () => Promise<void>) { setError(''); try { await action() } catch (cause) { setError(cause instanceof Error ? cause.message : t.health.attention) } }
   async function create() {

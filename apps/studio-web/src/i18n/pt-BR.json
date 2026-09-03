@@ -54,7 +54,8 @@
     "notPublished": "Isto é uma prévia local. Seu aplicativo não foi publicado na internet.",
     "closed": "A prévia foi encerrada. O protótipo continua salvo no projeto.",
     "accessCodes": "Código de acesso da prévia",
-    "accessCodesHelp": "Use este código somente dentro do protótipo. Ele não foi enviado por e-mail."
+    "accessCodesHelp": "Use este código somente dentro do protótipo. Ele não foi enviado por e-mail.",
+    "heartbeatFailed": "Não foi possível manter a prévia ativa. Confira a conexão local ou abra uma nova prévia."
   },
   "privacy": {
     "title": "Privacidade", "local": "Somente no meu computador", "configured": "Permitir IA configurada",

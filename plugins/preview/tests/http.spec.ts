@@ -34,6 +34,7 @@ function fakeService(overrides: Partial<StudioPreviewService> = {}) {
     health: vi.fn(() => Promise.resolve(preview)),
     logs: vi.fn(() => Promise.resolve(['linha segura'])),
     verificationMessages: vi.fn(() => Promise.resolve([{ kind: 'code', email: 'owner@example.test', code: '123456', expiresAt: '2026-09-03T12:10:00.000Z' }])),
+    heartbeat: vi.fn(() => Promise.resolve({ ...preview, expires_at: '2026-09-03T13:00:00.000Z' })),
     stop: vi.fn(() => Promise.resolve({ ...preview, state: 'STOPPED' as const })),
     ...overrides,
   } as unknown as StudioPreviewService
@@ -78,7 +79,7 @@ async function send(
 }
 
 describe('preview project HTTP extension', () => {
-  it('maps list, start, get/health, logs, preview messages and delete to the scoped service port', async () => {
+  it('maps list, start, get/health, logs, preview messages, heartbeat and delete to the scoped service port', async () => {
     const service = fakeService()
 
     const listed = await send(service, { suffix: '/previews' })
@@ -88,6 +89,7 @@ describe('preview project HTTP extension', () => {
     const fetched = await send(service, { suffix: '/previews/preview-1' })
     const logs = await send(service, { suffix: '/previews/preview-1/logs' })
     const messages = await send(service, { suffix: '/previews/preview-1/messages' })
+    const heartbeat = await send(service, { method: 'POST', suffix: '/previews/preview-1/heartbeat' })
     const stopped = await send(service, { method: 'DELETE', suffix: '/previews/preview-1' })
 
     expect(listed).toEqual({ status: 200, body: { previews: [preview] } })
@@ -98,12 +100,14 @@ describe('preview project HTTP extension', () => {
     expect(fetched).toEqual({ status: 200, body: { preview } })
     expect(logs).toEqual({ status: 200, body: { lines: ['linha segura'] } })
     expect(messages).toEqual({ status: 200, body: { messages: [{ email: 'owner@example.test', code: '123456', expires_at: '2026-09-03T12:10:00.000Z' }] } })
+    expect(heartbeat).toMatchObject({ status: 200, body: { preview: { expires_at: '2026-09-03T13:00:00.000Z' } } })
     expect(stopped).toMatchObject({ status: 200, body: { preview: { state: 'STOPPED' } } })
     expect(service.list).toHaveBeenCalledWith(actor, 'project-1')
     expect(service.start).toHaveBeenCalledWith(actor, 'project-1', 'run-requested')
     expect(service.health).toHaveBeenCalledWith(actor, 'project-1', 'preview-1')
     expect(service.logs).toHaveBeenCalledWith(actor, 'project-1', 'preview-1')
     expect(service.verificationMessages).toHaveBeenCalledWith(actor, 'project-1', 'preview-1')
+    expect(service.heartbeat).toHaveBeenCalledWith(actor, 'project-1', 'preview-1')
     expect(service.stop).toHaveBeenCalledWith(actor, 'project-1', 'preview-1')
   })
 

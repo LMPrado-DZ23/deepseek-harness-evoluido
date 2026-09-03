@@ -39,6 +39,7 @@ export interface PreviewPluginConfig {
 export interface StudioPreviewRuntime {
   readonly service: StudioPreviewService
   readonly state: 'BETA' | 'NOT_CONFIGURED'
+  readonly cleanupFailureAt: string | null
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -76,11 +77,13 @@ export async function apply(ctx: Context, config: PreviewPluginConfig = {}): Pro
   const repository = new DomainPreviewRepository(previewsDomain.table('previews'), admissionsDomain.table('admissions'))
   const runtime = config.runtime ?? new UnconfiguredRuntime()
   const identity = ctx.studioIdentity.service
+  let cleanupFailureAt: string | null = null
   const service = new StudioPreviewService({
     repository,
     runtime,
     ...(config.ttlSeconds === undefined ? {} : { ttlSeconds: config.ttlSeconds }),
-    ...(config.publicPort === undefined ? {} : { publicPort: config.publicPort }),
+    publicPort: config.publicPort ?? ctx.webServer.port,
+    onCleanupFailure: () => { cleanupFailureAt = new Date().toISOString() },
     ...(config.runtimeTimeoutMs === undefined ? {} : { runtimeTimeoutMs: config.runtimeTimeoutMs }),
     source: {
       async verifiedArtifact(actor: PreviewActor, projectId: string, runId?: string) {
@@ -116,9 +119,20 @@ export async function apply(ctx: Context, config: PreviewPluginConfig = {}): Pro
   })
   const unregister = registerPromptToAppHttpExtension(createPreviewProjectHttpExtension(service))
   ctx.effect(() => unregister, 'studio-preview.httpExtension')
-  const interval = setInterval(() => { void service.reap() }, Math.max(5_000, config.reaperIntervalMs ?? 30_000))
+  let reaperRunning = false
+  const interval = setInterval(() => {
+    if (reaperRunning) return
+    reaperRunning = true
+    void service.reap()
+      .catch(() => { cleanupFailureAt = new Date().toISOString() })
+      .finally(() => { reaperRunning = false })
+  }, Math.max(5_000, config.reaperIntervalMs ?? 30_000))
   interval.unref()
   ctx.effect(() => () => clearInterval(interval), 'studio-preview.reaper')
   await service.reconcile()
-  ctx.provide('studioPreview', { service, state: config.runtime === undefined ? 'NOT_CONFIGURED' : 'BETA' })
+  ctx.provide('studioPreview', {
+    service,
+    state: config.runtime === undefined ? 'NOT_CONFIGURED' : 'BETA',
+    get cleanupFailureAt() { return cleanupFailureAt },
+  })
 }

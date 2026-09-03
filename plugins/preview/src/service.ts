@@ -84,6 +84,7 @@ export interface PreviewServiceOptions {
   readonly ttlSeconds?: number
   readonly publicPort?: number
   readonly runtimeTimeoutMs?: number
+  readonly onCleanupFailure?: (previewId: string) => void
 }
 
 export interface PublicPreview {
@@ -155,10 +156,20 @@ export class StudioPreviewService {
             await this.options.repository.putPreview(refreshed)
             return refreshed
           }
-          await this.#runtimeCall('RUNTIME_STOP_TIMEOUT', signal => this.options.runtime.stop(current.runtime_ref!, signal)).catch(() => undefined)
-          const failed = previewRecordSchema.parse({ ...current, state: 'FAILED', health: 'DOWN', stopped_at: this.#now().toISOString(), stop_reason: 'failed', failure_code: 'RUNTIME_DOWN' })
+          let cleanupIncomplete = false
+          try { await this.#runtimeCall('RUNTIME_STOP_TIMEOUT', signal => this.options.runtime.stop(current.runtime_ref!, signal)) }
+          catch { cleanupIncomplete = true; this.options.onCleanupFailure?.(current.preview_id) }
+          const failed = previewRecordSchema.parse({
+            ...current,
+            state: cleanupIncomplete ? 'STOPPING' : 'FAILED', health: 'DOWN',
+            stopped_at: cleanupIncomplete ? null : this.#now().toISOString(), stop_reason: 'failed',
+            failure_code: cleanupIncomplete ? 'RUNTIME_CLEANUP_INCOMPLETE' : 'RUNTIME_DOWN',
+          })
           await this.options.repository.putPreview(failed)
           await this.#revokeAdmissions(current.preview_id)
+          if (cleanupIncomplete) {
+            throw new PreviewError('UNAVAILABLE', 'A prévia anterior não pôde ser encerrada com segurança; tente novamente em instantes.')
+          }
           return undefined
         })
         if (reusable !== undefined) {
@@ -166,6 +177,10 @@ export class StudioPreviewService {
           return { preview: this.public(reusable), admissionTicket: ticket }
         }
       }
+
+      const prior = this.options.repository.previews().filter(item => sameScope(item, actor)
+        && item.project_id === projectId && ACTIVE_STATES.has(item.state))
+      for (const candidate of prior) await this.#retireForReplacement(candidate)
 
       const now = this.#now()
       const previewId = this.#createId()
@@ -191,13 +206,27 @@ export class StudioPreviewService {
           }, signal))
           startedRuntimeRef = started.runtimeRef
           if (!/^[a-zA-Z0-9_.:-]{1,200}$/u.test(started.runtimeRef)) throw new PreviewError('UNAVAILABLE', 'O supervisor retornou uma referência de runtime inválida.')
+          const readiness = await this.#runtimeCall('RUNTIME_HEALTH_TIMEOUT', signal => this.options.runtime.health(started.runtimeRef, signal))
+          if (readiness !== 'OK') throw new PreviewError('UNAVAILABLE', 'O protótipo não ficou saudável dentro do prazo seguro.')
           record = previewRecordSchema.parse({ ...record, state: 'READY', ready_at: this.#now().toISOString(), runtime_ref: started.runtimeRef, health: 'OK' })
           await this.options.repository.putPreview(record)
           const ticket = await this.#issueAdmission(actor, record)
           return { preview: this.public(record), admissionTicket: ticket }
         } catch (error) {
-          if (startedRuntimeRef !== undefined) await this.#runtimeCall('RUNTIME_STOP_TIMEOUT', signal => this.options.runtime.stop(startedRuntimeRef!, signal)).catch(() => undefined)
-          record = previewRecordSchema.parse({ ...record, state: 'FAILED', stopped_at: this.#now().toISOString(), stop_reason: 'failed', failure_code: failureCode(error), health: 'DOWN' })
+          let cleanupIncomplete = false
+          if (startedRuntimeRef !== undefined) {
+            try { await this.#runtimeCall('RUNTIME_STOP_TIMEOUT', signal => this.options.runtime.stop(startedRuntimeRef!, signal)) }
+            catch { cleanupIncomplete = true; this.options.onCleanupFailure?.(previewId) }
+          }
+          record = previewRecordSchema.parse({
+            ...record,
+            state: cleanupIncomplete ? 'STOPPING' : 'FAILED',
+            stopped_at: cleanupIncomplete ? null : this.#now().toISOString(),
+            stop_reason: 'failed',
+            failure_code: cleanupIncomplete ? 'RUNTIME_CLEANUP_INCOMPLETE' : failureCode(error),
+            runtime_ref: cleanupIncomplete ? startedRuntimeRef ?? null : record.runtime_ref,
+            health: 'DOWN',
+          })
           await this.options.repository.putPreview(record)
           throw error
         }
@@ -216,9 +245,15 @@ export class StudioPreviewService {
         let cleanupIncomplete = false
         if (record.runtime_ref !== null) {
           try { await this.#runtimeCall('RUNTIME_STOP_TIMEOUT', signal => this.options.runtime.stop(record.runtime_ref!, signal)) }
-          catch { cleanupIncomplete = true }
+          catch { cleanupIncomplete = true; this.options.onCleanupFailure?.(previewId) }
         }
-        record = previewRecordSchema.parse({ ...record, state: 'STOPPED', stopped_at: this.#now().toISOString(), stop_reason: 'user', health: 'DOWN', failure_code: cleanupIncomplete ? 'RUNTIME_CLEANUP_INCOMPLETE' : record.failure_code })
+        record = previewRecordSchema.parse({
+          ...record,
+          state: cleanupIncomplete ? 'STOPPING' : 'STOPPED',
+          stopped_at: cleanupIncomplete ? null : this.#now().toISOString(),
+          stop_reason: 'user', health: 'DOWN',
+          failure_code: cleanupIncomplete ? 'RUNTIME_CLEANUP_INCOMPLETE' : record.failure_code,
+        })
         await this.options.repository.putPreview(record)
         await this.#revokeAdmissions(record.preview_id)
         return this.public(record)
@@ -226,23 +261,53 @@ export class StudioPreviewService {
     })
   }
 
+  async heartbeat(actor: PreviewActor, projectId: string, previewId: string): Promise<PublicPreview> {
+    this.#authorize(actor, 'project.write')
+    return this.#mutex.run(`${actor.orgId}:${actor.tenantId}:${projectId}`, async () => {
+      return this.#mutex.run(`preview:${previewId}`, async () => {
+        const record = this.#preview(actor, projectId, previewId)
+        const now = this.#now()
+        if (record.state !== 'READY' || record.runtime_ref === null || Date.parse(record.expires_at) <= now.getTime()) {
+          throw new PreviewError('CONFLICT', 'Esta prévia já foi encerrada ou expirou.')
+        }
+        const health = await this.#runtimeCall('RUNTIME_HEALTH_TIMEOUT', signal => this.options.runtime.health(record.runtime_ref!, signal))
+        if (health !== 'OK') throw new PreviewError('UNAVAILABLE', 'A prévia não está saudável e não pode ser renovada.')
+        const absoluteExpiry = Date.parse(record.created_at) + MAX_TTL_SECONDS * 1000
+        const renewedExpiry = Math.min(absoluteExpiry, Math.max(Date.parse(record.expires_at), now.getTime() + this.#ttlSeconds * 1000))
+        const updated = previewRecordSchema.parse({ ...record, health: 'OK', expires_at: new Date(renewedExpiry).toISOString() })
+        await this.options.repository.putPreview(updated)
+        await this.#mutex.run(`admissions:${previewId}`, async () => {
+          await Promise.all(this.options.repository.admissions()
+            .filter(item => item.preview_id === previewId && item.revoked_at === null)
+            .map(item => this.options.repository.putAdmission(previewAdmissionSchema.parse({ ...item, expires_at: updated.expires_at }))))
+        })
+        return this.public(updated)
+      })
+    })
+  }
+
   async exchange(hostname: string, ticket: string): Promise<{ readonly cookie: string; readonly maxAge: number }> {
     const ticketHash = hashSecret(ticket)
     return this.#mutex.run(`admission:${ticketHash}`, async () => {
-      const now = this.#now()
-      const preview = this.options.repository.previews().find(item => item.hostname === normalizeHost(hostname))
-      if (preview === undefined || preview.state !== 'READY' || Date.parse(preview.expires_at) <= now.getTime()) throw new PreviewError('NOT_FOUND', 'Prévia indisponível.')
-      const admission = this.options.repository.admissions().find(item => item.preview_id === preview.preview_id
-        && item.ticket_hash === ticketHash && item.exchanged_at === null && item.revoked_at === null)
-      if (admission === undefined || Date.parse(admission.expires_at) <= now.getTime()) throw new PreviewError('NOT_FOUND', 'Convite de prévia inválido ou expirado.')
-      if (!this.options.sessions.isActive({ sessionId: admission.source_session_id, userId: admission.user_id, orgId: admission.org_id, tenantId: admission.tenant_id })) {
-        throw new PreviewError('FORBIDDEN', 'Sua sessão do DZ23 STUDIO não está mais ativa.')
-      }
-      const cookie = this.#createSecret()
-      await this.options.repository.putAdmission(previewAdmissionSchema.parse({
-        ...admission, ticket_hash: hashSecret(this.#createSecret()), cookie_hash: hashSecret(cookie), exchanged_at: now.toISOString(),
-      }))
-      return { cookie, maxAge: Math.max(0, Math.floor((Date.parse(preview.expires_at) - now.getTime()) / 1000)) }
+      const snapshot = this.options.repository.admissions().find(item => item.ticket_hash === ticketHash)
+      if (snapshot === undefined) throw new PreviewError('NOT_FOUND', 'Convite de prévia inválido ou expirado.')
+      return this.#mutex.run(`admissions:${snapshot.preview_id}`, async () => {
+        const now = this.#now()
+        const preview = this.options.repository.previews().find(item => item.preview_id === snapshot.preview_id && item.hostname === normalizeHost(hostname))
+        if (preview === undefined || preview.state !== 'READY' || Date.parse(preview.expires_at) <= now.getTime()) throw new PreviewError('NOT_FOUND', 'Prévia indisponível.')
+        const admission = this.options.repository.admissions().find(item => item.preview_id === preview.preview_id
+          && item.ticket_hash === ticketHash && item.exchanged_at === null && item.revoked_at === null)
+        if (admission === undefined || Date.parse(admission.expires_at) <= now.getTime()) throw new PreviewError('NOT_FOUND', 'Convite de prévia inválido ou expirado.')
+        if (!this.options.sessions.isActive({ sessionId: admission.source_session_id, userId: admission.user_id, orgId: admission.org_id, tenantId: admission.tenant_id })) {
+          throw new PreviewError('FORBIDDEN', 'Sua sessão do DZ23 STUDIO não está mais ativa.')
+        }
+        const cookie = this.#createSecret()
+        await this.options.repository.putAdmission(previewAdmissionSchema.parse({
+          ...admission, ticket_hash: hashSecret(this.#createSecret()), cookie_hash: hashSecret(cookie), exchanged_at: now.toISOString(),
+        }))
+        const absoluteExpiry = Date.parse(preview.created_at) + MAX_TTL_SECONDS * 1000
+        return { cookie, maxAge: Math.max(0, Math.floor((absoluteExpiry - now.getTime()) / 1000)) }
+      })
     })
   }
 
@@ -269,10 +334,20 @@ export class StudioPreviewService {
         await this.#mutex.run(`preview:${candidate.preview_id}`, async () => {
           const current = this.options.repository.previews().find(item => item.preview_id === candidate.preview_id)
           if (current === undefined || !ACTIVE_STATES.has(current.state) || Date.parse(current.expires_at) > this.#now().getTime()) return
-          if (current.runtime_ref !== null) await this.#runtimeCall('RUNTIME_STOP_TIMEOUT', signal => this.options.runtime.stop(current.runtime_ref!, signal)).catch(() => undefined)
-          await this.options.repository.putPreview(previewRecordSchema.parse({ ...current, state: 'EXPIRED', stopped_at: this.#now().toISOString(), stop_reason: 'expired', health: 'DOWN' }))
+          let cleanupIncomplete = false
+          if (current.runtime_ref !== null) {
+            try { await this.#runtimeCall('RUNTIME_STOP_TIMEOUT', signal => this.options.runtime.stop(current.runtime_ref!, signal)) }
+            catch { cleanupIncomplete = true; this.options.onCleanupFailure?.(current.preview_id) }
+          }
+          await this.options.repository.putPreview(previewRecordSchema.parse({
+            ...current,
+            state: cleanupIncomplete ? 'STOPPING' : 'EXPIRED',
+            stopped_at: cleanupIncomplete ? null : this.#now().toISOString(),
+            stop_reason: 'expired', health: 'DOWN',
+            failure_code: cleanupIncomplete ? 'RUNTIME_CLEANUP_INCOMPLETE' : current.failure_code,
+          }))
           await this.#revokeAdmissions(current.preview_id)
-          reaped++
+          if (!cleanupIncomplete) reaped++
         })
       })
     }
@@ -289,7 +364,10 @@ export class StudioPreviewService {
         try {
           await this.#runtimeCall('RUNTIME_STOP_TIMEOUT', signal => this.options.runtime.stop(runtime.runtimeRef, signal))
           stoppedOrphans++
-        } catch { /* O próximo ciclo tenta novamente sem impedir os demais runtimes. */ }
+        } catch {
+          this.options.onCleanupFailure?.(runtime.previewId)
+          /* O próximo ciclo tenta novamente sem impedir os demais runtimes. */
+        }
       }
     }
     let failedRecords = 0
@@ -300,14 +378,34 @@ export class StudioPreviewService {
           if (record === undefined || ['STOPPED', 'FAILED', 'EXPIRED'].includes(record.state)) return
           const runtime = record.runtime_ref === null ? undefined : managed.find(item => item.previewId === record.preview_id && item.runtimeRef === record.runtime_ref)
           if (Date.parse(record.expires_at) <= this.#now().getTime()) {
-            if (runtime !== undefined) await this.#runtimeCall('RUNTIME_STOP_TIMEOUT', signal => this.options.runtime.stop(runtime.runtimeRef, signal)).catch(() => undefined)
-            await this.options.repository.putPreview(previewRecordSchema.parse({ ...record, state: 'EXPIRED', health: 'DOWN', stopped_at: this.#now().toISOString(), stop_reason: 'expired' }))
+            let cleanupIncomplete = false
+            if (runtime !== undefined) {
+              try { await this.#runtimeCall('RUNTIME_STOP_TIMEOUT', signal => this.options.runtime.stop(runtime.runtimeRef, signal)) }
+              catch { cleanupIncomplete = true; this.options.onCleanupFailure?.(record.preview_id) }
+            }
+            await this.options.repository.putPreview(previewRecordSchema.parse({
+              ...record,
+              state: cleanupIncomplete ? 'STOPPING' : 'EXPIRED', health: 'DOWN',
+              stopped_at: cleanupIncomplete ? null : this.#now().toISOString(),
+              stop_reason: 'expired',
+              failure_code: cleanupIncomplete ? 'RUNTIME_CLEANUP_INCOMPLETE' : record.failure_code,
+            }))
             await this.#revokeAdmissions(record.preview_id)
             return
           }
           if (record.state === 'STOPPING') {
-            if (runtime !== undefined) await this.#runtimeCall('RUNTIME_STOP_TIMEOUT', signal => this.options.runtime.stop(runtime.runtimeRef, signal)).catch(() => undefined)
-            await this.options.repository.putPreview(previewRecordSchema.parse({ ...record, state: 'STOPPED', health: 'DOWN', stopped_at: this.#now().toISOString(), stop_reason: 'reconciled' }))
+            let cleanupIncomplete = false
+            if (runtime !== undefined) {
+              try { await this.#runtimeCall('RUNTIME_STOP_TIMEOUT', signal => this.options.runtime.stop(runtime.runtimeRef, signal)) }
+              catch { cleanupIncomplete = true; this.options.onCleanupFailure?.(record.preview_id) }
+            }
+            await this.options.repository.putPreview(previewRecordSchema.parse({
+              ...record,
+              state: cleanupIncomplete ? 'STOPPING' : 'STOPPED', health: 'DOWN',
+              stopped_at: cleanupIncomplete ? null : this.#now().toISOString(),
+              stop_reason: record.stop_reason ?? 'reconciled',
+              failure_code: cleanupIncomplete ? 'RUNTIME_CLEANUP_INCOMPLETE' : record.failure_code,
+            }))
             await this.#revokeAdmissions(record.preview_id)
             return
           }
@@ -390,14 +488,43 @@ export class StudioPreviewService {
       ticket_hash: hashSecret(ticket), cookie_hash: null, created_at: this.#now().toISOString(),
       expires_at: preview.expires_at, exchanged_at: null, revoked_at: null,
     })
-    await this.options.repository.putAdmission(admission)
+    await this.#mutex.run(`admissions:${preview.preview_id}`, () => this.options.repository.putAdmission(admission))
     return ticket
   }
 
+  async #retireForReplacement(candidate: PreviewRecord): Promise<void> {
+    await this.#mutex.run(`preview:${candidate.preview_id}`, async () => {
+      let current = this.options.repository.previews().find(item => item.preview_id === candidate.preview_id)
+      if (current === undefined || !ACTIVE_STATES.has(current.state)) return
+      current = previewRecordSchema.parse({ ...current, state: 'STOPPING' })
+      await this.options.repository.putPreview(current)
+      let cleanupIncomplete = false
+      if (current.runtime_ref !== null) {
+        const runtimeRef = current.runtime_ref
+        try { await this.#runtimeCall('RUNTIME_STOP_TIMEOUT', signal => this.options.runtime.stop(runtimeRef, signal)) }
+        catch { cleanupIncomplete = true; this.options.onCleanupFailure?.(current.preview_id) }
+      }
+      current = previewRecordSchema.parse({
+        ...current,
+        state: cleanupIncomplete ? 'STOPPING' : 'STOPPED',
+        stopped_at: cleanupIncomplete ? null : this.#now().toISOString(),
+        stop_reason: 'replaced', health: 'DOWN',
+        failure_code: cleanupIncomplete ? 'RUNTIME_CLEANUP_INCOMPLETE' : current.failure_code,
+      })
+      await this.options.repository.putPreview(current)
+      await this.#revokeAdmissions(current.preview_id)
+      if (cleanupIncomplete) {
+        throw new PreviewError('UNAVAILABLE', 'A prévia anterior não pôde ser encerrada com segurança; tente novamente em instantes.')
+      }
+    })
+  }
+
   async #revokeAdmissions(previewId: string): Promise<void> {
-    const now = this.#now().toISOString()
-    await Promise.all(this.options.repository.admissions().filter(item => item.preview_id === previewId && item.revoked_at === null)
-      .map(item => this.options.repository.putAdmission(previewAdmissionSchema.parse({ ...item, revoked_at: now }))))
+    await this.#mutex.run(`admissions:${previewId}`, async () => {
+      const now = this.#now().toISOString()
+      await Promise.all(this.options.repository.admissions().filter(item => item.preview_id === previewId && item.revoked_at === null)
+        .map(item => this.options.repository.putAdmission(previewAdmissionSchema.parse({ ...item, revoked_at: now }))))
+    })
   }
 
   async #runtimeCall<T>(code: string, call: (signal: AbortSignal) => Promise<T>): Promise<T> {

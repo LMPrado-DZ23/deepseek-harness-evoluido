@@ -24,7 +24,7 @@ export const previewRecordSchema = z.object({
   ready_at: timestamp.nullable(),
   expires_at: timestamp,
   stopped_at: timestamp.nullable(),
-  stop_reason: z.enum(['user', 'expired', 'failed', 'reconciled']).nullable(),
+  stop_reason: z.enum(['user', 'expired', 'failed', 'reconciled', 'replaced']).nullable(),
   failure_code: z.string().min(1).nullable(),
   runtime_ref: z.string().min(1).max(200).nullable(),
   health: z.enum(['PENDING', 'OK', 'DOWN']),
