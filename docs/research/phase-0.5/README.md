@@ -34,6 +34,8 @@ credencial real, ação externa, publicação ou deploy pode ocorrer.
   encerramento de cada sessão;
 - [`observation-form.md`](observation-form.md): uma cópia por participante;
 - [`gate-scorecard.md`](gate-scorecard.md): consolidação dos cinco resultados;
+- [`recording-consent.md`](recording-consent.md): termo opcional, separado,
+  usado somente se houver gravação;
 - [`preparation-proof.md`](preparation-proof.md): comandos, resultados e
   bloqueios do preparo técnico;
 - [`claude-handoff.md`](claude-handoff.md): estado técnico para continuidade
@@ -49,6 +51,15 @@ O ZIP gerado pelo script `scripts/build-phase05-kit.ps1` contém formulários e
 lançadores, mas deliberadamente não contém wheel, fonte ou dependências do
 OmniSeek. O notebook precisa ter o checkout P40 e seu ambiente Python já
 preparados e auditados.
+
+O Docker é usado somente pelo P40 para executar a criação em sandbox. O
+lançador exige o daemon disponível porque a tarefa de pesquisa inclui essa
+etapa; ele não instala imagens, dependências nem serviços automaticamente.
+
+O lançador inicia o protótipo com uma lista explícita e mínima de variáveis de
+ambiente. Chaves, logins de CLIs e endereços externos existentes no notebook
+não são herdados. O endpoint da IA local detectada é passado explicitamente e
+permanece restrito a `localhost`.
 
 ## Ordem correta
 

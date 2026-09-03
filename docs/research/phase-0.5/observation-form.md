@@ -8,7 +8,7 @@ Copie este arquivo uma vez para cada sessão. Use identificador anônimo.
 |---|---|
 | Participante | `P0_` |
 | Data e início | |
-| Facilitador | |
+| Iniciais do facilitador | |
 | Commit do DZ23 STUDIO | |
 | Commit P40 esperado | `d9a8109528839a9f6c691cab9d71f3fce7e91e02` |
 | IA local e modelo | |
@@ -52,25 +52,31 @@ Preencha somente depois da pergunta “Conte com suas palavras o que aconteceu�
 | Criação | sim / não | |
 | Verificação | sim / não | |
 
-Explicou espontaneamente que preview não é produto publicado: **sim / não**.
+Explicou com palavras próprias que preview não está publicado nem disponível
+para outras pessoas: **sim / não**.
+
+Frase literal usada para explicar preview:
+
+
+Mencionou o aviso permanente como fonte da resposta: **sim / não**.
 
 Descreveu as cinco etapas sem ajuda: **sim / não**.
 
 ## Respostas finais
 
-**O que o sistema fez de verdade?**
-
-
-**O que ainda falta?**
-
-
 **Publicaria para clientes agora? Por quê?**
+
+
+**O que o sistema fez de verdade?**
 
 
 **Palavra, pergunta ou botão confuso:**
 
 
 **Confiança de 1 a 5:**
+
+
+**Somente depois das respostas acima: o que ainda falta?**
 
 
 ## Segurança e honestidade

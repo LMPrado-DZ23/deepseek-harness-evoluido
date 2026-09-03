@@ -38,10 +38,30 @@ parte do artefato do DZ23 STUDIO. O lançador exige o checkout P40 exato e limpo
 - o lançador foi corrigido para exigir JSON com pelo menos um modelo e agora
   bloqueia honestamente até uma IA local real estar ativa.
 
+## Correções da revisão de 03/09/2026
+
+- MEDIUM-1 fechado: o processo P40 agora nasce com ambiente vazio e allowlist;
+  nenhuma chave de nuvem, login de CLI ou URL externa do host é herdada;
+- prova negativa fechada: chave Anthropic falsa, `claude` falso e
+  `OPENAI_BASE_URL` externa resultaram em zero rota externa/CLI;
+- endpoint da IA local detectada é passado explicitamente em loopback;
+- arquivos `.env.*`, chaves e certificados ignorados pelo Git agora bloqueiam
+  o preflight;
+- MEDIUM-2 fechado: a intenção de publicar é perguntada antes de qualquer
+  pergunta sobre o que falta, evitando ensinar a resposta;
+- o gate de preview exige explicação espontânea em palavras próprias e registra
+  separadamente se o participante apenas citou o banner;
+- consentimento de gravação ganhou formulário separado, anônimo e fora do
+  diretório do protótipo; sem prazo de retenção preenchido, não há gravação.
+
+Evidência executada: `27 passed`, `ROUTING_ISOLATION_PROOF=PASS`,
+`IGNORED_SECRET_PROOF=PASS` e `PHASE05_LAUNCHER_PROOF=PASS`. A execução sem a
+IA simulada continua bloqueada corretamente. Nenhuma sessão humana foi feita.
+
 ## Revisão pedida ao Claude
 
 Revisar somente incompatibilidades concretas com o plano v2.0/P39/P40 e falhas
 que possam invalidar a pesquisa. Não reabrir arquitetura, licença ou escopo já
-congelados. Conferir especialmente neutralidade do roteiro, cálculo do gate,
+congelados. Conferir especialmente as duas correções acima, cálculo do gate,
 isolamento entre participantes, ausência de segredo, validação real da IA local
 e ausência de código do OmniSeek no ZIP.

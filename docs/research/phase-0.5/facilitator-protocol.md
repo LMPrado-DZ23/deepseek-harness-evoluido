@@ -29,7 +29,9 @@ o produto nem convencer a pessoa de que ele funciona.
    e-mail, telefone, CPF ou empresa.
 2. Explique que o protótipo pode falhar, que nada será publicado e que a pessoa
    pode parar quando quiser.
-3. Peça autorização específica antes de gravar áudio, vídeo ou tela. Sem
+3. Peça autorização específica antes de gravar áudio, vídeo ou tela. Quando
+   houver gravação, use o termo de consentimento separado, identificado apenas
+   como `P01` a `P05`, e guarde-o fora do diretório de dados do protótipo. Sem
    autorização, registre somente notas anônimas.
 4. Leia o [`participant-card.md`](participant-card.md) literalmente.
 5. Inicie o cronômetro e permaneça em silêncio.
@@ -58,14 +60,15 @@ e registre a frase exata.
 ## Perguntas finais, nesta ordem
 
 1. “Conte com suas palavras o que aconteceu desde a sua ideia até esta tela.”
-2. “O que o sistema fez de verdade?”
-3. “O que ainda falta para isso poder ser usado por outras pessoas?”
-4. “Você publicaria isso para clientes agora? Por quê?”
-5. “Que palavra, pergunta ou botão ficou confuso?”
-6. “De 1 a 5, quanto você confiou no que viu?”
+2. “Você publicaria isso para clientes agora? Por quê?”
+3. “O que o sistema fez de verdade?”
+4. “Que palavra, pergunta ou botão ficou confuso?”
+5. “De 1 a 5, quanto você confiou no que viu?”
+6. Somente agora: “O que ainda falta para isso poder ser usado por outras
+   pessoas?”
 
-Não cite as cinco etapas antes de encerrar e registrar a resposta da primeira
-pergunta.
+Não cite as cinco etapas nem explique o significado de preview antes de
+encerrar e registrar as respostas às cinco primeiras perguntas.
 
 ## Sessão válida ou inválida
 

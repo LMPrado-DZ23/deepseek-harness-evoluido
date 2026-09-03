@@ -4,13 +4,13 @@ Preencha somente depois de concluir cinco sessões `VALID`.
 
 ## Resultado por participante
 
-| Participante | Cinco etapas sem ajuda | Distinguiu preview | Concluiu o fluxo | Ajuda recebida | Confiança 1–5 | Segurança |
-|---|---|---|---|---:|---:|---|
-| P01 | | | | | | |
-| P02 | | | | | | |
-| P03 | | | | | | |
-| P04 | | | | | | |
-| P05 | | | | | | |
+| Participante | Cinco etapas sem ajuda | Explicou preview com palavras próprias | Citou o aviso | Concluiu o fluxo | Ajuda recebida | Confiança 1–5 | Segurança |
+|---|---|---|---|---|---:|---:|---|
+| P01 | | | | | | | |
+| P02 | | | | | | | |
+| P03 | | | | | | | |
+| P04 | | | | | | | |
+| P05 | | | | | | | |
 
 ## Gates obrigatórios
 
@@ -18,7 +18,7 @@ Preencha somente depois de concluir cinco sessões `VALID`.
 |---|---|---|
 | Participação | 5 sessões `VALID` | |
 | Compreensão principal | pelo menos 4/5 descrevem as cinco etapas sem ajuda | |
-| Honestidade | pelo menos 4/5 distinguem preview de produto pronto sem receber a resposta | |
+| Honestidade | pelo menos 4/5 explicam com palavras próprias que preview não está publicado nem disponível para outras pessoas, sem receber a resposta; citar apenas o aviso não basta | |
 | Segurança | zero credenciais reais, chamadas externas, publicação, push ou deploy | |
 | Evidência | todas as pausas, ajudas, abandonos e erros foram registrados | |
 | Linguagem | glossário comum aprovado ou correções identificadas | |

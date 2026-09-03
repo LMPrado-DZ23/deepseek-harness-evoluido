@@ -57,6 +57,7 @@ try {
   Copy-Item -LiteralPath (Join-Path $repoRoot 'docs/research/phase-0.5/facilitator-protocol.md') -Destination $forms
   Copy-Item -LiteralPath (Join-Path $repoRoot 'docs/research/phase-0.5/observation-form.md') -Destination $forms
   Copy-Item -LiteralPath (Join-Path $repoRoot 'docs/research/phase-0.5/gate-scorecard.md') -Destination $forms
+  Copy-Item -LiteralPath (Join-Path $repoRoot 'docs/research/phase-0.5/recording-consent.md') -Destination $forms
   Copy-Item -LiteralPath (Join-Path $repoRoot 'docs/research/phase-0.5/preparation-proof.md') -Destination $forms
   Copy-Item -LiteralPath (Join-Path $repoRoot 'research/phase-0.5/launchers/Start-DZ23-Research.ps1') -Destination $launchers
   Copy-Item -LiteralPath (Join-Path $repoRoot 'research/phase-0.5/launchers/start-wsl.sh') -Destination $launchers

@@ -21,6 +21,9 @@ HTTP. Ele exige JSON de Ollama/OpenAI-compatible com pelo menos um modelo.
 | Parser PowerShell dos dois scripts | PASS |
 | `bash -n` do lançador WSL2 | PASS |
 | P40 `tests/test_research_mode.py` | 27 passed |
+| Prova controlada do lançador | PASS |
+| Chave falsa + CLI `claude` falsa + URL externa | nenhuma rota externa ou CLI; PASS |
+| Arquivo `.env.*` ignorado pelo Git | recusado; PASS |
 | Commit P40 | `d9a8109528839a9f6c691cab9d71f3fce7e91e02` |
 | Árvore P40 | limpa |
 | Python P40 | 3.12.3 em `/home/leandro/omsfinal/.v/bin/python` |
@@ -57,6 +60,43 @@ EXPECTED_BLOCKER=NO_LOCAL_AI_MODEL
 
 Nenhum fluxo de participante, geração de aplicação, chamada externa, deploy,
 push ou publicação foi executado.
+
+## Correções após a revisão independente
+
+O lançador não usa mais uma lista de segredos conhecidos para limpar o ambiente.
+Ele inicia testes e servidor com `env -i` e uma lista explícita composta apenas
+por `PATH`, `HOME`, idioma, controles seguros do P40, diretório de dados e o
+endpoint local detectado. A IA local é passada por uma única variável adequada
+ao provedor (`OLLAMA_HOST`, `LMSTUDIO_HOST` ou `VLLM_BASE_URL`), sempre em
+`127.0.0.1`.
+
+A prova `scripts/prove-phase05-launcher.sh` criou, temporariamente, um servidor
+Ollama compatível em loopback e executou o preflight com:
+
+- `ANTHROPIC_API_KEY=fake`;
+- um binário `claude` executável e falso no `PATH` da prova;
+- `OPENAI_BASE_URL=http://203.0.113.1`.
+
+O P40 viu o binário falso, mas `cli_routes()` permaneceu vazio;
+`_api_entries()` permaneceu vazio; e todos os endereços externos injetados nas
+rotas locais foram reduzidos a loopback. Resultado:
+
+```text
+27 passed
+ROUTING_ISOLATION_PROOF=PASS
+IGNORED_SECRET_PROOF=PASS
+PHASE05_LAUNCHER_PROOF=PASS
+```
+
+Em seguida, sem a IA local simulada, o preflight voltou a recusar a execução
+com `Nenhuma IA local respondeu em localhost`. Portanto, a fase humana continua
+honestamente `NOT_EXECUTED` e `BLOCKED_LOCAL_AI_MODEL`.
+
+O protocolo também foi corrigido para perguntar se a pessoa publicaria o
+resultado antes de explicar o que falta. O gate de preview só conta quando a
+pessoa explica com palavras próprias que o preview não está publicado nem
+disponível para outras pessoas; o formulário registra separadamente se ela
+citou o aviso permanente.
 
 ## Condição para iniciar P01
 

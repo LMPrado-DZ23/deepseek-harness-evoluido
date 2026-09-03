@@ -76,6 +76,17 @@ observed_commit="$("${git_command[@]}" rev-parse HEAD)"
   exit 1
 }
 
+sensitive_ignored="$(
+  "${git_command[@]}" ls-files --others --ignored --exclude-standard |
+    grep -Ei '(^|/)\.env($|\.)|\.(key|pem|p12|pfx|crt)$' |
+    grep -Eiv '(^|/)\.env\.(example|sample|template)$' || true
+)"
+[ -z "$sensitive_ignored" ] || {
+  printf 'O checkout contém arquivos sensíveis ignorados pelo Git:\n%s\n' "$sensitive_ignored" >&2
+  printf 'Use uma cópia de pesquisa sem credenciais, chaves ou certificados.\n' >&2
+  exit 1
+}
+
 python_bin=""
 if [ -n "$requested_python" ]; then
   [ -x "$requested_python" ] || {
@@ -83,13 +94,13 @@ if [ -n "$requested_python" ]; then
     exit 1
   }
   if "$requested_python" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 12) else 1)' 2>/dev/null; then
-    python_bin="$requested_python"
+    python_bin="$(cd "$(dirname "$requested_python")" && pwd -P)/$(basename "$requested_python")"
   fi
 else
   for candidate in python3.13 python3.12 python3; do
     if command -v "$candidate" >/dev/null 2>&1 &&
       "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 12) else 1)' 2>/dev/null; then
-      python_bin="$candidate"
+      python_bin="$(command -v "$candidate")"
       break
     fi
   done
@@ -110,13 +121,14 @@ if ss -ltn "sport = :$port" | tail -n +2 | grep -q .; then
 fi
 
 local_ai=""
+local_ai_env=""
+local_ai_base=""
 for probe in \
-  "Ollama|http://127.0.0.1:11434/api/tags" \
-  "LM Studio|http://127.0.0.1:1234/v1/models" \
-  "vLLM|http://127.0.0.1:8000/v1/models"; do
-  label="${probe%%|*}"
-  url="${probe#*|}"
-  if curl --fail --silent --max-time 2 "$url" 2>/dev/null |
+  "Ollama|OLLAMA_HOST|http://127.0.0.1:11434|http://127.0.0.1:11434/api/tags" \
+  "LM Studio|LMSTUDIO_HOST|http://127.0.0.1:1234|http://127.0.0.1:1234/v1/models" \
+  "vLLM|VLLM_BASE_URL|http://127.0.0.1:8000|http://127.0.0.1:8000/v1/models"; do
+  IFS='|' read -r label candidate_env candidate_base url <<< "$probe"
+  if curl --noproxy '*' --fail --silent --max-time 2 "$url" 2>/dev/null |
     "$python_bin" -c '
 import json
 import sys
@@ -133,6 +145,8 @@ valid = isinstance(items, list) and any(
 raise SystemExit(0 if valid else 1)
 '; then
     local_ai="$label"
+    local_ai_env="$candidate_env"
+    local_ai_base="$candidate_base"
     break
   fi
 done
@@ -141,20 +155,59 @@ done
   exit 1
 }
 
-for secret_name in \
-  ANTHROPIC_API_KEY OPENAI_API_KEY OPENROUTER_API_KEY DEEPSEEK_API_KEY \
-  GEMINI_API_KEY GROQ_API_KEY FIRECRAWL_API_KEY GITHUB_TOKEN E2B_API_KEY \
-  BRAVE_API_KEY EVOLUTION_API_KEY TELEGRAM_BOT_TOKEN SLACK_BOT_TOKEN \
-  FAL_KEY REPLICATE_API_TOKEN ELEVENLABS_API_KEY HEYGEN_API_KEY \
-  ZERNIO_API_KEY IQOPTION_EMAIL IQOPTION_PASSWORD; do
-  unset "$secret_name" || true
-done
+python_dir="$(dirname "$python_bin")"
+clean_path="$python_dir:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+clean_env=(
+  env -i
+  "PATH=$clean_path"
+  "HOME=$HOME"
+  "LANG=${LANG:-C.UTF-8}"
+  "PYTHONDONTWRITEBYTECODE=1"
+  "PYTHONPATH=$source_root"
+  "OMNISEEK_RESEARCH_MODE=on"
+  "OMNISEEK_PREFER=api"
+  "OMNISEEK_DELEGATED=off"
+  "OMNISEEK_OUTPUT_COMPRESSION=off"
+  "OMNISEEK_COMPRESSION=off"
+  "OMNISEEK_SKILL_LEARNING=false"
+  "OMNISEEK_PERMISSION_MODE=ask"
+  "OMNISEEK_MCP_SERVERS="
+  "$local_ai_env=$local_ai_base"
+)
 
-export PYTHONDONTWRITEBYTECODE=1
-export PYTHONPATH="$source_root"
 cd "$source_root"
-"$python_bin" -c 'import fastapi, uvicorn, omniseek' >/dev/null
-"$python_bin" -m pytest "$source_root/tests/test_research_mode.py" -q
+"${clean_env[@]}" "$python_bin" -c 'import fastapi, uvicorn, omniseek' >/dev/null
+"${clean_env[@]}" "$python_bin" -m pytest "$source_root/tests/test_research_mode.py" -q
+
+"${clean_env[@]}" \
+  ANTHROPIC_API_KEY=fake \
+  OPENAI_BASE_URL=http://203.0.113.1 \
+  "$python_bin" - <<'PY'
+import os
+import tempfile
+from pathlib import Path
+
+with tempfile.TemporaryDirectory(prefix="dz23-fake-cli-") as raw:
+    fake = Path(raw) / "claude"
+    fake.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    fake.chmod(0o700)
+    os.environ["PATH"] = raw + os.pathsep + os.environ["PATH"]
+
+    from omniseek import local_ai, routing
+    from omniseek.delegated import is_installed
+
+    assert is_installed("claude") is True
+    assert routing.cli_routes() == {}
+    assert routing._api_entries() == []
+    for candidate in local_ai.CANDIDATOS:
+        os.environ[candidate.variavel] = "http://203.0.113.1"
+        assert local_ai._endereco(candidate) in {
+            f"http://127.0.0.1:{candidate.porta}",
+            f"http://localhost:{candidate.porta}",
+        }
+
+print("ROUTING_ISOLATION_PROOF=PASS")
+PY
 
 if [ "$resume" = "preflight" ]; then
   printf '{"status":"PASS","commit":"%s","participant":"%s","local_ai":"%s","port":%s,"python":"%s"}\n' \
@@ -169,16 +222,6 @@ if [ -e "$data_root" ] && [ "$resume" != "resume" ]; then
 fi
 mkdir -p -m 700 "$data_root"
 
-export OMNISEEK_DATA_DIR="$data_root"
-export OMNISEEK_RESEARCH_MODE=on
-export OMNISEEK_PREFER=api
-export OMNISEEK_DELEGATED=off
-export OMNISEEK_OUTPUT_COMPRESSION=off
-export OMNISEEK_COMPRESSION=off
-export OMNISEEK_SKILL_LEARNING=false
-export OMNISEEK_PERMISSION_MODE=ask
-export OMNISEEK_MCP_SERVERS=""
-
 printf '\nPreflight: PASS\n'
 printf 'Participante: %s\n' "$participant_id"
 printf 'IA local: %s\n' "$local_ai"
@@ -186,4 +229,6 @@ printf 'Abra no navegador: http://127.0.0.1:%s/studio\n' "$port"
 printf 'Encerre com Ctrl+C.\n\n'
 
 cd "$data_root"
-exec "$python_bin" -m omniseek.cli research --host 127.0.0.1 --port "$port" --no-open
+exec "${clean_env[@]}" \
+  "OMNISEEK_DATA_DIR=$data_root" \
+  "$python_bin" -m omniseek.cli research --host 127.0.0.1 --port "$port" --no-open

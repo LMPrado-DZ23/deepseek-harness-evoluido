@@ -10,6 +10,9 @@ Pré-requisitos do facilitador:
 - uma IA local rodando em localhost;
 - dependências do checkout P40 já instaladas e auditadas.
 
+O Docker executa somente a criação em sandbox do protótipo. O kit não instala
+Docker, imagens, pacotes ou serviços.
+
 Exemplo no PowerShell:
 
   .\Start-DZ23-Research.ps1 `
@@ -25,6 +28,10 @@ Se as dependências estiverem num ambiente virtual do WSL2, informe o Python:
 
 O lançador não instala dependências automaticamente. Essa recusa é intencional:
 o P40 ainda não possui lock/SBOM aprovado para distribuição.
+
+O lançador também não herda chaves, logins de CLIs ou endereços externos do
+Windows/WSL2. Ele cria um ambiente mínimo e passa explicitamente apenas a IA
+local detectada em localhost.
 
 O facilitador faz login e só então entrega o notebook ao participante.
 Para encerrar, volte ao terminal e pressione Ctrl+C.
