@@ -27,3 +27,11 @@
       studio_route_health: postgres
       studio_previews: postgres
       studio_preview_admissions: postgres
+      studio_projects: postgres
+      studio_app_specs: postgres
+      studio_design_specs: postgres
+      studio_intake_turns: postgres
+      studio_plans: postgres
+      studio_runs: postgres
+      studio_evidence: postgres
+      studio_approvals: postgres
