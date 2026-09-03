@@ -14,6 +14,7 @@ test('percorre as cinco etapas, muda privacidade e termina sem alegar publicaç�
     { name: 'dz23_studio_csrf', value: 'csrf-e2e', url: 'http://127.0.0.1:4179' },
   ])
   await page.goto('/studio')
+  await expect(page.getByRole('button', { name: 'Quero um painel para minha equipe criar, editar e excluir cadastros.' })).toBeVisible()
   await expect(page.getByText('Seus dados não são enviados para serviços externos.')).toBeVisible()
   await page.getByText('Permitir IA configurada', { exact: false }).click()
   await expect(page.locator('.privacy-notice')).toContainText('ollama-local')

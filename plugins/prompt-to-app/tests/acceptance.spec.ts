@@ -40,6 +40,22 @@ describe('AppSpec acceptance compiler', () => {
     const generated = await readFile(resolve(root, 'tests/e2e/appspec.spec.ts'), 'utf8')
     expect(generated).toContain('getByTestId("contato-form")')
     expect(generated).toContain('getByTestId("contato-list")')
-    expect(generated).toContain("getByRole('button', { name: 'Salvar' })")
+    expect(generated).toContain("getByRole('button',{name:'Salvar'})")
+  })
+
+  it('compiles login and create, edit, delete evidence for a CRUD panel', async () => {
+    const databaseSpec = { ...spec, entities: [{ name: 'Cliente', kind: 'database' as const, sensitive: false, fields: [
+      { name: 'Nome', type: 'text' as const, required: true },
+      { name: 'Ativo', type: 'boolean' as const, required: true },
+    ] }] }
+    const checks = acceptanceChecks(databaseSpec, 'crud-panel')
+    expect(checks).toContainEqual(expect.objectContaining({ kind: 'auth' }))
+    expect(checks).toContainEqual(expect.objectContaining({ kind: 'crud', flow: expect.objectContaining({ form_test_id: 'cliente-create-form', requires_auth: true }) }))
+    const root = await mkdtemp(join(tmpdir(), 'dz23-acceptance-crud-')); roots.push(root)
+    await writeAcceptanceArtifacts(root, databaseSpec, 'crud-panel')
+    const generated = await readFile(resolve(root, 'tests/e2e/appspec.spec.ts'), 'utf8')
+    expect(generated).toContain("fetch('/api/auth/session')")
+    expect(generated).toContain("name:'Salvar alterações'")
+    expect(generated).toContain("name:'Excluir'")
   })
 })

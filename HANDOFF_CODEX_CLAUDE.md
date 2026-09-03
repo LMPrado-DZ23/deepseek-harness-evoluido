@@ -1,5 +1,33 @@
 # Handoff Codex → Claude — E4 e abertura de P32/P33/P31-B
 
+## P32/P33 fatia 2 — blocos 6 e 7 construídos, aguardando revisão final
+
+Branch `codex/p32-fatia2-prompt-to-app`, sobre `9cd958c`. Ainda sem merge,
+push, PR ou deploy. O Studio agora gera acesso sem senha para formulário
+sensível e todo painel CRUD: owner fixado por `APP_OWNER_EMAIL`, member por
+convite, código de seis dígitos/10 minutos/5 tentativas, sessão opaca hasheada,
+cookie seguro, CSRF duplo e revogação. SMTP usa somente referências por env;
+`studio-capture` é recusado em produção.
+
+O painel CRUD determinístico exige login e CSRF para criar, editar e excluir;
+exclusão pede confirmação. Relações entre entidades continuam recusadas até
+existir seletor seguro. O backend só fornece códigos capturados ao projeto
+autorizado após estado `VERIFIED_PROTOTYPE`, e a interface os mostra apenas em
+Verificação com aviso de que a prova já os consumiu.
+
+Provas atuais: typecheck PASS; 80 testes do Prompt-to-App PASS; prova real
+`AUTH_CRUD_PROOF=PASS`, com `docker inspect NetworkMode=none`, conexão externa
+bloqueada, 18 caminhos protegidos, rota 401→200 e fluxo
+login→listar→criar→editar→excluir. Golden set: 18 total, 12
+`PASS_DETERMINISTIC`, 6 `NOT_IMPLEMENTED`, LLM real `NOT_EXECUTED`. Imagem
+regenerada e fixada no ambiente de prova:
+`sha256:c2011c57e0d8a2a66abb8626b53b2ef0abeedd7675ba4593924ee7bb99f2b33e`.
+
+Ainda é preciso executar os gates globais, fechar o commit e então revisar a
+fatia. Preview/publicação seguem `NOT_PRESENT`; SaaS/dashboard/agendamento
+`NOT_IMPLEMENTED`; passkey no app gerado `NOT_PRESENT`; experiência leiga
+`NOT_VALIDATED`.
+
 ## P32/P33 fatia 2 — blocos 1 a 3 prontos para revisão
 
 Branch de trabalho: `codex/p32-fatia2-prompt-to-app`. Base:
@@ -254,3 +282,77 @@ Arquivos centrais para revisão: `src/form-generator.ts`, `src/planner.ts`,
 `scripts/run-golden-set.ts`, ADR-026 e a capability matrix. Confirmar em
 especial que nenhum dado sensível chega ao modelo nessa categoria e que os
 componentes determinísticos entram na foto imutável antes da geração.
+
+## P32/P33 fatia 2 — fechamento dos blocos 6 e 7
+
+Branch de revisão: `codex/p32-fatia2-prompt-to-app`. Base integrada local:
+`codex/p30-policy-foundation@05d91f0`. Esta branch deve permanecer isolada:
+**não fazer merge, push, PR ou deploy** antes do parecer do Claude.
+
+### O que foi construído
+
+- Camada determinística de acesso sem senha nos aplicativos gerados: primeiro
+  proprietário limitado a `APP_OWNER_EMAIL`, convite de membros, código de seis
+  dígitos com TTL de dez minutos e cinco tentativas, sessão opaca revogável,
+  cookie `HttpOnly`/`Secure`/`SameSite=Lax` e double-submit CSRF.
+- Códigos ficam somente como derivação `scrypt` com sal no SQLite; tokens de
+  sessão ficam somente como SHA-256. `studio-capture` é restrito a
+  desenvolvimento, usa arquivo `0600` e falha fechado em produção. SMTP só
+  aceita configuração por referências de ambiente; SMTP sem TLS é recusado.
+- Migrações de autenticação usam `auth_schema_migrations` e não avançam o
+  `PRAGMA user_version` da camada de dados.
+- Categoria `crud-panel` gera, sem LLM, ações autenticadas de criar, editar e
+  excluir, painel e confirmação de exclusão. Formulários sensíveis também
+  exigem login. Referências entre entidades continuam recusadas até existir um
+  seletor seguro.
+- Aceitação executável percorre login e CRUD real no navegador. O pipeline
+  protege banco, migrações, autenticação, formulário e painel contra alteração
+  pelo modelo.
+- O backend só expõe códigos capturados ao projeto e tenant autorizados depois
+  de `VERIFIED_PROTOTYPE` com run `PASSED`; a interface mostra isso apenas na
+  etapa Verificação e avisa que os códigos da prova já foram consumidos.
+- Template Next.js ganhou headers CSP, `nosniff`, `DENY`, referrer policy e
+  permissions policy. Diretório de dados é `0700` e SQLite é `0600` no Linux.
+
+### Evidência executada no conteúdo final
+
+- `typecheck`, build dos dez pacotes, `gate:i18n` com 199 chaves e
+  `gate:domain-scopes`: PASS.
+- Vitest: **281 PASS**, 18 integrações PostgreSQL puladas no gate sem serviço;
+  cobertura global 94,95% statements, 91,46% branches, 95,65% functions e
+  97,29% lines. Geradores de auth, CRUD, dados e formulário: 100%.
+- UI Playwright na imagem fixada e sem rede: **2/2 PASS** (recusa sem sessão e
+  jornada das cinco etapas sem alegar publicação).
+- `AUTH_CRUD_PROOF=PASS`: 18 caminhos protegidos, 12 checks, quatro etapas;
+  login, sessão e CRUD real passaram em contêiner `NetworkMode=none`, sem
+  capacidades, não-root e com raiz somente leitura.
+- `GENERATED_DATA_PROOF`, `FORM_DATABASE_PROOF`,
+  `BUILDER_ISOLATION_PROOF`, `TEMPLATE_PIPELINE_PROOF` e
+  `PROMPT_TO_APP_PROOF`: PASS.
+- Golden set: **12 `PASS_DETERMINISTIC`**, seis `NOT_IMPLEMENTED`; LLM real
+  `NOT_EXECUTED` e promoção pública proibida.
+- Gate P37 no `git archive`: PASS, 423 arquivos, 14 manifestos, zero achado;
+  o self-test negativo detectou caminho MITM, dependência `freestyle`, licença
+  ausente e assinatura `caveman-shrink`.
+- Imagem canônica das provas:
+  `sha256:c2011c57e0d8a2a66abb8626b53b2ef0abeedd7675ba4593924ee7bb99f2b33e`.
+
+### Limites verdadeiros
+
+Não houve LLM real, SMTP real, passkey, preview, publicação, deploy, celular
+físico nem teste com pessoas leigas. Dashboard e SaaS autenticado permanecem
+`NOT_IMPLEMENTED`; experiência leiga permanece `NOT_VALIDATED`. O Playwright
+direto no WSL não iniciou por bibliotecas nativas ausentes; a prova canônica
+passou na imagem fixada do builder. PostgreSQL real não foi reexecutado nesta
+fatia e suas 18 integrações ficaram explicitamente puladas no gate puro.
+
+### Pontos prioritários da revisão Claude
+
+1. Autoridade de owner/member, convite e impossibilidade de autoelevação.
+2. Armazenamento de código/sessão, TTL, tentativas, cookies e CSRF.
+3. Separação entre migrações de autenticação e de dados.
+4. `studio-capture` recusado em produção e ausência de segredo literal.
+5. Isolamento por organização/tenant na exposição dos códigos de verificação.
+6. Pipeline impedindo que o modelo sobrescreva arquivos determinísticos.
+7. Fluxo CRUD real e proteção de formulário sensível.
+8. Estados e textos sem chamar protótipo verificado de aplicação pronta.

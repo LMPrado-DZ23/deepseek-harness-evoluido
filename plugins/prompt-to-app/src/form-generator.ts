@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import type { AppSpecV1 } from './appspec.js'
+import { requiresGeneratedAuth } from './auth-generator.js'
 import { dataIdentifier } from './data-generator.js'
 import type { GeneratedFile } from './generator.js'
 import type { StudioProjectCategory } from './model.js'
@@ -17,13 +18,14 @@ export interface GeneratedFormLayer {
 export function generateFormLayer(spec: AppSpecV1, category: StudioProjectCategory): GeneratedFormLayer {
   if (category !== 'form-database') return { files: [], protectedPaths: [] }
   assertCategoryCanGenerate(category, spec)
+  const authRequired = requiresGeneratedAuth(spec, category)
   const entities = spec.entities.filter((entity): entity is DatabaseEntity => entity.kind === 'database')
   const files: GeneratedFile[] = entities.flatMap(entity => {
     const slug = dataIdentifier(entity.name)
     const symbol = pascal(slug)
     return [
-      { path: `src/server/actions/${slug}.ts`, content: renderAction(entity, slug, symbol) },
-      { path: `src/components/generated/${slug}-manager.tsx`, content: renderManager(entity, slug, symbol) },
+      { path: `src/server/actions/${slug}.ts`, content: renderAction(entity, slug, symbol, authRequired) },
+      { path: `src/components/generated/${slug}-manager.tsx`, content: renderManager(entity, slug, symbol, authRequired) },
     ]
   })
   files.push({ path: 'src/components/generated/index.ts', content: renderIndex(entities) })
@@ -38,9 +40,11 @@ export async function writeFormLayer(root: string, layer: GeneratedFormLayer): P
   }
 }
 
-function renderAction(entity: DatabaseEntity, slug: string, symbol: string): string {
+function renderAction(entity: DatabaseEntity, slug: string, symbol: string, authRequired: boolean): string {
   const values = entity.fields.map(field => `    ${JSON.stringify(dataIdentifier(field.name))}: ${formValue(field)},`).join('\n')
-  return `'use server'\n\nimport { revalidatePath } from 'next/cache'\nimport { openDatabase } from '../../db/client'\nimport { ${symbol}Repository } from '../repositories/${slug}'\n\nfunction text(formData: FormData, name: string): string {\n  const value = formData.get(name)\n  return typeof value === 'string' ? value.trim() : ''\n}\n\nexport async function create${symbol}(formData: FormData): Promise<void> {\n  const database = openDatabase()\n  try {\n    new ${symbol}Repository(database).create({\n${values}\n    })\n  } finally {\n    database.close()\n  }\n  revalidatePath('/')\n}\n`
+  const authImport = authRequired ? "import { requireFormSession } from '../../auth/runtime'\n" : ''
+  const guard = authRequired ? '  await requireFormSession(formData)\n' : ''
+  return `'use server'\n\nimport { revalidatePath } from 'next/cache'\n${authImport}import { openDatabase } from '../../db/client'\nimport { ${symbol}Repository } from '../repositories/${slug}'\n\nfunction text(formData: FormData, name: string): string {\n  const value = formData.get(name)\n  return typeof value === 'string' ? value.trim() : ''\n}\n\nexport async function create${symbol}(formData: FormData): Promise<void> {\n${guard}  const database = openDatabase()\n  try {\n    new ${symbol}Repository(database).create({\n${values}\n    })\n  } finally {\n    database.close()\n  }\n  revalidatePath('/')\n}\n`
 }
 
 function formValue(field: DatabaseField): string {
@@ -51,11 +55,15 @@ function formValue(field: DatabaseField): string {
   return field.required ? `text(formData, ${name})` : `(text(formData, ${name}) || undefined)`
 }
 
-function renderManager(entity: DatabaseEntity, slug: string, symbol: string): string {
+function renderManager(entity: DatabaseEntity, slug: string, symbol: string, authRequired: boolean): string {
   const fields = entity.fields.filter(field => field.type !== 'reference')
   const inputs = fields.map(field => renderInput(slug, field)).join('\n')
   const visible = fields.map(field => `row[${JSON.stringify(dataIdentifier(field.name))}]`).join(', ')
-  return `import { openDatabase } from '../../db/client'\nimport { create${symbol} } from '../../server/actions/${slug}'\nimport { ${symbol}Repository } from '../../server/repositories/${slug}'\n\nexport default function ${symbol}Manager() {\n  const database = openDatabase()\n  let rows: ReturnType<${symbol}Repository['list']>\n  try { rows = new ${symbol}Repository(database).list() } finally { database.close() }\n  return <section aria-labelledby=${JSON.stringify(`${slug}-title`)}>\n    <h2 id=${JSON.stringify(`${slug}-title`)}>${jsx(entity.name)}</h2>\n    <form action={create${symbol}} data-testid=${JSON.stringify(`${slug}-form`)}>\n${inputs}\n      <button type="submit">Salvar</button>\n    </form>\n    <h3>Cadastros salvos</h3>\n    {rows.length === 0 ? <p>Nenhum cadastro ainda.</p> : <ul data-testid=${JSON.stringify(`${slug}-list`)}>\n      {rows.map(row => <li key={row.id}>{[${visible}].filter(value => value !== null && value !== undefined && value !== '').map(value => typeof value === 'boolean' ? (value ? 'Sim' : 'Não') : String(value)).join(' · ')}</li>)}\n    </ul>}\n  </section>\n}\n`
+  const authImports = authRequired ? "import { csrfForCurrentSession, currentSession } from '../../auth/runtime'\nimport { AccessPanel, AccountPanel } from './access-panel'\n" : ''
+  const authStart = authRequired ? '  const session = await currentSession()\n  if (session === null) return <AccessPanel />\n  const csrf = await csrfForCurrentSession()\n' : ''
+  const csrfInput = authRequired ? '      <input type="hidden" name="_csrf" value={csrf} />\n' : ''
+  const account = authRequired ? '    <AccountPanel />\n' : ''
+  return `${authImports}import { openDatabase } from '../../db/client'\nimport { create${symbol} } from '../../server/actions/${slug}'\nimport { ${symbol}Repository } from '../../server/repositories/${slug}'\n\nexport default async function ${symbol}Manager() {\n${authStart}  const database = openDatabase()\n  let rows: ReturnType<${symbol}Repository['list']>\n  try { rows = new ${symbol}Repository(database).list() } finally { database.close() }\n  return <section aria-labelledby=${JSON.stringify(`${slug}-title`)}>\n${account}    <h2 id=${JSON.stringify(`${slug}-title`)}>${jsx(entity.name)}</h2>\n    <form action={create${symbol}} data-testid=${JSON.stringify(`${slug}-form`)}>\n${csrfInput}${inputs}\n      <button type="submit">Salvar</button>\n    </form>\n    <h3>Cadastros salvos</h3>\n    {rows.length === 0 ? <p>Nenhum cadastro ainda.</p> : <ul data-testid=${JSON.stringify(`${slug}-list`)}>\n      {rows.map(row => <li key={row.id}>{[${visible}].filter(value => value !== null && value !== undefined && value !== '').map(value => typeof value === 'boolean' ? (value ? 'Sim' : 'Não') : String(value)).join(' · ')}</li>)}\n    </ul>}\n  </section>\n}\n`
 }
 
 function renderInput(slug: string, field: DatabaseField): string {

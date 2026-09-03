@@ -87,6 +87,7 @@
     "planFiles": "Cada fatia precisa listar planned_files. Use somente caminhos sob src/ ou content/.",
     "planFirst": "A primeira fatia deve criar content/app.json e src/GeneratedApp.tsx; estilos adicionais ficam em src/generated.css.",
     "planFormDatabase": "Para a categoria de cadastro e lista, a tela principal deve importar os componentes protegidos de @/src/components/generated/, mostrar os campos, salvar e exibir a lista. O modelo nunca cria banco, migração, repositório ou ação de gravação.",
+    "planCrudPanel": "Para o painel de gestão, a tela principal deve importar o painel protegido de @/src/components/generated/. O painel faz login, lista, cria, edita e exclui com confirmação; o modelo nunca cria autenticação, banco ou ações.",
     "changeRequest": "Pedido de mudança da pessoa: {reason}",
     "generateOnly": "Produza somente JSON com files[].path e files[].content.",
     "generatePaths": "Caminhos permitidos: src/ e content/. Não gere configuração, dependências ou scripts.",

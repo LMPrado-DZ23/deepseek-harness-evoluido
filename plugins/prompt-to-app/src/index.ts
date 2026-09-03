@@ -41,6 +41,8 @@ import { PromptToAppService, type PromptToAppRepository } from './service.js'
 import { SharpLogoProcessor } from './logo.js'
 
 export * from './appspec.js'
+export * from './auth-generator.js'
+export * from './crud-generator.js'
 export * from './generator.js'
 export * from './design.js'
 export * from './data-generator.js'

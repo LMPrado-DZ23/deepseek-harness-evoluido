@@ -45,12 +45,15 @@ Claude Code reais continuam `NOT_EXECUTED`. Consulte
 [ADR-015](./docs/adr/ADR-015-isolated-agents.md) e a
 [prova P35](./docs/pocs/P35-phase3-agents-routes-proof.md).
 
-O bloco 4 da fatia 2 gera a camada de dados dos protótipos em `node:sqlite`:
-esquema Zod, migrações versionadas e repositórios são protegidos e nunca vêm do
-modelo de linguagem. A prova executou CRUD real dentro do construtor sem rede.
-Formulários, autenticação, preview e publicação ainda não fazem parte dessa
-capacidade; consulte a [ADR-023](./docs/adr/ADR-023-generated-sqlite-data-layer.md)
-e a [prova focada](./docs/proofs/P32-generated-data-proof.md).
+A fatia 2 gera dados, formulários, acesso e painel CRUD sobre `node:sqlite`.
+Esquema, migrações, repositórios, auth, sessão, CSRF e ações são protegidos e
+nunca vêm do modelo. As provas executaram cadastro/lista e o ciclo completo
+login→criar→editar→excluir em contêiner sem rede. Consulte as ADRs
+[023](./docs/adr/ADR-023-generated-sqlite-data-layer.md),
+[024](./docs/adr/ADR-024-generated-passwordless-access.md),
+[026](./docs/adr/ADR-026-form-database-category.md) e
+[027](./docs/adr/ADR-027-crud-panel-category.md), além da
+[prova de acesso e CRUD](./docs/proofs/P32-auth-crud-proof.md).
 
 Consulte [REPORT.md](./REPORT.md) para comandos, resultados, erros e limitações.
 
@@ -94,16 +97,18 @@ pnpm preflight:fase3
 pnpm prove:fase3-agents
 pnpm prove:generated-data
 pnpm prove:form-database
+pnpm prove:auth-crud
 pnpm golden
 ```
 
 No gate puro atual, os testes unitários passam e os 18 casos que exigem PostgreSQL real
 ficam explicitamente pulados; a execução PostgreSQL do P31-A permanece
 registrada na prova própria, sem ser apresentada como reexecução desta fatia.
-O gerador de dados, o gerador de cadastro/lista e o gate estrutural de imports
+Os geradores de dados, cadastro/lista, acesso, painel e o gate estrutural de imports
 são medidos separadamente, e a cobertura global permanece acima de 90%. A
-prova executável da categoria de cadastro preenche, salva em SQLite e encontra
-o registro na lista. A prova de borda
+prova executável de acesso confirma 401 sem sessão, entra por código e executa
+criar, editar e excluir. O golden set possui 12 casos executáveis e 6
+`NOT_IMPLEMENTED`; LLM real continua `NOT_EXECUTED`. A prova de borda
 usa Docker e exige que as
 dependências do profile também tenham sido instaladas com
 `pnpm --dir dsh-home/profiles/studio install --frozen-lockfile`. Isso não inclui

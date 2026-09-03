@@ -1,7 +1,7 @@
 # P32 — Prova executável do isolamento do construtor
 
 - Resultado: **PASS**
-- Imagem: `sha256:c5708d3fff608da8d916fb5ae79dc3e4eba495fca376134a7c607a8e2216405d`
+- Imagem: `sha256:c2011c57e0d8a2a66abb8626b53b2ef0abeedd7675ba4593924ee7bb99f2b33e`
 - NetworkMode: `none`
 - Tentativa de conexão dentro do contêiner: `NETWORK_BLOCKED`
 - Usuário: `1001:1001`

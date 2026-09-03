@@ -58,6 +58,7 @@ export default function GeneratedApp() {
     `- Instalação: offline, lockfile congelado e scripts de pacote desativados.\n` +
     `- Fontes: Geist Sans e Source Serif 4 locais via next/font/local; nenhum download no build.\n` +
     `- Build: PASS\n- Teste unitário: PASS\n- E2E Playwright + axe: PASS\n` +
+    `- Cabeçalhos CSP, nosniff, frame deny e referrer policy: PASS no navegador.\n` +
     `- Execuções: ${results.map(result => `\`${result.command}\` → exit ${result.exitCode}`).join('; ')}.\n` +
     `- Arquivos iniciais alterados pelo framework: ${changedInitialFiles.map(file => `\`${file}\``).join(', ') || 'nenhum'}; nenhuma alteração inesperada.\n` +
     `- Isolamento: todos os comandos foram emitidos pelo \`ContainerBuilder\` com rede desativada e limites de recursos.\n\n` +

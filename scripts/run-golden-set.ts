@@ -4,7 +4,10 @@ import { basename, join, resolve } from 'node:path'
 import { ContainerBuilder, OFFLINE_PIPELINE_COMMANDS } from '../plugins/prompt-to-app/src/runner.js'
 import { scanGeneratedContent } from '../plugins/prompt-to-app/src/security.js'
 import type { AppSpecV1 } from '../plugins/prompt-to-app/src/appspec.js'
+import { generateAuthLayer, writeAuthLayer } from '../plugins/prompt-to-app/src/auth-generator.js'
+import { generateCrudLayer, writeCrudLayer } from '../plugins/prompt-to-app/src/crud-generator.js'
 import { generateDataLayer, writeDataLayer } from '../plugins/prompt-to-app/src/data-generator.js'
+import { dataIdentifier } from '../plugins/prompt-to-app/src/data-generator.js'
 import { generateFormLayer, writeFormLayer } from '../plugins/prompt-to-app/src/form-generator.js'
 import { writeAcceptanceArtifacts } from '../plugins/prompt-to-app/src/acceptance.js'
 
@@ -20,7 +23,7 @@ const root = process.cwd()
 const briefsDir = resolve(root, 'golden-set/briefs')
 const criteriaDir = resolve(root, 'golden-set/criteria')
 const reportsDir = resolve(root, 'golden-set/reports')
-const implemented = new Set<Criterion['category']>(['landing-page', 'catalog', 'form-database'])
+const implemented = new Set<Criterion['category']>(['landing-page', 'catalog', 'form-database', 'crud-panel'])
 const realLlmRequested = process.env.DZ23_GOLDEN_LLM === '1'
 
 if (realLlmRequested) {
@@ -49,7 +52,7 @@ try {
     const briefPath = resolve(briefsDir, `${criterion.id}.md`)
     const brief = await readFile(briefPath, 'utf8')
     if (brief.trim().length < 40 || criterion.acceptance.length < 3) throw new Error(`Fixture incompleta: ${criterion.id}`)
-    if (!implemented.has(criterion.category) || (criterion.category === 'form-database' && criterion.sensitive)) {
+    if (!implemented.has(criterion.category)) {
       results.push({ id: criterion.id, category: criterion.category, state: 'NOT_IMPLEMENTED', critical: 'NOT_EXECUTED', detail: 'Categoria declarada, ainda sem executor.' })
       continue
     }
@@ -59,7 +62,7 @@ try {
     await mkdir(resolve(runDirectory, 'content'), { recursive: true })
     await mkdir(resolve(runDirectory, 'src/styles'), { recursive: true })
     await writeFile(resolve(runDirectory, 'src/styles/tokens.css'), ':root { --background: 0 0% 100%; --foreground: 222 47% 11%; --card: 0 0% 100%; --card-foreground: 222 47% 11%; --primary: 222 72% 32%; --primary-foreground: 0 0% 100%; --secondary: 214 32% 91%; --secondary-foreground: 222 47% 11%; --muted: 210 40% 96%; --muted-foreground: 215 16% 40%; --accent: 214 100% 93%; --accent-foreground: 222 72% 26%; --destructive: 0 72% 45%; --border: 214 32% 88%; --input: 214 32% 88%; --ring: 217 91% 50%; --radius: 0.75rem; --font-body: sans-serif; }\n')
-    const title = criterion.category === 'catalog' ? 'Catálogo local' : criterion.category === 'form-database' ? 'Reservas' : 'Página de apresentação'
+    const title = criterion.category === 'catalog' ? 'Catálogo local' : criterion.category === 'form-database' ? 'Registros' : criterion.category === 'crud-panel' ? 'Painel de gestão' : 'Página de apresentação'
     const description = criterion.category === 'catalog'
       ? 'Produtos e serviços apresentados de forma clara e acessível.'
       : criterion.id === 'landing-01'
@@ -70,18 +73,20 @@ try {
       if (scanGeneratedContent({ fixture: 'CPF 123.456.789-00' }).length !== 0) throw new Error('catalog-03: CPF inválido virou falso positivo.')
     }
     const content = JSON.stringify({ title, description }, null, 2)
-    const formSpec = criterion.category === 'form-database' ? formDatabaseSpec(criterion, brief) : undefined
-    const component = formSpec === undefined
+    const appSpec = dataSpec(criterion, brief)
+    const component = appSpec === undefined
       ? `export default function GeneratedApp() {\n  return <main><h1>${title}</h1><p>${escapeJsx(description)}</p></main>\n}\n`
-      : `import ReservaManager from '@/src/components/generated/reserva-manager'\n\nexport default function GeneratedApp() {\n  return <main><h1>Reservas</h1><p>Cadastro</p><p>Lista</p><ReservaManager /></main>\n}\n`
+      : generatedDataView(appSpec, criterion.category)
     const findings = scanGeneratedContent({ 'content/app.json': content, 'src/GeneratedApp.tsx': component })
     if (findings.length > 0) throw new Error(`${criterion.id}: controle crítico recusou ${findings.join(', ')}`)
     await writeFile(resolve(runDirectory, 'content/app.json'), content)
     await writeFile(resolve(runDirectory, 'src/GeneratedApp.tsx'), component)
-    if (formSpec !== undefined) {
-      await writeDataLayer(runDirectory, generateDataLayer(formSpec))
-      await writeFormLayer(runDirectory, generateFormLayer(formSpec, 'form-database'))
-      await writeAcceptanceArtifacts(runDirectory, formSpec, 'form-database')
+    if (appSpec !== undefined) {
+      await writeDataLayer(runDirectory, generateDataLayer(appSpec))
+      await writeAuthLayer(runDirectory, generateAuthLayer(appSpec, criterion.category))
+      await writeFormLayer(runDirectory, generateFormLayer(appSpec, criterion.category))
+      await writeCrudLayer(runDirectory, generateCrudLayer(appSpec, criterion.category))
+      await writeAcceptanceArtifacts(runDirectory, appSpec, criterion.category)
     }
     for (const command of OFFLINE_PIPELINE_COMMANDS) {
       const result = await builder.execute(runDirectory, command)
@@ -125,16 +130,41 @@ function escapeJsx(value: string): string {
   return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('{', '&#123;').replaceAll('}', '&#125;').replaceAll('`', "'")
 }
 
-function formDatabaseSpec(criterion: Criterion, brief: string): AppSpecV1 {
+function dataSpec(criterion: Criterion, brief: string): AppSpecV1 | undefined {
+  if (criterion.category !== 'form-database' && criterion.category !== 'crud-panel') return undefined
+  const crud = criterion.category === 'crud-panel'
+  const sensitive = criterion.sensitive
+  const entityName = crud ? 'Cliente' : sensitive ? 'Registro de saúde' : 'Reserva'
+  const fields = crud
+    ? [
+        { name: 'Nome', type: 'text' as const, required: true },
+        { name: sensitive ? 'CPF' : 'E-mail', type: sensitive ? 'text' as const : 'email' as const, required: true },
+        { name: sensitive ? 'Limite financeiro' : 'Situação', type: sensitive ? 'number' as const : 'selection' as const, required: true, ...(sensitive ? {} : { options: ['Novo', 'Atendido'] }) },
+      ]
+    : sensitive
+      ? [{ name: 'Nome', type: 'text' as const, required: true }, { name: 'Informação de saúde', type: 'text' as const, required: true }]
+      : [{ name: 'Nome', type: 'text' as const, required: true }, { name: 'Data', type: 'date' as const, required: true }, { name: 'Horário', type: 'text' as const, required: true }]
+  const detected: AppSpecV1['sensitive_data']['detected'] = sensitive ? (crud ? ['cpf', 'financial'] : ['health']) : []
   return {
-    schema_version: 1, problem: brief.trim(), audience: 'Clientes e equipe da pequena empresa', journeys: ['Cadastrar e consultar reservas'],
-    pages: [{ name: 'Reservas', sections: ['Cadastro', 'Lista'] }],
+    schema_version: 1, problem: brief.trim(), audience: 'Clientes e equipe da pequena empresa', journeys: [crud ? 'Criar, editar e excluir cadastros' : 'Cadastrar e consultar registros'],
+    pages: [{ name: crud ? 'Painel de gestão' : 'Registros', sections: [crud ? 'Novo cadastro' : 'Cadastro', crud ? 'Cadastros' : 'Lista'] }],
     entities: [{
-      name: 'Reserva', kind: 'database', sensitive: false,
-      fields: [{ name: 'Nome', type: 'text', required: true }, { name: 'Data', type: 'date', required: true }, { name: 'Horário', type: 'text', required: true }],
+      name: entityName, kind: 'database', sensitive,
+      fields,
     }],
-    sensitive_data: { detected: [], confirmed_by_user: false },
+    sensitive_data: { detected, confirmed_by_user: sensitive },
     accessibility: { wcag_level: 'AA', keyboard_required: true, reduced_motion: true }, language: 'pt-BR',
     acceptance_criteria: [...criterion.acceptance],
   }
 }
+
+function generatedDataView(spec: AppSpecV1, category: Criterion['category']): string {
+  const entity = spec.entities.find(value => value.kind === 'database')!
+  const symbol = pascal(dataIdentifier(entity.name))
+  const component = category === 'crud-panel' ? `${symbol}Panel` : `${symbol}Manager`
+  const path = category === 'crud-panel' ? `${dataIdentifier(entity.name)}-panel` : `${dataIdentifier(entity.name)}-manager`
+  const labels = [spec.pages[0]!.name, ...spec.pages[0]!.sections, entity.name, ...entity.fields.map(field => field.name)]
+  return `import ${component} from '@/src/components/generated/${path}'\n\nexport default function GeneratedApp(){return <main>${labels.map((label, index) => index === 0 ? `<h1>${escapeJsx(label)}</h1>` : `<p>${escapeJsx(label)}</p>`).join('')}<${component}/></main>}\n`
+}
+
+function pascal(value: string): string { return value.split('_').map(part => `${part.charAt(0).toUpperCase()}${part.slice(1)}`).join('') }

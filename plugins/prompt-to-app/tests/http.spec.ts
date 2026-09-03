@@ -1,5 +1,8 @@
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CSRF_COOKIE, IdentityError, SESSION_COOKIE, type SessionRecord, type StudioIdentityService } from '@dz23-studio/identity'
 import type { StudioTenancyService } from '@dz23-studio/tenancy'
@@ -39,7 +42,8 @@ const validSpec: AppSpecV1 = {
 }
 const session = { session_id: 'session', user_id: 'owner', org_id: 'org-a', tenant_id: 'tenant-a' } as SessionRecord
 const servers: ReturnType<typeof createServer>[] = []
-afterEach(async () => Promise.all(servers.splice(0).map(server => new Promise<void>(resolve => server.close(() => resolve())))))
+const roots: string[] = []
+afterEach(async () => { await Promise.all(servers.splice(0).map(server => new Promise<void>(resolve => server.close(() => resolve())))); await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
 
 async function fixture() {
   const repository = new MemoryRepository(); let id = 0
@@ -142,6 +146,32 @@ describe('prompt-to-app HTTP boundary', () => {
     expect(f.jobs.start.mock.calls[0]![0]).toMatchObject({ sessionId: 'session', orgId: 'org-a', tenantId: 'tenant-a' })
     expect((await f.request(`/projects/${projectId}/generate/cancel`, { method: 'POST', body: '{}' })).status).toBe(202)
     expect(f.jobs.cancel).toHaveBeenCalledOnce()
+  })
+
+  it('returns captured development codes only after a verified run and only in project details', async () => {
+    const f = await fixture()
+    const actor = { userId: 'owner', orgId: 'org-a', tenantId: 'tenant-a', role: 'owner' as const }
+    const project = await f.service.createProject(actor, {
+      name: 'Painel', original_brief: 'Quero gerenciar clientes com acesso protegido.', category: 'crud-panel', privacy: 'local-only',
+    })
+    const runDirectory = await mkdtemp(join(tmpdir(), 'dz23-http-capture-')); roots.push(runDirectory)
+    await mkdir(resolve(runDirectory, 'data'))
+    await writeFile(resolve(runDirectory, 'data', 'studio-capture.json'), JSON.stringify([
+      { kind: 'code', email: 'owner@example.test', code: '123456', expiresAt: '2026-09-03T12:10:00.000Z' },
+      { kind: 'invitation', email: 'member@example.test', expiresAt: '2026-09-04T12:00:00.000Z' },
+    ]))
+    f.repository.runRows.push({
+      run_id: 'verified-run', operation_id: 'verified-run', owner_session_id: 'session', plan_id: 'plan', project_id: project.project_id,
+      org_id: 'org-a', tenant_id: 'tenant-a', stage: 'verify', attempt: 1, state: 'PASSED', started_at: '2026-09-03T12:00:00.000Z',
+      finished_at: '2026-09-03T12:01:00.000Z', sandbox: 'full', route: 'ollama', model: 'fixture', input_tokens: 1, output_tokens: 1,
+      estimated_cost_usd: 0, run_directory: runDirectory, failure_code: null, acceptance_checks: [],
+    })
+    const hidden = await (await f.request(`/projects/${project.project_id}`)).json() as { current_run: { verification_codes: unknown[] }; runs: unknown[] }
+    expect(hidden.current_run.verification_codes).toEqual([])
+    f.repository.projectRows[0] = { ...f.repository.projectRows[0]!, state: 'VERIFIED_PROTOTYPE' }
+    const visible = await (await f.request(`/projects/${project.project_id}`)).json() as { current_run: { verification_codes: unknown[] }; runs: unknown[] }
+    expect(visible.current_run.verification_codes).toEqual([{ email: 'owner@example.test', code: '123456', expires_at: '2026-09-03T12:10:00.000Z' }])
+    expect(JSON.stringify(visible.runs)).not.toContain('123456')
   })
 
   it('requires membership, session, CSRF, trusted host and a known route', async () => {

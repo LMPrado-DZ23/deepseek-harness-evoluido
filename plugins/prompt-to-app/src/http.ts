@@ -1,4 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { readFile } from 'node:fs/promises'
+import { resolve } from 'node:path'
 import {
   CSRF_COOKIE,
   IdentityError,
@@ -95,13 +97,17 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
       if (request.method === 'GET' && matched.suffix === '') {
         const project = config.service.project(actor, projectId)
         const runs = config.service.runs(actor, projectId)
+        const currentRun = [...runs].sort((left, right) => right.started_at.localeCompare(left.started_at) || right.attempt - left.attempt)[0] ?? null
+        const verificationCodes = project.state === 'VERIFIED_PROTOTYPE' && currentRun?.state === 'PASSED'
+          ? await capturedVerificationCodes(currentRun.run_directory)
+          : []
         return json(response, 200, {
           project,
           turns: config.service.intakeTurns(actor, projectId),
           plan: optional(() => config.service.plan(actor, projectId)),
           design: optional(() => config.service.latestDesign(actor, projectId)),
           runs,
-          current_run: [...runs].sort((left, right) => right.started_at.localeCompare(left.started_at) || right.attempt - left.attempt)[0] ?? null,
+          current_run: currentRun === null ? null : { ...currentRun, verification_codes: verificationCodes },
           evidence: config.service.evidence(actor, projectId),
         })
       }
@@ -152,6 +158,23 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
       return json(response, statusOf(error), { error: error instanceof Error ? error.message : t('errors.invalidRequest') })
     }
   }
+}
+
+const capturedMessageSchema = z.array(z.object({
+  kind: z.enum(['code', 'invitation']), email: z.string().email(), code: z.string().regex(/^\d{6}$/u).optional(), expiresAt: z.iso.datetime(),
+}).passthrough()).max(20)
+
+async function capturedVerificationCodes(runDirectory: string): Promise<readonly { email: string; code: string; expires_at: string }[]> {
+  try {
+    const decoded = capturedMessageSchema.parse(JSON.parse(await readFile(resolveRunCapture(runDirectory), 'utf8')))
+    return decoded.filter((message): message is typeof message & { code: string } => message.kind === 'code' && message.code !== undefined)
+      .map(message => ({ email: message.email, code: message.code, expires_at: message.expiresAt }))
+  } catch { return [] }
+}
+
+function resolveRunCapture(runDirectory: string): string {
+  if (runDirectory === 'not-created') throw new Error('RUN_DIRECTORY_NOT_CREATED')
+  return resolve(runDirectory, 'data', 'studio-capture.json')
 }
 
 async function answerIntake(

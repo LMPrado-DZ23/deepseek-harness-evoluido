@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { writeAcceptanceArtifacts } from '../plugins/prompt-to-app/src/acceptance.js'
@@ -61,8 +61,9 @@ try {
   const flow = report.checks.find(check => check.kind === 'flow')
   if (flow?.status !== 'PASSED') throw new Error('O fluxo preencher, salvar e listar não passou no navegador.')
   if (!readFileSync(resolve(runDirectory, 'data/app.sqlite')).byteLength) throw new Error('O banco em arquivo não foi criado.')
+  if (process.platform !== 'win32' && (statSync(resolve(runDirectory, 'data/app.sqlite')).mode & 0o777) !== 0o600) throw new Error('O banco não ficou restrito ao usuário do processo.')
 
-  const proof = `# P32/P33 — Prova da categoria cadastro e lista\n\n- Resultado: **PASS**\n- Imagem fixada: \`${digest}\`\n- Rede do contêiner: \`none\`; capacidades removidas e filesystem raiz somente leitura.\n- Fluxo real no navegador: preencher → salvar no SQLite → aparecer na lista: PASS.\n- Banco: arquivo \`data/app.sqlite\` criado pela aplicação gerada; migração e repositório protegidos pelo Studio.\n- Build Next.js, Vitest, Playwright, acessibilidade e scan offline: PASS.\n- Arquivos protegidos alterados durante build/teste: nenhum.\n- Dados sensíveis: recusados nesta categoria enquanto o login gerado ainda não existe.\n\nO resultado é um protótipo local verificado. Não houve preview remoto, publicação ou modelo real.\n`
+  const proof = `# P32/P33 — Prova da categoria cadastro e lista\n\n- Resultado: **PASS**\n- Imagem fixada: \`${digest}\`\n- Rede do contêiner: \`none\`; capacidades removidas e filesystem raiz somente leitura.\n- Fluxo real no navegador: preencher → salvar no SQLite → aparecer na lista: PASS.\n- Banco: arquivo \`data/app.sqlite\` criado pela aplicação gerada, restrito a modo \`0600\` no Linux; migração e repositório protegidos pelo Studio.\n- Build Next.js, Vitest, Playwright, acessibilidade e scan offline: PASS.\n- Arquivos protegidos alterados durante build/teste: nenhum.\n- Dados sensíveis confirmados recebem autenticação; esta prova focada usa dados comuns.\n\nO resultado é um protótipo local verificado. Não houve preview remoto, publicação ou modelo real.\n`
   mkdirSync(resolve(root, 'docs/proofs'), { recursive: true })
   writeFileSync(resolve(root, 'docs/proofs/P32-form-database-proof.md'), proof)
   process.stdout.write(`FORM_DATABASE_PROOF=PASS protected=${protectedPaths.length} checks=${report.checks.length} steps=${results.length}\n`)

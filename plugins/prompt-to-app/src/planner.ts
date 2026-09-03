@@ -14,13 +14,10 @@ export class FormCategoryCapabilityError extends Error {
 }
 
 export function assertCategoryCanGenerate(category: StudioProjectCategory, spec: AppSpecV1): void {
-  if (category !== 'form-database') return
+  if (category !== 'form-database' && category !== 'crud-panel') return
   const entities = spec.entities.filter(entity => entity.kind === 'database')
   if (entities.length === 0) throw new FormCategoryCapabilityError('FORM_DATABASE_REQUIRED', t('errors.formDatabaseRequired'))
-  if (spec.sensitive_data.detected.length > 0 || entities.some(entity => entity.sensitive)) {
-    throw new FormCategoryCapabilityError('AUTH_REQUIRED_FOR_SENSITIVE_FORM', t('errors.sensitiveFormRequiresLogin'))
-  }
-  if (entities.some(entity => entity.fields.some(field => field.type === 'reference' && field.required))) {
+  if (category === 'form-database' && entities.some(entity => entity.fields.some(field => field.type === 'reference' && field.required))) {
     throw new FormCategoryCapabilityError('FORM_REFERENCE_REQUIRES_CRUD', t('errors.formReferenceRequiresCrud'))
   }
 }
@@ -36,13 +33,14 @@ export class PlannerEngine {
       t('prompts.planFiles'),
       t('prompts.planFirst'),
       ...(category === 'form-database' ? [t('prompts.planFormDatabase')] : []),
+      ...(category === 'crud-panel' ? [t('prompts.planCrudPanel')] : []),
       t('prompts.generateSpec', { spec: JSON.stringify(spec) }),
       ...(changeRequest === undefined ? [] : [t('prompts.changeRequest', { reason: changeRequest })]),
       t('prompts.schema', { schema: JSON.stringify(planOutputSchema.toJSONSchema()) }),
     ].join('\n'))
     const decoded = typeof result.value === 'string' ? JSON.parse(result.value) : result.value
     const output = planOutputSchema.parse(decoded)
-    if (category === 'form-database' && !output.slices.some(slice => slice.planned_files.includes('src/GeneratedApp.tsx'))) {
+    if ((category === 'form-database' || category === 'crud-panel') && !output.slices.some(slice => slice.planned_files.includes('src/GeneratedApp.tsx'))) {
       throw new FormCategoryCapabilityError('FORM_ENTRY_FILE_REQUIRED', t('errors.formEntryFileRequired'))
     }
     return output

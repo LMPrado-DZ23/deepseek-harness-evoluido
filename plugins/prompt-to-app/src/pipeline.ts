@@ -3,6 +3,8 @@ import { cp, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { z } from 'zod'
 import type { AppSpecV1 } from './appspec.js'
+import { generateAuthLayer, writeAuthLayer } from './auth-generator.js'
+import { generateCrudLayer, writeCrudLayer } from './crud-generator.js'
 import { generateDataLayer, writeDataLayer } from './data-generator.js'
 import { renderDesignTokens } from './design.js'
 import { writeAcceptanceArtifacts, type AcceptanceCheck } from './acceptance.js'
@@ -82,7 +84,9 @@ export class PromptToAppPipeline {
       await mkdir(resolve(runDirectory, 'src', 'styles'), { recursive: true })
       await writeFile(resolve(runDirectory, 'src', 'styles', 'tokens.css'), renderDesignTokens(design), { encoding: 'utf8', flag: 'wx' })
       await writeDataLayer(runDirectory, generateDataLayer(spec))
+      await writeAuthLayer(runDirectory, generateAuthLayer(spec, project.category))
       await writeFormLayer(runDirectory, generateFormLayer(spec, project.category))
+      await writeCrudLayer(runDirectory, generateCrudLayer(spec, project.category))
       await this.options.service.putRun(actor, this.runRecord(actor, projectId, plan.plan_id, 'generate', attempt, 'RUNNING', 'full', runDirectory, null, null, runId, operationId, ownerSessionId))
       const protectedTemplatePaths = await listTreeFiles(runDirectory)
       const immutableBefore = await immutableHash(runDirectory, protectedTemplatePaths)

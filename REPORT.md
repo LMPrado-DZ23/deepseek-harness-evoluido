@@ -1,5 +1,15 @@
 # Relatório técnico — DZ23 STUDIO
 
+> Atualização de 2026-09-03 — P32/P33 fatia 2: o Prompt-to-App gera quatro
+> categorias BETA sobre Next.js: apresentação, catálogo, formulário+banco e
+> painel CRUD. Banco, migrações, repositórios, autenticação, sessão, CSRF,
+> papéis e ações são determinísticos e protegidos do modelo. A prova de acesso
+> executou 401→200 e login→criar→editar→excluir em contêiner com
+> `NetworkMode=none`; o golden set fechou 12/18 casos executáveis, mantendo
+> SaaS e dashboard como `NOT_IMPLEMENTED`. LLM real é `NOT_EXECUTED`, preview e
+> publicação são `NOT_PRESENT`, e experiência leiga é `NOT_VALIDATED`. Não
+> houve merge, push, PR ou deploy.
+>
 > Atualização de 2026-09-02: o histórico do PoC-01 abaixo foi preservado. A
 > errata do domínio foi aceita, o PoC-01b fechou a viabilidade do núcleo e o
 > P29-C comprovou a borda Caddy para HTTP, RPC e WebSocket. O resultado atual e

@@ -8,6 +8,10 @@ Aplicativos gerados que possuem entidades de banco usam `node:sqlite` do Node
 SQL, migrações e um repositório tipado por entidade; o modelo de linguagem não
 escreve nem altera esses arquivos.
 
+No Linux, o diretório de dados é restringido a `0700` e o arquivo SQLite a
+`0600`, mesmo quando já existem. Isso reduz exposição acidental por permissões
+do sistema; não substitui criptografia de disco do equipamento.
+
 São aceitos os tipos texto, número, data, booleano, e-mail, telefone, seleção e
 referência. Nomes de tabela e coluna são normalizados e colisões são recusadas.
 Toda tabela possui `id`, `created_at` e `updated_at`; referências usam chave
@@ -16,9 +20,8 @@ idempotentes versionadas por `PRAGMA user_version`.
 
 Entidades marcadas como sensíveis só são geradas após confirmação registrada
 na AppSpec. O contrato gerado marca `sensitive`, `requires_login` e
-`public_list`; a autenticação que faz cumprir esses metadados pertence ao
-ADR-024 e ainda não está presente neste bloco. Até esse próximo gate, não há
-rota pública de dados no aplicativo gerado.
+`public_list`; a autenticação do ADR-024 faz cumprir o acesso nos formulários
+sensíveis e em todo painel CRUD. Não há rota pública de dados nesta fatia.
 
 Arquivos em `src/db/**`, `src/server/repositories/**` e o teste de dados gerado
 são gravados antes da saída do modelo e entram na lista protegida. Um parser

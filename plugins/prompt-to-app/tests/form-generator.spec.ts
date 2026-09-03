@@ -4,7 +4,6 @@ import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { AppSpecV1 } from '../src/appspec.js'
 import { generateFormLayer, writeFormLayer } from '../src/form-generator.js'
-import { FormCategoryCapabilityError } from '../src/planner.js'
 
 const roots: string[] = []
 afterEach(async () => Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))))
@@ -50,10 +49,11 @@ describe('deterministic form and list layer', () => {
     expect(generateFormLayer(formSpec, 'catalog')).toEqual({ files: [], protectedPaths: [] })
   })
 
-  it('fails closed for sensitive data and required links until generated login and CRUD exist', () => {
+  it('adds the generated login to sensitive data and rejects required links without CRUD', () => {
     const sensitive: AppSpecV1 = { ...formSpec, sensitive_data: { detected: ['financial'], confirmed_by_user: true } }
-    expect(() => generateFormLayer(sensitive, 'form-database')).toThrow(FormCategoryCapabilityError)
-    expect(() => generateFormLayer(sensitive, 'form-database')).toThrow('proteção por login')
+    const protectedLayer = generateFormLayer(sensitive, 'form-database')
+    expect(protectedLayer.files[0]?.content).toContain('requireFormSession')
+    expect(protectedLayer.files[1]?.content).toContain('AccessPanel')
     const linked = { ...formSpec, entities: [
       ...formSpec.entities,
       { name: 'Tarefa', kind: 'database' as const, sensitive: false, fields: [

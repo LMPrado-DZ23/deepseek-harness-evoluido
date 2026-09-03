@@ -7,7 +7,8 @@
     "placeholder": "Ex.: Preciso de uma página para apresentar meu trabalho e receber contatos.",
     "suggestions": "Sugestões para começar", "landing": "Quero uma página para apresentar meu trabalho ou negócio.",
     "catalog": "Quero um catálogo para mostrar meus produtos ou serviços.",
-    "formDatabase": "Quero cadastrar informações e vê-las em uma lista.", "coming": "Agenda, painéis completos e áreas de acesso estarão disponíveis em etapas futuras.",
+    "formDatabase": "Quero cadastrar informações e vê-las em uma lista.", "crudPanel": "Quero um painel para minha equipe criar, editar e excluir cadastros.",
+    "coming": "Agenda, dashboards e portais com áreas separadas para cada cliente estarão disponíveis em etapas futuras.",
     "continue": "Continuar", "advanced": "Opções avançadas", "counter": "de 1000 caracteres",
     "empty": "Conte sua ideia para continuar."
   },
@@ -41,7 +42,8 @@
     "title": "Resultado da verificação", "success": "As verificações declaradas passaram neste computador.",
     "failure": "A criação parou porque uma verificação encontrou um problema.", "cancelled": "A criação foi cancelada.",
     "attempts": "Tentativas realizadas", "checks": "Critérios conferidos", "passed": "Passou", "failed": "Falhou",
-    "pending": "Em conferência", "notAutomated": "Não verificado automaticamente"
+    "pending": "Em conferência", "notAutomated": "Não verificado automaticamente",
+    "testCodes": "Códigos usados na verificação", "testCodesHelp": "Estes códigos locais já foram usados pelos testes automáticos. Quando o preview existir, novos códigos de teste aparecerão somente aqui."
   },
   "privacy": {
     "title": "Privacidade", "local": "Somente no meu computador", "configured": "Permitir IA configurada",

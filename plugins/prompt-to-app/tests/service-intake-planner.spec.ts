@@ -142,7 +142,9 @@ describe('intake and planner', () => {
     await expect(planner.plan({ orgId: 'o', tenantId: 't' }, 'local-only', validSpec, 'form-database')).rejects.toMatchObject({ code: 'FORM_DATABASE_REQUIRED' })
     await expect(planner.plan({ orgId: 'o', tenantId: 't' }, 'local-only', {
       ...databaseSpec, sensitive_data: { detected: ['financial'], confirmed_by_user: true },
-    }, 'form-database')).rejects.toMatchObject({ code: 'AUTH_REQUIRED_FOR_SENSITIVE_FORM' })
+    }, 'form-database')).resolves.toMatchObject({ slices: [{ slice_id: 'form' }] })
+    await expect(planner.plan({ orgId: 'o', tenantId: 't' }, 'local-only', databaseSpec, 'crud-panel')).resolves.toMatchObject({ slices: [{ slice_id: 'form' }] })
+    expect(complete.mock.calls.at(-1)?.[3]).toContain('login')
     complete.mockResolvedValueOnce({ value: { slices: [{ slice_id: 'bad', title: 'Incompleto', description: 'Sem entrada', acceptance_criteria: ['Visível'], planned_files: ['content/app.json'] }] }, route: 'ollama', model: 'qwen' })
     await expect(planner.plan({ orgId: 'o', tenantId: 't' }, 'local-only', databaseSpec, 'form-database')).rejects.toMatchObject({ code: 'FORM_ENTRY_FILE_REQUIRED' })
   })

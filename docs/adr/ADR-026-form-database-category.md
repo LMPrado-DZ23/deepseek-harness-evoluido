@@ -20,12 +20,12 @@ lista. A prova oficial usa SQLite em arquivo — não apenas memória — dentro
 construtor com rede `none`. O arquivo é criado pela aplicação gerada e os
 arquivos determinísticos permanecem imutáveis durante build e testes.
 
-Dados sensíveis continuam fail-closed. Enquanto a autenticação gerada do
-bloco 6 não existir, uma AppSpec sensível recebe
-`AUTH_REQUIRED_FOR_SENSITIVE_FORM` em linguagem comum e não chega ao modelo.
-Referências obrigatórias entre cadastros também aguardam o painel CRUD, porque
-um campo técnico de ID não seria uma experiência aceitável para leigos.
+Dados sensíveis continuam fail-closed. A AppSpec só é gerada depois da
+confirmação no intake e o formulário recebe o acesso real do ADR-024. Sem
+sessão e CSRF, nenhuma gravação ocorre. Referências obrigatórias entre
+cadastros ainda são recusadas, porque um campo técnico de ID não seria uma
+experiência aceitável para leigos.
 
-No golden set, `form-database-01` e `form-database-03` são executáveis.
-`form-database-02` permanece `NOT_IMPLEMENTED`, pois pede informações de saúde
-e só poderá ser promovido com login real e a prova adversarial do bloco 6.
+No golden set, as três fixtures `form-database-*` são executáveis. A segunda
+pede informações de saúde, exige login por código e prova que o formulário
+sensível não aparece sem sessão.

@@ -9,6 +9,12 @@ React Hook Form, Vitest e Playwright com axe. O build produz saída
 a partir de pacotes fixados sob SIL OFL; não há Google Fonts nem requisição
 externa em build ou runtime.
 
+O template também fixa os cabeçalhos CSP, `Referrer-Policy`,
+`X-Content-Type-Options`, `X-Frame-Options` e `Permissions-Policy`. A CSP
+mantém script e estilo inline somente pela compatibilidade atual do runtime do
+Next; reduzi-los com nonce fica para um hardening posterior e não autoriza
+origens externas.
+
 As versões são exatas e o lockfile passou pelas políticas de idade mínima da
 cadeia de suprimentos. Pacotes publicados no mesmo dia foram recusados e
 substituídos por versões maduras. O setup T2 baixa as dependências uma vez e
