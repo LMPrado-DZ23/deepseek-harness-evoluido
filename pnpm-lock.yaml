@@ -62,6 +62,9 @@ importers:
       '@deepseek-ai/dsh-subagent':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/subagent/subagent
         version: link:../../../harness-studio-poc02/deepseek-harness/packages/subagent/subagent
+      '@dz23-studio/identity':
+        specifier: workspace:*
+        version: link:../identity
       '@dz23-studio/policy':
         specifier: workspace:*
         version: link:../policy
