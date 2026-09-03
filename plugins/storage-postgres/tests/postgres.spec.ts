@@ -231,7 +231,7 @@ describePostgres('postgres backend against PostgreSQL 16', () => {
   }, 15_000)
 
   it('runs the write CLI for a new server, backs up replacements and refuses an active Studio', async () => {
-    if (postgresContainer === undefined) throw new Error('NOT_EXECUTED: real pg_dump/pg_restore container is not configured')
+    // pg_dump/pg_restore come from the test container when configured, otherwise from the local PostgreSQL client tools.
     const temporary = await mkdtemp(join(tmpdir(), 'dz23-p31-import-cli-'))
     try {
       const source = new SqliteStorageBackend({ path: join(temporary, 'source.sqlite'), journalMode: 'delete' })
@@ -246,11 +246,12 @@ describePostgres('postgres backend against PostgreSQL 16', () => {
       const toolDirectory = join(temporary, 'bin')
       await mkdir(toolDirectory)
       const pgDump = join(toolDirectory, 'pg_dump')
+      // With a test container, pg_dump is bridged through docker exec; without one the local client tools are used as-is.
       await writeFile(pgDump, `#!/bin/sh\nexec docker exec -i "$DZ23_POSTGRES_TEST_CONTAINER" pg_dump --username "$PGUSER" --dbname "$PGDATABASE" "$@"\n`)
       await chmod(pgDump, 0o700)
       const cliEnvironment = {
         ...process.env,
-        PATH: `${toolDirectory}${delimiter}${process.env.PATH ?? ''}`,
+        PATH: postgresContainer === undefined ? (process.env.PATH ?? '') : `${toolDirectory}${delimiter}${process.env.PATH ?? ''}`,
         DZ23_IMPORT_TEST_DSN: dsn!,
       }
       const cli = resolve('scripts/import-postgres-storage.ts')
@@ -284,11 +285,9 @@ describePostgres('postgres backend against PostgreSQL 16', () => {
       expect(replaced).toMatchObject({ mode: 'write', backup, backupStatus: 'created' })
       await access(backup)
       expect((await stat(backup)).mode & 0o777).toBe(0o600)
-      const listed = await runWithInput(
-        'docker',
-        ['exec', '-i', postgresContainer, 'pg_restore', '--list'],
-        await readFile(backup),
-      )
+      const listed = postgresContainer === undefined
+        ? await runWithInput('pg_restore', ['--list'], await readFile(backup))
+        : await runWithInput('docker', ['exec', '-i', postgresContainer, 'pg_restore', '--list'], await readFile(backup))
       expect(listed).toContain(targetSchema)
 
       const restored = backend(targetSchema)
