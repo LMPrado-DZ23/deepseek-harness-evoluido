@@ -6,6 +6,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, symlink } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import pg from 'pg'
 
 const upstreamRoot = resolve(process.env.DSH_UPSTREAM_ROOT ?? '/home/leandro/harness-studio-poc02/deepseek-harness')
 const studioRoot = resolve(process.cwd())
@@ -45,7 +46,10 @@ const routeHealth = app.ctx.storageDomain.get('studio_route_health')
 if (!hello || !routeHealth) throw new Error('soak domains did not open')
 const helloRecords = hello.table('records')
 const backups = app.ctx.studioStorageBackup
-const stats = { iterations: 0, errors: 0, readMismatches: 0, latencies: [], backups: 0, backupFailures: 0, lastBackup: null, startedAt: new Date().toISOString() }
+const stats = { iterations: 0, errors: 0, readMismatches: 0, dbMismatches: 0, dbChecks: 0, latencies: [], backups: 0, backupFailures: 0, lastBackup: null, startedAt: new Date().toISOString() }
+const schema = process.env.DZ23_POSTGRES_PROOF_SCHEMA ?? 'dz23_storage_proof'
+const inspector = new pg.Client({ connectionString: process.env.DZ23_POSTGRES_DSN, application_name: 'dz23-soak:inspector' })
+await inspector.connect()
 let running = true
 
 process.stdout.write(`${JSON.stringify({ event: 'ready', pid: process.pid, dshHome, startedAt: stats.startedAt })}\n`)
@@ -83,12 +87,28 @@ const backup = setInterval(async () => {
   }
 }, backupEveryMs)
 
-const report = setInterval(() => {
+const report = setInterval(async () => {
+  // Independent read-back from PostgreSQL (not the in-memory domain map): the
+  // last written key must be there with the same value, and the row count must
+  // equal the bounded window.
+  if (stats.iterations > 0) {
+    try {
+      const lastKey = `soak_${String(stats.iterations - 1).padStart(8, '0')}`
+      const row = await inspector.query(`SELECT value FROM "${schema}"."records" WHERE unit = 'studio_hello' AND table_name = 'records' AND key = $1`, [lastKey])
+      const count = await inspector.query(`SELECT count(*)::int AS n FROM "${schema}"."records" WHERE unit = 'studio_hello'`)
+      const expectedCount = Math.min(stats.iterations, 2000)
+      stats.dbChecks++
+      if (row.rows.length !== 1 || row.rows[0].value.note !== `iteration ${String(stats.iterations - 1)}` || count.rows[0].n !== expectedCount) stats.dbMismatches++
+    } catch (error) {
+      stats.dbMismatches++
+      process.stderr.write(`db check error: ${error instanceof Error ? error.message : String(error)}\n`)
+    }
+  }
   const sorted = [...stats.latencies].sort((a, b) => a - b)
   const pick = fraction => sorted.length === 0 ? 0 : sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))]
   const memory = process.memoryUsage()
   process.stdout.write(`${JSON.stringify({
-    event: 'status', at: new Date().toISOString(), iterations: stats.iterations, errors: stats.errors, readMismatches: stats.readMismatches,
+    event: 'status', at: new Date().toISOString(), iterations: stats.iterations, errors: stats.errors, readMismatches: stats.readMismatches, dbChecks: stats.dbChecks, dbMismatches: stats.dbMismatches,
     p50Ms: Number(pick(0.5).toFixed(2)), p95Ms: Number(pick(0.95).toFixed(2)), maxMs: Number((sorted.at(-1) ?? 0).toFixed(2)),
     rssMb: Number((memory.rss / 1048576).toFixed(1)), heapMb: Number((memory.heapUsed / 1048576).toFixed(1)),
     backups: stats.backups, backupFailures: stats.backupFailures, lastBackup: stats.lastBackup,

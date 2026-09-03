@@ -38,6 +38,14 @@ try {
     testEnv.DZ23_POSTGRES_TEST_CONTAINER = container
   } else {
     delete testEnv.DZ23_POSTGRES_TEST_CONTAINER
+    const version = (await capture(process.execPath, ['-e', `
+      const { Client } = require('pg'); const c = new Client({ connectionString: process.env.DZ23_POSTGRES_TEST_DSN })
+      c.connect().then(() => c.query('SHOW server_version_num')).then(r => { console.log(r.rows[0].server_version_num); return c.end() })
+    `], testEnv)).trim()
+    if (!/^16\d{4}$/.test(version)) {
+      process.stdout.write(`POSTGRES_GATE=NOT_EXECUTED reason=server-version-${version || 'unknown'} (PostgreSQL 16 required)\n`)
+      throw new Error(`PostgreSQL 16 required, server reports ${version || 'unknown'}`)
+    }
   }
   if (runtime) testEnv.DZ23_POSTGRES_DSN = testEnv.DZ23_POSTGRES_TEST_DSN
   const vitest = runtime

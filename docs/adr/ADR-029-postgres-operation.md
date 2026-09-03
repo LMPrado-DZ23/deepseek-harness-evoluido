@@ -45,7 +45,7 @@ Status: aceita e implementada na etapa M3 (Claude), sobre a base P31-A.
 - Provas: `prove:postgres-runtime` (20 unidades no esquema), `prove:postgres-soak`
   (operação contínua com backups a quente, contenda de escritor e `SIGKILL`),
   `prove:storage-migration` (json → PostgreSQL com dados das fatias 1–2).
-- O que ainda falta para ESTÁVEL: Compose real executado num servidor (o
+- O que ainda falta (matriz, coluna "falta para estável"): Compose real executado num servidor (o
   ambiente do Claude não tem Docker: `NOT_EXECUTED` até o Codex rodar no WSL),
   restauração ensaiada em produção, observabilidade do lease e do backup na
   interface, RLS por tenant (segue `NOT_PRESENT`, ADR própria).

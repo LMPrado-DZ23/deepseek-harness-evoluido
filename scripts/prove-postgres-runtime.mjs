@@ -69,6 +69,7 @@ try {
   await inspector.connect()
   try {
     const proofSchema = process.env.DZ23_POSTGRES_PROOF_SCHEMA ?? 'dz23_storage_proof'
+    assert.match(proofSchema, /^[a-z][a-z0-9_]{0,39}$/u, 'DZ23_POSTGRES_PROOF_SCHEMA must be a safe schema name')
     const stamped = await inspector.query(`SELECT name FROM "${proofSchema}"."units"`)
     const onPostgres = new Set(stamped.rows.map(row => row.name))
     for (const name of routedStudioDomains) assert.ok(onPostgres.has(name), `${name} opened on the json fallback, not on postgres`)

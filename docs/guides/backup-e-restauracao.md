@@ -23,6 +23,10 @@ Para mudar a frequência ou a quantidade guardada, defina
 `DZ23_POSTGRES_BACKUP_INTERVAL_MINUTES` (mínimo 5) e
 `DZ23_POSTGRES_BACKUP_KEEP` no ambiente do servidor.
 
+Atenção: a pasta de cópias contém dados pessoais (e-mails, nomes, projetos)
+e chaves de sessão em forma de resumo. Trate-a como o próprio banco: só quem
+administra o servidor acessa, e a retenção segue a regra de dados do Studio.
+
 ## Cópia manual
 
 ```

@@ -6,7 +6,7 @@
 //
 //   DZ23_POSTGRES_DSN=postgresql://... node scripts/prove-storage-migration.mjs
 import assert from 'node:assert/strict'
-import { execFile } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
@@ -16,6 +16,7 @@ import { promisify } from 'node:util'
 import pg from 'pg'
 
 const run = promisify(execFile)
+execFileSync('pnpm', ['--filter', '@dz23-studio/storage-postgres', 'build'], { cwd: process.cwd(), stdio: 'ignore' })
 const upstreamRoot = resolve(process.env.DSH_UPSTREAM_ROOT ?? '/home/leandro/harness-studio-poc02/deepseek-harness')
 const studioRoot = resolve(process.cwd())
 const runId = randomUUID().slice(0, 8)
@@ -208,3 +209,11 @@ Limite: migra os domínios do Studio; sessões e logs do próprio Harness usam o
 await writeFile(resolve(studioRoot, 'docs/proofs/P31-B-json-to-postgres-migration-proof.md'), proof)
 await rm(workDir, { recursive: true, force: true })
 process.stdout.write(`${JSON.stringify(result, null, 2)}\nSTORAGE_MIGRATION=${result.decision}\n`)
+
+process.on('uncaughtException', async error => { await writeFailure(error); process.exit(1) })
+process.on('unhandledRejection', async error => { await writeFailure(error); process.exit(1) })
+async function writeFailure(error) {
+  const message = error instanceof Error ? error.message : String(error)
+  await writeFile(resolve(studioRoot, 'docs/proofs/P31-B-json-to-postgres-migration-proof.md'), `# P31-B — Prova de migração da instância de desenvolvimento (json → PostgreSQL)\n\n- Resultado: **NO-GO**\n- Motivo: ${message}\n`)
+  process.stderr.write(`STORAGE_MIGRATION=NO-GO ${message}\n`)
+}

@@ -38,8 +38,8 @@ if (!args.write) {
   }, null, 2)}\n`)
 } else {
   const scheduler = new StorageBackupScheduler({
-    snapshot, directory: resolve(args.out), intervalMs: BACKUP_MIN_INTERVAL_MS, keep: args.keep,
-    log: line => process.stderr.write(`${line}\n`),
+    snapshot, directory: resolve(args.out), label: args.schema, intervalMs: BACKUP_MIN_INTERVAL_MS, keep: args.keep,
+    log: (level, line) => process.stderr.write(`[${level}] ${line}\n`),
   })
   const result = await scheduler.runOnce()
   process.stdout.write(`${JSON.stringify({ mode: 'write', ...result }, null, 2)}\n`)

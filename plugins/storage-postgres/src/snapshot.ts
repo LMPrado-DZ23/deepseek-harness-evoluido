@@ -2,7 +2,7 @@ import { Client } from 'pg'
 import { StorageError } from '@deepseek-ai/dsh-storage'
 import type { KvUnitDescriptor } from '@deepseek-ai/dsh-storage'
 import { exportedDomain, sealBundle, sha256, type ExportedDomain, type StorageExportBundle } from './bundle.js'
-import { assertConfiguredSchemaName, globalsTable, quoteIdentifier, recordsTable, unitsTable } from './schema.js'
+import { assertConfiguredSchemaName, globalsTable, quoteIdentifier, recordsTable, STORAGE_POSTGRES_LAYOUT_VERSION, unitsTable } from './schema.js'
 
 export interface SnapshotOptions {
   connectionString: string
@@ -38,6 +38,9 @@ export async function snapshotPostgresStorage(options: SnapshotOptions): Promise
       `SELECT value FROM ${quoteIdentifier(options.schema)}."storage_meta" WHERE key = 'layout_version'`,
     )
     if (layout.rows[0] === undefined) throw new StorageError('malformed-medium', `postgres schema '${options.schema}' has no Studio storage layout`)
+    if (layout.rows[0].value !== STORAGE_POSTGRES_LAYOUT_VERSION) {
+      throw new StorageError('version-mismatch', `postgres storage schema '${options.schema}' has layout version ${String(layout.rows[0].value)}, incompatible with this build (${String(STORAGE_POSTGRES_LAYOUT_VERSION)})`)
+    }
     const marker = await client.query<{ snapshot: string }>('SELECT pg_current_snapshot()::text AS snapshot')
     const units = await client.query<UnitRow>(`SELECT name, version FROM ${unitsTable(options.schema)}`)
     const records = await client.query<RecordRow>(`SELECT unit, table_name, key, value FROM ${recordsTable(options.schema)} ORDER BY unit, table_name, key`)

@@ -96,9 +96,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     const scheduler = new StorageBackupScheduler({
       snapshot,
       directory: config.backupDirectory,
+      label: schema,
       intervalMs: (config.backupIntervalMinutes ?? 60) * 60_000,
       keep: config.backupKeep ?? 48,
-      log: line => ctx.logger.info(line),
+      log: (level, line) => { if (level === 'warn') ctx.logger.warn(line); else ctx.logger.info(line) },
     })
     ctx.effect(() => {
       scheduler.start()
