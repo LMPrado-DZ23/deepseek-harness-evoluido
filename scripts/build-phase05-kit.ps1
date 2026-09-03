@@ -38,8 +38,9 @@ foreach ($relative in $requiredP40Files) {
 $destination = [System.IO.Path]::GetFullPath($DestinationDirectory)
 New-Item -ItemType Directory -Path $destination -Force | Out-Null
 $zipPath = Join-Path $destination 'DZ23-STUDIO-Fase-0.5-Kit.zip'
-if ((Test-Path -LiteralPath $zipPath) -and -not $Force) {
-  throw "O arquivo já existe: $zipPath. Use -Force para substituí-lo."
+$shaPath = "$zipPath.sha256"
+if (((Test-Path -LiteralPath $zipPath) -or (Test-Path -LiteralPath $shaPath)) -and -not $Force) {
+  throw "O artefato ou seu hash já existem em $destination. Use -Force para substituí-los."
 }
 
 $staging = Join-Path ([System.IO.Path]::GetTempPath()) ("dz23-phase05-kit-" + [guid]::NewGuid().ToString('N'))
@@ -87,12 +88,20 @@ try {
   if (Test-Path -LiteralPath $zipPath) {
     Remove-Item -LiteralPath $zipPath -Force
   }
+  if (Test-Path -LiteralPath $shaPath) {
+    Remove-Item -LiteralPath $shaPath -Force
+  }
   Compress-Archive -Path (Join-Path $staging '*') -DestinationPath $zipPath -CompressionLevel Optimal
+
+  $zipHash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+  "$zipHash *$([System.IO.Path]::GetFileName($zipPath))" |
+    Set-Content -LiteralPath $shaPath -Encoding ascii
 
   $result = [ordered]@{
     status = 'PASS'
     artifact = $zipPath
-    sha256 = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    sha256 = $zipHash
+    sha256File = $shaPath
     omniseekBundled = $false
     omniseekCommit = $observedCommit
   }
