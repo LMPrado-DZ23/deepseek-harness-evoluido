@@ -2,11 +2,9 @@
 
 ## Identidade obrigatória
 
-- Repositório: `C:\Users\zodyp\Documents\Codex\2026-09-01\com\work\poc-01-studio`
-- Base canônica: `codex/p30-policy-foundation@69dc354e989728d62ce5a715c9066188a1448f48`
-- Código da P32 revisado pelo Claude: `58f77d3`; `69dc354` é seu descendente
-  e acrescenta somente o fechamento documental do merge.
-- Criar worktree e branch novos: `codex/p34-preview-core`.
+- Repositório de execução: `C:\Users\zodyp\Documents\Codex\2026-09-01\com\work\missao-m1-preview`
+- Base canônica da missão: `codex/p30-policy-foundation@ec92f29f7398d1ac69dc6201e5fb8e6bccfa60b9`.
+- Branch empilhada da missão: `codex/missao-m1-preview`.
 - Não reutilizar worktrees históricos; não editar o Harness upstream.
 - Sem merge, push, PR, exposição pública ou deploy nesta missão.
 
@@ -15,10 +13,13 @@ fase 6 não pode ser declarada fechada antes da fase 5 completa.
 
 ## Objetivo
 
-Entregar preview privado e temporário do artefato exato já verificado, sobre
-HTTPS local pelo Caddy, em iframe de origem isolada, com sessão e tenant
-revalidados, lifecycle persistido, encerramento automático e runtime sem rede
-de saída. Staging, publicação e produção permanecem fora.
+Entregar preview privado e temporário do artefato exato já verificado. No uso
+local, o navegador abre `http://p-<id>.localhost:<porta-do-studio>` pelo Caddy,
+sem instalar CA ou alterar o trust store. O preview usa iframe de origem
+isolada, sessão e tenant revalidados, lifecycle persistido, encerramento
+automático e runtime sem saída externa. HTTPS com domínio real, staging,
+publicação e produção permanecem fora e devem ser registrados como
+`NOT_EXECUTED`.
 
 ## Leitura obrigatória antes do código
 
@@ -33,7 +34,8 @@ Estender `assertGeneratedSource` com AST, antes de qualquer escrita ou execuçã
 
 1. recusar a diretiva `'use server'` em qualquer função ou bloco, não apenas no
    topo do arquivo;
-2. recusar uso executável de `fetch`, `WebSocket` e `XMLHttpRequest`, inclusive
+2. recusar uso executável de `fetch`, `WebSocket`, `XMLHttpRequest` e
+   `EventSource`, inclusive
    referência direta, chamada, `new`, property access e element access com chave
    literal;
 3. não acusar comentários ou strings comuns que apenas mencionem esses termos;
@@ -42,7 +44,8 @@ Estender `assertGeneratedSource` com AST, antes de qualquer escrita ou execuçã
 Testes obrigatórios: função e arrow com `'use server'`; `fetch(...)`,
 `(0, fetch)(...)`, `window.fetch`, `window['fetch']`; `new WebSocket`,
 `window['WebSocket']`; `new XMLHttpRequest`, `window['XMLHttpRequest']`; casos
-positivos de comentários/strings e `'use client'`.
+positivos de comentários/strings e `'use client'`; `EventSource(...)`,
+`new EventSource(...)` e acessos equivalentes.
 
 O scanner não substitui a barreira de runtime: CSP e ausência de egress são
 controles independentes.
@@ -78,29 +81,41 @@ relógio injetável e reconciliação de órfãos após restart. Só aceitar run
   Harness.
 - Não herdar `process.env`; usar allowlist explícita sem DSN, SMTP, tokens,
   chaves ou códigos.
-- Rede privada por preview: gateway consegue entrar, aplicação não consegue
-  sair para internet, DNS, metadata, host, Harness ou Postgres.
+- Cada preview recebe uma rede Docker interna dedicada, contendo apenas seu
+  runtime e o gateway confiável. O runtime não entra em rede padrão, não
+  publica porta no host, não recebe `NET_ADMIN`, `NET_RAW`, modo privilegiado
+  ou capacidade equivalente. Build e qualquer processo que não precise
+  receber tráfego executam com `network=none`.
+- O gateway consegue entrar na rede interna dedicada; a aplicação não consegue
+  sair para internet, DNS externo, metadata, host, Harness ou Postgres. A prova
+  deve inspecionar a configuração e tentar conexões de dentro do runtime.
 - Se ingresso sem egress não puder ser provado sem privilégio perigoso, parar
   como `BLOCKED_EXTERNAL`; não degradar silenciosamente.
 
-## P34-D — Caddy, HTTPS e iframe
+## P34-D — Caddy, HTTP local e iframe
 
-- Caddy continua a única borda HTTPS.
-- Origem distinta e não adivinhável por preview:
-  `p-<id-aleatorio>.preview.<dominio-configurado>`.
+- Caddy continua a única borda do Studio e dos previews.
+- No uso local, cada preview tem origem distinta e não adivinhável em
+  `http://p-<id-aleatorio>.localhost:<porta-do-studio>`. Navegadores tratam
+  origens `localhost` como contexto local confiável; isso não autoriza HTTP em
+  host público.
 - Todos os hosts chegam a um gateway fixo; o gateway consulta a registry
   server-side e encaminha somente ao endpoint emitido pelo runtime.
 - Nunca selecionar upstream por `Host`, DNS ou destino enviado pelo cliente.
 - Preservar `X-Frame-Options: DENY` e `frame-ancestors 'none'` no Studio.
 - Somente no host de preview, substituir por CSP com
-  `frame-ancestors <origem HTTPS exata do Studio>`, `default-src 'self'`,
+  `frame-ancestors <origem exata do Studio>`, `default-src 'self'`,
   `connect-src 'self'`, `form-action 'self'`, `base-uri 'none'` e
   `object-src 'none'`.
 - Iframe: `sandbox="allow-scripts allow-forms allow-same-origin"` e
   `referrerpolicy="no-referrer"`; sem popup, top-navigation ou download.
-- Prova local usa `tls internal` com CA confinada ao ambiente de teste; nunca
-  instalar CA no host nem alterar hosts do sistema.
-- ACME e domínio público permanecem `NOT_EXECUTED`.
+- O fluxo de navegador usado pela pessoa não usa `tls internal`, certificado
+  local ou instalador de CA. É proibido instalar CA no host ou alterar o trust
+  store/arquivo de hosts do sistema.
+- Uma prova automatizada separada pode usar `tls internal` exclusivamente em
+  contêiner ou perfil descartável, com a CA confinada ao ambiente de teste e
+  nunca instalada no host. Essa prova não muda o protocolo do fluxo local.
+- HTTPS real, ACME e domínio público permanecem `NOT_EXECUTED`.
 
 ## P34-E — autenticação, autorização e cookies
 
@@ -117,6 +132,12 @@ relógio injetável e reconciliação de órfãos após restart. Só aceitar run
   `X-Forwarded-Proto`.
 - Revogação, remoção da membership, stop ou expiração bloqueiam a próxima
   requisição.
+- A autenticação por e-mail do aplicativo gerado usa modo `studio-preview`
+  durante o preview: nenhum e-mail real é enviado. O código de acesso é escrito
+  somente em volume efêmero e exclusivo do preview e pode ser lido apenas por
+  endpoint autenticado do Studio, após revalidar sessão, organização, tenant,
+  projeto e preview. Código nunca entra em URL, log, bundle ou resposta de outro
+  tenant e desaparece no encerramento do preview.
 
 Rotas estruturais sugeridas:
 
@@ -130,7 +151,8 @@ Não criar segunda autoridade de RBAC.
 
 ## P34-F — testes e prova adversarial
 
-Executar unitários, integração real com Caddy/runtime e Playwright HTTPS:
+Executar unitários, integração real com Caddy/runtime, Playwright no HTTP local
+e, separadamente, Playwright HTTPS confinado ao ambiente automatizado:
 
 - lifecycle, TTL, idempotência, concorrência, reaper e restart;
 - 401 anônimo e 404 de tenant cruzado;
@@ -140,9 +162,12 @@ Executar unitários, integração real com Caddy/runtime e Playwright HTTPS:
   arbitrário e DNS rebinding;
 - conexão HTTP/TCP/DNS externa a partir do runtime;
 - acesso direto ao runtime;
-- cookie Secure armazenado/enviado em HTTPS, ausente de `document.cookie` e não
-  enviado por HTTP;
+- cookie `HttpOnly` ausente de `document.cookie`; comportamento do cookie
+  `Secure` comprovado no navegador real para `localhost`; qualquer divergência
+  falha fechada, sem reduzir a proteção para host público;
 - iframe só na origem Studio autorizada;
+- modo `studio-preview` não envia e-mail, não vaza código entre tenants e apaga
+  o volume efêmero ao parar;
 - TTL remove runtime e stop repetido permanece idempotente;
 - restart elimina órfãos e não adota runtime desconhecido;
 - nenhum segredo, token, cookie, código, DSN, ambiente bruto, endpoint interno
