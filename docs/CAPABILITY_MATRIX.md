@@ -16,3 +16,4 @@ Estados seguem ADR-005 e nunca transformam uma prova focada em “aplicação pr
 | RLS PostgreSQL por tenant | NOT_PRESENT | KV armazena JSON opaco | repositório tenant-aware + role sem BYPASSRLS |
 | Transação de negócio multi-registro | NOT_PRESENT | contrato KV é atômico por chamada | extensão batch/CAS transacional |
 | Migração SQLite lógica | BETA | bundle versionado e E2E focado P31-A | restore operacional e dataset real |
+| Pesquisa de linguagem com pessoas leigas | NOT_EXECUTED | kit da fase 0.5 e preflight fail-closed preparados | IA local válida e cinco sessões `VALID` |

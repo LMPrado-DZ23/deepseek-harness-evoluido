@@ -80,3 +80,11 @@ usa Docker e exige que as
 dependências do profile também tenham sido instaladas com
 `pnpm --dir dsh-home/profiles/studio install --frozen-lockfile`. Isso não inclui
 cerimônia de passkey com hardware, aparelho móvel físico ou deploy.
+
+## Pesquisa com pessoas leigas
+
+O kit controlado da fase 0.5 está em
+[`docs/research/phase-0.5/README.md`](docs/research/phase-0.5/README.md). Ele
+mede a compreensão do fluxo antes de iniciar o Prompt-to-App. O kit não contém
+código do OmniSeek, não habilita deploy e ainda não foi executado com os cinco
+participantes.
