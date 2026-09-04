@@ -12,14 +12,22 @@
 import assert from 'node:assert/strict'
 import { execFileSync, spawn } from 'node:child_process'
 import { createHash, generateKeyPairSync, randomUUID, sign } from 'node:crypto'
-import { existsSync, readFileSync } from 'node:fs'
-import { chmod, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdir, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const studioRoot = resolve(process.cwd())
+const builderDigestFile = join(studioRoot, 'runtime', 'builder-image-digest')
+const templateStore = join(studioRoot, 'runtime', 'template-store-v2')
+if (!existsSync(builderDigestFile) || !existsSync(templateStore)) {
+  writeBlockedProof('BUILDER_INPUTS_NOT_CONFIGURED', `builder digest: ${existsSync(builderDigestFile) ? 'configurado' : 'ausente'}; template store: ${existsSync(templateStore) ? 'configurado' : 'ausente'}`)
+  process.stderr.write(`${JSON.stringify({ decision: 'BLOCKED_EXTERNAL', reason: 'BUILDER_INPUTS_NOT_CONFIGURED', builderDigest: existsSync(builderDigestFile), templateStore: existsSync(templateStore), export: 'NOT_EXECUTED', applicationReady: false }, null, 2)}\nINTEGRATION_HUB=BLOCKED_EXTERNAL\n`)
+  process.exit(2)
+}
 execFileSync('pnpm', ['build'], { cwd: studioRoot, stdio: 'ignore' })
+execFileSync('pnpm', ['install', '--offline', '--frozen-lockfile', '--ignore-scripts'], { cwd: join(studioRoot, 'dsh-home', 'profiles', 'studio'), stdio: 'ignore' })
 const upstreamRoot = resolve(process.env.DSH_UPSTREAM_ROOT ?? '/home/leandro/harness-studio-poc02/deepseek-harness')
 const runId = randomUUID().slice(0, 8)
 const workDir = join(studioRoot, 'runtime', `hub-proof-${runId}`)
@@ -44,6 +52,10 @@ const profileBootChunk = cliBin.match(/import\("\.\/(profile-boot-[^"]+\.js)"\)/
 const [{ loadLayeredEnv }, { runProfile }] = await Promise.all([moduleAt('packages/boot/app-boot/lib/index.js'), moduleAt(`apps/cli/lib/${profileBootChunk}`)])
 const { canonicalManifestBytes } = await import('../plugins/integration-hub/lib/manifest.js')
 const { readZip } = await import('../plugins/integration-hub/lib/zip.js')
+
+class BuilderUnavailable extends Error {
+  constructor(detail) { super(detail); this.name = 'BuilderUnavailable' }
+}
 await mkdir(join(dshHome, 'profiles'), { recursive: true })
 await symlink(join(studioRoot, 'dsh-home', 'profiles', 'studio'), join(dshHome, 'profiles', 'studio'), 'dir')
 
@@ -140,45 +152,49 @@ try {
   // tampered signature → refused and audited
   assert.equal((await hub('/integrations', { method: 'POST', body: JSON.stringify({ ...signedManifest, name: 'Agenda alterada' }) })).status, 400)
 
-  // ---- a verified project with a PASSED run whose files exist (fabricated standalone build)
+  // ---- a real Prompt-to-App pipeline run. The Hub may export only what this
+  // pipeline records as PASSED after the pinned, networkless ContainerBuilder
+  // produced a Next.js standalone tree. This proof never writes server.js and
+  // never inserts a PASSED run itself.
   const tenancy = app.ctx.studioTenancy.service
   const authorization = tenancy.authorizationFor(session.user_id, session.org_id, session.tenant_id)
   const actor = { ...authorization, sessionId: session.session_id }
   const p2a = app.ctx.studioPromptToApp.service
+  const pipeline = app.ctx.studioPromptToApp.pipeline
   const project = await p2a.createProject(actor, { name: 'Agenda do salão', original_brief: 'Preciso de um aplicativo para as pessoas escolherem horário no meu salão.', category: 'form-database', privacy: 'local-only' })
-  const spec = { schema_version: 1, problem: project.original_brief, audience: 'Clientes', journeys: ['Reservar'], pages: [{ name: 'Reservas', sections: ['Cadastro'] }], entities: [{ name: 'Reserva', kind: 'database', sensitive: false, fields: [{ name: 'Nome', type: 'text', required: true }] }], sensitive_data: { detected: [], confirmed_by_user: false }, accessibility: { wcag_level: 'AA', keyboard_required: true, reduced_motion: true }, language: 'pt-BR', acceptance_criteria: ['a', 'b', 'c'] }
+  const spec = { schema_version: 1, problem: project.original_brief, audience: 'Clientes', journeys: ['Reservar'], pages: [{ name: 'Reservas', sections: ['Cadastro', 'Lista'] }], entities: [{ name: 'Reserva', kind: 'database', sensitive: false, fields: [{ name: 'Nome', type: 'text', required: true }, { name: 'Data', type: 'date', required: true }] }], sensitive_data: { detected: [], confirmed_by_user: false }, accessibility: { wcag_level: 'AA', keyboard_required: true, reduced_motion: true }, language: 'pt-BR', acceptance_criteria: ['A tela mostra o texto “Escolha um horário”.'] }
   await p2a.saveSpec(actor, project.project_id, spec, 'intake')
-  await p2a.proposePlan(actor, project.project_id, [{ slice_id: 's1', title: 'Tela', description: 'Tela de reservas', acceptance_criteria: ['a'], planned_files: ['src/GeneratedApp.tsx'] }])
-  const plan = await p2a.approvePlan(actor, project.project_id)
-  await p2a.transition(actor, project.project_id, 'GENERATING')
-  await p2a.transition(actor, project.project_id, 'BUILD_OK')
-  await p2a.transition(actor, project.project_id, 'TESTS_OK')
-  await p2a.transition(actor, project.project_id, 'VERIFIED_PROTOTYPE')
-  const runDirectory = join(runsRoot, `hub-proof-${runId}`)
-  await mkdir(runsRoot, { recursive: true })
-  await mkdir(join(runDirectory, '.next', 'standalone', 'node_modules', 'next'), { recursive: true })
-  await mkdir(join(runDirectory, '.next', 'static'), { recursive: true })
-  await mkdir(join(runDirectory, 'data'), { recursive: true })
-  await mkdir(join(runDirectory, '.next', 'standalone', 'data'), { recursive: true }) // the generated app's own store, where the collector DOES walk
-  await mkdir(join(runDirectory, '.next', 'standalone', 'node_modules', 'lib', 'data'), { recursive: true }) // a library folder that happens to be called data/
-  await mkdir(join(runDirectory, 'evidence'), { recursive: true })
-  await writeFile(join(runDirectory, '.next', 'standalone', 'server.js'), 'console.log("app")')
-  await chmod(join(runDirectory, '.next', 'standalone', 'server.js'), 0o755)
-  await writeFile(join(runDirectory, '.next', 'standalone', 'node_modules', 'next', 'package.json'), '{}')
-  await writeFile(join(runDirectory, '.next', 'standalone', 'node_modules', 'lib', 'data', 'table.json'), '[]')
+  await p2a.proposePlan(actor, project.project_id, [{ slice_id: 's1', title: 'Tela', description: 'Tela de reservas', acceptance_criteria: ['Build e testes passam.'], planned_files: ['content/app.json', 'src/GeneratedApp.tsx'] }])
+  await p2a.approvePlan(actor, project.project_id)
+  const generated = {
+    generate: async () => ({
+      route: 'deterministic-proof', model: 'fixture-v1', inputTokens: 0, outputTokens: 0,
+      files: [
+        { path: 'content/app.json', content: '{"title":"Agenda do salão","description":"Escolha um horário."}' },
+        { path: 'src/GeneratedApp.tsx', content: "import ReservaManager from '@/src/components/generated/reserva-manager'\nexport default function GeneratedApp(){ return <main><h1>Agenda do salão</h1><p>Escolha um horário</p><ReservaManager /></main> }\n" },
+      ],
+    }),
+  }
+  const pipelineResult = await pipeline.run(actor, project.project_id, generated, { operationId: `hub-proof-${runId}`, ownerSessionId: session.session_id })
+  if (pipelineResult.state === 'BLOCKED_EXTERNAL') throw new BuilderUnavailable(pipelineResult.message)
+  assert.equal(pipelineResult.state, 'VERIFIED_PROTOTYPE', `pipeline did not verify the prototype: ${pipelineResult.message}`)
+  assert.ok(pipelineResult.runDirectory, 'the verified pipeline did not return its run directory')
+  const runDirectory = pipelineResult.runDirectory
+  const passedRuns = p2a.runs(actor, project.project_id).filter(run => run.state === 'PASSED')
+  assert.equal(passedRuns.length, 1, 'the real pipeline must be the sole authority that records PASSED')
+  assert.equal(passedRuns[0].run_directory, runDirectory)
+  assert.match(passedRuns[0].artifact_sha256, /^[a-f0-9]{64}$/u)
+  assert.ok((await stat(join(runDirectory, '.next', 'standalone', 'server.js'))).isFile(), 'the real builder did not produce Next.js standalone/server.js')
+
+  // Add adversarial private/opaque entries only after the builder produced the
+  // real standalone. They exercise the export filter; they do not fabricate
+  // the executable or the PASSED decision.
+  await mkdir(join(runDirectory, '.next', 'standalone', 'data'), { recursive: true })
   await writeFile(join(runDirectory, '.next', 'standalone', 'data', 'app.sqlite'), 'segredo-do-banco-777')
   await writeFile(join(runDirectory, '.next', 'standalone', 'data', 'studio-capture.json'), '[{"kind":"code","email":"x@example.test","code":"654321"}]')
   await writeFile(join(runDirectory, '.next', 'standalone', '.env'), 'APP_SMTP_URL=smtp://u:senha-local@h')
-  await writeFile(join(runDirectory, '.next', 'static', 'main.js'), 'chunk')
-  // The allow-list and the "entered uninspected" list only earn their claim if this run exercises
-  // them: `.exe` is a type nobody put on the list (it must stay out and be NAMED), and `.png` is an
-  // allowed type the secret scan cannot read (it must go in and be NAMED as unchecked).
   await writeFile(join(runDirectory, '.next', 'standalone', 'notas.exe'), 'MZ\u0000binario-que-nao-pode-embarcar')
   await writeFile(join(runDirectory, '.next', 'standalone', 'logo.png'), Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex'))
-  await writeFile(join(runDirectory, 'data', 'studio-capture.json'), '[{"kind":"code","email":"x@example.test","code":"654321"}]')
-  await writeFile(join(runDirectory, 'evidence', 'appspec-report.json'), '{"schema_version":1,"checks":[]}')
-  const now = new Date().toISOString()
-  await p2a.putRun(actor, { run_id: 'run-1', operation_id: 'op-1', owner_session_id: session.session_id, plan_id: plan.plan_id, project_id: project.project_id, org_id: actor.orgId, tenant_id: actor.tenantId, stage: 'verify', attempt: 1, state: 'PASSED', started_at: now, finished_at: now, sandbox: 'full', route: 'deterministic', model: 'studio-deterministic', input_tokens: 0, output_tokens: 0, estimated_cost_usd: 0, run_directory: runDirectory, failure_code: null, acceptance_checks: [] })
 
   // ---- export through HTTP and download
   const created = await hub(`/projects/${project.project_id}/exports`, { method: 'POST', body: '{}' })
@@ -192,7 +208,9 @@ try {
   assert.equal(download.headers.get('x-dz23-sha256'), record.sha256)
   const entries = readZip(archive)
   const names = entries.map(entry => entry.name)
-  assert.deepEqual(names, ['.env.example', 'EXCLUIDOS.txt', 'README.md', 'app/.next/static/main.js', 'app/logo.png', 'app/node_modules/lib/data/table.json', 'app/node_modules/next/package.json', 'app/server.js', 'evidence/appspec-report.json'])
+  assert.ok(names.includes('app/server.js'), 'the package did not consume the standalone server produced by the builder')
+  assert.ok(names.includes('evidence/appspec-report.json'), 'the real pipeline acceptance report is absent')
+  assert.ok(names.some(name => name.startsWith('app/.next/static/')), 'the real Next.js static output is absent')
   // Nothing left out in silence: the package names what stayed behind, without any of its content.
   const left = entries.find(entry => entry.name === 'EXCLUIDOS.txt').data.toString('utf8')
   assert.ok(left.includes('app/data/') && left.includes('app/.env'), 'the exclusion list must name what stayed behind')
@@ -250,23 +268,6 @@ try {
   const tested = events.events.find(event => event.action === 'smtp.tested' && event.outcome === 'not-executed')
   assert.ok(!JSON.stringify(events.events).includes(email), 'the recipient address was kept in the clear in the audit trail')
   void tested
-
-  // ---- adversarial: a run directory outside the runs root is refused before anything is read
-  const outsideRun = join(workDir, 'fora', 'op-x')
-  await mkdir(join(outsideRun, '.next', 'standalone'), { recursive: true })
-  await writeFile(join(outsideRun, '.next', 'standalone', 'server.js'), 'console.log("fora")')
-  await writeFile(join(outsideRun, '.next', 'standalone', 'segredo.txt'), 'nao-deveria-sair')
-  // On a project of its own, so the verified project the panel uses keeps its good run.
-  const escapeProject = await p2a.createProject(actor, { name: 'Projeto de fuga', original_brief: 'Preciso de um aplicativo de teste para a prova adversarial de caminho.', category: 'form-database', privacy: 'local-only' })
-  await p2a.saveSpec(actor, escapeProject.project_id, spec, 'intake')
-  await p2a.proposePlan(actor, escapeProject.project_id, [{ slice_id: 's1', title: 'Tela', description: 'Tela de reservas', acceptance_criteria: ['a'], planned_files: ['src/GeneratedApp.tsx'] }])
-  const escapePlan = await p2a.approvePlan(actor, escapeProject.project_id)
-  for (const state of ['GENERATING', 'BUILD_OK', 'TESTS_OK', 'VERIFIED_PROTOTYPE']) await p2a.transition(actor, escapeProject.project_id, state)
-  const escapeId = randomUUID()
-  await p2a.putRun(actor, { run_id: escapeId, operation_id: 'op-x', owner_session_id: session.session_id, plan_id: escapePlan.plan_id, project_id: escapeProject.project_id, org_id: actor.orgId, tenant_id: actor.tenantId, stage: 'verify', attempt: 1, state: 'PASSED', started_at: now, finished_at: now, sandbox: 'full', route: 'deterministic', model: 'studio-deterministic', input_tokens: 0, output_tokens: 0, estimated_cost_usd: 0, run_directory: outsideRun, failure_code: null, acceptance_checks: [] })
-  const escaped = await hub(`/projects/${escapeProject.project_id}/exports`, { method: 'POST', body: '{}' })
-  assert.equal(escaped.status, 400, 'a run outside the runs root must be refused')
-  assert.ok((await escaped.text()).includes('pasta de execuções'))
 
   // ---- the panel in real Chromium against this very Studio (session handed over, nothing mocked)
   let ui = 'NOT_EXECUTED'
@@ -333,31 +334,41 @@ try {
 
   const decision = ui === 'PASS' ? 'GO' : 'NO-GO'
 
-  const result = { decision, ui, uiDetail, port, announced: announced !== '', smtp: { configured: true, test: test.result, secretInStorage: false }, registry: { verifiedEnabled: true, unsignedTier: unsigned.integration.effective_tier, unsignedEnableRefused: true }, export: { entries: names.length, sha256: record.sha256.slice(0, 16), reproducible: true, privateLeak: false }, auditEvents: actions.length }
+  const result = { decision, ui, uiDetail, port, announced: announced !== '', smtp: { configured: true, test: test.result, secretInStorage: false }, registry: { verifiedEnabled: true, unsignedTier: unsigned.integration.effective_tier, unsignedEnableRefused: true }, pipeline: { state: pipelineResult.state, runId: passedRuns[0].run_id, artifactSha256: passedRuns[0].artifact_sha256.slice(0, 16) }, export: { entries: names.length, sha256: record.sha256.slice(0, 16), reproducible: true, privateLeak: false }, auditEvents: actions.length }
   await writeFile(resolve(studioRoot, 'docs/proofs/M5-integration-hub-proof.md'), `# M5 — Prova do Integration Hub v1 no Studio real
 
 - Resultado: **${decision}** (${new Date().toISOString().slice(0, 10)}, ambiente do Claude, Studio real no profile \`studio\` com o plugin \`@dz23-studio/integration-hub\`)
 - Sessão obtida pelo serviço de identidade real em processo (código de acesso por e-mail, captura de desenvolvimento); as chamadas ao Hub passam pelo servidor HTTP real com sessão e CSRF.
 - SMTP do aplicativo gerado: o navegador envia só o **nome** da referência (\`DZ23_APP_SMTP\`); o valor fica no ambiente do servidor, é conferido (existe + formato) e **não aparece no armazenamento**; nome inexistente → 400; teste de envio → \`NOT_EXECUTED\` com explicação (provedor ainda não escolhido).
 - **Aplicação dos níveis D16 (não só exibição), com a decisão emitida pelo servidor**: a tela pede ao servidor uma aprovação para a ação exata; o servidor decide o nível, registra a decisão, amarra a pessoa, a sessão, a ação e o alvo, dá validade curta e gasta na primeira utilização. Uma aprovação **inventada pelo cliente** → 403; uma aprovação emitida para **outra** integração → 403; configurar o e-mail (T2) sem aprovação → **403 e nada muda**; com a aprovação → 200. Uma integração assinada que pede \`secrets.read\` é **T3 pelo piso**, mesmo declarando T0: sem confirmação → 403; com uma confirmação de **T2** legítima, emitida para a mesma pessoa, sessão, ação e alvo, e depois o alvo virar T3 por nova assinatura → 403 e a integração continua desligada (o bilhete apresentado ainda é gasto); com confirmação de T3, mas nesta sessão entrada por código de e-mail → 403 pedindo **passkey**, e a integração continua desligada. Cada confirmação aceita vira um evento \`approval.recorded\`.
-- **Confinamento do diretório de execução**: uma run \`PASSED\` apontando para fora da pasta de execuções (\`runsRoot\`) é recusada **antes de qualquer leitura** — nada do que estava lá entra em pacote algum.
+- **Origem do artefato**: o projeto, plano, execução e estado \`PASSED\` vêm do serviço e do pipeline reais do Prompt-to-App. O \`server.js\`, os chunks e o relatório de aceite foram produzidos pelo \`ContainerBuilder\` fixado, com \`--network none\`, e não pela prova. O Hub consome exatamente a run registrada pelo pipeline.
 - **Exportação com lista de permitidos e varredura fail-closed**: só tipos de arquivo permitidos entram — um \`notas.exe\` plantado na run **não** entra e aparece nomeado em \`EXCLUIDOS.txt\`, e um \`logo.png\` (tipo permitido que a varredura não sabe ler) entra e aparece nomeado na segunda seção do mesmo arquivo, a dos que **entraram sem conferência**; o que fica de fora é listado por nome em \`EXCLUIDOS.txt\` dentro do pacote (nada sai em silêncio); um arquivo de código com bloco de chave privada dentro da run **derruba a exportação inteira** (409, sem eco do segredo, com o evento de recusa no histórico) e, retirado o arquivo, o mesmo pacote volta com o mesmo sha256 — é isso que prova que a recusa veio dele.
 - **A confirmação é amarrada ao alvo, não só à ação**: o bilhete leva organização, espaço de trabalho, ação, assunto e um **resumo (sha256) do que está sendo confirmado** — o apelido do segredo, o endereço do teste ou o estado de segurança do registro. Uma confirmação dada para \`DZ23_APP_SMTP\` apresentada para outra credencial → **403 e nada muda**. O resumo fica no servidor: a resposta do \`POST /approvals\` não o devolve.
 - **Auditoria minimizada**: o endereço do teste de e-mail não fica em texto claro no histórico (domínio + resumo sha256), e o **apelido da credencial não aparece em lugar nenhum do histórico** — nem como assunto, nem no detalhe (só \`ref sha256:…\` curto), em sucesso e em recusa.
 - **Histórico paginado**: \`GET /events\` devolve uma página (padrão 50, teto 200) e um cursor; uma segunda página não repete linha da primeira e um cursor inventado → 400. A tabela inteira nunca viaja numa resposta só.
 - Registro D16: manifesto assinado (Ed25519) → \`verified\`, ligado; habilidade **sem assinatura** declarando T0 → \`unverified\`, tier efetivo **T2** (piso de não verificado, sem envolver rede), ligar no canal estável → 403; manifesto adulterado → 400 e evento de recusa; \`can_enable\` decidido pelo servidor.
-- Exportação: projeto levado a \`VERIFIED_PROTOTYPE\` por \`transition()\` e run \`PASSED\` **simulada** (standalone fabricado com \`server.js\` de uma linha; o pipeline real de geração não foi executado nesta prova) → ZIP com ${String(names.length)} entradas; \`data/\` da raiz do app (sqlite + códigos capturados) e \`.env\` **não** entram, enquanto \`node_modules/lib/data/\` entra; SHA-256 no cabeçalho igual ao arquivo; segundo pedido devolve o mesmo pacote (sem arquivo gêmeo); arquivo sumido → 404 sem caminho do servidor.
+- Exportação: pipeline real → \`VERIFIED_PROTOTYPE\` e run real \`PASSED\` → ZIP com ${String(names.length)} entradas; \`data/\` da raiz do app (sqlite + códigos capturados), \`.env\` e binário opaco **não** entram; SHA-256 no cabeçalho igual ao arquivo; segundo pedido devolve o mesmo pacote (sem arquivo gêmeo); arquivo sumido → 404 sem caminho do servidor.
 - Auditoria: ${String(actions.length)} eventos com organização e espaço de trabalho, incluindo a recusa.
 - Interface \`/studio/hub\` em Chromium real contra este mesmo Studio: **${ui}** (${uiDetail}) — tela própria em pt-BR; a tela **pergunta antes** de qualquer ação T2/T3 e **cancelar não envia nada**: o teste conta as decisões emitidas no histórico do próprio servidor antes de abrir a caixa e depois de cancelar, e o número não muda (a decisão só nasce na confirmação); a integração T3 mostra o aviso do nível, pede confirmação e ainda assim recebe do servidor a recusa por falta de passkey, em palavras; nome do segredo guardado e teste mostrado como não executado; integração sem assinatura com o botão de ligar **presente e desativado**, com a explicação do porquê ao lado (não é um botão que some da tela); pacote gerado pela tela com SHA-256 igual ao download; sem sessão → 401 na tela e na API.
 
 Verificado só por teste automatizado (não nesta prova de ponta a ponta): a recusa de subida no canal \`dev\` fora de uma instalação pessoal em loopback (\`tests/index.spec.ts\`); a separação das confirmações por espaço de trabalho sob enxurrada e a retenção do histórico (\`tests/service.spec.ts\`); o piso D16 por kind, endpoint e permissão (\`tests/manifest.spec.ts\`).
 
-Não executado: envio SMTP real (depende da escolha do provedor pelo Prado), exportação de um standalone real produzido pelo pipeline (fica para a integração com a M1/fatia 3), aparelho físico, avaliação com pessoas leigas (ADR-016: só no sistema completo).
+Não executado: envio SMTP real (depende da escolha do provedor pelo Prado), aparelho físico, avaliação com pessoas leigas (ADR-016: só no sistema completo).
 `)
   process.stdout.write(`${JSON.stringify(result, null, 2)}\nINTEGRATION_HUB=${decision}\n`)
   if (decision !== 'GO') process.exitCode = 1
+} catch (error) {
+  if (error instanceof BuilderUnavailable) {
+    writeBlockedProof('BUILDER_UNAVAILABLE', error.message)
+    process.stderr.write(`${JSON.stringify({ decision: 'BLOCKED_EXTERNAL', reason: 'BUILDER_UNAVAILABLE', detail: error.message, export: 'NOT_EXECUTED', applicationReady: false }, null, 2)}\nINTEGRATION_HUB=BLOCKED_EXTERNAL\n`)
+    process.exitCode = 2
+  } else throw error
 } finally {
   await app.shutdown.shutdown(0)
   await rm(workDir, { recursive: true, force: true })
   await rm(join(resolve(homedir(), '.dz23-studio', 'generated-runs'), `hub-proof-${runId}`), { recursive: true, force: true })
+}
+
+function writeBlockedProof(reason, detail) {
+  writeFileSync(resolve(studioRoot, 'docs/proofs/M5-integration-hub-proof.md'), `# M5 — Prova de exportação real do Integration Hub\n\n- Resultado: **BLOCKED_EXTERNAL**\n- Motivo: \`${reason}\` (${detail}).\n- Standalone real produzido pelo pipeline: \`NOT_EXECUTED\`.\n- Exportação: \`NOT_EXECUTED\`.\n- Aplicação pronta: **não afirmada**.\n- A prova não fabrica \`server.js\`, não promove o projeto por \`transition()\` e não grava uma run \`PASSED\` manualmente.\n- O teste de integração \`pipeline-export.integration.spec.ts\` prova que uma execução \`BLOCKED_EXTERNAL\` criada pelo pipeline real continua não exportável, inclusive sob tentativa de outro tenant. Esse teste é somente o contrato entre os módulos; não substitui Docker, build Next.js, Playwright ou a exportação física.\n\nPara obter \`GO\`, preparar \`runtime/builder-image-digest\` e \`runtime/template-store-v2\`, manter a imagem fixada disponível no Docker e executar \`pnpm prove:integration-hub\`. Somente o caminho positivo do script aceita a run \`PASSED\` escrita pelo pipeline após build e testes isolados com \`--network none\`.\n`)
 }
