@@ -658,16 +658,16 @@ export class IntegrationHubService {
       await this.#audit(actor, 'export.created', projectId, 'failure', detail)
       throw error
     }
-    if (project.state !== 'VERIFIED_PROTOTYPE') return refuse(`state ${project.state}`, new HubError('INVALID', t('errors.exportNotVerified')))
+    if (project.state !== 'VERIFIED_PROTOTYPE') return await refuse(`state ${project.state}`, new HubError('INVALID', t('errors.exportNotVerified')))
     const run = [...this.options.projects.runs(actor, projectId)].filter(value => value.state === 'PASSED')
       .sort((left, right) => (right.started_at < left.started_at ? -1 : right.started_at > left.started_at ? 1 : 0) || right.attempt - left.attempt)[0]
-    if (run === undefined) return refuse('no PASSED run', new HubError('INVALID', t('errors.exportNotVerified')))
+    if (run === undefined) return await refuse('no PASSED run', new HubError('INVALID', t('errors.exportNotVerified')))
     // The run directory arrives as data from another plugin: it is confined to the runs root by real path before anything is read.
     let confinedRun: { handle: FileHandle; path: string }
     try {
       confinedRun = await this.#openConfinedRunDirectory(run.run_directory)
     } catch (error) {
-      return refuse(error instanceof HubError ? `run-directory ${error.code}` : 'run-directory', error instanceof HubError ? error : new HubError('INVALID', t('errors.exportRunMissing')))
+      return await refuse(error instanceof HubError ? `run-directory ${error.code}` : 'run-directory', error instanceof HubError ? error : new HubError('INVALID', t('errors.exportRunMissing')))
     }
     let built
     try {
@@ -678,11 +678,11 @@ export class IntegrationHubService {
       // The DETAIL travels with the code: three different refusals used to reach the history as a
       // bare `TOO_LARGE`, and a package refused for carrying a secret named the file on the screen
       // and nowhere in the row. The detail is a path or a reason, never the matched text.
-      if (error instanceof ExportError) return refuse(`${error.code} ${error.detail}`, new HubError(exportErrorCode(error.code), error.code === 'INVALID_PATH' ? t('errors.internal') : error.message))
+      if (error instanceof ExportError) return await refuse(`${error.code} ${error.detail}`, new HubError(exportErrorCode(error.code), error.code === 'INVALID_PATH' ? t('errors.internal') : error.message))
       // Anything else (an unreadable folder, a name the filesystem returns as invalid UTF-8) used to
       // leave through the front door as a 500 with no audit at all — the person saw "something went
       // wrong" and the history said nothing had been attempted.
-      return refuse(`package-failed ${error instanceof Error ? error.name : 'Error'}`, new HubError('INVALID', t('errors.exportFailed')))
+      return await refuse(`package-failed ${error instanceof Error ? error.name : 'Error'}`, new HubError('INVALID', t('errors.exportFailed')))
     } finally {
       await confinedRun.handle.close().catch(() => undefined)
     }
