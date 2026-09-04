@@ -102,6 +102,13 @@ test('serve a casca com o servidor fora do ar, sem nunca ter dados de projeto no
   })
   // The device HAS network; the Studio is what is gone. The two causes are not the same sentence.
   expect(offlineApi).toEqual({ status: 503, body: { error: 'SERVICE_UNREACHABLE', offline: false, serviceUnreachable: true } })
+  // A MUTATION gets the same treatment as a read: the worker answers POST too, so a blocked action
+  // reaches the interface as a code it can turn into a sentence, never as a raw "Failed to fetch".
+  const unreachablePost = await page.evaluate(async () => {
+    const response = await fetch('/api/studio/apps/projects/p-1/generate', { method: 'POST', body: '{}', headers: { 'content-type': 'application/json' } })
+    return { status: response.status, body: await response.json() as unknown }
+  })
+  expect(unreachablePost).toEqual({ status: 503, body: { error: 'SERVICE_UNREACHABLE', offline: false, serviceUnreachable: true } })
   const cachedPaths = await page.evaluate(async () => {
     const urls: string[] = []
     for (const name of await caches.keys()) for (const request of await (await caches.open(name)).keys()) urls.push(new URL(request.url).pathname)
@@ -122,6 +129,13 @@ test('serve a casca com o servidor fora do ar, sem nunca ter dados de projeto no
     return { status: response.status, body: await response.json() as unknown }
   })
   expect(trulyOffline).toEqual({ status: 503, body: { error: 'OFFLINE', offline: true } })
+  const offlinePost = await page.evaluate(async () => {
+    const response = await fetch('/api/studio/apps/projects/p-1/generate', { method: 'POST', body: '{}', headers: { 'content-type': 'application/json' } })
+    return { status: response.status, body: await response.json() as unknown }
+  })
+  // Same action, other cause, other code — and the catalogue has a different sentence for each.
+  expect(offlinePost).toEqual({ status: 503, body: { error: 'OFFLINE', offline: true } })
+  expect(pwa.offline.blockedAction).not.toBe(pwa.offline.serviceUnreachable)
   await context.setOffline(false)
   await expect(page.locator('.pwa-offline-banner')).toBeHidden()
 })
@@ -171,4 +185,15 @@ test('mostra notificação local quando a criação termina com a aba em segundo
   })
   const shown = await page.evaluate(() => (window as unknown as { __dz23Notifications: Array<{ title: string; body: string }> }).__dz23Notifications)
   expect(shown).toEqual([{ title: 'DZ23 STUDIO', body: 'Seu protótipo foi verificado.' }])
+  // The page polls: the same finished run can be seen more than once. One result, one notification —
+  // and another run reaching the same state is another result, which must be said.
+  await page.evaluate(() => {
+    for (let repeat = 0; repeat < 3; repeat++) window.dispatchEvent(new CustomEvent('dz23:generation-finished', { detail: { state: 'CANCELLED', runId: 'run-a' } }))
+    window.dispatchEvent(new CustomEvent('dz23:generation-finished', { detail: { state: 'CANCELLED', runId: 'run-b' } }))
+  })
+  const afterRuns = await page.evaluate(() => (window as unknown as { __dz23Notifications: Array<{ title: string; body: string }> }).__dz23Notifications)
+  expect(afterRuns.slice(1)).toEqual([
+    { title: 'DZ23 STUDIO', body: pwa.notifications.cancelled },
+    { title: 'DZ23 STUDIO', body: pwa.notifications.cancelled },
+  ])
 })

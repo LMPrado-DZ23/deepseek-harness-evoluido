@@ -1,5 +1,6 @@
 {
   "title": "Integrações e pacote do protótipo",
+  "navLabel": "Integrações",
   "subtitle": "Aqui você liga serviços ao seu aplicativo e baixa uma cópia do protótipo verificado. Nada sai deste computador sem a sua ação.",
   "back": "Voltar ao Studio",
   "loading": "Carregando…",

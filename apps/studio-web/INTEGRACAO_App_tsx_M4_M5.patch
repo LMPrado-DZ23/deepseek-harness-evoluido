@@ -1,0 +1,99 @@
+From: Claude (M4/M5) <noreply@anthropic.com>
+Subject: [PATCH] integracao M4/M5 em App.tsx: OFFLINE x SERVICE_UNREACHABLE, GENERATING so apos 202, aviso por run
+
+Base desta geracao (arvore deste worktree, branch claude/fix-m4): 0db72580a8f6044aff7bb2ef345b67b135306d58
+Comando de verificacao: git apply --check apps/studio-web/INTEGRACAO_App_tsx_M4_M5.patch
+
+O patch toca UM arquivo, apps/studio-web/src/App.tsx, que pertence ao Codex.
+Toda a logica vive em modulos do M4 (apps/studio-web/src/pwa/), com teste de
+unidade proprio; aqui ficam so as chamadas.
+
+---
+diff --git a/apps/studio-web/src/App.tsx b/apps/studio-web/src/App.tsx
+index dfa16f7..ed88a6b 100644
+--- a/apps/studio-web/src/App.tsx
++++ b/apps/studio-web/src/App.tsx
+@@ -1,8 +1,14 @@
+-import { Bell, CircleHelp, Eye, FolderKanban, Home, LineChart, Menu, Settings, Sparkles, UserRound } from 'lucide-react'
++import { Bell, CircleHelp, Eye, FolderKanban, Home, LineChart, Menu, Plug, Settings, Sparkles, UserRound } from 'lucide-react'
+ import { useEffect, useMemo, useState } from 'react'
+ import { api, type HealthState } from './api'
++import hub from './i18n/hub.pt-BR.json'
+ import t from './i18n/pt-BR.json'
++import { HUB_PATH } from './hub/presentation'
+ import { currentStepIndex, permanentTruthKind, privacyNotice, type ProjectUiState } from './presentation'
++import { apiFailureMessage, apiFailureText, type ApiCallKind } from './pwa/apiFailure'
++import { GENERATION_REJECTED_STATE, postGeneration, startGeneration } from './pwa/generation'
++import { dispatchGenerationFinished } from './pwa/notifications'
++import { NotificationOptIn } from './pwa/NotificationOptIn'
+ 
+ type Category = 'landing-page' | 'catalog' | 'form-database' | 'crud-panel'
+ type DesignPreset = 'modern' | 'professional' | 'colorful' | 'brand'
+@@ -40,9 +46,19 @@ export function App() {
+   const [result, setResult] = useState<PipelineResult | null>(null)
+   const [health, setHealth] = useState<HealthState>({ state: 'ATTENTION', route: null, builder: 'BLOCKED_EXTERNAL', disk: 'ATTENTION' })
+   const [error, setError] = useState('')
+-  useEffect(() => { void api<HealthState>('/health').then(value => { setHealth(value); setRoute(value.route) }).catch(() => undefined) }, [])
++  // A GET that fails says WHICH of the two things happened: the device has no network, or the
++  // Studio did not answer. Any other failure of this read stays quiet — health is not the person's problem.
++  useEffect(() => { void api<HealthState>('/health').then(value => { setHealth(value); setRoute(value.route) }).catch((cause: unknown) => {
++    const message = apiFailureMessage(cause, navigator.onLine, 'read')
++    if (message !== undefined) setError(message)
++  }) }, [])
+   const ready = useMemo(() => brief.trim().length >= 10, [brief])
+-  async function safely(action: () => Promise<void>) { setError(''); try { await action() } catch (cause) { setError(cause instanceof Error ? cause.message : t.health.attention) } }
++  // `call` decides the sentence: a blocked mutation is told it was NOT sent and that what was typed is
++  // still on the screen. Nothing is queued and nothing is retried in the background — there is no queue.
++  async function safely(action: () => Promise<void>, call: ApiCallKind = 'mutation') {
++    setError('')
++    try { await action() } catch (cause) { setError(apiFailureText(cause, navigator.onLine, call, t.health.attention)) }
++  }
+   async function create() {
+     if (!ready) { setError(t.idea.empty); return }
+     await safely(async () => {
+@@ -84,11 +100,20 @@ export function App() {
+   }
+   async function generate() {
+     if (projectId === null) return
++    setError('')
++    // The project only says it is being created after the server ACCEPTED the run with 202 and gave
++    // back a run to follow. Before this, the state moved first: offline, the screen said it was
++    // creating an application while no run existed anywhere. Every other answer leaves the project
++    // exactly where it was — PLAN_APPROVED — and says why.
++    const started = await startGeneration(
++      () => postGeneration(projectId, { fetch: (input, init) => fetch(input, init), cookie: () => document.cookie }),
++      () => navigator.onLine,
++      t.health.attention,
++    )
++    if (started.runId === null) { setProjectState(GENERATION_REJECTED_STATE); setError(started.message); return }
+     setProjectState('GENERATING')
+-    await safely(async () => {
+-      const response = await api<{ run_id: string }>(`/projects/${projectId}/generate`, { method: 'POST', body: '{}' })
+-      await pollProject(response.run_id)
+-    })
++    const runId = started.runId
++    await safely(() => pollProject(runId), 'read')
+   }
+   async function pollProject(runId: string) {
+     if (projectId === null) return
+@@ -103,6 +128,9 @@ export function App() {
+               : current.stage === 'test' ? 'TESTS_FAILED' : 'BUILD_FAILED'
+         setResult({ state, attempts: current.attempt, message: current.failure_code ?? (state === 'VERIFIED_PROTOTYPE' ? t.truth.verified : t.verification.failure), checks: current.acceptance_checks, ...(current.verification_codes === undefined ? {} : { verificationCodes: current.verification_codes }) })
+         if (state === 'BLOCKED_EXTERNAL') setProjectState('PLAN_APPROVED')
++        // The run travels with the event: the PWA notifies once per run and state, so a poll that
++        // lands twice on the same finished run does not buzz the person's phone twice.
++        dispatchGenerationFinished(window, { state, runId })
+         return
+       }
+       await new Promise(resolve => setTimeout(resolve, 250))
+@@ -117,8 +145,9 @@ export function App() {
+   return <div className="shell">
+     <aside className="sidebar"><img src="/studio/brand/dz23-studio-logo.jpg" alt={t.brand} className="brand" /><nav aria-label={t.brand}>
+       <Nav icon={<Home />} label={t.nav.home} active /><Nav icon={<FolderKanban />} label={t.nav.projects} /><Nav icon={<LineChart />} label={t.nav.progress} /><Nav icon={<Eye />} label={t.nav.result} />
++      <a className="nav" href={HUB_PATH}><Plug aria-hidden="true" /><span>{hub.navLabel}</span></a>
+     </nav><div className="sidebar-footer"><button aria-label={t.nav.help}><CircleHelp /></button><button aria-label={t.nav.settings}><Settings /></button></div></aside>
+-    <section className="workspace"><header className="topbar"><button className="mobile-menu" aria-label={t.mobile.menu}><Menu /></button><Status health={health} /><div className="top-actions"><Bell /><UserRound /></div></header>
++    <section className="workspace"><header className="topbar"><button className="mobile-menu" aria-label={t.mobile.menu}><Menu /></button><Status health={health} /><div className="top-actions"><NotificationOptIn /><Bell /><UserRound /></div></header>
+       <main className="canvas"><section className="idea-panel">
+         {projectState === null ? <Idea brief={brief} setBrief={setBrief} privacy={privacy} setPrivacy={setPrivacy} route={route ?? health.route} ready={ready} chooseSuggestion={chooseSuggestion} create={create}
+           designPreset={designPreset} setDesignPreset={setDesignPreset} brandColor={brandColor} setBrandColor={setBrandColor}
