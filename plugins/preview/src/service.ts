@@ -1,5 +1,14 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { roleAllows, type StudioRole } from '@dz23-studio/policy'
+import {
+  CapacityGovernorError,
+  MAX_LEASE_TTL_MS,
+  MIN_LEASE_TTL_MS,
+  MemoryCapacityGovernor,
+  type CapacityGovernor,
+  type CapacityLease,
+  type LeaseReference,
+} from '@dz23-studio/runtime-governor'
 import { z } from 'zod'
 import { previewAdmissionSchema, previewRecordSchema, type PreviewAdmission, type PreviewRecord } from './model.js'
 import { KeyedMutex } from './mutex.js'
@@ -8,6 +17,7 @@ import { t } from './i18n.js'
 const DEFAULT_TTL_SECONDS = 30 * 60
 const MAX_TTL_SECONDS = 2 * 60 * 60
 const TICKET_TTL_SECONDS = 2 * 60
+const CAPACITY_RELEASE_PENDING = 'CAPACITY_RELEASE_PENDING'
 const ACTIVE_STATES = new Set<PreviewRecord['state']>(['REQUESTED', 'STARTING', 'READY', 'STOPPING'])
 
 export interface PreviewActor {
@@ -89,6 +99,9 @@ export interface PreviewServiceOptions {
   readonly publicPort?: number
   readonly runtimeTimeoutMs?: number
   readonly onCleanupFailure?: (previewId: string) => void
+  readonly capacity?: CapacityGovernor
+  /** single-process is development-only; team and edge require an injected distributed governor. */
+  readonly capacityMode?: 'single-process' | 'team' | 'edge'
 }
 
 export interface PublicPreview {
@@ -108,7 +121,7 @@ export interface PublicPreview {
 }
 
 export class PreviewError extends Error {
-  constructor(readonly code: 'NOT_FOUND' | 'UNAUTHENTICATED' | 'FORBIDDEN' | 'INVALID' | 'CONFLICT' | 'UNAVAILABLE', message: string) { super(message) }
+  constructor(readonly code: 'NOT_FOUND' | 'UNAUTHENTICATED' | 'FORBIDDEN' | 'INVALID' | 'CONFLICT' | 'UNAVAILABLE' | 'CAPACITY_EXCEEDED', message: string) { super(message) }
 }
 
 export class StudioPreviewService {
@@ -118,6 +131,9 @@ export class StudioPreviewService {
   readonly #ttlSeconds: number
   readonly #publicPort: number
   readonly #runtimeTimeoutMs: number
+  readonly #capacity: CapacityGovernor
+  readonly #capacityLeases = new Map<string, LeaseReference>()
+  readonly #capacityReleasePending = new Set<string>()
   readonly #mutex = new KeyedMutex()
 
   constructor(private readonly options: PreviewServiceOptions) {
@@ -127,6 +143,14 @@ export class StudioPreviewService {
     this.#ttlSeconds = Math.min(MAX_TTL_SECONDS, Math.max(60, options.ttlSeconds ?? DEFAULT_TTL_SECONDS))
     this.#publicPort = validPort(options.publicPort ?? 80)
     this.#runtimeTimeoutMs = Math.min(30_000, Math.max(10, options.runtimeTimeoutMs ?? 10_000))
+    const capacityMode = options.capacityMode ?? 'single-process'
+    if (capacityMode !== 'single-process' && options.capacity === undefined) {
+      throw new Error(t('service.distributedCapacityRequired'))
+    }
+    if (capacityMode !== 'single-process' && options.capacity instanceof MemoryCapacityGovernor) {
+      throw new Error(t('service.memoryCapacitySingleProcessOnly'))
+    }
+    this.#capacity = options.capacity ?? new MemoryCapacityGovernor()
   }
 
   list(actor: PreviewActor, projectId: string): readonly PublicPreview[] {
@@ -144,6 +168,7 @@ export class StudioPreviewService {
   async start(actor: PreviewActor, projectId: string, runId?: string): Promise<{ readonly preview: PublicPreview; readonly admissionTicket: string }> {
     this.#authorize(actor, 'project.write')
     return this.#mutex.run(`${actor.orgId}:${actor.tenantId}:${projectId}`, async () => {
+      await this.#assertQuarantineCapacity()
       const artifact = await this.options.source.verifiedArtifact(actor, projectId, runId)
       if (!/^[a-f0-9]{64}$/u.test(artifact.artifactSha256)) throw new PreviewError('INVALID', t('service.invalidArtifactHash'))
       const existing = this.options.repository.previews().find(item => sameScope(item, actor)
@@ -154,6 +179,12 @@ export class StudioPreviewService {
         const reusable = await this.#mutex.run(`preview:${existing.preview_id}`, async () => {
           const current = this.options.repository.previews().find(item => item.preview_id === existing.preview_id)
           if (current === undefined || current.state !== 'READY' || current.runtime_ref === null || Date.parse(current.expires_at) <= this.#now().getTime()) return undefined
+          try {
+            await this.#ensureCapacity(current)
+          } catch (error) {
+            await this.#failClosedForCapacity(current, failureCode(error))
+            throw error
+          }
           const health = await this.#runtimeCall('RUNTIME_HEALTH_TIMEOUT', signal => this.options.runtime.health(current.runtime_ref!, signal)).catch(() => 'DOWN' as const)
           if (health === 'OK') {
             const refreshed = previewRecordSchema.parse({ ...current, health: 'OK' })
@@ -163,17 +194,19 @@ export class StudioPreviewService {
           let cleanupIncomplete = false
           try { await this.#runtimeCall('RUNTIME_STOP_TIMEOUT', signal => this.options.runtime.stop(current.runtime_ref!, signal)) }
           catch { cleanupIncomplete = true; this.options.onCleanupFailure?.(current.preview_id) }
-          const failed = previewRecordSchema.parse({
+          const failedBase = previewRecordSchema.parse({
             ...current,
-            state: cleanupIncomplete ? 'STOPPING' : 'FAILED', health: 'DOWN',
-            stopped_at: cleanupIncomplete ? null : this.#now().toISOString(), stop_reason: 'failed',
+            state: 'STOPPING', health: 'DOWN', stopped_at: null, stop_reason: 'failed',
             failure_code: cleanupIncomplete ? 'RUNTIME_CLEANUP_INCOMPLETE' : 'RUNTIME_DOWN',
           })
-          await this.options.repository.putPreview(failed)
-          await this.#revokeAdmissions(current.preview_id)
           if (cleanupIncomplete) {
+            await this.options.repository.putPreview(failedBase)
+            await this.#revokeAdmissions(current.preview_id)
+            await this.#retainCleanupCapacity(failedBase)
             throw new PreviewError('UNAVAILABLE', t('service.previousStopFailed'))
           }
+          const failed = await this.#settleRuntimeAbsent(failedBase, 'FAILED', 'RUNTIME_DOWN')
+          if (failed.state === 'STOPPING') throw new PreviewError('UNAVAILABLE', t('service.previousStopFailed'))
           return undefined
         })
         if (reusable !== undefined) {
@@ -197,12 +230,20 @@ export class StudioPreviewService {
         expires_at: new Date(now.getTime() + this.#ttlSeconds * 1000).toISOString(),
         stopped_at: null, stop_reason: null, failure_code: null, runtime_ref: null, health: 'PENDING',
       })
-      await this.options.repository.putPreview(initial)
+      await this.#acquireCapacity(initial)
+      try {
+        await this.options.repository.putPreview(initial)
+      } catch (error) {
+        if (!await this.#releaseCapacity(previewId)) {
+          throw new PreviewError('UNAVAILABLE', t('service.capacityUnavailable'))
+        }
+        throw error
+      }
       return this.#mutex.run(`preview:${previewId}`, async () => {
         let record = previewRecordSchema.parse({ ...initial, state: 'STARTING' })
-        await this.options.repository.putPreview(record)
         let startedRuntimeRef: string | undefined
         try {
+          await this.options.repository.putPreview(record)
           const started = await this.#runtimeCall('RUNTIME_START_TIMEOUT', signal => this.options.runtime.start({
             previewId, artifactPath: artifact.artifactPath, artifactSha256: artifact.artifactSha256,
             ownerEmail: artifact.ownerEmail,
@@ -213,7 +254,11 @@ export class StudioPreviewService {
           if (!/^[a-zA-Z0-9_.:-]{1,200}$/u.test(started.runtimeRef)) throw new PreviewError('UNAVAILABLE', t('service.invalidRuntimeRef'))
           const readiness = await this.#runtimeCall('RUNTIME_HEALTH_TIMEOUT', signal => this.options.runtime.health(started.runtimeRef, signal))
           if (readiness !== 'OK') throw new PreviewError('UNAVAILABLE', t('service.readinessFailed'))
+          if (Date.parse(record.expires_at) - this.#now().getTime() < MIN_LEASE_TTL_MS) {
+            throw new PreviewError('UNAVAILABLE', t('service.readinessFailed'))
+          }
           record = previewRecordSchema.parse({ ...record, state: 'READY', ready_at: this.#now().toISOString(), runtime_ref: started.runtimeRef, health: 'OK' })
+          await this.#ensureCapacity(record)
           await this.options.repository.putPreview(record)
           const ticket = await this.#issueAdmission(actor, record)
           return { preview: this.public(record), admissionTicket: ticket }
@@ -222,17 +267,42 @@ export class StudioPreviewService {
           if (startedRuntimeRef !== undefined) {
             try { await this.#runtimeCall('RUNTIME_STOP_TIMEOUT', signal => this.options.runtime.stop(startedRuntimeRef!, signal)) }
             catch { cleanupIncomplete = true; this.options.onCleanupFailure?.(previewId) }
+          } else {
+            const managed = await this.#runtimeInventory()
+            const ambiguousRuntime = managed?.find(item => item.previewId === previewId)
+            // A failed/aborted start can materialize after the first inventory
+            // response. Keep the admission lease quarantined until a later
+            // reconciliation cycle proves the runtime is absent.
+            cleanupIncomplete = true
+            this.options.onCleanupFailure?.(previewId)
+            if (ambiguousRuntime !== undefined) {
+              startedRuntimeRef = ambiguousRuntime.runtimeRef
+              try {
+                await this.#runtimeCall('RUNTIME_STOP_TIMEOUT', signal => this.options.runtime.stop(ambiguousRuntime.runtimeRef, signal))
+                const afterStop = await this.#runtimeInventory()
+                cleanupIncomplete = afterStop === undefined || afterStop.some(item => item.previewId === previewId)
+                if (cleanupIncomplete) this.options.onCleanupFailure?.(previewId)
+              } catch {
+                cleanupIncomplete = true
+                this.options.onCleanupFailure?.(previewId)
+              }
+            }
           }
-          record = previewRecordSchema.parse({
+          const failedBase = previewRecordSchema.parse({
             ...record,
-            state: cleanupIncomplete ? 'STOPPING' : 'FAILED',
-            stopped_at: cleanupIncomplete ? null : this.#now().toISOString(),
+            state: 'STOPPING', stopped_at: null,
             stop_reason: 'failed',
-            failure_code: cleanupIncomplete ? 'RUNTIME_CLEANUP_INCOMPLETE' : failureCode(error),
-            runtime_ref: cleanupIncomplete ? startedRuntimeRef ?? null : record.runtime_ref,
+            failure_code: failureCode(error),
+            runtime_ref: startedRuntimeRef ?? record.runtime_ref,
             health: 'DOWN',
           })
-          await this.options.repository.putPreview(record)
+          if (cleanupIncomplete) {
+            await this.options.repository.putPreview(failedBase)
+            await this.#revokeAdmissions(previewId)
+            await this.#retainCleanupCapacity(failedBase)
+          } else {
+            await this.#settleRuntimeAbsent(failedBase, 'FAILED', failureCode(error))
+          }
           throw error
         }
       })
@@ -252,16 +322,19 @@ export class StudioPreviewService {
           try { await this.#runtimeCall('RUNTIME_STOP_TIMEOUT', signal => this.options.runtime.stop(record.runtime_ref!, signal)) }
           catch { cleanupIncomplete = true; this.options.onCleanupFailure?.(previewId) }
         }
-        record = previewRecordSchema.parse({
+        const stoppedBase = previewRecordSchema.parse({
           ...record,
-          state: cleanupIncomplete ? 'STOPPING' : 'STOPPED',
-          stopped_at: cleanupIncomplete ? null : this.#now().toISOString(),
+          state: 'STOPPING', stopped_at: null,
           stop_reason: 'user', health: 'DOWN',
           failure_code: cleanupIncomplete ? 'RUNTIME_CLEANUP_INCOMPLETE' : record.failure_code,
         })
-        await this.options.repository.putPreview(record)
-        await this.#revokeAdmissions(record.preview_id)
-        return this.public(record)
+        if (cleanupIncomplete) {
+          await this.options.repository.putPreview(stoppedBase)
+          await this.#revokeAdmissions(stoppedBase.preview_id)
+          await this.#retainCleanupCapacity(stoppedBase)
+          return this.public(stoppedBase)
+        }
+        return this.public(await this.#settleRuntimeAbsent(stoppedBase, 'STOPPED', record.failure_code))
       })
     })
   }
@@ -280,6 +353,12 @@ export class StudioPreviewService {
         const absoluteExpiry = Date.parse(record.created_at) + MAX_TTL_SECONDS * 1000
         const renewedExpiry = Math.min(absoluteExpiry, Math.max(Date.parse(record.expires_at), now.getTime() + this.#ttlSeconds * 1000))
         const updated = previewRecordSchema.parse({ ...record, health: 'OK', expires_at: new Date(renewedExpiry).toISOString() })
+        try {
+          await this.#ensureCapacity(updated)
+        } catch (error) {
+          await this.#failClosedForCapacity(record, failureCode(error))
+          throw error
+        }
         await this.options.repository.putPreview(updated)
         await this.#mutex.run(`admissions:${previewId}`, async () => {
           await Promise.all(this.options.repository.admissions()
@@ -343,9 +422,46 @@ export class StudioPreviewService {
   }
 
   async reap(): Promise<number> {
+    await this.#maintainActiveCapacity()
+    const managed = await this.#runtimeCall('RUNTIME_LIST_TIMEOUT', signal => this.options.runtime.listManaged(signal))
+    await this.#capacity.reconcile()
+    await this.#retryDetachedCapacityReleases(managed)
     const now = this.#now().getTime()
-    const expired = this.options.repository.previews().filter(item => ACTIVE_STATES.has(item.state) && Date.parse(item.expires_at) <= now)
     let reaped = 0
+
+    const stopping = this.options.repository.previews().filter(item => item.state === 'STOPPING')
+    for (const candidate of stopping) {
+      await this.#mutex.run(scopeProjectKey(candidate), async () => {
+        await this.#mutex.run(`preview:${candidate.preview_id}`, async () => {
+          let current = this.options.repository.previews().find(item => item.preview_id === candidate.preview_id)
+          if (current === undefined || current.state !== 'STOPPING') return
+          // Runtime references may change while a supervisor reconciles or
+          // replaces a container. The preview id is the stable ownership key:
+          // any managed runtime for this preview keeps the capacity lease in
+          // quarantine until its absence is observed.
+          const live = managed.find(item => item.previewId === current!.preview_id)
+          if (live !== undefined) {
+            if (current.runtime_ref === null) {
+              current = previewRecordSchema.parse({ ...current, runtime_ref: live.runtimeRef })
+              await this.options.repository.putPreview(current)
+            }
+            try {
+              await this.#runtimeCall('RUNTIME_STOP_TIMEOUT', signal => this.options.runtime.stop(live.runtimeRef, signal))
+            } catch {
+              await this.#retainCleanupCapacity(current)
+              this.options.onCleanupFailure?.(current.preview_id)
+              return
+            }
+          }
+          const terminalState = terminalStateFor(current)
+          const settled = await this.#settleRuntimeAbsent(current, terminalState, current.failure_code)
+          if (settled.state === 'EXPIRED') reaped++
+        })
+      })
+    }
+
+    const expired = this.options.repository.previews().filter(item => item.state !== 'STOPPING'
+      && ACTIVE_STATES.has(item.state) && Date.parse(item.expires_at) <= now)
     for (const candidate of expired) {
       await this.#mutex.run(scopeProjectKey(candidate), async () => {
         await this.#mutex.run(`preview:${candidate.preview_id}`, async () => {
@@ -356,15 +472,20 @@ export class StudioPreviewService {
             try { await this.#runtimeCall('RUNTIME_STOP_TIMEOUT', signal => this.options.runtime.stop(current.runtime_ref!, signal)) }
             catch { cleanupIncomplete = true; this.options.onCleanupFailure?.(current.preview_id) }
           }
-          await this.options.repository.putPreview(previewRecordSchema.parse({
+          const expiredBase = previewRecordSchema.parse({
             ...current,
-            state: cleanupIncomplete ? 'STOPPING' : 'EXPIRED',
-            stopped_at: cleanupIncomplete ? null : this.#now().toISOString(),
+            state: 'STOPPING', stopped_at: null,
             stop_reason: 'expired', health: 'DOWN',
             failure_code: cleanupIncomplete ? 'RUNTIME_CLEANUP_INCOMPLETE' : current.failure_code,
-          }))
-          await this.#revokeAdmissions(current.preview_id)
-          if (!cleanupIncomplete) reaped++
+          })
+          if (cleanupIncomplete) {
+            await this.options.repository.putPreview(expiredBase)
+            await this.#revokeAdmissions(current.preview_id)
+            await this.#retainCleanupCapacity(expiredBase)
+            return
+          }
+          const settled = await this.#settleRuntimeAbsent(expiredBase, 'EXPIRED', current.failure_code)
+          if (settled.state === 'EXPIRED') reaped++
         })
       })
     }
@@ -373,6 +494,7 @@ export class StudioPreviewService {
 
   async reconcile(): Promise<{ readonly stoppedOrphans: number; readonly failedRecords: number }> {
     const managed = await this.#runtimeCall('RUNTIME_LIST_TIMEOUT', signal => this.options.runtime.listManaged(signal))
+    await this.#capacity.reconcile()
     const records = this.options.repository.previews()
     let stoppedOrphans = 0
     for (const runtime of managed) {
@@ -380,6 +502,16 @@ export class StudioPreviewService {
       if (record === undefined || ['STOPPED', 'FAILED', 'EXPIRED'].includes(record.state)) {
         try {
           await this.#runtimeCall('RUNTIME_STOP_TIMEOUT', signal => this.options.runtime.stop(runtime.runtimeRef, signal))
+          if (!await this.#runtimeAbsent(runtime.previewId)) {
+            throw new PreviewError('UNAVAILABLE', t('service.previousStopFailed'))
+          }
+          const released = await this.#releaseCapacity(runtime.previewId)
+          if (!released && record !== undefined) {
+            await this.options.repository.putPreview(previewRecordSchema.parse({
+              ...record, state: 'STOPPING', stopped_at: null,
+              failure_code: pendingReleaseCode(record.failure_code), health: 'DOWN',
+            }))
+          }
           stoppedOrphans++
         } catch {
           this.options.onCleanupFailure?.(runtime.previewId)
@@ -387,6 +519,7 @@ export class StudioPreviewService {
         }
       }
     }
+    await this.#retryDetachedCapacityReleases(managed)
     let failedRecords = 0
     for (const snapshot of records.filter(item => !['STOPPED', 'FAILED', 'EXPIRED'].includes(item.state))) {
       await this.#mutex.run(scopeProjectKey(snapshot), async () => {
@@ -400,14 +533,19 @@ export class StudioPreviewService {
               try { await this.#runtimeCall('RUNTIME_STOP_TIMEOUT', signal => this.options.runtime.stop(runtime.runtimeRef, signal)) }
               catch { cleanupIncomplete = true; this.options.onCleanupFailure?.(record.preview_id) }
             }
-            await this.options.repository.putPreview(previewRecordSchema.parse({
+            const expiredBase = previewRecordSchema.parse({
               ...record,
-              state: cleanupIncomplete ? 'STOPPING' : 'EXPIRED', health: 'DOWN',
-              stopped_at: cleanupIncomplete ? null : this.#now().toISOString(),
+              state: 'STOPPING', health: 'DOWN', stopped_at: null,
               stop_reason: 'expired',
               failure_code: cleanupIncomplete ? 'RUNTIME_CLEANUP_INCOMPLETE' : record.failure_code,
-            }))
-            await this.#revokeAdmissions(record.preview_id)
+            })
+            if (cleanupIncomplete) {
+              await this.options.repository.putPreview(expiredBase)
+              await this.#revokeAdmissions(record.preview_id)
+              await this.#retainCleanupCapacity(expiredBase)
+            } else {
+              await this.#settleRuntimeAbsent(expiredBase, 'EXPIRED', record.failure_code)
+            }
             return
           }
           if (record.state === 'STOPPING') {
@@ -416,19 +554,33 @@ export class StudioPreviewService {
               try { await this.#runtimeCall('RUNTIME_STOP_TIMEOUT', signal => this.options.runtime.stop(runtime.runtimeRef, signal)) }
               catch { cleanupIncomplete = true; this.options.onCleanupFailure?.(record.preview_id) }
             }
-            await this.options.repository.putPreview(previewRecordSchema.parse({
+            const stoppedBase = previewRecordSchema.parse({
               ...record,
-              state: cleanupIncomplete ? 'STOPPING' : 'STOPPED', health: 'DOWN',
-              stopped_at: cleanupIncomplete ? null : this.#now().toISOString(),
+              state: 'STOPPING', health: 'DOWN', stopped_at: null,
               stop_reason: record.stop_reason ?? 'reconciled',
               failure_code: cleanupIncomplete ? 'RUNTIME_CLEANUP_INCOMPLETE' : record.failure_code,
-            }))
-            await this.#revokeAdmissions(record.preview_id)
+            })
+            if (cleanupIncomplete) {
+              await this.options.repository.putPreview(stoppedBase)
+              await this.#revokeAdmissions(record.preview_id)
+              await this.#retainCleanupCapacity(stoppedBase)
+            } else {
+              await this.#settleRuntimeAbsent(stoppedBase, terminalStateFor(stoppedBase), stoppedBase.failure_code)
+            }
+            return
+          }
+          if (record.state === 'READY' && runtime !== undefined) {
+            try {
+              await this.#ensureCapacity(record)
+            } catch (error) {
+              await this.#failClosedForCapacity(record, failureCode(error))
+              failedRecords++
+            }
             return
           }
           if (record.state !== 'READY' || runtime === undefined) {
-            await this.options.repository.putPreview(previewRecordSchema.parse({ ...record, state: 'FAILED', health: 'DOWN', stopped_at: this.#now().toISOString(), stop_reason: 'reconciled', failure_code: record.state === 'READY' ? 'RUNTIME_MISSING' : 'RESTART_DURING_START' }))
-            await this.#revokeAdmissions(record.preview_id)
+            const failedBase = previewRecordSchema.parse({ ...record, state: 'STOPPING', health: 'DOWN', stopped_at: null, stop_reason: 'reconciled', failure_code: record.state === 'READY' ? 'RUNTIME_MISSING' : 'RESTART_DURING_START' })
+            await this.#settleRuntimeAbsent(failedBase, 'FAILED', failedBase.failure_code)
             failedRecords++
           }
         })
@@ -535,19 +687,269 @@ export class StudioPreviewService {
         try { await this.#runtimeCall('RUNTIME_STOP_TIMEOUT', signal => this.options.runtime.stop(runtimeRef, signal)) }
         catch { cleanupIncomplete = true; this.options.onCleanupFailure?.(current.preview_id) }
       }
-      current = previewRecordSchema.parse({
+      const stoppedBase = previewRecordSchema.parse({
         ...current,
-        state: cleanupIncomplete ? 'STOPPING' : 'STOPPED',
-        stopped_at: cleanupIncomplete ? null : this.#now().toISOString(),
+        state: 'STOPPING', stopped_at: null,
         stop_reason: 'replaced', health: 'DOWN',
         failure_code: cleanupIncomplete ? 'RUNTIME_CLEANUP_INCOMPLETE' : current.failure_code,
       })
-      await this.options.repository.putPreview(current)
-      await this.#revokeAdmissions(current.preview_id)
       if (cleanupIncomplete) {
+        await this.options.repository.putPreview(stoppedBase)
+        await this.#revokeAdmissions(stoppedBase.preview_id)
+        await this.#retainCleanupCapacity(stoppedBase)
         throw new PreviewError('UNAVAILABLE', t('service.previousStopFailed'))
       }
+      const settled = await this.#settleRuntimeAbsent(stoppedBase, 'STOPPED', current.failure_code)
+      if (settled.state === 'STOPPING') throw new PreviewError('UNAVAILABLE', t('service.previousStopFailed'))
     })
+  }
+
+  async #maintainActiveCapacity(): Promise<void> {
+    const candidates = this.options.repository.previews()
+      .filter(record => (record.state === 'READY' && record.runtime_ref !== null && Date.parse(record.expires_at) > this.#now().getTime())
+        || record.state === 'STOPPING')
+      .sort((left, right) => left.created_at.localeCompare(right.created_at) || left.preview_id.localeCompare(right.preview_id))
+    for (const candidate of candidates) {
+      await this.#mutex.run(scopeProjectKey(candidate), async () => {
+        await this.#mutex.run(`preview:${candidate.preview_id}`, async () => {
+          const current = this.options.repository.previews().find(record => record.preview_id === candidate.preview_id)
+          if (current === undefined || (current.state !== 'READY' && current.state !== 'STOPPING')) return
+          if (current.state === 'READY' && current.runtime_ref === null) return
+          try {
+            await this.#ensureCapacity(current, current.state === 'STOPPING')
+          } catch (error) {
+            await this.#failClosedForCapacity(current, failureCode(error))
+          }
+        })
+      })
+    }
+  }
+
+  async #ensureCapacity(record: PreviewRecord, quarantine = false): Promise<void> {
+    const ttlMs = this.#capacityTtlMs(record, quarantine)
+    const reference = this.#capacityLeases.get(record.preview_id)
+    if (reference !== undefined) {
+      try {
+        const renewed = await this.#capacity.heartbeat(reference, ttlMs)
+        this.#capacityLeases.set(record.preview_id, renewed)
+        return
+      } catch (error) {
+        if (!(error instanceof CapacityGovernorError) || (error.code !== 'LEASE_NOT_FOUND' && error.code !== 'STALE_FENCING_TOKEN')) {
+          throw capacityError(error)
+        }
+        this.#capacityLeases.delete(record.preview_id)
+      }
+    }
+    if (await this.#claimExistingCapacity(record, ttlMs)) return
+    await this.#acquireCapacity(record, ttlMs)
+  }
+
+  async #acquireCapacity(record: PreviewRecord, ttlMs = this.#capacityTtlMs(record)): Promise<void> {
+    try {
+      const lease = await this.#capacity.acquireBundle({
+        ownerId: capacityOwnerId(record.preview_id),
+        scope: { orgId: record.org_id, tenantId: record.tenant_id, projectId: record.project_id },
+        requests: [{ resource: 'preview' }],
+        ttlMs,
+      })
+      this.#capacityLeases.set(record.preview_id, lease)
+    } catch (error) {
+      if (error instanceof CapacityGovernorError && error.code === 'CAPACITY_EXCEEDED') {
+        try {
+          if (await this.#claimExistingCapacity(record, ttlMs)) return
+        } catch (claimError) {
+          throw capacityError(claimError)
+        }
+      }
+      throw capacityError(error)
+    }
+  }
+
+  async #claimExistingCapacity(record: PreviewRecord, ttlMs: number): Promise<boolean> {
+    let leases: readonly CapacityLease[]
+    try {
+      leases = (await this.#capacity.snapshot()).leases.filter(lease => lease.ownerId === capacityOwnerId(record.preview_id))
+    } catch (error) {
+      throw capacityError(error)
+    }
+    if (leases.length === 0) return false
+    assertCompatibleOwnerLeases(record, leases)
+    const canonical = [...leases].sort((left, right) => left.fencingToken - right.fencingToken)[0]!
+    try {
+      const renewed = await this.#capacity.heartbeat(canonical, ttlMs)
+      for (const duplicate of leases) {
+        if (duplicate.leaseId === canonical.leaseId && duplicate.fencingToken === canonical.fencingToken) continue
+        try {
+          await this.#capacity.release(duplicate)
+        } catch (error) {
+          if (!(error instanceof CapacityGovernorError) || error.code !== 'LEASE_NOT_FOUND') throw error
+        }
+      }
+      this.#capacityLeases.set(record.preview_id, renewed)
+      this.#capacityReleasePending.delete(record.preview_id)
+      return true
+    } catch (error) {
+      if (error instanceof CapacityGovernorError && (error.code === 'LEASE_NOT_FOUND' || error.code === 'STALE_FENCING_TOKEN')) {
+        return false
+      }
+      throw capacityError(error)
+    }
+  }
+
+  async #releaseCapacity(previewId: string): Promise<boolean> {
+    let leases: readonly CapacityLease[]
+    try {
+      leases = (await this.#capacity.snapshot()).leases.filter(lease => lease.ownerId === capacityOwnerId(previewId))
+      for (const lease of leases) {
+        try {
+          await this.#capacity.release(lease)
+        } catch (error) {
+          if (!(error instanceof CapacityGovernorError) || error.code !== 'LEASE_NOT_FOUND') throw error
+        }
+      }
+      this.#capacityLeases.delete(previewId)
+      this.#capacityReleasePending.delete(previewId)
+      return true
+    } catch (error) {
+      this.#capacityReleasePending.add(previewId)
+      this.options.onCleanupFailure?.(previewId)
+      return false
+    }
+  }
+
+  async #settleRuntimeAbsent(
+    record: PreviewRecord,
+    terminalState: 'STOPPED' | 'FAILED' | 'EXPIRED',
+    failureCode: string | null,
+  ): Promise<PreviewRecord> {
+    if (!await this.#runtimeAbsent(record.preview_id)) {
+      const quarantined = previewRecordSchema.parse({
+        ...record,
+        state: 'STOPPING',
+        stopped_at: null,
+        health: 'DOWN',
+        failure_code: failureCode ?? record.failure_code ?? 'RUNTIME_CLEANUP_INCOMPLETE',
+      })
+      await this.options.repository.putPreview(quarantined)
+      await this.#revokeAdmissions(record.preview_id)
+      await this.#retainCleanupCapacity(quarantined)
+      this.options.onCleanupFailure?.(record.preview_id)
+      return quarantined
+    }
+    const released = await this.#releaseCapacity(record.preview_id)
+    const settled = previewRecordSchema.parse({
+      ...record,
+      state: released ? terminalState : 'STOPPING',
+      stopped_at: released ? this.#now().toISOString() : null,
+      health: 'DOWN',
+      failure_code: released ? originalFailureCode(failureCode) : pendingReleaseCode(failureCode),
+    })
+    await this.options.repository.putPreview(settled)
+    await this.#revokeAdmissions(record.preview_id)
+    return settled
+  }
+
+  async #retainCleanupCapacity(record: PreviewRecord): Promise<void> {
+    try {
+      await this.#ensureCapacity(record, true)
+    } catch {
+      this.options.onCleanupFailure?.(record.preview_id)
+    }
+  }
+
+  async #assertQuarantineCapacity(): Promise<void> {
+    const quarantines = this.options.repository.previews().filter(record => record.state === 'STOPPING')
+    for (const quarantine of quarantines) {
+      try {
+        await this.#ensureCapacity(quarantine, true)
+      } catch (error) {
+        throw capacityError(error)
+      }
+    }
+  }
+
+  async #retryDetachedCapacityReleases(
+    managed: readonly { readonly runtimeRef: string; readonly previewId: string }[],
+  ): Promise<void> {
+    let leases: readonly CapacityLease[]
+    try {
+      leases = (await this.#capacity.snapshot()).leases
+    } catch (error) {
+      throw capacityError(error)
+    }
+    const previewIds = new Set(this.#capacityReleasePending)
+    for (const lease of leases) {
+      const previewId = capacityPreviewId(lease.ownerId)
+      if (previewId !== undefined) previewIds.add(previewId)
+    }
+    for (const previewId of previewIds) {
+      if (managed.some(runtime => runtime.previewId === previewId)) continue
+      const record = this.options.repository.previews().find(candidate => candidate.preview_id === previewId)
+      if (record !== undefined && !['STOPPED', 'FAILED', 'EXPIRED'].includes(record.state)) continue
+      const released = await this.#releaseCapacity(previewId)
+      if (!released && record !== undefined) {
+        await this.options.repository.putPreview(previewRecordSchema.parse({
+          ...record,
+          state: 'STOPPING', stopped_at: null, health: 'DOWN',
+          stop_reason: record.stop_reason ?? 'reconciled',
+          failure_code: pendingReleaseCode(record.failure_code),
+        }))
+      }
+    }
+  }
+
+  async #runtimeInventory(): Promise<readonly { readonly runtimeRef: string; readonly previewId: string }[] | undefined> {
+    try {
+      return await this.#runtimeCall('RUNTIME_LIST_TIMEOUT', signal => this.options.runtime.listManaged(signal))
+    } catch {
+      return undefined
+    }
+  }
+
+  async #runtimeAbsent(previewId: string): Promise<boolean> {
+    const managed = await this.#runtimeInventory()
+    if (managed === undefined) return false
+    return !managed.some(runtime => runtime.previewId === previewId)
+  }
+
+  #capacityTtlMs(record: PreviewRecord, quarantine = false): number {
+    if (quarantine) return MAX_LEASE_TTL_MS
+    const remaining = Date.parse(record.expires_at) - this.#now().getTime()
+    return Math.min(MAX_LEASE_TTL_MS, Math.max(MIN_LEASE_TTL_MS, remaining))
+  }
+
+  async #failClosedForCapacity(record: PreviewRecord, code: string): Promise<void> {
+    let cleanupIncomplete = false
+    if (record.state === 'STOPPING' && record.runtime_ref === null) {
+      await this.options.repository.putPreview(previewRecordSchema.parse({
+        ...record, stopped_at: null, health: 'DOWN', failure_code: 'RUNTIME_CLEANUP_INCOMPLETE',
+      }))
+      await this.#revokeAdmissions(record.preview_id)
+      this.options.onCleanupFailure?.(record.preview_id)
+      return
+    }
+    if (record.runtime_ref !== null) {
+      try {
+        await this.#runtimeCall('RUNTIME_STOP_TIMEOUT', signal => this.options.runtime.stop(record.runtime_ref!, signal))
+      } catch {
+        cleanupIncomplete = true
+        this.options.onCleanupFailure?.(record.preview_id)
+      }
+    }
+    const failedBase = previewRecordSchema.parse({
+      ...record,
+      state: 'STOPPING', stopped_at: null,
+      stop_reason: 'failed',
+      failure_code: code,
+      health: 'DOWN',
+    })
+    if (cleanupIncomplete) {
+      await this.options.repository.putPreview(failedBase)
+      await this.#revokeAdmissions(record.preview_id)
+      await this.#retainCleanupCapacity(failedBase)
+      return
+    }
+    await this.#settleRuntimeAbsent(failedBase, 'FAILED', code)
   }
 
   async #revokeAdmissions(previewId: string): Promise<void> {
@@ -597,4 +999,48 @@ function hashSecret(value: string): string {
 function failureCode(error: unknown): string {
   if (error instanceof PreviewError) return error.code
   return 'RUNTIME_START_FAILED'
+}
+
+function capacityError(error: unknown): PreviewError {
+  if (error instanceof CapacityGovernorError && error.code === 'CAPACITY_EXCEEDED') {
+    return new PreviewError('CAPACITY_EXCEEDED', t('service.capacityExceeded'))
+  }
+  return new PreviewError('UNAVAILABLE', t('service.capacityUnavailable'))
+}
+
+function capacityOwnerId(previewId: string): string {
+  return `preview:${previewId}`
+}
+
+function capacityPreviewId(ownerId: string): string | undefined {
+  return ownerId.startsWith('preview:') && ownerId.length > 'preview:'.length
+    ? ownerId.slice('preview:'.length)
+    : undefined
+}
+
+function assertCompatibleOwnerLeases(record: PreviewRecord, leases: readonly CapacityLease[]): void {
+  const compatible = leases.every(lease => lease.scope.orgId === record.org_id
+    && lease.scope.tenantId === record.tenant_id
+    && lease.scope.projectId === record.project_id
+    && lease.allocations.preview === 1
+    && lease.allocations['prompt-job'] === 0
+    && lease.allocations.build === 0)
+  if (!compatible) throw new PreviewError('UNAVAILABLE', t('service.capacityUnavailable'))
+}
+
+function pendingReleaseCode(failureCode: string | null): string {
+  if (failureCode?.startsWith(`${CAPACITY_RELEASE_PENDING}:`) === true || failureCode === CAPACITY_RELEASE_PENDING) return failureCode
+  return failureCode === null ? CAPACITY_RELEASE_PENDING : `${CAPACITY_RELEASE_PENDING}:${failureCode}`
+}
+
+function originalFailureCode(failureCode: string | null): string | null {
+  if (failureCode === CAPACITY_RELEASE_PENDING) return null
+  const prefix = `${CAPACITY_RELEASE_PENDING}:`
+  return failureCode?.startsWith(prefix) === true ? failureCode.slice(prefix.length) : failureCode
+}
+
+function terminalStateFor(record: Pick<PreviewRecord, 'stop_reason'>): 'STOPPED' | 'FAILED' | 'EXPIRED' {
+  if (record.stop_reason === 'expired') return 'EXPIRED'
+  if (record.stop_reason === 'failed') return 'FAILED'
+  return 'STOPPED'
 }

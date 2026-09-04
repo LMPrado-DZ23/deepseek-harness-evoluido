@@ -96,6 +96,7 @@ function statusOf(error: unknown): number {
   if (error instanceof PreviewError) {
     if (error.code === 'NOT_FOUND') return 404
     if (error.code === 'FORBIDDEN') return 403
+    if (error.code === 'CAPACITY_EXCEEDED') return 429
     if (error.code === 'CONFLICT') return 409
     if (error.code === 'UNAVAILABLE') return 503
     return 400

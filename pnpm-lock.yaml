@@ -211,6 +211,9 @@ importers:
       '@dz23-studio/prompt-to-app':
         specifier: workspace:*
         version: link:../prompt-to-app
+      '@dz23-studio/runtime-governor':
+        specifier: workspace:*
+        version: link:../runtime-governor
       '@dz23-studio/tenancy':
         specifier: workspace:*
         version: link:../tenancy

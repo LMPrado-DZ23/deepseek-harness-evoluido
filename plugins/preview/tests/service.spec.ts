@@ -1,4 +1,10 @@
 import { createHash } from 'node:crypto'
+import {
+  DEFAULT_CAPACITY_LIMITS,
+  MemoryCapacityGovernor,
+  type CapacityGovernor,
+  type CapacityLimits,
+} from '@dz23-studio/runtime-governor'
 import { describe, expect, it, vi } from 'vitest'
 import type { PreviewAdmission, PreviewRecord } from '../src/model.ts'
 import {
@@ -96,6 +102,9 @@ function createHarness(options: {
   sessions?: Partial<PreviewSessionPort>
   runtimeTimeoutMs?: number
   onCleanupFailure?: (previewId: string) => void
+  capacity?: CapacityGovernor
+  capacityMode?: 'single-process' | 'team' | 'edge'
+  createId?: () => string
 } = {}) {
   const repository = options.repository ?? new MemoryRepository()
   let currentTime = options.now ?? new Date('2026-09-03T12:00:00.000Z')
@@ -108,14 +117,27 @@ function createHarness(options: {
     verifiedArtifact: vi.fn(() => Promise.resolve(sourceArtifact)),
     ...options.source,
   }
+  const managed = new Map<string, string>()
   const runtime: PreviewRuntimePort = {
-    start: vi.fn(() => Promise.resolve({ runtimeRef: 'container:preview-1' })),
-    stop: vi.fn(() => Promise.resolve()),
-    health: vi.fn(() => Promise.resolve('OK' as const)),
-    logs: vi.fn(() => Promise.resolve([])),
-    verificationMessages: vi.fn(() => Promise.resolve([])),
-    listManaged: vi.fn(() => Promise.resolve([])),
-    ...options.runtime,
+    start: vi.fn(async (input, signal) => {
+      const started = options.runtime?.start === undefined
+        ? { runtimeRef: 'container:preview-1' }
+        : await options.runtime.start(input, signal)
+      managed.set(input.previewId, started.runtimeRef)
+      return started
+    }),
+    stop: vi.fn(async (runtimeRef, signal) => {
+      if (options.runtime?.stop !== undefined) await options.runtime.stop(runtimeRef, signal)
+      for (const [previewId, candidate] of managed) {
+        if (candidate === runtimeRef) managed.delete(previewId)
+      }
+    }),
+    health: options.runtime?.health ?? vi.fn(() => Promise.resolve('OK' as const)),
+    logs: options.runtime?.logs ?? vi.fn(() => Promise.resolve([])),
+    verificationMessages: options.runtime?.verificationMessages ?? vi.fn(() => Promise.resolve([])),
+    listManaged: options.runtime?.listManaged ?? vi.fn(() => Promise.resolve(
+      [...managed].map(([previewId, runtimeRef]) => ({ runtimeRef, previewId })),
+    )),
   }
   const sessions: PreviewSessionPort = {
     isActive: vi.fn(() => true),
@@ -125,11 +147,13 @@ function createHarness(options: {
   const service = new StudioPreviewService({
     repository, source, runtime, sessions,
     now: () => currentTime,
-    createId: () => `id-${++id}`,
+    createId: options.createId ?? (() => `id-${++id}`),
     createSecret: () => `secret-${++secret}`,
     ...(options.ttlSeconds === undefined ? {} : { ttlSeconds: options.ttlSeconds }),
     ...(options.runtimeTimeoutMs === undefined ? {} : { runtimeTimeoutMs: options.runtimeTimeoutMs }),
     ...(options.onCleanupFailure === undefined ? {} : { onCleanupFailure: options.onCleanupFailure }),
+    ...(options.capacity === undefined ? {} : { capacity: options.capacity }),
+    ...(options.capacityMode === undefined ? {} : { capacityMode: options.capacityMode }),
   })
   return {
     repository, source, runtime, sessions, service, sourceArtifact,
@@ -293,7 +317,7 @@ describe('StudioPreviewService lifecycle and isolation', () => {
 
     expect(h.repository.previews()[0]).toMatchObject({
       state: 'STOPPING', stopped_at: null, stop_reason: 'failed', health: 'DOWN',
-      runtime_ref: 'container:preview-1', failure_code: 'RUNTIME_CLEANUP_INCOMPLETE',
+      runtime_ref: 'container:preview-1', failure_code: 'UNAVAILABLE',
     })
     expect(h.repository.previewWrites.some(record => record.state === 'READY')).toBe(false)
     expect(onCleanupFailure).toHaveBeenCalledWith('id-1')
@@ -341,9 +365,11 @@ describe('StudioPreviewService lifecycle and isolation', () => {
 
     await expect(ready(h)).rejects.toThrow('docker secret detail')
     expect(h.repository.previews()[0]).toMatchObject({
-      state: 'FAILED', health: 'DOWN', stop_reason: 'failed', failure_code: 'RUNTIME_START_FAILED',
+      state: 'STOPPING', health: 'DOWN', stop_reason: 'failed', failure_code: 'RUNTIME_START_FAILED',
     })
     expect(h.repository.admissions()).toEqual([])
+    await expect(h.service.reap()).resolves.toBe(0)
+    expect(h.repository.previews()[0]).toMatchObject({ state: 'FAILED', failure_code: 'RUNTIME_START_FAILED' })
   })
 
   it('stops once, revokes admission and remains idempotent', async () => {
@@ -507,9 +533,9 @@ describe('StudioPreviewService maintenance and diagnostics', () => {
   it('stops orphan runtimes and fails READY records whose runtime disappeared', async () => {
     const h = createHarness()
     const { preview } = await ready(h)
-    vi.mocked(h.runtime.listManaged).mockResolvedValue([
+    vi.mocked(h.runtime.listManaged).mockResolvedValueOnce([
       { runtimeRef: 'container:orphan', previewId: 'not-recorded' },
-    ])
+    ]).mockResolvedValue([])
 
     await expect(h.service.reconcile()).resolves.toEqual({ stoppedOrphans: 1, failedRecords: 1 })
     expect(h.runtime.stop).toHaveBeenCalledWith('container:orphan', expect.any(AbortSignal))
@@ -548,10 +574,10 @@ describe('StudioPreviewService maintenance and diagnostics', () => {
     vi.mocked(h.runtime.stop).mockImplementation(runtimeRef => runtimeRef === 'container:preview-1'
       ? Promise.reject(new Error('terminal runtime survived'))
       : Promise.resolve())
-    vi.mocked(h.runtime.listManaged).mockResolvedValue([
+    vi.mocked(h.runtime.listManaged).mockResolvedValueOnce([
       { runtimeRef: 'container:preview-1', previewId: preview.preview_id },
       { runtimeRef: 'container:orphan-good', previewId: 'orphan-good' },
-    ])
+    ]).mockResolvedValue([])
 
     await expect(h.service.reconcile()).resolves.toEqual({ stoppedOrphans: 1, failedRecords: 0 })
 
@@ -659,9 +685,9 @@ describe('StudioPreviewService maintenance and diagnostics', () => {
     const h = createHarness()
     const { preview } = await ready(h)
     await h.service.stop(owner, 'project-1', preview.preview_id)
-    vi.mocked(h.runtime.listManaged).mockResolvedValue([
+    vi.mocked(h.runtime.listManaged).mockResolvedValueOnce([
       { runtimeRef: 'container:preview-1', previewId: preview.preview_id },
-    ])
+    ]).mockResolvedValue([])
 
     await expect(h.service.reconcile()).resolves.toEqual({ stoppedOrphans: 1, failedRecords: 0 })
     expect(h.runtime.stop).toHaveBeenCalledTimes(2)
@@ -673,13 +699,13 @@ describe('StudioPreviewService maintenance and diagnostics', () => {
     const { preview } = await ready(h)
     const current = h.repository.previews()[0]!
     await h.repository.putPreview({ ...current, state: 'STOPPING' })
-    vi.mocked(h.runtime.listManaged).mockResolvedValue([{ runtimeRef: 'container:preview-1', previewId: preview.preview_id }])
+    vi.mocked(h.runtime.listManaged).mockResolvedValueOnce([{ runtimeRef: 'container:preview-1', previewId: preview.preview_id }]).mockResolvedValue([])
 
     await expect(h.service.reconcile()).resolves.toEqual({ stoppedOrphans: 0, failedRecords: 0 })
     expect(h.repository.previews()[0]).toMatchObject({ state: 'STOPPED', stop_reason: 'reconciled' })
 
     const second = await ready(h)
-    vi.mocked(h.runtime.listManaged).mockResolvedValue([{ runtimeRef: 'container:preview-1', previewId: second.preview.preview_id }])
+    vi.mocked(h.runtime.listManaged).mockResolvedValueOnce([{ runtimeRef: 'container:preview-1', previewId: second.preview.preview_id }]).mockResolvedValue([])
     h.setNow(new Date('2026-09-03T12:01:01.000Z'))
     await expect(h.service.reconcile()).resolves.toEqual({ stoppedOrphans: 0, failedRecords: 0 })
     expect(h.repository.previews().find(item => item.preview_id === second.preview.preview_id)).toMatchObject({ state: 'EXPIRED', stop_reason: 'expired' })
@@ -712,6 +738,8 @@ describe('StudioPreviewService maintenance and diagnostics', () => {
     const h = createHarness({ runtimeTimeoutMs: 15, runtime: { start: vi.fn(() => never) } })
 
     await expect(ready(h)).rejects.toMatchObject({ code: 'UNAVAILABLE' })
+    expect(h.repository.previews()[0]).toMatchObject({ state: 'STOPPING', health: 'DOWN', failure_code: 'UNAVAILABLE' })
+    await expect(h.service.reap()).resolves.toBe(0)
     expect(h.repository.previews()[0]).toMatchObject({ state: 'FAILED', health: 'DOWN', failure_code: 'UNAVAILABLE' })
   })
 
@@ -723,6 +751,7 @@ describe('StudioPreviewService maintenance and diagnostics', () => {
 
     await expect(h.service.health(owner, 'project-1', preview.preview_id)).resolves.toMatchObject({ state: 'READY', health: 'DOWN' })
     vi.mocked(h.runtime.stop).mockImplementation(() => new Promise(() => undefined))
+    vi.mocked(h.runtime.listManaged).mockResolvedValue([{ runtimeRef: 'container:preview-1', previewId: preview.preview_id }])
     await expect(h.service.stop(owner, 'project-1', preview.preview_id)).resolves.toMatchObject({
       state: 'STOPPING', stopped_at: null, health: 'DOWN', failure_code: 'RUNTIME_CLEANUP_INCOMPLETE',
     })
@@ -734,5 +763,483 @@ describe('StudioPreviewService maintenance and diagnostics', () => {
       state: 'STOPPING', stopped_at: null, failure_code: 'RUNTIME_CLEANUP_INCOMPLETE',
     })
     expect(onCleanupFailure).toHaveBeenCalledTimes(2)
+  })
+})
+
+function limitsForPreview(global: number, perTenant: number, perProject: number): CapacityLimits {
+  return {
+    ...DEFAULT_CAPACITY_LIMITS,
+    preview: { global, perTenant, perProject },
+  }
+}
+
+function distributedGovernor(base: CapacityGovernor): CapacityGovernor {
+  return {
+    acquireBundle: request => base.acquireBundle(request),
+    heartbeat: (reference, ttlMs) => base.heartbeat(reference, ttlMs),
+    release: reference => base.release(reference),
+    reconcile: () => base.reconcile(),
+    snapshot: () => base.snapshot(),
+  }
+}
+
+describe('StudioPreviewService capacity leases', () => {
+  it('requires an injected non-memory governor in team and edge modes', () => {
+    expect(() => createHarness({ capacityMode: 'edge' })).toThrow('backend de capacidade distribuído')
+    expect(() => createHarness({
+      capacityMode: 'team',
+      capacity: new MemoryCapacityGovernor(),
+    })).toThrow('single-process')
+    expect(() => createHarness({
+      capacityMode: 'team',
+      capacity: distributedGovernor(new MemoryCapacityGovernor()),
+    })).not.toThrow()
+  })
+
+  it('enforces one atomic distributed quota across two team service instances', async () => {
+    const capacity = distributedGovernor(new MemoryCapacityGovernor({ limits: limitsForPreview(1, 1, 1) }))
+    const first = createHarness({ capacity, capacityMode: 'team' })
+    let secondId = 0
+    const second = createHarness({ capacity, capacityMode: 'team', createId: () => `second-${++secondId}` })
+    const otherTenant: PreviewActor = { ...owner, userId: 'user-2', orgId: 'org-2', tenantId: 'tenant-2', sessionId: 'session-2' }
+
+    const results = await Promise.allSettled([
+      first.service.start(owner, 'project-1'),
+      second.service.start(otherTenant, 'project-2'),
+    ])
+
+    expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1)
+    expect(results.filter(result => result.status === 'rejected')).toHaveLength(1)
+    expect((results.find(result => result.status === 'rejected') as PromiseRejectedResult).reason)
+      .toMatchObject({ code: 'CAPACITY_EXCEEDED' })
+  })
+
+  it('admits concurrent starts atomically at the global limit and releases capacity on stop', async () => {
+    const capacity = new MemoryCapacityGovernor({ limits: limitsForPreview(1, 1, 1) })
+    const first = createHarness({
+      capacity,
+      runtime: { start: vi.fn(async input => ({ runtimeRef: `container:${input.previewId}` })) },
+    })
+    const second = createHarness({
+      capacity,
+      createId: (() => { let value = 0; return () => `second-${++value}` })(),
+      runtime: { start: vi.fn(async input => ({ runtimeRef: `container:${input.previewId}` })) },
+    })
+    const otherTenant: PreviewActor = { ...owner, userId: 'user-2', orgId: 'org-2', tenantId: 'tenant-2', sessionId: 'session-2' }
+
+    const results = await Promise.allSettled([
+      first.service.start(owner, 'project-1'),
+      second.service.start(otherTenant, 'project-2'),
+    ])
+
+    expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1)
+    expect(results.filter(result => result.status === 'rejected')).toHaveLength(1)
+    expect((results.find(result => result.status === 'rejected') as PromiseRejectedResult).reason)
+      .toMatchObject({ code: 'CAPACITY_EXCEEDED' })
+    expect(vi.mocked(first.runtime.start).mock.calls.length + vi.mocked(second.runtime.start).mock.calls.length).toBe(1)
+    expect((await capacity.snapshot()).usage.find(item => item.resource === 'preview')?.global).toBe(1)
+
+    if (results[0]?.status === 'fulfilled') {
+      await first.service.stop(owner, 'project-1', results[0].value.preview.preview_id)
+    } else if (results[1]?.status === 'fulfilled') {
+      await second.service.stop(otherTenant, 'project-2', results[1].value.preview.preview_id)
+    }
+    expect((await capacity.snapshot()).usage.find(item => item.resource === 'preview')?.global).toBe(0)
+
+    const third = createHarness({ capacity })
+    await expect(third.service.start(owner, 'project-3')).resolves.toMatchObject({ preview: { state: 'READY' } })
+  })
+
+  it('isolates per-tenant capacity while permitting another tenant within the global limit', async () => {
+    const capacity = new MemoryCapacityGovernor({ limits: limitsForPreview(2, 1, 1) })
+    const h = createHarness({
+      capacity,
+      runtime: { start: vi.fn(async input => ({ runtimeRef: `container:${input.previewId}` })) },
+    })
+    const otherTenant: PreviewActor = { ...owner, userId: 'user-2', orgId: 'org-2', tenantId: 'tenant-2', sessionId: 'session-2' }
+
+    await h.service.start(owner, 'project-a')
+    await expect(h.service.start(owner, 'project-b')).rejects.toMatchObject({ code: 'CAPACITY_EXCEEDED' })
+    await expect(h.service.start(otherTenant, 'project-c')).resolves.toMatchObject({ preview: { state: 'READY' } })
+
+    const usage = (await capacity.snapshot()).usage.find(item => item.resource === 'preview')
+    expect(usage).toMatchObject({ global: 2 })
+    expect(usage?.tenants).toHaveLength(2)
+  })
+
+  it('renews the capacity lease on preview heartbeat and releases it at terminal stop', async () => {
+    let capacityNow = 1_000
+    const capacity = new MemoryCapacityGovernor({
+      limits: limitsForPreview(1, 1, 1),
+      now: () => capacityNow,
+    })
+    const h = createHarness({ capacity, ttlSeconds: 30 * 60 })
+    const started = await ready(h)
+    const before = (await capacity.snapshot()).leases[0]!
+
+    capacityNow += 60_000
+    h.setNow(new Date('2026-09-03T12:20:00.000Z'))
+    await h.service.heartbeat(owner, 'project-1', started.preview.preview_id)
+    const after = (await capacity.snapshot()).leases[0]!
+
+    expect(after.leaseId).toBe(before.leaseId)
+    expect(after.fencingToken).toBe(before.fencingToken)
+    expect(after.expiresAt).toBeGreaterThan(before.expiresAt)
+    await h.service.stop(owner, 'project-1', started.preview.preview_id)
+    expect((await capacity.snapshot()).leases).toEqual([])
+  })
+
+  it('reacquires capacity with a new fencing token when a lease expired before heartbeat', async () => {
+    let capacityNow = 1_000
+    const capacity = new MemoryCapacityGovernor({
+      limits: limitsForPreview(1, 1, 1),
+      now: () => capacityNow,
+    })
+    const h = createHarness({ capacity, ttlSeconds: 30 * 60 })
+    const started = await ready(h)
+    const before = (await capacity.snapshot()).leases[0]!
+
+    capacityNow = before.expiresAt + 1
+    h.setNow(new Date('2026-09-03T12:01:00.000Z'))
+    await h.service.heartbeat(owner, 'project-1', started.preview.preview_id)
+    const after = (await capacity.snapshot()).leases[0]!
+
+    expect(after.leaseId).not.toBe(before.leaseId)
+    expect(after.fencingToken).toBeGreaterThan(before.fencingToken)
+    expect(after.scope).toEqual(before.scope)
+  })
+
+  it('stops and fails the runtime closed when the capacity governor cannot renew its lease', async () => {
+    const base = new MemoryCapacityGovernor({ limits: limitsForPreview(1, 1, 1) })
+    let failHeartbeat = false
+    const capacity: CapacityGovernor = {
+      acquireBundle: request => base.acquireBundle(request),
+      heartbeat: reference => failHeartbeat ? Promise.reject(new Error('capacity backend unavailable')) : base.heartbeat(reference),
+      release: reference => base.release(reference),
+      reconcile: () => base.reconcile(),
+      snapshot: () => base.snapshot(),
+    }
+    const h = createHarness({ capacity })
+    const started = await ready(h)
+    failHeartbeat = true
+
+    await expect(h.service.heartbeat(owner, 'project-1', started.preview.preview_id))
+      .rejects.toMatchObject({ code: 'UNAVAILABLE' })
+    expect(h.runtime.stop).toHaveBeenCalledWith('container:preview-1', expect.any(AbortSignal))
+    expect(h.repository.previews().find(item => item.preview_id === started.preview.preview_id)).toMatchObject({
+      state: 'FAILED', health: 'DOWN', stop_reason: 'failed', failure_code: 'UNAVAILABLE',
+    })
+    expect((await base.snapshot()).leases).toEqual([])
+  })
+
+  it('keeps the lease and STOPPING state when fail-closed runtime cleanup is incomplete', async () => {
+    const base = new MemoryCapacityGovernor({ limits: limitsForPreview(1, 1, 1) })
+    let failHeartbeat = false
+    const capacity: CapacityGovernor = {
+      acquireBundle: request => base.acquireBundle(request),
+      heartbeat: reference => failHeartbeat ? Promise.reject(new Error('capacity backend unavailable')) : base.heartbeat(reference),
+      release: reference => base.release(reference),
+      reconcile: () => base.reconcile(),
+      snapshot: () => base.snapshot(),
+    }
+    const onCleanupFailure = vi.fn()
+    const h = createHarness({
+      capacity,
+      onCleanupFailure,
+      runtime: { stop: vi.fn(() => Promise.reject(new Error('runtime still alive'))) },
+    })
+    const started = await ready(h)
+    failHeartbeat = true
+
+    await expect(h.service.heartbeat(owner, 'project-1', started.preview.preview_id))
+      .rejects.toMatchObject({ code: 'UNAVAILABLE' })
+    expect(h.repository.previews().find(item => item.preview_id === started.preview.preview_id)).toMatchObject({
+      state: 'STOPPING', stopped_at: null, health: 'DOWN', failure_code: 'UNAVAILABLE',
+    })
+    expect(onCleanupFailure).toHaveBeenCalledWith(started.preview.preview_id)
+    expect((await base.snapshot()).leases).toHaveLength(1)
+  })
+
+  it('treats an already-expired capacity lease as released after the runtime stops', async () => {
+    const capacity = new MemoryCapacityGovernor({ limits: limitsForPreview(1, 1, 1) })
+    const h = createHarness({ capacity })
+    const started = await ready(h)
+    const reference = (await capacity.snapshot()).leases[0]!
+    await capacity.release(reference)
+
+    await expect(h.service.stop(owner, 'project-1', started.preview.preview_id))
+      .resolves.toMatchObject({ state: 'STOPPED' })
+    expect((await capacity.snapshot()).leases).toEqual([])
+  })
+
+  it('fails a persisted READY preview closed when boot reconciliation cannot reacquire capacity', async () => {
+    const repository = new MemoryRepository()
+    const original = createHarness({ repository })
+    const started = await ready(original)
+    const capacity = new MemoryCapacityGovernor({ limits: limitsForPreview(1, 1, 1) })
+    await capacity.acquireBundle({
+      ownerId: 'foreign-preview',
+      scope: { orgId: 'org-foreign', tenantId: 'tenant-foreign', projectId: 'project-foreign' },
+      requests: [{ resource: 'preview' }],
+    })
+    const rebooted = createHarness({
+      repository,
+      capacity,
+      runtime: {
+        listManaged: vi.fn()
+          .mockResolvedValueOnce([{ runtimeRef: 'container:preview-1', previewId: started.preview.preview_id }])
+          .mockResolvedValue([]),
+      },
+    })
+
+    await expect(rebooted.service.reconcile()).resolves.toEqual({ stoppedOrphans: 0, failedRecords: 1 })
+    expect(rebooted.runtime.stop).toHaveBeenCalledWith('container:preview-1', expect.any(AbortSignal))
+    expect(repository.previews().find(item => item.preview_id === started.preview.preview_id)).toMatchObject({
+      state: 'FAILED', health: 'DOWN', stop_reason: 'failed', failure_code: 'CAPACITY_EXCEEDED',
+    })
+    expect(repository.admissions().find(item => item.preview_id === started.preview.preview_id)?.revoked_at).not.toBeNull()
+  })
+
+  it('reacquires a persisted READY preview during boot reconciliation and keeps its runtime active', async () => {
+    const repository = new MemoryRepository()
+    const original = createHarness({ repository })
+    const started = await ready(original)
+    const capacity = new MemoryCapacityGovernor({ limits: limitsForPreview(1, 1, 1) })
+    const rebooted = createHarness({
+      repository,
+      capacity,
+      runtime: {
+        listManaged: vi.fn(() => Promise.resolve([
+          { runtimeRef: 'container:preview-1', previewId: started.preview.preview_id },
+        ])),
+      },
+    })
+
+    await expect(rebooted.service.reconcile()).resolves.toEqual({ stoppedOrphans: 0, failedRecords: 0 })
+    expect(rebooted.runtime.stop).not.toHaveBeenCalled()
+    expect((await capacity.snapshot()).leases).toEqual([
+      expect.objectContaining({
+        ownerId: `preview:${started.preview.preview_id}`,
+        scope: { orgId: owner.orgId, tenantId: owner.tenantId, projectId: 'project-1' },
+        allocations: expect.objectContaining({ preview: 1 }),
+      }),
+    ])
+  })
+
+  it('claims the same live owner lease and fencing token after reboot with a persistent backend', async () => {
+    const repository = new MemoryRepository()
+    const base = new MemoryCapacityGovernor({ limits: limitsForPreview(1, 1, 1) })
+    const capacity = distributedGovernor(base)
+    const original = createHarness({ repository, capacity, capacityMode: 'team' })
+    const started = await ready(original)
+    const leaseBefore = (await base.snapshot()).leases[0]!
+    const rebooted = createHarness({
+      repository,
+      capacity,
+      capacityMode: 'team',
+      runtime: {
+        listManaged: vi.fn(() => Promise.resolve([
+          { runtimeRef: 'container:preview-1', previewId: started.preview.preview_id },
+        ])),
+      },
+    })
+
+    await expect(rebooted.service.reconcile()).resolves.toEqual({ stoppedOrphans: 0, failedRecords: 0 })
+    expect(rebooted.runtime.stop).not.toHaveBeenCalled()
+    expect((await base.snapshot()).leases).toEqual([
+      expect.objectContaining({ leaseId: leaseBefore.leaseId, fencingToken: leaseBefore.fencingToken }),
+    ])
+  })
+
+  it('keeps zombie runtime capacity quarantined after preview expiry until inventory proves absence', async () => {
+    const startedAt = Date.parse('2026-09-03T12:00:00.000Z')
+    let capacityNow = startedAt
+    const base = new MemoryCapacityGovernor({ limits: limitsForPreview(1, 1, 1), now: () => capacityNow })
+    const capacity = distributedGovernor(base)
+    const h = createHarness({
+      capacity,
+      capacityMode: 'team',
+      ttlSeconds: 60,
+      runtime: {
+        stop: vi.fn(() => Promise.reject(new Error('runtime still alive'))),
+        listManaged: vi.fn(() => Promise.resolve([{ runtimeRef: 'container:preview-1', previewId: 'id-1' }])),
+      },
+    })
+    const started = await ready(h)
+    await expect(h.service.stop(owner, 'project-1', started.preview.preview_id))
+      .resolves.toMatchObject({ state: 'STOPPING' })
+
+    capacityNow += 61_000
+    h.setNow(new Date(startedAt + 61_000))
+    await expect(h.service.reap()).resolves.toBe(0)
+    expect((await base.snapshot()).leases).toHaveLength(1)
+
+    let contenderId = 0
+    const contender = createHarness({ capacity, capacityMode: 'team', createId: () => `contender-${++contenderId}` })
+    const otherTenant: PreviewActor = { ...owner, userId: 'user-2', orgId: 'org-2', tenantId: 'tenant-2', sessionId: 'session-2' }
+    await expect(contender.service.start(otherTenant, 'project-2')).rejects.toMatchObject({ code: 'CAPACITY_EXCEEDED' })
+  })
+
+  it('retains capacity when an ambiguous start failure is still present in runtime inventory', async () => {
+    const base = new MemoryCapacityGovernor({ limits: limitsForPreview(1, 1, 1) })
+    const runtimeRef = 'container:ambiguous'
+    const h = createHarness({
+      capacity: distributedGovernor(base),
+      capacityMode: 'team',
+      runtime: {
+        start: vi.fn(() => Promise.reject(new Error('connection reset after create'))),
+        listManaged: vi.fn(() => Promise.resolve([{ runtimeRef, previewId: 'id-1' }])),
+        stop: vi.fn(() => Promise.reject(new Error('cleanup incomplete'))),
+      },
+    })
+
+    await expect(h.service.start(owner, 'project-1')).rejects.toThrow('connection reset after create')
+    expect(h.runtime.listManaged).toHaveBeenCalled()
+    expect(h.repository.previews().find(item => item.preview_id === 'id-1')).toMatchObject({
+      state: 'STOPPING', runtime_ref: runtimeRef, failure_code: 'RUNTIME_START_FAILED',
+    })
+    expect((await base.snapshot()).leases).toHaveLength(1)
+  })
+
+  it('keeps capacity when stop resolves but the supervisor still lists the runtime', async () => {
+    const base = new MemoryCapacityGovernor({ limits: limitsForPreview(1, 1, 1) })
+    const h = createHarness({
+      capacity: distributedGovernor(base),
+      capacityMode: 'team',
+      runtime: {
+        listManaged: vi.fn(() => Promise.resolve([{ runtimeRef: 'container:preview-1', previewId: 'id-1' }])),
+      },
+    })
+    const started = await ready(h)
+
+    await expect(h.service.stop(owner, 'project-1', started.preview.preview_id)).resolves.toMatchObject({
+      state: 'STOPPING', failure_code: 'RUNTIME_CLEANUP_INCOMPLETE',
+    })
+    expect((await base.snapshot()).leases).toHaveLength(1)
+  })
+
+  it('keeps capacity when the supervisor replaces a stopped runtime for the same preview', async () => {
+    const base = new MemoryCapacityGovernor({ limits: limitsForPreview(1, 1, 1) })
+    const h = createHarness({
+      capacity: distributedGovernor(base),
+      capacityMode: 'team',
+      runtime: {
+        listManaged: vi.fn(() => Promise.resolve([{ runtimeRef: 'container:replacement', previewId: 'id-1' }])),
+      },
+    })
+    const started = await ready(h)
+
+    await expect(h.service.stop(owner, 'project-1', started.preview.preview_id)).resolves.toMatchObject({
+      state: 'STOPPING', failure_code: 'RUNTIME_CLEANUP_INCOMPLETE',
+    })
+    expect(h.runtime.stop).toHaveBeenCalledWith('container:preview-1', expect.any(AbortSignal))
+    expect((await base.snapshot()).leases).toHaveLength(1)
+  })
+
+  it('quarantines a runtime that appears only after the first failed-start inventory', async () => {
+    const base = new MemoryCapacityGovernor({ limits: limitsForPreview(1, 1, 1) })
+    let inventory = 0
+    const h = createHarness({
+      capacity: distributedGovernor(base),
+      capacityMode: 'team',
+      runtime: {
+        start: vi.fn(() => Promise.reject(new Error('connection reset before late create'))),
+        listManaged: vi.fn(() => Promise.resolve(++inventory === 1
+          ? []
+          : [{ runtimeRef: 'container:late', previewId: 'id-1' }])),
+      },
+    })
+
+    await expect(ready(h)).rejects.toThrow('connection reset before late create')
+    expect(h.repository.previews()[0]).toMatchObject({ state: 'STOPPING', runtime_ref: null })
+    await expect(h.service.reap()).resolves.toBe(0)
+    expect(h.runtime.stop).toHaveBeenCalledWith('container:late', expect.any(AbortSignal))
+    expect(h.repository.previews()[0]).toMatchObject({ state: 'STOPPING', runtime_ref: 'container:late' })
+    expect((await base.snapshot()).leases).toHaveLength(1)
+  })
+
+  it('keeps a late replacement runtime quarantined after reaping the first late runtime', async () => {
+    const base = new MemoryCapacityGovernor({ limits: limitsForPreview(1, 1, 1) })
+    let inventory = 0
+    const h = createHarness({
+      capacity: distributedGovernor(base),
+      capacityMode: 'team',
+      runtime: {
+        start: vi.fn(() => Promise.reject(new Error('connection reset before replacement'))),
+        listManaged: vi.fn(() => Promise.resolve(++inventory === 1
+          ? []
+          : inventory === 2
+            ? [{ runtimeRef: 'container:late-a', previewId: 'id-1' }]
+            : [{ runtimeRef: 'container:late-b', previewId: 'id-1' }])),
+      },
+    })
+
+    await expect(ready(h)).rejects.toThrow('connection reset before replacement')
+    await expect(h.service.reap()).resolves.toBe(0)
+    expect(h.runtime.stop).toHaveBeenCalledWith('container:late-a', expect.any(AbortSignal))
+    expect(h.repository.previews()[0]).toMatchObject({ state: 'STOPPING' })
+    expect((await base.snapshot()).leases).toHaveLength(1)
+  })
+
+  it('records a failed release as pending and completes it on the next reconciliation cycle', async () => {
+    const base = new MemoryCapacityGovernor({ limits: limitsForPreview(1, 1, 1) })
+    let failRelease = true
+    const capacity: CapacityGovernor = {
+      ...distributedGovernor(base),
+      release(reference) {
+        if (failRelease) {
+          failRelease = false
+          return Promise.reject(new Error('capacity backend unavailable'))
+        }
+        return base.release(reference)
+      },
+    }
+    const h = createHarness({ capacity, capacityMode: 'team' })
+    const started = await ready(h)
+
+    await expect(h.service.stop(owner, 'project-1', started.preview.preview_id)).resolves.toMatchObject({
+      state: 'STOPPING', stopped_at: null, failure_code: 'CAPACITY_RELEASE_PENDING',
+    })
+    expect((await base.snapshot()).leases).toHaveLength(1)
+
+    await expect(h.service.reap()).resolves.toBe(0)
+    expect(h.repository.previews().find(item => item.preview_id === started.preview.preview_id)).toMatchObject({
+      state: 'STOPPED', stopped_at: expect.any(String), failure_code: null,
+    })
+    expect((await base.snapshot()).leases).toEqual([])
+  })
+
+  it('releases capacity on startup failure, replacement and expiration', async () => {
+    const failedCapacity = new MemoryCapacityGovernor({ limits: limitsForPreview(1, 1, 1) })
+    const failed = createHarness({
+      capacity: failedCapacity,
+      runtime: { start: vi.fn(() => Promise.reject(new Error('start failed'))) },
+    })
+    await expect(ready(failed)).rejects.toThrow('start failed')
+    expect((await failedCapacity.snapshot()).leases).toHaveLength(1)
+    await failed.service.reap()
+    expect((await failedCapacity.snapshot()).leases).toEqual([])
+
+    const capacity = new MemoryCapacityGovernor({ limits: limitsForPreview(1, 1, 1) })
+    const artifacts = [
+      { projectId: 'project-1', runId: 'run-1', artifactPath: '/verified/run-1', artifactSha256: sha('run-1'), ownerEmail: 'owner@example.test' },
+      { projectId: 'project-1', runId: 'run-2', artifactPath: '/verified/run-2', artifactSha256: sha('run-2'), ownerEmail: 'owner@example.test' },
+    ]
+    const h = createHarness({
+      capacity,
+      ttlSeconds: 60,
+      source: { verifiedArtifact: vi.fn().mockResolvedValueOnce(artifacts[0]!).mockResolvedValueOnce(artifacts[1]!) },
+      runtime: { start: vi.fn(async input => ({ runtimeRef: `container:${input.previewId}` })) },
+    })
+    const first = await ready(h)
+    const second = await ready(h)
+    expect(h.repository.previews().find(item => item.preview_id === first.preview.preview_id)?.state).toBe('STOPPED')
+    expect((await capacity.snapshot()).leases).toEqual([
+      expect.objectContaining({ ownerId: `preview:${second.preview.preview_id}` }),
+    ])
+
+    h.setNow(new Date('2026-09-03T12:01:01.000Z'))
+    await h.service.reap()
+    expect((await capacity.snapshot()).leases).toEqual([])
   })
 })

@@ -5,6 +5,7 @@ import type { Domain, KvTable } from '@deepseek-ai/dsh-storage-domain'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import { registerPromptToAppHttpExtension, hashTree, PREVIEW_ARTIFACT_RELATIVE_PATH, type PromptToAppActor } from '@dz23-studio/prompt-to-app'
 import { roleAllows } from '@dz23-studio/policy'
+import type { CapacityGovernor } from '@dz23-studio/runtime-governor'
 import { createPreviewProjectHttpExtension } from './http.js'
 import { createPreviewGatewayHttpHandler } from './gateway.js'
 import { t } from './i18n.js'
@@ -49,6 +50,9 @@ export interface PreviewPluginConfig {
   readonly reaperIntervalMs?: number
   readonly publicPort?: number
   readonly runtimeTimeoutMs?: number
+  readonly capacity?: CapacityGovernor
+  /** single-process is development-only; team and edge require an injected distributed governor. */
+  readonly capacityMode?: 'single-process' | 'team' | 'edge'
 }
 
 export interface StudioPreviewRuntime {
@@ -100,6 +104,8 @@ export async function apply(ctx: Context, config: PreviewPluginConfig = {}): Pro
   const service = new StudioPreviewService({
     repository,
     runtime,
+    ...(config.capacity === undefined ? {} : { capacity: config.capacity }),
+    capacityMode: config.capacityMode ?? (supervisor === undefined ? 'single-process' : 'edge'),
     ...(config.ttlSeconds === undefined ? {} : { ttlSeconds: config.ttlSeconds }),
     publicPort,
     onCleanupFailure: () => { cleanupFailureAt = new Date().toISOString() },

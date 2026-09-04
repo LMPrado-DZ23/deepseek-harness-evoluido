@@ -157,7 +157,7 @@ describe('preview project HTTP extension', () => {
   })
 
   it.each([
-    ['NOT_FOUND', 404], ['FORBIDDEN', 403], ['CONFLICT', 409], ['UNAVAILABLE', 503], ['INVALID', 400],
+    ['NOT_FOUND', 404], ['FORBIDDEN', 403], ['CAPACITY_EXCEEDED', 429], ['CONFLICT', 409], ['UNAVAILABLE', 503], ['INVALID', 400],
   ] as const)('maps %s service errors without exposing internals', async (code, status) => {
     const service = fakeService({ start: vi.fn(() => Promise.reject(new PreviewError(code, `safe-${code}`))) } as Partial<StudioPreviewService>)
     const response = await send(service, { method: 'POST', suffix: '/previews', contentType: 'application/json', body: '{}' })
