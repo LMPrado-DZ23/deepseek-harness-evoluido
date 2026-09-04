@@ -6,7 +6,7 @@
 - iteração: 7
 - início: 2026-09-04
 - último heartbeat: 2026-09-04T18:35:27-03:00
-- último progresso real: fechamento dos bloqueios estáticos M6.1 de perfil gravável, conteúdo empacotado, toolchain verificada, build pós-fetch sem rede e política multiarch do builder
+- último progresso real: primeira prova Docker confirmou fetch íntegro e expôs revalidação online do pnpm durante `--offline`; correção oficial `--trust-lockfile` aplicada somente após o fetch verificado
 - tarefa atual: construir e provar a imagem runtime M6.1 a partir do staging WSL2/ext4
 - branch: `codex/m61-final`
 - base: `c57f914a49787de28d12141b167874357734f2d7`
@@ -45,6 +45,7 @@
 ## Falhas observadas
 
 - build anterior: `@deepseek-ai/dsh-subprocess-local` não estava na allowlist de scripts; corrigido, reteste pendente;
+- build `15e80ec`: a instalação fisicamente sem rede tentou revalidar metadata/attestations e entrou em retries; interrompida e corrigida com `--trust-lockfile` pós-fetch, mantendo `--network=none`;
 - primeira sincronização WSL resolveu a origem incorretamente e começou a copiar `/` para staging; foi interrompida, não tocou no repositório, e um staging novo explícito foi criado;
 - sincronização seguinte excluiu diretórios aninhados chamados `runtime`; o upstream ficou incompleto; a subárvore foi ressincronizada sem esse padrão e o manifesto passou.
 
