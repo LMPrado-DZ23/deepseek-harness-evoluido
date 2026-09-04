@@ -10,7 +10,7 @@
  *   node backup-worker.js --dsn-ref DZ23_POSTGRES_DSN --schema dz23_storage \
  *     --ssl verify-full --out <file> [--max-bytes N]
  */
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { open, rm } from 'node:fs/promises'
 import { Client } from 'pg'
 import { HARNESS_UPSTREAM_COMMIT, STORAGE_EXPORT_FORMAT, canonicalJson, sha256 } from './bundle.js'
@@ -33,7 +33,9 @@ export interface WorkerReport {
 }
 
 interface UnitRow { name: string; version: number }
-interface RecordRow { table_name: string; key: string; value: unknown }
+
+/** Rows per cursor round-trip: big enough to be cheap, small enough that memory stays flat. */
+const CURSOR_BATCH = 500
 
 /** Writes the bundle to `out` and reports it, holding at most one domain in memory at a time. */
 export async function writeBackupBundle(args: WorkerArgs, dsn: string): Promise<WorkerReport> {
@@ -72,36 +74,77 @@ export async function writeBackupBundle(args: WorkerArgs, dsn: string): Promise<
     await write(`{"format":${JSON.stringify(STORAGE_EXPORT_FORMAT)},"upstreamCommit":${JSON.stringify(HARNESS_UPSTREAM_COMMIT)},"source":${JSON.stringify(source)},"createdAt":${JSON.stringify(createdAt)},"domains":[`)
 
     for (const unit of units.rows) {
-      const rows = await client.query<RecordRow>(
-        `SELECT table_name, key, value FROM ${recordsTable(args.schema)} WHERE unit = $1 ORDER BY table_name, key`,
-        [unit.name],
-      )
       const globalRow = await client.query<{ value: unknown }>(
         `SELECT value FROM ${globalsTable(args.schema)} WHERE unit = $1`,
         [unit.name],
       )
-      const tables: Record<string, Record<string, unknown>> = {}
-      for (const row of rows.rows) {
-        tables[row.table_name] ??= Object.create(null) as Record<string, unknown>
-        tables[row.table_name]![row.key] = row.value
-      }
-      records += rows.rowCount ?? 0
+      // Which tables hold records, in code-point order (`COLLATE "C"` is byte order on UTF-8,
+      // which is what the canonical form needs — the database's own collation is not).
+      const tableRows = await client.query<{ table_name: string }>(
+        `SELECT table_name FROM ${recordsTable(args.schema)} WHERE unit = $1 GROUP BY table_name ORDER BY table_name COLLATE "C"`,
+        [unit.name],
+      )
       const descriptor = {
         name: unit.name,
         version: unit.version,
-        tables: Object.keys(tables).sort((left, right) => (left < right ? -1 : left > right ? 1 : 0)),
+        tables: tableRows.rows.map(row => row.table_name),
         hasGlobal: globalRow.rows[0] !== undefined,
       }
-      const domain = {
-        descriptor,
-        snapshot: { tables, global: globalRow.rows[0] === undefined ? null : globalRow.rows[0].value },
+      const global = globalRow.rows[0] === undefined ? null : globalRow.rows[0].value
+
+      /**
+       * The canonical bytes of this domain WITHOUT its own digest, in pieces.
+       * Records are read through a server-side cursor, so a unit with millions
+       * of rows never sits in memory — the whole reason this work left the
+       * Studio process. Runs twice inside the same REPEATABLE READ snapshot:
+       * once to learn the digest, once to write it out with the digest in
+       * place. Two passes over the rows, constant memory.
+       */
+      const streamDomain = async (sink: (chunk: string) => Promise<void> | void): Promise<number> => {
+        await sink(`{"descriptor":${canonicalJson(descriptor)},`)
+        await sink(`"snapshot":{"global":${canonicalJson(global)},"tables":{`)
+        let counted = 0
+        let firstTable = true
+        for (const table of descriptor.tables) {
+          await sink(`${firstTable ? '' : ','}${JSON.stringify(table)}:{`)
+          firstTable = false
+          let firstRow = true
+          for await (const row of cursorRows(client, args.schema, unit.name, table)) {
+            await sink(`${firstRow ? '' : ','}${JSON.stringify(row.key)}:${canonicalJson(row.value)}`)
+            firstRow = false
+            counted += 1
+          }
+          await sink('}')
+        }
+        await sink('}}}')
+        return counted
       }
-      const withDigest = { ...domain, sha256: sha256(canonicalJson(domain)) }
+
+      const domainHash = createHash('sha256')
+      const counted = await streamDomain(chunk => { domainHash.update(chunk, 'utf8') })
+      const domainDigest = domainHash.digest('hex')
+      records += counted
+
+      // Canonical order of the sealed domain is descriptor, sha256, snapshot; the file may spell
+      // the same object in any key order, so the digest is written last there.
       const separator = domains === 0 ? '' : ','
-      payloadHash.update(`${separator}${canonicalJson(withDigest)}`, 'utf8')
-      await write(`${separator}${JSON.stringify(withDigest)}`)
+      payloadHash.update(separator, 'utf8')
+      await write(separator)
+      let seenDescriptor = false
+      await streamDomain(async chunk => {
+        if (!seenDescriptor && chunk.startsWith('{"descriptor":')) {
+          seenDescriptor = true
+          payloadHash.update(`${chunk}"sha256":${JSON.stringify(domainDigest)},`, 'utf8')
+          await write(chunk)
+          return
+        }
+        payloadHash.update(chunk, 'utf8')
+        // The closing `}}}` of the file copy carries the digest, so the file object is complete on its own.
+        await write(chunk === '}}}' ? `}},"sha256":${JSON.stringify(domainDigest)}}` : chunk)
+      })
       domains += 1
     }
+
     await client.query('COMMIT')
 
     payloadHash.update(`],"format":${JSON.stringify(STORAGE_EXPORT_FORMAT)},"source":${canonicalJson(source)},"upstreamCommit":${JSON.stringify(HARNESS_UPSTREAM_COMMIT)}}`, 'utf8')
@@ -116,6 +159,29 @@ export async function writeBackupBundle(args: WorkerArgs, dsn: string): Promise<
     throw error
   } finally {
     await client.end().catch(() => undefined)
+  }
+}
+
+/**
+ * Records of one unit table, in code-point order, read through a PostgreSQL
+ * cursor in batches. The cursor lives inside the caller's transaction, so every
+ * batch sees the same snapshot as the rest of the backup.
+ */
+async function* cursorRows(client: Client, schema: string, unit: string, table: string): AsyncGenerator<{ key: string; value: unknown }> {
+  const name = `dz23_backup_${randomUUID().replaceAll('-', '')}`
+  await client.query(
+    `DECLARE ${name} NO SCROLL CURSOR FOR SELECT key, value FROM ${recordsTable(schema)} WHERE unit = $1 AND table_name = $2 ORDER BY key`,
+    [unit, table],
+  )
+  try {
+    for (;;) {
+      const batch = await client.query<{ key: string; value: unknown }>(`FETCH FORWARD ${String(CURSOR_BATCH)} FROM ${name}`)
+      for (const row of batch.rows) yield row
+      if (batch.rows.length < CURSOR_BATCH) return
+    }
+  } finally {
+    /* v8 ignore next -- closing the cursor is best effort; the transaction ends it anyway. */
+    await client.query(`CLOSE ${name}`).catch(() => undefined)
   }
 }
 

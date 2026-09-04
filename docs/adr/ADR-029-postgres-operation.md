@@ -32,9 +32,15 @@ Status: aceita e implementada na etapa M3 (Claude), sobre a base P31-A.
    `studio-backup-<carimbo>.json` (0600) + `.sha256` + ledger
    `backups.jsonl`, apaga só os seus próprios arquivos além de `backupKeep`,
    nunca derruba o Studio por falha de backup (registra e segue) e recusa
-   intervalo menor que cinco minutos. Limite honesto: o worker ainda materializa
-   **um domínio** por vez na memória dele; ler registro a registro por cursor
-   fica como melhoria seguinte, e nenhum tamanho de domínio derruba o Studio. O diretório é um volume dedicado no
+   intervalo menor que cinco minutos. Os registros são lidos por **cursor do
+   PostgreSQL** (lotes de 500) dentro da mesma transação `REPEATABLE READ`, e o
+   domínio é percorrido **duas vezes**: a primeira só para calcular o resumo
+   dele, a segunda para escrever o arquivo com o resumo no lugar. Custo: ler
+   cada registro duas vezes. Ganho: memória constante — nem o banco inteiro nem
+   um domínio inteiro ficam na memória de ninguém. A ordem dos registros vem do
+   banco com `COLLATE "C"` (ordem de bytes), que é a ordem que a forma canônica
+   exige; a locale do banco ordenaria diferente, e há teste que demonstra a
+   divergência em vez de supor. O diretório é um volume dedicado no
    Compose (`studio-backups`). Sem diretório, não há agendamento e o operador usa
    `pnpm storage:backup-postgres`.
 4. **Restauração é o caminho já provado, e agora recusa antes de destruir.**

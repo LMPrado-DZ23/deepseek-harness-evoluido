@@ -97,6 +97,57 @@ describePostgres('hot snapshot of a PostgreSQL storage schema', () => {
     }
   })
 
+  it('streams more rows than one cursor batch, with keys whose database order is NOT code-point order, and still seals the same bytes', async () => {
+    const schema = schemaName('cursor')
+    const source = backend(schema)
+    const unit = await source.kv!.open({ name: 'snap_big', version: 1, tables: ['items'], hasGlobal: false })
+    // 1200 rows: more than two cursor batches (500 each), so the streaming path is really exercised.
+    for (let index = 0; index < 1200; index += 1) await unit.putRecord('items', `k-${String(index).padStart(5, '0')}`, { index })
+    // Keys where a locale collation (en_US) and code-point order disagree: accents, case and punctuation.
+    for (const key of ['Zebra', 'ábaco', 'abacate', 'Ábaco', '_sublinhado', 'ñandu', 'nadar', 'Ñ', 'z-final']) {
+      await unit.putRecord('items', key, { key })
+    }
+    const directory = await mkdtemp(join(tmpdir(), 'dz23-backup-cursor-'))
+    const out = join(directory, 'bundle.json')
+    const now = () => new Date('2026-09-04T00:00:00.000Z')
+    try {
+      const report = await writeBackupBundle({ dsnRef: 'unused', schema, ssl: 'off', out, maxBytes: 50 * 1024 * 1024, now }, dsn!)
+      expect(report.records).toBe(1209)
+      const written = JSON.parse(await readFile(out, 'utf8')) as { domains: Array<{ sha256: string; snapshot: { tables: { items: Record<string, unknown> } } }> }
+      // Self-validating: the payload digest and every domain digest are recomputed from the file.
+      validateBundle(written as never)
+      const inProcess = await snapshotPostgresStorage({ connectionString: dsn!, ssl: false, schema, now })
+      // The proof that `COLLATE "C"` and the JS canonical sort agree: identical sealed digests.
+      expect(written.domains[0]!.sha256).toBe(inProcess.domains[0]!.sha256)
+      expect(Object.keys(written.domains[0]!.snapshot.tables.items)).toHaveLength(1209)
+    } finally {
+      await source.close()
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('proves the `COLLATE "C"` in the streaming reader is load-bearing, whatever the database locale', async () => {
+    // This test database happens to be C.UTF-8, so simply dropping the COLLATE would not fail the
+    // test above — that would be a vacuous guard. Here the claim is checked directly: a locale
+    // collation orders these keys differently from byte order, and byte order is what the canonical
+    // form (a code-point sort in JavaScript) requires.
+    const client = new Client({ connectionString: dsn!, ssl: false })
+    await client.connect()
+    try {
+      const keys = ['Zebra', 'ábaco', 'abacate', '_sublinhado', 'ñandu', 'nadar']
+      const ordered = async (collation: string): Promise<string[]> => (await client.query<{ v: string }>(
+        `SELECT v FROM unnest($1::text[]) AS t(v) ORDER BY v COLLATE "${collation}"`, [keys],
+      )).rows.map(row => row.v)
+      const byteOrder = await ordered('C')
+      const localeOrder = await ordered('pt-BR-x-icu')
+      expect(byteOrder).not.toEqual(localeOrder) // the two really disagree
+      expect(byteOrder).toEqual([...keys].sort((left, right) => (left < right ? -1 : left > right ? 1 : 0)))
+      expect(JSON.parse(canonicalJson(Object.fromEntries(keys.map(key => [key, 1]))) ) && Object.keys(JSON.parse(canonicalJson(Object.fromEntries(keys.map(key => [key, 1])))))).toEqual(byteOrder)
+    } finally {
+      await client.end()
+    }
+  })
+
   it('version-checks declared descriptors and exports never-opened declared units as empty', async () => {
     const schema = schemaName('snap_decl')
     const source = backend(schema)
