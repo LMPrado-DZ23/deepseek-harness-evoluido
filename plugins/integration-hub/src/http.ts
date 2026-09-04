@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { pipeline } from 'node:stream/promises'
 import {
   CSRF_COOKIE, IdentityError, assertRequestTrust, parseCookies, requiredSessionToken, singleHeader, type StudioIdentityService,
 } from '@dz23-studio/identity'
@@ -107,14 +108,27 @@ export function createHubHttpHandler(config: HubHttpConfig) {
           // The path stored in the row is data: the service resolves it, confines it and hands back
           // an OPEN handle it already checked. Nothing here reopens the file by name.
           const { handle, size } = await service.exportFile(actor, projectId, decodeURIComponent(exportsMatch[2]))
-          response.writeHead(200, {
-            'content-type': 'application/zip', 'content-length': String(size), 'cache-control': 'no-store',
-            'x-content-type-options': 'nosniff', 'content-disposition': `attachment; filename="${safeFileName(record.file_name)}"`,
-            'x-dz23-sha256': record.sha256,
-          })
-          const stream = handle.createReadStream({ autoClose: true })
-          stream.on('error', () => response.destroy())
-          stream.pipe(response)
+          // Everything from here to the `finally` runs with a descriptor open, so nothing in
+          // between may leave without closing it — `pipe` did exactly that: it does not destroy
+          // its SOURCE when the destination dies, so closing the tab in the middle of a download
+          // left the read stream, and the descriptor under it, alive until the garbage collector
+          // happened to run (Node already warns about that, DEP0137). A `pipeline` tears both
+          // ends down on any outcome; the `finally` covers the rest, including an exception
+          // thrown between the open and the first byte.
+          try {
+            response.writeHead(200, {
+              'content-type': 'application/zip', 'content-length': String(size), 'cache-control': 'no-store',
+              'x-content-type-options': 'nosniff', 'content-disposition': `attachment; filename="${safeFileName(record.file_name)}"`,
+              'x-dz23-sha256': record.sha256,
+            })
+            await pipeline(handle.createReadStream({ autoClose: false }), response)
+          } catch {
+            // The headers are already on the wire: there is no status left to send. The client
+            // going away is the normal case here, not an error worth a log line.
+            if (!response.writableEnded) response.destroy()
+          } finally {
+            await handle.close().catch(() => undefined)
+          }
           return
         }
       }
@@ -172,6 +186,9 @@ function statusOf(error: unknown): number {
     if (error.code === 'CONFLICT' || error.code === 'SECRET_DETECTED') return 409
     if (error.code === 'TOO_LARGE') return 413
     if (error.code === 'RATE_LIMITED') return 429
+    // The Studio stopped waiting for a packaging call that never came back: it is a gateway
+    // timeout, not a bad request — nothing the client sent was wrong.
+    if (error.code === 'TIMEOUT') return 504
     if (error.code === 'NOT_EXECUTED') return 200
     return 400
   }

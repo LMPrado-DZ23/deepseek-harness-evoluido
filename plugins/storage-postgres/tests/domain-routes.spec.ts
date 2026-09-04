@@ -38,4 +38,12 @@ describe('Studio domain → postgres route gate', () => {
     await expect(assertDomainRoutes(root, ['patch.yml'])).rejects.toThrow(/studio_runs.*no 'postgres' route[\s\S]*studio_ghost/u)
     await expect(assertDomainRoutes(root, ['empty.yml'])).rejects.toThrow(/zero postgres routes is a failure/u)
   })
+
+  it('fails on zero patch files, instead of reporting DOMAIN_ROUTE_GATE=PASS domains=0 files=0', async () => {
+    // The per-file guard covered a patch with no routes; nothing covered a gate with no patches.
+    // With ROUTED_PATCH_FILES emptied there was nothing to read and everything was approved.
+    await expect(assertDomainRoutes(process.cwd(), [])).rejects.toThrow(/zero files is a failure/u)
+    // The real list still passes, so the guard did not simply turn the gate off.
+    await expect(assertDomainRoutes(process.cwd())).resolves.toHaveLength(ROUTED_PATCH_FILES.length)
+  })
 })

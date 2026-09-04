@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { basename, extname, relative, resolve, sep } from 'node:path'
 import ts from 'typescript'
 import { legacyRevision, pluginBaselineRevisions, portugueseText } from './i18n-baseline-shared.mjs'
+import { scanReadinessClaims } from './i18n-readiness.mjs'
 
 const root = process.cwd()
 const catalogPath = resolve(root, 'apps/studio-web/src/i18n/pt-BR.json')
@@ -44,13 +45,10 @@ for (const [path, value] of flatten(catalog)) {
 for (const [path, value] of flatten(serverCatalog)) {
   if (/\bpront[oa]s?\b/iu.test(value)) failures.push(`alegação de prontidão proibida no servidor em ${path}`)
 }
-for (const extra of ['apps/studio-web/src/i18n/pwa.pt-BR.json', 'apps/studio-web/src/i18n/hub.pt-BR.json', 'apps/studio-web/public/manifest.json']) {
-  const full = resolve(root, extra)
-  if (!exists(full)) continue
-  for (const [path, value] of flatten(JSON.parse(readFileSync(full, 'utf8')))) {
-    if (/\bpront[oa]s?\b/iu.test(value)) failures.push(`alegação de prontidão proibida em ${extra}:${path}`)
-  }
-}
+// Every extra catalogue — and every plugin's own — is read, and a missing one is a failure instead
+// of a silently skipped item (see scripts/i18n-readiness.mjs). The count is printed as evidence.
+const readiness = scanReadinessClaims(root)
+failures.push(...readiness.failures)
 if (/['"](?:READY|DONE|PUBLISHED|DEPLOYED)['"]/u.test(modelSource)) failures.push('estado absoluto proibido na máquina de estados')
 const appSource = readFileSync(resolve(root, 'apps/studio-web/src/App.tsx'), 'utf8')
 if (!appSource.includes('permanentTruthKind(state)')) failures.push('aviso permanente não está condicionado ao estado real')
@@ -99,7 +97,7 @@ if (failures.length > 0) {
   process.stderr.write(`I18N_GATE=FAIL\n- ${failures.join('\n- ')}\n`)
   process.exit(1)
 }
-process.stdout.write(`I18N_GATE=PASS locale=pt-BR keys=${flatten(catalog).length + flatten(serverCatalog).length + flatten(previewCatalog).length} plugin_literals_grandfathered=${grandfatheredHits.length} baseline=${baselineFile === undefined ? 'git' : 'file'}\n`)
+process.stdout.write(`I18N_GATE=PASS locale=pt-BR catalogs=${readiness.scanned.length} keys=${flatten(catalog).length + flatten(serverCatalog).length + flatten(previewCatalog).length} plugin_literals_grandfathered=${grandfatheredHits.length} baseline=${baselineFile === undefined ? 'git' : 'file'}\n`)
 if (grandfatheredHits.length > 0) process.stdout.write(`- pendentes de migração para catálogo (bases ${PLUGIN_BASELINES.join(',')}, não podem crescer):\n  ${grandfatheredHits.join('\n  ')}\n`)
 
 function flatten(value, prefix = '') {

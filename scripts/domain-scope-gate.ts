@@ -151,11 +151,23 @@ export async function discoverDomainDeclarations(root: string): Promise<DomainDe
   return declarations.sort(compareDeclaration)
 }
 
-export async function assertDomainScopeManifest(root: string): Promise<void> {
+/**
+ * `entries` is a parameter so a test can hand the gate an EMPTY manifest and see what it does with
+ * it — which is the whole point of the guard below, and cannot be reached while the classified list
+ * is a module constant.
+ */
+export async function assertDomainScopeManifest(root: string, entries: readonly DomainScopeEntry[] = STUDIO_DOMAIN_SCOPES): Promise<void> {
   const discovered = await discoverDomainDeclarations(root)
-  const classified = STUDIO_DOMAIN_SCOPES
+  const classified = entries
     .map(({ source, exportName }) => ({ source, exportName }))
     .sort(compareDeclaration)
+  // Two empty lists are EQUAL, and comparing them printed PASS: pointed at a tree with no
+  // `defineDomain` in it — a wrong root, a move of the plugins folder, a manifest emptied by a bad
+  // merge — the gate said every domain was classified because it had looked at none. By this
+  // project's rules a gate that inspected nothing has failed, so it says so and names both counts.
+  if (discovered.length === 0 || classified.length === 0) {
+    throw new Error(`Studio domain scope gate inspected nothing (discovered=${String(discovered.length)} classified=${String(classified.length)}); a gate with zero items is a failure, not a pass. Check that '${root}' is the repository root.`)
+  }
   if (JSON.stringify(discovered) !== JSON.stringify(classified)) {
     throw new Error(`Studio domain scope manifest is incomplete. Discovered=${JSON.stringify(discovered)} classified=${JSON.stringify(classified)}`)
   }

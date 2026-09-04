@@ -252,13 +252,29 @@ describe('integration hub service', () => {
     // A decision about nothing is not issued at all: the SMTP actions must name what they are for.
     await expect(service.requestApproval(admin, 'smtp.configured', 'smtp')).rejects.toMatchObject({ code: 'INVALID' })
     const first = await service.requestApproval(admin, 'smtp.configured', 'smtp', 'DZ23_APP_SMTP')
-    // Far more tickets than a person could ever confirm: the oldest are dropped instead of piling up.
-    for (let index = 0; index < MAX_LIVE_APPROVALS + 10; index += 1) await service.requestApproval(admin, 'smtp.tested', 'smtp', 'pessoa@example.test')
+    // Far more tickets than a person could ever confirm: the oldest are dropped instead of piling
+    // up. Each one is a DIFFERENT decision (a different recipient), because re-asking for the very
+    // same decision now replaces its own previous ticket instead of adding another live one.
+    for (let index = 0; index < MAX_LIVE_APPROVALS + 10; index += 1) await service.requestApproval(admin, 'smtp.tested', 'smtp', `pessoa${String(index)}@example.test`)
     const last = await service.requestApproval(admin, 'smtp.tested', 'smtp', 'pessoa@example.test')
     // The evicted one is simply gone — the person confirms again, nothing is granted by accident.
     await expect(service.configureSmtp(admin, 'DZ23_APP_SMTP', { approvalId: first.approval_id })).rejects.toThrow('confirmação')
     expect(last.approval_id).not.toBe(first.approval_id)
     expect(repository.eventRows.filter(event => event.action === 'approval.requested').every(event => event.subject_id === 'smtp')).toBe(true)
+  })
+
+  it('replaces the previous ticket for the same decision instead of leaving two of them live', async () => {
+    const { service } = await build({ emailTest: true, secrets: { DZ23_APP_SMTP: { present: true, shapeOk: true } } })
+    await service.configureSmtp(admin, 'DZ23_APP_SMTP', await ok(service, admin, 'smtp.configured', SMTP, 'DZ23_APP_SMTP'))
+    const abandoned = await service.requestApproval(admin, 'smtp.tested', SMTP, 'pessoa@example.test')
+    const onScreen = await service.requestApproval(admin, 'smtp.tested', SMTP, 'pessoa@example.test')
+    expect(onScreen.approval_id).not.toBe(abandoned.approval_id)
+    // The one the person never saw is gone; only the one they are looking at can be spent.
+    await expect(service.testSmtp(admin, 'pessoa@example.test', { approvalId: abandoned.approval_id })).rejects.toThrow('confirmação')
+    // A pending confirmation for a DIFFERENT recipient is a different decision and survives.
+    const outra = await service.requestApproval(admin, 'smtp.tested', SMTP, 'outra@example.test')
+    await service.requestApproval(admin, 'smtp.tested', SMTP, 'pessoa@example.test')
+    expect((await service.testSmtp(admin, 'outra@example.test', { approvalId: outra.approval_id })).result).toBe('SENT')
   })
 
   it('binds the confirmation to the workspace, the action and a fingerprint of what was confirmed', async () => {
@@ -580,6 +596,65 @@ describe('integration hub service', () => {
     expect(() => safeSegment('a/b')).toThrow(HubError)
     expect(() => safeSegment('id-1')).not.toThrow()
   })
+
+  /**
+   * `#recordApproval` used to write `approval.recorded` whenever the REQUEST carried an `approval`
+   * field. On a T0/T1 integration nothing is confirmed and no ticket is ever looked at, so
+   * `{"enabled":true,"approval":{"approval_id":"qualquer-coisa"}}` put "Confirmação da pessoa
+   * registrada" into the history of an action no person confirmed. An audit row anybody can ask for
+   * is not evidence of anything.
+   */
+  it('never records a confirmation for a tier that did not ask for one', async () => {
+    const { service, repository } = await build()
+    const registered = await service.register(admin, signed(manifest({ id: 'agenda', tier: 'T0', permissions: [] })))
+    const id = registered.integration.integration_id
+    expect(service.requiredApprovalTier(registered.integration)).toBeNull()
+    const enabled = await service.setEnabled(admin, id, true, { approvalId: 'inventado-pelo-cliente' })
+    expect(enabled.enabled).toBe(true)
+    expect(repository.eventRows.map(event => event.action)).not.toContain('approval.recorded')
+    // And the tier that DOES ask for one still records it, so the guard did not simply switch the row off.
+    const sensitive = await service.register(admin, signed(manifest({ id: 'correio', kind: 'skill', permissions: ['email.send'] })))
+    const sensitiveId = sensitive.integration.integration_id
+    await service.setEnabled(strongAdmin, sensitiveId, true, await ok(service, strongAdmin, 'integration.enabled', sensitiveId))
+    expect(repository.eventRows.map(event => event.action)).toContain('approval.recorded')
+  })
+
+  /**
+   * A single packaging call that never returns used to take its slot with it: the `finally` that
+   * releases it never ran, the in-flight entry for that project was never deleted, and after
+   * MAX_CONCURRENT_PACKAGING of them no workspace in the Studio could export again until restart.
+   * The slot is now bounded in time as well as in number.
+   */
+  it('gives the packaging slot back when a build never returns, and audits the refusal', async () => {
+    const runDirectory = await fakeRun()
+    const exportsRoot = await mkdtemp(join(tmpdir(), 'dz23-hub-exports-'))
+    scratch.push(exportsRoot)
+    const repository = new MemoryRepository()
+    let sequence = 0
+    let wedged = true
+    const service = new IntegrationHubService({
+      repository, exportsRoot, publisherKeys, channel: 'stable', runsRoot: dirname(runDirectory),
+      secrets: { inspect: async () => ({ present: false, shapeOk: false }) },
+      projects: {
+        project: (_actor, projectId) => ({ project_id: projectId, name: 'Agenda do Salão', state: 'VERIFIED_PROTOTYPE' }),
+        runs: () => [{ run_id: 'run-new', state: 'PASSED', started_at: '2026-09-03T11:00:00.000Z', attempt: 1, run_directory: runDirectory }],
+      },
+      packagingTimeoutMs: 30,
+      now: () => new Date('2026-09-04T00:00:00.000Z'), createId: () => `id-${++sequence}`,
+    })
+    // Every slot is held by a call that never comes back — a named pipe, a filesystem that stopped
+    // answering: whatever it is, it does not return and cannot be cancelled.
+    const original = repository.putExport
+    repository.putExport = async (value: StudioExport) => { if (wedged) await new Promise<void>(() => undefined); await original(value) }
+    const stuck = Array.from({ length: MAX_CONCURRENT_PACKAGING }, (_unused, index) => service.createExport(builder, `p${index}`))
+    for (const attempt of stuck) await expect(attempt).rejects.toMatchObject({ code: 'TIMEOUT', message: expect.stringContaining('parou de esperar') })
+    // The refusal is in the history, with the project it happened on.
+    expect(repository.eventRows.filter(event => event.detail === 'packaging-timeout')).toHaveLength(MAX_CONCURRENT_PACKAGING)
+    expect(repository.eventRows.at(-1)).toMatchObject({ action: 'export.created', outcome: 'failure' })
+    // And the Studio still exports: the slots came back, and so did the in-flight entry for a project.
+    wedged = false
+    await expect(service.createExport(builder, 'p0')).resolves.toMatchObject({ project_id: 'p0' })
+  }, 20_000)
 
   it('refuses to export an unverified project or a project whose run files are gone', async () => {
     const draft = await build({ projectState: 'PLAN_APPROVED', runDirectory: await fakeRun() })

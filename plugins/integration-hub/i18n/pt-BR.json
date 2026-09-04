@@ -32,7 +32,8 @@
     "devChannelNotPersonal": "O canal de desenvolvimento (channel: dev) só vale numa instalação pessoal: o Studio precisa estar escutando e aceitando pedidos apenas deste computador (loopback). Este Studio atende outros endereços, então ele não sobe com esse canal. Use channel: stable ou rode o Studio só localmente.",
     "exportTooManyEntries": "O protótipo tem arquivos demais para empacotar aqui (limite de {limit} arquivos). Nada foi gerado.",
     "exportTooManyListed": "O protótipo tem itens demais fora da lista permitida para listar um por um no pacote (limite de {limit}). Nada foi gerado.",
-    "exportUnavailable": "O arquivo do pacote não está mais neste computador. Gere o pacote de novo.",
+    "exportTimedOut": "O Studio parou de esperar o empacotamento deste protótipo: passou do tempo máximo e nada foi gerado. Tente de novo; se repetir, fale com quem administra o servidor.",
+  "exportUnavailable": "O arquivo do pacote não está mais neste computador. Gere o pacote de novo.",
     "internal": "Algo deu errado do lado do Studio. Nada foi alterado; tente de novo."
   },
   "export": {

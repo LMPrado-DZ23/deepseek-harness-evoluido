@@ -37,6 +37,29 @@ async function runDirectory(): Promise<string> {
 }
 
 describe('prototype export package', () => {
+  /**
+   * `open()` on a FIFO in O_RDONLY without O_NONBLOCK waits for a writer that may never come. A
+   * named pipe where a file is expected therefore froze `packagePrototype` itself — and, above it,
+   * the global packaging slot and the in-flight entry of that project, for good. Both opens that
+   * read a file are covered: the acceptance report, which is opened BEFORE anything asks whether it
+   * is a regular file, and any entry of the walk that becomes a pipe between `readdir` and `open`.
+   * The test times out (and fails) instead of hanging the suite if the flag is taken away again.
+   */
+  it('does not hang on a FIFO where a file is expected, and names it as an exclusion', async () => {
+    const root = await runDirectory()
+    await rmDir(join(root, 'evidence', 'appspec-report.json'), { force: true })
+    execFileSync('mkfifo', [join(root, 'evidence', 'appspec-report.json')])
+    execFileSync('mkfifo', [join(root, '.next', 'standalone', 'pipe.js')])
+    const built = await packagePrototype({ runDirectory: root, projectName: 'Agenda', runId: 'run-fifo' })
+    const entries = readZip(built.archive)
+    expect(entries.map(entry => entry.name)).not.toContain('evidence/appspec-report.json')
+    expect(entries.map(entry => entry.name)).not.toContain('app/pipe.js')
+    const left = entries.find(entry => entry.name === 'EXCLUIDOS.txt')!.data.toString('utf8')
+    // Named, not silently dropped: both of them.
+    expect(left).toContain('evidence/appspec-report.json')
+    expect(left).toContain('app/pipe.js')
+  }, 15_000)
+
   it('keeps a dependency\'s data/ folder but drops the app\'s own at any depth, and keeps names containing ".."', async () => {
     const root = await runDirectory()
     await mkdir(join(root, '.next', 'standalone', 'node_modules', 'lib', 'data'), { recursive: true })

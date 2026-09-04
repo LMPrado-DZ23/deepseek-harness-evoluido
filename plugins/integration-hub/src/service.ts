@@ -117,6 +117,20 @@ export const EXPORT_WINDOW_MS = 10 * 60 * 1000
  */
 export const MAX_CONCURRENT_PACKAGING = 2
 
+/**
+ * Ceiling on how long ONE packaging call may hold a slot. Packaging is bounded work — the walk of
+ * one verified build, under `EXPORT_LIMIT_BYTES` — and even on a slow disk that is minutes. Ten
+ * minutes is therefore far above any honest run and far below "forever". It exists because a single
+ * call that never returns (a named pipe where a file was expected, a network filesystem that stops
+ * answering, a device that blocks on read) used to take the slot with it: two of those and no
+ * workspace in this Studio could export again until it was restarted.
+ *
+ * The wedged call is ABANDONED, not killed — Node cannot cancel a pending syscall — so the honest
+ * statement is "the Studio stopped waiting", and that is what the person is told and what the
+ * history records. Freeing the slot is what keeps one stuck build from becoming everybody's outage.
+ */
+export const PACKAGING_SLOT_TIMEOUT_MS = 10 * 60 * 1000
+
 export interface HubServiceOptions {
   repository: HubRepository
   secrets: SecretInspector
@@ -131,12 +145,14 @@ export interface HubServiceOptions {
    */
   runsRoot: string
   emailTest?: EmailTestPort | undefined
+  /** Only for tests: how long a packaging slot may be held before the caller is refused (default `PACKAGING_SLOT_TIMEOUT_MS`). */
+  packagingTimeoutMs?: number
   now?: () => Date
   createId?: () => string
 }
 
 export class HubError extends Error {
-  constructor(readonly code: 'FORBIDDEN' | 'NOT_FOUND' | 'INVALID' | 'CONFLICT' | 'NOT_EXECUTED' | 'SECRET_DETECTED' | 'TOO_LARGE' | 'RATE_LIMITED', message: string) { super(message) }
+  constructor(readonly code: 'FORBIDDEN' | 'NOT_FOUND' | 'INVALID' | 'CONFLICT' | 'NOT_EXECUTED' | 'SECRET_DETECTED' | 'TOO_LARGE' | 'RATE_LIMITED' | 'TIMEOUT', message: string) { super(message) }
 }
 
 /** Export refusals keep their own class so the HTTP boundary can answer 409/413 instead of a flat 400. */
@@ -178,6 +194,14 @@ export class IntegrationHubService {
   readonly #exportsInFlight = new Map<string, Promise<StudioExport>>()
   /** Export attempts per workspace inside the window, so a flood costs the flooder and nobody else. */
   readonly #exportAttempts = new Map<string, number[]>()
+  /**
+   * How many events this process believes one workspace has stored. Retention used to read the
+   * WHOLE table, filter it and sort it on every audited action — including the refusals an attacker
+   * can ask for by the thousand — which made each audited action more expensive than the last. The
+   * count is kept here, recomputed the first time a workspace is seen and after every sweep, so the
+   * full pass happens when the ceiling is actually in play and not before.
+   */
+  readonly #eventCounts = new Map<string, number>()
   /**
    * Strictly increasing millisecond stamp. `Date.now()` repeats inside one
    * millisecond, and two writes that share a stamp cannot be ordered — the
@@ -296,6 +320,16 @@ export class IntegrationHubService {
       requires_strong_identity: tier === 'T3',
     }
     const bucket = this.#sweepApprovals(actor)
+    // Re-issuing the SAME decision replaces the previous ticket instead of adding a second one.
+    // Asking again is what a person does when the tier changed under them, or when they abandoned
+    // the first confirmation: the discarded ticket used to stay usable for its whole TTL, next to
+    // the one on the screen — two live confirmations for one decision, only one of them ever seen.
+    // The comparison includes the FINGERPRINT, so a confirmation pending for another recipient or
+    // another alias is a different decision and is left alone.
+    for (const [id, live] of bucket) {
+      if (live.action === action && live.subject_id === subject && live.user_id === actor.userId
+        && live.session_id === actor.sessionId && live.fingerprint === ticket.fingerprint) bucket.delete(id)
+    }
     bucket.set(ticket.approval_id, ticket)
     await this.#audit(actor, 'approval.requested', subject, 'success', `${action} ${tier}`)
     return ticket
@@ -367,6 +401,7 @@ export class IntegrationHubService {
   async setEnabled(actor: HubActor, integrationId: string, enabled: boolean, approval?: HubApproval): Promise<StudioIntegration> {
     this.#authorize(actor, 'integrations.manage')
     const current = this.#integration(actor, integrationId)
+    let confirmed = false
     if (enabled) {
       // Turning something OFF always reduces exposure and needs no confirmation; turning it ON is the guarded direction.
       if (current.verification === 'invalid') {
@@ -377,7 +412,7 @@ export class IntegrationHubService {
         await this.#audit(actor, 'integration.enabled', integrationId, 'failure', t('errors.manifestUnverified'))
         throw new HubError('FORBIDDEN', this.options.channel === 'dev' ? t('errors.devChannelCapability') : t('errors.manifestUnverified'))
       }
-      await this.#requireTier(actor, this.#enforcedTier(current), approval, 'integration.enabled', integrationId, securityFingerprint(current))
+      confirmed = await this.#requireTier(actor, this.#enforcedTier(current), approval, 'integration.enabled', integrationId, securityFingerprint(current))
     }
     // The record decides the tier, so it must not be written back from a snapshot taken before the
     // confirmation: a concurrent re-registration that RAISED the tier would be silently undone.
@@ -390,7 +425,7 @@ export class IntegrationHubService {
     }
     const updated = { ...latest, enabled, updated_at: this.#stamp() }
     await this.options.repository.putIntegration(updated)
-    if (enabled) await this.#recordApproval(actor, approval, 'integration.enabled', integrationId)
+    await this.#recordApproval(actor, confirmed, 'integration.enabled', integrationId)
     await this.#audit(actor, enabled ? 'integration.enabled' : 'integration.disabled', integrationId, 'success', updated.effective_tier)
     return updated
   }
@@ -410,7 +445,7 @@ export class IntegrationHubService {
     if (!parsed.success) throw new HubError('INVALID', t('errors.secretRefInvalid'))
     // The confirmation has to have been given for THIS alias: the fingerprint of the reference is
     // what separates a decision about `DZ23_APP_SMTP` from one about somebody else's credential.
-    await this.#requireTier(actor, SMTP_TIER, approval, 'smtp.configured', SMTP_SUBJECT, this.#fingerprint(actor, 'smtp.configured', SMTP_SUBJECT, parsed.data))
+    const confirmed = await this.#requireTier(actor, SMTP_TIER, approval, 'smtp.configured', SMTP_SUBJECT, this.#fingerprint(actor, 'smtp.configured', SMTP_SUBJECT, parsed.data))
     const inspection = await this.options.secrets.inspect(parsed.data)
     // A refusal is part of the history too: "nothing happened" must be visible, not absent. The
     // subject is the SMTP setting itself — the alias is a name in the vault and never a subject id.
@@ -430,7 +465,7 @@ export class IntegrationHubService {
       enabled: true, secret_ref: parsed.data, created_by: existing?.created_by ?? actor.userId, created_at: existing?.created_at ?? now, updated_at: now,
     }
     await this.options.repository.putIntegration(record)
-    await this.#recordApproval(actor, approval, 'smtp.configured', record.integration_id)
+    await this.#recordApproval(actor, confirmed, 'smtp.configured', record.integration_id)
     // Proof that a reference was configured, never the reference: the alias names a credential, and
     // an audit that spells it out hands a reader the shopping list for the vault.
     await this.#audit(actor, 'smtp.configured', record.integration_id, 'success', minimizeSecretRef(parsed.data))
@@ -449,9 +484,9 @@ export class IntegrationHubService {
       throw new HubError('INVALID', t('errors.invalidRequest'))
     }
     // Bound to the address the person confirmed: a ticket taken for one recipient cannot send to another.
-    await this.#requireTier(actor, this.#enforcedTier(record), approval, 'smtp.tested', SMTP_SUBJECT, this.#fingerprint(actor, 'smtp.tested', SMTP_SUBJECT, recipient.data))
+    const confirmed = await this.#requireTier(actor, this.#enforcedTier(record), approval, 'smtp.tested', SMTP_SUBJECT, this.#fingerprint(actor, 'smtp.tested', SMTP_SUBJECT, recipient.data))
     if (this.options.emailTest === undefined) {
-      await this.#recordApproval(actor, approval, 'smtp.tested', record.integration_id)
+      await this.#recordApproval(actor, confirmed, 'smtp.tested', record.integration_id)
       await this.#audit(actor, 'smtp.tested', record.integration_id, 'not-executed', t('errors.smtpTestDisabled'))
       return { result: 'NOT_EXECUTED', message: t('errors.smtpTestDisabled') }
     }
@@ -462,7 +497,7 @@ export class IntegrationHubService {
       await this.#audit(actor, 'smtp.tested', record.integration_id, 'failure', error instanceof Error ? error.name : 'Error')
       throw new HubError('INVALID', t('errors.smtpTestFailed'))
     }
-    await this.#recordApproval(actor, approval, 'smtp.tested', record.integration_id)
+    await this.#recordApproval(actor, confirmed, 'smtp.tested', record.integration_id)
     // The audit trail proves a test happened; it does not need to keep somebody's address in the clear.
     await this.#audit(actor, 'smtp.tested', record.integration_id, 'success', minimizeRecipient(recipient.data))
     return { result: 'SENT', message: t('audit.smtpTested') }
@@ -500,15 +535,33 @@ export class IntegrationHubService {
     // One build per workspace is not enough on its own: two DIFFERENT workspaces packaging at the
     // same time each walk a whole run and hash it, on the one thread this Studio has. Past this
     // ceiling the caller waits its turn instead of making everybody's Studio slow at once.
-    return this.#withPackagingSlot(() => this.#createExport(actor, projectId))
+    try {
+      return await this.#withPackagingSlot(() => this.#createExport(actor, projectId))
+    } catch (error) {
+      // A refusal nobody can see is not a refusal: the person is told the Studio stopped waiting,
+      // and the history says so too, with the project it happened on.
+      if (error instanceof HubError && error.code === 'TIMEOUT') await this.#audit(actor, 'export.created', projectId, 'failure', 'packaging-timeout')
+      throw error
+    }
   }
 
   async #withPackagingSlot<T>(work: () => Promise<T>): Promise<T> {
     while (this.#packaging >= MAX_CONCURRENT_PACKAGING) await new Promise<void>(release => this.#packagingQueue.push(release))
     this.#packaging += 1
+    let timer: ReturnType<typeof setTimeout> | undefined
     try {
-      return await work()
+      // The slot is bounded in TIME, not only in number. `work()` that outlives the ceiling keeps
+      // running (nothing here can cancel a syscall), but it no longer owns a slot and no longer
+      // holds the queue behind it.
+      return await Promise.race([
+        work(),
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => reject(new HubError('TIMEOUT', t('errors.exportTimedOut'))), this.options.packagingTimeoutMs ?? PACKAGING_SLOT_TIMEOUT_MS)
+          timer.unref?.()
+        }),
+      ])
     } finally {
+      if (timer !== undefined) clearTimeout(timer)
       this.#packaging -= 1
       this.#packagingQueue.shift()?.()
     }
@@ -556,7 +609,10 @@ export class IntegrationHubService {
     } catch (error) {
       // The class of refusal survives to the boundary: a package refused because it carries a secret
       // is not the same answer as a malformed request, and the documents promised those statuses.
-      if (error instanceof ExportError) return refuse(error.code, new HubError(exportErrorCode(error.code), error.code === 'INVALID_PATH' ? t('errors.internal') : error.message))
+      // The DETAIL travels with the code: three different refusals used to reach the history as a
+      // bare `TOO_LARGE`, and a package refused for carrying a secret named the file on the screen
+      // and nowhere in the row. The detail is a path or a reason, never the matched text.
+      if (error instanceof ExportError) return refuse(`${error.code} ${error.detail}`, new HubError(exportErrorCode(error.code), error.code === 'INVALID_PATH' ? t('errors.internal') : error.message))
       // Anything else (an unreadable folder, a name the filesystem returns as invalid UTF-8) used to
       // leave through the front door as a 500 with no audit at all — the person saw "something went
       // wrong" and the history said nothing had been attempted.
@@ -667,8 +723,10 @@ export class IntegrationHubService {
    * T2 needs a confirmation recorded for exactly that tier, T3 needs that plus
    * a recent strong identity on this session. Every refusal is audited.
    */
-  async #requireTier(actor: HubActor, tier: PolicyTier, approval: HubApproval | undefined, action: HubEvent['action'], subjectId: string, fingerprint: string): Promise<void> {
-    if (!needsApproval(tier)) return
+  async #requireTier(actor: HubActor, tier: PolicyTier, approval: HubApproval | undefined, action: HubEvent['action'], subjectId: string, fingerprint: string): Promise<boolean> {
+    // The RETURN VALUE is what may be written into the history afterwards: `true` only when this
+    // tier really demanded a confirmation and a real ticket was found, checked and burned here.
+    if (!needsApproval(tier)) return false
     // Looked up INSIDE this workspace's bucket: an id from another org or tenant is not even visible here.
     const bucket = this.#approvals.get(this.#scope(actor))
     const ticket = approval === undefined ? undefined : bucket?.get(approval.approvalId)
@@ -704,11 +762,19 @@ export class IntegrationHubService {
     // Honoured now: burned synchronously, with no await in between, so two requests presenting the
     // same id cannot both get through.
     bucket?.delete(ticket.approval_id)
+    return true
   }
 
-  /** Written only after the action itself succeeded: a confirmation in the history means something happened. */
-  async #recordApproval(actor: HubActor, approval: HubApproval | undefined, action: HubEvent['action'], subjectId: string): Promise<void> {
-    if (approval === undefined) return
+  /**
+   * Written only after the action itself succeeded, and only when a confirmation was actually
+   * required and actually spent. It used to be written whenever the request CARRIED an `approval`
+   * field: on a T0/T1 integration, where nothing is confirmed and no ticket is checked, sending
+   * `{"approval":{"approval_id":"anything"}}` was enough to put "Confirmação da pessoa registrada"
+   * in the history of an action nobody confirmed. The audit trail is read by people as proof; a row
+   * that can be asked for is not proof of anything.
+   */
+  async #recordApproval(actor: HubActor, confirmed: boolean, action: HubEvent['action'], subjectId: string): Promise<void> {
+    if (!confirmed) return
     await this.#audit(actor, 'approval.recorded', subjectId, 'success', action)
   }
 
@@ -754,10 +820,25 @@ export class IntegrationHubService {
    * another's rows.
    */
   async #retainEvents(actor: HubActor): Promise<void> {
+    const key = this.#scope(actor)
+    const known = this.#eventCounts.get(key)
+    // Unknown workspace: count once, from the table. Known: one more than last time — the write
+    // that got us here. Either way the expensive pass below runs only when the ceiling is reached.
+    const count = known === undefined ? this.options.repository.events().filter(value => this.#sameScope(actor, value)).length : known + 1
+    this.#eventCounts.set(key, count)
+    // The map is keyed by a workspace that had to authenticate, and a dropped entry only costs one
+    // recount; it is bounded like every other per-workspace map in this service.
+    if (this.#eventCounts.size > MAX_APPROVAL_SCOPES) {
+      for (const scope of this.#eventCounts.keys()) {
+        if (this.#eventCounts.size <= MAX_APPROVAL_SCOPES) break
+        if (scope !== key) this.#eventCounts.delete(scope)
+      }
+    }
+    if (count <= EVENTS_RETAINED_PER_TENANT) return
     const mine = this.options.repository.events().filter(value => this.#sameScope(actor, value))
-    if (mine.length <= EVENTS_RETAINED_PER_TENANT) return
     const oldest = [...mine].sort(newestFirst).slice(EVENTS_RETAINED_PER_TENANT)
     for (const event of oldest) await this.options.repository.deleteEvent(event.event_id)
+    this.#eventCounts.set(key, Math.min(mine.length, EVENTS_RETAINED_PER_TENANT))
   }
 }
 

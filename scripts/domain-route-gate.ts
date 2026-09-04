@@ -61,10 +61,17 @@ export async function reportDomainRoutes(root: string, files: readonly string[] 
 
 export async function assertDomainRoutes(root: string, files: readonly string[] = ROUTED_PATCH_FILES): Promise<DomainRouteReport[]> {
   const reports = await reportDomainRoutes(root, files)
-  const failures = reports.flatMap(report => [
+  const failures: string[] = []
+  // Zero routes in ONE patch was already a failure; zero PATCHES was still a pass, and printed
+  // `domains=0 files=0` as if it had checked something. With `ROUTED_PATCH_FILES` emptied — by a
+  // merge, by a rename of a patch — the gate had nothing to read and approved everything. The same
+  // holds for the expected side: no Studio domains means the comparison is vacuous.
+  if (files.length === 0) failures.push('no Harness patch was checked: a gate with zero files is a failure, not a pass')
+  if (expectedDomainNames().length === 0) failures.push('no Studio domain was found in scripts/studio-domain-specs.ts: a gate with zero domains is a failure, not a pass')
+  failures.push(...reports.flatMap(report => [
     ...report.missing.map(name => `${report.file}: domain '${name}' has no 'postgres' route (it would fall back to the json backend)`),
     ...report.unknown.map(name => `${report.file}: route '${name}' does not match any Studio domain in scripts/studio-domain-specs.ts`),
-  ])
+  ]))
   if (reports.some(report => report.routed.length === 0)) failures.push('a patch with zero postgres routes is a failure, not a pass')
   if (failures.length > 0) throw new Error(`DOMAIN_ROUTE_GATE=FAIL\n${failures.join('\n')}`)
   return reports

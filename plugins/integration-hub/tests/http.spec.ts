@@ -1,5 +1,6 @@
-import { generateKeyPairSync, sign } from 'node:crypto'
-import { chmod, mkdir, mkdtemp, open, rm, writeFile } from 'node:fs/promises'
+import { generateKeyPairSync, randomBytes, sign } from 'node:crypto'
+import { existsSync } from 'node:fs'
+import { chmod, mkdir, mkdtemp, open, readdir, rm, writeFile } from 'node:fs/promises'
 import { createServer, request as httpRequest } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -209,6 +210,41 @@ describe('integration hub HTTP boundary', () => {
     }
     expect(last).toBe(429)
   }, 30_000)
+
+  /**
+   * `stream.pipe(response)` does NOT destroy its source when the destination dies: closing the tab
+   * in the middle of a download left the read stream — and the descriptor under it — alive until
+   * the garbage collector happened to run. The existing download tests never saw it because a 22 KB
+   * package fits in one write and the stream reaches EOF before anybody can abort. This one builds
+   * a package that needs many writes, aborts the client on the first byte, and counts descriptors.
+   */
+  it.skipIf(!existsSync('/proc/self/fd'))('does not leak a descriptor when the client aborts a download mid-stream', async () => {
+    const { request, standalone, origin } = await fixture()
+    // Hex: it does not compress away (so the package really is megabytes) and its alphabet cannot
+    // spell any of the shapes the secret scan refuses.
+    await writeFile(join(standalone, 'bundle.js'), randomBytes(6 * 1024 * 1024).toString('hex'))
+    const created = await request('/projects/p1/exports', { method: 'POST', body: '{}' })
+    expect(created.status).toBe(201)
+    const { export: record } = await created.json() as { export: { export_id: string; size_bytes: number } }
+    expect(record.size_bytes).toBeGreaterThan(1024 * 1024)
+    const path = `/api/studio/hub/projects/p1/exports/${record.export_id}/download`
+    const [hostname, port] = origin.slice('http://'.length).split(':')
+    const abortMidDownload = async (): Promise<void> => new Promise<void>(resolve => {
+      const client = httpRequest({ hostname, port: Number(port), path, headers: { host: `${hostname!}:${port!}`, cookie: `${SESSION_COOKIE}=session` } }, response => {
+        response.once('data', () => { client.destroy(); setTimeout(resolve, 5) })
+      })
+      client.on('error', () => resolve())
+      client.end()
+    })
+    const openDescriptors = async (): Promise<number> => (await readdir('/proc/self/fd')).length
+    // One download first, so anything opened lazily on the first request is already open.
+    await abortMidDownload()
+    const before = await openDescriptors()
+    for (let attempt = 0; attempt < 20; attempt += 1) await abortMidDownload()
+    await new Promise(resolve => setTimeout(resolve, 250))
+    // Twenty aborted downloads used to mean twenty descriptors that nothing ever closed.
+    expect(await openDescriptors() - before).toBeLessThanOrEqual(2)
+  }, 60_000)
 
   it('maps role errors to 403 for viewers and builders', async () => {
     const viewer = await fixture('viewer')

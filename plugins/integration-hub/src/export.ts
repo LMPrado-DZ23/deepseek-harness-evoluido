@@ -122,8 +122,19 @@ export const ENV_EXAMPLE = [
   '',
 ].join('\n')
 
+/**
+ * Why an export was refused, in words the history can keep. The four refusals used to reach the audit
+ * trail as their CODE alone: three different `TOO_LARGE` reasons — too many bytes, too many files, a
+ * list of exclusions too long — were one indistinguishable row, and a package refused for carrying a
+ * secret named the file on the screen and nowhere in the history. The detail is a path or a count,
+ * never the matched text: naming the file is what makes the refusal actionable, quoting it would put
+ * the secret in the row.
+ */
+export type ExportRefusal =
+  | 'run-missing' | 'invalid-path' | 'bytes-over-limit' | 'too-many-entries' | 'too-many-listed' | `secret-in ${string}`
+
 export class ExportError extends Error {
-  constructor(readonly code: 'RUN_MISSING' | 'INVALID_PATH' | 'TOO_LARGE' | 'SECRET_DETECTED', message: string) { super(message) }
+  constructor(readonly code: 'RUN_MISSING' | 'INVALID_PATH' | 'TOO_LARGE' | 'SECRET_DETECTED', message: string, readonly detail: ExportRefusal = 'invalid-path') { super(message) }
 }
 
 /**
@@ -148,13 +159,24 @@ interface Walk {
 /** Add a line to a published list, or refuse the export when the list would grow without bound. */
 function note(walk: Walk, list: string[], line: string): void {
   if (walk.excluded.length + walk.uninspected.length >= walk.maxListed) {
-    throw new ExportError('TOO_LARGE', t('errors.exportTooManyListed', { limit: walk.maxListed }))
+    throw new ExportError('TOO_LARGE', t('errors.exportTooManyListed', { limit: walk.maxListed }), 'too-many-listed')
   }
   list.push(line)
 }
 
 const O_NOFOLLOW = (constants.O_NOFOLLOW ?? 0) as number
 const O_DIRECTORY = (constants.O_DIRECTORY ?? 0) as number
+/**
+ * `open()` on a FIFO in `O_RDONLY` WITHOUT this flag blocks until somebody opens the other end —
+ * forever, if nobody ever does. A named pipe sitting where a file is expected (`evidence/appspec-report.json`,
+ * or any entry that becomes one between `readdir` and `open`) therefore froze packaging itself, and with
+ * it the packaging slot, the in-flight entry for that project and, after two of them, every export in the
+ * Studio. With `O_NONBLOCK` the open returns immediately, `stat()` says it is not a regular file, and it
+ * becomes a NAMED exclusion like every other special file. On a regular file the flag changes nothing.
+ */
+const O_NONBLOCK = (constants.O_NONBLOCK ?? 0) as number
+/** Read-only, no symlink, and never blocking on a pipe or a device: the only way this module opens a file. */
+const O_READ_FILE = (constants.O_RDONLY | O_NOFOLLOW | O_NONBLOCK) as number
 /**
  * Linux gives an `openat` equivalent reachable from JavaScript: a path under `/proc/self/fd/<fd>`
  * resolves from the OPEN inode instead of walking the names again. That is what closes the directory
@@ -203,9 +225,9 @@ export async function packagePrototype(source: ExportSource, limits: ExportLimit
   // Every top folder now goes through the confinement `evidence/` already had: resolved by real path
   // and required to stay inside the run directory before a descriptor is opened on it.
   const standalone = await confinedChild(root, join('.next', 'standalone'))
-  if (standalone === undefined) throw new ExportError('RUN_MISSING', t('errors.exportRunMissing'))
+  if (standalone === undefined) throw new ExportError('RUN_MISSING', t('errors.exportRunMissing'), 'run-missing')
   const opened = await openDirectory(standalone)
-  if (opened === undefined) throw new ExportError('RUN_MISSING', t('errors.exportRunMissing'))
+  if (opened === undefined) throw new ExportError('RUN_MISSING', t('errors.exportRunMissing'), 'run-missing')
   try { await collect(opened, standalone, 'app', walk) } finally { await opened.close().catch(() => undefined) }
   await walkFolder(await confinedChild(root, join('.next', 'static')), 'app/.next/static', walk)
   await walkFolder(await confinedChild(root, 'public'), 'app/public', walk)
@@ -219,7 +241,7 @@ export async function packagePrototype(source: ExportSource, limits: ExportLimit
     if (await pathExists(join(root, 'evidence'))) note(walk, walk.excluded, `${reportName} (${t('export.excludedShortcut')})`)
   } else {
     const report = join(evidence, 'appspec-report.json')
-    const handle = await open(report, (constants.O_RDONLY | O_NOFOLLOW) as number).catch(() => undefined)
+    const handle = await open(report, O_READ_FILE).catch(() => undefined)
     if (handle === undefined) {
       if (await pathExists(report)) note(walk, walk.excluded, `${reportName} (${t('export.excludedShortcut')})`)
     } else {
@@ -229,9 +251,9 @@ export async function packagePrototype(source: ExportSource, limits: ExportLimit
           note(walk, walk.excluded, `${reportName} (${t('export.excludedSpecialFile')})`)
         } else {
           walk.budget.remaining -= info.size
-          if (walk.budget.remaining < 0) throw new ExportError('TOO_LARGE', t('errors.exportTooLarge', { limitMb: EXPORT_LIMIT_BYTES / (1024 * 1024) }))
+          if (walk.budget.remaining < 0) throw new ExportError('TOO_LARGE', t('errors.exportTooLarge', { limitMb: EXPORT_LIMIT_BYTES / (1024 * 1024) }), 'bytes-over-limit')
           const data = await handle.readFile()
-          if (findSecret('appspec-report.json', data) !== null) throw new ExportError('SECRET_DETECTED', t('errors.exportSecretFound', { file: reportName }))
+          if (findSecret('appspec-report.json', data) !== null) throw new ExportError('SECRET_DETECTED', t('errors.exportSecretFound', { file: reportName }), `secret-in ${reportName}`)
           walk.entries.push({ name: reportName, data })
         }
       } finally {
@@ -317,7 +339,7 @@ async function collect(handle: FileHandle, path: string, prefix: string, walk: W
   const items = (await readdir(reference, { withFileTypes: true })).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
   for (const item of items) {
     // `readdir` returns single path segments; anything else means the platform lied and the walk stops.
-    if (item.name === '' || item.name === '.' || item.name === '..' || item.name.includes('/')) throw new ExportError('INVALID_PATH', `unsafe name under ${prefix}`)
+    if (item.name === '' || item.name === '.' || item.name === '..' || item.name.includes('/')) throw new ExportError('INVALID_PATH', `unsafe name under ${prefix}`, 'invalid-path')
     const name = posix.join(prefix, item.name)
     // A skipped shortcut is named too: an app missing files with no explanation is its own kind of lie.
     if (item.isSymbolicLink()) { note(walk, walk.excluded, `${name} (${t('export.excludedShortcut')})`); continue }
@@ -344,12 +366,12 @@ async function collect(handle: FileHandle, path: string, prefix: string, walk: W
     // BEFORE the file is opened, read, scanned or compressed: the archive cannot hold more entries
     // than this, so finding out at write time would mean reading and deflating a whole tree first.
     if (walk.entries.length + RESERVED_ENTRIES >= walk.maxEntries) {
-      throw new ExportError('TOO_LARGE', t('errors.exportTooManyEntries', { limit: walk.maxEntries }))
+      throw new ExportError('TOO_LARGE', t('errors.exportTooManyEntries', { limit: walk.maxEntries }), 'too-many-entries')
     }
     // Opened ONCE, without following a symlink, and both the size and the bytes come from that same
     // handle: `lstat` then `readFile` left a window where the entry could be swapped for a link to
     // something else between the check and the read.
-    const file = await open(join(reference, item.name), (constants.O_RDONLY | O_NOFOLLOW) as number).catch(() => undefined)
+    const file = await open(join(reference, item.name), O_READ_FILE).catch(() => undefined)
     if (file === undefined) { note(walk, walk.excluded, `${name} (${t('export.excludedShortcut')})`); continue }
     let data: Buffer
     let info: Stats
@@ -358,7 +380,7 @@ async function collect(handle: FileHandle, path: string, prefix: string, walk: W
       // Not a regular file any more (or never was): named, not skipped — and certainly not read.
       if (!info.isFile()) { note(walk, walk.excluded, `${name} (${t('export.excludedSpecialFile')})`); continue }
       walk.budget.remaining -= info.size
-      if (walk.budget.remaining < 0) throw new ExportError('TOO_LARGE', t('errors.exportTooLarge', { limitMb: EXPORT_LIMIT_BYTES / (1024 * 1024) }))
+      if (walk.budget.remaining < 0) throw new ExportError('TOO_LARGE', t('errors.exportTooLarge', { limitMb: EXPORT_LIMIT_BYTES / (1024 * 1024) }), 'bytes-over-limit')
       data = await file.readFile()
     } finally {
       await file.close().catch(() => undefined)
@@ -371,7 +393,7 @@ async function collect(handle: FileHandle, path: string, prefix: string, walk: W
       scanName = item.name.slice(0, item.name.lastIndexOf('.'))
       scanData = plain
     }
-    if (findSecret(scanName, scanData) !== null) throw new ExportError('SECRET_DETECTED', t('errors.exportSecretFound', { file: name }))
+    if (findSecret(scanName, scanData) !== null) throw new ExportError('SECRET_DETECTED', t('errors.exportSecretFound', { file: name }), `secret-in ${name}`)
     // Packaged, but nobody looked inside it: the package says so rather than implying it was checked.
     if (!isScannable(scanName)) note(walk, walk.uninspected, name)
     walk.entries.push({ name, data, mode: (info.mode & 0o111) !== 0 ? 0o755 : 0o644 })

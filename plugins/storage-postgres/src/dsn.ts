@@ -37,6 +37,40 @@ const TLS_URI_KEYS: readonly string[] = [
   'ssl_min_protocol_version', 'ssl_max_protocol_version', 'uselibpqcompat',
 ]
 
+/**
+ * Where each stripped key goes when the client tools are given the same connection. Everything
+ * libpq understands is FORWARDED: `channel_binding`, the two protocol-version floors, `sslsni`,
+ * `sslnegotiation`, `sslcertmode` and `sslcompression` used to be stripped from the URI and then
+ * simply dropped, so `pg_dump` connected with LESS assurance than the operator had configured —
+ * silently, which is the worst way to weaken somebody's TLS.
+ */
+const TOOL_ENV_BY_KEY: Readonly<Record<string, string>> = {
+  sslrootcert: 'PGSSLROOTCERT', sslcert: 'PGSSLCERT', sslkey: 'PGSSLKEY', sslpassword: 'PGSSLPASSWORD',
+  sslcrl: 'PGSSLCRL', sslcrldir: 'PGSSLCRLDIR', channel_binding: 'PGCHANNELBINDING',
+  ssl_min_protocol_version: 'PGSSLMINPROTOCOLVERSION', ssl_max_protocol_version: 'PGSSLMAXPROTOCOLVERSION',
+  sslnegotiation: 'PGSSLNEGOTIATION', sslsni: 'PGSSLSNI', sslcertmode: 'PGSSLCERTMODE',
+  sslcompression: 'PGSSLCOMPRESSION',
+}
+
+/**
+ * The keys that have no destination BECAUSE the policy replaces them: they are three spellings of
+ * "encrypt or do not", and that single decision is re-supplied as `PGSSLMODE` from `--ssl`. This is
+ * the module's whole purpose, it is documented at the top, and it is the only silent override here.
+ */
+const POLICY_OWNED_KEYS: ReadonlySet<string> = new Set(['ssl', 'sslmode', 'requiressl'])
+
+/**
+ * A stripped key with nowhere to go is a refusal, not a shrug. Dropping it would mean the client
+ * tools connect under settings the operator did not choose and was never told about; refusing names
+ * the key and leaves the decision with the person who wrote the DSN.
+ */
+function assertEveryCarriedKeyHasADestination(carried: ReadonlyMap<string, string>): void {
+  const orphans = [...carried.keys()].filter(key => !POLICY_OWNED_KEYS.has(key) && TOOL_ENV_BY_KEY[key] === undefined)
+  if (orphans.length > 0) {
+    throw new Error(`the PostgreSQL DSN carries ${orphans.join(', ')}, which this build cannot pass on to pg_dump/pg_restore; remove it from the DSN instead of letting the client tools connect without it`)
+  }
+}
+
 export interface PostgresTlsOptions {
   rejectUnauthorized: boolean
   ca?: string
@@ -124,6 +158,7 @@ export function postgresToolConnection(dsn: string, policy: TlsPolicy, base: Nod
   const carried = stripTlsParams(url)
   const password = url.password
   url.password = ''
+  assertEveryCarriedKeyHasADestination(carried)
   const env: NodeJS.ProcessEnv = {
     ...base,
     PGSSLMODE: policy === 'off' ? 'disable' : policy === 'require' ? 'require' : 'verify-full',
@@ -131,13 +166,16 @@ export function postgresToolConnection(dsn: string, policy: TlsPolicy, base: Nod
   }
   // A password on the command line is readable by every user on the box; in the
   // environment it is not. libpq reads it from here.
+  //
+  // What this function does NOT do is remove one. A DSN with no password plus a `PGPASSWORD` the
+  // operator exported (or a `~/.pgpass`) is a normal, documented libpq setup: `pg` connected fine
+  // with it, everything validated, and only the mandatory `pg_dump` failed — with pg_dump's own
+  // message, which never mentions that this tool had deleted the variable. This function sets what
+  // it itself provides and leaves the operator's environment alone.
   if (password !== '') env.PGPASSWORD = decodeURIComponent(password)
-  else delete env.PGPASSWORD
-  const forward: Record<string, string> = {
-    sslrootcert: 'PGSSLROOTCERT', sslcert: 'PGSSLCERT', sslkey: 'PGSSLKEY', sslpassword: 'PGSSLPASSWORD',
-    sslcrl: 'PGSSLCRL', sslcrldir: 'PGSSLCRLDIR',
-  }
-  for (const [key, variable] of Object.entries(forward)) {
+  for (const [key, variable] of Object.entries(TOOL_ENV_BY_KEY)) {
+    // Under `off` there is no TLS to configure, and the TLS material this function strips from the
+    // URI must not survive in the environment as if the URI had kept it.
     const value = policy === 'off' ? undefined : carried.get(key)
     if (value === undefined || value === '') delete env[variable]
     else env[variable] = value

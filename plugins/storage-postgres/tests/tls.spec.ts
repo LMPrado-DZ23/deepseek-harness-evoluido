@@ -156,9 +156,42 @@ describe('TLS policy is the single authority', () => {
     expect(tool.env.PGPASSWORD).toBe('s3cr3t')
     expect(tool.env.PGSSLMODE).toBe('verify-full')
     expect(tool.env.PGSSLROOTCERT).toBe(validCa)
-    // A DSN without a password must not leave a stale one behind either.
-    expect(postgresToolConnection(`postgresql://someone@127.0.0.1/dz23`, 'off', { PGPASSWORD: 'stale' }).env.PGPASSWORD).toBeUndefined()
     expect(postgresToolConnection(`postgresql://someone@127.0.0.1/dz23`, 'off').env.PGSSLMODE).toBe('disable')
+  })
+
+  // This assertion used to read the other way round: a DSN without a password DELETED the
+  // operator's PGPASSWORD. A DSN with no password next to a PGPASSWORD in the environment is a
+  // normal, documented libpq setup — node-pg connected, everything validated, and only the
+  // mandatory pg_dump failed, with pg_dump's own message, which never says this tool removed the
+  // variable. The function sets what it provides; it does not unset what the operator exported.
+  it('never removes a password the operator exported, and never invents one', () => {
+    const inherited = postgresToolConnection('postgresql://someone@127.0.0.1/dz23', 'off', { PGPASSWORD: 'do-nao-cofre', PGPASSFILE: '/home/op/.pgpass' })
+    expect(inherited.env.PGPASSWORD).toBe('do-nao-cofre')
+    expect(inherited.env.PGPASSFILE).toBe('/home/op/.pgpass')
+    // Nothing invented either: with no password anywhere, libpq is left to find its own (.pgpass).
+    expect(Object.keys(postgresToolConnection('postgresql://someone@127.0.0.1/dz23', 'off').env)).not.toContain('PGPASSWORD')
+    // A password in the DSN still wins over a stale one in the environment.
+    expect(postgresToolConnection('postgresql://someone:nova@127.0.0.1/dz23', 'off', { PGPASSWORD: 'velha' }).env.PGPASSWORD).toBe('nova')
+  })
+
+  it('forwards every hardening parameter libpq understands instead of dropping it in silence', () => {
+    const query = [
+      'channel_binding=require', 'ssl_min_protocol_version=TLSv1.3', 'ssl_max_protocol_version=TLSv1.3',
+      'sslnegotiation=direct', 'sslsni=1', 'sslcertmode=require', 'sslcompression=0',
+    ].join('&')
+    const tool = postgresToolConnection(`postgresql://someone:s3cr3t@127.0.0.1/dz23?${query}`, 'verify-full')
+    expect(tool.dsn).not.toMatch(/channel_binding|ssl/iu)
+    expect(tool.env).toMatchObject({
+      PGCHANNELBINDING: 'require', PGSSLMINPROTOCOLVERSION: 'TLSv1.3', PGSSLMAXPROTOCOLVERSION: 'TLSv1.3',
+      PGSSLNEGOTIATION: 'direct', PGSSLSNI: '1', PGSSLCERTMODE: 'require', PGSSLCOMPRESSION: '0',
+    })
+  })
+
+  it('refuses a stripped parameter it cannot pass on, instead of connecting with less than was asked', () => {
+    // `uselibpqcompat` is stripped from the URI and has no libpq environment variable: forwarding is
+    // impossible, so the only honest answers are "refuse" or "weaken silently".
+    expect(() => postgresToolConnection('postgresql://someone:s3cr3t@127.0.0.1/dz23?uselibpqcompat=1', 'verify-full'))
+      .toThrow(/uselibpqcompat/u)
   })
 
   it('refuses a DSN whose TLS policy cannot be enforced', async () => {
