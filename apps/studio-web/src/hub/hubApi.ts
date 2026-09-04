@@ -4,7 +4,7 @@
  * answers `/api/` requests made offline with 503 `{error:"OFFLINE"}`; that
  * becomes a typed error so the panel can say "you are offline" in words.
  */
-import type { HubAction, HubOutcome, IntegrationKind, PolicyTier, Verification } from './presentation'
+import type { Approval, HubAction, HubOutcome, IntegrationKind, PolicyTier, Verification } from './presentation'
 
 export const HUB_API_PREFIX = '/api/studio/hub'
 export const APPS_API_PREFIX = '/api/studio/apps'
@@ -15,6 +15,8 @@ export type Integration = {
   enabled: boolean; secret_ref: string | null; updated_at: string
   /** Server decision (signature + release channel): the panel offers "enable" only when this is true. */
   can_enable: boolean
+  /** Server decision (D16): the confirmation the person has to give before this can be turned on, or `null`. */
+  requires_approval_tier: PolicyTier | null
 }
 export type SmtpState = { configured: boolean; secret_ref: string | null; tier: PolicyTier }
 export type SmtpTest = { result: 'SENT' | 'NOT_EXECUTED'; message: string }
@@ -54,11 +56,11 @@ export function createHubApi(transport: HubTransport = browserTransport) {
   const hub = <T>(path: string, init?: RequestInit) => call<T>(HUB_API_PREFIX, path, init)
   return {
     smtp: () => hub<SmtpState>('/smtp'),
-    configureSmtp: (secretRef: string) => hub<{ configured: true; secret_ref: string; tier: PolicyTier }>('/smtp', { method: 'POST', body: JSON.stringify({ secret_ref: secretRef }) }),
-    testSmtp: (to: string) => hub<SmtpTest>('/smtp/test', { method: 'POST', body: JSON.stringify({ to }) }),
+    configureSmtp: (secretRef: string, approval?: Approval) => hub<{ configured: true; secret_ref: string; tier: PolicyTier }>('/smtp', { method: 'POST', body: JSON.stringify({ secret_ref: secretRef, approval }) }),
+    testSmtp: (to: string, approval?: Approval) => hub<SmtpTest>('/smtp/test', { method: 'POST', body: JSON.stringify({ to, approval }) }),
     integrations: () => hub<{ channel: 'stable' | 'dev'; integrations: Integration[] }>('/integrations'),
     register: (manifest: unknown) => hub<{ integration: Integration; reasons: string[] }>('/integrations', { method: 'POST', body: JSON.stringify(manifest) }),
-    setEnabled: (integrationId: string, enabled: boolean) => hub<{ integration: Integration }>(`/integrations/${encodeURIComponent(integrationId)}/enabled`, { method: 'POST', body: JSON.stringify({ enabled }) }).then(value => value.integration),
+    setEnabled: (integrationId: string, enabled: boolean, approval?: Approval) => hub<{ integration: Integration }>(`/integrations/${encodeURIComponent(integrationId)}/enabled`, { method: 'POST', body: JSON.stringify({ enabled, approval }) }).then(value => value.integration),
     exports: (projectId: string) => hub<{ exports: ExportRecord[] }>(`/projects/${encodeURIComponent(projectId)}/exports`).then(value => value.exports),
     createExport: (projectId: string) => hub<{ export: ExportRecord }>(`/projects/${encodeURIComponent(projectId)}/exports`, { method: 'POST', body: '{}' }).then(value => value.export),
     downloadHref: (projectId: string, exportId: string) => `${HUB_API_PREFIX}/projects/${encodeURIComponent(projectId)}/exports/${encodeURIComponent(exportId)}/download`,

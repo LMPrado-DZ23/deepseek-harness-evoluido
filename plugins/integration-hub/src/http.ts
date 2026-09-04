@@ -9,7 +9,7 @@ import { TenancyError, type StudioTenancyService } from '@dz23-studio/tenancy'
 import { z } from 'zod'
 import { t } from './i18n.js'
 import { ExportError } from './export.js'
-import { HubError, type HubActor, type IntegrationHubService } from './service.js'
+import { HubError, strongIdentityFresh, type HubActor, type IntegrationHubService } from './service.js'
 
 const JSON_LIMIT = 64 * 1024
 
@@ -34,11 +34,14 @@ export interface HubHttpConfig {
   readonly allowedHosts: readonly string[]
   readonly allowedOrigins: readonly string[]
   readonly prefix?: string
+  readonly now?: () => Date
 }
 
-const enabledSchema = z.object({ enabled: z.boolean() }).strict()
-const smtpSchema = z.object({ secret_ref: z.string() }).strict()
-const smtpTestSchema = z.object({ to: z.string() }).strict()
+/** The person's confirmation, as the interface recorded it. The tier is explicit so a T2 click can never stand in for a T3 one. */
+const approvalSchema = z.object({ approved: z.boolean(), tier: z.enum(['T0', 'T1', 'T2', 'T3']) }).strict()
+const enabledSchema = z.object({ enabled: z.boolean(), approval: approvalSchema.optional() }).strict()
+const smtpSchema = z.object({ secret_ref: z.string(), approval: approvalSchema.optional() }).strict()
+const smtpTestSchema = z.object({ to: z.string(), approval: approvalSchema.optional() }).strict()
 
 export function createHubHttpHandler(config: HubHttpConfig) {
   assertRouteContracts(HUB_ROUTE_CONTRACTS)
@@ -54,7 +57,7 @@ export function createHubHttpHandler(config: HubHttpConfig) {
 
       if (method === 'GET' && route === '/integrations') {
         // `can_enable` is the server's decision (signature + channel) so the interface never guesses policy.
-        return json(response, 200, { channel: service.channel, integrations: service.list(actor).map(item => ({ ...item, can_enable: service.canEnable(item) })) })
+        return json(response, 200, { channel: service.channel, integrations: service.list(actor).map(item => ({ ...item, can_enable: service.canEnable(item), requires_approval_tier: service.requiredApprovalTier(item) })) })
       }
       if (method === 'POST' && route === '/integrations') {
         const registered = await service.register(actor, await readJson(request))
@@ -63,18 +66,18 @@ export function createHubHttpHandler(config: HubHttpConfig) {
       const enabledMatch = /^\/integrations\/([^/]+)\/enabled$/u.exec(route)
       if (method === 'POST' && enabledMatch !== null) {
         const body = enabledSchema.parse(await readJson(request))
-        const integration = await service.setEnabled(actor, decodeURIComponent(enabledMatch[1]!), body.enabled)
-        return json(response, 200, { integration: { ...integration, can_enable: service.canEnable(integration) } })
+        const integration = await service.setEnabled(actor, decodeURIComponent(enabledMatch[1]!), body.enabled, body.approval)
+        return json(response, 200, { integration: { ...integration, can_enable: service.canEnable(integration), requires_approval_tier: service.requiredApprovalTier(integration) } })
       }
       if (method === 'GET' && route === '/smtp') return json(response, 200, service.smtp(actor))
       if (method === 'POST' && route === '/smtp') {
         const body = smtpSchema.parse(await readJson(request))
-        const record = await service.configureSmtp(actor, body.secret_ref)
+        const record = await service.configureSmtp(actor, body.secret_ref, body.approval)
         return json(response, 200, { configured: true, secret_ref: record.secret_ref, tier: record.effective_tier })
       }
       if (method === 'POST' && route === '/smtp/test') {
         const body = smtpTestSchema.parse(await readJson(request))
-        return json(response, 200, await service.testSmtp(actor, body.to))
+        return json(response, 200, await service.testSmtp(actor, body.to, body.approval))
       }
       const exportsMatch = /^\/projects\/([^/]+)\/exports(?:\/([^/]+)\/download)?$/u.exec(route)
       if (exportsMatch !== null) {
@@ -117,7 +120,8 @@ async function authenticatedActor(request: IncomingMessage, config: HubHttpConfi
   }
   const authorization = config.tenancy.authorizationFor(session.user_id, session.org_id, session.tenant_id)
   if (authorization === undefined) throw new HubError('FORBIDDEN', t('errors.membershipRequired'))
-  return { ...authorization, sessionId: session.session_id }
+  // Strong identity is read from the session that was just authenticated — never from anything the client sends.
+  return { ...authorization, sessionId: session.session_id, strongIdentityVerified: strongIdentityFresh(session, config.now?.() ?? new Date()) }
 }
 
 /** Only errors this module knows carry their message to the client; everything else becomes a fixed sentence (no paths, no stack details). */
@@ -133,7 +137,7 @@ function statusOf(error: unknown): number {
   if (error instanceof IdentityError) return error.code === 'locked' ? 429 : 401
   if (error instanceof TenancyError) return error.code === 'not-found' ? 404 : error.code === 'forbidden' ? 403 : 400
   if (error instanceof HubError) return error.code === 'NOT_FOUND' ? 404 : error.code === 'FORBIDDEN' ? 403 : error.code === 'CONFLICT' ? 409 : error.code === 'NOT_EXECUTED' ? 200 : 400
-  if (error instanceof ExportError) return error.code === 'RUN_MISSING' ? 409 : error.code === 'TOO_LARGE' ? 413 : 500
+  if (error instanceof ExportError) return error.code === 'RUN_MISSING' ? 409 : error.code === 'TOO_LARGE' ? 413 : error.code === 'SECRET_DETECTED' ? 409 : 500
   if (error instanceof z.ZodError || error instanceof SyntaxError || error instanceof URIError) return 400
   if (error instanceof Error && 'code' in error && (error as { code?: string }).code === 'NOT_FOUND') return 404
   if (error instanceof Error && 'code' in error && (error as { code?: string }).code === 'FORBIDDEN') return 403

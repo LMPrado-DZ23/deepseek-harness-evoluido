@@ -27,6 +27,41 @@ export interface ExportPackage {
 const EXCLUDED_ANYWHERE = new Set(['.git'])
 const EXCLUDED_AT_APP_ROOT = new Set(['data', 'test-results', 'playwright-report', '.cache'])
 const EXCLUDED_FILES = [/^\.env(\..*)?$/u, /\.sqlite(-journal|-wal|-shm)?$/u, /^studio-capture\.json$/u, /^studio-auth-state\.json$/u, /\.pem$/u, /\.key$/u]
+
+/**
+ * What may leave the machine, by extension: an allow-list, so a file type
+ * nobody thought about is left out instead of shipped. Nothing is dropped in
+ * silence — every excluded path is written into `EXCLUIDOS.txt` inside the
+ * package, in plain words.
+ */
+const ALLOWED_EXTENSIONS = new Set([
+  '.js', '.mjs', '.cjs', '.json', '.map', '.ts', '.tsx', '.jsx', '.mts', '.cts',
+  '.html', '.htm', '.css', '.scss', '.txt', '.md', '.xml', '.webmanifest', '.csv',
+  '.svg', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.ico', '.bmp',
+  '.woff', '.woff2', '.ttf', '.otf', '.eot', '.wasm', '.node', '.br', '.gz',
+  '.mp4', '.webm', '.mp3', '.ogg', '.pdf', '.lock', '.yml', '.yaml',
+])
+const ALLOWED_EXTENSIONLESS = new Set(['LICENSE', 'LICENCE', 'NOTICE', 'README', 'AUTHORS', 'CHANGELOG', 'COPYING', 'Dockerfile', 'server'])
+
+/**
+ * Shapes that are a secret wherever they appear, with effectively no false
+ * positives: a private key block, a provider key with its own prefix, or a
+ * connection string carrying a password. Finding one FAILS the export — the
+ * package is never written with the secret quietly inside it.
+ */
+const SECRET_PATTERNS: readonly RegExp[] = [
+  /-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----/u,
+  /\bAKIA[0-9A-Z]{16}\b/u,
+  /\bASIA[0-9A-Z]{16}\b/u,
+  /\bghp_[A-Za-z0-9]{36}\b/u,
+  /\bgithub_pat_[A-Za-z0-9_]{22,}/u,
+  /\bxox[baprs]-[A-Za-z0-9-]{10,}/u,
+  /\bsk-(?:live|proj)-[A-Za-z0-9_-]{16,}/u,
+  /\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|amqp|redis):\/\/[^\s:@/]+:[^\s:@/]+@/u,
+]
+/** Text types the scan reads; binaries are packaged without scanning (a key hidden inside a PNG is out of scope, and saying so is the honest answer). */
+const SCANNED_EXTENSIONS = new Set(['.js', '.mjs', '.cjs', '.json', '.map', '.ts', '.tsx', '.jsx', '.mts', '.cts', '.html', '.htm', '.css', '.scss', '.txt', '.md', '.xml', '.webmanifest', '.csv', '.svg', '.yml', '.yaml', '.lock', ''])
+const SCAN_LIMIT_BYTES = 4 * 1024 * 1024
 /** Total bytes of the packaged files; a prototype beyond this is refused in words instead of exhausting memory. */
 export const EXPORT_LIMIT_BYTES = 200 * 1024 * 1024
 
@@ -42,7 +77,7 @@ export const ENV_EXAMPLE = [
 ].join('\n')
 
 export class ExportError extends Error {
-  constructor(readonly code: 'RUN_MISSING' | 'INVALID_PATH' | 'TOO_LARGE', message: string) { super(message) }
+  constructor(readonly code: 'RUN_MISSING' | 'INVALID_PATH' | 'TOO_LARGE' | 'SECRET_DETECTED', message: string) { super(message) }
 }
 
 /**
@@ -56,11 +91,16 @@ export async function packagePrototype(source: ExportSource): Promise<ExportPack
   if (!(await isDirectory(standalone))) throw new ExportError('RUN_MISSING', t('errors.exportRunMissing'))
   const entries: ZipEntry[] = []
   const budget = { remaining: EXPORT_LIMIT_BYTES }
-  await collect(standalone, 'app', entries, budget, true)
-  if (await isDirectory(join(root, '.next', 'static'))) await collect(join(root, '.next', 'static'), 'app/.next/static', entries, budget, false)
-  if (await isDirectory(join(root, 'public'))) await collect(join(root, 'public'), 'app/public', entries, budget, false)
+  const excluded: string[] = []
+  await collect(standalone, 'app', entries, budget, true, excluded)
+  if (await isDirectory(join(root, '.next', 'static'))) await collect(join(root, '.next', 'static'), 'app/.next/static', entries, budget, false, excluded)
+  if (await isDirectory(join(root, 'public'))) await collect(join(root, 'public'), 'app/public', entries, budget, false, excluded)
   const report = join(root, 'evidence', 'appspec-report.json')
   if (await isFile(report)) entries.push({ name: 'evidence/appspec-report.json', data: await readFile(report) })
+  if (excluded.length > 0) {
+    excluded.sort((left, right) => (left < right ? -1 : left > right ? 1 : 0))
+    entries.push({ name: 'EXCLUIDOS.txt', data: Buffer.from([`# ${t('export.excludedTitle')}`, '', t('export.excludedIntro'), '', ...excluded, ''].join('\n'), 'utf8') })
+  }
   entries.push({ name: 'README.md', data: Buffer.from(readme(source), 'utf8') })
   entries.push({ name: '.env.example', data: Buffer.from(ENV_EXAMPLE, 'utf8') })
   entries.sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0)) // byte order: locale-independent
@@ -77,24 +117,48 @@ function readme(source: ExportSource): string {
   ].join('\n')
 }
 
-async function collect(directory: string, prefix: string, entries: ZipEntry[], budget: { remaining: number }, appRoot: boolean): Promise<void> {
+function extensionOf(name: string): string {
+  const dot = name.lastIndexOf('.')
+  return dot <= 0 ? '' : name.slice(dot).toLowerCase()
+}
+
+/** True when this file may be packaged at all. */
+export function isExportable(name: string): boolean {
+  const extension = extensionOf(name)
+  return extension === '' ? ALLOWED_EXTENSIONLESS.has(name) : ALLOWED_EXTENSIONS.has(extension)
+}
+
+/** The secret shape found in this file, or `null`. Fail-closed: the caller turns a hit into a refused export. */
+export function findSecret(name: string, data: Buffer): string | null {
+  if (!SCANNED_EXTENSIONS.has(extensionOf(name)) || data.length > SCAN_LIMIT_BYTES) return null
+  const text = data.toString('utf8')
+  for (const pattern of SECRET_PATTERNS) if (pattern.test(text)) return name
+  return null
+}
+
+async function collect(directory: string, prefix: string, entries: ZipEntry[], budget: { remaining: number }, appRoot: boolean, excluded: string[]): Promise<void> {
   const items = (await readdir(directory, { withFileTypes: true })).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
   for (const item of items) {
     const full = join(directory, item.name)
     if (item.isSymbolicLink()) continue
     if (item.isDirectory()) {
-      if (EXCLUDED_ANYWHERE.has(item.name) || (appRoot && EXCLUDED_AT_APP_ROOT.has(item.name))) continue
-      await collect(full, posix.join(prefix, item.name), entries, budget, false)
+      if (EXCLUDED_ANYWHERE.has(item.name) || (appRoot && EXCLUDED_AT_APP_ROOT.has(item.name))) { excluded.push(`${posix.join(prefix, item.name)}/`); continue }
+      await collect(full, posix.join(prefix, item.name), entries, budget, false, excluded)
       continue
     }
     if (!item.isFile()) continue
-    if (EXCLUDED_FILES.some(pattern => pattern.test(item.name))) continue
+    const name = posix.join(prefix, item.name)
+    if (EXCLUDED_FILES.some(pattern => pattern.test(item.name))) { excluded.push(name); continue }
+    if (!isExportable(item.name)) { excluded.push(name); continue }
     // Names come from readdir, so a literal `..` segment cannot appear; `assertEntryName` in the writer re-checks every segment.
-    if (relative(directory, full).startsWith('..')) throw new ExportError('INVALID_PATH', `unsafe path ${posix.join(prefix, item.name)}`)
+    if (relative(directory, full).startsWith('..')) throw new ExportError('INVALID_PATH', `unsafe path ${name}`)
     const info = await lstat(full)
     budget.remaining -= info.size
     if (budget.remaining < 0) throw new ExportError('TOO_LARGE', t('errors.exportTooLarge', { limitMb: EXPORT_LIMIT_BYTES / (1024 * 1024) }))
-    entries.push({ name: posix.join(prefix, item.name), data: await readFile(full), mode: (info.mode & 0o111) !== 0 ? 0o755 : 0o644 })
+    const data = await readFile(full)
+    const secret = findSecret(item.name, data)
+    if (secret !== null) throw new ExportError('SECRET_DETECTED', t('errors.exportSecretFound', { file: name }))
+    entries.push({ name, data, mode: (info.mode & 0o111) !== 0 ? 0o755 : 0o644 })
   }
 }
 

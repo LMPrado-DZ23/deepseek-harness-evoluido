@@ -22,14 +22,17 @@ const TIER_RANK: Readonly<Record<PolicyTier, number>> = { T0: 0, T1: 1, T2: 2, T
 export const UNVERIFIED_FLOOR: PolicyTier = 'T2'
 
 /**
- * D16 policy floor per kind: an integration that talks to the outside world
+ * D16 policy floor per kind: reading the vault is irreversible in the sense
+ * that matters here — a leaked credential cannot be un-leaked — so it sits at
+ * T3 and needs strong identity; an integration that talks to the outside world
  * (external MCP, outbound network, e-mail) never sits below T2; one that can
  * write inside the workspace never sits below T1; an unknown tier is T2.
  */
 export function policyFloor(kind: IntegrationKind, manifest: IntegrationManifest): PolicyTier {
   const external = manifest.endpoint !== undefined && !isLoopback(manifest.endpoint)
   const outbound = manifest.permissions.some(permission => permission === 'network.outbound' || permission === 'email.send')
-  const writes = manifest.permissions.some(permission => permission === 'write.project' || permission === 'secrets.read')
+  const writes = manifest.permissions.some(permission => permission === 'write.project')
+  if (manifest.permissions.includes('secrets.read')) return 'T3'
   if ((kind === 'mcp' && external) || kind === 'smtp' || outbound) return 'T2'
   if (kind === 'mcp' || kind === 'webhook' || writes) return 'T1'
   return 'T0'

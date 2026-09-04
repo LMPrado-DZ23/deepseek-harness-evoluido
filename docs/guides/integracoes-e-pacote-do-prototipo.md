@@ -31,16 +31,43 @@ pelo responsável pelo servidor.
 
 Níveis de confiança (D16): **T0** só leitura local · **T1** escreve no seu espaço de trabalho ·
 **T2** fala com serviços externos · **T3** acesso amplo. O nível efetivo é sempre o mais
-restritivo entre o que o manifesto declara e o que a natureza da integração exige.
+restritivo entre o que o manifesto declara e o que a natureza da integração exige. Uma
+integração que pede para **ler segredos do cofre** é sempre T3, mesmo que o manifesto diga
+outra coisa.
+
+**O que o nível muda na prática, na hora de ligar:**
+
+- **T0 e T1** — liga direto, e fica registrado no histórico.
+- **T2** — a tela pergunta antes, em uma frase, o que você está autorizando. Se você cancelar,
+  **nada é enviado**. A mesma pergunta aparece ao guardar o nome do e-mail do aplicativo e ao
+  disparar um teste de envio.
+- **T3** — além da confirmação na tela, o Studio pede a sua **passkey nesta sessão**. Se você
+  entrou só com código por e-mail, a ação é recusada em palavras e a integração continua
+  desligada. Isso não é um aviso que dá para passar por cima: é o servidor que recusa.
+
+Desligar uma integração nunca pede confirmação — reduzir o que está ligado é sempre permitido.
+Uma assinatura que **não confere** (adulterada, ou chave trocada) nunca é ligada, nem no canal
+de desenvolvimento.
 
 ### Baixar o protótipo
 
 Só um projeto **verificado** pode ser baixado. O pacote (`.zip`) traz o aplicativo, o relatório
 da verificação, um `README` em linguagem comum e um `.env.example` só com **nomes** de
 variáveis. Ficam de fora os seus dados (`data/`), arquivos `.env`, bancos SQLite, códigos
-capturados e chaves. A tela mostra o **SHA-256** do pacote; o download traz o mesmo valor no
-cabeçalho `x-dz23-sha256` para conferência. Pedir o pacote de novo para a mesma verificação
-devolve o mesmo arquivo.
+capturados e chaves. Além dessa lista, só entram tipos de arquivo conhecidos: um tipo em que
+ninguém pensou fica de fora em vez de embarcar por acidente. **Nada fica de fora em segredo** —
+dentro do pacote há um `EXCLUIDOS.txt` com o nome de tudo que não entrou (só os nomes; o
+conteúdo não sai do seu computador).
+
+Antes de fechar o pacote, o Studio confere se algum arquivo tem cara de senha ou chave privada
+(bloco de chave, chave de provedor, endereço de banco com senha). Se achar, **o pacote não é
+gerado** e a tela diz qual arquivo — é melhor recusar do que entregar um segredo dentro de um
+`.zip`. Vale dizer o limite com honestidade: essa conferência não lê arquivos binários e não
+promete achar todo segredo possível; ela fecha as formas que dá para reconhecer sem errar.
+
+A tela mostra o **SHA-256** do pacote; o download traz o mesmo valor no cabeçalho
+`x-dz23-sha256` para conferência. Pedir o pacote de novo para a mesma verificação devolve o
+mesmo arquivo.
 
 ### Histórico
 

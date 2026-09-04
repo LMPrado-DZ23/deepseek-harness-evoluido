@@ -24,17 +24,33 @@ ligá-la, e levar o protótipo verificado consigo.
    regras que qualquer biblioteca JSON reproduz. Resultado: `verified`,
    `unverified` (sem assinatura ou publicador sem chave) ou `invalid`
    (assinatura não confere → registro recusado e auditado).
-2. **Tier efetivo = o mais restritivo (D16).** Piso por natureza: MCP externo,
-   `network.outbound` e `email.send` nunca abaixo de **T2** (D16 exige "nunca
-   abaixo de T1" para MCP externo; T2 é mais restritivo e cumpre "conflito →
-   mais restritivo"); MCP local, webhook, `write.project` e `secrets.read`
-   nunca abaixo de T1; tier ausente ou inválido → T2. **Qualquer coisa abaixo
+2. **Tier efetivo = o mais restritivo (D16).** Piso por natureza:
+   `secrets.read` nunca abaixo de **T3** (um segredo vazado não se desvaza);
+   MCP externo, `network.outbound` e `email.send` nunca abaixo de **T2** (D16
+   exige "nunca abaixo de T1" para MCP externo; T2 é mais restritivo e cumpre
+   "conflito → mais restritivo"); MCP local, webhook e `write.project` nunca
+   abaixo de T1; tier ausente ou inválido → T2. **Qualquer coisa abaixo
    de `verified` é limitada a pelo menos T2**, independentemente do que o
    manifesto declare. No canal `stable` (padrão), uma integração não
    verificada **não pode ser ligada** (403 e evento de recusa); o canal `dev`
-   (`DZ23_HUB_CHANNEL=dev`) permite ligar para desenvolvimento local e a
-   interface avisa isso em palavras. `GET /integrations` devolve `channel` e
-   `can_enable` decididos pelo servidor: a interface nunca adivinha política.
+   permite ligar uma **não assinada** para desenvolvimento local e a interface
+   avisa isso em palavras — uma assinatura que **não confere** (`invalid`)
+   nunca é ligada, em canal nenhum. O canal é lido **só da configuração do
+   profile**: uma variável de ambiente não pode rebaixar a política de um
+   Studio em execução (revisão do Codex na M5). `GET /integrations` devolve
+   `channel`, `can_enable` e `requires_approval_tier` decididos pelo servidor:
+   a interface nunca adivinha política.
+2-B. **Os tiers são exigidos, não só exibidos (correção da M5).** Antes de
+   ligar uma integração, configurar o e-mail do aplicativo ou disparar o teste
+   de envio, o serviço exige o que o tier pede: **T0/T1** seguem e ficam
+   registrados; **T2** exige uma confirmação da pessoa para **exatamente esse
+   nível** (uma confirmação de outro nível não serve); **T3** exige a
+   confirmação **e** uma passkey recente na mesma sessão (mesma janela do
+   plugin de identidade), com falha fechada se não houver. Desligar nunca pede
+   confirmação — reduzir exposição é sempre permitido. Cada confirmação aceita
+   vira o evento `approval.recorded`; cada recusa vira um evento de falha. No
+   painel, a confirmação é um passo visível com o que está sendo autorizado em
+   palavras, e cancelar não envia nada ao servidor.
 3. **SMTP do aplicativo gerado só por referência (D17).** A pessoa informa o
    **nome** do segredo no cofre (`^[A-Z][A-Z0-9_]{2,63}$`, ex.: `DZ23_APP_SMTP`);
    o Studio confere pelo seam `ctx.credentials` que ele existe e tem o formato
@@ -47,15 +63,29 @@ ligá-la, e levar o protótipo verificado consigo.
    provedor nunca chegam crus à pessoa nem ao audit (só a classe do erro):
    mensagens de SMTP e de `JSON.parse` podem carregar trechos do segredo.
 4. **Pacote do protótipo reproduzível e sem dados.** Só projeto em
-   `VERIFIED_PROTOTYPE` com a última run `PASSED` cujos arquivos ainda existam.
+   `VERIFIED_PROTOTYPE` com a última run `PASSED` cujos arquivos ainda existam
+   **dentro da pasta de execuções** (`runsRoot`, o mesmo padrão do
+   prompt-to-app): o caminho da run é resolvido por `realpath` e recusado se
+   cair fora, se for link simbólico para fora ou se subir por `..`, **antes de
+   qualquer leitura**. Ids e nomes de organização/espaço que viram caminho são
+   validados como um único segmento (sem separador, sem `..`, sem controle).
    O ZIP (escritor/leitor próprio, sem dependência, timestamps fixos, bits
    Unix de tipo de arquivo) leva `app/**` do `.next/standalone`,
    `app/.next/static`, `app/public`, `evidence/appspec-report.json`, um
    `README.md` em linguagem comum e `.env.example` só com nomes. Ficam de fora:
    `data/` e caches **na raiz do app** (o `data/` de bibliotecas entra),
    `.env*`, `*.sqlite*`, `studio-capture.json`, `studio-auth-state.json`,
-   `*.pem`, `*.key`, links simbólicos e `.git`. Orçamento de 200 MB → recusa em
-   palavras (413). Mesma run e mesmos bytes → o mesmo registro é devolvido, sem
+   `*.pem`, `*.key`, links simbólicos e `.git`. Além dessa lista de proibidos,
+   vale uma **lista de permitidos por extensão**: um tipo de arquivo em que
+   ninguém pensou fica de fora em vez de embarcar. Nada sai em silêncio — todo
+   arquivo ou pasta que ficou de fora é listado **por nome** (nunca por
+   conteúdo) em `EXCLUIDOS.txt` dentro do pacote. Sobre o que entra roda uma
+   **varredura fail-closed**: bloco de chave privada, chave de provedor com
+   prefixo próprio (AWS, GitHub, Slack, Stripe/OpenAI) ou string de conexão com
+   senha **derrubam a exportação inteira** (`SECRET_DETECTED`, 409), dizendo
+   qual arquivo. O limite honesto: arquivos binários não são varridos, e a
+   varredura não promete achar todo segredo possível — ela fecha as formas que
+   não têm falso positivo. Orçamento de 200 MB → recusa em palavras (413). Mesma run e mesmos bytes → o mesmo registro é devolvido, sem
    arquivo gêmeo. Arquivo em `~/.dz23-studio/exports/<org>/<tenant>/` com 0600;
    o caminho nunca sai pela API; download com `Content-Disposition` saneado e
    `x-dz23-sha256`.
@@ -65,10 +95,16 @@ ligá-la, e levar o protótipo verificado consigo.
    por `assertRouteContracts` na subida). Só erros conhecidos levam sua
    mensagem ao cliente; qualquer outro vira uma frase fixa (nada de caminho,
    `ENOENT`, `URIError` ou texto de biblioteca).
-6. **Auditoria também das recusas.** Tabela `studio_integrations.events`
-   (org + tenant + ator): registro, ligação/desligamento, SMTP configurado e
-   testado (`not-executed` incluso), pacote gerado — e as recusas: manifesto
-   inválido, assinatura adulterada, kind reservado, exportação negada.
+6. **Auditoria também das recusas, e minimizada.** Tabela
+   `studio_integrations.events` (org + tenant + ator): registro,
+   ligação/desligamento, SMTP configurado e testado (`not-executed` incluso),
+   pacote gerado, confirmação registrada (`approval.recorded`) — e as recusas:
+   manifesto inválido, assinatura adulterada, kind reservado, exportação
+   negada, confirmação ausente ou de nível errado, passkey ausente. O
+   histórico guarda **prova, não dados pessoais**: o destinatário do teste de
+   e-mail entra como domínio + resumo `sha256` curto, nunca em texto claro.
+   O nome do segredo é canonizado antes de tudo (`secret://NOME` e `NOME` são
+   o mesmo nome; a caixa nunca é inventada).
 7. **Painel próprio em `/studio/hub`.** `apps/studio-web/src/hub/*`, roteado
    por `main.tsx` sem tocar em `App.tsx` (o Codex edita esse arquivo na M1),
    catálogo `src/i18n/hub.pt-BR.json`. Quatro cartões: e-mail do aplicativo,

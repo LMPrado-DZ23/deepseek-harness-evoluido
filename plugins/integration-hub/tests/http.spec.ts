@@ -97,14 +97,19 @@ describe('integration hub HTTP boundary', () => {
     const { integration } = await registered.json() as { integration: StudioIntegration }
     expect(integration).toMatchObject({ verification: 'verified', effective_tier: 'T0', enabled: false })
     const enabled = await request(`/integrations/${integration.integration_id}/enabled`, { method: 'POST', body: '{"enabled":true}' })
-    expect(await enabled.json()).toMatchObject({ integration: { enabled: true } })
+    // T0: no confirmation needed, and the interface is told so by the server.
+    expect(await enabled.json()).toMatchObject({ integration: { enabled: true, requires_approval_tier: null } })
     expect((await (await request('/integrations')).json() as { integrations: unknown[] }).integrations).toHaveLength(1)
 
     expect(await (await request('/smtp')).json()).toEqual({ configured: false, secret_ref: null, tier: 'T2' })
-    expect((await request('/smtp', { method: 'POST', body: '{"secret_ref":"smtp://user:pass@host"}' })).status).toBe(400)
-    const configured = await request('/smtp', { method: 'POST', body: '{"secret_ref":"DZ23_APP_SMTP"}' })
+    expect((await request('/smtp', { method: 'POST', body: '{"secret_ref":"smtp://user:pass@host","approval":{"approved":true,"tier":"T2"}}' })).status).toBe(400)
+    // T2 over HTTP: without the confirmation in the body the request is refused with 403, and the vault is never touched.
+    const unconfirmed = await request('/smtp', { method: 'POST', body: '{"secret_ref":"DZ23_APP_SMTP"}' })
+    expect(unconfirmed.status).toBe(403)
+    const approval = '"approval":{"approved":true,"tier":"T2"}'
+    const configured = await request('/smtp', { method: 'POST', body: `{"secret_ref":"DZ23_APP_SMTP",${approval}}` })
     expect(await configured.json()).toEqual({ configured: true, secret_ref: 'DZ23_APP_SMTP', tier: 'T2' })
-    const test = await request('/smtp/test', { method: 'POST', body: '{"to":"pessoa@example.test"}' })
+    const test = await request('/smtp/test', { method: 'POST', body: `{"to":"pessoa@example.test",${approval}}` })
     expect(test.status).toBe(200)
     expect(await test.json()).toMatchObject({ result: 'NOT_EXECUTED' })
 

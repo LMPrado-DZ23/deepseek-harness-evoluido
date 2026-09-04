@@ -29,7 +29,8 @@ const { publicKey, privateKey } = generateKeyPairSync('ed25519')
 process.env.DSH_HOME = dshHome
 process.env.DSH_TELEMETRY_DISABLED = '1'
 process.env.DZ23_HUB_PUBLISHER_KEYS = JSON.stringify({ dz23: publicKey.export({ type: 'spki', format: 'der' }).toString('base64') })
-process.env.DZ23_HUB_CHANNEL = 'stable'
+// The runs root the Hub confines exports to; the fabricated run below lives inside it.
+process.env.DZ23_STUDIO_RUNS_ROOT = join(workDir, 'runs')
 // The SMTP secret lives ONLY in the environment (the vault seam of this profile); the browser sends its name.
 process.env.DZ23_APP_SMTP = JSON.stringify({ host: 'smtp.example.test', port: 587, secure: false, user: 'app', pass: 'nunca-sai-do-servidor', from: 'app@example.test' })
 delete process.env.DZ23_HUB_SMTP_TEST_ENABLED
@@ -64,11 +65,17 @@ try {
 
   // ---- SMTP by reference: the value never leaves the environment
   assert.deepEqual(await (await hub('/smtp')).json(), { configured: false, secret_ref: null, tier: 'T2' })
-  assert.equal((await hub('/smtp', { method: 'POST', body: JSON.stringify({ secret_ref: 'DZ23_NAO_EXISTE' }) })).status, 400)
-  const configured = await hub('/smtp', { method: 'POST', body: JSON.stringify({ secret_ref: 'DZ23_APP_SMTP' }) })
+  // D16 enforcement: configuring the app's e-mail is T2 and is refused outright without the person's confirmation.
+  const approval = { approved: true, tier: 'T2' }
+  assert.equal((await hub('/smtp', { method: 'POST', body: JSON.stringify({ secret_ref: 'DZ23_APP_SMTP' }) })).status, 403)
+  assert.deepEqual(await (await hub('/smtp')).json(), { configured: false, secret_ref: null, tier: 'T2' }, 'a refused T2 action must change nothing')
+  assert.equal((await hub('/smtp', { method: 'POST', body: JSON.stringify({ secret_ref: 'DZ23_NAO_EXISTE', approval }) })).status, 400)
+  // `secret://NAME` is the same name as `NAME`: one spelling reaches the vault.
+  const configured = await hub('/smtp', { method: 'POST', body: JSON.stringify({ secret_ref: 'secret://DZ23_APP_SMTP', approval }) })
   assert.equal(configured.status, 200)
   assert.deepEqual(await configured.json(), { configured: true, secret_ref: 'DZ23_APP_SMTP', tier: 'T2' })
-  const test = await (await hub('/smtp/test', { method: 'POST', body: JSON.stringify({ to: email }) })).json()
+  assert.equal((await hub('/smtp/test', { method: 'POST', body: JSON.stringify({ to: email }) })).status, 403)
+  const test = await (await hub('/smtp/test', { method: 'POST', body: JSON.stringify({ to: email, approval }) })).json()
   assert.equal(test.result, 'NOT_EXECUTED')
   const storedIntegrations = JSON.stringify([...app.ctx.storageDomain.get('studio_integrations').table('integrations').entries()])
   assert.ok(!storedIntegrations.includes('nunca-sai-do-servidor'), 'the SMTP password leaked into storage')
@@ -80,14 +87,30 @@ try {
   assert.equal(registered.integration.verification, 'verified')
   assert.equal((await hub(`/integrations/${registered.integration.integration_id}/enabled`, { method: 'POST', body: '{"enabled":true}' })).status, 200)
   // The D16 rule under test is "unsigned → at least T2" on its own: a read-only skill declaring T0 (no network floor involved).
-  const unsigned = await (await hub('/integrations', { method: 'POST', body: JSON.stringify({ ...manifest, id: 'agenda-sem-assinatura', tier: 'T0' }) })).json()
+  const unsigned = await (await hub('/integrations', { method: 'POST', body: JSON.stringify({ ...manifest, id: 'agenda-sem-assinatura', name: 'Agenda sem assinatura', tier: 'T0' }) })).json()
   assert.equal(unsigned.integration.verification, 'unverified')
   assert.equal(unsigned.integration.effective_tier, 'T2')
   assert.equal(unsigned.integration.kind, 'skill')
   assert.equal((await hub(`/integrations/${unsigned.integration.integration_id}/enabled`, { method: 'POST', body: '{"enabled":true}' })).status, 403)
+  // A manifest that asks to read the vault is T3 by the floor, whatever it declares: confirmation is not enough without a passkey.
+  const sensitive = { ...manifest, id: 'cofre-externo', name: 'Cofre externo', tier: 'T0', permissions: ['secrets.read'] }
+  const sensitiveSigned = { ...sensitive, signature: sign(null, canonicalManifestBytes(sensitive), privateKey).toString('base64') }
+  const sensitiveRegistered = await (await hub('/integrations', { method: 'POST', body: JSON.stringify(sensitiveSigned) })).json()
+  assert.equal(sensitiveRegistered.integration.verification, 'verified')
+  assert.equal(sensitiveRegistered.integration.effective_tier, 'T3')
+  const sensitivePath = `/integrations/${sensitiveRegistered.integration.integration_id}/enabled`
+  assert.equal((await hub(sensitivePath, { method: 'POST', body: '{"enabled":true}' })).status, 403)
+  assert.equal((await hub(sensitivePath, { method: 'POST', body: '{"enabled":true,"approval":{"approved":true,"tier":"T2"}}' })).status, 403)
+  const t3 = await hub(sensitivePath, { method: 'POST', body: '{"enabled":true,"approval":{"approved":true,"tier":"T3"}}' })
+  assert.equal(t3.status, 403, 'this session signed in by magic code: T3 needs a recent passkey')
+  assert.ok((await t3.json()).error.includes('passkey'))
+  const sensitiveRow = await app.ctx.storageDomain.get('studio_integrations').table('integrations').get(sensitiveRegistered.integration.integration_id)
+  assert.equal(sensitiveRow.enabled, false, 'a refused T3 action must leave the integration off')
   const listed = await (await hub('/integrations')).json()
   assert.equal(listed.channel, 'stable')
-  assert.deepEqual(listed.integrations.map(item => [item.manifest?.id ?? item.kind, item.can_enable]).sort(), [['agenda-local', false], ['agenda-sem-assinatura', false], ['smtp', false]])
+  assert.deepEqual(listed.integrations.map(item => [item.manifest?.id ?? item.kind, item.can_enable]).sort(), [['agenda-local', false], ['agenda-sem-assinatura', false], ['cofre-externo', true], ['smtp', false]])
+  assert.equal(listed.integrations.find(item => item.manifest?.id === 'cofre-externo').requires_approval_tier, 'T3')
+  assert.equal(listed.integrations.find(item => item.manifest?.id === 'agenda-local').requires_approval_tier, null)
   // tampered signature → refused and audited
   assert.equal((await hub('/integrations', { method: 'POST', body: JSON.stringify({ ...signedManifest, name: 'Agenda alterada' }) })).status, 400)
 
@@ -106,6 +129,7 @@ try {
   await p2a.transition(actor, project.project_id, 'TESTS_OK')
   await p2a.transition(actor, project.project_id, 'VERIFIED_PROTOTYPE')
   const runDirectory = join(workDir, 'runs', 'op-1')
+  await mkdir(join(workDir, 'runs'), { recursive: true })
   await mkdir(join(runDirectory, '.next', 'standalone', 'node_modules', 'next'), { recursive: true })
   await mkdir(join(runDirectory, '.next', 'static'), { recursive: true })
   await mkdir(join(runDirectory, 'data'), { recursive: true })
@@ -137,7 +161,10 @@ try {
   assert.equal(download.headers.get('x-dz23-sha256'), record.sha256)
   const entries = readZip(archive)
   const names = entries.map(entry => entry.name)
-  assert.deepEqual(names, ['.env.example', 'README.md', 'app/.next/static/main.js', 'app/node_modules/lib/data/table.json', 'app/node_modules/next/package.json', 'app/server.js', 'evidence/appspec-report.json'])
+  assert.deepEqual(names, ['.env.example', 'EXCLUIDOS.txt', 'README.md', 'app/.next/static/main.js', 'app/node_modules/lib/data/table.json', 'app/node_modules/next/package.json', 'app/server.js', 'evidence/appspec-report.json'])
+  // Nothing left out in silence: the package names what stayed behind, without any of its content.
+  const left = entries.find(entry => entry.name === 'EXCLUIDOS.txt').data.toString('utf8')
+  assert.ok(left.includes('app/data/') && left.includes('app/.env'), 'the exclusion list must name what stayed behind')
   const content = entries.map(entry => entry.data.toString('utf8')).join('\n')
   for (const secret of ['654321', 'nunca-sai-do-servidor', 'segredo-do-banco-777', 'senha-local']) assert.ok(!content.includes(secret), `private data leaked into the package: ${secret}`)
   const again = await (await hub(`/projects/${project.project_id}/exports`, { method: 'POST', body: '{}' })).json()
@@ -153,7 +180,28 @@ try {
   void removeFile
   const events = await (await hub('/events')).json()
   const actions = events.events.map(event => `${event.action}:${event.outcome}`)
-  for (const expected of ['smtp.configured:success', 'smtp.tested:not-executed', 'integration.registered:success', 'integration.registered:failure', 'integration.enabled:success', 'integration.enabled:failure', 'export.created:success']) assert.ok(actions.includes(expected), `missing audit ${expected}`)
+  for (const expected of ['smtp.configured:success', 'smtp.tested:not-executed', 'integration.registered:success', 'integration.registered:failure', 'integration.enabled:success', 'integration.enabled:failure', 'export.created:success', 'approval.recorded:success']) assert.ok(actions.includes(expected), `missing audit ${expected}`)
+  // The audit proves the e-mail test without keeping the address in the clear.
+  const tested = events.events.find(event => event.action === 'smtp.tested' && event.outcome === 'not-executed')
+  assert.ok(!JSON.stringify(events.events).includes(email), 'the recipient address was kept in the clear in the audit trail')
+  void tested
+
+  // ---- adversarial: a run directory outside the runs root is refused before anything is read
+  const outsideRun = join(workDir, 'fora', 'op-x')
+  await mkdir(join(outsideRun, '.next', 'standalone'), { recursive: true })
+  await writeFile(join(outsideRun, '.next', 'standalone', 'server.js'), 'console.log("fora")')
+  await writeFile(join(outsideRun, '.next', 'standalone', 'segredo.txt'), 'nao-deveria-sair')
+  // On a project of its own, so the verified project the panel uses keeps its good run.
+  const escapeProject = await p2a.createProject(actor, { name: 'Projeto de fuga', original_brief: 'Preciso de um aplicativo de teste para a prova adversarial de caminho.', category: 'form-database', privacy: 'local-only' })
+  await p2a.saveSpec(actor, escapeProject.project_id, spec, 'intake')
+  await p2a.proposePlan(actor, escapeProject.project_id, [{ slice_id: 's1', title: 'Tela', description: 'Tela de reservas', acceptance_criteria: ['a'], planned_files: ['src/GeneratedApp.tsx'] }])
+  const escapePlan = await p2a.approvePlan(actor, escapeProject.project_id)
+  for (const state of ['GENERATING', 'BUILD_OK', 'TESTS_OK', 'VERIFIED_PROTOTYPE']) await p2a.transition(actor, escapeProject.project_id, state)
+  const escapeId = randomUUID()
+  await p2a.putRun(actor, { run_id: escapeId, operation_id: 'op-x', owner_session_id: session.session_id, plan_id: escapePlan.plan_id, project_id: escapeProject.project_id, org_id: actor.orgId, tenant_id: actor.tenantId, stage: 'verify', attempt: 1, state: 'PASSED', started_at: now, finished_at: now, sandbox: 'full', route: 'deterministic', model: 'studio-deterministic', input_tokens: 0, output_tokens: 0, estimated_cost_usd: 0, run_directory: outsideRun, failure_code: null, acceptance_checks: [] })
+  const escaped = await hub(`/projects/${escapeProject.project_id}/exports`, { method: 'POST', body: '{}' })
+  assert.equal(escaped.status, 400, 'a run outside the runs root must be refused')
+  assert.ok((await escaped.text()).includes('pasta de execuções'))
 
   // ---- the panel in real Chromium against this very Studio (session handed over, nothing mocked)
   let ui = 'NOT_EXECUTED'
@@ -174,8 +222,8 @@ try {
     const clean = `${playwright.stdout}\n${playwright.stderr}`.replace(/\u001b\[[0-9;]*[A-Za-z]/gu, '')
     const passed = Number(/(\d+) passed/u.exec(clean)?.[1] ?? 0)
     const skipped = Number(/(\d+) skipped/u.exec(clean)?.[1] ?? 0)
-    // A Playwright run that passes by skipping is not a proof: five real tests must have run.
-    ui = playwright.status === 0 && passed >= 5 && skipped === 0 ? 'PASS' : 'FAIL'
+    // A Playwright run that passes by skipping is not a proof: all six real tests must have run.
+    ui = playwright.status === 0 && passed >= 6 && skipped === 0 ? 'PASS' : 'FAIL'
     uiDetail = `${summary} (${passed} passed, ${skipped} skipped)`
     if (ui !== 'PASS') { process.stderr.write(`${playwright.stdout}\n${playwright.stderr}\n`); throw new Error(`hub panel e2e failed: ${summary}`) }
   }
@@ -187,10 +235,14 @@ try {
 - Resultado: **${decision}** (${new Date().toISOString().slice(0, 10)}, ambiente do Claude, Studio real no profile \`studio\` com o plugin \`@dz23-studio/integration-hub\`)
 - Sessão obtida pelo serviço de identidade real em processo (código de acesso por e-mail, captura de desenvolvimento); as chamadas ao Hub passam pelo servidor HTTP real com sessão e CSRF.
 - SMTP do aplicativo gerado: o navegador envia só o **nome** da referência (\`DZ23_APP_SMTP\`); o valor fica no ambiente do servidor, é conferido (existe + formato) e **não aparece no armazenamento**; nome inexistente → 400; teste de envio → \`NOT_EXECUTED\` com explicação (provedor ainda não escolhido).
+- **Aplicação dos níveis D16 (não só exibição)**: configurar o e-mail (T2) sem a confirmação da pessoa → **403 e nada muda**; com a confirmação → 200. Uma integração assinada que pede \`secrets.read\` é **T3 pelo piso**, mesmo declarando T0: sem confirmação → 403; com confirmação de **T2** (nível errado) → 403; com confirmação de T3, mas nesta sessão entrada por código de e-mail → 403 pedindo **passkey**, e a integração continua desligada. Cada confirmação aceita vira um evento \`approval.recorded\`.
+- **Confinamento do diretório de execução**: uma run \`PASSED\` apontando para fora da pasta de execuções (\`runsRoot\`) é recusada **antes de qualquer leitura** — nada do que estava lá entra em pacote algum.
+- **Exportação com lista de permitidos e varredura fail-closed**: só tipos de arquivo permitidos entram; o que fica de fora é listado por nome em \`EXCLUIDOS.txt\` dentro do pacote (nada sai em silêncio); um arquivo com chave privada ou string de conexão com senha **derruba a exportação inteira**.
+- **Auditoria minimizada**: o endereço do teste de e-mail não fica em texto claro no histórico (domínio + resumo sha256).
 - Registro D16: manifesto assinado (Ed25519) → \`verified\`, ligado; habilidade **sem assinatura** declarando T0 → \`unverified\`, tier efetivo **T2** (piso de não verificado, sem envolver rede), ligar no canal estável → 403; manifesto adulterado → 400 e evento de recusa; \`can_enable\` decidido pelo servidor.
 - Exportação: projeto levado a \`VERIFIED_PROTOTYPE\` por \`transition()\` e run \`PASSED\` **simulada** (standalone fabricado com \`server.js\` de uma linha; o pipeline real de geração não foi executado nesta prova) → ZIP com ${String(names.length)} entradas; \`data/\` da raiz do app (sqlite + códigos capturados) e \`.env\` **não** entram, enquanto \`node_modules/lib/data/\` entra; SHA-256 no cabeçalho igual ao arquivo; segundo pedido devolve o mesmo pacote (sem arquivo gêmeo); arquivo sumido → 404 sem caminho do servidor.
 - Auditoria: ${String(actions.length)} eventos com organização e espaço de trabalho, incluindo a recusa.
-- Interface \`/studio/hub\` em Chromium real contra este mesmo Studio: **${ui}** (${uiDetail}) — tela própria em pt-BR; nome do segredo guardado e teste mostrado como não executado; integração sem assinatura sem botão de ligar; pacote gerado pela tela com SHA-256 igual ao download; sem sessão → 401 na tela e na API.
+- Interface \`/studio/hub\` em Chromium real contra este mesmo Studio: **${ui}** (${uiDetail}) — tela própria em pt-BR; a tela **pergunta antes** de qualquer ação T2/T3 e cancelar não envia nada; a integração T3 mostra o aviso do nível, pede confirmação e ainda assim recebe do servidor a recusa por falta de passkey, em palavras; nome do segredo guardado e teste mostrado como não executado; integração sem assinatura sem botão de ligar; pacote gerado pela tela com SHA-256 igual ao download; sem sessão → 401 na tela e na API.
 
 Não executado: envio SMTP real (depende da escolha do provedor pelo Prado), exportação de um standalone real produzido pelo pipeline (fica para a integração com a M1/fatia 3), aparelho físico, avaliação com pessoas leigas (ADR-016: só no sistema completo).
 `)

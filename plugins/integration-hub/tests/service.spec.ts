@@ -1,11 +1,11 @@
 import { generateKeyPairSync, sign } from 'node:crypto'
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { canonicalManifestBytes } from '../src/manifest.ts'
 import type { HubEvent, IntegrationManifest, StudioExport, StudioIntegration } from '../src/model.ts'
-import { HubError, IntegrationHubService, type HubActor, type HubRepository } from '../src/service.ts'
+import { canonicalSecretRef, HubError, IntegrationHubService, minimizeRecipient, safeSegment, strongIdentityFresh, type HubActor, type HubRepository } from '../src/service.ts'
 import { readZip } from '../src/zip.ts'
 
 class MemoryRepository implements HubRepository {
@@ -21,6 +21,9 @@ const admin: HubActor = { ...owner, userId: 'u-admin', role: 'admin' }
 const builder: HubActor = { ...owner, userId: 'u-builder', role: 'builder' }
 const viewer: HubActor = { ...owner, userId: 'u-viewer', role: 'viewer' }
 const otherTenant: HubActor = { ...owner, tenantId: 'ws-b' }
+/** The confirmation the person gives on screen, for exactly one tier. */
+const ok = (tier: 'T2' | 'T3') => ({ approved: true, tier } as const)
+const strongAdmin: HubActor = { ...admin, sessionId: 's-admin', strongIdentityVerified: true }
 const { publicKey, privateKey } = generateKeyPairSync('ed25519')
 const publisherKeys = { dz23: publicKey.export({ type: 'spki', format: 'der' }).toString('base64') }
 const scratch: string[] = []
@@ -31,14 +34,14 @@ function manifest(overrides: Partial<IntegrationManifest> = {}): IntegrationMani
 }
 function signed(value: IntegrationManifest): IntegrationManifest { return { ...value, signature: sign(null, canonicalManifestBytes(value), privateKey).toString('base64') } }
 
-async function build(options: { channel?: 'stable' | 'dev'; emailTest?: boolean; secrets?: Record<string, { present: boolean; shapeOk: boolean }>; runDirectory?: string; projectState?: string } = {}) {
+async function build(options: { channel?: 'stable' | 'dev'; emailTest?: boolean; secrets?: Record<string, { present: boolean; shapeOk: boolean }>; runDirectory?: string; projectState?: string; runsRoot?: string } = {}) {
   const exportsRoot = await mkdtemp(join(tmpdir(), 'dz23-hub-exports-'))
   scratch.push(exportsRoot)
   const repository = new MemoryRepository()
   const sent: Array<[string, string]> = []
   let sequence = 0
   const service = new IntegrationHubService({
-    repository, exportsRoot, publisherKeys, channel: options.channel ?? 'stable',
+    repository, exportsRoot, publisherKeys, channel: options.channel ?? 'stable', runsRoot: options.runsRoot,
     secrets: { inspect: async ref => options.secrets?.[ref] ?? { present: false, shapeOk: false } },
     projects: {
       project: (actor, projectId) => {
@@ -97,8 +100,67 @@ describe('integration hub service', () => {
     const { service } = await build({ channel: 'dev' })
     const unsigned = await service.register(owner, manifest({ tier: undefined }))
     expect(service.canEnable(unsigned.integration)).toBe(true)
-    expect((await service.setEnabled(owner, unsigned.integration.integration_id, true)).enabled).toBe(true)
+    // Unverified means T2: even on the dev channel it takes the person's confirmation.
+    await expect(service.setEnabled(owner, unsigned.integration.integration_id, true)).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    expect((await service.setEnabled(owner, unsigned.integration.integration_id, true, ok('T2'))).enabled).toBe(true)
+    // Turning it off never needs a confirmation: less exposure is always allowed.
     expect((await service.setEnabled(owner, unsigned.integration.integration_id, false)).enabled).toBe(false)
+  })
+
+  it('never enables a manifest whose signature does not check out, on any channel', async () => {
+    for (const channel of ['stable', 'dev'] as const) {
+      const { service, repository } = await build({ channel })
+      // Registration already refuses a tampered manifest; this covers a record that turned `invalid` later
+      // (the publisher's key was replaced), which the dev channel must not wave through either.
+      await expect(service.register(owner, { ...signed(manifest()), name: 'alterado' })).rejects.toThrow('assinatura')
+      const registered = await service.register(owner, signed(manifest()))
+      const row = { ...registered.integration, verification: 'invalid' as const }
+      await repository.putIntegration(row)
+      expect(service.canEnable(row)).toBe(false)
+      await expect(service.setEnabled(owner, row.integration_id, true, ok('T2'))).rejects.toThrow('não confere')
+      expect(repository.rows.find(value => value.integration_id === row.integration_id)!.enabled).toBe(false)
+    }
+  })
+
+  it('asks for a confirmation at T2 and for a recent passkey at T3, and records the confirmation it accepted', async () => {
+    const { service, repository } = await build()
+    // `secrets.read` is T3 by the D16 floor, whatever the manifest declares.
+    const sensitive = await service.register(admin, signed(manifest({ id: 'cofre', tier: 'T0', permissions: ['secrets.read'] })))
+    expect(sensitive.integration.effective_tier).toBe('T3')
+    expect(service.requiredApprovalTier(sensitive.integration)).toBe('T3')
+    const id = sensitive.integration.integration_id
+    // no confirmation at all
+    await expect(service.setEnabled(admin, id, true)).rejects.toThrow('confirmação')
+    // a confirmation for the WRONG tier is not a confirmation for this one
+    await expect(service.setEnabled(admin, id, true, ok('T2'))).rejects.toThrow('confirmação')
+    // right confirmation, but no recent passkey on this session
+    await expect(service.setEnabled(admin, id, true, ok('T3'))).rejects.toThrow('passkey')
+    const enabled = await service.setEnabled(strongAdmin, id, true, ok('T3'))
+    expect(enabled.enabled).toBe(true)
+    const actions = repository.eventRows.map(event => `${event.action}:${event.outcome}`)
+    expect(actions).toContain('integration.enabled:failure')
+    expect(actions).toContain('approval.recorded:success')
+    expect(repository.eventRows.find(event => event.action === 'approval.recorded')).toMatchObject({ detail: 'integration.enabled T3' })
+    // A T0 integration is enabled with no confirmation at all.
+    const plain = await service.register(admin, signed(manifest({ id: 'agenda' })))
+    expect(service.requiredApprovalTier(plain.integration)).toBeNull()
+    expect((await service.setEnabled(admin, plain.integration.integration_id, true)).enabled).toBe(true)
+  })
+
+  it('accepts a passkey confirmation only inside its window, and fails closed on anything missing', async () => {
+    const now = new Date('2026-09-04T00:05:00.000Z')
+    expect(strongIdentityFresh({ last_strong_auth_method: 'passkey', last_strong_auth_at: '2026-09-04T00:01:00.000Z' }, now)).toBe(true)
+    // Older than the window, another method, missing, unparseable, or dated in the future: all refused.
+    expect(strongIdentityFresh({ last_strong_auth_method: 'passkey', last_strong_auth_at: '2026-09-03T23:58:00.000Z' }, now)).toBe(false)
+    expect(strongIdentityFresh({ last_strong_auth_method: 'email-code', last_strong_auth_at: '2026-09-04T00:04:00.000Z' }, now)).toBe(false)
+    expect(strongIdentityFresh({ last_strong_auth_method: 'passkey', last_strong_auth_at: null }, now)).toBe(false)
+    expect(strongIdentityFresh({}, now)).toBe(false)
+    expect(strongIdentityFresh({ last_strong_auth_method: 'passkey', last_strong_auth_at: 'ontem' }, now)).toBe(false)
+    expect(strongIdentityFresh({ last_strong_auth_method: 'passkey', last_strong_auth_at: '2026-09-04T00:06:00.000Z' }, now)).toBe(false)
+    expect(canonicalSecretRef('  secret://DZ23_APP_SMTP ')).toBe('DZ23_APP_SMTP')
+    expect(canonicalSecretRef('SECRET://DZ23_APP_SMTP')).toBe('DZ23_APP_SMTP')
+    expect(canonicalSecretRef('dz23_app_smtp')).toBe('dz23_app_smtp') // the case is never invented; the schema refuses it
+    expect(minimizeRecipient('Pessoa@Example.Test')).toMatch(/^\*\*\*@Example\.Test sha256:[a-f0-9]{12}$/u)
   })
 
   it('enforces roles and tenant scope', async () => {
@@ -115,33 +177,40 @@ describe('integration hub service', () => {
   it('stores only the SMTP credential reference after checking presence and shape, and reports the test as NOT_EXECUTED until enabled', async () => {
     const { service, repository } = await build({ secrets: { DZ23_APP_SMTP: { present: true, shapeOk: true }, DZ23_BROKEN: { present: true, shapeOk: false } } })
     expect(service.smtp(viewer)).toEqual({ configured: false, secret_ref: null, tier: 'T2' })
-    await expect(service.configureSmtp(admin, 'smtp://user:pass@host')).rejects.toThrow('identificador')
-    await expect(service.configureSmtp(admin, 'DZ23_MISSING')).rejects.toThrow('não existe no cofre')
-    await expect(service.configureSmtp(admin, 'DZ23_BROKEN')).rejects.toThrow('formato esperado')
-    const record = await service.configureSmtp(admin, 'DZ23_APP_SMTP')
+    await expect(service.configureSmtp(admin, 'smtp://user:pass@host', ok('T2'))).rejects.toThrow('identificador')
+    // Configuring the app's e-mail is T2: without the confirmation the vault is never even touched.
+    await expect(service.configureSmtp(admin, 'DZ23_APP_SMTP')).rejects.toThrow('confirmação')
+    await expect(service.configureSmtp(admin, 'DZ23_MISSING', ok('T2'))).rejects.toThrow('não existe no cofre')
+    await expect(service.configureSmtp(admin, 'DZ23_BROKEN', ok('T2'))).rejects.toThrow('formato esperado')
+    // `secret://NAME` and `NAME` are the same name; the case is never invented.
+    const record = await service.configureSmtp(admin, '  secret://DZ23_APP_SMTP  ', ok('T2'))
     expect(record).toMatchObject({ kind: 'smtp', secret_ref: 'DZ23_APP_SMTP', enabled: true, effective_tier: 'T2' })
     expect(JSON.stringify(repository.rows)).not.toContain('pass')
     expect(service.smtp(viewer)).toEqual({ configured: true, secret_ref: 'DZ23_APP_SMTP', tier: 'T2' })
-    const test = await service.testSmtp(admin, 'pessoa@example.test')
+    const test = await service.testSmtp(admin, 'pessoa@example.test', ok('T2'))
     expect(test.result).toBe('NOT_EXECUTED')
     expect(repository.eventRows.at(-1)).toMatchObject({ action: 'smtp.tested', outcome: 'not-executed' })
-    const second = await service.configureSmtp(admin, 'DZ23_APP_SMTP')
+    const second = await service.configureSmtp(admin, 'DZ23_APP_SMTP', ok('T2'))
     expect(second.integration_id).toBe(record.integration_id)
   })
 
   it('sends the SMTP test only when the operator enabled it, and records failures', async () => {
     const { service, sent, repository } = await build({ emailTest: true, secrets: { DZ23_APP_SMTP: { present: true, shapeOk: true } } })
-    await expect(service.testSmtp(admin, 'pessoa@example.test')).rejects.toMatchObject({ code: 'NOT_FOUND' })
-    await service.configureSmtp(admin, 'DZ23_APP_SMTP')
-    await expect(service.testSmtp(admin, 'not-an-email')).rejects.toMatchObject({ code: 'INVALID' })
-    expect(await service.testSmtp(admin, 'pessoa@example.test')).toMatchObject({ result: 'SENT' })
+    await expect(service.testSmtp(admin, 'pessoa@example.test', ok('T2'))).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    await service.configureSmtp(admin, 'DZ23_APP_SMTP', ok('T2'))
+    await expect(service.testSmtp(admin, 'not-an-email', ok('T2'))).rejects.toMatchObject({ code: 'INVALID' })
+    await expect(service.testSmtp(admin, 'pessoa@example.test')).rejects.toThrow('confirmação')
+    expect(await service.testSmtp(admin, 'pessoa@example.test', ok('T2'))).toMatchObject({ result: 'SENT' })
     expect(sent).toEqual([['DZ23_APP_SMTP', 'pessoa@example.test']])
+    // The audit proves the test happened without keeping the address in the clear.
     expect(repository.eventRows.at(-1)).toMatchObject({ action: 'smtp.tested', outcome: 'success' })
+    expect(repository.eventRows.at(-1)!.detail).toMatch(/^\*\*\*@example\.test sha256:[a-f0-9]{12}$/u)
+    expect(JSON.stringify(repository.eventRows)).not.toContain('pessoa@example.test')
     // Disabling the SMTP record makes it "not configured" again; the record itself stays for the audit trail.
     const smtpRecord = repository.rows.find(row => row.kind === 'smtp')!
     await service.setEnabled(admin, smtpRecord.integration_id, false)
     expect(service.smtp(viewer)).toMatchObject({ configured: false, secret_ref: null })
-    await expect(service.testSmtp(admin, 'pessoa@example.test')).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    await expect(service.testSmtp(admin, 'pessoa@example.test', ok('T2'))).rejects.toMatchObject({ code: 'NOT_FOUND' })
   })
 
   it('exports only a verified project from its latest PASSED run, with private files and a digest', async () => {
@@ -163,6 +232,45 @@ describe('integration hub service', () => {
     const again = await service.createExport(builder, 'p1')
     expect(again).toEqual(record)
     expect(service.listExports(viewer, 'p1')).toHaveLength(1)
+  })
+
+  it('refuses a run directory that is not inside the runs root, following symlinks, before reading anything', async () => {
+    const runsRoot = await mkdtemp(join(tmpdir(), 'dz23-hub-runs-'))
+    scratch.push(runsRoot)
+    // A well-behaved run: directly under the runs root.
+    const inside = join(runsRoot, 'run-new')
+    await mkdir(join(inside, '.next', 'standalone'), { recursive: true })
+    await writeFile(join(inside, '.next', 'standalone', 'server.js'), 'ok')
+    const good = await build({ runDirectory: inside, runsRoot })
+    expect(await good.service.createExport(builder, 'p1')).toMatchObject({ run_id: 'run-new' })
+
+    // Somewhere else on disk entirely.
+    const outsideRun = await fakeRun()
+    const outside = await build({ runDirectory: outsideRun, runsRoot })
+    await expect(outside.service.createExport(builder, 'p1')).rejects.toMatchObject({ code: 'INVALID', message: expect.stringContaining('pasta de execuções') })
+
+    // A symlink planted inside the runs root that points out of it: the real path is what counts.
+    const link = join(runsRoot, 'run-link')
+    await symlink(outsideRun, link)
+    const linked = await build({ runDirectory: link, runsRoot })
+    await expect(linked.service.createExport(builder, 'p1')).rejects.toMatchObject({ code: 'INVALID' })
+    // `..` climbing out is refused as well, and nothing was packaged in either case.
+    const climbing = await build({ runDirectory: join(runsRoot, '..', 'etc'), runsRoot })
+    await expect(climbing.service.createExport(builder, 'p1')).rejects.toMatchObject({ code: expect.stringMatching(/INVALID|CONFLICT/u) })
+    for (const built of [outside, linked, climbing]) {
+      expect(built.repository.exportRows).toEqual([])
+      expect(built.repository.eventRows.at(-1)).toMatchObject({ action: 'export.created', outcome: 'failure' })
+    }
+  })
+
+  it('refuses an id or scope name that would escape the exports folder', async () => {
+    const { service } = await build({ runDirectory: await fakeRun() })
+    const sneaky: HubActor = { ...builder, tenantId: '../../etc' }
+    // The tenant is scoped out first (no membership in `../../etc`), and a name like this never reaches `resolve`.
+    await expect(service.createExport(sneaky, 'p1')).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    expect(() => safeSegment('../../etc')).toThrow(HubError)
+    expect(() => safeSegment('a/b')).toThrow(HubError)
+    expect(() => safeSegment('id-1')).not.toThrow()
   })
 
   it('refuses to export an unverified project or a project whose run files are gone', async () => {

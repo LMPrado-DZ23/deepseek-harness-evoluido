@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import t from '../i18n/hub.pt-BR.json'
-import { actionLabel, enableExplanation, exportable, fill, formatBytes, isHubPath, kindLabel, outcomeLabel, tierLabel, verificationLabel } from './presentation'
+import { actionLabel, approvalNote, approvalPrompt, enableExplanation, exportable, fill, formatBytes, isHubPath, kindLabel, outcomeLabel, tierLabel, verificationLabel } from './presentation'
 
 describe('hub presentation', () => {
   it('opens the hub only at /studio/hub (with or without slash)', () => {
@@ -10,10 +10,19 @@ describe('hub presentation', () => {
     expect(isHubPath('/studio/hubx')).toBe(false)
     expect(isHubPath('/studio/hub/extra')).toBe(false)
   })
+  it('asks for a confirmation only when the server says so, and says what T3 costs', () => {
+    expect(approvalNote({ requires_approval_tier: null })).toBeNull()
+    expect(approvalNote({})).toBeNull()
+    expect(approvalNote({ requires_approval_tier: 'T2' })).toContain('T2')
+    expect(approvalPrompt('T2')).toBe(t.confirm.T2)
+    expect(approvalPrompt('T3')).toBe(t.confirm.T3)
+    expect(approvalPrompt('T3')).toContain('passkey')
+  })
+
   it('translates every kind, tier, action and outcome the server can send', () => {
     for (const kind of ['smtp', 'mcp', 'skill', 'webhook']) expect(kindLabel(kind)).not.toBe(kind)
     for (const tier of ['T0', 'T1', 'T2', 'T3']) expect(tierLabel(tier)).toMatch(new RegExp(`^${tier} — .+`, 'u'))
-    for (const action of ['smtp.configured', 'smtp.tested', 'integration.registered', 'integration.enabled', 'integration.disabled', 'export.created']) expect(actionLabel(action)).not.toBe(action)
+    for (const action of ['smtp.configured', 'smtp.tested', 'integration.registered', 'integration.enabled', 'integration.disabled', 'export.created', 'approval.recorded']) expect(actionLabel(action)).not.toBe(action)
     for (const outcome of ['success', 'failure', 'not-executed']) expect(outcomeLabel(outcome)).not.toBe(outcome)
     expect(verificationLabel('verified')).toBe(t.integrations.verified)
     expect(verificationLabel('unverified')).toBe(t.integrations.unverified)

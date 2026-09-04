@@ -11,8 +11,13 @@
     "manifestInvalid": "O manifesto da integração não está no formato esperado: {detail}",
     "manifestUnverified": "Esta integração não tem assinatura reconhecida e não pode ser ligada no canal estável.",
     "manifestSignatureInvalid": "A assinatura do manifesto não confere com a chave do publicador.",
+    "approvalRequiredT2": "Esta ação precisa da sua confirmação antes de valer. Confirme na tela e tente de novo.",
+    "approvalRequiredT3": "Esta ação é sensível: precisa da sua confirmação e da sua passkey nesta sessão.",
+    "strongIdentityRequired": "Confirme com sua passkey nesta sessão antes de continuar. Nada foi alterado.",
     "exportNotVerified": "Só é possível baixar um protótipo verificado.",
     "exportRunMissing": "Os arquivos da última verificação não estão mais neste computador.",
+    "exportRunOutside": "Os arquivos dessa verificação não estão na pasta de execuções do Studio. Por segurança, nada foi empacotado.",
+    "exportSecretFound": "O pacote não foi gerado: um arquivo do protótipo contém o que parece ser uma senha ou chave privada ({file}). Remova o segredo do projeto e gere de novo.",
     "exportNotFound": "Pacote não encontrado.",
     "smtpNotConfigured": "O envio de e-mail do aplicativo ainda não foi configurado.",
     "smtpTestDisabled": "O teste de envio ainda não foi liberado: falta escolher o provedor de e-mail. Nada foi enviado.",
@@ -29,7 +34,9 @@
     "readmeData": "Os dados do aplicativo ficam na pasta indicada por DATA_DIR. Faça cópias dela.",
     "readmeSecurity": "O aplicativo não envia e-mails até APP_EMAIL_MODE=smtp e APP_SMTP_URL estarem definidos no servidor. Não coloque senhas neste pacote.",
     "envComment": "Preencha estas variáveis no ambiente do servidor. Nunca dentro do pacote.",
-    "readmeRunLine": "Execução verificada: {runId}"
+    "readmeRunLine": "Execução verificada: {runId}",
+    "excludedTitle": "Arquivos que ficaram de fora deste pacote",
+    "excludedIntro": "Estes arquivos e pastas existiam na verificação, mas não entraram no pacote: são dados do seu computador (banco, senhas, cópias) ou tipos de arquivo fora da lista permitida para exportação. Nada foi apagado do seu computador."
   },
   "manifest": {
     "reasonUnsigned": "Sem assinatura do publicador.",
@@ -51,6 +58,7 @@
     "integrationRegistered": "Integração registrada.",
     "integrationEnabled": "Integração ligada.",
     "integrationDisabled": "Integração desligada.",
-    "exportCreated": "Pacote do protótipo gerado."
+    "exportCreated": "Pacote do protótipo gerado.",
+    "approvalRecorded": "Confirmação da pessoa registrada."
   }
 }

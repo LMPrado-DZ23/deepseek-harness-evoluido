@@ -31,8 +31,15 @@ export interface IntegrationHubConfig {
   readonly exportsRoot?: string
   /** Publisher id → Ed25519 public key (SPKI base64 or PEM). Public material only. */
   readonly publisherKeys?: Readonly<Record<string, string>>
-  /** `stable` (default) refuses to enable unsigned integrations (D16); `dev` allows them for local development. */
+  /**
+   * `stable` (default) refuses to enable unsigned integrations (D16); `dev`
+   * allows an UNSIGNED one for local development and never a wrong signature.
+   * It is read from this configuration only: an environment variable must not
+   * be able to lower the policy of a running Studio.
+   */
   readonly channel?: 'stable' | 'dev'
+  /** Root of the generated runs; a `run_directory` outside it is refused before the export reads anything. */
+  readonly runsRoot?: string
   /** Only the operator turns this on, after the e-mail provider is chosen; until then the test is NOT_EXECUTED. */
   readonly smtpTestEnabled?: boolean
   readonly allowedHosts?: readonly string[]
@@ -81,11 +88,21 @@ export function smtpTestPort(credentials: Context['credentials']): EmailTestPort
   }
 }
 
+/**
+ * The channel comes from the profile configuration and nowhere else. A value
+ * that is not exactly `dev` is `stable`: a typo, an injected environment
+ * variable or a stray object can only ever make the policy stricter.
+ */
+export function hubChannel(configured: unknown): 'stable' | 'dev' {
+  return configured === 'dev' ? 'dev' : 'stable'
+}
+
 export async function apply(ctx: Context, config: IntegrationHubConfig = {}): Promise<void> {
   const domain: Domain<typeof studioIntegrationsDomainSpec> = await ctx.storageDomain.open(studioIntegrationsDomainSpec)
   ctx.effect(() => () => domain.close(), 'dz23-studio-integration-hub.domainClose')
   const exportsRoot = resolve(config.exportsRoot ?? resolve(homedir(), '.dz23-studio', 'exports'))
   await mkdir(exportsRoot, { recursive: true, mode: 0o700 })
+  const runsRoot = resolve(config.runsRoot ?? resolve(homedir(), '.dz23-studio', 'generated-runs'))
   const publisherKeys = z.record(z.string().regex(/^[a-z][a-z0-9-]{1,63}$/u), z.string().min(32)).parse(config.publisherKeys ?? {})
   const promptToApp = ctx.studioPromptToApp.service
   const service = new IntegrationHubService({
@@ -95,7 +112,7 @@ export async function apply(ctx: Context, config: IntegrationHubConfig = {}): Pr
       project: (actor, projectId) => promptToApp.project(actor, projectId),
       runs: (actor, projectId) => promptToApp.runs(actor, projectId),
     },
-    exportsRoot, publisherKeys, channel: config.channel ?? 'stable',
+    exportsRoot, publisherKeys, channel: hubChannel(config.channel), runsRoot,
     emailTest: config.smtpTestEnabled === true ? smtpTestPort(ctx.credentials) : undefined,
   })
   ctx.provide('studioIntegrationHub', { service })

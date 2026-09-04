@@ -70,9 +70,13 @@ describe('prototype export package', () => {
     const entries = readZip(built.archive)
     const names = entries.map(entry => entry.name)
     expect(names).toEqual([
-      '.env.example', 'README.md', 'app/.next/static/chunks/main.js', 'app/node_modules/next/package.json', 'app/public/brand/logo.png',
+      '.env.example', 'EXCLUIDOS.txt', 'README.md', 'app/.next/static/chunks/main.js', 'app/node_modules/next/package.json', 'app/public/brand/logo.png',
       'app/server.js', 'evidence/appspec-report.json',
     ].sort())
+    // Nothing is dropped in silence: what stayed out is listed by name (never by content) inside the package.
+    const left = entries.find(entry => entry.name === 'EXCLUIDOS.txt')!.data.toString('utf8')
+    expect(left).toContain('app/.env')
+    expect(left).toContain('app/data/') // the app's own data folder is named as a whole, not file by file
     expect(entries.find(entry => entry.name === 'app/server.js')!.mode).toBe(0o755)
     const all = entries.map(entry => entry.data.toString('utf8')).join('\n')
     expect(all).not.toContain("987654")
@@ -84,6 +88,39 @@ describe('prototype export package', () => {
     expect(built.sha256).toMatch(/^[a-f0-9]{64}$/u)
     const again = await packagePrototype({ runDirectory: root, projectName: 'Agenda do Salão', runId: 'run-abcdef123456' })
     expect(again.sha256).toBe(built.sha256)
+  })
+
+  it('packages only allowed file types and lists every exclusion by name', async () => {
+    const root = await runDirectory()
+    await writeFile(join(root, '.next', 'standalone', 'deploy.sh'), 'echo hi')
+    await writeFile(join(root, '.next', 'standalone', 'backup.bak'), 'x')
+    await writeFile(join(root, '.next', 'standalone', 'LICENSE'), 'MIT')
+    const built = await packagePrototype({ runDirectory: root, projectName: 'A', runId: 'run-1' })
+    const entries = readZip(built.archive)
+    const names = entries.map(entry => entry.name)
+    expect(names).not.toContain('app/deploy.sh')
+    expect(names).not.toContain('app/backup.bak')
+    expect(names).toContain('app/LICENSE') // an extension-less file on the short allow-list still ships
+    const left = entries.find(entry => entry.name === 'EXCLUIDOS.txt')!.data.toString('utf8')
+    expect(left).toContain('app/deploy.sh')
+    expect(left).toContain('app/backup.bak')
+  })
+
+  it('fails the whole export when a packaged file carries a private key or a connection string with a password', async () => {
+    const key = await runDirectory()
+    await writeFile(join(key, '.next', 'standalone', 'config.js'), 'export const k = `-----BEGIN OPENSSH PRIVATE KEY-----\nAAAA\n-----END OPENSSH PRIVATE KEY-----`')
+    await expect(packagePrototype({ runDirectory: key, projectName: 'A', runId: 'run-1' }))
+      .rejects.toMatchObject({ code: 'SECRET_DETECTED', message: expect.stringContaining('config.js') })
+
+    const dsn = await runDirectory()
+    await writeFile(join(dsn, '.next', 'standalone', 'db.json'), '{"url":"postgresql://app:s3nh4@db.example.test:5432/app"}')
+    await expect(packagePrototype({ runDirectory: dsn, projectName: 'A', runId: 'run-1' }))
+      .rejects.toMatchObject({ code: 'SECRET_DETECTED', message: expect.stringContaining('db.json') })
+
+    // A password-shaped word without a secret shape is NOT a secret: the scan must not block ordinary code.
+    const ordinary = await runDirectory()
+    await writeFile(join(ordinary, '.next', 'standalone', 'form.js'), 'const field = { name: "password", label: "Senha" }')
+    await expect(packagePrototype({ runDirectory: ordinary, projectName: 'A', runId: 'run-1' })).resolves.toMatchObject({ entries: expect.any(Number) })
   })
 
   it('refuses a run without a standalone build and slugs names safely', async () => {

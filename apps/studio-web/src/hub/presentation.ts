@@ -11,7 +11,9 @@ export type IntegrationKind = 'smtp' | 'mcp' | 'skill' | 'webhook'
 export type PolicyTier = 'T0' | 'T1' | 'T2' | 'T3'
 export type Verification = 'verified' | 'unverified' | 'invalid'
 export type HubOutcome = 'success' | 'failure' | 'not-executed'
-export type HubAction = 'smtp.configured' | 'smtp.tested' | 'integration.registered' | 'integration.enabled' | 'integration.disabled' | 'export.created'
+export type HubAction = 'smtp.configured' | 'smtp.tested' | 'integration.registered' | 'integration.enabled' | 'integration.disabled' | 'export.created' | 'approval.recorded'
+/** The person's confirmation for exactly one tier, as the server expects it. */
+export type Approval = { approved: true; tier: PolicyTier }
 
 /** `/studio/hub` and `/studio/hub/` open the Hub; everything else stays with the main application. */
 export function isHubPath(pathname: string): boolean {
@@ -35,6 +37,17 @@ export function verificationLabel(verification: Verification): string {
 export function enableExplanation(integration: { verification: Verification; enabled: boolean; can_enable: boolean }): string | null {
   if (integration.enabled || integration.can_enable) return null
   return t.integrations.cannotEnable
+}
+
+/** What the person is agreeing to, in plain words, for the tier the server asked for. */
+export function approvalPrompt(tier: PolicyTier): string {
+  return tier === 'T3' ? t.confirm.T3 : t.confirm.T2
+}
+
+/** Note under the "enable" button when the server says this one needs a confirmation. */
+export function approvalNote(integration: { requires_approval_tier?: PolicyTier | null }): string | null {
+  const tier = integration.requires_approval_tier ?? null
+  return tier === null ? null : fill(t.integrations.needsApproval, { tier: tierLabel(tier) })
 }
 
 export function actionLabel(action: string): string {

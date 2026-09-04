@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { apply, credentialInspector, inject, name, smtpTestPort } from '../src/index.ts'
+import { apply, credentialInspector, inject, name, smtpTestPort, hubChannel } from '../src/index.ts'
 
 const roots: string[] = []
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }) })
@@ -64,5 +64,14 @@ describe('integration hub plugin wiring', () => {
     await Promise.all(disposers.map(dispose => dispose()))
     expect(domain.close).toHaveBeenCalled()
     await expect(apply(ctx as never, { exportsRoot: join(root, 'x'), publisherKeys: { 'BAD ID': 'k' } })).rejects.toThrow()
+  })
+
+  it('only an explicit `dev` in the configuration opens the dev channel', () => {
+    expect(hubChannel('dev')).toBe('dev')
+    expect(hubChannel('stable')).toBe('stable')
+    // Anything else — absent, a typo, an environment variable read as a string, an object — is the strict channel.
+    for (const value of [undefined, null, '', 'DEV', ' dev', 'development', 1, true, { channel: 'dev' }, ['dev']]) {
+      expect(hubChannel(value)).toBe('stable')
+    }
   })
 })

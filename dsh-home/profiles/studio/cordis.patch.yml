@@ -130,8 +130,14 @@
       config:
         # Public keys of trusted integration publishers (Ed25519 SPKI, base64). Empty = every manifest is unverified.
         publisherKeys: !!js JSON.parse(process.env.DZ23_HUB_PUBLISHER_KEYS ?? '{}')
-        channel: !!js process.env.DZ23_HUB_CHANNEL ?? 'stable'
+        # Written here on purpose: an environment variable must not be able to lower the
+        # policy of a running Studio. To develop with unsigned integrations, change this
+        # line to `dev` in this file. A wrong signature is refused on either channel.
+        channel: stable
         smtpTestEnabled: !!js process.env.DZ23_HUB_SMTP_TEST_ENABLED === '1'
+        # Where the generated runs live. Only a run inside this folder can be packaged;
+        # it must match the runs root of the prompt-to-app plugin (same default).
+        runsRoot: !!js process.env.DZ23_STUDIO_RUNS_ROOT ?? undefined
     - id: dz23-studio-web
       name: '@dz23-studio/web'
     - id: studio-hello

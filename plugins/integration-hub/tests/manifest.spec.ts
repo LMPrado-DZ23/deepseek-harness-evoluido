@@ -24,6 +24,10 @@ describe('D16 manifest evaluation', () => {
     expect(effectiveTier('mcp', manifest({ kind: 'mcp', endpoint: 'https://mcp.example.com', tier: 'T3' }))).toBe('T3')
     expect(effectiveTier('webhook', manifest({ kind: 'webhook', tier: 'T0' }))).toBe('T1')
     expect(effectiveTier('skill', manifest({ tier: 'T0', permissions: ['write.project'] }))).toBe('T1')
+    // Reading the vault is T3 by the floor, whatever the manifest declares — a leaked credential cannot be un-leaked.
+    expect(policyFloor('skill', manifest({ permissions: ['secrets.read'] }))).toBe('T3')
+    expect(effectiveTier('skill', manifest({ tier: 'T0', permissions: ['secrets.read'] }))).toBe('T3')
+    expect(effectiveTier('mcp', manifest({ kind: 'mcp', endpoint: 'http://127.0.0.1:8080', tier: 'T1', permissions: ['secrets.read'] }))).toBe('T3')
     expect(effectiveTier('skill', manifest({ tier: 'T0', permissions: ['email.send'] }))).toBe('T2')
     expect(effectiveTier('skill', manifest({ tier: 'T0', permissions: ['network.outbound'] }))).toBe('T2')
   })

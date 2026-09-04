@@ -2,10 +2,28 @@ import { ArrowLeft, Download, Mail, Plug, ScrollText } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import t from '../i18n/hub.pt-BR.json'
 import { createHubApi, HubApiError, type ExportRecord, type HubApi, type HubEvent, type Integration, type ProjectSummary, type SmtpState } from './hubApi'
-import { actionLabel, enableExplanation, exportable, fill, formatBytes, formatDate, kindLabel, outcomeLabel, tierLabel, verificationLabel } from './presentation'
+import { actionLabel, approvalNote, approvalPrompt, enableExplanation, exportable, fill, formatBytes, formatDate, kindLabel, outcomeLabel, tierLabel, verificationLabel, type Approval, type PolicyTier } from './presentation'
 import './hub.css'
 
 type Notice = { kind: 'ok' | 'error' | 'info'; text: string } | null
+
+/**
+ * One action waiting for the person's confirmation. The panel never sends an
+ * approval the person did not click: the tier comes from the server, and the
+ * text says, in plain words, what agreeing to it means.
+ */
+type Pending = { tier: PolicyTier; what: string; run(approval: Approval): Promise<void> } | null
+
+function ConfirmStep({ pending, busy, onCancel, onConfirm }: { pending: Pending; busy: boolean; onCancel(): void; onConfirm(): void }) {
+  if (pending === null) return null
+  return <div className="hub-confirm" role="group" aria-label={t.confirm.title} data-testid="hub-confirm">
+    <p><strong>{t.confirm.title}</strong></p>
+    <p>{pending.what}</p>
+    <p>{approvalPrompt(pending.tier)}</p>
+    <button type="button" className="primary" disabled={busy} onClick={onConfirm}>{t.confirm.confirm}</button>
+    <button type="button" className="secondary" disabled={busy} onClick={onCancel}>{t.confirm.cancel}</button>
+  </div>
+}
 
 /**
  * Integration Hub panel (M5). A separate screen at `/studio/hub` so the main
@@ -55,22 +73,44 @@ function SmtpSection({ api, state, onChange, notify, report }: SectionProps & { 
   const [secretRef, setSecretRef] = useState('')
   const [recipient, setRecipient] = useState('')
   const [busy, setBusy] = useState(false)
+  const [pending, setPending] = useState<Pending>(null)
   const run = async (task: () => Promise<void>) => { setBusy(true); notify(null); try { await task(); await onChange() } catch (error) { report(error) } finally { setBusy(false) } }
+  const confirm = () => {
+    const action = pending
+    if (action === null) return
+    setPending(null)
+    void run(() => action.run({ approved: true, tier: action.tier }))
+  }
   return <section className="hub-card" aria-labelledby="hub-smtp-title">
     <div className="hub-card-heading"><Mail aria-hidden="true" /><h2 id="hub-smtp-title">{t.smtp.title}</h2></div>
     <p className="hub-help">{t.smtp.help}</p>
     <p className="hub-state" data-testid="smtp-state"><strong>{t.smtp.status}:</strong> {state === null ? t.loading : state.configured && state.secret_ref !== null ? fill(t.smtp.configured, { ref: state.secret_ref }) : t.smtp.notConfigured}</p>
     {state === null ? null : <p className="hub-state"><strong>{t.smtp.tier}:</strong> {tierLabel(state.tier)}</p>}
-    <form onSubmit={event => { event.preventDefault(); void run(async () => { await api.configureSmtp(secretRef.trim()); notify({ kind: 'ok', text: t.smtp.saved }) }) }}>
+    <form onSubmit={event => {
+      event.preventDefault()
+      notify(null)
+      const ref = secretRef.trim()
+      // Configuring the app's e-mail is T2: the person confirms first, and only then does anything reach the server.
+      setPending({ tier: state?.tier ?? 'T2', what: t.confirm.smtpSave, run: async approval => { await api.configureSmtp(ref, approval); notify({ kind: 'ok', text: t.smtp.saved }) } })
+    }}>
       <label htmlFor="hub-smtp-ref">{t.smtp.refLabel}</label>
       <input id="hub-smtp-ref" value={secretRef} onChange={event => setSecretRef(event.target.value)} placeholder={t.smtp.refPlaceholder} autoComplete="off" spellCheck={false} />
       <button type="submit" className="primary" disabled={busy || secretRef.trim() === ''}>{t.smtp.save}</button>
     </form>
-    <form onSubmit={event => { event.preventDefault(); void run(async () => { const result = await api.testSmtp(recipient.trim()); notify({ kind: result.result === 'SENT' ? 'ok' : 'info', text: `${result.result === 'SENT' ? t.smtp.testSent : t.smtp.testNotExecuted}: ${result.message}` }) }) }}>
+    <form onSubmit={event => {
+      event.preventDefault()
+      notify(null)
+      const to = recipient.trim()
+      setPending({ tier: state?.tier ?? 'T2', what: t.confirm.smtpTest, run: async approval => {
+        const result = await api.testSmtp(to, approval)
+        notify({ kind: result.result === 'SENT' ? 'ok' : 'info', text: `${result.result === 'SENT' ? t.smtp.testSent : t.smtp.testNotExecuted}: ${result.message}` })
+      } })
+    }}>
       <label htmlFor="hub-smtp-to">{t.smtp.testLabel}</label>
       <input id="hub-smtp-to" type="email" value={recipient} onChange={event => setRecipient(event.target.value)} placeholder={t.smtp.testPlaceholder} />
       <button type="submit" className="secondary" disabled={busy || state?.configured !== true || recipient.trim() === ''}>{t.smtp.test}</button>
     </form>
+    <ConfirmStep pending={pending} busy={busy} onCancel={() => setPending(null)} onConfirm={confirm} />
   </section>
 }
 
@@ -78,8 +118,22 @@ function IntegrationsSection({ api, integrations, channel, onChange, notify, rep
   const [manifestText, setManifestText] = useState('')
   const [reasons, setReasons] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
+  const [pending, setPending] = useState<Pending>(null)
   const visible = useMemo(() => (integrations ?? []).filter(value => value.kind !== 'smtp'), [integrations])
   const run = async (task: () => Promise<void>) => { setBusy(true); notify(null); try { await task(); await onChange() } catch (error) { report(error) } finally { setBusy(false) } }
+  const enable = (item: Integration) => {
+    const tier = item.requires_approval_tier
+    // T0/T1 go straight through; T2/T3 wait for the person, with the tier the server asked for.
+    if (tier === null || tier === undefined) return void run(() => api.setEnabled(item.integration_id, true).then(() => undefined))
+    notify(null)
+    setPending({ tier, what: fill(t.integrations.needsApproval, { tier: tierLabel(tier) }), run: approval => api.setEnabled(item.integration_id, true, approval).then(() => undefined) })
+  }
+  const confirm = () => {
+    const action = pending
+    if (action === null) return
+    setPending(null)
+    void run(() => action.run({ approved: true, tier: action.tier }))
+  }
   return <section className="hub-card" aria-labelledby="hub-integrations-title">
     <div className="hub-card-heading"><Plug aria-hidden="true" /><h2 id="hub-integrations-title">{t.integrations.title}</h2></div>
     <p className="hub-help">{t.integrations.help}</p>
@@ -92,7 +146,8 @@ function IntegrationsSection({ api, integrations, channel, onChange, notify, rep
           ? <button type="button" className="secondary" disabled={busy} onClick={() => void run(() => api.setEnabled(item.integration_id, false).then(() => undefined))}>{t.integrations.disable}</button>
           : <>
             {enableExplanation(item) === null ? null : <p className="hub-why" id={`why-${item.integration_id}`}>{enableExplanation(item)}</p>}
-            <button type="button" className="primary" disabled={busy || !item.can_enable} aria-describedby={enableExplanation(item) === null ? undefined : `why-${item.integration_id}`} onClick={() => void run(() => api.setEnabled(item.integration_id, true).then(() => undefined))}>{t.integrations.enable}</button>
+            {enableExplanation(item) !== null || approvalNote(item) === null ? null : <p className="hub-why" data-testid="approval-note">{approvalNote(item)}</p>}
+            <button type="button" className="primary" disabled={busy || !item.can_enable} aria-describedby={enableExplanation(item) === null ? undefined : `why-${item.integration_id}`} onClick={() => enable(item)}>{t.integrations.enable}</button>
           </>}
       </li>)}
     </ul>}
@@ -111,6 +166,7 @@ function IntegrationsSection({ api, integrations, channel, onChange, notify, rep
       </form>
       {reasons.length === 0 ? null : <><h3>{t.integrations.reasons}</h3><ul className="hub-reasons">{reasons.map(reason => <li key={reason}>{reason}</li>)}</ul></>}
     </details>
+    <ConfirmStep pending={pending} busy={busy} onCancel={() => setPending(null)} onConfirm={confirm} />
   </section>
 }
 
