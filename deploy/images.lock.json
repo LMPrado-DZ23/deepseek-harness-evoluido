@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "resolvedAt": "2026-09-04T15:30:00Z",
+  "images": {
+    "node": {
+      "reference": "docker.io/library/node:22.23.1-bookworm-slim",
+      "indexDigest": "sha256:6c74791e557ce11fc957704f6d4fe134a7bc8d6f5ca4403205b2966bd488f6b3",
+      "source": "https://github.com/nodejs/docker-node.git#c517c39b81a3dd02485433f1fd7818b8220e1ada:22/bookworm-slim",
+      "platforms": {
+        "linux/amd64": "sha256:8607a9064d4a571140998ae9e52a3b3fcf9cff361d04642d5971e6cd76d39e27",
+        "linux/arm64": "sha256:ef03a3d0e663b3c9d38c95be3fd31a100514d41df2599562b68a58a57f979adf"
+      }
+    }
+  },
+  "tools": {
+    "pnpm": {
+      "version": "11.7.0",
+      "tarball": "https://registry.npmjs.org/pnpm/-/pnpm-11.7.0.tgz",
+      "integrity": "sha512-GcyFLBIMcSV2DyRD7mvgyltA+fUFmN4aCaHxd1A+AQ5Xwjx3ZG4B52HeWb+HT7IqM5jDOrlpH8E+uUa28PTWIA==",
+      "sha1": "bea54364524dadf0a42dae28dbfeeab25ff177e5"
+    }
+  }
+}
