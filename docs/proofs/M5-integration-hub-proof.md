@@ -6,5 +6,6 @@
 - Registro D16: manifesto assinado (Ed25519) → `verified`, ligado; manifesto não assinado de MCP externo com tier declarado T0 → `unverified`, tier efetivo **T2**, ligar no canal estável → 403.
 - Exportação: projeto `VERIFIED_PROTOTYPE` com run `PASSED` → ZIP com 6 entradas (servidor standalone, estáticos, relatório, README em linguagem comum, `.env.example` só com nomes); `data/` e códigos capturados **não** entram; SHA-256 exibido no cabeçalho e igual ao arquivo; segunda exportação produz o mesmo digest.
 - Auditoria: 8 eventos com organização e espaço de trabalho, incluindo a recusa.
+- Interface `/studio/hub` em Chromium real contra este mesmo Studio: **PASS** ([1A[2K  5 passed (8.3s)) — tela própria em pt-BR; nome do segredo guardado e teste mostrado como não executado; integração sem assinatura sem botão de ligar; pacote gerado pela tela com SHA-256 igual ao download; sem sessão → 401 na tela e na API.
 
-Não executado: envio SMTP real (depende da escolha do provedor pelo Prado), interface do Hub em navegador (M5 UI em `/studio/hub`, provada à parte), aparelho físico.
+Não executado: envio SMTP real (depende da escolha do provedor pelo Prado), aparelho físico, avaliação com pessoas leigas (ADR-016: só no sistema completo).

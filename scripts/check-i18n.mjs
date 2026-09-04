@@ -44,7 +44,7 @@ for (const [path, value] of flatten(catalog)) {
 for (const [path, value] of flatten(serverCatalog)) {
   if (/\bpront[oa]s?\b/iu.test(value)) failures.push(`alegação de prontidão proibida no servidor em ${path}`)
 }
-for (const extra of ['apps/studio-web/src/i18n/pwa.pt-BR.json', 'apps/studio-web/public/manifest.json']) {
+for (const extra of ['apps/studio-web/src/i18n/pwa.pt-BR.json', 'apps/studio-web/src/i18n/hub.pt-BR.json', 'apps/studio-web/public/manifest.json']) {
   const full = resolve(root, extra)
   if (!exists(full)) continue
   for (const [path, value] of flatten(JSON.parse(readFileSync(full, 'utf8')))) {

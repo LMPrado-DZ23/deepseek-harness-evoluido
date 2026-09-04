@@ -4,10 +4,13 @@
 // the browser nor stored), see the test refused as NOT_EXECUTED, register a
 // signed and an unsigned integration (stable channel refuses to enable the
 // unsigned one), export a verified prototype and download a reproducible ZIP.
+// Then the Hub panel itself, in real Chromium against the same running Studio
+// (apps/studio-web/tests/hub.spec.ts). DZ23_HUB_SKIP_UI=1 records the panel
+// as NOT_EXECUTED instead of running it (the decision is then not GO).
 //
 //   node scripts/prove-integration-hub.mjs
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { createHash, generateKeyPairSync, randomUUID, sign } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { chmod, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
@@ -56,7 +59,7 @@ try {
   assert.equal(await identity.requestMagicCode(email), 'sent')
   const issued = await identity.verifyMagicCode(email, capture.messages.at(-1).code, { label: 'prova', userAgent: 'node', ipTruncated: '127.0.0.0' })
   const session = await identity.authenticate(issued.token)
-  const headers = { host: `127.0.0.1:${port}`, origin, 'content-type': 'application/json', cookie: `dz23_studio_session=${issued.token}; dz23_studio_csrf=${issued.csrfToken ?? issued.csrf}`, 'x-dz23-csrf': issued.csrfToken ?? issued.csrf }
+  const headers = { host: `127.0.0.1:${port}`, origin, 'content-type': 'application/json', cookie: `dz23_studio_session=${issued.token}; dz23_studio_csrf=${issued.csrfToken}`, 'x-dz23-csrf': issued.csrfToken }
   const hub = (path, init = {}) => fetch(`${origin}/api/studio/hub${path}`, { ...init, headers: { ...headers, ...(init.headers ?? {}) } })
 
   // ---- SMTP by reference: the value never leaves the environment
@@ -130,19 +133,43 @@ try {
   const actions = events.events.map(event => `${event.action}:${event.outcome}`)
   for (const expected of ['smtp.configured:success', 'smtp.tested:not-executed', 'integration.registered:success', 'integration.enabled:success', 'integration.enabled:failure', 'export.created:success']) assert.ok(actions.includes(expected), `missing audit ${expected}`)
 
-  const result = { decision: 'GO', port, announced: announced !== '', smtp: { configured: true, test: test.state, secretInStorage: false }, registry: { verifiedEnabled: true, unsignedTier: unsigned.integration.effective_tier, unsignedEnableRefused: true }, export: { entries: names.length, sha256: record.sha256.slice(0, 16), reproducible: true, privateLeak: false }, auditEvents: actions.length }
+  // ---- the panel in real Chromium against this very Studio (session handed over, nothing mocked)
+  let ui = 'NOT_EXECUTED'
+  let uiDetail = 'DZ23_HUB_SKIP_UI=1'
+  if (process.env.DZ23_HUB_SKIP_UI !== '1') {
+    // Asynchronous on purpose: the Studio under test runs in THIS process, so a blocking spawn would freeze its server.
+    const playwright = await new Promise(resolvePromise => {
+      const child = spawn('pnpm', ['exec', 'playwright', 'test', '-c', 'playwright.hub.config.ts', '--reporter=line'], {
+        cwd: join(studioRoot, 'apps', 'studio-web'),
+        env: { ...process.env, DZ23_HUB_ORIGIN: origin, DZ23_HUB_SESSION: issued.token, DZ23_HUB_CSRF: issued.csrfToken, DZ23_HUB_PROJECT_ID: project.project_id, DZ23_HUB_PROJECT_NAME: project.name },
+      })
+      let stdout = ''; let stderr = ''
+      child.stdout.on('data', chunk => { stdout += chunk })
+      child.stderr.on('data', chunk => { stderr += chunk })
+      child.on('close', status => resolvePromise({ status, stdout, stderr }))
+    })
+    const summary = `${playwright.stdout}\n${playwright.stderr}`.replace(/\u001b\[[0-9;]*[A-Za-z]/gu, '').split('\n').filter(line => /passed|failed|skipped|Error/u.test(line)).join(' | ').slice(0, 400)
+    ui = playwright.status === 0 ? 'PASS' : 'FAIL'
+    uiDetail = summary
+    if (playwright.status !== 0) { process.stderr.write(`${playwright.stdout}\n${playwright.stderr}\n`); throw new Error(`hub panel e2e failed: ${summary}`) }
+  }
+  const decision = ui === 'PASS' ? 'GO' : 'NO-GO'
+
+  const result = { decision, ui, uiDetail, port, announced: announced !== '', smtp: { configured: true, test: test.state, secretInStorage: false }, registry: { verifiedEnabled: true, unsignedTier: unsigned.integration.effective_tier, unsignedEnableRefused: true }, export: { entries: names.length, sha256: record.sha256.slice(0, 16), reproducible: true, privateLeak: false }, auditEvents: actions.length }
   await writeFile(resolve(studioRoot, 'docs/proofs/M5-integration-hub-proof.md'), `# M5 — Prova do Integration Hub v1 no Studio real
 
-- Resultado: **GO** (${new Date().toISOString().slice(0, 10)}, ambiente do Claude, Studio real no profile \`studio\` com o plugin \`@dz23-studio/integration-hub\`)
+- Resultado: **${decision}** (${new Date().toISOString().slice(0, 10)}, ambiente do Claude, Studio real no profile \`studio\` com o plugin \`@dz23-studio/integration-hub\`)
 - Entrada pelo caminho real: código de acesso por e-mail (captura de desenvolvimento), sessão e CSRF do Studio.
 - SMTP do aplicativo gerado: o navegador envia só o **nome** da referência (\`DZ23_APP_SMTP\`); o valor fica no ambiente do servidor, é conferido (existe + formato) e **não aparece no armazenamento**; nome inexistente → 400; teste de envio → \`NOT_EXECUTED\` com explicação (provedor ainda não escolhido).
 - Registro D16: manifesto assinado (Ed25519) → \`verified\`, ligado; manifesto não assinado de MCP externo com tier declarado T0 → \`unverified\`, tier efetivo **T2**, ligar no canal estável → 403.
 - Exportação: projeto \`VERIFIED_PROTOTYPE\` com run \`PASSED\` → ZIP com ${String(names.length)} entradas (servidor standalone, estáticos, relatório, README em linguagem comum, \`.env.example\` só com nomes); \`data/\` e códigos capturados **não** entram; SHA-256 exibido no cabeçalho e igual ao arquivo; segunda exportação produz o mesmo digest.
 - Auditoria: ${String(actions.length)} eventos com organização e espaço de trabalho, incluindo a recusa.
+- Interface \`/studio/hub\` em Chromium real contra este mesmo Studio: **${ui}** (${uiDetail}) — tela própria em pt-BR; nome do segredo guardado e teste mostrado como não executado; integração sem assinatura sem botão de ligar; pacote gerado pela tela com SHA-256 igual ao download; sem sessão → 401 na tela e na API.
 
-Não executado: envio SMTP real (depende da escolha do provedor pelo Prado), interface do Hub em navegador (M5 UI em \`/studio/hub\`, provada à parte), aparelho físico.
+Não executado: envio SMTP real (depende da escolha do provedor pelo Prado), aparelho físico, avaliação com pessoas leigas (ADR-016: só no sistema completo).
 `)
-  process.stdout.write(`${JSON.stringify(result, null, 2)}\nINTEGRATION_HUB=GO\n`)
+  process.stdout.write(`${JSON.stringify(result, null, 2)}\nINTEGRATION_HUB=${decision}\n`)
+  if (decision !== 'GO') process.exitCode = 1
 } finally {
   await app.shutdown.shutdown(0)
   await rm(workDir, { recursive: true, force: true })

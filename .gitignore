@@ -22,3 +22,4 @@ apps/studio-web/dist/
 *.tsbuildinfo
 apps/studio-web/test-results/
 apps/studio-web/playwright-report/
+apps/studio-web/test-results-hub/
