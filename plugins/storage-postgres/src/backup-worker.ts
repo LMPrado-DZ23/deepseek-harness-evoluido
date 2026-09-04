@@ -11,12 +11,13 @@
  *     --ssl verify-full --out <file> [--max-bytes N]
  */
 import { createHash, randomUUID } from 'node:crypto'
-import { open, rm } from 'node:fs/promises'
+import { rm } from 'node:fs/promises'
 import { Client } from 'pg'
 import { HARNESS_UPSTREAM_COMMIT, STORAGE_EXPORT_FORMAT, canonicalJson, sha256 } from './bundle.js'
 import { postgresClientConnection } from './dsn.js'
 import { assertConfiguredSchemaName, globalsTable, quoteIdentifier, recordsTable, STORAGE_POSTGRES_LAYOUT_VERSION, unitsTable } from './schema.js'
 import { storedDescriptor, type UnitRow } from './snapshot.js'
+import { assertPinnedDirectory, openNewPinnedFile, pinnedChildPath, pinParent } from './safe-path.js'
 
 export interface WorkerArgs {
   dsnRef: string
@@ -46,7 +47,8 @@ export async function writeBackupBundle(args: WorkerArgs, dsn: string): Promise<
   // The output file is claimed BEFORE the database is opened. It used to be the other
   // way round, and outside the try/finally: an `EEXIST` from a previous attempt, or a
   // directory the process cannot write, left one CONNECTED client behind per attempt.
-  const file = await open(args.out, 'wx', 0o600)
+  const output = await pinParent(args.out)
+  const file = await openNewPinnedFile(output.directory, output.name)
   const client = new Client({ ...connection, application_name: `dz23-storage:backup:${args.schema}` })
   let connected = false
   const fileHash = createHash('sha256')
@@ -72,7 +74,6 @@ export async function writeBackupBundle(args: WorkerArgs, dsn: string): Promise<
       throw new Error(`postgres storage schema '${args.schema}' has layout version ${String(layout.rows[0].value)}, incompatible with this build (${String(STORAGE_POSTGRES_LAYOUT_VERSION)})`)
     }
     const marker = await client.query<{ snapshot: string }>('SELECT pg_current_snapshot()::text AS snapshot')
-    const units = await client.query<UnitRow>(`SELECT name, version, tables, has_global, descriptor_sha256 FROM ${unitsTable(args.schema)} ORDER BY name COLLATE "C"`)
     const createdAt = (args.now ?? (() => new Date()))().toISOString()
     const source = { kind: 'postgres' as const, sha256: sha256(`${args.schema}\0${marker.rows[0]!.snapshot}`) }
 
@@ -80,7 +81,7 @@ export async function writeBackupBundle(args: WorkerArgs, dsn: string): Promise<
     payloadHash.update(`{"createdAt":${JSON.stringify(createdAt)},"domains":[`, 'utf8')
     await write(`{"format":${JSON.stringify(STORAGE_EXPORT_FORMAT)},"upstreamCommit":${JSON.stringify(HARNESS_UPSTREAM_COMMIT)},"source":${JSON.stringify(source)},"createdAt":${JSON.stringify(createdAt)},"domains":[`)
 
-    for (const unit of units.rows) {
+    for await (const unit of cursorUnits(client, args.schema)) {
       const globalRow = await client.query<{ value: unknown }>(
         `SELECT value FROM ${globalsTable(args.schema)} WHERE unit = $1`,
         [unit.name],
@@ -154,17 +155,39 @@ export async function writeBackupBundle(args: WorkerArgs, dsn: string): Promise<
 
     payloadHash.update(`],"format":${JSON.stringify(STORAGE_EXPORT_FORMAT)},"source":${canonicalJson(source)},"upstreamCommit":${JSON.stringify(HARNESS_UPSTREAM_COMMIT)}}`, 'utf8')
     await write(`],"payloadSha256":${JSON.stringify(payloadHash.digest('hex'))}}\n`)
+    await assertPinnedDirectory(output.directory)
     await file.close()
     return { sha256: fileHash.digest('hex'), bytes, records, domains }
   } catch (error) {
     /* v8 ignore next 3 -- cleanup of a partial file cannot supersede the original failure. */
     if (connected) await client.query('ROLLBACK').catch(() => undefined)
     await file.close().catch(() => undefined)
-    await rm(args.out, { force: true }).catch(() => undefined)
+    await assertPinnedDirectory(output.directory)
+      .then(() => rm(pinnedChildPath(output.directory, output.name), { force: true }))
+      .catch(() => undefined)
     throw error
   } finally {
     // Only a client that actually connected: `end()` on one that never did never settles.
     if (connected) await client.end().catch(() => undefined)
+    await output.directory.handle.close().catch(() => undefined)
+  }
+}
+
+/** Units are cursored too: a schema with many small domains stays bounded just like one huge domain. */
+async function* cursorUnits(client: Client, schema: string): AsyncGenerator<UnitRow> {
+  const name = `dz23_backup_units_${randomUUID().replaceAll('-', '')}`
+  await client.query(
+    `DECLARE ${name} NO SCROLL CURSOR FOR SELECT name, version, tables, has_global, descriptor_sha256 FROM ${unitsTable(schema)} ORDER BY name COLLATE "C"`,
+  )
+  try {
+    for (;;) {
+      const batch = await client.query<UnitRow>(`FETCH FORWARD ${String(CURSOR_BATCH)} FROM ${name}`)
+      for (const row of batch.rows) yield row
+      if (batch.rows.length < CURSOR_BATCH) return
+    }
+  } finally {
+    /* v8 ignore next -- transaction end also closes the cursor after failure. */
+    await client.query(`CLOSE ${name}`).catch(() => undefined)
   }
 }
 

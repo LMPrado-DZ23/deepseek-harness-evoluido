@@ -1,7 +1,7 @@
 import { Client } from 'pg'
 import { StorageError } from '@deepseek-ai/dsh-storage'
 import type { KvUnitDescriptor } from '@deepseek-ai/dsh-storage'
-import { compareUtf8, descriptorFingerprint, exportedDomain, sealBundle, sha256, type ExportedDomain, type StorageExportBundle } from './bundle.js'
+import { compareUtf8, DEFAULT_STORAGE_BUNDLE_LIMITS, descriptorFingerprint, exportedDomain, sealBundle, sha256, type ExportedDomain, type StorageExportBundle } from './bundle.js'
 import { withoutTlsParams } from './dsn.js'
 import { assertConfiguredSchemaName, globalsTable, quoteIdentifier, recordsTable, STORAGE_POSTGRES_LAYOUT_VERSION, unitsTable } from './schema.js'
 
@@ -16,6 +16,9 @@ export interface SnapshotOptions {
    * global slot when one is stored — enough for a complete restore.
    */
   descriptors?: readonly KvUnitDescriptor[]
+  /** Diagnostic snapshots are bounded; large production backups use backup-worker's cursors. */
+  maxDomains?: number
+  maxRecords?: number
   now?: () => Date
 }
 
@@ -31,6 +34,11 @@ export interface GlobalRow { unit: string; value: unknown }
  */
 export async function snapshotPostgresStorage(options: SnapshotOptions): Promise<StorageExportBundle> {
   assertConfiguredSchemaName(options.schema)
+  for (const [name, limit] of [['maxDomains', options.maxDomains], ['maxRecords', options.maxRecords]] as const) {
+    if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1 || limit === Number.MAX_SAFE_INTEGER)) {
+      throw new Error(`${name} must be a positive bounded safe integer`)
+    }
+  }
   // The `ssl` option is the authority; the DSN's own ssl parameters are stripped so
   // `pg` cannot let the string override it (it merges the parsed string OVER the option).
   const client = new Client({ connectionString: withoutTlsParams(options.connectionString), ssl: options.ssl, application_name: `dz23-storage:snapshot:${options.schema}` })
@@ -45,9 +53,23 @@ export async function snapshotPostgresStorage(options: SnapshotOptions): Promise
       throw new StorageError('version-mismatch', `postgres storage schema '${options.schema}' has layout version ${String(layout.rows[0].value)}, incompatible with this build (${String(STORAGE_POSTGRES_LAYOUT_VERSION)})`)
     }
     const marker = await client.query<{ snapshot: string }>('SELECT pg_current_snapshot()::text AS snapshot')
-    const units = await client.query<UnitRow>(`SELECT name, version, tables, has_global, descriptor_sha256 FROM ${unitsTable(options.schema)}`)
-    const records = await client.query<RecordRow>(`SELECT unit, table_name, key, value FROM ${recordsTable(options.schema)} ORDER BY unit, table_name, key`)
-    const globals = await client.query<GlobalRow>(`SELECT unit, value FROM ${globalsTable(options.schema)}`)
+    const maxDomains = options.maxDomains ?? DEFAULT_STORAGE_BUNDLE_LIMITS.maxDomains
+    const maxRecords = options.maxRecords ?? DEFAULT_STORAGE_BUNDLE_LIMITS.maxRecords
+    const units = await client.query<UnitRow>(
+      `SELECT name, version, tables, has_global, descriptor_sha256 FROM ${unitsTable(options.schema)} ORDER BY name COLLATE "C" LIMIT $1`,
+      [maxDomains + 1],
+    )
+    if (units.rows.length > maxDomains) throw new Error(`postgres diagnostic snapshot exceeds the ${String(maxDomains)} domain limit; use the streaming backup worker`)
+    const records = await client.query<RecordRow>(
+      `SELECT unit, table_name, key, value FROM ${recordsTable(options.schema)} ORDER BY unit, table_name, key LIMIT $1`,
+      [maxRecords + 1],
+    )
+    if (records.rows.length > maxRecords) throw new Error(`postgres diagnostic snapshot exceeds the ${String(maxRecords)} record limit; use the streaming backup worker`)
+    const globals = await client.query<GlobalRow>(
+      `SELECT unit, value FROM ${globalsTable(options.schema)} ORDER BY unit COLLATE "C" LIMIT $1`,
+      [maxDomains + 1],
+    )
+    if (globals.rows.length > maxDomains) throw new Error(`postgres diagnostic snapshot exceeds the ${String(maxDomains)} global limit; use the streaming backup worker`)
     await client.query('COMMIT')
 
     const stamped = new Map(units.rows.map(row => [row.name, row.version]))

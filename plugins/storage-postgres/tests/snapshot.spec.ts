@@ -63,6 +63,17 @@ describePostgres('hot snapshot of a PostgreSQL storage schema', () => {
     await restored.close()
   })
 
+  it('bounds diagnostic snapshots and directs large stores to the streaming worker', async () => {
+    const schema = schemaName('snapshot_quota')
+    const source = backend(schema)
+    const unit = await source.kv!.open({ name: 'bounded', version: 1, tables: ['items'], hasGlobal: false })
+    await unit.putRecord('items', 'one', { value: 1 })
+    await unit.putRecord('items', 'two', { value: 2 })
+    await expect(snapshotPostgresStorage({ connectionString: dsn!, ssl: false, schema, maxRecords: 1 }))
+      .rejects.toThrow('record limit; use the streaming backup worker')
+    await source.close()
+  })
+
   it('the backup process writes, out of process and one domain at a time, exactly the bundle the in-process snapshot seals', async () => {
     const schema = schemaName('worker')
     const source = backend(schema)

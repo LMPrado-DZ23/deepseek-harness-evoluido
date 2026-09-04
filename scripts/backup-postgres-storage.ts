@@ -1,5 +1,5 @@
 import { resolve } from 'node:path'
-import { StorageBackupScheduler, BACKUP_MAX_BYTES_DEFAULT, BACKUP_MIN_INTERVAL_MS, inProcessBackupRunner } from '../plugins/storage-postgres/src/backup.ts'
+import { StorageBackupScheduler, BACKUP_MAX_BYTES_DEFAULT, BACKUP_MIN_INTERVAL_MS } from '../plugins/storage-postgres/src/backup.ts'
 import { writeBackupBundle } from '../plugins/storage-postgres/src/backup-worker.ts'
 import { assertTlsPolicy, postgresClientConnection } from '../plugins/storage-postgres/src/dsn.ts'
 import { assertConfiguredSchemaName } from '../plugins/storage-postgres/src/schema.ts'
@@ -20,6 +20,7 @@ import { descriptorOf } from '@deepseek-ai/dsh-storage-domain'
 const args = parseArgs(process.argv.slice(2))
 assertConfiguredSchemaName(args.schema)
 if (args.write && args.out === '') throw new Error('--out is mandatory with --write')
+if (args.write && args.declaredOnly) throw new Error('--declared-only cannot write a backup; production backups are complete and streamed')
 const dsn = process.env[args.dsnRef]
 if (dsn === undefined || dsn === '') throw new Error(`Credential reference '${args.dsnRef}' is not configured.`)
 // One authority for TLS here too: --ssl decides, and the DSN's own ssl parameters are stripped.
@@ -41,13 +42,10 @@ if (!args.write) {
   }, null, 2)}\n`)
 } else {
   const scheduler = new StorageBackupScheduler({
-    // Same engine, same ceiling as the scheduled backup: one domain at a time, straight
-    // to the file, refusing anything over --max-bytes. `--declared-only` is the one case
-    // that still builds the bundle in memory, because it seals declared units the medium
-    // may not hold at all — and it is bounded by the same number.
-    runner: args.declaredOnly
-      ? inProcessBackupRunner(snapshot, { maxBytes: args.maxBytes })
-      : { run: target => writeBackupBundle({ dsnRef: 'unused', schema: args.schema, ssl: args.ssl, out: target, maxBytes: args.maxBytes }, dsn) },
+    // Complete production backups have one path only: cursor batches written
+    // straight to the file. No flag is allowed to fall back to a whole-bundle
+    // allocation in the operator process.
+    runner: { run: target => writeBackupBundle({ dsnRef: 'unused', schema: args.schema, ssl: args.ssl, out: target, maxBytes: args.maxBytes }, dsn) },
     directory: resolve(args.out), label: args.schema, intervalMs: BACKUP_MIN_INTERVAL_MS, keep: args.keep,
     log: (level, line) => process.stderr.write(`[${level}] ${line}\n`),
   })

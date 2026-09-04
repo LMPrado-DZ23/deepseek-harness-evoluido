@@ -1,10 +1,10 @@
 import { execFile } from 'node:child_process'
-import { createReadStream, existsSync } from 'node:fs'
+import { constants, createReadStream, existsSync } from 'node:fs'
 import { createHash, randomBytes } from 'node:crypto'
-import { appendFile, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { open, opendir, rm } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { bundleRecordCount, sha256, type StorageExportBundle } from './bundle.js'
+import { assertPinnedDirectory, childPath, openNewPinnedFile, openPinnedAppendFile, pinnedChildPath, pinDirectory, pinParent, type PinnedDirectory } from './safe-path.js'
 
 /** Ceiling shared by the worker, the operator CLI and the verifier: one number, one behaviour. */
 export const BACKUP_MAX_BYTES_DEFAULT = 2 * 1024 * 1024 * 1024
@@ -23,6 +23,8 @@ export interface BackupResult {
   startedAt: string
   finishedAt: string
   pruned: string[]
+  /** Total removed; `pruned` is capped so a neglected directory cannot exhaust memory just by reporting cleanup. */
+  prunedCount: number
   error: string | null
 }
 
@@ -46,7 +48,15 @@ export function inProcessBackupRunner(snapshot: () => Promise<StorageExportBundl
       // The same ceiling the worker enforces: this path used to have none at all, so the
       // operator CLI would happily fill the disk where the scheduled backup refuses to.
       if (Buffer.byteLength(serialized) > maxBytes) throw new Error(`backup exceeds the ${String(maxBytes)} byte limit`)
-      await writeFile(target, serialized, { encoding: 'utf8', flag: 'wx', mode: 0o600 })
+      const parent = await pinParent(target)
+      const file = await openNewPinnedFile(parent.directory, parent.name)
+      try {
+        await file.writeFile(serialized, { encoding: 'utf8' })
+        await assertPinnedDirectory(parent.directory)
+      } finally {
+        await file.close().catch(() => undefined)
+        await parent.directory.handle.close().catch(() => undefined)
+      }
       return { sha256: sha256(serialized), bytes: Buffer.byteLength(serialized), records: bundleRecordCount(bundle), domains: bundle.domains.length }
     },
   }
@@ -216,48 +226,73 @@ export class StorageBackupScheduler {
     const startedAt = this.now().toISOString()
     const stamp = startedAt.replace(/[-:.]/gu, '')
     const fileName = `studio-backup-${this.options.label}-${stamp}-${this.suffix()}.json`
-    const target = resolve(this.options.directory, fileName)
+    let directory: PinnedDirectory | undefined
+    let target = ''
     let result: BackupResult
     try {
-      await mkdir(this.options.directory, { recursive: true, mode: 0o700 })
+      directory = await pinDirectory(this.options.directory, true)
+      target = childPath(directory, fileName)
       const written = await this.runner.run(target)
-      await writeFile(`${target}.sha256`, `${written.sha256}  ${fileName}\n`, { encoding: 'utf8', flag: 'wx', mode: 0o600 })
-      const pruned = await this.prune(fileName)
+      await assertPinnedDirectory(directory)
+      const sidecar = await openNewPinnedFile(directory, `${fileName}.sha256`)
+      try { await sidecar.writeFile(`${written.sha256}  ${fileName}\n`, { encoding: 'utf8' }) } finally { await sidecar.close() }
+      const pruned = await this.prune(directory, fileName)
       result = {
         status: 'created', file: target, sha256: written.sha256, bytes: written.bytes,
         records: written.records, domains: written.domains,
-        startedAt, finishedAt: this.now().toISOString(), pruned, error: null,
+        startedAt, finishedAt: this.now().toISOString(), pruned: pruned.names, prunedCount: pruned.count, error: null,
       }
     } catch (error) {
       // A run that died half-way leaves no half-file behind for the next restore to find.
-      await rm(target, { force: true }).catch(() => undefined)
-      await rm(`${target}.sha256`, { force: true }).catch(() => undefined)
+      if (directory !== undefined) {
+        await assertPinnedDirectory(directory).then(async () => {
+          await rm(pinnedChildPath(directory!, fileName), { force: true }).catch(() => undefined)
+          await rm(pinnedChildPath(directory!, `${fileName}.sha256`), { force: true }).catch(() => undefined)
+        }).catch(() => undefined)
+      }
       result = {
         status: 'failed', file: null, sha256: null, bytes: 0, records: 0, domains: 0,
-        startedAt, finishedAt: this.now().toISOString(), pruned: [],
+        startedAt, finishedAt: this.now().toISOString(), pruned: [], prunedCount: 0,
         error: error instanceof Error ? error.message : String(error),
       }
     }
     this.last = result
-    await this.record(result)
+    if (directory !== undefined) await this.record(directory, result)
+    await directory?.handle.close().catch(() => undefined)
     this.log(result.status === 'created' ? 'info' : 'warn', `storage-postgres backup ${result.status}${result.file === null ? '' : ` ${result.file}`}${result.error === null ? '' : ` (${result.error})`}`)
     return result
   }
 
-  private async prune(current: string): Promise<string[]> {
-    const names = (await readdir(this.options.directory)).filter(name => BACKUP_FILE_PATTERN.exec(name)?.[1] === this.options.label).sort()
-    const excess = names.filter(name => name !== current).slice(0, Math.max(0, names.length - this.options.keep))
-    for (const name of excess) {
-      await rm(resolve(this.options.directory, name), { force: true })
-      await rm(resolve(this.options.directory, `${name}.sha256`), { force: true })
+  private async prune(directory: PinnedDirectory, current: string): Promise<{ names: string[]; count: number }> {
+    const retained: string[] = []
+    const pruned: string[] = []
+    let count = 0
+    await assertPinnedDirectory(directory)
+    const listing = await opendir(process.platform === 'linux' ? `/proc/self/fd/${String(directory.handle.fd)}` : directory.path)
+    for await (const entry of listing) {
+      if (!entry.isFile() || BACKUP_FILE_PATTERN.exec(entry.name)?.[1] !== this.options.label) continue
+      retained.push(entry.name)
+      retained.sort()
+      if (retained.length <= this.options.keep) continue
+      let index = retained.findIndex(name => name !== current)
+      if (index < 0) continue
+      const [name] = retained.splice(index, 1)
+      await assertPinnedDirectory(directory)
+      await rm(pinnedChildPath(directory, name!), { force: true })
+      await rm(pinnedChildPath(directory, `${name!}.sha256`), { force: true })
+      count += 1
+      if (pruned.length < 1_000) pruned.push(name!)
     }
-    return excess
+    await assertPinnedDirectory(directory)
+    return { names: pruned, count }
   }
 
-  private async record(result: BackupResult): Promise<void> {
+  private async record(directory: PinnedDirectory, result: BackupResult): Promise<void> {
     try {
-      const ledger = resolve(this.options.directory, BACKUP_LEDGER_FILE)
-      await appendFile(ledger, `${JSON.stringify(result)}\n`, { encoding: 'utf8', mode: 0o600 })
+      await assertPinnedDirectory(directory)
+      const ledger = await openPinnedAppendFile(directory, BACKUP_LEDGER_FILE)
+      try { await ledger.writeFile(`${JSON.stringify(result)}\n`, { encoding: 'utf8' }) } finally { await ledger.close() }
+      await assertPinnedDirectory(directory)
     } catch (error) {
       this.log('warn', `storage-postgres backup ledger write failed (${error instanceof Error ? error.message : String(error)})`)
     }
@@ -281,18 +316,40 @@ export async function verifyBackupFile(
   const maxBytes = options.maxBytes ?? BACKUP_MAX_BYTES_DEFAULT
   const hash = createHash('sha256')
   let bytes = 0
-  const stream = createReadStream(file, { highWaterMark: 1024 * 1024 })
+  const parent = await pinParent(file)
+  const noFollow = constants.O_NOFOLLOW ?? 0
   try {
-    for await (const chunk of stream) {
-      const buffer = chunk as Buffer
-      bytes += buffer.byteLength
-      if (bytes > maxBytes) throw new Error(`backup file '${file}' exceeds the ${String(maxBytes)} byte limit`)
-      hash.update(buffer)
+    const data = await open(pinnedChildPath(parent.directory, parent.name), constants.O_RDONLY | noFollow)
+    try {
+      const dataStats = await data.stat({ bigint: true })
+      if (!dataStats.isFile()) throw new Error(`backup file '${file}' is not a regular file`)
+      const stream = createReadStream(pinnedChildPath(parent.directory, parent.name), { fd: data.fd, autoClose: false, highWaterMark: 1024 * 1024 })
+      try {
+        for await (const chunk of stream) {
+          const buffer = chunk as Buffer
+          bytes += buffer.byteLength
+          if (bytes > maxBytes) throw new Error(`backup file '${file}' exceeds the ${String(maxBytes)} byte limit`)
+          hash.update(buffer)
+        }
+      } finally {
+        stream.destroy()
+      }
+    } finally {
+      await data.close().catch(() => undefined)
+    }
+    await assertPinnedDirectory(parent.directory)
+    const digest = hash.digest('hex')
+    const sidecarFile = await open(pinnedChildPath(parent.directory, `${parent.name}.sha256`), constants.O_RDONLY | noFollow)
+    try {
+      const stats = await sidecarFile.stat({ bigint: true })
+      if (!stats.isFile() || stats.size > 1024n) throw new Error(`backup sidecar for '${file}' is invalid`)
+      const sidecar = (await sidecarFile.readFile('utf8')).trim().split(/\s+/u)[0]
+      await assertPinnedDirectory(parent.directory)
+      return { file, bytes, sha256: digest, matches: sidecar === digest }
+    } finally {
+      await sidecarFile.close().catch(() => undefined)
     }
   } finally {
-    stream.destroy()
+    await parent.directory.handle.close().catch(() => undefined)
   }
-  const digest = hash.digest('hex')
-  const sidecar = (await readFile(`${file}.sha256`, 'utf8')).trim().split(/\s+/u)[0]
-  return { file, bytes, sha256: digest, matches: sidecar === digest }
 }

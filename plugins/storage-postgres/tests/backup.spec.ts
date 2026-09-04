@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, truncate, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, truncate, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -136,6 +136,30 @@ describe('StorageBackupScheduler', () => {
     expect(() => new StorageBackupScheduler({ ...options, intervalMs: 60_000, keep: 1 })).toThrow('at least 5 minutes')
     expect(() => new StorageBackupScheduler({ ...options, intervalMs: BACKUP_MIN_INTERVAL_MS, keep: 0 })).toThrow('positive integer')
     expect(() => new StorageBackupScheduler({ ...options, label: '../x', intervalMs: BACKUP_MIN_INTERVAL_MS, keep: 1 })).toThrow('backup label')
+  })
+
+  it('refuses a backup directory reached through a symlink before invoking the runner', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dz23-backup-link-'))
+    scratch.push(root)
+    const outside = join(root, 'outside')
+    const linked = join(root, 'linked')
+    await mkdir(outside)
+    try {
+      await symlink(outside, linked, 'junction')
+    } catch (error) {
+      if ((error as { code?: string }).code === 'EPERM') return
+      throw error
+    }
+    let invoked = false
+    const scheduler = new StorageBackupScheduler({
+      directory: join(linked, 'backups'), label: 'safe_path', intervalMs: BACKUP_MIN_INTERVAL_MS, keep: 2,
+      runner: { run: async () => { invoked = true; return { sha256: 'a'.repeat(64), bytes: 0, records: 0, domains: 0 } } },
+    })
+    const result = await scheduler.runOnce()
+    expect(result.status).toBe('failed')
+    expect(result.error).toContain('not a real directory')
+    expect(invoked).toBe(false)
+    expect(await readdir(outside)).toEqual([])
   })
 
   it('reports a ledger write failure as a warning instead of failing the backup', async () => {
