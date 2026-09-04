@@ -125,6 +125,13 @@
           proxySocketRoot: !!js process.env.DZ23_PREVIEW_PROXY_SOCKET_ROOT ?? '/run/dz23-preview-proxies'
           studioOrigin: !!js process.env.DZ23_PUBLIC_ORIGIN ?? 'http://studio.dz23.localhost:8080'
           edgeSecretRef: DZ23_EDGE_SECRET
+    - id: dz23-studio-integration-hub
+      name: '@dz23-studio/integration-hub'
+      config:
+        # Public keys of trusted integration publishers (Ed25519 SPKI, base64). Empty = every manifest is unverified.
+        publisherKeys: !!js JSON.parse(process.env.DZ23_HUB_PUBLISHER_KEYS ?? '{}')
+        channel: !!js process.env.DZ23_HUB_CHANNEL ?? 'stable'
+        smtpTestEnabled: !!js process.env.DZ23_HUB_SMTP_TEST_ENABLED === '1'
     - id: dz23-studio-web
       name: '@dz23-studio/web'
     - id: studio-hello

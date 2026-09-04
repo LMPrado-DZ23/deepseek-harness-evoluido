@@ -26,6 +26,9 @@ importers:
       '@dz23-studio/identity':
         specifier: link:../../../plugins/identity
         version: link:../../../plugins/identity
+      '@dz23-studio/integration-hub':
+        specifier: link:../../../plugins/integration-hub
+        version: link:../../../plugins/integration-hub
       '@dz23-studio/policy':
         specifier: link:../../../plugins/policy
         version: link:../../../plugins/policy
