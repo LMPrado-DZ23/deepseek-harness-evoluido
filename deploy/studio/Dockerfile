@@ -30,6 +30,7 @@ RUN --mount=type=cache,id=dz23-studio-pnpm-11,target=/pnpm/store,sharing=locked 
     node scripts/check-upstream-content.mjs --materialize-symlinks \
  && node scripts/check-portability.mjs --all-files \
  && pnpm fetch --frozen-lockfile --store-dir /pnpm/store \
+ && pnpm --dir third_party/deepseek-harness fetch --frozen-lockfile --store-dir /pnpm/store \
  && touch /workspace/.dz23-fetch-complete
 
 FROM toolchain AS build
@@ -38,37 +39,21 @@ WORKDIR /workspace
 ENV DSH_CLIENT_COMMIT_HASH=6c705be1ce6774a000d061da41d1823b03a3d42c
 COPY --from=dependency-fetch /workspace/.dz23-fetch-complete /tmp/.dz23-fetch-complete
 COPY . .
-# The pinned upstream ships its own workspace boundary. The product build uses
-# the single audited root lockfile, so remove only the build-container copies
-# after integrity verification. Otherwise nested pnpm invocations try to
-# resolve the second lockfile and escape the offline build boundary.
+# Compile the pinned upstream against its own audited lock before the Studio
+# workspace injects those built packages into the product dependency graph.
 RUN test -n "${STUDIO_COMMIT}" \
  && test -f /tmp/.dz23-fetch-complete \
  && node scripts/check-image-lock.mjs \
  && node scripts/check-upstream-content.mjs --materialize-symlinks \
- && node scripts/check-portability.mjs --all-files \
- && rm third_party/deepseek-harness/pnpm-workspace.yaml \
-       third_party/deepseek-harness/pnpm-lock.yaml
+ && node scripts/check-portability.mjs --all-files
+RUN --mount=type=cache,id=dz23-studio-pnpm-11,target=/pnpm/store,sharing=locked \
+    --network=none \
+    pnpm --dir third_party/deepseek-harness install --offline --frozen-lockfile --trust-lockfile --store-dir /pnpm/store
+RUN --network=none pnpm --dir third_party/deepseek-harness build:official
+# Inject the now-built upstream packages into the Studio workspace.
 RUN --mount=type=cache,id=dz23-studio-pnpm-11,target=/pnpm/store,sharing=locked \
     --network=none \
     pnpm install --offline --frozen-lockfile --trust-lockfile --store-dir /pnpm/store
-# The upstream build script intentionally addresses these paths relative to
-# its repository root. The unified workspace hoists them to /workspace, so
-# expose only the two paths the pinned build contract requires.
-RUN mkdir -p third_party/deepseek-harness/node_modules \
- && if [ ! -e third_party/deepseek-harness/node_modules/typescript ]; then \
-      ln -s /workspace/node_modules/typescript third_party/deepseek-harness/node_modules/typescript; \
-    fi \
- && if [ ! -e third_party/deepseek-harness/node_modules/@types ]; then \
-      ln -s /workspace/node_modules/@types third_party/deepseek-harness/node_modules/@types; \
-    fi \
- && test -f third_party/deepseek-harness/node_modules/typescript/bin/tsc
-RUN --network=none pnpm --dir third_party/deepseek-harness build:official
-# Reinject the upstream packages after build:official; their lib/ trees do not
-# exist in the source snapshot used by the first install.
-RUN --mount=type=cache,id=dz23-studio-pnpm-11,target=/pnpm/store,sharing=locked \
-    --network=none \
-    pnpm install --offline --frozen-lockfile --trust-lockfile --force --store-dir /pnpm/store
 RUN --mount=type=cache,id=dz23-studio-pnpm-11,target=/pnpm/store,sharing=locked \
     --network=none pnpm build
 # Synchronize every built workspace package into the deployable virtual store.
