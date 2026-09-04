@@ -152,8 +152,13 @@ describe('the zip reader against a hostile archive', () => {
       expect(() => readZip(archive)).toThrow(message)
     }
     mutate((archive, { eocd }) => archive.writeUInt16LE(1, eocd + 4), /multi-disk/u)
+    mutate((archive, { eocd }) => archive.writeUInt16LE(1, eocd + 6), /multi-disk/u)
     mutate((archive, { eocd }) => archive.writeUInt16LE(2, eocd + 8), /central directory/u)
     mutate((archive, { eocd }) => archive.writeUInt32LE(eocd + 1, eocd + 16), /central directory/u)
+    mutate((archive, { eocd }) => archive.writeUInt32LE(1, eocd + 12), /central directory/u)
+    mutate((archive, { eocd }) => {
+      archive.writeUInt32LE(eocd - 20, eocd + 16); archive.writeUInt32LE(20, eocd + 12)
+    }, /central directory/u)
     mutate((archive, { central }) => archive.writeUInt32LE(0, central), /central directory/u)
     mutate((archive, { eocd }) => { archive.writeUInt16LE(0, eocd + 8); archive.writeUInt16LE(0, eocd + 10) }, /central directory/u)
     mutate((archive, { central, local }) => {
