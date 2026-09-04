@@ -24,7 +24,10 @@ const FORBIDDEN_GLOBALS = new Set([
 const FORBIDDEN_NETWORK_APIS = new Set(['fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource'])
 const FORBIDDEN_ESCAPE_PROPERTIES = new Set(['constructor', '__proto__', 'prototype'])
 const FORBIDDEN_ELEMENT_FACTORIES = new Set(['createElement', 'jsx', 'jsxs', 'jsxDEV'])
-const FORBIDDEN_JSX_TAGS = new Set(['script', 'iframe', 'object', 'embed', 'base', 'meta'])
+const FORBIDDEN_JSX_TAGS = new Set([
+  'script', 'iframe', 'object', 'embed', 'base', 'meta',
+  'svg', 'g', 'path', 'circle', 'ellipse', 'line', 'polygon', 'polyline', 'rect', 'text', 'title',
+])
 const SAFE_INTRINSIC_JSX_TAGS = new Set([
   'a', 'article', 'aside', 'b', 'blockquote', 'br', 'button', 'caption', 'code', 'col', 'colgroup',
   'dd', 'details', 'div', 'dl', 'dt', 'em', 'fieldset', 'figcaption', 'figure', 'footer', 'form',
@@ -32,10 +35,14 @@ const SAFE_INTRINSIC_JSX_TAGS = new Set([
   'li', 'main', 'mark', 'nav', 'ol', 'option', 'p', 'picture', 'pre', 'section', 'select', 'small',
   'span', 'strong', 'sub', 'summary', 'sup', 'table', 'tbody', 'td', 'textarea', 'tfoot', 'th',
   'thead', 'time', 'tr', 'u', 'ul',
-  'svg', 'g', 'path', 'circle', 'ellipse', 'line', 'polygon', 'polyline', 'rect', 'text', 'title',
 ])
-const FORBIDDEN_JSX_ATTRIBUTES = new Set(['dangerouslySetInnerHTML', 'srcDoc'])
-const URL_JSX_ATTRIBUTES = new Set(['href', 'src', 'action', 'formaction', 'xlinkhref'])
+const FORBIDDEN_JSX_ATTRIBUTES = new Set(['dangerouslysetinnerhtml', 'srcdoc', 'style'])
+const URL_JSX_ATTRIBUTES = new Set([
+  'href', 'src', 'action', 'formaction', 'xlinkhref',
+  'srcset', 'ping', 'background', 'cite', 'longdesc',
+])
+const URL_CANDIDATE_LIST_ATTRIBUTES = new Set(['srcset'])
+const URL_WHITESPACE_LIST_ATTRIBUTES = new Set(['ping'])
 const URL_IGNORED_CODE_POINTS = /[\u0000-\u0020]/gu
 const HTTPS_URL = /^https:\/\//iu
 const FIXED_COMPONENT_PATHS = [
@@ -91,11 +98,16 @@ function assertNoServerOrUnsafeSource(path: string, source: ts.SourceFile, gener
       const name = node.name.getText(source)
       const normalizedName = normalizeJsxAttributeName(name)
       if (/^on/iu.test(name) || name === 'ref') throw rejectedSource(path, `interactive JSX attribute ${name}`)
-      if (FORBIDDEN_JSX_ATTRIBUTES.has(name)) throw rejectedSource(path, name)
+      if (FORBIDDEN_JSX_ATTRIBUTES.has(normalizedName)) throw rejectedSource(path, name)
       if (URL_JSX_ATTRIBUTES.has(normalizedName)) {
         const value = staticJsxAttributeValue(node)
         if (value === undefined) throw rejectedSource(path, `dynamic URL attribute ${name}`)
-        if (!isSafeStaticUrl(value)) throw rejectedSource(path, `unsafe URL attribute ${name}`)
+        const candidates = URL_CANDIDATE_LIST_ATTRIBUTES.has(normalizedName)
+          ? splitCandidateList(value)
+          : URL_WHITESPACE_LIST_ATTRIBUTES.has(normalizedName) ? splitWhitespaceList(value) : [value]
+        for (const candidate of candidates) {
+          if (!isSafeStaticUrl(candidate)) throw rejectedSource(path, `unsafe URL attribute ${name}`)
+        }
       }
     }
     if (ts.isJsxSpreadAttribute(node)) throw rejectedSource(path, 'JSX spread attribute')
@@ -124,6 +136,14 @@ function isSafeStaticUrl(value: string): boolean {
   if (normalized === '' || normalized.startsWith('#') || normalized.startsWith('./')) return true
   if (normalized.startsWith('/') && !normalized.startsWith('//')) return true
   return HTTPS_URL.test(normalized)
+}
+
+function splitCandidateList(value: string): string[] {
+  return value.split(',').map(part => part.trim().split(/\s+/u)[0] ?? '').filter(part => part !== '')
+}
+
+function splitWhitespaceList(value: string): string[] {
+  return value.trim().split(/\s+/u).filter(part => part !== '')
 }
 
 function normalizeJsxAttributeName(value: string): string {

@@ -39,6 +39,7 @@ import { HarnessPromptModel } from './ports.js'
 import { ContainerBuilder, NodeProcessPort } from './runner.js'
 import { PromptToAppService, type PromptToAppRepository } from './service.js'
 import { SharpLogoProcessor } from './logo.js'
+import { productionTemplateDirectory } from './template-policy.js'
 
 export * from './appspec.js'
 export * from './auth-generator.js'
@@ -60,6 +61,7 @@ export * from './ports.js'
 export * from './runner.js'
 export * from './service.js'
 export * from './state.js'
+export * from './template-policy.js'
 
 export const name = 'dz23-studio-prompt-to-app'
 export const inject = ['agents', 'jobs', 'llm', 'storageDomain', 'studioIdentity', 'studioRouteHealth', 'studioTenancy', 'webServer']
@@ -68,7 +70,6 @@ export interface PromptToAppPluginConfig {
   readonly allowedHosts?: readonly string[]
   readonly allowedOrigins?: readonly string[]
   readonly modelByRoute?: Readonly<Record<string, string>>
-  readonly templateDirectory?: string
   readonly runsRoot?: string
   readonly logoStoreRoot?: string
   readonly builder?: {
@@ -154,7 +155,7 @@ export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}):
   })
   const runsRoot = resolve(config.runsRoot ?? resolve(homedir(), '.dz23-studio', 'generated-runs'))
   const logoStoreRoot = resolve(config.logoStoreRoot ?? resolve(homedir(), '.dz23-studio', 'assets'))
-  const templateDirectory = resolve(config.templateDirectory ?? resolve(projectRoot, 'templates', 'nextjs-app@1'))
+  const templateDirectory = productionTemplateDirectory(projectRoot)
   const templateStore = resolve(config.builder?.templateStore ?? resolve(projectRoot, 'runtime', 'template-store-v2'))
   const imageDigest = config.builder?.imageDigest ?? await readDigest(config.builder?.imageDigestFile ?? resolve(projectRoot, 'runtime', 'builder-image-digest'))
   await Promise.all([mkdir(runsRoot, { recursive: true }), mkdir(logoStoreRoot, { recursive: true })])

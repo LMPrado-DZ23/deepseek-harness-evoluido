@@ -293,6 +293,41 @@ describe('generated import policy', () => {
     },
   )
 
+  it.each([
+    '<img src="/ok.png" srcSet="//evil.example/p.png 1x" />',
+    '<img src="/ok.png" srcSet="/ok.png 1x, http://evil.example/p.png 2x" />',
+    '<a href="/ok" ping="http://evil.example/collect">i</a>',
+    '<a href="/ok" ping="/safe http://evil.example/collect">i</a>',
+    '<table background="http://evil.example/p.png" />',
+  ])('rejects an external URL in every URL-bearing JSX surface: %s', (jsx) => {
+    const content = `export default function App(){return (${jsx})}`
+    expect(() => assertGeneratedSource([{ path: 'src/app.tsx', content }])).toThrow('unsafe URL')
+  })
+
+  it.each([
+    '<div style={{ backgroundImage: "url(http://evil.example/p.png)" }} />',
+    '<div style={{ background: \'url("//evil.example/p.png")\' }} />',
+    '<div style={{ backgroundImage: "u" + "rl(http://evil.example/p.png)" }} />',
+    '<div style={{ backgroundImage: "\\u0075rl(http://evil.example/p.png)" }} />',
+    '<div style={{ color: "red" }} />',
+    '<div style={s} />',
+    '<svg fill="url(http://evil.example/p.svg#paint)" />',
+    '<path filter="url(http://evil.example/p.svg#filter)" />',
+    '<path markerStart="url(http://evil.example/p.svg#marker)" />',
+  ])('rejects unreviewed inline style and raw SVG surfaces: %s', (jsx) => {
+    const content = `export default function App(){return (${jsx})}`
+    expect(() => assertGeneratedSource([{ path: 'src/app.tsx', content }])).toThrow()
+  })
+
+  it.each([
+    '<img src="/ok.png" srcSet="/ok.png 1x, /ok@2x.png 2x" />',
+    '<a href="/ok" ping="/audit /metric">Abrir</a>',
+    '<a href="https://exemplo.com.br/ajuda">Ajuda</a>',
+  ])('keeps a safe URL-bearing JSX surface valid: %s', (jsx) => {
+    const content = `export default function App(){return (${jsx})}`
+    expect(() => assertGeneratedSource([{ path: 'src/app.tsx', content }])).not.toThrow()
+  })
+
   it('accepts the remaining static facade and property forms', () => {
     expect(() => assertGeneratedSource([{
       path: 'src/app.tsx',
