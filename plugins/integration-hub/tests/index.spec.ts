@@ -14,12 +14,13 @@ function credentials(values: Record<string, string>) {
 /** The pieces of a Cordis context this plugin actually touches, with the bind host under the test's control. */
 function fakeContext(bindHost = '127.0.0.1') {
   const tables = new Map<string, Map<string, unknown>>()
+  let entriesCalls = 0
   const domain = {
     table: (tableName: string) => {
       const rows = tables.get(tableName) ?? new Map<string, unknown>()
       tables.set(tableName, rows)
       return {
-        entries: () => rows.entries(),
+        entries: () => { entriesCalls += 1; return rows.entries() },
         put: async (key: string, value: unknown) => { rows.set(key, value) },
         delete: async (key: string) => rows.delete(key),
       }
@@ -38,7 +39,7 @@ function fakeContext(bindHost = '127.0.0.1') {
     provide: provided,
     effect: (factory: () => () => unknown) => { disposers.push(factory()) },
   }
-  return { ctx, registered, provided, disposers, domain }
+  return { ctx, registered, provided, disposers, domain, tables, entriesCalls: () => entriesCalls }
 }
 
 describe('integration hub plugin wiring', () => {
@@ -74,6 +75,35 @@ describe('integration hub plugin wiring', () => {
     await Promise.all(disposers.map(dispose => dispose()))
     expect(domain.close).toHaveBeenCalled()
     await expect(apply(ctx as never, { exportsRoot: join(root, 'x'), publisherKeys: { 'BAD ID': 'k' } })).rejects.toThrow()
+  })
+
+  it('builds scoped indexes once and pages without materialising domain tables per request', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dz23-hub-indexed-'))
+    roots.push(root)
+    const fixture = fakeContext()
+    const eventRows = new Map<string, unknown>()
+    for (let index = 0; index < 500; index += 1) {
+      eventRows.set(`physical-${index}`, {
+        event_id: `event-${String(index).padStart(4, '0')}`, org_id: 'org-a', tenant_id: 'ws-a', actor_user_id: 'u1',
+        action: 'approval.requested', subject_id: 'smtp', outcome: 'success', detail: 'seed',
+        created_at: new Date(Date.UTC(2026, 0, 1) + index * 1000).toISOString(),
+      })
+    }
+    fixture.tables.set('events', eventRows)
+    await apply(fixture.ctx as never, { exportsRoot: join(root, 'exports') })
+    expect(fixture.entriesCalls()).toBe(3)
+    const provided = fixture.provided.mock.calls.find(call => call[0] === 'studioIntegrationHub')?.[1] as { service: {
+      events(actor: unknown, page: { limit: number; cursor?: string }): { events: unknown[]; next_cursor: string | null }
+    } }
+    const service = provided.service
+    const actor = { userId: 'u1', orgId: 'org-a', tenantId: 'ws-a', role: 'owner' }
+    const first = service.events(actor, { limit: 2 })
+    const second = service.events(actor, { limit: 2, cursor: first.next_cursor! })
+    expect(first.events).toHaveLength(2)
+    expect(second.events).toHaveLength(2)
+    // Only the constructor snapshot touched KvTable.entries(); both pages came
+    // from the scoped, retained index and asked for three rows apiece.
+    expect(fixture.entriesCalls()).toBe(3)
   })
 
   it('refuses to start on the dev channel unless this is a personal, loopback-only Studio', async () => {
