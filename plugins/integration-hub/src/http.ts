@@ -1,5 +1,3 @@
-import { createReadStream } from 'node:fs'
-import { stat } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import {
   CSRF_COOKIE, IdentityError, assertRequestTrust, parseCookies, requiredSessionToken, singleHeader, type StudioIdentityService,
@@ -106,16 +104,15 @@ export function createHubHttpHandler(config: HubHttpConfig) {
         if (method === 'POST' && exportsMatch[2] === undefined) return json(response, 201, { export: publicExport(await service.createExport(actor, projectId)) })
         if (method === 'GET' && exportsMatch[2] !== undefined) {
           const record = service.exportRecord(actor, projectId, decodeURIComponent(exportsMatch[2]))
-          // The path stored in the row is data: it is resolved and confined before anything is read.
-          const file = await service.exportFile(actor, projectId, decodeURIComponent(exportsMatch[2]))
-          const info = await stat(file).catch(() => undefined)
-          if (info === undefined || !info.isFile()) throw new HubError('NOT_FOUND', t('errors.exportUnavailable'))
+          // The path stored in the row is data: the service resolves it, confines it and hands back
+          // an OPEN handle it already checked. Nothing here reopens the file by name.
+          const { handle, size } = await service.exportFile(actor, projectId, decodeURIComponent(exportsMatch[2]))
           response.writeHead(200, {
-            'content-type': 'application/zip', 'content-length': String(info.size), 'cache-control': 'no-store',
+            'content-type': 'application/zip', 'content-length': String(size), 'cache-control': 'no-store',
             'x-content-type-options': 'nosniff', 'content-disposition': `attachment; filename="${safeFileName(record.file_name)}"`,
             'x-dz23-sha256': record.sha256,
           })
-          const stream = createReadStream(file)
+          const stream = handle.createReadStream({ autoClose: true })
           stream.on('error', () => response.destroy())
           stream.pipe(response)
           return

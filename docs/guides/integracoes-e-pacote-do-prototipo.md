@@ -61,7 +61,8 @@ dentro do pacote há um `EXCLUIDOS.txt` com o nome de tudo que não entrou (só 
 conteúdo não sai do seu computador).
 
 Antes de fechar o pacote, o Studio confere se algum arquivo tem cara de senha ou chave privada
-(bloco de chave, chave de provedor, endereço de banco com senha). Se achar, **o pacote não é
+(bloco de chave, chave de provedor, ou qualquer endereço que carregue usuário e senha — banco de
+dados, servidor de e-mail, FTP, o que for). Se achar, **o pacote não é
 gerado** e a tela diz qual arquivo — é melhor recusar do que entregar um segredo dentro de um
 `.zip`. Vale dizer o limite com honestidade: essa conferência não lê arquivos binários e não
 promete achar todo segredo possível; ela fecha as formas que dá para reconhecer sem errar.

@@ -134,9 +134,12 @@ ligá-la, e levar o protótipo verificado consigo.
   se o registro mudou durante a confirmação, a ação é recusada (`CONFLICT`).
 - **A varredura de segredos não desiste por tamanho.** Havia limite de 4 MB — "nenhum segredo
   encontrado" justamente nos arquivos onde um bundle esconde um. Agora a leitura é por fatias com
-  sobreposição; e todo arquivo que a varredura **não sabe ler** (imagem, `.gz`, `.wasm`) entra no
-  pacote com o nome listado em `EXCLUIDOS.txt` sob "entraram sem conferência", em vez de passar como
-  se tivesse sido conferido.
+  sobreposição. Cópias comprimidas de texto (`.gz`, `.br`) passaram a ser **abertas sob um teto de
+  64 MB e varridas pelo que realmente são**; a que não abre é excluída e nomeada. O que continua sem
+  conferência é o binário opaco (imagem, fonte, `.wasm`, `.node`, vídeo): ele entra no pacote com o
+  nome listado em `EXCLUIDOS.txt` sob "entraram sem conferência", em vez de passar como se tivesse
+  sido conferido. Bloquear binário seria entregar um aplicativo quebrado — o pior resultado, porque
+  empurra a pessoa a desligar a exportação inteira.
 - **A pasta `data/` do aplicativo não viaja em profundidade nenhuma** (antes só na raiz do
   standalone: um app uma pasta abaixo levava o próprio banco e os códigos capturados). Sob
   `node_modules` a regra não vale — ali `data/` é da dependência, e tirá-la quebraria o aplicativo.

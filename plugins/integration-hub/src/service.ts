@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { access, mkdir, realpath, writeFile } from 'node:fs/promises'
+import { constants as fsConstants } from 'node:fs'
+import { access, mkdir, open, realpath, type FileHandle } from 'node:fs/promises'
 import { relative, resolve, sep } from 'node:path'
 import { roleAllows, type PolicyTier, type StudioPermission, type StudioRole } from '@dz23-studio/policy'
 import { z } from 'zod'
@@ -108,6 +109,14 @@ export const EVENTS_RETAINED_PER_TENANT = 1000
 export const MAX_EXPORTS_PER_WINDOW = 12
 export const EXPORT_WINDOW_MS = 10 * 60 * 1000
 
+/**
+ * How many prototypes this Studio packages at the same time, across every workspace. Packaging
+ * walks a whole build, reads every allowed file and hashes it, on Node's single thread: letting
+ * four workspaces do that at once makes the Studio unresponsive for all four. Waiting a turn is
+ * slower for one person and honest for everybody.
+ */
+export const MAX_CONCURRENT_PACKAGING = 2
+
 export interface HubServiceOptions {
   repository: HubRepository
   secrets: SecretInspector
@@ -157,6 +166,9 @@ export class IntegrationHubService {
    * one only means the person confirms again — the failure is closed. Anything
    * durable here would be a decision that outlives the screen that made it.
    */
+  #packaging = 0
+  readonly #packagingQueue: Array<() => void> = []
+
   readonly #approvals = new Map<string, Map<string, HubApprovalTicket>>()
   /**
    * One package per workspace and project at a time: a page that clicks ten
@@ -485,7 +497,21 @@ export class IntegrationHubService {
 
   async #guardedExport(actor: HubActor, projectId: string): Promise<StudioExport> {
     await this.#throttleExport(actor, projectId)
-    return this.#createExport(actor, projectId)
+    // One build per workspace is not enough on its own: two DIFFERENT workspaces packaging at the
+    // same time each walk a whole run and hash it, on the one thread this Studio has. Past this
+    // ceiling the caller waits its turn instead of making everybody's Studio slow at once.
+    return this.#withPackagingSlot(() => this.#createExport(actor, projectId))
+  }
+
+  async #withPackagingSlot<T>(work: () => Promise<T>): Promise<T> {
+    while (this.#packaging >= MAX_CONCURRENT_PACKAGING) await new Promise<void>(release => this.#packagingQueue.push(release))
+    this.#packaging += 1
+    try {
+      return await work()
+    } finally {
+      this.#packaging -= 1
+      this.#packagingQueue.shift()?.()
+    }
   }
 
   /** Attempts per workspace inside the window; a refusal is audited and costs the flooder, not the table. */
@@ -544,7 +570,15 @@ export class IntegrationHubService {
     const directory = resolve(this.options.exportsRoot, safeSegment(actor.orgId), safeSegment(actor.tenantId))
     await mkdir(directory, { recursive: true, mode: 0o700 })
     const path = resolve(directory, `${safeSegment(exportId)}.zip`)
-    await writeFile(path, built.archive, { flag: 'wx', mode: 0o600 })
+    // Created, not opened: O_EXCL means this call makes the file or fails, O_NOFOLLOW means a
+    // symlink planted at that name is never followed, and the mode is set BY the open — a `chmod`
+    // afterwards leaves a window in which the package is readable by anyone on the machine.
+    const target = await open(path, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | (fsConstants.O_NOFOLLOW ?? 0), 0o600)
+    try {
+      await target.writeFile(built.archive)
+    } finally {
+      await target.close().catch(() => undefined)
+    }
     const record: StudioExport = {
       export_id: exportId, org_id: actor.orgId, tenant_id: actor.tenantId, project_id: projectId, run_id: run.run_id,
       file_name: built.fileName, path, sha256: built.sha256, size_bytes: built.archive.length, entries: built.entries,
@@ -567,7 +601,7 @@ export class IntegrationHubService {
    * that was tampered with (or written by an older build) must not be able to
    * turn the download route into "read any file on the server".
    */
-  async exportFile(actor: HubActor, projectId: string, exportId: string): Promise<string> {
+  async exportFile(actor: HubActor, projectId: string, exportId: string): Promise<{ handle: FileHandle; size: number }> {
     const record = this.exportRecord(actor, projectId, exportId)
     const root = resolve(this.options.exportsRoot, safeSegment(actor.orgId), safeSegment(actor.tenantId))
     let realRoot: string
@@ -583,7 +617,18 @@ export class IntegrationHubService {
       await this.#audit(actor, 'export.downloadRefused', exportId, 'failure', 'path-outside-exports')
       throw new HubError('NOT_FOUND', t('errors.exportUnavailable'))
     }
-    return realFile
+    // Everything above decided about a NAME. What is served is a HANDLE: opened once without
+    // following a link, checked for being a regular file on that same handle, and streamed from it.
+    // Resolving the name and then opening it again is exactly the window an attacker needs.
+    const handle = await open(realFile, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0)).catch(() => undefined)
+    if (handle === undefined) throw new HubError('NOT_FOUND', t('errors.exportUnavailable'))
+    const info = await handle.stat().catch(() => undefined)
+    if (info === undefined || !info.isFile()) {
+      await handle.close().catch(() => undefined)
+      await this.#audit(actor, 'export.downloadRefused', exportId, 'failure', 'not-a-regular-file')
+      throw new HubError('NOT_FOUND', t('errors.exportUnavailable'))
+    }
+    return { handle, size: info.size }
   }
 
   /**

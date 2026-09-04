@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { canonicalManifestBytes } from '../src/manifest.ts'
 import type { HubEvent, IntegrationManifest, StudioExport, StudioIntegration } from '../src/model.ts'
-import { canonicalSecretRef, EVENTS_RETAINED_PER_TENANT, HubError, IntegrationHubService, MAX_EXPORTS_PER_WINDOW, MAX_LIVE_APPROVALS, minimizeRecipient, minimizeSecretRef, safeSegment, securityFingerprint, strongIdentityFresh, type HubActor, type HubRepository } from '../src/service.ts'
+import { canonicalSecretRef, EVENTS_RETAINED_PER_TENANT, HubError, IntegrationHubService, MAX_CONCURRENT_PACKAGING, MAX_EXPORTS_PER_WINDOW, MAX_LIVE_APPROVALS, minimizeRecipient, minimizeSecretRef, safeSegment, securityFingerprint, strongIdentityFresh, type HubActor, type HubRepository } from '../src/service.ts'
 import { readZip } from '../src/zip.ts'
 
 class MemoryRepository implements HubRepository {
@@ -390,6 +390,68 @@ describe('integration hub service', () => {
     expect(repository.eventRows.at(-1)).toMatchObject({ action: 'export.created', outcome: 'failure', detail: 'rate-limited' })
     // The refusal belongs to the workspace that flooded: another one is untouched.
     expect(service.listExports(viewer, 'p1')).toHaveLength(1)
+  })
+
+  it('hands the download an open handle it already checked, and never follows a link planted at the name', async () => {
+    // The row carries a path, and a path is data. The service used to return that path and the HTTP
+    // layer opened it AGAIN by name — between the check and that second open, the file can become a
+    // link to something else. Now the service returns the handle it already checked. (The refusal
+    // below is the confinement check doing its job; the handle is what closes the timing window,
+    // and the assertion that matters is that the bytes come from the handle, not from the name.)
+    const runDirectory = await fakeRun()
+    const { service, exportsRoot } = await build({ runDirectory })
+    const record = await service.createExport(builder, 'p1')
+    const opened = await service.exportFile(builder, 'p1', record.export_id)
+    try {
+      expect(opened.size).toBe((await stat(record.path)).size)
+      // What comes back reads the package, not whatever the name points at now: the swap below
+      // happens AFTER the handle exists, and the bytes are still the package's.
+      const secret = join(exportsRoot, 'segredo.txt')
+      await writeFile(secret, 'conteudo-de-outro-arquivo')
+      await rm(record.path)
+      await symlink(secret, record.path)
+      const bytes = await opened.handle.readFile()
+      expect(bytes.subarray(0, 2).toString('latin1')).toBe('PK')
+      expect(bytes.toString('utf8')).not.toContain('conteudo-de-outro-arquivo')
+    } finally {
+      await opened.handle.close()
+    }
+    // And a fresh download, now that the name IS a link, is refused instead of serving the target.
+    await expect(service.exportFile(builder, 'p1', record.export_id)).rejects.toMatchObject({ code: 'NOT_FOUND' })
+  })
+
+  it('never packages more than a couple of prototypes at the same time, however many are asked for at once', async () => {
+    // Packaging walks a whole build, reads every allowed file and hashes it — on Node's one thread.
+    // Without a ceiling, six projects asked for at once make the Studio unresponsive for all six.
+    const runDirectory = await fakeRun()
+    const exportsRoot = await mkdtemp(join(tmpdir(), 'dz23-hub-parallel-'))
+    scratch.push(exportsRoot)
+    const repository = new MemoryRepository()
+    let entered = 0
+    let sequence = 0
+    let release: () => void = () => undefined
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const service = new IntegrationHubService({
+      repository, exportsRoot, publisherKeys, channel: 'stable', runsRoot: dirname(runDirectory),
+      secrets: { inspect: async () => ({ present: false, shapeOk: false }) },
+      projects: {
+        // Called first inside the build: this is "one more package started".
+        project: (_actor, projectId) => { entered += 1; return { project_id: projectId, name: 'Agenda do Salão', state: 'VERIFIED_PROTOTYPE' } },
+        runs: () => [{ run_id: 'run-new', state: 'PASSED', started_at: '2026-09-03T11:00:00.000Z', attempt: 1, run_directory: runDirectory }],
+      },
+      now: () => new Date('2026-09-04T00:00:00.000Z'), createId: () => `id-${++sequence}`,
+    })
+    // Every build is held at its last step until the gate opens, so `entered` counts what is live.
+    repository.putExport = async (value: StudioExport) => { await gate; repository.exportRows = [...repository.exportRows, value] }
+    const all = Promise.all(Array.from({ length: 6 }, (_unused, index) => service.createExport(builder, `p${index}`)))
+    // Let every one of the six callers reach the queue before looking.
+    for (let tick = 0; tick < 50; tick += 1) await Promise.resolve()
+    expect(entered).toBe(MAX_CONCURRENT_PACKAGING)
+    release()
+    const records = await all
+    // Waiting a turn is not losing the turn: all six come out, each its own package.
+    expect(new Set(records.map(record => record.export_id)).size).toBe(6)
+    expect(repository.exportRows).toHaveLength(6)
   })
 
   it('does not spend the confirmation when it is the passkey that is missing', async () => {
