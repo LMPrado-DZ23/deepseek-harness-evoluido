@@ -57,8 +57,10 @@ da verificação, um `README` em linguagem comum e um `.env.example` só com **n
 variáveis. Ficam de fora os seus dados (`data/`), arquivos `.env`, bancos SQLite, códigos
 capturados e chaves. Além dessa lista, só entram tipos de arquivo conhecidos: um tipo em que
 ninguém pensou fica de fora em vez de embarcar por acidente. **Nada fica de fora em segredo** —
-dentro do pacote há um `EXCLUIDOS.txt` com o nome de tudo que não entrou (só os nomes; o
-conteúdo não sai do seu computador).
+quando alguma coisa fica de fora, ou entra no pacote sem ter sido conferida, o pacote traz um
+`EXCLUIDOS.txt` com esses nomes (só os nomes; o conteúdo não sai do seu computador). Esse arquivo
+só é criado quando há o que listar: **se ele não estiver no pacote, é porque nada ficou de fora e
+nada entrou sem conferência** — não é sinal de que a lista falhou.
 
 Antes de fechar o pacote, o Studio confere se algum arquivo tem cara de senha ou chave privada
 (bloco de chave, chave de provedor, ou qualquer endereço que carregue usuário e senha — banco de

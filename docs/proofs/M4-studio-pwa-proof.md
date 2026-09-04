@@ -57,8 +57,10 @@ que as ações "vão esperar a conexão". Playwright 6/6 em Chromium real.
 Esta é a rodada cujos números valem. **Executado agora, nesta árvore
 (`claude/fix-m4`, base `0db7258`), e não copiado de rodada anterior:**
 
-- `cd apps/studio-web && npx vitest run` → **44/44 em 9 arquivos** (eram 26/26 em
-  6 arquivos). Os 18 novos cobrem: separação OFFLINE × SERVICE_UNREACHABLE em
+- `cd apps/studio-web && npx vitest run` → **44/44 em 9 arquivos** naquela rodada
+  (eram 26/26 em 6 arquivos). Nesta árvore, hoje, o mesmo comando dá **47/47 em 9
+  arquivos**: três testes foram acrescentados a esses mesmos arquivos depois desta
+  prova (medido em 04/09/2026). Os 18 novos cobrem: separação OFFLINE × SERVICE_UNREACHABLE em
   leitura e em mutação; frase de ação bloqueada sem promessa de fila; regra do
   `202`; deduplicação de aviso por `run_id` + estado; rejeição de
   `showNotification()` sem erro não tratado; e o `git apply --check` do patch.

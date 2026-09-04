@@ -250,10 +250,12 @@ enviado, e aparar produzia um registro cujos bytes não eram os assinados.
   do segredo): qualquer mudança ali recusa (`CONFLICT`) um `enable` confirmado antes dela. Sem
   mudança de versão do domínio: a impressão é calculada, não gravada.
 
-Limite anterior, agora histórico: a confirmação de **T2** era uma afirmação do cliente (um campo
-JSON). O que separa isso de uma página hostil é CSRF + verificação de origem; **T3** é o único
-nível com prova do lado do servidor (a passkey recente). Anotado para a fatia da arquitetura de
-modos de confiança.
+Limite **atual, ainda em aberto** (nada nesta etapa o fechou): a confirmação de **T2** é uma
+afirmação do cliente (um campo JSON). Qualquer pedido autenticado com um token CSRF válido pode
+chamar `POST /approvals` e gastar o bilhete na chamada seguinte — o servidor não tem prova de que
+uma pessoa clicou em alguma coisa. O que separa isso de uma página hostil é CSRF + verificação de
+origem; **T3** é o único nível com prova do lado do servidor (a passkey recente). Anotado para a
+fatia da arquitetura de modos de confiança.
 
 
 ## Consequências

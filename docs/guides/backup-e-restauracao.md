@@ -45,10 +45,19 @@ pnpm storage:backup-postgres --dsn-ref DZ23_POSTGRES_DSN --schema dz23_storage -
 Sem `--write` o comando só mostra o que copiaria. O endereço do banco vem da
 variável `DZ23_POSTGRES_DSN`; nunca é escrito na linha de comando.
 
-A cópia manual usa o mesmo motor da cópia automática: um conjunto de dados de
-cada vez, escrito direto no arquivo, com o mesmo teto de tamanho (2 GB, ajustável
-com `--max-bytes`). Se passar do teto, a tentativa falha e o arquivo pela metade
-é apagado — nunca enche o disco em silêncio.
+Os dois modos do comando não funcionam do mesmo jeito, e a diferença importa em
+banco grande:
+
+- **Com `--write`** a cópia manual usa o mesmo motor da cópia automática: um
+  conjunto de dados de cada vez, escrito direto no arquivo, com o mesmo teto de
+  tamanho (2 GB, ajustável com `--max-bytes`). Se passar do teto, a tentativa
+  falha e o arquivo pela metade é apagado — nunca enche o disco em silêncio.
+- **Sem `--write`** (o padrão) o comando só mostra o que copiaria, mas para
+  contar os registros ele monta o pacote **inteiro na memória** e não escreve
+  arquivo nenhum. Aqui o `--max-bytes` não vale para nada: não há teto nesse
+  caminho. Num banco muito grande a prévia pode ficar sem memória — `NOT_VALIDATED`
+  para bancos muito grandes (`docs/proofs/M3-postgres-hardening-proof.md`). Se isso
+  acontecer, rode direto com `--write`, que é o caminho com teto.
 
 ## Conferir uma cópia
 

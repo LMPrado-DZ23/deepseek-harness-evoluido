@@ -14,8 +14,9 @@ PATH=/root/shim:$PATH DZ23_POSTGRES_TEST_DSN=postgresql://dz23_test:dz23test@127
   DZ23_POSTGRES_TEST_CONTAINER=shim npx vitest run plugins/storage-postgres --reporter=dot
 ```
 
-Resultado: **10 arquivos, 65 testes, 65 aprovados** (`pnpm typecheck` limpo, `pnpm gate:i18n`
-`I18N_GATE=PASS locale=pt-BR keys=199`).
+Resultado desta prova: **10 arquivos, 65 testes, 65 aprovados** (`pnpm typecheck` limpo, `pnpm gate:i18n`
+`I18N_GATE=PASS locale=pt-BR keys=199`). Nesta árvore, hoje, o mesmo comando dá **10 arquivos, 70
+testes, 70 aprovados**: cinco testes foram acrescentados depois desta prova (medido em 04/09/2026).
 
 ## Regra desta prova
 

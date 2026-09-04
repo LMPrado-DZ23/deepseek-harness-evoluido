@@ -170,6 +170,11 @@ try {
   await writeFile(join(runDirectory, '.next', 'standalone', 'data', 'studio-capture.json'), '[{"kind":"code","email":"x@example.test","code":"654321"}]')
   await writeFile(join(runDirectory, '.next', 'standalone', '.env'), 'APP_SMTP_URL=smtp://u:senha-local@h')
   await writeFile(join(runDirectory, '.next', 'static', 'main.js'), 'chunk')
+  // The allow-list and the "entered uninspected" list only earn their claim if this run exercises
+  // them: `.exe` is a type nobody put on the list (it must stay out and be NAMED), and `.png` is an
+  // allowed type the secret scan cannot read (it must go in and be NAMED as unchecked).
+  await writeFile(join(runDirectory, '.next', 'standalone', 'notas.exe'), 'MZ\u0000binario-que-nao-pode-embarcar')
+  await writeFile(join(runDirectory, '.next', 'standalone', 'logo.png'), Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex'))
   await writeFile(join(runDirectory, 'data', 'studio-capture.json'), '[{"kind":"code","email":"x@example.test","code":"654321"}]')
   await writeFile(join(runDirectory, 'evidence', 'appspec-report.json'), '{"schema_version":1,"checks":[]}')
   const now = new Date().toISOString()
@@ -187,10 +192,18 @@ try {
   assert.equal(download.headers.get('x-dz23-sha256'), record.sha256)
   const entries = readZip(archive)
   const names = entries.map(entry => entry.name)
-  assert.deepEqual(names, ['.env.example', 'EXCLUIDOS.txt', 'README.md', 'app/.next/static/main.js', 'app/node_modules/lib/data/table.json', 'app/node_modules/next/package.json', 'app/server.js', 'evidence/appspec-report.json'])
+  assert.deepEqual(names, ['.env.example', 'EXCLUIDOS.txt', 'README.md', 'app/.next/static/main.js', 'app/logo.png', 'app/node_modules/lib/data/table.json', 'app/node_modules/next/package.json', 'app/server.js', 'evidence/appspec-report.json'])
   // Nothing left out in silence: the package names what stayed behind, without any of its content.
   const left = entries.find(entry => entry.name === 'EXCLUIDOS.txt').data.toString('utf8')
   assert.ok(left.includes('app/data/') && left.includes('app/.env'), 'the exclusion list must name what stayed behind')
+  // The allow-list: a type nobody listed stays out, and it stays out BY NAME.
+  assert.ok(!names.includes('app/notas.exe'), 'a file type outside the allow-list must not be packaged')
+  assert.ok(left.includes('app/notas.exe'), 'a file left out by the allow-list must be named in the exclusion list')
+  // And the second section of the same file: what travelled without anybody reading it.
+  const [excludedSection, uninspectedSection] = left.split('# Arquivos que entraram sem conferência de segredos')
+  assert.ok(uninspectedSection !== undefined, 'the package must carry the "entered uninspected" section')
+  assert.ok(excludedSection.includes('app/notas.exe'), 'the excluded file belongs to the first section')
+  assert.ok(uninspectedSection.includes('app/logo.png'), 'a packaged file the scan cannot read must be named as uninspected')
   const content = entries.map(entry => entry.data.toString('utf8')).join('\n')
   for (const secret of ['654321', 'nunca-sai-do-servidor', 'segredo-do-banco-777', 'senha-local']) assert.ok(!content.includes(secret), `private data leaked into the package: ${secret}`)
   const again = await (await hub(`/projects/${project.project_id}/exports`, { method: 'POST', body: '{}' })).json()
@@ -276,7 +289,9 @@ try {
     const skipped = Number(/(\d+) skipped/u.exec(clean)?.[1] ?? 0)
     // A Playwright run that passes by skipping is not a proof: all six real tests must have run.
     ui = playwright.status === 0 && passed >= 6 && skipped === 0 ? 'PASS' : 'FAIL'
-    uiDetail = `${summary} (${passed} passed, ${skipped} skipped)`
+    // Deterministic on purpose: the wall-clock line ('6 passed (7.4s)') put a meaningless diff in
+    // the repository on every re-run of an otherwise identical proof.
+    uiDetail = `${passed} passed, ${skipped} skipped`
     if (ui !== 'PASS') { process.stderr.write(`${playwright.stdout}\n${playwright.stderr}\n`); throw new Error(`hub panel e2e failed: ${summary}`) }
   }
   // Kept until AFTER the panel run on purpose: this block leaves an integration that asks for the
@@ -326,14 +341,14 @@ try {
 - SMTP do aplicativo gerado: o navegador envia só o **nome** da referência (\`DZ23_APP_SMTP\`); o valor fica no ambiente do servidor, é conferido (existe + formato) e **não aparece no armazenamento**; nome inexistente → 400; teste de envio → \`NOT_EXECUTED\` com explicação (provedor ainda não escolhido).
 - **Aplicação dos níveis D16 (não só exibição), com a decisão emitida pelo servidor**: a tela pede ao servidor uma aprovação para a ação exata; o servidor decide o nível, registra a decisão, amarra a pessoa, a sessão, a ação e o alvo, dá validade curta e gasta na primeira utilização. Uma aprovação **inventada pelo cliente** → 403; uma aprovação emitida para **outra** integração → 403; configurar o e-mail (T2) sem aprovação → **403 e nada muda**; com a aprovação → 200. Uma integração assinada que pede \`secrets.read\` é **T3 pelo piso**, mesmo declarando T0: sem confirmação → 403; com uma confirmação de **T2** legítima, emitida para a mesma pessoa, sessão, ação e alvo, e depois o alvo virar T3 por nova assinatura → 403 e a integração continua desligada (o bilhete apresentado ainda é gasto); com confirmação de T3, mas nesta sessão entrada por código de e-mail → 403 pedindo **passkey**, e a integração continua desligada. Cada confirmação aceita vira um evento \`approval.recorded\`.
 - **Confinamento do diretório de execução**: uma run \`PASSED\` apontando para fora da pasta de execuções (\`runsRoot\`) é recusada **antes de qualquer leitura** — nada do que estava lá entra em pacote algum.
-- **Exportação com lista de permitidos e varredura fail-closed**: só tipos de arquivo permitidos entram; o que fica de fora é listado por nome em \`EXCLUIDOS.txt\` dentro do pacote (nada sai em silêncio); um arquivo de código com bloco de chave privada dentro da run **derruba a exportação inteira** (409, sem eco do segredo, com o evento de recusa no histórico) e, retirado o arquivo, o mesmo pacote volta com o mesmo sha256 — é isso que prova que a recusa veio dele.
+- **Exportação com lista de permitidos e varredura fail-closed**: só tipos de arquivo permitidos entram — um \`notas.exe\` plantado na run **não** entra e aparece nomeado em \`EXCLUIDOS.txt\`, e um \`logo.png\` (tipo permitido que a varredura não sabe ler) entra e aparece nomeado na segunda seção do mesmo arquivo, a dos que **entraram sem conferência**; o que fica de fora é listado por nome em \`EXCLUIDOS.txt\` dentro do pacote (nada sai em silêncio); um arquivo de código com bloco de chave privada dentro da run **derruba a exportação inteira** (409, sem eco do segredo, com o evento de recusa no histórico) e, retirado o arquivo, o mesmo pacote volta com o mesmo sha256 — é isso que prova que a recusa veio dele.
 - **A confirmação é amarrada ao alvo, não só à ação**: o bilhete leva organização, espaço de trabalho, ação, assunto e um **resumo (sha256) do que está sendo confirmado** — o apelido do segredo, o endereço do teste ou o estado de segurança do registro. Uma confirmação dada para \`DZ23_APP_SMTP\` apresentada para outra credencial → **403 e nada muda**. O resumo fica no servidor: a resposta do \`POST /approvals\` não o devolve.
 - **Auditoria minimizada**: o endereço do teste de e-mail não fica em texto claro no histórico (domínio + resumo sha256), e o **apelido da credencial não aparece em lugar nenhum do histórico** — nem como assunto, nem no detalhe (só \`ref sha256:…\` curto), em sucesso e em recusa.
 - **Histórico paginado**: \`GET /events\` devolve uma página (padrão 50, teto 200) e um cursor; uma segunda página não repete linha da primeira e um cursor inventado → 400. A tabela inteira nunca viaja numa resposta só.
 - Registro D16: manifesto assinado (Ed25519) → \`verified\`, ligado; habilidade **sem assinatura** declarando T0 → \`unverified\`, tier efetivo **T2** (piso de não verificado, sem envolver rede), ligar no canal estável → 403; manifesto adulterado → 400 e evento de recusa; \`can_enable\` decidido pelo servidor.
 - Exportação: projeto levado a \`VERIFIED_PROTOTYPE\` por \`transition()\` e run \`PASSED\` **simulada** (standalone fabricado com \`server.js\` de uma linha; o pipeline real de geração não foi executado nesta prova) → ZIP com ${String(names.length)} entradas; \`data/\` da raiz do app (sqlite + códigos capturados) e \`.env\` **não** entram, enquanto \`node_modules/lib/data/\` entra; SHA-256 no cabeçalho igual ao arquivo; segundo pedido devolve o mesmo pacote (sem arquivo gêmeo); arquivo sumido → 404 sem caminho do servidor.
 - Auditoria: ${String(actions.length)} eventos com organização e espaço de trabalho, incluindo a recusa.
-- Interface \`/studio/hub\` em Chromium real contra este mesmo Studio: **${ui}** (${uiDetail}) — tela própria em pt-BR; a tela **pergunta antes** de qualquer ação T2/T3 e **cancelar não envia nada**: o teste conta as decisões emitidas no histórico do próprio servidor antes de abrir a caixa e depois de cancelar, e o número não muda (a decisão só nasce na confirmação); a integração T3 mostra o aviso do nível, pede confirmação e ainda assim recebe do servidor a recusa por falta de passkey, em palavras; nome do segredo guardado e teste mostrado como não executado; integração sem assinatura sem botão de ligar; pacote gerado pela tela com SHA-256 igual ao download; sem sessão → 401 na tela e na API.
+- Interface \`/studio/hub\` em Chromium real contra este mesmo Studio: **${ui}** (${uiDetail}) — tela própria em pt-BR; a tela **pergunta antes** de qualquer ação T2/T3 e **cancelar não envia nada**: o teste conta as decisões emitidas no histórico do próprio servidor antes de abrir a caixa e depois de cancelar, e o número não muda (a decisão só nasce na confirmação); a integração T3 mostra o aviso do nível, pede confirmação e ainda assim recebe do servidor a recusa por falta de passkey, em palavras; nome do segredo guardado e teste mostrado como não executado; integração sem assinatura com o botão de ligar **presente e desativado**, com a explicação do porquê ao lado (não é um botão que some da tela); pacote gerado pela tela com SHA-256 igual ao download; sem sessão → 401 na tela e na API.
 
 Verificado só por teste automatizado (não nesta prova de ponta a ponta): a recusa de subida no canal \`dev\` fora de uma instalação pessoal em loopback (\`tests/index.spec.ts\`); a separação das confirmações por espaço de trabalho sob enxurrada e a retenção do histórico (\`tests/service.spec.ts\`); o piso D16 por kind, endpoint e permissão (\`tests/manifest.spec.ts\`).
 
