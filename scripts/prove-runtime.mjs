@@ -5,9 +5,9 @@ import { mkdir, rm, symlink } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-const upstreamRoot = resolve(process.env.DSH_UPSTREAM_ROOT
-  ?? '/home/leandro/harness-studio-poc02/deepseek-harness')
 const studioRoot = resolve(process.cwd())
+const upstreamRoot = resolve(process.env.DSH_UPSTREAM_ROOT
+  ?? join(studioRoot, 'third_party', 'deepseek-harness'))
 const profileHome = join(studioRoot, 'dsh-home')
 const proofRunId = randomUUID()
 const dshHome = join(studioRoot, 'runtime', `proof-dsh-home-${proofRunId}`)

@@ -1,0 +1,16 @@
+{
+  "name": "@dz23-studio/runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "dz23-studio": "./entrypoint.mjs"
+  },
+  "files": [
+    "entrypoint.mjs"
+  ],
+  "dependencies": {
+    "@deepseek-ai/dsh": "workspace:*",
+    "dsh-profile-studio": "workspace:*"
+  }
+}

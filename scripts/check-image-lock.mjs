@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url'
 
 const DIGEST = /^sha256:[0-9a-f]{64}$/u
 const SHA1 = /^[0-9a-f]{40}$/u
+const SHA256_HEX = /^[0-9a-f]{64}$/u
 const SHA512_INTEGRITY = /^sha512-[A-Za-z0-9+/]+={0,2}$/u
 const EXPECTED_PLATFORMS = ['linux/amd64', 'linux/arm64']
 
@@ -25,7 +26,7 @@ export function validateImageLock(lock) {
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/u.test(lock.resolvedAt)) {
     throw new Error('resolvedAt precisa ser UTC canônico')
   }
-  exactKeys(lock.images, ['node'], 'images')
+  exactKeys(lock.images, ['node', 'playwright'], 'images')
   const node = lock.images.node
   exactKeys(node, ['reference', 'indexDigest', 'source', 'platforms'], 'images.node')
   if (node.reference !== 'docker.io/library/node:22.23.1-bookworm-slim') {
@@ -40,15 +41,46 @@ export function validateImageLock(lock) {
   if (platformDigests.some(digest => !DIGEST.test(digest))) throw new Error('digest de plataforma inválido')
   if (new Set(platformDigests).size !== platformDigests.length) throw new Error('digests de plataforma duplicados')
 
-  exactKeys(lock.tools, ['pnpm'], 'tools')
+  const playwright = lock.images.playwright
+  exactKeys(playwright, ['reference', 'indexDigest', 'platforms'], 'images.playwright')
+  if (playwright.reference !== 'mcr.microsoft.com/playwright:v1.50.1-noble') throw new Error('imagem Playwright inesperada')
+  if (!DIGEST.test(playwright.indexDigest)) throw new Error('digest do índice Playwright inválido')
+  exactKeys(playwright.platforms, EXPECTED_PLATFORMS, 'images.playwright.platforms')
+  const playwrightDigests = EXPECTED_PLATFORMS.map(platform => playwright.platforms[platform])
+  if (playwrightDigests.some(digest => !DIGEST.test(digest)) || new Set(playwrightDigests).size !== 2) {
+    throw new Error('digests de plataforma Playwright inválidos')
+  }
+
+  exactKeys(lock.tools, ['git', 'nodeArchives', 'pnpm'], 'tools')
+  const git = lock.tools.git
+  exactKeys(git, ['package', 'version', 'repository'], 'tools.git')
+  if (git.package !== 'git' || git.version !== '1:2.39.5-0+deb12u3') throw new Error('pacote Git divergente')
+  if (git.repository !== 'http://deb.debian.org/debian bookworm') throw new Error('repositório Git divergente')
+  const nodeArchives = lock.tools.nodeArchives
+  exactKeys(nodeArchives, ['version', 'baseUrl', 'platforms'], 'tools.nodeArchives')
+  if (nodeArchives.version !== '22.23.1' || nodeArchives.baseUrl !== 'https://nodejs.org/dist/v22.23.1') {
+    throw new Error('arquivos Node divergentes')
+  }
+  exactKeys(nodeArchives.platforms, EXPECTED_PLATFORMS, 'tools.nodeArchives.platforms')
+  for (const platform of EXPECTED_PLATFORMS) {
+    const archive = nodeArchives.platforms[platform]
+    exactKeys(archive, ['filename', 'sha256'], `tools.nodeArchives.platforms.${platform}`)
+    const expectedFilename = platform === 'linux/amd64'
+      ? 'node-v22.23.1-linux-x64.tar.gz'
+      : 'node-v22.23.1-linux-arm64.tar.gz'
+    if (archive.filename !== expectedFilename || !SHA256_HEX.test(archive.sha256)) {
+      throw new Error(`arquivo Node ${platform} inválido`)
+    }
+  }
   const pnpm = lock.tools.pnpm
-  exactKeys(pnpm, ['version', 'tarball', 'integrity', 'sha1'], 'tools.pnpm')
+  exactKeys(pnpm, ['version', 'tarball', 'integrity', 'sha1', 'sha256'], 'tools.pnpm')
   if (pnpm.version !== '11.7.0') throw new Error('versão pnpm divergente')
   if (pnpm.tarball !== `https://registry.npmjs.org/pnpm/-/pnpm-${pnpm.version}.tgz`) {
     throw new Error('tarball pnpm divergente')
   }
   if (!SHA512_INTEGRITY.test(pnpm.integrity)) throw new Error('integridade pnpm inválida')
   if (!SHA1.test(pnpm.sha1)) throw new Error('sha1 pnpm inválido')
+  if (!SHA256_HEX.test(pnpm.sha256)) throw new Error('sha256 pnpm inválido')
   return lock
 }
 

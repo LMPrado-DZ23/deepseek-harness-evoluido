@@ -10,7 +10,6 @@ import type {} from '@dz23-studio/tenancy'
 import { mkdir, readFile, statfs } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { createPromptToAppHttpHandler, type StudioAppsHealth } from './http.js'
 import { PromptToAppJobService, type PromptToAppJobRegistry } from './jobs.js'
 import {
@@ -124,7 +123,6 @@ class DomainPromptToAppRepository implements PromptToAppRepository {
 function tableValues<T>(table: KvTable<PromptToAppKey, T>): T[] { return [...table.entries()].map(([, value]) => value) }
 
 export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}): Promise<void> {
-  const projectRoot = resolve(fileURLToPath(new URL('../../../', import.meta.url)))
   const [projects, specs, designs, turns, plans, runs, evidence, approvals]: [
     Domain<typeof studioProjectsDomainSpec>, Domain<typeof studioAppSpecsDomainSpec>,
     Domain<typeof studioDesignSpecsDomainSpec>,
@@ -156,9 +154,9 @@ export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}):
   })
   const runsRoot = resolve(config.runsRoot ?? resolve(homedir(), '.dz23-studio', 'generated-runs'))
   const logoStoreRoot = resolve(config.logoStoreRoot ?? resolve(homedir(), '.dz23-studio', 'assets'))
-  const templateDirectory = productionTemplateDirectory(projectRoot)
-  const templateStore = resolve(config.builder?.templateStore ?? resolve(projectRoot, 'runtime', 'template-store-v2'))
-  const imageDigest = config.builder?.imageDigest ?? await readDigest(config.builder?.imageDigestFile ?? resolve(projectRoot, 'runtime', 'builder-image-digest'))
+  const templateDirectory = productionTemplateDirectory()
+  const templateStore = resolve(config.builder?.templateStore ?? resolve(homedir(), '.dz23-studio', 'template-store-v2'))
+  const imageDigest = config.builder?.imageDigest ?? await readDigest(config.builder?.imageDigestFile ?? resolve(homedir(), '.dz23-studio', 'builder-image-digest'))
   await Promise.all([mkdir(runsRoot, { recursive: true }), mkdir(logoStoreRoot, { recursive: true })])
   const builder = new ContainerBuilder({
     engine: config.builder?.engine ?? 'docker', imageDigest, templateStore,

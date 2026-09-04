@@ -6,9 +6,9 @@ import { mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-const upstreamRoot = resolve(process.env.DSH_UPSTREAM_ROOT
-  ?? '/home/leandro/harness-studio-poc02/deepseek-harness')
 const studioRoot = resolve(process.cwd())
+const upstreamRoot = resolve(process.env.DSH_UPSTREAM_ROOT
+  ?? join(studioRoot, 'third_party', 'deepseek-harness'))
 const runId = randomUUID()
 const runtimeRoot = join(studioRoot, 'runtime', `fase3-proof-${runId}`)
 const dshHome = join(runtimeRoot, 'dsh-home')
@@ -64,7 +64,7 @@ async function boot() {
     return await runProfile({
       environment: loadLayeredEnv('dz23-studio-poc-3a', studioRoot),
       profile: 'studio',
-      patchFiles: [],
+      patchFiles: [join(profile, 'poc-01b.patch.yml')],
       args: ['--host', '127.0.0.1', '--port', '0', '--no-open'],
     })
   } finally {

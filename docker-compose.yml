@@ -3,6 +3,7 @@ services:
     image: ${DZ23_STUDIO_IMAGE:?Defina DZ23_STUDIO_IMAGE com a imagem auditada do DZ23 STUDIO}
     command: ["--profile", "studio", "--patch", "/opt/dz23-studio/deploy/harness/edge.patch.yml", "--host", "127.0.0.1", "--port", "3210", "--no-open"]
     environment:
+      HOME: /var/lib/dz23-studio
       DSH_HOME: /var/lib/dz23-studio
       DZ23_EDGE_SECRET: ${DZ23_EDGE_SECRET:?Defina DZ23_EDGE_SECRET}
       DZ23_PUBLIC_HOST: ${DZ23_PUBLIC_HOST:?Defina o dominio publico sem protocolo}
@@ -14,6 +15,7 @@ services:
       DZ23_POSTGRES_BACKUP_DIR: /var/lib/dz23-studio-backups
       DZ23_POSTGRES_BACKUP_INTERVAL_MINUTES: ${DZ23_POSTGRES_BACKUP_INTERVAL_MINUTES:-60}
       DZ23_POSTGRES_BACKUP_KEEP: ${DZ23_POSTGRES_BACKUP_KEEP:-48}
+      DZ23_AGENT_WORKTREE_ROOT: /var/lib/dz23-studio/worktrees
     volumes:
       - studio-data:/var/lib/dz23-studio
       - studio-backups:/var/lib/dz23-studio-backups

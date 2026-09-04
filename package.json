@@ -6,7 +6,14 @@
   "packageManager": "pnpm@11.7.0",
   "workspaces": [
     "plugins/*",
-    "apps/studio-web"
+    "apps/*",
+    "dsh-home/profiles/studio",
+    "third_party/deepseek-harness",
+    "third_party/deepseek-harness/apps/*",
+    "third_party/deepseek-harness/vendor/*",
+    "third_party/deepseek-harness/packages/*/*",
+    "third_party/deepseek-harness/native/landlock-run",
+    "third_party/deepseek-harness/native/landlock-run/packages/*"
   ],
   "scripts": {
     "build:edge": "docker build -f deploy/caddy/Dockerfile -t dz23-studio-caddy:p29c .",
@@ -37,7 +44,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "build": "pnpm --recursive run build",
+    "build": "pnpm --filter @dz23-studio/studio-web-app run build && pnpm --filter './plugins/**' --recursive run build",
+    "gate:upstream-pin": "node scripts/check-upstream-pin.mjs --self-test",
+    "gate:portability": "node scripts/check-portability.mjs --self-test",
     "gate:i18n": "node scripts/check-i18n.mjs",
     "golden": "tsx scripts/run-golden-set.ts",
     "prove:prompt-to-app": "tsx scripts/prove-prompt-to-app.ts",
@@ -47,10 +56,10 @@
     "i18n:baseline": "node scripts/build-i18n-baseline.mjs"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-storage": "link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage",
-    "@deepseek-ai/dsh-storage-domain": "link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage-domain",
-    "@deepseek-ai/dsh-storage-json": "link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage-json",
-    "@deepseek-ai/dsh-storage-sqlite": "link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage-sqlite",
+    "@deepseek-ai/dsh-storage": "workspace:*",
+    "@deepseek-ai/dsh-storage-domain": "workspace:*",
+    "@deepseek-ai/dsh-storage-json": "workspace:*",
+    "@deepseek-ai/dsh-storage-sqlite": "workspace:*",
     "@types/node": "22.20.0",
     "@vitest/coverage-v8": "4.1.8",
     "tsx": "4.22.4",

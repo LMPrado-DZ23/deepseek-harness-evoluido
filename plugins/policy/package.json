@@ -11,16 +11,17 @@
       "default": "./lib/index.js"
     }
   },
+  "files": ["lib"],
   "scripts": {
     "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
-    "@deepseek-ai/cordis": "link:/home/leandro/harness-studio-poc02/deepseek-harness/vendor/cordis",
-    "@deepseek-ai/dsh-llm": "link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/llm/llm",
-    "@deepseek-ai/dsh-session": "link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/core/session",
-    "@deepseek-ai/dsh-storage-domain": "link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage-domain",
-    "@deepseek-ai/dsh-system-prompt": "link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/core/system-prompt",
-    "@deepseek-ai/dsh-tools": "link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/core/tools",
+    "@deepseek-ai/cordis": "workspace:*",
+    "@deepseek-ai/dsh-llm": "workspace:*",
+    "@deepseek-ai/dsh-session": "workspace:*",
+    "@deepseek-ai/dsh-storage-domain": "workspace:*",
+    "@deepseek-ai/dsh-system-prompt": "workspace:*",
+    "@deepseek-ai/dsh-tools": "workspace:*",
     "zod": "4.4.3"
   }
 }

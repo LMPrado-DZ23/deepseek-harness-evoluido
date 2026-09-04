@@ -1,8 +1,26 @@
 packages:
   - plugins/*
-  - apps/studio-web
+  - apps/*
+  - dsh-home/profiles/studio
+  - third_party/deepseek-harness
+  - third_party/deepseek-harness/apps/*
+  - third_party/deepseek-harness/vendor/*
+  - third_party/deepseek-harness/packages/*/*
+  - third_party/deepseek-harness/native/landlock-run
+  - third_party/deepseek-harness/native/landlock-run/packages/*
 
 nodeLinker: hoisted
+injectWorkspacePackages: true
+syncInjectedDepsAfterScripts:
+  - build
 autoInstallPeers: false
 allowBuilds:
+  '@google/genai': false
   esbuild: true
+  lefthook: false
+  node-addon-require-builtin: false
+  protobufjs: false
+  sharp: true
+  koffi: true
+  node-pty: true
+  '@deepseek-ai/dsh-subprocess-local': true

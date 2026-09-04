@@ -1,10 +1,5 @@
-# Harness Studio PoC-01 profile layer. The profile manifest composes the exact
-# official web stack first; this file changes only the default model route and
-# inserts the out-of-tree Studio plugin.
-- id: agent-default-model
-  config:
-    provider: studio-fake
-    model: studio-deterministic
+# DZ23 STUDIO production profile. Deterministic/fake providers live only in
+# poc-01b.patch.yml and are never mounted by the release command.
 
 - id: agent-presets
   config:
@@ -73,13 +68,6 @@
       config:
         requireAuthorizationDeclarations: true
         rules:
-          studio_echo:
-            source:
-              kind: studio
-            inferredTier: T2
-            sandboxMode: workspace-write
-            requiredPermission: project.write
-            scope: project
           bash:
             source:
               kind: harness
@@ -104,14 +92,16 @@
         coordinatorPreset: dz23-coordinator
         inProcessCoordinatorPreset: dz23-coordinator-in-process
         worktreeRoot: !!js process.env.DZ23_AGENT_WORKTREE_ROOT
-        inProcessProvider: studio-fake
-        inProcessModel: studio-deterministic
     - id: dz23-studio-route-health
       name: '@dz23-studio/route-health'
     - id: dz23-studio-prompt-to-app
       name: '@dz23-studio/prompt-to-app'
       config:
-        runsRoot: !!js process.env.DZ23_RUNS_ROOT
+        runsRoot: /var/lib/dz23-studio/generated-runs
+        logoStoreRoot: /var/lib/dz23-studio/assets
+        builder:
+          imageDigestFile: /var/lib/dz23-studio/builder-image-digest
+          templateStore: /var/lib/dz23-studio/template-store-v2
     - id: dz23-studio-preview
       name: '@dz23-studio/preview'
       config:
@@ -143,8 +133,7 @@
         # must match the runs root of the prompt-to-app plugin — both default to
         # ~/.dz23-studio/generated-runs. Written here, never read from the environment: this is
         # the export's only boundary, and a variable must not be able to move it.
-        # runsRoot: /caminho/das/execucoes
+        runsRoot: /var/lib/dz23-studio/generated-runs
+        exportsRoot: /var/lib/dz23-studio/exports
     - id: dz23-studio-web
       name: '@dz23-studio/web'
-    - id: studio-hello
-      name: '@studio/hello'

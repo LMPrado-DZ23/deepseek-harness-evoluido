@@ -8,8 +8,8 @@ import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import pg from 'pg'
 
-const upstreamRoot = resolve(process.env.DSH_UPSTREAM_ROOT ?? '/home/leandro/harness-studio-poc02/deepseek-harness')
 const studioRoot = resolve(process.cwd())
+const upstreamRoot = resolve(process.env.DSH_UPSTREAM_ROOT ?? join(studioRoot, 'third_party', 'deepseek-harness'))
 const dshHome = resolve(process.env.DZ23_SOAK_DSH_HOME ?? join(studioRoot, 'runtime', `postgres-soak-${randomUUID()}`))
 const profile = join(studioRoot, 'dsh-home', 'profiles', 'studio')
 const writeEveryMs = Number(process.env.DZ23_SOAK_WRITE_MS ?? 500)

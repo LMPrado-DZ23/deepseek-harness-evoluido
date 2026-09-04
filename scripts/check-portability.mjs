@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, extname, join, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -129,7 +129,7 @@ function isEscapedJavaScriptUnc(content, matchIndex, file) {
 }
 
 function gitFiles(root) {
-  const result = spawnSync('git', ['ls-files', '-z'], {
+  const result = spawnSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], {
     cwd: root,
     encoding: 'utf8',
     maxBuffer: 16 * 1024 * 1024,
@@ -140,11 +140,32 @@ function gitFiles(root) {
   return result.stdout.split('\0').filter(Boolean)
 }
 
+async function allSourceFiles(root) {
+  const omittedDirectories = new Set(['.git', 'node_modules', 'coverage', 'lib', 'dist', 'runtime', 'outputs'])
+  const files = []
+  async function visit(directory, relative = '') {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      if (entry.isSymbolicLink()) continue
+      const childRelative = relative ? `${relative}/${entry.name}` : entry.name
+      if (entry.isDirectory()) {
+        if (!omittedDirectories.has(entry.name)) await visit(resolve(directory, entry.name), childRelative)
+      } else {
+        files.push(childRelative)
+      }
+    }
+  }
+  await visit(root)
+  return files
+}
+
 function scanKind(path) {
   const normalized = path.replaceAll('\\', '/')
   if (OMIT.has(normalized)) return undefined
   if (KEY_FILES.has(basename(normalized))) return 'manifest'
   if (normalized.startsWith('scripts/') || normalized.startsWith('deploy/')) {
+    return EXECUTABLE_EXTENSIONS.has(extname(normalized).toLowerCase()) ? 'script' : undefined
+  }
+  if (normalized.startsWith('apps/')) {
     return EXECUTABLE_EXTENSIONS.has(extname(normalized).toLowerCase()) ? 'script' : undefined
   }
   if (normalized.includes('/src/') || normalized.includes('/tests/')) {
@@ -158,7 +179,11 @@ export async function scanPortableSources(root, suppliedFiles) {
   const findings = []
   for (const file of files) {
     const absolute = resolve(root, file)
-    const content = await readFile(absolute, 'utf8')
+    const content = await readFile(absolute, 'utf8').catch((error) => {
+      if (error?.code === 'ENOENT') return undefined
+      throw error
+    })
+    if (content === undefined) continue
     const kind = scanKind(file)
     const rules = kind === 'manifest'
       ? [...MACHINE_PATH_RULES, ...MANIFEST_ONLY_RULES]
@@ -228,6 +253,16 @@ $mixedMachinePath = '\\server/share/artifact.json'
       || !findings.some((item) => item.rule === 'ABSOLUTE_LINK')) {
       throw new Error(`self-test não separou escapes legítimos de UNC real; recebeu ${JSON.stringify(findings)}`)
     }
+    const gitInit = spawnSync('git', ['init', '--quiet'], { cwd: root, encoding: 'utf8', windowsHide: true })
+    if (gitInit.status !== 0) throw new Error(gitInit.stderr.trim() || 'git init da fixture falhou')
+    await mkdir(join(root, 'apps'), { recursive: true })
+    await writeFile(join(root, 'apps', 'new-entrypoint.mjs'), "export const bad = '/home/alice/private/entry.js'\n")
+    const untrackedFindings = await scanPortableSources(root)
+    const filesystemFindings = await scanPortableSources(root, await allSourceFiles(root))
+    if (!untrackedFindings.some((item) => item.file === 'plugins/safe/package.json')
+      || !filesystemFindings.some((item) => item.file === 'apps/new-entrypoint.mjs' && item.rule === 'POSIX_HOME')) {
+      throw new Error(`self-test não examinou arquivo não rastreado e entrypoint; recebeu git=${JSON.stringify(untrackedFindings)} fs=${JSON.stringify(filesystemFindings)}`)
+    }
     process.stdout.write('PORTABILITY_SELF_TEST=PASS negative_fixture_rejected=true\n')
   } finally {
     await rm(root, { recursive: true, force: true })
@@ -238,7 +273,8 @@ export async function main(argv = process.argv.slice(2)) {
   if (argv.includes('--self-test')) await selfTest()
   const rootIndex = argv.indexOf('--root')
   const root = resolve(rootIndex >= 0 ? argv[rootIndex + 1] : process.cwd())
-  const findings = await scanPortableSources(root)
+  const suppliedFiles = argv.includes('--all-files') ? await allSourceFiles(root) : undefined
+  const findings = await scanPortableSources(root, suppliedFiles)
   if (findings.length) {
     for (const finding of findings) {
       process.stderr.write(
@@ -247,7 +283,7 @@ export async function main(argv = process.argv.slice(2)) {
     }
     throw new Error(`${findings.length} referência(s) não portáteis`)
   }
-  process.stdout.write(`PORTABILITY=PASS files_scanned_from_git=true findings=0\n`)
+  process.stdout.write(`PORTABILITY=PASS source=${suppliedFiles === undefined ? 'git' : 'filesystem'} findings=0\n`)
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {

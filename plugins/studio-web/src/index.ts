@@ -53,8 +53,8 @@ export function createStudioWebHandler(config: {
 export async function apply(ctx: Context, config: StudioWebConfig = {}): Promise<void> {
   const port = ctx.webServer.port
   const defaultHost = `127.0.0.1:${port}`
-  const projectRoot = resolve(fileURLToPath(new URL('../../../', import.meta.url)))
-  const distDirectory = resolve(config.distDirectory ?? resolve(projectRoot, 'apps', 'studio-web', 'dist'))
+  const packagedClient = fileURLToPath(new URL('./client/', import.meta.url))
+  const distDirectory = resolve(config.distDirectory ?? packagedClient)
   ctx.effect(() => ctx.webServer.register({
     kind: 'prefix', path: '/studio',
     handler: createStudioWebHandler({

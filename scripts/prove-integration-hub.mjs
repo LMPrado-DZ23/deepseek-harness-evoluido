@@ -28,7 +28,7 @@ if (!existsSync(builderDigestFile) || !existsSync(templateStore)) {
 }
 execFileSync('pnpm', ['build'], { cwd: studioRoot, stdio: 'ignore' })
 execFileSync('pnpm', ['install', '--offline', '--frozen-lockfile', '--ignore-scripts'], { cwd: join(studioRoot, 'dsh-home', 'profiles', 'studio'), stdio: 'ignore' })
-const upstreamRoot = resolve(process.env.DSH_UPSTREAM_ROOT ?? '/home/leandro/harness-studio-poc02/deepseek-harness')
+const upstreamRoot = resolve(process.env.DSH_UPSTREAM_ROOT ?? join(studioRoot, 'third_party', 'deepseek-harness'))
 const runId = randomUUID().slice(0, 8)
 const workDir = join(studioRoot, 'runtime', `hub-proof-${runId}`)
 const dshHome = join(workDir, 'dsh-home')
@@ -39,8 +39,8 @@ process.env.DSH_HOME = dshHome
 process.env.DSH_TELEMETRY_DISABLED = '1'
 process.env.DZ23_HUB_PUBLISHER_KEYS = JSON.stringify({ dz23: publicKey.export({ type: 'spki', format: 'der' }).toString('base64') })
 // The Hub confines exports to the runs root of the profile — the same default the prompt-to-app
-// plugin uses. The fabricated run below lives inside it (and is removed at the end), exactly where
-// a real run would be; the adversarial run stays outside it on purpose.
+// plugin uses. Only a run produced by the real pipeline may become exportable; adversarial paths
+// remain outside this root on purpose.
 const runsRoot = resolve(homedir(), '.dz23-studio', 'generated-runs')
 // The SMTP secret lives ONLY in the environment (the vault seam of this profile); the browser sends its name.
 process.env.DZ23_APP_SMTP = JSON.stringify({ host: 'smtp.example.test', port: 587, secure: false, user: 'app', pass: 'nunca-sai-do-servidor', from: 'app@example.test' })

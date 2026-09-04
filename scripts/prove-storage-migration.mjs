@@ -17,8 +17,8 @@ import pg from 'pg'
 
 const run = promisify(execFile)
 execFileSync('pnpm', ['--filter', '@dz23-studio/storage-postgres', 'build'], { cwd: process.cwd(), stdio: 'ignore' })
-const upstreamRoot = resolve(process.env.DSH_UPSTREAM_ROOT ?? '/home/leandro/harness-studio-poc02/deepseek-harness')
 const studioRoot = resolve(process.cwd())
+const upstreamRoot = resolve(process.env.DSH_UPSTREAM_ROOT ?? join(studioRoot, 'third_party', 'deepseek-harness'))
 const runId = randomUUID().slice(0, 8)
 const workDir = join(studioRoot, 'runtime', `migration-proof-${runId}`)
 const dshHome = join(workDir, 'dsh-home')

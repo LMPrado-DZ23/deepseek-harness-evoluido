@@ -1,5 +1,36 @@
 # Handoff Codex → Claude — E4 e abertura de P32/P33/P31-B
 
+## M6.1 — checkpoint de execução para revisão do Claude (04/09/2026)
+
+O Codex está construindo, não apenas planejando. Branch isolada
+`codex/m61-final`, base `c57f914`, upstream fixado como submodule no commit
+`6c705be1ce6774a000d061da41d1823b03a3d42c`. A ponta ainda não foi mesclada,
+enviada nem implantada.
+
+As auditorias independentes bloquearam a primeira tentativa por causas reais:
+profile ligado ao rootfs somente leitura, UI/template ausentes do deploy,
+dependências injetadas pré-build, pnpm não conferido, build pós-fetch com rede,
+entrypoint com propagação de sinal recursiva, ausência de usuário/HOME/Git,
+label open source incompatível com a licença atual, gate de portabilidade
+ignorando untracked/entrypoint, SBOM/proveniência ausentes e builder x64.
+
+Todos os bloqueios estáticos acima foram corrigidos no worktree. O novo
+Dockerfile usa a imagem Node por digest, Git Debian por versão exata, baixa o
+tarball pnpm 11.7.0 e confere SHA-512/SHA-256/SHA-1, executa instalação/build/
+deploy pós-fetch com `--network=none`, reinjeta packages após o build do
+upstream e exige fisicamente CLI, UI e template no deploy. O profile de
+produção é materializado por revisão em área gravável; fakes existem apenas no
+patch do PoC. O builder seleciona Node por `TARGETARCH` com hashes separados.
+
+Gates já verdes: manifesto upstream 8.953 entradas/11 symlinks, lock de imagens
+2/2, proveniência 6/6, portabilidade (inclusive untracked e entrypoint),
+`node --check` e `git diff --check`. O build físico M6.1 em WSL2/ext4 é a próxima
+prova; depois vem M6.2, com supervisor de build separado por socket Unix
+autenticado. Regra congelada: o Harness nunca recebe Docker CLI/socket e o RPC
+não aceita comando, imagem, mount, env ou limites do cliente.
+
+Estado recuperável detalhado: `audit/AUTONOMOUS_MISSION_STATE.md`.
+
 ## P32/P33 fatia 2 — fechamento integrado
 
 O Claude verificou o diff `16ea5ec..58f77d3`, declarou todas as correções

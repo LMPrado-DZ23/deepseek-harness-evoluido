@@ -1,22 +1,27 @@
 {
   "name": "dsh-profile-studio",
   "private": true,
+  "files": ["cordis.patch.yml"],
   "dependencies": {
-    "@deepseek-ai/dsh-llm-pi-ai": "link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/llm/llm-pi-ai",
-    "@deepseek-ai/dsh-subagent-claude-code": "link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/subagent/subagent-claude-code",
-    "@deepseek-ai/dsh-subagent-codex": "link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/subagent/subagent-codex",
-    "@deepseek-ai/dsh-subagent-spawn-in-process": "link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/subagent/subagent-spawn-in-process",
-    "@dz23-studio/agents": "link:../../../plugins/agents",
-    "@dz23-studio/identity": "link:../../../plugins/identity",
-    "@dz23-studio/integration-hub": "link:../../../plugins/integration-hub",
-    "@dz23-studio/policy": "link:../../../plugins/policy",
-    "@dz23-studio/preview": "link:../../../plugins/preview",
-    "@dz23-studio/prompt-to-app": "link:../../../plugins/prompt-to-app",
-    "@dz23-studio/route-health": "link:../../../plugins/route-health",
-    "@dz23-studio/storage-postgres": "link:../../../plugins/storage-postgres",
-    "@dz23-studio/tenancy": "link:../../../plugins/tenancy",
-    "@dz23-studio/web": "link:../../../plugins/studio-web",
-    "@studio/hello": "link:../../../plugins/hello"
+    "@deepseek-ai/dsh-base": "workspace:*",
+    "@deepseek-ai/dsh-llm-pi-ai": "workspace:*",
+    "@deepseek-ai/dsh-subagent-claude-code": "workspace:*",
+    "@deepseek-ai/dsh-subagent-codex": "workspace:*",
+    "@deepseek-ai/dsh-subagent-spawn-in-process": "workspace:*",
+    "@deepseek-ai/dsh-web-app": "workspace:*",
+    "@dz23-studio/agents": "workspace:*",
+    "@dz23-studio/identity": "workspace:*",
+    "@dz23-studio/integration-hub": "workspace:*",
+    "@dz23-studio/policy": "workspace:*",
+    "@dz23-studio/preview": "workspace:*",
+    "@dz23-studio/prompt-to-app": "workspace:*",
+    "@dz23-studio/route-health": "workspace:*",
+    "@dz23-studio/storage-postgres": "workspace:*",
+    "@dz23-studio/tenancy": "workspace:*",
+    "@dz23-studio/web": "workspace:*"
+  },
+  "devDependencies": {
+    "@studio/hello": "workspace:*"
   },
   "dsh": {
     "profile": {
