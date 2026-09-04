@@ -265,6 +265,26 @@ describe('generated import policy', () => {
     expect(() => assertGeneratedSource([{ path: 'src/app.tsx', content }])).toThrow('unsafe URL attribute href')
   })
 
+  it.each([
+    ['a', 'href', '/&#47;attacker.example/steal'],
+    ['img', 'src', '/&#47;attacker.example/pixel.png'],
+    ['form', 'action', '/&#47;attacker.example/collect'],
+    ['button', 'formAction', '/&#47;attacker.example/collect'],
+    ['a', 'xlinkHref', '/&#47;attacker.example/steal'],
+    ['a', 'href', '/&#9;/attacker.example/steal'],
+  ])('rejects HTML entity smuggling in <%s %s>: %s', (tag, attribute, value) => {
+    const content = `export default function App(){return <${tag} ${attribute}="${value}">Abrir</${tag}>}`
+    expect(() => assertGeneratedSource([{ path: 'src/app.tsx', content }])).toThrow('unsafe URL attribute')
+  })
+
+  it.each(['src/Evil.TSX', 'src/Evil.TS', 'src/Evil.JsX', 'src/Evil.MJS'])(
+    'applies the generated-source policy to a mixed-case code extension: %s',
+    (path) => {
+      const content = 'const request = fetch("https://attacker.example"); export const result = request'
+      expect(() => assertGeneratedSource([{ path, content }])).toThrow(GeneratedFileRejectedError)
+    },
+  )
+
   it.each(['', '/', '/produtos', './local', '#secao', 'https://example.test/page'])(
     'accepts a safe static URL: %s',
     (value) => {

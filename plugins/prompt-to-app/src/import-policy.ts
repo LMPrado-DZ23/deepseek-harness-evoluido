@@ -46,7 +46,7 @@ const FIXED_COMPONENT_PATHS = [
 export function assertGeneratedSource(files: readonly GeneratedFile[]): void {
   const generatedPaths = new Set(files.map(file => normalizePath(file.path)))
   for (const file of files) {
-    if (!/\.[cm]?[jt]sx?$/u.test(file.path)) continue
+    if (!/\.[cm]?[jt]sx?$/u.test(file.path.toLowerCase())) continue
     if (isFixedComponentPath(normalizePath(file.path))) throw rejectedSource(file.path, 'reserved Studio component path')
     const source = ts.createSourceFile(file.path, file.content, ts.ScriptTarget.Latest, true, scriptKind(file.path))
     visitImports(source, moduleName => assertAllowedModule(file.path, moduleName, generatedPaths))
@@ -115,6 +115,10 @@ function assertNoServerOrUnsafeSource(path: string, source: ts.SourceFile, gener
 }
 
 function isSafeStaticUrl(value: string): boolean {
+  // JSX compilers decode character references in quoted attributes before the
+  // value reaches the DOM. Refuse them at this trust boundary so an apparently
+  // local path such as `/&#47;host` cannot become `//host` after compilation.
+  if (value.includes('&')) return false
   if (value.includes('\\')) return false
   const normalized = value.replace(URL_IGNORED_CODE_POINTS, '')
   if (normalized === '' || normalized.startsWith('#') || normalized.startsWith('./')) return true
@@ -214,7 +218,7 @@ function rejectedSource(path: string, construct: string): GeneratedFileRejectedE
 }
 
 function normalizePath(path: string): string {
-  return posix.normalize(path.replaceAll('\\', '/')).replace(/\.(?:[cm]?[jt]sx?)$/u, '')
+  return posix.normalize(path.replaceAll('\\', '/')).replace(/\.(?:[cm]?[jt]sx?)$/iu, '')
 }
 
 function safeSuffix(value: string): boolean {
@@ -222,8 +226,9 @@ function safeSuffix(value: string): boolean {
 }
 
 function scriptKind(path: string): ts.ScriptKind {
-  if (/\.tsx$/u.test(path)) return ts.ScriptKind.TSX
-  if (/\.jsx$/u.test(path)) return ts.ScriptKind.JSX
-  if (/\.[cm]?js$/u.test(path)) return ts.ScriptKind.JS
+  const normalizedPath = path.toLowerCase()
+  if (/\.tsx$/u.test(normalizedPath)) return ts.ScriptKind.TSX
+  if (/\.jsx$/u.test(normalizedPath)) return ts.ScriptKind.JSX
+  if (/\.[cm]?js$/u.test(normalizedPath)) return ts.ScriptKind.JS
   return ts.ScriptKind.TS
 }
