@@ -22,9 +22,13 @@ const FIXED_DOS_TIME = 0x0000 // 00:00:00
 const FIXED_DOS_DATE = ((2026 - 1980) << 9) | (1 << 5) | 1 // 2026-01-01
 
 export function assertEntryName(name: string): void {
-  if (name === '' || name.startsWith('/') || name.includes('\\') || name.includes('\0') || name.split('/').some(part => part === '' || part === '.' || part === '..')) {
+  if (name === '' || name.startsWith('/') || name.includes('\\') || /[\u0000-\u001f\u007f]/u.test(name)
+    || /^[A-Za-z]:/u.test(name) || name.split('/').some(part => part === '' || part === '.' || part === '..')) {
     throw new Error(`invalid zip entry name: ${JSON.stringify(name)}`)
   }
+  // The header fields are 16-bit: a name that does not fit must be refused HERE, in words, not by a
+  // RangeError from a buffer write half-way through the archive.
+  if (Buffer.byteLength(name, 'utf8') > 0xffff) throw new Error(`zip entry name is too long: ${String(Buffer.byteLength(name, 'utf8'))} bytes`)
 }
 
 type Prepared = { readonly entry: ZipEntry; readonly nameBytes: Buffer; readonly crc: number; readonly payload: Buffer; readonly method: 0 | 8 }
@@ -57,6 +61,9 @@ export async function createZipAsync(entries: readonly ZipEntry[]): Promise<Buff
 }
 
 function assemble(prepared: readonly Prepared[]): Buffer {
+  // Checked BEFORE anything is written: the limit test used to sit after the very writes it was
+  // meant to protect, so the honest message was dead code and the caller got a RangeError instead.
+  if (prepared.length > 0xffff) throw new Error('archive exceeds the ZIP (non-64) limits')
   const locals: Buffer[] = []
   const centrals: Buffer[] = []
   let offset = 0
@@ -67,6 +74,7 @@ function assemble(prepared: readonly Prepared[]): Buffer {
     local.writeUInt32LE(crc, 14); local.writeUInt32LE(payload.length, 18); local.writeUInt32LE(entry.data.length, 22)
     local.writeUInt16LE(nameBytes.length, 26); local.writeUInt16LE(0, 28)
     locals.push(local, nameBytes, payload)
+    if (offset + local.length + nameBytes.length + payload.length > 0xffffffff) throw new Error('archive exceeds the ZIP (non-64) limits')
     const central = Buffer.alloc(46)
     central.writeUInt32LE(0x02014b50, 0); central.writeUInt16LE(0x0314, 4); central.writeUInt16LE(20, 6); central.writeUInt16LE(0x0800, 8)
     central.writeUInt16LE(method, 10); central.writeUInt16LE(FIXED_DOS_TIME, 12); central.writeUInt16LE(FIXED_DOS_DATE, 14)
@@ -81,20 +89,23 @@ function assemble(prepared: readonly Prepared[]): Buffer {
   const centralSize = centrals.reduce((total, part) => total + part.length, 0)
   const end = Buffer.alloc(22)
   end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(0, 4); end.writeUInt16LE(0, 6)
+  if (offset + centralSize > 0xffffffff) throw new Error('archive exceeds the ZIP (non-64) limits')
   end.writeUInt16LE(entries.length, 8); end.writeUInt16LE(entries.length, 10)
   end.writeUInt32LE(centralSize, 12); end.writeUInt32LE(offset, 16); end.writeUInt16LE(0, 20)
-  if (entries.length > 0xffff || offset + centralSize > 0xffffffff) throw new Error('archive exceeds the ZIP (non-64) limits')
   return Buffer.concat([...locals, ...centrals, end])
 }
 
 /** Read every entry back (used by tests and by the export self-check). */
 export function readZip(archive: Buffer): ZipEntry[] {
   const eocd = archive.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]))
-  if (eocd < 0) throw new Error('not a zip archive')
+  if (eocd < 0 || eocd + 22 > archive.length) throw new Error('not a zip archive')
   const count = archive.readUInt16LE(eocd + 10)
   let position = archive.readUInt32LE(eocd + 16)
   const entries: ZipEntry[] = []
   for (let index = 0; index < count; index++) {
+    // Every field is read only after the header is known to fit: a crafted directory used to return
+    // truncated names and empty data instead of saying the archive is corrupt.
+    if (position + 46 > eocd) throw new Error('corrupt central directory')
     if (archive.readUInt32LE(position) !== 0x02014b50) throw new Error('corrupt central directory')
     const method = archive.readUInt16LE(position + 10)
     const crc = archive.readUInt32LE(position + 16)
@@ -105,12 +116,19 @@ export function readZip(archive: Buffer): ZipEntry[] {
     const commentLength = archive.readUInt16LE(position + 32)
     const mode = (archive.readUInt32LE(position + 38) >>> 16) & 0o7777 // permission bits only; the type bits are the writer's concern
     const localOffset = archive.readUInt32LE(position + 42)
+    if (position + 46 + nameLength + extraLength + commentLength > eocd) throw new Error('corrupt central directory')
     const name = archive.subarray(position + 46, position + 46 + nameLength).toString('utf8')
+    // The reader is API of this plugin, so it is written for a hostile archive even though today it
+    // only ever sees archives this module wrote.
+    assertEntryName(name)
+    if (localOffset + 30 > archive.length) throw new Error(`corrupt entry: ${name}`)
     const localNameLength = archive.readUInt16LE(localOffset + 26)
     const localExtraLength = archive.readUInt16LE(localOffset + 28)
     const start = localOffset + 30 + localNameLength + localExtraLength
+    if (start + compressedSize > archive.length) throw new Error(`corrupt entry: ${name}`)
     const payload = archive.subarray(start, start + compressedSize)
-    const data = method === 8 ? inflateRawSync(payload) : Buffer.from(payload)
+    // `maxOutputLength` is what turns a zip bomb into an error instead of a heap that keeps growing.
+    const data = method === 8 ? inflateRawSync(payload, { maxOutputLength: size + 1 }) : Buffer.from(payload)
     if (data.length !== size || crc32(data) !== crc) throw new Error(`corrupt entry: ${name}`)
     entries.push({ name, data, mode })
     position += 46 + nameLength + extraLength + commentLength

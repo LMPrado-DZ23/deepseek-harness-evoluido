@@ -380,7 +380,10 @@ export class IntegrationHubService {
       built = await packagePrototype({ runDirectory, projectName: project.name, runId: run.run_id })
     } catch (error) {
       if (error instanceof ExportError) return refuse(error.code, new HubError(error.code === 'RUN_MISSING' ? 'CONFLICT' : 'INVALID', error.code === 'INVALID_PATH' ? t('errors.internal') : error.message))
-      throw error
+      // Anything else (an unreadable folder, a name the filesystem returns as invalid UTF-8) used to
+      // leave through the front door as a 500 with no audit at all — the person saw "something went
+      // wrong" and the history said nothing had been attempted.
+      return refuse(`package-failed ${error instanceof Error ? error.name : 'Error'}`, new HubError('INVALID', t('errors.exportFailed')))
     }
     // Same run, same bytes: hand back the existing package instead of writing a twin file on every click.
     const existing = this.listExports(actor, projectId).find(value => value.run_id === run.run_id && value.sha256 === built.sha256)

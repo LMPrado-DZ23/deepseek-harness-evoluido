@@ -26,4 +26,21 @@ describe('dependency-free zip', () => {
     expect(() => readZip(Buffer.from('not a zip'))).toThrow('not a zip')
     expect(crc32(Buffer.from('123456789'))).toBe(0xcbf43926)
   })
+
+  it('refuses what it cannot represent, and does not trust an archive it is given', () => {
+    // The limit test used to run AFTER the writes it guarded, so the caller got a RangeError.
+    expect(() => createZip(Array.from({ length: 0x10000 }, (_unused, index) => ({ name: `f${String(index)}`, data: Buffer.alloc(0) }))))
+      .toThrow('ZIP (non-64) limits')
+    expect(() => createZip([{ name: 'a'.repeat(70_000), data: Buffer.alloc(0) }])).toThrow('too long')
+    expect(() => createZip([{ name: 'C:/win', data: Buffer.alloc(0) }])).toThrow('invalid zip entry name')
+    expect(() => createZip([{ name: 'a\r\nb', data: Buffer.alloc(0) }])).toThrow('invalid zip entry name')
+    // A crafted central directory must be an error, not a silently truncated entry.
+    const archive = createZip([{ name: 'ok.txt', data: Buffer.from('ok') }])
+    const eocd = archive.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]))
+    const central = archive.readUInt32LE(eocd + 16)
+    const forged = Buffer.from(archive)
+    forged.writeUInt16LE(0xffff, central + 28) // nameLength beyond the directory
+    expect(() => readZip(forged)).toThrow('corrupt central directory')
+    expect(() => readZip(Buffer.from('nao e um zip'))).toThrow('not a zip archive')
+  })
 })

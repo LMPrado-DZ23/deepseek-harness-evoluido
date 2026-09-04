@@ -85,6 +85,13 @@ for (const sourceRoot of sourceRoots) for (const file of walk(sourceRoot.path)) 
 if (directText.length > 0) failures.push(`texto pt-BR fora do catálogo: ${directText.join(' | ')}`)
 if (inflatedBaseline.length > 0) failures.push(`baseline de i18n contém literal que o histórico não confirma (rode \`pnpm i18n:baseline\`): ${inflatedBaseline.join(' | ')}`)
 if (baselineFile === undefined && !hasGitHistory()) failures.push('sem histórico Git e sem docs/inventory/i18n-legacy-literals.json: rode `pnpm i18n:baseline` no repositório e versione o arquivo')
+// "cannot grow" was printed but never checked: the ceiling is what the baseline file records.
+const baselineCeiling = baselineFile === undefined
+  ? undefined
+  : Object.values(baselineFile.files ?? {}).reduce((total, entry) => total + (entry.plugins?.length ?? 0), 0)
+if (baselineCeiling !== undefined && grandfatheredHits.length > baselineCeiling) {
+  failures.push(`literais herdados cresceram (${String(grandfatheredHits.length)} > ${String(baselineCeiling)}): migre para o catálogo em vez de aumentar o baseline`)
+}
 const cssText = [...styles.matchAll(/content\s*:\s*['"]([^'"]+)['"]/gu)].map(match => match[1].trim()).filter(Boolean)
 if (cssText.length > 0) failures.push(`texto visível no CSS fora do catálogo: ${cssText.join(' | ')}`)
 
@@ -117,8 +124,12 @@ function scanSource(path, strict, baselines) {
 function resolveBaseline(path, kind, revisions) {
   const repoPath = relative(root, path).replaceAll('\\', '/')
   const fromFile = new Set(baselineFile?.files?.[repoPath]?.[kind] ?? [])
-  const fromGit = new Set(revisions.flatMap(revision => [...legacyPortugueseLiterals(path, revision)]))
-  if (fromGit.size === 0) return fromFile
+  // `undefined` = this clone cannot answer for that revision; an EMPTY SET = the history answered
+  // and the file had no such literal. Collapsing the two let a baseline entry for a file that never
+  // existed pass unchecked — which is exactly how new untranslated text could be grandfathered in.
+  const answers = revisions.map(revision => legacyPortugueseLiterals(path, revision))
+  if (answers.every(answer => answer === undefined)) return fromFile
+  const fromGit = new Set(answers.flatMap(answer => [...(answer ?? [])]))
   for (const literal of fromFile) {
     if (!fromGit.has(literal)) inflatedBaseline.push(`${repoPath}:${literal.slice(0, 60)}`)
   }
@@ -159,8 +170,12 @@ function isDirectory(path) {
   try { return statSync(path).isDirectory() } catch { return false }
 }
 
+/** Literals of one file at one revision, or `undefined` when this clone cannot answer for it. */
 function legacyPortugueseLiterals(path, revision) {
   const repoPath = relative(root, path).replaceAll('\\', '/')
+  // A revision this clone does not have is "cannot answer"; a file missing AT a revision it does
+  // have is an answer — the empty set — and must be treated as one.
+  try { execFileSync('git', ['rev-parse', '--verify', `${revision}^{commit}`], { cwd: root, stdio: 'ignore' }) } catch { return undefined }
   try {
     const source = execFileSync('git', ['show', `${revision}:${repoPath}`], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
     const sourceFile = ts.createSourceFile(repoPath, source, ts.ScriptTarget.Latest, true, extname(path) === '.tsx' ? ts.ScriptKind.TSX : ts.ScriptKind.TS)
@@ -172,7 +187,7 @@ function legacyPortugueseLiterals(path, revision) {
     }
     collect(sourceFile)
     return found
-  } catch { return new Set() }
+  } catch { return new Set() } // the revision exists and the file was not in it: an answer, not a shrug
 }
 
 function hasGitHistory() {

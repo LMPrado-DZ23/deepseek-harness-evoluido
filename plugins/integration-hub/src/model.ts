@@ -23,14 +23,16 @@ export const integrationPermissionSchema = z.enum([
 export const integrationManifestSchema = z.object({
   schema_version: z.literal(1),
   id: z.string().regex(/^[a-z][a-z0-9-]{1,63}$/u),
-  name: z.string().trim().min(1).max(120),
+  // NOT `.trim()`: the signature is verified over the manifest as supplied, so a schema that
+  // silently trimmed produced a record whose bytes were not the bytes that were signed.
+  name: z.string().min(1).max(120).regex(/^\S(.*\S)?$/su, 'no-padding'),
   version: z.string().regex(/^\d+\.\d+\.\d+$/u),
   kind: integrationKindSchema,
-  publisher: z.object({ id: z.string().regex(/^[a-z][a-z0-9-]{1,63}$/u), name: z.string().trim().min(1).max(120) }).strict(),
+  publisher: z.object({ id: z.string().regex(/^[a-z][a-z0-9-]{1,63}$/u), name: z.string().min(1).max(120).regex(/^\S(.*\S)?$/su, 'no-padding') }).strict(),
   tier: z.string().optional(),
   permissions: z.array(integrationPermissionSchema).max(20).default([]),
   endpoint: z.string().url().optional(),
-  description: z.string().trim().max(500).optional(),
+  description: z.string().max(500).regex(/^(\S(.*\S)?)?$/su, 'no-padding').optional(),
   signature: z.string().base64().optional(),
 }).strict()
 export type IntegrationManifest = z.infer<typeof integrationManifestSchema>

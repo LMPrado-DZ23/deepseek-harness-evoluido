@@ -57,6 +57,31 @@ describe('D16 manifest evaluation', () => {
     for (const reason of invalid.reasons) expect(reason).not.toMatch(/expected|received|invalid_|Invalid enum/iu)
   })
 
+  it('treats any external endpoint as outside, whatever the kind, and knows IPv6 loopback', () => {
+    // The rule said "talks to the outside world is never below T2" and the code only applied it to
+    // `mcp`: a signed webhook pointing anywhere was T1 and got enabled with no confirmation.
+    expect(policyFloor('webhook', manifest({ kind: 'webhook', endpoint: 'https://attacker.example/hook' }))).toBe('T2')
+    expect(policyFloor('skill', manifest({ endpoint: 'https://attacker.example/x' }))).toBe('T2')
+    expect(policyFloor('webhook', manifest({ kind: 'webhook' }))).toBe('T1') // no endpoint: unchanged
+    expect(policyFloor('webhook', manifest({ kind: 'webhook', endpoint: 'http://127.0.0.1:3000/x' }))).toBe('T1')
+    expect(policyFloor('webhook', manifest({ kind: 'webhook', endpoint: 'http://[::1]:3000/x' }))).toBe('T1')
+  })
+
+  it('never lets a publisher id reach Object.prototype', () => {
+    // `publisherKeys['constructor']` used to hand back `Object`, turning "no key for this publisher"
+    // into "signature invalid" — the wrong verdict and the wrong sentence.
+    const result = evaluateManifest(signed(manifest({ publisher: { id: 'constructor', name: 'X' } })), publisherKeys)
+    expect(result.verification).toBe('unverified')
+    expect(result.reasons.join(' ')).toContain('chave cadastrada')
+  })
+
+  it('stores exactly what was signed: padding is refused, not trimmed away', () => {
+    // The signature is verified over the manifest AS SUPPLIED; a schema that trimmed produced a
+    // record whose bytes were not the bytes that were signed.
+    expect(evaluateManifest(signed(manifest({ name: '  Agenda  ' })), publisherKeys).manifest).toBeNull()
+    expect(evaluateManifest(signed(manifest({ name: 'Agenda' })), publisherKeys).manifest).toMatchObject({ name: 'Agenda' })
+  })
+
   it('verifies a real Ed25519 signature, flags tampering and unknown publishers, and rejects malformed manifests', () => {
     const good = signed(manifest({ tier: 'T0' }))
     expect(evaluateManifest(good, publisherKeys)).toMatchObject({ verification: 'verified', effectiveTier: 'T0', reasons: [] })

@@ -33,7 +33,10 @@ export function policyFloor(kind: IntegrationKind, manifest: IntegrationManifest
   const outbound = manifest.permissions.some(permission => permission === 'network.outbound' || permission === 'email.send')
   const writes = manifest.permissions.some(permission => permission === 'write.project')
   if (manifest.permissions.includes('secrets.read')) return 'T3'
-  if ((kind === 'mcp' && external) || kind === 'smtp' || outbound) return 'T2'
+  // ANY declared endpoint that is not loopback is "talks to the outside world" — the rule said so
+  // and the code only applied it to `mcp`, so a signed `webhook` (or a `skill` with an endpoint)
+  // pointing anywhere was T1/T0 and turned on with no confirmation at all.
+  if (external || kind === 'smtp' || outbound) return 'T2'
   if (kind === 'mcp' || kind === 'webhook' || writes) return 'T1'
   return 'T0'
 }
@@ -42,7 +45,8 @@ function maxTier(left: PolicyTier, right: PolicyTier): PolicyTier { return TIER_
 
 function isLoopback(endpoint: string): boolean {
   try {
-    const host = new URL(endpoint).hostname
+    // `new URL('http://[::1]/').hostname` keeps the brackets, so the bare form never matched.
+    const host = new URL(endpoint).hostname.replace(/^\[|\]$/gu, '')
     return host === '127.0.0.1' || host === '::1' || host === 'localhost' || host.endsWith('.localhost')
   } catch { return false }
 }
@@ -80,7 +84,8 @@ export function evaluateManifest(input: unknown, publisherKeys: PublisherKeys): 
     return { manifest, verification, effectiveTier: tier, reasons }
   }
   if (manifest.signature === undefined) return unverified(t('manifest.reasonUnsigned'), 'unverified')
-  const publicKey = publisherKeys[manifest.publisher.id]
+  // `publisherKeys['constructor']` would otherwise hand back `Object` and turn "no key" into "invalid".
+  const publicKey = Object.hasOwn(publisherKeys, manifest.publisher.id) ? publisherKeys[manifest.publisher.id] : undefined
   if (publicKey === undefined) return unverified(t('manifest.reasonNoPublisherKey'), 'unverified')
   let valid = false
   try {

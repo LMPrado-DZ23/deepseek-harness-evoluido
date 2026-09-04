@@ -180,6 +180,19 @@ recusado deixou de ser registrado no histórico como "pacote falhou ao ser gerad
 confirmação passa a citar o nível que o **servidor** acabou de decidir, não o que a tela tinha
 carregado antes.
 
+**Quarta passagem adversarial (áreas que ninguém tinha atacado):** o piso D16 só tratava
+`endpoint` externo quando o kind era `mcp` — um `webhook` **assinado** apontando para qualquer host
+ficava em T1 e era ligado **sem confirmação nenhuma**; agora qualquer endpoint que não seja loopback
+é T2, e o loopback IPv6 (`[::1]`, que a URL entrega entre colchetes) passou a ser reconhecido. Uma
+falha de empacotamento que não fosse `ExportError` saía como 500 **sem auditoria** — agora toda
+falha é recusa auditada com frase própria. O limite do ZIP era conferido **depois** das escritas que
+ele deveria proteger (a mensagem honesta era código morto e o cliente recebia um `RangeError`); o
+leitor de ZIP passou a validar limites, nomes e tamanho de descompressão em vez de confiar no
+arquivo. O identificador do publicador não alcança mais `Object.prototype` (`constructor` devolvia
+`Object` e trocava "publicador sem chave" por "assinatura inválida"). E o schema **recusa** espaço
+em volta de nome/descrição em vez de aparar: a assinatura é conferida sobre o manifesto como
+enviado, e aparar produzia um registro cujos bytes não eram os assinados.
+
 Limite anterior, agora histórico: a confirmação de **T2** era uma afirmação do cliente (um campo
 JSON). O que separa isso de uma página hostil é CSRF + verificação de origem; **T3** é o único
 nível com prova do lado do servidor (a passkey recente). Anotado para a fatia da arquitetura de

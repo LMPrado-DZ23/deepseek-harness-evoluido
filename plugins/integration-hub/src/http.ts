@@ -141,7 +141,11 @@ function publicMessage(error: unknown): string {
   if (error instanceof IdentityError || error instanceof TenancyError || error instanceof HubError) return error.message
   if (error instanceof ExportError) return error.code === 'INVALID_PATH' ? t('errors.internal') : error.message
   if (error instanceof z.ZodError || error instanceof SyntaxError || error instanceof URIError) return t('errors.invalidRequest')
-  if (error instanceof Error && 'code' in error && ((error as { code?: string }).code === 'NOT_FOUND' || (error as { code?: string }).code === 'FORBIDDEN')) return error.message
+  // Another plugin's error is NOT this module's message: duck-typing on `code` meant whatever text
+  // that plugin happened to put in it — a server path, say — went straight to the network. The
+  // status still distinguishes the cases (see `statusOf`); the sentence comes from our catalogue.
+  if (error instanceof Error && 'code' in error && (error as { code?: string }).code === 'NOT_FOUND') return t('errors.projectNotFound')
+  if (error instanceof Error && 'code' in error && (error as { code?: string }).code === 'FORBIDDEN') return t('errors.forbidden')
   return t('errors.internal')
 }
 
