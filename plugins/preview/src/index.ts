@@ -160,6 +160,7 @@ export async function apply(ctx: Context, config: PreviewPluginConfig = {}): Pro
       handler: edgeGuard(edgeSecret, gateway),
     }), 'studio-preview.gateway')
   }
+  await service.reconcile()
   let reaperRunning = false
   const interval = setInterval(() => {
     if (reaperRunning) return
@@ -170,7 +171,6 @@ export async function apply(ctx: Context, config: PreviewPluginConfig = {}): Pro
   }, Math.max(5_000, config.reaperIntervalMs ?? 30_000))
   interval.unref()
   ctx.effect(() => () => clearInterval(interval), 'studio-preview.reaper')
-  await service.reconcile()
   ctx.provide('studioPreview', {
     service,
     state: config.runtime === undefined && supervisor === undefined ? 'NOT_CONFIGURED' : 'BETA',

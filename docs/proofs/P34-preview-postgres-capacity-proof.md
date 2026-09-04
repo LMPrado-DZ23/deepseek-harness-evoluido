@@ -10,21 +10,23 @@
 
 O plugin `storage-postgres` publica uma autoridade de capacidade PostgreSQL no
 mesmo boot do backend de domínios. O Preview em modo `edge` a resolve pelo
-contexto e recusa iniciar sem uma implementação distribuída que ofereça
-takeover.
+contexto; o overlay declara a dependência de lifecycle e recusa iniciar sem uma
+implementação distribuída que ofereça takeover.
 
 Na recuperação de um preview ativo, o serviço valida `ownerId`, organização,
 tenant, projeto e alocação, então executa takeover compare-and-swap da lease.
 O fencing token é rotacionado; a referência anterior deixa de poder renovar ou
-liberar a geração. Uma lease destacada de registro terminal também é assumida
-antes da limpeza e liberada apenas depois da ausência do runtime.
+liberar a geração. Uma lease destacada de registro terminal também é assumida,
+mas permanece em `CAPACITY_RECOVERY_QUARANTINE`: sem fencing no supervisor, uma
+runtime antiga ainda pode materializar depois de uma leitura vazia. A
+capacidade não é liberada automaticamente nesse estado.
 
 ## Gates executados
 
 - instalação offline com lock congelado: `PASS`;
-- runtime-governor + Preview: 208 testes aprovados, 2 skips explícitos de
+- runtime-governor + Preview: 211 testes aprovados, 2 skips explícitos de
   filesystem no corte completo;
-- recorte final de takeover: 65/65;
+- recorte final de recuperação e lifecycle: 59/59;
 - typecheck raiz: `PASS`;
 - builds de runtime-governor, storage-postgres e preview: `PASS`;
 - PostgresCapacityGovernor em PostgreSQL 16 real: 11/11;

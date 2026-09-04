@@ -1054,7 +1054,7 @@ describe('StudioPreviewService capacity leases', () => {
     expect((await base.snapshot()).leases[0]!.fencingToken).toBeGreaterThan(leaseBefore.fencingToken)
   })
 
-  it('takes over and releases a detached lease while cleaning a terminal runtime after restart', async () => {
+  it('takes over and quarantines a detached lease while cleaning a terminal runtime after restart', async () => {
     const repository = new MemoryRepository()
     const base = new MemoryCapacityGovernor({ limits: limitsForPreview(1, 1, 1) })
     const capacity = distributedGovernor(base)
@@ -1077,7 +1077,77 @@ describe('StudioPreviewService capacity leases', () => {
 
     await expect(rebooted.service.reconcile()).resolves.toEqual({ stoppedOrphans: 1, failedRecords: 0 })
     expect(rebooted.runtime.stop).toHaveBeenCalledOnce()
-    expect(await base.snapshot()).toMatchObject({ leases: [] })
+    expect((await base.snapshot()).leases).toHaveLength(1)
+    expect(repository.previews().find(item => item.preview_id === started.preview.preview_id)).toMatchObject({
+      state: 'STOPPING', stopped_at: null, failure_code: 'CAPACITY_RECOVERY_QUARANTINE',
+    })
+    await expect(rebooted.service.reap()).resolves.toBe(0)
+    expect((await base.snapshot()).leases).toHaveLength(1)
+  })
+
+  it('keeps a detached terminal lease when a runtime materializes after the startup inventory', async () => {
+    const repository = new MemoryRepository()
+    const base = new MemoryCapacityGovernor({ limits: limitsForPreview(1, 1, 1) })
+    const distributed = distributedGovernor(base)
+    const original = createHarness({ repository, capacity: distributed, capacityMode: 'team' })
+    const started = await ready(original)
+    const stored = repository.previews().find(item => item.preview_id === started.preview.preview_id)!
+    await repository.putPreview({ ...stored, state: 'STOPPED', health: 'DOWN', stopped_at: stored.ready_at, stop_reason: 'reconciled' })
+    let live = false
+    const racingCapacity: DistributedCapacityGovernor = {
+      acquireBundle: request => distributed.acquireBundle(request),
+      heartbeat: (reference, ttlMs) => distributed.heartbeat(reference, ttlMs),
+      release: reference => distributed.release(reference),
+      reconcile: () => distributed.reconcile(),
+      snapshot: async () => { live = true; return distributed.snapshot() },
+      takeover: request => distributed.takeover(request),
+    }
+    const rebooted = createHarness({
+      repository,
+      capacity: racingCapacity,
+      capacityMode: 'team',
+      runtime: {
+        listManaged: vi.fn(() => Promise.resolve(live
+          ? [{ runtimeRef: 'container:late', previewId: started.preview.preview_id }]
+          : [])),
+        stop: vi.fn(() => { live = false; return Promise.resolve() }),
+      },
+    })
+
+    await expect(rebooted.service.reconcile()).resolves.toEqual({ stoppedOrphans: 0, failedRecords: 0 })
+    expect(live).toBe(true)
+    expect((await base.snapshot()).leases).toHaveLength(1)
+    expect(repository.previews().find(item => item.preview_id === started.preview.preview_id)).toMatchObject({
+      state: 'STOPPING', failure_code: 'CAPACITY_RECOVERY_QUARANTINE',
+    })
+    await expect(rebooted.service.reap()).resolves.toBe(0)
+    expect(rebooted.runtime.stop).toHaveBeenCalledWith('container:late', expect.any(AbortSignal))
+    expect((await base.snapshot()).leases).toHaveLength(1)
+  })
+
+  it('serializes boot reconciliation with the reaper before renewing recovered capacity', async () => {
+    const repository = new MemoryRepository()
+    const base = new MemoryCapacityGovernor({ limits: limitsForPreview(1, 1, 1) })
+    const capacity = distributedGovernor(base)
+    const original = createHarness({ repository, capacity, capacityMode: 'team' })
+    const started = await ready(original)
+    const rebooted = createHarness({
+      repository,
+      capacity,
+      capacityMode: 'team',
+      runtime: {
+        listManaged: vi.fn(() => Promise.resolve([
+          { runtimeRef: 'container:preview-1', previewId: started.preview.preview_id },
+        ])),
+      },
+    })
+
+    const [reconciled, reaped] = await Promise.all([rebooted.service.reconcile(), rebooted.service.reap()])
+    expect(reconciled).toEqual({ stoppedOrphans: 0, failedRecords: 0 })
+    expect(reaped).toBe(0)
+    expect(rebooted.runtime.stop).not.toHaveBeenCalled()
+    expect(repository.previews().find(item => item.preview_id === started.preview.preview_id)).toMatchObject({ state: 'READY' })
+    expect((await base.snapshot()).leases).toHaveLength(1)
   })
 
   it('keeps zombie runtime capacity quarantined after preview expiry until inventory proves absence', async () => {

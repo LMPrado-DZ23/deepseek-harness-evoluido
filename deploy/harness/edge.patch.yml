@@ -34,6 +34,8 @@
       - !!js process.env.DZ23_PUBLIC_HOST
 
 - id: dz23-studio-preview
+  inject:
+    - studioCapacity
   config:
     capacityMode: edge
 

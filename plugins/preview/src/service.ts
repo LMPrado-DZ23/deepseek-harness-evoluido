@@ -429,10 +429,13 @@ export class StudioPreviewService {
   }
 
   async reap(): Promise<number> {
+    return this.#mutex.run('maintenance', () => this.#reap())
+  }
+
+  async #reap(): Promise<number> {
     await this.#maintainActiveCapacity()
     const managed = await this.#runtimeCall('RUNTIME_LIST_TIMEOUT', signal => this.options.runtime.listManaged(signal))
     await this.#capacity.reconcile()
-    await this.#retryDetachedCapacityReleases(managed)
     const now = this.#now().getTime()
     let reaped = 0
 
@@ -459,6 +462,10 @@ export class StudioPreviewService {
               this.options.onCleanupFailure?.(current.preview_id)
               return
             }
+          }
+          if (current.failure_code === 'CAPACITY_RECOVERY_QUARANTINE') {
+            await this.#retainCleanupCapacity(current)
+            return
           }
           const terminalState = terminalStateFor(current)
           const settled = await this.#settleRuntimeAbsent(current, terminalState, current.failure_code)
@@ -500,6 +507,10 @@ export class StudioPreviewService {
   }
 
   async reconcile(): Promise<{ readonly stoppedOrphans: number; readonly failedRecords: number }> {
+    return this.#mutex.run('maintenance', () => this.#reconcile())
+  }
+
+  async #reconcile(): Promise<{ readonly stoppedOrphans: number; readonly failedRecords: number }> {
     const managed = await this.#runtimeCall('RUNTIME_LIST_TIMEOUT', signal => this.options.runtime.listManaged(signal))
     await this.#capacity.reconcile()
     const records = this.options.repository.previews()
@@ -512,13 +523,10 @@ export class StudioPreviewService {
           if (!await this.#runtimeAbsent(runtime.previewId)) {
             throw new PreviewError('UNAVAILABLE', t('service.previousStopFailed'))
           }
-          const released = await this.#releaseCapacity(runtime.previewId)
-          if (!released && record !== undefined) {
-            await this.options.repository.putPreview(previewRecordSchema.parse({
-              ...record, state: 'STOPPING', stopped_at: null,
-              failure_code: pendingReleaseCode(record.failure_code), health: 'DOWN',
-            }))
-          }
+          // A runtime de uma instância anterior pode materializar tarde. Sem
+          // fencing aplicado pelo supervisor, liberar a lease aqui permitiria
+          // um processo vivo sem contabilização. A etapa seguinte mantém a
+          // capacidade em quarentena fail-closed.
           stoppedOrphans++
         } catch {
           this.options.onCleanupFailure?.(runtime.previewId)
@@ -526,7 +534,7 @@ export class StudioPreviewService {
         }
       }
     }
-    await this.#retryDetachedCapacityReleases(managed)
+    await this.#quarantineDetachedCapacity(managed)
     let failedRecords = 0
     for (const snapshot of records.filter(item => !['STOPPED', 'FAILED', 'EXPIRED'].includes(item.state))) {
       await this.#mutex.run(scopeProjectKey(snapshot), async () => {
@@ -723,7 +731,11 @@ export class StudioPreviewService {
           if (current === undefined || (current.state !== 'READY' && current.state !== 'STOPPING')) return
           if (current.state === 'READY' && current.runtime_ref === null) return
           try {
-            await this.#ensureCapacity(current, current.state === 'STOPPING')
+            if (this.#distributedCapacity !== undefined && !this.#capacityLeases.has(current.preview_id)) {
+              await this.#recoverCapacity(current)
+            } else {
+              await this.#ensureCapacity(current, current.state === 'STOPPING')
+            }
           } catch (error) {
             await this.#failClosedForCapacity(current, failureCode(error))
           }
@@ -887,7 +899,7 @@ export class StudioPreviewService {
     }
   }
 
-  async #retryDetachedCapacityReleases(
+  async #quarantineDetachedCapacity(
     managed: readonly { readonly runtimeRef: string; readonly previewId: string }[],
   ): Promise<void> {
     let leases: readonly CapacityLease[]
@@ -896,24 +908,26 @@ export class StudioPreviewService {
     } catch (error) {
       throw capacityError(error)
     }
-    const previewIds = new Set(this.#capacityReleasePending)
     for (const lease of leases) {
       const previewId = capacityPreviewId(lease.ownerId)
-      if (previewId !== undefined) previewIds.add(previewId)
-    }
-    for (const previewId of previewIds) {
-      if (managed.some(runtime => runtime.previewId === previewId)) continue
+      if (previewId === undefined || this.#capacityLeases.has(previewId)) continue
       const record = this.options.repository.previews().find(candidate => candidate.preview_id === previewId)
-      if (record !== undefined && !['STOPPED', 'FAILED', 'EXPIRED'].includes(record.state)) continue
-      const released = await this.#releaseCapacity(previewId)
-      if (!released && record !== undefined) {
-        await this.options.repository.putPreview(previewRecordSchema.parse({
-          ...record,
-          state: 'STOPPING', stopped_at: null, health: 'DOWN',
-          stop_reason: record.stop_reason ?? 'reconciled',
-          failure_code: pendingReleaseCode(record.failure_code),
-        }))
-      }
+      if (record === undefined || !['STOPPED', 'FAILED', 'EXPIRED'].includes(record.state)) continue
+      const quarantined = previewRecordSchema.parse({
+        ...record,
+        state: 'STOPPING', stopped_at: null, health: 'DOWN',
+        stop_reason: record.stop_reason ?? 'reconciled',
+        failure_code: 'CAPACITY_RECOVERY_QUARANTINE',
+      })
+      await this.#recoverCapacity(quarantined)
+      await this.#ensureCapacity(quarantined, true)
+      await this.options.repository.putPreview(quarantined)
+      await this.#revokeAdmissions(previewId)
+      // Mesmo que o inventário inicial esteja vazio, a instância anterior pode
+      // concluir um start depois desta leitura. O supervisor atual ainda não
+      // aplica o fencing token em cada operação; portanto não existe prova
+      // linearizável de ausência e a lease não pode ser liberada automaticamente.
+      if (managed.some(runtime => runtime.previewId === previewId)) this.options.onCleanupFailure?.(previewId)
     }
   }
 
