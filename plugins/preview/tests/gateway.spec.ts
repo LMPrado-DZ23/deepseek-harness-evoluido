@@ -1,7 +1,7 @@
 import { createServer, request as httpRequest, type IncomingMessage, type ServerResponse } from 'node:http'
 import { createConnection } from 'node:net'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createPreviewGatewayHttpHandler, PREVIEW_COOKIE, type PreviewForwardPort } from '../src/gateway.ts'
+import { createPreviewGatewayHttpHandler, PREVIEW_COOKIE, SECURE_PREVIEW_COOKIE, type PreviewForwardPort } from '../src/gateway.ts'
 import { PreviewError, type StudioPreviewService } from '../src/service.ts'
 
 interface HttpResult {
@@ -72,14 +72,14 @@ async function sendRaw(
   })
 }
 
-function gateway(service = fakeService(), forward?: PreviewForwardPort) {
+function gateway(service = fakeService(), forward?: PreviewForwardPort, studioOrigin = 'http://studio.dz23.localhost:3210') {
   const trustedForward: PreviewForwardPort = forward ?? {
     forward: vi.fn(() => Promise.resolve({ status: 200, body: Buffer.from('forwarded') })),
   }
   return {
     service,
     forward: trustedForward,
-    handler: createPreviewGatewayHttpHandler({ service, forward: trustedForward, studioOrigin: 'http://studio.dz23.localhost:3210' }),
+    handler: createPreviewGatewayHttpHandler({ service, forward: trustedForward, studioOrigin }),
   }
 }
 
@@ -89,9 +89,9 @@ describe('preview gateway trust boundary', () => {
   it('rejects non-local or non-origin Studio configuration at construction', () => {
     const service = fakeService()
     const forward: PreviewForwardPort = { forward: vi.fn(() => Promise.resolve({ status: 200, body: Buffer.alloc(0) })) }
-    expect(() => createPreviewGatewayHttpHandler({ service, forward, studioOrigin: 'https://studio.dz23.localhost:3210' })).toThrow('origem HTTP local exata')
+    expect(() => createPreviewGatewayHttpHandler({ service, forward, studioOrigin: 'https://studio.dz23.localhost:3210' })).not.toThrow()
     expect(() => createPreviewGatewayHttpHandler({ service, forward, studioOrigin: 'http://studio.example' })).toThrow('studio.dz23.localhost')
-    expect(() => createPreviewGatewayHttpHandler({ service, forward, studioOrigin: 'http://studio.dz23.localhost:3210/path' })).toThrow('origem HTTP local exata')
+    expect(() => createPreviewGatewayHttpHandler({ service, forward, studioOrigin: 'http://studio.dz23.localhost:3210/path' })).toThrow('origem web local exata')
   })
 
   it('returns 421 for an invalid or ambiguous Host before consulting services', async () => {
@@ -143,6 +143,18 @@ describe('preview gateway trust boundary', () => {
     expect(h.service.exchange).toHaveBeenCalledWith(previewHost, ticket)
     expect(result.headers['set-cookie']).toEqual([
       `${PREVIEW_COOKIE}=cookie-from-service; Path=/; Max-Age=900; HttpOnly; SameSite=Strict`,
+    ])
+  })
+
+  it('uses a __Host cookie and preserves Secure on every cookie under an HTTPS public origin', async () => {
+    const forward: PreviewForwardPort = { forward: vi.fn(() => Promise.resolve({ status: 200, headers: { 'set-cookie': 'app_session=value; Path=/loose' }, body: Buffer.from('ok') })) }
+    const h = gateway(fakeService(), forward, 'https://studio.dz23.localhost:3210')
+    const admitted = await send(h.handler, { method: 'POST', path: '/__dz23/admission', headers: { host: previewHost, origin: `https://${previewHost}`, 'content-type': 'application/json' }, body: JSON.stringify({ ticket: 'ticket-with-at-least-twenty-characters' }) })
+    expect(admitted.headers['set-cookie']).toEqual([`${SECURE_PREVIEW_COOKIE}=cookie-from-service; Path=/; Max-Age=900; HttpOnly; SameSite=Strict; Secure`])
+    const forwarded = await send(h.handler, { headers: { host: previewHost, cookie: `${SECURE_PREVIEW_COOKIE}=valid` } })
+    expect(forwarded.headers['set-cookie']).toEqual([
+      'app_session=value; Path=/; HttpOnly; SameSite=Strict; Secure',
+      `${SECURE_PREVIEW_COOKIE}=valid; Path=/; Max-Age=900; HttpOnly; SameSite=Strict; Secure`,
     ])
   })
 

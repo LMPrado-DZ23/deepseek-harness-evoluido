@@ -3,6 +3,7 @@ import type { StudioPreviewService } from './service.js'
 import { t } from './i18n.js'
 
 export const PREVIEW_COOKIE = 'dz23_preview_admission'
+export const SECURE_PREVIEW_COOKIE = '__Host-dz23_preview_admission'
 const HOST_PATTERN = /^p-[a-f0-9]{24}\.dz23\.localhost(?::\d+)?$/u
 const BODY_LIMIT = 8 * 1024
 const FORWARD_BODY_LIMIT = 2 * 1024 * 1024
@@ -32,11 +33,14 @@ export interface PreviewGatewayOptions {
 }
 
 export function createPreviewGatewayHttpHandler(options: PreviewGatewayOptions) {
-  const studioOrigin = exactHttpOrigin(options.studioOrigin)
+  const studioOrigin = exactStudioOrigin(options.studioOrigin)
+  const publicScheme = new URL(studioOrigin).protocol === 'https:' ? 'https' : 'http'
+  const secureCookies = publicScheme === 'https'
+  const admissionCookieName = secureCookies ? SECURE_PREVIEW_COOKIE : PREVIEW_COOKIE
   return async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     const host = singleHeader(request.headers.host)?.toLowerCase()
     if (host === undefined || !validPreviewHost(host)) return plain(response, 421, t('gateway.invalidHost'))
-    const origin = `http://${host}`
+    const origin = `${publicScheme}://${host}`
     const target = originForm(request.url)
     if (target === undefined) return plain(response, 400, t('gateway.invalidTarget'))
     if (!isAllowedMethod(request.method)) return plain(response, 405, t('gateway.invalidMethod'))
@@ -60,7 +64,7 @@ export function createPreviewGatewayHttpHandler(options: PreviewGatewayOptions) 
         const exchanged = await options.service.exchange(host, ticket)
         response.writeHead(204, {
           ...headers,
-          'set-cookie': localCookie(PREVIEW_COOKIE, encodeURIComponent(exchanged.cookie), exchanged.maxAge),
+          'set-cookie': localCookie(admissionCookieName, encodeURIComponent(exchanged.cookie), exchanged.maxAge, secureCookies),
           'cache-control': 'no-store',
         })
         response.end()
@@ -71,13 +75,13 @@ export function createPreviewGatewayHttpHandler(options: PreviewGatewayOptions) 
     }
 
     if (request.method === 'GET' && pathname === '/__dz23/refresh') {
-      const cookie = parseCookie(singleHeader(request.headers.cookie), PREVIEW_COOKIE)
+      const cookie = parseCookie(singleHeader(request.headers.cookie), admissionCookieName)
       if (cookie === undefined) return plain(response, 401, t('gateway.signIn'), headers)
       try {
         const authorized = options.service.authorize(host, cookie)
         response.writeHead(204, {
           ...headers,
-          'set-cookie': localCookie(PREVIEW_COOKIE, encodeURIComponent(cookie), authorized.maxAge),
+          'set-cookie': localCookie(admissionCookieName, encodeURIComponent(cookie), authorized.maxAge, secureCookies),
           'cache-control': 'no-store',
         })
         response.end()
@@ -90,21 +94,22 @@ export function createPreviewGatewayHttpHandler(options: PreviewGatewayOptions) 
     if (isUnsafeMethod(request.method) && singleHeader(request.headers.origin) !== origin) {
       return plain(response, 403, t('gateway.invalidOrigin'), headers)
     }
-    const cookie = parseCookie(singleHeader(request.headers.cookie), PREVIEW_COOKIE)
+    const cookie = parseCookie(singleHeader(request.headers.cookie), admissionCookieName)
     if (cookie === undefined) return plain(response, 401, t('gateway.signIn'), headers)
     try {
       const authorized = options.service.authorize(host, cookie)
       const forwarded = await options.forward.forward(authorized.runtimeRef, {
         method: normalizedMethod(request.method),
         path: target,
-        headers: forwardedRequestHeaders(request, cookie),
+        headers: forwardedRequestHeaders(request, cookie, admissionCookieName),
         body: await readBoundedBody(request, FORWARD_BODY_LIMIT),
       })
       writeForwardedResponse(
         response,
         forwarded,
         headers,
-        localCookie(PREVIEW_COOKIE, encodeURIComponent(cookie), authorized.maxAge),
+        localCookie(admissionCookieName, encodeURIComponent(cookie), authorized.maxAge, secureCookies),
+        secureCookies,
       )
     } catch (error) {
       if (error instanceof Error && 'code' in error && error.code === 'UNAUTHENTICATED') {
@@ -140,7 +145,7 @@ function isAllowedMethod(method: string | undefined): boolean {
   return /^(?:GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS)$/u.test(method ?? '')
 }
 
-function forwardedRequestHeaders(request: IncomingMessage, admissionCookie: string): Readonly<Record<string, string>> {
+function forwardedRequestHeaders(request: IncomingMessage, admissionCookie: string, admissionCookieName: string): Readonly<Record<string, string>> {
   const allowed = [
     'accept', 'accept-language', 'content-type', 'if-none-match', 'range', 'user-agent',
     'next-action', 'next-router-state-tree', 'next-url', 'rsc', 'x-nextjs-data',
@@ -150,19 +155,19 @@ function forwardedRequestHeaders(request: IncomingMessage, admissionCookie: stri
     const value = singleHeader(request.headers[name])
     if (value !== undefined && value.length <= 4_096) result[name] = value
   }
-  const applicationCookies = withoutAdmissionCookie(singleHeader(request.headers.cookie), admissionCookie)
+  const applicationCookies = withoutAdmissionCookie(singleHeader(request.headers.cookie), admissionCookie, admissionCookieName)
   if (applicationCookies !== '') result.cookie = applicationCookies
   return result
 }
 
-function withoutAdmissionCookie(header: string | undefined, admissionCookie: string): string {
+function withoutAdmissionCookie(header: string | undefined, admissionCookie: string, admissionCookieName: string): string {
   if (header === undefined) return ''
   return header.split(';').map(part => part.trim()).filter(part => {
     const separator = part.indexOf('=')
     if (separator < 0) return false
     const name = part.slice(0, separator).trim()
     const value = part.slice(separator + 1).trim()
-    return name !== PREVIEW_COOKIE && value !== encodeURIComponent(admissionCookie) && value !== admissionCookie
+    return name !== admissionCookieName && name !== PREVIEW_COOKIE && name !== SECURE_PREVIEW_COOKIE && value !== encodeURIComponent(admissionCookie) && value !== admissionCookie
   }).join('; ')
 }
 
@@ -171,6 +176,7 @@ function writeForwardedResponse(
   forwarded: PreviewForwardResponse,
   enforced: Readonly<Record<string, string>>,
   admissionCookie: string,
+  secureCookies: boolean,
 ): void {
   const status = Number.isInteger(forwarded.status) && forwarded.status >= 200 && forwarded.status <= 599 ? forwarded.status : 502
   const validBody = Buffer.isBuffer(forwarded.body) && forwarded.body.byteLength <= RESPONSE_BODY_LIMIT
@@ -184,7 +190,7 @@ function writeForwardedResponse(
   if (lastModified !== undefined && lastModified.length <= 100) safe['last-modified'] = lastModified
   const location = singleResponseHeader(forwarded.headers?.location)
   if (location !== undefined && originForm(location) !== undefined) safe.location = location
-  safe['set-cookie'] = [...sanitizeApplicationCookies(forwarded.headers?.['set-cookie']), admissionCookie]
+  safe['set-cookie'] = [...sanitizeApplicationCookies(forwarded.headers?.['set-cookie'], secureCookies), admissionCookie]
   response.writeHead(validBody ? status : 502, { ...safe, ...enforced, 'content-length': String(body.byteLength) })
   response.end(body)
 }
@@ -193,20 +199,20 @@ function singleResponseHeader(value: string | readonly string[] | undefined): st
   return typeof value === 'string' ? value : value?.length === 1 ? value[0] : undefined
 }
 
-function sanitizeApplicationCookies(value: string | readonly string[] | undefined): readonly string[] {
+function sanitizeApplicationCookies(value: string | readonly string[] | undefined, secure: boolean): readonly string[] {
   const values = value === undefined ? [] : typeof value === 'string' ? [value] : value
   return values.slice(0, 10).flatMap(cookie => {
     if (cookie.length > 4_096) return []
     const [pair] = cookie.split(';', 1)
     const separator = pair?.indexOf('=') ?? -1
     const name = separator < 1 ? '' : pair!.slice(0, separator).trim()
-    if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u.test(name) || name === PREVIEW_COOKIE || /;\s*domain=/iu.test(cookie)) return []
-    return [`${pair}; Path=/; HttpOnly; SameSite=Strict`]
+    if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u.test(name) || name === PREVIEW_COOKIE || name === SECURE_PREVIEW_COOKIE || /;\s*domain=/iu.test(cookie)) return []
+    return [`${pair}; Path=/; HttpOnly; SameSite=Strict${secure ? '; Secure' : ''}`]
   })
 }
 
-function localCookie(name: string, value: string, maxAge: number): string {
-  return `${name}=${value}; Path=/; Max-Age=${maxAge}; HttpOnly; SameSite=Strict`
+function localCookie(name: string, value: string, maxAge: number, secure: boolean): string {
+  return `${name}=${value}; Path=/; Max-Age=${maxAge}; HttpOnly; SameSite=Strict${secure ? '; Secure' : ''}`
 }
 
 function previewHeaders(studioOrigin: string): Readonly<Record<string, string>> {
@@ -228,9 +234,9 @@ function admissionScript(studioOrigin: string): string {
 
 const ADMISSION_PAGE = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${t('gateway.loadingTitle')}</title></head><body><p>${t('gateway.loadingBody')}</p><script src="/__dz23/admission.js" defer></script></body></html>`
 
-function exactHttpOrigin(value: string): string {
+function exactStudioOrigin(value: string): string {
   const parsed = new URL(value)
-  if (parsed.protocol !== 'http:' || parsed.username !== '' || parsed.password !== '' || parsed.pathname !== '/' || parsed.search !== '' || parsed.hash !== '') {
+  if ((parsed.protocol !== 'http:' && parsed.protocol !== 'https:') || parsed.username !== '' || parsed.password !== '' || parsed.pathname !== '/' || parsed.search !== '' || parsed.hash !== '') {
     throw new Error(t('gateway.invalidStudioOrigin'))
   }
   if (parsed.hostname !== 'studio.dz23.localhost') throw new Error(t('gateway.invalidStudioHost'))

@@ -53,7 +53,7 @@ const sourceRoots = [{ path: resolve(root, 'apps/studio-web/src'), strict: true 
 for (const plugin of readdirSync(resolve(root, 'plugins'), { withFileTypes: true })) {
   if (plugin.isDirectory() && exists(resolve(root, 'plugins', plugin.name, 'src'))) sourceRoots.push({
     path: resolve(root, 'plugins', plugin.name, 'src'),
-    strict: plugin.name === 'preview',
+    strict: exists(resolve(root, 'plugins', plugin.name, 'i18n', 'pt-BR.json')) && !pluginExistedAtLegacyBaseline(plugin.name),
   })
 }
 for (const sourceRoot of sourceRoots) for (const file of walk(sourceRoot.path)) scanSource(file, sourceRoot.strict)
@@ -122,4 +122,11 @@ function legacyPortugueseLiterals(path) {
     collect(sourceFile)
     return found
   } catch { return new Set() }
+}
+
+function pluginExistedAtLegacyBaseline(name) {
+  try {
+    execFileSync('git', ['cat-file', '-e', `${LEGACY_PLUGIN_BASELINE}:plugins/${name}/src`], { cwd: root, stdio: 'ignore' })
+    return true
+  } catch { return false }
 }

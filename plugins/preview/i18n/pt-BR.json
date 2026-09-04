@@ -11,7 +11,7 @@
     "invalidResponse": "Resposta da prévia inválida.",
     "loadingTitle": "Carregando prévia",
     "loadingBody": "Carregando sua prévia segura…",
-    "invalidStudioOrigin": "studioOrigin deve ser uma origem HTTP local exata.",
+    "invalidStudioOrigin": "studioOrigin deve ser uma origem web local exata.",
     "invalidStudioHost": "studioOrigin local deve usar studio.dz23.localhost."
   },
   "http": {
