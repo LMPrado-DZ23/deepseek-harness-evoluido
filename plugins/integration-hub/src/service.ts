@@ -178,6 +178,10 @@ const TIER_RANK: Readonly<Record<PolicyTier, number>> = { T0: 0, T1: 1, T2: 2, T
 const smtpSecretShape = z.object({ host: z.string().min(1), port: z.number().int(), secure: z.boolean(), user: z.string().min(1), pass: z.string().min(1), from: z.string().min(1) }).strict()
 export { smtpSecretShape }
 
+type ExportOutcome =
+  | { readonly ok: true; readonly value: StudioExport }
+  | { readonly ok: false; readonly error: unknown }
+
 export class IntegrationHubService {
   readonly #now: () => Date
   readonly #createId: () => string
@@ -196,7 +200,7 @@ export class IntegrationHubService {
    * times, or ten tabs of the same person, join the SAME build instead of
    * starting ten of them on a single-threaded process.
    */
-  readonly #exportsInFlight = new Map<string, Promise<StudioExport>>()
+  readonly #exportsInFlight = new Map<string, Promise<ExportOutcome>>()
   /** Export attempts per workspace inside the window, so a flood costs the flooder and nobody else. */
   readonly #exportAttempts = new Map<string, number[]>()
   /**
@@ -549,16 +553,21 @@ export class IntegrationHubService {
   async createExport(actor: HubActor, projectId: string): Promise<StudioExport> {
     this.#authorize(actor, 'project.write')
     const key = `${this.#scope(actor)}\u0000${projectId}`
-    const running = this.#exportsInFlight.get(key)
-    if (running !== undefined) return running
-    // Registered SYNCHRONOUSLY, before the first await: ten clicks arriving in the same tick must
-    // find the build already in flight, not each other's absence.
-    const task = this.#guardedExport(actor, projectId)
-    // The HTTP boundary attaches on its next microtask; own the rejection immediately so a fast
-    // fail-closed scan is not reported as an unhandled process rejection in that gap.
-    void task.catch(() => undefined)
-    this.#exportsInFlight.set(key, task)
-    try { return await task } finally { this.#exportsInFlight.delete(key) }
+    let task = this.#exportsInFlight.get(key)
+    if (task === undefined) {
+      // Registered SYNCHRONOUSLY, before the first await: ten clicks arriving in the same tick must
+      // find the build already in flight, not each other's absence.  The shared promise always
+      // resolves to a tagged outcome; no fast refusal can briefly become an unhandled rejection.
+      task = this.#guardedExport(actor, projectId).then<ExportOutcome>(
+        value => ({ ok: true, value }),
+        error => ({ ok: false, error }),
+      )
+      this.#exportsInFlight.set(key, task)
+      void task.then(() => { if (this.#exportsInFlight.get(key) === task) this.#exportsInFlight.delete(key) })
+    }
+    const outcome = await task
+    if (!outcome.ok) throw outcome.error
+    return outcome.value
   }
 
   async #guardedExport(actor: HubActor, projectId: string): Promise<StudioExport> {
