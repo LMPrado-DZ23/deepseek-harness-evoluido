@@ -100,6 +100,7 @@ DZ23_POSTGRES_DSN=... pnpm prove:storage-migration
 DZ23_POSTGRES_DSN=... pnpm prove:postgres-soak --minutes 30
 pnpm build:edge
 pnpm prove:edge
+DZ23_CHROMIUM_PATH=/caminho/chromium pnpm prove:integration-hub   # Hub real + painel /studio/hub em Chromium
 pnpm preflight:fase3
 pnpm prove:fase3-agents
 pnpm prove:generated-data

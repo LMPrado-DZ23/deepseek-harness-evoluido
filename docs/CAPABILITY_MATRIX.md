@@ -10,6 +10,10 @@ o código pode existir, mas ainda não foi validado com pessoas leigas.
 | Identidade, sessão revogável e RBAC | BETA | P29-A/P29-B | PostgreSQL multi-instância e UI final |
 | Acesso móvel por borda autenticada | BETA | P29-C: HTTP, RPC e WS reais | celular/Tailscale e domínio reais |
 | Interface instalável (PWA) e uso sem rede | BETA | M4: manifesto, ícones, service worker só de casca (nunca `/api/`), casca servida com o servidor fora do ar e faixa offline provados em Chromium (`docs/proofs/M4-studio-pwa-proof.md`) | instalação em aparelho físico, preview no celular (M1/HTTPS), fase 0.5 |
+| Integration Hub: registro por manifesto assinado com tiers D16 | BETA | M5: Ed25519, piso por natureza, não verificado ≥ T2 e bloqueado no canal estável, `can_enable` do servidor, recusas auditadas; 26 testes + prova no Studio real com Chromium (`docs/proofs/M5-integration-hub-proof.md`) | publicadores reais com chaves publicadas, fase 0.5 |
+| E-mail do aplicativo gerado por referência (SMTP) | BETA | M5: só o nome do segredo é guardado; existência e formato conferidos pelo seam de credenciais; teste `NOT_EXECUTED` até liberação | provedor escolhido pelo Prado e envio real (`NOT_EXECUTED`) |
+| Pacote do protótipo verificado (download ZIP) | BETA | M5: reproduzível, sem `data/`/`.env`/códigos, SHA-256 conferido byte a byte no download, 200 MB de orçamento | standalone real produzido pelo pipeline (a prova usa run simulada), fase 0.5 |
+| Marketplace de integrações | NOT_PRESENT | ADR-031 §8 | plugins assinados e decisão de publicação (ADR-009/ADR-013) |
 | Notificação local de fim de criação | NOT_IMPLEMENTED | M4: módulo e teste com evento sintético existem; a interface ainda não dispara o evento nem pede permissão | duas linhas em `App.tsx` na integração (handoff) e prova em Chromium |
 | Bind público da porta interna do Harness | BLOCKED | ADR-012 proíbe | não deve ser liberado |
 | TLS ACME em domínio real | NOT_EXECUTED | configuração validada | emissão e renovação reais |
