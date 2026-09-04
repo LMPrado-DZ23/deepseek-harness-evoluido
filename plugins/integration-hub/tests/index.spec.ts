@@ -2,7 +2,8 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { apply, assertChannelAllowed, credentialInspector, inject, name, smtpTestPort, hubChannel } from '../src/index.ts'
+import { apply, assertChannelAllowed, credentialInspector, inject, name, smtpTestPort, hubChannel, securityFingerprint, type HubRepository } from '../src/index.ts'
+import type { HubEvent, StudioExport, StudioIntegration } from '../src/model.ts'
 
 const roots: string[] = []
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }) })
@@ -104,6 +105,76 @@ describe('integration hub plugin wiring', () => {
     // Only the constructor snapshot touched KvTable.entries(); both pages came
     // from the scoped, retained index and asked for three rows apiece.
     expect(fixture.entriesCalls()).toBe(3)
+  })
+
+  it('keeps adapter indexes scoped, CAS-safe and compatible with legacy physical keys', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dz23-hub-adapter-'))
+    roots.push(root)
+    const fixture = fakeContext()
+    const timestamp = '2026-09-04T00:00:00.000Z'
+    const manifest = {
+      schema_version: 1 as const, id: 'agenda', name: 'Agenda', version: '1.0.0', kind: 'skill' as const,
+      publisher: { id: 'dz23', name: 'DZ23' }, permissions: [] as const,
+    }
+    const integration: StudioIntegration = {
+      integration_id: 'agenda', org_id: 'org-a', tenant_id: 'ws-a', kind: 'skill', name: 'Agenda', manifest,
+      effective_tier: 'T0', verification: 'verified', enabled: false, secret_ref: null,
+      created_by: 'u1', created_at: timestamp, updated_at: timestamp,
+    }
+    const exported: StudioExport = {
+      export_id: 'export-1', org_id: 'org-a', tenant_id: 'ws-a', project_id: 'project-1', run_id: 'run-1',
+      file_name: 'project.zip', path: join(root, 'project.zip'), sha256: 'a'.repeat(64), size_bytes: 1, entries: 1,
+      created_by: 'u1', created_at: timestamp,
+    }
+    const event: HubEvent = {
+      event_id: 'event-1', org_id: 'org-a', tenant_id: 'ws-a', actor_user_id: 'u1', action: 'integration.registered',
+      subject_id: 'agenda', outcome: 'success', detail: 'seed', created_at: timestamp,
+    }
+    fixture.tables.set('integrations', new Map([['legacy-integration', integration]]))
+    fixture.tables.set('exports', new Map([['legacy-export', exported]]))
+    fixture.tables.set('events', new Map([['legacy-event', event]]))
+    await apply(fixture.ctx as never, { exportsRoot: join(root, 'exports') })
+    const service = fixture.provided.mock.calls.find(call => call[0] === 'studioIntegrationHub')?.[1] as { service: unknown }
+    const repository = (service.service as { options: { repository: HubRepository } }).options.repository
+    const actor = { userId: 'u1', orgId: 'org-a', tenantId: 'ws-a', role: 'owner' as const }
+    const stranger = { ...actor, tenantId: 'ws-b' }
+
+    expect(repository.integrations(actor)).toEqual([integration])
+    expect(repository.integrations(stranger)).toEqual([])
+    expect(repository.integration(actor, 'agenda')).toEqual(integration)
+    expect(repository.integration(actor, 'missing')).toBeUndefined()
+    expect(repository.exports(actor, 'project-1')).toEqual([exported])
+    expect(repository.exports(stranger, 'project-1')).toEqual([])
+    expect(repository.export(actor, 'project-1', 'export-1')).toEqual(exported)
+    expect(repository.export(actor, 'project-1', 'missing')).toBeUndefined()
+    expect(repository.eventCount(actor)).toBe(1)
+    expect(repository.eventCount(stranger)).toBe(0)
+    expect(repository.eventPage(actor, undefined, 2)).toEqual([event])
+    expect(repository.eventPage(actor, { created_at: '1900-01-01T00:00:00.000Z', event_id: 'missing' }, 2)).toEqual([])
+
+    expect(await repository.compareAndSwapIntegration(actor, 'missing', 'x', integration)).toBe(false)
+    expect(await repository.compareAndSwapIntegration(actor, 'agenda', 'x', integration)).toBe(false)
+    const enabled = { ...integration, enabled: true, updated_at: '2026-09-04T00:00:01.000Z' }
+    expect(await repository.compareAndSwapIntegration(actor, 'agenda', securityFingerprint(integration), enabled)).toBe(true)
+    expect(repository.integration(actor, 'agenda')).toEqual(enabled)
+    expect(fixture.tables.get('integrations')?.has('legacy-integration')).toBe(false)
+
+    const larger = { ...exported, size_bytes: 2 }
+    await repository.putExport(larger)
+    expect(repository.export(actor, 'project-1', 'export-1')).toEqual(larger)
+    expect(fixture.tables.get('exports')?.has('legacy-export')).toBe(false)
+
+    const amended = { ...event, detail: 'amended' }
+    await repository.putEvent(amended)
+    expect(repository.eventCount(actor)).toBe(1)
+    expect(repository.eventPage(actor, undefined, 2)).toEqual([amended])
+    expect(fixture.tables.get('events')?.has('legacy-event')).toBe(false)
+    const tied = { ...event, event_id: 'event-2', detail: 'tie' }
+    await repository.putEvent(tied)
+    expect(repository.eventPage(actor, undefined, 2).map(row => row.event_id)).toEqual(['event-2', 'event-1'])
+    expect(await repository.pruneEvents(stranger, 0)).toBe(0)
+    expect(await repository.pruneEvents(actor, 1)).toBe(1)
+    expect(repository.eventCount(actor)).toBe(1)
   })
 
   it('refuses to start on the dev channel unless this is a personal, loopback-only Studio', async () => {
