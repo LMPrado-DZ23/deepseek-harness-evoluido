@@ -22,7 +22,7 @@ antes da limpeza e liberada apenas depois da ausência do runtime.
 ## Gates executados
 
 - instalação offline com lock congelado: `PASS`;
-- runtime-governor + Preview: 207 testes aprovados, 2 skips explícitos de
+- runtime-governor + Preview: 208 testes aprovados, 2 skips explícitos de
   filesystem no corte completo;
 - recorte final de takeover: 65/65;
 - typecheck raiz: `PASS`;
