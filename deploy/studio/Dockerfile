@@ -26,34 +26,44 @@ FROM toolchain AS dependency-fetch
 WORKDIR /workspace
 COPY . .
 ENV DSH_CLIENT_COMMIT_HASH=6c705be1ce6774a000d061da41d1823b03a3d42c
-RUN node scripts/check-upstream-content.mjs --materialize-symlinks \
+RUN --mount=type=cache,id=dz23-studio-pnpm-11,target=/pnpm/store,sharing=locked \
+    node scripts/check-upstream-content.mjs --materialize-symlinks \
  && node scripts/check-portability.mjs --all-files \
- && pnpm fetch --frozen-lockfile --store-dir /pnpm/store
+ && pnpm fetch --frozen-lockfile --store-dir /pnpm/store \
+ && touch /workspace/.dz23-fetch-complete
 
 FROM toolchain AS build
 ARG STUDIO_COMMIT
 WORKDIR /workspace
 ENV DSH_CLIENT_COMMIT_HASH=6c705be1ce6774a000d061da41d1823b03a3d42c
-COPY --from=dependency-fetch /pnpm/store /pnpm/store
+COPY --from=dependency-fetch /workspace/.dz23-fetch-complete /tmp/.dz23-fetch-complete
 COPY . .
 # The pinned upstream ships its own workspace boundary. The product build uses
 # the single audited root lockfile, so remove only the build-container copies
 # after integrity verification. Otherwise nested pnpm invocations try to
 # resolve the second lockfile and escape the offline build boundary.
 RUN test -n "${STUDIO_COMMIT}" \
+ && test -f /tmp/.dz23-fetch-complete \
  && node scripts/check-image-lock.mjs \
  && node scripts/check-upstream-content.mjs --materialize-symlinks \
  && node scripts/check-portability.mjs --all-files \
  && rm third_party/deepseek-harness/pnpm-workspace.yaml \
        third_party/deepseek-harness/pnpm-lock.yaml
-RUN --network=none pnpm install --offline --frozen-lockfile --trust-lockfile --store-dir /pnpm/store
+RUN --mount=type=cache,id=dz23-studio-pnpm-11,target=/pnpm/store,sharing=locked \
+    --network=none \
+    pnpm install --offline --frozen-lockfile --trust-lockfile --store-dir /pnpm/store
 RUN --network=none pnpm --dir third_party/deepseek-harness build:official
 # Reinject the upstream packages after build:official; their lib/ trees do not
 # exist in the source snapshot used by the first install.
-RUN --network=none pnpm install --offline --frozen-lockfile --trust-lockfile --force --store-dir /pnpm/store
-RUN --network=none pnpm build
+RUN --mount=type=cache,id=dz23-studio-pnpm-11,target=/pnpm/store,sharing=locked \
+    --network=none \
+    pnpm install --offline --frozen-lockfile --trust-lockfile --force --store-dir /pnpm/store
+RUN --mount=type=cache,id=dz23-studio-pnpm-11,target=/pnpm/store,sharing=locked \
+    --network=none pnpm build
 # Synchronize every built workspace package into the deployable virtual store.
-RUN --network=none pnpm install --offline --frozen-lockfile --trust-lockfile --force --store-dir /pnpm/store \
+RUN --mount=type=cache,id=dz23-studio-pnpm-11,target=/pnpm/store,sharing=locked \
+    --network=none \
+    pnpm install --offline --frozen-lockfile --trust-lockfile --force --store-dir /pnpm/store \
  && pnpm --filter @dz23-studio/runtime deploy --prod /opt/runtime \
  && test -f /opt/runtime/entrypoint.mjs \
  && test -f /opt/runtime/node_modules/@deepseek-ai/dsh/lib/bin.js \

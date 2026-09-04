@@ -5,6 +5,7 @@
 **/node_modules
 **/coverage
 /runtime
+/deploy/studio/Dockerfile
 /outputs
 /bundles
 /research
