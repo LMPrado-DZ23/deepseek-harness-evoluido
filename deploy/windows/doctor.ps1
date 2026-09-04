@@ -2,6 +2,7 @@
 param(
     [Parameter(Mandatory)][string]$ExpectedCommit,
     [Parameter(Mandatory)][string]$Image,
+    [Parameter(Mandatory)][string]$CaddyImage,
     [string]$Distro = 'Ubuntu',
     [string]$InstallRoot = '',
     [string]$SecretsFile,
@@ -14,38 +15,38 @@ Import-Module (Join-Path $PSScriptRoot 'Dz23.Windows.psm1') -Force
 
 Assert-Dz23Commit $ExpectedCommit
 Assert-Dz23ImageDigest $Image
+Assert-Dz23ImageDigest $CaddyImage
 $InstallRoot = Resolve-Dz23InstallRoot -Distro $Distro -InstallRoot $InstallRoot -CommandInvoker $CommandInvoker
 if ($SecretsFile) { Assert-Dz23LinuxPath $SecretsFile 'arquivo de segredos' }
 if ($CommandInvoker -and $env:DZ23_M6_TEST_MODE -ne '1') { throw 'O executor simulado é exclusivo dos testes.' }
 Test-Dz23Prerequisites -Distro $Distro -CommandInvoker $CommandInvoker
 Test-Dz23Image -Image $Image -Distro $Distro -CommandInvoker $CommandInvoker
+Test-Dz23Image -Image $CaddyImage -Distro $Distro -CommandInvoker $CommandInvoker
 
-$doctorScript = @'
+$doctorScript = (Get-Dz23WslSafetyPrelude) + "`n" + @'
 set -euo pipefail
-root="$1"; expected="$2"; image="$3"; secrets="${4:-}"
-case "$root" in /mnt/*|'') exit 20;; esac
-test -d "$root"; test ! -L "$root"
-root_real="$(readlink -f "$root")"
-case "$root_real" in /home/*/*|/root/*) ;; *) exit 22;; esac
-test "$(stat -f -c %T "$root_real")" != '9p'
-test -L "$root/current"; current="$(readlink -f "$root/current")"
-case "$current" in "$root_real"/releases/*) ;; *) exit 23;; esac
-test -d "$current/.git"
-test "$(git -C "$current" rev-parse HEAD)" = "$expected"
-test -z "$(git -C "$current" status --porcelain=v1 --untracked-files=no)"
+root="$1"; expected="$2"; image="$3"; caddy_image="$4"; secrets="${5:-}"
+root_real="$(secure_root "$root")"
+secure_layout "$root_real"
+acquire_operation_lock "$root_real"
+assert_no_operation_journal "$root_real"
+installation_id="$(read_installation_id "$root_real")"
+current="$(resolve_current_release "$root_real")"
+test "$(basename -- "$current")" = "$expected" || die 'current não corresponde ao commit esperado' 84
+assert_release_repository "$root_real" "$current" "$expected"
+assert_release_env "$current" "$expected"
+assert_installed_commit "$root_real" "$expected"
 grep -Fqx "DZ23_STUDIO_IMAGE=$image" "$current/release.env"
-grep -Fqx "DZ23_STUDIO_COMMIT=$expected" "$current/release.env"
+grep -Fqx "DZ23_CADDY_IMAGE=$caddy_image" "$current/release.env"
+grep -Fqx "DZ23_INSTALLATION_ID=$installation_id" "$current/release.env"
 if [ -n "$secrets" ]; then
-  test -f "$secrets"; test ! -L "$secrets"
-  secrets_real="$(readlink -f "$secrets")"
-  case "$secrets_real" in /home/*/*|/root/*) ;; *) exit 24;; esac
-  test "$(stat -f -c %T "$secrets_real")" != '9p'
-  mode="$(stat -c %a "$secrets")"; test "$mode" = 600 -o "$mode" = 400
-  cd "$current"
-  docker compose --project-name dz23-studio --env-file release.env --env-file "$secrets" -f docker-compose.yml config --quiet
+  validate_secrets "$secrets"
+  compose_for_release "$current" "$secrets" config --quiet
+  assert_compose_images_pinned "$current" "$secrets"
+  assert_compose_ready "$current" "$secrets"
 fi
 '@
-Invoke-Dz23WslScript -Distro $Distro -Script $doctorScript -Arguments @($InstallRoot, $ExpectedCommit, $Image, $SecretsFile) `
+Invoke-Dz23WslScript -Distro $Distro -Script $doctorScript -Arguments @($InstallRoot, $ExpectedCommit, $Image, $CaddyImage, $SecretsFile) `
     -CommandInvoker $CommandInvoker -FailureMessage 'O diagnóstico encontrou uma inconsistência' | Out-Null
 Write-Host 'Tudo certo: WSL2, Docker Linux, commit e digest correspondem ao artefato aprovado.'
 if ($CommandInvoker) { Write-Host 'SIMULADO: este resultado não comprova uma instalação real.' }
