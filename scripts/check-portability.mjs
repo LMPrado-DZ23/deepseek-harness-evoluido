@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url'
 
 const KEY_FILES = new Set(['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'UPSTREAM.lock'])
 const EXECUTABLE_EXTENSIONS = new Set(['.mjs', '.cjs', '.js', '.ts', '.tsx', '.sh', '.ps1'])
+const JAVASCRIPT_EXTENSIONS = new Set(['.mjs', '.cjs', '.js', '.ts', '.tsx'])
 const OMIT = new Set(['scripts/check-portability.mjs'])
 
 const MACHINE_PATH_RULES = [
@@ -21,6 +22,111 @@ const MANIFEST_ONLY_RULES = [
 ]
 
 const ABSOLUTE_IMPORT = /(?:\bfrom\s+|\bimport\s*\(|\brequire\s*\()\s*(['"])((?:\/home\/[A-Za-z0-9._-]+\/|[A-Za-z]:[\\/]Users[\\/]|\\\\[A-Za-z0-9._-]+[\\/])[^'"]*)\1/giu
+
+function javascriptStringContextAt(content, target) {
+  let state = 'code'
+  let rawTemplate = false
+  for (let index = 0; index < target; index += 1) {
+    const current = content[index]
+    const next = content[index + 1]
+    if (state === 'line-comment') {
+      if (current === '\n' || current === '\r') state = 'code'
+      continue
+    }
+    if (state === 'block-comment') {
+      if (current === '*' && next === '/') {
+        state = 'code'
+        index += 1
+      }
+      continue
+    }
+    if (state !== 'code') {
+      if (current === '\\') {
+        index += 1
+      } else if ((state === 'single' && current === "'")
+        || (state === 'double' && current === '"')
+        || (state === 'template' && current === '`')) {
+        state = 'code'
+        rawTemplate = false
+      }
+      continue
+    }
+    if (current === '/' && next === '/') {
+      state = 'line-comment'
+      index += 1
+    } else if (current === '/' && next === '*') {
+      state = 'block-comment'
+      index += 1
+    } else if (current === "'") {
+      state = 'single'
+    } else if (current === '"') {
+      state = 'double'
+    } else if (current === '`') {
+      state = 'template'
+      rawTemplate = /(?:^|[^A-Za-z0-9_$])String\.raw\s*$/u.test(content.slice(0, index))
+    }
+  }
+  return { state, rawTemplate }
+}
+
+function startsRegexLiteral(content, slashIndex, lineStart) {
+  let previous = slashIndex - 1
+  while (previous >= lineStart && /\s/u.test(content[previous])) previous -= 1
+  if (previous < lineStart) return true
+  if ('([{:;,=!?&|+-*%^~<>'.includes(content[previous])) return true
+  const prefix = content.slice(lineStart, slashIndex)
+  return /(?:^|\s)(?:return|case|throw|yield|await)\s*$/u.test(prefix)
+}
+
+function regexLiteralEnd(content, slashIndex, lineEnd) {
+  let escaped = false
+  let characterClass = false
+  for (let index = slashIndex + 1; index < lineEnd; index += 1) {
+    const current = content[index]
+    if (escaped) {
+      escaped = false
+      continue
+    }
+    if (current === '\\') {
+      escaped = true
+    } else if (current === '[') {
+      characterClass = true
+    } else if (current === ']') {
+      characterClass = false
+    } else if (current === '/' && !characterClass) {
+      return index
+    }
+  }
+  return -1
+}
+
+function isInsideJavaScriptRegex(content, target) {
+  const lineStart = Math.max(content.lastIndexOf('\n', target - 1), content.lastIndexOf('\r', target - 1)) + 1
+  const newline = content.indexOf('\n', target)
+  const carriageReturn = content.indexOf('\r', target)
+  const candidates = [newline, carriageReturn].filter(index => index >= 0)
+  const lineEnd = candidates.length ? Math.min(...candidates) : content.length
+  for (let slash = target - 1; slash >= lineStart; slash -= 1) {
+    if (content[slash] !== '/' || !startsRegexLiteral(content, slash, lineStart)) continue
+    const end = regexLiteralEnd(content, slash, lineEnd)
+    if (end >= target) return true
+  }
+  return false
+}
+
+function isEscapedJavaScriptUnc(content, matchIndex, file) {
+  if (!JAVASCRIPT_EXTENSIONS.has(extname(file).toLowerCase())) return false
+  let runStart = matchIndex
+  let runEnd = matchIndex
+  while (runStart > 0 && content[runStart - 1] === '\\') runStart -= 1
+  while (runEnd < content.length && content[runEnd] === '\\') runEnd += 1
+  const context = javascriptStringContextAt(content, matchIndex)
+  if (context.state === 'template' && context.rawTemplate) return false
+  if (context.state === 'single' || context.state === 'double' || context.state === 'template') {
+    return runEnd - runStart === 2
+  }
+  return isInsideJavaScriptRegex(content, matchIndex)
+}
 
 function gitFiles(root) {
   const result = spawnSync('git', ['ls-files', '-z'], {
@@ -62,6 +168,7 @@ export async function scanPortableSources(root, suppliedFiles) {
     for (const rule of rules) {
       rule.pattern.lastIndex = 0
       for (const match of content.matchAll(rule.pattern)) {
+        if (rule.id === 'UNC_PATH' && isEscapedJavaScriptUnc(content, match.index, file)) continue
         const line = content.slice(0, match.index).split(/\r?\n/u).length
         findings.push({ file: file.replaceAll('\\', '/'), line, rule: rule.id, value: match[0] })
       }
@@ -86,17 +193,40 @@ async function selfTest() {
   const root = await mkdtemp(join(tmpdir(), 'dz23-portability-'))
   try {
     await mkdir(join(root, 'plugins', 'safe', 'src'), { recursive: true })
-    await writeFile(join(root, 'plugins', 'safe', 'src', 'safe.ts'), "export const ok = './relative.js'\n")
+    await mkdir(join(root, 'scripts'), { recursive: true })
+    await writeFile(
+      join(root, 'scripts', 'safe.mjs'),
+      String.raw`export const rows = value.split(/\\n/u)
+export const pattern = /prefix\\server/u
+export const escaped = "\\n/u"
+`,
+    )
+    await writeFile(
+      join(root, 'scripts', 'unc.ps1'),
+      String.raw`$machinePath = '\\server\share\artifact.json'
+$mixedMachinePath = '\\server/share/artifact.json'
+`,
+    )
+    await writeFile(
+      join(root, 'scripts', 'unc.mjs'),
+      'export const machinePath = String.raw`\\\\server\\share\\artifact.json`\n',
+    )
     await writeFile(
       join(root, 'plugins', 'safe', 'package.json'),
       JSON.stringify({ dependencies: { bad: 'link:/home/alice/private/pkg' } }),
     )
     const findings = await scanPortableSources(root, [
-      'plugins/safe/src/safe.ts',
+      'scripts/safe.mjs',
+      'scripts/unc.ps1',
+      'scripts/unc.mjs',
       'plugins/safe/package.json',
     ])
-    if (findings.length !== 2 || !findings.some((item) => item.rule === 'ABSOLUTE_LINK')) {
-      throw new Error(`self-test esperava detectar caminho e link absolutos; recebeu ${findings.length}`)
+    const uncFindings = findings.filter((item) => item.file.endsWith('unc.ps1') && item.rule === 'UNC_PATH')
+    if (findings.some((item) => item.file.endsWith('safe.mjs'))
+      || uncFindings.length !== 2
+      || !findings.some((item) => item.file.endsWith('unc.mjs') && item.rule === 'UNC_PATH')
+      || !findings.some((item) => item.rule === 'ABSOLUTE_LINK')) {
+      throw new Error(`self-test não separou escapes legítimos de UNC real; recebeu ${JSON.stringify(findings)}`)
     }
     process.stdout.write('PORTABILITY_SELF_TEST=PASS negative_fixture_rejected=true\n')
   } finally {

@@ -53,10 +53,11 @@ test('pin aceita árvore exata e recusa alteração não rastreada', async (t) =
   )
 })
 
-test('portabilidade ignora URLs legítimas e recusa imports e links de máquina', async (t) => {
+test('portabilidade ignora URLs e escapes legítimos e recusa imports, links e UNC reais', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'dz23-portability-test-'))
   t.after(() => rm(root, { recursive: true, force: true }))
   await mkdir(join(root, 'plugins', 'fixture', 'src'), { recursive: true })
+  await mkdir(join(root, 'scripts'), { recursive: true })
   await writeFile(
     join(root, 'plugins', 'fixture', 'src', 'safe.ts'),
     "export const docs = new URL('file:///documentation', import.meta.url)\n",
@@ -69,13 +70,36 @@ test('portabilidade ignora URLs legítimas e recusa imports e links de máquina'
     join(root, 'plugins', 'fixture', 'package.json'),
     '{"dependencies":{"bad":"link:C:/Users/Alice/private/pkg"}}\n',
   )
+  await writeFile(
+    join(root, 'scripts', 'safe.mjs'),
+    String.raw`export const rows = value.split(/\\n/u)
+export const pattern = /prefix\\server/u
+export const escaped = "\\n/u"
+`
+      + 'export const embedded = `const rows = text.split(/\\\\n/u)`\n'
+  )
+  await writeFile(
+    join(root, 'scripts', 'unc.ps1'),
+    String.raw`$machinePath = '\\server\share\artifact.json'
+$mixedMachinePath = '\\server/share/artifact.json'
+`,
+  )
+  await writeFile(
+    join(root, 'scripts', 'unc.mjs'),
+    'export const unc = String.raw`\\\\server\\share\\artifact.json`\n',
+  )
 
   const findings = await scanPortableSources(root, [
     'plugins/fixture/src/safe.ts',
     'plugins/fixture/src/bad.ts',
     'plugins/fixture/package.json',
+    'scripts/safe.mjs',
+    'scripts/unc.ps1',
+    'scripts/unc.mjs',
   ])
-  assert.equal(findings.some((item) => item.file.endsWith('safe.ts')), false)
+  assert.equal(findings.some((item) => item.file.endsWith('safe.ts') || item.file.endsWith('safe.mjs')), false)
   assert.equal(findings.some((item) => item.rule === 'ABSOLUTE_IMPORT'), true)
   assert.equal(findings.some((item) => item.rule === 'ABSOLUTE_LINK'), true)
+  assert.equal(findings.filter((item) => item.file.endsWith('unc.ps1') && item.rule === 'UNC_PATH').length, 2)
+  assert.equal(findings.some((item) => item.file.endsWith('unc.mjs') && item.rule === 'UNC_PATH'), true)
 })
