@@ -5,7 +5,7 @@
 // signed and an unsigned integration (stable channel refuses to enable the
 // unsigned one), export a verified prototype and download a reproducible ZIP.
 // Then the Hub panel itself, in real Chromium against the same running Studio
-// (apps/studio-web/tests/hub.spec.ts). DZ23_HUB_SKIP_UI=1 records the panel
+// (apps/studio-web/tests-hub/hub.spec.ts). DZ23_HUB_SKIP_UI=1 records the panel
 // as NOT_EXECUTED instead of running it (the decision is then not GO).
 //
 //   node scripts/prove-integration-hub.mjs
