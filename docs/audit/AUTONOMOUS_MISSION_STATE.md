@@ -3,12 +3,12 @@
 - `mission_id`: `M1-M6-finalizacao-2026-09-04`
 - `objective`: integrar e provar M1-M6 com segurança, sem push, PR, deploy ou exclusões não autorizadas
 - `state`: `FIXING`
-- `iteration`: `2026-09-04.5`
+- `iteration`: `2026-09-04.6`
 - `started_at`: `2026-09-04 America/Sao_Paulo`
-- `heartbeat_at`: `2026-09-04T13:10:00-03:00`
-- `last_progress_at`: `2026-09-04T13:10:00-03:00`
+- `heartbeat_at`: `2026-09-04T13:32:00-03:00`
+- `last_progress_at`: `2026-09-04T13:32:00-03:00`
 - `branch`: `codex/p30-policy-foundation`
-- `head`: `80d2dd7`
+- `head`: `7273b38`
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c`
 
 ## Critérios de aceite
@@ -29,21 +29,22 @@
 - Shell inicial M6 registrado em `50cd12b`; correção posterior está em revisão independente e ainda não é GO.
 - Pin portátil do upstream e lock da cadeia de imagens foram registrados em `80d2dd7`; pin passou em clone WSL/ext4 e a verificação on-line dos digests passou.
 - Claude entregou M3+M4+M5 em `9034a85`; transporte íntegro, mas ainda baseado em `b95d23c`. A composição sobre `d819314` foi solicitada novamente com evidência do merge-base.
+- Preview recebeu o checkpoint isolado `7273b38`: instalação offline com lock congelado, 178/178 testes e build passaram em WSL/ext4. A prova de ausência usa `previewId`, portanto uma troca de `runtimeRef` não libera capacidade prematuramente.
 
 ## Tarefas atuais e propriedade de arquivos
 
-- `preview capacity`: Codex principal; somente `plugins/preview/**`. Segundo corte continua NO-GO por ausência de backend distribuído, fencing e liberação prematura; correção fail-closed de runtime em andamento.
-- `retention`: subagente Codex; somente `plugins/runtime-governor/src/{index,retention}.ts` e teste. Primeiro corte NO-GO por segurança de remoção, TOCTOU, quota e recovery.
+- `preview capacity`: recorte de ausência de runtime fechado em `7273b38`; backend PostgreSQL distribuído e fencing/takeover continuam pendentes e impedem GO global.
+- `retention`: subagente Codex; somente `plugins/runtime-governor/src/{index,retention}.ts` e teste. Terceiro corte recebeu NEEDS_FIX; política v1 passou a proibir remoção física até backend por descritor.
 - `M6 Windows shell`: revisão independente ativa sobre a correção de conversão Windows→WSL, pin, imagens por digest, health e rollback.
 - `M3+M4+M5`: Claude; nova ponta única sobre `d819314`, preservando as correções até `9034a85`.
 - `integration/M6.1`: Codex principal após os quatro trabalhos acima passarem revisão.
 
 ## Testes e auditorias atuais
 
-- preview segundo corte: auditoria independente = `NO-GO`; 172/174 antes do novo fail-closed. Correção adicional deliberadamente deixa expectativas antigas vermelhas até os testes representarem inventário real.
-- retention primeiro corte: auditoria independente = `NO-GO`; reteste pendente.
+- preview runtime-absence: auditoria independente encontrou dois casos de troca de runtime; corrigidos e retestados, 178/178 + build + instalação offline congelada PASS. Preview distribuído ainda `NO-GO`.
+- retention terceiro corte: auditoria independente = `NO-GO`; cinco reproduções cobrem TOCTOU, alias por inode, inventário incompleto, blocos de diretórios e substituição online. Quarto corte fail-closed em execução.
 - M6 shell primeiro corte: teste Node e parser PowerShell passaram, mas auditoria independente = `NO-GO`; reteste pendente.
-- M3+M4+M5 `9034a85`: não integrado; bundle íntegro, base incorreta e auditoria independente ativa.
+- M3+M4+M5 `9034a85`: não integrado; bundle íntegro, base incorreta e parecer final `NEEDS_FIX` com 13 itens ainda abertos.
 - tentativa de materializar dependências no Windows falhou com `EACCES` em links absolutos para WSL; M6.1 deve eliminar essa não portabilidade em base limpa, sem tratar o verde antigo como prova.
 
 ## Bloqueadores externos que não param o restante
