@@ -1,4 +1,5 @@
 import { timingSafeEqual } from 'node:crypto'
+import { t } from './i18n.js'
 
 export const SUPERVISOR_RPC_PATH = '/v1/rpc'
 export const SUPERVISOR_RPC_MAX_BODY_BYTES = 64 * 1024
@@ -82,12 +83,12 @@ export function createSupervisorRpcHandler(options: {
     if (input.body.byteLength > SUPERVISOR_RPC_MAX_BODY_BYTES) return response(413, { error: 'REQUEST_TOO_LARGE' })
     let parsed: SupervisorRpcRequest
     try { parsed = parseSupervisorRpcRequest(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(input.body)) as unknown) }
-    catch { return rpcError(400, 'INVALID_REQUEST', 'Solicitação inválida.') }
+    catch { return rpcError(400, 'INVALID_REQUEST', t('rpc.invalidRequest')) }
     try {
       const result = await dispatch(options.methods, parsed, input.signal)
-      if (!validResult(parsed.operation, result)) return rpcError(500, 'INTERNAL', 'O supervisor não conseguiu concluir a operação.')
+      if (!validResult(parsed.operation, result)) return rpcError(500, 'INTERNAL', t('rpc.internal'))
       return response(200, { ok: true, result })
-    } catch { return rpcError(500, 'INTERNAL', 'O supervisor não conseguiu concluir a operação.') }
+    } catch { return rpcError(500, 'INTERNAL', t('rpc.internal')) }
   } }
 }
 

@@ -10,6 +10,7 @@ import {
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { lstat, readFile, realpath } from 'node:fs/promises'
 import { extname, relative, resolve, sep } from 'node:path'
+import { t } from './i18n.js'
 import { fileURLToPath } from 'node:url'
 
 export const name = 'dz23-studio-web'
@@ -108,7 +109,7 @@ function normalizePreviewFrameSources(values: readonly string[]): readonly strin
     if (local !== null && (local[1] === undefined || Number(local[1]) <= 65_535)) return value
     const hosted = /^https:\/\/\*\.preview\.([a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)$/u.exec(value)
     if (hosted !== null && hosted[1]!.includes('.') && !hosted[1]!.includes('..')) return value
-    throw new Error('previewFrameSources aceita somente HTTP local com porta exata ou HTTPS em *.preview.<domínio>.')
+    throw new Error(t('config.invalidPreviewFrameSource'))
   }))]
 }
 

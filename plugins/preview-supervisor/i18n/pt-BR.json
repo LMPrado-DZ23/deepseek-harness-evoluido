@@ -1,0 +1,6 @@
+{
+  "rpc": {
+    "invalidRequest": "Solicitação inválida.",
+    "internal": "O supervisor não conseguiu concluir a operação."
+  }
+}

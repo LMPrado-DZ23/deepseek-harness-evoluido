@@ -1,0 +1,5 @@
+{
+  "config": {
+    "invalidPreviewFrameSource": "previewFrameSources aceita somente HTTP local com porta exata ou HTTPS em *.preview.<domínio>."
+  }
+}
