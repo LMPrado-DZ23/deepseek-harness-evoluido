@@ -12,6 +12,11 @@ class MemoryRepository implements HubRepository {
   rows: StudioIntegration[] = []; exportRows: StudioExport[] = []; eventRows: HubEvent[] = []
   integrations = () => this.rows; exports = () => this.exportRows; events = () => this.eventRows
   putIntegration = async (value: StudioIntegration) => { this.rows = [...this.rows.filter(row => row.integration_id !== value.integration_id), value] }
+  compareAndSwapIntegration = async (integrationId: string, expected: string, value: StudioIntegration) => {
+    const current = this.rows.find(row => row.integration_id === integrationId)
+    if (current === undefined || securityFingerprint(current) !== expected) return false
+    await this.putIntegration(value); return true
+  }
   putExport = async (value: StudioExport) => { this.exportRows = [...this.exportRows, value] }
   putEvent = async (value: HubEvent) => { this.eventRows = [...this.eventRows, value] }
   deleteEvent = async (eventId: string) => { this.eventRows = this.eventRows.filter(row => row.event_id !== eventId) }

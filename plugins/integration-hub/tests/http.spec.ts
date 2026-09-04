@@ -12,13 +12,18 @@ import { EXPORT_LIMIT_BYTES } from '../src/export.ts'
 import { createHubHttpHandler, HUB_ROUTE_CONTRACTS } from '../src/http.ts'
 import { canonicalManifestBytes } from '../src/manifest.ts'
 import type { HubEvent, IntegrationManifest, StudioExport, StudioIntegration } from '../src/model.ts'
-import { IntegrationHubService, type HubRepository } from '../src/service.ts'
+import { IntegrationHubService, securityFingerprint, type HubRepository } from '../src/service.ts'
 import { readZip } from '../src/zip.ts'
 
 class MemoryRepository implements HubRepository {
   rows: StudioIntegration[] = []; exportRows: StudioExport[] = []; eventRows: HubEvent[] = []
   integrations = () => this.rows; exports = () => this.exportRows; events = () => this.eventRows
   putIntegration = async (value: StudioIntegration) => { this.rows = [...this.rows.filter(row => row.integration_id !== value.integration_id), value] }
+  compareAndSwapIntegration = async (integrationId: string, expected: string, value: StudioIntegration) => {
+    const current = this.rows.find(row => row.integration_id === integrationId)
+    if (current === undefined || securityFingerprint(current) !== expected) return false
+    await this.putIntegration(value); return true
+  }
   putExport = async (value: StudioExport) => { this.exportRows = [...this.exportRows, value] }
   putEvent = async (value: HubEvent) => { this.eventRows = [...this.eventRows, value] }
   deleteEvent = async (eventId: string) => { this.eventRows = this.eventRows.filter(row => row.event_id !== eventId) }

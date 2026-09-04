@@ -32,6 +32,8 @@ export function strongIdentityFresh(input: { readonly last_strong_auth_method?: 
 export interface HubRepository {
   integrations(): readonly StudioIntegration[]
   putIntegration(value: StudioIntegration): Promise<void>
+  /** Atomic within the repository writer: replace only the security state the caller read. */
+  compareAndSwapIntegration(integrationId: string, expectedFingerprint: string, value: StudioIntegration): Promise<boolean>
   exports(): readonly StudioExport[]
   putExport(value: StudioExport): Promise<void>
   events(): readonly HubEvent[]
@@ -435,7 +437,10 @@ export class IntegrationHubService {
       throw new HubError('CONFLICT', t('errors.integrationChanged'))
     }
     const updated = { ...latest, enabled, updated_at: this.#stamp() }
-    await this.options.repository.putIntegration(updated)
+    if (!await this.options.repository.compareAndSwapIntegration(integrationId, securityFingerprint(latest), updated)) {
+      await this.#audit(actor, enabled ? 'integration.enabled' : 'integration.disabled', integrationId, 'failure', 'changed-during-write')
+      throw new HubError('CONFLICT', t('errors.integrationChanged'))
+    }
     await this.#recordApproval(actor, confirmed, 'integration.enabled', integrationId)
     await this.#audit(actor, enabled ? 'integration.enabled' : 'integration.disabled', integrationId, 'success', updated.effective_tier)
     return updated
@@ -592,14 +597,14 @@ export class IntegrationHubService {
     const timer = setTimeout(() => controller.abort(timeout), this.options.packagingTimeoutMs ?? PACKAGING_SLOT_TIMEOUT_MS)
     timer.unref?.()
     const task = work(controller.signal)
-    const settled = task.finally(() => {
+    const releaseSlot = () => {
       clearTimeout(timer)
       this.#packaging -= 1
       this.#packagingQueue.shift()?.release()
-    })
-    // `settled` exists to own the slot lifecycle; the caller may receive TIMEOUT first, but capacity
+    }
+    // This observer owns the slot lifecycle; the caller may receive TIMEOUT first, but capacity
     // is not returned until the abandoned operation really stops.
-    void settled.catch(() => undefined)
+    void task.then(releaseSlot, releaseSlot)
     const aborted = new Promise<never>((_resolve, reject) => {
       controller.signal.addEventListener('abort', () => reject(timeout), { once: true })
     })

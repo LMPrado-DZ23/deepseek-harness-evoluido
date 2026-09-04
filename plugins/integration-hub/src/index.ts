@@ -15,7 +15,7 @@ import { createHubHttpHandler } from './http.js'
 import { isLoopbackAuthority, isLoopbackEndpoint } from './manifest.js'
 import { t } from './i18n.js'
 import { studioIntegrationsDomainSpec, type HubEvent, type HubKey, type StudioExport, type StudioIntegration } from './model.js'
-import { IntegrationHubService, smtpSecretShape, type EmailTestPort, type HubRepository, type SecretInspector } from './service.js'
+import { IntegrationHubService, securityFingerprint, smtpSecretShape, type EmailTestPort, type HubRepository, type SecretInspector } from './service.js'
 
 export * from './model.js'
 export * from './manifest.js'
@@ -48,18 +48,33 @@ export interface IntegrationHubConfig {
 }
 
 class DomainHubRepository implements HubRepository {
+  #integrationTail: Promise<void> = Promise.resolve()
   constructor(
     private readonly integrationTable: KvTable<HubKey, StudioIntegration>,
     private readonly exportTable: KvTable<HubKey, StudioExport>,
     private readonly eventTable: KvTable<HubKey, HubEvent>,
   ) {}
   integrations() { return values(this.integrationTable) }
-  putIntegration(value: StudioIntegration) { return this.integrationTable.put(value.integration_id as HubKey, value) }
+  putIntegration(value: StudioIntegration) { return this.#exclusiveIntegration(() => this.integrationTable.put(value.integration_id as HubKey, value)) }
+  compareAndSwapIntegration(integrationId: string, expectedFingerprint: string, value: StudioIntegration) {
+    return this.#exclusiveIntegration(async () => {
+      const current = this.integrationTable.get(integrationId as HubKey)
+      if (current === undefined || securityFingerprint(current) !== expectedFingerprint) return false
+      await this.integrationTable.put(integrationId as HubKey, value)
+      return true
+    })
+  }
   exports() { return values(this.exportTable) }
   putExport(value: StudioExport) { return this.exportTable.put(value.export_id as HubKey, value) }
   events() { return values(this.eventTable) }
   putEvent(value: HubEvent) { return this.eventTable.put(value.event_id as HubKey, value) }
   async deleteEvent(eventId: string) { await this.eventTable.delete(eventId as HubKey) }
+
+  #exclusiveIntegration<T>(work: () => Promise<T>): Promise<T> {
+    const result = this.#integrationTail.then(work, work)
+    this.#integrationTail = result.then(() => undefined, () => undefined)
+    return result
+  }
 }
 
 function values<T>(table: KvTable<HubKey, T>): T[] { return [...table.entries()].map(([, value]) => value) }
