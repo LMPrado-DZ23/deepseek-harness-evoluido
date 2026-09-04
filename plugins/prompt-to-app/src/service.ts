@@ -37,7 +37,7 @@ export interface PromptToAppRepository {
 }
 
 export class PromptToAppError extends Error {
-  constructor(readonly code: 'NOT_FOUND' | 'FORBIDDEN' | 'INVALID' | 'REPLAY', message: string) { super(message) }
+  constructor(readonly code: 'NOT_FOUND' | 'FORBIDDEN' | 'INVALID' | 'REPLAY' | 'CAPACITY', message: string) { super(message) }
 }
 
 export interface PromptToAppServiceOptions {

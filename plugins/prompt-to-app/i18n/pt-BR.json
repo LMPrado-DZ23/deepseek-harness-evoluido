@@ -30,6 +30,7 @@
     "answerRequired": "Responda à pergunta para continuar.",
     "membershipRequired": "Você não participa deste espaço de trabalho.",
     "activeGeneration": "Este projeto já tem uma criação em andamento.",
+    "capacityExceeded": "O computador já está criando outros projetos. Tente novamente em alguns instantes.",
     "generationNotActive": "Este projeto não tem uma criação em andamento.",
     "generatedPathRoot": "O modelo só pode alterar src/ e content/.",
     "generatedAbsolutePath": "O modelo tentou usar um caminho absoluto.",

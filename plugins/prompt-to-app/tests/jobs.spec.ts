@@ -1,6 +1,7 @@
 import type { JobId, JobOutcome } from '@deepseek-ai/dsh-jobs'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { describe, expect, it, vi } from 'vitest'
+import { MemoryCapacityGovernor } from '@dz23-studio/runtime-governor'
 import { PromptToAppJobService, type PromptToAppJobRegistry } from '../src/jobs.js'
 import type { PromptToAppPipeline } from '../src/pipeline.js'
 import { PromptToAppError, type PromptToAppService } from '../src/service.js'
@@ -18,10 +19,11 @@ describe('Prompt-to-App background jobs', () => {
     }
     const service = { assertAuthorized: vi.fn(), project: vi.fn(() => ({ state: 'PLAN_APPROVED' })), plan: vi.fn(() => ({ status: 'APPROVED' })) }
     const pipeline = { run: vi.fn(() => done) }
+    const governor = new MemoryCapacityGovernor({ createId: () => 'capacity-lease' })
     const dispose = vi.fn(async () => undefined)
     const jobs = new PromptToAppJobService({
       service: service as unknown as PromptToAppService, pipeline: pipeline as unknown as PromptToAppPipeline, registry,
-      owners: { create: vi.fn(async () => ({ owner: {} as Agent, dispose })) }, createId: () => 'run-1',
+      owners: { create: vi.fn(async () => ({ owner: {} as Agent, dispose })) }, createId: () => 'run-1', governor,
     })
     await expect(jobs.start(actor, 'project', { generate: vi.fn() })).resolves.toMatchObject({ runId: 'run-1' })
     expect(pipeline.run).toHaveBeenCalledTimes(1)
@@ -30,8 +32,29 @@ describe('Prompt-to-App background jobs', () => {
     expect(registry.kill).toHaveBeenCalledWith('studio-prompt-to-app-1', expect.anything(), expect.any(String))
     finish({ state: 'VERIFIED_PROTOTYPE', attempts: 1, message: 'ok' })
     await hooks.done
+    await vi.waitFor(async () => expect((await governor.snapshot()).leases).toHaveLength(0))
     await vi.waitFor(() => expect(dispose).toHaveBeenCalledOnce())
     await expect(jobs.start(actor, 'project', { generate: vi.fn() })).resolves.toMatchObject({ runId: 'run-1' })
+  })
+
+  it('fails admission with CAPACITY before creating a job owner', async () => {
+    const governor = new MemoryCapacityGovernor({ createId: () => 'held-build' })
+    await governor.acquireBundle({
+      ownerId: 'other', scope: { orgId: 'org-b', tenantId: 'tenant-b', projectId: 'project-b' },
+      requests: [{ resource: 'build' }],
+    })
+    const owners = { create: vi.fn() }
+    const registry: PromptToAppJobRegistry = { start: vi.fn(), kill: vi.fn(() => 'already-finished' as const) }
+    const service = { assertAuthorized: vi.fn(), project: vi.fn(() => ({ state: 'PLAN_APPROVED' })), plan: vi.fn(() => ({ status: 'APPROVED' })) }
+    const jobs = new PromptToAppJobService({
+      service: service as unknown as PromptToAppService,
+      pipeline: { run: vi.fn() } as unknown as PromptToAppPipeline,
+      registry, owners, governor, createId: () => 'blocked-run',
+    })
+
+    await expect(jobs.start(actor, 'project', { generate: vi.fn() })).rejects.toMatchObject({ code: 'CAPACITY' })
+    expect(owners.create).not.toHaveBeenCalled()
+    expect(registry.start).not.toHaveBeenCalled()
   })
 
   it('does not start pipeline work when ctx.jobs rejects the owner preflight', async () => {

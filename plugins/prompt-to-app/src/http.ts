@@ -282,7 +282,7 @@ function optional<T>(read: () => T): T | null {
 function statusOf(error: unknown): number {
   if (error instanceof IdentityError) return error.code === 'locked' ? 429 : 401
   if (error instanceof TenancyError) return error.code === 'not-found' ? 404 : error.code === 'forbidden' ? 403 : 400
-  if (error instanceof PromptToAppError) return error.code === 'NOT_FOUND' ? 404 : error.code === 'FORBIDDEN' ? 403 : error.code === 'REPLAY' ? 409 : 400
+  if (error instanceof PromptToAppError) return error.code === 'NOT_FOUND' ? 404 : error.code === 'FORBIDDEN' ? 403 : error.code === 'CAPACITY' ? 429 : error.code === 'REPLAY' ? 409 : 400
   if (error instanceof FormCategoryCapabilityError) return 409
   if (error instanceof InvalidTransitionError) return 409
   if (error instanceof z.ZodError || error instanceof SyntaxError) return 400

@@ -24,6 +24,7 @@
     "@deepseek-ai/dsh-storage-domain": "link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage-domain",
     "@dz23-studio/identity": "workspace:*",
     "@dz23-studio/policy": "workspace:*",
+    "@dz23-studio/runtime-governor": "workspace:*",
     "@dz23-studio/route-health": "workspace:*",
     "@dz23-studio/tenancy": "workspace:*",
     "sharp": "0.35.4",

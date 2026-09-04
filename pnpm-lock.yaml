@@ -252,6 +252,9 @@ importers:
       '@dz23-studio/route-health':
         specifier: workspace:*
         version: link:../route-health
+      '@dz23-studio/runtime-governor':
+        specifier: workspace:*
+        version: link:../runtime-governor
       '@dz23-studio/tenancy':
         specifier: workspace:*
         version: link:../tenancy
@@ -285,6 +288,8 @@ importers:
       zod:
         specifier: 4.4.3
         version: 4.4.3
+
+  plugins/runtime-governor: {}
 
   plugins/storage-postgres:
     dependencies:
