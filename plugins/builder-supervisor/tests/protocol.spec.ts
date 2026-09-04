@@ -1,0 +1,135 @@
+import { describe, expect, it, vi } from 'vitest'
+import { BuilderSupervisorError } from '../src/model.js'
+import { BUILDER_RPC_MAX_BODY_BYTES, createBuilderRpcHandler, parseBuilderRpcRequest, type BuilderRpcMethods } from '../src/protocol.js'
+
+const requestId = (digit: string) => `req_${digit.repeat(32)}`
+const buildRef = `build_${'a'.repeat(32)}`
+const valid = [
+  { operation: 'preflight', body: { request_id: requestId('1') } },
+  { operation: 'prepare', body: { request_id: requestId('2'), build_id: 'run-1', artifact_relative_path: 'runs/run-1', artifact_sha256: 'a'.repeat(64) } },
+  { operation: 'execute', body: { request_id: requestId('3'), build_ref: buildRef, step: 'install' } },
+  { operation: 'cancel', body: { request_id: requestId('4'), build_ref: buildRef } },
+  { operation: 'finish', body: { request_id: requestId('5'), build_ref: buildRef } },
+  { operation: 'listManaged', body: { request_id: requestId('6') } },
+] as const
+
+describe('builder supervisor closed RPC schema', () => {
+  it.each(valid)('accepts the exact $operation request', request => {
+    expect(parseBuilderRpcRequest(request)).toEqual(request)
+  })
+
+  it.each(valid)('rejects extra fields in $operation envelope and body', request => {
+    expect(() => parseBuilderRpcRequest({ ...request, attacker: true })).toThrow('INVALID_REQUEST')
+    expect(() => parseBuilderRpcRequest({ operation: request.operation, body: { ...request.body, attacker: true } })).toThrow('INVALID_REQUEST')
+  })
+
+  it.each(['command', 'argv', 'image', 'mount', 'mounts', 'env', 'network', 'privileged', 'user'])('never accepts client Docker authority %s', field => {
+    expect(() => parseBuilderRpcRequest({ operation: 'prepare', body: { ...valid[1].body, [field]: 'attacker' } })).toThrow('INVALID_REQUEST')
+    expect(() => parseBuilderRpcRequest({ operation: 'execute', body: { ...valid[2].body, [field]: 'attacker' } })).toThrow('INVALID_REQUEST')
+  })
+
+  it.each(['../outside', '/absolute', './run', 'runs//one', 'runs\\one', 'runs/../../outside', 'runs/one\0hidden', 'runs/line\nfeed', 'runs/colon:value'])('rejects traversal or non-canonical path %j', artifact_relative_path => {
+    expect(() => parseBuilderRpcRequest({ operation: 'prepare', body: { ...valid[1].body, artifact_relative_path } })).toThrow('INVALID_REQUEST')
+  })
+
+  it.each(['shell', 'lint', 'deploy', '', 'INSTALL'])('rejects caller-defined or unknown step %j', step => {
+    expect(() => parseBuilderRpcRequest({ operation: 'execute', body: { ...valid[2].body, step } })).toThrow('INVALID_REQUEST')
+  })
+
+  it('rejects invalid ids, hashes, operations and scalar bodies', () => {
+    expect(() => parseBuilderRpcRequest({ operation: 'preflight', body: { request_id: 'no' } })).toThrow()
+    expect(() => parseBuilderRpcRequest({ operation: 'prepare', body: { ...valid[1].body, build_id: '../bad' } })).toThrow()
+    expect(() => parseBuilderRpcRequest({ operation: 'prepare', body: { ...valid[1].body, artifact_sha256: 'A'.repeat(64) } })).toThrow()
+    expect(() => parseBuilderRpcRequest({ operation: 'execute', body: { ...valid[2].body, build_ref: 'bad' } })).toThrow()
+    expect(() => parseBuilderRpcRequest({ operation: 'unknown', body: {} })).toThrow()
+    expect(() => parseBuilderRpcRequest(null)).toThrow()
+  })
+})
+
+describe('builder supervisor authenticated HTTP contract', () => {
+  const token = 'A'.repeat(43)
+  const credentialRef = 'file:/run/secrets/dz23-builder-supervisor-token'
+
+  function fixture(overrides: Partial<BuilderRpcMethods> = {}) {
+    const methods: BuilderRpcMethods = {
+      preflight: vi.fn(async () => ({ state: 'OK' as const })),
+      prepare: vi.fn(async () => ({ build_ref: buildRef, state: 'PREPARED' as const })),
+      execute: vi.fn(async (body: Parameters<BuilderRpcMethods['execute']>[0]) => ({ build_ref: body.build_ref, state: 'INSTALL_OK' as const, step: body.step, result: { exit_code: 0, stdout: '', stderr: '', timed_out: false, output_limited: false } })),
+      cancel: vi.fn(async (body: Parameters<BuilderRpcMethods['cancel']>[0]) => ({ build_ref: body.build_ref, state: 'CANCELLED' as const })),
+      finish: vi.fn(async (body: Parameters<BuilderRpcMethods['finish']>[0]) => ({ build_ref: body.build_ref, final_state: 'E2E_OK' as const, cleaned: true as const })),
+      listManaged: vi.fn(async () => ({ builds: [] })),
+      ...overrides,
+    }
+    const resolve = vi.fn(async () => token)
+    return { methods, resolve, handler: createBuilderRpcHandler({ credentialRef, credentials: { resolve }, methods }) }
+  }
+
+  async function send(handler: ReturnType<typeof createBuilderRpcHandler>, value: unknown, options: { token?: string; path?: string; method?: string; raw?: Buffer } = {}) {
+    return handler.handle({
+      path: options.path ?? '/v1/rpc', method: options.method ?? 'POST',
+      headers: { ...(options.token === undefined ? {} : { authorization: `Bearer ${options.token}` }) },
+      body: options.raw ?? Buffer.from(JSON.stringify(value)), signal: new AbortController().signal,
+    })
+  }
+  const decode = (result: { readonly body: Uint8Array }) => JSON.parse(Buffer.from(result.body).toString('utf8')) as unknown
+
+  it('authenticates before parsing and gives the same denial for missing and wrong credentials', async () => {
+    const f = fixture()
+    const missing = await send(f.handler, valid[0])
+    const wrong = await send(f.handler, valid[0], { token: 'B'.repeat(43) })
+    expect(missing.status).toBe(401); expect(decode(wrong)).toEqual(decode(missing))
+    expect(f.methods.preflight).not.toHaveBeenCalled()
+    expect(f.resolve).toHaveBeenCalledTimes(2)
+  })
+
+  it('rejects path, method, oversized and malformed input without dispatch', async () => {
+    const f = fixture()
+    expect((await send(f.handler, valid[0], { token, path: '/wrong' })).status).toBe(404)
+    expect((await send(f.handler, valid[0], { token, method: 'GET' })).status).toBe(405)
+    expect((await send(f.handler, valid[0], { token, raw: Buffer.alloc(BUILDER_RPC_MAX_BODY_BYTES + 1) })).status).toBe(413)
+    expect((await send(f.handler, valid[0], { token, raw: Buffer.from('{') })).status).toBe(400)
+    expect(f.methods.preflight).not.toHaveBeenCalled()
+  })
+
+  it.each(valid)('dispatches $operation and validates its response allowlist', async request => {
+    const f = fixture()
+    const result = await send(f.handler, request, { token })
+    expect(result.status).toBe(200)
+    expect(decode(result)).toMatchObject({ ok: true })
+  })
+
+  it('returns only safe error codes and refuses extra response authority', async () => {
+    const failed = fixture({ preflight: vi.fn(async () => { throw new BuilderSupervisorError('REQUEST_REPLAY') }) })
+    expect(decode(await send(failed.handler, valid[0], { token }))).toEqual({ ok: false, error: { code: 'REQUEST_REPLAY' } })
+    const invalid = fixture({ preflight: vi.fn(async () => ({ state: 'OK', socket: '/var/run/docker.sock' }) as never) })
+    expect(decode(await send(invalid.handler, valid[0], { token }))).toEqual({ ok: false, error: { code: 'INTERNAL' } })
+    const unexpected = fixture({ preflight: vi.fn(async () => { throw new Error('/secret/path') }) })
+    expect(JSON.stringify(decode(await send(unexpected.handler, valid[0], { token })))).not.toContain('secret')
+  })
+
+  it('allows only strictly shaped managed-build and step results', async () => {
+    const listed = fixture({ listManaged: vi.fn(async () => ({ builds: [{ build_ref: buildRef, build_id: 'run-1', state: 'PREPARED' as const }] })) })
+    expect((await send(listed.handler, valid[5], { token })).status).toBe(200)
+    const leakingList = fixture({ listManaged: vi.fn(async () => ({ builds: [{ build_ref: buildRef, build_id: 'run-1', state: 'PREPARED', image: 'attacker' }] })) as never })
+    expect((await send(leakingList.handler, valid[5], { token })).status).toBe(500)
+    const leakingStep = fixture({ execute: vi.fn(async body => ({ build_ref: body.build_ref, state: 'INSTALL_OK', step: body.step, result: { exit_code: 0, stdout: '', stderr: '', timed_out: false, output_limited: false, command: 'secret' } })) as never })
+    expect((await send(leakingStep.handler, valid[2], { token })).status).toBe(500)
+  })
+
+  it.each(['E2E_OK', 'FAILED', 'CANCELLED'] as const)('allows the closed terminal result %s', async final_state => {
+    const f = fixture({ finish: vi.fn(async body => ({ build_ref: body.build_ref, final_state, cleaned: true as const })) })
+    expect((await send(f.handler, valid[4], { token })).status).toBe(200)
+  })
+
+  it('rejects nonterminal and not-cleaned finish results', async () => {
+    const running = fixture({ finish: vi.fn(async body => ({ build_ref: body.build_ref, final_state: 'BUILD_OK', cleaned: true })) as never })
+    expect((await send(running.handler, valid[4], { token })).status).toBe(500)
+    const dirty = fixture({ finish: vi.fn(async body => ({ build_ref: body.build_ref, final_state: 'FAILED', cleaned: false })) as never })
+    expect((await send(dirty.handler, valid[4], { token })).status).toBe(500)
+  })
+
+  it('rejects unsafe credential references at construction', () => {
+    expect(() => createBuilderRpcHandler({ credentialRef: 'env:TOKEN', credentials: { resolve: async () => token }, methods: fixture().methods })).toThrow('INVALID_CREDENTIAL_REFERENCE')
+    expect(() => createBuilderRpcHandler({ credentialRef: 'file:/run/../secret', credentials: { resolve: async () => token }, methods: fixture().methods })).toThrow('INVALID_CREDENTIAL_REFERENCE')
+  })
+})

@@ -177,6 +177,8 @@ importers:
         specifier: 4.4.3
         version: 4.4.3
 
+  plugins/builder-supervisor: {}
+
   plugins/hello:
     dependencies:
       '@deepseek-ai/cordis':
