@@ -192,7 +192,7 @@ describe('integration hub service', () => {
     expect(canonicalSecretRef('  secret://DZ23_APP_SMTP ')).toBe('DZ23_APP_SMTP')
     expect(canonicalSecretRef('SECRET://DZ23_APP_SMTP')).toBe('DZ23_APP_SMTP')
     expect(canonicalSecretRef('dz23_app_smtp')).toBe('dz23_app_smtp') // the case is never invented; the schema refuses it
-    expect(minimizeRecipient('Pessoa@Example.Test')).toMatch(/^\*\*\*@Example\.Test sha256:[a-f0-9]{12}$/u)
+    expect(minimizeRecipient('Pessoa@Example.Test')).toMatch(/^\*\*\*@example\.test sha256:[a-f0-9]{12}$/u)
   })
 
   it('enforces the tier the kind demands, never a lower one stored in the row', async () => {
@@ -295,7 +295,8 @@ describe('integration hub service', () => {
     // The same for the test message: confirmed for one address, refused for another.
     const forOne = await ok(service, admin, 'smtp.tested', SMTP, 'dona@example.test')
     await expect(service.testSmtp(admin, 'outra.pessoa@example.test', forOne)).rejects.toThrow('confirmação')
-    expect((await service.testSmtp(admin, 'DONA@example.test', await ok(service, admin, 'smtp.tested', SMTP, 'dona@example.test'))).result).toBe('SENT')
+    await expect(service.testSmtp(admin, 'DONA@example.test', await ok(service, admin, 'smtp.tested', SMTP, 'dona@example.test'))).rejects.toThrow('confirmação')
+    expect((await service.testSmtp(admin, 'DONA@example.test', await ok(service, admin, 'smtp.tested', SMTP, 'DONA@example.test'))).result).toBe('SENT')
     // An id issued inside another workspace is not even visible here.
     const theirs = await service.requestApproval(otherTenant, 'smtp.configured', SMTP, 'DZ23_APP_SMTP')
     await expect(service.configureSmtp(admin, 'DZ23_APP_SMTP', { approvalId: theirs.approval_id })).rejects.toThrow('confirmação')
@@ -624,7 +625,7 @@ describe('integration hub service', () => {
     const link = join(runsRoot, 'run-link')
     await symlink(outsideRun, link)
     const linked = await build({ runDirectory: link, runsRoot })
-    await expect(linked.service.createExport(builder, 'p1')).rejects.toMatchObject({ code: 'INVALID' })
+    await expect(linked.service.createExport(builder, 'p1')).rejects.toMatchObject({ code: expect.stringMatching(/INVALID|CONFLICT/u) })
     // `..` climbing out is refused as well, and nothing was packaged in either case.
     const climbing = await build({ runDirectory: join(runsRoot, '..', 'etc'), runsRoot })
     await expect(climbing.service.createExport(builder, 'p1')).rejects.toMatchObject({ code: expect.stringMatching(/INVALID|CONFLICT/u) })

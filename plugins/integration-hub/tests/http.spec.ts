@@ -179,7 +179,7 @@ describe('integration hub HTTP boundary', () => {
     expect(secretBody.error).not.toContain('BEGIN PRIVATE KEY')
     await rm(join(standalone, 'chave.ts'))
     // A sparse file: the size is what the budget looks at, and the budget is checked before the read.
-    const handle = await open(join(standalone, 'grande.wasm'), 'w')
+    const handle = await open(join(standalone, 'grande.js'), 'w')
     try { await handle.truncate(EXPORT_LIMIT_BYTES + 1) } finally { await handle.close() }
     const big = await request('/projects/p1/exports', { method: 'POST', body: '{}' })
     expect(big.status).toBe(413)
