@@ -24,7 +24,7 @@ capacidade não é liberada automaticamente nesse estado.
 ## Gates executados
 
 - instalação offline com lock congelado: `PASS`;
-- runtime-governor + Preview: 373 testes aprovados, 2 skips explícitos de
+- runtime-governor + Preview: 212 testes aprovados, 2 skips explícitos de
   filesystem no corte completo;
 - recorte final de recuperação e lifecycle: 60/60;
 - typecheck raiz: `PASS`;
