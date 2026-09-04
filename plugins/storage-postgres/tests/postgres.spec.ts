@@ -146,6 +146,53 @@ describePostgres('postgres backend against PostgreSQL 16', () => {
     await incompatible.close()
   })
 
+  it('never rewrites an immutable descriptor when the version number is unchanged', async () => {
+    const schema = schemaName('descriptor_immutable')
+    const original = { name: 'immutable_unit', version: 7, tables: ['records'], hasGlobal: false } as const
+    const first = backend(schema)
+    const unit = await first.kv!.open(original)
+    await unit.close()
+    await first.close()
+
+    for (const changed of [
+      { ...original, tables: ['other'] },
+      { ...original, hasGlobal: true },
+    ]) {
+      const stale = backend(schema)
+      await expect(stale.kv!.open(changed)).rejects.toMatchObject({ code: 'malformed-medium' })
+      await stale.close()
+    }
+
+    const client = new Client({ connectionString: dsn!, ssl: false })
+    await client.connect()
+    const persisted = await client.query<{ version: number; tables: string[]; has_global: boolean }>(
+      `SELECT version, tables, has_global FROM "${schema}"."units" WHERE name = $1`,
+      [original.name],
+    )
+    await client.end()
+    expect(persisted.rows).toEqual([{ version: 7, tables: ['records'], has_global: false }])
+  })
+
+  it('initializes a fully legacy descriptor once but rejects partially stamped metadata', async () => {
+    const schema = schemaName('descriptor_legacy')
+    const original = { name: 'legacy_unit', version: 2, tables: ['records'], hasGlobal: false } as const
+    const seed = backend(schema)
+    const unit = await seed.kv!.open(original)
+    await unit.close()
+    await seed.close()
+    const client = new Client({ connectionString: dsn!, ssl: false })
+    await client.connect()
+    await client.query(`UPDATE "${schema}"."units" SET tables = NULL, has_global = NULL, descriptor_sha256 = NULL WHERE name = $1`, [original.name])
+    const migrated = backend(schema)
+    await (await migrated.kv!.open(original)).close()
+    await migrated.close()
+    await client.query(`UPDATE "${schema}"."units" SET descriptor_sha256 = NULL WHERE name = $1`, [original.name])
+    await client.end()
+    const corrupt = backend(schema)
+    await expect(corrupt.kv!.open(original)).rejects.toMatchObject({ code: 'malformed-medium' })
+    await corrupt.close()
+  })
+
   it('keeps two tenants in one database separated by the tenancy service', async () => {
     const schema = schemaName('tenants')
     const instance = backend(schema)

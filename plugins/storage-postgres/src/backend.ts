@@ -150,27 +150,55 @@ export class PostgresStorageBackend implements StorageBackend {
       // and must survive a backup/restore round trip. The fingerprint travels with it so a
       // hand-edited row is caught instead of believed.
       const declaredTables = [...descriptor.tables].sort(compareUtf8)
-      const stamped = await client.query<{ version: number }>(`
-        WITH inserted AS (
-          INSERT INTO ${unitsTable(this.config.schema)} (name, version, tables, has_global, descriptor_sha256)
-          VALUES ($1, $2, $3::jsonb, $4, $5)
-          ON CONFLICT (name) DO UPDATE SET
-            tables = EXCLUDED.tables,
-            has_global = EXCLUDED.has_global,
-            descriptor_sha256 = EXCLUDED.descriptor_sha256
-          WHERE ${unitsTable(this.config.schema)}.version = EXCLUDED.version
-          RETURNING version
-        )
-        SELECT version FROM inserted
-        UNION ALL
-        SELECT version FROM ${unitsTable(this.config.schema)} WHERE name = $1
-        LIMIT 1
-      `, [descriptor.name, descriptor.version, JSON.stringify(declaredTables), descriptor.hasGlobal, descriptorFingerprint(descriptor)])
-      const onDisk = stamped.rows[0]?.version
-      if (onDisk !== descriptor.version) {
+      const declaredFingerprint = descriptorFingerprint(descriptor)
+      // A descriptor is an immutable schema declaration, not last-writer-wins
+      // configuration.  Updating the row on a same-version open allowed an old
+      // process (or a stale plugin) to silently redefine tables/hasGlobal and to
+      // bless the rewrite with a new fingerprint.  Insert once, then compare the
+      // complete persisted declaration.  The unit advisory lock serializes the
+      // INSERT/SELECT pair across processes.
+      await client.query(`
+        INSERT INTO ${unitsTable(this.config.schema)} (name, version, tables, has_global, descriptor_sha256)
+        VALUES ($1, $2, $3::jsonb, $4, $5)
+        ON CONFLICT (name) DO NOTHING
+      `, [descriptor.name, descriptor.version, JSON.stringify(declaredTables), descriptor.hasGlobal, declaredFingerprint])
+      // Layout v1 originally had only name+version. A completely unstamped
+      // legacy row gets exactly one atomic initialization; a partially edited
+      // row never qualifies and is rejected by the comparison below.
+      await client.query(`
+        UPDATE ${unitsTable(this.config.schema)}
+        SET tables = $3::jsonb, has_global = $4, descriptor_sha256 = $5
+        WHERE name = $1 AND version = $2
+          AND tables IS NULL AND has_global IS NULL AND descriptor_sha256 IS NULL
+      `, [descriptor.name, descriptor.version, JSON.stringify(declaredTables), descriptor.hasGlobal, declaredFingerprint])
+      const stamped = await client.query<{
+        version: number
+        tables: string[] | null
+        has_global: boolean | null
+        descriptor_sha256: string | null
+      }>(`
+        SELECT version, tables, has_global, descriptor_sha256
+        FROM ${unitsTable(this.config.schema)} WHERE name = $1
+      `, [descriptor.name])
+      const onDisk = stamped.rows[0]
+      if (onDisk === undefined || onDisk.version !== descriptor.version) {
         throw new StorageError(
           'version-mismatch',
-          `kv unit '${descriptor.name}' is stamped version ${String(onDisk)} on the medium, incompatible with descriptor version ${String(descriptor.version)}`,
+          `kv unit '${descriptor.name}' is stamped version ${String(onDisk?.version)} on the medium, incompatible with descriptor version ${String(descriptor.version)}`,
+        )
+      }
+      const storedTables = Array.isArray(onDisk.tables) && onDisk.tables.every(table => typeof table === 'string')
+        ? [...onDisk.tables].sort(compareUtf8)
+        : undefined
+      if (
+        storedTables === undefined
+        || JSON.stringify(storedTables) !== JSON.stringify(declaredTables)
+        || onDisk.has_global !== descriptor.hasGlobal
+        || onDisk.descriptor_sha256 !== declaredFingerprint
+      ) {
+        throw new StorageError(
+          'malformed-medium',
+          `kv unit '${descriptor.name}' already has a different immutable descriptor for version ${String(descriptor.version)}`,
         )
       }
       await client.query(
