@@ -20,4 +20,3 @@ git(studioRoot, ['submodule', 'update', '--init', '--checkout', '--', lock.path]
 
 const result = await verifyUpstreamPin({ studioRoot })
 process.stdout.write(`UPSTREAM_BOOTSTRAP=PASS commit=${result.commit}\n`)
-
