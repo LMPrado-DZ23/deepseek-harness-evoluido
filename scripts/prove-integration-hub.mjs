@@ -70,21 +70,33 @@ try {
   assert.deepEqual(await (await hub('/smtp')).json(), { configured: false, secret_ref: null, tier: 'T2' })
   // D16 enforcement: configuring the app's e-mail is T2 and is refused outright without the person's confirmation.
   // The server issues the approval; the client only presents its id. An id the client invents is worth nothing.
-  const issue = async (action, subject) => {
-    const ticket = await (await hub('/approvals', { method: 'POST', body: JSON.stringify({ action, subject_id: subject }) })).json()
+  // `payload` is what the decision is ABOUT (the alias, the address): the server keeps only a digest
+  // of it in the ticket, so a confirmation given for one target cannot be spent on another.
+  const issue = async (action, subject, payload) => {
+    const ticket = await (await hub('/approvals', { method: 'POST', body: JSON.stringify({ action, subject_id: subject, payload }) })).json()
     assert.equal(ticket.tier, 'T2')
+    assert.equal(ticket.fingerprint, undefined, 'the digest of what is being confirmed stays on the server')
     return { approval: { approval_id: ticket.approval_id } }
   }
   assert.equal((await hub('/smtp', { method: 'POST', body: JSON.stringify({ secret_ref: 'DZ23_APP_SMTP', approval: { approval_id: 'inventado' } }) })).status, 403)
   assert.equal((await hub('/smtp', { method: 'POST', body: JSON.stringify({ secret_ref: 'DZ23_APP_SMTP' }) })).status, 403)
   assert.deepEqual(await (await hub('/smtp')).json(), { configured: false, secret_ref: null, tier: 'T2' }, 'a refused T2 action must change nothing')
-  assert.equal((await hub('/smtp', { method: 'POST', body: JSON.stringify({ secret_ref: 'DZ23_NAO_EXISTE', ...(await issue('smtp.configured', 'smtp')) }) })).status, 400)
+  assert.equal((await hub('/smtp', { method: 'POST', body: JSON.stringify({ secret_ref: 'DZ23_NAO_EXISTE', ...(await issue('smtp.configured', 'smtp', 'DZ23_NAO_EXISTE')) }) })).status, 400)
   // `secret://NAME` is the same name as `NAME`: one spelling reaches the vault.
-  const configured = await hub('/smtp', { method: 'POST', body: JSON.stringify({ secret_ref: 'secret://DZ23_APP_SMTP', ...(await issue('smtp.configured', 'smtp')) }) })
+  const configured = await hub('/smtp', { method: 'POST', body: JSON.stringify({ secret_ref: 'secret://DZ23_APP_SMTP', ...(await issue('smtp.configured', 'smtp', 'secret://DZ23_APP_SMTP')) }) })
   assert.equal(configured.status, 200)
   assert.deepEqual(await configured.json(), { configured: true, secret_ref: 'DZ23_APP_SMTP', tier: 'T2' })
+  // A decision confirmed for ONE credential cannot be spent on another: the subject of the SMTP
+  // actions is the same string for both, so only the fingerprint of the alias separates them.
+  const forOneAlias = await issue('smtp.configured', 'smtp', 'DZ23_APP_SMTP')
+  assert.equal((await hub('/smtp', { method: 'POST', body: JSON.stringify({ secret_ref: 'DZ23_OUTRO_COFRE', ...forOneAlias }) })).status, 403)
+  assert.deepEqual(await (await hub('/smtp')).json(), { configured: true, secret_ref: 'DZ23_APP_SMTP', tier: 'T2' }, 'the refused decision changed nothing')
+  // …and the history proves it without ever naming the credential.
+  const smtpHistory = JSON.stringify((await (await hub('/events?limit=200')).json()).events)
+  assert.ok(!smtpHistory.includes('DZ23_APP_SMTP'), 'the audit must not carry the credential alias')
+  assert.ok(!smtpHistory.includes('DZ23_OUTRO_COFRE'), 'the audit must not carry the credential alias')
   assert.equal((await hub('/smtp/test', { method: 'POST', body: JSON.stringify({ to: email }) })).status, 403)
-  const test = await (await hub('/smtp/test', { method: 'POST', body: JSON.stringify({ to: email, ...(await issue('smtp.tested', 'smtp')) }) })).json()
+  const test = await (await hub('/smtp/test', { method: 'POST', body: JSON.stringify({ to: email, ...(await issue('smtp.tested', 'smtp', email)) }) })).json()
   assert.equal(test.result, 'NOT_EXECUTED')
   const storedIntegrations = JSON.stringify([...app.ctx.storageDomain.get('studio_integrations').table('integrations').entries()])
   assert.ok(!storedIntegrations.includes('nunca-sai-do-servidor'), 'the SMTP password leaked into storage')
@@ -195,7 +207,7 @@ try {
   assert.equal(refused.status, 409, 'a package carrying a private key must be refused, not shipped')
   const refusedBody = await refused.json()
   assert.ok(!JSON.stringify(refusedBody).includes('BEGIN PRIVATE KEY'), 'the refusal must not echo the secret it found')
-  const afterRefusal = await (await hub('/events')).json()
+  const afterRefusal = await (await hub('/events?limit=200')).json()
   assert.ok(afterRefusal.events.some(event => event.action === 'export.created' && event.outcome === 'failure' && String(event.detail ?? '').includes('SECRET_DETECTED')), 'the refusal must be in the history')
   await (await import('node:fs/promises')).rm(poisoned)
   const healed = await (await hub(`/projects/${project.project_id}/exports`, { method: 'POST', body: '{}' })).json()
@@ -209,9 +221,18 @@ try {
   assert.equal(gone.status, 404)
   assert.ok(!(await gone.text()).includes(workDir), 'server path leaked')
   void removeFile
-  const events = await (await hub('/events')).json()
+  const events = await (await hub('/events?limit=200')).json()
   const actions = events.events.map(event => `${event.action}:${event.outcome}`)
   for (const expected of ['smtp.configured:success', 'smtp.tested:not-executed', 'integration.registered:success', 'integration.registered:failure', 'integration.enabled:success', 'integration.enabled:failure', 'export.created:success', 'approval.requested:success', 'approval.recorded:success']) assert.ok(actions.includes(expected), `missing audit ${expected}`)
+  // The history is paged: the whole table never travels in one answer, and one page never repeats
+  // a row of the previous one.
+  const firstPage = await (await hub('/events?limit=2')).json()
+  assert.equal(firstPage.events.length, 2)
+  assert.ok(typeof firstPage.next_cursor === 'string' && firstPage.next_cursor.length > 0, 'a paged history must hand back a cursor')
+  const secondPage = await (await hub(`/events?limit=2&cursor=${encodeURIComponent(firstPage.next_cursor)}`)).json()
+  assert.equal(secondPage.events.length, 2)
+  assert.ok(!secondPage.events.some(event => firstPage.events.some(first => first.event_id === event.event_id)), 'pages must not repeat rows')
+  assert.equal((await hub('/events?cursor=nao-e-cursor')).status, 400)
   // The audit proves the e-mail test without keeping the address in the clear.
   const tested = events.events.find(event => event.action === 'smtp.tested' && event.outcome === 'not-executed')
   assert.ok(!JSON.stringify(events.events).includes(email), 'the recipient address was kept in the clear in the audit trail')
@@ -284,7 +305,7 @@ try {
   // 403 alone would not prove the TIER is what refused it: this session has no passkey either, so
   // the same status would come out even if the tier were never compared. The history says which
   // guard spoke, and it has to be the tier — the passkey gate is behind it.
-  const escalationEvents = (await (await hub('/events')).json()).events
+  const escalationEvents = (await (await hub('/events?limit=200')).json()).events
     .filter(event => event.action === 'integration.enabled' && event.subject_id === escalableRegistered.integration.integration_id && event.outcome === 'failure')
   assert.ok(escalationEvents.some(event => String(event.detail ?? '').includes('approval-required T3')), 'the refusal must be the tier, not the passkey')
   assert.ok(!escalationEvents.some(event => String(event.detail ?? '').includes('strong-identity-required')), 'the T2 ticket must never reach the passkey gate')
@@ -306,11 +327,15 @@ try {
 - **Aplicação dos níveis D16 (não só exibição), com a decisão emitida pelo servidor**: a tela pede ao servidor uma aprovação para a ação exata; o servidor decide o nível, registra a decisão, amarra a pessoa, a sessão, a ação e o alvo, dá validade curta e gasta na primeira utilização. Uma aprovação **inventada pelo cliente** → 403; uma aprovação emitida para **outra** integração → 403; configurar o e-mail (T2) sem aprovação → **403 e nada muda**; com a aprovação → 200. Uma integração assinada que pede \`secrets.read\` é **T3 pelo piso**, mesmo declarando T0: sem confirmação → 403; com uma confirmação de **T2** legítima, emitida para a mesma pessoa, sessão, ação e alvo, e depois o alvo virar T3 por nova assinatura → 403 e a integração continua desligada (o bilhete apresentado ainda é gasto); com confirmação de T3, mas nesta sessão entrada por código de e-mail → 403 pedindo **passkey**, e a integração continua desligada. Cada confirmação aceita vira um evento \`approval.recorded\`.
 - **Confinamento do diretório de execução**: uma run \`PASSED\` apontando para fora da pasta de execuções (\`runsRoot\`) é recusada **antes de qualquer leitura** — nada do que estava lá entra em pacote algum.
 - **Exportação com lista de permitidos e varredura fail-closed**: só tipos de arquivo permitidos entram; o que fica de fora é listado por nome em \`EXCLUIDOS.txt\` dentro do pacote (nada sai em silêncio); um arquivo de código com bloco de chave privada dentro da run **derruba a exportação inteira** (409, sem eco do segredo, com o evento de recusa no histórico) e, retirado o arquivo, o mesmo pacote volta com o mesmo sha256 — é isso que prova que a recusa veio dele.
-- **Auditoria minimizada**: o endereço do teste de e-mail não fica em texto claro no histórico (domínio + resumo sha256).
+- **A confirmação é amarrada ao alvo, não só à ação**: o bilhete leva organização, espaço de trabalho, ação, assunto e um **resumo (sha256) do que está sendo confirmado** — o apelido do segredo, o endereço do teste ou o estado de segurança do registro. Uma confirmação dada para \`DZ23_APP_SMTP\` apresentada para outra credencial → **403 e nada muda**. O resumo fica no servidor: a resposta do \`POST /approvals\` não o devolve.
+- **Auditoria minimizada**: o endereço do teste de e-mail não fica em texto claro no histórico (domínio + resumo sha256), e o **apelido da credencial não aparece em lugar nenhum do histórico** — nem como assunto, nem no detalhe (só \`ref sha256:…\` curto), em sucesso e em recusa.
+- **Histórico paginado**: \`GET /events\` devolve uma página (padrão 50, teto 200) e um cursor; uma segunda página não repete linha da primeira e um cursor inventado → 400. A tabela inteira nunca viaja numa resposta só.
 - Registro D16: manifesto assinado (Ed25519) → \`verified\`, ligado; habilidade **sem assinatura** declarando T0 → \`unverified\`, tier efetivo **T2** (piso de não verificado, sem envolver rede), ligar no canal estável → 403; manifesto adulterado → 400 e evento de recusa; \`can_enable\` decidido pelo servidor.
 - Exportação: projeto levado a \`VERIFIED_PROTOTYPE\` por \`transition()\` e run \`PASSED\` **simulada** (standalone fabricado com \`server.js\` de uma linha; o pipeline real de geração não foi executado nesta prova) → ZIP com ${String(names.length)} entradas; \`data/\` da raiz do app (sqlite + códigos capturados) e \`.env\` **não** entram, enquanto \`node_modules/lib/data/\` entra; SHA-256 no cabeçalho igual ao arquivo; segundo pedido devolve o mesmo pacote (sem arquivo gêmeo); arquivo sumido → 404 sem caminho do servidor.
 - Auditoria: ${String(actions.length)} eventos com organização e espaço de trabalho, incluindo a recusa.
-- Interface \`/studio/hub\` em Chromium real contra este mesmo Studio: **${ui}** (${uiDetail}) — tela própria em pt-BR; a tela **pergunta antes** de qualquer ação T2/T3 e cancelar não envia nada; a integração T3 mostra o aviso do nível, pede confirmação e ainda assim recebe do servidor a recusa por falta de passkey, em palavras; nome do segredo guardado e teste mostrado como não executado; integração sem assinatura sem botão de ligar; pacote gerado pela tela com SHA-256 igual ao download; sem sessão → 401 na tela e na API.
+- Interface \`/studio/hub\` em Chromium real contra este mesmo Studio: **${ui}** (${uiDetail}) — tela própria em pt-BR; a tela **pergunta antes** de qualquer ação T2/T3 e **cancelar não envia nada**: o teste conta as decisões emitidas no histórico do próprio servidor antes de abrir a caixa e depois de cancelar, e o número não muda (a decisão só nasce na confirmação); a integração T3 mostra o aviso do nível, pede confirmação e ainda assim recebe do servidor a recusa por falta de passkey, em palavras; nome do segredo guardado e teste mostrado como não executado; integração sem assinatura sem botão de ligar; pacote gerado pela tela com SHA-256 igual ao download; sem sessão → 401 na tela e na API.
+
+Verificado só por teste automatizado (não nesta prova de ponta a ponta): a recusa de subida no canal \`dev\` fora de uma instalação pessoal em loopback (\`tests/index.spec.ts\`); a separação das confirmações por espaço de trabalho sob enxurrada e a retenção do histórico (\`tests/service.spec.ts\`); o piso D16 por kind, endpoint e permissão (\`tests/manifest.spec.ts\`).
 
 Não executado: envio SMTP real (depende da escolha do provedor pelo Prado), exportação de um standalone real produzido pelo pipeline (fica para a integração com a M1/fatia 3), aparelho físico, avaliação com pessoas leigas (ADR-016: só no sistema completo).
 `)

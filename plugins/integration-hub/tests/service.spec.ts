@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { canonicalManifestBytes } from '../src/manifest.ts'
 import type { HubEvent, IntegrationManifest, StudioExport, StudioIntegration } from '../src/model.ts'
-import { canonicalSecretRef, HubError, IntegrationHubService, MAX_LIVE_APPROVALS, minimizeRecipient, safeSegment, strongIdentityFresh, type HubActor, type HubRepository } from '../src/service.ts'
+import { canonicalSecretRef, EVENTS_RETAINED_PER_TENANT, HubError, IntegrationHubService, MAX_EXPORTS_PER_WINDOW, MAX_LIVE_APPROVALS, minimizeRecipient, minimizeSecretRef, safeSegment, securityFingerprint, strongIdentityFresh, type HubActor, type HubRepository } from '../src/service.ts'
 import { readZip } from '../src/zip.ts'
 
 class MemoryRepository implements HubRepository {
@@ -14,6 +14,7 @@ class MemoryRepository implements HubRepository {
   putIntegration = async (value: StudioIntegration) => { this.rows = [...this.rows.filter(row => row.integration_id !== value.integration_id), value] }
   putExport = async (value: StudioExport) => { this.exportRows = [...this.exportRows, value] }
   putEvent = async (value: HubEvent) => { this.eventRows = [...this.eventRows, value] }
+  deleteEvent = async (eventId: string) => { this.eventRows = this.eventRows.filter(row => row.event_id !== eventId) }
 }
 
 const owner: HubActor = { userId: 'u-owner', orgId: 'org-a', tenantId: 'ws-a', role: 'owner' }
@@ -26,8 +27,8 @@ const otherTenant: HubActor = { ...owner, tenantId: 'ws-b' }
  * action and one subject, and the client presents its id. `ok(...)` asks for it
  * the way the panel does.
  */
-const ok = async (service: IntegrationHubService, actor: HubActor, action: 'integration.enabled' | 'smtp.configured' | 'smtp.tested', subjectId: string) =>
-  ({ approvalId: (await service.requestApproval(actor, action, subjectId)).approval_id })
+const ok = async (service: IntegrationHubService, actor: HubActor, action: 'integration.enabled' | 'smtp.configured' | 'smtp.tested', subjectId: string, payload?: string) =>
+  ({ approvalId: (await service.requestApproval(actor, action, subjectId, payload)).approval_id })
 const SMTP = 'smtp'
 const strongAdmin: HubActor = { ...admin, sessionId: 's-admin', strongIdentityVerified: true }
 const { publicKey, privateKey } = generateKeyPairSync('ed25519')
@@ -196,7 +197,7 @@ describe('integration hub service', () => {
 
   it('enforces the tier the kind demands, never a lower one stored in the row', async () => {
     const { service, repository, sent } = await build({ emailTest: true, secrets: { DZ23_APP_SMTP: { present: true, shapeOk: true } } })
-    await service.configureSmtp(admin, 'DZ23_APP_SMTP', await ok(service, admin, 'smtp.configured', SMTP))
+    await service.configureSmtp(admin, 'DZ23_APP_SMTP', await ok(service, admin, 'smtp.configured', SMTP, 'DZ23_APP_SMTP'))
     // A row written with a lower tier — an older build, a migration, any other writer of the table —
     // must not buy a free pass: e-mail talks to an external provider, so T2 is the floor.
     const smtpRow = repository.rows.find(row => row.kind === 'smtp')!
@@ -236,8 +237,8 @@ describe('integration hub service', () => {
 
   it('records a confirmation only when the action really happened, and audits the refusals', async () => {
     const { service, repository } = await build({ secrets: { DZ23_BROKEN: { present: true, shapeOk: false } } })
-    await expect(service.configureSmtp(admin, 'DZ23_MISSING', await ok(service, admin, 'smtp.configured', SMTP))).rejects.toThrow('cofre')
-    await expect(service.configureSmtp(admin, 'DZ23_BROKEN', await ok(service, admin, 'smtp.configured', SMTP))).rejects.toThrow('formato')
+    await expect(service.configureSmtp(admin, 'DZ23_MISSING', await ok(service, admin, 'smtp.configured', SMTP, 'DZ23_MISSING'))).rejects.toThrow('cofre')
+    await expect(service.configureSmtp(admin, 'DZ23_BROKEN', await ok(service, admin, 'smtp.configured', SMTP, 'DZ23_BROKEN'))).rejects.toThrow('formato')
     const actions = repository.eventRows.map(event => `${event.action}:${event.outcome}`)
     // No "confirmation recorded" for something that did not happen, and the refusals are visible.
     expect(actions).not.toContain('approval.recorded:success')
@@ -247,15 +248,148 @@ describe('integration hub service', () => {
   it('keeps the approvals bounded and pins the subject the SMTP actions can be issued for', async () => {
     const { service, repository } = await build()
     // The SMTP actions have one subject; a free string there made the number of live tickets unbounded.
-    await expect(service.requestApproval(admin, 'smtp.configured', 'qualquer-coisa')).rejects.toMatchObject({ code: 'INVALID' })
-    const first = await service.requestApproval(admin, 'smtp.configured', 'smtp')
+    await expect(service.requestApproval(admin, 'smtp.configured', 'qualquer-coisa', 'DZ23_APP_SMTP')).rejects.toMatchObject({ code: 'INVALID' })
+    // A decision about nothing is not issued at all: the SMTP actions must name what they are for.
+    await expect(service.requestApproval(admin, 'smtp.configured', 'smtp')).rejects.toMatchObject({ code: 'INVALID' })
+    const first = await service.requestApproval(admin, 'smtp.configured', 'smtp', 'DZ23_APP_SMTP')
     // Far more tickets than a person could ever confirm: the oldest are dropped instead of piling up.
-    for (let index = 0; index < MAX_LIVE_APPROVALS + 10; index += 1) await service.requestApproval(admin, 'smtp.tested', 'smtp')
-    const last = await service.requestApproval(admin, 'smtp.tested', 'smtp')
+    for (let index = 0; index < MAX_LIVE_APPROVALS + 10; index += 1) await service.requestApproval(admin, 'smtp.tested', 'smtp', 'pessoa@example.test')
+    const last = await service.requestApproval(admin, 'smtp.tested', 'smtp', 'pessoa@example.test')
     // The evicted one is simply gone — the person confirms again, nothing is granted by accident.
     await expect(service.configureSmtp(admin, 'DZ23_APP_SMTP', { approvalId: first.approval_id })).rejects.toThrow('confirmação')
     expect(last.approval_id).not.toBe(first.approval_id)
     expect(repository.eventRows.filter(event => event.action === 'approval.requested').every(event => event.subject_id === 'smtp')).toBe(true)
+  })
+
+  it('binds the confirmation to the workspace, the action and a fingerprint of what was confirmed', async () => {
+    const secrets = { DZ23_APP_SMTP: { present: true, shapeOk: true }, DZ23_OUTRO_COFRE: { present: true, shapeOk: true } }
+    const { service } = await build({ emailTest: true, secrets })
+    const ticket = await service.requestApproval(admin, 'smtp.configured', SMTP, 'DZ23_APP_SMTP')
+    // The ticket says which workspace it belongs to, which action it is for and — as a digest, never
+    // as a name — exactly what was confirmed.
+    expect(ticket).toMatchObject({ org_id: 'org-a', tenant_id: 'ws-a', action: 'smtp.configured', subject_id: SMTP, tier: 'T2' })
+    expect(ticket.fingerprint).toMatch(/^[a-f0-9]{64}$/u)
+    expect(JSON.stringify(ticket)).not.toContain('DZ23_APP_SMTP')
+    // A decision taken for ONE credential cannot be spent on another: the subject is the same string
+    // for both, so without the fingerprint this went through.
+    await expect(service.configureSmtp(admin, 'DZ23_OUTRO_COFRE', { approvalId: ticket.approval_id })).rejects.toThrow('confirmação')
+    // And it is spent by that attempt: a presented ticket never gets a second chance.
+    await expect(service.configureSmtp(admin, 'DZ23_APP_SMTP', { approvalId: ticket.approval_id })).rejects.toThrow('confirmação')
+    await service.configureSmtp(admin, 'DZ23_APP_SMTP', await ok(service, admin, 'smtp.configured', SMTP, 'DZ23_APP_SMTP'))
+    // The same for the test message: confirmed for one address, refused for another.
+    const forOne = await ok(service, admin, 'smtp.tested', SMTP, 'dona@example.test')
+    await expect(service.testSmtp(admin, 'outra.pessoa@example.test', forOne)).rejects.toThrow('confirmação')
+    expect((await service.testSmtp(admin, 'DONA@example.test', await ok(service, admin, 'smtp.tested', SMTP, 'dona@example.test'))).result).toBe('SENT')
+    // An id issued inside another workspace is not even visible here.
+    const theirs = await service.requestApproval(otherTenant, 'smtp.configured', SMTP, 'DZ23_APP_SMTP')
+    await expect(service.configureSmtp(admin, 'DZ23_APP_SMTP', { approvalId: theirs.approval_id })).rejects.toThrow('confirmação')
+  })
+
+  it('a flood of confirmations in one workspace never throws away another workspace\'s', async () => {
+    const { service } = await build({ secrets: { DZ23_APP_SMTP: { present: true, shapeOk: true } } })
+    // Somebody in ws-b is in the middle of confirming…
+    const theirs = await service.requestApproval(otherTenant, 'smtp.configured', SMTP, 'DZ23_APP_SMTP')
+    // …while ws-a asks for far more confirmations than the ceiling. The map used to be GLOBAL, so
+    // this evicted the other workspace's ticket and that person was told to confirm again.
+    for (let index = 0; index < MAX_LIVE_APPROVALS + 50; index += 1) await service.requestApproval(admin, 'smtp.tested', SMTP, 'pessoa@example.test')
+    const record = await service.configureSmtp(otherTenant, 'DZ23_APP_SMTP', { approvalId: theirs.approval_id })
+    expect(record).toMatchObject({ tenant_id: 'ws-b', secret_ref: 'DZ23_APP_SMTP' })
+  })
+
+  it('never writes the credential alias into the history, in success or in refusal', async () => {
+    const { service, repository } = await build({ secrets: { DZ23_APP_SMTP: { present: true, shapeOk: true } } })
+    await service.configureSmtp(admin, 'DZ23_APP_SMTP', await ok(service, admin, 'smtp.configured', SMTP, 'DZ23_APP_SMTP'))
+    await expect(service.configureSmtp(admin, 'DZ23_SEGREDO_AUSENTE', await ok(service, admin, 'smtp.configured', SMTP, 'DZ23_SEGREDO_AUSENTE'))).rejects.toThrow('cofre')
+    const history = JSON.stringify(repository.eventRows)
+    // The audit proves a reference was configured; it never names the credential nor lists the vault.
+    expect(history).not.toContain('DZ23_APP_SMTP')
+    expect(history).not.toContain('DZ23_SEGREDO_AUSENTE')
+    expect(repository.eventRows.filter(event => event.action === 'smtp.configured').map(event => event.subject_id)).not.toContain('DZ23_APP_SMTP')
+    const configured = repository.eventRows.find(event => event.action === 'smtp.configured' && event.outcome === 'success')!
+    expect(configured.detail).toBe(minimizeSecretRef('DZ23_APP_SMTP'))
+    expect(configured.detail).toMatch(/^ref sha256:[a-f0-9]{12}$/u)
+    // …and the row itself still keeps the name, which is where it belongs.
+    expect(repository.rows.find(row => row.kind === 'smtp')!.secret_ref).toBe('DZ23_APP_SMTP')
+  })
+
+  it('refuses an enable when the record changed under it, even when both writes land in the same millisecond', async () => {
+    const { service, repository } = await build()
+    const registered = await service.register(admin, signed(manifest({ id: 'agenda', tier: 'T0' })))
+    const id = registered.integration.integration_id
+    const before = securityFingerprint(registered.integration)
+    // The clock of this service is fixed: `updated_at` is byte for byte the same on both versions,
+    // so comparing timestamps declared "nothing changed" and enabled the NEW manifest with the old
+    // decision. What changes here is the manifest and its signature, not the tier.
+    const readRows = repository.integrations.bind(repository)
+    let reads = 0
+    repository.integrations = () => {
+      reads += 1
+      if (reads === 2) repository.rows = repository.rows.map(row => (row.integration_id === id ? { ...row, manifest: signed(manifest({ id: 'agenda', tier: 'T0', version: '9.9.9' })) } : row))
+      return readRows()
+    }
+    await expect(service.setEnabled(admin, id, true)).rejects.toMatchObject({ code: 'CONFLICT' })
+    const stored = repository.rows.find(row => row.integration_id === id)!
+    expect(stored.enabled).toBe(false)
+    expect(stored.updated_at).toBe(registered.integration.updated_at)
+    expect(securityFingerprint(stored)).not.toBe(before)
+  })
+
+  it('pages the history newest first and keeps only what the workspace is entitled to', async () => {
+    const { service, repository } = await build()
+    for (let index = 0; index < 5; index += 1) await service.register(admin, signed(manifest({ id: `app-${index}` })))
+    const first = service.events(owner, { limit: 2 })
+    expect(first.events).toHaveLength(2)
+    expect(first.next_cursor).not.toBeNull()
+    // Newest first, and one page never repeats a row of the previous one.
+    expect(first.events[0]!.created_at >= first.events[1]!.created_at).toBe(true)
+    const second = service.events(owner, { limit: 2, cursor: first.next_cursor! })
+    expect(second.events).toHaveLength(2)
+    expect(second.events.map(event => event.event_id)).not.toEqual(expect.arrayContaining(first.events.map(event => event.event_id)))
+    const third = service.events(owner, { limit: 2, cursor: second.next_cursor! })
+    expect(third.events).toHaveLength(1)
+    expect(third.next_cursor).toBeNull()
+    // The whole table is never handed over in one answer, whatever the client asks for.
+    expect(service.events(owner, { limit: 10_000 }).events).toHaveLength(5)
+    expect(() => service.events(owner, { cursor: 'não é um cursor' })).toThrow(HubError)
+    // Another workspace's history is not paged into this one.
+    expect(service.events({ ...owner, tenantId: 'ws-b' }).events).toEqual([])
+  })
+
+  it('keeps the history bounded per workspace instead of growing for as long as the Studio runs', async () => {
+    const { service, repository } = await build()
+    const filler = (index: number, tenant: string) => ({
+      event_id: `seed-${tenant}-${String(index).padStart(5, '0')}`, org_id: 'org-a', tenant_id: tenant, actor_user_id: 'u-owner',
+      action: 'approval.requested' as const, subject_id: 'smtp', outcome: 'success' as const, detail: 'seed',
+      created_at: new Date(Date.UTC(2026, 0, 1) + index * 1000).toISOString(),
+    })
+    repository.eventRows = [
+      ...Array.from({ length: EVENTS_RETAINED_PER_TENANT + 200 }, (_value, index) => filler(index, 'ws-a')),
+      ...Array.from({ length: 5 }, (_value, index) => filler(index, 'ws-b')),
+    ]
+    await service.register(admin, signed(manifest({ id: 'agenda' })))
+    const mine = repository.eventRows.filter(row => row.tenant_id === 'ws-a')
+    expect(mine).toHaveLength(EVENTS_RETAINED_PER_TENANT)
+    // What leaves is the oldest, and the newest event — the one just written — is still there.
+    expect(mine.some(row => row.event_id === 'seed-ws-a-00000')).toBe(false)
+    expect(mine.some(row => row.action === 'integration.registered')).toBe(true)
+    // One workspace's ceiling never touches another's rows.
+    expect(repository.eventRows.filter(row => row.tenant_id === 'ws-b')).toHaveLength(5)
+  })
+
+  it('builds one package at a time per project and refuses a flood of export requests', async () => {
+    const runDirectory = await fakeRun()
+    const { service, repository } = await build({ runDirectory })
+    // Ten clicks (or ten tabs) on the same project join the same build instead of starting ten of them.
+    const together = await Promise.all(Array.from({ length: 10 }, () => service.createExport(builder, 'p1')))
+    expect(new Set(together.map(record => record.export_id)).size).toBe(1)
+    expect(repository.exportRows).toHaveLength(1)
+    expect(repository.eventRows.filter(event => event.action === 'export.created' && event.outcome === 'success')).toHaveLength(1)
+    // And a workspace cannot ask for an unbounded number of them inside the window.
+    for (let index = 1; index < MAX_EXPORTS_PER_WINDOW; index += 1) await service.createExport(builder, 'p1')
+    await expect(service.createExport(builder, 'p1')).rejects.toMatchObject({ code: 'RATE_LIMITED' })
+    expect(repository.eventRows.at(-1)).toMatchObject({ action: 'export.created', outcome: 'failure', detail: 'rate-limited' })
+    // The refusal belongs to the workspace that flooded: another one is untouched.
+    expect(service.listExports(viewer, 'p1')).toHaveLength(1)
   })
 
   it('does not spend the confirmation when it is the passkey that is missing', async () => {
@@ -283,36 +417,36 @@ describe('integration hub service', () => {
     const registered = await service.register(owner, signed(manifest()))
     await expect(service.setEnabled(otherTenant, registered.integration.integration_id, true)).rejects.toMatchObject({ code: 'NOT_FOUND' })
     await expect(service.createExport(viewer, 'p1')).rejects.toMatchObject({ code: 'FORBIDDEN' })
-    expect(service.events(owner)).toHaveLength(1)
+    expect(service.events(owner).events).toHaveLength(1)
   })
 
   it('stores only the SMTP credential reference after checking presence and shape, and reports the test as NOT_EXECUTED until enabled', async () => {
     const { service, repository } = await build({ secrets: { DZ23_APP_SMTP: { present: true, shapeOk: true }, DZ23_BROKEN: { present: true, shapeOk: false } } })
     expect(service.smtp(viewer)).toEqual({ configured: false, secret_ref: null, tier: 'T2' })
-    await expect(service.configureSmtp(admin, 'smtp://user:pass@host', await ok(service, admin, 'smtp.configured', SMTP))).rejects.toThrow('identificador')
+    await expect(service.configureSmtp(admin, 'smtp://user:pass@host', await ok(service, admin, 'smtp.configured', SMTP, 'smtp://user:pass@host'))).rejects.toThrow('identificador')
     // Configuring the app's e-mail is T2: without the confirmation the vault is never even touched.
     await expect(service.configureSmtp(admin, 'DZ23_APP_SMTP')).rejects.toThrow('confirmação')
-    await expect(service.configureSmtp(admin, 'DZ23_MISSING', await ok(service, admin, 'smtp.configured', SMTP))).rejects.toThrow('não existe no cofre')
-    await expect(service.configureSmtp(admin, 'DZ23_BROKEN', await ok(service, admin, 'smtp.configured', SMTP))).rejects.toThrow('formato esperado')
+    await expect(service.configureSmtp(admin, 'DZ23_MISSING', await ok(service, admin, 'smtp.configured', SMTP, 'DZ23_MISSING'))).rejects.toThrow('não existe no cofre')
+    await expect(service.configureSmtp(admin, 'DZ23_BROKEN', await ok(service, admin, 'smtp.configured', SMTP, 'DZ23_BROKEN'))).rejects.toThrow('formato esperado')
     // `secret://NAME` and `NAME` are the same name; the case is never invented.
-    const record = await service.configureSmtp(admin, '  secret://DZ23_APP_SMTP  ', await ok(service, admin, 'smtp.configured', SMTP))
+    const record = await service.configureSmtp(admin, '  secret://DZ23_APP_SMTP  ', await ok(service, admin, 'smtp.configured', SMTP, '  secret://DZ23_APP_SMTP  '))
     expect(record).toMatchObject({ kind: 'smtp', secret_ref: 'DZ23_APP_SMTP', enabled: true, effective_tier: 'T2' })
     expect(JSON.stringify(repository.rows)).not.toContain('pass')
     expect(service.smtp(viewer)).toEqual({ configured: true, secret_ref: 'DZ23_APP_SMTP', tier: 'T2' })
-    const test = await service.testSmtp(admin, 'pessoa@example.test', await ok(service, admin, 'smtp.tested', SMTP))
+    const test = await service.testSmtp(admin, 'pessoa@example.test', await ok(service, admin, 'smtp.tested', SMTP, 'pessoa@example.test'))
     expect(test.result).toBe('NOT_EXECUTED')
     expect(repository.eventRows.at(-1)).toMatchObject({ action: 'smtp.tested', outcome: 'not-executed' })
-    const second = await service.configureSmtp(admin, 'DZ23_APP_SMTP', await ok(service, admin, 'smtp.configured', SMTP))
+    const second = await service.configureSmtp(admin, 'DZ23_APP_SMTP', await ok(service, admin, 'smtp.configured', SMTP, 'DZ23_APP_SMTP'))
     expect(second.integration_id).toBe(record.integration_id)
   })
 
   it('sends the SMTP test only when the operator enabled it, and records failures', async () => {
     const { service, sent, repository } = await build({ emailTest: true, secrets: { DZ23_APP_SMTP: { present: true, shapeOk: true } } })
-    await expect(service.testSmtp(admin, 'pessoa@example.test', await ok(service, admin, 'smtp.tested', SMTP))).rejects.toMatchObject({ code: 'NOT_FOUND' })
-    await service.configureSmtp(admin, 'DZ23_APP_SMTP', await ok(service, admin, 'smtp.configured', SMTP))
-    await expect(service.testSmtp(admin, 'not-an-email', await ok(service, admin, 'smtp.tested', SMTP))).rejects.toMatchObject({ code: 'INVALID' })
+    await expect(service.testSmtp(admin, 'pessoa@example.test', await ok(service, admin, 'smtp.tested', SMTP, 'pessoa@example.test'))).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    await service.configureSmtp(admin, 'DZ23_APP_SMTP', await ok(service, admin, 'smtp.configured', SMTP, 'DZ23_APP_SMTP'))
+    await expect(service.testSmtp(admin, 'not-an-email', await ok(service, admin, 'smtp.tested', SMTP, 'not-an-email'))).rejects.toMatchObject({ code: 'INVALID' })
     await expect(service.testSmtp(admin, 'pessoa@example.test')).rejects.toThrow('confirmação')
-    expect(await service.testSmtp(admin, 'pessoa@example.test', await ok(service, admin, 'smtp.tested', SMTP))).toMatchObject({ result: 'SENT' })
+    expect(await service.testSmtp(admin, 'pessoa@example.test', await ok(service, admin, 'smtp.tested', SMTP, 'pessoa@example.test'))).toMatchObject({ result: 'SENT' })
     expect(sent).toEqual([['DZ23_APP_SMTP', 'pessoa@example.test']])
     // The audit proves the test happened without keeping the address in the clear.
     expect(repository.eventRows.at(-1)).toMatchObject({ action: 'smtp.tested', outcome: 'success' })
@@ -322,7 +456,7 @@ describe('integration hub service', () => {
     const smtpRecord = repository.rows.find(row => row.kind === 'smtp')!
     await service.setEnabled(admin, smtpRecord.integration_id, false)
     expect(service.smtp(viewer)).toMatchObject({ configured: false, secret_ref: null })
-    await expect(service.testSmtp(admin, 'pessoa@example.test', await ok(service, admin, 'smtp.tested', SMTP))).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    await expect(service.testSmtp(admin, 'pessoa@example.test', await ok(service, admin, 'smtp.tested', SMTP, 'pessoa@example.test'))).rejects.toMatchObject({ code: 'NOT_FOUND' })
   })
 
   it('exports only a verified project from its latest PASSED run, with private files and a digest', async () => {

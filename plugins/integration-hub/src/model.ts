@@ -15,6 +15,8 @@ export type IntegrationKind = z.infer<typeof integrationKindSchema>
 export const integrationPermissionSchema = z.enum([
   'read.project', 'write.project', 'network.outbound', 'filesystem.workspace', 'secrets.read', 'email.send',
 ])
+/** Every permission has a declared floor in `manifest.ts`; adding one here without one is a type error. */
+export type IntegrationPermission = z.infer<typeof integrationPermissionSchema>
 
 /**
  * Integration manifest v1 (D16). `signature` is an Ed25519 signature (base64)

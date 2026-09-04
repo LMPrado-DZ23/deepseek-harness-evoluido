@@ -28,6 +28,8 @@
     "smtpTestFailed": "O provedor de e-mail recusou o envio de teste. Confira o segredo no cofre e tente de novo.",
     "smtpKindReserved": "O e-mail do aplicativo é configurado na seção própria, não por manifesto.",
     "exportTooLarge": "O protótipo é grande demais para empacotar aqui (limite de {limitMb} MB).",
+    "exportTooMany": "Muitos pacotes foram pedidos neste espaço de trabalho em pouco tempo. Espere alguns minutos e tente de novo; nada foi perdido.",
+    "devChannelNotPersonal": "O canal de desenvolvimento (channel: dev) só vale numa instalação pessoal: o Studio precisa estar escutando e aceitando pedidos apenas deste computador (loopback). Este Studio atende outros endereços, então ele não sobe com esse canal. Use channel: stable ou rode o Studio só localmente.",
     "exportUnavailable": "O arquivo do pacote não está mais neste computador. Gere o pacote de novo.",
     "internal": "Algo deu errado do lado do Studio. Nada foi alterado; tente de novo."
   },

@@ -44,20 +44,33 @@ test('abre /studio/hub como tela própria, em pt-BR, sem tocar na aplicação pr
 test('guarda só o NOME do segredo de e-mail e mostra o teste como não executado, em palavras', async ({ context, page }) => {
   await signIn(context)
   await page.goto('/studio/hub')
+  /** How many decisions the server has issued so far, straight from its own history. */
+  const approvalsIssued = async (): Promise<number> => {
+    const body = await (await page.request.get('/api/studio/hub/events?limit=200')).json() as { events: Array<{ action: string }> }
+    return body.events.filter(event => event.action === 'approval.requested').length
+  }
   const state = page.getByTestId('smtp-state')
   await expect(state).toContainText(hub.smtp.status)
+  const beforeAsking = await approvalsIssued()
   await page.getByLabel(hub.smtp.refLabel).fill('DZ23_NAO_EXISTE')
   await page.getByRole('button', { name: hub.smtp.save }).click()
   // T2: the panel asks first. Cancelling sends nothing at all.
   const confirmBox = page.getByTestId('hub-confirm')
   await expect(confirmBox).toContainText(hub.confirm.title)
+  // And nothing was sent to open the box either: the decision is only asked for on confirmation, so
+  // a person who reads the box and backs out leaves NO ticket and NO audit event behind.
+  expect(await approvalsIssued()).toBe(beforeAsking)
   await confirmBox.getByRole('button', { name: hub.confirm.cancel }).click()
   await expect(confirmBox).toHaveCount(0)
+  expect(await approvalsIssued()).toBe(beforeAsking)
   // Cancelling sent nothing: the name the proof configured before opening the panel is untouched.
   await expect(state).toContainText('DZ23_APP_SMTP')
   await page.getByRole('button', { name: hub.smtp.save }).click()
   await confirmBox.getByRole('button', { name: hub.confirm.confirm }).click()
   await expect(page.getByRole('alert')).toContainText('cofre')
+  // Confirming DOES issue exactly one decision, so the assertion above is about the cancel and not
+  // about a panel that never asks.
+  expect(await approvalsIssued()).toBe(beforeAsking + 1)
   await page.getByLabel(hub.smtp.refLabel).fill('DZ23_APP_SMTP')
   await page.getByRole('button', { name: hub.smtp.save }).click()
   await confirmBox.getByRole('button', { name: hub.confirm.confirm }).click()

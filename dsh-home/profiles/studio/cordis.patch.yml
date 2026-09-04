@@ -133,6 +133,10 @@
         # Written here on purpose: an environment variable must not be able to lower the
         # policy of a running Studio. To develop with unsigned integrations, change this
         # line to `dev` in this file. A wrong signature is refused on either channel.
+        # `dev` is only accepted on a PERSONAL installation: the Studio bound to loopback
+        # and accepting only loopback hosts and origins. On anything reachable by somebody
+        # else the Studio REFUSES TO START with `dev` instead of serving other people with
+        # a lowered policy.
         channel: stable
         smtpTestEnabled: !!js process.env.DZ23_HUB_SMTP_TEST_ENABLED === '1'
         # Where the generated runs live. Only a run inside this folder can be packaged, and it

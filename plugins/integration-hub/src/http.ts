@@ -9,7 +9,7 @@ import { TenancyError, type StudioTenancyService } from '@dz23-studio/tenancy'
 import { z } from 'zod'
 import { t } from './i18n.js'
 import { ExportError } from './export.js'
-import { HubError, strongIdentityFresh, type HubActor, type IntegrationHubService } from './service.js'
+import { EVENTS_PAGE_MAX, HubError, strongIdentityFresh, type HubActor, type IntegrationHubService } from './service.js'
 
 const JSON_LIMIT = 64 * 1024
 
@@ -40,7 +40,18 @@ export interface HubHttpConfig {
 
 /** What the client presents: the id of an approval the SERVER issued for this exact action. */
 const approvalSchema = z.object({ approval_id: z.string().min(1) }).strict()
-const approvalRequestSchema = z.object({ action: z.enum(['integration.enabled', 'smtp.configured', 'smtp.tested']), subject_id: z.string().min(1) }).strict()
+/**
+ * What the decision is about: the alias for `smtp.configured`, the recipient for
+ * `smtp.tested`. It never reaches storage or the history — the server keeps only
+ * a digest of it in the ticket — and it is what stops a confirmation given for
+ * one target from being spent on another.
+ */
+const approvalRequestSchema = z.object({
+  action: z.enum(['integration.enabled', 'smtp.configured', 'smtp.tested']),
+  subject_id: z.string().min(1),
+  payload: z.string().min(1).max(320).optional(),
+}).strict()
+const eventsPageSchema = z.object({ limit: z.coerce.number().int().positive().max(EVENTS_PAGE_MAX).optional(), cursor: z.string().min(1).max(512).optional() }).strict()
 const enabledSchema = z.object({ enabled: z.boolean(), approval: approvalSchema.optional() }).strict()
 const smtpSchema = z.object({ secret_ref: z.string(), approval: approvalSchema.optional() }).strict()
 const smtpTestSchema = z.object({ to: z.string(), approval: approvalSchema.optional() }).strict()
@@ -73,7 +84,10 @@ export function createHubHttpHandler(config: HubHttpConfig) {
       }
       if (method === 'POST' && route === '/approvals') {
         const body = approvalRequestSchema.parse(await readJson(request))
-        return json(response, 201, await service.requestApproval(actor, body.action, body.subject_id))
+        // The fingerprint stays on the server: the client gets what it needs to show the decision
+        // and to present it back, never a digest of somebody's alias to compare offline.
+        const { fingerprint: _fingerprint, ...ticket } = await service.requestApproval(actor, body.action, body.subject_id, body.payload)
+        return json(response, 201, ticket)
       }
       if (method === 'GET' && route === '/smtp') return json(response, 200, service.smtp(actor))
       if (method === 'POST' && route === '/smtp') {
@@ -107,7 +121,10 @@ export function createHubHttpHandler(config: HubHttpConfig) {
           return
         }
       }
-      if (method === 'GET' && route === '/events') return json(response, 200, { events: service.events(actor) })
+      if (method === 'GET' && route === '/events') {
+        const page = eventsPageSchema.parse(Object.fromEntries(url.searchParams))
+        return json(response, 200, service.events(actor, page))
+      }
       return json(response, 404, { error: t('errors.routeNotFound') })
     } catch (error) {
       json(response, statusOf(error), { error: publicMessage(error) })
@@ -157,6 +174,7 @@ function statusOf(error: unknown): number {
     if (error.code === 'FORBIDDEN') return 403
     if (error.code === 'CONFLICT' || error.code === 'SECRET_DETECTED') return 409
     if (error.code === 'TOO_LARGE') return 413
+    if (error.code === 'RATE_LIMITED') return 429
     if (error.code === 'NOT_EXECUTED') return 200
     return 400
   }

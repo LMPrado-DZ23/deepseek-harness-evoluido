@@ -20,6 +20,7 @@ class MemoryRepository implements HubRepository {
   putIntegration = async (value: StudioIntegration) => { this.rows = [...this.rows.filter(row => row.integration_id !== value.integration_id), value] }
   putExport = async (value: StudioExport) => { this.exportRows = [...this.exportRows, value] }
   putEvent = async (value: HubEvent) => { this.eventRows = [...this.eventRows, value] }
+  deleteEvent = async (eventId: string) => { this.eventRows = this.eventRows.filter(row => row.event_id !== eventId) }
 }
 
 const session = { session_id: 's1', user_id: 'u1', org_id: 'org-a', tenant_id: 'ws-a' } as SessionRecord
@@ -109,14 +110,16 @@ describe('integration hub HTTP boundary', () => {
     expect(unconfirmed.status).toBe(403)
     // An id the client invented is worth nothing: the server only honours what it issued itself.
     expect((await request('/smtp', { method: 'POST', body: '{"secret_ref":"DZ23_APP_SMTP","approval":{"approval_id":"inventado"}}' })).status).toBe(403)
-    const issue = async (action: string, subject: string) => {
-      const ticket = await (await request('/approvals', { method: 'POST', body: JSON.stringify({ action, subject_id: subject }) })).json() as { approval_id: string; tier: string }
+    const issue = async (action: string, subject: string, payload: string) => {
+      const ticket = await (await request('/approvals', { method: 'POST', body: JSON.stringify({ action, subject_id: subject, payload }) })).json() as { approval_id: string; tier: string; fingerprint?: string }
       expect(ticket.tier).toBe('T2')
+      // The digest of what the person is confirming stays on the server: the client gets an id, not a hash of the alias.
+      expect(ticket.fingerprint).toBeUndefined()
       return `"approval":{"approval_id":${JSON.stringify(ticket.approval_id)}}`
     }
-    const configured = await request('/smtp', { method: 'POST', body: `{"secret_ref":"DZ23_APP_SMTP",${await issue('smtp.configured', 'smtp')}}` })
+    const configured = await request('/smtp', { method: 'POST', body: `{"secret_ref":"DZ23_APP_SMTP",${await issue('smtp.configured', 'smtp', 'DZ23_APP_SMTP')}}` })
     expect(await configured.json()).toEqual({ configured: true, secret_ref: 'DZ23_APP_SMTP', tier: 'T2' })
-    const test = await request('/smtp/test', { method: 'POST', body: `{"to":"pessoa@example.test",${await issue('smtp.tested', 'smtp')}}` })
+    const test = await request('/smtp/test', { method: 'POST', body: `{"to":"pessoa@example.test",${await issue('smtp.tested', 'smtp', 'pessoa@example.test')}}` })
     expect(test.status).toBe(200)
     expect(await test.json()).toMatchObject({ result: 'NOT_EXECUTED' })
 
@@ -182,6 +185,29 @@ describe('integration hub HTTP boundary', () => {
     expect(((await big.json()) as { error: string }).error).toContain('200')
     // Neither refusal wrote a package.
     expect(repository.exportRows).toHaveLength(0)
+  }, 30_000)
+
+  it('pages the history instead of handing over the whole table, and refuses a flood of packages with 429', async () => {
+    const { request } = await fixture('admin')
+    for (let index = 0; index < 4; index += 1) {
+      await request('/integrations', { method: 'POST', body: JSON.stringify(manifest()) })
+    }
+    const page = await (await request('/events?limit=2')).json() as { events: Array<{ event_id: string }>; next_cursor: string | null }
+    expect(page.events).toHaveLength(2)
+    expect(page.next_cursor).not.toBeNull()
+    const next = await (await request(`/events?limit=2&cursor=${encodeURIComponent(page.next_cursor!)}`)).json() as { events: Array<{ event_id: string }>; next_cursor: string | null }
+    expect(next.events).toHaveLength(2)
+    expect(next.events.map(event => event.event_id)).not.toEqual(page.events.map(event => event.event_id))
+    // A cursor the client invented is a bad request, not a stack trace.
+    expect((await request('/events?cursor=nao-e-cursor')).status).toBe(400)
+    expect((await request('/events?limit=0')).status).toBe(400)
+    expect((await request('/events?limit=9999')).status).toBe(400)
+    // Packaging is the expensive call here; a workspace asking for it without end gets 429 in words.
+    let last = 201
+    for (let index = 0; index < 20 && last !== 429; index += 1) {
+      last = (await request('/projects/p1/exports', { method: 'POST', body: '{}' })).status
+    }
+    expect(last).toBe(429)
   }, 30_000)
 
   it('maps role errors to 403 for viewers and builders', async () => {

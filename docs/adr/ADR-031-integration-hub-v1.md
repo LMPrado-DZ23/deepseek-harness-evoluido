@@ -195,6 +195,58 @@ arquivo. O identificador do publicador não alcança mais `Object.prototype` (`c
 em volta de nome/descrição em vez de aparar: a assinatura é conferida sobre o manifesto como
 enviado, e aparar produzia um registro cujos bytes não eram os assinados.
 
+**Quinta passagem adversarial (autorização), 04/09 — Codex sobre a M5:**
+
+- **O piso D16 virou tabela, não expressão.** `KIND_FLOOR` (todo kind) e `PERMISSION_FLOOR` (toda
+  permissão) ficam declarados em `manifest.ts`, e o piso é o mais restritivo entre kind, endpoint
+  externo e **cada** permissão declarada. A expressão anterior citava quatro permissões e
+  `filesystem.workspace` não era uma delas: uma habilidade **assinada**, sem endpoint, que lê e
+  escreve o espaço de trabalho inteiro da pessoa ficava em **T0** e era ligada sem confirmação
+  nenhuma. Agora é **T2** — não é um projeto, é tudo o que a pessoa guarda ali. Kind ou permissão que
+  esta versão não conhece é T2, nunca T0, e um teste compara as chaves da tabela com o schema: uma
+  permissão nova sem piso quebra a suíte.
+- **A confirmação é amarrada ao alvo.** O bilhete passou a levar `org_id`, `tenant_id` e um
+  **resumo (sha256) do que está sendo confirmado**: o apelido da credencial, o endereço do teste ou
+  o estado de segurança do registro. O assunto das ações de SMTP é a mesma string para todas elas —
+  sem o resumo, uma confirmação dada para uma credencial era gasta em outra. O resumo não sai do
+  servidor (a resposta do `POST /approvals` não o devolve) e não vai para o histórico.
+- **A decisão só nasce depois do "sim".** O painel pedia a aprovação para poder **mostrar** a caixa:
+  quem lia e cancelava já tinha deixado um bilhete e um evento de auditoria no servidor para algo que
+  recusou. Agora a caixa é montada com o nível que o servidor já publicou na linha e a decisão é
+  pedida dentro do `confirmar`; se o servidor então exigir **mais** do que a caixa dizia, nada é
+  feito e a pergunta volta no nível verdadeiro. Provado na tela real contando as decisões emitidas
+  no histórico do servidor antes e depois do cancelamento.
+- **As confirmações são separadas por espaço de trabalho.** O mapa era global e tinha teto: uma
+  enxurrada de um inquilino **despejava o bilhete que a pessoa de outro inquilino estava
+  confirmando**. Agora o teto é por espaço de trabalho, o bilhete é procurado só dentro do próprio
+  balde (um id de outro inquilino não é sequer visível) e o número de baldes também é limitado,
+  descartando primeiro os vazios.
+- **O histórico pagina e tem retenção.** `GET /events` devolve uma página (padrão 50, teto 200) com
+  cursor opaco; a tabela inteira nunca viaja numa resposta só. E cada espaço de trabalho guarda no
+  máximo `EVENTS_RETAINED_PER_TENANT` eventos: a auditoria crescia para sempre e qualquer pessoa
+  capaz de fazer o Studio recusar algo a fazia crescer de graça. O teto de um espaço nunca toca as
+  linhas de outro.
+- **Exportação: um pacote de cada vez e com teto.** Empacotar é a chamada cara do plugin, num
+  processo de thread única. Dez cliques (ou dez abas) no mesmo projeto entram na **mesma** construção
+  em vez de dispararem dez, e cada espaço de trabalho tem um teto de tentativas por janela
+  (`RATE_LIMITED` → **429** em palavras, com a recusa auditada).
+- **O apelido da credencial saiu do histórico.** `smtp.configured` gravava o apelido como
+  `subject_id` (na recusa) e como detalhe (no sucesso) — a lista de compras do cofre em texto claro
+  para quem lê a auditoria. Agora o assunto é o próprio registro de e-mail e o detalhe é
+  `ref sha256:` curto, que prova qual referência foi configurada sem nomeá-la.
+- **`channel: dev` deixou de ser só configuração.** É uma afirmação sobre **onde** este Studio roda.
+  Só é aceito numa instalação pessoal — servidor em loopback e todos os hosts e origens aceitos em
+  loopback; em qualquer outro lugar o Studio **recusa a subir** (decisão pendente #12 do Prado,
+  acatada). Recusar na subida é deliberado: um Studio que subisse e só reclamasse no log já estaria
+  alcançável.
+- **Concorrência por impressão digital, não por relógio.** `setEnabled` comparava `updated_at`, e
+  duas escritas dentro do mesmo milissegundo carregam o mesmo carimbo — a checagem dizia "nada mudou"
+  e ligava o manifesto **novo** com a decisão **velha**. Agora o serviço carimba de forma
+  estritamente crescente (nunca dois iguais) e a comparação é a **impressão digital dos campos de
+  segurança** (identidade, kind, tier exigido, verificação, manifesto **com** assinatura, referência
+  do segredo): qualquer mudança ali recusa (`CONFLICT`) um `enable` confirmado antes dela. Sem
+  mudança de versão do domínio: a impressão é calculada, não gravada.
+
 Limite anterior, agora histórico: a confirmação de **T2** era uma afirmação do cliente (um campo
 JSON). O que separa isso de uma página hostil é CSRF + verificação de origem; **T3** é o único
 nível com prova do lado do servidor (a passkey recente). Anotado para a fatia da arquitetura de

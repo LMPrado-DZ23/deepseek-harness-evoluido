@@ -12,6 +12,7 @@ import { resolve } from 'node:path'
 import nodemailer from 'nodemailer'
 import { z } from 'zod'
 import { createHubHttpHandler } from './http.js'
+import { isLoopbackAuthority, isLoopbackEndpoint } from './manifest.js'
 import { t } from './i18n.js'
 import { studioIntegrationsDomainSpec, type HubEvent, type HubKey, type StudioExport, type StudioIntegration } from './model.js'
 import { IntegrationHubService, smtpSecretShape, type EmailTestPort, type HubRepository, type SecretInspector } from './service.js'
@@ -58,6 +59,7 @@ class DomainHubRepository implements HubRepository {
   putExport(value: StudioExport) { return this.exportTable.put(value.export_id as HubKey, value) }
   events() { return values(this.eventTable) }
   putEvent(value: HubEvent) { return this.eventTable.put(value.event_id as HubKey, value) }
+  async deleteEvent(eventId: string) { await this.eventTable.delete(eventId as HubKey) }
 }
 
 function values<T>(table: KvTable<HubKey, T>): T[] { return [...table.entries()].map(([, value]) => value) }
@@ -97,7 +99,39 @@ export function hubChannel(configured: unknown): 'stable' | 'dev' {
   return configured === 'dev' ? 'dev' : 'stable'
 }
 
+/**
+ * `dev` is not a configuration flag, it is a claim about WHERE this Studio is
+ * running: somebody's own machine. It lowers what may be enabled without a
+ * publisher's signature, so it is only accepted on a personal installation
+ * reachable from this machine alone — the server bound to loopback and every
+ * accepted host and origin loopback too. Anywhere else the Studio refuses to
+ * start rather than serve other people with a lowered policy (pending decision
+ * #12, accepted). Refusing at boot is deliberate: a Studio that came up and
+ * only complained in a log would already be reachable.
+ */
+export function assertChannelAllowed(channel: 'stable' | 'dev', boundary: {
+  readonly bindHost: string
+  readonly allowedHosts: readonly string[]
+  readonly allowedOrigins: readonly string[]
+}): void {
+  if (channel !== 'dev') return
+  const local = isLoopbackAuthority(boundary.bindHost)
+    && boundary.allowedHosts.length > 0
+    && boundary.allowedHosts.every(host => isLoopbackAuthority(host))
+    && boundary.allowedOrigins.length > 0
+    && boundary.allowedOrigins.every(origin => isLoopbackEndpoint(origin))
+  if (!local) throw new Error(t('errors.devChannelNotPersonal'))
+}
+
 export async function apply(ctx: Context, config: IntegrationHubConfig = {}): Promise<void> {
+  const port = ctx.webServer.port
+  const defaultHost = `127.0.0.1:${port}`; const defaultOrigin = `http://localhost:${port}`
+  const allowedHosts = config.allowedHosts ?? [defaultHost, `localhost:${port}`]
+  const allowedOrigins = config.allowedOrigins ?? [defaultOrigin, `http://${defaultHost}`]
+  const channel = hubChannel(config.channel)
+  // Before the domain is served and before anything is provided: a `dev` channel that is not a
+  // personal, loopback-only installation stops the Studio here.
+  assertChannelAllowed(channel, { bindHost: ctx.webServer.host, allowedHosts, allowedOrigins })
   const domain: Domain<typeof studioIntegrationsDomainSpec> = await ctx.storageDomain.open(studioIntegrationsDomainSpec)
   ctx.effect(() => () => domain.close(), 'dz23-studio-integration-hub.domainClose')
   const exportsRoot = resolve(config.exportsRoot ?? resolve(homedir(), '.dz23-studio', 'exports'))
@@ -115,18 +149,15 @@ export async function apply(ctx: Context, config: IntegrationHubConfig = {}): Pr
       project: (actor, projectId) => promptToApp.project(actor, projectId),
       runs: (actor, projectId) => promptToApp.runs(actor, projectId),
     },
-    exportsRoot, publisherKeys, channel: hubChannel(config.channel), runsRoot,
+    exportsRoot, publisherKeys, channel, runsRoot,
     emailTest: config.smtpTestEnabled === true ? smtpTestPort(ctx.credentials) : undefined,
   })
   ctx.provide('studioIntegrationHub', { service })
-  const port = ctx.webServer.port
-  const defaultHost = `127.0.0.1:${port}`; const defaultOrigin = `http://localhost:${port}`
   ctx.effect(() => ctx.webServer.register({
     kind: 'prefix', path: '/api/studio/hub',
     handler: createHubHttpHandler({
       service, identity: ctx.studioIdentity.service, tenancy: ctx.studioTenancy.service,
-      allowedHosts: config.allowedHosts ?? [defaultHost, `localhost:${port}`],
-      allowedOrigins: config.allowedOrigins ?? [defaultOrigin, `http://${defaultHost}`],
+      allowedHosts, allowedOrigins,
     }),
   }), 'dz23-studio-integration-hub.http')
 }

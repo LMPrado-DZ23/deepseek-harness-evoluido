@@ -101,6 +101,7 @@
     "confirm": "Confirmar",
     "cancel": "Cancelar",
     "smtpSave": "Guardar o nome do segredo liga o envio de e-mail do aplicativo por um serviço externo.",
+    "changed": "O que esta ação exige mudou enquanto você lia. Nada foi feito. Confira o novo nível e confirme de novo, se ainda quiser.",
     "smtpTest": "Se o envio de teste estiver liberado neste servidor, uma mensagem de verdade vai para o endereço informado. Se ainda não estiver, o Studio responde que o teste não foi executado e nada é enviado."
   }
 }

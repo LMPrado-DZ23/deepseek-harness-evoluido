@@ -50,6 +50,48 @@ export function approvalNote(integration: { requires_approval_tier?: PolicyTier 
   return tier === null ? null : fill(t.integrations.needsApproval, { tier: tierLabel(tier) })
 }
 
+export type ApprovalAction = 'integration.enabled' | 'smtp.configured' | 'smtp.tested'
+/** What the server answers when it issues a decision. */
+export type IssuedApproval = { approval_id: string; tier: PolicyTier }
+export type GuardedOutcome = { kind: 'done' } | { kind: 'tier-changed'; step: ConfirmStepModel }
+
+/**
+ * One action waiting for the person's word. The ticket is asked for INSIDE
+ * `confirm()` — never while the box is being shown — because asking earlier
+ * meant that cancelling had already left a decision and an audit event on the
+ * server for something the person refused.
+ */
+export type ConfirmStepModel = {
+  readonly tier: PolicyTier
+  readonly what: string
+  confirm(): Promise<GuardedOutcome>
+}
+
+export function confirmStep(input: {
+  readonly tier: PolicyTier
+  readonly action: ApprovalAction
+  readonly subjectId: string
+  /** The alias or the address this decision is about; the server keeps only a digest of it. */
+  readonly payload?: string
+  describe(tier: PolicyTier): string
+  requestApproval(action: ApprovalAction, subjectId: string, payload?: string): Promise<IssuedApproval>
+  run(approval: Approval): Promise<void>
+}): ConfirmStepModel {
+  return {
+    tier: input.tier,
+    what: input.describe(input.tier),
+    async confirm() {
+      const ticket = await input.requestApproval(input.action, input.subjectId, input.payload)
+      // The server may now demand MORE than the box said (the integration was re-registered while
+      // the person read it). Nothing is done with a decision the person was not shown: the step is
+      // rebuilt at the real level and asked again.
+      if (ticket.tier !== input.tier) return { kind: 'tier-changed', step: confirmStep({ ...input, tier: ticket.tier }) }
+      await input.run({ approval_id: ticket.approval_id })
+      return { kind: 'done' }
+    },
+  }
+}
+
 export function actionLabel(action: string): string {
   return (t.events.action as Record<string, string>)[action] ?? action
 }

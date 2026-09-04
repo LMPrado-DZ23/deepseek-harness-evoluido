@@ -5,7 +5,7 @@
  * becomes a typed error so the panel can say "you are offline" in words.
  */
 import pwa from '../i18n/pwa.pt-BR.json'
-import type { Approval, HubAction, HubOutcome, IntegrationKind, PolicyTier, Verification } from './presentation'
+import type { Approval, ApprovalAction, HubAction, HubOutcome, IntegrationKind, PolicyTier, Verification } from './presentation'
 
 export const HUB_API_PREFIX = '/api/studio/hub'
 export const APPS_API_PREFIX = '/api/studio/apps'
@@ -22,7 +22,7 @@ export type Integration = {
 export type SmtpState = { configured: boolean; secret_ref: string | null; tier: PolicyTier }
 /** What the server issued for one action: the panel shows what it says and, on confirmation, presents its id. */
 export type ApprovalTicket = { approval_id: string; tier: PolicyTier; expires_at: string; requires_strong_identity: boolean }
-export type ApprovalAction = 'integration.enabled' | 'smtp.configured' | 'smtp.tested'
+export type { ApprovalAction } from './presentation'
 export type SmtpTest = { result: 'SENT' | 'NOT_EXECUTED'; message: string }
 export type ExportRecord = { export_id: string; project_id: string; run_id: string; file_name: string; sha256: string; size_bytes: number; entries: number; created_at: string }
 export type HubEvent = { event_id: string; action: HubAction; outcome: HubOutcome; detail: string; created_at: string }
@@ -68,7 +68,9 @@ export function createHubApi(transport: HubTransport = browserTransport) {
   }
   const hub = <T>(path: string, init?: RequestInit) => call<T>(HUB_API_PREFIX, path, init)
   return {
-    requestApproval: (action: ApprovalAction, subjectId: string) => hub<ApprovalTicket>('/approvals', { method: 'POST', body: JSON.stringify({ action, subject_id: subjectId }) }),
+    // `payload` is what the decision is ABOUT (the alias, the address). The server keeps a digest of
+    // it in the ticket, so a confirmation given for one target cannot be spent on another.
+    requestApproval: (action: ApprovalAction, subjectId: string, payload?: string) => hub<ApprovalTicket>('/approvals', { method: 'POST', body: JSON.stringify(payload === undefined ? { action, subject_id: subjectId } : { action, subject_id: subjectId, payload }) }),
     smtp: () => hub<SmtpState>('/smtp'),
     configureSmtp: (secretRef: string, approval?: Approval) => hub<{ configured: true; secret_ref: string; tier: PolicyTier }>('/smtp', { method: 'POST', body: JSON.stringify({ secret_ref: secretRef, approval }) }),
     testSmtp: (to: string, approval?: Approval) => hub<SmtpTest>('/smtp/test', { method: 'POST', body: JSON.stringify({ to, approval }) }),
@@ -78,7 +80,8 @@ export function createHubApi(transport: HubTransport = browserTransport) {
     exports: (projectId: string) => hub<{ exports: ExportRecord[] }>(`/projects/${encodeURIComponent(projectId)}/exports`).then(value => value.exports),
     createExport: (projectId: string) => hub<{ export: ExportRecord }>(`/projects/${encodeURIComponent(projectId)}/exports`, { method: 'POST', body: '{}' }).then(value => value.export),
     downloadHref: (projectId: string, exportId: string) => `${HUB_API_PREFIX}/projects/${encodeURIComponent(projectId)}/exports/${encodeURIComponent(exportId)}/download`,
-    events: () => hub<{ events: HubEvent[] }>('/events').then(value => value.events),
+    // One page, newest first: the history grows for as long as the Studio runs.
+    events: (limit = 50) => hub<{ events: HubEvent[]; next_cursor: string | null }>(`/events?limit=${encodeURIComponent(String(limit))}`).then(value => value.events),
     projects: () => call<{ projects: ProjectSummary[] }>(APPS_API_PREFIX, '/projects').then(value => value.projects),
   }
 }

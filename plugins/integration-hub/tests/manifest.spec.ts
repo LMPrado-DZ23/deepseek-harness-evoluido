@@ -1,7 +1,7 @@
 import { generateKeyPairSync, sign } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
-import { canonicalManifestBytes, effectiveTier, evaluateManifest, policyFloor } from '../src/manifest.ts'
-import type { IntegrationManifest } from '../src/model.ts'
+import { canonicalManifestBytes, effectiveTier, evaluateManifest, EXTERNAL_ENDPOINT_FLOOR, KIND_FLOOR, PERMISSION_FLOOR, policyFloor } from '../src/manifest.ts'
+import { integrationKindSchema, integrationPermissionSchema, type IntegrationKind, type IntegrationManifest, type IntegrationPermission } from '../src/model.ts'
 
 const { publicKey, privateKey } = generateKeyPairSync('ed25519')
 const publisherKeys = { 'dz23': publicKey.export({ type: 'spki', format: 'der' }).toString('base64') }
@@ -14,6 +14,39 @@ function signed(value: IntegrationManifest): IntegrationManifest {
 }
 
 describe('D16 manifest evaluation', () => {
+  it('has a declared floor for EVERY kind and EVERY permission, plus the external endpoint', () => {
+    // The floor used to be an expression that named four permissions. `filesystem.workspace` — read
+    // AND write over the person's whole workspace — was not one of them, so a SIGNED skill with no
+    // endpoint sat at T0 and was turned on with no confirmation at all. A table cannot forget.
+    expect(Object.keys(KIND_FLOOR).sort()).toEqual([...integrationKindSchema.options].sort())
+    expect(Object.keys(PERMISSION_FLOOR).sort()).toEqual([...integrationPermissionSchema.options].sort())
+
+    const kindFloors: Record<IntegrationKind, string> = { smtp: 'T2', mcp: 'T1', webhook: 'T1', skill: 'T0' }
+    for (const [kind, expected] of Object.entries(kindFloors) as [IntegrationKind, string][]) {
+      expect(policyFloor(kind, manifest({ kind }))).toBe(expected)
+      // Whatever the kind, an endpoint outside this machine is never below T2.
+      expect(policyFloor(kind, manifest({ kind, endpoint: 'https://algum-servico.example/x' }))).toBe(
+        expected === 'T2' ? 'T2' : EXTERNAL_ENDPOINT_FLOOR)
+    }
+
+    const permissionFloors: Record<IntegrationPermission, string> = {
+      'read.project': 'T0', 'write.project': 'T1', 'filesystem.workspace': 'T2',
+      'network.outbound': 'T2', 'email.send': 'T2', 'secrets.read': 'T3',
+    }
+    for (const [permission, expected] of Object.entries(permissionFloors) as [IntegrationPermission, string][]) {
+      expect(policyFloor('skill', manifest({ permissions: [permission] }))).toBe(expected)
+      // And what the manifest DECLARES never lowers it: a signed `tier: T0` does not buy T0.
+      expect(effectiveTier('skill', manifest({ tier: 'T0', permissions: [permission] }))).toBe(expected)
+    }
+    // The most restrictive of everything it asks for, not the first one that matches.
+    expect(policyFloor('skill', manifest({ permissions: ['read.project', 'filesystem.workspace', 'write.project'] }))).toBe('T2')
+    expect(policyFloor('webhook', manifest({ kind: 'webhook', permissions: ['secrets.read'] }))).toBe('T3')
+    // A kind or a permission this build does not know is T2, never T0.
+    expect(policyFloor('quimera' as IntegrationKind, manifest())).toBe('T2')
+    expect(policyFloor('skill', manifest({ permissions: ['sistema.tudo' as IntegrationPermission] }))).toBe('T2')
+    expect(policyFloor('skill', manifest({ permissions: ['constructor' as IntegrationPermission] }))).toBe('T2')
+  })
+
   it('applies the policy floor: missing tier → T2, external MCP never below T2, local MCP/webhook/writes never below T1, read-only skill T0', () => {
     expect(effectiveTier('skill', manifest())).toBe('T2')
     expect(effectiveTier('skill', manifest({ tier: 'T0' }))).toBe('T0')

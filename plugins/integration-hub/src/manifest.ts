@@ -2,7 +2,7 @@ import { createPublicKey, verify } from 'node:crypto'
 import type { PolicyTier } from '@dz23-studio/policy'
 import { z } from 'zod'
 import { t } from './i18n.js'
-import { integrationManifestSchema, type IntegrationKind, type IntegrationManifest } from './model.js'
+import { integrationManifestSchema, type IntegrationKind, type IntegrationManifest, type IntegrationPermission } from './model.js'
 
 export type ManifestVerification = 'verified' | 'unverified' | 'invalid'
 
@@ -22,33 +22,76 @@ const TIER_RANK: Readonly<Record<PolicyTier, number>> = { T0: 0, T1: 1, T2: 2, T
 export const UNVERIFIED_FLOOR: PolicyTier = 'T2'
 
 /**
- * D16 policy floor per kind: reading the vault is irreversible in the sense
- * that matters here — a leaked credential cannot be un-leaked — so it sits at
- * T3 and needs strong identity; an integration that talks to the outside world
- * (external MCP, outbound network, e-mail) never sits below T2; one that can
- * write inside the workspace never sits below T1; an unknown tier is T2.
+ * D16 policy floor, as a TABLE. Every kind and every permission the model can
+ * carry names its floor here, so a permission added to `model.ts` without a
+ * floor is a hole somebody has to open on purpose — the previous expression
+ * only mentioned four permissions, and `filesystem.workspace` (read AND write
+ * over the person's whole workspace) fell through it at T0.
+ */
+export const KIND_FLOOR: Readonly<Record<IntegrationKind, PolicyTier>> = {
+  // The app's e-mail always leaves this computer, through somebody else's server.
+  smtp: 'T2',
+  // A local MCP server and a webhook act in the workspace's name: never below T1.
+  mcp: 'T1',
+  webhook: 'T1',
+  // A skill on its own only reads; what raises it is what it asks for, below.
+  skill: 'T0',
+}
+
+/**
+ * Floor per declared permission. `filesystem.workspace` is T2 and not T1: it is
+ * not one project's files, it is everything the person keeps in the workspace,
+ * read and written — that deserves the same explicit confirmation as talking to
+ * the outside world. `secrets.read` is T3 because a leaked credential cannot be
+ * un-leaked.
+ */
+export const PERMISSION_FLOOR: Readonly<Record<IntegrationPermission, PolicyTier>> = {
+  'read.project': 'T0',
+  'write.project': 'T1',
+  'filesystem.workspace': 'T2',
+  'network.outbound': 'T2',
+  'email.send': 'T2',
+  'secrets.read': 'T3',
+}
+
+/** Any endpoint that is not loopback is "talks to the outside world", whatever the kind. */
+export const EXTERNAL_ENDPOINT_FLOOR: PolicyTier = 'T2'
+
+/**
+ * The floor this manifest can never sit below: the most restrictive of its
+ * kind, its endpoint and EVERY permission it declares. A kind or a permission
+ * this build does not know is treated as T2, never as T0.
  */
 export function policyFloor(kind: IntegrationKind, manifest: IntegrationManifest): PolicyTier {
-  const external = manifest.endpoint !== undefined && !isLoopback(manifest.endpoint)
-  const outbound = manifest.permissions.some(permission => permission === 'network.outbound' || permission === 'email.send')
-  const writes = manifest.permissions.some(permission => permission === 'write.project')
-  if (manifest.permissions.includes('secrets.read')) return 'T3'
-  // ANY declared endpoint that is not loopback is "talks to the outside world" — the rule said so
-  // and the code only applied it to `mcp`, so a signed `webhook` (or a `skill` with an endpoint)
-  // pointing anywhere was T1/T0 and turned on with no confirmation at all.
-  if (external || kind === 'smtp' || outbound) return 'T2'
-  if (kind === 'mcp' || kind === 'webhook' || writes) return 'T1'
-  return 'T0'
+  let floor = floorOf(KIND_FLOOR, kind)
+  // The rule said so and the code only applied it to `mcp`, so a signed `webhook` (or a `skill`
+  // with an endpoint) pointing anywhere was T1/T0 and turned on with no confirmation at all.
+  if (manifest.endpoint !== undefined && !isLoopbackEndpoint(manifest.endpoint)) floor = maxTier(floor, EXTERNAL_ENDPOINT_FLOOR)
+  for (const permission of manifest.permissions) floor = maxTier(floor, floorOf(PERMISSION_FLOOR, permission))
+  return floor
+}
+
+/** A table lookup that cannot inherit from `Object.prototype` and never answers "no floor". */
+function floorOf(table: Readonly<Record<string, PolicyTier>>, key: string): PolicyTier {
+  return Object.hasOwn(table, key) ? table[key]! : UNVERIFIED_FLOOR
 }
 
 function maxTier(left: PolicyTier, right: PolicyTier): PolicyTier { return TIER_RANK[left] >= TIER_RANK[right] ? left : right }
 
-function isLoopback(endpoint: string): boolean {
-  try {
-    // `new URL('http://[::1]/').hostname` keeps the brackets, so the bare form never matched.
-    const host = new URL(endpoint).hostname.replace(/^\[|\]$/gu, '')
-    return host === '127.0.0.1' || host === '::1' || host === 'localhost' || host.endsWith('.localhost')
-  } catch { return false }
+/** `new URL('http://[::1]/').hostname` keeps the brackets, so the bare form never matched. */
+export function isLoopbackHostname(host: string): boolean {
+  const bare = host.replace(/^\[|\]$/gu, '')
+  return bare === '127.0.0.1' || bare === '::1' || bare === 'localhost' || bare.endsWith('.localhost')
+}
+
+/** Whether a full URL points back at this very machine. Anything unparseable is NOT loopback (fail closed). */
+export function isLoopbackEndpoint(endpoint: string): boolean {
+  try { return isLoopbackHostname(new URL(endpoint).hostname) } catch { return false }
+}
+
+/** Whether a `Host:`-style authority (`127.0.0.1:3000`, `[::1]:3000`, `localhost`) points back at this machine. */
+export function isLoopbackAuthority(authority: string): boolean {
+  try { return isLoopbackHostname(new URL(`http://${authority}`).hostname) } catch { return false }
 }
 
 /** Most restrictive of the manifest's declared tier and the policy floor; missing/invalid declared tier → T2. */
@@ -65,7 +108,12 @@ export function effectiveTier(kind: IntegrationKind, manifest: IntegrationManife
  */
 export function canonicalManifestBytes(manifest: Readonly<Record<string, unknown>>): Buffer {
   const { signature: _signature, ...rest } = manifest
-  return Buffer.from(JSON.stringify(sortKeys(rest)), 'utf8')
+  return canonicalJsonBytes(rest)
+}
+
+/** The same five rules, for anything that has to hash the same way twice (see `securityFingerprint`). */
+export function canonicalJsonBytes(value: unknown): Buffer {
+  return Buffer.from(JSON.stringify(sortKeys(value)), 'utf8')
 }
 
 export function evaluateManifest(input: unknown, publisherKeys: PublisherKeys): ManifestEvaluation {

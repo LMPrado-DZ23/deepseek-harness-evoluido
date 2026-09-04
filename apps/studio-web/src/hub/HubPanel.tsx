@@ -1,8 +1,8 @@
 import { ArrowLeft, Download, Mail, Plug, ScrollText } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import t from '../i18n/hub.pt-BR.json'
-import { createHubApi, HubApiError, type ApprovalAction, type ExportRecord, type HubApi, type HubEvent, type Integration, type ProjectSummary, type SmtpState } from './hubApi'
-import { actionLabel, approvalNote, approvalPrompt, enableExplanation, exportable, fill, formatBytes, formatDate, kindLabel, outcomeLabel, tierLabel, verificationLabel, type Approval, type PolicyTier } from './presentation'
+import { createHubApi, HubApiError, type ExportRecord, type HubApi, type HubEvent, type Integration, type ProjectSummary, type SmtpState } from './hubApi'
+import { actionLabel, approvalNote, approvalPrompt, confirmStep, enableExplanation, exportable, fill, formatBytes, formatDate, kindLabel, outcomeLabel, tierLabel, verificationLabel, type ConfirmStepModel } from './presentation'
 import './hub.css'
 
 type Notice = { kind: 'ok' | 'error' | 'info'; text: string } | null
@@ -10,9 +10,11 @@ type Notice = { kind: 'ok' | 'error' | 'info'; text: string } | null
 /**
  * One action waiting for the person's confirmation. The panel never sends an
  * approval the person did not click: the tier comes from the server, and the
- * text says, in plain words, what agreeing to it means.
+ * text says, in plain words, what agreeing to it means. Nothing at all is sent
+ * while the box is on screen — the decision is asked for INSIDE `confirm()`, so
+ * cancelling leaves no ticket and no audit event behind on the server.
  */
-type Pending = { tier: PolicyTier; what: string; approvalId: string; run(approval: Approval): Promise<void> } | null
+type Pending = ConfirmStepModel | null
 
 function ConfirmStep({ pending, busy, onCancel, onConfirm }: { pending: Pending; busy: boolean; onCancel(): void; onConfirm(): void }) {
   if (pending === null) return null
@@ -75,23 +77,22 @@ function SmtpSection({ api, state, onChange, notify, report }: SectionProps & { 
   const [busy, setBusy] = useState(false)
   const [pending, setPending] = useState<Pending>(null)
   const run = async (task: () => Promise<void>) => { setBusy(true); notify(null); try { await task(); await onChange() } catch (error) { report(error) } finally { setBusy(false) } }
-  const ask = async (action: ApprovalAction, subjectId: string, what: (tier: PolicyTier) => string, act: (approval: Approval) => Promise<void>) => {
-    // One confirmation at a time: a second click while the first is in flight would issue a second
-    // approval and leave the first one dangling until it expired.
+  const ask = (input: Omit<Parameters<typeof confirmStep>[0], 'requestApproval'>) => {
+    // One confirmation at a time. The box is built from the level the server already published for
+    // this row; the decision itself is only asked for if the person agrees.
     if (busy || pending !== null) return
-    setBusy(true)
-    try {
-      const ticket = await api.requestApproval(action, subjectId)
-      // The text comes from the tier the SERVER just decided, never from the row the page loaded:
-      // if the integration was re-registered meanwhile, the box would otherwise state two tiers.
-      setPending({ tier: ticket.tier, what: what(ticket.tier), approvalId: ticket.approval_id, run: act })
-    } catch (error) { report(error) } finally { setBusy(false) }
+    setPending(confirmStep({ ...input, requestApproval: api.requestApproval }))
   }
   const confirm = () => {
-    const action = pending
-    if (action === null) return
+    const step = pending
+    if (step === null) return
     setPending(null)
-    void run(() => action.run({ approval_id: action.approvalId }))
+    void run(async () => {
+      const outcome = await step.confirm()
+      // The server now demands MORE than the box said (the record changed while the person read it):
+      // nothing was done, and the same action is asked again at the level it really costs.
+      if (outcome.kind === 'tier-changed') { setPending(outcome.step); notify({ kind: 'info', text: t.confirm.changed }) }
+    })
   }
   return <section className="hub-card" aria-labelledby="hub-smtp-title">
     <div className="hub-card-heading"><Mail aria-hidden="true" /><h2 id="hub-smtp-title">{t.smtp.title}</h2></div>
@@ -104,7 +105,10 @@ function SmtpSection({ api, state, onChange, notify, report }: SectionProps & { 
       const ref = secretRef.trim()
       // The SERVER decides the tier and issues the approval; the panel only shows what it said and,
       // if the person agrees, hands the id back. A confirmation the client invents is worth nothing.
-      void ask('smtp.configured', 'smtp', () => t.confirm.smtpSave, async approval => { await api.configureSmtp(ref, approval); notify({ kind: 'ok', text: t.smtp.saved }) })
+      void ask({
+        tier: state?.tier ?? 'T2', action: 'smtp.configured', subjectId: 'smtp', payload: ref, describe: () => t.confirm.smtpSave,
+        run: async approval => { await api.configureSmtp(ref, approval); notify({ kind: 'ok', text: t.smtp.saved }) },
+      })
     }}>
       <label htmlFor="hub-smtp-ref">{t.smtp.refLabel}</label>
       <input id="hub-smtp-ref" value={secretRef} onChange={event => setSecretRef(event.target.value)} placeholder={t.smtp.refPlaceholder} autoComplete="off" spellCheck={false} />
@@ -114,9 +118,12 @@ function SmtpSection({ api, state, onChange, notify, report }: SectionProps & { 
       event.preventDefault()
       notify(null)
       const to = recipient.trim()
-      void ask('smtp.tested', 'smtp', () => t.confirm.smtpTest, async approval => {
-        const result = await api.testSmtp(to, approval)
-        notify({ kind: result.result === 'SENT' ? 'ok' : 'info', text: `${result.result === 'SENT' ? t.smtp.testSent : t.smtp.testNotExecuted}: ${result.message}` })
+      void ask({
+        tier: state?.tier ?? 'T2', action: 'smtp.tested', subjectId: 'smtp', payload: to, describe: () => t.confirm.smtpTest,
+        run: async approval => {
+          const result = await api.testSmtp(to, approval)
+          notify({ kind: result.result === 'SENT' ? 'ok' : 'info', text: `${result.result === 'SENT' ? t.smtp.testSent : t.smtp.testNotExecuted}: ${result.message}` })
+        },
       })
     }}>
       <label htmlFor="hub-smtp-to">{t.smtp.testLabel}</label>
@@ -134,31 +141,33 @@ function IntegrationsSection({ api, integrations, channel, onChange, notify, rep
   const [pending, setPending] = useState<Pending>(null)
   const visible = useMemo(() => (integrations ?? []).filter(value => value.kind !== 'smtp'), [integrations])
   const run = async (task: () => Promise<void>) => { setBusy(true); notify(null); try { await task(); await onChange() } catch (error) { report(error) } finally { setBusy(false) } }
-  const ask = async (action: ApprovalAction, subjectId: string, what: (tier: PolicyTier) => string, act: (approval: Approval) => Promise<void>) => {
-    // One confirmation at a time: a second click while the first is in flight would issue a second
-    // approval and leave the first one dangling until it expired.
+  const ask = (input: Omit<Parameters<typeof confirmStep>[0], 'requestApproval'>) => {
+    // One confirmation at a time. The box is built from the level the server already published for
+    // this row; the decision itself is only asked for if the person agrees.
     if (busy || pending !== null) return
-    setBusy(true)
-    try {
-      const ticket = await api.requestApproval(action, subjectId)
-      // The text comes from the tier the SERVER just decided, never from the row the page loaded:
-      // if the integration was re-registered meanwhile, the box would otherwise state two tiers.
-      setPending({ tier: ticket.tier, what: what(ticket.tier), approvalId: ticket.approval_id, run: act })
-    } catch (error) { report(error) } finally { setBusy(false) }
+    setPending(confirmStep({ ...input, requestApproval: api.requestApproval }))
   }
   const enable = (item: Integration) => {
     const tier = item.requires_approval_tier
     // T0/T1 go straight through; T2/T3 ask the server for an approval first.
     if (tier === null || tier === undefined) return void run(() => api.setEnabled(item.integration_id, true).then(() => undefined))
     notify(null)
-    void ask('integration.enabled', item.integration_id, decided => fill(t.integrations.needsApproval, { tier: tierLabel(decided) }),
-      approval => api.setEnabled(item.integration_id, true, approval).then(() => undefined))
+    void ask({
+      tier, action: 'integration.enabled', subjectId: item.integration_id,
+      describe: decided => fill(t.integrations.needsApproval, { tier: tierLabel(decided) }),
+      run: approval => api.setEnabled(item.integration_id, true, approval).then(() => undefined),
+    })
   }
   const confirm = () => {
-    const action = pending
-    if (action === null) return
+    const step = pending
+    if (step === null) return
     setPending(null)
-    void run(() => action.run({ approval_id: action.approvalId }))
+    void run(async () => {
+      const outcome = await step.confirm()
+      // The server now demands MORE than the box said (the record changed while the person read it):
+      // nothing was done, and the same action is asked again at the level it really costs.
+      if (outcome.kind === 'tier-changed') { setPending(outcome.step); notify({ kind: 'info', text: t.confirm.changed }) }
+    })
   }
   return <section className="hub-card" aria-labelledby="hub-integrations-title">
     <div className="hub-card-heading"><Plug aria-hidden="true" /><h2 id="hub-integrations-title">{t.integrations.title}</h2></div>

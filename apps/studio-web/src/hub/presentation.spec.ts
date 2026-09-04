@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import t from '../i18n/hub.pt-BR.json'
-import { actionLabel, approvalNote, approvalPrompt, enableExplanation, exportable, fill, formatBytes, isHubPath, kindLabel, outcomeLabel, tierLabel, verificationLabel } from './presentation'
+import { actionLabel, approvalNote, approvalPrompt, confirmStep, enableExplanation, exportable, fill, formatBytes, isHubPath, kindLabel, outcomeLabel, tierLabel, verificationLabel, type PolicyTier } from './presentation'
 
 describe('hub presentation', () => {
   it('opens the hub only at /studio/hub (with or without slash)', () => {
@@ -17,6 +17,47 @@ describe('hub presentation', () => {
     expect(approvalPrompt('T2')).toBe(t.confirm.T2)
     expect(approvalPrompt('T3')).toBe(t.confirm.T3)
     expect(approvalPrompt('T3')).toContain('passkey')
+  })
+
+  it('asks the server for the decision only after the person confirms, never while the box is shown', async () => {
+    const asked: Array<[string, string, string | undefined]> = []
+    const ran: string[] = []
+    const step = confirmStep({
+      tier: 'T2', action: 'smtp.configured', subjectId: 'smtp', payload: 'DZ23_APP_SMTP',
+      describe: tier => `nível ${tier}`,
+      requestApproval: async (action, subjectId, payload) => { asked.push([action, subjectId, payload]); return { approval_id: 'ap-1', tier: 'T2' } },
+      run: async approval => { ran.push(approval.approval_id) },
+    })
+    // Building the step — which is what putting the box on screen does — sends NOTHING. Asking for
+    // the ticket first meant that cancelling had already left a decision, and an audit event, on the
+    // server for something the person went on to refuse.
+    expect(step.what).toBe('nível T2')
+    expect(asked).toEqual([])
+    expect(ran).toEqual([])
+    expect(await step.confirm()).toEqual({ kind: 'done' })
+    expect(asked).toEqual([['smtp.configured', 'smtp', 'DZ23_APP_SMTP']])
+    expect(ran).toEqual(['ap-1'])
+  })
+
+  it('does nothing when the server now demands a higher level than the box announced', async () => {
+    const ran: string[] = []
+    const tiers: PolicyTier[] = ['T3', 'T3']
+    const step = confirmStep({
+      tier: 'T2', action: 'integration.enabled', subjectId: 'i-1',
+      describe: tier => `nível ${tier}`,
+      requestApproval: async () => ({ approval_id: 'ap-2', tier: tiers.shift() ?? 'T2' }),
+      run: async approval => { ran.push(approval.approval_id) },
+    })
+    const outcome = await step.confirm()
+    // The person agreed to T2 and the server now says T3: nothing runs, and the same action comes
+    // back as a NEW question at the level it really costs.
+    expect(ran).toEqual([])
+    expect(outcome.kind).toBe('tier-changed')
+    if (outcome.kind !== 'tier-changed') throw new Error('esperado tier-changed')
+    expect(outcome.step.tier).toBe('T3')
+    expect(outcome.step.what).toBe('nível T3')
+    expect(await outcome.step.confirm()).toEqual({ kind: 'done' })
+    expect(ran).toEqual(['ap-2'])
   })
 
   it('translates every kind, tier, action and outcome the server can send', () => {
