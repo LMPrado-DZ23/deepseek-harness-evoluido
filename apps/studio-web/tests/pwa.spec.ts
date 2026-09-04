@@ -1,5 +1,6 @@
 import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { Socket } from 'node:net'
+import pwa from '../src/i18n/pwa.pt-BR.json' with { type: 'json' }
 import { expect, test, type BrowserContext } from '@playwright/test'
 
 /**
@@ -99,7 +100,8 @@ test('serve a casca com o servidor fora do ar, sem nunca ter dados de projeto no
     const response = await fetch('/api/studio/apps/projects')
     return { status: response.status, body: await response.json() as unknown }
   })
-  expect(offlineApi).toEqual({ status: 503, body: { error: 'OFFLINE', offline: true } })
+  // The device HAS network; the Studio is what is gone. The two causes are not the same sentence.
+  expect(offlineApi).toEqual({ status: 503, body: { error: 'SERVICE_UNREACHABLE', offline: false, serviceUnreachable: true } })
   const cachedPaths = await page.evaluate(async () => {
     const urls: string[] = []
     for (const name of await caches.keys()) for (const request of await (await caches.open(name)).keys()) urls.push(new URL(request.url).pathname)
@@ -111,7 +113,15 @@ test('serve a casca com o servidor fora do ar, sem nunca ter dados de projeto no
   // Browser-level offline (navigator.onLine=false) drives the banner.
   await context.setOffline(true)
   await expect(page.locator('.pwa-offline-banner')).toBeVisible()
-  await expect(page.locator('.pwa-offline-banner')).toHaveText('Você está sem internet. O Studio continua aberto, mas suas ações vão esperar a conexão voltar.')
+  await expect(page.locator('.pwa-offline-banner')).toHaveText(pwa.offline.banner)
+  // No promise of a queue: the text says the screen stays open and nothing can be created, saved or sent.
+  expect(pwa.offline.banner).not.toMatch(/esperar a conexão/u)
+  // Now the device really is offline, and the worker says so with the other code.
+  const trulyOffline = await page.evaluate(async () => {
+    const response = await fetch('/api/studio/apps/projects')
+    return { status: response.status, body: await response.json() as unknown }
+  })
+  expect(trulyOffline).toEqual({ status: 503, body: { error: 'OFFLINE', offline: true } })
   await context.setOffline(false)
   await expect(page.locator('.pwa-offline-banner')).toBeHidden()
 })

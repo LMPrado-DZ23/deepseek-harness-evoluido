@@ -16,6 +16,8 @@
     "failed": "A criação parou. Abra o Studio para ver o motivo.",
     "cancelled": "A criação foi cancelada.",
     "blocked": "O ambiente isolado não está disponível neste computador.",
-    "title": "DZ23 STUDIO"
+    "title": "DZ23 STUDIO",
+    "granted": "Este aparelho vai avisar quando a criação terminar.",
+    "denied": "Os avisos estão bloqueados para este site. Se mudar de ideia, libere as notificações nas configurações do navegador."
   }
 }

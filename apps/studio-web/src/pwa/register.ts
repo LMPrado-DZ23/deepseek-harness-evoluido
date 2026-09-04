@@ -1,5 +1,5 @@
 import t from '../i18n/pwa.pt-BR.json'
-import { attachGenerationNotifications, browserNotificationPort, type NotificationPort } from './notifications'
+import { attachGenerationNotifications, browserNotificationPort, notificationPortFor, type NotificationPort } from './notifications'
 import './pwa.css'
 
 interface BeforeInstallPromptEvent extends Event {
@@ -70,13 +70,30 @@ export function registerStudioPwa(env: PwaEnvironment = { window, document, navi
   env.window.addEventListener('appinstalled', onInstalled)
   disposers.push(() => { env.window.removeEventListener('beforeinstallprompt', onBeforeInstall); env.window.removeEventListener('appinstalled', onInstalled); installButton.remove() })
 
-  disposers.push(attachGenerationNotifications(env.window, env.notifications, () => env.document.visibilityState === 'hidden'))
+  // The port is bound to whatever is available now; once the worker is ready it is
+  // rebound to the registration, which is the only path that works on Android.
+  let detachNotifications = attachGenerationNotifications(env.window, env.notifications, () => env.document.visibilityState === 'hidden')
+  let disposed = false
+  void notificationPortFor(env.navigator).then(port => {
+    if (disposed || port === undefined) return
+    detachNotifications()
+    detachNotifications = attachGenerationNotifications(env.window, port, () => env.document.visibilityState === 'hidden')
+  }).catch(() => undefined)
+  disposers.push(() => { disposed = true; detachNotifications() })
   return () => { for (const dispose of disposers.splice(0)) dispose() }
 }
 
-/** Ask for notification permission from a user gesture; returns the resulting permission. */
-export async function enableGenerationNotifications(port: NotificationPort | undefined = browserNotificationPort()): Promise<NotificationPermission | 'unsupported'> {
-  if (port === undefined) return 'unsupported'
-  if (port.permission === 'granted') return 'granted'
-  return port.requestPermission()
+/**
+ * Ask for notification permission. Browsers only accept this from a user
+ * gesture, so it must be called from a click handler — `NotificationOptIn` is
+ * that button. Never called on load: an unprompted permission dialog is the
+ * fastest way to a permanent "denied".
+ */
+export async function enableGenerationNotifications(port?: NotificationPort | undefined): Promise<NotificationPermission | 'unsupported'> {
+  const resolved = port ?? await notificationPortFor(navigator)
+  if (resolved === undefined) return 'unsupported'
+  if (resolved.permission === 'granted') return 'granted'
+  return resolved.requestPermission()
 }
+
+export { browserNotificationPort, notificationPortFor } from './notifications'

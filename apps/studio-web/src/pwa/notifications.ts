@@ -21,13 +21,40 @@ export interface NotificationPort {
   show(title: string, body: string): void
 }
 
-/** Browser Notification API behind a port so tests and unsupported browsers are explicit. */
-export function browserNotificationPort(): NotificationPort | undefined {
+const NOTIFICATION_OPTIONS = { icon: '/studio/icons/icon-192.png', badge: '/studio/icons/icon-192.png', tag: 'dz23-generation' } as const
+
+/**
+ * Browser Notification API behind a port so tests and unsupported browsers are
+ * explicit. On Android/Chrome `new Notification(...)` throws
+ * (`Illegal constructor`) and only the service worker registration may show
+ * one, so the registration is used whenever there is one and the constructor is
+ * the fallback for desktop browsers without a worker.
+ */
+export function browserNotificationPort(registration?: ServiceWorkerRegistration | undefined): NotificationPort | undefined {
   if (typeof Notification === 'undefined') return undefined
   return {
     get permission() { return Notification.permission },
     requestPermission: () => Notification.requestPermission(),
-    show: (title, body) => { new Notification(title, { body, icon: '/studio/icons/icon-192.png', tag: 'dz23-generation' }) },
+    show: (title, body) => {
+      if (registration !== undefined) { void registration.showNotification(title, { body, ...NOTIFICATION_OPTIONS }) ; return }
+      // Throws on browsers that only allow the worker path: the notification is a courtesy, never a reason to break the page.
+      try { new Notification(title, { body, ...NOTIFICATION_OPTIONS }) } catch { /* the interface remains the source of truth */ }
+    },
+  }
+}
+
+/**
+ * The port bound to the service worker registration, when one is ready. Falls
+ * back to the constructor port so a browser without a worker still notifies.
+ */
+export async function notificationPortFor(navigatorRef: Navigator): Promise<NotificationPort | undefined> {
+  if (typeof Notification === 'undefined') return undefined
+  if (!('serviceWorker' in navigatorRef)) return browserNotificationPort()
+  try {
+    const registration = await navigatorRef.serviceWorker.ready
+    return browserNotificationPort(registration)
+  } catch {
+    return browserNotificationPort()
   }
 }
 

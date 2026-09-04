@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { attachGenerationNotifications, GENERATION_FINISHED_EVENT, notificationBodyFor, type NotificationPort } from './notifications'
+import { attachGenerationNotifications, browserNotificationPort, GENERATION_FINISHED_EVENT, notificationBodyFor, notificationPortFor, type NotificationPort } from './notifications'
 import t from '../i18n/pwa.pt-BR.json'
 
 function port(permission: NotificationPermission): NotificationPort & { shown: Array<[string, string]> } {
@@ -34,6 +34,30 @@ describe('local generation notifications', () => {
     detach()
     target.dispatchEvent(new CustomEvent(GENERATION_FINISHED_EVENT, { detail: { state: 'CANCELLED' } }))
     expect(granted.shown).toHaveLength(1)
+  })
+
+  it('shows through the service worker registration when there is one, and never breaks the page when the constructor is forbidden', async () => {
+    const shown: Array<[string, NotificationOptions | undefined]> = []
+    const registration = { showNotification: async (title: string, options?: NotificationOptions) => { shown.push([title, options]) } } as unknown as ServiceWorkerRegistration
+    const original = Reflect.get(globalThis, 'Notification') as unknown
+    // Android/Chrome: the constructor throws and only the registration may show a notification.
+    Reflect.set(globalThis, 'Notification', Object.assign(function Forbidden() { throw new TypeError('Illegal constructor') }, { permission: 'granted' as NotificationPermission }))
+    try {
+      const viaWorker = browserNotificationPort(registration)!
+      viaWorker.show(t.notifications.title, t.notifications.verified)
+      expect(shown).toEqual([[t.notifications.title, expect.objectContaining({ body: t.notifications.verified, tag: 'dz23-generation' })]])
+      // Without a registration the constructor is tried and its refusal is swallowed: the page keeps working.
+      expect(() => browserNotificationPort()!.show('x', 'y')).not.toThrow()
+      // The port follows `serviceWorker.ready`, which is the only path that works on Android.
+      const port = await notificationPortFor({ serviceWorker: { ready: Promise.resolve(registration) } } as unknown as Navigator)
+      port!.show('t', 'b')
+      expect(shown).toHaveLength(2)
+      // A worker that never becomes ready still leaves a usable port instead of no notifications at all.
+      expect(await notificationPortFor({ serviceWorker: { ready: Promise.reject(new Error('no worker')) } } as unknown as Navigator)).toBeDefined()
+      expect(await notificationPortFor({} as Navigator)).toBeDefined()
+    } finally {
+      Reflect.set(globalThis, 'Notification', original)
+    }
   })
 
   it('stays silent without permission or without a Notification API', () => {

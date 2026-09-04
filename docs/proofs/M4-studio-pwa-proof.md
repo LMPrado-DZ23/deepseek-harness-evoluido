@@ -19,3 +19,32 @@ Além disso, o service worker passou a distinguir duas causas que antes eram a m
 `OFFLINE` (o aparelho está sem rede) e `SERVICE_UNREACHABLE` (há rede, mas o Studio não
 respondeu — desligado ou reiniciando). O corpo do 503 carrega o código correspondente e a
 interface tem uma frase para cada. Fila/`background sync` permanece `NOT_PRESENT`.
+
+## Notificações: caminho do service worker e permissão por gesto (04/09/2026, mesma revisão)
+
+O módulo mostrava a notificação com `new Notification(...)`. No Android/Chrome esse construtor
+é **proibido** (`Illegal constructor`): quando existe service worker, só
+`ServiceWorkerRegistration.showNotification()` funciona. Corrigido: o porto passa a usar a
+registração assim que `navigator.serviceWorker.ready` resolve, o construtor fica de reserva para
+navegadores de mesa sem worker, e a recusa dele é engolida — a notificação é cortesia e nunca
+motivo para quebrar a tela. Teste novo simula o construtor proibido e verifica que a notificação
+sai pela registração (25/25 unitários no `apps/studio-web`).
+
+A permissão passou a ter um lugar só: o componente `NotificationOptIn`, que pede **a partir do
+clique** (fora de um gesto do usuário o navegador recusa, e um pedido não solicitado é o caminho
+mais rápido para um "bloqueado" permanente) e diz em palavras o que o navegador respondeu,
+inclusive quando ficou bloqueado — o que só as configurações do próprio navegador desfazem.
+
+**O estado da matriz continua `NOT_IMPLEMENTED`, de propósito:** a interface principal
+(`App.tsx`, arquivo do Codex) ainda não aplicou `INTEGRACAO_App_tsx_M4_M5.patch`, e **nada disso
+foi provado em aparelho físico**. Notificação em celular real não é algo que se declare pronto a
+partir de um teste em Chromium de mesa.
+
+### Achado meu, na própria correção
+
+A prova em Chromium (`tests/pwa.spec.ts`) ainda afirmava o texto ANTIGO da faixa e o código
+`OFFLINE` para o caso "servidor fora do ar com internet funcionando". Ou seja: a correção de
+honestidade tinha sido feita no produto e não no teste que a vigia. Corrigido no mesmo dia — o
+teste agora exige `SERVICE_UNREACHABLE` quando só o Studio caiu, `OFFLINE` quando o aparelho
+está mesmo sem rede (`context.setOffline(true)`), e falha se a frase da faixa voltar a prometer
+que as ações "vão esperar a conexão". Playwright 6/6 em Chromium real.
