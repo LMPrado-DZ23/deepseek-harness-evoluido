@@ -36,10 +36,16 @@ WORKDIR /workspace
 ENV DSH_CLIENT_COMMIT_HASH=6c705be1ce6774a000d061da41d1823b03a3d42c
 COPY --from=dependency-fetch /pnpm/store /pnpm/store
 COPY . .
+# The pinned upstream ships its own workspace boundary. The product build uses
+# the single audited root lockfile, so remove only the build-container copies
+# after integrity verification. Otherwise nested pnpm invocations try to
+# resolve the second lockfile and escape the offline build boundary.
 RUN test -n "${STUDIO_COMMIT}" \
  && node scripts/check-image-lock.mjs \
  && node scripts/check-upstream-content.mjs --materialize-symlinks \
- && node scripts/check-portability.mjs --all-files
+ && node scripts/check-portability.mjs --all-files \
+ && rm third_party/deepseek-harness/pnpm-workspace.yaml \
+       third_party/deepseek-harness/pnpm-lock.yaml
 RUN --network=none pnpm install --offline --frozen-lockfile --trust-lockfile --store-dir /pnpm/store
 RUN --network=none pnpm --dir third_party/deepseek-harness build:official
 # Reinject the upstream packages after build:official; their lib/ trees do not
