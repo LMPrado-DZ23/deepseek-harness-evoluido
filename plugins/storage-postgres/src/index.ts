@@ -9,6 +9,9 @@ import { assertConfiguredSchemaName } from './schema.js'
 export { PostgresStorageBackend } from './backend.js'
 export type { PostgresStorageBackendConfig } from './backend.js'
 export { StudioStorageError } from './errors.js'
+export { PostgresCapacityGovernor } from './capacity.js'
+export type { CapacityTakeoverRequest, PostgresCapacityGovernorOptions } from './capacity.js'
+export { CAPACITY_POSTGRES_LAYOUT_VERSION } from './capacity-schema.js'
 export {
   POSTGRES_IDENTIFIER_MAX_LENGTH,
   POSTGRES_SCHEMA_MAX_LENGTH,

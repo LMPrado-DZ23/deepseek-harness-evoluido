@@ -21,6 +21,7 @@
     "@deepseek-ai/dsh-storage-domain": "link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage-domain",
     "@deepseek-ai/dsh-storage-sqlite": "link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage-sqlite",
     "@deepseek-ai/schemastery": "link:/home/leandro/harness-studio-poc02/deepseek-harness/vendor/schemastery",
+    "@dz23-studio/runtime-governor": "workspace:*",
     "pg": "8.23.0"
   },
   "devDependencies": {

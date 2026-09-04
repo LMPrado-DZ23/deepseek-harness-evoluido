@@ -314,6 +314,9 @@ importers:
       '@deepseek-ai/schemastery':
         specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/vendor/schemastery
         version: link:../../../harness-studio-poc02/deepseek-harness/vendor/schemastery
+      '@dz23-studio/runtime-governor':
+        specifier: workspace:*
+        version: link:../runtime-governor
       pg:
         specifier: 8.23.0
         version: 8.23.0
