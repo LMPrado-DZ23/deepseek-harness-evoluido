@@ -23,4 +23,4 @@ allowBuilds:
   sharp: true
   koffi: true
   node-pty: true
-  '@deepseek-ai/dsh-subprocess-local': true
+  '@deepseek-ai/dsh-subprocess-local@file:third_party/deepseek-harness/packages/subprocess/subprocess-local': true
