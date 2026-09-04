@@ -1,6 +1,6 @@
 import { createServer, request as httpRequest, type IncomingMessage, type ServerResponse } from 'node:http'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createPreviewProjectHttpExtension } from '../src/http.ts'
+import { createPreviewProjectHttpExtension, PREVIEW_ROUTE_CONTRACTS } from '../src/http.ts'
 import { PreviewError, type PreviewActor, type StudioPreviewService } from '../src/service.ts'
 
 interface HttpResult {
@@ -79,6 +79,13 @@ async function send(
 }
 
 describe('preview project HTTP extension', () => {
+  it('declares every preview route with tenant-aware RBAC', () => {
+    expect(PREVIEW_ROUTE_CONTRACTS).toHaveLength(7)
+    expect(PREVIEW_ROUTE_CONTRACTS.every(route => route.access === 'authorized' && route.scope === 'project')).toBe(true)
+    expect(PREVIEW_ROUTE_CONTRACTS.find(route => route.path.endsWith('/heartbeat'))?.permission).toBe('project.write')
+    expect(PREVIEW_ROUTE_CONTRACTS.find(route => route.path.endsWith('/messages'))?.permission).toBe('project.write')
+  })
+
   it('maps list, start, get/health, logs, preview messages, heartbeat and delete to the scoped service port', async () => {
     const service = fakeService()
 

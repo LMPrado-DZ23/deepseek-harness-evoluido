@@ -323,6 +323,9 @@ importers:
       '@dz23-studio/identity':
         specifier: workspace:*
         version: link:../identity
+      '@dz23-studio/preview':
+        specifier: workspace:*
+        version: link:../preview
 
   plugins/tenancy:
     dependencies:

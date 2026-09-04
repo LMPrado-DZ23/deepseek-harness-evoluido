@@ -1,9 +1,22 @@
 import type { ServerResponse } from 'node:http'
 import { z } from 'zod'
 import type { PromptToAppHttpExtension, PromptToAppHttpExtensionRequest } from '@dz23-studio/prompt-to-app'
+import { assertRouteContracts, type StudioRouteContract } from '@dz23-studio/policy'
 import { PreviewError, type StudioPreviewService } from './service.js'
 
 const startSchema = z.object({ run_id: z.string().min(1).max(200).optional() }).strict()
+
+export const PREVIEW_ROUTE_CONTRACTS = [
+  { method: 'GET', path: '/projects/:projectId/previews', access: 'authorized', permission: 'project.read', scope: 'project' },
+  { method: 'POST', path: '/projects/:projectId/previews', access: 'authorized', permission: 'project.write', scope: 'project' },
+  { method: 'GET', path: '/projects/:projectId/previews/:previewId', access: 'authorized', permission: 'project.read', scope: 'project' },
+  { method: 'DELETE', path: '/projects/:projectId/previews/:previewId', access: 'authorized', permission: 'project.write', scope: 'project' },
+  { method: 'GET', path: '/projects/:projectId/previews/:previewId/logs', access: 'authorized', permission: 'project.read', scope: 'project' },
+  { method: 'GET', path: '/projects/:projectId/previews/:previewId/messages', access: 'authorized', permission: 'project.write', scope: 'project' },
+  { method: 'POST', path: '/projects/:projectId/previews/:previewId/heartbeat', access: 'authorized', permission: 'project.write', scope: 'project' },
+] as const satisfies readonly StudioRouteContract[]
+
+assertRouteContracts(PREVIEW_ROUTE_CONTRACTS)
 
 export function createPreviewProjectHttpExtension(service: StudioPreviewService): PromptToAppHttpExtension {
   return async (input): Promise<boolean> => {

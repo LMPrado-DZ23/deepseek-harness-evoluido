@@ -104,7 +104,7 @@ export interface PublicPreview {
 }
 
 export class PreviewError extends Error {
-  constructor(readonly code: 'NOT_FOUND' | 'FORBIDDEN' | 'INVALID' | 'CONFLICT' | 'UNAVAILABLE', message: string) { super(message) }
+  constructor(readonly code: 'NOT_FOUND' | 'UNAUTHENTICATED' | 'FORBIDDEN' | 'INVALID' | 'CONFLICT' | 'UNAVAILABLE', message: string) { super(message) }
 }
 
 export class StudioPreviewService {
@@ -314,13 +314,18 @@ export class StudioPreviewService {
   authorize(hostname: string, cookie: string): { readonly previewId: string; readonly runtimeRef: string } {
     const now = this.#now()
     const preview = this.options.repository.previews().find(item => item.hostname === normalizeHost(hostname))
-    if (preview === undefined || preview.state !== 'READY' || preview.runtime_ref === null || Date.parse(preview.expires_at) <= now.getTime()) throw new PreviewError('NOT_FOUND', 'Prévia indisponível.')
+    if (preview === undefined) throw new PreviewError('NOT_FOUND', 'Prévia indisponível.')
+    if (preview.state !== 'READY' || preview.runtime_ref === null || Date.parse(preview.expires_at) <= now.getTime()) {
+      throw new PreviewError('UNAUTHENTICATED', 'Seu acesso a esta prévia expirou ou foi encerrado.')
+    }
     const admission = this.options.repository.admissions().find(item => item.preview_id === preview.preview_id
-      && item.cookie_hash === hashSecret(cookie) && item.revoked_at === null && Date.parse(item.expires_at) > now.getTime())
-    if (admission === undefined) throw new PreviewError('NOT_FOUND', 'Prévia indisponível.')
+      && item.cookie_hash === hashSecret(cookie))
+    if (admission === undefined || admission.revoked_at !== null || Date.parse(admission.expires_at) <= now.getTime()) {
+      throw new PreviewError('UNAUTHENTICATED', 'Seu acesso a esta prévia expirou ou foi encerrado.')
+    }
     const active = this.options.sessions.isActive({ sessionId: admission.source_session_id, userId: admission.user_id, orgId: admission.org_id, tenantId: admission.tenant_id })
     if (!active || !this.options.sessions.canRead({ userId: admission.user_id, orgId: admission.org_id, tenantId: admission.tenant_id })) {
-      throw new PreviewError('FORBIDDEN', 'Seu acesso a esta prévia foi encerrado.')
+      throw new PreviewError('UNAUTHENTICATED', 'Seu acesso a esta prévia expirou ou foi encerrado.')
     }
     return { previewId: preview.preview_id, runtimeRef: preview.runtime_ref }
   }

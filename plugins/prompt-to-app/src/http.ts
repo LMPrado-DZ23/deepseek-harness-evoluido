@@ -98,7 +98,9 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
       const path = new URL(request.url ?? '/', 'http://local').pathname
       const route = path.slice('/api/studio/apps'.length)
       const matched = matchRoute(request.method, route)
-      const extension = /^\/projects\/([^/]+)(\/previews(?:\/[^/]+)?(?:\/(?:logs|messages))?)$/u.exec(route)
+      // The core authenticates every extension request, but each extension owns
+      // its exact suffix grammar. This prevents a second route list from drifting.
+      const extension = matched === undefined ? /^\/projects\/([^/]+)(\/.+)$/u.exec(route) : null
       if (matched === undefined && extension === null) return json(response, 404, { error: t('errors.routeNotFound') })
       const actor = await authenticatedActor(request, config)
       if (extension !== null) {

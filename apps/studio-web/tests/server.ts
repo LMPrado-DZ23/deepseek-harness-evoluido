@@ -176,7 +176,10 @@ const apiHandler = createPromptToAppHttpHandler({
   generatorFor: (actor, projectId) => new ModelCodeGenerator(model, actor, service.project(actor, projectId).privacy),
   health: async () => ({ state: 'OK', route: 'ollama-local', builder: 'OK', disk: 'OK' }), allowedHosts: [host], allowedOrigins: [`http://${host}`],
 })
-const webHandler = createStudioWebHandler({ distDirectory: resolve(root, 'apps', 'studio-web', 'dist'), identity, allowedHosts: [host] })
+const webHandler = createStudioWebHandler({
+  distDirectory: resolve(root, 'apps', 'studio-web', 'dist'), identity, allowedHosts: [host],
+  previewFrameSources: ['http://*.localhost:4179'],
+})
 const previewForward: PreviewForwardPort = {
   async forward(runtimeRef, forwarded) {
     if (!previewRuntime.managed.has(runtimeRef)) return { status: 404, body: Buffer.from('runtime missing') }

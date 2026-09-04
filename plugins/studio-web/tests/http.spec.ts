@@ -13,12 +13,14 @@ afterEach(async () => {
   await Promise.all(temporary.splice(0).map(path => rm(path, { recursive: true, force: true })))
 })
 
-async function fixture() {
+async function fixture(previewFrameSources: readonly string[] = []) {
   const root = await mkdtemp(join(tmpdir(), 'dz23-web-')); temporary.push(root)
   await mkdir(join(root, 'assets')); await writeFile(join(root, 'index.html'), '<main>DZ23 STUDIO</main>'); await writeFile(join(root, 'assets/app.js'), 'ok')
   const identity = { authenticate: vi.fn(() => Promise.resolve({ session_id: 'session' })) }
   const allowedHosts: string[] = []
-  const server = createServer(createStudioWebHandler({ distDirectory: root, identity: identity as unknown as StudioIdentityService, allowedHosts }))
+  const server = createServer(createStudioWebHandler({
+    distDirectory: root, identity: identity as unknown as StudioIdentityService, allowedHosts, previewFrameSources,
+  }))
   servers.push(server)
   await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve) })
   const port = (server.address() as AddressInfo).port; const host = `127.0.0.1:${port}`; allowedHosts.push(host)
@@ -38,9 +40,21 @@ describe('authenticated Studio web surface', () => {
   })
 
   it('sets a restrictive browser policy and supports HEAD without a body', async () => {
-    const f = await fixture(); const response = await f.request('/', { method: 'HEAD' })
-    expect(response.status).toBe(200); expect(response.headers.get('content-security-policy')).toContain("connect-src 'self'")
+    const f = await fixture(['http://*.localhost:4179']); const response = await f.request('/', { method: 'HEAD' })
+    const policy = response.headers.get('content-security-policy') ?? ''
+    expect(response.status).toBe(200); expect(policy).toContain("connect-src 'self'")
+    expect(policy).toContain('frame-src http://*.localhost:4179')
+    expect(policy).toContain("frame-ancestors 'none'")
+    expect(policy).not.toContain('frame-src *;')
+    expect(response.headers.get('x-frame-options')).toBe('DENY')
     expect(await response.text()).toBe('')
+  })
+
+  it('fails at startup for broad or injectable preview frame sources', () => {
+    const input = { distDirectory: '.', identity: {} as StudioIdentityService, allowedHosts: [] }
+    expect(() => createStudioWebHandler({ ...input, previewFrameSources: ['*'] })).toThrow('previewFrameSources')
+    expect(() => createStudioWebHandler({ ...input, previewFrameSources: ['http://*.localhost:4179; script-src *'] })).toThrow('previewFrameSources')
+    expect(() => createStudioWebHandler({ ...input, previewFrameSources: ['https://*.example.com'] })).toThrow('previewFrameSources')
   })
 
   it('fails closed for missing sessions, hostile hosts, traversal, missing assets and mutations', async () => {

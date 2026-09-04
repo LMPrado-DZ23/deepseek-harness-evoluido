@@ -1,5 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
+import type {} from '@dz23-studio/preview'
 import {
   IdentityError,
   assertRequestTrust,
@@ -12,22 +13,25 @@ import { extname, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export const name = 'dz23-studio-web'
-export const inject = ['studioIdentity', 'webServer']
+export const inject = ['studioIdentity', 'studioPreview', 'webServer']
 
 export interface StudioWebConfig {
   readonly distDirectory?: string
   readonly allowedHosts?: readonly string[]
+  readonly previewFrameSources?: readonly string[]
 }
 
 export function createStudioWebHandler(config: {
   readonly distDirectory: string
   readonly identity: StudioIdentityService
   readonly allowedHosts: readonly string[]
+  readonly previewFrameSources?: readonly string[]
 }) {
+  const frameSources = normalizePreviewFrameSources(config.previewFrameSources ?? [])
   return async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     try {
       assertRequestTrust(request, { allowedHosts: config.allowedHosts, allowedOrigins: [] })
-      if (request.method !== 'GET' && request.method !== 'HEAD') return send(response, 405, 'Método não permitido.')
+      if (request.method !== 'GET' && request.method !== 'HEAD') return send(response, 405, 'Método não permitido.', frameSources)
       await config.identity.authenticate(requiredSessionToken(request))
       const root = await realpath(config.distDirectory)
       const pathname = new URL(request.url ?? '/studio', 'http://local').pathname
@@ -35,12 +39,12 @@ export function createStudioWebHandler(config: {
       const candidate = safeTarget(root, requested)
       const selected = await selectFile(root, candidate, requested)
       const body = await readFile(selected)
-      response.writeHead(200, securityHeaders(contentType(selected)))
+      response.writeHead(200, securityHeaders(contentType(selected), frameSources))
       response.end(request.method === 'HEAD' ? undefined : body)
     } catch (error) {
       const status = error instanceof IdentityError ? error.code === 'locked' ? 429 : 401
         : error instanceof StaticFileError ? error.status : 500
-      send(response, status, error instanceof Error ? error.message : 'Não foi possível abrir a interface.')
+      send(response, status, error instanceof Error ? error.message : 'Não foi possível abrir a interface.', frameSources)
     }
   }
 }
@@ -55,6 +59,7 @@ export async function apply(ctx: Context, config: StudioWebConfig = {}): Promise
     handler: createStudioWebHandler({
       distDirectory, identity: ctx.studioIdentity.service,
       allowedHosts: config.allowedHosts ?? [defaultHost, `localhost:${port}`],
+      previewFrameSources: config.previewFrameSources ?? [ctx.studioPreview.frameSource],
     }),
   }), 'dz23-studio-web.http')
 }
@@ -88,16 +93,27 @@ function contentType(path: string): string {
   } as Readonly<Record<string, string>>)[extname(path).toLowerCase()] ?? 'application/octet-stream'
 }
 
-function securityHeaders(type: string): Record<string, string> {
+function securityHeaders(type: string, frameSources: readonly string[]): Record<string, string> {
+  const frameSource = frameSources.length === 0 ? "'none'" : frameSources.join(' ')
   return {
     'content-type': type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff',
     'x-frame-options': 'DENY', 'referrer-policy': 'no-referrer',
-    'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+    'content-security-policy': `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-src ${frameSource}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`,
   }
 }
 
-function send(response: ServerResponse, status: number, message: string): void {
+function normalizePreviewFrameSources(values: readonly string[]): readonly string[] {
+  return [...new Set(values.map(value => {
+    const local = /^http:\/\/\*\.localhost(?::([1-9]\d{0,4}))?$/u.exec(value)
+    if (local !== null && (local[1] === undefined || Number(local[1]) <= 65_535)) return value
+    const hosted = /^https:\/\/\*\.preview\.([a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)$/u.exec(value)
+    if (hosted !== null && hosted[1]!.includes('.') && !hosted[1]!.includes('..')) return value
+    throw new Error('previewFrameSources aceita somente HTTP local com porta exata ou HTTPS em *.preview.<domínio>.')
+  }))]
+}
+
+function send(response: ServerResponse, status: number, message: string, frameSources: readonly string[] = []): void {
   if (response.writableEnded) return
-  response.writeHead(status, securityHeaders('text/plain; charset=utf-8'))
+  response.writeHead(status, securityHeaders('text/plain; charset=utf-8', frameSources))
   response.end(message)
 }

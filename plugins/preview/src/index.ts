@@ -39,6 +39,8 @@ export interface PreviewPluginConfig {
 export interface StudioPreviewRuntime {
   readonly service: StudioPreviewService
   readonly state: 'BETA' | 'NOT_CONFIGURED'
+  /** Narrow CSP source matching the exact local gateway port used in preview URLs. */
+  readonly frameSource: string
   readonly cleanupFailureAt: string | null
 }
 
@@ -67,6 +69,7 @@ class UnconfiguredRuntime implements PreviewRuntimePort {
 }
 
 export async function apply(ctx: Context, config: PreviewPluginConfig = {}): Promise<void> {
+  const publicPort = config.publicPort ?? ctx.webServer.port
   const [previewsDomain, admissionsDomain]: [
     Domain<typeof studioPreviewsDomainSpec>, Domain<typeof studioPreviewAdmissionsDomainSpec>,
   ] = await Promise.all([
@@ -82,7 +85,7 @@ export async function apply(ctx: Context, config: PreviewPluginConfig = {}): Pro
     repository,
     runtime,
     ...(config.ttlSeconds === undefined ? {} : { ttlSeconds: config.ttlSeconds }),
-    publicPort: config.publicPort ?? ctx.webServer.port,
+    publicPort,
     onCleanupFailure: () => { cleanupFailureAt = new Date().toISOString() },
     ...(config.runtimeTimeoutMs === undefined ? {} : { runtimeTimeoutMs: config.runtimeTimeoutMs }),
     source: {
@@ -133,6 +136,12 @@ export async function apply(ctx: Context, config: PreviewPluginConfig = {}): Pro
   ctx.provide('studioPreview', {
     service,
     state: config.runtime === undefined ? 'NOT_CONFIGURED' : 'BETA',
+    frameSource: localPreviewFrameSource(publicPort),
     get cleanupFailureAt() { return cleanupFailureAt },
   })
+}
+
+export function localPreviewFrameSource(publicPort: number): string {
+  if (!Number.isInteger(publicPort) || publicPort < 1 || publicPort > 65_535) throw new Error('publicPort deve ser uma porta TCP válida.')
+  return `http://*.localhost${publicPort === 80 ? '' : `:${publicPort}`}`
 }

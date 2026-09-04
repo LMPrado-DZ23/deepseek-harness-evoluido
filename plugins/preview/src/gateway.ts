@@ -83,7 +83,10 @@ export function createPreviewGatewayHttpHandler(options: PreviewGatewayOptions) 
         body: await readBoundedBody(request, FORWARD_BODY_LIMIT),
       })
       writeForwardedResponse(response, forwarded, headers)
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'UNAUTHENTICATED') {
+        return plain(response, 401, 'Entre novamente no DZ23 STUDIO para ver esta prévia.', headers)
+      }
       return plain(response, 404, 'Prévia indisponível.', headers)
     }
   }

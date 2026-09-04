@@ -2,7 +2,7 @@ import { createServer, request as httpRequest, type IncomingMessage, type Server
 import { createConnection } from 'node:net'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createPreviewGatewayHttpHandler, PREVIEW_COOKIE, type PreviewForwardPort } from '../src/gateway.ts'
-import type { StudioPreviewService } from '../src/service.ts'
+import { PreviewError, type StudioPreviewService } from '../src/service.ts'
 
 interface HttpResult {
   readonly status: number
@@ -153,6 +153,28 @@ describe('preview gateway trust boundary', () => {
     expect(result.status).toBe(401)
     expect(h.service.authorize).not.toHaveBeenCalled()
     expect(h.forward.forward).not.toHaveBeenCalled()
+  })
+
+  it('returns 401 for an expired or revoked admission without revealing an unknown host', async () => {
+    const expiredService = fakeService({
+      authorize: vi.fn(() => { throw new PreviewError('UNAUTHENTICATED', 'expired') }),
+    })
+    const expired = gateway(expiredService)
+    const expiredResult = await send(expired.handler, {
+      headers: { host: previewHost, cookie: `${PREVIEW_COOKIE}=expired-cookie` },
+    })
+    expect(expiredResult.status).toBe(401)
+    expect(expired.forward.forward).not.toHaveBeenCalled()
+
+    const missingService = fakeService({
+      authorize: vi.fn(() => { throw new PreviewError('NOT_FOUND', 'missing') }),
+    })
+    const missing = gateway(missingService)
+    const missingResult = await send(missing.handler, {
+      headers: { host: previewHost, cookie: `${PREVIEW_COOKIE}=unknown-cookie` },
+    })
+    expect(missingResult.status).toBe(404)
+    expect(missing.forward.forward).not.toHaveBeenCalled()
   })
 
   it('rejects unsupported methods and invalid cookie encoding before forwarding', async () => {

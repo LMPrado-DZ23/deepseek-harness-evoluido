@@ -412,7 +412,7 @@ describe('StudioPreviewService admissions', () => {
     const cookie = (await h.service.exchange(host, first.admissionTicket)).cookie
     expect(h.service.authorize(host, cookie)).toEqual({ previewId: first.preview.preview_id, runtimeRef: 'container:preview-1' })
     membership = false
-    expect(() => h.service.authorize(host, cookie)).toThrowError(expect.objectContaining({ code: 'FORBIDDEN' }))
+    expect(() => h.service.authorize(host, cookie)).toThrowError(expect.objectContaining({ code: 'UNAUTHENTICATED' }))
   })
 })
 

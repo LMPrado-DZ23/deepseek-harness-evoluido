@@ -32,7 +32,10 @@ test('percorre as cinco etapas, muda privacidade e termina sem alegar publicaç�
     { name: 'dz23_studio_session', value: 'e2e', url: 'http://127.0.0.1:4179' },
     { name: 'dz23_studio_csrf', value: 'csrf-e2e', url: 'http://127.0.0.1:4179' },
   ])
-  await page.goto('/studio')
+  const studioResponse = await page.goto('/studio')
+  const studioPolicy = studioResponse?.headers()['content-security-policy'] ?? ''
+  expect(studioPolicy).toContain('frame-src http://*.localhost:4179')
+  expect(studioPolicy).toContain("frame-ancestors 'none'")
   await expect(page.getByRole('button', { name: 'Quero um painel para minha equipe criar, editar e excluir cadastros.' })).toBeVisible()
   await expect(page.getByText('Seus dados não são enviados para serviços externos.')).toBeVisible()
   await page.getByText('Permitir IA configurada', { exact: false }).click()
@@ -66,7 +69,8 @@ test('percorre as cinco etapas, muda privacidade e termina sem alegar publicaç�
   await openPreview.click()
   const previewFrameElement = page.getByTitle('Prévia isolada do protótipo')
   await expect(previewFrameElement).toHaveAttribute('sandbox', 'allow-scripts allow-forms allow-same-origin')
-  await expect(page.getByText('Isto é uma prévia local. Seu aplicativo não foi publicado na internet.')).toBeVisible()
+  await expect(page.getByText('Isto é uma prévia local. Seu aplicativo não foi publicado na internet.')).toHaveCount(1)
+  await expect(page.getByRole('button', { name: 'Ver meu protótipo' })).toHaveCount(0)
   const previewFrame = page.frameLocator('iframe[title="Prévia isolada do protótipo"]')
   await expect(previewFrame.getByRole('heading', { name: 'Protótipo E2E carregado' })).toBeVisible({ timeout: 10_000 })
   await expect(page.getByText('cliente@preview.local')).toBeVisible()
