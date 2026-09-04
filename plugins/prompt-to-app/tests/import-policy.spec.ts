@@ -199,6 +199,16 @@ describe('generated import policy', () => {
     }])).not.toThrow()
   })
 
+  it('handles default, namespace and mixed type/value imports from the fixed facade', () => {
+    expect(() => assertGeneratedSource([{
+      path: 'src/default.tsx', content: "import Generated from '@/src/components/generated'; void Generated; export default function App(){return <main/>}",
+    }, {
+      path: 'src/namespace.tsx', content: "import * as Generated from '@/src/components/generated'; void Generated; export default function App(){return <main/>}",
+    }, {
+      path: 'src/mixed.tsx', content: "import { type GeneratedProps, SchedulingPanel } from '@/src/components/generated'; void SchedulingPanel; export default function App(){return <main/>}",
+    }])).not.toThrow()
+  })
+
   it.each([
     "import type Link from 'next/link'; const Link='script'; export default function App(){return <Link>{'alert(1)'}</Link>}",
     "import { type LinkProps as Link } from 'next/link'; const Link='iframe'; export default function App(){return <Link/>}",
