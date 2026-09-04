@@ -136,12 +136,15 @@ describePostgres('hot snapshot of a PostgreSQL storage schema', () => {
     const database = `dz23_icu_${randomUUID().replaceAll('-', '').slice(0, 12)}`
     let created = false
     try {
-      try {
-        await admin.query(`CREATE DATABASE ${database} LOCALE_PROVIDER icu ICU_LOCALE 'pt-BR' TEMPLATE template0 ENCODING 'UTF8' LOCALE 'C.UTF-8'`)
-        created = true
-      } catch {
-        return // no ICU on this server: the claim cannot be checked here, and pretending otherwise would be worse
+      // A test that returns early when the server has no ICU is a guard that passes with zero
+      // items — exactly the shape this project treats as a failure. So: say NOT_EXECUTED out loud
+      // and go red, instead of reporting a green that proved nothing.
+      const icu = await admin.query<{ n: string }>(`SELECT count(*)::text AS n FROM pg_collation WHERE collprovider = 'i'`)
+      if (Number(icu.rows[0]?.n ?? '0') === 0) {
+        throw new Error('NOT_EXECUTED: this PostgreSQL server has no ICU collation, so the non-C locale claim cannot be checked here. Run the suite against a server built with ICU.')
       }
+      await admin.query(`CREATE DATABASE ${database} LOCALE_PROVIDER icu ICU_LOCALE 'pt-BR' TEMPLATE template0 ENCODING 'UTF8' LOCALE 'C.UTF-8'`)
+      created = true
       const icuDsn = new URL(dsn!)
       icuDsn.pathname = `/${database}`
       const schema = 'icu_probe'

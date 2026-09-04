@@ -1,7 +1,7 @@
 # M4 — Prova da interface do Studio como PWA
 
 - Resultado: **PASS** (Chromium real no ambiente do Claude, 04/09/2026)
-- `apps/studio-web` unitários: 13/13 — política de cache (só casca, nunca `/api/`), worker (fonte sob vitest com `fetch`/`caches` simulados: install/activate, 503 `OFFLINE` sem rede, `AbortError` preservado, assets cache-first, casca network-first com fallback e com timeout de 4 s sobre servidor travado), notificações locais (mensagens do catálogo, estado desconhecido não notifica, só com permissão e aba oculta).
+- `apps/studio-web` unitários: 26/26 — política de cache (só casca, nunca `/api/`), worker (fonte sob vitest com `fetch`/`caches` simulados: install/activate, 503 `OFFLINE` sem rede, `AbortError` preservado, assets cache-first, casca network-first com fallback e com timeout de 4 s sobre servidor travado), notificações locais (mensagens do catálogo, estado desconhecido não notifica, só com permissão e aba oculta).
 - Playwright `apps/studio-web` 6/6 em Chromium: jornada original com axe intacta; manifesto instalável servido com três ícones PNG reais, `crossorigin="use-credentials"` e `Page.getAppManifest` sem erros; `/studio/sw.js` servido como `text/javascript`, IIFE sem `import`; service worker registrado e controlando a página; **com o servidor realmente fora do ar (proxy do teste fechado e sockets destruídos), a recarga mostra a casca e `/api/…` responde 503 `OFFLINE`**; o cache não contém nenhuma entrada `/api/`; faixa "Você está sem internet…" dirigida por `navigator.onLine`; `appinstalled` mostra a confirmação e volta a esconder a faixa; notificação local disparada pelo evento sintético com a aba oculta.
 - Gates: `gate:i18n` PASS (catálogo PWA e manifesto varridos contra "pronto"), typecheck PASS, build reprodutível (versão do worker por digest do conteúdo).
 
@@ -28,7 +28,7 @@ O módulo mostrava a notificação com `new Notification(...)`. No Android/Chrom
 registração assim que `navigator.serviceWorker.ready` resolve, o construtor fica de reserva para
 navegadores de mesa sem worker, e a recusa dele é engolida — a notificação é cortesia e nunca
 motivo para quebrar a tela. Teste novo simula o construtor proibido e verifica que a notificação
-sai pela registração (25/25 unitários no `apps/studio-web`).
+sai pela registração (26/26 unitários no `apps/studio-web`, contados na árvore desta entrega).
 
 A permissão passou a ter um lugar só: o componente `NotificationOptIn`, que pede **a partir do
 clique** (fora de um gesto do usuário o navegador recusa, e um pedido não solicitado é o caminho

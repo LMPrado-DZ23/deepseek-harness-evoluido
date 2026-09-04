@@ -41,9 +41,10 @@ outra coisa.
 - **T2** — a tela pergunta antes, em uma frase, o que você está autorizando. Se você cancelar,
   **nada é enviado**. A mesma pergunta aparece ao guardar o nome do e-mail do aplicativo e ao
   disparar um teste de envio.
-- **T3** — além da confirmação na tela, o Studio pede a sua **passkey nesta sessão**. Se você
-  entrou só com código por e-mail, a ação é recusada em palavras e a integração continua
-  desligada. Isso não é um aviso que dá para passar por cima: é o servidor que recusa.
+- **T3** — além da confirmação na tela, a ação só funciona se você **já tiver confirmado com a sua
+  passkey nesta sessão**. O Studio não abre a janela da passkey aqui: se você entrou só com código
+  por e-mail, a ação é recusada em palavras e a integração continua desligada. Isso não é um aviso
+  que dá para passar por cima: é o servidor que recusa.
 
 Desligar uma integração nunca pede confirmação — reduzir o que está ligado é sempre permitido.
 Uma assinatura que **não confere** (adulterada, ou chave trocada) nunca é ligada, nem no canal

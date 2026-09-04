@@ -152,7 +152,14 @@ function publicMessage(error: unknown): string {
 function statusOf(error: unknown): number {
   if (error instanceof IdentityError) return error.code === 'locked' ? 429 : 401
   if (error instanceof TenancyError) return error.code === 'not-found' ? 404 : error.code === 'forbidden' ? 403 : 400
-  if (error instanceof HubError) return error.code === 'NOT_FOUND' ? 404 : error.code === 'FORBIDDEN' ? 403 : error.code === 'CONFLICT' ? 409 : error.code === 'NOT_EXECUTED' ? 200 : 400
+  if (error instanceof HubError) {
+    if (error.code === 'NOT_FOUND') return 404
+    if (error.code === 'FORBIDDEN') return 403
+    if (error.code === 'CONFLICT' || error.code === 'SECRET_DETECTED') return 409
+    if (error.code === 'TOO_LARGE') return 413
+    if (error.code === 'NOT_EXECUTED') return 200
+    return 400
+  }
   if (error instanceof ExportError) return error.code === 'RUN_MISSING' ? 409 : error.code === 'TOO_LARGE' ? 413 : error.code === 'SECRET_DETECTED' ? 409 : 500
   if (error instanceof z.ZodError || error instanceof SyntaxError || error instanceof URIError) return 400
   if (error instanceof Error && 'code' in error && (error as { code?: string }).code === 'NOT_FOUND') return 404

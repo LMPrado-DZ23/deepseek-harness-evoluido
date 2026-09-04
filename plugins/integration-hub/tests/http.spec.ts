@@ -1,5 +1,5 @@
 import { generateKeyPairSync, sign } from 'node:crypto'
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, open, rm, writeFile } from 'node:fs/promises'
 import { createServer, request as httpRequest } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CSRF_COOKIE, IdentityError, SESSION_COOKIE, type SessionRecord, type StudioIdentityService } from '@dz23-studio/identity'
 import type { StudioTenancyService } from '@dz23-studio/tenancy'
+import { EXPORT_LIMIT_BYTES } from '../src/export.ts'
 import { createHubHttpHandler, HUB_ROUTE_CONTRACTS } from '../src/http.ts'
 import { canonicalManifestBytes } from '../src/manifest.ts'
 import type { HubEvent, IntegrationManifest, StudioExport, StudioIntegration } from '../src/model.ts'
@@ -63,7 +64,7 @@ async function fixture(role: 'owner' | 'admin' | 'builder' | 'viewer' = 'owner')
   allowedHosts.push(host); allowedOrigins.push(origin)
   const headers = { host, origin, 'content-type': 'application/json', cookie: `${SESSION_COOKIE}=session; ${CSRF_COOKIE}=csrf`, 'x-dz23-csrf': 'csrf' }
   const request = (path: string, init: RequestInit = {}) => fetch(`${origin}/api/studio/hub${path}`, { ...init, headers: { ...headers, ...(init.headers ?? {}) } })
-  return { request, repository, host, origin }
+  return { request, repository, host, origin, standalone: join(runDirectory, '.next', 'standalone') }
 }
 
 describe('integration hub HTTP boundary', () => {
@@ -160,6 +161,28 @@ describe('integration hub HTTP boundary', () => {
     const list = await (await request('/integrations')).json() as { channel: string; integrations: unknown[] }
     expect(list.channel).toBe('stable')
   })
+
+  it('gives the refused package its own status: secret found → 409, over the budget → 413', async () => {
+    // The documents promise these two numbers to the person reading the panel. Before this, both
+    // left as 400 "pedido inválido", which reads as "you typed something wrong" for a refusal that
+    // is the Studio protecting them.
+    const { request, repository, standalone } = await fixture('admin')
+    await writeFile(join(standalone, 'chave.ts'), '-----BEGIN PRIVATE KEY-----\nMIIB\n-----END PRIVATE KEY-----\n')
+    const secret = await request('/projects/p1/exports', { method: 'POST', body: '{}' })
+    expect(secret.status).toBe(409)
+    const secretBody = await secret.json() as { error: string }
+    expect(secretBody.error).toContain('chave.ts')
+    expect(secretBody.error).not.toContain('BEGIN PRIVATE KEY')
+    await rm(join(standalone, 'chave.ts'))
+    // A sparse file: the size is what the budget looks at, and the budget is checked before the read.
+    const handle = await open(join(standalone, 'grande.wasm'), 'w')
+    try { await handle.truncate(EXPORT_LIMIT_BYTES + 1) } finally { await handle.close() }
+    const big = await request('/projects/p1/exports', { method: 'POST', body: '{}' })
+    expect(big.status).toBe(413)
+    expect(((await big.json()) as { error: string }).error).toContain('200')
+    // Neither refusal wrote a package.
+    expect(repository.exportRows).toHaveLength(0)
+  }, 30_000)
 
   it('maps role errors to 403 for viewers and builders', async () => {
     const viewer = await fixture('viewer')

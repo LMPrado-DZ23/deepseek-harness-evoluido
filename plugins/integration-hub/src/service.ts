@@ -101,7 +101,15 @@ export interface HubServiceOptions {
 }
 
 export class HubError extends Error {
-  constructor(readonly code: 'FORBIDDEN' | 'NOT_FOUND' | 'INVALID' | 'CONFLICT' | 'NOT_EXECUTED', message: string) { super(message) }
+  constructor(readonly code: 'FORBIDDEN' | 'NOT_FOUND' | 'INVALID' | 'CONFLICT' | 'NOT_EXECUTED' | 'SECRET_DETECTED' | 'TOO_LARGE', message: string) { super(message) }
+}
+
+/** Export refusals keep their own class so the HTTP boundary can answer 409/413 instead of a flat 400. */
+function exportErrorCode(code: ExportError['code']): HubError['code'] {
+  if (code === 'RUN_MISSING') return 'CONFLICT'
+  if (code === 'SECRET_DETECTED') return 'SECRET_DETECTED'
+  if (code === 'TOO_LARGE') return 'TOO_LARGE'
+  return 'INVALID'
 }
 
 /** SMTP for generated apps talks to an external provider: T2 by the D16 floor. */
@@ -379,7 +387,9 @@ export class IntegrationHubService {
     try {
       built = await packagePrototype({ runDirectory, projectName: project.name, runId: run.run_id })
     } catch (error) {
-      if (error instanceof ExportError) return refuse(error.code, new HubError(error.code === 'RUN_MISSING' ? 'CONFLICT' : 'INVALID', error.code === 'INVALID_PATH' ? t('errors.internal') : error.message))
+      // The class of refusal survives to the boundary: a package refused because it carries a secret
+      // is not the same answer as a malformed request, and the documents promised those statuses.
+      if (error instanceof ExportError) return refuse(error.code, new HubError(exportErrorCode(error.code), error.code === 'INVALID_PATH' ? t('errors.internal') : error.message))
       // Anything else (an unreadable folder, a name the filesystem returns as invalid UTF-8) used to
       // leave through the front door as a 500 with no audit at all — the person saw "something went
       // wrong" and the history said nothing had been attempted.

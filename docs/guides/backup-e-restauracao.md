@@ -19,8 +19,10 @@ cópia é um arquivo `studio-backup-<data-e-hora>.json` acompanhado de um
 `backups.jsonl` com o resultado de cada tentativa. A cópia acontece com o
 Studio ligado, sem travar ninguém.
 
-A cópia é feita por um **programa separado**, não pelo Studio em si: assim,
-por maior que fique o banco, copiar nunca deixa o Studio lento nem o derruba.
+A cópia é feita por um **programa separado**, não pelo Studio em si: assim, por maior que fique o
+banco, o Studio não gasta a própria memória para copiar, e uma cópia travada não derruba o Studio.
+Sendo honesto sobre o limite: a cópia lê o **mesmo banco de dados**, então pode disputar disco com
+quem estiver usando o sistema naquele momento — o que ela não faz é parar o Studio.
 Esse programa tem hora para acabar (15 minutos), tamanho máximo de arquivo
 (2 GB) e memória própria; se estourar qualquer um dos três, a tentativa é
 registrada como falha, o arquivo pela metade é apagado e o Studio continua

@@ -75,9 +75,11 @@ Status: aceita e implementada na etapa M3 (Claude), sobre a base P31-A.
      coisa.
    - **Preparo limpo**: qualquer falha derruba o esquema de staging antes de o
      erro subir; nada de meio-esquema esquecido no banco.
-   - **A cópia física herda a política TLS**: o `pg_dump` do `--backup` roda com
-     `PGSSLMODE` derivado do `--ssl` do próprio comando (não faz sentido exigir
-     `verify-full` na importação e despejar em claro).
+   - **A cópia física herda a política TLS**: o `pg_dump` do `--backup` roda com o
+     `sslmode` da própria string de conexão forçado a partir do `--ssl` do
+     comando (não faz sentido exigir `verify-full` na importação e despejar em
+     claro); o resto da string — `sslrootcert`, `sslcert`, `sslkey`, `options` —
+     é preservado.
    A prova adversarial dessas regras está em `docs/proofs/P31-B-backup-restore-proof.md`
    (fase 5).
 
@@ -112,7 +114,7 @@ Status: aceita e implementada na etapa M3 (Claude), sobre a base P31-A.
 
 ## Consequências
 
-- Provas: `prove:postgres-runtime` (20 unidades no esquema), `prove:postgres-soak`
+- Provas: `prove:postgres-runtime` (21 unidades no esquema), `prove:postgres-soak`
   (operação contínua com backups a quente, contenda de escritor e `SIGKILL`),
   `prove:storage-migration` (json → PostgreSQL com dados das fatias 1–2).
 - O que ainda falta (matriz, coluna "falta para estável"): Compose real executado num servidor (o

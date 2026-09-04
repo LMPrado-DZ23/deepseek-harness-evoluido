@@ -145,8 +145,10 @@ ligá-la, e levar o protótipo verificado consigo.
   o motivo.
 - **A raiz das execuções é obrigatória e não vem do ambiente.** Era opcional (serviço sem ela = sem
   confinamento) e o profile a lia de `DZ23_STUDIO_RUNS_ROOT` — três linhas abaixo do comentário que
-  diz que variável de ambiente não pode mexer em política. Agora é obrigatória no serviço e escrita
-  no profile.
+  diz que variável de ambiente não pode mexer em política. Agora é **obrigatória no serviço** (o
+  serviço não aceita ser criado sem ela); quem preenche o padrão é o carregador do plugin
+  (`~/.dz23-studio/generated-runs`, a mesma pasta do prompt-to-app) e o profile traz a linha
+  comentada para trocar esse caminho — nunca lida do ambiente.
 - **Confirmação registrada só quando a ação aconteceu**, e as recusas de segredo ausente ou
   inválido passaram a ser auditadas: antes o histórico dizia "Confirmação da pessoa registrada" para
   uma configuração que não aconteceu, e a recusa não aparecia em lugar nenhum.

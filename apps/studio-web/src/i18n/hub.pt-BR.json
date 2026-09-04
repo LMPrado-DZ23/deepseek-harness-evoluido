@@ -55,7 +55,7 @@
   },
   "exports": {
     "title": "Baixar o protótipo",
-    "help": "Só protótipos verificados podem ser baixados. O pacote traz o aplicativo, o relatório da verificação e um guia em linguagem comum — sem os seus dados e sem senhas.",
+    "help": "Só protótipos verificados podem ser baixados. O pacote traz o aplicativo, o relatório da verificação e um guia em linguagem comum — sem os seus dados e sem os arquivos de senha e chave que o Studio reconhece. Dentro do pacote, o arquivo EXCLUIDOS.txt diz o que ficou de fora e o que entrou sem conferência.",
     "projectLabel": "Projeto",
     "noProjects": "Nenhum projeto verificado ainda. Crie e verifique um protótipo no Studio primeiro.",
     "create": "Gerar pacote",
@@ -100,6 +100,6 @@
     "confirm": "Confirmar",
     "cancel": "Cancelar",
     "smtpSave": "Guardar o nome do segredo liga o envio de e-mail do aplicativo por um serviço externo.",
-    "smtpTest": "O teste envia uma mensagem de verdade para o endereço informado, usando o serviço externo."
+    "smtpTest": "Se o envio de teste estiver liberado neste servidor, uma mensagem de verdade vai para o endereço informado. Se ainda não estiver, o Studio responde que o teste não foi executado e nada é enviado."
   }
 }

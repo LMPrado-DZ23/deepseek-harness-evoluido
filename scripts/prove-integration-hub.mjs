@@ -184,6 +184,23 @@ try {
   const again = await (await hub(`/projects/${project.project_id}/exports`, { method: 'POST', body: '{}' })).json()
   assert.equal(again.export.sha256, record.sha256, 'export is not reproducible')
   assert.equal(again.export.export_id, record.export_id, 'a second click must reuse the identical package, not write a twin')
+  // ---- the secret scan actually refuses a package (until now nothing here ever tripped it)
+  // A source file carrying a private key is the case the documents promise: the WHOLE export is
+  // refused with 409, nothing is written, and the refusal is in the history. The file is then
+  // removed and the export succeeds again with the identical sha256 — which is what proves the
+  // refusal came from that file and not from anything else.
+  const poisoned = join(runDirectory, '.next', 'standalone', 'chave.ts')
+  await writeFile(poisoned, `export const key = \`-----BEGIN PRIVATE KEY-----\nMIIBVgIBADANBgkqhkiG9w0BAQEFAASCAUAwggE8AgEAAkEA\n-----END PRIVATE KEY-----\`\n`)
+  const refused = await hub(`/projects/${project.project_id}/exports`, { method: 'POST', body: '{}' })
+  assert.equal(refused.status, 409, 'a package carrying a private key must be refused, not shipped')
+  const refusedBody = await refused.json()
+  assert.ok(!JSON.stringify(refusedBody).includes('BEGIN PRIVATE KEY'), 'the refusal must not echo the secret it found')
+  const afterRefusal = await (await hub('/events')).json()
+  assert.ok(afterRefusal.events.some(event => event.action === 'export.created' && event.outcome === 'failure' && String(event.detail ?? '').includes('SECRET_DETECTED')), 'the refusal must be in the history')
+  await (await import('node:fs/promises')).rm(poisoned)
+  const healed = await (await hub(`/projects/${project.project_id}/exports`, { method: 'POST', body: '{}' })).json()
+  assert.equal(healed.export.sha256, record.sha256, 'with the offending file gone, the same package comes back')
+
   // download of a package whose file is gone: 404 in words, no server path
   const { rm: removeFile } = await import('node:fs/promises')
   const orphanId = randomUUID()
@@ -241,6 +258,43 @@ try {
     uiDetail = `${summary} (${passed} passed, ${skipped} skipped)`
     if (ui !== 'PASS') { process.stderr.write(`${playwright.stdout}\n${playwright.stderr}\n`); throw new Error(`hub panel e2e failed: ${summary}`) }
   }
+  // Kept until AFTER the panel run on purpose: this block leaves an integration that asks for the
+  // vault, and the panel's own fixture asserts exactly one such item on the screen.
+  // ---- a confirmation of the WRONG tier, with everything else right
+  // Until now the proof only showed tickets refused for belonging to another subject. Here the
+  // person, the session, the action and the target all match: the ONLY thing that does not is the
+  // tier the ticket was issued at. The integration is registered as T2 (talks to the network), the
+  // person confirms at T2, and THEN the publisher re-registers the same id asking for the vault —
+  // which raises it to T3. The T2 confirmation in hand must be worth nothing.
+  const escalableBase = { ...manifest, id: 'escalonavel', name: 'Integração que escala', tier: 'T0', permissions: ['network.outbound'] }
+  const escalable = { ...escalableBase, signature: sign(null, canonicalManifestBytes(escalableBase), privateKey).toString('base64') }
+  const escalableRegistered = await (await hub('/integrations', { method: 'POST', body: JSON.stringify(escalable) })).json()
+  assert.equal(escalableRegistered.integration.effective_tier, 'T2')
+  const t2Ticket = await (await hub('/approvals', { method: 'POST', body: JSON.stringify({ action: 'integration.enabled', subject_id: escalableRegistered.integration.integration_id }) })).json()
+  assert.equal(t2Ticket.tier, 'T2')
+  assert.equal(t2Ticket.requires_strong_identity, false)
+  const raisedBase = { ...escalableBase, permissions: ['network.outbound', 'secrets.read'] }
+  const raised = { ...raisedBase, signature: sign(null, canonicalManifestBytes(raisedBase), privateKey).toString('base64') }
+  const raisedRegistered = await (await hub('/integrations', { method: 'POST', body: JSON.stringify(raised) })).json()
+  assert.equal(raisedRegistered.integration.integration_id, escalableRegistered.integration.integration_id, 'the same manifest id must keep the same record')
+  assert.equal(raisedRegistered.integration.effective_tier, 'T3')
+  const escalablePath = `/integrations/${escalableRegistered.integration.integration_id}/enabled`
+  const wrongTier = await hub(escalablePath, { method: 'POST', body: JSON.stringify({ enabled: true, approval: { approval_id: t2Ticket.approval_id } }) })
+  assert.equal(wrongTier.status, 403, 'a T2 confirmation must not pay for a T3 action')
+  // 403 alone would not prove the TIER is what refused it: this session has no passkey either, so
+  // the same status would come out even if the tier were never compared. The history says which
+  // guard spoke, and it has to be the tier — the passkey gate is behind it.
+  const escalationEvents = (await (await hub('/events')).json()).events
+    .filter(event => event.action === 'integration.enabled' && event.subject_id === escalableRegistered.integration.integration_id && event.outcome === 'failure')
+  assert.ok(escalationEvents.some(event => String(event.detail ?? '').includes('approval-required T3')), 'the refusal must be the tier, not the passkey')
+  assert.ok(!escalationEvents.some(event => String(event.detail ?? '').includes('strong-identity-required')), 'the T2 ticket must never reach the passkey gate')
+  const escalableRow = await app.ctx.storageDomain.get('studio_integrations').table('integrations').get(escalableRegistered.integration.integration_id)
+  assert.equal(escalableRow.enabled, false, 'a refused wrong-tier action must leave the integration off')
+  // And presented is spent: the same id offered again is gone, not merely of the wrong tier.
+  assert.equal((await hub(escalablePath, { method: 'POST', body: JSON.stringify({ enabled: true, approval: { approval_id: t2Ticket.approval_id } }) })).status, 403)
+  const nowT3 = await (await hub('/approvals', { method: 'POST', body: JSON.stringify({ action: 'integration.enabled', subject_id: escalableRegistered.integration.integration_id }) })).json()
+  assert.equal(nowT3.tier, 'T3', 'after the escalation the server must ask for T3')
+
   const decision = ui === 'PASS' ? 'GO' : 'NO-GO'
 
   const result = { decision, ui, uiDetail, port, announced: announced !== '', smtp: { configured: true, test: test.result, secretInStorage: false }, registry: { verifiedEnabled: true, unsignedTier: unsigned.integration.effective_tier, unsignedEnableRefused: true }, export: { entries: names.length, sha256: record.sha256.slice(0, 16), reproducible: true, privateLeak: false }, auditEvents: actions.length }
@@ -249,9 +303,9 @@ try {
 - Resultado: **${decision}** (${new Date().toISOString().slice(0, 10)}, ambiente do Claude, Studio real no profile \`studio\` com o plugin \`@dz23-studio/integration-hub\`)
 - Sessão obtida pelo serviço de identidade real em processo (código de acesso por e-mail, captura de desenvolvimento); as chamadas ao Hub passam pelo servidor HTTP real com sessão e CSRF.
 - SMTP do aplicativo gerado: o navegador envia só o **nome** da referência (\`DZ23_APP_SMTP\`); o valor fica no ambiente do servidor, é conferido (existe + formato) e **não aparece no armazenamento**; nome inexistente → 400; teste de envio → \`NOT_EXECUTED\` com explicação (provedor ainda não escolhido).
-- **Aplicação dos níveis D16 (não só exibição), com a decisão emitida pelo servidor**: a tela pede ao servidor uma aprovação para a ação exata; o servidor decide o nível, registra a decisão, amarra a pessoa, a sessão, a ação e o alvo, dá validade curta e gasta na primeira utilização. Uma aprovação **inventada pelo cliente** → 403; uma aprovação emitida para **outra** integração → 403; configurar o e-mail (T2) sem aprovação → **403 e nada muda**; com a aprovação → 200. Uma integração assinada que pede \`secrets.read\` é **T3 pelo piso**, mesmo declarando T0: sem confirmação → 403; com confirmação de **T2** (nível errado) → 403; com confirmação de T3, mas nesta sessão entrada por código de e-mail → 403 pedindo **passkey**, e a integração continua desligada. Cada confirmação aceita vira um evento \`approval.recorded\`.
+- **Aplicação dos níveis D16 (não só exibição), com a decisão emitida pelo servidor**: a tela pede ao servidor uma aprovação para a ação exata; o servidor decide o nível, registra a decisão, amarra a pessoa, a sessão, a ação e o alvo, dá validade curta e gasta na primeira utilização. Uma aprovação **inventada pelo cliente** → 403; uma aprovação emitida para **outra** integração → 403; configurar o e-mail (T2) sem aprovação → **403 e nada muda**; com a aprovação → 200. Uma integração assinada que pede \`secrets.read\` é **T3 pelo piso**, mesmo declarando T0: sem confirmação → 403; com uma confirmação de **T2** legítima, emitida para a mesma pessoa, sessão, ação e alvo, e depois o alvo virar T3 por nova assinatura → 403 e a integração continua desligada (o bilhete apresentado ainda é gasto); com confirmação de T3, mas nesta sessão entrada por código de e-mail → 403 pedindo **passkey**, e a integração continua desligada. Cada confirmação aceita vira um evento \`approval.recorded\`.
 - **Confinamento do diretório de execução**: uma run \`PASSED\` apontando para fora da pasta de execuções (\`runsRoot\`) é recusada **antes de qualquer leitura** — nada do que estava lá entra em pacote algum.
-- **Exportação com lista de permitidos e varredura fail-closed**: só tipos de arquivo permitidos entram; o que fica de fora é listado por nome em \`EXCLUIDOS.txt\` dentro do pacote (nada sai em silêncio); um arquivo com chave privada ou string de conexão com senha **derruba a exportação inteira**.
+- **Exportação com lista de permitidos e varredura fail-closed**: só tipos de arquivo permitidos entram; o que fica de fora é listado por nome em \`EXCLUIDOS.txt\` dentro do pacote (nada sai em silêncio); um arquivo de código com bloco de chave privada dentro da run **derruba a exportação inteira** (409, sem eco do segredo, com o evento de recusa no histórico) e, retirado o arquivo, o mesmo pacote volta com o mesmo sha256 — é isso que prova que a recusa veio dele.
 - **Auditoria minimizada**: o endereço do teste de e-mail não fica em texto claro no histórico (domínio + resumo sha256).
 - Registro D16: manifesto assinado (Ed25519) → \`verified\`, ligado; habilidade **sem assinatura** declarando T0 → \`unverified\`, tier efetivo **T2** (piso de não verificado, sem envolver rede), ligar no canal estável → 403; manifesto adulterado → 400 e evento de recusa; \`can_enable\` decidido pelo servidor.
 - Exportação: projeto levado a \`VERIFIED_PROTOTYPE\` por \`transition()\` e run \`PASSED\` **simulada** (standalone fabricado com \`server.js\` de uma linha; o pipeline real de geração não foi executado nesta prova) → ZIP com ${String(names.length)} entradas; \`data/\` da raiz do app (sqlite + códigos capturados) e \`.env\` **não** entram, enquanto \`node_modules/lib/data/\` entra; SHA-256 no cabeçalho igual ao arquivo; segundo pedido devolve o mesmo pacote (sem arquivo gêmeo); arquivo sumido → 404 sem caminho do servidor.
