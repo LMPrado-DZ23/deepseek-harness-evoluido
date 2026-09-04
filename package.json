@@ -43,7 +43,8 @@
     "prove:prompt-to-app": "tsx scripts/prove-prompt-to-app.ts",
     "prove:integration-hub": "node scripts/prove-integration-hub.mjs",
     "hub:sign": "node scripts/hub-sign-manifest.mjs",
-    "prove:backup-restore": "node scripts/prove-backup-restore.mjs"
+    "prove:backup-restore": "node scripts/prove-backup-restore.mjs",
+    "i18n:baseline": "node scripts/build-i18n-baseline.mjs"
   },
   "devDependencies": {
     "@deepseek-ai/dsh-storage": "link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage",
