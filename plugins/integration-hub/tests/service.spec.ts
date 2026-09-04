@@ -249,16 +249,16 @@ describe('integration hub service', () => {
     // Between the read that decides the tier and the write, the integration is re-registered with
     // permissions that raise it to T3. Writing back the old snapshot would silently undo that and
     // leave it enabled at T0.
-    const readRows = repository.integrations.bind(repository)
+    const readRow = repository.integration.bind(repository)
     let reads = 0
-    repository.integrations = (scope) => {
+    repository.integration = (scope, integrationId) => {
       reads += 1
       if (reads === 2) {
         repository.rows = repository.rows.map(row => (row.integration_id === id
           ? { ...row, effective_tier: 'T3' as const, updated_at: '2026-09-05T00:00:00.000Z' }
           : row))
       }
-      return readRows(scope)
+      return readRow(scope, integrationId)
     }
     await expect(service.setEnabled(admin, id, true)).rejects.toMatchObject({ code: 'CONFLICT' })
     expect(repository.rows.find(row => row.integration_id === id)).toMatchObject({ enabled: false, effective_tier: 'T3' })
@@ -366,12 +366,12 @@ describe('integration hub service', () => {
     // The clock of this service is fixed: `updated_at` is byte for byte the same on both versions,
     // so comparing timestamps declared "nothing changed" and enabled the NEW manifest with the old
     // decision. What changes here is the manifest and its signature, not the tier.
-    const readRows = repository.integrations.bind(repository)
+    const readRow = repository.integration.bind(repository)
     let reads = 0
-    repository.integrations = () => {
+    repository.integration = (scope, integrationId) => {
       reads += 1
       if (reads === 2) repository.rows = repository.rows.map(row => (row.integration_id === id ? { ...row, manifest: signed(manifest({ id: 'agenda', tier: 'T0', version: '9.9.9' })) } : row))
-      return readRows()
+      return readRow(scope, integrationId)
     }
     await expect(service.setEnabled(admin, id, true)).rejects.toMatchObject({ code: 'CONFLICT' })
     const stored = repository.rows.find(row => row.integration_id === id)!
