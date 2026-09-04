@@ -554,6 +554,9 @@ export class IntegrationHubService {
     // Registered SYNCHRONOUSLY, before the first await: ten clicks arriving in the same tick must
     // find the build already in flight, not each other's absence.
     const task = this.#guardedExport(actor, projectId)
+    // The HTTP boundary attaches on its next microtask; own the rejection immediately so a fast
+    // fail-closed scan is not reported as an unhandled process rejection in that gap.
+    void task.catch(() => undefined)
     this.#exportsInFlight.set(key, task)
     try { return await task } finally { this.#exportsInFlight.delete(key) }
   }
@@ -608,7 +611,9 @@ export class IntegrationHubService {
     const aborted = new Promise<never>((_resolve, reject) => {
       controller.signal.addEventListener('abort', () => reject(timeout), { once: true })
     })
-    return Promise.race([task, aborted])
+    const result = Promise.race([task, aborted])
+    void result.catch(() => undefined)
+    return await result
   }
 
   /** Attempts per workspace inside the window; a refusal is audited and costs the flooder, not the table. */

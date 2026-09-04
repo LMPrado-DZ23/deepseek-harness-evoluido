@@ -1,5 +1,5 @@
 import { generateKeyPairSync, sign } from 'node:crypto'
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -648,6 +648,23 @@ describe('integration hub service', () => {
     expect(() => safeSegment('../../etc')).toThrow(HubError)
     expect(() => safeSegment('a/b')).toThrow(HubError)
     expect(() => safeSegment('id-1')).not.toThrow()
+  })
+
+  it('never creates or downloads through a swapped export-scope ancestor', async () => {
+    const runDirectory = await fakeRun()
+    const outside = await mkdtemp(join(tmpdir(), 'dz23-hub-outside-'))
+    scratch.push(outside)
+    const planted = await build({ runDirectory })
+    await symlink(outside, join(planted.exportsRoot, 'org-a'))
+    await expect(planted.service.createExport(builder, 'p1')).rejects.toMatchObject({ code: 'CONFLICT' })
+    expect(await readdir(outside)).toEqual([])
+
+    const built = await build({ runDirectory })
+    const record = await built.service.createExport(builder, 'p1')
+    await rename(join(built.exportsRoot, 'org-a'), join(built.exportsRoot, 'org-real'))
+    await symlink(outside, join(built.exportsRoot, 'org-a'))
+    await writeFile(join(outside, `${record.export_id}.zip`), 'outside-secret')
+    await expect(built.service.exportFile(builder, 'p1', record.export_id)).rejects.toMatchObject({ code: 'NOT_FOUND' })
   })
 
   /**
