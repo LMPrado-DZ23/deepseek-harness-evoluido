@@ -1,7 +1,7 @@
 # P34 — recuperação de capacidade PostgreSQL do Preview
 
 - Base: `codex/p30-policy-foundation@16765ca`.
-- Implementação: `codex/preview-capacity-wiring@1bd9dbf`.
+- Implementação: `codex/preview-capacity-wiring@8b47caa`.
 - Ambiente canônico: WSL2/ext4, Node 22.23.1 e pnpm 11.7.0.
 - PostgreSQL: contêiner descartável `postgres:16-alpine`, digest observado
   `sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685`.
