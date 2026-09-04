@@ -13,6 +13,7 @@ describe('hub api client', () => {
     const fake = transport((input, init) => init.method === 'POST' ? json(200, { configured: true, secret_ref: 'X', tier: 'T1' }) : json(200, { configured: false, secret_ref: null, tier: 'T1' }))
     const api = createHubApi(fake)
     await api.smtp(); await api.configureSmtp('DZ23_APP_SMTP')
+    expect(fake.calls).toHaveLength(2)
     expect(fake.calls[0]!.input).toBe('/api/studio/hub/smtp')
     expect((fake.calls[0]!.init.headers as Record<string, string>)['x-dz23-csrf']).toBeUndefined()
     expect((fake.calls[1]!.init.headers as Record<string, string>)['x-dz23-csrf']).toBe('tok=1')

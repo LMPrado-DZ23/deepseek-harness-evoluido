@@ -4,6 +4,8 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ExportError, packagePrototype, slug } from '../src/export.ts'
 import { readZip } from '../src/zip.ts'
+import { execFileSync } from 'node:child_process'
+import { rm as rmDir } from 'node:fs/promises'
 
 const scratch: string[] = []
 afterEach(async () => { for (const directory of scratch.splice(0)) await rm(directory, { recursive: true, force: true }) })
@@ -34,6 +36,34 @@ async function runDirectory(): Promise<string> {
 }
 
 describe('prototype export package', () => {
+  it('keeps library data/ folders and files whose names contain "..", excluding only the app root data/ and caches', async () => {
+    const root = await runDirectory()
+    await mkdir(join(root, '.next', 'standalone', 'node_modules', 'lib', 'data'), { recursive: true })
+    await writeFile(join(root, '.next', 'standalone', 'node_modules', 'lib', 'data', 'table.json'), '[]')
+    await writeFile(join(root, '.next', 'standalone', 'jquery..min.js'), 'js')
+    await mkdir(join(root, '.next', 'standalone', '.cache'), { recursive: true })
+    await writeFile(join(root, '.next', 'standalone', '.cache', 'x'), 'x')
+    const built = await packagePrototype({ runDirectory: root, projectName: 'A', runId: 'run-1' })
+    const names = readZip(built.archive).map(entry => entry.name)
+    expect(names).toContain('app/node_modules/lib/data/table.json')
+    expect(names).toContain('app/jquery..min.js')
+    expect(names.some(name => name.startsWith('app/data/') || name.startsWith('app/.cache/'))).toBe(false)
+  })
+
+  it('writes Unix file-type bits so system unzip sees regular files with the right permissions', async () => {
+    const root = await runDirectory()
+    const built = await packagePrototype({ runDirectory: root, projectName: 'A', runId: 'run-1' })
+    const out = await mkdtemp(join(tmpdir(), 'dz23-unzip-'))
+    scratch.push(out)
+    await writeFile(join(out, 'p.zip'), built.archive)
+    let listing = ''
+    try { listing = execFileSync('unzip', ['-Z', join(out, 'p.zip')], { encoding: 'utf8' }) } catch { return } // unzip not installed here: nothing to assert
+    const serverLine = listing.split('\n').find(line => line.endsWith('app/server.js'))!
+    expect(serverLine.startsWith('-rwxr-xr-x')).toBe(true)
+    expect(listing.split('\n').some(line => line.startsWith('?'))).toBe(false)
+    await rmDir(out, { recursive: true, force: true })
+  })
+
   it('packages the standalone server, static assets, public files, report, README and .env.example — and nothing private', async () => {
     const root = await runDirectory()
     const built = await packagePrototype({ runDirectory: root, projectName: 'Agenda do Salão', runId: 'run-abcdef123456' })

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import t from '../i18n/hub.pt-BR.json'
-import { actionLabel, canEnable, exportable, fill, formatBytes, isHubPath, kindLabel, outcomeLabel, tierLabel, verificationLabel } from './presentation'
+import { actionLabel, enableExplanation, exportable, fill, formatBytes, isHubPath, kindLabel, outcomeLabel, tierLabel, verificationLabel } from './presentation'
 
 describe('hub presentation', () => {
   it('opens the hub only at /studio/hub (with or without slash)', () => {
@@ -18,10 +18,11 @@ describe('hub presentation', () => {
     expect(verificationLabel('verified')).toBe(t.integrations.verified)
     expect(verificationLabel('unverified')).toBe(t.integrations.unverified)
   })
-  it('never offers to enable an unsigned integration', () => {
-    expect(canEnable({ verification: 'unverified', enabled: false })).toBe(false)
-    expect(canEnable({ verification: 'verified', enabled: false })).toBe(true)
-    expect(canEnable({ verification: 'verified', enabled: true })).toBe(false)
+  it('explains a refused enable in words and stays silent when the server allows it or it is already on', () => {
+    expect(enableExplanation({ verification: 'unverified', enabled: false, can_enable: false })).toBe(t.integrations.cannotEnable)
+    expect(enableExplanation({ verification: 'verified', enabled: false, can_enable: true })).toBeNull()
+    expect(enableExplanation({ verification: 'unverified', enabled: false, can_enable: true })).toBeNull() // dev channel: the server decides
+    expect(enableExplanation({ verification: 'verified', enabled: true, can_enable: false })).toBeNull()
   })
   it('only verified prototypes are exportable', () => {
     expect(exportable({ state: 'VERIFIED_PROTOTYPE' })).toBe(true)

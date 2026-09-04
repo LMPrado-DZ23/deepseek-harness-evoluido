@@ -13,9 +13,11 @@ const CSRF_COOKIE = 'dz23_studio_csrf'
 export type Integration = {
   integration_id: string; kind: IntegrationKind; name: string; effective_tier: PolicyTier; verification: Verification
   enabled: boolean; secret_ref: string | null; updated_at: string
+  /** Server decision (signature + release channel): the panel offers "enable" only when this is true. */
+  can_enable: boolean
 }
 export type SmtpState = { configured: boolean; secret_ref: string | null; tier: PolicyTier }
-export type SmtpTest = { state: 'SENT' | 'NOT_EXECUTED'; message: string }
+export type SmtpTest = { result: 'SENT' | 'NOT_EXECUTED'; message: string }
 export type ExportRecord = { export_id: string; project_id: string; run_id: string; file_name: string; sha256: string; size_bytes: number; entries: number; created_at: string }
 export type HubEvent = { event_id: string; action: HubAction; outcome: HubOutcome; detail: string; created_at: string }
 export type ProjectSummary = { project_id: string; name: string; state: string }
@@ -54,7 +56,7 @@ export function createHubApi(transport: HubTransport = browserTransport) {
     smtp: () => hub<SmtpState>('/smtp'),
     configureSmtp: (secretRef: string) => hub<{ configured: true; secret_ref: string; tier: PolicyTier }>('/smtp', { method: 'POST', body: JSON.stringify({ secret_ref: secretRef }) }),
     testSmtp: (to: string) => hub<SmtpTest>('/smtp/test', { method: 'POST', body: JSON.stringify({ to }) }),
-    integrations: () => hub<{ integrations: Integration[] }>('/integrations').then(value => value.integrations),
+    integrations: () => hub<{ channel: 'stable' | 'dev'; integrations: Integration[] }>('/integrations'),
     register: (manifest: unknown) => hub<{ integration: Integration; reasons: string[] }>('/integrations', { method: 'POST', body: JSON.stringify(manifest) }),
     setEnabled: (integrationId: string, enabled: boolean) => hub<{ integration: Integration }>(`/integrations/${encodeURIComponent(integrationId)}/enabled`, { method: 'POST', body: JSON.stringify({ enabled }) }).then(value => value.integration),
     exports: (projectId: string) => hub<{ exports: ExportRecord[] }>(`/projects/${encodeURIComponent(projectId)}/exports`).then(value => value.exports),

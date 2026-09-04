@@ -74,6 +74,7 @@ test('lista integrações com nível de confiança e não oferece ligar a que n�
   await expect(unverified).toHaveCount(1)
   await expect(unverified).toContainText('T2')
   await expect(unverified.getByRole('button', { name: hub.integrations.enable })).toBeDisabled()
+  await expect(unverified.locator('.hub-why')).toHaveText(hub.integrations.cannotEnable)
   // Verified one is enabled by the proof; the panel offers to switch it off and back on.
   await expect(verified).toContainText(hub.integrations.enabled)
   await verified.getByRole('button', { name: hub.integrations.disable }).click()

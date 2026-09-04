@@ -63,13 +63,13 @@ try {
   const hub = (path, init = {}) => fetch(`${origin}/api/studio/hub${path}`, { ...init, headers: { ...headers, ...(init.headers ?? {}) } })
 
   // ---- SMTP by reference: the value never leaves the environment
-  assert.deepEqual(await (await hub('/smtp')).json(), { configured: false, secret_ref: null, tier: 'T1' })
+  assert.deepEqual(await (await hub('/smtp')).json(), { configured: false, secret_ref: null, tier: 'T2' })
   assert.equal((await hub('/smtp', { method: 'POST', body: JSON.stringify({ secret_ref: 'DZ23_NAO_EXISTE' }) })).status, 400)
   const configured = await hub('/smtp', { method: 'POST', body: JSON.stringify({ secret_ref: 'DZ23_APP_SMTP' }) })
   assert.equal(configured.status, 200)
-  assert.deepEqual(await configured.json(), { configured: true, secret_ref: 'DZ23_APP_SMTP', tier: 'T1' })
+  assert.deepEqual(await configured.json(), { configured: true, secret_ref: 'DZ23_APP_SMTP', tier: 'T2' })
   const test = await (await hub('/smtp/test', { method: 'POST', body: JSON.stringify({ to: email }) })).json()
-  assert.equal(test.state, 'NOT_EXECUTED')
+  assert.equal(test.result, 'NOT_EXECUTED')
   const storedIntegrations = JSON.stringify([...app.ctx.storageDomain.get('studio_integrations').table('integrations').entries()])
   assert.ok(!storedIntegrations.includes('nunca-sai-do-servidor'), 'the SMTP password leaked into storage')
 
@@ -79,10 +79,17 @@ try {
   const registered = await (await hub('/integrations', { method: 'POST', body: JSON.stringify(signedManifest) })).json()
   assert.equal(registered.integration.verification, 'verified')
   assert.equal((await hub(`/integrations/${registered.integration.integration_id}/enabled`, { method: 'POST', body: '{"enabled":true}' })).status, 200)
-  const unsigned = await (await hub('/integrations', { method: 'POST', body: JSON.stringify({ ...manifest, id: 'mcp-externo', kind: 'mcp', endpoint: 'https://mcp.example.com', tier: 'T0' }) })).json()
+  // The D16 rule under test is "unsigned → at least T2" on its own: a read-only skill declaring T0 (no network floor involved).
+  const unsigned = await (await hub('/integrations', { method: 'POST', body: JSON.stringify({ ...manifest, id: 'agenda-sem-assinatura', tier: 'T0' }) })).json()
   assert.equal(unsigned.integration.verification, 'unverified')
   assert.equal(unsigned.integration.effective_tier, 'T2')
+  assert.equal(unsigned.integration.kind, 'skill')
   assert.equal((await hub(`/integrations/${unsigned.integration.integration_id}/enabled`, { method: 'POST', body: '{"enabled":true}' })).status, 403)
+  const listed = await (await hub('/integrations')).json()
+  assert.equal(listed.channel, 'stable')
+  assert.deepEqual(listed.integrations.map(item => [item.manifest?.id ?? item.kind, item.can_enable]).sort(), [['agenda-local', false], ['agenda-sem-assinatura', false], ['smtp', false]])
+  // tampered signature → refused and audited
+  assert.equal((await hub('/integrations', { method: 'POST', body: JSON.stringify({ ...signedManifest, name: 'Agenda alterada' }) })).status, 400)
 
   // ---- a verified project with a PASSED run whose files exist (fabricated standalone build)
   const tenancy = app.ctx.studioTenancy.service
@@ -102,10 +109,16 @@ try {
   await mkdir(join(runDirectory, '.next', 'standalone', 'node_modules', 'next'), { recursive: true })
   await mkdir(join(runDirectory, '.next', 'static'), { recursive: true })
   await mkdir(join(runDirectory, 'data'), { recursive: true })
+  await mkdir(join(runDirectory, '.next', 'standalone', 'data'), { recursive: true }) // the generated app's own store, where the collector DOES walk
+  await mkdir(join(runDirectory, '.next', 'standalone', 'node_modules', 'lib', 'data'), { recursive: true }) // a library folder that happens to be called data/
   await mkdir(join(runDirectory, 'evidence'), { recursive: true })
   await writeFile(join(runDirectory, '.next', 'standalone', 'server.js'), 'console.log("app")')
   await chmod(join(runDirectory, '.next', 'standalone', 'server.js'), 0o755)
   await writeFile(join(runDirectory, '.next', 'standalone', 'node_modules', 'next', 'package.json'), '{}')
+  await writeFile(join(runDirectory, '.next', 'standalone', 'node_modules', 'lib', 'data', 'table.json'), '[]')
+  await writeFile(join(runDirectory, '.next', 'standalone', 'data', 'app.sqlite'), 'segredo-do-banco-777')
+  await writeFile(join(runDirectory, '.next', 'standalone', 'data', 'studio-capture.json'), '[{"kind":"code","email":"x@example.test","code":"654321"}]')
+  await writeFile(join(runDirectory, '.next', 'standalone', '.env'), 'APP_SMTP_URL=smtp://u:senha-local@h')
   await writeFile(join(runDirectory, '.next', 'static', 'main.js'), 'chunk')
   await writeFile(join(runDirectory, 'data', 'studio-capture.json'), '[{"kind":"code","email":"x@example.test","code":"654321"}]')
   await writeFile(join(runDirectory, 'evidence', 'appspec-report.json'), '{"schema_version":1,"checks":[]}')
@@ -124,14 +137,23 @@ try {
   assert.equal(download.headers.get('x-dz23-sha256'), record.sha256)
   const entries = readZip(archive)
   const names = entries.map(entry => entry.name)
-  assert.deepEqual(names, ['.env.example', 'README.md', 'app/.next/static/main.js', 'app/node_modules/next/package.json', 'app/server.js', 'evidence/appspec-report.json'])
+  assert.deepEqual(names, ['.env.example', 'README.md', 'app/.next/static/main.js', 'app/node_modules/lib/data/table.json', 'app/node_modules/next/package.json', 'app/server.js', 'evidence/appspec-report.json'])
   const content = entries.map(entry => entry.data.toString('utf8')).join('\n')
-  assert.ok(!content.includes('654321') && !content.includes('nunca-sai-do-servidor'), 'private data leaked into the package')
+  for (const secret of ['654321', 'nunca-sai-do-servidor', 'segredo-do-banco-777', 'senha-local']) assert.ok(!content.includes(secret), `private data leaked into the package: ${secret}`)
   const again = await (await hub(`/projects/${project.project_id}/exports`, { method: 'POST', body: '{}' })).json()
   assert.equal(again.export.sha256, record.sha256, 'export is not reproducible')
+  assert.equal(again.export.export_id, record.export_id, 'a second click must reuse the identical package, not write a twin')
+  // download of a package whose file is gone: 404 in words, no server path
+  const { rm: removeFile } = await import('node:fs/promises')
+  const orphanId = randomUUID()
+  await app.ctx.storageDomain.get('studio_integrations').table('exports').put(orphanId, { ...(await app.ctx.storageDomain.get('studio_integrations').table('exports').get(record.export_id)), export_id: orphanId, path: join(workDir, 'gone.zip') })
+  const gone = await hub(`/projects/${project.project_id}/exports/${orphanId}/download`)
+  assert.equal(gone.status, 404)
+  assert.ok(!(await gone.text()).includes(workDir), 'server path leaked')
+  void removeFile
   const events = await (await hub('/events')).json()
   const actions = events.events.map(event => `${event.action}:${event.outcome}`)
-  for (const expected of ['smtp.configured:success', 'smtp.tested:not-executed', 'integration.registered:success', 'integration.enabled:success', 'integration.enabled:failure', 'export.created:success']) assert.ok(actions.includes(expected), `missing audit ${expected}`)
+  for (const expected of ['smtp.configured:success', 'smtp.tested:not-executed', 'integration.registered:success', 'integration.registered:failure', 'integration.enabled:success', 'integration.enabled:failure', 'export.created:success']) assert.ok(actions.includes(expected), `missing audit ${expected}`)
 
   // ---- the panel in real Chromium against this very Studio (session handed over, nothing mocked)
   let ui = 'NOT_EXECUTED'
@@ -149,24 +171,28 @@ try {
       child.on('close', status => resolvePromise({ status, stdout, stderr }))
     })
     const summary = `${playwright.stdout}\n${playwright.stderr}`.replace(/\u001b\[[0-9;]*[A-Za-z]/gu, '').split('\n').filter(line => /passed|failed|skipped|Error/u.test(line)).join(' | ').slice(0, 400)
-    ui = playwright.status === 0 ? 'PASS' : 'FAIL'
-    uiDetail = summary
-    if (playwright.status !== 0) { process.stderr.write(`${playwright.stdout}\n${playwright.stderr}\n`); throw new Error(`hub panel e2e failed: ${summary}`) }
+    const clean = `${playwright.stdout}\n${playwright.stderr}`.replace(/\u001b\[[0-9;]*[A-Za-z]/gu, '')
+    const passed = Number(/(\d+) passed/u.exec(clean)?.[1] ?? 0)
+    const skipped = Number(/(\d+) skipped/u.exec(clean)?.[1] ?? 0)
+    // A Playwright run that passes by skipping is not a proof: five real tests must have run.
+    ui = playwright.status === 0 && passed >= 5 && skipped === 0 ? 'PASS' : 'FAIL'
+    uiDetail = `${summary} (${passed} passed, ${skipped} skipped)`
+    if (ui !== 'PASS') { process.stderr.write(`${playwright.stdout}\n${playwright.stderr}\n`); throw new Error(`hub panel e2e failed: ${summary}`) }
   }
   const decision = ui === 'PASS' ? 'GO' : 'NO-GO'
 
-  const result = { decision, ui, uiDetail, port, announced: announced !== '', smtp: { configured: true, test: test.state, secretInStorage: false }, registry: { verifiedEnabled: true, unsignedTier: unsigned.integration.effective_tier, unsignedEnableRefused: true }, export: { entries: names.length, sha256: record.sha256.slice(0, 16), reproducible: true, privateLeak: false }, auditEvents: actions.length }
+  const result = { decision, ui, uiDetail, port, announced: announced !== '', smtp: { configured: true, test: test.result, secretInStorage: false }, registry: { verifiedEnabled: true, unsignedTier: unsigned.integration.effective_tier, unsignedEnableRefused: true }, export: { entries: names.length, sha256: record.sha256.slice(0, 16), reproducible: true, privateLeak: false }, auditEvents: actions.length }
   await writeFile(resolve(studioRoot, 'docs/proofs/M5-integration-hub-proof.md'), `# M5 — Prova do Integration Hub v1 no Studio real
 
 - Resultado: **${decision}** (${new Date().toISOString().slice(0, 10)}, ambiente do Claude, Studio real no profile \`studio\` com o plugin \`@dz23-studio/integration-hub\`)
-- Entrada pelo caminho real: código de acesso por e-mail (captura de desenvolvimento), sessão e CSRF do Studio.
+- Sessão obtida pelo serviço de identidade real em processo (código de acesso por e-mail, captura de desenvolvimento); as chamadas ao Hub passam pelo servidor HTTP real com sessão e CSRF.
 - SMTP do aplicativo gerado: o navegador envia só o **nome** da referência (\`DZ23_APP_SMTP\`); o valor fica no ambiente do servidor, é conferido (existe + formato) e **não aparece no armazenamento**; nome inexistente → 400; teste de envio → \`NOT_EXECUTED\` com explicação (provedor ainda não escolhido).
-- Registro D16: manifesto assinado (Ed25519) → \`verified\`, ligado; manifesto não assinado de MCP externo com tier declarado T0 → \`unverified\`, tier efetivo **T2**, ligar no canal estável → 403.
-- Exportação: projeto \`VERIFIED_PROTOTYPE\` com run \`PASSED\` → ZIP com ${String(names.length)} entradas (servidor standalone, estáticos, relatório, README em linguagem comum, \`.env.example\` só com nomes); \`data/\` e códigos capturados **não** entram; SHA-256 exibido no cabeçalho e igual ao arquivo; segunda exportação produz o mesmo digest.
+- Registro D16: manifesto assinado (Ed25519) → \`verified\`, ligado; habilidade **sem assinatura** declarando T0 → \`unverified\`, tier efetivo **T2** (piso de não verificado, sem envolver rede), ligar no canal estável → 403; manifesto adulterado → 400 e evento de recusa; \`can_enable\` decidido pelo servidor.
+- Exportação: projeto levado a \`VERIFIED_PROTOTYPE\` por \`transition()\` e run \`PASSED\` **simulada** (standalone fabricado com \`server.js\` de uma linha; o pipeline real de geração não foi executado nesta prova) → ZIP com ${String(names.length)} entradas; \`data/\` da raiz do app (sqlite + códigos capturados) e \`.env\` **não** entram, enquanto \`node_modules/lib/data/\` entra; SHA-256 no cabeçalho igual ao arquivo; segundo pedido devolve o mesmo pacote (sem arquivo gêmeo); arquivo sumido → 404 sem caminho do servidor.
 - Auditoria: ${String(actions.length)} eventos com organização e espaço de trabalho, incluindo a recusa.
 - Interface \`/studio/hub\` em Chromium real contra este mesmo Studio: **${ui}** (${uiDetail}) — tela própria em pt-BR; nome do segredo guardado e teste mostrado como não executado; integração sem assinatura sem botão de ligar; pacote gerado pela tela com SHA-256 igual ao download; sem sessão → 401 na tela e na API.
 
-Não executado: envio SMTP real (depende da escolha do provedor pelo Prado), aparelho físico, avaliação com pessoas leigas (ADR-016: só no sistema completo).
+Não executado: envio SMTP real (depende da escolha do provedor pelo Prado), exportação de um standalone real produzido pelo pipeline (fica para a integração com a M1/fatia 3), aparelho físico, avaliação com pessoas leigas (ADR-016: só no sistema completo).
 `)
   process.stdout.write(`${JSON.stringify(result, null, 2)}\nINTEGRATION_HUB=${decision}\n`)
   if (decision !== 'GO') process.exitCode = 1

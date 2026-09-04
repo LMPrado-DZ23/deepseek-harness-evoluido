@@ -1,4 +1,8 @@
-import { deflateRawSync, inflateRawSync } from 'node:zlib'
+import { promisify } from 'node:util'
+import { deflateRaw, deflateRawSync, inflateRawSync } from 'node:zlib'
+
+const deflateRawAsync = promisify(deflateRaw)
+const S_IFREG = 0o100000
 
 /**
  * Minimal ZIP writer/reader (PKZIP 2.0, deflate or store, no ZIP64), enough to
@@ -23,21 +27,40 @@ export function assertEntryName(name: string): void {
   }
 }
 
-export function createZip(entries: readonly ZipEntry[]): Buffer {
-  const locals: Buffer[] = []
-  const centrals: Buffer[] = []
-  let offset = 0
+type Prepared = { readonly entry: ZipEntry; readonly nameBytes: Buffer; readonly crc: number; readonly payload: Buffer; readonly method: 0 | 8 }
+
+function prepare(entry: ZipEntry, deflated: Buffer): Prepared {
+  const useDeflate = deflated.length < entry.data.length
+  return { entry, nameBytes: Buffer.from(entry.name, 'utf8'), crc: crc32(entry.data), payload: useDeflate ? deflated : entry.data, method: useDeflate ? 8 : 0 }
+}
+
+function validateNames(entries: readonly ZipEntry[]): void {
   const seen = new Set<string>()
   for (const entry of entries) {
     assertEntryName(entry.name)
     if (seen.has(entry.name)) throw new Error(`duplicate zip entry: ${entry.name}`)
     seen.add(entry.name)
-    const nameBytes = Buffer.from(entry.name, 'utf8')
-    const crc = crc32(entry.data)
-    const deflated = deflateRawSync(entry.data, { level: 9 })
-    const useDeflate = deflated.length < entry.data.length
-    const payload = useDeflate ? deflated : entry.data
-    const method = useDeflate ? 8 : 0
+  }
+}
+
+export function createZip(entries: readonly ZipEntry[]): Buffer {
+  validateNames(entries)
+  return assemble(entries.map(entry => prepare(entry, deflateRawSync(entry.data, { level: 9 }))))
+}
+
+/** Same archive as `createZip`, but compression runs in the zlib thread pool so a large prototype does not stall the server. */
+export async function createZipAsync(entries: readonly ZipEntry[]): Promise<Buffer> {
+  validateNames(entries)
+  const prepared: Prepared[] = []
+  for (const entry of entries) prepared.push(prepare(entry, await deflateRawAsync(entry.data, { level: 9 })))
+  return assemble(prepared)
+}
+
+function assemble(prepared: readonly Prepared[]): Buffer {
+  const locals: Buffer[] = []
+  const centrals: Buffer[] = []
+  let offset = 0
+  for (const { entry, nameBytes, crc, payload, method } of prepared) {
     const local = Buffer.alloc(30)
     local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4); local.writeUInt16LE(0x0800, 6) // UTF-8 names
     local.writeUInt16LE(method, 8); local.writeUInt16LE(FIXED_DOS_TIME, 10); local.writeUInt16LE(FIXED_DOS_DATE, 12)
@@ -49,10 +72,12 @@ export function createZip(entries: readonly ZipEntry[]): Buffer {
     central.writeUInt16LE(method, 10); central.writeUInt16LE(FIXED_DOS_TIME, 12); central.writeUInt16LE(FIXED_DOS_DATE, 14)
     central.writeUInt32LE(crc, 16); central.writeUInt32LE(payload.length, 20); central.writeUInt32LE(entry.data.length, 24)
     central.writeUInt16LE(nameBytes.length, 28); central.writeUInt16LE(0, 30); central.writeUInt16LE(0, 32); central.writeUInt16LE(0, 34); central.writeUInt16LE(0, 36)
-    central.writeUInt32LE(((entry.mode ?? 0o644) & 0xffff) << 16 >>> 0, 38); central.writeUInt32LE(offset, 42)
+    // Regular-file type bit + permission bits, as unzip/tar expect for Unix external attributes.
+    central.writeUInt32LE((((S_IFREG | (entry.mode ?? 0o644)) & 0xffff) << 16) >>> 0, 38); central.writeUInt32LE(offset, 42)
     centrals.push(central, nameBytes)
     offset += local.length + nameBytes.length + payload.length
   }
+  const entries = prepared
   const centralSize = centrals.reduce((total, part) => total + part.length, 0)
   const end = Buffer.alloc(22)
   end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(0, 4); end.writeUInt16LE(0, 6)
@@ -78,7 +103,7 @@ export function readZip(archive: Buffer): ZipEntry[] {
     const nameLength = archive.readUInt16LE(position + 28)
     const extraLength = archive.readUInt16LE(position + 30)
     const commentLength = archive.readUInt16LE(position + 32)
-    const mode = archive.readUInt32LE(position + 38) >>> 16
+    const mode = (archive.readUInt32LE(position + 38) >>> 16) & 0o7777 // permission bits only; the type bits are the writer's concern
     const localOffset = archive.readUInt32LE(position + 42)
     const name = archive.subarray(position + 46, position + 46 + nameLength).toString('utf8')
     const localNameLength = archive.readUInt16LE(localOffset + 26)

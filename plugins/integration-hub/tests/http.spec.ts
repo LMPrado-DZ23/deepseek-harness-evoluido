@@ -100,13 +100,13 @@ describe('integration hub HTTP boundary', () => {
     expect(await enabled.json()).toMatchObject({ integration: { enabled: true } })
     expect((await (await request('/integrations')).json() as { integrations: unknown[] }).integrations).toHaveLength(1)
 
-    expect(await (await request('/smtp')).json()).toEqual({ configured: false, secret_ref: null, tier: 'T1' })
+    expect(await (await request('/smtp')).json()).toEqual({ configured: false, secret_ref: null, tier: 'T2' })
     expect((await request('/smtp', { method: 'POST', body: '{"secret_ref":"smtp://user:pass@host"}' })).status).toBe(400)
     const configured = await request('/smtp', { method: 'POST', body: '{"secret_ref":"DZ23_APP_SMTP"}' })
-    expect(await configured.json()).toEqual({ configured: true, secret_ref: 'DZ23_APP_SMTP', tier: 'T1' })
+    expect(await configured.json()).toEqual({ configured: true, secret_ref: 'DZ23_APP_SMTP', tier: 'T2' })
     const test = await request('/smtp/test', { method: 'POST', body: '{"to":"pessoa@example.test"}' })
     expect(test.status).toBe(200)
-    expect(await test.json()).toMatchObject({ state: 'NOT_EXECUTED' })
+    expect(await test.json()).toMatchObject({ result: 'NOT_EXECUTED' })
 
     const created = await request('/projects/p1/exports', { method: 'POST', body: '{}' })
     expect(created.status).toBe(201)
@@ -127,6 +127,27 @@ describe('integration hub HTTP boundary', () => {
     const events = await (await request('/events')).json() as { events: unknown[] }
     expect(events.events.length).toBeGreaterThanOrEqual(5)
     expect(repository.eventRows.every(event => event.org_id === 'org-a' && event.tenant_id === 'ws-a')).toBe(true)
+  })
+
+  it('never leaks server paths or library messages: missing file → 404 in words, bad percent-encoding → 400, bad body → 400 in words', async () => {
+    const { request, repository } = await fixture('admin')
+    const created = await request('/projects/p1/exports', { method: 'POST', body: '{}' })
+    const { export: record } = await created.json() as { export: { export_id: string } }
+    const stored = repository.exportRows.find(row => row.export_id === record.export_id)!
+    await rm(stored.path, { force: true })
+    const gone = await request(`/projects/p1/exports/${record.export_id}/download`)
+    expect(gone.status).toBe(404)
+    const goneBody = await gone.json() as { error: string }
+    expect(goneBody.error).not.toContain('/')
+    expect(goneBody.error).not.toMatch(/ENOENT/u)
+    const malformed = await request('/integrations/%E0%A4%A/enabled', { method: 'POST', body: '{"enabled":true}' })
+    expect(malformed.status).toBe(400)
+    expect(((await malformed.json()) as { error: string }).error).not.toMatch(/URI/u)
+    const badBody = await request('/smtp', { method: 'POST', body: '{"secret_ref":123}' })
+    expect(badBody.status).toBe(400)
+    expect(((await badBody.json()) as { error: string }).error).not.toMatch(/expected|received|string/iu)
+    const list = await (await request('/integrations')).json() as { channel: string; integrations: unknown[] }
+    expect(list.channel).toBe('stable')
   })
 
   it('maps role errors to 403 for viewers and builders', async () => {

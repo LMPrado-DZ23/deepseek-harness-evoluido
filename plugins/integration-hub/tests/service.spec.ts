@@ -77,9 +77,15 @@ describe('integration hub service', () => {
     await expect(service.setEnabled(admin, unsigned.integration.integration_id, true)).rejects.toMatchObject({ code: 'FORBIDDEN' })
     await expect(service.register(admin, { ...signed(manifest()), name: 'alterado' })).rejects.toThrow('assinatura')
     await expect(service.register(admin, { nope: true })).rejects.toThrow('formato esperado')
+    await expect(service.register(admin, signed(manifest({ kind: 'smtp', id: 'fake-smtp' })))).rejects.toThrow('seção própria')
+    // Refusals are audited too: tampering, malformed input and the reserved kind all leave a failure event.
     expect(repository.eventRows.map(event => `${event.action}:${event.outcome}`)).toEqual([
       'integration.registered:success', 'integration.enabled:success', 'integration.registered:success', 'integration.enabled:failure',
+      'integration.registered:failure', 'integration.registered:failure', 'integration.registered:failure',
     ])
+    expect(service.canEnable(registered.integration)).toBe(true)
+    expect(service.canEnable(unsigned.integration)).toBe(false)
+    expect(service.canEnable(enabled)).toBe(false)
     // re-registering the same id updates in place
     const again = await service.register(admin, signed(manifest({ version: '1.1.0' })))
     expect(again.integration.integration_id).toBe(registered.integration.integration_id)
@@ -90,6 +96,7 @@ describe('integration hub service', () => {
   it('allows unsigned integrations only on the dev channel', async () => {
     const { service } = await build({ channel: 'dev' })
     const unsigned = await service.register(owner, manifest({ tier: undefined }))
+    expect(service.canEnable(unsigned.integration)).toBe(true)
     expect((await service.setEnabled(owner, unsigned.integration.integration_id, true)).enabled).toBe(true)
     expect((await service.setEnabled(owner, unsigned.integration.integration_id, false)).enabled).toBe(false)
   })
@@ -107,16 +114,16 @@ describe('integration hub service', () => {
 
   it('stores only the SMTP credential reference after checking presence and shape, and reports the test as NOT_EXECUTED until enabled', async () => {
     const { service, repository } = await build({ secrets: { DZ23_APP_SMTP: { present: true, shapeOk: true }, DZ23_BROKEN: { present: true, shapeOk: false } } })
-    expect(service.smtp(viewer)).toEqual({ configured: false, secret_ref: null, tier: 'T1' })
+    expect(service.smtp(viewer)).toEqual({ configured: false, secret_ref: null, tier: 'T2' })
     await expect(service.configureSmtp(admin, 'smtp://user:pass@host')).rejects.toThrow('identificador')
     await expect(service.configureSmtp(admin, 'DZ23_MISSING')).rejects.toThrow('não existe no cofre')
     await expect(service.configureSmtp(admin, 'DZ23_BROKEN')).rejects.toThrow('formato esperado')
     const record = await service.configureSmtp(admin, 'DZ23_APP_SMTP')
-    expect(record).toMatchObject({ kind: 'smtp', secret_ref: 'DZ23_APP_SMTP', enabled: true, effective_tier: 'T1' })
+    expect(record).toMatchObject({ kind: 'smtp', secret_ref: 'DZ23_APP_SMTP', enabled: true, effective_tier: 'T2' })
     expect(JSON.stringify(repository.rows)).not.toContain('pass')
-    expect(service.smtp(viewer)).toEqual({ configured: true, secret_ref: 'DZ23_APP_SMTP', tier: 'T1' })
+    expect(service.smtp(viewer)).toEqual({ configured: true, secret_ref: 'DZ23_APP_SMTP', tier: 'T2' })
     const test = await service.testSmtp(admin, 'pessoa@example.test')
-    expect(test.state).toBe('NOT_EXECUTED')
+    expect(test.result).toBe('NOT_EXECUTED')
     expect(repository.eventRows.at(-1)).toMatchObject({ action: 'smtp.tested', outcome: 'not-executed' })
     const second = await service.configureSmtp(admin, 'DZ23_APP_SMTP')
     expect(second.integration_id).toBe(record.integration_id)
@@ -127,9 +134,14 @@ describe('integration hub service', () => {
     await expect(service.testSmtp(admin, 'pessoa@example.test')).rejects.toMatchObject({ code: 'NOT_FOUND' })
     await service.configureSmtp(admin, 'DZ23_APP_SMTP')
     await expect(service.testSmtp(admin, 'not-an-email')).rejects.toMatchObject({ code: 'INVALID' })
-    expect(await service.testSmtp(admin, 'pessoa@example.test')).toMatchObject({ state: 'SENT' })
+    expect(await service.testSmtp(admin, 'pessoa@example.test')).toMatchObject({ result: 'SENT' })
     expect(sent).toEqual([['DZ23_APP_SMTP', 'pessoa@example.test']])
     expect(repository.eventRows.at(-1)).toMatchObject({ action: 'smtp.tested', outcome: 'success' })
+    // Disabling the SMTP record makes it "not configured" again; the record itself stays for the audit trail.
+    const smtpRecord = repository.rows.find(row => row.kind === 'smtp')!
+    await service.setEnabled(admin, smtpRecord.integration_id, false)
+    expect(service.smtp(viewer)).toMatchObject({ configured: false, secret_ref: null })
+    await expect(service.testSmtp(admin, 'pessoa@example.test')).rejects.toMatchObject({ code: 'NOT_FOUND' })
   })
 
   it('exports only a verified project from its latest PASSED run, with private files and a digest', async () => {
@@ -147,6 +159,10 @@ describe('integration hub service', () => {
     expect(() => service.exportRecord(viewer, 'p1', 'missing')).toThrow(HubError)
     expect(() => service.listExports(otherTenant, 'p1')).toThrow()
     expect(repository.eventRows.at(-1)).toMatchObject({ action: 'export.created', outcome: 'success', subject_id: record.export_id })
+    // Same run, same bytes → the same package; no twin file per click.
+    const again = await service.createExport(builder, 'p1')
+    expect(again).toEqual(record)
+    expect(service.listExports(viewer, 'p1')).toHaveLength(1)
   })
 
   it('refuses to export an unverified project or a project whose run files are gone', async () => {
@@ -155,6 +171,7 @@ describe('integration hub service', () => {
     const noRun = await build()
     await expect(noRun.service.createExport(owner, 'p1')).rejects.toThrow('protótipo verificado')
     const gone = await build({ runDirectory: '/definitely/not/here' })
-    await expect(gone.service.createExport(owner, 'p1')).rejects.toThrow('não estão mais neste computador')
+    await expect(gone.service.createExport(owner, 'p1')).rejects.toMatchObject({ code: 'CONFLICT', message: expect.stringContaining('não estão mais neste computador') })
+    for (const built of [draft, noRun, gone]) expect(built.repository.eventRows.at(-1)).toMatchObject({ action: 'export.created', outcome: 'failure' })
   })
 })

@@ -31,9 +31,10 @@ export function verificationLabel(verification: Verification): string {
   return verification === 'verified' ? t.integrations.verified : t.integrations.unverified
 }
 
-/** Unsigned integrations cannot be switched on: the button is shown disabled instead of failing after a click. */
-export function canEnable(integration: { verification: Verification; enabled: boolean }): boolean {
-  return integration.verification === 'verified' && !integration.enabled
+/** The server decides (signature + channel); the panel only mirrors `can_enable` and explains a refusal in words. */
+export function enableExplanation(integration: { verification: Verification; enabled: boolean; can_enable: boolean }): string | null {
+  if (integration.enabled || integration.can_enable) return null
+  return t.integrations.cannotEnable
 }
 
 export function actionLabel(action: string): string {

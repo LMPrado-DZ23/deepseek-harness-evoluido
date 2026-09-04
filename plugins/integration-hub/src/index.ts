@@ -71,7 +71,9 @@ export function smtpTestPort(credentials: Context['credentials']): EmailTestPort
     async sendTest(ref, to) {
       const resolved = await credentials.resolve(credentialRef(ref))
       if (resolved === undefined) throw new Error(t('errors.smtpNotConfigured'))
-      const secret = smtpSecretShape.parse(JSON.parse(resolved.value))
+      // The vault value may have changed since it was configured; a parse failure must never echo the value (JSON errors quote their input).
+      let secret: z.infer<typeof smtpSecretShape>
+      try { secret = smtpSecretShape.parse(JSON.parse(resolved.value)) } catch { throw new Error(t('errors.secretShapeInvalid')) }
       const transport = nodemailer.createTransport({ host: secret.host, port: secret.port, secure: secret.secure, requireTLS: !secret.secure, auth: { user: secret.user, pass: secret.pass } })
       await transport.sendMail({ from: secret.from, to, subject: t('smtp.testSubject'), text: t('smtp.testBody') })
     },

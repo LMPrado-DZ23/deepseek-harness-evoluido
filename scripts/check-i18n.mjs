@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
-import { basename, extname, relative, resolve } from 'node:path'
+import { basename, extname, relative, resolve, sep } from 'node:path'
 import ts from 'typescript'
 
 const root = process.cwd()
@@ -58,12 +58,17 @@ if (!appSource.includes('permanentTruthKind(state)')) failures.push('aviso perma
 const directText = []
 const sourceRoots = [{ path: resolve(root, 'apps/studio-web/src'), strict: true }]
 for (const plugin of readdirSync(resolve(root, 'plugins'), { withFileTypes: true })) {
-  if (plugin.isDirectory() && exists(resolve(root, 'plugins', plugin.name, 'src'))) sourceRoots.push({
+  // `exists` answers for files only; a source ROOT is a directory, so it needs its own check — with `exists` here no plugin was ever scanned.
+  if (plugin.isDirectory() && isDirectory(resolve(root, 'plugins', plugin.name, 'src'))) sourceRoots.push({
     path: resolve(root, 'plugins', plugin.name, 'src'),
     strict: exists(resolve(root, 'plugins', plugin.name, 'i18n', 'pt-BR.json')) && !pluginExistedAtLegacyBaseline(plugin.name),
   })
 }
-for (const sourceRoot of sourceRoots) for (const file of walk(sourceRoot.path)) scanSource(file, sourceRoot.strict)
+// Plugin literals that already existed when the gate started scanning plugins (M5, base c0aeb53) are
+// grandfathered and COUNTED, never silently accepted: the count must go down, never up, and is printed.
+const PLUGIN_BASELINE = 'c0aeb53'
+const grandfatheredHits = []
+for (const sourceRoot of sourceRoots) for (const file of walk(sourceRoot.path)) scanSource(file, sourceRoot.strict, sourceRoot.path.includes(`${sep}plugins${sep}`) ? PLUGIN_BASELINE : undefined)
 if (directText.length > 0) failures.push(`texto pt-BR fora do catálogo: ${directText.join(' | ')}`)
 const cssText = [...styles.matchAll(/content\s*:\s*['"]([^'"]+)['"]/gu)].map(match => match[1].trim()).filter(Boolean)
 if (cssText.length > 0) failures.push(`texto visível no CSS fora do catálogo: ${cssText.join(' | ')}`)
@@ -72,21 +77,23 @@ if (failures.length > 0) {
   process.stderr.write(`I18N_GATE=FAIL\n- ${failures.join('\n- ')}\n`)
   process.exit(1)
 }
-process.stdout.write(`I18N_GATE=PASS locale=pt-BR keys=${flatten(catalog).length + flatten(serverCatalog).length + flatten(previewCatalog).length}\n`)
+process.stdout.write(`I18N_GATE=PASS locale=pt-BR keys=${flatten(catalog).length + flatten(serverCatalog).length + flatten(previewCatalog).length} plugin_literals_grandfathered=${grandfatheredHits.length}\n`)
+if (grandfatheredHits.length > 0) process.stdout.write(`- pendentes de migração para catálogo (base ${PLUGIN_BASELINE}, não podem crescer):\n  ${grandfatheredHits.join('\n  ')}\n`)
 
 function flatten(value, prefix = '') {
   if (typeof value === 'string') return [[prefix, value]]
   return Object.entries(value).flatMap(([key, child]) => flatten(child, prefix === '' ? key : `${prefix}.${key}`))
 }
 
-function scanSource(path, strict) {
+function scanSource(path, strict, baseline) {
   const source = readFileSync(path, 'utf8')
   const sourceFile = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, extname(path) === '.tsx' ? ts.ScriptKind.TSX : ts.ScriptKind.TS)
-  const grandfathered = strict ? new Set() : legacyPortugueseLiterals(path)
-  visit(sourceFile, sourceFile, path, grandfathered)
+  const grandfathered = strict ? new Set() : legacyPortugueseLiterals(path, 'ab0fe506928dacd736262a024d202f3e96e2689d')
+  const baselineLiterals = baseline === undefined ? new Set() : legacyPortugueseLiterals(path, baseline)
+  visit(sourceFile, sourceFile, path, grandfathered, baselineLiterals)
 }
 
-function visit(node, sourceFile, path, grandfathered) {
+function visit(node, sourceFile, path, grandfathered, baselineLiterals) {
   if (node.kind === ts.SyntaxKind.JsxText && /[\p{L}\p{N}]/u.test(node.text)) {
     const { line } = sourceFile.getLineAndCharacterOfPosition(node.getStart())
     directText.push(`${basename(path)}:${line + 1}:${node.text.trim()}`)
@@ -94,9 +101,10 @@ function visit(node, sourceFile, path, grandfathered) {
   const raw = node.getText(sourceFile)
   if ((ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateExpression(node)) && portugueseText(raw) && !grandfathered.has(raw)) {
     const { line } = sourceFile.getLineAndCharacterOfPosition(node.getStart())
-    directText.push(`${basename(path)}:${line + 1}:${node.getText(sourceFile).slice(0, 80)}`)
+    const hit = `${basename(path)}:${line + 1}:${node.getText(sourceFile).slice(0, 80)}`
+    if (baselineLiterals.has(raw)) grandfatheredHits.push(hit); else directText.push(hit)
   }
-  ts.forEachChild(node, child => visit(child, sourceFile, path, grandfathered))
+  ts.forEachChild(node, child => visit(child, sourceFile, path, grandfathered, baselineLiterals))
 }
 
 function portugueseText(value) {
@@ -115,10 +123,14 @@ function exists(path) {
   try { statSync(path); return true } catch { return false }
 }
 
-function legacyPortugueseLiterals(path) {
+function isDirectory(path) {
+  try { return statSync(path).isDirectory() } catch { return false }
+}
+
+function legacyPortugueseLiterals(path, revision) {
   const repoPath = relative(root, path).replaceAll('\\', '/')
   try {
-    const source = execFileSync('git', ['show', `${LEGACY_PLUGIN_BASELINE}:${repoPath}`], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+    const source = execFileSync('git', ['show', `${revision}:${repoPath}`], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
     const sourceFile = ts.createSourceFile(repoPath, source, ts.ScriptTarget.Latest, true, extname(path) === '.tsx' ? ts.ScriptKind.TSX : ts.ScriptKind.TS)
     const found = new Set()
     const collect = node => {

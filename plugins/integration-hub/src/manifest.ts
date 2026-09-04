@@ -1,6 +1,7 @@
 import { createPublicKey, verify } from 'node:crypto'
 import type { PolicyTier } from '@dz23-studio/policy'
 import { z } from 'zod'
+import { t } from './i18n.js'
 import { integrationManifestSchema, type IntegrationKind, type IntegrationManifest } from './model.js'
 
 export type ManifestVerification = 'verified' | 'unverified' | 'invalid'
@@ -17,17 +18,24 @@ export type PublisherKeys = Readonly<Record<string, string>>
 
 const TIER_RANK: Readonly<Record<PolicyTier, number>> = { T0: 0, T1: 1, T2: 2, T3: 3 }
 
+/** Anything below `verified` is capped at this floor, whatever the manifest declares (D16). */
+export const UNVERIFIED_FLOOR: PolicyTier = 'T2'
+
 /**
- * D16 policy floor per kind: an integration that reaches outside the machine
- * or can write never sits below T1; an unsigned or unknown tier is T2.
+ * D16 policy floor per kind: an integration that talks to the outside world
+ * (external MCP, outbound network, e-mail) never sits below T2; one that can
+ * write inside the workspace never sits below T1; an unknown tier is T2.
  */
 export function policyFloor(kind: IntegrationKind, manifest: IntegrationManifest): PolicyTier {
   const external = manifest.endpoint !== undefined && !isLoopback(manifest.endpoint)
-  const writes = manifest.permissions.some(permission => permission === 'write.project' || permission === 'network.outbound' || permission === 'email.send' || permission === 'secrets.read')
-  if (kind === 'mcp' && external) return 'T2'
+  const outbound = manifest.permissions.some(permission => permission === 'network.outbound' || permission === 'email.send')
+  const writes = manifest.permissions.some(permission => permission === 'write.project' || permission === 'secrets.read')
+  if ((kind === 'mcp' && external) || kind === 'smtp' || outbound) return 'T2'
   if (kind === 'mcp' || kind === 'webhook' || writes) return 'T1'
   return 'T0'
 }
+
+function maxTier(left: PolicyTier, right: PolicyTier): PolicyTier { return TIER_RANK[left] >= TIER_RANK[right] ? left : right }
 
 function isLoopback(endpoint: string): boolean {
   try {
@@ -39,11 +47,16 @@ function isLoopback(endpoint: string): boolean {
 /** Most restrictive of the manifest's declared tier and the policy floor; missing/invalid declared tier → T2. */
 export function effectiveTier(kind: IntegrationKind, manifest: IntegrationManifest): PolicyTier {
   const declared = (['T0', 'T1', 'T2', 'T3'] as const).includes(manifest.tier as PolicyTier) ? (manifest.tier as PolicyTier) : 'T2'
-  const floor = policyFloor(kind, manifest)
-  return TIER_RANK[declared] >= TIER_RANK[floor] ? declared : floor
+  return maxTier(declared, policyFloor(kind, manifest))
 }
 
-export function canonicalManifestBytes(manifest: IntegrationManifest): Buffer {
+/**
+ * Canonical form signed by the publisher: the manifest object exactly as
+ * supplied (no defaults added, no trimming), without `signature`, keys sorted
+ * by code point at every level, JSON without whitespace, UTF-8. A signer that
+ * follows these five rules with any JSON library produces the same bytes.
+ */
+export function canonicalManifestBytes(manifest: Readonly<Record<string, unknown>>): Buffer {
   const { signature: _signature, ...rest } = manifest
   return Buffer.from(JSON.stringify(sortKeys(rest)), 'utf8')
 }
@@ -51,22 +64,30 @@ export function canonicalManifestBytes(manifest: IntegrationManifest): Buffer {
 export function evaluateManifest(input: unknown, publisherKeys: PublisherKeys): ManifestEvaluation {
   const parsed = integrationManifestSchema.safeParse(input)
   if (!parsed.success) {
-    return { manifest: null, verification: 'invalid', effectiveTier: 'T2', reasons: parsed.error.issues.slice(0, 5).map(issue => `${issue.path.join('.') || '$'}: ${issue.message}`) }
+    // Field names only: Zod's English messages never reach the interface.
+    const fields = [...new Set(parsed.error.issues.map(issue => issue.path.join('.') || '$'))].slice(0, 5)
+    return { manifest: null, verification: 'invalid', effectiveTier: UNVERIFIED_FLOOR, reasons: fields.map(field => t('manifest.reasonInvalidField', { field })) }
   }
   const manifest = parsed.data
-  const tier = effectiveTier(manifest.kind, manifest)
-  const reasons: string[] = []
-  if (manifest.tier !== tier) reasons.push(`tier efetivo ${tier} (declarado: ${manifest.tier ?? 'ausente'})`)
-  if (manifest.signature === undefined) return { manifest, verification: 'unverified', effectiveTier: tier, reasons: [...reasons, 'sem assinatura'] }
+  const declaredTier = effectiveTier(manifest.kind, manifest)
+  const unverified = (reason: string, verification: 'unverified' | 'invalid'): ManifestEvaluation => {
+    const tier = maxTier(declaredTier, UNVERIFIED_FLOOR)
+    const reasons = [reason]
+    if (tier !== manifest.tier) reasons.push(t('manifest.reasonUnverifiedTier', { tier, declared: manifest.tier ?? t('manifest.tierAbsent') }))
+    return { manifest, verification, effectiveTier: tier, reasons }
+  }
+  if (manifest.signature === undefined) return unverified(t('manifest.reasonUnsigned'), 'unverified')
   const publicKey = publisherKeys[manifest.publisher.id]
-  if (publicKey === undefined) return { manifest, verification: 'unverified', effectiveTier: tier, reasons: [...reasons, 'publicador sem chave cadastrada'] }
+  if (publicKey === undefined) return unverified(t('manifest.reasonNoPublisherKey'), 'unverified')
   let valid = false
   try {
     const key = createPublicKey(publicKey.includes('BEGIN') ? publicKey : { key: Buffer.from(publicKey, 'base64'), format: 'der', type: 'spki' })
-    valid = verify(null, canonicalManifestBytes(manifest), key, Buffer.from(manifest.signature, 'base64'))
+    valid = verify(null, canonicalManifestBytes(input as Record<string, unknown>), key, Buffer.from(manifest.signature, 'base64'))
   } catch { valid = false }
-  if (!valid) return { manifest, verification: 'invalid', effectiveTier: tier, reasons: [...reasons, 'assinatura inválida'] }
-  return { manifest, verification: 'verified', effectiveTier: tier, reasons }
+  if (!valid) return unverified(t('manifest.reasonSignatureInvalid'), 'invalid')
+  const reasons: string[] = []
+  if (manifest.tier !== declaredTier) reasons.push(t('manifest.reasonTier', { tier: declaredTier, declared: manifest.tier ?? t('manifest.tierAbsent') }))
+  return { manifest, verification: 'verified', effectiveTier: declaredTier, reasons }
 }
 
 export const manifestEvaluationSchema = z.object({
@@ -78,7 +99,8 @@ export const manifestEvaluationSchema = z.object({
 function sortKeys(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(sortKeys)
   if (value !== null && typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => [k, sortKeys(v)]))
+    // Code-point order, locale-independent: the same bytes on every machine.
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([k, v]) => [k, sortKeys(v)]))
   }
   return value
 }

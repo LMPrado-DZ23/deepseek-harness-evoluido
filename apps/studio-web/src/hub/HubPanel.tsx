@@ -1,8 +1,8 @@
 import { ArrowLeft, Download, Mail, Plug, ScrollText } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import t from '../i18n/hub.pt-BR.json'
 import { createHubApi, HubApiError, type ExportRecord, type HubApi, type HubEvent, type Integration, type ProjectSummary, type SmtpState } from './hubApi'
-import { actionLabel, canEnable, exportable, fill, formatBytes, formatDate, kindLabel, outcomeLabel, tierLabel, verificationLabel } from './presentation'
+import { actionLabel, enableExplanation, exportable, fill, formatBytes, formatDate, kindLabel, outcomeLabel, tierLabel, verificationLabel } from './presentation'
 import './hub.css'
 
 type Notice = { kind: 'ok' | 'error' | 'info'; text: string } | null
@@ -15,6 +15,7 @@ type Notice = { kind: 'ok' | 'error' | 'info'; text: string } | null
 export function HubPanel({ api = createHubApi(), homeHref = '/studio/' }: { api?: HubApi; homeHref?: string }) {
   const [smtp, setSmtp] = useState<SmtpState | null>(null)
   const [integrations, setIntegrations] = useState<Integration[] | null>(null)
+  const [channel, setChannel] = useState<'stable' | 'dev'>('stable')
   const [projects, setProjects] = useState<ProjectSummary[] | null>(null)
   const [events, setEvents] = useState<HubEvent[] | null>(null)
   const [notice, setNotice] = useState<Notice>(null)
@@ -27,7 +28,7 @@ export function HubPanel({ api = createHubApi(), homeHref = '/studio/' }: { api?
   const refresh = useCallback(async () => {
     try {
       const [smtpState, list, projectList, log] = await Promise.all([api.smtp(), api.integrations(), api.projects(), api.events()])
-      setSmtp(smtpState); setIntegrations(list); setProjects(projectList); setEvents(log)
+      setSmtp(smtpState); setIntegrations(list.integrations); setChannel(list.channel); setProjects(projectList); setEvents(log)
     } catch (error) { report(error) }
   }, [api, report])
 
@@ -41,7 +42,7 @@ export function HubPanel({ api = createHubApi(), homeHref = '/studio/' }: { api?
     {notice === null ? null : <p className={`hub-notice ${notice.kind}`} role={notice.kind === 'error' ? 'alert' : 'status'}>{notice.text}</p>}
     <main className="hub-grid">
       <SmtpSection api={api} state={smtp} onChange={async () => { setSmtp(await api.smtp()); setEvents(await api.events()) }} notify={setNotice} report={report} />
-      <IntegrationsSection api={api} integrations={integrations} onChange={async () => { setIntegrations(await api.integrations()); setEvents(await api.events()) }} notify={setNotice} report={report} />
+      <IntegrationsSection api={api} integrations={integrations} channel={channel} onChange={async () => { const list = await api.integrations(); setIntegrations(list.integrations); setChannel(list.channel); setEvents(await api.events()) }} notify={setNotice} report={report} />
       <ExportsSection api={api} projects={projects} onChange={async () => { setEvents(await api.events()) }} notify={setNotice} report={report} />
       <EventsSection events={events} />
     </main>
@@ -65,7 +66,7 @@ function SmtpSection({ api, state, onChange, notify, report }: SectionProps & { 
       <input id="hub-smtp-ref" value={secretRef} onChange={event => setSecretRef(event.target.value)} placeholder={t.smtp.refPlaceholder} autoComplete="off" spellCheck={false} />
       <button type="submit" className="primary" disabled={busy || secretRef.trim() === ''}>{t.smtp.save}</button>
     </form>
-    <form onSubmit={event => { event.preventDefault(); void run(async () => { const result = await api.testSmtp(recipient.trim()); notify({ kind: result.state === 'SENT' ? 'ok' : 'info', text: `${result.state === 'SENT' ? t.smtp.testSent : t.smtp.testNotExecuted}: ${result.message}` }) }) }}>
+    <form onSubmit={event => { event.preventDefault(); void run(async () => { const result = await api.testSmtp(recipient.trim()); notify({ kind: result.result === 'SENT' ? 'ok' : 'info', text: `${result.result === 'SENT' ? t.smtp.testSent : t.smtp.testNotExecuted}: ${result.message}` }) }) }}>
       <label htmlFor="hub-smtp-to">{t.smtp.testLabel}</label>
       <input id="hub-smtp-to" type="email" value={recipient} onChange={event => setRecipient(event.target.value)} placeholder={t.smtp.testPlaceholder} />
       <button type="submit" className="secondary" disabled={busy || state?.configured !== true || recipient.trim() === ''}>{t.smtp.test}</button>
@@ -73,7 +74,7 @@ function SmtpSection({ api, state, onChange, notify, report }: SectionProps & { 
   </section>
 }
 
-function IntegrationsSection({ api, integrations, onChange, notify, report }: SectionProps & { integrations: Integration[] | null }) {
+function IntegrationsSection({ api, integrations, channel, onChange, notify, report }: SectionProps & { integrations: Integration[] | null; channel: 'stable' | 'dev' }) {
   const [manifestText, setManifestText] = useState('')
   const [reasons, setReasons] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
@@ -82,13 +83,17 @@ function IntegrationsSection({ api, integrations, onChange, notify, report }: Se
   return <section className="hub-card" aria-labelledby="hub-integrations-title">
     <div className="hub-card-heading"><Plug aria-hidden="true" /><h2 id="hub-integrations-title">{t.integrations.title}</h2></div>
     <p className="hub-help">{t.integrations.help}</p>
+    {channel === 'dev' ? <p className="hub-state hub-channel" data-testid="hub-channel">{t.integrations.devChannel}</p> : null}
     {integrations === null ? <p>{t.loading}</p> : visible.length === 0 ? <p className="hub-empty">{t.integrations.empty}</p> : <ul className="hub-list" data-testid="integration-list">
       {visible.map(item => <li key={item.integration_id} data-testid="integration-item">
         <div><strong>{item.name}</strong><span className="hub-meta">{kindLabel(item.kind)}</span></div>
         <div className="hub-tags"><span className={`hub-tag ${item.verification}`}>{verificationLabel(item.verification)}</span><span className="hub-tag">{tierLabel(item.effective_tier)}</span><span className={`hub-tag ${item.enabled ? 'on' : 'off'}`}>{item.enabled ? t.integrations.enabled : t.integrations.disabled}</span></div>
         {item.enabled
           ? <button type="button" className="secondary" disabled={busy} onClick={() => void run(() => api.setEnabled(item.integration_id, false).then(() => undefined))}>{t.integrations.disable}</button>
-          : <button type="button" className="primary" disabled={busy || !canEnable(item)} title={canEnable(item) ? undefined : t.integrations.unverified} onClick={() => void run(() => api.setEnabled(item.integration_id, true).then(() => undefined))}>{t.integrations.enable}</button>}
+          : <>
+            {enableExplanation(item) === null ? null : <p className="hub-why" id={`why-${item.integration_id}`}>{enableExplanation(item)}</p>}
+            <button type="button" className="primary" disabled={busy || !item.can_enable} aria-describedby={enableExplanation(item) === null ? undefined : `why-${item.integration_id}`} onClick={() => void run(() => api.setEnabled(item.integration_id, true).then(() => undefined))}>{t.integrations.enable}</button>
+          </>}
       </li>)}
     </ul>}
     <details className="hub-advanced">
@@ -113,6 +118,8 @@ function ExportsSection({ api, projects, onChange, notify, report }: SectionProp
   const [projectId, setProjectId] = useState('')
   const [exports, setExports] = useState<ExportRecord[] | null>(null)
   const [busy, setBusy] = useState(false)
+  const projectIdRef = useRef(projectId)
+  projectIdRef.current = projectId
   const selected = useMemo(() => projects?.find(value => value.project_id === projectId), [projects, projectId])
   useEffect(() => { if (projectId === '' && projects !== null && projects.length > 0) setProjectId(projects.find(exportable)?.project_id ?? projects[0]!.project_id) }, [projects, projectId])
   useEffect(() => {
@@ -122,8 +129,15 @@ function ExportsSection({ api, projects, onChange, notify, report }: SectionProp
     return () => { cancelled = true }
   }, [api, projectId, report])
   const create = async () => {
+    const target = projectId
     setBusy(true); notify(null)
-    try { await api.createExport(projectId); setExports(await api.exports(projectId)); notify({ kind: 'ok', text: t.exports.created }); await onChange() } catch (error) { report(error) } finally { setBusy(false) }
+    try {
+      await api.createExport(target)
+      const list = await api.exports(target)
+      // The person may have switched projects while the package was being built: never show one project's list under another.
+      setExports(current => (projectIdRef.current === target ? list : current))
+      notify({ kind: 'ok', text: t.exports.created }); await onChange()
+    } catch (error) { report(error) } finally { setBusy(false) }
   }
   return <section className="hub-card" aria-labelledby="hub-exports-title">
     <div className="hub-card-heading"><Download aria-hidden="true" /><h2 id="hub-exports-title">{t.exports.title}</h2></div>
