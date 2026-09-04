@@ -14,6 +14,7 @@ ENV CI=1 \
     COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
     PNPM_STORE_DIR=/pnpm/store
 COPY deploy/images.lock.json deploy/images.lock.json
+COPY deploy/studio/Dockerfile deploy/studio/Dockerfile
 COPY scripts/check-image-lock.mjs scripts/check-image-lock.mjs
 COPY scripts/fetch-verified-pnpm.mjs scripts/fetch-verified-pnpm.mjs
 RUN node scripts/check-image-lock.mjs \
