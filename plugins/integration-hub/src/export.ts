@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
-import { lstat, readdir, readFile } from 'node:fs/promises'
+import { constants, type Stats } from 'node:fs'
+import { lstat, open, readdir, readFile } from 'node:fs/promises'
 import { join, posix, relative, resolve } from 'node:path'
 import { t } from './i18n.js'
 import { createZipAsync, type ZipEntry } from './zip.js'
@@ -199,10 +200,22 @@ async function collect(directory: string, prefix: string, entries: ZipEntry[], b
     if (/[\\\u0000-\u001f]/u.test(item.name)) { excluded.push(`${name} (${t('export.excludedUnsupportedName')})`); continue }
     // Names come from readdir, so a literal `..` segment cannot appear; `assertEntryName` in the writer re-checks every segment.
     if (relative(directory, full).startsWith('..')) throw new ExportError('INVALID_PATH', `unsafe path ${name}`)
-    const info = await lstat(full)
-    budget.remaining -= info.size
-    if (budget.remaining < 0) throw new ExportError('TOO_LARGE', t('errors.exportTooLarge', { limitMb: EXPORT_LIMIT_BYTES / (1024 * 1024) }))
-    const data = await readFile(full)
+    // Opened ONCE, without following a symlink, and both the size and the bytes come from that same
+    // handle: `lstat` then `readFile` left a window where the entry could be swapped for a link to
+    // something else between the check and the read.
+    const handle = await open(full, (constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0)) as number).catch(() => undefined)
+    if (handle === undefined) { excluded.push(`${name} (${t('export.excludedShortcut')})`); continue }
+    let data: Buffer
+    let info: Stats
+    try {
+      info = await handle.stat()
+      if (!info.isFile()) { excluded.push(`${name} (${t('export.excludedUnsupportedName')})`); continue }
+      budget.remaining -= info.size
+      if (budget.remaining < 0) throw new ExportError('TOO_LARGE', t('errors.exportTooLarge', { limitMb: EXPORT_LIMIT_BYTES / (1024 * 1024) }))
+      data = await handle.readFile()
+    } finally {
+      await handle.close().catch(() => undefined)
+    }
     const secret = findSecret(item.name, data)
     if (secret !== null) throw new ExportError('SECRET_DETECTED', t('errors.exportSecretFound', { file: name }))
     // Packaged, but nobody looked inside it: the package says so rather than implying it was checked.

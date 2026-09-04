@@ -154,8 +154,21 @@ ligá-la, e levar o protótipo verificado consigo.
   e o painel não executa cerimônia de passkey nenhuma. Agora diz o que de fato acontece: a ação só
   funciona se a passkey já tiver sido confirmada nesta sessão; senão o Studio recusa e nada muda.
 
-Limite que fica **registrado, não fechado**: a confirmação de **T2** é uma afirmação do cliente (um
-campo JSON). O que separa isso de uma página hostil é CSRF + verificação de origem; **T3** é o único
+**Correção posterior (mesmo dia):** a confirmação de T2/T3 deixou de ser afirmação do cliente. A
+tela pede ao servidor uma aprovação para a ação exata (`POST /approvals`); o servidor decide o
+nível, registra a decisão **antes** da ação, amarra a pessoa, a sessão, a ação e o alvo, expira em
+três minutos e **gasta na primeira apresentação**. Uma aprovação inventada, reapresentada ou emitida
+para outro alvo é recusada. Os tickets vivem em memória: um reinício os perde e a pessoa confirma de
+novo — falha fechada; persistir exigiria versão nova do domínio.
+
+E a janela TOCTOU da exportação foi fechada, não só reduzida: cada arquivo é aberto **uma vez**, com
+`O_NOFOLLOW`, e tanto o tamanho quanto os bytes vêm desse mesmo descritor — `lstat` seguido de
+`readFile` deixava um intervalo em que a entrada podia virar um link para outra coisa. Um link
+plantado no lugar de um arquivo comum não é lido e aparece nomeado em `EXCLUIDOS.txt`; verificado
+por mutação.
+
+Limite anterior, agora histórico: a confirmação de **T2** era uma afirmação do cliente (um campo
+JSON). O que separa isso de uma página hostil é CSRF + verificação de origem; **T3** é o único
 nível com prova do lado do servidor (a passkey recente). Anotado para a fatia da arquitetura de
 modos de confiança.
 
