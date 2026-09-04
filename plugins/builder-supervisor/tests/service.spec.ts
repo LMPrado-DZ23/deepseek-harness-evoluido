@@ -139,6 +139,13 @@ describe('builder supervisor orchestration', () => {
     await service.prepare({ request_id: req('1'), build_id: 'first', artifact_relative_path: 'run', artifact_sha256: fixture.hash }, signal)
     await expect(service.prepare({ request_id: req('2'), build_id: 'second', artifact_relative_path: 'run', artifact_sha256: fixture.hash }, signal)).rejects.toThrow('CAPACITY_EXCEEDED')
   })
+
+  it('serializes concurrent prepare calls so one build id cannot win twice', async () => {
+    const fixture = await artifactFixture(); const adapter = fakeAdapter(); const service = new BuilderSupervisor({ artifactRoot: fixture.root, adapter, createReference: () => ref }); const signal = new AbortController().signal
+    const body = { build_id: 'racing-id', artifact_relative_path: 'run', artifact_sha256: fixture.hash }
+    const results = await Promise.allSettled([service.prepare({ ...body, request_id: req('1') }, signal), service.prepare({ ...body, request_id: req('2') }, signal)])
+    expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1); expect(results.filter(result => result.status === 'rejected')).toHaveLength(1); expect(adapter.prepare).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('verified build archive', () => {

@@ -36,6 +36,7 @@ export class BuilderSupervisor implements BuilderRpcMethods {
   readonly #replay: ReplayClaimPort
   readonly #createReference: () => string
   readonly #steps: Semaphore
+  readonly #prepares = new Semaphore(1)
   readonly #maxBuilds: number
   readonly #buildClaims: BuildIdClaimPort
   #initialized = false
@@ -70,11 +71,12 @@ export class BuilderSupervisor implements BuilderRpcMethods {
 
   async prepare(body: Parameters<BuilderRpcMethods['prepare']>[0], signal: AbortSignal): Promise<{ readonly build_ref: string; readonly state: 'PREPARED' }> {
     await this.#claim(body.request_id)
-    const activeBuilds = [...this.#builds.values()].filter(build => build.finish_result === undefined).length
-    if (activeBuilds >= this.#maxBuilds || this.#builds.size >= 4_096) throw new BuilderSupervisorError('CAPACITY_EXCEEDED')
-    if (this.#buildIds.has(body.build_id)) throw new BuilderSupervisorError('BUILD_ALREADY_EXISTS')
-    const buildRef = this.#createReference()
+    const release = await this.#prepares.acquire(signal)
     try {
+      const activeBuilds = [...this.#builds.values()].filter(build => build.finish_result === undefined).length
+      if (activeBuilds >= this.#maxBuilds || this.#builds.size >= 4_096) throw new BuilderSupervisorError('CAPACITY_EXCEEDED')
+      if (this.#buildIds.has(body.build_id)) throw new BuilderSupervisorError('BUILD_ALREADY_EXISTS')
+      const buildRef = this.#createReference()
       if (!/^build_[a-f0-9]{32}$/u.test(buildRef) || this.#builds.has(buildRef) || this.#buildRefs.has(buildRef) || (await this.options.adapter.listManaged(signal)).includes(buildRef)) {
         throw new BuilderSupervisorError('BUILD_ALREADY_EXISTS')
       }
@@ -83,9 +85,7 @@ export class BuilderSupervisor implements BuilderRpcMethods {
       await this.options.adapter.prepare(buildRef, body.build_id, artifact, signal)
       this.#buildRefs.add(buildRef); this.#builds.set(buildRef, { build_ref: buildRef, build_id: body.build_id, state: 'PREPARED', cleanup_pending: false })
       return { build_ref: buildRef, state: 'PREPARED' }
-    } catch (error) {
-      throw error
-    }
+    } finally { release() }
   }
 
   async execute(body: Parameters<BuilderRpcMethods['execute']>[0], signal: AbortSignal): Promise<Awaited<ReturnType<BuilderRpcMethods['execute']>>> {
