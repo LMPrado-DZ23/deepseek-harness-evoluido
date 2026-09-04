@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { roleAllows, type StudioRole } from '@dz23-studio/policy'
 import { appSpecHash, type AppSpecV1 } from './appspec.js'
 import { createDesignSpec, designSpecHash, designSpecV1Schema, type DesignLogo, type DesignSelection, type DesignSpecV1 } from './design.js'
@@ -222,7 +222,7 @@ export class PromptToAppService {
       const projectRuns = this.#repository.runs().filter(run => run.project_id === project.project_id && run.org_id === project.org_id && run.tenant_id === project.tenant_id)
       const latest = [...projectRuns].sort((left, right) => right.started_at.localeCompare(left.started_at))[0]
       const operationId = latest?.operation_id ?? `recovery-${project.project_id}`
-      const markerId = `recovery:${project.org_id}:${project.tenant_id}:${project.project_id}:${operationId}`
+      const markerId = recoveryId('run', project, operationId)
       if (!projectRuns.some(run => run.failure_code === 'STUDIO_RESTARTED_DURING_RUN' && run.operation_id === operationId)) {
         await this.#repository.putRun({
           run_id: markerId, operation_id: operationId, owner_session_id: 'studio-system-recovery',
@@ -237,7 +237,7 @@ export class PromptToAppService {
         recoveredRuns++
       }
       await this.#repository.putApproval({
-        approval_id: `recovery-transition:${project.org_id}:${project.tenant_id}:${project.project_id}:${operationId}`,
+        approval_id: recoveryId('transition', project, operationId),
         project_id: project.project_id, org_id: project.org_id, tenant_id: project.tenant_id,
         subject: 'transition', subject_id: `${project.state}:INTERRUPTED:${operationId}`,
         approved_by: 'studio-system-recovery', approved_at: now, tier: 'T1', strong_identity: false,
@@ -283,3 +283,8 @@ export class PromptToAppService {
 }
 
 export function values<T>(table: { entries(): IterableIterator<[PromptToAppKey, T]> }): T[] { return [...table.entries()].map(([, value]) => value) }
+
+function recoveryId(kind: 'run' | 'transition', project: Pick<StudioProject, 'org_id' | 'tenant_id' | 'project_id'>, operationId: string): string {
+  const digest = createHash('sha256').update(JSON.stringify([kind, project.org_id, project.tenant_id, project.project_id, operationId])).digest('hex')
+  return `recovery-${kind}-${digest}`
+}

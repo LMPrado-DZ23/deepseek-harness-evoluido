@@ -125,6 +125,20 @@ describe('PromptToAppService', () => {
     await expect(service.reconcileInterruptedExecutions()).resolves.toEqual({ runs: 0, projects: 0 })
     expect(repository.approvalRows).toHaveLength(1)
   })
+
+  it('derives collision-resistant recovery keys from the full structured scope', async () => {
+    const { repository, service } = fixture()
+    const base: StudioProject = {
+      project_id: 'd', org_id: 'a:b', tenant_id: 'c', name: 'A', state: 'BUILD_OK', original_brief: 'A',
+      category: 'landing-page', created_by: 'owner', privacy: 'local-only', created_at: '2026-09-03T11:00:00.000Z',
+      updated_at: '2026-09-03T11:00:00.000Z', archived_at: null,
+    }
+    repository.projectRows = [base, { ...base, org_id: 'a', tenant_id: 'b:c', name: 'B' }]
+    await expect(service.reconcileInterruptedExecutions()).resolves.toEqual({ runs: 2, projects: 2 })
+    expect(new Set(repository.runRows.map(run => run.run_id)).size).toBe(2)
+    expect(new Set(repository.approvalRows.map(row => row.approval_id)).size).toBe(2)
+    expect(repository.projectRows.every(row => row.state === 'INTERRUPTED')).toBe(true)
+  })
 })
 
 describe('intake and planner', () => {
