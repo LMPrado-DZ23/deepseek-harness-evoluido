@@ -42,7 +42,7 @@ self.addEventListener('fetch', event => {
     event.respondWith(fetch(request).catch((error: unknown) => {
       // A request the page itself cancelled is not "offline".
       if (error instanceof DOMException && error.name === 'AbortError') throw error
-      return new Response(offlineApiResponseBody(), {
+      return new Response(offlineApiResponseBody(self.navigator?.onLine === true), {
         status: OFFLINE_STATUS, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
       })
     }))

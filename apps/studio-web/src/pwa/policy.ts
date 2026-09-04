@@ -16,6 +16,8 @@ export const SW_CACHE_PREFIX = 'dz23-studio-shell-'
 export const SW_SCOPE = '/studio/'
 export const OFFLINE_STATUS = 503
 export const OFFLINE_ERROR_CODE = 'OFFLINE'
+/** The browser has a network but the Studio did not answer: a different message for the person, and a different cause. */
+export const SERVICE_UNREACHABLE_ERROR_CODE = 'SERVICE_UNREACHABLE'
 
 export function decide(method: string, url: URL, origin: string): CacheDecision {
   if (method !== 'GET' || url.origin !== origin) return 'bypass'
@@ -29,6 +31,10 @@ export function decide(method: string, url: URL, origin: string): CacheDecision 
 /** Paths precached on install: only the shell entry points; hashed assets are cached as they are first loaded. */
 export const PRECACHE_PATHS = [SW_SCOPE, `${SW_SCOPE}manifest.json`, `${SW_SCOPE}icons/icon-192.png`, `${SW_SCOPE}icons/icon-512.png`, `${SW_SCOPE}icons/maskable-512.png`] as const
 
-export function offlineApiResponseBody(): string {
-  return JSON.stringify({ error: OFFLINE_ERROR_CODE, offline: true })
+export function offlineApiResponseBody(online = false): string {
+  // `online` comes from navigator.onLine inside the worker: with a network, a failed API call is the
+  // Studio being unreachable, not the person being offline. The interface says each in its own words.
+  return online
+    ? JSON.stringify({ error: SERVICE_UNREACHABLE_ERROR_CODE, offline: false, serviceUnreachable: true })
+    : JSON.stringify({ error: OFFLINE_ERROR_CODE, offline: true })
 }

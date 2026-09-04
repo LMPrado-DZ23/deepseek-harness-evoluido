@@ -34,6 +34,7 @@ beforeEach(async () => {
   vi.resetModules()
   vi.stubGlobal('self', {
     location: { origin: 'http://127.0.0.1:4179' },
+    navigator: { onLine: false },
     addEventListener: (name: string, listener: Listener) => { listeners.set(name, listener) },
     skipWaiting: async () => undefined,
     clients: { claim: async () => undefined },

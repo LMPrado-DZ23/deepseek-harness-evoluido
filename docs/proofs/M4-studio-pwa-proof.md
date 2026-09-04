@@ -6,3 +6,16 @@
 - Gates: `gate:i18n` PASS (catálogo PWA e manifesto varridos contra "pronto"), typecheck PASS, build reprodutível (versão do worker por digest do conteúdo).
 
 Não executado ou pendente: instalação em aparelho físico (Android/iOS); Lighthouse (substituído pelas verificações acima); preview no celular (M1/HTTPS); **disparo real do evento de fim de criação e botão de permissão na interface** (integração em `App.tsx`, no handoff — até lá a notificação é `NOT_IMPLEMENTED` do lado da interface).
+
+## Correção de honestidade (04/09/2026, após revisão do Codex)
+
+O texto anterior da faixa dizia que, sem internet, "suas ações vão esperar a conexão voltar" —
+**e não existe fila nem sincronização em segundo plano**. Era exatamente o tipo de promessa que
+o projeto proíbe. O catálogo passou a dizer o que de fato acontece: a tela continua aberta para
+ver o que já está nela, mas nada pode ser criado, salvo ou enviado até a conexão voltar; e uma
+ação bloqueada avisa que o que foi digitado continua ali.
+
+Além disso, o service worker passou a distinguir duas causas que antes eram a mesma frase:
+`OFFLINE` (o aparelho está sem rede) e `SERVICE_UNREACHABLE` (há rede, mas o Studio não
+respondeu — desligado ou reiniciando). O corpo do 503 carrega o código correspondente e a
+interface tem uma frase para cada. Fila/`background sync` permanece `NOT_PRESENT`.

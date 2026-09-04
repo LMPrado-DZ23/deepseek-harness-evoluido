@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { decide, OFFLINE_ERROR_CODE, offlineApiResponseBody, PRECACHE_PATHS, SW_SCOPE } from './policy'
+import { decide, OFFLINE_ERROR_CODE, offlineApiResponseBody, PRECACHE_PATHS, SERVICE_UNREACHABLE_ERROR_CODE, SW_SCOPE } from './policy'
 
 const origin = 'http://127.0.0.1:4179'
 const at = (path: string, base = origin) => new URL(path, base)
@@ -9,6 +9,9 @@ describe('service worker caching policy', () => {
     expect(decide('GET', at('/api/studio/apps/projects'), origin)).toBe('api')
     expect(decide('GET', at('/api/studio/identity/session'), origin)).toBe('api')
     expect(JSON.parse(offlineApiResponseBody())).toEqual({ error: OFFLINE_ERROR_CODE, offline: true })
+    expect(JSON.parse(offlineApiResponseBody(false))).toEqual({ error: OFFLINE_ERROR_CODE, offline: true })
+    // Com rede, a mesma falha significa outra coisa e recebe outro código.
+    expect(JSON.parse(offlineApiResponseBody(true))).toEqual({ error: SERVICE_UNREACHABLE_ERROR_CODE, offline: false, serviceUnreachable: true })
   })
 
   it('caches only the shell: hashed assets, icons, brand and manifest are cache-first; the shell HTML is network-first', () => {
