@@ -2,8 +2,8 @@
 
 - Missão: `M1-M6`
 - Estado: `EXECUTING`
-- Etapa atual: `M1 — P34 preview seguro`
-- Branch: `codex/missao-m1-preview`
+- Etapa atual: `M2 — Prompt-to-App fatia 3`
+- Branch: `codex/missao-m2-prompt-to-app-final`
 - Base imutável: `ec92f29f7398d1ac69dc6201e5fb8e6bccfa60b9`
 - Harness upstream preservado: `6c705be1ce6774a000d061da41d1823b03a3d42c`
 - Último checkpoint: `2026-09-04 America/Sao_Paulo`
@@ -34,14 +34,14 @@ Entregar, em branches empilhadas e sem push/deploy, as etapas M1 a M6: preview s
 
 ## Etapas
 
-- [x] M1 — checkpoint de código P34 fechado; aguardando parecer independente do Claude antes de integração
-- [ ] M2 — Prompt-to-App fatia 3, SaaS/dashboard e golden 18/18
+- [x] M1 — código final em `codex/missao-m1-preview-fix@17ac4d7`, parecer independente `GO`; preservado sem merge enquanto a integração aguarda a ordem sequencial
+- [ ] M2 — código em fechamento: agenda interna, dashboard, área autenticada e Golden 18/18; aguardando gates e checkpoint imutável
 - [ ] M3 — Postgres operacional, migração e backup/restore
 - [ ] M4 — PWA e preparação móvel
 - [ ] M5 — Integration Hub, SMTP configurável e download de protótipo
 - [ ] M6 — gate Windows integrado
 
-## Checkpoint atual
+## Checkpoint M1 preservado
 
 - Supervisor Docker e proxy mínimo construídos com autoridade derivada no
   servidor, sockets Unix, runtime em `NetworkMode=none`, proxy somente no
@@ -78,11 +78,23 @@ está no patch de prova e a lista do script de runtime está desatualizada. M3
 deve gerar/verificar rotas a partir de `scripts/studio-domain-specs.ts` e falhar
 se qualquer domínio Studio cair no backend JSON em produção.
 
+## Checkpoint M2 em preparação
+
+- As sete categorias estão disponíveis na interface com linguagem BETA honesta.
+- O Golden Set exige exatamente 18 briefs/18 critérios, schema estrito, IDs
+  únicos, hashes das fixtures e separação entre pipeline técnico e critérios de
+  produto.
+- Agenda, dashboard e área autenticada possuem geradores e provas deterministas;
+  a política de código gerado bloqueia rede, runtime ativo, caminhos reservados,
+  componentes dinâmicos, dados sensíveis e arquivos não autorizados.
+- Nenhum resultado desta seção é checkpoint até a suíte final, cobertura,
+  Golden Set e artefato P37 serem executados sobre a mesma árvore.
+
 ## Próxima ação exata
 
-Fechar commit e artefato do M1, executar P37 sobre o arquivo extraído e entregar
-ao Claude para revisão/reexecução independente. Em seguida iniciar M2 em branch
-empilhada, sem integrar M1 na branch principal antes do parecer.
+Fechar os gates do M2, criar commit e artefato auditável, executar P37 sobre o
+arquivo extraído e entregar ao Claude para revisão independente. Nenhuma branch
+é integrada ou removida antes da autorização correspondente.
 
 ## Bloqueios externos reservados ao usuário
 

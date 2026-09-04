@@ -1,10 +1,10 @@
 import { Bell, CircleHelp, Eye, FolderKanban, Home, LineChart, Menu, Settings, Sparkles, UserRound } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, type HealthState } from './api'
+import type { Category } from './categories'
 import t from './i18n/pt-BR.json'
 import { currentStepIndex, permanentTruthKind, privacyNotice, type ProjectUiState } from './presentation'
 
-type Category = 'landing-page' | 'catalog' | 'form-database' | 'crud-panel'
 type DesignPreset = 'modern' | 'professional' | 'colorful' | 'brand'
 type Question = { id: 'audience' | 'goal' | 'content' | 'sensitive-confirmation'; text: string }
 type Plan = { slices: Array<{ slice_id: string; title: string; description: string; acceptance_criteria: string[] }> }
@@ -224,7 +224,7 @@ function Idea(props: {
   ]
   return <><div className="heading"><Sparkles aria-hidden="true"/><div><h1>{t.idea.title}</h1><p>{t.idea.subtitle}</p></div></div><label className="sr-only" htmlFor="brief">{t.idea.title}</label>
     <textarea id="brief" maxLength={1000} value={props.brief} onChange={event => props.setBrief(event.target.value)} placeholder={t.idea.placeholder} /><div className="counter" aria-live="polite">{props.brief.length} {t.idea.counter}</div>
-    <h2>{t.idea.suggestions}</h2><button className="suggestion" onClick={() => props.chooseSuggestion(t.idea.landing, 'landing-page')}>{t.idea.landing}</button><button className="suggestion" onClick={() => props.chooseSuggestion(t.idea.catalog, 'catalog')}>{t.idea.catalog}</button><button className="suggestion" onClick={() => props.chooseSuggestion(t.idea.formDatabase, 'form-database')}>{t.idea.formDatabase}</button><button className="suggestion" onClick={() => props.chooseSuggestion(t.idea.crudPanel, 'crud-panel')}>{t.idea.crudPanel}</button><p className="coming">{t.idea.coming}</p>
+    <h2>{t.idea.suggestions}</h2><button className="suggestion" onClick={() => props.chooseSuggestion(t.idea.landing, 'landing-page')}>{t.idea.landing}</button><button className="suggestion" onClick={() => props.chooseSuggestion(t.idea.catalog, 'catalog')}>{t.idea.catalog}</button><button className="suggestion" onClick={() => props.chooseSuggestion(t.idea.formDatabase, 'form-database')}>{t.idea.formDatabase}</button><button className="suggestion" onClick={() => props.chooseSuggestion(t.idea.crudPanel, 'crud-panel')}>{t.idea.crudPanel}</button><button className="suggestion" onClick={() => props.chooseSuggestion(t.idea.scheduling, 'scheduling')}>{t.idea.scheduling}</button><button className="suggestion" onClick={() => props.chooseSuggestion(t.idea.dashboard, 'dashboard')}>{t.idea.dashboard}</button><button className="suggestion" onClick={() => props.chooseSuggestion(t.idea.saas, 'saas-authenticated')}>{t.idea.saas}</button><p className="coming">{t.idea.betaNotice}</p>
     <h2>{t.design.title}</h2><p className="coming">{t.design.subtitle}</p><div className="design-grid">{presets.map(([value, label, detail]) => <button type="button" key={value} className={props.designPreset === value ? 'design-card selected' : 'design-card'} aria-pressed={props.designPreset === value} onClick={() => props.setDesignPreset(value)}><strong>{label}</strong><span>{detail}</span></button>)}</div>
     <button type="button" className="advanced" aria-expanded={props.showDesignAdvanced} onClick={() => props.setShowDesignAdvanced(!props.showDesignAdvanced)}>{props.showDesignAdvanced ? t.design.hideAdvanced : t.design.advanced}</button>
     {props.showDesignAdvanced ? <section className="design-advanced">

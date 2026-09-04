@@ -1,1 +1,1 @@
-{"id":"saas-authenticated-03","category":"saas-authenticated","sensitive":true,"acceptance":["NOT_IMPLEMENTED explícito","identidade e papéis","dados bancários protegidos"]}
+{"id":"saas-authenticated-03","category":"saas-authenticated","sensitive":true,"acceptance":["campos de autoridade vindos do cliente são recusados","identidade e papéis","dados bancários protegidos"]}

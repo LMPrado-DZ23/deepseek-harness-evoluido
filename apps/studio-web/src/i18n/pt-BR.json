@@ -8,7 +8,10 @@
     "suggestions": "Sugestões para começar", "landing": "Quero uma página para apresentar meu trabalho ou negócio.",
     "catalog": "Quero um catálogo para mostrar meus produtos ou serviços.",
     "formDatabase": "Quero cadastrar informações e vê-las em uma lista.", "crudPanel": "Quero um painel para minha equipe criar, editar e excluir cadastros.",
-    "coming": "Agenda, dashboards e portais com áreas separadas para cada cliente estarão disponíveis em etapas futuras.",
+    "scheduling": "Quero uma agenda interna para minha equipe criar, confirmar e cancelar reservas.",
+    "dashboard": "Quero um painel para acompanhar números e agrupamentos, sem alterar os dados.",
+    "saas": "Quero uma área com acesso separado para cada cliente.",
+    "betaNotice": "Agenda, painel e área de clientes são protótipos iniciais. A verificação mostrará exatamente o que foi testado e o que ainda falta.",
     "continue": "Continuar", "advanced": "Opções avançadas", "counter": "de 1000 caracteres",
     "empty": "Conte sua ideia para continuar."
   },

@@ -8,10 +8,14 @@ Ele usa dependências preparadas anteriormente, compila o projeto, roda testes e
 confere acessibilidade e sinais de segredos ou dados sensíveis. Se algo falhar,
 ele tenta corrigir no máximo três vezes e mostra o problema real.
 
-Ao final, “protótipo verificado” quer dizer apenas que as verificações declaradas
-passaram naquele computador. Nesta fatia não há preview, publicação, domínio,
-banco, login nem deploy. As páginas de apresentação e catálogos são as únicas
-categorias executáveis; as demais aparecem como `NOT_IMPLEMENTED`.
+Ao final, “protótipo verificado” quer dizer apenas que as verificações técnicas
+declaradas passaram naquele computador. O Studio gera sete categorias: página
+de apresentação, catálogo, formulário+banco, painel CRUD, agenda interna,
+dashboard e área autenticada mínima. Banco e login existem nas categorias que
+precisam deles. Os critérios que ainda não têm prova automática aparecem como
+`NOT_AUTOMATED`; isso nunca é contado como “passou”. O preview seguro pertence
+ao M1 e ainda precisa ser unido a esta jornada. Não há publicação, domínio de
+produção nem deploy.
 
 A opção “Somente no meu computador” bloqueia qualquer rota externa. A opção
 “Permitir IA configurada” mostra qual serviço receberá sua ideia e respostas.

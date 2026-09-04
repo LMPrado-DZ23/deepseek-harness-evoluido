@@ -1,1 +1,1 @@
-{"id":"dashboard-02","category":"dashboard","sensitive":false,"acceptance":["NOT_IMPLEMENTED explícito","atrasos por região","responsável visível"]}
+{"id":"dashboard-02","category":"dashboard","sensitive":false,"acceptance":["painel autenticado e somente leitura","atrasos por região","responsável visível"]}

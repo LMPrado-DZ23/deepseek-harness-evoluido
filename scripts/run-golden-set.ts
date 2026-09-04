@@ -1,4 +1,6 @@
 import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { ContainerBuilder, OFFLINE_PIPELINE_COMMANDS } from '../plugins/prompt-to-app/src/runner.js'
@@ -10,11 +12,14 @@ import { generateDataLayer, writeDataLayer } from '../plugins/prompt-to-app/src/
 import { dataIdentifier } from '../plugins/prompt-to-app/src/data-generator.js'
 import { generateFormLayer, writeFormLayer } from '../plugins/prompt-to-app/src/form-generator.js'
 import { writeAcceptanceArtifacts } from '../plugins/prompt-to-app/src/acceptance.js'
+import { generateSchedulingLayer, writeSchedulingLayer } from '../plugins/prompt-to-app/src/scheduling-generator.js'
+import { generateDashboardLayer, writeDashboardLayer } from '../plugins/prompt-to-app/src/dashboard-generator.js'
+import { generateSaasLayer, writeSaasLayer } from '../plugins/prompt-to-app/src/saas-generator.js'
 
-type GoldenState = 'PASS_DETERMINISTIC' | 'NOT_IMPLEMENTED'
+type GoldenState = 'PIPELINE_VERIFIED_CRITERIA_PARTIAL' | 'NOT_IMPLEMENTED'
 interface Criterion {
   readonly id: string
-  readonly category: 'landing-page' | 'catalog' | 'form-database' | 'crud-panel' | 'saas-authenticated' | 'dashboard'
+  readonly category: 'landing-page' | 'catalog' | 'form-database' | 'crud-panel' | 'scheduling' | 'saas-authenticated' | 'dashboard'
   readonly sensitive: boolean
   readonly acceptance: readonly string[]
 }
@@ -23,7 +28,9 @@ const root = process.cwd()
 const briefsDir = resolve(root, 'golden-set/briefs')
 const criteriaDir = resolve(root, 'golden-set/criteria')
 const reportsDir = resolve(root, 'golden-set/reports')
-const implemented = new Set<Criterion['category']>(['landing-page', 'catalog', 'form-database', 'crud-panel'])
+const implemented = new Set<Criterion['category']>([
+  'landing-page', 'catalog', 'form-database', 'crud-panel', 'scheduling', 'saas-authenticated', 'dashboard',
+])
 const realLlmRequested = process.env.DZ23_GOLDEN_LLM === '1'
 
 if (realLlmRequested) {
@@ -42,18 +49,26 @@ const preflight = await builder.preflight()
 if (preflight.state !== 'OK') throw new Error(preflight.message)
 
 const criteriaFiles = (await readdir(criteriaDir)).filter(file => file.endsWith('.yml')).sort()
-if (criteriaFiles.length < 18) throw new Error(`Golden set incompleto: ${criteriaFiles.length}/18 critérios.`)
+const briefFiles = (await readdir(briefsDir)).filter(file => file.endsWith('.md')).sort()
+if (criteriaFiles.length !== 18) throw new Error(`Golden set inválido: esperado exatamente 18 critérios, encontrado ${criteriaFiles.length}.`)
+if (briefFiles.length !== 18) throw new Error(`Golden set inválido: esperado exatamente 18 briefs, encontrado ${briefFiles.length}.`)
+const expectedBriefFiles = criteriaFiles.map(file => `${basename(file, '.yml')}.md`)
+if (JSON.stringify(briefFiles) !== JSON.stringify(expectedBriefFiles)) throw new Error('Golden set inválido: briefs e critérios não têm correspondência exata.')
 const scratch = await mkdtemp(join(tmpdir(), 'dz23-golden-'))
-const results: Array<{ id: string; category: string; state: GoldenState; critical: string; not_automated: number | null; detail: string }> = []
+const results: Array<{ id: string; category: string; state: GoldenState; critical: string; technical_checks_passed: number | null; declared_criteria_passed: number | null; declared_criteria_not_automated: number | null; detail: string }> = []
+const seenIds = new Set<string>()
 
 try {
   for (const file of criteriaFiles) {
-    const criterion = JSON.parse(await readFile(resolve(criteriaDir, file), 'utf8')) as Criterion
+    const criterion = parseCriterion(JSON.parse(await readFile(resolve(criteriaDir, file), 'utf8')), file)
+    if (seenIds.has(criterion.id)) throw new Error(`Golden set inválido: id duplicado ${criterion.id}.`)
+    seenIds.add(criterion.id)
+    if (file !== `${criterion.id}.yml`) throw new Error(`Golden set inválido: ${file} declara id ${criterion.id}.`)
     const briefPath = resolve(briefsDir, `${criterion.id}.md`)
     const brief = await readFile(briefPath, 'utf8')
     if (brief.trim().length < 40 || criterion.acceptance.length < 3) throw new Error(`Fixture incompleta: ${criterion.id}`)
     if (!implemented.has(criterion.category)) {
-      results.push({ id: criterion.id, category: criterion.category, state: 'NOT_IMPLEMENTED', critical: 'NOT_EXECUTED', not_automated: null, detail: 'Categoria declarada, ainda sem executor.' })
+      results.push({ id: criterion.id, category: criterion.category, state: 'NOT_IMPLEMENTED', critical: 'NOT_EXECUTED', technical_checks_passed: null, declared_criteria_passed: null, declared_criteria_not_automated: null, detail: 'Categoria declarada, ainda sem executor.' })
       continue
     }
 
@@ -62,7 +77,8 @@ try {
     await mkdir(resolve(runDirectory, 'content'), { recursive: true })
     await mkdir(resolve(runDirectory, 'src/styles'), { recursive: true })
     await writeFile(resolve(runDirectory, 'src/styles/tokens.css'), ':root { --background: 0 0% 100%; --foreground: 222 47% 11%; --card: 0 0% 100%; --card-foreground: 222 47% 11%; --primary: 222 72% 32%; --primary-foreground: 0 0% 100%; --secondary: 214 32% 91%; --secondary-foreground: 222 47% 11%; --muted: 210 40% 96%; --muted-foreground: 215 16% 40%; --accent: 214 100% 93%; --accent-foreground: 222 72% 26%; --destructive: 0 72% 45%; --border: 214 32% 88%; --input: 214 32% 88%; --ring: 217 91% 50%; --radius: 0.75rem; --font-body: sans-serif; }\n')
-    const title = criterion.category === 'catalog' ? 'Catálogo local' : criterion.category === 'form-database' ? 'Registros' : criterion.category === 'crud-panel' ? 'Painel de gestão' : 'Página de apresentação'
+    const appSpec = goldenSpec(criterion, brief)
+    const title = appSpec.pages[0]!.name
     const description = criterion.category === 'catalog'
       ? 'Produtos e serviços apresentados de forma clara e acessível.'
       : criterion.id === 'landing-01'
@@ -73,49 +89,70 @@ try {
       if (scanGeneratedContent({ fixture: 'CPF 123.456.789-00' }).length !== 0) throw new Error('catalog-03: CPF inválido virou falso positivo.')
     }
     const content = JSON.stringify({ title, description }, null, 2)
-    const appSpec = dataSpec(criterion, brief)
-    const component = appSpec === undefined
-      ? `export default function GeneratedApp() {\n  return <main><h1>${title}</h1><p>${escapeJsx(description)}</p></main>\n}\n`
-      : generatedDataView(appSpec, criterion.category)
+    const component = generatedView(appSpec, criterion.category, description)
     const findings = scanGeneratedContent({ 'content/app.json': content, 'src/GeneratedApp.tsx': component })
     if (findings.length > 0) throw new Error(`${criterion.id}: controle crítico recusou ${findings.join(', ')}`)
     await writeFile(resolve(runDirectory, 'content/app.json'), content)
     await writeFile(resolve(runDirectory, 'src/GeneratedApp.tsx'), component)
-    if (appSpec !== undefined) {
+    await writeAuthLayer(runDirectory, generateAuthLayer(appSpec, criterion.category))
+    if (appSpec.entities.some(entity => entity.kind === 'database')) {
       await writeDataLayer(runDirectory, generateDataLayer(appSpec))
-      await writeAuthLayer(runDirectory, generateAuthLayer(appSpec, criterion.category))
+    }
+    if (criterion.category === 'form-database' || criterion.category === 'crud-panel') {
       await writeFormLayer(runDirectory, generateFormLayer(appSpec, criterion.category))
       await writeCrudLayer(runDirectory, generateCrudLayer(appSpec, criterion.category))
-      await writeAcceptanceArtifacts(runDirectory, appSpec, criterion.category)
     }
+    if (criterion.category === 'scheduling') await writeSchedulingLayer(runDirectory, generateSchedulingLayer(appSpec))
+    if (criterion.category === 'dashboard') await writeDashboardLayer(runDirectory, generateDashboardLayer(appSpec, criterion.category))
+    if (criterion.category === 'saas-authenticated') await writeSaasLayer(runDirectory, generateSaasLayer(appSpec, criterion.category))
+    await writeAcceptanceArtifacts(runDirectory, appSpec, criterion.category)
     for (const command of OFFLINE_PIPELINE_COMMANDS) {
       const result = await builder.execute(runDirectory, command)
-      if (result.exitCode !== 0 || result.timedOut) throw new Error(`${criterion.id}: ${command} falhou.`)
+      if (result.exitCode !== 0 || result.timedOut) {
+        const output = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join('\n').slice(-8_000)
+        throw new Error(`${criterion.id}: ${command} falhou${result.timedOut ? ' por tempo excedido' : ''}.\n${output}`)
+      }
     }
-    const notAutomated = appSpec === undefined
-      ? criterion.acceptance.length
-      : (JSON.parse(await readFile(resolve(runDirectory, 'evidence/appspec-report.json'), 'utf8')) as { checks: Array<{ status: string }> }).checks.filter(check => check.status === 'NOT_AUTOMATED').length
+    const acceptanceReport = JSON.parse(await readFile(resolve(runDirectory, 'evidence/appspec-report.json'), 'utf8')) as { checks: Array<{ id: string; kind: string; status: string }> }
+    const allowedStatuses = new Set(['PASSED', 'NOT_AUTOMATED'])
+    const invalid = acceptanceReport.checks.filter(check => !allowedStatuses.has(check.status))
+    if (invalid.length > 0) throw new Error(`${criterion.id}: estados de verificação inválidos: ${invalid.map(check => `${check.id}=${check.status}`).join(', ')}`)
+    const unfinished = acceptanceReport.checks.filter(check => check.status === 'PENDING' || check.status === 'FAILED')
+    if (unfinished.length > 0) throw new Error(`${criterion.id}: critérios automáticos sem aprovação: ${unfinished.map(check => `${check.id}=${check.status}`).join(', ')}`)
+    const declared = acceptanceReport.checks.filter(check => check.kind === 'criterion')
+    const declaredPassed = declared.filter(check => check.status === 'PASSED').length
+    const declaredNotAutomated = declared.filter(check => check.status === 'NOT_AUTOMATED').length
+    const technicalPassed = acceptanceReport.checks.filter(check => check.kind !== 'criterion' && check.status === 'PASSED').length
     results.push({
-      id: criterion.id, category: criterion.category, state: 'PASS_DETERMINISTIC',
-      critical: criterion.sensitive ? 'SENSITIVE_QUESTION_REQUIRED' : 'NO_SENSITIVE_DATA_DETECTED',
-      not_automated: notAutomated,
-      detail: `Build, teste unitário, Playwright, axe e scan passaram em contêiner sem rede; ${notAutomated} critérios declarados não foram automatizados.`,
+      id: criterion.id, category: criterion.category, state: 'PIPELINE_VERIFIED_CRITERIA_PARTIAL',
+      critical: criterion.sensitive ? 'SENSITIVE_GATE_NOT_EXECUTED' : 'NOT_APPLICABLE',
+      technical_checks_passed: technicalPassed,
+      declared_criteria_passed: declaredPassed,
+      declared_criteria_not_automated: declaredNotAutomated,
+      detail: `Pipeline técnico, testes gerados, Playwright, axe e scan passaram em contêiner sem rede; ${declaredPassed}/${declared.length} critérios declarados foram verificados automaticamente e ${declaredNotAutomated} não foram automatizados.`,
     })
   }
 } finally {
   await rm(scratch, { recursive: true, force: true })
 }
 
-const stamp = new Date().toISOString().slice(0, 10)
+const generatedAt = new Date().toISOString()
+const stamp = generatedAt.replaceAll(':', '-').replaceAll('.', '-')
+const sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim()
+const workingTreeDirty = execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).trim().length > 0
+const fixtureSha256 = await hashFixtures([...criteriaFiles.map(file => resolve(criteriaDir, file)), ...briefFiles.map(file => resolve(briefsDir, file))])
 await mkdir(reportsDir, { recursive: true })
 const report = {
-  schema_version: 1, generated_at: new Date().toISOString(), route: 'deterministic-fixture',
+  schema_version: 2, generated_at: generatedAt, route: 'deterministic-fixture', source_commit: sourceCommit,
+  working_tree_dirty: workingTreeDirty, builder_image_digest: digest, fixture_sha256: fixtureSha256,
   real_llm: 'NOT_EXECUTED', promotion_eligible: false,
   counts: {
     total: results.length,
-    pass_deterministic: results.filter(value => value.state === 'PASS_DETERMINISTIC').length,
+    pipeline_verified: results.filter(value => value.state === 'PIPELINE_VERIFIED_CRITERIA_PARTIAL').length,
     not_implemented: results.filter(value => value.state === 'NOT_IMPLEMENTED').length,
-    not_automated_criteria: results.reduce((total, value) => total + (value.not_automated ?? 0), 0),
+    technical_checks_passed: results.reduce((total, value) => total + (value.technical_checks_passed ?? 0), 0),
+    declared_criteria_passed: results.reduce((total, value) => total + (value.declared_criteria_passed ?? 0), 0),
+    declared_criteria_not_automated: results.reduce((total, value) => total + (value.declared_criteria_not_automated ?? 0), 0),
   },
   results,
 }
@@ -123,21 +160,84 @@ await writeFile(resolve(reportsDir, `${stamp}-deterministic.json`), `${JSON.stri
 await writeFile(resolve(reportsDir, `${stamp}-deterministic.md`), [
   '# Golden set — execução determinística', '',
   '- LLM real: **NOT_EXECUTED**', '- Elegível para promoção: **não**',
-  `- Fixtures: ${report.counts.total}; executáveis: ${report.counts.pass_deterministic}; NOT_IMPLEMENTED: ${report.counts.not_implemented}.`,
-  `- As ${report.counts.pass_deterministic} fixtures executáveis passaram por build, Vitest, Playwright, axe e scan dentro do contêiner sem rede.`,
-  `- Critérios declarados não automatizados nas fixtures executáveis: **${report.counts.not_automated_criteria}**.`,
-  '', '| Brief | Categoria | Estado | Controle crítico | Critérios não automatizados |', '| --- | --- | --- | --- | ---: |',
-  ...results.map(value => `| ${value.id} | ${value.category} | ${value.state} | ${value.critical} | ${value.not_automated ?? 'NOT_EXECUTED'} |`), '',
-  'Este relatório não valida qualidade com modelo real e não promove o produto.', '',
+  `- Commit de origem: \`${sourceCommit}\`; árvore suja durante a prova: **${workingTreeDirty ? 'sim' : 'não'}**.`,
+  `- Imagem do builder: \`${digest}\`; SHA-256 conjunto das fixtures: \`${fixtureSha256}\`.`,
+  `- Fixtures: ${report.counts.total}; pipeline técnico verificado: ${report.counts.pipeline_verified}; NOT_IMPLEMENTED: ${report.counts.not_implemented}.`,
+  `- Checks técnicos aprovados: **${report.counts.technical_checks_passed}**.`,
+  `- Critérios de negócio declarados aprovados automaticamente: **${report.counts.declared_criteria_passed}**; não automatizados: **${report.counts.declared_criteria_not_automated}**.`,
+  '', '| Brief | Categoria | Estado técnico | Controle sensível | Checks técnicos | Critérios aprovados | Critérios não automatizados |', '| --- | --- | --- | --- | ---: | ---: | ---: |',
+  ...results.map(value => `| ${value.id} | ${value.category} | ${value.state} | ${value.critical} | ${value.technical_checks_passed ?? 'NOT_EXECUTED'} | ${value.declared_criteria_passed ?? 'NOT_EXECUTED'} | ${value.declared_criteria_not_automated ?? 'NOT_EXECUTED'} |`), '',
+  'Este relatório prova o pipeline técnico determinístico. Ele não afirma aceite integral dos briefs, não executa o gate de confirmação sensível, não valida qualidade com modelo real e não promove o produto.', '',
 ].join('\n'))
-process.stdout.write(`GOLDEN_SET=PASS_DETERMINISTIC total=${results.length} executable=${report.counts.pass_deterministic} real_llm=NOT_EXECUTED\n`)
+process.stdout.write(`GOLDEN_SET=PIPELINE_VERIFIED_CRITERIA_PARTIAL total=${results.length} pipeline_verified=${report.counts.pipeline_verified} declared_passed=${report.counts.declared_criteria_passed} declared_not_automated=${report.counts.declared_criteria_not_automated} real_llm=NOT_EXECUTED\n`)
+
+function parseCriterion(value: unknown, file: string): Criterion {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error(`Fixture inválida: ${file}.`)
+  const record = value as Record<string, unknown>
+  const categories = new Set(['landing-page', 'catalog', 'form-database', 'crud-panel', 'scheduling', 'saas-authenticated', 'dashboard'])
+  if (typeof record.id !== 'string' || !/^[a-z][a-z0-9-]*$/u.test(record.id)) throw new Error(`Fixture inválida: ${file} tem id inválido.`)
+  if (typeof record.category !== 'string' || !categories.has(record.category)) throw new Error(`Fixture inválida: ${file} tem categoria inválida.`)
+  if (typeof record.sensitive !== 'boolean') throw new Error(`Fixture inválida: ${file} não declara sensitive booleano.`)
+  if (!Array.isArray(record.acceptance) || record.acceptance.length < 3 || record.acceptance.some(item => typeof item !== 'string' || item.trim().length < 3)) throw new Error(`Fixture inválida: ${file} tem critérios de aceite incompletos.`)
+  const allowed = new Set(['id', 'category', 'sensitive', 'acceptance'])
+  if (Object.keys(record).some(key => !allowed.has(key))) throw new Error(`Fixture inválida: ${file} contém campos desconhecidos.`)
+  return record as unknown as Criterion
+}
+
+async function hashFixtures(paths: readonly string[]): Promise<string> {
+  const hash = createHash('sha256')
+  for (const path of [...paths].sort()) {
+    hash.update(path.slice(root.length).replaceAll('\\', '/'))
+    hash.update('\0')
+    hash.update(await readFile(path))
+    hash.update('\0')
+  }
+  return hash.digest('hex')
+}
 
 function escapeJsx(value: string): string {
   return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('{', '&#123;').replaceAll('}', '&#125;').replaceAll('`', "'")
 }
 
-function dataSpec(criterion: Criterion, brief: string): AppSpecV1 | undefined {
-  if (criterion.category !== 'form-database' && criterion.category !== 'crud-panel') return undefined
+function goldenSpec(criterion: Criterion, brief: string): AppSpecV1 {
+  if (criterion.category === 'landing-page' || criterion.category === 'catalog') {
+    const page = criterion.category === 'catalog' ? 'Catálogo local' : 'Página de apresentação'
+    const sections = criterion.category === 'catalog' ? ['Itens disponíveis', 'Como pedir'] : ['Serviços', 'Horários', 'Contato']
+    const detected: AppSpecV1['sensitive_data']['detected'] = criterion.sensitive
+      ? criterion.id === 'landing-03' ? ['health', 'minors'] : ['cpf', 'financial']
+      : []
+    return {
+      schema_version: 1, problem: brief.trim(), audience: 'Pessoas interessadas no negócio',
+      journeys: [criterion.category === 'catalog' ? 'Consultar itens e encontrar o contato' : 'Entender o negócio e encontrar o contato'],
+      pages: [{ name: page, sections }],
+      entities: [{ name: criterion.category === 'catalog' ? 'Item do catálogo' : 'Conteúdo', kind: 'static-content', fields: sections }],
+      sensitive_data: { detected, confirmed_by_user: criterion.sensitive },
+      accessibility: { wcag_level: 'AA', keyboard_required: true, reduced_motion: true }, language: 'pt-BR',
+      acceptance_criteria: [...criterion.acceptance],
+    }
+  }
+
+  if (criterion.category === 'scheduling') {
+    return {
+      schema_version: 1, problem: brief.trim(), audience: 'Clientes e equipe do salão',
+      journeys: ['Escolher uma data e um horário disponível', 'Confirmar ou cancelar uma reserva'],
+      pages: [{ name: 'Agenda', sections: ['Nova reserva', 'Reservas'] }],
+      entities: [{
+        name: 'Reserva', kind: 'database', sensitive: false,
+        fields: [
+          { name: 'Data', type: 'date', required: true },
+          { name: 'Horário', type: 'selection', required: true, options: ['09:00', '10:00', '14:00', '15:00'] },
+        ],
+      }],
+      sensitive_data: { detected: [], confirmed_by_user: false },
+      accessibility: { wcag_level: 'AA', keyboard_required: true, reduced_motion: true }, language: 'pt-BR',
+      acceptance_criteria: [...criterion.acceptance],
+    }
+  }
+
+  if (criterion.category === 'dashboard') return dashboardSpec(criterion, brief)
+  if (criterion.category === 'saas-authenticated') return saasSpec(criterion, brief)
+
   const crud = criterion.category === 'crud-panel'
   const sensitive = criterion.sensitive
   const entityName = crud ? 'Cliente' : sensitive ? 'Registro de saúde' : 'Reserva'
@@ -164,13 +264,72 @@ function dataSpec(criterion: Criterion, brief: string): AppSpecV1 | undefined {
   }
 }
 
-function generatedDataView(spec: AppSpecV1, category: Criterion['category']): string {
+function dashboardSpec(criterion: Criterion, brief: string): AppSpecV1 {
+  const sensitive = criterion.sensitive
+  const entityName = criterion.id === 'dashboard-01' ? 'Venda' : criterion.id === 'dashboard-02' ? 'Entrega' : 'Despesa'
+  const selectionName = criterion.id === 'dashboard-02' ? 'Região' : 'Categoria'
+  const detected: AppSpecV1['sensitive_data']['detected'] = sensitive ? ['financial'] : []
+  return {
+    schema_version: 1, problem: brief.trim(), audience: 'Equipe responsável pelo acompanhamento',
+    journeys: ['Consultar totais e agrupamentos sem alterar cadastros'],
+    pages: [{ name: 'Painel', sections: ['Resumo', `Por ${selectionName}`, 'Por mês'] }],
+    entities: [{
+      name: entityName, kind: 'database', sensitive,
+      fields: [
+        { name: selectionName, type: 'selection', required: true, options: criterion.id === 'dashboard-02' ? ['Norte', 'Sul'] : ['Produtos', 'Serviços'] },
+        { name: 'Data', type: 'date', required: true },
+        { name: criterion.id === 'dashboard-02' ? 'Responsável' : 'Valor', type: criterion.id === 'dashboard-02' ? 'text' : 'number', required: true },
+      ],
+    }],
+    sensitive_data: { detected, confirmed_by_user: sensitive },
+    accessibility: { wcag_level: 'AA', keyboard_required: true, reduced_motion: true }, language: 'pt-BR',
+    acceptance_criteria: [...criterion.acceptance],
+  }
+}
+
+function saasSpec(criterion: Criterion, brief: string): AppSpecV1 {
+  const entityName = criterion.id === 'saas-authenticated-01' ? 'Documento' : criterion.id === 'saas-authenticated-02' ? 'Comunicado' : 'Nota do fornecedor'
+  const detected: AppSpecV1['sensitive_data']['detected'] = criterion.id === 'saas-authenticated-02' ? ['minors'] : criterion.id === 'saas-authenticated-03' ? ['financial'] : []
+  return {
+    schema_version: 1, problem: brief.trim(), audience: 'Pessoas autenticadas e proprietário da organização',
+    journeys: ['Entrar por código e consultar somente os próprios registros'],
+    pages: [{ name: 'Área protegida', sections: ['Novo registro', 'Meus registros'] }],
+    entities: [{
+      name: entityName, kind: 'database', sensitive: criterion.sensitive,
+      fields: [
+        { name: 'Título', type: 'text', required: true },
+        { name: 'Descrição', type: 'text', required: true },
+      ],
+    }],
+    sensitive_data: { detected, confirmed_by_user: criterion.sensitive },
+    accessibility: { wcag_level: 'AA', keyboard_required: true, reduced_motion: true }, language: 'pt-BR',
+    acceptance_criteria: [...criterion.acceptance],
+  }
+}
+
+function generatedView(spec: AppSpecV1, category: Criterion['category'], description: string): string {
+  const labels = [spec.pages[0]!.name, ...spec.pages[0]!.sections, ...spec.entities.flatMap(entity => [entity.name, ...entity.fields.map(field => typeof field === 'string' ? field : field.name)])]
+  if (category === 'landing-page' || category === 'catalog') {
+    return `export default function GeneratedApp(){return <main>${labels.map((label, index) => index === 0 ? `<h1>${escapeJsx(label)}</h1>` : `<p>${escapeJsx(label)}</p>`).join('')}<p>${escapeJsx(description)}</p></main>}\n`
+  }
+  if (category === 'scheduling') return generatedComponentView(labels, "import SchedulingPanel from '@/src/components/generated/scheduling-panel'", 'SchedulingPanel')
+  if (category === 'dashboard') {
+    const entity = spec.entities.find(value => value.kind === 'database')!
+    const symbol = `${pascal(dataIdentifier(entity.name))}Dashboard`
+    return generatedComponentView(labels, `import ${symbol} from '@/src/components/generated/dashboards/${dataIdentifier(entity.name)}-dashboard'`, symbol)
+  }
+  if (category === 'saas-authenticated') return generatedComponentView(labels, "import SaasPanel from '@/src/components/generated/saas-panel'", 'SaasPanel')
+
   const entity = spec.entities.find(value => value.kind === 'database')!
   const symbol = pascal(dataIdentifier(entity.name))
   const component = category === 'crud-panel' ? `${symbol}Panel` : `${symbol}Manager`
   const path = category === 'crud-panel' ? `${dataIdentifier(entity.name)}-panel` : `${dataIdentifier(entity.name)}-manager`
-  const labels = [spec.pages[0]!.name, ...spec.pages[0]!.sections, entity.name, ...entity.fields.map(field => field.name)]
   return `import ${component} from '@/src/components/generated/${path}'\n\nexport default function GeneratedApp(){return <main>${labels.map((label, index) => index === 0 ? `<h1>${escapeJsx(label)}</h1>` : `<p>${escapeJsx(label)}</p>`).join('')}<${component}/></main>}\n`
+}
+
+function generatedComponentView(labels: readonly string[], importLine: string, component: string): string {
+  const header = labels.map((label, index) => index === 0 ? `<h1>${escapeJsx(label)}</h1>` : `<p>${escapeJsx(label)}</p>`).join('')
+  return `${importLine}\n\nexport default function GeneratedApp(){return <><header>${header}</header><${component}/></>}\n`
 }
 
 function pascal(value: string): string { return value.split('_').map(part => `${part.charAt(0).toUpperCase()}${part.slice(1)}`).join('') }

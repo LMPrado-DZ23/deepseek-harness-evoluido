@@ -41,7 +41,7 @@ describe('AppSpec acceptance compiler', () => {
     expect(generated).toContain('getByTestId("contato-form")')
     expect(generated).toContain('getByTestId("contato-list")')
     expect(generated).toContain('toHaveCount(0);await loginAsOwner(page)')
-    expect(generated).toContain("getByRole('button',{name:'Salvar'})")
+    expect(generated).toContain("getByRole('button',{name:\"Salvar\"})")
   })
 
   it('compiles login and create, edit, delete evidence for a CRUD panel', async () => {
@@ -56,7 +56,84 @@ describe('AppSpec acceptance compiler', () => {
     await writeAcceptanceArtifacts(root, databaseSpec, 'crud-panel')
     const generated = await readFile(resolve(root, 'tests/e2e/appspec.spec.ts'), 'utf8')
     expect(generated).toContain("fetch('/api/auth/session')")
-    expect(generated).toContain("name:'Salvar alterações'")
-    expect(generated).toContain("name:'Excluir'")
+    expect(generated).toContain('name:"Salvar alterações"')
+    expect(generated).toContain('name:"Excluir"')
+  })
+
+  it('does not emit a broken browser flow when a relation has no seeded target row', async () => {
+    const relatedSpec: AppSpecV1 = { ...spec, entities: [
+      { name: 'Cliente', kind: 'database', sensitive: false, fields: [{ name: 'Nome', type: 'text', required: true }] },
+      { name: 'Pedido', kind: 'database', sensitive: false, fields: [
+        { name: 'Descrição', type: 'text', required: true },
+        { name: 'Cliente', type: 'reference', required: true, reference_entity: 'Cliente' },
+      ] },
+    ] }
+    const checks = acceptanceChecks(relatedSpec, 'crud-panel')
+    expect(checks).toContainEqual(expect.objectContaining({ label: 'crud:Pedido', status: 'NOT_AUTOMATED' }))
+    const root = await mkdtemp(join(tmpdir(), 'dz23-acceptance-reference-')); roots.push(root)
+    await writeAcceptanceArtifacts(root, relatedSpec, 'crud-panel')
+    const generated = await readFile(resolve(root, 'tests/e2e/appspec.spec.ts'), 'utf8')
+    expect(generated).not.toContain('selectOption({index:1})')
+  })
+
+  it('seeds a known dashboard row and refuses a vacuous empty-dashboard pass', async () => {
+    const dashboardSpec: AppSpecV1 = { ...spec, entities: [{
+      name: 'Venda', kind: 'database', sensitive: false, fields: [
+        { name: 'Categoria', type: 'selection', required: true, options: ['Produtos', 'Serviços'] },
+        { name: 'Data', type: 'date', required: true },
+        { name: 'Valor', type: 'number', required: true },
+      ],
+    }] }
+    const checks = acceptanceChecks(dashboardSpec, 'dashboard')
+    expect(checks).toContainEqual(expect.objectContaining({
+      id: 'dashboard-read-only', kind: 'dashboard', expected: 'Venda',
+      flow: expect.objectContaining({ fields: expect.arrayContaining([expect.objectContaining({ name: 'valor', type: 'number' })]) }),
+    }))
+    const root = await mkdtemp(join(tmpdir(), 'dz23-acceptance-dashboard-')); roots.push(root)
+    await writeAcceptanceArtifacts(root, dashboardSpec, 'dashboard')
+    const generated = await readFile(resolve(root, 'tests/e2e/appspec.spec.ts'), 'utf8')
+    expect(generated).toContain("new VendaRepository(database).create({\"categoria\":\"Produtos\",\"data\":\"2099-09-04\",\"valor\":42})")
+    expect(generated).toContain('expect(await tables.count()).toBeGreaterThan(0)')
+    expect(generated).toContain("getByText('1',{exact:true}).first()")
+  })
+
+  it('compiles every supported field kind without inventing product evidence', async () => {
+    const cases: Array<{ type: 'text' | 'email' | 'phone' | 'number' | 'date' | 'boolean' | 'selection'; options?: string[]; expected: string }> = [
+      { type: 'text', expected: 'DZ23-flow-0' },
+      { type: 'email', expected: 'DZ23-flow-0@example.test' },
+      { type: 'phone', expected: '11987654321' },
+      { type: 'number', expected: '42' },
+      { type: 'date', expected: '2026-09-03' },
+      { type: 'boolean', expected: 'Sim' },
+      { type: 'selection', options: ['Primeira'], expected: 'Primeira' },
+    ]
+    for (const field of cases) {
+      const databaseSpec: AppSpecV1 = { ...spec, entities: [{
+        name: `Registro ${field.type}`, kind: 'database', sensitive: false,
+        fields: [{ name: 'Valor', type: field.type, required: true, ...(field.options === undefined ? {} : { options: field.options }) }],
+      }] }
+      const root = await mkdtemp(join(tmpdir(), `dz23-acceptance-${field.type}-`)); roots.push(root)
+      await writeAcceptanceArtifacts(root, databaseSpec, 'form-database')
+      const generated = await readFile(resolve(root, 'tests/e2e/appspec.spec.ts'), 'utf8')
+      expect(generated, field.type).toContain(field.expected)
+    }
+  })
+
+  it('keeps specialized category checks explicit, including empty-domain fallbacks', async () => {
+    const noDatabase: AppSpecV1 = { ...spec, entities: [] }
+    expect(acceptanceChecks(noDatabase, 'dashboard').some(check => check.kind === 'dashboard')).toBe(false)
+    expect(acceptanceChecks(noDatabase, 'saas-authenticated')).toContainEqual(expect.objectContaining({ kind: 'saas' }))
+    expect(acceptanceChecks(noDatabase, 'scheduling')).toContainEqual(expect.objectContaining({ kind: 'scheduling', expected: '09:00' }))
+
+    const scheduling: AppSpecV1 = { ...spec, entities: [{
+      name: 'Agenda', kind: 'database', sensitive: false,
+      fields: [{ name: 'Horário', type: 'selection', required: true, options: ['14:30'] }],
+    }] }
+    const root = await mkdtemp(join(tmpdir(), 'dz23-acceptance-specialized-')); roots.push(root)
+    await writeAcceptanceArtifacts(root, scheduling, 'scheduling')
+    const generated = await readFile(resolve(root, 'tests/e2e/appspec.spec.ts'), 'utf8')
+    expect(generated).toContain("slot:\"14:30\"")
+    expect(generated).toContain("repository.transition(String(created.id),'confirmed'")
+    expect(generated).toContain("repository.transition(String(created.id),'cancelled'")
   })
 })

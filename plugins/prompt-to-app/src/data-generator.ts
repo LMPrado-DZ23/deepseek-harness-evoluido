@@ -41,6 +41,11 @@ export function generateDataLayer(spec: AppSpecV1): GeneratedDataLayer {
   return { files, protectedPaths: files.map(file => file.path) }
 }
 
+/** Validate the persistent graph before a plan is accepted or files are written. */
+export function assertValidDataModel(spec: AppSpecV1): void {
+  prepareEntities(spec)
+}
+
 export async function writeDataLayer(root: string, layer: GeneratedDataLayer): Promise<void> {
   for (const file of layer.files) {
     const target = resolve(root, file.path)

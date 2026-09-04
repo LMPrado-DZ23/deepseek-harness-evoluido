@@ -1,11 +1,16 @@
 # O que o seu protótipo já faz — e o que ainda não faz
 
-O DZ23 STUDIO já consegue criar e conferir quatro tipos de protótipo:
+O DZ23 STUDIO já consegue criar e conferir sete tipos de protótipo em estado
+BETA técnico:
 
 - página de apresentação;
 - catálogo;
 - formulário que salva informações e mostra a lista somente à equipe;
 - painel interno para criar, editar e excluir cadastros.
+- agenda interna de equipe, com conflito de horário e confirmação;
+- painel de dados com resumo, tabela e gráfico;
+- área autenticada mínima em que cada membro vê os próprios registros e o
+  proprietário vê todos.
 
 Um formulário comum pode receber dados sem exigir cadastro, mas nenhum
 visitante vê o que outras pessoas enviaram. A lista fica disponível somente
@@ -26,11 +31,14 @@ O protótipo é construído e testado em um contêiner sem internet. Banco,
 autenticação, permissões e cabeçalhos são escritos pelo Studio e não pela IA.
 Cada critério informa “Passou”, “Falhou” ou “Não verificado automaticamente”.
 
-Ainda não existe preview no navegador fora do ambiente de prova, publicação,
-deploy, dashboard, agenda ou portal separado para cada cliente. Também não há
-passkey no aplicativo gerado. Por isso, “protótipo verificado” não significa
-“aplicativo pronto” nem “publicado”. A experiência ainda não foi validada com
-as cinco pessoas leigas da fase 0.5.
+O preview seguro foi construído e provado separadamente no M1, mas a jornada
+única criação→preview ainda precisa ser integrada e reexecutada. Não existe
+publicação nem deploy. Dashboard e área autenticada são bases mínimas: não
+incluem métricas financeiras específicas, documentos, vínculo de família ou
+responsável, nem dados bancários. Também não há passkey no aplicativo gerado.
+Por isso, “protótipo verificado” não significa “aplicativo pronto” nem
+“publicado”. A experiência ainda não foi validada com as cinco pessoas leigas
+da fase 0.5.
 
 Nota de desenvolvimento: versões antigas do domínio `studio_runs` não são
 migradas nesta pré-release. Se um ambiente local de desenvolvimento acusar

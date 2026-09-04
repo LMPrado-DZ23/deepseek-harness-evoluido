@@ -6,11 +6,14 @@ import type { AppSpecV1 } from './appspec.js'
 import { generateAuthLayer, writeAuthLayer } from './auth-generator.js'
 import { generateCrudLayer, writeCrudLayer } from './crud-generator.js'
 import { generateDataLayer, writeDataLayer } from './data-generator.js'
+import { generateDashboardLayer, writeDashboardLayer } from './dashboard-generator.js'
 import { renderDesignTokens } from './design.js'
 import { writeAcceptanceArtifacts, type AcceptanceCheck } from './acceptance.js'
 import { generatedFileSchema, writeGeneratedFiles, type GeneratedFile } from './generator.js'
 import { generateFormLayer, writeFormLayer } from './form-generator.js'
+import { generateSchedulingLayer, writeSchedulingLayer } from './scheduling-generator.js'
 import { assertGeneratedSource } from './import-policy.js'
+import { generateSaasLayer, writeSaasLayer } from './saas-generator.js'
 import { t } from './i18n.js'
 import type { StudioPlan, StudioRun } from './model.js'
 import { assertCategoryCanGenerate } from './planner.js'
@@ -29,6 +32,7 @@ export class ModelCodeGenerator implements CodeGeneratorPort {
   async generate(spec: AppSpecV1, plan: StudioPlan, diagnostic?: string): Promise<CodeGenerationResult> {
     const result = await this.model.complete({ orgId: this.actor.orgId, tenantId: this.actor.tenantId }, 'generate', this.privacy, [
       t('prompts.generateOnly'),
+      t('prompts.generateDeclarative'),
       t('prompts.generatePaths'),
       t('prompts.generatePlanned'),
       t('prompts.generateSpec', { spec: JSON.stringify(spec) }), t('prompts.generatePlan', { plan: JSON.stringify(plan.slices) }),
@@ -67,6 +71,8 @@ export class PromptToAppPipeline {
     const ownerSessionId = runOptions.ownerSessionId ?? actor.sessionId ?? 'direct-execution'
     const spec = this.options.service.latestSpec(actor, projectId).app_spec
     assertCategoryCanGenerate(project.category, spec)
+    const specFindings = scanGeneratedContent({ 'appspec.json': JSON.stringify(spec) })
+    if (specFindings.length > 0) throw new PromptToAppError('INVALID', t('errors.generatedSensitiveLiteral'))
     const design = this.options.service.designOrDefault(actor, projectId)
     await this.options.service.putRun(actor, this.runRecord(actor, projectId, plan.plan_id, 'generate', 1, 'PENDING', 'full', 'not-created', null, null, operationId, operationId, ownerSessionId))
     if (isAborted(runOptions.signal)) return this.cancelled(actor, projectId, plan.plan_id, operationId, ownerSessionId, 0)
@@ -83,10 +89,27 @@ export class PromptToAppPipeline {
       const runId = attempt === 1 ? operationId : `${operationId}-attempt-${attempt}`; const runDirectory = resolve(this.options.runsRoot, runId)
       await mkdir(this.options.runsRoot, { recursive: true }); await cp(this.options.templateDirectory, runDirectory, { recursive: true, errorOnExist: true })
       await writeDesignAssets(runDirectory, design, this.options.logoStoreRoot)
-      await writeDataLayer(runDirectory, generateDataLayer(spec))
-      await writeAuthLayer(runDirectory, generateAuthLayer(spec, project.category))
-      await writeFormLayer(runDirectory, generateFormLayer(spec, project.category))
-      await writeCrudLayer(runDirectory, generateCrudLayer(spec, project.category))
+      const dataLayer = project.category === 'scheduling' || project.category === 'saas-authenticated' ? { files: [], protectedPaths: [] } : generateDataLayer(spec)
+      const authLayer = generateAuthLayer(spec, project.category)
+      const formLayer = generateFormLayer(spec, project.category)
+      const crudLayer = generateCrudLayer(spec, project.category)
+      const schedulingLayer = project.category === 'scheduling' ? generateSchedulingLayer(spec) : undefined
+      const dashboardLayer = generateDashboardLayer(spec, project.category)
+      const saasLayer = generateSaasLayer(spec, project.category)
+      const frameworkFiles = [dataLayer, authLayer, formLayer, crudLayer, ...(schedulingLayer === undefined ? [] : [schedulingLayer]), dashboardLayer, saasLayer].flatMap(layer => layer.files)
+      const frameworkFindings = scanGeneratedContent(Object.fromEntries(frameworkFiles.map(file => [file.path, file.content])))
+      if (frameworkFindings.length > 0) {
+        diagnostic = frameworkFindings.join('; '); finalFailureState = 'BUILD_FAILED'
+        await this.recordFailure(actor, projectId, plan.plan_id, runId, runDirectory, attempt, null, diagnostic, 'verify', operationId, ownerSessionId)
+        continue
+      }
+      await writeDataLayer(runDirectory, dataLayer)
+      await writeAuthLayer(runDirectory, authLayer)
+      await writeFormLayer(runDirectory, formLayer)
+      await writeCrudLayer(runDirectory, crudLayer)
+      if (schedulingLayer !== undefined) await writeSchedulingLayer(runDirectory, schedulingLayer)
+      await writeDashboardLayer(runDirectory, dashboardLayer)
+      await writeSaasLayer(runDirectory, saasLayer)
       await this.options.service.putRun(actor, this.runRecord(actor, projectId, plan.plan_id, 'generate', attempt, 'RUNNING', 'full', runDirectory, null, null, runId, operationId, ownerSessionId))
       const protectedTemplatePaths = await listTreeFiles(runDirectory)
       const immutableBefore = await immutableHash(runDirectory, protectedTemplatePaths)
@@ -107,7 +130,7 @@ export class PromptToAppPipeline {
         await this.recordFailure(actor, projectId, plan.plan_id, runId, runDirectory, attempt, null, diagnostic, 'generate', operationId, ownerSessionId)
         continue
       }
-      const findings = scanGeneratedContent(Object.fromEntries(generated.files.map(file => [file.path, file.content])))
+      const findings = scanGeneratedContent(Object.fromEntries([...frameworkFiles, ...generated.files].map(file => [file.path, file.content])))
       if (findings.length > 0) {
         diagnostic = findings.join('; '); finalFailureState = 'BUILD_FAILED'
         await this.recordFailure(actor, projectId, plan.plan_id, runId, runDirectory, attempt, generated, diagnostic, 'verify', operationId, ownerSessionId)

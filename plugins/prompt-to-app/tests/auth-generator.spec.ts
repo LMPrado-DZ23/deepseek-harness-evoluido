@@ -32,6 +32,8 @@ describe('generated passwordless access layer',()=>{
     expect(source['src/components/generated/access-panel.tsx']).toContain('<form action={logoutAction}><input type="hidden" name="_csrf" value={csrf}/>')
     expect(source['src/auth/email.ts']).toContain('STUDIO_CAPTURE_FORBIDDEN_OUTSIDE_VERIFICATION')
     expect(source['src/auth/runtime.ts']).toContain("CODE_REQUEST_COOKIE = 'dz23_app_code_request'")
+    expect(source['src/auth/runtime.ts']).toContain('jar.set(CODE_REQUEST_COOKIE,result.requestId')
+    expect(source['src/auth/runtime.ts']).not.toContain("if(result.status==='sent')")
     expect(source['app/api/auth/session/route.ts']).toContain('status:401')
     expect(generateAuthLayer(spec,'catalog')).toEqual({required:false,files:[],protectedPaths:[]})
   })

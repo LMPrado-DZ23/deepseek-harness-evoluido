@@ -147,6 +147,23 @@ describe('Prompt-to-App pipeline', () => {
     expect(f.runs.filter(run => run.state === 'FAILED')).toHaveLength(3)
   })
 
+  it('rejects a real personal identifier embedded in the AppSpec before preflight or generation', async () => {
+    const f = await fixture()
+    const unsafeSpec: AppSpecV1 = {
+      ...spec,
+      entities: [{ name: 'Cadastro', kind: 'database', sensitive: false, fields: [
+        { name: 'Tipo', type: 'selection', required: true, options: ['CPF 529.982.247-25'] },
+      ] }],
+    }
+    f.service.project.mockImplementation(() => ({ state: 'PLAN_APPROVED', category: 'form-database' }))
+    f.service.latestSpec.mockReturnValue({ app_spec: unsafeSpec })
+    const generator = { generate: vi.fn(async () => cleanGeneration) }
+    await expect(f.pipeline.run(actor, 'project', generator)).rejects.toMatchObject({ code: 'INVALID' })
+    expect(f.builder.preflight).not.toHaveBeenCalled()
+    expect(generator.generate).not.toHaveBeenCalled()
+    expect(f.runs).toHaveLength(0)
+  })
+
   it('blocks before generation when the isolated builder is unavailable', async () => {
     const f = await fixture({ preflight: 'BLOCKED_EXTERNAL' }); const generator = { generate: vi.fn(async () => cleanGeneration) }
     await expect(f.pipeline.run(actor, 'project', generator)).resolves.toEqual({ state: 'BLOCKED_EXTERNAL', attempts: 0, message: 'Construtor indisponível.' })
