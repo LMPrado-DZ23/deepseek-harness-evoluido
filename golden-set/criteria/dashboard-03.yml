@@ -1,1 +1,1 @@
-{"id":"dashboard-03","category":"dashboard","sensitive":true,"acceptance":["NOT_IMPLEMENTED explícito","pergunta sobre financeiro","proibir exposição em telão"]}
+{"id":"dashboard-03","category":"dashboard","sensitive":true,"acceptance":["painel autenticado e somente leitura","pergunta sobre financeiro","proibir exposição de dados pessoais em telão"]}

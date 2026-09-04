@@ -1,1 +1,1 @@
-{"id":"form-database-01","category":"form-database","sensitive":false,"acceptance":["preencher, salvar e encontrar na lista","evitar reserva duplicada","critérios testáveis"]}
+{"id":"form-database-01","category":"scheduling","sensitive":false,"acceptance":["criar uma reserva pendente","evitar reserva duplicada","confirmar ou cancelar com sessão autorizada"]}

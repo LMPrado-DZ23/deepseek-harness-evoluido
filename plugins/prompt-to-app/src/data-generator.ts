@@ -34,11 +34,16 @@ export function generateDataLayer(spec: AppSpecV1): GeneratedDataLayer {
     { path: 'src/db/schema.ts', content: renderSchema(entities) },
     { path: 'src/db/migrations.ts', content: renderMigrations(entities) },
     { path: 'src/db/client.ts', content: renderClient() },
-    ...entities.map(entity => ({ path: `src/server/repositories/${entity.slug}.ts`, content: renderRepository(entity) })),
+    ...entities.map(entity => ({ path: `src/server/repositories/${entity.slug}.ts`, content: renderNodeCompatibleRepository(entity) })),
     { path: 'src/server/repositories/index.ts', content: renderRepositoryIndex(entities) },
     { path: 'tests/generated-data.spec.ts', content: renderGeneratedTest(entities) },
   ]
   return { files, protectedPaths: files.map(file => file.path) }
+}
+
+/** Validate the persistent graph before a plan is accepted or files are written. */
+export function assertValidDataModel(spec: AppSpecV1): void {
+  prepareEntities(spec)
 }
 
 export async function writeDataLayer(root: string, layer: GeneratedDataLayer): Promise<void> {
@@ -119,6 +124,13 @@ function renderRepository(entity: PreparedEntity): string {
   const updateValues = entity.fields.map(field => `      ${field.column}: ${updateExpression(field)},`).join('\n')
   const decodeFields = entity.fields.map(field => `      ${field.column}: ${decodeExpression(field, `row.${field.column}`)},`).join('\n')
   return `import { randomUUID } from 'node:crypto'\nimport type { DatabaseSync } from 'node:sqlite'\nimport { ${entity.symbol}InputSchema, ${entity.symbol}RecordSchema, ${entity.symbol}UpdateSchema, type ${entity.symbol}Record } from '../../db/schema'\n\ntype SqlRow = Record<string, unknown>\n\nexport class ${entity.symbol}Repository {\n  constructor(private readonly database: DatabaseSync) {}\n\n  create(input: unknown): ${entity.symbol}Record {\n    const value = ${entity.symbol}InputSchema.parse(input)\n    const now = new Date().toISOString()\n    const parameters = {\n      id: randomUUID(),\n${createValues}\n      created_at: now,\n      updated_at: now,\n    }\n    this.database.prepare(${JSON.stringify(`INSERT INTO ${quoteId(entity.table)} (${insertColumns}) VALUES (${insertParams})`)}).run(parameters)\n    return this.get(parameters.id)!\n  }\n\n  get(id: string): ${entity.symbol}Record | undefined {\n    const row = this.database.prepare(${JSON.stringify(`SELECT * FROM ${quoteId(entity.table)} WHERE "id" = ?`)}).get(id) as SqlRow | undefined\n    return row === undefined ? undefined : this.decode(row)\n  }\n\n  list(): readonly ${entity.symbol}Record[] {\n    const rows = this.database.prepare(${JSON.stringify(`SELECT * FROM ${quoteId(entity.table)} ORDER BY "created_at", "id"`)}).all() as SqlRow[]\n    return rows.map(row => this.decode(row))\n  }\n\n  update(id: string, input: unknown): ${entity.symbol}Record | undefined {\n    const current = this.get(id)\n    if (current === undefined) return undefined\n    const value = ${entity.symbol}UpdateSchema.parse(input)\n    this.database.prepare(${JSON.stringify(`UPDATE ${quoteId(entity.table)} SET ${updateAssignments}, "updated_at" = @updated_at WHERE "id" = @id`)}).run({\n      id,\n${updateValues}\n      updated_at: new Date().toISOString(),\n    })\n    return this.get(id)\n  }\n\n  delete(id: string): boolean {\n    return Number(this.database.prepare(${JSON.stringify(`DELETE FROM ${quoteId(entity.table)} WHERE "id" = ?`)}).run(id).changes) === 1\n  }\n\n  private decode(row: SqlRow): ${entity.symbol}Record {\n    return ${entity.symbol}RecordSchema.parse({\n      id: row.id,\n${decodeFields}\n      created_at: row.created_at,\n      updated_at: row.updated_at,\n    })\n  }\n}\n`
+}
+
+function renderNodeCompatibleRepository(entity: PreparedEntity): string {
+  return renderRepository(entity).replace(
+    '  constructor(private readonly database: DatabaseSync) {}',
+    '  private readonly database: DatabaseSync\n\n  constructor(database: DatabaseSync) { this.database = database }',
+  )
 }
 
 function renderRepositoryIndex(entities: readonly PreparedEntity[]): string {

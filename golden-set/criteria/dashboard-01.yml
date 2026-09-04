@@ -1,1 +1,1 @@
-{"id":"dashboard-01","category":"dashboard","sensitive":false,"acceptance":["NOT_IMPLEMENTED explícito","métricas explicadas","gráfico acessível"]}
+{"id":"dashboard-01","category":"dashboard","sensitive":false,"acceptance":["total e agrupamentos determinísticos","métricas explicadas","gráfico com tabela acessível equivalente"]}

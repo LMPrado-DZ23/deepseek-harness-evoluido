@@ -32,13 +32,16 @@ describe('deterministic form and list layer', () => {
     const manager = layer.files[1]!.content
     expect(action).toContain("'use server'")
     expect(action).toContain('new ContatoRepository(database).create')
-    expect(action).not.toContain('requireFormSession')
+    expect(action).toContain('requireFormSession')
+    expect(action).toContain('new ContatoRepository(database).get(reference_indicacao)')
     expect(action).toContain("revalidatePath('/')")
     expect(manager).toContain('data-testid="contato-form"')
     expect(manager).toContain('data-testid="contato-list"')
     expect(manager).toContain('session === null ? <section aria-label="Área de gestão">')
     expect(manager).toContain('<label htmlFor="contato-nome">{"Nome"}</label>')
     expect(manager).toContain('name="situacao"')
+    expect(manager).toContain('name="indicacao"')
+    expect(manager).toContain('indicacaoOptions.map')
     expect(layer.protectedPaths).toEqual(layer.files.map(file => file.path))
   })
 
@@ -51,7 +54,7 @@ describe('deterministic form and list layer', () => {
     expect(generateFormLayer(formSpec, 'catalog')).toEqual({ files: [], protectedPaths: [] })
   })
 
-  it('adds the generated login to sensitive data and rejects required links without CRUD', () => {
+  it('adds the generated login to sensitive data and supports required links with a safe selector', () => {
     const sensitive: AppSpecV1 = { ...formSpec, sensitive_data: { detected: ['financial'], confirmed_by_user: true } }
     const protectedLayer = generateFormLayer(sensitive, 'form-database')
     expect(protectedLayer.files[0]?.content).toContain('requireFormSession')
@@ -63,6 +66,11 @@ describe('deterministic form and list layer', () => {
         { name: 'Contato', type: 'reference' as const, required: true, reference_entity: 'Contato' },
       ] },
     ] }
-    expect(() => generateFormLayer(linked, 'form-database')).toThrow('depende de outro cadastro obrigatório')
+    const linkedLayer = generateFormLayer(linked, 'form-database')
+    const taskAction = linkedLayer.files.find(file => file.path === 'src/server/actions/tarefa.ts')?.content
+    const taskManager = linkedLayer.files.find(file => file.path === 'src/components/generated/tarefa-manager.tsx')?.content
+    expect(taskAction).toContain("if (reference_contato === '') throw new Error")
+    expect(taskAction).toContain('new ContatoRepository(database).get(reference_contato)')
+    expect(taskManager).toContain('contatoOptions.map')
   })
 })

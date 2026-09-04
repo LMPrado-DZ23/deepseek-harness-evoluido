@@ -17,7 +17,7 @@ const scope = {
 const timestamp = z.iso.datetime()
 const sha256 = z.string().regex(/^[a-f0-9]{64}$/)
 
-export const studioProjectCategorySchema = z.enum(['landing-page', 'catalog', 'form-database', 'crud-panel', 'saas-authenticated', 'dashboard'])
+export const studioProjectCategorySchema = z.enum(['landing-page', 'catalog', 'form-database', 'crud-panel', 'scheduling', 'saas-authenticated', 'dashboard'])
 export type StudioProjectCategory = z.infer<typeof studioProjectCategorySchema>
 
 export const studioProjectSchema = z.object({
@@ -79,11 +79,14 @@ export const studioRunSchema = z.object({
   failure_code: z.string().nullable(),
   acceptance_checks: z.array(z.object({
     id: z.string().min(1), label: z.string().min(1),
-    kind: z.enum(['language', 'title', 'page', 'section', 'entity', 'criterion', 'flow', 'auth', 'crud']),
+    kind: z.enum(['language', 'title', 'page', 'section', 'entity', 'criterion', 'flow', 'auth', 'crud', 'scheduling', 'dashboard', 'saas']),
     expected: z.string().optional(),
     flow: z.object({
       form_test_id: z.string().min(1), list_test_id: z.string().min(1), marker_field: z.string().min(1),
+      // Legacy runs used requires_auth. Keep it readable while every new run
+      // writes the two explicit boundaries below.
       requires_auth: z.boolean().optional(),
+      submit_requires_auth: z.boolean().optional(), list_requires_auth: z.boolean().optional(),
       fields: z.array(z.object({
         name: z.string().min(1), type: z.enum(['text', 'number', 'date', 'boolean', 'email', 'phone', 'selection', 'reference']),
         required: z.boolean(), options: z.array(z.string()).optional(),

@@ -43,6 +43,7 @@
     "generatedOverwrite": "O modelo tentou substituir um arquivo existente: {path}",
     "generatedImport": "O arquivo {path} tentou importar um módulo não permitido: {module}",
     "generatedSource": "O arquivo {path} tentou usar uma construção não permitida: {construct}",
+    "generatedSensitiveLiteral": "A especificação contém um segredo ou dado pessoal real. Use somente nomes de campos e exemplos fictícios.",
     "templateSymlink": "Link simbólico proibido no template: {path}",
     "transition": "Transição não permitida: {from} → {to}",
     "routeModel": "A rota escolhida ainda não possui um modelo configurado.",
@@ -73,6 +74,12 @@
     "confirmed": "confirmado",
     "notConfirmed": "não confirmado"
   },
+  "checks": {
+    "auth": "acesso: sem sessão recebe 401 e login por código funciona",
+    "scheduling": "agenda: o mesmo horário não pode ser reservado duas vezes",
+    "dashboard": "painel: somente leitura com tabela equivalente",
+    "saas": "aplicativo de equipe: membro não acessa registro de outra pessoa"
+  },
   "prompts": {
     "recommend": "Recomende uma resposta curta, em português comum, para a pergunta \"{question}\". Ideia: {brief}",
     "specOnly": "Produza somente JSON válido para AppSpec v1.",
@@ -87,9 +94,13 @@
     "planFiles": "Cada fatia precisa listar planned_files. Use somente caminhos sob src/ ou content/.",
     "planFirst": "A primeira fatia deve criar content/app.json e src/GeneratedApp.tsx; estilos adicionais ficam em src/generated.css.",
     "planFormDatabase": "Para a categoria de cadastro e lista, a tela principal deve importar os componentes protegidos de @/src/components/generated/, mostrar os campos, salvar e exibir a lista. O modelo nunca cria banco, migração, repositório ou ação de gravação.",
-    "planCrudPanel": "Para o painel de gestão, a tela principal deve importar o painel protegido de @/src/components/generated/. O painel faz login, lista, cria, edita e exclui com confirmação; o modelo nunca cria autenticação, banco ou ações.",
+      "planCrudPanel": "Para o painel de gestão, a tela principal deve importar o painel protegido de @/src/components/generated/. O painel faz login, lista, cria, edita e exclui com confirmação; o modelo nunca cria autenticação, banco ou ações.",
+      "planScheduling": "Para a agenda, a tela principal deve importar SchedulingPanel de @/src/components/generated/scheduling-panel. O Studio já controla autenticação, banco, horários, conflitos e mudanças de situação; o modelo só compõe a apresentação.",
+      "planDashboard": "Para o painel, a tela principal deve importar os painéis somente leitura de @/src/components/generated/dashboards/. O Studio já controla autenticação, banco, contagens, gráficos e tabelas; o modelo só compõe a apresentação.",
+      "planSaas": "Para o aplicativo de equipe, a tela principal deve importar SaasPanel de @/src/components/generated/. O Studio já controla login, autoria, isolamento por pessoa e ações de gravação; o modelo só compõe a apresentação.",
     "changeRequest": "Pedido de mudança da pessoa: {reason}",
     "generateOnly": "Produza somente JSON com files[].path e files[].content.",
+    "generateDeclarative": "A tela gerada deve usar somente JSX declarativo com elementos HTML e componentes das fachadas protegidas indicadas no plano. Não use chamadas de função, construtores, componentes locais dinâmicos, atributos espalhados nem acesso dinâmico a propriedades.",
     "generatePaths": "Caminhos permitidos: src/ e content/. Não gere configuração, dependências ou scripts.",
     "generatePlanned": "Gere somente arquivos presentes em planned_files. Não tente alterar arquivos do template.",
     "generateSpec": "AppSpec: {spec}",
