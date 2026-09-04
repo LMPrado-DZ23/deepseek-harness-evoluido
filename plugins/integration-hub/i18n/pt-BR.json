@@ -11,6 +11,7 @@
     "integrationChanged": "Esta integração mudou enquanto você confirmava. Confira o nível de confiança e tente de novo.",
     "manifestInvalid": "O manifesto da integração não está no formato esperado: {detail}",
     "manifestUnverified": "Esta integração não tem assinatura reconhecida e não pode ser ligada no canal estável.",
+    "devChannelCapability": "Mesmo no canal de desenvolvimento, uma integração sem assinatura não pode pedir rede, e-mail ou acesso ao cofre. Assine o manifesto para ligá-la.",
     "manifestSignatureInvalid": "A assinatura do manifesto não confere com a chave do publicador.",
     "approvalRequiredT2": "Esta ação precisa da sua confirmação antes de valer. Confirme na tela e tente de novo.",
     "approvalRequiredT3": "Esta ação é sensível: precisa da sua confirmação e da sua passkey nesta sessão.",

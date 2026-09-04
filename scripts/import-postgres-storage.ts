@@ -6,6 +6,14 @@ import { PostgresStorageBackend } from '../plugins/storage-postgres/src/backend.
 import { assertConfiguredSchemaName, assertIdentifier, quoteIdentifier, STORAGE_POSTGRES_LAYOUT_VERSION, storageMaintenanceLockName, storageUnitLockName } from '../plugins/storage-postgres/src/schema.ts'
 import { importStorage, type StorageExportBundle, validateBundle } from './storage-migration.ts'
 
+const STUDIO_LAYOUT: Readonly<Record<string, readonly string[]>> = {
+  storage_meta: ['key', 'value'],
+  units: ['name', 'version'],
+  records: ['unit', 'table_name', 'key', 'value'],
+  unit_globals: ['unit', 'value'],
+  unit_leases: ['unit', 'holder', 'acquired_at', 'heartbeat_at'],
+}
+
 const args = parseArgs(process.argv.slice(2))
 assertConfiguredSchemaName(args.schema)
 if (args.write && args.backup === undefined) throw new Error('--backup is mandatory with --write')
@@ -81,6 +89,18 @@ try {
     }
     const staging = `${args.schema}_staging_${Date.now().toString(36)}`
     assertIdentifier(staging, 'staging schema')
+    // Ctrl+C or a `kill` in the middle of staging leaves a full copy of the data behind. A signal
+    // handler drops it on the way out; a SIGKILL still cannot be caught, which is why the reaping
+    // above exists as well.
+    const cleanupOnSignal = (signal: NodeJS.Signals) => {
+      const emergency = new Client({ connectionString: dsn, ssl: args.ssl === 'off' ? false : { rejectUnauthorized: args.ssl === 'verify-full' } })
+      emergency.connect()
+        .then(() => emergency.query(`DROP SCHEMA IF EXISTS ${quoteIdentifier(staging)} CASCADE`))
+        .catch(() => undefined)
+        .finally(() => { void emergency.end().catch(() => undefined); process.exit(signal === 'SIGINT' ? 130 : 143) })
+    }
+    process.once('SIGINT', cleanupOnSignal)
+    process.once('SIGTERM', cleanupOnSignal)
     const backend = new PostgresStorageBackend({ connectionString: dsn, schema: staging, ssl: args.ssl === 'off' ? false : { rejectUnauthorized: args.ssl === 'verify-full' }, poolMax: 4 })
     try {
       await backend.waitUntilReady()
@@ -142,16 +162,40 @@ async function acquireMaintenanceLock(client: Client, schema: string): Promise<v
 }
 
 /** A schema that has a `units` table but not the rest of the layout is not a Studio schema: refuse instead of dropping it. */
+
 async function assertStudioLayout(client: Client, schema: string): Promise<void> {
-  const expected = ['storage_meta', 'units', 'records', 'unit_globals']
-  const found = await client.query<{ tablename: string }>(
-    'SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = $1 AND tablename = ANY($2)',
+  const expected = Object.keys(STUDIO_LAYOUT)
+  // Real tables only (`relkind = 'r'`): a VIEW named `units` is not this Studio's storage.
+  const found = await client.query<{ relname: string }>(
+    `SELECT c.relname FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = $1 AND c.relkind = 'r' AND c.relname = ANY($2)`,
     [schema, expected],
   )
-  const names = new Set(found.rows.map(row => row.tablename))
+  const names = new Set(found.rows.map(row => row.relname))
   const missing = expected.filter(table => !names.has(table))
   if (missing.length > 0) {
     throw new Error(`O esquema '${schema}' não tem a estrutura do DZ23 STUDIO (faltam: ${missing.join(', ')}). Importação recusada para não apagar dados de outra coisa.`)
+  }
+  // Columns too: a table with the right name and the wrong shape is not the right table.
+  const columns = await client.query<{ relname: string; attname: string }>(
+    `SELECT c.relname, a.attname FROM pg_catalog.pg_attribute a
+     JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+     JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = $1 AND c.relkind = 'r' AND c.relname = ANY($2) AND a.attnum > 0 AND NOT a.attisdropped`,
+    [schema, expected],
+  )
+  const byTable = new Map<string, Set<string>>()
+  for (const row of columns.rows) {
+    const set = byTable.get(row.relname) ?? new Set<string>()
+    set.add(row.attname)
+    byTable.set(row.relname, set)
+  }
+  for (const [table, required] of Object.entries(STUDIO_LAYOUT)) {
+    const present = byTable.get(table) ?? new Set<string>()
+    const absent = required.filter(column => !present.has(column))
+    if (absent.length > 0) {
+      throw new Error(`A tabela '${table}' do esquema '${schema}' não tem a forma do DZ23 STUDIO (faltam colunas: ${absent.join(', ')}). Importação recusada.`)
+    }
   }
   const layout = await client.query<{ value: number }>(
     `SELECT value FROM ${quoteIdentifier(schema)}."storage_meta" WHERE key = 'layout_version'`,
@@ -165,18 +209,14 @@ async function assertStudioLayout(client: Client, schema: string): Promise<void>
 }
 
 async function pgDump(dsn: string, schema: string, output: string, ssl: 'off' | 'require' | 'verify-full'): Promise<void> {
-  const url = new URL(dsn)
-  const env = {
-    ...process.env,
-    PGHOST: url.hostname,
-    PGPORT: url.port || '5432',
-    PGUSER: decodeURIComponent(url.username),
-    PGPASSWORD: decodeURIComponent(url.password),
-    PGDATABASE: decodeURIComponent(url.pathname.slice(1)),
-    // The safety copy travels under the SAME TLS policy as the import itself:
-    // it would make no sense to demand verify-full here and dump in the clear.
-    PGSSLMODE: ssl === 'off' ? 'disable' : ssl === 'require' ? 'require' : 'verify-full',
-  }
+  // The whole connection string is handed over, not a host/port/user/password taken apart from it:
+  // decomposing dropped every other libpq parameter the operator had set — `sslrootcert`, `sslcert`,
+  // `sslkey`, `hostaddr`, `options` — so the dump could reach a different endpoint, or one with a
+  // weaker trust chain, than the import it is protecting. The TLS mode is forced to match this
+  // command's own `--ssl`; anything else in the string is preserved.
+  const target = new URL(dsn)
+  target.searchParams.set('sslmode', ssl === 'off' ? 'disable' : ssl === 'require' ? 'require' : 'verify-full')
+  const env = { ...process.env, PGCONNECT_TIMEOUT: process.env.PGCONNECT_TIMEOUT ?? '15' }
   let destination
   try {
     destination = await open(output, 'wx', 0o600)
@@ -188,7 +228,7 @@ async function pgDump(dsn: string, schema: string, output: string, ssl: 'off' | 
   }
   try {
     await new Promise<void>((resolvePromise, reject) => {
-      const child = spawn('pg_dump', [`--schema=${schema}`, '--format=custom'], {
+      const child = spawn('pg_dump', [`--dbname=${target.href}`, `--schema=${schema}`, '--format=custom'], {
         env,
         stdio: ['ignore', destination.fd, 'inherit'],
       })

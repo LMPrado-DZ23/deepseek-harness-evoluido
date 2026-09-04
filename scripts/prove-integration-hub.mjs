@@ -69,16 +69,22 @@ try {
   // ---- SMTP by reference: the value never leaves the environment
   assert.deepEqual(await (await hub('/smtp')).json(), { configured: false, secret_ref: null, tier: 'T2' })
   // D16 enforcement: configuring the app's e-mail is T2 and is refused outright without the person's confirmation.
-  const approval = { approved: true, tier: 'T2' }
+  // The server issues the approval; the client only presents its id. An id the client invents is worth nothing.
+  const issue = async (action, subject) => {
+    const ticket = await (await hub('/approvals', { method: 'POST', body: JSON.stringify({ action, subject_id: subject }) })).json()
+    assert.equal(ticket.tier, 'T2')
+    return { approval: { approval_id: ticket.approval_id } }
+  }
+  assert.equal((await hub('/smtp', { method: 'POST', body: JSON.stringify({ secret_ref: 'DZ23_APP_SMTP', approval: { approval_id: 'inventado' } }) })).status, 403)
   assert.equal((await hub('/smtp', { method: 'POST', body: JSON.stringify({ secret_ref: 'DZ23_APP_SMTP' }) })).status, 403)
   assert.deepEqual(await (await hub('/smtp')).json(), { configured: false, secret_ref: null, tier: 'T2' }, 'a refused T2 action must change nothing')
-  assert.equal((await hub('/smtp', { method: 'POST', body: JSON.stringify({ secret_ref: 'DZ23_NAO_EXISTE', approval }) })).status, 400)
+  assert.equal((await hub('/smtp', { method: 'POST', body: JSON.stringify({ secret_ref: 'DZ23_NAO_EXISTE', ...(await issue('smtp.configured', 'smtp')) }) })).status, 400)
   // `secret://NAME` is the same name as `NAME`: one spelling reaches the vault.
-  const configured = await hub('/smtp', { method: 'POST', body: JSON.stringify({ secret_ref: 'secret://DZ23_APP_SMTP', approval }) })
+  const configured = await hub('/smtp', { method: 'POST', body: JSON.stringify({ secret_ref: 'secret://DZ23_APP_SMTP', ...(await issue('smtp.configured', 'smtp')) }) })
   assert.equal(configured.status, 200)
   assert.deepEqual(await configured.json(), { configured: true, secret_ref: 'DZ23_APP_SMTP', tier: 'T2' })
   assert.equal((await hub('/smtp/test', { method: 'POST', body: JSON.stringify({ to: email }) })).status, 403)
-  const test = await (await hub('/smtp/test', { method: 'POST', body: JSON.stringify({ to: email, approval }) })).json()
+  const test = await (await hub('/smtp/test', { method: 'POST', body: JSON.stringify({ to: email, ...(await issue('smtp.tested', 'smtp')) }) })).json()
   assert.equal(test.result, 'NOT_EXECUTED')
   const storedIntegrations = JSON.stringify([...app.ctx.storageDomain.get('studio_integrations').table('integrations').entries()])
   assert.ok(!storedIntegrations.includes('nunca-sai-do-servidor'), 'the SMTP password leaked into storage')
@@ -103,8 +109,13 @@ try {
   assert.equal(sensitiveRegistered.integration.effective_tier, 'T3')
   const sensitivePath = `/integrations/${sensitiveRegistered.integration.integration_id}/enabled`
   assert.equal((await hub(sensitivePath, { method: 'POST', body: '{"enabled":true}' })).status, 403)
-  assert.equal((await hub(sensitivePath, { method: 'POST', body: '{"enabled":true,"approval":{"approved":true,"tier":"T2"}}' })).status, 403)
-  const t3 = await hub(sensitivePath, { method: 'POST', body: '{"enabled":true,"approval":{"approved":true,"tier":"T3"}}' })
+  const sensitiveTicket = await (await hub('/approvals', { method: 'POST', body: JSON.stringify({ action: 'integration.enabled', subject_id: sensitiveRegistered.integration.integration_id }) })).json()
+  assert.equal(sensitiveTicket.tier, 'T3')
+  assert.equal(sensitiveTicket.requires_strong_identity, true)
+  // An approval issued for ANOTHER integration is not this one.
+  const foreignTicket = await (await hub('/approvals', { method: 'POST', body: JSON.stringify({ action: 'integration.enabled', subject_id: registered.integration.integration_id }) })).json()
+  assert.equal((await hub(sensitivePath, { method: 'POST', body: JSON.stringify({ enabled: true, approval: { approval_id: foreignTicket.approval_id } }) })).status, 403)
+  const t3 = await hub(sensitivePath, { method: 'POST', body: JSON.stringify({ enabled: true, approval: { approval_id: sensitiveTicket.approval_id } }) })
   assert.equal(t3.status, 403, 'this session signed in by magic code: T3 needs a recent passkey')
   assert.ok((await t3.json()).error.includes('passkey'))
   const sensitiveRow = await app.ctx.storageDomain.get('studio_integrations').table('integrations').get(sensitiveRegistered.integration.integration_id)
@@ -183,7 +194,7 @@ try {
   void removeFile
   const events = await (await hub('/events')).json()
   const actions = events.events.map(event => `${event.action}:${event.outcome}`)
-  for (const expected of ['smtp.configured:success', 'smtp.tested:not-executed', 'integration.registered:success', 'integration.registered:failure', 'integration.enabled:success', 'integration.enabled:failure', 'export.created:success', 'approval.recorded:success']) assert.ok(actions.includes(expected), `missing audit ${expected}`)
+  for (const expected of ['smtp.configured:success', 'smtp.tested:not-executed', 'integration.registered:success', 'integration.registered:failure', 'integration.enabled:success', 'integration.enabled:failure', 'export.created:success', 'approval.requested:success', 'approval.recorded:success']) assert.ok(actions.includes(expected), `missing audit ${expected}`)
   // The audit proves the e-mail test without keeping the address in the clear.
   const tested = events.events.find(event => event.action === 'smtp.tested' && event.outcome === 'not-executed')
   assert.ok(!JSON.stringify(events.events).includes(email), 'the recipient address was kept in the clear in the audit trail')
@@ -238,7 +249,7 @@ try {
 - Resultado: **${decision}** (${new Date().toISOString().slice(0, 10)}, ambiente do Claude, Studio real no profile \`studio\` com o plugin \`@dz23-studio/integration-hub\`)
 - Sessão obtida pelo serviço de identidade real em processo (código de acesso por e-mail, captura de desenvolvimento); as chamadas ao Hub passam pelo servidor HTTP real com sessão e CSRF.
 - SMTP do aplicativo gerado: o navegador envia só o **nome** da referência (\`DZ23_APP_SMTP\`); o valor fica no ambiente do servidor, é conferido (existe + formato) e **não aparece no armazenamento**; nome inexistente → 400; teste de envio → \`NOT_EXECUTED\` com explicação (provedor ainda não escolhido).
-- **Aplicação dos níveis D16 (não só exibição)**: configurar o e-mail (T2) sem a confirmação da pessoa → **403 e nada muda**; com a confirmação → 200. Uma integração assinada que pede \`secrets.read\` é **T3 pelo piso**, mesmo declarando T0: sem confirmação → 403; com confirmação de **T2** (nível errado) → 403; com confirmação de T3, mas nesta sessão entrada por código de e-mail → 403 pedindo **passkey**, e a integração continua desligada. Cada confirmação aceita vira um evento \`approval.recorded\`.
+- **Aplicação dos níveis D16 (não só exibição), com a decisão emitida pelo servidor**: a tela pede ao servidor uma aprovação para a ação exata; o servidor decide o nível, registra a decisão, amarra a pessoa, a sessão, a ação e o alvo, dá validade curta e gasta na primeira utilização. Uma aprovação **inventada pelo cliente** → 403; uma aprovação emitida para **outra** integração → 403; configurar o e-mail (T2) sem aprovação → **403 e nada muda**; com a aprovação → 200. Uma integração assinada que pede \`secrets.read\` é **T3 pelo piso**, mesmo declarando T0: sem confirmação → 403; com confirmação de **T2** (nível errado) → 403; com confirmação de T3, mas nesta sessão entrada por código de e-mail → 403 pedindo **passkey**, e a integração continua desligada. Cada confirmação aceita vira um evento \`approval.recorded\`.
 - **Confinamento do diretório de execução**: uma run \`PASSED\` apontando para fora da pasta de execuções (\`runsRoot\`) é recusada **antes de qualquer leitura** — nada do que estava lá entra em pacote algum.
 - **Exportação com lista de permitidos e varredura fail-closed**: só tipos de arquivo permitidos entram; o que fica de fora é listado por nome em \`EXCLUIDOS.txt\` dentro do pacote (nada sai em silêncio); um arquivo com chave privada ou string de conexão com senha **derruba a exportação inteira**.
 - **Auditoria minimizada**: o endereço do teste de e-mail não fica em texto claro no histórico (domínio + resumo sha256).

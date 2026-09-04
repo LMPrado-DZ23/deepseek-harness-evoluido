@@ -140,6 +140,7 @@ export interface BackupSchedulerOptions {
 export class StorageBackupScheduler {
   private timer: NodeJS.Timeout | undefined
   private inFlight: Promise<BackupResult> | undefined
+  private queued: Promise<BackupResult> | undefined
   private last: BackupResult | undefined
   private readonly now: () => Date
   private readonly log: (level: BackupLogLevel, line: string) => void
@@ -168,20 +169,41 @@ export class StorageBackupScheduler {
     void this.runOnce()
   }
 
+  /** Stops the schedule and DRAINS: when it returns, nothing is running and nothing is owed. */
   async stop(): Promise<void> {
     if (this.timer !== undefined) clearInterval(this.timer)
     this.timer = undefined
-    await this.inFlight?.catch(() => undefined)
+    // A queued run only starts when the one in flight ends, so draining takes a couple of rounds.
+    while (this.inFlight !== undefined || this.queued !== undefined) {
+      await this.inFlight?.catch(() => undefined)
+      await this.queued?.catch(() => undefined)
+    }
   }
 
-  /** Serialized: a run that overlaps a running one waits for it and then starts. */
+  /**
+   * Serialized AND coalesced: at most one run in flight and at most one waiting.
+   * A tick that arrives while a copy is running joins the one already queued —
+   * otherwise a backup slower than the interval would grow a queue without
+   * limit and the machine would spend the rest of its life copying.
+   */
   runOnce(): Promise<BackupResult> {
-    const previous = this.inFlight ?? Promise.resolve(undefined)
-    const run = previous.then(() => this.execute(), () => this.execute())
-    this.inFlight = run
-    run.finally(() => { if (this.inFlight === run) this.inFlight = undefined }).catch(() => undefined)
-    return run
+    if (this.inFlight === undefined) {
+      const run = this.execute()
+      this.inFlight = run
+      run.finally(() => { if (this.inFlight === run) this.inFlight = undefined }).catch(() => undefined)
+      return run
+    }
+    this.queued ??= this.inFlight.then(() => this.startQueued(), () => this.startQueued())
+    return this.queued
   }
+
+  private startQueued(): Promise<BackupResult> {
+    this.queued = undefined
+    return this.runOnce()
+  }
+
+  /** How many ticks joined the waiting run instead of starting one of their own. */
+  get pending(): boolean { return this.queued !== undefined }
 
   private async execute(): Promise<BackupResult> {
     const startedAt = this.now().toISOString()

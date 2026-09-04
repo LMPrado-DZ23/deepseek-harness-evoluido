@@ -12,8 +12,8 @@ export type PolicyTier = 'T0' | 'T1' | 'T2' | 'T3'
 export type Verification = 'verified' | 'unverified' | 'invalid'
 export type HubOutcome = 'success' | 'failure' | 'not-executed'
 export type HubAction = 'smtp.configured' | 'smtp.tested' | 'integration.registered' | 'integration.enabled' | 'integration.disabled' | 'export.created' | 'approval.recorded'
-/** The person's confirmation for exactly one tier, as the server expects it. */
-export type Approval = { approved: true; tier: PolicyTier }
+/** The id of an approval the server issued for exactly this action; the client never asserts a tier. */
+export type Approval = { approval_id: string }
 
 /** `/studio/hub` and `/studio/hub/` open the Hub; everything else stays with the main application. */
 export function isHubPath(pathname: string): boolean {

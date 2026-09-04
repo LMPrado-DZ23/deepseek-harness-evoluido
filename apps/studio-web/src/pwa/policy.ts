@@ -20,8 +20,12 @@ export const OFFLINE_ERROR_CODE = 'OFFLINE'
 export const SERVICE_UNREACHABLE_ERROR_CODE = 'SERVICE_UNREACHABLE'
 
 export function decide(method: string, url: URL, origin: string): CacheDecision {
-  if (method !== 'GET' || url.origin !== origin) return 'bypass'
+  if (url.origin !== origin) return 'bypass'
+  // Every method under /api/, not only GET: a POST that fails with no network used to surface as a
+  // raw "Failed to fetch", so the sentence the catalogue has for a blocked action was never shown.
+  // Nothing is cached or retried here — the answer is the same honest 503.
   if (url.pathname.startsWith('/api/')) return 'api'
+  if (method !== 'GET') return 'bypass'
   if (!url.pathname.startsWith(SW_SCOPE)) return 'bypass'
   if (url.pathname.startsWith(`${SW_SCOPE}assets/`) || url.pathname.startsWith(`${SW_SCOPE}icons/`) || url.pathname.startsWith(`${SW_SCOPE}brand/`) || url.pathname === `${SW_SCOPE}manifest.json`) return 'shell-asset'
   if (url.pathname === SW_SCOPE || url.pathname === `${SW_SCOPE}index.html` || !/\.[a-z0-9]+$/iu.test(url.pathname)) return 'shell-html'

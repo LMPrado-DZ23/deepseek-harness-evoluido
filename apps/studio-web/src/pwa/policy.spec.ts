@@ -4,6 +4,19 @@ import { decide, OFFLINE_ERROR_CODE, offlineApiResponseBody, PRECACHE_PATHS, SER
 const origin = 'http://127.0.0.1:4179'
 const at = (path: string, base = origin) => new URL(path, base)
 
+
+describe('service worker decisions for mutations', () => {
+  it('answers every method under /api/, so a blocked action gets a sentence instead of "Failed to fetch"', () => {
+    const origin = 'https://studio.example'
+    for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+      expect(decide(method, new URL('/api/studio/apps/projects', origin), origin)).toBe('api')
+    }
+    // Everything else keeps bypassing on non-GET: the worker is not in the way of anything it does not answer.
+    expect(decide('POST', new URL('/studio/', origin), origin)).toBe('bypass')
+    expect(decide('POST', new URL('/api/x', 'https://outro.example'), origin)).toBe('bypass')
+  })
+})
+
 describe('service worker caching policy', () => {
   it('never caches project data: every /api/ request is network-only with an offline 503 fallback', () => {
     expect(decide('GET', at('/api/studio/apps/projects'), origin)).toBe('api')

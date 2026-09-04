@@ -31,15 +31,15 @@ describe('hub api client', () => {
     const api = createHubApi(transport(() => json(403, { error: 'recusado pelo servidor' })))
     await expect(api.setEnabled('x', true)).rejects.toMatchObject({ status: 403, message: 'recusado pelo servidor', offline: false })
   })
-  it('sends the confirmation only when the panel passes one, and never invents a tier', async () => {
+  it('sends only an approval the server issued, never a tier the client asserts', async () => {
     const fake = transport(() => json(200, { integration: { enabled: true } }))
     const api = createHubApi(fake)
     await api.setEnabled('x', true)
     expect(JSON.parse(String(fake.calls[0]!.init.body))).toEqual({ enabled: true })
-    await api.setEnabled('x', true, { approved: true, tier: 'T3' })
-    expect(JSON.parse(String(fake.calls[1]!.init.body))).toEqual({ enabled: true, approval: { approved: true, tier: 'T3' } })
-    await api.testSmtp('a@b.test', { approved: true, tier: 'T2' })
-    expect(JSON.parse(String(fake.calls[2]!.init.body))).toEqual({ to: 'a@b.test', approval: { approved: true, tier: 'T2' } })
+    await api.setEnabled('x', true, { approval_id: 'ap-1' })
+    expect(JSON.parse(String(fake.calls[1]!.init.body))).toEqual({ enabled: true, approval: { approval_id: 'ap-1' } })
+    await api.testSmtp('a@b.test', { approval_id: 'ap-2' })
+    expect(JSON.parse(String(fake.calls[2]!.init.body))).toEqual({ to: 'a@b.test', approval: { approval_id: 'ap-2' } })
   })
   it('builds the download link with encoded ids and lists projects from the application API', async () => {
     const fake = transport(() => json(200, { projects: [] }))

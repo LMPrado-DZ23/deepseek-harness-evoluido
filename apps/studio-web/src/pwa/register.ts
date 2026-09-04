@@ -90,10 +90,16 @@ export function registerStudioPwa(env: PwaEnvironment = { window, document, navi
  * fastest way to a permanent "denied".
  */
 export async function enableGenerationNotifications(port?: NotificationPort | undefined): Promise<NotificationPermission | 'unsupported'> {
-  const resolved = port ?? await notificationPortFor(navigator)
-  if (resolved === undefined) return 'unsupported'
-  if (resolved.permission === 'granted') return 'granted'
-  return resolved.requestPermission()
+  if (port !== undefined) {
+    if (port.permission === 'granted') return 'granted'
+    return port.requestPermission()
+  }
+  // The request has to happen INSIDE the click: awaiting `serviceWorker.ready` first can outlive the
+  // gesture, and a browser then refuses the prompt outright. The permission is asked here and now;
+  // which port actually shows the notification is decided later, by the registration.
+  if (typeof Notification === 'undefined') return 'unsupported'
+  if (Notification.permission === 'granted') return 'granted'
+  return Notification.requestPermission()
 }
 
 export { browserNotificationPort, notificationPortFor } from './notifications'

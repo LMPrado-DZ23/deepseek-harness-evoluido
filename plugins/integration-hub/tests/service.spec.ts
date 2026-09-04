@@ -21,8 +21,14 @@ const admin: HubActor = { ...owner, userId: 'u-admin', role: 'admin' }
 const builder: HubActor = { ...owner, userId: 'u-builder', role: 'builder' }
 const viewer: HubActor = { ...owner, userId: 'u-viewer', role: 'viewer' }
 const otherTenant: HubActor = { ...owner, tenantId: 'ws-b' }
-/** The confirmation the person gives on screen, for exactly one tier. */
-const ok = (tier: 'T2' | 'T3') => ({ approved: true, tier } as const)
+/**
+ * The confirmation as it really travels: the server issues a ticket for one
+ * action and one subject, and the client presents its id. `ok(...)` asks for it
+ * the way the panel does.
+ */
+const ok = async (service: IntegrationHubService, actor: HubActor, action: 'integration.enabled' | 'smtp.configured' | 'smtp.tested', subjectId: string) =>
+  ({ approvalId: (await service.requestApproval(actor, action, subjectId)).approval_id })
+const SMTP = 'smtp'
 const strongAdmin: HubActor = { ...admin, sessionId: 's-admin', strongIdentityVerified: true }
 const { publicKey, privateKey } = generateKeyPairSync('ed25519')
 const publisherKeys = { dz23: publicKey.export({ type: 'spki', format: 'der' }).toString('base64') }
@@ -104,9 +110,22 @@ describe('integration hub service', () => {
     expect(service.canEnable(unsigned.integration)).toBe(true)
     // Unverified means T2: even on the dev channel it takes the person's confirmation.
     await expect(service.setEnabled(owner, unsigned.integration.integration_id, true)).rejects.toMatchObject({ code: 'FORBIDDEN' })
-    expect((await service.setEnabled(owner, unsigned.integration.integration_id, true, ok('T2'))).enabled).toBe(true)
+    expect((await service.setEnabled(owner, unsigned.integration.integration_id, true, await ok(service, owner, 'integration.enabled', unsigned.integration.integration_id))).enabled).toBe(true)
     // Turning it off never needs a confirmation: less exposure is always allowed.
     expect((await service.setEnabled(owner, unsigned.integration.integration_id, false)).enabled).toBe(false)
+    // But the dev channel is not a hole: an UNSIGNED manifest that asks for the network, e-mail or
+    // the vault is refused there too — trying something locally is not the same as granting it.
+    for (const asking of [
+      manifest({ id: 'com-rede', permissions: ['network.outbound'] }),
+      manifest({ id: 'com-email', permissions: ['email.send'] }),
+      manifest({ id: 'com-cofre', permissions: ['secrets.read'] }),
+      manifest({ id: 'mcp-externo', kind: 'mcp', endpoint: 'https://mcp.example.com' }),
+    ]) {
+      const risky = await service.register(owner, asking)
+      expect(service.canEnable(risky.integration)).toBe(false)
+      await expect(service.setEnabled(owner, risky.integration.integration_id, true, await ok(service, owner, 'integration.enabled', risky.integration.integration_id)))
+        .rejects.toThrow('sem assinatura não pode pedir')
+    }
   })
 
   it('never enables a manifest whose signature does not check out, on any channel', async () => {
@@ -119,7 +138,7 @@ describe('integration hub service', () => {
       const row = { ...registered.integration, verification: 'invalid' as const }
       await repository.putIntegration(row)
       expect(service.canEnable(row)).toBe(false)
-      await expect(service.setEnabled(owner, row.integration_id, true, ok('T2'))).rejects.toThrow('não confere')
+      await expect(service.setEnabled(owner, row.integration_id, true, await ok(service, owner, 'integration.enabled', row.integration_id))).rejects.toThrow('não confere')
       expect(repository.rows.find(value => value.integration_id === row.integration_id)!.enabled).toBe(false)
     }
   })
@@ -134,15 +153,25 @@ describe('integration hub service', () => {
     // no confirmation at all
     await expect(service.setEnabled(admin, id, true)).rejects.toThrow('confirmação')
     // a confirmation for the WRONG tier is not a confirmation for this one
-    await expect(service.setEnabled(admin, id, true, ok('T2'))).rejects.toThrow('confirmação')
+    await expect(service.setEnabled(admin, id, true, { approvalId: 'inventado' })).rejects.toThrow('confirmação')
     // right confirmation, but no recent passkey on this session
-    await expect(service.setEnabled(admin, id, true, ok('T3'))).rejects.toThrow('passkey')
-    const enabled = await service.setEnabled(strongAdmin, id, true, ok('T3'))
+    await expect(service.setEnabled(admin, id, true, await ok(service, admin, 'integration.enabled', id))).rejects.toThrow('passkey')
+    const enabled = await service.setEnabled(strongAdmin, id, true, await ok(service, strongAdmin, 'integration.enabled', id))
     expect(enabled.enabled).toBe(true)
     const actions = repository.eventRows.map(event => `${event.action}:${event.outcome}`)
     expect(actions).toContain('integration.enabled:failure')
     expect(actions).toContain('approval.recorded:success')
-    expect(repository.eventRows.find(event => event.action === 'approval.recorded')).toMatchObject({ detail: 'integration.enabled T3' })
+    expect(repository.eventRows.find(event => event.action === 'approval.recorded')).toMatchObject({ detail: 'integration.enabled' })
+    // The server issued the decision before the action, and it is single use: presenting it twice fails.
+    const reused = await ok(service, strongAdmin, 'integration.enabled', id)
+    await service.setEnabled(strongAdmin, id, false)
+    expect((await service.setEnabled(strongAdmin, id, true, reused)).enabled).toBe(true)
+    await service.setEnabled(strongAdmin, id, false)
+    await expect(service.setEnabled(strongAdmin, id, true, reused)).rejects.toThrow('passkey')
+    // An approval issued for another subject, another person or another action is not this one.
+    const other = await service.register(admin, signed(manifest({ id: 'outra', permissions: ['secrets.read'] })))
+    const foreign = await ok(service, strongAdmin, 'integration.enabled', other.integration.integration_id)
+    await expect(service.setEnabled(strongAdmin, id, true, foreign)).rejects.toThrow('passkey')
     // A T0 integration is enabled with no confirmation at all.
     const plain = await service.register(admin, signed(manifest({ id: 'agenda' })))
     expect(service.requiredApprovalTier(plain.integration)).toBeNull()
@@ -167,7 +196,7 @@ describe('integration hub service', () => {
 
   it('enforces the tier the kind demands, never a lower one stored in the row', async () => {
     const { service, repository, sent } = await build({ emailTest: true, secrets: { DZ23_APP_SMTP: { present: true, shapeOk: true } } })
-    await service.configureSmtp(admin, 'DZ23_APP_SMTP', ok('T2'))
+    await service.configureSmtp(admin, 'DZ23_APP_SMTP', await ok(service, admin, 'smtp.configured', SMTP))
     // A row written with a lower tier — an older build, a migration, any other writer of the table —
     // must not buy a free pass: e-mail talks to an external provider, so T2 is the floor.
     const smtpRow = repository.rows.find(row => row.kind === 'smtp')!
@@ -180,7 +209,7 @@ describe('integration hub service', () => {
     const sensitive = await service.register(admin, signed(manifest({ id: 'cofre', permissions: ['secrets.read'] })))
     await repository.putIntegration({ ...sensitive.integration, effective_tier: 'T0' })
     expect(service.requiredApprovalTier({ ...sensitive.integration, effective_tier: 'T0' })).toBe('T3')
-    await expect(service.setEnabled(strongAdmin, sensitive.integration.integration_id, true, ok('T2'))).rejects.toThrow('confirmação')
+    await expect(service.setEnabled(strongAdmin, sensitive.integration.integration_id, true, { approvalId: 'inventado' })).rejects.toThrow('confirmação')
   })
 
   it('refuses to enable on a record that changed while the person was confirming', async () => {
@@ -207,12 +236,12 @@ describe('integration hub service', () => {
 
   it('records a confirmation only when the action really happened, and audits the refusals', async () => {
     const { service, repository } = await build({ secrets: { DZ23_BROKEN: { present: true, shapeOk: false } } })
-    await expect(service.configureSmtp(admin, 'DZ23_MISSING', ok('T2'))).rejects.toThrow('cofre')
-    await expect(service.configureSmtp(admin, 'DZ23_BROKEN', ok('T2'))).rejects.toThrow('formato')
+    await expect(service.configureSmtp(admin, 'DZ23_MISSING', await ok(service, admin, 'smtp.configured', SMTP))).rejects.toThrow('cofre')
+    await expect(service.configureSmtp(admin, 'DZ23_BROKEN', await ok(service, admin, 'smtp.configured', SMTP))).rejects.toThrow('formato')
     const actions = repository.eventRows.map(event => `${event.action}:${event.outcome}`)
     // No "confirmation recorded" for something that did not happen, and the refusals are visible.
     expect(actions).not.toContain('approval.recorded:success')
-    expect(actions).toEqual(['smtp.configured:failure', 'smtp.configured:failure'])
+    expect(actions).toEqual(['approval.requested:success', 'smtp.configured:failure', 'approval.requested:success', 'smtp.configured:failure'])
   })
 
   it('enforces roles and tenant scope', async () => {
@@ -229,30 +258,30 @@ describe('integration hub service', () => {
   it('stores only the SMTP credential reference after checking presence and shape, and reports the test as NOT_EXECUTED until enabled', async () => {
     const { service, repository } = await build({ secrets: { DZ23_APP_SMTP: { present: true, shapeOk: true }, DZ23_BROKEN: { present: true, shapeOk: false } } })
     expect(service.smtp(viewer)).toEqual({ configured: false, secret_ref: null, tier: 'T2' })
-    await expect(service.configureSmtp(admin, 'smtp://user:pass@host', ok('T2'))).rejects.toThrow('identificador')
+    await expect(service.configureSmtp(admin, 'smtp://user:pass@host', await ok(service, admin, 'smtp.configured', SMTP))).rejects.toThrow('identificador')
     // Configuring the app's e-mail is T2: without the confirmation the vault is never even touched.
     await expect(service.configureSmtp(admin, 'DZ23_APP_SMTP')).rejects.toThrow('confirmação')
-    await expect(service.configureSmtp(admin, 'DZ23_MISSING', ok('T2'))).rejects.toThrow('não existe no cofre')
-    await expect(service.configureSmtp(admin, 'DZ23_BROKEN', ok('T2'))).rejects.toThrow('formato esperado')
+    await expect(service.configureSmtp(admin, 'DZ23_MISSING', await ok(service, admin, 'smtp.configured', SMTP))).rejects.toThrow('não existe no cofre')
+    await expect(service.configureSmtp(admin, 'DZ23_BROKEN', await ok(service, admin, 'smtp.configured', SMTP))).rejects.toThrow('formato esperado')
     // `secret://NAME` and `NAME` are the same name; the case is never invented.
-    const record = await service.configureSmtp(admin, '  secret://DZ23_APP_SMTP  ', ok('T2'))
+    const record = await service.configureSmtp(admin, '  secret://DZ23_APP_SMTP  ', await ok(service, admin, 'smtp.configured', SMTP))
     expect(record).toMatchObject({ kind: 'smtp', secret_ref: 'DZ23_APP_SMTP', enabled: true, effective_tier: 'T2' })
     expect(JSON.stringify(repository.rows)).not.toContain('pass')
     expect(service.smtp(viewer)).toEqual({ configured: true, secret_ref: 'DZ23_APP_SMTP', tier: 'T2' })
-    const test = await service.testSmtp(admin, 'pessoa@example.test', ok('T2'))
+    const test = await service.testSmtp(admin, 'pessoa@example.test', await ok(service, admin, 'smtp.tested', SMTP))
     expect(test.result).toBe('NOT_EXECUTED')
     expect(repository.eventRows.at(-1)).toMatchObject({ action: 'smtp.tested', outcome: 'not-executed' })
-    const second = await service.configureSmtp(admin, 'DZ23_APP_SMTP', ok('T2'))
+    const second = await service.configureSmtp(admin, 'DZ23_APP_SMTP', await ok(service, admin, 'smtp.configured', SMTP))
     expect(second.integration_id).toBe(record.integration_id)
   })
 
   it('sends the SMTP test only when the operator enabled it, and records failures', async () => {
     const { service, sent, repository } = await build({ emailTest: true, secrets: { DZ23_APP_SMTP: { present: true, shapeOk: true } } })
-    await expect(service.testSmtp(admin, 'pessoa@example.test', ok('T2'))).rejects.toMatchObject({ code: 'NOT_FOUND' })
-    await service.configureSmtp(admin, 'DZ23_APP_SMTP', ok('T2'))
-    await expect(service.testSmtp(admin, 'not-an-email', ok('T2'))).rejects.toMatchObject({ code: 'INVALID' })
+    await expect(service.testSmtp(admin, 'pessoa@example.test', await ok(service, admin, 'smtp.tested', SMTP))).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    await service.configureSmtp(admin, 'DZ23_APP_SMTP', await ok(service, admin, 'smtp.configured', SMTP))
+    await expect(service.testSmtp(admin, 'not-an-email', await ok(service, admin, 'smtp.tested', SMTP))).rejects.toMatchObject({ code: 'INVALID' })
     await expect(service.testSmtp(admin, 'pessoa@example.test')).rejects.toThrow('confirmação')
-    expect(await service.testSmtp(admin, 'pessoa@example.test', ok('T2'))).toMatchObject({ result: 'SENT' })
+    expect(await service.testSmtp(admin, 'pessoa@example.test', await ok(service, admin, 'smtp.tested', SMTP))).toMatchObject({ result: 'SENT' })
     expect(sent).toEqual([['DZ23_APP_SMTP', 'pessoa@example.test']])
     // The audit proves the test happened without keeping the address in the clear.
     expect(repository.eventRows.at(-1)).toMatchObject({ action: 'smtp.tested', outcome: 'success' })
@@ -262,7 +291,7 @@ describe('integration hub service', () => {
     const smtpRecord = repository.rows.find(row => row.kind === 'smtp')!
     await service.setEnabled(admin, smtpRecord.integration_id, false)
     expect(service.smtp(viewer)).toMatchObject({ configured: false, secret_ref: null })
-    await expect(service.testSmtp(admin, 'pessoa@example.test', ok('T2'))).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    await expect(service.testSmtp(admin, 'pessoa@example.test', await ok(service, admin, 'smtp.tested', SMTP))).rejects.toMatchObject({ code: 'NOT_FOUND' })
   })
 
   it('exports only a verified project from its latest PASSED run, with private files and a digest', async () => {

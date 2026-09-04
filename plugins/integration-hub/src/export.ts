@@ -47,7 +47,7 @@ const EXCLUDED_FILES = [/^\.env(\..*)?$/u, /\.sqlite(-journal|-wal|-shm)?$/u, /^
  * package, in plain words.
  */
 const ALLOWED_EXTENSIONS = new Set([
-  '.js', '.mjs', '.cjs', '.json', '.map', '.ts', '.tsx', '.jsx', '.mts', '.cts',
+  '.js', '.mjs', '.cjs', '.json', '.ts', '.tsx', '.jsx', '.mts', '.cts',
   '.html', '.htm', '.css', '.scss', '.txt', '.md', '.xml', '.webmanifest', '.csv',
   '.svg', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.ico', '.bmp',
   '.woff', '.woff2', '.ttf', '.otf', '.eot', '.wasm', '.node', '.br', '.gz',
@@ -72,7 +72,7 @@ const SECRET_PATTERNS: readonly RegExp[] = [
   /\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|amqp|redis):\/\/[^\s:@/]+:[^\s:@/]+@/u,
 ]
 /** Text types the scan reads. Everything else is packaged uninspected — and SAID SO, in `EXCLUIDOS.txt`. */
-const SCANNED_EXTENSIONS = new Set(['.js', '.mjs', '.cjs', '.json', '.map', '.ts', '.tsx', '.jsx', '.mts', '.cts', '.html', '.htm', '.css', '.scss', '.txt', '.md', '.xml', '.webmanifest', '.csv', '.svg', '.yml', '.yaml', '.lock', ''])
+const SCANNED_EXTENSIONS = new Set(['.js', '.mjs', '.cjs', '.json', '.ts', '.tsx', '.jsx', '.mts', '.cts', '.html', '.htm', '.css', '.scss', '.txt', '.md', '.xml', '.webmanifest', '.csv', '.svg', '.yml', '.yaml', '.lock', ''])
 /** A scanned file is read in slices of this size, with an overlap, so a big bundle is inspected whole instead of skipped. */
 const SCAN_CHUNK_BYTES = 1024 * 1024
 /** Longest secret shape, doubled: the overlap between slices, so a pattern split across a boundary is still seen. */
@@ -112,7 +112,15 @@ export async function packagePrototype(source: ExportSource): Promise<ExportPack
   if (await isDirectory(join(root, '.next', 'static'))) await collect(join(root, '.next', 'static'), 'app/.next/static', entries, budget, false, excluded, uninspected)
   if (await isDirectory(join(root, 'public'))) await collect(join(root, 'public'), 'app/public', entries, budget, false, excluded, uninspected)
   const report = join(root, 'evidence', 'appspec-report.json')
-  if (await isFile(report)) entries.push({ name: 'evidence/appspec-report.json', data: await readFile(report) })
+  if (await isFile(report)) {
+    // The acceptance report is a generated file like any other: it counts against the budget and it
+    // is scanned. It used to be copied in unconditionally.
+    const data = await readFile(report)
+    budget.remaining -= data.length
+    if (budget.remaining < 0) throw new ExportError('TOO_LARGE', t('errors.exportTooLarge', { limitMb: EXPORT_LIMIT_BYTES / (1024 * 1024) }))
+    if (findSecret('appspec-report.json', data) !== null) throw new ExportError('SECRET_DETECTED', t('errors.exportSecretFound', { file: 'evidence/appspec-report.json' }))
+    entries.push({ name: 'evidence/appspec-report.json', data })
+  }
   if (excluded.length > 0 || uninspected.length > 0) {
     const order = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0)
     excluded.sort(order)

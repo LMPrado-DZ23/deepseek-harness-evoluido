@@ -53,15 +53,31 @@ export interface ProjectsPort {
 }
 
 /**
- * The person's confirmation for one action, as recorded by the interface. D16:
- * T2 needs an explicit confirmation for that exact tier; T3 needs the same
- * confirmation *and* a recent strong identity. An approval for another tier is
- * not an approval for this one.
+ * What the client presents when it acts: the id of an approval the SERVER
+ * issued for exactly this action. It is not the client's word that a person
+ * confirmed — that claim was worth nothing, since any page that got past CSRF
+ * could simply send `{approved:true}`. The server decides the tier, records the
+ * decision before the action, binds it to the actor, the session, the action
+ * and the subject, expires it, and burns it on use.
  */
 export interface HubApproval {
-  readonly approved: boolean
-  readonly tier: PolicyTier
+  readonly approvalId: string
 }
+
+/** An approval the server issued and has not yet spent. */
+export interface HubApprovalTicket {
+  readonly approval_id: string
+  readonly tier: PolicyTier
+  readonly action: HubEvent['action']
+  readonly subject_id: string
+  readonly user_id: string
+  readonly session_id: string | undefined
+  readonly expires_at: string
+  readonly requires_strong_identity: boolean
+}
+
+/** How long a confirmation is worth something. Short on purpose: it is a decision about one action, now. */
+export const APPROVAL_TTL_MS = 3 * 60 * 1000
 
 export interface HubServiceOptions {
   repository: HubRepository
@@ -88,6 +104,9 @@ export class HubError extends Error {
 /** SMTP for generated apps talks to an external provider: T2 by the D16 floor. */
 export const SMTP_TIER: PolicyTier = 'T2'
 
+/** The subject an SMTP approval is bound to: the app's e-mail setting itself, not the secret's name. */
+export const SMTP_SUBJECT = 'smtp'
+
 const TIER_RANK: Readonly<Record<PolicyTier, number>> = { T0: 0, T1: 1, T2: 2, T3: 3 }
 
 const smtpSecretShape = z.object({ host: z.string().min(1), port: z.number().int(), secure: z.boolean(), user: z.string().min(1), pass: z.string().min(1), from: z.string().min(1) }).strict()
@@ -96,6 +115,12 @@ export { smtpSecretShape }
 export class IntegrationHubService {
   readonly #now: () => Date
   readonly #createId: () => string
+  /**
+   * Issued approvals, in memory on purpose: a restart loses them, and losing
+   * one only means the person confirms again — the failure is closed. Anything
+   * durable here would be a decision that outlives the screen that made it.
+   */
+  readonly #approvals = new Map<string, HubApprovalTicket>()
 
   constructor(private readonly options: HubServiceOptions) {
     this.#now = options.now ?? (() => new Date())
@@ -110,11 +135,18 @@ export class IntegrationHubService {
   }
 
   /** Whether the interface may offer "enable" for this record: decided here, the same place that enforces it. */
-  canEnable(integration: Pick<StudioIntegration, 'verification' | 'enabled'>): boolean {
+  canEnable(integration: Pick<StudioIntegration, 'verification' | 'enabled' | 'kind' | 'effective_tier' | 'manifest'>): boolean {
     if (integration.enabled) return false
     // A signature that does not check out is never enabled, on any channel: `dev` relaxes "unsigned", never "wrong signature".
     if (integration.verification === 'invalid') return false
-    return integration.verification === 'verified' || this.options.channel === 'dev'
+    if (integration.verification === 'verified') return true
+    // The dev channel exists so somebody can try an unsigned integration on their own machine — not
+    // so an unsigned manifest can ask for the network, e-mail, an external service or the vault.
+    // What counts here is what the manifest ASKS FOR (its own policy floor), not the T2 that being
+    // unverified adds: otherwise the channel would refuse everything and mean nothing.
+    if (this.options.channel !== 'dev') return false
+    const asked = integration.manifest === null ? SMTP_TIER : policyFloor(integration.kind, integration.manifest)
+    return TIER_RANK[asked] <= TIER_RANK.T1
   }
 
   /** The confirmation the person has to give before this integration can be turned on. `null` = none needed (T0/T1). */
@@ -169,6 +201,38 @@ export class IntegrationHubService {
     return TIER_RANK[record.effective_tier] >= TIER_RANK[floor] ? record.effective_tier : floor
   }
 
+  /**
+   * The server's decision that this person may do this exact thing: which tier
+   * it takes, whether a passkey is needed, and until when. Nothing happens yet.
+   * The interface shows what it says and, if the person agrees, presents the id.
+   */
+  async requestApproval(actor: HubActor, action: HubEvent['action'], subjectId: string): Promise<HubApprovalTicket> {
+    this.#authorize(actor, 'integrations.manage')
+    const tier = this.#tierForAction(actor, action, subjectId)
+    const ticket: HubApprovalTicket = {
+      approval_id: this.#createId(), tier, action, subject_id: subjectId,
+      user_id: actor.userId, session_id: actor.sessionId,
+      expires_at: new Date(this.#now().getTime() + APPROVAL_TTL_MS).toISOString(),
+      requires_strong_identity: tier === 'T3',
+    }
+    this.#sweepApprovals()
+    this.#approvals.set(ticket.approval_id, ticket)
+    await this.#audit(actor, 'approval.requested', subjectId, 'success', `${action} ${tier}`)
+    return ticket
+  }
+
+  /** The tier an action would need right now, decided by the server for the request above. */
+  #tierForAction(actor: HubActor, action: HubEvent['action'], subjectId: string): PolicyTier {
+    if (action === 'integration.enabled') return this.#enforcedTier(this.#integration(actor, subjectId))
+    if (action === 'smtp.configured' || action === 'smtp.tested') return SMTP_TIER
+    throw new HubError('INVALID', t('errors.invalidRequest'))
+  }
+
+  #sweepApprovals(): void {
+    const now = this.#now().getTime()
+    for (const [id, ticket] of this.#approvals) if (Date.parse(ticket.expires_at) <= now) this.#approvals.delete(id)
+  }
+
   async setEnabled(actor: HubActor, integrationId: string, enabled: boolean, approval?: HubApproval): Promise<StudioIntegration> {
     this.#authorize(actor, 'integrations.manage')
     const current = this.#integration(actor, integrationId)
@@ -178,9 +242,9 @@ export class IntegrationHubService {
         await this.#audit(actor, 'integration.enabled', integrationId, 'failure', 'signature-invalid')
         throw new HubError('FORBIDDEN', t('errors.manifestSignatureInvalid'))
       }
-      if (current.verification !== 'verified' && this.options.channel === 'stable') {
+      if (current.verification !== 'verified' && !this.canEnable({ ...current, enabled: false })) {
         await this.#audit(actor, 'integration.enabled', integrationId, 'failure', t('errors.manifestUnverified'))
-        throw new HubError('FORBIDDEN', t('errors.manifestUnverified'))
+        throw new HubError('FORBIDDEN', this.options.channel === 'dev' ? t('errors.devChannelCapability') : t('errors.manifestUnverified'))
       }
       await this.#requireTier(actor, this.#enforcedTier(current), approval, 'integration.enabled', integrationId)
     }
@@ -211,7 +275,7 @@ export class IntegrationHubService {
     this.#authorize(actor, 'integrations.manage')
     const parsed = secretRefSchema.safeParse(canonicalSecretRef(secretRefInput))
     if (!parsed.success) throw new HubError('INVALID', t('errors.secretRefInvalid'))
-    await this.#requireTier(actor, SMTP_TIER, approval, 'smtp.configured', parsed.data)
+    await this.#requireTier(actor, SMTP_TIER, approval, 'smtp.configured', SMTP_SUBJECT)
     const inspection = await this.options.secrets.inspect(parsed.data)
     // A refusal is part of the history too: "nothing happened" must be visible, not absent.
     if (!inspection.present) {
@@ -239,7 +303,7 @@ export class IntegrationHubService {
     this.#authorize(actor, 'integrations.manage')
     const record = this.#smtpRecord(actor)
     if (record === undefined || record.secret_ref === null || !record.enabled) throw new HubError('NOT_FOUND', t('errors.smtpNotConfigured'))
-    await this.#requireTier(actor, this.#enforcedTier(record), approval, 'smtp.tested', record.integration_id)
+    await this.#requireTier(actor, this.#enforcedTier(record), approval, 'smtp.tested', SMTP_SUBJECT)
     if (this.options.emailTest === undefined) {
       await this.#recordApproval(actor, approval, 'smtp.tested', record.integration_id)
       await this.#audit(actor, 'smtp.tested', record.integration_id, 'not-executed', t('errors.smtpTestDisabled'))
@@ -321,6 +385,31 @@ export class IntegrationHubService {
     return record
   }
 
+  /**
+   * The file to send for a package, resolved by real path and refused unless it
+   * sits inside this workspace's export folder. The stored path is data: a row
+   * that was tampered with (or written by an older build) must not be able to
+   * turn the download route into "read any file on the server".
+   */
+  async exportFile(actor: HubActor, projectId: string, exportId: string): Promise<string> {
+    const record = this.exportRecord(actor, projectId, exportId)
+    const root = resolve(this.options.exportsRoot, safeSegment(actor.orgId), safeSegment(actor.tenantId))
+    let realRoot: string
+    let realFile: string
+    try {
+      realRoot = await realpath(root)
+      realFile = await realpath(record.path)
+    } catch {
+      throw new HubError('NOT_FOUND', t('errors.exportUnavailable'))
+    }
+    const inside = relative(realRoot, realFile)
+    if (inside === '' || inside.startsWith('..') || inside.startsWith(sep) || resolve(realRoot, inside) !== realFile) {
+      await this.#audit(actor, 'export.created', exportId, 'failure', 'path-outside-exports')
+      throw new HubError('NOT_FOUND', t('errors.exportUnavailable'))
+    }
+    return realFile
+  }
+
   events(actor: HubActor): readonly HubEvent[] {
     this.#authorize(actor, 'audit.read')
     return this.options.repository.events().filter(value => this.#sameScope(actor, value))
@@ -345,7 +434,18 @@ export class IntegrationHubService {
    */
   async #requireTier(actor: HubActor, tier: PolicyTier, approval: HubApproval | undefined, action: HubEvent['action'], subjectId: string): Promise<void> {
     if (!needsApproval(tier)) return
-    if (approval?.approved !== true || approval.tier !== tier) {
+    const ticket = approval === undefined ? undefined : this.#approvals.get(approval.approvalId)
+    const now = this.#now().getTime()
+    // Burned on sight: one approval, one action, whatever happens next.
+    if (ticket !== undefined) this.#approvals.delete(ticket.approval_id)
+    const usable = ticket !== undefined
+      && ticket.tier === tier
+      && ticket.action === action
+      && ticket.subject_id === subjectId
+      && ticket.user_id === actor.userId
+      && ticket.session_id === actor.sessionId
+      && Date.parse(ticket.expires_at) > now
+    if (!usable) {
       await this.#audit(actor, action, subjectId, 'failure', `approval-required ${tier}`)
       throw new HubError('FORBIDDEN', tier === 'T3' ? t('errors.approvalRequiredT3') : t('errors.approvalRequiredT2'))
     }
@@ -360,8 +460,8 @@ export class IntegrationHubService {
 
   /** Written only after the action itself succeeded: a confirmation in the history means something happened. */
   async #recordApproval(actor: HubActor, approval: HubApproval | undefined, action: HubEvent['action'], subjectId: string): Promise<void> {
-    if (approval?.approved !== true) return
-    await this.#audit(actor, 'approval.recorded', subjectId, 'success', `${action} ${approval.tier}`)
+    if (approval === undefined) return
+    await this.#audit(actor, 'approval.recorded', subjectId, 'success', action)
   }
 
   /** Real path of the run directory, refused unless it sits inside the configured runs root (symlinks resolved on both sides). */

@@ -19,6 +19,7 @@ export const HUB_ROUTE_CONTRACTS = [
   { method: 'POST', path: '/integrations', access: 'authorized', permission: 'integrations.manage', scope: 'workspace' },
   { method: 'POST', path: '/integrations/:integrationId/enabled', access: 'authorized', permission: 'integrations.manage', scope: 'workspace' },
   { method: 'GET', path: '/smtp', access: 'authorized', permission: 'workspace.read', scope: 'workspace' },
+  { method: 'POST', path: '/approvals', access: 'authorized', permission: 'integrations.manage', scope: 'workspace' },
   { method: 'POST', path: '/smtp', access: 'authorized', permission: 'integrations.manage', scope: 'workspace' },
   { method: 'POST', path: '/smtp/test', access: 'authorized', permission: 'integrations.manage', scope: 'workspace' },
   { method: 'GET', path: '/projects/:projectId/exports', access: 'authorized', permission: 'project.read', scope: 'project' },
@@ -37,8 +38,9 @@ export interface HubHttpConfig {
   readonly now?: () => Date
 }
 
-/** The person's confirmation, as the interface recorded it. The tier is explicit so a T2 click can never stand in for a T3 one. */
-const approvalSchema = z.object({ approved: z.boolean(), tier: z.enum(['T0', 'T1', 'T2', 'T3']) }).strict()
+/** What the client presents: the id of an approval the SERVER issued for this exact action. */
+const approvalSchema = z.object({ approval_id: z.string().min(1) }).strict()
+const approvalRequestSchema = z.object({ action: z.enum(['integration.enabled', 'smtp.configured', 'smtp.tested']), subject_id: z.string().min(1) }).strict()
 const enabledSchema = z.object({ enabled: z.boolean(), approval: approvalSchema.optional() }).strict()
 const smtpSchema = z.object({ secret_ref: z.string(), approval: approvalSchema.optional() }).strict()
 const smtpTestSchema = z.object({ to: z.string(), approval: approvalSchema.optional() }).strict()
@@ -66,18 +68,22 @@ export function createHubHttpHandler(config: HubHttpConfig) {
       const enabledMatch = /^\/integrations\/([^/]+)\/enabled$/u.exec(route)
       if (method === 'POST' && enabledMatch !== null) {
         const body = enabledSchema.parse(await readJson(request))
-        const integration = await service.setEnabled(actor, decodeURIComponent(enabledMatch[1]!), body.enabled, body.approval)
+        const integration = await service.setEnabled(actor, decodeURIComponent(enabledMatch[1]!), body.enabled, asApproval(body.approval))
         return json(response, 200, { integration: { ...integration, can_enable: service.canEnable(integration), requires_approval_tier: service.requiredApprovalTier(integration) } })
+      }
+      if (method === 'POST' && route === '/approvals') {
+        const body = approvalRequestSchema.parse(await readJson(request))
+        return json(response, 201, await service.requestApproval(actor, body.action, body.subject_id))
       }
       if (method === 'GET' && route === '/smtp') return json(response, 200, service.smtp(actor))
       if (method === 'POST' && route === '/smtp') {
         const body = smtpSchema.parse(await readJson(request))
-        const record = await service.configureSmtp(actor, body.secret_ref, body.approval)
+        const record = await service.configureSmtp(actor, body.secret_ref, asApproval(body.approval))
         return json(response, 200, { configured: true, secret_ref: record.secret_ref, tier: record.effective_tier })
       }
       if (method === 'POST' && route === '/smtp/test') {
         const body = smtpTestSchema.parse(await readJson(request))
-        return json(response, 200, await service.testSmtp(actor, body.to, body.approval))
+        return json(response, 200, await service.testSmtp(actor, body.to, asApproval(body.approval)))
       }
       const exportsMatch = /^\/projects\/([^/]+)\/exports(?:\/([^/]+)\/download)?$/u.exec(route)
       if (exportsMatch !== null) {
@@ -86,14 +92,16 @@ export function createHubHttpHandler(config: HubHttpConfig) {
         if (method === 'POST' && exportsMatch[2] === undefined) return json(response, 201, { export: publicExport(await service.createExport(actor, projectId)) })
         if (method === 'GET' && exportsMatch[2] !== undefined) {
           const record = service.exportRecord(actor, projectId, decodeURIComponent(exportsMatch[2]))
-          const info = await stat(record.path).catch(() => undefined)
+          // The path stored in the row is data: it is resolved and confined before anything is read.
+          const file = await service.exportFile(actor, projectId, decodeURIComponent(exportsMatch[2]))
+          const info = await stat(file).catch(() => undefined)
           if (info === undefined || !info.isFile()) throw new HubError('NOT_FOUND', t('errors.exportUnavailable'))
           response.writeHead(200, {
             'content-type': 'application/zip', 'content-length': String(info.size), 'cache-control': 'no-store',
             'x-content-type-options': 'nosniff', 'content-disposition': `attachment; filename="${safeFileName(record.file_name)}"`,
             'x-dz23-sha256': record.sha256,
           })
-          const stream = createReadStream(record.path)
+          const stream = createReadStream(file)
           stream.on('error', () => response.destroy())
           stream.pipe(response)
           return
@@ -105,6 +113,10 @@ export function createHubHttpHandler(config: HubHttpConfig) {
       json(response, statusOf(error), { error: publicMessage(error) })
     }
   }
+}
+
+function asApproval(value: { approval_id: string } | undefined) {
+  return value === undefined ? undefined : { approvalId: value.approval_id }
 }
 
 function publicExport(record: ReturnType<IntegrationHubService['exportRecord']>) {

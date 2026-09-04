@@ -4,6 +4,7 @@
  * answers `/api/` requests made offline with 503 `{error:"OFFLINE"}`; that
  * becomes a typed error so the panel can say "you are offline" in words.
  */
+import pwa from '../i18n/pwa.pt-BR.json'
 import type { Approval, HubAction, HubOutcome, IntegrationKind, PolicyTier, Verification } from './presentation'
 
 export const HUB_API_PREFIX = '/api/studio/hub'
@@ -19,6 +20,9 @@ export type Integration = {
   requires_approval_tier: PolicyTier | null
 }
 export type SmtpState = { configured: boolean; secret_ref: string | null; tier: PolicyTier }
+/** What the server issued for one action: the panel shows what it says and, on confirmation, presents its id. */
+export type ApprovalTicket = { approval_id: string; tier: PolicyTier; expires_at: string; requires_strong_identity: boolean }
+export type ApprovalAction = 'integration.enabled' | 'smtp.configured' | 'smtp.tested'
 export type SmtpTest = { result: 'SENT' | 'NOT_EXECUTED'; message: string }
 export type ExportRecord = { export_id: string; project_id: string; run_id: string; file_name: string; sha256: string; size_bytes: number; entries: number; created_at: string }
 export type HubEvent = { event_id: string; action: HubAction; outcome: HubOutcome; detail: string; created_at: string }
@@ -50,11 +54,21 @@ export function createHubApi(transport: HubTransport = browserTransport) {
     const response = await transport.fetch(`${prefix}${path}`, { ...init, credentials: 'same-origin', headers: { ...headers, ...(init.headers as Record<string, string> | undefined) } })
     let body: (T & { error?: string; offline?: boolean }) | undefined
     try { body = await response.json() as T & { error?: string; offline?: boolean } } catch { body = undefined }
-    if (!response.ok) throw new HubApiError(response.status, body?.error ?? `HTTP ${response.status}`, body?.offline === true || body?.error === 'OFFLINE')
+    if (!response.ok) {
+      // The worker answers a request made without network with 503 OFFLINE, and one made with
+      // network but no Studio with 503 SERVICE_UNREACHABLE. Each becomes its own sentence; a raw
+      // code must never reach a person.
+      const offline = body?.offline === true || body?.error === 'OFFLINE'
+      const unreachable = body?.error === 'SERVICE_UNREACHABLE'
+      if (offline) throw new HubApiError(response.status, pwa.offline.blockedAction, true)
+      if (unreachable) throw new HubApiError(response.status, pwa.offline.serviceUnreachable, false)
+      throw new HubApiError(response.status, body?.error ?? `HTTP ${response.status}`, false)
+    }
     return body as T
   }
   const hub = <T>(path: string, init?: RequestInit) => call<T>(HUB_API_PREFIX, path, init)
   return {
+    requestApproval: (action: ApprovalAction, subjectId: string) => hub<ApprovalTicket>('/approvals', { method: 'POST', body: JSON.stringify({ action, subject_id: subjectId }) }),
     smtp: () => hub<SmtpState>('/smtp'),
     configureSmtp: (secretRef: string, approval?: Approval) => hub<{ configured: true; secret_ref: string; tier: PolicyTier }>('/smtp', { method: 'POST', body: JSON.stringify({ secret_ref: secretRef, approval }) }),
     testSmtp: (to: string, approval?: Approval) => hub<SmtpTest>('/smtp/test', { method: 'POST', body: JSON.stringify({ to, approval }) }),

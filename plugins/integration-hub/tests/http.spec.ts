@@ -102,14 +102,20 @@ describe('integration hub HTTP boundary', () => {
     expect((await (await request('/integrations')).json() as { integrations: unknown[] }).integrations).toHaveLength(1)
 
     expect(await (await request('/smtp')).json()).toEqual({ configured: false, secret_ref: null, tier: 'T2' })
-    expect((await request('/smtp', { method: 'POST', body: '{"secret_ref":"smtp://user:pass@host","approval":{"approved":true,"tier":"T2"}}' })).status).toBe(400)
-    // T2 over HTTP: without the confirmation in the body the request is refused with 403, and the vault is never touched.
+    expect((await request('/smtp', { method: 'POST', body: '{"secret_ref":"smtp://user:pass@host","approval":{"approval_id":"x"}}' })).status).toBe(400)
+    // T2 over HTTP: without an approval the request is refused with 403, and the vault is never touched.
     const unconfirmed = await request('/smtp', { method: 'POST', body: '{"secret_ref":"DZ23_APP_SMTP"}' })
     expect(unconfirmed.status).toBe(403)
-    const approval = '"approval":{"approved":true,"tier":"T2"}'
-    const configured = await request('/smtp', { method: 'POST', body: `{"secret_ref":"DZ23_APP_SMTP",${approval}}` })
+    // An id the client invented is worth nothing: the server only honours what it issued itself.
+    expect((await request('/smtp', { method: 'POST', body: '{"secret_ref":"DZ23_APP_SMTP","approval":{"approval_id":"inventado"}}' })).status).toBe(403)
+    const issue = async (action: string, subject: string) => {
+      const ticket = await (await request('/approvals', { method: 'POST', body: JSON.stringify({ action, subject_id: subject }) })).json() as { approval_id: string; tier: string }
+      expect(ticket.tier).toBe('T2')
+      return `"approval":{"approval_id":${JSON.stringify(ticket.approval_id)}}`
+    }
+    const configured = await request('/smtp', { method: 'POST', body: `{"secret_ref":"DZ23_APP_SMTP",${await issue('smtp.configured', 'smtp')}}` })
     expect(await configured.json()).toEqual({ configured: true, secret_ref: 'DZ23_APP_SMTP', tier: 'T2' })
-    const test = await request('/smtp/test', { method: 'POST', body: `{"to":"pessoa@example.test",${approval}}` })
+    const test = await request('/smtp/test', { method: 'POST', body: `{"to":"pessoa@example.test",${await issue('smtp.tested', 'smtp')}}` })
     expect(test.status).toBe(200)
     expect(await test.json()).toMatchObject({ result: 'NOT_EXECUTED' })
 

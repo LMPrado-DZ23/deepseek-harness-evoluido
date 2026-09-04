@@ -118,10 +118,17 @@ describe('StorageBackupScheduler', () => {
     scheduler.start()
     await vi.advanceTimersByTimeAsync(BACKUP_MIN_INTERVAL_MS * 2 + 10)
     await scheduler.stop()
-    expect(runs).toBe(4)
+    // Two ticks fired, and `stop()` drained whatever was still owed. The exact count depends on
+    // whether a copy finished before the next tick — ticks that overlap COALESCE on purpose (own
+    // test below), so the contract is "it kept backing up, bounded by one run per tick", not a
+    // fixed number that would only hold if the disk were always fast enough.
+    const afterTicks = runs
+    expect(afterTicks).toBeGreaterThan(1)
+    expect(afterTicks).toBeLessThanOrEqual(4)
+    // Stopped means stopped: no further tick produces anything.
     await vi.advanceTimersByTimeAsync(BACKUP_MIN_INTERVAL_MS * 2)
-    expect(runs).toBe(4)
     await scheduler.stop()
+    expect(runs).toBe(afterTicks)
   })
 
   it('refuses an interval under five minutes, a non-positive keep and an unsafe label', () => {
@@ -147,5 +154,36 @@ describe('StorageBackupScheduler', () => {
     const result = await scheduler.runOnce()
     await writeFile(result.file!, '{"tampered":true}\n', 'utf8')
     expect((await verifyBackupFile(result.file!)).matches).toBe(false)
+  })
+
+  it('coalesces overlapping ticks into one waiting run instead of growing a queue', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dz23-backup-coalesce-'))
+    let running = 0
+    let peak = 0
+    let runs = 0
+    const scheduler = new StorageBackupScheduler({
+      directory, label: 'coalesce', intervalMs: BACKUP_MIN_INTERVAL_MS, keep: 5,
+      runner: {
+        run: async () => {
+          runs += 1
+          running += 1
+          peak = Math.max(peak, running)
+          await new Promise(resolvePromise => setTimeout(resolvePromise, 40))
+          running -= 1
+          return { sha256: 'a'.repeat(64), bytes: 1, records: 0, domains: 0 }
+        },
+      },
+      suffix: () => String(runs).padStart(6, '0'),
+    })
+    try {
+      // Ten ticks while one copy is running: one runs now, ONE waits, the other eight join it.
+      const results = await Promise.all(Array.from({ length: 10 }, () => scheduler.runOnce()))
+      expect(peak).toBe(1)
+      expect(runs).toBe(2)
+      expect(results.every(result => result.status === 'created')).toBe(true)
+    } finally {
+      await scheduler.stop()
+      await rm(directory, { recursive: true, force: true })
+    }
   })
 })

@@ -1,7 +1,7 @@
 import { ArrowLeft, Download, Mail, Plug, ScrollText } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import t from '../i18n/hub.pt-BR.json'
-import { createHubApi, HubApiError, type ExportRecord, type HubApi, type HubEvent, type Integration, type ProjectSummary, type SmtpState } from './hubApi'
+import { createHubApi, HubApiError, type ApprovalAction, type ExportRecord, type HubApi, type HubEvent, type Integration, type ProjectSummary, type SmtpState } from './hubApi'
 import { actionLabel, approvalNote, approvalPrompt, enableExplanation, exportable, fill, formatBytes, formatDate, kindLabel, outcomeLabel, tierLabel, verificationLabel, type Approval, type PolicyTier } from './presentation'
 import './hub.css'
 
@@ -12,7 +12,7 @@ type Notice = { kind: 'ok' | 'error' | 'info'; text: string } | null
  * approval the person did not click: the tier comes from the server, and the
  * text says, in plain words, what agreeing to it means.
  */
-type Pending = { tier: PolicyTier; what: string; run(approval: Approval): Promise<void> } | null
+type Pending = { tier: PolicyTier; what: string; approvalId: string; run(approval: Approval): Promise<void> } | null
 
 function ConfirmStep({ pending, busy, onCancel, onConfirm }: { pending: Pending; busy: boolean; onCancel(): void; onConfirm(): void }) {
   if (pending === null) return null
@@ -75,11 +75,17 @@ function SmtpSection({ api, state, onChange, notify, report }: SectionProps & { 
   const [busy, setBusy] = useState(false)
   const [pending, setPending] = useState<Pending>(null)
   const run = async (task: () => Promise<void>) => { setBusy(true); notify(null); try { await task(); await onChange() } catch (error) { report(error) } finally { setBusy(false) } }
+  const ask = async (action: ApprovalAction, subjectId: string, what: string, act: (approval: Approval) => Promise<void>) => {
+    try {
+      const ticket = await api.requestApproval(action, subjectId)
+      setPending({ tier: ticket.tier, what, approvalId: ticket.approval_id, run: act })
+    } catch (error) { report(error) }
+  }
   const confirm = () => {
     const action = pending
     if (action === null) return
     setPending(null)
-    void run(() => action.run({ approved: true, tier: action.tier }))
+    void run(() => action.run({ approval_id: action.approvalId }))
   }
   return <section className="hub-card" aria-labelledby="hub-smtp-title">
     <div className="hub-card-heading"><Mail aria-hidden="true" /><h2 id="hub-smtp-title">{t.smtp.title}</h2></div>
@@ -90,8 +96,9 @@ function SmtpSection({ api, state, onChange, notify, report }: SectionProps & { 
       event.preventDefault()
       notify(null)
       const ref = secretRef.trim()
-      // Configuring the app's e-mail is T2: the person confirms first, and only then does anything reach the server.
-      setPending({ tier: state?.tier ?? 'T2', what: t.confirm.smtpSave, run: async approval => { await api.configureSmtp(ref, approval); notify({ kind: 'ok', text: t.smtp.saved }) } })
+      // The SERVER decides the tier and issues the approval; the panel only shows what it said and,
+      // if the person agrees, hands the id back. A confirmation the client invents is worth nothing.
+      void ask('smtp.configured', 'smtp', t.confirm.smtpSave, async approval => { await api.configureSmtp(ref, approval); notify({ kind: 'ok', text: t.smtp.saved }) })
     }}>
       <label htmlFor="hub-smtp-ref">{t.smtp.refLabel}</label>
       <input id="hub-smtp-ref" value={secretRef} onChange={event => setSecretRef(event.target.value)} placeholder={t.smtp.refPlaceholder} autoComplete="off" spellCheck={false} />
@@ -101,10 +108,10 @@ function SmtpSection({ api, state, onChange, notify, report }: SectionProps & { 
       event.preventDefault()
       notify(null)
       const to = recipient.trim()
-      setPending({ tier: state?.tier ?? 'T2', what: t.confirm.smtpTest, run: async approval => {
+      void ask('smtp.tested', 'smtp', t.confirm.smtpTest, async approval => {
         const result = await api.testSmtp(to, approval)
         notify({ kind: result.result === 'SENT' ? 'ok' : 'info', text: `${result.result === 'SENT' ? t.smtp.testSent : t.smtp.testNotExecuted}: ${result.message}` })
-      } })
+      })
     }}>
       <label htmlFor="hub-smtp-to">{t.smtp.testLabel}</label>
       <input id="hub-smtp-to" type="email" value={recipient} onChange={event => setRecipient(event.target.value)} placeholder={t.smtp.testPlaceholder} />
@@ -121,18 +128,25 @@ function IntegrationsSection({ api, integrations, channel, onChange, notify, rep
   const [pending, setPending] = useState<Pending>(null)
   const visible = useMemo(() => (integrations ?? []).filter(value => value.kind !== 'smtp'), [integrations])
   const run = async (task: () => Promise<void>) => { setBusy(true); notify(null); try { await task(); await onChange() } catch (error) { report(error) } finally { setBusy(false) } }
+  const ask = async (action: ApprovalAction, subjectId: string, what: string, act: (approval: Approval) => Promise<void>) => {
+    try {
+      const ticket = await api.requestApproval(action, subjectId)
+      setPending({ tier: ticket.tier, what, approvalId: ticket.approval_id, run: act })
+    } catch (error) { report(error) }
+  }
   const enable = (item: Integration) => {
     const tier = item.requires_approval_tier
-    // T0/T1 go straight through; T2/T3 wait for the person, with the tier the server asked for.
+    // T0/T1 go straight through; T2/T3 ask the server for an approval first.
     if (tier === null || tier === undefined) return void run(() => api.setEnabled(item.integration_id, true).then(() => undefined))
     notify(null)
-    setPending({ tier, what: fill(t.integrations.needsApproval, { tier: tierLabel(tier) }), run: approval => api.setEnabled(item.integration_id, true, approval).then(() => undefined) })
+    void ask('integration.enabled', item.integration_id, fill(t.integrations.needsApproval, { tier: tierLabel(tier) }),
+      approval => api.setEnabled(item.integration_id, true, approval).then(() => undefined))
   }
   const confirm = () => {
     const action = pending
     if (action === null) return
     setPending(null)
-    void run(() => action.run({ approved: true, tier: action.tier }))
+    void run(() => action.run({ approval_id: action.approvalId }))
   }
   return <section className="hub-card" aria-labelledby="hub-integrations-title">
     <div className="hub-card-heading"><Plug aria-hidden="true" /><h2 id="hub-integrations-title">{t.integrations.title}</h2></div>
