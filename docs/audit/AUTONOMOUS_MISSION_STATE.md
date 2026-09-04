@@ -1,112 +1,70 @@
 # Estado da missão autônoma DZ23 STUDIO
 
-- Missão: `M1-M6`
-- Estado: `EXECUTING`
-- Etapa atual: `M2 — Prompt-to-App fatia 3`
-- Branch: `codex/missao-m2-prompt-to-app-final`
-- Base imutável: `ec92f29f7398d1ac69dc6201e5fb8e6bccfa60b9`
-- Harness upstream preservado: `6c705be1ce6774a000d061da41d1823b03a3d42c`
-- Último checkpoint: `2026-09-04 America/Sao_Paulo`
+- `mission_id`: `M1-M6-finalizacao-2026-09-04`
+- `objective`: integrar e provar M1-M6 com segurança, sem push, PR, deploy ou exclusões não autorizadas
+- `state`: `FIXING`
+- `iteration`: `2026-09-04.4`
+- `started_at`: `2026-09-04 America/Sao_Paulo`
+- `heartbeat_at`: `2026-09-04T12:20:00-03:00`
+- `last_progress_at`: `2026-09-04T12:20:00-03:00`
+- `branch`: `codex/p30-policy-foundation`
+- `head`: `50cd12b2b35d5dd274fe6648d8a8dea097762d64`
+- `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c`
 
-## Objetivo
+## Critérios de aceite
 
-Entregar, em branches empilhadas e sem push/deploy, as etapas M1 a M6: preview seguro, categorias finais do Prompt-to-App, Postgres operacional, PWA móvel, Integration Hub/download e gate Windows.
+- nenhum blocker interno, CRITICAL ou HIGH conhecido;
+- M3, M4 e M5 compostos sobre a principal após auditoria independente;
+- M6 Windows e M6.1 portabilidade/imagem implementados e provados no ambiente disponível;
+- gates de tipo, build, testes, i18n, domínios, licenças e artefatos aprovados em base limpa;
+- estados externos continuam honestos: celular físico, cinco leigos, piloto, SMTP real e release público não são simulados;
+- upstream preservado e nenhum push, PR, deploy, segredo ou exclusão não autorizada.
 
-## Concluído antes desta missão
+## Progresso comprovado
 
-- Trust plane v1 integrado.
-- `storage-postgres` P31-A integrado em estado BETA.
-- Composição de agentes e rotas da fase 3 integrada.
-- Prompt-to-App fatias 1 e 2 integradas no commit ancestral `58f77d3`.
-- Branch histórica `codex/p32-fatia2-prompt-to-app` restaurada em `58f77d3` após ter sido removida sem autorização.
+- Trust plane, Postgres P31-A, agentes/rotas e Prompt-to-App fatias 1/2 integrados.
+- M1 preview seguro e M2 categorias/Golden Set incorporados na história principal.
+- Recuperação de geração, limites do builder e governador de jobs/builds integrados até `d819314`.
+- Bundle transportável `outputs/CODEX_BASE_d819314.bundle` verificado, SHA-256 `413EBE67B82BB0CF9A9169CAD0FB4B48CE2C91BFD58B539D3E7415A763F836BE`.
+- Shell inicial M6 registrado em `50cd12b`, mas ainda em correção; não é GO.
+- Claude entregou M3+M4+M5 em `5749d6f`; auditoria Codex encontrou 14 regressões e impediu merge. Claude está regenerando uma ponta cumulativa sobre `d819314`.
 
-## Regras vinculantes
+## Tarefas atuais e propriedade de arquivos
 
-- Não editar o Harness upstream.
-- Não instalar CA raiz, alterar trust store/hosts, ativar MITM/TPROXY ou liberar egress do preview.
-- Não excluir branch ou worktree sem autorização expressa do Prado.
-- Não fazer push, PR, deploy, piloto ou release público.
-- Só o Codex integra; cada etapa aguarda parecer independente do Claude antes de merge na branch principal.
-- Subagentes ficam limitados a auditoria, revisão, testes, provas e documentação, com propriedade exclusiva de arquivos.
-- Capability states permanecem honestos (`BETA`, `NOT_EXECUTED`, `NOT_VALIDATED`, etc.).
-- Divisão conjunta: Codex constrói M1-M6; Claude não implementa os mesmos
-  pacotes, revisa os checkpoints e reexecuta os gates em ambiente independente.
+- `preview capacity`: subagente Codex; somente `plugins/preview/**` e lockfile se inevitável. Primeiro corte NO-GO por cinco falhas de concorrência/recovery.
+- `retention`: subagente Codex; somente `plugins/runtime-governor/src/{index,retention}.ts` e teste. Primeiro corte NO-GO por segurança de remoção, TOCTOU, quota e recovery.
+- `M6 Windows shell`: subagente Codex; somente `deploy/windows/**` e `tests/m6/**`. Primeiro corte NO-GO por confinement, health, symlink e prova simulada insuficiente.
+- `M3+M4+M5`: Claude; nova ponta única sobre `d819314`, corrigindo `M345_5749D6F_CODEX_PARECER.md` e os achados próprios de 15:05Z.
+- `integration/M6.1`: Codex principal após os quatro trabalhos acima passarem revisão.
 
-## Etapas
+## Testes e auditorias atuais
 
-- [x] M1 — código final em `codex/missao-m1-preview-fix@17ac4d7`, parecer independente `GO`; preservado sem merge enquanto a integração aguarda a ordem sequencial
-- [x] M2 — código provado em `0bf62fe`: sete categorias BETA e Golden Set 18/18; checkpoint aguardando parecer independente e sem merge
-- [ ] M3 — Postgres operacional, migração e backup/restore
-- [ ] M4 — PWA e preparação móvel
-- [ ] M5 — Integration Hub, SMTP configurável e download de protótipo
-- [ ] M6 — gate Windows integrado
+- preview primeiro corte: implementação reportou 168/168 em ext4, mas auditoria independente = `NO-GO`; reteste pendente.
+- retention primeiro corte: auditoria independente = `NO-GO`; reteste pendente.
+- M6 shell primeiro corte: teste Node e parser PowerShell passaram, mas auditoria independente = `NO-GO`; reteste pendente.
+- M3+M4+M5 `5749d6f`: não integrado; parecer = `NEEDS_FIX`.
+- tentativa de materializar dependências no Windows falhou com `EACCES` em links absolutos para WSL; M6.1 deve eliminar essa não portabilidade em base limpa, sem tratar o verde antigo como prova.
 
-## Checkpoint M1 preservado
+## Bloqueadores externos que não param o restante
 
-- Supervisor Docker e proxy mínimo construídos com autoridade derivada no
-  servidor, sockets Unix, runtime em `NetworkMode=none`, proxy somente no
-  loopback compartilhado, artefato imutável e cleanup idempotente.
-- Lifecycle tenant-aware liga somente run `PASSED` ao artefato materializado,
-  serializa start/stop/admissão, exige readiness e mantém cleanup incompleto em
-  estado bloqueante e observável.
-- Gateway fecha método, host, cabeçalhos e corpo; ticket entra somente por
-  `postMessage`; respostas Unix acima do limite são recusadas sem exceção não
-  tratada no stream.
-- Prova física final no digest `sha256:0de6fc8f…97ff2`: runtime e proxy reais
-  endurecidos, apenas `lo`, zero rotas externas, host/metadata/egress bloqueados,
-  login local e cleanup sem sobreviventes. Caddy atual e Compose combinados
-  validados offline.
-- Chromium em contêiner sem rede: 3/3 jornadas `PASS`, incluindo login HTTP
-  local, ticket fora da URL, cookie host-only, ataque por cookie duplicado,
-  iframe, código local e encerramento.
-- Domínios locais corrigidos para `studio.dz23.localhost` e
-  `p-<id>.dz23.localhost`; origens permanecem isoladas e o cookie
-  `SameSite=Strict` funciona no iframe sem CA/TLS/hosts.
-- Gates em WSL/ext4: typecheck, builds, i18n (265 chaves), escopo de domínios,
-  Caddy, Compose e `git diff --check` aprovados. Suíte global: 659 aprovados e
-  18 integrações Postgres puladas; cobertura 94,24/90,04/95,44/97,11%. Revisão
-  adversarial independente: `GO`, sem incompatibilidade concreta remanescente;
-  validação focada independente 79/79 `PASS`.
-- M1 autoriza `PREVIEW_OK` somente para o protótipo local verificado. HTTPS,
-  celular, Tailscale, operação prolongada e experiência leiga continuam sem prova.
+- licença open source exata e política de marca;
+- destino do remoto;
+- SMTP real;
+- domínio/Tailscale e celular físico;
+- cinco participantes leigos e piloto.
 
-## Achado reservado para M3
+## Próxima ação
 
-O Claude verificou que os oito domínios Prompt-to-App não estão roteados para
-PostgreSQL em `deploy/harness/edge.patch.yml`; `studio_design_specs` também não
-está no patch de prova e a lista do script de runtime está desatualizada. M3
-deve gerar/verificar rotas a partir de `scripts/studio-domain-specs.ts` e falhar
-se qualquer domínio Studio cair no backend JSON em produção.
+1. receber e auditar as três correções Codex;
+2. receber e auditar a ponta cumulativa Claude;
+3. integrar por commits verificáveis, sem aceitar exclusões de `plugins/*/lib/**`;
+4. executar M6.1: pin oficial transportável, workspace/lock sem caminhos absolutos, runtime agregador, imagem multiarch e SBOM;
+5. rodar gates completos serializados em WSL/ext4 e auditoria final independente.
 
-## Checkpoint M2 preservado
+## Instruções de retomada
 
-- As sete categorias estão disponíveis na interface com linguagem BETA honesta.
-- O Golden Set exige exatamente 18 briefs/18 critérios, schema estrito, IDs
-  únicos, hashes das fixtures e separação entre pipeline técnico e critérios de
-  produto.
-- Agenda, dashboard e área autenticada possuem geradores e provas deterministas;
-  a política de código gerado bloqueia rede, runtime ativo, caminhos reservados,
-  componentes dinâmicos, dados sensíveis e arquivos não autorizados.
-- Golden Set no clone limpo ext4: 18/18 pipelines técnicos, 184 checks, zero
-  categoria não implementada; zero critério de negócio promovido e 54
-  corretamente `NOT_AUTOMATED`; LLM real `NOT_EXECUTED`.
-- Gates no código `0bf62fe`: typecheck e 12 builds `PASS`; 725 testes `PASS`,
-  18 integrações PostgreSQL puladas; cobertura 94,36/90,02/95,80/97,10%; UI
-  5/5, i18n 277 e domínios `PASS`.
-- Duas falhas de runtime encontradas pelo Golden foram fechadas: parameter
-  properties incompatíveis com Node strip-only e classificação do conflito
-  único da agenda no driver `node:sqlite`.
-- Relatório canônico: `golden-set/reports/2026-09-04T07-53-26-115Z-deterministic.*`.
-
-## Próxima ação exata
-
-Fixar a documentação e o relatório do M2 em commit, criar artefato auditável,
-executar P37 sobre o arquivo extraído e entregar ao Claude para revisão
-independente. Nenhuma branch é integrada ou removida antes da autorização
-correspondente.
-
-## Bloqueios externos reservados ao usuário
-
-- Escolha final da licença open source e política de marca.
-- Local do remoto privado.
-- SMTP real, retenção da pesquisa e recrutamento das cinco pessoas leigas.
+Executar `git status`, `git rev-parse HEAD`, ler este arquivo e os finais de
+`outputs/CODEX_OUTBOX.md`, `outputs/CLAUDE_INBOX.md` e
+`outputs/HANDOFF_CODEX_CLAUDE.md`. Não resetar a árvore compartilhada. Consultar
+os agentes vivos antes de editar `plugins/preview/**`,
+`plugins/runtime-governor/**`, `deploy/windows/**` ou `tests/m6/**`.
