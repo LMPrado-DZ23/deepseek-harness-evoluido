@@ -57,7 +57,7 @@ da verificação, um `README` em linguagem comum e um `.env.example` só com **n
 variáveis. Ficam de fora os seus dados (`data/`), arquivos `.env`, bancos SQLite, códigos
 capturados e chaves. Além dessa lista, só entram tipos de arquivo conhecidos: um tipo em que
 ninguém pensou fica de fora em vez de embarcar por acidente. **Nada fica de fora em segredo** —
-quando alguma coisa fica de fora, ou entra no pacote sem ter sido conferida, o pacote traz um
+quando alguma coisa fica de fora, o pacote traz um
 `EXCLUIDOS.txt` com esses nomes (só os nomes; o conteúdo não sai do seu computador). Esse arquivo
 só é criado quando há o que listar: **se ele não estiver no pacote, é porque nada ficou de fora e
 nada entrou sem conferência** — não é sinal de que a lista falhou.
@@ -66,8 +66,10 @@ Antes de fechar o pacote, o Studio confere se algum arquivo tem cara de senha ou
 (bloco de chave, chave de provedor, ou qualquer endereço que carregue usuário e senha — banco de
 dados, servidor de e-mail, FTP, o que for). Se achar, **o pacote não é
 gerado** e a tela diz qual arquivo — é melhor recusar do que entregar um segredo dentro de um
-`.zip`. Vale dizer o limite com honestidade: essa conferência não lê arquivos binários e não
-promete achar todo segredo possível; ela fecha as formas que dá para reconhecer sem errar.
+`.zip`. Arquivos binários opacos (imagem, fonte, WebAssembly, módulo nativo ou vídeo) não podem ser
+conferidos por essa varredura e, por isso, **não entram** no pacote; aparecem em `EXCLUIDOS.txt`.
+A conferência também não promete achar todo segredo possível: ela fecha as formas que dá para
+reconhecer sem errar.
 
 A tela mostra o **SHA-256** do pacote; o download traz o mesmo valor no cabeçalho
 `x-dz23-sha256` para conferência. Pedir o pacote de novo para a mesma verificação devolve o

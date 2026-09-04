@@ -65,9 +65,9 @@ ligá-la, e levar o protótipo verificado consigo.
 4. **Pacote do protótipo reproduzível e sem dados.** Só projeto em
    `VERIFIED_PROTOTYPE` com a última run `PASSED` cujos arquivos ainda existam
    **dentro da pasta de execuções** (`runsRoot`, o mesmo padrão do
-   prompt-to-app): o caminho da run é resolvido por `realpath` e recusado se
-   cair fora, se for link simbólico para fora ou se subir por `..`, **antes de
-   qualquer leitura**. Ids e nomes de organização/espaço que viram caminho são
+   prompt-to-app): cada segmento da run é aberto a partir do descritor da raiz;
+   o empacotador recebe o descritor final, não reabre um caminho. Trocas de
+   ancestral, links simbólicos e subida por `..` são recusados. Ids e nomes de organização/espaço que viram caminho são
    validados como um único segmento (sem separador, sem `..`, sem controle).
    O ZIP (escritor/leitor próprio, sem dependência, timestamps fixos, bits
    Unix de tipo de arquivo) leva `app/**` do `.next/standalone`,
@@ -75,7 +75,7 @@ ligá-la, e levar o protótipo verificado consigo.
    `README.md` em linguagem comum e `.env.example` só com nomes. Ficam de fora:
    `data/` e caches **na raiz do app** (o `data/` de bibliotecas entra),
    `.env*`, `*.sqlite*`, `studio-capture.json`, `studio-auth-state.json`,
-   `*.pem`, `*.key`, links simbólicos e `.git`. Além dessa lista de proibidos,
+   `*.pem`, `*.key`, links simbólicos, binários opacos e `.git`. Além dessa lista de proibidos,
    vale uma **lista de permitidos por extensão**: um tipo de arquivo em que
    ninguém pensou fica de fora em vez de embarcar. Nada sai em silêncio — todo
    arquivo ou pasta que ficou de fora é listado **por nome** (nunca por
@@ -83,8 +83,7 @@ ligá-la, e levar o protótipo verificado consigo.
    **varredura fail-closed**: bloco de chave privada, chave de provedor com
    prefixo próprio (AWS, GitHub, Slack, Stripe/OpenAI) ou string de conexão com
    senha **derrubam a exportação inteira** (`SECRET_DETECTED`, 409), dizendo
-   qual arquivo. O limite honesto: arquivos binários não são varridos, e a
-   varredura não promete achar todo segredo possível — ela fecha as formas que
+   qual arquivo. O limite honesto: a varredura não promete achar todo segredo possível — ela fecha as formas que
    não têm falso positivo. Orçamento de 200 MB → recusa em palavras (413). Mesma run e mesmos bytes → o mesmo registro é devolvido, sem
    arquivo gêmeo. Arquivo em `~/.dz23-studio/exports/<org>/<tenant>/` com 0600;
    o caminho nunca sai pela API; download com `Content-Disposition` saneado e
@@ -136,10 +135,9 @@ ligá-la, e levar o protótipo verificado consigo.
   encontrado" justamente nos arquivos onde um bundle esconde um. Agora a leitura é por fatias com
   sobreposição. Cópias comprimidas de texto (`.gz`, `.br`) passaram a ser **abertas sob um teto de
   64 MB e varridas pelo que realmente são**; a que não abre é excluída e nomeada. O que continua sem
-  conferência é o binário opaco (imagem, fonte, `.wasm`, `.node`, vídeo): ele entra no pacote com o
-  nome listado em `EXCLUIDOS.txt` sob "entraram sem conferência", em vez de passar como se tivesse
-  sido conferido. Bloquear binário seria entregar um aplicativo quebrado — o pior resultado, porque
-  empurra a pessoa a desligar a exportação inteira.
+  conferência é o binário opaco (imagem, fonte, `.wasm`, `.node`, vídeo): ele é excluído e seu nome
+  aparece em `EXCLUIDOS.txt`. A v1 prefere um pacote explicitamente incompleto a transportar bytes
+  que não conseguiu inspecionar; ativos binários exigirão uma política própria antes de entrar.
 - **A pasta `data/` do aplicativo não viaja em profundidade nenhuma** (antes só na raiz do
   standalone: um app uma pasta abaixo levava o próprio banco e os códigos capturados). Sob
   `node_modules` a regra não vale — ali `data/` é da dependência, e tirá-la quebraria o aplicativo.
