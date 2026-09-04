@@ -15,6 +15,7 @@ type Notice = { kind: 'ok' | 'error' | 'info'; text: string } | null
  * cancelling leaves no ticket and no audit event behind on the server.
  */
 type Pending = ConfirmStepModel | null
+const defaultHubApi = createHubApi()
 
 function ConfirmStep({ pending, busy, onCancel, onConfirm }: { pending: Pending; busy: boolean; onCancel(): void; onConfirm(): void }) {
   if (pending === null) return null
@@ -32,7 +33,7 @@ function ConfirmStep({ pending, busy, onCancel, onConfirm }: { pending: Pending;
  * application stays untouched. Every server refusal is shown in words; the
  * panel never claims a state the server did not report.
  */
-export function HubPanel({ api = createHubApi(), homeHref = '/studio/' }: { api?: HubApi; homeHref?: string }) {
+export function HubPanel({ api = defaultHubApi, homeHref = '/studio/' }: { api?: HubApi; homeHref?: string }) {
   const [smtp, setSmtp] = useState<SmtpState | null>(null)
   const [integrations, setIntegrations] = useState<Integration[] | null>(null)
   const [channel, setChannel] = useState<'stable' | 'dev'>('stable')

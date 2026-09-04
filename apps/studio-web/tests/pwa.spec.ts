@@ -180,7 +180,7 @@ test('mostra notificação local quando a criação termina com a aba em segundo
   // the page's continuation run before the event is dispatched.
   await page.evaluate(async () => { await navigator.serviceWorker.ready })
   await page.evaluate(() => {
-    window.dispatchEvent(new CustomEvent('dz23:generation-finished', { detail: { state: 'VERIFIED_PROTOTYPE' } }))
+    window.dispatchEvent(new CustomEvent('dz23:generation-finished', { detail: { state: 'VERIFIED_PROTOTYPE', runId: 'run-verified' } }))
     window.dispatchEvent(new CustomEvent('dz23:generation-finished', { detail: { state: 'SOMETHING_ELSE' } }))
   })
   const shown = await page.evaluate(() => (window as unknown as { __dz23Notifications: Array<{ title: string; body: string }> }).__dz23Notifications)

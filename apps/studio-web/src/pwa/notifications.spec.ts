@@ -19,6 +19,7 @@ describe('local generation notifications', () => {
     expect(notificationBodyFor('TESTS_FAILED')).toBe(t.notifications.failed)
     expect(notificationBodyFor('CANCELLED')).toBe(t.notifications.cancelled)
     expect(notificationBodyFor('BLOCKED_EXTERNAL')).toBe(t.notifications.blocked)
+    expect(notificationBodyFor('INTERRUPTED')).toBe(t.notifications.failed)
     expect(notificationBodyFor('SOMETHING_ELSE')).toBeUndefined()
     expect(notificationBodyFor(undefined)).toBeUndefined()
     for (const value of Object.values(t.notifications)) expect(value).not.toMatch(/\bpront[oa]s?\b/iu)

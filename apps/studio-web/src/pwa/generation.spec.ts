@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { GENERATION_ACCEPTED_STATUS, postGeneration, startGeneration, csrfTokenFrom } from './generation'
+import { GENERATION_ACCEPTED_STATUS, postGeneration, startGeneration } from './generation'
 import { OFFLINE_ERROR_CODE, SERVICE_UNREACHABLE_ERROR_CODE } from './policy'
 import t from '../i18n/pwa.pt-BR.json'
 
@@ -46,27 +46,20 @@ describe('the project only says it is creating after the run was accepted', () =
     expect((await startGeneration(async () => { throw new TypeError('x') }, () => false, fallback)).message).toBe(t.offline.blockedAction)
   })
 
-  it('sends the POST with the CSRF header and reads the status, which is what 202 means', async () => {
+  it('uses the shared authenticated request and reads the status, which is what 202 means', async () => {
     const calls: Array<[string, RequestInit | undefined]> = []
-    const result = await postGeneration('p-1', {
-      cookie: () => 'a=b; dz23_studio_csrf=tok%20en; c=d',
-      fetch: (async (url: string, init?: RequestInit) => {
-        calls.push([url, init])
-        return new Response(JSON.stringify({ run_id: 'run-9' }), { status: 202, headers: { 'content-type': 'application/json' } })
-      }) as unknown as typeof fetch,
+    const result = await postGeneration('p-1', async (path, init) => {
+      calls.push([path, init])
+      return { status: 202, body: { run_id: 'run-9' } }
     })
     expect(result).toEqual({ status: 202, body: { run_id: 'run-9' } })
-    expect(calls[0]?.[0]).toBe('/api/studio/apps/projects/p-1/generate')
-    expect((calls[0]?.[1]?.headers as Record<string, string>)['x-dz23-csrf']).toBe('tok en')
+    expect(calls[0]?.[0]).toBe('/projects/p-1/generate')
     expect(calls[0]?.[1]?.method).toBe('POST')
-    expect(csrfTokenFrom('')).toBe('')
+    expect(calls[0]?.[1]?.body).toBe('{}')
   })
 
   it('survives a body that is not JSON, so the status alone decides', async () => {
-    const result = await postGeneration('p-1', {
-      cookie: () => '',
-      fetch: (async () => new Response('<html>502</html>', { status: 502 })) as unknown as typeof fetch,
-    })
+    const result = await postGeneration('p-1', async () => ({ status: 502, body: null }))
     expect(result).toEqual({ status: 502, body: null })
     const outcome = await startGeneration(async () => result, () => true, fallback)
     expect(outcome.state).toBe('PLAN_APPROVED')

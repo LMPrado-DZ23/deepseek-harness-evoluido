@@ -3,6 +3,8 @@ export type ProjectSummary = { project_id: string; name: string; state: string }
 
 const CSRF_STORAGE_KEY = 'dz23.studio.csrf.v1'
 
+export type ApiResponse<T> = { status: number; body: T | null }
+
 async function csrf(): Promise<string> {
   const stored = window.sessionStorage.getItem(CSRF_STORAGE_KEY)
   if (stored !== null && stored !== '') return stored
@@ -14,7 +16,7 @@ async function csrf(): Promise<string> {
   return body.csrf_token
 }
 
-export async function api<T>(path: string, init: RequestInit = {}, acceptDeclaredResult = false): Promise<T> {
+async function request<T>(path: string, init: RequestInit): Promise<{ response: Response; body: (T & { error?: string }) | null }> {
   const csrfToken = init.body === undefined ? '' : await csrf()
   const bodyHeaders = init.body === undefined ? {} : typeof init.body === 'string'
     ? { 'content-type': 'application/json', 'x-dz23-csrf': csrfToken }
@@ -24,9 +26,25 @@ export async function api<T>(path: string, init: RequestInit = {}, acceptDeclare
     credentials: 'same-origin',
     headers: { ...bodyHeaders, ...init.headers },
   })
-  const body = await response.json() as T & { error?: string }
+  const body = await response.json().catch(() => null) as (T & { error?: string }) | null
+  return { response, body }
+}
+
+/**
+ * Request variant for protocols whose HTTP status is part of the contract.
+ * Authentication, tenant and role still come exclusively from the server-side
+ * session cookie; the browser contributes only the CSRF token issued by it.
+ */
+export async function apiResponse<T>(path: string, init: RequestInit = {}): Promise<ApiResponse<T>> {
+  const { response, body } = await request<T>(path, init)
+  return { status: response.status, body }
+}
+
+export async function api<T>(path: string, init: RequestInit = {}, acceptDeclaredResult = false): Promise<T> {
+  const { response, body } = await request<T>(path, init)
   if (!response.ok && !(acceptDeclaredResult && typeof body === 'object' && body !== null && 'state' in body)) {
-    throw new Error(body.error ?? `HTTP ${response.status}`)
+    throw new Error(body?.error ?? `HTTP ${response.status}`)
   }
+  if (body === null) throw new Error(`HTTP ${response.status}`)
   return body
 }

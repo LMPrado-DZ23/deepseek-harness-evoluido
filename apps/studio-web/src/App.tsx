@@ -1,9 +1,15 @@
-import { Bell, CircleHelp, Eye, FolderKanban, Home, LineChart, Menu, Settings, Sparkles, UserRound } from 'lucide-react'
+import { Bell, CircleHelp, Eye, FolderKanban, Home, LineChart, Menu, Plug, Settings, Sparkles, UserRound } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { api, type HealthState } from './api'
+import { api, apiResponse, type HealthState } from './api'
 import type { Category } from './categories'
+import { HUB_PATH } from './hub/presentation'
+import hub from './i18n/hub.pt-BR.json'
 import t from './i18n/pt-BR.json'
 import { currentStepIndex, permanentTruthKind, privacyNotice, type ProjectUiState } from './presentation'
+import { apiFailureMessage, apiFailureText, type ApiCallKind } from './pwa/apiFailure'
+import { GENERATION_REJECTED_STATE, postGeneration, startGeneration } from './pwa/generation'
+import { NotificationOptIn } from './pwa/NotificationOptIn'
+import { dispatchGenerationFinished } from './pwa/notifications'
 
 type DesignPreset = 'modern' | 'professional' | 'colorful' | 'brand'
 type Question = { id: 'audience' | 'goal' | 'content' | 'sensitive-confirmation'; text: string }
@@ -45,7 +51,10 @@ export function App() {
   const [admissionTicket, setAdmissionTicket] = useState<string | null>(null)
   const [previewCodes, setPreviewCodes] = useState<VerificationCode[]>([])
   const previewFrame = useRef<HTMLIFrameElement>(null)
-  useEffect(() => { void api<HealthState>('/health').then(value => { setHealth(value); setRoute(value.route) }).catch(() => undefined) }, [])
+  useEffect(() => { void api<HealthState>('/health').then(value => { setHealth(value); setRoute(value.route) }).catch((cause: unknown) => {
+    const message = apiFailureMessage(cause, navigator.onLine, 'read')
+    if (message !== undefined) setError(message)
+  }) }, [])
   useEffect(() => {
     if (preview === null) return
     const previewOrigin = new URL(preview.url).origin
@@ -89,14 +98,17 @@ export function App() {
             refreshPreviewAdmission(response.preview.url)
           }
         })
-        .catch(() => { if (active) setError(t.preview.heartbeatFailed) })
+        .catch((cause: unknown) => { if (active) setError(apiFailureText(cause, navigator.onLine, 'mutation', t.preview.heartbeatFailed)) })
     }
     heartbeat()
     const timer = setInterval(heartbeat, 30_000)
     return () => { active = false; clearInterval(timer) }
   }, [projectId, preview?.preview_id, preview?.state])
   const ready = useMemo(() => brief.trim().length >= 10, [brief])
-  async function safely(action: () => Promise<void>) { setError(''); try { await action() } catch (cause) { setError(cause instanceof Error ? cause.message : t.health.attention) } }
+  async function safely(action: () => Promise<void>, call: ApiCallKind = 'mutation') {
+    setError('')
+    try { await action() } catch (cause) { setError(apiFailureText(cause, navigator.onLine, call, t.health.attention)) }
+  }
   async function create() {
     if (!ready) { setError(t.idea.empty); return }
     await safely(async () => {
@@ -138,19 +150,31 @@ export function App() {
   }
   async function generate() {
     if (projectId === null) return
+    setError('')
+    const started = await startGeneration(
+      () => postGeneration(projectId, (path, init) => apiResponse(path, init)),
+      () => navigator.onLine,
+      t.health.attention,
+    )
+    if (started.runId === null) {
+      setProjectState(GENERATION_REJECTED_STATE)
+      setError(started.message)
+      return
+    }
     setResult(null)
     setProjectState('GENERATING')
-    await safely(async () => {
-      const response = await api<{ run_id: string }>(`/projects/${projectId}/generate`, { method: 'POST', body: '{}' })
-      await pollProject(response.run_id)
-    })
+    await safely(() => pollProject(started.runId), 'read')
   }
   async function pollProject(runId: string) {
     if (projectId === null) return
     for (let poll = 0; poll < 1_800; poll++) {
       const details = await api<ProjectDetails>(`/projects/${projectId}`)
-      setProjectState(details.project.state)
       const current = details.current_run
+      if (current?.operation_id !== runId) {
+        await new Promise(resolve => setTimeout(resolve, 250))
+        continue
+      }
+      setProjectState(details.project.state)
       if (current?.operation_id === runId && ['PASSED', 'FAILED', 'BLOCKED_EXTERNAL', 'BUDGET_EXCEEDED', 'CANCELLED'].includes(current.state)) {
         const state: PipelineResult['state'] = details.project.state === 'INTERRUPTED' ? 'INTERRUPTED'
           : current.state === 'PASSED' ? 'VERIFIED_PROTOTYPE'
@@ -159,6 +183,7 @@ export function App() {
               : current.stage === 'test' ? 'TESTS_FAILED' : 'BUILD_FAILED'
         setResult({ state, attempts: current.attempt, message: current.failure_code ?? (state === 'VERIFIED_PROTOTYPE' ? t.truth.verified : t.verification.failure), checks: current.acceptance_checks, ...(current.verification_codes === undefined ? {} : { verificationCodes: current.verification_codes }) })
         if (state === 'BLOCKED_EXTERNAL') setProjectState('PLAN_APPROVED')
+        dispatchGenerationFinished(window, { state, runId })
         return
       }
       await new Promise(resolve => setTimeout(resolve, 250))
@@ -191,8 +216,9 @@ export function App() {
   return <div className="shell">
     <aside className="sidebar"><img src="/studio/brand/dz23-studio-logo.jpg" alt={t.brand} className="brand" /><nav aria-label={t.brand}>
       <Nav icon={<Home />} label={t.nav.home} active /><Nav icon={<FolderKanban />} label={t.nav.projects} /><Nav icon={<LineChart />} label={t.nav.progress} /><Nav icon={<Eye />} label={t.nav.result} />
+      <a className="nav" href={HUB_PATH}><Plug aria-hidden="true" /><span>{hub.navLabel}</span></a>
     </nav><div className="sidebar-footer"><button aria-label={t.nav.help}><CircleHelp /></button><button aria-label={t.nav.settings}><Settings /></button></div></aside>
-    <section className="workspace"><header className="topbar"><button className="mobile-menu" aria-label={t.mobile.menu}><Menu /></button><Status health={health} /><div className="top-actions"><Bell /><UserRound /></div></header>
+    <section className="workspace"><header className="topbar"><button className="mobile-menu" aria-label={t.mobile.menu}><Menu /></button><Status health={health} /><div className="top-actions"><NotificationOptIn /><Bell /><UserRound /></div></header>
       <main className="canvas"><section className="idea-panel">
         {projectState === null ? <Idea brief={brief} setBrief={setBrief} privacy={privacy} setPrivacy={setPrivacy} route={route ?? health.route} ready={ready} chooseSuggestion={chooseSuggestion} create={create}
           designPreset={designPreset} setDesignPreset={setDesignPreset} brandColor={brandColor} setBrandColor={setBrandColor}

@@ -64,24 +64,13 @@ export async function startGeneration(
 }
 
 /**
- * The POST itself. It lives here, and not behind `api.ts`, because `api.ts`
- * returns only the parsed body and the rule above needs the status code: 202
- * is what "the run exists" means, and no other status may be read as such.
+ * The POST itself. The injected request is the shared authenticated API
+ * transport, which preserves the HTTP status while keeping session, tenant,
+ * role and CSRF authority outside this presentation helper.
  */
-export function csrfTokenFrom(cookieHeader: string): string {
-  const row = cookieHeader.split(';').map(value => value.trim()).find(value => value.startsWith('dz23_studio_csrf='))
-  return row === undefined ? '' : decodeURIComponent(row.slice(row.indexOf('=') + 1))
-}
-
-export const STUDIO_API_PREFIX = '/api/studio/apps'
-
-export async function postGeneration(projectId: string, deps: { fetch: typeof fetch; cookie: () => string }): Promise<GenerationHttpResult> {
-  const response = await deps.fetch(`${STUDIO_API_PREFIX}/projects/${projectId}/generate`, {
-    method: 'POST',
-    credentials: 'same-origin',
-    body: '{}',
-    headers: { 'content-type': 'application/json', 'x-dz23-csrf': csrfTokenFrom(deps.cookie()) },
-  })
-  const body = await response.json().catch(() => null) as unknown
-  return { status: response.status, body }
+export async function postGeneration(
+  projectId: string,
+  request: (path: string, init: RequestInit) => Promise<GenerationHttpResult>,
+): Promise<GenerationHttpResult> {
+  return request(`/projects/${projectId}/generate`, { method: 'POST', body: '{}' })
 }

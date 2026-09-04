@@ -2,9 +2,9 @@ import t from '../i18n/pwa.pt-BR.json'
 
 /** Event the interface dispatches on `window` when a generation finishes (any final state). */
 export const GENERATION_FINISHED_EVENT = 'dz23:generation-finished'
-export type GenerationFinalState = 'VERIFIED_PROTOTYPE' | 'BUILD_FAILED' | 'TESTS_FAILED' | 'BLOCKED_EXTERNAL' | 'CANCELLED'
+export type GenerationFinalState = 'VERIFIED_PROTOTYPE' | 'BUILD_FAILED' | 'TESTS_FAILED' | 'BLOCKED_EXTERNAL' | 'CANCELLED' | 'INTERRUPTED'
 
-const FINAL_STATES: readonly GenerationFinalState[] = ['VERIFIED_PROTOTYPE', 'BUILD_FAILED', 'TESTS_FAILED', 'BLOCKED_EXTERNAL', 'CANCELLED']
+const FINAL_STATES: readonly GenerationFinalState[] = ['VERIFIED_PROTOTYPE', 'BUILD_FAILED', 'TESTS_FAILED', 'BLOCKED_EXTERNAL', 'CANCELLED', 'INTERRUPTED']
 
 /** Message for a known final state; unknown values (arbitrary event detail) produce no notification. */
 export function notificationBodyFor(state: unknown): string | undefined {

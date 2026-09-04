@@ -152,11 +152,14 @@ const jobs = new PromptToAppJobService({
   createId: () => `operation-${++id}`,
 })
 const host = 'studio.dz23.localhost:4179'
+const pwaProxyHost = '127.0.0.1:4179'
+const allowedHosts = [host, pwaProxyHost]
+const allowedOrigins = [`http://${host}`, 'http://127.0.0.1:4180']
 const identityHandler = createIdentityHttpHandler({
   service: identity,
   bindHost: '127.0.0.1',
-  allowedHosts: [host],
-  allowedOrigins: [`http://${host}`],
+  allowedHosts,
+  allowedOrigins,
   secureCookies: false,
 })
 const previewRepository = new MemoryPreviewRepository()
@@ -199,10 +202,10 @@ const apiHandler = createPromptToAppHttpHandler({
     size_bytes: 100, width: 10, height: 10, extracted_primary: { h: 217, s: 91, l: 50 },
   }) },
   generatorFor: (actor, projectId) => new ModelCodeGenerator(model, actor, service.project(actor, projectId).privacy),
-  health: async () => ({ state: 'OK', route: 'ollama-local', builder: 'OK', disk: 'OK' }), allowedHosts: [host], allowedOrigins: [`http://${host}`],
+  health: async () => ({ state: 'OK', route: 'ollama-local', builder: 'OK', disk: 'OK' }), allowedHosts, allowedOrigins,
 })
 const webHandler = createStudioWebHandler({
-  distDirectory: resolve(root, 'apps', 'studio-web', 'dist'), identity, allowedHosts: [host],
+  distDirectory: resolve(root, 'apps', 'studio-web', 'dist'), identity, allowedHosts,
   previewFrameSources: ['http://*.dz23.localhost:4179'],
 })
 const previewForward: PreviewForwardPort = {

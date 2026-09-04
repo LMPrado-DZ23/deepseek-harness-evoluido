@@ -26,11 +26,26 @@ test('o login HTTP local grava sessão host-only sem enfraquecer o modo de servi
   expect(cookies.some(cookie => cookie.name === 'dz23_studio_csrf')).toBe(false)
 })
 
+test('abre o Integration Hub pela navegação autenticada do Studio', async ({ context, page }) => {
+  await context.addCookies([{ name: 'dz23_studio_session', value: 'e2e', url: 'http://studio.dz23.localhost:4179' }])
+  await page.goto('/studio/')
+  const link = page.getByRole('link', { name: 'Integrações' })
+  await expect(link).toHaveAttribute('href', '/studio/hub')
+  await link.click()
+  await expect(page).toHaveURL(/\/studio\/hub$/u)
+  await expect(page.getByRole('heading', { level: 1, name: 'Integrações e pacote do protótipo' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Voltar ao Studio' })).toHaveAttribute('href', '/studio/')
+})
+
 test('percorre as cinco etapas, muda privacidade e termina sem alegar publicação', async ({ context, page }) => {
   const admissionPosts: Array<{ readonly hasTicket: boolean; readonly origin: string; readonly url: string }> = []
   const requestedUrls: string[] = []
+  const mutationBodies: unknown[] = []
   page.on('request', request => {
     requestedUrls.push(request.url())
+    if (request.method() === 'POST' && new URL(request.url()).pathname.startsWith('/api/studio/apps/')) {
+      try { mutationBodies.push(request.postDataJSON()) } catch { /* uploads are binary and carry no authority fields */ }
+    }
     if (request.method() !== 'POST' || new URL(request.url()).pathname !== '/__dz23/admission') return
     const payload = request.postDataJSON() as unknown
     void request.allHeaders().then(headers => {
@@ -43,12 +58,40 @@ test('percorre as cinco etapas, muda privacidade e termina sem alegar publicaç�
   })
   await context.addCookies([
     { name: 'dz23_studio_session', value: 'e2e', url: 'http://studio.dz23.localhost:4179' },
+    { name: 'dz23_studio_csrf', value: 'csrf-e2e', url: 'http://studio.dz23.localhost:4179' },
   ])
-  await context.addInitScript(() => window.sessionStorage.setItem('dz23.studio.csrf.v1', 'csrf-e2e'))
+  await context.addInitScript(() => {
+    window.sessionStorage.setItem('dz23.studio.csrf.v1', 'csrf-e2e')
+    const shown: Array<{ title: string; body: string; tag?: string }> = []
+    let permissionRequests = 0
+    ;(window as unknown as { __dz23Notifications: typeof shown }).__dz23Notifications = shown
+    ;(window as unknown as { __dz23PermissionRequests: () => number }).__dz23PermissionRequests = () => permissionRequests
+    class FakeNotification {
+      static permission: NotificationPermission = 'default'
+      static async requestPermission(): Promise<NotificationPermission> { permissionRequests++; FakeNotification.permission = 'granted'; return 'granted' }
+      constructor(title: string, options?: NotificationOptions) { shown.push({ title, body: options?.body ?? '', ...(options?.tag === undefined ? {} : { tag: options.tag }) }) }
+    }
+    Object.defineProperty(window, 'Notification', { value: FakeNotification, configurable: true })
+    Object.defineProperty(document, 'visibilityState', { get: () => 'hidden', configurable: true })
+    Object.defineProperty(navigator.serviceWorker, 'ready', {
+      configurable: true,
+      get: () => Promise.resolve({
+        showNotification: (title: string, options?: NotificationOptions) => {
+          shown.push({ title, body: options?.body ?? '', ...(options?.tag === undefined ? {} : { tag: options.tag }) })
+          return Promise.resolve()
+        },
+      } as unknown as ServiceWorkerRegistration),
+    })
+  })
   const studioResponse = await page.goto('/studio')
   const studioPolicy = studioResponse?.headers()['content-security-policy'] ?? ''
   expect(studioPolicy).toContain('frame-src http://*.dz23.localhost:4179')
   expect(studioPolicy).toContain("frame-ancestors 'none'")
+  const notificationOptIn = page.getByRole('button', { name: 'Avisar quando a criação terminar' })
+  await expect(notificationOptIn).toBeVisible()
+  await notificationOptIn.click()
+  await expect(page.getByText('Este aparelho vai avisar quando a criação terminar.')).toBeVisible()
+  expect(await page.evaluate(() => (window as unknown as { __dz23PermissionRequests: () => number }).__dz23PermissionRequests())).toBe(1)
   await expect(page.getByRole('button', { name: 'Quero um painel para minha equipe criar, editar e excluir cadastros.' })).toBeVisible()
   await expect(page.getByText('Seus dados não são enviados para serviços externos.')).toBeVisible()
   await page.getByText('Permitir IA configurada', { exact: false }).click()
@@ -71,11 +114,23 @@ test('percorre as cinco etapas, muda privacidade e termina sem alegar publicaç�
   await expect(lastSlice).toContainText('Contato')
   expect(await lastSlice.evaluate((node, approve) => Boolean(node.compareDocumentPosition(approve as Node) & Node.DOCUMENT_POSITION_FOLLOWING), await approveButton.elementHandle())).toBe(true)
   await approveButton.click()
+  const acceptedPromise = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith('/generate'))
   await page.getByRole('button', { name: 'Iniciar criação' }).click()
+  const accepted = await acceptedPromise
+  expect(accepted.status()).toBe(202)
+  const acceptedBody = await accepted.json() as { run_id: string }
+  expect(acceptedBody.run_id).toMatch(/^operation-/u)
   await expect(page.getByText('VERIFIED_PROTOTYPE')).toBeVisible({ timeout: 20_000 })
   await expect(page.getByText('não está publicado nem disponível para outras pessoas', { exact: false }).first()).toBeVisible()
   await expect(page.getByText('page:Início: Passou')).toBeVisible()
   await expect(page.getByText('A navegação deve ser simples.: Não verificado automaticamente')).toBeVisible()
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __dz23Notifications: unknown[] }).__dz23Notifications.length)).toBe(1)
+  expect(await page.evaluate(() => (window as unknown as { __dz23Notifications: Array<{ title: string; body: string; tag?: string }> }).__dz23Notifications)).toEqual([
+    { title: 'DZ23 STUDIO', body: 'Seu protótipo foi verificado.', tag: `dz23-generation-${acceptedBody.run_id}` },
+  ])
+  await page.evaluate(({ runId }) => window.dispatchEvent(new CustomEvent('dz23:generation-finished', { detail: { state: 'VERIFIED_PROTOTYPE', runId } })), { runId: acceptedBody.run_id })
+  expect(await page.evaluate(() => (window as unknown as { __dz23Notifications: unknown[] }).__dz23Notifications.length)).toBe(1)
+  expect(JSON.stringify(mutationBodies)).not.toMatch(/org_id|tenant_id|bootstrap_owner|"role"/u)
 
   const openPreview = page.getByRole('button', { name: 'Ver meu protótipo' })
   await expect(openPreview).toBeVisible()
