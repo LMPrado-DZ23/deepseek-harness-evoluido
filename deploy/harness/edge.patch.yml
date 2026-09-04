@@ -33,6 +33,10 @@
     trustedHosts:
       - !!js process.env.DZ23_PUBLIC_HOST
 
+- id: dz23-studio-preview
+  config:
+    capacityMode: edge
+
 - id: dz23-studio-identity
   config:
     rpId: !!js process.env.DZ23_RP_ID

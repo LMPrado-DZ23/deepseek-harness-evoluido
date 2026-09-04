@@ -4,6 +4,7 @@ import {
   MemoryCapacityGovernor,
   type CapacityGovernor,
   type CapacityLimits,
+  type DistributedCapacityGovernor,
 } from '@dz23-studio/runtime-governor'
 import { describe, expect, it, vi } from 'vitest'
 import type { PreviewAdmission, PreviewRecord } from '../src/model.ts'
@@ -773,13 +774,14 @@ function limitsForPreview(global: number, perTenant: number, perProject: number)
   }
 }
 
-function distributedGovernor(base: CapacityGovernor): CapacityGovernor {
+function distributedGovernor(base: CapacityGovernor & Pick<DistributedCapacityGovernor, 'takeover'>): DistributedCapacityGovernor {
   return {
     acquireBundle: request => base.acquireBundle(request),
     heartbeat: (reference, ttlMs) => base.heartbeat(reference, ttlMs),
     release: reference => base.release(reference),
     reconcile: () => base.reconcile(),
     snapshot: () => base.snapshot(),
+    takeover: request => base.takeover(request),
   }
 }
 
@@ -1026,7 +1028,7 @@ describe('StudioPreviewService capacity leases', () => {
     ])
   })
 
-  it('claims the same live owner lease and fencing token after reboot with a persistent backend', async () => {
+  it('takes over the same live owner lease with a new fencing token after reboot', async () => {
     const repository = new MemoryRepository()
     const base = new MemoryCapacityGovernor({ limits: limitsForPreview(1, 1, 1) })
     const capacity = distributedGovernor(base)
@@ -1047,8 +1049,35 @@ describe('StudioPreviewService capacity leases', () => {
     await expect(rebooted.service.reconcile()).resolves.toEqual({ stoppedOrphans: 0, failedRecords: 0 })
     expect(rebooted.runtime.stop).not.toHaveBeenCalled()
     expect((await base.snapshot()).leases).toEqual([
-      expect.objectContaining({ leaseId: leaseBefore.leaseId, fencingToken: leaseBefore.fencingToken }),
+      expect.objectContaining({ leaseId: leaseBefore.leaseId, fencingToken: expect.any(Number) }),
     ])
+    expect((await base.snapshot()).leases[0]!.fencingToken).toBeGreaterThan(leaseBefore.fencingToken)
+  })
+
+  it('takes over and releases a detached lease while cleaning a terminal runtime after restart', async () => {
+    const repository = new MemoryRepository()
+    const base = new MemoryCapacityGovernor({ limits: limitsForPreview(1, 1, 1) })
+    const capacity = distributedGovernor(base)
+    const original = createHarness({ repository, capacity, capacityMode: 'team' })
+    const started = await ready(original)
+    const stored = repository.previews().find(item => item.preview_id === started.preview.preview_id)!
+    await repository.putPreview({ ...stored, state: 'STOPPED', health: 'DOWN', stopped_at: stored.ready_at, stop_reason: 'reconciled' })
+    let live = true
+    const rebooted = createHarness({
+      repository,
+      capacity,
+      capacityMode: 'team',
+      runtime: {
+        listManaged: vi.fn(() => Promise.resolve(live
+          ? [{ runtimeRef: 'container:preview-1', previewId: started.preview.preview_id }]
+          : [])),
+        stop: vi.fn(() => { live = false; return Promise.resolve() }),
+      },
+    })
+
+    await expect(rebooted.service.reconcile()).resolves.toEqual({ stoppedOrphans: 1, failedRecords: 0 })
+    expect(rebooted.runtime.stop).toHaveBeenCalledOnce()
+    expect(await base.snapshot()).toMatchObject({ leases: [] })
   })
 
   it('keeps zombie runtime capacity quarantined after preview expiry until inventory proves absence', async () => {

@@ -5,7 +5,7 @@ import type { Domain, KvTable } from '@deepseek-ai/dsh-storage-domain'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import { registerPromptToAppHttpExtension, hashTree, PREVIEW_ARTIFACT_RELATIVE_PATH, type PromptToAppActor } from '@dz23-studio/prompt-to-app'
 import { roleAllows } from '@dz23-studio/policy'
-import type { CapacityGovernor } from '@dz23-studio/runtime-governor'
+import type { CapacityGovernor, DistributedCapacityGovernor } from '@dz23-studio/runtime-governor'
 import { createPreviewProjectHttpExtension } from './http.js'
 import { createPreviewGatewayHttpHandler } from './gateway.js'
 import { t } from './i18n.js'
@@ -64,7 +64,10 @@ export interface StudioPreviewRuntime {
 }
 
 declare module '@deepseek-ai/cordis' {
-  interface Context { studioPreview: StudioPreviewRuntime }
+  interface Context {
+    studioCapacity: DistributedCapacityGovernor
+    studioPreview: StudioPreviewRuntime
+  }
 }
 
 class DomainPreviewRepository implements PreviewRepository {
@@ -99,12 +102,13 @@ export async function apply(ctx: Context, config: PreviewPluginConfig = {}): Pro
   const repository = new DomainPreviewRepository(previewsDomain.table('previews'), admissionsDomain.table('admissions'))
   const supervisor = config.supervisor?.enabled === true ? configuredSupervisor(config.supervisor) : undefined
   const runtime = config.runtime ?? supervisor?.runtime ?? new UnconfiguredRuntime()
+  const capacity = config.capacity ?? ctx.get('studioCapacity')
   const identity = ctx.studioIdentity.service
   let cleanupFailureAt: string | null = null
   const service = new StudioPreviewService({
     repository,
     runtime,
-    ...(config.capacity === undefined ? {} : { capacity: config.capacity }),
+    ...(capacity === undefined ? {} : { capacity }),
     capacityMode: config.capacityMode ?? (supervisor === undefined ? 'single-process' : 'edge'),
     ...(config.ttlSeconds === undefined ? {} : { ttlSeconds: config.ttlSeconds }),
     publicPort,
