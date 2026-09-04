@@ -53,6 +53,8 @@ describe('scheduling generator', () => {
     expect(generated).toContain("session.role==='owner'&&row.state==='pending'")
     expect(generated).toContain('date<new Date().toISOString().slice(0,10)')
     expect(generated).toContain('min={today}')
+    expect(generated).toContain('constructor(database:DatabaseSync){this.database=database}')
+    expect(generated).not.toContain('constructor(private readonly database')
     expect(generated).not.toMatch(/name=["'{]state/u)
     expect(generated).not.toContain("formData.get('state')")
   })

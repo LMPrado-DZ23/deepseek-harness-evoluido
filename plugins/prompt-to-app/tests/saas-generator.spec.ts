@@ -49,6 +49,8 @@ describe('authenticated SaaS generator', () => {
     ])
     const source = layer.files.map(file => file.content).join('\n')
     expect(source).toContain('owner_user_id TEXT NOT NULL REFERENCES auth_users(id)')
+    expect(source).toContain('constructor(database:DatabaseSync){this.database=database}')
+    expect(source).not.toContain('constructor(private readonly database')
     expect(source).toContain("requireFormSession(formData,['owner','member'])")
     expect(source).toContain('owner_user_id=?')
     expect(source).toContain("readonly status=404")

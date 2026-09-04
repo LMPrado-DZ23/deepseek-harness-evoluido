@@ -133,7 +133,7 @@ export function generateSaasLayer(spec: AppSpecV1, category: StudioProjectCatego
 
   const files: GeneratedFile[] = [
     { path: 'src/db/saas-migrations.ts', content: renderMigration() },
-    { path: 'src/server/saas/repository.ts', content: renderRepository() },
+    { path: 'src/server/saas/repository.ts', content: renderNodeCompatibleRepository() },
     { path: 'src/server/actions/saas-records.ts', content: renderActions(databaseEntities) },
     { path: 'src/components/generated/saas-panel.tsx', content: renderPanel(databaseEntities) },
     { path: 'src/components/generated/index.ts', content: "export { default as SaasPanel } from './saas-panel'\n" },
@@ -255,6 +255,13 @@ export class SaasRepository{
 function renderActions(entities: readonly Extract<AppSpecV1['entities'][number], { kind: 'database' }>[]): string {
   const fields = Object.fromEntries(entities.map(entity => [dataIdentifier(entity.name), entity.fields.map(field => ({ name: dataIdentifier(field.name), type: field.type, required: field.required, ...(field.options === undefined ? {} : { options: field.options }) }))]))
   return `'use server'\nimport { revalidatePath } from 'next/cache'\nimport { requireFormSession } from '../../auth/runtime'\nimport { openDatabase } from '../../db/client'\nimport { migrateSaas } from '../../db/saas-migrations'\nimport { SaasRepository } from '../saas/repository'\nconst fields=${JSON.stringify(fields)} as const\nfunction text(formData:FormData,name:string):string{const value=formData.get(name);return typeof value==='string'?value.trim():''}\nfunction entity(formData:FormData):keyof typeof fields{const value=text(formData,'entity');if(!Object.hasOwn(fields,value))throw new Error('UNKNOWN_ENTITY');return value as keyof typeof fields}\nfunction fieldValue(formData:FormData,field:{readonly name:string;readonly type:string;readonly required:boolean;readonly options?:readonly string[]}):unknown{const raw=text(formData,field.name);if(field.required&&raw==='')throw new Error('REQUIRED_FIELD');if(raw.length>2000)throw new Error('FIELD_TOO_LARGE');if(raw==='')return '';if(field.type==='number'){const value=Number(raw);if(!Number.isFinite(value))throw new Error('INVALID_NUMBER');return value}if(field.type==='email'&&!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/u.test(raw))throw new Error('INVALID_EMAIL');if(field.type==='date'&&!/^\\d{4}-\\d{2}-\\d{2}$/u.test(raw))throw new Error('INVALID_DATE');if(field.type==='phone'&&!/^[+() 0-9-]{8,24}$/u.test(raw))throw new Error('INVALID_PHONE');if(field.type==='selection'&&!field.options?.includes(raw))throw new Error('INVALID_SELECTION');return raw}\nfunction data(formData:FormData,kind:keyof typeof fields):unknown{const value=Object.fromEntries(fields[kind].map(field=>[field.name,fieldValue(formData,field)]));if(Buffer.byteLength(JSON.stringify(value),'utf8')>16384)throw new Error('SAAS_PAYLOAD_TOO_LARGE');return value}\nexport async function createSaasRecord(formData:FormData):Promise<void>{const session=await requireFormSession(formData,['owner','member']);const kind=entity(formData);const database=openDatabase();try{migrateSaas(database);new SaasRepository(database).create(kind,data(formData,kind),{userId:session.userId,role:session.role})}finally{database.close()}revalidatePath('/')}\nexport async function updateSaasRecord(formData:FormData):Promise<void>{const session=await requireFormSession(formData,['owner','member']);const kind=entity(formData);const database=openDatabase();try{migrateSaas(database);new SaasRepository(database).update(text(formData,'record_id'),data(formData,kind),{userId:session.userId,role:session.role})}finally{database.close()}revalidatePath('/')}\nexport async function deleteSaasRecord(formData:FormData):Promise<void>{const session=await requireFormSession(formData,['owner','member']);const database=openDatabase();try{migrateSaas(database);new SaasRepository(database).delete(text(formData,'record_id'),{userId:session.userId,role:session.role})}finally{database.close()}revalidatePath('/')}\n`
+}
+
+function renderNodeCompatibleRepository(): string {
+  return renderRepository().replace(
+    'constructor(private readonly database:DatabaseSync){}',
+    'private readonly database:DatabaseSync;constructor(database:DatabaseSync){this.database=database}',
+  )
 }
 
 function renderPanel(entities: readonly Extract<AppSpecV1['entities'][number], { kind: 'database' }>[]): string {

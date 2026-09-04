@@ -160,7 +160,7 @@ export function generateSchedulingLayer(spec: AppSpecV1): GeneratedSchedulingLay
   }
   const files: GeneratedFile[] = [
     { path: 'src/db/scheduling-migration.ts', content: renderMigration(names) },
-    { path: 'src/server/scheduling/repository.ts', content: renderRepository(names) },
+    { path: 'src/server/scheduling/repository.ts', content: renderNodeCompatibleRepository(names) },
     { path: 'src/server/actions/scheduling.ts', content: renderActions(names, contract.slots) },
     { path: 'src/components/generated/scheduling-panel.tsx', content: renderPanel(names, contract) },
   ]
@@ -216,6 +216,13 @@ function renderRepository(names: { table: string; date: string; slot: string }):
 
 function renderActions(names: { date: string; slot: string }, slots: readonly string[]): string {
   return `'use server'\nimport { revalidatePath } from 'next/cache'\nimport { requireFormSession } from '../../auth/runtime'\nimport { openDatabase } from '../../db/client'\nimport { migrateScheduling } from '../../db/scheduling-migration'\nimport { SchedulingRepository } from '../scheduling/repository'\nconst slots=new Set(${JSON.stringify(slots)} as readonly string[])\nfunction text(formData:FormData,name:string):string{const value=formData.get(name);return typeof value==='string'?value.trim():''}\nexport async function createReservation(formData:FormData):Promise<void>{const session=await requireFormSession(formData,['owner','member']);const date=text(formData,${JSON.stringify(names.date)});const slot=text(formData,${JSON.stringify(names.slot)});if(!/^\\d{4}-\\d{2}-\\d{2}$/u.test(date)||!slots.has(slot))throw new Error(${JSON.stringify(tGeneratedApp('scheduling.invalidDate'))});if(date<new Date().toISOString().slice(0,10))throw new Error(${JSON.stringify(tGeneratedApp('scheduling.pastDate'))});const database=openDatabase();try{migrateScheduling(database);new SchedulingRepository(database).create({date,slot,createdBy:session.userId})}finally{database.close()}revalidatePath('/')}\nasync function changeReservation(formData:FormData,target:'confirmed'|'cancelled'):Promise<void>{const session=await requireFormSession(formData,target==='confirmed'?['owner']:['owner','member']);const database=openDatabase();try{migrateScheduling(database);new SchedulingRepository(database).transition(text(formData,'id'),target,{userId:session.userId,role:session.role})}finally{database.close()}revalidatePath('/')}\nexport async function confirmReservation(formData:FormData):Promise<void>{return changeReservation(formData,'confirmed')}\nexport async function cancelReservation(formData:FormData):Promise<void>{return changeReservation(formData,'cancelled')}\n`
+}
+
+function renderNodeCompatibleRepository(names: { table: string; date: string; slot: string }): string {
+  return renderRepository(names).replace(
+    'constructor(private readonly database:DatabaseSync){}',
+    'private readonly database:DatabaseSync;constructor(database:DatabaseSync){this.database=database}',
+  )
 }
 
 function renderPanel(names: { date: string; slot: string }, contract: SchedulingContract): string {
