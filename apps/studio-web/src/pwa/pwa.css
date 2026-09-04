@@ -20,3 +20,7 @@ body.pwa-offline { padding-bottom: 3.5rem; }
   .pwa-notify { max-width: 11rem; padding: 0.35rem 0.55rem; font-size: 0.78rem; }
   .pwa-notify-state { max-width: 11rem; font-size: 0.78rem; }
 }
+
+/* A screen restored from the copy saved on this device says so, at the top, above everything. */
+.pwa-cached-shell { position: fixed; inset-inline: 0; top: 0; z-index: 60; padding: 0.6rem 1rem; padding-top: calc(0.6rem + env(safe-area-inset-top)); background: #6b4d0f; color: #fff; font-size: 0.9rem; text-align: center; }
+.pwa-cached-shell[hidden] { display: none; }

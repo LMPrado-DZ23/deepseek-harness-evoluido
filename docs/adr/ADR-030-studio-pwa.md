@@ -76,12 +76,45 @@ reservada à M1 (preview) do Codex.
    por quê. O POST precisou sair de `api.ts` porque `api.ts` devolve só o
    corpo, e a regra depende do código de status.
 
+11. **Sem rede e sem a cópia salva, uma página em português.** Quando o
+   navegador joga fora o Cache Storage (o que ele faz sozinho sob pressão de
+   armazenamento, mantendo o worker registrado) e a rede cai, não há casca
+   para servir. O worker respondia `new Response('', { status: 503 })` — sem
+   corpo e sem tipo — e o Chrome transformava isso em
+   `net::ERR_HTTP_RESPONSE_CODE_FAILURE`: a tela de erro do próprio navegador,
+   em inglês, sem `document.body`. Era pior do que não ter service worker
+   nenhum, porque sem ele a pessoa teria visto a página "sem internet" do
+   navegador no idioma dela. Agora o worker devolve uma página HTML mínima em
+   pt-BR (`offlineShellHtml()` em `policy.ts`, texto de
+   `src/i18n/pwa.pt-BR.json`, `content-type: text/html; charset=utf-8`) que
+   diz que o aparelho está sem internet, que a cópia do Studio não está mais
+   aqui, e o que fazer. O texto entra no `sw.js` porque o Vite embute o JSON
+   na build do worker — nada é importado em tempo de execução (o `sw.js`
+   continua sem `import`, e isso é testado).
+12. **Uma casca vinda do cache diz que é uma cópia salva.** O servidor manda
+   `cache-control: no-store` em toda resposta de `/studio/` e responde `401`
+   quando a sessão acabou; o worker ignorava as duas coisas. Sessão encerrada
+   + aparelho offline devolvia a interface autenticada inteira, e a única
+   coisa dita à pessoa era "você está sem internet" — quando a verdade era
+   "sua sessão terminou". Não é vazamento (nenhum dado de projeto é cacheado,
+   `/api/` nunca é cacheado, e não há `localStorage`, `sessionStorage` nem
+   `indexedDB` em lugar nenhum de `apps/studio-web/src` ou `plugins/*/src`):
+   é um estado que ninguém consegue entender, e num aparelho compartilhado a
+   próxima pessoa vê o Studio "aberto". Agora: (a) o worker marca a origem da
+   casca em `/studio/__shell-source` dentro do próprio Cache Storage — única
+   forma de a página saber, porque uma página não lê os cabeçalhos da própria
+   navegação — e acrescenta `x-dz23-shell-source: cache` à resposta para quem
+   inspeciona; (b) `registerStudioPwa()` lê essa marca e mostra o aviso
+   `.pwa-cached-shell` com o texto `offline.cachedShell`, separado da faixa de
+   offline porque as duas coisas são diferentes e podem ser verdade ao mesmo
+   tempo; (c) um `401` em `/studio/` apaga todo cache `dz23-studio-shell-*`,
+   que é o fim de sessão que existe hoje neste produto; (d) `forgetSavedShell()`
+   é o gancho para um botão de sair — a página avisa o worker
+   (`dz23:shell-logout`), ele apaga os caches e confirma; sem worker, a própria
+   página apaga. Não há botão de sair no Studio hoje: `NOT_PRESENT`.
+
 ## Limites verdadeiros
 
-A casca em cache é servida a quem abrir o navegador sem rede mesmo depois
-de a sessão expirar ou ser revogada: é só a interface estática (sem dado de
-projeto, `/api/` nunca cacheado, respostas 401 nunca cacheadas), mas o
-"recusa a interface sem sessão" do `plugins/studio-web` só vale com rede.
 Sem push, sem sincronização em segundo plano, sem cache de dados: **não há
 fila**. Uma ação bloqueada é dita como bloqueada — o que a pessoa digitou
 continua na tela e ela pode tentar de novo —, nunca como algo que será enviado
@@ -90,3 +123,21 @@ em Android/Chrome real e em iOS (`apple-touch-icon` presente; Safari não emite
 `beforeinstallprompt`) não foram executadas em aparelho físico:
 `NOT_EXECUTED`. O preview no celular depende da M1 (HTTPS em domínio real) e
 segue `NOT_EXECUTED` com o texto do próprio cartão de preview.
+
+## O que continua em aberto
+
+**`skipWaiting()` + `clients.claim()` com o `activate` apagando o cache
+anterior.** Uma versão nova ativa embaixo de uma aba já aberta e remove do
+cache os assets que aquela aba ainda poderia pedir. Isso **não pode falhar
+hoje**: a interface é construída como **um único pedaço**, sem `import()`
+dinâmico, então uma aba em execução já carregou tudo o que vai precisar. O dia
+em que o bundle for dividido — uma rota preguiçosa, qualquer `import()` — isso
+deixa de ser verdade e vira defeito real. Não foi "consertado": inventar agora
+o rastreio de clientes por versão seria acrescentar um mecanismo que nenhum
+teste consegue fazer falhar. Em vez disso ficou uma **guarda que cai no dia
+exato em que a condição chegar**: o teste "a casca continua sendo um unico
+pedaco" (`apps/studio-web/tests/pwa.spec.ts`) lê `dist/assets` depois da build
+e exige um único `.js` sem `import(` — a mensagem de falha diz o que fazer
+então (manter o cache da versão anterior até o último cliente dela sair, ou
+parar de reivindicar clientes). Estado: `NOT_PRESENT` (a condição que tornaria
+o defeito alcançável não existe nesta build).

@@ -1,5 +1,7 @@
+import { readdirSync, readFileSync } from 'node:fs'
 import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { Socket } from 'node:net'
+import { resolve } from 'node:path'
 import pwa from '../src/i18n/pwa.pt-BR.json' with { type: 'json' }
 import { expect, test, type BrowserContext } from '@playwright/test'
 
@@ -196,4 +198,89 @@ test('mostra notificação local quando a criação termina com a aba em segundo
     { title: 'DZ23 STUDIO', body: pwa.notifications.cancelled },
     { title: 'DZ23 STUDIO', body: pwa.notifications.cancelled },
   ])
+})
+
+test('sem rede e sem a copia salva, mostra uma pagina em pt-BR em vez da tela de erro do Chrome', async ({ context, page }) => {
+  await signIn(context)
+  await page.goto('/studio/')
+  await expect.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker?.controller)), { timeout: 15_000 }).toBe(true)
+  // What the browser itself does under storage pressure: it throws the Cache Storage away and keeps
+  // the worker registered. Before the fix the worker then answered an EMPTY 503 and Chrome showed
+  // net::ERR_HTTP_RESPONSE_CODE_FAILURE — its own error screen, in English, with no document.body.
+  await page.evaluate(async () => { for (const name of await caches.keys()) await caches.delete(name) })
+  expect(await page.evaluate(async () => (await caches.keys()).length)).toBe(0)
+  await killProxy()
+  await page.reload()
+
+  // A real document, in the person's language, that says what happened and what to do.
+  expect(await page.evaluate(() => document.documentElement.lang)).toBe('pt-BR')
+  expect(await page.evaluate(() => Boolean(document.body))).toBe(true)
+  const text = await page.evaluate(() => document.body.innerText)
+  expect(text).toContain(pwa.offline.shellUnavailable.title)
+  expect(text).toContain(pwa.offline.shellUnavailable.body)
+  expect(text).toContain(pwa.offline.shellUnavailable.retry)
+  // And it is not the Studio pretending to be open: the interface is not there.
+  expect(await page.locator('.brand').count()).toBe(0)
+})
+
+test('a casca servida do cache se identifica como copia salva, e some quando a sessao termina', async ({ context, page }) => {
+  await signIn(context)
+  await page.goto('/studio/')
+  await expect.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker?.controller)), { timeout: 15_000 }).toBe(true)
+  await page.reload()
+  // With a live session the screen is what the server just sent, and nothing extra is said.
+  await expect(page.locator('.pwa-cached-shell')).toBeHidden()
+  expect(await page.evaluate(async () => (await caches.match('/studio/__shell-source'))?.text())).toBe('network')
+
+  // The session ends and the device goes offline BEFORE the worker can learn about it — the exact
+  // sequence the reviewer reproduced. The interface used to come back with nothing to distinguish it
+  // from a signed-in session, and the person was told "you are offline" when the truth was "your
+  // session ended".
+  await context.clearCookies()
+  await killProxy()
+  await page.reload()
+  await expect(page.getByRole('img', { name: 'DZ23 STUDIO' })).toBeVisible({ timeout: 20_000 })
+  await expect(page.locator('.pwa-cached-shell')).toBeVisible()
+  await expect(page.locator('.pwa-cached-shell')).toHaveText(pwa.offline.cachedShell)
+  expect(await page.evaluate(async () => (await caches.match('/studio/__shell-source'))?.text())).toBe('cache')
+
+  // Network back, session still over: the server answers 401 and the copy of the authenticated
+  // interface saved on this device goes away with the session.
+  await startProxy()
+  const denied = await page.goto('/studio/')
+  expect(denied?.status()).toBe(401)
+  expect(await denied?.text()).toContain('Entre para continuar.')
+  await expect.poll(() => page.evaluate(async () => (await caches.keys()).filter(name => name.startsWith('dz23-studio-shell-')).length), { timeout: 10_000 }).toBe(0)
+
+  // And offline from now on there is no interface to come back: only the honest page.
+  await killProxy()
+  await page.reload()
+  expect(await page.evaluate(() => document.body.innerText)).toContain(pwa.offline.shellUnavailable.title)
+  expect(await page.locator('.brand').count()).toBe(0)
+})
+
+/**
+ * NOT a fix: a tripwire, and it is written down as one (ADR-030, "o que continua em aberto").
+ *
+ * The worker calls `skipWaiting()` on install and `clients.claim()` on activate, and `activate`
+ * deletes the previous version's cache. So a new version activates under a tab that is already open
+ * and removes from the cache the assets that tab might still ask for. It cannot hurt anybody today:
+ * the interface is built as ONE chunk with no dynamic `import()`, so a tab that is already running
+ * has already loaded everything it will ever need. The day the bundle is split — a lazy route, a
+ * `import()` anywhere — that stops being true, and a person with an open tab gets a chunk request
+ * that the cache no longer has and the server no longer serves.
+ *
+ * Deciding it now, with no way to make it fail, would be inventing a mechanism nobody can test. So
+ * this guard fails on the exact day the condition arrives, and its message says what to do then.
+ */
+test('a casca continua sendo um unico pedaco: o dia em que deixar de ser, esta guarda cai', () => {
+  const assets = resolve(import.meta.dirname, '..', 'dist', 'assets')
+  const scripts = readdirSync(assets).filter(name => name.endsWith('.js'))
+  const remedy = 'skipWaiting()+clients.claim() com activate apagando o cache anterior so e seguro enquanto a interface for um pedaco unico;'
+    + ' ao dividir o bundle, mantenha o cache da versao anterior ate o ultimo cliente dela sair, ou pare de reivindicar clientes (ADR-030).'
+  expect(scripts, remedy).toHaveLength(1)
+  const source = readFileSync(resolve(assets, scripts[0]!), 'utf8')
+  // `import(` in the built bundle is a chunk fetched at runtime — exactly the request an activated
+  // new version would have already removed from the cache of the tab that is still open.
+  expect(/\bimport\s*\(/u.test(source), remedy).toBe(false)
 })

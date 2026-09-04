@@ -58,9 +58,10 @@ Esta é a rodada cujos números valem. **Executado agora, nesta árvore
 (`claude/fix-m4`, base `0db7258`), e não copiado de rodada anterior:**
 
 - `cd apps/studio-web && npx vitest run` → **44/44 em 9 arquivos** naquela rodada
-  (eram 26/26 em 6 arquivos). Nesta árvore, hoje, o mesmo comando dá **47/47 em 9
-  arquivos**: três testes foram acrescentados a esses mesmos arquivos depois desta
-  prova (medido em 04/09/2026). Os 18 novos cobrem: separação OFFLINE × SERVICE_UNREACHABLE em
+  (eram 26/26 em 6 arquivos). Nesta árvore, hoje, o mesmo comando dá **54/54 em 10
+  arquivos** (medido em 04/09/2026) — três testes acrescentados a esses mesmos
+  arquivos depois desta prova, mais os sete da sétima rodada adversarial, que
+  estão na seção no fim deste documento. Os 18 novos cobrem: separação OFFLINE × SERVICE_UNREACHABLE em
   leitura e em mutação; frase de ação bloqueada sem promessa de fila; regra do
   `202`; deduplicação de aviso por `run_id` + estado; rejeição de
   `showNotification()` sem erro não tratado; e o `git apply --check` do patch.
@@ -123,3 +124,145 @@ Esta é a rodada cujos números valem. **Executado agora, nesta árvore
   onde o patch for aplicado.
 - **Fila / `background sync`: `NOT_PRESENT`**, e há teste que falha se o patch
   introduzir um esboço de fila.
+
+---
+
+## Sétima rodada adversarial — os dois defeitos do service worker
+
+### Comandos executados nesta árvore
+
+- `pnpm build` → todos os plugins compilados (o Playwright precisa deles antes
+  de subir o `webServer`).
+- `cd apps/studio-web && npx vitest run --reporter=dot` → **54/54 em 10
+  arquivos** (eram 47/47 em 9).
+- `cd apps/studio-web && DZ23_CHROMIUM_PATH=/opt/pw-browsers/chromium npx
+  playwright test` → **9/9 em Chromium real** (eram 6/6).
+- `pnpm typecheck` → PASS. `pnpm gate:i18n` → `I18N_GATE=PASS locale=pt-BR
+  catalogs=5 keys=199 plugin_literals_grandfathered=19 baseline=file`.
+
+### Defeito 1 — 503 vazio virava a tela de erro do Chrome, em inglês
+
+`sw.ts` respondia `new Response('', { status: 503 })` quando não havia rede
+**nem** cópia da casca no aparelho (estado real: o navegador joga fora o Cache
+Storage sob pressão de armazenamento e mantém o worker registrado). Agora
+devolve uma página HTML em pt-BR com `content-type: text/html; charset=utf-8`,
+texto vindo de `src/i18n/pwa.pt-BR.json` (`offline.shellUnavailable`) e embutido
+no `sw.js` pela build do Vite — o `sw.js` continua sem `import`.
+
+Testes que passam a existir:
+
+- unidade, `src/pwa/sw.spec.ts` → "answers a readable pt-BR page instead of an
+  empty 503…";
+- Chromium real, `tests/pwa.spec.ts` → "sem rede e sem a copia salva, mostra uma
+  pagina em pt-BR em vez da tela de erro do Chrome": carrega `/studio/`, espera
+  `navigator.serviceWorker.controller`, apaga o Cache Storage com
+  `caches.delete`, derruba a rede no nível TCP e recarrega.
+
+**Mutação que prova que a guarda é carregada** — restaurando
+`return new Response('', { status: OFFLINE_STATUS })`:
+
+```
+FAIL src/pwa/sw.spec.ts > answers a readable pt-BR page instead of an empty 503…
+  AssertionError: expected 'text/plain;charset=UTF-8' to be 'text/html; charset=utf-8'
+FAIL src/pwa/sw.spec.ts > stops existing once the server says the session ended…
+  AssertionError: expected '' to contain 'Não foi possível abrir o DZ23 STUDIO'
+Tests  2 failed | 5 passed (7)
+
+✘ tests/pwa.spec.ts:201 › sem rede e sem a copia salva…
+✘ tests/pwa.spec.ts:224 › a casca servida do cache se identifica…
+  Error: page.reload: net::ERR_HTTP_RESPONSE_CODE_FAILURE
+2 failed, 4 passed
+```
+
+O `net::ERR_HTTP_RESPONSE_CODE_FAILURE` é exatamente o que o parecer relatou.
+
+### Defeito 2 — a interface autenticada voltava do cache depois da sessão
+
+Quatro coisas mudaram, e cada uma tem mutante próprio:
+
+1. o worker marca a origem da casca em `/studio/__shell-source` (Cache Storage,
+   nenhum outro armazenamento) e acrescenta `x-dz23-shell-source: cache`;
+2. `registerStudioPwa()` lê a marca e mostra `.pwa-cached-shell` com
+   `offline.cachedShell` — "Mostrando a tela salva neste aparelho; entre de novo
+   quando a internet voltar";
+3. um `401` em `/studio/` apaga todo cache `dz23-studio-shell-*`;
+4. `forgetSavedShell()` avisa o worker (`dz23:shell-logout`), que apaga os
+   caches e confirma — gancho para o botão de sair, que ainda `NOT_PRESENT`.
+
+**Mutação 2a** — casca do cache marcada como `'network'`:
+
+```
+FAIL src/pwa/sw.spec.ts > is marked as such, so the interface can say it is a saved screen…
+  AssertionError: expected 'network' to be 'cache'
+✘ tests/pwa.spec.ts:224 › a casca servida do cache se identifica como copia salva…
+  Timed out 5000ms waiting for expect(locator).toBeVisible() — Received: hidden
+```
+
+**Mutação 2b** — removendo `else if (response.status === SESSION_ENDED_STATUS)`:
+
+```
+FAIL src/pwa/sw.spec.ts > stops existing once the server says the session ended…
+  AssertionError: expected [ Array(1) ] to deeply equal []
+✘ tests/pwa.spec.ts:224 › …e some quando a sessao termina
+  expect(received).toBe(expected) — Expected: 0, Received: 1
+```
+
+**Mutação 2c** — o `message` do worker retornando antes de reconhecer o
+`dz23:shell-logout`:
+
+```
+FAIL src/pwa/sw.spec.ts > is forgotten when the page signs the person out…
+  AssertionError: expected [ Array(1) ] to deeply equal []
+```
+
+**Mutação 2d** — o aviso da página nunca aparecendo
+(`.then(() => { savedNotice.hidden = true })`):
+
+```
+✘ tests/pwa.spec.ts:224 › a casca servida do cache se identifica como copia salva…
+  Timed out 5000ms waiting for expect(locator).toBeVisible() — Received: hidden
+```
+
+### `skipWaiting()` + `clients.claim()`: NÃO consertado, e dito assim
+
+Ver ADR-030, "O que continua em aberto". A escolha foi **deixar a suspeita com
+uma guarda que cai no dia em que a condição chegar**, em vez de inventar hoje um
+rastreio de clientes por versão que nenhum teste conseguiria fazer falhar. A
+guarda é o teste "a casca continua sendo um unico pedaco", que lê `dist/assets`
+depois da build e exige um único `.js` sem `import(`.
+
+**Prova de que a guarda pode falhar** (um `import()` dinâmico de um módulo que
+não é importado estaticamente, adicionado só para esta medição e removido em
+seguida):
+
+```
+dist/assets/__tmp-lazy-DBhAGRkX.js    0.04 kB
+dist/assets/index-DPubRVhI.js       197.28 kB
+✘ tests/pwa.spec.ts:276 › a casca continua sendo um unico pedaco…
+  Error: skipWaiting()+clients.claim() com activate apagando o cache anterior so e
+  seguro enquanto a interface for um pedaco unico; ao dividir o bundle, mantenha o
+  cache da versao anterior ate o ultimo cliente dela sair, ou pare de reivindicar
+  clientes (ADR-030).
+  Expected length: 1 / Received length: 2
+  Received array: ["__tmp-lazy-DBhAGRkX.js", "index-DPubRVhI.js"]
+```
+
+Um `import()` de um módulo que já é importado estaticamente **não** derruba a
+guarda, e isso está certo: o Rollup o resolve para `Promise.resolve()` e não
+existe pedaço buscado em tempo de execução — não há defeito a alcançar.
+
+### Confirmado, e continua verdade: não é vazamento de dados
+
+`grep` por `localStorage`, `sessionStorage` e `indexedDB` em
+`apps/studio-web/src` e `plugins/*/src` não encontra nada, o worker nunca cacheia
+`/api/` (há teste que percorre todo o Cache Storage do navegador e falha se
+achar uma entrada `/api/`), e o `401` do servidor nunca entra no cache. O defeito
+era de **estado que ninguém consegue entender**, não de dado exposto.
+
+### O que continua NÃO provado — sem mudança nesta rodada
+
+- Notificação em aparelho físico: `NOT_IMPLEMENTED`.
+- Instalação em Android/iOS reais: `NOT_EXECUTED`.
+- Ponta a ponta com o patch de `App.tsx` aplicado: `NOT_EXECUTED`.
+- Botão de sair no Studio: `NOT_PRESENT` — `forgetSavedShell()` existe e é
+  testado, mas nenhuma tela o chama hoje, e esta prova não finge o contrário.

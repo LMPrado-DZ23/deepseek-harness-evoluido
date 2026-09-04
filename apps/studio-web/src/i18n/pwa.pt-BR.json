@@ -3,7 +3,13 @@
     "banner": "Você está sem internet. O Studio continua aberto para você ver o que já está na tela, mas nada pode ser criado, salvo ou enviado até a conexão voltar.",
     "backOnline": "Conexão restabelecida.",
     "blockedAction": "Esta ação precisa de conexão. O que você digitou continua aqui; tente de novo quando a internet voltar.",
-    "serviceUnreachable": "Você está com internet, mas o Studio não respondeu. Ele pode estar desligado ou reiniciando; tente de novo em instantes."
+    "serviceUnreachable": "Você está com internet, mas o Studio não respondeu. Ele pode estar desligado ou reiniciando; tente de novo em instantes.",
+    "cachedShell": "Mostrando a tela salva neste aparelho; entre de novo quando a internet voltar.",
+    "shellUnavailable": {
+      "title": "Não foi possível abrir o DZ23 STUDIO",
+      "body": "Este aparelho está sem internet e a cópia do Studio que ficava guardada aqui não está mais neste aparelho.",
+      "retry": "Conecte-se à internet e abra o Studio de novo."
+    }
   },
   "install": {
     "prompt": "Instalar o DZ23 STUDIO neste aparelho",
