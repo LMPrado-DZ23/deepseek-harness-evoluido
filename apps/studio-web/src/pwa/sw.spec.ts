@@ -13,7 +13,7 @@ function fakeCaches() {
       const keyOf = (input: Request | string) => typeof input === 'string' ? new URL(input, 'http://127.0.0.1:4179').href : input.url
       return {
         addAll: async (paths: string[]) => { for (const path of paths) bucket.set(keyOf(path), await fetch(new Request(keyOf(path)))) },
-        match: async (input: Request | string) => bucket.get(keyOf(input)),
+        match: async (input: Request | string) => bucket.get(keyOf(input))?.clone(),
         put: async (input: Request | string, response: Response) => { bucket.set(keyOf(input), response) },
       }
     },
@@ -79,6 +79,16 @@ describe('built service worker behaviour', () => {
     expect(await (await fetchEvent(shell))!.text()).toContain('ok:')
     ;(fetch as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new TypeError('Failed to fetch'))
     expect(await (await fetchEvent(new Request('http://127.0.0.1:4179/studio/projects/x')))!.text()).toContain('ok:')
+    // A stalled server (connection accepted, never answered) must not hang the shell: the cached copy wins after the timeout.
+    vi.useFakeTimers()
+    ;(fetch as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(() => new Promise(() => undefined))
+    const stalled = fetchEvent(new Request('http://127.0.0.1:4179/studio/'))
+    await vi.advanceTimersByTimeAsync(4_100)
+    expect(await (await stalled)!.text()).toContain('ok:')
+    vi.useRealTimers()
+    // A request the page aborted is not an offline condition.
+    ;(fetch as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new DOMException('aborted', 'AbortError'))
+    await expect(fetchEvent(new Request('http://127.0.0.1:4179/api/studio/apps/health'))).rejects.toMatchObject({ name: 'AbortError' })
     expect(fetchEvent(new Request('http://127.0.0.1:4179/healthz'))).toBeUndefined()
     expect(fetchEvent(new Request('http://127.0.0.1:4179/studio/', { method: 'POST' }))).toBeUndefined()
   })

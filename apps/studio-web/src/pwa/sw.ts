@@ -7,6 +7,15 @@ declare const self: ServiceWorkerGlobalScope
 declare const __DZ23_SW_VERSION__: string
 
 const CACHE_NAME = `${SW_CACHE_PREFIX}${__DZ23_SW_VERSION__}`
+const SHELL_NETWORK_TIMEOUT_MS = 4_000
+
+/** Network-first must not hang on a stalled server: after the timeout the cached shell wins. */
+function fetchWithTimeout(request: Request, timeoutMs: number): Promise<Response> {
+  return new Promise((resolvePromise, reject) => {
+    const timer = setTimeout(() => reject(new Error('shell-network-timeout')), timeoutMs)
+    fetch(request).then(response => { clearTimeout(timer); resolvePromise(response) }, error => { clearTimeout(timer); reject(error) })
+  })
+}
 
 self.addEventListener('install', event => {
   event.waitUntil((async () => {
@@ -30,9 +39,13 @@ self.addEventListener('fetch', event => {
   const decision = decide(request.method, url, self.location.origin)
   if (decision === 'bypass') return
   if (decision === 'api') {
-    event.respondWith(fetch(request).catch(() => new Response(offlineApiResponseBody(), {
-      status: OFFLINE_STATUS, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
-    })))
+    event.respondWith(fetch(request).catch((error: unknown) => {
+      // A request the page itself cancelled is not "offline".
+      if (error instanceof DOMException && error.name === 'AbortError') throw error
+      return new Response(offlineApiResponseBody(), {
+        status: OFFLINE_STATUS, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
+      })
+    }))
     return
   }
   if (decision === 'shell-asset') {
@@ -50,7 +63,7 @@ self.addEventListener('fetch', event => {
   event.respondWith((async () => {
     const cache = await caches.open(CACHE_NAME)
     try {
-      const response = await fetch(request)
+      const response = await fetchWithTimeout(request, SHELL_NETWORK_TIMEOUT_MS)
       if (response.ok) await cache.put(PRECACHE_PATHS[0], response.clone())
       return response
     } catch {

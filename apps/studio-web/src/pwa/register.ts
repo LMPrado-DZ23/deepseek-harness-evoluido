@@ -29,14 +29,21 @@ export function registerStudioPwa(env: PwaEnvironment = { window, document, navi
   banner.hidden = true
   banner.textContent = t.offline.banner
   env.document.body.append(banner)
-  const sync = () => { banner.hidden = env.navigator.onLine }
+  const sync = () => {
+    banner.textContent = t.offline.banner
+    banner.hidden = env.navigator.onLine
+    env.document.body.classList.toggle('pwa-offline', !env.navigator.onLine)
+  }
   sync()
   env.window.addEventListener('online', sync)
   env.window.addEventListener('offline', sync)
   disposers.push(() => { env.window.removeEventListener('online', sync); env.window.removeEventListener('offline', sync); banner.remove() })
 
   if ('serviceWorker' in env.navigator) {
-    void env.navigator.serviceWorker.register('/studio/sw.js', { scope: '/studio/' }).catch(() => undefined)
+    // Registered after the page finished loading so the worker never competes with the first paint.
+    const register = () => { void env.navigator.serviceWorker.register('/studio/sw.js', { scope: '/studio/' }).catch(() => undefined) }
+    if (env.document.readyState === 'complete') register()
+    else env.window.addEventListener('load', register, { once: true })
   }
 
   let deferredPrompt: BeforeInstallPromptEvent | undefined
@@ -52,7 +59,13 @@ export function registerStudioPwa(env: PwaEnvironment = { window, document, navi
   })
   env.document.body.append(installButton)
   const onBeforeInstall = (event: Event) => { event.preventDefault(); deferredPrompt = event as BeforeInstallPromptEvent; installButton.hidden = false }
-  const onInstalled = () => { deferredPrompt = undefined; installButton.hidden = true; banner.textContent = t.install.installed; banner.hidden = false; env.window.setTimeout(sync, 4_000); banner.textContent = t.offline.banner }
+  const onInstalled = () => {
+    deferredPrompt = undefined
+    installButton.hidden = true
+    banner.textContent = t.install.installed
+    banner.hidden = false
+    env.window.setTimeout(sync, 4_000)
+  }
   env.window.addEventListener('beforeinstallprompt', onBeforeInstall)
   env.window.addEventListener('appinstalled', onInstalled)
   disposers.push(() => { env.window.removeEventListener('beforeinstallprompt', onBeforeInstall); env.window.removeEventListener('appinstalled', onInstalled); installButton.remove() })

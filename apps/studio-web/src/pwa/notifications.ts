@@ -4,7 +4,11 @@ import t from '../i18n/pwa.pt-BR.json'
 export const GENERATION_FINISHED_EVENT = 'dz23:generation-finished'
 export type GenerationFinalState = 'VERIFIED_PROTOTYPE' | 'BUILD_FAILED' | 'TESTS_FAILED' | 'BLOCKED_EXTERNAL' | 'CANCELLED'
 
-export function notificationBodyFor(state: GenerationFinalState): string {
+const FINAL_STATES: readonly GenerationFinalState[] = ['VERIFIED_PROTOTYPE', 'BUILD_FAILED', 'TESTS_FAILED', 'BLOCKED_EXTERNAL', 'CANCELLED']
+
+/** Message for a known final state; unknown values (arbitrary event detail) produce no notification. */
+export function notificationBodyFor(state: unknown): string | undefined {
+  if (!FINAL_STATES.includes(state as GenerationFinalState)) return undefined
   if (state === 'VERIFIED_PROTOTYPE') return t.notifications.verified
   if (state === 'CANCELLED') return t.notifications.cancelled
   if (state === 'BLOCKED_EXTERNAL') return t.notifications.blocked
@@ -36,9 +40,9 @@ export function browserNotificationPort(): NotificationPort | undefined {
 export function attachGenerationNotifications(target: EventTarget, port: NotificationPort | undefined, isHidden: () => boolean): () => void {
   if (port === undefined) return () => undefined
   const listener = (event: Event) => {
-    const state = (event as CustomEvent<{ state?: GenerationFinalState }>).detail?.state
-    if (state === undefined || port.permission !== 'granted' || !isHidden()) return
-    port.show(t.notifications.title, notificationBodyFor(state))
+    const body = notificationBodyFor((event as CustomEvent<{ state?: unknown }>).detail?.state)
+    if (body === undefined || port.permission !== 'granted' || !isHidden()) return
+    port.show(t.notifications.title, body)
   }
   target.addEventListener(GENERATION_FINISHED_EVENT, listener)
   return () => target.removeEventListener(GENERATION_FINISHED_EVENT, listener)

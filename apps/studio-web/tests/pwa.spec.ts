@@ -1,19 +1,60 @@
-import { expect, test } from '@playwright/test'
+import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import type { Socket } from 'node:net'
+import { expect, test, type BrowserContext } from '@playwright/test'
 
-const origin = 'http://127.0.0.1:4179'
+/**
+ * Playwright's offline emulation never reaches fetches made by a service
+ * worker, so this proof puts a tiny TCP-level proxy between the browser and
+ * the Studio test server. Killing the proxy (server closed, sockets destroyed)
+ * makes the network really disappear for page AND worker; the worker's
+ * fallback is then the only way the shell can appear.
+ */
+const upstream = { host: '127.0.0.1', port: 4179 }
+const proxyPort = 4180
+const origin = `http://127.0.0.1:${proxyPort}`
+let proxy: Server | undefined
+const sockets = new Set<Socket>()
 
-async function signIn(context: Parameters<Parameters<typeof test>[2]>[0]['context']): Promise<void> {
+function startProxy(): Promise<void> {
+  return new Promise(resolvePromise => {
+    proxy = createServer((request: IncomingMessage, response: ServerResponse) => {
+      const forward = httpRequest({ ...upstream, method: request.method, path: request.url, headers: { ...request.headers, host: `${upstream.host}:${upstream.port}` } }, back => {
+        response.writeHead(back.statusCode ?? 502, back.headers)
+        back.pipe(response)
+      })
+      forward.on('error', () => { if (!response.headersSent) response.writeHead(502); response.end() })
+      request.pipe(forward)
+    })
+    proxy.on('connection', socket => { sockets.add(socket); socket.on('close', () => sockets.delete(socket)) })
+    proxy.listen(proxyPort, '127.0.0.1', () => resolvePromise())
+  })
+}
+
+function killProxy(): Promise<void> {
+  return new Promise(resolvePromise => {
+    for (const socket of sockets) socket.destroy()
+    if (proxy === undefined) return resolvePromise()
+    proxy.close(() => { proxy = undefined; resolvePromise() })
+  })
+}
+
+async function signIn(context: BrowserContext): Promise<void> {
   await context.addCookies([
     { name: 'dz23_studio_session', value: 'e2e', url: origin },
     { name: 'dz23_studio_csrf', value: 'csrf-e2e', url: origin },
   ])
 }
 
-test('publica manifesto instalável com ícones reais e escopo /studio/', async ({ context, page }) => {
+test.use({ baseURL: origin })
+test.beforeEach(async () => { await startProxy() })
+test.afterEach(async () => { await killProxy() })
+
+test('publica manifesto instalável com ícones reais, escopo /studio/ e worker clássico sem imports', async ({ context, page }) => {
   await signIn(context)
   await page.goto('/studio/')
   const link = page.locator('link[rel="manifest"]')
   await expect(link).toHaveAttribute('href', '/studio/manifest.json')
+  await expect(link).toHaveAttribute('crossorigin', 'use-credentials')
   const manifest = await page.request.get('/studio/manifest.json')
   expect(manifest.status()).toBe(200)
   const body = await manifest.json() as { name: string; start_url: string; scope: string; display: string; icons: Array<{ src: string; sizes: string; purpose: string }> }
@@ -26,40 +67,62 @@ test('publica manifesto instalável com ícones reais e escopo /studio/', async 
     expect(response.headers()['content-type']).toContain('image/png')
   }
   expect(await page.locator('meta[name="theme-color"]').getAttribute('content')).toBe('#1f2a5a')
+  // The browser's own manifest fetch (no session cookie unless use-credentials) must succeed for installability.
+  const cdp = await context.newCDPSession(page)
+  const appManifest = await cdp.send('Page.getAppManifest') as { url: string; errors: unknown[]; data?: string }
+  expect(appManifest.errors).toEqual([])
+  expect(JSON.parse(appManifest.data ?? '{}')).toMatchObject({ name: 'DZ23 STUDIO' })
+  const worker = await page.request.get('/studio/sw.js')
+  expect(worker.headers()['content-type']).toContain('text/javascript')
+  const source = await worker.text()
+  expect(source).not.toMatch(/^\s*(?:import|export)\b/mu)
+  expect(source).toContain('dz23-studio-shell-')
 })
 
-test('registra o service worker, serve a casca sem internet e nunca entrega dados de projeto do cache', async ({ context, page }) => {
+test('serve a casca com o servidor fora do ar, sem nunca ter dados de projeto no cache', async ({ context, page }) => {
   await signIn(context)
   await page.goto('/studio/')
   // The Studio CSP has no 'unsafe-eval', so polling goes through evaluate(function), never waitForFunction(string).
   await expect.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker?.controller)), { timeout: 15_000 }).toBe(true)
-  const scope = await page.evaluate(async () => (await navigator.serviceWorker.ready).scope)
-  expect(scope).toBe(`${origin}/studio/`)
-  // Warm the cache with the hashed assets by reloading once under the worker.
+  expect(await page.evaluate(async () => (await navigator.serviceWorker.ready).scope)).toBe(`${origin}/studio/`)
   await page.reload()
   await expect(page.getByRole('img', { name: 'DZ23 STUDIO' })).toBeVisible()
   await expect(page.locator('.pwa-offline-banner')).toBeHidden()
 
-  await context.setOffline(true)
+  // Network really gone for page and worker: proxy closed, sockets destroyed. The browser still reports
+  // navigator.onLine=true (the interface is not what is offline), so the banner stays hidden — the shell
+  // itself is the evidence.
+  await killProxy()
   await page.reload()
-  await expect(page.getByRole('img', { name: 'DZ23 STUDIO' })).toBeVisible({ timeout: 15_000 })
-  await expect(page.locator('.pwa-offline-banner')).toBeVisible()
-  await expect(page.locator('.pwa-offline-banner')).toHaveText('Você está sem internet. O Studio continua aberto, mas suas ações vão esperar a conexão voltar.')
-  // Playwright's offline emulation does not reach service-worker-initiated fetches, so the
-  // "API offline → 503 OFFLINE" path is proven at worker level in src/pwa/sw.spec.ts; here we
-  // prove that no project data ever entered the cache.
-  const cachedApiEntries = await page.evaluate(async () => {
-    const names = await caches.keys()
+  await expect(page.getByRole('img', { name: 'DZ23 STUDIO' })).toBeVisible({ timeout: 20_000 })
+  const offlineApi = await page.evaluate(async () => {
+    const response = await fetch('/api/studio/apps/projects')
+    return { status: response.status, body: await response.json() as unknown }
+  })
+  expect(offlineApi).toEqual({ status: 503, body: { error: 'OFFLINE', offline: true } })
+  const cachedPaths = await page.evaluate(async () => {
     const urls: string[] = []
-    for (const name of names) for (const request of await (await caches.open(name)).keys()) urls.push(new URL(request.url).pathname)
+    for (const name of await caches.keys()) for (const request of await (await caches.open(name)).keys()) urls.push(new URL(request.url).pathname)
     return urls
   })
-  expect(cachedApiEntries.some(path => path.startsWith('/api/'))).toBe(false)
-  expect(cachedApiEntries).toEqual(expect.arrayContaining(['/studio/', '/studio/manifest.json']))
+  expect(cachedPaths.some(path => path.startsWith('/api/'))).toBe(false)
+  expect(cachedPaths).toEqual(expect.arrayContaining(['/studio/', '/studio/manifest.json']))
 
+  // Browser-level offline (navigator.onLine=false) drives the banner.
+  await context.setOffline(true)
+  await expect(page.locator('.pwa-offline-banner')).toBeVisible()
+  await expect(page.locator('.pwa-offline-banner')).toHaveText('Você está sem internet. O Studio continua aberto, mas suas ações vão esperar a conexão voltar.')
   await context.setOffline(false)
-  await page.reload()
   await expect(page.locator('.pwa-offline-banner')).toBeHidden()
+})
+
+test('confirma a instalação sem nunca dizer que está sem internet', async ({ context, page }) => {
+  await signIn(context)
+  await page.goto('/studio/')
+  await page.evaluate(() => window.dispatchEvent(new Event('appinstalled')))
+  await expect(page.locator('.pwa-offline-banner')).toHaveText('O DZ23 STUDIO foi instalado neste aparelho.')
+  await expect(page.locator('.pwa-offline-banner')).toBeHidden({ timeout: 6_000 })
+  await expect(page.locator('.pwa-install')).toBeHidden()
 })
 
 test('mostra notificação local quando a criação termina com a aba em segundo plano', async ({ context, page }) => {
@@ -77,7 +140,10 @@ test('mostra notificação local quando a criação termina com a aba em segundo
     Object.defineProperty(document, 'visibilityState', { get: () => 'hidden', configurable: true })
   })
   await page.goto('/studio/')
-  await page.evaluate(() => window.dispatchEvent(new CustomEvent('dz23:generation-finished', { detail: { state: 'VERIFIED_PROTOTYPE' } })))
+  await page.evaluate(() => {
+    window.dispatchEvent(new CustomEvent('dz23:generation-finished', { detail: { state: 'VERIFIED_PROTOTYPE' } }))
+    window.dispatchEvent(new CustomEvent('dz23:generation-finished', { detail: { state: 'SOMETHING_ELSE' } }))
+  })
   const shown = await page.evaluate(() => (window as unknown as { __dz23Notifications: Array<{ title: string; body: string }> }).__dz23Notifications)
   expect(shown).toEqual([{ title: 'DZ23 STUDIO', body: 'Seu protótipo foi verificado.' }])
 })

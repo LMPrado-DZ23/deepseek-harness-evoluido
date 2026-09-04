@@ -9,7 +9,8 @@ o código pode existir, mas ainda não foi validado com pessoas leigas.
 | Núcleo composto sem diff no Harness | BETA | PoC-01b | empacotamento e jornadas reais |
 | Identidade, sessão revogável e RBAC | BETA | P29-A/P29-B | PostgreSQL multi-instância e UI final |
 | Acesso móvel por borda autenticada | BETA | P29-C: HTTP, RPC e WS reais | celular/Tailscale e domínio reais |
-| Interface instalável (PWA) e uso sem rede | BETA | M4: manifesto, ícones, service worker só de casca (nunca `/api/`), faixa offline e notificação local provados em Chromium (`docs/proofs/M4-studio-pwa-proof.md`) | instalação em aparelho físico, preview no celular (M1/HTTPS), fase 0.5 |
+| Interface instalável (PWA) e uso sem rede | BETA | M4: manifesto, ícones, service worker só de casca (nunca `/api/`), casca servida com o servidor fora do ar e faixa offline provados em Chromium (`docs/proofs/M4-studio-pwa-proof.md`) | instalação em aparelho físico, preview no celular (M1/HTTPS), fase 0.5 |
+| Notificação local de fim de criação | NOT_IMPLEMENTED | M4: módulo e teste com evento sintético existem; a interface ainda não dispara o evento nem pede permissão | duas linhas em `App.tsx` na integração (handoff) e prova em Chromium |
 | Bind público da porta interna do Harness | BLOCKED | ADR-012 proíbe | não deve ser liberado |
 | TLS ACME em domínio real | NOT_EXECUTED | configuração validada | emissão e renovação reais |
 | Deploy de produção | NOT_EXECUTED | nenhum deploy | fase própria com aprovação humana |
