@@ -15,4 +15,11 @@ describe('preview runtime browser boundary', () => {
     const edgePatch = readFileSync(resolve(process.cwd(), 'deploy/harness/edge.patch.yml'), 'utf8')
     expect(edgePatch).toMatch(/- id: dz23-studio-preview\s+inject:\s+- studioCapacity\s+config:\s+capacityMode: edge/u)
   })
+
+  it('does not expose preview HTTP routes before startup reconciliation', () => {
+    const source = readFileSync(resolve(process.cwd(), 'plugins/preview/src/index.ts'), 'utf8')
+    expect(source.indexOf('await service.reconcile()')).toBeGreaterThan(-1)
+    expect(source.indexOf('await service.reconcile()')).toBeLessThan(source.indexOf('const unregister = registerPromptToAppHttpExtension'))
+    expect(source.indexOf('await service.reconcile()')).toBeLessThan(source.indexOf("path: '/__dz23/preview-gateway'"))
+  })
 })

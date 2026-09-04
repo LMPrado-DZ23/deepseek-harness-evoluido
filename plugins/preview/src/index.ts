@@ -150,6 +150,9 @@ export async function apply(ctx: Context, config: PreviewPluginConfig = {}): Pro
       },
     },
   })
+  await service.reconcile()
+  // Nenhuma rota recebe tráfego antes de a capacidade persistida e os
+  // runtimes sobreviventes terem sido reconciliados.
   const unregister = registerPromptToAppHttpExtension(createPreviewProjectHttpExtension(service))
   ctx.effect(() => unregister, 'studio-preview.httpExtension')
   if (supervisor !== undefined) {
@@ -160,7 +163,6 @@ export async function apply(ctx: Context, config: PreviewPluginConfig = {}): Pro
       handler: edgeGuard(edgeSecret, gateway),
     }), 'studio-preview.gateway')
   }
-  await service.reconcile()
   let reaperRunning = false
   const interval = setInterval(() => {
     if (reaperRunning) return

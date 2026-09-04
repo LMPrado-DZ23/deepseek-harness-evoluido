@@ -1083,6 +1083,18 @@ describe('StudioPreviewService capacity leases', () => {
     })
     await expect(rebooted.service.reap()).resolves.toBe(0)
     expect((await base.snapshot()).leases).toHaveLength(1)
+
+    const secondReboot = createHarness({
+      repository,
+      capacity,
+      capacityMode: 'team',
+      runtime: { listManaged: vi.fn(() => Promise.resolve([])) },
+    })
+    await expect(secondReboot.service.reconcile()).resolves.toEqual({ stoppedOrphans: 0, failedRecords: 0 })
+    expect(repository.previews().find(item => item.preview_id === started.preview.preview_id)).toMatchObject({
+      state: 'STOPPING', stopped_at: null, failure_code: 'CAPACITY_RECOVERY_QUARANTINE',
+    })
+    expect((await base.snapshot()).leases).toHaveLength(1)
   })
 
   it('keeps a detached terminal lease when a runtime materializes after the startup inventory', async () => {

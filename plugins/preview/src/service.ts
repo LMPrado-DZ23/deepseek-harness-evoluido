@@ -550,6 +550,16 @@ export class StudioPreviewService {
             return
           }
           const runtime = record.runtime_ref === null ? undefined : managed.find(item => item.previewId === record.preview_id && item.runtimeRef === record.runtime_ref)
+          if (record.state === 'STOPPING' && record.failure_code === 'CAPACITY_RECOVERY_QUARANTINE') {
+            const quarantinedRuntime = managed.find(item => item.previewId === record.preview_id)
+            if (quarantinedRuntime !== undefined) {
+              try { await this.#runtimeCall('RUNTIME_STOP_TIMEOUT', signal => this.options.runtime.stop(quarantinedRuntime.runtimeRef, signal)) }
+              catch { this.options.onCleanupFailure?.(record.preview_id) }
+            }
+            await this.#revokeAdmissions(record.preview_id)
+            await this.#retainCleanupCapacity(record)
+            return
+          }
           if (Date.parse(record.expires_at) <= this.#now().getTime()) {
             let cleanupIncomplete = false
             if (runtime !== undefined) {
