@@ -148,8 +148,21 @@ test('mostra notificação local quando a criação termina com a aba em segundo
     }
     Object.defineProperty(window, 'Notification', { value: FakeNotification, configurable: true })
     Object.defineProperty(document, 'visibilityState', { get: () => 'hidden', configurable: true })
+    // The page shows the notification through the service worker registration whenever there is
+    // one (the only path that works on Android) and through the constructor otherwise. Both paths
+    // are captured, so the test asserts the CONTRACT — one notification per final state — instead
+    // of which of the two happened to win the race with `serviceWorker.ready`.
+    Object.defineProperty(navigator.serviceWorker, 'ready', {
+      configurable: true,
+      get: () => Promise.resolve({
+        showNotification: (title: string, options?: { body?: string }) => { shown.push({ title, body: options?.body ?? '' }); return Promise.resolve() },
+      } as unknown as ServiceWorkerRegistration),
+    })
   })
   await page.goto('/studio/')
+  // The rebinding to the registration happens after `serviceWorker.ready` resolves; waiting for it
+  // is what makes this deterministic instead of a race that fails once in a while.
+  await page.evaluate(async () => { await navigator.serviceWorker.ready })
   await page.evaluate(() => {
     window.dispatchEvent(new CustomEvent('dz23:generation-finished', { detail: { state: 'VERIFIED_PROTOTYPE' } }))
     window.dispatchEvent(new CustomEvent('dz23:generation-finished', { detail: { state: 'SOMETHING_ELSE' } }))
