@@ -1,7 +1,7 @@
 # ADR-028 — Preview local seguro e temporário
 
-Status: aceito como decisão arquitetural; implementação e provas permanecem em
-andamento na M1/P34.
+Status: aceito e implementado em M1/P34; capacidade local classificada como
+`BETA` até operação prolongada e revisão independente do checkpoint.
 
 ## Contexto
 
@@ -17,10 +17,10 @@ O preview separa quatro zonas:
 
 1. navegador da pessoa e iframe, sujeitos a conteúdo não confiável;
 2. Caddy, única borda HTTP e autoridade de roteamento por origem;
-3. supervisor/gateway do Studio, que revalida sessão, organização, tenant,
+3. plugin de preview do Studio, que revalida sessão, organização, tenant,
    projeto, run, hash do artefato e lifecycle;
-4. runtime do aplicativo gerado, sempre não confiável e sem credenciais do
-   Studio.
+4. supervisor sem rede, proxy mínimo do plano de dados e runtime do aplicativo
+   gerado, sempre não confiável e sem credenciais do Studio.
 
 O navegador nunca escolhe container, endereço, porta, imagem ou caminho. O
 gateway resolve uma referência interna opaca emitida pelo runtime e vinculada ao
@@ -41,33 +41,34 @@ criada no plugin de preview.
 
 ## Origem local e HTTPS futuro
 
-No uso local, o navegador abre
-`http://p-<id-aleatorio>.localhost:<porta-do-studio>`. Cada preview recebe origem
-distinta, mas continua no namespace loopback que os navegadores reconhecem como
-contexto local confiável. O fluxo da pessoa não usa `tls internal`, não instala
-CA raiz, não altera o trust store e não modifica o arquivo de hosts.
+No uso local, o Studio abre em `http://studio.dz23.localhost:<porta>` e cada
+preview em `http://p-<id-aleatorio>.dz23.localhost:<porta>`. As origens são
+distintas, mas pertencem ao mesmo site local; isso permite cookie host-only,
+`HttpOnly` e `SameSite=Strict` no iframe sem usar TLS privado. `localhost` e
+`p-<id>.localhost` não servem para este contrato: navegadores os tratam como
+sites distintos e recusam o cookie no iframe.
 
-Uma prova automatizada separada pode exercitar HTTPS com `tls internal` somente
-dentro de contêiner ou perfil descartável. A CA permanece confinada a esse
-ambiente e nunca é instalada no host. HTTPS real, ACME, domínio público e acesso
-por celular fora do host estão `NOT_EXECUTED` até prova específica; não podem ser
-inferidos do teste local.
+O fluxo não usa `tls internal`, não instala CA raiz, não altera trust store,
+DNS ou arquivo de hosts. HTTPS real, ACME, domínio público e acesso por celular
+fora do host estão `NOT_EXECUTED` até prova específica e não podem ser inferidos
+do teste local.
 
 ## Isolamento do runtime e rede
 
-Cada preview usa rede Docker interna dedicada que contém apenas o runtime e o
-gateway confiável. O runtime não entra na rede padrão, não publica porta no host,
-não recebe `NET_ADMIN`, `NET_RAW`, modo privilegiado ou qualquer capacidade. A
-raiz é somente leitura, o usuário é não-root, a única escrita ocorre em volume
-efêmero dedicado, e CPU, memória e PIDs têm limites.
+Cada preview cria o runtime com `NetworkMode=none`. O proxy mínimo compartilha
+exclusivamente o namespace de rede desse runtime por
+`NetworkMode=container:<runtime>` e fala com a aplicação por loopback. Nenhum
+dos dois publica porta, ingressa em bridge Docker ou recebe Docker socket. O
+supervisor também permanece em `network=none`; Studio, supervisor e proxy se
+comunicam apenas por sockets Unix autenticados. Runtime e proxy não recebem
+`NET_ADMIN`, `NET_RAW`, modo privilegiado ou qualquer capability. Ambos usam
+raiz somente leitura, usuário não-root, escrita efêmera e limites de CPU,
+memória e PIDs.
 
-Build e processos que não precisam receber tráfego usam `network=none`. Para o
-servidor de preview, a rede interna dedicada permite somente o ingresso do
-gateway; nenhuma rota de saída para internet, DNS externo, metadata, host,
-Harness ou Postgres é permitida. A inspeção do runtime e tentativas reais de
-HTTP, TCP e DNS de dentro do contêiner são a autoridade de segurança. Se o
-isolamento não puder ser provado sem privilégio perigoso, o estado é
-`BLOCKED_EXTERNAL`, nunca fallback permissivo.
+O staging do artefato também usa `network=none`. A inspeção física precisa
+provar apenas a interface `lo`, tabela de rotas externas vazia e falha de DNS,
+internet, metadata, host Docker e Studio. Se isso não puder ser provado sem
+privilégio perigoso, o estado é `BLOCKED_EXTERNAL`, nunca fallback permissivo.
 
 A denylist AST da fonte gerada — incluindo `use server`, `fetch`, `WebSocket`,
 `XMLHttpRequest` e `EventSource` em posições executáveis — permanece uma defesa
@@ -84,10 +85,34 @@ Studio, com `default-src 'self'`, `connect-src 'self'`, `form-action 'self'`,
 O iframe usa `sandbox="allow-scripts allow-forms allow-same-origin"` e
 `referrerpolicy="no-referrer"`, sem popup, top-navigation ou download. Como
 `allow-scripts` junto de `allow-same-origin` aumenta a capacidade do conteúdo, a
-origem distinta `p-<id>.localhost` e a separação de cookies são obrigatórias; o
+origem distinta `p-<id>.dz23.localhost` e a separação de cookies são obrigatórias; o
 aplicativo não é servido na origem do Studio. A origem isolada também não é
 credencial: admissão opaca, sessão vigente e membership são revalidadas pelo
 gateway em cada acesso relevante.
+
+O cookie de sessão do Studio é host-only e `HttpOnly`. Como um preview pode
+tentar criar outro cookie com o mesmo nome no domínio pai, a autenticação
+preserva valores duplicados e aceita somente um candidato que passe a validação
+criptográfica, com limite de trabalho. CSRF é derivado da sessão, guardado pelo
+navegador em `sessionStorage` e enviado em cabeçalho; nenhum cookie legível por
+JavaScript participa dessa decisão. Em HTTP local, a omissão de `Secure` exige
+configuração explícita `loopback-http`, bind em `127.0.0.1` e allowlists apenas
+para `localhost`, subdomínios `.localhost` ou `127.0.0.1`. Servidor e borda real
+continuam `secure` por padrão.
+
+O convite opaco enviado por `postMessage` pode ser trocado uma única vez e
+expira em 120 segundos. Heartbeat renova somente a admissão já trocada, nunca
+um convite ainda não usado. O cookie host-only recebe `Max-Age` calculado pelo
+servidor e é renovado pelo navegador após cada heartbeat, sem jamais ultrapassar
+o vencimento atual do preview ou da admissão. Códigos de acesso capturados no runtime só aparecem
+para a mesma pessoa e sessão que abriu aquela prévia, além das validações de
+papel, organização, tenant e projeto; sessão ativa e membership são revalidadas
+imediatamente antes da leitura.
+
+O encerramento concede 75 segundos ao supervisor. Sinais de shutdown abortam
+RPCs e staging em andamento antes do drain e o garbage collector remove
+stager, runtime, proxy, sockets e volumes rotulados; sobreviventes mantêm a
+operação em falha observável.
 
 ## E-mail no preview
 

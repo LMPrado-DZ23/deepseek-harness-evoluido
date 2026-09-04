@@ -22,7 +22,7 @@ const actor: PreviewActor = {
 
 const preview = {
   preview_id: 'preview-1', project_id: 'project-1', run_id: 'run-1', artifact_sha256: 'a'.repeat(64),
-  state: 'READY' as const, health: 'OK' as const, url: 'http://p-0123456789abcdef01234567.localhost',
+  state: 'READY' as const, health: 'OK' as const, url: 'http://p-0123456789abcdef01234567.dz23.localhost',
   created_at: '2026-09-03T12:00:00.000Z', ready_at: '2026-09-03T12:00:01.000Z',
   expires_at: '2026-09-03T12:30:00.000Z', stopped_at: null, stop_reason: null, failure_code: null,
 }

@@ -5,8 +5,14 @@ services:
     environment:
       DSH_HOME: /var/lib/dz23-studio
       DZ23_EDGE_SECRET: ${DZ23_EDGE_SECRET:?Defina DZ23_EDGE_SECRET}
-      DZ23_PUBLIC_HOST: ${DZ23_PUBLIC_HOST:-localhost:8443}
-      DZ23_PUBLIC_ORIGIN: ${DZ23_PUBLIC_ORIGIN:-https://localhost:8443}
+      DZ23_PUBLIC_HOST: studio.dz23.localhost:${DZ23_HTTP_PORT:-8080}
+      DZ23_PUBLIC_ORIGIN: http://studio.dz23.localhost:${DZ23_HTTP_PORT:-8080}
+      DZ23_PUBLIC_PORT: ${DZ23_HTTP_PORT:-8080}
+      DZ23_COOKIE_SECURITY: loopback-http
+      DZ23_RUNS_ROOT: /var/lib/dz23-studio/generated-runs
+      DZ23_PREVIEW_SUPERVISOR_ENABLED: ${DZ23_PREVIEW_SUPERVISOR_ENABLED:-0}
+      DZ23_PREVIEW_SUPERVISOR_SOCKET: /run/dz23-preview/supervisor.sock
+      DZ23_PREVIEW_SUPERVISOR_TOKEN_FILE: /run/secrets/dz23_preview_supervisor_token
       DZ23_RP_ID: ${DZ23_RP_ID:-localhost}
       DZ23_BOOTSTRAP_OWNER_EMAIL: ${DZ23_BOOTSTRAP_OWNER_EMAIL:?Defina o email da primeira pessoa proprietaria}
       DZ23_SMTP_SECRET: ${DZ23_SMTP_SECRET:?Defina a configuracao SMTP por segredo}
@@ -26,12 +32,10 @@ services:
       dockerfile: deploy/caddy/Dockerfile
     ports:
       - "${DZ23_BIND_ADDRESS:-127.0.0.1}:${DZ23_HTTP_PORT:-8080}:80"
-      - "${DZ23_BIND_ADDRESS:-127.0.0.1}:${DZ23_HTTPS_PORT:-8443}:443"
     environment:
       DZ23_EDGE_SECRET: ${DZ23_EDGE_SECRET:?Defina DZ23_EDGE_SECRET}
       DZ23_HARNESS_UPSTREAM: 127.0.0.1:3210
-      DZ23_SITE_HOST: ${DZ23_SITE_HOST:-localhost}
-      DZ23_HTTPS_PORT: 443
+      DZ23_SITE_HOST: ${DZ23_SITE_HOST:-studio.dz23.localhost}
     command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile.local", "--adapter", "caddyfile"]
     volumes:
       - caddy-data:/data

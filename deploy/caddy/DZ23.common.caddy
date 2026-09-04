@@ -82,3 +82,27 @@
 		}
 	}
 }
+
+(dz23_preview_edge) {
+	header {
+		-Server
+		-X-Frame-Options
+	}
+
+	@preview_host header_regexp Host ^p-[a-f0-9]{24}\.dz23\.localhost(?::[0-9]{1,5})?$
+	handle @preview_host {
+		rewrite * /__dz23/preview-gateway{uri}
+		reverse_proxy {$DZ23_HARNESS_UPSTREAM:127.0.0.1:3210} {
+			header_up X-DZ23-Edge "{$DZ23_EDGE_SECRET}"
+			header_up -Authorization
+			header_up -Forwarded
+			header_up -X-Forwarded-For
+			header_up -X-Forwarded-Host
+			header_up -X-Forwarded-Proto
+		}
+	}
+
+	handle {
+		respond "Host de prévia inválido." 421
+	}
+}

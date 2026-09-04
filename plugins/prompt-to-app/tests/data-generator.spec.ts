@@ -64,7 +64,9 @@ describe('deterministic generated data layer', () => {
     expect(nonSensitiveSchema).toContain('sensitive: false, requires_login: true, public_list: false')
     expect(selected['src/db/migrations.ts']).toContain('PRAGMA user_version')
     expect(selected['src/db/migrations.ts']).toContain('ON DELETE RESTRICT')
-    expect(layer.files.find(file => file.path === 'src/db/client.ts')?.content).toContain('chmodSync(databasePath, 0o600)')
+    const client = layer.files.find(file => file.path === 'src/db/client.ts')?.content
+    expect(client).toContain("process.env.APP_EMAIL_MODE === 'studio-preview' ? 0o710 : 0o700")
+    expect(client).toContain('chmodSync(databasePath, 0o600)')
     expect(layer.files.find(file => file.path.endsWith('cliente.ts'))?.content).toContain('class ClienteRepository')
     expect(layer.files.find(file => file.path.startsWith('tests/'))?.content).toContain("mkdtempSync(join(tmpdir(), 'dz23-generated-data-'))")
   })

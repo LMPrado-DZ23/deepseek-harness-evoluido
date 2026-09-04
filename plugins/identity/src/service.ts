@@ -28,6 +28,8 @@ const STRONG_AUTH_TTL = 5 * MINUTE
 const MAX_MAGIC_ATTEMPTS = 5
 const SESSION_TOUCH_INTERVAL = MINUTE
 
+function derivedCsrfToken(tokenHash: string): string { return secretHash(`dz23-csrf-v1:${tokenHash}`) }
+
 export type EnrollmentMode = 'closed' | 'open' | {
   readonly mode: 'bootstrap-email'
   readonly email: string
@@ -306,6 +308,24 @@ export class StudioIdentityService {
     }
   }
 
+  validateCsrfToken(session: SessionRecord, headerToken: string | undefined): void {
+    if (headerToken === undefined || !secretMatches(headerToken, session.csrf_hash)) {
+      throw new IdentityError('csrf', 'A confirmação desta solicitação é inválida.')
+    }
+  }
+
+  async csrfTokenFor(session: SessionRecord): Promise<string> {
+    return this.#mutex.run(`session:${session.session_id}`, async () => {
+      const current = this.#repository.sessions().find(candidate => candidate.session_id === session.session_id)
+      if (current === undefined) throw new IdentityError('invalid', 'Sessão inválida.')
+      this.#assertSessionUsable(current, this.#now())
+      const csrfToken = derivedCsrfToken(current.token_hash)
+      const csrfHash = secretHash(csrfToken)
+      if (current.csrf_hash !== csrfHash) await this.#repository.putSession({ ...current, csrf_hash: csrfHash })
+      return csrfToken
+    })
+  }
+
   listDevices(userId: string): readonly Omit<SessionRecord, 'token_hash' | 'csrf_hash'>[] {
     return this.#repository.sessions()
       .filter(session => session.user_id === userId)
@@ -514,13 +534,14 @@ export class StudioIdentityService {
   async #issueSession(user: IdentityUser, device: DeviceInput): Promise<IssuedSession> {
     const now = this.#now()
     const token = this.#createSecret()
-    const csrfToken = this.#createSecret()
+    const tokenHash = secretHash(token)
+    const csrfToken = derivedCsrfToken(tokenHash)
     const session: SessionRecord = {
       session_id: this.#createId(),
       user_id: user.user_id,
       org_id: user.org_id,
       tenant_id: user.tenant_id,
-      token_hash: secretHash(token),
+      token_hash: tokenHash,
       csrf_hash: secretHash(csrfToken),
       device_label: device.label,
       user_agent: device.userAgent,

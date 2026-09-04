@@ -40,10 +40,10 @@ describe('authenticated Studio web surface', () => {
   })
 
   it('sets a restrictive browser policy and supports HEAD without a body', async () => {
-    const f = await fixture(['http://*.localhost:4179']); const response = await f.request('/', { method: 'HEAD' })
+    const f = await fixture(['http://*.dz23.localhost:4179']); const response = await f.request('/', { method: 'HEAD' })
     const policy = response.headers.get('content-security-policy') ?? ''
     expect(response.status).toBe(200); expect(policy).toContain("connect-src 'self'")
-    expect(policy).toContain('frame-src http://*.localhost:4179')
+    expect(policy).toContain('frame-src http://*.dz23.localhost:4179')
     expect(policy).toContain("frame-ancestors 'none'")
     expect(policy).not.toContain('frame-src *;')
     expect(response.headers.get('x-frame-options')).toBe('DENY')
@@ -53,7 +53,7 @@ describe('authenticated Studio web surface', () => {
   it('fails at startup for broad or injectable preview frame sources', () => {
     const input = { distDirectory: '.', identity: {} as StudioIdentityService, allowedHosts: [] }
     expect(() => createStudioWebHandler({ ...input, previewFrameSources: ['*'] })).toThrow('previewFrameSources')
-    expect(() => createStudioWebHandler({ ...input, previewFrameSources: ['http://*.localhost:4179; script-src *'] })).toThrow('previewFrameSources')
+    expect(() => createStudioWebHandler({ ...input, previewFrameSources: ['http://*.dz23.localhost:4179; script-src *'] })).toThrow('previewFrameSources')
     expect(() => createStudioWebHandler({ ...input, previewFrameSources: ['https://*.example.com'] })).toThrow('previewFrameSources')
   })
 

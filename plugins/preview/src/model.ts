@@ -18,7 +18,7 @@ export const previewRecordSchema = z.object({
   artifact_sha256: sha256,
   created_by: z.string().min(1),
   source_session_id: z.string().min(1),
-  hostname: z.string().regex(/^p-[a-f0-9]{24}\.localhost$/u),
+  hostname: z.string().regex(/^p-[a-f0-9]{24}\.dz23\.localhost$/u),
   state: previewStateSchema,
   created_at: timestamp,
   ready_at: timestamp.nullable(),

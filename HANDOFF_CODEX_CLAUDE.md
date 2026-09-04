@@ -400,3 +400,63 @@ fatia e suas 18 integrações ficaram explicitamente puladas no gate puro.
 6. Pipeline impedindo que o modelo sobrescreva arquivos determinísticos.
 7. Fluxo CRUD real e proteção de formulário sensível.
 8. Estados e textos sem chamar protótipo verificado de aplicação pronta.
+
+## M1/P34 — checkpoint fechado do preview local seguro
+
+Branch: `codex/missao-m1-preview`, empilhada sobre `ec92f29`. O hash exato do
+commit que contém esta seção fica no `outputs/CODEX_OUTBOX.md`; o Harness
+upstream permanece limpo no pin `6c705be1ce6774a000d061da41d1823b03a3d42c`.
+
+### Construído
+
+- runtime não confiável em `NetworkMode=none` e proxy mínimo somente no mesmo
+  loopback, sem porta, bridge, Docker socket, segredo ou rota externa;
+- supervisor autenticado por socket Unix, staging offline e artefato imutável,
+  com limites de arquivo/memória e shutdown que aborta RPC e staging;
+- lifecycle tenant-aware, Caddy por host local, admissão opaca, revogação, TTL,
+  captura local do código de acesso e cleanup com falha fechada;
+- cookie de sessão host-only/HttpOnly com defesa contra valores duplicados e
+  CSRF derivado da sessão em cabeçalho; `loopback-http` só em bind e origens
+  localhost explicitamente validadas.
+- convite de admissão de uso único com TTL de 120 segundos; heartbeat renova
+  apenas admissão já trocada, e códigos ficam restritos à pessoa/sessão que
+  abriu a prévia; a associação é revalidada antes de cada leitura e o navegador
+  renova o cookie host-only somente até o novo vencimento autorizado.
+
+### Gates e provas
+
+- typecheck e build recursivo: `PASS`;
+- Vitest: 659 `PASS`, 18 integrações Postgres `SKIPPED`; cobertura global
+  94,24% statements, 90,04% branches, 95,44% functions e 97,11% lines;
+- identidade e política: 100% de cobertura;
+- Chromium fixado em contêiner sem rede: 3/3 `PASS`, incluindo login HTTP
+  local e ataque por cookie duplicado do preview;
+- `prove:preview-runtime`: `PASS`, artefato `557c907f…d433`, runtime
+  `sha256:f6660dc7…73b42`, supervisor/proxy `sha256:0de6fc8f…97ff2`, apenas
+  loopback, zero rotas e host/metadata/egress bloqueados;
+- `prove:edge`, Caddy offline, Compose, i18n 265, domínios e diff-check: `PASS`;
+- revisão adversarial independente: `GO`, sem incompatibilidade concreta alta,
+  média ou baixa; suíte focada independente 79/79 `PASS`.
+
+### Achados fechados
+
+Cookie-tossing, alcance ao host pela bridge, órfãos em SIGTERM e exaustão de
+memória foram classificados como MÉDIA e fechados antes do commit. A observação
+BAIXA restante é tornar nomes dos volumes de socket exclusivos por
+`DZ23_INSTANCE_ID` antes de suportar duas instalações no mesmo daemon.
+O adendo posterior do Claude sobre ticket e visibilidade de códigos também foi
+fechado: convite não usado expira em 120 segundos e somente a pessoa/sessão que
+abriu a prévia pode consultar os códigos capturados.
+
+### Limites honestos
+
+PostgreSQL real pertence ao gate M3. A jornada única Caddy + Harness + runtime,
+HTTPS/domínio/celular reais, operação prolongada, LLM/SMTP reais e pessoas
+leigas continuam `NOT_EXECUTED`, `NOT_CONFIGURED` ou `NOT_VALIDATED`. Não houve
+merge na principal, push, PR ou deploy.
+
+### Próximo comando seguro
+
+Criar `codex/missao-m2-prompt-to-app-final` a partir deste checkpoint e executar
+a fatia M2 enquanto o Claude revisa M1. Se o parecer trouxer ALTA/MÉDIA, parar
+M2 em ponto seguro e corrigir M1 primeiro.

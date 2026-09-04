@@ -55,7 +55,10 @@ export function App() {
       if (type === 'DZ23_PREVIEW_READY' && admissionTicket !== null) {
         previewFrame.current?.contentWindow?.postMessage({ type: 'DZ23_PREVIEW_ADMISSION', ticket: admissionTicket }, previewOrigin)
       }
-      if (type === 'DZ23_PREVIEW_ADMITTED') setAdmissionTicket(null)
+      if (type === 'DZ23_PREVIEW_ADMITTED') {
+        setAdmissionTicket(null)
+        refreshPreviewAdmission(preview.url)
+      }
     }
     window.addEventListener('message', receive)
     return () => window.removeEventListener('message', receive)
@@ -79,7 +82,13 @@ export function App() {
     let active = true
     const heartbeat = () => {
       void api<{ preview: Preview }>(`/projects/${projectId}/previews/${encodeURIComponent(preview.preview_id)}/heartbeat`, { method: 'POST', body: '{}' })
-        .then(response => { if (active) { setPreview(response.preview); setError('') } })
+        .then(response => {
+          if (active) {
+            setPreview(response.preview)
+            setError('')
+            refreshPreviewAdmission(response.preview.url)
+          }
+        })
         .catch(() => { if (active) setError(t.preview.heartbeatFailed) })
     }
     heartbeat()
@@ -236,6 +245,23 @@ function Questions({ question, answer, setAnswer, submit }: { question: Question
 function PlanView({ plan, approve, reason, setReason, requestChange }: { plan: Plan; approve(): Promise<void>; reason: string; setReason(v: string): void; requestChange(): Promise<void> }) { return <><div className="heading"><Sparkles/><div><h1>{t.plan.title}</h1><p>{t.progress.planDetail}</p></div></div><div className="plan-list">{plan.slices.map(slice => <section className="task-card" key={slice.slice_id}><h2>{slice.title}</h2><p>{slice.description}</p><strong>{t.plan.criterion}</strong><ul>{slice.acceptance_criteria.map(value => <li key={value}>{value}</li>)}</ul></section>)}</div><button className="primary" onClick={() => void approve()}>{t.plan.approve}</button><section className="task-card"><h2>{t.plan.change}</h2><label htmlFor="change-reason">{t.plan.changeLabel}</label><textarea id="change-reason" value={reason} onChange={event => setReason(event.target.value)} placeholder={t.plan.changePlaceholder}/><button className="secondary" disabled={reason.trim().length < 3} onClick={() => void requestChange()}>{t.plan.sendChange}</button></section></> }
 function Action({ title, detail, button, action }: { title: string; detail: string; button?: string; action?: () => Promise<void> }) { return <><div className="heading"><Sparkles/><div><h1>{title}</h1><p>{detail}</p></div></div>{button === undefined || action === undefined ? null : <button className="primary" onClick={() => void action()}>{button}</button>}</> }
 function Verification({ result, previewActive, startPreview }: { result: PipelineResult; previewActive: boolean; startPreview(): Promise<void> }) { const ok = result.state === 'VERIFIED_PROTOTYPE'; const cancelled = result.state === 'CANCELLED'; return <section className="task-card"><h1>{t.verification.title}</h1><p>{ok ? t.verification.success : cancelled ? t.verification.cancelled : t.verification.failure}</p><p>{t.verification.attempts}: {result.attempts}</p><code>{result.state}</code><p>{result.message}</p>{ok && !previewActive ? <button className="primary" onClick={() => void startPreview()}>{t.preview.open}</button> : null}{result.verificationCodes === undefined || result.verificationCodes.length === 0 ? null : <section><h2>{t.verification.testCodes}</h2><p>{t.verification.testCodesHelp}</p><ul>{result.verificationCodes.map(item => <li key={`${item.email}-${item.expires_at}-${item.code}`}><strong>{item.email}</strong>: <code>{item.code}</code></li>)}</ul></section>}{result.checks === undefined ? null : <><h2>{t.verification.checks}</h2><ul>{result.checks.map(check => <li key={check.id}>{check.label}: {checkStatus(check.status)}</li>)}</ul></>}</section> }
+
+function refreshPreviewAdmission(previewUrl: string): void {
+  const probe = document.createElement('iframe')
+  probe.hidden = true
+  probe.setAttribute('aria-hidden', 'true')
+  probe.setAttribute('sandbox', '')
+  probe.referrerPolicy = 'no-referrer'
+  const timeout = window.setTimeout(() => probe.remove(), 5_000)
+  const remove = () => {
+    window.clearTimeout(timeout)
+    probe.remove()
+  }
+  probe.addEventListener('load', remove, { once: true })
+  probe.addEventListener('error', remove, { once: true })
+  probe.src = new URL(`/__dz23/refresh?at=${Date.now()}`, previewUrl).toString()
+  document.body.append(probe)
+}
 function checkStatus(status: AcceptanceCheck['status']): string { return status === 'PASSED' ? t.verification.passed : status === 'FAILED' ? t.verification.failed : status === 'NOT_AUTOMATED' ? t.verification.notAutomated : t.verification.pending }
 function Nav({ icon, label, active = false }: { icon: React.ReactNode; label: string; active?: boolean }) { return <button className={active ? 'nav active' : 'nav'}>{icon}<span>{label}</span></button> }
 function Status({ health }: { health: HealthState }) { const ok = health.state === 'OK'; return <button className={ok ? 'status ok' : 'status attention'} aria-label={ok ? t.health.ok : t.health.attention}><span />{ok ? t.health.ok : t.health.attention}</button> }

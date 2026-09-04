@@ -67,7 +67,7 @@ class DelayedHeartbeatRepository extends MemoryRepository {
   }
 
   override async putAdmission(record: PreviewAdmission): Promise<void> {
-    if (this.blockRenewal && record.exchanged_at === null && record.revoked_at === null) {
+    if (this.blockRenewal && record.exchanged_at !== null && record.revoked_at === null) {
       this.renewalWrites++
       await this.#gate
     }
@@ -102,7 +102,7 @@ function createHarness(options: {
   let id = 0
   let secret = 0
   const sourceArtifact = {
-    projectId: 'project-1', runId: 'run-from-source', artifactPath: '/verified/artifact-only', artifactSha256: sha('artifact'),
+    projectId: 'project-1', runId: 'run-from-source', artifactPath: '/verified/artifact-only', artifactSha256: sha('artifact'), ownerEmail: 'owner@example.test',
   }
   const source: PreviewSourcePort = {
     verifiedArtifact: vi.fn(() => Promise.resolve(sourceArtifact)),
@@ -152,8 +152,9 @@ describe('StudioPreviewService lifecycle and isolation', () => {
       previewId: 'id-1',
       artifactPath: '/verified/artifact-only',
       artifactSha256: h.sourceArtifact.artifactSha256,
+      ownerEmail: 'owner@example.test',
       labels: { 'dz23.managed': 'preview', 'dz23.preview_id': 'id-1' },
-      environment: { APP_EMAIL_MODE: 'studio-preview', DZ23_PREVIEW_ID: 'id-1', DATA_DIR: '/data' },
+      environment: { APP_EMAIL_MODE: 'studio-preview', APP_OWNER_EMAIL: 'owner@example.test', DZ23_PREVIEW_ID: 'id-1', DATA_DIR: '/preview-storage/data' },
     }, expect.any(AbortSignal))
     expect(result.preview).toMatchObject({
       preview_id: 'id-1', project_id: 'project-1', run_id: 'run-from-source', state: 'READY', health: 'OK',
@@ -220,8 +221,8 @@ describe('StudioPreviewService lifecycle and isolation', () => {
   })
 
   it('fails closed after revoking a prior preview whose runtime cleanup fails', async () => {
-    const firstArtifact = { projectId: 'project-1', runId: 'run-1', artifactPath: '/verified/run-1', artifactSha256: sha('run-1') }
-    const secondArtifact = { projectId: 'project-1', runId: 'run-2', artifactPath: '/verified/run-2', artifactSha256: sha('run-2') }
+    const firstArtifact = { projectId: 'project-1', runId: 'run-1', artifactPath: '/verified/run-1', artifactSha256: sha('run-1'), ownerEmail: 'owner@example.test' }
+    const secondArtifact = { projectId: 'project-1', runId: 'run-2', artifactPath: '/verified/run-2', artifactSha256: sha('run-2'), ownerEmail: 'owner@example.test' }
     const verifiedArtifact = vi.fn()
       .mockResolvedValueOnce(firstArtifact)
       .mockResolvedValueOnce(secondArtifact)
@@ -247,8 +248,8 @@ describe('StudioPreviewService lifecycle and isolation', () => {
   })
 
   it('successfully replaces a prior preview while preserving exactly one active runtime', async () => {
-    const firstArtifact = { projectId: 'project-1', runId: 'run-1', artifactPath: '/verified/run-1', artifactSha256: sha('run-1') }
-    const secondArtifact = { projectId: 'project-1', runId: 'run-2', artifactPath: '/verified/run-2', artifactSha256: sha('run-2') }
+    const firstArtifact = { projectId: 'project-1', runId: 'run-1', artifactPath: '/verified/run-1', artifactSha256: sha('run-1'), ownerEmail: 'owner@example.test' }
+    const secondArtifact = { projectId: 'project-1', runId: 'run-2', artifactPath: '/verified/run-2', artifactSha256: sha('run-2'), ownerEmail: 'owner@example.test' }
     const verifiedArtifact = vi.fn()
       .mockResolvedValueOnce(firstArtifact)
       .mockResolvedValueOnce(secondArtifact)
@@ -332,7 +333,7 @@ describe('StudioPreviewService lifecycle and isolation', () => {
     expect(serialized).not.toContain('/verified/artifact-only')
     expect(serialized).not.toContain('admissionTicket')
     expect(serialized).not.toContain('cookie')
-    expect(preview.url).toMatch(/^http:\/\/p-[a-f0-9]{24}\.localhost$/u)
+    expect(preview.url).toMatch(/^http:\/\/p-[a-f0-9]{24}\.dz23\.localhost$/u)
   })
 
   it('marks a failed runtime start as FAILED without issuing admission', async () => {
@@ -410,7 +411,7 @@ describe('StudioPreviewService admissions', () => {
 
     active = true
     const cookie = (await h.service.exchange(host, first.admissionTicket)).cookie
-    expect(h.service.authorize(host, cookie)).toEqual({ previewId: first.preview.preview_id, runtimeRef: 'container:preview-1' })
+    expect(h.service.authorize(host, cookie)).toEqual({ previewId: first.preview.preview_id, runtimeRef: 'container:preview-1', maxAge: 1800 })
     membership = false
     expect(() => h.service.authorize(host, cookie)).toThrowError(expect.objectContaining({ code: 'UNAUTHENTICATED' }))
   })
@@ -420,6 +421,7 @@ describe('StudioPreviewService heartbeat', () => {
   it('renews preview and admissions in steps without crossing the absolute two-hour limit', async () => {
     const h = createHarness({ ttlSeconds: 30 * 60 })
     const { preview, admissionTicket } = await ready(h)
+    const exchanged = await h.service.exchange(new URL(preview.url).hostname, admissionTicket)
 
     for (const time of ['12:20:00', '12:40:00', '13:00:00', '13:20:00', '13:40:00']) {
       h.setNow(new Date(`2026-09-03T${time}.000Z`))
@@ -429,8 +431,24 @@ describe('StudioPreviewService heartbeat', () => {
     const renewed = h.service.get(owner, 'project-1', preview.preview_id)
     expect(renewed.expires_at).toBe('2026-09-03T14:00:00.000Z')
     expect(h.repository.admissions()[0]?.expires_at).toBe(renewed.expires_at)
-    const exchanged = await h.service.exchange(new URL(preview.url).hostname, admissionTicket)
-    expect(exchanged.maxAge).toBe(20 * 60)
+    expect(h.service.authorize(new URL(preview.url).hostname, exchanged.cookie)).toEqual({
+      previewId: preview.preview_id,
+      runtimeRef: 'container:preview-1',
+      maxAge: 20 * 60,
+    })
+  })
+
+  it('expires an unused admission ticket after two minutes and never renews it by heartbeat', async () => {
+    const h = createHarness({ ttlSeconds: 30 * 60 })
+    const { preview, admissionTicket } = await ready(h)
+    expect(h.repository.admissions()[0]?.expires_at).toBe('2026-09-03T12:02:00.000Z')
+
+    h.setNow(new Date('2026-09-03T12:01:00.000Z'))
+    await h.service.heartbeat(owner, 'project-1', preview.preview_id)
+    expect(h.repository.admissions()[0]?.expires_at).toBe('2026-09-03T12:02:00.000Z')
+
+    h.setNow(new Date('2026-09-03T12:02:01.000Z'))
+    await expect(h.service.exchange(new URL(preview.url).hostname, admissionTicket)).rejects.toMatchObject({ code: 'NOT_FOUND' })
   })
 
   it('refuses viewer, expired, and unhealthy preview renewals', async () => {
@@ -449,25 +467,24 @@ describe('StudioPreviewService heartbeat', () => {
     await expect(downHarness.service.heartbeat(owner, 'project-1', downPreview.preview.preview_id)).rejects.toMatchObject({ code: 'UNAVAILABLE' })
   })
 
-  it('serializes heartbeat renewal with one-shot exchange without reviving the old ticket', async () => {
+  it('serializes heartbeat renewal of an exchanged admission without reviving its old ticket', async () => {
     const repository = new DelayedHeartbeatRepository()
     const h = createHarness({ repository, ttlSeconds: 30 * 60 })
     const { preview, admissionTicket } = await ready(h)
     const host = new URL(preview.url).hostname
+    const exchanged = await h.service.exchange(host, admissionTicket)
     h.setNow(new Date('2026-09-03T12:20:00.000Z'))
     repository.blockRenewal = true
     const readsBefore = repository.admissionReads
 
     const heartbeat = h.service.heartbeat(owner, 'project-1', preview.preview_id)
     await vi.waitFor(() => expect(repository.renewalWrites).toBe(1))
-    const exchange = h.service.exchange(host, admissionTicket)
-    await vi.waitFor(() => expect(repository.admissionReads).toBeGreaterThanOrEqual(readsBefore + 2))
+    await vi.waitFor(() => expect(repository.admissionReads).toBeGreaterThan(readsBefore))
     repository.releaseHeartbeat()
 
     await expect(heartbeat).resolves.toMatchObject({ expires_at: '2026-09-03T12:50:00.000Z' })
-    const exchanged = await exchange
-    expect(h.service.authorize(host, exchanged.cookie)).toEqual({ previewId: preview.preview_id, runtimeRef: 'container:preview-1' })
-    expect(h.repository.admissions()[0]).toMatchObject({ exchanged_at: '2026-09-03T12:20:00.000Z', expires_at: '2026-09-03T12:50:00.000Z' })
+    expect(h.service.authorize(host, exchanged.cookie)).toEqual({ previewId: preview.preview_id, runtimeRef: 'container:preview-1', maxAge: 1800 })
+    expect(h.repository.admissions()[0]).toMatchObject({ exchanged_at: '2026-09-03T12:00:00.000Z', expires_at: '2026-09-03T12:50:00.000Z' })
     await expect(h.service.exchange(host, admissionTicket)).rejects.toMatchObject({ code: 'NOT_FOUND' })
   })
 })
@@ -591,7 +608,7 @@ describe('StudioPreviewService maintenance and diagnostics', () => {
     expect(h.runtime.stop).toHaveBeenCalledTimes(1)
   })
 
-  it('exposes preview access codes only to writers in the same project and filters hostile messages', async () => {
+  it('exposes preview access codes only to the writer session that opened the preview and filters hostile messages', async () => {
     const valid = { kind: 'code', email: 'owner@example.test', code: '123456', expiresAt: '2026-09-03T12:10:00.000Z' }
     const h = createHarness({
       runtime: {
@@ -604,10 +621,19 @@ describe('StudioPreviewService maintenance and diagnostics', () => {
         ])),
       },
     })
-    const { preview } = await ready(h)
+    const { preview, admissionTicket } = await ready(h)
+    await h.service.exchange(new URL(preview.url).hostname, admissionTicket)
 
     await expect(h.service.verificationMessages(owner, 'project-1', preview.preview_id)).resolves.toEqual([valid])
+    vi.mocked(h.sessions.isActive).mockReturnValue(false)
+    await expect(h.service.verificationMessages(owner, 'project-1', preview.preview_id)).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    vi.mocked(h.sessions.isActive).mockReturnValue(true)
+    vi.mocked(h.sessions.canRead).mockReturnValue(false)
+    await expect(h.service.verificationMessages(owner, 'project-1', preview.preview_id)).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    vi.mocked(h.sessions.canRead).mockReturnValue(true)
     await expect(h.service.verificationMessages(viewer, 'project-1', preview.preview_id)).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    const otherWriter: PreviewActor = { ...owner, userId: 'builder-2', role: 'builder', sessionId: 'builder-session' }
+    await expect(h.service.verificationMessages(otherWriter, 'project-1', preview.preview_id)).rejects.toMatchObject({ code: 'FORBIDDEN' })
     const outsider: PreviewActor = { ...owner, tenantId: 'tenant-2' }
     await expect(h.service.verificationMessages(outsider, 'project-1', preview.preview_id)).rejects.toMatchObject({ code: 'NOT_FOUND' })
   })
@@ -674,7 +700,7 @@ describe('StudioPreviewService maintenance and diagnostics', () => {
     await h.repository.putPreview({
       preview_id: 'failed-preview', org_id: owner.orgId, tenant_id: owner.tenantId, project_id: 'project-1', run_id: 'run-1',
       artifact_sha256: sha('artifact'), created_by: owner.userId, source_session_id: owner.sessionId,
-      hostname: 'p-0123456789abcdef01234567.localhost', state: 'FAILED', created_at: '2026-09-03T12:00:00.000Z', ready_at: null,
+      hostname: 'p-0123456789abcdef01234567.dz23.localhost', state: 'FAILED', created_at: '2026-09-03T12:00:00.000Z', ready_at: null,
       expires_at: '2026-09-03T12:30:00.000Z', stopped_at: '2026-09-03T12:00:01.000Z', stop_reason: 'failed', failure_code: 'RUNTIME_START_FAILED', runtime_ref: null, health: 'DOWN',
     })
     await expect(h.service.logs(owner, 'project-1', 'failed-preview')).resolves.toEqual([])

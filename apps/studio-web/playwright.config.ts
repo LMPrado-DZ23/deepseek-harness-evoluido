@@ -11,7 +11,7 @@ export default defineConfig({
   testDir: './tests', timeout: 60_000, workers: 1,
   outputDir: process.env.CI === 'true' ? '/tmp/dz23-studio-web-test-results' : './test-results',
   use: {
-    baseURL: 'http://127.0.0.1:4179', trace: 'retain-on-failure',
+    baseURL: 'http://studio.dz23.localhost:4179', trace: 'retain-on-failure',
     ...(chromiumPath === undefined ? {} : { launchOptions: { executablePath: chromiumPath } }),
   },
   webServer: {

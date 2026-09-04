@@ -6,7 +6,7 @@
 - Branch: `codex/missao-m1-preview`
 - Base imutável: `ec92f29f7398d1ac69dc6201e5fb8e6bccfa60b9`
 - Harness upstream preservado: `6c705be1ce6774a000d061da41d1823b03a3d42c`
-- Último checkpoint: `2026-09-03 America/Sao_Paulo`
+- Último checkpoint: `2026-09-04 America/Sao_Paulo`
 
 ## Objetivo
 
@@ -34,7 +34,7 @@ Entregar, em branches empilhadas e sem push/deploy, as etapas M1 a M6: preview s
 
 ## Etapas
 
-- [ ] M1 — P34 preview seguro
+- [x] M1 — checkpoint de código P34 fechado; aguardando parecer independente do Claude antes de integração
 - [ ] M2 — Prompt-to-App fatia 3, SaaS/dashboard e golden 18/18
 - [ ] M3 — Postgres operacional, migração e backup/restore
 - [ ] M4 — PWA e preparação móvel
@@ -43,30 +43,32 @@ Entregar, em branches empilhadas e sem push/deploy, as etapas M1 a M6: preview s
 
 ## Checkpoint atual
 
-- P34-A concluído em `302b582`: análise AST recusa `use server` aninhado e
-  APIs de rede executáveis sem confundir textos ou comentários.
-- Núcleo P34 concluído em `c861fc3` e ajuste de tipagem de prova em `76ebca0`:
-  domínio tenant-aware, hash integral do artefato, lifecycle, TTL, mutexes,
-  reconciliação, admissão opaca, gateway com allowlist e fail-closed.
-- Jornada visual local concluída em `068a212`: iframe isolado, ticket entregue
-  por `postMessage`, aviso permanente de não publicação, códigos
-  `studio-preview` e encerramento pela pessoa.
-- Prova Playwright da jornada registrada em `09348fb`; compila e inclui casos
-  adversariais, mas o navegador não executou neste host por runtime ausente.
-- Lifecycle endurecido em `a251fc5`: só um preview físico pode avançar;
-  readiness é obrigatória; heartbeat e ticket usam locks compatíveis; cleanup
-  incompleto permanece `STOPPING`, observável e bloqueia novo runtime.
-- Revisão adversarial do núcleo: `GO`, sem achado ALTO/MÉDIO. Residual: o
-  supervisor real deve provar que respeita `AbortSignal` e não deixa runtime
-  órfão após timeout.
-- Gates em WSL/ext4: typecheck `PASS`; 65 testes focados `PASS`; cobertura
-  global 387 `PASS` e 18 integrações Postgres puladas; i18n 209 chaves `PASS`;
-  domínios `PASS`; builds `PASS`. A suíte Playwright iniciou, mas o
-  navegador não abriu por bibliotecas nativas ausentes no host; não é prova E2E.
-- Docker Desktop está indisponível. Supervisor Docker, rede interna sem egress,
-  Caddy real e jornada completa de navegador permanecem `NOT_EXECUTED`.
-- M1 ainda não pode receber `PREVIEW_OK`; o runtime padrão é
-  `UnconfiguredRuntime` e recusa iniciar a prévia.
+- Supervisor Docker e proxy mínimo construídos com autoridade derivada no
+  servidor, sockets Unix, runtime em `NetworkMode=none`, proxy somente no
+  loopback compartilhado, artefato imutável e cleanup idempotente.
+- Lifecycle tenant-aware liga somente run `PASSED` ao artefato materializado,
+  serializa start/stop/admissão, exige readiness e mantém cleanup incompleto em
+  estado bloqueante e observável.
+- Gateway fecha método, host, cabeçalhos e corpo; ticket entra somente por
+  `postMessage`; respostas Unix acima do limite são recusadas sem exceção não
+  tratada no stream.
+- Prova física final no digest `sha256:0de6fc8f…97ff2`: runtime e proxy reais
+  endurecidos, apenas `lo`, zero rotas externas, host/metadata/egress bloqueados,
+  login local e cleanup sem sobreviventes. Caddy atual e Compose combinados
+  validados offline.
+- Chromium em contêiner sem rede: 3/3 jornadas `PASS`, incluindo login HTTP
+  local, ticket fora da URL, cookie host-only, ataque por cookie duplicado,
+  iframe, código local e encerramento.
+- Domínios locais corrigidos para `studio.dz23.localhost` e
+  `p-<id>.dz23.localhost`; origens permanecem isoladas e o cookie
+  `SameSite=Strict` funciona no iframe sem CA/TLS/hosts.
+- Gates em WSL/ext4: typecheck, builds, i18n (265 chaves), escopo de domínios,
+  Caddy, Compose e `git diff --check` aprovados. Suíte global: 659 aprovados e
+  18 integrações Postgres puladas; cobertura 94,24/90,04/95,44/97,11%. Revisão
+  adversarial independente: `GO`, sem incompatibilidade concreta remanescente;
+  validação focada independente 79/79 `PASS`.
+- M1 autoriza `PREVIEW_OK` somente para o protótipo local verificado. HTTPS,
+  celular, Tailscale, operação prolongada e experiência leiga continuam sem prova.
 
 ## Achado reservado para M3
 
@@ -78,9 +80,9 @@ se qualquer domínio Studio cair no backend JSON em produção.
 
 ## Próxima ação exata
 
-Entregar este checkpoint ao Claude para revisão e reexecução independente.
-Em paralelo seguro, preparar o supervisor Docker/Caddy sem afirmar execução;
-o gate real exige daemon Docker disponível e navegador funcional.
+Fechar commit e artefato do M1, executar P37 sobre o arquivo extraído e entregar
+ao Claude para revisão/reexecução independente. Em seguida iniciar M2 em branch
+empilhada, sem integrar M1 na branch principal antes do parecer.
 
 ## Bloqueios externos reservados ao usuário
 

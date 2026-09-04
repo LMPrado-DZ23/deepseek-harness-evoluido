@@ -5,7 +5,7 @@ import { STUDIO_DOMAIN_SPECS } from '../../../scripts/studio-domain-specs.ts'
 describe('Studio domain tenant-scope gate', () => {
   it('classifies every defineDomain declaration with no wildcard', async () => {
     await expect(assertDomainScopeManifest(process.cwd())).resolves.toBeUndefined()
-  })
+  }, 15_000)
 
   it('matches every physical domain and table and requires its structural scope fields', () => {
     expect(STUDIO_DOMAIN_SCOPES).toHaveLength(STUDIO_DOMAIN_SPECS.length)

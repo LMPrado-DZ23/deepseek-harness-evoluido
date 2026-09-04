@@ -2,7 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import type { Domain, KvTable } from '@deepseek-ai/dsh-storage-domain'
 import type {} from '@deepseek-ai/dsh-host-webserver'
-import { requiredSessionToken, type StudioIdentityService } from '@dz23-studio/identity'
+import { authenticatedMutation, type StudioIdentityService } from '@dz23-studio/identity'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import {
   studioRouteHealthDomainSpec,
@@ -88,7 +88,7 @@ export function createRouteHealthHandler(service: StudioRouteHealthService, iden
   return async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     try {
       if (request.method !== 'GET') return send(response, 405, { error: 'Método não permitido.' })
-      const session = await identity.authenticate(requiredSessionToken(request))
+      const session = await authenticatedMutation(request, identity)
       const scope = { orgId: session.org_id, tenantId: session.tenant_id }
       return send(response, 200, { routes: service.list(scope), switches: service.switches(scope) })
     } catch (error) {

@@ -41,6 +41,7 @@
       - !!js process.env.DZ23_PUBLIC_HOST
     allowedOrigins:
       - !!js process.env.DZ23_PUBLIC_ORIGIN
+    cookieSecurity: !!js process.env.DZ23_COOKIE_SECURITY ?? 'secure'
     enrollment:
       mode: bootstrap-email
       email: !!js process.env.DZ23_BOOTSTRAP_OWNER_EMAIL

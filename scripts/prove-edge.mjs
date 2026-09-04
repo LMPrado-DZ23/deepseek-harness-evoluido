@@ -280,7 +280,7 @@ try {
   })
   assert.equal(await websocketStatus(`ws://127.0.0.1:${edgePort}/api/remote.mux`, allCookies, edgeOrigin), 101)
 
-  const sessionToken = decodeURIComponent(studioCookies.match(/dz23_studio_session=([^;]+)/)?.[1] ?? '')
+  const sessionToken = decodeURIComponent(studioCookies.match(/(?:^|;\s*)dz23_studio_session=([^;]+)/)?.[1] ?? '')
   const identitySession = await booted.ctx.studioIdentity.service.authenticate(sessionToken, false)
   await booted.ctx.studioIdentity.service.revokeSession(identitySession, identitySession.session_id)
   assert.equal((await fetch(`${edgeOrigin}/`, { headers: authenticatedHeaders })).status, 401)

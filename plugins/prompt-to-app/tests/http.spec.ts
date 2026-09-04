@@ -48,7 +48,7 @@ afterEach(async () => { await Promise.all(servers.splice(0).map(server => new Pr
 async function fixture() {
   const repository = new MemoryRepository(); let id = 0
   const service = new PromptToAppService({ repository, now: () => new Date('2026-09-03T12:00:00.000Z'), createId: () => `id-${++id}` })
-  const identity = { authenticate: vi.fn(() => Promise.resolve(session)), validateCsrf: vi.fn() }
+  const identity = { authenticate: vi.fn(() => Promise.resolve(session)), validateCsrf: vi.fn(), validateCsrfToken: vi.fn() }
   const tenancy = { authorizationFor: vi.fn((userId: string, orgId: string, tenantId: string) => ({ userId, orgId, tenantId, role: 'owner' as const })) }
   const model: PromptModelPort = {
     complete: vi.fn((_scope, purpose) => Promise.resolve(purpose === 'plan'
@@ -180,7 +180,7 @@ describe('prompt-to-app HTTP boundary', () => {
     expect((await f.request('/projects')).status).toBe(403)
     f.identity.authenticate.mockRejectedValueOnce(new IdentityError('invalid', 'Entre'))
     expect((await f.request('/projects')).status).toBe(401)
-    f.identity.validateCsrf.mockImplementationOnce(() => { throw new IdentityError('csrf', 'csrf') })
+    f.identity.validateCsrfToken.mockImplementationOnce(() => { throw new IdentityError('csrf', 'csrf') })
     expect((await f.request('/projects', { method: 'POST', body: '{}' })).status).toBe(401)
     f.allowedHosts.splice(0)
     expect((await f.request('/projects')).status).toBe(401)

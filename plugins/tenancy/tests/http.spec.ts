@@ -14,6 +14,7 @@ function services() {
   const identity = {
     authenticate: vi.fn(() => Promise.resolve(session)),
     validateCsrf: vi.fn(),
+    validateCsrfToken: vi.fn(),
     userForSession: vi.fn(() => ({ user_id: 'owner', email: 'owner@example.com' })),
   }
   const tenancy = {
@@ -110,7 +111,7 @@ describe('tenancy HTTP boundary', () => {
   it('rejects missing sessions, CSRF failures, hostile hosts and unknown routes', async () => {
     const f = await fixture()
     expect((await f.request('/workspaces', { headers: { cookie: '' } })).status).toBe(401)
-    f.identity.validateCsrf.mockImplementationOnce(() => { throw new IdentityError('csrf', 'csrf') })
+    f.identity.validateCsrfToken.mockImplementationOnce(() => { throw new IdentityError('csrf', 'csrf') })
     expect((await f.request('/workspaces', { method: 'POST', body: JSON.stringify({ name: 'Produto' }) })).status).toBe(401)
     f.allowedHosts.splice(0)
     expect((await f.request('/workspaces')).status).toBe(401)

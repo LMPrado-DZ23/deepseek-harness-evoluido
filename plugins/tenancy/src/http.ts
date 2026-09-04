@@ -1,9 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import {
-  CSRF_COOKIE,
+  authenticatedMutation,
   assertRequestTrust,
-  parseCookies,
-  requiredSessionToken,
   singleHeader,
   IdentityError,
   type StudioIdentityService,
@@ -50,12 +48,7 @@ export function createTenancyHttpHandler(config: TenancyHttpConfig) {
       const route = path.slice('/api/studio/tenancy'.length)
       const match = matchRoute(request.method, route)
       if (match === undefined) return json(response, 404, { error: 'Rota não encontrada.' })
-      const token = requiredSessionToken(request)
-      const session = await config.identity.authenticate(token)
-      if (request.method !== 'GET') {
-        const cookies = parseCookies(request.headers.cookie)
-        config.identity.validateCsrf(session, cookies[CSRF_COOKIE], singleHeader(request.headers['x-dz23-csrf']))
-      }
+      const session = await authenticatedMutation(request, config.identity)
       const actor = config.service.actorFromSession(session)
 
       if (request.method === 'GET' && route === '/workspaces') {

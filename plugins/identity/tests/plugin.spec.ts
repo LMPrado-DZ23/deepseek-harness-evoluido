@@ -2,7 +2,7 @@ import type { CredentialProvider } from '@deepseek-ai/dsh-credentials'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import { describe, expect, it, vi } from 'vitest'
 import type { EmailSender } from '../src/email.ts'
-import { apply, type StudioIdentityRuntime } from '../src/index.ts'
+import { apply, SESSION_COOKIE, type StudioIdentityRuntime } from '../src/index.ts'
 import type { PasskeyProvider, RegistrationOptions, AuthenticationOptions } from '../src/passkey.ts'
 import type { StudioPolicyRuntime } from '../../policy/src/index.ts'
 
@@ -165,7 +165,7 @@ describe('identity Cordis plugin composition', () => {
       url: '/api/studio/identity/harness/session',
       headers: {
         host: 'studio.example',
-        cookie: `dz23_studio_session=${ownerIssued.token}`,
+        cookie: `${SESSION_COOKIE}=${ownerIssued.token}`,
         'x-dz23-edge': 'edge-secret',
         'x-forwarded-proto': 'https',
       },
@@ -230,5 +230,38 @@ describe('identity Cordis plugin composition', () => {
     const invalid = context()
     await expect(apply(invalid.ctx as never, { passkeys, rpId: '127.0.0.1' })).rejects.toThrow(/nunca um endereço IP/)
     expect(invalid.ctx.storageDomain.open).not.toHaveBeenCalled()
+  })
+
+  it('allows non-Secure cookies only on an explicit loopback HTTP origin', async () => {
+    const local = context()
+    await expect(apply(local.ctx as never, {
+      passkeys,
+      edge: { required: true, secretRef: 'DZ23_EDGE_SECRET' },
+      email: { kind: 'memory' },
+      enrollment: 'closed',
+      cookieSecurity: 'loopback-http',
+      allowedHosts: ['studio.dz23.localhost:4321'],
+      allowedOrigins: ['http://studio.dz23.localhost:4321'],
+    })).resolves.toBeUndefined()
+
+    const publicBind = context('0.0.0.0')
+    await expect(apply(publicBind.ctx as never, {
+      passkeys,
+      edge: { secretRef: 'DZ23_EDGE_SECRET' },
+      emailSender: { sendMagicCode: vi.fn(), sendInvitation: vi.fn() },
+      cookieSecurity: 'loopback-http',
+      allowedHosts: ['studio.example'],
+      allowedOrigins: ['http://studio.example'],
+    })).rejects.toThrow(/loopback-http exige/)
+    expect(publicBind.ctx.storageDomain.open).not.toHaveBeenCalled()
+
+    const malformed = context()
+    await expect(apply(malformed.ctx as never, {
+      passkeys,
+      cookieSecurity: 'loopback-http',
+      allowedHosts: ['['],
+      allowedOrigins: ['http://localhost:4321'],
+    })).rejects.toThrow(/loopback-http exige/)
+    expect(malformed.ctx.storageDomain.open).not.toHaveBeenCalled()
   })
 })

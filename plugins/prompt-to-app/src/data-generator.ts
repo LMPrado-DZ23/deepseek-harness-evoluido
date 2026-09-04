@@ -107,7 +107,7 @@ function renderMigrations(entities: readonly PreparedEntity[]): string {
 }
 
 function renderClient(): string {
-  return `import { chmodSync, mkdirSync } from 'node:fs'\nimport { resolve } from 'node:path'\nimport { DatabaseSync } from 'node:sqlite'\nimport { migrate } from './migrations'\n\nexport function openDatabase(dataDirectory = process.env.DATA_DIR ?? './data'): DatabaseSync {\n  const directory = resolve(dataDirectory)\n  mkdirSync(directory, { recursive: true, mode: 0o700 })\n  chmodSync(directory, 0o700)\n  const databasePath = resolve(directory, 'app.sqlite')\n  const database = new DatabaseSync(databasePath)\n  chmodSync(databasePath, 0o600)\n  migrate(database)\n  return database\n}\n`
+  return `import { chmodSync, mkdirSync } from 'node:fs'\nimport { resolve } from 'node:path'\nimport { DatabaseSync } from 'node:sqlite'\nimport { migrate } from './migrations'\n\nexport function openDatabase(dataDirectory = process.env.DATA_DIR ?? './data'): DatabaseSync {\n  const directory = resolve(dataDirectory)\n  const directoryMode = process.env.APP_EMAIL_MODE === 'studio-preview' ? 0o710 : 0o700\n  mkdirSync(directory, { recursive: true, mode: directoryMode })\n  chmodSync(directory, directoryMode)\n  const databasePath = resolve(directory, 'app.sqlite')\n  const database = new DatabaseSync(databasePath)\n  chmodSync(databasePath, 0o600)\n  migrate(database)\n  return database\n}\n`
 }
 
 function renderRepository(entity: PreparedEntity): string {

@@ -4,7 +4,10 @@
 
 import /etc/caddy/DZ23.common.caddy
 
-https://{$DZ23_SITE_HOST:localhost}:{$DZ23_HTTPS_PORT:8443} {
-	tls internal
+http://{$DZ23_SITE_HOST:studio.dz23.localhost} {
 	import dz23_edge
+}
+
+http://*.dz23.localhost {
+	import dz23_preview_edge
 }

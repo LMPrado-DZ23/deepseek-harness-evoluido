@@ -40,11 +40,13 @@ codeForm.addEventListener('submit', async event => {
   event.preventDefault()
   message('Verificando…')
   try {
-    await post('/magic/verify', {
+    const issued = await post('/magic/verify', {
       email: emailInput.value,
       code: codeInput.value,
       device_label: navigator.userAgentData?.platform ?? navigator.platform ?? 'Navegador',
     })
+    if (typeof issued.csrf_token !== 'string' || issued.csrf_token.length < 32) throw new Error('A sessão não pôde ser protegida.')
+    window.sessionStorage.setItem('dz23.studio.csrf.v1', issued.csrf_token)
     message('Tudo certo. Abrindo seu espaço…', 'success')
     window.location.assign('/api/studio/identity/harness/session')
   } catch (error) {

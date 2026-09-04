@@ -2,39 +2,52 @@ import AxeBuilder from '@axe-core/playwright'
 import { expect, request as apiRequest, test } from '@playwright/test'
 
 test('recusa interface e API sem sessão', async () => {
-  const client = await apiRequest.newContext({ baseURL: 'http://127.0.0.1:4179' })
+  const client = await apiRequest.newContext({
+    baseURL: 'http://127.0.0.1:4179',
+    extraHTTPHeaders: { host: 'studio.dz23.localhost:4179' },
+  })
   expect((await client.get('/studio')).status()).toBe(401)
   expect((await client.get('/api/studio/apps/health')).status()).toBe(401)
   await client.dispose()
 })
 
+test('o login HTTP local grava sessão host-only sem enfraquecer o modo de servidor', async ({ context, page }) => {
+  await page.goto('/login')
+  const status = await page.evaluate(async () => (await fetch('/api/studio/identity/magic/verify', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email: 'owner@example.test', code: '123456', device_label: 'Chromium local' }),
+  })).status)
+  expect(status).toBe(200)
+  const cookies = await context.cookies('http://studio.dz23.localhost:4179')
+  expect(cookies).toEqual(expect.arrayContaining([
+    expect.objectContaining({ name: 'dz23_studio_session', value: 'session-token', domain: 'studio.dz23.localhost', httpOnly: true, secure: false }),
+  ]))
+  expect(cookies.some(cookie => cookie.name === 'dz23_studio_csrf')).toBe(false)
+})
+
 test('percorre as cinco etapas, muda privacidade e termina sem alegar publicação', async ({ context, page }) => {
-  const postedMessages: Array<{ readonly hasTicket: boolean; readonly targetOrigin: string; readonly receiverUrl: string }> = []
+  const admissionPosts: Array<{ readonly hasTicket: boolean; readonly origin: string; readonly url: string }> = []
   const requestedUrls: string[] = []
-  await context.exposeBinding('__recordDz23PostMessage', ({ frame }, payload: { hasTicket: boolean; targetOrigin: string }) => {
-    postedMessages.push({ ...payload, receiverUrl: frame.url() })
+  page.on('request', request => {
+    requestedUrls.push(request.url())
+    if (request.method() !== 'POST' || new URL(request.url()).pathname !== '/__dz23/admission') return
+    const payload = request.postDataJSON() as unknown
+    void request.allHeaders().then(headers => {
+      admissionPosts.push({
+        hasTicket: typeof payload === 'object' && payload !== null && 'ticket' in payload && typeof (payload as { ticket?: unknown }).ticket === 'string',
+        origin: headers.origin ?? '',
+        url: request.url(),
+      })
+    })
   })
-  await context.addInitScript(() => {
-    type Recorder = (payload: { hasTicket: boolean; targetOrigin: string }) => Promise<void>
-    const scope = globalThis as typeof globalThis & { __recordDz23PostMessage: Recorder }
-    const original = window.postMessage
-    window.postMessage = function (...args: Parameters<Window['postMessage']>): void {
-      const message = args[0]
-      const target = args[1]
-      const targetOrigin = typeof target === 'string' ? target : target.targetOrigin
-      const hasTicket = typeof message === 'object' && message !== null && 'ticket' in message
-      void scope.__recordDz23PostMessage({ hasTicket, targetOrigin })
-      Reflect.apply(original, this, args)
-    } as Window['postMessage']
-  })
-  page.on('request', request => requestedUrls.push(request.url()))
   await context.addCookies([
-    { name: 'dz23_studio_session', value: 'e2e', url: 'http://127.0.0.1:4179' },
-    { name: 'dz23_studio_csrf', value: 'csrf-e2e', url: 'http://127.0.0.1:4179' },
+    { name: 'dz23_studio_session', value: 'e2e', url: 'http://studio.dz23.localhost:4179' },
   ])
+  await context.addInitScript(() => window.sessionStorage.setItem('dz23.studio.csrf.v1', 'csrf-e2e'))
   const studioResponse = await page.goto('/studio')
   const studioPolicy = studioResponse?.headers()['content-security-policy'] ?? ''
-  expect(studioPolicy).toContain('frame-src http://*.localhost:4179')
+  expect(studioPolicy).toContain('frame-src http://*.dz23.localhost:4179')
   expect(studioPolicy).toContain("frame-ancestors 'none'")
   await expect(page.getByRole('button', { name: 'Quero um painel para minha equipe criar, editar e excluir cadastros.' })).toBeVisible()
   await expect(page.getByText('Seus dados não são enviados para serviços externos.')).toBeVisible()
@@ -76,19 +89,27 @@ test('percorre as cinco etapas, muda privacidade e termina sem alegar publicaç�
   await expect(page.getByText('cliente@preview.local')).toBeVisible()
   await expect(page.getByText('482901')).toBeVisible()
 
+  const studioSessionCookies = (await context.cookies('http://studio.dz23.localhost:4179'))
+    .filter(cookie => cookie.name === 'dz23_studio_session')
+  expect(studioSessionCookies).toEqual(expect.arrayContaining([
+    expect.objectContaining({ value: 'e2e', domain: 'studio.dz23.localhost' }),
+    expect.objectContaining({ value: 'shadow', domain: '.dz23.localhost' }),
+  ]))
+  expect(studioSessionCookies).toHaveLength(2)
+
   const frameUrl = await previewFrameElement.getAttribute('src').then(src => new URL(src!, page.url()))
-  const loadedPreviewFrame = page.frames().find(frame => frame !== page.mainFrame() && frame.url().includes('.localhost:4179/'))
+  const loadedPreviewFrame = page.frames().find(frame => frame !== page.mainFrame() && frame.url().includes('.dz23.localhost:4179/'))
   expect(loadedPreviewFrame).toBeDefined()
   expect(page.url()).not.toMatch(/[?&#]ticket=/iu)
   expect(frameUrl.href).not.toMatch(/[?&#]ticket=/iu)
   expect(loadedPreviewFrame!.url()).not.toMatch(/[?&#]ticket=/iu)
   expect(requestedUrls.every(url => !/[?&#]ticket=/iu.test(url))).toBe(true)
-  await expect.poll(() => postedMessages.filter(message => message.hasTicket).length).toBe(1)
-  const ticketPost = postedMessages.find(message => message.hasTicket)!
-  expect(ticketPost.targetOrigin).toBe(frameUrl.origin)
-  expect(new URL(ticketPost.receiverUrl).origin).toBe(frameUrl.origin)
+  await expect.poll(() => admissionPosts.length).toBe(1)
+  expect(admissionPosts[0]).toEqual({ hasTicket: true, origin: frameUrl.origin, url: `${frameUrl.origin}/__dz23/admission` })
+  await expect.poll(() => requestedUrls.some(url => new URL(url).pathname === '/__dz23/refresh')).toBe(true)
+  await expect.poll(() => page.locator('iframe[aria-hidden="true"]').count(), { timeout: 7_000 }).toBe(0)
 
-  const beforeForgery = postedMessages.filter(message => message.hasTicket).length
+  const beforeForgery = admissionPosts.length
   await page.evaluate(previewOrigin => {
     const frame = document.querySelector<HTMLIFrameElement>('iframe[title="Prévia isolada do protótipo"]')
     if (frame?.contentWindow == null) throw new Error('preview frame missing')
@@ -100,7 +121,7 @@ test('percorre as cinco etapas, muda privacidade e termina sem alegar publicaç�
     }))
   }, frameUrl.origin)
   await page.waitForTimeout(100)
-  expect(postedMessages.filter(message => message.hasTicket)).toHaveLength(beforeForgery)
+  expect(admissionPosts).toHaveLength(beforeForgery)
 
   await page.getByRole('button', { name: 'Encerrar prévia' }).click()
   await expect(previewFrameElement).toHaveCount(0)

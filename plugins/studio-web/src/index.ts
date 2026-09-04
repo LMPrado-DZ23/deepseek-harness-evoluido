@@ -3,8 +3,8 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@dz23-studio/preview'
 import {
   IdentityError,
+  authenticatedMutation,
   assertRequestTrust,
-  requiredSessionToken,
   type StudioIdentityService,
 } from '@dz23-studio/identity'
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -32,7 +32,7 @@ export function createStudioWebHandler(config: {
     try {
       assertRequestTrust(request, { allowedHosts: config.allowedHosts, allowedOrigins: [] })
       if (request.method !== 'GET' && request.method !== 'HEAD') return send(response, 405, 'Método não permitido.', frameSources)
-      await config.identity.authenticate(requiredSessionToken(request))
+      await authenticatedMutation(request, config.identity)
       const root = await realpath(config.distDirectory)
       const pathname = new URL(request.url ?? '/studio', 'http://local').pathname
       const requested = pathname === '/studio' || pathname === '/studio/' ? 'index.html' : decodeURIComponent(pathname.slice('/studio/'.length))
@@ -104,7 +104,7 @@ function securityHeaders(type: string, frameSources: readonly string[]): Record<
 
 function normalizePreviewFrameSources(values: readonly string[]): readonly string[] {
   return [...new Set(values.map(value => {
-    const local = /^http:\/\/\*\.localhost(?::([1-9]\d{0,4}))?$/u.exec(value)
+    const local = /^http:\/\/\*\.dz23\.localhost(?::([1-9]\d{0,4}))?$/u.exec(value)
     if (local !== null && (local[1] === undefined || Number(local[1]) <= 65_535)) return value
     const hosted = /^https:\/\/\*\.preview\.([a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)$/u.exec(value)
     if (hosted !== null && hosted[1]!.includes('.') && !hosted[1]!.includes('..')) return value

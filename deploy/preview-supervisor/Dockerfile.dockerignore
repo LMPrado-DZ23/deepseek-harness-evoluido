@@ -1,0 +1,5 @@
+**
+!plugins/
+!plugins/preview-supervisor/
+!plugins/preview-supervisor/lib/
+!plugins/preview-supervisor/lib/**

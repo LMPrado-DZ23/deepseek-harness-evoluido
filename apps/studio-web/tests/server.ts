@@ -1,10 +1,10 @@
 import type { JobId, JobOutcome } from '@deepseek-ai/dsh-jobs'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { CSRF_COOKIE, SESSION_COOKIE, type SessionRecord, type StudioIdentityService } from '../../../plugins/identity/src/index.js'
+import { createIdentityHttpHandler, CSRF_COOKIE, IdentityError, SESSION_COOKIE, type SessionRecord, type StudioIdentityService } from '../../../plugins/identity/src/index.js'
 import { createStudioWebHandler } from '../../../plugins/studio-web/src/index.js'
 import type { StudioTenancyService } from '../../../plugins/tenancy/src/index.js'
 import { createPromptToAppHttpHandler } from '../../../plugins/prompt-to-app/src/http.js'
@@ -15,7 +15,7 @@ import type { StudioApproval, StudioAppSpecRecord, StudioDesignSpecRecord, Studi
 import { ModelCodeGenerator, PromptToAppPipeline } from '../../../plugins/prompt-to-app/src/pipeline.js'
 import { PlannerEngine } from '../../../plugins/prompt-to-app/src/planner.js'
 import type { PromptModelPort } from '../../../plugins/prompt-to-app/src/ports.js'
-import { hashTree, type ContainerBuilder } from '../../../plugins/prompt-to-app/src/runner.js'
+import { hashTree, PREVIEW_ARTIFACT_RELATIVE_PATH, type ContainerBuilder } from '../../../plugins/prompt-to-app/src/runner.js'
 import { PromptToAppService, type PromptToAppRepository } from '../../../plugins/prompt-to-app/src/service.js'
 import { createPreviewGatewayHttpHandler, type PreviewForwardPort } from '../../../plugins/preview/src/gateway.js'
 import { createPreviewProjectHttpExtension } from '../../../plugins/preview/src/http.js'
@@ -56,7 +56,7 @@ class DeterministicPreviewRuntime implements PreviewRuntimePort {
 
   async start(input: Parameters<PreviewRuntimePort['start']>[0], signal: AbortSignal): Promise<{ readonly runtimeRef: string }> {
     signal.throwIfAborted()
-    if (input.environment.APP_EMAIL_MODE !== 'studio-preview' || input.environment.DATA_DIR !== '/data') throw new Error('invalid-preview-environment')
+    if (input.environment.APP_EMAIL_MODE !== 'studio-preview' || input.environment.DATA_DIR !== '/preview-storage/data') throw new Error('invalid-preview-environment')
     const runtimeRef = `runtime:${input.previewId}`
     this.managed.set(runtimeRef, { previewId: input.previewId, environment: input.environment })
     return { runtimeRef }
@@ -87,12 +87,17 @@ const root = resolve(import.meta.dirname, '..', '..', '..')
 const scratch = await mkdtemp(join(tmpdir(), 'dz23-studio-e2e-'))
 const session = { session_id: 'e2e-session', user_id: 'owner', org_id: 'org-e2e', tenant_id: 'tenant-e2e' } as SessionRecord
 const identity = {
+  requestMagicCode: async () => undefined,
+  verifyMagicCode: async () => ({ token: 'session-token', csrfToken: 'csrf-e2e', session }),
   authenticate: async (token: string) => {
-    if (token !== 'e2e') throw new Error('invalid-session')
+    if (token !== 'e2e') throw new IdentityError('invalid', 'invalid-session')
     return session
   },
   validateCsrf: (_session: SessionRecord, cookie: string | undefined, header: string | undefined) => {
     if (cookie !== 'csrf-e2e' || header !== 'csrf-e2e') throw new Error('invalid-csrf')
+  },
+  validateCsrfToken: (_session: SessionRecord, header: string | undefined) => {
+    if (header !== 'csrf-e2e') throw new IdentityError('csrf', 'invalid-csrf')
   },
 } as unknown as StudioIdentityService
 const tenancy = { authorizationFor: (userId: string, orgId: string, tenantId: string) => ({ userId, orgId, tenantId, role: 'owner' as const }) } as unknown as StudioTenancyService
@@ -120,6 +125,12 @@ const model: PromptModelPort = {
 const builder = {
   preflight: async () => ({ state: 'OK' as const, message: 'fixture' }),
   execute: async (directory: string, command: string) => {
+    if (command === 'pnpm run build') {
+      await mkdir(resolve(directory, '.next', 'standalone'), { recursive: true })
+      await mkdir(resolve(directory, '.next', 'static'), { recursive: true })
+      await writeFile(resolve(directory, '.next', 'standalone', 'server.js'), "import http from 'node:http';http.createServer((_,res)=>res.end('fixture')).listen(3000)")
+      await writeFile(resolve(directory, '.next', 'static', 'fixture.js'), 'export {}')
+    }
     if (command === 'pnpm run test:e2e') {
       const path = resolve(directory, 'evidence', 'appspec-report.json')
       const report = JSON.parse(await readFile(path, 'utf8')) as { checks: Array<{ status: string }> }
@@ -129,7 +140,7 @@ const builder = {
     return { exitCode: 0, stdout: command, stderr: '', timedOut: false, command, securityArgs: [] }
   },
 } as unknown as ContainerBuilder
-const pipeline = new PromptToAppPipeline({ service, builder, templateDirectory: resolve(root, 'templates', 'static-site@1'), runsRoot: resolve(scratch, 'runs'), createId: () => `pipeline-${++id}` })
+const pipeline = new PromptToAppPipeline({ service, builder, templateDirectory: resolve(root, 'templates', 'nextjs-app@1'), runsRoot: resolve(scratch, 'runs'), createId: () => `pipeline-${++id}` })
 const active = new Map<JobId, { cancel(reason?: string): void; done: Promise<JobOutcome> }>()
 let jobSequence = 0
 const registry: PromptToAppJobRegistry = {
@@ -140,7 +151,14 @@ const jobs = new PromptToAppJobService({
   service, pipeline, registry, owners: { create: async () => ({ owner: {} as Agent, dispose: async () => undefined }) },
   createId: () => `operation-${++id}`,
 })
-const host = '127.0.0.1:4179'
+const host = 'studio.dz23.localhost:4179'
+const identityHandler = createIdentityHttpHandler({
+  service: identity,
+  bindHost: '127.0.0.1',
+  allowedHosts: [host],
+  allowedOrigins: [`http://${host}`],
+  secureCookies: false,
+})
 const previewRepository = new MemoryPreviewRepository()
 const previewRuntime = new DeterministicPreviewRuntime()
 let previewSequence = 0
@@ -152,8 +170,15 @@ const previewSource: PreviewSourcePort = {
       .filter(run => run.stage === 'verify' && run.state === 'PASSED' && run.artifact_sha256 != null && (runId === undefined || run.run_id === runId))
       .sort((left, right) => right.started_at.localeCompare(left.started_at) || right.attempt - left.attempt)[0]
     if (selected === undefined || selected.run_directory === 'not-created' || selected.artifact_sha256 == null) throw new Error('verified-artifact-not-found')
-    if (await hashTree(selected.run_directory) !== selected.artifact_sha256) throw new Error('verified-artifact-changed')
-    return { projectId, runId: selected.run_id, artifactPath: selected.run_directory, artifactSha256: selected.artifact_sha256 }
+    const artifactPath = resolve(selected.run_directory, PREVIEW_ARTIFACT_RELATIVE_PATH)
+    if (await hashTree(artifactPath) !== selected.artifact_sha256) throw new Error('verified-artifact-changed')
+    return {
+      projectId,
+      runId: selected.run_id,
+      artifactPath,
+      artifactSha256: selected.artifact_sha256,
+      ownerEmail: 'cliente@preview.local',
+    }
   },
 }
 const previewService = new StudioPreviewService({
@@ -178,7 +203,7 @@ const apiHandler = createPromptToAppHttpHandler({
 })
 const webHandler = createStudioWebHandler({
   distDirectory: resolve(root, 'apps', 'studio-web', 'dist'), identity, allowedHosts: [host],
-  previewFrameSources: ['http://*.localhost:4179'],
+  previewFrameSources: ['http://*.dz23.localhost:4179'],
 })
 const previewForward: PreviewForwardPort = {
   async forward(runtimeRef, forwarded) {
@@ -187,14 +212,15 @@ const previewForward: PreviewForwardPort = {
     return {
       status: 200,
       headers: { 'content-type': 'text/html; charset=utf-8' },
-      body: Buffer.from('<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Protótipo E2E</title></head><body><main><h1>Protótipo E2E carregado</h1><p>Ambiente local de conferência.</p></main></body></html>'),
+      body: Buffer.from('<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Protótipo E2E</title></head><body><main><h1>Protótipo E2E carregado</h1><p>Ambiente local de conferência.</p></main><script>document.cookie="dz23_studio_session=shadow; Domain=dz23.localhost; Path=/; SameSite=Lax";document.cookie="dz23_studio_csrf=shadow; Domain=dz23.localhost; Path=/; SameSite=Lax";</script></body></html>'),
     }
   },
 }
 const previewGateway = createPreviewGatewayHttpHandler({ service: previewService, forward: previewForward, studioOrigin: `http://${host}` })
 const server = createServer((request, response) => {
-  if (/^p-[a-f0-9]{24}\.localhost:4179$/u.test(request.headers.host ?? '')) return void previewGateway(request, response)
+  if (/^p-[a-f0-9]{24}\.dz23\.localhost:4179$/u.test(request.headers.host ?? '')) return void previewGateway(request, response)
   if (request.url === '/healthz') return plain(response, 200, 'ok')
+  if (request.url?.startsWith('/api/studio/identity') === true) return void identityHandler(request, response)
   if (request.url?.startsWith('/api/studio/apps') === true) return void apiHandler(request, response)
   return void webHandler(request, response)
 })

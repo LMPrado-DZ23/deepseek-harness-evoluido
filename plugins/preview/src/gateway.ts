@@ -1,8 +1,9 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { StudioPreviewService } from './service.js'
+import { t } from './i18n.js'
 
-export const PREVIEW_COOKIE = '__Host-dz23_preview'
-const HOST_PATTERN = /^p-[a-f0-9]{24}\.localhost(?::\d+)?$/u
+export const PREVIEW_COOKIE = 'dz23_preview_admission'
+const HOST_PATTERN = /^p-[a-f0-9]{24}\.dz23\.localhost(?::\d+)?$/u
 const BODY_LIMIT = 8 * 1024
 const FORWARD_BODY_LIMIT = 2 * 1024 * 1024
 const RESPONSE_BODY_LIMIT = 8 * 1024 * 1024
@@ -34,11 +35,11 @@ export function createPreviewGatewayHttpHandler(options: PreviewGatewayOptions) 
   const studioOrigin = exactHttpOrigin(options.studioOrigin)
   return async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     const host = singleHeader(request.headers.host)?.toLowerCase()
-    if (host === undefined || !validPreviewHost(host)) return plain(response, 421, 'Host de prévia inválido.')
+    if (host === undefined || !validPreviewHost(host)) return plain(response, 421, t('gateway.invalidHost'))
     const origin = `http://${host}`
     const target = originForm(request.url)
-    if (target === undefined) return plain(response, 400, 'Destino de prévia inválido.')
-    if (!isAllowedMethod(request.method)) return plain(response, 405, 'Método de prévia inválido.')
+    if (target === undefined) return plain(response, 400, t('gateway.invalidTarget'))
+    if (!isAllowedMethod(request.method)) return plain(response, 405, t('gateway.invalidMethod'))
     const pathname = new URL(target, origin).pathname
     const headers = previewHeaders(studioOrigin)
 
@@ -49,31 +50,48 @@ export function createPreviewGatewayHttpHandler(options: PreviewGatewayOptions) 
       return javascript(response, 200, admissionScript(studioOrigin), headers)
     }
     if (request.method === 'POST' && pathname === '/__dz23/admission') {
-      if (singleHeader(request.headers.origin) !== origin) return plain(response, 403, 'Origem de prévia inválida.', headers)
+      if (singleHeader(request.headers.origin) !== origin) return plain(response, 403, t('gateway.invalidOrigin'), headers)
       try {
         const payload = JSON.parse(await readBody(request)) as unknown
         const ticket = typeof payload === 'object' && payload !== null && 'ticket' in payload
           ? (payload as { readonly ticket?: unknown }).ticket
           : undefined
-        if (typeof ticket !== 'string' || ticket.length < 20 || ticket.length > 200) return plain(response, 400, 'Convite de prévia inválido.', headers)
+        if (typeof ticket !== 'string' || ticket.length < 20 || ticket.length > 200) return plain(response, 400, t('gateway.invalidTicket'), headers)
         const exchanged = await options.service.exchange(host, ticket)
         response.writeHead(204, {
           ...headers,
-          'set-cookie': `${PREVIEW_COOKIE}=${encodeURIComponent(exchanged.cookie)}; Path=/; Max-Age=${exchanged.maxAge}; HttpOnly; Secure; SameSite=Lax`,
+          'set-cookie': localCookie(PREVIEW_COOKIE, encodeURIComponent(exchanged.cookie), exchanged.maxAge),
           'cache-control': 'no-store',
         })
         response.end()
         return
       } catch {
-        return plain(response, 404, 'Prévia indisponível.', headers)
+        return plain(response, 404, t('gateway.unavailable'), headers)
+      }
+    }
+
+    if (request.method === 'GET' && pathname === '/__dz23/refresh') {
+      const cookie = parseCookie(singleHeader(request.headers.cookie), PREVIEW_COOKIE)
+      if (cookie === undefined) return plain(response, 401, t('gateway.signIn'), headers)
+      try {
+        const authorized = options.service.authorize(host, cookie)
+        response.writeHead(204, {
+          ...headers,
+          'set-cookie': localCookie(PREVIEW_COOKIE, encodeURIComponent(cookie), authorized.maxAge),
+          'cache-control': 'no-store',
+        })
+        response.end()
+        return
+      } catch {
+        return plain(response, 401, t('gateway.signInAgain'), headers)
       }
     }
 
     if (isUnsafeMethod(request.method) && singleHeader(request.headers.origin) !== origin) {
-      return plain(response, 403, 'Origem de prévia inválida.', headers)
+      return plain(response, 403, t('gateway.invalidOrigin'), headers)
     }
     const cookie = parseCookie(singleHeader(request.headers.cookie), PREVIEW_COOKIE)
-    if (cookie === undefined) return plain(response, 401, 'Entre no DZ23 STUDIO para ver esta prévia.', headers)
+    if (cookie === undefined) return plain(response, 401, t('gateway.signIn'), headers)
     try {
       const authorized = options.service.authorize(host, cookie)
       const forwarded = await options.forward.forward(authorized.runtimeRef, {
@@ -82,12 +100,17 @@ export function createPreviewGatewayHttpHandler(options: PreviewGatewayOptions) 
         headers: forwardedRequestHeaders(request, cookie),
         body: await readBoundedBody(request, FORWARD_BODY_LIMIT),
       })
-      writeForwardedResponse(response, forwarded, headers)
+      writeForwardedResponse(
+        response,
+        forwarded,
+        headers,
+        localCookie(PREVIEW_COOKIE, encodeURIComponent(cookie), authorized.maxAge),
+      )
     } catch (error) {
       if (error instanceof Error && 'code' in error && error.code === 'UNAUTHENTICATED') {
-        return plain(response, 401, 'Entre novamente no DZ23 STUDIO para ver esta prévia.', headers)
+        return plain(response, 401, t('gateway.signInAgain'), headers)
       }
-      return plain(response, 404, 'Prévia indisponível.', headers)
+      return plain(response, 404, t('gateway.unavailable'), headers)
     }
   }
 }
@@ -96,7 +119,7 @@ function validPreviewHost(host: string): boolean {
   if (!HOST_PATTERN.test(host)) return false
   try {
     const parsed = new URL(`http://${host}`)
-    return parsed.hostname.endsWith('.localhost') && (parsed.port === '' || (Number(parsed.port) >= 1 && Number(parsed.port) <= 65_535))
+    return parsed.hostname.endsWith('.dz23.localhost') && (parsed.port === '' || (Number(parsed.port) >= 1 && Number(parsed.port) <= 65_535))
   } catch { return false }
 }
 
@@ -118,7 +141,10 @@ function isAllowedMethod(method: string | undefined): boolean {
 }
 
 function forwardedRequestHeaders(request: IncomingMessage, admissionCookie: string): Readonly<Record<string, string>> {
-  const allowed = ['accept', 'accept-language', 'content-type', 'if-none-match', 'range', 'user-agent'] as const
+  const allowed = [
+    'accept', 'accept-language', 'content-type', 'if-none-match', 'range', 'user-agent',
+    'next-action', 'next-router-state-tree', 'next-url', 'rsc', 'x-nextjs-data',
+  ] as const
   const result: Record<string, string> = {}
   for (const name of allowed) {
     const value = singleHeader(request.headers[name])
@@ -140,10 +166,15 @@ function withoutAdmissionCookie(header: string | undefined, admissionCookie: str
   }).join('; ')
 }
 
-function writeForwardedResponse(response: ServerResponse, forwarded: PreviewForwardResponse, enforced: Readonly<Record<string, string>>): void {
+function writeForwardedResponse(
+  response: ServerResponse,
+  forwarded: PreviewForwardResponse,
+  enforced: Readonly<Record<string, string>>,
+  admissionCookie: string,
+): void {
   const status = Number.isInteger(forwarded.status) && forwarded.status >= 200 && forwarded.status <= 599 ? forwarded.status : 502
   const validBody = Buffer.isBuffer(forwarded.body) && forwarded.body.byteLength <= RESPONSE_BODY_LIMIT
-  const body = validBody ? forwarded.body : Buffer.from('Resposta da prévia inválida.', 'utf8')
+  const body = validBody ? forwarded.body : Buffer.from(t('gateway.invalidResponse'), 'utf8')
   const safe: Record<string, string | readonly string[]> = {}
   const contentType = singleResponseHeader(forwarded.headers?.['content-type'])
   if (contentType !== undefined && contentType.length <= 200) safe['content-type'] = contentType
@@ -153,8 +184,7 @@ function writeForwardedResponse(response: ServerResponse, forwarded: PreviewForw
   if (lastModified !== undefined && lastModified.length <= 100) safe['last-modified'] = lastModified
   const location = singleResponseHeader(forwarded.headers?.location)
   if (location !== undefined && originForm(location) !== undefined) safe.location = location
-  const cookies = sanitizeApplicationCookies(forwarded.headers?.['set-cookie'])
-  if (cookies.length > 0) safe['set-cookie'] = cookies
+  safe['set-cookie'] = [...sanitizeApplicationCookies(forwarded.headers?.['set-cookie']), admissionCookie]
   response.writeHead(validBody ? status : 502, { ...safe, ...enforced, 'content-length': String(body.byteLength) })
   response.end(body)
 }
@@ -171,13 +201,19 @@ function sanitizeApplicationCookies(value: string | readonly string[] | undefine
     const separator = pair?.indexOf('=') ?? -1
     const name = separator < 1 ? '' : pair!.slice(0, separator).trim()
     if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u.test(name) || name === PREVIEW_COOKIE || /;\s*domain=/iu.test(cookie)) return []
-    return [`${pair}; Path=/; HttpOnly; Secure; SameSite=Lax`]
+    return [`${pair}; Path=/; HttpOnly; SameSite=Strict`]
   })
+}
+
+function localCookie(name: string, value: string, maxAge: number): string {
+  return `${name}=${value}; Path=/; Max-Age=${maxAge}; HttpOnly; SameSite=Strict`
 }
 
 function previewHeaders(studioOrigin: string): Readonly<Record<string, string>> {
   return {
-    'content-security-policy': `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; form-action 'self'; base-uri 'none'; object-src 'none'; frame-src 'none'; frame-ancestors ${studioOrigin}`,
+    // Next emits inline bootstrap and critical-style blocks. External scripts,
+    // eval, child frames and cross-origin connections remain forbidden.
+    'content-security-policy': `default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; form-action 'self'; base-uri 'none'; object-src 'none'; frame-src 'none'; frame-ancestors ${studioOrigin}`,
     'referrer-policy': 'no-referrer',
     'permissions-policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
     'x-content-type-options': 'nosniff',
@@ -190,14 +226,14 @@ function admissionScript(studioOrigin: string): string {
   return `"use strict";window.addEventListener("message",async(event)=>{if(event.origin!==${JSON.stringify(studioOrigin)}||event.source!==window.parent)return;const ticket=event.data&&event.data.type==="DZ23_PREVIEW_ADMISSION"?event.data.ticket:null;if(typeof ticket!=="string")return;const response=await fetch("/__dz23/admission",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({ticket})});if(response.ok){window.parent.postMessage({type:"DZ23_PREVIEW_ADMITTED"},${JSON.stringify(studioOrigin)});window.location.replace("/");}});window.parent.postMessage({type:"DZ23_PREVIEW_READY"},${JSON.stringify(studioOrigin)});`
 }
 
-const ADMISSION_PAGE = '<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Carregando prévia</title></head><body><p>Carregando sua prévia segura…</p><script src="/__dz23/admission.js" defer></script></body></html>'
+const ADMISSION_PAGE = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${t('gateway.loadingTitle')}</title></head><body><p>${t('gateway.loadingBody')}</p><script src="/__dz23/admission.js" defer></script></body></html>`
 
 function exactHttpOrigin(value: string): string {
   const parsed = new URL(value)
   if (parsed.protocol !== 'http:' || parsed.username !== '' || parsed.password !== '' || parsed.pathname !== '/' || parsed.search !== '' || parsed.hash !== '') {
-    throw new Error('studioOrigin deve ser uma origem HTTP local exata.')
+    throw new Error(t('gateway.invalidStudioOrigin'))
   }
-  if (parsed.hostname !== 'localhost' && parsed.hostname !== '127.0.0.1') throw new Error('studioOrigin local deve usar localhost ou 127.0.0.1.')
+  if (parsed.hostname !== 'studio.dz23.localhost') throw new Error(t('gateway.invalidStudioHost'))
   return parsed.origin
 }
 

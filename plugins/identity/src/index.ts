@@ -87,6 +87,7 @@ export interface IdentityPluginConfig {
   readonly allowedHosts?: readonly string[]
   readonly allowedOrigins?: readonly string[]
   readonly edge?: { readonly required?: boolean; readonly secretRef?: string }
+  readonly cookieSecurity?: 'secure' | 'loopback-http'
   readonly email?: { readonly kind: 'memory' } | { readonly kind: 'smtp'; readonly secretRef: string }
   readonly now?: () => Date
   readonly createId?: () => string
@@ -149,6 +150,13 @@ export async function apply(ctx: Context, config: IdentityPluginConfig = {}): Pr
   if (edgeRequired && config.enrollment === 'open') {
     throw new Error('A borda autenticada proíbe enrollment aberto; configure bootstrap-email ou closed.')
   }
+  const port = ctx.webServer.port
+  const defaultHost = `127.0.0.1:${port}`
+  const defaultOrigin = `http://localhost:${port}`
+  const allowedHosts = config.allowedHosts ?? [defaultHost, `localhost:${port}`]
+  const allowedOrigins = config.allowedOrigins ?? [defaultOrigin, `http://${defaultHost}`]
+  const cookieSecurity = config.cookieSecurity ?? (!edgeRequired && ctx.webServer.host === '127.0.0.1' ? 'loopback-http' : 'secure')
+  if (cookieSecurity === 'loopback-http') assertLoopbackHttpCookies(ctx.webServer.host, allowedHosts, allowedOrigins)
   const [usersDomain, credentialsDomain, sessionsDomain, auditDomain]: [
     Domain<typeof identityUsersDomainSpec>,
     Domain<typeof identityCredentialsDomainSpec>,
@@ -172,9 +180,6 @@ export async function apply(ctx: Context, config: IdentityPluginConfig = {}): Pr
     sessionsDomain.table('sessions'),
     auditDomain.table('events'),
   )
-  const port = ctx.webServer.port
-  const defaultHost = `127.0.0.1:${port}`
-  const defaultOrigin = `http://localhost:${port}`
   const email = resolveEmailSender(ctx, config, edgeRequired)
   let harnessAuthenticationUrl: ((baseUrl: string) => string) | undefined
   ctx.inject(['connection'], (connectionCtx) => {
@@ -211,15 +216,33 @@ export async function apply(ctx: Context, config: IdentityPluginConfig = {}): Pr
     handler: createIdentityHttpHandler({
       service,
       bindHost: ctx.webServer.host,
-      allowedHosts: config.allowedHosts ?? [defaultHost, `localhost:${port}`],
-      allowedOrigins: config.allowedOrigins ?? [defaultOrigin, `http://${defaultHost}`],
+      allowedHosts,
+      allowedOrigins,
       edgeRequired,
+      secureCookies: cookieSecurity === 'secure',
       ...(edgeSecretRef === undefined ? {} : {
         resolveEdgeSecret: async () => (await ctx.credentials.resolve(edgeSecretRef))?.value,
       }),
       harnessAuthenticationUrl: baseUrl => harnessAuthenticationUrl?.(baseUrl),
     }),
   }), 'dz23-studio-identity.http')
+}
+
+function assertLoopbackHttpCookies(
+  bindHost: '127.0.0.1' | '0.0.0.0',
+  allowedHosts: readonly string[],
+  allowedOrigins: readonly string[],
+): void {
+  const localName = (hostname: string) => hostname === 'localhost' || hostname.endsWith('.localhost') || hostname === '127.0.0.1'
+  let valid = bindHost === '127.0.0.1' && allowedHosts.length > 0 && allowedOrigins.length > 0
+  try {
+    valid &&= allowedHosts.every(host => localName(new URL(`http://${host}`).hostname))
+    valid &&= allowedOrigins.every(origin => {
+      const parsed = new URL(origin)
+      return parsed.protocol === 'http:' && parsed.username === '' && parsed.password === '' && localName(parsed.hostname)
+    })
+  } catch { valid = false }
+  if (!valid) throw new Error('cookieSecurity loopback-http exige bind 127.0.0.1 e somente origens HTTP *.localhost.')
 }
 
 export function assertValidRpId(rpId: string): void {

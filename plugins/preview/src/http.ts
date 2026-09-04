@@ -3,6 +3,7 @@ import { z } from 'zod'
 import type { PromptToAppHttpExtension, PromptToAppHttpExtensionRequest } from '@dz23-studio/prompt-to-app'
 import { assertRouteContracts, type StudioRouteContract } from '@dz23-studio/policy'
 import { PreviewError, type StudioPreviewService } from './service.js'
+import { t } from './i18n.js'
 
 const startSchema = z.object({ run_id: z.string().min(1).max(200).optional() }).strict()
 
@@ -23,7 +24,7 @@ export function createPreviewProjectHttpExtension(service: StudioPreviewService)
     if (!input.suffix.startsWith('/previews')) return false
     try {
       const actor = { ...input.actor, sessionId: input.actor.sessionId ?? '' }
-      if (actor.sessionId === '') throw new PreviewError('FORBIDDEN', 'Sessão auditável obrigatória para a prévia.')
+      if (actor.sessionId === '') throw new PreviewError('FORBIDDEN', t('http.auditableSession'))
       if (input.suffix === '/previews') {
         if (input.request.method === 'GET') return respond(input.response, 200, { previews: service.list(actor, input.projectId) })
         if (input.request.method === 'POST') {
@@ -66,13 +67,13 @@ export function createPreviewProjectHttpExtension(service: StudioPreviewService)
 
 async function readJson(input: PromptToAppHttpExtensionRequest): Promise<unknown> {
   const contentType = input.request.headers['content-type']
-  if (typeof contentType !== 'string' || !contentType.toLowerCase().startsWith('application/json')) throw new PreviewError('INVALID', 'Envie os dados da prévia em JSON.')
+  if (typeof contentType !== 'string' || !contentType.toLowerCase().startsWith('application/json')) throw new PreviewError('INVALID', t('http.jsonRequired'))
   const chunks: Buffer[] = []
   let size = 0
   for await (const chunk of input.request) {
     const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
     size += bytes.length
-    if (size > 8 * 1024) throw new PreviewError('INVALID', 'A solicitação da prévia é grande demais.')
+    if (size > 8 * 1024) throw new PreviewError('INVALID', t('http.requestTooLarge'))
     chunks.push(bytes)
   }
   const value = Buffer.concat(chunks).toString('utf8')
@@ -105,5 +106,5 @@ function statusOf(error: unknown): number {
 
 function safeMessage(error: unknown): string {
   if (error instanceof PreviewError || error instanceof z.ZodError || error instanceof SyntaxError) return error.message
-  return 'Não foi possível concluir a operação de prévia.'
+  return t('http.operationFailed')
 }

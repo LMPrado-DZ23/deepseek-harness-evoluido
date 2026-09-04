@@ -1,67 +1,80 @@
 # P34/M1 — checkpoint verificável da prévia segura
 
-Data: 03/09/2026. Branch: `codex/missao-m1-preview`. Base imutável:
-`ec92f29f7398d1ac69dc6201e5fb8e6bccfa60b9`.
+Data: 04/09/2026. Branch: `codex/missao-m1-preview`. Base imutável:
+`ec92f29f7398d1ac69dc6201e5fb8e6bccfa60b9`. Harness upstream preservado em
+`6c705be1ce6774a000d061da41d1823b03a3d42c`.
 
 ## Construído
 
-- `302b582`: gate AST da fonte gerada antes de escrita/execução.
-- `c861fc3`: vínculo do run `PASSED` ao SHA-256 integral, domínios tenant-aware,
-  lifecycle, TTL, locks, reconciliação, timeout de runtime, admissão opaca,
-  gateway e modo de e-mail `studio-preview`.
-- `76ebca0`: tipagem exata do teste de inventário de runtime bloqueado.
-- `068a212`: jornada visual com iframe de origem separada, sandbox,
-  `referrerPolicy=no-referrer`, troca do ticket via `postMessage`, aviso de
-  prévia não publicada, códigos locais e ação de encerramento.
-- `09348fb`: prova Playwright determinística composta com serviço, extensão
-  HTTP e gateway reais; apenas supervisor e encaminhamento são doubles.
-- `a251fc5`: singleton físico fail-closed, readiness, heartbeat limitado a
-  duas horas e mutex único de admissões. A revisão adversarial encontrou e a
-  correção fechou uma corrida que poderia restaurar ticket consumido; cleanup
-  incompleto permanece `STOPPING` e impede novo runtime.
+- artefato executável separado em `.dz23/preview-artifact-v1`, com fonte
+  limitada a 20.000 arquivos/160 MiB e arquivo do runtime a 128 MiB, sem links
+  para fora do run e fixado por SHA-256;
+- supervisor Docker com plano de controle autenticado por socket Unix,
+  `network=none` e autoridade exclusiva sobre imagem, rede, mounts e limites;
+- runtime não confiável em `NetworkMode=none` e proxy mínimo compartilhando
+  somente seu loopback, sem porta publicada, Docker socket, credenciais do
+  Studio ou rota de saída;
+- contêineres não-root, raiz somente leitura, `cap_drop=ALL`,
+  `no-new-privileges`, limites de CPU/memória/PIDs e volume efêmero;
+- Caddy como borda única em `studio.dz23.localhost` e
+  `p-<id>.dz23.localhost`, sem CA, TLS interno, DNS ou hosts alterados;
+- admissão opaca por `postMessage`, ticket fora de URLs, cookie local host-only,
+  `HttpOnly` e `SameSite=Strict`, defesa contra cookies duplicados do preview,
+  convite de uso único com TTL de 120 segundos, CSRF em cabeçalho derivado da
+  sessão, autorização/revogação no servidor e renovação do cookie limitada ao
+  TTL vigente após cada heartbeat;
+- modo `studio-preview` com código de acesso capturado somente no volume
+  efêmero e exposto somente à mesma pessoa/sessão que abriu a prévia;
+- shutdown com aborto de RPC/staging, cleanup idempotente, reconciliação,
+  readiness, TTL e falha fechada quando qualquer stager, runtime, proxy, socket
+  ou volume permanece vivo; supervisor limitado a 512 MiB.
 
-O Harness upstream permaneceu no pin
-`6c705be1ce6774a000d061da41d1823b03a3d42c` sem alteração.
+## Provas executadas no checkpoint final
 
-## Provas executadas
+Ambiente canônico: ext4 no WSL2, Node 22, pnpm 11.7.0 e Docker Desktop.
 
-Ambiente canônico desta rodada: cópia limpa em ext4 no WSL2, pnpm 11.7.0.
+- `pnpm typecheck`: `PASS`;
+- build recursivo dos 12 pacotes aplicáveis: `PASS`;
+- i18n: `PASS`, 265 chaves pt-BR; o catálogo do preview é estrito e os demais
+  plugins foram congelados no checkpoint anterior para a migração da fatia M2;
+- gate de domínios tenant-aware: `PASS`;
+- Chromium em contêiner sem rede: 3/3 jornadas `PASS`, cobrindo login HTTP local
+  real, recusa sem sessão, Ideia → Plano → Criação → Verificação, iframe,
+  admissão, código local, cookie duplicado hostil e encerramento sem alegar
+  publicação;
+- configuração Caddy atual validada offline com o binário fixado que contém o
+  módulo de rate limit: `PASS`;
+- composição Caddy + supervisor: `docker compose config --quiet` = `PASS`;
+- prova física `P34-M1-runtime-proof.json`: `PASS`, artefato
+  `557c907f…d433`, runtime `sha256:f6660dc7…73b42` e supervisor/proxy
+  `sha256:0de6fc8f…97ff2`; runtime com apenas `lo`, zero rotas externas, DNS,
+  internet, metadata, host Docker e Studio bloqueados, HTTP 200, login sem senha
+  e cleanup sem sobreviventes;
+- suíte global: 659 testes `PASS`, 18 integrações PostgreSQL puladas por ausência
+  deliberada do serviço; cobertura 94,24% statements, 90,04% branches, 95,44%
+  functions e 97,11% lines; identidade e política em 100%;
+- revisão adversarial independente: `GO`, sem incompatibilidade concreta alta,
+  média ou baixa; validação focada independente 79/79 `PASS`;
+- `git diff --check`: `PASS`.
 
-- instalação com lockfile fixado: `PASS`;
-- typecheck: `PASS`;
-- testes focados de preview e vínculo de artefato: 64/64 `PASS`;
-- gate i18n: `PASS`, 208 chaves pt-BR;
-- gate de escopo tenant: `PASS`;
-- build dos 11 pacotes: `PASS`;
-- P37 self-test positivo/negativo e scan da árvore: `PASS`, incluindo recusa
-  de artefato vazio, MITM, `freestyle`, `caveman-shrink` e licença ausente;
-- revisão adversarial independente do núcleo: `GO`, zero ALTA/MÉDIA.
+As integrações PostgreSQL reais continuam sendo responsabilidade do gate
+independente do Claude/M3 e não são inferidas aqui.
 
-A cobertura global no snapshot endurecido passou com 387 testes e 18 pulados:
-94,83% statements, 90,97% branches, 95,64% functions e 97,36% lines; o gate
-crítico de importação ficou em 100% nas quatro métricas. A suíte focada final
-do preview passou 65/65.
+## Limites da evidência
 
-## Provas que não aconteceram
-
-- supervisor Docker real e cópia atômica do artefato: `NOT_CONFIGURED`;
-- rede interna por preview e tentativas reais de egress: `NOT_EXECUTED`;
-- Caddy roteando `p-<id>.localhost`: `NOT_EXECUTED`;
-- cookie/admissão no navegador real e revogação no request seguinte:
+- o teste Playwright usa supervisor/forward determinísticos; a prova física
+  separada usa manager, runtime, proxy, build Next.js e Chromium reais. Não foi
+  executada uma única jornada que una Caddy, Harness real e runtime Docker em
+  um só processo de prova;
+- HTTPS/ACME, domínio público, celular físico, Tailscale e operação prolongada:
   `NOT_EXECUTED`;
-- HTTPS/ACME, celular e domínio público: `NOT_EXECUTED`;
-- Playwright visual desta rodada: teste escrito e compilado, mas execução do
-  navegador `BLOCKED_EXTERNAL` pelas bibliotecas nativas ausentes no WSL e
-  pelo executável Chromium ausente no host Windows. O teste HTTP de recusa sem
-  sessão passou antes da tentativa de abrir o navegador.
-
-Docker Desktop estava desligado/indisponível. Nenhum privilégio, CA, trust
-store, arquivo de hosts, MITM, TPROXY, push, PR ou deploy foi usado.
+- SMTP real e LLM real: `NOT_CONFIGURED`/`NOT_EXECUTED`;
+- experiência para pessoas leigas: `NOT_VALIDATED` até a fase 0.5 reposicionada.
 
 ## Veredito honesto
 
-O núcleo e a interface da prévia são `BETA`; a capacidade utilizável permanece
-`NOT_CONFIGURED`. A revisão final do núcleo foi `GO`, sem ALTA/MÉDIA. Não há
-base para `PREVIEW_OK`, publicação ou aplicação pronta. M1 só fecha quando
-supervisor, Caddy, isolamento físico e jornada de navegador passarem no
-artefato exato.
+M1/P34 entrega preview local seguro em estado `BETA`. A evidência autoriza
+`PREVIEW_OK` somente para o protótipo local verificado deste fluxo; não autoriza
+“publicado”, “produção”, “aplicação pronta”, acesso móvel ou release público.
+O merge na branch principal continua dependendo do parecer independente do
+Claude sobre o commit fechado.

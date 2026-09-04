@@ -3,9 +3,11 @@ import { roleAllows, type StudioRole } from '@dz23-studio/policy'
 import { z } from 'zod'
 import { previewAdmissionSchema, previewRecordSchema, type PreviewAdmission, type PreviewRecord } from './model.js'
 import { KeyedMutex } from './mutex.js'
+import { t } from './i18n.js'
 
 const DEFAULT_TTL_SECONDS = 30 * 60
 const MAX_TTL_SECONDS = 2 * 60 * 60
+const TICKET_TTL_SECONDS = 2 * 60
 const ACTIVE_STATES = new Set<PreviewRecord['state']>(['REQUESTED', 'STARTING', 'READY', 'STOPPING'])
 
 export interface PreviewActor {
@@ -21,6 +23,7 @@ export interface VerifiedPreviewArtifact {
   readonly runId: string
   readonly artifactPath: string
   readonly artifactSha256: string
+  readonly ownerEmail: string
 }
 
 export interface PreviewSourcePort {
@@ -33,6 +36,7 @@ export interface PreviewRuntimePort {
     readonly previewId: string
     readonly artifactPath: string
     readonly artifactSha256: string
+    readonly ownerEmail: string
     readonly labels: Readonly<Record<string, string>>
     readonly environment: Readonly<Record<string, string>>
   }, signal: AbortSignal): Promise<{ readonly runtimeRef: string }>
@@ -141,7 +145,7 @@ export class StudioPreviewService {
     this.#authorize(actor, 'project.write')
     return this.#mutex.run(`${actor.orgId}:${actor.tenantId}:${projectId}`, async () => {
       const artifact = await this.options.source.verifiedArtifact(actor, projectId, runId)
-      if (!/^[a-f0-9]{64}$/u.test(artifact.artifactSha256)) throw new PreviewError('INVALID', 'O artefato verificado não possui hash SHA-256 válido.')
+      if (!/^[a-f0-9]{64}$/u.test(artifact.artifactSha256)) throw new PreviewError('INVALID', t('service.invalidArtifactHash'))
       const existing = this.options.repository.previews().find(item => sameScope(item, actor)
         && item.project_id === projectId && item.run_id === artifact.runId
         && item.artifact_sha256 === artifact.artifactSha256 && item.state === 'READY'
@@ -168,7 +172,7 @@ export class StudioPreviewService {
           await this.options.repository.putPreview(failed)
           await this.#revokeAdmissions(current.preview_id)
           if (cleanupIncomplete) {
-            throw new PreviewError('UNAVAILABLE', 'A prévia anterior não pôde ser encerrada com segurança; tente novamente em instantes.')
+            throw new PreviewError('UNAVAILABLE', t('service.previousStopFailed'))
           }
           return undefined
         })
@@ -184,7 +188,7 @@ export class StudioPreviewService {
 
       const now = this.#now()
       const previewId = this.#createId()
-      const hostname = `p-${randomBytes(12).toString('hex')}.localhost`
+      const hostname = `p-${randomBytes(12).toString('hex')}.dz23.localhost`
       const initial = previewRecordSchema.parse({
         preview_id: previewId, org_id: actor.orgId, tenant_id: actor.tenantId,
         project_id: projectId, run_id: artifact.runId, artifact_sha256: artifact.artifactSha256,
@@ -201,13 +205,14 @@ export class StudioPreviewService {
         try {
           const started = await this.#runtimeCall('RUNTIME_START_TIMEOUT', signal => this.options.runtime.start({
             previewId, artifactPath: artifact.artifactPath, artifactSha256: artifact.artifactSha256,
+            ownerEmail: artifact.ownerEmail,
             labels: { 'dz23.managed': 'preview', 'dz23.preview_id': previewId },
-            environment: { APP_EMAIL_MODE: 'studio-preview', DZ23_PREVIEW_ID: previewId, DATA_DIR: '/data' },
+            environment: { APP_EMAIL_MODE: 'studio-preview', APP_OWNER_EMAIL: artifact.ownerEmail, DZ23_PREVIEW_ID: previewId, DATA_DIR: '/preview-storage/data' },
           }, signal))
           startedRuntimeRef = started.runtimeRef
-          if (!/^[a-zA-Z0-9_.:-]{1,200}$/u.test(started.runtimeRef)) throw new PreviewError('UNAVAILABLE', 'O supervisor retornou uma referência de runtime inválida.')
+          if (!/^[a-zA-Z0-9_.:-]{1,200}$/u.test(started.runtimeRef)) throw new PreviewError('UNAVAILABLE', t('service.invalidRuntimeRef'))
           const readiness = await this.#runtimeCall('RUNTIME_HEALTH_TIMEOUT', signal => this.options.runtime.health(started.runtimeRef, signal))
-          if (readiness !== 'OK') throw new PreviewError('UNAVAILABLE', 'O protótipo não ficou saudável dentro do prazo seguro.')
+          if (readiness !== 'OK') throw new PreviewError('UNAVAILABLE', t('service.readinessFailed'))
           record = previewRecordSchema.parse({ ...record, state: 'READY', ready_at: this.#now().toISOString(), runtime_ref: started.runtimeRef, health: 'OK' })
           await this.options.repository.putPreview(record)
           const ticket = await this.#issueAdmission(actor, record)
@@ -268,17 +273,17 @@ export class StudioPreviewService {
         const record = this.#preview(actor, projectId, previewId)
         const now = this.#now()
         if (record.state !== 'READY' || record.runtime_ref === null || Date.parse(record.expires_at) <= now.getTime()) {
-          throw new PreviewError('CONFLICT', 'Esta prévia já foi encerrada ou expirou.')
+          throw new PreviewError('CONFLICT', t('service.alreadyStopped'))
         }
         const health = await this.#runtimeCall('RUNTIME_HEALTH_TIMEOUT', signal => this.options.runtime.health(record.runtime_ref!, signal))
-        if (health !== 'OK') throw new PreviewError('UNAVAILABLE', 'A prévia não está saudável e não pode ser renovada.')
+        if (health !== 'OK') throw new PreviewError('UNAVAILABLE', t('service.unhealthy'))
         const absoluteExpiry = Date.parse(record.created_at) + MAX_TTL_SECONDS * 1000
         const renewedExpiry = Math.min(absoluteExpiry, Math.max(Date.parse(record.expires_at), now.getTime() + this.#ttlSeconds * 1000))
         const updated = previewRecordSchema.parse({ ...record, health: 'OK', expires_at: new Date(renewedExpiry).toISOString() })
         await this.options.repository.putPreview(updated)
         await this.#mutex.run(`admissions:${previewId}`, async () => {
           await Promise.all(this.options.repository.admissions()
-            .filter(item => item.preview_id === previewId && item.revoked_at === null)
+            .filter(item => item.preview_id === previewId && item.revoked_at === null && item.exchanged_at !== null)
             .map(item => this.options.repository.putAdmission(previewAdmissionSchema.parse({ ...item, expires_at: updated.expires_at }))))
         })
         return this.public(updated)
@@ -290,44 +295,51 @@ export class StudioPreviewService {
     const ticketHash = hashSecret(ticket)
     return this.#mutex.run(`admission:${ticketHash}`, async () => {
       const snapshot = this.options.repository.admissions().find(item => item.ticket_hash === ticketHash)
-      if (snapshot === undefined) throw new PreviewError('NOT_FOUND', 'Convite de prévia inválido ou expirado.')
+      if (snapshot === undefined) throw new PreviewError('NOT_FOUND', t('service.invalidOrExpiredTicket'))
       return this.#mutex.run(`admissions:${snapshot.preview_id}`, async () => {
         const now = this.#now()
         const preview = this.options.repository.previews().find(item => item.preview_id === snapshot.preview_id && item.hostname === normalizeHost(hostname))
-        if (preview === undefined || preview.state !== 'READY' || Date.parse(preview.expires_at) <= now.getTime()) throw new PreviewError('NOT_FOUND', 'Prévia indisponível.')
+        if (preview === undefined || preview.state !== 'READY' || Date.parse(preview.expires_at) <= now.getTime()) throw new PreviewError('NOT_FOUND', t('service.unavailable'))
         const admission = this.options.repository.admissions().find(item => item.preview_id === preview.preview_id
           && item.ticket_hash === ticketHash && item.exchanged_at === null && item.revoked_at === null)
-        if (admission === undefined || Date.parse(admission.expires_at) <= now.getTime()) throw new PreviewError('NOT_FOUND', 'Convite de prévia inválido ou expirado.')
+        if (admission === undefined || Date.parse(admission.expires_at) <= now.getTime()) throw new PreviewError('NOT_FOUND', t('service.invalidOrExpiredTicket'))
         if (!this.options.sessions.isActive({ sessionId: admission.source_session_id, userId: admission.user_id, orgId: admission.org_id, tenantId: admission.tenant_id })) {
-          throw new PreviewError('FORBIDDEN', 'Sua sessão do DZ23 STUDIO não está mais ativa.')
+          throw new PreviewError('FORBIDDEN', t('service.sessionInactive'))
         }
         const cookie = this.#createSecret()
         await this.options.repository.putAdmission(previewAdmissionSchema.parse({
-          ...admission, ticket_hash: hashSecret(this.#createSecret()), cookie_hash: hashSecret(cookie), exchanged_at: now.toISOString(),
+          ...admission,
+          ticket_hash: hashSecret(this.#createSecret()),
+          cookie_hash: hashSecret(cookie),
+          exchanged_at: now.toISOString(),
+          expires_at: preview.expires_at,
         }))
-        const absoluteExpiry = Date.parse(preview.created_at) + MAX_TTL_SECONDS * 1000
-        return { cookie, maxAge: Math.max(0, Math.floor((absoluteExpiry - now.getTime()) / 1000)) }
+        return { cookie, maxAge: Math.max(0, Math.floor((Date.parse(preview.expires_at) - now.getTime()) / 1000)) }
       })
     })
   }
 
-  authorize(hostname: string, cookie: string): { readonly previewId: string; readonly runtimeRef: string } {
+  authorize(hostname: string, cookie: string): { readonly previewId: string; readonly runtimeRef: string; readonly maxAge: number } {
     const now = this.#now()
     const preview = this.options.repository.previews().find(item => item.hostname === normalizeHost(hostname))
-    if (preview === undefined) throw new PreviewError('NOT_FOUND', 'Prévia indisponível.')
+    if (preview === undefined) throw new PreviewError('NOT_FOUND', t('service.unavailable'))
     if (preview.state !== 'READY' || preview.runtime_ref === null || Date.parse(preview.expires_at) <= now.getTime()) {
-      throw new PreviewError('UNAUTHENTICATED', 'Seu acesso a esta prévia expirou ou foi encerrado.')
+      throw new PreviewError('UNAUTHENTICATED', t('service.accessExpired'))
     }
     const admission = this.options.repository.admissions().find(item => item.preview_id === preview.preview_id
       && item.cookie_hash === hashSecret(cookie))
     if (admission === undefined || admission.revoked_at !== null || Date.parse(admission.expires_at) <= now.getTime()) {
-      throw new PreviewError('UNAUTHENTICATED', 'Seu acesso a esta prévia expirou ou foi encerrado.')
+      throw new PreviewError('UNAUTHENTICATED', t('service.accessExpired'))
     }
     const active = this.options.sessions.isActive({ sessionId: admission.source_session_id, userId: admission.user_id, orgId: admission.org_id, tenantId: admission.tenant_id })
     if (!active || !this.options.sessions.canRead({ userId: admission.user_id, orgId: admission.org_id, tenantId: admission.tenant_id })) {
-      throw new PreviewError('UNAUTHENTICATED', 'Seu acesso a esta prévia expirou ou foi encerrado.')
+      throw new PreviewError('UNAUTHENTICATED', t('service.accessExpired'))
     }
-    return { previewId: preview.preview_id, runtimeRef: preview.runtime_ref }
+    return {
+      previewId: preview.preview_id,
+      runtimeRef: preview.runtime_ref,
+      maxAge: Math.max(0, Math.floor((Date.parse(admission.expires_at) - now.getTime()) / 1000)),
+    }
   }
 
   async reap(): Promise<number> {
@@ -458,6 +470,18 @@ export class StudioPreviewService {
     this.#authorize(actor, 'project.write')
     const record = this.#preview(actor, projectId, previewId)
     if (record.state !== 'READY' || record.runtime_ref === null) return []
+    const now = this.#now().getTime()
+    const admission = this.options.repository.admissions().find(item => item.preview_id === previewId
+      && item.org_id === actor.orgId && item.tenant_id === actor.tenantId
+      && item.user_id === actor.userId && item.source_session_id === actor.sessionId
+      && item.exchanged_at !== null && item.revoked_at === null && Date.parse(item.expires_at) > now)
+    if (admission === undefined) {
+      throw new PreviewError('FORBIDDEN', t('service.openBeforeCodes'))
+    }
+    const session = { sessionId: actor.sessionId, userId: actor.userId, orgId: actor.orgId, tenantId: actor.tenantId }
+    if (!this.options.sessions.isActive(session) || !this.options.sessions.canRead({ userId: actor.userId, orgId: actor.orgId, tenantId: actor.tenantId })) {
+      throw new PreviewError('FORBIDDEN', t('service.signInBeforeCodes'))
+    }
     const messages = await this.#runtimeCall('RUNTIME_MESSAGES_TIMEOUT', signal => this.options.runtime.verificationMessages(record.runtime_ref!, signal))
     return messages.slice(-20).flatMap(message => {
       const parsed = previewVerificationMessageSchema.safeParse(message)
@@ -477,21 +501,23 @@ export class StudioPreviewService {
 
   #preview(actor: PreviewActor, projectId: string, previewId: string): PreviewRecord {
     const value = this.options.repository.previews().find(item => item.preview_id === previewId && item.project_id === projectId && sameScope(item, actor))
-    if (value === undefined) throw new PreviewError('NOT_FOUND', 'Prévia não encontrada.')
+    if (value === undefined) throw new PreviewError('NOT_FOUND', t('service.notFound'))
     return value
   }
 
   #authorize(actor: PreviewActor, permission: 'project.read' | 'project.write'): void {
-    if (!roleAllows(actor.role, permission)) throw new PreviewError('FORBIDDEN', 'Seu papel neste espaço não permite esta ação.')
+    if (!roleAllows(actor.role, permission)) throw new PreviewError('FORBIDDEN', t('service.roleDenied'))
   }
 
   async #issueAdmission(actor: PreviewActor, preview: PreviewRecord): Promise<string> {
     const ticket = this.#createSecret()
+    const now = this.#now()
+    const ticketExpiry = Math.min(Date.parse(preview.expires_at), now.getTime() + TICKET_TTL_SECONDS * 1000)
     const admission = previewAdmissionSchema.parse({
       admission_id: this.#createId(), preview_id: preview.preview_id,
       org_id: actor.orgId, tenant_id: actor.tenantId, user_id: actor.userId, source_session_id: actor.sessionId,
-      ticket_hash: hashSecret(ticket), cookie_hash: null, created_at: this.#now().toISOString(),
-      expires_at: preview.expires_at, exchanged_at: null, revoked_at: null,
+      ticket_hash: hashSecret(ticket), cookie_hash: null, created_at: now.toISOString(),
+      expires_at: new Date(ticketExpiry).toISOString(), exchanged_at: null, revoked_at: null,
     })
     await this.#mutex.run(`admissions:${preview.preview_id}`, () => this.options.repository.putAdmission(admission))
     return ticket
@@ -519,7 +545,7 @@ export class StudioPreviewService {
       await this.options.repository.putPreview(current)
       await this.#revokeAdmissions(current.preview_id)
       if (cleanupIncomplete) {
-        throw new PreviewError('UNAVAILABLE', 'A prévia anterior não pôde ser encerrada com segurança; tente novamente em instantes.')
+        throw new PreviewError('UNAVAILABLE', t('service.previousStopFailed'))
       }
     })
   }
@@ -538,7 +564,7 @@ export class StudioPreviewService {
     const timeout = new Promise<never>((_resolve, reject) => {
       timer = setTimeout(() => {
         controller.abort(new Error(code))
-        reject(new PreviewError('UNAVAILABLE', 'O supervisor da prévia não respondeu dentro do prazo seguro.'))
+        reject(new PreviewError('UNAVAILABLE', t('service.supervisorTimeout')))
       }, this.#runtimeTimeoutMs)
       timer.unref?.()
     })
@@ -548,7 +574,7 @@ export class StudioPreviewService {
 }
 
 function validPort(port: number): number {
-  if (!Number.isInteger(port) || port < 1 || port > 65_535) throw new Error('publicPort deve ser uma porta TCP válida.')
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) throw new Error(t('plugin.invalidPublicPort'))
   return port
 }
 

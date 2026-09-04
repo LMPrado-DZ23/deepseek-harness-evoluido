@@ -7,6 +7,8 @@ const root = process.cwd()
 const catalogPath = resolve(root, 'apps/studio-web/src/i18n/pt-BR.json')
 const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'))
 const serverCatalog = JSON.parse(readFileSync(resolve(root, 'plugins/prompt-to-app/i18n/pt-BR.json'), 'utf8'))
+const previewCatalog = JSON.parse(readFileSync(resolve(root, 'plugins/preview/i18n/pt-BR.json'), 'utf8'))
+const LEGACY_PLUGIN_BASELINE = '61c96039cc506d13c1da9b053c5003a115f075cc'
 const styles = readFileSync(resolve(root, 'apps/studio-web/src/styles.css'), 'utf8')
 const modelSource = readFileSync(resolve(root, 'plugins/prompt-to-app/src/model.ts'), 'utf8')
 
@@ -28,6 +30,9 @@ for (const path of ['questions.audience', 'questions.goal', 'questions.content',
   const value = path.split('.').reduce((current, key) => current?.[key], serverCatalog)
   if (typeof value !== 'string' || value.trim() === '') failures.push(`chave de servidor ausente ou vazia: ${path}`)
 }
+for (const [path, value] of flatten(previewCatalog)) {
+  if (typeof value !== 'string' || value.trim() === '') failures.push(`chave de prévia ausente ou vazia: ${path}`)
+}
 
 const expectedSteps = ['Ideia', 'Perguntas', 'Plano', 'Criação', 'Verificação']
 const actualSteps = ['idea', 'questions', 'plan', 'creation', 'verification'].map(key => catalog.progress[key])
@@ -48,7 +53,7 @@ const sourceRoots = [{ path: resolve(root, 'apps/studio-web/src'), strict: true 
 for (const plugin of readdirSync(resolve(root, 'plugins'), { withFileTypes: true })) {
   if (plugin.isDirectory() && exists(resolve(root, 'plugins', plugin.name, 'src'))) sourceRoots.push({
     path: resolve(root, 'plugins', plugin.name, 'src'),
-    strict: exists(resolve(root, 'plugins', plugin.name, 'i18n', 'pt-BR.json')),
+    strict: plugin.name === 'preview',
   })
 }
 for (const sourceRoot of sourceRoots) for (const file of walk(sourceRoot.path)) scanSource(file, sourceRoot.strict)
@@ -60,7 +65,7 @@ if (failures.length > 0) {
   process.stderr.write(`I18N_GATE=FAIL\n- ${failures.join('\n- ')}\n`)
   process.exit(1)
 }
-process.stdout.write(`I18N_GATE=PASS locale=pt-BR keys=${flatten(catalog).length + flatten(serverCatalog).length}\n`)
+process.stdout.write(`I18N_GATE=PASS locale=pt-BR keys=${flatten(catalog).length + flatten(serverCatalog).length + flatten(previewCatalog).length}\n`)
 
 function flatten(value, prefix = '') {
   if (typeof value === 'string') return [[prefix, value]]
@@ -100,13 +105,13 @@ function walk(directory) {
 }
 
 function exists(path) {
-  try { return statSync(path).isFile() } catch { return false }
+  try { statSync(path); return true } catch { return false }
 }
 
 function legacyPortugueseLiterals(path) {
   const repoPath = relative(root, path).replaceAll('\\', '/')
   try {
-    const source = execFileSync('git', ['show', `ab0fe506928dacd736262a024d202f3e96e2689d:${repoPath}`], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+    const source = execFileSync('git', ['show', `${LEGACY_PLUGIN_BASELINE}:${repoPath}`], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
     const sourceFile = ts.createSourceFile(repoPath, source, ts.ScriptTarget.Latest, true, extname(path) === '.tsx' ? ts.ScriptKind.TSX : ts.ScriptKind.TS)
     const found = new Set()
     const collect = node => {

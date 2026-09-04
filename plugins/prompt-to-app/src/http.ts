@@ -2,11 +2,9 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import {
-  CSRF_COOKIE,
+  authenticatedMutation,
   IdentityError,
   assertRequestTrust,
-  parseCookies,
-  requiredSessionToken,
   singleHeader,
   type StudioIdentityService,
 } from '@dz23-studio/identity'
@@ -261,11 +259,7 @@ function conversationFor(service: PromptToAppService, actor: PromptToAppActor, p
 }
 
 async function authenticatedActor(request: IncomingMessage, config: PromptToAppHttpConfig): Promise<PromptToAppActor> {
-  const session = await config.identity.authenticate(requiredSessionToken(request))
-  if (request.method !== 'GET' && request.method !== 'HEAD') {
-    const cookies = parseCookies(request.headers.cookie)
-    config.identity.validateCsrf(session, cookies[CSRF_COOKIE], singleHeader(request.headers['x-dz23-csrf']))
-  }
+  const session = await authenticatedMutation(request, config.identity)
   const authorization = config.tenancy.authorizationFor(session.user_id, session.org_id, session.tenant_id)
   if (authorization === undefined) throw new PromptToAppError('FORBIDDEN', t('errors.membershipRequired'))
   return { ...authorization, sessionId: session.session_id }

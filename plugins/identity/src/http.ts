@@ -6,11 +6,11 @@ import type { AuthenticationResponse, RegistrationResponse } from './passkey.js'
 import type { SessionRecord } from './model.js'
 import { IdentityError, type StudioIdentityService } from './service.js'
 import { assertRouteContracts, type StudioRouteContract } from '@dz23-studio/policy'
-import { CSRF_COOKIE, parseCookies, SESSION_COOKIE } from './cookies.js'
+import { CSRF_COOKIE, parseCookies, parseCookieValues, SESSION_COOKIE } from './cookies.js'
 import { InMemoryIdentityRateLimiter, rateLimitBuckets, rateLimitKey } from './rate-limit.js'
 
 const JSON_LIMIT = 64 * 1024
-export { CSRF_COOKIE, parseCookies, SESSION_COOKIE } from './cookies.js'
+export { CSRF_COOKIE, parseCookies, parseCookieValues, SESSION_COOKIE } from './cookies.js'
 
 const emailSchema = z.object({ email: z.email() }).strict()
 const magicStartSchema = emailSchema
@@ -29,6 +29,7 @@ export const IDENTITY_ROUTE_CONTRACTS = [
   { method: 'POST', path: '/passkey/login/options', access: 'public', permission: null, scope: 'none' },
   { method: 'POST', path: '/passkey/login/verify', access: 'public', permission: null, scope: 'none' },
   { method: 'GET', path: '/session', access: 'public', permission: null, scope: 'identity' },
+  { method: 'GET', path: '/csrf', access: 'authorized', permission: 'identity.self', scope: 'identity' },
   { method: 'GET', path: '/harness/session', access: 'authorized', permission: 'identity.self', scope: 'identity' },
   { method: 'POST', path: '/passkey/register/options', access: 'authorized', permission: 'identity.self', scope: 'identity' },
   { method: 'POST', path: '/passkey/register/verify', access: 'authorized', permission: 'identity.self', scope: 'identity' },
@@ -51,24 +52,29 @@ export interface IdentityHttpConfig {
   readonly resolveEdgeSecret?: () => Promise<string | undefined>
   readonly harnessAuthenticationUrl?: (baseUrl: string) => string | undefined
   readonly rateLimiter?: InMemoryIdentityRateLimiter
+  readonly secureCookies?: boolean
 }
 
-export function serializeSessionCookies(token: string, csrfToken: string): readonly string[] {
+export function serializeSessionCookies(token: string, csrfToken: string, secure = true): readonly string[] {
+  void csrfToken
+  const secureAttribute = secure ? '; Secure' : ''
   return [
-    `${SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Lax; Path=/`,
-    `${CSRF_COOKIE}=${encodeURIComponent(csrfToken)}; Secure; SameSite=Lax; Path=/`,
+    `${SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly${secureAttribute}; SameSite=Lax; Path=/`,
+    `${CSRF_COOKIE}=${secureAttribute}; SameSite=Lax; Path=/; Max-Age=0`,
   ]
 }
 
-export function clearSessionCookies(): readonly string[] {
+export function clearSessionCookies(secure = true): readonly string[] {
+  const secureAttribute = secure ? '; Secure' : ''
   return [
-    `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`,
-    `${CSRF_COOKIE}=; Secure; SameSite=Lax; Path=/; Max-Age=0`,
+    `${SESSION_COOKIE}=; HttpOnly${secureAttribute}; SameSite=Lax; Path=/; Max-Age=0`,
+    `${CSRF_COOKIE}=${secureAttribute}; SameSite=Lax; Path=/; Max-Age=0`,
   ]
 }
 
 export function createIdentityHttpHandler(config: IdentityHttpConfig) {
   const limiter = config.rateLimiter ?? new InMemoryIdentityRateLimiter()
+  const secureCookies = config.secureCookies !== false
   return async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     try {
       await assertEdgeTrust(request, config)
@@ -83,10 +89,7 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
       const forwardedAddress = config.edgeRequired === true
         ? singleHeader(request.headers['x-forwarded-for'])?.split(',')[0]?.trim()
         : undefined
-      const publicAuthentication = route === '/magic/start'
-        || route === '/magic/verify'
-        || route.startsWith('/passkey/login/')
-      const key = rateLimitKey(request, forwardedAddress, !publicAuthentication)
+      const key = rateLimitKey(request, forwardedAddress)
       for (const bucket of rateLimitBuckets(route)) {
         const decision = limiter.consume(bucket, key)
         if (!decision.allowed) {
@@ -106,7 +109,7 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
       if (request.method === 'POST' && route === '/magic/verify') {
         const body = magicVerifySchema.parse(await readJson(request))
         const issued = await config.service.verifyMagicCode(body.email, body.code, deviceOf(request, body.device_label))
-        response.setHeader('set-cookie', serializeSessionCookies(issued.token, issued.csrfToken))
+        response.setHeader('set-cookie', serializeSessionCookies(issued.token, issued.csrfToken, secureCookies))
         json(response, 200, { session_id: issued.session.session_id, csrf_token: issued.csrfToken })
         return
       }
@@ -122,13 +125,13 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
           body.response as AuthenticationResponse,
           deviceOf(request, 'Chave de acesso'),
         )
-        response.setHeader('set-cookie', serializeSessionCookies(issued.token, issued.csrfToken))
+        response.setHeader('set-cookie', serializeSessionCookies(issued.token, issued.csrfToken, secureCookies))
         json(response, 200, { session_id: issued.session.session_id, csrf_token: issued.csrfToken })
         return
       }
       if (request.method === 'GET' && route === '/session') {
-        const token = parseCookies(request.headers.cookie)[SESSION_COOKIE]
-        if (token === undefined) {
+        const tokens = parseCookieValues(request.headers.cookie, SESSION_COOKIE)
+        if (tokens.length === 0) {
           const principal = config.edgeRequired === true
             ? undefined
             : config.service.personalPrincipal(config.bindHost)
@@ -136,8 +139,14 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
           json(response, 200, { mode: 'personal', principal })
           return
         }
-        const session = await config.service.authenticate(token)
+        const { session } = await authenticateCookieRequest(request, config.service)
         json(response, 200, { mode: 'authenticated', principal: principalOf(session) })
+        return
+      }
+
+      if (request.method === 'GET' && route === '/csrf') {
+        const { session } = await authenticateCookieRequest(request, config.service)
+        json(response, 200, { csrf_token: await config.service.csrfTokenFor(session) })
         return
       }
 
@@ -164,26 +173,30 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
         return
       }
 
-      const session = await authenticatedMutation(request, config.service)
+      const authentication = await authenticateCookieRequest(request, config.service)
+      const session = authentication.session
+      if (request.method !== 'GET' && request.method !== 'HEAD') {
+        config.service.validateCsrfToken(session, singleHeader(request.headers['x-dz23-csrf']))
+      }
       if (request.method === 'POST' && route === '/passkey/register/options') {
-        json(response, 200, await config.service.beginPasskeyRegistration(requiredSessionToken(request)))
+        json(response, 200, await config.service.beginPasskeyRegistration(authentication.token))
         return
       }
       if (request.method === 'POST' && route === '/passkey/register/verify') {
         const body = registerVerifySchema.parse(await readJson(request))
         await config.service.finishPasskeyRegistration(
-          requiredSessionToken(request), body.challenge_id, body.response as RegistrationResponse, body.device_label,
+          authentication.token, body.challenge_id, body.response as RegistrationResponse, body.device_label,
         )
         json(response, 200, { message: 'Chave de acesso criada com segurança.' })
         return
       }
       if (request.method === 'POST' && route === '/passkey/step-up/options') {
-        json(response, 200, await config.service.beginStepUp(requiredSessionToken(request)))
+        json(response, 200, await config.service.beginStepUp(authentication.token))
         return
       }
       if (request.method === 'POST' && route === '/passkey/step-up/verify') {
         const body = challengeSchema.parse(await readJson(request))
-        await config.service.finishStepUp(requiredSessionToken(request), body.challenge_id, body.response as AuthenticationResponse)
+        await config.service.finishStepUp(authentication.token, body.challenge_id, body.response as AuthenticationResponse)
         json(response, 200, { message: 'Ação sensível confirmada.' })
         return
       }
@@ -194,13 +207,13 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
       if (request.method === 'POST' && route === '/devices/revoke') {
         const body = revokeSchema.parse(await readJson(request))
         await config.service.revokeSession(session, body.session_id)
-        if (body.session_id === session.session_id) response.setHeader('set-cookie', clearSessionCookies())
+        if (body.session_id === session.session_id) response.setHeader('set-cookie', clearSessionCookies(secureCookies))
         json(response, 200, { message: 'Dispositivo desconectado.' })
         return
       }
       if (request.method === 'POST' && route === '/devices/revoke-all') {
         await config.service.revokeAllSessions(session)
-        response.setHeader('set-cookie', clearSessionCookies())
+        response.setHeader('set-cookie', clearSessionCookies(secureCookies))
         json(response, 200, { message: 'Todos os dispositivos foram desconectados.' })
         return
       }
@@ -217,20 +230,30 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
 }
 
 export async function authenticatedMutation(request: IncomingMessage, service: StudioIdentityService): Promise<SessionRecord> {
-  const token = requiredSessionToken(request)
-  const session = await service.authenticate(token)
+  const { session } = await authenticateCookieRequest(request, service)
   if (request.method !== 'GET' && request.method !== 'HEAD') {
-    const cookies = parseCookies(request.headers.cookie)
     const header = singleHeader(request.headers['x-dz23-csrf'])
-    service.validateCsrf(session, cookies[CSRF_COOKIE], header)
+    service.validateCsrfToken(session, header)
   }
   return session
 }
 
 export function requiredSessionToken(request: IncomingMessage): string {
-  const token = parseCookies(request.headers.cookie)[SESSION_COOKIE]
+  const token = parseCookieValues(request.headers.cookie, SESSION_COOKIE)[0]
   if (token === undefined || token === '') throw new IdentityError('invalid', 'Entre para continuar.')
   return token
+}
+
+async function authenticateCookieRequest(request: IncomingMessage, service: StudioIdentityService): Promise<{ readonly token: string; readonly session: SessionRecord }> {
+  const candidates = [...new Set(parseCookieValues(request.headers.cookie, SESSION_COOKIE))]
+  if (candidates.length === 0 || candidates.length > 64) throw new IdentityError('invalid', 'Entre para continuar.')
+  let lastError: IdentityError | undefined
+  for (const token of candidates) {
+    if (token === '') continue
+    try { return { token, session: await service.authenticate(token) } }
+    catch (error) { if (!(error instanceof IdentityError)) throw error; lastError = error }
+  }
+  throw lastError ?? new IdentityError('invalid', 'Entre para continuar.')
 }
 
 async function assertEdgeTrust(

@@ -15,7 +15,7 @@ import { t } from './i18n.js'
 import type { StudioPlan, StudioRun } from './model.js'
 import { assertCategoryCanGenerate } from './planner.js'
 import type { PromptModelPort } from './ports.js'
-import { ContainerBuilder, hashTree, listTreeFiles, OFFLINE_PIPELINE_COMMANDS } from './runner.js'
+import { ContainerBuilder, listTreeFiles, materializePreviewArtifact, OFFLINE_PIPELINE_COMMANDS } from './runner.js'
 import { scanGeneratedContent } from './security.js'
 import { PromptToAppError, type PromptToAppActor, type PromptToAppService } from './service.js'
 
@@ -137,7 +137,7 @@ export class PromptToAppPipeline {
       const state = diagnostic === undefined && buildPassed && testPassed ? 'PASSED' : diagnostic === 'BUDGET_EXCEEDED' ? 'BUDGET_EXCEEDED' : 'FAILED'
       if (state !== 'PASSED') finalFailureState = failedStage === 'test' ? 'TESTS_FAILED' : 'BUILD_FAILED'
       await writeFile(resolve(runDirectory, 'pipeline.log'), log, 'utf8')
-      const artifactSha256 = state === 'PASSED' ? await hashTree(runDirectory) : null
+      const artifactSha256 = state === 'PASSED' ? (await materializePreviewArtifact(runDirectory)).sha256 : null
       await this.options.service.putRun(actor, this.runRecord(actor, projectId, plan.plan_id, state === 'PASSED' ? 'verify' : failedStage, attempt, state, 'full', runDirectory, generated, diagnostic ?? null, runId, operationId, ownerSessionId, acceptanceChecks, artifactSha256))
       await this.recordEvidence(actor, projectId, runId, runDirectory, 'pipeline.log', 'build-log')
       await this.recordEvidence(actor, projectId, runId, runDirectory, 'evidence/appspec-report.json', 'test-report')

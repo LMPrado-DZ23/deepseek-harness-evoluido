@@ -27,7 +27,7 @@ o código pode existir, mas ainda não foi validado com pessoas leigas.
 | Prompt-to-App: painel CRUD | BETA | três fixtures; login→listar→criar→editar→excluir com confirmação em Playwright | relações entre entidades, LLM real, preview e fase 0.5 |
 | Prompt-to-App: SaaS autenticado e dashboard | NOT_IMPLEMENTED | briefs e critérios existem no golden set | implementação e prova por categoria |
 | Passkeys no aplicativo gerado | NOT_PRESENT | código por e-mail é a única cerimônia atual | domínio real e fatia própria |
-| Preview autenticado | NOT_CONFIGURED | P34: vínculo por SHA-256, lifecycle tenant-aware, admissão opaca, gateway com allowlist, TTL/reconciliação e interface de iframe passaram em testes focados; o runtime padrão falha fechado | supervisor Docker real, rede interna sem egress, Caddy e Playwright de navegador real |
+| Preview autenticado | BETA | P34/M1: artefato por SHA-256, runtime `NetworkMode=none`, proxy somente no loopback compartilhado, host/metadata/egress bloqueados, Caddy validado, cookie-tossing neutralizado, 3/3 jornadas Chromium e cleanup físico sem sobreviventes | jornada única Caddy+Harness+runtime, HTTPS/domínio/celular reais, operação prolongada e fase 0.5 |
 | Publicação | NOT_PRESENT | nenhuma rota, estado ou botão de publicação | fase autorizada, staging antes de produção e aprovação humana |
 | Rotas DeepSeek/OmniRoute/Ollama no profile | BETA | PoC 3A carregou as três; retry OmniRoute/Ollama = 0 | provedores reais e operação prolongada |
 | Saúde, custo e fallback por rota | BETA | falhas determinísticas antes/depois do primeiro conteúdo | telemetria com rotas reais |

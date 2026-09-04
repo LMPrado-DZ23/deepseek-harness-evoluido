@@ -21,7 +21,7 @@ afterEach(async () => {
 function fakeService(overrides: Partial<Pick<StudioPreviewService, 'exchange' | 'authorize'>> = {}) {
   return {
     exchange: vi.fn(() => Promise.resolve({ cookie: 'cookie-from-service', maxAge: 900 })),
-    authorize: vi.fn(() => ({ previewId: 'preview-trusted', runtimeRef: 'runtime:trusted' })),
+    authorize: vi.fn(() => ({ previewId: 'preview-trusted', runtimeRef: 'runtime:trusted', maxAge: 900 })),
     ...overrides,
   } as unknown as StudioPreviewService
 }
@@ -79,19 +79,19 @@ function gateway(service = fakeService(), forward?: PreviewForwardPort) {
   return {
     service,
     forward: trustedForward,
-    handler: createPreviewGatewayHttpHandler({ service, forward: trustedForward, studioOrigin: 'http://localhost:3210' }),
+    handler: createPreviewGatewayHttpHandler({ service, forward: trustedForward, studioOrigin: 'http://studio.dz23.localhost:3210' }),
   }
 }
 
-const previewHost = 'p-0123456789abcdef01234567.localhost'
+const previewHost = 'p-0123456789abcdef01234567.dz23.localhost'
 
 describe('preview gateway trust boundary', () => {
   it('rejects non-local or non-origin Studio configuration at construction', () => {
     const service = fakeService()
     const forward: PreviewForwardPort = { forward: vi.fn(() => Promise.resolve({ status: 200, body: Buffer.alloc(0) })) }
-    expect(() => createPreviewGatewayHttpHandler({ service, forward, studioOrigin: 'https://localhost:3210' })).toThrow('origem HTTP local exata')
-    expect(() => createPreviewGatewayHttpHandler({ service, forward, studioOrigin: 'http://studio.example' })).toThrow('localhost ou 127.0.0.1')
-    expect(() => createPreviewGatewayHttpHandler({ service, forward, studioOrigin: 'http://localhost:3210/path' })).toThrow('origem HTTP local exata')
+    expect(() => createPreviewGatewayHttpHandler({ service, forward, studioOrigin: 'https://studio.dz23.localhost:3210' })).toThrow('origem HTTP local exata')
+    expect(() => createPreviewGatewayHttpHandler({ service, forward, studioOrigin: 'http://studio.example' })).toThrow('studio.dz23.localhost')
+    expect(() => createPreviewGatewayHttpHandler({ service, forward, studioOrigin: 'http://studio.dz23.localhost:3210/path' })).toThrow('origem HTTP local exata')
   })
 
   it('returns 421 for an invalid or ambiguous Host before consulting services', async () => {
@@ -142,7 +142,7 @@ describe('preview gateway trust boundary', () => {
     expect(result.status).toBe(204)
     expect(h.service.exchange).toHaveBeenCalledWith(previewHost, ticket)
     expect(result.headers['set-cookie']).toEqual([
-      `${PREVIEW_COOKIE}=cookie-from-service; Path=/; Max-Age=900; HttpOnly; Secure; SameSite=Lax`,
+      `${PREVIEW_COOKIE}=cookie-from-service; Path=/; Max-Age=900; HttpOnly; SameSite=Strict`,
     ])
   })
 
@@ -153,6 +153,26 @@ describe('preview gateway trust boundary', () => {
     expect(result.status).toBe(401)
     expect(h.service.authorize).not.toHaveBeenCalled()
     expect(h.forward.forward).not.toHaveBeenCalled()
+  })
+
+  it('renews an active admission without forwarding to the generated application', async () => {
+    const service = fakeService({
+      authorize: vi.fn(() => ({ previewId: 'preview-trusted', runtimeRef: 'runtime:trusted', maxAge: 321 })),
+    })
+    const h = gateway(service)
+    const renewed = await send(h.handler, {
+      path: '/__dz23/refresh?at=1',
+      headers: { host: previewHost, cookie: `${PREVIEW_COOKIE}=browser-cookie` },
+    })
+    const missing = await send(h.handler, { path: '/__dz23/refresh', headers: { host: previewHost } })
+
+    expect(renewed.status).toBe(204)
+    expect(renewed.headers['set-cookie']).toEqual([
+      `${PREVIEW_COOKIE}=browser-cookie; Path=/; Max-Age=321; HttpOnly; SameSite=Strict`,
+    ])
+    expect(service.authorize).toHaveBeenCalledWith(previewHost, 'browser-cookie')
+    expect(h.forward.forward).not.toHaveBeenCalled()
+    expect(missing.status).toBe(401)
   })
 
   it('returns 401 for an expired or revoked admission without revealing an unknown host', async () => {
@@ -303,7 +323,10 @@ describe('preview gateway trust boundary', () => {
     const result = await send(h.handler, { headers: { host: previewHost, cookie: `${PREVIEW_COOKIE}=valid` } })
 
     expect(result.status).toBe(201)
-    expect(result.headers['content-security-policy']).toContain('frame-ancestors http://localhost:3210')
+    expect(result.headers['content-security-policy']).toContain('frame-ancestors http://studio.dz23.localhost:3210')
+    expect(result.headers['content-security-policy']).toContain("script-src 'self' 'unsafe-inline'")
+    expect(result.headers['content-security-policy']).toContain("style-src 'self' 'unsafe-inline'")
+    expect(result.headers['content-security-policy']).not.toContain("'unsafe-eval'")
     expect(result.headers['content-security-policy']).not.toContain('default-src *')
     expect(result.headers['x-frame-options']).toBeUndefined()
     expect(result.headers['x-leak']).toBeUndefined()
@@ -311,7 +334,8 @@ describe('preview gateway trust boundary', () => {
     expect(result.headers.connection).toBe('keep-alive')
     expect(result.headers.connection).not.toContain('x-leak')
     expect(result.headers['set-cookie']).toEqual([
-      'app_session=trusted-value; Path=/; HttpOnly; Secure; SameSite=Lax',
+      'app_session=trusted-value; Path=/; HttpOnly; SameSite=Strict',
+      `${PREVIEW_COOKIE}=valid; Path=/; Max-Age=900; HttpOnly; SameSite=Strict`,
     ])
   })
 
@@ -330,7 +354,10 @@ describe('preview gateway trust boundary', () => {
 
     expect(result.status).toBe(302)
     expect(result.headers).toMatchObject({ etag: '"safe"', 'last-modified': 'Wed, 03 Sep 2026 12:00:00 GMT', location: '/entrar?next=%2F' })
-    expect(result.headers['set-cookie']).toEqual(['app_session=value; Path=/; HttpOnly; Secure; SameSite=Lax'])
+    expect(result.headers['set-cookie']).toEqual([
+      'app_session=value; Path=/; HttpOnly; SameSite=Strict',
+      `${PREVIEW_COOKIE}=valid; Path=/; Max-Age=900; HttpOnly; SameSite=Strict`,
+    ])
   })
 
   it('fails closed on an invalid runtime status, oversized response or authorization error', async () => {
@@ -373,7 +400,7 @@ describe('preview gateway trust boundary', () => {
     const h = gateway()
     const result = await send(h.handler, { path: '/__dz23/admission', headers: { host: previewHost } })
 
-    expect(result.headers['content-security-policy']).toContain('frame-ancestors http://localhost:3210')
+    expect(result.headers['content-security-policy']).toContain('frame-ancestors http://studio.dz23.localhost:3210')
     expect(result.headers['content-security-policy']).not.toContain('frame-ancestors *')
     expect(result.headers['x-frame-options']).toBeUndefined()
   })

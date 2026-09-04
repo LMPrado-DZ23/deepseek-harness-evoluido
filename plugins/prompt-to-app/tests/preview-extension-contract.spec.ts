@@ -58,7 +58,7 @@ const session = {
 const readyPreview = previewRecordSchema.parse({
   preview_id: 'preview-1', org_id: 'org-1', tenant_id: 'tenant-1', project_id: 'project-1', run_id: 'run-1',
   artifact_sha256: 'a'.repeat(64), created_by: 'user-1', source_session_id: 'session-1',
-  hostname: 'p-0123456789abcdef01234567.localhost', state: 'READY',
+  hostname: 'p-0123456789abcdef01234567.dz23.localhost', state: 'READY',
   created_at: '2026-09-03T11:30:00.000Z', ready_at: '2026-09-03T11:30:01.000Z',
   expires_at: '2026-09-03T12:30:00.000Z', stopped_at: null, stop_reason: null, failure_code: null,
   runtime_ref: 'runtime:preview-1', health: 'OK',
@@ -93,7 +93,7 @@ function realPreviewService(): { service: StudioPreviewService; runtime: Preview
 
 interface HttpFixture {
   readonly request: (path: string, init?: RequestInit) => Promise<Response>
-  readonly identity: { authenticate: ReturnType<typeof vi.fn>; validateCsrf: ReturnType<typeof vi.fn> }
+  readonly identity: { authenticate: ReturnType<typeof vi.fn>; validateCsrf: ReturnType<typeof vi.fn>; validateCsrfToken: ReturnType<typeof vi.fn> }
   readonly tenancy: { authorizationFor: ReturnType<typeof vi.fn> }
 }
 
@@ -103,6 +103,9 @@ async function httpFixture(extension: PromptToAppHttpExtension): Promise<HttpFix
     authenticate: vi.fn(() => Promise.resolve(session)),
     validateCsrf: vi.fn((_session: SessionRecord, cookie: string | undefined, header: string | undefined) => {
       if (cookie !== 'csrf-token' || header !== 'csrf-token') throw new IdentityError('csrf', 'CSRF inválido.')
+    }),
+    validateCsrfToken: vi.fn((_session: SessionRecord, header: string | undefined) => {
+      if (header !== 'csrf-token') throw new IdentityError('csrf', 'CSRF inválido.')
     }),
   }
   const tenancy = {
@@ -208,7 +211,7 @@ describe('prompt-to-app preview extension dispatcher contract', () => {
     })
 
     expect(response.status).toBe(401)
-    expect(f.identity.validateCsrf).toHaveBeenCalledOnce()
+    expect(f.identity.validateCsrfToken).toHaveBeenCalledOnce()
     expect(preview.runtime.health).not.toHaveBeenCalled()
   })
 })

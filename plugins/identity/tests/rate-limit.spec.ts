@@ -5,6 +5,7 @@ import {
   rateLimitBuckets,
   rateLimitKey,
 } from '../src/rate-limit.ts'
+import { SESSION_COOKIE } from '../src/cookies.ts'
 
 describe('identity application rate limits', () => {
   it('enforces a window and releases the key only after the boundary', () => {
@@ -33,18 +34,18 @@ describe('identity application rate limits', () => {
     expect(rateLimitBuckets('/session')).toEqual(['global'])
   })
 
-  it('keys trusted authenticated calls by session and anonymous calls only by address', () => {
+  it('ignores untrusted cookies and keys only a server-authenticated session explicitly', () => {
     const request = (cookie?: string, remoteAddress?: string) => ({
       headers: cookie === undefined ? {} : { cookie },
       socket: { remoteAddress },
     }) as never
-    const session = rateLimitKey(request('dz23_studio_session=session-a'), '198.51.100.1')
-    expect(session).toBe(rateLimitKey(request('dz23_studio_session=session-a'), '203.0.113.1'))
-    expect(session).not.toBe(rateLimitKey(request('dz23_studio_session=session-b'), '198.51.100.1'))
-    expect(rateLimitKey(request('dz23_studio_session=fake-a'), '198.51.100.1', false))
-      .toBe(rateLimitKey(request('dz23_studio_session=fake-b'), '198.51.100.1', false))
-    expect(rateLimitKey(request('dz23_studio_session=fake-a'), '198.51.100.1', false))
-      .not.toBe(rateLimitKey(request('dz23_studio_session=fake-a'), '203.0.113.1', false))
+    const session = rateLimitKey(request(`${SESSION_COOKIE}=shadow-a`), '198.51.100.1', 'session-a')
+    expect(session).toBe(rateLimitKey(request(`${SESSION_COOKIE}=shadow-b`), '203.0.113.1', 'session-a'))
+    expect(session).not.toBe(rateLimitKey(request(`${SESSION_COOKIE}=shadow-a`), '198.51.100.1', 'session-b'))
+    expect(rateLimitKey(request(`${SESSION_COOKIE}=fake-a`), '198.51.100.1'))
+      .toBe(rateLimitKey(request(`${SESSION_COOKIE}=fake-b`), '198.51.100.1'))
+    expect(rateLimitKey(request(`${SESSION_COOKIE}=fake-a`), '198.51.100.1'))
+      .not.toBe(rateLimitKey(request(`${SESSION_COOKIE}=fake-a`), '203.0.113.1'))
     expect(rateLimitKey(request(undefined, '127.0.0.1'), '198.51.100.1'))
       .toBe(rateLimitKey(request(undefined, '127.0.0.2'), '198.51.100.1'))
     expect(rateLimitKey(request(undefined, '127.0.0.1')))

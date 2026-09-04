@@ -4,9 +4,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   clearSessionCookies,
   createIdentityHttpHandler,
+  authenticatedMutation,
   CSRF_COOKIE,
   deviceOf,
   parseCookies,
+  parseCookieValues,
+  requiredSessionToken,
   serializeSessionCookies,
   SESSION_COOKIE,
   singleHeader,
@@ -30,8 +33,10 @@ function fakeService() {
     beginPasskeyLogin: vi.fn(() => Promise.resolve({ challengeId: 'challenge', options: { challenge: 'abc' } })),
     finishPasskeyLogin: vi.fn(() => Promise.resolve({ token: 'passkey-token', csrfToken: 'passkey-csrf', session })),
     personalPrincipal: vi.fn(() => ({ userId: 'user_local', orgId: 'org_local', tenantId: 'tenant_local', sessionId: 'session_local' })),
-    authenticate: vi.fn(() => Promise.resolve(session)),
+    authenticate: vi.fn<(token: string) => Promise<SessionRecord>>(() => Promise.resolve(session)),
     validateCsrf: vi.fn(),
+    validateCsrfToken: vi.fn(),
+    csrfTokenFor: vi.fn(() => Promise.resolve('csrf-token')),
     beginPasskeyRegistration: vi.fn(() => Promise.resolve({ challengeId: 'reg', options: { challenge: 'reg-c' } })),
     finishPasskeyRegistration: vi.fn(() => Promise.resolve()),
     beginStepUp: vi.fn(() => Promise.resolve({ challengeId: 'step', options: { challenge: 'step-c' } })),
@@ -93,11 +98,20 @@ describe('identity HTTP boundary', () => {
   it('serializes secure cookies and parses malformed cookie values safely', () => {
     expect(serializeSessionCookies('a b', 'c d')).toEqual([
       `${SESSION_COOKIE}=a%20b; HttpOnly; Secure; SameSite=Lax; Path=/`,
-      `${CSRF_COOKIE}=c%20d; Secure; SameSite=Lax; Path=/`,
+      `${CSRF_COOKIE}=; Secure; SameSite=Lax; Path=/; Max-Age=0`,
+    ])
+    expect(serializeSessionCookies('local', 'unused', false)).toEqual([
+      `${SESSION_COOKIE}=local; HttpOnly; SameSite=Lax; Path=/`,
+      `${CSRF_COOKIE}=; SameSite=Lax; Path=/; Max-Age=0`,
     ])
     expect(clearSessionCookies()).toHaveLength(2)
+    expect(clearSessionCookies(false).every(cookie => !cookie.includes('Secure'))).toBe(true)
     expect(parseCookies(undefined)).toEqual({})
     expect(parseCookies('a=1; lone; bad=%E0%A4%A')).toEqual({ a: '1', lone: '', bad: '' })
+    expect(parseCookieValues('a=first; a=second; a=%E0%A4%A; b=other', 'a')).toEqual(['first', 'second'])
+    expect(requiredSessionToken({ headers: { cookie: `${SESSION_COOKIE}=required` } } as never)).toBe('required')
+    expect(() => requiredSessionToken({ headers: {} } as never)).toThrow(IdentityError)
+    expect(() => requiredSessionToken({ headers: { cookie: `${SESSION_COOKIE}=` } } as never)).toThrow(IdentityError)
     expect(singleHeader(undefined)).toBeUndefined()
     expect(singleHeader('one')).toBe('one')
     expect(singleHeader(['one'])).toBe('one')
@@ -152,6 +166,41 @@ describe('identity HTTP boundary', () => {
       mode: 'authenticated',
       principal: { userId: 'user-1', orgId: 'org-1', tenantId: 'tenant-1', sessionId: 'session-1' },
     })
+  })
+
+  it('issues CSRF through an authenticated same-origin endpoint and ignores a shadow cookie before the valid session', async () => {
+    const f = await fixture()
+    f.service.authenticate.mockImplementation(token => token === 'session-token'
+      ? Promise.resolve(session)
+      : Promise.reject(new IdentityError('invalid', 'invalid')))
+    const response = await f.request('/csrf', {
+      method: 'GET', headers: { cookie: `${SESSION_COOKIE}=shadow; ${SESSION_COOKIE}=session-token` },
+    })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ csrf_token: 'csrf-token' })
+    expect(f.service.authenticate).toHaveBeenCalledWith('shadow')
+    expect(f.service.authenticate).toHaveBeenCalledWith('session-token')
+  })
+
+  it('authenticates mutations from the valid duplicate cookie and bounds adversarial candidates', async () => {
+    const service = fakeService()
+    service.authenticate.mockImplementation(async token => {
+      if (token === 'valid') return session
+      if (token === 'explode') throw new Error('storage unavailable')
+      throw new IdentityError('invalid', 'invalid-session')
+    })
+    const request = (cookie: string, method = 'POST') => ({
+      method,
+      headers: { cookie, 'x-dz23-csrf': 'csrf-token' },
+    }) as never
+
+    await expect(authenticatedMutation(request(`${SESSION_COOKIE}=shadow; ${SESSION_COOKIE}=valid`), service as unknown as StudioIdentityService)).resolves.toBe(session)
+    expect(service.validateCsrfToken).toHaveBeenCalledWith(session, 'csrf-token')
+    await expect(authenticatedMutation(request(`${SESSION_COOKIE}=valid`, 'GET'), service as unknown as StudioIdentityService)).resolves.toBe(session)
+    await expect(authenticatedMutation(request(`${SESSION_COOKIE}=`), service as unknown as StudioIdentityService)).rejects.toMatchObject({ code: 'invalid' })
+    await expect(authenticatedMutation(request(`${SESSION_COOKIE}=explode`), service as unknown as StudioIdentityService)).rejects.toThrow('storage unavailable')
+    const tooMany = Array.from({ length: 65 }, (_, index) => `${SESSION_COOKIE}=candidate-${index}`).join('; ')
+    await expect(authenticatedMutation(request(tooMany), service as unknown as StudioIdentityService)).rejects.toMatchObject({ code: 'invalid' })
   })
 
   it('requires the rotatable edge secret and creates the native Harness session exchange', async () => {
@@ -241,7 +290,7 @@ describe('identity HTTP boundary', () => {
     expect(self.headers.getSetCookie().join(';')).toContain('Max-Age=0')
     const all = await f.request('/devices/revoke-all', { method: 'POST', headers: authHeaders, body: '{}' })
     expect(all.headers.getSetCookie().join(';')).toContain('Max-Age=0')
-    expect(f.service.validateCsrf).toHaveBeenCalled()
+    expect(f.service.validateCsrfToken).toHaveBeenCalled()
   })
 
   it('rejects absent session, missing CSRF, untrusted host and untrusted origin', async () => {
@@ -250,7 +299,7 @@ describe('identity HTTP boundary', () => {
     expect((await f.request('/bind-agent', {
       method: 'POST', headers: { cookie: `${SESSION_COOKIE}=session-token` }, body: JSON.stringify({ harness_session_id: 'a' }),
     })).status).toBe(200)
-    f.service.validateCsrf.mockImplementationOnce(() => { throw new IdentityError('csrf', 'csrf') })
+    f.service.validateCsrfToken.mockImplementationOnce(() => { throw new IdentityError('csrf', 'csrf') })
     expect((await f.request('/bind-agent', { method: 'POST', headers: authHeaders, body: JSON.stringify({ harness_session_id: 'a' }) })).status).toBe(401)
     f.allowedHosts.splice(0)
     expect((await f.request('/session', { method: 'GET' })).status).toBe(401)
