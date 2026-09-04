@@ -40,7 +40,11 @@ function spdx(architecture) {
     },
     packages: [{ SPDXID: 'SPDXRef-Package-runtime', name: 'runtime' }],
     files: [],
-    relationships: [],
+    relationships: [{
+      spdxElementId: 'SPDXRef-DOCUMENT',
+      relationshipType: 'DESCRIBES',
+      relatedSpdxElement: 'SPDXRef-Package-runtime',
+    }],
   }
 }
 
@@ -86,6 +90,8 @@ async function fixture(t) {
   await mkdir(join(root, 'deploy', 'studio'), { recursive: true })
   await writeFile(join(root, 'deploy', 'studio', 'Dockerfile'), 'FROM scratch\n', 'utf8')
   await writeFile(join(root, 'pnpm-lock.yaml'), 'lockfileVersion: 9.0\n', 'utf8')
+  await mkdir(join(root, 'third_party', 'deepseek-harness'), { recursive: true })
+  await writeFile(join(root, 'third_party', 'deepseek-harness', 'pnpm-lock.yaml'), 'lockfileVersion: 9.0\n', 'utf8')
   const metadataPath = join(root, 'release-metadata.json')
   const descriptorPath = join(root, 'oci-descriptor.json')
   const sbomAmd64Path = join(root, 'sbom-amd64.spdx.json')
@@ -163,6 +169,20 @@ test('rejeita SBOM que não cumpre o cabeçalho SPDX', async (t) => {
   invalid.dataLicense = 'NOASSERTION'
   await json(options.sbomArm64Path, invalid)
   await assert.rejects(() => buildReleaseProvenance(options), /cabeçalho SPDX inválido/u)
+})
+
+test('rejeita SBOM vazio ou sem relação DESCRIBES', async (t) => {
+  const options = await fixture(t)
+  const empty = spdx('arm64')
+  empty.packages = []
+  await json(options.sbomArm64Path, empty)
+  await assert.rejects(() => buildReleaseProvenance(options), /nenhum pacote descrito/u)
+
+  const optionsWithoutRoot = await fixture(t)
+  const unrelated = spdx('arm64')
+  unrelated.relationships = []
+  await json(optionsWithoutRoot.sbomArm64Path, unrelated)
+  await assert.rejects(() => buildReleaseProvenance(optionsWithoutRoot), /não descreve nenhum pacote raiz/u)
 })
 
 test('rejeita proveniência adulterada ou não canônica', async (t) => {

@@ -21,6 +21,7 @@ const SHA40 = /^[0-9a-f]{40}$/u
 const SAFE_IMAGE = /^(?!-)[A-Za-z0-9][A-Za-z0-9._:/@-]{0,510}$/u
 const FORBIDDEN_CONFIG = ['studio-fake', 'studio-deterministic', 'studio_echo', 'tenant-poc-01']
 const HOME_PATH = '/var/lib/dz23-studio'
+const BACKUP_PATH = '/var/lib/dz23-studio-backups'
 const TMPFS = '/tmp:rw,noexec,nosuid,nodev,size=67108864'
 const COMMAND_TIMEOUT_MS = 60_000
 const START_TIMEOUT_MS = 45_000
@@ -91,11 +92,16 @@ export function validateInputs(image, revision) {
 
 export function assertImageMetadata(raw, expectedRevision) {
   const image = one(parseJson(raw, 'docker image inspect'), 'docker image inspect')
+  if (!/^sha256:[0-9a-f]{64}$/u.test(image?.Id)) fail('IMAGE_ID_INVALID', 'imagem sem content ID imutável')
   const user = image?.Config?.User
   if (!['10001', '10001:10001'].includes(user)) fail('IMAGE_USER_MISMATCH', `usuário efetivo inesperado: ${String(user)}`)
   const env = Array.isArray(image?.Config?.Env) ? image.Config.Env : []
   const revision = env.find(item => item.startsWith('DZ23_STUDIO_IMAGE_REVISION='))?.slice('DZ23_STUDIO_IMAGE_REVISION='.length)
   if (revision !== expectedRevision) fail('IMAGE_REVISION_MISMATCH', `esperado ${expectedRevision}, recebido ${String(revision)}`)
+  const labelRevision = image?.Config?.Labels?.['org.opencontainers.image.revision']
+  if (labelRevision !== expectedRevision) {
+    fail('IMAGE_LABEL_REVISION_MISMATCH', `label OCI esperada ${expectedRevision}, recebida ${String(labelRevision)}`)
+  }
   const entrypoint = image?.Config?.Entrypoint
   if (!Array.isArray(entrypoint) || entrypoint.join('\0') !== 'node\0entrypoint.mjs') {
     fail('IMAGE_ENTRYPOINT_MISMATCH', 'entrypoint versionado do Studio ausente')
@@ -103,12 +109,14 @@ export function assertImageMetadata(raw, expectedRevision) {
   return { imageId: image.Id, revision, user }
 }
 
-export function hardenedRunArgs({ image, name, volume, entrypoint, command = [], server = false }) {
+export function hardenedRunArgs({ image, name, volume, backupVolume, entrypoint, command = [], server = false }) {
+  if (!backupVolume) fail('INTERNAL_PLAN_ERROR', 'volume de backup obrigatório')
   const args = [
     'create', '--name', name,
     '--read-only',
     '--tmpfs', TMPFS,
     '--mount', `type=volume,source=${volume},target=${HOME_PATH}`,
+    '--mount', `type=volume,source=${backupVolume},target=${BACKUP_PATH}`,
     '--cap-drop', 'ALL',
     '--security-opt', 'no-new-privileges',
     '--network', 'none',
@@ -120,8 +128,9 @@ export function hardenedRunArgs({ image, name, volume, entrypoint, command = [],
   return args
 }
 
-export function assertHardenedContainer(raw, expectedVolume) {
+export function assertHardenedContainer(raw, expectedVolume, expectedBackupVolume, expectedImageId) {
   const container = one(parseJson(raw, 'docker container inspect'), 'docker container inspect')
+  if (container?.Image !== expectedImageId) fail('CONTAINER_IMAGE_MISMATCH', 'contêiner não usa o content ID inspecionado')
   const host = container?.HostConfig ?? {}
   if (host.ReadonlyRootfs !== true) fail('ROOTFS_NOT_READ_ONLY', 'ReadonlyRootfs não está ativo')
   if (host.NetworkMode !== 'none') fail('NETWORK_NOT_DISABLED', `NetworkMode=${String(host.NetworkMode)}`)
@@ -140,9 +149,17 @@ export function assertHardenedContainer(raw, expectedVolume) {
   if (home?.Type !== 'volume' || home?.Name !== expectedVolume || home?.RW !== true) {
     fail('PERSISTENT_VOLUME_MISMATCH', 'volume gravável e nomeado do perfil ausente')
   }
-  const forbidden = mounts.find(item => item.Destination === '/var/run/docker.sock' || item.Source === '/var/run/docker.sock')
-  if (forbidden !== undefined) fail('DOCKER_SOCKET_MOUNTED', 'docker.sock nunca pode entrar no runtime')
-  return { networkMode: host.NetworkMode, readOnly: true, tmpfs, volume: home.Name }
+  const backup = mounts.find(item => item.Destination === BACKUP_PATH)
+  if (backup?.Type !== 'volume' || backup?.Name !== expectedBackupVolume || backup?.RW !== true) {
+    fail('BACKUP_VOLUME_MISMATCH', 'volume gravável e nomeado de backup ausente')
+  }
+  const allowedDestinations = new Set([HOME_PATH, BACKUP_PATH])
+  if (mounts.length !== allowedDestinations.size || mounts.some(item => (
+    item.Type !== 'volume' || !allowedDestinations.has(item.Destination)
+  ))) {
+    fail('UNEXPECTED_RUNTIME_MOUNT', 'runtime contém bind, device ou montagem adicional')
+  }
+  return { imageId: container.Image, networkMode: host.NetworkMode, readOnly: true, tmpfs, volume: home.Name, backupVolume: backup.Name }
 }
 
 export function assertCleanDumpConfig(output) {
@@ -160,7 +177,7 @@ export function assertGracefulExit(raw) {
   const state = container?.State ?? {}
   if (state.Running !== false || state.OOMKilled !== false) fail('UNEXPECTED_STOP_STATE', 'contêiner ainda ativo ou morto por OOM')
   if (state.ExitCode === 137) fail('SIGKILL_DETECTED', 'exit 137 indica escalonamento para SIGKILL')
-  if (state.ExitCode !== 143) fail('SIGTERM_NOT_PROPAGATED', `exit esperado 143, recebido ${String(state.ExitCode)}`)
+  if (state.ExitCode !== 0) fail('CLEAN_SHUTDOWN_NOT_CONFIRMED', `exit limpo esperado 0, recebido ${String(state.ExitCode)}`)
   return { exitCode: state.ExitCode, oomKilled: state.OOMKilled }
 }
 
@@ -222,17 +239,29 @@ function managedProfileScript(revision, mode) {
     `if(fs.readFileSync(path.join(target,'.image-revision'),'utf8').trim()!=='${revision}')throw new Error('PROFILE_REVISION_MISMATCH');`,
     mode === 'write'
       ? "fs.writeFileSync(path.join(target,'.m61-persistence-proof'),'persisted\\n',{mode:0o600});process.stdout.write(JSON.stringify({target,writable:true}));"
-      : "const marker=fs.readFileSync(path.join(target,'.m61-persistence-proof'),'utf8');if(marker!=='persisted\\n')throw new Error('PROFILE_MARKER_MISSING');process.stdout.write(JSON.stringify({target,persisted:true}));",
+      : `const marker=fs.readFileSync(path.join(target,'.m61-persistence-proof'),'utf8');if(marker!=='persisted\\n')throw new Error('PROFILE_MARKER_MISSING');const shutdown=JSON.parse(fs.readFileSync('${HOME_PATH}/.last-clean-shutdown.json','utf8'));if(shutdown.imageRevision!=='${revision}'||shutdown.requestedSignal!=='SIGTERM')throw new Error('CLEAN_SHUTDOWN_MARKER_INVALID');process.stdout.write(JSON.stringify({target,persisted:true,cleanShutdown:true}));`,
   ].join('')
 }
 
 const packagedAssetsScript = [
-  "const fs=require('node:fs');",
+  "const fs=require('node:fs');const crypto=require('node:crypto');const path=require('node:path');",
   "const ui='/opt/dz23-studio/runtime/node_modules/@dz23-studio/web/lib/client/index.html';",
-  "const template='/opt/dz23-studio/runtime/node_modules/@dz23-studio/prompt-to-app/template/nextjs-app@1/package.json';",
-  "for(const file of [ui,template]){const s=fs.statSync(file);if(!s.isFile()||s.size<=0)throw new Error('PACKAGED_FILE_MISSING:'+file)}",
-  "const manifest=JSON.parse(fs.readFileSync(template,'utf8'));if(typeof manifest.name!=='string'||manifest.name.length===0)throw new Error('TEMPLATE_MANIFEST_INVALID');",
-  "process.stdout.write(JSON.stringify({uiBytes:fs.statSync(ui).size,templateBytes:fs.statSync(template).size,templateName:manifest.name}));",
+  "const root='/opt/dz23-studio/runtime/node_modules/@dz23-studio/prompt-to-app/template/nextjs-app@1';",
+  "const required=['package.json','pnpm-lock.yaml','app/layout.tsx','app/page.tsx','src/lib/utils.ts','tests/e2e/smoke.spec.ts'];",
+  "function walk(dir,prefix=''){const out=[];for(const item of fs.readdirSync(dir,{withFileTypes:true})){const rel=prefix?prefix+'/'+item.name:item.name;const full=path.join(dir,item.name);if(item.isSymbolicLink())throw new Error('TEMPLATE_SYMLINK:'+rel);if(item.isDirectory())out.push(...walk(full,rel));else if(item.isFile())out.push(rel);else throw new Error('TEMPLATE_SPECIAL_FILE:'+rel)}return out}",
+  "const uiStat=fs.statSync(ui);if(!uiStat.isFile()||uiStat.size<=0)throw new Error('PACKAGED_UI_MISSING');",
+  "const files=walk(root).sort();if(files.length!==23)throw new Error('TEMPLATE_FILE_COUNT:'+files.length);for(const file of required){if(!files.includes(file))throw new Error('PACKAGED_FILE_MISSING:'+file)}",
+  "const digest=crypto.createHash('sha256');let bytes=0;for(const file of files){const data=fs.readFileSync(path.join(root,file));if(data.length===0)throw new Error('TEMPLATE_EMPTY:'+file);bytes+=data.length;digest.update(file).update('\\0').update(crypto.createHash('sha256').update(data).digest()).update('\\0')}",
+  "const manifest=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8'));if(typeof manifest.name!=='string'||manifest.name.length===0)throw new Error('TEMPLATE_MANIFEST_INVALID');",
+  "process.stdout.write(JSON.stringify({uiBytes:uiStat.size,templateBytes:bytes,templateFiles:files.length,templateSha256:digest.digest('hex'),templateName:manifest.name}));",
+].join('')
+
+const runtimeToolsScript = [
+  "const {spawnSync}=require('node:child_process');",
+  "function run(command,args=[]){const r=spawnSync(command,args,{encoding:'utf8'});return {command,code:r.status,error:r.error?.code,stdout:(r.stdout||'').trim()}}",
+  "const git=run('git',['--version']);if(git.code!==0||!/^git version \\d+\\.\\d+\\.\\d+$/.test(git.stdout))throw new Error('GIT_RUNTIME_MISSING');",
+  "const forbidden=['npm','npx','corepack','pnpm','docker'].map(command=>run(command));if(forbidden.some(item=>item.error!=='ENOENT'))throw new Error('FORBIDDEN_RUNTIME_TOOL:'+JSON.stringify(forbidden));",
+  "process.stdout.write(JSON.stringify({node:process.version,git:git.stdout,absent:forbidden.map(item=>item.command)}));",
 ].join('')
 
 function ownName(prefix, nonce) {
@@ -244,35 +273,45 @@ export async function proveStudioRuntime({ image, revision, runner = createDocke
   if (!/^[a-f0-9]{12}$/u.test(nonce)) fail('INVALID_NONCE', 'nonce interno inválido')
   const report = createReport(image, revision, now)
   const volume = ownName('data', nonce)
+  const backupVolume = ownName('backups', nonce)
   const dump = ownName('dump', nonce)
   const first = ownName('boot-a', nonce)
   const second = ownName('boot-b', nonce)
   const containers = []
-  let volumeCreated = false
+  const createdVolumes = []
   let currentCheck = 'image_metadata'
   try {
     const metadata = assertImageMetadata(inspect(runner, 'image', image, 'imagem Docker'), revision)
     mark(report, 'image_metadata', 'PASS', metadata)
+    const resolvedImage = metadata.imageId
 
     currentCheck = 'hardened_storage'
-    const volumeResult = runOrFail(runner, ['volume', 'create', volume], 'criação do volume')
-    if (volumeResult.stdout.trim() !== volume) fail('VOLUME_NAME_MISMATCH', 'Docker devolveu outro nome de volume')
-    volumeCreated = true
+    for (const candidate of [volume, backupVolume]) {
+      const volumeResult = runOrFail(runner, ['volume', 'create', candidate], `criação do volume ${candidate}`)
+      if (volumeResult.stdout.trim() !== candidate) fail('VOLUME_NAME_MISMATCH', 'Docker devolveu outro nome de volume')
+      createdVolumes.push(candidate)
+    }
     runOrFail(runner, hardenedRunArgs({
-      image, name: dump, volume,
+      image: resolvedImage, name: dump, volume, backupVolume,
       command: ['--profile', 'studio', '--dump-config'],
     }), 'criação do contêiner dump-config')
     containers.push(dump)
-    const hardening = assertHardenedContainer(inspect(runner, 'container', dump, 'contêiner dump-config'), volume)
+    const hardening = assertHardenedContainer(
+      inspect(runner, 'container', dump, 'contêiner dump-config'),
+      volume,
+      backupVolume,
+      resolvedImage,
+    )
     mark(report, 'hardened_storage', 'PASS', hardening)
 
     currentCheck = 'runtime_tools'
     const gitContainer = ownName('git', nonce)
-    runOrFail(runner, hardenedRunArgs({ image, name: gitContainer, volume, entrypoint: 'git', command: ['--version'] }), 'criação da prova Git')
+    runOrFail(runner, hardenedRunArgs({
+      image: resolvedImage, name: gitContainer, volume, backupVolume, entrypoint: 'node', command: ['-e', runtimeToolsScript],
+    }), 'criação da prova das ferramentas do runtime')
     containers.push(gitContainer)
-    const gitResult = runOrFail(runner, ['start', '--attach', gitContainer], 'Git do runtime')
-    if (!/^git version \d+\.\d+\.\d+\s*$/u.test(gitResult.stdout)) fail('GIT_RUNTIME_MISSING', 'git --version não retornou uma versão válida')
-    mark(report, 'runtime_tools', 'PASS', { git: gitResult.stdout.trim() })
+    const gitResult = runOrFail(runner, ['start', '--attach', gitContainer], 'ferramentas do runtime')
+    mark(report, 'runtime_tools', 'PASS', parseJson(gitResult.stdout, 'ferramentas do runtime'))
 
     currentCheck = 'dump_config'
     const dumpResult = runOrFail(runner, ['start', '--attach', dump], 'dump-config', 120_000)
@@ -281,7 +320,7 @@ export async function proveStudioRuntime({ image, revision, runner = createDocke
     currentCheck = 'managed_profile'
     const profileWrite = ownName('profile-write', nonce)
     runOrFail(runner, hardenedRunArgs({
-      image, name: profileWrite, volume, entrypoint: 'node',
+      image: resolvedImage, name: profileWrite, volume, backupVolume, entrypoint: 'node',
       command: ['-e', managedProfileScript(revision, 'write')],
     }), 'criação da prova de escrita do perfil')
     containers.push(profileWrite)
@@ -290,14 +329,14 @@ export async function proveStudioRuntime({ image, revision, runner = createDocke
 
     currentCheck = 'packaged_assets'
     const assets = ownName('assets', nonce)
-    runOrFail(runner, hardenedRunArgs({ image, name: assets, volume, entrypoint: 'node', command: ['-e', packagedAssetsScript] }), 'criação da prova de artefatos')
+    runOrFail(runner, hardenedRunArgs({ image: resolvedImage, name: assets, volume, backupVolume, entrypoint: 'node', command: ['-e', packagedAssetsScript] }), 'criação da prova de artefatos')
     containers.push(assets)
     const assetResult = runOrFail(runner, ['start', '--attach', assets], 'artefatos empacotados')
     mark(report, 'packaged_assets', 'PASS', parseJson(assetResult.stdout, 'artefatos empacotados'))
 
     currentCheck = 'http_boot'
     runOrFail(runner, hardenedRunArgs({
-      image, name: first, volume, server: true,
+      image: resolvedImage, name: first, volume, backupVolume, server: true,
       command: ['--profile', 'studio', '--host', '127.0.0.1', '--port', '3210', '--no-open'],
     }), 'criação do primeiro boot')
     containers.push(first)
@@ -312,7 +351,7 @@ export async function proveStudioRuntime({ image, revision, runner = createDocke
 
     currentCheck = 'persistent_restart'
     runOrFail(runner, hardenedRunArgs({
-      image, name: second, volume, server: true,
+      image: resolvedImage, name: second, volume, backupVolume, server: true,
       command: ['--profile', 'studio', '--host', '127.0.0.1', '--port', '3210', '--no-open'],
     }), 'criação do segundo boot')
     containers.push(second)
@@ -341,12 +380,12 @@ export async function proveStudioRuntime({ image, revision, runner = createDocke
       const result = runner(['rm', '--force', '--volumes', container], { timeoutMs: 20_000 })
       if (result.status !== 0 && !/No such container/iu.test(`${result.stderr}\n${result.stdout}`)) failures.push(`container ${container}`)
     }
-    if (volumeCreated) {
-      const result = runner(['volume', 'rm', volume], { timeoutMs: 20_000 })
-      if (result.status !== 0 && !/No such volume/iu.test(`${result.stderr}\n${result.stdout}`)) failures.push(`volume ${volume}`)
+    for (const createdVolume of [...createdVolumes].reverse()) {
+      const result = runner(['volume', 'rm', createdVolume], { timeoutMs: 20_000 })
+      if (result.status !== 0 && !/No such volume/iu.test(`${result.stderr}\n${result.stdout}`)) failures.push(`volume ${createdVolume}`)
     }
     report.cleanup = failures.length === 0
-      ? { status: 'PASS', resources: { containers: containers.length, volumes: volumeCreated ? 1 : 0 } }
+      ? { status: 'PASS', resources: { containers: containers.length, volumes: createdVolumes.length } }
       : { status: 'FAIL', error: `recursos não removidos: ${failures.join(', ')}` }
     if (failures.length > 0) report.status = 'FAIL'
     report.completedAt = now().toISOString()

@@ -84,11 +84,31 @@ export function validateImageLock(lock) {
   return lock
 }
 
+export function validateDockerfileBase(dockerfile, lock) {
+  if (typeof dockerfile !== 'string' || dockerfile.length === 0) throw new Error('Dockerfile do Studio vazio')
+  const fromLines = dockerfile
+    .split(/\r?\n/u)
+    .map(line => line.trim())
+    .filter(line => /^FROM\s+/iu.test(line))
+  const expected = `FROM ${lock.images.node.reference}@${lock.images.node.indexDigest} AS git-runtime`
+  if (fromLines[0] !== expected) {
+    throw new Error(`Dockerfile do Studio não usa a imagem Node fixada (${expected})`)
+  }
+  const external = fromLines.filter(line => !/^FROM\s+[A-Za-z][A-Za-z0-9_.-]*\s+AS\s+/u.test(line))
+  if (external.length !== 1 || external[0] !== expected) {
+    throw new Error('Dockerfile do Studio contém base externa não fixada pelo images.lock')
+  }
+  return { base: `${lock.images.node.reference}@${lock.images.node.indexDigest}`, fromLines }
+}
+
 export async function main(argv = process.argv.slice(2)) {
   const pathIndex = argv.indexOf('--file')
   const lockPath = resolve(pathIndex >= 0 ? argv[pathIndex + 1] : 'deploy/images.lock.json')
+  const dockerfileIndex = argv.indexOf('--dockerfile')
+  const dockerfilePath = resolve(dockerfileIndex >= 0 ? argv[dockerfileIndex + 1] : 'deploy/studio/Dockerfile')
   const parsed = JSON.parse(await readFile(lockPath, 'utf8'))
   const lock = validateImageLock(parsed)
+  validateDockerfileBase(await readFile(dockerfilePath, 'utf8'), lock)
   process.stdout.write(
     `IMAGE_LOCK=PASS node=${lock.images.node.indexDigest} platforms=${EXPECTED_PLATFORMS.length} pnpm=${lock.tools.pnpm.version}\n`,
   )

@@ -53,13 +53,13 @@ RUN --network=none pnpm --dir third_party/deepseek-harness build:official
 # Inject the now-built upstream packages into the Studio workspace.
 RUN --mount=type=cache,id=dz23-studio-pnpm-11,target=/pnpm/store,sharing=locked \
     --network=none \
-    pnpm install --offline --frozen-lockfile --trust-lockfile --store-dir /pnpm/store
+    pnpm install --offline --frozen-lockfile --trust-lockfile --filter '@dz23-studio/*...' --store-dir /pnpm/store
 RUN --mount=type=cache,id=dz23-studio-pnpm-11,target=/pnpm/store,sharing=locked \
     --network=none pnpm build
 # Synchronize every built workspace package into the deployable virtual store.
 RUN --mount=type=cache,id=dz23-studio-pnpm-11,target=/pnpm/store,sharing=locked \
     --network=none \
-    pnpm install --offline --frozen-lockfile --trust-lockfile --force --store-dir /pnpm/store \
+    pnpm install --offline --frozen-lockfile --trust-lockfile --filter '@dz23-studio/*...' --force --store-dir /pnpm/store \
  && pnpm --filter @dz23-studio/runtime deploy --prod /opt/runtime \
  && test -f /opt/runtime/entrypoint.mjs \
  && test -f /opt/runtime/node_modules/@deepseek-ai/dsh/lib/bin.js \
@@ -67,9 +67,10 @@ RUN --mount=type=cache,id=dz23-studio-pnpm-11,target=/pnpm/store,sharing=locked 
  && test -f /opt/runtime/node_modules/@dz23-studio/prompt-to-app/template/nextjs-app@1/package.json
 
 FROM git-runtime AS runtime
-LABEL org.opencontainers.image.title="DZ23 STUDIO" \
-      org.opencontainers.image.description="Runtime do DZ23 STUDIO sobre uma revisão fixada do DeepSeek Harness"
 ARG STUDIO_COMMIT
+LABEL org.opencontainers.image.title="DZ23 STUDIO" \
+      org.opencontainers.image.description="Runtime do DZ23 STUDIO sobre uma revisão fixada do DeepSeek Harness" \
+      org.opencontainers.image.revision="${STUDIO_COMMIT}"
 ENV NODE_ENV=production \
     HOME=/var/lib/dz23-studio \
     DSH_HOME=/var/lib/dz23-studio \
@@ -78,7 +79,10 @@ ENV NODE_ENV=production \
 WORKDIR /opt/dz23-studio/runtime
 COPY --from=build --chown=10001:10001 /opt/runtime/ ./
 COPY --from=build --chown=10001:10001 /workspace/deploy/harness/ /opt/dz23-studio/deploy/harness/
-RUN mkdir -p /var/lib/dz23-studio /var/lib/dz23-studio-backups \
+RUN node -e "if (!/^[0-9a-f]{40}$/.test(process.env.DZ23_STUDIO_IMAGE_REVISION)) process.exit(1)" \
+ && rm -rf /usr/local/lib/node_modules/npm \
+ && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/pnpm /usr/local/bin/pnpx \
+ && mkdir -p /var/lib/dz23-studio /var/lib/dz23-studio-backups \
  && chown -R 10001:10001 /var/lib/dz23-studio /var/lib/dz23-studio-backups
 USER 10001:10001
 EXPOSE 3210

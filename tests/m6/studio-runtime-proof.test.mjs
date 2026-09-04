@@ -25,6 +25,7 @@ function imageInspect(overrides = {}) {
       User: '10001:10001',
       Entrypoint: ['node', 'entrypoint.mjs'],
       Env: [`DZ23_STUDIO_IMAGE_REVISION=${REVISION}`],
+      Labels: { 'org.opencontainers.image.revision': REVISION },
       ...overrides,
     },
   }])
@@ -32,6 +33,7 @@ function imageInspect(overrides = {}) {
 
 function containerInspect(overrides = {}) {
   return JSON.stringify([{
+    Image: 'sha256:' + 'a'.repeat(64),
     Config: { User: '10001:10001' },
     HostConfig: {
       ReadonlyRootfs: true,
@@ -40,7 +42,10 @@ function containerInspect(overrides = {}) {
       CapDrop: ['ALL'],
       SecurityOpt: ['no-new-privileges'],
     },
-    Mounts: [{ Destination: '/var/lib/dz23-studio', Type: 'volume', Name: 'proof-data', RW: true }],
+    Mounts: [
+      { Destination: '/var/lib/dz23-studio', Type: 'volume', Name: 'proof-data', RW: true },
+      { Destination: '/var/lib/dz23-studio-backups', Type: 'volume', Name: 'proof-backups', RW: true },
+    ],
     ...overrides,
   }])
 }
@@ -56,11 +61,12 @@ test('confere usuário, revisão e entrypoint da imagem', () => {
   assert.equal(assertImageMetadata(imageInspect(), REVISION).user, '10001:10001')
   assert.throws(() => assertImageMetadata(imageInspect({ User: 'root' }), REVISION), /IMAGE_USER_MISMATCH/u)
   assert.throws(() => assertImageMetadata(imageInspect({ Env: ['DZ23_STUDIO_IMAGE_REVISION=' + 'e'.repeat(40)] }), REVISION), /IMAGE_REVISION_MISMATCH/u)
+  assert.throws(() => assertImageMetadata(imageInspect({ Labels: {} }), REVISION), /IMAGE_LABEL_REVISION_MISMATCH/u)
   assert.throws(() => assertImageMetadata(imageInspect({ Entrypoint: ['/bin/sh'] }), REVISION), /IMAGE_ENTRYPOINT_MISMATCH/u)
 })
 
 test('plano do contêiner é fechado: sem rede, rootfs somente leitura e sem docker.sock', () => {
-  const args = hardenedRunArgs({ image: IMAGE, name: 'proof', volume: 'proof-data', command: ['--profile', 'studio', '--dump-config'] })
+  const args = hardenedRunArgs({ image: IMAGE, name: 'proof', volume: 'proof-data', backupVolume: 'proof-backups', command: ['--profile', 'studio', '--dump-config'] })
   assert.deepEqual(args.slice(0, 2), ['create', '--name'])
   assert.ok(args.includes('--read-only'))
   assert.deepEqual(args.slice(args.indexOf('--network'), args.indexOf('--network') + 2), ['--network', 'none'])
@@ -70,15 +76,20 @@ test('plano do contêiner é fechado: sem rede, rootfs somente leitura e sem doc
 })
 
 test('inspect do contêiner confirma as proteções e o volume esperado', () => {
-  assert.equal(assertHardenedContainer(containerInspect(), 'proof-data').readOnly, true)
+  const imageId = 'sha256:' + 'a'.repeat(64)
+  assert.equal(assertHardenedContainer(containerInspect(), 'proof-data', 'proof-backups', imageId).readOnly, true)
   const normalized = JSON.parse(containerInspect())
   normalized[0].HostConfig.Tmpfs['/tmp'] = 'rw,nosuid,nodev,noexec,size=67108864'
   normalized[0].HostConfig.SecurityOpt = ['no-new-privileges:true']
-  assert.equal(assertHardenedContainer(JSON.stringify(normalized), 'proof-data').networkMode, 'none')
-  assert.throws(() => assertHardenedContainer(containerInspect({ HostConfig: { ReadonlyRootfs: false } }), 'proof-data'), /ROOTFS_NOT_READ_ONLY/u)
+  assert.equal(assertHardenedContainer(JSON.stringify(normalized), 'proof-data', 'proof-backups', imageId).networkMode, 'none')
+  assert.throws(() => assertHardenedContainer(containerInspect({ HostConfig: { ReadonlyRootfs: false } }), 'proof-data', 'proof-backups', imageId), /ROOTFS_NOT_READ_ONLY/u)
   const socket = JSON.parse(containerInspect())
   socket[0].Mounts.push({ Destination: '/var/run/docker.sock', Source: '/var/run/docker.sock', Type: 'bind', RW: false })
-  assert.throws(() => assertHardenedContainer(JSON.stringify(socket), 'proof-data'), /DOCKER_SOCKET_MOUNTED/u)
+  assert.throws(() => assertHardenedContainer(JSON.stringify(socket), 'proof-data', 'proof-backups', imageId), /UNEXPECTED_RUNTIME_MOUNT/u)
+  const disguisedSocket = JSON.parse(containerInspect())
+  disguisedSocket[0].Mounts.push({ Destination: '/mnt/control', Source: '/var/run/docker.sock', Type: 'bind', RW: false })
+  assert.throws(() => assertHardenedContainer(JSON.stringify(disguisedSocket), 'proof-data', 'proof-backups', imageId), /UNEXPECTED_RUNTIME_MOUNT/u)
+  assert.throws(() => assertHardenedContainer(containerInspect({ Image: 'sha256:' + 'b'.repeat(64) }), 'proof-data', 'proof-backups', imageId), /CONTAINER_IMAGE_MISMATCH/u)
 })
 
 test('dump-config vazio, incompleto ou com provider de prova falha fechado', () => {
@@ -90,11 +101,11 @@ test('dump-config vazio, incompleto ou com provider de prova falha fechado', () 
   assert.throws(() => assertCleanDumpConfig(`${production}tenant-poc-01`), /FORBIDDEN_PROVIDER_IN_RELEASE/u)
 })
 
-test('saída 143 prova SIGTERM; 137 é tratada como SIGKILL', () => {
+test('saída limpa prova encerramento observado; 137 é tratada como SIGKILL', () => {
   const state = code => JSON.stringify([{ State: { Running: false, OOMKilled: false, ExitCode: code } }])
-  assert.equal(assertGracefulExit(state(143)).exitCode, 143)
+  assert.equal(assertGracefulExit(state(0)).exitCode, 0)
   assert.throws(() => assertGracefulExit(state(137)), /SIGKILL_DETECTED/u)
-  assert.throws(() => assertGracefulExit(state(0)), /SIGTERM_NOT_PROPAGATED/u)
+  assert.throws(() => assertGracefulExit(state(143)), /CLEAN_SHUTDOWN_NOT_CONFIRMED/u)
 })
 
 test('Docker ausente falha no primeiro check e deixa os demais NOT_EXECUTED', async () => {
@@ -126,22 +137,25 @@ test('orquestra duas inicializações reais pelo contrato Docker e fecha todos o
     if (args[0] === 'volume' && args[1] === 'create') return ok(`${args[2]}\n`)
     if (args[0] === 'create') {
       const name = args[args.indexOf('--name') + 1]
-      const volume = args[args.indexOf('--mount') + 1].match(/source=([^,]+)/u)[1]
-      containers.set(name, { state: { Running: false, OOMKilled: false, ExitCode: 0 }, volume })
+      const mounts = args.filter((item, index) => args[index - 1] === '--mount')
+      const volume = mounts[0].match(/source=([^,]+)/u)[1]
+      const backupVolume = mounts[1].match(/source=([^,]+)/u)[1]
+      containers.set(name, { state: { Running: false, OOMKilled: false, ExitCode: 0 }, volume, backupVolume })
       return ok(name + '\n')
     }
     if (args[0] === 'container' && args[1] === 'inspect') {
       const item = containers.get(args[2])
       const inspected = JSON.parse(containerInspect().replaceAll('proof-data', item.volume))
+      inspected[0].Mounts[1].Name = item.backupVolume
       inspected[0].State = item.state
       return ok(JSON.stringify(inspected))
     }
     if (args[0] === 'start' && args[1] === '--attach') {
       const name = args[2]
-      if (name.includes('-git-')) return ok('git version 2.39.5\n')
+      if (name.includes('-git-')) return ok(JSON.stringify({ node: 'v22.23.1', git: 'git version 2.39.5', absent: ['npm', 'npx', 'corepack', 'pnpm', 'docker'] }))
       if (name.includes('-dump-')) return ok("name: '@dz23-studio/web'\nname: '@dz23-studio/prompt-to-app'\n")
       if (name.includes('-profile-write-')) return ok(JSON.stringify({ target: '/var/lib/dz23-studio/profiles/.dz23-managed/studio-' + REVISION, writable: true }))
-      if (name.includes('-assets-')) return ok(JSON.stringify({ uiBytes: 100, templateBytes: 200, templateName: 'app' }))
+      if (name.includes('-assets-')) return ok(JSON.stringify({ uiBytes: 100, templateBytes: 200, templateFiles: 23, templateSha256: 'f'.repeat(64), templateName: 'app' }))
     }
     if (args[0] === 'start') {
       containers.get(args[1]).state.Running = true
@@ -155,7 +169,7 @@ test('orquestra duas inicializações reais pelo contrato Docker e fecha todos o
     }
     if (args[0] === 'stop') {
       const item = containers.get(args.at(-1))
-      item.state = { Running: false, OOMKilled: false, ExitCode: 143 }
+      item.state = { Running: false, OOMKilled: false, ExitCode: 0 }
       return ok(args.at(-1) + '\n')
     }
     if (args[0] === 'rm') return ok()
@@ -170,6 +184,7 @@ test('orquestra duas inicializações reais pelo contrato Docker e fecha todos o
   const createCalls = calls.filter(args => args[0] === 'create')
   assert.equal(createCalls.length, 6)
   assert.ok(createCalls.every(args => args.includes('--read-only') && args.includes('none')))
+  assert.ok(createCalls.every(args => args.includes('sha256:' + 'a'.repeat(64)) && !args.includes(IMAGE)))
   assert.doesNotMatch(calls.flat().join(' '), /docker\.sock|--privileged/u)
 })
 

@@ -12,6 +12,7 @@ const managedRoot = join(dshHome, 'profiles', '.dz23-managed')
 const managedProfile = join(managedRoot, `studio-${imageRevision}`)
 const profileLink = join(dshHome, 'profiles', 'studio')
 const dshBin = require.resolve('@deepseek-ai/dsh/lib/bin.js')
+const shutdownMarker = join(dshHome, '.last-clean-shutdown.json')
 
 async function ensureLink(path, target) {
   const current = await lstat(path).catch(error => {
@@ -91,8 +92,13 @@ const child = spawn(process.execPath, [dshBin, ...process.argv.slice(2)], {
 })
 const forwardedSignals = ['SIGINT', 'SIGTERM']
 const handlers = new Map()
+let requestedSignal
 for (const signal of forwardedSignals) {
-  const handler = () => child.kill(signal)
+  const handler = () => {
+    if (requestedSignal !== undefined) return
+    requestedSignal = signal
+    child.kill(signal)
+  }
   handlers.set(signal, handler)
   process.on(signal, handler)
 }
@@ -100,8 +106,25 @@ child.once('error', error => {
   process.stderr.write(`DZ23_STUDIO_START=FAIL ${error.message}\n`)
   process.exitCode = 1
 })
-child.once('exit', (code, signal) => {
+child.once('exit', async (code, signal) => {
   for (const [name, handler] of handlers) process.removeListener(name, handler)
+  if (requestedSignal !== undefined) {
+    try {
+      const temporary = `${shutdownMarker}.tmp-${process.pid}`
+      await writeFile(temporary, `${JSON.stringify({
+        childCode: code,
+        childSignal: signal,
+        imageRevision,
+        requestedSignal,
+      })}\n`, { flag: 'wx', mode: 0o600 })
+      await rename(temporary, shutdownMarker)
+      process.exitCode = 0
+    } catch (error) {
+      process.stderr.write(`DZ23_STUDIO_SHUTDOWN=FAIL ${error.message}\n`)
+      process.exitCode = 1
+    }
+    return
+  }
   if (signal) {
     process.kill(process.pid, signal)
     return

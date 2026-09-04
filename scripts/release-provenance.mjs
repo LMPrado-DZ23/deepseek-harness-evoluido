@@ -16,6 +16,7 @@ const FIXED_INPUTS = Object.freeze({
   imagesLock: 'deploy/images.lock.json',
   integrityManifest: 'integrity/deepseek-harness-tree.json',
   packageLock: 'pnpm-lock.yaml',
+  upstreamPackageLock: 'third_party/deepseek-harness/pnpm-lock.yaml',
   upstreamLock: 'UPSTREAM.lock',
 })
 
@@ -163,6 +164,16 @@ function validateSpdx(input, platform) {
     || creationInfo.creators.some(creator => typeof creator !== 'string' || creator.length === 0)) {
     fail(`SBOM ${platform}: creators inválido`)
   }
+  if (!Array.isArray(spdx.packages) || spdx.packages.length === 0) {
+    fail(`SBOM ${platform}: nenhum pacote descrito`)
+  }
+  const packageIds = new Set(spdx.packages.map(item => item?.SPDXID).filter(item => typeof item === 'string'))
+  const describes = Array.isArray(spdx.relationships) && spdx.relationships.some(relationship => (
+    relationship?.spdxElementId === 'SPDXRef-DOCUMENT'
+    && relationship?.relationshipType === 'DESCRIBES'
+    && packageIds.has(relationship?.relatedSpdxElement)
+  ))
+  if (!describes) fail(`SBOM ${platform}: documento não descreve nenhum pacote raiz`)
   return {
     documentNamespace: namespace,
     fileCount: Array.isArray(spdx.files) ? spdx.files.length : 0,
@@ -268,6 +279,10 @@ export async function buildReleaseProvenance({
         sha256: fixed.integrityManifest.digest,
       },
       packageLock: { path: FIXED_INPUTS.packageLock, sha256: fixed.packageLock.digest },
+      upstreamPackageLock: {
+        path: FIXED_INPUTS.upstreamPackageLock,
+        sha256: fixed.upstreamPackageLock.digest,
+      },
       releaseMetadata: { logicalName: 'release-metadata.json', sha256: metadataFile.digest },
       upstreamLock: { path: FIXED_INPUTS.upstreamLock, sha256: fixed.upstreamLock.digest },
     },

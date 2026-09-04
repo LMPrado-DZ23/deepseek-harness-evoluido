@@ -17,6 +17,7 @@
   ],
   "scripts": {
     "build:edge": "docker build -f deploy/caddy/Dockerfile -t dz23-studio-caddy:p29c .",
+    "build:studio-image": "node scripts/build-studio-image.mjs",
     "gate:domain-scopes": "tsx scripts/check-domain-scopes.ts",
     "gate:domain-routes": "tsx scripts/check-domain-routes.ts",
     "storage:export-sqlite": "tsx scripts/export-sqlite-storage.ts",

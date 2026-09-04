@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
-import { validateImageLock } from '../../scripts/check-image-lock.mjs'
+import { validateDockerfileBase, validateImageLock } from '../../scripts/check-image-lock.mjs'
 
 const canonical = JSON.parse(await readFile(new URL('../../deploy/images.lock.json', import.meta.url), 'utf8'))
+const dockerfile = await readFile(new URL('../../deploy/studio/Dockerfile', import.meta.url), 'utf8')
 
 test('lock de imagens aceita somente a resolução canônica', () => {
   assert.equal(validateImageLock(structuredClone(canonical)).schemaVersion, 1)
@@ -29,4 +30,16 @@ test('lock de imagens recusa tag, plataforma ausente e campo inesperado', () => 
   const archive = structuredClone(canonical)
   archive.tools.nodeArchives.platforms['linux/arm64'].filename = 'node-v22.23.1-linux-x64.tar.gz'
   assert.throws(() => validateImageLock(archive), /arquivo Node linux\/arm64 inválido/u)
+})
+
+test('Dockerfile usa exatamente a base Node fixada no lock', () => {
+  assert.equal(validateDockerfileBase(dockerfile, canonical).fromLines.length, 5)
+  assert.throws(
+    () => validateDockerfileBase(dockerfile.replace(canonical.images.node.indexDigest, `sha256:${'0'.repeat(64)}`), canonical),
+    /não usa a imagem Node fixada/u,
+  )
+  assert.throws(
+    () => validateDockerfileBase(`${dockerfile}\nFROM node:latest AS hidden\n`, canonical),
+    /base externa não fixada/u,
+  )
 })
