@@ -554,7 +554,7 @@ export class IntegrationHubService {
       // Registered SYNCHRONOUSLY, before the first await: ten clicks arriving in the same tick must
       // find the build already in flight, not each other's absence.  The shared promise always
       // resolves to a tagged outcome; no fast refusal can briefly become an unhandled rejection.
-      task = this.#guardedExport(actor, projectId).then<ExportOutcome>(
+      task = this.#guardedExport(actor, projectId).then<ExportOutcome, ExportOutcome>(
         value => ({ ok: true, value }),
         error => ({ ok: false, error }),
       )
