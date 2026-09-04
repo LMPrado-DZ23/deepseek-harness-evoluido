@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { canonicalManifestBytes } from '../src/manifest.ts'
 import type { HubEvent, IntegrationManifest, StudioExport, StudioIntegration } from '../src/model.ts'
-import { canonicalSecretRef, EVENTS_RETAINED_PER_TENANT, HubError, IntegrationHubService, MAX_CONCURRENT_PACKAGING, MAX_EXPORTS_PER_WINDOW, MAX_LIVE_APPROVALS, minimizeRecipient, minimizeSecretRef, safeSegment, securityFingerprint, strongIdentityFresh, type HubActor, type HubRepository } from '../src/service.ts'
+import { canonicalSecretRef, EVENTS_RETAINED_PER_TENANT, HubError, IntegrationHubService, MAX_APPROVAL_SCOPES, MAX_CONCURRENT_PACKAGING, MAX_EXPORTS_PER_WINDOW, MAX_LIVE_APPROVALS, minimizeRecipient, minimizeSecretRef, safeSegment, securityFingerprint, strongIdentityFresh, type HubActor, type HubRepository } from '../src/service.ts'
 import { readZip } from '../src/zip.ts'
 
 class MemoryRepository implements HubRepository {
@@ -487,6 +487,43 @@ describe('integration hub service', () => {
     await expect(service.setEnabled(strongAdmin, id, true, ticket)).rejects.toThrow('confirmação')
   })
 
+  it('never evicts a live approval bucket to admit the 257th workspace', async () => {
+    const { service } = await build()
+    const first = { ...admin, tenantId: 'scope-0' }
+    const ticket = await service.requestApproval(first, 'smtp.configured', SMTP, 'DZ23_APP_SMTP')
+    for (let index = 1; index < MAX_APPROVAL_SCOPES; index += 1) {
+      await service.requestApproval({ ...admin, tenantId: `scope-${index}` }, 'smtp.configured', SMTP, 'DZ23_APP_SMTP')
+    }
+    await expect(service.requestApproval({ ...admin, tenantId: 'scope-overflow' }, 'smtp.configured', SMTP, 'DZ23_APP_SMTP'))
+      .rejects.toMatchObject({ code: 'RATE_LIMITED' })
+    const replacement = await service.requestApproval(first, 'smtp.configured', SMTP, 'DZ23_APP_SMTP')
+    expect(replacement.approval_id).not.toBe(ticket.approval_id)
+  })
+
+  it('serializes re-registration with enable so a stale low-tier snapshot cannot overwrite T3', async () => {
+    const { service, repository } = await build()
+    const initial = await service.register(admin, signed(manifest({ id: 'race', permissions: [] })))
+    let reached!: () => void
+    const atWrite = new Promise<void>(resolve => { reached = resolve })
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const original = repository.putIntegration
+    repository.putIntegration = async value => {
+      if (value.integration_id === initial.integration.integration_id && value.enabled) { reached(); await gate }
+      await original(value)
+    }
+    const enabling = service.setEnabled(admin, initial.integration.integration_id, true)
+    await atWrite
+    const reregister = service.register(admin, signed(manifest({ id: 'race', permissions: ['secrets.read'] })))
+    await Promise.resolve()
+    release()
+    await enabling
+    const hardened = await reregister
+    expect(hardened.integration).toMatchObject({ effective_tier: 'T3', enabled: false })
+    expect(repository.rows.find(row => row.integration_id === initial.integration.integration_id))
+      .toMatchObject({ effective_tier: 'T3', enabled: false })
+  })
+
   it('enforces roles and tenant scope', async () => {
     const { service } = await build()
     await expect(service.register(builder, signed(manifest()))).rejects.toMatchObject({ code: 'FORBIDDEN' })
@@ -535,6 +572,16 @@ describe('integration hub service', () => {
     await service.setEnabled(admin, smtpRecord.integration_id, false)
     expect(service.smtp(viewer)).toMatchObject({ configured: false, secret_ref: null })
     await expect(service.testSmtp(admin, 'pessoa@example.test', await ok(service, admin, 'smtp.tested', SMTP, 'pessoa@example.test'))).rejects.toMatchObject({ code: 'NOT_FOUND' })
+  })
+
+  it('binds an SMTP approval to the exact address bytes that will be sent', async () => {
+    const { service, sent } = await build({ emailTest: true, secrets: { DZ23_APP_SMTP: { present: true, shapeOk: true } } })
+    await service.configureSmtp(admin, 'DZ23_APP_SMTP', await ok(service, admin, 'smtp.configured', SMTP, 'DZ23_APP_SMTP'))
+    const mixed = await ok(service, admin, 'smtp.tested', SMTP, 'Pessoa@example.test')
+    await expect(service.testSmtp(admin, 'pessoa@example.test', mixed)).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    expect(sent).toEqual([])
+    await service.testSmtp(admin, 'Pessoa@example.test', await ok(service, admin, 'smtp.tested', SMTP, 'Pessoa@example.test'))
+    expect(sent).toEqual([['DZ23_APP_SMTP', 'Pessoa@example.test']])
   })
 
   it('exports only a verified project from its latest PASSED run, with private files and a digest', async () => {
@@ -625,13 +672,17 @@ describe('integration hub service', () => {
    * MAX_CONCURRENT_PACKAGING of them no workspace in the Studio could export again until restart.
    * The slot is now bounded in time as well as in number.
    */
-  it('gives the packaging slot back when a build never returns, and audits the refusal', async () => {
+  it('does not return capacity while an aborted packaging operation is still alive', async () => {
     const runDirectory = await fakeRun()
     const exportsRoot = await mkdtemp(join(tmpdir(), 'dz23-hub-exports-'))
     scratch.push(exportsRoot)
     const repository = new MemoryRepository()
     let sequence = 0
     let wedged = true
+    let liveWrites = 0
+    let peakWrites = 0
+    let releaseWrites!: () => void
+    const writeGate = new Promise<void>(resolve => { releaseWrites = resolve })
     const service = new IntegrationHubService({
       repository, exportsRoot, publisherKeys, channel: 'stable', runsRoot: dirname(runDirectory),
       secrets: { inspect: async () => ({ present: false, shapeOk: false }) },
@@ -645,14 +696,23 @@ describe('integration hub service', () => {
     // Every slot is held by a call that never comes back — a named pipe, a filesystem that stopped
     // answering: whatever it is, it does not return and cannot be cancelled.
     const original = repository.putExport
-    repository.putExport = async (value: StudioExport) => { if (wedged) await new Promise<void>(() => undefined); await original(value) }
+    repository.putExport = async (value: StudioExport) => {
+      liveWrites += 1; peakWrites = Math.max(peakWrites, liveWrites)
+      try { if (wedged) await writeGate; await original(value) } finally { liveWrites -= 1 }
+    }
     const stuck = Array.from({ length: MAX_CONCURRENT_PACKAGING }, (_unused, index) => service.createExport(builder, `p${index}`))
     for (const attempt of stuck) await expect(attempt).rejects.toMatchObject({ code: 'TIMEOUT', message: expect.stringContaining('parou de esperar') })
     // The refusal is in the history, with the project it happened on.
     expect(repository.eventRows.filter(event => event.detail === 'packaging-timeout')).toHaveLength(MAX_CONCURRENT_PACKAGING)
     expect(repository.eventRows.at(-1)).toMatchObject({ action: 'export.created', outcome: 'failure' })
-    // And the Studio still exports: the slots came back, and so did the in-flight entry for a project.
+    // A third request times out in the bounded queue; it never becomes a third live write.
+    await expect(service.createExport(builder, 'p-third')).rejects.toMatchObject({ code: 'TIMEOUT' })
+    expect(liveWrites).toBe(MAX_CONCURRENT_PACKAGING)
+    expect(peakWrites).toBe(MAX_CONCURRENT_PACKAGING)
+    // Capacity returns only after the underlying operations actually stop.
     wedged = false
+    releaseWrites()
+    for (let tick = 0; tick < 50 && liveWrites > 0; tick += 1) await new Promise(resolve => setTimeout(resolve, 2))
     await expect(service.createExport(builder, 'p0')).resolves.toMatchObject({ project_id: 'p0' })
   }, 20_000)
 

@@ -29,6 +29,8 @@
     "smtpKindReserved": "O e-mail do aplicativo é configurado na seção própria, não por manifesto.",
     "exportTooLarge": "O protótipo é grande demais para empacotar aqui (limite de {limitMb} MB).",
     "exportTooMany": "Muitos pacotes foram pedidos neste espaço de trabalho em pouco tempo. Espere alguns minutos e tente de novo; nada foi perdido.",
+    "exportQueueFull": "Há muitos pacotes aguardando. Espere uma criação terminar e tente novamente.",
+    "approvalCapacity": "Há muitas confirmações em andamento. Conclua ou aguarde uma delas expirar antes de tentar novamente.",
     "devChannelNotPersonal": "O canal de desenvolvimento (channel: dev) só vale numa instalação pessoal: o Studio precisa estar escutando e aceitando pedidos apenas deste computador (loopback). Este Studio atende outros endereços, então ele não sobe com esse canal. Use channel: stable ou rode o Studio só localmente.",
     "exportTooManyEntries": "O protótipo tem arquivos demais para empacotar aqui (limite de {limit} arquivos). Nada foi gerado.",
     "exportTooManyListed": "O protótipo tem itens demais fora da lista permitida para listar um por um no pacote (limite de {limit}). Nada foi gerado.",

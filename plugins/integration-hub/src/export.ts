@@ -10,8 +10,11 @@ import { createZipAsync, type ZipEntry } from './zip.js'
 export interface ExportSource {
   /** Directory of the PASSED run (the generated app after build and verification). */
   readonly runDirectory: string
+  /** Descriptor pinned by the service after walking from `runsRoot`; caller retains ownership. */
+  readonly runHandle?: FileHandle
   readonly projectName: string
   readonly runId: string
+  readonly signal?: AbortSignal
 }
 
 export interface ExportPackage {
@@ -52,9 +55,7 @@ const EXCLUDED_FILES = [/^\.env(\..*)?$/u, /\.sqlite(-journal|-wal|-shm)?$/u, /^
 const ALLOWED_EXTENSIONS = new Set([
   '.js', '.mjs', '.cjs', '.json', '.ts', '.tsx', '.jsx', '.mts', '.cts',
   '.html', '.htm', '.css', '.scss', '.txt', '.md', '.xml', '.webmanifest', '.csv',
-  '.svg', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.ico', '.bmp',
-  '.woff', '.woff2', '.ttf', '.otf', '.eot', '.wasm', '.node', '.br', '.gz',
-  '.mp4', '.webm', '.mp3', '.ogg', '.pdf', '.lock', '.yml', '.yaml',
+  '.svg', '.br', '.gz', '.lock', '.yml', '.yaml',
 ])
 const ALLOWED_EXTENSIONLESS = new Set(['LICENSE', 'LICENCE', 'NOTICE', 'README', 'AUTHORS', 'CHANGELOG', 'COPYING', 'Dockerfile', 'server'])
 
@@ -145,6 +146,7 @@ export class ExportError extends Error {
 export interface ExportLimits {
   readonly maxEntries?: number
   readonly maxListed?: number
+  readonly maxBytes?: number
 }
 
 interface Walk {
@@ -154,6 +156,7 @@ interface Walk {
   readonly uninspected: string[]
   readonly maxEntries: number
   readonly maxListed: number
+  readonly signal?: AbortSignal
 }
 
 /** Add a line to a published list, or refuse the export when the list would grow without bound. */
@@ -188,7 +191,7 @@ const O_READ_FILE = (constants.O_RDONLY | O_NOFOLLOW | O_NONBLOCK) as number
 const HAS_PROC_FD = existsSync('/proc/self/fd')
 
 /** Open a directory without following a symlink, or `undefined` — never a silent success on something else. */
-async function openDirectory(path: string): Promise<FileHandle | undefined> {
+export async function openDirectory(path: string): Promise<FileHandle | undefined> {
   const handle = await open(path, (constants.O_RDONLY | O_DIRECTORY | O_NOFOLLOW) as number).catch(() => undefined)
   if (handle === undefined) return undefined
   const info = await handle.stat().catch(() => undefined)
@@ -207,7 +210,7 @@ async function openDirectory(path: string): Promise<FileHandle | undefined> {
 }
 
 /** How to name a child of an already-open directory: through the descriptor where the platform allows it. */
-function referenceOf(handle: FileHandle, path: string): string {
+export function referenceOf(handle: FileHandle, path: string): string {
   return HAS_PROC_FD ? `/proc/self/fd/${String(handle.fd)}` : path
 }
 
@@ -218,46 +221,52 @@ function referenceOf(handle: FileHandle, path: string): string {
  */
 export async function packagePrototype(source: ExportSource, limits: ExportLimits = {}): Promise<ExportPackage> {
   const root = resolve(source.runDirectory)
+  const rootHandle = source.runHandle ?? await openDirectory(root)
+  if (rootHandle === undefined) throw new ExportError('RUN_MISSING', t('errors.exportRunMissing'), 'run-missing')
+  const ownsRoot = source.runHandle === undefined
   const walk: Walk = {
-    entries: [], budget: { remaining: EXPORT_LIMIT_BYTES }, excluded: [], uninspected: [],
+    entries: [], budget: { remaining: limits.maxBytes ?? EXPORT_LIMIT_BYTES }, excluded: [], uninspected: [],
     maxEntries: limits.maxEntries ?? EXPORT_MAX_ENTRIES, maxListed: limits.maxListed ?? EXPORT_MAX_LISTED,
+    ...(source.signal === undefined ? {} : { signal: source.signal }),
   }
-  // Every top folder now goes through the confinement `evidence/` already had: resolved by real path
-  // and required to stay inside the run directory before a descriptor is opened on it.
-  const standalone = await confinedChild(root, join('.next', 'standalone'))
-  if (standalone === undefined) throw new ExportError('RUN_MISSING', t('errors.exportRunMissing'), 'run-missing')
-  const opened = await openDirectory(standalone)
-  if (opened === undefined) throw new ExportError('RUN_MISSING', t('errors.exportRunMissing'), 'run-missing')
-  try { await collect(opened, standalone, 'app', walk) } finally { await opened.close().catch(() => undefined) }
-  await walkFolder(await confinedChild(root, join('.next', 'static')), 'app/.next/static', walk)
-  await walkFolder(await confinedChild(root, 'public'), 'app/public', walk)
+  let next: FileHandle | undefined
+  let standalone: FileHandle | undefined
+  try {
+    next = await openChildDirectory(rootHandle, root, '.next')
+    standalone = next === undefined ? undefined : await openChildDirectory(next, join(root, '.next'), 'standalone')
+    if (standalone === undefined) throw new ExportError('RUN_MISSING', t('errors.exportRunMissing'), 'run-missing')
+    await collect(standalone, join(root, '.next', 'standalone'), 'app', walk)
+    const staticDirectory = next === undefined ? undefined : await openChildDirectory(next, join(root, '.next'), 'static')
+    await walkFolder(staticDirectory, join(root, '.next', 'static'), 'app/.next/static', walk)
+    const publicDirectory = await openChildDirectory(rootHandle, root, 'public')
+    await walkFolder(publicDirectory, join(root, 'public'), 'app/public', walk)
   // The acceptance report goes through the SAME discipline as every other file: the `evidence`
   // folder is resolved and confined first (a symlinked folder pointed the read outside the run
   // directory that was just confined), the file is opened once without following links, and it
   // counts against the budget and the scan. Skipping it is named, never silent.
-  const evidence = await confinedChild(root, 'evidence')
+  const evidence = await openChildDirectory(rootHandle, root, 'evidence')
   const reportName = 'evidence/appspec-report.json'
   if (evidence === undefined) {
     if (await pathExists(join(root, 'evidence'))) note(walk, walk.excluded, `${reportName} (${t('export.excludedShortcut')})`)
   } else {
-    const report = join(evidence, 'appspec-report.json')
+    const report = join(referenceOf(evidence, join(root, 'evidence')), 'appspec-report.json')
     const handle = await open(report, O_READ_FILE).catch(() => undefined)
     if (handle === undefined) {
       if (await pathExists(report)) note(walk, walk.excluded, `${reportName} (${t('export.excludedShortcut')})`)
+      await evidence.close().catch(() => undefined)
     } else {
       try {
         const info = await handle.stat()
         if (!info.isFile()) {
           note(walk, walk.excluded, `${reportName} (${t('export.excludedSpecialFile')})`)
         } else {
-          walk.budget.remaining -= info.size
-          if (walk.budget.remaining < 0) throw new ExportError('TOO_LARGE', t('errors.exportTooLarge', { limitMb: EXPORT_LIMIT_BYTES / (1024 * 1024) }), 'bytes-over-limit')
-          const data = await handle.readFile()
+          const data = await readBounded(handle, walk)
           if (findSecret('appspec-report.json', data) !== null) throw new ExportError('SECRET_DETECTED', t('errors.exportSecretFound', { file: reportName }), `secret-in ${reportName}`)
           walk.entries.push({ name: reportName, data })
         }
       } finally {
         await handle.close().catch(() => undefined)
+        await evidence.close().catch(() => undefined)
       }
     }
   }
@@ -276,13 +285,16 @@ export async function packagePrototype(source: ExportSource, limits: ExportLimit
   const archive = await createZipAsync(entries)
   const sha256 = createHash('sha256').update(archive).digest('hex')
   return { archive, sha256, entries: entries.length, fileName: `${slug(source.projectName)}-${source.runId.slice(0, 8)}.zip` }
+  } finally {
+    await standalone?.close().catch(() => undefined)
+    await next?.close().catch(() => undefined)
+    if (ownsRoot) await rootHandle.close().catch(() => undefined)
+  }
 }
 
 /** An optional top folder: absent is nothing, present-but-unopenable is a NAMED exclusion. */
-async function walkFolder(path: string | undefined, prefix: string, walk: Walk): Promise<void> {
-  if (path === undefined) return
-  const handle = await openDirectory(path)
-  if (handle === undefined) { note(walk, walk.excluded, `${prefix}/ (${t('export.excludedShortcut')})`); return }
+async function walkFolder(handle: FileHandle | undefined, path: string, prefix: string, walk: Walk): Promise<void> {
+  if (handle === undefined) return
   try { await collect(handle, path, prefix, walk) } finally { await handle.close().catch(() => undefined) }
 }
 
@@ -335,6 +347,7 @@ async function decompressedText(extension: string, data: Buffer): Promise<Buffer
 }
 
 async function collect(handle: FileHandle, path: string, prefix: string, walk: Walk): Promise<void> {
+  throwIfAborted(walk.signal)
   const reference = referenceOf(handle, path)
   const items = (await readdir(reference, { withFileTypes: true })).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
   for (const item of items) {
@@ -379,9 +392,7 @@ async function collect(handle: FileHandle, path: string, prefix: string, walk: W
       info = await file.stat()
       // Not a regular file any more (or never was): named, not skipped — and certainly not read.
       if (!info.isFile()) { note(walk, walk.excluded, `${name} (${t('export.excludedSpecialFile')})`); continue }
-      walk.budget.remaining -= info.size
-      if (walk.budget.remaining < 0) throw new ExportError('TOO_LARGE', t('errors.exportTooLarge', { limitMb: EXPORT_LIMIT_BYTES / (1024 * 1024) }), 'bytes-over-limit')
-      data = await file.readFile()
+      data = await readBounded(file, walk)
     } finally {
       await file.close().catch(() => undefined)
     }
@@ -394,10 +405,40 @@ async function collect(handle: FileHandle, path: string, prefix: string, walk: W
       scanData = plain
     }
     if (findSecret(scanName, scanData) !== null) throw new ExportError('SECRET_DETECTED', t('errors.exportSecretFound', { file: name }), `secret-in ${name}`)
-    // Packaged, but nobody looked inside it: the package says so rather than implying it was checked.
-    if (!isScannable(scanName)) note(walk, walk.uninspected, name)
+    // Opaque binaries never leave the machine: only content the scanner understands is exportable.
+    if (!isScannable(scanName)) { note(walk, walk.excluded, name); continue }
     walk.entries.push({ name, data, mode: (info.mode & 0o111) !== 0 ? 0o755 : 0o644 })
   }
+}
+
+export async function openChildDirectory(parent: FileHandle, parentPath: string, name: string): Promise<FileHandle | undefined> {
+  if (name === '' || name === '.' || name === '..' || name.includes('/') || name.includes('\\')) return undefined
+  return openDirectory(join(referenceOf(parent, parentPath), name))
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted === true) throw signal.reason instanceof Error ? signal.reason : new Error('EXPORT_ABORTED')
+}
+
+/** Reads no more than the remaining quota plus one byte; growth after stat can never consume to EOF. */
+async function readBounded(handle: FileHandle, walk: Walk): Promise<Buffer> {
+  throwIfAborted(walk.signal)
+  const ceiling = walk.budget.remaining
+  if (ceiling < 0) throw new ExportError('TOO_LARGE', t('errors.exportTooLarge', { limitMb: EXPORT_LIMIT_BYTES / (1024 * 1024) }), 'bytes-over-limit')
+  const chunks: Buffer[] = []
+  let total = 0
+  const chunkSize = Math.min(1024 * 1024, ceiling + 1)
+  while (true) {
+    throwIfAborted(walk.signal)
+    const buffer = Buffer.allocUnsafe(Math.max(1, Math.min(chunkSize, ceiling + 1 - total)))
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, total)
+    if (bytesRead === 0) break
+    total += bytesRead
+    if (total > ceiling) throw new ExportError('TOO_LARGE', t('errors.exportTooLarge', { limitMb: EXPORT_LIMIT_BYTES / (1024 * 1024) }), 'bytes-over-limit')
+    chunks.push(buffer.subarray(0, bytesRead))
+  }
+  walk.budget.remaining -= total
+  return Buffer.concat(chunks, total)
 }
 
 /** The real path of `<root>/<name>`, or `undefined` when it resolves outside `root` or is not a directory. */

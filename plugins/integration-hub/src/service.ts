@@ -1,10 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { constants as fsConstants } from 'node:fs'
-import { access, mkdir, open, realpath, type FileHandle } from 'node:fs/promises'
-import { relative, resolve, sep } from 'node:path'
+import { access, mkdir, open, type FileHandle } from 'node:fs/promises'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { roleAllows, type PolicyTier, type StudioPermission, type StudioRole } from '@dz23-studio/policy'
 import { z } from 'zod'
-import { ExportError, packagePrototype } from './export.js'
+import { ExportError, openChildDirectory, openDirectory, packagePrototype, referenceOf } from './export.js'
 import { t } from './i18n.js'
 import { canonicalJsonBytes, evaluateManifest, policyFloor, type PublisherKeys } from './manifest.js'
 import { secretRefSchema, type HubEvent, type StudioExport, type StudioIntegration } from './model.js'
@@ -116,6 +116,8 @@ export const EXPORT_WINDOW_MS = 10 * 60 * 1000
  * slower for one person and honest for everybody.
  */
 export const MAX_CONCURRENT_PACKAGING = 2
+/** Waiting exports are bounded too; overload is refused instead of retaining promises forever. */
+export const MAX_PACKAGING_QUEUE = 64
 
 /**
  * Ceiling on how long ONE packaging call may hold a slot. Packaging is bounded work — the walk of
@@ -183,7 +185,8 @@ export class IntegrationHubService {
    * durable here would be a decision that outlives the screen that made it.
    */
   #packaging = 0
-  readonly #packagingQueue: Array<() => void> = []
+  readonly #packagingQueue: Array<{ readonly release: () => void; readonly reject: (error: Error) => void }> = []
+  readonly #integrationMutations = new Map<string, Promise<void>>()
 
   readonly #approvals = new Map<string, Map<string, HubApprovalTicket>>()
   /**
@@ -257,6 +260,10 @@ export class IntegrationHubService {
   get channel(): 'stable' | 'dev' { return this.options.channel }
 
   async register(actor: HubActor, manifestInput: unknown): Promise<{ integration: StudioIntegration; reasons: readonly string[] }> {
+    return this.#exclusiveIntegration(this.#scope(actor), () => this.#register(actor, manifestInput))
+  }
+
+  async #register(actor: HubActor, manifestInput: unknown): Promise<{ integration: StudioIntegration; reasons: readonly string[] }> {
     this.#authorize(actor, 'integrations.manage')
     const evaluation = evaluateManifest(manifestInput, this.options.publisherKeys)
     const subject = evaluation.manifest?.id ?? '-'
@@ -347,7 +354,7 @@ export class IntegrationHubService {
     if (action === 'smtp.configured' || action === 'smtp.tested') {
       // A decision with no target is a decision about nothing: refuse to issue it.
       if (payload === undefined || payload.trim() === '') throw new HubError('INVALID', t('errors.invalidRequest'))
-      const target = action === 'smtp.configured' ? String(canonicalSecretRef(payload)) : payload.trim().toLowerCase()
+      const target = action === 'smtp.configured' ? String(canonicalSecretRef(payload)) : payload.trim()
       const record = this.#smtpRecord(actor)
       return digest([action, target, record === undefined ? '-' : securityFingerprint(record)])
     }
@@ -369,8 +376,20 @@ export class IntegrationHubService {
   #sweepApprovals(actor: HubActor): Map<string, HubApprovalTicket> {
     const now = this.#now().getTime()
     const key = this.#scope(actor)
-    const bucket = this.#approvals.get(key) ?? new Map<string, HubApprovalTicket>()
-    this.#approvals.set(key, bucket)
+    let bucket = this.#approvals.get(key)
+    if (bucket === undefined) {
+      for (const [scope, tickets] of this.#approvals) {
+        for (const [id, ticket] of tickets) {
+          if (Date.parse(ticket.expires_at) <= now) tickets.delete(id)
+        }
+        if (tickets.size === 0) this.#approvals.delete(scope)
+      }
+      if (this.#approvals.size >= MAX_APPROVAL_SCOPES) {
+        throw new HubError('RATE_LIMITED', t('errors.approvalCapacity'))
+      }
+      bucket = new Map<string, HubApprovalTicket>()
+      this.#approvals.set(key, bucket)
+    }
     for (const [id, ticket] of bucket) {
       if (Date.parse(ticket.expires_at) > now) break
       bucket.delete(id)
@@ -383,22 +402,14 @@ export class IntegrationHubService {
       if (oldest.done === true) break
       bucket.delete(oldest.value)
     }
-    // Buckets themselves are bounded: an empty one (everything expired) is dropped first, and only
-    // then the least recently touched, so a workspace with live confirmations is never the victim.
-    if (this.#approvals.size > MAX_APPROVAL_SCOPES) {
-      for (const [scope, tickets] of this.#approvals) {
-        if (this.#approvals.size <= MAX_APPROVAL_SCOPES) break
-        if (scope !== key && tickets.size === 0) this.#approvals.delete(scope)
-      }
-      for (const scope of this.#approvals.keys()) {
-        if (this.#approvals.size <= MAX_APPROVAL_SCOPES) break
-        if (scope !== key) this.#approvals.delete(scope)
-      }
-    }
     return bucket
   }
 
   async setEnabled(actor: HubActor, integrationId: string, enabled: boolean, approval?: HubApproval): Promise<StudioIntegration> {
+    return this.#exclusiveIntegration(this.#scope(actor), () => this.#setEnabled(actor, integrationId, enabled, approval))
+  }
+
+  async #setEnabled(actor: HubActor, integrationId: string, enabled: boolean, approval?: HubApproval): Promise<StudioIntegration> {
     this.#authorize(actor, 'integrations.manage')
     const current = this.#integration(actor, integrationId)
     let confirmed = false
@@ -428,6 +439,18 @@ export class IntegrationHubService {
     await this.#recordApproval(actor, confirmed, 'integration.enabled', integrationId)
     await this.#audit(actor, enabled ? 'integration.enabled' : 'integration.disabled', integrationId, 'success', updated.effective_tier)
     return updated
+  }
+
+  async #exclusiveIntegration<T>(key: string, work: () => Promise<T>): Promise<T> {
+    const previous = this.#integrationMutations.get(key) ?? Promise.resolve()
+    let release!: () => void
+    const current = new Promise<void>(resolvePromise => { release = resolvePromise })
+    this.#integrationMutations.set(key, current)
+    await previous
+    try { return await work() } finally {
+      release()
+      if (this.#integrationMutations.get(key) === current) this.#integrationMutations.delete(key)
+    }
   }
 
   // ---- smtp for generated apps ---------------------------------------------
@@ -478,7 +501,7 @@ export class IntegrationHubService {
     if (record === undefined || record.secret_ref === null || !record.enabled) throw new HubError('NOT_FOUND', t('errors.smtpNotConfigured'))
     // The address is checked BEFORE the confirmation is spent: a typo must not cost the person their
     // confirmation, and the ticket is bound to this exact recipient anyway.
-    const recipient = z.string().email().safeParse(to)
+    const recipient = z.string().trim().email().safeParse(to)
     if (!recipient.success) {
       await this.#audit(actor, 'smtp.tested', record.integration_id, 'failure', 'invalid-recipient')
       throw new HubError('INVALID', t('errors.invalidRequest'))
@@ -536,7 +559,7 @@ export class IntegrationHubService {
     // same time each walk a whole run and hash it, on the one thread this Studio has. Past this
     // ceiling the caller waits its turn instead of making everybody's Studio slow at once.
     try {
-      return await this.#withPackagingSlot(() => this.#createExport(actor, projectId))
+      return await this.#withPackagingSlot(signal => this.#createExport(actor, projectId, signal))
     } catch (error) {
       // A refusal nobody can see is not a refusal: the person is told the Studio stopped waiting,
       // and the history says so too, with the project it happened on.
@@ -545,26 +568,42 @@ export class IntegrationHubService {
     }
   }
 
-  async #withPackagingSlot<T>(work: () => Promise<T>): Promise<T> {
-    while (this.#packaging >= MAX_CONCURRENT_PACKAGING) await new Promise<void>(release => this.#packagingQueue.push(release))
-    this.#packaging += 1
-    let timer: ReturnType<typeof setTimeout> | undefined
-    try {
-      // The slot is bounded in TIME, not only in number. `work()` that outlives the ceiling keeps
-      // running (nothing here can cancel a syscall), but it no longer owns a slot and no longer
-      // holds the queue behind it.
-      return await Promise.race([
-        work(),
-        new Promise<never>((_resolve, reject) => {
-          timer = setTimeout(() => reject(new HubError('TIMEOUT', t('errors.exportTimedOut'))), this.options.packagingTimeoutMs ?? PACKAGING_SLOT_TIMEOUT_MS)
-          timer.unref?.()
-        }),
-      ])
-    } finally {
-      if (timer !== undefined) clearTimeout(timer)
-      this.#packaging -= 1
-      this.#packagingQueue.shift()?.()
+  async #withPackagingSlot<T>(work: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    while (this.#packaging >= MAX_CONCURRENT_PACKAGING) {
+      if (this.#packagingQueue.length >= MAX_PACKAGING_QUEUE) throw new HubError('RATE_LIMITED', t('errors.exportQueueFull'))
+      await new Promise<void>((release, reject) => {
+        let timer: ReturnType<typeof setTimeout>
+        const entry = {
+          release: () => { clearTimeout(timer); release() },
+          reject,
+        }
+        this.#packagingQueue.push(entry)
+        timer = setTimeout(() => {
+          const index = this.#packagingQueue.indexOf(entry)
+          if (index >= 0) this.#packagingQueue.splice(index, 1)
+          reject(new HubError('TIMEOUT', t('errors.exportTimedOut')))
+        }, this.options.packagingTimeoutMs ?? PACKAGING_SLOT_TIMEOUT_MS)
+        timer.unref?.()
+      })
     }
+    this.#packaging += 1
+    const controller = new AbortController()
+    const timeout = new HubError('TIMEOUT', t('errors.exportTimedOut'))
+    const timer = setTimeout(() => controller.abort(timeout), this.options.packagingTimeoutMs ?? PACKAGING_SLOT_TIMEOUT_MS)
+    timer.unref?.()
+    const task = work(controller.signal)
+    const settled = task.finally(() => {
+      clearTimeout(timer)
+      this.#packaging -= 1
+      this.#packagingQueue.shift()?.release()
+    })
+    // `settled` exists to own the slot lifecycle; the caller may receive TIMEOUT first, but capacity
+    // is not returned until the abandoned operation really stops.
+    void settled.catch(() => undefined)
+    const aborted = new Promise<never>((_resolve, reject) => {
+      controller.signal.addEventListener('abort', () => reject(timeout), { once: true })
+    })
+    return Promise.race([task, aborted])
   }
 
   /** Attempts per workspace inside the window; a refusal is audited and costs the flooder, not the table. */
@@ -586,7 +625,7 @@ export class IntegrationHubService {
     }
   }
 
-  async #createExport(actor: HubActor, projectId: string): Promise<StudioExport> {
+  async #createExport(actor: HubActor, projectId: string, signal: AbortSignal): Promise<StudioExport> {
     const project = this.options.projects.project(actor, projectId)
     const refuse = async (detail: string, error: HubError): Promise<never> => {
       await this.#audit(actor, 'export.created', projectId, 'failure', detail)
@@ -597,15 +636,15 @@ export class IntegrationHubService {
       .sort((left, right) => (right.started_at < left.started_at ? -1 : right.started_at > left.started_at ? 1 : 0) || right.attempt - left.attempt)[0]
     if (run === undefined) return refuse('no PASSED run', new HubError('INVALID', t('errors.exportNotVerified')))
     // The run directory arrives as data from another plugin: it is confined to the runs root by real path before anything is read.
-    let runDirectory: string
+    let confinedRun: { handle: FileHandle; path: string }
     try {
-      runDirectory = await this.#confineRunDirectory(run.run_directory)
+      confinedRun = await this.#openConfinedRunDirectory(run.run_directory)
     } catch (error) {
       return refuse(error instanceof HubError ? `run-directory ${error.code}` : 'run-directory', error instanceof HubError ? error : new HubError('INVALID', t('errors.exportRunMissing')))
     }
     let built
     try {
-      built = await packagePrototype({ runDirectory, projectName: project.name, runId: run.run_id })
+      built = await packagePrototype({ runDirectory: confinedRun.path, runHandle: confinedRun.handle, projectName: project.name, runId: run.run_id, signal })
     } catch (error) {
       // The class of refusal survives to the boundary: a package refused because it carries a secret
       // is not the same answer as a malformed request, and the documents promised those statuses.
@@ -617,6 +656,8 @@ export class IntegrationHubService {
       // leave through the front door as a 500 with no audit at all — the person saw "something went
       // wrong" and the history said nothing had been attempted.
       return refuse(`package-failed ${error instanceof Error ? error.name : 'Error'}`, new HubError('INVALID', t('errors.exportFailed')))
+    } finally {
+      await confinedRun.handle.close().catch(() => undefined)
     }
     // Same run, same bytes: hand back the existing package instead of writing a twin file on every click.
     const existing = this.listExports(actor, projectId).find(value => value.run_id === run.run_id && value.sha256 === built.sha256)
@@ -624,16 +665,18 @@ export class IntegrationHubService {
     const exportId = this.#createId()
     // Every segment that becomes a path here is checked, not trusted: ids and scope names never carry `..`, separators or control characters.
     const directory = resolve(this.options.exportsRoot, safeSegment(actor.orgId), safeSegment(actor.tenantId))
-    await mkdir(directory, { recursive: true, mode: 0o700 })
+    const scope = await this.#openExportScope(actor, true)
     const path = resolve(directory, `${safeSegment(exportId)}.zip`)
     // Created, not opened: O_EXCL means this call makes the file or fails, O_NOFOLLOW means a
     // symlink planted at that name is never followed, and the mode is set BY the open — a `chmod`
     // afterwards leaves a window in which the package is readable by anyone on the machine.
-    const target = await open(path, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | (fsConstants.O_NOFOLLOW ?? 0), 0o600)
+    let target: FileHandle | undefined
     try {
+      target = await open(join(referenceOf(scope.handle, directory), `${safeSegment(exportId)}.zip`), fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | (fsConstants.O_NOFOLLOW ?? 0), 0o600)
       await target.writeFile(built.archive)
     } finally {
-      await target.close().catch(() => undefined)
+      await target?.close().catch(() => undefined)
+      await scope.handle.close().catch(() => undefined)
     }
     const record: StudioExport = {
       export_id: exportId, org_id: actor.orgId, tenant_id: actor.tenantId, project_id: projectId, run_id: run.run_id,
@@ -660,23 +703,18 @@ export class IntegrationHubService {
   async exportFile(actor: HubActor, projectId: string, exportId: string): Promise<{ handle: FileHandle; size: number }> {
     const record = this.exportRecord(actor, projectId, exportId)
     const root = resolve(this.options.exportsRoot, safeSegment(actor.orgId), safeSegment(actor.tenantId))
-    let realRoot: string
-    let realFile: string
-    try {
-      realRoot = await realpath(root)
-      realFile = await realpath(record.path)
-    } catch {
-      throw new HubError('NOT_FOUND', t('errors.exportUnavailable'))
-    }
-    const inside = relative(realRoot, realFile)
-    if (inside === '' || inside.startsWith('..') || inside.startsWith(sep) || resolve(realRoot, inside) !== realFile) {
+    const expected = resolve(root, `${safeSegment(exportId)}.zip`)
+    if (resolve(record.path) !== expected) {
       await this.#audit(actor, 'export.downloadRefused', exportId, 'failure', 'path-outside-exports')
       throw new HubError('NOT_FOUND', t('errors.exportUnavailable'))
     }
     // Everything above decided about a NAME. What is served is a HANDLE: opened once without
     // following a link, checked for being a regular file on that same handle, and streamed from it.
     // Resolving the name and then opening it again is exactly the window an attacker needs.
-    const handle = await open(realFile, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0)).catch(() => undefined)
+    const scope = await this.#openExportScope(actor, false).catch(() => undefined)
+    if (scope === undefined) throw new HubError('NOT_FOUND', t('errors.exportUnavailable'))
+    const handle = await open(join(referenceOf(scope.handle, root), `${safeSegment(exportId)}.zip`), fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0)).catch(() => undefined)
+    await scope.handle.close().catch(() => undefined)
     if (handle === undefined) throw new HubError('NOT_FOUND', t('errors.exportUnavailable'))
     const info = await handle.stat().catch(() => undefined)
     if (info === undefined || !info.isFile()) {
@@ -778,22 +816,42 @@ export class IntegrationHubService {
     await this.#audit(actor, 'approval.recorded', subjectId, 'success', action)
   }
 
-  /** Real path of the run directory, refused unless it sits inside the configured runs root (symlinks resolved on both sides). */
-  async #confineRunDirectory(candidate: string): Promise<string> {
-    const root = this.options.runsRoot
-    let realRoot: string
-    let realRun: string
-    try {
-      realRoot = await realpath(resolve(root))
-      realRun = await realpath(resolve(candidate))
-    } catch {
-      throw new HubError('CONFLICT', t('errors.exportRunMissing'))
+  /** Walks from a pinned `runsRoot` descriptor; the packager receives the final descriptor, never a re-resolved name. */
+  async #openConfinedRunDirectory(candidate: string): Promise<{ handle: FileHandle; path: string }> {
+    const root = resolve(this.options.runsRoot)
+    const target = resolve(candidate)
+    const inside = relative(root, target)
+    if (inside === '' || inside.startsWith('..') || isAbsolute(inside)) throw new HubError('INVALID', t('errors.exportRunOutside'))
+    let handle = await openDirectory(root)
+    if (handle === undefined) throw new HubError('CONFLICT', t('errors.exportRunMissing'))
+    let currentPath = root
+    for (const segment of inside.split(/[\\/]/u)) {
+      const child = await openChildDirectory(handle, currentPath, segment)
+      await handle.close().catch(() => undefined)
+      if (child === undefined) throw new HubError('CONFLICT', t('errors.exportRunMissing'))
+      handle = child
+      currentPath = join(currentPath, segment)
     }
-    const inside = relative(realRoot, realRun)
-    if (inside === '' || inside.startsWith('..') || inside.startsWith(`${sep}`) || resolve(realRoot, inside) !== realRun) {
-      throw new HubError('INVALID', t('errors.exportRunOutside'))
+    return { handle, path: target }
+  }
+
+  async #openExportScope(actor: HubActor, create: boolean): Promise<{ handle: FileHandle }> {
+    const rootPath = resolve(this.options.exportsRoot)
+    let handle = await openDirectory(rootPath)
+    if (handle === undefined) throw new HubError('CONFLICT', t('errors.exportUnavailable'))
+    let currentPath = rootPath
+    for (const segment of [safeSegment(actor.orgId), safeSegment(actor.tenantId)]) {
+      const reference = join(referenceOf(handle, currentPath), segment)
+      if (create) await mkdir(reference, { mode: 0o700 }).catch((error: unknown) => {
+        if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) throw error
+      })
+      const child = await openChildDirectory(handle, currentPath, segment)
+      await handle.close().catch(() => undefined)
+      if (child === undefined) throw new HubError('CONFLICT', t('errors.exportUnavailable'))
+      handle = child
+      currentPath = join(currentPath, segment)
     }
-    return realRun
+    return { handle }
   }
 
   #authorize(actor: HubActor, permission: StudioPermission): void {
@@ -903,8 +961,9 @@ export function minimizeSecretRef(ref: string): string {
 
 /** Audit keeps proof, not the address: the domain (useful when diagnosing) and a short digest that matches a repeat test. */
 export function minimizeRecipient(email: string): string {
-  const domain = email.slice(email.lastIndexOf('@') + 1)
-  return `***@${domain} sha256:${createHash('sha256').update(email.toLowerCase(), 'utf8').digest('hex').slice(0, 12)}`
+  const canonical = email.trim()
+  const domain = canonical.slice(canonical.lastIndexOf('@') + 1).toLowerCase()
+  return `***@${domain} sha256:${createHash('sha256').update(canonical, 'utf8').digest('hex').slice(0, 12)}`
 }
 
 /** A single path segment, or nothing: no separators, no `..`, no control characters, no surprises from an id. */

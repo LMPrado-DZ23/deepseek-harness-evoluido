@@ -59,7 +59,7 @@ for (const plugin of readdirSync(resolve(root, 'plugins'), { withFileTypes: true
   // `exists` answers for files only; a source ROOT is a directory, so it needs its own check — with `exists` here no plugin was ever scanned.
   if (plugin.isDirectory() && isDirectory(resolve(root, 'plugins', plugin.name, 'src'))) sourceRoots.push({
     path: resolve(root, 'plugins', plugin.name, 'src'),
-    strict: exists(resolve(root, 'plugins', plugin.name, 'i18n', 'pt-BR.json')) && !pluginExistedAtLegacyBaseline(plugin.name),
+    strict: exists(resolve(root, 'plugins', plugin.name, 'i18n', 'pt-BR.json')),
   })
 }
 // Plugin literals that already existed when the gate started scanning plugins (M5) are grandfathered

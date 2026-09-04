@@ -100,13 +100,14 @@ describe('prototype export package', () => {
     const entries = readZip(built.archive)
     const names = entries.map(entry => entry.name)
     expect(names).toEqual([
-      '.env.example', 'EXCLUIDOS.txt', 'README.md', 'app/.next/static/chunks/main.js', 'app/node_modules/next/package.json', 'app/public/brand/logo.png',
+      '.env.example', 'EXCLUIDOS.txt', 'README.md', 'app/.next/static/chunks/main.js', 'app/node_modules/next/package.json',
       'app/server.js', 'evidence/appspec-report.json',
     ].sort())
     // Nothing is dropped in silence: what stayed out is listed by name (never by content) inside the package.
     const left = entries.find(entry => entry.name === 'EXCLUIDOS.txt')!.data.toString('utf8')
     expect(left).toContain('app/.env')
     expect(left).toContain('app/data/') // the app's own data folder is named as a whole, not file by file
+    expect(left).toContain('app/public/brand/logo.png')
     expect(entries.find(entry => entry.name === 'app/server.js')!.mode).toBe(0o755)
     const all = entries.map(entry => entry.data.toString('utf8')).join('\n')
     expect(all).not.toContain("987654")
@@ -136,6 +137,18 @@ describe('prototype export package', () => {
     expect(left).toContain('app/backup.bak')
   })
 
+  it('charges bytes actually read and refuses growth past the remaining EOF quota', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dz23-export-eof-'))
+    await mkdir(join(root, '.next', 'standalone'), { recursive: true })
+    await writeFile(join(root, '.next', 'standalone', 'server.js'), '12345')
+    try {
+      await expect(packagePrototype({ runDirectory: root, projectName: 'A', runId: 'run-1' }, { maxBytes: 4 }))
+        .rejects.toMatchObject({ code: 'TOO_LARGE', detail: 'bytes-over-limit' })
+    } finally {
+      await rmDir(root, { recursive: true, force: true })
+    }
+  })
+
   it('fails the whole export when a packaged file carries a private key or a connection string with a password', async () => {
     const key = await runDirectory()
     await writeFile(join(key, '.next', 'standalone', 'config.js'), 'export const k = `-----BEGIN OPENSSH PRIVATE KEY-----\nAAAA\n-----END OPENSSH PRIVATE KEY-----`')
@@ -153,7 +166,7 @@ describe('prototype export package', () => {
     await expect(packagePrototype({ runDirectory: ordinary, projectName: 'A', runId: 'run-1' })).resolves.toMatchObject({ entries: expect.any(Number) })
   })
 
-  it('scans a file far larger than one slice, and names what it could not inspect', async () => {
+  it('scans a file far larger than one slice, and excludes opaque content it cannot inspect', async () => {
     const root = await runDirectory()
     // A 5 MB bundle with the key at the very end: a size limit here would answer "no secret found"
     // for exactly the files most likely to carry one.
@@ -162,12 +175,12 @@ describe('prototype export package', () => {
     await expect(packagePrototype({ runDirectory: root, projectName: 'A', runId: 'run-1' }))
       .rejects.toMatchObject({ code: 'SECRET_DETECTED', message: expect.stringContaining('bundle.js') })
 
-    // A type the scan cannot read still ships, but the package says nobody looked inside it.
+    // A type the scan cannot read never ships; it is named as an exclusion.
     const quiet = await runDirectory()
     await writeFile(join(quiet, '.next', 'standalone', 'imagem.png'), 'nao-e-texto')
     const built = await packagePrototype({ runDirectory: quiet, projectName: 'A', runId: 'run-1' })
     const entries = readZip(built.archive)
-    expect(entries.map(entry => entry.name)).toContain('app/imagem.png')
+    expect(entries.map(entry => entry.name)).not.toContain('app/imagem.png')
     expect(entries.find(entry => entry.name === 'EXCLUIDOS.txt')!.data.toString('utf8')).toContain('app/imagem.png')
   })
 
