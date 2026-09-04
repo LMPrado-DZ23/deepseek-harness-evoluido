@@ -1,5 +1,8 @@
 import { randomBytes } from 'node:crypto'
 import { spawn } from 'node:child_process'
+import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { delimiter, join } from 'node:path'
 
 /**
  * PostgreSQL gate. Two ways to obtain a real server:
@@ -18,6 +21,7 @@ const runtime = process.argv.includes('--runtime')
 const presetDsn = process.env.DZ23_POSTGRES_TEST_DSN
 const useCompose = presetDsn === undefined || presetDsn === ''
 let started = false
+let toolDirectory
 
 try {
   const testEnv = { ...process.env }
@@ -33,9 +37,24 @@ try {
     const container = (await capture('docker', [...compose, 'ps', '-q', 'postgres-test'], composeEnv)).trim()
     const port = endpoint.slice(endpoint.lastIndexOf(':') + 1)
     if (!/^\d+$/.test(port)) throw new Error('PostgreSQL test port was not published')
-    if (container === '') throw new Error('PostgreSQL test container was not found')
+    if (!/^[a-f0-9]{12,64}$/.test(container)) throw new Error('PostgreSQL test container was not found')
     testEnv.DZ23_POSTGRES_TEST_DSN = `postgresql://dz23_test:${password}@127.0.0.1:${port}/dz23_test`
     testEnv.DZ23_POSTGRES_TEST_CONTAINER = container
+    toolDirectory = await mkdtemp(join(tmpdir(), 'dz23-postgres-tools-'))
+    const pgDump = join(toolDirectory, 'pg_dump')
+    await writeFile(pgDump, `#!/usr/bin/env bash
+set -euo pipefail
+filtered=()
+for argument in "$@"; do
+  case "$argument" in
+    --dbname=*) ;;
+    *) filtered+=("$argument") ;;
+  esac
+done
+exec docker exec -i ${container} pg_dump --username dz23_test --dbname dz23_test "\${filtered[@]}"
+`, { mode: 0o700 })
+    await chmod(pgDump, 0o700)
+    testEnv.PATH = `${toolDirectory}${delimiter}${testEnv.PATH ?? ''}`
   } else {
     delete testEnv.DZ23_POSTGRES_TEST_CONTAINER
     const version = (await capture(process.execPath, ['-e', `
@@ -52,11 +71,17 @@ try {
     ? ['run', 'prove:postgres-runtime']
     : coverage
       ? ['exec', 'vitest', 'run', '--coverage', '--maxWorkers=1']
-      : ['exec', 'vitest', 'run', 'plugins/storage-postgres/tests/postgres.spec.ts', '--reporter=verbose']
+      : ['exec', 'vitest', 'run',
+          'plugins/storage-postgres/tests/postgres.spec.ts',
+          'plugins/storage-postgres/tests/capacity.spec.ts',
+          'plugins/storage-postgres/tests/snapshot.spec.ts',
+          'plugins/storage-postgres/tests/import-hardening.spec.ts',
+          '--maxWorkers=1', '--reporter=verbose']
   await run('pnpm', vitest, testEnv)
   process.stdout.write(`POSTGRES_GATE=PASS server=${useCompose ? 'compose' : 'preset-dsn'} mode=${runtime ? 'runtime' : coverage ? 'coverage' : 'integration'}\n`)
 } finally {
   if (started) await run('docker', [...compose, 'down', '-v'], composeEnv, true)
+  if (toolDirectory !== undefined) await rm(toolDirectory, { recursive: true, force: true })
 }
 
 function run(command, args, env, tolerateFailure = false) {

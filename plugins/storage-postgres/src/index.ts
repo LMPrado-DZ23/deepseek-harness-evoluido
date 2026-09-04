@@ -103,16 +103,22 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     ssl,
     poolMax: config.poolMax ?? 4,
   })
-  const capacity = new PostgresCapacityGovernor({
-    connectionString: connection.connectionString,
-    schema,
-    ssl,
-    poolMax: Math.min(4, config.poolMax ?? 4),
-  })
+  let capacity: PostgresCapacityGovernor | undefined
   try {
-    await Promise.all([backend.waitUntilReady(), capacity.waitUntilReady()])
+    // Both services share one PostgreSQL schema. Initialise the storage writer
+    // first so its physical layout exists before the capacity tables are added;
+    // concurrent CREATE SCHEMA IF NOT EXISTS calls can still race inside
+    // PostgreSQL and raise a duplicate pg_namespace key.
+    await backend.waitUntilReady()
+    capacity = new PostgresCapacityGovernor({
+      connectionString: connection.connectionString,
+      schema,
+      ssl,
+      poolMax: Math.min(4, config.poolMax ?? 4),
+    })
+    await capacity.waitUntilReady()
   } catch (error) {
-    await Promise.allSettled([backend.close(), capacity.close()])
+    await Promise.allSettled([backend.close(), capacity?.close()])
     throw new Error('storage-postgres: PostgreSQL is unavailable or incompatible', { cause: error })
   }
   ctx.effect(() => {

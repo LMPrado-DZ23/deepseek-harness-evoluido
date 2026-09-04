@@ -295,7 +295,18 @@ describePostgres('postgres backend against PostgreSQL 16', () => {
       await mkdir(toolDirectory)
       const pgDump = join(toolDirectory, 'pg_dump')
       // With a test container, pg_dump is bridged through docker exec; without one the local client tools are used as-is.
-      await writeFile(pgDump, `#!/bin/sh\nexec docker exec -i "$DZ23_POSTGRES_TEST_CONTAINER" pg_dump --username "$PGUSER" --dbname "$PGDATABASE" "$@"\n`)
+      await writeFile(pgDump, `#!/usr/bin/env bash
+set -euo pipefail
+container="$DZ23_POSTGRES_TEST_CONTAINER"
+filtered=()
+for argument in "$@"; do
+  case "$argument" in
+    --dbname=*) ;;
+    *) filtered+=("$argument") ;;
+  esac
+done
+exec docker exec -i "$container" pg_dump --username dz23_test --dbname dz23_test "\${filtered[@]}"
+`)
       await chmod(pgDump, 0o700)
       const cliEnvironment = {
         ...process.env,
