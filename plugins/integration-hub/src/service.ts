@@ -599,7 +599,15 @@ export class IntegrationHubService {
     const timeout = new HubError('TIMEOUT', t('errors.exportTimedOut'))
     const timer = setTimeout(() => controller.abort(timeout), this.options.packagingTimeoutMs ?? PACKAGING_SLOT_TIMEOUT_MS)
     timer.unref?.()
-    const task = work(controller.signal)
+    // Convert both contenders to values before racing them.  A fast fail-closed
+    // refusal can otherwise reject in the short interval between construction
+    // and the async HTTP boundary attaching its observer, which Node correctly
+    // reports as PromiseRejectionHandledWarning even though the response is
+    // eventually mapped to 409/413.
+    const task = work(controller.signal).then(
+      value => ({ kind: 'value' as const, value }),
+      error => ({ kind: 'error' as const, error }),
+    )
     const releaseSlot = () => {
       clearTimeout(timer)
       this.#packaging -= 1
@@ -607,13 +615,13 @@ export class IntegrationHubService {
     }
     // This observer owns the slot lifecycle; the caller may receive TIMEOUT first, but capacity
     // is not returned until the abandoned operation really stops.
-    void task.then(releaseSlot, releaseSlot)
-    const aborted = new Promise<never>((_resolve, reject) => {
-      controller.signal.addEventListener('abort', () => reject(timeout), { once: true })
+    void task.then(releaseSlot)
+    const aborted = new Promise<{ kind: 'error'; error: unknown }>(resolve => {
+      controller.signal.addEventListener('abort', () => resolve({ kind: 'error', error: timeout }), { once: true })
     })
-    const result = Promise.race([task, aborted])
-    void result.catch(() => undefined)
-    return await result
+    const outcome = await Promise.race([task, aborted])
+    if (outcome.kind === 'error') throw outcome.error
+    return outcome.value
   }
 
   /** Attempts per workspace inside the window; a refusal is audited and costs the flooder, not the table. */
