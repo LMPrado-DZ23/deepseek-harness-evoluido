@@ -9,6 +9,7 @@ o código pode existir, mas ainda não foi validado com pessoas leigas.
 | Núcleo composto sem diff no Harness | BETA | PoC-01b | empacotamento e jornadas reais |
 | Identidade, sessão revogável e RBAC | BETA | P29-A/P29-B | PostgreSQL multi-instância e UI final |
 | Acesso móvel por borda autenticada | BETA | P29-C: HTTP, RPC e WS reais | celular/Tailscale e domínio reais |
+| Lifecycle Windows 11 + WSL2 | BETA | M6 `fd2d84a`: simulação PowerShell/Bash com Docker isolado, rollback, timeout, inventário e uninstall fail-closed | imagem M6.1 e instalação/update/rollback/uninstall reais no Windows |
 | Bind público da porta interna do Harness | BLOCKED | ADR-012 proíbe | não deve ser liberado |
 | TLS ACME em domínio real | NOT_EXECUTED | configuração validada | emissão e renovação reais |
 | Deploy de produção | NOT_EXECUTED | nenhum deploy | fase própria com aprovação humana |
