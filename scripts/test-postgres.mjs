@@ -23,7 +23,7 @@ try {
   const vitest = runtime
     ? ['run', 'prove:postgres-runtime']
     : coverage
-      ? ['exec', 'vitest', 'run', '--coverage']
+      ? ['exec', 'vitest', 'run', '--coverage', '--maxWorkers=1']
       : ['exec', 'vitest', 'run', 'plugins/storage-postgres/tests/postgres.spec.ts', '--reporter=verbose']
   await run('pnpm', vitest, testEnv)
 } finally {
