@@ -56,7 +56,7 @@ describe('builder supervisor authenticated HTTP contract', () => {
       prepare: vi.fn(async () => ({ build_ref: buildRef, state: 'PREPARED' as const })),
       execute: vi.fn(async (body: Parameters<BuilderRpcMethods['execute']>[0]) => ({ build_ref: body.build_ref, state: 'INSTALL_OK' as const, step: body.step, result: { exit_code: 0, stdout: '', stderr: '', timed_out: false, output_limited: false } })),
       cancel: vi.fn(async (body: Parameters<BuilderRpcMethods['cancel']>[0]) => ({ build_ref: body.build_ref, state: 'CANCELLED' as const })),
-      finish: vi.fn(async (body: Parameters<BuilderRpcMethods['finish']>[0]) => ({ build_ref: body.build_ref, final_state: 'E2E_OK' as const, cleaned: true as const })),
+      finish: vi.fn(async (body: Parameters<BuilderRpcMethods['finish']>[0]) => ({ build_ref: body.build_ref, final_state: 'E2E_OK' as const, exported: null, cleanup_pending: false, cleaned: true })),
       listManaged: vi.fn(async () => ({ builds: [] })),
       ...overrides,
     }
@@ -108,7 +108,7 @@ describe('builder supervisor authenticated HTTP contract', () => {
   })
 
   it('allows only strictly shaped managed-build and step results', async () => {
-    const listed = fixture({ listManaged: vi.fn(async () => ({ builds: [{ build_ref: buildRef, build_id: 'run-1', state: 'PREPARED' as const }] })) })
+    const listed = fixture({ listManaged: vi.fn(async () => ({ builds: [{ build_ref: buildRef, build_id: 'run-1', state: 'PREPARED' as const, exported: false, cleanup_pending: false }] })) })
     expect((await send(listed.handler, valid[5], { token })).status).toBe(200)
     const leakingList = fixture({ listManaged: vi.fn(async () => ({ builds: [{ build_ref: buildRef, build_id: 'run-1', state: 'PREPARED', image: 'attacker' }] })) as never })
     expect((await send(leakingList.handler, valid[5], { token })).status).toBe(500)
@@ -117,14 +117,14 @@ describe('builder supervisor authenticated HTTP contract', () => {
   })
 
   it.each(['E2E_OK', 'FAILED', 'CANCELLED'] as const)('allows the closed terminal result %s', async final_state => {
-    const f = fixture({ finish: vi.fn(async body => ({ build_ref: body.build_ref, final_state, cleaned: true as const })) })
+    const f = fixture({ finish: vi.fn(async body => ({ build_ref: body.build_ref, final_state, exported: final_state === 'E2E_OK' ? { relative_path: `exports/${buildRef}`, sha256: 'a'.repeat(64), files: 1, bytes: 0 } : null, cleanup_pending: false, cleaned: true })) })
     expect((await send(f.handler, valid[4], { token })).status).toBe(200)
   })
 
   it('rejects nonterminal and not-cleaned finish results', async () => {
-    const running = fixture({ finish: vi.fn(async body => ({ build_ref: body.build_ref, final_state: 'BUILD_OK', cleaned: true })) as never })
+    const running = fixture({ finish: vi.fn(async body => ({ build_ref: body.build_ref, final_state: 'BUILD_OK', exported: null, cleanup_pending: false, cleaned: true })) as never })
     expect((await send(running.handler, valid[4], { token })).status).toBe(500)
-    const dirty = fixture({ finish: vi.fn(async body => ({ build_ref: body.build_ref, final_state: 'FAILED', cleaned: false })) as never })
+    const dirty = fixture({ finish: vi.fn(async body => ({ build_ref: body.build_ref, final_state: 'FAILED', exported: null, cleanup_pending: false, cleaned: false })) as never })
     expect((await send(dirty.handler, valid[4], { token })).status).toBe(500)
   })
 

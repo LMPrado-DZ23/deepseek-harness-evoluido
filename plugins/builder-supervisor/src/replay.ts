@@ -1,6 +1,8 @@
 import { BuilderSupervisorError } from './model.js'
 
-export class ReplayGuard {
+export interface ReplayClaimPort { claim(requestId: string): Promise<void> }
+
+export class ReplayGuard implements ReplayClaimPort {
   readonly #claims = new Map<string, number>()
 
   constructor(
@@ -13,7 +15,7 @@ export class ReplayGuard {
     }
   }
 
-  claim(requestId: string): void {
+  async claim(requestId: string): Promise<void> {
     const now = this.now()
     for (const [id, expiresAt] of this.#claims) if (expiresAt <= now) this.#claims.delete(id)
     if (this.#claims.has(requestId)) throw new BuilderSupervisorError('REQUEST_REPLAY')

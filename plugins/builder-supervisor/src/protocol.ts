@@ -1,5 +1,5 @@
 import { timingSafeEqual } from 'node:crypto'
-import { BUILD_STEPS, BuilderSupervisorError, type BuildState, type BuildStep, type ManagedBuild, type StepResult } from './model.js'
+import { BUILD_STEPS, BuilderSupervisorError, type BuildState, type BuildStep, type FinishResult, type ManagedBuild, type StepResult } from './model.js'
 
 export const BUILDER_RPC_PATH = '/v1/rpc'
 export const BUILDER_RPC_MAX_BODY_BYTES = 64 * 1024
@@ -26,7 +26,7 @@ export interface BuilderRpcMethods {
   readonly prepare: (body: PrepareRequest, signal: AbortSignal) => Promise<{ readonly build_ref: string; readonly state: 'PREPARED' }>
   readonly execute: (body: ExecuteRequest, signal: AbortSignal) => Promise<{ readonly build_ref: string; readonly state: BuildState; readonly step: BuildStep; readonly result: StepResult }>
   readonly cancel: (body: BuildReferenceRequest, signal: AbortSignal) => Promise<{ readonly build_ref: string; readonly state: 'CANCELLED' }>
-  readonly finish: (body: BuildReferenceRequest, signal: AbortSignal) => Promise<{ readonly build_ref: string; readonly final_state: 'E2E_OK' | 'FAILED' | 'CANCELLED'; readonly cleaned: true }>
+  readonly finish: (body: BuildReferenceRequest, signal: AbortSignal) => Promise<FinishResult>
   readonly listManaged: (body: RequestIdentity, signal: AbortSignal) => Promise<{ readonly builds: readonly ManagedBuild[] }>
 }
 
@@ -115,8 +115,9 @@ function validResult(operation: BuilderRpcRequest['operation'], value: unknown):
     const row = exact(value, ['build_ref', 'state']); return row?.state === 'CANCELLED' && validBuildRef(row.build_ref)
   }
   if (operation === 'finish') {
-    const row = exact(value, ['build_ref', 'final_state', 'cleaned'])
-    return row !== undefined && validBuildRef(row.build_ref) && (row.final_state === 'E2E_OK' || row.final_state === 'FAILED' || row.final_state === 'CANCELLED') && row.cleaned === true
+    const row = exact(value, ['build_ref', 'final_state', 'exported', 'cleanup_pending', 'cleaned'])
+    return row !== undefined && validBuildRef(row.build_ref) && (row.final_state === 'E2E_OK' || row.final_state === 'FAILED' || row.final_state === 'CANCELLED') &&
+      validExported(row.exported) && typeof row.cleanup_pending === 'boolean' && typeof row.cleaned === 'boolean' && row.cleanup_pending !== row.cleaned
   }
   const row = exact(value, ['builds'])
   return row !== undefined && Array.isArray(row.builds) && row.builds.length <= 1_000 && row.builds.every(validManagedBuild)
@@ -128,8 +129,15 @@ function validStepResult(value: unknown): boolean {
 }
 
 function validManagedBuild(value: unknown): boolean {
-  const row = exact(value, ['build_ref', 'build_id', 'state'])
-  return row !== undefined && validBuildRef(row.build_ref) && validBuildId(row.build_id) && validBuildState(row.state)
+  const row = exact(value, ['build_ref', 'build_id', 'state', 'exported', 'cleanup_pending'])
+  return row !== undefined && validBuildRef(row.build_ref) && validBuildId(row.build_id) && validBuildState(row.state) && typeof row.exported === 'boolean' && typeof row.cleanup_pending === 'boolean'
+}
+
+function validExported(value: unknown): boolean {
+  if (value === null) return true
+  const row = exact(value, ['relative_path', 'sha256', 'files', 'bytes'])
+  return row !== undefined && typeof row.relative_path === 'string' && /^exports\/build_[a-f0-9]{32}$/u.test(row.relative_path) &&
+    typeof row.sha256 === 'string' && /^[a-f0-9]{64}$/u.test(row.sha256) && Number.isSafeInteger(row.files) && Number(row.files) > 0 && Number.isSafeInteger(row.bytes) && Number(row.bytes) >= 0
 }
 
 function validBuildState(value: unknown): value is BuildState {

@@ -32,10 +32,11 @@ describe('builder supervisor orchestration', () => {
       const result = await service.execute({ request_id: req(String(index + 2)), build_ref: ref, step }, signal)
       expect(result).toMatchObject({ build_ref: ref, step, result: ok })
     }
-    await expect(service.listManaged({ request_id: req('6') }, signal)).resolves.toEqual({ builds: [{ build_ref: ref, build_id: 'run-1', state: 'E2E_OK' }] })
-    await expect(service.finish({ request_id: req('7'), build_ref: ref }, signal)).resolves.toEqual({ build_ref: ref, final_state: 'E2E_OK', cleaned: true })
-    expect(adapter.finish).toHaveBeenCalledWith(ref, 'E2E_OK', signal)
-    await expect(service.listManaged({ request_id: req('8') }, signal)).resolves.toEqual({ builds: [] })
+    await expect(service.listManaged({ request_id: req('6') }, signal)).resolves.toEqual({ builds: [{ build_ref: ref, build_id: 'run-1', state: 'E2E_OK', exported: false, cleanup_pending: false }] })
+    await expect(service.finish({ request_id: req('7'), build_ref: ref }, signal)).resolves.toEqual({ build_ref: ref, final_state: 'E2E_OK', exported: { relative_path: `exports/${ref}`, sha256: 'e'.repeat(64), files: 1, bytes: 1 }, cleanup_pending: false, cleaned: true })
+    expect(adapter.exportArtifact).toHaveBeenCalledWith(ref, signal); expect(adapter.cleanup).toHaveBeenCalledWith(ref, signal)
+    await expect(service.finish({ request_id: req('8'), build_ref: ref }, signal)).resolves.toMatchObject({ cleaned: true })
+    expect(adapter.exportArtifact).toHaveBeenCalledTimes(1); expect(adapter.cleanup).toHaveBeenCalledTimes(1)
   })
 
   it('rejects skips, duplicate builds, nonterminal finish, unknown builds and replay', async () => {
@@ -73,7 +74,7 @@ describe('builder supervisor orchestration', () => {
     await vi.waitFor(() => expect(adapter.execute).toHaveBeenCalled())
     await expect(service.cancel({ request_id: req('3'), build_ref: ref }, signal)).resolves.toEqual({ build_ref: ref, state: 'CANCELLED' })
     await expect(pending).rejects.toThrow('BUILD_CANCELLED')
-    await expect(service.listManaged({ request_id: req('4') }, signal)).resolves.toEqual({ builds: [{ build_ref: ref, build_id: 'run-cancel', state: 'CANCELLED' }] })
+    await expect(service.listManaged({ request_id: req('4') }, signal)).resolves.toEqual({ builds: [{ build_ref: ref, build_id: 'run-cancel', state: 'CANCELLED', exported: false, cleanup_pending: false }] })
     await expect(service.finish({ request_id: req('5'), build_ref: ref }, signal)).resolves.toMatchObject({ final_state: 'CANCELLED' })
   })
 
@@ -94,7 +95,7 @@ describe('builder supervisor orchestration', () => {
     const signal = new AbortController().signal
     await service.prepare({ request_id: req('1'), build_id: 'run-error', artifact_relative_path: 'run', artifact_sha256: fixture.hash }, signal)
     await expect(service.execute({ request_id: req('2'), build_ref: ref, step: 'install' }, signal)).rejects.toThrow('engine down')
-    await expect(service.listManaged({ request_id: req('3') }, signal)).resolves.toEqual({ builds: [{ build_ref: ref, build_id: 'run-error', state: 'FAILED' }] })
+    await expect(service.listManaged({ request_id: req('3') }, signal)).resolves.toEqual({ builds: [{ build_ref: ref, build_id: 'run-error', state: 'FAILED', exported: false, cleanup_pending: false }] })
   })
 
   it('rejects a malformed or already-managed server-generated reference', async () => {
@@ -110,6 +111,33 @@ describe('builder supervisor orchestration', () => {
     const fixture = await artifactFixture(); const adapter = fakeAdapter(); const signal = new AbortController().signal
     const service = new BuilderSupervisor({ artifactRoot: fixture.root, adapter })
     await expect(service.prepare({ request_id: req('1'), build_id: 'random-ref', artifact_relative_path: 'run', artifact_sha256: fixture.hash }, signal)).resolves.toMatchObject({ build_ref: expect.stringMatching(/^build_[a-f0-9]{32}$/u) })
+  })
+
+  it('reconciles before serving and permanently reserves recovered build ids and refs', async () => {
+    const fixture = await artifactFixture(); const adapter = fakeAdapter(); const recoveredRef = `build_${'d'.repeat(32)}`
+    vi.mocked(adapter.reconcile).mockResolvedValueOnce([{ build_ref: recoveredRef, build_id: 'recovered-run' }])
+    const service = new BuilderSupervisor({ artifactRoot: fixture.root, adapter, createReference: () => recoveredRef }); const signal = new AbortController().signal
+    await expect(service.preflight({ request_id: req('1') }, signal)).resolves.toEqual({ state: 'OK' })
+    expect(adapter.reconcile).toHaveBeenCalledTimes(1)
+    await expect(service.prepare({ request_id: req('2'), build_id: 'recovered-run', artifact_relative_path: 'run', artifact_sha256: fixture.hash }, signal)).rejects.toThrow('BUILD_ALREADY_EXISTS')
+    await expect(service.prepare({ request_id: req('3'), build_id: 'new-run', artifact_relative_path: 'run', artifact_sha256: fixture.hash }, signal)).rejects.toThrow('BUILD_ALREADY_EXISTS')
+  })
+
+  it('keeps exported tracking while cleanup is pending and retries cleanup without re-exporting', async () => {
+    const fixture = await artifactFixture(); const adapter = fakeAdapter(); const service = new BuilderSupervisor({ artifactRoot: fixture.root, adapter, createReference: () => ref }); const signal = new AbortController().signal
+    await service.prepare({ request_id: req('1'), build_id: 'retry-cleanup', artifact_relative_path: 'run', artifact_sha256: fixture.hash }, signal)
+    for (const [index, step] of (['install', 'build', 'unit', 'e2e'] as const).entries()) await service.execute({ request_id: req(String(index + 2)), build_ref: ref, step }, signal)
+    vi.mocked(adapter.cleanup).mockRejectedValueOnce(new Error('busy')).mockResolvedValueOnce(undefined)
+    await expect(service.finish({ request_id: req('6'), build_ref: ref }, signal)).rejects.toThrow('CLEANUP_INCOMPLETE')
+    await expect(service.listManaged({ request_id: req('7') }, signal)).resolves.toEqual({ builds: [{ build_ref: ref, build_id: 'retry-cleanup', state: 'E2E_OK', exported: true, cleanup_pending: true }] })
+    await expect(service.finish({ request_id: req('8'), build_ref: ref }, signal)).resolves.toMatchObject({ exported: { relative_path: `exports/${ref}` }, cleanup_pending: false, cleaned: true })
+    expect(adapter.exportArtifact).toHaveBeenCalledTimes(1); expect(adapter.cleanup).toHaveBeenCalledTimes(2)
+  })
+
+  it('fails closed at the configured global managed-build limit', async () => {
+    const fixture = await artifactFixture(); const adapter = fakeAdapter(); const service = new BuilderSupervisor({ artifactRoot: fixture.root, adapter, createReference: () => ref, maxBuilds: 1 }); const signal = new AbortController().signal
+    await service.prepare({ request_id: req('1'), build_id: 'first', artifact_relative_path: 'run', artifact_sha256: fixture.hash }, signal)
+    await expect(service.prepare({ request_id: req('2'), build_id: 'second', artifact_relative_path: 'run', artifact_sha256: fixture.hash }, signal)).rejects.toThrow('CAPACITY_EXCEEDED')
   })
 })
 
@@ -129,10 +157,12 @@ describe('verified build archive', () => {
 function fakeAdapter(): BuilderExecutionPort {
   return {
     preflight: vi.fn(async () => 'OK' as const),
+    reconcile: vi.fn(async () => []),
     prepare: vi.fn(async () => undefined),
     execute: vi.fn(async (_buildRef: string, _step: BuildStep) => ok),
     cancel: vi.fn(async () => undefined),
-    finish: vi.fn(async () => undefined),
+    exportArtifact: vi.fn(async buildRef => ({ relative_path: `exports/${buildRef}`, sha256: 'e'.repeat(64), files: 1, bytes: 1 })),
+    cleanup: vi.fn(async () => undefined),
     listManaged: vi.fn(async () => []),
   }
 }

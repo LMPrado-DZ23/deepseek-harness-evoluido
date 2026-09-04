@@ -1,5 +1,10 @@
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { FileBuildIdGuard, FileReplayGuard } from '../src/persistent-replay.js'
 import { ReplayGuard } from '../src/replay.js'
+import { Semaphore } from '../src/semaphore.js'
 import { beginStep, completeStep } from '../src/state-machine.js'
 
 describe('builder state machine', () => {
@@ -22,19 +27,43 @@ describe('builder state machine', () => {
   })
 })
 
+describe('bounded execution semaphore', () => {
+  it('queues globally, releases once and removes cancelled waiters', async () => {
+    const semaphore = new Semaphore(1); const signal = new AbortController().signal; const first = await semaphore.acquire(signal); expect(semaphore.active).toBe(1)
+    const controller = new AbortController(); const cancelled = semaphore.acquire(controller.signal); controller.abort(new Error('cancelled')); await expect(cancelled).rejects.toThrow('cancelled')
+    let granted = false; const next = semaphore.acquire(signal).then(release => { granted = true; release() }); await Promise.resolve(); expect(granted).toBe(false)
+    first(); first(); await next; expect(semaphore.active).toBe(0); expect(() => new Semaphore(0)).toThrow('INVALID_CONCURRENCY_LIMIT')
+  })
+})
+
 describe('replay guard', () => {
-  it('rejects replay, expires old claims and fails closed at capacity', () => {
+  it('rejects replay, expires old claims and fails closed at capacity', async () => {
     let now = 0
     const guard = new ReplayGuard(() => now, 10, 1)
-    guard.claim('one')
-    expect(() => guard.claim('one')).toThrow('REQUEST_REPLAY')
-    expect(() => guard.claim('two')).toThrow('REPLAY_CAPACITY')
+    await guard.claim('one')
+    await expect(guard.claim('one')).rejects.toThrow('REQUEST_REPLAY')
+    await expect(guard.claim('two')).rejects.toThrow('REPLAY_CAPACITY')
     now = 10
-    expect(() => guard.claim('two')).not.toThrow()
+    await expect(guard.claim('two')).resolves.toBeUndefined()
   })
 
   it('rejects invalid limits', () => {
     expect(() => new ReplayGuard(Date.now, 0, 1)).toThrow('INVALID_REPLAY_CONFIGURATION')
     expect(() => new ReplayGuard(Date.now, 1, 0)).toThrow('INVALID_REPLAY_CONFIGURATION')
+  })
+
+  it('persists claims across process-object replacement and fails closed at disk capacity', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dz23-replay-')); const id = `req_${'a'.repeat(32)}`
+    try {
+      await new FileReplayGuard(root, 1).claim(id)
+      await expect(new FileReplayGuard(root, 1).claim(id)).rejects.toThrow('REQUEST_REPLAY')
+      await expect(new FileReplayGuard(root, 1).claim(`req_${'b'.repeat(32)}`)).rejects.toThrow('REPLAY_CAPACITY')
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
+
+  it('persists opaque build ids as hashed, non-reusable claims', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dz23-build-claims-'))
+    try { await new FileBuildIdGuard(root).claim('customer-run-1'); await expect(new FileBuildIdGuard(root).claim('customer-run-1')).rejects.toThrow('BUILD_ALREADY_EXISTS') }
+    finally { await rm(root, { recursive: true, force: true }) }
   })
 })

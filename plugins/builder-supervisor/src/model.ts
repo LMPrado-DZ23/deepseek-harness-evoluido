@@ -20,6 +20,23 @@ export interface ManagedBuild {
   readonly build_ref: string
   readonly build_id: string
   readonly state: BuildState
+  readonly exported: boolean
+  readonly cleanup_pending: boolean
+}
+
+export interface ExportedArtifact {
+  readonly relative_path: string
+  readonly sha256: string
+  readonly files: number
+  readonly bytes: number
+}
+
+export interface FinishResult {
+  readonly build_ref: string
+  readonly final_state: TerminalBuildState
+  readonly exported: ExportedArtifact | null
+  readonly cleanup_pending: boolean
+  readonly cleaned: boolean
 }
 
 export interface StepResult {
@@ -42,7 +59,10 @@ export type BuilderErrorCode =
   | 'BUILD_ALREADY_EXISTS'
   | 'BUILD_NOT_FOUND'
   | 'BUILD_NOT_TERMINAL'
+  | 'CAPACITY_EXCEEDED'
   | 'CLEANUP_INCOMPLETE'
+  | 'EXPORT_INVALID'
+  | 'RECOVERY_FAILED'
   | 'INVALID_STEP_ORDER'
   | 'REQUEST_REPLAY'
   | 'REPLAY_CAPACITY'

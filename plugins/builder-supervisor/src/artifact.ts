@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
-import { lstat, readFile, readdir, realpath } from 'node:fs/promises'
+import { constants } from 'node:fs'
+import { lstat, open, readdir, realpath } from 'node:fs/promises'
 import { posix, resolve, sep } from 'node:path'
 import { BuilderSupervisorError } from './model.js'
 
@@ -22,8 +23,11 @@ export async function createVerifiedBuildArchive(
 ): Promise<VerifiedBuildArtifact> {
   signal?.throwIfAborted()
   const root = await realpath(artifactRoot)
+  await assertNoSymlinkBeneath(root, relativePath)
   const source = await realpath(resolve(root, ...relativePath.split('/')))
   if (!inside(root, source)) throw new BuilderSupervisorError('ARTIFACT_OUTSIDE_ROOT')
+  const sourceBefore = await lstat(source)
+  if (!sourceBefore.isDirectory() || sourceBefore.isSymbolicLink()) throw new BuilderSupervisorError('ARTIFACT_UNSAFE_ENTRY')
   const paths = await walk(source, '', signal)
   if (paths.length === 0 || paths.length > MAX_FILES) throw new BuilderSupervisorError('ARTIFACT_UNSAFE_ENTRY')
   const folded = new Set<string>()
@@ -36,18 +40,22 @@ export async function createVerifiedBuildArchive(
     if (folded.has(normalized)) throw new BuilderSupervisorError('ARTIFACT_UNSAFE_ENTRY')
     folded.add(normalized)
     const path = resolve(source, ...name.split('/'))
-    const before = await lstat(path)
-    if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) throw new BuilderSupervisorError('ARTIFACT_UNSAFE_ENTRY')
-    total += before.size
-    if (total > MAX_BYTES) throw new BuilderSupervisorError('ARTIFACT_UNSAFE_ENTRY')
-    const bytes = await readFile(path)
-    const after = await lstat(path)
-    if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs) {
-      throw new BuilderSupervisorError('ARTIFACT_CHANGED_DURING_STAGE')
-    }
+    const handle = await open(path, constants.O_RDONLY | noFollow())
+    let bytes: Buffer
+    try {
+      const before = await handle.stat()
+      if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) throw new BuilderSupervisorError('ARTIFACT_UNSAFE_ENTRY')
+      total += before.size
+      if (total > MAX_BYTES) throw new BuilderSupervisorError('ARTIFACT_UNSAFE_ENTRY')
+      bytes = await handle.readFile()
+      const after = await handle.stat()
+      if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs) throw new BuilderSupervisorError('ARTIFACT_CHANGED_DURING_STAGE')
+    } finally { await handle.close() }
     hash.update(name).update('\0').update(bytes).update('\0')
     files.push({ name, bytes })
   }
+  const sourceAfter = await lstat(source)
+  if (sourceBefore.dev !== sourceAfter.dev || sourceBefore.ino !== sourceAfter.ino || sourceBefore.mtimeMs !== sourceAfter.mtimeMs) throw new BuilderSupervisorError('ARTIFACT_CHANGED_DURING_STAGE')
   const sha256 = hash.digest('hex')
   if (sha256 !== expectedSha256) throw new BuilderSupervisorError('ARTIFACT_HASH_MISMATCH')
   return { archive: tarArchive(files), sourceDirectory: source, sha256, files: files.length, bytes: total }
@@ -55,6 +63,8 @@ export async function createVerifiedBuildArchive(
 
 async function walk(root: string, prefix: string, signal?: AbortSignal): Promise<string[]> {
   signal?.throwIfAborted()
+  const before = await lstat(root)
+  if (!before.isDirectory() || before.isSymbolicLink() || await realpath(root) !== root) throw new BuilderSupervisorError('ARTIFACT_UNSAFE_ENTRY')
   const entries = await readdir(root, { withFileTypes: true })
   const result: string[] = []
   for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
@@ -68,6 +78,8 @@ async function walk(root: string, prefix: string, signal?: AbortSignal): Promise
     else throw new BuilderSupervisorError('ARTIFACT_UNSAFE_ENTRY')
     if (result.length > MAX_FILES) throw new BuilderSupervisorError('ARTIFACT_UNSAFE_ENTRY')
   }
+  const after = await lstat(root)
+  if (before.dev !== after.dev || before.ino !== after.ino || before.mtimeMs !== after.mtimeMs) throw new BuilderSupervisorError('ARTIFACT_CHANGED_DURING_STAGE')
   return result
 }
 
@@ -126,3 +138,12 @@ function safePath(value: string): boolean {
 }
 
 function inside(root: string, candidate: string): boolean { return candidate.startsWith(`${root}${sep}`) }
+async function assertNoSymlinkBeneath(root: string, relativePath: string): Promise<void> {
+  let current = root
+  for (const part of relativePath.split('/')) {
+    current = resolve(current, part)
+    const stat = await lstat(current)
+    if (stat.isSymbolicLink()) throw new BuilderSupervisorError('ARTIFACT_UNSAFE_ENTRY')
+  }
+}
+function noFollow(): number { return process.platform === 'linux' ? constants.O_NOFOLLOW : 0 }
