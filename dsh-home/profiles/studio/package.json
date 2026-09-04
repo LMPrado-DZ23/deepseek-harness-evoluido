@@ -8,6 +8,7 @@
     "@deepseek-ai/dsh-subagent-spawn-in-process": "link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/subagent/subagent-spawn-in-process",
     "@dz23-studio/agents": "link:../../../plugins/agents",
     "@dz23-studio/identity": "link:../../../plugins/identity",
+    "@dz23-studio/integration-hub": "link:../../../plugins/integration-hub",
     "@dz23-studio/policy": "link:../../../plugins/policy",
     "@dz23-studio/preview": "link:../../../plugins/preview",
     "@dz23-studio/prompt-to-app": "link:../../../plugins/prompt-to-app",

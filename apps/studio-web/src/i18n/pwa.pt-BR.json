@@ -1,0 +1,23 @@
+{
+  "offline": {
+    "banner": "Você está sem internet. O Studio continua aberto para você ver o que já está na tela, mas nada pode ser criado, salvo ou enviado até a conexão voltar.",
+    "backOnline": "Conexão restabelecida.",
+    "blockedAction": "Esta ação precisa de conexão. O que você digitou continua aqui; tente de novo quando a internet voltar.",
+    "serviceUnreachable": "Você está com internet, mas o Studio não respondeu. Ele pode estar desligado ou reiniciando; tente de novo em instantes."
+  },
+  "install": {
+    "prompt": "Instalar o DZ23 STUDIO neste aparelho",
+    "installed": "O DZ23 STUDIO foi instalado neste aparelho.",
+    "ios": "No iPhone: toque em Compartilhar e depois em \"Adicionar à Tela de Início\"."
+  },
+  "notifications": {
+    "enable": "Avisar quando a criação terminar",
+    "verified": "Seu protótipo foi verificado.",
+    "failed": "A criação parou. Abra o Studio para ver o motivo.",
+    "cancelled": "A criação foi cancelada.",
+    "blocked": "O ambiente isolado não está disponível neste computador.",
+    "title": "DZ23 STUDIO",
+    "granted": "Este aparelho vai avisar quando a criação terminar.",
+    "denied": "Os avisos estão bloqueados para este site. Se mudar de ideia, libere as notificações nas configurações do navegador."
+  }
+}

@@ -11,11 +11,11 @@ import { SqliteStorageBackend } from '@deepseek-ai/dsh-storage-sqlite'
 import { runKvBackendContract } from '/home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage/tests/contract.ts'
 import { PostgresStorageBackend } from '../src/backend.ts'
 import { StudioStorageError } from '../src/errors.ts'
-import { quoteIdentifier, STORAGE_POSTGRES_LAYOUT_VERSION, storageUnitLockName } from '../src/schema.ts'
+import { quoteIdentifier, STORAGE_POSTGRES_LAYOUT_VERSION, storageMaintenanceLockName, storageUnitLockName } from '../src/schema.ts'
 import { StudioTenancyService, type TenancyRepository } from '../../tenancy/src/service.ts'
 import type { Invitation, Membership, Organization, Workspace } from '../../tenancy/src/model.ts'
 import { descriptorOf } from '@deepseek-ai/dsh-storage-domain'
-import { exportStorage, importStorage, validateBundle } from '../../../scripts/storage-migration.ts'
+import { exportStorage, importStorage, validateBundle, type StorageExportBundle } from '../../../scripts/storage-migration.ts'
 import { STUDIO_DOMAIN_SPECS } from '../../../scripts/studio-domain-specs.ts'
 import { apply } from '../src/index.ts'
 
@@ -146,6 +146,53 @@ describePostgres('postgres backend against PostgreSQL 16', () => {
     await incompatible.close()
   })
 
+  it('never rewrites an immutable descriptor when the version number is unchanged', async () => {
+    const schema = schemaName('descriptor_immutable')
+    const original = { name: 'immutable_unit', version: 7, tables: ['records'], hasGlobal: false } as const
+    const first = backend(schema)
+    const unit = await first.kv!.open(original)
+    await unit.close()
+    await first.close()
+
+    for (const changed of [
+      { ...original, tables: ['other'] },
+      { ...original, hasGlobal: true },
+    ]) {
+      const stale = backend(schema)
+      await expect(stale.kv!.open(changed)).rejects.toMatchObject({ code: 'malformed-medium' })
+      await stale.close()
+    }
+
+    const client = new Client({ connectionString: dsn!, ssl: false })
+    await client.connect()
+    const persisted = await client.query<{ version: number; tables: string[]; has_global: boolean }>(
+      `SELECT version, tables, has_global FROM "${schema}"."units" WHERE name = $1`,
+      [original.name],
+    )
+    await client.end()
+    expect(persisted.rows).toEqual([{ version: 7, tables: ['records'], has_global: false }])
+  })
+
+  it('initializes a fully legacy descriptor once but rejects partially stamped metadata', async () => {
+    const schema = schemaName('descriptor_legacy')
+    const original = { name: 'legacy_unit', version: 2, tables: ['records'], hasGlobal: false } as const
+    const seed = backend(schema)
+    const unit = await seed.kv!.open(original)
+    await unit.close()
+    await seed.close()
+    const client = new Client({ connectionString: dsn!, ssl: false })
+    await client.connect()
+    await client.query(`UPDATE "${schema}"."units" SET tables = NULL, has_global = NULL, descriptor_sha256 = NULL WHERE name = $1`, [original.name])
+    const migrated = backend(schema)
+    await (await migrated.kv!.open(original)).close()
+    await migrated.close()
+    await client.query(`UPDATE "${schema}"."units" SET descriptor_sha256 = NULL WHERE name = $1`, [original.name])
+    await client.end()
+    const corrupt = backend(schema)
+    await expect(corrupt.kv!.open(original)).rejects.toMatchObject({ code: 'malformed-medium' })
+    await corrupt.close()
+  })
+
   it('keeps two tenants in one database separated by the tenancy service', async () => {
     const schema = schemaName('tenants')
     const instance = backend(schema)
@@ -231,7 +278,7 @@ describePostgres('postgres backend against PostgreSQL 16', () => {
   }, 15_000)
 
   it('runs the write CLI for a new server, backs up replacements and refuses an active Studio', async () => {
-    if (postgresContainer === undefined) throw new Error('NOT_EXECUTED: real pg_dump/pg_restore container is not configured')
+    // pg_dump/pg_restore come from the test container when configured, otherwise from the local PostgreSQL client tools.
     const temporary = await mkdtemp(join(tmpdir(), 'dz23-p31-import-cli-'))
     try {
       const source = new SqliteStorageBackend({ path: join(temporary, 'source.sqlite'), journalMode: 'delete' })
@@ -246,11 +293,12 @@ describePostgres('postgres backend against PostgreSQL 16', () => {
       const toolDirectory = join(temporary, 'bin')
       await mkdir(toolDirectory)
       const pgDump = join(toolDirectory, 'pg_dump')
+      // With a test container, pg_dump is bridged through docker exec; without one the local client tools are used as-is.
       await writeFile(pgDump, `#!/bin/sh\nexec docker exec -i "$DZ23_POSTGRES_TEST_CONTAINER" pg_dump --username "$PGUSER" --dbname "$PGDATABASE" "$@"\n`)
       await chmod(pgDump, 0o700)
       const cliEnvironment = {
         ...process.env,
-        PATH: `${toolDirectory}${delimiter}${process.env.PATH ?? ''}`,
+        PATH: postgresContainer === undefined ? (process.env.PATH ?? '') : `${toolDirectory}${delimiter}${process.env.PATH ?? ''}`,
         DZ23_IMPORT_TEST_DSN: dsn!,
       }
       const cli = resolve('scripts/import-postgres-storage.ts')
@@ -272,7 +320,7 @@ describePostgres('postgres backend against PostgreSQL 16', () => {
       await oldUnit.close()
       await oldBackend.close()
       const backup = join(temporary, 'before-replace.dump')
-      await expect(invoke(targetSchema, backup)).rejects.toThrow('Target has Studio units')
+      await expect(invoke(targetSchema, backup)).rejects.toThrow('já tem conteúdo')
 
       const activeBackend = backend(targetSchema)
       await activeBackend.kv!.open(helloDescriptor)
@@ -284,11 +332,9 @@ describePostgres('postgres backend against PostgreSQL 16', () => {
       expect(replaced).toMatchObject({ mode: 'write', backup, backupStatus: 'created' })
       await access(backup)
       expect((await stat(backup)).mode & 0o777).toBe(0o600)
-      const listed = await runWithInput(
-        'docker',
-        ['exec', '-i', postgresContainer, 'pg_restore', '--list'],
-        await readFile(backup),
-      )
+      const listed = postgresContainer === undefined
+        ? await runWithInput('pg_restore', ['--list'], await readFile(backup))
+        : await runWithInput('docker', ['exec', '-i', postgresContainer, 'pg_restore', '--list'], await readFile(backup))
       expect(listed).toContain(targetSchema)
 
       const restored = backend(targetSchema)
@@ -299,6 +345,152 @@ describePostgres('postgres backend against PostgreSQL 16', () => {
       await rm(temporary, { recursive: true, force: true })
     }
   }, 30_000)
+
+  it('refuses to replace a schema that is not this Studio, even when a relation is named `units`', async () => {
+    const temporary = await mkdtemp(join(tmpdir(), 'dz23-import-foreign-'))
+    const client = new Client({ connectionString: dsn!, ssl: false })
+    await client.connect()
+    const foreign = schemaName('foreign_victim')
+    const viewed = schemaName('view_victim')
+    const typesOnly = schemaName('types_victim')
+    try {
+      // 1) Somebody else's schema. It has no `units` at all: the guard used to be gated on that very
+      //    table, so nothing checked the layout and `DROP SCHEMA CASCADE` ran with no confirmation.
+      await client.query(`CREATE SCHEMA ${quoteIdentifier(foreign)}`)
+      await client.query(`CREATE TABLE ${quoteIdentifier(foreign)}."important" (id int)`)
+      await client.query(`INSERT INTO ${quoteIdentifier(foreign)}."important" VALUES (1)`)
+      // 2) A schema where `units` is a VIEW — `pg_tables` does not list views, so the old gate opened again.
+      await client.query(`CREATE SCHEMA ${quoteIdentifier(viewed)}`)
+      await client.query(`CREATE TABLE ${quoteIdentifier(viewed)}."units_real" (name text primary key, version int)`)
+      await client.query(`CREATE VIEW ${quoteIdentifier(viewed)}."units" AS SELECT * FROM ${quoteIdentifier(viewed)}."units_real"`)
+
+      const bundle = await exportStorage(backend(schemaName('foreign_source')), STUDIO_DOMAIN_SPECS, 'c'.repeat(64), '2026-09-04T00:00:00.000Z')
+      const input = join(temporary, 'input.json')
+      await writeFile(input, JSON.stringify(bundle), { flag: 'wx', mode: 0o600 })
+      const cli = resolve('scripts/import-postgres-storage.ts')
+      const attempt = (schema: string, extra: string[] = []) => run(process.execPath, [
+        '--import', 'tsx', cli, '--input', input, '--dsn-ref', 'DZ23_IMPORT_TEST_DSN',
+        '--schema', schema, '--ssl', 'off', '--write', '--backup', join(temporary, `${schema}.dump`), ...extra,
+      ], { env: { ...process.env, DZ23_IMPORT_TEST_DSN: dsn! } })
+
+      // 3) A schema that holds NO relation at all — only a type, a domain and a function. `pg_class`
+      //    does not list those, so it looked empty, skipped the layout check and the confirmation,
+      //    and went straight into DROP SCHEMA CASCADE.
+      await client.query(`CREATE SCHEMA ${quoteIdentifier(typesOnly)}`)
+      await client.query(`CREATE TYPE ${quoteIdentifier(typesOnly)}."humor" AS ENUM ('bom', 'ruim')`)
+      await client.query(`CREATE FUNCTION ${quoteIdentifier(typesOnly)}."regra"() RETURNS int LANGUAGE sql AS 'SELECT 1'`)
+
+      // Refused even with the loudest flags a person can type.
+      for (const schema of [foreign, viewed, typesOnly]) {
+        await expect(attempt(schema, ['--force', '--confirm', 'REPLACE_DZ23_STORAGE', '--allow-domain-loss']))
+          .rejects.toThrow('não tem a estrutura do DZ23 STUDIO')
+      }
+      // Nothing was touched, and no safety dump was even started.
+      expect((await client.query(`SELECT count(*)::int AS n FROM ${quoteIdentifier(foreign)}."important"`)).rows[0].n).toBe(1)
+      expect((await client.query('SELECT count(*)::int AS n FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = $1', [typesOnly])).rows[0].n).toBe(1)
+      expect((await client.query(`SELECT count(*)::int AS n FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1`, [viewed])).rows[0].n).toBeGreaterThan(0)
+      await expect(access(join(temporary, `${foreign}.dump`))).rejects.toThrow()
+    } finally {
+      await client.query(`DROP SCHEMA IF EXISTS ${quoteIdentifier(foreign)} CASCADE`).catch(() => undefined)
+      await client.query(`DROP SCHEMA IF EXISTS ${quoteIdentifier(viewed)} CASCADE`).catch(() => undefined)
+      await client.query(`DROP SCHEMA IF EXISTS ${quoteIdentifier(typesOnly)} CASCADE`).catch(() => undefined)
+      await client.end()
+      await rm(temporary, { recursive: true, force: true })
+    }
+  }, 30_000)
+
+  it('keeps the maintenance lock supervised: a killed session does not crash the Studio, stops new units and is taken again', async () => {
+    const schema = schemaName('maint')
+    const store = new PostgresStorageBackend({ connectionString: dsn!, schema, ssl: false, poolMax: 2, heartbeatMs: 100, maintenanceRetryMs: 200 })
+    const admin = new Client({ connectionString: dsn!, ssl: false })
+    await admin.connect()
+    const uncaught: unknown[] = []
+    const onUncaught = (error: unknown) => uncaught.push(error)
+    process.on('uncaughtException', onUncaught)
+    try {
+      await store.waitUntilReady()
+      expect(store.maintenanceLockHeld).toBe(true)
+      // Kill the lock session the way a failover, an idle reaper or a DBA would.
+      const killed = await admin.query<{ pid: number }>(
+        `SELECT pg_terminate_backend(pid) AS ok, pid FROM pg_stat_activity WHERE application_name = $1`,
+        [`dz23-storage:maintenance:${schema}`],
+      )
+      expect(killed.rowCount).toBeGreaterThan(0)
+      // The guarantee is dropped immediately, and opening a unit is refused rather than running unprotected.
+      await vi.waitFor(() => { expect(store.maintenanceLockHeld).toBe(false) }, { timeout: 5_000, interval: 25 })
+      await expect(store.kv!.open({ name: 'maint_unit', version: 1, tables: ['records'], hasGlobal: false }))
+        .rejects.toThrow('maintenance lock')
+      // And it comes back on its own.
+      await vi.waitFor(() => { expect(store.maintenanceLockHeld).toBe(true) }, { timeout: 10_000, interval: 50 })
+      const unit = await store.kv!.open({ name: 'maint_unit', version: 1, tables: ['records'], hasGlobal: false })
+      await unit.close()
+      // The dead connection must never reach the process as an unhandled error.
+      expect(uncaught).toEqual([])
+    } finally {
+      process.off('uncaughtException', onUncaught)
+      await store.close()
+      await admin.end()
+    }
+  }, 30_000)
+
+  it('keeps a writer and a restore from ever overlapping: whoever takes the maintenance lock first wins', async () => {
+    // The window this closes: `maintenanceHeld` was read, and only THEN was the unit lock
+    // taken. Between the two, a restore could take the maintenance lock EXCLUSIVE, list the
+    // units it knew about and DROP SCHEMA under a writer that had just walked in.
+    const schema = schemaName('maint_race_writer')
+    const store = new PostgresStorageBackend({ connectionString: dsn!, schema, ssl: false, poolMax: 2, heartbeatMs: 100, maintenanceRetryMs: 60_000 })
+    const restore = new Client({ connectionString: dsn!, ssl: false })
+    await restore.connect()
+    const admin = new Client({ connectionString: dsn!, ssl: false })
+    await admin.connect()
+    const lockName = storageMaintenanceLockName(schema)
+    const restoreTriesToTakeOver = async (): Promise<boolean> => (await restore.query<{ acquired: boolean }>(
+      'SELECT pg_try_advisory_lock(hashtext($1)) AS acquired', [lockName],
+    )).rows[0]!.acquired
+    try {
+      await store.waitUntilReady()
+      const unit = await store.kv!.open({ name: 'race_unit', version: 1, tables: ['records'], hasGlobal: false })
+
+      // 1) The writer is in. Even with the Studio's own supervising session gone — killed by a
+      //    failover, an idle reaper or a DBA — the WRITER'S OWN session still holds the schema
+      //    shared, so the restore cannot take it exclusive and cannot drop anything.
+      await admin.query('SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = $1', [`dz23-storage:maintenance:${schema}`])
+      await vi.waitFor(() => { expect(store.maintenanceLockHeld).toBe(false) }, { timeout: 5_000, interval: 25 })
+      expect(await restoreTriesToTakeOver()).toBe(false)
+      await unit.close()
+
+      // 2) The restore is in. The flag still claims the guarantee — this IS the window — but the
+      //    database is the authority, so opening a unit is refused instead of writing into a
+      //    schema that is about to be replaced.
+      await vi.waitFor(async () => { expect(await restoreTriesToTakeOver()).toBe(true) }, { timeout: 5_000, interval: 50 })
+      ;(store as unknown as { maintenanceHeld: boolean }).maintenanceHeld = true
+      await expect(store.kv!.open({ name: 'race_unit_two', version: 1, tables: ['records'], hasGlobal: false }))
+        .rejects.toThrow('maintenance lock')
+    } finally {
+      await restore.query('SELECT pg_advisory_unlock_all()').catch(() => undefined)
+      await restore.end()
+      await admin.end()
+      await store.close()
+    }
+  }, 30_000)
+
+  it('leaves no orphan lock session when close() races the opening', async () => {
+    const schema = schemaName('maint_race')
+    const store = new PostgresStorageBackend({ connectionString: dsn!, schema, ssl: false, poolMax: 2 })
+    // No `await waitUntilReady()`: close lands while the lock session is still being taken.
+    await store.close()
+    const admin = new Client({ connectionString: dsn!, ssl: false })
+    await admin.connect()
+    try {
+      const sessions = await admin.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM pg_stat_activity WHERE application_name = $1`,
+        [`dz23-storage:maintenance:${schema}`],
+      )
+      expect(sessions.rows[0]!.n).toBe(0)
+    } finally {
+      await admin.end()
+    }
+  }, 20_000)
 
   it('exposes the Studio lock error as an upstream StorageError subclass', () => {
     const error = new StudioStorageError('locked')
@@ -319,7 +511,42 @@ describePostgres('postgres backend against PostgreSQL 16', () => {
     await apply(context as never, { dsnRef: 'DZ23_POSTGRES_TEST_DSN', schema: schemaName('plugin'), ssl: 'off', poolMax: 2 })
     expect(registered).toHaveBeenCalledWith('postgres', expect.any(PostgresStorageBackend))
     expect(provided).toHaveBeenCalledWith('storage.backend.postgres', expect.any(PostgresStorageBackend))
+    const backupService = provided.mock.calls.find(call => call[0] === 'studioStorageBackup')?.[1] as { runOnce(): Promise<unknown>; lastResult(): unknown; snapshot(): Promise<{ domains: unknown[] }> }
+    expect(backupService.lastResult()).toBeUndefined()
+    await expect(backupService.runOnce()).rejects.toThrow('scheduled backup is not configured')
+    expect((await backupService.snapshot()).domains).toEqual([])
     await Promise.all(disposers.map(dispose => dispose()))
+  })
+
+  it('schedules logical backups when configured and exposes the last result', async () => {
+    const temporary = await mkdtemp(join(tmpdir(), 'dz23-p31-backup-plugin-'))
+    const disposers: Array<() => void | Promise<void>> = []
+    const provided = vi.fn()
+    const logged: string[] = []
+    const context = {
+      credentials: { resolve: vi.fn(() => Promise.resolve({ value: dsn!, source: 'env' })) },
+      storage: { backend: { register: vi.fn(() => vi.fn()) } },
+      provide: provided,
+      effect: (factory: () => () => void | Promise<void>) => { disposers.push(factory()) },
+      logger: { info: (line: string) => logged.push(line), warn: (line: string) => logged.push(line) },
+    }
+    try {
+      const schema = schemaName('plugin_backup')
+      await apply(context as never, { dsnRef: 'DZ23_POSTGRES_TEST_DSN', schema, ssl: 'off', poolMax: 2, backupDirectory: join(temporary, 'backups'), backupIntervalMinutes: 5, backupKeep: 2 })
+      const service = provided.mock.calls.find(call => call[0] === 'studioStorageBackup')?.[1] as { runOnce(): Promise<{ status: string; file: string | null }>; lastResult(): unknown }
+      const result = await service.runOnce()
+      expect(result).toMatchObject({ status: 'created', error: null })
+      expect(service.lastResult()).toEqual(result)
+      expect((await stat(result.file!)).mode & 0o777).toBe(0o600)
+      expect(logged.some(line => line.includes('backup created'))).toBe(true)
+      // The copy is made by a process of its own: the file exists, is complete and validates on its own.
+      const bundle = JSON.parse(await readFile(result.file!, 'utf8')) as StorageExportBundle
+      expect(() => validateBundle(bundle)).not.toThrow()
+      expect(Array.isArray(bundle.domains)).toBe(true)
+    } finally {
+      await Promise.all(disposers.map(dispose => dispose()))
+      await rm(temporary, { recursive: true, force: true })
+    }
   })
 
   it('fails startup without a configured DSN or usable TLS', async () => {

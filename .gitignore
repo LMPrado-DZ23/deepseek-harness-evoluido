@@ -16,3 +16,10 @@ dsh-home/profiles/studio/cordis.yml
 
 runtime/
 
+# Build outputs: every plugin is compiled by `pnpm build`; committed copies drifted from src (route-health lacked markScope since b44ffe4).
+plugins/*/lib/
+apps/studio-web/dist/
+*.tsbuildinfo
+apps/studio-web/test-results/
+apps/studio-web/playwright-report/
+apps/studio-web/test-results-hub/

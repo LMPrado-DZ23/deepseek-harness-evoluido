@@ -7,6 +7,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@dz23-studio/identity': fileURLToPath(new URL('./plugins/identity/src/index.ts', import.meta.url)),
+      '@dz23-studio/integration-hub': fileURLToPath(new URL('./plugins/integration-hub/src/index.ts', import.meta.url)),
       '@dz23-studio/policy': fileURLToPath(new URL('./plugins/policy/src/index.ts', import.meta.url)),
       '@dz23-studio/preview': fileURLToPath(new URL('./plugins/preview/src/index.ts', import.meta.url)),
       '@dz23-studio/prompt-to-app': fileURLToPath(new URL('./plugins/prompt-to-app/src/index.ts', import.meta.url)),

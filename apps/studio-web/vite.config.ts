@@ -1,6 +1,10 @@
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
+import { swVersion } from './sw-version'
+
 export default defineConfig({
-  base: '/studio/', plugins: [react()], build: { outDir: 'dist', emptyOutDir: true },
-  test: { include: ['src/**/*.spec.ts'] },
+  base: '/studio/', plugins: [react()],
+  define: { __DZ23_SW_VERSION__: JSON.stringify(swVersion()) },
+  build: { outDir: 'dist', emptyOutDir: true },
+  test: { include: ['src/**/*.spec.ts'], environment: 'node' },
 })

@@ -1,0 +1,107 @@
+{
+  "title": "Integrações e pacote do protótipo",
+  "navLabel": "Integrações",
+  "subtitle": "Aqui você liga serviços ao seu aplicativo e baixa uma cópia do protótipo verificado. Nada sai deste computador sem a sua ação.",
+  "back": "Voltar ao Studio",
+  "loading": "Carregando…",
+  "offline": "Você está sem internet. Esta tela precisa de conexão com o Studio.",
+  "smtp": {
+    "title": "E-mail do aplicativo",
+    "help": "O aplicativo criado precisa de um serviço de e-mail para enviar códigos de acesso. A senha fica no cofre do servidor; aqui você informa só o nome que ela recebeu lá.",
+    "status": "Situação",
+    "configured": "Configurado com o nome {ref}.",
+    "notConfigured": "Ainda não configurado.",
+    "refLabel": "Nome do segredo no cofre",
+    "refPlaceholder": "Ex.: DZ23_APP_SMTP",
+    "save": "Guardar nome",
+    "saved": "Nome guardado. A senha continua só no servidor.",
+    "testLabel": "Enviar um e-mail de teste para",
+    "testPlaceholder": "voce@exemplo.com.br",
+    "test": "Enviar teste",
+    "testNotExecuted": "Teste não executado",
+    "testSent": "Teste enviado",
+    "tier": "Nível de confiança"
+  },
+  "integrations": {
+    "title": "Integrações",
+    "help": "Cada integração traz um manifesto com quem a publicou e o que ela pode fazer. Sem assinatura reconhecida, o nível de confiança sobe para T2 e, na versão estável, ela não pode ser ligada.",
+    "cannotEnable": "Não pode ser ligada nesta versão: falta uma assinatura reconhecida.",
+    "devChannel": "Este Studio está no canal de desenvolvimento: integrações sem assinatura podem ser ligadas aqui. Isso não acontece na versão estável.",
+    "empty": "Nenhuma integração registrada ainda.",
+    "enable": "Ligar",
+    "disable": "Desligar",
+    "enabled": "Ligada",
+    "disabled": "Desligada",
+    "verified": "Assinatura reconhecida",
+    "unverified": "Sem assinatura reconhecida",
+    "kind": {
+      "skill": "Habilidade",
+      "mcp": "Serviço externo (MCP)",
+      "webhook": "Aviso automático (webhook)",
+      "smtp": "E-mail"
+    },
+    "tier": {
+      "T0": "Só leitura local",
+      "T1": "Escreve no seu espaço",
+      "T2": "Fala com serviços externos",
+      "T3": "Acesso amplo"
+    },
+    "registerTitle": "Registrar uma integração (avançado)",
+    "registerHelp": "Cole o manifesto que o publicador forneceu. O Studio confere a assinatura e mostra o nível de confiança antes de qualquer coisa ser ligada.",
+    "manifestLabel": "Manifesto da integração",
+    "register": "Registrar",
+    "registered": "Integração registrada.",
+    "reasons": "Observações da verificação",
+    "needsApproval": "Ligar esta integração precisa da sua confirmação ({tier})."
+  },
+  "exports": {
+    "title": "Baixar o protótipo",
+    "help": "Só protótipos verificados podem ser baixados. O pacote traz o aplicativo, o relatório da verificação e um guia em linguagem comum — sem os seus dados e sem os arquivos de senha e chave que o Studio reconhece. Dentro do pacote, o arquivo EXCLUIDOS.txt diz o que ficou de fora e o que entrou sem conferência.",
+    "projectLabel": "Projeto",
+    "noProjects": "Nenhum projeto verificado ainda. Crie e verifique um protótipo no Studio primeiro.",
+    "create": "Gerar pacote",
+    "created": "Pacote gerado.",
+    "empty": "Nenhum pacote gerado para este projeto.",
+    "download": "Baixar {file}",
+    "digest": "Conferência (SHA-256)",
+    "size": "Tamanho",
+    "entries": "Arquivos",
+    "createdAt": "Gerado em",
+    "stateNote": "Este projeto ainda não tem protótipo verificado; o pacote só fica disponível depois da verificação."
+  },
+  "events": {
+    "title": "Histórico",
+    "help": "Tudo o que acontece aqui fica registrado com quem fez e quando.",
+    "empty": "Nenhum registro ainda.",
+    "outcome": {
+      "success": "feito",
+      "failure": "recusado",
+      "not-executed": "não executado"
+    },
+    "action": {
+      "smtp.configured": "Nome do e-mail guardado",
+      "smtp.tested": "Teste de e-mail",
+      "integration.registered": "Integração registrada",
+      "integration.enabled": "Integração ligada",
+      "integration.disabled": "Integração desligada",
+      "export.created": "Pacote gerado",
+      "approval.recorded": "Confirmação registrada",
+      "approval.requested": "Confirmação pedida",
+      "export.downloadRefused": "Download recusado por segurança"
+    }
+  },
+  "errors": {
+    "generic": "Não foi possível concluir. Tente novamente.",
+    "manifestJson": "O manifesto precisa ser um texto no formato JSON."
+  },
+  "confirm": {
+    "title": "Confirme antes de continuar",
+    "T2": "Esta ação deixa o seu aplicativo falar com um serviço fora deste computador. Continue só se você reconhece o serviço.",
+    "T3": "Esta ação é sensível: dá acesso amplo, inclusive a segredos guardados no cofre. Ela só funciona se você já tiver confirmado com a sua passkey nesta sessão; se ainda não confirmou, o Studio vai recusar e nada será alterado.",
+    "confirm": "Confirmar",
+    "cancel": "Cancelar",
+    "smtpSave": "Guardar o nome do segredo liga o envio de e-mail do aplicativo por um serviço externo.",
+    "changed": "O que esta ação exige mudou enquanto você lia. Nada foi feito. Confira o novo nível e confirme de novo, se ainda quiser.",
+    "smtpTest": "Se o envio de teste estiver liberado neste servidor, uma mensagem de verdade vai para o endereço informado. Se ainda não estiver, o Studio responde que o teste não foi executado e nada é enviado."
+  }
+}

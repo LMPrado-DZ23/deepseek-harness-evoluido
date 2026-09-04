@@ -7,6 +7,7 @@ import { studioRouteHealthDomainSpec } from '../plugins/route-health/src/model.t
 import { studioPreviewAdmissionsDomainSpec, studioPreviewsDomainSpec } from '../plugins/preview/src/model.ts'
 import { studioMembershipsDomainSpec, studioOrgsDomainSpec, studioWorkspacesDomainSpec } from '../plugins/tenancy/src/model.ts'
 import { PROMPT_TO_APP_DOMAIN_SPECS } from '../plugins/prompt-to-app/src/model.ts'
+import { studioIntegrationsDomainSpec } from '../plugins/integration-hub/src/model.ts'
 
 /** The only units migration tools may touch. Session/event logs use another seam. */
 export const STUDIO_DOMAIN_SPECS: readonly DomainSpec[] = [
@@ -25,4 +26,5 @@ export const STUDIO_DOMAIN_SPECS: readonly DomainSpec[] = [
   studioPreviewsDomainSpec,
   studioPreviewAdmissionsDomainSpec,
   ...PROMPT_TO_APP_DOMAIN_SPECS,
+  studioIntegrationsDomainSpec,
 ]

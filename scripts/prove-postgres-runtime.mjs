@@ -4,20 +4,19 @@ import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, rm, symlink } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import pg from 'pg'
 
 const upstreamRoot = resolve(process.env.DSH_UPSTREAM_ROOT ?? '/home/leandro/harness-studio-poc02/deepseek-harness')
 const studioRoot = resolve(process.cwd())
 const dshHome = join(studioRoot, 'runtime', `postgres-proof-${randomUUID()}`)
 const profile = join(studioRoot, 'dsh-home', 'profiles', 'studio')
 const recordKey = `p31_${randomUUID()}`
-const routedStudioDomains = [
-  'studio_hello', 'studio_policy_audit',
-  'studio_identity_users', 'studio_identity_credentials', 'studio_identity_sessions', 'studio_identity_audit',
-  'studio_orgs', 'studio_workspaces', 'studio_memberships',
-  'studio_agent_runs', 'studio_agent_leases', 'studio_route_health',
-  'studio_projects', 'studio_app_specs', 'studio_intake_turns', 'studio_plans',
-  'studio_runs', 'studio_evidence', 'studio_approvals',
-]
+const proofPatch = join(studioRoot, 'deploy', 'harness', 'postgres-proof.patch.yml')
+// Single source of truth: the routes declared in the proof patch itself.
+const routedStudioDomains = readFileSync(proofPatch, 'utf8').split(/\r?\n/u)
+  .map(line => /^\s+([a-z0-9_]+):\s*postgres\s*$/u.exec(line)?.[1])
+  .filter(name => name !== undefined)
+assert.ok(routedStudioDomains.length >= 20, `proof patch routes only ${routedStudioDomains.length} domains to postgres`)
 process.env.DSH_HOME = dshHome
 process.env.DSH_TELEMETRY_DISABLED = '1'
 
@@ -62,7 +61,20 @@ try {
   first = await boot()
   assert.ok(first.ctx.storage.backend.get('postgres'))
   for (const name of routedStudioDomains) {
-    assert.ok(first.ctx.storageDomain.get(name), `${name} did not open on its configured backend`)
+    assert.ok(first.ctx.storageDomain.get(name), `${name} did not open`)
+  }
+  // The domain layer opening is not enough: prove each unit is stamped in the
+  // PostgreSQL schema, i.e. it really landed on the postgres backend.
+  const inspector = new pg.Client({ connectionString: process.env.DZ23_POSTGRES_DSN })
+  await inspector.connect()
+  try {
+    const proofSchema = process.env.DZ23_POSTGRES_PROOF_SCHEMA ?? 'dz23_storage_proof'
+    assert.match(proofSchema, /^[a-z][a-z0-9_]{0,39}$/u, 'DZ23_POSTGRES_PROOF_SCHEMA must be a safe schema name')
+    const stamped = await inspector.query(`SELECT name FROM "${proofSchema}"."units"`)
+    const onPostgres = new Set(stamped.rows.map(row => row.name))
+    for (const name of routedStudioDomains) assert.ok(onPostgres.has(name), `${name} opened on the json fallback, not on postgres`)
+  } finally {
+    await inspector.end()
   }
   const firstDomain = first.ctx.storageDomain.get('studio_hello')
   assert.ok(firstDomain, 'studio_hello did not open on PostgreSQL')

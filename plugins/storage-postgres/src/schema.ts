@@ -30,6 +30,18 @@ export function storageUnitLockName(schema: string, unit: string): string {
   return `dz23-storage-unit:${schema}:${unit}`
 }
 
+/**
+ * Schema-wide maintenance lock. A running Studio holds it in SHARED mode for
+ * as long as it is up; restore and migration take it EXCLUSIVE. That is what
+ * makes "the Studio is still running" a refusal even when the incoming bundle
+ * mentions none of the units the Studio has open — per-unit locks alone would
+ * leave those units unprotected in front of a `DROP SCHEMA`.
+ */
+export function storageMaintenanceLockName(schema: string): string {
+  assertIdentifier(schema, 'postgres schema')
+  return `dz23-storage-maintenance:${schema}`
+}
+
 export function recordsTable(schema: string): string {
   return `${quoteIdentifier(schema)}."records"`
 }
@@ -82,6 +94,17 @@ async function createLayout(client: PoolClient, schema: string): Promise<void> {
     name TEXT PRIMARY KEY,
     version INTEGER NOT NULL CHECK (version >= 0)
   )`)
+  // The DECLARED shape of each unit, stamped when it is opened. Without it a
+  // backup can only infer the descriptor from the rows that happen to exist,
+  // which silently drops a declared-but-empty table and a `hasGlobal` slot that
+  // was never written — a restore would then come back with a different shape
+  // than the one the product declares. Added as nullable columns on purpose:
+  // a schema written by an older build keeps working and simply falls back to
+  // inference until each unit is opened once, so the physical layout version
+  // does not change.
+  for (const column of ['tables JSONB', 'has_global BOOLEAN', 'descriptor_sha256 TEXT']) {
+    await client.query(`ALTER TABLE ${unitsTable(schema)} ADD COLUMN IF NOT EXISTS ${column}`)
+  }
   await client.query(`CREATE TABLE IF NOT EXISTS ${recordsTable(schema)} (
     unit TEXT NOT NULL REFERENCES ${unitsTable(schema)}(name) ON DELETE CASCADE,
     table_name TEXT NOT NULL,

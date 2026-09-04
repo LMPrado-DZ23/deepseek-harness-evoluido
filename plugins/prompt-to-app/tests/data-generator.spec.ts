@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { AppSpecV1 } from '../src/appspec.js'
-import { generateDataLayer, InvalidDataModelError, writeDataLayer } from '../src/data-generator.js'
+import { assertValidDataModel, generateDataLayer, InvalidDataModelError, writeDataLayer } from '../src/data-generator.js'
 
 const roots: string[] = []
 afterEach(async () => Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))))
@@ -43,6 +43,14 @@ const databaseSpec: AppSpecV1 = {
 }
 
 describe('deterministic generated data layer', () => {
+  it('validates a data model without generating or writing files', () => {
+    expect(() => assertValidDataModel(databaseSpec)).not.toThrow()
+    expect(() => assertValidDataModel({
+      ...databaseSpec,
+      entities: [databaseSpec.entities[0]!, { ...databaseSpec.entities[0]!, name: 'CLIENTE' }],
+    } as AppSpecV1)).toThrow('DUPLICATE_ENTITY:CLIENTE')
+  })
+
   it('renders reviewable SQL, Zod schemas, repositories and a real CRUD test', () => {
     const layer = generateDataLayer(databaseSpec)
     expect(layer.files.map(file => file.path)).toEqual([
