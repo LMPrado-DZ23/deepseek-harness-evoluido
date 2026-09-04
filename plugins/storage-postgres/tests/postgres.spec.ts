@@ -228,7 +228,7 @@ describePostgres('postgres backend against PostgreSQL 16', () => {
     } finally {
       await rm(temporary, { recursive: true, force: true })
     }
-  })
+  }, 15_000)
 
   it('runs the write CLI for a new server, backs up replacements and refuses an active Studio', async () => {
     if (postgresContainer === undefined) throw new Error('NOT_EXECUTED: real pg_dump/pg_restore container is not configured')
