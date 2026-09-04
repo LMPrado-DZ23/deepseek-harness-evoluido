@@ -263,8 +263,9 @@ export class ArtifactRetentionGarbageCollector {
         return freezeManifest(manifest)
       }
 
-      offline = await this.#beginOfflineCleanup()
-      validateGuard(offline, 'offline cleanup lease')
+      const acquiredOffline = await this.#beginOfflineCleanup()
+      validateGuard(acquiredOffline, 'offline cleanup lease')
+      offline = acquiredOffline
       await assertGuard(offline, 'offline cleanup lease')
       manifest.offlineGeneration = offline.generation
       await persistManifest(manifest.manifestPath, manifest)
