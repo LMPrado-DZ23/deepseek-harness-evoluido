@@ -14,7 +14,9 @@ import { createHash, randomUUID } from 'node:crypto'
 import { open, rm } from 'node:fs/promises'
 import { Client } from 'pg'
 import { HARNESS_UPSTREAM_COMMIT, STORAGE_EXPORT_FORMAT, canonicalJson, sha256 } from './bundle.js'
+import { postgresClientConnection } from './dsn.js'
 import { assertConfiguredSchemaName, globalsTable, quoteIdentifier, recordsTable, STORAGE_POSTGRES_LAYOUT_VERSION, unitsTable } from './schema.js'
+import { storedDescriptor, type UnitRow } from './snapshot.js'
 
 export interface WorkerArgs {
   dsnRef: string
@@ -32,18 +34,21 @@ export interface WorkerReport {
   domains: number
 }
 
-interface UnitRow { name: string; version: number }
-
 /** Rows per cursor round-trip: big enough to be cheap, small enough that memory stays flat. */
 const CURSOR_BATCH = 500
 
 /** Writes the bundle to `out` and reports it, holding at most one domain in memory at a time. */
 export async function writeBackupBundle(args: WorkerArgs, dsn: string): Promise<WorkerReport> {
   assertConfiguredSchemaName(args.schema)
-  const ssl = args.ssl === 'off' ? false : { rejectUnauthorized: args.ssl === 'verify-full' }
-  const client = new Client({ connectionString: dsn, ssl, application_name: 'dz23-storage:backup' })
-  await client.connect()
+  // TLS is decided here and nowhere else: the DSN's own ssl parameters are stripped
+  // so they cannot downgrade the configured policy.
+  const connection = await postgresClientConnection(dsn, args.ssl)
+  // The output file is claimed BEFORE the database is opened. It used to be the other
+  // way round, and outside the try/finally: an `EEXIST` from a previous attempt, or a
+  // directory the process cannot write, left one CONNECTED client behind per attempt.
   const file = await open(args.out, 'wx', 0o600)
+  const client = new Client({ ...connection, application_name: `dz23-storage:backup:${args.schema}` })
+  let connected = false
   const fileHash = createHash('sha256')
   const payloadHash = createHash('sha256')
   let bytes = 0
@@ -56,6 +61,8 @@ export async function writeBackupBundle(args: WorkerArgs, dsn: string): Promise<
     await file.write(chunk, null, 'utf8')
   }
   try {
+    await client.connect()
+    connected = true
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY')
     const layout = await client.query<{ value: number }>(
       `SELECT value FROM ${quoteIdentifier(args.schema)}."storage_meta" WHERE key = 'layout_version'`,
@@ -65,7 +72,7 @@ export async function writeBackupBundle(args: WorkerArgs, dsn: string): Promise<
       throw new Error(`postgres storage schema '${args.schema}' has layout version ${String(layout.rows[0].value)}, incompatible with this build (${String(STORAGE_POSTGRES_LAYOUT_VERSION)})`)
     }
     const marker = await client.query<{ snapshot: string }>('SELECT pg_current_snapshot()::text AS snapshot')
-    const units = await client.query<UnitRow>(`SELECT name, version FROM ${unitsTable(args.schema)} ORDER BY name COLLATE "C"`)
+    const units = await client.query<UnitRow>(`SELECT name, version, tables, has_global, descriptor_sha256 FROM ${unitsTable(args.schema)} ORDER BY name COLLATE "C"`)
     const createdAt = (args.now ?? (() => new Date()))().toISOString()
     const source = { kind: 'postgres' as const, sha256: sha256(`${args.schema}\0${marker.rows[0]!.snapshot}`) }
 
@@ -84,12 +91,10 @@ export async function writeBackupBundle(args: WorkerArgs, dsn: string): Promise<
         `SELECT table_name FROM ${recordsTable(args.schema)} WHERE unit = $1 GROUP BY table_name ORDER BY table_name COLLATE "C"`,
         [unit.name],
       )
-      const descriptor = {
-        name: unit.name,
-        version: unit.version,
-        tables: tableRows.rows.map(row => row.table_name),
-        hasGlobal: globalRow.rows[0] !== undefined,
-      }
+      // Same rule as the in-process snapshot: the DECLARED shape stamped on the medium,
+      // widened by whatever rows exist. Inferring from rows alone dropped a declared
+      // table that happened to be empty and a global slot that had not been written.
+      const descriptor = storedDescriptor(unit, new Set(tableRows.rows.map(row => row.table_name)), globalRow.rows[0] !== undefined)
       const global = globalRow.rows[0] === undefined ? null : globalRow.rows[0].value
 
       /**
@@ -153,12 +158,13 @@ export async function writeBackupBundle(args: WorkerArgs, dsn: string): Promise<
     return { sha256: fileHash.digest('hex'), bytes, records, domains }
   } catch (error) {
     /* v8 ignore next 3 -- cleanup of a partial file cannot supersede the original failure. */
-    await client.query('ROLLBACK').catch(() => undefined)
+    if (connected) await client.query('ROLLBACK').catch(() => undefined)
     await file.close().catch(() => undefined)
     await rm(args.out, { force: true }).catch(() => undefined)
     throw error
   } finally {
-    await client.end().catch(() => undefined)
+    // Only a client that actually connected: `end()` on one that never did never settles.
+    if (connected) await client.end().catch(() => undefined)
   }
 }
 

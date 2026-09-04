@@ -3,6 +3,8 @@ import { Client, Pool } from 'pg'
 import type { ClientConfig, PoolConfig } from 'pg'
 import { StorageError, UNIT_NAME_RE } from '@deepseek-ai/dsh-storage'
 import type { KvFacet, KvUnit, KvUnitDescriptor, StorageBackend } from '@deepseek-ai/dsh-storage'
+import { compareUtf8, descriptorFingerprint } from './bundle.js'
+import { withoutTlsParams } from './dsn.js'
 import { StudioStorageError } from './errors.js'
 import { ensureSchema, leasesTable, storageMaintenanceLockName, storageUnitLockName, unitsTable } from './schema.js'
 import { PostgresKvUnit } from './unit.js'
@@ -122,6 +124,19 @@ export class PostgresStorageBackend implements StorageBackend {
     const client = new Client({ ...this.connectionConfig(), application_name: `dz23-storage:${descriptor.name}` })
     try {
       await client.connect()
+      // The flag above is a cheap pre-check, not the authority: between reading it and taking the
+      // unit lock a restore could have taken the maintenance lock EXCLUSIVE, listed the units it
+      // knows about and dropped the schema under this writer. So this session takes the maintenance
+      // lock SHARED itself, before anything else it does. Shared and exclusive are the same lock:
+      // either this writer gets in first and the restore's `pg_try_advisory_lock` is refused, or the
+      // restore is already in and this acquisition fails — there is no window between the two.
+      const guarded = await client.query<{ acquired: boolean }>(
+        'SELECT pg_try_advisory_lock_shared(hashtext($1)) AS acquired',
+        [storageMaintenanceLockName(this.config.schema)],
+      )
+      if (guarded.rows[0]?.acquired !== true) {
+        throw new StudioStorageError(`postgres storage schema '${this.config.schema}' is not protected by the maintenance lock right now`)
+      }
       const lockName = storageUnitLockName(this.config.schema, descriptor.name)
       const lock = await client.query<{ acquired: boolean }>(
         'SELECT pg_try_advisory_lock(hashtext($1)) AS acquired',
@@ -130,17 +145,27 @@ export class PostgresStorageBackend implements StorageBackend {
       if (lock.rows[0]?.acquired !== true) {
         throw new StudioStorageError(`kv unit '${descriptor.name}' already has an active writer`)
       }
+      // The DECLARED shape is stamped with the unit, not inferred later from the rows that happen to
+      // exist: a table declared and never written, or a global slot never set, is part of the unit
+      // and must survive a backup/restore round trip. The fingerprint travels with it so a
+      // hand-edited row is caught instead of believed.
+      const declaredTables = [...descriptor.tables].sort(compareUtf8)
       const stamped = await client.query<{ version: number }>(`
         WITH inserted AS (
-          INSERT INTO ${unitsTable(this.config.schema)} (name, version) VALUES ($1, $2)
-          ON CONFLICT (name) DO NOTHING
+          INSERT INTO ${unitsTable(this.config.schema)} (name, version, tables, has_global, descriptor_sha256)
+          VALUES ($1, $2, $3::jsonb, $4, $5)
+          ON CONFLICT (name) DO UPDATE SET
+            tables = EXCLUDED.tables,
+            has_global = EXCLUDED.has_global,
+            descriptor_sha256 = EXCLUDED.descriptor_sha256
+          WHERE ${unitsTable(this.config.schema)}.version = EXCLUDED.version
           RETURNING version
         )
         SELECT version FROM inserted
         UNION ALL
         SELECT version FROM ${unitsTable(this.config.schema)} WHERE name = $1
         LIMIT 1
-      `, [descriptor.name, descriptor.version])
+      `, [descriptor.name, descriptor.version, JSON.stringify(declaredTables), descriptor.hasGlobal, descriptorFingerprint(descriptor)])
       const onDisk = stamped.rows[0]?.version
       if (onDisk !== descriptor.version) {
         throw new StorageError(
@@ -200,7 +225,10 @@ export class PostgresStorageBackend implements StorageBackend {
 
   private connectionConfig(max?: number): PoolConfig & ClientConfig {
     return {
-      connectionString: this.config.connectionString,
+      // The `ssl` field decides, alone: `pg` merges the parsed connection string over the
+      // explicit options, so a DSN carrying `sslmode=disable` would otherwise silently
+      // turn a verified connection into a plaintext one.
+      connectionString: withoutTlsParams(this.config.connectionString),
       ssl: this.config.ssl,
       ...(max === undefined ? {} : { max }),
     }

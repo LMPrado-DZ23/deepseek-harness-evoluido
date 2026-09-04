@@ -45,13 +45,21 @@ pnpm storage:backup-postgres --dsn-ref DZ23_POSTGRES_DSN --schema dz23_storage -
 Sem `--write` o comando só mostra o que copiaria. O endereço do banco vem da
 variável `DZ23_POSTGRES_DSN`; nunca é escrito na linha de comando.
 
+A cópia manual usa o mesmo motor da cópia automática: um conjunto de dados de
+cada vez, escrito direto no arquivo, com o mesmo teto de tamanho (2 GB, ajustável
+com `--max-bytes`). Se passar do teto, a tentativa falha e o arquivo pela metade
+é apagado — nunca enche o disco em silêncio.
+
 ## Conferir uma cópia
 
 ```
 sha256sum -c studio-backup-<data-e-hora>.json.sha256
 ```
 
-Se a resposta for `OK`, o arquivo está íntegro.
+Se a resposta for `OK`, o arquivo está íntegro. A verificação feita pelo próprio
+Studio lê o arquivo **em fluxo**, sem carregá-lo inteiro na memória, e recusa
+arquivos acima do teto configurado: conferir uma cópia grande nunca custa a
+memória do servidor.
 
 ## Restaurar
 
@@ -60,6 +68,11 @@ Se a resposta for `OK`, o arquivo está íntegro.
    ```
    pnpm storage:import-postgres --input studio-backup-<data-e-hora>.json --dsn-ref DZ23_POSTGRES_DSN --schema dz23_storage --ssl verify-full
    ```
+   O `--ssl` do comando é a **única** autoridade sobre a conexão: se o endereço do
+   banco trouxer `sslmode`, `sslrootcert` ou parecidos, eles não conseguem
+   enfraquecer o que você pediu. A cópia física de segurança (`pg_dump`) segue a
+   mesma política, e a senha do banco vai para ela pelo ambiente — nunca pela
+   linha de comando, que qualquer usuário da máquina consegue ler.
 3. Restaure de verdade. Se o banco já tiver dados, o comando exige que você
    confirme a substituição e guarda antes uma cópia física do que existia:
    ```
@@ -84,7 +97,14 @@ de qualquer coisa ser apagada, inclusive antes da cópia física de segurança:
   repita acrescentando `--allow-domain-loss --confirm REPLACE_DZ23_STORAGE`.
 - **Esquema que não é do Studio.** Se o lugar de destino não tiver a estrutura
   do Studio, ou for de outra versão, o comando recusa em vez de apagar dados de
-  outro sistema.
+  outro sistema. "Tem alguma coisa dentro" é perguntado a **todos** os catálogos
+  do PostgreSQL que pertencem a um esquema — inclusive configurações de busca
+  textual, conversões, classes de operador e extensões, que não aparecem na
+  lista de tabelas. Um esquema alheio contendo só isso já foi confundido com um
+  esquema vazio.
+- **Esquema de outro dono com nome parecido.** A limpeza de esquemas temporários
+  esquecidos só apaga os que esta ferramenta criou e marcou como seus, e só
+  quando o nome tem exatamente a forma esperada.
 
 Se algo falhar no meio, o esquema temporário usado para preparar a restauração
 é removido: o banco não fica com pedaços soltos.

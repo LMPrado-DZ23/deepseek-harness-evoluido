@@ -4,7 +4,8 @@ import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { storageBackendServiceKey } from '@deepseek-ai/dsh-storage'
 import z from '@deepseek-ai/schemastery'
 import { PostgresStorageBackend } from './backend.js'
-import { childProcessBackupRunner, StorageBackupScheduler, type BackupResult } from './backup.js'
+import { BACKUP_MAX_BYTES_DEFAULT, childProcessBackupRunner, StorageBackupScheduler, type BackupResult } from './backup.js'
+import { postgresClientConnection } from './dsn.js'
 import { assertConfiguredSchemaName } from './schema.js'
 import { snapshotPostgresStorage } from './snapshot.js'
 
@@ -12,8 +13,9 @@ export { PostgresStorageBackend } from './backend.js'
 export type { PostgresStorageBackendConfig } from './backend.js'
 export { StudioStorageError } from './errors.js'
 export * from './bundle.js'
-export { snapshotPostgresStorage, type SnapshotOptions } from './snapshot.js'
-export { BACKUP_FILE_PATTERN, BACKUP_LEDGER_FILE, BACKUP_MIN_INTERVAL_MS, StorageBackupScheduler, childProcessBackupRunner, inProcessBackupRunner, verifyBackupFile, type BackupResult, type BackupRunner, type BackupSchedulerOptions, type ChildBackupRunnerOptions } from './backup.js'
+export { snapshotPostgresStorage, storedDescriptor, deriveDescriptors, type SnapshotOptions } from './snapshot.js'
+export { assertTlsPolicy, postgresClientConnection, postgresToolConnection, withoutTlsParams, type PostgresClientConnection, type PostgresToolConnection, type TlsPolicy } from './dsn.js'
+export { BACKUP_FILE_PATTERN, BACKUP_LEDGER_FILE, BACKUP_MAX_BYTES_DEFAULT, BACKUP_MIN_INTERVAL_MS, StorageBackupScheduler, childProcessBackupRunner, inProcessBackupRunner, verifyBackupFile, type BackupResult, type BackupRunner, type BackupSchedulerOptions, type ChildBackupRunnerOptions } from './backup.js'
 export { parseWorkerArgs, writeBackupBundle, type WorkerArgs, type WorkerReport } from './backup-worker.js'
 export {
   POSTGRES_IDENTIFIER_MAX_LENGTH,
@@ -79,11 +81,12 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     throw new Error(`storage-postgres: credential reference '${config.dsnRef}' is not configured`)
   }
   const sslMode = config.ssl ?? 'verify-full'
-  const ssl = sslMode === 'off'
-    ? false
-    : { rejectUnauthorized: sslMode === 'verify-full' }
+  // One authority for TLS: the policy decides, and the DSN's own ssl parameters are
+  // stripped so they cannot quietly downgrade it.
+  const connection = await postgresClientConnection(resolved.value, sslMode)
+  const ssl = connection.ssl
   const backend = new PostgresStorageBackend({
-    connectionString: resolved.value,
+    connectionString: connection.connectionString,
     schema,
     ssl,
     poolMax: config.poolMax ?? 4,
@@ -104,7 +107,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   ctx.provide(storageBackendServiceKey('postgres'), backend)
 
   // Descriptors are derived from the medium: every unit stamped on this schema.
-  const snapshot = () => snapshotPostgresStorage({ connectionString: resolved.value, ssl, schema })
+  const snapshot = () => snapshotPostgresStorage({ connectionString: connection.connectionString, ssl, schema })
   if (config.backupDirectory !== undefined && config.backupDirectory !== '') {
     const scheduler = new StorageBackupScheduler({
       // Out of this process on purpose: copying the database must never cost the
@@ -116,7 +119,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         env: { ...process.env, [BACKUP_DSN_ENV]: resolved.value },
         schema,
         ssl: sslMode,
-        maxBytes: config.backupMaxBytes ?? 2 * 1024 * 1024 * 1024,
+        maxBytes: config.backupMaxBytes ?? BACKUP_MAX_BYTES_DEFAULT,
         timeoutMs: (config.backupTimeoutMinutes ?? 15) * 60_000,
         heapMb: config.backupHeapMb ?? 1024,
       }),

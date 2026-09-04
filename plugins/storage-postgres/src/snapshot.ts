@@ -1,7 +1,8 @@
 import { Client } from 'pg'
 import { StorageError } from '@deepseek-ai/dsh-storage'
 import type { KvUnitDescriptor } from '@deepseek-ai/dsh-storage'
-import { compareUtf8, exportedDomain, sealBundle, sha256, type ExportedDomain, type StorageExportBundle } from './bundle.js'
+import { compareUtf8, descriptorFingerprint, exportedDomain, sealBundle, sha256, type ExportedDomain, type StorageExportBundle } from './bundle.js'
+import { withoutTlsParams } from './dsn.js'
 import { assertConfiguredSchemaName, globalsTable, quoteIdentifier, recordsTable, STORAGE_POSTGRES_LAYOUT_VERSION, unitsTable } from './schema.js'
 
 export interface SnapshotOptions {
@@ -18,9 +19,9 @@ export interface SnapshotOptions {
   now?: () => Date
 }
 
-interface UnitRow { name: string; version: number }
-interface RecordRow { unit: string; table_name: string; key: string; value: unknown }
-interface GlobalRow { unit: string; value: unknown }
+export interface UnitRow { name: string; version: number; tables: string[] | null; has_global: boolean | null; descriptor_sha256: string | null }
+export interface RecordRow { unit: string; table_name: string; key: string; value: unknown }
+export interface GlobalRow { unit: string; value: unknown }
 
 /**
  * Hot logical snapshot of every Studio unit in one REPEATABLE READ, READ ONLY
@@ -30,7 +31,9 @@ interface GlobalRow { unit: string; value: unknown }
  */
 export async function snapshotPostgresStorage(options: SnapshotOptions): Promise<StorageExportBundle> {
   assertConfiguredSchemaName(options.schema)
-  const client = new Client({ connectionString: options.connectionString, ssl: options.ssl, application_name: 'dz23-storage:snapshot' })
+  // The `ssl` option is the authority; the DSN's own ssl parameters are stripped so
+  // `pg` cannot let the string override it (it merges the parsed string OVER the option).
+  const client = new Client({ connectionString: withoutTlsParams(options.connectionString), ssl: options.ssl, application_name: `dz23-storage:snapshot:${options.schema}` })
   await client.connect()
   try {
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY')
@@ -42,7 +45,7 @@ export async function snapshotPostgresStorage(options: SnapshotOptions): Promise
       throw new StorageError('version-mismatch', `postgres storage schema '${options.schema}' has layout version ${String(layout.rows[0].value)}, incompatible with this build (${String(STORAGE_POSTGRES_LAYOUT_VERSION)})`)
     }
     const marker = await client.query<{ snapshot: string }>('SELECT pg_current_snapshot()::text AS snapshot')
-    const units = await client.query<UnitRow>(`SELECT name, version FROM ${unitsTable(options.schema)}`)
+    const units = await client.query<UnitRow>(`SELECT name, version, tables, has_global, descriptor_sha256 FROM ${unitsTable(options.schema)}`)
     const records = await client.query<RecordRow>(`SELECT unit, table_name, key, value FROM ${recordsTable(options.schema)} ORDER BY unit, table_name, key`)
     const globals = await client.query<GlobalRow>(`SELECT unit, value FROM ${globalsTable(options.schema)}`)
     await client.query('COMMIT')
@@ -87,7 +90,18 @@ export async function snapshotPostgresStorage(options: SnapshotOptions): Promise
   }
 }
 
-function deriveDescriptors(units: readonly UnitRow[], records: readonly RecordRow[], globals: readonly GlobalRow[]): KvUnitDescriptor[] {
+/**
+ * The descriptor of each unit, from the DECLARATION stamped on the medium when
+ * the unit was opened, widened by whatever the rows actually show.
+ *
+ * Inference alone lost every declared-but-empty table and every `hasGlobal`
+ * that had not been written yet, so a restore came back with a narrower shape
+ * than the product declares. The stored declaration fixes that; the union with
+ * the observed tables makes sure no stored row is ever left undeclared, and a
+ * row written by an older build (no declaration stored) still degrades to pure
+ * inference instead of failing.
+ */
+export function deriveDescriptors(units: readonly UnitRow[], records: readonly RecordRow[], globals: readonly GlobalRow[]): KvUnitDescriptor[] {
   const tablesByUnit = new Map<string, Set<string>>()
   for (const row of records) {
     const set = tablesByUnit.get(row.unit) ?? new Set<string>()
@@ -96,10 +110,27 @@ function deriveDescriptors(units: readonly UnitRow[], records: readonly RecordRo
   }
   const withGlobal = new Set(globals.map(row => row.unit))
   // Byte order here too: the domain order is part of the sealed payload.
-  return [...units].sort((left, right) => compareUtf8(left.name, right.name)).map(unit => ({
+  return [...units].sort((left, right) => compareUtf8(left.name, right.name)).map(unit => storedDescriptor(unit, tablesByUnit.get(unit.name), withGlobal.has(unit.name)))
+}
+
+/** One unit's descriptor: the stamped declaration checked against its fingerprint, widened by what is on the medium. */
+export function storedDescriptor(unit: UnitRow, observedTables: ReadonlySet<string> | undefined, observedGlobal: boolean): KvUnitDescriptor {
+  const declared = unit.tables ?? null
+  if (declared !== null && (!Array.isArray(declared) || declared.some(table => typeof table !== 'string'))) {
+    throw new StorageError('malformed-medium', `kv unit '${unit.name}' has a malformed declared table list on the medium`)
+  }
+  const stored: KvUnitDescriptor = {
     name: unit.name,
     version: unit.version,
-    tables: [...(tablesByUnit.get(unit.name) ?? [])].sort(compareUtf8),
-    hasGlobal: withGlobal.has(unit.name),
-  }))
+    tables: [...(declared ?? [])].sort(compareUtf8),
+    hasGlobal: unit.has_global ?? false,
+  }
+  // A stored declaration must match the fingerprint written with it: a hand-edited
+  // `units` row must not be able to redefine a unit's shape behind the product's back.
+  if (unit.descriptor_sha256 !== null && descriptorFingerprint(stored) !== unit.descriptor_sha256) {
+    throw new StorageError('malformed-medium', `kv unit '${unit.name}' has a declared shape that does not match its stored fingerprint`)
+  }
+  const tables = new Set(stored.tables)
+  for (const table of observedTables ?? []) tables.add(table)
+  return { name: unit.name, version: unit.version, tables: [...tables].sort(compareUtf8), hasGlobal: stored.hasGlobal || observedGlobal }
 }

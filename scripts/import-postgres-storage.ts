@@ -1,10 +1,22 @@
+import { randomBytes } from 'node:crypto'
 import { mkdir, open, readFile, rm } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { Client } from 'pg'
 import { PostgresStorageBackend } from '../plugins/storage-postgres/src/backend.ts'
+import { assertTlsPolicy, postgresClientConnection, postgresToolConnection, type TlsPolicy } from '../plugins/storage-postgres/src/dsn.ts'
 import { assertConfiguredSchemaName, assertIdentifier, quoteIdentifier, STORAGE_POSTGRES_LAYOUT_VERSION, storageMaintenanceLockName, storageUnitLockName } from '../plugins/storage-postgres/src/schema.ts'
 import { importStorage, type StorageExportBundle, validateBundle } from './storage-migration.ts'
+
+/**
+ * Table this tool writes inside every staging schema it creates, in the same
+ * transaction that creates the schema. It is the ONLY thing that authorises the
+ * orphan sweep to drop a schema: a name that merely looks like ours is not
+ * enough, and a `LIKE` pattern whose `_` was never escaped made "looks like
+ * ours" wider still.
+ */
+const STAGING_MARKER_TABLE = 'dz23_import_staging'
+const STAGING_MARKER_TOOL = 'dz23-studio/import-postgres-storage'
 
 const STUDIO_LAYOUT: Readonly<Record<string, readonly string[]>> = {
   storage_meta: ['key', 'value'],
@@ -25,7 +37,11 @@ validateBundle(bundle)
 if (!Array.isArray(bundle.domains) || bundle.domains.length === 0) {
   throw new Error('O arquivo de cópia não contém nenhum domínio. Nada seria restaurado — só apagado. Importação recusada.')
 }
-const client = new Client({ connectionString: dsn, ssl: args.ssl === 'off' ? false : { rejectUnauthorized: args.ssl === 'verify-full' } })
+// One authority for TLS: the policy from --ssl decides, and every ssl parameter the
+// DSN carries is stripped, because `pg` merges the parsed connection string OVER the
+// explicit `ssl` option — a DSN saying `sslmode=disable` used to defeat --ssl verify-full.
+const connection = await postgresClientConnection(dsn, args.ssl)
+const client = new Client(connection)
 await client.connect()
 try {
   // Order matters: everything that can refuse runs BEFORE pg_dump, staging or DROP.
@@ -42,17 +58,9 @@ try {
   // ANY object, not only relations: `pg_class` does not hold functions, types, domains, operators
   // or collations, so a schema belonging to another product that has only those looked EMPTY —
   // and an empty target skips the layout check and the confirmation, straight into DROP SCHEMA.
-  const content = await client.query<{ present: boolean }>(
-    `SELECT (
-       EXISTS (SELECT 1 FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1)
-       OR EXISTS (SELECT 1 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = $1)
-       OR EXISTS (SELECT 1 FROM pg_catalog.pg_type t JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = $1)
-       OR EXISTS (SELECT 1 FROM pg_catalog.pg_operator o JOIN pg_catalog.pg_namespace n ON n.oid = o.oprnamespace WHERE n.nspname = $1)
-       OR EXISTS (SELECT 1 FROM pg_catalog.pg_collation l JOIN pg_catalog.pg_namespace n ON n.oid = l.collnamespace WHERE n.nspname = $1)
-     ) AS present`,
-    [args.schema],
-  )
-  const targetHasContent = targetSchemaExists && content.rows[0]?.present === true
+  // Hand-listing catalogues was still a partial list (`pg_ts_config`, `pg_ts_dict`, `pg_conversion`,
+  // `pg_opclass`, `pg_extension`, ... were all missing), so the list is DERIVED from the catalogue.
+  const targetHasContent = targetSchemaExists && await schemaHasContent(client, args.schema)
   let existingUnits = 0
   let targetDomains: string[] = []
   if (targetHasContent) {
@@ -88,21 +96,31 @@ try {
     // A run killed with SIGKILL leaves a full copy of the data in its staging schema, which nothing
     // would ever reap. Under the exclusive maintenance lock nobody else can own one, so the old ones
     // go now — before another copy is made.
-    const orphans = await client.query<{ nspname: string }>(
-      'SELECT nspname FROM pg_catalog.pg_namespace WHERE nspname LIKE $1',
-      [`${args.schema}_staging_%`],
-    )
-    for (const orphan of orphans.rows) {
-      assertIdentifier(orphan.nspname, 'staging schema')
-      await client.query(`DROP SCHEMA IF EXISTS ${quoteIdentifier(orphan.nspname)} CASCADE`)
-    }
-    const staging = `${args.schema}_staging_${Date.now().toString(36)}`
+    const orphans = await reapStagingSchemas(client, args.schema)
+    const staging = `${args.schema}_staging_${Date.now().toString(36)}${randomBytes(2).toString('hex')}`
     assertIdentifier(staging, 'staging schema')
+    // Created here, with its ownership marker, in ONE transaction: a staging schema that
+    // exists but carries no marker can never happen, so the sweep above never has to guess.
+    await client.query('BEGIN')
+    try {
+      await client.query(`CREATE SCHEMA ${quoteIdentifier(staging)}`)
+      await client.query(`CREATE TABLE ${quoteIdentifier(staging)}.${quoteIdentifier(STAGING_MARKER_TABLE)} (
+        tool TEXT NOT NULL, target_schema TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL
+      )`)
+      await client.query(
+        `INSERT INTO ${quoteIdentifier(staging)}.${quoteIdentifier(STAGING_MARKER_TABLE)} (tool, target_schema, created_at) VALUES ($1, $2, now())`,
+        [STAGING_MARKER_TOOL, args.schema],
+      )
+      await client.query('COMMIT')
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    }
     // Ctrl+C or a `kill` in the middle of staging leaves a full copy of the data behind. A signal
     // handler drops it on the way out; a SIGKILL still cannot be caught, which is why the reaping
     // above exists as well.
     const cleanupOnSignal = (signal: NodeJS.Signals) => {
-      const emergency = new Client({ connectionString: dsn, ssl: args.ssl === 'off' ? false : { rejectUnauthorized: args.ssl === 'verify-full' } })
+      const emergency = new Client(connection)
       emergency.connect()
         .then(() => emergency.query(`DROP SCHEMA IF EXISTS ${quoteIdentifier(staging)} CASCADE`))
         .catch(() => undefined)
@@ -110,7 +128,7 @@ try {
     }
     process.once('SIGINT', cleanupOnSignal)
     process.once('SIGTERM', cleanupOnSignal)
-    const backend = new PostgresStorageBackend({ connectionString: dsn, schema: staging, ssl: args.ssl === 'off' ? false : { rejectUnauthorized: args.ssl === 'verify-full' }, poolMax: 4 })
+    const backend = new PostgresStorageBackend({ ...connection, schema: staging, poolMax: 4 })
     try {
       await backend.waitUntilReady()
       await importStorage(backend, bundle)
@@ -130,7 +148,7 @@ try {
       await client.query(`DROP SCHEMA IF EXISTS ${quoteIdentifier(staging)} CASCADE`).catch(() => undefined)
       throw error
     }
-    process.stdout.write(`${JSON.stringify({ mode: 'write', domains: bundle.domains.length, backup, backupStatus, replacedDomains: targetDomains, droppedDomains: wouldBeLost, reapedStaging: orphans.rows.map(row => row.nspname) }, null, 2)}\n`)
+    process.stdout.write(`${JSON.stringify({ mode: 'write', domains: bundle.domains.length, backup, backupStatus, replacedDomains: targetDomains, droppedDomains: wouldBeLost, reapedStaging: orphans }, null, 2)}\n`)
   }
 } finally {
   await client.end()
@@ -217,15 +235,15 @@ async function assertStudioLayout(client: Client, schema: string): Promise<void>
   }
 }
 
-async function pgDump(dsn: string, schema: string, output: string, ssl: 'off' | 'require' | 'verify-full'): Promise<void> {
-  // The whole connection string is handed over, not a host/port/user/password taken apart from it:
-  // decomposing dropped every other libpq parameter the operator had set — `sslrootcert`, `sslcert`,
-  // `sslkey`, `hostaddr`, `options` — so the dump could reach a different endpoint, or one with a
-  // weaker trust chain, than the import it is protecting. The TLS mode is forced to match this
-  // command's own `--ssl`; anything else in the string is preserved.
-  const target = new URL(dsn)
-  target.searchParams.set('sslmode', ssl === 'off' ? 'disable' : ssl === 'require' ? 'require' : 'verify-full')
-  const env = { ...process.env, PGCONNECT_TIMEOUT: process.env.PGCONNECT_TIMEOUT ?? '15' }
+async function pgDump(dsn: string, schema: string, output: string, ssl: TlsPolicy): Promise<void> {
+  // The connection string is handed over almost whole — decomposing it into host/port/user
+  // dropped every other libpq parameter the operator had set (`hostaddr`, `options`, ...), so
+  // the dump could reach a different endpoint than the import it is protecting. What IS taken
+  // out of it: the password and every TLS parameter. A command line is readable by every user
+  // on the machine (`ps -ef`), so the password travels in the child's environment, and the TLS
+  // policy is re-supplied there too, where the stripped URI can no longer contradict it.
+  const target = postgresToolConnection(dsn, ssl, process.env)
+  const env = target.env
   let destination
   try {
     destination = await open(output, 'wx', 0o600)
@@ -237,7 +255,7 @@ async function pgDump(dsn: string, schema: string, output: string, ssl: 'off' | 
   }
   try {
     await new Promise<void>((resolvePromise, reject) => {
-      const child = spawn('pg_dump', [`--dbname=${target.href}`, `--schema=${schema}`, '--format=custom'], {
+      const child = spawn('pg_dump', [`--dbname=${target.dsn}`, `--schema=${schema}`, '--format=custom'], {
         env,
         stdio: ['ignore', destination.fd, 'inherit'],
       })
@@ -262,17 +280,88 @@ function parseArgs(argv: string[]) {
     const at = argv.indexOf(name)
     return at < 0 ? undefined : argv[at + 1]
   }
-  const ssl = optional('--ssl') ?? 'verify-full'
-  if (!['off', 'require', 'verify-full'].includes(ssl)) throw new Error('Invalid --ssl value')
+  const ssl = assertTlsPolicy(optional('--ssl') ?? 'verify-full')
   return {
     input: required('--input'),
     dsnRef: required('--dsn-ref'),
     schema: optional('--schema') ?? 'dz23_storage',
-    ssl: ssl as 'off' | 'require' | 'verify-full',
+    ssl,
     backup: optional('--backup'),
     force: argv.includes('--force'),
     allowDomainLoss: argv.includes('--allow-domain-loss'),
     confirm: optional('--confirm'),
     write: argv.includes('--write'),
   }
+}
+
+/**
+ * Does the schema hold ANYTHING? The answer decides whether `DROP SCHEMA` may
+ * run without the spoken confirmation, so a partial answer is a data-loss bug:
+ * a schema holding only a TEXT SEARCH CONFIGURATION, a conversion, an operator
+ * class or an extension looked empty to a hand-written list of catalogues.
+ *
+ * So the catalogues are not hand-written: every `pg_catalog` table with an
+ * `oid` column named `*namespace` IS, by definition, a catalogue whose rows
+ * belong to a schema. Their names come from the catalogue itself and are still
+ * checked against a strict identifier pattern before being interpolated.
+ */
+async function schemaHasContent(client: Client, schema: string): Promise<boolean> {
+  const catalogs = await client.query<{ relname: string; attname: string }>(
+    `SELECT c.relname, a.attname
+       FROM pg_catalog.pg_class c
+       JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+       JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid
+      WHERE n.nspname = 'pg_catalog' AND c.relkind = 'r'
+        AND a.attnum > 0 AND NOT a.attisdropped
+        AND a.atttypid = 'oid'::regtype AND a.attname LIKE '%namespace'`,
+  )
+  if (catalogs.rows.length === 0) {
+    throw new Error('Não foi possível inspecionar o catálogo do PostgreSQL para saber se o esquema de destino está vazio. Importação recusada.')
+  }
+  const safe = /^[a-z][a-z0-9_]*$/u
+  const clauses = catalogs.rows.map(row => {
+    if (!safe.test(row.relname) || !safe.test(row.attname)) {
+      throw new Error(`Nome inesperado no catálogo do PostgreSQL ('${row.relname}.${row.attname}'). Importação recusada.`)
+    }
+    return `EXISTS (SELECT 1 FROM pg_catalog."${row.relname}" WHERE "${row.attname}" = target.oid)`
+  })
+  const present = await client.query<{ present: boolean }>(
+    `SELECT COALESCE((SELECT ${clauses.join(' OR ')} FROM pg_catalog.pg_namespace target WHERE target.nspname = $1), false) AS present`,
+    [schema],
+  )
+  return present.rows[0]?.present === true
+}
+
+/**
+ * Drop the staging schemas THIS tool left behind for THIS target, and nothing
+ * else. Two independent conditions, both required:
+ *
+ *  - the name is exactly `<schema>_staging_<suffix>` — matched by a regular
+ *    expression here, not by a `LIKE` whose unescaped `_` is a wildcard: with
+ *    `dz23_storage_staging_%`, the pattern also matched a foreign
+ *    `dz23xstorage_staging_...`, and that was dropped with CASCADE;
+ *  - the schema carries the marker table this tool writes when it creates one,
+ *    naming this tool and this exact target schema.
+ */
+async function reapStagingSchemas(client: Client, schema: string): Promise<string[]> {
+  const escaped = `${schema.replaceAll('\\', '\\\\').replaceAll('_', '\\_').replaceAll('%', '\\%')}\\_staging\\_%`
+  const candidates = await client.query<{ nspname: string }>(
+    `SELECT n.nspname FROM pg_catalog.pg_namespace n WHERE n.nspname LIKE $1 ESCAPE '\\'`,
+    [escaped],
+  )
+  const shape = new RegExp(`^${schema.replaceAll(/[.*+?^${}()|[\]\\]/gu, '\\$&')}_staging_[a-z0-9]+$`, 'u')
+  const reaped: string[] = []
+  for (const candidate of candidates.rows) {
+    if (!shape.test(candidate.nspname)) continue
+    assertIdentifier(candidate.nspname, 'staging schema')
+    const marker = await client.query<{ tool: string; target_schema: string }>(
+      `SELECT m.tool, m.target_schema FROM ${quoteIdentifier(candidate.nspname)}.${quoteIdentifier(STAGING_MARKER_TABLE)} m
+        WHERE m.tool = $1 AND m.target_schema = $2`,
+      [STAGING_MARKER_TOOL, schema],
+    ).catch(() => ({ rows: [] as { tool: string; target_schema: string }[] }))
+    if (marker.rows.length === 0) continue
+    await client.query(`DROP SCHEMA IF EXISTS ${quoteIdentifier(candidate.nspname)} CASCADE`)
+    reaped.push(candidate.nspname)
+  }
+  return reaped
 }

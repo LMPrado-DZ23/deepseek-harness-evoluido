@@ -101,6 +101,57 @@ Status: aceita e implementada na etapa M3 (Claude), sobre a base P31-A.
    `DROP SCHEMA CASCADE` com a invocação mais simples possível. Agora a pergunta cobre `pg_class`,
    `pg_proc`, `pg_type`, `pg_operator` e `pg_collation`, com teste que planta exatamente esse
    esquema e verificação por mutação.
+
+   **Quarta passagem adversarial (Codex, 04/09) — o que ainda estava aberto:**
+   - **A lista de catálogos ainda era parcial.** `pg_ts_config`, `pg_ts_dict`, `pg_conversion`,
+     `pg_opclass`, `pg_extension` e outros não estavam nela: um esquema com apenas uma
+     configuração de busca textual continuava parecendo vazio e ia para o `DROP SCHEMA` sem
+     `--force`. A lista deixou de ser escrita à mão: os catálogos são **derivados** do próprio
+     `pg_catalog` (toda tabela com coluna `oid` chamada `*namespace`), e os nomes vindos do
+     catálogo ainda passam por uma checagem estrita de identificador antes de entrar na consulta.
+   - **A varredura de esquemas de preparo podia apagar esquema alheio.** O `LIKE
+     '<esquema>_staging_%'` nunca escapou o `_`, que é curinga: `dz23_storagexstaging_...`, de
+     outro dono, casava e era apagado com `CASCADE`. Agora são duas condições independentes: o
+     nome precisa ter exatamente a forma `<esquema>_staging_<sufixo>` (expressão regular, não
+     `LIKE`) **e** o esquema precisa carregar a tabela-marca `dz23_import_staging` que esta
+     ferramenta escreve — na mesma transação que cria o esquema de preparo, para que um preparo
+     sem marca não possa existir.
+   - **A política TLS não era autoridade única.** O `pg` mistura a string de conexão **por cima**
+     das opções explícitas (`Object.assign({}, config, parse(connectionString))`), então um DSN
+     com `sslmode=disable` desligava em silêncio um `--ssl verify-full`. Agora existe um só lugar
+     que decide (`plugins/storage-postgres/src/dsn.ts`): todo parâmetro TLS é **retirado** da
+     string, a política vira o objeto `ssl`, e material citado no DSN (`sslrootcert`, `sslcert`,
+     `sslkey`) é lido e reentregue de propósito. O `pg_dump` recebe a mesma política pelo
+     **ambiente** (`PGSSLMODE`, `PGSSLROOTCERT`, ...) e a **senha nunca vai para o `argv`**
+     (`PGPASSWORD`): linha de comando é legível por qualquer usuário da máquina (`ps`).
+   - **Corrida entre a checagem da trava e a abertura da unidade.** Entre ler "a trava de
+     manutenção está comigo" e tomar a trava da unidade, uma restauração podia tomar a trava
+     exclusiva, listar as unidades e derrubar o esquema debaixo de quem acabara de entrar. A
+     sessão da unidade passa a tomar ela mesma a trava de manutenção em modo **compartilhado**,
+     antes de qualquer outra coisa: é a mesma trava, então ou o escritor entra primeiro e a
+     restauração é recusada, ou a restauração já está dentro e a abertura é recusada. Não há
+     janela.
+   - **Vazamento de conexão no worker de backup.** A conexão era aberta **antes** de reivindicar o
+     arquivo de saída e fora do `try/finally`: cada tentativa que esbarrava num arquivo já
+     existente deixava uma conexão pendurada pela vida do processo. Agora o arquivo vem primeiro e
+     a conexão é sempre encerrada.
+   - **Descritor deduzido só das linhas existentes.** Uma tabela declarada e nunca escrita, e um
+     `hasGlobal` que ninguém preencheu, sumiam da cópia — a restauração devolvia uma unidade mais
+     estreita do que o produto declara. A forma **declarada** passa a ser gravada com a unidade
+     (`units.tables`, `units.has_global`) junto de uma **impressão digital**
+     (`units.descriptor_sha256`), conferida na leitura; a cópia usa a declaração unida ao que as
+     linhas mostram. Colunas anuláveis, acrescentadas com `ADD COLUMN IF NOT EXISTS`: esquema
+     escrito por versão anterior continua funcionando e volta a deduzir até a unidade ser aberta
+     uma vez, então a versão do layout físico não muda.
+   - **Verificação de cópia carregava o arquivo inteiro na memória.** `verifyBackupFile` fazia
+     `readFile`: 2 GB de cópia viravam 2 GB de memória viva, e qualquer arquivo no teto do próprio
+     Node (2 GiB) não podia ser verificado de forma alguma. Agora é fluxo, com teto explícito. A
+     CLI manual passou a usar o mesmo motor do worker (um domínio de cada vez, direto no arquivo) e
+     aceita `--max-bytes`; `--declared-only`, que sela unidades que o meio pode nem ter, continua
+     montando o pacote em memória, agora limitado pelo mesmo número.
+
+   Cada uma dessas correções tem teste que **falha sem ela**, verificado por mutação em
+   `docs/proofs/M3-postgres-hardening-proof.md`.
 5. **Instância de desenvolvimento migra do `json`.** O Harness padrão guarda os
    domínios em `<DSH_HOME>/storages` (json), não em SQLite; `storage:export-json`
    cobre esse caso com o Harness parado.

@@ -1,10 +1,13 @@
 import { execFile } from 'node:child_process'
-import { existsSync } from 'node:fs'
-import { randomBytes } from 'node:crypto'
-import { appendFile, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { createReadStream, existsSync } from 'node:fs'
+import { createHash, randomBytes } from 'node:crypto'
+import { appendFile, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { bundleRecordCount, sha256, type StorageExportBundle } from './bundle.js'
+
+/** Ceiling shared by the worker, the operator CLI and the verifier: one number, one behaviour. */
+export const BACKUP_MAX_BYTES_DEFAULT = 2 * 1024 * 1024 * 1024
 
 export const BACKUP_FILE_PATTERN = /^studio-backup-([a-z0-9_]+)-(\d{8}T\d{6}\d{3}Z)-([a-f0-9]{6})\.json$/u
 export const BACKUP_LEDGER_FILE = 'backups.jsonl'
@@ -34,11 +37,15 @@ export interface BackupRunner {
  * Builds the whole bundle in THIS process. Fine for the operator CLI, which is
  * a process of its own; the Studio uses the child-process runner instead.
  */
-export function inProcessBackupRunner(snapshot: () => Promise<StorageExportBundle>): BackupRunner {
+export function inProcessBackupRunner(snapshot: () => Promise<StorageExportBundle>, options: { maxBytes?: number } = {}): BackupRunner {
+  const maxBytes = options.maxBytes ?? BACKUP_MAX_BYTES_DEFAULT
   return {
     async run(target) {
       const bundle = await snapshot()
       const serialized = `${JSON.stringify(bundle)}\n`
+      // The same ceiling the worker enforces: this path used to have none at all, so the
+      // operator CLI would happily fill the disk where the scheduled backup refuses to.
+      if (Buffer.byteLength(serialized) > maxBytes) throw new Error(`backup exceeds the ${String(maxBytes)} byte limit`)
       await writeFile(target, serialized, { encoding: 'utf8', flag: 'wx', mode: 0o600 })
       return { sha256: sha256(serialized), bytes: Buffer.byteLength(serialized), records: bundleRecordCount(bundle), domains: bundle.domains.length }
     },
@@ -69,7 +76,7 @@ export interface ChildBackupRunnerOptions {
 export function childProcessBackupRunner(options: ChildBackupRunnerOptions): BackupRunner {
   const worker = options.workerPath ?? defaultWorkerPath()
   const timeoutMs = options.timeoutMs ?? 15 * 60 * 1000
-  const maxBytes = options.maxBytes ?? 2 * 1024 * 1024 * 1024
+  const maxBytes = options.maxBytes ?? BACKUP_MAX_BYTES_DEFAULT
   return {
     run(target) {
       return new Promise((resolvePromise, reject) => {
@@ -257,10 +264,35 @@ export class StorageBackupScheduler {
   }
 }
 
-/** Verify a backup file against its sidecar digest without loading it as JSON. */
-export async function verifyBackupFile(file: string): Promise<{ file: string; bytes: number; sha256: string; matches: boolean }> {
-  const content = await readFile(file)
-  const digest = sha256(content)
+/**
+ * Verify a backup file against its sidecar digest.
+ *
+ * STREAMED, and bounded. Reading the whole file into a Buffer meant a 2 GiB
+ * backup — exactly the size the worker is allowed to write — became 2 GiB of
+ * live memory in whatever process asked the question, and anything at or above
+ * Node's own 2 GiB `readFile` ceiling could not be verified at all. Here the
+ * bytes go through the digest as they arrive, so memory stays flat whatever the
+ * file weighs, and a file over `maxBytes` is refused instead of being read.
+ */
+export async function verifyBackupFile(
+  file: string,
+  options: { maxBytes?: number } = {},
+): Promise<{ file: string; bytes: number; sha256: string; matches: boolean }> {
+  const maxBytes = options.maxBytes ?? BACKUP_MAX_BYTES_DEFAULT
+  const hash = createHash('sha256')
+  let bytes = 0
+  const stream = createReadStream(file, { highWaterMark: 1024 * 1024 })
+  try {
+    for await (const chunk of stream) {
+      const buffer = chunk as Buffer
+      bytes += buffer.byteLength
+      if (bytes > maxBytes) throw new Error(`backup file '${file}' exceeds the ${String(maxBytes)} byte limit`)
+      hash.update(buffer)
+    }
+  } finally {
+    stream.destroy()
+  }
+  const digest = hash.digest('hex')
   const sidecar = (await readFile(`${file}.sha256`, 'utf8')).trim().split(/\s+/u)[0]
-  return { file, bytes: (await stat(file)).size, sha256: digest, matches: sidecar === digest }
+  return { file, bytes, sha256: digest, matches: sidecar === digest }
 }

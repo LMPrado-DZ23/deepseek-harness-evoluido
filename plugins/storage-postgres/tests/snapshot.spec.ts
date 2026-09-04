@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto'
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it, vi } from 'vitest'
 import { Client } from 'pg'
 import { descriptorOf } from '@deepseek-ai/dsh-storage-domain'
 import { PostgresStorageBackend } from '../src/backend.ts'
-import { bundleRecordCount, canonicalJson, sha256, validateBundle } from '../src/bundle.ts'
+import { bundleRecordCount, canonicalJson, sha256, validateBundle, type StorageExportBundle } from '../src/bundle.ts'
 import { writeBackupBundle } from '../src/backup-worker.ts'
 import { snapshotPostgresStorage } from '../src/snapshot.ts'
 import { importStorage } from '../../../scripts/storage-migration.ts'
@@ -48,7 +48,8 @@ describePostgres('hot snapshot of a PostgreSQL storage schema', () => {
     const helloDomain = bundle.domains.find(domain => domain.descriptor.name === 'studio_hello')!
     expect(helloDomain.snapshot).toEqual(await helloUnit.loadAll())
     const globalDomain = bundle.domains.find(domain => domain.descriptor.name === 'snap_global')!
-    expect(globalDomain.descriptor).toEqual({ name: 'snap_global', version: 3, tables: ['items'], hasGlobal: true })
+    // 'empty' was DECLARED and never written: it is part of the unit and stays in the bundle.
+    expect(globalDomain.descriptor).toEqual({ name: 'snap_global', version: 3, tables: ['empty', 'items'], hasGlobal: true })
     expect(globalDomain.snapshot.global).toEqual({ counter: 7 })
     // The writer is still alive after the snapshot.
     await helloUnit.putRecord('records', 'two', { tenant_id: 'workspace-a', created_at: '2026-09-03T00:00:01.000Z', note: 'two' })
@@ -165,7 +166,14 @@ describePostgres('hot snapshot of a PostgreSQL storage schema', () => {
         expect(() => validateBundle(written as never)).not.toThrow()
         const inProcess = await snapshotPostgresStorage({ connectionString: icuDsn.href, ssl: false, schema, now })
         expect(written.domains[0]!.sha256).toBe(inProcess.domains[0]!.sha256)
-        expect((written as unknown as { payloadSha256: string }).payloadSha256).toBe(inProcess.payloadSha256)
+        // The whole payload, not only the domains — with the one field that legitimately differs
+        // held equal: `source.sha256` seals the transaction snapshot marker, and ANY committed
+        // transaction anywhere in the cluster moves it between these two reads.
+        const resealed = (value: StorageExportBundle): string => sha256(canonicalJson({
+          createdAt: value.createdAt, domains: value.domains, format: value.format,
+          source: { kind: value.source.kind, sha256: 'fixed-for-comparison' }, upstreamCommit: value.upstreamCommit,
+        }))
+        expect(resealed(written as unknown as StorageExportBundle)).toBe(resealed(inProcess))
       } finally {
         await source.close()
         await rm(directory, { recursive: true, force: true })
@@ -213,6 +221,81 @@ describePostgres('hot snapshot of a PostgreSQL storage schema', () => {
     const narrowed = [{ ...hello, tables: [] }]
     await expect(snapshotPostgresStorage({ connectionString: dsn!, ssl: false, schema, descriptors: narrowed })).rejects.toMatchObject({ code: 'malformed-medium' })
   })
+
+  it('keeps a declared but empty table, and a declared global nobody wrote, all the way through a restore', async () => {
+    // Inferring the descriptor from the rows that happen to exist loses exactly these two
+    // things, and a restore then comes back with a NARROWER unit than the product declares.
+    const schema = schemaName('declared')
+    const declared = { name: 'decl_unit', version: 2, tables: ['cheia', 'vazia'], hasGlobal: true }
+    const source = backend(schema)
+    const unit = await source.kv!.open(declared)
+    await unit.putRecord('cheia', 'k', { value: 1 })
+    await unit.close()
+    await source.close()
+
+    const inProcess = await snapshotPostgresStorage({ connectionString: dsn!, ssl: false, schema, now: () => new Date('2026-09-04T00:00:00.000Z') })
+    expect(inProcess.domains[0]!.descriptor).toEqual(declared)
+    expect(inProcess.domains[0]!.snapshot.tables['vazia']).toEqual({})
+
+    const directory = await mkdtemp(join(tmpdir(), 'dz23-declared-'))
+    try {
+      const out = join(directory, 'bundle.json')
+      await writeBackupBundle({ dsnRef: 'unused', schema, ssl: 'off', out, maxBytes: 10 * 1024 * 1024, now: () => new Date('2026-09-04T00:00:00.000Z') }, dsn!)
+      const written = JSON.parse(await readFile(out, 'utf8')) as StorageExportBundle
+      validateBundle(written)
+      // The out-of-process copy says exactly the same thing.
+      expect(written.domains[0]!.descriptor).toEqual(declared)
+
+      // And it survives the round trip: the restored schema declares the same unit.
+      const restored = schemaName('declared_restore')
+      await importStorage(backend(restored), written)
+      const again = await snapshotPostgresStorage({ connectionString: dsn!, ssl: false, schema: restored })
+      expect(again.domains[0]!.descriptor).toEqual(declared)
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+
+    // The stamped shape is fingerprinted: editing the `units` row by hand is caught, not believed.
+    const admin = new Client({ connectionString: dsn!, ssl: false })
+    await admin.connect()
+    try {
+      await admin.query(`UPDATE "${schema}"."units" SET tables = '["cheia"]'::jsonb WHERE name = 'decl_unit'`)
+      await expect(snapshotPostgresStorage({ connectionString: dsn!, ssl: false, schema })).rejects.toMatchObject({ code: 'malformed-medium' })
+    } finally {
+      await admin.end()
+    }
+  })
+
+  it('leaves no database connection behind when the output file cannot be created', async () => {
+    // The client used to be connected BEFORE the output file was claimed, and outside the
+    // try/finally: every attempt that hit an existing file leaked one connection, for the
+    // life of the process — a scheduled backup retrying every hour eventually exhausts the server.
+    const schema = schemaName('leak')
+    const source = backend(schema)
+    await source.waitUntilReady()
+    await source.close()
+    const directory = await mkdtemp(join(tmpdir(), 'dz23-leak-'))
+    const admin = new Client({ connectionString: dsn!, ssl: false })
+    await admin.connect()
+    const sessions = async (): Promise<number> => (await admin.query<{ n: number }>(
+      'SELECT count(*)::int AS n FROM pg_stat_activity WHERE application_name = $1', [`dz23-storage:backup:${schema}`],
+    )).rows[0]!.n
+    try {
+      const out = join(directory, 'taken.json')
+      await writeFile(out, 'a previous attempt left this here\n', { flag: 'wx', mode: 0o600 })
+      expect(await sessions()).toBe(0)
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        await expect(writeBackupBundle({ dsnRef: 'unused', schema, ssl: 'off', out, maxBytes: 1024 * 1024 }, dsn!))
+          .rejects.toMatchObject({ code: 'EEXIST' })
+      }
+      await vi.waitFor(async () => { expect(await sessions()).toBe(0) }, { timeout: 3_000, interval: 50 })
+      // The file the operator already had is untouched.
+      expect(await readFile(out, 'utf8')).toBe('a previous attempt left this here\n')
+    } finally {
+      await admin.end()
+      await rm(directory, { recursive: true, force: true })
+    }
+  }, 30_000)
 
   it('refuses a schema without the Studio layout and an invalid schema name', async () => {
     await expect(snapshotPostgresStorage({ connectionString: dsn!, ssl: false, schema: schemaName('nolayout') })).rejects.toThrow()

@@ -1,8 +1,8 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, truncate, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { BACKUP_FILE_PATTERN, BACKUP_LEDGER_FILE, BACKUP_MIN_INTERVAL_MS, StorageBackupScheduler, verifyBackupFile, type BackupLogLevel } from '../src/backup.ts'
+import { BACKUP_FILE_PATTERN, BACKUP_LEDGER_FILE, BACKUP_MAX_BYTES_DEFAULT, BACKUP_MIN_INTERVAL_MS, StorageBackupScheduler, inProcessBackupRunner, verifyBackupFile, type BackupLogLevel } from '../src/backup.ts'
 import { exportedDomain, sealBundle, validateBundle, type StorageExportBundle } from '../src/bundle.ts'
 
 const scratch: string[] = []
@@ -154,6 +154,43 @@ describe('StorageBackupScheduler', () => {
     const result = await scheduler.runOnce()
     await writeFile(result.file!, '{"tampered":true}\n', 'utf8')
     expect((await verifyBackupFile(result.file!)).matches).toBe(false)
+  })
+
+  it('verifies a file larger than Node can read at once, streaming, and refuses one over the ceiling', async () => {
+    // The verifier used to do `readFile(file)`: 2 GiB of backup became 2 GiB of live memory in
+    // whichever process asked, and anything at or above Node's own whole-file ceiling could not
+    // be verified AT ALL — the exact size the worker is allowed to write.
+    const target = await directory()
+    await mkdir(target, { recursive: true })
+    const file = join(target, 'huge.json')
+    const bytes = BACKUP_MAX_BYTES_DEFAULT + 1
+    await writeFile(file, '', { flag: 'wx', mode: 0o600 })
+    // Sparse: it costs no disk, and every byte still has to go through the digest.
+    await truncate(file, bytes)
+    await writeFile(`${file}.sha256`, `${'0'.repeat(64)}  huge.json\n`, { encoding: 'utf8', mode: 0o600 })
+
+    // This is what the old implementation would hit, and why it could not answer at all.
+    await expect(readFile(file)).rejects.toMatchObject({ code: 'ERR_FS_FILE_TOO_LARGE' })
+    // Bounded: over the ceiling it stops instead of reading on.
+    await expect(verifyBackupFile(file, { maxBytes: 4 * 1024 * 1024 })).rejects.toThrow('byte limit')
+    await expect(verifyBackupFile(file)).rejects.toThrow(`${String(BACKUP_MAX_BYTES_DEFAULT)} byte limit`)
+    // And with room to work, it reads the whole thing without ever holding it.
+    const verified = await verifyBackupFile(file, { maxBytes: bytes })
+    expect(verified.bytes).toBe(bytes)
+    expect(verified.sha256).toMatch(/^[a-f0-9]{64}$/u)
+    expect(verified.matches).toBe(false)
+  }, 180_000)
+
+  it('refuses an in-process backup over the ceiling instead of filling the disk', async () => {
+    const target = await directory()
+    const scheduler = new StorageBackupScheduler({
+      runner: inProcessBackupRunner(async () => bundle('x'.repeat(4096)), { maxBytes: 512 }),
+      directory: target, label: 'dz23_storage', intervalMs: BACKUP_MIN_INTERVAL_MS, keep: 5,
+    })
+    const result = await scheduler.runOnce()
+    expect(result).toMatchObject({ status: 'failed', file: null })
+    expect(result.error).toContain('512 byte limit')
+    expect((await readdir(target)).filter(name => name.endsWith('.json'))).toEqual([])
   })
 
   it('coalesces overlapping ticks into one waiting run instead of growing a queue', async () => {

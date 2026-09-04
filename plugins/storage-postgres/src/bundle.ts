@@ -62,6 +62,16 @@ export function validateBundle(value: StorageExportBundle): void {
   }
 }
 
+/**
+ * Fingerprint of a unit's DECLARED shape. Persisted next to the unit on the
+ * medium so a backup can carry the declaration itself instead of guessing it
+ * back from whichever rows happen to exist, and so a hand-edited `units` row
+ * is detected instead of silently believed.
+ */
+export function descriptorFingerprint(descriptor: KvUnitDescriptor): string {
+  return sha256(canonicalJson({ hasGlobal: descriptor.hasGlobal, name: descriptor.name, tables: [...descriptor.tables].sort(compareUtf8), version: descriptor.version }))
+}
+
 export function bundleRecordCount(bundle: StorageExportBundle): number {
   return bundle.domains.reduce((total, domain) =>
     total + Object.values(domain.snapshot.tables).reduce((sum, table) => sum + Object.keys(table).length, 0), 0)

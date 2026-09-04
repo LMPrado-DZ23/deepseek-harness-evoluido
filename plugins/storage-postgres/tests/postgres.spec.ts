@@ -11,7 +11,7 @@ import { SqliteStorageBackend } from '@deepseek-ai/dsh-storage-sqlite'
 import { runKvBackendContract } from '/home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage/tests/contract.ts'
 import { PostgresStorageBackend } from '../src/backend.ts'
 import { StudioStorageError } from '../src/errors.ts'
-import { quoteIdentifier, STORAGE_POSTGRES_LAYOUT_VERSION, storageUnitLockName } from '../src/schema.ts'
+import { quoteIdentifier, STORAGE_POSTGRES_LAYOUT_VERSION, storageMaintenanceLockName, storageUnitLockName } from '../src/schema.ts'
 import { StudioTenancyService, type TenancyRepository } from '../../tenancy/src/service.ts'
 import type { Invitation, Membership, Organization, Workspace } from '../../tenancy/src/model.ts'
 import { descriptorOf } from '@deepseek-ai/dsh-storage-domain'
@@ -383,6 +383,47 @@ describePostgres('postgres backend against PostgreSQL 16', () => {
       process.off('uncaughtException', onUncaught)
       await store.close()
       await admin.end()
+    }
+  }, 30_000)
+
+  it('keeps a writer and a restore from ever overlapping: whoever takes the maintenance lock first wins', async () => {
+    // The window this closes: `maintenanceHeld` was read, and only THEN was the unit lock
+    // taken. Between the two, a restore could take the maintenance lock EXCLUSIVE, list the
+    // units it knew about and DROP SCHEMA under a writer that had just walked in.
+    const schema = schemaName('maint_race_writer')
+    const store = new PostgresStorageBackend({ connectionString: dsn!, schema, ssl: false, poolMax: 2, heartbeatMs: 100, maintenanceRetryMs: 60_000 })
+    const restore = new Client({ connectionString: dsn!, ssl: false })
+    await restore.connect()
+    const admin = new Client({ connectionString: dsn!, ssl: false })
+    await admin.connect()
+    const lockName = storageMaintenanceLockName(schema)
+    const restoreTriesToTakeOver = async (): Promise<boolean> => (await restore.query<{ acquired: boolean }>(
+      'SELECT pg_try_advisory_lock(hashtext($1)) AS acquired', [lockName],
+    )).rows[0]!.acquired
+    try {
+      await store.waitUntilReady()
+      const unit = await store.kv!.open({ name: 'race_unit', version: 1, tables: ['records'], hasGlobal: false })
+
+      // 1) The writer is in. Even with the Studio's own supervising session gone — killed by a
+      //    failover, an idle reaper or a DBA — the WRITER'S OWN session still holds the schema
+      //    shared, so the restore cannot take it exclusive and cannot drop anything.
+      await admin.query('SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = $1', [`dz23-storage:maintenance:${schema}`])
+      await vi.waitFor(() => { expect(store.maintenanceLockHeld).toBe(false) }, { timeout: 5_000, interval: 25 })
+      expect(await restoreTriesToTakeOver()).toBe(false)
+      await unit.close()
+
+      // 2) The restore is in. The flag still claims the guarantee — this IS the window — but the
+      //    database is the authority, so opening a unit is refused instead of writing into a
+      //    schema that is about to be replaced.
+      await vi.waitFor(async () => { expect(await restoreTriesToTakeOver()).toBe(true) }, { timeout: 5_000, interval: 50 })
+      ;(store as unknown as { maintenanceHeld: boolean }).maintenanceHeld = true
+      await expect(store.kv!.open({ name: 'race_unit_two', version: 1, tables: ['records'], hasGlobal: false }))
+        .rejects.toThrow('maintenance lock')
+    } finally {
+      await restore.query('SELECT pg_advisory_unlock_all()').catch(() => undefined)
+      await restore.end()
+      await admin.end()
+      await store.close()
     }
   }, 30_000)
 
