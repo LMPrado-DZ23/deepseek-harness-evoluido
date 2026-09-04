@@ -143,4 +143,27 @@ describe('the zip reader against a hostile archive', () => {
     const archive = Buffer.concat([createZip([{ name: 'a.txt', data: Buffer.from('ok') }]), Buffer.from('lixo depois do fim')])
     expect(() => readZip(archive)).toThrow('not a zip archive')
   })
+
+  it('rejects malformed central and local directory boundaries one invariant at a time', () => {
+    const fresh = () => createZip([{ name: 'a.txt', data: Buffer.from('ok') }])
+    const mutate = (change: (archive: Buffer, at: ReturnType<typeof centralOf> & { eocd: number }) => void, message: RegExp) => {
+      const archive = fresh(); const positions = { ...centralOf(archive), eocd: archive.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06])) }
+      change(archive, positions)
+      expect(() => readZip(archive)).toThrow(message)
+    }
+    mutate((archive, { eocd }) => archive.writeUInt16LE(1, eocd + 4), /multi-disk/u)
+    mutate((archive, { eocd }) => archive.writeUInt16LE(2, eocd + 8), /central directory/u)
+    mutate((archive, { eocd }) => archive.writeUInt32LE(eocd + 1, eocd + 16), /central directory/u)
+    mutate((archive, { central }) => archive.writeUInt32LE(0, central), /central directory/u)
+    mutate((archive, { eocd }) => { archive.writeUInt16LE(0, eocd + 8); archive.writeUInt16LE(0, eocd + 10) }, /central directory/u)
+    mutate((archive, { central, local }) => {
+      archive.writeUInt32LE(3, central + 24); archive.writeUInt32LE(3, local + 22)
+    }, /corrupt entry/u)
+    mutate((archive, { local }) => archive.writeUInt32LE(0, local), /corrupt entry/u)
+    mutate((archive, { central }) => archive.writeUInt32LE(central - 20, central + 42), /corrupt entry/u)
+    mutate((archive, { central, local }) => {
+      archive.writeUInt16LE(0, local + 26); archive.writeUInt16LE(0, central + 28)
+    }, /central directory|local header|invalid zip entry/u)
+    mutate((archive, { local }) => archive.write('b.txt', local + 30, 'utf8'), /local header/u)
+  })
 })
