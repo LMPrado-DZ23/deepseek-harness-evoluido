@@ -1,0 +1,18 @@
+{
+  "offline": {
+    "banner": "Você está sem internet. O Studio continua aberto, mas suas ações vão esperar a conexão voltar.",
+    "backOnline": "Conexão restabelecida."
+  },
+  "install": {
+    "prompt": "Instalar o DZ23 STUDIO neste aparelho",
+    "installed": "O DZ23 STUDIO foi instalado neste aparelho."
+  },
+  "notifications": {
+    "enable": "Avisar quando a criação terminar",
+    "verified": "Seu protótipo foi verificado.",
+    "failed": "A criação parou. Abra o Studio para ver o motivo.",
+    "cancelled": "A criação foi cancelada.",
+    "blocked": "O ambiente isolado não está disponível neste computador.",
+    "title": "DZ23 STUDIO"
+  }
+}

@@ -1,0 +1,34 @@
+/**
+ * Caching policy of the Studio service worker, kept pure so it can be unit
+ * tested and shared by the worker and the page.
+ *
+ * - `shell`: the app shell (`/studio/`, its hashed assets, manifest, icons,
+ *   brand image). Assets are immutable (hashed names) → cache-first; the
+ *   shell HTML is network-first with the cached copy as offline fallback.
+ * - `api`: anything under `/api/` — never cached, never served from cache. A
+ *   request made offline receives a synthetic 503 so the interface can say
+ *   "you are offline" instead of showing stale project data.
+ * - `bypass`: everything else (other origins, non-GET) is left to the network.
+ */
+export type CacheDecision = 'shell-asset' | 'shell-html' | 'api' | 'bypass'
+
+export const SW_CACHE_PREFIX = 'dz23-studio-shell-'
+export const SW_SCOPE = '/studio/'
+export const OFFLINE_STATUS = 503
+export const OFFLINE_ERROR_CODE = 'OFFLINE'
+
+export function decide(method: string, url: URL, origin: string): CacheDecision {
+  if (method !== 'GET' || url.origin !== origin) return 'bypass'
+  if (url.pathname.startsWith('/api/')) return 'api'
+  if (!url.pathname.startsWith(SW_SCOPE)) return 'bypass'
+  if (url.pathname.startsWith(`${SW_SCOPE}assets/`) || url.pathname.startsWith(`${SW_SCOPE}icons/`) || url.pathname.startsWith(`${SW_SCOPE}brand/`) || url.pathname === `${SW_SCOPE}manifest.json`) return 'shell-asset'
+  if (url.pathname === SW_SCOPE || url.pathname === `${SW_SCOPE}index.html` || !/\.[a-z0-9]+$/iu.test(url.pathname)) return 'shell-html'
+  return 'bypass'
+}
+
+/** Paths precached on install: only the shell entry points; hashed assets are cached as they are first loaded. */
+export const PRECACHE_PATHS = [SW_SCOPE, `${SW_SCOPE}manifest.json`, `${SW_SCOPE}icons/icon-192.png`, `${SW_SCOPE}icons/icon-512.png`, `${SW_SCOPE}icons/maskable-512.png`] as const
+
+export function offlineApiResponseBody(): string {
+  return JSON.stringify({ error: OFFLINE_ERROR_CODE, offline: true })
+}
