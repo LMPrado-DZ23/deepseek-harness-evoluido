@@ -65,7 +65,7 @@ export async function writeBackupBundle(args: WorkerArgs, dsn: string): Promise<
       throw new Error(`postgres storage schema '${args.schema}' has layout version ${String(layout.rows[0].value)}, incompatible with this build (${String(STORAGE_POSTGRES_LAYOUT_VERSION)})`)
     }
     const marker = await client.query<{ snapshot: string }>('SELECT pg_current_snapshot()::text AS snapshot')
-    const units = await client.query<UnitRow>(`SELECT name, version FROM ${unitsTable(args.schema)} ORDER BY name`)
+    const units = await client.query<UnitRow>(`SELECT name, version FROM ${unitsTable(args.schema)} ORDER BY name COLLATE "C"`)
     const createdAt = (args.now ?? (() => new Date()))().toISOString()
     const source = { kind: 'postgres' as const, sha256: sha256(`${args.schema}\0${marker.rows[0]!.snapshot}`) }
 
@@ -78,7 +78,7 @@ export async function writeBackupBundle(args: WorkerArgs, dsn: string): Promise<
         `SELECT value FROM ${globalsTable(args.schema)} WHERE unit = $1`,
         [unit.name],
       )
-      // Which tables hold records, in code-point order (`COLLATE "C"` is byte order on UTF-8,
+      // Which tables hold records, in byte order (`COLLATE "C"`), which is what
       // which is what the canonical form needs — the database's own collation is not).
       const tableRows = await client.query<{ table_name: string }>(
         `SELECT table_name FROM ${recordsTable(args.schema)} WHERE unit = $1 GROUP BY table_name ORDER BY table_name COLLATE "C"`,
@@ -170,7 +170,7 @@ export async function writeBackupBundle(args: WorkerArgs, dsn: string): Promise<
 async function* cursorRows(client: Client, schema: string, unit: string, table: string): AsyncGenerator<{ key: string; value: unknown }> {
   const name = `dz23_backup_${randomUUID().replaceAll('-', '')}`
   await client.query(
-    `DECLARE ${name} NO SCROLL CURSOR FOR SELECT key, value FROM ${recordsTable(schema)} WHERE unit = $1 AND table_name = $2 ORDER BY key`,
+    `DECLARE ${name} NO SCROLL CURSOR FOR SELECT key, value FROM ${recordsTable(schema)} WHERE unit = $1 AND table_name = $2 ORDER BY key COLLATE "C"`,
     [unit, table],
   )
   try {

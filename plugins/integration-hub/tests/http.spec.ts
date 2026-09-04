@@ -45,7 +45,7 @@ async function fixture(role: 'owner' | 'admin' | 'builder' | 'viewer' = 'owner')
   await chmod(join(runDirectory, '.next', 'standalone', 'server.js'), 0o755)
   const repository = new MemoryRepository(); let id = 0
   const service = new IntegrationHubService({
-    repository, exportsRoot, publisherKeys, channel: 'stable',
+    repository, exportsRoot, publisherKeys, channel: 'stable', runsRoot: exportsRoot,
     secrets: { inspect: async ref => ({ present: ref === 'DZ23_APP_SMTP', shapeOk: ref === 'DZ23_APP_SMTP' }) },
     projects: {
       project: (actor, projectId) => { if (projectId !== 'p1' || actor.tenantId !== 'ws-a') throw Object.assign(new Error('nope'), { code: 'NOT_FOUND' }); return { project_id: 'p1', name: 'Agenda', state: 'VERIFIED_PROTOTYPE' } },

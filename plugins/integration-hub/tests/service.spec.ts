@@ -1,7 +1,7 @@
 import { generateKeyPairSync, sign } from 'node:crypto'
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { canonicalManifestBytes } from '../src/manifest.ts'
 import type { HubEvent, IntegrationManifest, StudioExport, StudioIntegration } from '../src/model.ts'
@@ -41,7 +41,9 @@ async function build(options: { channel?: 'stable' | 'dev'; emailTest?: boolean;
   const sent: Array<[string, string]> = []
   let sequence = 0
   const service = new IntegrationHubService({
-    repository, exportsRoot, publisherKeys, channel: options.channel ?? 'stable', runsRoot: options.runsRoot,
+    repository, exportsRoot, publisherKeys, channel: options.channel ?? 'stable',
+    // The boundary is always on; a test that wants a run outside it says so with its own root.
+    runsRoot: options.runsRoot ?? (options.runDirectory === undefined ? exportsRoot : dirname(options.runDirectory)),
     secrets: { inspect: async ref => options.secrets?.[ref] ?? { present: false, shapeOk: false } },
     projects: {
       project: (actor, projectId) => {
@@ -161,6 +163,56 @@ describe('integration hub service', () => {
     expect(canonicalSecretRef('SECRET://DZ23_APP_SMTP')).toBe('DZ23_APP_SMTP')
     expect(canonicalSecretRef('dz23_app_smtp')).toBe('dz23_app_smtp') // the case is never invented; the schema refuses it
     expect(minimizeRecipient('Pessoa@Example.Test')).toMatch(/^\*\*\*@Example\.Test sha256:[a-f0-9]{12}$/u)
+  })
+
+  it('enforces the tier the kind demands, never a lower one stored in the row', async () => {
+    const { service, repository, sent } = await build({ emailTest: true, secrets: { DZ23_APP_SMTP: { present: true, shapeOk: true } } })
+    await service.configureSmtp(admin, 'DZ23_APP_SMTP', ok('T2'))
+    // A row written with a lower tier — an older build, a migration, any other writer of the table —
+    // must not buy a free pass: e-mail talks to an external provider, so T2 is the floor.
+    const smtpRow = repository.rows.find(row => row.kind === 'smtp')!
+    await repository.putIntegration({ ...smtpRow, effective_tier: 'T0' })
+    expect(service.requiredApprovalTier({ ...smtpRow, effective_tier: 'T0' })).toBe('T2')
+    await expect(service.testSmtp(admin, 'pessoa@example.test')).rejects.toThrow('confirmação')
+    expect(sent).toEqual([])
+    await expect(service.setEnabled(admin, smtpRow.integration_id, true)).rejects.toThrow('confirmação')
+    // The same for a manifest whose stored tier was lowered but whose permissions demand T3.
+    const sensitive = await service.register(admin, signed(manifest({ id: 'cofre', permissions: ['secrets.read'] })))
+    await repository.putIntegration({ ...sensitive.integration, effective_tier: 'T0' })
+    expect(service.requiredApprovalTier({ ...sensitive.integration, effective_tier: 'T0' })).toBe('T3')
+    await expect(service.setEnabled(strongAdmin, sensitive.integration.integration_id, true, ok('T2'))).rejects.toThrow('confirmação')
+  })
+
+  it('refuses to enable on a record that changed while the person was confirming', async () => {
+    const { service, repository } = await build()
+    const registered = await service.register(admin, signed(manifest({ id: 'agenda' })))
+    const id = registered.integration.integration_id
+    // Between the read that decides the tier and the write, the integration is re-registered with
+    // permissions that raise it to T3. Writing back the old snapshot would silently undo that and
+    // leave it enabled at T0.
+    const readRows = repository.integrations.bind(repository)
+    let reads = 0
+    repository.integrations = () => {
+      reads += 1
+      if (reads === 2) {
+        repository.rows = repository.rows.map(row => (row.integration_id === id
+          ? { ...row, effective_tier: 'T3' as const, updated_at: '2026-09-05T00:00:00.000Z' }
+          : row))
+      }
+      return readRows()
+    }
+    await expect(service.setEnabled(admin, id, true)).rejects.toMatchObject({ code: 'CONFLICT' })
+    expect(repository.rows.find(row => row.integration_id === id)).toMatchObject({ enabled: false, effective_tier: 'T3' })
+  })
+
+  it('records a confirmation only when the action really happened, and audits the refusals', async () => {
+    const { service, repository } = await build({ secrets: { DZ23_BROKEN: { present: true, shapeOk: false } } })
+    await expect(service.configureSmtp(admin, 'DZ23_MISSING', ok('T2'))).rejects.toThrow('cofre')
+    await expect(service.configureSmtp(admin, 'DZ23_BROKEN', ok('T2'))).rejects.toThrow('formato')
+    const actions = repository.eventRows.map(event => `${event.action}:${event.outcome}`)
+    // No "confirmation recorded" for something that did not happen, and the refusals are visible.
+    expect(actions).not.toContain('approval.recorded:success')
+    expect(actions).toEqual(['smtp.configured:failure', 'smtp.configured:failure'])
   })
 
   it('enforces roles and tenant scope', async () => {

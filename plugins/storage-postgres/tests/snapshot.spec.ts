@@ -126,6 +126,53 @@ describePostgres('hot snapshot of a PostgreSQL storage schema', () => {
     }
   })
 
+  it('seals the same bytes on a database whose locale is NOT C, and on keys outside the BMP', async () => {
+    // The previous version of this test could not fail: the fixture database is C.UTF-8, so
+    // dropping the COLLATE changed nothing and a real regression shipped. This one creates a
+    // database with an ICU pt-BR collation — where the database's order and byte order really
+    // disagree — and compares the streamed bundle with the in-process snapshot there.
+    const admin = new Client({ connectionString: dsn!, ssl: false })
+    await admin.connect()
+    const database = `dz23_icu_${randomUUID().replaceAll('-', '').slice(0, 12)}`
+    let created = false
+    try {
+      try {
+        await admin.query(`CREATE DATABASE ${database} LOCALE_PROVIDER icu ICU_LOCALE 'pt-BR' TEMPLATE template0 ENCODING 'UTF8' LOCALE 'C.UTF-8'`)
+        created = true
+      } catch {
+        return // no ICU on this server: the claim cannot be checked here, and pretending otherwise would be worse
+      }
+      const icuDsn = new URL(dsn!)
+      icuDsn.pathname = `/${database}`
+      const schema = 'icu_probe'
+      const source = new PostgresStorageBackend({ connectionString: icuDsn.href, schema, ssl: false, poolMax: 2, heartbeatMs: 100 })
+      const unit = await source.kv!.open({ name: 'icu_unit', version: 1, tables: ['items'], hasGlobal: false })
+      // Keys where a locale collation and byte order disagree, plus keys outside the BMP where
+      // UTF-16 code-unit order and UTF-8 byte order disagree.
+      for (const key of ['Zebra', 'ábaco', 'abacate', 'Ábaco', '_sub', 'ñandu', 'nadar', 'z-final', '😀', 'Ａ', '\uFFFD']) {
+        await unit.putRecord('items', key, { key })
+      }
+      const directory = await mkdtemp(join(tmpdir(), 'dz23-icu-'))
+      const out = join(directory, 'bundle.json')
+      const now = () => new Date('2026-09-04T00:00:00.000Z')
+      try {
+        await writeBackupBundle({ dsnRef: 'unused', schema, ssl: 'off', out, maxBytes: 10 * 1024 * 1024, now }, icuDsn.href)
+        const written = JSON.parse(await readFile(out, 'utf8')) as { domains: Array<{ sha256: string }> }
+        // The file must validate on its own AND match the in-process snapshot byte for byte.
+        expect(() => validateBundle(written as never)).not.toThrow()
+        const inProcess = await snapshotPostgresStorage({ connectionString: icuDsn.href, ssl: false, schema, now })
+        expect(written.domains[0]!.sha256).toBe(inProcess.domains[0]!.sha256)
+        expect((written as unknown as { payloadSha256: string }).payloadSha256).toBe(inProcess.payloadSha256)
+      } finally {
+        await source.close()
+        await rm(directory, { recursive: true, force: true })
+      }
+    } finally {
+      if (created) await admin.query(`DROP DATABASE IF EXISTS ${database} WITH (FORCE)`).catch(() => undefined)
+      await admin.end()
+    }
+  }, 60_000)
+
   it('proves the `COLLATE "C"` in the streaming reader is load-bearing, whatever the database locale', async () => {
     // This test database happens to be C.UTF-8, so simply dropping the COLLATE would not fail the
     // test above — that would be a vacuous guard. Here the claim is checked directly: a locale

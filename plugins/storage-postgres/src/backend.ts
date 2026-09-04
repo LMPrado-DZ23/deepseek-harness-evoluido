@@ -13,6 +13,8 @@ export interface PostgresStorageBackendConfig {
   ssl: false | { rejectUnauthorized: boolean }
   poolMax: number
   heartbeatMs?: number
+  /** How long to wait before taking the maintenance lock again after losing its session. */
+  maintenanceRetryMs?: number
 }
 
 /** PostgreSQL KV backend with one dedicated, locked connection per open unit. */
@@ -25,8 +27,12 @@ export class PostgresStorageBackend implements StorageBackend {
   private closing: Promise<void> | undefined
   /** Dedicated session holding the shared maintenance lock while this Studio is up. */
   private maintenance: Client | undefined
+  private maintenanceHeld = false
+  private maintenanceRetry: NodeJS.Timeout | undefined
+  private readonly maintenanceRetryMs: number
 
   constructor(private readonly config: PostgresStorageBackendConfig) {
+    this.maintenanceRetryMs = config.maintenanceRetryMs ?? 2_000
     this.pool = new Pool(this.connectionConfig(config.poolMax))
     this.ready = ensureSchema(this.pool, config.schema).then(() => this.holdMaintenanceLock())
     this.ready.catch(() => undefined)
@@ -37,9 +43,19 @@ export class PostgresStorageBackend implements StorageBackend {
    * Shared, so several readers coexist; a restore that wants the schema takes
    * it exclusive and is refused while this session exists. Its own session is
    * what releases it, so a crashed Studio never leaves it stuck.
+   *
+   * The session is supervised: a dropped connection (failover, an idle reaper,
+   * `pg_terminate_backend`, a network blip) would otherwise both crash the
+   * process with an unhandled `error` event AND silently drop the guarantee,
+   * leaving a live Studio that a restore is free to `DROP SCHEMA` under. On
+   * loss it reconnects and takes the lock again; while it is not held, the
+   * backend refuses to open new units instead of running unprotected.
    */
   private async holdMaintenanceLock(): Promise<void> {
     const client = new Client({ ...this.connectionConfig(), application_name: `dz23-storage:maintenance:${this.config.schema}` })
+    // Attached BEFORE connect: an `error` event with no listener takes the whole process down.
+    client.on('error', () => { this.onMaintenanceLost(client) })
+    client.on('end', () => { this.onMaintenanceLost(client) })
     await client.connect()
     try {
       await client.query('SELECT pg_advisory_lock_shared(hashtext($1))', [storageMaintenanceLockName(this.config.schema)])
@@ -49,7 +65,30 @@ export class PostgresStorageBackend implements StorageBackend {
       throw error
     }
     this.maintenance = client
+    this.maintenanceHeld = true
   }
+
+  /** The lock session died: stop claiming the guarantee, and try to take it again. */
+  private onMaintenanceLost(client: Client): void {
+    if (this.closing !== undefined || this.maintenance !== client) return
+    this.maintenance = undefined
+    this.maintenanceHeld = false
+    /* v8 ignore next -- the retry timer is exercised by the reconnection test, not by unit coverage. */
+    if (this.maintenanceRetry !== undefined) return
+    const attempt = (): void => {
+      this.maintenanceRetry = undefined
+      if (this.closing !== undefined || this.maintenanceHeld) return
+      this.holdMaintenanceLock().catch(() => {
+        this.maintenanceRetry = setTimeout(attempt, this.maintenanceRetryMs)
+        this.maintenanceRetry.unref()
+      })
+    }
+    this.maintenanceRetry = setTimeout(attempt, this.maintenanceRetryMs)
+    this.maintenanceRetry.unref()
+  }
+
+  /** Whether this Studio currently holds the shared maintenance lock on its schema. */
+  get maintenanceLockHeld(): boolean { return this.maintenanceHeld }
 
   /** Resolve only after the schema and database connection are usable. */
   waitUntilReady(): Promise<void> {
@@ -74,6 +113,11 @@ export class PostgresStorageBackend implements StorageBackend {
 
   private async materializeUnit(descriptor: KvUnitDescriptor): Promise<PostgresKvUnit> {
     await this.ready
+    // Without the maintenance lock a restore could replace this schema underneath us: refuse to
+    // start writing rather than write into something that may be dropped in the next second.
+    if (!this.maintenanceHeld) {
+      throw new StudioStorageError(`postgres storage schema '${this.config.schema}' is not protected by the maintenance lock right now`)
+    }
     const holder = randomUUID()
     const client = new Client({ ...this.connectionConfig(), application_name: `dz23-storage:${descriptor.name}` })
     try {
@@ -134,6 +178,10 @@ export class PostgresStorageBackend implements StorageBackend {
   }
 
   private async doClose(): Promise<void> {
+    // The lock session is assigned after an await, so a close that races the opening would leak it
+    // and leave the schema looking busy forever.
+    await this.ready.catch(() => undefined)
+    if (this.maintenanceRetry !== undefined) { clearTimeout(this.maintenanceRetry); this.maintenanceRetry = undefined }
     for (const pending of [...this.units.values()]) {
       /* v8 ignore next -- a rejected pending open already released its client in materializeUnit. */
       const unit = await pending.catch(() => undefined)
@@ -142,6 +190,8 @@ export class PostgresStorageBackend implements StorageBackend {
     await this.pool.end()
     const maintenance = this.maintenance
     this.maintenance = undefined
+    this.maintenanceHeld = false
+    maintenance?.removeAllListeners('end')
     /* v8 ignore next -- ending the session releases the lock even if the explicit unlock fails. */
     await maintenance?.query('SELECT pg_advisory_unlock_shared(hashtext($1))', [storageMaintenanceLockName(this.config.schema)]).catch(() => undefined)
     /* v8 ignore next -- best-effort close of the maintenance session. */

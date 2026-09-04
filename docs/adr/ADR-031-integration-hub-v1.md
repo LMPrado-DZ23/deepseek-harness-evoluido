@@ -121,6 +121,45 @@ ligá-la, e levar o protótipo verificado consigo.
    impressa; assinar por cima de uma assinatura existente exige `--replace`.
    Guia: `docs/guides/integracoes-e-pacote-do-prototipo.md`.
 
+## Correções da revisão adversarial das próprias correções (04/09, subagentes)
+
+- **O nível exigido é o piso da natureza, não o que está gravado.** `setEnabled` e `testSmtp` usavam
+  o `effective_tier` da linha; uma linha escrita com T0 (build antigo, migração, qualquer outro
+  escritor da tabela) mandava e-mail de verdade **sem confirmação nenhuma** enquanto a tela seguia
+  mostrando T2. Agora o tier exigido é o mais restritivo entre o gravado e o piso do kind, e
+  `requiredApprovalTier` usa **a mesma expressão** da exigência — a tela não pode mostrar menos do
+  que o servidor cobra.
+- **Nada de atualização perdida.** `setEnabled` escrevia por cima o instantâneo lido antes da
+  confirmação: uma re-registração concorrente que **subisse** o tier era desfeita em silêncio. Agora,
+  se o registro mudou durante a confirmação, a ação é recusada (`CONFLICT`).
+- **A varredura de segredos não desiste por tamanho.** Havia limite de 4 MB — "nenhum segredo
+  encontrado" justamente nos arquivos onde um bundle esconde um. Agora a leitura é por fatias com
+  sobreposição; e todo arquivo que a varredura **não sabe ler** (imagem, `.gz`, `.wasm`) entra no
+  pacote com o nome listado em `EXCLUIDOS.txt` sob "entraram sem conferência", em vez de passar como
+  se tivesse sido conferido.
+- **A pasta `data/` do aplicativo não viaja em profundidade nenhuma** (antes só na raiz do
+  standalone: um app uma pasta abaixo levava o próprio banco e os códigos capturados). Sob
+  `node_modules` a regra não vale — ali `data/` é da dependência, e tirá-la quebraria o aplicativo.
+- **Atalhos e nomes impossíveis também são nomeados.** Link simbólico sumia sem aparecer em lugar
+  nenhum; nome com barra invertida virava erro 500. Agora os dois entram na lista de exclusões, com
+  o motivo.
+- **A raiz das execuções é obrigatória e não vem do ambiente.** Era opcional (serviço sem ela = sem
+  confinamento) e o profile a lia de `DZ23_STUDIO_RUNS_ROOT` — três linhas abaixo do comentário que
+  diz que variável de ambiente não pode mexer em política. Agora é obrigatória no serviço e escrita
+  no profile.
+- **Confirmação registrada só quando a ação aconteceu**, e as recusas de segredo ausente ou
+  inválido passaram a ser auditadas: antes o histórico dizia "Confirmação da pessoa registrada" para
+  uma configuração que não aconteceu, e a recusa não aparecia em lugar nenhum.
+- **Honestidade do texto:** o passo de confirmação prometia que "o Studio vai pedir a sua passkey" —
+  e o painel não executa cerimônia de passkey nenhuma. Agora diz o que de fato acontece: a ação só
+  funciona se a passkey já tiver sido confirmada nesta sessão; senão o Studio recusa e nada muda.
+
+Limite que fica **registrado, não fechado**: a confirmação de **T2** é uma afirmação do cliente (um
+campo JSON). O que separa isso de uma página hostil é CSRF + verificação de origem; **T3** é o único
+nível com prova do lado do servidor (a passkey recente). Anotado para a fatia da arquitetura de
+modos de confiança.
+
+
 ## Consequências
 
 - Domínio novo `studio_integrations` (versão 1) roteado para Postgres nos dois

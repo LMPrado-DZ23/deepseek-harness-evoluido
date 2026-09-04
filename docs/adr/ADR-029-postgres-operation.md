@@ -39,8 +39,18 @@ Status: aceita e implementada na etapa M3 (Claude), sobre a base P31-A.
    cada registro duas vezes. Ganho: memória constante — nem o banco inteiro nem
    um domínio inteiro ficam na memória de ninguém. A ordem dos registros vem do
    banco com `COLLATE "C"` (ordem de bytes), que é a ordem que a forma canônica
-   exige; a locale do banco ordenaria diferente, e há teste que demonstra a
-   divergência em vez de supor. O diretório é um volume dedicado no
+   exige; a locale do banco ordenaria diferente. **Duas correções da revisão
+   adversarial:** o `COLLATE "C"` estava só no nome da tabela e **faltava na
+   leitura das chaves** (um `sed` meu o apagou depois de os testes passarem, e o
+   teste não pegou porque este banco de teste é `C.UTF-8` — guarda que não pode
+   falhar não é guarda); e a forma canônica ordenava por **unidades UTF-16**
+   (`<` em JavaScript), que discorda da ordem de bytes para qualquer chave fora
+   do BMP: uma única chave com emoji selava um pacote que falhava no próprio
+   validador, ou seja, uma cópia de segurança que não restaura. Agora a
+   comparação é por bytes UTF-8 (`compareUtf8`) e o teste roda contra um banco
+   criado com locale **ICU pt-BR**, onde as ordens realmente divergem —
+   verificado por mutação: desfazer qualquer uma das duas correções faz o teste
+   falhar. O diretório é um volume dedicado no
    Compose (`studio-backups`). Sem diretório, não há agendamento e o operador usa
    `pnpm storage:backup-postgres`.
 4. **Restauração é o caminho já provado, e agora recusa antes de destruir.**
@@ -70,6 +80,18 @@ Status: aceita e implementada na etapa M3 (Claude), sobre a base P31-A.
      `verify-full` na importação e despejar em claro).
    A prova adversarial dessas regras está em `docs/proofs/P31-B-backup-restore-proof.md`
    (fase 5).
+
+   **Correções da revisão adversarial das próprias correções (04/09, subagentes):** a checagem de
+   estrutura estava condicionada à existência de uma **tabela** `units` — exatamente a coisa que ela
+   deveria verificar. Um esquema de outro sistema, ou um esquema do Studio cujo `units` fosse uma
+   **view**, atravessava as duas travas e chegava ao `DROP SCHEMA` sem `--force`. Agora a condição é
+   "o esquema tem qualquer relação": aí a estrutura é exigida e a confirmação também. A trava de
+   manutenção passou a ser **supervisionada** — sem ouvinte de `error`, uma queda de conexão
+   derrubava o processo por exceção não tratada e, se alguém a engolisse, a garantia sumia em
+   silêncio e um restore podia derrubar o esquema de um Studio vivo; agora a perda desliga a
+   garantia (abrir unidade nova é recusado), a trava é retomada sozinha, e um `close()` que corra
+   com a abertura não deixa sessão órfã. Esquemas de preparo órfãos, de uma execução morta por
+   `SIGKILL`, são varridos no início da próxima restauração, sob a trava exclusiva.
 5. **Instância de desenvolvimento migra do `json`.** O Harness padrão guarda os
    domínios em `<DSH_HOME>/storages` (json), não em SQLite; `storage:export-json`
    cobre esse caso com o Harness parado.

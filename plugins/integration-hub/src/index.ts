@@ -102,6 +102,9 @@ export async function apply(ctx: Context, config: IntegrationHubConfig = {}): Pr
   ctx.effect(() => () => domain.close(), 'dz23-studio-integration-hub.domainClose')
   const exportsRoot = resolve(config.exportsRoot ?? resolve(homedir(), '.dz23-studio', 'exports'))
   await mkdir(exportsRoot, { recursive: true, mode: 0o700 })
+  // Same default as the prompt-to-app plugin: the two must name the same folder, and the export
+  // fails closed (and says so) if they ever diverge. Not taken from the environment — the export's
+  // only boundary must not be movable by a variable.
   const runsRoot = resolve(config.runsRoot ?? resolve(homedir(), '.dz23-studio', 'generated-runs'))
   const publisherKeys = z.record(z.string().regex(/^[a-z][a-z0-9-]{1,63}$/u), z.string().min(32)).parse(config.publisherKeys ?? {})
   const promptToApp = ctx.studioPromptToApp.service

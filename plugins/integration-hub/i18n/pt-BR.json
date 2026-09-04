@@ -8,6 +8,7 @@
     "secretRefMissing": "Esse nome ainda não existe no cofre do servidor. Cadastre o segredo lá primeiro; aqui fica só o nome.",
     "secretShapeInvalid": "O segredo existe, mas não tem o formato esperado (host, port, secure, user, pass, from).",
     "integrationNotFound": "Integração não encontrada.",
+    "integrationChanged": "Esta integração mudou enquanto você confirmava. Confira o nível de confiança e tente de novo.",
     "manifestInvalid": "O manifesto da integração não está no formato esperado: {detail}",
     "manifestUnverified": "Esta integração não tem assinatura reconhecida e não pode ser ligada no canal estável.",
     "manifestSignatureInvalid": "A assinatura do manifesto não confere com a chave do publicador.",
@@ -36,7 +37,11 @@
     "envComment": "Preencha estas variáveis no ambiente do servidor. Nunca dentro do pacote.",
     "readmeRunLine": "Execução verificada: {runId}",
     "excludedTitle": "Arquivos que ficaram de fora deste pacote",
-    "excludedIntro": "Estes arquivos e pastas existiam na verificação, mas não entraram no pacote: são dados do seu computador (banco, senhas, cópias) ou tipos de arquivo fora da lista permitida para exportação. Nada foi apagado do seu computador."
+    "excludedIntro": "Estes arquivos e pastas existiam na verificação, mas não entraram no pacote: são dados do seu computador (banco, senhas, cópias) ou tipos de arquivo fora da lista permitida para exportação. Nada foi apagado do seu computador.",
+    "uninspectedTitle": "Arquivos que entraram sem conferência de segredos",
+    "uninspectedIntro": "Estes arquivos entraram no pacote, mas a conferência de senhas e chaves só lê arquivos de texto — nestes ninguém olhou dentro. Se algum deles guarda segredo, ele está no pacote.",
+    "excludedShortcut": "atalho",
+    "excludedUnsupportedName": "nome não suportado"
   },
   "manifest": {
     "reasonUnsigned": "Sem assinatura do publicador.",

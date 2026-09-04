@@ -5,7 +5,7 @@ import { roleAllows, type PolicyTier, type StudioPermission, type StudioRole } f
 import { z } from 'zod'
 import { ExportError, packagePrototype } from './export.js'
 import { t } from './i18n.js'
-import { evaluateManifest, type PublisherKeys } from './manifest.js'
+import { evaluateManifest, policyFloor, type PublisherKeys } from './manifest.js'
 import { secretRefSchema, type HubEvent, type StudioExport, type StudioIntegration } from './model.js'
 
 export interface HubActor {
@@ -70,8 +70,12 @@ export interface HubServiceOptions {
   exportsRoot: string
   publisherKeys: PublisherKeys
   channel: 'stable' | 'dev'
-  /** Root the generated runs live under; a `run_directory` outside it is refused before anything is read. */
-  runsRoot?: string | undefined
+  /**
+   * Root the generated runs live under; a `run_directory` outside it is refused
+   * before anything is read. Required: an optional boundary is a boundary that
+   * is off by accident.
+   */
+  runsRoot: string
   emailTest?: EmailTestPort | undefined
   now?: () => Date
   createId?: () => string
@@ -83,6 +87,8 @@ export class HubError extends Error {
 
 /** SMTP for generated apps talks to an external provider: T2 by the D16 floor. */
 export const SMTP_TIER: PolicyTier = 'T2'
+
+const TIER_RANK: Readonly<Record<PolicyTier, number>> = { T0: 0, T1: 1, T2: 2, T3: 3 }
 
 const smtpSecretShape = z.object({ host: z.string().min(1), port: z.number().int(), secure: z.boolean(), user: z.string().min(1), pass: z.string().min(1), from: z.string().min(1) }).strict()
 export { smtpSecretShape }
@@ -112,8 +118,10 @@ export class IntegrationHubService {
   }
 
   /** The confirmation the person has to give before this integration can be turned on. `null` = none needed (T0/T1). */
-  requiredApprovalTier(integration: Pick<StudioIntegration, 'effective_tier'>): PolicyTier | null {
-    return needsApproval(integration.effective_tier) ? integration.effective_tier : null
+  requiredApprovalTier(integration: Pick<StudioIntegration, 'kind' | 'effective_tier' | 'manifest'>): PolicyTier | null {
+    // The same expression that enforces, so the screen can never show a lower tier than the server demands.
+    const tier = this.#enforcedTier(integration)
+    return needsApproval(tier) ? tier : null
   }
 
   get channel(): 'stable' | 'dev' { return this.options.channel }
@@ -148,6 +156,19 @@ export class IntegrationHubService {
     return { integration, reasons: evaluation.reasons }
   }
 
+  /**
+   * The tier this record is enforced at: the most restrictive of what was
+   * stored and the floor its kind demands. A row written before a floor
+   * existed — or by any other writer of the table — must not be able to lower
+   * the confirmation the person has to give.
+   */
+  #enforcedTier(record: Pick<StudioIntegration, 'kind' | 'effective_tier' | 'manifest'>): PolicyTier {
+    const floor = record.kind === 'smtp'
+      ? SMTP_TIER
+      : record.manifest === null ? SMTP_TIER : policyFloor(record.kind, record.manifest)
+    return TIER_RANK[record.effective_tier] >= TIER_RANK[floor] ? record.effective_tier : floor
+  }
+
   async setEnabled(actor: HubActor, integrationId: string, enabled: boolean, approval?: HubApproval): Promise<StudioIntegration> {
     this.#authorize(actor, 'integrations.manage')
     const current = this.#integration(actor, integrationId)
@@ -161,10 +182,18 @@ export class IntegrationHubService {
         await this.#audit(actor, 'integration.enabled', integrationId, 'failure', t('errors.manifestUnverified'))
         throw new HubError('FORBIDDEN', t('errors.manifestUnverified'))
       }
-      await this.#requireTier(actor, current.effective_tier, approval, 'integration.enabled', integrationId)
+      await this.#requireTier(actor, this.#enforcedTier(current), approval, 'integration.enabled', integrationId)
     }
-    const updated = { ...current, enabled, updated_at: this.#now().toISOString() }
+    // The record decides the tier, so it must not be written back from a snapshot taken before the
+    // confirmation: a concurrent re-registration that RAISED the tier would be silently undone.
+    const latest = this.#integration(actor, integrationId)
+    if (latest.updated_at !== current.updated_at) {
+      await this.#audit(actor, enabled ? 'integration.enabled' : 'integration.disabled', integrationId, 'failure', 'changed-during-approval')
+      throw new HubError('CONFLICT', t('errors.integrationChanged'))
+    }
+    const updated = { ...latest, enabled, updated_at: this.#now().toISOString() }
     await this.options.repository.putIntegration(updated)
+    if (enabled) await this.#recordApproval(actor, approval, 'integration.enabled', integrationId)
     await this.#audit(actor, enabled ? 'integration.enabled' : 'integration.disabled', integrationId, 'success', updated.effective_tier)
     return updated
   }
@@ -184,8 +213,15 @@ export class IntegrationHubService {
     if (!parsed.success) throw new HubError('INVALID', t('errors.secretRefInvalid'))
     await this.#requireTier(actor, SMTP_TIER, approval, 'smtp.configured', parsed.data)
     const inspection = await this.options.secrets.inspect(parsed.data)
-    if (!inspection.present) throw new HubError('INVALID', t('errors.secretRefMissing'))
-    if (!inspection.shapeOk) throw new HubError('INVALID', t('errors.secretShapeInvalid'))
+    // A refusal is part of the history too: "nothing happened" must be visible, not absent.
+    if (!inspection.present) {
+      await this.#audit(actor, 'smtp.configured', parsed.data, 'failure', 'secret-missing')
+      throw new HubError('INVALID', t('errors.secretRefMissing'))
+    }
+    if (!inspection.shapeOk) {
+      await this.#audit(actor, 'smtp.configured', parsed.data, 'failure', 'secret-shape')
+      throw new HubError('INVALID', t('errors.secretShapeInvalid'))
+    }
     const now = this.#now().toISOString()
     const existing = this.#smtpRecord(actor)
     const record: StudioIntegration = {
@@ -194,6 +230,7 @@ export class IntegrationHubService {
       enabled: true, secret_ref: parsed.data, created_by: existing?.created_by ?? actor.userId, created_at: existing?.created_at ?? now, updated_at: now,
     }
     await this.options.repository.putIntegration(record)
+    await this.#recordApproval(actor, approval, 'smtp.configured', record.integration_id)
     await this.#audit(actor, 'smtp.configured', record.integration_id, 'success', parsed.data)
     return record
   }
@@ -202,13 +239,17 @@ export class IntegrationHubService {
     this.#authorize(actor, 'integrations.manage')
     const record = this.#smtpRecord(actor)
     if (record === undefined || record.secret_ref === null || !record.enabled) throw new HubError('NOT_FOUND', t('errors.smtpNotConfigured'))
-    await this.#requireTier(actor, record.effective_tier, approval, 'smtp.tested', record.integration_id)
+    await this.#requireTier(actor, this.#enforcedTier(record), approval, 'smtp.tested', record.integration_id)
     if (this.options.emailTest === undefined) {
+      await this.#recordApproval(actor, approval, 'smtp.tested', record.integration_id)
       await this.#audit(actor, 'smtp.tested', record.integration_id, 'not-executed', t('errors.smtpTestDisabled'))
       return { result: 'NOT_EXECUTED', message: t('errors.smtpTestDisabled') }
     }
     const recipient = z.string().email().safeParse(to)
-    if (!recipient.success) throw new HubError('INVALID', t('errors.invalidRequest'))
+    if (!recipient.success) {
+      await this.#audit(actor, 'smtp.tested', record.integration_id, 'failure', 'invalid-recipient')
+      throw new HubError('INVALID', t('errors.invalidRequest'))
+    }
     try {
       await this.options.emailTest.sendTest(record.secret_ref, recipient.data)
     } catch (error) {
@@ -216,6 +257,7 @@ export class IntegrationHubService {
       await this.#audit(actor, 'smtp.tested', record.integration_id, 'failure', error instanceof Error ? error.name : 'Error')
       throw new HubError('INVALID', t('errors.smtpTestFailed'))
     }
+    await this.#recordApproval(actor, approval, 'smtp.tested', record.integration_id)
     // The audit trail proves a test happened; it does not need to keep somebody's address in the clear.
     await this.#audit(actor, 'smtp.tested', record.integration_id, 'success', minimizeRecipient(recipient.data))
     return { result: 'SENT', message: t('audit.smtpTested') }
@@ -314,13 +356,17 @@ export class IntegrationHubService {
         throw new HubError('FORBIDDEN', t('errors.strongIdentityRequired'))
       }
     }
-    await this.#audit(actor, 'approval.recorded', subjectId, 'success', `${action} ${tier}`)
+  }
+
+  /** Written only after the action itself succeeded: a confirmation in the history means something happened. */
+  async #recordApproval(actor: HubActor, approval: HubApproval | undefined, action: HubEvent['action'], subjectId: string): Promise<void> {
+    if (approval?.approved !== true) return
+    await this.#audit(actor, 'approval.recorded', subjectId, 'success', `${action} ${approval.tier}`)
   }
 
   /** Real path of the run directory, refused unless it sits inside the configured runs root (symlinks resolved on both sides). */
   async #confineRunDirectory(candidate: string): Promise<string> {
     const root = this.options.runsRoot
-    if (root === undefined) return resolve(candidate)
     let realRoot: string
     let realRun: string
     try {

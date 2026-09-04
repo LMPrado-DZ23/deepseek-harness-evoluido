@@ -27,20 +27,27 @@ try {
     [args.schema],
   )
   const targetSchemaExists = namespace.rows[0]?.present === true
-  const current = await client.query<{ count: string }>(
-    `SELECT count(*) FROM pg_catalog.pg_tables WHERE schemaname = $1 AND tablename = 'units'`,
+  // Everything in the target schema, not only a table named `units`: the check that decides whether
+  // a `DROP SCHEMA` is allowed must not be gated on the very structure it is meant to verify — a
+  // schema whose `units` is a VIEW, or which belongs to something else entirely, used to walk
+  // straight through both guards below.
+  const relations = await client.query<{ count: string }>(
+    'SELECT count(*) FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1',
     [args.schema],
   )
+  const targetHasContent = targetSchemaExists && relations.rows[0]?.count !== '0'
   let existingUnits = 0
   let targetDomains: string[] = []
-  if (current.rows[0]?.count !== '0') {
+  if (targetHasContent) {
     await assertStudioLayout(client, args.schema)
-    const result = await client.query<{ name: string }>(`SELECT name FROM ${quoteIdentifier(args.schema)}."units" ORDER BY name`)
+    const result = await client.query<{ name: string }>(`SELECT name FROM ${quoteIdentifier(args.schema)}."units" ORDER BY name COLLATE "C"`)
     targetDomains = result.rows.map(row => row.name)
     existingUnits = targetDomains.length
   }
-  if (existingUnits > 0 && !(args.force && args.confirm === 'REPLACE_DZ23_STORAGE')) {
-    throw new Error('Target has Studio units. Use --force --confirm REPLACE_DZ23_STORAGE only after reviewing the backup.')
+  // Anything already in the schema — units, zero units but other tables, anything — needs the
+  // spoken confirmation before it is replaced.
+  if (targetHasContent && !(args.force && args.confirm === 'REPLACE_DZ23_STORAGE')) {
+    throw new Error('O esquema de destino já tem conteúdo. Use --force --confirm REPLACE_DZ23_STORAGE só depois de conferir a cópia de segurança.')
   }
   // A bundle that does not carry every domain the target holds would silently DESTROY the missing ones.
   const bundleDomains = new Set(bundle.domains.map(domain => domain.descriptor.name))
@@ -49,7 +56,7 @@ try {
     throw new Error(`Esta cópia não contém ${String(wouldBeLost.length)} conjunto(s) de dados que existem no destino (${wouldBeLost.join(', ')}). Restaurar assim apagaria esses dados. Importação recusada. Se for mesmo isso que você quer, repita com --allow-domain-loss --confirm REPLACE_DZ23_STORAGE.`)
   }
   if (!args.write) {
-    process.stdout.write(`${JSON.stringify({ mode: 'dry-run', domains: bundle.domains.length, existingUnits, targetDomains, wouldBeLost, targetSchemaExists }, null, 2)}\n`)
+    process.stdout.write(`${JSON.stringify({ mode: 'dry-run', domains: bundle.domains.length, existingUnits, targetDomains, wouldBeLost, targetSchemaExists, targetHasContent }, null, 2)}\n`)
     process.exitCode = 0
   } else {
     const backupPath = resolve(args.backup!)
@@ -60,6 +67,17 @@ try {
       await pgDump(dsn, args.schema, backupPath, args.ssl)
       backup = backupPath
       backupStatus = 'created'
+    }
+    // A run killed with SIGKILL leaves a full copy of the data in its staging schema, which nothing
+    // would ever reap. Under the exclusive maintenance lock nobody else can own one, so the old ones
+    // go now — before another copy is made.
+    const orphans = await client.query<{ nspname: string }>(
+      'SELECT nspname FROM pg_catalog.pg_namespace WHERE nspname LIKE $1',
+      [`${args.schema}_staging_%`],
+    )
+    for (const orphan of orphans.rows) {
+      assertIdentifier(orphan.nspname, 'staging schema')
+      await client.query(`DROP SCHEMA IF EXISTS ${quoteIdentifier(orphan.nspname)} CASCADE`)
     }
     const staging = `${args.schema}_staging_${Date.now().toString(36)}`
     assertIdentifier(staging, 'staging schema')
@@ -83,7 +101,7 @@ try {
       await client.query(`DROP SCHEMA IF EXISTS ${quoteIdentifier(staging)} CASCADE`).catch(() => undefined)
       throw error
     }
-    process.stdout.write(`${JSON.stringify({ mode: 'write', domains: bundle.domains.length, backup, backupStatus, replacedDomains: targetDomains, droppedDomains: wouldBeLost }, null, 2)}\n`)
+    process.stdout.write(`${JSON.stringify({ mode: 'write', domains: bundle.domains.length, backup, backupStatus, replacedDomains: targetDomains, droppedDomains: wouldBeLost, reapedStaging: orphans.rows.map(row => row.nspname) }, null, 2)}\n`)
   }
 } finally {
   await client.end()
@@ -159,7 +177,15 @@ async function pgDump(dsn: string, schema: string, output: string, ssl: 'off' | 
     // it would make no sense to demand verify-full here and dump in the clear.
     PGSSLMODE: ssl === 'off' ? 'disable' : ssl === 'require' ? 'require' : 'verify-full',
   }
-  const destination = await open(output, 'wx', 0o600)
+  let destination
+  try {
+    destination = await open(output, 'wx', 0o600)
+  } catch (error) {
+    if ((error as { code?: string }).code === 'EEXIST') {
+      throw new Error(`Já existe um arquivo em ${output} (provavelmente de uma tentativa anterior). Escolha outro caminho para --backup ou mova esse arquivo antes de repetir.`)
+    }
+    throw error
+  }
   try {
     await new Promise<void>((resolvePromise, reject) => {
       const child = spawn('pg_dump', [`--schema=${schema}`, '--format=custom'], {

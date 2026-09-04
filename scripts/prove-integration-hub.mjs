@@ -14,6 +14,7 @@ import { execFileSync, spawn } from 'node:child_process'
 import { createHash, generateKeyPairSync, randomUUID, sign } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { chmod, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
@@ -29,8 +30,10 @@ const { publicKey, privateKey } = generateKeyPairSync('ed25519')
 process.env.DSH_HOME = dshHome
 process.env.DSH_TELEMETRY_DISABLED = '1'
 process.env.DZ23_HUB_PUBLISHER_KEYS = JSON.stringify({ dz23: publicKey.export({ type: 'spki', format: 'der' }).toString('base64') })
-// The runs root the Hub confines exports to; the fabricated run below lives inside it.
-process.env.DZ23_STUDIO_RUNS_ROOT = join(workDir, 'runs')
+// The Hub confines exports to the runs root of the profile — the same default the prompt-to-app
+// plugin uses. The fabricated run below lives inside it (and is removed at the end), exactly where
+// a real run would be; the adversarial run stays outside it on purpose.
+const runsRoot = resolve(homedir(), '.dz23-studio', 'generated-runs')
 // The SMTP secret lives ONLY in the environment (the vault seam of this profile); the browser sends its name.
 process.env.DZ23_APP_SMTP = JSON.stringify({ host: 'smtp.example.test', port: 587, secure: false, user: 'app', pass: 'nunca-sai-do-servidor', from: 'app@example.test' })
 delete process.env.DZ23_HUB_SMTP_TEST_ENABLED
@@ -128,8 +131,8 @@ try {
   await p2a.transition(actor, project.project_id, 'BUILD_OK')
   await p2a.transition(actor, project.project_id, 'TESTS_OK')
   await p2a.transition(actor, project.project_id, 'VERIFIED_PROTOTYPE')
-  const runDirectory = join(workDir, 'runs', 'op-1')
-  await mkdir(join(workDir, 'runs'), { recursive: true })
+  const runDirectory = join(runsRoot, `hub-proof-${runId}`)
+  await mkdir(runsRoot, { recursive: true })
   await mkdir(join(runDirectory, '.next', 'standalone', 'node_modules', 'next'), { recursive: true })
   await mkdir(join(runDirectory, '.next', 'static'), { recursive: true })
   await mkdir(join(runDirectory, 'data'), { recursive: true })
@@ -251,4 +254,5 @@ Não executado: envio SMTP real (depende da escolha do provedor pelo Prado), exp
 } finally {
   await app.shutdown.shutdown(0)
   await rm(workDir, { recursive: true, force: true })
+  await rm(join(resolve(homedir(), '.dz23-studio', 'generated-runs'), `hub-proof-${runId}`), { recursive: true, force: true })
 }

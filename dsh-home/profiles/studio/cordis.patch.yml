@@ -135,9 +135,11 @@
         # line to `dev` in this file. A wrong signature is refused on either channel.
         channel: stable
         smtpTestEnabled: !!js process.env.DZ23_HUB_SMTP_TEST_ENABLED === '1'
-        # Where the generated runs live. Only a run inside this folder can be packaged;
-        # it must match the runs root of the prompt-to-app plugin (same default).
-        runsRoot: !!js process.env.DZ23_STUDIO_RUNS_ROOT ?? undefined
+        # Where the generated runs live. Only a run inside this folder can be packaged, and it
+        # must match the runs root of the prompt-to-app plugin — both default to
+        # ~/.dz23-studio/generated-runs. Written here, never read from the environment: this is
+        # the export's only boundary, and a variable must not be able to move it.
+        # runsRoot: /caminho/das/execucoes
     - id: dz23-studio-web
       name: '@dz23-studio/web'
     - id: studio-hello

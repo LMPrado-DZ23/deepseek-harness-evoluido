@@ -1,7 +1,7 @@
 import { Client } from 'pg'
 import { StorageError } from '@deepseek-ai/dsh-storage'
 import type { KvUnitDescriptor } from '@deepseek-ai/dsh-storage'
-import { exportedDomain, sealBundle, sha256, type ExportedDomain, type StorageExportBundle } from './bundle.js'
+import { compareUtf8, exportedDomain, sealBundle, sha256, type ExportedDomain, type StorageExportBundle } from './bundle.js'
 import { assertConfiguredSchemaName, globalsTable, quoteIdentifier, recordsTable, STORAGE_POSTGRES_LAYOUT_VERSION, unitsTable } from './schema.js'
 
 export interface SnapshotOptions {
@@ -95,11 +95,11 @@ function deriveDescriptors(units: readonly UnitRow[], records: readonly RecordRo
     tablesByUnit.set(row.unit, set)
   }
   const withGlobal = new Set(globals.map(row => row.unit))
-  // Code-point order here too: the domain order is part of the sealed payload.
-  return [...units].sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0)).map(unit => ({
+  // Byte order here too: the domain order is part of the sealed payload.
+  return [...units].sort((left, right) => compareUtf8(left.name, right.name)).map(unit => ({
     name: unit.name,
     version: unit.version,
-    tables: [...(tablesByUnit.get(unit.name) ?? [])].sort(),
+    tables: [...(tablesByUnit.get(unit.name) ?? [])].sort(compareUtf8),
     hasGlobal: withGlobal.has(unit.name),
   }))
 }

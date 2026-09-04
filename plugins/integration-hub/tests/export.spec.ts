@@ -36,18 +36,24 @@ async function runDirectory(): Promise<string> {
 }
 
 describe('prototype export package', () => {
-  it('keeps library data/ folders and files whose names contain "..", excluding only the app root data/ and caches', async () => {
+  it('keeps a dependency\'s data/ folder but drops the app\'s own at any depth, and keeps names containing ".."', async () => {
     const root = await runDirectory()
     await mkdir(join(root, '.next', 'standalone', 'node_modules', 'lib', 'data'), { recursive: true })
     await writeFile(join(root, '.next', 'standalone', 'node_modules', 'lib', 'data', 'table.json'), '[]')
     await writeFile(join(root, '.next', 'standalone', 'jquery..min.js'), 'js')
     await mkdir(join(root, '.next', 'standalone', '.cache'), { recursive: true })
     await writeFile(join(root, '.next', 'standalone', '.cache', 'x'), 'x')
+    // A generated app one folder down keeps its own store there, captured access codes included.
+    await mkdir(join(root, '.next', 'standalone', 'meu-app', 'data'), { recursive: true })
+    await writeFile(join(root, '.next', 'standalone', 'meu-app', 'data', 'codigos.json'), '[{"code":"654321"}]')
     const built = await packagePrototype({ runDirectory: root, projectName: 'A', runId: 'run-1' })
-    const names = readZip(built.archive).map(entry => entry.name)
-    expect(names).toContain('app/node_modules/lib/data/table.json')
+    const entries = readZip(built.archive)
+    const names = entries.map(entry => entry.name)
+    expect(names).toContain('app/node_modules/lib/data/table.json') // a dependency's data IS the dependency
     expect(names).toContain('app/jquery..min.js')
     expect(names.some(name => name.startsWith('app/data/') || name.startsWith('app/.cache/'))).toBe(false)
+    expect(names.some(name => name.includes('meu-app/data/'))).toBe(false) // …but the app's own store never travels
+    expect(entries.map(entry => entry.data.toString('utf8')).join('\n')).not.toContain('654321')
   })
 
   it('writes Unix file-type bits so system unzip sees regular files with the right permissions', async () => {
@@ -121,6 +127,24 @@ describe('prototype export package', () => {
     const ordinary = await runDirectory()
     await writeFile(join(ordinary, '.next', 'standalone', 'form.js'), 'const field = { name: "password", label: "Senha" }')
     await expect(packagePrototype({ runDirectory: ordinary, projectName: 'A', runId: 'run-1' })).resolves.toMatchObject({ entries: expect.any(Number) })
+  })
+
+  it('scans a file far larger than one slice, and names what it could not inspect', async () => {
+    const root = await runDirectory()
+    // A 5 MB bundle with the key at the very end: a size limit here would answer "no secret found"
+    // for exactly the files most likely to carry one.
+    const filler = 'x'.repeat(5 * 1024 * 1024)
+    await writeFile(join(root, '.next', 'standalone', 'bundle.js'), `${filler}\nconst k = "-----BEGIN PRIVATE KEY-----"`)
+    await expect(packagePrototype({ runDirectory: root, projectName: 'A', runId: 'run-1' }))
+      .rejects.toMatchObject({ code: 'SECRET_DETECTED', message: expect.stringContaining('bundle.js') })
+
+    // A type the scan cannot read still ships, but the package says nobody looked inside it.
+    const quiet = await runDirectory()
+    await writeFile(join(quiet, '.next', 'standalone', 'imagem.png'), 'nao-e-texto')
+    const built = await packagePrototype({ runDirectory: quiet, projectName: 'A', runId: 'run-1' })
+    const entries = readZip(built.archive)
+    expect(entries.map(entry => entry.name)).toContain('app/imagem.png')
+    expect(entries.find(entry => entry.name === 'EXCLUIDOS.txt')!.data.toString('utf8')).toContain('app/imagem.png')
   })
 
   it('refuses a run without a standalone build and slugs names safely', async () => {

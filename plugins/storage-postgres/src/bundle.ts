@@ -75,13 +75,22 @@ export function sha256(value: string | Buffer): string {
   return createHash('sha256').update(value).digest('hex')
 }
 
+/** Byte order of the UTF-8 encoding: exactly what `COLLATE "C"` compares. */
+export function compareUtf8(left: string, right: string): number {
+  return Buffer.compare(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8'))
+}
+
 function sortValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(sortValue)
   if (value !== null && typeof value === 'object') {
-    // Code-point order, locale-independent: the same bytes on every machine.
-    // `localeCompare` would make a bundle validate here and fail on another
-    // installation whose ICU sorts accents or case differently.
-    return Object.fromEntries(Object.entries(value).sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+    // UTF-8 BYTE order, locale-independent, and the same order PostgreSQL gives
+    // under `COLLATE "C"` — the backup reads records straight from a cursor in
+    // that order. `localeCompare` would depend on the machine's ICU, and JS `<`
+    // compares UTF-16 code units, which disagrees with byte order for any key
+    // outside the BMP: an emoji sorts one way here and the other way in the
+    // database, and a single such key would seal a bundle that fails its own
+    // validator.
+    return Object.fromEntries(Object.entries(value).sort(([left], [right]) => compareUtf8(left, right))
       .map(([key, nested]) => [key, sortValue(nested)]))
   }
   return value

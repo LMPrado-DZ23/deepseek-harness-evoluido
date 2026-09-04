@@ -273,7 +273,7 @@ describePostgres('postgres backend against PostgreSQL 16', () => {
       await oldUnit.close()
       await oldBackend.close()
       const backup = join(temporary, 'before-replace.dump')
-      await expect(invoke(targetSchema, backup)).rejects.toThrow('Target has Studio units')
+      await expect(invoke(targetSchema, backup)).rejects.toThrow('já tem conteúdo')
 
       const activeBackend = backend(targetSchema)
       await activeBackend.kv!.open(helloDescriptor)
@@ -298,6 +298,101 @@ describePostgres('postgres backend against PostgreSQL 16', () => {
       await rm(temporary, { recursive: true, force: true })
     }
   }, 30_000)
+
+  it('refuses to replace a schema that is not this Studio, even when a relation is named `units`', async () => {
+    const temporary = await mkdtemp(join(tmpdir(), 'dz23-import-foreign-'))
+    const client = new Client({ connectionString: dsn!, ssl: false })
+    await client.connect()
+    const foreign = schemaName('foreign_victim')
+    const viewed = schemaName('view_victim')
+    try {
+      // 1) Somebody else's schema. It has no `units` at all: the guard used to be gated on that very
+      //    table, so nothing checked the layout and `DROP SCHEMA CASCADE` ran with no confirmation.
+      await client.query(`CREATE SCHEMA ${quoteIdentifier(foreign)}`)
+      await client.query(`CREATE TABLE ${quoteIdentifier(foreign)}."important" (id int)`)
+      await client.query(`INSERT INTO ${quoteIdentifier(foreign)}."important" VALUES (1)`)
+      // 2) A schema where `units` is a VIEW — `pg_tables` does not list views, so the old gate opened again.
+      await client.query(`CREATE SCHEMA ${quoteIdentifier(viewed)}`)
+      await client.query(`CREATE TABLE ${quoteIdentifier(viewed)}."units_real" (name text primary key, version int)`)
+      await client.query(`CREATE VIEW ${quoteIdentifier(viewed)}."units" AS SELECT * FROM ${quoteIdentifier(viewed)}."units_real"`)
+
+      const bundle = await exportStorage(backend(schemaName('foreign_source')), STUDIO_DOMAIN_SPECS, 'c'.repeat(64), '2026-09-04T00:00:00.000Z')
+      const input = join(temporary, 'input.json')
+      await writeFile(input, JSON.stringify(bundle), { flag: 'wx', mode: 0o600 })
+      const cli = resolve('scripts/import-postgres-storage.ts')
+      const attempt = (schema: string, extra: string[] = []) => run(process.execPath, [
+        '--import', 'tsx', cli, '--input', input, '--dsn-ref', 'DZ23_IMPORT_TEST_DSN',
+        '--schema', schema, '--ssl', 'off', '--write', '--backup', join(temporary, `${schema}.dump`), ...extra,
+      ], { env: { ...process.env, DZ23_IMPORT_TEST_DSN: dsn! } })
+
+      // Refused even with the loudest flags a person can type.
+      for (const schema of [foreign, viewed]) {
+        await expect(attempt(schema, ['--force', '--confirm', 'REPLACE_DZ23_STORAGE', '--allow-domain-loss']))
+          .rejects.toThrow('não tem a estrutura do DZ23 STUDIO')
+      }
+      // Nothing was touched, and no safety dump was even started.
+      expect((await client.query(`SELECT count(*)::int AS n FROM ${quoteIdentifier(foreign)}."important"`)).rows[0].n).toBe(1)
+      expect((await client.query(`SELECT count(*)::int AS n FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1`, [viewed])).rows[0].n).toBeGreaterThan(0)
+      await expect(access(join(temporary, `${foreign}.dump`))).rejects.toThrow()
+    } finally {
+      await client.query(`DROP SCHEMA IF EXISTS ${quoteIdentifier(foreign)} CASCADE`).catch(() => undefined)
+      await client.query(`DROP SCHEMA IF EXISTS ${quoteIdentifier(viewed)} CASCADE`).catch(() => undefined)
+      await client.end()
+      await rm(temporary, { recursive: true, force: true })
+    }
+  }, 30_000)
+
+  it('keeps the maintenance lock supervised: a killed session does not crash the Studio, stops new units and is taken again', async () => {
+    const schema = schemaName('maint')
+    const store = new PostgresStorageBackend({ connectionString: dsn!, schema, ssl: false, poolMax: 2, heartbeatMs: 100, maintenanceRetryMs: 200 })
+    const admin = new Client({ connectionString: dsn!, ssl: false })
+    await admin.connect()
+    const uncaught: unknown[] = []
+    const onUncaught = (error: unknown) => uncaught.push(error)
+    process.on('uncaughtException', onUncaught)
+    try {
+      await store.waitUntilReady()
+      expect(store.maintenanceLockHeld).toBe(true)
+      // Kill the lock session the way a failover, an idle reaper or a DBA would.
+      const killed = await admin.query<{ pid: number }>(
+        `SELECT pg_terminate_backend(pid) AS ok, pid FROM pg_stat_activity WHERE application_name = $1`,
+        [`dz23-storage:maintenance:${schema}`],
+      )
+      expect(killed.rowCount).toBeGreaterThan(0)
+      // The guarantee is dropped immediately, and opening a unit is refused rather than running unprotected.
+      await vi.waitFor(() => { expect(store.maintenanceLockHeld).toBe(false) }, { timeout: 5_000, interval: 25 })
+      await expect(store.kv!.open({ name: 'maint_unit', version: 1, tables: ['records'], hasGlobal: false }))
+        .rejects.toThrow('maintenance lock')
+      // And it comes back on its own.
+      await vi.waitFor(() => { expect(store.maintenanceLockHeld).toBe(true) }, { timeout: 10_000, interval: 50 })
+      const unit = await store.kv!.open({ name: 'maint_unit', version: 1, tables: ['records'], hasGlobal: false })
+      await unit.close()
+      // The dead connection must never reach the process as an unhandled error.
+      expect(uncaught).toEqual([])
+    } finally {
+      process.off('uncaughtException', onUncaught)
+      await store.close()
+      await admin.end()
+    }
+  }, 30_000)
+
+  it('leaves no orphan lock session when close() races the opening', async () => {
+    const schema = schemaName('maint_race')
+    const store = new PostgresStorageBackend({ connectionString: dsn!, schema, ssl: false, poolMax: 2 })
+    // No `await waitUntilReady()`: close lands while the lock session is still being taken.
+    await store.close()
+    const admin = new Client({ connectionString: dsn!, ssl: false })
+    await admin.connect()
+    try {
+      const sessions = await admin.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM pg_stat_activity WHERE application_name = $1`,
+        [`dz23-storage:maintenance:${schema}`],
+      )
+      expect(sessions.rows[0]!.n).toBe(0)
+    } finally {
+      await admin.end()
+    }
+  }, 20_000)
 
   it('exposes the Studio lock error as an upstream StorageError subclass', () => {
     const error = new StudioStorageError('locked')
