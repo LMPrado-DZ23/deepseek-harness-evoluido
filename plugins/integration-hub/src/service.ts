@@ -30,16 +30,20 @@ export function strongIdentityFresh(input: { readonly last_strong_auth_method?: 
 }
 
 export interface HubRepository {
-  integrations(): readonly StudioIntegration[]
+  integrations(scope: HubActor): readonly StudioIntegration[]
+  integration(scope: HubActor, integrationId: string): StudioIntegration | undefined
   putIntegration(value: StudioIntegration): Promise<void>
   /** Atomic within the repository writer: replace only the security state the caller read. */
-  compareAndSwapIntegration(integrationId: string, expectedFingerprint: string, value: StudioIntegration): Promise<boolean>
-  exports(): readonly StudioExport[]
+  compareAndSwapIntegration(scope: HubActor, integrationId: string, expectedFingerprint: string, value: StudioIntegration): Promise<boolean>
+  exports(scope: HubActor, projectId: string): readonly StudioExport[]
+  export(scope: HubActor, projectId: string, exportId: string): StudioExport | undefined
   putExport(value: StudioExport): Promise<void>
-  events(): readonly HubEvent[]
+  /** Bounded page, already scoped and ordered newest first; never a full-table snapshot. */
+  eventPage(scope: HubActor, after: Pick<HubEvent, 'created_at' | 'event_id'> | undefined, limit: number): readonly HubEvent[]
+  eventCount(scope: HubActor): number
   putEvent(value: HubEvent): Promise<void>
-  /** Retention: the oldest events of ONE workspace leave when it is over its ceiling. */
-  deleteEvent(eventId: string): Promise<void>
+  /** Retention happens inside the scoped repository index, not after materialising the domain. */
+  pruneEvents(scope: HubActor, keep: number): Promise<number>
 }
 
 /** Existence and shape of a credential in the vault; the value never crosses this port. */
@@ -204,14 +208,6 @@ export class IntegrationHubService {
   /** Export attempts per workspace inside the window, so a flood costs the flooder and nobody else. */
   readonly #exportAttempts = new Map<string, number[]>()
   /**
-   * How many events this process believes one workspace has stored. Retention used to read the
-   * WHOLE table, filter it and sort it on every audited action — including the refusals an attacker
-   * can ask for by the thousand — which made each audited action more expensive than the last. The
-   * count is kept here, recomputed the first time a workspace is seen and after every sweep, so the
-   * full pass happens when the ceiling is actually in play and not before.
-   */
-  readonly #eventCounts = new Map<string, number>()
-  /**
    * Strictly increasing millisecond stamp. `Date.now()` repeats inside one
    * millisecond, and two writes that share a stamp cannot be ordered — the
    * concurrency check that compared `updated_at` could then keep the WRONG
@@ -238,7 +234,7 @@ export class IntegrationHubService {
 
   list(actor: HubActor): readonly StudioIntegration[] {
     this.#authorize(actor, 'workspace.read')
-    return this.options.repository.integrations().filter(value => this.#sameScope(actor, value))
+    return this.options.repository.integrations(actor)
   }
 
   /** Whether the interface may offer "enable" for this record: decided here, the same place that enforces it. */
@@ -441,7 +437,7 @@ export class IntegrationHubService {
       throw new HubError('CONFLICT', t('errors.integrationChanged'))
     }
     const updated = { ...latest, enabled, updated_at: this.#stamp() }
-    if (!await this.options.repository.compareAndSwapIntegration(integrationId, securityFingerprint(latest), updated)) {
+    if (!await this.options.repository.compareAndSwapIntegration(actor, integrationId, securityFingerprint(latest), updated)) {
       await this.#audit(actor, enabled ? 'integration.enabled' : 'integration.disabled', integrationId, 'failure', 'changed-during-write')
       throw new HubError('CONFLICT', t('errors.integrationChanged'))
     }
@@ -540,7 +536,7 @@ export class IntegrationHubService {
   listExports(actor: HubActor, projectId: string): readonly StudioExport[] {
     this.#authorize(actor, 'project.read')
     this.options.projects.project(actor, projectId)
-    return this.options.repository.exports().filter(value => value.project_id === projectId && this.#sameScope(actor, value))
+    return this.options.repository.exports(actor, projectId)
   }
 
   /**
@@ -716,7 +712,9 @@ export class IntegrationHubService {
   }
 
   exportRecord(actor: HubActor, projectId: string, exportId: string): StudioExport {
-    const record = this.listExports(actor, projectId).find(value => value.export_id === exportId)
+    this.#authorize(actor, 'project.read')
+    this.options.projects.project(actor, projectId)
+    const record = this.options.repository.export(actor, projectId, exportId)
     if (record === undefined) throw new HubError('NOT_FOUND', t('errors.exportNotFound'))
     return record
   }
@@ -762,23 +760,22 @@ export class IntegrationHubService {
     this.#authorize(actor, 'audit.read')
     const limit = Math.min(Math.max(Math.trunc(page.limit ?? EVENTS_PAGE_SIZE), 1), EVENTS_PAGE_MAX)
     const after = page.cursor === undefined ? undefined : decodeCursor(page.cursor)
-    const ordered = this.options.repository.events().filter(value => this.#sameScope(actor, value)).sort(newestFirst)
-    const start = after === undefined ? 0 : ordered.findIndex(value => newestFirst(value, after) > 0)
-    const window = start < 0 ? [] : ordered.slice(start, start + limit)
+    const pageRows = this.options.repository.eventPage(actor, after, limit + 1)
+    const window = pageRows.slice(0, limit)
     const last = window.at(-1)
     // A cursor only exists while there is something after it: the client stops without a second empty round trip.
-    const more = last !== undefined && (start < 0 ? false : ordered.length > start + window.length)
+    const more = last !== undefined && pageRows.length > limit
     return { events: window, next_cursor: more ? encodeCursor(last) : null }
   }
 
   // ---- internals -----------------------------------------------------------
 
   #smtpRecord(actor: HubActor): StudioIntegration | undefined {
-    return this.options.repository.integrations().find(value => value.kind === 'smtp' && value.manifest === null && this.#sameScope(actor, value))
+    return this.options.repository.integrations(actor).find(value => value.kind === 'smtp' && value.manifest === null)
   }
 
   #integration(actor: HubActor, integrationId: string): StudioIntegration {
-    const value = this.options.repository.integrations().find(candidate => candidate.integration_id === integrationId && this.#sameScope(actor, candidate))
+    const value = this.options.repository.integration(actor, integrationId)
     if (value === undefined) throw new HubError('NOT_FOUND', t('errors.integrationNotFound'))
     return value
   }
@@ -885,10 +882,6 @@ export class IntegrationHubService {
     if (!roleAllows(actor.role, permission)) throw new HubError('FORBIDDEN', t('errors.forbidden'))
   }
 
-  #sameScope(actor: HubActor, value: { readonly org_id: string; readonly tenant_id: string }): boolean {
-    return value.org_id === actor.orgId && value.tenant_id === actor.tenantId
-  }
-
   async #audit(actor: HubActor, action: HubEvent['action'], subjectId: string, outcome: HubEvent['outcome'], detail: string): Promise<void> {
     await this.options.repository.putEvent({
       event_id: this.#createId(), org_id: actor.orgId, tenant_id: actor.tenantId, actor_user_id: actor.userId,
@@ -905,25 +898,8 @@ export class IntegrationHubService {
    * another's rows.
    */
   async #retainEvents(actor: HubActor): Promise<void> {
-    const key = this.#scope(actor)
-    const known = this.#eventCounts.get(key)
-    // Unknown workspace: count once, from the table. Known: one more than last time — the write
-    // that got us here. Either way the expensive pass below runs only when the ceiling is reached.
-    const count = known === undefined ? this.options.repository.events().filter(value => this.#sameScope(actor, value)).length : known + 1
-    this.#eventCounts.set(key, count)
-    // The map is keyed by a workspace that had to authenticate, and a dropped entry only costs one
-    // recount; it is bounded like every other per-workspace map in this service.
-    if (this.#eventCounts.size > MAX_APPROVAL_SCOPES) {
-      for (const scope of this.#eventCounts.keys()) {
-        if (this.#eventCounts.size <= MAX_APPROVAL_SCOPES) break
-        if (scope !== key) this.#eventCounts.delete(scope)
-      }
-    }
-    if (count <= EVENTS_RETAINED_PER_TENANT) return
-    const mine = this.options.repository.events().filter(value => this.#sameScope(actor, value))
-    const oldest = [...mine].sort(newestFirst).slice(EVENTS_RETAINED_PER_TENANT)
-    for (const event of oldest) await this.options.repository.deleteEvent(event.event_id)
-    this.#eventCounts.set(key, Math.min(mine.length, EVENTS_RETAINED_PER_TENANT))
+    if (this.options.repository.eventCount(actor) <= EVENTS_RETAINED_PER_TENANT) return
+    await this.options.repository.pruneEvents(actor, EVENTS_RETAINED_PER_TENANT)
   }
 }
 
@@ -960,12 +936,6 @@ export function securityFingerprint(record: Pick<StudioIntegration, 'integration
 /** sha256 over parts that cannot run into each other (NUL is not allowed in any of them). */
 function digest(parts: readonly string[]): string {
   return createHash('sha256').update(parts.join('\u0000'), 'utf8').digest('hex')
-}
-
-/** Newest first, with the id as tie-break so a page boundary is a total order and never repeats a row. */
-function newestFirst(left: Pick<HubEvent, 'created_at' | 'event_id'>, right: Pick<HubEvent, 'created_at' | 'event_id'>): number {
-  if (left.created_at !== right.created_at) return left.created_at < right.created_at ? 1 : -1
-  return left.event_id < right.event_id ? 1 : left.event_id > right.event_id ? -1 : 0
 }
 
 /** The cursor is opaque on purpose: it is a position in one workspace's history, not an API. */

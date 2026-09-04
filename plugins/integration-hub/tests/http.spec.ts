@@ -12,21 +12,43 @@ import { EXPORT_LIMIT_BYTES } from '../src/export.ts'
 import { createHubHttpHandler, HUB_ROUTE_CONTRACTS } from '../src/http.ts'
 import { canonicalManifestBytes } from '../src/manifest.ts'
 import type { HubEvent, IntegrationManifest, StudioExport, StudioIntegration } from '../src/model.ts'
-import { IntegrationHubService, securityFingerprint, type HubRepository } from '../src/service.ts'
+import { IntegrationHubService, securityFingerprint, type HubActor, type HubRepository } from '../src/service.ts'
 import { readZip } from '../src/zip.ts'
 
 class MemoryRepository implements HubRepository {
   rows: StudioIntegration[] = []; exportRows: StudioExport[] = []; eventRows: HubEvent[] = []
-  integrations = () => this.rows; exports = () => this.exportRows; events = () => this.eventRows
-  putIntegration = async (value: StudioIntegration) => { this.rows = [...this.rows.filter(row => row.integration_id !== value.integration_id), value] }
-  compareAndSwapIntegration = async (integrationId: string, expected: string, value: StudioIntegration) => {
-    const current = this.rows.find(row => row.integration_id === integrationId)
+  integrations = (scope: HubActor) => this.rows.filter(row => sameScope(scope, row))
+  integration = (scope: HubActor, integrationId: string) => this.rows.find(row => sameScope(scope, row) && row.integration_id === integrationId)
+  putIntegration = async (value: StudioIntegration) => { this.rows = [...this.rows.filter(row => row.integration_id !== value.integration_id || row.org_id !== value.org_id || row.tenant_id !== value.tenant_id), value] }
+  compareAndSwapIntegration = async (scope: HubActor, integrationId: string, expected: string, value: StudioIntegration) => {
+    const current = this.integration(scope, integrationId)
     if (current === undefined || securityFingerprint(current) !== expected) return false
     await this.putIntegration(value); return true
   }
+  exports = (scope: HubActor, projectId: string) => this.exportRows.filter(row => sameScope(scope, row) && row.project_id === projectId)
+  export = (scope: HubActor, projectId: string, exportId: string) => this.exportRows.find(row => sameScope(scope, row) && row.project_id === projectId && row.export_id === exportId)
   putExport = async (value: StudioExport) => { this.exportRows = [...this.exportRows, value] }
+  eventPage = (scope: HubActor, after: Pick<HubEvent, 'created_at' | 'event_id'> | undefined, limit: number) => {
+    const rows = this.eventRows.filter(row => sameScope(scope, row)).sort(newestFirst)
+    const start = after === undefined ? 0 : rows.findIndex(row => newestFirst(row, after) > 0)
+    return start < 0 ? [] : rows.slice(start, start + limit)
+  }
+  eventCount = (scope: HubActor) => this.eventRows.filter(row => sameScope(scope, row)).length
   putEvent = async (value: HubEvent) => { this.eventRows = [...this.eventRows, value] }
-  deleteEvent = async (eventId: string) => { this.eventRows = this.eventRows.filter(row => row.event_id !== eventId) }
+  pruneEvents = async (scope: HubActor, keep: number) => {
+    const retained = this.eventRows.filter(row => sameScope(scope, row)).sort(newestFirst).slice(0, keep)
+    const ids = new Set(retained.map(row => row.event_id))
+    const before = this.eventCount(scope)
+    this.eventRows = this.eventRows.filter(row => !sameScope(scope, row) || ids.has(row.event_id))
+    return before - retained.length
+  }
+}
+
+type Scope = { readonly orgId: string; readonly tenantId: string }
+function sameScope(scope: Scope, value: { org_id: string; tenant_id: string }): boolean { return scope.orgId === value.org_id && scope.tenantId === value.tenant_id }
+function newestFirst(left: Pick<HubEvent, 'created_at' | 'event_id'>, right: Pick<HubEvent, 'created_at' | 'event_id'>): number {
+  if (left.created_at !== right.created_at) return left.created_at < right.created_at ? 1 : -1
+  return left.event_id < right.event_id ? 1 : left.event_id > right.event_id ? -1 : 0
 }
 
 const session = { session_id: 's1', user_id: 'u1', org_id: 'org-a', tenant_id: 'ws-a' } as SessionRecord

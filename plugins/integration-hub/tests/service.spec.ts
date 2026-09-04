@@ -10,16 +10,40 @@ import { readZip } from '../src/zip.ts'
 
 class MemoryRepository implements HubRepository {
   rows: StudioIntegration[] = []; exportRows: StudioExport[] = []; eventRows: HubEvent[] = []
-  integrations = () => this.rows; exports = () => this.exportRows; events = () => this.eventRows
-  putIntegration = async (value: StudioIntegration) => { this.rows = [...this.rows.filter(row => row.integration_id !== value.integration_id), value] }
-  compareAndSwapIntegration = async (integrationId: string, expected: string, value: StudioIntegration) => {
-    const current = this.rows.find(row => row.integration_id === integrationId)
+  pageLimits: number[] = []; pruneCalls: Array<{ tenantId: string; keep: number }> = []
+  integrations = (scope: HubActor) => this.rows.filter(row => sameScope(scope, row))
+  integration = (scope: HubActor, integrationId: string) => this.rows.find(row => sameScope(scope, row) && row.integration_id === integrationId)
+  putIntegration = async (value: StudioIntegration) => { this.rows = [...this.rows.filter(row => row.integration_id !== value.integration_id || row.org_id !== value.org_id || row.tenant_id !== value.tenant_id), value] }
+  compareAndSwapIntegration = async (scope: HubActor, integrationId: string, expected: string, value: StudioIntegration) => {
+    const current = this.integration(scope, integrationId)
     if (current === undefined || securityFingerprint(current) !== expected) return false
     await this.putIntegration(value); return true
   }
+  exports = (scope: HubActor, projectId: string) => this.exportRows.filter(row => sameScope(scope, row) && row.project_id === projectId)
+  export = (scope: HubActor, projectId: string, exportId: string) => this.exportRows.find(row => sameScope(scope, row) && row.project_id === projectId && row.export_id === exportId)
   putExport = async (value: StudioExport) => { this.exportRows = [...this.exportRows, value] }
+  eventPage = (scope: HubActor, after: Pick<HubEvent, 'created_at' | 'event_id'> | undefined, limit: number) => {
+    this.pageLimits.push(limit)
+    const rows = this.eventRows.filter(row => sameScope(scope, row)).sort(newestFirst)
+    const start = after === undefined ? 0 : rows.findIndex(row => newestFirst(row, after) > 0)
+    return start < 0 ? [] : rows.slice(start, start + limit)
+  }
+  eventCount = (scope: HubActor) => this.eventRows.filter(row => sameScope(scope, row)).length
   putEvent = async (value: HubEvent) => { this.eventRows = [...this.eventRows, value] }
-  deleteEvent = async (eventId: string) => { this.eventRows = this.eventRows.filter(row => row.event_id !== eventId) }
+  pruneEvents = async (scope: HubActor, keep: number) => {
+    this.pruneCalls.push({ tenantId: scope.tenantId, keep })
+    const retained = this.eventRows.filter(row => sameScope(scope, row)).sort(newestFirst).slice(0, keep)
+    const ids = new Set(retained.map(row => row.event_id))
+    const before = this.eventCount(scope)
+    this.eventRows = this.eventRows.filter(row => !sameScope(scope, row) || ids.has(row.event_id))
+    return before - retained.length
+  }
+}
+
+function sameScope(scope: HubActor, value: { org_id: string; tenant_id: string }): boolean { return scope.orgId === value.org_id && scope.tenantId === value.tenant_id }
+function newestFirst(left: Pick<HubEvent, 'created_at' | 'event_id'>, right: Pick<HubEvent, 'created_at' | 'event_id'>): number {
+  if (left.created_at !== right.created_at) return left.created_at < right.created_at ? 1 : -1
+  return left.event_id < right.event_id ? 1 : left.event_id > right.event_id ? -1 : 0
 }
 
 const owner: HubActor = { userId: 'u-owner', orgId: 'org-a', tenantId: 'ws-a', role: 'owner' }
@@ -227,14 +251,14 @@ describe('integration hub service', () => {
     // leave it enabled at T0.
     const readRows = repository.integrations.bind(repository)
     let reads = 0
-    repository.integrations = () => {
+    repository.integrations = (scope) => {
       reads += 1
       if (reads === 2) {
         repository.rows = repository.rows.map(row => (row.integration_id === id
           ? { ...row, effective_tier: 'T3' as const, updated_at: '2026-09-05T00:00:00.000Z' }
           : row))
       }
-      return readRows()
+      return readRows(scope)
     }
     await expect(service.setEnabled(admin, id, true)).rejects.toMatchObject({ code: 'CONFLICT' })
     expect(repository.rows.find(row => row.integration_id === id)).toMatchObject({ enabled: false, effective_tier: 'T3' })
@@ -375,6 +399,9 @@ describe('integration hub service', () => {
     expect(() => service.events(owner, { cursor: 'não é um cursor' })).toThrow(HubError)
     // Another workspace's history is not paged into this one.
     expect(service.events({ ...owner, tenantId: 'ws-b' }).events).toEqual([])
+    // The service asks the repository for one bounded look-ahead row; it never
+    // requests or receives the whole event table to paginate in memory.
+    expect(repository.pageLimits).toEqual([3, 3, 3, 201, 51])
   })
 
   it('keeps the history bounded per workspace instead of growing for as long as the Studio runs', async () => {
@@ -396,6 +423,7 @@ describe('integration hub service', () => {
     expect(mine.some(row => row.action === 'integration.registered')).toBe(true)
     // One workspace's ceiling never touches another's rows.
     expect(repository.eventRows.filter(row => row.tenant_id === 'ws-b')).toHaveLength(5)
+    expect(repository.pruneCalls).toEqual([{ tenantId: 'ws-a', keep: EVENTS_RETAINED_PER_TENANT }])
   })
 
   it('builds one package at a time per project and refuses a flood of export requests', async () => {

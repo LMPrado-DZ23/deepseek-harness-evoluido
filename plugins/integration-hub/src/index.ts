@@ -15,7 +15,7 @@ import { createHubHttpHandler } from './http.js'
 import { isLoopbackAuthority, isLoopbackEndpoint } from './manifest.js'
 import { t } from './i18n.js'
 import { studioIntegrationsDomainSpec, type HubEvent, type HubKey, type StudioExport, type StudioIntegration } from './model.js'
-import { IntegrationHubService, securityFingerprint, smtpSecretShape, type EmailTestPort, type HubRepository, type SecretInspector } from './service.js'
+import { IntegrationHubService, securityFingerprint, smtpSecretShape, type EmailTestPort, type HubActor, type HubRepository, type SecretInspector } from './service.js'
 
 export * from './model.js'
 export * from './manifest.js'
@@ -49,35 +49,148 @@ export interface IntegrationHubConfig {
 
 class DomainHubRepository implements HubRepository {
   #integrationTail: Promise<void> = Promise.resolve()
+  #eventTail: Promise<void> = Promise.resolve()
+  readonly #integrations = new Map<string, Map<string, StudioIntegration>>()
+  readonly #exports = new Map<string, Map<string, StudioExport>>()
+  readonly #events = new Map<string, HubEvent[]>()
+  readonly #integrationKeys = new Map<string, HubKey>()
+  readonly #exportKeys = new Map<string, HubKey>()
+  readonly #eventKeys = new Map<string, HubKey>()
+
   constructor(
     private readonly integrationTable: KvTable<HubKey, StudioIntegration>,
     private readonly exportTable: KvTable<HubKey, StudioExport>,
     private readonly eventTable: KvTable<HubKey, HubEvent>,
-  ) {}
-  integrations() { return values(this.integrationTable) }
-  putIntegration(value: StudioIntegration) { return this.#exclusiveIntegration(() => this.integrationTable.put(value.integration_id as HubKey, value)) }
-  compareAndSwapIntegration(integrationId: string, expectedFingerprint: string, value: StudioIntegration) {
+  ) {
+    // The storage-domain seam itself is memory resident. Build bounded, scoped
+    // indexes once at open so requests never clone and filter all three tables.
+    for (const [key, value] of integrationTable.entries()) {
+      mapFor(this.#integrations, scopeOf(value)).set(value.integration_id, value)
+      this.#integrationKeys.set(recordKey(value, value.integration_id), key)
+    }
+    for (const [key, value] of exportTable.entries()) {
+      mapFor(this.#exports, projectScopeOf(value, value.project_id)).set(value.export_id, value)
+      this.#exportKeys.set(recordKey(value, value.export_id), key)
+    }
+    for (const [key, value] of eventTable.entries()) {
+      arrayFor(this.#events, scopeOf(value)).push(value)
+      this.#eventKeys.set(recordKey(value, value.event_id), key)
+    }
+    for (const rows of this.#events.values()) rows.sort(newestEventFirst)
+  }
+
+  integrations(scope: HubActor) { return [...(this.#integrations.get(scopeOf(scope))?.values() ?? [])] }
+  integration(scope: HubActor, integrationId: string) { return this.#integrations.get(scopeOf(scope))?.get(integrationId) }
+  putIntegration(value: StudioIntegration) { return this.#exclusiveIntegration(() => this.#putIntegration(value)) }
+  compareAndSwapIntegration(scope: HubActor, integrationId: string, expectedFingerprint: string, value: StudioIntegration) {
     return this.#exclusiveIntegration(async () => {
-      const current = this.integrationTable.get(integrationId as HubKey)
+      const current = this.integration(scope, integrationId)
       if (current === undefined || securityFingerprint(current) !== expectedFingerprint) return false
-      await this.integrationTable.put(integrationId as HubKey, value)
+      await this.#putIntegration(value)
       return true
     })
   }
-  exports() { return values(this.exportTable) }
-  putExport(value: StudioExport) { return this.exportTable.put(value.export_id as HubKey, value) }
-  events() { return values(this.eventTable) }
-  putEvent(value: HubEvent) { return this.eventTable.put(value.event_id as HubKey, value) }
-  async deleteEvent(eventId: string) { await this.eventTable.delete(eventId as HubKey) }
+  exports(scope: HubActor, projectId: string) { return [...(this.#exports.get(projectScopeOf(scope, projectId))?.values() ?? [])] }
+  export(scope: HubActor, projectId: string, exportId: string) { return this.#exports.get(projectScopeOf(scope, projectId))?.get(exportId) }
+  async putExport(value: StudioExport) {
+    const key = physicalKey(value, value.export_id)
+    await this.exportTable.put(key, value)
+    const identity = recordKey(value, value.export_id)
+    const previous = this.#exportKeys.get(identity)
+    if (previous !== undefined && previous !== key) await this.exportTable.delete(previous)
+    this.#exportKeys.set(identity, key)
+    mapFor(this.#exports, projectScopeOf(value, value.project_id)).set(value.export_id, value)
+  }
+  eventPage(scope: HubActor, after: Pick<HubEvent, 'created_at' | 'event_id'> | undefined, limit: number) {
+    const rows = this.#events.get(scopeOf(scope)) ?? []
+    const start = after === undefined ? 0 : rows.findIndex(value => newestEventFirst(value, after) > 0)
+    return start < 0 ? [] : rows.slice(start, start + limit)
+  }
+  eventCount(scope: HubActor) { return this.#events.get(scopeOf(scope))?.length ?? 0 }
+  putEvent(value: HubEvent) {
+    return this.#exclusiveEvent(async () => {
+      const key = physicalKey(value, value.event_id)
+      await this.eventTable.put(key, value)
+      const identity = recordKey(value, value.event_id)
+      const previous = this.#eventKeys.get(identity)
+      if (previous !== undefined && previous !== key) await this.eventTable.delete(previous)
+      this.#eventKeys.set(identity, key)
+      const rows = arrayFor(this.#events, scopeOf(value))
+      const old = rows.findIndex(event => event.event_id === value.event_id)
+      if (old >= 0) rows.splice(old, 1)
+      rows.push(value)
+      rows.sort(newestEventFirst)
+    })
+  }
+  pruneEvents(scope: HubActor, keep: number) {
+    return this.#exclusiveEvent(async () => {
+      const rows = this.#events.get(scopeOf(scope)) ?? []
+      const removed = rows.splice(keep)
+      for (const value of removed) {
+        const identity = recordKey(value, value.event_id)
+        const key = this.#eventKeys.get(identity)
+        if (key !== undefined) await this.eventTable.delete(key)
+        this.#eventKeys.delete(identity)
+      }
+      return removed.length
+    })
+  }
+
+  async #putIntegration(value: StudioIntegration): Promise<void> {
+    const key = physicalKey(value, value.integration_id)
+    await this.integrationTable.put(key, value)
+    const identity = recordKey(value, value.integration_id)
+    const previous = this.#integrationKeys.get(identity)
+    if (previous !== undefined && previous !== key) await this.integrationTable.delete(previous)
+    this.#integrationKeys.set(identity, key)
+    mapFor(this.#integrations, scopeOf(value)).set(value.integration_id, value)
+  }
 
   #exclusiveIntegration<T>(work: () => Promise<T>): Promise<T> {
     const result = this.#integrationTail.then(work, work)
     this.#integrationTail = result.then(() => undefined, () => undefined)
     return result
   }
+
+  #exclusiveEvent<T>(work: () => Promise<T>): Promise<T> {
+    const result = this.#eventTail.then(work, work)
+    this.#eventTail = result.then(() => undefined, () => undefined)
+    return result
+  }
 }
 
-function values<T>(table: KvTable<HubKey, T>): T[] { return [...table.entries()].map(([, value]) => value) }
+function scopeOf(value: { readonly org_id?: string; readonly tenant_id?: string; readonly orgId?: string; readonly tenantId?: string }): string {
+  return JSON.stringify([value.org_id ?? value.orgId, value.tenant_id ?? value.tenantId])
+}
+
+function projectScopeOf(value: { readonly org_id?: string; readonly tenant_id?: string; readonly orgId?: string; readonly tenantId?: string }, projectId: string): string {
+  return JSON.stringify([value.org_id ?? value.orgId, value.tenant_id ?? value.tenantId, projectId])
+}
+
+function recordKey(value: { readonly org_id: string; readonly tenant_id: string }, id: string): string {
+  return JSON.stringify([value.org_id, value.tenant_id, id])
+}
+
+function physicalKey(value: { readonly org_id: string; readonly tenant_id: string }, id: string): HubKey {
+  return recordKey(value, id) as HubKey
+}
+
+function mapFor<T>(index: Map<string, Map<string, T>>, key: string): Map<string, T> {
+  let rows = index.get(key)
+  if (rows === undefined) { rows = new Map(); index.set(key, rows) }
+  return rows
+}
+
+function arrayFor<T>(index: Map<string, T[]>, key: string): T[] {
+  let rows = index.get(key)
+  if (rows === undefined) { rows = []; index.set(key, rows) }
+  return rows
+}
+
+function newestEventFirst(left: Pick<HubEvent, 'created_at' | 'event_id'>, right: Pick<HubEvent, 'created_at' | 'event_id'>): number {
+  if (left.created_at !== right.created_at) return left.created_at < right.created_at ? 1 : -1
+  return left.event_id < right.event_id ? 1 : left.event_id > right.event_id ? -1 : 0
+}
 
 /** Looks a credential up by reference and reports presence and shape; the value is parsed and discarded here. */
 export function credentialInspector(credentials: Context['credentials']): SecretInspector {
