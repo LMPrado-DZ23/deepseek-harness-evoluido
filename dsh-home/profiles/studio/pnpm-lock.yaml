@@ -29,6 +29,9 @@ importers:
       '@dz23-studio/policy':
         specifier: link:../../../plugins/policy
         version: link:../../../plugins/policy
+      '@dz23-studio/preview':
+        specifier: link:../../../plugins/preview
+        version: link:../../../plugins/preview
       '@dz23-studio/prompt-to-app':
         specifier: link:../../../plugins/prompt-to-app
         version: link:../../../plugins/prompt-to-app

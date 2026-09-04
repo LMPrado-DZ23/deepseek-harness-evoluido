@@ -36,7 +36,8 @@ const SAFE_INTRINSIC_JSX_TAGS = new Set([
 ])
 const FORBIDDEN_JSX_ATTRIBUTES = new Set(['dangerouslySetInnerHTML', 'srcDoc'])
 const URL_JSX_ATTRIBUTES = new Set(['href', 'src', 'action', 'formAction', 'xlinkHref'])
-const ACTIVE_URL_SCHEME = /^\s*(?:javascript|data|vbscript|file|blob):/iu
+const URL_IGNORED_CODE_POINTS = /[\u0000-\u0020]/gu
+const HTTPS_URL = /^https:\/\//iu
 const FIXED_COMPONENT_PATHS = [
   'src/components/generated', 'components/generated',
   'src/components/ui', 'components/ui',
@@ -93,7 +94,7 @@ function assertNoServerOrUnsafeSource(path: string, source: ts.SourceFile, gener
       if (URL_JSX_ATTRIBUTES.has(name)) {
         const value = staticJsxAttributeValue(node)
         if (value === undefined) throw rejectedSource(path, `dynamic URL attribute ${name}`)
-        if (ACTIVE_URL_SCHEME.test(value)) throw rejectedSource(path, `${name}:${value.split(':', 1)[0]}`)
+        if (!isSafeStaticUrl(value)) throw rejectedSource(path, `unsafe URL attribute ${name}`)
       }
     }
     if (ts.isJsxSpreadAttribute(node)) throw rejectedSource(path, 'JSX spread attribute')
@@ -110,6 +111,13 @@ function assertNoServerOrUnsafeSource(path: string, source: ts.SourceFile, gener
     if (ts.isNewExpression(node)) throw rejectedSource(path, 'runtime constructor')
   }
   walk(source)
+}
+
+function isSafeStaticUrl(value: string): boolean {
+  const normalized = value.replace(URL_IGNORED_CODE_POINTS, '')
+  if (normalized === '' || normalized.startsWith('#') || normalized.startsWith('./')) return true
+  if (normalized.startsWith('/') && !normalized.startsWith('//')) return true
+  return HTTPS_URL.test(normalized)
 }
 
 function importedBindings(source: ts.SourceFile, generatedPaths: ReadonlySet<string>): ReadonlySet<string> {

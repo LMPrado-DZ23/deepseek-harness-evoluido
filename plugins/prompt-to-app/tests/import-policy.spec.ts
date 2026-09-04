@@ -217,6 +217,40 @@ describe('generated import policy', () => {
     expect(() => assertGeneratedSource([{ path: 'src/app.tsx', content }])).toThrow(message)
   })
 
+  it.each([
+    ['javascript:alert(1)', 'literal'],
+    [' javascript:alert(1)', 'leading space'],
+    ['JaVaScRiPt:alert(1)', 'mixed case'],
+    [`java${String.fromCharCode(9)}script:alert(1)`, 'embedded tab'],
+    [`java${String.fromCharCode(10)}script:alert(1)`, 'embedded line feed'],
+    [`java${String.fromCharCode(13)}script:alert(1)`, 'embedded carriage return'],
+    [`${String.fromCharCode(1)}javascript:alert(1)`, 'leading C0 control'],
+    ['data:text/html,<x>', 'data scheme'],
+    ['vbscript:msgbox(1)', 'vbscript scheme'],
+    ['blob:https://example.test/x', 'blob scheme'],
+    ['file:///etc/passwd', 'file scheme'],
+    ['//attacker.example/path', 'protocol-relative URL'],
+  ])('rejects a disguised active URL in href: %s (%s)', (value) => {
+    const content = `export default function App(){return <a href={${JSON.stringify(value)}}>Abrir</a>}`
+    expect(() => assertGeneratedSource([{ path: 'src/app.tsx', content }])).toThrow('unsafe URL attribute href')
+  })
+
+  it.each([
+    `java${String.fromCharCode(9)}script:alert(1)`,
+    `${String.fromCharCode(1)}javascript:alert(1)`,
+  ])('rejects a disguised active URL in src: %s', (value) => {
+    const content = `export default function App(){return <img src={${JSON.stringify(value)}} alt='Imagem'/>}`
+    expect(() => assertGeneratedSource([{ path: 'src/app.tsx', content }])).toThrow('unsafe URL attribute src')
+  })
+
+  it.each(['', '/', '/produtos', './local', '#secao', 'https://example.test/page'])(
+    'accepts a safe static URL: %s',
+    (value) => {
+      const content = `export default function App(){return <a href={${JSON.stringify(value)}}>Abrir</a>}`
+      expect(() => assertGeneratedSource([{ path: 'src/app.tsx', content }])).not.toThrow()
+    },
+  )
+
   it('accepts the remaining static facade and property forms', () => {
     expect(() => assertGeneratedSource([{
       path: 'src/app.tsx',
