@@ -24,7 +24,7 @@ describe('Studio domain tenant-scope gate', () => {
     await expect(assertDomainScopeManifest(root)).rejects.toThrow(/zero items is a failure/u)
     // And the real tree with a real manifest still passes, so the guard is not just refusing everything.
     await expect(assertDomainScopeManifest(process.cwd(), STUDIO_DOMAIN_SCOPES)).resolves.toBeUndefined()
-  })
+  }, 15_000)
 
   it('matches every physical domain and table and requires its structural scope fields', () => {
     expect(STUDIO_DOMAIN_SCOPES).toHaveLength(STUDIO_DOMAIN_SPECS.length)

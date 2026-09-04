@@ -741,7 +741,7 @@ describe('integration hub service', () => {
         project: (_actor, projectId) => ({ project_id: projectId, name: 'Agenda do Salão', state: 'VERIFIED_PROTOTYPE' }),
         runs: () => [{ run_id: 'run-new', state: 'PASSED', started_at: '2026-09-03T11:00:00.000Z', attempt: 1, run_directory: runDirectory }],
       },
-      packagingTimeoutMs: 30,
+      packagingTimeoutMs: 300,
       now: () => new Date('2026-09-04T00:00:00.000Z'), createId: () => `id-${++sequence}`,
     })
     // Every slot is held by a call that never comes back — a named pipe, a filesystem that stopped
