@@ -30,6 +30,8 @@
     "exportTooLarge": "O protótipo é grande demais para empacotar aqui (limite de {limitMb} MB).",
     "exportTooMany": "Muitos pacotes foram pedidos neste espaço de trabalho em pouco tempo. Espere alguns minutos e tente de novo; nada foi perdido.",
     "devChannelNotPersonal": "O canal de desenvolvimento (channel: dev) só vale numa instalação pessoal: o Studio precisa estar escutando e aceitando pedidos apenas deste computador (loopback). Este Studio atende outros endereços, então ele não sobe com esse canal. Use channel: stable ou rode o Studio só localmente.",
+    "exportTooManyEntries": "O protótipo tem arquivos demais para empacotar aqui (limite de {limit} arquivos). Nada foi gerado.",
+    "exportTooManyListed": "O protótipo tem itens demais fora da lista permitida para listar um por um no pacote (limite de {limit}). Nada foi gerado.",
     "exportUnavailable": "O arquivo do pacote não está mais neste computador. Gere o pacote de novo.",
     "internal": "Algo deu errado do lado do Studio. Nada foi alterado; tente de novo."
   },
@@ -46,7 +48,9 @@
     "uninspectedTitle": "Arquivos que entraram sem conferência de segredos",
     "uninspectedIntro": "Estes arquivos entraram no pacote, mas a conferência de senhas e chaves só lê arquivos de texto — nestes ninguém olhou dentro. Se algum deles guarda segredo, ele está no pacote.",
     "excludedShortcut": "atalho",
-    "excludedUnsupportedName": "nome não suportado"
+    "excludedUnsupportedName": "nome não suportado",
+    "excludedSpecialFile": "arquivo especial do sistema, não é um arquivo comum",
+    "excludedUnreadable": "arquivo compactado que não pôde ser aberto para conferência"
   },
   "manifest": {
     "reasonUnsigned": "Sem assinatura do publicador.",

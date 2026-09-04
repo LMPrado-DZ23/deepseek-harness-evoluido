@@ -6,6 +6,7 @@ import { ExportError, packagePrototype, slug } from '../src/export.ts'
 import { readZip } from '../src/zip.ts'
 import { execFileSync } from 'node:child_process'
 import { rm as rmDir } from 'node:fs/promises'
+import { gzipSync } from 'node:zlib'
 
 const scratch: string[] = []
 afterEach(async () => { for (const directory of scratch.splice(0)) await rm(directory, { recursive: true, force: true }) })
@@ -145,6 +146,79 @@ describe('prototype export package', () => {
     const entries = readZip(built.archive)
     expect(entries.map(entry => entry.name)).toContain('app/imagem.png')
     expect(entries.find(entry => entry.name === 'EXCLUIDOS.txt')!.data.toString('utf8')).toContain('app/imagem.png')
+  })
+
+  it('finds a credential in ANY URI scheme, not only the five that were listed first', async () => {
+    // `smtp://usuario:senha@host` is the app's OWN e-mail setting: the shape most likely to be pasted
+    // into a config file, and the one the pattern list did not cover.
+    const mail = await runDirectory()
+    await writeFile(join(mail, '.next', 'standalone', 'mail.json'), '{"url":"smtp://usuario:senha@mail.example.test:587"}')
+    await expect(packagePrototype({ runDirectory: mail, projectName: 'A', runId: 'run-1' }))
+      .rejects.toMatchObject({ code: 'SECRET_DETECTED', message: expect.stringContaining('mail.json') })
+
+    const ftp = await runDirectory()
+    await writeFile(join(ftp, '.next', 'standalone', 'deploy.yml'), 'destino: ftp://deploy:s3nh4@ftp.example.test/site\n')
+    await expect(packagePrototype({ runDirectory: ftp, projectName: 'A', runId: 'run-1' }))
+      .rejects.toMatchObject({ code: 'SECRET_DETECTED', message: expect.stringContaining('deploy.yml') })
+
+    // A URL without credentials is still just a URL: broadening the scheme must not block ordinary code.
+    const plain = await runDirectory()
+    await writeFile(join(plain, '.next', 'standalone', 'links.json'), '{"a":"https://exemplo.test/caminho","b":"ldap://servidor.test:389","c":"http://user@host.test"}')
+    await expect(packagePrototype({ runDirectory: plain, projectName: 'A', runId: 'run-1' })).resolves.toMatchObject({ entries: expect.any(Number) })
+  })
+
+  it('opens a compressed copy of a bundle to scan it, and refuses to ship one it cannot open', async () => {
+    // The `.gz` next to `main.js` used to travel as "nobody looked inside": the secret was caught in
+    // the bundle and shipped in its compressed twin.
+    const hidden = await runDirectory()
+    await writeFile(join(hidden, '.next', 'standalone', 'bundle.js.gz'), gzipSync(Buffer.from('const k = "-----BEGIN PRIVATE KEY-----"')))
+    await expect(packagePrototype({ runDirectory: hidden, projectName: 'A', runId: 'run-1' }))
+      .rejects.toMatchObject({ code: 'SECRET_DETECTED', message: expect.stringContaining('bundle.js.gz') })
+
+    const mixed = await runDirectory()
+    await writeFile(join(mixed, '.next', 'standalone', 'app.js.gz'), gzipSync(Buffer.from('console.log("ok")')))
+    await writeFile(join(mixed, '.next', 'standalone', 'quebrado.js.gz'), Buffer.from('isto nao e um gzip'))
+    const built = await packagePrototype({ runDirectory: mixed, projectName: 'A', runId: 'run-1' })
+    const entries = readZip(built.archive)
+    const names = entries.map(entry => entry.name)
+    expect(names).toContain('app/app.js.gz')
+    expect(names).not.toContain('app/quebrado.js.gz') // cannot be opened, so it is not shipped as if it had been checked
+    const left = entries.find(entry => entry.name === 'EXCLUIDOS.txt')!.data.toString('utf8')
+    expect(left).toContain('app/quebrado.js.gz')
+    // …and a `.gz` that WAS opened is no longer listed among the files nobody looked inside.
+    expect(left.split('sem conferência de segredos')[1] ?? '').not.toContain('app/app.js.gz')
+  })
+
+  it('refuses on the entry ceiling BEFORE reading the file that would trip the scan', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dz23-export-count-'))
+    scratch.push(root)
+    const standalone = join(root, '.next', 'standalone')
+    await mkdir(standalone, { recursive: true })
+    await writeFile(join(standalone, 'a.js'), 'const a = 1')
+    await writeFile(join(standalone, 'b.js'), 'const b = 2')
+    // Sorted last, and it carries a private key. A ceiling checked AFTER the reading it exists to
+    // prevent would answer SECRET_DETECTED here — that answer is the proof the file was read.
+    await writeFile(join(standalone, 'c.js'), 'const k = "-----BEGIN PRIVATE KEY-----"')
+    await expect(packagePrototype({ runDirectory: root, projectName: 'A', runId: 'run-1' }, { maxEntries: 6 }))
+      .rejects.toMatchObject({ code: 'TOO_LARGE', message: expect.stringContaining('arquivos demais') })
+    // The same tree under the real ceiling is refused for the honest reason instead.
+    await expect(packagePrototype({ runDirectory: root, projectName: 'A', runId: 'run-1' }))
+      .rejects.toMatchObject({ code: 'SECRET_DETECTED' })
+  })
+
+  it('refuses when the list of exclusions would grow without bound, instead of truncating it', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dz23-export-listed-'))
+    scratch.push(root)
+    const standalone = join(root, '.next', 'standalone')
+    await mkdir(standalone, { recursive: true })
+    await writeFile(join(standalone, 'server.js'), 'ok')
+    for (const name of ['a.bak', 'b.bak', 'c.bak']) await writeFile(join(standalone, name), 'x')
+    await expect(packagePrototype({ runDirectory: root, projectName: 'A', runId: 'run-1' }, { maxListed: 2 }))
+      .rejects.toMatchObject({ code: 'TOO_LARGE', message: expect.stringContaining('itens demais') })
+    // Under the real ceiling the very same tree exports and names all three: the bound is a bound, not a wall.
+    const built = await packagePrototype({ runDirectory: root, projectName: 'A', runId: 'run-1' })
+    const left = readZip(built.archive).find(entry => entry.name === 'EXCLUIDOS.txt')!.data.toString('utf8')
+    for (const name of ['a.bak', 'b.bak', 'c.bak']) expect(left).toContain(`app/${name}`)
   })
 
   it('refuses a run without a standalone build and slugs names safely', async () => {

@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto'
-import { constants, type Stats } from 'node:fs'
-import { lstat, open, readdir, readFile, realpath } from 'node:fs/promises'
+import { constants, existsSync, type Stats } from 'node:fs'
+import { lstat, open, readdir, realpath, type FileHandle } from 'node:fs/promises'
 import { isAbsolute, join, posix, relative, resolve } from 'node:path'
+import { promisify } from 'node:util'
+import { brotliDecompress, gunzip } from 'node:zlib'
 import { t } from './i18n.js'
 import { createZipAsync, type ZipEntry } from './zip.js'
 
@@ -70,16 +72,44 @@ const SECRET_PATTERNS: readonly RegExp[] = [
   /\bgithub_pat_[A-Za-z0-9_]{22,}/u,
   /\bxox[baprs]-[A-Za-z0-9-]{10,}/u,
   /\bsk-(?:live|proj)-[A-Za-z0-9_-]{16,}/u,
-  /\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|amqp|redis):\/\/[^\s:@/]+:[^\s:@/]+@/u,
+  // ANY URI scheme carrying `user:password@`, not the five that happened to be listed first.
+  // `smtp://`, `ftp://`, `https://` and `ldap://` hide exactly the same credential — and the app's
+  // own e-mail setting IS an `smtp://` URL, the shape most likely to be pasted into a config file.
+  /\b[a-z][a-z0-9+.-]{1,15}:\/\/[^\s:@/]{1,256}:[^\s:@/]{1,256}@[^\s/]/u,
 ]
 /** Text types the scan reads. Everything else is packaged uninspected — and SAID SO, in `EXCLUIDOS.txt`. */
 const SCANNED_EXTENSIONS = new Set(['.js', '.mjs', '.cjs', '.json', '.ts', '.tsx', '.jsx', '.mts', '.cts', '.html', '.htm', '.css', '.scss', '.txt', '.md', '.xml', '.webmanifest', '.csv', '.svg', '.yml', '.yaml', '.lock', ''])
+/**
+ * Compressed copies of text (`main.js.gz`, `main.css.br`, written next to the originals by a Next.js
+ * build). They used to travel as "nobody looked inside": a secret bundled into `main.js` was caught
+ * in the `.js` and shipped in the `.gz`. They are now decompressed under a ceiling and scanned as the
+ * file they really are; one that cannot be decompressed under that ceiling is EXCLUDED and named,
+ * never packaged as if it had been checked.
+ */
+const COMPRESSED_EXTENSIONS = new Set(['.gz', '.br'])
+const SCAN_DECOMPRESSED_LIMIT = 64 * 1024 * 1024
+const gunzipAsync = promisify(gunzip)
+const brotliDecompressAsync = promisify(brotliDecompress)
 /** A scanned file is read in slices of this size, with an overlap, so a big bundle is inspected whole instead of skipped. */
 const SCAN_CHUNK_BYTES = 1024 * 1024
 /** Longest secret shape, doubled: the overlap between slices, so a pattern split across a boundary is still seen. */
 const SCAN_OVERLAP_BYTES = 512
 /** Total bytes of the packaged files; a prototype beyond this is refused in words instead of exhausting memory. */
 export const EXPORT_LIMIT_BYTES = 200 * 1024 * 1024
+/**
+ * Hard ZIP (non-64) ceiling on the number of entries, checked while WALKING — before any of those
+ * files is opened, read, scanned or compressed. A `node_modules` tree passes 65 535 files without
+ * trying, and a ceiling verified after the work it is meant to prevent is not a ceiling.
+ */
+export const EXPORT_MAX_ENTRIES = 0xffff
+/** README, `.env.example`, `EXCLUIDOS.txt` and the acceptance report are added after the walk; the walk leaves room for them. */
+const RESERVED_ENTRIES = 4
+/**
+ * Ceiling on the two lists the package publishes inside `EXCLUIDOS.txt`. Unbounded, they are the
+ * same denial of service as the entry list, one string per file. Hitting it REFUSES the export:
+ * truncating would mean a file stayed behind — or travelled uninspected — without being named.
+ */
+export const EXPORT_MAX_LISTED = 100_000
 
 export const ENV_EXAMPLE = [
   `# ${t('export.envComment')}`,
@@ -97,21 +127,88 @@ export class ExportError extends Error {
 }
 
 /**
+ * The two ceilings, as parameters. Production passes none and gets the constants above; a test can
+ * lower them and REACH them, instead of having to materialise 65 535 files to find out whether the
+ * refusal happens before or after the reading it is supposed to prevent.
+ */
+export interface ExportLimits {
+  readonly maxEntries?: number
+  readonly maxListed?: number
+}
+
+interface Walk {
+  readonly entries: ZipEntry[]
+  readonly budget: { remaining: number }
+  readonly excluded: string[]
+  readonly uninspected: string[]
+  readonly maxEntries: number
+  readonly maxListed: number
+}
+
+/** Add a line to a published list, or refuse the export when the list would grow without bound. */
+function note(walk: Walk, list: string[], line: string): void {
+  if (walk.excluded.length + walk.uninspected.length >= walk.maxListed) {
+    throw new ExportError('TOO_LARGE', t('errors.exportTooManyListed', { limit: walk.maxListed }))
+  }
+  list.push(line)
+}
+
+const O_NOFOLLOW = (constants.O_NOFOLLOW ?? 0) as number
+const O_DIRECTORY = (constants.O_DIRECTORY ?? 0) as number
+/**
+ * Linux gives an `openat` equivalent reachable from JavaScript: a path under `/proc/self/fd/<fd>`
+ * resolves from the OPEN inode instead of walking the names again. That is what closes the directory
+ * half of the TOCTOU — `readdir` and every child open below happen against the very directory that
+ * was opened with `O_NOFOLLOW|O_DIRECTORY`, so swapping the folder for a symlink after the check
+ * changes nothing that is read. Node exposes no portable `openat`; where `/proc/self/fd` is absent
+ * the walker falls back to the pathname and pins the directory by device+inode (see `openDirectory`).
+ */
+const HAS_PROC_FD = existsSync('/proc/self/fd')
+
+/** Open a directory without following a symlink, or `undefined` — never a silent success on something else. */
+async function openDirectory(path: string): Promise<FileHandle | undefined> {
+  const handle = await open(path, (constants.O_RDONLY | O_DIRECTORY | O_NOFOLLOW) as number).catch(() => undefined)
+  if (handle === undefined) return undefined
+  const info = await handle.stat().catch(() => undefined)
+  if (info === undefined || !info.isDirectory()) { await handle.close().catch(() => undefined); return undefined }
+  if (!HAS_PROC_FD) {
+    // Without an `openat` equivalent the walker must name the directory again to read it, so it
+    // re-checks that the name still points at the inode it opened. A swap between the two is caught
+    // and the folder becomes a NAMED exclusion instead of a walked one.
+    const named = await lstat(path).catch(() => undefined)
+    if (named === undefined || named.dev !== info.dev || named.ino !== info.ino) {
+      await handle.close().catch(() => undefined)
+      return undefined
+    }
+  }
+  return handle
+}
+
+/** How to name a child of an already-open directory: through the descriptor where the platform allows it. */
+function referenceOf(handle: FileHandle, path: string): string {
+  return HAS_PROC_FD ? `/proc/self/fd/${String(handle.fd)}` : path
+}
+
+/**
  * Package the verified prototype: the Next.js standalone server, its static
  * assets and public files, the acceptance report, a plain-language README and
  * an `.env.example` with names only. Reproducible: same input → same digest.
  */
-export async function packagePrototype(source: ExportSource): Promise<ExportPackage> {
+export async function packagePrototype(source: ExportSource, limits: ExportLimits = {}): Promise<ExportPackage> {
   const root = resolve(source.runDirectory)
-  const standalone = join(root, '.next', 'standalone')
-  if (!(await isDirectory(standalone))) throw new ExportError('RUN_MISSING', t('errors.exportRunMissing'))
-  const entries: ZipEntry[] = []
-  const budget = { remaining: EXPORT_LIMIT_BYTES }
-  const excluded: string[] = []
-  const uninspected: string[] = []
-  await collect(standalone, 'app', entries, budget, true, excluded, uninspected)
-  if (await isDirectory(join(root, '.next', 'static'))) await collect(join(root, '.next', 'static'), 'app/.next/static', entries, budget, false, excluded, uninspected)
-  if (await isDirectory(join(root, 'public'))) await collect(join(root, 'public'), 'app/public', entries, budget, false, excluded, uninspected)
+  const walk: Walk = {
+    entries: [], budget: { remaining: EXPORT_LIMIT_BYTES }, excluded: [], uninspected: [],
+    maxEntries: limits.maxEntries ?? EXPORT_MAX_ENTRIES, maxListed: limits.maxListed ?? EXPORT_MAX_LISTED,
+  }
+  // Every top folder now goes through the confinement `evidence/` already had: resolved by real path
+  // and required to stay inside the run directory before a descriptor is opened on it.
+  const standalone = await confinedChild(root, join('.next', 'standalone'))
+  if (standalone === undefined) throw new ExportError('RUN_MISSING', t('errors.exportRunMissing'))
+  const opened = await openDirectory(standalone)
+  if (opened === undefined) throw new ExportError('RUN_MISSING', t('errors.exportRunMissing'))
+  try { await collect(opened, standalone, 'app', walk) } finally { await opened.close().catch(() => undefined) }
+  await walkFolder(await confinedChild(root, join('.next', 'static')), 'app/.next/static', walk)
+  await walkFolder(await confinedChild(root, 'public'), 'app/public', walk)
   // The acceptance report goes through the SAME discipline as every other file: the `evidence`
   // folder is resolved and confined first (a symlinked folder pointed the read outside the run
   // directory that was just confined), the file is opened once without following links, and it
@@ -119,35 +216,36 @@ export async function packagePrototype(source: ExportSource): Promise<ExportPack
   const evidence = await confinedChild(root, 'evidence')
   const reportName = 'evidence/appspec-report.json'
   if (evidence === undefined) {
-    if (await pathExists(join(root, 'evidence'))) excluded.push(`${reportName} (${t('export.excludedShortcut')})`)
+    if (await pathExists(join(root, 'evidence'))) note(walk, walk.excluded, `${reportName} (${t('export.excludedShortcut')})`)
   } else {
     const report = join(evidence, 'appspec-report.json')
-    const handle = await open(report, (constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0)) as number).catch(() => undefined)
+    const handle = await open(report, (constants.O_RDONLY | O_NOFOLLOW) as number).catch(() => undefined)
     if (handle === undefined) {
-      if (await pathExists(report)) excluded.push(`${reportName} (${t('export.excludedShortcut')})`)
+      if (await pathExists(report)) note(walk, walk.excluded, `${reportName} (${t('export.excludedShortcut')})`)
     } else {
       try {
         const info = await handle.stat()
         if (!info.isFile()) {
-          excluded.push(`${reportName} (${t('export.excludedUnsupportedName')})`)
+          note(walk, walk.excluded, `${reportName} (${t('export.excludedSpecialFile')})`)
         } else {
-          budget.remaining -= info.size
-          if (budget.remaining < 0) throw new ExportError('TOO_LARGE', t('errors.exportTooLarge', { limitMb: EXPORT_LIMIT_BYTES / (1024 * 1024) }))
+          walk.budget.remaining -= info.size
+          if (walk.budget.remaining < 0) throw new ExportError('TOO_LARGE', t('errors.exportTooLarge', { limitMb: EXPORT_LIMIT_BYTES / (1024 * 1024) }))
           const data = await handle.readFile()
           if (findSecret('appspec-report.json', data) !== null) throw new ExportError('SECRET_DETECTED', t('errors.exportSecretFound', { file: reportName }))
-          entries.push({ name: reportName, data })
+          walk.entries.push({ name: reportName, data })
         }
       } finally {
         await handle.close().catch(() => undefined)
       }
     }
   }
-  if (excluded.length > 0 || uninspected.length > 0) {
+  const entries = walk.entries
+  if (walk.excluded.length > 0 || walk.uninspected.length > 0) {
     const order = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0)
-    excluded.sort(order)
-    uninspected.sort(order)
-    const lines = [`# ${t('export.excludedTitle')}`, '', t('export.excludedIntro'), '', ...excluded]
-    if (uninspected.length > 0) lines.push('', `# ${t('export.uninspectedTitle')}`, '', t('export.uninspectedIntro'), '', ...uninspected)
+    walk.excluded.sort(order)
+    walk.uninspected.sort(order)
+    const lines = [`# ${t('export.excludedTitle')}`, '', t('export.excludedIntro'), '', ...walk.excluded]
+    if (walk.uninspected.length > 0) lines.push('', `# ${t('export.uninspectedTitle')}`, '', t('export.uninspectedIntro'), '', ...walk.uninspected)
     entries.push({ name: 'EXCLUIDOS.txt', data: Buffer.from([...lines, ''].join('\n'), 'utf8') })
   }
   entries.push({ name: 'README.md', data: Buffer.from(readme(source), 'utf8') })
@@ -156,6 +254,14 @@ export async function packagePrototype(source: ExportSource): Promise<ExportPack
   const archive = await createZipAsync(entries)
   const sha256 = createHash('sha256').update(archive).digest('hex')
   return { archive, sha256, entries: entries.length, fileName: `${slug(source.projectName)}-${source.runId.slice(0, 8)}.zip` }
+}
+
+/** An optional top folder: absent is nothing, present-but-unopenable is a NAMED exclusion. */
+async function walkFolder(path: string | undefined, prefix: string, walk: Walk): Promise<void> {
+  if (path === undefined) return
+  const handle = await openDirectory(path)
+  if (handle === undefined) { note(walk, walk.excluded, `${prefix}/ (${t('export.excludedShortcut')})`); return }
+  try { await collect(handle, path, prefix, walk) } finally { await handle.close().catch(() => undefined) }
 }
 
 function readme(source: ExportSource): string {
@@ -197,50 +303,78 @@ export function findSecret(name: string, data: Buffer): string | null {
   return null
 }
 
-async function collect(directory: string, prefix: string, entries: ZipEntry[], budget: { remaining: number }, appRoot: boolean, excluded: string[], uninspected: string[]): Promise<void> {
-  const items = (await readdir(directory, { withFileTypes: true })).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+/** The plain text inside a `.gz`/`.br`, under a ceiling, or `undefined` when it cannot be read at all. */
+async function decompressedText(extension: string, data: Buffer): Promise<Buffer | undefined> {
+  try {
+    return extension === '.gz'
+      ? await gunzipAsync(data, { maxOutputLength: SCAN_DECOMPRESSED_LIMIT })
+      : await brotliDecompressAsync(data, { maxOutputLength: SCAN_DECOMPRESSED_LIMIT })
+  } catch { return undefined }
+}
+
+async function collect(handle: FileHandle, path: string, prefix: string, walk: Walk): Promise<void> {
+  const reference = referenceOf(handle, path)
+  const items = (await readdir(reference, { withFileTypes: true })).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
   for (const item of items) {
-    const full = join(directory, item.name)
+    // `readdir` returns single path segments; anything else means the platform lied and the walk stops.
+    if (item.name === '' || item.name === '.' || item.name === '..' || item.name.includes('/')) throw new ExportError('INVALID_PATH', `unsafe name under ${prefix}`)
+    const name = posix.join(prefix, item.name)
     // A skipped shortcut is named too: an app missing files with no explanation is its own kind of lie.
-    if (item.isSymbolicLink()) { excluded.push(`${posix.join(prefix, item.name)} (${t('export.excludedShortcut')})`); continue }
+    if (item.isSymbolicLink()) { note(walk, walk.excluded, `${name} (${t('export.excludedShortcut')})`); continue }
     if (item.isDirectory()) {
       if (EXCLUDED_ANYWHERE.has(item.name) || (EXCLUDED_APP_FOLDERS.has(item.name) && !isInsideDependencies(prefix))) {
-        excluded.push(`${posix.join(prefix, item.name)}/`)
+        note(walk, walk.excluded, `${name}/`)
         continue
       }
-      await collect(full, posix.join(prefix, item.name), entries, budget, false, excluded, uninspected)
+      // Opened AS a directory, without following a link, and everything below is addressed through
+      // that descriptor: the folder cannot be swapped for a symlink between this check and the read.
+      const child = await openDirectory(join(reference, item.name))
+      if (child === undefined) { note(walk, walk.excluded, `${name}/ (${t('export.excludedShortcut')})`); continue }
+      try { await collect(child, join(path, item.name), name, walk) } finally { await child.close().catch(() => undefined) }
       continue
     }
-    if (!item.isFile()) continue
-    const name = posix.join(prefix, item.name)
-    if (EXCLUDED_FILES.some(pattern => pattern.test(item.name))) { excluded.push(name); continue }
-    if (!isExportable(item.name)) { excluded.push(name); continue }
+    // A fifo, a socket, a block or character device: not packaged — and no longer skipped in
+    // SILENCE. It is named in `EXCLUIDOS.txt` like everything else that stayed behind.
+    if (!item.isFile()) { note(walk, walk.excluded, `${name} (${t('export.excludedSpecialFile')})`); continue }
+    if (EXCLUDED_FILES.some(pattern => pattern.test(item.name))) { note(walk, walk.excluded, name); continue }
+    if (!isExportable(item.name)) { note(walk, walk.excluded, name); continue }
     // A name the ZIP writer would refuse (backslash, control character) leaves the package as an
     // exclusion instead of turning the whole export into an internal error.
-    if (/[\\\u0000-\u001f]/u.test(item.name)) { excluded.push(`${name} (${t('export.excludedUnsupportedName')})`); continue }
-    // Names come from readdir, so a literal `..` segment cannot appear; `assertEntryName` in the writer re-checks every segment.
-    if (relative(directory, full).startsWith('..')) throw new ExportError('INVALID_PATH', `unsafe path ${name}`)
+    if (/[\\\u0000-\u001f]/u.test(item.name)) { note(walk, walk.excluded, `${name} (${t('export.excludedUnsupportedName')})`); continue }
+    // BEFORE the file is opened, read, scanned or compressed: the archive cannot hold more entries
+    // than this, so finding out at write time would mean reading and deflating a whole tree first.
+    if (walk.entries.length + RESERVED_ENTRIES >= walk.maxEntries) {
+      throw new ExportError('TOO_LARGE', t('errors.exportTooManyEntries', { limit: walk.maxEntries }))
+    }
     // Opened ONCE, without following a symlink, and both the size and the bytes come from that same
     // handle: `lstat` then `readFile` left a window where the entry could be swapped for a link to
     // something else between the check and the read.
-    const handle = await open(full, (constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0)) as number).catch(() => undefined)
-    if (handle === undefined) { excluded.push(`${name} (${t('export.excludedShortcut')})`); continue }
+    const file = await open(join(reference, item.name), (constants.O_RDONLY | O_NOFOLLOW) as number).catch(() => undefined)
+    if (file === undefined) { note(walk, walk.excluded, `${name} (${t('export.excludedShortcut')})`); continue }
     let data: Buffer
     let info: Stats
     try {
-      info = await handle.stat()
-      if (!info.isFile()) { excluded.push(`${name} (${t('export.excludedUnsupportedName')})`); continue }
-      budget.remaining -= info.size
-      if (budget.remaining < 0) throw new ExportError('TOO_LARGE', t('errors.exportTooLarge', { limitMb: EXPORT_LIMIT_BYTES / (1024 * 1024) }))
-      data = await handle.readFile()
+      info = await file.stat()
+      // Not a regular file any more (or never was): named, not skipped — and certainly not read.
+      if (!info.isFile()) { note(walk, walk.excluded, `${name} (${t('export.excludedSpecialFile')})`); continue }
+      walk.budget.remaining -= info.size
+      if (walk.budget.remaining < 0) throw new ExportError('TOO_LARGE', t('errors.exportTooLarge', { limitMb: EXPORT_LIMIT_BYTES / (1024 * 1024) }))
+      data = await file.readFile()
     } finally {
-      await handle.close().catch(() => undefined)
+      await file.close().catch(() => undefined)
     }
-    const secret = findSecret(item.name, data)
-    if (secret !== null) throw new ExportError('SECRET_DETECTED', t('errors.exportSecretFound', { file: name }))
+    let scanName = item.name
+    let scanData = data
+    if (COMPRESSED_EXTENSIONS.has(extensionOf(item.name))) {
+      const plain = await decompressedText(extensionOf(item.name), data)
+      if (plain === undefined) { note(walk, walk.excluded, `${name} (${t('export.excludedUnreadable')})`); continue }
+      scanName = item.name.slice(0, item.name.lastIndexOf('.'))
+      scanData = plain
+    }
+    if (findSecret(scanName, scanData) !== null) throw new ExportError('SECRET_DETECTED', t('errors.exportSecretFound', { file: name }))
     // Packaged, but nobody looked inside it: the package says so rather than implying it was checked.
-    if (!isScannable(item.name)) uninspected.push(name)
-    entries.push({ name, data, mode: (info.mode & 0o111) !== 0 ? 0o755 : 0o644 })
+    if (!isScannable(scanName)) note(walk, walk.uninspected, name)
+    walk.entries.push({ name, data, mode: (info.mode & 0o111) !== 0 ? 0o755 : 0o644 })
   }
 }
 
@@ -259,15 +393,7 @@ async function pathExists(path: string): Promise<boolean> {
   try { await lstat(path); return true } catch { return false }
 }
 
-async function isDirectory(path: string): Promise<boolean> {
-  try { return (await lstat(path)).isDirectory() } catch { return false }
-}
-async function isFile(path: string): Promise<boolean> {
-  try { return (await lstat(path)).isFile() } catch { return false }
-}
-
 export function slug(value: string): string {
   const normalized = value.normalize('NFD').replace(/[\u0300-\u036f]/gu, '').toLowerCase().replace(/[^a-z0-9]+/gu, '-').replace(/^-+|-+$/gu, '')
   return normalized === '' ? 'prototipo' : normalized.slice(0, 40)
 }
-

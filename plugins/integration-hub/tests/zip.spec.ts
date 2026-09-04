@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { assertEntryName, crc32, createZip, readZip } from '../src/zip.ts'
+import { assertEntryName, createZipAsync, crc32, createZip, readZip } from '../src/zip.ts'
 
 describe('dependency-free zip', () => {
   it('round-trips deflated and stored entries with modes, and is reproducible', () => {
@@ -42,5 +42,105 @@ describe('dependency-free zip', () => {
     forged.writeUInt16LE(0xffff, central + 28) // nameLength beyond the directory
     expect(() => readZip(forged)).toThrow('corrupt central directory')
     expect(() => readZip(Buffer.from('nao e um zip'))).toThrow('not a zip archive')
+  })
+
+  it('refuses too many entries before touching a byte of any of them', () => {
+    // The count used to be checked inside `assemble`, i.e. after every entry had been deflated: the
+    // refusal was honest, the CPU was already spent. `data` is a getter here, so "was it read?" is
+    // a fact and not an opinion.
+    let reads = 0
+    const payload = Buffer.from('x'.repeat(256))
+    const entries = Array.from({ length: 0x10000 }, (_unused, index) => ({
+      name: `f${String(index)}`,
+      get data(): Buffer { reads++; return payload },
+    }))
+    expect(() => createZip(entries)).toThrow('ZIP (non-64) limits')
+    expect(reads).toBe(0)
+  })
+
+  it('refuses too many entries before compressing, on the async path too', async () => {
+    let reads = 0
+    const payload = Buffer.from('y'.repeat(256))
+    const entries = Array.from({ length: 0x10000 }, (_unused, index) => ({
+      name: `g${String(index)}`,
+      get data(): Buffer { reads++; return payload },
+    }))
+    await expect(createZipAsync(entries)).rejects.toThrow('ZIP (non-64) limits')
+    expect(reads).toBe(0)
+  })
+})
+
+/**
+ * The reader is not on a production route today — nothing imports a ZIP anywhere in the Studio — so
+ * this is preventive. It is also the whole point: an import route may not be opened over a reader
+ * that believes what the archive says about itself.
+ */
+describe('the zip reader against a hostile archive', () => {
+  function centralOf(archive: Buffer): { central: number; local: number } {
+    const eocd = archive.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]))
+    const central = archive.readUInt32LE(eocd + 16)
+    return { central, local: archive.readUInt32LE(central + 42) }
+  }
+
+  it('refuses a declared size that lies, instead of using it as the decompression budget', () => {
+    // ~2 MB of zeros deflate to almost nothing. Declaring 0xffffffff used to BECOME the ceiling
+    // (`maxOutputLength: size + 1`): a small file that asks for roughly 4 GiB of heap.
+    const archive = createZip([{ name: 'a.bin', data: Buffer.alloc(2 * 1024 * 1024) }])
+    const { central, local } = centralOf(archive)
+    archive.writeUInt32LE(0xffffffff, central + 24)
+    archive.writeUInt32LE(0xffffffff, local + 22)
+    expect(() => readZip(archive)).toThrow('too large')
+
+    // And a claim that clears the whole-archive ceiling but not the per-entry one: without the
+    // per-entry ceiling this reads as a merely "corrupt" entry, after 300 MB had been permitted.
+    const single = createZip([{ name: 'a.bin', data: Buffer.alloc(2 * 1024 * 1024) }])
+    const there = centralOf(single)
+    single.writeUInt32LE(300 * 1024 * 1024, there.central + 24)
+    single.writeUInt32LE(300 * 1024 * 1024, there.local + 22)
+    expect(() => readZip(single)).toThrow('zip entry is too large')
+  })
+
+  it('refuses an unknown compression method instead of handing back the compressed bytes as the file', () => {
+    const archive = createZip([{ name: 'a.txt', data: Buffer.from('ok '.repeat(200)) }])
+    const { central, local } = centralOf(archive)
+    archive.writeUInt16LE(99, central + 10)
+    archive.writeUInt16LE(99, local + 8)
+    expect(() => readZip(archive)).toThrow('unsupported compression method')
+  })
+
+  it('refuses an entry whose local header disagrees with the central directory', () => {
+    const archive = createZip([{ name: 'a.txt', data: Buffer.from('ok '.repeat(200)) }])
+    const { local } = centralOf(archive)
+    archive.writeUInt32LE(0xdeadbeef, local + 14) // a CRC only the local header knows about
+    expect(() => readZip(archive)).toThrow('local header does not match')
+  })
+
+  it('refuses an encrypted entry and one whose sizes live in a data descriptor', () => {
+    for (const flag of [0x0001, 0x0008]) {
+      const archive = createZip([{ name: 'a.txt', data: Buffer.from('ok '.repeat(200)) }])
+      const { central, local } = centralOf(archive)
+      archive.writeUInt16LE(archive.readUInt16LE(central + 8) | flag, central + 8)
+      archive.writeUInt16LE(archive.readUInt16LE(local + 6) | flag, local + 6)
+      expect(() => readZip(archive), String(flag)).toThrow('unsupported zip entry flags')
+    }
+  })
+
+  it('refuses two entries with the same name', () => {
+    const archive = createZip([{ name: 'a.txt', data: Buffer.from('AAAA') }, { name: 'b.txt', data: Buffer.from('BBBB') }])
+    // Both copies of the second name — local header and central directory — become the first name.
+    for (let at = archive.indexOf('b.txt'); at >= 0; at = archive.indexOf('b.txt', at + 1)) archive.write('a.txt', at, 'utf8')
+    expect(() => readZip(archive)).toThrow('duplicate zip entry')
+  })
+
+  it('refuses an entry whose data is not before the central directory', () => {
+    const archive = createZip([{ name: 'a.txt', data: Buffer.from('ok '.repeat(200)) }])
+    const { central } = centralOf(archive)
+    archive.writeUInt32LE(central, central + 42) // the local header would sit on top of the directory
+    expect(() => readZip(archive)).toThrow('corrupt entry')
+  })
+
+  it('refuses an end-of-central-directory record that does not reach the end of the buffer', () => {
+    const archive = Buffer.concat([createZip([{ name: 'a.txt', data: Buffer.from('ok') }]), Buffer.from('lixo depois do fim')])
+    expect(() => readZip(archive)).toThrow('not a zip archive')
   })
 })
