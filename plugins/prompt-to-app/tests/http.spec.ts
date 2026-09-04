@@ -51,9 +51,9 @@ async function fixture() {
   const identity = { authenticate: vi.fn(() => Promise.resolve(session)), validateCsrf: vi.fn(), validateCsrfToken: vi.fn() }
   const tenancy = { authorizationFor: vi.fn((userId: string, orgId: string, tenantId: string) => ({ userId, orgId, tenantId, role: 'owner' as const })) }
   const model: PromptModelPort = {
-    complete: vi.fn((_scope, purpose) => Promise.resolve(purpose === 'plan'
+    complete: vi.fn((_scope, purpose, _privacy, prompt) => Promise.resolve(purpose === 'plan'
       ? { value: { slices: [{ slice_id: 'slice', title: 'Página', description: 'Criar a página', acceptance_criteria: ['Compila'], planned_files: ['content/app.json', 'src/GeneratedApp.tsx'] }] }, route: 'ollama', model: 'qwen' }
-      : { value: validSpec, route: 'ollama', model: 'qwen' })),
+      : { value: prompt.startsWith('Recomende') ? 'Clientes atendidos pela empresa.' : validSpec, route: 'ollama', model: 'qwen' })),
   }
   const jobs = {
     start: vi.fn(async (actor: PromptToAppActor, _projectId: string, _generator: CodeGeneratorPort) => {
@@ -231,5 +231,65 @@ describe('prompt-to-app HTTP boundary', () => {
     expect((await asAttacker(`/projects/${projectId}`, { method: 'DELETE', body: JSON.stringify({ org_id: 'org-a' }) })).status).toBe(404)
     expect(f.repository.projectRows).toHaveLength(1)
     expect(f.repository.projectRows[0]).toMatchObject({ org_id: 'org-a', tenant_id: 'tenant-a', archived_at: null })
+  })
+
+  it('covers recommendation, completed-intake replay, and both sensitive-data decisions', async () => {
+    const f = await fixture()
+    const normal = await (await f.request('/projects', { method: 'POST', body: JSON.stringify({
+      name: 'Normal', original_brief: 'Quero apresentar serviços.', category: 'landing-page', privacy: 'local-only',
+    }) })).json() as { project: { project_id: string } }
+    expect((await f.request(`/projects/${normal.project.project_id}/intake/answer`, {
+      method: 'POST', body: JSON.stringify({ answer: '', recommend: true }),
+    })).status).toBe(200)
+    expect(f.repository.turnRows.at(-1)).toMatchObject({ answer: 'Clientes atendidos pela empresa.', recommended: true, route: 'ollama' })
+    expect((await f.request(`/projects/${normal.project.project_id}/intake/answer`, {
+      method: 'POST', body: JSON.stringify({ answer: 'Objetivo', recommend: false }),
+    })).status).toBe(200)
+    expect((await f.request(`/projects/${normal.project.project_id}/intake/answer`, {
+      method: 'POST', body: JSON.stringify({ answer: 'Conteúdo', recommend: false }),
+    })).status).toBe(201)
+    expect((await f.request(`/projects/${normal.project.project_id}/intake/answer`, {
+      method: 'POST', body: JSON.stringify({ answer: 'replay', recommend: false }),
+    })).status).toBe(409)
+
+    const refused = await (await f.request('/projects', { method: 'POST', body: JSON.stringify({
+      name: 'Sensível recusado', original_brief: 'Cadastro com CPF de clientes.', category: 'form-database', privacy: 'local-only',
+    }) })).json() as { project: { project_id: string } }
+    expect((await f.request(`/projects/${refused.project.project_id}/intake/answer`, {
+      method: 'POST', body: JSON.stringify({ answer: '' }),
+    })).status).toBe(400)
+    expect(await (await f.request(`/projects/${refused.project.project_id}/intake/answer`, {
+      method: 'POST', body: JSON.stringify({ answer: '', confirm_sensitive: false }),
+    })).json()).toMatchObject({ blocked: true })
+
+    const confirmed = await (await f.request('/projects', { method: 'POST', body: JSON.stringify({
+      name: 'Sensível confirmado', original_brief: 'Cadastro com CPF de clientes.', category: 'form-database', privacy: 'local-only',
+    }) })).json() as { project: { project_id: string } }
+    expect(await (await f.request(`/projects/${confirmed.project.project_id}/intake/answer`, {
+      method: 'POST', body: JSON.stringify({ answer: '', confirm_sensitive: true }),
+    })).json()).toMatchObject({ next: { id: 'audience' } })
+  })
+
+  it('sorts current runs, hides unavailable captures, locks out sessions, and archives as owner', async () => {
+    const f = await fixture()
+    const actor = { userId: 'owner', orgId: 'org-a', tenantId: 'tenant-a', role: 'owner' as const }
+    const project = await f.service.createProject(actor, {
+      name: 'Lifecycle', original_brief: 'Projeto para conferir ciclo.', category: 'landing-page', privacy: 'local-only',
+    })
+    f.repository.projectRows[0] = { ...f.repository.projectRows[0]!, state: 'VERIFIED_PROTOTYPE' }
+    for (const attempt of [1, 2]) f.repository.runRows.push({
+      run_id: `run-${attempt}`, operation_id: `run-${attempt}`, owner_session_id: 'session', plan_id: 'plan', project_id: project.project_id,
+      org_id: 'org-a', tenant_id: 'tenant-a', stage: 'verify', attempt, state: 'PASSED', started_at: '2026-09-03T12:00:00.000Z',
+      finished_at: '2026-09-03T12:01:00.000Z', sandbox: 'full', route: 'ollama', model: 'fixture', input_tokens: 1, output_tokens: 1,
+      estimated_cost_usd: 0, run_directory: 'not-created', failure_code: null, acceptance_checks: [],
+    })
+    const details = await (await f.request(`/projects/${project.project_id}`)).json() as { current_run: { run_id: string; verification_codes: unknown[] } }
+    expect(details.current_run).toMatchObject({ run_id: 'run-2', verification_codes: [] })
+
+    f.identity.authenticate.mockRejectedValueOnce(new IdentityError('locked', 'Aguarde'))
+    expect((await f.request('/projects')).status).toBe(429)
+    expect((await f.request('/projects', { method: 'POST', body: '{invalid' })).status).toBe(400)
+    expect((await f.request(`/projects/${project.project_id}`, { method: 'DELETE', body: '{}' })).status).toBe(200)
+    expect(f.repository.projectRows[0]?.archived_at).not.toBeNull()
   })
 })

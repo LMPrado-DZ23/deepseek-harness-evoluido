@@ -1,11 +1,11 @@
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { IdentityError, SESSION_COOKIE, type StudioIdentityService } from '@dz23-studio/identity'
-import { createStudioWebHandler } from '../src/index.js'
+import { apply, createStudioWebHandler } from '../src/index.js'
 
 const servers: ReturnType<typeof createServer>[] = []; const temporary: string[] = []
 afterEach(async () => {
@@ -27,7 +27,7 @@ async function fixture(previewFrameSources: readonly string[] = []) {
   const request = (path: string, init: RequestInit = {}) => fetch(`http://${host}/studio${path}`, {
     ...init, headers: { host, cookie: `${SESSION_COOKIE}=token`, ...(init.headers ?? {}) },
   })
-  return { request, identity, allowedHosts, host }
+  return { request, identity, allowedHosts, host, root }
 }
 
 describe('authenticated Studio web surface', () => {
@@ -66,4 +66,72 @@ describe('authenticated Studio web surface', () => {
     expect((await f.request('/assets/missing.js')).status).toBe(404)
     expect((await f.request('/', { method: 'POST' })).status).toBe(401)
   })
+
+  it('maps authentication lockout, unknown failures, invalid methods, and missing builds honestly', async () => {
+    const f = await fixture()
+    f.identity.authenticate.mockRejectedValueOnce(new IdentityError('locked', 'Aguarde'))
+    expect((await f.request('/')).status).toBe(429)
+    f.identity.authenticate.mockRejectedValueOnce('opaque failure')
+    const opaque = await f.request('/')
+    expect(opaque.status).toBe(500)
+    expect(await opaque.text()).toContain('Não foi possível abrir a interface')
+    // Cross-origin-capable mutation verbs are rejected by the trust boundary
+    // before the method dispatcher, so no method oracle is exposed.
+    expect((await f.request('/', { method: 'DELETE' })).status).toBe(401)
+
+    await rm(join(f.root, 'index.html'))
+    expect((await f.request('/route-without-extension')).status).toBe(404)
+  })
+
+  it('rejects symlinks and serves only known content types with an octet-stream fallback', async () => {
+    const f = await fixture()
+    await writeFile(join(f.root, 'assets', 'data.unknown'), 'opaque')
+    const opaque = await f.request('/assets/data.unknown')
+    expect(opaque.status).toBe(200)
+    expect(opaque.headers.get('content-type')).toBe('application/octet-stream')
+
+    await symlink(join(f.root, 'assets', 'app.js'), join(f.root, 'assets', 'linked.js'))
+    expect((await f.request('/assets/linked.js')).status).toBe(400)
+  })
+
+  it('accepts only exact local and delegated HTTPS preview source forms and deduplicates them', async () => {
+    const accepted = [
+      'http://*.dz23.localhost',
+      'http://*.dz23.localhost:65535',
+      'https://*.preview.apps.example.com',
+      'https://*.preview.apps.example.com',
+    ]
+    const f = await fixture(accepted)
+    const policy = (await f.request('/')).headers.get('content-security-policy') ?? ''
+    expect(policy).toContain('http://*.dz23.localhost http://*.dz23.localhost:65535 https://*.preview.apps.example.com')
+    expect(policy.match(/https:\/\/\*\.preview\.apps\.example\.com/gu)).toHaveLength(1)
+
+    const input = { distDirectory: '.', identity: {} as StudioIdentityService, allowedHosts: [] }
+    for (const source of [
+      'http://*.dz23.localhost:65536',
+      'http://*.dz23.localhost:0',
+      'https://*.preview.localhost',
+      'https://*.preview.bad..example.com',
+    ]) expect(() => createStudioWebHandler({ ...input, previewFrameSources: [source] })).toThrow('previewFrameSources')
+  })
+
+  it('registers the composed web surface using secure defaults or explicit overrides', async () => {
+    const registrations: Array<Record<string, unknown>> = []
+    const effects: string[] = []
+    const ctx = {
+      webServer: { port: 3210, register: (value: Record<string, unknown>) => { registrations.push(value); return () => undefined } },
+      studioIdentity: { service: {} as StudioIdentityService },
+      studioPreview: { frameSource: 'http://*.dz23.localhost:4179' },
+      effect: (factory: () => unknown, label: string) => { effects.push(label); factory() },
+    }
+    await apply(ctx as never)
+    await apply(ctx as never, { distDirectory: fakedRoot(), allowedHosts: ['studio.example'], previewFrameSources: [] })
+    expect(effects).toEqual(['dz23-studio-web.http', 'dz23-studio-web.http'])
+    expect(registrations).toHaveLength(2)
+    expect(registrations[0]).toMatchObject({ kind: 'prefix', path: '/studio', handler: expect.any(Function) })
+  })
 })
+
+function fakedRoot(): string {
+  return resolve(join(tmpdir(), 'dz23-explicit-web-dist'))
+}

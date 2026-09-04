@@ -1,5 +1,5 @@
 import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -67,6 +67,10 @@ function forwardEnvelope(overrides: Partial<{
       ...overrides,
     },
   }
+}
+
+function messagesEnvelope(): unknown {
+  return { operation: 'verification-messages', body: { runtime_ref: 'container:preview-01' } }
 }
 
 async function sendProxy(socketPath: string, value: unknown, rawBody?: Buffer): Promise<ProxyResponse> {
@@ -254,5 +258,63 @@ describeUnix('preview proxy Unix-socket boundary', () => {
       socketPath, runtimeRef: 'container:preview-01', runtimeHost: '127.0.0.1', previewId: 'preview-01', dataRoot,
     })).rejects.toThrow()
     expect(await readFile(socketPath, 'utf8')).toBe('operator-owned-file')
+  })
+
+  it('reads only bounded regular capture files and filters every malformed message field', async () => {
+    const proxy = await startProxy()
+    const previewRoot = join(proxy.options.dataRoot, proxy.options.previewId)
+    const capture = join(previewRoot, 'preview-capture.json')
+    await mkdir(previewRoot)
+    const valid = { kind: 'code', email: 'person@example.com', code: '123456', expiresAt: '2026-09-04T12:00:00.000Z' }
+    const invalid = [
+      null,
+      [],
+      'string',
+      { ...valid, extra: true },
+      { ...valid, kind: 'other' },
+      { ...valid, email: 'not-an-email' },
+      { ...valid, code: '12345' },
+      { ...valid, expiresAt: 'not-a-date' },
+    ]
+    await writeFile(capture, JSON.stringify([valid, ...invalid]))
+    expect(await sendProxy(proxy.options.socketPath, messagesEnvelope())).toEqual({
+      status: 200, body: { messages: [valid] },
+    })
+
+    await writeFile(capture, JSON.stringify(Array.from({ length: 21 }, () => valid)))
+    expect(await sendProxy(proxy.options.socketPath, messagesEnvelope())).toEqual({ status: 200, body: { messages: [] } })
+    await writeFile(capture, '{invalid json')
+    expect(await sendProxy(proxy.options.socketPath, messagesEnvelope())).toEqual({ status: 200, body: { messages: [] } })
+    await writeFile(capture, 'x'.repeat(64 * 1024 + 1))
+    expect(await sendProxy(proxy.options.socketPath, messagesEnvelope())).toEqual({ status: 200, body: { messages: [] } })
+
+    await rm(capture)
+    await mkdir(capture)
+    expect(await sendProxy(proxy.options.socketPath, messagesEnvelope())).toEqual({ status: 200, body: { messages: [] } })
+    await rm(capture, { recursive: true })
+    await symlink(join(previewRoot, 'absent.json'), capture)
+    expect(await sendProxy(proxy.options.socketPath, messagesEnvelope())).toEqual({ status: 200, body: { messages: [] } })
+  })
+
+  it('rejects every invalid proxy boundary option before opening a socket', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dz23-preview-proxy-invalid-'))
+    temporaryRoots.push(root)
+    const valid: PreviewProxyOptions = {
+      socketPath: join(root, 'proxy.sock').replaceAll('\\', '/'),
+      runtimeRef: 'container:preview-01', runtimeHost: '127.0.0.1', previewId: 'preview-01', dataRoot: root.replaceAll('\\', '/'),
+    }
+    const invalid: PreviewProxyOptions[] = [
+      { ...valid, socketPath: 'relative.sock' },
+      { ...valid, socketPath: '/tmp/bad\\socket' },
+      { ...valid, socketPath: '/tmp/bad\0socket' },
+      { ...valid, runtimeRef: '' },
+      { ...valid, runtimeHost: 'UPPERCASE' },
+      { ...valid, previewId: 'bad/id' },
+      { ...valid, dataRoot: 'relative' },
+      { ...valid, runtimeTimeoutMs: 49 },
+      { ...valid, runtimeTimeoutMs: 30_001 },
+      { ...valid, runtimeTimeoutMs: Number.NaN },
+    ]
+    for (const options of invalid) await expect(listenPreviewProxy(options)).rejects.toThrow(/INVALID_/u)
   })
 })
