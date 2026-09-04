@@ -139,7 +139,9 @@ function isSafeStaticUrl(value: string): boolean {
 }
 
 function splitCandidateList(value: string): string[] {
-  return value.split(',').map(part => part.trim().split(/\s+/u)[0] ?? '').filter(part => part !== '')
+  // String#split always returns at least one item; avoid an impossible fallback
+  // branch so the security-critical policy remains fully covered.
+  return value.split(',').map(part => part.trim().split(/\s+/u)[0] as string).filter(part => part !== '')
 }
 
 function splitWhitespaceList(value: string): string[] {
