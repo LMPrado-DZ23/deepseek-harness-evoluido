@@ -221,7 +221,46 @@ describe('integration hub service', () => {
     expect(canonicalSecretRef('  secret://DZ23_APP_SMTP ')).toBe('DZ23_APP_SMTP')
     expect(canonicalSecretRef('SECRET://DZ23_APP_SMTP')).toBe('DZ23_APP_SMTP')
     expect(canonicalSecretRef('dz23_app_smtp')).toBe('dz23_app_smtp') // the case is never invented; the schema refuses it
+    expect(canonicalSecretRef(42)).toBe(42)
     expect(minimizeRecipient('Pessoa@Example.Test')).toMatch(/^\*\*\*@example\.test sha256:[a-f0-9]{12}$/u)
+  })
+
+  it('fails closed on the final repository CAS and minimizes provider failures', async () => {
+    const { service, repository } = await build({ channel: 'dev', emailTest: true, secrets: { DZ23_APP_SMTP: { present: true, shapeOk: true } } })
+    const rawOptions = (service as unknown as { options: ConstructorParameters<typeof IntegrationHubService>[0] }).options
+    // Defaults are part of production wiring; constructing without injected clock/id covers that path without relying on their values.
+    expect(new IntegrationHubService({ ...rawOptions, now: undefined, createId: undefined })).toBeInstanceOf(IntegrationHubService)
+    const nullManifest: StudioIntegration = {
+      integration_id: 'legacy-null', org_id: 'org-a', tenant_id: 'ws-a', kind: 'skill', name: 'Legado', manifest: null,
+      effective_tier: 'T0', verification: 'unverified', enabled: false, secret_ref: null,
+      created_by: 'u1', created_at: '2026-09-04T00:00:00.000Z', updated_at: '2026-09-04T00:00:00.000Z',
+    }
+    expect(service.canEnable(nullManifest)).toBe(false)
+    expect(service.requiredApprovalTier(nullManifest)).toBe('T2')
+
+    const registered = await service.register(admin, signed(manifest({ id: 'cas-write' })))
+    repository.compareAndSwapIntegration = async () => false
+    await expect(service.setEnabled(admin, registered.integration.integration_id, true)).rejects.toMatchObject({ code: 'CONFLICT' })
+    expect(repository.eventRows.at(-1)).toMatchObject({ action: 'integration.enabled', detail: 'changed-during-write' })
+    await repository.putIntegration({ ...registered.integration, enabled: true })
+    await expect(service.setEnabled(admin, registered.integration.integration_id, false)).rejects.toMatchObject({ code: 'CONFLICT' })
+    expect(repository.eventRows.at(-1)).toMatchObject({ action: 'integration.disabled', detail: 'changed-during-write' })
+
+    repository.compareAndSwapIntegration = async (scope, id, fingerprint, value) => {
+      const current = repository.integration(scope, id)
+      if (current === undefined || securityFingerprint(current) !== fingerprint) return false
+      await repository.putIntegration(value); return true
+    }
+    await service.configureSmtp(admin, 'DZ23_APP_SMTP', await ok(service, admin, 'smtp.configured', SMTP, 'DZ23_APP_SMTP'))
+    const options = (service as unknown as { options: { emailTest?: { sendTest(ref: string, to: string): Promise<void> } } }).options
+    options.emailTest = { sendTest: async () => { throw 'provider-down' } }
+    await expect(service.testSmtp(admin, 'pessoa@example.test', await ok(service, admin, 'smtp.tested', SMTP, 'pessoa@example.test')))
+      .rejects.toMatchObject({ code: 'INVALID' })
+    expect(repository.eventRows.at(-1)).toMatchObject({ action: 'smtp.tested', outcome: 'failure', detail: 'Error' })
+    options.emailTest = { sendTest: async () => { throw new TypeError('private provider detail') } }
+    await expect(service.testSmtp(admin, 'pessoa@example.test', await ok(service, admin, 'smtp.tested', SMTP, 'pessoa@example.test')))
+      .rejects.toMatchObject({ code: 'INVALID' })
+    expect(repository.eventRows.at(-1)).toMatchObject({ detail: 'TypeError' })
   })
 
   it('enforces the tier the kind demands, never a lower one stored in the row', async () => {
