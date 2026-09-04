@@ -14,6 +14,14 @@ export interface DomainScopeEntry {
 /** Explicit and reviewable classification; there is deliberately no wildcard. */
 export const STUDIO_DOMAIN_SCOPES: readonly DomainScopeEntry[] = [
   {
+    source: 'plugins/integration-hub/src/model.ts', exportName: 'studioIntegrationsDomainSpec', physicalName: 'studio_integrations',
+    tables: {
+      integrations: { scope: 'org-tenant', requiredFields: ['org_id', 'tenant_id'] },
+      exports: { scope: 'org-tenant', requiredFields: ['org_id', 'tenant_id'] },
+      events: { scope: 'org-tenant', requiredFields: ['org_id', 'tenant_id'] },
+    },
+  },
+  {
     source: 'plugins/prompt-to-app/src/model.ts', exportName: 'studioProjectsDomainSpec', physicalName: 'studio_projects',
     tables: { projects: { scope: 'org-tenant', requiredFields: ['org_id', 'tenant_id'] } },
   },

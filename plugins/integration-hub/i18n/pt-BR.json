@@ -1,0 +1,43 @@
+{
+  "errors": {
+    "routeNotFound": "Rota não encontrada.",
+    "forbidden": "Seu papel não permite esta ação.",
+    "membershipRequired": "Você precisa fazer parte deste espaço de trabalho.",
+    "invalidRequest": "Solicitação inválida.",
+    "secretRefInvalid": "O nome do segredo precisa ser um identificador como DZ23_APP_SMTP (letras maiúsculas, números e sublinhado).",
+    "secretRefMissing": "Esse nome ainda não existe no cofre do servidor. Cadastre o segredo lá primeiro; aqui fica só o nome.",
+    "secretShapeInvalid": "O segredo existe, mas não tem o formato esperado (host, port, secure, user, pass, from).",
+    "integrationNotFound": "Integração não encontrada.",
+    "manifestInvalid": "O manifesto da integração não está no formato esperado: {detail}",
+    "manifestUnverified": "Esta integração não tem assinatura reconhecida e não pode ser ligada no canal estável.",
+    "manifestSignatureInvalid": "A assinatura do manifesto não confere com a chave do publicador.",
+    "exportNotVerified": "Só é possível baixar um protótipo verificado.",
+    "exportRunMissing": "Os arquivos da última verificação não estão mais neste computador.",
+    "exportNotFound": "Pacote não encontrado.",
+    "smtpNotConfigured": "O envio de e-mail do aplicativo ainda não foi configurado.",
+    "smtpTestDisabled": "O teste de envio ainda não foi liberado: falta escolher o provedor de e-mail. Nada foi enviado.",
+    "smtpTestFailed": "O provedor recusou o envio de teste: {detail}"
+  },
+  "export": {
+    "readmeTitle": "Seu protótipo do DZ23 STUDIO",
+    "readmeIntro": "Este pacote contém o aplicativo que foi verificado no seu computador. Ele ainda não está publicado na internet.",
+    "readmeRun": "Para executar em um servidor com Node.js 22: descompacte, entre na pasta e rode `node server.js`. Antes, preencha as variáveis do arquivo `.env.example` no ambiente do servidor (nunca dentro do pacote).",
+    "readmeData": "Os dados do aplicativo ficam na pasta indicada por DATA_DIR. Faça cópias dela.",
+    "readmeSecurity": "O aplicativo não envia e-mails até APP_EMAIL_MODE=smtp e APP_SMTP_URL estarem definidos no servidor. Não coloque senhas neste pacote.",
+    "envComment": "Preencha estas variáveis no ambiente do servidor. Nunca dentro do pacote.",
+    "readmeRunLine": "Execução verificada: {runId}"
+  },
+  "smtp": {
+    "testSubject": "Teste de envio do DZ23 STUDIO",
+    "testBody": "Se você recebeu esta mensagem, o envio de e-mail do seu aplicativo está funcionando.",
+    "integrationName": "E-mail do aplicativo (SMTP)"
+  },
+  "audit": {
+    "smtpConfigured": "Referência de e-mail do aplicativo configurada.",
+    "smtpTested": "Teste de envio executado.",
+    "integrationRegistered": "Integração registrada.",
+    "integrationEnabled": "Integração ligada.",
+    "integrationDisabled": "Integração desligada.",
+    "exportCreated": "Pacote do protótipo gerado."
+  }
+}

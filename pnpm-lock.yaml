@@ -170,6 +170,43 @@ importers:
         specifier: 8.0.1
         version: 8.0.1
 
+  plugins/integration-hub:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/vendor/cordis
+        version: link:../../../harness-studio-poc02/deepseek-harness/vendor/cordis
+      '@deepseek-ai/dsh-credentials':
+        specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/credentials/credentials
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/credentials/credentials
+      '@deepseek-ai/dsh-host-webserver':
+        specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/host/webserver
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/host/webserver
+      '@deepseek-ai/dsh-storage-domain':
+        specifier: link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage-domain
+        version: link:../../../harness-studio-poc02/deepseek-harness/packages/storage/storage-domain
+      '@dz23-studio/identity':
+        specifier: link:../identity
+        version: link:../identity
+      '@dz23-studio/policy':
+        specifier: link:../policy
+        version: link:../policy
+      '@dz23-studio/prompt-to-app':
+        specifier: link:../prompt-to-app
+        version: link:../prompt-to-app
+      '@dz23-studio/tenancy':
+        specifier: link:../tenancy
+        version: link:../tenancy
+      nodemailer:
+        specifier: 9.0.5
+        version: 9.0.5
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@types/nodemailer':
+        specifier: 8.0.1
+        version: 8.0.1
+
   plugins/policy:
     dependencies:
       '@deepseek-ai/cordis':

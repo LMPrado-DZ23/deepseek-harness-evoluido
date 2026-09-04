@@ -39,3 +39,4 @@
       studio_runs: postgres
       studio_evidence: postgres
       studio_approvals: postgres
+      studio_integrations: postgres
