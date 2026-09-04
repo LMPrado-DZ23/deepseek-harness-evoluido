@@ -123,7 +123,7 @@
           tokenFile: !!js process.env.DZ23_PREVIEW_SUPERVISOR_TOKEN_FILE ?? '/run/secrets/dz23_preview_supervisor_token'
           artifactRoot: !!js process.env.DZ23_RUNS_ROOT ?? '/var/lib/dz23-studio/generated-runs'
           proxySocketRoot: !!js process.env.DZ23_PREVIEW_PROXY_SOCKET_ROOT ?? '/run/dz23-preview-proxies'
-          studioOrigin: !!js process.env.DZ23_PUBLIC_ORIGIN ?? 'http://localhost:8080'
+          studioOrigin: !!js process.env.DZ23_PUBLIC_ORIGIN ?? 'http://studio.dz23.localhost:8080'
           edgeSecretRef: DZ23_EDGE_SECRET
     - id: dz23-studio-web
       name: '@dz23-studio/web'
