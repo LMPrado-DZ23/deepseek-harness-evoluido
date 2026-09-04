@@ -10,6 +10,7 @@ const unitName = process.env.DZ23_SOAK_UNIT ?? 'studio_hello'
 const everyMs = Number(process.env.DZ23_SOAK_CONTEND_MS ?? 2_000)
 if (dsn === undefined || schema === undefined) process.exit(2)
 
+process.stdout.on('error', () => process.exit(0)) // the orchestrator went away: nothing left to report to
 let refused = 0
 let acquiredAt: string | null = null
 process.stdout.write(`${JSON.stringify({ event: 'ready', pid: process.pid })}\n`)

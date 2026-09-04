@@ -51,6 +51,7 @@ const schema = process.env.DZ23_POSTGRES_PROOF_SCHEMA ?? 'dz23_storage_proof'
 const inspector = new pg.Client({ connectionString: process.env.DZ23_POSTGRES_DSN, application_name: 'dz23-soak:inspector' })
 await inspector.connect()
 let running = true
+let writeInFlight = false
 
 process.stdout.write(`${JSON.stringify({ event: 'ready', pid: process.pid, dshHome, startedAt: stats.startedAt })}\n`)
 
@@ -59,6 +60,7 @@ const writer = setInterval(async () => {
   const key = `soak_${String(stats.iterations).padStart(8, '0')}`
   const record = { tenant_id: 'tenant-soak', created_at: new Date().toISOString(), note: `iteration ${String(stats.iterations)}` }
   const started = process.hrtime.bigint()
+  writeInFlight = true
   try {
     await helloRecords.put(key, record)
     const back = helloRecords.get(key)
@@ -70,6 +72,7 @@ const writer = setInterval(async () => {
     stats.errors++
     process.stderr.write(`write error: ${error instanceof Error ? error.message : String(error)}\n`)
   } finally {
+    writeInFlight = false
     stats.latencies.push(Number(process.hrtime.bigint() - started) / 1e6)
     if (stats.latencies.length > 20_000) stats.latencies.splice(0, stats.latencies.length - 20_000)
   }
@@ -91,7 +94,8 @@ const report = setInterval(async () => {
   // Independent read-back from PostgreSQL (not the in-memory domain map): the
   // last written key must be there with the same value, and the row count must
   // equal the bounded window.
-  if (stats.iterations > 0) {
+  // Skipped while a put/delete pair is in flight: the check compares against a settled window.
+  if (stats.iterations > 0 && !writeInFlight) {
     try {
       const lastKey = `soak_${String(stats.iterations - 1).padStart(8, '0')}`
       const row = await inspector.query(`SELECT value FROM "${schema}"."records" WHERE unit = 'studio_hello' AND table_name = 'records' AND key = $1`, [lastKey])
