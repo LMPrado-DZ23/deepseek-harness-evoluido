@@ -97,6 +97,7 @@ pnpm build
 pnpm test:postgres:coverage
 pnpm test:postgres:runtime
 DZ23_POSTGRES_DSN=... pnpm prove:storage-migration
+DZ23_POSTGRES_DSN=... pnpm prove:backup-restore      # cópia → desastre → restauração → Studio religado
 DZ23_POSTGRES_DSN=... pnpm prove:postgres-soak --minutes 30
 pnpm build:edge
 pnpm prove:edge

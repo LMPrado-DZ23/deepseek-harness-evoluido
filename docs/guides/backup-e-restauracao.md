@@ -69,3 +69,12 @@ pnpm storage:export-json --storages ~/.dsh/storages --out dev.bundle.json --conf
 
 O arquivo gerado é restaurado no servidor com o mesmo comando de restauração
 acima.
+
+## Prova executada
+
+O caminho completo — cópia agendada e cópia do operador com o Studio ligado, perda do esquema,
+restauração pela CLI, Studio religado com a mesma sessão e os mesmos registros, recusa de
+sobrescrever um esquema povoado sem confirmação — é exercitado por `pnpm prove:backup-restore`
+(PostgreSQL real). Resultado em `docs/proofs/P31-B-backup-restore-proof.md`. A prova também
+mostra, sem esconder, que uma escrita feita depois da cópia não volta: a restauração é um ponto
+no tempo, por isso a frequência da cópia agendada importa.
