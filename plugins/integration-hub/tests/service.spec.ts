@@ -229,7 +229,8 @@ describe('integration hub service', () => {
     const { service, repository } = await build({ channel: 'dev', emailTest: true, secrets: { DZ23_APP_SMTP: { present: true, shapeOk: true } } })
     const rawOptions = (service as unknown as { options: ConstructorParameters<typeof IntegrationHubService>[0] }).options
     // Defaults are part of production wiring; constructing without injected clock/id covers that path without relying on their values.
-    expect(new IntegrationHubService({ ...rawOptions, now: undefined, createId: undefined })).toBeInstanceOf(IntegrationHubService)
+    const { now: _now, createId: _createId, ...defaultedOptions } = rawOptions
+    expect(new IntegrationHubService(defaultedOptions)).toBeInstanceOf(IntegrationHubService)
     const nullManifest: StudioIntegration = {
       integration_id: 'legacy-null', org_id: 'org-a', tenant_id: 'ws-a', kind: 'skill', name: 'Legado', manifest: null,
       effective_tier: 'T0', verification: 'unverified', enabled: false, secret_ref: null,

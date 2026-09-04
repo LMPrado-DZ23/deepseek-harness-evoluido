@@ -112,9 +112,9 @@ describe('integration hub plugin wiring', () => {
     roots.push(root)
     const fixture = fakeContext()
     const timestamp = '2026-09-04T00:00:00.000Z'
-    const manifest = {
+    const manifest: NonNullable<StudioIntegration['manifest']> = {
       schema_version: 1 as const, id: 'agenda', name: 'Agenda', version: '1.0.0', kind: 'skill' as const,
-      publisher: { id: 'dz23', name: 'DZ23' }, permissions: [] as const,
+      publisher: { id: 'dz23', name: 'DZ23' }, permissions: [],
     }
     const integration: StudioIntegration = {
       integration_id: 'agenda', org_id: 'org-a', tenant_id: 'ws-a', kind: 'skill', name: 'Agenda', manifest,
