@@ -1,12 +1,15 @@
 import { randomBytes } from 'node:crypto'
-import { mkdir, open, readFile, rm } from 'node:fs/promises'
-import { dirname, resolve } from 'node:path'
+import { rm } from 'node:fs/promises'
+import type { FileHandle } from 'node:fs/promises'
+import { resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { Client } from 'pg'
 import { PostgresStorageBackend } from '../plugins/storage-postgres/src/backend.ts'
 import { assertTlsPolicy, postgresClientConnection, postgresToolConnection, type TlsPolicy } from '../plugins/storage-postgres/src/dsn.ts'
 import { assertConfiguredSchemaName, assertIdentifier, quoteIdentifier, STORAGE_POSTGRES_LAYOUT_VERSION, storageMaintenanceLockName, storageUnitLockName } from '../plugins/storage-postgres/src/schema.ts'
-import { importStorage, type StorageExportBundle, validateBundle } from './storage-migration.ts'
+import { readStorageBundleFile } from '../plugins/storage-postgres/src/import-file.ts'
+import { assertPinnedDirectory, openNewPinnedFile, pinnedChildPath, pinParent } from '../plugins/storage-postgres/src/safe-path.ts'
+import { importStorage } from './storage-migration.ts'
 
 /**
  * Table this tool writes inside every staging schema it creates, in the same
@@ -31,8 +34,7 @@ assertConfiguredSchemaName(args.schema)
 if (args.write && args.backup === undefined) throw new Error('--backup is mandatory with --write')
 const dsn = process.env[args.dsnRef]
 if (dsn === undefined || dsn === '') throw new Error(`Credential reference '${args.dsnRef}' is not configured.`)
-const bundle = JSON.parse(await readFile(resolve(args.input), 'utf8')) as StorageExportBundle
-validateBundle(bundle)
+const bundle = await readStorageBundleFile(resolve(args.input))
 // A bundle with no domains restores nothing: it can only ever destroy. Refused before the database is even opened.
 if (!Array.isArray(bundle.domains) || bundle.domains.length === 0) {
   throw new Error('O arquivo de cópia não contém nenhum domínio. Nada seria restaurado — só apagado. Importação recusada.')
@@ -88,7 +90,6 @@ try {
     let backup: string | null = null
     let backupStatus = 'not-needed-empty-target'
     if (targetSchemaExists) {
-      await mkdir(dirname(backupPath), { recursive: true })
       await pgDump(dsn, args.schema, backupPath, args.ssl)
       backup = backupPath
       backupStatus = 'created'
@@ -244,10 +245,12 @@ async function pgDump(dsn: string, schema: string, output: string, ssl: TlsPolic
   // policy is re-supplied there too, where the stripped URI can no longer contradict it.
   const target = postgresToolConnection(dsn, ssl, process.env)
   const env = target.env
-  let destination
+  const parent = await pinParent(output, true)
+  let destination: FileHandle
   try {
-    destination = await open(output, 'wx', 0o600)
+    destination = await openNewPinnedFile(parent.directory, parent.name)
   } catch (error) {
+    await parent.directory.handle.close().catch(() => undefined)
     if ((error as { code?: string }).code === 'EEXIST') {
       throw new Error(`Já existe um arquivo em ${output} (provavelmente de uma tentativa anterior). Escolha outro caminho para --backup ou mova esse arquivo antes de repetir.`)
     }
@@ -262,10 +265,14 @@ async function pgDump(dsn: string, schema: string, output: string, ssl: TlsPolic
       child.once('error', reject)
       child.once('exit', code => code === 0 ? resolvePromise() : reject(new Error(`pg_dump exited with code ${String(code)}`)))
     })
+    await assertPinnedDirectory(parent.directory)
   } catch (error) {
     await destination.close()
-    await rm(output, { force: true })
+    await assertPinnedDirectory(parent.directory)
+    await rm(pinnedChildPath(parent.directory, parent.name), { force: true })
     throw error
+  } finally {
+    await parent.directory.handle.close().catch(() => undefined)
   }
   await destination.close()
 }

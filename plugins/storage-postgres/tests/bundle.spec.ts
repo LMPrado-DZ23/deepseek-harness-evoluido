@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { bundleRecordCount, exportedDomain, sealBundle, validateBundle, type StorageExportBundle } from '../src/bundle.ts'
+import { bundleRecordCount, canonicalJson, exportedDomain, sealBundle, sha256, validateBundle, type StorageExportBundle } from '../src/bundle.ts'
 
 const descriptor = { name: 'studio_hello', version: 1, tables: ['records'], hasGlobal: false }
 const sealed = () => sealBundle({ kind: 'json', sha256: 'b'.repeat(64) }, [
@@ -25,5 +25,30 @@ describe('storage export bundle', () => {
     ;(edited.domains[0]!.snapshot.tables.records as Record<string, unknown>).a = { note: 'tampered' }
     const resealed = { ...edited, payloadSha256: sealBundle(edited.source, edited.domains, edited.createdAt).payloadSha256 }
     expect(() => validateBundle(resealed)).toThrow('domain checksum mismatch')
+  })
+
+  it('rejects unknown fields, undeclared tables and bounded record/depth explosions even when resealed', () => {
+    const unknown = structuredClone(sealed()) as StorageExportBundle & { surprise?: boolean }
+    unknown.surprise = true
+    unknown.payloadSha256 = sha256(canonicalJson({
+      format: unknown.format, upstreamCommit: unknown.upstreamCommit, source: unknown.source,
+      createdAt: unknown.createdAt, domains: unknown.domains, surprise: true,
+    }))
+    expect(() => validateBundle(unknown)).toThrow('unknown or missing fields')
+
+    const extraTable = sealed()
+    ;(extraTable.domains[0]!.snapshot.tables as Record<string, unknown>).undeclared = {}
+    expect(() => validateBundle(sealBundle(extraTable.source, extraTable.domains, extraTable.createdAt))).toThrow('unknown or missing fields')
+
+    expect(() => validateBundle(sealed(), { maxDomains: 1, maxRecords: 1, maxDepth: 8 })).toThrow('record limit')
+    const twoDomains = sealBundle({ kind: 'json', sha256: 'b'.repeat(64) }, [
+      sealed().domains[0]!,
+      exportedDomain({ ...descriptor, name: 'studio_second' }, { tables: { records: {} }, global: null }),
+    ], '2026-09-03T12:00:00.000Z')
+    expect(() => validateBundle(twoDomains, { maxDomains: 1, maxRecords: 10, maxDepth: 8 })).toThrow('domain limit')
+    const deep = sealed()
+    deep.domains[0]!.snapshot.tables.records!.a = { one: { two: { three: true } } }
+    const deepSealed = sealBundle(deep.source, [exportedDomain(deep.domains[0]!.descriptor, deep.domains[0]!.snapshot)], deep.createdAt)
+    expect(() => validateBundle(deepSealed, { maxDomains: 1, maxRecords: 10, maxDepth: 1 })).toThrow('nesting-depth limit')
   })
 })
