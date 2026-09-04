@@ -7,12 +7,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CSRF_COOKIE, IdentityError, SESSION_COOKIE, type SessionRecord, type StudioIdentityService } from '@dz23-studio/identity'
-import type { StudioTenancyService } from '@dz23-studio/tenancy'
-import { EXPORT_LIMIT_BYTES } from '../src/export.ts'
-import { createHubHttpHandler, HUB_ROUTE_CONTRACTS } from '../src/http.ts'
+import { TenancyError, type StudioTenancyService } from '@dz23-studio/tenancy'
+import { EXPORT_LIMIT_BYTES, ExportError } from '../src/export.ts'
+import { createHubHttpHandler, HUB_ROUTE_CONTRACTS, safeFileName } from '../src/http.ts'
 import { canonicalManifestBytes } from '../src/manifest.ts'
 import type { HubEvent, IntegrationManifest, StudioExport, StudioIntegration } from '../src/model.ts'
-import { IntegrationHubService, securityFingerprint, type HubActor, type HubRepository } from '../src/service.ts'
+import { HubError, IntegrationHubService, securityFingerprint, type HubActor, type HubRepository } from '../src/service.ts'
 import { readZip } from '../src/zip.ts'
 
 class MemoryRepository implements HubRepository {
@@ -96,6 +96,34 @@ async function fixture(role: 'owner' | 'admin' | 'builder' | 'viewer' = 'owner')
   return { request, repository, host, origin, standalone: join(runDirectory, '.next', 'standalone') }
 }
 
+async function getWithInjectedFailure(error: unknown, source: 'identity' | 'tenancy' | 'service' = 'service'): Promise<Response> {
+  const allowedHosts: string[] = []; const allowedOrigins: string[] = []
+  const identity = {
+    authenticate: vi.fn(() => source === 'identity' ? Promise.reject(error) : Promise.resolve(session)),
+  }
+  const tenancy = {
+    authorizationFor: vi.fn(() => {
+      if (source === 'tenancy') throw error
+      return { userId: 'u1', orgId: 'org-a', tenantId: 'ws-a', role: 'owner' }
+    }),
+  }
+  const service = {
+    channel: 'stable',
+    list: vi.fn(() => { if (source === 'service') throw error; return [] }),
+  }
+  const server = createServer(createHubHttpHandler({
+    service: service as unknown as IntegrationHubService,
+    identity: identity as unknown as StudioIdentityService,
+    tenancy: tenancy as unknown as StudioTenancyService,
+    allowedHosts, allowedOrigins,
+  }))
+  servers.push(server)
+  await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve) })
+  const port = (server.address() as AddressInfo).port; const host = `127.0.0.1:${port}`; const origin = `http://${host}`
+  allowedHosts.push(host); allowedOrigins.push(origin)
+  return fetch(`${origin}/api/studio/hub/integrations`, { headers: { host, origin, cookie: `${SESSION_COOKIE}=session` } })
+}
+
 describe('integration hub HTTP boundary', () => {
   it('declares every route authorized with a permission and a server-owned scope', () => {
     for (const contract of HUB_ROUTE_CONTRACTS) {
@@ -117,7 +145,43 @@ describe('integration hub HTTP boundary', () => {
     expect((await request('/smtp', { method: 'POST', body: '{"secret_ref":"DZ23_APP_SMTP"}', headers: { 'x-dz23-csrf': 'wrong' } })).status).toBe(401)
     expect((await request('/nope')).status).toBe(404)
     expect((await request('/smtp', { method: 'POST', body: 'not json' })).status).toBe(400)
+    expect((await request('/smtp', { method: 'POST', body: '{}', headers: { 'content-type': 'text/plain' } })).status).toBe(400)
+    expect((await request('/smtp', { method: 'POST', body: JSON.stringify({ secret_ref: 'A'.repeat(70_000) }) })).status).toBe(400)
+    expect((await request('/smtp', { method: 'PUT', body: '{}' })).status).toBe(404)
     expect(host).toContain('127.0.0.1')
+  })
+
+  it('maps every owned failure class without exposing foreign messages', async () => {
+    expect((await getWithInjectedFailure(new IdentityError('locked', 'bloqueada'), 'identity')).status).toBe(429)
+    expect((await getWithInjectedFailure(new IdentityError('expired', 'expirada'), 'identity')).status).toBe(401)
+    for (const [error, expected] of [
+      [new TenancyError('not-found', 'ausente'), 404],
+      [new TenancyError('forbidden', 'negada'), 403],
+      [new TenancyError('invalid', 'inválida'), 400],
+      [new HubError('NOT_FOUND', 'ausente'), 404],
+      [new HubError('FORBIDDEN', 'negada'), 403],
+      [new HubError('CONFLICT', 'conflito'), 409],
+      [new HubError('SECRET_DETECTED', 'segredo'), 409],
+      [new HubError('TOO_LARGE', 'grande'), 413],
+      [new HubError('RATE_LIMITED', 'limite'), 429],
+      [new HubError('TIMEOUT', 'tempo'), 504],
+      [new HubError('NOT_EXECUTED', 'não executado'), 200],
+      [new HubError('INVALID', 'inválido'), 400],
+      [new ExportError('RUN_MISSING', 'interno'), 409],
+      [new ExportError('TOO_LARGE', 'interno'), 413],
+      [new ExportError('SECRET_DETECTED', 'interno'), 409],
+      [new ExportError('INVALID_PATH', '/segredo/do/host'), 500],
+      [Object.assign(new Error('/segredo/do/projeto'), { code: 'NOT_FOUND' }), 404],
+      [Object.assign(new Error('/segredo/proibido'), { code: 'FORBIDDEN' }), 403],
+      [new Error('/segredo/interno'), 500],
+    ] as const) {
+      const response = await getWithInjectedFailure(error)
+      expect(response.status).toBe(expected)
+      const body = await response.json() as { error: string }
+      if (!(error instanceof HubError || error instanceof IdentityError || error instanceof TenancyError)) expect(body.error).not.toContain('/segredo')
+    }
+    expect(safeFileName('///')).toBe('prototipo.zip')
+    expect(safeFileName('meu protótipo.zip')).toBe('meu_prot_tipo.zip')
   })
 
   it('walks the registry, SMTP and export flows through real HTTP', async () => {
