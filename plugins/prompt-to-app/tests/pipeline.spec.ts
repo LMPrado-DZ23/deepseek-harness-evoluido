@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -71,6 +71,16 @@ async function fixture(options: { readonly preflight?: 'OK' | 'BLOCKED_EXTERNAL'
 }
 
 describe('Prompt-to-App pipeline', () => {
+  it('rejects a template symlink before creating a run or changing project state', async () => {
+    const f = await fixture(); const outside = await mkdtemp(join(tmpdir(), 'dz23-template-outside-')); roots.push(outside)
+    await symlink(outside, resolve(f.templateDirectory, 'linked'), 'dir')
+    const generator = { generate: vi.fn(async () => cleanGeneration) }
+    await expect(f.pipeline.run(actor, 'project', generator)).rejects.toThrow('Link simbólico')
+    expect(generator.generate).not.toHaveBeenCalled()
+    expect(f.runs).toEqual([])
+    expect(f.transitions).toEqual([])
+  })
+
   it('records a verified prototype only after every offline step passes', async () => {
     const f = await fixture(); const generator = { generate: vi.fn(async () => cleanGeneration) }
     const result = await f.pipeline.run(actor, 'project', generator)

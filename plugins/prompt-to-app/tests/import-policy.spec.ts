@@ -24,8 +24,10 @@ describe('generated import policy', () => {
     expect(() => assertGeneratedImports([{ path: 'src/Generated.tsx', content }])).toThrow(moduleName)
   })
 
-  it('ignores non-code assets and rejects malformed module suffixes', () => {
+  it('allows the reviewed content file and rejects unreviewed styles and malformed module suffixes', () => {
     expect(() => assertGeneratedImports([{ path: 'content/app.json', content: '{"import":"node:fs"}' }])).not.toThrow()
+    expect(() => assertGeneratedImports([{ path: 'src/evil.css', content: '@import url(http://evil.example/x.css);' }])).toThrow(GeneratedFileRejectedError)
+    expect(() => assertGeneratedImports([{ path: 'src/evil.module.css', content: '.box{background:url(//evil.example/x)}' }])).toThrow(GeneratedFileRejectedError)
     expect(() => assertGeneratedImports([{ path: 'src/a.ts', content: "import x from '@/server/repositories/../secret'" }])).toThrow(GeneratedFileRejectedError)
   })
 
@@ -195,6 +197,34 @@ describe('generated import policy', () => {
     expect(() => assertGeneratedSource([{
       path: 'src/app.tsx', content: "import { SchedulingPanel } from '@/src/components/generated'; export default function App(){return <SchedulingPanel/>}",
     }])).not.toThrow()
+  })
+
+  it.each([
+    "import type Link from 'next/link'; const Link='script'; export default function App(){return <Link>{'alert(1)'}</Link>}",
+    "import { type LinkProps as Link } from 'next/link'; const Link='iframe'; export default function App(){return <Link/>}",
+  ])('never treats a type-only import as a trusted runtime JSX component', content => {
+    expect(() => assertGeneratedSource([{ path: 'src/app.tsx', content }])).toThrow('dynamic JSX tag Link')
+  })
+
+  it('keeps the normal next/link default value import trusted', () => {
+    expect(() => assertGeneratedSource([{
+      path: 'src/app.tsx', content: "import Link from 'next/link'; export default function App(){return <Link href='/ajuda'>Ajuda</Link>}",
+    }])).not.toThrow()
+  })
+
+  it.each([
+    'SRC/Components/Generated/evil.tsx',
+    'src/Components/UI/evil.tsx',
+  ])('rejects a case-variant of a protected namespace: %s', path => {
+    expect(() => assertGeneratedSource([{ path, content: 'export const value=1' }])).toThrow(GeneratedFileRejectedError)
+  })
+
+  it.each([
+    '@/src/components/ui/..\\..\\auth/runtime',
+    '@/src/components/ui/button?raw',
+    '@/src/components/ui/button#fragment',
+  ])('rejects separators or resource queries in an allowlisted import suffix: %s', moduleName => {
+    expect(() => assertGeneratedSource([{ path: 'src/app.ts', content: `import value from ${JSON.stringify(moduleName)}; void value` }])).toThrow(GeneratedFileRejectedError)
   })
 
   it('rejects a tagged-template call through an allowed import alias', () => {

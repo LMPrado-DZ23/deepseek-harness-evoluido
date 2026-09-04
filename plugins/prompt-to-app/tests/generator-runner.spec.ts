@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -20,7 +20,7 @@ describe('generated file fence', () => {
     await expect(writeGeneratedFiles(root, [{ path: 'src/App.tsx', content: 'ok' }, { path: 'content/app.json', content: '{}' }], { plannedPaths: ['src/App.tsx', 'content/app.json'] })).resolves.toEqual(['src/App.tsx', 'content/app.json'])
     expect(await readFile(join(root, 'src/App.tsx'), 'utf8')).toBe('ok')
     await expect(writeGeneratedFiles(root, [{ path: 'src/App.tsx', content: 'again' }])).rejects.toThrow()
-    await expect(writeGeneratedFiles(root, [{ path: 'src/a', content: '' }, { path: 'src/a', content: '' }])).rejects.toBeInstanceOf(GeneratedFileRejectedError)
+    await expect(writeGeneratedFiles(root, [{ path: 'src/a.ts', content: '' }, { path: 'src/a.ts', content: '' }])).rejects.toBeInstanceOf(GeneratedFileRejectedError)
   })
 
   it('allows only plan-listed changes to generated files and never overwrites template files', async () => {
@@ -35,6 +35,11 @@ describe('generated file fence', () => {
   it.each(['/tmp/x', '../x', 'src/../x', 'package.json', 'src//x', 'C:\\x'])('rejects unsafe path %s', value => {
     expect(() => validateGeneratedPath(value)).toThrow(GeneratedFileRejectedError)
   })
+
+  it.each(['src/evil.css', 'src/evil.module.css', 'src/evil.scss', 'content/other.json', 'content/app.md'])(
+    'rejects an unreviewed generated file type or content path: %s',
+    value => expect(() => validateGeneratedPath(value)).toThrow(GeneratedFileRejectedError),
+  )
 })
 
 describe('container builder', () => {
@@ -68,6 +73,8 @@ describe('container builder', () => {
   it('hashes immutable trees, rejects symlinks and scans secrets and valid CPF without blocking phones', async () => {
     const root = await temp(); await writeFile(join(root, 'a'), 'one'); const first = await hashTree(root)
     expect(first).toMatch(/^[a-f0-9]{64}$/u); await writeFile(join(root, 'a'), 'two'); expect(await hashTree(root)).not.toBe(first)
+    const holder = await temp(); const linkedRoot = join(holder, 'linked-root'); await symlink(root, linkedRoot, 'dir')
+    await expect(hashTree(linkedRoot)).rejects.toThrow('Link simbólico')
     expect(isValidCpf('529.982.247-25')).toBe(true)
     expect(isValidCpf('111.444.777-35')).toBe(true)
     expect(isValidCpf('123.456.789-00')).toBe(false)

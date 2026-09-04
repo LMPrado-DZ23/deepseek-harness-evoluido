@@ -125,6 +125,7 @@ describe('intake and planner', () => {
     expect(built.spec).toEqual(validSpec)
     await expect(new PlannerEngine(model).plan({ orgId: 'o', tenantId: 't' }, 'local-only', validSpec)).resolves.toMatchObject({ slices: [{ title: 'Página' }] })
     expect(complete.mock.calls.every(call => call[2] === 'local-only')).toBe(true)
+    expect(complete.mock.calls[2]?.[3]).toContain('não planeje arquivos CSS')
   })
 
   it('plans the public form category and refuses sensitive or incomplete forms until login exists', async () => {

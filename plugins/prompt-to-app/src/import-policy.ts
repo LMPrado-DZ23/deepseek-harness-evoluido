@@ -1,7 +1,7 @@
 import { posix } from 'node:path'
 import ts from 'typescript'
 import type { GeneratedFile } from './generator.js'
-import { GeneratedFileRejectedError } from './generator.js'
+import { GeneratedFileRejectedError, validateGeneratedPath } from './generator.js'
 import { t } from './i18n.js'
 
 const ALLOWED_MODULES = new Set([
@@ -51,8 +51,9 @@ const FIXED_COMPONENT_PATHS = [
 ] as const
 
 export function assertGeneratedSource(files: readonly GeneratedFile[]): void {
-  const generatedPaths = new Set(files.map(file => normalizePath(file.path)))
-  for (const file of files) {
+  const validated = files.map(file => ({ ...file, path: validateGeneratedPath(file.path) }))
+  const generatedPaths = new Set(validated.map(file => normalizePath(file.path)))
+  for (const file of validated) {
     if (!/\.[cm]?[jt]sx?$/u.test(file.path.toLowerCase())) continue
     if (isFixedComponentPath(normalizePath(file.path))) throw rejectedSource(file.path, 'reserved Studio component path')
     const source = ts.createSourceFile(file.path, file.content, ts.ScriptTarget.Latest, true, scriptKind(file.path))
@@ -158,11 +159,13 @@ function importedBindings(source: ts.SourceFile, generatedPaths: ReadonlySet<str
     if (!ts.isImportDeclaration(statement) || statement.importClause === undefined) continue
     const moduleName = literalModule(statement.moduleSpecifier)
     if (moduleName === undefined || !trustedJsxModule(moduleName) || aliasTargetsGeneratedFile(moduleName, generatedPaths)) continue
+    if (statement.importClause.isTypeOnly) continue
     if (statement.importClause.name !== undefined) names.add(statement.importClause.name.text)
+    if (moduleName === 'next/link') continue
     const bindings = statement.importClause.namedBindings
     if (bindings === undefined) continue
     if (ts.isNamespaceImport(bindings)) names.add(bindings.name.text)
-    else for (const element of bindings.elements) names.add(element.name.text)
+    else for (const element of bindings.elements) if (!element.isTypeOnly) names.add(element.name.text)
   }
   return names
 }
@@ -180,7 +183,8 @@ function aliasTargetsGeneratedFile(moduleName: string, generatedPaths: ReadonlyS
 }
 
 function isFixedComponentPath(path: string): boolean {
-  return FIXED_COMPONENT_PATHS.some(prefix => path === prefix || path.startsWith(`${prefix}/`))
+  const folded = path.toLowerCase()
+  return FIXED_COMPONENT_PATHS.some(prefix => folded === prefix || folded.startsWith(`${prefix}/`))
 }
 
 function factoryName(node: ts.Expression): string | undefined {
@@ -244,7 +248,10 @@ function normalizePath(path: string): string {
 }
 
 function safeSuffix(value: string): boolean {
-  return value.length > 0 && !value.startsWith('/') && !value.split('/').some(part => part === '' || part === '.' || part === '..')
+  return value.length > 0
+    && !value.startsWith('/')
+    && !/[\\?#\u0000-\u001f\u007f]/u.test(value)
+    && !value.split('/').some(part => part === '' || part === '.' || part === '..')
 }
 
 function scriptKind(path: string): ts.ScriptKind {

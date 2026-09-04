@@ -92,6 +92,8 @@ export async function hashTree(root: string, ignored: ReadonlySet<string> = new 
 
 export async function listTreeFiles(root: string): Promise<readonly string[]> {
   const absoluteRoot = resolve(root)
+  const rootInfo = await lstat(absoluteRoot)
+  if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) throw new Error(t('errors.templateSymlink', { path: absoluteRoot }))
   return (await walk(absoluteRoot)).map(path => path.slice(absoluteRoot.length + 1).replaceAll('\\', '/'))
 }
 

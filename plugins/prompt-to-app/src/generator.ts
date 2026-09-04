@@ -19,10 +19,19 @@ export interface GeneratedWritePolicy {
   readonly protectedTemplatePaths?: readonly string[]
 }
 
+const GENERATED_CODE_EXTENSION = /\.[cm]?[jt]sx?$/iu
+const GENERATED_CONTENT_PATHS = new Set(['content/app.json'])
+
 export function validateGeneratedPath(path: string): string {
   const normalized = validateRelativePath(path)
   const parts = normalized.split('/')
   if (parts[0] !== 'src' && parts[0] !== 'content') throw new GeneratedFileRejectedError(t('errors.generatedPathRoot'))
+  if (parts[0] === 'src' && !GENERATED_CODE_EXTENSION.test(normalized)) {
+    throw new GeneratedFileRejectedError(t('errors.generatedFileType', { path: normalized }))
+  }
+  if (parts[0] === 'content' && !GENERATED_CONTENT_PATHS.has(normalized)) {
+    throw new GeneratedFileRejectedError(t('errors.generatedContentPath', { path: normalized }))
+  }
   return normalized
 }
 

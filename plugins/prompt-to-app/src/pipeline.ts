@@ -74,6 +74,7 @@ export class PromptToAppPipeline {
     const specFindings = scanGeneratedContent({ 'appspec.json': JSON.stringify(spec) })
     if (specFindings.length > 0) throw new PromptToAppError('INVALID', t('errors.generatedSensitiveLiteral'))
     const design = this.options.service.designOrDefault(actor, projectId)
+    await listTreeFiles(this.options.templateDirectory)
     await this.options.service.putRun(actor, this.runRecord(actor, projectId, plan.plan_id, 'generate', 1, 'PENDING', 'full', 'not-created', null, null, operationId, operationId, ownerSessionId))
     if (isAborted(runOptions.signal)) return this.cancelled(actor, projectId, plan.plan_id, operationId, ownerSessionId, 0)
     const preflight = await this.options.builder.preflight()
