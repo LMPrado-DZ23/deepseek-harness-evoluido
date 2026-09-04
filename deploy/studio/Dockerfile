@@ -52,6 +52,17 @@ RUN test -n "${STUDIO_COMMIT}" \
 RUN --mount=type=cache,id=dz23-studio-pnpm-11,target=/pnpm/store,sharing=locked \
     --network=none \
     pnpm install --offline --frozen-lockfile --trust-lockfile --store-dir /pnpm/store
+# The upstream build script intentionally addresses these paths relative to
+# its repository root. The unified workspace hoists them to /workspace, so
+# expose only the two paths the pinned build contract requires.
+RUN mkdir -p third_party/deepseek-harness/node_modules \
+ && if [ ! -e third_party/deepseek-harness/node_modules/typescript ]; then \
+      ln -s /workspace/node_modules/typescript third_party/deepseek-harness/node_modules/typescript; \
+    fi \
+ && if [ ! -e third_party/deepseek-harness/node_modules/@types ]; then \
+      ln -s /workspace/node_modules/@types third_party/deepseek-harness/node_modules/@types; \
+    fi \
+ && test -f third_party/deepseek-harness/node_modules/typescript/bin/tsc
 RUN --network=none pnpm --dir third_party/deepseek-harness build:official
 # Reinject the upstream packages after build:official; their lib/ trees do not
 # exist in the source snapshot used by the first install.
