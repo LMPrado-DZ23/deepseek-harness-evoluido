@@ -55,6 +55,8 @@ describe('scheduling generator', () => {
     expect(generated).toContain('min={today}')
     expect(generated).toContain('constructor(database:DatabaseSync){this.database=database}')
     expect(generated).not.toContain('constructor(private readonly database')
+    expect(generated).toContain("code==='ERR_SQLITE_ERROR'")
+    expect(generated).toContain('UNIQUE constraint failed: scheduling_reserva.data, scheduling_reserva.horario')
     expect(generated).not.toMatch(/name=["'{]state/u)
     expect(generated).not.toContain("formData.get('state')")
   })
