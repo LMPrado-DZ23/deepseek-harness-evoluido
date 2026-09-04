@@ -35,7 +35,7 @@ Entregar, em branches empilhadas e sem push/deploy, as etapas M1 a M6: preview s
 ## Etapas
 
 - [x] M1 — código final em `codex/missao-m1-preview-fix@17ac4d7`, parecer independente `GO`; preservado sem merge enquanto a integração aguarda a ordem sequencial
-- [ ] M2 — código em fechamento: agenda interna, dashboard, área autenticada e Golden 18/18; aguardando gates e checkpoint imutável
+- [x] M2 — código provado em `0bf62fe`: sete categorias BETA e Golden Set 18/18; checkpoint aguardando parecer independente e sem merge
 - [ ] M3 — Postgres operacional, migração e backup/restore
 - [ ] M4 — PWA e preparação móvel
 - [ ] M5 — Integration Hub, SMTP configurável e download de protótipo
@@ -78,7 +78,7 @@ está no patch de prova e a lista do script de runtime está desatualizada. M3
 deve gerar/verificar rotas a partir de `scripts/studio-domain-specs.ts` e falhar
 se qualquer domínio Studio cair no backend JSON em produção.
 
-## Checkpoint M2 em preparação
+## Checkpoint M2 preservado
 
 - As sete categorias estão disponíveis na interface com linguagem BETA honesta.
 - O Golden Set exige exatamente 18 briefs/18 critérios, schema estrito, IDs
@@ -87,14 +87,23 @@ se qualquer domínio Studio cair no backend JSON em produção.
 - Agenda, dashboard e área autenticada possuem geradores e provas deterministas;
   a política de código gerado bloqueia rede, runtime ativo, caminhos reservados,
   componentes dinâmicos, dados sensíveis e arquivos não autorizados.
-- Nenhum resultado desta seção é checkpoint até a suíte final, cobertura,
-  Golden Set e artefato P37 serem executados sobre a mesma árvore.
+- Golden Set no clone limpo ext4: 18/18 pipelines técnicos, 184 checks, zero
+  categoria não implementada; zero critério de negócio promovido e 54
+  corretamente `NOT_AUTOMATED`; LLM real `NOT_EXECUTED`.
+- Gates no código `0bf62fe`: typecheck e 12 builds `PASS`; 725 testes `PASS`,
+  18 integrações PostgreSQL puladas; cobertura 94,36/90,02/95,80/97,10%; UI
+  5/5, i18n 277 e domínios `PASS`.
+- Duas falhas de runtime encontradas pelo Golden foram fechadas: parameter
+  properties incompatíveis com Node strip-only e classificação do conflito
+  único da agenda no driver `node:sqlite`.
+- Relatório canônico: `golden-set/reports/2026-09-04T07-53-26-115Z-deterministic.*`.
 
 ## Próxima ação exata
 
-Fechar os gates do M2, criar commit e artefato auditável, executar P37 sobre o
-arquivo extraído e entregar ao Claude para revisão independente. Nenhuma branch
-é integrada ou removida antes da autorização correspondente.
+Fixar a documentação e o relatório do M2 em commit, criar artefato auditável,
+executar P37 sobre o arquivo extraído e entregar ao Claude para revisão
+independente. Nenhuma branch é integrada ou removida antes da autorização
+correspondente.
 
 ## Bloqueios externos reservados ao usuário
 
