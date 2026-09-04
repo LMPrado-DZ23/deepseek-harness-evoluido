@@ -1,25 +1,107 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
+import type { ChildProcess } from 'node:child_process'
 import type { Stats } from 'node:fs'
 import { copyFile, lstat, mkdir, readdir, readFile, realpath, stat } from 'node:fs/promises'
 import { dirname, relative, resolve, sep } from 'node:path'
 import { t } from './i18n.js'
 
-export interface ProcessResult { readonly exitCode: number; readonly stdout: string; readonly stderr: string; readonly timedOut: boolean }
+export const PROCESS_OUTPUT_BYTE_LIMIT = 512 * 1024
+
+export type ProcessTerminationReason = 'timeout' | 'output_limit'
+export interface ProcessResult {
+  readonly exitCode: number
+  readonly stdout: string
+  readonly stderr: string
+  readonly timedOut: boolean
+  /** Present on enforced termination; optional to preserve third-party ProcessPort compatibility. */
+  readonly terminationReason?: ProcessTerminationReason
+  readonly outputLimitExceeded?: boolean
+}
 export interface ProcessPort { run(command: string, args: readonly string[], timeoutMs: number): Promise<ProcessResult> }
 
 export class NodeProcessPort implements ProcessPort {
   run(command: string, args: readonly string[], timeoutMs: number): Promise<ProcessResult> {
     return new Promise((resolveResult, reject) => {
-      const child = spawn(command, [...args], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
-      let stdout = ''; let stderr = ''; let timedOut = false
-      child.stdout.setEncoding('utf8').on('data', chunk => { stdout += String(chunk) })
-      child.stderr.setEncoding('utf8').on('data', chunk => { stderr += String(chunk) })
-      const timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL') }, timeoutMs)
-      child.once('error', error => { clearTimeout(timer); reject(error) })
-      child.once('close', code => { clearTimeout(timer); resolveResult({ exitCode: code ?? -1, stdout, stderr, timedOut }) })
+      if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) { reject(new Error('PROCESS_TIMEOUT_INVALID')); return }
+      const child = spawn(command, [...args], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+        // A separate POSIX process group lets us terminate grandchildren too.
+        detached: process.platform !== 'win32',
+      })
+      const stdout: Buffer[] = []; const stderr: Buffer[] = []
+      let capturedBytes = 0
+      let terminationReason: ProcessTerminationReason | undefined
+      let terminationPromise: Promise<void> | undefined
+      let settled = false
+
+      const terminate = (reason: ProcessTerminationReason) => {
+        if (terminationReason !== undefined) return
+        terminationReason = reason
+        terminationPromise = terminateProcessTree(child)
+      }
+      const capture = (target: Buffer[], chunk: Buffer | string) => {
+        const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+        const remaining = PROCESS_OUTPUT_BYTE_LIMIT - capturedBytes
+        if (remaining > 0) {
+          const accepted = bytes.length <= remaining ? bytes : bytes.subarray(0, remaining)
+          target.push(Buffer.from(accepted))
+          capturedBytes += accepted.length
+        }
+        if (bytes.length > remaining) terminate('output_limit')
+        // Keep the listener attached after overflow so OS pipes remain drained.
+      }
+      child.stdout.on('data', (chunk: Buffer | string) => { capture(stdout, chunk) })
+      child.stderr.on('data', (chunk: Buffer | string) => { capture(stderr, chunk) })
+      const timer = setTimeout(() => { terminate('timeout') }, timeoutMs)
+      child.once('error', error => {
+        clearTimeout(timer)
+        if (settled) return
+        settled = true
+        reject(error)
+      })
+      child.once('close', code => {
+        clearTimeout(timer)
+        void (async () => {
+          await terminationPromise
+          if (settled) return
+          settled = true
+          resolveResult({
+            exitCode: code ?? -1,
+            stdout: Buffer.concat(stdout).toString('utf8'),
+            stderr: Buffer.concat(stderr).toString('utf8'),
+            timedOut: terminationReason === 'timeout',
+            ...(terminationReason === undefined ? {} : { terminationReason }),
+            outputLimitExceeded: terminationReason === 'output_limit',
+          })
+        })()
+      })
     })
   }
+}
+
+async function terminateProcessTree(child: ChildProcess): Promise<void> {
+  const pid = child.pid
+  if (pid === undefined) { child.kill('SIGKILL'); return }
+  if (process.platform !== 'win32') {
+    try { process.kill(-pid, 'SIGKILL') } catch { child.kill('SIGKILL') }
+    return
+  }
+  await new Promise<void>(resolveTaskkill => {
+    const killer = spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true })
+    let finished = false
+    const finish = () => {
+      if (finished) return
+      finished = true
+      clearTimeout(fallback)
+      child.kill('SIGKILL')
+      resolveTaskkill()
+    }
+    const fallback = setTimeout(() => { killer.kill('SIGKILL'); finish() }, 5_000)
+    killer.once('error', finish)
+    killer.once('close', finish)
+  })
 }
 
 export interface BuilderLimits { readonly pids: number; readonly memory: string; readonly cpus: string; readonly timeoutMs: number }
@@ -33,6 +115,11 @@ export interface ContainerBuilderConfig {
 
 export interface BuilderPreflight { readonly state: 'OK' | 'BLOCKED_EXTERNAL'; readonly message: string }
 export interface BuilderStepResult extends ProcessResult { readonly command: string; readonly securityArgs: readonly string[] }
+
+export class BuilderContainerCleanupError extends Error {
+  readonly code = 'BUILDER_CONTAINER_CLEANUP_FAILED'
+  constructor(readonly containerName: string, options?: ErrorOptions) { super('BUILDER_CONTAINER_CLEANUP_FAILED', options) }
+}
 
 export class ContainerBuilder {
   constructor(private readonly config: ContainerBuilderConfig, private readonly process: ProcessPort = new NodeProcessPort()) {}
@@ -52,7 +139,7 @@ export class ContainerBuilder {
     return { state: 'OK', message: t('errors.builderAvailable') }
   }
 
-  commandArgs(runDirectory: string, command: string): readonly string[] {
+  commandArgs(runDirectory: string, command: string, containerName = uniqueContainerName()): readonly string[] {
     const security = [
       '--network', 'none', '--user', this.config.user, '--cap-drop', 'ALL',
       '--security-opt', 'no-new-privileges', '--read-only',
@@ -63,7 +150,7 @@ export class ContainerBuilder {
       '--memory', this.config.limits.memory, '--cpus', this.config.limits.cpus,
     ]
     return [
-      'run', '--rm', ...security,
+      'run', '--rm', '--name', containerName, ...security,
       '--mount', `type=bind,src=${resolve(runDirectory)},dst=/workspace`,
       '--mount', `type=bind,src=${resolve(this.config.templateStore)},dst=/template-store,readonly`,
       '--workdir', '/workspace', this.config.imageDigest, 'sh', '-lc', command,
@@ -72,11 +159,35 @@ export class ContainerBuilder {
 
   async execute(runDirectory: string, command: string): Promise<BuilderStepResult> {
     const root = await realpath(runDirectory)
-    const args = this.commandArgs(root, command)
-    const result = await this.process.run(this.config.engine, args, this.config.limits.timeoutMs)
+    const containerName = uniqueContainerName()
+    const args = this.commandArgs(root, command, containerName)
+    let result: ProcessResult
+    try {
+      result = await this.process.run(this.config.engine, args, this.config.limits.timeoutMs)
+    } catch (error) {
+      await this.removeContainer(containerName, error)
+      throw error
+    }
+    if (result.timedOut || result.terminationReason === 'output_limit' || result.outputLimitExceeded === true) {
+      await this.removeContainer(containerName)
+    }
     return { ...result, command, securityArgs: args }
   }
+
+  private async removeContainer(containerName: string, originalError?: unknown): Promise<void> {
+    try {
+      const cleanup = await this.process.run(this.config.engine, ['rm', '-f', containerName], 15_000)
+      if (cleanup.exitCode === 0 && !cleanup.timedOut && cleanup.outputLimitExceeded !== true) return
+      const inspect = await this.process.run(this.config.engine, ['inspect', containerName], 15_000)
+      if (inspect.exitCode !== 0 && !inspect.timedOut && inspect.outputLimitExceeded !== true) return
+      throw new Error('CONTAINER_REMOVE_UNCONFIRMED')
+    } catch (cleanupError) {
+      throw new BuilderContainerCleanupError(containerName, { cause: originalError ?? cleanupError })
+    }
+  }
 }
+
+function uniqueContainerName(): string { return `dz23-build-${randomUUID()}` }
 
 function blocked(): BuilderPreflight { return { state: 'BLOCKED_EXTERNAL', message: t('errors.builderUnavailable') } }
 

@@ -90,8 +90,11 @@ export class PromptToAppPipeline {
       await this.options.service.transition(actor, projectId, 'GENERATING')
       let diagnostic: string | undefined
       let finalFailureState: 'BUILD_FAILED' | 'TESTS_FAILED' = 'BUILD_FAILED'
+      let stopRetries = false
+      let completedAttempts = 0
       for (let attempt = 1; attempt <= 3; attempt++) {
       activeAttempt = attempt
+      completedAttempts = attempt
       activeStage = 'generate'
       if (isAborted(runOptions.signal)) return this.cancelled(actor, projectId, plan.plan_id, operationId, ownerSessionId, attempt - 1)
       const runId = attempt === 1 ? operationId : `${operationId}-attempt-${attempt}`; const runDirectory = resolve(this.options.runsRoot, runId)
@@ -153,6 +156,9 @@ export class PromptToAppPipeline {
         await this.options.service.putRun(actor, this.runRecord(actor, projectId, plan.plan_id, stage, attempt, 'RUNNING', 'full', runDirectory, generated, null, runId, operationId, ownerSessionId, await readAcceptanceChecks(runDirectory, expectedAcceptanceChecks)))
         const result = await this.options.builder.execute(runDirectory, command)
         log += `$ ${command}\n${result.stdout}\n${result.stderr}\n`
+        if (result.outputLimitExceeded === true || result.terminationReason === 'output_limit') {
+          diagnostic = 'PROCESS_OUTPUT_LIMIT_EXCEEDED'; failedStage = buildPassed ? 'test' : 'build'; stopRetries = true; break
+        }
         if (result.timedOut) { diagnostic = 'BUDGET_EXCEEDED'; failedStage = buildPassed ? 'test' : 'build'; break }
         if (result.exitCode !== 0) { diagnostic = `${command}: exit ${result.exitCode}`; failedStage = buildPassed ? 'test' : 'build'; break }
         if (command === 'pnpm run build') buildPassed = true
@@ -179,6 +185,7 @@ export class PromptToAppPipeline {
         await this.options.service.transition(actor, projectId, 'BUILD_OK'); await this.options.service.transition(actor, projectId, 'TESTS_OK'); await this.options.service.transition(actor, projectId, 'VERIFIED_PROTOTYPE')
         return { state: 'VERIFIED_PROTOTYPE', runDirectory, attempts: attempt, message: t('pipeline.verified') }
       }
+      if (stopRetries) break
     }
       const current = this.options.service.project(actor, projectId)
       if (current.state === 'GENERATING') {
@@ -187,7 +194,7 @@ export class PromptToAppPipeline {
           await this.options.service.transition(actor, projectId, 'TESTS_FAILED')
         } else await this.options.service.transition(actor, projectId, 'BUILD_FAILED')
       }
-      return { state: finalFailureState, attempts: 3, message: diagnostic ?? t('pipeline.failed') }
+      return { state: finalFailureState, attempts: completedAttempts, message: diagnostic ?? t('pipeline.failed') }
     } catch (error) {
       return this.unexpectedFailure(actor, projectId, plan.plan_id, operationId, ownerSessionId, activeAttempt, activeRunId, activeRunDirectory, activeStage, error)
     }

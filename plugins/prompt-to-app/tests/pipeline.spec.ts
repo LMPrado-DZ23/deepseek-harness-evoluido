@@ -122,7 +122,7 @@ describe('Prompt-to-App pipeline', () => {
       if (command === 'pnpm run test:e2e') await passAcceptance(directory)
       return { exitCode: 0, stdout: 'ok', stderr: '', timedOut: false }
     } })
-    await expect(f.pipeline.run(actor, 'project', { generate: vi.fn(async () => cleanGeneration) })).resolves.toMatchObject({ state: 'BUILD_FAILED' })
+    await expect(f.pipeline.run(actor, 'project', { generate: vi.fn(async () => cleanGeneration) })).resolves.toMatchObject({ state: 'BUILD_FAILED', attempts: 1 })
     expect(f.runs.at(-1)).toMatchObject({ state: 'FAILED', failure_code: 'ARTIFACT_MATERIALIZATION_FAILED', artifact_sha256: null })
     expect(f.transitions).toEqual(['GENERATING', 'BUILD_FAILED'])
     expect(f.service.project()).toMatchObject({ state: 'BUILD_FAILED' })
@@ -155,6 +155,16 @@ describe('Prompt-to-App pipeline', () => {
     } })
     await expect(f.pipeline.run(actor, 'project', { generate: vi.fn(async () => cleanGeneration) })).resolves.toMatchObject({ state: 'TESTS_FAILED' })
     expect(f.runs.at(-1)).toMatchObject({ state: 'FAILED', failure_code: 'APPSPEC_REPORT_TOO_LARGE' })
+  })
+
+  it('does not retry a process that exceeds the output budget', async () => {
+    const f = await fixture({ execute: async () => ({
+      exitCode: -1, stdout: 'bounded', stderr: '', timedOut: false,
+      terminationReason: 'output_limit' as const, outputLimitExceeded: true,
+    }) })
+    await expect(f.pipeline.run(actor, 'project', { generate: vi.fn(async () => cleanGeneration) })).resolves.toMatchObject({ state: 'BUILD_FAILED', attempts: 1 })
+    expect(f.execute).toHaveBeenCalledTimes(1)
+    expect(f.runs.at(-1)).toMatchObject({ state: 'FAILED', failure_code: 'PROCESS_OUTPUT_LIMIT_EXCEEDED' })
   })
 
   it('allows only the framework-generated next-env file to change during build', async () => {
