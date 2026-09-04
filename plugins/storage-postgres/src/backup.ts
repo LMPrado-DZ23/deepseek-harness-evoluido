@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { constants, createReadStream, existsSync } from 'node:fs'
+import { constants, existsSync } from 'node:fs'
 import { createHash, randomBytes } from 'node:crypto'
 import { open, opendir, rm } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
@@ -323,7 +323,7 @@ export async function verifyBackupFile(
     try {
       const dataStats = await data.stat({ bigint: true })
       if (!dataStats.isFile()) throw new Error(`backup file '${file}' is not a regular file`)
-      const stream = createReadStream(pinnedChildPath(parent.directory, parent.name), { fd: data.fd, autoClose: false, highWaterMark: 1024 * 1024 })
+      const stream = data.createReadStream({ autoClose: false, highWaterMark: 1024 * 1024 })
       try {
         for await (const chunk of stream) {
           const buffer = chunk as Buffer
