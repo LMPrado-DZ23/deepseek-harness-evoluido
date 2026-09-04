@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { generateKeyPairSync } from 'node:crypto'
 import { evaluateManifest } from '../src/manifest.ts'
 import { generatePublisherKeyPair, publicKeyFromPrivatePem, signManifest, SigningError } from '../src/signing.ts'
 
@@ -23,6 +24,8 @@ describe('publisher signing helpers', () => {
     expect(() => signManifest({ ...manifest, kind: 'nope' }, pair.privateKeyPem)).toThrow(SigningError)
     expect(() => signManifest({ ...manifest, kind: 'smtp' }, pair.privateKeyPem)).toThrow(/reserved/u)
     expect(() => signManifest(manifest, 'not a pem')).toThrow(/valid PEM/u)
+    expect(() => signManifest(manifest, generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey)).toThrow(/Ed25519/u)
+    expect(signManifest(manifest, generateKeyPairSync('ed25519').privateKey).signature).toBeTypeOf('string')
     const signed = signManifest(manifest, pair.privateKeyPem)
     expect(() => signManifest(signed, pair.privateKeyPem)).toThrow(/already signed/u)
     const resigned = signManifest({ ...signed, version: '1.0.1' }, pair.privateKeyPem, { replace: true })
