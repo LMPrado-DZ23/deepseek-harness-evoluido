@@ -1,12 +1,12 @@
-import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, open, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { ExportError, packagePrototype, slug } from '../src/export.ts'
+import { ExportError, findSecret, isExportable, isScannable, openChildDirectory, openDirectory, packagePrototype, referenceOf, slug } from '../src/export.ts'
 import { readZip } from '../src/zip.ts'
 import { execFileSync } from 'node:child_process'
 import { rm as rmDir } from 'node:fs/promises'
-import { gzipSync } from 'node:zlib'
+import { brotliCompressSync, gzipSync } from 'node:zlib'
 
 const scratch: string[] = []
 afterEach(async () => { for (const directory of scratch.splice(0)) await rm(directory, { recursive: true, force: true }) })
@@ -37,6 +37,72 @@ async function runDirectory(): Promise<string> {
 }
 
 describe('prototype export package', () => {
+  it('pins directory handles and refuses missing, non-directory and unsafe children', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dz23-export-handles-'))
+    scratch.push(root)
+    const plain = join(root, 'plain.txt')
+    await writeFile(plain, 'plain')
+    await expect(openDirectory(join(root, 'missing'))).resolves.toBeUndefined()
+    await expect(openDirectory(plain)).resolves.toBeUndefined()
+    const handle = await openDirectory(root)
+    expect(handle).toBeDefined()
+    try {
+      expect(referenceOf(handle!, root)).toMatch(/(?:\/proc\/self\/fd\/\d+|dz23-export-handles-)/u)
+      for (const name of ['', '.', '..', 'a/b', 'a\\b']) await expect(openChildDirectory(handle!, root, name)).resolves.toBeUndefined()
+      await expect(openChildDirectory(handle!, root, 'plain.txt')).resolves.toBeUndefined()
+    } finally { await handle?.close() }
+  })
+
+  it('covers every supported secret prefix and the explicit file allow-lists', () => {
+    for (const secret of [
+      'AKIA1234567890ABCDEF', 'ASIA1234567890ABCDEF', `ghp_${'a'.repeat(36)}`,
+      `github_pat_${'a'.repeat(24)}`, 'xoxb-1234567890-token', `sk-live-${'a'.repeat(16)}`,
+    ]) expect(findSecret('config.txt', Buffer.from(secret))).toBe('config.txt')
+    expect(findSecret('image.png', Buffer.from('AKIA1234567890ABCDEF'))).toBeNull()
+    expect(findSecret('plain.txt', Buffer.alloc(0))).toBeNull()
+    expect(isExportable('index.js')).toBe(true)
+    expect(isExportable('LICENSE')).toBe(true)
+    expect(isExportable('archive.exe')).toBe(false)
+    expect(isScannable('index.js')).toBe(true)
+    expect(isScannable('LICENSE')).toBe(true)
+    expect(isScannable('image.png')).toBe(false)
+  })
+
+  it('honours a caller-owned run descriptor, aborts early and scans Brotli assets and evidence', async () => {
+    const root = await runDirectory()
+    await writeFile(join(root, '.next', 'standalone', 'app.js.br'), brotliCompressSync(Buffer.from('console.log("ok")')))
+    await writeFile(join(root, '.next', 'standalone', 'broken.js.br'), Buffer.from('not-brotli'))
+    const handle = await open(root, 'r')
+    try {
+      const built = await packagePrototype({ runDirectory: root, runHandle: handle, projectName: 'A', runId: 'run-owned' })
+      const names = readZip(built.archive).map(entry => entry.name)
+      expect(names).toContain('app/app.js.br')
+      expect(names).not.toContain('app/broken.js.br')
+      await expect(handle.stat()).resolves.toMatchObject({})
+    } finally { await handle.close() }
+
+    await writeFile(join(root, 'evidence', 'appspec-report.json'), '{"key":"-----BEGIN PRIVATE KEY-----"}')
+    await expect(packagePrototype({ runDirectory: root, projectName: 'A', runId: 'run-secret-report' }))
+      .rejects.toMatchObject({ code: 'SECRET_DETECTED', detail: 'secret-in evidence/appspec-report.json' })
+    const aborted = new AbortController(); aborted.abort(new Error('STOP'))
+    await expect(packagePrototype({ runDirectory: root, projectName: 'A', runId: 'run-abort', signal: aborted.signal })).rejects.toThrow('STOP')
+    const abortedWithoutError = new AbortController(); abortedWithoutError.abort('stop')
+    await expect(packagePrototype({ runDirectory: root, projectName: 'A', runId: 'run-abort-2', signal: abortedWithoutError.signal })).rejects.toThrow('EXPORT_ABORTED')
+  })
+
+  it('names a shortcut acceptance report and rejects a missing run before walking', async () => {
+    const root = await runDirectory()
+    await rm(join(root, 'evidence', 'appspec-report.json'))
+    await symlink('/etc/passwd', join(root, 'evidence', 'appspec-report.json'))
+    const built = await packagePrototype({ runDirectory: root, projectName: 'A', runId: 'run-report-link' })
+    const exclusions = readZip(built.archive).find(entry => entry.name === 'EXCLUIDOS.txt')!.data.toString('utf8')
+    expect(exclusions).toContain('evidence/appspec-report.json')
+    await expect(packagePrototype({ runDirectory: join(root, 'missing'), projectName: 'A', runId: 'run-missing' }))
+      .rejects.toMatchObject({ code: 'RUN_MISSING' })
+    await expect(packagePrototype({ runDirectory: root, projectName: 'A', runId: 'run-negative' }, { maxBytes: -1 }))
+      .rejects.toMatchObject({ code: 'TOO_LARGE', detail: 'bytes-over-limit' })
+  })
+
   /**
    * `open()` on a FIFO in O_RDONLY without O_NONBLOCK waits for a writer that may never come. A
    * named pipe where a file is expected therefore froze `packagePrototype` itself — and, above it,
