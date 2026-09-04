@@ -19,6 +19,13 @@ cópia é um arquivo `studio-backup-<data-e-hora>.json` acompanhado de um
 `backups.jsonl` com o resultado de cada tentativa. A cópia acontece com o
 Studio ligado, sem travar ninguém.
 
+A cópia é feita por um **programa separado**, não pelo Studio em si: assim,
+por maior que fique o banco, copiar nunca deixa o Studio lento nem o derruba.
+Esse programa tem hora para acabar (15 minutos), tamanho máximo de arquivo
+(2 GB) e memória própria; se estourar qualquer um dos três, a tentativa é
+registrada como falha, o arquivo pela metade é apagado e o Studio continua
+funcionando normalmente.
+
 Para mudar a frequência ou a quantidade guardada, defina
 `DZ23_POSTGRES_BACKUP_INTERVAL_MINUTES` (mínimo 5) e
 `DZ23_POSTGRES_BACKUP_KEEP` no ambiente do servidor.
@@ -57,6 +64,28 @@ Se a resposta for `OK`, o arquivo está íntegro.
    pnpm storage:import-postgres --input studio-backup-<data-e-hora>.json --dsn-ref DZ23_POSTGRES_DSN --schema dz23_storage --ssl verify-full --write --backup /caminho/seguro/antes-de-restaurar.dump --force --confirm REPLACE_DZ23_STORAGE
    ```
 4. Ligue o Studio.
+
+### O que a restauração recusa fazer (e por quê)
+
+Restaurar apaga o que está lá para colocar o que está na cópia. Por isso o
+comando prefere parar do que errar — e todas essas recusas acontecem **antes**
+de qualquer coisa ser apagada, inclusive antes da cópia física de segurança:
+
+- **Studio ligado.** Enquanto o Studio estiver de pé, a restauração não começa.
+  Isso vale mesmo que a cópia não mencione as partes que ele está usando no
+  momento — antes essa brecha existia.
+- **Cópia vazia.** Um arquivo sem nenhum conjunto de dados não restaura nada:
+  só apagaria. Recusado.
+- **Cópia incompleta.** Se o banco tem conjuntos de dados que a cópia não traz,
+  restaurar apagaria esses conjuntos. O comando diz **quais** e para. Se for
+  mesmo isso que você quer (por exemplo, voltar a um estado antigo de propósito),
+  repita acrescentando `--allow-domain-loss --confirm REPLACE_DZ23_STORAGE`.
+- **Esquema que não é do Studio.** Se o lugar de destino não tiver a estrutura
+  do Studio, ou for de outra versão, o comando recusa em vez de apagar dados de
+  outro sistema.
+
+Se algo falhar no meio, o esquema temporário usado para preparar a restauração
+é removido: o banco não fica com pedaços soltos.
 
 ## Trazer os dados do computador de desenvolvimento
 

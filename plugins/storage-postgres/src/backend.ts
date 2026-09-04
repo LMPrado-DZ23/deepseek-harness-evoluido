@@ -4,7 +4,7 @@ import type { ClientConfig, PoolConfig } from 'pg'
 import { StorageError, UNIT_NAME_RE } from '@deepseek-ai/dsh-storage'
 import type { KvFacet, KvUnit, KvUnitDescriptor, StorageBackend } from '@deepseek-ai/dsh-storage'
 import { StudioStorageError } from './errors.js'
-import { ensureSchema, leasesTable, storageUnitLockName, unitsTable } from './schema.js'
+import { ensureSchema, leasesTable, storageMaintenanceLockName, storageUnitLockName, unitsTable } from './schema.js'
 import { PostgresKvUnit } from './unit.js'
 
 export interface PostgresStorageBackendConfig {
@@ -23,11 +23,32 @@ export class PostgresStorageBackend implements StorageBackend {
   private readonly ready: Promise<void>
   private readonly units = new Map<string, Promise<PostgresKvUnit>>()
   private closing: Promise<void> | undefined
+  /** Dedicated session holding the shared maintenance lock while this Studio is up. */
+  private maintenance: Client | undefined
 
   constructor(private readonly config: PostgresStorageBackendConfig) {
     this.pool = new Pool(this.connectionConfig(config.poolMax))
-    this.ready = ensureSchema(this.pool, config.schema)
+    this.ready = ensureSchema(this.pool, config.schema).then(() => this.holdMaintenanceLock())
     this.ready.catch(() => undefined)
+  }
+
+  /**
+   * Announce "a Studio is using this schema" for as long as the process lives.
+   * Shared, so several readers coexist; a restore that wants the schema takes
+   * it exclusive and is refused while this session exists. Its own session is
+   * what releases it, so a crashed Studio never leaves it stuck.
+   */
+  private async holdMaintenanceLock(): Promise<void> {
+    const client = new Client({ ...this.connectionConfig(), application_name: `dz23-storage:maintenance:${this.config.schema}` })
+    await client.connect()
+    try {
+      await client.query('SELECT pg_advisory_lock_shared(hashtext($1))', [storageMaintenanceLockName(this.config.schema)])
+    } catch (error) {
+      /* v8 ignore next -- cleanup after a failed lock cannot supersede the original error. */
+      await client.end().catch(() => undefined)
+      throw error
+    }
+    this.maintenance = client
   }
 
   /** Resolve only after the schema and database connection are usable. */
@@ -119,6 +140,12 @@ export class PostgresStorageBackend implements StorageBackend {
       await unit?.close()
     }
     await this.pool.end()
+    const maintenance = this.maintenance
+    this.maintenance = undefined
+    /* v8 ignore next -- ending the session releases the lock even if the explicit unlock fails. */
+    await maintenance?.query('SELECT pg_advisory_unlock_shared(hashtext($1))', [storageMaintenanceLockName(this.config.schema)]).catch(() => undefined)
+    /* v8 ignore next -- best-effort close of the maintenance session. */
+    await maintenance?.end().catch(() => undefined)
   }
 
   private connectionConfig(max?: number): PoolConfig & ClientConfig {

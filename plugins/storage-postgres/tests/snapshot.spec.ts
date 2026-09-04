@@ -1,9 +1,13 @@
 import { randomUUID } from 'node:crypto'
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { Client } from 'pg'
 import { descriptorOf } from '@deepseek-ai/dsh-storage-domain'
 import { PostgresStorageBackend } from '../src/backend.ts'
 import { bundleRecordCount, canonicalJson, sha256, validateBundle } from '../src/bundle.ts'
+import { writeBackupBundle } from '../src/backup-worker.ts'
 import { snapshotPostgresStorage } from '../src/snapshot.ts'
 import { importStorage } from '../../../scripts/storage-migration.ts'
 import { STUDIO_DOMAIN_SPECS } from '../../../scripts/studio-domain-specs.ts'
@@ -56,6 +60,41 @@ describePostgres('hot snapshot of a PostgreSQL storage schema', () => {
     const restoredUnit = await restored.kv!.open(hello)
     expect(sha256(canonicalJson({ descriptor: hello, snapshot: await restoredUnit.loadAll() }))).toBe(helloDomain.sha256)
     await restored.close()
+  })
+
+  it('the backup process writes, out of process and one domain at a time, exactly the bundle the in-process snapshot seals', async () => {
+    const schema = schemaName('worker')
+    const source = backend(schema)
+    const helloUnit = await source.kv!.open(hello)
+    await helloUnit.putRecord('records', 'one', { tenant_id: 'workspace-a', created_at: '2026-09-03T00:00:00.000Z', note: 'um' })
+    await helloUnit.putRecord('records', 'dois', { tenant_id: 'workspace-a', created_at: '2026-09-03T00:00:01.000Z', note: 'acentuação e Ç' })
+    const globalUnit = await source.kv!.open(withGlobal)
+    await globalUnit.putRecord('items', 'x', { value: 1 })
+    await globalUnit.setGlobal({ counter: 7 })
+
+    const directory = await mkdtemp(join(tmpdir(), 'dz23-backup-worker-'))
+    const out = join(directory, 'bundle.json')
+    const now = () => new Date('2026-09-03T12:00:00.000Z')
+    try {
+      // Written straight to the file by the worker code, with both digests computed as the bytes go by.
+      const report = await writeBackupBundle({ dsnRef: 'unused', schema, ssl: 'off', out, maxBytes: 50 * 1024 * 1024, now }, dsn!)
+      const written = JSON.parse(await readFile(out, 'utf8')) as ReturnType<typeof JSON.parse>
+      validateBundle(written)
+      expect(report).toMatchObject({ domains: 2, records: 3 })
+      expect(sha256(await readFile(out))).toBe(report.sha256)
+      // Same content as the in-process snapshot: same domains, same per-domain digests.
+      const inProcess = await snapshotPostgresStorage({ connectionString: dsn!, ssl: false, schema, now })
+      expect(written.domains.map((domain: { sha256: string }) => domain.sha256)).toEqual(inProcess.domains.map(domain => domain.sha256))
+      expect(written.domains.map((domain: { descriptor: { name: string } }) => domain.descriptor.name)).toEqual(['snap_global', 'studio_hello'])
+      // The file is 0600 and, over the limit, nothing is left behind.
+      expect((await stat(out)).mode & 0o777).toBe(0o600)
+      const tiny = join(directory, 'tiny.json')
+      await expect(writeBackupBundle({ dsnRef: 'unused', schema, ssl: 'off', out: tiny, maxBytes: 32, now }, dsn!)).rejects.toThrow('limit')
+      await expect(stat(tiny)).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally {
+      await source.close()
+      await rm(directory, { recursive: true, force: true })
+    }
   })
 
   it('version-checks declared descriptors and exports never-opened declared units as empty', async () => {

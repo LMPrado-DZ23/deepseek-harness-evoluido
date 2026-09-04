@@ -1,6 +1,9 @@
+import { execFile } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { appendFile, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { bundleRecordCount, sha256, type StorageExportBundle } from './bundle.js'
 
 export const BACKUP_FILE_PATTERN = /^studio-backup-([a-z0-9_]+)-(\d{8}T\d{6}\d{3}Z)-([a-f0-9]{6})\.json$/u
@@ -22,8 +25,97 @@ export interface BackupResult {
 
 export type BackupLogLevel = 'info' | 'warn'
 
+/** What actually produces one backup file. The scheduler only names files, prunes and records. */
+export interface BackupRunner {
+  run(target: string): Promise<{ sha256: string; bytes: number; records: number; domains: number }>
+}
+
+/**
+ * Builds the whole bundle in THIS process. Fine for the operator CLI, which is
+ * a process of its own; the Studio uses the child-process runner instead.
+ */
+export function inProcessBackupRunner(snapshot: () => Promise<StorageExportBundle>): BackupRunner {
+  return {
+    async run(target) {
+      const bundle = await snapshot()
+      const serialized = `${JSON.stringify(bundle)}\n`
+      await writeFile(target, serialized, { encoding: 'utf8', flag: 'wx', mode: 0o600 })
+      return { sha256: sha256(serialized), bytes: Buffer.byteLength(serialized), records: bundleRecordCount(bundle), domains: bundle.domains.length }
+    },
+  }
+}
+
+export interface ChildBackupRunnerOptions {
+  dsnRef: string
+  schema: string
+  ssl: 'off' | 'require' | 'verify-full'
+  /** Hard ceiling for the file; beyond it the child gives up and removes what it had written. */
+  maxBytes?: number
+  /** The child is killed after this long: a stuck backup must never become a stuck Studio. */
+  timeoutMs?: number
+  /** Heap cap of the child, in MB. It holds one domain at a time, so this is a guard rail, not a target. */
+  heapMb?: number
+  execPath?: string
+  workerPath?: string
+  env?: NodeJS.ProcessEnv
+}
+
+/**
+ * Runs the backup in a separate process (`backup-worker.js`), with a time
+ * limit, a size limit and its own heap: the Studio's own memory and event loop
+ * are never spent copying the database. The DSN is passed by **reference**;
+ * the child reads it from its own environment, like every other seam here.
+ */
+export function childProcessBackupRunner(options: ChildBackupRunnerOptions): BackupRunner {
+  const worker = options.workerPath ?? defaultWorkerPath()
+  const timeoutMs = options.timeoutMs ?? 15 * 60 * 1000
+  const maxBytes = options.maxBytes ?? 2 * 1024 * 1024 * 1024
+  return {
+    run(target) {
+      return new Promise((resolvePromise, reject) => {
+        execFile(
+          options.execPath ?? process.execPath,
+          [`--max-old-space-size=${String(options.heapMb ?? 1024)}`, worker,
+            '--dsn-ref', options.dsnRef, '--schema', options.schema, '--ssl', options.ssl,
+            '--out', target, '--max-bytes', String(maxBytes)],
+          { timeout: timeoutMs, maxBuffer: 1024 * 1024, env: options.env ?? process.env },
+          (error, stdout, stderr) => {
+            if (error !== null) {
+              const lines = String(stderr).split('\n').map(line => line.trim()).filter(line => line !== '')
+              const detail = (lines.find(line => /error/iu.test(line)) ?? lines.at(-1) ?? '').slice(0, 300)
+              reject(new Error(detail === '' ? error.message : detail))
+              return
+            }
+            try {
+              const report = JSON.parse(String(stdout).trim().split('\n').at(-1) ?? '') as { sha256: string; bytes: number; records: number; domains: number }
+              if (typeof report.sha256 !== 'string' || typeof report.bytes !== 'number') throw new Error('backup worker report is malformed')
+              resolvePromise(report)
+            } catch (parseError) {
+              reject(parseError instanceof Error ? parseError : new Error(String(parseError)))
+            }
+          },
+        )
+      })
+    },
+  }
+}
+
+/**
+ * The compiled worker next to this module. Under a TypeScript runner this file
+ * is the source, so the built `lib/` sibling is used instead — the child is a
+ * real Node process either way.
+ */
+export function defaultWorkerPath(): string {
+  const candidates = [new URL('./backup-worker.js', import.meta.url), new URL('../lib/backup-worker.js', import.meta.url)]
+  const found = candidates.map(url => fileURLToPath(url)).find(path => existsSync(path))
+  if (found === undefined) throw new Error('backup worker not found: build the storage-postgres plugin first')
+  return found
+}
+
 export interface BackupSchedulerOptions {
-  snapshot: () => Promise<StorageExportBundle>
+  /** Either a runner (preferred) or a snapshot function, which is wrapped in the in-process runner. */
+  runner?: BackupRunner
+  snapshot?: () => Promise<StorageExportBundle>
   directory: string
   /** Backup family, normally the PostgreSQL schema: it names the files and bounds pruning to this family only. */
   label: string
@@ -52,8 +144,11 @@ export class StorageBackupScheduler {
   private readonly now: () => Date
   private readonly log: (level: BackupLogLevel, line: string) => void
   private readonly suffix: () => string
+  private readonly runner: BackupRunner
 
   constructor(private readonly options: BackupSchedulerOptions) {
+    if (options.runner === undefined && options.snapshot === undefined) throw new Error('backup scheduler needs a runner or a snapshot function')
+    this.runner = options.runner ?? inProcessBackupRunner(options.snapshot!)
     if (!Number.isInteger(options.keep) || options.keep < 1) throw new Error('backup keep must be a positive integer')
     if (!Number.isFinite(options.intervalMs) || options.intervalMs < BACKUP_MIN_INTERVAL_MS) {
       throw new Error(`backup interval must be at least ${String(BACKUP_MIN_INTERVAL_MS / 60_000)} minutes`)
@@ -96,18 +191,18 @@ export class StorageBackupScheduler {
     let result: BackupResult
     try {
       await mkdir(this.options.directory, { recursive: true, mode: 0o700 })
-      const bundle = await this.options.snapshot()
-      const serialized = `${JSON.stringify(bundle)}\n`
-      const digest = sha256(serialized)
-      await writeFile(target, serialized, { encoding: 'utf8', flag: 'wx', mode: 0o600 })
-      await writeFile(`${target}.sha256`, `${digest}  ${fileName}\n`, { encoding: 'utf8', flag: 'wx', mode: 0o600 })
+      const written = await this.runner.run(target)
+      await writeFile(`${target}.sha256`, `${written.sha256}  ${fileName}\n`, { encoding: 'utf8', flag: 'wx', mode: 0o600 })
       const pruned = await this.prune(fileName)
       result = {
-        status: 'created', file: target, sha256: digest, bytes: Buffer.byteLength(serialized),
-        records: bundleRecordCount(bundle), domains: bundle.domains.length,
+        status: 'created', file: target, sha256: written.sha256, bytes: written.bytes,
+        records: written.records, domains: written.domains,
         startedAt, finishedAt: this.now().toISOString(), pruned, error: null,
       }
     } catch (error) {
+      // A run that died half-way leaves no half-file behind for the next restore to find.
+      await rm(target, { force: true }).catch(() => undefined)
+      await rm(`${target}.sha256`, { force: true }).catch(() => undefined)
       result = {
         status: 'failed', file: null, sha256: null, bytes: 0, records: 0, domains: 0,
         startedAt, finishedAt: this.now().toISOString(), pruned: [],

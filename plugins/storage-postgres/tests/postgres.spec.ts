@@ -15,7 +15,7 @@ import { quoteIdentifier, STORAGE_POSTGRES_LAYOUT_VERSION, storageUnitLockName }
 import { StudioTenancyService, type TenancyRepository } from '../../tenancy/src/service.ts'
 import type { Invitation, Membership, Organization, Workspace } from '../../tenancy/src/model.ts'
 import { descriptorOf } from '@deepseek-ai/dsh-storage-domain'
-import { exportStorage, importStorage, validateBundle } from '../../../scripts/storage-migration.ts'
+import { exportStorage, importStorage, validateBundle, type StorageExportBundle } from '../../../scripts/storage-migration.ts'
 import { STUDIO_DOMAIN_SPECS } from '../../../scripts/studio-domain-specs.ts'
 import { apply } from '../src/index.ts'
 
@@ -335,17 +335,21 @@ describePostgres('postgres backend against PostgreSQL 16', () => {
       storage: { backend: { register: vi.fn(() => vi.fn()) } },
       provide: provided,
       effect: (factory: () => () => void | Promise<void>) => { disposers.push(factory()) },
-      logger: { info: (line: string) => logged.push(line) },
+      logger: { info: (line: string) => logged.push(line), warn: (line: string) => logged.push(line) },
     }
     try {
       const schema = schemaName('plugin_backup')
       await apply(context as never, { dsnRef: 'DZ23_POSTGRES_TEST_DSN', schema, ssl: 'off', poolMax: 2, backupDirectory: join(temporary, 'backups'), backupIntervalMinutes: 5, backupKeep: 2 })
       const service = provided.mock.calls.find(call => call[0] === 'studioStorageBackup')?.[1] as { runOnce(): Promise<{ status: string; file: string | null }>; lastResult(): unknown }
       const result = await service.runOnce()
-      expect(result.status).toBe('created')
+      expect(result).toMatchObject({ status: 'created', error: null })
       expect(service.lastResult()).toEqual(result)
       expect((await stat(result.file!)).mode & 0o777).toBe(0o600)
       expect(logged.some(line => line.includes('backup created'))).toBe(true)
+      // The copy is made by a process of its own: the file exists, is complete and validates on its own.
+      const bundle = JSON.parse(await readFile(result.file!, 'utf8')) as StorageExportBundle
+      expect(() => validateBundle(bundle)).not.toThrow()
+      expect(Array.isArray(bundle.domains)).toBe(true)
     } finally {
       await Promise.all(disposers.map(dispose => dispose()))
       await rm(temporary, { recursive: true, force: true })

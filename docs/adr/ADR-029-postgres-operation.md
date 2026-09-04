@@ -18,17 +18,52 @@ Status: aceita e implementada na etapa M3 (Claude), sobre a base P31-A.
    lock de escritor, produzindo um bundle `dz23-studio-kv-export/v1` — o mesmo
    que `storage:import-postgres` restaura. Não há dependência de `pg_dump` para o
    backup lógico; `pg_dump` continua sendo o backup físico do operador.
-3. **Agendamento dentro do Studio.** Com `backupDirectory` configurado, o
-   plugin grava `studio-backup-<carimbo>.json` (0600) + `.sha256` + ledger
+3. **Agendamento dentro do Studio, execução FORA do processo dele.** Com
+   `backupDirectory` configurado, o plugin agenda a cópia, mas quem a faz é um
+   **processo separado** (`backup-worker.js`), com limite de tempo
+   (`backupTimeoutMinutes`, 15 min), limite de tamanho (`backupMaxBytes`, 2 GB) e
+   heap próprio (`backupHeapMb`, 1 GB). O worker escreve **direto no arquivo**,
+   um domínio de cada vez, calculando os dois resumos (o do arquivo e o
+   `payloadSha256` canônico) enquanto os bytes passam: o Studio nunca
+   materializa o banco inteiro nem o JSON canônico na própria memória — era um
+   risco de disponibilidade apontado na revisão da M3. O DSN vai para o filho
+   pelo **ambiente**, nunca pela linha de comando. Execuções se enfileiram (uma
+   por vez) e uma falha remove o arquivo parcial. O plugin grava
+   `studio-backup-<carimbo>.json` (0600) + `.sha256` + ledger
    `backups.jsonl`, apaga só os seus próprios arquivos além de `backupKeep`,
    nunca derruba o Studio por falha de backup (registra e segue) e recusa
-   intervalo menor que cinco minutos. O diretório é um volume dedicado no
+   intervalo menor que cinco minutos. Limite honesto: o worker ainda materializa
+   **um domínio** por vez na memória dele; ler registro a registro por cursor
+   fica como melhoria seguinte, e nenhum tamanho de domínio derruba o Studio. O diretório é um volume dedicado no
    Compose (`studio-backups`). Sem diretório, não há agendamento e o operador usa
    `pnpm storage:backup-postgres`.
-4. **Restauração é o caminho já provado.** `storage:import-postgres --write`
-   importa num esquema de staging e troca atomicamente; recusa alvo com dados sem
-   `--force --confirm REPLACE_DZ23_STORAGE`, recusa Studio em execução (lock de
-   escritor) e faz `pg_dump` do esquema anterior antes de substituir.
+4. **Restauração é o caminho já provado, e agora recusa antes de destruir.**
+   `storage:import-postgres --write` importa num esquema de staging e troca
+   atomicamente. Tudo o que pode recusar acontece **antes** do `pg_dump`, do
+   staging e do `DROP SCHEMA`:
+   - **Trava de manutenção do esquema inteiro.** O Studio em execução segura
+     `dz23-storage-maintenance:<esquema>` em modo **compartilhado** enquanto
+     estiver de pé; a restauração e a migração tomam a mesma trava em modo
+     **exclusivo**. Antes, só se travavam as unidades **presentes na cópia**: uma
+     cópia que não mencionasse a unidade aberta pelo Studio passava direto para o
+     `DROP SCHEMA` com o Studio vivo. As travas por unidade continuam, como
+     segunda cinta.
+   - **Cópia vazia é recusada** antes mesmo de abrir o banco: ela não restaura
+     nada, só apaga.
+   - **Cópia parcial é recusada**: se o destino tem conjuntos de dados que a
+     cópia não traz, restaurar apagaria esses dados — a CLI diz quais são e só
+     segue com `--allow-domain-loss --confirm REPLACE_DZ23_STORAGE`.
+   - **Estrutura conferida pelo `pg_catalog`**: um esquema que tem uma tabela
+     `units` mas não o resto do layout do Studio (ou outra versão de layout) não
+     é tratado como esquema do Studio — recusa em vez de apagar algo de outra
+     coisa.
+   - **Preparo limpo**: qualquer falha derruba o esquema de staging antes de o
+     erro subir; nada de meio-esquema esquecido no banco.
+   - **A cópia física herda a política TLS**: o `pg_dump` do `--backup` roda com
+     `PGSSLMODE` derivado do `--ssl` do próprio comando (não faz sentido exigir
+     `verify-full` na importação e despejar em claro).
+   A prova adversarial dessas regras está em `docs/proofs/P31-B-backup-restore-proof.md`
+   (fase 5).
 5. **Instância de desenvolvimento migra do `json`.** O Harness padrão guarda os
    domínios em `<DSH_HOME>/storages` (json), não em SQLite; `storage:export-json`
    cobre esse caso com o Harness parado.

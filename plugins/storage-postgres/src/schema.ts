@@ -30,6 +30,18 @@ export function storageUnitLockName(schema: string, unit: string): string {
   return `dz23-storage-unit:${schema}:${unit}`
 }
 
+/**
+ * Schema-wide maintenance lock. A running Studio holds it in SHARED mode for
+ * as long as it is up; restore and migration take it EXCLUSIVE. That is what
+ * makes "the Studio is still running" a refusal even when the incoming bundle
+ * mentions none of the units the Studio has open — per-unit locks alone would
+ * leave those units unprotected in front of a `DROP SCHEMA`.
+ */
+export function storageMaintenanceLockName(schema: string): string {
+  assertIdentifier(schema, 'postgres schema')
+  return `dz23-storage-maintenance:${schema}`
+}
+
 export function recordsTable(schema: string): string {
   return `${quoteIdentifier(schema)}."records"`
 }

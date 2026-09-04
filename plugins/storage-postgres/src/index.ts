@@ -4,7 +4,7 @@ import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { storageBackendServiceKey } from '@deepseek-ai/dsh-storage'
 import z from '@deepseek-ai/schemastery'
 import { PostgresStorageBackend } from './backend.js'
-import { StorageBackupScheduler, type BackupResult } from './backup.js'
+import { childProcessBackupRunner, StorageBackupScheduler, type BackupResult } from './backup.js'
 import { assertConfiguredSchemaName } from './schema.js'
 import { snapshotPostgresStorage } from './snapshot.js'
 
@@ -13,7 +13,8 @@ export type { PostgresStorageBackendConfig } from './backend.js'
 export { StudioStorageError } from './errors.js'
 export * from './bundle.js'
 export { snapshotPostgresStorage, type SnapshotOptions } from './snapshot.js'
-export { BACKUP_FILE_PATTERN, BACKUP_LEDGER_FILE, BACKUP_MIN_INTERVAL_MS, StorageBackupScheduler, verifyBackupFile, type BackupResult, type BackupSchedulerOptions } from './backup.js'
+export { BACKUP_FILE_PATTERN, BACKUP_LEDGER_FILE, BACKUP_MIN_INTERVAL_MS, StorageBackupScheduler, childProcessBackupRunner, inProcessBackupRunner, verifyBackupFile, type BackupResult, type BackupRunner, type BackupSchedulerOptions, type ChildBackupRunnerOptions } from './backup.js'
+export { parseWorkerArgs, writeBackupBundle, type WorkerArgs, type WorkerReport } from './backup-worker.js'
 export {
   POSTGRES_IDENTIFIER_MAX_LENGTH,
   POSTGRES_SCHEMA_MAX_LENGTH,
@@ -21,6 +22,9 @@ export {
   assertConfiguredSchemaName,
   storageUnitLockName,
 } from './schema.js'
+
+/** Environment name under which the scheduler hands the resolved DSN to the backup process. */
+export const BACKUP_DSN_ENV = 'DZ23_STORAGE_BACKUP_DSN'
 
 export const name = 'storage-postgres'
 export const inject = ['storage', 'credentials']
@@ -34,6 +38,12 @@ export interface Config {
   backupDirectory?: string
   backupIntervalMinutes?: number
   backupKeep?: number
+  /** Ceiling for one backup file; a bigger database fails the run instead of filling the disk. */
+  backupMaxBytes?: number
+  /** A backup that takes longer than this is killed: a stuck copy must never become a stuck Studio. */
+  backupTimeoutMinutes?: number
+  /** Heap cap of the backup process, in MB. */
+  backupHeapMb?: number
 }
 
 export const Config: z<Config> = z.object({
@@ -44,6 +54,9 @@ export const Config: z<Config> = z.object({
   backupDirectory: z.string().default(''),
   backupIntervalMinutes: z.number().step(1).min(5).max(24 * 60).default(60),
   backupKeep: z.number().step(1).min(1).max(1000).default(48),
+  backupMaxBytes: z.number().step(1).min(1024 * 1024).default(2 * 1024 * 1024 * 1024),
+  backupTimeoutMinutes: z.number().step(1).min(1).max(24 * 60).default(15),
+  backupHeapMb: z.number().step(1).min(128).max(16 * 1024).default(1024),
 })
 
 export interface StudioStorageBackupService {
@@ -94,7 +107,19 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   const snapshot = () => snapshotPostgresStorage({ connectionString: resolved.value, ssl, schema })
   if (config.backupDirectory !== undefined && config.backupDirectory !== '') {
     const scheduler = new StorageBackupScheduler({
-      snapshot,
+      // Out of this process on purpose: copying the database must never cost the
+      // Studio its memory or its event loop (review finding on M3).
+      runner: childProcessBackupRunner({
+        // The child reads the DSN from its own environment, never from the command
+        // line (a command line is world-readable; a process environment is not).
+        dsnRef: BACKUP_DSN_ENV,
+        env: { ...process.env, [BACKUP_DSN_ENV]: resolved.value },
+        schema,
+        ssl: sslMode,
+        maxBytes: config.backupMaxBytes ?? 2 * 1024 * 1024 * 1024,
+        timeoutMs: (config.backupTimeoutMinutes ?? 15) * 60_000,
+        heapMb: config.backupHeapMb ?? 1024,
+      }),
       directory: config.backupDirectory,
       label: schema,
       intervalMs: (config.backupIntervalMinutes ?? 60) * 60_000,

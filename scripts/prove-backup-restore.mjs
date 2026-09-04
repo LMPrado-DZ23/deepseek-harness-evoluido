@@ -35,7 +35,7 @@ const moduleAt = relative => import(pathToFileURL(join(upstreamRoot, relative)).
 const cliBin = readFileSync(join(upstreamRoot, 'apps/cli/lib/bin.js'), 'utf8')
 const profileBootChunk = cliBin.match(/import\("\.\/(profile-boot-[^"]+\.js)"\)/)?.[1]
 const [{ loadLayeredEnv }, { runProfile }] = await Promise.all([moduleAt('packages/boot/app-boot/lib/index.js'), moduleAt(`apps/cli/lib/${profileBootChunk}`)])
-const { validateBundle, canonicalJson } = await import('../plugins/storage-postgres/lib/bundle.js')
+const { validateBundle, canonicalJson, sealBundle } = await import('../plugins/storage-postgres/lib/bundle.js')
 const { verifyBackupFile } = await import('../plugins/storage-postgres/lib/backup.js')
 
 process.env.DSH_HOME = dshHome
@@ -160,6 +160,68 @@ const afterRefusal = await inspector.query(`SELECT value->>'archived_at' AS arch
 assert.equal(afterRefusal.rows[0]?.archived_at, archivedRow.rows[0].archived_at, 'refused restore must leave the data untouched')
 assert.equal(await unitCount(), unitsBefore, 'refused restore must not touch the units')
 
+// ---- Phase 5 (adversarial): a bundle that does not carry every domain of the target must fail
+// BEFORE pg_dump and before any staging schema exists — with the Studio running and with it stopped.
+const stagingSchemas = async () => (await inspector.query(
+  `SELECT nspname FROM pg_catalog.pg_namespace WHERE nspname LIKE $1`, [`${schema}_staging_%`],
+)).rows.map(row => row.nspname)
+const full = JSON.parse(readFileSync(scheduled.file, 'utf8'))
+assert.ok(full.domains.length >= 2, 'the drill needs at least two domains to remove one')
+const dropped = full.domains.at(-1).descriptor.name
+const subsetFile = join(workDir, 'subset.json')
+await writeFile(subsetFile, `${JSON.stringify(sealBundle(full.source, full.domains.slice(0, -1), full.createdAt))}\n`)
+const emptyFile = join(workDir, 'empty.json')
+await writeFile(emptyFile, `${JSON.stringify(sealBundle(full.source, [], full.createdAt))}\n`)
+
+const attempt = async (input, dumpPath, extra = []) => {
+  try {
+    await run(process.execPath, ['--import', 'tsx', 'scripts/import-postgres-storage.ts', '--input', input,
+      '--dsn-ref', 'DZ23_POSTGRES_DSN', '--schema', schema, '--ssl', 'off', '--write', '--backup', dumpPath, ...extra],
+      { cwd: studioRoot, env: process.env })
+    return { refused: false, message: '' }
+  } catch (error) {
+    return { refused: true, message: `${error.stderr ?? ''}${error.stdout ?? ''}${error.message}` }
+  }
+}
+
+// 5.1 — with the Studio UP. The subset mentions none of the units it holds open, which used to walk
+// straight into DROP SCHEMA; the shared maintenance lock is what refuses it now.
+const guard = await boot()
+let liveAttempt
+try {
+  liveAttempt = await attempt(subsetFile, join(workDir, 'never-written-live.dump'), ['--force', '--confirm', 'REPLACE_DZ23_STORAGE', '--allow-domain-loss'])
+} finally {
+  await guard.shutdown.shutdown(0)
+}
+assert.ok(liveAttempt.refused, 'a restore while the Studio is running was not refused')
+assert.match(liveAttempt.message, /ainda está em execução/u)
+assert.equal(existsSync(join(workDir, 'never-written-live.dump')), false, 'pg_dump ran before the refusal')
+assert.deepEqual(await stagingSchemas(), [], 'a staging schema was created before the refusal')
+
+// 5.2 — Studio stopped: the subset is still refused, because restoring it would erase a domain of the target.
+const subsetAttempt = await attempt(subsetFile, join(workDir, 'never-written-subset.dump'), ['--force', '--confirm', 'REPLACE_DZ23_STORAGE'])
+assert.ok(subsetAttempt.refused, 'a subset bundle was not refused')
+assert.match(subsetAttempt.message, new RegExp(dropped, 'u'))
+assert.equal(existsSync(join(workDir, 'never-written-subset.dump')), false, 'pg_dump ran before the subset refusal')
+assert.deepEqual(await stagingSchemas(), [], 'a staging schema was created before the subset refusal')
+
+// 5.3 — an empty bundle can only destroy: refused before the database is opened.
+const emptyAttempt = await attempt(emptyFile, join(workDir, 'never-written-empty.dump'), ['--force', '--confirm', 'REPLACE_DZ23_STORAGE', '--allow-domain-loss'])
+assert.ok(emptyAttempt.refused, 'an empty bundle was not refused')
+assert.match(emptyAttempt.message, /nenhum domínio/u)
+
+// Nothing above touched the data.
+const afterAdversarial = await inspector.query(`SELECT value->>'archived_at' AS archived_at FROM "${schema}"."records" WHERE unit = 'studio_projects'`)
+assert.equal(afterAdversarial.rows[0]?.archived_at, archivedRow.rows[0].archived_at, 'a refused restore must leave the data untouched')
+assert.equal(await unitCount(), unitsBefore, 'a refused restore must not touch the units')
+
+// 5.4 — the same subset, now with the loss stated out loud, IS allowed: the refusal is a guard, not a wall.
+const consented = await attempt(subsetFile, join(workDir, 'consented.dump'), ['--force', '--confirm', 'REPLACE_DZ23_STORAGE', '--allow-domain-loss'])
+assert.equal(consented.refused, false, `an explicitly consented domain loss was refused: ${consented.message}`)
+assert.equal(await unitCount(), unitsBefore - 1, 'the consented restore did not drop exactly one domain')
+assert.ok(existsSync(join(workDir, 'consented.dump')), 'the safety copy was not written before replacing the schema')
+assert.deepEqual(await stagingSchemas(), [], 'a staging schema was left behind after a successful restore')
+
 await inspector.query(`DROP SCHEMA "${schema}" CASCADE`)
 await inspector.end()
 const result = { decision: 'GO', schema, unitsRestored: unitsBefore, scheduledBackup: scheduled.file.split('/').pop(), operatorBackup: operatorFile.split('/').pop(), pointInTimeHonest: true, refusedOverwrite: true }
@@ -172,6 +234,7 @@ await writeFile(resolve(studioRoot, 'docs/proofs/P31-B-backup-restore-proof.md')
 - Studio religado sobre o esquema restaurado: a **mesma sessão** entra, projeto/especificação/espaços idênticos (JSON canônico), uma escrita nova cai no PostgreSQL e a cópia agendada volta a funcionar.
 - Honestidade do ponto no tempo: a escrita feita **depois** das cópias não existe após a restauração — a prova afirma isso em vez de esconder.
 - Segurança: a CLI **recusa** sobrescrever um esquema que já tem unidades sem \`--force --confirm REPLACE_DZ23_STORAGE\`, e os dados ficam intactos.
+- **Prova adversarial do achado do Codex (M3/ALTA):** com o destino contendo vários conjuntos de dados e o Studio **ligado**, uma cópia que não menciona nenhum deles é recusada pela trava de manutenção compartilhada (\`ainda está em execução\`) — e a recusa acontece **antes** do \`pg_dump\` e antes de existir qualquer esquema de preparo (o arquivo de dump não é criado e nenhum \`${schema}_staging_*\` aparece). Com o Studio **desligado**, a mesma cópia parcial continua recusada, nomeando o conjunto \`${dropped}\` que seria apagado; uma cópia **vazia** é recusada antes de abrir o banco. Nenhuma das recusas encosta nos dados. Repetindo com \`--allow-domain-loss --confirm REPLACE_DZ23_STORAGE\`, a restauração acontece, a cópia de segurança \`pg_dump\` é escrita antes e o esquema de preparo não sobra.
 
 Não executado: restauração em servidor remoto com TLS \`verify-full\` (aqui \`ssl off\` local), Docker/Compose (ambiente do Claude sem daemon), restauração a partir de \`pg_dump\` (o caminho oficial é o bundle JSON; o dump é só rede de segurança do \`--backup\`).
 `)

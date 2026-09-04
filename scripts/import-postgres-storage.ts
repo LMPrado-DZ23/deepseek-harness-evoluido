@@ -3,7 +3,7 @@ import { dirname, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { Client } from 'pg'
 import { PostgresStorageBackend } from '../plugins/storage-postgres/src/backend.ts'
-import { assertConfiguredSchemaName, assertIdentifier, quoteIdentifier, storageUnitLockName } from '../plugins/storage-postgres/src/schema.ts'
+import { assertConfiguredSchemaName, assertIdentifier, quoteIdentifier, STORAGE_POSTGRES_LAYOUT_VERSION, storageMaintenanceLockName, storageUnitLockName } from '../plugins/storage-postgres/src/schema.ts'
 import { importStorage, type StorageExportBundle, validateBundle } from './storage-migration.ts'
 
 const args = parseArgs(process.argv.slice(2))
@@ -13,10 +13,15 @@ const dsn = process.env[args.dsnRef]
 if (dsn === undefined || dsn === '') throw new Error(`Credential reference '${args.dsnRef}' is not configured.`)
 const bundle = JSON.parse(await readFile(resolve(args.input), 'utf8')) as StorageExportBundle
 validateBundle(bundle)
+// A bundle with no domains restores nothing: it can only ever destroy. Refused before the database is even opened.
+if (!Array.isArray(bundle.domains) || bundle.domains.length === 0) {
+  throw new Error('O arquivo de cópia não contém nenhum domínio. Nada seria restaurado — só apagado. Importação recusada.')
+}
 const client = new Client({ connectionString: dsn, ssl: args.ssl === 'off' ? false : { rejectUnauthorized: args.ssl === 'verify-full' } })
 await client.connect()
 try {
-  if (args.write) await acquireTargetLocks(client, args.schema, bundle)
+  // Order matters: everything that can refuse runs BEFORE pg_dump, staging or DROP.
+  if (args.write) await acquireMaintenanceLock(client, args.schema)
   const namespace = await client.query<{ present: boolean }>(
     'SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = $1) AS present',
     [args.schema],
@@ -27,15 +32,24 @@ try {
     [args.schema],
   )
   let existingUnits = 0
+  let targetDomains: string[] = []
   if (current.rows[0]?.count !== '0') {
-    const result = await client.query<{ count: string }>(`SELECT count(*) FROM ${quoteIdentifier(args.schema)}."units"`)
-    existingUnits = Number(result.rows[0]?.count ?? 0)
+    await assertStudioLayout(client, args.schema)
+    const result = await client.query<{ name: string }>(`SELECT name FROM ${quoteIdentifier(args.schema)}."units" ORDER BY name`)
+    targetDomains = result.rows.map(row => row.name)
+    existingUnits = targetDomains.length
   }
   if (existingUnits > 0 && !(args.force && args.confirm === 'REPLACE_DZ23_STORAGE')) {
     throw new Error('Target has Studio units. Use --force --confirm REPLACE_DZ23_STORAGE only after reviewing the backup.')
   }
+  // A bundle that does not carry every domain the target holds would silently DESTROY the missing ones.
+  const bundleDomains = new Set(bundle.domains.map(domain => domain.descriptor.name))
+  const wouldBeLost = targetDomains.filter(name => !bundleDomains.has(name))
+  if (wouldBeLost.length > 0 && !(args.allowDomainLoss && args.confirm === 'REPLACE_DZ23_STORAGE')) {
+    throw new Error(`Esta cópia não contém ${String(wouldBeLost.length)} conjunto(s) de dados que existem no destino (${wouldBeLost.join(', ')}). Restaurar assim apagaria esses dados. Importação recusada. Se for mesmo isso que você quer, repita com --allow-domain-loss --confirm REPLACE_DZ23_STORAGE.`)
+  }
   if (!args.write) {
-    process.stdout.write(`${JSON.stringify({ mode: 'dry-run', domains: bundle.domains.length, existingUnits, targetSchemaExists }, null, 2)}\n`)
+    process.stdout.write(`${JSON.stringify({ mode: 'dry-run', domains: bundle.domains.length, existingUnits, targetDomains, wouldBeLost, targetSchemaExists }, null, 2)}\n`)
     process.exitCode = 0
   } else {
     const backupPath = resolve(args.backup!)
@@ -43,43 +57,96 @@ try {
     let backupStatus = 'not-needed-empty-target'
     if (targetSchemaExists) {
       await mkdir(dirname(backupPath), { recursive: true })
-      await pgDump(dsn, args.schema, backupPath)
+      await pgDump(dsn, args.schema, backupPath, args.ssl)
       backup = backupPath
       backupStatus = 'created'
     }
     const staging = `${args.schema}_staging_${Date.now().toString(36)}`
     assertIdentifier(staging, 'staging schema')
     const backend = new PostgresStorageBackend({ connectionString: dsn, schema: staging, ssl: args.ssl === 'off' ? false : { rejectUnauthorized: args.ssl === 'verify-full' }, poolMax: 4 })
-    await backend.waitUntilReady()
-    await importStorage(backend, bundle)
-    await client.query('BEGIN')
     try {
-      await client.query(`DROP SCHEMA IF EXISTS ${quoteIdentifier(args.schema)} CASCADE`)
-      await client.query(`ALTER SCHEMA ${quoteIdentifier(staging)} RENAME TO ${quoteIdentifier(args.schema)}`)
-      await client.query('COMMIT')
+      await backend.waitUntilReady()
+      await importStorage(backend, bundle)
+      await backend.close()
+      await client.query('BEGIN')
+      try {
+        await client.query(`DROP SCHEMA IF EXISTS ${quoteIdentifier(args.schema)} CASCADE`)
+        await client.query(`ALTER SCHEMA ${quoteIdentifier(staging)} RENAME TO ${quoteIdentifier(args.schema)}`)
+        await client.query('COMMIT')
+      } catch (error) {
+        await client.query('ROLLBACK')
+        throw error
+      }
     } catch (error) {
-      await client.query('ROLLBACK')
+      // Any failure leaves nothing behind: the half-filled staging schema is dropped before the error surfaces.
+      await backend.close().catch(() => undefined)
+      await client.query(`DROP SCHEMA IF EXISTS ${quoteIdentifier(staging)} CASCADE`).catch(() => undefined)
       throw error
     }
-    process.stdout.write(`${JSON.stringify({ mode: 'write', domains: bundle.domains.length, backup, backupStatus }, null, 2)}\n`)
+    process.stdout.write(`${JSON.stringify({ mode: 'write', domains: bundle.domains.length, backup, backupStatus, replacedDomains: targetDomains, droppedDomains: wouldBeLost }, null, 2)}\n`)
   }
 } finally {
   await client.end()
 }
 
-async function acquireTargetLocks(client: Client, schema: string, bundle: StorageExportBundle): Promise<void> {
-  for (const domain of bundle.domains) {
-    const result = await client.query<{ acquired: boolean }>(
+/**
+ * Exclusive maintenance lock over the WHOLE schema. A running Studio holds it
+ * shared, so this fails while any Studio is up — including one whose open
+ * units are not mentioned in the bundle, which is exactly the case a per-unit
+ * lock used to let through straight into `DROP SCHEMA`. The per-unit locks are
+ * still taken afterwards, as a second belt for a foreign writer that predates
+ * the maintenance lock.
+ */
+async function acquireMaintenanceLock(client: Client, schema: string): Promise<void> {
+  const result = await client.query<{ acquired: boolean }>(
+    'SELECT pg_try_advisory_lock(hashtext($1)) AS acquired',
+    [storageMaintenanceLockName(schema)],
+  )
+  if (result.rows[0]?.acquired !== true) {
+    throw new Error('O DZ23 STUDIO ainda está em execução no servidor. Pare-o antes de importar.')
+  }
+  const hasUnits = await client.query<{ count: string }>(
+    `SELECT count(*) FROM pg_catalog.pg_tables WHERE schemaname = $1 AND tablename = 'units'`,
+    [schema],
+  )
+  const units = hasUnits.rows[0]?.count === '0'
+    ? { rows: [] as { name: string }[] }
+    : await client.query<{ name: string }>(`SELECT name FROM ${quoteIdentifier(schema)}."units"`)
+  for (const row of units.rows) {
+    const unit = await client.query<{ acquired: boolean }>(
       'SELECT pg_try_advisory_lock(hashtext($1)) AS acquired',
-      [storageUnitLockName(schema, domain.descriptor.name)],
+      [storageUnitLockName(schema, row.name)],
     )
-    if (result.rows[0]?.acquired !== true) {
+    if (unit.rows[0]?.acquired !== true) {
       throw new Error('O DZ23 STUDIO ainda está em execução no servidor. Pare-o antes de importar.')
     }
   }
 }
 
-async function pgDump(dsn: string, schema: string, output: string): Promise<void> {
+/** A schema that has a `units` table but not the rest of the layout is not a Studio schema: refuse instead of dropping it. */
+async function assertStudioLayout(client: Client, schema: string): Promise<void> {
+  const expected = ['storage_meta', 'units', 'records', 'unit_globals']
+  const found = await client.query<{ tablename: string }>(
+    'SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = $1 AND tablename = ANY($2)',
+    [schema, expected],
+  )
+  const names = new Set(found.rows.map(row => row.tablename))
+  const missing = expected.filter(table => !names.has(table))
+  if (missing.length > 0) {
+    throw new Error(`O esquema '${schema}' não tem a estrutura do DZ23 STUDIO (faltam: ${missing.join(', ')}). Importação recusada para não apagar dados de outra coisa.`)
+  }
+  const layout = await client.query<{ value: number }>(
+    `SELECT value FROM ${quoteIdentifier(schema)}."storage_meta" WHERE key = 'layout_version'`,
+  )
+  if (layout.rows[0] === undefined) {
+    throw new Error(`O esquema '${schema}' não registra a versão do armazenamento. Importação recusada.`)
+  }
+  if (layout.rows[0].value !== STORAGE_POSTGRES_LAYOUT_VERSION) {
+    throw new Error(`O esquema '${schema}' está na versão ${String(layout.rows[0].value)} do armazenamento e esta versão do Studio usa a ${String(STORAGE_POSTGRES_LAYOUT_VERSION)}. Importação recusada.`)
+  }
+}
+
+async function pgDump(dsn: string, schema: string, output: string, ssl: 'off' | 'require' | 'verify-full'): Promise<void> {
   const url = new URL(dsn)
   const env = {
     ...process.env,
@@ -88,6 +155,9 @@ async function pgDump(dsn: string, schema: string, output: string): Promise<void
     PGUSER: decodeURIComponent(url.username),
     PGPASSWORD: decodeURIComponent(url.password),
     PGDATABASE: decodeURIComponent(url.pathname.slice(1)),
+    // The safety copy travels under the SAME TLS policy as the import itself:
+    // it would make no sense to demand verify-full here and dump in the clear.
+    PGSSLMODE: ssl === 'off' ? 'disable' : ssl === 'require' ? 'require' : 'verify-full',
   }
   const destination = await open(output, 'wx', 0o600)
   try {
@@ -126,6 +196,7 @@ function parseArgs(argv: string[]) {
     ssl: ssl as 'off' | 'require' | 'verify-full',
     backup: optional('--backup'),
     force: argv.includes('--force'),
+    allowDomainLoss: argv.includes('--allow-domain-loss'),
     confirm: optional('--confirm'),
     write: argv.includes('--write'),
   }

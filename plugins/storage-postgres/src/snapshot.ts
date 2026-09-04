@@ -95,7 +95,8 @@ function deriveDescriptors(units: readonly UnitRow[], records: readonly RecordRo
     tablesByUnit.set(row.unit, set)
   }
   const withGlobal = new Set(globals.map(row => row.unit))
-  return [...units].sort((left, right) => left.name.localeCompare(right.name)).map(unit => ({
+  // Code-point order here too: the domain order is part of the sealed payload.
+  return [...units].sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0)).map(unit => ({
     name: unit.name,
     version: unit.version,
     tables: [...(tablesByUnit.get(unit.name) ?? [])].sort(),

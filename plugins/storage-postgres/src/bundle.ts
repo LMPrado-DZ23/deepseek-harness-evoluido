@@ -78,7 +78,10 @@ export function sha256(value: string | Buffer): string {
 function sortValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(sortValue)
   if (value !== null && typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right))
+    // Code-point order, locale-independent: the same bytes on every machine.
+    // `localeCompare` would make a bundle validate here and fail on another
+    // installation whose ICU sorts accents or case differently.
+    return Object.fromEntries(Object.entries(value).sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
       .map(([key, nested]) => [key, sortValue(nested)]))
   }
   return value
