@@ -101,6 +101,7 @@ DZ23_POSTGRES_DSN=... pnpm prove:postgres-soak --minutes 30
 pnpm build:edge
 pnpm prove:edge
 DZ23_CHROMIUM_PATH=/caminho/chromium pnpm prove:integration-hub   # Hub real + painel /studio/hub em Chromium
+pnpm hub:sign keygen|pubkey|sign …                                 # publicador: chaves e manifesto assinado (ADR-031)
 pnpm preflight:fase3
 pnpm prove:fase3-agents
 pnpm prove:generated-data

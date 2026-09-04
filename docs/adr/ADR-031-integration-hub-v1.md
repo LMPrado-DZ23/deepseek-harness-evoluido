@@ -78,6 +78,13 @@ ligá-la, e levar o protótipo verificado consigo.
    da internet: estado `NOT_PRESENT` até haver plugins assinados e decisão do
    Prado sobre publicação (ADR-009/ADR-013).
 
+9. **Ferramenta do publicador.** `plugins/integration-hub/src/signing.ts`
+   (`generatePublisherKeyPair`, `publicKeyFromPrivatePem`, `signManifest`) e o CLI
+   `pnpm hub:sign keygen|pubkey|sign` produzem exatamente os bytes canônicos que o
+   Studio verifica; a chave privada fica em arquivo 0600 (ou env) e nunca é
+   impressa; assinar por cima de uma assinatura existente exige `--replace`.
+   Guia: `docs/guides/integracoes-e-pacote-do-prototipo.md`.
+
 ## Consequências
 
 - Domínio novo `studio_integrations` (versão 1) roteado para Postgres nos dois

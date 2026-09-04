@@ -41,7 +41,8 @@
     "gate:i18n": "node scripts/check-i18n.mjs",
     "golden": "tsx scripts/run-golden-set.ts",
     "prove:prompt-to-app": "tsx scripts/prove-prompt-to-app.ts",
-    "prove:integration-hub": "node scripts/prove-integration-hub.mjs"
+    "prove:integration-hub": "node scripts/prove-integration-hub.mjs",
+    "hub:sign": "node scripts/hub-sign-manifest.mjs"
   },
   "devDependencies": {
     "@deepseek-ai/dsh-storage": "link:/home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage",

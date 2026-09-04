@@ -22,6 +22,7 @@ export * from './zip.js'
 export * from './export.js'
 export * from './service.js'
 export * from './http.js'
+export * from './signing.js'
 
 export const name = 'dz23-studio-integration-hub'
 export const inject = ['storageDomain', 'credentials', 'webServer', 'studioIdentity', 'studioTenancy', 'studioPromptToApp']
