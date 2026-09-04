@@ -3,12 +3,12 @@
 - `mission_id`: `M1-M6-finalizacao-2026-09-04`
 - `objective`: integrar e provar M1-M6 com segurança, sem push, PR, deploy ou exclusões não autorizadas
 - `state`: `FIXING`
-- `iteration`: `2026-09-04.4`
+- `iteration`: `2026-09-04.5`
 - `started_at`: `2026-09-04 America/Sao_Paulo`
-- `heartbeat_at`: `2026-09-04T12:20:00-03:00`
-- `last_progress_at`: `2026-09-04T12:20:00-03:00`
+- `heartbeat_at`: `2026-09-04T13:10:00-03:00`
+- `last_progress_at`: `2026-09-04T13:10:00-03:00`
 - `branch`: `codex/p30-policy-foundation`
-- `head`: `50cd12b2b35d5dd274fe6648d8a8dea097762d64`
+- `head`: `80d2dd7`
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c`
 
 ## Critérios de aceite
@@ -26,23 +26,24 @@
 - M1 preview seguro e M2 categorias/Golden Set incorporados na história principal.
 - Recuperação de geração, limites do builder e governador de jobs/builds integrados até `d819314`.
 - Bundle transportável `outputs/CODEX_BASE_d819314.bundle` verificado, SHA-256 `413EBE67B82BB0CF9A9169CAD0FB4B48CE2C91BFD58B539D3E7415A763F836BE`.
-- Shell inicial M6 registrado em `50cd12b`, mas ainda em correção; não é GO.
-- Claude entregou M3+M4+M5 em `5749d6f`; auditoria Codex encontrou 14 regressões e impediu merge. Claude está regenerando uma ponta cumulativa sobre `d819314`.
+- Shell inicial M6 registrado em `50cd12b`; correção posterior está em revisão independente e ainda não é GO.
+- Pin portátil do upstream e lock da cadeia de imagens foram registrados em `80d2dd7`; pin passou em clone WSL/ext4 e a verificação on-line dos digests passou.
+- Claude entregou M3+M4+M5 em `9034a85`; transporte íntegro, mas ainda baseado em `b95d23c`. A composição sobre `d819314` foi solicitada novamente com evidência do merge-base.
 
 ## Tarefas atuais e propriedade de arquivos
 
-- `preview capacity`: subagente Codex; somente `plugins/preview/**` e lockfile se inevitável. Primeiro corte NO-GO por cinco falhas de concorrência/recovery.
+- `preview capacity`: Codex principal; somente `plugins/preview/**`. Segundo corte continua NO-GO por ausência de backend distribuído, fencing e liberação prematura; correção fail-closed de runtime em andamento.
 - `retention`: subagente Codex; somente `plugins/runtime-governor/src/{index,retention}.ts` e teste. Primeiro corte NO-GO por segurança de remoção, TOCTOU, quota e recovery.
-- `M6 Windows shell`: subagente Codex; somente `deploy/windows/**` e `tests/m6/**`. Primeiro corte NO-GO por confinement, health, symlink e prova simulada insuficiente.
-- `M3+M4+M5`: Claude; nova ponta única sobre `d819314`, corrigindo `M345_5749D6F_CODEX_PARECER.md` e os achados próprios de 15:05Z.
+- `M6 Windows shell`: revisão independente ativa sobre a correção de conversão Windows→WSL, pin, imagens por digest, health e rollback.
+- `M3+M4+M5`: Claude; nova ponta única sobre `d819314`, preservando as correções até `9034a85`.
 - `integration/M6.1`: Codex principal após os quatro trabalhos acima passarem revisão.
 
 ## Testes e auditorias atuais
 
-- preview primeiro corte: implementação reportou 168/168 em ext4, mas auditoria independente = `NO-GO`; reteste pendente.
+- preview segundo corte: auditoria independente = `NO-GO`; 172/174 antes do novo fail-closed. Correção adicional deliberadamente deixa expectativas antigas vermelhas até os testes representarem inventário real.
 - retention primeiro corte: auditoria independente = `NO-GO`; reteste pendente.
 - M6 shell primeiro corte: teste Node e parser PowerShell passaram, mas auditoria independente = `NO-GO`; reteste pendente.
-- M3+M4+M5 `5749d6f`: não integrado; parecer = `NEEDS_FIX`.
+- M3+M4+M5 `9034a85`: não integrado; bundle íntegro, base incorreta e auditoria independente ativa.
 - tentativa de materializar dependências no Windows falhou com `EACCES` em links absolutos para WSL; M6.1 deve eliminar essa não portabilidade em base limpa, sem tratar o verde antigo como prova.
 
 ## Bloqueadores externos que não param o restante
