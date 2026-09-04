@@ -243,6 +243,28 @@ describe('generated import policy', () => {
     expect(() => assertGeneratedSource([{ path: 'src/app.tsx', content }])).toThrow('unsafe URL attribute src')
   })
 
+  it.each([
+    ['a', 'HREF'],
+    ['a', 'HrEf'],
+    ['img', 'SRC'],
+    ['form', 'ACTION'],
+    ['button', 'FORMACTION'],
+    ['a', 'xlinkHref'],
+    ['a', 'xlink:href'],
+  ])('normalizes URL attributes on <%s>: %s', (tag, attribute) => {
+    const content = `export default function App(){return <${tag} ${attribute}='javascript:alert(1)'>x</${tag}>}`
+    expect(() => assertGeneratedSource([{ path: 'src/app.tsx', content }])).toThrow('unsafe URL attribute')
+  })
+
+  it.each([
+    '/\\attacker.example/steal',
+    '/\\\\attacker.example/steal',
+    `/${String.fromCharCode(9)}\\attacker.example/steal`,
+  ])('rejects a backslash URL interpreted as an external host: %s', (value) => {
+    const content = `export default function App(){return <a href={${JSON.stringify(value)}}>Abrir</a>}`
+    expect(() => assertGeneratedSource([{ path: 'src/app.tsx', content }])).toThrow('unsafe URL attribute href')
+  })
+
   it.each(['', '/', '/produtos', './local', '#secao', 'https://example.test/page'])(
     'accepts a safe static URL: %s',
     (value) => {

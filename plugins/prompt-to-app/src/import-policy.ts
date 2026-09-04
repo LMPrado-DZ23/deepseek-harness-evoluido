@@ -35,7 +35,7 @@ const SAFE_INTRINSIC_JSX_TAGS = new Set([
   'svg', 'g', 'path', 'circle', 'ellipse', 'line', 'polygon', 'polyline', 'rect', 'text', 'title',
 ])
 const FORBIDDEN_JSX_ATTRIBUTES = new Set(['dangerouslySetInnerHTML', 'srcDoc'])
-const URL_JSX_ATTRIBUTES = new Set(['href', 'src', 'action', 'formAction', 'xlinkHref'])
+const URL_JSX_ATTRIBUTES = new Set(['href', 'src', 'action', 'formaction', 'xlinkhref'])
 const URL_IGNORED_CODE_POINTS = /[\u0000-\u0020]/gu
 const HTTPS_URL = /^https:\/\//iu
 const FIXED_COMPONENT_PATHS = [
@@ -89,9 +89,10 @@ function assertNoServerOrUnsafeSource(path: string, source: ts.SourceFile, gener
     if (ts.isCallExpression(node) && factoryName(node.expression) !== undefined && FORBIDDEN_ELEMENT_FACTORIES.has(factoryName(node.expression)!)) throw rejectedSource(path, factoryName(node.expression)!)
     if (ts.isJsxAttribute(node)) {
       const name = node.name.getText(source)
+      const normalizedName = normalizeJsxAttributeName(name)
       if (/^on/iu.test(name) || name === 'ref') throw rejectedSource(path, `interactive JSX attribute ${name}`)
       if (FORBIDDEN_JSX_ATTRIBUTES.has(name)) throw rejectedSource(path, name)
-      if (URL_JSX_ATTRIBUTES.has(name)) {
+      if (URL_JSX_ATTRIBUTES.has(normalizedName)) {
         const value = staticJsxAttributeValue(node)
         if (value === undefined) throw rejectedSource(path, `dynamic URL attribute ${name}`)
         if (!isSafeStaticUrl(value)) throw rejectedSource(path, `unsafe URL attribute ${name}`)
@@ -114,10 +115,15 @@ function assertNoServerOrUnsafeSource(path: string, source: ts.SourceFile, gener
 }
 
 function isSafeStaticUrl(value: string): boolean {
+  if (value.includes('\\')) return false
   const normalized = value.replace(URL_IGNORED_CODE_POINTS, '')
   if (normalized === '' || normalized.startsWith('#') || normalized.startsWith('./')) return true
   if (normalized.startsWith('/') && !normalized.startsWith('//')) return true
   return HTTPS_URL.test(normalized)
+}
+
+function normalizeJsxAttributeName(value: string): string {
+  return value.replace(/[^a-z0-9]/giu, '').toLowerCase()
 }
 
 function importedBindings(source: ts.SourceFile, generatedPaths: ReadonlySet<string>): ReadonlySet<string> {
