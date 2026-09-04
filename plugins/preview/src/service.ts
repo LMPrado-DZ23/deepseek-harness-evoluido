@@ -2,11 +2,13 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { roleAllows, type StudioRole } from '@dz23-studio/policy'
 import {
   CapacityGovernorError,
+  isDistributedCapacityGovernor,
   MAX_LEASE_TTL_MS,
   MIN_LEASE_TTL_MS,
   MemoryCapacityGovernor,
   type CapacityGovernor,
   type CapacityLease,
+  type DistributedCapacityGovernor,
   type LeaseReference,
 } from '@dz23-studio/runtime-governor'
 import { z } from 'zod'
@@ -132,6 +134,7 @@ export class StudioPreviewService {
   readonly #publicPort: number
   readonly #runtimeTimeoutMs: number
   readonly #capacity: CapacityGovernor
+  readonly #distributedCapacity: DistributedCapacityGovernor | undefined
   readonly #capacityLeases = new Map<string, LeaseReference>()
   readonly #capacityReleasePending = new Set<string>()
   readonly #mutex = new KeyedMutex()
@@ -151,6 +154,10 @@ export class StudioPreviewService {
       throw new Error(t('service.memoryCapacitySingleProcessOnly'))
     }
     this.#capacity = options.capacity ?? new MemoryCapacityGovernor()
+    this.#distributedCapacity = isDistributedCapacityGovernor(this.#capacity) ? this.#capacity : undefined
+    if (capacityMode !== 'single-process' && this.#distributedCapacity === undefined) {
+      throw new Error(t('service.distributedCapacityRequired'))
+    }
   }
 
   list(actor: PreviewActor, projectId: string): readonly PublicPreview[] {
@@ -422,10 +429,13 @@ export class StudioPreviewService {
   }
 
   async reap(): Promise<number> {
+    return this.#mutex.run('maintenance', () => this.#reap())
+  }
+
+  async #reap(): Promise<number> {
     await this.#maintainActiveCapacity()
     const managed = await this.#runtimeCall('RUNTIME_LIST_TIMEOUT', signal => this.options.runtime.listManaged(signal))
     await this.#capacity.reconcile()
-    await this.#retryDetachedCapacityReleases(managed)
     const now = this.#now().getTime()
     let reaped = 0
 
@@ -452,6 +462,10 @@ export class StudioPreviewService {
               this.options.onCleanupFailure?.(current.preview_id)
               return
             }
+          }
+          if (current.failure_code === 'CAPACITY_RECOVERY_QUARANTINE') {
+            await this.#retainCleanupCapacity(current)
+            return
           }
           const terminalState = terminalStateFor(current)
           const settled = await this.#settleRuntimeAbsent(current, terminalState, current.failure_code)
@@ -493,6 +507,10 @@ export class StudioPreviewService {
   }
 
   async reconcile(): Promise<{ readonly stoppedOrphans: number; readonly failedRecords: number }> {
+    return this.#mutex.run('maintenance', () => this.#reconcile())
+  }
+
+  async #reconcile(): Promise<{ readonly stoppedOrphans: number; readonly failedRecords: number }> {
     const managed = await this.#runtimeCall('RUNTIME_LIST_TIMEOUT', signal => this.options.runtime.listManaged(signal))
     await this.#capacity.reconcile()
     const records = this.options.repository.previews()
@@ -505,13 +523,10 @@ export class StudioPreviewService {
           if (!await this.#runtimeAbsent(runtime.previewId)) {
             throw new PreviewError('UNAVAILABLE', t('service.previousStopFailed'))
           }
-          const released = await this.#releaseCapacity(runtime.previewId)
-          if (!released && record !== undefined) {
-            await this.options.repository.putPreview(previewRecordSchema.parse({
-              ...record, state: 'STOPPING', stopped_at: null,
-              failure_code: pendingReleaseCode(record.failure_code), health: 'DOWN',
-            }))
-          }
+          // A runtime de uma instância anterior pode materializar tarde. Sem
+          // fencing aplicado pelo supervisor, liberar a lease aqui permitiria
+          // um processo vivo sem contabilização. A etapa seguinte mantém a
+          // capacidade em quarentena fail-closed.
           stoppedOrphans++
         } catch {
           this.options.onCleanupFailure?.(runtime.previewId)
@@ -519,14 +534,32 @@ export class StudioPreviewService {
         }
       }
     }
-    await this.#retryDetachedCapacityReleases(managed)
+    await this.#quarantineDetachedCapacity(managed)
     let failedRecords = 0
     for (const snapshot of records.filter(item => !['STOPPED', 'FAILED', 'EXPIRED'].includes(item.state))) {
       await this.#mutex.run(scopeProjectKey(snapshot), async () => {
         await this.#mutex.run(`preview:${snapshot.preview_id}`, async () => {
           const record = this.options.repository.previews().find(item => item.preview_id === snapshot.preview_id)
           if (record === undefined || ['STOPPED', 'FAILED', 'EXPIRED'].includes(record.state)) return
+          try {
+            await this.#recoverCapacity(record)
+          } catch (error) {
+            if (!(error instanceof PreviewError) || error.code !== 'CAPACITY_EXCEEDED') throw error
+            await this.#failClosedForCapacity(record, error.code)
+            failedRecords++
+            return
+          }
           const runtime = record.runtime_ref === null ? undefined : managed.find(item => item.previewId === record.preview_id && item.runtimeRef === record.runtime_ref)
+          if (record.state === 'STOPPING' && record.failure_code === 'CAPACITY_RECOVERY_QUARANTINE') {
+            const quarantinedRuntime = managed.find(item => item.previewId === record.preview_id)
+            if (quarantinedRuntime !== undefined) {
+              try { await this.#runtimeCall('RUNTIME_STOP_TIMEOUT', signal => this.options.runtime.stop(quarantinedRuntime.runtimeRef, signal)) }
+              catch { this.options.onCleanupFailure?.(record.preview_id) }
+            }
+            await this.#revokeAdmissions(record.preview_id)
+            await this.#retainCleanupCapacity(record)
+            return
+          }
           if (Date.parse(record.expires_at) <= this.#now().getTime()) {
             let cleanupIncomplete = false
             if (runtime !== undefined) {
@@ -569,15 +602,7 @@ export class StudioPreviewService {
             }
             return
           }
-          if (record.state === 'READY' && runtime !== undefined) {
-            try {
-              await this.#ensureCapacity(record)
-            } catch (error) {
-              await this.#failClosedForCapacity(record, failureCode(error))
-              failedRecords++
-            }
-            return
-          }
+          if (record.state === 'READY' && runtime !== undefined) return
           if (record.state !== 'READY' || runtime === undefined) {
             const failedBase = previewRecordSchema.parse({ ...record, state: 'STOPPING', health: 'DOWN', stopped_at: null, stop_reason: 'reconciled', failure_code: record.state === 'READY' ? 'RUNTIME_MISSING' : 'RESTART_DURING_START' })
             await this.#settleRuntimeAbsent(failedBase, 'FAILED', failedBase.failure_code)
@@ -716,7 +741,11 @@ export class StudioPreviewService {
           if (current === undefined || (current.state !== 'READY' && current.state !== 'STOPPING')) return
           if (current.state === 'READY' && current.runtime_ref === null) return
           try {
-            await this.#ensureCapacity(current, current.state === 'STOPPING')
+            if (this.#distributedCapacity !== undefined && !this.#capacityLeases.has(current.preview_id)) {
+              await this.#recoverCapacity(current)
+            } else {
+              await this.#ensureCapacity(current, current.state === 'STOPPING')
+            }
           } catch (error) {
             await this.#failClosedForCapacity(current, failureCode(error))
           }
@@ -740,7 +769,6 @@ export class StudioPreviewService {
         this.#capacityLeases.delete(record.preview_id)
       }
     }
-    if (await this.#claimExistingCapacity(record, ttlMs)) return
     await this.#acquireCapacity(record, ttlMs)
   }
 
@@ -754,44 +782,42 @@ export class StudioPreviewService {
       })
       this.#capacityLeases.set(record.preview_id, lease)
     } catch (error) {
-      if (error instanceof CapacityGovernorError && error.code === 'CAPACITY_EXCEEDED') {
-        try {
-          if (await this.#claimExistingCapacity(record, ttlMs)) return
-        } catch (claimError) {
-          throw capacityError(claimError)
-        }
-      }
       throw capacityError(error)
     }
   }
 
-  async #claimExistingCapacity(record: PreviewRecord, ttlMs: number): Promise<boolean> {
+  async #recoverCapacity(record: PreviewRecord): Promise<void> {
+    if (this.#capacityLeases.has(record.preview_id)) {
+      await this.#ensureCapacity(record, record.state === 'STOPPING')
+      return
+    }
+    const ttlMs = this.#capacityTtlMs(record, record.state === 'STOPPING')
     let leases: readonly CapacityLease[]
     try {
       leases = (await this.#capacity.snapshot()).leases.filter(lease => lease.ownerId === capacityOwnerId(record.preview_id))
     } catch (error) {
       throw capacityError(error)
     }
-    if (leases.length === 0) return false
+    if (leases.length === 0) {
+      await this.#acquireCapacity(record, ttlMs)
+      return
+    }
     assertCompatibleOwnerLeases(record, leases)
-    const canonical = [...leases].sort((left, right) => left.fencingToken - right.fencingToken)[0]!
+    if (leases.length !== 1) throw new PreviewError('UNAVAILABLE', t('service.capacityUnavailable'))
+    const canonical = leases[0]!
     try {
-      const renewed = await this.#capacity.heartbeat(canonical, ttlMs)
-      for (const duplicate of leases) {
-        if (duplicate.leaseId === canonical.leaseId && duplicate.fencingToken === canonical.fencingToken) continue
-        try {
-          await this.#capacity.release(duplicate)
-        } catch (error) {
-          if (!(error instanceof CapacityGovernorError) || error.code !== 'LEASE_NOT_FOUND') throw error
-        }
-      }
-      this.#capacityLeases.set(record.preview_id, renewed)
+      const recovered = this.#distributedCapacity === undefined
+        ? await this.#capacity.heartbeat(canonical, ttlMs)
+        : await this.#distributedCapacity.takeover({
+            reference: canonical,
+            ownerId: capacityOwnerId(record.preview_id),
+            scope: { orgId: record.org_id, tenantId: record.tenant_id, projectId: record.project_id },
+            requests: [{ resource: 'preview' }],
+            ttlMs,
+          })
+      this.#capacityLeases.set(record.preview_id, recovered)
       this.#capacityReleasePending.delete(record.preview_id)
-      return true
     } catch (error) {
-      if (error instanceof CapacityGovernorError && (error.code === 'LEASE_NOT_FOUND' || error.code === 'STALE_FENCING_TOKEN')) {
-        return false
-      }
       throw capacityError(error)
     }
   }
@@ -800,9 +826,24 @@ export class StudioPreviewService {
     let leases: readonly CapacityLease[]
     try {
       leases = (await this.#capacity.snapshot()).leases.filter(lease => lease.ownerId === capacityOwnerId(previewId))
+      if (leases.length > 1) throw new PreviewError('UNAVAILABLE', t('service.capacityUnavailable'))
       for (const lease of leases) {
         try {
-          await this.#capacity.release(lease)
+          let reference: LeaseReference = lease
+          const local = this.#capacityLeases.get(previewId)
+          if (this.#distributedCapacity !== undefined
+            && (local?.leaseId !== lease.leaseId || local.fencingToken !== lease.fencingToken)) {
+            if (!isPreviewCapacityLease(previewId, lease)) throw new PreviewError('UNAVAILABLE', t('service.capacityUnavailable'))
+            reference = await this.#distributedCapacity.takeover({
+              reference: lease,
+              ownerId: lease.ownerId,
+              scope: lease.scope,
+              requests: [{ resource: 'preview', units: lease.allocations.preview }],
+              ttlMs: MIN_LEASE_TTL_MS,
+            })
+            this.#capacityLeases.set(previewId, reference)
+          }
+          await this.#capacity.release(reference)
         } catch (error) {
           if (!(error instanceof CapacityGovernorError) || error.code !== 'LEASE_NOT_FOUND') throw error
         }
@@ -868,7 +909,7 @@ export class StudioPreviewService {
     }
   }
 
-  async #retryDetachedCapacityReleases(
+  async #quarantineDetachedCapacity(
     managed: readonly { readonly runtimeRef: string; readonly previewId: string }[],
   ): Promise<void> {
     let leases: readonly CapacityLease[]
@@ -877,24 +918,26 @@ export class StudioPreviewService {
     } catch (error) {
       throw capacityError(error)
     }
-    const previewIds = new Set(this.#capacityReleasePending)
     for (const lease of leases) {
       const previewId = capacityPreviewId(lease.ownerId)
-      if (previewId !== undefined) previewIds.add(previewId)
-    }
-    for (const previewId of previewIds) {
-      if (managed.some(runtime => runtime.previewId === previewId)) continue
+      if (previewId === undefined || this.#capacityLeases.has(previewId)) continue
       const record = this.options.repository.previews().find(candidate => candidate.preview_id === previewId)
-      if (record !== undefined && !['STOPPED', 'FAILED', 'EXPIRED'].includes(record.state)) continue
-      const released = await this.#releaseCapacity(previewId)
-      if (!released && record !== undefined) {
-        await this.options.repository.putPreview(previewRecordSchema.parse({
-          ...record,
-          state: 'STOPPING', stopped_at: null, health: 'DOWN',
-          stop_reason: record.stop_reason ?? 'reconciled',
-          failure_code: pendingReleaseCode(record.failure_code),
-        }))
-      }
+      if (record === undefined || !['STOPPED', 'FAILED', 'EXPIRED'].includes(record.state)) continue
+      const quarantined = previewRecordSchema.parse({
+        ...record,
+        state: 'STOPPING', stopped_at: null, health: 'DOWN',
+        stop_reason: record.stop_reason ?? 'reconciled',
+        failure_code: 'CAPACITY_RECOVERY_QUARANTINE',
+      })
+      await this.#recoverCapacity(quarantined)
+      await this.#ensureCapacity(quarantined, true)
+      await this.options.repository.putPreview(quarantined)
+      await this.#revokeAdmissions(previewId)
+      // Mesmo que o inventário inicial esteja vazio, a instância anterior pode
+      // concluir um start depois desta leitura. O supervisor atual ainda não
+      // aplica o fencing token em cada operação; portanto não existe prova
+      // linearizável de ausência e a lease não pode ser liberada automaticamente.
+      if (managed.some(runtime => runtime.previewId === previewId)) this.options.onCleanupFailure?.(previewId)
     }
   }
 
@@ -1026,6 +1069,13 @@ function assertCompatibleOwnerLeases(record: PreviewRecord, leases: readonly Cap
     && lease.allocations['prompt-job'] === 0
     && lease.allocations.build === 0)
   if (!compatible) throw new PreviewError('UNAVAILABLE', t('service.capacityUnavailable'))
+}
+
+function isPreviewCapacityLease(previewId: string, lease: CapacityLease): boolean {
+  return lease.ownerId === capacityOwnerId(previewId)
+    && lease.allocations.preview === 1
+    && lease.allocations['prompt-job'] === 0
+    && lease.allocations.build === 0
 }
 
 function pendingReleaseCode(failureCode: string | null): string {

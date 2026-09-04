@@ -129,3 +129,25 @@ Até que lifecycle, Caddy, isolamento de rede, admissão, revogação, iframe e
 `studio-preview` sejam exercitados com o runtime real, a capacidade permanece
 `NOT_EXECUTED` ou `BETA` conforme a evidência disponível. O resultado local é
 `PREVIEW_OK`, nunca "publicado", "em produção" ou "aplicação pronta".
+
+## Capacidade persistente e recuperação
+
+No perfil de borda, `@dz23-studio/storage-postgres` publica a mesma autoridade
+PostgreSQL de capacidade consumida pelo Preview. O overlay declara
+`studioCapacity` como dependência de lifecycle, impedindo a corrida entre
+plugins irmãos durante o boot. A inicialização falha fechada
+se essa autoridade não existir ou não oferecer takeover atômico. Uma
+recuperação lê a lease de `preview:<previewId>`, valida escopo e alocação e
+rotaciona o fencing token por compare-and-swap antes de controlar o runtime.
+
+Uma lease destacada ligada a registro terminal é tomada e mantida em
+`CAPACITY_RECOVERY_QUARANTINE`. Ela não é liberada automaticamente: sem o
+supervisor validar o fencing token, uma criação iniciada pela instância antiga
+pode materializar depois de qualquer fotografia de inventário. O custo de
+segurança é intervenção operacional para liberar essa quarentena.
+
+Esse contrato fecha reinício/failover de uma implantação **single-active**. Não
+autoriza active-active: o backend de domínios ainda impõe escritor único, e o
+supervisor não recebe o fencing token em cada operação. Active-active permanece
+`NOT_IMPLEMENTED` até que start, stop, health, proxy e coleta rejeitem tokens
+antigos no próprio supervisor.

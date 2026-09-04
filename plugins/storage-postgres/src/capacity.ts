@@ -8,7 +8,7 @@ import {
   MAX_LEASE_TTL_MS,
   MIN_LEASE_TTL_MS,
   type AcquireBundleRequest,
-  type CapacityGovernor,
+  type DistributedCapacityGovernor,
   type CapacityLease,
   type CapacityLimit,
   type CapacityLimitLevel,
@@ -17,6 +17,7 @@ import {
   type CapacityResource,
   type CapacityScope,
   type CapacitySnapshot,
+  type CapacityTakeoverRequest,
   type LeaseReference,
   type ProjectCapacityUsage,
   type ReconcileResult,
@@ -52,10 +53,6 @@ interface CapacityLeaseRow {
   expires_at_ms: string
 }
 
-export interface CapacityTakeoverRequest extends AcquireBundleRequest {
-  readonly reference: LeaseReference
-}
-
 export interface PostgresCapacityGovernorOptions {
   readonly connectionString: string
   readonly schema: string
@@ -70,7 +67,7 @@ export interface PostgresCapacityGovernorOptions {
 }
 
 /** PostgreSQL-backed capacity authority. Every admission is serialized by capacity_meta. */
-export class PostgresCapacityGovernor implements CapacityGovernor {
+export class PostgresCapacityGovernor implements DistributedCapacityGovernor {
   readonly #pool: Pool
   readonly #schema: string
   readonly #limits: CapacityLimits

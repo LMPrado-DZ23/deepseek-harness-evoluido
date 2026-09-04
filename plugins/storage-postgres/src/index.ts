@@ -3,9 +3,11 @@ import type { Context } from '@deepseek-ai/cordis'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { storageBackendServiceKey } from '@deepseek-ai/dsh-storage'
 import z from '@deepseek-ai/schemastery'
+import type { DistributedCapacityGovernor } from '@dz23-studio/runtime-governor'
 import { PostgresStorageBackend } from './backend.js'
 import { BACKUP_MAX_BYTES_DEFAULT, childProcessBackupRunner, StorageBackupScheduler, type BackupResult } from './backup.js'
 import { postgresClientConnection } from './dsn.js'
+import { PostgresCapacityGovernor } from './capacity.js'
 import { assertConfiguredSchemaName } from './schema.js'
 import { snapshotPostgresStorage } from './snapshot.js'
 
@@ -13,7 +15,8 @@ export { PostgresStorageBackend } from './backend.js'
 export type { PostgresStorageBackendConfig } from './backend.js'
 export { StudioStorageError } from './errors.js'
 export { PostgresCapacityGovernor } from './capacity.js'
-export type { CapacityTakeoverRequest, PostgresCapacityGovernorOptions } from './capacity.js'
+export type { PostgresCapacityGovernorOptions } from './capacity.js'
+export type { CapacityTakeoverRequest } from '@dz23-studio/runtime-governor'
 export { CAPACITY_POSTGRES_LAYOUT_VERSION } from './capacity-schema.js'
 export * from './bundle.js'
 export { DEFAULT_STORAGE_IMPORT_LIMITS, IMPORT_MAX_BYTES_DEFAULT, readStorageBundleFile, type StorageImportLimits } from './import-file.js'
@@ -34,6 +37,10 @@ export const BACKUP_DSN_ENV = 'DZ23_STORAGE_BACKUP_DSN'
 
 export const name = 'storage-postgres'
 export const inject = ['storage', 'credentials']
+
+declare module '@deepseek-ai/cordis' {
+  interface Context { studioCapacity: DistributedCapacityGovernor }
+}
 
 export interface Config {
   dsnRef: string
@@ -74,6 +81,7 @@ export interface StudioStorageBackupService {
 declare module '@deepseek-ai/cordis' {
   interface Context {
     studioStorageBackup?: StudioStorageBackupService
+    studioCapacity: DistributedCapacityGovernor
   }
 }
 
@@ -95,20 +103,27 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     ssl,
     poolMax: config.poolMax ?? 4,
   })
+  const capacity = new PostgresCapacityGovernor({
+    connectionString: connection.connectionString,
+    schema,
+    ssl,
+    poolMax: Math.min(4, config.poolMax ?? 4),
+  })
   try {
-    await backend.waitUntilReady()
+    await Promise.all([backend.waitUntilReady(), capacity.waitUntilReady()])
   } catch (error) {
-    await backend.close()
+    await Promise.allSettled([backend.close(), capacity.close()])
     throw new Error('storage-postgres: PostgreSQL is unavailable or incompatible', { cause: error })
   }
   ctx.effect(() => {
     const dispose = ctx.storage.backend.register('postgres', backend)
     return async () => {
       dispose()
-      await backend.close()
+      await Promise.all([backend.close(), capacity.close()])
     }
   }, 'storage-postgres.registerBackend')
   ctx.provide(storageBackendServiceKey('postgres'), backend)
+  ctx.provide('studioCapacity', capacity)
 
   // Descriptors are derived from the medium: every unit stamped on this schema.
   const snapshot = () => snapshotPostgresStorage({ connectionString: connection.connectionString, ssl, schema })

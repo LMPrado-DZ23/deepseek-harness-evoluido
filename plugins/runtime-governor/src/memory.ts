@@ -15,6 +15,7 @@ import {
   type CapacityResource,
   type CapacityScope,
   type CapacitySnapshot,
+  type CapacityTakeoverRequest,
   type LeaseReference,
   type ProjectCapacityUsage,
   type ReconcileResult,
@@ -248,6 +249,39 @@ export class MemoryCapacityGovernor implements CapacityGovernor {
         )
       }
       this.#leases.delete(reference.leaseId)
+    })
+  }
+
+  takeover(request: CapacityTakeoverRequest): Promise<CapacityLease> {
+    return this.#mutex.runExclusive(() => {
+      this.#validateReference(request.reference)
+      this.#validateScope(request.scope)
+      assertIdentifier('ownerId', request.ownerId)
+      const ttlMs = request.ttlMs ?? this.#defaultTtlMs
+      this.#validateTtl(ttlMs)
+      const allocations = normalizedAllocations(request.requests)
+      const now = this.#readNow()
+      const lease = this.#leaseFor(request.reference, now)
+      if (lease.ownerId !== request.ownerId
+        || projectKey(lease.scope) !== projectKey(request.scope)
+        || !CAPACITY_RESOURCES.every(resource => lease.allocations[resource] === allocations[resource])) {
+        throw new CapacityGovernorError(
+          'INVALID_CAPACITY_REQUEST',
+          'The takeover request does not match the active lease.',
+          { leaseId: request.reference.leaseId },
+        )
+      }
+      if (this.#fencingToken >= Number.MAX_SAFE_INTEGER) {
+        throw new CapacityGovernorError(
+          'INVALID_CAPACITY_REQUEST',
+          'The fencing token space is exhausted.',
+          { field: 'fencingToken' },
+        )
+      }
+      this.#fencingToken += 1
+      lease.fencingToken = this.#fencingToken
+      lease.expiresAt = this.#expirationFor(now, ttlMs)
+      return cloneLease(lease)
     })
   }
 

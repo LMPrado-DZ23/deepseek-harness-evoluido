@@ -185,6 +185,29 @@ describe('MemoryCapacityGovernor', () => {
     expect((await governor.snapshot()).leases).toEqual([])
   })
 
+  it('rotates the fencing token on a matching takeover and rejects the previous holder', async () => {
+    const governor = new MemoryCapacityGovernor({ createId: () => 'lease-takeover', now: () => 1_000 })
+    const original = await governor.acquireBundle({
+      ownerId: 'preview:one',
+      scope: { orgId: 'org-1', tenantId: 'tenant-1', projectId: 'project-1' },
+      requests: [{ resource: 'preview' }],
+    })
+    const recovered = await governor.takeover({
+      reference: original,
+      ownerId: original.ownerId,
+      scope: original.scope,
+      requests: [{ resource: 'preview' }],
+    })
+    expect(recovered).toMatchObject({ leaseId: original.leaseId, fencingToken: original.fencingToken + 1 })
+    await expect(governor.heartbeat(original)).rejects.toMatchObject({ code: 'STALE_FENCING_TOKEN' })
+    await expect(governor.takeover({
+      reference: recovered,
+      ownerId: 'preview:other',
+      scope: recovered.scope,
+      requests: [{ resource: 'preview' }],
+    })).rejects.toMatchObject({ code: 'INVALID_CAPACITY_REQUEST' })
+  })
+
   it('fails closed on invalid limits, scopes, requests, TTLs, clocks and tokens', async () => {
     expect(() => new MemoryCapacityGovernor({
       limits: limits({ preview: { global: 1, perTenant: 2, perProject: 1 } }),

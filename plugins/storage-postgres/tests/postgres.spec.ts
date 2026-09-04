@@ -10,6 +10,7 @@ import { Client } from 'pg'
 import { SqliteStorageBackend } from '@deepseek-ai/dsh-storage-sqlite'
 import { runKvBackendContract } from '/home/leandro/harness-studio-poc02/deepseek-harness/packages/storage/storage/tests/contract.ts'
 import { PostgresStorageBackend } from '../src/backend.ts'
+import { PostgresCapacityGovernor } from '../src/capacity.ts'
 import { StudioStorageError } from '../src/errors.ts'
 import { quoteIdentifier, STORAGE_POSTGRES_LAYOUT_VERSION, storageMaintenanceLockName, storageUnitLockName } from '../src/schema.ts'
 import { StudioTenancyService, type TenancyRepository } from '../../tenancy/src/service.ts'
@@ -511,6 +512,7 @@ describePostgres('postgres backend against PostgreSQL 16', () => {
     await apply(context as never, { dsnRef: 'DZ23_POSTGRES_TEST_DSN', schema: schemaName('plugin'), ssl: 'off', poolMax: 2 })
     expect(registered).toHaveBeenCalledWith('postgres', expect.any(PostgresStorageBackend))
     expect(provided).toHaveBeenCalledWith('storage.backend.postgres', expect.any(PostgresStorageBackend))
+    expect(provided).toHaveBeenCalledWith('studioCapacity', expect.any(PostgresCapacityGovernor))
     const backupService = provided.mock.calls.find(call => call[0] === 'studioStorageBackup')?.[1] as { runOnce(): Promise<unknown>; lastResult(): unknown; snapshot(): Promise<{ domains: unknown[] }> }
     expect(backupService.lastResult()).toBeUndefined()
     await expect(backupService.runOnce()).rejects.toThrow('scheduled backup is not configured')
