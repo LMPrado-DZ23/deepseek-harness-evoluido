@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { constants, type Stats } from 'node:fs'
-import { lstat, open, readdir, readFile } from 'node:fs/promises'
-import { join, posix, relative, resolve } from 'node:path'
+import { lstat, open, readdir, readFile, realpath } from 'node:fs/promises'
+import { isAbsolute, join, posix, relative, resolve } from 'node:path'
 import { t } from './i18n.js'
 import { createZipAsync, type ZipEntry } from './zip.js'
 
@@ -112,15 +112,35 @@ export async function packagePrototype(source: ExportSource): Promise<ExportPack
   await collect(standalone, 'app', entries, budget, true, excluded, uninspected)
   if (await isDirectory(join(root, '.next', 'static'))) await collect(join(root, '.next', 'static'), 'app/.next/static', entries, budget, false, excluded, uninspected)
   if (await isDirectory(join(root, 'public'))) await collect(join(root, 'public'), 'app/public', entries, budget, false, excluded, uninspected)
-  const report = join(root, 'evidence', 'appspec-report.json')
-  if (await isFile(report)) {
-    // The acceptance report is a generated file like any other: it counts against the budget and it
-    // is scanned. It used to be copied in unconditionally.
-    const data = await readFile(report)
-    budget.remaining -= data.length
-    if (budget.remaining < 0) throw new ExportError('TOO_LARGE', t('errors.exportTooLarge', { limitMb: EXPORT_LIMIT_BYTES / (1024 * 1024) }))
-    if (findSecret('appspec-report.json', data) !== null) throw new ExportError('SECRET_DETECTED', t('errors.exportSecretFound', { file: 'evidence/appspec-report.json' }))
-    entries.push({ name: 'evidence/appspec-report.json', data })
+  // The acceptance report goes through the SAME discipline as every other file: the `evidence`
+  // folder is resolved and confined first (a symlinked folder pointed the read outside the run
+  // directory that was just confined), the file is opened once without following links, and it
+  // counts against the budget and the scan. Skipping it is named, never silent.
+  const evidence = await confinedChild(root, 'evidence')
+  const reportName = 'evidence/appspec-report.json'
+  if (evidence === undefined) {
+    if (await pathExists(join(root, 'evidence'))) excluded.push(`${reportName} (${t('export.excludedShortcut')})`)
+  } else {
+    const report = join(evidence, 'appspec-report.json')
+    const handle = await open(report, (constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0)) as number).catch(() => undefined)
+    if (handle === undefined) {
+      if (await pathExists(report)) excluded.push(`${reportName} (${t('export.excludedShortcut')})`)
+    } else {
+      try {
+        const info = await handle.stat()
+        if (!info.isFile()) {
+          excluded.push(`${reportName} (${t('export.excludedUnsupportedName')})`)
+        } else {
+          budget.remaining -= info.size
+          if (budget.remaining < 0) throw new ExportError('TOO_LARGE', t('errors.exportTooLarge', { limitMb: EXPORT_LIMIT_BYTES / (1024 * 1024) }))
+          const data = await handle.readFile()
+          if (findSecret('appspec-report.json', data) !== null) throw new ExportError('SECRET_DETECTED', t('errors.exportSecretFound', { file: reportName }))
+          entries.push({ name: reportName, data })
+        }
+      } finally {
+        await handle.close().catch(() => undefined)
+      }
+    }
   }
   if (excluded.length > 0 || uninspected.length > 0) {
     const order = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0)
@@ -222,6 +242,21 @@ async function collect(directory: string, prefix: string, entries: ZipEntry[], b
     if (!isScannable(item.name)) uninspected.push(name)
     entries.push({ name, data, mode: (info.mode & 0o111) !== 0 ? 0o755 : 0o644 })
   }
+}
+
+/** The real path of `<root>/<name>`, or `undefined` when it resolves outside `root` or is not a directory. */
+async function confinedChild(root: string, name: string): Promise<string | undefined> {
+  try {
+    const realRoot = await realpath(root)
+    const child = await realpath(join(realRoot, name))
+    const inside = relative(realRoot, child)
+    if (inside === '' || inside.startsWith('..') || isAbsolute(inside)) return undefined
+    return (await lstat(child)).isDirectory() ? child : undefined
+  } catch { return undefined }
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try { await lstat(path); return true } catch { return false }
 }
 
 async function isDirectory(path: string): Promise<boolean> {

@@ -167,6 +167,19 @@ E a janela TOCTOU da exportação foi fechada, não só reduzida: cada arquivo �
 plantado no lugar de um arquivo comum não é lido e aparece nomeado em `EXCLUIDOS.txt`; verificado
 por mutação.
 
+**Terceira passagem adversarial (mesmo dia), sobre esse próprio código:** as aprovações ganharam
+teto (`MAX_LIVE_APPROVALS`) e varredura limitada à frente do mapa — a varredura completa a cada
+pedido fazia cada confirmação custar mais que a anterior, num processo de thread única que serve
+todos os espaços de trabalho; o assunto das ações de SMTP passou a ser fixo, porque aceitar texto
+livre ali tornava o número de aprovações possíveis ilimitado; a aprovação **não é mais gasta** quando
+o que falta é a passkey (a pessoa era mandada confirmar com a passkey e, ao voltar, ouvia "confirme
+de novo"); o relatório de aceitação passou a ser lido com a mesma disciplina do resto (pasta
+`evidence` resolvida e confinada, arquivo aberto uma vez com `O_NOFOLLOW`) — uma pasta `evidence`
+que fosse link simbólico levava a leitura para fora do diretório recém-confinado; um download
+recusado deixou de ser registrado no histórico como "pacote falhou ao ser gerado"; e o texto da
+confirmação passa a citar o nível que o **servidor** acabou de decidir, não o que a tela tinha
+carregado antes.
+
 Limite anterior, agora histórico: a confirmação de **T2** era uma afirmação do cliente (um campo
 JSON). O que separa isso de uma página hostil é CSRF + verificação de origem; **T3** é o único
 nível com prova do lado do servidor (a passkey recente). Anotado para a fatia da arquitetura de

@@ -160,8 +160,10 @@ test('mostra notificação local quando a criação termina com a aba em segundo
     })
   })
   await page.goto('/studio/')
-  // The rebinding to the registration happens after `serviceWorker.ready` resolves; waiting for it
-  // is what makes this deterministic instead of a race that fails once in a while.
+  // What makes this deterministic is that BOTH paths write into the same array above — the stubbed
+  // `ready` getter returns a new promise each time, so awaiting it here does not by itself order the
+  // page's own rebinding, and saying otherwise would be a comment that lies. This await only lets
+  // the page's continuation run before the event is dispatched.
   await page.evaluate(async () => { await navigator.serviceWorker.ready })
   await page.evaluate(() => {
     window.dispatchEvent(new CustomEvent('dz23:generation-finished', { detail: { state: 'VERIFIED_PROTOTYPE' } }))

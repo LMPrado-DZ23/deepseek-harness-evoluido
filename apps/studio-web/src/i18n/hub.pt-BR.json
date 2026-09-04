@@ -84,7 +84,9 @@
       "integration.enabled": "Integração ligada",
       "integration.disabled": "Integração desligada",
       "export.created": "Pacote gerado",
-      "approval.recorded": "Confirmação registrada"
+      "approval.recorded": "Confirmação registrada",
+      "approval.requested": "Confirmação pedida",
+      "export.downloadRefused": "Download recusado por segurança"
     }
   },
   "errors": {

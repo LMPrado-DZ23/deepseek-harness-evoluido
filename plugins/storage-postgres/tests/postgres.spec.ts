@@ -305,6 +305,7 @@ describePostgres('postgres backend against PostgreSQL 16', () => {
     await client.connect()
     const foreign = schemaName('foreign_victim')
     const viewed = schemaName('view_victim')
+    const typesOnly = schemaName('types_victim')
     try {
       // 1) Somebody else's schema. It has no `units` at all: the guard used to be gated on that very
       //    table, so nothing checked the layout and `DROP SCHEMA CASCADE` ran with no confirmation.
@@ -325,18 +326,27 @@ describePostgres('postgres backend against PostgreSQL 16', () => {
         '--schema', schema, '--ssl', 'off', '--write', '--backup', join(temporary, `${schema}.dump`), ...extra,
       ], { env: { ...process.env, DZ23_IMPORT_TEST_DSN: dsn! } })
 
+      // 3) A schema that holds NO relation at all — only a type, a domain and a function. `pg_class`
+      //    does not list those, so it looked empty, skipped the layout check and the confirmation,
+      //    and went straight into DROP SCHEMA CASCADE.
+      await client.query(`CREATE SCHEMA ${quoteIdentifier(typesOnly)}`)
+      await client.query(`CREATE TYPE ${quoteIdentifier(typesOnly)}."humor" AS ENUM ('bom', 'ruim')`)
+      await client.query(`CREATE FUNCTION ${quoteIdentifier(typesOnly)}."regra"() RETURNS int LANGUAGE sql AS 'SELECT 1'`)
+
       // Refused even with the loudest flags a person can type.
-      for (const schema of [foreign, viewed]) {
+      for (const schema of [foreign, viewed, typesOnly]) {
         await expect(attempt(schema, ['--force', '--confirm', 'REPLACE_DZ23_STORAGE', '--allow-domain-loss']))
           .rejects.toThrow('não tem a estrutura do DZ23 STUDIO')
       }
       // Nothing was touched, and no safety dump was even started.
       expect((await client.query(`SELECT count(*)::int AS n FROM ${quoteIdentifier(foreign)}."important"`)).rows[0].n).toBe(1)
+      expect((await client.query('SELECT count(*)::int AS n FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = $1', [typesOnly])).rows[0].n).toBe(1)
       expect((await client.query(`SELECT count(*)::int AS n FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1`, [viewed])).rows[0].n).toBeGreaterThan(0)
       await expect(access(join(temporary, `${foreign}.dump`))).rejects.toThrow()
     } finally {
       await client.query(`DROP SCHEMA IF EXISTS ${quoteIdentifier(foreign)} CASCADE`).catch(() => undefined)
       await client.query(`DROP SCHEMA IF EXISTS ${quoteIdentifier(viewed)} CASCADE`).catch(() => undefined)
+      await client.query(`DROP SCHEMA IF EXISTS ${quoteIdentifier(typesOnly)} CASCADE`).catch(() => undefined)
       await client.end()
       await rm(temporary, { recursive: true, force: true })
     }

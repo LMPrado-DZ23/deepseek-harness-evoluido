@@ -75,11 +75,17 @@ function SmtpSection({ api, state, onChange, notify, report }: SectionProps & { 
   const [busy, setBusy] = useState(false)
   const [pending, setPending] = useState<Pending>(null)
   const run = async (task: () => Promise<void>) => { setBusy(true); notify(null); try { await task(); await onChange() } catch (error) { report(error) } finally { setBusy(false) } }
-  const ask = async (action: ApprovalAction, subjectId: string, what: string, act: (approval: Approval) => Promise<void>) => {
+  const ask = async (action: ApprovalAction, subjectId: string, what: (tier: PolicyTier) => string, act: (approval: Approval) => Promise<void>) => {
+    // One confirmation at a time: a second click while the first is in flight would issue a second
+    // approval and leave the first one dangling until it expired.
+    if (busy || pending !== null) return
+    setBusy(true)
     try {
       const ticket = await api.requestApproval(action, subjectId)
-      setPending({ tier: ticket.tier, what, approvalId: ticket.approval_id, run: act })
-    } catch (error) { report(error) }
+      // The text comes from the tier the SERVER just decided, never from the row the page loaded:
+      // if the integration was re-registered meanwhile, the box would otherwise state two tiers.
+      setPending({ tier: ticket.tier, what: what(ticket.tier), approvalId: ticket.approval_id, run: act })
+    } catch (error) { report(error) } finally { setBusy(false) }
   }
   const confirm = () => {
     const action = pending
@@ -98,7 +104,7 @@ function SmtpSection({ api, state, onChange, notify, report }: SectionProps & { 
       const ref = secretRef.trim()
       // The SERVER decides the tier and issues the approval; the panel only shows what it said and,
       // if the person agrees, hands the id back. A confirmation the client invents is worth nothing.
-      void ask('smtp.configured', 'smtp', t.confirm.smtpSave, async approval => { await api.configureSmtp(ref, approval); notify({ kind: 'ok', text: t.smtp.saved }) })
+      void ask('smtp.configured', 'smtp', () => t.confirm.smtpSave, async approval => { await api.configureSmtp(ref, approval); notify({ kind: 'ok', text: t.smtp.saved }) })
     }}>
       <label htmlFor="hub-smtp-ref">{t.smtp.refLabel}</label>
       <input id="hub-smtp-ref" value={secretRef} onChange={event => setSecretRef(event.target.value)} placeholder={t.smtp.refPlaceholder} autoComplete="off" spellCheck={false} />
@@ -108,7 +114,7 @@ function SmtpSection({ api, state, onChange, notify, report }: SectionProps & { 
       event.preventDefault()
       notify(null)
       const to = recipient.trim()
-      void ask('smtp.tested', 'smtp', t.confirm.smtpTest, async approval => {
+      void ask('smtp.tested', 'smtp', () => t.confirm.smtpTest, async approval => {
         const result = await api.testSmtp(to, approval)
         notify({ kind: result.result === 'SENT' ? 'ok' : 'info', text: `${result.result === 'SENT' ? t.smtp.testSent : t.smtp.testNotExecuted}: ${result.message}` })
       })
@@ -128,18 +134,24 @@ function IntegrationsSection({ api, integrations, channel, onChange, notify, rep
   const [pending, setPending] = useState<Pending>(null)
   const visible = useMemo(() => (integrations ?? []).filter(value => value.kind !== 'smtp'), [integrations])
   const run = async (task: () => Promise<void>) => { setBusy(true); notify(null); try { await task(); await onChange() } catch (error) { report(error) } finally { setBusy(false) } }
-  const ask = async (action: ApprovalAction, subjectId: string, what: string, act: (approval: Approval) => Promise<void>) => {
+  const ask = async (action: ApprovalAction, subjectId: string, what: (tier: PolicyTier) => string, act: (approval: Approval) => Promise<void>) => {
+    // One confirmation at a time: a second click while the first is in flight would issue a second
+    // approval and leave the first one dangling until it expired.
+    if (busy || pending !== null) return
+    setBusy(true)
     try {
       const ticket = await api.requestApproval(action, subjectId)
-      setPending({ tier: ticket.tier, what, approvalId: ticket.approval_id, run: act })
-    } catch (error) { report(error) }
+      // The text comes from the tier the SERVER just decided, never from the row the page loaded:
+      // if the integration was re-registered meanwhile, the box would otherwise state two tiers.
+      setPending({ tier: ticket.tier, what: what(ticket.tier), approvalId: ticket.approval_id, run: act })
+    } catch (error) { report(error) } finally { setBusy(false) }
   }
   const enable = (item: Integration) => {
     const tier = item.requires_approval_tier
     // T0/T1 go straight through; T2/T3 ask the server for an approval first.
     if (tier === null || tier === undefined) return void run(() => api.setEnabled(item.integration_id, true).then(() => undefined))
     notify(null)
-    void ask('integration.enabled', item.integration_id, fill(t.integrations.needsApproval, { tier: tierLabel(tier) }),
+    void ask('integration.enabled', item.integration_id, decided => fill(t.integrations.needsApproval, { tier: tierLabel(decided) }),
       approval => api.setEnabled(item.integration_id, true, approval).then(() => undefined))
   }
   const confirm = () => {

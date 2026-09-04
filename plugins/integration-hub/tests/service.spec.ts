@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { canonicalManifestBytes } from '../src/manifest.ts'
 import type { HubEvent, IntegrationManifest, StudioExport, StudioIntegration } from '../src/model.ts'
-import { canonicalSecretRef, HubError, IntegrationHubService, minimizeRecipient, safeSegment, strongIdentityFresh, type HubActor, type HubRepository } from '../src/service.ts'
+import { canonicalSecretRef, HubError, IntegrationHubService, MAX_LIVE_APPROVALS, minimizeRecipient, safeSegment, strongIdentityFresh, type HubActor, type HubRepository } from '../src/service.ts'
 import { readZip } from '../src/zip.ts'
 
 class MemoryRepository implements HubRepository {
@@ -242,6 +242,37 @@ describe('integration hub service', () => {
     // No "confirmation recorded" for something that did not happen, and the refusals are visible.
     expect(actions).not.toContain('approval.recorded:success')
     expect(actions).toEqual(['approval.requested:success', 'smtp.configured:failure', 'approval.requested:success', 'smtp.configured:failure'])
+  })
+
+  it('keeps the approvals bounded and pins the subject the SMTP actions can be issued for', async () => {
+    const { service, repository } = await build()
+    // The SMTP actions have one subject; a free string there made the number of live tickets unbounded.
+    await expect(service.requestApproval(admin, 'smtp.configured', 'qualquer-coisa')).rejects.toMatchObject({ code: 'INVALID' })
+    const first = await service.requestApproval(admin, 'smtp.configured', 'smtp')
+    // Far more tickets than a person could ever confirm: the oldest are dropped instead of piling up.
+    for (let index = 0; index < MAX_LIVE_APPROVALS + 10; index += 1) await service.requestApproval(admin, 'smtp.tested', 'smtp')
+    const last = await service.requestApproval(admin, 'smtp.tested', 'smtp')
+    // The evicted one is simply gone — the person confirms again, nothing is granted by accident.
+    await expect(service.configureSmtp(admin, 'DZ23_APP_SMTP', { approvalId: first.approval_id })).rejects.toThrow('confirmação')
+    expect(last.approval_id).not.toBe(first.approval_id)
+    expect(repository.eventRows.filter(event => event.action === 'approval.requested').every(event => event.subject_id === 'smtp')).toBe(true)
+  })
+
+  it('does not spend the confirmation when it is the passkey that is missing', async () => {
+    const { service } = await build()
+    const sensitive = await service.register(admin, signed(manifest({ id: 'cofre', permissions: ['secrets.read'] })))
+    const id = sensitive.integration.integration_id
+    // Same session throughout: what changes between the two attempts is only the passkey.
+    const weakAdmin: HubActor = { ...admin, sessionId: 's-admin' }
+    const ticket = await ok(service, weakAdmin, 'integration.enabled', id)
+    // First refusal is about the passkey…
+    await expect(service.setEnabled(weakAdmin, id, true, ticket)).rejects.toThrow('passkey')
+    // …so after confirming with the passkey, the SAME confirmation still works. Burning it here
+    // would greet the person with "confirm again" for something they had just confirmed.
+    expect((await service.setEnabled(strongAdmin, id, true, ticket)).enabled).toBe(true)
+    // And now it is spent.
+    await service.setEnabled(strongAdmin, id, false)
+    await expect(service.setEnabled(strongAdmin, id, true, ticket)).rejects.toThrow('confirmação')
   })
 
   it('enforces roles and tenant scope', async () => {

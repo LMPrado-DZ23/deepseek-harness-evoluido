@@ -64,7 +64,7 @@ export type StudioExport = z.infer<typeof studioExportSchema>
 export const hubEventSchema = z.object({
   event_id: z.string().min(1), ...scope,
   actor_user_id: z.string().min(1),
-  action: z.enum(['smtp.configured', 'smtp.tested', 'integration.registered', 'integration.enabled', 'integration.disabled', 'export.created', 'approval.recorded', 'approval.requested']),
+  action: z.enum(['smtp.configured', 'smtp.tested', 'integration.registered', 'integration.enabled', 'integration.disabled', 'export.created', 'approval.recorded', 'approval.requested', 'export.downloadRefused']),
   subject_id: z.string().min(1),
   outcome: z.enum(['success', 'failure', 'not-executed']),
   detail: z.string().max(500),

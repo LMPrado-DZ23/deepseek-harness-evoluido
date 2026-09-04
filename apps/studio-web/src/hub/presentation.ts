@@ -11,7 +11,7 @@ export type IntegrationKind = 'smtp' | 'mcp' | 'skill' | 'webhook'
 export type PolicyTier = 'T0' | 'T1' | 'T2' | 'T3'
 export type Verification = 'verified' | 'unverified' | 'invalid'
 export type HubOutcome = 'success' | 'failure' | 'not-executed'
-export type HubAction = 'smtp.configured' | 'smtp.tested' | 'integration.registered' | 'integration.enabled' | 'integration.disabled' | 'export.created' | 'approval.recorded'
+export type HubAction = 'smtp.configured' | 'smtp.tested' | 'integration.registered' | 'integration.enabled' | 'integration.disabled' | 'export.created' | 'approval.recorded' | 'approval.requested' | 'export.downloadRefused'
 /** The id of an approval the server issued for exactly this action; the client never asserts a tier. */
 export type Approval = { approval_id: string }
 

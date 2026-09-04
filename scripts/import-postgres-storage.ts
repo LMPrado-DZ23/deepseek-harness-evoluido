@@ -39,11 +39,20 @@ try {
   // a `DROP SCHEMA` is allowed must not be gated on the very structure it is meant to verify — a
   // schema whose `units` is a VIEW, or which belongs to something else entirely, used to walk
   // straight through both guards below.
-  const relations = await client.query<{ count: string }>(
-    'SELECT count(*) FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1',
+  // ANY object, not only relations: `pg_class` does not hold functions, types, domains, operators
+  // or collations, so a schema belonging to another product that has only those looked EMPTY —
+  // and an empty target skips the layout check and the confirmation, straight into DROP SCHEMA.
+  const content = await client.query<{ present: boolean }>(
+    `SELECT (
+       EXISTS (SELECT 1 FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1)
+       OR EXISTS (SELECT 1 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = $1)
+       OR EXISTS (SELECT 1 FROM pg_catalog.pg_type t JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = $1)
+       OR EXISTS (SELECT 1 FROM pg_catalog.pg_operator o JOIN pg_catalog.pg_namespace n ON n.oid = o.oprnamespace WHERE n.nspname = $1)
+       OR EXISTS (SELECT 1 FROM pg_catalog.pg_collation l JOIN pg_catalog.pg_namespace n ON n.oid = l.collnamespace WHERE n.nspname = $1)
+     ) AS present`,
     [args.schema],
   )
-  const targetHasContent = targetSchemaExists && relations.rows[0]?.count !== '0'
+  const targetHasContent = targetSchemaExists && content.rows[0]?.present === true
   let existingUnits = 0
   let targetDomains: string[] = []
   if (targetHasContent) {

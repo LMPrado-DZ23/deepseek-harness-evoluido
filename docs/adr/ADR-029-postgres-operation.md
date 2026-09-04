@@ -92,6 +92,13 @@ Status: aceita e implementada na etapa M3 (Claude), sobre a base P31-A.
    garantia (abrir unidade nova é recusado), a trava é retomada sozinha, e um `close()` que corra
    com a abertura não deixa sessão órfã. Esquemas de preparo órfãos, de uma execução morta por
    `SIGKILL`, são varridos no início da próxima restauração, sob a trava exclusiva.
+
+   **Terceira passagem adversarial:** "o esquema tem conteúdo" era decidido por `pg_class`, que só
+   lista relações — um esquema de outro produto contendo apenas **funções, tipos ou domínios**
+   parecia vazio, pulava a checagem de estrutura e a confirmação, e ia direto para o
+   `DROP SCHEMA CASCADE` com a invocação mais simples possível. Agora a pergunta cobre `pg_class`,
+   `pg_proc`, `pg_type`, `pg_operator` e `pg_collation`, com teste que planta exatamente esse
+   esquema e verificação por mutação.
 5. **Instância de desenvolvimento migra do `json`.** O Harness padrão guarda os
    domínios em `<DSH_HOME>/storages` (json), não em SQLite; `storage:export-json`
    cobre esse caso com o Harness parado.

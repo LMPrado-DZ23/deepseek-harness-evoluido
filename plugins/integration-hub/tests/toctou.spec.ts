@@ -26,4 +26,38 @@ describe('export reads each file through one handle', () => {
       await rm(root, { recursive: true, force: true })
     }
   })
+
+  it('does not read the acceptance report through a symlinked evidence folder', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dz23-evidence-'))
+    const outside = await mkdtemp(join(tmpdir(), 'dz23-outside-'))
+    try {
+      await mkdir(join(root, '.next', 'standalone'), { recursive: true })
+      await writeFile(join(root, '.next', 'standalone', 'server.js'), 'ok')
+      // `evidence/` is a symlink to somewhere else: the report there must not travel, and the skip is named.
+      await writeFile(join(outside, 'appspec-report.json'), '{"conteudo":"FORA-DO-RUN-DIRECTORY"}')
+      await symlink(outside, join(root, 'evidence'))
+      const built = await packagePrototype({ runDirectory: root, projectName: 'A', runId: 'run-1' })
+      const entries = readZip(built.archive)
+      expect(entries.map(entry => entry.name)).not.toContain('evidence/appspec-report.json')
+      expect(entries.map(entry => entry.data.toString('utf8')).join('\n')).not.toContain('FORA-DO-RUN-DIRECTORY')
+      expect(entries.find(entry => entry.name === 'EXCLUIDOS.txt')!.data.toString('utf8')).toContain('evidence/appspec-report.json')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+      await rm(outside, { recursive: true, force: true })
+    }
+  })
+
+  it('still packages a real evidence folder', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dz23-evidence-ok-'))
+    try {
+      await mkdir(join(root, '.next', 'standalone'), { recursive: true })
+      await writeFile(join(root, '.next', 'standalone', 'server.js'), 'ok')
+      await mkdir(join(root, 'evidence'), { recursive: true })
+      await writeFile(join(root, 'evidence', 'appspec-report.json'), '{"checks":[]}')
+      const built = await packagePrototype({ runDirectory: root, projectName: 'A', runId: 'run-1' })
+      expect(readZip(built.archive).map(entry => entry.name)).toContain('evidence/appspec-report.json')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
 })

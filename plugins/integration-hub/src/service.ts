@@ -79,6 +79,9 @@ export interface HubApprovalTicket {
 /** How long a confirmation is worth something. Short on purpose: it is a decision about one action, now. */
 export const APPROVAL_TTL_MS = 3 * 60 * 1000
 
+/** Ceiling for approvals waiting to be used, so the map cannot grow without bound. */
+export const MAX_LIVE_APPROVALS = 512
+
 export interface HubServiceOptions {
   repository: HubRepository
   secrets: SecretInspector
@@ -208,16 +211,20 @@ export class IntegrationHubService {
    */
   async requestApproval(actor: HubActor, action: HubEvent['action'], subjectId: string): Promise<HubApprovalTicket> {
     this.#authorize(actor, 'integrations.manage')
-    const tier = this.#tierForAction(actor, action, subjectId)
+    // The SMTP actions have exactly one subject; accepting a free string there made the number of
+    // possible tickets unbounded for no reason.
+    const subject = action === 'integration.enabled' ? subjectId : SMTP_SUBJECT
+    if (action !== 'integration.enabled' && subjectId !== SMTP_SUBJECT) throw new HubError('INVALID', t('errors.invalidRequest'))
+    const tier = this.#tierForAction(actor, action, subject)
     const ticket: HubApprovalTicket = {
-      approval_id: this.#createId(), tier, action, subject_id: subjectId,
+      approval_id: this.#createId(), tier, action, subject_id: subject,
       user_id: actor.userId, session_id: actor.sessionId,
       expires_at: new Date(this.#now().getTime() + APPROVAL_TTL_MS).toISOString(),
       requires_strong_identity: tier === 'T3',
     }
     this.#sweepApprovals()
     this.#approvals.set(ticket.approval_id, ticket)
-    await this.#audit(actor, 'approval.requested', subjectId, 'success', `${action} ${tier}`)
+    await this.#audit(actor, 'approval.requested', subject, 'success', `${action} ${tier}`)
     return ticket
   }
 
@@ -228,9 +235,24 @@ export class IntegrationHubService {
     throw new HubError('INVALID', t('errors.invalidRequest'))
   }
 
+  /**
+   * Expired tickets leave, and the map has a ceiling. Insertion order is expiry order (one clock,
+   * one TTL), so the sweep only has to look at the FRONT — walking the whole map on every request
+   * made each confirmation slower than the last, and Node has one thread for every tenant.
+   */
   #sweepApprovals(): void {
     const now = this.#now().getTime()
-    for (const [id, ticket] of this.#approvals) if (Date.parse(ticket.expires_at) <= now) this.#approvals.delete(id)
+    for (const [id, ticket] of this.#approvals) {
+      if (Date.parse(ticket.expires_at) > now) break
+      this.#approvals.delete(id)
+    }
+    // A person confirms one action at a time; a thousand live tickets is already absurd. The oldest
+    // go first, and losing one only means confirming again.
+    while (this.#approvals.size >= MAX_LIVE_APPROVALS) {
+      const oldest = this.#approvals.keys().next()
+      if (oldest.done === true) break
+      this.#approvals.delete(oldest.value)
+    }
   }
 
   async setEnabled(actor: HubActor, integrationId: string, enabled: boolean, approval?: HubApproval): Promise<StudioIntegration> {
@@ -404,7 +426,7 @@ export class IntegrationHubService {
     }
     const inside = relative(realRoot, realFile)
     if (inside === '' || inside.startsWith('..') || inside.startsWith(sep) || resolve(realRoot, inside) !== realFile) {
-      await this.#audit(actor, 'export.created', exportId, 'failure', 'path-outside-exports')
+      await this.#audit(actor, 'export.downloadRefused', exportId, 'failure', 'path-outside-exports')
       throw new HubError('NOT_FOUND', t('errors.exportUnavailable'))
     }
     return realFile
@@ -436,8 +458,6 @@ export class IntegrationHubService {
     if (!needsApproval(tier)) return
     const ticket = approval === undefined ? undefined : this.#approvals.get(approval.approvalId)
     const now = this.#now().getTime()
-    // Burned on sight: one approval, one action, whatever happens next.
-    if (ticket !== undefined) this.#approvals.delete(ticket.approval_id)
     const usable = ticket !== undefined
       && ticket.tier === tier
       && ticket.action === action
@@ -446,16 +466,24 @@ export class IntegrationHubService {
       && ticket.session_id === actor.sessionId
       && Date.parse(ticket.expires_at) > now
     if (!usable) {
+      // A ticket that does not fit this action is spent anyway: it was presented, and a presented
+      // ticket never gets a second chance.
+      if (ticket !== undefined) this.#approvals.delete(ticket.approval_id)
       await this.#audit(actor, action, subjectId, 'failure', `approval-required ${tier}`)
       throw new HubError('FORBIDDEN', tier === 'T3' ? t('errors.approvalRequiredT3') : t('errors.approvalRequiredT2'))
     }
     if (tier === 'T3') {
       // Fail closed: without a recent passkey on this very session, a T3 action never runs.
       if (actor.strongIdentityVerified !== true) {
+        // The confirmation is NOT spent here: the person is being told to go and confirm with the
+        // passkey, and burning the ticket would greet them with "confirm again" instead.
         await this.#audit(actor, action, subjectId, 'failure', 'strong-identity-required')
         throw new HubError('FORBIDDEN', t('errors.strongIdentityRequired'))
       }
     }
+    // Honoured now: burned synchronously, with no await in between, so two requests presenting the
+    // same id cannot both get through.
+    this.#approvals.delete(ticket.approval_id)
   }
 
   /** Written only after the action itself succeeded: a confirmation in the history means something happened. */
