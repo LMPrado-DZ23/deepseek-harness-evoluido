@@ -26,7 +26,7 @@ index dfa16f7..ed88a6b 100644
 +import { GENERATION_REJECTED_STATE, postGeneration, startGeneration } from './pwa/generation'
 +import { dispatchGenerationFinished } from './pwa/notifications'
 +import { NotificationOptIn } from './pwa/NotificationOptIn'
- 
+
  type Category = 'landing-page' | 'catalog' | 'form-database' | 'crud-panel'
  type DesignPreset = 'modern' | 'professional' | 'colorful' | 'brand'
 @@ -40,9 +46,19 @@ export function App() {
