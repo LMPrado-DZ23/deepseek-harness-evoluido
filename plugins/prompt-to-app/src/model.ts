@@ -6,7 +6,7 @@ import { designSpecV1Schema } from './design.js'
 
 export const projectStateSchema = z.enum([
   'DRAFT', 'SPEC_READY', 'PLAN_PROPOSED', 'PLAN_APPROVED', 'GENERATING',
-  'BUILD_OK', 'BUILD_FAILED', 'TESTS_OK', 'TESTS_FAILED', 'CANCELLED', 'VERIFIED_PROTOTYPE',
+  'BUILD_OK', 'BUILD_FAILED', 'TESTS_OK', 'TESTS_FAILED', 'CANCELLED', 'INTERRUPTED', 'VERIFIED_PROTOTYPE',
 ])
 export type ProjectState = z.infer<typeof projectStateSchema>
 
@@ -120,14 +120,14 @@ export type StudioApproval = z.infer<typeof studioApprovalSchema>
 declare const promptKeyBrand: unique symbol
 export type PromptToAppKey = string & { readonly [promptKeyBrand]: true }
 
-export const studioProjectsDomainSpec = defineDomain({ name: 'studio_projects', version: 1, tables: { projects: domainTable<PromptToAppKey, StudioProject>(studioProjectSchema) } })
+export const studioProjectsDomainSpec = defineDomain({ name: 'studio_projects', version: 2, tables: { projects: domainTable<PromptToAppKey, StudioProject>(studioProjectSchema) } })
 export const studioAppSpecsDomainSpec = defineDomain({ name: 'studio_app_specs', version: 1, tables: { specs: domainTable<PromptToAppKey, StudioAppSpecRecord>(studioAppSpecRecordSchema) } })
 export const studioDesignSpecsDomainSpec = defineDomain({ name: 'studio_design_specs', version: 1, tables: { designs: domainTable<PromptToAppKey, StudioDesignSpecRecord>(studioDesignSpecRecordSchema) } })
 export const studioIntakeTurnsDomainSpec = defineDomain({ name: 'studio_intake_turns', version: 1, tables: { turns: domainTable<PromptToAppKey, StudioIntakeTurn>(studioIntakeTurnSchema) } })
 export const studioPlansDomainSpec = defineDomain({ name: 'studio_plans', version: 1, tables: { plans: domainTable<PromptToAppKey, StudioPlan>(studioPlanSchema) } })
 export const studioRunsDomainSpec = defineDomain({ name: 'studio_runs', version: 5, tables: { runs: domainTable<PromptToAppKey, StudioRun>(studioRunSchema) } })
 export const studioEvidenceDomainSpec = defineDomain({ name: 'studio_evidence', version: 1, tables: { evidence: domainTable<PromptToAppKey, StudioEvidence>(studioEvidenceSchema) } })
-export const studioApprovalsDomainSpec = defineDomain({ name: 'studio_approvals', version: 1, tables: { approvals: domainTable<PromptToAppKey, StudioApproval>(studioApprovalSchema) } })
+export const studioApprovalsDomainSpec = defineDomain({ name: 'studio_approvals', version: 2, tables: { approvals: domainTable<PromptToAppKey, StudioApproval>(studioApprovalSchema) } })
 
 export const PROMPT_TO_APP_DOMAIN_SPECS = [
   studioProjectsDomainSpec, studioAppSpecsDomainSpec, studioDesignSpecsDomainSpec, studioIntakeTurnsDomainSpec,

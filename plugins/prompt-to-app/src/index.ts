@@ -145,6 +145,7 @@ export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}):
     runs.table('runs'), evidence.table('evidence'), approvals.table('approvals'),
   )
   const service = new PromptToAppService({ repository })
+  await service.reconcileInterruptedExecutions()
   const model = new HarnessPromptModel({
     llm: ctx.llm,
     routes: ctx.studioRouteHealth.service,

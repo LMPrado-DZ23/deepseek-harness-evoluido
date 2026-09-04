@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { cp, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { cp, lstat, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { z } from 'zod'
 import type { AppSpecV1 } from './appspec.js'
@@ -8,7 +8,7 @@ import { generateCrudLayer, writeCrudLayer } from './crud-generator.js'
 import { generateDataLayer, writeDataLayer } from './data-generator.js'
 import { generateDashboardLayer, writeDashboardLayer } from './dashboard-generator.js'
 import { renderDesignTokens } from './design.js'
-import { writeAcceptanceArtifacts, type AcceptanceCheck } from './acceptance.js'
+import { acceptanceChecks, parseAcceptanceReport, writeAcceptanceArtifacts, type AcceptanceCheck } from './acceptance.js'
 import { generatedFileSchema, writeGeneratedFiles, type GeneratedFile } from './generator.js'
 import { generateFormLayer, writeFormLayer } from './form-generator.js'
 import { generateSchedulingLayer, writeSchedulingLayer } from './scheduling-generator.js'
@@ -21,6 +21,7 @@ import type { PromptModelPort } from './ports.js'
 import { ContainerBuilder, listTreeFiles, materializePreviewArtifact, OFFLINE_PIPELINE_COMMANDS } from './runner.js'
 import { scanGeneratedContent } from './security.js'
 import { PromptToAppError, type PromptToAppActor, type PromptToAppService } from './service.js'
+import { canStartGeneration } from './state.js'
 
 const generatedOutputSchema = z.object({ files: z.array(generatedFileSchema).min(1).max(80) }).strict()
 const FRAMEWORK_GENERATED_MUTABLE_PATHS = new Set(['next-env.d.ts'])
@@ -54,7 +55,7 @@ export interface PipelineOptions {
   readonly createId?: () => string
 }
 
-export interface PipelineResult { readonly state: 'VERIFIED_PROTOTYPE' | 'BUILD_FAILED' | 'TESTS_FAILED' | 'BLOCKED_EXTERNAL' | 'CANCELLED'; readonly runDirectory?: string; readonly attempts: number; readonly message: string }
+export interface PipelineResult { readonly state: 'VERIFIED_PROTOTYPE' | 'BUILD_FAILED' | 'TESTS_FAILED' | 'BLOCKED_EXTERNAL' | 'CANCELLED' | 'INTERRUPTED'; readonly runDirectory?: string; readonly attempts: number; readonly message: string }
 export interface PipelineRunOptions { readonly operationId?: string; readonly ownerSessionId?: string; readonly signal?: AbortSignal }
 
 export class PromptToAppPipeline {
@@ -64,7 +65,7 @@ export class PromptToAppPipeline {
   async run(actor: PromptToAppActor, projectId: string, generator: CodeGeneratorPort, runOptions: PipelineRunOptions = {}): Promise<PipelineResult> {
     const project = this.options.service.project(actor, projectId)
     const plan = this.options.service.plan(actor, projectId)
-    if (plan.status !== 'APPROVED' || project.state !== 'PLAN_APPROVED') {
+    if (plan.status !== 'APPROVED' || !canStartGeneration(project.state)) {
       throw new PromptToAppError('INVALID', t('errors.planRequired'))
     }
     const operationId = runOptions.operationId ?? this.#createId()
@@ -74,20 +75,27 @@ export class PromptToAppPipeline {
     const specFindings = scanGeneratedContent({ 'appspec.json': JSON.stringify(spec) })
     if (specFindings.length > 0) throw new PromptToAppError('INVALID', t('errors.generatedSensitiveLiteral'))
     const design = this.options.service.designOrDefault(actor, projectId)
+    const expectedAcceptanceChecks = acceptanceChecks(spec, project.category)
     await listTreeFiles(this.options.templateDirectory)
     await this.options.service.putRun(actor, this.runRecord(actor, projectId, plan.plan_id, 'generate', 1, 'PENDING', 'full', 'not-created', null, null, operationId, operationId, ownerSessionId))
-    if (isAborted(runOptions.signal)) return this.cancelled(actor, projectId, plan.plan_id, operationId, ownerSessionId, 0)
-    const preflight = await this.options.builder.preflight()
-    if (preflight.state !== 'OK') {
-      await this.options.service.putRun(actor, this.runRecord(actor, projectId, plan.plan_id, 'build', 1, 'BLOCKED_EXTERNAL', 'unavailable', 'not-created', null, 'BUILDER_UNAVAILABLE', operationId, operationId, ownerSessionId))
-      return { state: 'BLOCKED_EXTERNAL', attempts: 0, message: preflight.message }
-    }
-    await this.options.service.transition(actor, projectId, 'GENERATING')
-    let diagnostic: string | undefined
-    let finalFailureState: 'BUILD_FAILED' | 'TESTS_FAILED' = 'BUILD_FAILED'
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    let activeAttempt = 1; let activeRunId = operationId; let activeRunDirectory = 'not-created'; let activeStage: StudioRun['stage'] = 'generate'
+    try {
+      if (isAborted(runOptions.signal)) return this.cancelled(actor, projectId, plan.plan_id, operationId, ownerSessionId, 0)
+      const preflight = await this.options.builder.preflight()
+      activeStage = 'build'
+      if (preflight.state !== 'OK') {
+        await this.options.service.putRun(actor, this.runRecord(actor, projectId, plan.plan_id, 'build', 1, 'BLOCKED_EXTERNAL', 'unavailable', 'not-created', null, 'BUILDER_UNAVAILABLE', operationId, operationId, ownerSessionId))
+        return { state: 'BLOCKED_EXTERNAL', attempts: 0, message: preflight.message }
+      }
+      await this.options.service.transition(actor, projectId, 'GENERATING')
+      let diagnostic: string | undefined
+      let finalFailureState: 'BUILD_FAILED' | 'TESTS_FAILED' = 'BUILD_FAILED'
+      for (let attempt = 1; attempt <= 3; attempt++) {
+      activeAttempt = attempt
+      activeStage = 'generate'
       if (isAborted(runOptions.signal)) return this.cancelled(actor, projectId, plan.plan_id, operationId, ownerSessionId, attempt - 1)
       const runId = attempt === 1 ? operationId : `${operationId}-attempt-${attempt}`; const runDirectory = resolve(this.options.runsRoot, runId)
+      activeRunId = runId; activeRunDirectory = runDirectory
       await mkdir(this.options.runsRoot, { recursive: true }); await cp(this.options.templateDirectory, runDirectory, { recursive: true, errorOnExist: true })
       await writeDesignAssets(runDirectory, design, this.options.logoStoreRoot)
       const dataLayer = project.category === 'scheduling' || project.category === 'saas-authenticated' ? { files: [], protectedPaths: [] } : generateDataLayer(spec)
@@ -141,7 +149,8 @@ export class PromptToAppPipeline {
       for (const command of OFFLINE_PIPELINE_COMMANDS) {
         if (isAborted(runOptions.signal)) return this.cancelled(actor, projectId, plan.plan_id, operationId, ownerSessionId, attempt, runDirectory)
         const stage: StudioRun['stage'] = command === 'pnpm run test' || command === 'pnpm run test:e2e' ? 'test' : 'build'
-        await this.options.service.putRun(actor, this.runRecord(actor, projectId, plan.plan_id, stage, attempt, 'RUNNING', 'full', runDirectory, generated, null, runId, operationId, ownerSessionId, await readAcceptanceChecks(runDirectory)))
+        activeStage = stage
+        await this.options.service.putRun(actor, this.runRecord(actor, projectId, plan.plan_id, stage, attempt, 'RUNNING', 'full', runDirectory, generated, null, runId, operationId, ownerSessionId, await readAcceptanceChecks(runDirectory, expectedAcceptanceChecks)))
         const result = await this.options.builder.execute(runDirectory, command)
         log += `$ ${command}\n${result.stdout}\n${result.stderr}\n`
         if (result.timedOut) { diagnostic = 'BUDGET_EXCEEDED'; failedStage = buildPassed ? 'test' : 'build'; break }
@@ -150,8 +159,8 @@ export class PromptToAppPipeline {
         if (command === 'pnpm run test:e2e') testPassed = true
       }
       if (isAborted(runOptions.signal)) return this.cancelled(actor, projectId, plan.plan_id, operationId, ownerSessionId, attempt, runDirectory)
-      const acceptanceChecks = await readAcceptanceChecks(runDirectory)
-      if (diagnostic === undefined && acceptanceChecks.some(check => check.status !== 'PASSED' && check.status !== 'NOT_AUTOMATED')) {
+      const verifiedAcceptanceChecks = await readAcceptanceChecks(runDirectory, expectedAcceptanceChecks)
+      if (diagnostic === undefined && verifiedAcceptanceChecks.some(check => check.status !== 'PASSED' && check.status !== 'NOT_AUTOMATED')) {
         diagnostic = 'APPSPEC_ACCEPTANCE_INCOMPLETE'; failedStage = 'test'; testPassed = false
       }
       try {
@@ -161,8 +170,9 @@ export class PromptToAppPipeline {
       const state = diagnostic === undefined && buildPassed && testPassed ? 'PASSED' : diagnostic === 'BUDGET_EXCEEDED' ? 'BUDGET_EXCEEDED' : 'FAILED'
       if (state !== 'PASSED') finalFailureState = failedStage === 'test' ? 'TESTS_FAILED' : 'BUILD_FAILED'
       await writeFile(resolve(runDirectory, 'pipeline.log'), log, 'utf8')
+      activeStage = 'verify'
       const artifactSha256 = state === 'PASSED' ? (await materializePreviewArtifact(runDirectory)).sha256 : null
-      await this.options.service.putRun(actor, this.runRecord(actor, projectId, plan.plan_id, state === 'PASSED' ? 'verify' : failedStage, attempt, state, 'full', runDirectory, generated, diagnostic ?? null, runId, operationId, ownerSessionId, acceptanceChecks, artifactSha256))
+      await this.options.service.putRun(actor, this.runRecord(actor, projectId, plan.plan_id, state === 'PASSED' ? 'verify' : failedStage, attempt, state, 'full', runDirectory, generated, diagnostic ?? null, runId, operationId, ownerSessionId, verifiedAcceptanceChecks, artifactSha256))
       await this.recordEvidence(actor, projectId, runId, runDirectory, 'pipeline.log', 'build-log')
       await this.recordEvidence(actor, projectId, runId, runDirectory, 'evidence/appspec-report.json', 'test-report')
       if (state === 'PASSED') {
@@ -170,14 +180,17 @@ export class PromptToAppPipeline {
         return { state: 'VERIFIED_PROTOTYPE', runDirectory, attempts: attempt, message: t('pipeline.verified') }
       }
     }
-    const current = this.options.service.project(actor, projectId)
-    if (current.state === 'GENERATING') {
-      if (finalFailureState === 'TESTS_FAILED') {
-        await this.options.service.transition(actor, projectId, 'BUILD_OK')
-        await this.options.service.transition(actor, projectId, 'TESTS_FAILED')
-      } else await this.options.service.transition(actor, projectId, 'BUILD_FAILED')
+      const current = this.options.service.project(actor, projectId)
+      if (current.state === 'GENERATING') {
+        if (finalFailureState === 'TESTS_FAILED') {
+          await this.options.service.transition(actor, projectId, 'BUILD_OK')
+          await this.options.service.transition(actor, projectId, 'TESTS_FAILED')
+        } else await this.options.service.transition(actor, projectId, 'BUILD_FAILED')
+      }
+      return { state: finalFailureState, attempts: 3, message: diagnostic ?? t('pipeline.failed') }
+    } catch (error) {
+      return this.unexpectedFailure(actor, projectId, plan.plan_id, operationId, ownerSessionId, activeAttempt, activeRunId, activeRunDirectory, activeStage, error)
     }
-    return { state: finalFailureState, attempts: 3, message: diagnostic ?? t('pipeline.failed') }
   }
 
   private runRecord(actor: PromptToAppActor, projectId: string, planId: string, stage: StudioRun['stage'], attempt: number, state: StudioRun['state'], sandbox: StudioRun['sandbox'], runDirectory: string, generation: CodeGenerationResult | null, failure: string | null, runId = this.#createId(), operationId = runId, ownerSessionId = actor.sessionId ?? 'direct-execution', acceptanceChecks: readonly AcceptanceCheck[] = [], artifactSha256: string | null = null): StudioRun {
@@ -194,6 +207,26 @@ export class PromptToAppPipeline {
   private async recordEvidence(actor: PromptToAppActor, projectId: string, runId: string, directory: string, filename: string, kind: 'build-log' | 'security-scan' | 'test-report') {
     const bytes = await readFile(resolve(directory, filename)); const id = this.#createId()
     await this.options.service.putEvidence(actor, { evidence_id: id, run_id: runId, project_id: projectId, org_id: actor.orgId, tenant_id: actor.tenantId, kind, sha256: createHash('sha256').update(bytes).digest('hex'), size_bytes: bytes.byteLength, relative_path: `${runId}/${filename}`, created_at: this.#now().toISOString() })
+  }
+
+  private async unexpectedFailure(actor: PromptToAppActor, projectId: string, planId: string, operationId: string, ownerSessionId: string, attempt: number, runId: string, runDirectory: string, stage: StudioRun['stage'], error: unknown): Promise<PipelineResult> {
+    const failure = pipelineFailureCode(error)
+    const finalState: 'BUILD_FAILED' | 'TESTS_FAILED' | 'INTERRUPTED' = failure.startsWith('APPSPEC_') || stage === 'test'
+      ? 'TESTS_FAILED'
+      : failure === 'ARTIFACT_MATERIALIZATION_FAILED' || stage === 'build' || stage === 'generate' ? 'BUILD_FAILED' : 'INTERRUPTED'
+    if (runDirectory !== 'not-created') await writeFile(resolve(runDirectory, 'pipeline.log'), `${failure}\n`, 'utf8').catch(() => undefined)
+    await this.options.service.putRun(actor, this.runRecord(actor, projectId, planId, finalState === 'TESTS_FAILED' ? 'test' : stage, attempt, 'FAILED', 'full', runDirectory, null, failure, runId, operationId, ownerSessionId))
+    const current = this.options.service.project(actor, projectId)
+    if (current.state === 'GENERATING') {
+      if (finalState === 'TESTS_FAILED') {
+        await this.options.service.transition(actor, projectId, 'BUILD_OK')
+        await this.options.service.transition(actor, projectId, 'TESTS_FAILED')
+      } else if (finalState === 'BUILD_FAILED') await this.options.service.transition(actor, projectId, 'BUILD_FAILED')
+      else await this.options.service.transition(actor, projectId, 'INTERRUPTED')
+    } else if (current.state === 'BUILD_OK' || current.state === 'TESTS_OK') {
+      await this.options.service.transition(actor, projectId, 'INTERRUPTED')
+    }
+    return { state: finalState, attempts: attempt, message: finalState === 'INTERRUPTED' ? t('pipeline.interrupted') : t('pipeline.failed') }
   }
 
   private async cancelled(actor: PromptToAppActor, projectId: string, planId: string, operationId: string, ownerSessionId: string, attempts: number, runDirectory = 'not-created'): Promise<PipelineResult> {
@@ -224,11 +257,24 @@ async function immutableHash(root: string, files: readonly string[]): Promise<st
   return hash.digest('hex')
 }
 
-async function readAcceptanceChecks(runDirectory: string): Promise<readonly AcceptanceCheck[]> {
+async function readAcceptanceChecks(runDirectory: string, expected: readonly AcceptanceCheck[]): Promise<readonly AcceptanceCheck[]> {
+  const path = resolve(runDirectory, 'evidence', 'appspec-report.json')
   try {
-    const report = JSON.parse(await readFile(resolve(runDirectory, 'evidence', 'appspec-report.json'), 'utf8')) as { checks?: AcceptanceCheck[] }
-    return report.checks ?? []
-  } catch { return [] }
+    const info = await lstat(path)
+    if (!info.isFile() || info.isSymbolicLink()) throw new Error('APPSPEC_REPORT_INVALID')
+    if (info.size > 1024 * 1024) throw new Error('APPSPEC_REPORT_TOO_LARGE')
+    return parseAcceptanceReport(JSON.parse(await readFile(path, 'utf8')), expected)
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('APPSPEC_')) throw error
+    throw new Error('APPSPEC_REPORT_INVALID')
+  }
 }
 
 function isAborted(signal: AbortSignal | undefined): boolean { return signal?.aborted === true }
+
+function pipelineFailureCode(error: unknown): string {
+  const message = error instanceof Error ? error.message : ''
+  if (message.startsWith('APPSPEC_')) return message
+  if (message.startsWith('PREVIEW_ARTIFACT_')) return 'ARTIFACT_MATERIALIZATION_FAILED'
+  return 'PIPELINE_UNEXPECTED_FAILURE'
+}

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { appSpecHash, appSpecV1Schema, AppSpecClarificationRequired, detectSensitiveData, parseAppSpecWithSingleRepair, sensitiveDataQuestion } from '../src/appspec.js'
 import { PROMPT_TO_APP_DOMAIN_SPECS, projectStateSchema } from '../src/model.js'
-import { assertProjectTransition, InvalidTransitionError, PROJECT_TRANSITIONS } from '../src/state.js'
+import { assertProjectTransition, canStartGeneration, InvalidTransitionError, PROJECT_TRANSITIONS } from '../src/state.js'
 
 const validSpec = {
   schema_version: 1 as const,
@@ -32,7 +32,7 @@ describe('Prompt-to-App domains, state and AppSpec', () => {
   it('covers every valid transition and rejects every other state pair', () => {
     expect(projectStateSchema.options).toEqual([
       'DRAFT', 'SPEC_READY', 'PLAN_PROPOSED', 'PLAN_APPROVED', 'GENERATING',
-      'BUILD_OK', 'BUILD_FAILED', 'TESTS_OK', 'TESTS_FAILED', 'CANCELLED', 'VERIFIED_PROTOTYPE',
+      'BUILD_OK', 'BUILD_FAILED', 'TESTS_OK', 'TESTS_FAILED', 'CANCELLED', 'INTERRUPTED', 'VERIFIED_PROTOTYPE',
     ])
     expect(projectStateSchema.options).not.toEqual(expect.arrayContaining(['READY', 'DONE', 'PUBLISHED', 'DEPLOYED']))
     for (const from of projectStateSchema.options) {
@@ -41,6 +41,7 @@ describe('Prompt-to-App domains, state and AppSpec', () => {
         else expect(() => assertProjectTransition(from, to)).toThrow(InvalidTransitionError)
       }
     }
+    expect(projectStateSchema.options.filter(canStartGeneration)).toEqual(['PLAN_APPROVED', 'BUILD_FAILED', 'TESTS_FAILED', 'CANCELLED', 'INTERRUPTED'])
   })
 
   it('detects sensitive data and requires the confirmation question', () => {

@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { t } from './i18n.js'
 import type { CodeGeneratorPort, PipelineResult, PromptToAppPipeline } from './pipeline.js'
 import { PromptToAppError, type PromptToAppActor, type PromptToAppService } from './service.js'
+import { canStartGeneration } from './state.js'
 
 declare module '@deepseek-ai/dsh-jobs' {
   interface JobKindMap { 'studio-prompt-to-app': 'studio-prompt-to-app' }
@@ -45,7 +46,7 @@ export class PromptToAppJobService {
     this.options.service.assertAuthorized(actor, 'project.write')
     const project = this.options.service.project(actor, projectId)
     const plan = this.options.service.plan(actor, projectId)
-    if (project.state !== 'PLAN_APPROVED' || plan.status !== 'APPROVED') throw new PromptToAppError('INVALID', t('errors.planRequired'))
+    if (!canStartGeneration(project.state) || plan.status !== 'APPROVED') throw new PromptToAppError('INVALID', t('errors.planRequired'))
     const key = scopeKey(actor, projectId)
     if (this.#active.has(key) || this.#reserved.has(key)) throw new PromptToAppError('REPLAY', t('errors.activeGeneration'))
     this.#reserved.add(key)

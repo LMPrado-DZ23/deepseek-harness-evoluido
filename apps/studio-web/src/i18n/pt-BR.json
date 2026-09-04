@@ -39,11 +39,12 @@
     "changePlaceholder": "Explique com suas palavras.", "sendChange": "Enviar pedido de mudança", "revision": "Montar plano revisado"
   },
   "creation": {
-    "title": "Criar e testar o protótipo", "start": "Iniciar criação", "working": "Criando e conferindo dentro do ambiente isolado…", "cancel": "Cancelar criação"
+    "title": "Criar e testar o protótipo", "start": "Iniciar criação", "retry": "Tentar novamente", "working": "Criando e conferindo dentro do ambiente isolado…", "cancel": "Cancelar criação"
   },
   "verification": {
     "title": "Resultado da verificação", "success": "As verificações declaradas passaram neste computador.",
     "failure": "A criação parou porque uma verificação encontrou um problema.", "cancelled": "A criação foi cancelada.",
+    "interrupted": "A criação foi interrompida antes de terminar. Nada foi publicado.",
     "attempts": "Tentativas realizadas", "checks": "Critérios conferidos", "passed": "Passou", "failed": "Falhou",
     "pending": "Em conferência", "notAutomated": "Não verificado automaticamente",
     "testCodes": "Códigos usados na verificação", "testCodesHelp": "Estes códigos locais já foram usados pelos testes automáticos. Quando o preview existir, novos códigos de teste aparecerão somente aqui."

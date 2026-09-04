@@ -206,6 +206,49 @@ export class PromptToAppService {
   runs(actor: PromptToAppActor, projectId: string) { this.project(actor, projectId); return this.#repository.runs().filter(value => value.project_id === projectId && this.#sameScope(actor, value)) }
   evidence(actor: PromptToAppActor, projectId: string) { this.project(actor, projectId); return this.#repository.evidence().filter(value => value.project_id === projectId && this.#sameScope(actor, value)) }
 
+  async reconcileInterruptedExecutions(): Promise<{ readonly runs: number; readonly projects: number }> {
+    const now = this.#now().toISOString()
+    let recoveredRuns = 0
+    let recoveredProjects = 0
+    for (const run of this.#repository.runs().filter(value => value.state === 'PENDING' || value.state === 'RUNNING')) {
+      await this.#repository.putRun({
+        ...run, state: 'FAILED', finished_at: now, artifact_sha256: null,
+        failure_code: 'STUDIO_RESTARTED_DURING_RUN',
+      })
+      recoveredRuns++
+    }
+    for (const project of this.#repository.projects()) {
+      if (project.state !== 'GENERATING' && project.state !== 'BUILD_OK' && project.state !== 'TESTS_OK') continue
+      const projectRuns = this.#repository.runs().filter(run => run.project_id === project.project_id && run.org_id === project.org_id && run.tenant_id === project.tenant_id)
+      const latest = [...projectRuns].sort((left, right) => right.started_at.localeCompare(left.started_at))[0]
+      const operationId = latest?.operation_id ?? `recovery-${project.project_id}`
+      const markerId = `recovery:${project.org_id}:${project.tenant_id}:${project.project_id}:${operationId}`
+      if (!projectRuns.some(run => run.failure_code === 'STUDIO_RESTARTED_DURING_RUN' && run.operation_id === operationId)) {
+        await this.#repository.putRun({
+          run_id: markerId, operation_id: operationId, owner_session_id: 'studio-system-recovery',
+          plan_id: latest?.plan_id ?? 'recovery-unavailable', project_id: project.project_id,
+          org_id: project.org_id, tenant_id: project.tenant_id, stage: latest?.stage ?? 'verify',
+          attempt: latest?.attempt ?? 1, state: 'FAILED', started_at: latest?.started_at ?? now, finished_at: now,
+          sandbox: latest?.sandbox ?? 'unavailable', route: latest?.route ?? null, model: latest?.model ?? null,
+          input_tokens: latest?.input_tokens ?? null, output_tokens: latest?.output_tokens ?? null,
+          estimated_cost_usd: latest?.estimated_cost_usd ?? null, run_directory: latest?.run_directory ?? 'not-created',
+          artifact_sha256: null, failure_code: 'STUDIO_RESTARTED_DURING_RUN', acceptance_checks: latest?.acceptance_checks ?? [],
+        })
+        recoveredRuns++
+      }
+      await this.#repository.putApproval({
+        approval_id: `recovery-transition:${project.org_id}:${project.tenant_id}:${project.project_id}:${operationId}`,
+        project_id: project.project_id, org_id: project.org_id, tenant_id: project.tenant_id,
+        subject: 'transition', subject_id: `${project.state}:INTERRUPTED:${operationId}`,
+        approved_by: 'studio-system-recovery', approved_at: now, tier: 'T1', strong_identity: false,
+        from_state: project.state, to_state: 'INTERRUPTED',
+      })
+      await this.#repository.putProject({ ...project, state: 'INTERRUPTED', updated_at: now })
+      recoveredProjects++
+    }
+    return { runs: recoveredRuns, projects: recoveredProjects }
+  }
+
   async archive(actor: PromptToAppActor, projectId: string): Promise<StudioProject> {
     if (actor.role !== 'owner' && actor.role !== 'admin') throw new PromptToAppError('FORBIDDEN', t('errors.archiveForbidden'))
     const value = this.project(actor, projectId); const updated = { ...value, archived_at: this.#now().toISOString(), updated_at: this.#now().toISOString() }

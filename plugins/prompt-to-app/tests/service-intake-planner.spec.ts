@@ -100,6 +100,31 @@ describe('PromptToAppService', () => {
     await expect(service.saveDesign(viewerA, project.project_id, { preset: 'modern' })).rejects.toMatchObject({ code: 'FORBIDDEN' })
     expect(() => service.latestDesign(builderB, project.project_id)).toThrow(PromptToAppError)
   })
+
+  it('reconciles orphaned executions once without crossing tenant boundaries', async () => {
+    const { repository, service } = fixture()
+    const base: StudioProject = {
+      project_id: 'project-a', org_id: 'org-a', tenant_id: 'tenant-a', name: 'A', state: 'GENERATING',
+      original_brief: 'Aplicativo A', category: 'landing-page', created_by: 'owner-a', privacy: 'local-only',
+      created_at: '2026-09-03T11:00:00.000Z', updated_at: '2026-09-03T11:00:00.000Z', archived_at: null,
+    }
+    repository.projectRows = [base, { ...base, project_id: 'project-b', org_id: 'org-b', tenant_id: 'tenant-b', name: 'B', state: 'PLAN_APPROVED' }]
+    repository.runRows = [{
+      run_id: 'run-a', operation_id: 'operation-a', owner_session_id: 'old-process', plan_id: 'plan-a',
+      project_id: 'project-a', org_id: 'org-a', tenant_id: 'tenant-a', stage: 'build', attempt: 1,
+      state: 'RUNNING', started_at: '2026-09-03T11:00:00.000Z', finished_at: null, sandbox: 'full',
+      route: null, model: null, input_tokens: null, output_tokens: null, estimated_cost_usd: null,
+      run_directory: 'run-a', artifact_sha256: null, failure_code: null, acceptance_checks: [],
+    }]
+
+    await expect(service.reconcileInterruptedExecutions()).resolves.toEqual({ runs: 1, projects: 1 })
+    expect(repository.runRows).toContainEqual(expect.objectContaining({ run_id: 'run-a', state: 'FAILED', failure_code: 'STUDIO_RESTARTED_DURING_RUN' }))
+    expect(repository.projectRows.find(row => row.project_id === 'project-a')?.state).toBe('INTERRUPTED')
+    expect(repository.projectRows.find(row => row.project_id === 'project-b')?.state).toBe('PLAN_APPROVED')
+    expect(repository.approvalRows).toContainEqual(expect.objectContaining({ approved_by: 'studio-system-recovery', from_state: 'GENERATING', to_state: 'INTERRUPTED' }))
+    await expect(service.reconcileInterruptedExecutions()).resolves.toEqual({ runs: 0, projects: 0 })
+    expect(repository.approvalRows).toHaveLength(1)
+  })
 })
 
 describe('intake and planner', () => {

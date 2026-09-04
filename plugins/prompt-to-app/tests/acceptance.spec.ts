@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { acceptanceChecks, writeAcceptanceArtifacts } from '../src/acceptance.js'
+import { acceptanceChecks, parseAcceptanceReport, writeAcceptanceArtifacts } from '../src/acceptance.js'
 import type { AppSpecV1 } from '../src/appspec.js'
 
 const roots: string[] = []
@@ -26,6 +26,18 @@ describe('AppSpec acceptance compiler', () => {
     await writeAcceptanceArtifacts(root, spec)
     expect(await readFile(resolve(root, 'tests/e2e/appspec.spec.ts'), 'utf8')).toContain("getByText(\"Fale conosco\"")
     expect(JSON.parse(await readFile(resolve(root, 'evidence/appspec-report.json'), 'utf8')).checks).toHaveLength(checks.length)
+  })
+
+  it('accepts only the exact report contract and immutable check inventory', () => {
+    const checks = acceptanceChecks(spec)
+    const valid = { schema_version: 1, checks: checks.map(check => ({ ...check, status: check.status === 'PENDING' ? 'PASSED' : check.status })) }
+    expect(parseAcceptanceReport(valid, checks)).toHaveLength(checks.length)
+    expect(() => parseAcceptanceReport({ checks: valid.checks }, checks)).toThrow()
+    expect(() => parseAcceptanceReport({ schema_version: 1, checks: [] }, checks)).toThrow()
+    expect(() => parseAcceptanceReport({ ...valid, checks: valid.checks.slice(1) }, checks)).toThrow('APPSPEC_REPORT_MISMATCH')
+    expect(() => parseAcceptanceReport({ ...valid, checks: valid.checks.map((check, index) => index === 0 ? { ...check, label: 'alterado' } : check) }, checks)).toThrow('APPSPEC_REPORT_MISMATCH')
+    expect(() => parseAcceptanceReport({ ...valid, checks: valid.checks.map((check, index) => index === 0 ? { ...check, status: 'NOT_AUTOMATED' } : check) }, checks)).toThrow('APPSPEC_REPORT_MISMATCH')
+    expect(() => parseAcceptanceReport({ ...valid, checks: [valid.checks[0], valid.checks[0], ...valid.checks.slice(2)] }, checks)).toThrow('APPSPEC_REPORT_MISMATCH')
   })
 
   it('compiles fill, save and list evidence for a database form', async () => {

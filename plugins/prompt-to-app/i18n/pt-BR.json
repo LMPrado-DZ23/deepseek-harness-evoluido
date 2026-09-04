@@ -69,6 +69,7 @@
   "pipeline": {
     "verified": "Protótipo verificado — não está publicado nem disponível para outras pessoas",
     "failed": "A verificação não foi concluída.",
+    "interrupted": "A criação foi interrompida antes de terminar. Nada foi publicado.",
     "cancelled": "A criação foi cancelada pela pessoa.",
     "cancelledReason": "cancelado pela pessoa"
   },

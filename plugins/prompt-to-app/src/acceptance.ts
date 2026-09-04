@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import { z } from 'zod'
 import { requiresFormSubmissionAuth, requiresGeneratedAuth } from './auth-generator.js'
 import type { AppSpecV1 } from './appspec.js'
 import { dataIdentifier } from './data-generator.js'
@@ -23,6 +24,42 @@ export interface AcceptanceCheck {
   readonly expected?: string
   readonly flow?: FlowCheck
   readonly status: AcceptanceStatus
+}
+
+const acceptanceStatusSchema = z.enum(['PENDING', 'PASSED', 'FAILED', 'NOT_AUTOMATED'])
+const flowCheckSchema = z.object({
+  form_test_id: z.string(), list_test_id: z.string(), marker_field: z.string(),
+  submit_requires_auth: z.boolean(), list_requires_auth: z.boolean(),
+  fields: z.array(z.object({
+    name: z.string(), type: z.enum(['text', 'number', 'date', 'boolean', 'email', 'phone', 'selection', 'reference']),
+    required: z.boolean(), options: z.array(z.string()).optional(),
+  }).strict()),
+}).strict()
+const acceptanceCheckSchema = z.object({
+  id: z.string().min(1).max(160), label: z.string().min(1).max(2_000),
+  kind: z.enum(['language', 'title', 'page', 'section', 'entity', 'criterion', 'flow', 'auth', 'crud', 'scheduling', 'dashboard', 'saas']),
+  expected: z.string().optional(), flow: flowCheckSchema.optional(), status: acceptanceStatusSchema,
+}).strict()
+export const acceptanceReportSchema = z.object({
+  schema_version: z.literal(1), checks: z.array(acceptanceCheckSchema).min(1).max(500),
+}).strict()
+
+export function parseAcceptanceReport(value: unknown, expected: readonly AcceptanceCheck[]): readonly AcceptanceCheck[] {
+  const report = acceptanceReportSchema.parse(value)
+  if (report.checks.length !== expected.length) throw new Error('APPSPEC_REPORT_MISMATCH')
+  const actualById = new Map(report.checks.map(check => [check.id, check] as const))
+  if (actualById.size !== report.checks.length) throw new Error('APPSPEC_REPORT_MISMATCH')
+  for (const expectedCheck of expected) {
+    const actual = actualById.get(expectedCheck.id)
+    if (actual === undefined) throw new Error('APPSPEC_REPORT_MISMATCH')
+    const { status: actualStatus, ...actualStatic } = actual
+    const { status: expectedStatus, ...expectedStatic } = acceptanceCheckSchema.parse(expectedCheck)
+    if (JSON.stringify(actualStatic) !== JSON.stringify(expectedStatic)) throw new Error('APPSPEC_REPORT_MISMATCH')
+    if (expectedStatus === 'NOT_AUTOMATED' ? actualStatus !== 'NOT_AUTOMATED' : actualStatus === 'NOT_AUTOMATED') {
+      throw new Error('APPSPEC_REPORT_MISMATCH')
+    }
+  }
+  return report.checks as readonly AcceptanceCheck[]
 }
 
 export function acceptanceChecks(spec: AppSpecV1, category: StudioProjectCategory = 'landing-page'): readonly AcceptanceCheck[] {
