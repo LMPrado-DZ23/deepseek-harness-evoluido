@@ -18,7 +18,7 @@ export default defineConfig({
     },
   },
   test: {
-    include: ['plugins/*/tests/**/*.spec.ts', 'apps/studio-runtime/**/*.spec.mjs'],
+    include: ['plugins/*/tests/**/*.spec.ts', 'apps/studio-runtime/**/*.spec.mjs', 'scripts/**/*.spec.mjs'],
     coverage: {
       provider: 'v8',
       include: ['plugins/*/src/**/*.ts'],
