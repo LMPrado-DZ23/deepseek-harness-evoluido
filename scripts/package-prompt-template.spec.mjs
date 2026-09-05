@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { packagePromptTemplate } from './package-prompt-template.mjs'
+import { packageStudioWeb } from './package-studio-web.mjs'
 
 const scratch = []
 afterEach(async () => {
@@ -25,5 +26,22 @@ describe('prompt template packager', () => {
 
     await expect(readFile(join(target, 'version.txt'), 'utf8')).resolves.toBe('second')
     await expect(readFile(join(target, 'stale.txt'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('replaces previously packaged web assets instead of failing on the directory', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dz23-web-package-'))
+    scratch.push(root)
+    const source = join(root, 'dist')
+    const target = join(root, 'plugin', 'lib', 'client')
+    await mkdir(source, { recursive: true })
+    await writeFile(join(source, 'index.html'), 'v1', 'utf8')
+
+    await packageStudioWeb(source, target)
+    await writeFile(join(source, 'index.html'), 'v2', 'utf8')
+    await writeFile(join(target, 'stale.js'), 'must disappear', 'utf8')
+    await packageStudioWeb(source, target)
+
+    await expect(readFile(join(target, 'index.html'), 'utf8')).resolves.toBe('v2')
+    await expect(readFile(join(target, 'stale.js'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })
