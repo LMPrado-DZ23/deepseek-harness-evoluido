@@ -51,7 +51,12 @@ export function validateImageLock(lock) {
     throw new Error('digests de plataforma Playwright inválidos')
   }
 
-  exactKeys(lock.tools, ['git', 'nodeArchives', 'pnpm'], 'tools')
+  exactKeys(lock.tools, ['dockerfileFrontend', 'git', 'nodeArchives', 'pnpm'], 'tools')
+  const dockerfileFrontend = lock.tools.dockerfileFrontend
+  exactKeys(dockerfileFrontend, ['reference', 'digest'], 'tools.dockerfileFrontend')
+  if (dockerfileFrontend.reference !== 'docker.io/docker/dockerfile:1.7' || !DIGEST.test(dockerfileFrontend.digest)) {
+    throw new Error('frontend do Dockerfile divergente')
+  }
   const git = lock.tools.git
   exactKeys(git, ['package', 'version', 'repository'], 'tools.git')
   if (git.package !== 'git' || git.version !== '1:2.39.5-0+deb12u3') throw new Error('pacote Git divergente')
@@ -86,6 +91,9 @@ export function validateImageLock(lock) {
 
 export function validateDockerfileBase(dockerfile, lock) {
   if (typeof dockerfile !== 'string' || dockerfile.length === 0) throw new Error('Dockerfile do Studio vazio')
+  const syntaxLine = dockerfile.split(/\r?\n/u)[0]
+  const expectedSyntax = `# syntax=${lock.tools.dockerfileFrontend.reference}@${lock.tools.dockerfileFrontend.digest}`
+  if (syntaxLine !== expectedSyntax) throw new Error(`frontend do Dockerfile não está fixado (${expectedSyntax})`)
   const fromLines = dockerfile
     .split(/\r?\n/u)
     .map(line => line.trim())
@@ -112,7 +120,7 @@ export function validateDockerfileBase(dockerfile, lock) {
   if (externalCount !== 1) {
     throw new Error('Dockerfile do Studio precisa conter exatamente uma base externa fixada')
   }
-  return { base: `${lock.images.node.reference}@${lock.images.node.indexDigest}`, fromLines }
+  return { base: `${lock.images.node.reference}@${lock.images.node.indexDigest}`, frontend: expectedSyntax.slice('# syntax='.length), fromLines }
 }
 
 export async function main(argv = process.argv.slice(2)) {

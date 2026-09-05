@@ -34,6 +34,11 @@ test('lock de imagens recusa tag, plataforma ausente e campo inesperado', () => 
 
 test('Dockerfile usa exatamente a base Node fixada no lock', () => {
   assert.equal(validateDockerfileBase(dockerfile, canonical).fromLines.length, 5)
+  assert.equal(validateDockerfileBase(dockerfile, canonical).frontend, `${canonical.tools.dockerfileFrontend.reference}@${canonical.tools.dockerfileFrontend.digest}`)
+  assert.throws(
+    () => validateDockerfileBase(dockerfile.replace(canonical.tools.dockerfileFrontend.digest, `sha256:${'9'.repeat(64)}`), canonical),
+    /frontend do Dockerfile não está fixado/u,
+  )
   assert.throws(
     () => validateDockerfileBase(dockerfile.replace(canonical.images.node.indexDigest, `sha256:${'0'.repeat(64)}`), canonical),
     /não usa a imagem Node fixada/u,
