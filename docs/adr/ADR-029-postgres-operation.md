@@ -198,7 +198,7 @@ Status: aceita e implementada na etapa M3, com o operador W3 consolidado em
    A varredura de staging órfão continua restrita a nomes exatos com a marca de propriedade do
    Studio e, na prévia, é apenas informada.
 
-   **Evidência deste checkpoint W3 (05/09):** 178 testes que não exigem Docker passaram; 59
+   **Evidência deste checkpoint W3 (05/09):** 181 testes que não exigem Docker passaram; 59
    integrações dependentes de PostgreSQL/Docker foram puladas. A execução real do operador no
    Docker Desktop Windows está `BLOCKED_ENVIRONMENT` porque o Docker Desktop deste computador
    quebrou durante a preparação do ambiente. Isso não é evidência de defeito do produto, mas

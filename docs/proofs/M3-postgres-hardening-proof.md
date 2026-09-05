@@ -72,7 +72,7 @@ O código atual acrescenta a autoridade única em
 registros, objetos desconhecidos e instalação estrangeira, auditoria dentro da
 transação da troca e reconciliação segura após `COMMIT`.
 
-Neste checkpoint, **178 testes que não exigem Docker passaram** e **59
+Neste checkpoint, **181 testes que não exigem Docker passaram** e **59
 integrações PostgreSQL/Docker foram puladas**. PostgreSQL/Compose real não foi
 reexecutado: o Docker Desktop Windows quebrou durante a preparação e está
 classificado `BLOCKED_ENVIRONMENT`, não como falha do produto. Os resultados

@@ -204,7 +204,7 @@ sobrescrever um esquema povoado sem confirmação — é exercitado por `pnpm pr
 mostra, sem esconder, que uma escrita feita depois da cópia não volta: a restauração é um ponto
 no tempo, por isso a frequência da cópia agendada importa.
 
-No checkpoint W3 de 05/09, os 178 testes que não dependem de Docker passaram e
+No checkpoint W3 de 05/09, os 181 testes que não dependem de Docker passaram e
 59 integrações PostgreSQL/Docker foram puladas. A prova real do operador no
 Docker Desktop Windows está `BLOCKED_ENVIRONMENT` por quebra do Docker Desktop
 deste computador. Portanto este checkpoint não afirma que PostgreSQL/Compose
