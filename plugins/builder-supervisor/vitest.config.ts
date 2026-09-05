@@ -28,7 +28,7 @@ export default defineConfig({
         lines: 95,
         'src/{model,protocol,replay,state-machine}.ts': { 100: true },
         'src/{docker-adapter,docker-engine,export-artifact,persistent-replay,service,unix-server}.ts': { 100: true },
-        'src/unix-client.ts': { statements: 95, branches: 80, functions: 100, lines: 100 },
+        'src/unix-client.ts': { statements: 95, branches: 85, functions: 100, lines: 100 },
       },
     },
   },

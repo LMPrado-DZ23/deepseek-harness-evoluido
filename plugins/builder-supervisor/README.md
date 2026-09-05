@@ -104,3 +104,12 @@ resolução do segredo. Status, `Content-Type`, `Content-Length`, UTF-8, envelop
 código de erro e DTO de sucesso são validados por allowlist antes de retornar ao
 chamador. A fundação não ativa o supervisor, não seleciona tenant, não monta o
 socket e não concede qualquer autoridade Docker.
+
+O limite de 64 KiB do pedido é defesa em profundidade e só pode ser reduzido
+pelo chamador: o esquema fechado atual limita os DTOs a aproximadamente 800
+bytes. A referência `file:/...` é validada somente quanto à sintaxe e ao teto
+de 4 KiB; o cliente não abre o arquivo. O
+resolvedor de produção ainda deve provar arquivo regular, `O_NOFOLLOW`, um único
+link, proprietário e modo esperados e recusar dispositivos, FIFO e links. O
+classificador exportado separa `BLOCKED_EXTERNAL`, falha do build, cancelamento e
+erro interno, mas permanece sem call site nesta fundação.
