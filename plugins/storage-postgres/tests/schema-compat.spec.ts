@@ -11,20 +11,20 @@ function clientWithRows(...rows: unknown[][]): Client {
 
 describe('schema compatibility readers', () => {
   it('uses typed NULLs only for optional unit columns absent from the catalog', async () => {
-    const client = clientWithRows([[{ attname: 'tables' }]])
+    const client = clientWithRows([{ attname: 'tables' }])
     await expect(unitsProjection(client, 'dz23_storage')).resolves.toBe(
       '"name", "version", "tables", NULL::boolean AS "has_global", NULL::text AS "descriptor_sha256"',
     )
   })
 
   it('omits an installation identity when the old schema has no metadata column', async () => {
-    const client = clientWithRows([[{ n: 0 }]])
+    const client = clientWithRows([{ n: 0 }])
     await expect(readInstallation(client, 'dz23_storage')).resolves.toBeUndefined()
   })
 
   it('reads the installation identity only after confirming the column exists', async () => {
     const installation = '11111111-1111-4111-8111-111111111111'
-    const client = clientWithRows([[{ n: 1 }], [{ text_value: installation }]])
+    const client = clientWithRows([{ n: 1 }], [{ text_value: installation }])
     await expect(readInstallation(client, 'dz23_storage')).resolves.toBe(installation)
   })
 })

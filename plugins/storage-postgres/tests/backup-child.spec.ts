@@ -7,12 +7,14 @@
  * stubbing the module under test.
  */
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { BACKUP_LEDGER_FILE, StorageBackupScheduler, childProcessBackupRunner, type BackupResult } from '../src/backup.ts'
 import { parseWorkerArgs } from '../src/backup-worker.ts'
 import { assertTlsPolicy, TLS_POLICIES } from '../src/dsn.ts'
+import { OPERATOR_BUNDLE_MAX_BYTES } from '../src/operator-limits.ts'
 
 const scratch: string[] = []
 afterEach(async () => { for (const directory of scratch.splice(0)) await rm(directory, { recursive: true, force: true }) })
@@ -115,9 +117,9 @@ describe('childProcessBackupRunner: what the Studio is told when the backup proc
 })
 
 describe('parseWorkerArgs: the worker reading its own command line', () => {
-  it('defaults fail closed: full TLS verification and the shared 2 GiB ceiling', () => {
+  it('defaults fail closed: full TLS verification and the bounded operator ceiling', () => {
     expect(parseWorkerArgs(['--dsn-ref', 'DZ23_STORAGE_BACKUP_DSN', '--schema', 'dz23_storage', '--out', '/tmp/b.json']))
-      .toEqual({ dsnRef: 'DZ23_STORAGE_BACKUP_DSN', schema: 'dz23_storage', ssl: 'verify-full', out: '/tmp/b.json', maxBytes: 2 * 1024 * 1024 * 1024 })
+      .toEqual({ dsnRef: 'DZ23_STORAGE_BACKUP_DSN', schema: 'dz23_storage', ssl: 'verify-full', out: '/tmp/b.json', maxBytes: OPERATOR_BUNDLE_MAX_BYTES })
   })
 
   it('reads every flag the runner passes', () => {
@@ -136,7 +138,7 @@ describe('parseWorkerArgs: the worker reading its own command line', () => {
   it('refuses a ceiling that is not a whole positive number of bytes', () => {
     for (const bad of ['0', '-1', 'lots', '1.5', 'Infinity', '']) {
       expect(() => parseWorkerArgs(['--dsn-ref', 'R', '--schema', 's', '--out', '/o', '--max-bytes', bad]))
-        .toThrow('--max-bytes must be a positive integer')
+        .toThrow(`--max-bytes must be an integer between 1 and ${String(OPERATOR_BUNDLE_MAX_BYTES)}`)
     }
   })
 
@@ -170,7 +172,11 @@ describe('StorageBackupScheduler: when the ledger itself cannot be written', () 
     await mkdir(join(directory, BACKUP_LEDGER_FILE))
     const log: Array<[string, string]> = []
     const scheduler = new StorageBackupScheduler({
-      runner: { run: () => Promise.resolve({ sha256: 'e'.repeat(64), bytes: 1, records: 0, domains: 0 }) },
+      runner: { run: async target => {
+        const payload = 'x'
+        await writeFile(target, payload, { flag: 'wx', mode: 0o600 })
+        return { sha256: createHash('sha256').update(payload).digest('hex'), bytes: 1, records: 0, domains: 0 }
+      } },
       directory, label: 'dz23_storage', intervalMs: 5 * 60 * 1000, keep: 2,
       suffix: () => 'abc123', now: () => new Date(Date.UTC(2026, 8, 3, 12, 0, 0)),
       log: (level, line) => log.push([level, line]),
@@ -192,7 +198,12 @@ describe('StorageBackupScheduler.pending', () => {
     const gate = new Promise<void>(resolve => { release = resolve })
     const results: BackupResult[] = []
     const scheduler = new StorageBackupScheduler({
-      runner: { run: async () => { await gate; return { sha256: 'd'.repeat(64), bytes: 1, records: 0, domains: 0 } } },
+      runner: { run: async target => {
+        await gate
+        const payload = 'x'
+        await writeFile(target, payload, { flag: 'wx', mode: 0o600 })
+        return { sha256: createHash('sha256').update(payload).digest('hex'), bytes: 1, records: 0, domains: 0 }
+      } },
       directory, label: 'dz23_storage', intervalMs: 5 * 60 * 1000, keep: 2,
       suffix: (() => { let n = 0; return () => String(n++).padStart(6, '0') })(),
       now: (() => { let n = 0; return () => new Date(Date.UTC(2026, 8, 3, 12, 0, n++)) })(),

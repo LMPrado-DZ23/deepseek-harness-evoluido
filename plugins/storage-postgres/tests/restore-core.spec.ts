@@ -33,6 +33,10 @@ class ScriptClient {
     if (sql.includes('pg_catalog.pg_namespace WHERE nspname')) return { rows: [{ present: this.receiptInput !== undefined } as T] }
     if (sql.includes("tablename = 'units'")) return { rows: [{ count: '0' } as T] }
     if (sql.includes('LIKE $1')) return { rows: [] }
+    if (sql.includes('c.relkind NOT IN')) return { rows: [] }
+    if (sql.includes('SELECT c.relname AS catalog')) {
+      return { rows: [{ catalog: 'pg_class', nsattr: 'relnamespace', nameattr: 'relname' } as T] }
+    }
     if (sql.includes('pg_catalog.pg_attribute a')) {
       const shape = {
         storage_meta: ['key', 'value'], units: ['name', 'version'], records: ['unit', 'table_name', 'key', 'value'],
@@ -56,7 +60,7 @@ class ExistingClient extends ScriptClient {
       this.sql.push(sql)
       return { rows: [{ present: true } as T] }
     }
-    if (sql.includes("a.attname LIKE '%namespace'")) {
+    if (sql.includes('SELECT c.relname, a.attname') && sql.includes("a.attname LIKE '%namespace'")) {
       this.sql.push(sql)
       return { rows: [{ relname: 'pg_class', attname: 'relnamespace' } as T] }
     }
