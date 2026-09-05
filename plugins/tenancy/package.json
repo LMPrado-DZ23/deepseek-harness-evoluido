@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@deepseek-ai/cordis": "workspace:*",
+    "@deepseek-ai/dsh-agent": "workspace:*",
     "@deepseek-ai/dsh-host-webserver": "workspace:*",
     "@deepseek-ai/dsh-storage-domain": "workspace:*",
     "@dz23-studio/identity": "workspace:*",

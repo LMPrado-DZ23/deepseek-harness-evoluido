@@ -1,4 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { Domain, KvTable } from '@deepseek-ai/dsh-storage-domain'
 import { principalForAgent } from '@dz23-studio/identity'

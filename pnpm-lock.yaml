@@ -456,6 +456,9 @@ importers:
       '@deepseek-ai/cordis':
         specifier: workspace:*
         version: link:../../third_party/deepseek-harness/vendor/cordis
+      '@deepseek-ai/dsh-agent':
+        specifier: workspace:*
+        version: link:../../third_party/deepseek-harness/packages/core/agent
       '@deepseek-ai/dsh-host-webserver':
         specifier: workspace:*
         version: link:../../third_party/deepseek-harness/packages/host/webserver
