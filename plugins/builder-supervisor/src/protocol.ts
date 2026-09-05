@@ -4,6 +4,7 @@ import { RpcReplayGuard, type RpcReplayPort } from './replay.js'
 
 export const BUILDER_RPC_PATH = '/v1/rpc'
 export const BUILDER_RPC_MAX_BODY_BYTES = 64 * 1024
+export const BUILDER_RPC_MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 
 interface RequestIdentity { readonly request_id: string }
 export interface ListManagedRequest extends RequestIdentity { readonly build_id?: string }
@@ -72,7 +73,7 @@ export function createBuilderRpcHandler(options: {
   readonly methods: BuilderRpcMethods
   readonly replay?: RpcReplayPort
 }) {
-  if (!/^file:\/(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+$/u.test(options.credentialRef) || options.credentialRef.split('/').includes('..')) throw new Error('INVALID_CREDENTIAL_REFERENCE')
+  if (!isBuilderCredentialReference(options.credentialRef)) throw new Error('INVALID_CREDENTIAL_REFERENCE')
   const replay = options.replay ?? new RpcReplayGuard()
   return { handle: async (input: BuilderRpcInput): Promise<BuilderRpcOutput> => {
     if (input.path !== BUILDER_RPC_PATH) return response(404, { error: 'NOT_FOUND' })
@@ -87,7 +88,7 @@ export function createBuilderRpcHandler(options: {
     try { return await replay.run(request.body.request_id, fingerprint, async () => {
       try {
         const result = await dispatch(options.methods, request, input.signal)
-        if (!validResult(request, result)) throw new Error('INVALID_METHOD_RESULT')
+        if (!isValidBuilderRpcResult(request, result)) throw new Error('INVALID_METHOD_RESULT')
         return response(200, { ok: true, result })
       } catch (error) {
         if (input.signal.aborted) throw input.signal.reason
@@ -114,7 +115,7 @@ async function dispatch(methods: BuilderRpcMethods, request: BuilderRpcRequest, 
   }
 }
 
-function validResult(request: BuilderRpcRequest, value: unknown): boolean {
+export function isValidBuilderRpcResult(request: BuilderRpcRequest, value: unknown): boolean {
   if (request.operation === 'preflight') {
     const row = exact(value, ['state', 'protocol_version', 'instance_id', 'image_id', 'policy_sha256'])
     return row !== undefined && (row.state === 'OK' || row.state === 'BLOCKED_EXTERNAL') && row.protocol_version === 1 &&
@@ -142,6 +143,10 @@ function validResult(request: BuilderRpcRequest, value: unknown): boolean {
   const row = exact(value, ['builds'])
   const body = request.body as ListManagedRequest
   return row !== undefined && Array.isArray(row.builds) && row.builds.length <= 1_000 && row.builds.every(item => validManagedBuild(item) && (body.build_id === undefined || (item as ManagedBuild).build_id === body.build_id))
+}
+
+export function isBuilderCredentialReference(value: string): boolean {
+  return /^file:\/(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+$/u.test(value) && !value.split('/').includes('..')
 }
 
 function validStepResult(value: unknown): boolean {

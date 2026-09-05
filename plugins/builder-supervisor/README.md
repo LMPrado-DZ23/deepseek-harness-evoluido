@@ -87,3 +87,20 @@ O deadline RPC padrão é 240 s, cobrindo o teto de etapa de 180 s e a janela de
 cleanup de 30 s. Configurações customizadas são recusadas quando o deadline RPC
 é menor que `stepTimeoutMs + cleanupTimeoutMs`. Timeout, desconexão do cliente e
 shutdown são causas distintas e respostas abortadas não são persistidas no replay.
+
+### Cliente Unix M6.2
+
+`createBuilderUnixClient` é a fundação tipada do lado não privilegiado. O
+chamador entrega o caminho absoluto do socket, uma referência `file:/...` e um
+resolvedor de credenciais; o cliente não consulta ambiente, arquivo, Docker ou
+configuração de tenant por conta própria. Cada método recebe o DTO completo com
+`request_id` já escolhido pelo chamador. Não existe geração de ID nem retry
+automático: uma repetição deliberada deve reutilizar o mesmo DTO para acionar o
+replay idempotente do servidor.
+
+O transporte limita o pedido a 64 KiB, a resposta a no máximo 4 MiB e a chamada
+a no máximo 600 s (240 s por padrão). Deadline e `AbortSignal` também limitam a
+resolução do segredo. Status, `Content-Type`, `Content-Length`, UTF-8, envelope,
+código de erro e DTO de sucesso são validados por allowlist antes de retornar ao
+chamador. A fundação não ativa o supervisor, não seleciona tenant, não monta o
+socket e não concede qualquer autoridade Docker.
