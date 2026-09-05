@@ -63,10 +63,19 @@ RUN --mount=type=cache,id=dz23-studio-pnpm-11,target=/pnpm/store,sharing=locked 
     pnpm install --offline --frozen-lockfile --trust-lockfile --filter '@dz23-studio/*...' --store-dir /pnpm/store
 RUN --mount=type=cache,id=dz23-studio-pnpm-11,target=/pnpm/store,sharing=locked \
     --network=none pnpm build
-# Synchronize every built workspace package into the deployable virtual store.
+# pnpm's injected workspace copies are snapshots taken at install time. A
+# second install with --force does not refresh those snapshots after `build`,
+# so a deploy could silently contain stale `lib/` files. Remove only the
+# Studio workspace installation (the separately built upstream stays intact),
+# then recreate the injected graph from the freshly built packages.
+RUN rm -rf \
+      /workspace/node_modules \
+      /workspace/plugins/*/node_modules \
+      /workspace/apps/*/node_modules \
+      /workspace/dsh-home/profiles/studio/node_modules
 RUN --mount=type=cache,id=dz23-studio-pnpm-11,target=/pnpm/store,sharing=locked \
     --network=none \
-    pnpm install --offline --frozen-lockfile --trust-lockfile --filter '@dz23-studio/*...' --force --store-dir /pnpm/store \
+    pnpm install --offline --frozen-lockfile --trust-lockfile --filter '@dz23-studio/*...' --store-dir /pnpm/store \
  && pnpm --filter @dz23-studio/runtime deploy --prod /opt/runtime \
  && test -f /opt/runtime/entrypoint.mjs \
  && test -f /opt/runtime/operator.mjs \

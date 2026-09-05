@@ -157,6 +157,24 @@ export function validateDockerfileBase(dockerfile, lock) {
       !dockerfile.includes(`test "$(pg_restore --version)" = '${postgres.pgRestoreVersion}'`)) {
     throw new Error('Dockerfile não valida versões exatas de pg_dump/pg_restore')
   }
+  const studioBuild = dockerfile.indexOf('--network=none pnpm build')
+  const injectionReset = dockerfile.indexOf('RUN rm -rf', studioBuild)
+  const finalInstall = dockerfile.indexOf("pnpm install --offline --frozen-lockfile --trust-lockfile --filter '@dz23-studio/*...'", injectionReset)
+  const deploy = dockerfile.indexOf('pnpm --filter @dz23-studio/runtime deploy', finalInstall)
+  const resetBlock = injectionReset < 0 || finalInstall < 0 ? '' : dockerfile.slice(injectionReset, finalInstall)
+  const resetTargets = [
+    '/workspace/node_modules',
+    '/workspace/plugins/*/node_modules',
+    '/workspace/apps/*/node_modules',
+    '/workspace/dsh-home/profiles/studio/node_modules',
+  ]
+  if (studioBuild < 0 || injectionReset < studioBuild || finalInstall < injectionReset || deploy < finalInstall
+      || resetTargets.some(target => !resetBlock.includes(target))) {
+    throw new Error('Dockerfile não reinjeta os pacotes compilados antes do deploy')
+  }
+  if (dockerfile.slice(finalInstall, deploy).includes('--force')) {
+    throw new Error('Dockerfile tenta atualizar cópias injetadas com --force sem instalação limpa')
+  }
   return { base: `${lock.images.node.reference}@${lock.images.node.indexDigest}`, postgresBase: postgres.sourceImage, frontend: expectedSyntax.slice('# syntax='.length), fromLines }
 }
 

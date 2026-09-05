@@ -5,6 +5,21 @@ import { validateDockerfileBase, validateImageLock } from '../../scripts/check-i
 
 const canonical = JSON.parse(await readFile(new URL('../../deploy/images.lock.json', import.meta.url), 'utf8'))
 const dockerfile = await readFile(new URL('../../deploy/studio/Dockerfile', import.meta.url), 'utf8')
+const studioLibraries = [
+  'agents',
+  'hello',
+  'identity',
+  'integration-hub',
+  'policy',
+  'preview',
+  'preview-supervisor',
+  'prompt-to-app',
+  'route-health',
+  'runtime-governor',
+  'storage-postgres',
+  'studio-web',
+  'tenancy',
+]
 
 test('lock de imagens aceita somente a resolução canônica', () => {
   assert.equal(validateImageLock(structuredClone(canonical)).schemaVersion, 1)
@@ -66,4 +81,28 @@ test('Dockerfile usa exatamente as bases Node e PostgreSQL fixadas no lock', () 
     () => validateDockerfileBase(`${dockerfile}\nFROM ubuntu AS hidden\n`, canonical),
     /base externa não fixada/u,
   )
+  assert.throws(
+    () => validateDockerfileBase(dockerfile.replace('      /workspace/plugins/*/node_modules \\\n', ''), canonical),
+    /não reinjeta os pacotes compilados/u,
+  )
+  const install = "pnpm install --offline --frozen-lockfile --trust-lockfile --filter '@dz23-studio/*...'"
+  const finalInstall = dockerfile.lastIndexOf(install)
+  assert.notEqual(finalInstall, -1)
+  const forced = `${dockerfile.slice(0, finalInstall)}${install} --force${dockerfile.slice(finalInstall + install.length)}`
+  assert.throws(() => validateDockerfileBase(forced, canonical), /sem instalação limpa/u)
+})
+
+test('build isolado usa declarações compiladas sem enfraquecer o typecheck de desenvolvimento', async () => {
+  for (const directory of studioLibraries) {
+    const manifest = JSON.parse(await readFile(new URL(`../../plugins/${directory}/package.json`, import.meta.url), 'utf8'))
+    assert.equal(manifest.types, './src/index.ts', `${manifest.name}: typecheck local não usa a fonte`)
+    for (const [subpath, exported] of Object.entries(manifest.exports)) {
+      assert.equal(typeof exported.types, 'string', `${manifest.name}${subpath}: export sem types de desenvolvimento`)
+      assert.match(exported.types, /^\.\/src\/.+\.ts$/u, `${manifest.name}${subpath}: typecheck local não usa a fonte`)
+      assert.match(exported['dz23-build']?.types ?? '', /^\.\/lib\/.+\.d\.ts$/u, `${manifest.name}${subpath}: build não usa declaração compilada`)
+      assert.equal(exported['dz23-build']?.default, exported.default, `${manifest.name}${subpath}: JS do build diverge do runtime`)
+    }
+    const buildConfig = JSON.parse(await readFile(new URL(`../../plugins/${directory}/tsconfig.build.json`, import.meta.url), 'utf8'))
+    assert.equal(buildConfig.extends, '../../tsconfig.package-build.json', `${manifest.name}: build não ativa dz23-build`)
+  }
 })

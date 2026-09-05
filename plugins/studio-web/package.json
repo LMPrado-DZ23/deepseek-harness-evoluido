@@ -5,7 +5,13 @@
   "type": "module",
   "main": "./lib/index.js",
   "types": "./src/index.ts",
-  "exports": { ".": { "types": "./src/index.ts", "default": "./lib/index.js" } },
+  "exports": {
+    ".": {
+      "dz23-build": { "types": "./lib/index.d.ts", "default": "./lib/index.js" },
+      "types": "./src/index.ts",
+      "default": "./lib/index.js"
+    }
+  },
   "files": ["lib", "i18n"],
   "scripts": { "build": "tsc -p tsconfig.build.json && node ../../scripts/package-studio-web.mjs" },
   "dependencies": {
