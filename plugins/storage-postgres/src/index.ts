@@ -25,6 +25,19 @@ export { assertTlsPolicy, postgresClientConnection, postgresToolConnection, with
 export { BACKUP_FILE_PATTERN, BACKUP_LEDGER_FILE, BACKUP_MAX_BYTES_DEFAULT, BACKUP_MIN_INTERVAL_MS, StorageBackupScheduler, childProcessBackupRunner, inProcessBackupRunner, verifyBackupFile, type BackupResult, type BackupRunner, type BackupSchedulerOptions, type ChildBackupRunnerOptions } from './backup.js'
 export { parseWorkerArgs, writeBackupBundle, type WorkerArgs, type WorkerReport } from './backup-worker.js'
 export {
+  createPostgresSafetyBackup,
+  postgresDumpInvocation,
+  postgresStorageStatus,
+  restorePostgresStorage,
+  type PostgresStorageStatus,
+  type RestorableBackend,
+  type RestoreInspectionReport,
+  type RestorePostgresDependencies,
+  type RestorePostgresOptions,
+  type RestorePostgresReport,
+  type RestoreWriteReport,
+} from './restore.js'
+export {
   POSTGRES_IDENTIFIER_MAX_LENGTH,
   POSTGRES_SCHEMA_MAX_LENGTH,
   STORAGE_POSTGRES_LAYOUT_VERSION,

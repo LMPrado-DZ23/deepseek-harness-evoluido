@@ -45,6 +45,9 @@ importers:
       '@deepseek-ai/dsh':
         specifier: workspace:*
         version: file:third_party/deepseek-harness/apps/cli(@deepseek-ai/dsh-storage-domain@file:third_party/deepseek-harness/packages/storage/storage-domain(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)(@types/node@22.20.0)(typescript@6.0.3)
+      '@dz23-studio/storage-postgres':
+        specifier: workspace:*
+        version: link:../../plugins/storage-postgres
       dsh-profile-studio:
         specifier: workspace:*
         version: link:../../dsh-home/profiles/studio

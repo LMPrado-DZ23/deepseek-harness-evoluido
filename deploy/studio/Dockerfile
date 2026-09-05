@@ -2,11 +2,12 @@
 FROM docker.io/library/node:22.23.1-bookworm-slim@sha256:6c74791e557ce11fc957704f6d4fe134a7bc8d6f5ca4403205b2966bd488f6b3 AS git-runtime
 
 RUN apt-get update \
- && apt-get install --yes --no-install-recommends git=1:2.39.5-0+deb12u3 \
+ && apt-get install --yes --no-install-recommends git=1:2.39.5-0+deb12u3 postgresql-client=15+248+deb12u1 \
  && rm -rf /var/lib/apt/lists/* \
  && groupadd --gid 10001 studio \
  && useradd --uid 10001 --gid 10001 --home-dir /var/lib/dz23-studio --no-create-home --shell /usr/sbin/nologin studio \
- && test "$(git --version)" = "git version 2.39.5"
+ && test "$(git --version)" = "git version 2.39.5" \
+ && pg_dump --version | grep -Eq '^pg_dump \(PostgreSQL\) 15\.'
 
 FROM git-runtime AS toolchain
 WORKDIR /workspace
@@ -63,6 +64,7 @@ RUN --mount=type=cache,id=dz23-studio-pnpm-11,target=/pnpm/store,sharing=locked 
     pnpm install --offline --frozen-lockfile --trust-lockfile --filter '@dz23-studio/*...' --force --store-dir /pnpm/store \
  && pnpm --filter @dz23-studio/runtime deploy --prod /opt/runtime \
  && test -f /opt/runtime/entrypoint.mjs \
+ && test -f /opt/runtime/operator.mjs \
  && test -f /opt/runtime/shutdown-contract.mjs \
  && test -f /opt/runtime/node_modules/@deepseek-ai/dsh/lib/bin.js \
  && test -f /opt/runtime/node_modules/@dz23-studio/web/lib/client/index.html \
@@ -82,6 +84,8 @@ WORKDIR /opt/dz23-studio/runtime
 COPY --from=build --chown=10001:10001 /opt/runtime/ ./
 COPY --from=build --chown=10001:10001 /workspace/deploy/harness/ /opt/dz23-studio/deploy/harness/
 RUN node -e "if (!/^[0-9a-f]{40}$/.test(process.env.DZ23_STUDIO_IMAGE_REVISION)) process.exit(1)" \
+ && test -f operator.mjs \
+ && command -v pg_dump >/dev/null \
  && rm -rf /usr/local/lib/node_modules/npm \
  && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/pnpm /usr/local/bin/pnpx \
  && mkdir -p /var/lib/dz23-studio /var/lib/dz23-studio-backups \

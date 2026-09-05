@@ -171,6 +171,8 @@ describePostgres('restore CLI hardening', () => {
       const password = new URL(dsn!).password
       expect(password).not.toBe('')
       expect(seen.argv.join(' ')).not.toContain(password)
+      expect(seen.argv.join(' ')).not.toContain('postgres://')
+      expect(seen.argv.join(' ')).not.toContain('postgresql://')
       expect(seen.argv.some(argument => /ssl/iu.test(argument))).toBe(false)
       expect(seen.env.PGPASSWORD).toBe(password)
       expect(seen.env.PGSSLMODE).toBe('disable')

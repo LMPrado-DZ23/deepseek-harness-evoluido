@@ -9,6 +9,10 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./lib/index.js"
+    },
+    "./operator": {
+      "types": "./src/operator.ts",
+      "default": "./lib/operator.js"
     }
   },
   "files": ["lib"],
