@@ -1,14 +1,18 @@
-import { link, lstat, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import type { Stats } from 'node:fs'
+import { link, lstat, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   TEMPLATE_ENTRY_MAX_BYTES,
+  TEMPLATE_STORE_MAX_BYTES,
   TEMPLATE_STORE_MAX_ENTRIES,
   assertSafeStoreStat,
   assertSourceIdentity,
+  assertUnchangedStoreStat,
   canonicalSourceRoot,
+  checkedTemplateStoreByteTotal,
+  checkedTemplateStoreEntryCount,
   computeTemplateTreeSha256,
   imageDigestValue,
   isSafeStagingName,
@@ -81,6 +85,15 @@ describe('template store security contracts', () => {
     expect(() => parseTemplateStoreManifest({ version: 1, template_store_version: 'v1', tree_sha256: 'a'.repeat(64), entries: tooMany })).toThrow('INVALID_TEMPLATE_STORE')
     const huge = Array.from({ length: 9 }, (_, index) => ({ path: `f${index}`, type: 'file', bytes: TEMPLATE_ENTRY_MAX_BYTES, sha256: 'a'.repeat(64) }))
     expect(() => parseTemplateStoreManifest({ version: 1, template_store_version: 'v1', tree_sha256: 'a'.repeat(64), entries: huge })).toThrow('INVALID_TEMPLATE_STORE')
+    expect(checkedTemplateStoreByteTotal(1, 2)).toBe(3)
+    let boundary = 0
+    for (let index = 0; index < TEMPLATE_STORE_MAX_BYTES / TEMPLATE_ENTRY_MAX_BYTES; index += 1) boundary = checkedTemplateStoreByteTotal(boundary, TEMPLATE_ENTRY_MAX_BYTES)
+    expect(boundary).toBe(TEMPLATE_STORE_MAX_BYTES)
+    expect(() => checkedTemplateStoreByteTotal(boundary, 1)).toThrow('INVALID_TEMPLATE_STORE')
+    expect(() => checkedTemplateStoreByteTotal(Number.MAX_SAFE_INTEGER, 1)).toThrow('INVALID_TEMPLATE_STORE')
+    expect(() => checkedTemplateStoreByteTotal(TEMPLATE_STORE_MAX_BYTES, 1)).toThrow('INVALID_TEMPLATE_STORE')
+    expect(checkedTemplateStoreEntryCount(1)).toBe(1)
+    for (const count of [-1, 1.5, TEMPLATE_STORE_MAX_ENTRIES + 1]) expect(() => checkedTemplateStoreEntryCount(count)).toThrow('INVALID_TEMPLATE_STORE')
   })
 
   it('validates identifiers, versions, digests, references, source roots and staging names', () => {
@@ -102,10 +115,11 @@ describe('template store security contracts', () => {
     expect(() => manifestReferencePath('/opt/manifest.json')).toThrow()
   })
 
-  it('classifies regular files/directories and rejects symlinks, hardlinks, wrong types and writable sealed entries', async () => {
+  it.runIf(process.platform === 'linux')('classifies regular files/directories and rejects symlinks, hardlinks, wrong types and writable sealed entries', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dz23-store-security-')); roots.push(root)
     const file = join(root, 'file'); const directory = join(root, 'dir'); const symbolic = join(root, 'symbolic'); const hard = join(root, 'hard')
-    await writeFile(file, 'x', { mode: 0o444 }); await mkdir(directory, { mode: 0o555 }); await symlink(file, symbolic); await link(file, hard)
+    await writeFile(file, 'x', { mode: 0o444 }); await mkdir(directory, { mode: 0o555 }); await link(file, hard)
+    if (process.platform === 'linux') await symlink(file, symbolic)
     const fileStat = await lstat(file); const directoryStat = await lstat(directory)
     expect(() => assertSafeStoreStat(directoryStat, 'directory', true)).not.toThrow()
     expect(() => assertSafeStoreStat(fileStat, 'file', false)).toThrow()
@@ -114,13 +128,25 @@ describe('template store security contracts', () => {
     expect(() => assertSafeStoreStat(single, 'file', true)).not.toThrow()
     expect(() => assertSafeStoreStat(single, 'directory', false)).toThrow()
     expect(() => assertSafeStoreStat(directoryStat, 'file', false)).toThrow()
-    const symbolicStat = await lstat(symbolic)
-    expect(() => assertSafeStoreStat(symbolicStat, 'file', false)).toThrow()
-    const writable = statWithMode(single, 0o644)
-    expect(() => assertSafeStoreStat(writable, 'file', true)).toThrow()
+    if (process.platform === 'linux') {
+      const symbolicStat = await lstat(symbolic)
+      expect(() => assertSafeStoreStat(symbolicStat, 'file', false)).toThrow()
+    }
+    expect(() => assertSafeStoreStat(statWithMode(single, 0o644), 'file', true)).toThrow()
     expect(() => assertSafeStoreStat(statWithMode(directoryStat, 0o755), 'directory', true)).toThrow()
     expect(() => assertSourceIdentity(single, single, 'file')).not.toThrow()
     expect(() => assertSourceIdentity(single, statWithInode(single, single.ino + 1), 'file')).toThrow()
+    expect(() => assertUnchangedStoreStat(single, single, 'file')).not.toThrow()
+    expect(() => assertUnchangedStoreStat(directoryStat, directoryStat, 'directory')).not.toThrow()
+    for (const [property, value] of [
+      ['dev', single.dev + 1],
+      ['ino', single.ino + 1],
+      ['mtimeMs', single.mtimeMs + 1],
+      ['ctimeMs', single.ctimeMs + 1],
+      ['mode', single.mode ^ 1],
+      ['size', single.size + 1],
+      ['nlink', single.nlink + 1],
+    ] as const) expect(() => assertUnchangedStoreStat(single, statWith(single, property, value), 'file')).toThrow()
     if (process.platform === 'linux') {
       const device = await lstat('/dev/null')
       expect(() => assertSafeStoreStat(device, 'file', false)).toThrow()
@@ -139,4 +165,8 @@ function statWithMode(stat: Stats, mode: number): Stats {
 
 function statWithInode(stat: Stats, ino: number): Stats {
   return new Proxy(stat, { get(target, property) { return property === 'ino' ? ino : Reflect.get(target, property, target) } })
+}
+
+function statWith(stat: Stats, key: keyof Stats, value: unknown): Stats {
+  return new Proxy(stat, { get(target, property) { return property === key ? value : Reflect.get(target, property, target) } })
 }

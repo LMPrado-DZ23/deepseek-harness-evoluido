@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { createServer } from 'node:http'
 import { lstat, mkdir, mkdtemp, rm, unlink, writeFile } from 'node:fs/promises'
+import type { FileHandle } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { posix } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -20,6 +21,12 @@ import {
 } from '../src/supervisor-main.js'
 import { listenBuilderUnix } from '../src/unix-server.js'
 import { deriveBuilderRuntimeScopeId } from '../src/runtime-scope.js'
+import { computeTemplateTreeSha256, type TemplateManifestEntry } from '../src/store-security.js'
+import { templateStoreVolumeName } from '../src/template-store-volume.js'
+
+const supervisorTemplateContent = 'supervisor-store'
+const supervisorTemplateEntries: TemplateManifestEntry[] = [{ path: 'store.txt', type: 'file', bytes: Buffer.byteLength(supervisorTemplateContent), sha256: createHash('sha256').update(supervisorTemplateContent).digest('hex') }]
+const supervisorTemplateSha = computeTemplateTreeSha256('v2.0.0', supervisorTemplateEntries)
 
 const temporary: string[] = []
 afterEach(async () => { await Promise.all(temporary.splice(0).map(path => rm(path, { recursive: true, force: true }))) })
@@ -165,6 +172,7 @@ describe('builder supervisor process entrypoint', () => {
     const pinned = { ...initial, policySha256 }
     const composition = composeBuilderSupervisor(pinned, engine)
     await composition.methods.initialize(new AbortController().signal)
+    expect(engine.activeContainers()).toEqual([])
     expect(await composition.methods.preflight({ request_id: `req_${'1'.repeat(32)}` }, new AbortController().signal)).toMatchObject({ state: 'OK', policy_sha256: policySha256 })
     const mismatched = composeBuilderSupervisor({ ...pinned, policySha256: 'f'.repeat(64) }, engine)
     await expect(mismatched.methods.initialize(new AbortController().signal)).rejects.toThrow('BUILDER_ATTESTATION_FAILED')
@@ -244,30 +252,49 @@ function config(overrides: Partial<BuilderSupervisorResolvedConfig> = {}): Build
     artifactRoot: `/srv/dz23-studio/generated-runs/instances/${scopeId}`, exportRoot: `/srv/dz23-studio/builder-exports/instances/${scopeId}`,
     journalRoot: `/var/lib/dz23-studio/builder/instances/${scopeId}/journal`, replayRoot: `/var/lib/dz23-studio/builder/instances/${scopeId}/rpc-replay`, dockerSocketPath: '/var/run/docker.sock',
     bearerToken: `token_${'T'.repeat(48)}`, imageDigest: `sha256:${'a'.repeat(64)}`, templateStoreVersion: 'v2.0.0',
-    templateStoreSha256: 'b'.repeat(64), policySha256: 'c'.repeat(64), ...overrides,
+    templateStoreSha256: supervisorTemplateSha, policySha256: 'c'.repeat(64), ...overrides,
   }
 }
 
 class HealthyEngine implements DockerEnginePort {
   readonly #templateVolume: string
+  readonly #containers = new Map<string, { readonly name: string; readonly labels: Record<string, string>; state: string }>()
   constructor(private readonly config: BuilderSupervisorResolvedConfig) {
-    this.#templateVolume = `dz23-template-${createHash('sha256').update(`${config.scopeId}:${config.templateStoreVersion}:${config.templateStoreSha256}`).digest('hex').slice(0, 24)}`
+    this.#templateVolume = templateStoreVolumeName(config.installationId, config.scopeId, config.templateStoreVersion, config.templateStoreSha256)
   }
   async ping(): Promise<void> {}
   async inspectImage(): Promise<{ readonly Id: string }> { return { Id: this.config.imageDigest } }
   async createVolume(): Promise<void> { throw new Error('UNEXPECTED_CREATE_VOLUME') }
   async removeVolume(): Promise<void> {}
   async listVolumes(filters: Readonly<Record<string, readonly string[]>>): Promise<readonly Record<string, unknown>[]> {
-    const labels = filters.label ?? []
-    return labels.includes('dz23.managed=builder-template-store') ? [{ Name: this.#templateVolume, Labels: Object.fromEntries(labels.map(item => item.split(/=(.*)/su).slice(0, 2) as [string, string])) }] : []
+    const names = filters.name ?? []
+    return names.includes(this.#templateVolume) ? [{ Name: this.#templateVolume, Labels: { 'dz23.managed': 'builder-template-store', 'com.dz23.studio.installation-id': this.config.installationId, 'com.dz23.studio.scope-id': this.config.scopeId, 'dz23.template_version': this.config.templateStoreVersion, 'dz23.template_sha256': this.config.templateStoreSha256, 'dz23.materialization_nonce': 'a'.repeat(32) } }] : []
   }
-  async createContainer(): Promise<string> { return 'a'.repeat(12) }
+  async createContainer(name: string, bodyValue: unknown): Promise<string> {
+    const body = bodyValue as { readonly Labels?: unknown }
+    const labels = typeof body.Labels === 'object' && body.Labels !== null && !Array.isArray(body.Labels) ? body.Labels as Record<string, string> : {}
+    const id = String(this.#containers.size + 1).padStart(12, 'a'); this.#containers.set(id, { name, labels: { ...labels }, state: 'created' }); return id
+  }
   async putArchive(): Promise<void> { throw new Error('UNEXPECTED_PUT_ARCHIVE') }
-  async startContainer(): Promise<void> {}
+  async startContainer(id: string): Promise<void> { const row = this.#containers.get(id); if (row !== undefined) row.state = 'running' }
   async waitContainer(): Promise<{ readonly StatusCode: number }> { return { StatusCode: 0 } }
   async containerLogs(): Promise<{ readonly stdout: Buffer; readonly stderr: Buffer }> { return { stdout: Buffer.from(this.config.templateStoreSha256), stderr: Buffer.alloc(0) } }
-  async downloadArchive(): Promise<{ readonly bytes: number; readonly sha256: string }> { throw new Error('UNEXPECTED_DOWNLOAD') }
-  async stopContainer(): Promise<void> {}
-  async removeContainer(): Promise<void> {}
-  async listContainers(): Promise<readonly Record<string, unknown>[]> { return [] }
+  async downloadArchive(_container: string, _source: string, destination: FileHandle): Promise<{ readonly bytes: number; readonly sha256: string }> { const value = supervisorTemplateTar(this.config.templateStoreSha256); await destination.writeFile(value); await destination.sync(); return { bytes: value.byteLength, sha256: createHash('sha256').update(value).digest('hex') } }
+  async stopContainer(id: string): Promise<void> { const row = this.#containers.get(id); if (row !== undefined) row.state = 'exited' }
+  async removeContainer(id: string): Promise<void> { this.#containers.delete(id) }
+  async listContainers(filters: Readonly<Record<string, readonly string[]>> = {}): Promise<readonly Record<string, unknown>[]> {
+    const names = filters.name ?? []; const wanted = filters.label ?? []
+    return [...this.#containers.entries()].filter(([, row]) => (names.length === 0 || names.includes(row.name)) && wanted.every(item => { const [key, value] = item.split(/=(.*)/su); return row.labels[key!] === value })).map(([Id, row]) => ({ Id, Names: [`/${row.name}`], State: row.state, Labels: row.labels }))
+  }
+  activeContainers(): readonly string[] { return [...this.#containers.keys()] }
+}
+
+function supervisorTemplateTar(markerHash: string): Buffer {
+  const entry = (name: string, value: Buffer, type: '0' | '5', mode: number): Buffer => {
+    const header = Buffer.alloc(512); header.write(name, 0, 100, 'utf8')
+    const octal = (offset: number, length: number, number: number) => header.write(`${number.toString(8).padStart(length - 1, '0')}\0`, offset, length, 'ascii')
+    octal(100, 8, mode); octal(108, 8, 10_001); octal(116, 8, 10_001); octal(124, 12, value.byteLength); octal(136, 12, 0); header.fill(0x20, 148, 156); header[156] = type.charCodeAt(0); header.write('ustar', 257, 6, 'ascii'); header.write('00', 263, 2, 'ascii'); octal(148, 8, header.reduce((sum, byte) => sum + byte, 0))
+    return Buffer.concat([header, value, Buffer.alloc((512 - value.byteLength % 512) % 512)])
+  }
+  return Buffer.concat([entry('template-store', Buffer.alloc(0), '5', 0o555), entry('template-store/tree', Buffer.alloc(0), '5', 0o555), entry('template-store/tree/store.txt', Buffer.from(supervisorTemplateContent), '0', 0o444), entry('template-store/.complete', Buffer.from(`${markerHash}\n`), '0', 0o444), Buffer.alloc(1024)])
 }

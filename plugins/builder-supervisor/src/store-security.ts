@@ -29,14 +29,24 @@ export function parseTemplateStoreManifest(value: unknown): TemplateStoreManifes
   let bytes = 0
   for (const entry of entries) {
     if (entry.type === 'file') {
-      bytes += entry.bytes
-      if (!Number.isSafeInteger(bytes) || bytes > TEMPLATE_STORE_MAX_BYTES) invalid()
+      bytes = checkedTemplateStoreByteTotal(bytes, entry.bytes)
     }
     assertParentsDeclared(entry, directories)
   }
   const manifest = { version: 1 as const, template_store_version: record.template_store_version, tree_sha256: record.tree_sha256, entries }
   if (computeTemplateTreeSha256(manifest.template_store_version, entries) !== manifest.tree_sha256) invalid()
   return manifest
+}
+
+export function checkedTemplateStoreByteTotal(current: number, added: number): number {
+  const result = current + added
+  if (!Number.isSafeInteger(result) || result > TEMPLATE_STORE_MAX_BYTES) invalid()
+  return result
+}
+
+export function checkedTemplateStoreEntryCount(count: number): number {
+  if (!Number.isSafeInteger(count) || count < 0 || count > TEMPLATE_STORE_MAX_ENTRIES) invalid()
+  return count
 }
 
 export function computeTemplateTreeSha256(version: string, entries: readonly TemplateManifestEntry[]): string {
@@ -102,6 +112,12 @@ export function assertSourceIdentity(opened: Stats, linked: Stats, expected: 'di
   assertSafeStoreStat(opened, expected, false)
   assertSafeStoreStat(linked, expected, false)
   if (opened.dev !== linked.dev || opened.ino !== linked.ino) invalid()
+}
+
+export function assertUnchangedStoreStat(left: Stats, right: Stats, expected: 'directory' | 'file'): void {
+  const common = left.dev === right.dev && left.ino === right.ino && left.mtimeMs === right.mtimeMs && left.ctimeMs === right.ctimeMs && (left.mode & 0o7777) === (right.mode & 0o7777)
+  const fileFields = expected === 'directory' || (left.size === right.size && left.nlink === right.nlink)
+  if (!common || !fileFields) invalid()
 }
 
 export function isSafeStagingName(value: string): boolean {

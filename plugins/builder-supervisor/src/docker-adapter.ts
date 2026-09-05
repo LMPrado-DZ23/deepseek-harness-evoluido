@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { rm } from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
@@ -8,11 +8,12 @@ import type { BuilderAttestation, BuildStep, ExportedArtifact, StepResult } from
 import { BuilderSupervisorError } from './model.js'
 import { Semaphore } from './semaphore.js'
 import { isBuilderRuntimeScopeId, isInstallationId, type BuilderRuntimeScopeId } from './runtime-scope.js'
+import { templateStoreVolumeName, verifyTemplateStoreVolume } from './template-store-volume.js'
 
 const OUTPUT_LIMIT = 512 * 1024
 const EXPORT_ARCHIVE_LIMIT = 640 * 1024 * 1024
 const COMMANDS: Readonly<Record<BuildStep, readonly string[]>> = {
-  install: ['pnpm', 'install', '--offline', '--frozen-store', '--frozen-lockfile', '--trust-lockfile', '--ignore-scripts', '--store-dir', '/template-store'],
+  install: ['pnpm', 'install', '--offline', '--frozen-store', '--frozen-lockfile', '--trust-lockfile', '--ignore-scripts', '--store-dir', '/template-store/tree'],
   build: ['pnpm', 'run', 'build'], test: ['pnpm', 'run', 'test'], e2e: ['pnpm', 'run', 'test:e2e'],
 }
 
@@ -63,17 +64,15 @@ export class DockerBuilderAdapter implements BuilderExecutionPort {
     for (const value of Object.values(this.#limits)) if (!Number.isSafeInteger(value) || value <= 0) throw new Error('INVALID_BUILDER_LIMIT')
     if (this.#limits.workspaceBytes > this.#limits.maxWorkspaceBytes || this.#limits.maxRetainedExports > 1_000) throw new Error('INVALID_BUILDER_LIMIT')
     this.#containers = new Semaphore(this.#limits.concurrentContainers)
-    this.#templateStoreVolume = templateStoreVolumeName(options.scopeId, options.templateStoreVersion, options.templateStoreSha256)
-    this.#policySha256 = createHash('sha256').update(JSON.stringify({ protocol: 1, image: options.imageDigest, scope: options.scopeId, templateStoreVersion: options.templateStoreVersion, templateStoreSha256: options.templateStoreSha256, templateStoreVerifierSha256: createHash('sha256').update(TEMPLATE_STORE_VERIFY_SCRIPT).digest('hex'), templateStoreMountSteps: ['install'], commands: COMMANDS, exportAllowlist: ['.next/standalone/**', '.next/static/**', 'public/**', 'evidence/appspec-report.json'], limits: this.#limits, user: '10001:10001', network: 'none', readOnlyRoot: true, capDrop: ['ALL'], noNewPrivileges: true })).digest('hex')
+    this.#templateStoreVolume = templateStoreVolumeName(options.installationId, options.scopeId, options.templateStoreVersion, options.templateStoreSha256)
+    this.#policySha256 = createHash('sha256').update(JSON.stringify({ protocol: 1, image: options.imageDigest, scope: options.scopeId, templateStoreVersion: options.templateStoreVersion, templateStoreSha256: options.templateStoreSha256, templateStoreValidator: 'host-canonical-v1', templateStoreMountSteps: ['install'], commands: COMMANDS, exportAllowlist: ['.next/standalone/**', '.next/static/**', 'public/**', 'evidence/appspec-report.json'], limits: this.#limits, user: '10001:10001', network: 'none', readOnlyRoot: true, capDrop: ['ALL'], noNewPrivileges: true })).digest('hex')
   }
 
   async preflight(signal: AbortSignal): Promise<BuilderAttestation> {
     let state: 'OK' | 'BLOCKED_EXTERNAL' = 'BLOCKED_EXTERNAL'; let imageId = this.options.imageDigest
     try {
       await this.options.engine.ping(signal); imageId = (await this.options.engine.inspectImage(this.options.imageDigest, signal)).Id as `sha256:${string}`
-      const stores = await this.options.engine.listVolumes({ label: templateStoreLabels(this.options.installationId, this.options.scopeId, this.options.templateStoreVersion, this.options.templateStoreSha256) }, signal)
-      const storeMetadataValid = stores.length === 1 && identifier(stores[0]) === this.#templateStoreVolume && hasLabels(stores[0], templateStoreLabels(this.options.installationId, this.options.scopeId, this.options.templateStoreVersion, this.options.templateStoreSha256))
-      const storeContentValid = storeMetadataValid && await this.#verifyTemplateStore(signal)
+      const storeContentValid = await verifyTemplateStoreVolume({ engine: this.options.engine, imageDigest: this.options.imageDigest, installationId: this.options.installationId, scopeId: this.options.scopeId, version: this.options.templateStoreVersion, treeSha256: this.options.templateStoreSha256, volumeName: this.#templateStoreVolume }, signal)
       state = imageId === this.options.imageDigest && storeContentValid ? 'OK' : 'BLOCKED_EXTERNAL'
     } catch { state = 'BLOCKED_EXTERNAL' }
     return { state, protocol_version: 1, scope_id: this.options.scopeId, image_id: /^sha256:[a-f0-9]{64}$/u.test(imageId) ? imageId : this.options.imageDigest, policy_sha256: this.#policySha256 }
@@ -237,22 +236,6 @@ export class DockerBuilderAdapter implements BuilderExecutionPort {
     return [...refs].sort()
   }
 
-  async #verifyTemplateStore(signal: AbortSignal): Promise<boolean> {
-    const labels = templateVerifierLabels(this.options.installationId, this.options.scopeId, this.options.templateStoreVersion, this.options.templateStoreSha256)
-    const stale = await this.options.engine.listContainers({ label: Object.entries(labels).map(([key, value]) => `${key}=${value}`) }, signal)
-    for (const row of stale) { const id = identifier(row); if (id === undefined) throw new BuilderSupervisorError('RECOVERY_FAILED'); await this.options.engine.removeContainer(id, signal) }
-    let container: string | undefined
-    try {
-      container = await this.options.engine.createContainer(`${this.#templateStoreVolume}-verify-${randomBytes(4).toString('hex')}`, containerBody(this.options.imageDigest, ['node', '-e', TEMPLATE_STORE_VERIFY_SCRIPT], labels, 'template-verify', this.#limits, [
-        { Type: 'volume', Source: this.#templateStoreVolume, Target: '/template-store', ReadOnly: true },
-      ]), signal)
-      await this.options.engine.startContainer(container, signal)
-      const [completion, logs] = await Promise.all([this.options.engine.waitContainer(container, signal), this.options.engine.containerLogs(container, 256, signal)])
-      return completion.StatusCode === 0 && logs.stderr.byteLength === 0 && logs.stdout.toString('utf8').trim() === this.options.templateStoreSha256
-    } finally {
-      if (container !== undefined) await this.options.engine.removeContainer(container, AbortSignal.timeout(10_000))
-    }
-  }
 }
 
 function containerBody(image: string, command: readonly string[], labels: Readonly<Record<string, string>>, role: string, limits: BuilderLimits, mounts: readonly unknown[], step?: BuildStep): Readonly<Record<string, unknown>> {
@@ -274,10 +257,5 @@ function sanitized(value: Buffer, maximumBytes: number): string {
   for (const character of source) { const size = Buffer.byteLength(character); if (bytes + size > maximumBytes) break; result += character; bytes += size }
   return result
 }
-function templateStoreLabels(installationId: string, scopeId: BuilderRuntimeScopeId, version: string, sha256: string): readonly string[] { return ['dz23.managed=builder-template-store', `com.dz23.studio.installation-id=${installationId}`, `com.dz23.studio.scope-id=${scopeId}`, `dz23.template_version=${version}`, `dz23.template_sha256=${sha256}`] }
-function templateStoreVolumeName(scopeId: BuilderRuntimeScopeId, version: string, sha256: string): string { return `dz23-template-${createHash('sha256').update(`${scopeId}:${version}:${sha256}`).digest('hex').slice(0, 24)}` }
-function hasLabels(value: unknown, expected: readonly string[]): boolean { const labels = record(record(value).Labels); return expected.every(item => { const index = item.indexOf('='); return labels[item.slice(0, index)] === item.slice(index + 1) }) }
-function templateVerifierLabels(installationId: string, scopeId: BuilderRuntimeScopeId, version: string, sha256: string): Readonly<Record<string, string>> { return { 'dz23.managed': 'builder-template-verifier', ...baseIdentityLabels(installationId, scopeId), 'dz23.template_version': version, 'dz23.template_sha256': sha256 } }
 
 const EXPORT_SCRIPT = String.raw`const fs=require('node:fs'),p=require('node:path');const rows=[['.next/standalone',true,true],['.next/static',true,true],['public',true,false],['evidence/appspec-report.json',false,true]];for(const [name,dir,required]of rows){const from=p.join('/workspace',name),to=p.join('/export',name);if(!fs.existsSync(from)){if(required)throw new Error('EXPORT_SOURCE_MISSING');continue}const stat=fs.lstatSync(from);if(stat.isSymbolicLink()||(dir?!stat.isDirectory():!stat.isFile()))throw new Error('EXPORT_SOURCE_INVALID');fs.mkdirSync(p.dirname(to),{recursive:true});fs.cpSync(from,to,{recursive:dir,dereference:false,errorOnExist:true,force:false})}`
-const TEMPLATE_STORE_VERIFY_SCRIPT = String.raw`const fs=require('node:fs'),p=require('node:path'),c=require('node:crypto');const root='/template-store',names=[];function walk(dir,prefix=''){for(const item of fs.readdirSync(dir,{withFileTypes:true}).sort((a,b)=>a.name.localeCompare(b.name))){const name=prefix?prefix+'/'+item.name:item.name,full=p.join(dir,item.name),stat=fs.lstatSync(full);if(item.isSymbolicLink()||stat.isSymbolicLink())throw new Error('UNSAFE_STORE');if(item.isDirectory()&&stat.isDirectory())walk(full,name);else if(item.isFile()&&stat.isFile()&&stat.nlink===1)names.push(name);else throw new Error('UNSAFE_STORE')}}walk(root);const hash=c.createHash('sha256');for(const name of names){hash.update(name).update('\0').update(fs.readFileSync(p.join(root,...name.split('/')))).update('\0')}process.stdout.write(hash.digest('hex'))`

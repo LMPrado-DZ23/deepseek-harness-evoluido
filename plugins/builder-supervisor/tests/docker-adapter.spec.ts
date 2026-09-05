@@ -8,17 +8,21 @@ import { DockerBuilderAdapter } from '../src/docker-adapter.js'
 import type { DockerEnginePort } from '../src/docker-engine.js'
 import { openManagedExportArchive } from '../src/export-artifact.js'
 import { deriveBuilderRuntimeScopeId } from '../src/runtime-scope.js'
+import { computeTemplateTreeSha256, type TemplateManifestEntry } from '../src/store-security.js'
+import { templateStoreVolumeName } from '../src/template-store-volume.js'
 
 const image = `sha256:${'a'.repeat(64)}` as const
 const installationId = '1'.repeat(64)
 const scopeId = deriveBuilderRuntimeScopeId({ installationId, tenantId: 'tenant-one', instanceId: 'test-instance' })
 const templateVersion = 'nextjs-app@1'
-const templateStoreSha256 = 'd'.repeat(64)
+const templateContent = 'offline-store'
+const templateEntries: TemplateManifestEntry[] = [{ path: 'store.txt', type: 'file', bytes: Buffer.byteLength(templateContent), sha256: createHash('sha256').update(templateContent).digest('hex') }]
+const templateStoreSha256 = computeTemplateTreeSha256(templateVersion, templateEntries)
 const buildRef = `build_${'b'.repeat(32)}`
 const artifact = { archivePath: '/tmp/dz23-input.tar', archiveBytes: 1_024, sha256: 'c'.repeat(64), files: 1, bytes: 1 }
 
 describe('server-authoritative Docker builder adapter', () => {
-  it('uses only its pinned image and creates an isolated, read-only-rootfs step', async () => {
+  it('mounts the validated volume root read-only and installs from its materialized tree', async () => {
     const engine = new FakeEngine()
     const adapter = create(engine)
     const signal = new AbortController().signal
@@ -33,16 +37,16 @@ describe('server-authoritative Docker builder adapter', () => {
     expect(engine.volumeOptions).toEqual([{ type: 'tmpfs', device: 'tmpfs', o: 'size=67108864,uid=10001,gid=10001,mode=0700' }])
     const stager = engine.created.find(row => labels(row.body)['dz23.role'] === 'anchor')?.body
     const step = engine.created.find(row => labels(row.body)['dz23.role'] === 'step')?.body
-    const verifier = engine.created.find(row => labels(row.body)['dz23.role'] === 'template-verify')?.body
+    const verifier = engine.created.find(row => labels(row.body)['dz23.managed'] === 'builder-template-transporter')?.body
     expect(stager).toMatchObject({ Image: image, Cmd: ['sleep', 'infinity'], User: '10001:10001', NetworkDisabled: true })
     expect(step).toMatchObject({
       Image: image,
-      Cmd: ['pnpm', 'install', '--offline', '--frozen-store', '--frozen-lockfile', '--trust-lockfile', '--ignore-scripts', '--store-dir', '/template-store'],
+      Cmd: ['pnpm', 'install', '--offline', '--frozen-store', '--frozen-lockfile', '--trust-lockfile', '--ignore-scripts', '--store-dir', '/template-store/tree'],
       WorkingDir: '/workspace', User: '10001:10001', NetworkDisabled: true,
       Env: ['CI=true', 'HOME=/tmp', 'XDG_CONFIG_HOME=/tmp/.config', 'NEXT_TELEMETRY_DISABLED=1'],
     })
     expect(JSON.stringify(engine.created)).not.toMatch(/curl attacker|SECRET|"evil"/u)
-    assertHardened(verifier); assertHardened(stager); assertHardened(step)
+    assertTransportHardened(verifier); assertHardened(stager); assertHardened(step)
     expect(host(verifier).Mounts).toEqual([{ Type: 'volume', Source: templateVolume(), Target: '/template-store', ReadOnly: true }])
     expect(host(step).Mounts).toEqual([
       expect.objectContaining({ Type: 'volume', Target: '/workspace', ReadOnly: false }),
@@ -404,13 +408,14 @@ describe('server-authoritative Docker builder adapter', () => {
     await expect(create(nonRecord).listManaged(signal)).rejects.toThrow('RECOVERY_FAILED')
   })
 
-  it('removes stale template verifiers and rejects malformed verifier inventory', async () => {
+  it('never removes an unproved transporter owned by another attempt', async () => {
     const signal = new AbortController().signal
     const stale = new FakeEngine(); stale.containers.push({ Id: 'stale-verifier', Labels: verifierLabels() })
     await expect(create(stale).preflight(signal)).resolves.toMatchObject({ state: 'OK' })
-    expect(stale.containers.some(row => row.Id === 'stale-verifier')).toBe(false)
+    expect(stale.containers.some(row => row.Id === 'stale-verifier')).toBe(true)
     const malformed = new FakeEngine(); malformed.containers.push({ Id: '', Labels: verifierLabels() })
-    await expect(create(malformed).preflight(signal)).resolves.toMatchObject({ state: 'BLOCKED_EXTERNAL' })
+    await expect(create(malformed).preflight(signal)).resolves.toMatchObject({ state: 'OK' })
+    expect(malformed.containers.some(row => row.Id === '')).toBe(true)
   })
 
   it('truncates multibyte output only at a complete UTF-8 boundary', async () => {
@@ -432,8 +437,8 @@ class FakeEngine implements DockerEnginePort {
   readonly inspected: string[] = []; readonly archives: Array<{ destination: string; bytes: number }> = []
   readonly volumeOptions: Array<Readonly<Record<string, string>>> = []
   readonly created: Array<{ name: string; body: Record<string, unknown> }> = []
-  containers: Array<{ Id: string; Labels: Record<string, string> }> = []
-  volumes: Array<{ Name: string; Labels: Record<string, string> }> = [{ Name: templateVolume(), Labels: { 'dz23.managed': 'builder-template-store', ...physicalIdentityLabels(), 'dz23.template_version': templateVersion, 'dz23.template_sha256': templateStoreSha256 } }]
+  containers: Array<{ Id: string; Labels: Record<string, string>; Names?: string[]; State?: string }> = []
+  volumes: Array<{ Name: string; Labels: Record<string, string> }> = [{ Name: templateVolume(), Labels: { 'dz23.managed': 'builder-template-store', ...physicalIdentityLabels(), 'dz23.template_version': templateVersion, 'dz23.template_sha256': templateStoreSha256, 'dz23.materialization_nonce': 'a'.repeat(32) } }]
   readonly started: string[] = []
   readonly waitResolvers = new Map<string, (value: { readonly StatusCode: number }) => void>()
   downloadPayload: Buffer = Buffer.alloc(0)
@@ -441,16 +446,16 @@ class FakeEngine implements DockerEnginePort {
   async inspectImage(digest: string): Promise<{ readonly Id: string }> { this.inspected.push(digest); return { Id: this.imageId } }
   async createVolume(name: string, volumeLabels: Readonly<Record<string, string>>, driverOpts: Readonly<Record<string, string>>): Promise<void> { this.volumes.push({ Name: name, Labels: { ...volumeLabels } }); this.volumeOptions.push({ ...driverOpts }) }
   async removeVolume(name: string): Promise<void> { if (this.failExporterCleanup && this.volumes.find(row => row.Name === name)?.Labels['dz23.resource'] === 'export') throw new Error('remove export volume failed'); if (!this.keepVolume) this.volumes = this.volumes.filter(row => row.Name !== name) }
-  async listVolumes(filters: Readonly<Record<string, readonly string[]>> = {}): Promise<readonly Record<string, unknown>[]> { const wanted = filters.label ?? []; if (this.failExporterCleanup && wanted.includes('dz23.resource=export')) throw new Error('list export volumes failed'); if (this.failRollbackInventory && wanted.some(item => item.startsWith('dz23.build_ref='))) throw new Error('list rollback volumes failed'); return this.volumes.filter(row => wanted.every(item => { const index = item.indexOf('='); return row.Labels[item.slice(0, index)] === item.slice(index + 1) })) }
+  async listVolumes(filters: Readonly<Record<string, readonly string[]>> = {}): Promise<readonly Record<string, unknown>[]> { const wanted = filters.label ?? []; const names = filters.name ?? []; if (this.failExporterCleanup && wanted.includes('dz23.resource=export')) throw new Error('list export volumes failed'); if (this.failRollbackInventory && wanted.some(item => item.startsWith('dz23.build_ref='))) throw new Error('list rollback volumes failed'); return this.volumes.filter(row => (names.length === 0 || names.includes(row.Name)) && wanted.every(item => { const index = item.indexOf('='); return row.Labels[item.slice(0, index)] === item.slice(index + 1) })) }
   async createContainer(name: string, bodyValue: unknown): Promise<string> {
     const body = object(bodyValue); const id = `${String(this.created.length + 1).padStart(12, 'a')}`
-    this.created.push({ name, body }); this.containers.push({ Id: id, Labels: labels(body) }); return id
+    this.created.push({ name, body }); this.containers.push({ Id: id, Labels: labels(body), Names: [`/${name}`], State: 'created' }); return id
   }
   async putArchive(_container: string, destination: string, _archivePath: string, archiveBytes: number): Promise<void> {
     if (this.archiveFailure) throw new Error('archive failed')
     this.archives.push({ destination, bytes: archiveBytes })
   }
-  async startContainer(id: string): Promise<void> { this.started.push(id) }
+  async startContainer(id: string): Promise<void> { this.started.push(id); const row = this.containers.find(value => value.Id === id); if (row !== undefined) row.State = 'running' }
   async waitContainer(id: string, signal: AbortSignal): Promise<{ readonly StatusCode: number }> {
     if (!this.waitForAbort) return { StatusCode: this.containers.find(row => row.Id === id)?.Labels['dz23.role'] === 'export' ? this.exportExitCode : 0 }
     return new Promise((resolve, reject) => {
@@ -463,13 +468,13 @@ class FakeEngine implements DockerEnginePort {
     if (this.logs.stdout.byteLength + this.logs.stderr.byteLength > maximumBytes) throw new Error('DOCKER_RESPONSE_TOO_LARGE')
     return this.logs
   }
-  async downloadArchive(_container: string, _source: string, destination: FileHandle): Promise<{ readonly bytes: number; readonly sha256: string }> { await destination.writeFile(this.downloadPayload); await destination.sync(); return { bytes: this.downloadPayload.length + this.reportedDownloadBytesDelta, sha256: createHash('sha256').update(this.downloadPayload).digest('hex') } }
+  async downloadArchive(_container: string, source: string, destination: FileHandle): Promise<{ readonly bytes: number; readonly sha256: string }> { const payload = source === '/template-store' ? templateTar(this.templateDigest) : this.downloadPayload; await destination.writeFile(payload); await destination.sync(); return { bytes: payload.length + this.reportedDownloadBytesDelta, sha256: createHash('sha256').update(payload).digest('hex') } }
   async stopContainer(id: string): Promise<void> {
     if (this.failExporterCleanup && this.containers.find(row => row.Id === id)?.Labels['dz23.role'] === 'export') throw new Error('stop exporter failed')
     this.waitResolvers.get(id)?.({ StatusCode: 137 }); this.waitResolvers.delete(id)
   }
   async removeContainer(id: string): Promise<void> { const role = this.containers.find(row => row.Id === id)?.Labels['dz23.role']; if ((this.failExporterCleanup && role === 'export') || (this.failStepRemoval && role === 'step')) throw new Error('remove container failed'); this.waitResolvers.delete(id); if (!this.keepContainer) this.containers = this.containers.filter(row => row.Id !== id) }
-  async listContainers(filters: Readonly<Record<string, readonly string[]>> = {}): Promise<readonly Record<string, unknown>[]> { const wanted = filters.label ?? []; if (this.failExporterCleanup && wanted.includes('dz23.role=export')) throw new Error('list export containers failed'); if (this.failRollbackInventory && wanted.some(item => item.startsWith('dz23.build_ref='))) throw new Error('list rollback containers failed'); return this.containers.filter(row => wanted.every(item => { const index = item.indexOf('='); return row.Labels[item.slice(0, index)] === item.slice(index + 1) })) }
+  async listContainers(filters: Readonly<Record<string, readonly string[]>> = {}): Promise<readonly Record<string, unknown>[]> { const wanted = filters.label ?? []; const names = filters.name ?? []; if (this.failExporterCleanup && wanted.includes('dz23.role=export')) throw new Error('list export containers failed'); if (this.failRollbackInventory && wanted.some(item => item.startsWith('dz23.build_ref='))) throw new Error('list rollback containers failed'); return this.containers.filter(row => (names.length === 0 || row.Names?.some(name => names.includes(name.replace(/^\//u, ''))) === true) && wanted.every(item => { const index = item.indexOf('='); return row.Labels[item.slice(0, index)] === item.slice(index + 1) })) }
 }
 
 function assertHardened(body: unknown): void {
@@ -479,6 +484,11 @@ function assertHardened(body: unknown): void {
   })
   expect(object(body)).not.toHaveProperty('ExposedPorts')
   expect(host(body)).not.toHaveProperty('Binds')
+}
+function assertTransportHardened(body: unknown): void {
+  expect(host(body)).toMatchObject({ NetworkMode: 'none', ReadonlyRootfs: true, Privileged: false, CapDrop: ['ALL'], SecurityOpt: ['no-new-privileges'], AutoRemove: true, PidsLimit: 32, Memory: 256 * 1024 * 1024, NanoCpus: 500_000_000, PublishAllPorts: false, PortBindings: {}, IpcMode: 'private' })
+  expect(object(body)).toMatchObject({ Image: image, Cmd: ['node', '-e', 'setTimeout(()=>process.exit(0),720000)'], User: '10001:10001', NetworkDisabled: true })
+  expect(host(body)).not.toHaveProperty('Binds'); expect(object(body)).not.toHaveProperty('ExposedPorts')
 }
 function host(value: unknown): Record<string, unknown> { return object(object(value).HostConfig) }
 function labels(value: unknown): Record<string, string> {
@@ -492,10 +502,25 @@ function tarSingle(name: string, value: string): Buffer {
   return Buffer.concat([header, data, Buffer.alloc((512 - data.length % 512) % 512), Buffer.alloc(1024)])
 }
 function exportTar(): Buffer { return Buffer.concat([tarSingle('.next/standalone/server.js', 'server').subarray(0, -1024), tarSingle('.next/static/chunk.js', 'chunk').subarray(0, -1024), tarSingle('evidence/appspec-report.json', '{}').subarray(0, -1024), Buffer.alloc(1024)]) }
-function templateVolume(): string { return `dz23-template-${createHash('sha256').update(`${scopeId}:${templateVersion}:${templateStoreSha256}`).digest('hex').slice(0, 24)}` }
+function templateVolume(): string { return templateStoreVolumeName(installationId, scopeId, templateVersion, templateStoreSha256) }
 function limits(overrides: Partial<import('../src/docker-adapter.js').BuilderLimits> = {}): import('../src/docker-adapter.js').BuilderLimits { return { memoryBytes: 512 * 1024 * 1024, nanoCpus: 1_000_000_000, pids: 128, timeoutMs: 1_000, workspaceBytes: 64 * 1024 * 1024, maxWorkspaceBytes: 128 * 1024 * 1024, concurrentContainers: 2, maxExportBytes: 128 * 1024 * 1024, maxRetainedExports: 5, ...overrides } }
 function physicalIdentityLabels(selectedScope = scopeId): Record<string, string> { return { 'com.dz23.studio.installation-id': installationId, 'com.dz23.studio.scope-id': selectedScope } }
 function managedIdentityLabels(): Record<string, string> { return { 'dz23.managed': 'builder', ...physicalIdentityLabels() } }
 function managedLabels(ref: string, id: string): Record<string, string> { return { ...managedIdentityLabels(), 'dz23.build_ref': ref, 'dz23.build_id': id } }
 function managedContainer(ref: string, id: string): { Id: string; Labels: Record<string, string> } { return { Id: `${id}-${ref}`.slice(0, 64), Labels: managedLabels(ref, id) } }
 function verifierLabels(): Record<string, string> { return { 'dz23.managed': 'builder-template-verifier', ...physicalIdentityLabels(), 'dz23.template_version': templateVersion, 'dz23.template_sha256': templateStoreSha256 } }
+function templateTar(markerHash: string): Buffer {
+  return Buffer.concat([
+    templateTarEntry('template-store', Buffer.alloc(0), '5', 0o555),
+    templateTarEntry('template-store/tree', Buffer.alloc(0), '5', 0o555),
+    templateTarEntry('template-store/tree/store.txt', Buffer.from(templateContent), '0', 0o444),
+    templateTarEntry('template-store/.complete', Buffer.from(`${markerHash}\n`), '0', 0o444),
+    Buffer.alloc(1024),
+  ])
+}
+function templateTarEntry(name: string, data: Buffer, type: '0' | '5', mode: number): Buffer {
+  const header = Buffer.alloc(512); header.write(name, 0, 100, 'utf8')
+  const octal = (offset: number, length: number, value: number) => header.write(`${value.toString(8).padStart(length - 1, '0')}\0`, offset, length, 'ascii')
+  octal(100, 8, mode); octal(108, 8, 10_001); octal(116, 8, 10_001); octal(124, 12, data.byteLength); octal(136, 12, 0); header.fill(0x20, 148, 156); header[156] = type.charCodeAt(0); header.write('ustar', 257, 6, 'ascii'); header.write('00', 263, 2, 'ascii'); octal(148, 8, header.reduce((sum, byte) => sum + byte, 0))
+  return Buffer.concat([header, data, Buffer.alloc((512 - data.byteLength % 512) % 512)])
+}

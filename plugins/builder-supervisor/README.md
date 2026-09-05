@@ -43,8 +43,29 @@ retenção do próprio journal remove resultados antigos e libera a capacidade s
 depender de um mapa volátil em memória.
 
 O preflight não confia apenas nas labels do store: monta o volume versionado
-somente para leitura em um verificador efêmero isolado, calcula a árvore real e
-exige o SHA-256 configurado antes de atestar `state: OK`.
+somente para leitura em um transporter efêmero isolado, baixa o envelope pela
+Docker Archive API e reconstrói no host o mesmo manifesto canônico usado pelo
+provisionador. PAX/GNU, links, devices, FIFO, duplicidade, traversal, limites
+excedidos, marker ausente ou hash diferente são recusados antes de atestar
+`state: OK`.
+
+O materializador M6.3 copia o envelope selado `<version>/{tree,.complete}` para
+um volume determinístico de `installation_id + scope_id + versão + hash`.
+Produtores de `TemplateStoreManifest` devem validar cada entrada com
+`templateStoreUstarEntryPath`; caminhos aceitos pela gramática lógica mas que
+não cabem no `name`/`prefix` USTAR são recusados antes do acesso ao Docker.
+Adquire antes um claim-contêiner com nonce e TTL, prova o volume vazio, envia a
+árvore em tar determinístico e o `.complete` em um segundo upload, sempre por
+último. A imagem builder fixada é o único transporter; seu comando `node -e` é
+fixo, sem shell, rede, bind ou portas, autoexpira acima do deadline da operação
+e é removido automaticamente; o claim permanece como witness. O volume é
+somente leitura nos builds.
+Uma corrida nunca autoriza apagar um volume sem o nonce da tentativa; uma queda
+só é recuperada depois que o claim autoexpira e está `created` (queda entre a
+criação e o start), `exited` ou `dead`. Claims `running`, `restarting`,
+`paused` ou `removing` continuam ocupados e nunca são tomados. O preflight usa
+o mesmo claim, portanto também não deixa transporter órfão na janela entre
+criação e start; `BUSY` resulta apenas em volume inelegível.
 
 Um build aprovado sai pela API de archive do Docker, em streaming com teto e
 SHA-256, diretamente para um descritor criado pelo supervisor. Raiz, diretório
@@ -217,6 +238,22 @@ node lib/provision-cli.js \
 
 O instalador futuro deve criar previamente as raízes da policy com dono e modos
 seguros. Esta fatia não provisiona volume Docker nem torna o serviço ativo.
+
+### Template store materializado (M6.3)
+
+O volume físico contém `tree/**` e `.complete`. O passo de instalação monta a
+raiz em `/template-store` como read-only e usa exclusivamente
+`--store-dir /template-store/tree`. A raiz é uma fronteira gerida pelo driver
+Docker: o parser exige uma única entrada diretório, mas não usa UID/GID ou modo
+da raiz como atestação. `tree`, seus descendentes e `.complete` permanecem
+estritos (UID/GID 10001; diretórios 0555; arquivos 0444), com manifesto e hash
+canônicos.
+
+O verifier tem deadline próprio de 8 minutos mais orçamento conservador de até
+2 minutos para cleanup, ambos dentro do TTL de 15 minutos do claim. A liberação
+revalida a geração do claim, ausência do transporter e nonce estável do volume.
+Docker real está desligado neste checkpoint: Archive API, comportamento de
+metadata entre drivers e instalação offline real permanecem `NOT_EXECUTED`.
 
 ### Isolamento de organização/tenant
 
