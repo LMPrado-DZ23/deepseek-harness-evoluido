@@ -9,12 +9,13 @@ O socket do Docker nunca é montado no Harness.
 O cliente fala HTTP sobre um socket Unix `0660`, em `POST /v1/rpc`, usando um
 bearer obtido por referência de segredo. As únicas operações são `preflight`,
 `prepare`, `execute`, `cancel`, `finish` e `listManaged`. Todo corpo exige um
-`request_id` novo; replay é recusado.
+`request_id`. Repetir exatamente o mesmo corpo devolve a resposta persistida;
+reutilizar o ID com outro corpo é recusado.
 
 O cliente não escolhe imagem, comando, argumentos, usuário, rede, variáveis,
 mounts, portas ou limites. `execute` aceita somente uma etapa da máquina fixa:
 
-`install -> build -> unit -> e2e`
+`install -> build -> test -> e2e`
 
 Cada contêiner usa a imagem fixada no supervisor, usuário `10001:10001`, rede
 `none`, root filesystem somente leitura, `cap-drop ALL`,
@@ -31,7 +32,9 @@ gravados com criação exclusiva para continuarem inválidos após reinício.
 Um build aprovado sai pela API de archive do Docker, em streaming com teto e
 SHA-256. O tar é revalidado e extraído por descritores sem seguir links em um
 staging novo, depois publicado por `rename`; nenhum diretório do host é montado
-no contêiner. `finish` é idempotente e conserva `exported` e
+no contêiner. Somente `.next/standalone`, `.next/static`, `public` e o relatório
+de aceite podem sair. Retenção por contagem e quota global é aplicada antes de
+confirmar o resultado. `finish` é idempotente e conserva `exported` e
 `cleanup_pending` até o Docker confirmar que não restou recurso administrado.
 
 ## Integração

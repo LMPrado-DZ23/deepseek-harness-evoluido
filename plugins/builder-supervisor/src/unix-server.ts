@@ -5,6 +5,7 @@ import { createServer, request as httpRequest, type IncomingMessage, type Server
 import { dirname, posix } from 'node:path'
 import type { BuilderRpcMethods } from './protocol.js'
 import { BUILDER_RPC_MAX_BODY_BYTES, createBuilderRpcHandler } from './protocol.js'
+import { FileRpcReplayGuard } from './persistent-replay.js'
 
 const CREDENTIAL_REFERENCE = 'file:/run/secrets/dz23-builder-supervisor-token'
 interface LockMetadata { readonly nonce: string; readonly pid: number; readonly uid: number; readonly socket_dev: number | null; readonly socket_ino: number | null }
@@ -17,18 +18,23 @@ export async function listenBuilderUnix(options: BuilderUnixServerOptions): Prom
   if (!/^[A-Za-z0-9_-]{43,200}$/u.test(options.bearerToken)) throw new Error('INVALID_SUPERVISOR_TOKEN')
   const timeoutMs = options.operationTimeoutMs ?? 30_000; if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1) throw new Error('INVALID_OPERATION_TIMEOUT')
   await ensureSocketDirectory(parent, uid)
-  await acquireLock(lockPath, socketPath, options.bearerToken, uid, nonce)
-  let socketIdentity: { readonly dev: number; readonly ino: number } | undefined; let server: Server | undefined
+  let socketIdentity: { readonly dev: number; readonly ino: number } | undefined; let server: Server | undefined; let lockHeld = false
   try {
+    await acquireLock(lockPath, socketPath, options.bearerToken, uid, nonce); lockHeld = true
     await options.methods.initialize?.(AbortSignal.any([options.signal ?? new AbortController().signal, AbortSignal.timeout(timeoutMs)]))
     await assertAbsent(socketPath)
-    server = createServer((request, response) => { void handle(request, response, options, timeoutMs).catch(() => failure(response)) })
+    const rpc = createBuilderRpcHandler({ credentialRef: CREDENTIAL_REFERENCE, credentials: { resolve: async () => options.bearerToken }, methods: options.methods, replay: new FileRpcReplayGuard(`${socketPath}.requests`) })
+    server = createServer((request, response) => { void handle(request, response, options, timeoutMs, rpc).catch(() => failure(response)) })
     server.requestTimeout = timeoutMs; server.headersTimeout = Math.min(timeoutMs, 10_000); server.maxHeadersCount = 64
-    await new Promise<void>((resolve, reject) => { server!.once('error', reject); server!.listen(socketPath, () => { server!.off('error', reject); resolve() }) })
-    await chmod(socketPath, 0o660); const stat = await lstat(socketPath)
-    if (!stat.isSocket() || stat.uid !== uid) throw new Error('UNSAFE_SOCKET')
-    socketIdentity = { dev: stat.dev, ino: stat.ino }; await replaceMetadata(lockPath, { nonce, pid: process.pid, uid, socket_dev: stat.dev, socket_ino: stat.ino })
-  } catch (error) { await safeUnlinkSocket(socketPath, socketIdentity, uid); await releaseLock(lockPath, nonce); throw error }
+    const previousUmask = process.umask(0o117)
+    try { await new Promise<void>((resolve, reject) => { server!.once('error', reject); server!.listen(socketPath, () => { server!.off('error', reject); resolve() }) }) }
+    finally { process.umask(previousUmask) }
+    const bound = await lstat(socketPath)
+    if (!bound.isSocket() || bound.uid !== uid) throw new Error('UNSAFE_SOCKET')
+    socketIdentity = { dev: bound.dev, ino: bound.ino }
+    await chmod(socketPath, 0o660); await assertSocketIdentity(socketPath, socketIdentity, uid)
+    await replaceMetadata(lockPath, { nonce, pid: process.pid, uid, socket_dev: bound.dev, socket_ino: bound.ino })
+  } catch (error) { await safeUnlinkSocket(socketPath, socketIdentity, uid); if (lockHeld) await releaseLock(lockPath, nonce); throw error }
   const activeServer = server
   return { server: activeServer, close: async () => {
     await assertSocketIdentity(socketPath, socketIdentity, uid)
@@ -39,12 +45,11 @@ export async function listenBuilderUnix(options: BuilderUnixServerOptions): Prom
   } }
 }
 
-async function handle(request: IncomingMessage, response: ServerResponse, options: BuilderUnixServerOptions, timeoutMs: number): Promise<void> {
+async function handle(request: IncomingMessage, response: ServerResponse, options: BuilderUnixServerOptions, timeoutMs: number, rpc: ReturnType<typeof createBuilderRpcHandler>): Promise<void> {
   const controller = new AbortController(); const timeout = AbortSignal.timeout(timeoutMs); const abort = (reason?: unknown) => controller.abort(reason)
   const shutdown = () => abort(options.signal?.reason); const deadline = () => abort(timeout.reason)
   if (options.signal?.aborted === true) shutdown(); else options.signal?.addEventListener('abort', shutdown, { once: true })
   timeout.addEventListener('abort', deadline, { once: true }); request.once('aborted', () => abort()); response.once('close', () => { if (!response.writableEnded) abort() })
-  const rpc = createBuilderRpcHandler({ credentialRef: CREDENTIAL_REFERENCE, credentials: { resolve: async () => options.bearerToken }, methods: options.methods })
   try {
     let body: Buffer; try { body = await readBounded(request) } catch { body = Buffer.alloc(BUILDER_RPC_MAX_BODY_BYTES + 1) }
     const result = await rpc.handle({ path: request.url ?? '/', method: request.method ?? '', headers: { authorization: typeof request.headers.authorization === 'string' ? request.headers.authorization : undefined }, body, signal: controller.signal })
@@ -59,7 +64,8 @@ async function acquireLock(lockPath: string, socketPath: string, token: string, 
     if (await authenticatedProbe(socketPath, token)) throw new Error('SUPERVISOR_ALREADY_RUNNING')
     await recoverDeadLock(lockPath, socketPath, uid); return acquireLock(lockPath, socketPath, token, uid, nonce)
   }
-  await writeFile(posix.join(lockPath, 'owner.json'), `${JSON.stringify({ nonce, pid: process.pid, uid, socket_dev: null, socket_ino: null })}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
+  try { await writeFile(posix.join(lockPath, 'owner.json'), `${JSON.stringify({ nonce, pid: process.pid, uid, socket_dev: null, socket_ino: null })}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' }) }
+  catch (error) { await rm(lockPath, { recursive: true, force: true }); throw error }
 }
 
 async function recoverDeadLock(lockPath: string, socketPath: string, uid: number): Promise<void> {

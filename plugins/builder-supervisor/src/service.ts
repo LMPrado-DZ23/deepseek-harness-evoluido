@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { createVerifiedBuildArchive } from './artifact.js'
 import type { BuilderExecutionPort } from './docker-adapter.js'
-import type { BuildState, ExportedArtifact, FinishResult, ManagedBuild } from './model.js'
+import type { BuilderAttestation, BuilderErrorCode, BuildState, ExportedArtifact, FinishResult, ManagedBuild } from './model.js'
 import { BuilderSupervisorError, isTerminalState } from './model.js'
 import type { BuilderRpcMethods } from './protocol.js'
 import { ReplayGuard, type ReplayClaimPort } from './replay.js'
@@ -16,6 +16,8 @@ interface MutableBuild {
   exported?: ExportedArtifact
   cleanup_pending: boolean
   finish_result?: FinishResult
+  finish_error?: BuilderErrorCode
+  recovered_cleaned?: boolean
 }
 
 export interface BuilderSupervisorOptions {
@@ -46,7 +48,7 @@ export class BuilderSupervisor implements BuilderRpcMethods {
     this.#replay = options.replay ?? new ReplayGuard()
     this.#createReference = options.createReference ?? (() => `build_${randomBytes(16).toString('hex')}`)
     this.#maxBuilds = options.maxBuilds ?? 32
-    this.#buildClaims = options.buildClaims ?? { claim: async buildId => { if (this.#buildIds.has(buildId)) throw new BuilderSupervisorError('BUILD_ALREADY_EXISTS') } }
+    this.#buildClaims = options.buildClaims ?? { claim: async buildId => { if (this.#buildIds.has(buildId)) throw new BuilderSupervisorError('BUILD_ALREADY_EXISTS') }, release: async () => undefined }
     this.#steps = new Semaphore(options.maxConcurrentSteps ?? 2)
     if (!Number.isSafeInteger(this.#maxBuilds) || this.#maxBuilds < 1 || this.#maxBuilds > 1_000) throw new Error('INVALID_BUILD_LIMIT')
   }
@@ -58,15 +60,16 @@ export class BuilderSupervisor implements BuilderRpcMethods {
       for (const item of recovered) {
         if (this.#buildIds.has(item.build_id) || this.#buildRefs.has(item.build_ref)) throw new BuilderSupervisorError('RECOVERY_FAILED')
         this.#buildIds.add(item.build_id); this.#buildRefs.add(item.build_ref)
+        this.#builds.set(item.build_ref, { build_ref: item.build_ref, build_id: item.build_id, state: 'CANCELLED', cleanup_pending: false, recovered_cleaned: true })
       }
       this.#initialized = true
     })()
     try { await this.#initializing } finally { if (!this.#initialized) this.#initializing = undefined }
   }
 
-  async preflight(body: Parameters<BuilderRpcMethods['preflight']>[0], signal: AbortSignal): Promise<{ readonly state: 'OK' | 'BLOCKED_EXTERNAL' }> {
+  async preflight(body: Parameters<BuilderRpcMethods['preflight']>[0], signal: AbortSignal): Promise<BuilderAttestation> {
     await this.#claim(body.request_id)
-    return { state: await this.options.adapter.preflight(signal) }
+    return this.options.adapter.preflight(signal)
   }
 
   async prepare(body: Parameters<BuilderRpcMethods['prepare']>[0], signal: AbortSignal): Promise<{ readonly build_ref: string; readonly state: 'PREPARED' }> {
@@ -81,8 +84,18 @@ export class BuilderSupervisor implements BuilderRpcMethods {
         throw new BuilderSupervisorError('BUILD_ALREADY_EXISTS')
       }
       const artifact = await createVerifiedBuildArchive(this.options.artifactRoot, body.artifact_relative_path, body.artifact_sha256, signal)
-      await this.#buildClaims.claim(body.build_id); this.#buildIds.add(body.build_id)
-      await this.options.adapter.prepare(buildRef, body.build_id, artifact, signal)
+      try {
+        await this.#buildClaims.claim(body.build_id); this.#buildIds.add(body.build_id)
+        try { await this.options.adapter.prepare(buildRef, body.build_id, artifact, signal) }
+        catch (error) {
+          this.#buildIds.delete(body.build_id)
+          if (error instanceof BuilderSupervisorError && error.code === 'CLEANUP_INCOMPLETE') {
+            this.#buildIds.add(body.build_id); this.#buildRefs.add(buildRef)
+            this.#builds.set(buildRef, { build_ref: buildRef, build_id: body.build_id, state: 'CANCELLED', cleanup_pending: true })
+          } else await this.#buildClaims.release?.(body.build_id)
+          throw error
+        }
+      } finally { await artifact.dispose() }
       this.#buildRefs.add(buildRef); this.#builds.set(buildRef, { build_ref: buildRef, build_id: body.build_id, state: 'PREPARED', cleanup_pending: false })
       return { build_ref: buildRef, state: 'PREPARED' }
     } finally { release() }
@@ -99,7 +112,7 @@ export class BuilderSupervisor implements BuilderRpcMethods {
     try {
       release = await this.#steps.acquire(combined)
       const result = await this.options.adapter.execute(body.build_ref, body.step, combined)
-      if (build.state !== 'CANCELLED') build.state = completeStep(build.state, body.step, result.exit_code === 0 && !result.timed_out && !result.output_limited)
+      if (build.state !== 'CANCELLED') build.state = completeStep(build.state, body.step, result.exit_code === 0 && !result.timed_out && !result.output_limit_exceeded)
       return { build_ref: body.build_ref, state: build.state, step: body.step, result }
     } catch (error) {
       if (build.state !== 'CANCELLED') build.state = 'FAILED'
@@ -123,9 +136,14 @@ export class BuilderSupervisor implements BuilderRpcMethods {
     await this.#claim(body.request_id)
     const build = this.#build(body.build_ref)
     if (build.finish_result !== undefined) return build.finish_result
+    if (build.finish_error !== undefined) throw new BuilderSupervisorError(build.finish_error)
     if (!isTerminalState(build.state)) throw new BuilderSupervisorError('BUILD_NOT_TERMINAL')
     const finalState = build.state
-    if (finalState === 'E2E_OK' && build.exported === undefined) build.exported = await this.options.adapter.exportArtifact(body.build_ref, signal)
+    let exportError: unknown
+    if (finalState === 'E2E_OK' && build.exported === undefined) {
+      try { build.exported = await this.options.adapter.exportArtifact(body.build_ref, signal) }
+      catch (error) { exportError = error }
+    }
     build.cleanup_pending = true
     try {
       await this.options.adapter.cleanup(body.build_ref, signal)
@@ -133,14 +151,22 @@ export class BuilderSupervisor implements BuilderRpcMethods {
       throw new BuilderSupervisorError('CLEANUP_INCOMPLETE')
     }
     build.cleanup_pending = false
+    if (exportError !== undefined) {
+      build.finish_error = exportError instanceof BuilderSupervisorError ? exportError.code : 'RECOVERY_FAILED'
+      throw new BuilderSupervisorError(build.finish_error)
+    }
     const result: FinishResult = { build_ref: body.build_ref, final_state: finalState, exported: build.exported ?? null, cleanup_pending: false, cleaned: true }
     build.finish_result = result
     return result
   }
 
-  async listManaged(body: Parameters<BuilderRpcMethods['listManaged']>[0], _signal: AbortSignal): Promise<{ readonly builds: readonly ManagedBuild[] }> {
+  async listManaged(body: Parameters<BuilderRpcMethods['listManaged']>[0], signal: AbortSignal): Promise<{ readonly builds: readonly ManagedBuild[] }> {
     await this.#claim(body.request_id)
-    return { builds: [...this.#builds.values()].filter(build => build.finish_result === undefined).map(build => ({ build_ref: build.build_ref, build_id: build.build_id, state: build.state, exported: build.exported !== undefined, cleanup_pending: build.cleanup_pending })).sort((left, right) => left.build_ref.localeCompare(right.build_ref)) }
+    const engineRefs = new Set(await this.options.adapter.listManaged(signal))
+    const tracked = [...this.#builds.values()].filter(build => build.finish_result === undefined && build.finish_error === undefined)
+    const resourceBacked = tracked.filter(build => build.recovered_cleaned !== true)
+    if (engineRefs.size !== resourceBacked.length || resourceBacked.some(build => !engineRefs.has(build.build_ref))) throw new BuilderSupervisorError('RECOVERY_FAILED')
+    return { builds: tracked.filter(build => body.build_id === undefined || build.build_id === body.build_id).map(build => ({ build_ref: build.build_ref, build_id: build.build_id, state: build.state, exported: build.exported !== undefined, cleanup_pending: build.cleanup_pending })).sort((left, right) => left.build_ref.localeCompare(right.build_ref)) }
   }
 
   #build(buildRef: string): MutableBuild {

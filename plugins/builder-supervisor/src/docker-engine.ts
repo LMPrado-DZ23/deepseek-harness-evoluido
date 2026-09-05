@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
+import type { ReadStream } from 'node:fs'
 import { open, rm } from 'node:fs/promises'
 import { request as httpRequest } from 'node:http'
+import type { ClientRequest } from 'node:http'
 
 const DEFAULT_RESPONSE_LIMIT = 8 * 1024 * 1024
 
@@ -12,10 +14,10 @@ export interface DockerEnginePort {
   removeVolume(name: string, signal: AbortSignal): Promise<void>
   listVolumes(filters: Readonly<Record<string, readonly string[]>>, signal: AbortSignal): Promise<readonly Record<string, unknown>[]>
   createContainer(name: string, body: unknown, signal: AbortSignal): Promise<string>
-  putArchive(container: string, destination: string, archive: Buffer, signal: AbortSignal): Promise<void>
+  putArchive(container: string, destination: string, archivePath: string, maximumBytes: number, signal: AbortSignal): Promise<void>
   startContainer(id: string, signal: AbortSignal): Promise<void>
   waitContainer(id: string, signal: AbortSignal): Promise<{ readonly StatusCode: number }>
-  containerLogs(id: string, signal: AbortSignal): Promise<{ readonly stdout: Buffer; readonly stderr: Buffer }>
+  containerLogs(id: string, maximumBytes: number, signal: AbortSignal): Promise<{ readonly stdout: Buffer; readonly stderr: Buffer }>
   downloadArchive(container: string, source: string, destination: string, maximumBytes: number, signal: AbortSignal): Promise<{ readonly bytes: number; readonly sha256: string }>
   stopContainer(id: string, signal: AbortSignal): Promise<void>
   removeContainer(id: string, signal: AbortSignal): Promise<void>
@@ -41,8 +43,36 @@ export class DockerEngine implements DockerEnginePort {
     if (typeof result.Id !== 'string' || !/^[a-f0-9]{12,64}$/u.test(result.Id)) throw new Error('INVALID_DOCKER_RESPONSE')
     return result.Id
   }
-  async putArchive(container: string, destination: string, archive: Buffer, signal: AbortSignal): Promise<void> {
-    await this.#request('PUT', `/containers/${encodeURIComponent(container)}/archive?path=${encodeURIComponent(destination)}`, archive, signal, [200])
+  async putArchive(container: string, destination: string, archivePath: string, maximumBytes: number, signal: AbortSignal): Promise<void> {
+    if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) throw new Error('INVALID_ARCHIVE_LIMIT')
+    const handle = await open(archivePath, constants.O_RDONLY | noFollow())
+    try {
+      const stat = await handle.stat()
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.size < 1 || stat.size > maximumBytes) throw new Error('INVALID_ARCHIVE')
+      const operationSignal = AbortSignal.any([signal, AbortSignal.timeout(this.requestTimeoutMs)])
+      await new Promise<void>((resolve, reject) => {
+        let settled = false; let request: ClientRequest | undefined; let stream: ReadStream | undefined
+        const fail = (error: unknown) => {
+          if (settled) return
+          settled = true; stream?.destroy(); request?.destroy(error instanceof Error ? error : new Error('DOCKER_ARCHIVE_STREAM_FAILED')); reject(error)
+        }
+        request = httpRequest({
+          socketPath: this.socketPath, method: 'PUT', path: `/containers/${encodeURIComponent(container)}/archive?path=${encodeURIComponent(destination)}`,
+          signal: operationSignal, headers: { 'content-type': 'application/x-tar', 'content-length': String(stat.size) },
+        }, response => {
+          response.resume()
+          response.once('aborted', () => fail(new Error('DOCKER_RESPONSE_ABORTED'))); response.once('error', fail)
+          response.once('end', () => {
+            if (!response.complete) return fail(new Error('DOCKER_RESPONSE_ABORTED'))
+            if (response.statusCode !== 200) return fail(new Error(`DOCKER_STATUS_${response.statusCode ?? 0}`))
+            if (!settled) { settled = true; resolve() }
+          })
+        })
+        request.once('error', fail)
+        stream = handle.createReadStream({ autoClose: false, start: 0 })
+        stream.once('error', fail); stream.pipe(request)
+      })
+    } finally { await handle.close() }
   }
   async startContainer(id: string, signal: AbortSignal): Promise<void> { await this.#request('POST', `/containers/${encodeURIComponent(id)}/start`, undefined, signal, [204, 304]) }
   async waitContainer(id: string, signal: AbortSignal): Promise<{ readonly StatusCode: number }> {
@@ -50,8 +80,40 @@ export class DockerEngine implements DockerEnginePort {
     if (!Number.isSafeInteger(result.StatusCode)) throw new Error('INVALID_DOCKER_RESPONSE')
     return { StatusCode: Number(result.StatusCode) }
   }
-  async containerLogs(id: string, signal: AbortSignal): Promise<{ readonly stdout: Buffer; readonly stderr: Buffer }> {
-    return demultiplexDockerStream(await this.#request('GET', `/containers/${encodeURIComponent(id)}/logs?stdout=1&stderr=1&follow=1`, undefined, signal, [200], 1024 * 1024 + 64 * 1024))
+  async containerLogs(id: string, maximumBytes: number, signal: AbortSignal): Promise<{ readonly stdout: Buffer; readonly stderr: Buffer }> {
+    if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) throw new Error('INVALID_LOG_LIMIT')
+    const operationSignal = AbortSignal.any([signal, AbortSignal.timeout(this.requestTimeoutMs)])
+    return new Promise((resolve, reject) => {
+      let settled = false; let pending = Buffer.alloc(0); let total = 0
+      const stdout: Buffer[] = []; const stderr: Buffer[] = []
+      const fail = (error: unknown) => { if (!settled) { settled = true; reject(error) } }
+      const request = httpRequest({ socketPath: this.socketPath, method: 'GET', path: `/containers/${encodeURIComponent(id)}/logs?stdout=1&stderr=1&follow=1`, signal: operationSignal }, response => {
+        if (response.statusCode !== 200) { response.resume(); fail(new Error(`DOCKER_STATUS_${response.statusCode ?? 0}`)); return }
+        response.on('data', chunk => {
+          if (settled) return
+          pending = Buffer.concat([pending, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)])
+          try {
+            while (pending.byteLength >= 8) {
+              const channel = pending[0]
+              if ((channel !== 1 && channel !== 2) || pending[1] !== 0 || pending[2] !== 0 || pending[3] !== 0) throw new Error('INVALID_DOCKER_LOG_STREAM')
+              const length = pending.readUInt32BE(4)
+              if (length > maximumBytes || total + length > maximumBytes) throw new Error('DOCKER_RESPONSE_TOO_LARGE')
+              if (pending.byteLength < 8 + length) break
+              const value = pending.subarray(8, 8 + length); total += length
+              if (channel === 1) stdout.push(Buffer.from(value)); else stderr.push(Buffer.from(value))
+              pending = pending.subarray(8 + length)
+            }
+          } catch (error) { fail(error); response.destroy(error as Error); request.destroy(error as Error) }
+        })
+        response.once('aborted', () => fail(new Error('DOCKER_RESPONSE_ABORTED'))); response.once('error', fail)
+        response.once('end', () => {
+          if (!response.complete) return fail(new Error('DOCKER_RESPONSE_ABORTED'))
+          if (pending.byteLength !== 0) return fail(new Error('INVALID_DOCKER_LOG_STREAM'))
+          if (!settled) { settled = true; resolve({ stdout: Buffer.concat(stdout), stderr: Buffer.concat(stderr) }) }
+        })
+      })
+      request.once('error', fail); request.end()
+    })
   }
   async downloadArchive(container: string, source: string, destination: string, maximumBytes: number, signal: AbortSignal): Promise<{ readonly bytes: number; readonly sha256: string }> {
     if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) throw new Error('INVALID_ARCHIVE_LIMIT')

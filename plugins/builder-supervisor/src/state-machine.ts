@@ -4,8 +4,8 @@ import { BuilderSupervisorError } from './model.js'
 const TRANSITIONS: Readonly<Record<BuildStep, readonly [BuildState, BuildState, BuildState]>> = {
   install: ['PREPARED', 'INSTALLING', 'INSTALL_OK'],
   build: ['INSTALL_OK', 'BUILDING', 'BUILD_OK'],
-  unit: ['BUILD_OK', 'UNIT_RUNNING', 'UNIT_OK'],
-  e2e: ['UNIT_OK', 'E2E_RUNNING', 'E2E_OK'],
+  test: ['BUILD_OK', 'TEST_RUNNING', 'TEST_OK'],
+  e2e: ['TEST_OK', 'E2E_RUNNING', 'E2E_OK'],
 }
 
 export function beginStep(state: BuildState, step: BuildStep): BuildState {

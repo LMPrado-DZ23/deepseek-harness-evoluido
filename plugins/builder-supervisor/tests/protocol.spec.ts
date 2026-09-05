@@ -43,6 +43,9 @@ describe('builder supervisor closed RPC schema', () => {
     expect(() => parseBuilderRpcRequest({ operation: 'execute', body: { ...valid[2].body, build_ref: 'bad' } })).toThrow()
     expect(() => parseBuilderRpcRequest({ operation: 'unknown', body: {} })).toThrow()
     expect(() => parseBuilderRpcRequest(null)).toThrow()
+    expect(parseBuilderRpcRequest({ operation: 'listManaged', body: { request_id: requestId('7'), build_id: 'run-1' } })).toEqual({ operation: 'listManaged', body: { request_id: requestId('7'), build_id: 'run-1' } })
+    expect(() => parseBuilderRpcRequest({ operation: 'listManaged', body: { request_id: requestId('7'), build_id: '../bad' } })).toThrow()
+    expect(() => parseBuilderRpcRequest({ operation: 'listManaged', body: null })).toThrow()
   })
 })
 
@@ -52,9 +55,9 @@ describe('builder supervisor authenticated HTTP contract', () => {
 
   function fixture(overrides: Partial<BuilderRpcMethods> = {}) {
     const methods: BuilderRpcMethods = {
-      preflight: vi.fn(async () => ({ state: 'OK' as const })),
+      preflight: vi.fn(async () => attestation()),
       prepare: vi.fn(async () => ({ build_ref: buildRef, state: 'PREPARED' as const })),
-      execute: vi.fn(async (body: Parameters<BuilderRpcMethods['execute']>[0]) => ({ build_ref: body.build_ref, state: 'INSTALL_OK' as const, step: body.step, result: { exit_code: 0, stdout: '', stderr: '', timed_out: false, output_limited: false } })),
+      execute: vi.fn(async (body: Parameters<BuilderRpcMethods['execute']>[0]) => ({ build_ref: body.build_ref, state: ({ install: 'INSTALL_OK', build: 'BUILD_OK', test: 'TEST_OK', e2e: 'E2E_OK' } as const)[body.step], step: body.step, result: { exit_code: 0, stdout: '', stderr: '', timed_out: false, termination_reason: null, output_limit_exceeded: false } })),
       cancel: vi.fn(async (body: Parameters<BuilderRpcMethods['cancel']>[0]) => ({ build_ref: body.build_ref, state: 'CANCELLED' as const })),
       finish: vi.fn(async (body: Parameters<BuilderRpcMethods['finish']>[0]) => ({ build_ref: body.build_ref, final_state: 'E2E_OK' as const, exported: null, cleanup_pending: false, cleaned: true })),
       listManaged: vi.fn(async () => ({ builds: [] })),
@@ -98,13 +101,24 @@ describe('builder supervisor authenticated HTTP contract', () => {
     expect(decode(result)).toMatchObject({ ok: true })
   })
 
+  it('returns the same response for the same request id and body, and conflicts on body reuse', async () => {
+    const f = fixture()
+    const first = await send(f.handler, valid[0], { token }); const same = await send(f.handler, valid[0], { token })
+    expect(decode(same)).toEqual(decode(first)); expect(f.methods.preflight).toHaveBeenCalledTimes(1)
+    const conflict = await send(f.handler, { operation: 'listManaged', body: { request_id: valid[0].body.request_id } }, { token })
+    expect(conflict.status).toBe(409); expect(decode(conflict)).toEqual({ ok: false, error: { code: 'REQUEST_ID_CONFLICT' } })
+  })
+
   it('returns only safe error codes and refuses extra response authority', async () => {
     const failed = fixture({ preflight: vi.fn(async () => { throw new BuilderSupervisorError('REQUEST_REPLAY') }) })
     expect(decode(await send(failed.handler, valid[0], { token }))).toEqual({ ok: false, error: { code: 'REQUEST_REPLAY' } })
-    const invalid = fixture({ preflight: vi.fn(async () => ({ state: 'OK', socket: '/var/run/docker.sock' }) as never) })
+    const invalid = fixture({ preflight: vi.fn(async () => ({ ...attestation(), socket: '/var/run/docker.sock' }) as never) })
     expect(decode(await send(invalid.handler, valid[0], { token }))).toEqual({ ok: false, error: { code: 'INTERNAL' } })
     const unexpected = fixture({ preflight: vi.fn(async () => { throw new Error('/secret/path') }) })
     expect(JSON.stringify(decode(await send(unexpected.handler, valid[0], { token })))).not.toContain('secret')
+    const replayFailure = fixture()
+    const guarded = createBuilderRpcHandler({ credentialRef, credentials: { resolve: async () => token }, methods: replayFailure.methods, replay: { run: async () => { throw new Error('/secret/replay') } } })
+    expect(decode(await send(guarded, valid[0], { token }))).toEqual({ ok: false, error: { code: 'INTERNAL' } })
   })
 
   it('allows only strictly shaped managed-build and step results', async () => {
@@ -112,8 +126,33 @@ describe('builder supervisor authenticated HTTP contract', () => {
     expect((await send(listed.handler, valid[5], { token })).status).toBe(200)
     const leakingList = fixture({ listManaged: vi.fn(async () => ({ builds: [{ build_ref: buildRef, build_id: 'run-1', state: 'PREPARED', image: 'attacker' }] })) as never })
     expect((await send(leakingList.handler, valid[5], { token })).status).toBe(500)
-    const leakingStep = fixture({ execute: vi.fn(async body => ({ build_ref: body.build_ref, state: 'INSTALL_OK', step: body.step, result: { exit_code: 0, stdout: '', stderr: '', timed_out: false, output_limited: false, command: 'secret' } })) as never })
+    const leakingStep = fixture({ execute: vi.fn(async body => ({ build_ref: body.build_ref, state: 'INSTALL_OK', step: body.step, result: { exit_code: 0, stdout: '', stderr: '', timed_out: false, termination_reason: null, output_limit_exceeded: false, command: 'secret' } })) as never })
     expect((await send(leakingStep.handler, valid[2], { token })).status).toBe(500)
+    const wrongStep = fixture({ execute: vi.fn(async body => ({ build_ref: body.build_ref, state: 'TEST_OK', step: 'test', result: { exit_code: 0, stdout: '', stderr: '', timed_out: false, termination_reason: null, output_limit_exceeded: false } })) as never })
+    expect((await send(wrongStep.handler, valid[2], { token })).status).toBe(500)
+    const incoherent = fixture({ execute: vi.fn(async body => ({ build_ref: body.build_ref, state: 'FAILED', step: body.step, result: { exit_code: -1, stdout: '', stderr: '', timed_out: false, termination_reason: 'timeout', output_limit_exceeded: false } })) as never })
+    expect((await send(incoherent.handler, valid[2], { token })).status).toBe(500)
+    const tooLarge = fixture({ execute: vi.fn(async body => ({ build_ref: body.build_ref, state: 'FAILED', step: body.step, result: { exit_code: -1, stdout: 'é'.repeat(262_145), stderr: '', timed_out: false, termination_reason: 'output_limit', output_limit_exceeded: true } })) as never })
+    expect((await send(tooLarge.handler, valid[2], { token })).status).toBe(500)
+    const unknownReason = fixture({ execute: vi.fn(async body => ({ build_ref: body.build_ref, state: 'FAILED', step: body.step, result: { exit_code: -1, stdout: '', stderr: '', timed_out: false, termination_reason: 'signal', output_limit_exceeded: false } })) as never })
+    expect((await send(unknownReason.handler, valid[2], { token })).status).toBe(500)
+    const timedOut = fixture({ execute: vi.fn(async body => ({ build_ref: body.build_ref, state: 'FAILED', step: body.step, result: { exit_code: -1, stdout: '', stderr: '', timed_out: true, termination_reason: 'timeout', output_limit_exceeded: false } })) as never })
+    expect((await send(timedOut.handler, valid[2], { token })).status).toBe(200)
+    const outputLimited = fixture({ execute: vi.fn(async body => ({ build_ref: body.build_ref, state: 'FAILED', step: body.step, result: { exit_code: -1, stdout: '', stderr: '', timed_out: false, termination_reason: 'output_limit', output_limit_exceeded: true } })) as never })
+    expect((await send(outputLimited.handler, valid[2], { token })).status).toBe(200)
+    const cancelled = fixture({ execute: vi.fn(async body => ({ build_ref: body.build_ref, state: 'CANCELLED', step: body.step, result: { exit_code: -1, stdout: '', stderr: '', timed_out: false, termination_reason: null, output_limit_exceeded: false } })) as never })
+    expect((await send(cancelled.handler, valid[2], { token })).status).toBe(200)
+    const wrongCancelled = fixture({ execute: vi.fn(async body => ({ build_ref: body.build_ref, state: 'CANCELLED', step: body.step, result: { exit_code: 1, stdout: '', stderr: '', timed_out: false, termination_reason: null, output_limit_exceeded: false } })) as never })
+    expect((await send(wrongCancelled.handler, valid[2], { token })).status).toBe(500)
+    const failedZero = fixture({ execute: vi.fn(async body => ({ build_ref: body.build_ref, state: 'FAILED', step: body.step, result: { exit_code: 0, stdout: '', stderr: '', timed_out: false, termination_reason: null, output_limit_exceeded: false } })) as never })
+    expect((await send(failedZero.handler, valid[2], { token })).status).toBe(500)
+    const blocked = fixture({ preflight: vi.fn(async () => ({ ...attestation(), state: 'BLOCKED_EXTERNAL' as const })) })
+    expect((await send(blocked.handler, valid[0], { token })).status).toBe(200)
+    const filteredRequest = { operation: 'listManaged' as const, body: { request_id: requestId('8'), build_id: 'run-1' } }
+    const wrongFiltered = fixture({ listManaged: vi.fn(async () => ({ builds: [{ build_ref: buildRef, build_id: 'run-2', state: 'PREPARED' as const, exported: false, cleanup_pending: false }] })) })
+    expect((await send(wrongFiltered.handler, filteredRequest, { token })).status).toBe(500)
+    const oversizedList = fixture({ listManaged: vi.fn(async () => ({ builds: Array.from({ length: 1_001 }, () => ({ build_ref: buildRef, build_id: 'run-1', state: 'PREPARED' as const, exported: false, cleanup_pending: false })) })) })
+    expect((await send(oversizedList.handler, valid[5], { token })).status).toBe(500)
   })
 
   it.each(['E2E_OK', 'FAILED', 'CANCELLED'] as const)('allows the closed terminal result %s', async final_state => {
@@ -133,3 +172,5 @@ describe('builder supervisor authenticated HTTP contract', () => {
     expect(() => createBuilderRpcHandler({ credentialRef: 'file:/run/../secret', credentials: { resolve: async () => token }, methods: fixture().methods })).toThrow('INVALID_CREDENTIAL_REFERENCE')
   })
 })
+
+function attestation() { return { state: 'OK' as const, protocol_version: 1 as const, instance_id: 'test-instance', image_id: `sha256:${'a'.repeat(64)}` as const, policy_sha256: 'b'.repeat(64) } }

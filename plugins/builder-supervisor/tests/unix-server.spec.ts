@@ -24,9 +24,34 @@ describe.skipIf(process.platform === 'win32')('authenticated Unix builder socket
     expect((await lstat(socketPath)).mode & 0o777).toBe(0o660)
     expect(await send(socketPath, undefined)).toMatchObject({ status: 401 })
     expect(methods.preflight).not.toHaveBeenCalled()
-    expect(await send(socketPath, token)).toEqual({ status: 200, body: { ok: true, result: { state: 'OK' } } })
+    expect(await send(socketPath, token)).toMatchObject({ status: 200, body: { ok: true, result: { state: 'OK', protocol_version: 1 } } })
     await listener.close(); listeners.splice(0, 1)
     await expect(lstat(socketPath)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('carries the public test step and bounded termination fields over the real Unix wire', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dz23-builder-wire-')); roots.push(root); const socketPath = join(root, 'builder.sock').replaceAll('\\', '/')
+    const methods = fakeMethods(); const listener = await listenBuilderUnix({ socketPath, bearerToken: token, methods }); listeners.push(listener)
+    const value = { operation: 'execute', body: { request_id: `req_${'b'.repeat(32)}`, build_ref: `build_${'a'.repeat(32)}`, step: 'test' } }
+    const result = await sendValue(socketPath, token, value)
+    expect(result).toEqual({ status: 200, body: { ok: true, result: { build_ref: `build_${'a'.repeat(32)}`, state: 'TEST_OK', step: 'test', result: { exit_code: 0, stdout: '', stderr: '', timed_out: false, termination_reason: null, output_limit_exceeded: false } } } })
+    expect(methods.execute).toHaveBeenCalledWith(value.body, expect.any(AbortSignal))
+  })
+
+  it('replays the exact persisted response after a server restart without redispatch', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dz23-builder-persisted-wire-')); roots.push(root); const socketPath = join(root, 'builder.sock').replaceAll('\\', '/')
+    const firstMethods = fakeMethods(); const first = await listenBuilderUnix({ socketPath, bearerToken: token, methods: firstMethods })
+    const request = { operation: 'preflight', body: { request_id: `req_${'c'.repeat(32)}` } }
+    const expected = await sendValue(socketPath, token, request); await first.close()
+    const secondMethods = fakeMethods(); const second = await listenBuilderUnix({ socketPath, bearerToken: token, methods: secondMethods }); listeners.push(second)
+    expect(await sendValue(socketPath, token, request)).toEqual(expected); expect(secondMethods.preflight).not.toHaveBeenCalled()
+  })
+
+  it('does not strand the exclusive lease when initialization fails', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dz23-builder-init-fail-')); roots.push(root); const socketPath = join(root, 'builder.sock').replaceAll('\\', '/')
+    await expect(listenBuilderUnix({ socketPath, bearerToken: token, methods: { ...fakeMethods(), initialize: async () => { throw new Error('init failed') } } })).rejects.toThrow('init failed')
+    await expect(lstat(`${socketPath}.lock`)).rejects.toMatchObject({ code: 'ENOENT' })
+    const listener = await listenBuilderUnix({ socketPath, bearerToken: token, methods: fakeMethods() }); listeners.push(listener)
   })
 
   it('uses an authenticated probe and exclusive lease to reject split-brain', async () => {
@@ -52,7 +77,7 @@ describe.skipIf(process.platform === 'win32')('authenticated Unix builder socket
 
   it('bounds request bodies and aborts a cooperative slow RPC at the operation deadline', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dz23-builder-deadline-')); roots.push(root); const socketPath = join(root, 'builder.sock').replaceAll('\\', '/')
-    const methods = { ...fakeMethods(), preflight: vi.fn(async (_body: unknown, signal: AbortSignal) => new Promise<never>((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }))) }
+    const methods = { ...fakeMethods(), preflight: vi.fn(async (_body: unknown, signal: AbortSignal) => { signal.throwIfAborted(); return new Promise<never>((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true })) }) }
     const listener = await listenBuilderUnix({ socketPath, bearerToken: token, methods, operationTimeoutMs: 50 }); listeners.push(listener)
     await expect(send(socketPath, token)).resolves.toMatchObject({ status: 500 })
   })
@@ -79,9 +104,9 @@ describe.skipIf(process.platform === 'win32')('authenticated Unix builder socket
 
 function fakeMethods(): BuilderRpcMethods {
   return {
-    preflight: vi.fn(async () => ({ state: 'OK' as const })),
+    preflight: vi.fn(async () => ({ state: 'OK' as const, protocol_version: 1 as const, instance_id: 'test-instance', image_id: `sha256:${'a'.repeat(64)}` as const, policy_sha256: 'b'.repeat(64) })),
     prepare: vi.fn(async () => ({ build_ref: `build_${'a'.repeat(32)}`, state: 'PREPARED' as const })),
-    execute: vi.fn(async body => ({ build_ref: body.build_ref, state: 'INSTALL_OK' as const, step: body.step, result: { exit_code: 0, stdout: '', stderr: '', timed_out: false, output_limited: false } })),
+    execute: vi.fn(async (body: Parameters<BuilderRpcMethods['execute']>[0]) => ({ build_ref: body.build_ref, state: ({ install: 'INSTALL_OK', build: 'BUILD_OK', test: 'TEST_OK', e2e: 'E2E_OK' } as const)[body.step], step: body.step, result: { exit_code: 0, stdout: '', stderr: '', timed_out: false, termination_reason: null, output_limit_exceeded: false } })),
     cancel: vi.fn(async body => ({ build_ref: body.build_ref, state: 'CANCELLED' as const })),
     finish: vi.fn(async body => ({ build_ref: body.build_ref, final_state: 'E2E_OK' as const, exported: null, cleanup_pending: false, cleaned: true })),
     listManaged: vi.fn(async () => ({ builds: [] })),
@@ -90,6 +115,12 @@ function fakeMethods(): BuilderRpcMethods {
 
 async function send(socketPath: string, bearer: string | undefined): Promise<{ readonly status: number; readonly body: unknown }> {
   const body = Buffer.from(JSON.stringify({ operation: 'preflight', body: { request_id: `req_${'a'.repeat(32)}` } }))
+  return sendRaw(socketPath, bearer, body)
+}
+async function sendValue(socketPath: string, bearer: string | undefined, value: unknown): Promise<{ readonly status: number; readonly body: unknown }> {
+  return sendRaw(socketPath, bearer, Buffer.from(JSON.stringify(value)))
+}
+async function sendRaw(socketPath: string, bearer: string | undefined, body: Buffer): Promise<{ readonly status: number; readonly body: unknown }> {
   return new Promise((resolve, reject) => {
     const request = httpRequest({ socketPath, path: '/v1/rpc', method: 'POST', headers: {
       'content-type': 'application/json', 'content-length': String(body.byteLength), ...(bearer === undefined ? {} : { authorization: `Bearer ${bearer}` }),

@@ -1,4 +1,4 @@
-export const BUILD_STEPS = ['install', 'build', 'unit', 'e2e'] as const
+export const BUILD_STEPS = ['install', 'build', 'test', 'e2e'] as const
 export type BuildStep = typeof BUILD_STEPS[number]
 
 export type BuildState =
@@ -7,8 +7,8 @@ export type BuildState =
   | 'INSTALL_OK'
   | 'BUILDING'
   | 'BUILD_OK'
-  | 'UNIT_RUNNING'
-  | 'UNIT_OK'
+  | 'TEST_RUNNING'
+  | 'TEST_OK'
   | 'E2E_RUNNING'
   | 'E2E_OK'
   | 'FAILED'
@@ -44,7 +44,16 @@ export interface StepResult {
   readonly stdout: string
   readonly stderr: string
   readonly timed_out: boolean
-  readonly output_limited: boolean
+  readonly termination_reason: null | 'timeout' | 'output_limit'
+  readonly output_limit_exceeded: boolean
+}
+
+export interface BuilderAttestation {
+  readonly state: 'OK' | 'BLOCKED_EXTERNAL'
+  readonly protocol_version: 1
+  readonly instance_id: string
+  readonly image_id: `sha256:${string}`
+  readonly policy_sha256: string
 }
 
 export class BuilderSupervisorError extends Error {
@@ -65,6 +74,7 @@ export type BuilderErrorCode =
   | 'RECOVERY_FAILED'
   | 'INVALID_STEP_ORDER'
   | 'REQUEST_REPLAY'
+  | 'REQUEST_ID_CONFLICT'
   | 'REPLAY_CAPACITY'
 
 export function isTerminalState(state: BuildState): state is TerminalBuildState {

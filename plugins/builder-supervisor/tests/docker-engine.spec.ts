@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { access, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -12,7 +12,7 @@ afterEach(async () => Promise.all(roots.splice(0).map(path => rm(path, { recursi
 
 linux('Docker Engine Unix transport', () => {
   it('uses the real Unix HTTP transport, fixed paths and JSON bodies', async () => {
-    const calls: Array<{ method?: string; url?: string; body: string }> = []
+    const calls: Array<{ method: string | undefined; url: string | undefined; body: string }> = []
     const fixture = await daemon(async (request, response) => {
       const body = await collect(request); calls.push({ method: request.method, url: request.url, body: body.toString() })
       if (request.url === '/_ping') return reply(response, 200, 'OK')
@@ -49,6 +49,20 @@ linux('Docker Engine Unix transport', () => {
     expect(() => demultiplexDockerStream(Buffer.concat([frame(1, 'abc'), frame(2, 'def')]), 5)).toThrow('DOCKER_RESPONSE_TOO_LARGE')
   })
 
+  it('enforces the combined output budget while the Docker log stream is still live', async () => {
+    const fixture = await daemon((_request, response) => { response.writeHead(200); response.write(frame(1, '123456')); /* deliberately never ends */ })
+    const engine = new DockerEngine(fixture.socket, 1_000)
+    await expect(engine.containerLogs('live', 5, new AbortController().signal)).rejects.toThrow('DOCKER_RESPONSE_TOO_LARGE')
+    await fixture.close()
+  })
+
+  it('decodes Docker frames split across transport chunks', async () => {
+    const payload = Buffer.concat([frame(1, 'out'), frame(2, 'err')])
+    const fixture = await daemon((_request, response) => { response.writeHead(200); for (const byte of payload) response.write(Buffer.from([byte])); response.end() })
+    await expect(new DockerEngine(fixture.socket, 1_000).containerLogs('split', 100, new AbortController().signal)).resolves.toEqual({ stdout: Buffer.from('out'), stderr: Buffer.from('err') })
+    await fixture.close()
+  })
+
   it('covers every bounded Docker operation and rejects malformed daemon responses', async () => {
     const fixture = await daemon(async (request, response) => {
       if (request.url?.startsWith('/images/')) return reply(response, 200, JSON.stringify({ Id: `sha256:${'a'.repeat(64)}` }))
@@ -60,12 +74,12 @@ linux('Docker Engine Unix transport', () => {
       if (request.method === 'PUT') return reply(response, 200, '')
       return reply(response, request.method === 'DELETE' ? 204 : 204, '')
     })
-    const engine = new DockerEngine(fixture.socket, 1_000); const signal = new AbortController().signal
+    const engine = new DockerEngine(fixture.socket, 1_000); const signal = new AbortController().signal; const archiveRoot = await mkdtemp(join(tmpdir(), 'dz23-put-')); roots.push(archiveRoot); const archive = join(archiveRoot, 'input.tar'); await writeFile(archive, Buffer.alloc(512))
     await expect(engine.inspectImage(`sha256:${'a'.repeat(64)}`, signal)).resolves.toMatchObject({ Id: expect.stringMatching(/^sha256:/u) })
     await expect(engine.listVolumes({ label: ['x=y'] }, signal)).resolves.toHaveLength(1)
     await expect(engine.listContainers({ label: ['x=y'] }, signal)).resolves.toHaveLength(1)
-    const id = await engine.createContainer('one', {}, signal); await engine.putArchive(id, '/workspace', Buffer.alloc(512), signal); await engine.startContainer(id, signal)
-    await expect(engine.waitContainer(id, signal)).resolves.toEqual({ StatusCode: 0 }); await expect(engine.containerLogs(id, signal)).resolves.toEqual({ stdout: Buffer.from('out'), stderr: Buffer.from('err') })
+    const id = await engine.createContainer('one', {}, signal); await engine.putArchive(id, '/workspace', archive, 512, signal); await engine.startContainer(id, signal)
+    await expect(engine.waitContainer(id, signal)).resolves.toEqual({ StatusCode: 0 }); await expect(engine.containerLogs(id, 100, signal)).resolves.toEqual({ stdout: Buffer.from('out'), stderr: Buffer.from('err') })
     await engine.stopContainer(id, signal); await engine.removeContainer(id, signal); await engine.removeVolume('one', signal); await fixture.close()
     expect(() => new DockerEngine('relative')).toThrow('INVALID_DOCKER_SOCKET'); expect(() => new DockerEngine('/tmp/docker.sock', 0)).toThrow('INVALID_DOCKER_TIMEOUT')
   })
