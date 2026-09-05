@@ -23,7 +23,7 @@ export interface BuilderUnixServerOptions {
   readonly signal?: AbortSignal; readonly operationTimeoutMs?: number; readonly stepTimeoutMs?: number; readonly cleanupTimeoutMs?: number; readonly runtime?: BuilderUnixRuntime
 }
 
-export async function listenBuilderUnix(options: BuilderUnixServerOptions): Promise<{ readonly server: Server; close(): Promise<void> }> {
+export async function listenBuilderUnix(options: BuilderUnixServerOptions): Promise<{ readonly server: Server; close(afterStopAccepting?: () => void): Promise<void> }> {
   const runtime = options.runtime ?? DEFAULT_RUNTIME
   if (runtime.platform === 'win32' || runtime.getuid === undefined) throw new Error('UNIX_SOCKET_REQUIRED')
   const socketPath = validSocketPath(options.socketPath); const parent = dirname(socketPath); const lockPath = `${socketPath}.lock`; const uid = runtime.getuid(); const nonce = randomBytes(16).toString('hex')
@@ -59,10 +59,9 @@ export async function listenBuilderUnix(options: BuilderUnixServerOptions): Prom
     throw error
   }
   const activeServer = server
-  return { server: activeServer, close: async () => {
-    await assertSocketIdentity(socketPath, socketIdentity!, uid, runtime)
-    await closeServerBounded(activeServer, timeoutMs, runtime)
-    await safeUnlinkSocket(socketPath, socketIdentity!, uid, runtime); await releaseLock(lockPath, nonce, runtime)
+  return { server: activeServer, close: async afterStopAccepting => {
+    await closeOwnedSocket(socketPath, socketIdentity!, uid, activeServer, timeoutMs, runtime, afterStopAccepting)
+    await releaseLock(lockPath, nonce, runtime)
   } }
 }
 
@@ -143,7 +142,40 @@ async function readMetadata(lockPath: string, runtime: BuilderUnixRuntime): Prom
 async function releaseLock(lockPath: string, nonce: string, runtime: BuilderUnixRuntime): Promise<void> { try { if ((await readMetadata(lockPath, runtime)).nonce !== nonce) throw new Error('LOCK_IDENTITY_MISMATCH'); await runtime.remove(lockPath, { recursive: true }) } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error } }
 async function processStartIdentity(pid: number, runtime: BuilderUnixRuntime): Promise<string> { const stat = await runtime.readFile(`/proc/${pid}/stat`, 'utf8'); const end = stat.lastIndexOf(') '); const fields = end < 0 ? [] : stat.slice(end + 2).trim().split(/\s+/u); const start = fields[19]; if (start === undefined || !/^[0-9]+$/u.test(start)) throw new Error('PROCESS_IDENTITY_UNAVAILABLE'); return start }
 async function sameProcess(pid: number, expectedStart: string, runtime: BuilderUnixRuntime): Promise<boolean> { try { runtime.kill(pid, 0); return await processStartIdentity(pid, runtime) === expectedStart } catch (error) { const code = (error as NodeJS.ErrnoException).code; if (code === 'ESRCH' || code === 'ENOENT') return false; throw error } }
-async function closeServerBounded(server: Server, timeoutMs: number, runtime: BuilderUnixRuntime): Promise<void> { if (!server.listening) return; server.closeIdleConnections(); const closed = new Promise<void>((resolve, reject) => server.close(error => error === undefined ? resolve() : reject(error))); const timer = runtime.setTimeout(() => server.closeAllConnections(), Math.min(timeoutMs, 5_000)); await closed.finally(() => runtime.clearTimeout(timer)) }
+async function closeOwnedSocket(path: string, identity: { readonly dev: number; readonly ino: number }, uid: number, server: Server, timeoutMs: number, runtime: BuilderUnixRuntime, afterStopAccepting?: () => void): Promise<void> {
+  if (!server.listening) {
+    afterStopAccepting?.()
+    await safeUnlinkSocket(path, identity, uid, runtime)
+    return
+  }
+  let current
+  try { current = await runtime.lstat(path) } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      await closeServerBounded(server, timeoutMs, runtime, afterStopAccepting)
+      return
+    }
+    detachServerWithoutPathMutation(server, afterStopAccepting)
+    throw error
+  }
+  const owned = current.isSocket() && current.uid === uid && current.dev === identity.dev && current.ino === identity.ino
+  if (!owned) {
+    detachServerWithoutPathMutation(server, afterStopAccepting)
+    const preserved = await runtime.lstat(path)
+    if (!preserved.isSocket() || preserved.uid !== current.uid || preserved.dev !== current.dev || preserved.ino !== current.ino) throw new Error('SOCKET_IDENTITY_MISMATCH')
+    throw new Error('SOCKET_IDENTITY_MISMATCH')
+  }
+  await closeServerBounded(server, timeoutMs, runtime, afterStopAccepting)
+  await safeUnlinkSocket(path, identity, uid, runtime)
+}
+function detachServerWithoutPathMutation(server: Server, afterStopAccepting?: () => void): void { server.closeIdleConnections(); server.closeAllConnections(); server.unref(); afterStopAccepting?.() }
+async function closeServerBounded(server: Server, timeoutMs: number, runtime: BuilderUnixRuntime, afterStopAccepting?: () => void): Promise<void> {
+  if (!server.listening) { afterStopAccepting?.(); return }
+  server.closeIdleConnections()
+  const closed = new Promise<void>((resolve, reject) => server.close(error => error === undefined ? resolve() : reject(error)))
+  afterStopAccepting?.()
+  const timer = runtime.setTimeout(() => server.closeAllConnections(), Math.min(timeoutMs, 5_000))
+  await closed.finally(() => runtime.clearTimeout(timer))
+}
 async function readBounded(request: IncomingMessage): Promise<Buffer> { const chunks: Buffer[] = []; let size = 0; for await (const chunk of request) { const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk); size += bytes.byteLength; if (size > BUILDER_RPC_MAX_BODY_BYTES) throw new Error('REQUEST_TOO_LARGE'); chunks.push(bytes) } return Buffer.concat(chunks) }
 function validSocketPath(value: string): string { if (!posix.isAbsolute(value) || value.includes('\\') || value.includes('\0') || value.includes('://')) throw new Error('INVALID_SOCKET_PATH'); const normalized = posix.normalize(value); if (normalized !== value) throw new Error('INVALID_SOCKET_PATH'); return normalized }
 function failure(response: ServerResponse): void { if (response.writableEnded) return; const body = Buffer.from('{"error":"SUPERVISOR_UNAVAILABLE"}', 'utf8'); response.writeHead(500, { 'content-type': 'application/json; charset=utf-8', 'content-length': String(body.byteLength), 'cache-control': 'no-store' }); response.end(body) }

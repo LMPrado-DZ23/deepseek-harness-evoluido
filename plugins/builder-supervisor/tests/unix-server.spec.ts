@@ -295,6 +295,62 @@ describe.skipIf(process.platform === 'win32')('authenticated Unix builder socket
     const listener = await listenBuilderUnix({ socketPath, bearerToken: token, methods: fakeMethods(), replayNamespace, runtime }); interceptClose = true; await expect(listener.close()).resolves.toBeUndefined(); interceptClose = false; await new Promise<void>(resolve => realClose!(() => resolve())); await rm(`${socketPath}.lock`, { recursive: true, force: true })
   })
 
+  it('closes a live listener whose accepting path disappeared and releases its lease', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dz23-builder-close-missing-')); roots.push(root); const socketPath = join(root, 'builder.sock').replaceAll('\\', '/')
+    const listener = await listenBuilderUnix({ socketPath, bearerToken: token, methods: fakeMethods(), replayNamespace })
+    await unlink(socketPath)
+    await expect(listener.close()).resolves.toBeUndefined()
+    await expect(lstat(`${socketPath}.lock`)).rejects.toMatchObject({ code: 'ENOENT' })
+
+    const deniedRoot = await mkdtemp(join(tmpdir(), 'dz23-builder-close-denied-')); roots.push(deniedRoot); const deniedPath = join(deniedRoot, 'builder.sock').replaceAll('\\', '/'); let deny = false
+    const denied = new Error('denied') as NodeJS.ErrnoException; denied.code = 'EACCES'
+    const deniedListener = await listenBuilderUnix({ socketPath: deniedPath, bearerToken: token, methods: fakeMethods(), replayNamespace, runtime: unixRuntime({ lstat: (async path => deny && path === deniedPath ? Promise.reject(denied) : lstat(path)) as typeof lstat }) })
+    deny = true; await expect(deniedListener.close()).rejects.toThrow('denied'); deny = false
+    await new Promise<void>(resolve => deniedListener.server.close(() => resolve()))
+    await rm(`${deniedPath}.lock`, { recursive: true, force: true })
+  })
+
+  it('preserves a foreign socket before close and one installed during close', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dz23-builder-foreign-close-')); roots.push(root); const socketPath = join(root, 'builder.sock').replaceAll('\\', '/')
+    const listener = await listenBuilderUnix({ socketPath, bearerToken: token, methods: fakeMethods(), replayNamespace }); await unlink(socketPath)
+    const alien = createNetServer(socket => socket.destroy()); await new Promise<void>((resolve, reject) => { alien.once('error', reject); alien.listen(socketPath, resolve) }); const alienIdentity = await lstat(socketPath)
+    await expect(listener.close()).rejects.toThrow('SOCKET_IDENTITY_MISMATCH')
+    expect(await lstat(socketPath)).toMatchObject({ dev: alienIdentity.dev, ino: alienIdentity.ino })
+    await new Promise<void>(resolve => alien.close(() => resolve())); await unlink(socketPath).catch(() => undefined); await new Promise<void>(resolve => listener.server.close(() => resolve())); await rm(`${socketPath}.lock`, { recursive: true, force: true })
+
+    const raceRoot = await mkdtemp(join(tmpdir(), 'dz23-builder-close-race-')); roots.push(raceRoot); const racePath = join(raceRoot, 'builder.sock').replaceAll('\\', '/'); let racing: ReturnType<typeof createNetServer> | undefined
+    const createServer = ((handler: HttpHandler) => { const server = createHttpServer(handler); const close = server.close.bind(server); server.close = ((callback?: (error?: Error) => void) => close(() => { racing = createNetServer(socket => socket.destroy()); racing.listen(racePath, () => callback?.()) })) as typeof server.close; return server }) as typeof createHttpServer
+    const raceListener = await listenBuilderUnix({ socketPath: racePath, bearerToken: token, methods: fakeMethods(), replayNamespace, runtime: unixRuntime({ createServer }) })
+    await expect(raceListener.close()).rejects.toThrow('SOCKET_IDENTITY_MISMATCH'); const racingIdentity = await lstat(racePath)
+    expect(racingIdentity.isSocket()).toBe(true)
+    await new Promise<void>(resolve => racing!.close(() => resolve())); await unlink(racePath).catch(() => undefined); await rm(`${racePath}.lock`, { recursive: true, force: true })
+  })
+
+  it('fails closed without mutation for every foreign post-close identity and a concurrently stopped owner', async () => {
+    const variants = [
+      (stat: Awaited<ReturnType<typeof lstat>>) => statWith(stat, { isSocket: () => false }),
+      (stat: Awaited<ReturnType<typeof lstat>>) => statWith(stat, { uid: Number(stat.uid) + 1 }),
+      (stat: Awaited<ReturnType<typeof lstat>>) => statWith(stat, { dev: Number(stat.dev) + 1 }),
+      (stat: Awaited<ReturnType<typeof lstat>>) => statWith(stat, { ino: Number(stat.ino) + 1 }),
+    ]
+    for (const [index, mutate] of variants.entries()) {
+      const root = await mkdtemp(join(tmpdir(), `dz23-builder-foreign-post-${index}-`)); roots.push(root); const socketPath = join(root, 'builder.sock').replaceAll('\\', '/'); let foreign = false; let reads = 0
+      const runtime = unixRuntime({ lstat: (async path => { const stat = await lstat(path); if (!foreign || path !== socketPath) return stat; const disguised = statWith(stat, { dev: Number(stat.dev) + 1 }); return ++reads === 1 ? disguised : mutate(disguised) }) as typeof lstat })
+      const listener = await listenBuilderUnix({ socketPath, bearerToken: token, methods: fakeMethods(), replayNamespace, runtime }); foreign = true
+      await expect(listener.close()).rejects.toThrow('SOCKET_IDENTITY_MISMATCH')
+      expect((await lstat(socketPath)).isSocket()).toBe(true)
+      await unlink(socketPath); await new Promise<void>(resolve => listener.server.close(() => resolve())); await rm(`${socketPath}.lock`, { recursive: true, force: true })
+    }
+
+    const root = await mkdtemp(join(tmpdir(), 'dz23-builder-stop-during-identity-')); roots.push(root); const socketPath = join(root, 'builder.sock').replaceAll('\\', '/'); let stop = false; let captured: ReturnType<typeof createHttpServer> | undefined
+    const runtime = unixRuntime({
+      createServer: ((handler: HttpHandler) => { captured = createHttpServer(handler); return captured }) as typeof createHttpServer,
+      lstat: (async path => { const stat = await lstat(path); if (stop && path === socketPath) { stop = false; await new Promise<void>(resolve => captured!.close(() => resolve())) } return stat }) as typeof lstat,
+    })
+    const listener = await listenBuilderUnix({ socketPath, bearerToken: token, methods: fakeMethods(), replayNamespace, runtime }); stop = true
+    await expect(listener.close()).resolves.toBeUndefined()
+  })
+
   it('handles an already-stopped server and fail-closes unusual HTTP message shapes', async () => {
     const stoppedRoot = await mkdtemp(join(tmpdir(), 'dz23-builder-stopped-')); roots.push(stoppedRoot); const stoppedPath = join(stoppedRoot, 'builder.sock').replaceAll('\\', '/'); let stopped = false; let stoppedReads = 0; let saved: Awaited<ReturnType<typeof lstat>> | undefined
     const stoppedRuntime = unixRuntime({ lstat: (async path => { if (path !== stoppedPath || !stopped) { const value = await lstat(path); if (path === stoppedPath) saved = value; return value } if (++stoppedReads === 1) return saved!; const error = new Error('missing') as NodeJS.ErrnoException; error.code = 'ENOENT'; throw error }) as typeof lstat })

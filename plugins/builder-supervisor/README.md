@@ -62,10 +62,50 @@ journal tornam-se elegíveis à evicção. `finish` é linearizado por
 
 ## Integração
 
-Este pacote é somente a fundação M6.2. A composição do processo, os segredos,
-o volume imutável do store e o adaptador do Prompt-to-App pertencem à etapa de
-integração. Não exponha este socket pela rede e não substitua os DTOs por
-`argv`, shell ou configuração Docker recebida do cliente.
+Este pacote é somente a fundação M6.2. O entrypoint `builder-supervisor` compõe
+o adaptador Docker, o journal durável, a reconciliação de boot, o replay RPC e o
+socket Unix, mas **não é ativado por este pacote**. Compose, imagem, criação dos
+arquivos protegidos e adaptação do Prompt-to-App pertencem a etapas separadas.
+Não exponha este socket pela rede e não substitua os DTOs por `argv`, shell ou
+configuração Docker recebida do cliente.
+
+O processo aceita somente `--config file:/caminho/absoluto`. Não consulta
+variáveis de ambiente para configuração, token ou digests. Em produção, o
+arquivo deve existir exatamente em
+`/etc/dz23-studio/builder/<tenant>/<instance>/supervisor.json`, pertencer a root
+ou ao UID do processo, ser regular, não ser link, ter um único hard link e não
+ser gravável por grupo/outros. Token e digests são lidos de referências `file:`
+exatas sob as raízes fechadas. O bearer aceita somente modo `0400` ou `0600`,
+sem qualquer permissão para grupo/outros. Erros e códigos de saída nunca incluem
+caminhos, conteúdo ou segredos.
+
+O JSON é um contrato fechado, sem chaves extras:
+
+```json
+{
+  "version": 1,
+  "tenant_id": "tenant-one",
+  "instance_id": "instance-one",
+  "socket_path": "/run/dz23-studio/builder/tenant-one/instance-one/builder.sock",
+  "artifact_root": "/srv/dz23-studio/generated-runs/tenant-one/instance-one",
+  "export_root": "/srv/dz23-studio/builder-exports/tenant-one/instance-one",
+  "journal_root": "/var/lib/dz23-studio/builder/tenant-one/instance-one/journal",
+  "docker_socket_path": "/var/run/docker.sock",
+  "bearer_token_ref": "file:/run/secrets/dz23-studio/builder/tenant-one/instance-one/token",
+  "image_digest_ref": "file:/etc/dz23-studio/builder/tenant-one/instance-one/builder-image.sha256",
+  "template_store_version": "v1.0.0",
+  "template_store_sha256_ref": "file:/etc/dz23-studio/builder/tenant-one/instance-one/template-store.sha256",
+  "policy_sha256_ref": "file:/etc/dz23-studio/builder/tenant-one/instance-one/policy.sha256"
+}
+```
+
+`SIGINT` e `SIGTERM` primeiro verificam a autoridade do socket, depois abortam
+as operações cooperativas e aguardam a drenagem/limpeza limitada. Um segundo
+sinal encerra conexões restantes. Se o pathname já pertence a outro processo,
+o supervisor não o renomeia, remove nem fecha: desconecta e remove a referência
+do seu próprio listener, que já está inacessível pelo pathname, e sai com falha.
+A remoção do socket e da lease sempre revalida identidade e nunca remove ou
+sobrescreve um socket substituído por outro processo.
 
 A composição de produção deve fornecer obrigatoriamente um `FileBuildIdGuard`;
 um guard em memória é permitido somente em testes e não protege o `build_id`
