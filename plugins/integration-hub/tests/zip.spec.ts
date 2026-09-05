@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { assertEntryName, createZipAsync, crc32, createZip, readZip } from '../src/zip.ts'
 
@@ -115,6 +116,21 @@ describe('the zip reader against a hostile archive', () => {
     expect(() => readZip(archive)).toThrow('local header does not match')
   })
 
+  /**
+   * The name in the local header and the name in the central directory are the same length and the
+   * numeric fields all agree, so every other check passes: only the byte-for-byte comparison of the
+   * two names catches it. Without it the reader reports one name for bytes that were stored under
+   * another — the extraction step decides where a file lands by the name it is told.
+   */
+  it('refuses an entry whose local name differs from the central one while every number agrees', () => {
+    const archive = createZip([{ name: 'app/servidor.js', data: Buffer.from('ok '.repeat(200)) }])
+    const { local } = centralOf(archive)
+    // Same length, so `localNameLength !== nameLength` cannot be what refuses it.
+    archive.write('app/passwd.json', local + 30, 'utf8')
+    expect(archive.readUInt16LE(local + 26)).toBe(Buffer.byteLength('app/servidor.js'))
+    expect(() => readZip(archive)).toThrow('local header does not match')
+  })
+
   it('refuses an encrypted entry and one whose sizes live in a data descriptor', () => {
     for (const flag of [0x0001, 0x0008]) {
       const archive = createZip([{ name: 'a.txt', data: Buffer.from('ok '.repeat(200)) }])
@@ -130,6 +146,68 @@ describe('the zip reader against a hostile archive', () => {
     // Both copies of the second name — local header and central directory — become the first name.
     for (let at = archive.indexOf('b.txt'); at >= 0; at = archive.indexOf('b.txt', at + 1)) archive.write('a.txt', at, 'utf8')
     expect(() => readZip(archive)).toThrow('duplicate zip entry')
+  })
+
+  /**
+   * The directory record itself, taken apart. Every one of these checks is the reader refusing to
+   * believe an arithmetic claim the archive makes about its own layout, and none of them had ever
+   * been executed — the whole reader had only ever been fed archives this module wrote.
+   */
+  it('refuses a central directory whose own arithmetic does not hold', () => {
+    const build = (): { archive: Buffer; eocd: number } => {
+      const archive = createZip([{ name: 'a.txt', data: Buffer.from('ok '.repeat(200)) }])
+      return { archive, eocd: archive.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06])) }
+    }
+    // A directory that lives on another disk is a directory this reader cannot check.
+    const disk = build(); disk.archive.writeUInt16LE(1, disk.eocd + 4)
+    expect(() => readZip(disk.archive)).toThrow('multi-disk')
+    const onDisk = build(); onDisk.archive.writeUInt16LE(1, onDisk.eocd + 6)
+    expect(() => readZip(onDisk.archive)).toThrow('multi-disk')
+    // "Entries on this disk" and "entries in total" that disagree.
+    const counts = build(); counts.archive.writeUInt16LE(2, counts.eocd + 8)
+    expect(() => readZip(counts.archive)).toThrow('corrupt central directory')
+    // A directory whose declared size does not reach the record that describes it.
+    const size = build(); size.archive.writeUInt32LE(size.archive.readUInt32LE(size.eocd + 12) + 1, size.eocd + 12)
+    expect(() => readZip(size.archive)).toThrow('corrupt central directory')
+    // A directory whose first header cannot even fit before the end record.
+    const short = build()
+    short.archive.writeUInt32LE(short.eocd - 20, short.eocd + 16); short.archive.writeUInt32LE(20, short.eocd + 12)
+    expect(() => readZip(short.archive)).toThrow('corrupt central directory')
+    // A header that is not a header.
+    const signature = build()
+    signature.archive.writeUInt32LE(0xdeadbeef, signature.archive.readUInt32LE(signature.eocd + 16))
+    expect(() => readZip(signature.archive)).toThrow('corrupt central directory')
+    // A directory that says one entry but whose headers do not fill it: the trailing bytes are
+    // somebody else's headers, and stopping without noticing is how a reader misses an entry.
+    const trailing = build()
+    trailing.archive.writeUInt16LE(0, trailing.eocd + 8); trailing.archive.writeUInt16LE(0, trailing.eocd + 10)
+    expect(() => readZip(trailing.archive)).toThrow('corrupt central directory')
+  })
+
+  /**
+   * The local header and the payload, taken apart. A reader that trusts the directory alone can be
+   * told one thing about an entry while the bytes on disk say another.
+   */
+  it('refuses an entry whose local header or payload does not hold up', () => {
+    // STORED, so the two sizes must be the same number; anything else is a claim, not a file.
+    const stored = createZip([{ name: 'a.bin', data: randomBytes(64) }])
+    const storedAt = centralOf(stored)
+    expect(stored.readUInt16LE(storedAt.central + 10)).toBe(0) // really stored, not deflated
+    stored.writeUInt32LE(stored.readUInt32LE(storedAt.central + 24) + 1, storedAt.central + 20)
+    expect(() => readZip(stored)).toThrow('corrupt entry')
+    // A local header that is not a header at all.
+    const header = createZip([{ name: 'a.txt', data: Buffer.from('ok '.repeat(200)) }])
+    header.writeUInt32LE(0xdeadbeef, centralOf(header).local)
+    expect(() => readZip(header)).toThrow('corrupt entry')
+    // An "extra field" long enough to push the payload into the directory that describes it.
+    const extra = createZip([{ name: 'a.txt', data: Buffer.from('ok '.repeat(200)) }])
+    extra.writeUInt16LE(5000, centralOf(extra).local + 28)
+    expect(() => readZip(extra)).toThrow('corrupt entry')
+    // Bytes that survive every arithmetic check and are still not the file: the CRC is the last word.
+    const flipped = createZip([{ name: 'a.bin', data: randomBytes(64) }])
+    const payload = centralOf(flipped).local + 30 + 5
+    flipped[payload] = (flipped[payload] ?? 0) ^ 0xff
+    expect(() => readZip(flipped)).toThrow('corrupt entry')
   })
 
   it('refuses an entry whose data is not before the central directory', () => {

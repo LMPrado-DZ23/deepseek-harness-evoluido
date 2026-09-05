@@ -738,6 +738,8 @@ export class IntegrationHubService {
     // Resolving the name and then opening it again is exactly the window an attacker needs.
     const scope = await this.#openExportScope(actor, false).catch(() => undefined)
     if (scope === undefined) throw new HubError('NOT_FOUND', t('errors.exportUnavailable'))
+    // O_NONBLOCK is required here: opening a FIFO read-only can otherwise block
+    // a libuv worker forever before the regular-file check below can refuse it.
     const handle = await open(join(referenceOf(scope.handle, root), `${safeSegment(exportId)}.zip`), fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0)).catch(() => undefined)
     await scope.handle.close().catch(() => undefined)
     if (handle === undefined) throw new HubError('NOT_FOUND', t('errors.exportUnavailable'))

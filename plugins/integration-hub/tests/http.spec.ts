@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { generateKeyPairSync, randomBytes, sign } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { chmod, mkdir, mkdtemp, open, readdir, rm, writeFile } from 'node:fs/promises'
@@ -66,7 +67,19 @@ function manifest(): IntegrationManifest {
   return { ...value, signature: sign(null, canonicalManifestBytes(value), privateKey).toString('base64') }
 }
 
-async function fixture(role: 'owner' | 'admin' | 'builder' | 'viewer' = 'owner') {
+interface FixtureOptions {
+  /** Thrown by the projects port of ANOTHER plugin, exactly as that plugin throws it. */
+  readonly projectError?: unknown
+  readonly packagingTimeoutMs?: number
+  /** Thrown by the identity plugin when the session is authenticated. */
+  readonly identityError?: unknown
+  /** Thrown by the tenancy plugin when the membership is looked up. */
+  readonly tenancyError?: unknown
+  /** The session is valid, but it has no membership in this workspace. */
+  readonly noMembership?: boolean
+}
+
+async function fixture(role: 'owner' | 'admin' | 'builder' | 'viewer' = 'owner', options: FixtureOptions = {}) {
   const exportsRoot = await mkdtemp(join(tmpdir(), 'dz23-hub-http-'))
   roots.push(exportsRoot)
   const runDirectory = join(exportsRoot, 'run')
@@ -78,13 +91,18 @@ async function fixture(role: 'owner' | 'admin' | 'builder' | 'viewer' = 'owner')
     repository, exportsRoot, publisherKeys, channel: 'stable', runsRoot: exportsRoot,
     secrets: { inspect: async ref => ({ present: ref === 'DZ23_APP_SMTP', shapeOk: ref === 'DZ23_APP_SMTP' }) },
     projects: {
-      project: (actor, projectId) => { if (projectId !== 'p1' || actor.tenantId !== 'ws-a') throw Object.assign(new Error('nope'), { code: 'NOT_FOUND' }); return { project_id: 'p1', name: 'Agenda', state: 'VERIFIED_PROTOTYPE' } },
+      project: (actor, projectId) => {
+        if (options.projectError !== undefined) throw options.projectError
+        if (projectId !== 'p1' || actor.tenantId !== 'ws-a') throw Object.assign(new Error('nope'), { code: 'NOT_FOUND' })
+        return { project_id: 'p1', name: 'Agenda', state: 'VERIFIED_PROTOTYPE' }
+      },
       runs: () => [{ run_id: 'run-1', state: 'PASSED', started_at: '2026-09-03T11:00:00.000Z', attempt: 1, run_directory: runDirectory }],
     },
+    ...(options.packagingTimeoutMs === undefined ? {} : { packagingTimeoutMs: options.packagingTimeoutMs }),
     now: () => new Date('2026-09-04T00:00:00.000Z'), createId: () => `id-${++id}`,
   })
-  const identity = { authenticate: vi.fn((token: string) => token === 'session' ? Promise.resolve(session) : Promise.reject(new IdentityError('invalid', 'Sessão inválida.'))), validateCsrf: vi.fn((_s: unknown, cookie?: string, header?: string) => { if (cookie !== 'csrf' || header !== 'csrf') throw new IdentityError('invalid', 'CSRF ausente.') }) }
-  const tenancy = { authorizationFor: vi.fn((userId: string, orgId: string, tenantId: string) => ({ userId, orgId, tenantId, role })) }
+  const identity = { authenticate: vi.fn((token: string) => { if (options.identityError !== undefined) return Promise.reject(options.identityError); return token === 'session' ? Promise.resolve(session) : Promise.reject(new IdentityError('invalid', 'Sessão inválida.')) }), validateCsrf: vi.fn((_s: unknown, cookie?: string, header?: string) => { if (cookie !== 'csrf' || header !== 'csrf') throw new IdentityError('invalid', 'CSRF ausente.') }) }
+  const tenancy = { authorizationFor: vi.fn((userId: string, orgId: string, tenantId: string) => { if (options.tenancyError !== undefined) throw options.tenancyError; return options.noMembership === true ? undefined : { userId, orgId, tenantId, role } }) }
   const allowedHosts: string[] = []; const allowedOrigins: string[] = []
   const server = createServer(createHubHttpHandler({ service, identity: identity as unknown as StudioIdentityService, tenancy: tenancy as unknown as StudioTenancyService, allowedHosts, allowedOrigins }))
   servers.push(server)
@@ -336,6 +354,152 @@ describe('integration hub HTTP boundary', () => {
     // Twenty aborted downloads used to mean twenty descriptors that nothing ever closed.
     expect(await openDescriptors() - before).toBeLessThanOrEqual(2)
   }, 60_000)
+
+
+  /**
+   * The projects port belongs to ANOTHER plugin. What it throws is that plugin's error class, with
+   * that plugin's sentence in it — `PromptToAppError('FORBIDDEN', ...)` in production, and any
+   * message a future version of it decides to put there, a server path included. This boundary is
+   * the only thing between that sentence and the network, and until now nobody had ever run the
+   * `FORBIDDEN` arm of it.
+   */
+  it('answers a foreign plugin refusal with its own sentence and status, never the other plugin’s message', async () => {
+    const leak = '/srv/dz23/runs/org-a/ws-a/run-1: papel insuficiente'
+    const forbidden = await fixture('admin', { projectError: Object.assign(new Error(leak), { code: 'FORBIDDEN' }) })
+    for (const path of ['/projects/p1/exports', '/projects/p1/exports/e1/download']) {
+      const answer = await forbidden.request(path)
+      expect(answer.status, path).toBe(403)
+      const body = await answer.json() as { error: string }
+      expect(body.error, path).toBe('Seu papel não permite esta ação.')
+      expect(body.error, path).not.toContain('/srv')
+    }
+    // The same discipline for the code that IS mapped today, with a path in the message.
+    const missing = await fixture('admin', { projectError: Object.assign(new Error(leak), { code: 'NOT_FOUND' }) })
+    const gone = await missing.request('/projects/p1/exports')
+    expect(gone.status).toBe(404)
+    expect(((await gone.json()) as { error: string }).error).toBe('Projeto não encontrado.')
+    // And a code this module does not know is a 500 with the fixed sentence — not the plugin's text.
+    const unknown = await fixture('admin', { projectError: Object.assign(new Error(leak), { code: 'BOOM' }) })
+    const failed = await unknown.request('/projects/p1/exports')
+    expect(failed.status).toBe(500)
+    const failedBody = await failed.json() as { error: string }
+    expect(failedBody.error).not.toContain('/srv')
+    expect(failedBody.error).toContain('Algo deu errado')
+  })
+
+  /**
+   * `readJson` is what stands between the network and `JSON.parse`. Neither of its two refusals —
+   * a body that is not JSON at all, and a body past the 64 KB ceiling — had ever been executed:
+   * a ceiling nobody has ever reached is a claim, not a ceiling.
+   */
+  it('refuses a body that is not JSON and one past the 64 KB ceiling, without touching the service', async () => {
+    const { request, repository } = await fixture('admin')
+    const wrongType = await request('/smtp', { method: 'POST', body: '{"secret_ref":"DZ23_APP_SMTP"}', headers: { 'content-type': 'text/plain' } })
+    expect(wrongType.status).toBe(400)
+    expect(((await wrongType.json()) as { error: string }).error).toBe('Solicitação inválida.')
+    // Syntactically valid JSON, and small enough that the whole body is already in flight when the
+    // ceiling refuses it: what is refused is the SIZE, not the shape.
+    const huge = `{"secret_ref":"${'A'.repeat(80 * 1024)}"}`
+    const tooBig = await request('/smtp', { method: 'POST', body: huge })
+    expect(tooBig.status).toBe(400)
+    expect(((await tooBig.json()) as { error: string }).error).toBe('Solicitação inválida.')
+    // Nothing was configured and nothing was written: the refusal happened before the service.
+    expect(await (await request('/smtp')).json()).toMatchObject({ configured: false })
+    expect(repository.rows).toHaveLength(0)
+  })
+
+  /**
+   * `file_name` is a column, and a column is data. It reaches the wire inside a header line, so a
+   * row somebody edited (or an older build wrote) must not be able to put a quote, a CRLF or an
+   * empty token there. Neither the sanitiser's fallback nor its effect on the header had a test.
+   */
+  it('builds the download header from a sanitised name, whatever the stored row says', async () => {
+    const { request, repository } = await fixture('admin')
+    const created = await request('/projects/p1/exports', { method: 'POST', body: '{}' })
+    const { export: record } = await created.json() as { export: { export_id: string } }
+    const row = repository.exportRows.find(value => value.export_id === record.export_id)!
+    repository.exportRows = [{ ...row, file_name: 'a"\r\nx-injetado: sim' }]
+    const injected = await request(`/projects/p1/exports/${record.export_id}/download`)
+    expect(injected.status).toBe(200)
+    expect(injected.headers.get('x-injetado')).toBeNull()
+    expect(injected.headers.get('content-disposition')).toBe('attachment; filename="a_x-injetado_sim"')
+    await injected.arrayBuffer()
+    // A name that sanitises away to nothing still has to be a name.
+    repository.exportRows = [{ ...row, file_name: '☠☠☠' }]
+    const empty = await request(`/projects/p1/exports/${record.export_id}/download`)
+    expect(empty.headers.get('content-disposition')).toBe('attachment; filename="prototipo.zip"')
+    await empty.arrayBuffer()
+  }, 20_000)
+
+  /**
+   * The download opens the file the row names. `export.ts` learned in D16 that `open()` on a FIFO
+   * in `O_RDONLY` waits for a writer that may never come; this open did not. A named pipe left at
+   * the package's path therefore hung the request AND one of the four threads libuv has for the
+   * whole process — four of them and every file operation in the Studio stops — while the
+   * "not a regular file" refusal right below it could never fire. The test fails by TIMING OUT if
+   * the flag is taken away again.
+   */
+  it('refuses a named pipe left where the package should be, instead of waiting for it forever', async () => {
+    const { request, repository } = await fixture('admin')
+    const created = await request('/projects/p1/exports', { method: 'POST', body: '{}' })
+    const { export: record } = await created.json() as { export: { export_id: string } }
+    const row = repository.exportRows.find(value => value.export_id === record.export_id)!
+    await rm(row.path)
+    execFileSync('mkfifo', [row.path])
+    const answer = await request(`/projects/p1/exports/${record.export_id}/download`)
+    expect(answer.status).toBe(404)
+    expect(((await answer.json()) as { error: string }).error).toContain('não está mais neste computador')
+    // And the refusal is in the history, in words, like every other one.
+    expect(repository.eventRows.at(-1)).toMatchObject({ action: 'export.downloadRefused', outcome: 'failure', detail: 'not-a-regular-file' })
+  }, 15_000)
+
+  /**
+   * The Studio stopping its wait for a packaging call is a GATEWAY timeout: nothing the client sent
+   * was wrong, and answering 400 would tell the person to fix something they did not break. The
+   * service-level refusal is tested; the number it becomes on the wire was not.
+   */
+  it('answers 504 when the Studio stops waiting for a package', async () => {
+    const { request, repository } = await fixture('admin', { packagingTimeoutMs: 30 })
+    repository.putExport = async () => new Promise<void>(() => undefined)
+    const answer = await request('/projects/p1/exports', { method: 'POST', body: '{}' })
+    expect(answer.status).toBe(504)
+    expect(((await answer.json()) as { error: string }).error).toContain('parou de esperar')
+    expect(repository.eventRows.at(-1)).toMatchObject({ action: 'export.created', outcome: 'failure', detail: 'packaging-timeout' })
+  }, 20_000)
+
+
+  /**
+   * Identity and tenancy are other plugins too, and their refusals are the ones every request goes
+   * through. Three of the four numbers this boundary owes them had never been produced: a locked
+   * account is 429 and not 401 (a person told "wrong password" while the account is locked tries
+   * again, which is what locked it), a workspace that does not exist is 404, and a session with no
+   * membership at all is 403 in this plugin's own words.
+   */
+  it('gives identity and tenancy refusals their own status, and never their internals', async () => {
+    const locked = await fixture('admin', { identityError: new IdentityError('locked', 'Conta bloqueada. Tente mais tarde.') })
+    expect((await locked.request('/integrations')).status).toBe(429)
+    const invalid = await fixture('admin', { identityError: new IdentityError('invalid', 'Sessão inválida.') })
+    expect((await invalid.request('/integrations')).status).toBe(401)
+    for (const [code, status] of [['not-found', 404], ['forbidden', 403], ['invalid', 400]] as const) {
+      const tenancy = await fixture('admin', { tenancyError: new TenancyError(code, `tenancy: ${code}`) })
+      expect((await tenancy.request('/integrations')).status, code).toBe(status)
+    }
+    // Authenticated, but not a member of this workspace: this plugin's own sentence, not a 500.
+    const stranger = await fixture('admin', { noMembership: true })
+    const answer = await stranger.request('/integrations')
+    expect(answer.status).toBe(403)
+    expect(((await answer.json()) as { error: string }).error).toBe('Você precisa fazer parte deste espaço de trabalho.')
+  })
+
+  it('answers a path outside its own prefix as a route it does not have', async () => {
+    const { origin, host } = await fixture('admin')
+    // The handler may be mounted with or without its prefix, so a path that does not carry it is
+    // matched as the bare route — and a bare route it does not have is a 404 in words, never a
+    // library error from the matching itself.
+    const answer = await fetch(`${origin}/nao-existe-em-lugar-nenhum`, { headers: { host, origin, cookie: `${SESSION_COOKIE}=session` } })
+    expect(answer.status).toBe(404)
+    expect(((await answer.json()) as { error: string }).error).toBe('Rota não encontrada.')
+  })
 
   it('maps role errors to 403 for viewers and builders', async () => {
     const viewer = await fixture('viewer')

@@ -1,3 +1,4 @@
+import { createPrivateKey, generateKeyPairSync } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { generateKeyPairSync } from 'node:crypto'
 import { evaluateManifest } from '../src/manifest.ts'
@@ -17,6 +18,24 @@ describe('publisher signing helpers', () => {
     expect(evaluateManifest(signed, { dz23: generatePublisherKeyPair().publicKeyBase64 }).verification).toBe('invalid')
     // and the manifest without `permissions` (schema default) still verifies: signed as supplied
     expect('permissions' in signed).toBe(false)
+  })
+
+  /**
+   * The publisher-side helper is what a partner runs on their own machine with their own private
+   * key in hand. Two of its refusals had never been executed: an Ed25519 check reached with a real
+   * key of the wrong type, and the `KeyObject` form of the parameter — the form a caller who
+   * already holds the loaded key uses, and the only one that skips `createPrivateKey` entirely.
+   */
+  it('checks a real key of the wrong type and signs the same bytes from an already-loaded key', () => {
+    const pair = generatePublisherKeyPair()
+    // A perfectly valid private key — of the wrong algorithm. `sign(null, ...)` needs Ed25519, and
+    // without this check the caller gets a library error instead of a sentence about the key.
+    const rsa = generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({ type: 'pkcs8', format: 'pem' }).toString()
+    expect(() => signManifest(manifest, rsa)).toThrow(new SigningError('KEY_INVALID', 'private key must be Ed25519'))
+    // And the key may arrive already loaded, not as PEM: the same bytes must come out.
+    const asObject = signManifest(manifest, createPrivateKey(pair.privateKeyPem))
+    expect(asObject.signature).toBe(signManifest(manifest, pair.privateKeyPem).signature)
+    expect(evaluateManifest(asObject, { dz23: pair.publicKeyBase64 }).verification).toBe('verified')
   })
 
   it('refuses invalid manifests, the reserved smtp kind, non-Ed25519 keys and accidental re-signing', () => {

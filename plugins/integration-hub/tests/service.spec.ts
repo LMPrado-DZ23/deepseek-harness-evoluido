@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { canonicalManifestBytes } from '../src/manifest.ts'
 import type { HubEvent, IntegrationManifest, StudioExport, StudioIntegration } from '../src/model.ts'
-import { canonicalSecretRef, EVENTS_RETAINED_PER_TENANT, HubError, IntegrationHubService, MAX_APPROVAL_SCOPES, MAX_CONCURRENT_PACKAGING, MAX_EXPORTS_PER_WINDOW, MAX_LIVE_APPROVALS, minimizeRecipient, minimizeSecretRef, safeSegment, securityFingerprint, strongIdentityFresh, type HubActor, type HubRepository } from '../src/service.ts'
+import { canonicalSecretRef, EVENTS_RETAINED_PER_TENANT, EXPORT_WINDOW_MS, HubError, MAX_APPROVAL_SCOPES, IntegrationHubService, MAX_CONCURRENT_PACKAGING, MAX_EXPORTS_PER_WINDOW, MAX_LIVE_APPROVALS, minimizeRecipient, minimizeSecretRef, safeSegment, securityFingerprint, strongIdentityFresh, type HubActor, type HubRepository } from '../src/service.ts'
 import { readZip } from '../src/zip.ts'
 
 class MemoryRepository implements HubRepository {
@@ -70,7 +70,7 @@ function manifest(overrides: Partial<IntegrationManifest> = {}): IntegrationMani
 }
 function signed(value: IntegrationManifest): IntegrationManifest { return { ...value, signature: sign(null, canonicalManifestBytes(value), privateKey).toString('base64') } }
 
-async function build(options: { channel?: 'stable' | 'dev'; emailTest?: boolean; secrets?: Record<string, { present: boolean; shapeOk: boolean }>; runDirectory?: string; projectState?: string; runsRoot?: string } = {}) {
+async function build(options: { channel?: 'stable' | 'dev'; emailTest?: boolean; secrets?: Record<string, { present: boolean; shapeOk: boolean }>; runDirectory?: string; projectState?: string; runsRoot?: string; now?: () => Date } = {}) {
   const exportsRoot = await mkdtemp(join(tmpdir(), 'dz23-hub-exports-'))
   scratch.push(exportsRoot)
   const repository = new MemoryRepository()
@@ -92,7 +92,7 @@ async function build(options: { channel?: 'stable' | 'dev'; emailTest?: boolean;
       ],
     },
     emailTest: options.emailTest === true ? { sendTest: async (ref, to) => { sent.push([ref, to]) } } : undefined,
-    now: () => new Date('2026-09-04T00:00:00.000Z'), createId: () => `id-${++sequence}`,
+    now: options.now ?? (() => new Date('2026-09-04T00:00:00.000Z')), createId: () => `id-${++sequence}`,
   })
   return { service, repository, sent, exportsRoot }
 }
@@ -382,6 +382,61 @@ describe('integration hub service', () => {
     expect(record).toMatchObject({ tenant_id: 'ws-b', secret_ref: 'DZ23_APP_SMTP' })
   })
 
+  /**
+   * The map of live confirmations is bounded by WORKSPACE as well as by ticket, and the comment on
+   * it promises an order: a workspace whose confirmations were all already spent goes before one
+   * where somebody is still looking at the screen. That first pass had never run, so the promise
+   * was untested — and without it the oldest workspace loses its ticket to a stranger's flood and
+   * the person is told, for no reason they can see, to confirm again.
+   */
+  it('drops the workspaces with nothing pending first, never the one still confirming', async () => {
+    const { service } = await build({ secrets: { DZ23_APP_SMTP: { present: true, shapeOk: true } } })
+    const at = (tenant: string): HubActor => ({ ...admin, tenantId: tenant })
+    // The FIRST workspace the service ever saw, with a confirmation still on somebody's screen.
+    const waiting = await service.requestApproval(at('ws-primeiro'), 'smtp.configured', SMTP, 'DZ23_APP_SMTP')
+    for (let index = 0; index < MAX_APPROVAL_SCOPES - 2; index += 1) {
+      await service.requestApproval(at(`ws-${String(index)}`), 'smtp.configured', SMTP, 'DZ23_APP_SMTP')
+    }
+    // …and one workspace that confirmed and is done: its bucket is empty, and it is the one to go.
+    const spent = at('ws-gasto')
+    await service.configureSmtp(spent, 'DZ23_APP_SMTP', await ok(service, spent, 'smtp.configured', SMTP, 'DZ23_APP_SMTP'))
+    // One workspace too many arrives.
+    await service.requestApproval(at('ws-ultimo'), 'smtp.configured', SMTP, 'DZ23_APP_SMTP')
+    // The person who was still confirming can still confirm.
+    const record = await service.configureSmtp(at('ws-primeiro'), 'DZ23_APP_SMTP', { approvalId: waiting.approval_id })
+    expect(record).toMatchObject({ tenant_id: 'ws-primeiro', secret_ref: 'DZ23_APP_SMTP' })
+  }, 30_000)
+
+  /**
+   * The window of export attempts is kept per workspace, and that map is bounded too. What bounds
+   * it must only ever drop windows that have already gone STALE: dropping a live one hands the
+   * workspace that just hit the ceiling a fresh quota, so anybody able to make the Studio see many
+   * workspaces can buy themselves an unlimited number of packaging calls.
+   */
+  it('never gives a flooder a fresh quota when other workspaces crowd the window map out', async () => {
+    let clock = Date.parse('2026-09-04T00:00:00.000Z')
+    const { service } = await build({ now: () => new Date(clock) })
+    const at = (tenant: string): HubActor => ({ ...admin, tenantId: tenant })
+    // ws-a spends its whole quota and is refused.
+    for (let index = 0; index < MAX_EXPORTS_PER_WINDOW; index += 1) {
+      await expect(service.createExport(admin, 'p1')).rejects.toThrow()
+    }
+    await expect(service.createExport(admin, 'p1')).rejects.toMatchObject({ code: 'RATE_LIMITED' })
+    // Now many other workspaces ask for a package inside the same window, pushing the map of
+    // windows past its bound. Pruning it must only ever drop windows that have gone STALE: dropping
+    // a live one hands the workspace that just hit the ceiling a brand new quota, so anybody who can
+    // make the Studio see enough workspaces buys themselves unlimited packaging.
+    for (let index = 0; index <= MAX_APPROVAL_SCOPES + 4; index += 1) {
+      await expect(service.createExport(at(`ws-vizinho-${String(index)}`), 'p1')).rejects.toThrow()
+    }
+    await expect(service.createExport(admin, 'p1')).rejects.toMatchObject({ code: 'RATE_LIMITED' })
+    // Once the window has passed, those entries ARE stale, and stale is exactly what the bound is
+    // allowed to drop — the same workspace may ask again.
+    clock += EXPORT_WINDOW_MS + 1
+    await expect(service.createExport(at('ws-depois'), 'p1')).rejects.toThrow()
+    await expect(service.createExport(admin, 'p1')).rejects.not.toMatchObject({ code: 'RATE_LIMITED' })
+  }, 60_000)
+
   it('never writes the credential alias into the history, in success or in refusal', async () => {
     const { service, repository } = await build({ secrets: { DZ23_APP_SMTP: { present: true, shapeOk: true } } })
     await service.configureSmtp(admin, 'DZ23_APP_SMTP', await ok(service, admin, 'smtp.configured', SMTP, 'DZ23_APP_SMTP'))
@@ -465,6 +520,39 @@ describe('integration hub service', () => {
     expect(repository.eventRows.filter(row => row.tenant_id === 'ws-b')).toHaveLength(5)
     expect(repository.pruneCalls).toEqual([{ tenantId: 'ws-a', keep: EVENTS_RETAINED_PER_TENANT }])
   })
+
+  /**
+   * Retention is driven by a per-workspace counter kept in memory, and that map is bounded like
+   * every other one here — a Studio that has served ten thousand workspaces must not keep ten
+   * thousand counters. The eviction had never run, which means the recovery it depends on had never
+   * run either: a workspace whose counter was thrown away must be COUNTED AGAIN from the table on
+   * its next event, not treated as if it had one. Otherwise the ceiling silently stops applying to
+   * exactly the workspaces the Studio has known longest, and their history grows for ever.
+   */
+  it('recounts a workspace from the table after its retention counter is evicted, and still bounds it', async () => {
+    const { service, repository } = await build()
+    const first = { ...admin, tenantId: 'ws-0' }
+    // One event each, from more workspaces than the map is allowed to remember.
+    for (let index = 0; index <= MAX_APPROVAL_SCOPES; index += 1) {
+      await service.register({ ...admin, tenantId: `ws-${String(index)}` }, signed(manifest({ id: 'agenda' })))
+    }
+    // The first workspace's counter is gone by now. Its history, meanwhile, is well over the ceiling.
+    repository.eventRows = [
+      ...repository.eventRows.filter(row => row.tenant_id !== 'ws-0'),
+      ...Array.from({ length: EVENTS_RETAINED_PER_TENANT + 200 }, (_value, index) => ({
+        event_id: `seed-${String(index).padStart(5, '0')}`, org_id: 'org-a', tenant_id: 'ws-0', actor_user_id: 'u-owner',
+        action: 'approval.requested' as const, subject_id: 'smtp', outcome: 'success' as const, detail: 'seed',
+        created_at: new Date(Date.UTC(2026, 0, 1) + index * 1000).toISOString(),
+      })),
+    ]
+    await service.register(first, signed(manifest({ id: 'agenda-2' })))
+    // Counted again from the table, so the ceiling applies: a stale counter of "1" would have let
+    // all 1 201 rows stand.
+    expect(repository.eventRows.filter(row => row.tenant_id === 'ws-0')).toHaveLength(EVENTS_RETAINED_PER_TENANT)
+    expect(repository.eventRows.some(row => row.event_id === 'seed-00000')).toBe(false)
+    // And no other workspace lost a row to somebody else's ceiling.
+    expect(repository.eventRows.filter(row => row.tenant_id === 'ws-1')).toHaveLength(1)
+  }, 30_000)
 
   it('builds one package at a time per project and refuses a flood of export requests', async () => {
     const runDirectory = await fakeRun()

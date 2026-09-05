@@ -1,8 +1,8 @@
-import { chmod, mkdir, mkdtemp, open, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, open, open as openFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { ExportError, findSecret, isExportable, isScannable, openChildDirectory, openDirectory, packagePrototype, referenceOf, slug } from '../src/export.ts'
+import { EXPORT_LIMIT_BYTES, ExportError, findSecret, isExportable, isScannable, openChildDirectory, openDirectory, packagePrototype, referenceOf, slug } from '../src/export.ts'
 import { readZip } from '../src/zip.ts'
 import { execFileSync } from 'node:child_process'
 import { rm as rmDir } from 'node:fs/promises'
@@ -323,10 +323,109 @@ describe('prototype export package', () => {
     for (const name of ['a.bak', 'b.bak', 'c.bak']) expect(left).toContain(`app/${name}`)
   })
 
+
+  /**
+   * `.br` is the other half of the compressed-copy rule, and it had never been decompressed by a
+   * test: only the `.gz` arm of `decompressedText` had ever run. A Next.js build writes both next
+   * to the same bundle, so a secret shipped in the `.br` while the `.gz` was refused is a secret
+   * that leaves the machine.
+   */
+  it('opens a brotli copy of a bundle too, and refuses to ship one it cannot open', async () => {
+    const hidden = await runDirectory()
+    await writeFile(join(hidden, '.next', 'standalone', 'bundle.js.br'), brotliCompressSync(Buffer.from('const k = "AKIAIOSFODNN7EXAMPLE"')))
+    await expect(packagePrototype({ runDirectory: hidden, projectName: 'A', runId: 'run-1' }))
+      .rejects.toMatchObject({ code: 'SECRET_DETECTED', message: expect.stringContaining('bundle.js.br') })
+
+    const mixed = await runDirectory()
+    await writeFile(join(mixed, '.next', 'standalone', 'app.js.br'), brotliCompressSync(Buffer.from('console.log("ok")')))
+    await writeFile(join(mixed, '.next', 'standalone', 'quebrado.js.br'), Buffer.from('isto nao e brotli'))
+    const built = await packagePrototype({ runDirectory: mixed, projectName: 'A', runId: 'run-1' })
+    const entries = readZip(built.archive)
+    expect(entries.map(entry => entry.name)).toContain('app/app.js.br')
+    expect(entries.map(entry => entry.name)).not.toContain('app/quebrado.js.br')
+    expect(entries.find(entry => entry.name === 'EXCLUIDOS.txt')!.data.toString('utf8')).toContain('app/quebrado.js.br')
+  })
+
+  /**
+   * The acceptance report is opened, budgeted and scanned by its own code path, outside the walk —
+   * and none of its three refusals had ever been executed. It is a generated file: whatever the
+   * verification run captured (a response body, an environment dump) is in it.
+   */
+  it('applies the same three refusals to the acceptance report as to any other file', async () => {
+    // A secret in the report fails the WHOLE export, naming the report and never quoting the match.
+    const withSecret = await runDirectory()
+    await writeFile(join(withSecret, 'evidence', 'appspec-report.json'), '{"env":"postgres://dz23:s3nh4@db.interno:5432/app"}')
+    await expect(packagePrototype({ runDirectory: withSecret, projectName: 'A', runId: 'run-1' }))
+      .rejects.toMatchObject({ code: 'SECRET_DETECTED', detail: 'secret-in evidence/appspec-report.json' })
+    await expect(packagePrototype({ runDirectory: withSecret, projectName: 'A', runId: 'run-1' }))
+      .rejects.toMatchObject({ message: expect.not.stringContaining('s3nh4') })
+
+    // The report counts against the byte budget, and the budget is checked before the read.
+    const huge = await runDirectory()
+    const handle = await openFile(join(huge, 'evidence', 'appspec-report.json'), 'w')
+    try { await handle.truncate(EXPORT_LIMIT_BYTES + 1) } finally { await handle.close() }
+    await expect(packagePrototype({ runDirectory: huge, projectName: 'A', runId: 'run-1' }))
+      .rejects.toMatchObject({ code: 'TOO_LARGE', detail: 'bytes-over-limit' })
+
+    // A report that is a shortcut is not followed — and not silently missing either: it is named.
+    const linked = await runDirectory()
+    await writeFile(join(linked, 'segredo-do-dono.json'), '{"token":"ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}')
+    await rmDir(join(linked, 'evidence', 'appspec-report.json'), { force: true })
+    await symlink(join(linked, 'segredo-do-dono.json'), join(linked, 'evidence', 'appspec-report.json'))
+    const built = await packagePrototype({ runDirectory: linked, projectName: 'A', runId: 'run-1' })
+    const entries = readZip(built.archive)
+    expect(entries.map(entry => entry.name)).not.toContain('evidence/appspec-report.json')
+    expect(entries.find(entry => entry.name === 'EXCLUIDOS.txt')!.data.toString('utf8')).toContain('evidence/appspec-report.json')
+  }, 30_000)
+
+  /**
+   * Two names the ZIP writer or the platform cannot represent. Both used to be able to turn a whole
+   * export into an internal error (or, worse, into a file packaged under a name nobody chose);
+   * both must leave the package as a NAMED exclusion, with everything else still exported.
+   */
+  it('names, instead of shipping or crashing on, a file the archive or the platform cannot name', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dz23-export-nome-'))
+    scratch.push(root)
+    const standalone = join(root, '.next', 'standalone')
+    await mkdir(standalone, { recursive: true })
+    await writeFile(join(standalone, 'server.js'), 'ok')
+    // Legal on this filesystem, refused by `assertEntryName`: a backslash is a separator elsewhere.
+    await writeFile(join(standalone, 'rel\\ativo.js'), 'const a = 1')
+    // Bytes that are not UTF-8: `readdir` hands back a name with a replacement character, and that
+    // name names nothing on disk — the open fails and the entry must be reported, not dropped.
+    await writeFile(Buffer.concat([Buffer.from(`${standalone}/`), Buffer.from([0xff]), Buffer.from('nome.js')]), 'const b = 2')
+    const built = await packagePrototype({ runDirectory: root, projectName: 'A', runId: 'run-1' })
+    const entries = readZip(built.archive)
+    expect(entries.map(entry => entry.name)).toEqual(['.env.example', 'EXCLUIDOS.txt', 'README.md', 'app/server.js'])
+    const left = entries.find(entry => entry.name === 'EXCLUIDOS.txt')!.data.toString('utf8')
+    expect(left).toContain('rel\\ativo.js')
+    expect(left).toContain('nome.js')
+  })
+
   it('refuses a run without a standalone build and slugs names safely', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dz23-export-empty-'))
     scratch.push(root)
     await expect(packagePrototype({ runDirectory: root, projectName: 'x', runId: 'r' })).rejects.toBeInstanceOf(ExportError)
+    // A top folder that is present but is NOT a folder. Confinement resolves the name, so the only
+    // thing that can refuse it is the type check at the end of `confinedChild`, and that check had
+    // never run: without it these names travel on to be opened as directories, and the package
+    // grows a list of "exclusions" for folders the prototype never had.
+    const file = await mkdtemp(join(tmpdir(), 'dz23-export-file-'))
+    scratch.push(file)
+    await mkdir(join(file, '.next', 'standalone'), { recursive: true })
+    await writeFile(join(file, '.next', 'standalone', 'server.js'), 'ok')
+    await writeFile(join(file, '.next', 'static'), 'nao sou uma pasta')
+    await writeFile(join(file, 'public'), 'nem eu')
+    const built = await packagePrototype({ runDirectory: file, projectName: 'x', runId: 'r' })
+    // Not a folder means not there: nothing is walked, and nothing is listed as left behind.
+    expect(readZip(built.archive).map(entry => entry.name)).toEqual(['.env.example', 'README.md', 'app/server.js'])
+    // And the same check on `.next/standalone` itself is what makes the run refusable at all.
+    const noStandalone = await mkdtemp(join(tmpdir(), 'dz23-export-file2-'))
+    scratch.push(noStandalone)
+    await mkdir(join(noStandalone, '.next'), { recursive: true })
+    await writeFile(join(noStandalone, '.next', 'standalone'), 'nao sou uma pasta')
+    await expect(packagePrototype({ runDirectory: noStandalone, projectName: 'x', runId: 'r' }))
+      .rejects.toMatchObject({ code: 'RUN_MISSING', detail: 'run-missing' })
     expect(slug('  Ção & Cia!!  ')).toBe('cao-cia')
     expect(slug('___')).toBe('prototipo')
   })
