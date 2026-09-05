@@ -34,11 +34,12 @@ export interface PreparedArtifact { readonly archivePath: string; readonly archi
 export interface RecoveredBuild { readonly build_ref: string; readonly build_id: string }
 export interface BuilderExecutionPort {
   preflight(signal: AbortSignal): Promise<BuilderAttestation>
-  reconcile(signal: AbortSignal): Promise<readonly RecoveredBuild[]>
+  reconcile(expected: readonly RecoveredBuild[], signal: AbortSignal): Promise<readonly RecoveredBuild[]>
   prepare(buildRef: string, buildId: string, artifact: PreparedArtifact, signal: AbortSignal): Promise<void>
   execute(buildRef: string, step: BuildStep, signal: AbortSignal): Promise<StepResult>
   cancel(buildRef: string, signal: AbortSignal): Promise<void>
   exportArtifact(buildRef: string, signal: AbortSignal): Promise<ExportedArtifact>
+  commitArtifact(buildRef: string, pinnedBuildRefs: ReadonlySet<string>, signal: AbortSignal): Promise<void>
   cleanup(buildRef: string, signal: AbortSignal): Promise<void>
   listManaged(signal: AbortSignal): Promise<readonly string[]>
 }
@@ -77,7 +78,12 @@ export class DockerBuilderAdapter implements BuilderExecutionPort {
     return { state, protocol_version: 1, instance_id: this.options.instanceId, image_id: /^sha256:[a-f0-9]{64}$/u.test(imageId) ? imageId : this.options.imageDigest, policy_sha256: this.#policySha256 }
   }
 
-  async reconcile(signal: AbortSignal): Promise<readonly RecoveredBuild[]> {
+  async reconcile(expected: readonly RecoveredBuild[], signal: AbortSignal): Promise<readonly RecoveredBuild[]> {
+    const expectedByRef = new Map<string, string>(); const expectedById = new Map<string, string>()
+    for (const row of expected) {
+      if (!validBuildRef(row.build_ref) || !validBuildId(row.build_id) || expectedByRef.has(row.build_ref) || expectedById.has(row.build_id)) throw new BuilderSupervisorError('RECOVERY_FAILED')
+      expectedByRef.set(row.build_ref, row.build_id); expectedById.set(row.build_id, row.build_ref)
+    }
     const filter = managedFilter(this.options.instanceId); const [containers, volumes] = await Promise.all([this.options.engine.listContainers(filter, signal), this.options.engine.listVolumes(filter, signal)])
     const recovered = new Map<string, string>(); const ids = new Map<string, string>()
     for (const row of [...containers, ...volumes]) {
@@ -88,10 +94,11 @@ export class DockerBuilderAdapter implements BuilderExecutionPort {
       recovered.set(buildRef, buildId)
       ids.set(buildId, buildRef)
     }
-    for (const [buildRef, buildId] of recovered) { this.#buildIds.set(buildRef, buildId); await this.cleanup(buildRef, signal) }
+    const exportRefs = await listManagedExportArchives(this.options.exportRoot)
+    for (const [buildRef, buildId] of recovered) if (expectedByRef.get(buildRef) !== buildId || expectedById.get(buildId) !== buildRef) throw new BuilderSupervisorError('RECOVERY_FAILED')
+    for (const buildRef of exportRefs) if (!expectedByRef.has(buildRef)) throw new BuilderSupervisorError('RECOVERY_FAILED')
+    for (const [buildRef, buildId] of recovered) this.#buildIds.set(buildRef, buildId)
     await cleanupManagedExportResources(this.options.exportRoot, undefined, signal)
-    const [afterContainers, afterVolumes] = await Promise.all([this.options.engine.listContainers(filter, signal), this.options.engine.listVolumes(filter, signal)])
-    if (afterContainers.length !== 0 || afterVolumes.length !== 0) throw new BuilderSupervisorError('RECOVERY_FAILED')
     return [...recovered].map(([build_ref, build_id]) => ({ build_ref, build_id }))
   }
 
@@ -152,21 +159,14 @@ export class DockerBuilderAdapter implements BuilderExecutionPort {
   async cancel(buildRef: string, signal: AbortSignal): Promise<void> { const active = this.#active.get(buildRef); if (active !== undefined) await this.options.engine.stopContainer(active, signal) }
 
   async exportArtifact(buildRef: string, signal: AbortSignal): Promise<ExportedArtifact> {
-    const recovered = await readValidatedPublishedArtifact(this.options.exportRoot, buildRef)
-    if (recovered !== undefined) {
-      try { await cleanupManagedExportResources(this.options.exportRoot, buildRef, signal) }
-      catch { throw new BuilderSupervisorError('CLEANUP_INCOMPLETE') }
-      await enforceExportRetention(this.options.exportRoot, buildRef, this.#limits.maxRetainedExports, this.#limits.maxExportBytes, signal)
-      return recovered
-    }
-    const buildId = this.#buildIds.get(buildRef); if (buildId === undefined) throw new BuilderSupervisorError('BUILD_NOT_FOUND')
     const resources = names(this.options.instanceId, buildRef)
     const release = await this.#exports.acquire(signal); let exporter: string | undefined; let exportVolumeCreated = false; let result: ExportedArtifact | undefined; let operationError: unknown; let archive: Awaited<ReturnType<typeof openManagedExportArchive>> | undefined; let archiveClosed = false
     try {
       const existing = await readValidatedPublishedArtifact(this.options.exportRoot, buildRef)
       if (existing !== undefined) {
-        await cleanupManagedExportResources(this.options.exportRoot, buildRef, signal); await enforceExportRetention(this.options.exportRoot, buildRef, this.#limits.maxRetainedExports, this.#limits.maxExportBytes, signal); result = existing
+        await cleanupManagedExportResources(this.options.exportRoot, buildRef, signal); result = existing
       } else {
+        const buildId = this.#buildIds.get(buildRef); if (buildId === undefined) throw new BuilderSupervisorError('BUILD_NOT_FOUND')
         await cleanupManagedExportResources(this.options.exportRoot, undefined, signal)
         archive = await openManagedExportArchive(this.options.exportRoot, buildRef)
         const labels = baseLabels(this.options.instanceId, buildRef, buildId)
@@ -183,7 +183,6 @@ export class DockerBuilderAdapter implements BuilderExecutionPort {
         const stat = await archive.handle.stat(); if (!stat.isFile() || stat.nlink !== 1 || stat.dev !== archive.dev || stat.ino !== archive.ino || stat.size !== downloaded.bytes) throw new BuilderSupervisorError('EXPORT_INVALID')
         await (this.options.closeArchive?.(archive.handle) ?? archive.handle.close()); archiveClosed = true
         const published = await publishValidatedDockerArchive(this.options.exportRoot, buildRef, archive.path, signal, undefined, { dev: stat.dev, ino: stat.ino, size: stat.size, sha256: downloaded.sha256 })
-        await enforceExportRetention(this.options.exportRoot, buildRef, this.#limits.maxRetainedExports, this.#limits.maxExportBytes, signal)
         result = published
       }
     } catch (error) { operationError = error }
@@ -206,6 +205,12 @@ export class DockerBuilderAdapter implements BuilderExecutionPort {
       if (result === undefined) throw operationError
       return result
     } finally { release() }
+  }
+
+  async commitArtifact(buildRef: string, pinnedBuildRefs: ReadonlySet<string>, signal: AbortSignal): Promise<void> {
+    const release = await this.#exports.acquire(signal)
+    try { await enforceExportRetention(this.options.exportRoot, buildRef, pinnedBuildRefs, this.#limits.maxRetainedExports, this.#limits.maxExportBytes, signal) }
+    finally { release() }
   }
 
   async cleanup(buildRef: string, signal: AbortSignal): Promise<void> {

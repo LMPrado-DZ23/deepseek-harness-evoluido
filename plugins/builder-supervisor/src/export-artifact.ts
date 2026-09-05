@@ -76,7 +76,10 @@ export async function publishValidatedDockerArchive(exportRoot: string, buildRef
     const result = await verifyPublishedTree(stage, runtime)
     if (result.files !== extracted.files || result.bytes !== extracted.bytes) invalid()
     const published: ExportedArtifact = { relative_path: `exports/${buildRef}`, ...result }
-    await runtime.writeFile(resolve(stage, '.dz23-artifact.json'), `${JSON.stringify({ build_ref: buildRef, ...published })}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
+    const manifest = await runtime.open(resolve(stage, '.dz23-artifact.json'), constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | runtime.noFollowFlag, 0o600)
+    try { await writeAll(manifest, Buffer.from(`${JSON.stringify({ build_ref: buildRef, ...published })}\n`, 'utf8')); await manifest.sync() }
+    finally { await manifest.close() }
+    await syncTreeDirectories(stage, runtime)
     await runtime.rename(stage, final); await syncDirectory(parent, runtime)
     return published
   } catch (error) {
@@ -87,7 +90,7 @@ export async function publishValidatedDockerArchive(exportRoot: string, buildRef
   }
 }
 
-export async function enforceExportRetention(exportRoot: string, currentBuildRef: string, maximumExports: number, maximumBytes: number, signal: AbortSignal, runtime: ExportRuntime = DEFAULT_RUNTIME): Promise<void> {
+export async function enforceExportRetention(exportRoot: string, currentBuildRef: string, pinnedBuildRefs: ReadonlySet<string>, maximumExports: number, maximumBytes: number, signal: AbortSignal, runtime: ExportRuntime = DEFAULT_RUNTIME): Promise<void> {
   if (!Number.isSafeInteger(maximumExports) || maximumExports < 1 || !Number.isSafeInteger(maximumBytes) || maximumBytes < 1) throw new Error('INVALID_EXPORT_RETENTION')
   if (!/^build_[a-f0-9]{32}$/u.test(currentBuildRef)) invalid()
   const root = resolve(exportRoot); const parent = resolve(root, 'exports'); await assertOwnedDirectory(root, runtime); await assertOwnedDirectory(parent, runtime)
@@ -115,11 +118,12 @@ export async function enforceExportRetention(exportRoot: string, currentBuildRef
   const current = rows.find(row => row.buildRef === currentBuildRef)
   if (current === undefined || current.bytes > maximumBytes) throw new BuilderSupervisorError('CAPACITY_EXCEEDED')
   let total = rows.reduce((sum, row) => sum + row.bytes, 0); let count = rows.length
-  for (const row of rows.filter(item => item.buildRef !== currentBuildRef).sort((left, right) => left.mtimeMs - right.mtimeMs || left.buildRef.localeCompare(right.buildRef))) {
+  for (const row of rows.filter(item => item.buildRef !== currentBuildRef && !pinnedBuildRefs.has(item.buildRef)).sort((left, right) => left.mtimeMs - right.mtimeMs || left.buildRef.localeCompare(right.buildRef))) {
     if (count <= maximumExports && total <= maximumBytes) break
     const stat = await runtime.lstat(row.path); if (!stat.isDirectory() || stat.isSymbolicLink() || await runtime.realpath(row.path) !== row.path) invalid()
     await runtime.remove(row.path, { recursive: true }); await syncDirectory(parent, runtime); total -= row.bytes; count -= 1
   }
+  if (count > maximumExports || total > maximumBytes) throw new BuilderSupervisorError('CAPACITY_EXCEEDED')
 }
 
 async function extractTar(archivePath: string, stage: string, signal: AbortSignal, runtime: ExportRuntime, expected?: ExpectedArchive): Promise<{ readonly files: number; readonly bytes: number }> {
@@ -247,6 +251,17 @@ async function verifyPublishedTree(path: string, runtime: ExportRuntime): Promis
     } finally { await handle.close() }
   }
   if (names.length < 1) invalid(); return { sha256: hash.digest('hex'), files: names.length, bytes }
+}
+async function syncTreeDirectories(path: string, runtime: ExportRuntime): Promise<void> {
+  if (runtime.platform === 'win32') return
+  for (const entry of await runtime.readdir(path, { withFileTypes: true })) {
+    const child = resolve(path, entry.name); assertExportPathBeneath(path, child)
+    const stat = await runtime.lstat(child)
+    if (entry.isSymbolicLink() || stat.isSymbolicLink()) invalid()
+    if (entry.isDirectory() && stat.isDirectory()) await syncTreeDirectories(child, runtime)
+    else if (!(entry.isFile() && stat.isFile() && stat.nlink === 1)) invalid()
+  }
+  await syncDirectory(path, runtime)
 }
 function normalizeTarName(value: string): string | undefined {
   const name = value.replace(/^\.\//u, '').replace(/\/$/u, '')

@@ -1,6 +1,6 @@
 # M6.2 — Fechamento dos bloqueios P1 do builder-supervisor
 
-**Base revisada:** `codex/m62-builder-supervisor@016a8f166933879a3b370ab89a89a46b173118c2`
+**Base cumulativa anterior:** `codex/m62-builder-supervisor@e370ea6a4c79c8ebadd1031a8d67e41e4353fd1b`
 **Contrato vinculante:** `outputs/M62_CONTRACT_REVIEW_655b237.md`
 **Escopo:** somente `plugins/builder-supervisor`; upstream, Compose,
 Prompt-to-App e demais worktrees não foram alterados.
@@ -20,11 +20,12 @@ cumulativamente na fundação do supervisor:
   devolvem a resposta gravada; corpo divergente conflita. O mutex cobre apenas
   metadados, não a operação, e falhas transitórias não envenenam a nova
   tentativa. Resultados concluídos têm retenção e capacidade limitadas;
-- o namespace durável do replay deriva de `instance_id` + `policy_sha256`;
+- o namespace durável do replay deriva de `scope_id` + `instance_id` + `policy_sha256`;
   o journal bidirecional persiste `build_id`, `build_ref`, estado, export,
   `cleanup_pending` e resultado/erro terminal. Claims ativos sem recurso são
-  terminalizados sem permitir replay, recursos Docker sem claim são adotados e
-  drenados, concluídos têm retenção durável, e o `FileBuildIdGuard` é dependência
+  terminalizados sem permitir replay; recursos Docker sem claim ou com relação
+  `build_id`/`build_ref` divergente são preservados e bloqueiam a inicialização,
+  concluídos têm retenção durável, e o `FileBuildIdGuard` é dependência
   obrigatória da composição;
 - `preflight` atesta exatamente `state`, `protocol_version: 1`, `instance_id`,
   `image_id` e `policy_sha256`. O store é versionado por instalação e seu
@@ -37,12 +38,18 @@ cumulativamente na fundação do supervisor:
   journal. Chamadas concorrentes recebem o mesmo resultado ou erro; publicação
   ocorrida na janela anterior à atualização do journal é revalidada pelo digest
   e recuperada no boot, enquanto ausência ou divergência falha fechada;
+- o manifesto e todos os diretórios internos do staging são sincronizados
+  bottom-up antes do rename. Uma publicação com journal ativo fica pinada até o
+  commit durável e não é elegível à retenção de outro build;
 - download escreve no mesmo descritor exclusivo que foi criado após validar
   raiz e pai. A publicação reabre com `O_NOFOLLOW` e exige o mesmo device, inode,
   tamanho e SHA-256, fechando a troca de caminho entre download e extração;
 - wait, logs em follow e download de archive são governados pelo prazo da
   etapa, não pelo timeout curto de chamadas de controle. Escritas parciais são
   completadas ou falham fechadas;
+- o RPC recusa configuração cujo deadline seja menor que o teto de etapa mais
+  cleanup; timeout, disconnect e shutdown são causas separadas, e aborto não é
+  gravado como resposta idempotente;
 - o limite de logs é combinado em bytes. O wire usa `test`; o resultado inclui
   `termination_reason` e coerência entre timeout/output-limit/exit code;
 - o socket Unix fecha o servidor em falha de setup, revalida dev/ino/uid antes
@@ -59,12 +66,17 @@ cumulativamente na fundação do supervisor:
 - reinícios nas janelas claim→Docker, publicação→journal e cleanup→complete são
   reconciliados sem reutilizar `build_id`; publicação ausente, metadado
   divergente e leitura transitória têm resultados distintos e fechados;
+- uma queda após `E2E_OK` e antes da exportação preserva os recursos Docker:
+  a recuperação publica o artefato antes do cleanup; inverter essa ordem é
+  coberto por teste de regressão;
 - falha ao remover archive/staging/orphan mantém `CLEANUP_INCOMPLETE`; a próxima
   reconciliação coleta o resíduo e recupera a publicação validada;
 - troca de inode, digest divergente, escrita curta e descriptor ocupado são
   rejeitados antes da extração;
 - expiração do journal foi avançada por relógio injetado: só depois da coleta
   durável o ID e a capacidade em memória puderam ser reutilizados.
+- 100.000 waiters abortados foram removidos de uma fila intrusiva em tempo
+  linear, sem entrada ou permit residual.
 
 ## Gates executados
 
@@ -72,16 +84,16 @@ cumulativamente na fundação do supervisor:
 
 - `tsc -p plugins/builder-supervisor/tsconfig.build.json --noEmit`: **PASS**.
 - `tsc -p plugins/builder-supervisor/tsconfig.build.json`: **PASS**.
-- Vitest focado com coverage: **208/208 PASS**, 7/7 arquivos de teste.
+- Vitest focado com coverage: **220/220 PASS**, 7/7 arquivos de teste.
 - Fronteiras críticas com **100% statements / branches / functions / lines**:
   `docker-adapter.ts`, `docker-engine.ts`, `export-artifact.ts`,
   `persistent-replay.ts`, `service.ts` e `unix-server.ts`.
-- Cobertura global do pacote: 98,87% statements, 98,51% branches, 99,68%
-  functions e 99,57% lines.
+- Cobertura global do pacote: 98,91% statements, 98,45% branches, 99,69%
+  functions e 99,58% lines.
 
 ### Windows nativo
 
-- Vitest focado: **164 PASS / 44 SKIP**; os 44 são testes Unix/Linux.
+- Vitest focado: **174 PASS / 46 SKIP**; os 46 são testes Unix/Linux.
 - Typecheck focado: **PASS**.
 - Build focado: **PASS**.
 
@@ -112,3 +124,8 @@ cumulativamente na fundação do supervisor:
 - Docker real, `supervisor-main`, imagem, Compose e ligação com Prompt-to-App
   são a próxima fatia e permanecem **NOT_EXECUTED/NOT_PRESENT** aqui.
 - Nenhum merge, push, PR ou deploy foi feito.
+- O protocolo v1 não possui ownership por operação. A prova **não** declara o
+  processo tenant-safe quando compartilhado: produção exige uma instância por
+  tenant com `scopeId`, credencial, socket, `instanceId`, artifact/export roots,
+  journal e replay exclusivos. A composição ponta a ponta permanece
+  **NOT_EXECUTED**.

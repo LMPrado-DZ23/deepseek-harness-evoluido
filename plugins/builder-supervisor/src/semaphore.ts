@@ -1,6 +1,17 @@
+interface Waiter {
+  readonly signal: AbortSignal
+  readonly resolve: (release: () => void) => void
+  readonly reject: (error: unknown) => void
+  previous: Waiter | undefined
+  next: Waiter | undefined
+  queued: boolean
+}
+
 export class Semaphore {
   #active = 0
-  readonly #queue: Array<{ readonly signal: AbortSignal; readonly resolve: (release: () => void) => void; readonly reject: (error: unknown) => void }> = []
+  #queued = 0
+  #head: Waiter | undefined
+  #tail: Waiter | undefined
   constructor(private readonly maximum: number) {
     if (!Number.isSafeInteger(maximum) || maximum < 1) throw new Error('INVALID_CONCURRENCY_LIMIT')
   }
@@ -8,22 +19,34 @@ export class Semaphore {
     signal.throwIfAborted()
     if (this.#active < this.maximum) return this.#grant()
     return new Promise((resolve, reject) => {
-      const item = { signal, resolve, reject }
-      const abort = () => { const at = this.#queue.indexOf(item); if (at >= 0) this.#queue.splice(at, 1); reject(signal.reason) }
+      let item!: Waiter
+      const abort = () => { if (item.queued) this.#remove(item); reject(signal.reason) }
+      item = { signal, reject, queued: true, resolve: release => { signal.removeEventListener('abort', abort); resolve(release) }, previous: this.#tail, next: undefined }
+      if (this.#tail === undefined) this.#head = item
+      else this.#tail.next = item
+      this.#tail = item; this.#queued += 1
       signal.addEventListener('abort', abort, { once: true })
-      this.#queue.push({ ...item, resolve: release => { signal.removeEventListener('abort', abort); resolve(release) } })
     })
   }
   get active(): number { return this.#active }
+  get queued(): number { return this.#queued }
   #grant(): () => void {
     this.#active += 1; let released = false
     return () => {
       if (released) return
       released = true; this.#active -= 1
-      while (this.#queue.length > 0) {
-        const next = this.#queue.shift()!
+      while (this.#head !== undefined) {
+        const next = this.#head; this.#remove(next)
         if (!next.signal.aborted) { next.resolve(this.#grant()); break }
       }
     }
+  }
+  #remove(item: Waiter): void {
+    if (!item.queued) return
+    if (item.previous === undefined) this.#head = item.next
+    else item.previous.next = item.next
+    if (item.next === undefined) this.#tail = item.previous
+    else item.next.previous = item.previous
+    item.previous = undefined; item.next = undefined; item.queued = false; this.#queued -= 1
   }
 }

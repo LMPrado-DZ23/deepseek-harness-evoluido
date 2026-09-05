@@ -17,15 +17,20 @@ export interface BuilderUnixRuntime {
   readonly createServer: typeof createServer; readonly request: typeof httpRequest; readonly setTimeout: typeof setTimeout; readonly clearTimeout: typeof clearTimeout
 }
 const DEFAULT_RUNTIME: BuilderUnixRuntime = { platform: process.platform, pid: process.pid, getuid: process.getuid, kill: process.kill.bind(process), umask: process.umask.bind(process), lstatSync, chmod, lstat, mkdir, open, readFile, realpath, rename, remove: rm, unlink, writeFile, createServer, request: httpRequest, setTimeout, clearTimeout }
-export interface BuilderUnixServerOptions { readonly socketPath: string; readonly bearerToken: string; readonly methods: LifecycleMethods; readonly replayNamespace: { readonly instanceId: string; readonly policySha256: string }; readonly signal?: AbortSignal; readonly operationTimeoutMs?: number; readonly runtime?: BuilderUnixRuntime }
+export interface BuilderUnixServerOptions {
+  readonly socketPath: string; readonly bearerToken: string; readonly methods: LifecycleMethods
+  readonly replayNamespace: { readonly instanceId: string; readonly policySha256: string; readonly scopeId: string }
+  readonly signal?: AbortSignal; readonly operationTimeoutMs?: number; readonly stepTimeoutMs?: number; readonly cleanupTimeoutMs?: number; readonly runtime?: BuilderUnixRuntime
+}
 
 export async function listenBuilderUnix(options: BuilderUnixServerOptions): Promise<{ readonly server: Server; close(): Promise<void> }> {
   const runtime = options.runtime ?? DEFAULT_RUNTIME
   if (runtime.platform === 'win32' || runtime.getuid === undefined) throw new Error('UNIX_SOCKET_REQUIRED')
   const socketPath = validSocketPath(options.socketPath); const parent = dirname(socketPath); const lockPath = `${socketPath}.lock`; const uid = runtime.getuid(); const nonce = randomBytes(16).toString('hex')
   if (!/^[A-Za-z0-9_-]{43,200}$/u.test(options.bearerToken)) throw new Error('INVALID_SUPERVISOR_TOKEN')
-  if (!/^[A-Za-z0-9_-]{1,64}$/u.test(options.replayNamespace.instanceId) || !/^[a-f0-9]{64}$/u.test(options.replayNamespace.policySha256)) throw new Error('INVALID_REPLAY_NAMESPACE')
-  const timeoutMs = options.operationTimeoutMs ?? 30_000; if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1) throw new Error('INVALID_OPERATION_TIMEOUT')
+  if (!/^[A-Za-z0-9_-]{1,64}$/u.test(options.replayNamespace.instanceId) || !/^[a-f0-9]{64}$/u.test(options.replayNamespace.policySha256) || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/u.test(options.replayNamespace.scopeId)) throw new Error('INVALID_REPLAY_NAMESPACE')
+  const stepTimeoutMs = options.stepTimeoutMs ?? 180_000; const cleanupTimeoutMs = options.cleanupTimeoutMs ?? 30_000; const timeoutMs = options.operationTimeoutMs ?? 240_000
+  if (![stepTimeoutMs, cleanupTimeoutMs, timeoutMs].every(value => Number.isSafeInteger(value) && value > 0) || timeoutMs < stepTimeoutMs + cleanupTimeoutMs) throw new Error('INVALID_OPERATION_TIMEOUT')
   const processStartTicks = await processStartIdentity(runtime.pid, runtime)
   await ensureSocketDirectory(parent, uid, runtime)
   let socketIdentity: { readonly dev: number; readonly ino: number } | undefined; let server: Server | undefined; let lockHeld = false; let listenSucceeded = false
@@ -33,7 +38,7 @@ export async function listenBuilderUnix(options: BuilderUnixServerOptions): Prom
     await acquireLock(lockPath, socketPath, options.bearerToken, uid, nonce, processStartTicks, runtime); lockHeld = true
     await options.methods.initialize?.(AbortSignal.any([options.signal ?? new AbortController().signal, AbortSignal.timeout(timeoutMs)]))
     await assertAbsent(socketPath, runtime)
-    const replayKey = createHash('sha256').update(`${options.replayNamespace.instanceId}:${options.replayNamespace.policySha256}`).digest('hex')
+    const replayKey = createHash('sha256').update(`${options.replayNamespace.scopeId}:${options.replayNamespace.instanceId}:${options.replayNamespace.policySha256}`).digest('hex')
     const rpc = createBuilderRpcHandler({ credentialRef: CREDENTIAL_REFERENCE, credentials: { resolve: async () => options.bearerToken }, methods: options.methods, replay: new FileRpcReplayGuard(`${socketPath}.requests/${replayKey}`) })
     server = runtime.createServer((request, response) => { void handle(request, response, options, timeoutMs, rpc).catch(() => failure(response)) })
     server.requestTimeout = timeoutMs; server.headersTimeout = Math.min(timeoutMs, 10_000); server.maxHeadersCount = 64
@@ -62,13 +67,20 @@ export async function listenBuilderUnix(options: BuilderUnixServerOptions): Prom
 }
 
 async function handle(request: IncomingMessage, response: ServerResponse, options: BuilderUnixServerOptions, timeoutMs: number, rpc: ReturnType<typeof createBuilderRpcHandler>): Promise<void> {
-  const controller = new AbortController(); const timeout = AbortSignal.timeout(timeoutMs); const abort = (reason?: unknown) => controller.abort(reason)
-  const shutdown = () => abort(options.signal?.reason); const deadline = () => abort(timeout.reason)
+  const controller = new AbortController(); const timeout = AbortSignal.timeout(timeoutMs); let cause: 'timeout' | 'disconnect' | 'shutdown' | undefined
+  const abort = (next: typeof cause) => { cause ??= next; controller.abort(new Error(`SUPERVISOR_${next?.toUpperCase()}`)) }
+  const shutdown = () => abort('shutdown'); const deadline = () => abort('timeout'); const disconnect = () => abort('disconnect')
   if (options.signal?.aborted === true) shutdown(); else options.signal?.addEventListener('abort', shutdown, { once: true })
-  timeout.addEventListener('abort', deadline, { once: true }); request.once('aborted', () => abort()); response.once('close', () => { if (!response.writableEnded) abort() })
+  timeout.addEventListener('abort', deadline, { once: true }); request.once('aborted', disconnect); response.once('close', () => { if (!response.writableEnded) disconnect() })
   try {
     let body: Buffer; try { body = await readBounded(request) } catch { body = Buffer.alloc(BUILDER_RPC_MAX_BODY_BYTES + 1) }
-    const result = await rpc.handle({ path: request.url ?? '/', method: request.method ?? '', headers: { authorization: typeof request.headers.authorization === 'string' ? request.headers.authorization : undefined }, body, signal: controller.signal })
+    let result
+    try { result = await rpc.handle({ path: request.url ?? '/', method: request.method ?? '', headers: { authorization: typeof request.headers.authorization === 'string' ? request.headers.authorization : undefined }, body, signal: controller.signal }) }
+    catch {
+      if (cause === 'disconnect') return
+      const status = cause === 'timeout' ? 504 : 503; const code = cause === 'timeout' ? 'DEADLINE_EXCEEDED' : 'SUPERVISOR_SHUTTING_DOWN'
+      const body = Buffer.from(JSON.stringify({ ok: false, error: { code } }), 'utf8'); response.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'content-length': String(body.byteLength), 'cache-control': 'no-store' }); response.end(body); return
+    }
     response.writeHead(result.status, result.headers); response.end(result.body)
   } finally { options.signal?.removeEventListener('abort', shutdown); timeout.removeEventListener('abort', deadline) }
 }

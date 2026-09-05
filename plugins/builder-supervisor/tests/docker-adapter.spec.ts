@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto'
 import type { FileHandle } from 'node:fs/promises'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { describe, expect, it, vi } from 'vitest'
 import { DockerBuilderAdapter } from '../src/docker-adapter.js'
 import type { DockerEnginePort } from '../src/docker-engine.js'
+import { openManagedExportArchive } from '../src/export-artifact.js'
 
 const image = `sha256:${'a'.repeat(64)}` as const
 const templateVersion = 'nextjs-app@1'
@@ -158,12 +159,14 @@ describe('server-authoritative Docker builder adapter', () => {
     await expect(adapter.cancel(`build_${'0'.repeat(32)}`, signal)).resolves.toBeUndefined()
   })
 
-  it('reconciles labeled orphan containers and quota volumes before accepting work', async () => {
+  it('validates labeled recovery ownership and preserves resources for lifecycle recovery', async () => {
     const engine = new FakeEngine(); const signal = new AbortController().signal; await create(engine).prepare(buildRef, 'orphan-run', artifact, signal)
-    const restarted = create(engine); await expect(restarted.reconcile(signal)).resolves.toEqual([{ build_ref: buildRef, build_id: 'orphan-run' }])
+    const restarted = create(engine); await expect(restarted.reconcile([{ build_ref: buildRef, build_id: 'orphan-run' }], signal)).resolves.toEqual([{ build_ref: buildRef, build_id: 'orphan-run' }])
+    expect(engine.containers.length).toBeGreaterThan(0); expect(engine.volumes.length).toBeGreaterThan(1)
+    await restarted.cleanup(buildRef, signal)
     expect(engine.containers).toHaveLength(0); expect(engine.volumes).toHaveLength(1)
     engine.volumes.push({ Name: 'alien', Labels: { 'dz23.managed': 'builder', 'dz23.instance_id': 'test-instance' } })
-    await expect(create(engine).reconcile(signal)).rejects.toThrow('RECOVERY_FAILED')
+    await expect(create(engine).reconcile([], signal)).rejects.toThrow('RECOVERY_FAILED')
   })
 
   it('fails closed on conflicting recovery identities and surviving resources', async () => {
@@ -175,13 +178,31 @@ describe('server-authoritative Docker builder adapter', () => {
       [{ Id: 'alien', Labels: { 'dz23.managed': 'builder', 'dz23.instance_id': 'test-instance', 'dz23.build_ref': 'bad', 'dz23.build_id': 'one' } }],
     ]) {
       const engine = new FakeEngine(); engine.containers = rows
-      await expect(create(engine).reconcile(signal)).rejects.toThrow('RECOVERY_FAILED')
+      await expect(create(engine).reconcile([], signal)).rejects.toThrow('RECOVERY_FAILED')
     }
     const survivor = new FakeEngine(); survivor.containers = [managedContainer(buildRef, 'one')]; survivor.keepContainer = true
-    await expect(create(survivor).reconcile(signal)).rejects.toThrow('CLEANUP_INCOMPLETE')
-    const late = new FakeEngine(); late.containers = [managedContainer(buildRef, 'one')]; const original = late.listContainers.bind(late); let calls = 0
-    vi.spyOn(late, 'listContainers').mockImplementation(async filters => { calls += 1; const rows = await original(filters); return calls === 4 ? [managedContainer(buildRef, 'one')] : rows })
-    await expect(create(late).reconcile(signal)).rejects.toThrow('RECOVERY_FAILED')
+    const adapter = create(survivor)
+    await expect(adapter.reconcile([{ build_ref: buildRef, build_id: 'one' }], signal)).resolves.toEqual([{ build_ref: buildRef, build_id: 'one' }])
+    await expect(adapter.cleanup(buildRef, signal)).rejects.toThrow('CLEANUP_INCOMPLETE')
+  })
+
+  it('preserves all Docker evidence when journal ownership is absent or inconsistent', async () => {
+    const signal = new AbortController().signal; const ref2 = `build_${'c'.repeat(32)}`
+    for (const expected of [[], [{ build_ref: buildRef, build_id: 'other' }], [{ build_ref: ref2, build_id: 'one' }]]) {
+      const engine = new FakeEngine(); engine.containers = [managedContainer(buildRef, 'one')]; const before = structuredClone(engine.containers); const remove = vi.spyOn(engine, 'removeContainer')
+      await expect(create(engine).reconcile(expected, signal)).rejects.toThrow('RECOVERY_FAILED')
+      expect(engine.containers).toEqual(before); expect(remove).not.toHaveBeenCalled()
+    }
+    const invalidExpected = create(new FakeEngine())
+    await expect(invalidExpected.reconcile([{ build_ref: 'bad', build_id: 'one' }], signal)).rejects.toThrow('RECOVERY_FAILED')
+    await expect(invalidExpected.reconcile([{ build_ref: buildRef, build_id: 'one' }, { build_ref: buildRef, build_id: 'two' }], signal)).rejects.toThrow('RECOVERY_FAILED')
+    await expect(invalidExpected.reconcile([{ build_ref: buildRef, build_id: 'one' }, { build_ref: ref2, build_id: 'one' }], signal)).rejects.toThrow('RECOVERY_FAILED')
+    const root = await mkdtemp(join(tmpdir(), 'dz23-reconcile-archive-')); const archive = await openManagedExportArchive(root, buildRef); await archive.handle.close()
+    try {
+      const adapter = new DockerBuilderAdapter({ engine: new FakeEngine(), imageDigest: image, instanceId: 'test-instance', exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256 })
+      await expect(adapter.reconcile([], signal)).rejects.toThrow('RECOVERY_FAILED'); await expect(readFile(archive.path)).resolves.toBeInstanceOf(Buffer)
+      await expect(adapter.reconcile([{ build_ref: buildRef, build_id: 'one' }], signal)).resolves.toEqual([]); await expect(readFile(archive.path)).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally { await rm(root, { recursive: true, force: true }) }
   })
 
   it('rolls back every partially prepared stage and detects rollback API failures', async () => {
@@ -215,6 +236,7 @@ describe('server-authoritative Docker builder adapter', () => {
     try {
       const adapter = new DockerBuilderAdapter({ engine, imageDigest: image, instanceId: 'test-instance', exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256 }); await adapter.prepare(buildRef, 'export-run', artifact, signal)
       await expect(adapter.exportArtifact(buildRef, signal)).resolves.toMatchObject({ relative_path: `exports/${buildRef}`, files: 3 })
+      await expect(adapter.commitArtifact(buildRef, new Set(), signal)).resolves.toBeUndefined()
       expect(JSON.stringify(engine.created)).not.toMatch(/"Type":"bind"|cp","-a/u)
       const exporter = engine.created.find(row => labels(row.body)['dz23.role'] === 'export')?.body
       expect(exporter).toMatchObject({ Cmd: ['node', '-e', expect.stringContaining("evidence/appspec-report.json")] })

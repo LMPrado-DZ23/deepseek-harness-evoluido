@@ -100,7 +100,7 @@ describe('builder supervisor orchestration', () => {
     await expect(service.listManaged({ request_id: req('6') }, signal)).resolves.toEqual({ builds: [{ build_ref: ref, build_id: 'run-1', state: 'E2E_OK', exported: false, cleanup_pending: false }] })
     await expect(service.listManaged({ request_id: req('9'), build_id: 'another-run' }, signal)).resolves.toEqual({ builds: [] })
     await expect(service.finish({ request_id: req('7'), build_ref: ref }, signal)).resolves.toEqual({ build_ref: ref, final_state: 'E2E_OK', exported: { relative_path: `exports/${ref}`, sha256: 'e'.repeat(64), files: 1, bytes: 1 }, cleanup_pending: false, cleaned: true })
-    expect(adapter.exportArtifact).toHaveBeenCalledWith(ref, signal); expect(adapter.cleanup).toHaveBeenCalledWith(ref, expect.any(AbortSignal)); expect(vi.mocked(adapter.cleanup).mock.calls[0]![1]).not.toBe(signal)
+    expect(adapter.exportArtifact).toHaveBeenCalledWith(ref, expect.any(AbortSignal)); expect(vi.mocked(adapter.exportArtifact).mock.calls[0]![1]).not.toBe(signal); expect(adapter.cleanup).toHaveBeenCalledWith(ref, expect.any(AbortSignal)); expect(vi.mocked(adapter.cleanup).mock.calls[0]![1]).not.toBe(signal)
     await expect(service.finish({ request_id: req('8'), build_ref: ref }, signal)).resolves.toMatchObject({ cleaned: true })
     expect(adapter.exportArtifact).toHaveBeenCalledTimes(1); expect(adapter.cleanup).toHaveBeenCalledTimes(1)
   })
@@ -235,8 +235,9 @@ describe('builder supervisor orchestration', () => {
 
   it('reconciles before serving and permanently reserves recovered build ids and refs', async () => {
     const fixture = await artifactFixture(); const adapter = fakeAdapter(); const recoveredRef = `build_${'d'.repeat(32)}`
+    const journal = memoryJournal(); await journal.claim('recovered-run', recoveredRef)
     vi.mocked(adapter.reconcile).mockResolvedValueOnce([{ build_ref: recoveredRef, build_id: 'recovered-run' }])
-    const service = testSupervisor({ artifactRoot: fixture.root, adapter, createReference: () => recoveredRef }); const signal = new AbortController().signal
+    const service = new BuilderSupervisor({ artifactRoot: fixture.root, adapter, createReference: () => recoveredRef, buildClaims: journal }); const signal = new AbortController().signal
     await expect(service.preflight({ request_id: req('1') }, signal)).resolves.toMatchObject({ state: 'OK', protocol_version: 1 })
     expect(adapter.reconcile).toHaveBeenCalledTimes(1)
     await expect(service.listManaged({ request_id: req('4'), build_id: 'recovered-run' }, signal)).resolves.toEqual({ builds: [] })
@@ -266,6 +267,27 @@ describe('builder supervisor orchestration', () => {
     const second = service.finish({ request_id: req('7'), build_ref: ref }, signal); release()
     const [left, right] = await Promise.all([first, second]); expect(left).toEqual(right)
     expect(adapter.exportArtifact).toHaveBeenCalledTimes(1); expect(adapter.cleanup).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a published artifact retryable until retention commits after journal-safe pinning', async () => {
+    const fixture = await artifactFixture(); const adapter = fakeAdapter(); const service = testSupervisor({ artifactRoot: fixture.root, adapter, createReference: () => ref }); const signal = new AbortController().signal
+    await service.prepare({ request_id: req('1'), build_id: 'retention-gap', artifact_relative_path: 'run', artifact_sha256: fixture.hash }, signal)
+    for (const [index, step] of (['install', 'build', 'test', 'e2e'] as const).entries()) await service.execute({ request_id: req(String(index + 2)), build_ref: ref, step }, signal)
+    vi.mocked(adapter.commitArtifact).mockRejectedValueOnce(new BuilderSupervisorError('CAPACITY_EXCEEDED')).mockResolvedValueOnce(undefined)
+    await expect(service.finish({ request_id: req('6'), build_ref: ref }, signal)).rejects.toThrow('CAPACITY_EXCEEDED')
+    await expect(service.finish({ request_id: req('7'), build_ref: ref }, signal)).resolves.toMatchObject({ final_state: 'E2E_OK', cleaned: true })
+    expect(adapter.exportArtifact).toHaveBeenCalledTimes(1); expect(adapter.cleanup).toHaveBeenCalledTimes(2); expect(adapter.commitArtifact).toHaveBeenCalledTimes(2)
+  })
+  it('pins another active publication while concurrent finishes cross the journal commit boundary', async () => {
+    const fixture = await artifactFixture(); const adapter = fakeAdapter(); const refs = [`build_${'a'.repeat(32)}`, `build_${'b'.repeat(32)}`]; let index = 0; const service = testSupervisor({ artifactRoot: fixture.root, adapter, createReference: () => refs[index++]! }); const signal = new AbortController().signal
+    for (const [position, buildRef] of refs.entries()) {
+      await service.prepare({ request_id: req(position === 0 ? '1' : '7'), build_id: `pin-${position}`, artifact_relative_path: 'run', artifact_sha256: fixture.hash }, signal)
+      for (const [stepIndex, step] of (['install', 'build', 'test', 'e2e'] as const).entries()) await service.execute({ request_id: req((position === 0 ? stepIndex + 2 : stepIndex + 8).toString(16)), build_ref: buildRef, step }, signal)
+    }
+    let release!: () => void; const blocked = new Promise<void>(resolve => { release = resolve }); vi.mocked(adapter.commitArtifact).mockImplementationOnce(async () => blocked).mockResolvedValue(undefined)
+    const first = service.finish({ request_id: req('6'), build_ref: refs[0]! }, signal); await vi.waitFor(() => expect(adapter.commitArtifact).toHaveBeenCalledTimes(1))
+    const second = service.finish({ request_id: req('c'), build_ref: refs[1]! }, signal); await vi.waitFor(() => expect(adapter.commitArtifact).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(adapter.commitArtifact).mock.calls[1]![1].has(refs[0]!)).toBe(true); release(); await expect(Promise.all([first, second])).resolves.toHaveLength(2)
   })
 
   it('shares one finish failure with concurrent callers and permits one explicit retry', async () => {
@@ -318,6 +340,46 @@ describe('builder supervisor orchestration', () => {
     const adapter = fakeAdapter(); vi.mocked(adapter.exportArtifact).mockResolvedValueOnce(exported)
     const service = new BuilderSupervisor({ artifactRoot: fixture.root, adapter, buildClaims: new FileBuildIdGuard(journalRoot) }); await service.initialize(signal)
     await expect(service.finish({ request_id: req('1'), build_ref: ref }, signal)).resolves.toEqual({ build_ref: ref, final_state: 'E2E_OK', exported, cleanup_pending: false, cleaned: true })
+  })
+
+  it('exports a recovered E2E build before removing its Docker resources', async () => {
+    const fixture = await artifactFixture(); const journal = memoryJournal(); const signal = new AbortController().signal
+    await journal.claim('crashed-before-export', ref)
+    await journal.update({ build_id: 'crashed-before-export', build_ref: ref, build_state: 'E2E_OK', exported: null, cleanup_pending: false, finish_result: null, finish_error: null })
+    const calls: string[] = []; const adapter = fakeAdapter()
+    vi.mocked(adapter.reconcile).mockResolvedValueOnce([{ build_ref: ref, build_id: 'crashed-before-export' }])
+    vi.mocked(adapter.exportArtifact).mockImplementationOnce(async () => { calls.push('export'); return { relative_path: `exports/${ref}`, sha256: '8'.repeat(64), files: 3, bytes: 11 } })
+    vi.mocked(adapter.cleanup).mockImplementationOnce(async () => { calls.push('cleanup') })
+    const service = new BuilderSupervisor({ artifactRoot: fixture.root, adapter, buildClaims: journal })
+    await service.initialize(signal)
+    expect(calls).toEqual(['export', 'cleanup'])
+    await expect(service.finish({ request_id: req('1'), build_ref: ref }, signal)).resolves.toMatchObject({ final_state: 'E2E_OK', cleaned: true })
+  })
+
+  it('fails closed when recovered active resources cannot be cleaned', async () => {
+    const fixture = await artifactFixture(); const journal = memoryJournal(); const signal = new AbortController().signal
+    await journal.claim('active-cleanup-failure', ref)
+    await journal.update({ build_id: 'active-cleanup-failure', build_ref: ref, build_state: 'CANCELLED', exported: null, cleanup_pending: false, finish_result: null, finish_error: null })
+    const adapter = fakeAdapter(); vi.mocked(adapter.reconcile).mockResolvedValueOnce([{ build_ref: ref, build_id: 'active-cleanup-failure' }]); vi.mocked(adapter.cleanup).mockRejectedValueOnce(new Error('docker unavailable'))
+    await expect(new BuilderSupervisor({ artifactRoot: fixture.root, adapter, buildClaims: journal }).initialize(signal)).rejects.toThrow('CLEANUP_INCOMPLETE')
+    await expect(journal.list()).resolves.toEqual([expect.objectContaining({ build_id: 'active-cleanup-failure', cleanup_pending: true, finish_result: null })])
+  })
+
+  it('fails closed when residual resources of a completed build cannot be cleaned', async () => {
+    const fixture = await artifactFixture(); const journal = memoryJournal(); const signal = new AbortController().signal
+    const result = { build_ref: ref, final_state: 'CANCELLED' as const, exported: null, cleanup_pending: false, cleaned: true }
+    await journal.claim('complete-cleanup-failure', ref)
+    await journal.complete({ build_id: 'complete-cleanup-failure', build_ref: ref, build_state: 'CANCELLED', exported: null, cleanup_pending: false, finish_result: result, finish_error: null })
+    const adapter = fakeAdapter(); vi.mocked(adapter.reconcile).mockResolvedValueOnce([{ build_ref: ref, build_id: 'complete-cleanup-failure' }]); vi.mocked(adapter.cleanup).mockRejectedValueOnce(new Error('docker unavailable'))
+    await expect(new BuilderSupervisor({ artifactRoot: fixture.root, adapter, buildClaims: journal }).initialize(signal)).rejects.toThrow('CLEANUP_INCOMPLETE')
+  })
+
+  it('pins every other active journal publication during crash recovery', async () => {
+    const fixture = await artifactFixture(); const journal = memoryJournal(); const signal = new AbortController().signal; const refs = [`build_${'1'.repeat(32)}`, `build_${'2'.repeat(32)}`]
+    for (const [index, buildRef] of refs.entries()) { const exported = { relative_path: `exports/${buildRef}`, sha256: `${index + 1}`.repeat(64), files: 1, bytes: 1 }; await journal.claim(`recover-pin-${index}`, buildRef); await journal.update({ build_id: `recover-pin-${index}`, build_ref: buildRef, build_state: 'E2E_OK', exported, cleanup_pending: false, finish_result: null, finish_error: null }) }
+    const adapter = fakeAdapter(); vi.mocked(adapter.exportArtifact).mockImplementation(async buildRef => ({ relative_path: `exports/${buildRef}`, sha256: buildRef === refs[0] ? '1'.repeat(64) : '2'.repeat(64), files: 1, bytes: 1 }))
+    await new BuilderSupervisor({ artifactRoot: fixture.root, adapter, buildClaims: journal }).initialize(signal)
+    expect(vi.mocked(adapter.commitArtifact).mock.calls[0]![1].has(refs[1]!)).toBe(true)
   })
 
   it('persists EXPORT_INVALID when an E2E journal has neither Docker resources nor a publication', async () => {
@@ -446,6 +508,7 @@ function fakeAdapter(): BuilderExecutionPort {
     execute: vi.fn(async (_buildRef: string, _step: BuildStep) => ok),
     cancel: vi.fn(async () => undefined),
     exportArtifact: vi.fn(async buildRef => ({ relative_path: `exports/${buildRef}`, sha256: 'e'.repeat(64), files: 1, bytes: 1 })),
+    commitArtifact: vi.fn(async () => undefined),
     cleanup: vi.fn(async buildRef => { managed.delete(buildRef) }),
     listManaged: vi.fn(async () => [...managed]),
   }

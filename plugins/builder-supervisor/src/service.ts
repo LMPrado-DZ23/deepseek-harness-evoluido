@@ -58,18 +58,14 @@ export class BuilderSupervisor implements BuilderRpcMethods {
     if (this.#initialized) return
     this.#initializing ??= (async () => {
       const journal = await this.#buildClaims.list()
-      const recovered = await this.options.adapter.reconcile(signal)
       const journalById = new Map(journal.map(item => [item.build_id, item]))
       const journalByRef = new Map(journal.map(item => [item.build_ref, item]))
       if (journalById.size !== journal.length || journalByRef.size !== journal.length) throw new BuilderSupervisorError('RECOVERY_FAILED')
+      const recovered = await this.options.adapter.reconcile(journal.map(item => ({ build_id: item.build_id, build_ref: item.build_ref })), signal)
+      const recoveredRefs = new Set(recovered.map(item => item.build_ref))
       for (const item of recovered) {
         const byId = journalById.get(item.build_id); const byRef = journalByRef.get(item.build_ref)
-        if ((byId !== undefined && byId.build_ref !== item.build_ref) || (byRef !== undefined && byRef.build_id !== item.build_id)) throw new BuilderSupervisorError('RECOVERY_FAILED')
-        if (byId === undefined) {
-          await this.#buildClaims.claim(item.build_id, item.build_ref)
-          const adopted = recoveredRecord(item.build_id, item.build_ref, 'CANCELLED', null)
-          journalById.set(item.build_id, adopted); journalByRef.set(item.build_ref, adopted)
-        }
+        if (byId?.build_ref !== item.build_ref || byRef?.build_id !== item.build_id) throw new BuilderSupervisorError('RECOVERY_FAILED')
       }
       for (const item of journalById.values()) {
         let record = item
@@ -89,9 +85,21 @@ export class BuilderSupervisor implements BuilderRpcMethods {
               continue
             }
           }
+          if (recoveredRefs.has(record.build_ref) || record.cleanup_pending) {
+            record = { ...record, build_state: finalState, exported, cleanup_pending: true }
+            await this.#buildClaims.update(record)
+            try { await this.options.adapter.cleanup(record.build_ref, cleanupSignal()) }
+            catch { throw new BuilderSupervisorError('CLEANUP_INCOMPLETE') }
+            record = { ...record, cleanup_pending: false }
+            await this.#buildClaims.update(record)
+          }
           const result = recoveredResult(record.build_ref, finalState, exported)
+          if (exported !== null) await this.options.adapter.commitArtifact(record.build_ref, pinnedExportRefs(journalById.values(), record.build_ref), cleanupSignal())
           record = recoveredRecord(record.build_id, record.build_ref, finalState, result)
           await this.#buildClaims.complete(record)
+        } else if (recoveredRefs.has(record.build_ref) || record.cleanup_pending) {
+          try { await this.options.adapter.cleanup(record.build_ref, cleanupSignal()) }
+          catch { throw new BuilderSupervisorError('CLEANUP_INCOMPLETE') }
         }
         this.#buildIds.add(record.build_id); this.#buildRefs.add(record.build_ref)
         this.#builds.set(record.build_ref, mutable(record))
@@ -110,11 +118,11 @@ export class BuilderSupervisor implements BuilderRpcMethods {
     await this.#claim(body.request_id)
     const release = await this.#prepares.acquire(signal)
     try {
-      await this.#pruneCompleted()
       const activeBuilds = [...this.#builds.values()].filter(build => build.finish_result === undefined && build.finish_error === undefined).length
       if (activeBuilds >= this.#maxBuilds) throw new BuilderSupervisorError('CAPACITY_EXCEEDED')
-      if (this.#buildIds.has(body.build_id)) throw new BuilderSupervisorError('BUILD_ALREADY_EXISTS')
+      if (this.#buildIds.has(body.build_id)) { await this.#pruneCompleted(); if (this.#buildIds.has(body.build_id)) throw new BuilderSupervisorError('BUILD_ALREADY_EXISTS') }
       const buildRef = this.#createReference()
+      if (this.#buildRefs.has(buildRef)) await this.#pruneCompleted()
       if (!/^build_[a-f0-9]{32}$/u.test(buildRef) || this.#builds.has(buildRef) || this.#buildRefs.has(buildRef) || (await this.options.adapter.listManaged(signal)).includes(buildRef)) {
         throw new BuilderSupervisorError('BUILD_ALREADY_EXISTS')
       }
@@ -181,7 +189,8 @@ export class BuilderSupervisor implements BuilderRpcMethods {
     if (build.finish_error !== undefined) throw new BuilderSupervisorError(build.finish_error)
     if (!isTerminalState(build.state)) throw new BuilderSupervisorError('BUILD_NOT_TERMINAL')
     const current = this.#finishes.get(body.build_ref); if (current !== undefined) return current
-    const operation = this.#finish(build, signal); this.#finishes.set(body.build_ref, operation)
+    signal.throwIfAborted()
+    const operation = this.#finish(build, lifecycleSignal()); this.#finishes.set(body.build_ref, operation)
     try { return await operation } finally { this.#finishes.delete(body.build_ref) }
   }
 
@@ -211,6 +220,7 @@ export class BuilderSupervisor implements BuilderRpcMethods {
       build.finish_error = exportError.code; throw new BuilderSupervisorError(build.finish_error)
     }
     const result: FinishResult = { build_ref: build.build_ref, final_state: finalState, exported: build.exported ?? null, cleanup_pending: false, cleaned: true }
+    if (build.exported !== undefined) await this.options.adapter.commitArtifact(build.build_ref, this.#pinnedExportRefs(build.build_ref), cleanupSignal())
     await this.#buildClaims.complete({ ...this.#record(build), finish_result: result })
     build.finish_result = result
     return result
@@ -238,6 +248,12 @@ export class BuilderSupervisor implements BuilderRpcMethods {
     for (const [buildRef, build] of this.#builds) if ((build.finish_result !== undefined || build.finish_error !== undefined) && !retained.has(buildRef)) { this.#builds.delete(buildRef); this.#buildIds.delete(build.build_id); this.#buildRefs.delete(buildRef) }
   }
 
+  #pinnedExportRefs(current: string): ReadonlySet<string> {
+    const pinned = new Set<string>()
+    for (const build of this.#builds.values()) if (build.build_ref !== current && build.finish_result === undefined && build.finish_error === undefined && build.exported !== undefined) pinned.add(build.build_ref)
+    return pinned
+  }
+
   async #claim(requestId: string): Promise<void> {
     if (!this.#initialized) await this.initialize(AbortSignal.timeout(30_000))
     await this.#replay.claim(requestId)
@@ -245,6 +261,12 @@ export class BuilderSupervisor implements BuilderRpcMethods {
 }
 
 function cleanupSignal(): AbortSignal { return AbortSignal.timeout(30_000) }
+function lifecycleSignal(): AbortSignal { return AbortSignal.timeout(210_000) }
+function pinnedExportRefs(records: Iterable<BuildJournalRecord>, current: string): ReadonlySet<string> {
+  const pinned = new Set<string>()
+  for (const record of records) if (record.build_ref !== current && record.finish_result === null && record.finish_error === null && record.exported !== null) pinned.add(record.build_ref)
+  return pinned
+}
 function recoveredResult(buildRef: string, state: Extract<BuildState, 'E2E_OK' | 'FAILED' | 'CANCELLED'>, exported: ExportedArtifact | null): FinishResult { return { build_ref: buildRef, final_state: state, exported, cleanup_pending: false, cleaned: true } }
 function recoveredRecord(buildId: string, buildRef: string, state: Extract<BuildState, 'E2E_OK' | 'FAILED' | 'CANCELLED'>, result: FinishResult | null): BuildJournalRecord { return { build_id: buildId, build_ref: buildRef, build_state: state, exported: result?.exported ?? null, cleanup_pending: false, finish_result: result, finish_error: null } }
 function mutable(record: BuildJournalRecord): MutableBuild { return { build_ref: record.build_ref, build_id: record.build_id, state: record.build_state, cleanup_pending: record.cleanup_pending, ...(record.exported === null ? {} : { exported: record.exported }), ...(record.finish_result === null ? {} : { finish_result: record.finish_result }), ...(record.finish_error === null ? {} : { finish_error: record.finish_error }), recovered_cleaned: true } }

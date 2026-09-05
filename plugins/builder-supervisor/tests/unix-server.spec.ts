@@ -10,7 +10,7 @@ import { listenBuilderUnix, type BuilderUnixRuntime } from '../src/unix-server.j
 
 const roots: string[] = []; const listeners: Array<{ close(): Promise<void> }> = []
 const token = 'A'.repeat(43)
-const replayNamespace = { instanceId: 'test-instance', policySha256: 'b'.repeat(64) }
+const replayNamespace = { instanceId: 'test-instance', policySha256: 'b'.repeat(64), scopeId: 'tenant-test' }
 type HttpHandler = (request: IncomingMessage, response: ServerResponse) => void
 afterEach(async () => {
   await Promise.all(listeners.splice(0).map(item => item.close().catch(() => undefined)))
@@ -72,12 +72,14 @@ describe.skipIf(process.platform === 'win32')('authenticated Unix builder socket
     await expect(listenBuilderUnix({ socketPath: 'relative.sock', bearerToken: token, methods, replayNamespace })).rejects.toThrow('INVALID_SOCKET_PATH')
     await expect(listenBuilderUnix({ socketPath: '/tmp/../tmp/builder.sock', bearerToken: token, methods, replayNamespace })).rejects.toThrow('INVALID_SOCKET_PATH')
     await expect(listenBuilderUnix({ socketPath: '/tmp/builder.sock', bearerToken: 'short', methods, replayNamespace })).rejects.toThrow('INVALID_SUPERVISOR_TOKEN')
-    await expect(listenBuilderUnix({ socketPath: '/tmp/builder.sock', bearerToken: token, methods, replayNamespace: { instanceId: '../bad', policySha256: 'x' } })).rejects.toThrow('INVALID_REPLAY_NAMESPACE')
-    await expect(listenBuilderUnix({ socketPath: '/tmp/builder.sock', bearerToken: token, methods, replayNamespace: { instanceId: 'ok', policySha256: 'x' } })).rejects.toThrow('INVALID_REPLAY_NAMESPACE')
+    await expect(listenBuilderUnix({ socketPath: '/tmp/builder.sock', bearerToken: token, methods, replayNamespace: { instanceId: '../bad', policySha256: 'x', scopeId: 'tenant-test' } })).rejects.toThrow('INVALID_REPLAY_NAMESPACE')
+    await expect(listenBuilderUnix({ socketPath: '/tmp/builder.sock', bearerToken: token, methods, replayNamespace: { instanceId: 'ok', policySha256: 'x', scopeId: 'tenant-test' } })).rejects.toThrow('INVALID_REPLAY_NAMESPACE')
+    await expect(listenBuilderUnix({ socketPath: '/tmp/builder.sock', bearerToken: token, methods, replayNamespace: { ...replayNamespace, scopeId: '../bad' } })).rejects.toThrow('INVALID_REPLAY_NAMESPACE')
     await expect(listenBuilderUnix({ socketPath: '/tmp/bad\\socket', bearerToken: token, methods, replayNamespace })).rejects.toThrow('INVALID_SOCKET_PATH')
     await expect(listenBuilderUnix({ socketPath: '/tmp/bad\0socket', bearerToken: token, methods, replayNamespace })).rejects.toThrow('INVALID_SOCKET_PATH')
     await expect(listenBuilderUnix({ socketPath: 'http://localhost/socket', bearerToken: token, methods, replayNamespace })).rejects.toThrow('INVALID_SOCKET_PATH')
     await expect(listenBuilderUnix({ socketPath: '/tmp/builder.sock', bearerToken: token, methods, replayNamespace, operationTimeoutMs: 0 })).rejects.toThrow('INVALID_OPERATION_TIMEOUT')
+    await expect(listenBuilderUnix({ socketPath: '/tmp/builder.sock', bearerToken: token, methods, replayNamespace, operationTimeoutMs: 100, stepTimeoutMs: 80, cleanupTimeoutMs: 30 })).rejects.toThrow('INVALID_OPERATION_TIMEOUT')
   })
 
   it('rejects unsupported runtimes and unavailable process identity before acquiring authority', async () => {
@@ -103,9 +105,10 @@ describe.skipIf(process.platform === 'win32')('authenticated Unix builder socket
 
   it('bounds request bodies and aborts a cooperative slow RPC at the operation deadline', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dz23-builder-deadline-')); roots.push(root); const socketPath = join(root, 'builder.sock').replaceAll('\\', '/')
-    const methods = { ...fakeMethods(), preflight: vi.fn(async (_body: unknown, signal: AbortSignal) => { signal.throwIfAborted(); return new Promise<never>((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true })) }) }
-    const listener = await listenBuilderUnix({ socketPath, bearerToken: token, methods, replayNamespace, operationTimeoutMs: 50 }); listeners.push(listener)
-    await expect(send(socketPath, token)).resolves.toMatchObject({ status: 500 })
+    let slow = true; const methods = { ...fakeMethods(), preflight: vi.fn(async (_body: unknown, signal: AbortSignal) => { if (!slow) return { state: 'OK' as const, protocol_version: 1 as const, instance_id: 'test-instance', image_id: `sha256:${'a'.repeat(64)}` as const, policy_sha256: 'b'.repeat(64) }; signal.throwIfAborted(); return new Promise<never>((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true })) }) }
+    const listener = await listenBuilderUnix({ socketPath, bearerToken: token, methods, replayNamespace, operationTimeoutMs: 50, stepTimeoutMs: 20, cleanupTimeoutMs: 20 }); listeners.push(listener)
+    await expect(send(socketPath, token)).resolves.toMatchObject({ status: 504, body: { ok: false, error: { code: 'DEADLINE_EXCEEDED' } } })
+    slow = false; await expect(send(socketPath, token)).resolves.toMatchObject({ status: 200 }); expect(methods.preflight).toHaveBeenCalledTimes(2)
     await expect(sendRaw(socketPath, token, Buffer.alloc(64 * 1024 + 1, 0x61))).resolves.toMatchObject({ status: 413 })
   })
 
@@ -159,7 +162,7 @@ describe.skipIf(process.platform === 'win32')('authenticated Unix builder socket
   it('uses bounded close to destroy a held connection', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dz23-builder-close-bound-')); roots.push(root); const socketPath = join(root, 'builder.sock').replaceAll('\\', '/'); let timerCalled = false
     const runtime = unixRuntime({ setTimeout: ((callback: (...args: unknown[]) => void) => setTimeout(() => { timerCalled = true; callback() }, 5)) as typeof setTimeout })
-    const listener = await listenBuilderUnix({ socketPath, bearerToken: token, methods: fakeMethods(), replayNamespace, operationTimeoutMs: 10, runtime })
+    const listener = await listenBuilderUnix({ socketPath, bearerToken: token, methods: fakeMethods(), replayNamespace, operationTimeoutMs: 10, stepTimeoutMs: 4, cleanupTimeoutMs: 4, runtime })
     const client = await new Promise<import('node:net').Socket>((resolve, reject) => { const socket = createConnection(socketPath, () => resolve(socket)); socket.once('error', reject) })
     await listener.close(); client.destroy(); expect(timerCalled).toBe(true)
   })
@@ -183,7 +186,7 @@ describe.skipIf(process.platform === 'win32')('authenticated Unix builder socket
 
   it('applies shutdown signals and treats a missing lock during close as already released', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dz23-builder-shutdown-')); roots.push(root); const socketPath = join(root, 'builder.sock').replaceAll('\\', '/'); const controller = new AbortController(); controller.abort(new Error('shutdown'))
-    const listener = await listenBuilderUnix({ socketPath, bearerToken: token, methods: fakeMethods(), replayNamespace, signal: controller.signal }); expect(await send(socketPath, token)).toMatchObject({ status: 500 })
+    const listener = await listenBuilderUnix({ socketPath, bearerToken: token, methods: fakeMethods(), replayNamespace, signal: controller.signal }); expect(await send(socketPath, token)).toMatchObject({ status: 503, body: { ok: false, error: { code: 'SUPERVISOR_SHUTTING_DOWN' } } })
     await rm(`${socketPath}.lock`, { recursive: true }); await expect(listener.close()).resolves.toBeUndefined()
   })
 
@@ -250,7 +253,7 @@ describe.skipIf(process.platform === 'win32')('authenticated Unix builder socket
   it('aborts a live RPC when its client disconnects', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dz23-builder-disconnect-')); roots.push(root); const socketPath = join(root, 'builder.sock').replaceAll('\\', '/'); let aborted = false
     const methods = { ...fakeMethods(), preflight: vi.fn(async (_body: unknown, signal: AbortSignal) => new Promise<never>((_resolve, reject) => signal.addEventListener('abort', () => { aborted = true; reject(signal.reason) }, { once: true }))) }
-    const listener = await listenBuilderUnix({ socketPath, bearerToken: token, methods, replayNamespace, operationTimeoutMs: 1_000 }); listeners.push(listener)
+    const listener = await listenBuilderUnix({ socketPath, bearerToken: token, methods, replayNamespace, operationTimeoutMs: 1_000, stepTimeoutMs: 400, cleanupTimeoutMs: 400 }); listeners.push(listener)
     const client = createConnection(socketPath); await new Promise<void>((resolve, reject) => { client.once('connect', resolve); client.once('error', reject) })
     const body = JSON.stringify({ operation: 'preflight', body: { request_id: `req_${'7'.repeat(32)}` } })
     client.write(`POST /v1/rpc HTTP/1.1\r\nHost: local\r\nAuthorization: Bearer ${token}\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`)

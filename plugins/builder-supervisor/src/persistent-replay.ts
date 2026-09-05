@@ -156,10 +156,9 @@ export class FileBuildIdGuard implements BuildIdClaimPort {
     const previous = this.#tail; let release!: () => void; this.#tail = new Promise(resolveTail => { release = resolveTail }); await previous
     try {
       await mkdir(this.directory, { recursive: true, mode: 0o700 }); await assertPrivateDirectory(resolve(this.directory), this.runtime)
-      await this.#collect()
+      const count = await this.#collect()
       const digest = buildDigest(buildId); const path = resolve(this.directory, `build_${digest}.json`)
       try { await lstat(path); throw new BuilderSupervisorError('BUILD_ALREADY_EXISTS') } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
-      const count = (await readdir(this.directory)).filter(name => /^build_[a-f0-9]{64}\.json$/u.test(name)).length
       if (count >= this.maximum) throw new BuilderSupervisorError('REPLAY_CAPACITY')
       await writeExclusive(path, buildClaim({ build_id: buildId, build_ref: buildRef, build_state: 'PREPARED', exported: null, cleanup_pending: false, finish_result: null, finish_error: null }, 'active', this.now()), this.runtime); await syncDirectory(this.directory, this.runtime)
     } finally { release() }
@@ -198,14 +197,17 @@ export class FileBuildIdGuard implements BuildIdClaimPort {
       return records
     })
   }
-  async #collect(): Promise<void> {
+  async #collect(): Promise<number> {
     const threshold = this.now() - this.retentionMs
+    let count = 0
     for (const name of await readdir(this.directory)) {
       if (!/^build_[a-f0-9]{64}\.json$/u.test(name)) continue
       const path = resolve(this.directory, name); const claim = await readBuildClaim(path, this.runtime)
       if (claim.state === 'complete' && claim.completed_at !== null && claim.completed_at <= threshold) await rm(path)
+      else count += 1
     }
     await syncDirectory(this.directory, this.runtime)
+    return count
   }
   async #exclusive<T>(operation: () => Promise<T>): Promise<T> {
     const previous = this.#tail; let release!: () => void; this.#tail = new Promise(resolveTail => { release = resolveTail }); await previous

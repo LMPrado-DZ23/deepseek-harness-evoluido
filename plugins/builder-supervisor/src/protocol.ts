@@ -90,10 +90,12 @@ export function createBuilderRpcHandler(options: {
         if (!validResult(request, result)) throw new Error('INVALID_METHOD_RESULT')
         return response(200, { ok: true, result })
       } catch (error) {
+        if (input.signal.aborted) throw input.signal.reason
         if (error instanceof BuilderSupervisorError) return rpcError(409, error.code)
         throw error
       }
     }) } catch (error) {
+      if (input.signal.aborted) throw input.signal.reason
       if (error instanceof BuilderSupervisorError) return rpcError(409, error.code)
       return rpcError(500, 'INTERNAL')
     }
