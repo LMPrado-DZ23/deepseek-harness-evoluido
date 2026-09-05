@@ -1,11 +1,15 @@
 import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import { EventEmitter } from 'node:events'
 import { mkdtemp, rm, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { Readable } from 'node:stream'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  BUILDER_RPC_MAX_BODY_BYTES,
   BUILDER_RPC_MAX_RESPONSE_BYTES,
   BuilderUnixClientError,
+  classifyBuilderUnixClientFailure,
   createBuilderUnixClient,
   type BuilderUnixClientTransport,
 } from '../src/index.js'
@@ -42,6 +46,18 @@ describe('builder Unix client configuration and local validation', () => {
 
   it.each([0, BUILDER_RPC_MAX_RESPONSE_BYTES + 1, 1.5])('rejects unbounded or invalid response limit %s', maxResponseBytes => {
     expect(() => client({ maxResponseBytes })).toThrowError(expect.objectContaining({ code: 'INVALID_CONFIGURATION' }))
+  })
+
+  it.each([0, BUILDER_RPC_MAX_BODY_BYTES + 1, 1.5])('rejects an invalid request limit %s', maxRequestBytes => {
+    expect(() => client({ maxRequestBytes })).toThrowError(expect.objectContaining({ code: 'INVALID_CONFIGURATION' }))
+  })
+
+  it('enforces a caller-lowered request ceiling before credentials or transport', async () => {
+    const resolve = vi.fn(async () => token)
+    const request = vi.fn()
+    await expect(client({ maxRequestBytes: 1, credentials: { resolve }, transport: { request } as never }).preflight({ request_id: requestId('1') })).rejects.toMatchObject({ code: 'REQUEST_TOO_LARGE' })
+    expect(resolve).not.toHaveBeenCalled()
+    expect(request).not.toHaveBeenCalled()
   })
 
   it('rejects malformed caller IDs and bodies before resolving a credential or opening a socket', async () => {
@@ -83,6 +99,35 @@ describe('builder Unix client configuration and local validation', () => {
     controller.abort(new BuilderUnixClientError('INTERNAL'))
     await expect(pending).rejects.toEqual(expect.objectContaining({ code: 'ABORTED', message: 'ABORTED' }))
   })
+
+  it('propagates caller abort synchronously to the transport on every platform', async () => {
+    let transportSignal: AbortSignal | undefined
+    const request = new EventEmitter() as ReturnType<typeof httpRequest>
+    request.end = vi.fn(() => request) as typeof request.end
+    const transport: BuilderUnixClientTransport = {
+      request: options => {
+        transportSignal = options.signal
+        options.signal?.addEventListener('abort', () => request.emit('error', options.signal?.reason), { once: true })
+        return request
+      },
+    }
+    const controller = new AbortController()
+    const pending = client({ timeoutMs: 10_000, transport }).preflight({ request_id: requestId('9') }, { signal: controller.signal })
+    await vi.waitFor(() => expect(transportSignal).toBeDefined())
+    controller.abort(new Error('/secret/caller/reason'))
+    expect(transportSignal?.aborted).toBe(true)
+    await expect(pending).rejects.toEqual(expect.objectContaining({ code: 'ABORTED', message: 'ABORTED' }))
+  })
+
+  it.each([
+    { error: new BuilderUnixClientError('SOCKET_UNAVAILABLE'), state: 'BLOCKED_EXTERNAL', code: 'SOCKET_UNAVAILABLE' },
+    { error: new BuilderUnixClientError('ARTIFACT_HASH_MISMATCH'), state: 'BUILD_FAILED', code: 'ARTIFACT_HASH_MISMATCH' },
+    { error: new BuilderUnixClientError('ABORTED'), state: 'CANCELLED', code: 'ABORTED' },
+    { error: new BuilderUnixClientError('INVALID_REQUEST'), state: 'INTERNAL', code: 'INVALID_REQUEST' },
+    { error: new Error('/secret/unknown'), state: 'INTERNAL', code: 'UNKNOWN' },
+  ])('classifies future adapter failures without leaking details: $state/$code', ({ error, state, code }) => {
+    expect(classifyBuilderUnixClientFailure(error)).toEqual({ state, code })
+  })
 })
 
 describe.skipIf(process.platform === 'win32')('builder Unix client wire contract', () => {
@@ -109,6 +154,16 @@ describe.skipIf(process.platform === 'win32')('builder Unix client wire contract
     await expect(instance.finish({ request_id: requestId('5'), build_ref: buildRef })).resolves.toMatchObject({ final_state: 'E2E_OK', cleaned: true })
     await expect(instance.listManaged({ request_id: requestId('6'), build_id: 'run-1' })).resolves.toMatchObject({ builds: [{ build_id: 'run-1' }] })
     expect(seen.map(value => (value as { operation: string }).operation)).toEqual(['preflight', 'prepare', 'execute', 'cancel', 'finish', 'listManaged'])
+  })
+
+  it.each([
+    { name: 'failed build carrying an export', final_state: 'FAILED', exported: { relative_path: `exports/${buildRef}`, sha256: 'c'.repeat(64), files: 1, bytes: 1 }, cleanup_pending: false, cleaned: true },
+    { name: 'cancelled build carrying an export', final_state: 'CANCELLED', exported: { relative_path: `exports/${buildRef}`, sha256: 'c'.repeat(64), files: 1, bytes: 1 }, cleanup_pending: false, cleaned: true },
+    { name: 'successful build without an export', final_state: 'E2E_OK', exported: null, cleanup_pending: false, cleaned: true },
+    { name: 'successful build carrying another build export', final_state: 'E2E_OK', exported: { relative_path: `exports/build_${'9'.repeat(32)}`, sha256: 'c'.repeat(64), files: 1, bytes: 1 }, cleanup_pending: false, cleaned: true },
+  ])('rejects hostile finish result: $name', async ({ name: _name, ...result }) => {
+    const socketPath = await listen((_request, response) => json(response, 200, { ok: true, result: { build_ref: buildRef, ...result } }))
+    await expect(client({ socketPath }).finish({ request_id: requestId('6'), build_ref: buildRef })).rejects.toMatchObject({ code: 'INVALID_RESPONSE' })
   })
 
   it('preserves caller request IDs and bytes across explicit retries and never retries itself', async () => {
@@ -156,7 +211,8 @@ describe.skipIf(process.platform === 'win32')('builder Unix client wire contract
 
   it.each([
     { name: 'invalid JSON', status: 200, value: '{', contentType: 'application/json', code: 'INVALID_RESPONSE' },
-    { name: 'wrong media type', status: 200, value: '{}', contentType: 'text/plain', code: 'INVALID_RESPONSE' },
+    { name: 'wrong media type', status: 200, value: JSON.stringify({ ok: true, result: attestation() }), contentType: 'text/plain', code: 'INVALID_RESPONSE' },
+    { name: 'success flag is not true', status: 200, value: JSON.stringify({ ok: false, result: attestation() }), contentType: 'application/json', code: 'INVALID_RESPONSE' },
     { name: 'extra success authority', status: 200, value: JSON.stringify({ ok: true, result: attestation(), socket: '/run/docker.sock' }), contentType: 'application/json', code: 'INVALID_RESPONSE' },
     { name: 'invalid success result', status: 200, value: JSON.stringify({ ok: true, result: { ...attestation(), image_id: 'latest' } }), contentType: 'application/json', code: 'INVALID_RESPONSE' },
     { name: 'unknown remote error', status: 409, value: JSON.stringify({ ok: false, error: { code: 'SHELL_FAILED' } }), contentType: 'application/json', code: 'INVALID_RESPONSE' },
@@ -183,15 +239,34 @@ describe.skipIf(process.platform === 'win32')('builder Unix client wire contract
     await expect(client({ socketPath: streamedPath, maxResponseBytes: 128 }).preflight({ request_id: requestId('b') })).rejects.toMatchObject({ code: 'RESPONSE_TOO_LARGE' })
   })
 
+  it('rejects a content-length that differs from bytes read before decoding a valid envelope', async () => {
+    const payload = Buffer.from(JSON.stringify({ ok: true, result: attestation() }), 'utf8')
+    const transport = responseTransport(payload, {
+      'content-type': 'application/json; charset=utf-8',
+      'content-length': String(payload.byteLength + 1),
+    })
+    await expect(client({ transport }).preflight({ request_id: requestId('b') })).rejects.toMatchObject({ code: 'INVALID_RESPONSE' })
+  })
+
   it('distinguishes deadline, caller abort and socket availability without leaking transport details', async () => {
     const waiting: Array<() => void> = []
     const socketPath = await listen((_request, response) => { waiting.push(() => json(response, 200, { ok: true, result: attestation() })) })
     await expect(client({ socketPath, timeoutMs: 20 }).preflight({ request_id: requestId('c') })).rejects.toMatchObject({ code: 'DEADLINE_EXCEEDED' })
 
+    let transportSignal: AbortSignal | undefined
+    const transport: BuilderUnixClientTransport = {
+      request: (options, onResponse) => {
+        transportSignal = options.signal
+        return httpRequest(options, onResponse)
+      },
+    }
     const controller = new AbortController()
-    const pending = client({ socketPath, timeoutMs: 1_000 }).preflight({ request_id: requestId('d') }, { signal: controller.signal })
+    const pending = client({ socketPath, timeoutMs: 10_000, transport }).preflight({ request_id: requestId('d') }, { signal: controller.signal })
     await vi.waitFor(() => expect(waiting.length).toBeGreaterThanOrEqual(2))
     controller.abort(new Error('/secret/caller/reason'))
+    // AbortSignal.any propagates synchronously. Assert before awaiting the request so
+    // a later deadline cannot disguise a dropped caller signal.
+    expect(transportSignal?.aborted).toBe(true)
     await expect(pending).rejects.toEqual(expect.objectContaining({ code: 'ABORTED', message: 'ABORTED' }))
     waiting.splice(0).forEach(finish => finish())
 
@@ -278,4 +353,20 @@ function attestation() {
 
 function stepResult() {
   return { exit_code: 0, stdout: '', stderr: '', timed_out: false, termination_reason: null, output_limit_exceeded: false }
+}
+
+function responseTransport(body: Buffer, headers: Readonly<Record<string, string>>): BuilderUnixClientTransport {
+  return {
+    request: (_options, onResponse) => {
+      const request = new EventEmitter() as ReturnType<typeof httpRequest>
+      request.end = vi.fn(() => request) as typeof request.end
+      queueMicrotask(() => {
+        const response = Readable.from([body]) as IncomingMessage
+        response.statusCode = 200
+        response.headers = { ...headers }
+        onResponse(response)
+      })
+      return request
+    },
+  }
 }

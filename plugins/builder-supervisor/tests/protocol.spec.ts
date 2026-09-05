@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { BuilderSupervisorError } from '../src/model.js'
-import { BUILDER_RPC_MAX_BODY_BYTES, createBuilderRpcHandler, parseBuilderRpcRequest, type BuilderRpcMethods } from '../src/protocol.js'
+import { BUILDER_CREDENTIAL_REFERENCE_MAX_BYTES, BUILDER_RPC_MAX_BODY_BYTES, createBuilderRpcHandler, isBuilderCredentialReference, parseBuilderRpcRequest, type BuilderRpcMethods } from '../src/protocol.js'
 
 const requestId = (digit: string) => `req_${digit.repeat(32)}`
 const buildRef = `build_${'a'.repeat(32)}`
@@ -51,6 +51,18 @@ describe('builder supervisor closed RPC schema', () => {
     expect(() => parseBuilderRpcRequest({ operation: 'listManaged', body: { request_id: requestId('7'), build_id: '../bad' } })).toThrow()
     expect(() => parseBuilderRpcRequest({ operation: 'listManaged', body: null })).toThrow()
   })
+
+  it('bounds file credential references by bytes while keeping the check syntactic', () => {
+    expect(BUILDER_CREDENTIAL_REFERENCE_MAX_BYTES).toBe(4_096)
+    const prefix = 'file:/'
+    expect(isBuilderCredentialReference(`${prefix}${'a'.repeat(BUILDER_CREDENTIAL_REFERENCE_MAX_BYTES - prefix.length)}`)).toBe(true)
+    expect(isBuilderCredentialReference(`${prefix}${'a'.repeat(BUILDER_CREDENTIAL_REFERENCE_MAX_BYTES - prefix.length + 1)}`)).toBe(false)
+    expect(isBuilderCredentialReference('file:/proc/self/environ')).toBe(true)
+  })
+
+  it('keeps the absolute authenticated request ceiling at 64 KiB', () => {
+    expect(BUILDER_RPC_MAX_BODY_BYTES).toBe(65_536)
+  })
 })
 
 describe('builder supervisor authenticated HTTP contract', () => {
@@ -63,7 +75,7 @@ describe('builder supervisor authenticated HTTP contract', () => {
       prepare: vi.fn(async () => ({ build_ref: buildRef, state: 'PREPARED' as const })),
       execute: vi.fn(async (body: Parameters<BuilderRpcMethods['execute']>[0]) => ({ build_ref: body.build_ref, state: ({ install: 'INSTALL_OK', build: 'BUILD_OK', test: 'TEST_OK', e2e: 'E2E_OK' } as const)[body.step], step: body.step, result: { exit_code: 0, stdout: '', stderr: '', timed_out: false, termination_reason: null, output_limit_exceeded: false } })),
       cancel: vi.fn(async (body: Parameters<BuilderRpcMethods['cancel']>[0]) => ({ build_ref: body.build_ref, state: 'CANCELLED' as const })),
-      finish: vi.fn(async (body: Parameters<BuilderRpcMethods['finish']>[0]) => ({ build_ref: body.build_ref, final_state: 'E2E_OK' as const, exported: null, cleanup_pending: false, cleaned: true })),
+      finish: vi.fn(async (body: Parameters<BuilderRpcMethods['finish']>[0]) => ({ build_ref: body.build_ref, final_state: 'E2E_OK' as const, exported: { relative_path: `exports/${body.build_ref}`, sha256: 'a'.repeat(64), files: 1, bytes: 0 }, cleanup_pending: false, cleaned: true })),
       listManaged: vi.fn(async () => ({ builds: [] })),
       ...overrides,
     }
@@ -177,9 +189,21 @@ describe('builder supervisor authenticated HTTP contract', () => {
     expect((await send(dirty.handler, valid[4], { token })).status).toBe(500)
   })
 
+  it.each([
+    { name: 'failed result with an export', final_state: 'FAILED', exported: { relative_path: `exports/${buildRef}`, sha256: 'a'.repeat(64), files: 1, bytes: 0 }, cleanup_pending: false, cleaned: true },
+    { name: 'cancelled result with an export', final_state: 'CANCELLED', exported: { relative_path: `exports/${buildRef}`, sha256: 'a'.repeat(64), files: 1, bytes: 0 }, cleanup_pending: false, cleaned: true },
+    { name: 'successful result without an export', final_state: 'E2E_OK', exported: null, cleanup_pending: false, cleaned: true },
+    { name: 'successful result with another build export', final_state: 'E2E_OK', exported: { relative_path: `exports/build_${'9'.repeat(32)}`, sha256: 'a'.repeat(64), files: 1, bytes: 0 }, cleanup_pending: false, cleaned: true },
+    { name: 'successful result with cleanup pending', final_state: 'E2E_OK', exported: { relative_path: `exports/${buildRef}`, sha256: 'a'.repeat(64), files: 1, bytes: 0 }, cleanup_pending: true, cleaned: false },
+  ])('rejects impossible finish contract: $name', async ({ name: _name, ...result }) => {
+    const f = fixture({ finish: vi.fn(async body => ({ build_ref: body.build_ref, ...result })) as never })
+    expect((await send(f.handler, valid[4], { token })).status).toBe(500)
+  })
+
   it('rejects unsafe credential references at construction', () => {
     expect(() => createBuilderRpcHandler({ credentialRef: 'env:TOKEN', credentials: { resolve: async () => token }, methods: fixture().methods })).toThrow('INVALID_CREDENTIAL_REFERENCE')
     expect(() => createBuilderRpcHandler({ credentialRef: 'file:/run/../secret', credentials: { resolve: async () => token }, methods: fixture().methods })).toThrow('INVALID_CREDENTIAL_REFERENCE')
+    expect(() => createBuilderRpcHandler({ credentialRef: `file:/${'a'.repeat(4_096)}`, credentials: { resolve: async () => token }, methods: fixture().methods })).toThrow('INVALID_CREDENTIAL_REFERENCE')
   })
 })
 

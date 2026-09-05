@@ -40,6 +40,7 @@ export interface BuilderUnixClientOptions {
   readonly credentialRef: string
   readonly credentials: BuilderUnixClientCredentials
   readonly timeoutMs?: number
+  readonly maxRequestBytes?: number
   readonly maxResponseBytes?: number
   readonly transport?: BuilderUnixClientTransport
 }
@@ -97,6 +98,56 @@ export class BuilderUnixClientError extends Error {
   }
 }
 
+export type BuilderUnixClientFailureState = 'BLOCKED_EXTERNAL' | 'BUILD_FAILED' | 'CANCELLED' | 'INTERNAL'
+
+export interface BuilderUnixClientFailureClassification {
+  readonly state: BuilderUnixClientFailureState
+  readonly code: BuilderUnixClientErrorCode | 'UNKNOWN'
+}
+
+const FAILURE_STATES = {
+  ABORTED: 'CANCELLED',
+  CREDENTIAL_UNAVAILABLE: 'BLOCKED_EXTERNAL',
+  DEADLINE_EXCEEDED: 'BLOCKED_EXTERNAL',
+  INVALID_CONFIGURATION: 'INTERNAL',
+  INVALID_REQUEST: 'INTERNAL',
+  INVALID_RESPONSE: 'BLOCKED_EXTERNAL',
+  REQUEST_TOO_LARGE: 'INTERNAL',
+  RESPONSE_TOO_LARGE: 'BLOCKED_EXTERNAL',
+  SOCKET_UNAVAILABLE: 'BLOCKED_EXTERNAL',
+  TRANSPORT_ERROR: 'BLOCKED_EXTERNAL',
+  UNAUTHORIZED: 'BLOCKED_EXTERNAL',
+  NOT_FOUND: 'BLOCKED_EXTERNAL',
+  METHOD_NOT_ALLOWED: 'BLOCKED_EXTERNAL',
+  INTERNAL: 'BLOCKED_EXTERNAL',
+  SUPERVISOR_UNAVAILABLE: 'BLOCKED_EXTERNAL',
+  SUPERVISOR_SHUTTING_DOWN: 'BLOCKED_EXTERNAL',
+  ARTIFACT_CHANGED_DURING_STAGE: 'BUILD_FAILED',
+  ARTIFACT_HASH_MISMATCH: 'BUILD_FAILED',
+  ARTIFACT_OUTSIDE_ROOT: 'BUILD_FAILED',
+  ARTIFACT_UNSAFE_ENTRY: 'BUILD_FAILED',
+  BUILD_ALREADY_EXISTS: 'INTERNAL',
+  BUILD_NOT_FOUND: 'INTERNAL',
+  BUILD_NOT_TERMINAL: 'INTERNAL',
+  CAPACITY_EXCEEDED: 'BLOCKED_EXTERNAL',
+  CLEANUP_INCOMPLETE: 'BLOCKED_EXTERNAL',
+  EXPORT_INVALID: 'BLOCKED_EXTERNAL',
+  RECOVERY_FAILED: 'BLOCKED_EXTERNAL',
+  INVALID_STEP_ORDER: 'INTERNAL',
+  REQUEST_REPLAY: 'INTERNAL',
+  REQUEST_ID_CONFLICT: 'INTERNAL',
+  REPLAY_CAPACITY: 'BLOCKED_EXTERNAL',
+} as const satisfies Readonly<Record<BuilderUnixClientErrorCode, BuilderUnixClientFailureState>>
+
+/**
+ * Classifies the closed client error union for the future Prompt-to-App adapter.
+ * This function is deliberately not wired to any call site in the foundation.
+ */
+export function classifyBuilderUnixClientFailure(error: unknown): BuilderUnixClientFailureClassification {
+  if (!(error instanceof BuilderUnixClientError)) return { state: 'INTERNAL', code: 'UNKNOWN' }
+  return { state: FAILURE_STATES[error.code], code: error.code }
+}
+
 const DEFAULT_TRANSPORT: BuilderUnixClientTransport = {
   request: (options, onResponse) => httpRequest(options, onResponse),
 }
@@ -106,6 +157,8 @@ export function createBuilderUnixClient(options: BuilderUnixClientOptions): Buil
   if (!isBuilderCredentialReference(options.credentialRef)) throw new BuilderUnixClientError('INVALID_CONFIGURATION')
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > MAX_TIMEOUT_MS) throw new BuilderUnixClientError('INVALID_CONFIGURATION')
+  const maxRequestBytes = options.maxRequestBytes ?? BUILDER_RPC_MAX_BODY_BYTES
+  if (!Number.isSafeInteger(maxRequestBytes) || maxRequestBytes < 1 || maxRequestBytes > BUILDER_RPC_MAX_BODY_BYTES) throw new BuilderUnixClientError('INVALID_CONFIGURATION')
   const maxResponseBytes = options.maxResponseBytes ?? BUILDER_RPC_MAX_RESPONSE_BYTES
   if (!Number.isSafeInteger(maxResponseBytes) || maxResponseBytes < 1 || maxResponseBytes > BUILDER_RPC_MAX_RESPONSE_BYTES) throw new BuilderUnixClientError('INVALID_CONFIGURATION')
   const transport = options.transport ?? DEFAULT_TRANSPORT
@@ -115,7 +168,7 @@ export function createBuilderUnixClient(options: BuilderUnixClientOptions): Buil
     try { parsed = parseBuilderRpcRequest(request) }
     catch { throw new BuilderUnixClientError('INVALID_REQUEST') }
     const body = Buffer.from(JSON.stringify(parsed), 'utf8')
-    if (body.byteLength > BUILDER_RPC_MAX_BODY_BYTES) throw new BuilderUnixClientError('REQUEST_TOO_LARGE')
+    if (body.byteLength > maxRequestBytes) throw new BuilderUnixClientError('REQUEST_TOO_LARGE')
 
     const timeout = AbortSignal.timeout(timeoutMs)
     const signal = callOptions?.signal === undefined ? timeout : AbortSignal.any([callOptions.signal, timeout])

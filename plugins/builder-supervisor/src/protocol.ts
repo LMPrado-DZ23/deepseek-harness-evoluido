@@ -6,6 +6,7 @@ import { isBuilderRuntimeScopeId } from './runtime-scope.js'
 export const BUILDER_RPC_PATH = '/v1/rpc'
 export const BUILDER_RPC_MAX_BODY_BYTES = 64 * 1024
 export const BUILDER_RPC_MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+export const BUILDER_CREDENTIAL_REFERENCE_MAX_BYTES = 4 * 1024
 
 interface RequestIdentity { readonly request_id: string }
 export interface ListManagedRequest extends RequestIdentity { readonly build_id?: string }
@@ -138,8 +139,11 @@ export function isValidBuilderRpcResult(request: BuilderRpcRequest, value: unkno
   }
   if (request.operation === 'finish') {
     const row = exact(value, ['build_ref', 'final_state', 'exported', 'cleanup_pending', 'cleaned'])
-    return row !== undefined && row.build_ref === request.body.build_ref && (row.final_state === 'E2E_OK' || row.final_state === 'FAILED' || row.final_state === 'CANCELLED') &&
-      validExported(row.exported) && typeof row.cleanup_pending === 'boolean' && typeof row.cleaned === 'boolean' && row.cleanup_pending !== row.cleaned
+    if (row === undefined || row.build_ref !== request.body.build_ref || (row.final_state !== 'E2E_OK' && row.final_state !== 'FAILED' && row.final_state !== 'CANCELLED')) return false
+    if (row.cleanup_pending !== false || row.cleaned !== true || !validExported(row.exported)) return false
+    return row.final_state === 'E2E_OK'
+      ? row.exported !== null && (row.exported as { readonly relative_path?: unknown }).relative_path === `exports/${request.body.build_ref}`
+      : row.exported === null
   }
   const row = exact(value, ['builds'])
   const body = request.body as ListManagedRequest
@@ -147,7 +151,8 @@ export function isValidBuilderRpcResult(request: BuilderRpcRequest, value: unkno
 }
 
 export function isBuilderCredentialReference(value: string): boolean {
-  return /^file:\/(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+$/u.test(value) && !value.split('/').includes('..')
+  return Buffer.byteLength(value, 'utf8') <= BUILDER_CREDENTIAL_REFERENCE_MAX_BYTES &&
+    /^file:\/(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+$/u.test(value) && !value.split('/').includes('..')
 }
 
 function validStepResult(value: unknown): boolean {
