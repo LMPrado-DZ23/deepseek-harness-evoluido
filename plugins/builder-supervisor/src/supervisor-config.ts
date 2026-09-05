@@ -1,6 +1,13 @@
 import { constants, type Stats } from 'node:fs'
 import { lstat, open, realpath, type FileHandle } from 'node:fs/promises'
 import { posix } from 'node:path'
+import {
+  builderRuntimeSocketPath,
+  deriveBuilderRuntimeScopeId,
+  isInstallationId,
+  isRuntimeIdentifier,
+  type BuilderRuntimeScopeId,
+} from './runtime-scope.js'
 
 const CONFIG_KEYS = [
   'artifact_root',
@@ -8,9 +15,11 @@ const CONFIG_KEYS = [
   'docker_socket_path',
   'export_root',
   'image_digest_ref',
+  'installation_id',
   'instance_id',
   'journal_root',
   'policy_sha256_ref',
+  'replay_root',
   'socket_path',
   'template_store_sha256_ref',
   'template_store_version',
@@ -44,12 +53,15 @@ export const PRODUCTION_BUILDER_ROOT_POLICY: BuilderSupervisorRootPolicy = Objec
 })
 
 export interface BuilderSupervisorResolvedConfig {
+  readonly installationId: string
   readonly tenantId: string
   readonly instanceId: string
+  readonly scopeId: BuilderRuntimeScopeId
   readonly socketPath: string
   readonly artifactRoot: string
   readonly exportRoot: string
   readonly journalRoot: string
+  readonly replayRoot: string
   readonly dockerSocketPath: string
   readonly bearerToken: string
   readonly imageDigest: `sha256:${string}`
@@ -89,16 +101,20 @@ export async function loadBuilderSupervisorConfig(
     const raw = await readSecureFile(configPath, 'config', runtime)
     const value = strictRecord(JSON.parse(raw), CONFIG_KEYS)
     if (value.version !== 1) invalid()
+    const installationId = installationIdentifier(value.installation_id)
     const tenantId = identifier(value.tenant_id)
     const instanceId = identifier(value.instance_id)
-    const configDirectory = posix.join(roots.configRoot, tenantId, instanceId)
-    const secretDirectory = posix.join(roots.secretRoot, tenantId, instanceId)
+    const scopeId = deriveBuilderRuntimeScopeId({ installationId, tenantId, instanceId })
+    const configDirectory = posix.join(roots.configRoot, 'instances', scopeId)
+    const secretDirectory = posix.join(roots.secretRoot, 'instances', scopeId)
     if (configPath !== posix.join(configDirectory, 'supervisor.json')) invalid()
 
-    const socketPath = exactPath(value.socket_path, posix.join(roots.socketRoot, tenantId, instanceId, 'builder.sock'))
-    const artifactRoot = exactPath(value.artifact_root, posix.join(roots.artifactRoot, tenantId, instanceId))
-    const exportRoot = exactPath(value.export_root, posix.join(roots.exportRoot, tenantId, instanceId))
-    const journalRoot = exactPath(value.journal_root, posix.join(roots.stateRoot, tenantId, instanceId, 'journal'))
+    const socketPath = exactPath(value.socket_path, builderRuntimeSocketPath(roots.socketRoot, scopeId))
+    const artifactRoot = exactPath(value.artifact_root, posix.join(roots.artifactRoot, 'instances', scopeId))
+    const exportRoot = exactPath(value.export_root, posix.join(roots.exportRoot, 'instances', scopeId))
+    const stateDirectory = posix.join(roots.stateRoot, 'instances', scopeId)
+    const journalRoot = exactPath(value.journal_root, posix.join(stateDirectory, 'journal'))
+    const replayRoot = exactPath(value.replay_root, posix.join(stateDirectory, 'rpc-replay'))
     const dockerSocketPath = exactPath(value.docker_socket_path, roots.dockerSocketPath)
     const bearerTokenRef = exactReference(value.bearer_token_ref, posix.join(secretDirectory, 'token'))
     const imageDigestRef = exactReference(value.image_digest_ref, posix.join(configDirectory, 'builder-image.sha256'))
@@ -117,12 +133,15 @@ export async function loadBuilderSupervisorConfig(
     if (!/^sha256:[a-f0-9]{64}$/u.test(imageDigest)) invalid()
     if (!/^[a-f0-9]{64}$/u.test(templateStoreSha256) || !/^[a-f0-9]{64}$/u.test(policySha256)) invalid()
     return {
+      installationId,
       tenantId,
       instanceId,
+      scopeId,
       socketPath,
       artifactRoot,
       exportRoot,
       journalRoot,
+      replayRoot,
       dockerSocketPath,
       bearerToken,
       imageDigest: imageDigest as `sha256:${string}`,
@@ -177,7 +196,13 @@ function strictRecord(value: unknown, keys: readonly string[]): Record<string, u
 
 function identifier(value: unknown): string {
   const item = scalar(value)
-  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u.test(item)) invalid()
+  if (!isRuntimeIdentifier(item)) invalid()
+  return item
+}
+
+function installationIdentifier(value: unknown): string {
+  const item = scalar(value)
+  if (!isInstallationId(item)) invalid()
   return item
 }
 

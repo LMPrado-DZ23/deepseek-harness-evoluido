@@ -9,13 +9,14 @@ import {
   type BuilderSupervisorRootPolicy,
   type SupervisorConfigRuntime,
 } from '../src/supervisor-config.js'
+import { deriveBuilderRuntimeScopeId } from '../src/runtime-scope.js'
 
 const linux = process.platform === 'linux' ? describe : describe.skip
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map(path => rm(path, { recursive: true, force: true }))) })
 
 linux('builder supervisor fail-closed configuration', () => {
-  it('loads only the exact tenant-scoped paths and file-backed secret/digests', async () => {
+  it('loads only the exact opaque-scope paths and file-backed secret/digests', async () => {
     const fixture = await createFixture()
     const config = await loadBuilderSupervisorConfig(`file:${fixture.configPath}`, fixture.policy)
     expect(config).toEqual(fixture.expected)
@@ -58,6 +59,8 @@ linux('builder supervisor fail-closed configuration', () => {
     await expectInvalid(`file:${fixture.configPath}`, fixture.policy)
     await rewriteConfig(fixture, { tenant_id: '../tenant' })
     await expectInvalid(`file:${fixture.configPath}`, fixture.policy)
+    await rewriteConfig(fixture, { installation_id: 'A'.repeat(64) })
+    await expectInvalid(`file:${fixture.configPath}`, fixture.policy)
     await rewriteConfig(fixture, { version: 2 })
     await expectInvalid(`file:${fixture.configPath}`, fixture.policy)
     await expectInvalid(`file:${fixture.configPath}`, { ...fixture.policy, dockerSocketPath: 'relative.sock' })
@@ -82,6 +85,8 @@ linux('builder supervisor fail-closed configuration', () => {
     await writeFile(alternate, `${JSON.stringify(fixture.raw)}\n`, { mode: 0o600 })
     await expectInvalid(`file:${alternate}`, fixture.policy)
     await rewriteConfig(fixture, { socket_path: posix.join(fixture.policy.socketRoot, 'other', 'builder.sock') })
+    await expectInvalid(`file:${fixture.configPath}`, fixture.policy)
+    await rewriteConfig(fixture, { replay_root: posix.join(fixture.policy.stateRoot, 'other', 'rpc-replay') })
     await expectInvalid(`file:${fixture.configPath}`, fixture.policy)
     await rewriteConfig(fixture, { bearer_token_ref: `file:${fixture.tokenPath}.other` })
     await expectInvalid(`file:${fixture.configPath}`, fixture.policy)
@@ -144,7 +149,7 @@ interface Fixture {
 }
 
 async function createFixture(): Promise<Fixture> {
-  const root = await mkdtemp(posix.join(tmpdir(), 'dz23-supervisor-config-')); roots.push(root)
+  const root = await mkdtemp(posix.join(tmpdir(), 'dsc-')); roots.push(root)
   const policy = {
     configRoot: posix.join(root, 'config'),
     secretRoot: posix.join(root, 'secrets'),
@@ -154,9 +159,10 @@ async function createFixture(): Promise<Fixture> {
     stateRoot: posix.join(root, 'state'),
     dockerSocketPath: posix.join(root, 'docker.sock'),
   }
-  const tenantId = 'tenant-one'; const instanceId = 'instance-one'
-  const configDirectory = posix.join(policy.configRoot, tenantId, instanceId)
-  const secretDirectory = posix.join(policy.secretRoot, tenantId, instanceId)
+  const installationId = '1'.repeat(64); const tenantId = 'tenant-one'; const instanceId = 'instance-one'
+  const scopeId = deriveBuilderRuntimeScopeId({ installationId, tenantId, instanceId })
+  const configDirectory = posix.join(policy.configRoot, 'instances', scopeId)
+  const secretDirectory = posix.join(policy.secretRoot, 'instances', scopeId)
   await mkdir(configDirectory, { recursive: true, mode: 0o700 }); await mkdir(secretDirectory, { recursive: true, mode: 0o700 })
   const configPath = posix.join(configDirectory, 'supervisor.json')
   const tokenPath = posix.join(secretDirectory, 'token')
@@ -170,12 +176,14 @@ async function createFixture(): Promise<Fixture> {
   await writeFile(policyPath, `${'c'.repeat(64)}\n`, { mode: 0o600 })
   const raw: Record<string, unknown> = {
     version: 1,
+    installation_id: installationId,
     tenant_id: tenantId,
     instance_id: instanceId,
-    socket_path: posix.join(policy.socketRoot, tenantId, instanceId, 'builder.sock'),
-    artifact_root: posix.join(policy.artifactRoot, tenantId, instanceId),
-    export_root: posix.join(policy.exportRoot, tenantId, instanceId),
-    journal_root: posix.join(policy.stateRoot, tenantId, instanceId, 'journal'),
+    socket_path: posix.join(policy.socketRoot, 'instances', scopeId, 'rpc.sock'),
+    artifact_root: posix.join(policy.artifactRoot, 'instances', scopeId),
+    export_root: posix.join(policy.exportRoot, 'instances', scopeId),
+    journal_root: posix.join(policy.stateRoot, 'instances', scopeId, 'journal'),
+    replay_root: posix.join(policy.stateRoot, 'instances', scopeId, 'rpc-replay'),
     docker_socket_path: policy.dockerSocketPath,
     bearer_token_ref: `file:${tokenPath}`,
     image_digest_ref: `file:${imagePath}`,
@@ -185,12 +193,15 @@ async function createFixture(): Promise<Fixture> {
   }
   await writeFile(configPath, `${JSON.stringify(raw)}\n`, { mode: 0o600 })
   return { root, policy, configPath, tokenPath, imagePath, token, raw, expected: {
+    installationId,
     tenantId,
     instanceId,
+    scopeId,
     socketPath: raw.socket_path,
     artifactRoot: raw.artifact_root,
     exportRoot: raw.export_root,
     journalRoot: raw.journal_root,
+    replayRoot: raw.replay_root,
     dockerSocketPath: raw.docker_socket_path,
     bearerToken: token,
     imageDigest: `sha256:${'a'.repeat(64)}`,

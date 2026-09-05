@@ -29,8 +29,9 @@ proprietário, modo, inode, PID e identidade de início do processo; reconcilia
 contêineres e volumes rotulados e remove órfãos. A reconciliação primeiro prova
 a correspondência com o journal, recupera e publica qualquer build `E2E_OK` e
 somente então remove seus recursos Docker; assim uma queda antes da exportação
-não destrói o resultado recuperável. O replay durável é isolado pelo
-triplo `scope_id` + `instance_id` + `policy_sha256`, conserva respostas completas por 24 horas e
+não destrói o resultado recuperável. O replay durável é isolado por `scope_id`
++ `policy_sha256` dentro da raiz de estado persistente, conserva respostas
+completas por 24 horas e
 coleta somente resultados concluídos expirados. Claims de build ativos nunca
 expiram; depois de concluídos permanecem reservados durante a mesma janela. O
 journal liga de forma durável `build_id`, `build_ref`, estado, export e resultado
@@ -72,7 +73,7 @@ configuração Docker recebida do cliente.
 O processo aceita somente `--config file:/caminho/absoluto`. Não consulta
 variáveis de ambiente para configuração, token ou digests. Em produção, o
 arquivo deve existir exatamente em
-`/etc/dz23-studio/builder/<tenant>/<instance>/supervisor.json`, pertencer a root
+`/etc/dz23-studio/builder/instances/<scope_id>/supervisor.json`, pertencer a root
 ou ao UID do processo, ser regular, não ser link, ter um único hard link e não
 ser gravável por grupo/outros. Token e digests são lidos de referências `file:`
 exatas sob as raízes fechadas. O bearer aceita somente modo `0400` ou `0600`,
@@ -84,18 +85,20 @@ O JSON é um contrato fechado, sem chaves extras:
 ```json
 {
   "version": 1,
+  "installation_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "tenant_id": "tenant-one",
   "instance_id": "instance-one",
-  "socket_path": "/run/dz23-studio/builder/tenant-one/instance-one/builder.sock",
-  "artifact_root": "/srv/dz23-studio/generated-runs/tenant-one/instance-one",
-  "export_root": "/srv/dz23-studio/builder-exports/tenant-one/instance-one",
-  "journal_root": "/var/lib/dz23-studio/builder/tenant-one/instance-one/journal",
+  "socket_path": "/run/dz23-studio/builder/instances/s_10d6067021ca707c6acab1260770dd26ea90a1e8e6d1bc1b/rpc.sock",
+  "artifact_root": "/srv/dz23-studio/generated-runs/instances/s_10d6067021ca707c6acab1260770dd26ea90a1e8e6d1bc1b",
+  "export_root": "/srv/dz23-studio/builder-exports/instances/s_10d6067021ca707c6acab1260770dd26ea90a1e8e6d1bc1b",
+  "journal_root": "/var/lib/dz23-studio/builder/instances/s_10d6067021ca707c6acab1260770dd26ea90a1e8e6d1bc1b/journal",
+  "replay_root": "/var/lib/dz23-studio/builder/instances/s_10d6067021ca707c6acab1260770dd26ea90a1e8e6d1bc1b/rpc-replay",
   "docker_socket_path": "/var/run/docker.sock",
-  "bearer_token_ref": "file:/run/secrets/dz23-studio/builder/tenant-one/instance-one/token",
-  "image_digest_ref": "file:/etc/dz23-studio/builder/tenant-one/instance-one/builder-image.sha256",
+  "bearer_token_ref": "file:/run/secrets/dz23-studio/builder/instances/s_10d6067021ca707c6acab1260770dd26ea90a1e8e6d1bc1b/token",
+  "image_digest_ref": "file:/etc/dz23-studio/builder/instances/s_10d6067021ca707c6acab1260770dd26ea90a1e8e6d1bc1b/builder-image.sha256",
   "template_store_version": "v1.0.0",
-  "template_store_sha256_ref": "file:/etc/dz23-studio/builder/tenant-one/instance-one/template-store.sha256",
-  "policy_sha256_ref": "file:/etc/dz23-studio/builder/tenant-one/instance-one/policy.sha256"
+  "template_store_sha256_ref": "file:/etc/dz23-studio/builder/instances/s_10d6067021ca707c6acab1260770dd26ea90a1e8e6d1bc1b/template-store.sha256",
+  "policy_sha256_ref": "file:/etc/dz23-studio/builder/instances/s_10d6067021ca707c6acab1260770dd26ea90a1e8e6d1bc1b/policy.sha256"
 }
 ```
 
@@ -182,15 +185,17 @@ seguros. Esta fatia não provisiona volume Docker nem torna o serviço ativo.
 
 ### Isolamento de organização/tenant
 
-O protocolo v1 não carrega `tenant_id` em cada operação e, portanto, **uma única
-instância compartilhada não é tenant-safe**. A integração deve iniciar uma
-instância exclusiva por escopo de tenant, com `scopeId`, bearer secret, socket,
-`instanceId`, raiz de artefatos, raiz de exports, journal e replay exclusivos.
-Reutilizar qualquer uma dessas credenciais ou raízes entre tenants é configuração
-inválida para produção. O `scopeId` é obrigatório e participa do namespace do
-replay; isso evita colisões, mas não substitui o isolamento do processo e das
-raízes. A integração não pode anunciar isolamento multi-tenant até provar essa
-composição ponta a ponta.
+O protocolo v1 não recebe nem devolve `org_id`, `tenant_id` ou `instance_id`.
+A integração deve iniciar uma instância exclusiva por escopo físico, com
+`scope_id`, bearer secret, socket, raiz de artefatos, raiz de exports, journal e
+replay exclusivos. Reutilizar qualquer uma dessas credenciais ou raízes entre
+tenants é configuração inválida para produção. O `scope_id` opaco é derivado no
+servidor, com domínio e versão, a partir de `installation_id`, `tenant_id` e
+`instance_id`. Ele é a única identidade operacional usada em nomes, labels,
+filtros, attestation e replay. Os identificadores lógicos não entram no
+protocolo nem nas labels do Docker. Essa separação evita colisões, mas a
+integração não pode anunciar isolamento multi-tenant até provar a composição
+ponta a ponta.
 
 O deadline RPC padrão é 240 s, cobrindo o teto de etapa de 180 s e a janela de
 cleanup de 30 s. Configurações customizadas são recusadas quando o deadline RPC

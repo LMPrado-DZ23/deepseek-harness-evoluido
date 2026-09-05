@@ -273,7 +273,7 @@ function json(response: ServerResponse, status: number, value: unknown): void {
 }
 
 function attestation() {
-  return { state: 'OK' as const, protocol_version: 1 as const, instance_id: 'test-instance', image_id: `sha256:${'a'.repeat(64)}` as const, policy_sha256: 'b'.repeat(64) }
+  return { state: 'OK' as const, protocol_version: 1 as const, scope_id: `s_${'c'.repeat(48)}` as const, image_id: `sha256:${'a'.repeat(64)}` as const, policy_sha256: 'b'.repeat(64) }
 }
 
 function stepResult() {

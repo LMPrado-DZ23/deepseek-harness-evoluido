@@ -29,6 +29,13 @@ export class FileRpcReplayGuard implements RpcReplayPort {
     if (!resolve(directory).startsWith(resolve(dirname(directory)) + sep) || !Number.isSafeInteger(maximum) || maximum < 1 || !Number.isSafeInteger(retentionMs) || retentionMs < 1) throw new Error('INVALID_REPLAY_CONFIGURATION')
     this.#directory = resolve(directory)
   }
+  async initialize(): Promise<void> {
+    await this.#exclusive(async () => {
+      await mkdir(this.#directory, { recursive: true, mode: 0o700 })
+      await assertPrivateDirectory(this.#directory, this.runtime)
+      await this.#collectExpired()
+    })
+  }
   async run(requestId: string, fingerprint: string, operation: () => Promise<RpcReplayValue>): Promise<RpcReplayValue> {
     if (!/^req_[a-f0-9]{32}$/u.test(requestId) || !/^[a-f0-9]{64}$/u.test(fingerprint)) throw new BuilderSupervisorError('REQUEST_REPLAY')
     const current = this.#inflight.get(requestId)

@@ -56,7 +56,8 @@ export function composeBuilderSupervisor(config: BuilderSupervisorResolvedConfig
   const adapter = new DockerBuilderAdapter({
     engine,
     imageDigest: config.imageDigest,
-    instanceId: config.instanceId,
+    installationId: config.installationId,
+    scopeId: config.scopeId,
     exportRoot: config.exportRoot,
     templateStoreVersion: config.templateStoreVersion,
     templateStoreSha256: config.templateStoreSha256,
@@ -110,7 +111,9 @@ export async function runBuilderSupervisorMain(options: {
       socketPath: config.socketPath,
       bearerToken: config.bearerToken,
       methods: composition.methods,
-      replayNamespace: { instanceId: config.instanceId, policySha256: config.policySha256, scopeId: config.tenantId },
+      scopeId: config.scopeId,
+      policySha256: config.policySha256,
+      replayRoot: config.replayRoot,
       signal: controller.signal,
     })
     if (shutdownRequested) shutdown = stopSupervisor(listener, controller)
@@ -162,7 +165,7 @@ async function stopSupervisor(listener: BuilderSupervisorListener, controller: A
 }
 
 function assertAttestation(value: BuilderAttestation, config: BuilderSupervisorResolvedConfig): void {
-  if (value.state !== 'OK' || value.protocol_version !== 1 || value.instance_id !== config.instanceId || value.image_id !== config.imageDigest || value.policy_sha256 !== config.policySha256) throw new Error('BUILDER_ATTESTATION_FAILED')
+  if (value.state !== 'OK' || value.protocol_version !== 1 || value.scope_id !== config.scopeId || value.image_id !== config.imageDigest || value.policy_sha256 !== config.policySha256) throw new Error('BUILDER_ATTESTATION_FAILED')
 }
 
 const invokedPath = process.argv[1]

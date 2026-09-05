@@ -19,6 +19,7 @@ import {
   type BuilderSupervisorSignalSource,
 } from '../src/supervisor-main.js'
 import { listenBuilderUnix } from '../src/unix-server.js'
+import { deriveBuilderRuntimeScopeId } from '../src/runtime-scope.js'
 
 const temporary: string[] = []
 afterEach(async () => { await Promise.all(temporary.splice(0).map(path => rm(path, { recursive: true, force: true }))) })
@@ -159,7 +160,7 @@ describe('builder supervisor process entrypoint', () => {
     const initial = config({ artifactRoot: posix.join(root, 'artifacts'), exportRoot: posix.join(root, 'exports'), journalRoot: posix.join(root, 'journal') })
     await mkdir(initial.artifactRoot, { recursive: true, mode: 0o700 })
     const engine = new HealthyEngine(initial)
-    const probe = new DockerBuilderAdapter({ engine, imageDigest: initial.imageDigest, instanceId: initial.instanceId, exportRoot: initial.exportRoot, templateStoreVersion: initial.templateStoreVersion, templateStoreSha256: initial.templateStoreSha256 })
+    const probe = new DockerBuilderAdapter({ engine, imageDigest: initial.imageDigest, installationId: initial.installationId, scopeId: initial.scopeId, exportRoot: initial.exportRoot, templateStoreVersion: initial.templateStoreVersion, templateStoreSha256: initial.templateStoreSha256 })
     const policySha256 = (await probe.preflight(new AbortController().signal)).policy_sha256
     const pinned = { ...initial, policySha256 }
     const composition = composeBuilderSupervisor(pinned, engine)
@@ -177,7 +178,7 @@ unix('builder supervisor real Unix process boundary', () => {
     const socketPath = posix.join(root, 'rpc', 'builder.sock'); await mkdir(posix.dirname(socketPath), { recursive: true, mode: 0o700 }); await writeFile(socketPath, 'evidence', { mode: 0o600 })
     const messages: string[] = []
     const result = await runBuilderSupervisorMain({ configReference: 'file:/trusted/config.json', dependencies: dependencies({
-      loadConfig: async () => config({ socketPath }), listen: listenBuilderUnix, error: code => messages.push(code),
+      loadConfig: async () => config({ socketPath, replayRoot: posix.join(root, 'state') }), listen: listenBuilderUnix, error: code => messages.push(code),
     }) })
     expect(result).toBe(BUILDER_SUPERVISOR_EXIT.startup)
     expect(messages).toEqual(['STARTUP_FAILED'])
@@ -189,7 +190,7 @@ unix('builder supervisor real Unix process boundary', () => {
     const socketPath = posix.join(root, 'rpc', 'builder.sock'); const signals = new Signals(); const messages: string[] = []
     let listener: BuilderSupervisorListener | undefined; let started!: () => void; const ready = new Promise<void>(resolve => { started = resolve })
     const result = runBuilderSupervisorMain({ configReference: 'file:/trusted/config.json', dependencies: dependencies({
-      signals, loadConfig: async () => config({ socketPath }), error: code => messages.push(code),
+      signals, loadConfig: async () => config({ socketPath, replayRoot: posix.join(root, 'state') }), error: code => messages.push(code),
       listen: async options => { listener = await listenBuilderUnix(options); setTimeout(started, 0); return listener },
     }) })
     await ready; await unlink(socketPath)
@@ -226,7 +227,7 @@ function dependencies(overrides: Record<string, unknown>) {
 function fakeMethods(): BuilderRpcMethods & { initialize(signal: AbortSignal): Promise<void> } {
   return {
     initialize: async signal => { signal.throwIfAborted() },
-    preflight: async () => ({ state: 'OK', protocol_version: 1, instance_id: 'instance-one', image_id: `sha256:${'a'.repeat(64)}`, policy_sha256: 'c'.repeat(64) }),
+    preflight: async () => ({ state: 'OK', protocol_version: 1, scope_id: deriveBuilderRuntimeScopeId({ installationId: '1'.repeat(64), tenantId: 'tenant-one', instanceId: 'instance-one' }), image_id: `sha256:${'a'.repeat(64)}`, policy_sha256: 'c'.repeat(64) }),
     prepare: async () => ({ build_ref: `build_${'1'.repeat(32)}`, state: 'PREPARED' }),
     execute: async body => ({ build_ref: body.build_ref, state: 'FAILED', step: body.step, result: { exit_code: 1, stdout: '', stderr: '', timed_out: false, termination_reason: null, output_limit_exceeded: false } }),
     cancel: async body => ({ build_ref: body.build_ref, state: 'CANCELLED' }),
@@ -236,10 +237,12 @@ function fakeMethods(): BuilderRpcMethods & { initialize(signal: AbortSignal): P
 }
 
 function config(overrides: Partial<BuilderSupervisorResolvedConfig> = {}): BuilderSupervisorResolvedConfig {
+  const installationId = '1'.repeat(64); const tenantId = 'tenant-one'; const instanceId = 'instance-one'
+  const scopeId = deriveBuilderRuntimeScopeId({ installationId, tenantId, instanceId })
   return {
-    tenantId: 'tenant-one', instanceId: 'instance-one', socketPath: '/run/dz23-studio/builder/tenant-one/instance-one/builder.sock',
-    artifactRoot: '/srv/dz23-studio/generated-runs/tenant-one/instance-one', exportRoot: '/srv/dz23-studio/builder-exports/tenant-one/instance-one',
-    journalRoot: '/var/lib/dz23-studio/builder/tenant-one/instance-one/journal', dockerSocketPath: '/var/run/docker.sock',
+    installationId, tenantId, instanceId, scopeId, socketPath: `/run/dz23-studio/builder/instances/${scopeId}/rpc.sock`,
+    artifactRoot: `/srv/dz23-studio/generated-runs/instances/${scopeId}`, exportRoot: `/srv/dz23-studio/builder-exports/instances/${scopeId}`,
+    journalRoot: `/var/lib/dz23-studio/builder/instances/${scopeId}/journal`, replayRoot: `/var/lib/dz23-studio/builder/instances/${scopeId}/rpc-replay`, dockerSocketPath: '/var/run/docker.sock',
     bearerToken: `token_${'T'.repeat(48)}`, imageDigest: `sha256:${'a'.repeat(64)}`, templateStoreVersion: 'v2.0.0',
     templateStoreSha256: 'b'.repeat(64), policySha256: 'c'.repeat(64), ...overrides,
   }
@@ -248,7 +251,7 @@ function config(overrides: Partial<BuilderSupervisorResolvedConfig> = {}): Build
 class HealthyEngine implements DockerEnginePort {
   readonly #templateVolume: string
   constructor(private readonly config: BuilderSupervisorResolvedConfig) {
-    this.#templateVolume = `dz23-template-${createHash('sha256').update(`${config.instanceId}:${config.templateStoreVersion}:${config.templateStoreSha256}`).digest('hex').slice(0, 24)}`
+    this.#templateVolume = `dz23-template-${createHash('sha256').update(`${config.scopeId}:${config.templateStoreVersion}:${config.templateStoreSha256}`).digest('hex').slice(0, 24)}`
   }
   async ping(): Promise<void> {}
   async inspectImage(): Promise<{ readonly Id: string }> { return { Id: this.config.imageDigest } }

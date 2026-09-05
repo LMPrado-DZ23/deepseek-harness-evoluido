@@ -1,6 +1,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { BUILD_STEPS, BuilderSupervisorError, type BuilderAttestation, type BuildState, type BuildStep, type FinishResult, type ManagedBuild, type StepResult } from './model.js'
 import { RpcReplayGuard, type RpcReplayPort } from './replay.js'
+import { isBuilderRuntimeScopeId } from './runtime-scope.js'
 
 export const BUILDER_RPC_PATH = '/v1/rpc'
 export const BUILDER_RPC_MAX_BODY_BYTES = 64 * 1024
@@ -117,9 +118,9 @@ async function dispatch(methods: BuilderRpcMethods, request: BuilderRpcRequest, 
 
 export function isValidBuilderRpcResult(request: BuilderRpcRequest, value: unknown): boolean {
   if (request.operation === 'preflight') {
-    const row = exact(value, ['state', 'protocol_version', 'instance_id', 'image_id', 'policy_sha256'])
+    const row = exact(value, ['state', 'protocol_version', 'scope_id', 'image_id', 'policy_sha256'])
     return row !== undefined && (row.state === 'OK' || row.state === 'BLOCKED_EXTERNAL') && row.protocol_version === 1 &&
-      typeof row.instance_id === 'string' && /^[A-Za-z0-9_-]{1,64}$/u.test(row.instance_id) &&
+      isBuilderRuntimeScopeId(row.scope_id) &&
       typeof row.image_id === 'string' && /^sha256:[a-f0-9]{64}$/u.test(row.image_id) &&
       typeof row.policy_sha256 === 'string' && /^[a-f0-9]{64}$/u.test(row.policy_sha256)
   }

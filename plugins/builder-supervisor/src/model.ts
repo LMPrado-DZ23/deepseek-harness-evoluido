@@ -51,7 +51,7 @@ export interface StepResult {
 export interface BuilderAttestation {
   readonly state: 'OK' | 'BLOCKED_EXTERNAL'
   readonly protocol_version: 1
-  readonly instance_id: string
+  readonly scope_id: `s_${string}`
   readonly image_id: `sha256:${string}`
   readonly policy_sha256: string
 }
