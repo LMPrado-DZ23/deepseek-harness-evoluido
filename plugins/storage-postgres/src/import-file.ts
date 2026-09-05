@@ -11,8 +11,9 @@ import {
   type StorageExportBundle,
 } from './bundle.js'
 import { assertPinnedDirectory, pinnedChildPath, pinParent } from './safe-path.js'
+import { OPERATOR_BUNDLE_MAX_BYTES, assertOperatorBundleLimit } from './operator-limits.js'
 
-export const IMPORT_MAX_BYTES_DEFAULT = 512 * 1024 * 1024
+export const IMPORT_MAX_BYTES_DEFAULT = OPERATOR_BUNDLE_MAX_BYTES
 
 export interface StorageImportLimits extends StorageBundleLimits {
   maxBytes: number
@@ -185,4 +186,5 @@ function assertImportLimits(limits: Readonly<StorageImportLimits>): void {
   for (const [name, limit] of Object.entries(limits)) {
     if (!Number.isSafeInteger(limit) || limit < 1) throw new Error(`storage import ${name} must be a positive safe integer`)
   }
+  assertOperatorBundleLimit(limits.maxBytes, 'storage import maxBytes')
 }

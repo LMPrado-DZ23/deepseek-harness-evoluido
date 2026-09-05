@@ -55,9 +55,11 @@ describe('storage path failure boundaries', () => {
     await expect(pinDirectory('/private/data')).rejects.toThrow('not a directory')
     expect(state.closes).toBe(1)
 
-    state.handleStats = makeStats('dir', { mode: 0o722 })
-    await expect(pinDirectory('/private/data')).rejects.toThrow('writable by another OS user')
-    expect(state.closes).toBe(2)
+    if (process.platform !== 'win32') {
+      state.handleStats = makeStats('dir', { mode: 0o722 })
+      await expect(pinDirectory('/private/data')).rejects.toThrow('writable by another OS user')
+      expect(state.closes).toBe(2)
+    }
   })
 
   it('refuses canonical-path replacement and invalid directory creation races', async () => {

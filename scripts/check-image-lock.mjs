@@ -26,7 +26,7 @@ export function validateImageLock(lock) {
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/u.test(lock.resolvedAt)) {
     throw new Error('resolvedAt precisa ser UTC canônico')
   }
-  exactKeys(lock.images, ['node', 'playwright'], 'images')
+  exactKeys(lock.images, ['node', 'playwright', 'postgresRuntime'], 'images')
   const node = lock.images.node
   exactKeys(node, ['reference', 'indexDigest', 'source', 'platforms'], 'images.node')
   if (node.reference !== 'docker.io/library/node:22.23.1-bookworm-slim') {
@@ -40,6 +40,21 @@ export function validateImageLock(lock) {
   const platformDigests = EXPECTED_PLATFORMS.map(platform => node.platforms[platform])
   if (platformDigests.some(digest => !DIGEST.test(digest))) throw new Error('digest de plataforma inválido')
   if (new Set(platformDigests).size !== platformDigests.length) throw new Error('digests de plataforma duplicados')
+
+  const postgresRuntime = lock.images.postgresRuntime
+  exactKeys(postgresRuntime, ['reference', 'indexDigest', 'source', 'platforms'], 'images.postgresRuntime')
+  if (postgresRuntime.reference !== 'docker.io/library/postgres:16.15-bookworm') {
+    throw new Error('imagem PostgreSQL de runtime inesperada')
+  }
+  if (!DIGEST.test(postgresRuntime.indexDigest)) throw new Error('digest do índice PostgreSQL inválido')
+  if (!/^https:\/\/github\.com\/docker-library\/postgres\.git#[0-9a-f]{40}:16\/bookworm$/u.test(postgresRuntime.source)) {
+    throw new Error('origem da imagem PostgreSQL inválida')
+  }
+  exactKeys(postgresRuntime.platforms, EXPECTED_PLATFORMS, 'images.postgresRuntime.platforms')
+  const postgresPlatformDigests = EXPECTED_PLATFORMS.map(platform => postgresRuntime.platforms[platform])
+  if (postgresPlatformDigests.some(digest => !DIGEST.test(digest)) || new Set(postgresPlatformDigests).size !== 2) {
+    throw new Error('digests de plataforma PostgreSQL inválidos')
+  }
 
   const playwright = lock.images.playwright
   exactKeys(playwright, ['reference', 'indexDigest', 'platforms'], 'images.playwright')
@@ -62,14 +77,15 @@ export function validateImageLock(lock) {
   if (git.package !== 'git' || git.version !== '1:2.39.5-0+deb12u3') throw new Error('pacote Git divergente')
   if (git.repository !== 'http://snapshot.debian.org/archive/debian/20260904T000000Z bookworm') throw new Error('repositório Git divergente')
   const postgres = lock.tools.postgresClient
-  exactKeys(postgres, ['debianSnapshot', 'packages', 'pgDumpVersion', 'pgRestoreVersion'], 'tools.postgresClient')
-  if (!/^\d{8}T\d{6}Z$/u.test(postgres.debianSnapshot)) throw new Error('snapshot PostgreSQL inválido')
-  exactKeys(postgres.packages, ['postgresql-client-15', 'postgresql-client-common', 'libpq5'], 'tools.postgresClient.packages')
+  exactKeys(postgres, ['sourceImage', 'packages', 'pgDumpVersion', 'pgRestoreVersion'], 'tools.postgresClient')
+  const expectedPostgresImage = `${postgresRuntime.reference}@${postgresRuntime.indexDigest}`
+  if (postgres.sourceImage !== expectedPostgresImage) throw new Error('origem do cliente PostgreSQL divergente')
+  exactKeys(postgres.packages, ['postgresql-client-16', 'postgresql-client-common', 'libpq5'], 'tools.postgresClient.packages')
   for (const [name, version] of Object.entries(postgres.packages)) {
     if (typeof version !== 'string' || version === '' || version.includes('*')) throw new Error(`versão PostgreSQL não fixada: ${name}`)
   }
-  if (postgres.pgDumpVersion !== 'pg_dump (PostgreSQL) 15.19 (Debian 15.19-0+deb12u1)' ||
-      postgres.pgRestoreVersion !== 'pg_restore (PostgreSQL) 15.19 (Debian 15.19-0+deb12u1)') {
+  if (postgres.pgDumpVersion !== 'pg_dump (PostgreSQL) 16.15 (Debian 16.15-1.pgdg12+2)' ||
+      postgres.pgRestoreVersion !== 'pg_restore (PostgreSQL) 16.15 (Debian 16.15-1.pgdg12+2)') {
     throw new Error('binários PostgreSQL divergentes')
   }
   const nodeArchives = lock.tools.nodeArchives
@@ -109,9 +125,10 @@ export function validateDockerfileBase(dockerfile, lock) {
     .split(/\r?\n/u)
     .map(line => line.trim())
     .filter(line => /^FROM\s+/iu.test(line))
-  const expected = `FROM ${lock.images.node.reference}@${lock.images.node.indexDigest} AS git-runtime`
-  if (fromLines[0] !== expected) {
-    throw new Error(`Dockerfile do Studio não usa a imagem Node fixada (${expected})`)
+  const expectedNode = `FROM ${lock.images.node.reference}@${lock.images.node.indexDigest} AS git-runtime`
+  const expectedPostgres = `FROM ${lock.images.postgresRuntime.reference}@${lock.images.postgresRuntime.indexDigest} AS postgres-runtime`
+  if (fromLines[0] !== expectedNode || fromLines[1] !== expectedPostgres) {
+    throw new Error(`Dockerfile do Studio não usa as imagens Node/PostgreSQL fixadas (${expectedNode}; ${expectedPostgres})`)
   }
   const declaredStages = new Set()
   let externalCount = 0
@@ -121,31 +138,26 @@ export function validateDockerfileBase(dockerfile, lock) {
     const [, source, alias] = match
     if (!declaredStages.has(source)) {
       externalCount += 1
-      if (line !== expected) throw new Error('Dockerfile do Studio contém base externa não fixada pelo images.lock')
+      if (line !== expectedNode && line !== expectedPostgres) throw new Error('Dockerfile do Studio contém base externa não fixada pelo images.lock')
     }
     if (alias !== undefined) {
       if (declaredStages.has(alias)) throw new Error('Dockerfile do Studio repete nome de estágio')
       declaredStages.add(alias)
     }
   }
-  if (externalCount !== 1) {
-    throw new Error('Dockerfile do Studio precisa conter exatamente uma base externa fixada')
+  if (externalCount !== 2) {
+    throw new Error('Dockerfile do Studio precisa conter exatamente duas bases externas fixadas')
   }
   const postgres = lock.tools.postgresClient
-  const snapshot = postgres.debianSnapshot
-  for (const repository of ['debian', 'debian-security']) {
-    const expectedRepository = `http://snapshot.debian.org/archive/${repository}/${snapshot}`
-    if (!dockerfile.includes(expectedRepository)) throw new Error(`Dockerfile não usa snapshot fixado: ${expectedRepository}`)
-  }
   for (const [name, version] of Object.entries(postgres.packages)) {
-    if (!dockerfile.includes(`${name}=${version}`)) throw new Error(`Dockerfile não fixa ${name}=${version}`)
     if (!dockerfile.includes(`dpkg-query -W -f='\${Version}' ${name}`)) throw new Error(`Dockerfile não valida ${name} instalado`)
+    if (!dockerfile.includes(`= '${version}'`)) throw new Error(`Dockerfile não valida ${name}=${version}`)
   }
   if (!dockerfile.includes(`test "$(pg_dump --version)" = '${postgres.pgDumpVersion}'`) ||
       !dockerfile.includes(`test "$(pg_restore --version)" = '${postgres.pgRestoreVersion}'`)) {
     throw new Error('Dockerfile não valida versões exatas de pg_dump/pg_restore')
   }
-  return { base: `${lock.images.node.reference}@${lock.images.node.indexDigest}`, frontend: expectedSyntax.slice('# syntax='.length), fromLines }
+  return { base: `${lock.images.node.reference}@${lock.images.node.indexDigest}`, postgresBase: postgres.sourceImage, frontend: expectedSyntax.slice('# syntax='.length), fromLines }
 }
 
 export async function main(argv = process.argv.slice(2)) {

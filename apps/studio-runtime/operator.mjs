@@ -5,6 +5,7 @@ import {
   BACKUP_MAX_BYTES_DEFAULT,
   BACKUP_MIN_INTERVAL_MS,
   DEFAULT_STORAGE_IMPORT_LIMITS,
+  OPERATOR_BUNDLE_MAX_BYTES,
   StorageBackupScheduler,
   assertTlsPolicy,
   postgresStorageStatus,
@@ -44,6 +45,9 @@ export function parseOperatorCommand(argv) {
   const positiveInteger = (name, fallback) => {
     const parsed = Number(values.get(name) ?? fallback)
     if (!Number.isSafeInteger(parsed) || parsed < 1) throw new Error(`${name} deve ser um inteiro positivo`)
+    if (name === '--max-bytes' && parsed > OPERATOR_BUNDLE_MAX_BYTES) {
+      throw new Error(`${name} não pode exceder ${String(OPERATOR_BUNDLE_MAX_BYTES)} bytes enquanto a importação usar JSON em memória`)
+    }
     return parsed
   }
   const allowOnly = allowed => {

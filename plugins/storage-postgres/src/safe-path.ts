@@ -78,6 +78,23 @@ export async function assertPinnedDirectory(directory: PinnedDirectory): Promise
   if (!samePath(canonical, directory.path)) throw new Error(`unsafe storage path: directory '${directory.path}' became a symlink`)
 }
 
+/**
+ * Make a directory-entry publication durable where the host exposes directory
+ * fsync. Native Windows rejects fsync on directory handles with EPERM/EINVAL;
+ * the supported release path runs these operations inside the Linux runtime
+ * container, while Windows-side tests still exercise every other invariant.
+ */
+export async function syncPinnedDirectory(directory: PinnedDirectory): Promise<void> {
+  await assertPinnedDirectory(directory)
+  try {
+    await directory.handle.sync()
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (process.platform === 'win32' && (code === 'EPERM' || code === 'EINVAL')) return
+    throw error
+  }
+}
+
 export function childPath(directory: PinnedDirectory, name: string): string {
   if (name === '' || name === '.' || name === '..' || name.includes('/') || name.includes('\\') || name.includes('\0')) {
     throw new Error(`unsafe storage child name '${name}'`)

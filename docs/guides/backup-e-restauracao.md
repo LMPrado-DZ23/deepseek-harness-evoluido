@@ -24,7 +24,9 @@ banco, o Studio não gasta a própria memória para copiar, e uma cópia travada
 Sendo honesto sobre o limite: a cópia lê o **mesmo banco de dados**, então pode disputar disco com
 quem estiver usando o sistema naquele momento — o que ela não faz é parar o Studio.
 Esse programa tem hora para acabar (15 minutos), tamanho máximo de arquivo
-(2 GB) e memória própria; se estourar qualquer um dos três, a tentativa é
+(64 MiB nesta versão) e memória própria; o pico de memória pode ser várias vezes maior que o
+arquivo porque a validação JSON ainda cria buffer, texto e objetos, portanto **64 MiB não é um
+teto de RAM**. Se estourar o tempo ou o tamanho, a tentativa é
 registrada como falha, o arquivo pela metade é apagado e o Studio continua
 funcionando normalmente.
 
@@ -50,7 +52,7 @@ banco grande:
 
 - **Com `--write`** a cópia manual usa o mesmo motor da cópia automática: um
   conjunto de dados de cada vez, escrito direto no arquivo, com o mesmo teto de
-  tamanho (2 GB, ajustável com `--max-bytes`). Se passar do teto, a tentativa
+  tamanho (64 MiB; `--max-bytes` só pode reduzir esse teto). Se passar do teto, a tentativa
   falha e o arquivo pela metade é apagado — nunca enche o disco em silêncio.
 - **Sem `--write`** (o padrão) o comando só mostra o que copiaria, mas para
   contar os registros ele monta o pacote **inteiro na memória** e não escreve
@@ -89,10 +91,18 @@ memória do servidor.
 3. Restaure de verdade. Se o banco já tiver dados, o comando exige que você
    confirme a substituição e guarda antes uma cópia física do que existia:
    ```
-   pnpm storage:import-postgres --input studio-backup-<data-e-hora>.json --attempt-id restauracao-20260904-01 --dsn-ref DZ23_POSTGRES_DSN --schema dz23_storage --ssl verify-full --write --backup /caminho/seguro/antes-de-restaurar.dump --force --confirm REPLACE_DZ23_STORAGE
+   pnpm storage:operator-stopped -- restore --input /var/lib/dz23-studio-backups/studio-backup-<data-e-hora>.json --attempt-id restauracao-20260904-01 --dsn-ref DZ23_POSTGRES_DSN --schema dz23_storage --ssl verify-full --write --backup /var/lib/dz23-studio-backups/antes-de-restaurar.dump --force --confirm REPLACE_DZ23_STORAGE
    ```
 4. Ligue o Studio.
+   Esse lançador verifica se o Harness estava ligado, espera o PostgreSQL,
+   para o Harness, executa o contêiner `operator` uma única vez e só reabre os
+   escritores depois que a restauração e a readiness terminarem com sucesso.
+   Se a restauração falhar, o Harness permanece parado para não escrever sobre
+   um estado incerto.
 
+O formato JSON ainda precisa ser materializado para a validação estrita. Por
+isso o operador recusa valores de `--max-bytes` acima de 67.108.864 bytes
+(64 MiB). Esse é o teto comprovado desta versão, não uma promessa de 2 GiB.
 ### O que a restauração recusa fazer (e por quê)
 
 Restaurar apaga o que está lá para colocar o que está na cópia. Por isso o

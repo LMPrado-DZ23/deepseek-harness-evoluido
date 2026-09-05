@@ -24,6 +24,7 @@
     "storage:export-json": "tsx scripts/export-json-storage.ts",
     "storage:import-postgres": "tsx scripts/import-postgres-storage.ts",
     "storage:backup-postgres": "tsx scripts/backup-postgres-storage.ts",
+    "storage:operator-stopped": "node scripts/run-storage-operator.mjs",
     "studio:setup-templates": "node scripts/setup-templates.mjs",
     "prove:edge": "node scripts/prove-edge.mjs",
     "prove:fase3-agents": "node scripts/prove-fase3-agents.mjs",

@@ -57,6 +57,10 @@ cópia. Fora do contêiner oficial, configure também `DZ23_OPERATOR_STATE_DIR` 
 privado e persistente da instalação; no Compose oficial ele já é
 `/var/lib/dz23-studio/operator`. Se o alvo já tiver dados, pare e confira.
 A ferramenta recusa sobrescrever um backup que já existe.
+No Compose, use `pnpm storage:operator-stopped -- restore ... --write ...`:
+ele para o Harness antes da troca e só o liga novamente depois da verificação.
+Se algo falhar, o Harness continua parado. O limite máximo aceito nesta versão
+é 64 MiB, pois o arquivo JSON ainda é validado inteiro em memória.
 A primeira importação num servidor sem schema não cria dump, pois ainda não há
 dado anterior; o relatório mostra `not-needed-empty-target`.
 A substituição exige `--force --confirm REPLACE_DZ23_STORAGE` e só deve ocorrer

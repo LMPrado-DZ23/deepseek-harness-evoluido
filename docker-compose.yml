@@ -44,6 +44,33 @@ services:
       com.dz23.studio.release-commit: ${DZ23_STUDIO_COMMIT:?Commit da release ausente}
       com.dz23.studio.compose-sha256: ${DZ23_COMPOSE_SHA256:?Hash do Compose ausente}
 
+  operator:
+    profiles: ["operator"]
+    image: ${DZ23_STUDIO_IMAGE:?Defina DZ23_STUDIO_IMAGE com a imagem auditada do DZ23 STUDIO}
+    entrypoint: ["node", "operator.mjs"]
+    environment:
+      HOME: /var/lib/dz23-studio
+      DSH_HOME: /var/lib/dz23-studio
+      DZ23_POSTGRES_DSN: ${DZ23_POSTGRES_DSN:?Defina a DSN PostgreSQL como segredo no servidor}
+      DZ23_OPERATOR_STATE_DIR: /var/lib/dz23-studio/operator
+    volumes:
+      - studio-data:/var/lib/dz23-studio
+      - studio-backups:/var/lib/dz23-studio-backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    labels:
+      com.dz23.studio.installation-id: ${DZ23_INSTALLATION_ID:?Identidade da instalacao ausente}
+      com.dz23.studio.release-commit: ${DZ23_STUDIO_COMMIT:?Commit da release ausente}
+      com.dz23.studio.compose-sha256: ${DZ23_COMPOSE_SHA256:?Hash do Compose ausente}
+
   caddy:
     image: ${DZ23_CADDY_IMAGE:?Defina DZ23_CADDY_IMAGE com a imagem auditada do Caddy DZ23}
     ports:

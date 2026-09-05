@@ -21,7 +21,7 @@ Status: aceita e implementada na etapa M3 (Claude), sobre a base P31-A.
 3. **Agendamento dentro do Studio, execução FORA do processo dele.** Com
    `backupDirectory` configurado, o plugin agenda a cópia, mas quem a faz é um
    **processo separado** (`backup-worker.js`), com limite de tempo
-   (`backupTimeoutMinutes`, 15 min), limite de tamanho (`backupMaxBytes`, 2 GB) e
+   (`backupTimeoutMinutes`, 15 min), limite de tamanho (`backupMaxBytes`, 64 MiB nesta versão) e
    heap próprio (`backupHeapMb`, 1 GB). O worker escreve **direto no arquivo**,
    um domínio de cada vez, calculando os dois resumos (o do arquivo e o
    `payloadSha256` canônico) enquanto os bytes passam: o Studio nunca
@@ -144,14 +144,31 @@ Status: aceita e implementada na etapa M3 (Claude), sobre a base P31-A.
      escrito por versão anterior continua funcionando e volta a deduzir até a unidade ser aberta
      uma vez, então a versão do layout físico não muda.
    - **Verificação de cópia carregava o arquivo inteiro na memória.** `verifyBackupFile` fazia
-     `readFile`: 2 GB de cópia viravam 2 GB de memória viva, e qualquer arquivo no teto do próprio
-     Node (2 GiB) não podia ser verificado de forma alguma. Agora é fluxo, com teto explícito. A
+     `readFile`: uma cópia grande virava a mesma quantidade de memória viva. Agora a verificação é
+     em fluxo, e o formato JSON que a importação ainda materializa usa um teto único de arquivo de
+     64 MiB. Esse número não é teto de RAM: chunks, `Buffer.concat`, texto UTF-8 e grafo do JSON
+     coexistem; o pico de memória permanece `NOT_MEASURED`. `--max-bytes` pode reduzir o arquivo,
+     nunca prometer um pacote maior do que o parser suporta. A
      CLI manual passou a usar o mesmo motor do worker (um domínio de cada vez, direto no arquivo) e
      aceita `--max-bytes`; `--declared-only`, que sela unidades que o meio pode nem ter, continua
      montando o pacote em memória, agora limitado pelo mesmo número.
 
    Cada uma dessas correções tem teste que **falha sem ela**, verificado por mutação em
    `docs/proofs/M3-postgres-hardening-proof.md`.
+
+   **Operador interno W3 (05/09):** `apps/studio-runtime/operator.mjs` é a única autoridade dos
+   comandos `backup`, `verify-backup`, `restore` e `status`. O restore real só roda no contêiner
+   Linux one-shot do perfil `operator`; `scripts/run-storage-operator.mjs` para o Harness antes,
+   espera o PostgreSQL e só reabre os escritores depois de `readyToStart`. Falha deixa o Harness
+   parado. O pacote verificado é lido, resumido e analisado pelo mesmo descritor privado, com teto
+   único de 64 MiB. Uma restauração grava um journal canônico por
+   instalação+schema+`attempt-id`; sua reserva atômica impede que duas bases PostgreSQL que
+   compartilham o diretório de estado reivindiquem o mesmo identificador. A identidade inclui
+   `system_identifier`, OID/nome do banco e schema em uma impressão SHA-256 presente no journal,
+   no marcador do safety dump e no recibo transacional. O safety dump tem limite durante a saída
+   do `pg_dump`, parcial determinístico autenticado, `fsync`, hash e `pg_restore --list` sobre o
+   mesmo descritor antes de publicar dados e, por último, o marcador. O backup lógico segue o
+   mesmo protocolo marker-last; retenção só começa depois do par durável.
 5. **Instância de desenvolvimento migra do `json`.** O Harness padrão guarda os
    domínios em `<DSH_HOME>/storages` (json), não em SQLite; `storage:export-json`
    cobre esse caso com o Harness parado.

@@ -9,18 +9,10 @@ RUN printf '%s\n' \
  && apt-get -o Acquire::Check-Valid-Until=false update \
  && apt-get install --yes --no-install-recommends \
       git=1:2.39.5-0+deb12u3 \
-      postgresql-client-15=15.19-0+deb12u1 \
-      postgresql-client-common=248+deb12u1 \
-      libpq5=15.19-0+deb12u1 \
  && rm -rf /var/lib/apt/lists/* \
- && groupadd --gid 10001 studio \
- && useradd --uid 10001 --gid 10001 --home-dir /var/lib/dz23-studio --no-create-home --shell /usr/sbin/nologin studio \
- && test "$(git --version)" = "git version 2.39.5" \
- && test "$(dpkg-query -W -f='${Version}' postgresql-client-15)" = '15.19-0+deb12u1' \
- && test "$(dpkg-query -W -f='${Version}' postgresql-client-common)" = '248+deb12u1' \
- && test "$(dpkg-query -W -f='${Version}' libpq5)" = '15.19-0+deb12u1' \
- && test "$(pg_dump --version)" = 'pg_dump (PostgreSQL) 15.19 (Debian 15.19-0+deb12u1)' \
- && test "$(pg_restore --version)" = 'pg_restore (PostgreSQL) 15.19 (Debian 15.19-0+deb12u1)'
+ && test "$(git --version)" = "git version 2.39.5"
+
+FROM docker.io/library/postgres:16.15-bookworm@sha256:bb3e1a57e5407e0a5280b4211980a5e537f4abd234a87014ac979849a78dd825 AS postgres-runtime
 
 FROM git-runtime AS toolchain
 WORKDIR /workspace
@@ -83,7 +75,7 @@ RUN --mount=type=cache,id=dz23-studio-pnpm-11,target=/pnpm/store,sharing=locked 
  && test -f /opt/runtime/node_modules/@dz23-studio/web/lib/client/index.html \
  && test -f /opt/runtime/node_modules/@dz23-studio/prompt-to-app/template/nextjs-app@1/package.json
 
-FROM git-runtime AS runtime
+FROM postgres-runtime AS runtime
 ARG STUDIO_COMMIT
 LABEL org.opencontainers.image.title="DZ23 STUDIO" \
       org.opencontainers.image.description="Runtime do DZ23 STUDIO sobre uma revisão fixada do DeepSeek Harness" \
@@ -94,13 +86,19 @@ ENV NODE_ENV=production \
     DSH_TELEMETRY_DISABLED=1 \
     DZ23_STUDIO_IMAGE_REVISION=${STUDIO_COMMIT}
 WORKDIR /opt/dz23-studio/runtime
+COPY --from=git-runtime /usr/local/bin/node /usr/local/bin/node
 COPY --from=build --chown=10001:10001 /opt/runtime/ ./
 COPY --from=build --chown=10001:10001 /workspace/deploy/harness/ /opt/dz23-studio/deploy/harness/
-RUN node -e "if (!/^[0-9a-f]{40}$/.test(process.env.DZ23_STUDIO_IMAGE_REVISION)) process.exit(1)" \
+RUN groupadd --gid 10001 studio \
+ && useradd --uid 10001 --gid 10001 --home-dir /var/lib/dz23-studio --no-create-home --shell /usr/sbin/nologin studio \
+ && node -e "if (!/^[0-9a-f]{40}$/.test(process.env.DZ23_STUDIO_IMAGE_REVISION)) process.exit(1)" \
  && test -f operator.mjs \
  && command -v pg_dump >/dev/null \
- && rm -rf /usr/local/lib/node_modules/npm \
- && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/pnpm /usr/local/bin/pnpx \
+ && test "$(dpkg-query -W -f='${Version}' postgresql-client-16)" = '16.15-1.pgdg12+2' \
+ && test "$(dpkg-query -W -f='${Version}' postgresql-client-common)" = '293.pgdg12+1' \
+ && test "$(dpkg-query -W -f='${Version}' libpq5)" = '18.6-1.pgdg12+2' \
+ && test "$(pg_dump --version)" = 'pg_dump (PostgreSQL) 16.15 (Debian 16.15-1.pgdg12+2)' \
+ && test "$(pg_restore --version)" = 'pg_restore (PostgreSQL) 16.15 (Debian 16.15-1.pgdg12+2)' \
  && mkdir -p /var/lib/dz23-studio /var/lib/dz23-studio-backups \
  && chown -R 10001:10001 /var/lib/dz23-studio /var/lib/dz23-studio-backups
 USER 10001:10001

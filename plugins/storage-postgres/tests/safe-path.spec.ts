@@ -1,7 +1,7 @@
 import { chmod, mkdir, mkdtemp, open, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   assertPinnedDirectory,
   childPath,
@@ -11,6 +11,7 @@ import {
   pinDirectory,
   pinnedChildPath,
   pinParent,
+  syncPinnedDirectory,
 } from '../src/safe-path.ts'
 
 const scratch: string[] = []
@@ -104,6 +105,26 @@ describe('storage path confinement', () => {
     await writeFile(file, 'x')
     await expect(pinDirectory(file)).rejects.toThrow('not a real directory')
     await expect(pinDirectory(file, true)).rejects.toThrow('not a real directory')
+  })
+
+  it('skips only the Windows directory-fsync limitation and propagates every other error', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dz23-pin-sync-'))
+    scratch.push(root)
+    const pinned = await pinDirectory(root)
+    const descriptor = Object.getOwnPropertyDescriptor(process, 'platform')!
+    const sync = vi.spyOn(pinned.handle, 'sync')
+      .mockRejectedValueOnce(Object.assign(new Error('unsupported'), { code: 'EPERM' }))
+      .mockRejectedValueOnce(Object.assign(new Error('disk failure'), { code: 'EIO' }))
+    Object.defineProperty(process, 'platform', { ...descriptor, value: 'win32' })
+    try {
+      await expect(syncPinnedDirectory(pinned)).resolves.toBeUndefined()
+      await expect(syncPinnedDirectory(pinned)).rejects.toMatchObject({ code: 'EIO' })
+      expect(sync).toHaveBeenCalledTimes(2)
+    } finally {
+      Object.defineProperty(process, 'platform', descriptor)
+      sync.mockRestore()
+      await pinned.handle.close()
+    }
   })
 
   it.runIf(process.platform !== 'win32')('refuses group/world-writable private directories and ancestors', async () => {

@@ -1,6 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { constants } from 'node:fs'
-import type { BigIntStats } from 'node:fs'
 import { link, lstat, open, rm } from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
 import { resolve } from 'node:path'
@@ -11,10 +10,11 @@ import { PostgresStorageBackend } from './backend.js'
 import { canonicalJson, sha256, type StorageExportBundle } from './bundle.js'
 import { postgresClientConnection, type PostgresClientConnection, type TlsPolicy } from './dsn.js'
 import type { VerifiedStorageBundle } from './import-file.js'
-import { advanceJournal, assertJournalIdentity, journalReached, loadRestoreJournal, writeRestoreJournal, type RestoreJournal } from './restore-journal.js'
+import { advanceJournal, assertJournalIdentity, journalReached, loadRestoreJournal, reserveRestoreJournal, writeRestoreJournal, type RestoreJournal } from './restore-journal.js'
 import { assertDomainLossAllowed, assertReplacementAllowed, assertRestorableBundle, assertRestoreIntent, postgresDumpInvocation } from './restore-policy.js'
-import { assertPinnedDirectory, openNewPinnedFile, openNewPinnedReadWriteFile, pinnedChildPath, pinParent } from './safe-path.js'
+import { assertPinnedDirectory, openNewPinnedFile, openNewPinnedReadWriteFile, pinnedChildPath, pinParent, syncPinnedDirectory } from './safe-path.js'
 import { assertConfiguredSchemaName, assertIdentifier, quoteIdentifier, STORAGE_POSTGRES_LAYOUT_VERSION, storageMaintenanceLockName, storageUnitLockName } from './schema.js'
+import { OPERATOR_BUNDLE_MAX_BYTES, assertOperatorBundleLimit } from './operator-limits.js'
 
 /**
  * Table this tool writes inside every staging schema it creates, in the same
@@ -95,11 +95,13 @@ export interface RestorePostgresDependencies {
   now?: () => number
   suffix?: () => string
   loadJournal?: typeof loadRestoreJournal
+  reserveJournal?: typeof reserveRestoreJournal
   writeJournal?: typeof writeRestoreJournal
+  platform?: NodeJS.Platform
 }
 
 export interface SafetyBackupInfo { file: string; sha256: string; bytes: number }
-export interface SafetyBackupOwnership { attemptId: string; targetSchema: string; inputSha256: string }
+export interface SafetyBackupOwnership { attemptId: string; targetSchema: string; targetFingerprint: string; inputSha256: string }
 
 export interface RestorableBackend extends StorageBackend {
   waitUntilReady(): Promise<void>
@@ -124,6 +126,9 @@ export async function restorePostgresStorage(
   if (write && (options.stateDirectory === undefined || options.stateDirectory === '')) {
     throw new Error('Restauração real exige o diretório de estado canônico da instância.')
   }
+  if (write && (dependencies.platform ?? process.platform) !== 'linux') {
+    throw new Error('Restauração com escrita exige Linux para validar o safety backup pelo mesmo descritor aberto.')
+  }
   throwIfAborted(options.signal)
   const bundle = options.verifiedInput.bundle
   // A bundle with no domains restores nothing: it can only ever destroy. Refused before the database is even opened.
@@ -139,17 +144,34 @@ export async function restorePostgresStorage(
   try {
     // Order matters: everything that can refuse runs BEFORE pg_dump, staging or DROP.
     if (write) await acquireMaintenanceLock(client, schema)
+    const targetFingerprint = write ? await postgresTargetFingerprint(client, schema) : ''
     const backupPath = write ? resolve(options.safetyBackup!) : ''
+    // One canonical attempt path per installation, schema and attempt-id. The
+    // fingerprint lives INSIDE the atomically reserved journal: including it
+    // in the filename would let the same attempt-id run concurrently against
+    // two physical databases that share this filesystem state directory.
     const journalPath = write ? resolve(options.stateDirectory!, `${schema}.${options.attemptId}.restore.json`) : ''
     const loadJournal = dependencies.loadJournal ?? loadRestoreJournal
+    const reserveJournal = dependencies.reserveJournal ?? reserveRestoreJournal
     const writeJournal = dependencies.writeJournal ?? writeRestoreJournal
     let journal = write ? await loadJournal(journalPath) : undefined
+    let journalWasCreated = false
+    if (write && journal === undefined) {
+      const initial: RestoreJournal = {
+        v: 1, attemptId: options.attemptId, targetSchema: schema, targetFingerprint,
+        inputSha256: options.verifiedInput.inputSha256, state: 'verified',
+        safetyDestination: backupPath, stagingSchema: null, safety: null, result: null, updatedAt: new Date().toISOString(),
+      }
+      journalWasCreated = await reserveJournal(journalPath, initial)
+      journal = journalWasCreated ? initial : await loadJournal(journalPath)
+      if (journal === undefined) throw new Error('A reserva da tentativa de restauração desapareceu. Restauração recusada.')
+    }
     if (journal !== undefined) {
       assertJournalIdentity(journal, {
-        attemptId: options.attemptId, targetSchema: schema, inputSha256: options.verifiedInput.inputSha256, safetyDestination: backupPath,
+        attemptId: options.attemptId, targetSchema: schema, targetFingerprint, inputSha256: options.verifiedInput.inputSha256, safetyDestination: backupPath,
       })
       if (journalReached(journal, 'swap_started')) {
-        if (await hasRestoreReceipt(client, schema, options.attemptId, options.verifiedInput.inputSha256, journal.safety?.sha256 ?? null)) {
+        if (await hasRestoreReceipt(client, schema, options.attemptId, targetFingerprint, options.verifiedInput.inputSha256, journal.safety?.sha256 ?? null)) {
           await assertStudioLayout(client, schema)
           const replay = journal.result as unknown as RestoreWriteReport | null
           if (replay === null || replay.mode !== 'write' || replay.readyToStart !== true) throw new Error('Journal confirmado no banco não contém um resultado recuperável.')
@@ -197,18 +219,10 @@ export async function restorePostgresStorage(
     if (!write) {
       return { mode: 'dry-run', domains: bundle.domains.length, existingUnits, targetDomains, wouldBeLost, targetSchemaExists, targetHasContent }
     }
+    if (journal === undefined) throw new Error('Journal da restauração não foi reservado. Restauração recusada.')
 
     throwIfAborted(options.signal)
-    if (journal === undefined) {
-      if (targetSchemaExists) await assertSafetyDestinationAvailable(backupPath)
-      journal = {
-        v: 1, attemptId: options.attemptId, targetSchema: schema,
-        inputSha256: options.verifiedInput.inputSha256, state: 'verified',
-        safetyDestination: backupPath,
-        stagingSchema: null, safety: null, result: null, updatedAt: new Date().toISOString(),
-      }
-      await writeJournal(journalPath, journal)
-    }
+    if (journalWasCreated && targetSchemaExists) await assertSafetyDestinationAvailable(backupPath)
 
     let safetyBackup: string | null = null
     let safetyBackupSha256: string | null = null
@@ -216,7 +230,7 @@ export async function restorePostgresStorage(
     if (targetSchemaExists) {
       const createSafetyBackup = dependencies.createSafetyBackup ?? createPostgresSafetyBackup
       const safety = await createSafetyBackup(options.dsn, schema, backupPath, ssl, options.environment ?? process.env, options.signal, true, options.maxBytes, {
-        attemptId: options.attemptId, targetSchema: schema, inputSha256: options.verifiedInput.inputSha256,
+        attemptId: options.attemptId, targetSchema: schema, targetFingerprint, inputSha256: options.verifiedInput.inputSha256,
       })
       if (journal.safety !== null && (journal.safety.path !== safety.file || journal.safety.sha256 !== safety.sha256 || journal.safety.bytes !== safety.bytes)) {
         throw new Error('A cópia de segurança publicada diverge do journal da tentativa. Restauração recusada.')
@@ -283,11 +297,11 @@ export async function restorePostgresStorage(
         // restored product schema and must disappear before the atomic swap.
         await client.query(`DROP TABLE ${quoteIdentifier(staging)}.${quoteIdentifier(STAGING_MARKER_TABLE)}`)
         await client.query(`CREATE TABLE ${quoteIdentifier(staging)}.${quoteIdentifier(RESTORE_RECEIPT_TABLE)} (
-          attempt_id TEXT PRIMARY KEY, input_sha256 TEXT NOT NULL, safety_sha256 TEXT
+          attempt_id TEXT PRIMARY KEY, target_fingerprint TEXT NOT NULL, input_sha256 TEXT NOT NULL, safety_sha256 TEXT
         )`)
         await client.query(
-          `INSERT INTO ${quoteIdentifier(staging)}.${quoteIdentifier(RESTORE_RECEIPT_TABLE)} (attempt_id, input_sha256, safety_sha256) VALUES ($1, $2, $3)`,
-          [options.attemptId, options.verifiedInput.inputSha256, safetyBackupSha256],
+          `INSERT INTO ${quoteIdentifier(staging)}.${quoteIdentifier(RESTORE_RECEIPT_TABLE)} (attempt_id, target_fingerprint, input_sha256, safety_sha256) VALUES ($1, $2, $3, $4)`,
+          [options.attemptId, targetFingerprint, options.verifiedInput.inputSha256, safetyBackupSha256],
         )
         await client.query(`DROP SCHEMA IF EXISTS ${quoteIdentifier(schema)} CASCADE`)
         await client.query(`ALTER SCHEMA ${quoteIdentifier(staging)} RENAME TO ${quoteIdentifier(schema)}`)
@@ -505,9 +519,11 @@ export async function createPostgresSafetyBackup(
   environment: NodeJS.ProcessEnv = process.env,
   signal?: AbortSignal,
   resume = false,
-  maxBytes = 2 * 1024 * 1024 * 1024,
+  maxBytes = OPERATOR_BUNDLE_MAX_BYTES,
   ownership?: SafetyBackupOwnership,
 ): Promise<SafetyBackupInfo> {
+  if (process.platform !== 'linux') throw new Error('Safety backup exige Linux para validar pg_restore pelo mesmo descritor aberto.')
+  assertOperatorBundleLimit(maxBytes, 'safety backup maxBytes')
   if (ownership === undefined) throw new Error('Safety backup exige identidade da tentativa de restauração.')
   // The connection string is handed over almost whole — decomposing it into host/port/user
   // dropped every other libpq parameter the operator had set (`hostaddr`, `options`, ...), so
@@ -517,11 +533,14 @@ export async function createPostgresSafetyBackup(
   // policy is re-supplied there too, where the stripped URI can no longer contradict it.
   const invocation = postgresDumpInvocation(dsn, schema, ssl, environment)
   const parent = await pinParent(output, true)
-  const partial = `.${parent.name}.partial-${randomBytes(8).toString('hex')}`
+  const ownerKey = sha256(canonicalJson(ownership)).slice(0, 24)
+  const partial = `.${parent.name}.partial-${ownerKey}`
   const partialSidecar = `${partial}.sha256`
   let destination: FileHandle | undefined
   try {
     await reserveSafetyDestination(parent.directory, parent.name, ownership)
+    await collapseOwnedPublicationLink(parent.directory, parent.name, partial)
+    await collapseOwnedPublicationLink(parent.directory, `${parent.name}.sha256`, partialSidecar)
     if (resume) {
       try {
         return await inspectPublishedSafetyBackup(parent.directory, parent.name, environment, signal, maxBytes)
@@ -544,15 +563,14 @@ export async function createPostgresSafetyBackup(
         })
       if (existing) throw new Error(`Já existe um arquivo em ${output}. Escolha outro caminho para --backup.`)
     }
+    // Only the exact owner marker above authorises reaping these deterministic
+    // crash remnants. A different database/attempt cannot reach this point.
+    await rm(pinnedChildPath(parent.directory, partial), { force: true })
+    await rm(pinnedChildPath(parent.directory, partialSidecar), { force: true })
+    await syncPinnedDirectory(parent.directory)
     destination = await openNewPinnedReadWriteFile(parent.directory, partial)
     throwIfAborted(signal)
-    await new Promise<void>((resolvePromise, reject) => {
-      const child = spawn(invocation.command, invocation.args, {
-        env: invocation.environment, stdio: ['ignore', destination!.fd, 'ignore'], ...(signal === undefined ? {} : { signal }),
-      })
-      child.once('error', reject)
-      child.once('exit', code => code === 0 ? resolvePromise() : reject(new Error(`pg_dump failed with code ${String(code)}`)))
-    })
+    await runBoundedPgDump(invocation.command, invocation.args, invocation.environment, destination, maxBytes, signal)
     throwIfAborted(signal)
     await destination.sync()
     const info = await inspectSafetyHandle(destination, pinnedChildPath(parent.directory, partial), resolve(output), environment, signal, maxBytes)
@@ -568,10 +586,10 @@ export async function createPostgresSafetyBackup(
     destination = undefined
     await link(pinnedChildPath(parent.directory, partial), pinnedChildPath(parent.directory, parent.name))
     await rm(pinnedChildPath(parent.directory, partial))
-    await parent.directory.handle.sync()
+    await syncPinnedDirectory(parent.directory)
     await link(pinnedChildPath(parent.directory, partialSidecar), pinnedChildPath(parent.directory, `${parent.name}.sha256`))
     await rm(pinnedChildPath(parent.directory, partialSidecar))
-    await parent.directory.handle.sync()
+    await syncPinnedDirectory(parent.directory)
     return info
   } catch (error) {
     await destination?.close().catch(() => undefined)
@@ -592,9 +610,11 @@ async function reserveSafetyDestination(
   assertAttemptId(ownership.attemptId)
   assertIdentifier(ownership.targetSchema, 'target schema')
   if (!/^[a-f0-9]{64}$/u.test(ownership.inputSha256)) throw new Error('Identidade do safety backup inválida.')
+  if (!/^[a-f0-9]{64}$/u.test(ownership.targetFingerprint)) throw new Error('Identidade do destino do safety backup inválida.')
   const ownerName = `${name}.owner.json`
   const expected = `${JSON.stringify({ v: 1, ...ownership })}\n`
-  const ownerPartial = `.${ownerName}.partial-${randomBytes(8).toString('hex')}`
+  const ownerPartial = `.${ownerName}.partial-${sha256(expected).slice(0, 24)}`
+  await collapseOwnedPublicationLink(directory, ownerName, ownerPartial)
   try {
     const marker = await openNewPinnedFile(directory, ownerPartial)
     try {
@@ -603,7 +623,7 @@ async function reserveSafetyDestination(
     } finally { await marker.close() }
     await link(pinnedChildPath(directory, ownerPartial), pinnedChildPath(directory, ownerName))
     await rm(pinnedChildPath(directory, ownerPartial))
-    await directory.handle.sync()
+    await syncPinnedDirectory(directory)
     return
   } catch (error) {
     await rm(pinnedChildPath(directory, ownerPartial), { force: true }).catch(() => undefined)
@@ -624,6 +644,37 @@ async function reserveSafetyDestination(
       throw new Error('Destino da cópia de segurança pertence a outra tentativa. Escolha outro caminho.')
     }
   } finally { await marker.close() }
+}
+
+async function collapseOwnedPublicationLink(
+  directory: Awaited<ReturnType<typeof pinParent>>['directory'],
+  finalName: string,
+  temporaryName: string,
+): Promise<void> {
+  const finalPath = pinnedChildPath(directory, finalName)
+  const final = await lstat(finalPath, { bigint: true }).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return undefined
+    throw error
+  })
+  if (final === undefined || final.nlink === 1n) return
+  if (!final.isFile() || final.isSymbolicLink() || final.nlink !== 2n) {
+    throw new Error('Destino da cópia de segurança pertence a outra tentativa: hardlink não autenticado.')
+  }
+  const temporaryPath = pinnedChildPath(directory, temporaryName)
+  const temporary = await lstat(temporaryPath, { bigint: true }).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return undefined
+    throw error
+  })
+  if (temporary === undefined || !temporary.isFile() || temporary.isSymbolicLink() || temporary.nlink !== 2n ||
+      temporary.dev !== final.dev || temporary.ino !== final.ino || temporary.size !== final.size || temporary.mtimeNs !== final.mtimeNs) {
+    throw new Error('Destino da cópia de segurança pertence a outra tentativa: hardlink não autenticado.')
+  }
+  await rm(temporaryPath)
+  await syncPinnedDirectory(directory)
+  const recovered = await lstat(finalPath, { bigint: true })
+  if (!recovered.isFile() || recovered.isSymbolicLink() || recovered.nlink !== 1n || recovered.dev !== final.dev || recovered.ino !== final.ino || recovered.size !== final.size || recovered.mtimeNs !== final.mtimeNs) {
+    throw new Error('Publicação interrompida da cópia de segurança não pôde ser concluída.')
+  }
 }
 
 async function recoverPublishedSafetyBackup(
@@ -658,7 +709,7 @@ async function recoverPublishedSafetyBackup(
       await marker.writeFile(`${info.sha256}  ${name}\n`, 'utf8')
       await marker.sync()
     } finally { await marker.close() }
-    await directory.handle.sync()
+    await syncPinnedDirectory(directory)
     return info
   } finally { await file.close() }
 }
@@ -738,22 +789,12 @@ async function inspectSafetyHandle(file: FileHandle, path: string, reportedPath:
     hash.update(block.subarray(0, chunk.bytesRead))
     offset += chunk.bytesRead
   }
-  const sameDescriptorPath = process.platform === 'linux' ? '/proc/self/fd/3' : path
-  if (process.platform !== 'linux') await assertSafetyPathIdentity(path, stats)
-  await runTool('pg_restore', ['--list', sameDescriptorPath], { PATH: environment.PATH, LANG: environment.LANG, LC_ALL: environment.LC_ALL }, signal, file.fd)
+  await runTool('pg_restore', ['--list', '/proc/self/fd/3'], { PATH: environment.PATH, LANG: environment.LANG, LC_ALL: environment.LC_ALL }, signal, file.fd)
   const after = await file.stat({ bigint: true })
   if (after.dev !== stats.dev || after.ino !== stats.ino || after.size !== stats.size || after.mtimeNs !== stats.mtimeNs) {
     throw new Error('Safety backup mudou durante a verificação. Restauração recusada.')
   }
-  if (process.platform !== 'linux') await assertSafetyPathIdentity(path, after)
   return { file: reportedPath, sha256: hash.digest('hex'), bytes: offset }
-}
-
-async function assertSafetyPathIdentity(path: string, expected: BigIntStats): Promise<void> {
-  const current = await lstat(path, { bigint: true })
-  if (!current.isFile() || current.isSymbolicLink() || current.nlink !== 1n || current.dev !== expected.dev || current.ino !== expected.ino || current.size !== expected.size || current.mtimeNs !== expected.mtimeNs) {
-    throw new Error('Safety backup mudou durante a verificação. Restauração recusada.')
-  }
 }
 
 async function runTool(command: string, args: string[], environment: NodeJS.ProcessEnv, signal?: AbortSignal, inheritedFd?: number): Promise<void> {
@@ -762,6 +803,51 @@ async function runTool(command: string, args: string[], environment: NodeJS.Proc
     child.once('error', reject)
     child.once('exit', code => code === 0 ? resolvePromise() : reject(new Error(`${command} failed with code ${String(code)}`)))
   })
+}
+
+async function runBoundedPgDump(
+  command: string,
+  args: string[],
+  environment: NodeJS.ProcessEnv,
+  destination: FileHandle,
+  maxBytes: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  const child = spawn(command, args, {
+    env: environment,
+    stdio: ['ignore', 'pipe', 'ignore'],
+    ...(signal === undefined ? {} : { signal }),
+  })
+  const exited = new Promise<{ code: number | null; error?: Error }>(resolvePromise => {
+    let settled = false
+    child.once('error', error => {
+      if (!settled) { settled = true; resolvePromise({ code: null, error }) }
+    })
+    child.once('exit', code => {
+      if (!settled) { settled = true; resolvePromise({ code }) }
+    })
+  })
+  let bytes = 0
+  try {
+    if (child.stdout === null) throw new Error('pg_dump stdout indisponível.')
+    for await (const chunk of child.stdout) {
+      throwIfAborted(signal)
+      const buffer = chunk as Buffer
+      bytes += buffer.byteLength
+      if (bytes > maxBytes) {
+        child.kill('SIGKILL')
+        throw new Error(`Safety backup excede o limite de ${String(maxBytes)} bytes.`)
+      }
+      await destination.write(buffer)
+    }
+    const outcome = await exited
+    if (outcome.error !== undefined) throw outcome.error
+    if (outcome.code !== 0) throw new Error(`pg_dump failed with code ${String(outcome.code)}`)
+  } catch (error) {
+    child.kill('SIGKILL')
+    await exited
+    throw error
+  }
 }
 
 export { postgresDumpInvocation } from './restore-policy.js'
@@ -804,17 +890,37 @@ async function schemaHasContent(client: Client, schema: string): Promise<boolean
   return present.rows[0]?.present === true
 }
 
-async function hasRestoreReceipt(client: Client, schema: string, attemptId: string, inputSha256: string, safetySha256: string | null): Promise<boolean> {
+async function postgresTargetFingerprint(client: Client, schema: string): Promise<string> {
+  const identity = await client.query<{ system_identifier: string; database_oid: string; database_name: string }>(
+    `SELECT (pg_control_system()).system_identifier::text AS system_identifier,
+            d.oid::text AS database_oid,
+            d.datname AS database_name
+       FROM pg_catalog.pg_database d
+      WHERE d.datname = current_database()`,
+  )
+  const row = identity.rows[0]
+  if (row === undefined || !/^\d+$/u.test(row.system_identifier) || !/^\d+$/u.test(row.database_oid) || row.database_name === '') {
+    throw new Error('Não foi possível provar a identidade física do PostgreSQL. Restauração recusada.')
+  }
+  return sha256(canonicalJson({
+    databaseName: row.database_name,
+    databaseOid: row.database_oid,
+    schema,
+    systemIdentifier: row.system_identifier,
+  }))
+}
+
+async function hasRestoreReceipt(client: Client, schema: string, attemptId: string, targetFingerprint: string, inputSha256: string, safetySha256: string | null): Promise<boolean> {
   const present = await client.query<{ present: boolean }>(
     'SELECT to_regclass(format(\'%I.%I\', $1, $2)) IS NOT NULL AS present',
     [schema, RESTORE_RECEIPT_TABLE],
   )
   if (present.rows[0]?.present !== true) return false
-  const receipt = await client.query<{ input_sha256: string; safety_sha256: string | null }>(
-    `SELECT input_sha256, safety_sha256 FROM ${quoteIdentifier(schema)}.${quoteIdentifier(RESTORE_RECEIPT_TABLE)} WHERE attempt_id = $1`,
+  const receipt = await client.query<{ target_fingerprint: string; input_sha256: string; safety_sha256: string | null }>(
+    `SELECT target_fingerprint, input_sha256, safety_sha256 FROM ${quoteIdentifier(schema)}.${quoteIdentifier(RESTORE_RECEIPT_TABLE)} WHERE attempt_id = $1`,
     [attemptId],
   )
-  return receipt.rows[0]?.input_sha256 === inputSha256 && receipt.rows[0]?.safety_sha256 === safetySha256
+  return receipt.rows[0]?.target_fingerprint === targetFingerprint && receipt.rows[0]?.input_sha256 === inputSha256 && receipt.rows[0]?.safety_sha256 === safetySha256
 }
 
 /**

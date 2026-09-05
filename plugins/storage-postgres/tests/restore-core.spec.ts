@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { exportedDomain, sealBundle } from '../src/bundle.ts'
+import { canonicalJson, exportedDomain, sealBundle, sha256 } from '../src/bundle.ts'
 import { postgresDumpInvocation, postgresStorageStatus, restorePostgresStorage } from '../src/restore.ts'
 
 const domain = exportedDomain(
@@ -11,20 +11,23 @@ const domain = exportedDomain(
 )
 const bundle = sealBundle({ kind: 'postgres', sha256: 'a'.repeat(64) }, [domain], '2026-09-04T00:00:00.000Z')
 const verifiedInput = { bundle, inputSha256: 'f'.repeat(64), bytes: 100, file: 'unused' }
+const targetFingerprint = sha256(canonicalJson({ databaseName: 'studio', databaseOid: '16384', schema: 'dz23_storage', systemIdentifier: '7413371234567890123' }))
 const restoreBase = { verifiedInput, attemptId: 'attempt-0001', dsn: 'secret', stateDirectory: 'unused-state' }
 const connection = { connectionString: 'postgres://redacted@localhost/studio', ssl: false as const }
 
 class ScriptClient {
   readonly sql: string[] = []
   receiptInput: string | undefined
+  receiptTarget: string | undefined
   receiptSafety: string | null | undefined
   async connect(): Promise<void> { this.sql.push('CONNECT') }
   async end(): Promise<void> { this.sql.push('END') }
   async query<T>(sql: string, values?: unknown[]): Promise<{ rows: T[] }> {
     this.sql.push(sql)
-    if (sql.includes(`INSERT INTO`) && sql.includes('dz23_restore_receipt')) { this.receiptInput = String(values?.[1]); this.receiptSafety = values?.[2] === null ? null : String(values?.[2]); return { rows: [] } }
+    if (sql.includes(`INSERT INTO`) && sql.includes('dz23_restore_receipt')) { this.receiptTarget = String(values?.[1]); this.receiptInput = String(values?.[2]); this.receiptSafety = values?.[3] === null ? null : String(values?.[3]); return { rows: [] } }
     if (sql.includes('to_regclass')) return { rows: [{ present: this.receiptInput !== undefined } as T] }
-    if (sql.includes('dz23_restore_receipt') && sql.includes('SELECT input_sha256')) return { rows: this.receiptInput === undefined ? [] : [{ input_sha256: this.receiptInput, safety_sha256: this.receiptSafety } as T] }
+    if (sql.includes('dz23_restore_receipt') && sql.includes('SELECT target_fingerprint')) return { rows: this.receiptInput === undefined ? [] : [{ target_fingerprint: this.receiptTarget, input_sha256: this.receiptInput, safety_sha256: this.receiptSafety } as T] }
+    if (sql.includes('pg_control_system')) return { rows: [{ system_identifier: '7413371234567890123', database_oid: '16384', database_name: 'studio' } as T] }
     if (sql === 'SHOW server_version') return { rows: [{ server_version: '16.4' } as T] }
     if (sql.includes('pg_try_advisory_lock')) return { rows: [{ acquired: true } as T] }
     if (sql.includes('pg_catalog.pg_namespace WHERE nspname')) return { rows: [{ present: this.receiptInput !== undefined } as T] }
@@ -83,8 +86,14 @@ function journalMemory(initial?: import('../src/restore-journal.ts').RestoreJour
   const memory = { value: initial }
   const paths: string[] = []
   return {
-    memory, paths,
+    memory, paths, platform: 'linux' as const,
     loadJournal: async (path: string) => { paths.push(path); return memory.value },
+    reserveJournal: async (path: string, next: import('../src/restore-journal.ts').RestoreJournal) => {
+      paths.push(path)
+      if (memory.value !== undefined) return false
+      memory.value = structuredClone(next)
+      return true
+    },
     writeJournal: async (path: string, next: import('../src/restore-journal.ts').RestoreJournal) => { paths.push(path); memory.value = structuredClone(next) },
   }
 }
@@ -121,6 +130,51 @@ describe('restore core without Docker', () => {
     const { stateDirectory: _stateDirectory, ...withoutStateDirectory } = restoreBase
     await expect(restorePostgresStorage({ ...withoutStateDirectory, write: true, safetyBackup: 'unused.dump' }, dependencies)).rejects.toThrow('diretório de estado')
     expect(resolved).toBe(0)
+  })
+
+  it('blocks write restore outside Linux before opening PostgreSQL', async () => {
+    let resolved = false
+    await expect(restorePostgresStorage({ ...restoreBase, write: true, safetyBackup: 'unused.dump' }, {
+      platform: 'win32', resolveConnection: async () => { resolved = true; return connection },
+    })).rejects.toThrow('exige Linux')
+    expect(resolved).toBe(false)
+  })
+
+  it('refuses an unprovable physical database identity before journal or safety artifacts', async () => {
+    const client = new ScriptClient()
+    const original = client.query.bind(client)
+    client.query = async function <T>(sql: string, values?: unknown[]): Promise<{ rows: T[] }> {
+      if (sql.includes('pg_control_system')) {
+        this.sql.push(sql)
+        return { rows: [{ system_identifier: '', database_oid: 'not-an-oid', database_name: '' } as T] }
+      }
+      return original<T>(sql, values)
+    }
+    let journalLoaded = false
+    let safetyStarted = false
+    await expect(restorePostgresStorage({ ...restoreBase, ssl: 'off', write: true, safetyBackup: 'unused.dump' }, {
+      platform: 'linux',
+      resolveConnection: async () => connection,
+      createClient: () => client as never,
+      loadJournal: async () => { journalLoaded = true; return undefined },
+      reserveJournal: async () => { journalLoaded = true; return true },
+      createSafetyBackup: async () => { safetyStarted = true; return { file: '', sha256: '', bytes: 0 } },
+    })).rejects.toThrow('identidade física')
+    expect(journalLoaded).toBe(false)
+    expect(safetyStarted).toBe(false)
+    expect(client.sql.some(sql => sql.startsWith('CREATE SCHEMA') || sql.startsWith('DROP SCHEMA'))).toBe(false)
+  })
+
+  it('fails closed if a concurrent journal reservation disappears before reload', async () => {
+    const client = new ScriptClient()
+    await expect(restorePostgresStorage({ ...restoreBase, ssl: 'off', write: true, safetyBackup: 'unused.dump' }, {
+      platform: 'linux',
+      resolveConnection: async () => connection,
+      createClient: () => client as never,
+      loadJournal: async () => undefined,
+      reserveJournal: async () => false,
+    })).rejects.toThrow('reserva da tentativa')
+    expect(client.sql.some(sql => sql.startsWith('CREATE SCHEMA') || sql.startsWith('DROP SCHEMA'))).toBe(false)
   })
 
   it('reports an existing target accurately in dry-run without publishing artifacts', async () => {
@@ -171,7 +225,10 @@ describe('restore core without Docker', () => {
       ...restoreBase, ssl: 'off', write: true, safetyBackup: 'safety.dump', force: true, confirmation: 'REPLACE_DZ23_STORAGE',
     }, {
       ...journalMemory(), resolveConnection: async () => connection, createClient: () => client as never, createBackend: () => fakeBackend() as never,
-      createSafetyBackup: async () => ({ file: resolve('safety.dump'), sha256: 'a'.repeat(64), bytes: 10 }),
+      createSafetyBackup: async (_dsn, _schema, _path, _ssl, _environment, _signal, _resume, _maxBytes, ownership) => {
+        expect(ownership).toEqual({ attemptId: 'attempt-0001', targetSchema: 'dz23_storage', targetFingerprint, inputSha256: verifiedInput.inputSha256 })
+        return { file: resolve('safety.dump'), sha256: 'a'.repeat(64), bytes: 10 }
+      },
     })
     expect(report).toMatchObject({ mode: 'write', safetyBackup: resolve('safety.dump'), safetyBackupStatus: 'created', safetyBackupSha256: 'a'.repeat(64) })
   })
@@ -231,6 +288,7 @@ describe('restore core without Docker', () => {
   it('reports a valid initialized schema as ready', async () => {
     const client = new ScriptClient()
     client.receiptInput = verifiedInput.inputSha256
+    client.receiptTarget = targetFingerprint
     const status = await postgresStorageStatus({ dsn: 'secret', ssl: 'off' }, {
       resolveConnection: async () => connection, createClient: () => client as never,
     })
@@ -287,7 +345,7 @@ describe('restore core without Docker', () => {
 
   it('refuses reusing an attempt id with another verified input hash', async () => {
     const state = journalMemory({
-      v: 1, attemptId: 'attempt-0001', targetSchema: 'dz23_storage', inputSha256: '0'.repeat(64), state: 'verified',
+      v: 1, attemptId: 'attempt-0001', targetSchema: 'dz23_storage', targetFingerprint, inputSha256: '0'.repeat(64), state: 'verified',
       safetyDestination: resolve('unused.dump'),
       stagingSchema: null, safety: null, result: null, updatedAt: '2026-09-04T00:00:00.000Z',
     })
@@ -299,7 +357,7 @@ describe('restore core without Docker', () => {
   it('binds one attempt id to one canonical safety destination before staging', async () => {
     const client = new ScriptClient()
     const state = journalMemory({
-      v: 1, attemptId: 'attempt-0001', targetSchema: 'dz23_storage', inputSha256: verifiedInput.inputSha256,
+      v: 1, attemptId: 'attempt-0001', targetSchema: 'dz23_storage', targetFingerprint, inputSha256: verifiedInput.inputSha256,
       safetyDestination: resolve('unused.dump'), state: 'verified', stagingSchema: null, safety: null, result: null,
       updatedAt: '2026-09-04T00:00:00.000Z',
     })
@@ -310,16 +368,41 @@ describe('restore core without Docker', () => {
     expect(state.paths[0]).toBe(resolve('unused-state', 'dz23_storage.attempt-0001.restore.json'))
   })
 
+  it('serializes the same instance attempt across physical databases through one canonical ledger', async () => {
+    const firstClient = new ScriptClient()
+    const secondClient = new ScriptClient()
+    const original = secondClient.query.bind(secondClient)
+    secondClient.query = async function <T>(sql: string, values?: unknown[]): Promise<{ rows: T[] }> {
+      if (sql.includes('pg_control_system')) {
+        this.sql.push(sql)
+        return { rows: [{ system_identifier: '7413371234567890123', database_oid: '16385', database_name: 'other' } as T] }
+      }
+      return original<T>(sql, values)
+    }
+    const state = journalMemory()
+    await restorePostgresStorage({ ...restoreBase, ssl: 'off', write: true, safetyBackup: 'unused.dump' }, {
+      ...state, resolveConnection: async () => connection, createClient: () => firstClient as never, createBackend: () => fakeBackend() as never,
+    })
+    const firstFingerprint = state.memory.value?.targetFingerprint
+    await expect(restorePostgresStorage({ ...restoreBase, ssl: 'off', write: true, safetyBackup: 'unused.dump' }, {
+      ...state, resolveConnection: async () => connection, createClient: () => secondClient as never, createBackend: () => fakeBackend() as never,
+    })).rejects.toThrow('outra restauração')
+    expect(firstFingerprint).toBe(targetFingerprint)
+    expect(state.paths.every(path => path === resolve('unused-state', 'dz23_storage.attempt-0001.restore.json'))).toBe(true)
+    expect(secondClient.sql.some(sql => sql.startsWith('CREATE SCHEMA') || sql.startsWith('DROP SCHEMA'))).toBe(false)
+  })
+
   it('refuses a committed journal whose database receipt does not match', async () => {
     const client = new ScriptClient()
     client.receiptInput = '0'.repeat(64)
+    client.receiptTarget = targetFingerprint
     client.receiptSafety = null
     const planned = {
       mode: 'write', domains: 1, safetyBackup: null, safetyBackupStatus: 'not-needed-empty-target' as const,
       safetyBackupSha256: null, replacedDomains: [], droppedDomains: [], reapedStaging: [], readyToStart: true as const,
     }
     const state = journalMemory({
-      v: 1, attemptId: 'attempt-0001', targetSchema: 'dz23_storage', inputSha256: verifiedInput.inputSha256,
+      v: 1, attemptId: 'attempt-0001', targetSchema: 'dz23_storage', targetFingerprint, inputSha256: verifiedInput.inputSha256,
       safetyDestination: resolve('unused.dump'), state: 'committed', stagingSchema: 'dz23_storage_staging_abcd',
       safety: null, result: planned, updatedAt: '2026-09-04T00:00:00.000Z',
     })
@@ -332,9 +415,10 @@ describe('restore core without Docker', () => {
   it('refuses an exact database receipt when the in-memory journal result is not recoverable', async () => {
     const client = new ScriptClient()
     client.receiptInput = verifiedInput.inputSha256
+    client.receiptTarget = targetFingerprint
     client.receiptSafety = null
     const state = journalMemory({
-      v: 1, attemptId: 'attempt-0001', targetSchema: 'dz23_storage', inputSha256: verifiedInput.inputSha256,
+      v: 1, attemptId: 'attempt-0001', targetSchema: 'dz23_storage', targetFingerprint, inputSha256: verifiedInput.inputSha256,
       safetyDestination: resolve('unused.dump'), state: 'swap_started', stagingSchema: 'dz23_storage_staging_abcd',
       safety: null, result: null, updatedAt: '2026-09-04T00:00:00.000Z',
     })
@@ -533,7 +617,7 @@ describe('restore core without Docker', () => {
   it('refuses a safety artifact that diverges from the monotonic journal', async () => {
     const client = new ExistingClient()
     const state = journalMemory({
-      v: 1, attemptId: 'attempt-0001', targetSchema: 'dz23_storage', inputSha256: verifiedInput.inputSha256,
+      v: 1, attemptId: 'attempt-0001', targetSchema: 'dz23_storage', targetFingerprint, inputSha256: verifiedInput.inputSha256,
       safetyDestination: resolve('safety.dump'), state: 'safety_published', stagingSchema: null,
       safety: { path: resolve('safety.dump'), sha256: 'a'.repeat(64), bytes: 10 }, result: null, updatedAt: '2026-09-04T00:00:00.000Z',
     })
@@ -568,7 +652,7 @@ describe('restore core without Docker', () => {
       safetyBackupSha256: null, replacedDomains: [], droppedDomains: [], reapedStaging: [], readyToStart: true as const,
     }
     const state = journalMemory({
-      v: 1, attemptId: 'attempt-0001', targetSchema: 'dz23_storage', inputSha256: verifiedInput.inputSha256,
+      v: 1, attemptId: 'attempt-0001', targetSchema: 'dz23_storage', targetFingerprint, inputSha256: verifiedInput.inputSha256,
       safetyDestination: resolve('unused.dump'), state: 'swap_started', stagingSchema: 'dz23_storage_staging_old',
       safety: null, result: planned, updatedAt: '2026-09-04T00:00:00.000Z',
     })

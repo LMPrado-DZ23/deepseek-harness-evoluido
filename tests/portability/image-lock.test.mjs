@@ -32,15 +32,19 @@ test('lock de imagens recusa tag, plataforma ausente e campo inesperado', () => 
   assert.throws(() => validateImageLock(archive), /arquivo Node linux\/arm64 inválido/u)
 
   const postgres = structuredClone(canonical)
-  postgres.tools.postgresClient.packages['postgresql-client-15'] = '15.*'
+  postgres.tools.postgresClient.packages['postgresql-client-16'] = '16.*'
   assert.throws(() => validateImageLock(postgres), /não fixada/u)
 
-  const missingLeaf = dockerfile.replace('postgresql-client-15=15.19-0+deb12u1', 'postgresql-client-15')
-  assert.throws(() => validateDockerfileBase(missingLeaf, canonical), /não fixa postgresql-client-15/u)
+  const missingLeaf = dockerfile.replace("test \"$(dpkg-query -W -f='${Version}' postgresql-client-16)\" = '16.15-1.pgdg12+2'", 'true')
+  assert.throws(() => validateDockerfileBase(missingLeaf, canonical), /não valida postgresql-client-16/u)
+
+  const postgresBase = structuredClone(canonical)
+  postgresBase.images.postgresRuntime.platforms['linux/arm64'] = postgresBase.images.postgresRuntime.platforms['linux/amd64']
+  assert.throws(() => validateImageLock(postgresBase), /plataforma PostgreSQL inválidos/u)
 })
 
-test('Dockerfile usa exatamente a base Node fixada no lock', () => {
-  assert.equal(validateDockerfileBase(dockerfile, canonical).fromLines.length, 5)
+test('Dockerfile usa exatamente as bases Node e PostgreSQL fixadas no lock', () => {
+  assert.equal(validateDockerfileBase(dockerfile, canonical).fromLines.length, 6)
   assert.equal(validateDockerfileBase(dockerfile, canonical).frontend, `${canonical.tools.dockerfileFrontend.reference}@${canonical.tools.dockerfileFrontend.digest}`)
   assert.throws(
     () => validateDockerfileBase(dockerfile.replace(canonical.tools.dockerfileFrontend.digest, `sha256:${'9'.repeat(64)}`), canonical),
@@ -48,7 +52,11 @@ test('Dockerfile usa exatamente a base Node fixada no lock', () => {
   )
   assert.throws(
     () => validateDockerfileBase(dockerfile.replace(canonical.images.node.indexDigest, `sha256:${'0'.repeat(64)}`), canonical),
-    /não usa a imagem Node fixada/u,
+    /não usa as imagens Node\/PostgreSQL fixadas/u,
+  )
+  assert.throws(
+    () => validateDockerfileBase(dockerfile.replace(canonical.images.postgresRuntime.indexDigest, `sha256:${'1'.repeat(64)}`), canonical),
+    /não usa as imagens Node\/PostgreSQL fixadas/u,
   )
   assert.throws(
     () => validateDockerfileBase(`${dockerfile}\nFROM node:latest AS hidden\n`, canonical),

@@ -1,14 +1,19 @@
 import { describe, expect, it } from 'vitest'
 import { readFile } from 'node:fs/promises'
 import { main, parseOperatorCommand, runOperator, sanitizeOperatorError } from './operator.mjs'
+import { runStorageRestoreStopped } from '../../scripts/run-storage-operator.mjs'
 
 describe('internal storage operator', () => {
   it('is included in the runtime package and asserted by the production image', async () => {
     const manifest = JSON.parse(await readFile(new URL('./package.json', import.meta.url), 'utf8'))
     const dockerfile = await readFile(new URL('../../deploy/studio/Dockerfile', import.meta.url), 'utf8')
+    const compose = await readFile(new URL('../../docker-compose.yml', import.meta.url), 'utf8')
     expect(manifest.bin['dz23-studio-operator']).toBe('./operator.mjs')
     expect(manifest.files).toContain('operator.mjs')
     expect(dockerfile).toContain('test -f /opt/runtime/operator.mjs')
+    expect(compose).toContain('  operator:')
+    expect(compose).toContain('entrypoint: ["node", "operator.mjs"]')
+    expect(compose).toContain('profiles: ["operator"]')
     expect(dockerfile).toContain('command -v pg_dump')
   })
   it('accepts only environment references, never a DSN on argv', () => {
@@ -24,10 +29,58 @@ describe('internal storage operator', () => {
     expect(() => parseOperatorCommand(['status', '--dsn-ref', 'A', '--dsn-ref', 'B'])).toThrow('Opção repetida')
     expect(() => parseOperatorCommand(['restore', '--dsn-ref', 'A', '--input', 'x', '--attempt-id', 'attempt-1', '--write', '--write'])).toThrow('Opção repetida')
     expect(() => parseOperatorCommand(['verify-backup', '--input', 'x', '--max-bytes', '0'])).toThrow('inteiro positivo')
+    expect(() => parseOperatorCommand(['verify-backup', '--input', 'x', '--max-bytes', String(64 * 1024 * 1024 + 1)])).toThrow('não pode exceder')
     expect(() => parseOperatorCommand(['verify-backup', '--input', 'x', '--schema', 'x'])).toThrow('não pertence')
     expect(() => parseOperatorCommand(['backup', '--dsn-ref', 'A'])).toThrow('Falta --out')
     expect(() => parseOperatorCommand(['restore', '--dsn-ref', 'A', '--input', 'x', '--attempt-id', 'attempt-1', '--write'])).toThrow('Falta --backup')
     expect(parseOperatorCommand(['restore', '--dsn-ref', 'A', '--input', 'x', '--attempt-id', 'attempt-1'])).toMatchObject({ command: 'restore', write: false, backup: '' })
+  })
+
+  it('runs write restore with Harness stopped and reopens it only after operator success', async () => {
+    const calls = []
+    const executor = async (_program, args, options) => {
+      calls.push(args)
+      return { stdout: options?.capture === true ? 'harness\n' : '', stderr: '' }
+    }
+    await expect(runStorageRestoreStopped(['restore', '--write', '--input', '/backup.json'], { executor }))
+      .resolves.toEqual({ restored: true, harnessRestarted: true })
+    expect(calls).toEqual([
+      ['compose', 'ps', '--status', 'running', '--services', 'harness'],
+      ['compose', 'stop', 'harness'],
+      ['compose', 'up', '-d', '--wait', 'postgres'],
+      ['compose', '--profile', 'operator', 'run', '--rm', '--no-deps', 'operator', 'restore', '--write', '--input', '/backup.json'],
+      ['compose', 'up', '-d', '--no-deps', '--wait', 'harness'],
+    ])
+  })
+
+  it('leaves Harness stopped after restore failure and never accepts a non-write command', async () => {
+    const calls = []
+    const executor = async (_program, args, options) => {
+      calls.push(args)
+      if (args.includes('operator')) throw new Error('restore refused')
+      return { stdout: options?.capture === true ? 'harness\n' : '', stderr: '' }
+    }
+    await expect(runStorageRestoreStopped(['backup'], { executor })).rejects.toThrow('somente restore --write')
+    await expect(runStorageRestoreStopped(['restore', '--write'], { executor })).rejects.toThrow('continuará parado')
+    expect(calls.at(-1)).toContain('operator')
+    expect(calls.filter(args => args.includes('harness') && args.includes('up'))).toEqual([])
+  })
+
+  it('threads cancellation through every Docker child and never reopens Harness after an abort', async () => {
+    const controller = new AbortController()
+    const calls = []
+    const executor = async (_program, args, options) => {
+      calls.push({ args, signal: options?.signal })
+      if (args.includes('operator')) controller.abort(new Error('cancelled-by-supervisor'))
+      return { stdout: options?.capture === true ? 'harness\n' : '', stderr: '' }
+    }
+    await expect(runStorageRestoreStopped(['restore', '--write'], { executor, signal: controller.signal })).rejects.toThrow('continuará parado')
+    expect(calls.every(call => call.signal === controller.signal)).toBe(true)
+    expect(calls.filter(call => call.args.includes('harness') && call.args.includes('up'))).toEqual([])
+
+    const already = new AbortController()
+    already.abort(new Error('already-cancelled'))
+    await expect(runStorageRestoreStopped(['restore', '--write'], { executor, signal: already.signal })).rejects.toThrow('already-cancelled')
   })
 
   it('executes backup and emits only a sanitized bounded report', async () => {

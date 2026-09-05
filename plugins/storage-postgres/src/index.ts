@@ -80,7 +80,7 @@ export const Config: z<Config> = z.object({
   backupDirectory: z.string().default(''),
   backupIntervalMinutes: z.number().step(1).min(5).max(24 * 60).default(60),
   backupKeep: z.number().step(1).min(1).max(1000).default(48),
-  backupMaxBytes: z.number().step(1).min(1024 * 1024).default(2 * 1024 * 1024 * 1024),
+  backupMaxBytes: z.number().step(1).min(1024 * 1024).max(BACKUP_MAX_BYTES_DEFAULT).default(BACKUP_MAX_BYTES_DEFAULT),
   backupTimeoutMinutes: z.number().step(1).min(1).max(24 * 60).default(15),
   backupHeapMb: z.number().step(1).min(128).max(16 * 1024).default(1024),
 })

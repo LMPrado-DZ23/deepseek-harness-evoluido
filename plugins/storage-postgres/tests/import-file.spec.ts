@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { exportedDomain, sealBundle } from '../src/bundle.ts'
 import { readStorageBundleFile, readVerifiedStorageBundleFile } from '../src/import-file.ts'
+import { OPERATOR_BUNDLE_MAX_BYTES } from '../src/operator-limits.ts'
 
 const scratch: string[] = []
 afterEach(async () => {
@@ -26,6 +27,23 @@ function validBundle() {
 }
 
 describe('bounded storage import reader', () => {
+  it('refuses an advertised ceiling above the proved in-memory parser boundary', async () => {
+    await expect(readStorageBundleFile('not-opened.json', {
+      maxBytes: OPERATOR_BUNDLE_MAX_BYTES + 1, maxDomains: 1, maxRecords: 1, maxDepth: 8,
+    })).rejects.toThrow(`between 1 and ${String(OPERATOR_BUNDLE_MAX_BYTES)}`)
+  })
+
+  it('refuses missing input, invalid quotas and malformed JSON boundaries', async () => {
+    const root = await directory()
+    await expect(readStorageBundleFile(join(root, 'missing.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+    const input = join(root, 'malformed.json')
+    await writeFile(input, '{"text":"escaped\\\\value\\\"')
+    await expect(readStorageBundleFile(input)).rejects.toThrow('incomplete JSON')
+    await writeFile(input, '}')
+    await expect(readStorageBundleFile(input)).rejects.toThrow('invalid JSON nesting')
+    await expect(readStorageBundleFile(input, { maxBytes: 1, maxDomains: 0, maxRecords: 1, maxDepth: 1 })).rejects.toThrow('maxDomains')
+  })
+
   it('reads a valid bundle through one descriptor and enforces the actual EOF byte count', async () => {
     const root = await directory()
     const input = join(root, 'bundle.json')
@@ -103,6 +121,9 @@ describe('bounded storage import reader', () => {
     await expect(readVerifiedStorageBundleFile(input)).rejects.toThrow()
     await rm(`${input}.sha256`)
     await link(digestFile, `${input}.sha256`)
+    await expect(readVerifiedStorageBundleFile(input)).rejects.toThrow('sidecar is invalid')
+    await rm(`${input}.sha256`)
+    await writeFile(`${input}.sha256`, 'x'.repeat(1025))
     await expect(readVerifiedStorageBundleFile(input)).rejects.toThrow('sidecar is invalid')
     await rm(`${input}.sha256`)
     if (process.platform !== 'win32') {

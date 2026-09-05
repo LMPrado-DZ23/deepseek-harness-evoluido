@@ -18,6 +18,7 @@ import { postgresClientConnection } from './dsn.js'
 import { assertConfiguredSchemaName, globalsTable, quoteIdentifier, recordsTable, STORAGE_POSTGRES_LAYOUT_VERSION, unitsTable } from './schema.js'
 import { storedDescriptor, type UnitRow } from './snapshot.js'
 import { assertPinnedDirectory, openNewPinnedFile, pinnedChildPath, pinParent } from './safe-path.js'
+import { OPERATOR_BUNDLE_MAX_BYTES, assertOperatorBundleLimit } from './operator-limits.js'
 
 export interface WorkerArgs {
   dsnRef: string
@@ -43,6 +44,7 @@ const CURSOR_BATCH = 500
 export async function writeBackupBundle(args: WorkerArgs, dsn: string): Promise<WorkerReport> {
   throwIfAborted(args.signal)
   assertConfiguredSchemaName(args.schema)
+  assertOperatorBundleLimit(args.maxBytes, 'backup maxBytes')
   // TLS is decided here and nowhere else: the DSN's own ssl parameters are stripped
   // so they cannot downgrade the configured policy.
   const connection = await postgresClientConnection(dsn, args.ssl)
@@ -163,6 +165,7 @@ export async function writeBackupBundle(args: WorkerArgs, dsn: string): Promise<
     payloadHash.update(`],"format":${JSON.stringify(STORAGE_EXPORT_FORMAT)},"source":${canonicalJson(source)},"upstreamCommit":${JSON.stringify(HARNESS_UPSTREAM_COMMIT)}}`, 'utf8')
     await write(`],"payloadSha256":${JSON.stringify(payloadHash.digest('hex'))}}\n`)
     await assertPinnedDirectory(output.directory)
+    await file.sync()
     await file.close()
     return { sha256: fileHash.digest('hex'), bytes, records, domains }
   } catch (error) {
@@ -236,8 +239,7 @@ export function parseWorkerArgs(argv: readonly string[]): WorkerArgs {
   }
   const ssl = value('--ssl', 'verify-full')
   if (ssl !== 'off' && ssl !== 'require' && ssl !== 'verify-full') throw new Error('--ssl must be off, require or verify-full')
-  const maxBytes = Number(value('--max-bytes', String(2 * 1024 * 1024 * 1024)))
-  if (!Number.isInteger(maxBytes) || maxBytes < 1) throw new Error('--max-bytes must be a positive integer')
+  const maxBytes = assertOperatorBundleLimit(Number(value('--max-bytes', String(OPERATOR_BUNDLE_MAX_BYTES))), '--max-bytes')
   return { dsnRef: value('--dsn-ref'), schema: value('--schema'), ssl, out: value('--out'), maxBytes }
 }
 
