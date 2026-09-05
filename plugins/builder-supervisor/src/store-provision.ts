@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
+import { spawn } from 'node:child_process'
 import { constants, type Stats } from 'node:fs'
 import {
   chmod,
@@ -12,6 +13,7 @@ import {
   realpath,
   rename,
   rm,
+  statfs,
   unlink,
   type FileHandle,
 } from 'node:fs/promises'
@@ -87,21 +89,45 @@ interface ProvisionIdentity {
 
 interface ProvisionLock {
   readonly recoveredStaleOwner: boolean
+  readonly completeRecovery: () => Promise<void>
   readonly release: () => Promise<void>
 }
 
 interface ProvenProvisionLock {
   readonly owner: ProvisionIdentity
   readonly stat: Stats
+  readonly claimPath: string
+  readonly takeoverPath?: string
+}
+
+interface RetiredProvisionLock {
+  readonly owner: ProvisionIdentity
+  readonly stat: Stats
+  readonly claimPath?: string
+  readonly takeoverPath?: string
+  readonly grantsRecovery: boolean
 }
 
 export interface BuilderProvisionRuntime {
   readonly afterStaleLockProof?: (lockPath: string) => Promise<void>
   readonly beforeStaleLockPathUnlink?: (lockPath: string) => Promise<void>
   readonly afterStaleLockPathUnlink?: (lockPath: string) => Promise<void>
+  readonly afterProvisionCoordinatorAcquired?: (phase: 'acquire' | 'cleanup' | 'release') => Promise<void>
+  readonly beforeProvisionLockRelease?: (lockPath: string) => Promise<void>
+  readonly afterTemplateStoreEntryCopied?: (entryPath: string) => Promise<void>
 }
 
 const DEFAULT_PROVISION_RUNTIME: BuilderProvisionRuntime = Object.freeze({})
+const PROVISION_GUARD_NAME = '.provision.guard'
+const PROVISION_FLOCK_PATH = '/usr/bin/flock'
+const PROVISION_FLOCK_BUSY_EXIT = 200
+const PROVISION_FLOCK_TIMEOUT_MS = 2_000
+const PROVISION_FLOCK_STDERR_LIMIT = 4_096
+const EXT4_SUPER_MAGIC = 0xef53
+const XFS_SUPER_MAGIC = 0x58465342
+const PROVISION_CLAIM = /^\.claim-[a-f0-9]{32}$/u
+const PROVISION_TAKEOVER = /^\.takeover-[a-f0-9]{32}$/u
+const PROVISION_ARTIFACT_LIMIT = 128
 
 export async function provisionBuilderSupervisor(
   request: BuilderProvisionRequest,
@@ -133,7 +159,7 @@ export async function provisionBuilderSupervisor(
       if (await exists(storePath)) {
         await recoverInterruptedStoreTarget(storePath, manifest, lock.recoveredStaleOwner)
       }
-      await publishTemplateStore(sourceRoot, templateStoreParent, storePath, manifest)
+      await publishTemplateStore(sourceRoot, templateStoreParent, storePath, manifest, runtime)
 
       const configDirectory = await ensureTenantInstance(roots.configRoot, tenantId, instanceId)
       const secretDirectory = await ensureTenantInstance(roots.secretRoot, tenantId, instanceId)
@@ -147,7 +173,10 @@ export async function provisionBuilderSupervisor(
       const configPath = posix.join(configDirectory, 'supervisor.json')
       const configExists = await exists(configPath)
       await recoverAuthorityLinkTemps(configDirectory, secretDirectory, configExists)
-      if (configExists) throw new BuilderProvisionError('ALREADY_PROVISIONED')
+      if (configExists) {
+        await lock.completeRecovery()
+        throw new BuilderProvisionError('ALREADY_PROVISIONED')
+      }
       await recoverPartialAuthority(configDirectory, secretDirectory)
 
       const token = randomBytes(32).toString('base64url')
@@ -179,6 +208,7 @@ export async function provisionBuilderSupervisor(
       await writeAuthorityFile(configPath, `${JSON.stringify(config)}\n`, 0o600)
       await syncDirectory(configDirectory)
       await syncDirectory(secretDirectory)
+      await lock.completeRecovery()
       return {
         state: 'CREATED', tenant_id: tenantId, instance_id: instanceId,
         template_store_version: manifest.template_store_version,
@@ -291,7 +321,13 @@ async function hashSecureSourceFile(path: string, expected: Stats): Promise<stri
   } finally { await handle?.close() }
 }
 
-async function publishTemplateStore(sourceRoot: string, parent: string, target: string, manifest: TemplateStoreManifest): Promise<void> {
+async function publishTemplateStore(
+  sourceRoot: string,
+  parent: string,
+  target: string,
+  manifest: TemplateStoreManifest,
+  runtime: BuilderProvisionRuntime,
+): Promise<void> {
   const staging = posix.join(parent, `.staging-${randomBytes(16).toString('hex')}`)
   let targetClaimed = false
   try {
@@ -308,6 +344,7 @@ async function publishTemplateStore(sourceRoot: string, parent: string, target: 
       const destination = posix.join(staging, entry.path)
       if (entry.type === 'directory') await mkdir(destination, { mode: 0o700 })
       else await copyPinnedFile(posix.join(sourceRoot, entry.path), destination, entry)
+      await runtime.afterTemplateStoreEntryCopied?.(entry.path)
     }
     const after = await inspectSourceTree(sourceRoot)
     assertTreeMatchesManifest(after, manifest.entries)
@@ -597,43 +634,81 @@ async function writeAuthorityFile(path: string, value: string, mode: 0o400 | 0o6
 }
 
 async function acquireProvisionLock(instanceRoot: string, runtime: BuilderProvisionRuntime): Promise<ProvisionLock> {
-  const bootId = (await readFile('/proc/sys/kernel/random/boot_id', 'utf8')).trim()
-  const startTicks = await processStartTicks(process.pid)
-  let recoveredStaleOwner = false
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const suffix = randomBytes(16).toString('hex')
-    const claimName = `.claim-${suffix}`
-    const claimPath = posix.join(instanceRoot, claimName)
-    const lockPath = posix.join(instanceRoot, '.provision.lock')
-    const identity: ProvisionIdentity = { pid: process.pid, boot_id: bootId, start_ticks: startTicks, claim: claimName }
-    let handle: FileHandle | undefined
-    let acquired = false
-    try {
-      handle = await open(claimPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o400)
-      await handle.writeFile(`${JSON.stringify(identity)}\n`, 'utf8'); await handle.chmod(0o400); await handle.sync(); await handle.close(); handle = undefined
-      try { await link(claimPath, lockPath) }
-      catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-        const inspected = await inspectProvisionLock(lockPath, bootId)
-        if (inspected.live) throw new BuilderProvisionError('PROVISION_BUSY')
-        await runtime.afterStaleLockProof?.(lockPath)
-        if (await removeStaleLock(lockPath, inspected.proof, runtime)) recoveredStaleOwner = true
-        continue
-      }
-      acquired = true
-      return { recoveredStaleOwner, release: async () => {
-        const [claim, lock] = await Promise.all([lstat(claimPath), lstat(lockPath)])
-        if (!sameIdentity(claim, lock)) recoveryFailed()
-        await unlink(lockPath)
-        await unlink(claimPath)
+  return withProvisionCoordinator(instanceRoot, runtime, 'acquire', async () => {
+    const bootId = (await readFile('/proc/sys/kernel/random/boot_id', 'utf8')).trim()
+    const startTicks = await processStartTicks(process.pid)
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const suffix = randomBytes(16).toString('hex')
+      const claimName = `.claim-${suffix}`
+      const claimPath = posix.join(instanceRoot, claimName)
+      const lockPath = posix.join(instanceRoot, '.provision.lock')
+      const identity: ProvisionIdentity = { pid: process.pid, boot_id: bootId, start_ticks: startTicks, claim: claimName }
+      let handle: FileHandle | undefined
+      let claimed: Stats | undefined
+      let acquired = false
+      try {
+        handle = await open(claimPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o400)
+        await handle.writeFile(`${JSON.stringify(identity)}\n`, 'utf8')
+        await handle.chmod(0o400)
+        await handle.sync()
+        claimed = await handle.stat()
+        await handle.close(); handle = undefined
         await syncDirectory(instanceRoot)
-      } }
-    } finally {
-      await handle?.close()
-      if (!acquired && await exists(claimPath)) await unlink(claimPath).catch(() => undefined)
+        try { await link(claimPath, lockPath) }
+        catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+          const inspected = await inspectProvisionLock(lockPath, bootId)
+          if (inspected.live) throw new BuilderProvisionError('PROVISION_BUSY')
+          await runtime.afterStaleLockProof?.(lockPath)
+          if (!await retireStaleLock(lockPath, inspected.proof, runtime)) continue
+          continue
+        }
+        await syncDirectory(instanceRoot)
+        const [claim, lock] = await Promise.all([lstat(claimPath), lstat(lockPath)])
+        if (!sameLockMetadata(claimed, claim, 2) || !sameLockMetadata(claimed, lock, 2)) recoveryFailed()
+        const current = { owner: identity, stat: lock, claimPath }
+        const retired = await collectRetiredProvisionLocks(instanceRoot, current, bootId)
+        acquired = true
+        let recoveryCompleted = false
+        return {
+          recoveredStaleOwner: retired.some(item => item.grantsRecovery),
+          completeRecovery: async () => {
+            if (recoveryCompleted) return
+            await withProvisionCoordinator(instanceRoot, runtime, 'cleanup', async () => {
+              await assertCurrentProvisionLock(lockPath, current)
+              await cleanupRetiredProvisionLocks(instanceRoot, retired)
+            })
+            recoveryCompleted = true
+          },
+          release: async () => {
+            await withProvisionCoordinator(instanceRoot, runtime, 'release', async () => {
+              await runtime.beforeProvisionLockRelease?.(lockPath)
+              await assertCurrentProvisionLock(lockPath, current)
+              await unlink(lockPath)
+              await syncDirectory(instanceRoot)
+              if (!await removeProvenLink(claimPath, current.stat, 1)) recoveryFailed()
+              await syncDirectory(instanceRoot)
+            })
+          },
+        }
+      } finally {
+        await handle?.close()
+        if (!acquired && claimed !== undefined) {
+          const lock = await optionalLstat(lockPath)
+          if (lock !== undefined && sameLockObject(claimed, lock)) {
+            if (!await removeProvenLink(lockPath, claimed, 2)) recoveryFailed()
+            await syncDirectory(instanceRoot)
+          }
+          const claim = await optionalLstat(claimPath)
+          if (claim !== undefined && sameLockObject(claimed, claim)) {
+            if (!await removeProvenLink(claimPath, claimed, 1)) recoveryFailed()
+            await syncDirectory(instanceRoot)
+          }
+        }
+      }
     }
-  }
-  recoveryFailed()
+    recoveryFailed()
+  })
 }
 
 async function inspectProvisionLock(
@@ -644,56 +719,305 @@ async function inspectProvisionLock(
   try {
     handle = await open(lockPath, constants.O_RDONLY | constants.O_NOFOLLOW)
     const opened = await handle.stat(); const linked = await lstat(lockPath)
-    if (!opened.isFile() || opened.isSymbolicLink() || opened.nlink !== 2 || (opened.mode & 0o7777) !== 0o400 || !trustedOwner(opened) || !sameIdentity(opened, linked) || opened.size < 2 || opened.size > 1024 || await realpath(lockPath) !== lockPath) recoveryFailed()
+    if (!opened.isFile() || opened.isSymbolicLink() || (opened.nlink !== 2 && opened.nlink !== 3) || (opened.mode & 0o7777) !== 0o400 || !trustedOwner(opened) || !sameIdentity(opened, linked) || opened.size < 2 || opened.size > 1024 || await realpath(lockPath) !== lockPath) recoveryFailed()
     const value = JSON.parse(await handle.readFile('utf8')) as unknown
     const owner = parseLockIdentity(value)
-    const proof = { owner, stat: opened }
+    const claimPath = posix.join(posix.dirname(lockPath), owner.claim)
+    const claim = await lstat(claimPath)
+    if (!sameLockMetadata(opened, claim, opened.nlink) || await realpath(claimPath) !== claimPath) recoveryFailed()
+    const takeoverPath = opened.nlink === 3 ? await findBoundTakeoverPath(posix.dirname(lockPath), opened) : undefined
+    const proof = { owner, stat: opened, claimPath, ...(takeoverPath === undefined ? {} : { takeoverPath }) }
     if (owner.boot_id !== bootId) return { live: false, proof }
-    try { return await processStartTicks(owner.pid) === owner.start_ticks ? { live: true } : { live: false, proof } }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { live: false, proof }
-      throw error
-    }
+    return await provisionIdentityLive(owner) ? { live: true } : { live: false, proof }
   } finally { await handle?.close() }
 }
 
-async function removeStaleLock(lockPath: string, proof: ProvenProvisionLock, runtime: BuilderProvisionRuntime): Promise<boolean> {
+async function retireStaleLock(lockPath: string, proof: ProvenProvisionLock, runtime: BuilderProvisionRuntime): Promise<boolean> {
   let handle: FileHandle | undefined
-  const takeoverPath = posix.join(posix.dirname(lockPath), `.takeover-${randomBytes(16).toString('hex')}`)
-  let takeoverCreated = false
+  const takeoverPath = proof.takeoverPath ?? posix.join(posix.dirname(lockPath), `.takeover-${randomBytes(16).toString('hex')}`)
+  let takeoverPresent = proof.takeoverPath !== undefined
   let lockPathUnlinked = false
   try {
     try { handle = await open(lockPath, constants.O_RDONLY | constants.O_NOFOLLOW) }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error }
     const opened = await handle.stat()
     const linked = await lstat(lockPath)
-    if (!sameLockMetadata(proof.stat, opened, 2) || !sameLockMetadata(proof.stat, linked, 2) || await realpath(lockPath) !== lockPath) return false
+    const expectedLinks = takeoverPresent ? 3 : 2
+    if (!sameLockMetadata(proof.stat, opened, expectedLinks) || !sameLockMetadata(proof.stat, linked, expectedLinks) || await realpath(lockPath) !== lockPath) return false
     const currentOwner = parseLockIdentity(JSON.parse(await handle.readFile('utf8')) as unknown)
     if (!sameProvisionIdentity(currentOwner, proof.owner)) return false
-    const claimPath = posix.join(posix.dirname(lockPath), proof.owner.claim)
-    const claim = await optionalLstat(claimPath)
-    if (claim === undefined || !sameLockMetadata(proof.stat, claim, 2)) return false
-    try { await link(lockPath, takeoverPath); takeoverCreated = true }
-    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error }
-    if (!await everyLockLinkMatches(proof.stat, [lockPath, claimPath, takeoverPath], 3) || !sameLockMetadata(proof.stat, await handle.stat(), 3)) return false
+    if (!takeoverPresent) {
+      await link(lockPath, takeoverPath)
+      takeoverPresent = true
+      await syncDirectory(posix.dirname(lockPath))
+    }
+    if (!await everyLockLinkMatches(proof.stat, [lockPath, proof.claimPath, takeoverPath], 3) || !sameLockMetadata(proof.stat, await handle.stat(), 3)) recoveryFailed()
     await runtime.beforeStaleLockPathUnlink?.(lockPath)
-    if (!await everyLockLinkMatches(proof.stat, [lockPath, claimPath, takeoverPath], 3) || !sameLockMetadata(proof.stat, await handle.stat(), 3)) return false
-    try { await unlink(lockPath) }
-    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error }
+    if (!await everyLockLinkMatches(proof.stat, [lockPath, proof.claimPath, takeoverPath], 3) || !sameLockMetadata(proof.stat, await handle.stat(), 3)) recoveryFailed()
+    await unlink(lockPath)
     lockPathUnlinked = true
+    await syncDirectory(posix.dirname(lockPath))
     await runtime.afterStaleLockPathUnlink?.(lockPath)
-    if (!await removeProvenLink(claimPath, proof.stat, 2)) recoveryFailed()
-    if (!await removeProvenLink(takeoverPath, proof.stat, 1)) recoveryFailed()
-    takeoverCreated = false
     return true
   } finally {
     await handle?.close()
-    if (takeoverCreated) {
+    if (takeoverPresent && !lockPathUnlinked) {
       const takeover = await optionalLstat(takeoverPath)
-      if (takeover !== undefined && sameLockObject(proof.stat, takeover)) await unlink(takeoverPath).catch(() => undefined)
-      else if (takeover !== undefined && !lockPathUnlinked) recoveryFailed()
+      if (takeover !== undefined && sameLockMetadata(proof.stat, takeover, 3)) {
+        await unlink(takeoverPath)
+        await syncDirectory(posix.dirname(lockPath))
+      } else if (takeover !== undefined) recoveryFailed()
     }
   }
+}
+
+async function collectRetiredProvisionLocks(instanceRoot: string, current: ProvenProvisionLock, bootId: string): Promise<RetiredProvisionLock[]> {
+  const names = (await readdir(instanceRoot)).filter(name => name.startsWith('.claim-') || name.startsWith('.takeover-'))
+  if (names.length > PROVISION_ARTIFACT_LIMIT) recoveryFailed()
+  const groups = new Map<string, Array<{ name: string; path: string; owner: ProvisionIdentity; stat: Stats }>>()
+  for (const name of names) {
+    if ((!PROVISION_CLAIM.test(name) && !PROVISION_TAKEOVER.test(name)) || name === posix.basename(current.claimPath)) {
+      if (name === posix.basename(current.claimPath)) continue
+      recoveryFailed()
+    }
+    const path = posix.join(instanceRoot, name)
+    const inspected = await inspectProvisionArtifact(path)
+    if (sameLockObject(current.stat, inspected.stat)) recoveryFailed()
+    const key = `${inspected.stat.dev}:${inspected.stat.ino}`
+    const group = groups.get(key) ?? []
+    group.push({ name, path, ...inspected })
+    groups.set(key, group)
+  }
+  const retired: RetiredProvisionLock[] = []
+  for (const group of groups.values()) {
+    const first = group[0]
+    if (first === undefined || await provisionIdentityLive(first.owner, bootId)) throw new BuilderProvisionError('PROVISION_BUSY')
+    if (group.some(item => !sameProvisionIdentity(item.owner, first.owner))) recoveryFailed()
+    const claims = group.filter(item => PROVISION_CLAIM.test(item.name))
+    const takeovers = group.filter(item => PROVISION_TAKEOVER.test(item.name))
+    if (claims.length === 1 && takeovers.length === 1 && group.length === 2 && group.every(item => sameLockMetadata(first.stat, item.stat, 2)) && claims[0]!.name === first.owner.claim) {
+      retired.push({ owner: first.owner, stat: first.stat, claimPath: claims[0]!.path, takeoverPath: takeovers[0]!.path, grantsRecovery: true })
+      continue
+    }
+    if (group.length === 1 && first.stat.nlink === 1 && ((claims.length === 1 && first.name === first.owner.claim) || takeovers.length === 1)) {
+      retired.push({ owner: first.owner, stat: first.stat, ...(claims.length === 1 ? { claimPath: first.path } : { takeoverPath: first.path }), grantsRecovery: false })
+      continue
+    }
+    recoveryFailed()
+  }
+  return retired
+}
+
+async function inspectProvisionArtifact(path: string): Promise<{ owner: ProvisionIdentity; stat: Stats }> {
+  let handle: FileHandle | undefined
+  try {
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+    const opened = await handle.stat()
+    const linked = await lstat(path)
+    if (!opened.isFile() || opened.isSymbolicLink() || (opened.nlink !== 1 && opened.nlink !== 2) || (opened.mode & 0o7777) !== 0o400 || !trustedOwner(opened) || opened.size < 2 || opened.size > 1024 || !sameIdentity(opened, linked) || await realpath(path) !== path) recoveryFailed()
+    return { owner: parseLockIdentity(JSON.parse(await handle.readFile('utf8')) as unknown), stat: opened }
+  } finally { await handle?.close() }
+}
+
+async function findBoundTakeoverPath(instanceRoot: string, expected: Stats): Promise<string> {
+  const names = (await readdir(instanceRoot)).filter(name => name.startsWith('.takeover-'))
+  if (names.length > PROVISION_ARTIFACT_LIMIT || names.some(name => !PROVISION_TAKEOVER.test(name))) recoveryFailed()
+  const matches: string[] = []
+  for (const name of names) {
+    const path = posix.join(instanceRoot, name)
+    const stat = await lstat(path)
+    if (sameLockObject(expected, stat)) matches.push(path)
+  }
+  if (matches.length !== 1 || !sameLockMetadata(expected, await lstat(matches[0]!), 3) || await realpath(matches[0]!) !== matches[0]) recoveryFailed()
+  return matches[0]!
+}
+
+async function cleanupRetiredProvisionLocks(instanceRoot: string, retired: readonly RetiredProvisionLock[]): Promise<void> {
+  for (const item of retired) {
+    if (item.takeoverPath !== undefined) {
+      const links = item.claimPath === undefined ? 1 : 2
+      if (!await removeProvenLink(item.takeoverPath, item.stat, links)) recoveryFailed()
+      await syncDirectory(instanceRoot)
+    }
+    if (item.claimPath !== undefined) {
+      if (!await removeProvenLink(item.claimPath, item.stat, 1)) recoveryFailed()
+      await syncDirectory(instanceRoot)
+    }
+  }
+}
+
+async function assertCurrentProvisionLock(lockPath: string, current: ProvenProvisionLock): Promise<void> {
+  const [claim, lock] = await Promise.all([lstat(current.claimPath), lstat(lockPath)])
+  if (!sameLockMetadata(current.stat, claim, 2) || !sameLockMetadata(current.stat, lock, 2) || await realpath(lockPath) !== lockPath || await realpath(current.claimPath) !== current.claimPath) recoveryFailed()
+}
+
+async function provisionIdentityLive(owner: ProvisionIdentity, bootId = owner.boot_id): Promise<boolean> {
+  if (owner.boot_id !== bootId) return false
+  try { return await processStartTicks(owner.pid) === owner.start_ticks }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+    throw error
+  }
+}
+
+async function withProvisionCoordinator<T>(
+  instanceRoot: string,
+  runtime: BuilderProvisionRuntime,
+  phase: 'acquire' | 'cleanup' | 'release',
+  operation: () => Promise<T>,
+): Promise<T> {
+  // This guard is only a crash-releasing local mutex. Filesystem witnesses and
+  // process identities remain the authority. A process with the same UID can
+  // replace paths inside instanceRoot and is therefore part of the local TCB.
+  const guardPath = posix.join(instanceRoot, PROVISION_GUARD_NAME)
+  let guard: FileHandle | undefined
+  try {
+    await assertProvisionGuardFilesystem(instanceRoot)
+    await assertTrustedFlockBinary()
+    const opened = await openProvisionGuard(guardPath, instanceRoot)
+    guard = opened.handle
+    await acquireProvisionGuard(guard)
+    await assertProvisionGuardIdentity(guardPath, opened.identity, await guard.stat())
+    await runtime.afterProvisionCoordinatorAcquired?.(phase)
+    const result = await operation()
+    await assertProvisionGuardIdentity(guardPath, opened.identity, await guard.stat())
+    return result
+  } catch (error) {
+    if (error instanceof BuilderProvisionError) throw error
+    return recoveryFailed()
+  } finally {
+    if (guard !== undefined) {
+      try { await guard.close() } catch { recoveryFailed() }
+    }
+  }
+}
+
+async function openProvisionGuard(
+  guardPath: string,
+  instanceRoot: string,
+): Promise<{ readonly handle: FileHandle; readonly identity: Stats }> {
+  let creator: FileHandle | undefined
+  let handle: FileHandle | undefined
+  try {
+    try {
+      handle = await open(guardPath, constants.O_RDONLY | constants.O_NOFOLLOW)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      // Creation belongs to the installer/bootstrap boundary. Once any state
+      // exists, disappearance of the permanent guard is corruption, not a cue
+      // to recreate it at runtime.
+      if ((await readdir(instanceRoot)).length !== 0) recoveryFailed()
+      try {
+        creator = await open(guardPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600)
+      } catch (createError) {
+        if ((createError as NodeJS.ErrnoException).code !== 'EEXIST') throw createError
+      }
+      if (creator !== undefined) {
+        await creator.sync()
+        await creator.close()
+        creator = undefined
+        await syncDirectory(instanceRoot)
+      }
+      handle = await open(guardPath, constants.O_RDONLY | constants.O_NOFOLLOW)
+    }
+    const identity = await handle.stat()
+    await assertProvisionGuardIdentity(guardPath, identity, identity)
+    return { handle, identity }
+  } catch (error) {
+    await closeIgnoringErrors(creator)
+    await closeIgnoringErrors(handle)
+    throw error
+  }
+}
+
+async function assertProvisionGuardIdentity(path: string, expected: Stats, opened: Stats): Promise<void> {
+  const linked = await lstat(path)
+  if (!opened.isFile() || opened.isSymbolicLink() || opened.nlink !== 1 || (opened.mode & 0o7777) !== 0o600 || !trustedOwner(opened) || !sameGuardIdentity(expected, opened) || !sameGuardIdentity(opened, linked) || await realpath(path) !== path) recoveryFailed()
+}
+
+async function assertProvisionGuardFilesystem(instanceRoot: string): Promise<void> {
+  if (instanceRoot === '/mnt' || instanceRoot.startsWith('/mnt/')) recoveryFailed()
+  const filesystem = await statfs(instanceRoot)
+  if (filesystem.type !== EXT4_SUPER_MAGIC && filesystem.type !== XFS_SUPER_MAGIC) recoveryFailed()
+}
+
+async function assertTrustedFlockBinary(path = PROVISION_FLOCK_PATH): Promise<void> {
+  let handle: FileHandle | undefined
+  try {
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+    const [opened, linked] = await Promise.all([handle.stat(), lstat(path)])
+    if (!opened.isFile() || opened.isSymbolicLink() || opened.uid !== 0 || opened.nlink !== 1 ||
+      (opened.mode & 0o022) !== 0 || (opened.mode & 0o111) === 0 ||
+      !sameGuardIdentity(opened, linked) || await realpath(path) !== path) recoveryFailed()
+  } catch (error) {
+    if (error instanceof BuilderProvisionError) throw error
+    recoveryFailed()
+  } finally { await handle?.close() }
+}
+
+async function acquireProvisionGuard(guard: FileHandle): Promise<void> {
+  const outcome = await new Promise<{ readonly code: number | null; readonly signal: NodeJS.Signals | null; readonly failed: boolean }>((resolve) => {
+    const child = spawn(PROVISION_FLOCK_PATH, ['--exclusive', '--nonblock', '--conflict-exit-code', String(PROVISION_FLOCK_BUSY_EXIT), '3'], {
+      env: {}, shell: false, windowsHide: true,
+      stdio: ['ignore', 'ignore', 'pipe', guard.fd],
+    })
+    let settled = false
+    let stderrBytes = 0
+    let failed = false
+    const stderr = child.stderr
+    if (stderr === null) return resolve({ code: null, signal: null, failed: true })
+    let timer: NodeJS.Timeout
+    let reapTimer: NodeJS.Timeout | undefined
+    const finish = (code: number | null, signal: NodeJS.Signals | null): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      if (reapTimer !== undefined) clearTimeout(reapTimer)
+      resolve({ code, signal, failed })
+    }
+    const killAndBound = (): void => {
+      if (failed) return
+      failed = true
+      if (!child.kill('SIGKILL')) return finish(null, null)
+      reapTimer = setTimeout(finish.bind(null, null, 'SIGKILL'), 250)
+      reapTimer.unref()
+    }
+    timer = setTimeout(killAndBound, PROVISION_FLOCK_TIMEOUT_MS)
+    timer.unref()
+    const consumeStderr = (chunk: Buffer): void => {
+      stderrBytes += chunk.byteLength
+      if (stderrBytes > PROVISION_FLOCK_STDERR_LIMIT) killAndBound()
+    }
+    stderr.on('data', consumeStderr)
+    child.once('error', finish.bind(null, null, null))
+    child.once('exit', finish)
+  })
+  classifyProvisionFlockOutcome(outcome)
+}
+
+function classifyProvisionFlockOutcome(outcome: {
+  readonly code: number | null
+  readonly signal: NodeJS.Signals | null
+  readonly failed: boolean
+}): void {
+  if (!outcome.failed && outcome.code === 0 && outcome.signal === null) return
+  if (!outcome.failed && outcome.code === PROVISION_FLOCK_BUSY_EXIT && outcome.signal === null) throw new BuilderProvisionError('PROVISION_BUSY')
+  recoveryFailed()
+}
+
+export const STORE_PROVISION_GUARD_TEST_ONLY = Object.freeze({
+  assertProvisionGuardFilesystem,
+  assertTrustedFlockBinary,
+  classifyProvisionFlockOutcome,
+})
+
+function sameGuardIdentity(left: Stats, right: Stats): boolean {
+  return left.dev === right.dev && left.ino === right.ino && left.uid === right.uid && left.gid === right.gid && left.mode === right.mode
+}
+
+async function closeIgnoringErrors(handle: FileHandle | undefined): Promise<void> {
+  if (handle === undefined) return
+  try { await handle.close() } catch { /* best-effort cleanup after a primary failure */ }
 }
 
 async function everyLockLinkMatches(expected: Stats, paths: readonly string[], links: number): Promise<boolean> {

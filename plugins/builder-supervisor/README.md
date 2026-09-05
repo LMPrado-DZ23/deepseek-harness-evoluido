@@ -138,6 +138,20 @@ depois de adquirir o lock. O lock não expira por relógio: um reclaim exige que
 `supervisor.json` é publicado por último, depois do token `0400` e dos digests
 `0600`, todos sob as raízes exatas de `BuilderSupervisorRootPolicy`.
 
+Todas as mudanças em `.provision.lock`, claims e testemunhos de takeover são
+serializadas pelo arquivo permanente `.provision.guard`. O instalador o cria em
+`0600` dentro da raiz `0700`; depois que existir qualquer estado, o runtime nunca
+o remove, renomeia ou recria. O processo abre esse arquivo com `O_NOFOLLOW`,
+revalida dono, modo, inode e link count e passa somente o descritor para
+`/usr/bin/flock --exclusive --nonblock --conflict-exit-code 200 3`, sem shell,
+com argumentos fixos e ambiente vazio. O descritor permanece aberto durante a
+seção crítica curta, por isso o kernel libera a trava inclusive após `SIGKILL`.
+A cópia e o hash do store ficam fora da trava; os testemunhos duráveis só são
+limpos depois que store e configuração terminam. O suporte desta fatia é
+deliberadamente restrito a Linux sobre ext4 ou XFS; `/mnt/*`, NFS, CIFS, FUSE,
+btrfs e Windows falham fechados. Processos com o mesmo UID fazem parte da TCB
+local, pois podem substituir pathnames dentro da raiz privada.
+
 As raízes por instância são `0700` e estabelecem o mesmo UID do provisionador
 como fronteira administrativa: outro processo com esse UID já poderia remover
 qualquer store ou segredo, portanto não é tratado como ator não confiável. Entre
