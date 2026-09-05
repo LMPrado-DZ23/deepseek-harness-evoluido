@@ -100,6 +100,25 @@ describe('builder Unix client configuration and local validation', () => {
     await expect(pending).rejects.toEqual(expect.objectContaining({ code: 'ABORTED', message: 'ABORTED' }))
   })
 
+  it('propagates caller abort synchronously to the transport on every platform', async () => {
+    let transportSignal: AbortSignal | undefined
+    const request = new EventEmitter() as ReturnType<typeof httpRequest>
+    request.end = vi.fn(() => request) as typeof request.end
+    const transport: BuilderUnixClientTransport = {
+      request: options => {
+        transportSignal = options.signal
+        options.signal?.addEventListener('abort', () => request.emit('error', options.signal?.reason), { once: true })
+        return request
+      },
+    }
+    const controller = new AbortController()
+    const pending = client({ timeoutMs: 10_000, transport }).preflight({ request_id: requestId('9') }, { signal: controller.signal })
+    await vi.waitFor(() => expect(transportSignal).toBeDefined())
+    controller.abort(new Error('/secret/caller/reason'))
+    expect(transportSignal?.aborted).toBe(true)
+    await expect(pending).rejects.toEqual(expect.objectContaining({ code: 'ABORTED', message: 'ABORTED' }))
+  })
+
   it.each([
     { error: new BuilderUnixClientError('SOCKET_UNAVAILABLE'), state: 'BLOCKED_EXTERNAL', code: 'SOCKET_UNAVAILABLE' },
     { error: new BuilderUnixClientError('ARTIFACT_HASH_MISMATCH'), state: 'BUILD_FAILED', code: 'ARTIFACT_HASH_MISMATCH' },
@@ -242,11 +261,13 @@ describe.skipIf(process.platform === 'win32')('builder Unix client wire contract
       },
     }
     const controller = new AbortController()
-    const pending = client({ socketPath, timeoutMs: 100, transport }).preflight({ request_id: requestId('d') }, { signal: controller.signal })
+    const pending = client({ socketPath, timeoutMs: 10_000, transport }).preflight({ request_id: requestId('d') }, { signal: controller.signal })
     await vi.waitFor(() => expect(waiting.length).toBeGreaterThanOrEqual(2))
     controller.abort(new Error('/secret/caller/reason'))
-    await expect(pending).rejects.toEqual(expect.objectContaining({ code: 'ABORTED', message: 'ABORTED' }))
+    // AbortSignal.any propagates synchronously. Assert before awaiting the request so
+    // a later deadline cannot disguise a dropped caller signal.
     expect(transportSignal?.aborted).toBe(true)
+    await expect(pending).rejects.toEqual(expect.objectContaining({ code: 'ABORTED', message: 'ABORTED' }))
     waiting.splice(0).forEach(finish => finish())
 
     const missing = join(tmpdir(), `missing-${Date.now()}.sock`).replaceAll('\\', '/')
