@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { constants as fsConstants } from 'node:fs'
-import { access, mkdir, open, type FileHandle } from 'node:fs/promises'
+import { access, mkdir, open, unlink, type FileHandle } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { roleAllows, type PolicyTier, type StudioPermission, type StudioRole } from '@dz23-studio/policy'
 import { z } from 'zod'
@@ -136,8 +136,39 @@ export const MAX_PACKAGING_QUEUE = 64
  * The wedged call is ABANDONED, not killed — Node cannot cancel a pending syscall — so the honest
  * statement is "the Studio stopped waiting", and that is what the person is told and what the
  * history records. Freeing the slot is what keeps one stuck build from becoming everybody's outage.
+ *
+ * Abandoned means abandoned, though: the call kept running and used to finish its job, writing the
+ * `.zip`, the export row and an `export.created / success` line AFTER the person had been told
+ * TIMEOUT and after the history had recorded `export.created / failure / packaging-timeout`. One
+ * click, two contradictory lines. So the ceiling and the build now share a lease (`PackagingLease`):
+ * whichever asks first owns the outcome, and the loser writes nothing at all — the abandoned build
+ * takes its own package back off the disk and leaves the history with the single line the person was
+ * shown. The in-flight entry lives until the abandoned build really settles, so the next click joins
+ * it rather than starting a twin of a build that still owns that package's name.
+ *
+ * What the ceiling does NOT do is take back a record. Once the build has claimed the outcome — the
+ * package is written and the row is about to be — the Studio waits for that to finish instead of
+ * telling somebody "it did not happen" about something it may have stored. The slot still goes back
+ * on time in that case, because the slot is what protects everybody else.
  */
 export const PACKAGING_SLOT_TIMEOUT_MS = 10 * 60 * 1000
+
+/**
+ * The right to finish ONE packaging call. `PACKAGING_SLOT_TIMEOUT_MS` abandons a call it cannot
+ * cancel, so the call has to be able to find out that it was abandoned and give up on its own:
+ * `abandoned` says the Studio already stopped waiting, `signal` is the same fact for anything that
+ * takes one, and `commit()` claims the outcome for whoever asks first.
+ */
+interface PackagingLease {
+  readonly abandoned: boolean
+  readonly signal: AbortSignal
+  commit(): boolean
+}
+
+/** One build in flight, kept until the BUILD settles — not until the caller's answer does. */
+interface ExportInFlight {
+  answer: Promise<StudioExport>
+}
 
 export interface HubServiceOptions {
   repository: HubRepository
@@ -182,10 +213,6 @@ const TIER_RANK: Readonly<Record<PolicyTier, number>> = { T0: 0, T1: 1, T2: 2, T
 const smtpSecretShape = z.object({ host: z.string().min(1), port: z.number().int(), secure: z.boolean(), user: z.string().min(1), pass: z.string().min(1), from: z.string().min(1) }).strict()
 export { smtpSecretShape }
 
-type ExportOutcome =
-  | { readonly ok: true; readonly value: StudioExport }
-  | { readonly ok: false; readonly error: unknown }
-
 export class IntegrationHubService {
   readonly #now: () => Date
   readonly #createId: () => string
@@ -204,7 +231,7 @@ export class IntegrationHubService {
    * times, or ten tabs of the same person, join the SAME build instead of
    * starting ten of them on a single-threaded process.
    */
-  readonly #exportsInFlight = new Map<string, Promise<ExportOutcome>>()
+  readonly #exportsInFlight = new Map<string, ExportInFlight>()
   /** Export attempts per workspace inside the window, so a flood costs the flooder and nobody else. */
   readonly #exportAttempts = new Map<string, number[]>()
   /**
@@ -549,39 +576,48 @@ export class IntegrationHubService {
   async createExport(actor: HubActor, projectId: string): Promise<StudioExport> {
     this.#authorize(actor, 'project.write')
     const key = `${this.#scope(actor)}\u0000${projectId}`
-    let task = this.#exportsInFlight.get(key)
-    if (task === undefined) {
-      // Registered SYNCHRONOUSLY, before the first await: ten clicks arriving in the same tick must
-      // find the build already in flight, not each other's absence.  The shared promise always
-      // resolves to a tagged outcome; no fast refusal can briefly become an unhandled rejection.
-      task = this.#guardedExport(actor, projectId).then<ExportOutcome, ExportOutcome>(
-        value => ({ ok: true, value }),
-        error => ({ ok: false, error }),
-      )
-      this.#exportsInFlight.set(key, task)
-      void task.then(() => { if (this.#exportsInFlight.get(key) === task) this.#exportsInFlight.delete(key) })
-    }
-    const outcome = await task
-    if (!outcome.ok) throw outcome.error
-    return outcome.value
+    const running = this.#exportsInFlight.get(key)
+    if (running !== undefined) return running.answer
+    // Registered SYNCHRONOUSLY, before the first await: ten clicks arriving in the same tick must
+    // find the build already in flight, not each other's absence.
+    //
+    // The entry lives until the BUILD settles, not until the caller's answer does. A build the
+    // Studio stopped waiting for is abandoned, not cancelled: it is still walking the run and still
+    // holding the name of the package it may write. Deleting the entry when the caller was told
+    // TIMEOUT let the next click start a twin of exactly that build, and both twins passed the
+    // "same run, same bytes → hand back the existing package" check before either wrote its row.
+    const entry: ExportInFlight = { answer: undefined as unknown as Promise<StudioExport> }
+    // Nothing can replace this entry while it is there — a second click finds it and joins it — so
+    // when the build it stands for is over, it is this one that goes.
+    entry.answer = this.#guardedExport(actor, projectId, () => { this.#exportsInFlight.delete(key) })
+    this.#exportsInFlight.set(key, entry)
+    // The caller below awaits this same promise; the handler is only here so that a rejection which
+    // nobody joins is never an unhandled one.
+    void entry.answer.catch(() => undefined)
+    return entry.answer
   }
 
-  async #guardedExport(actor: HubActor, projectId: string): Promise<StudioExport> {
-    await this.#throttleExport(actor, projectId)
+  async #guardedExport(actor: HubActor, projectId: string, whenSettled: () => void): Promise<StudioExport> {
     // One build per workspace is not enough on its own: two DIFFERENT workspaces packaging at the
     // same time each walk a whole run and hash it, on the one thread this Studio has. Past this
     // ceiling the caller waits its turn instead of making everybody's Studio slow at once.
+    let started = false
     try {
-      return await this.#withPackagingSlot(signal => this.#createExport(actor, projectId, signal))
+      await this.#throttleExport(actor, projectId)
+      // From here the packaging call itself decides when the in-flight entry may go.
+      started = true
+      return await this.#withPackagingSlot(lease => this.#createExport(actor, projectId, lease), whenSettled)
     } catch (error) {
+      if (!started) whenSettled()
       // A refusal nobody can see is not a refusal: the person is told the Studio stopped waiting,
-      // and the history says so too, with the project it happened on.
+      // and the history says so too, with the project it happened on. It is the ONLY row this
+      // attempt writes: the abandoned call may no longer add a second, contradictory one.
       if (error instanceof HubError && error.code === 'TIMEOUT') await this.#audit(actor, 'export.created', projectId, 'failure', 'packaging-timeout')
       throw error
     }
   }
 
-  async #withPackagingSlot<T>(work: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  async #withPackagingSlot<T>(work: (lease: PackagingLease) => Promise<T>, whenSettled: () => void): Promise<T> {
     while (this.#packaging >= MAX_CONCURRENT_PACKAGING) {
       if (this.#packagingQueue.length >= MAX_PACKAGING_QUEUE) throw new HubError('RATE_LIMITED', t('errors.exportQueueFull'))
       await new Promise<void>((release, reject) => {
@@ -600,33 +636,63 @@ export class IntegrationHubService {
       })
     }
     this.#packaging += 1
-    const controller = new AbortController()
-    const timeout = new HubError('TIMEOUT', t('errors.exportTimedOut'))
-    const timer = setTimeout(() => controller.abort(timeout), this.options.packagingTimeoutMs ?? PACKAGING_SLOT_TIMEOUT_MS)
-    timer.unref?.()
-    // Convert both contenders to values before racing them.  A fast fail-closed
-    // refusal can otherwise reject in the short interval between construction
-    // and the async HTTP boundary attaching its observer, which Node correctly
-    // reports as PromiseRejectionHandledWarning even though the response is
-    // eventually mapped to 409/413.
-    const task = work(controller.signal).then(
-      value => ({ kind: 'value' as const, value }),
-      error => ({ kind: 'error' as const, error }),
-    )
-    const releaseSlot = () => {
-      clearTimeout(timer)
+    let held = true
+    const releaseSlot = (): void => {
+      if (!held) return
+      held = false
       this.#packaging -= 1
       this.#packagingQueue.shift()?.release()
     }
-    // This observer owns the slot lifecycle; the caller may receive TIMEOUT first, but capacity
-    // is not returned until the abandoned operation really stops.
-    void task.then(releaseSlot)
-    const aborted = new Promise<{ kind: 'error'; error: unknown }>(resolve => {
-      controller.signal.addEventListener('abort', () => resolve({ kind: 'error', error: timeout }), { once: true })
-    })
-    const outcome = await Promise.race([task, aborted])
-    if (outcome.kind === 'error') throw outcome.error
-    return outcome.value
+    let decided = false
+    // Assigned by the executor of the deadline below, which runs before anything is awaited.
+    let timer!: ReturnType<typeof setTimeout>
+    const abandon = new AbortController()
+    /**
+     * The right to finish, held by exactly one of two parties. `commit()` reads and sets `decided`
+     * with NO await in between, so on this one thread either the build claims the outcome or the
+     * ceiling does — never both. That is what makes "you were told it timed out" and "it was
+     * recorded as done" impossible for the same attempt.
+     */
+    const lease: PackagingLease = {
+      get abandoned(): boolean { return abandon.signal.aborted },
+      signal: abandon.signal,
+      commit: (): boolean => {
+        if (decided) return false
+        decided = true
+        return true
+      },
+    }
+    const running = work(lease)
+    // Whatever the caller is told, the build is only over when THIS promise settles: until then a
+    // second click joins it instead of starting a twin of a call that is still running.
+    const settled = (): void => { releaseSlot(); whenSettled() }
+    running.then(settled, settled)
+    try {
+      // The slot is bounded in TIME, not only in number. `work()` that outlives the ceiling keeps
+      // running (nothing here can cancel a syscall), but it no longer owns a slot, no longer holds
+      // the queue behind it, and — since it lost the lease — may no longer write a file, a row or
+      // an audit line for an attempt the person was already told had timed out.
+      return await Promise.race([
+        running,
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => {
+            // The slot goes back whatever else is true: a call that has held its turn this long is
+            // never allowed to become everybody's outage, and that was the whole point of the ceiling.
+            releaseSlot()
+            // The build already claimed the outcome and is writing the record down. It is NOT refused
+            // here: the Studio cannot tell somebody "it did not happen" about a row it may have
+            // written. What the ceiling protects — the slot — has been given back above.
+            if (decided) return
+            decided = true
+            abandon.abort()
+            reject(new HubError('TIMEOUT', t('errors.exportTimedOut')))
+          }, this.options.packagingTimeoutMs ?? PACKAGING_SLOT_TIMEOUT_MS)
+          timer.unref?.()
+        }),
+      ])
+    } finally {
+      clearTimeout(timer)
+    }
   }
 
   /** Attempts per workspace inside the window; a refusal is audited and costs the flooder, not the table. */
@@ -648,9 +714,18 @@ export class IntegrationHubService {
     }
   }
 
-  async #createExport(actor: HubActor, projectId: string, signal: AbortSignal): Promise<StudioExport> {
+  async #createExport(actor: HubActor, projectId: string, lease: PackagingLease): Promise<StudioExport> {
+    /**
+     * The build lost the lease: the ceiling already answered the person and already wrote the one
+     * row this attempt gets. Nothing more may be written under its name — and whatever it managed
+     * to leave on disk goes with it. The error is the same TIMEOUT the caller was handed, so the
+     * only place it can ever surface says the same thing.
+     */
+    const abandoned = (): HubError => new HubError('TIMEOUT', t('errors.exportTimedOut'))
     const project = this.options.projects.project(actor, projectId)
     const refuse = async (detail: string, error: HubError): Promise<never> => {
+      // A refusal is an outcome too: it claims the lease, so the ceiling can no longer answer over it.
+      if (!lease.commit()) throw abandoned()
       await this.#audit(actor, 'export.created', projectId, 'failure', detail)
       throw error
     }
@@ -667,7 +742,7 @@ export class IntegrationHubService {
     }
     let built
     try {
-      built = await packagePrototype({ runDirectory: confinedRun.path, runHandle: confinedRun.handle, projectName: project.name, runId: run.run_id, signal })
+      built = await packagePrototype({ runDirectory: confinedRun.path, runHandle: confinedRun.handle, projectName: project.name, runId: run.run_id, signal: lease.signal })
     } catch (error) {
       // The class of refusal survives to the boundary: a package refused because it carries a secret
       // is not the same answer as a malformed request, and the documents promised those statuses.
@@ -682,8 +757,14 @@ export class IntegrationHubService {
     } finally {
       await confinedRun.handle.close().catch(() => undefined)
     }
+    // The walk is over and it took longer than the ceiling allows: the person has already been told
+    // the Studio stopped waiting. Nothing below this line may run — no file, no row, no audit.
+    if (lease.abandoned) throw abandoned()
     // Same run, same bytes: hand back the existing package instead of writing a twin file on every click.
     const existing = this.listExports(actor, projectId).find(value => value.run_id === run.run_id && value.sha256 === built.sha256)
+    // No lease is claimed here on purpose: handing back a package that was already on disk writes
+    // no file, no row and no audit line, so there is nothing for the ceiling to contradict — and a
+    // guard whose failure changes nothing is not a guard.
     if (existing !== undefined && await exists(existing.path)) return existing
     const exportId = this.#createId()
     // Every segment that becomes a path here is checked, not trusted: ids and scope names never carry `..`, separators or control characters.
@@ -700,6 +781,15 @@ export class IntegrationHubService {
     } finally {
       await target?.close().catch(() => undefined)
       await scope.handle.close().catch(() => undefined)
+    }
+    // The package exists on disk; the row and the history line do not yet. This is the last moment
+    // at which this attempt can still be given up, so it is where the lease is claimed: from here
+    // the ceiling can no longer answer over it, and the person gets the export they waited for.
+    // Losing here means the abandoned `.zip` is removed and nothing is ever recorded about it —
+    // the history used to carry BOTH `failure / packaging-timeout` and `success` for one click.
+    if (!lease.commit()) {
+      await unlink(path).catch(() => undefined)
+      throw abandoned()
     }
     const record: StudioExport = {
       export_id: exportId, org_id: actor.orgId, tenant_id: actor.tenantId, project_id: projectId, run_id: run.run_id,

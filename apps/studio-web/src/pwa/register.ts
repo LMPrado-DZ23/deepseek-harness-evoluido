@@ -1,6 +1,6 @@
 import t from '../i18n/pwa.pt-BR.json'
 import { attachGenerationNotifications, browserNotificationPort, notificationPortFor, type NotificationPort } from './notifications'
-import { SHELL_CLEARED_MESSAGE, SHELL_LOGOUT_MESSAGE, SHELL_SOURCE_PATH, SW_CACHE_PREFIX, type ShellSource } from './policy'
+import { SHELL_CLEARED_MESSAGE, SHELL_LOGOUT_MESSAGE, SHELL_SOURCE_ANSWER, SHELL_SOURCE_REQUEST, SW_CACHE_PREFIX, type ShellSource } from './policy'
 import './pwa.css'
 
 interface BeforeInstallPromptEvent extends Event {
@@ -17,20 +17,37 @@ export interface PwaEnvironment {
 }
 
 /**
- * Whether this screen is the copy saved on this device or something the server just sent. The worker
- * writes the answer into its own cache before answering the navigation (`policy.ts`), because a page
- * cannot read the headers of its own navigation response.
+ * Whether THIS screen is the copy saved on this device or something the server just sent. A page
+ * cannot read the headers of its own navigation response, so it asks the worker that controls it,
+ * and the worker answers about the navigation that created this page and no other.
  *
- * `undefined` means nobody answered: no worker yet, no Cache Storage, or a browser that refuses it.
- * The interface then says nothing extra, which is the honest thing to do with an unknown.
+ * It used to read one global mark out of Cache Storage instead, and a per-navigation fact kept in a
+ * single last-writer-wins slot told people the wrong thing. Reproduced in Chromium: visit once with
+ * no network (the slot is left saying `cache`), then reload with the network back and the worker
+ * bypassed — Shift+Reload, `Network.setBypassServiceWorker`. The navigation goes straight to the
+ * server, nothing corrects the slot, and a person with a live session is told the screen is an old
+ * saved copy. Asking the controller closes exactly that: a bypassed navigation produces a page with
+ * NO controller, so there is nobody to ask and nothing is claimed.
+ *
+ * `undefined` means nobody answered: no worker controlling this page, a worker that never saw this
+ * navigation, or a browser that refuses. The interface then says nothing extra, which is the honest
+ * thing to do with an unknown.
  */
-export async function shellSource(store: CacheStorage | undefined = typeof caches === 'undefined' ? undefined : caches): Promise<ShellSource | undefined> {
-  if (store === undefined) return undefined
+export async function shellSource(env: { navigator: Navigator } = { navigator }, timeoutMs = 3_000): Promise<ShellSource | undefined> {
+  const worker = env.navigator.serviceWorker?.controller
+  if (worker === undefined || worker === null) return undefined
   try {
-    const marked = await store.match(SHELL_SOURCE_PATH)
-    if (marked === undefined) return undefined
-    const value = (await marked.text()).trim()
-    return value === 'cache' || value === 'network' ? value : undefined
+    return await new Promise<ShellSource | undefined>(resolvePromise => {
+      const channel = new MessageChannel()
+      const timer = setTimeout(() => resolvePromise(undefined), timeoutMs)
+      channel.port1.onmessage = message => {
+        clearTimeout(timer)
+        const answer = message.data as { type?: unknown; source?: unknown } | null
+        const value = answer?.type === SHELL_SOURCE_ANSWER ? answer.source : undefined
+        resolvePromise(value === 'cache' || value === 'network' ? value : undefined)
+      }
+      worker.postMessage({ type: SHELL_SOURCE_REQUEST }, [channel.port2])
+    })
   } catch { return undefined }
 }
 
@@ -107,7 +124,7 @@ export function registerStudioPwa(env: PwaEnvironment = { window, document, navi
   savedNotice.textContent = t.offline.cachedShell
   env.document.body.append(savedNotice)
   disposers.push(() => savedNotice.remove())
-  void shellSource(env.caches ?? ('caches' in env.window ? env.window.caches : undefined)).then(source => { savedNotice.hidden = source !== 'cache' }).catch(() => undefined)
+  void shellSource({ navigator: env.navigator }).then(source => { savedNotice.hidden = source !== 'cache' }).catch(() => undefined)
 
   if ('serviceWorker' in env.navigator) {
     // Registered after the page finished loading so the worker never competes with the first paint.

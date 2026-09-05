@@ -1,12 +1,50 @@
 import { generateKeyPairSync, sign } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { chmod, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { canonicalManifestBytes } from '../src/manifest.ts'
 import type { HubEvent, IntegrationManifest, StudioExport, StudioIntegration } from '../src/model.ts'
 import { canonicalSecretRef, EVENTS_RETAINED_PER_TENANT, EXPORT_WINDOW_MS, HubError, MAX_APPROVAL_SCOPES, IntegrationHubService, MAX_CONCURRENT_PACKAGING, MAX_EXPORTS_PER_WINDOW, MAX_LIVE_APPROVALS, minimizeRecipient, minimizeSecretRef, safeSegment, securityFingerprint, strongIdentityFresh, type HubActor, type HubRepository } from '../src/service.ts'
 import { readZip } from '../src/zip.ts'
+
+/**
+ * Packaging — walking a whole build, reading every allowed file and hashing it — is the work the
+ * slot ceiling is a ceiling ON, so it is the only honest place to make a build outlive it. By
+ * default this is the real packager with nothing added; a test that needs a build that does not
+ * come back holds `packaging.hold` and releases it when it wants to watch the abandoned call land.
+ */
+const packaging = vi.hoisted(() => ({ hold: undefined as Promise<void> | undefined, fail: undefined as Error | undefined, calls: [] as Promise<unknown>[] }))
+vi.mock('../src/export.ts', async importOriginal => {
+  const actual = await importOriginal<typeof import('../src/export.ts')>()
+  return {
+    ...actual,
+    packagePrototype: (input: Parameters<typeof actual.packagePrototype>[0]) => {
+      const call = (async () => {
+        if (packaging.hold !== undefined) await packaging.hold
+        if (packaging.fail !== undefined) throw packaging.fail
+        return actual.packagePrototype(input)
+      })()
+      packaging.calls.push(call)
+      return call
+    },
+  }
+})
+
+/** Waits for every packaging call started so far to land, plus the steps the service takes after it. */
+async function packagingSettled(): Promise<void> {
+  await Promise.allSettled(packaging.calls)
+  await new Promise<void>(resolve => { setTimeout(resolve, 25) })
+}
+
+/** Retries until the in-flight build of a project is really over and a new one can start. */
+async function eventually<T>(attempt: () => Promise<T>, tries = 400): Promise<T> {
+  for (let left = tries; left > 1; left -= 1) {
+    try { return await attempt() } catch { await new Promise<void>(resolve => { setTimeout(resolve, 10) }) }
+  }
+  return attempt()
+}
 
 class MemoryRepository implements HubRepository {
   rows: StudioIntegration[] = []; exportRows: StudioExport[] = []; eventRows: HubEvent[] = []
@@ -63,7 +101,12 @@ const strongAdmin: HubActor = { ...admin, sessionId: 's-admin', strongIdentityVe
 const { publicKey, privateKey } = generateKeyPairSync('ed25519')
 const publisherKeys = { dz23: publicKey.export({ type: 'spki', format: 'der' }).toString('base64') }
 const scratch: string[] = []
-afterEach(async () => { for (const directory of scratch.splice(0)) await rm(directory, { recursive: true, force: true }) })
+afterEach(async () => {
+  packaging.hold = undefined
+  packaging.fail = undefined
+  await Promise.allSettled(packaging.calls.splice(0))
+  for (const directory of scratch.splice(0)) await rm(directory, { recursive: true, force: true })
+})
 
 function manifest(overrides: Partial<IntegrationManifest> = {}): IntegrationManifest {
   return { schema_version: 1, id: 'agenda', name: 'Agenda', version: '1.0.0', kind: 'skill', publisher: { id: 'dz23', name: 'DZ23' }, permissions: [], tier: 'T0', ...overrides } as IntegrationManifest
@@ -851,17 +894,12 @@ describe('integration hub service', () => {
    * MAX_CONCURRENT_PACKAGING of them no workspace in the Studio could export again until restart.
    * The slot is now bounded in time as well as in number.
    */
-  it('does not return capacity while an aborted packaging operation is still alive', async () => {
+  it('returns bounded capacity while an abandoned packaging operation is still alive', async () => {
     const runDirectory = await fakeRun()
     const exportsRoot = await mkdtemp(join(tmpdir(), 'dz23-hub-exports-'))
     scratch.push(exportsRoot)
     const repository = new MemoryRepository()
     let sequence = 0
-    let wedged = true
-    let liveWrites = 0
-    let peakWrites = 0
-    let releaseWrites!: () => void
-    const writeGate = new Promise<void>(resolve => { releaseWrites = resolve })
     const service = new IntegrationHubService({
       repository, exportsRoot, publisherKeys, channel: 'stable', runsRoot: dirname(runDirectory),
       secrets: { inspect: async () => ({ present: false, shapeOk: false }) },
@@ -872,27 +910,207 @@ describe('integration hub service', () => {
       packagingTimeoutMs: 300,
       now: () => new Date('2026-09-04T00:00:00.000Z'), createId: () => `id-${++sequence}`,
     })
-    // Every slot is held by a call that never comes back — a named pipe, a filesystem that stopped
-    // answering: whatever it is, it does not return and cannot be cancelled.
-    const original = repository.putExport
-    repository.putExport = async (value: StudioExport) => {
-      liveWrites += 1; peakWrites = Math.max(peakWrites, liveWrites)
-      try { if (wedged) await writeGate; await original(value) } finally { liveWrites -= 1 }
-    }
+    // Every slot is held by a packaging call that does not come back — a named pipe, a filesystem
+    // that stopped answering: whatever it is, it does not return and cannot be cancelled.
+    let release: () => void = () => undefined
+    packaging.hold = new Promise<void>(resolve => { release = resolve })
     const stuck = Array.from({ length: MAX_CONCURRENT_PACKAGING }, (_unused, index) => service.createExport(builder, `p${index}`))
     for (const attempt of stuck) await expect(attempt).rejects.toMatchObject({ code: 'TIMEOUT', message: expect.stringContaining('parou de esperar') })
     // The refusal is in the history, with the project it happened on.
     expect(repository.eventRows.filter(event => event.detail === 'packaging-timeout')).toHaveLength(MAX_CONCURRENT_PACKAGING)
     expect(repository.eventRows.at(-1)).toMatchObject({ action: 'export.created', outcome: 'failure' })
-    // A third request times out in the bounded queue; it never becomes a third live write.
-    await expect(service.createExport(builder, 'p-third')).rejects.toMatchObject({ code: 'TIMEOUT' })
-    expect(liveWrites).toBe(MAX_CONCURRENT_PACKAGING)
-    expect(peakWrites).toBe(MAX_CONCURRENT_PACKAGING)
-    // Capacity returns only after the underlying operations actually stop.
-    wedged = false
-    releaseWrites()
-    for (let tick = 0; tick < 50 && liveWrites > 0; tick += 1) await new Promise(resolve => setTimeout(resolve, 2))
-    await expect(service.createExport(builder, 'p0')).resolves.toMatchObject({ project_id: 'p0' })
+    // And the Studio still exports while those calls are STILL running: the slots came back, which
+    // is the whole point of the ceiling — one wedged build is never everybody's outage.
+    packaging.hold = undefined
+    await expect(service.createExport(builder, 'p9')).resolves.toMatchObject({ project_id: 'p9' })
+    // The abandoned calls now finish. They add nothing: the person was told the Studio stopped
+    // waiting, and that stays the only thing this attempt ever said.
+    release()
+    await packagingSettled()
+    expect(repository.exportRows.map(row => row.project_id)).toEqual(['p9'])
+    expect(repository.eventRows.filter(event => event.outcome === 'success').map(event => event.action)).toEqual(['export.created'])
+    // Only when the abandoned build has really finished does the project it was holding build again.
+    await expect(eventually(() => service.createExport(builder, 'p0'))).resolves.toMatchObject({ project_id: 'p0' })
+  }, 20_000)
+
+  /**
+   * A packaging call that outlives the ceiling is ABANDONED, not cancelled: it keeps walking the
+   * run. It used to keep the rest of its work too — it wrote the `.zip`, inserted the export row and
+   * wrote `export.created / success` AFTER the person had been handed `TIMEOUT` and after the
+   * history had already recorded `export.created / failure / packaging-timeout`. One click, two
+   * contradictory lines: a layperson opening the history saw the same export fail and succeed in the
+   * same instant. And because the in-flight entry was dropped the moment the CALLER was answered, a
+   * second click started a TWIN build of the same run — both passed the "same run, same bytes"
+   * check before either wrote its row, and the workspace ended up with two rows and two `.zip`
+   * files for one export.
+   */
+  it('tells one story for one attempt: an abandoned build writes no package, no row and no second audit line', async () => {
+    const runDirectory = await fakeRun()
+    const exportsRoot = await mkdtemp(join(tmpdir(), 'dz23-hub-abandoned-'))
+    scratch.push(exportsRoot)
+    const repository = new MemoryRepository()
+    let sequence = 0
+    const service = new IntegrationHubService({
+      repository, exportsRoot, publisherKeys, channel: 'stable', runsRoot: dirname(runDirectory),
+      secrets: { inspect: async () => ({ present: false, shapeOk: false }) },
+      projects: {
+        project: (_actor, projectId) => ({ project_id: projectId, name: 'Agenda do Salão', state: 'VERIFIED_PROTOTYPE' }),
+        runs: () => [{ run_id: 'run-1', state: 'PASSED', started_at: '2026-09-03T11:00:00.000Z', attempt: 1, run_directory: runDirectory }],
+      },
+      packagingTimeoutMs: 60,
+      now: () => new Date('2026-09-04T00:00:00.000Z'), createId: () => `id-${++sequence}`,
+    })
+    const workspace = join(exportsRoot, 'org-a', 'ws-a')
+    const filesOnDisk = async (): Promise<string[]> => (await readdir(workspace).catch(() => [])).sort()
+
+    let release: () => void = () => undefined
+    packaging.hold = new Promise<void>(resolve => { release = resolve })
+    // The click the person made, and the answer they were given.
+    await expect(service.createExport(builder, 'p1')).rejects.toMatchObject({ code: 'TIMEOUT', message: expect.stringContaining('parou de esperar') })
+    // The second click, while the abandoned build is still walking the run: it JOINS that build and
+    // hears the same sentence. It must not start a twin of a build that already owns this package.
+    await expect(service.createExport(builder, 'p1')).rejects.toMatchObject({ code: 'TIMEOUT' })
+
+    // The abandoned build now finishes everything it was going to do.
+    release()
+    await packagingSettled()
+
+    // One attempt, one story — and nothing on disk, in the table or in the history claiming otherwise.
+    expect(repository.eventRows.map(event => [event.action, event.outcome, event.detail])).toEqual([['export.created', 'failure', 'packaging-timeout']])
+    expect(repository.exportRows).toEqual([])
+    // Not "created and then cleaned up": a build that already knows it lost stops before it touches
+    // the disk at all, so the workspace's export folder was never even made.
+    expect(existsSync(workspace)).toBe(false)
+
+    // And the Studio is not broken by any of it: once that build is really over, the export works.
+    const record = await eventually(() => service.createExport(builder, 'p1'))
+    expect(record).toMatchObject({ project_id: 'p1', run_id: 'run-1' })
+    expect(repository.exportRows).toHaveLength(1)
+    expect(await filesOnDisk()).toEqual([`${record.export_id}.zip`])
+    expect(repository.eventRows.filter(event => event.outcome === 'success')).toHaveLength(1)
+  }, 20_000)
+
+  /**
+   * The narrow half of the same defect, and the one no early check can catch: the ceiling landing
+   * AFTER the walk is over, while the `.zip` is being written. There is no cancelling a write in
+   * flight, so the build has to ask, at the last moment before anything durable is recorded,
+   * whether it is still the one answering this click — and give the package back if it is not.
+   * The question is asked with no `await` between reading the answer and acting on it, which is
+   * what makes it a decision and not a coin toss: on one thread either the build claims the outcome
+   * or the ceiling does, never both.
+   */
+  it('gives the package back when the ceiling lands while it is being written, instead of recording it anyway', async () => {
+    const runDirectory = await fakeRun()
+    const exportsRoot = await mkdtemp(join(tmpdir(), 'dz23-hub-midwrite-'))
+    scratch.push(exportsRoot)
+    const repository = new MemoryRepository()
+    let sequence = 0
+    // The walk is over and the name of the package has just been drawn; the Studio then spends
+    // longer than the whole ceiling before the first byte is written. However it happens — a machine
+    // that stalls, a disk that stops answering — the ceiling expires with the package half made.
+    let stall = 0
+    const service = new IntegrationHubService({
+      repository, exportsRoot, publisherKeys, channel: 'stable', runsRoot: dirname(runDirectory),
+      secrets: { inspect: async () => ({ present: false, shapeOk: false }) },
+      projects: {
+        project: (_actor, projectId) => ({ project_id: projectId, name: 'Agenda do Salão', state: 'VERIFIED_PROTOTYPE' }),
+        runs: () => [{ run_id: 'run-1', state: 'PASSED', started_at: '2026-09-03T11:00:00.000Z', attempt: 1, run_directory: runDirectory }],
+      },
+      packagingTimeoutMs: 40,
+      now: () => new Date('2026-09-04T00:00:00.000Z'),
+      createId: () => {
+        if (stall > 0) { const until = Date.now() + stall; stall = 0; while (Date.now() < until) { /* the machine is busy elsewhere */ } }
+        sequence += 1
+        return `id-${sequence}`
+      },
+    })
+    const workspace = join(exportsRoot, 'org-a', 'ws-a')
+    stall = 200
+    await expect(service.createExport(builder, 'p1')).rejects.toMatchObject({ code: 'TIMEOUT', message: expect.stringContaining('parou de esperar') })
+    await packagingSettled()
+    // The `.zip` reached the disk and was taken back off it; no row, and no second line in the history.
+    expect((await readdir(workspace).catch(() => [])).filter(name => name.endsWith('.zip'))).toEqual([])
+    expect(repository.exportRows).toEqual([])
+    expect(repository.eventRows.map(event => [event.action, event.outcome, event.detail])).toEqual([['export.created', 'failure', 'packaging-timeout']])
+  }, 20_000)
+
+  /**
+   * The other half of the rule, and the one that decides what the ceiling is FOR. Once the build has
+   * claimed the outcome — the package is written, the row is going in — the Studio does not tell
+   * anybody "it did not happen" about something it may have stored, so the caller waits. What the
+   * ceiling protects is the SLOT, and that comes back on time regardless: one build slow to record
+   * itself is never everybody's outage.
+   */
+  it('gives the slot back on time when a build is slow to record itself, without ever calling it a failure', async () => {
+    const runDirectory = await fakeRun()
+    const exportsRoot = await mkdtemp(join(tmpdir(), 'dz23-hub-slowrow-'))
+    scratch.push(exportsRoot)
+    const repository = new MemoryRepository()
+    let sequence = 0
+    const entered = new Set<string>()
+    let release: () => void = () => undefined
+    const stored = new Promise<void>(resolve => { release = resolve })
+    const service = new IntegrationHubService({
+      repository, exportsRoot, publisherKeys, channel: 'stable', runsRoot: dirname(runDirectory),
+      secrets: { inspect: async () => ({ present: false, shapeOk: false }) },
+      projects: {
+        // Called first inside the build: this is "one more package started".
+        project: (_actor, projectId) => { entered.add(projectId); return { project_id: projectId, name: 'Agenda do Salão', state: 'VERIFIED_PROTOTYPE' } },
+        runs: () => [{ run_id: 'run-1', state: 'PASSED', started_at: '2026-09-03T11:00:00.000Z', attempt: 1, run_directory: runDirectory }],
+      },
+      packagingTimeoutMs: 40,
+      now: () => new Date('2026-09-04T00:00:00.000Z'), createId: () => `id-${++sequence}`,
+    })
+    // The table is what is slow here — well past the ceiling — and the row it is writing is real.
+    const original = repository.putExport
+    repository.putExport = async (value: StudioExport) => { await stored; await original(value) }
+
+    const all = Promise.all([0, 1, 2].map(index => service.createExport(builder, `p${index}`)))
+    // Long enough for the ceiling to expire on the two that took a slot first.
+    await new Promise<void>(resolve => { setTimeout(resolve, 150) })
+    // The third one is packaging: the slots came back although nothing has finished.
+    expect([...entered].sort()).toEqual(['p0', 'p1', 'p2'])
+    // And nobody has been told anything yet — no refusal invented over a row being written.
+    expect(repository.eventRows).toEqual([])
+
+    release()
+    const records = await all
+    expect(records.map(record => record.project_id)).toEqual(['p0', 'p1', 'p2'])
+    expect(repository.eventRows.filter(event => event.detail === 'packaging-timeout')).toEqual([])
+    expect(repository.eventRows.filter(event => event.outcome === 'success')).toHaveLength(3)
+  }, 20_000)
+
+  /**
+   * A build that was abandoned AND then failed on its own has two things it would like to say, and
+   * the person has already been told one of them. A refusal is an outcome like any other, so it asks
+   * for the same lease: having lost it, the abandoned build says nothing, and the history keeps the
+   * single line the person actually saw instead of two failures for one click.
+   */
+  it('does not add its own refusal to the history when the Studio had already stopped waiting for it', async () => {
+    const runDirectory = await fakeRun()
+    const exportsRoot = await mkdtemp(join(tmpdir(), 'dz23-hub-lateref-'))
+    scratch.push(exportsRoot)
+    const repository = new MemoryRepository()
+    let sequence = 0
+    const service = new IntegrationHubService({
+      repository, exportsRoot, publisherKeys, channel: 'stable', runsRoot: dirname(runDirectory),
+      secrets: { inspect: async () => ({ present: false, shapeOk: false }) },
+      projects: {
+        project: (_actor, projectId) => ({ project_id: projectId, name: 'Agenda do Salão', state: 'VERIFIED_PROTOTYPE' }),
+        runs: () => [{ run_id: 'run-1', state: 'PASSED', started_at: '2026-09-03T11:00:00.000Z', attempt: 1, run_directory: runDirectory }],
+      },
+      packagingTimeoutMs: 40,
+      now: () => new Date('2026-09-04T00:00:00.000Z'), createId: () => `id-${++sequence}`,
+    })
+    let release: () => void = () => undefined
+    packaging.hold = new Promise<void>(resolve => { release = resolve })
+    // Whatever it was reading stopped answering, and only much later did it give up.
+    packaging.fail = new Error('a pasta parou de responder')
+    await expect(service.createExport(builder, 'p1')).rejects.toMatchObject({ code: 'TIMEOUT' })
+    release()
+    await packagingSettled()
+    expect(repository.eventRows.map(event => [event.action, event.outcome, event.detail])).toEqual([['export.created', 'failure', 'packaging-timeout']])
+    expect(repository.exportRows).toEqual([])
   }, 20_000)
 
   it('refuses to export an unverified project or a project whose run files are gone', async () => {

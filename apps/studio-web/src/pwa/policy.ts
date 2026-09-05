@@ -60,6 +60,29 @@ export function offlineApiResponseBody(online = false): string {
 export type ShellSource = 'network' | 'cache'
 export const SHELL_SOURCE_PATH = `${SW_SCOPE}__shell-source`
 export const SHELL_SOURCE_HEADER = 'x-dz23-shell-source'
+
+/**
+ * Where the mark for ONE navigation is kept. It used to be a single global slot at
+ * `SHELL_SOURCE_PATH`, which is a per-navigation fact stored last-writer-wins — and that is exactly
+ * how it lied. Reproduced in Chromium: visit offline once (the slot is left saying `cache`), come
+ * back with the network up and reload BYPASSING the worker (Shift+Reload, `Network.setBypassService
+ * Worker`). That navigation never reaches the fetch handler, so nothing corrects the slot, and a
+ * person with a live session — `/api/` answering 200 — was told "Mostrando a tela salva neste
+ * aparelho; entre de novo quando a internet voltar." Two tabs produce the same lie in reverse: the
+ * one served from the cache reads the mark the other one wrote from the network.
+ *
+ * So the mark is written per CLIENT (`event.resultingClientId`, the page the answer will create) and
+ * the page asks the worker that controls it for its own. A page whose navigation bypassed the worker
+ * has no controller, gets no answer, and says nothing — which is the truth about a screen the worker
+ * never saw.
+ */
+export function shellSourceKey(clientId: string): string {
+  // A query, not a fragment: the Cache API strips fragments, so `#id` would collide back into one slot.
+  return `${SHELL_SOURCE_PATH}?client=${encodeURIComponent(clientId)}`
+}
+/** The page asks; the worker answers for the page that asked, and for no other. */
+export const SHELL_SOURCE_REQUEST = 'dz23:shell-source?'
+export const SHELL_SOURCE_ANSWER = 'dz23:shell-source'
 /** A page that signs the person out tells the worker, and the copy of the interface saved here goes away. */
 export const SHELL_LOGOUT_MESSAGE = 'dz23:shell-logout'
 export const SHELL_CLEARED_MESSAGE = 'dz23:shell-cleared'

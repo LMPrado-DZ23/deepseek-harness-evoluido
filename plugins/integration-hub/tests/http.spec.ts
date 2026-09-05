@@ -16,6 +16,29 @@ import type { HubEvent, IntegrationManifest, StudioExport, StudioIntegration } f
 import { HubError, IntegrationHubService, securityFingerprint, type HubActor, type HubRepository } from '../src/service.ts'
 import { readZip } from '../src/zip.ts'
 
+/**
+ * The ceiling is a ceiling on PACKAGING, so that is where a test makes a build outlive it. By
+ * default this is the real packager with nothing added. The previous version of the 504 test stubbed
+ * `putExport` with a promise that never settles and left it dangling for the rest of the process:
+ * it produced the status, but the abandoned build was never allowed to land, so what the build did
+ * AFTER the person was answered — the file, the row, the second audit line — was never exercised.
+ */
+const packaging = vi.hoisted(() => ({ hold: undefined as Promise<void> | undefined, calls: [] as Promise<unknown>[] }))
+vi.mock('../src/export.ts', async importOriginal => {
+  const actual = await importOriginal<typeof import('../src/export.ts')>()
+  return {
+    ...actual,
+    packagePrototype: (input: Parameters<typeof actual.packagePrototype>[0]) => {
+      const call = (async () => {
+        if (packaging.hold !== undefined) await packaging.hold
+        return actual.packagePrototype(input)
+      })()
+      packaging.calls.push(call)
+      return call
+    },
+  }
+})
+
 class MemoryRepository implements HubRepository {
   rows: StudioIntegration[] = []; exportRows: StudioExport[] = []; eventRows: HubEvent[] = []
   integrations = (scope: HubActor) => this.rows.filter(row => sameScope(scope, row))
@@ -58,6 +81,8 @@ const publisherKeys = { dz23: publicKey.export({ type: 'spki', format: 'der' }).
 const servers: ReturnType<typeof createServer>[] = []
 const roots: string[] = []
 afterEach(async () => {
+  packaging.hold = undefined
+  await Promise.allSettled(packaging.calls.splice(0))
   await Promise.all(servers.splice(0).map(server => new Promise<void>(resolve => server.close(() => resolve()))))
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
 })
@@ -456,15 +481,40 @@ describe('integration hub HTTP boundary', () => {
   /**
    * The Studio stopping its wait for a packaging call is a GATEWAY timeout: nothing the client sent
    * was wrong, and answering 400 would tell the person to fix something they did not break. The
-   * service-level refusal is tested; the number it becomes on the wire was not.
+   * number it becomes on the wire is only half of it, though: the abandoned build keeps running, and
+   * what it does after the answer has already left is what a person actually sees in the history.
+   * So the build here is really let go, and the route is asked again afterwards.
    */
-  it('answers 504 when the Studio stops waiting for a package', async () => {
-    const { request, repository } = await fixture('admin', { packagingTimeoutMs: 30 })
-    repository.putExport = async () => new Promise<void>(() => undefined)
+  it('answers 504 when the Studio stops waiting for a package, and the abandoned build adds nothing after it', async () => {
+    const { request, repository } = await fixture('admin', { packagingTimeoutMs: 60 })
+    let release: () => void = () => undefined
+    packaging.hold = new Promise<void>(resolve => { release = resolve })
     const answer = await request('/projects/p1/exports', { method: 'POST', body: '{}' })
     expect(answer.status).toBe(504)
     expect(((await answer.json()) as { error: string }).error).toContain('parou de esperar')
     expect(repository.eventRows.at(-1)).toMatchObject({ action: 'export.created', outcome: 'failure', detail: 'packaging-timeout' })
+    // A second click while that build is still running is told the same thing, not given a twin.
+    expect((await request('/projects/p1/exports', { method: 'POST', body: '{}' })).status).toBe(504)
+
+    // The abandoned build is now let go — and lands.
+    packaging.hold = undefined
+    release()
+    await Promise.allSettled(packaging.calls.splice(0))
+    await new Promise<void>(resolve => { setTimeout(resolve, 25) })
+    // One click, one story: no export row, and no `success` line contradicting the 504.
+    expect(repository.exportRows).toEqual([])
+    expect(repository.eventRows.map(event => [event.action, event.outcome, event.detail])).toEqual([['export.created', 'failure', 'packaging-timeout']])
+
+    // And the route still works once that build is really over: 201, exactly one package.
+    let created = await request('/projects/p1/exports', { method: 'POST', body: '{}' })
+    for (let tries = 0; tries < 200 && created.status !== 201; tries += 1) {
+      await created.arrayBuffer()
+      await new Promise<void>(resolve => { setTimeout(resolve, 10) })
+      created = await request('/projects/p1/exports', { method: 'POST', body: '{}' })
+    }
+    expect(created.status).toBe(201)
+    expect(repository.exportRows).toHaveLength(1)
+    expect(repository.eventRows.filter(event => event.outcome === 'success')).toHaveLength(1)
   }, 20_000)
 
 

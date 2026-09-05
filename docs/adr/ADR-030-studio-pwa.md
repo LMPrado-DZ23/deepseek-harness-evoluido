@@ -101,17 +101,42 @@ reservada à M1 (preview) do Codex.
    `indexedDB` em lugar nenhum de `apps/studio-web/src` ou `plugins/*/src`):
    é um estado que ninguém consegue entender, e num aparelho compartilhado a
    próxima pessoa vê o Studio "aberto". Agora: (a) o worker marca a origem da
-   casca em `/studio/__shell-source` dentro do próprio Cache Storage — única
-   forma de a página saber, porque uma página não lê os cabeçalhos da própria
-   navegação — e acrescenta `x-dz23-shell-source: cache` à resposta para quem
-   inspeciona; (b) `registerStudioPwa()` lê essa marca e mostra o aviso
+   casca **por navegação**, em `/studio/__shell-source?client=<id da página>`
+   dentro do próprio Cache Storage — uma página não lê os cabeçalhos da própria
+   navegação, então ela pergunta ao worker que a controla (`dz23:shell-source?`)
+   e recebe a resposta sobre a navegação que criou **aquela** página; a resposta
+   também acrescenta `x-dz23-shell-source: cache` para quem inspeciona;
+   (b) `registerStudioPwa()` faz essa pergunta e mostra o aviso
    `.pwa-cached-shell` com o texto `offline.cachedShell`, separado da faixa de
    offline porque as duas coisas são diferentes e podem ser verdade ao mesmo
-   tempo; (c) um `401` em `/studio/` apaga todo cache `dz23-studio-shell-*`,
-   que é o fim de sessão que existe hoje neste produto; (d) `forgetSavedShell()`
+   tempo — uma página sem controlador (recarga que passa por cima do worker) não
+   tem a quem perguntar e não afirma nada; (c) um `401` **numa navegação** de
+   `/studio/` apaga todo cache `dz23-studio-shell-*`, que é o fim de sessão que
+   existe hoje neste produto; (d) `forgetSavedShell()`
    é o gancho para um botão de sair — a página avisa o worker
    (`dz23:shell-logout`), ele apaga os caches e confirma; sem worker, a própria
    página apaga. Não há botão de sair no Studio hoje: `NOT_PRESENT`.
+
+13. **A marca era global; agora é de cada tela, e o `401` só conta quando é
+   uma tela.** Duas suspeitas da auditoria, as duas verificadas no navegador:
+   (i) `__shell-source` era **um slot só** para um fato que é de cada
+   navegação, gravado por último-escreve-vence. Reproduzido em Chromium com
+   `Network.setBypassServiceWorker` (o Shift+Reload): visita offline deixa o
+   slot em `cache`, a internet volta, a pessoa recarrega passando por cima do
+   worker — a navegação não passa pelo `fetch`, nada corrige o slot, e quem
+   tinha sessão viva (o `/api/` respondendo 200 na mesma tela) lia "Mostrando a
+   tela salva neste aparelho; entre de novo quando a internet voltar". Com duas
+   abas o mesmo defeito acontece ao contrário. Fechado como descrito em (a) e
+   (b); a prova em navegador está em `tests/pwa.spec.ts` e a das duas abas em
+   `src/pwa/sw.spec.ts`. (ii) `decide()` classifica **qualquer** GET sem
+   extensão sob `/studio/` como `shell-html`, então um `401` de qualquer um
+   desses caminhos apagava a casca inteira. Hoje tudo sob `/studio/` é a mesma
+   interface, então ninguém foi prejudicado — mas "ainda não existe caminho
+   diferente" não é guarda. O gatilho passou a ser o que o estado significa:
+   uma **tela** foi recusada (`request.mode === 'navigate'`). Um pedido que a
+   própria página faz sendo recusado não é a sessão acabando e não esvazia o
+   aparelho; a recusa de uma navegação continua esvaziando, e há teste para as
+   duas metades.
 
 ## Limites verdadeiros
 

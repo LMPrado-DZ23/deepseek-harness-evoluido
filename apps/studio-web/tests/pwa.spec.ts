@@ -3,7 +3,7 @@ import { createServer, request as httpRequest, type IncomingMessage, type Server
 import type { Socket } from 'node:net'
 import { resolve } from 'node:path'
 import pwa from '../src/i18n/pwa.pt-BR.json' with { type: 'json' }
-import { expect, test, type BrowserContext } from '@playwright/test'
+import { expect, test, type BrowserContext, type Page } from '@playwright/test'
 
 /**
  * Playwright's offline emulation never reaches fetches made by a service
@@ -46,6 +46,29 @@ async function signIn(context: BrowserContext): Promise<void> {
     { name: 'dz23_studio_session', value: 'e2e', url: origin },
     { name: 'dz23_studio_csrf', value: 'csrf-e2e', url: origin },
   ])
+}
+
+
+/**
+ * What the PAGE learns about the screen it is showing, asked exactly the way `register.ts` asks it:
+ * of the worker that controls this page, about this page's own navigation. `null` means there is no
+ * controller to ask — which is what a reload that bypassed the worker produces.
+ */
+function shellSourceSeenByPage(page: Page): Promise<string | null> {
+  return page.evaluate(async () => {
+    const worker = navigator.serviceWorker?.controller
+    if (worker === null || worker === undefined) return null
+    return await new Promise<string | null>(resolve => {
+      const channel = new MessageChannel()
+      const timer = setTimeout(() => resolve('sem-resposta'), 3_000)
+      channel.port1.onmessage = message => {
+        clearTimeout(timer)
+        const source = (message.data as { source?: unknown } | null)?.source
+        resolve(typeof source === 'string' ? source : 'nada-marcado')
+      }
+      worker.postMessage({ type: 'dz23:shell-source?' }, [channel.port2])
+    })
+  })
 }
 
 test.use({ baseURL: origin })
@@ -230,7 +253,7 @@ test('a casca servida do cache se identifica como copia salva, e some quando a s
   await page.reload()
   // With a live session the screen is what the server just sent, and nothing extra is said.
   await expect(page.locator('.pwa-cached-shell')).toBeHidden()
-  expect(await page.evaluate(async () => (await caches.match('/studio/__shell-source'))?.text())).toBe('network')
+  expect(await shellSourceSeenByPage(page)).toBe('network')
 
   // The session ends and the device goes offline BEFORE the worker can learn about it — the exact
   // sequence the reviewer reproduced. The interface used to come back with nothing to distinguish it
@@ -242,7 +265,7 @@ test('a casca servida do cache se identifica como copia salva, e some quando a s
   await expect(page.getByRole('img', { name: 'DZ23 STUDIO' })).toBeVisible({ timeout: 20_000 })
   await expect(page.locator('.pwa-cached-shell')).toBeVisible()
   await expect(page.locator('.pwa-cached-shell')).toHaveText(pwa.offline.cachedShell)
-  expect(await page.evaluate(async () => (await caches.match('/studio/__shell-source'))?.text())).toBe('cache')
+  expect(await shellSourceSeenByPage(page)).toBe('cache')
 
   // Network back, session still over: the server answers 401 and the copy of the authenticated
   // interface saved on this device goes away with the session.
@@ -257,6 +280,51 @@ test('a casca servida do cache se identifica como copia salva, e some quando a s
   await page.reload()
   expect(await page.evaluate(() => document.body.innerText)).toContain(pwa.offline.shellUnavailable.title)
   expect(await page.locator('.brand').count()).toBe(0)
+})
+
+/**
+ * SUSPEITA CONFIRMADA E FECHADA. The mark was one global slot in Cache Storage for a fact that
+ * belongs to ONE navigation. Reproduced in this browser, before the fix, exactly as below: visit
+ * once with no network (the slot is left saying `cache`), bring the network back and reload with
+ * the worker bypassed — Shift+Reload, which CDP spells `Network.setBypassServiceWorker`. That
+ * navigation never reaches the fetch handler, nothing corrects the slot, and the page read it and
+ * told a person whose session was alive (the API answering 200 on the same screen):
+ * "Mostrando a tela salva neste aparelho; entre de novo quando a internet voltar."
+ *
+ * The page now asks the worker that controls it. A bypassed navigation produces a page with NO
+ * controller — asserted below, because that is the whole mechanism — so there is nobody to ask and
+ * nothing is claimed about a screen the worker never served.
+ */
+test('uma recarga que passa por cima do worker nao herda o aviso de tela salva de uma visita anterior', async ({ context, page }) => {
+  await signIn(context)
+  await page.goto('/studio/')
+  await expect.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker?.controller)), { timeout: 15_000 }).toBe(true)
+
+  // A visit with no network: the screen really is the copy saved on this device, and it says so.
+  // One load with the worker in charge, so the interface's own files are on the device too.
+  await page.reload()
+  await killProxy()
+  await page.reload()
+  await expect(page.getByRole('img', { name: 'DZ23 STUDIO' })).toBeVisible({ timeout: 20_000 })
+  await expect(page.locator('.pwa-cached-shell')).toBeVisible()
+  expect(await shellSourceSeenByPage(page)).toBe('cache')
+
+  // Network back, and the person reloads bypassing the worker. The shell comes from the server.
+  await startProxy()
+  const cdp = await context.newCDPSession(page)
+  await cdp.send('Network.enable')
+  await cdp.send('Network.setBypassServiceWorker', { bypass: true })
+  await page.reload()
+  await expect(page.getByRole('img', { name: 'DZ23 STUDIO' })).toBeVisible({ timeout: 20_000 })
+
+  // The session is alive: this screen came from the Studio, not from the device.
+  const live = await page.evaluate(async () => (await fetch('/api/studio/apps/projects')).status)
+  expect(live).toBe(200)
+  // The worker never saw this navigation, and the page knows it: there is no controller to ask.
+  expect(await page.evaluate(() => navigator.serviceWorker?.controller === null)).toBe(true)
+  expect(await shellSourceSeenByPage(page)).toBeNull()
+  // So nobody is told to sign in again over a session that never ended.
+  await expect(page.locator('.pwa-cached-shell')).toBeHidden()
 })
 
 /**

@@ -248,6 +248,27 @@ enviado, e aparar produzia um registro cujos bytes não eram os assinados.
   do segredo): qualquer mudança ali recusa (`CONFLICT`) um `enable` confirmado antes dela. Sem
   mudança de versão do domínio: a impressão é calculada, não gravada.
 
+**Passagem seguinte — o empacotamento abandonado.** O teto de tempo do empacotamento
+(`PACKAGING_SLOT_TIMEOUT_MS`) **abandona** uma chamada que não pode cancelar: nada em Node cancela
+uma syscall pendente. A chamada abandonada continuava fazendo o trabalho inteiro — escrevia o
+`.zip`, inseria a linha do export e gravava `export.created / success` **depois** de a pessoa ter
+recebido `TIMEOUT` e **depois** de o histórico já ter registrado
+`export.created / failure / packaging-timeout`. Um clique, duas linhas que se contradizem: quem
+abrisse o histórico via a mesma exportação falhar e dar certo no mesmo instante. E como a entrada de
+"já está sendo empacotado" era apagada quando o **chamador** era respondido, o segundo clique
+começava um **gêmeo** da mesma execução: os dois passavam pela guarda "mesma execução, mesmos bytes"
+antes de qualquer um gravar a sua linha, e a área de trabalho terminava com duas linhas e dois
+`.zip` para uma exportação só. Agora o teto e a construção dividem uma **concessão**
+(`PackagingLease`): quem pedir primeiro fica com o desfecho — a leitura e a decisão acontecem sem
+`await` entre elas, então numa thread só um dos dois ganha, nunca os dois. Quem perde não grava
+nada: a construção abandonada tira o próprio pacote do disco e o histórico fica com a única linha
+que a pessoa viu. A entrada de "já está sendo empacotado" vive até a construção abandonada
+**terminar de verdade**, então o clique seguinte se junta a ela em vez de criar um gêmeo. O que o
+teto **não** faz é desfazer um registro: depois que a construção assumiu o desfecho — o pacote está
+escrito e a linha está para ser gravada — o Studio espera, em vez de dizer a alguém "não aconteceu"
+sobre algo que ele pode ter guardado; a vaga de empacotamento volta na hora de qualquer jeito,
+porque a vaga é o que protege todo mundo.
+
 Limite **atual, ainda em aberto** (nada nesta etapa o fechou): a confirmação de **T2** é uma
 afirmação do cliente (um campo JSON). Qualquer pedido autenticado com um token CSRF válido pode
 chamar `POST /approvals` e gastar o bilhete na chamada seguinte — o servidor não tem prova de que
