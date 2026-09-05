@@ -37,6 +37,9 @@ Os testes usam subprocessos reais e cobrem:
 - `SIGKILL` durante a cópia parcial do store;
 - dois retomadores simultâneos e preservação de um L1 instalado no intervalo;
 - 50 processos concorrentes disputando o mesmo guard;
+- 50 processos pausados depois de todos observarem `ENOENT` na mesma raiz
+  vazia: exatamente um cria o guard e conclui; os demais terminam somente como
+  `PROVISION_BUSY` ou `ALREADY_PROVISIONED`, nunca recovery failure;
 - release concorrente com reclaim;
 - identidade antiga de outro boot, hardlink concorrente, `ENOENT` benigno,
   inode/owner/mode/nlink divergentes, symlink, binário inválido e códigos de
@@ -53,16 +56,20 @@ real usado nas provas de concorrência e crash.
 
 Ambiente: Ubuntu em WSL2, ext4, Node `22.23.1`.
 
-- suíte focada de `store-provision.spec.ts`: **43/43 PASS**;
-- suíte canônica do pacote, `maxWorkers: 1`: **337/337 PASS**, 13 arquivos,
-  **61,12 s**;
+- suíte focada de `store-provision.spec.ts`: **44/44 PASS**; a execução com
+  coverage levou **66,52 s**;
+- suíte canônica do pacote, `maxWorkers: 1`: **338/338 PASS**, 13 arquivos,
+  **60,14 s** na revisão incremental;
 - suíte canônica com coverage: **337/337 PASS**, **78,45 s**;
 - cobertura global: **96,88% statements / 94,80% branches / 99,42% functions /
   99,06% lines**;
-- `store-provision.ts`: **90,27% statements / 84,93% branches / 97,93%
-  functions / 97,70% lines**; gate D30 de `90/80/95/95` atendido sem reduzir
+- `store-provision.ts` na cobertura focada incremental: **90,30% statements /
+  84,80% branches / 97,93% functions / 97,71% lines**; gate D30 de
+  `90/80/95/95` atendido sem reduzir
   threshold ou ignorar código;
 - mutações de guard e recuperação: **11 mortas / 0 sobreviventes**;
+- mutação incremental que restaura a rejeição incorreta de um guard criado
+  concorrentemente: **morta** pelo stress de bootstrap;
 - `tsc -p tsconfig.build.json --noEmit`: **PASS**, 5,74 s;
 - `tsc -p tsconfig.build.json`: **PASS**, 4,13 s;
 - `check-portability.mjs --self-test`: **PASS**; verificação real: **PASS**;
@@ -80,8 +87,9 @@ deadline Unix falharam sob carga. Na execução canônica inicial, enquanto outr
 agente copiava milhares de arquivos de `/mnt/c` para ext4 e o WSL tinha acabado
 de reiniciar, somente o segundo RPC do teste Unix retornou 504. O arquivo
 `unix-server.spec.ts` era blob-idêntico à base; isolado, passou **32/32 em
-3,42 s**. Depois que o rsync cessou, a repetição canônica passou **337/337** sem
-alterar deadline, assertion ou código Unix. A falha foi classificada como
+3,42 s**. Depois que o rsync cessou, a repetição canônica passou **337/337** e a
+revisão incremental passou **338/338**, sem alterar deadline, assertion ou
+código Unix. A falha foi classificada como
 interferência de I/O/carga, não ocultada.
 
 ## Limites honestos

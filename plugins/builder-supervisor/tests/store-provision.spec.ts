@@ -464,6 +464,30 @@ linux('immutable builder template-store provisioning', () => {
     expect(await lockArtifacts(instanceRoot)).toEqual([])
   }, 60_000)
 
+  it('bootstraps one permanent guard after fifty processes observe the same empty root', async () => {
+    const fixture = await createFixture()
+    const instanceRoot = posix.join(fixture.policy.stateRoot, 'tenant-one', 'instance-one')
+    const gate = posix.join(fixture.root, 'bootstrap-race.go')
+    const readyPaths = Array.from({ length: 50 }, (_, index) => posix.join(fixture.root, `bootstrap-race-${index}.ready`))
+    const resultPaths = Array.from({ length: 50 }, (_, index) => posix.join(fixture.root, `bootstrap-race-${index}.json`))
+    const children = await Promise.all(resultPaths.map((resultPath, index) =>
+      startProvisionChild(fixture, 'pause-guard-missing', readyPaths[index], gate, resultPath)))
+    await Promise.all(readyPaths.map(path => waitForPath(path, 20_000)))
+    expect(await readdir(instanceRoot)).toEqual([])
+    await writeFile(gate, 'go\n', { mode: 0o600 })
+    await Promise.all(children.map(child => expect(child.completed).resolves.toMatchObject({ code: 0, signal: null })))
+    const results = await Promise.all(resultPaths.map(path => readFile(path, 'utf8').then(value => JSON.parse(value) as Record<string, unknown>)))
+    expect(results.filter(result => result.state === 'CREATED')).toHaveLength(1)
+    const errors = results.filter(result => result.error !== undefined).map(result => result.error)
+    expect(errors).toHaveLength(49)
+    expect(errors.every(error => error === 'PROVISION_BUSY' || error === 'ALREADY_PROVISIONED')).toBe(true)
+    expect(errors).not.toContain('PROVISION_RECOVERY_FAILED')
+    const guard = await lstat(posix.join(instanceRoot, '.provision.guard'))
+    expect({ file: guard.isFile(), links: guard.nlink, mode: guard.mode & 0o777 }).toEqual({ file: true, links: 1, mode: 0o600 })
+    expect(await lockArtifacts(instanceRoot)).toEqual([])
+    expect(await pathExists(posix.join(instanceRoot, '3'))).toBe(false)
+  }, 90_000)
+
   it('serializes release against a competing reclaim process under the same crash-releasing mutex', async () => {
     const fixture = await createFixture()
     const instanceRoot = posix.join(fixture.policy.stateRoot, 'tenant-one', 'instance-one')
@@ -783,7 +807,7 @@ async function installProvisionGuard(instanceRoot: string): Promise<void> {
 let provisionChildSequence = 0
 async function startProvisionChild(
   fixture: Fixture,
-  mode: 'run' | 'crash-before-unlink' | 'crash-after-unlink' | 'crash-during-store' | 'pause-acquire' | 'pause-release',
+  mode: 'run' | 'crash-before-unlink' | 'crash-after-unlink' | 'crash-during-store' | 'pause-acquire' | 'pause-guard-missing' | 'pause-release',
   readyPath?: string,
   gatePath?: string,
   resultPath?: string,
@@ -804,8 +828,8 @@ async function startProvisionChild(
   }
 }
 
-async function waitForPath(path: string): Promise<void> {
-  const deadline = Date.now() + 5_000
+async function waitForPath(path: string, timeoutMs = 5_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
   while (!await pathExists(path)) {
     if (Date.now() >= deadline) throw new Error(`timed out waiting for ${posix.basename(path)}`)
     await new Promise(resolve => setTimeout(resolve, 10))

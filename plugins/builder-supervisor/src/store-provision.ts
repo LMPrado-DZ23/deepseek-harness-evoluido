@@ -113,6 +113,7 @@ export interface BuilderProvisionRuntime {
   readonly beforeStaleLockPathUnlink?: (lockPath: string) => Promise<void>
   readonly afterStaleLockPathUnlink?: (lockPath: string) => Promise<void>
   readonly afterProvisionCoordinatorAcquired?: (phase: 'acquire' | 'cleanup' | 'release') => Promise<void>
+  readonly afterProvisionGuardOpenMissing?: () => Promise<void>
   readonly beforeProvisionLockRelease?: (lockPath: string) => Promise<void>
   readonly afterTemplateStoreEntryCopied?: (entryPath: string) => Promise<void>
 }
@@ -874,7 +875,7 @@ async function withProvisionCoordinator<T>(
   try {
     await assertProvisionGuardFilesystem(instanceRoot)
     await assertTrustedFlockBinary()
-    const opened = await openProvisionGuard(guardPath, instanceRoot)
+    const opened = await openProvisionGuard(guardPath, instanceRoot, runtime)
     guard = opened.handle
     await acquireProvisionGuard(guard)
     await assertProvisionGuardIdentity(guardPath, opened.identity, await guard.stat())
@@ -895,6 +896,7 @@ async function withProvisionCoordinator<T>(
 async function openProvisionGuard(
   guardPath: string,
   instanceRoot: string,
+  runtime: BuilderProvisionRuntime,
 ): Promise<{ readonly handle: FileHandle; readonly identity: Stats }> {
   let creator: FileHandle | undefined
   let handle: FileHandle | undefined
@@ -903,20 +905,26 @@ async function openProvisionGuard(
       handle = await open(guardPath, constants.O_RDONLY | constants.O_NOFOLLOW)
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      await runtime.afterProvisionGuardOpenMissing?.()
       // Creation belongs to the installer/bootstrap boundary. Once any state
       // exists, disappearance of the permanent guard is corruption, not a cue
-      // to recreate it at runtime.
-      if ((await readdir(instanceRoot)).length !== 0) recoveryFailed()
-      try {
-        creator = await open(guardPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600)
-      } catch (createError) {
-        if ((createError as NodeJS.ErrnoException).code !== 'EEXIST') throw createError
-      }
-      if (creator !== undefined) {
-        await creator.sync()
-        await creator.close()
-        creator = undefined
-        await syncDirectory(instanceRoot)
+      // to recreate it at runtime. A valid guard may, however, have appeared
+      // after this process observed ENOENT; that is the normal concurrent
+      // bootstrap race and must be opened rather than treated as corruption.
+      const entries = await readdir(instanceRoot)
+      if (!entries.includes(PROVISION_GUARD_NAME)) {
+        if (entries.length !== 0) recoveryFailed()
+        try {
+          creator = await open(guardPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600)
+        } catch (createError) {
+          if ((createError as NodeJS.ErrnoException).code !== 'EEXIST') throw createError
+        }
+        if (creator !== undefined) {
+          await creator.sync()
+          await creator.close()
+          creator = undefined
+          await syncDirectory(instanceRoot)
+        }
       }
       handle = await open(guardPath, constants.O_RDONLY | constants.O_NOFOLLOW)
     }

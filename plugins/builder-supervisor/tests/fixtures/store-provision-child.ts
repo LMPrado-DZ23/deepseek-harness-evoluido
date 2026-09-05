@@ -29,6 +29,8 @@ const runtime: BuilderProvisionRuntime = mode === 'crash-before-unlink'
       ? { afterTemplateStoreEntryCopied: async () => { process.kill(process.pid, 'SIGKILL') } }
     : mode === 'pause-acquire'
       ? { afterProvisionCoordinatorAcquired: async phase => { if (phase === 'acquire') await signalReadyAndWait() } }
+      : mode === 'pause-guard-missing'
+        ? { afterProvisionGuardOpenMissing: signalReadyAndWait }
       : mode === 'pause-release'
         ? { beforeProvisionLockRelease: signalReadyAndWait }
         : {}
