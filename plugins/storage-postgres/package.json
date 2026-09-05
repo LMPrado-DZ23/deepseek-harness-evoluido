@@ -17,7 +17,7 @@
       "default": "./lib/operator.js"
     }
   },
-  "files": ["lib"],
+  "files": ["lib", "i18n"],
   "scripts": {
     "build": "tsc -p tsconfig.build.json"
   },

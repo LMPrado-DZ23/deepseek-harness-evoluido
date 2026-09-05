@@ -1,5 +1,6 @@
 import type { StorageExportBundle } from './bundle.js'
 import { postgresToolConnection, type TlsPolicy } from './dsn.js'
+import { t } from './i18n.js'
 
 export function assertRestoreIntent(write: boolean, safetyBackup: string | undefined): void {
   if (write && (safetyBackup === undefined || safetyBackup === '')) throw new Error('safetyBackup is mandatory when write is enabled')
@@ -7,19 +8,19 @@ export function assertRestoreIntent(write: boolean, safetyBackup: string | undef
 
 export function assertRestorableBundle(bundle: StorageExportBundle): void {
   if (!Array.isArray(bundle.domains) || bundle.domains.length === 0) {
-    throw new Error('O arquivo de cópia não contém nenhum domínio. Nada seria restaurado — só apagado. Importação recusada.')
+    throw new Error(t('policy.emptyBundle'))
   }
 }
 
 export function assertReplacementAllowed(targetHasContent: boolean, force: boolean, confirmation: string | undefined): void {
   if (targetHasContent && !(force && confirmation === 'REPLACE_DZ23_STORAGE')) {
-    throw new Error('O esquema de destino já tem conteúdo. Use a confirmação REPLACE_DZ23_STORAGE só depois de conferir a cópia de segurança.')
+    throw new Error(t('policy.replacementConfirmationRequired'))
   }
 }
 
 export function assertDomainLossAllowed(wouldBeLost: readonly string[], allowed: boolean, confirmation: string | undefined): void {
   if (wouldBeLost.length > 0 && !(allowed && confirmation === 'REPLACE_DZ23_STORAGE')) {
-    throw new Error(`Esta cópia não contém ${String(wouldBeLost.length)} conjunto(s) de dados que existem no destino (${wouldBeLost.join(', ')}). Restaurar assim apagaria esses dados. Importação recusada.`)
+    throw new Error(t('policy.domainLoss', { count: wouldBeLost.length, domains: wouldBeLost.join(', ') }))
   }
 }
 
@@ -45,10 +46,14 @@ export function assertRecordLossAllowed(
     0,
   )
   const details = destructiveLosses.map((loss) => {
-    const records = `${loss.domain}: a cópia traz ${String(loss.recordsInBackup)} registro(s) e o destino tem ${String(loss.recordsInTarget)}`
-    return loss.globalWouldBeLost ? `${records}; o valor global também seria apagado` : records
+    const records = t('policy.recordDetail', {
+      domain: loss.domain,
+      backupRecords: loss.recordsInBackup,
+      targetRecords: loss.recordsInTarget,
+    })
+    return loss.globalWouldBeLost ? t('policy.globalLossDetail', { records }) : records
   }).join('; ')
-  throw new Error(`Esta cópia substituiria dados por domínio com perda de ${String(recordsLost)} registro(s) e/ou valor global (${details}). Importação recusada. Para autorizar conscientemente, use --allow-record-loss junto com --confirm REPLACE_DZ23_STORAGE.`)
+  throw new Error(t('policy.recordLoss', { recordsLost, details }))
 }
 
 export function assertUnknownObjectsAllowed(
@@ -57,7 +62,7 @@ export function assertUnknownObjectsAllowed(
   confirmation: string | undefined,
 ): void {
   if (unknownObjects.length === 0 || (allowed && confirmation === 'REPLACE_DZ23_STORAGE')) return
-  throw new Error(`O destino contém ${String(unknownObjects.length)} objeto(s) que esta versão do DZ23 STUDIO não reconhece (${unknownObjects.join(', ')}). Restaurar apagaria esses objetos sem saber o que guardam. Importação recusada. Para autorizar conscientemente, use --allow-unknown-objects junto com --confirm REPLACE_DZ23_STORAGE.`)
+  throw new Error(t('policy.unknownObjects', { count: unknownObjects.length, objects: unknownObjects.join(', ') }))
 }
 
 export function assertForeignInstallationAllowed(
@@ -72,7 +77,10 @@ export function assertForeignInstallationAllowed(
     && targetInstallation !== null
     && backupInstallation !== targetInstallation
   if (!isForeign || (allowed && confirmation === 'REPLACE_DZ23_STORAGE')) return
-  throw new Error(`Esta cópia pertence a outra instalação do DZ23 STUDIO (cópia: ${backupInstallation}; destino: ${targetInstallation}). Restaurar trocaria os dados de um servidor pelos de outro. Importação recusada. Para autorizar conscientemente, use --allow-foreign-installation junto com --confirm REPLACE_DZ23_STORAGE.`)
+  throw new Error(t('policy.foreignInstallation', {
+    backupInstallation,
+    targetInstallation,
+  }))
 }
 
 /** Pure process boundary: no connection string is ever an argv item. */

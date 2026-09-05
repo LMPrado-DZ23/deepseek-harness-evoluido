@@ -10,6 +10,7 @@ import { PostgresStorageBackend } from './backend.js'
 import { bundleRecordCount, canonicalJson, sha256, type StorageExportBundle } from './bundle.js'
 import { postgresClientConnection, type PostgresClientConnection, type TlsPolicy } from './dsn.js'
 import type { VerifiedStorageBundle } from './import-file.js'
+import { t } from './i18n.js'
 import { advanceJournal, assertJournalIdentity, journalReached, loadRestoreJournal, reserveRestoreJournal, writeRestoreJournal, type RestoreJournal } from './restore-journal.js'
 import {
   assertDomainLossAllowed, assertForeignInstallationAllowed, assertRecordLossAllowed,
@@ -167,10 +168,10 @@ export async function restorePostgresStorage(
   assertAttemptId(options.attemptId)
   assertRestoreIntent(write, options.safetyBackup)
   if (write && (options.stateDirectory === undefined || options.stateDirectory === '')) {
-    throw new Error('Restauração real exige o diretório de estado canônico da instância.')
+    throw new Error(t('restore.canonicalStateRequired'))
   }
   if (write && (dependencies.platform ?? process.platform) !== 'linux') {
-    throw new Error('Restauração com escrita exige Linux para validar o safety backup pelo mesmo descritor aberto.')
+    throw new Error(t('restore.linuxWriteRequired'))
   }
   throwIfAborted(options.signal)
   const bundle = options.verifiedInput.bundle
@@ -210,7 +211,7 @@ export async function restorePostgresStorage(
       }
       journalWasCreated = await reserveJournal(journalPath, initial)
       journal = journalWasCreated ? initial : await loadJournal(journalPath)
-      if (journal === undefined) throw new Error('A reserva da tentativa de restauração desapareceu. Restauração recusada.')
+      if (journal === undefined) throw new Error(t('restore.reservationDisappeared'))
     }
     if (journal !== undefined) {
       assertJournalIdentity(journal, {
@@ -220,7 +221,7 @@ export async function restorePostgresStorage(
         if (await hasRestoreReceipt(client, schema, options.attemptId, targetFingerprint, options.verifiedInput.inputSha256, journal.safety?.sha256 ?? null)) {
           await assertStudioLayout(client, schema)
           const replay = journal.result as unknown as RestoreWriteReport | null
-          if (replay === null || replay.mode !== 'write' || replay.readyToStart !== true) throw new Error('Journal confirmado no banco não contém um resultado recuperável.')
+          if (replay === null || replay.mode !== 'write' || replay.readyToStart !== true) throw new Error(t('restore.committedResultInvalid'))
           if (journal.state !== 'cleanup_complete') {
             journal = advanceJournal(journal, 'cleanup_complete')
             await writeJournal(journalPath, journal)
@@ -228,7 +229,7 @@ export async function restorePostgresStorage(
           return replay
         }
         if (journal.state === 'committed' || journal.state === 'cleanup_complete') {
-          throw new Error('O journal declara commit, mas o recibo no PostgreSQL não corresponde. Restauração recusada.')
+          throw new Error(t('restore.receiptMismatch'))
         }
       }
     }
@@ -305,7 +306,7 @@ export async function restorePostgresStorage(
     assertRecordLossAllowed(recordLoss, options.allowRecordLoss === true, options.confirmation)
     assertUnknownObjectsAllowed(unknown.items, options.allowUnknownObjects === true, options.confirmation)
     assertForeignInstallationAllowed(backupInstallation, targetInstallationValue, options.allowForeignInstallation === true, options.confirmation)
-    if (journal === undefined) throw new Error('Journal da restauração não foi reservado. Restauração recusada.')
+    if (journal === undefined) throw new Error(t('restore.journalNotReserved'))
 
     throwIfAborted(options.signal)
     if (journalWasCreated && targetSchemaExists) await assertSafetyDestinationAvailable(backupPath)
@@ -319,7 +320,7 @@ export async function restorePostgresStorage(
         attemptId: options.attemptId, targetSchema: schema, targetFingerprint, inputSha256: options.verifiedInput.inputSha256,
       })
       if (journal.safety !== null && (journal.safety.path !== safety.file || journal.safety.sha256 !== safety.sha256 || journal.safety.bytes !== safety.bytes)) {
-        throw new Error('A cópia de segurança publicada diverge do journal da tentativa. Restauração recusada.')
+        throw new Error(t('restore.safetyJournalMismatch'))
       }
       safetyBackup = safety.file
       safetyBackupSha256 = safety.sha256
@@ -414,7 +415,7 @@ export async function restorePostgresStorage(
         const restored = await client.query<{ name: string }>(`SELECT name FROM ${quoteIdentifier(schema)}."units" ORDER BY name COLLATE "C"`)
         const expected = [...bundleDomains].sort()
         if (restored.rows.map(row => row.name).join('\0') !== expected.join('\0')) {
-          throw new Error('O esquema restaurado não contém exatamente os domínios da cópia. Troca cancelada.')
+          throw new Error(t('restore.domainSetMismatch'))
         }
         throwIfAborted(options.signal)
         await client.query('COMMIT')
@@ -452,11 +453,7 @@ export async function restorePostgresStorage(
 
 function postCommitReconciliationError(schema: string, attemptId: string, cause: unknown): Error {
   const detail = cause instanceof Error ? cause.message : String(cause)
-  return new Error(
-    `A restauração do esquema '${schema}' JÁ FOI CONCLUÍDA no PostgreSQL, mas o journal local não pôde ser finalizado (${detail}). ` +
-    `Mantenha o Harness parado, NÃO inicie outra restauração e reconcilie usando exatamente o mesmo attempt-id '${attemptId}'.`,
-    { cause },
-  )
+  return new Error(t('restore.postCommitReconciliation', { schema, detail, attemptId }), { cause })
 }
 
 /** Read-only operator health. No connection material is ever returned. */
@@ -502,11 +499,11 @@ export async function postgresStorageStatus(
 }
 
 function assertAttemptId(value: string): void {
-  if (!/^[a-zA-Z0-9_-]{8,80}$/u.test(value)) throw new Error('attemptId deve ter 8 a 80 caracteres seguros')
+  if (!/^[a-zA-Z0-9_-]{8,80}$/u.test(value)) throw new Error(t('restore.attemptIdInvalid'))
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {
-  if (signal?.aborted === true) throw signal.reason instanceof Error ? signal.reason : new Error('Operação cancelada.')
+  if (signal?.aborted === true) throw signal.reason instanceof Error ? signal.reason : new Error(t('common.operationCancelled'))
 }
 
 async function importStorage(backend: StorageBackend, bundle: StorageExportBundle, signal: AbortSignal | undefined): Promise<void> {
@@ -564,7 +561,7 @@ async function acquireMaintenanceLock(client: Client, schema: string): Promise<v
     [storageMaintenanceLockName(schema)],
   )
   if (result.rows[0]?.acquired !== true) {
-    throw new Error('O DZ23 STUDIO ainda está em execução no servidor. Pare-o antes de importar.')
+    throw new Error(t('restore.serverRunning'))
   }
   const hasUnits = await client.query<{ count: string }>(
     `SELECT count(*) FROM pg_catalog.pg_tables WHERE schemaname = $1 AND tablename = 'units'`,
@@ -579,7 +576,7 @@ async function acquireMaintenanceLock(client: Client, schema: string): Promise<v
       [storageUnitLockName(schema, row.name)],
     )
     if (unit.rows[0]?.acquired !== true) {
-      throw new Error('O DZ23 STUDIO ainda está em execução no servidor. Pare-o antes de importar.')
+      throw new Error(t('restore.serverRunning'))
     }
   }
 }
@@ -597,7 +594,7 @@ async function assertStudioLayout(client: Client, schema: string): Promise<void>
   const names = new Set(found.rows.map(row => row.relname))
   const missing = expected.filter(table => !names.has(table))
   if (missing.length > 0) {
-    throw new Error(`O esquema '${schema}' não tem a estrutura do DZ23 STUDIO (faltam: ${missing.join(', ')}). Importação recusada para não apagar dados de outra coisa.`)
+    throw new Error(t('restore.layoutTablesMissing', { schema, missing: missing.join(', ') }))
   }
   // Columns too: a table with the right name and the wrong shape is not the right table.
   const columns = await client.query<{ relname: string; attname: string }>(
@@ -617,17 +614,21 @@ async function assertStudioLayout(client: Client, schema: string): Promise<void>
     const present = byTable.get(table) ?? new Set<string>()
     const absent = required.filter(column => !present.has(column))
     if (absent.length > 0) {
-      throw new Error(`A tabela '${table}' do esquema '${schema}' não tem a forma do DZ23 STUDIO (faltam colunas: ${absent.join(', ')}). Importação recusada.`)
+      throw new Error(t('restore.layoutColumnsMissing', { table, schema, missing: absent.join(', ') }))
     }
   }
   const layout = await client.query<{ value: number }>(
     `SELECT value FROM ${quoteIdentifier(schema)}."storage_meta" WHERE key = 'layout_version'`,
   )
   if (layout.rows[0] === undefined) {
-    throw new Error(`O esquema '${schema}' não registra a versão do armazenamento. Importação recusada.`)
+    throw new Error(t('restore.layoutVersionMissing', { schema }))
   }
   if (layout.rows[0].value !== STORAGE_POSTGRES_LAYOUT_VERSION) {
-    throw new Error(`O esquema '${schema}' está na versão ${String(layout.rows[0].value)} do armazenamento e esta versão do Studio usa a ${String(STORAGE_POSTGRES_LAYOUT_VERSION)}. Importação recusada.`)
+    throw new Error(t('restore.layoutVersionMismatch', {
+      schema,
+      actual: String(layout.rows[0].value),
+      expected: STORAGE_POSTGRES_LAYOUT_VERSION,
+    }))
   }
 }
 
@@ -642,9 +643,9 @@ export async function createPostgresSafetyBackup(
   maxBytes = OPERATOR_BUNDLE_MAX_BYTES,
   ownership?: SafetyBackupOwnership,
 ): Promise<SafetyBackupInfo> {
-  if (process.platform !== 'linux') throw new Error('Safety backup exige Linux para validar pg_restore pelo mesmo descritor aberto.')
+  if (process.platform !== 'linux') throw new Error(t('restore.safetyLinuxRequired'))
   assertOperatorBundleLimit(maxBytes, 'safety backup maxBytes')
-  if (ownership === undefined) throw new Error('Safety backup exige identidade da tentativa de restauração.')
+  if (ownership === undefined) throw new Error(t('restore.safetyIdentityRequired'))
   // The connection string is handed over almost whole — decomposing it into host/port/user
   // dropped every other libpq parameter the operator had set (`hostaddr`, `options`, ...), so
   // the dump could reach a different endpoint than the import it is protecting. What IS taken
@@ -681,7 +682,7 @@ export async function createPostgresSafetyBackup(
           if (error.code === 'ENOENT') return false
           throw error
         })
-      if (existing) throw new Error(`Já existe um arquivo em ${output}. Escolha outro caminho para --backup.`)
+      if (existing) throw new Error(t('restore.backupDestinationExists', { output }))
     }
     // Only the exact owner marker above authorises reaping these deterministic
     // crash remnants. A different database/attempt cannot reach this point.
@@ -729,8 +730,8 @@ async function reserveSafetyDestination(
 ): Promise<void> {
   assertAttemptId(ownership.attemptId)
   assertIdentifier(ownership.targetSchema, 'target schema')
-  if (!/^[a-f0-9]{64}$/u.test(ownership.inputSha256)) throw new Error('Identidade do safety backup inválida.')
-  if (!/^[a-f0-9]{64}$/u.test(ownership.targetFingerprint)) throw new Error('Identidade do destino do safety backup inválida.')
+  if (!/^[a-f0-9]{64}$/u.test(ownership.inputSha256)) throw new Error(t('restore.safetyIdentityInvalid'))
+  if (!/^[a-f0-9]{64}$/u.test(ownership.targetFingerprint)) throw new Error(t('restore.safetyTargetIdentityInvalid'))
   const ownerName = `${name}.owner.json`
   const expected = `${JSON.stringify({ v: 1, ...ownership })}\n`
   const ownerPartial = `.${ownerName}.partial-${sha256(expected).slice(0, 24)}`
@@ -752,7 +753,7 @@ async function reserveSafetyDestination(
   const markerPath = pinnedChildPath(directory, ownerName)
   const before = await lstat(markerPath, { bigint: true })
   if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n || before.size > 1024n) {
-    throw new Error('Destino da cópia de segurança pertence a outra tentativa. Escolha outro caminho.')
+    throw new Error(t('restore.safetyDestinationOwnedByOtherAttempt'))
   }
   const marker = await open(markerPath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))
   try {
@@ -761,7 +762,7 @@ async function reserveSafetyDestination(
     const after = await marker.stat({ bigint: true })
     if (!stats.isFile() || stats.nlink !== 1n || stats.size > 1024n || stats.dev !== before.dev || stats.ino !== before.ino || stats.mtimeNs !== before.mtimeNs ||
         after.dev !== stats.dev || after.ino !== stats.ino || after.size !== stats.size || after.mtimeNs !== stats.mtimeNs || contents !== expected) {
-      throw new Error('Destino da cópia de segurança pertence a outra tentativa. Escolha outro caminho.')
+      throw new Error(t('restore.safetyDestinationOwnedByOtherAttempt'))
     }
   } finally { await marker.close() }
 }
@@ -778,7 +779,7 @@ async function collapseOwnedPublicationLink(
   })
   if (final === undefined || final.nlink === 1n) return
   if (!final.isFile() || final.isSymbolicLink() || final.nlink !== 2n) {
-    throw new Error('Destino da cópia de segurança pertence a outra tentativa: hardlink não autenticado.')
+    throw new Error(t('restore.safetyDestinationUnauthenticatedHardlink'))
   }
   const temporaryPath = pinnedChildPath(directory, temporaryName)
   const temporary = await lstat(temporaryPath, { bigint: true }).catch((error: NodeJS.ErrnoException) => {
@@ -787,13 +788,13 @@ async function collapseOwnedPublicationLink(
   })
   if (temporary === undefined || !temporary.isFile() || temporary.isSymbolicLink() || temporary.nlink !== 2n ||
       temporary.dev !== final.dev || temporary.ino !== final.ino || temporary.size !== final.size || temporary.mtimeNs !== final.mtimeNs) {
-    throw new Error('Destino da cópia de segurança pertence a outra tentativa: hardlink não autenticado.')
+    throw new Error(t('restore.safetyDestinationUnauthenticatedHardlink'))
   }
   await rm(temporaryPath)
   await syncPinnedDirectory(directory)
   const recovered = await lstat(finalPath, { bigint: true })
   if (!recovered.isFile() || recovered.isSymbolicLink() || recovered.nlink !== 1n || recovered.dev !== final.dev || recovered.ino !== final.ino || recovered.size !== final.size || recovered.mtimeNs !== final.mtimeNs) {
-    throw new Error('Publicação interrompida da cópia de segurança não pôde ser concluída.')
+    throw new Error(t('restore.safetyInterruptedPublicationFailed'))
   }
 }
 
@@ -820,7 +821,7 @@ async function recoverPublishedSafetyBackup(
       await existingSidecar.close()
       // A present but invalid marker is not repaired silently: it may describe
       // a different operator action and needs manual inspection.
-      throw new Error('Safety backup existente possui sidecar inválido. Restauração recusada.')
+      throw new Error(t('restore.safetyExistingSidecarInvalid'))
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     }
@@ -844,10 +845,10 @@ async function inspectPublishedSafetyBackup(directory: Awaited<ReturnType<typeof
       const contents = await sidecar.readFile('utf8')
       const after = await sidecar.stat({ bigint: true })
       if (after.dev !== before.dev || after.ino !== before.ino || after.size !== before.size || after.mtimeNs !== before.mtimeNs) {
-        throw new Error('Safety backup sidecar mudou durante a verificação.')
+        throw new Error(t('restore.safetySidecarChanged'))
       }
       const expected = contents.trim().split(/\s+/u)[0]
-      if (expected !== info.sha256) throw new Error('Safety backup não corresponde ao sidecar.')
+      if (expected !== info.sha256) throw new Error(t('restore.safetySidecarMismatch'))
     } finally {
       await sidecar.close()
     }
@@ -863,7 +864,7 @@ async function assertSafetyDestinationAvailable(output: string): Promise<void> {
     for (const name of [parent.name, `${parent.name}.sha256`, `${parent.name}.owner.json`]) {
       try {
         await lstat(pinnedChildPath(parent.directory, name))
-        throw new Error(`Já existe um arquivo em ${output}. Escolha outro caminho para --backup.`)
+        throw new Error(t('restore.backupDestinationExists', { output }))
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue
         throw error
@@ -880,13 +881,13 @@ async function openPrivatePinnedExistingFile(
   const path = pinnedChildPath(directory, name)
   const before = await lstat(path, { bigint: true })
   if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n || before.size > BigInt(maxBytes)) {
-    throw new Error('Safety backup ou arquivo auxiliar inválido.')
+    throw new Error(t('restore.safetyFileInvalid'))
   }
   const file = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))
   try {
     const after = await file.stat({ bigint: true })
     if (!after.isFile() || after.nlink !== 1n || after.dev !== before.dev || after.ino !== before.ino || after.size !== before.size || after.mtimeNs !== before.mtimeNs) {
-      throw new Error('Safety backup ou arquivo auxiliar mudou durante a abertura.')
+      throw new Error(t('restore.safetyFileChangedWhileOpening'))
     }
     return file
   } catch (error) {
@@ -897,8 +898,8 @@ async function openPrivatePinnedExistingFile(
 
 async function inspectSafetyHandle(file: FileHandle, path: string, reportedPath: string, environment: NodeJS.ProcessEnv, signal: AbortSignal | undefined, maxBytes: number): Promise<SafetyBackupInfo> {
   const stats = await file.stat({ bigint: true })
-  if (!stats.isFile() || stats.nlink !== 1n || stats.size === 0n) throw new Error('pg_dump não produziu um arquivo privado e não vazio.')
-  if (stats.size > BigInt(maxBytes)) throw new Error(`Safety backup excede o limite de ${String(maxBytes)} bytes.`)
+  if (!stats.isFile() || stats.nlink !== 1n || stats.size === 0n) throw new Error(t('restore.pgDumpEmpty'))
+  if (stats.size > BigInt(maxBytes)) throw new Error(t('restore.safetyTooLarge', { maxBytes }))
   const hash = createHash('sha256')
   const block = Buffer.allocUnsafe(1024 * 1024)
   let offset = 0
@@ -912,7 +913,7 @@ async function inspectSafetyHandle(file: FileHandle, path: string, reportedPath:
   await runTool('pg_restore', ['--list', '/proc/self/fd/3'], { PATH: environment.PATH, LANG: environment.LANG, LC_ALL: environment.LC_ALL }, signal, file.fd)
   const after = await file.stat({ bigint: true })
   if (after.dev !== stats.dev || after.ino !== stats.ino || after.size !== stats.size || after.mtimeNs !== stats.mtimeNs) {
-    throw new Error('Safety backup mudou durante a verificação. Restauração recusada.')
+    throw new Error(t('restore.safetyChangedWhileVerifying'))
   }
   return { file: reportedPath, sha256: hash.digest('hex'), bytes: offset }
 }
@@ -949,14 +950,14 @@ async function runBoundedPgDump(
   })
   let bytes = 0
   try {
-    if (child.stdout === null) throw new Error('pg_dump stdout indisponível.')
+    if (child.stdout === null) throw new Error(t('restore.pgDumpStdoutUnavailable'))
     for await (const chunk of child.stdout) {
       throwIfAborted(signal)
       const buffer = chunk as Buffer
       bytes += buffer.byteLength
       if (bytes > maxBytes) {
         child.kill('SIGKILL')
-        throw new Error(`Safety backup excede o limite de ${String(maxBytes)} bytes.`)
+        throw new Error(t('restore.safetyTooLarge', { maxBytes }))
       }
       await destination.write(buffer)
     }
@@ -994,12 +995,12 @@ async function schemaHasContent(client: Client, schema: string): Promise<boolean
         AND a.atttypid = 'oid'::regtype AND a.attname LIKE '%namespace'`,
   )
   if (catalogs.rows.length === 0) {
-    throw new Error('Não foi possível inspecionar o catálogo do PostgreSQL para saber se o esquema de destino está vazio. Importação recusada.')
+    throw new Error(t('restore.catalogInspectionFailed'))
   }
   const safe = /^[a-z][a-z0-9_]*$/u
   const clauses = catalogs.rows.map(row => {
     if (!safe.test(row.relname) || !safe.test(row.attname)) {
-      throw new Error(`Nome inesperado no catálogo do PostgreSQL ('${row.relname}.${row.attname}'). Importação recusada.`)
+      throw new Error(t('restore.unexpectedCatalogName', { name: `${row.relname}.${row.attname}` }))
     }
     return `EXISTS (SELECT 1 FROM pg_catalog."${row.relname}" WHERE "${row.attname}" = target.oid)`
   })
@@ -1020,7 +1021,7 @@ async function postgresTargetFingerprint(client: Client, schema: string): Promis
   )
   const row = identity.rows[0]
   if (row === undefined || !/^\d+$/u.test(row.system_identifier) || !/^\d+$/u.test(row.database_oid) || row.database_name === '') {
-    throw new Error('Não foi possível provar a identidade física do PostgreSQL. Restauração recusada.')
+    throw new Error(t('restore.physicalIdentityFailed'))
   }
   return sha256(canonicalJson({
     databaseName: row.database_name,
@@ -1046,11 +1047,11 @@ async function hasRestoreReceipt(client: Client, schema: string, attemptId: stri
 interface UnknownObjects { items: string[]; total: number }
 const INVENTORY_SAMPLE = 3
 const CATALOG_LABELS: Readonly<Record<string, string>> = {
-  pg_proc: 'função', pg_type: 'tipo', pg_operator: 'operador', pg_opclass: 'classe de operador',
-  pg_opfamily: 'família de operadores', pg_conversion: 'conversão', pg_collation: 'ordenação',
-  pg_ts_config: 'configuração de busca textual', pg_ts_dict: 'dicionário de busca textual',
-  pg_ts_parser: 'analisador de busca textual', pg_ts_template: 'modelo de busca textual',
-  pg_statistic_ext: 'estatística estendida', pg_extension: 'extensão', pg_default_acl: 'permissão padrão',
+  pg_proc: t('catalog.function'), pg_type: t('catalog.type'), pg_operator: t('catalog.operator'), pg_opclass: t('catalog.operatorClass'),
+  pg_opfamily: t('catalog.operatorFamily'), pg_conversion: t('catalog.conversion'), pg_collation: t('catalog.collation'),
+  pg_ts_config: t('catalog.textSearchConfiguration'), pg_ts_dict: t('catalog.textSearchDictionary'),
+  pg_ts_parser: t('catalog.textSearchParser'), pg_ts_template: t('catalog.textSearchTemplate'),
+  pg_statistic_ext: t('catalog.extendedStatistic'), pg_extension: t('catalog.extension'), pg_default_acl: t('catalog.defaultPrivilege'),
 }
 const CATALOG_BYPRODUCTS: Readonly<Record<string, string>> = {
   pg_class: 'false',
@@ -1068,10 +1069,10 @@ async function unknownSchemaObjects(client: Client, schema: string): Promise<Unk
     [schema, STUDIO_KNOWN_TABLES],
   )
   const relationKinds: Readonly<Record<string, string>> = {
-    r: 'tabela', p: 'tabela particionada', v: 'visão', m: 'visão materializada',
-    S: 'sequência', f: 'tabela externa', c: 'tipo composto',
+    r: t('catalog.table'), p: t('catalog.partitionedTable'), v: t('catalog.view'), m: t('catalog.materializedView'),
+    S: t('catalog.sequence'), f: t('catalog.foreignTable'), c: t('catalog.compositeType'),
   }
-  for (const row of relations.rows) found.push({ kind: relationKinds[row.relkind] ?? 'objeto', name: row.relname })
+  for (const row of relations.rows) found.push({ kind: relationKinds[row.relkind] ?? t('catalog.object'), name: row.relname })
 
   const catalogs = await client.query<{ catalog: string; nsattr: string; nameattr: string | null }>(
     `SELECT c.relname AS catalog,
@@ -1088,13 +1089,13 @@ async function unknownSchemaObjects(client: Client, schema: string): Promise<Unk
                        AND a.atttypid = 'oid'::regtype AND a.attname LIKE '%namespace')
       ORDER BY c.relname COLLATE "C"`,
   )
-  if (catalogs.rows.length === 0) throw new Error('Não foi possível inspecionar os objetos do esquema de destino. Importação recusada.')
+  if (catalogs.rows.length === 0) throw new Error(t('restore.objectInspectionFailed'))
   const safe = /^[a-z][a-z0-9_]*$/u
   for (const catalog of catalogs.rows) {
     const filter = CATALOG_BYPRODUCTS[catalog.catalog] ?? 'true'
     if (filter === 'false') continue
     if (!safe.test(catalog.catalog) || !safe.test(catalog.nsattr) || (catalog.nameattr !== null && !safe.test(catalog.nameattr))) {
-      throw new Error(`Nome inesperado no catálogo do PostgreSQL ('${catalog.catalog}'). Importação recusada.`)
+      throw new Error(t('restore.unexpectedCatalogName', { name: catalog.catalog }))
     }
     const naming = catalog.nameattr === null ? 'oid::text' : `"${catalog.nameattr}"::text`
     const rows = await client.query<{ name: string }>(
@@ -1103,7 +1104,7 @@ async function unknownSchemaObjects(client: Client, schema: string): Promise<Unk
         ORDER BY (${naming}) COLLATE "C"`,
       [schema],
     )
-    const label = CATALOG_LABELS[catalog.catalog] ?? `objeto de ${catalog.catalog}`
+    const label = CATALOG_LABELS[catalog.catalog] ?? t('catalog.objectOf', { catalog: catalog.catalog })
     for (const row of rows.rows) found.push({ kind: label, name: row.name })
   }
 
@@ -1119,13 +1120,13 @@ async function unknownSchemaObjects(client: Client, schema: string): Promise<Unk
   const auditColumns = new Set<string>()
   for (const row of columns.rows) {
     if (row.relname === RESTORE_AUDIT_TABLE) auditColumns.add(row.attname)
-    if (!(STUDIO_KNOWN_COLUMNS[row.relname] ?? []).includes(row.attname)) found.push({ kind: 'coluna', name: `${row.relname}.${row.attname}` })
+    if (!(STUDIO_KNOWN_COLUMNS[row.relname] ?? []).includes(row.attname)) found.push({ kind: t('catalog.column'), name: `${row.relname}.${row.attname}` })
   }
   const summary = summariseUnknown(found)
   if (auditColumns.size > 0) {
     const missing = AUDIT_REQUIRED_COLUMNS.filter(column => !auditColumns.has(column))
     if (missing.length > 0) {
-      summary.items.push(`tabela "${RESTORE_AUDIT_TABLE}" não reconhecida; faltam ${missing.join(', ')}`)
+      summary.items.push(t('restore.auditTableUnrecognized', { table: RESTORE_AUDIT_TABLE, missing: missing.join(', ') }))
       summary.total += 1
     }
   }
@@ -1137,8 +1138,13 @@ function summariseUnknown(found: readonly { kind: string; name: string }[]): Unk
   for (const item of found) grouped.set(item.kind, [...(grouped.get(item.kind) ?? []), item.name])
   const items: string[] = []
   for (const [kind, names] of grouped) {
-    if (names.length <= INVENTORY_SAMPLE) items.push(...names.map(name => `${kind} "${name}"`))
-    else items.push(`${kind} (${String(names.length)} no total): ${names.slice(0, INVENTORY_SAMPLE).map(name => `"${name}"`).join(', ')} e mais ${String(names.length - INVENTORY_SAMPLE)}`)
+    if (names.length <= INVENTORY_SAMPLE) items.push(...names.map(name => t('restore.unknownItem', { kind, name })))
+    else items.push(t('restore.unknownSummary', {
+      kind,
+      count: names.length,
+      sample: names.slice(0, INVENTORY_SAMPLE).map(name => `"${name}"`).join(', '),
+      remaining: names.length - INVENTORY_SAMPLE,
+    }))
   }
   return { items, total: found.length }
 }

@@ -11,6 +11,7 @@ import {
   type StorageExportBundle,
 } from './bundle.js'
 import { assertPinnedDirectory, pinnedChildPath, pinParent } from './safe-path.js'
+import { t } from './i18n.js'
 import { OPERATOR_BUNDLE_MAX_BYTES, assertOperatorBundleLimit } from './operator-limits.js'
 
 export const IMPORT_MAX_BYTES_DEFAULT = OPERATOR_BUNDLE_MAX_BYTES
@@ -129,7 +130,7 @@ async function readBundleSnapshot(
           throw new Error('storage import sidecar changed while it was being verified')
         }
         const expected = contents.trim().split(/\s+/u)[0]
-        if (expected !== inputSha256) throw new Error('A cópia não corresponde ao arquivo de verificação.')
+        if (expected !== inputSha256) throw new Error(t('import.verificationMismatch'))
       } finally {
         await sidecar.close().catch(() => undefined)
       }
@@ -144,7 +145,7 @@ async function readBundleSnapshot(
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {
-  if (signal?.aborted === true) throw signal.reason instanceof Error ? signal.reason : new Error('Operação cancelada.')
+  if (signal?.aborted === true) throw signal.reason instanceof Error ? signal.reason : new Error(t('common.operationCancelled'))
 }
 
 class JsonDepthScanner {

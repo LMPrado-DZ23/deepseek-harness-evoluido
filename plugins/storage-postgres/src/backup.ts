@@ -5,6 +5,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { link, lstat, open, opendir, rm } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { bundleRecordCount, sha256, type StorageExportBundle } from './bundle.js'
+import { t } from './i18n.js'
 import { assertPinnedDirectory, childPath, openNewPinnedFile, openPinnedAppendFile, pinnedChildPath, pinDirectory, pinParent, syncPinnedDirectory, type PinnedDirectory } from './safe-path.js'
 import { OPERATOR_BUNDLE_MAX_BYTES, assertOperatorBundleLimit } from './operator-limits.js'
 
@@ -423,7 +424,7 @@ function escapeRegExp(value: string): string {
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {
-  if (signal?.aborted === true) throw signal.reason instanceof Error ? signal.reason : new Error('Operação cancelada.')
+  if (signal?.aborted === true) throw signal.reason instanceof Error ? signal.reason : new Error(t('common.operationCancelled'))
 }
 
 /**

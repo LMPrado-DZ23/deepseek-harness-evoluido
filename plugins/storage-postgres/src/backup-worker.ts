@@ -15,6 +15,7 @@ import { rm } from 'node:fs/promises'
 import { Client } from 'pg'
 import { HARNESS_UPSTREAM_COMMIT, STORAGE_EXPORT_FORMAT, canonicalJson, sha256 } from './bundle.js'
 import { postgresClientConnection } from './dsn.js'
+import { t } from './i18n.js'
 import { assertConfiguredSchemaName, globalsTable, quoteIdentifier, recordsTable, STORAGE_POSTGRES_LAYOUT_VERSION, unitsTable } from './schema.js'
 import { readInstallation, storedDescriptor, unitsProjection, type UnitRow } from './snapshot.js'
 import { assertPinnedDirectory, openNewPinnedFile, pinnedChildPath, pinParent } from './safe-path.js'
@@ -186,7 +187,7 @@ export async function writeBackupBundle(args: WorkerArgs, dsn: string): Promise<
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {
-  if (signal?.aborted === true) throw signal.reason instanceof Error ? signal.reason : new Error('Operação cancelada.')
+  if (signal?.aborted === true) throw signal.reason instanceof Error ? signal.reason : new Error(t('common.operationCancelled'))
 }
 
 /** Units are cursored too: a schema with many small domains stays bounded just like one huge domain. */
