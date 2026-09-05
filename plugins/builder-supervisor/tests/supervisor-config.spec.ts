@@ -1,11 +1,13 @@
 import { constants } from 'node:fs'
-import { chmod, link, lstat, mkdir, mkdtemp, open, realpath, rm, symlink, unlink, writeFile } from 'node:fs/promises'
+import { chmod, link, lstat, mkdir, mkdtemp, open, readFile, realpath, rename, rm, symlink, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { posix } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   BuilderSupervisorConfigError,
+  computeBuilderSupervisorConfigEnvelopeSha256,
   loadBuilderSupervisorConfig,
+  loadPinnedBuilderSupervisorConfig,
   type BuilderSupervisorRootPolicy,
   type SupervisorConfigRuntime,
 } from '../src/supervisor-config.js'
@@ -23,6 +25,44 @@ linux('builder supervisor fail-closed configuration', () => {
     expect(JSON.stringify(config)).toContain(fixture.token)
     await chmod(fixture.tokenPath, 0o400)
     await expect(loadBuilderSupervisorConfig(`file:${fixture.configPath}`, fixture.policy)).resolves.toEqual(fixture.expected)
+  })
+
+  it('pins the exact immutable config envelope while allowing token rotation', async () => {
+    const fixture = await createFixture()
+    const digest = await envelopeDigest(fixture)
+    await expect(loadPinnedBuilderSupervisorConfig(`file:${fixture.configPath}`, digest, fixture.policy)).resolves.toEqual(fixture.expected)
+    await expect(loadPinnedBuilderSupervisorConfig(`file:${fixture.configPath}`, 'bad', fixture.policy)).rejects.toBeInstanceOf(BuilderSupervisorConfigError)
+
+    const rotatedToken = `rotated_${'R'.repeat(48)}`
+    await writeFile(fixture.tokenPath, `${rotatedToken}\n`, { mode: 0o600 })
+    await expect(loadPinnedBuilderSupervisorConfig(`file:${fixture.configPath}`, digest, fixture.policy)).resolves.toEqual({ ...fixture.expected, bearerToken: rotatedToken })
+
+    for (const [path, replacement] of [
+      [fixture.imagePath, `sha256:${'d'.repeat(64)}\n`],
+      [fixture.storePath, `${'e'.repeat(64)}\n`],
+      [fixture.policyPath, `${'f'.repeat(64)}\n`],
+    ] as const) {
+      const original = await readFile(path)
+      await writeFile(path, replacement, { mode: 0o600 })
+      await expect(loadPinnedBuilderSupervisorConfig(`file:${fixture.configPath}`, digest, fixture.policy)).rejects.toBeInstanceOf(BuilderSupervisorConfigError)
+      await writeFile(path, original, { mode: 0o600 })
+    }
+  })
+
+  it('uses the config bytes held by the verified descriptor during an adversarial path swap', async () => {
+    const fixture = await createFixture()
+    const digest = await envelopeDigest(fixture)
+    const replacement = `${fixture.configPath}.replacement`
+    await writeFile(replacement, `${JSON.stringify({ ...fixture.raw, template_store_version: 'v9.9.9' })}\n`, { mode: 0o600 })
+    let swapped = false
+    const selected = runtime({ realpath: async path => {
+      const resolved = await realpath(path)
+      if (path === fixture.configPath && !swapped) { swapped = true; await rename(replacement, fixture.configPath) }
+      return resolved
+    } })
+    const config = await loadPinnedBuilderSupervisorConfig(`file:${fixture.configPath}`, digest, fixture.policy, selected)
+    expect(config.templateStoreVersion).toBe('v2.0.0')
+    expect(JSON.parse(await readFile(fixture.configPath, 'utf8')).template_store_version).toBe('v9.9.9')
   })
 
   it('rejects extra fields, inline secrets, noncanonical paths and untrusted config locations', async () => {
@@ -77,6 +117,18 @@ linux('builder supervisor fail-closed configuration', () => {
     await expectInvalid(`file:${fixture.configPath}`, fixture.policy)
     await writeFile(fixture.configPath, '[]\n', { mode: 0o600 })
     await expectInvalid(`file:${fixture.configPath}`, fixture.policy)
+    await writeFile(fixture.configPath, Buffer.alloc(0), { mode: 0o600 })
+    await expectInvalid(`file:${fixture.configPath}`, fixture.policy)
+    await writeFile(fixture.configPath, Buffer.from([0x7b, 0x00, 0x7d]), { mode: 0o600 })
+    await expectInvalid(`file:${fixture.configPath}`, fixture.policy)
+    await writeFile(fixture.configPath, Buffer.from([0xc3]), { mode: 0o600 })
+    await expectInvalid(`file:${fixture.configPath}`, fixture.policy)
+  })
+
+  it('accepts canonical CRLF termination without changing resolved values', async () => {
+    const fixture = await createFixture()
+    await writeFile(fixture.tokenPath, `${fixture.token}\r\n`, { mode: 0o600 })
+    await expect(loadBuilderSupervisorConfig(`file:${fixture.configPath}`, fixture.policy)).resolves.toEqual(fixture.expected)
   })
 
   it('rejects wrong derived paths, references and scalar types before consuming authority', async () => {
@@ -143,6 +195,8 @@ interface Fixture {
   readonly configPath: string
   readonly tokenPath: string
   readonly imagePath: string
+  readonly storePath: string
+  readonly policyPath: string
   readonly token: string
   readonly raw: Record<string, unknown>
   readonly expected: Record<string, unknown>
@@ -192,7 +246,7 @@ async function createFixture(): Promise<Fixture> {
     policy_sha256_ref: `file:${policyPath}`,
   }
   await writeFile(configPath, `${JSON.stringify(raw)}\n`, { mode: 0o600 })
-  return { root, policy, configPath, tokenPath, imagePath, token, raw, expected: {
+  return { root, policy, configPath, tokenPath, imagePath, storePath, policyPath, token, raw, expected: {
     installationId,
     tenantId,
     instanceId,
@@ -209,6 +263,13 @@ async function createFixture(): Promise<Fixture> {
     templateStoreSha256: 'b'.repeat(64),
     policySha256: 'c'.repeat(64),
   } }
+}
+
+async function envelopeDigest(fixture: Fixture): Promise<string> {
+  const [configBytes, imageDigestBytes, templateStoreSha256Bytes, policySha256Bytes] = await Promise.all([
+    readFile(fixture.configPath), readFile(fixture.imagePath), readFile(fixture.storePath), readFile(fixture.policyPath),
+  ])
+  return computeBuilderSupervisorConfigEnvelopeSha256({ configBytes, imageDigestBytes, templateStoreSha256Bytes, policySha256Bytes })
 }
 
 async function rewriteConfig(fixture: Fixture, additions: Record<string, unknown>, removals: readonly string[] = []): Promise<void> {

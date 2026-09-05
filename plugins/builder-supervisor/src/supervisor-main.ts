@@ -28,7 +28,7 @@ export interface BuilderSupervisorListener {
   close(afterStopAccepting?: () => void): Promise<void>
 }
 
-interface BuilderSupervisorLifecycleMethods extends BuilderRpcMethods {
+export interface BuilderSupervisorLifecycleMethods extends BuilderRpcMethods {
   initialize(signal: AbortSignal): Promise<void>
 }
 

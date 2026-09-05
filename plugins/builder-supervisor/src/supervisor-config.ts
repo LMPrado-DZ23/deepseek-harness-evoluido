@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { constants, type Stats } from 'node:fs'
 import { lstat, open, realpath, type FileHandle } from 'node:fs/promises'
 import { posix } from 'node:path'
@@ -82,7 +83,7 @@ export interface SupervisorConfigRuntime {
 const DEFAULT_RUNTIME: SupervisorConfigRuntime = {
   platform: process.platform,
   uid: process.getuid?.(),
-  noFollowFlag: process.platform === 'linux' ? constants.O_NOFOLLOW : 0,
+  noFollowFlag: constants.O_NOFOLLOW,
   open,
   lstat,
   realpath,
@@ -93,12 +94,37 @@ export async function loadBuilderSupervisorConfig(
   roots: BuilderSupervisorRootPolicy = PRODUCTION_BUILDER_ROOT_POLICY,
   runtime: SupervisorConfigRuntime = DEFAULT_RUNTIME,
 ): Promise<BuilderSupervisorResolvedConfig> {
+  return loadResolvedConfig(configReference, roots, runtime)
+}
+
+/**
+ * Loads the supervisor configuration and its immutable referenced pins from the
+ * exact file descriptors whose raw bytes form `expectedEnvelopeSha256`.
+ * The bearer token is deliberately excluded so credentials can be rotated.
+ */
+export async function loadPinnedBuilderSupervisorConfig(
+  configReference: string,
+  expectedEnvelopeSha256: string,
+  roots: BuilderSupervisorRootPolicy = PRODUCTION_BUILDER_ROOT_POLICY,
+  runtime: SupervisorConfigRuntime = DEFAULT_RUNTIME,
+): Promise<BuilderSupervisorResolvedConfig> {
+  if (!/^[a-f0-9]{64}$/u.test(expectedEnvelopeSha256)) throw new BuilderSupervisorConfigError()
+  return loadResolvedConfig(configReference, roots, runtime, expectedEnvelopeSha256)
+}
+
+async function loadResolvedConfig(
+  configReference: string,
+  roots: BuilderSupervisorRootPolicy,
+  runtime: SupervisorConfigRuntime,
+  expectedEnvelopeSha256?: string,
+): Promise<BuilderSupervisorResolvedConfig> {
   try {
     if (runtime.platform !== 'linux' || runtime.uid === undefined) invalid()
     validateBuilderSupervisorRootPolicy(roots)
     const configPath = referencePath(configReference)
     if (!beneath(roots.configRoot, configPath)) invalid()
-    const raw = await readSecureFile(configPath, 'config', runtime)
+    const configBytes = await readSecureFileBytes(configPath, 'config', runtime)
+    const raw = secureText(configBytes)
     const value = strictRecord(JSON.parse(raw), CONFIG_KEYS)
     if (value.version !== 1) invalid()
     const installationId = installationIdentifier(value.installation_id)
@@ -123,12 +149,17 @@ export async function loadBuilderSupervisorConfig(
     const templateStoreVersion = scalar(value.template_store_version)
     if (!/^[A-Za-z0-9][A-Za-z0-9_.@-]{0,63}$/u.test(templateStoreVersion)) invalid()
 
-    const [bearerToken, imageDigest, templateStoreSha256, policySha256] = await Promise.all([
-      readSecureFile(referencePath(bearerTokenRef), 'secret', runtime),
-      readSecureFile(referencePath(imageDigestRef), 'config', runtime),
-      readSecureFile(referencePath(templateStoreSha256Ref), 'config', runtime),
-      readSecureFile(referencePath(policySha256Ref), 'config', runtime),
+    const [bearerTokenBytes, imageDigestBytes, templateStoreSha256Bytes, policySha256Bytes] = await Promise.all([
+      readSecureFileBytes(referencePath(bearerTokenRef), 'secret', runtime),
+      readSecureFileBytes(referencePath(imageDigestRef), 'config', runtime),
+      readSecureFileBytes(referencePath(templateStoreSha256Ref), 'config', runtime),
+      readSecureFileBytes(referencePath(policySha256Ref), 'config', runtime),
     ])
+    if (expectedEnvelopeSha256 !== undefined && computeBuilderSupervisorConfigEnvelopeSha256({ configBytes, imageDigestBytes, templateStoreSha256Bytes, policySha256Bytes }) !== expectedEnvelopeSha256) invalid()
+    const bearerToken = secureText(bearerTokenBytes)
+    const imageDigest = secureText(imageDigestBytes)
+    const templateStoreSha256 = secureText(templateStoreSha256Bytes)
+    const policySha256 = secureText(policySha256Bytes)
     if (!/^[A-Za-z0-9_-]{43,200}$/u.test(bearerToken)) invalid()
     if (!/^sha256:[a-f0-9]{64}$/u.test(imageDigest)) invalid()
     if (!/^[a-f0-9]{64}$/u.test(templateStoreSha256) || !/^[a-f0-9]{64}$/u.test(policySha256)) invalid()
@@ -155,7 +186,23 @@ export async function loadBuilderSupervisorConfig(
   }
 }
 
-async function readSecureFile(path: string, kind: 'config' | 'secret', runtime: SupervisorConfigRuntime): Promise<string> {
+export function computeBuilderSupervisorConfigEnvelopeSha256(input: {
+  readonly configBytes: Uint8Array
+  readonly imageDigestBytes: Uint8Array
+  readonly templateStoreSha256Bytes: Uint8Array
+  readonly policySha256Bytes: Uint8Array
+}): string {
+  const hash = createHash('sha256').update('dz23-builder-config-envelope-v1\0')
+  for (const [label, bytes] of [
+    ['supervisor.json', input.configBytes],
+    ['builder-image.sha256', input.imageDigestBytes],
+    ['template-store.sha256', input.templateStoreSha256Bytes],
+    ['policy.sha256', input.policySha256Bytes],
+  ] as const) hash.update(label).update('\0').update(String(bytes.byteLength)).update('\0').update(bytes)
+  return hash.digest('hex')
+}
+
+async function readSecureFileBytes(path: string, kind: 'config' | 'secret', runtime: SupervisorConfigRuntime): Promise<Buffer> {
   let handle: FileHandle | undefined
   try {
     handle = await runtime.open(path, constants.O_RDONLY | runtime.noFollowFlag)
@@ -165,13 +212,21 @@ async function readSecureFile(path: string, kind: 'config' | 'secret', runtime: 
     if (!linked.isFile() || linked.isSymbolicLink() || linked.dev !== opened.dev || linked.ino !== opened.ino || await runtime.realpath(path) !== path) invalid()
     const mode = opened.mode & 0o7777
     if ((opened.uid !== 0 && opened.uid !== runtime.uid) || (opened.mode & 0o022) !== 0 || (kind === 'secret' && mode !== 0o400 && mode !== 0o600)) invalid()
-    const value = await handle.readFile('utf8')
-    const normalized = value.endsWith('\r\n') ? value.slice(0, -2) : value.endsWith('\n') ? value.slice(0, -1) : value
-    if (normalized.length === 0 || normalized.trim() !== normalized || /[\r\n\0]/u.test(normalized)) invalid()
-    return normalized
+    const value = await handle.readFile()
+    if (value.byteLength === 0 || value.includes(0)) invalid()
+    return value
   } finally {
     await handle?.close()
   }
+}
+
+function secureText(value: Uint8Array): string {
+  let decoded: string
+  try { decoded = new TextDecoder('utf-8', { fatal: true }).decode(value) }
+  catch { return invalid() }
+  const normalized = decoded.endsWith('\r\n') ? decoded.slice(0, -2) : decoded.endsWith('\n') ? decoded.slice(0, -1) : decoded
+  if (normalized.length === 0 || normalized.trim() !== normalized || /[\r\n\0]/u.test(normalized)) invalid()
+  return normalized
 }
 
 export function validateBuilderSupervisorRootPolicy(roots: BuilderSupervisorRootPolicy): void {

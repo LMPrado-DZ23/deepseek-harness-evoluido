@@ -80,6 +80,40 @@ exatas sob as raízes fechadas. O bearer aceita somente modo `0400` ou `0600`,
 sem qualquer permissão para grupo/outros. Erros e códigos de saída nunca incluem
 caminhos, conteúdo ou segredos.
 
+### Manager multi-runtime M6.3
+
+O entrypoint opcional `lib/start-builder-manager.js` (script `start:manager`) aceita somente
+`--registry file:/etc/dz23-studio/builder/manager/runtime-registry.json`. Ele
+mantém um runtime independente por `scope_id`, cada qual carregado pela mesma
+validação single-runtime, com token, socket, artefatos, exports, journal e replay
+próprios. O registry é uma allowlist autoritativa; o manager nunca descobre
+configurações percorrendo diretórios.
+
+O campo externo `config_sha256` fixa o envelope imutável v1, calculado com
+framing de nome+tamanho+bytes crus sobre `supervisor.json`, o digest da imagem,
+o digest do template store e o digest da política. O token fica fora desse
+envelope para permitir rotação. O loader consome exatamente os descritores que
+foram hasheados, eliminando troca de arquivo entre verificação e uso.
+
+Reload por `SIGHUP` ou polling exige geração monotônica e conteúdo integralmente
+válido. Um scope removido entra em `RETIRING`, para de aceitar RPC e drena com
+prazo. Falha de um scope não encerra os demais. Health persistente usa somente
+o `scope_id`, estado verdadeiro, timestamps e códigos fechados. O scheduler de
+capacidade global é justo por scope e limita as filas; a lease cobre o build de
+`prepare` até estado terminal, cancelamento concluído, finalização comprovadamente
+limpa ou encerramento.
+
+Antes de aplicar a primeira geração, uma lease de processo por `installation_id`
+é mantida por `flock` em guard permanente privado sob `stateRoot`. Um checkpoint
+atômico e sincronizado é publicado antes dos efeitos de cada nova geração e
+preserva anti-rollback e imutabilidade de configuração entre restarts. O backend
+de arquivo exige Linux em ext4 ou XFS; implementações em memória existem somente
+para testes.
+
+O manager é fundação e não é ativado automaticamente, não cria os arquivos de
+autoridade e não concede isolamento de processo. O contrato e as restrições de
+rollout estão em `ADR-034`.
+
 O JSON é um contrato fechado, sem chaves extras:
 
 ```json
