@@ -111,6 +111,61 @@ A composição de produção deve fornecer obrigatoriamente um `FileBuildIdGuard
 um guard em memória é permitido somente em testes e não protege o `build_id`
 contra replay depois de reinício do supervisor.
 
+### Provisionamento local imutável
+
+`builder-provision` é a fundação local e explícita que prepara **uma** instância
+de tenant. Ela não inicia o supervisor, não acessa Docker e não altera Compose ou
+o Prompt-to-App. O comando recebe somente identificadores, caminhos e digests
+públicos; o bearer é gerado dentro do processo e nunca vem de argumento,
+variável de ambiente ou log.
+
+A fonte é um diretório Linux privado fora das raízes administradas e um
+manifesto JSON separado, fixado pelo SHA-256 do próprio manifesto. O manifesto
+v1 contém `template_store_version`, `tree_sha256` e uma lista fechada de
+diretórios/arquivos com tamanho e SHA-256. Caminhos aceitam somente ASCII seguro,
+não admitem colisões por caixa, links, hardlinks, FIFO, devices ou escapes. O
+store é copiado por descritores com `O_NOFOLLOW`, conferido novamente, sincronizado
+e selado em `0555`/`0444`. O diretório da versão é reservado por `mkdir` exclusivo;
+a árvore entra no envelope como `tree`, o marcador `.complete` é persistido e o
+envelope só então muda atomicamente de `0700` para o estado publicado `0555`.
+Leitores só podem considerar visível um envelope `0555` com marcador e árvore
+integralmente validados. Um store já publicado nunca é sobrescrito: igualdade permite concluir a
+recuperação da configuração; qualquer divergência falha fechada.
+
+Stagings interrompidos e arquivos de autoridade parciais são recuperados somente
+depois de adquirir o lock. O lock não expira por relógio: um reclaim exige que
+`boot_id`, PID e start ticks do proprietário não correspondam mais ao processo.
+`supervisor.json` é publicado por último, depois do token `0400` e dos digests
+`0600`, todos sob as raízes exatas de `BuilderSupervisorRootPolicy`.
+
+As raízes por instância são `0700` e estabelecem o mesmo UID do provisionador
+como fronteira administrativa: outro processo com esse UID já poderia remover
+qualquer store ou segredo, portanto não é tratado como ator não confiável. Entre
+provisionadores cooperativos, o lock impede a corrida; arquivos finais usam
+hardlink temporário como publicação `no-replace`, e o recovery reduz novamente
+o link count para um se houver queda entre link e unlink. O diretório versionado
+também é `no-replace`: `mkdir` reivindica o pathname final antes que qualquer
+rename ocorra. Um alvo vencido por outro processo é apenas verificado e jamais
+removido ou substituído. A recuperação de envelope incompleto só é autorizada
+quando o lock anterior foi comprovadamente recuperado por `boot_id`, PID e start
+ticks, nunca por tempo ou pela mera aparência do diretório.
+
+Depois do build do pacote, em Linux:
+
+```sh
+node lib/provision-cli.js \
+  --tenant tenant-one \
+  --instance instance-one \
+  --source-root /opt/dz23/templates/v1 \
+  --manifest file:/opt/dz23/manifests/v1.json \
+  --manifest-sha256 <sha256-do-manifesto> \
+  --image-digest sha256:<digest-da-imagem> \
+  --policy-sha256 <sha256-da-politica>
+```
+
+O instalador futuro deve criar previamente as raízes da policy com dono e modos
+seguros. Esta fatia não provisiona volume Docker nem torna o serviço ativo.
+
 ### Isolamento de organização/tenant
 
 O protocolo v1 não carrega `tenant_id` em cada operação e, portanto, **uma única

@@ -83,7 +83,7 @@ export async function loadBuilderSupervisorConfig(
 ): Promise<BuilderSupervisorResolvedConfig> {
   try {
     if (runtime.platform !== 'linux' || runtime.uid === undefined) invalid()
-    validateRootPolicy(roots)
+    validateBuilderSupervisorRootPolicy(roots)
     const configPath = referencePath(configReference)
     if (!beneath(roots.configRoot, configPath)) invalid()
     const raw = await readSecureFile(configPath, 'config', runtime)
@@ -155,7 +155,7 @@ async function readSecureFile(path: string, kind: 'config' | 'secret', runtime: 
   }
 }
 
-function validateRootPolicy(roots: BuilderSupervisorRootPolicy): void {
+export function validateBuilderSupervisorRootPolicy(roots: BuilderSupervisorRootPolicy): void {
   const paths = [roots.configRoot, roots.secretRoot, roots.socketRoot, roots.artifactRoot, roots.exportRoot, roots.stateRoot, roots.dockerSocketPath]
   for (const path of paths) canonicalAbsolute(path)
   if (new Set(paths).size !== paths.length) invalid()
