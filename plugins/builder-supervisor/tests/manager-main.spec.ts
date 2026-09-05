@@ -130,21 +130,22 @@ describe('multi-runtime manager', () => {
     expect(calls).toBe(2)
   })
 
-  it('serializes a reload requested while initial registry loading is still pending', async () => {
-    const first = slot('1'); let release!: () => void; let calls = 0; let concurrent = 0; let maximumConcurrent = 0
+  it('rejects direct reload during initialization without creating a concurrent registry load', async () => {
+    const first = slot('1'); let release!: () => void; let calls = 0
     const gate = new Promise<void>(resolve => { release = resolve })
     const harness = fixture([registry(1, [first])])
     ;(harness.dependencies as { loadRegistry: BuilderRuntimeManagerDependencies['loadRegistry'] }).loadRegistry = async () => {
-      calls += 1; concurrent += 1; maximumConcurrent = Math.max(maximumConcurrent, concurrent)
+      calls += 1
       if (calls === 1) await gate
-      concurrent -= 1; return registry(1, [first])
+      return registry(1, [first])
     }
     const initializing = harness.manager.initialize(); const reload = harness.manager.requestReload()
-    release(); await initializing; await reload; await until(() => calls === 2)
-    expect({ calls, maximumConcurrent, starts: harness.started.length }).toEqual({ calls: 2, maximumConcurrent: 1, starts: 1 })
+    await expect(reload).rejects.toThrow('MANAGER_NOT_INITIALIZED')
+    release(); await initializing
+    expect({ calls, starts: harness.started.length }).toEqual({ calls: 1, starts: 1 })
   })
 
-  it('does not rearm a pending SIGHUP behind a failed initialization or retain its lease', async () => {
+  it('rejects direct reload before a failed initialization and preserves generation minus one', async () => {
     const first = slot('1'); let release!: () => void; let calls = 0
     const gate = new Promise<void>(resolve => { release = resolve })
     const state = memoryState()
@@ -152,12 +153,13 @@ describe('multi-runtime manager', () => {
     ;(harness.dependencies as { loadRegistry: BuilderRuntimeManagerDependencies['loadRegistry'] }).loadRegistry = async () => {
       calls += 1; if (calls === 1) { await gate; throw new BuilderRuntimeRegistryError() }; return registry(1, [first])
     }
-    const initializing = harness.manager.initialize(); const pending = harness.manager.requestReload()
+    const pending = harness.manager.requestReload()
+    await expect(pending).rejects.toThrow('MANAGER_NOT_INITIALIZED')
+    const initializing = harness.manager.initialize()
     release()
     await expect(initializing).rejects.toThrow('INVALID_RUNTIME_REGISTRY')
-    await expect(pending).rejects.toThrow('INVALID_RUNTIME_REGISTRY')
     await new Promise(resolve => setTimeout(resolve, 0))
-    expect(calls).toBe(1)
+    expect({ calls, generation: harness.manager.snapshot().generation }).toEqual({ calls: 1, generation: -1 })
     await harness.manager.initialize()
     expect({ calls, starts: harness.started.length }).toEqual({ calls: 2, starts: 1 })
   })
@@ -203,7 +205,7 @@ describe('multi-runtime manager', () => {
     expect(manager.snapshot().health[0]).toEqual(expect.objectContaining({ state: 'DEGRADED', code: 'START_FAILED' }))
   })
 
-  it('keeps cleanup attached when a runtime appears after both startup and cleanup deadlines', async () => {
+  it('waits for cleanup proof when a runtime appears after its startup deadline', async () => {
     const first = slot('1'); let retired = false
     const dependencies: BuilderRuntimeManagerDependencies = {
       ...memoryState(),
@@ -212,9 +214,51 @@ describe('multi-runtime manager', () => {
       health: new MemoryBuilderRuntimeHealthStore(), now: () => new Date(0), error: vi.fn(),
     }
     const manager = new BuilderRuntimeManager({ registryReference: 'file:/config/manager/runtime-registry.json', roots, drainTimeoutMs: 10, reloadTimeoutMs: 5, maximumGlobalBuilds: 1, dependencies })
-    await manager.initialize(); expect(retired).toBe(false)
-    await until(() => retired)
+    await manager.initialize(); expect(retired).toBe(true)
     expect(manager.snapshot().activeScopes).toEqual([])
+  })
+
+  it('retains installation authority while shutdown cannot prove cleanup of a late start', async () => {
+    const firstSlot = slot('1'); const state = memoryState(); let releaseStart!: () => void; let started = false; let allowRetire = false
+    const startGate = new Promise<void>(resolve => { releaseStart = resolve })
+    const dependencies: BuilderRuntimeManagerDependencies = {
+      ...state,
+      loadRegistry: async () => registry(1, [firstSlot]),
+      startSlot: async () => {
+        started = true
+        await startGate
+        return { scopeId: firstSlot.scopeId, retire: async () => { if (!allowRetire) throw new Error('late-retire-secret') } }
+      },
+      health: new MemoryBuilderRuntimeHealthStore(), now: () => new Date(0), error: vi.fn(),
+    }
+    const first = new BuilderRuntimeManager({ registryReference: 'file:/config/manager/runtime-registry.json', roots, drainTimeoutMs: 10, reloadTimeoutMs: 5, maximumGlobalBuilds: 1, dependencies })
+    const second = fixture([registry(1, [firstSlot])], undefined, undefined, state)
+    const initializing = first.initialize()
+    await until(() => started)
+    await new Promise(resolve => setTimeout(resolve, 20))
+    const shuttingDown = first.shutdown(); releaseStart()
+    await expect(initializing).rejects.toBeInstanceOf(Error)
+    await expect(shuttingDown).rejects.toThrow('MANAGER_SHUTDOWN_FAILED')
+    await expect(second.manager.initialize()).rejects.toThrow('MANAGER_ALREADY_RUNNING')
+    allowRetire = true
+    await expect(first.shutdown()).resolves.toBeUndefined()
+    await second.manager.initialize(); await second.manager.shutdown()
+  })
+
+  it('retires a slot that resolves after shutdown aborts its in-flight start', async () => {
+    const firstSlot = slot('1'); let releaseStart!: () => void; let started = false; let retired = false
+    const startGate = new Promise<void>(resolve => { releaseStart = resolve })
+    const dependencies: BuilderRuntimeManagerDependencies = {
+      ...memoryState(), loadRegistry: async () => registry(1, [firstSlot]),
+      startSlot: async () => { started = true; await startGate; return { scopeId: firstSlot.scopeId, retire: async () => { retired = true } } },
+      health: new MemoryBuilderRuntimeHealthStore(), now: () => new Date(0), error: vi.fn(),
+    }
+    const manager = new BuilderRuntimeManager({ registryReference: 'file:/config/manager/runtime-registry.json', roots, drainTimeoutMs: 100, reloadTimeoutMs: 100, maximumGlobalBuilds: 1, dependencies })
+    const initializing = manager.initialize(); await until(() => started)
+    const shuttingDown = manager.shutdown(); releaseStart()
+    await expect(initializing).resolves.toBeUndefined()
+    await expect(shuttingDown).resolves.toBeUndefined()
+    expect({ retired, active: manager.snapshot().activeScopes }).toEqual({ retired: true, active: [] })
   })
 
   it('waits for an in-flight initialization during shutdown and absorbs its registry failure', async () => {
@@ -605,6 +649,25 @@ describe('manager process lifecycle', () => {
     expect(await runBuilderRuntimeManager({ registryReference: 'file:/config/manager/runtime-registry.json', roots, dependencies })).toBe(BUILDER_MANAGER_EXIT.usage)
     expect(error).toHaveBeenCalledWith('INVALID_RUNTIME_REGISTRY')
     expect(JSON.stringify(error.mock.calls)).not.toMatch(/tenant|token|secret/u)
+  })
+
+  it('does not register reload or shutdown signals until initialization is proven', async () => {
+    const signals = new Signals(); const intervals: Array<() => void> = []; let entered = false; let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve }); const error = vi.fn()
+    const dependencies = {
+      ...fixture([]).dependencies,
+      loadRegistry: async () => { entered = true; await gate; throw new BuilderRuntimeRegistryError() },
+      error,
+    }
+    const execution = runBuilderRuntimeManager({ registryReference: 'file:/config/manager/runtime-registry.json', roots, dependencies, runtime: fakeRuntime(signals, intervals) })
+    await until(() => entered)
+    expect(signals.eventNames()).toEqual([])
+    expect(signals.emit('SIGHUP')).toBe(false)
+    release()
+    expect(await execution).toBe(BUILDER_MANAGER_EXIT.usage)
+    expect(error).toHaveBeenCalledWith('INVALID_RUNTIME_REGISTRY')
+    expect(intervals).toEqual([])
+    expect(signals.eventNames()).toEqual([])
   })
 
   it('reports generic startup and failed shutdown without leaking the underlying error', async () => {

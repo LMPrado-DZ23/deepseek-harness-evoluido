@@ -57,6 +57,27 @@ const mutations = [
     tests: ['tests/manager-main.spec.ts'],
   },
   {
+    name: 'uncertain-start-owned-until-retired',
+    file: 'src/manager-main.ts',
+    from: '      await pending.runtime.retire(this.options.drainTimeoutMs)\n      this.#uncertainStarts.delete(pending)',
+    to: '      this.#uncertainStarts.delete(pending)\n      await pending.runtime.retire(this.options.drainTimeoutMs)',
+    tests: ['tests/manager-main.spec.ts'],
+  },
+  {
+    name: 'signals-after-initialize',
+    file: 'src/manager-main.ts',
+    from: "    await manager.initialize()\n    runtime.signals.on('SIGHUP', reload); runtime.signals.on('SIGINT', requestShutdown); runtime.signals.on('SIGTERM', requestShutdown)",
+    to: "    runtime.signals.on('SIGHUP', reload); runtime.signals.on('SIGINT', requestShutdown); runtime.signals.on('SIGTERM', requestShutdown)\n    await manager.initialize()",
+    tests: ['tests/manager-main.spec.ts'],
+  },
+  {
+    name: 'reload-requires-initialize',
+    file: 'src/manager-main.ts',
+    from: "    if (!this.#initialized) return Promise.reject(new Error('MANAGER_NOT_INITIALIZED'))",
+    to: "    if (false) return Promise.reject(new Error('MANAGER_NOT_INITIALIZED'))",
+    tests: ['tests/manager-main.spec.ts'],
+  },
+  {
     name: 'runtime-owned-before-health',
     file: 'src/manager-main.ts',
     from: '        this.#runtimes.set(slot.scopeId, current)\n        if (runtime.scopeId !== slot.scopeId)',
@@ -75,13 +96,6 @@ const mutations = [
     file: 'src/manager-main.ts',
     from: '      finally { runtime.clearScheduledTimeout(forced) }',
     to: '      finally { runtime.clearScheduledTimeout(forced); composition.releaseAll() }',
-    tests: ['tests/manager-main.spec.ts'],
-  },
-  {
-    name: 'reload-rearm',
-    file: 'src/manager-main.ts',
-    from: '    } finally { this.#reloadExecution = undefined }\n  }\n\n  async #reload()',
-    to: '    } finally { }\n  }\n\n  async #reload()',
     tests: ['tests/manager-main.spec.ts'],
   },
   {

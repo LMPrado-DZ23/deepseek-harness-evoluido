@@ -81,12 +81,20 @@ const DEFAULT_SLOT_START_RUNTIME: BuilderRuntimeSlotStartRuntime = {
 }
 
 interface ActiveRuntime { readonly slot: BuilderRuntimeRegistrySlot; readonly runtime: BuilderManagedRuntime }
+type SlotStartOutcome = { readonly kind: 'runtime'; readonly runtime: BuilderManagedRuntime } | { readonly kind: 'error'; readonly error: unknown }
+interface UncertainSlotStart {
+  readonly controller: AbortController
+  readonly outcome: Promise<SlotStartOutcome>
+  runtime?: BuilderManagedRuntime
+  cleanup: Promise<void> | undefined
+}
 class RuntimeCleanupIncomplete extends Error {}
 
 export class BuilderRuntimeManager {
   readonly #runtimes = new Map<BuilderRuntimeScopeId, ActiveRuntime>()
   readonly #health = new Map<BuilderRuntimeScopeId, BuilderRuntimeHealth>()
   readonly #acceptedSlots = new Map<BuilderRuntimeScopeId, BuilderManagerCheckpointSlot>()
+  readonly #uncertainStarts = new Set<UncertainSlotStart>()
   readonly #capacity: GlobalBuilderCapacityPort
   #installationId: string | undefined
   #generation = -1
@@ -97,7 +105,6 @@ export class BuilderRuntimeManager {
   #lease: BuilderManagerLease | undefined
   #checkpointLoaded = false
   #initialized = false
-  #initializing = false
 
   constructor(private readonly options: {
     readonly registryReference: string
@@ -122,7 +129,6 @@ export class BuilderRuntimeManager {
 
   async initialize(): Promise<void> {
     if (this.#initialized) return
-    this.#initializing = true
     const execution = this.#reloadExecution ?? this.#reload()
     this.#reloadExecution = execution
     try {
@@ -131,19 +137,19 @@ export class BuilderRuntimeManager {
     }
     catch (error) {
       this.#reloadPending = false
-      const cleanup = await Promise.allSettled([...this.#runtimes].map(([scopeId, current]) => this.#retire(scopeId, current)))
-      if (cleanup.every(result => result.status === 'fulfilled')) await this.#releaseLease()
+      this.#abortUncertainStarts('MANAGER_INITIALIZATION_FAILED')
+      const cleanup = await this.#cleanupOwnedWork()
+      if (cleanup) await this.#releaseLease()
       throw error
     }
     finally {
       this.#reloadExecution = undefined
-      this.#initializing = false
-      if (this.#initialized && this.#reloadPending && this.#reloadExecution === undefined && !this.#stopped) void this.requestReload()
     }
   }
 
   requestReload(): Promise<void> {
     if (this.#stopped) return Promise.resolve()
+    if (!this.#initialized) return Promise.reject(new Error('MANAGER_NOT_INITIALIZED'))
     this.#reloadPending = true
     this.#reloadExecution ??= this.#drainReloadRequests()
     return this.#reloadExecution
@@ -151,10 +157,9 @@ export class BuilderRuntimeManager {
 
   async shutdown(): Promise<void> {
     this.#stopped = true
+    this.#abortUncertainStarts('MANAGER_SHUTDOWN')
     await this.#reloadExecution?.catch(() => undefined)
-    const runtimes = [...this.#runtimes]
-    const results = await Promise.allSettled(runtimes.map(([scopeId, current]) => this.#retire(scopeId, current)))
-    if (results.some(result => result.status === 'rejected')) throw new Error('MANAGER_SHUTDOWN_FAILED')
+    if (!await this.#cleanupOwnedWork()) throw new Error('MANAGER_SHUTDOWN_FAILED')
     await this.#releaseLease()
   }
 
@@ -239,20 +244,63 @@ export class BuilderRuntimeManager {
 
   async #startBounded(slot: BuilderRuntimeRegistrySlot, installationId: string): Promise<BuilderManagedRuntime> {
     const controller = new AbortController()
-    const execution = this.options.dependencies.startSlot(slot, installationId, this.options.roots, this.#capacity, this.options.drainTimeoutMs, controller.signal)
-    let lateRetired = false
-    const cleanupLateRuntime = execution.then(async runtime => {
-      if (!controller.signal.aborted || lateRetired) return
-      lateRetired = true
-      await runtime.retire(this.options.drainTimeoutMs)
-    })
-    try { return await deadline(execution, this.options.reloadTimeoutMs, 'SLOT_START_TIMEOUT') }
+    const outcome: Promise<SlotStartOutcome> = Promise.resolve()
+      .then(() => this.options.dependencies.startSlot(slot, installationId, this.options.roots, this.#capacity, this.options.drainTimeoutMs, controller.signal))
+      .then(runtime => ({ kind: 'runtime' as const, runtime }), error => ({ kind: 'error' as const, error }))
+    const pending: UncertainSlotStart = { controller, outcome, cleanup: undefined }
+    this.#uncertainStarts.add(pending)
+    try {
+      const settled = await deadline(outcome, this.options.reloadTimeoutMs, 'SLOT_START_TIMEOUT')
+      if (settled.kind === 'error') throw settled.error
+      pending.runtime = settled.runtime
+      if (controller.signal.aborted) throw new Error('SLOT_START_CANCELLED')
+      this.#uncertainStarts.delete(pending)
+      return settled.runtime
+    }
     catch (error) {
       controller.abort(new Error('SLOT_START_CANCELLED'))
-      await deadline(cleanupLateRuntime, this.options.drainTimeoutMs, 'SLOT_START_CLEANUP_TIMEOUT').catch(() => {
-        // Keep the cleanup attached even after the manager reports the bounded failure.
-        void cleanupLateRuntime.catch(() => undefined)
-      })
+      try { await this.#cleanupUncertainStartBounded(pending) }
+      catch { throw new RuntimeCleanupIncomplete() }
+      throw error
+    }
+  }
+
+  #abortUncertainStarts(code: string): void {
+    for (const pending of this.#uncertainStarts) pending.controller.abort(new Error(code))
+  }
+
+  async #cleanupOwnedWork(): Promise<boolean> {
+    const runtimes = [...this.#runtimes]
+    const uncertain = [...this.#uncertainStarts]
+    const results = await Promise.allSettled([
+      ...runtimes.map(([scopeId, current]) => this.#retire(scopeId, current)),
+      ...uncertain.map(pending => this.#cleanupUncertainStartBounded(pending)),
+    ])
+    return results.every(result => result.status === 'fulfilled') && this.#runtimes.size === 0 && this.#uncertainStarts.size === 0
+  }
+
+  #cleanupUncertainStart(pending: UncertainSlotStart): Promise<void> {
+    if (pending.cleanup !== undefined) return pending.cleanup
+    const execution = (async () => {
+      const outcome = await pending.outcome
+      if (outcome.kind === 'error') { this.#uncertainStarts.delete(pending); return }
+      pending.runtime ??= outcome.runtime
+      await pending.runtime.retire(this.options.drainTimeoutMs)
+      this.#uncertainStarts.delete(pending)
+    })()
+    pending.cleanup = execution
+    execution.then(
+      () => { pending.cleanup = undefined },
+      () => { pending.cleanup = undefined },
+    )
+    return execution
+  }
+
+  async #cleanupUncertainStartBounded(pending: UncertainSlotStart): Promise<void> {
+    const execution = this.#cleanupUncertainStart(pending)
+    try { await deadline(execution, this.options.drainTimeoutMs + 250, 'SLOT_START_CLEANUP_TIMEOUT') }
+    catch (error) {
+      void execution.catch(() => undefined)
       throw error
     }
   }
@@ -351,10 +399,12 @@ export async function runBuilderRuntimeManager(options: {
   let requested = false
   const requestShutdown = () => { if (!requested) { requested = true; resolveShutdown() } }
   const reload = () => { void manager.requestReload() }
-  runtime.signals.on('SIGHUP', reload); runtime.signals.on('SIGINT', requestShutdown); runtime.signals.on('SIGTERM', requestShutdown)
+  let signalsRegistered = false
   let poll: ReturnType<typeof setInterval> | undefined
   try {
     await manager.initialize()
+    runtime.signals.on('SIGHUP', reload); runtime.signals.on('SIGINT', requestShutdown); runtime.signals.on('SIGTERM', requestShutdown)
+    signalsRegistered = true
     poll = runtime.setInterval(reload, pollIntervalMs)
     poll.unref?.()
     await shutdown
@@ -365,7 +415,9 @@ export async function runBuilderRuntimeManager(options: {
     return error instanceof BuilderRuntimeRegistryError ? BUILDER_MANAGER_EXIT.usage : BUILDER_MANAGER_EXIT.startup
   } finally {
     if (poll !== undefined) runtime.clearInterval(poll)
-    runtime.signals.off('SIGHUP', reload); runtime.signals.off('SIGINT', requestShutdown); runtime.signals.off('SIGTERM', requestShutdown)
+    if (signalsRegistered) {
+      runtime.signals.off('SIGHUP', reload); runtime.signals.off('SIGINT', requestShutdown); runtime.signals.off('SIGTERM', requestShutdown)
+    }
     if (!requested) await manager.shutdown().catch(() => undefined)
   }
 }
