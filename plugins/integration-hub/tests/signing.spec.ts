@@ -1,6 +1,5 @@
 import { createPrivateKey, generateKeyPairSync } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
-import { generateKeyPairSync } from 'node:crypto'
 import { evaluateManifest } from '../src/manifest.ts'
 import { generatePublisherKeyPair, publicKeyFromPrivatePem, signManifest, SigningError } from '../src/signing.ts'
 
