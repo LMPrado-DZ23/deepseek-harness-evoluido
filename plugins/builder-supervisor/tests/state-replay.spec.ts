@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { link, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, parse, resolve } from 'node:path'
@@ -288,6 +289,47 @@ describe('replay guard', () => {
       await expect(guard.claim('customer-run-complete')).rejects.toThrow('BUILD_ALREADY_EXISTS')
       now = 10
       await expect(guard.claim('customer-run-next')).resolves.toBeUndefined()
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
+
+  it('persists the bidirectional build journal state and terminal result across guard instances', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dz23-build-journal-')); const buildRef = `build_${'e'.repeat(32)}`; const exported = { relative_path: `exports/${buildRef}`, sha256: 'f'.repeat(64), files: 3, bytes: 9 }
+    try {
+      const first = new FileBuildIdGuard(root); await first.claim('journal-run', buildRef)
+      await first.update({ build_id: 'journal-run', build_ref: buildRef, build_state: 'E2E_OK', exported, cleanup_pending: true, finish_result: null, finish_error: null })
+      await expect(new FileBuildIdGuard(root).list()).resolves.toEqual([{ build_id: 'journal-run', build_ref: buildRef, build_state: 'E2E_OK', exported, cleanup_pending: true, finish_result: null, finish_error: null }])
+      const result = { build_ref: buildRef, final_state: 'E2E_OK' as const, exported, cleanup_pending: false, cleaned: true }
+      const completed = { build_id: 'journal-run', build_ref: buildRef, build_state: 'E2E_OK' as const, exported, cleanup_pending: false, finish_result: result, finish_error: null }
+      await new FileBuildIdGuard(root).complete(completed)
+      await expect(new FileBuildIdGuard(root).complete(completed)).resolves.toBeUndefined()
+      await expect(new FileBuildIdGuard(root).complete({ ...completed, finish_result: null, finish_error: 'EXPORT_INVALID' })).rejects.toThrow('RECOVERY_FAILED')
+      await expect(new FileBuildIdGuard(root).list()).resolves.toEqual([expect.objectContaining({ finish_result: result, cleanup_pending: false })])
+      await expect(new FileBuildIdGuard(root).claim('journal-run', buildRef)).rejects.toThrow('BUILD_ALREADY_EXISTS')
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
+
+  it('fails closed for every corrupted build-journal identity, state and result field', async () => {
+    const buildId = 'corrupt-journal'; const buildRef = `build_${'a'.repeat(32)}`; const digest = createHash('sha256').update(buildId).digest('hex'); const exported = { relative_path: `exports/${buildRef}`, sha256: 'b'.repeat(64), files: 1, bytes: 1 }
+    const result = { build_ref: buildRef, final_state: 'E2E_OK', exported, cleanup_pending: false, cleaned: true }
+    const valid = { version: 1, state: 'complete', build_id: buildId, build_id_hash: digest, build_ref: buildRef, build_state: 'E2E_OK', exported, cleanup_pending: false, finish_result: result, finish_error: null, updated_at: 1, completed_at: 1 }
+    const malformed = [
+      { ...valid, build_id_hash: 'c'.repeat(64) }, { ...valid, updated_at: -1 }, { ...valid, updated_at: 1.5 }, { ...valid, completed_at: null },
+      { ...valid, state: 'active', completed_at: 1 }, { ...valid, state: 'active', completed_at: null }, { ...valid, finish_result: null }, { ...valid, build_ref: 'bad' }, { ...valid, build_state: 'UNKNOWN' }, { ...valid, cleanup_pending: 'no' },
+      { ...valid, cleanup_pending: true }, { ...valid, build_state: 'CANCELLED', finish_result: { ...result, final_state: 'CANCELLED' } }, { ...valid, build_state: 'CANCELLED', exported: null, finish_result: null, finish_error: 'EXPORT_INVALID' },
+      { ...valid, exported: { ...exported, relative_path: 'elsewhere' } }, { ...valid, exported: { ...exported, sha256: 'bad' } }, { ...valid, exported: { ...exported, files: 0 } }, { ...valid, exported: { ...exported, files: 1.5 } }, { ...valid, exported: { ...exported, bytes: -1 } }, { ...valid, exported: { ...exported, bytes: 1.5 } },
+      { ...valid, finish_error: 'ALIEN' }, { ...valid, finish_result: { ...result, build_ref: `build_${'c'.repeat(32)}` } }, { ...valid, finish_result: { ...result, final_state: 'FAILED' } }, { ...valid, finish_result: { ...result, cleanup_pending: true } }, { ...valid, finish_result: { ...result, cleaned: false } }, { ...valid, finish_result: { ...result, exported: null } }, { ...valid, finish_error: 'EXPORT_INVALID' },
+    ]
+    for (const [index, value] of malformed.entries()) {
+      const root = await mkdtemp(join(tmpdir(), `dz23-journal-field-${index}-`))
+      try { await writeFile(join(root, `build_${digest}.json`), JSON.stringify(value), { mode: 0o600 }); await expect(new FileBuildIdGuard(root).list()).rejects.toThrow('RECOVERY_FAILED') } finally { await rm(root, { recursive: true, force: true }) }
+    }
+    const root = await mkdtemp(join(tmpdir(), 'dz23-journal-owner-'))
+    try {
+      const guard = new FileBuildIdGuard(root); await guard.claim(buildId, buildRef)
+      await expect(guard.update({ build_id: buildId, build_ref: `build_${'d'.repeat(32)}`, build_state: 'PREPARED', exported: null, cleanup_pending: false, finish_result: null, finish_error: null })).rejects.toThrow('RECOVERY_FAILED')
+      await expect(guard.complete({ build_id: buildId, build_ref: `build_${'d'.repeat(32)}`, build_state: 'CANCELLED', exported: null, cleanup_pending: false, finish_result: null, finish_error: null })).rejects.toThrow('RECOVERY_FAILED')
+      await expect(guard.claim('bad-ref', 'bad')).rejects.toThrow('BUILD_ALREADY_EXISTS')
+      await writeFile(join(root, 'ignored'), 'ignored'); await expect(guard.list()).resolves.toHaveLength(1)
     } finally { await rm(root, { recursive: true, force: true }) }
   })
 

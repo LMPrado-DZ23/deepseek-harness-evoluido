@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createVerifiedBuildArchive } from '../src/artifact.js'
-import { assertExportPathBeneath, currentExportIdentity, enforceExportRetention, publishValidatedDockerArchive, type ExportRuntime } from '../src/export-artifact.js'
+import { assertExportPathBeneath, cleanupManagedExportResources, currentExportIdentity, enforceExportRetention, listManagedExportArchives, openManagedExportArchive, publishValidatedDockerArchive, readValidatedPublishedArtifact, type ExportRuntime } from '../src/export-artifact.js'
 
 const roots: string[] = []; afterEach(async () => Promise.all(roots.splice(0).map(path => rm(path, { recursive: true, force: true }))))
 describe('validated Docker export publication', () => {
@@ -57,9 +57,35 @@ describe('validated Docker export publication', () => {
     const root = await mkdtemp(join(tmpdir(), 'dz23-export-stage-')); roots.push(root); const source = join(root, 'source'); const exports = join(root, 'published'); await validExportTree(source)
     const artifact = await createVerifiedBuildArchive(root, 'source', await hashExportTree()); const ref = `build_${'7'.repeat(32)}`; await publishValidatedDockerArchive(exports, ref, artifact.archivePath, new AbortController().signal)
     const stale = join(exports, 'exports', `.stage-build_${'6'.repeat(32)}-${'a'.repeat(16)}`); const fresh = join(exports, 'exports', `.stage-build_${'5'.repeat(32)}-${'b'.repeat(16)}`)
-    await mkdir(stale); await mkdir(fresh)
+    const orphan = join(exports, 'exports', `.orphan-${'c'.repeat(16)}`); await mkdir(stale, { mode: 0o700 }); await mkdir(fresh, { mode: 0o700 }); await mkdir(orphan, { mode: 0o700 })
     await enforceExportRetention(exports, ref, 1, 1_024 * 1_024, new AbortController().signal)
-    await expect(access(stale)).rejects.toThrow(); await expect(access(fresh)).rejects.toThrow(); await artifact.dispose()
+    await expect(access(stale)).rejects.toThrow(); await expect(access(fresh)).rejects.toThrow(); await expect(access(orphan)).rejects.toThrow(); await artifact.dispose()
+  })
+
+  it('owns archive descriptors and discovers, quarantines and fsyncs every managed export residue', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dz23-export-managed-')); roots.push(root); const firstRef = `build_${'1'.repeat(32)}`; const secondRef = `build_${'2'.repeat(32)}`; const runtime = exportRuntime(); const signal = new AbortController().signal
+    const first = await openManagedExportArchive(root, firstRef, runtime); const second = await openManagedExportArchive(root, secondRef, runtime); await first.handle.close(); await second.handle.close()
+    const stage = join(root, 'exports', `.stage-${firstRef}-${'a'.repeat(16)}`); const otherStage = join(root, 'exports', `.stage-${secondRef}-${'b'.repeat(16)}`); const orphan = join(root, 'exports', `.orphan-${'c'.repeat(16)}`); await mkdir(stage, { mode: 0o700 }); await mkdir(otherStage, { mode: 0o700 }); await mkdir(orphan, { mode: 0o700 })
+    await expect(listManagedExportArchives(root, runtime)).resolves.toEqual([firstRef, secondRef])
+    await cleanupManagedExportResources(root, firstRef, signal, runtime)
+    await expect(access(first.path)).rejects.toThrow(); await expect(access(stage)).rejects.toThrow(); await expect(access(orphan)).rejects.toThrow(); await expect(access(second.path)).resolves.toBeUndefined(); await expect(access(otherStage)).resolves.toBeUndefined()
+    await cleanupManagedExportResources(root, undefined, signal, runtime); await expect(listManagedExportArchives(root, runtime)).resolves.toEqual([])
+    await expect(openManagedExportArchive(root, 'bad', runtime)).rejects.toThrow('EXPORT_INVALID'); await expect(readValidatedPublishedArtifact(root, 'bad', runtime)).rejects.toThrow('EXPORT_INVALID'); await expect(cleanupManagedExportResources(root, 'bad', signal, runtime)).rejects.toThrow('EXPORT_INVALID')
+    const badArchive = join(root, `.archive-${firstRef}-${'d'.repeat(16)}.tar`); await mkdir(badArchive); await expect(listManagedExportArchives(root, runtime)).rejects.toThrow('EXPORT_INVALID'); await rm(badArchive, { recursive: true })
+    const badStage = join(root, 'exports', `.stage-${firstRef}-${'e'.repeat(16)}`); await writeFile(badStage, 'bad'); await expect(listManagedExportArchives(root, runtime)).rejects.toThrow('EXPORT_INVALID'); await rm(badStage)
+    const badOrphan = join(root, 'exports', `.orphan-${'f'.repeat(16)}`); await writeFile(badOrphan, 'bad'); await expect(cleanupManagedExportResources(root, undefined, signal, runtime)).rejects.toThrow('EXPORT_INVALID'); await rm(badOrphan)
+    const invalidDescriptor = exportRuntime({ open: (async (path, flags, mode) => { const handle = await open(path, flags, mode); if (!String(path).includes('.archive-')) return handle; return new Proxy(handle, { get(target, property) { if (property === 'stat') return async () => statProxy(await target.stat(), { isFile: () => false }); const member = Reflect.get(target, property, target); return typeof member === 'function' ? member.bind(target) : member } }) }) as typeof open })
+    await expect(openManagedExportArchive(root, `build_${'3'.repeat(32)}`, invalidDescriptor)).rejects.toThrow('EXPORT_INVALID')
+    const ignoredCleanup = exportRuntime({ open: invalidDescriptor.open, remove: (async () => { throw new Error('cannot remove') }) as typeof rm })
+    await expect(openManagedExportArchive(root, `build_${'4'.repeat(32)}`, ignoredCleanup)).rejects.toThrow('EXPORT_INVALID')
+    const windowsRuntime = exportRuntime({ platform: 'win32', uid: undefined }); const win = await openManagedExportArchive(join(root, 'win'), `build_${'5'.repeat(32)}`, windowsRuntime); await win.handle.close(); await cleanupManagedExportResources(join(root, 'win'), undefined, signal, windowsRuntime)
+  })
+
+  it('binds publication to the downloaded archive identity, size and digest', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dz23-export-binding-')); roots.push(root); const source = join(root, 'source'); const exports = join(root, 'published'); await validExportTree(source)
+    const artifact = await createVerifiedBuildArchive(root, 'source', await hashExportTree()); const stat = await lstat(artifact.archivePath); const ref = `build_${'8'.repeat(32)}`
+    await expect(publishValidatedDockerArchive(exports, ref, artifact.archivePath, new AbortController().signal, undefined, { dev: stat.dev, ino: stat.ino, size: stat.size, sha256: '0'.repeat(64) })).rejects.toThrow('ARTIFACT_CHANGED_DURING_STAGE')
+    await expect(publishValidatedDockerArchive(exports, ref, artifact.archivePath, new AbortController().signal, undefined, { dev: stat.dev, ino: stat.ino, size: stat.size, sha256: createHash('sha256').update(await readFile(artifact.archivePath)).digest('hex') })).resolves.toMatchObject({ relative_path: `exports/${ref}` }); await artifact.dispose()
   })
 
   it('rejects malformed tar structure, paths, types, checksums and incomplete exports', async () => {
@@ -97,6 +123,7 @@ describe('validated Docker export publication', () => {
     await expect(enforceExportRetention(exports, '../bad', 1, 100, new AbortController().signal)).rejects.toThrow('EXPORT_INVALID')
     await expect(enforceExportRetention(exports, `build_${'2'.repeat(32)}`, 1, 100, new AbortController().signal)).rejects.toThrow('CAPACITY_EXCEEDED')
     await expect(enforceExportRetention(exports, ref, 1, 1, new AbortController().signal)).rejects.toThrow('CAPACITY_EXCEEDED')
+    const badOrphan = join(exports, 'exports', `.orphan-${'a'.repeat(16)}`); await writeFile(badOrphan, 'x'); await expect(enforceExportRetention(exports, ref, 1, 100, new AbortController().signal)).rejects.toThrow('EXPORT_INVALID'); await rm(badOrphan)
     await writeFile(join(exports, 'exports', 'alien'), 'x')
     await expect(enforceExportRetention(exports, ref, 1, 100, new AbortController().signal)).rejects.toThrow('EXPORT_INVALID')
     await artifact.dispose()
@@ -149,6 +176,8 @@ describe('validated Docker export publication', () => {
     await attempt(interceptOpen(artifact.archivePath, { stat: async target => { const stat = await target.stat(); statCalls += 1; return statCalls === 2 ? { ...stat, mtimeMs: stat.mtimeMs + 1 } as never : stat } }), 'ARTIFACT_CHANGED_DURING_STAGE')
     await attempt(interceptOpen(undefined, { write: async (_target, buffer) => ({ bytesWritten: 0, buffer }) }, (_path, flags) => (flags & constants.O_WRONLY) !== 0))
     await attempt(interceptOpen(undefined, { stat: async target => { const stat = await target.stat(); return { ...stat, isFile: () => false } as never } }, (path, flags) => flags === (constants.O_RDONLY | constants.O_NOFOLLOW) && path.includes('.stage-') && !path.endsWith('.dz23-artifact.json')))
+    const archiveStat = await lstat(artifact.archivePath); const archiveSha = createHash('sha256').update(await readFile(artifact.archivePath)).digest('hex')
+    await expect(publishValidatedDockerArchive(exports, `build_${(++index + 20).toString(16).padStart(32, '0')}`, artifact.archivePath, signal, exportRuntime({ open: interceptOpen(artifact.archivePath, { read: async (_target, buffer) => ({ bytesRead: 0, buffer }) }) }), { dev: archiveStat.dev, ino: archiveStat.ino, size: archiveStat.size, sha256: archiveSha })).rejects.toThrow('EXPORT_INVALID')
     await artifact.dispose()
   })
 

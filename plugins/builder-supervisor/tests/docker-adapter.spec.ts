@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import type { FileHandle } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { describe, expect, it, vi } from 'vitest'
@@ -268,7 +269,11 @@ describe('server-authoritative Docker builder adapter', () => {
       await expect(first.exportArtifact(buildRef, signal)).rejects.toThrow('CLEANUP_INCOMPLETE')
       const valid = new FakeEngine(); valid.downloadPayload = exportTar()
       const secondRef = `build_${'4'.repeat(32)}`; const second = new DockerBuilderAdapter({ engine: valid, imageDigest: image, instanceId: 'test-instance', exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256, removeArchive: async () => { throw new Error('rm failed') } }); await second.prepare(secondRef, 'rm-two', artifact, signal)
-      await expect(second.exportArtifact(secondRef, signal)).resolves.toMatchObject({ relative_path: `exports/${secondRef}` })
+      await expect(second.exportArtifact(secondRef, signal)).rejects.toThrow('CLEANUP_INCOMPLETE')
+      const recovered = new DockerBuilderAdapter({ engine: valid, imageDigest: image, instanceId: 'test-instance', exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256 })
+      const invalidResidue = join(root, `.archive-${secondRef}-${'a'.repeat(16)}.tar`); await mkdir(invalidResidue)
+      await expect(recovered.exportArtifact(secondRef, signal)).rejects.toThrow('CLEANUP_INCOMPLETE'); await rm(invalidResidue, { recursive: true })
+      await expect(recovered.exportArtifact(secondRef, signal)).resolves.toMatchObject({ relative_path: `exports/${secondRef}` })
     } finally { await rm(root, { recursive: true, force: true }) }
   })
 
@@ -277,10 +282,44 @@ describe('server-authoritative Docker builder adapter', () => {
     const root = await mkdtemp(join(tmpdir(), 'dz23-adapter-export-published-')); const signal = new AbortController().signal
     try {
       const adapter = new DockerBuilderAdapter({ engine, imageDigest: image, instanceId: 'test-instance', exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256 }); await adapter.prepare(buildRef, 'published-cleanup', artifact, signal)
-      await expect(adapter.exportArtifact(buildRef, signal)).resolves.toMatchObject({ relative_path: `exports/${buildRef}`, files: 3 })
+      await expect(adapter.exportArtifact(buildRef, signal)).rejects.toThrow('CLEANUP_INCOMPLETE')
       expect(engine.containers.some(row => row.Labels['dz23.role'] === 'export')).toBe(true)
       engine.failExporterCleanup = false
       await expect(adapter.cleanup(buildRef, AbortSignal.timeout(1_000))).resolves.toBeUndefined()
+      await expect(adapter.exportArtifact(buildRef, signal)).resolves.toMatchObject({ relative_path: `exports/${buildRef}`, files: 3 })
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
+
+  it('serializes duplicate exports and reuses the publication created while waiting', async () => {
+    const engine = new FakeEngine(); engine.downloadPayload = exportTar(); const root = await mkdtemp(join(tmpdir(), 'dz23-adapter-export-race-')); const signal = new AbortController().signal
+    try {
+      const adapter = new DockerBuilderAdapter({ engine, imageDigest: image, instanceId: 'test-instance', exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256 }); await adapter.prepare(buildRef, 'export-race', artifact, signal)
+      let release!: () => void; const blocked = new Promise<void>(resolve => { release = resolve }); vi.spyOn(engine, 'waitContainer').mockImplementationOnce(async () => { await blocked; return { StatusCode: 0 } })
+      const first = adapter.exportArtifact(buildRef, signal); await vi.waitFor(() => expect(engine.created.some(row => row.body.Labels && object(row.body.Labels)['dz23.role'] === 'export')).toBe(true)); const second = adapter.exportArtifact(buildRef, signal); release()
+      await expect(Promise.all([first, second])).resolves.toEqual([expect.objectContaining({ relative_path: `exports/${buildRef}` }), expect.objectContaining({ relative_path: `exports/${buildRef}` })])
+      expect(engine.created.filter(row => object(row.body.Labels)['dz23.role'] === 'export')).toHaveLength(1)
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
+
+  it('treats export-garbage cleanup failures and archive identity drift as incomplete/invalid', async () => {
+    const signal = new AbortController().signal; const root = await mkdtemp(join(tmpdir(), 'dz23-adapter-export-residue-'))
+    try {
+      const engine = new FakeEngine(); engine.downloadPayload = exportTar(); engine.reportedDownloadBytesDelta = 1
+      const drifted = new DockerBuilderAdapter({ engine, imageDigest: image, instanceId: 'test-instance', exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256 }); await drifted.prepare(buildRef, 'drifted', artifact, signal)
+      await expect(drifted.exportArtifact(buildRef, signal)).rejects.toThrow('EXPORT_INVALID')
+      const cleanupFailure = new DockerBuilderAdapter({ engine: new FakeEngine(), imageDigest: image, instanceId: 'test-instance', exportRoot: join(root, 'cleanup'), templateStoreVersion: templateVersion, templateStoreSha256, cleanupExportResources: async () => { throw new Error('fs busy') } })
+      await expect(cleanupFailure.cleanup(buildRef, signal)).rejects.toThrow('CLEANUP_INCOMPLETE')
+      const exportCleanupEngine = new FakeEngine(); exportCleanupEngine.downloadPayload = exportTar(); const exportCleanup = new DockerBuilderAdapter({ engine: exportCleanupEngine, imageDigest: image, instanceId: 'test-instance', exportRoot: join(root, 'export-cleanup'), templateStoreVersion: templateVersion, templateStoreSha256, cleanupExportResources: async () => { throw new Error('fs busy') } }); await exportCleanup.prepare(buildRef, 'export-cleanup-failure', artifact, signal); await expect(exportCleanup.exportArtifact(buildRef, signal)).rejects.toThrow('CLEANUP_INCOMPLETE')
+      const closeEngine = new FakeEngine(); const closeFailure = new DockerBuilderAdapter({ engine: closeEngine, imageDigest: image, instanceId: 'test-instance', exportRoot: join(root, 'close'), templateStoreVersion: templateVersion, templateStoreSha256, closeArchive: async handle => { await handle.close(); throw new Error('close failed') } }); await closeFailure.prepare(buildRef, 'close-failure', artifact, signal); vi.spyOn(closeEngine, 'createVolume').mockRejectedValueOnce(new Error('volume unavailable')); await expect(closeFailure.exportArtifact(buildRef, signal)).rejects.toThrow('CLEANUP_INCOMPLETE')
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
+
+  it('includes managed archive residues in the Engine inventory', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dz23-adapter-archive-list-')); const signal = new AbortController().signal
+    try {
+      await mkdir(join(root, 'exports'), { recursive: true, mode: 0o700 }); await writeFile(join(root, `.archive-${buildRef}-${'a'.repeat(16)}.tar`), 'pending', { mode: 0o600 })
+      const adapter = new DockerBuilderAdapter({ engine: new FakeEngine(), imageDigest: image, instanceId: 'test-instance', exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256 })
+      await expect(adapter.listManaged(signal)).resolves.toEqual([buildRef]); await expect(adapter.cleanup(buildRef, signal)).resolves.toBeUndefined(); await expect(adapter.listManaged(signal)).resolves.toEqual([])
     } finally { await rm(root, { recursive: true, force: true }) }
   })
 
@@ -340,7 +379,7 @@ function create(engine: FakeEngine, timeoutMs = 1_000): DockerBuilderAdapter {
 }
 
 class FakeEngine implements DockerEnginePort {
-  imageId = image; pingFailure = false; archiveFailure = false; waitForAbort = false; keepVolume = false; keepContainer = false; failExporterCleanup = false; failStepRemoval = false; failRollbackInventory = false; exportExitCode = 0
+  imageId = image; pingFailure = false; archiveFailure = false; waitForAbort = false; keepVolume = false; keepContainer = false; failExporterCleanup = false; failStepRemoval = false; failRollbackInventory = false; exportExitCode = 0; reportedDownloadBytesDelta = 0
   templateDigest = templateStoreSha256
   logs = { stdout: Buffer.from('clean output'), stderr: Buffer.alloc(0) }
   readonly inspected: string[] = []; readonly archives: Array<{ destination: string; bytes: number }> = []
@@ -377,7 +416,7 @@ class FakeEngine implements DockerEnginePort {
     if (this.logs.stdout.byteLength + this.logs.stderr.byteLength > maximumBytes) throw new Error('DOCKER_RESPONSE_TOO_LARGE')
     return this.logs
   }
-  async downloadArchive(_container: string, _source: string, destination: string): Promise<{ readonly bytes: number; readonly sha256: string }> { await writeFile(destination, this.downloadPayload, { flag: 'wx' }); return { bytes: this.downloadPayload.length, sha256: createHash('sha256').update(this.downloadPayload).digest('hex') } }
+  async downloadArchive(_container: string, _source: string, destination: FileHandle): Promise<{ readonly bytes: number; readonly sha256: string }> { await destination.writeFile(this.downloadPayload); await destination.sync(); return { bytes: this.downloadPayload.length + this.reportedDownloadBytesDelta, sha256: createHash('sha256').update(this.downloadPayload).digest('hex') } }
   async stopContainer(id: string): Promise<void> {
     if (this.failExporterCleanup && this.containers.find(row => row.Id === id)?.Labels['dz23.role'] === 'export') throw new Error('stop exporter failed')
     this.waitResolvers.get(id)?.({ StatusCode: 137 }); this.waitResolvers.delete(id)

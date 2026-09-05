@@ -29,19 +29,28 @@ proprietário, modo, inode, PID e identidade de início do processo; reconcilia
 contêineres e volumes rotulados e remove órfãos. O replay durável é isolado pelo
 par `instance_id` + `policy_sha256`, conserva respostas completas por 24 horas e
 coleta somente resultados concluídos expirados. Claims de build ativos nunca
-expiram; depois de concluídos permanecem reservados durante a mesma janela.
+expiram; depois de concluídos permanecem reservados durante a mesma janela. O
+journal liga de forma durável `build_id`, `build_ref`, estado, export e resultado
+terminal. No reinício, recursos Docker sem claim são adotados e drenados; claim
+ativo sem recurso vira resultado terminal e nunca autoriza repetir o build. A
+retenção do próprio journal remove resultados antigos e libera a capacidade sem
+depender de um mapa volátil em memória.
 
 O preflight não confia apenas nas labels do store: monta o volume versionado
 somente para leitura em um verificador efêmero isolado, calcula a árvore real e
 exige o SHA-256 configurado antes de atestar `state: OK`.
 
 Um build aprovado sai pela API de archive do Docker, em streaming com teto e
-SHA-256. O tar é revalidado e extraído por descritores sem seguir links em um
-staging novo, depois publicado por `rename`; nenhum diretório do host é montado
-no contêiner. Somente `.next/standalone`, `.next/static`, `public` e o relatório
-de aceite podem sair. Retenção por contagem e quota global é aplicada antes de
-confirmar o resultado. `finish` é idempotente e conserva `exported` e
-`cleanup_pending` até o Docker confirmar que não restou recurso administrado.
+SHA-256, diretamente para um descritor criado pelo supervisor. Raiz, diretório
+pai, inode, device, tamanho e digest são revalidados antes da publicação. O tar é
+extraído sem seguir links em um staging novo, depois publicado por `rename`;
+nenhum diretório do host é montado no contêiner. Somente `.next/standalone`,
+`.next/static`, `public` e o relatório de aceite podem sair. Archives temporários,
+staging e quarentenas `.orphan-*` são recursos gerenciados, sincronizados e
+coletados no boot e antes de nova exportação. Retenção por contagem e quota global
+é aplicada antes de confirmar o resultado. `finish` é linearizado por
+`build_ref`: concorrentes recebem o mesmo resultado ou erro, e `exported` mais
+`cleanup_pending` permanecem duráveis até zero recurso administrado.
 
 ## Integração
 

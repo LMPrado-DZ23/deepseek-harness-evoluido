@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
-import { access, link, mkdir, mkdtemp, open, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { link, mkdir, mkdtemp, open, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import type { FileHandle } from 'node:fs/promises'
 import { createServer, request as httpRequest, type IncomingMessage, type ServerResponse } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -29,17 +30,21 @@ linux('Docker Engine Unix transport', () => {
     await fixture.close()
   })
 
-  it('streams archive to an exclusive descriptor, hashes it and removes partial files on cap/timeout', async () => {
+  it('streams archive to a caller-owned descriptor and hashes it under cap/deadline', async () => {
     const payload = Buffer.from('streamed-archive')
     const fixture = await daemon(async (request, response) => {
       if (request.url?.includes('slow')) return
       response.writeHead(200); response.write(payload.subarray(0, 3)); setImmediate(() => response.end(payload.subarray(3)))
     })
     const root = await mkdtemp(join(tmpdir(), 'dz23-engine-')); roots.push(root); const engine = new DockerEngine(fixture.socket, 1_000)
-    const target = join(root, 'ok.tar'); await expect(engine.downloadArchive('id', '/workspace/.', target, 100, new AbortController().signal)).resolves.toEqual({ bytes: payload.length, sha256: createHash('sha256').update(payload).digest('hex') })
+    const target = join(root, 'ok.tar'); await expect(download(engine, 'id', '/workspace/.', target, 100, new AbortController().signal)).resolves.toEqual({ bytes: payload.length, sha256: createHash('sha256').update(payload).digest('hex') })
     expect(await readFile(target)).toEqual(payload)
-    const capped = join(root, 'capped.tar'); await expect(engine.downloadArchive('id', '/workspace/.', capped, 2, new AbortController().signal)).rejects.toThrow('DOCKER_RESPONSE_TOO_LARGE'); await expect(access(capped)).rejects.toThrow()
-    const slow = join(root, 'slow.tar'); await expect(new DockerEngine(fixture.socket, 5).downloadArchive('slow', '/slow', slow, 100, AbortSignal.timeout(30))).rejects.toThrow(); await expect(access(slow)).rejects.toThrow()
+    const capped = join(root, 'capped.tar'); await expect(download(engine, 'id', '/workspace/.', capped, 2, new AbortController().signal)).rejects.toThrow('DOCKER_RESPONSE_TOO_LARGE')
+    const slow = join(root, 'slow.tar'); await expect(download(new DockerEngine(fixture.socket, 5), 'slow', '/slow', slow, 100, AbortSignal.timeout(30))).rejects.toThrow()
+    const occupied = await open(join(root, 'occupied.tar'), constants.O_CREAT | constants.O_EXCL | constants.O_RDWR, 0o600); await occupied.writeFile('x'); await expect(engine.downloadArchive('id', '/', occupied, 100, new AbortController().signal)).rejects.toThrow('INVALID_ARCHIVE'); await occupied.close()
+    const actual = await open(join(root, 'identity.tar'), constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600); let stats = 0
+    const changed = new Proxy(actual, { get(target, property) { if (property === 'stat') return async () => { const value = await target.stat(); return ++stats === 1 ? value : new Proxy(value, { get(row, key) { return key === 'ino' ? row.ino + 1 : Reflect.get(row, key, row) } }) }; const member = Reflect.get(target, property, target); return typeof member === 'function' ? member.bind(target) : member } }) as FileHandle
+    await expect(engine.downloadArchive('id', '/', changed, 100, new AbortController().signal)).rejects.toThrow('INVALID_ARCHIVE'); await actual.close()
     await fixture.close()
   })
 
@@ -75,7 +80,7 @@ linux('Docker Engine Unix transport', () => {
     const root = await mkdtemp(join(tmpdir(), 'dz23-engine-long-')); roots.push(root); const engine = new DockerEngine(fixture.socket, 5); const signal = AbortSignal.timeout(250)
     await expect(engine.waitContainer('long', signal)).resolves.toEqual({ StatusCode: 0 })
     await expect(engine.containerLogs('long', 100, signal)).resolves.toEqual({ stdout: Buffer.from('late'), stderr: Buffer.alloc(0) })
-    await expect(engine.downloadArchive('long', '/workspace/.', join(root, 'long.tar'), 100, signal)).resolves.toMatchObject({ bytes: archive.byteLength })
+    await expect(download(engine, 'long', '/workspace/.', join(root, 'long.tar'), 100, signal)).resolves.toMatchObject({ bytes: archive.byteLength })
     await fixture.close()
   })
 
@@ -117,8 +122,8 @@ linux('Docker Engine Unix transport', () => {
     await expect(engine.putArchive('one', '/', empty, 1, signal)).rejects.toThrow('INVALID_ARCHIVE')
     await expect(engine.containerLogs('one', 0, signal)).rejects.toThrow('INVALID_LOG_LIMIT')
     await expect(engine.containerLogs('one', 1, signal)).rejects.toThrow('DOCKER_STATUS_503')
-    await expect(engine.downloadArchive('one', '/', join(root, 'bad-limit'), 0, signal)).rejects.toThrow('INVALID_ARCHIVE_LIMIT')
-    await expect(engine.downloadArchive('one', '/', join(root, 'bad-download'), 1, signal)).rejects.toThrow('DOCKER_STATUS_503')
+    await expect(download(engine, 'one', '/', join(root, 'bad-limit'), 0, signal)).rejects.toThrow('INVALID_ARCHIVE_LIMIT')
+    await expect(download(engine, 'one', '/', join(root, 'bad-download'), 1, signal)).rejects.toThrow('DOCKER_STATUS_503')
     await expect(engine.ping(AbortSignal.timeout(100))).rejects.toThrow('DOCKER_STATUS_500')
     await expect(engine.inspectImage('bad-json', signal)).rejects.toThrow('INVALID_DOCKER_RESPONSE')
     await expect(engine.createContainer('bad-create', {}, signal)).rejects.toThrow('INVALID_DOCKER_RESPONSE')
@@ -156,18 +161,19 @@ linux('Docker Engine Unix transport', () => {
     await expect(new DockerEngine(huge.socket, 1_000).ping(new AbortController().signal)).rejects.toThrow('DOCKER_RESPONSE_TOO_LARGE'); await huge.close()
   })
 
-  it('fails closed on zero-byte archive writes and still attempts partial-file removal', async () => {
-    const fixture = await daemon((_request, response) => { response.writeHead(200); response.end('archive') }); let removed = false
+  it('fails closed on zero-byte archive writes to the caller-owned descriptor', async () => {
+    const fixture = await daemon((_request, response) => { response.writeHead(200); response.end('archive') })
     const runtime = {
       request: httpRequest,
       open: (async () => ({
         write: async () => ({ bytesWritten: 0, buffer: Buffer.alloc(0) }), sync: async () => undefined, close: async () => undefined,
       })) as unknown as typeof open,
-      remove: (async () => { removed = true; throw new Error('remove failed') }) as typeof rm,
+      remove: rm,
       noFollowFlag: constants.O_NOFOLLOW,
     }
-    await expect(new DockerEngine(fixture.socket, 100, runtime).downloadArchive('one', '/', '/unused', 100, new AbortController().signal)).rejects.toThrow('DOCKER_ARCHIVE_WRITE_FAILED')
-    expect(removed).toBe(true); await fixture.close()
+    const handle = { stat: async () => ({ isFile: () => true, nlink: 1, size: 0, dev: 1, ino: 1 }), write: async () => ({ bytesWritten: 0, buffer: Buffer.alloc(0) }), sync: async () => undefined } as unknown as FileHandle
+    await expect(new DockerEngine(fixture.socket, 100, runtime).downloadArchive('one', '/', handle, 100, new AbortController().signal)).rejects.toThrow('DOCKER_ARCHIVE_WRITE_FAILED')
+    await fixture.close()
   })
 
   it('rejects truncated and aborted live Docker responses', async () => {
@@ -178,7 +184,7 @@ linux('Docker Engine Unix transport', () => {
     })
     const root = await mkdtemp(join(tmpdir(), 'dz23-engine-abort-')); roots.push(root); const engine = new DockerEngine(fixture.socket, 100); const signal = new AbortController().signal
     await expect(engine.containerLogs('one', 100, signal)).rejects.toThrow('INVALID_DOCKER_LOG_STREAM')
-    await expect(engine.downloadArchive('one', '/', join(root, 'partial'), 100, signal)).rejects.toThrow()
+    await expect(download(engine, 'one', '/', join(root, 'partial'), 100, signal)).rejects.toThrow()
     await expect(engine.ping(signal)).rejects.toThrow()
     await fixture.close()
   })
@@ -199,10 +205,10 @@ linux('Docker Engine Unix transport', () => {
     await attempt(engine => engine.containerLogs('one', 100, signal), 200, response => { response.emit('data', new Uint8Array(frame(1, 'text'))); markComplete(response, false); response.emit('end') }, 'DOCKER_RESPONSE_ABORTED')
     await attempt(engine => engine.containerLogs('one', 100, signal), 200, response => { markComplete(response, true); response.emit('error', new Error('log failed')); response.emit('data', frame(1, 'ignored')); response.emit('end'); response.emit('aborted') }, 'log failed')
 
-    await attempt(engine => engine.downloadArchive('one', '/', join(root, 'incomplete.tar'), 100, signal), 200, response => { markComplete(response, false); response.emit('end') }, 'DOCKER_RESPONSE_ABORTED')
-    await attempt(engine => engine.downloadArchive('one', '/', join(root, 'status.tar'), 100, signal), undefined, response => response.emit('end'), 'DOCKER_STATUS_0')
-    await attempt(engine => engine.downloadArchive('one', '/', join(root, 'aborted.tar'), 100, signal), 200, response => { response.emit('data', 'text'); response.emit('aborted'); response.emit('error', new Error('later')) }, 'DOCKER_RESPONSE_ABORTED')
-    await attempt(engine => engine.downloadArchive('one', '/', join(root, 'race.tar'), 100, signal), 200, response => { markComplete(response, true); response.emit('end'); response.emit('error', new Error('race')) }, 'race')
+    await attempt(engine => download(engine, 'one', '/', join(root, 'incomplete.tar'), 100, signal), 200, response => { markComplete(response, false); response.emit('end') }, 'DOCKER_RESPONSE_ABORTED')
+    await attempt(engine => download(engine, 'one', '/', join(root, 'status.tar'), 100, signal), undefined, response => response.emit('end'), 'DOCKER_STATUS_0')
+    await attempt(engine => download(engine, 'one', '/', join(root, 'aborted.tar'), 100, signal), 200, response => { response.emit('data', 'text'); response.emit('aborted'); response.emit('error', new Error('later')) }, 'DOCKER_RESPONSE_ABORTED')
+    await attempt(engine => download(engine, 'one', '/', join(root, 'race.tar'), 100, signal), 200, response => { markComplete(response, true); response.emit('end'); response.emit('error', new Error('race')) }, 'race')
 
     await attempt(engine => engine.ping(signal), 200, response => { markComplete(response, false); response.emit('end') }, 'DOCKER_RESPONSE_ABORTED')
     await attempt(engine => engine.ping(signal), undefined, response => { markComplete(response, true); response.emit('end') }, 'DOCKER_STATUS_0')
@@ -232,4 +238,9 @@ function dockerRuntime(status: number | undefined, events: (response: PassThroug
     remove: rm,
     noFollowFlag: constants.O_NOFOLLOW,
   }
+}
+
+async function download(engine: DockerEngine, container: string, source: string, path: string, maximumBytes: number, signal: AbortSignal) {
+  const handle = await open(path, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600)
+  try { return await engine.downloadArchive(container, source, handle, maximumBytes, signal) } finally { await handle.close() }
 }

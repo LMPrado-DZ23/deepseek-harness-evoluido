@@ -1,7 +1,8 @@
 import { createHash, randomBytes } from 'node:crypto'
-import { constants } from 'node:fs'
+import { constants, type Dirent } from 'node:fs'
 import { lstat, mkdir, open, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, relative, resolve, sep } from 'node:path'
+import type { FileHandle } from 'node:fs/promises'
 import type { ExportedArtifact } from './model.js'
 import { BuilderSupervisorError } from './model.js'
 
@@ -14,13 +15,55 @@ export interface ExportRuntime {
   readonly realpath: typeof realpath; readonly rename: typeof rename; readonly remove: typeof rm; readonly writeFile: typeof writeFile
   readonly noFollowFlag: number; readonly platform: NodeJS.Platform; readonly uid: number | undefined; readonly randomHex: () => string
 }
+export interface ManagedExportArchive { readonly path: string; readonly handle: FileHandle; readonly dev: number; readonly ino: number }
+export interface ExpectedArchive { readonly dev: number; readonly ino: number; readonly size: number; readonly sha256: string }
 export function currentExportIdentity(platform: NodeJS.Platform, getuid: (() => number) | undefined): Pick<ExportRuntime, 'platform' | 'uid'> { return { platform, uid: getuid === undefined ? undefined : getuid() } }
 const DEFAULT_RUNTIME: ExportRuntime = { lstat, mkdir, open, readdir, realpath, rename, remove: rm, writeFile, noFollowFlag: constants.O_NOFOLLOW, ...currentExportIdentity(process.platform, process.getuid), randomHex: () => randomBytes(8).toString('hex') }
 
-export async function publishValidatedDockerArchive(exportRoot: string, buildRef: string, archivePath: string, signal: AbortSignal, runtime: ExportRuntime = DEFAULT_RUNTIME): Promise<ExportedArtifact> {
+export async function openManagedExportArchive(exportRoot: string, buildRef: string, runtime: ExportRuntime = DEFAULT_RUNTIME): Promise<ManagedExportArchive> {
+  if (!/^build_[a-f0-9]{32}$/u.test(buildRef)) invalid()
+  const root = resolve(exportRoot); await prepareExportDirectories(root, runtime)
+  const path = resolve(root, `.archive-${buildRef}-${runtime.randomHex()}.tar`); assertExportPathBeneath(root, path)
+  const handle = await runtime.open(path, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | runtime.noFollowFlag, 0o600)
+  try { const stat = await handle.stat(); if (!stat.isFile() || stat.nlink !== 1) invalid(); return { path, handle, dev: stat.dev, ino: stat.ino } } catch (error) { await handle.close(); await runtime.remove(path, { force: true }).catch(() => undefined); throw error }
+}
+
+export async function readValidatedPublishedArtifact(exportRoot: string, buildRef: string, runtime: ExportRuntime = DEFAULT_RUNTIME): Promise<ExportedArtifact | undefined> {
+  if (!/^build_[a-f0-9]{32}$/u.test(buildRef)) invalid(); const root = resolve(exportRoot); await prepareExportDirectories(root, runtime)
+  return readPublished(resolve(root, 'exports', buildRef), root, buildRef, runtime)
+}
+
+export async function listManagedExportArchives(exportRoot: string, runtime: ExportRuntime = DEFAULT_RUNTIME): Promise<readonly string[]> {
+  const root = resolve(exportRoot); await prepareExportDirectories(root, runtime); const refs = new Set<string>()
+  for (const entry of await runtime.readdir(root, { withFileTypes: true })) {
+    const match = /^\.archive-(build_[a-f0-9]{32})-[a-f0-9]{16}\.tar$/u.exec(entry.name); if (match === null) continue
+    const path = resolve(root, entry.name); await assertManagedArchive(path, entry, runtime); refs.add(match[1]!)
+  }
+  const parent = resolve(root, 'exports')
+  for (const entry of await runtime.readdir(parent, { withFileTypes: true })) { const match = /^\.stage-(build_[a-f0-9]{32})-[a-f0-9]{16}$/u.exec(entry.name); if (match === null) continue; const path = resolve(parent, entry.name); if (!entry.isDirectory() || entry.isSymbolicLink()) invalid(); await assertOwnedDirectory(path, runtime); refs.add(match[1]!) }
+  return [...refs].sort()
+}
+
+export async function cleanupManagedExportResources(exportRoot: string, buildRef: string | undefined, signal: AbortSignal, runtime: ExportRuntime = DEFAULT_RUNTIME): Promise<void> {
+  if (buildRef !== undefined && !/^build_[a-f0-9]{32}$/u.test(buildRef)) invalid(); const root = resolve(exportRoot); await prepareExportDirectories(root, runtime); const parent = resolve(root, 'exports')
+  for (const entry of await runtime.readdir(root, { withFileTypes: true })) {
+    signal.throwIfAborted(); const match = /^\.archive-(build_[a-f0-9]{32})-[a-f0-9]{16}\.tar$/u.exec(entry.name); if (match === null || (buildRef !== undefined && match[1] !== buildRef)) continue
+    const path = resolve(root, entry.name); await assertManagedArchive(path, entry, runtime); await runtime.remove(path); await syncDirectory(root, runtime)
+  }
+  for (const entry of await runtime.readdir(parent, { withFileTypes: true })) {
+    signal.throwIfAborted(); const stage = /^\.stage-(build_[a-f0-9]{32})-[a-f0-9]{16}$/u.exec(entry.name); const orphan = /^\.orphan-[a-f0-9]{16}$/u.test(entry.name)
+    if (!orphan && (stage === null || (buildRef !== undefined && stage[1] !== buildRef))) continue
+    const path = resolve(parent, entry.name); if (!entry.isDirectory() || entry.isSymbolicLink()) invalid(); await assertOwnedDirectory(path, runtime)
+    const quarantine = orphan ? path : resolve(parent, `.orphan-${runtime.randomHex()}`)
+    if (!orphan) { await runtime.rename(path, quarantine); await syncDirectory(parent, runtime) }
+    await runtime.remove(quarantine, { recursive: true }); await syncDirectory(parent, runtime)
+  }
+}
+
+export async function publishValidatedDockerArchive(exportRoot: string, buildRef: string, archivePath: string, signal: AbortSignal, runtime: ExportRuntime = DEFAULT_RUNTIME, expected?: ExpectedArchive): Promise<ExportedArtifact> {
   if (!/^build_[a-f0-9]{32}$/u.test(buildRef)) invalid()
   const root = resolve(exportRoot)
-  await runtime.mkdir(root, { recursive: true, mode: 0o700 }); await assertOwnedDirectory(root, runtime)
+  await prepareExportDirectories(root, runtime)
   const final = resolve(root, 'exports', buildRef)
   const parent = dirname(final); await runtime.mkdir(parent, { recursive: true, mode: 0o700 }); await assertOwnedDirectory(parent, runtime)
   const existing = await readPublished(final, root, buildRef, runtime)
@@ -28,16 +71,17 @@ export async function publishValidatedDockerArchive(exportRoot: string, buildRef
   const stage = resolve(parent, `.stage-${buildRef}-${runtime.randomHex()}`)
   await runtime.mkdir(stage, { mode: 0o700 })
   try {
-    const extracted = await extractTar(archivePath, stage, signal, runtime)
+    const extracted = await extractTar(archivePath, stage, signal, runtime, expected)
     await assertRequiredExport(stage, runtime)
     const result = await verifyPublishedTree(stage, runtime)
     if (result.files !== extracted.files || result.bytes !== extracted.bytes) invalid()
     const published: ExportedArtifact = { relative_path: `exports/${buildRef}`, ...result }
     await runtime.writeFile(resolve(stage, '.dz23-artifact.json'), `${JSON.stringify({ build_ref: buildRef, ...published })}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
-    await runtime.rename(stage, final)
+    await runtime.rename(stage, final); await syncDirectory(parent, runtime)
     return published
   } catch (error) {
-    await runtime.remove(stage, { recursive: true, force: true }).catch(() => undefined)
+    const orphan = resolve(parent, `.orphan-${runtime.randomHex()}`)
+    await runtime.rename(stage, orphan).then(async () => { await syncDirectory(parent, runtime); await runtime.remove(orphan, { recursive: true }); await syncDirectory(parent, runtime) }).catch(() => undefined)
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new BuilderSupervisorError('EXPORT_INVALID')
     throw error
   }
@@ -50,12 +94,16 @@ export async function enforceExportRetention(exportRoot: string, currentBuildRef
   const rows: Array<{ readonly path: string; readonly buildRef: string; readonly bytes: number; readonly mtimeMs: number }> = []
   for (const entry of await runtime.readdir(parent, { withFileTypes: true })) {
     signal.throwIfAborted()
+    if (/^\.orphan-[a-f0-9]{16}$/u.test(entry.name)) {
+      if (!entry.isDirectory() || entry.isSymbolicLink()) invalid()
+      const orphan = resolve(parent, entry.name); assertExportPathBeneath(root, orphan); await assertOwnedDirectory(orphan, runtime); await runtime.remove(orphan, { recursive: true }); await syncDirectory(parent, runtime); continue
+    }
     if (/^\.stage-build_[a-f0-9]{32}-[a-f0-9]{16}$/u.test(entry.name)) {
       if (!entry.isDirectory() || entry.isSymbolicLink()) invalid()
       const stage = resolve(parent, entry.name); assertExportPathBeneath(root, stage)
       const stat = await runtime.lstat(stage)
       if (!stat.isDirectory() || stat.isSymbolicLink() || await runtime.realpath(stage) !== stage) invalid()
-      const quarantine = resolve(parent, `.orphan-${runtime.randomHex()}`); await runtime.rename(stage, quarantine); await runtime.remove(quarantine, { recursive: true })
+      const quarantine = resolve(parent, `.orphan-${runtime.randomHex()}`); await runtime.rename(stage, quarantine); await syncDirectory(parent, runtime); await runtime.remove(quarantine, { recursive: true }); await syncDirectory(parent, runtime)
       continue
     }
     if (!entry.isDirectory() || entry.isSymbolicLink() || !/^build_[a-f0-9]{32}$/u.test(entry.name)) invalid()
@@ -70,15 +118,18 @@ export async function enforceExportRetention(exportRoot: string, currentBuildRef
   for (const row of rows.filter(item => item.buildRef !== currentBuildRef).sort((left, right) => left.mtimeMs - right.mtimeMs || left.buildRef.localeCompare(right.buildRef))) {
     if (count <= maximumExports && total <= maximumBytes) break
     const stat = await runtime.lstat(row.path); if (!stat.isDirectory() || stat.isSymbolicLink() || await runtime.realpath(row.path) !== row.path) invalid()
-    await runtime.remove(row.path, { recursive: true }); total -= row.bytes; count -= 1
+    await runtime.remove(row.path, { recursive: true }); await syncDirectory(parent, runtime); total -= row.bytes; count -= 1
   }
 }
 
-async function extractTar(archivePath: string, stage: string, signal: AbortSignal, runtime: ExportRuntime): Promise<{ readonly files: number; readonly bytes: number }> {
+async function extractTar(archivePath: string, stage: string, signal: AbortSignal, runtime: ExportRuntime, expected?: ExpectedArchive): Promise<{ readonly files: number; readonly bytes: number }> {
   const archive = await runtime.open(archivePath, constants.O_RDONLY | runtime.noFollowFlag)
   const names = new Set<string>(); let offset = 0; let files = 0; let bytes = 0; let terminated = false
   try {
     const archiveBefore = await archive.stat(); if (!archiveBefore.isFile() || archiveBefore.nlink !== 1) invalid()
+    if (expected !== undefined) {
+      if (archiveBefore.dev !== expected.dev || archiveBefore.ino !== expected.ino || archiveBefore.size !== expected.size || await hashFile(archive, archiveBefore.size, signal) !== expected.sha256) throw new BuilderSupervisorError('ARTIFACT_CHANGED_DURING_STAGE')
+    }
     while (offset + BLOCK <= archiveBefore.size) {
       signal.throwIfAborted()
       const header = Buffer.alloc(BLOCK); if ((await archive.read(header, 0, BLOCK, offset)).bytesRead !== BLOCK) invalid(); offset += BLOCK
@@ -155,6 +206,9 @@ async function assertOwnedDirectory(path: string, runtime: ExportRuntime): Promi
   if (!stat.isDirectory() || stat.isSymbolicLink()) invalid()
   if (runtime.platform !== 'win32' && ((stat.mode & 0o077) !== 0 || (runtime.uid !== undefined && stat.uid !== runtime.uid))) invalid()
 }
+async function assertManagedArchive(path: string, entry: Pick<Dirent, 'isFile' | 'isSymbolicLink'>, runtime: ExportRuntime): Promise<void> { const stat = await runtime.lstat(path); if (!entry.isFile() || entry.isSymbolicLink() || !stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || await runtime.realpath(path) !== path) invalid() }
+async function prepareExportDirectories(root: string, runtime: ExportRuntime): Promise<void> { await runtime.mkdir(root, { recursive: true, mode: 0o700 }); await assertOwnedDirectory(root, runtime); const parent = resolve(root, 'exports'); await runtime.mkdir(parent, { recursive: true, mode: 0o700 }); await assertOwnedDirectory(parent, runtime) }
+async function hashFile(handle: FileHandle, size: number, signal: AbortSignal): Promise<string> { const hash = createHash('sha256'); let offset = 0; const chunk = Buffer.allocUnsafe(64 * 1024); while (offset < size) { signal.throwIfAborted(); const read = await handle.read(chunk, 0, Math.min(chunk.byteLength, size - offset), offset); if (read.bytesRead === 0) invalid(); hash.update(chunk.subarray(0, read.bytesRead)); offset += read.bytesRead } return hash.digest('hex') }
 async function measuredDirectoryBytes(path: string, maximum: number, signal: AbortSignal, runtime: ExportRuntime): Promise<number> {
   let total = 0
   async function walk(directory: string): Promise<void> {
@@ -227,3 +281,4 @@ function cstring(value: Buffer): string { const zero = value.indexOf(0); return 
 export function assertExportPathBeneath(root: string, path: string): void { if (path === root || !path.startsWith(root + sep)) invalid() }
 async function writeAll(handle: Awaited<ReturnType<typeof open>>, value: Buffer): Promise<void> { let offset = 0; while (offset < value.byteLength) { const written = await handle.write(value, offset, value.byteLength - offset); if (written.bytesWritten === 0) invalid(); offset += written.bytesWritten } }
 function invalid(): never { throw new BuilderSupervisorError('EXPORT_INVALID') }
+async function syncDirectory(path: string, runtime: ExportRuntime): Promise<void> { if (runtime.platform === 'win32') return; const handle = await runtime.open(path, constants.O_RDONLY); try { await handle.sync() } finally { await handle.close() } }

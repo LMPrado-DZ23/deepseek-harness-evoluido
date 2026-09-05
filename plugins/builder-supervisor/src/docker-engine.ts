@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
 import type { ReadStream } from 'node:fs'
+import type { FileHandle } from 'node:fs/promises'
 import { open, rm } from 'node:fs/promises'
 import { request as httpRequest } from 'node:http'
 import type { ClientRequest } from 'node:http'
@@ -18,7 +19,7 @@ export interface DockerEnginePort {
   startContainer(id: string, signal: AbortSignal): Promise<void>
   waitContainer(id: string, signal: AbortSignal): Promise<{ readonly StatusCode: number }>
   containerLogs(id: string, maximumBytes: number, signal: AbortSignal): Promise<{ readonly stdout: Buffer; readonly stderr: Buffer }>
-  downloadArchive(container: string, source: string, destination: string, maximumBytes: number, signal: AbortSignal): Promise<{ readonly bytes: number; readonly sha256: string }>
+  downloadArchive(container: string, source: string, destination: FileHandle, maximumBytes: number, signal: AbortSignal): Promise<{ readonly bytes: number; readonly sha256: string }>
   stopContainer(id: string, signal: AbortSignal): Promise<void>
   removeContainer(id: string, signal: AbortSignal): Promise<void>
   listContainers(filters: Readonly<Record<string, readonly string[]>>, signal: AbortSignal): Promise<readonly Record<string, unknown>[]>
@@ -124,12 +125,10 @@ export class DockerEngine implements DockerEnginePort {
       request.once('error', fail); request.end()
     })
   }
-  async downloadArchive(container: string, source: string, destination: string, maximumBytes: number, signal: AbortSignal): Promise<{ readonly bytes: number; readonly sha256: string }> {
+  async downloadArchive(container: string, source: string, handle: FileHandle, maximumBytes: number, signal: AbortSignal): Promise<{ readonly bytes: number; readonly sha256: string }> {
     if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) throw new Error('INVALID_ARCHIVE_LIMIT')
-    const handle = await this.runtime.open(destination, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | this.runtime.noFollowFlag, 0o600)
-    let succeeded = false
-    try {
-      const result = await new Promise<{ readonly bytes: number; readonly sha256: string }>((resolve, reject) => {
+    const before = await handle.stat(); if (!before.isFile() || before.nlink !== 1 || before.size !== 0) throw new Error('INVALID_ARCHIVE')
+    const result = await new Promise<{ readonly bytes: number; readonly sha256: string }>((resolve, reject) => {
         let settled = false; let writes = Promise.resolve(); const fail = (error: unknown) => { if (!settled) { settled = true; void writes.then(() => reject(error), reject) } }
         const request = this.runtime.request({ socketPath: this.socketPath, method: 'GET', path: `/containers/${encodeURIComponent(container)}/archive?path=${encodeURIComponent(source)}`, signal }, response => {
           if (response.statusCode !== 200) { response.resume(); fail(new Error(`DOCKER_STATUS_${response.statusCode ?? 0}`)); return }
@@ -143,9 +142,9 @@ export class DockerEngine implements DockerEnginePort {
           response.once('end', () => { if (!settled) void writes.then(async () => { if (!response.complete) throw new Error('DOCKER_RESPONSE_ABORTED'); await handle.sync(); if (!settled) { settled = true; resolve({ bytes, sha256: hash.digest('hex') }) } }).catch(fail) })
         })
         request.once('error', fail); request.end()
-      })
-      succeeded = true; return result
-    } finally { await handle.close(); if (!succeeded) await this.runtime.remove(destination, { force: true }).catch(() => undefined) }
+    })
+    const after = await handle.stat(); if (!after.isFile() || after.nlink !== 1 || after.dev !== before.dev || after.ino !== before.ino || after.size !== result.bytes) throw new Error('INVALID_ARCHIVE')
+    return result
   }
   async stopContainer(id: string, signal: AbortSignal): Promise<void> { await this.#request('POST', `/containers/${encodeURIComponent(id)}/stop?t=3`, undefined, signal, [204, 304, 404]) }
   async removeContainer(id: string, signal: AbortSignal): Promise<void> { await this.#request('DELETE', `/containers/${encodeURIComponent(id)}?force=1&v=0`, undefined, signal, [204, 404]) }

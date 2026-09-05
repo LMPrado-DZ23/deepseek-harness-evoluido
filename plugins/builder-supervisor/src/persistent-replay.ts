@@ -3,6 +3,7 @@ import { constants } from 'node:fs'
 import { lstat, mkdir, open, readdir, realpath, rename, rm } from 'node:fs/promises'
 import { basename, dirname, resolve, sep } from 'node:path'
 import { BuilderSupervisorError } from './model.js'
+import type { BuilderErrorCode, BuildState, ExportedArtifact, FinishResult } from './model.js'
 import type { ReplayClaimPort, RpcReplayPort, RpcReplayValue } from './replay.js'
 
 const DEFAULT_RETENTION_MS = 24 * 60 * 60_000
@@ -122,39 +123,95 @@ export class FileReplayGuard implements ReplayClaimPort {
   }
 }
 
-interface ActiveBuildClaim { readonly state: 'active'; readonly build_id_hash: string }
-interface CompleteBuildClaim { readonly state: 'complete'; readonly build_id_hash: string; readonly completed_at: number }
-type BuildClaim = ActiveBuildClaim | CompleteBuildClaim
-export interface BuildIdClaimPort { claim(buildId: string): Promise<void>; release?(buildId: string): Promise<void>; complete?(buildId: string): Promise<void> }
+export interface BuildJournalRecord {
+  readonly build_id: string
+  readonly build_ref: string
+  readonly build_state: BuildState
+  readonly exported: ExportedArtifact | null
+  readonly cleanup_pending: boolean
+  readonly finish_result: FinishResult | null
+  readonly finish_error: BuilderErrorCode | null
+}
+interface BuildClaim extends BuildJournalRecord {
+  readonly version: 1
+  readonly state: 'active' | 'complete'
+  readonly build_id_hash: string
+  readonly updated_at: number
+  readonly completed_at: number | null
+}
+export interface BuildIdClaimPort {
+  claim(buildId: string, buildRef: string): Promise<void>
+  update(record: BuildJournalRecord): Promise<void>
+  release(buildId: string): Promise<void>
+  complete(record: BuildJournalRecord): Promise<void>
+  list(): Promise<readonly BuildJournalRecord[]>
+}
 export class FileBuildIdGuard implements BuildIdClaimPort {
   #tail: Promise<void> = Promise.resolve()
   constructor(private readonly directory: string, private readonly maximum = 65_536, private readonly retentionMs = DEFAULT_RETENTION_MS, private readonly now: () => number = Date.now, private readonly runtime: PersistentReplayRuntime = SYSTEM_RUNTIME) {
     if (!Number.isSafeInteger(maximum) || maximum < 1 || !Number.isSafeInteger(retentionMs) || retentionMs < 1) throw new Error('INVALID_BUILD_CLAIM_CONFIGURATION')
   }
-  async claim(buildId: string): Promise<void> {
-    validateBuildId(buildId)
+  async claim(buildId: string, buildRef = `build_${buildDigest(buildId).slice(0, 32)}`): Promise<void> {
+    validateBuildId(buildId); validateBuildRef(buildRef)
     const previous = this.#tail; let release!: () => void; this.#tail = new Promise(resolveTail => { release = resolveTail }); await previous
     try {
       await mkdir(this.directory, { recursive: true, mode: 0o700 }); await assertPrivateDirectory(resolve(this.directory), this.runtime)
-      const now = this.now(); const names = (await readdir(this.directory)).filter(name => /^build_[a-f0-9]{64}\.json$/u.test(name))
-      for (const name of names) { const path = resolve(this.directory, name); const claim = await readBuildClaim(path, this.runtime); if (claim.state === 'complete' && claim.completed_at <= now - this.retentionMs) await rm(path) }
+      await this.#collect()
       const digest = buildDigest(buildId); const path = resolve(this.directory, `build_${digest}.json`)
       try { await lstat(path); throw new BuilderSupervisorError('BUILD_ALREADY_EXISTS') } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
       const count = (await readdir(this.directory)).filter(name => /^build_[a-f0-9]{64}\.json$/u.test(name)).length
       if (count >= this.maximum) throw new BuilderSupervisorError('REPLAY_CAPACITY')
-      await writeExclusive(path, { state: 'active', build_id_hash: digest } satisfies ActiveBuildClaim, this.runtime); await syncDirectory(this.directory, this.runtime)
+      await writeExclusive(path, buildClaim({ build_id: buildId, build_ref: buildRef, build_state: 'PREPARED', exported: null, cleanup_pending: false, finish_result: null, finish_error: null }, 'active', this.now()), this.runtime); await syncDirectory(this.directory, this.runtime)
     } finally { release() }
+  }
+  async update(record: BuildJournalRecord): Promise<void> {
+    validateBuildRecord(record)
+    await this.#exclusive(async () => {
+      const path = this.#path(record.build_id); const claim = await readBuildClaim(path, this.runtime)
+      if (claim.state !== 'active' || claim.build_id !== record.build_id || claim.build_ref !== record.build_ref) throw new BuilderSupervisorError('RECOVERY_FAILED')
+      await writeReplace(path, buildClaim(record, 'active', this.now()), this.runtime)
+    })
   }
   async release(buildId: string): Promise<void> {
     validateBuildId(buildId)
-    await rm(resolve(this.directory, `build_${buildDigest(buildId)}.json`), { force: true })
+    await this.#exclusive(async () => { await rm(this.#path(buildId), { force: true }); await syncDirectory(this.directory, this.runtime) })
   }
-  async complete(buildId: string): Promise<void> {
-    validateBuildId(buildId); const digest = buildDigest(buildId); const path = resolve(this.directory, `build_${digest}.json`)
-    const claim = await readBuildClaim(path, this.runtime)
-    if (claim.state !== 'active' || claim.build_id_hash !== digest) throw new BuilderSupervisorError('RECOVERY_FAILED')
-    await writeReplace(path, { state: 'complete', build_id_hash: digest, completed_at: this.now() } satisfies CompleteBuildClaim, this.runtime)
+  async complete(value: BuildJournalRecord | string): Promise<void> {
+    if (typeof value === 'string') validateBuildId(value); else validateBuildRecord(value)
+    await this.#exclusive(async () => {
+      const path = this.#path(typeof value === 'string' ? value : value.build_id); const claim = await readBuildClaim(path, this.runtime)
+      const record = typeof value === 'string' ? completedCancelled(toJournalRecord(claim)) : value
+      if (claim.build_id !== record.build_id || claim.build_ref !== record.build_ref) throw new BuilderSupervisorError('RECOVERY_FAILED')
+      if (claim.state === 'complete') {
+        if (JSON.stringify(toJournalRecord(claim)) !== JSON.stringify(record)) throw new BuilderSupervisorError('RECOVERY_FAILED')
+        return
+      }
+      await writeReplace(path, buildClaim(record, 'complete', this.now()), this.runtime)
+    })
   }
+  async list(): Promise<readonly BuildJournalRecord[]> {
+    return this.#exclusive(async () => {
+      await mkdir(this.directory, { recursive: true, mode: 0o700 }); await assertPrivateDirectory(resolve(this.directory), this.runtime)
+      await this.#collect()
+      const records: BuildJournalRecord[] = []
+      for (const name of (await readdir(this.directory)).filter(name => /^build_[a-f0-9]{64}\.json$/u.test(name)).sort()) records.push(toJournalRecord(await readBuildClaim(resolve(this.directory, name), this.runtime)))
+      return records
+    })
+  }
+  async #collect(): Promise<void> {
+    const threshold = this.now() - this.retentionMs
+    for (const name of await readdir(this.directory)) {
+      if (!/^build_[a-f0-9]{64}\.json$/u.test(name)) continue
+      const path = resolve(this.directory, name); const claim = await readBuildClaim(path, this.runtime)
+      if (claim.state === 'complete' && claim.completed_at !== null && claim.completed_at <= threshold) await rm(path)
+    }
+    await syncDirectory(this.directory, this.runtime)
+  }
+  async #exclusive<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.#tail; let release!: () => void; this.#tail = new Promise(resolveTail => { release = resolveTail }); await previous
+    try { return await operation() } finally { release() }
+  }
+  #path(buildId: string): string { return resolve(this.directory, `build_${buildDigest(buildId)}.json`) }
 }
 
 async function assertPrivateDirectory(path: string, runtime: PersistentReplayRuntime): Promise<void> {
@@ -204,13 +261,16 @@ async function readBuildClaim(path: string, runtime: PersistentReplayRuntime): P
   let handle
   try {
     handle = await open(path, constants.O_RDONLY | noFollow(runtime)); const stat = await handle.stat()
-    if (!stat.isFile() || stat.nlink !== 1 || stat.size > 256) throw new BuilderSupervisorError('RECOVERY_FAILED')
+    if (!stat.isFile() || stat.nlink !== 1 || stat.size > 4_096) throw new BuilderSupervisorError('RECOVERY_FAILED')
     const value = JSON.parse(await handle.readFile('utf8')) as Record<string, unknown>
-    const keys = value.state === 'active' ? ['build_id_hash', 'state'] : ['build_id_hash', 'completed_at', 'state']
-    if (Object.keys(value).sort().join('\0') !== keys.join('\0') || typeof value.build_id_hash !== 'string' || !/^[a-f0-9]{64}$/u.test(value.build_id_hash)) throw new BuilderSupervisorError('RECOVERY_FAILED')
-    if (value.state === 'active') return value as unknown as ActiveBuildClaim
-    if (value.state !== 'complete' || !Number.isSafeInteger(value.completed_at) || Number(value.completed_at) < 0) throw new BuilderSupervisorError('RECOVERY_FAILED')
-    return value as unknown as CompleteBuildClaim
+    const keys = ['build_id', 'build_id_hash', 'build_ref', 'build_state', 'cleanup_pending', 'completed_at', 'exported', 'finish_error', 'finish_result', 'state', 'updated_at', 'version']
+    if (Object.keys(value).sort().join('\0') !== keys.join('\0') || value.version !== 1 || (value.state !== 'active' && value.state !== 'complete') || typeof value.build_id_hash !== 'string' || !/^[a-f0-9]{64}$/u.test(value.build_id_hash)) throw new BuilderSupervisorError('RECOVERY_FAILED')
+    const record = value as unknown as BuildClaim
+    validateBuildRecord(record)
+    if (record.build_id_hash !== buildDigest(record.build_id) || !Number.isSafeInteger(record.updated_at) || record.updated_at < 0) throw new BuilderSupervisorError('RECOVERY_FAILED')
+    if (record.state === 'active' ? record.completed_at !== null : (!Number.isSafeInteger(record.completed_at) || Number(record.completed_at) < 0)) throw new BuilderSupervisorError('RECOVERY_FAILED')
+    if (record.state === 'active' ? (record.finish_result !== null || record.finish_error !== null) : (record.finish_result === null && record.finish_error === null) || record.cleanup_pending) throw new BuilderSupervisorError('RECOVERY_FAILED')
+    return record
   } catch (error) {
     if (error instanceof BuilderSupervisorError) throw error
     throw new BuilderSupervisorError('RECOVERY_FAILED')
@@ -230,5 +290,21 @@ function encodeResult(fingerprint: string, value: RpcReplayValue, completedAt: n
 function decodeResult(value: PersistedRpcResult): RpcReplayValue { return { status: value.status, headers: { ...value.headers }, body: Buffer.from(value.body, 'base64') } }
 function clone(value: RpcReplayValue): RpcReplayValue { return { status: value.status, headers: { ...value.headers }, body: Buffer.from(value.body) } }
 function validateBuildId(value: string): void { if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/u.test(value)) throw new BuilderSupervisorError('BUILD_ALREADY_EXISTS') }
+function validateBuildRef(value: string): void { if (!/^build_[a-f0-9]{32}$/u.test(value)) throw new BuilderSupervisorError('BUILD_ALREADY_EXISTS') }
 function buildDigest(value: string): string { return createHash('sha256').update(value).digest('hex') }
+function buildClaim(record: BuildJournalRecord, state: 'active' | 'complete', now: number): BuildClaim {
+  return { version: 1, state, build_id: record.build_id, build_id_hash: buildDigest(record.build_id), build_ref: record.build_ref, build_state: record.build_state, exported: record.exported, cleanup_pending: record.cleanup_pending, finish_result: record.finish_result, finish_error: record.finish_error, updated_at: now, completed_at: state === 'complete' ? now : null }
+}
+function toJournalRecord(record: BuildClaim): BuildJournalRecord { return { build_id: record.build_id, build_ref: record.build_ref, build_state: record.build_state, exported: record.exported, cleanup_pending: record.cleanup_pending, finish_result: record.finish_result, finish_error: record.finish_error } }
+function completedCancelled(record: BuildJournalRecord): BuildJournalRecord { const finish_result: FinishResult = { build_ref: record.build_ref, final_state: 'CANCELLED', exported: null, cleanup_pending: false, cleaned: true }; return { ...record, build_state: 'CANCELLED', exported: null, cleanup_pending: false, finish_result, finish_error: null } }
+function validateBuildRecord(record: BuildJournalRecord): void {
+  try { validateBuildId(record.build_id); validateBuildRef(record.build_ref) } catch { throw new BuilderSupervisorError('RECOVERY_FAILED') }
+  if (!['PREPARED', 'INSTALLING', 'INSTALL_OK', 'BUILDING', 'BUILD_OK', 'TEST_RUNNING', 'TEST_OK', 'E2E_RUNNING', 'E2E_OK', 'FAILED', 'CANCELLED'].includes(record.build_state) || typeof record.cleanup_pending !== 'boolean') throw new BuilderSupervisorError('RECOVERY_FAILED')
+  if (record.exported !== null && (!/^exports\/build_[a-f0-9]{32}$/u.test(record.exported.relative_path) || !/^[a-f0-9]{64}$/u.test(record.exported.sha256) || !Number.isSafeInteger(record.exported.files) || record.exported.files < 1 || !Number.isSafeInteger(record.exported.bytes) || record.exported.bytes < 0)) throw new BuilderSupervisorError('RECOVERY_FAILED')
+  if (record.exported !== null && record.build_state !== 'E2E_OK') throw new BuilderSupervisorError('RECOVERY_FAILED')
+  if (record.finish_error !== null && !['ARTIFACT_CHANGED_DURING_STAGE', 'ARTIFACT_HASH_MISMATCH', 'ARTIFACT_OUTSIDE_ROOT', 'ARTIFACT_UNSAFE_ENTRY', 'BUILD_ALREADY_EXISTS', 'BUILD_NOT_FOUND', 'BUILD_NOT_TERMINAL', 'CAPACITY_EXCEEDED', 'CLEANUP_INCOMPLETE', 'EXPORT_INVALID', 'RECOVERY_FAILED', 'INVALID_STEP_ORDER', 'REQUEST_REPLAY', 'REQUEST_ID_CONFLICT', 'REPLAY_CAPACITY'].includes(record.finish_error)) throw new BuilderSupervisorError('RECOVERY_FAILED')
+  if (record.finish_error !== null && record.build_state !== 'E2E_OK') throw new BuilderSupervisorError('RECOVERY_FAILED')
+  if (record.finish_result !== null && (record.finish_result.build_ref !== record.build_ref || record.finish_result.final_state !== record.build_state || record.finish_result.cleanup_pending || !record.finish_result.cleaned || JSON.stringify(record.finish_result.exported) !== JSON.stringify(record.exported))) throw new BuilderSupervisorError('RECOVERY_FAILED')
+  if (record.finish_result !== null && record.finish_error !== null) throw new BuilderSupervisorError('RECOVERY_FAILED')
+}
 async function syncDirectory(path: string, runtime: PersistentReplayRuntime): Promise<void> { if (runtime.platform === 'win32') return; const handle = await open(path, constants.O_RDONLY); try { await handle.sync() } finally { await handle.close() } }
