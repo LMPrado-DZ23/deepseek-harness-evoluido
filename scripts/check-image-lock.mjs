@@ -51,7 +51,7 @@ export function validateImageLock(lock) {
     throw new Error('digests de plataforma Playwright inválidos')
   }
 
-  exactKeys(lock.tools, ['dockerfileFrontend', 'git', 'nodeArchives', 'pnpm'], 'tools')
+  exactKeys(lock.tools, ['dockerfileFrontend', 'git', 'nodeArchives', 'pnpm', 'postgresClient'], 'tools')
   const dockerfileFrontend = lock.tools.dockerfileFrontend
   exactKeys(dockerfileFrontend, ['reference', 'digest'], 'tools.dockerfileFrontend')
   if (dockerfileFrontend.reference !== 'docker.io/docker/dockerfile:1.7' || !DIGEST.test(dockerfileFrontend.digest)) {
@@ -60,7 +60,18 @@ export function validateImageLock(lock) {
   const git = lock.tools.git
   exactKeys(git, ['package', 'version', 'repository'], 'tools.git')
   if (git.package !== 'git' || git.version !== '1:2.39.5-0+deb12u3') throw new Error('pacote Git divergente')
-  if (git.repository !== 'http://deb.debian.org/debian bookworm') throw new Error('repositório Git divergente')
+  if (git.repository !== 'http://snapshot.debian.org/archive/debian/20260904T000000Z bookworm') throw new Error('repositório Git divergente')
+  const postgres = lock.tools.postgresClient
+  exactKeys(postgres, ['debianSnapshot', 'packages', 'pgDumpVersion', 'pgRestoreVersion'], 'tools.postgresClient')
+  if (!/^\d{8}T\d{6}Z$/u.test(postgres.debianSnapshot)) throw new Error('snapshot PostgreSQL inválido')
+  exactKeys(postgres.packages, ['postgresql-client-15', 'postgresql-client-common', 'libpq5'], 'tools.postgresClient.packages')
+  for (const [name, version] of Object.entries(postgres.packages)) {
+    if (typeof version !== 'string' || version === '' || version.includes('*')) throw new Error(`versão PostgreSQL não fixada: ${name}`)
+  }
+  if (postgres.pgDumpVersion !== 'pg_dump (PostgreSQL) 15.19 (Debian 15.19-0+deb12u1)' ||
+      postgres.pgRestoreVersion !== 'pg_restore (PostgreSQL) 15.19 (Debian 15.19-0+deb12u1)') {
+    throw new Error('binários PostgreSQL divergentes')
+  }
   const nodeArchives = lock.tools.nodeArchives
   exactKeys(nodeArchives, ['version', 'baseUrl', 'platforms'], 'tools.nodeArchives')
   if (nodeArchives.version !== '22.23.1' || nodeArchives.baseUrl !== 'https://nodejs.org/dist/v22.23.1') {
@@ -119,6 +130,20 @@ export function validateDockerfileBase(dockerfile, lock) {
   }
   if (externalCount !== 1) {
     throw new Error('Dockerfile do Studio precisa conter exatamente uma base externa fixada')
+  }
+  const postgres = lock.tools.postgresClient
+  const snapshot = postgres.debianSnapshot
+  for (const repository of ['debian', 'debian-security']) {
+    const expectedRepository = `http://snapshot.debian.org/archive/${repository}/${snapshot}`
+    if (!dockerfile.includes(expectedRepository)) throw new Error(`Dockerfile não usa snapshot fixado: ${expectedRepository}`)
+  }
+  for (const [name, version] of Object.entries(postgres.packages)) {
+    if (!dockerfile.includes(`${name}=${version}`)) throw new Error(`Dockerfile não fixa ${name}=${version}`)
+    if (!dockerfile.includes(`dpkg-query -W -f='\${Version}' ${name}`)) throw new Error(`Dockerfile não valida ${name} instalado`)
+  }
+  if (!dockerfile.includes(`test "$(pg_dump --version)" = '${postgres.pgDumpVersion}'`) ||
+      !dockerfile.includes(`test "$(pg_restore --version)" = '${postgres.pgRestoreVersion}'`)) {
+    throw new Error('Dockerfile não valida versões exatas de pg_dump/pg_restore')
   }
   return { base: `${lock.images.node.reference}@${lock.images.node.indexDigest}`, frontend: expectedSyntax.slice('# syntax='.length), fromLines }
 }

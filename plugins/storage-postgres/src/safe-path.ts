@@ -1,7 +1,7 @@
 import { constants } from 'node:fs'
 import type { FileHandle } from 'node:fs/promises'
 import { lstat, mkdir, open, realpath } from 'node:fs/promises'
-import { basename, dirname, join, parse, relative, resolve, sep } from 'node:path'
+import { basename, dirname, join, parse, resolve, sep } from 'node:path'
 
 interface FileIdentity { dev: bigint; ino: bigint }
 
@@ -82,9 +82,7 @@ export function childPath(directory: PinnedDirectory, name: string): string {
   if (name === '' || name === '.' || name === '..' || name.includes('/') || name.includes('\\') || name.includes('\0')) {
     throw new Error(`unsafe storage child name '${name}'`)
   }
-  const target = join(directory.path, name)
-  if (relative(directory.path, target).startsWith('..')) throw new Error(`unsafe storage child name '${name}'`)
-  return target
+  return join(directory.path, name)
 }
 
 /**
@@ -107,6 +105,23 @@ export async function openNewPinnedFile(directory: PinnedDirectory, name: string
   try {
     const stats = await handle.stat({ bigint: true })
     if (!stats.isFile()) throw new Error(`unsafe storage path: '${target}' is not a regular file`)
+    await assertPinnedDirectory(directory)
+    return handle
+  } catch (error) {
+    await handle.close().catch(() => undefined)
+    throw error
+  }
+}
+
+/** New private regular file that can be hashed through the creating descriptor. */
+export async function openNewPinnedReadWriteFile(directory: PinnedDirectory, name: string, mode = 0o600): Promise<FileHandle> {
+  await assertPinnedDirectory(directory)
+  const target = pinnedChildPath(directory, name)
+  const noFollow = constants.O_NOFOLLOW ?? 0
+  const handle = await open(target, constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | noFollow, mode)
+  try {
+    const stats = await handle.stat({ bigint: true })
+    if (!stats.isFile() || stats.nlink !== 1n) throw new Error(`unsafe storage path: '${target}' is not a private regular file`)
     await assertPinnedDirectory(directory)
     return handle
   } catch (error) {

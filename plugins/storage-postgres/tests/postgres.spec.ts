@@ -1,5 +1,5 @@
 import { execFile, spawn } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { access, chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { delimiter, join, resolve } from 'node:path'
@@ -289,11 +289,14 @@ describePostgres('postgres backend against PostgreSQL 16', () => {
       await sourceUnit.close()
       const bundle = await exportStorage(source, STUDIO_DOMAIN_SPECS, 'b'.repeat(64), '2026-09-02T00:00:00.000Z')
       const input = join(temporary, 'input.json')
-      await writeFile(input, JSON.stringify(bundle), { flag: 'wx', mode: 0o600 })
+      const serialized = JSON.stringify(bundle)
+      await writeFile(input, serialized, { flag: 'wx', mode: 0o600 })
+      await writeFile(`${input}.sha256`, `${createHash('sha256').update(serialized).digest('hex')}  input.json\n`, { flag: 'wx', mode: 0o600 })
 
       const toolDirectory = join(temporary, 'bin')
       await mkdir(toolDirectory)
       const pgDump = join(toolDirectory, 'pg_dump')
+      const pgRestore = join(toolDirectory, 'pg_restore')
       // With a test container, pg_dump is bridged through docker exec; without one the local client tools are used as-is.
       await writeFile(pgDump, `#!/usr/bin/env bash
 set -euo pipefail
@@ -308,6 +311,12 @@ done
 exec docker exec -i "$container" pg_dump --username dz23_test --dbname dz23_test "\${filtered[@]}"
 `)
       await chmod(pgDump, 0o700)
+      await writeFile(pgRestore, `#!/usr/bin/env bash
+set -euo pipefail
+file="\${@: -1}"
+exec docker exec -i "$DZ23_POSTGRES_TEST_CONTAINER" pg_restore --list < "$file"
+`)
+      await chmod(pgRestore, 0o700)
       const cliEnvironment = {
         ...process.env,
         PATH: postgresContainer === undefined ? (process.env.PATH ?? '') : `${toolDirectory}${delimiter}${process.env.PATH ?? ''}`,
@@ -316,7 +325,7 @@ exec docker exec -i "$container" pg_dump --username dz23_test --dbname dz23_test
       const cli = resolve('scripts/import-postgres-storage.ts')
       const invoke = (schema: string, backup: string, extra: string[] = []) => run(process.execPath, [
         '--import', 'tsx', cli, '--input', input, '--dsn-ref', 'DZ23_IMPORT_TEST_DSN',
-        '--schema', schema, '--ssl', 'off', '--write', '--backup', backup, ...extra,
+        '--schema', schema, '--ssl', 'off', '--write', '--attempt-id', `attempt-${schema}`, '--backup', backup, ...extra,
       ], { env: cliEnvironment })
 
       const freshSchema = schemaName('cli_fresh')
@@ -378,11 +387,13 @@ exec docker exec -i "$container" pg_dump --username dz23_test --dbname dz23_test
 
       const bundle = await exportStorage(backend(schemaName('foreign_source')), STUDIO_DOMAIN_SPECS, 'c'.repeat(64), '2026-09-04T00:00:00.000Z')
       const input = join(temporary, 'input.json')
-      await writeFile(input, JSON.stringify(bundle), { flag: 'wx', mode: 0o600 })
+      const serialized = JSON.stringify(bundle)
+      await writeFile(input, serialized, { flag: 'wx', mode: 0o600 })
+      await writeFile(`${input}.sha256`, `${createHash('sha256').update(serialized).digest('hex')}  input.json\n`, { flag: 'wx', mode: 0o600 })
       const cli = resolve('scripts/import-postgres-storage.ts')
       const attempt = (schema: string, extra: string[] = []) => run(process.execPath, [
         '--import', 'tsx', cli, '--input', input, '--dsn-ref', 'DZ23_IMPORT_TEST_DSN',
-        '--schema', schema, '--ssl', 'off', '--write', '--backup', join(temporary, `${schema}.dump`), ...extra,
+        '--schema', schema, '--ssl', 'off', '--write', '--attempt-id', `attempt-${schema}`, '--backup', join(temporary, `${schema}.dump`), ...extra,
       ], { env: { ...process.env, DZ23_IMPORT_TEST_DSN: dsn! } })
 
       // 3) A schema that holds NO relation at all — only a type, a domain and a function. `pg_class`

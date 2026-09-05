@@ -47,11 +47,15 @@ Coloque a DSN numa variável de ambiente, por exemplo `DZ23_POSTGRES_DSN`. Nunca
 passe a senha na linha de comando. Faça primeiro o dry-run:
 
 ```bash
-pnpm storage:import-postgres -- --input /caminho/export.json --dsn-ref DZ23_POSTGRES_DSN --schema dz23_storage --ssl verify-full
+pnpm storage:import-postgres -- --input /caminho/export.json --attempt-id restauracao-<data>-<numero> --dsn-ref DZ23_POSTGRES_DSN --schema dz23_storage --ssl verify-full
 ```
 
-Para escrever, instale `pg_dump`, escolha um arquivo de backup novo e acrescente
-`--write --backup /caminho/antes.dump`. Se o alvo já tiver dados, pare e confira.
+Para escrever, instale `pg_dump` e `pg_restore`, escolha um arquivo de backup novo e acrescente
+`--attempt-id restauracao-<data>-<numero> --write --backup /caminho/antes.dump`. Use o mesmo
+`attempt-id` ao retomar uma tentativa interrompida; nunca reutilize esse identificador com outra
+cópia. Fora do contêiner oficial, configure também `DZ23_OPERATOR_STATE_DIR` com um diretório
+privado e persistente da instalação; no Compose oficial ele já é
+`/var/lib/dz23-studio/operator`. Se o alvo já tiver dados, pare e confira.
 A ferramenta recusa sobrescrever um backup que já existe.
 A primeira importação num servidor sem schema não cria dump, pois ainda não há
 dado anterior; o relatório mostra `not-needed-empty-target`.

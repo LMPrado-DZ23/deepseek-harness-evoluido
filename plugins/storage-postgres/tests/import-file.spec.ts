@@ -1,9 +1,11 @@
-import { mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { link, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { exportedDomain, sealBundle } from '../src/bundle.ts'
-import { readStorageBundleFile } from '../src/import-file.ts'
+import { readStorageBundleFile, readVerifiedStorageBundleFile } from '../src/import-file.ts'
 
 const scratch: string[] = []
 afterEach(async () => {
@@ -55,5 +57,67 @@ describe('bounded storage import reader', () => {
       throw error
     }
     await expect(readStorageBundleFile(linked)).rejects.toThrow()
+  })
+
+  it('hashes, verifies and parses the same private descriptor', async () => {
+    const root = await directory()
+    const input = join(root, 'bundle.json')
+    const serialized = JSON.stringify(validBundle())
+    const digest = createHash('sha256').update(serialized).digest('hex')
+    await writeFile(input, serialized)
+    await writeFile(`${input}.sha256`, `${digest}  bundle.json\n`)
+    await expect(readVerifiedStorageBundleFile(input)).resolves.toMatchObject({ inputSha256: digest, bytes: Buffer.byteLength(serialized), bundle: validBundle() })
+    await writeFile(`${input}.sha256`, `${'0'.repeat(64)}  bundle.json\n`)
+    await expect(readVerifiedStorageBundleFile(input)).rejects.toThrow('não corresponde')
+  })
+
+  it('refuses hardlinked input and cancellation before reading', async () => {
+    const root = await directory()
+    const input = join(root, 'bundle.json')
+    const alias = join(root, 'alias.json')
+    const serialized = JSON.stringify(validBundle())
+    await writeFile(input, serialized)
+    await link(input, alias)
+    await writeFile(`${input}.sha256`, `${createHash('sha256').update(serialized).digest('hex')}  bundle.json\n`)
+    await expect(readVerifiedStorageBundleFile(input)).rejects.toThrow('private regular file')
+    await rm(alias)
+    const controller = new AbortController()
+    controller.abort(new Error('cancelled'))
+    await expect(readVerifiedStorageBundleFile(input, undefined, controller.signal)).rejects.toThrow('cancelled')
+  })
+
+  it('refuses a symlink, hardlink or FIFO in place of the verification sidecar', async () => {
+    const root = await directory()
+    const input = join(root, 'bundle.json')
+    const digestFile = join(root, 'digest.txt')
+    const serialized = JSON.stringify(validBundle())
+    const digest = createHash('sha256').update(serialized).digest('hex')
+    await writeFile(input, serialized)
+    await writeFile(digestFile, `${digest}  bundle.json\n`)
+    try {
+      await symlink(digestFile, `${input}.sha256`, 'file')
+    } catch (error) {
+      if ((error as { code?: string }).code === 'EPERM') return
+      throw error
+    }
+    await expect(readVerifiedStorageBundleFile(input)).rejects.toThrow()
+    await rm(`${input}.sha256`)
+    await link(digestFile, `${input}.sha256`)
+    await expect(readVerifiedStorageBundleFile(input)).rejects.toThrow('sidecar is invalid')
+    await rm(`${input}.sha256`)
+    if (process.platform !== 'win32') {
+      execFileSync('mkfifo', [`${input}.sha256`])
+      // O_NONBLOCK is deliberately not needed: lstat/open identity validation
+      // rejects the FIFO before any read is attempted.
+      await expect(readVerifiedStorageBundleFile(input)).rejects.toThrow()
+    }
+  })
+
+  it('refuses a FIFO input before it can block the operator', async () => {
+    if (process.platform === 'win32') return
+    const root = await directory()
+    const input = join(root, 'bundle.json')
+    execFileSync('mkfifo', [input])
+    await expect(readVerifiedStorageBundleFile(input)).rejects.toThrow('not a regular file')
   })
 })

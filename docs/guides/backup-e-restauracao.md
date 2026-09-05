@@ -73,9 +73,13 @@ memória do servidor.
 ## Restaurar
 
 1. Pare o Studio. A restauração recusa continuar enquanto ele estiver ligado.
+   Fora do contêiner oficial, defina `DZ23_OPERATOR_STATE_DIR` para um diretório
+   privado e persistente desta instalação. No Compose oficial ele já é
+   `/var/lib/dz23-studio/operator`; é ali que a retomada segura registra cada
+   `attempt-id`, sem guardar DSN ou senha.
 2. Veja o que será feito, sem mudar nada:
    ```
-   pnpm storage:import-postgres --input studio-backup-<data-e-hora>.json --dsn-ref DZ23_POSTGRES_DSN --schema dz23_storage --ssl verify-full
+   pnpm storage:import-postgres --input studio-backup-<data-e-hora>.json --attempt-id restauracao-20260904-01 --dsn-ref DZ23_POSTGRES_DSN --schema dz23_storage --ssl verify-full
    ```
    O `--ssl` do comando é a **única** autoridade sobre a conexão: se o endereço do
    banco trouxer `sslmode`, `sslrootcert` ou parecidos, eles não conseguem
@@ -85,7 +89,7 @@ memória do servidor.
 3. Restaure de verdade. Se o banco já tiver dados, o comando exige que você
    confirme a substituição e guarda antes uma cópia física do que existia:
    ```
-   pnpm storage:import-postgres --input studio-backup-<data-e-hora>.json --dsn-ref DZ23_POSTGRES_DSN --schema dz23_storage --ssl verify-full --write --backup /caminho/seguro/antes-de-restaurar.dump --force --confirm REPLACE_DZ23_STORAGE
+   pnpm storage:import-postgres --input studio-backup-<data-e-hora>.json --attempt-id restauracao-20260904-01 --dsn-ref DZ23_POSTGRES_DSN --schema dz23_storage --ssl verify-full --write --backup /caminho/seguro/antes-de-restaurar.dump --force --confirm REPLACE_DZ23_STORAGE
    ```
 4. Ligue o Studio.
 

@@ -32,7 +32,7 @@ export type BackupLogLevel = 'info' | 'warn'
 
 /** What actually produces one backup file. The scheduler only names files, prunes and records. */
 export interface BackupRunner {
-  run(target: string): Promise<{ sha256: string; bytes: number; records: number; domains: number }>
+  run(target: string, signal?: AbortSignal): Promise<{ sha256: string; bytes: number; records: number; domains: number }>
 }
 
 /**
@@ -42,8 +42,10 @@ export interface BackupRunner {
 export function inProcessBackupRunner(snapshot: () => Promise<StorageExportBundle>, options: { maxBytes?: number } = {}): BackupRunner {
   const maxBytes = options.maxBytes ?? BACKUP_MAX_BYTES_DEFAULT
   return {
-    async run(target) {
+    async run(target, signal) {
+      throwIfAborted(signal)
       const bundle = await snapshot()
+      throwIfAborted(signal)
       const serialized = `${JSON.stringify(bundle)}\n`
       // The same ceiling the worker enforces: this path used to have none at all, so the
       // operator CLI would happily fill the disk where the scheduled backup refuses to.
@@ -88,14 +90,14 @@ export function childProcessBackupRunner(options: ChildBackupRunnerOptions): Bac
   const timeoutMs = options.timeoutMs ?? 15 * 60 * 1000
   const maxBytes = options.maxBytes ?? BACKUP_MAX_BYTES_DEFAULT
   return {
-    run(target) {
+    run(target, signal) {
       return new Promise((resolvePromise, reject) => {
         execFile(
           options.execPath ?? process.execPath,
           [`--max-old-space-size=${String(options.heapMb ?? 1024)}`, worker,
             '--dsn-ref', options.dsnRef, '--schema', options.schema, '--ssl', options.ssl,
             '--out', target, '--max-bytes', String(maxBytes)],
-          { timeout: timeoutMs, maxBuffer: 1024 * 1024, env: options.env ?? process.env },
+          { timeout: timeoutMs, maxBuffer: 1024 * 1024, env: options.env ?? process.env, ...(signal === undefined ? {} : { signal }) },
           (error, stdout, stderr) => {
             if (error !== null) {
               const lines = String(stderr).split('\n').map(line => line.trim()).filter(line => line !== '')
@@ -142,6 +144,7 @@ export interface BackupSchedulerOptions {
   log?: (level: BackupLogLevel, line: string) => void
   /** Test seam for the per-file suffix; defaults to 6 random hex characters. */
   suffix?: () => string
+  signal?: AbortSignal
 }
 
 /**
@@ -223,6 +226,7 @@ export class StorageBackupScheduler {
   get pending(): boolean { return this.queued !== undefined }
 
   private async execute(): Promise<BackupResult> {
+    throwIfAborted(this.options.signal)
     const startedAt = this.now().toISOString()
     const stamp = startedAt.replace(/[-:.]/gu, '')
     const fileName = `studio-backup-${this.options.label}-${stamp}-${this.suffix()}.json`
@@ -232,7 +236,8 @@ export class StorageBackupScheduler {
     try {
       directory = await pinDirectory(this.options.directory, true)
       target = childPath(directory, fileName)
-      const written = await this.runner.run(target)
+      const written = await this.runner.run(target, this.options.signal)
+      throwIfAborted(this.options.signal)
       await assertPinnedDirectory(directory)
       const sidecar = await openNewPinnedFile(directory, `${fileName}.sha256`)
       try { await sidecar.writeFile(`${written.sha256}  ${fileName}\n`, { encoding: 'utf8' }) } finally { await sidecar.close() }
@@ -297,6 +302,10 @@ export class StorageBackupScheduler {
       this.log('warn', `storage-postgres backup ledger write failed (${error instanceof Error ? error.message : String(error)})`)
     }
   }
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted === true) throw signal.reason instanceof Error ? signal.reason : new Error('Operação cancelada.')
 }
 
 /**

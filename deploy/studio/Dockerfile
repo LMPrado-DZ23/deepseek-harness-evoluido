@@ -1,13 +1,26 @@
 # syntax=docker.io/docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
 FROM docker.io/library/node:22.23.1-bookworm-slim@sha256:6c74791e557ce11fc957704f6d4fe134a7bc8d6f5ca4403205b2966bd488f6b3 AS git-runtime
 
-RUN apt-get update \
- && apt-get install --yes --no-install-recommends git=1:2.39.5-0+deb12u3 postgresql-client=15+248+deb12u1 \
+RUN printf '%s\n' \
+      'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20260904T000000Z bookworm main' \
+      'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/20260904T000000Z bookworm-security main' \
+      > /etc/apt/sources.list \
+ && rm -f /etc/apt/sources.list.d/debian.sources \
+ && apt-get -o Acquire::Check-Valid-Until=false update \
+ && apt-get install --yes --no-install-recommends \
+      git=1:2.39.5-0+deb12u3 \
+      postgresql-client-15=15.19-0+deb12u1 \
+      postgresql-client-common=248+deb12u1 \
+      libpq5=15.19-0+deb12u1 \
  && rm -rf /var/lib/apt/lists/* \
  && groupadd --gid 10001 studio \
  && useradd --uid 10001 --gid 10001 --home-dir /var/lib/dz23-studio --no-create-home --shell /usr/sbin/nologin studio \
  && test "$(git --version)" = "git version 2.39.5" \
- && pg_dump --version | grep -Eq '^pg_dump \(PostgreSQL\) 15\.'
+ && test "$(dpkg-query -W -f='${Version}' postgresql-client-15)" = '15.19-0+deb12u1' \
+ && test "$(dpkg-query -W -f='${Version}' postgresql-client-common)" = '248+deb12u1' \
+ && test "$(dpkg-query -W -f='${Version}' libpq5)" = '15.19-0+deb12u1' \
+ && test "$(pg_dump --version)" = 'pg_dump (PostgreSQL) 15.19 (Debian 15.19-0+deb12u1)' \
+ && test "$(pg_restore --version)" = 'pg_restore (PostgreSQL) 15.19 (Debian 15.19-0+deb12u1)'
 
 FROM git-runtime AS toolchain
 WORKDIR /workspace

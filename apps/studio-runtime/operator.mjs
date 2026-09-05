@@ -8,14 +8,13 @@ import {
   StorageBackupScheduler,
   assertTlsPolicy,
   postgresStorageStatus,
-  readStorageBundleFile,
+  readVerifiedStorageBundleFile,
   restorePostgresStorage,
-  verifyBackupFile,
   writeBackupBundle,
 } from '@dz23-studio/storage-postgres/operator'
 
 const COMMANDS = new Set(['backup', 'verify-backup', 'restore', 'status'])
-const VALUE_FLAGS = new Set(['--dsn-ref', '--schema', '--ssl', '--out', '--input', '--backup', '--keep', '--max-bytes', '--confirm'])
+const VALUE_FLAGS = new Set(['--dsn-ref', '--schema', '--ssl', '--out', '--input', '--backup', '--keep', '--max-bytes', '--confirm', '--attempt-id'])
 const BOOL_FLAGS = new Set(['--write', '--force', '--allow-domain-loss'])
 
 export function parseOperatorCommand(argv) {
@@ -66,10 +65,10 @@ export function parseOperatorCommand(argv) {
     allowOnly(new Set(['--dsn-ref', '--schema', '--ssl']))
     return { command, ...common, dsnRef }
   }
-  allowOnly(new Set(['--dsn-ref', '--schema', '--ssl', '--input', '--backup', '--max-bytes', '--confirm']))
+  allowOnly(new Set(['--dsn-ref', '--schema', '--ssl', '--input', '--backup', '--max-bytes', '--confirm', '--attempt-id']))
   const write = booleans.has('--write')
   return {
-    command, ...common, dsnRef, input: required('--input'), backup: write ? required('--backup') : (values.get('--backup') ?? ''),
+    command, ...common, dsnRef, input: required('--input'), attemptId: required('--attempt-id'), backup: write ? required('--backup') : (values.get('--backup') ?? ''),
     maxBytes: positiveInteger('--max-bytes', BACKUP_MAX_BYTES_DEFAULT), write: booleans.has('--write'),
     force: booleans.has('--force'), allowDomainLoss: booleans.has('--allow-domain-loss'),
     confirmation: values.get('--confirm') ?? '',
@@ -77,6 +76,11 @@ export function parseOperatorCommand(argv) {
 }
 
 export async function runOperator(command, dependencies = {}) {
+  const signal = dependencies.signal
+  const throwIfAborted = () => {
+    if (signal?.aborted === true) throw signal.reason instanceof Error ? signal.reason : new Error('Operação cancelada.')
+  }
+  throwIfAborted()
   const environment = dependencies.environment ?? process.env
   const getDsn = reference => {
     const value = environment[reference]
@@ -84,31 +88,36 @@ export async function runOperator(command, dependencies = {}) {
     return value
   }
   if (command.command === 'verify-backup') {
-    const verified = await (dependencies.verifyBackupFile ?? verifyBackupFile)(resolve(command.input), { maxBytes: command.maxBytes })
-    if (!verified.matches) throw new Error('A cópia não corresponde ao arquivo de verificação.')
-    const bundle = await (dependencies.readStorageBundleFile ?? readStorageBundleFile)(resolve(command.input), { ...DEFAULT_STORAGE_IMPORT_LIMITS, maxBytes: command.maxBytes })
-    return { command: 'verify-backup', status: 'valid', file: verified.file, bytes: verified.bytes, sha256: verified.sha256, domains: bundle.domains.length }
+    const verified = await (dependencies.readVerifiedStorageBundleFile ?? readVerifiedStorageBundleFile)(resolve(command.input), { ...DEFAULT_STORAGE_IMPORT_LIMITS, maxBytes: command.maxBytes }, signal)
+    throwIfAborted()
+    return { command: 'verify-backup', status: 'valid', file: verified.file, bytes: verified.bytes, sha256: verified.inputSha256, domains: verified.bundle.domains.length }
   }
   const dsn = getDsn(command.dsnRef)
   if (command.command === 'status') {
-    return { command: 'status', ...(await (dependencies.postgresStorageStatus ?? postgresStorageStatus)({ dsn, schema: command.schema, ssl: command.ssl })) }
+    const status = await (dependencies.postgresStorageStatus ?? postgresStorageStatus)({ dsn, schema: command.schema, ssl: command.ssl, signal })
+    throwIfAborted()
+    return { command: 'status', ...status }
   }
   if (command.command === 'backup') {
-    const runner = dependencies.backupRunner ?? { run: target => writeBackupBundle({ dsnRef: command.dsnRef, schema: command.schema, ssl: command.ssl, out: target, maxBytes: command.maxBytes }, dsn) }
+    const backupWriter = dependencies.writeBackupBundle ?? writeBackupBundle
+    const runner = dependencies.backupRunner ?? { run: (target, operationSignal) => backupWriter({ dsnRef: command.dsnRef, schema: command.schema, ssl: command.ssl, out: target, maxBytes: command.maxBytes, signal: operationSignal }, dsn) }
     const scheduler = new (dependencies.StorageBackupScheduler ?? StorageBackupScheduler)({
       runner, directory: resolve(command.out), label: command.schema,
-      intervalMs: BACKUP_MIN_INTERVAL_MS, keep: command.keep,
+      intervalMs: BACKUP_MIN_INTERVAL_MS, keep: command.keep, signal,
     })
     const result = await scheduler.runOnce()
+    throwIfAborted()
     if (result.status !== 'created') throw new Error('Não foi possível criar a cópia de segurança.')
     return { command: 'backup', status: result.status, file: result.file, sha256: result.sha256, bytes: result.bytes, records: result.records, domains: result.domains, prunedCount: result.prunedCount }
   }
-  const verified = await (dependencies.verifyBackupFile ?? verifyBackupFile)(resolve(command.input), { maxBytes: command.maxBytes })
-  if (!verified.matches) throw new Error('A cópia não corresponde ao arquivo de verificação.')
+  const verified = await (dependencies.readVerifiedStorageBundleFile ?? readVerifiedStorageBundleFile)(resolve(command.input), { ...DEFAULT_STORAGE_IMPORT_LIMITS, maxBytes: command.maxBytes }, signal)
+  throwIfAborted()
+  const stateDirectory = command.write ? environment.DZ23_OPERATOR_STATE_DIR : undefined
+  if (command.write && (typeof stateDirectory !== 'string' || stateDirectory === '')) throw new Error("Credencial não secreta 'DZ23_OPERATOR_STATE_DIR' não configurada.")
   const report = await (dependencies.restorePostgresStorage ?? restorePostgresStorage)({
-    input: command.input, dsn, schema: command.schema, ssl: command.ssl, write: command.write,
+    verifiedInput: verified, attemptId: command.attemptId, dsn, schema: command.schema, ssl: command.ssl, write: command.write,
     safetyBackup: command.backup, force: command.force, allowDomainLoss: command.allowDomainLoss,
-    confirmation: command.confirmation, signal: dependencies.signal, environment,
+    confirmation: command.confirmation, signal, environment, maxBytes: command.maxBytes, stateDirectory,
   })
   return { command: 'restore', ...report }
 }
@@ -130,24 +139,30 @@ function credentialFragments(value) {
   }
 }
 
-async function main() {
+export async function main(runtime = {}) {
+  const argv = runtime.argv ?? process.argv.slice(2)
+  const environment = runtime.environment ?? process.env
+  const stdout = runtime.stdout ?? process.stdout
+  const stderr = runtime.stderr ?? process.stderr
+  const signals = runtime.signals ?? process
   let command
   const controller = new AbortController()
   const cancel = () => controller.abort(new Error('Operação cancelada.'))
-  process.once('SIGINT', cancel)
-  process.once('SIGTERM', cancel)
+  signals.once('SIGINT', cancel)
+  signals.once('SIGTERM', cancel)
   try {
-    command = parseOperatorCommand(process.argv.slice(2))
-    const result = await runOperator(command, { signal: controller.signal })
-    process.stdout.write(`${JSON.stringify(result)}\n`)
+    command = parseOperatorCommand(argv)
+    const result = await runOperator(command, { ...runtime.dependencies, signal: controller.signal, environment })
+    stdout.write(`${JSON.stringify(result)}\n`)
+    return 0
   } catch (error) {
-    const secret = command?.dsnRef === undefined ? [] : credentialFragments(process.env[command.dsnRef])
-    process.stderr.write(`${JSON.stringify({ status: 'failed', error: sanitizeOperatorError(error, secret) })}\n`)
-    process.exitCode = 1
+    const secret = command?.dsnRef === undefined ? [] : credentialFragments(environment[command.dsnRef])
+    stderr.write(`${JSON.stringify({ status: 'failed', error: sanitizeOperatorError(error, secret) })}\n`)
+    return 1
   } finally {
-    process.off('SIGINT', cancel)
-    process.off('SIGTERM', cancel)
+    signals.off('SIGINT', cancel)
+    signals.off('SIGTERM', cancel)
   }
 }
 
-if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) await main()
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) process.exitCode = await main()

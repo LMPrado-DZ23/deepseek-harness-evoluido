@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { delimiter, join, resolve } from 'node:path'
@@ -33,7 +33,9 @@ const hello = descriptorOf(STUDIO_DOMAIN_SPECS[0]!)
 async function writeBundleFile(directory: string): Promise<string> {
   const bundle = await exportStorage(backend(schemaName('src')), STUDIO_DOMAIN_SPECS, 'd'.repeat(64), '2026-09-04T00:00:00.000Z')
   const input = join(directory, 'input.json')
-  await writeFile(input, JSON.stringify(bundle), { flag: 'wx', mode: 0o600 })
+  const serialized = JSON.stringify(bundle)
+  await writeFile(input, serialized, { flag: 'wx', mode: 0o600 })
+  await writeFile(`${input}.sha256`, `${createHash('sha256').update(serialized).digest('hex')}  input.json\n`, { flag: 'wx', mode: 0o600 })
   return input
 }
 
@@ -41,7 +43,7 @@ function invoke(input: string, schema: string, backup: string, extra: string[] =
   return run(process.execPath, [
     '--import', 'tsx', resolve('scripts/import-postgres-storage.ts'),
     '--input', input, '--dsn-ref', 'DZ23_IMPORT_TEST_DSN', '--schema', schema,
-    '--ssl', 'off', '--write', '--backup', backup, ...extra,
+    '--ssl', 'off', '--write', '--attempt-id', `attempt-${schema}`, '--backup', backup, ...extra,
   ], { env: { ...process.env, DZ23_IMPORT_TEST_DSN: dsn!, ...environment } })
 }
 
@@ -153,6 +155,7 @@ describePostgres('restore CLI hardening', () => {
       await mkdir(binaries)
       const recorded = join(directory, 'argv.json')
       const fake = join(binaries, 'pg_dump')
+      const fakeRestore = join(binaries, 'pg_restore')
       await writeFile(fake, [
         '#!/usr/bin/env node',
         `const { writeFileSync } = require('node:fs')`,
@@ -161,6 +164,8 @@ describePostgres('restore CLI hardening', () => {
         '',
       ].join('\n'))
       await chmod(fake, 0o700)
+      await writeFile(fakeRestore, '#!/usr/bin/env node\nprocess.exit(0)\n')
+      await chmod(fakeRestore, 0o700)
 
       const input = await writeBundleFile(directory)
       await invoke(input, target, join(directory, 'backup.dump'), ['--force', '--confirm', 'REPLACE_DZ23_STORAGE'], {

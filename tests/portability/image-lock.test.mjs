@@ -30,6 +30,13 @@ test('lock de imagens recusa tag, plataforma ausente e campo inesperado', () => 
   const archive = structuredClone(canonical)
   archive.tools.nodeArchives.platforms['linux/arm64'].filename = 'node-v22.23.1-linux-x64.tar.gz'
   assert.throws(() => validateImageLock(archive), /arquivo Node linux\/arm64 inválido/u)
+
+  const postgres = structuredClone(canonical)
+  postgres.tools.postgresClient.packages['postgresql-client-15'] = '15.*'
+  assert.throws(() => validateImageLock(postgres), /não fixada/u)
+
+  const missingLeaf = dockerfile.replace('postgresql-client-15=15.19-0+deb12u1', 'postgresql-client-15')
+  assert.throws(() => validateDockerfileBase(missingLeaf, canonical), /não fixa postgresql-client-15/u)
 })
 
 test('Dockerfile usa exatamente a base Node fixada no lock', () => {

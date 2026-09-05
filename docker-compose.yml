@@ -13,6 +13,7 @@ services:
       DZ23_SMTP_SECRET: ${DZ23_SMTP_SECRET:?Defina a configuracao SMTP por segredo}
       DZ23_POSTGRES_DSN: ${DZ23_POSTGRES_DSN:?Defina a DSN PostgreSQL como segredo no servidor}
       DZ23_POSTGRES_BACKUP_DIR: /var/lib/dz23-studio-backups
+      DZ23_OPERATOR_STATE_DIR: /var/lib/dz23-studio/operator
       DZ23_POSTGRES_BACKUP_INTERVAL_MINUTES: ${DZ23_POSTGRES_BACKUP_INTERVAL_MINUTES:-60}
       DZ23_POSTGRES_BACKUP_KEEP: ${DZ23_POSTGRES_BACKUP_KEEP:-48}
       DZ23_AGENT_WORKTREE_ROOT: /var/lib/dz23-studio/worktrees

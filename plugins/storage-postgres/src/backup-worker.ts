@@ -26,6 +26,7 @@ export interface WorkerArgs {
   out: string
   maxBytes: number
   now?: () => Date
+  signal?: AbortSignal
 }
 
 export interface WorkerReport {
@@ -40,6 +41,7 @@ const CURSOR_BATCH = 500
 
 /** Writes the bundle to `out` and reports it, holding at most one domain in memory at a time. */
 export async function writeBackupBundle(args: WorkerArgs, dsn: string): Promise<WorkerReport> {
+  throwIfAborted(args.signal)
   assertConfiguredSchemaName(args.schema)
   // TLS is decided here and nowhere else: the DSN's own ssl parameters are stripped
   // so they cannot downgrade the configured policy.
@@ -57,6 +59,7 @@ export async function writeBackupBundle(args: WorkerArgs, dsn: string): Promise<
   let records = 0
   let domains = 0
   const write = async (chunk: string): Promise<void> => {
+    throwIfAborted(args.signal)
     bytes += Buffer.byteLength(chunk, 'utf8')
     if (bytes > args.maxBytes) throw new Error(`backup exceeds the ${String(args.maxBytes)} byte limit`)
     fileHash.update(chunk, 'utf8')
@@ -64,6 +67,7 @@ export async function writeBackupBundle(args: WorkerArgs, dsn: string): Promise<
   }
   try {
     await client.connect()
+    throwIfAborted(args.signal)
     connected = true
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY')
     const layout = await client.query<{ value: number }>(
@@ -82,6 +86,7 @@ export async function writeBackupBundle(args: WorkerArgs, dsn: string): Promise<
     await write(`{"format":${JSON.stringify(STORAGE_EXPORT_FORMAT)},"upstreamCommit":${JSON.stringify(HARNESS_UPSTREAM_COMMIT)},"source":${JSON.stringify(source)},"createdAt":${JSON.stringify(createdAt)},"domains":[`)
 
     for await (const unit of cursorUnits(client, args.schema)) {
+      throwIfAborted(args.signal)
       const globalRow = await client.query<{ value: unknown }>(
         `SELECT value FROM ${globalsTable(args.schema)} WHERE unit = $1`,
         [unit.name],
@@ -116,6 +121,7 @@ export async function writeBackupBundle(args: WorkerArgs, dsn: string): Promise<
           firstTable = false
           let firstRow = true
           for await (const row of cursorRows(client, args.schema, unit.name, table)) {
+            throwIfAborted(args.signal)
             await sink(`${firstRow ? '' : ','}${JSON.stringify(row.key)}:${canonicalJson(row.value)}`)
             firstRow = false
             counted += 1
@@ -151,6 +157,7 @@ export async function writeBackupBundle(args: WorkerArgs, dsn: string): Promise<
       domains += 1
     }
 
+    throwIfAborted(args.signal)
     await client.query('COMMIT')
 
     payloadHash.update(`],"format":${JSON.stringify(STORAGE_EXPORT_FORMAT)},"source":${canonicalJson(source)},"upstreamCommit":${JSON.stringify(HARNESS_UPSTREAM_COMMIT)}}`, 'utf8')
@@ -171,6 +178,10 @@ export async function writeBackupBundle(args: WorkerArgs, dsn: string): Promise<
     if (connected) await client.end().catch(() => undefined)
     await output.directory.handle.close().catch(() => undefined)
   }
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted === true) throw signal.reason instanceof Error ? signal.reason : new Error('Operação cancelada.')
 }
 
 /** Units are cursored too: a schema with many small domains stays bounded just like one huge domain. */
