@@ -90,7 +90,23 @@ interface ProvisionLock {
   readonly release: () => Promise<void>
 }
 
-export async function provisionBuilderSupervisor(request: BuilderProvisionRequest): Promise<BuilderProvisionResult> {
+interface ProvenProvisionLock {
+  readonly owner: ProvisionIdentity
+  readonly stat: Stats
+}
+
+export interface BuilderProvisionRuntime {
+  readonly afterStaleLockProof?: (lockPath: string) => Promise<void>
+  readonly beforeStaleLockPathUnlink?: (lockPath: string) => Promise<void>
+  readonly afterStaleLockPathUnlink?: (lockPath: string) => Promise<void>
+}
+
+const DEFAULT_PROVISION_RUNTIME: BuilderProvisionRuntime = Object.freeze({})
+
+export async function provisionBuilderSupervisor(
+  request: BuilderProvisionRequest,
+  runtime: BuilderProvisionRuntime = DEFAULT_PROVISION_RUNTIME,
+): Promise<BuilderProvisionResult> {
   try {
     if (process.platform !== 'linux' || process.getuid === undefined) invalidRequest()
     const roots = request.roots ?? PRODUCTION_BUILDER_ROOT_POLICY
@@ -106,7 +122,7 @@ export async function provisionBuilderSupervisor(request: BuilderProvisionReques
     await Promise.all(managedRoots(roots).map(assertPrivateRoot))
 
     const stateInstanceRoot = await ensureTenantInstance(roots.stateRoot, tenantId, instanceId)
-    const lock = await acquireProvisionLock(stateInstanceRoot)
+    const lock = await acquireProvisionLock(stateInstanceRoot, runtime)
     try {
       const manifest = await loadPinnedManifest(manifestPath, expectedManifestSha256)
       const sourceEntries = await inspectSourceTree(sourceRoot)
@@ -580,7 +596,7 @@ async function writeAuthorityFile(path: string, value: string, mode: 0o400 | 0o6
   }
 }
 
-async function acquireProvisionLock(instanceRoot: string): Promise<ProvisionLock> {
+async function acquireProvisionLock(instanceRoot: string, runtime: BuilderProvisionRuntime): Promise<ProvisionLock> {
   const bootId = (await readFile('/proc/sys/kernel/random/boot_id', 'utf8')).trim()
   const startTicks = await processStartTicks(process.pid)
   let recoveredStaleOwner = false
@@ -598,9 +614,10 @@ async function acquireProvisionLock(instanceRoot: string): Promise<ProvisionLock
       try { await link(claimPath, lockPath) }
       catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-        if (await lockOwnerAlive(lockPath, bootId)) throw new BuilderProvisionError('PROVISION_BUSY')
-        await removeStaleLock(lockPath)
-        recoveredStaleOwner = true
+        const inspected = await inspectProvisionLock(lockPath, bootId)
+        if (inspected.live) throw new BuilderProvisionError('PROVISION_BUSY')
+        await runtime.afterStaleLockProof?.(lockPath)
+        if (await removeStaleLock(lockPath, inspected.proof, runtime)) recoveredStaleOwner = true
         continue
       }
       acquired = true
@@ -619,7 +636,10 @@ async function acquireProvisionLock(instanceRoot: string): Promise<ProvisionLock
   recoveryFailed()
 }
 
-async function lockOwnerAlive(lockPath: string, bootId: string): Promise<boolean> {
+async function inspectProvisionLock(
+  lockPath: string,
+  bootId: string,
+): Promise<{ readonly live: true } | { readonly live: false; readonly proof: ProvenProvisionLock }> {
   let handle: FileHandle | undefined
   try {
     handle = await open(lockPath, constants.O_RDONLY | constants.O_NOFOLLOW)
@@ -627,23 +647,83 @@ async function lockOwnerAlive(lockPath: string, bootId: string): Promise<boolean
     if (!opened.isFile() || opened.isSymbolicLink() || opened.nlink !== 2 || (opened.mode & 0o7777) !== 0o400 || !trustedOwner(opened) || !sameIdentity(opened, linked) || opened.size < 2 || opened.size > 1024 || await realpath(lockPath) !== lockPath) recoveryFailed()
     const value = JSON.parse(await handle.readFile('utf8')) as unknown
     const owner = parseLockIdentity(value)
-    if (owner.boot_id !== bootId) return false
-    try { return await processStartTicks(owner.pid) === owner.start_ticks }
+    const proof = { owner, stat: opened }
+    if (owner.boot_id !== bootId) return { live: false, proof }
+    try { return await processStartTicks(owner.pid) === owner.start_ticks ? { live: true } : { live: false, proof } }
     catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { live: false, proof }
       throw error
     }
   } finally { await handle?.close() }
 }
 
-async function removeStaleLock(lockPath: string): Promise<void> {
-  const raw = JSON.parse(await readFile(lockPath, 'utf8')) as unknown
-  const owner = parseLockIdentity(raw)
-  const claimPath = posix.join(posix.dirname(lockPath), owner.claim)
-  const [lockStat, claimStat] = await Promise.all([lstat(lockPath), lstat(claimPath)])
-  if (!sameIdentity(lockStat, claimStat) || lockStat.nlink !== 2) recoveryFailed()
-  await unlink(lockPath)
-  await unlink(claimPath)
+async function removeStaleLock(lockPath: string, proof: ProvenProvisionLock, runtime: BuilderProvisionRuntime): Promise<boolean> {
+  let handle: FileHandle | undefined
+  const takeoverPath = posix.join(posix.dirname(lockPath), `.takeover-${randomBytes(16).toString('hex')}`)
+  let takeoverCreated = false
+  let lockPathUnlinked = false
+  try {
+    try { handle = await open(lockPath, constants.O_RDONLY | constants.O_NOFOLLOW) }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error }
+    const opened = await handle.stat()
+    const linked = await lstat(lockPath)
+    if (!sameLockMetadata(proof.stat, opened, 2) || !sameLockMetadata(proof.stat, linked, 2) || await realpath(lockPath) !== lockPath) return false
+    const currentOwner = parseLockIdentity(JSON.parse(await handle.readFile('utf8')) as unknown)
+    if (!sameProvisionIdentity(currentOwner, proof.owner)) return false
+    const claimPath = posix.join(posix.dirname(lockPath), proof.owner.claim)
+    const claim = await optionalLstat(claimPath)
+    if (claim === undefined || !sameLockMetadata(proof.stat, claim, 2)) return false
+    try { await link(lockPath, takeoverPath); takeoverCreated = true }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error }
+    if (!await everyLockLinkMatches(proof.stat, [lockPath, claimPath, takeoverPath], 3) || !sameLockMetadata(proof.stat, await handle.stat(), 3)) return false
+    await runtime.beforeStaleLockPathUnlink?.(lockPath)
+    if (!await everyLockLinkMatches(proof.stat, [lockPath, claimPath, takeoverPath], 3) || !sameLockMetadata(proof.stat, await handle.stat(), 3)) return false
+    try { await unlink(lockPath) }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error }
+    lockPathUnlinked = true
+    await runtime.afterStaleLockPathUnlink?.(lockPath)
+    if (!await removeProvenLink(claimPath, proof.stat, 2)) recoveryFailed()
+    if (!await removeProvenLink(takeoverPath, proof.stat, 1)) recoveryFailed()
+    takeoverCreated = false
+    return true
+  } finally {
+    await handle?.close()
+    if (takeoverCreated) {
+      const takeover = await optionalLstat(takeoverPath)
+      if (takeover !== undefined && sameLockObject(proof.stat, takeover)) await unlink(takeoverPath).catch(() => undefined)
+      else if (takeover !== undefined && !lockPathUnlinked) recoveryFailed()
+    }
+  }
+}
+
+async function everyLockLinkMatches(expected: Stats, paths: readonly string[], links: number): Promise<boolean> {
+  const stats = await Promise.all(paths.map(optionalLstat))
+  return stats.every(stat => stat !== undefined && sameLockMetadata(expected, stat, links))
+}
+
+async function removeProvenLink(path: string, expected: Stats, links: number): Promise<boolean> {
+  const stat = await optionalLstat(path)
+  if (stat === undefined || !sameLockMetadata(expected, stat, links)) return false
+  try { await unlink(path); return true }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error }
+}
+
+async function optionalLstat(path: string): Promise<Stats | undefined> {
+  try { return await lstat(path) }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error }
+}
+
+function sameProvisionIdentity(left: ProvisionIdentity, right: ProvisionIdentity): boolean {
+  return left.pid === right.pid && left.boot_id === right.boot_id && left.start_ticks === right.start_ticks && left.claim === right.claim
+}
+
+function sameLockMetadata(expected: Stats, actual: Stats, links: number): boolean {
+  return sameLockObject(expected, actual) && actual.nlink === links
+}
+
+function sameLockObject(expected: Stats, actual: Stats): boolean {
+  return expected.dev === actual.dev && expected.ino === actual.ino && expected.size === actual.size &&
+    expected.uid === actual.uid && expected.gid === actual.gid && expected.mode === actual.mode
 }
 
 function parseLockIdentity(value: unknown): ProvisionIdentity {

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
-import { chmod, link, lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, link, lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { posix } from 'node:path'
 import { promisify } from 'node:util'
@@ -134,6 +134,70 @@ linux('immutable builder template-store provisioning', () => {
     await link(claimPath, posix.join(instanceRoot, '.provision.lock'))
     await expect(provisionBuilderSupervisor(fixture.request)).rejects.toMatchObject({ code: 'PROVISION_BUSY' })
     expect((await readdir(instanceRoot)).filter(name => name.startsWith('.claim-'))).toEqual([claim])
+  })
+
+  it('preserves a live L1 substituted between stale L0 proof and reclaim', async () => {
+    const fixture = await createFixture()
+    const instanceRoot = posix.join(fixture.policy.stateRoot, 'tenant-one', 'instance-one')
+    await mkdir(instanceRoot, { recursive: true, mode: 0o700 })
+    const lockPath = posix.join(instanceRoot, '.provision.lock')
+    const staleClaim = '.claim-11111111111111111111111111111111'
+    const staleClaimPath = posix.join(instanceRoot, staleClaim)
+    const liveClaim = '.claim-22222222222222222222222222222222'
+    const liveClaimPath = posix.join(instanceRoot, liveClaim)
+    const bootId = (await readFile('/proc/sys/kernel/random/boot_id', 'utf8')).trim()
+    await writeFile(staleClaimPath, `${JSON.stringify({ pid: 2_147_483_647, boot_id: bootId, start_ticks: '1', claim: staleClaim })}\n`, { mode: 0o400 })
+    await link(staleClaimPath, lockPath)
+    const statLine = await readFile(`/proc/${process.pid}/stat`, 'utf8')
+    const fields = statLine.slice(statLine.lastIndexOf(') ') + 2).trim().split(/\s+/u)
+    let replaced = false
+    await expect(provisionBuilderSupervisor(fixture.request, { afterStaleLockProof: async provenPath => {
+      expect(provenPath).toBe(lockPath)
+      expect(replaced).toBe(false)
+      replaced = true
+      await unlink(lockPath); await unlink(staleClaimPath)
+      await writeFile(liveClaimPath, `${JSON.stringify({ pid: process.pid, boot_id: bootId, start_ticks: fields[19], claim: liveClaim })}\n`, { mode: 0o400 })
+      await link(liveClaimPath, lockPath)
+    } })).rejects.toMatchObject({ code: 'PROVISION_BUSY' })
+    const [lock, claim] = await Promise.all([lstat(lockPath), lstat(liveClaimPath)])
+    expect({ same: lock.dev === claim.dev && lock.ino === claim.ino, links: lock.nlink }).toEqual({ same: true, links: 2 })
+    expect(await readFile(lockPath, 'utf8')).toContain(`"claim":"${liveClaim}"`)
+  })
+
+  it('arbitrates a takeover immediately before unlink and never touches L1 installed afterward', async () => {
+    const fixture = await createFixture()
+    const instanceRoot = posix.join(fixture.policy.stateRoot, 'tenant-one', 'instance-one')
+    await mkdir(instanceRoot, { recursive: true, mode: 0o700 })
+    const lockPath = posix.join(instanceRoot, '.provision.lock')
+    const staleClaim = '.claim-33333333333333333333333333333333'
+    const staleClaimPath = posix.join(instanceRoot, staleClaim)
+    const competingTakeover = posix.join(instanceRoot, '.takeover-44444444444444444444444444444444')
+    const liveClaim = '.claim-55555555555555555555555555555555'
+    const liveClaimPath = posix.join(instanceRoot, liveClaim)
+    const bootId = (await readFile('/proc/sys/kernel/random/boot_id', 'utf8')).trim()
+    const statLine = await readFile(`/proc/${process.pid}/stat`, 'utf8')
+    const fields = statLine.slice(statLine.lastIndexOf(') ') + 2).trim().split(/\s+/u)
+    await writeFile(staleClaimPath, `${JSON.stringify({ pid: 2_147_483_647, boot_id: bootId, start_ticks: '1', claim: staleClaim })}\n`, { mode: 0o400 })
+    await link(staleClaimPath, lockPath)
+    let before = 0; let after = 0
+    await expect(provisionBuilderSupervisor(fixture.request, {
+      beforeStaleLockPathUnlink: async provenPath => {
+        before += 1; expect(provenPath).toBe(lockPath)
+        await link(lockPath, competingTakeover)
+        expect((await lstat(lockPath)).nlink).toBe(4)
+        await unlink(competingTakeover)
+      },
+      afterStaleLockPathUnlink: async removedPath => {
+        after += 1; expect(removedPath).toBe(lockPath); expect(await pathExists(lockPath)).toBe(false)
+        await writeFile(liveClaimPath, `${JSON.stringify({ pid: process.pid, boot_id: bootId, start_ticks: fields[19], claim: liveClaim })}\n`, { mode: 0o400 })
+        await link(liveClaimPath, lockPath)
+      },
+    })).rejects.toMatchObject({ code: 'PROVISION_BUSY' })
+    expect({ before, after }).toEqual({ before: 1, after: 1 })
+    const [lock, claim] = await Promise.all([lstat(lockPath), lstat(liveClaimPath)])
+    expect({ same: lock.dev === claim.dev && lock.ino === claim.ino, links: lock.nlink }).toEqual({ same: true, links: 2 })
+    expect(await pathExists(staleClaimPath)).toBe(false)
+    expect((await readdir(instanceRoot)).some(name => name.startsWith('.takeover-'))).toBe(false)
   })
 
   it('never replaces a version directory created by a competing same-uid process', async () => {
