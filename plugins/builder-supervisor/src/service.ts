@@ -27,7 +27,7 @@ export interface BuilderSupervisorOptions {
   readonly createReference?: () => string
   readonly maxBuilds?: number
   readonly maxConcurrentSteps?: number
-  readonly buildClaims?: BuildIdClaimPort
+  readonly buildClaims: BuildIdClaimPort
 }
 
 export class BuilderSupervisor implements BuilderRpcMethods {
@@ -48,7 +48,7 @@ export class BuilderSupervisor implements BuilderRpcMethods {
     this.#replay = options.replay ?? new ReplayGuard()
     this.#createReference = options.createReference ?? (() => `build_${randomBytes(16).toString('hex')}`)
     this.#maxBuilds = options.maxBuilds ?? 32
-    this.#buildClaims = options.buildClaims ?? { claim: async buildId => { if (this.#buildIds.has(buildId)) throw new BuilderSupervisorError('BUILD_ALREADY_EXISTS') }, release: async () => undefined }
+    this.#buildClaims = options.buildClaims
     this.#steps = new Semaphore(options.maxConcurrentSteps ?? 2)
     if (!Number.isSafeInteger(this.#maxBuilds) || this.#maxBuilds < 1 || this.#maxBuilds > 1_000) throw new Error('INVALID_BUILD_LIMIT')
   }
@@ -122,13 +122,13 @@ export class BuilderSupervisor implements BuilderRpcMethods {
     }
   }
 
-  async cancel(body: Parameters<BuilderRpcMethods['cancel']>[0], signal: AbortSignal): Promise<{ readonly build_ref: string; readonly state: 'CANCELLED' }> {
+  async cancel(body: Parameters<BuilderRpcMethods['cancel']>[0], _signal: AbortSignal): Promise<{ readonly build_ref: string; readonly state: 'CANCELLED' }> {
     await this.#claim(body.request_id)
     const build = this.#build(body.build_ref)
-    if (isTerminalState(build.state)) throw new BuilderSupervisorError('INVALID_STEP_ORDER')
+    if (isTerminalState(build.state) && build.state !== 'CANCELLED') throw new BuilderSupervisorError('INVALID_STEP_ORDER')
     build.state = 'CANCELLED'
     this.#controllers.get(body.build_ref)?.abort(new Error('BUILD_CANCELLED'))
-    await this.options.adapter.cancel(body.build_ref, signal)
+    await this.options.adapter.cancel(body.build_ref, cleanupSignal())
     return { build_ref: body.build_ref, state: 'CANCELLED' }
   }
 
@@ -144,18 +144,19 @@ export class BuilderSupervisor implements BuilderRpcMethods {
       try { build.exported = await this.options.adapter.exportArtifact(body.build_ref, signal) }
       catch (error) { exportError = error }
     }
+    if (exportError !== undefined && !(exportError instanceof BuilderSupervisorError)) throw exportError
     build.cleanup_pending = true
     try {
-      await this.options.adapter.cleanup(body.build_ref, signal)
+      await this.options.adapter.cleanup(body.build_ref, cleanupSignal())
     } catch {
       throw new BuilderSupervisorError('CLEANUP_INCOMPLETE')
     }
     build.cleanup_pending = false
     if (exportError !== undefined) {
-      build.finish_error = exportError instanceof BuilderSupervisorError ? exportError.code : 'RECOVERY_FAILED'
-      throw new BuilderSupervisorError(build.finish_error)
+      build.finish_error = exportError.code; throw new BuilderSupervisorError(build.finish_error)
     }
     const result: FinishResult = { build_ref: body.build_ref, final_state: finalState, exported: build.exported ?? null, cleanup_pending: false, cleaned: true }
+    await this.#buildClaims.complete?.(build.build_id)
     build.finish_result = result
     return result
   }
@@ -180,3 +181,5 @@ export class BuilderSupervisor implements BuilderRpcMethods {
     await this.#replay.claim(requestId)
   }
 }
+
+function cleanupSignal(): AbortSignal { return AbortSignal.timeout(30_000) }

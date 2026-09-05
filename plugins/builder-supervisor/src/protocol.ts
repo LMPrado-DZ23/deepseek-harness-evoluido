@@ -87,11 +87,11 @@ export function createBuilderRpcHandler(options: {
     try { return await replay.run(request.body.request_id, fingerprint, async () => {
       try {
         const result = await dispatch(options.methods, request, input.signal)
-        if (!validResult(request, result)) return rpcError(500, 'INTERNAL')
+        if (!validResult(request, result)) throw new Error('INVALID_METHOD_RESULT')
         return response(200, { ok: true, result })
       } catch (error) {
         if (error instanceof BuilderSupervisorError) return rpcError(409, error.code)
-        return rpcError(500, 'INTERNAL')
+        throw error
       }
     }) } catch (error) {
       if (error instanceof BuilderSupervisorError) return rpcError(409, error.code)

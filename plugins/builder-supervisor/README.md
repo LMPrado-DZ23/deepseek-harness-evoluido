@@ -25,9 +25,15 @@ de qualquer execução. O workspace usa volume `tmpfs` com quota física e uma
 âncora isolada; a concorrência total e por build é limitada no servidor.
 
 Antes de abrir o socket, o supervisor adquire uma lease exclusiva, valida
-proprietário, modo e inode, reconcilia contêineres e volumes rotulados e remove
-órfãos. IDs recuperados continuam reservados e os `request_id` de produção são
-gravados com criação exclusiva para continuarem inválidos após reinício.
+proprietário, modo, inode, PID e identidade de início do processo; reconcilia
+contêineres e volumes rotulados e remove órfãos. O replay durável é isolado pelo
+par `instance_id` + `policy_sha256`, conserva respostas completas por 24 horas e
+coleta somente resultados concluídos expirados. Claims de build ativos nunca
+expiram; depois de concluídos permanecem reservados durante a mesma janela.
+
+O preflight não confia apenas nas labels do store: monta o volume versionado
+somente para leitura em um verificador efêmero isolado, calcula a árvore real e
+exige o SHA-256 configurado antes de atestar `state: OK`.
 
 Um build aprovado sai pela API de archive do Docker, em streaming com teto e
 SHA-256. O tar é revalidado e extraído por descritores sem seguir links em um
@@ -43,3 +49,7 @@ Este pacote é somente a fundação M6.2. A composição do processo, os segredo
 o volume imutável do store e o adaptador do Prompt-to-App pertencem à etapa de
 integração. Não exponha este socket pela rede e não substitua os DTOs por
 `argv`, shell ou configuração Docker recebida do cliente.
+
+A composição de produção deve fornecer obrigatoriamente um `FileBuildIdGuard`;
+um guard em memória é permitido somente em testes e não protege o `build_id`
+contra replay depois de reinício do supervisor.

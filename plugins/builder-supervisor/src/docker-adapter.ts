@@ -23,6 +23,8 @@ export interface BuilderLimits {
 export interface DockerBuilderAdapterOptions {
   readonly engine: DockerEnginePort; readonly imageDigest: `sha256:${string}`; readonly instanceId: string
   readonly exportRoot: string; readonly templateStoreVersion: string; readonly templateStoreSha256: string; readonly limits?: BuilderLimits
+  /** @internal Deterministic filesystem fault seam; production uses node:fs/promises.rm. */
+  readonly removeArchive?: (path: string) => Promise<void>
 }
 export interface PreparedArtifact { readonly archivePath: string; readonly archiveBytes: number; readonly sha256: string; readonly files: number; readonly bytes: number }
 export interface RecoveredBuild { readonly build_ref: string; readonly build_id: string }
@@ -56,7 +58,7 @@ export class DockerBuilderAdapter implements BuilderExecutionPort {
     if (this.#limits.workspaceBytes > this.#limits.maxWorkspaceBytes || this.#limits.maxRetainedExports > 1_000) throw new Error('INVALID_BUILDER_LIMIT')
     this.#containers = new Semaphore(this.#limits.concurrentContainers)
     this.#templateStoreVolume = templateStoreVolumeName(options.instanceId, options.templateStoreVersion, options.templateStoreSha256)
-    this.#policySha256 = createHash('sha256').update(JSON.stringify({ protocol: 1, image: options.imageDigest, instance: options.instanceId, templateStoreVersion: options.templateStoreVersion, templateStoreSha256: options.templateStoreSha256, templateStoreMountSteps: ['install'], commands: COMMANDS, exportAllowlist: ['.next/standalone/**', '.next/static/**', 'public/**', 'evidence/appspec-report.json'], limits: this.#limits, user: '10001:10001', network: 'none', readOnlyRoot: true, capDrop: ['ALL'], noNewPrivileges: true })).digest('hex')
+    this.#policySha256 = createHash('sha256').update(JSON.stringify({ protocol: 1, image: options.imageDigest, instance: options.instanceId, templateStoreVersion: options.templateStoreVersion, templateStoreSha256: options.templateStoreSha256, templateStoreVerifierSha256: createHash('sha256').update(TEMPLATE_STORE_VERIFY_SCRIPT).digest('hex'), templateStoreMountSteps: ['install'], commands: COMMANDS, exportAllowlist: ['.next/standalone/**', '.next/static/**', 'public/**', 'evidence/appspec-report.json'], limits: this.#limits, user: '10001:10001', network: 'none', readOnlyRoot: true, capDrop: ['ALL'], noNewPrivileges: true })).digest('hex')
   }
 
   async preflight(signal: AbortSignal): Promise<BuilderAttestation> {
@@ -64,7 +66,9 @@ export class DockerBuilderAdapter implements BuilderExecutionPort {
     try {
       await this.options.engine.ping(signal); imageId = (await this.options.engine.inspectImage(this.options.imageDigest, signal)).Id as `sha256:${string}`
       const stores = await this.options.engine.listVolumes({ label: templateStoreLabels(this.options.instanceId, this.options.templateStoreVersion, this.options.templateStoreSha256) }, signal)
-      state = imageId === this.options.imageDigest && stores.length === 1 && identifier(stores[0]) === this.#templateStoreVolume && hasLabels(stores[0], templateStoreLabels(this.options.instanceId, this.options.templateStoreVersion, this.options.templateStoreSha256)) ? 'OK' : 'BLOCKED_EXTERNAL'
+      const storeMetadataValid = stores.length === 1 && identifier(stores[0]) === this.#templateStoreVolume && hasLabels(stores[0], templateStoreLabels(this.options.instanceId, this.options.templateStoreVersion, this.options.templateStoreSha256))
+      const storeContentValid = storeMetadataValid && await this.#verifyTemplateStore(signal)
+      state = imageId === this.options.imageDigest && storeContentValid ? 'OK' : 'BLOCKED_EXTERNAL'
     } catch { state = 'BLOCKED_EXTERNAL' }
     return { state, protocol_version: 1, instance_id: this.options.instanceId, image_id: /^sha256:[a-f0-9]{64}$/u.test(imageId) ? imageId : this.options.imageDigest, policy_sha256: this.#policySha256 }
   }
@@ -145,7 +149,7 @@ export class DockerBuilderAdapter implements BuilderExecutionPort {
   async exportArtifact(buildRef: string, signal: AbortSignal): Promise<ExportedArtifact> {
     const buildId = this.#buildIds.get(buildRef); if (buildId === undefined) throw new BuilderSupervisorError('BUILD_NOT_FOUND')
     const resources = names(this.options.instanceId, buildRef); const archive = resolve(this.options.exportRoot, `.archive-${buildRef}-${randomBytes(8).toString('hex')}.tar`)
-    const release = await this.#exports.acquire(signal); let exporter: string | undefined; let exportVolumeCreated = false
+    const release = await this.#exports.acquire(signal); let exporter: string | undefined; let exportVolumeCreated = false; let result: ExportedArtifact | undefined; let operationError: unknown
     try {
       const labels = baseLabels(this.options.instanceId, buildRef, buildId)
       await this.options.engine.createVolume(resources.exportVolume, { ...labels, 'dz23.resource': 'export' }, { type: 'tmpfs', device: 'tmpfs', o: `size=${Math.min(EXPORT_ARCHIVE_LIMIT, this.#limits.maxExportBytes)},uid=10001,gid=10001,mode=0700` }, signal)
@@ -158,11 +162,12 @@ export class DockerBuilderAdapter implements BuilderExecutionPort {
       const completion = await this.options.engine.waitContainer(exporter, signal)
       if (completion.StatusCode !== 0) throw new BuilderSupervisorError('EXPORT_INVALID')
       await this.options.engine.downloadArchive(exporter, '/export/.', archive, Math.min(EXPORT_ARCHIVE_LIMIT, this.#limits.maxExportBytes), signal)
-      const result = await publishValidatedDockerArchive(this.options.exportRoot, buildRef, archive, signal)
+      const published = await publishValidatedDockerArchive(this.options.exportRoot, buildRef, archive, signal)
       await enforceExportRetention(this.options.exportRoot, buildRef, this.#limits.maxRetainedExports, this.#limits.maxExportBytes, signal)
-      return result
-    } finally {
-      const cleanupErrors: unknown[] = []
+      result = published
+    } catch (error) { operationError = error }
+    const cleanupErrors: unknown[] = []
+    try {
       if (exporter !== undefined) {
         await this.options.engine.stopContainer(exporter, AbortSignal.timeout(10_000)).catch(error => cleanupErrors.push(error))
         await this.options.engine.removeContainer(exporter, AbortSignal.timeout(10_000)).catch(error => cleanupErrors.push(error))
@@ -174,9 +179,11 @@ export class DockerBuilderAdapter implements BuilderExecutionPort {
         this.options.engine.listContainers(containerFilter, AbortSignal.timeout(10_000)).catch(error => { cleanupErrors.push(error); return [{}] }),
         this.options.engine.listVolumes(volumeFilter, AbortSignal.timeout(10_000)).catch(error => { cleanupErrors.push(error); return [{}] }),
       ])
-      await rm(archive, { force: true }).catch(error => cleanupErrors.push(error)); release()
-      if (cleanupErrors.length > 0 || containers.length > 0 || volumes.length > 0) throw new BuilderSupervisorError('CLEANUP_INCOMPLETE')
-    }
+      await (this.options.removeArchive?.(archive) ?? rm(archive, { force: true })).catch(error => cleanupErrors.push(error))
+      if (result === undefined && (cleanupErrors.length > 0 || containers.length > 0 || volumes.length > 0)) throw new BuilderSupervisorError('CLEANUP_INCOMPLETE')
+      if (result === undefined) throw operationError
+      return result
+    } finally { release() }
   }
 
   async cleanup(buildRef: string, signal: AbortSignal): Promise<void> {
@@ -198,6 +205,23 @@ export class DockerBuilderAdapter implements BuilderExecutionPort {
     const refs = new Set<string>()
     for (const row of [...containers, ...volumes]) { const value = record(row.Labels)['dz23.build_ref']; if (typeof value !== 'string' || !validBuildRef(value)) throw new BuilderSupervisorError('RECOVERY_FAILED'); refs.add(value) }
     return [...refs].sort()
+  }
+
+  async #verifyTemplateStore(signal: AbortSignal): Promise<boolean> {
+    const labels = templateVerifierLabels(this.options.instanceId, this.options.templateStoreVersion, this.options.templateStoreSha256)
+    const stale = await this.options.engine.listContainers({ label: Object.entries(labels).map(([key, value]) => `${key}=${value}`) }, signal)
+    for (const row of stale) { const id = identifier(row); if (id === undefined) throw new BuilderSupervisorError('RECOVERY_FAILED'); await this.options.engine.removeContainer(id, signal) }
+    let container: string | undefined
+    try {
+      container = await this.options.engine.createContainer(`${this.#templateStoreVolume}-verify-${randomBytes(4).toString('hex')}`, containerBody(this.options.imageDigest, ['node', '-e', TEMPLATE_STORE_VERIFY_SCRIPT], labels, 'template-verify', this.#limits, [
+        { Type: 'volume', Source: this.#templateStoreVolume, Target: '/template-store', ReadOnly: true },
+      ]), signal)
+      await this.options.engine.startContainer(container, signal)
+      const [completion, logs] = await Promise.all([this.options.engine.waitContainer(container, signal), this.options.engine.containerLogs(container, 256, signal)])
+      return completion.StatusCode === 0 && logs.stderr.byteLength === 0 && logs.stdout.toString('utf8').trim() === this.options.templateStoreSha256
+    } finally {
+      if (container !== undefined) await this.options.engine.removeContainer(container, AbortSignal.timeout(10_000))
+    }
   }
 }
 
@@ -222,5 +246,7 @@ function sanitized(value: Buffer, maximumBytes: number): string {
 function templateStoreLabels(instanceId: string, version: string, sha256: string): readonly string[] { return ['dz23.managed=builder-template-store', `dz23.instance_id=${instanceId}`, `dz23.template_version=${version}`, `dz23.template_sha256=${sha256}`] }
 function templateStoreVolumeName(instanceId: string, version: string, sha256: string): string { return `dz23-template-${createHash('sha256').update(`${instanceId}:${version}:${sha256}`).digest('hex').slice(0, 24)}` }
 function hasLabels(value: unknown, expected: readonly string[]): boolean { const labels = record(record(value).Labels); return expected.every(item => { const index = item.indexOf('='); return labels[item.slice(0, index)] === item.slice(index + 1) }) }
+function templateVerifierLabels(instanceId: string, version: string, sha256: string): Readonly<Record<string, string>> { return { 'dz23.managed': 'builder-template-verifier', 'dz23.instance_id': instanceId, 'dz23.template_version': version, 'dz23.template_sha256': sha256 } }
 
 const EXPORT_SCRIPT = String.raw`const fs=require('node:fs'),p=require('node:path');const rows=[['.next/standalone',true,true],['.next/static',true,true],['public',true,false],['evidence/appspec-report.json',false,true]];for(const [name,dir,required]of rows){const from=p.join('/workspace',name),to=p.join('/export',name);if(!fs.existsSync(from)){if(required)throw new Error('EXPORT_SOURCE_MISSING');continue}const stat=fs.lstatSync(from);if(stat.isSymbolicLink()||(dir?!stat.isDirectory():!stat.isFile()))throw new Error('EXPORT_SOURCE_INVALID');fs.mkdirSync(p.dirname(to),{recursive:true});fs.cpSync(from,to,{recursive:dir,dereference:false,errorOnExist:true,force:false})}`
+const TEMPLATE_STORE_VERIFY_SCRIPT = String.raw`const fs=require('node:fs'),p=require('node:path'),c=require('node:crypto');const root='/template-store',names=[];function walk(dir,prefix=''){for(const item of fs.readdirSync(dir,{withFileTypes:true}).sort((a,b)=>a.name.localeCompare(b.name))){const name=prefix?prefix+'/'+item.name:item.name,full=p.join(dir,item.name),stat=fs.lstatSync(full);if(item.isSymbolicLink()||stat.isSymbolicLink())throw new Error('UNSAFE_STORE');if(item.isDirectory()&&stat.isDirectory())walk(full,name);else if(item.isFile()&&stat.isFile()&&stat.nlink===1)names.push(name);else throw new Error('UNSAFE_STORE')}}walk(root);const hash=c.createHash('sha256');for(const name of names){hash.update(name).update('\0').update(fs.readFileSync(p.join(root,...name.split('/')))).update('\0')}process.stdout.write(hash.digest('hex'))`

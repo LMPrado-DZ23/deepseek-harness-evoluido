@@ -24,8 +24,16 @@ export interface DockerEnginePort {
   listContainers(filters: Readonly<Record<string, readonly string[]>>, signal: AbortSignal): Promise<readonly Record<string, unknown>[]>
 }
 
+export interface DockerEngineRuntime {
+  readonly request: typeof httpRequest
+  readonly open: typeof open
+  readonly remove: typeof rm
+  readonly noFollowFlag: number
+}
+const DEFAULT_RUNTIME: DockerEngineRuntime = { request: httpRequest, open, remove: rm, noFollowFlag: constants.O_NOFOLLOW }
+
 export class DockerEngine implements DockerEnginePort {
-  constructor(private readonly socketPath: string, private readonly requestTimeoutMs = 30_000) {
+  constructor(private readonly socketPath: string, private readonly requestTimeoutMs = 30_000, private readonly runtime: DockerEngineRuntime = DEFAULT_RUNTIME) {
     if (!socketPath.startsWith('/') || socketPath.includes('\\') || socketPath.includes('\0')) throw new Error('INVALID_DOCKER_SOCKET')
     if (!Number.isSafeInteger(requestTimeoutMs) || requestTimeoutMs < 1) throw new Error('INVALID_DOCKER_TIMEOUT')
   }
@@ -45,20 +53,19 @@ export class DockerEngine implements DockerEnginePort {
   }
   async putArchive(container: string, destination: string, archivePath: string, maximumBytes: number, signal: AbortSignal): Promise<void> {
     if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) throw new Error('INVALID_ARCHIVE_LIMIT')
-    const handle = await open(archivePath, constants.O_RDONLY | noFollow())
+    const handle = await this.runtime.open(archivePath, constants.O_RDONLY | this.runtime.noFollowFlag)
     try {
       const stat = await handle.stat()
       if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.size < 1 || stat.size > maximumBytes) throw new Error('INVALID_ARCHIVE')
-      const operationSignal = AbortSignal.any([signal, AbortSignal.timeout(this.requestTimeoutMs)])
       await new Promise<void>((resolve, reject) => {
         let settled = false; let request: ClientRequest | undefined; let stream: ReadStream | undefined
         const fail = (error: unknown) => {
           if (settled) return
           settled = true; stream?.destroy(); request?.destroy(error instanceof Error ? error : new Error('DOCKER_ARCHIVE_STREAM_FAILED')); reject(error)
         }
-        request = httpRequest({
+        request = this.runtime.request({
           socketPath: this.socketPath, method: 'PUT', path: `/containers/${encodeURIComponent(container)}/archive?path=${encodeURIComponent(destination)}`,
-          signal: operationSignal, headers: { 'content-type': 'application/x-tar', 'content-length': String(stat.size) },
+          signal, headers: { 'content-type': 'application/x-tar', 'content-length': String(stat.size) },
         }, response => {
           response.resume()
           response.once('aborted', () => fail(new Error('DOCKER_RESPONSE_ABORTED'))); response.once('error', fail)
@@ -76,18 +83,20 @@ export class DockerEngine implements DockerEnginePort {
   }
   async startContainer(id: string, signal: AbortSignal): Promise<void> { await this.#request('POST', `/containers/${encodeURIComponent(id)}/start`, undefined, signal, [204, 304]) }
   async waitContainer(id: string, signal: AbortSignal): Promise<{ readonly StatusCode: number }> {
-    const result = await this.#json<{ readonly StatusCode: unknown }>('POST', `/containers/${encodeURIComponent(id)}/wait?condition=not-running`, undefined, signal, [200])
+    // Docker wait is a long poll bounded by the caller's step deadline. Applying
+    // the short transport timeout here would terminate valid 180-second builds
+    // after the default 30 seconds.
+    const result = await this.#json<{ readonly StatusCode: unknown }>('POST', `/containers/${encodeURIComponent(id)}/wait?condition=not-running`, undefined, signal, [200], false)
     if (!Number.isSafeInteger(result.StatusCode)) throw new Error('INVALID_DOCKER_RESPONSE')
     return { StatusCode: Number(result.StatusCode) }
   }
   async containerLogs(id: string, maximumBytes: number, signal: AbortSignal): Promise<{ readonly stdout: Buffer; readonly stderr: Buffer }> {
     if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) throw new Error('INVALID_LOG_LIMIT')
-    const operationSignal = AbortSignal.any([signal, AbortSignal.timeout(this.requestTimeoutMs)])
     return new Promise((resolve, reject) => {
       let settled = false; let pending = Buffer.alloc(0); let total = 0
       const stdout: Buffer[] = []; const stderr: Buffer[] = []
       const fail = (error: unknown) => { if (!settled) { settled = true; reject(error) } }
-      const request = httpRequest({ socketPath: this.socketPath, method: 'GET', path: `/containers/${encodeURIComponent(id)}/logs?stdout=1&stderr=1&follow=1`, signal: operationSignal }, response => {
+      const request = this.runtime.request({ socketPath: this.socketPath, method: 'GET', path: `/containers/${encodeURIComponent(id)}/logs?stdout=1&stderr=1&follow=1`, signal }, response => {
         if (response.statusCode !== 200) { response.resume(); fail(new Error(`DOCKER_STATUS_${response.statusCode ?? 0}`)); return }
         response.on('data', chunk => {
           if (settled) return
@@ -117,27 +126,26 @@ export class DockerEngine implements DockerEnginePort {
   }
   async downloadArchive(container: string, source: string, destination: string, maximumBytes: number, signal: AbortSignal): Promise<{ readonly bytes: number; readonly sha256: string }> {
     if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) throw new Error('INVALID_ARCHIVE_LIMIT')
-    const operationSignal = AbortSignal.any([signal, AbortSignal.timeout(this.requestTimeoutMs)])
-    const handle = await open(destination, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | noFollow(), 0o600)
+    const handle = await this.runtime.open(destination, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | this.runtime.noFollowFlag, 0o600)
     let succeeded = false
     try {
       const result = await new Promise<{ readonly bytes: number; readonly sha256: string }>((resolve, reject) => {
         let settled = false; let writes = Promise.resolve(); const fail = (error: unknown) => { if (!settled) { settled = true; void writes.then(() => reject(error), reject) } }
-        const request = httpRequest({ socketPath: this.socketPath, method: 'GET', path: `/containers/${encodeURIComponent(container)}/archive?path=${encodeURIComponent(source)}`, signal: operationSignal }, response => {
+        const request = this.runtime.request({ socketPath: this.socketPath, method: 'GET', path: `/containers/${encodeURIComponent(container)}/archive?path=${encodeURIComponent(source)}`, signal }, response => {
           if (response.statusCode !== 200) { response.resume(); fail(new Error(`DOCKER_STATUS_${response.statusCode ?? 0}`)); return }
           const hash = createHash('sha256'); let bytes = 0
           response.on('data', chunk => {
             response.pause(); const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk); bytes += value.byteLength
             if (bytes > maximumBytes) { request.destroy(new Error('DOCKER_RESPONSE_TOO_LARGE')); return }
-            hash.update(value); writes = writes.then(() => handle.write(value)).then(() => { response.resume() })
+            hash.update(value); writes = writes.then(() => writeAll(handle, value)).then(() => { response.resume() })
           })
           response.once('aborted', () => fail(new Error('DOCKER_RESPONSE_ABORTED'))); response.once('error', fail)
-          response.once('end', () => { if (!settled) void writes.then(async () => { if (!response.complete) throw new Error('DOCKER_RESPONSE_ABORTED'); await handle.sync(); if (!settled) { settled = true; resolve({ bytes, sha256: hash.digest('hex') }) } }, fail) })
+          response.once('end', () => { if (!settled) void writes.then(async () => { if (!response.complete) throw new Error('DOCKER_RESPONSE_ABORTED'); await handle.sync(); if (!settled) { settled = true; resolve({ bytes, sha256: hash.digest('hex') }) } }).catch(fail) })
         })
         request.once('error', fail); request.end()
       })
       succeeded = true; return result
-    } finally { await handle.close(); if (!succeeded) await rm(destination, { force: true }).catch(() => undefined) }
+    } finally { await handle.close(); if (!succeeded) await this.runtime.remove(destination, { force: true }).catch(() => undefined) }
   }
   async stopContainer(id: string, signal: AbortSignal): Promise<void> { await this.#request('POST', `/containers/${encodeURIComponent(id)}/stop?t=3`, undefined, signal, [204, 304, 404]) }
   async removeContainer(id: string, signal: AbortSignal): Promise<void> { await this.#request('DELETE', `/containers/${encodeURIComponent(id)}?force=1&v=0`, undefined, signal, [204, 404]) }
@@ -146,20 +154,20 @@ export class DockerEngine implements DockerEnginePort {
     return Array.isArray(result) ? result.filter(isRecord) : []
   }
 
-  async #json<T>(method: string, path: string, body: unknown, signal: AbortSignal, statuses: readonly number[]): Promise<T> {
-    const bytes = await this.#request(method, path, body, signal, statuses)
+  async #json<T>(method: string, path: string, body: unknown, signal: AbortSignal, statuses: readonly number[], applyRequestTimeout = true): Promise<T> {
+    const bytes = await this.#request(method, path, body, signal, statuses, DEFAULT_RESPONSE_LIMIT, applyRequestTimeout)
     try { return JSON.parse(bytes.toString('utf8')) as T } catch { throw new Error('INVALID_DOCKER_RESPONSE') }
   }
 
-  async #request(method: string, path: string, body: unknown, signal: AbortSignal, statuses: readonly number[], limit = DEFAULT_RESPONSE_LIMIT): Promise<Buffer> {
-    const payload = body === undefined ? undefined : Buffer.isBuffer(body) ? body : Buffer.from(JSON.stringify(body), 'utf8')
-    const operationSignal = AbortSignal.any([signal, AbortSignal.timeout(this.requestTimeoutMs)])
+  async #request(method: string, path: string, body: unknown, signal: AbortSignal, statuses: readonly number[], limit = DEFAULT_RESPONSE_LIMIT, applyRequestTimeout = true): Promise<Buffer> {
+    const payload = body === undefined ? undefined : Buffer.from(JSON.stringify(body), 'utf8')
+    const operationSignal = applyRequestTimeout ? AbortSignal.any([signal, AbortSignal.timeout(this.requestTimeoutMs)]) : signal
     return new Promise((resolve, reject) => {
       let settled = false; const fail = (error: unknown) => { if (!settled) { settled = true; reject(error) } }
-      const request = httpRequest({
+      const request = this.runtime.request({
         socketPath: this.socketPath, method, path, signal: operationSignal,
         headers: payload === undefined ? {} : {
-          'content-type': Buffer.isBuffer(body) ? 'application/x-tar' : 'application/json',
+          'content-type': 'application/json',
           'content-length': String(payload.byteLength),
         },
       }, response => {
@@ -182,7 +190,7 @@ export class DockerEngine implements DockerEnginePort {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === 'object' && value !== null && !Array.isArray(value) }
-function noFollow(): number { return process.platform === 'linux' ? constants.O_NOFOLLOW : 0 }
+async function writeAll(handle: Awaited<ReturnType<typeof open>>, value: Buffer): Promise<void> { let offset = 0; while (offset < value.byteLength) { const written = await handle.write(value, offset, value.byteLength - offset); if (written.bytesWritten === 0) throw new Error('DOCKER_ARCHIVE_WRITE_FAILED'); offset += written.bytesWritten } }
 
 export function demultiplexDockerStream(value: Buffer, maximum = 576 * 1024): { readonly stdout: Buffer; readonly stderr: Buffer } {
   const stdout: Buffer[] = []; const stderr: Buffer[] = []; let out = 0; let err = 0; let offset = 0

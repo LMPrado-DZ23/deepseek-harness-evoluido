@@ -28,6 +28,7 @@ describe('server-authoritative Docker builder adapter', () => {
     expect(engine.volumeOptions).toEqual([{ type: 'tmpfs', device: 'tmpfs', o: 'size=67108864,uid=10001,gid=10001,mode=0700' }])
     const stager = engine.created.find(row => labels(row.body)['dz23.role'] === 'anchor')?.body
     const step = engine.created.find(row => labels(row.body)['dz23.role'] === 'step')?.body
+    const verifier = engine.created.find(row => labels(row.body)['dz23.role'] === 'template-verify')?.body
     expect(stager).toMatchObject({ Image: image, Cmd: ['sleep', 'infinity'], User: '10001:10001', NetworkDisabled: true })
     expect(step).toMatchObject({
       Image: image,
@@ -36,7 +37,8 @@ describe('server-authoritative Docker builder adapter', () => {
       Env: ['CI=true', 'HOME=/tmp', 'XDG_CONFIG_HOME=/tmp/.config', 'NEXT_TELEMETRY_DISABLED=1'],
     })
     expect(JSON.stringify(engine.created)).not.toMatch(/curl attacker|SECRET|"evil"/u)
-    assertHardened(stager); assertHardened(step)
+    assertHardened(verifier); assertHardened(stager); assertHardened(step)
+    expect(host(verifier).Mounts).toEqual([{ Type: 'volume', Source: templateVolume(), Target: '/template-store', ReadOnly: true }])
     expect(host(step).Mounts).toEqual([
       expect.objectContaining({ Type: 'volume', Target: '/workspace', ReadOnly: false }),
       { Type: 'volume', Source: templateVolume(), Target: '/template-store', ReadOnly: true },
@@ -66,6 +68,12 @@ describe('server-authoritative Docker builder adapter', () => {
     await expect(create(down).preflight(new AbortController().signal)).resolves.toMatchObject({ state: 'BLOCKED_EXTERNAL' })
     const missingStore = new FakeEngine(); missingStore.volumes = []
     await expect(create(missingStore).preflight(new AbortController().signal)).resolves.toMatchObject({ state: 'BLOCKED_EXTERNAL' })
+    const tamperedStore = new FakeEngine(); tamperedStore.templateDigest = 'e'.repeat(64)
+    await expect(create(tamperedStore).preflight(new AbortController().signal)).resolves.toMatchObject({ state: 'BLOCKED_EXTERNAL' })
+    const invalidId = new FakeEngine(); invalidId.imageId = 'not-a-digest' as never
+    await expect(create(invalidId).preflight(new AbortController().signal)).resolves.toMatchObject({ state: 'BLOCKED_EXTERNAL', image_id: image })
+    const verifierFailure = new FakeEngine(); vi.spyOn(verifierFailure, 'createContainer').mockRejectedValueOnce(new Error('verifier failed'))
+    await expect(create(verifierFailure).preflight(new AbortController().signal)).resolves.toMatchObject({ state: 'BLOCKED_EXTERNAL' })
   })
 
   it('binds the attested policy hash to immutable limits and template identity', async () => {
@@ -133,6 +141,20 @@ describe('server-authoritative Docker builder adapter', () => {
     expect(() => new DockerBuilderAdapter({ engine: new FakeEngine(), imageDigest: image, instanceId: '../bad', exportRoot: tmpdir(), templateStoreVersion: templateVersion, templateStoreSha256 })).toThrow('INVALID_INSTANCE_ID')
     expect(() => new DockerBuilderAdapter({ engine: new FakeEngine(), imageDigest: image, instanceId: 'one', exportRoot: tmpdir(), templateStoreVersion: templateVersion, templateStoreSha256, limits: limits({ memoryBytes: 0, nanoCpus: 1, pids: 1, timeoutMs: 1, workspaceBytes: 1, concurrentContainers: 1 }) })).toThrow('INVALID_BUILDER_LIMIT')
     expect(() => new DockerBuilderAdapter({ engine: new FakeEngine(), imageDigest: image, instanceId: 'one', exportRoot: tmpdir(), templateStoreVersion: '../bad', templateStoreSha256 })).toThrow('INVALID_TEMPLATE_STORE')
+    expect(() => new DockerBuilderAdapter({ engine: new FakeEngine(), imageDigest: image, instanceId: 'one', exportRoot: 'relative', templateStoreVersion: templateVersion, templateStoreSha256 })).toThrow('INVALID_EXPORT_ROOT')
+    expect(() => new DockerBuilderAdapter({ engine: new FakeEngine(), imageDigest: image, instanceId: 'one', exportRoot: tmpdir(), templateStoreVersion: templateVersion, templateStoreSha256: 'bad' })).toThrow('INVALID_TEMPLATE_STORE')
+    expect(() => new DockerBuilderAdapter({ engine: new FakeEngine(), imageDigest: image, instanceId: 'one', exportRoot: tmpdir(), templateStoreVersion: templateVersion, templateStoreSha256, limits: limits({ timeoutMs: Number.NaN }) })).toThrow('INVALID_BUILDER_LIMIT')
+    expect(() => new DockerBuilderAdapter({ engine: new FakeEngine(), imageDigest: image, instanceId: 'one', exportRoot: tmpdir(), templateStoreVersion: templateVersion, templateStoreSha256, limits: limits({ workspaceBytes: 129, maxWorkspaceBytes: 128 }) })).toThrow('INVALID_BUILDER_LIMIT')
+    expect(() => new DockerBuilderAdapter({ engine: new FakeEngine(), imageDigest: image, instanceId: 'one', exportRoot: tmpdir(), templateStoreVersion: templateVersion, templateStoreSha256, limits: limits({ maxRetainedExports: 1_001 }) })).toThrow('INVALID_BUILDER_LIMIT')
+  })
+
+  it('rejects duplicate and unknown build references without touching Docker', async () => {
+    const engine = new FakeEngine(); const adapter = create(engine); const signal = new AbortController().signal
+    await adapter.prepare(buildRef, 'one', artifact, signal)
+    await expect(adapter.prepare(buildRef, 'two', artifact, signal)).rejects.toThrow('BUILD_ALREADY_EXISTS')
+    await expect(adapter.execute(`build_${'0'.repeat(32)}`, 'build', signal)).rejects.toThrow('BUILD_NOT_FOUND')
+    await expect(adapter.exportArtifact(`build_${'0'.repeat(32)}`, signal)).rejects.toThrow('BUILD_NOT_FOUND')
+    await expect(adapter.cancel(`build_${'0'.repeat(32)}`, signal)).resolves.toBeUndefined()
   })
 
   it('reconciles labeled orphan containers and quota volumes before accepting work', async () => {
@@ -141,6 +163,50 @@ describe('server-authoritative Docker builder adapter', () => {
     expect(engine.containers).toHaveLength(0); expect(engine.volumes).toHaveLength(1)
     engine.volumes.push({ Name: 'alien', Labels: { 'dz23.managed': 'builder', 'dz23.instance_id': 'test-instance' } })
     await expect(create(engine).reconcile(signal)).rejects.toThrow('RECOVERY_FAILED')
+  })
+
+  it('fails closed on conflicting recovery identities and surviving resources', async () => {
+    const signal = new AbortController().signal
+    const ref2 = `build_${'c'.repeat(32)}`
+    for (const rows of [
+      [managedContainer(buildRef, 'one'), managedContainer(buildRef, 'two')],
+      [managedContainer(buildRef, 'one'), managedContainer(ref2, 'one')],
+      [{ Id: 'alien', Labels: { 'dz23.managed': 'builder', 'dz23.instance_id': 'test-instance', 'dz23.build_ref': 'bad', 'dz23.build_id': 'one' } }],
+    ]) {
+      const engine = new FakeEngine(); engine.containers = rows
+      await expect(create(engine).reconcile(signal)).rejects.toThrow('RECOVERY_FAILED')
+    }
+    const survivor = new FakeEngine(); survivor.containers = [managedContainer(buildRef, 'one')]; survivor.keepContainer = true
+    await expect(create(survivor).reconcile(signal)).rejects.toThrow('CLEANUP_INCOMPLETE')
+    const late = new FakeEngine(); late.containers = [managedContainer(buildRef, 'one')]; const original = late.listContainers.bind(late); let calls = 0
+    vi.spyOn(late, 'listContainers').mockImplementation(async filters => { calls += 1; const rows = await original(filters); return calls === 4 ? [managedContainer(buildRef, 'one')] : rows })
+    await expect(create(late).reconcile(signal)).rejects.toThrow('RECOVERY_FAILED')
+  })
+
+  it('rolls back every partially prepared stage and detects rollback API failures', async () => {
+    const signal = new AbortController().signal
+    const volumeFailure = new FakeEngine(); vi.spyOn(volumeFailure, 'createVolume').mockRejectedValueOnce(new Error('volume failed'))
+    await expect(create(volumeFailure).prepare(buildRef, 'one', artifact, signal)).rejects.toThrow('volume failed')
+    const anchorFailure = new FakeEngine(); vi.spyOn(anchorFailure, 'createContainer').mockRejectedValueOnce(new Error('anchor failed'))
+    await expect(create(anchorFailure).prepare(buildRef, 'one', artifact, signal)).rejects.toThrow('anchor failed')
+    const removeAnchor = new FakeEngine(); removeAnchor.archiveFailure = true; vi.spyOn(removeAnchor, 'removeContainer').mockRejectedValueOnce(new Error('remove failed'))
+    await expect(create(removeAnchor).prepare(buildRef, 'one', artifact, signal)).rejects.toThrow('CLEANUP_INCOMPLETE')
+    const removeVolume = new FakeEngine(); removeVolume.archiveFailure = true; vi.spyOn(removeVolume, 'removeVolume').mockRejectedValueOnce(new Error('remove failed'))
+    await expect(create(removeVolume).prepare(buildRef, 'one', artifact, signal)).rejects.toThrow('CLEANUP_INCOMPLETE')
+  })
+
+  it('distinguishes unexpected, caller-aborted and output-limit execution failures', async () => {
+    const signal = new AbortController().signal
+    const unexpected = new FakeEngine(); const first = create(unexpected); await first.prepare(buildRef, 'one', artifact, signal); vi.spyOn(unexpected, 'containerLogs').mockRejectedValueOnce(new Error('unexpected'))
+    await expect(first.execute(buildRef, 'build', signal)).rejects.toThrow('unexpected')
+    const aborted = new FakeEngine(); const second = create(aborted); await second.prepare(buildRef, 'two', artifact, signal); const controller = new AbortController(); vi.spyOn(aborted, 'waitContainer').mockImplementationOnce(async () => { controller.abort(new Error('cancelled')); throw controller.signal.reason })
+    await expect(second.execute(buildRef, 'build', controller.signal)).resolves.toMatchObject({ exit_code: -1, timed_out: false, termination_reason: null })
+    const bounded = new FakeEngine(); const third = create(bounded); await third.prepare(buildRef, 'three', artifact, signal); vi.spyOn(bounded, 'containerLogs').mockRejectedValueOnce(new Error('DOCKER_RESPONSE_TOO_LARGE'))
+    await expect(third.execute(buildRef, 'build', signal)).resolves.toMatchObject({ exit_code: -1, termination_reason: 'output_limit' })
+    const createFailure = new FakeEngine(); const fourth = create(createFailure); await fourth.prepare(buildRef, 'four', artifact, signal); vi.spyOn(createFailure, 'createContainer').mockRejectedValueOnce(new Error('create failed'))
+    await expect(fourth.execute(buildRef, 'build', signal)).rejects.toThrow('create failed')
+    const stopFailure = new FakeEngine(); const fifth = create(stopFailure); await fifth.prepare(buildRef, 'five', artifact, signal); vi.spyOn(stopFailure, 'containerLogs').mockRejectedValueOnce(new Error('unexpected')); vi.spyOn(stopFailure, 'stopContainer').mockRejectedValueOnce(new Error('stop failed'))
+    await expect(fifth.execute(buildRef, 'build', signal)).rejects.toThrow('unexpected')
   })
 
   it('exports only through bounded Docker archive streaming and returns the revalidated tree SHA', async () => {
@@ -165,6 +231,24 @@ describe('server-authoritative Docker builder adapter', () => {
     } finally { await rm(root, { recursive: true, force: true }) }
   })
 
+  it('rejects a non-zero exporter and releases the export permit for retry', async () => {
+    const engine = new FakeEngine(); engine.exportExitCode = 1; const root = await mkdtemp(join(tmpdir(), 'dz23-adapter-export-exit-')); const signal = new AbortController().signal
+    try {
+      const adapter = new DockerBuilderAdapter({ engine, imageDigest: image, instanceId: 'test-instance', exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256 }); await adapter.prepare(buildRef, 'exit', artifact, signal)
+      await expect(adapter.exportArtifact(buildRef, signal)).rejects.toThrow('EXPORT_INVALID')
+      engine.exportExitCode = 0; engine.downloadPayload = Buffer.from('bad')
+      await expect(adapter.exportArtifact(buildRef, signal)).rejects.toThrow('EXPORT_INVALID')
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
+
+  it('cleans partial exporter setup when volume or container creation fails', async () => {
+    const signal = new AbortController().signal
+    const volume = new FakeEngine(); const first = create(volume); await first.prepare(buildRef, 'volume-fail', artifact, signal); vi.spyOn(volume, 'createVolume').mockRejectedValueOnce(new Error('volume failed'))
+    await expect(first.exportArtifact(buildRef, signal)).rejects.toThrow('volume failed')
+    const container = new FakeEngine(); const second = create(container); await second.prepare(buildRef, 'container-fail', artifact, signal); vi.spyOn(container, 'createContainer').mockRejectedValueOnce(new Error('container failed'))
+    await expect(second.exportArtifact(buildRef, signal)).rejects.toThrow('container failed')
+  })
+
   it('fails closed on every exporter cleanup error while releasing the global export permit', async () => {
     const engine = new FakeEngine(); engine.downloadPayload = Buffer.from('not a tar'); engine.failExporterCleanup = true
     const root = await mkdtemp(join(tmpdir(), 'dz23-adapter-export-cleanup-')); const signal = new AbortController().signal
@@ -173,6 +257,30 @@ describe('server-authoritative Docker builder adapter', () => {
       await expect(adapter.exportArtifact(buildRef, signal)).rejects.toThrow('CLEANUP_INCOMPLETE')
       engine.failExporterCleanup = false; engine.containers = engine.containers.filter(row => row.Labels['dz23.role'] !== 'export'); engine.volumes = engine.volumes.filter(row => row.Labels['dz23.resource'] !== 'export')
       await expect(adapter.exportArtifact(buildRef, signal)).rejects.toThrow('EXPORT_INVALID')
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
+
+  it('accounts for archive cleanup failures before and after successful publication', async () => {
+    const signal = new AbortController().signal; const root = await mkdtemp(join(tmpdir(), 'dz23-adapter-rm-'))
+    try {
+      const invalid = new FakeEngine(); invalid.downloadPayload = Buffer.from('bad')
+      const first = new DockerBuilderAdapter({ engine: invalid, imageDigest: image, instanceId: 'test-instance', exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256, removeArchive: async () => { throw new Error('rm failed') } }); await first.prepare(buildRef, 'rm-one', artifact, signal)
+      await expect(first.exportArtifact(buildRef, signal)).rejects.toThrow('CLEANUP_INCOMPLETE')
+      const valid = new FakeEngine(); valid.downloadPayload = exportTar()
+      const secondRef = `build_${'4'.repeat(32)}`; const second = new DockerBuilderAdapter({ engine: valid, imageDigest: image, instanceId: 'test-instance', exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256, removeArchive: async () => { throw new Error('rm failed') } }); await second.prepare(secondRef, 'rm-two', artifact, signal)
+      await expect(second.exportArtifact(secondRef, signal)).resolves.toMatchObject({ relative_path: `exports/${secondRef}` })
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
+
+  it('does not erase a successfully published result when exporter cleanup must be retried by finish', async () => {
+    const engine = new FakeEngine(); engine.downloadPayload = exportTar(); engine.failExporterCleanup = true
+    const root = await mkdtemp(join(tmpdir(), 'dz23-adapter-export-published-')); const signal = new AbortController().signal
+    try {
+      const adapter = new DockerBuilderAdapter({ engine, imageDigest: image, instanceId: 'test-instance', exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256 }); await adapter.prepare(buildRef, 'published-cleanup', artifact, signal)
+      await expect(adapter.exportArtifact(buildRef, signal)).resolves.toMatchObject({ relative_path: `exports/${buildRef}`, files: 3 })
+      expect(engine.containers.some(row => row.Labels['dz23.role'] === 'export')).toBe(true)
+      engine.failExporterCleanup = false
+      await expect(adapter.cleanup(buildRef, AbortSignal.timeout(1_000))).resolves.toBeUndefined()
     } finally { await rm(root, { recursive: true, force: true }) }
   })
 
@@ -190,6 +298,41 @@ describe('server-authoritative Docker builder adapter', () => {
     const second = `build_${'c'.repeat(32)}`; await expect(adapter.prepare(second, 'two', artifact, signal)).rejects.toThrow('CAPACITY_EXCEEDED')
     await adapter.cleanup(buildRef, signal); await expect(adapter.prepare(second, 'two', artifact, signal)).resolves.toBeUndefined()
   })
+
+  it('validates all managed inventory rows and cleanup failures', async () => {
+    const signal = new AbortController().signal
+    const invalidList = new FakeEngine(); invalidList.containers = [{ Id: 'alien', Labels: { 'dz23.managed': 'builder', 'dz23.instance_id': 'test-instance', 'dz23.build_ref': 'bad' } }]
+    await expect(create(invalidList).listManaged(signal)).rejects.toThrow('RECOVERY_FAILED')
+    const invalidContainer = new FakeEngine(); invalidContainer.containers = [{ Id: '', Labels: managedLabels(buildRef, 'one') }]
+    await expect(create(invalidContainer).cleanup(buildRef, signal)).rejects.toThrow('CLEANUP_INCOMPLETE')
+    const invalidVolume = new FakeEngine(); invalidVolume.volumes.push({ Name: '', Labels: managedLabels(buildRef, 'one') })
+    await expect(create(invalidVolume).cleanup(buildRef, signal)).rejects.toThrow('CLEANUP_INCOMPLETE')
+    const failing = new FakeEngine(); failing.containers = [managedContainer(buildRef, 'one')]; failing.volumes.push({ Name: 'workspace', Labels: managedLabels(buildRef, 'one') })
+    vi.spyOn(failing, 'stopContainer').mockRejectedValueOnce(new Error('stop')); vi.spyOn(failing, 'removeContainer').mockRejectedValueOnce(new Error('remove')); vi.spyOn(failing, 'removeVolume').mockRejectedValueOnce(new Error('volume'))
+    await expect(create(failing).cleanup(buildRef, signal)).rejects.toThrow('CLEANUP_INCOMPLETE')
+    const inventoryError = new FakeEngine(); vi.spyOn(inventoryError, 'listContainers').mockRejectedValueOnce(new Error('list')); vi.spyOn(inventoryError, 'listVolumes').mockRejectedValueOnce(new Error('list'))
+    await expect(create(inventoryError).cleanup(buildRef, signal)).rejects.toThrow('CLEANUP_INCOMPLETE')
+    const lateInventoryError = new FakeEngine(); vi.spyOn(lateInventoryError, 'listContainers').mockResolvedValueOnce([]).mockRejectedValueOnce(new Error('late')); vi.spyOn(lateInventoryError, 'listVolumes').mockResolvedValueOnce([]).mockRejectedValueOnce(new Error('late'))
+    await expect(create(lateInventoryError).cleanup(buildRef, signal)).rejects.toThrow('CLEANUP_INCOMPLETE')
+    const nonRecord = new FakeEngine(); vi.spyOn(nonRecord, 'listContainers').mockResolvedValueOnce([{ Labels: null }])
+    await expect(create(nonRecord).listManaged(signal)).rejects.toThrow('RECOVERY_FAILED')
+  })
+
+  it('removes stale template verifiers and rejects malformed verifier inventory', async () => {
+    const signal = new AbortController().signal
+    const stale = new FakeEngine(); stale.containers.push({ Id: 'stale-verifier', Labels: verifierLabels() })
+    await expect(create(stale).preflight(signal)).resolves.toMatchObject({ state: 'OK' })
+    expect(stale.containers.some(row => row.Id === 'stale-verifier')).toBe(false)
+    const malformed = new FakeEngine(); malformed.containers.push({ Id: '', Labels: verifierLabels() })
+    await expect(create(malformed).preflight(signal)).resolves.toMatchObject({ state: 'BLOCKED_EXTERNAL' })
+  })
+
+  it('truncates multibyte output only at a complete UTF-8 boundary', async () => {
+    const engine = new FakeEngine(); const adapter = create(engine); const signal = new AbortController().signal; await adapter.prepare(buildRef, 'utf8', artifact, signal)
+    vi.spyOn(engine, 'containerLogs').mockResolvedValueOnce({ stdout: Buffer.concat([Buffer.alloc(512 * 1024 - 1, 0x61), Buffer.from('é')]), stderr: Buffer.alloc(0) })
+    const result = await adapter.execute(buildRef, 'test', signal)
+    expect(Buffer.byteLength(result.stdout)).toBe(512 * 1024 - 1); expect(result.stdout.endsWith('é')).toBe(false)
+  })
 })
 
 function create(engine: FakeEngine, timeoutMs = 1_000): DockerBuilderAdapter {
@@ -197,7 +340,8 @@ function create(engine: FakeEngine, timeoutMs = 1_000): DockerBuilderAdapter {
 }
 
 class FakeEngine implements DockerEnginePort {
-  imageId = image; pingFailure = false; archiveFailure = false; waitForAbort = false; keepVolume = false; failExporterCleanup = false; failStepRemoval = false; failRollbackInventory = false
+  imageId = image; pingFailure = false; archiveFailure = false; waitForAbort = false; keepVolume = false; keepContainer = false; failExporterCleanup = false; failStepRemoval = false; failRollbackInventory = false; exportExitCode = 0
+  templateDigest = templateStoreSha256
   logs = { stdout: Buffer.from('clean output'), stderr: Buffer.alloc(0) }
   readonly inspected: string[] = []; readonly archives: Array<{ destination: string; bytes: number }> = []
   readonly volumeOptions: Array<Readonly<Record<string, string>>> = []
@@ -222,13 +366,14 @@ class FakeEngine implements DockerEnginePort {
   }
   async startContainer(id: string): Promise<void> { this.started.push(id) }
   async waitContainer(id: string, signal: AbortSignal): Promise<{ readonly StatusCode: number }> {
-    if (!this.waitForAbort) return { StatusCode: 0 }
+    if (!this.waitForAbort) return { StatusCode: this.containers.find(row => row.Id === id)?.Labels['dz23.role'] === 'export' ? this.exportExitCode : 0 }
     return new Promise((resolve, reject) => {
       this.waitResolvers.set(id, resolve)
       signal.addEventListener('abort', () => { this.waitResolvers.delete(id); reject(signal.reason) }, { once: true })
     })
   }
-  async containerLogs(_id: string, maximumBytes: number): Promise<{ readonly stdout: Buffer; readonly stderr: Buffer }> {
+  async containerLogs(id: string, maximumBytes: number): Promise<{ readonly stdout: Buffer; readonly stderr: Buffer }> {
+    if (this.containers.find(row => row.Id === id)?.Labels['dz23.role'] === 'template-verify') return { stdout: Buffer.from(this.templateDigest), stderr: Buffer.alloc(0) }
     if (this.logs.stdout.byteLength + this.logs.stderr.byteLength > maximumBytes) throw new Error('DOCKER_RESPONSE_TOO_LARGE')
     return this.logs
   }
@@ -237,7 +382,7 @@ class FakeEngine implements DockerEnginePort {
     if (this.failExporterCleanup && this.containers.find(row => row.Id === id)?.Labels['dz23.role'] === 'export') throw new Error('stop exporter failed')
     this.waitResolvers.get(id)?.({ StatusCode: 137 }); this.waitResolvers.delete(id)
   }
-  async removeContainer(id: string): Promise<void> { const role = this.containers.find(row => row.Id === id)?.Labels['dz23.role']; if ((this.failExporterCleanup && role === 'export') || (this.failStepRemoval && role === 'step')) throw new Error('remove container failed'); this.waitResolvers.delete(id); this.containers = this.containers.filter(row => row.Id !== id) }
+  async removeContainer(id: string): Promise<void> { const role = this.containers.find(row => row.Id === id)?.Labels['dz23.role']; if ((this.failExporterCleanup && role === 'export') || (this.failStepRemoval && role === 'step')) throw new Error('remove container failed'); this.waitResolvers.delete(id); if (!this.keepContainer) this.containers = this.containers.filter(row => row.Id !== id) }
   async listContainers(filters: Readonly<Record<string, readonly string[]>> = {}): Promise<readonly Record<string, unknown>[]> { const wanted = filters.label ?? []; if (this.failExporterCleanup && wanted.includes('dz23.role=export')) throw new Error('list export containers failed'); if (this.failRollbackInventory && wanted.some(item => item.startsWith('dz23.build_ref='))) throw new Error('list rollback containers failed'); return this.containers.filter(row => wanted.every(item => { const index = item.indexOf('='); return row.Labels[item.slice(0, index)] === item.slice(index + 1) })) }
 }
 
@@ -263,3 +408,6 @@ function tarSingle(name: string, value: string): Buffer {
 function exportTar(): Buffer { return Buffer.concat([tarSingle('.next/standalone/server.js', 'server').subarray(0, -1024), tarSingle('.next/static/chunk.js', 'chunk').subarray(0, -1024), tarSingle('evidence/appspec-report.json', '{}').subarray(0, -1024), Buffer.alloc(1024)]) }
 function templateVolume(): string { return `dz23-template-${createHash('sha256').update(`test-instance:${templateVersion}:${templateStoreSha256}`).digest('hex').slice(0, 24)}` }
 function limits(overrides: Partial<import('../src/docker-adapter.js').BuilderLimits> = {}): import('../src/docker-adapter.js').BuilderLimits { return { memoryBytes: 512 * 1024 * 1024, nanoCpus: 1_000_000_000, pids: 128, timeoutMs: 1_000, workspaceBytes: 64 * 1024 * 1024, maxWorkspaceBytes: 128 * 1024 * 1024, concurrentContainers: 2, maxExportBytes: 128 * 1024 * 1024, maxRetainedExports: 5, ...overrides } }
+function managedLabels(ref: string, id: string): Record<string, string> { return { 'dz23.managed': 'builder', 'dz23.instance_id': 'test-instance', 'dz23.build_ref': ref, 'dz23.build_id': id } }
+function managedContainer(ref: string, id: string): { Id: string; Labels: Record<string, string> } { return { Id: `${id}-${ref}`.slice(0, 64), Labels: managedLabels(ref, id) } }
+function verifierLabels(): Record<string, string> { return { 'dz23.managed': 'builder-template-verifier', 'dz23.instance_id': 'test-instance', 'dz23.template_version': templateVersion, 'dz23.template_sha256': templateStoreSha256 } }

@@ -116,6 +116,8 @@ describe('builder supervisor authenticated HTTP contract', () => {
     expect(decode(await send(invalid.handler, valid[0], { token }))).toEqual({ ok: false, error: { code: 'INTERNAL' } })
     const unexpected = fixture({ preflight: vi.fn(async () => { throw new Error('/secret/path') }) })
     expect(JSON.stringify(decode(await send(unexpected.handler, valid[0], { token })))).not.toContain('secret')
+    expect(JSON.stringify(decode(await send(unexpected.handler, valid[0], { token })))).not.toContain('secret')
+    expect(unexpected.methods.preflight).toHaveBeenCalledTimes(2)
     const replayFailure = fixture()
     const guarded = createBuilderRpcHandler({ credentialRef, credentials: { resolve: async () => token }, methods: replayFailure.methods, replay: { run: async () => { throw new Error('/secret/replay') } } })
     expect(decode(await send(guarded, valid[0], { token }))).toEqual({ ok: false, error: { code: 'INTERNAL' } })
