@@ -28,6 +28,10 @@ describe('builder supervisor closed RPC schema', () => {
     expect(() => parseBuilderRpcRequest({ operation: 'execute', body: { ...valid[2].body, [field]: 'attacker' } })).toThrow('INVALID_REQUEST')
   })
 
+  it.each(['org_id', 'tenant_id', 'instance_id', 'scope_id', 'socket_path'])('never accepts caller-selected routing authority %s', field => {
+    for (const request of valid) expect(() => parseBuilderRpcRequest({ operation: request.operation, body: { ...request.body, [field]: 'attacker' } })).toThrow('INVALID_REQUEST')
+  })
+
   it.each(['../outside', '/absolute', './run', 'runs//one', 'runs\\one', 'runs/../../outside', 'runs/one\0hidden', 'runs/line\nfeed', 'runs/colon:value'])('rejects traversal or non-canonical path %j', artifact_relative_path => {
     expect(() => parseBuilderRpcRequest({ operation: 'prepare', body: { ...valid[1].body, artifact_relative_path } })).toThrow('INVALID_REQUEST')
   })
@@ -114,6 +118,10 @@ describe('builder supervisor authenticated HTTP contract', () => {
     expect(decode(await send(failed.handler, valid[0], { token }))).toEqual({ ok: false, error: { code: 'REQUEST_REPLAY' } })
     const invalid = fixture({ preflight: vi.fn(async () => ({ ...attestation(), socket: '/var/run/docker.sock' }) as never) })
     expect(decode(await send(invalid.handler, valid[0], { token }))).toEqual({ ok: false, error: { code: 'INTERNAL' } })
+    for (const field of ['org_id', 'tenant_id', 'instance_id']) {
+      const logicalIdentity = fixture({ preflight: vi.fn(async () => ({ ...attestation(), [field]: 'logical-value' }) as never) })
+      expect(decode(await send(logicalIdentity.handler, valid[0], { token }))).toEqual({ ok: false, error: { code: 'INTERNAL' } })
+    }
     const unexpected = fixture({ preflight: vi.fn(async () => { throw new Error('/secret/path') }) })
     expect(JSON.stringify(decode(await send(unexpected.handler, valid[0], { token })))).not.toContain('secret')
     expect(JSON.stringify(decode(await send(unexpected.handler, valid[0], { token })))).not.toContain('secret')
@@ -175,4 +183,4 @@ describe('builder supervisor authenticated HTTP contract', () => {
   })
 })
 
-function attestation() { return { state: 'OK' as const, protocol_version: 1 as const, instance_id: 'test-instance', image_id: `sha256:${'a'.repeat(64)}` as const, policy_sha256: 'b'.repeat(64) } }
+function attestation() { return { state: 'OK' as const, protocol_version: 1 as const, scope_id: `s_${'c'.repeat(48)}` as const, image_id: `sha256:${'a'.repeat(64)}` as const, policy_sha256: 'b'.repeat(64) } }

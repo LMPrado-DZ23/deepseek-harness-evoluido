@@ -502,7 +502,7 @@ describe('verified build archive', () => {
 function fakeAdapter(): BuilderExecutionPort {
   const managed = new Set<string>()
   return {
-    preflight: vi.fn(async () => ({ state: 'OK' as const, protocol_version: 1 as const, instance_id: 'test-instance', image_id: `sha256:${'a'.repeat(64)}` as const, policy_sha256: 'b'.repeat(64) })),
+    preflight: vi.fn(async () => ({ state: 'OK' as const, protocol_version: 1 as const, scope_id: `s_${'c'.repeat(48)}` as const, image_id: `sha256:${'a'.repeat(64)}` as const, policy_sha256: 'b'.repeat(64) })),
     reconcile: vi.fn(async () => []),
     prepare: vi.fn(async buildRef => { managed.add(buildRef) }),
     execute: vi.fn(async (_buildRef: string, _step: BuildStep) => ok),

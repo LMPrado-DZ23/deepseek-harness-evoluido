@@ -3,14 +3,14 @@ import { request as httpRequest, createServer as createHttpServer, type Incoming
 import { chmod, link, lstat, mkdir, mkdtemp, open, readFile, realpath, rename, rm, unlink, writeFile } from 'node:fs/promises'
 import { createConnection, createServer as createNetServer } from 'node:net'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { BuilderRpcMethods } from '../src/protocol.js'
-import { listenBuilderUnix, type BuilderUnixRuntime } from '../src/unix-server.js'
+import { listenBuilderUnix as listenBuilderUnixActual, type BuilderUnixRuntime, type BuilderUnixServerOptions } from '../src/unix-server.js'
 
 const roots: string[] = []; const listeners: Array<{ close(): Promise<void> }> = []
 const token = 'A'.repeat(43)
-const replayNamespace = { instanceId: 'test-instance', policySha256: 'b'.repeat(64), scopeId: 'tenant-test' }
+const replayNamespace = { policySha256: 'b'.repeat(64), scopeId: `s_${'a'.repeat(48)}` }
 type HttpHandler = (request: IncomingMessage, response: ServerResponse) => void
 afterEach(async () => {
   await Promise.all(listeners.splice(0).map(item => item.close().catch(() => undefined)))
@@ -42,15 +42,39 @@ describe.skipIf(process.platform === 'win32')('authenticated Unix builder socket
   })
 
   it('replays the exact persisted response after a server restart without redispatch', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'dz23-builder-persisted-wire-')); roots.push(root); const socketPath = join(root, 'builder.sock').replaceAll('\\', '/')
-    const firstMethods = fakeMethods(); const first = await listenBuilderUnix({ socketPath, bearerToken: token, methods: firstMethods, replayNamespace })
+    const root = await mkdtemp(join(tmpdir(), 'dz23-builder-persisted-wire-')); roots.push(root); const socketPath = join(root, 'builder.sock').replaceAll('\\', '/'); const replayRoot = join(root, 'persistent-state').replaceAll('\\', '/')
+    const firstMethods = fakeMethods(); const first = await listenBuilderUnix({ socketPath, bearerToken: token, methods: firstMethods, replayNamespace, replayRoot })
     const request = { operation: 'preflight', body: { request_id: `req_${'c'.repeat(32)}` } }
     const expected = await sendValue(socketPath, token, request); await first.close()
-    const secondMethods = fakeMethods(); const second = await listenBuilderUnix({ socketPath, bearerToken: token, methods: secondMethods, replayNamespace }); listeners.push(second)
+    expect((await lstat(join(replayRoot, replayNamespace.scopeId, replayNamespace.policySha256))).mode & 0o777).toBe(0o700)
+    await expect(lstat(`${socketPath}.requests`)).rejects.toMatchObject({ code: 'ENOENT' })
+    const secondMethods = fakeMethods(); const second = await listenBuilderUnix({ socketPath, bearerToken: token, methods: secondMethods, replayNamespace, replayRoot }); listeners.push(second)
     expect(await sendValue(socketPath, token, request)).toEqual(expected); expect(secondMethods.preflight).not.toHaveBeenCalled()
     await second.close(); listeners.splice(0, 1)
-    const changedMethods = fakeMethods(); const changed = await listenBuilderUnix({ socketPath, bearerToken: token, methods: changedMethods, replayNamespace: { ...replayNamespace, policySha256: 'c'.repeat(64) } }); listeners.push(changed)
+    const changedMethods = fakeMethods(); const changed = await listenBuilderUnix({ socketPath, bearerToken: token, methods: changedMethods, replayNamespace: { ...replayNamespace, policySha256: 'c'.repeat(64) }, replayRoot }); listeners.push(changed)
     expect(await sendValue(socketPath, token, request)).toEqual(expected); expect(changedMethods.preflight).toHaveBeenCalledTimes(1)
+  })
+
+  it('fails closed before binding when the configured persistent replay root is not private', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dz23-builder-replay-mode-')); roots.push(root); const socketPath = join(root, 'builder.sock').replaceAll('\\', '/'); const replayRoot = join(root, 'persistent-state').replaceAll('\\', '/')
+    await mkdir(replayRoot, { mode: 0o755 })
+    await expect(listenBuilderUnix({ socketPath, bearerToken: token, methods: fakeMethods(), replayNamespace, replayRoot })).rejects.toThrow('UNSAFE_REPLAY_DIRECTORY')
+    await expect(lstat(socketPath)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('never replays one physical scope request inside another scope', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dz23-builder-cross-scope-')); roots.push(root); const socketPath = join(root, 'builder.sock').replaceAll('\\', '/'); const replayRoot = join(root, 'persistent-state').replaceAll('\\', '/')
+    const request = { operation: 'preflight', body: { request_id: `req_${'d'.repeat(32)}` } }
+    const firstMethods = fakeMethods(); const first = await listenBuilderUnix({ socketPath, bearerToken: token, methods: firstMethods, replayNamespace, replayRoot })
+    await sendValue(socketPath, token, request); await first.close()
+    const other = { ...replayNamespace, scopeId: `s_${'b'.repeat(48)}` }
+    const secondMethods = fakeMethods(); const second = await listenBuilderUnix({ socketPath, bearerToken: token, methods: secondMethods, replayNamespace: other, replayRoot }); listeners.push(second)
+
+    await expect(sendValue(socketPath, token, request)).resolves.toMatchObject({ status: 200 })
+    expect(firstMethods.preflight).toHaveBeenCalledTimes(1)
+    expect(secondMethods.preflight).toHaveBeenCalledTimes(1)
+    expect((await lstat(join(replayRoot, replayNamespace.scopeId))).isDirectory()).toBe(true)
+    expect((await lstat(join(replayRoot, other.scopeId))).isDirectory()).toBe(true)
   })
 
   it('does not strand the exclusive lease when initialization fails', async () => {
@@ -72,12 +96,18 @@ describe.skipIf(process.platform === 'win32')('authenticated Unix builder socket
     await expect(listenBuilderUnix({ socketPath: 'relative.sock', bearerToken: token, methods, replayNamespace })).rejects.toThrow('INVALID_SOCKET_PATH')
     await expect(listenBuilderUnix({ socketPath: '/tmp/../tmp/builder.sock', bearerToken: token, methods, replayNamespace })).rejects.toThrow('INVALID_SOCKET_PATH')
     await expect(listenBuilderUnix({ socketPath: '/tmp/builder.sock', bearerToken: 'short', methods, replayNamespace })).rejects.toThrow('INVALID_SUPERVISOR_TOKEN')
-    await expect(listenBuilderUnix({ socketPath: '/tmp/builder.sock', bearerToken: token, methods, replayNamespace: { instanceId: '../bad', policySha256: 'x', scopeId: 'tenant-test' } })).rejects.toThrow('INVALID_REPLAY_NAMESPACE')
-    await expect(listenBuilderUnix({ socketPath: '/tmp/builder.sock', bearerToken: token, methods, replayNamespace: { instanceId: 'ok', policySha256: 'x', scopeId: 'tenant-test' } })).rejects.toThrow('INVALID_REPLAY_NAMESPACE')
+    await expect(listenBuilderUnix({ socketPath: '/tmp/builder.sock', bearerToken: token, methods, replayNamespace: { policySha256: 'x', scopeId: replayNamespace.scopeId } })).rejects.toThrow('INVALID_REPLAY_NAMESPACE')
     await expect(listenBuilderUnix({ socketPath: '/tmp/builder.sock', bearerToken: token, methods, replayNamespace: { ...replayNamespace, scopeId: '../bad' } })).rejects.toThrow('INVALID_REPLAY_NAMESPACE')
+    await expect(listenBuilderUnix({ socketPath: '/tmp/builder.sock', bearerToken: token, methods, replayNamespace, replayRoot: 'relative' })).rejects.toThrow('INVALID_REPLAY_ROOT')
+    for (const replayRoot of ['/', '/tmp/replay\\bad', '/tmp/replay\0bad', 'http://localhost/replay', '/tmp/replay/', '/tmp/../tmp/replay']) {
+      await expect(listenBuilderUnix({ socketPath: '/tmp/builder.sock', bearerToken: token, methods, replayNamespace, replayRoot })).rejects.toThrow('INVALID_REPLAY_ROOT')
+    }
     await expect(listenBuilderUnix({ socketPath: '/tmp/bad\\socket', bearerToken: token, methods, replayNamespace })).rejects.toThrow('INVALID_SOCKET_PATH')
     await expect(listenBuilderUnix({ socketPath: '/tmp/bad\0socket', bearerToken: token, methods, replayNamespace })).rejects.toThrow('INVALID_SOCKET_PATH')
     await expect(listenBuilderUnix({ socketPath: 'http://localhost/socket', bearerToken: token, methods, replayNamespace })).rejects.toThrow('INVALID_SOCKET_PATH')
+    const oversizedSocketPath = `/tmp/${'a'.repeat(103)}`
+    expect(Buffer.byteLength(oversizedSocketPath, 'utf8')).toBe(108)
+    await expect(listenBuilderUnix({ socketPath: oversizedSocketPath, bearerToken: token, methods, replayNamespace })).rejects.toThrow('INVALID_SOCKET_PATH')
     await expect(listenBuilderUnix({ socketPath: '/tmp/builder.sock', bearerToken: token, methods, replayNamespace, operationTimeoutMs: 0 })).rejects.toThrow('INVALID_OPERATION_TIMEOUT')
     await expect(listenBuilderUnix({ socketPath: '/tmp/builder.sock', bearerToken: token, methods, replayNamespace, operationTimeoutMs: 100, stepTimeoutMs: 80, cleanupTimeoutMs: 30 })).rejects.toThrow('INVALID_OPERATION_TIMEOUT')
   })
@@ -105,7 +135,7 @@ describe.skipIf(process.platform === 'win32')('authenticated Unix builder socket
 
   it('bounds request bodies and aborts a cooperative slow RPC at the operation deadline', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dz23-builder-deadline-')); roots.push(root); const socketPath = join(root, 'builder.sock').replaceAll('\\', '/')
-    let slow = true; const methods = { ...fakeMethods(), preflight: vi.fn(async (_body: unknown, signal: AbortSignal) => { if (!slow) return { state: 'OK' as const, protocol_version: 1 as const, instance_id: 'test-instance', image_id: `sha256:${'a'.repeat(64)}` as const, policy_sha256: 'b'.repeat(64) }; signal.throwIfAborted(); return new Promise<never>((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true })) }) }
+    let slow = true; const methods = { ...fakeMethods(), preflight: vi.fn(async (_body: unknown, signal: AbortSignal) => { if (!slow) return { state: 'OK' as const, protocol_version: 1 as const, scope_id: replayNamespace.scopeId as `s_${string}`, image_id: `sha256:${'a'.repeat(64)}` as const, policy_sha256: 'b'.repeat(64) }; signal.throwIfAborted(); return new Promise<never>((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true })) }) }
     const listener = await listenBuilderUnix({ socketPath, bearerToken: token, methods, replayNamespace, operationTimeoutMs: 50, stepTimeoutMs: 20, cleanupTimeoutMs: 20 }); listeners.push(listener)
     await expect(send(socketPath, token)).resolves.toMatchObject({ status: 504, body: { ok: false, error: { code: 'DEADLINE_EXCEEDED' } } })
     slow = false; await expect(send(socketPath, token)).resolves.toMatchObject({ status: 200 }); expect(methods.preflight).toHaveBeenCalledTimes(2)
@@ -358,9 +388,24 @@ describe.skipIf(process.platform === 'win32')('authenticated Unix builder socket
   })
 })
 
+type TestUnixServerOptions = Omit<BuilderUnixServerOptions, 'scopeId' | 'policySha256' | 'replayRoot'> & {
+  readonly replayNamespace: { readonly scopeId: string; readonly policySha256: string }
+  readonly replayRoot?: string
+}
+
+function listenBuilderUnix(options: TestUnixServerOptions): ReturnType<typeof listenBuilderUnixActual> {
+  const { replayNamespace: namespace, replayRoot, ...rest } = options
+  return listenBuilderUnixActual({
+    ...rest,
+    scopeId: namespace.scopeId as `s_${string}`,
+    policySha256: namespace.policySha256,
+    replayRoot: replayRoot ?? join(dirname(options.socketPath), 'rpc-replay').replaceAll('\\', '/'),
+  })
+}
+
 function fakeMethods(): BuilderRpcMethods {
   return {
-    preflight: vi.fn(async () => ({ state: 'OK' as const, protocol_version: 1 as const, instance_id: 'test-instance', image_id: `sha256:${'a'.repeat(64)}` as const, policy_sha256: 'b'.repeat(64) })),
+    preflight: vi.fn(async () => ({ state: 'OK' as const, protocol_version: 1 as const, scope_id: replayNamespace.scopeId as `s_${string}`, image_id: `sha256:${'a'.repeat(64)}` as const, policy_sha256: 'b'.repeat(64) })),
     prepare: vi.fn(async () => ({ build_ref: `build_${'a'.repeat(32)}`, state: 'PREPARED' as const })),
     execute: vi.fn(async (body: Parameters<BuilderRpcMethods['execute']>[0]) => ({ build_ref: body.build_ref, state: ({ install: 'INSTALL_OK', build: 'BUILD_OK', test: 'TEST_OK', e2e: 'E2E_OK' } as const)[body.step], step: body.step, result: { exit_code: 0, stdout: '', stderr: '', timed_out: false, termination_reason: null, output_limit_exceeded: false } })),
     cancel: vi.fn(async body => ({ build_ref: body.build_ref, state: 'CANCELLED' as const })),

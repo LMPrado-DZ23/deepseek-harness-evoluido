@@ -7,8 +7,11 @@ import { describe, expect, it, vi } from 'vitest'
 import { DockerBuilderAdapter } from '../src/docker-adapter.js'
 import type { DockerEnginePort } from '../src/docker-engine.js'
 import { openManagedExportArchive } from '../src/export-artifact.js'
+import { deriveBuilderRuntimeScopeId } from '../src/runtime-scope.js'
 
 const image = `sha256:${'a'.repeat(64)}` as const
+const installationId = '1'.repeat(64)
+const scopeId = deriveBuilderRuntimeScopeId({ installationId, tenantId: 'tenant-one', instanceId: 'test-instance' })
 const templateVersion = 'nextjs-app@1'
 const templateStoreSha256 = 'd'.repeat(64)
 const buildRef = `build_${'b'.repeat(32)}`
@@ -20,7 +23,7 @@ describe('server-authoritative Docker builder adapter', () => {
     const adapter = create(engine)
     const signal = new AbortController().signal
 
-    await expect(adapter.preflight(signal)).resolves.toMatchObject({ state: 'OK', protocol_version: 1, instance_id: 'test-instance', image_id: image, policy_sha256: expect.stringMatching(/^[a-f0-9]{64}$/u) })
+    await expect(adapter.preflight(signal)).resolves.toMatchObject({ state: 'OK', protocol_version: 1, scope_id: scopeId, image_id: image, policy_sha256: expect.stringMatching(/^[a-f0-9]{64}$/u) })
     await adapter.prepare(buildRef, 'run-1', { ...artifact, command: 'curl attacker', image: 'evil', mount: '/', env: ['SECRET'] } as never, signal)
     const result = await adapter.execute(buildRef, 'install', signal)
 
@@ -49,6 +52,27 @@ describe('server-authoritative Docker builder adapter', () => {
     expect(JSON.stringify(engine.created)).not.toContain('"Type":"bind"')
     await adapter.cleanup(buildRef, signal)
     expect(await adapter.listManaged(signal)).toEqual([])
+  })
+
+  it('uses only installation plus opaque scope in Docker labels, filters and names', async () => {
+    const engine = new FakeEngine(); const signal = new AbortController().signal
+    const otherScope = deriveBuilderRuntimeScopeId({ installationId, tenantId: 'tenant-two', instanceId: 'test-instance' })
+    engine.containers.push({ Id: 'foreign', Labels: { 'dz23.managed': 'builder', ...physicalIdentityLabels(otherScope), 'dz23.build_ref': buildRef, 'dz23.build_id': 'foreign-run' } })
+    const listContainers = vi.spyOn(engine, 'listContainers')
+    const adapter = create(engine)
+
+    await expect(adapter.reconcile([], signal)).resolves.toEqual([])
+    expect(listContainers).toHaveBeenCalledWith({ label: [
+      'dz23.managed=builder',
+      `com.dz23.studio.installation-id=${installationId}`,
+      `com.dz23.studio.scope-id=${scopeId}`,
+    ] }, signal)
+    await adapter.prepare(buildRef, 'owned-run', artifact, signal)
+    const owned = engine.created.filter(row => labels(row.body)['com.dz23.studio.scope-id'] === scopeId)
+    expect(owned.length).toBeGreaterThan(0)
+    expect(owned.every(row => labels(row.body)['com.dz23.studio.installation-id'] === installationId)).toBe(true)
+    expect(JSON.stringify(owned)).not.toMatch(/tenant-one|tenant-two|instance_id/u)
+    expect(engine.containers.some(row => row.Id === 'foreign')).toBe(true)
   })
 
   it.each([
@@ -81,7 +105,7 @@ describe('server-authoritative Docker builder adapter', () => {
   it('binds the attested policy hash to immutable limits and template identity', async () => {
     const engine = new FakeEngine(); const signal = new AbortController().signal
     const normal = await create(engine).preflight(signal)
-    const changed = await new DockerBuilderAdapter({ engine, imageDigest: image, instanceId: 'test-instance', exportRoot: join(tmpdir(), 'changed'), templateStoreVersion: templateVersion, templateStoreSha256, limits: limits({ memoryBytes: 512 * 1024 * 1024, nanoCpus: 1_000_000_000, pids: 64, timeoutMs: 1_000, workspaceBytes: 64 * 1024 * 1024, concurrentContainers: 2 }) }).preflight(signal)
+    const changed = await new DockerBuilderAdapter({ engine, imageDigest: image, installationId, scopeId, exportRoot: join(tmpdir(), 'changed'), templateStoreVersion: templateVersion, templateStoreSha256, limits: limits({ memoryBytes: 512 * 1024 * 1024, nanoCpus: 1_000_000_000, pids: 64, timeoutMs: 1_000, workspaceBytes: 64 * 1024 * 1024, concurrentContainers: 2 }) }).preflight(signal)
     expect(changed.policy_sha256).not.toBe(normal.policy_sha256)
   })
 
@@ -139,15 +163,16 @@ describe('server-authoritative Docker builder adapter', () => {
   })
 
   it('validates immutable adapter configuration', () => {
-    expect(() => new DockerBuilderAdapter({ engine: new FakeEngine(), imageDigest: 'sha256:no' as never, instanceId: 'one', exportRoot: tmpdir(), templateStoreVersion: templateVersion, templateStoreSha256 })).toThrow('INVALID_BUILDER_IMAGE')
-    expect(() => new DockerBuilderAdapter({ engine: new FakeEngine(), imageDigest: image, instanceId: '../bad', exportRoot: tmpdir(), templateStoreVersion: templateVersion, templateStoreSha256 })).toThrow('INVALID_INSTANCE_ID')
-    expect(() => new DockerBuilderAdapter({ engine: new FakeEngine(), imageDigest: image, instanceId: 'one', exportRoot: tmpdir(), templateStoreVersion: templateVersion, templateStoreSha256, limits: limits({ memoryBytes: 0, nanoCpus: 1, pids: 1, timeoutMs: 1, workspaceBytes: 1, concurrentContainers: 1 }) })).toThrow('INVALID_BUILDER_LIMIT')
-    expect(() => new DockerBuilderAdapter({ engine: new FakeEngine(), imageDigest: image, instanceId: 'one', exportRoot: tmpdir(), templateStoreVersion: '../bad', templateStoreSha256 })).toThrow('INVALID_TEMPLATE_STORE')
-    expect(() => new DockerBuilderAdapter({ engine: new FakeEngine(), imageDigest: image, instanceId: 'one', exportRoot: 'relative', templateStoreVersion: templateVersion, templateStoreSha256 })).toThrow('INVALID_EXPORT_ROOT')
-    expect(() => new DockerBuilderAdapter({ engine: new FakeEngine(), imageDigest: image, instanceId: 'one', exportRoot: tmpdir(), templateStoreVersion: templateVersion, templateStoreSha256: 'bad' })).toThrow('INVALID_TEMPLATE_STORE')
-    expect(() => new DockerBuilderAdapter({ engine: new FakeEngine(), imageDigest: image, instanceId: 'one', exportRoot: tmpdir(), templateStoreVersion: templateVersion, templateStoreSha256, limits: limits({ timeoutMs: Number.NaN }) })).toThrow('INVALID_BUILDER_LIMIT')
-    expect(() => new DockerBuilderAdapter({ engine: new FakeEngine(), imageDigest: image, instanceId: 'one', exportRoot: tmpdir(), templateStoreVersion: templateVersion, templateStoreSha256, limits: limits({ workspaceBytes: 129, maxWorkspaceBytes: 128 }) })).toThrow('INVALID_BUILDER_LIMIT')
-    expect(() => new DockerBuilderAdapter({ engine: new FakeEngine(), imageDigest: image, instanceId: 'one', exportRoot: tmpdir(), templateStoreVersion: templateVersion, templateStoreSha256, limits: limits({ maxRetainedExports: 1_001 }) })).toThrow('INVALID_BUILDER_LIMIT')
+    expect(() => new DockerBuilderAdapter({ engine: new FakeEngine(), imageDigest: 'sha256:no' as never, installationId, scopeId, exportRoot: tmpdir(), templateStoreVersion: templateVersion, templateStoreSha256 })).toThrow('INVALID_BUILDER_IMAGE')
+    expect(() => new DockerBuilderAdapter({ engine: new FakeEngine(), imageDigest: image, installationId: 'bad', scopeId, exportRoot: tmpdir(), templateStoreVersion: templateVersion, templateStoreSha256 })).toThrow('INVALID_RUNTIME_SCOPE')
+    expect(() => new DockerBuilderAdapter({ engine: new FakeEngine(), imageDigest: image, installationId, scopeId: 'tenant-one' as never, exportRoot: tmpdir(), templateStoreVersion: templateVersion, templateStoreSha256 })).toThrow('INVALID_RUNTIME_SCOPE')
+    expect(() => new DockerBuilderAdapter({ engine: new FakeEngine(), imageDigest: image, installationId, scopeId, exportRoot: tmpdir(), templateStoreVersion: templateVersion, templateStoreSha256, limits: limits({ memoryBytes: 0, nanoCpus: 1, pids: 1, timeoutMs: 1, workspaceBytes: 1, concurrentContainers: 1 }) })).toThrow('INVALID_BUILDER_LIMIT')
+    expect(() => new DockerBuilderAdapter({ engine: new FakeEngine(), imageDigest: image, installationId, scopeId, exportRoot: tmpdir(), templateStoreVersion: '../bad', templateStoreSha256 })).toThrow('INVALID_TEMPLATE_STORE')
+    expect(() => new DockerBuilderAdapter({ engine: new FakeEngine(), imageDigest: image, installationId, scopeId, exportRoot: 'relative', templateStoreVersion: templateVersion, templateStoreSha256 })).toThrow('INVALID_EXPORT_ROOT')
+    expect(() => new DockerBuilderAdapter({ engine: new FakeEngine(), imageDigest: image, installationId, scopeId, exportRoot: tmpdir(), templateStoreVersion: templateVersion, templateStoreSha256: 'bad' })).toThrow('INVALID_TEMPLATE_STORE')
+    expect(() => new DockerBuilderAdapter({ engine: new FakeEngine(), imageDigest: image, installationId, scopeId, exportRoot: tmpdir(), templateStoreVersion: templateVersion, templateStoreSha256, limits: limits({ timeoutMs: Number.NaN }) })).toThrow('INVALID_BUILDER_LIMIT')
+    expect(() => new DockerBuilderAdapter({ engine: new FakeEngine(), imageDigest: image, installationId, scopeId, exportRoot: tmpdir(), templateStoreVersion: templateVersion, templateStoreSha256, limits: limits({ workspaceBytes: 129, maxWorkspaceBytes: 128 }) })).toThrow('INVALID_BUILDER_LIMIT')
+    expect(() => new DockerBuilderAdapter({ engine: new FakeEngine(), imageDigest: image, installationId, scopeId, exportRoot: tmpdir(), templateStoreVersion: templateVersion, templateStoreSha256, limits: limits({ maxRetainedExports: 1_001 }) })).toThrow('INVALID_BUILDER_LIMIT')
   })
 
   it('rejects duplicate and unknown build references without touching Docker', async () => {
@@ -165,7 +190,7 @@ describe('server-authoritative Docker builder adapter', () => {
     expect(engine.containers.length).toBeGreaterThan(0); expect(engine.volumes.length).toBeGreaterThan(1)
     await restarted.cleanup(buildRef, signal)
     expect(engine.containers).toHaveLength(0); expect(engine.volumes).toHaveLength(1)
-    engine.volumes.push({ Name: 'alien', Labels: { 'dz23.managed': 'builder', 'dz23.instance_id': 'test-instance' } })
+    engine.volumes.push({ Name: 'alien', Labels: managedIdentityLabels() })
     await expect(create(engine).reconcile([], signal)).rejects.toThrow('RECOVERY_FAILED')
   })
 
@@ -175,7 +200,7 @@ describe('server-authoritative Docker builder adapter', () => {
     for (const rows of [
       [managedContainer(buildRef, 'one'), managedContainer(buildRef, 'two')],
       [managedContainer(buildRef, 'one'), managedContainer(ref2, 'one')],
-      [{ Id: 'alien', Labels: { 'dz23.managed': 'builder', 'dz23.instance_id': 'test-instance', 'dz23.build_ref': 'bad', 'dz23.build_id': 'one' } }],
+      [{ Id: 'alien', Labels: { ...managedIdentityLabels(), 'dz23.build_ref': 'bad', 'dz23.build_id': 'one' } }],
     ]) {
       const engine = new FakeEngine(); engine.containers = rows
       await expect(create(engine).reconcile([], signal)).rejects.toThrow('RECOVERY_FAILED')
@@ -199,7 +224,7 @@ describe('server-authoritative Docker builder adapter', () => {
     await expect(invalidExpected.reconcile([{ build_ref: buildRef, build_id: 'one' }, { build_ref: ref2, build_id: 'one' }], signal)).rejects.toThrow('RECOVERY_FAILED')
     const root = await mkdtemp(join(tmpdir(), 'dz23-reconcile-archive-')); const archive = await openManagedExportArchive(root, buildRef); await archive.handle.close()
     try {
-      const adapter = new DockerBuilderAdapter({ engine: new FakeEngine(), imageDigest: image, instanceId: 'test-instance', exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256 })
+      const adapter = new DockerBuilderAdapter({ engine: new FakeEngine(), imageDigest: image, installationId, scopeId, exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256 })
       await expect(adapter.reconcile([], signal)).rejects.toThrow('RECOVERY_FAILED'); await expect(readFile(archive.path)).resolves.toBeInstanceOf(Buffer)
       await expect(adapter.reconcile([{ build_ref: buildRef, build_id: 'one' }], signal)).resolves.toEqual([]); await expect(readFile(archive.path)).rejects.toMatchObject({ code: 'ENOENT' })
     } finally { await rm(root, { recursive: true, force: true }) }
@@ -234,7 +259,7 @@ describe('server-authoritative Docker builder adapter', () => {
   it('exports only through bounded Docker archive streaming and returns the revalidated tree SHA', async () => {
     const engine = new FakeEngine(); engine.downloadPayload = exportTar(); const root = await mkdtemp(join(tmpdir(), 'dz23-adapter-export-')); const signal = new AbortController().signal
     try {
-      const adapter = new DockerBuilderAdapter({ engine, imageDigest: image, instanceId: 'test-instance', exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256 }); await adapter.prepare(buildRef, 'export-run', artifact, signal)
+      const adapter = new DockerBuilderAdapter({ engine, imageDigest: image, installationId, scopeId, exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256 }); await adapter.prepare(buildRef, 'export-run', artifact, signal)
       await expect(adapter.exportArtifact(buildRef, signal)).resolves.toMatchObject({ relative_path: `exports/${buildRef}`, files: 3 })
       await expect(adapter.commitArtifact(buildRef, new Set(), signal)).resolves.toBeUndefined()
       expect(JSON.stringify(engine.created)).not.toMatch(/"Type":"bind"|cp","-a/u)
@@ -248,7 +273,7 @@ describe('server-authoritative Docker builder adapter', () => {
   it('removes exporter resources even when the downloaded archive is invalid', async () => {
     const engine = new FakeEngine(); engine.downloadPayload = Buffer.from('not a tar'); const root = await mkdtemp(join(tmpdir(), 'dz23-adapter-export-fail-')); const signal = new AbortController().signal
     try {
-      const adapter = new DockerBuilderAdapter({ engine, imageDigest: image, instanceId: 'test-instance', exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256 }); await adapter.prepare(buildRef, 'export-fail', artifact, signal)
+      const adapter = new DockerBuilderAdapter({ engine, imageDigest: image, installationId, scopeId, exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256 }); await adapter.prepare(buildRef, 'export-fail', artifact, signal)
       await expect(adapter.exportArtifact(buildRef, signal)).rejects.toThrow('EXPORT_INVALID')
       expect(engine.containers.filter(row => row.Labels['dz23.role'] === 'export')).toHaveLength(0); expect(engine.volumes.filter(row => row.Labels['dz23.resource'] === 'export')).toHaveLength(0)
     } finally { await rm(root, { recursive: true, force: true }) }
@@ -257,7 +282,7 @@ describe('server-authoritative Docker builder adapter', () => {
   it('rejects a non-zero exporter and releases the export permit for retry', async () => {
     const engine = new FakeEngine(); engine.exportExitCode = 1; const root = await mkdtemp(join(tmpdir(), 'dz23-adapter-export-exit-')); const signal = new AbortController().signal
     try {
-      const adapter = new DockerBuilderAdapter({ engine, imageDigest: image, instanceId: 'test-instance', exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256 }); await adapter.prepare(buildRef, 'exit', artifact, signal)
+      const adapter = new DockerBuilderAdapter({ engine, imageDigest: image, installationId, scopeId, exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256 }); await adapter.prepare(buildRef, 'exit', artifact, signal)
       await expect(adapter.exportArtifact(buildRef, signal)).rejects.toThrow('EXPORT_INVALID')
       engine.exportExitCode = 0; engine.downloadPayload = Buffer.from('bad')
       await expect(adapter.exportArtifact(buildRef, signal)).rejects.toThrow('EXPORT_INVALID')
@@ -276,7 +301,7 @@ describe('server-authoritative Docker builder adapter', () => {
     const engine = new FakeEngine(); engine.downloadPayload = Buffer.from('not a tar'); engine.failExporterCleanup = true
     const root = await mkdtemp(join(tmpdir(), 'dz23-adapter-export-cleanup-')); const signal = new AbortController().signal
     try {
-      const adapter = new DockerBuilderAdapter({ engine, imageDigest: image, instanceId: 'test-instance', exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256 }); await adapter.prepare(buildRef, 'export-cleanup', artifact, signal)
+      const adapter = new DockerBuilderAdapter({ engine, imageDigest: image, installationId, scopeId, exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256 }); await adapter.prepare(buildRef, 'export-cleanup', artifact, signal)
       await expect(adapter.exportArtifact(buildRef, signal)).rejects.toThrow('CLEANUP_INCOMPLETE')
       engine.failExporterCleanup = false; engine.containers = engine.containers.filter(row => row.Labels['dz23.role'] !== 'export'); engine.volumes = engine.volumes.filter(row => row.Labels['dz23.resource'] !== 'export')
       await expect(adapter.exportArtifact(buildRef, signal)).rejects.toThrow('EXPORT_INVALID')
@@ -287,12 +312,12 @@ describe('server-authoritative Docker builder adapter', () => {
     const signal = new AbortController().signal; const root = await mkdtemp(join(tmpdir(), 'dz23-adapter-rm-'))
     try {
       const invalid = new FakeEngine(); invalid.downloadPayload = Buffer.from('bad')
-      const first = new DockerBuilderAdapter({ engine: invalid, imageDigest: image, instanceId: 'test-instance', exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256, removeArchive: async () => { throw new Error('rm failed') } }); await first.prepare(buildRef, 'rm-one', artifact, signal)
+      const first = new DockerBuilderAdapter({ engine: invalid, imageDigest: image, installationId, scopeId, exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256, removeArchive: async () => { throw new Error('rm failed') } }); await first.prepare(buildRef, 'rm-one', artifact, signal)
       await expect(first.exportArtifact(buildRef, signal)).rejects.toThrow('CLEANUP_INCOMPLETE')
       const valid = new FakeEngine(); valid.downloadPayload = exportTar()
-      const secondRef = `build_${'4'.repeat(32)}`; const second = new DockerBuilderAdapter({ engine: valid, imageDigest: image, instanceId: 'test-instance', exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256, removeArchive: async () => { throw new Error('rm failed') } }); await second.prepare(secondRef, 'rm-two', artifact, signal)
+      const secondRef = `build_${'4'.repeat(32)}`; const second = new DockerBuilderAdapter({ engine: valid, imageDigest: image, installationId, scopeId, exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256, removeArchive: async () => { throw new Error('rm failed') } }); await second.prepare(secondRef, 'rm-two', artifact, signal)
       await expect(second.exportArtifact(secondRef, signal)).rejects.toThrow('CLEANUP_INCOMPLETE')
-      const recovered = new DockerBuilderAdapter({ engine: valid, imageDigest: image, instanceId: 'test-instance', exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256 })
+      const recovered = new DockerBuilderAdapter({ engine: valid, imageDigest: image, installationId, scopeId, exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256 })
       const invalidResidue = join(root, `.archive-${secondRef}-${'a'.repeat(16)}.tar`); await mkdir(invalidResidue)
       await expect(recovered.exportArtifact(secondRef, signal)).rejects.toThrow('CLEANUP_INCOMPLETE'); await rm(invalidResidue, { recursive: true })
       await expect(recovered.exportArtifact(secondRef, signal)).resolves.toMatchObject({ relative_path: `exports/${secondRef}` })
@@ -303,7 +328,7 @@ describe('server-authoritative Docker builder adapter', () => {
     const engine = new FakeEngine(); engine.downloadPayload = exportTar(); engine.failExporterCleanup = true
     const root = await mkdtemp(join(tmpdir(), 'dz23-adapter-export-published-')); const signal = new AbortController().signal
     try {
-      const adapter = new DockerBuilderAdapter({ engine, imageDigest: image, instanceId: 'test-instance', exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256 }); await adapter.prepare(buildRef, 'published-cleanup', artifact, signal)
+      const adapter = new DockerBuilderAdapter({ engine, imageDigest: image, installationId, scopeId, exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256 }); await adapter.prepare(buildRef, 'published-cleanup', artifact, signal)
       await expect(adapter.exportArtifact(buildRef, signal)).rejects.toThrow('CLEANUP_INCOMPLETE')
       expect(engine.containers.some(row => row.Labels['dz23.role'] === 'export')).toBe(true)
       engine.failExporterCleanup = false
@@ -315,7 +340,7 @@ describe('server-authoritative Docker builder adapter', () => {
   it('serializes duplicate exports and reuses the publication created while waiting', async () => {
     const engine = new FakeEngine(); engine.downloadPayload = exportTar(); const root = await mkdtemp(join(tmpdir(), 'dz23-adapter-export-race-')); const signal = new AbortController().signal
     try {
-      const adapter = new DockerBuilderAdapter({ engine, imageDigest: image, instanceId: 'test-instance', exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256 }); await adapter.prepare(buildRef, 'export-race', artifact, signal)
+      const adapter = new DockerBuilderAdapter({ engine, imageDigest: image, installationId, scopeId, exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256 }); await adapter.prepare(buildRef, 'export-race', artifact, signal)
       let release!: () => void; const blocked = new Promise<void>(resolve => { release = resolve }); vi.spyOn(engine, 'waitContainer').mockImplementationOnce(async () => { await blocked; return { StatusCode: 0 } })
       const first = adapter.exportArtifact(buildRef, signal); await vi.waitFor(() => expect(engine.created.some(row => row.body.Labels && object(row.body.Labels)['dz23.role'] === 'export')).toBe(true)); const second = adapter.exportArtifact(buildRef, signal); release()
       await expect(Promise.all([first, second])).resolves.toEqual([expect.objectContaining({ relative_path: `exports/${buildRef}` }), expect.objectContaining({ relative_path: `exports/${buildRef}` })])
@@ -327,12 +352,12 @@ describe('server-authoritative Docker builder adapter', () => {
     const signal = new AbortController().signal; const root = await mkdtemp(join(tmpdir(), 'dz23-adapter-export-residue-'))
     try {
       const engine = new FakeEngine(); engine.downloadPayload = exportTar(); engine.reportedDownloadBytesDelta = 1
-      const drifted = new DockerBuilderAdapter({ engine, imageDigest: image, instanceId: 'test-instance', exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256 }); await drifted.prepare(buildRef, 'drifted', artifact, signal)
+      const drifted = new DockerBuilderAdapter({ engine, imageDigest: image, installationId, scopeId, exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256 }); await drifted.prepare(buildRef, 'drifted', artifact, signal)
       await expect(drifted.exportArtifact(buildRef, signal)).rejects.toThrow('EXPORT_INVALID')
-      const cleanupFailure = new DockerBuilderAdapter({ engine: new FakeEngine(), imageDigest: image, instanceId: 'test-instance', exportRoot: join(root, 'cleanup'), templateStoreVersion: templateVersion, templateStoreSha256, cleanupExportResources: async () => { throw new Error('fs busy') } })
+      const cleanupFailure = new DockerBuilderAdapter({ engine: new FakeEngine(), imageDigest: image, installationId, scopeId, exportRoot: join(root, 'cleanup'), templateStoreVersion: templateVersion, templateStoreSha256, cleanupExportResources: async () => { throw new Error('fs busy') } })
       await expect(cleanupFailure.cleanup(buildRef, signal)).rejects.toThrow('CLEANUP_INCOMPLETE')
-      const exportCleanupEngine = new FakeEngine(); exportCleanupEngine.downloadPayload = exportTar(); const exportCleanup = new DockerBuilderAdapter({ engine: exportCleanupEngine, imageDigest: image, instanceId: 'test-instance', exportRoot: join(root, 'export-cleanup'), templateStoreVersion: templateVersion, templateStoreSha256, cleanupExportResources: async () => { throw new Error('fs busy') } }); await exportCleanup.prepare(buildRef, 'export-cleanup-failure', artifact, signal); await expect(exportCleanup.exportArtifact(buildRef, signal)).rejects.toThrow('CLEANUP_INCOMPLETE')
-      const closeEngine = new FakeEngine(); const closeFailure = new DockerBuilderAdapter({ engine: closeEngine, imageDigest: image, instanceId: 'test-instance', exportRoot: join(root, 'close'), templateStoreVersion: templateVersion, templateStoreSha256, closeArchive: async handle => { await handle.close(); throw new Error('close failed') } }); await closeFailure.prepare(buildRef, 'close-failure', artifact, signal); vi.spyOn(closeEngine, 'createVolume').mockRejectedValueOnce(new Error('volume unavailable')); await expect(closeFailure.exportArtifact(buildRef, signal)).rejects.toThrow('CLEANUP_INCOMPLETE')
+      const exportCleanupEngine = new FakeEngine(); exportCleanupEngine.downloadPayload = exportTar(); const exportCleanup = new DockerBuilderAdapter({ engine: exportCleanupEngine, imageDigest: image, installationId, scopeId, exportRoot: join(root, 'export-cleanup'), templateStoreVersion: templateVersion, templateStoreSha256, cleanupExportResources: async () => { throw new Error('fs busy') } }); await exportCleanup.prepare(buildRef, 'export-cleanup-failure', artifact, signal); await expect(exportCleanup.exportArtifact(buildRef, signal)).rejects.toThrow('CLEANUP_INCOMPLETE')
+      const closeEngine = new FakeEngine(); const closeFailure = new DockerBuilderAdapter({ engine: closeEngine, imageDigest: image, installationId, scopeId, exportRoot: join(root, 'close'), templateStoreVersion: templateVersion, templateStoreSha256, closeArchive: async handle => { await handle.close(); throw new Error('close failed') } }); await closeFailure.prepare(buildRef, 'close-failure', artifact, signal); vi.spyOn(closeEngine, 'createVolume').mockRejectedValueOnce(new Error('volume unavailable')); await expect(closeFailure.exportArtifact(buildRef, signal)).rejects.toThrow('CLEANUP_INCOMPLETE')
     } finally { await rm(root, { recursive: true, force: true }) }
   })
 
@@ -340,7 +365,7 @@ describe('server-authoritative Docker builder adapter', () => {
     const root = await mkdtemp(join(tmpdir(), 'dz23-adapter-archive-list-')); const signal = new AbortController().signal
     try {
       await mkdir(join(root, 'exports'), { recursive: true, mode: 0o700 }); await writeFile(join(root, `.archive-${buildRef}-${'a'.repeat(16)}.tar`), 'pending', { mode: 0o600 })
-      const adapter = new DockerBuilderAdapter({ engine: new FakeEngine(), imageDigest: image, instanceId: 'test-instance', exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256 })
+      const adapter = new DockerBuilderAdapter({ engine: new FakeEngine(), imageDigest: image, installationId, scopeId, exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256 })
       await expect(adapter.listManaged(signal)).resolves.toEqual([buildRef]); await expect(adapter.cleanup(buildRef, signal)).resolves.toBeUndefined(); await expect(adapter.listManaged(signal)).resolves.toEqual([])
     } finally { await rm(root, { recursive: true, force: true }) }
   })
@@ -354,7 +379,7 @@ describe('server-authoritative Docker builder adapter', () => {
   })
 
   it('enforces the aggregate workspace quota across builds and frees it only after observed cleanup', async () => {
-    const engine = new FakeEngine(); const adapter = new DockerBuilderAdapter({ engine, imageDigest: image, instanceId: 'test-instance', exportRoot: join(tmpdir(), 'quota'), templateStoreVersion: templateVersion, templateStoreSha256, limits: limits({ workspaceBytes: 64 * 1024 * 1024, maxWorkspaceBytes: 64 * 1024 * 1024 }) }); const signal = new AbortController().signal
+    const engine = new FakeEngine(); const adapter = new DockerBuilderAdapter({ engine, imageDigest: image, installationId, scopeId, exportRoot: join(tmpdir(), 'quota'), templateStoreVersion: templateVersion, templateStoreSha256, limits: limits({ workspaceBytes: 64 * 1024 * 1024, maxWorkspaceBytes: 64 * 1024 * 1024 }) }); const signal = new AbortController().signal
     await adapter.prepare(buildRef, 'one', artifact, signal)
     const second = `build_${'c'.repeat(32)}`; await expect(adapter.prepare(second, 'two', artifact, signal)).rejects.toThrow('CAPACITY_EXCEEDED')
     await adapter.cleanup(buildRef, signal); await expect(adapter.prepare(second, 'two', artifact, signal)).resolves.toBeUndefined()
@@ -362,7 +387,7 @@ describe('server-authoritative Docker builder adapter', () => {
 
   it('validates all managed inventory rows and cleanup failures', async () => {
     const signal = new AbortController().signal
-    const invalidList = new FakeEngine(); invalidList.containers = [{ Id: 'alien', Labels: { 'dz23.managed': 'builder', 'dz23.instance_id': 'test-instance', 'dz23.build_ref': 'bad' } }]
+    const invalidList = new FakeEngine(); invalidList.containers = [{ Id: 'alien', Labels: { ...managedIdentityLabels(), 'dz23.build_ref': 'bad' } }]
     await expect(create(invalidList).listManaged(signal)).rejects.toThrow('RECOVERY_FAILED')
     const invalidContainer = new FakeEngine(); invalidContainer.containers = [{ Id: '', Labels: managedLabels(buildRef, 'one') }]
     await expect(create(invalidContainer).cleanup(buildRef, signal)).rejects.toThrow('CLEANUP_INCOMPLETE')
@@ -397,7 +422,7 @@ describe('server-authoritative Docker builder adapter', () => {
 })
 
 function create(engine: FakeEngine, timeoutMs = 1_000): DockerBuilderAdapter {
-  return new DockerBuilderAdapter({ engine, imageDigest: image, instanceId: 'test-instance', exportRoot: join(tmpdir(), 'dz23-builder-exports'), templateStoreVersion: templateVersion, templateStoreSha256, limits: limits({ memoryBytes: 512 * 1024 * 1024, nanoCpus: 1_000_000_000, pids: 128, timeoutMs, workspaceBytes: 64 * 1024 * 1024, concurrentContainers: 2 }) })
+  return new DockerBuilderAdapter({ engine, imageDigest: image, installationId, scopeId, exportRoot: join(tmpdir(), 'dz23-builder-exports'), templateStoreVersion: templateVersion, templateStoreSha256, limits: limits({ memoryBytes: 512 * 1024 * 1024, nanoCpus: 1_000_000_000, pids: 128, timeoutMs, workspaceBytes: 64 * 1024 * 1024, concurrentContainers: 2 }) })
 }
 
 class FakeEngine implements DockerEnginePort {
@@ -408,7 +433,7 @@ class FakeEngine implements DockerEnginePort {
   readonly volumeOptions: Array<Readonly<Record<string, string>>> = []
   readonly created: Array<{ name: string; body: Record<string, unknown> }> = []
   containers: Array<{ Id: string; Labels: Record<string, string> }> = []
-  volumes: Array<{ Name: string; Labels: Record<string, string> }> = [{ Name: templateVolume(), Labels: { 'dz23.managed': 'builder-template-store', 'dz23.instance_id': 'test-instance', 'dz23.template_version': templateVersion, 'dz23.template_sha256': templateStoreSha256 } }]
+  volumes: Array<{ Name: string; Labels: Record<string, string> }> = [{ Name: templateVolume(), Labels: { 'dz23.managed': 'builder-template-store', ...physicalIdentityLabels(), 'dz23.template_version': templateVersion, 'dz23.template_sha256': templateStoreSha256 } }]
   readonly started: string[] = []
   readonly waitResolvers = new Map<string, (value: { readonly StatusCode: number }) => void>()
   downloadPayload: Buffer = Buffer.alloc(0)
@@ -467,8 +492,10 @@ function tarSingle(name: string, value: string): Buffer {
   return Buffer.concat([header, data, Buffer.alloc((512 - data.length % 512) % 512), Buffer.alloc(1024)])
 }
 function exportTar(): Buffer { return Buffer.concat([tarSingle('.next/standalone/server.js', 'server').subarray(0, -1024), tarSingle('.next/static/chunk.js', 'chunk').subarray(0, -1024), tarSingle('evidence/appspec-report.json', '{}').subarray(0, -1024), Buffer.alloc(1024)]) }
-function templateVolume(): string { return `dz23-template-${createHash('sha256').update(`test-instance:${templateVersion}:${templateStoreSha256}`).digest('hex').slice(0, 24)}` }
+function templateVolume(): string { return `dz23-template-${createHash('sha256').update(`${scopeId}:${templateVersion}:${templateStoreSha256}`).digest('hex').slice(0, 24)}` }
 function limits(overrides: Partial<import('../src/docker-adapter.js').BuilderLimits> = {}): import('../src/docker-adapter.js').BuilderLimits { return { memoryBytes: 512 * 1024 * 1024, nanoCpus: 1_000_000_000, pids: 128, timeoutMs: 1_000, workspaceBytes: 64 * 1024 * 1024, maxWorkspaceBytes: 128 * 1024 * 1024, concurrentContainers: 2, maxExportBytes: 128 * 1024 * 1024, maxRetainedExports: 5, ...overrides } }
-function managedLabels(ref: string, id: string): Record<string, string> { return { 'dz23.managed': 'builder', 'dz23.instance_id': 'test-instance', 'dz23.build_ref': ref, 'dz23.build_id': id } }
+function physicalIdentityLabels(selectedScope = scopeId): Record<string, string> { return { 'com.dz23.studio.installation-id': installationId, 'com.dz23.studio.scope-id': selectedScope } }
+function managedIdentityLabels(): Record<string, string> { return { 'dz23.managed': 'builder', ...physicalIdentityLabels() } }
+function managedLabels(ref: string, id: string): Record<string, string> { return { ...managedIdentityLabels(), 'dz23.build_ref': ref, 'dz23.build_id': id } }
 function managedContainer(ref: string, id: string): { Id: string; Labels: Record<string, string> } { return { Id: `${id}-${ref}`.slice(0, 64), Labels: managedLabels(ref, id) } }
-function verifierLabels(): Record<string, string> { return { 'dz23.managed': 'builder-template-verifier', 'dz23.instance_id': 'test-instance', 'dz23.template_version': templateVersion, 'dz23.template_sha256': templateStoreSha256 } }
+function verifierLabels(): Record<string, string> { return { 'dz23.managed': 'builder-template-verifier', ...physicalIdentityLabels(), 'dz23.template_version': templateVersion, 'dz23.template_sha256': templateStoreSha256 } }

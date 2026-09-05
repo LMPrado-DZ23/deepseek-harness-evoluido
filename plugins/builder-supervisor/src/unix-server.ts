@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto'
+import { randomBytes } from 'node:crypto'
 import { constants, lstatSync } from 'node:fs'
 import { chmod, lstat, mkdir, open, readFile, realpath, rename, rm, unlink, writeFile } from 'node:fs/promises'
 import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
@@ -6,6 +6,7 @@ import { dirname, posix } from 'node:path'
 import type { BuilderRpcMethods } from './protocol.js'
 import { BUILDER_RPC_MAX_BODY_BYTES, createBuilderRpcHandler } from './protocol.js'
 import { FileRpcReplayGuard } from './persistent-replay.js'
+import { BUILDER_UNIX_SOCKET_MAX_BYTES, isBuilderRuntimeScopeId, type BuilderRuntimeScopeId } from './runtime-scope.js'
 
 const CREDENTIAL_REFERENCE = 'file:/run/secrets/dz23-builder-supervisor-token'
 interface LockMetadata { readonly nonce: string; readonly pid: number; readonly process_start_ticks: string; readonly uid: number; readonly socket_dev: number | null; readonly socket_ino: number | null }
@@ -19,7 +20,7 @@ export interface BuilderUnixRuntime {
 const DEFAULT_RUNTIME: BuilderUnixRuntime = { platform: process.platform, pid: process.pid, getuid: process.getuid, kill: process.kill.bind(process), umask: process.umask.bind(process), lstatSync, chmod, lstat, mkdir, open, readFile, realpath, rename, remove: rm, unlink, writeFile, createServer, request: httpRequest, setTimeout, clearTimeout }
 export interface BuilderUnixServerOptions {
   readonly socketPath: string; readonly bearerToken: string; readonly methods: LifecycleMethods
-  readonly replayNamespace: { readonly instanceId: string; readonly policySha256: string; readonly scopeId: string }
+  readonly scopeId: BuilderRuntimeScopeId; readonly policySha256: string; readonly replayRoot: string
   readonly signal?: AbortSignal; readonly operationTimeoutMs?: number; readonly stepTimeoutMs?: number; readonly cleanupTimeoutMs?: number; readonly runtime?: BuilderUnixRuntime
 }
 
@@ -28,7 +29,8 @@ export async function listenBuilderUnix(options: BuilderUnixServerOptions): Prom
   if (runtime.platform === 'win32' || runtime.getuid === undefined) throw new Error('UNIX_SOCKET_REQUIRED')
   const socketPath = validSocketPath(options.socketPath); const parent = dirname(socketPath); const lockPath = `${socketPath}.lock`; const uid = runtime.getuid(); const nonce = randomBytes(16).toString('hex')
   if (!/^[A-Za-z0-9_-]{43,200}$/u.test(options.bearerToken)) throw new Error('INVALID_SUPERVISOR_TOKEN')
-  if (!/^[A-Za-z0-9_-]{1,64}$/u.test(options.replayNamespace.instanceId) || !/^[a-f0-9]{64}$/u.test(options.replayNamespace.policySha256) || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/u.test(options.replayNamespace.scopeId)) throw new Error('INVALID_REPLAY_NAMESPACE')
+  if (!isBuilderRuntimeScopeId(options.scopeId) || !/^[a-f0-9]{64}$/u.test(options.policySha256)) throw new Error('INVALID_REPLAY_NAMESPACE')
+  const replayRoot = validReplayRoot(options.replayRoot)
   const stepTimeoutMs = options.stepTimeoutMs ?? 180_000; const cleanupTimeoutMs = options.cleanupTimeoutMs ?? 30_000; const timeoutMs = options.operationTimeoutMs ?? 240_000
   if (![stepTimeoutMs, cleanupTimeoutMs, timeoutMs].every(value => Number.isSafeInteger(value) && value > 0) || timeoutMs < stepTimeoutMs + cleanupTimeoutMs) throw new Error('INVALID_OPERATION_TIMEOUT')
   const processStartTicks = await processStartIdentity(runtime.pid, runtime)
@@ -38,8 +40,11 @@ export async function listenBuilderUnix(options: BuilderUnixServerOptions): Prom
     await acquireLock(lockPath, socketPath, options.bearerToken, uid, nonce, processStartTicks, runtime); lockHeld = true
     await options.methods.initialize?.(AbortSignal.any([options.signal ?? new AbortController().signal, AbortSignal.timeout(timeoutMs)]))
     await assertAbsent(socketPath, runtime)
-    const replayKey = createHash('sha256').update(`${options.replayNamespace.scopeId}:${options.replayNamespace.instanceId}:${options.replayNamespace.policySha256}`).digest('hex')
-    const rpc = createBuilderRpcHandler({ credentialRef: CREDENTIAL_REFERENCE, credentials: { resolve: async () => options.bearerToken }, methods: options.methods, replay: new FileRpcReplayGuard(`${socketPath}.requests/${replayKey}`) })
+    const replayScopeRoot = posix.join(replayRoot, options.scopeId)
+    const replayDirectory = posix.join(replayScopeRoot, options.policySha256)
+    for (const directory of [replayRoot, replayScopeRoot]) await new FileRpcReplayGuard(directory).initialize()
+    const replay = new FileRpcReplayGuard(replayDirectory); await replay.initialize()
+    const rpc = createBuilderRpcHandler({ credentialRef: CREDENTIAL_REFERENCE, credentials: { resolve: async () => options.bearerToken }, methods: options.methods, replay })
     server = runtime.createServer((request, response) => { void handle(request, response, options, timeoutMs, rpc).catch(() => failure(response)) })
     server.requestTimeout = timeoutMs; server.headersTimeout = Math.min(timeoutMs, 10_000); server.maxHeadersCount = 64
     const previousUmask = runtime.umask(0o117)
@@ -175,5 +180,6 @@ async function closeServerBounded(server: Server, timeoutMs: number, runtime: Bu
   await closed.finally(() => runtime.clearTimeout(timer))
 }
 async function readBounded(request: IncomingMessage): Promise<Buffer> { const chunks: Buffer[] = []; let size = 0; for await (const chunk of request) { const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk); size += bytes.byteLength; if (size > BUILDER_RPC_MAX_BODY_BYTES) throw new Error('REQUEST_TOO_LARGE'); chunks.push(bytes) } return Buffer.concat(chunks) }
-function validSocketPath(value: string): string { if (!posix.isAbsolute(value) || value.includes('\\') || value.includes('\0') || value.includes('://')) throw new Error('INVALID_SOCKET_PATH'); const normalized = posix.normalize(value); if (normalized !== value) throw new Error('INVALID_SOCKET_PATH'); return normalized }
+function validSocketPath(value: string): string { if (!posix.isAbsolute(value) || value.includes('\\') || value.includes('\0') || value.includes('://') || Buffer.byteLength(value, 'utf8') > BUILDER_UNIX_SOCKET_MAX_BYTES) throw new Error('INVALID_SOCKET_PATH'); const normalized = posix.normalize(value); if (normalized !== value) throw new Error('INVALID_SOCKET_PATH'); return normalized }
+function validReplayRoot(value: string): string { if (!posix.isAbsolute(value) || value === '/' || value.includes('\\') || value.includes('\0') || value.includes('://') || value.endsWith('/')) throw new Error('INVALID_REPLAY_ROOT'); const normalized = posix.normalize(value); if (normalized !== value) throw new Error('INVALID_REPLAY_ROOT'); return normalized }
 function failure(response: ServerResponse): void { if (response.writableEnded) return; const body = Buffer.from('{"error":"SUPERVISOR_UNAVAILABLE"}', 'utf8'); response.writeHead(500, { 'content-type': 'application/json; charset=utf-8', 'content-length': String(body.byteLength), 'cache-control': 'no-store' }); response.end(body) }
