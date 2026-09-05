@@ -33,6 +33,12 @@ export function validateBuildState({ head, status, tag }) {
   return { head, tag }
 }
 
+export function validateSubmoduleState({ expected, actual, status }) {
+  if (!SHA40.test(expected) || actual !== expected) fail('submodule não corresponde ao gitlink do commit')
+  if (status.length !== 0) fail('submodule precisa estar totalmente limpo para o snapshot')
+  return { commit: actual }
+}
+
 export function buildPlan({ head, tag }) {
   return [
     'build', '--progress=plain',
@@ -65,17 +71,29 @@ export async function main(argv = process.argv.slice(2), projectRoot = process.c
   const head = run('git', ['rev-parse', '--verify', 'HEAD'], { cwd: root })
   const status = run('git', ['status', '--porcelain=v1', '--untracked-files=all'], { cwd: root })
   validateBuildState({ head, status, tag })
+  const submoduleRoot = join(root, 'third_party', 'deepseek-harness')
+  const expectedSubmodule = run('git', ['rev-parse', `${head}:third_party/deepseek-harness`], { cwd: root })
+  const actualSubmodule = run('git', ['rev-parse', '--verify', 'HEAD'], { cwd: submoduleRoot })
+  const submoduleStatus = run('git', ['status', '--porcelain=v1', '--untracked-files=all'], { cwd: submoduleRoot })
+  validateSubmoduleState({ expected: expectedSubmodule, actual: actualSubmodule, status: submoduleStatus })
   const temporaryParent = assertTemporaryParent(await mkdtemp(join(tmpdir(), 'dz23-studio-build-')))
   const snapshotRoot = join(temporaryParent, 'context')
   let registeredWorktree = false
   try {
     run('git', ['worktree', 'add', '--detach', snapshotRoot, head], { cwd: root })
     registeredWorktree = true
-    run('git', ['submodule', 'update', '--init', '--recursive', '--checkout', '--no-fetch'], { cwd: snapshotRoot })
+    run('git', [
+      '-c', 'protocol.file.allow=always',
+      '-c', `submodule.deepseek-harness.url=${submoduleRoot}`,
+      'submodule', 'update', '--init', '--recursive', '--checkout', '--no-fetch',
+    ], { cwd: snapshotRoot })
     const snapshotHead = run('git', ['rev-parse', '--verify', 'HEAD'], { cwd: snapshotRoot })
     const snapshotStatus = run('git', ['status', '--porcelain=v1', '--untracked-files=all'], { cwd: snapshotRoot })
     validateBuildState({ head: snapshotHead, status: snapshotStatus, tag })
     if (snapshotHead !== head) fail('snapshot Git diverge do commit validado')
+    const snapshotSubmodule = run('git', ['rev-parse', '--verify', 'HEAD'], { cwd: join(snapshotRoot, 'third_party', 'deepseek-harness') })
+    const snapshotSubmoduleStatus = run('git', ['status', '--porcelain=v1', '--untracked-files=all'], { cwd: join(snapshotRoot, 'third_party', 'deepseek-harness') })
+    validateSubmoduleState({ expected: expectedSubmodule, actual: snapshotSubmodule, status: snapshotSubmoduleStatus })
     run(process.env.DZ23_DOCKER_BIN ?? 'docker', buildPlan({ head, tag }), {
       cwd: snapshotRoot,
       env: { ...process.env, DOCKER_BUILDKIT: '1' },
