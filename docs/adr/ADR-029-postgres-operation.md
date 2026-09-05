@@ -1,6 +1,7 @@
 # ADR-029 — Operação do Studio sobre PostgreSQL (P31-B)
 
-Status: aceita e implementada na etapa M3 (Claude), sobre a base P31-A.
+Status: aceita e implementada na etapa M3, com o operador W3 consolidado em
+`apps/studio-runtime/operator.mjs`.
 
 ## Decisões
 
@@ -169,6 +170,39 @@ Status: aceita e implementada na etapa M3 (Claude), sobre a base P31-A.
    do `pg_dump`, parcial determinístico autenticado, `fsync`, hash e `pg_restore --list` sobre o
    mesmo descritor antes de publicar dados e, por último, o marcador. O backup lógico segue o
    mesmo protocolo marker-last; retenção só começa depois do par durável.
+
+   Há duas identidades diferentes, de propósito:
+   - a **impressão física** identifica o servidor PostgreSQL que receberá a restauração
+     (`system_identifier`, OID e nome do banco, mais o schema). Ela prende journal, safety dump e
+     recibo ao destino real e impede reutilizar a mesma tentativa em outro banco;
+   - o **`installation_id` lógico** nasce uma única vez em `storage_meta`, acompanha a cópia lógica
+     e identifica de qual instalação vieram os dados. Uma cópia antiga sem esse campo continua
+     legível; uma cópia identificada como sendo de outra instalação é recusada, salvo autorização
+     consciente com `--allow-foreign-installation --confirm REPLACE_DZ23_STORAGE`.
+
+   A prévia do restore é deliberadamente pura: lê e relata, mas não cria journal, não produz
+   `pg_dump`, não cria nem remove staging e não troca schema. Ela mostra perda de domínios, perda de
+   registros ou valor global, objetos desconhecidos, staging órfão, incompatibilidade de layout e
+   a identidade lógica de origem/destino. Na escrita, cada exceção perigosa tem autorização
+   separada: `--allow-record-loss`, `--allow-unknown-objects` e
+   `--allow-foreign-installation` só valem junto de `--confirm REPLACE_DZ23_STORAGE` (assim como as
+   autorizações já existentes de substituição e perda de domínio). Uma opção sozinha nunca libera
+   a destruição.
+
+   O recibo, o histórico de auditoria trazido do schema anterior e o novo evento de restauração
+   são gravados **na mesma transação** da troca atômica de schemas. Antes do `COMMIT`, qualquer
+   falha permite `ROLLBACK` e limpeza do staging. Depois do `COMMIT`, o banco já mudou: o operador
+   não executa `ROLLBACK`, não apaga o schema restaurado e nunca informa que “nada mudou”. Se falhar
+   ao finalizar o journal ou ao entregar o relatório, a mensagem manda manter o Harness parado e
+   reconciliar usando exatamente o mesmo `attempt-id`; repetir com outro identificador é proibido.
+   A varredura de staging órfão continua restrita a nomes exatos com a marca de propriedade do
+   Studio e, na prévia, é apenas informada.
+
+   **Evidência deste checkpoint W3 (05/09):** 178 testes que não exigem Docker passaram; 59
+   integrações dependentes de PostgreSQL/Docker foram puladas. A execução real do operador no
+   Docker Desktop Windows está `BLOCKED_ENVIRONMENT` porque o Docker Desktop deste computador
+   quebrou durante a preparação do ambiente. Isso não é evidência de defeito do produto, mas
+   também não conta como prova PostgreSQL/Compose executada.
 5. **Instância de desenvolvimento migra do `json`.** O Harness padrão guarda os
    domínios em `<DSH_HOME>/storages` (json), não em SQLite; `storage:export-json`
    cobre esse caso com o Harness parado.

@@ -63,3 +63,18 @@ observada está transcrita. Depois a correção é restaurada.
 - A execução em `--dry-run` da cópia manual ainda monta o pacote em memória para contar registros;
   a escrita (`--write`) não. **NOT_VALIDATED** para bancos muito grandes em modo `--dry-run`.
 - Compose real em servidor: segue `NOT_EXECUTED` (sem Docker neste ambiente).
+
+## Checkpoint W3 — operador unificado (05/09/2026)
+
+O código atual acrescenta a autoridade única em
+`apps/studio-runtime/operator.mjs`, impressão física do destino,
+`installation_id` lógico portável, prévia pura, cercas explícitas para perda de
+registros, objetos desconhecidos e instalação estrangeira, auditoria dentro da
+transação da troca e reconciliação segura após `COMMIT`.
+
+Neste checkpoint, **178 testes que não exigem Docker passaram** e **59
+integrações PostgreSQL/Docker foram puladas**. PostgreSQL/Compose real não foi
+reexecutado: o Docker Desktop Windows quebrou durante a preparação e está
+classificado `BLOCKED_ENVIRONMENT`, não como falha do produto. Os resultados
+históricos acima permanecem evidência da revisão anterior, mas não substituem a
+prova do operador W3 no ambiente real.
