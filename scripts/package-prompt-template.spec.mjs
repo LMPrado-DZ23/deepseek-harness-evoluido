@@ -1,11 +1,13 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { packagePromptTemplate } from './package-prompt-template.mjs'
 import { packageStudioWeb } from './package-studio-web.mjs'
 
 const scratch = []
+const repositoryRoot = fileURLToPath(new URL('..', import.meta.url))
 afterEach(async () => {
   for (const directory of scratch.splice(0)) await rm(directory, { recursive: true, force: true })
 })
@@ -43,5 +45,13 @@ describe('prompt template packager', () => {
 
     await expect(readFile(join(target, 'index.html'), 'utf8')).resolves.toBe('v2')
     await expect(readFile(join(target, 'stale.js'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('keeps packaged template assets outside source typechecking and Git', async () => {
+    const tsconfig = JSON.parse(await readFile(join(repositoryRoot, 'tsconfig.json'), 'utf8'))
+    const ignore = await readFile(join(repositoryRoot, '.gitignore'), 'utf8')
+
+    expect(tsconfig.exclude).toContain('plugins/prompt-to-app/template/**')
+    expect(ignore.split(/\r?\n/u)).toContain('plugins/prompt-to-app/template/')
   })
 })

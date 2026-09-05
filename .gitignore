@@ -18,6 +18,7 @@ runtime/
 
 # Build outputs: every plugin is compiled by `pnpm build`; committed copies drifted from src (route-health lacked markScope since b44ffe4).
 plugins/*/lib/
+plugins/prompt-to-app/template/
 apps/studio-web/dist/
 *.tsbuildinfo
 apps/studio-web/test-results/

@@ -16,6 +16,7 @@
     "scripts/**/*.ts"
   ],
   "exclude": [
-    "plugins/**/lib/**"
+    "plugins/**/lib/**",
+    "plugins/prompt-to-app/template/**"
   ]
 }
