@@ -20,6 +20,8 @@ linux('builder supervisor fail-closed configuration', () => {
     const config = await loadBuilderSupervisorConfig(`file:${fixture.configPath}`, fixture.policy)
     expect(config).toEqual(fixture.expected)
     expect(JSON.stringify(config)).toContain(fixture.token)
+    await chmod(fixture.tokenPath, 0o400)
+    await expect(loadBuilderSupervisorConfig(`file:${fixture.configPath}`, fixture.policy)).resolves.toEqual(fixture.expected)
   })
 
   it('rejects extra fields, inline secrets, noncanonical paths and untrusted config locations', async () => {
@@ -36,10 +38,10 @@ linux('builder supervisor fail-closed configuration', () => {
 
   it('rejects weak or linked credential files and never includes their contents in errors', async () => {
     const fixture = await createFixture()
-    await chmod(fixture.tokenPath, 0o644)
-    await expectInvalidWithoutSecret(fixture)
-    await chmod(fixture.tokenPath, 0o640)
-    await expectInvalidWithoutSecret(fixture)
+    for (const mode of [0o000, 0o100, 0o500, 0o640, 0o644, 0o700, 0o4600]) {
+      await chmod(fixture.tokenPath, mode)
+      await expectInvalidWithoutSecret(fixture)
+    }
     await chmod(fixture.tokenPath, 0o600)
     const target = `${fixture.tokenPath}.target`
     await writeFile(target, `${fixture.token}\n`, { mode: 0o600 })
@@ -109,7 +111,7 @@ linux('builder supervisor fail-closed configuration', () => {
     await unlink(hardlink)
     const actual = await lstat(fixture.configPath)
     await expectInvalidWithRuntime(fixture, runtime({
-      lstat: (async path => path === fixture.configPath ? { ...actual, ino: actual.ino + 1 } as never : lstat(path)) as typeof lstat,
+      lstat: (async path => path === fixture.configPath ? statWithInode(actual, actual.ino + 1) : lstat(path)) as typeof lstat,
     }))
     await expectInvalidWithRuntime(fixture, runtime({
       realpath: (async path => path === fixture.configPath ? `${path}.moved` : realpath(path)) as typeof realpath,
@@ -228,4 +230,8 @@ async function expectInvalidWithRuntime(fixture: Fixture, selected: SupervisorCo
 function referencePath(value: unknown): string {
   if (typeof value !== 'string' || !value.startsWith('file:')) throw new Error('INVALID_TEST_FIXTURE')
   return value.slice(5)
+}
+
+function statWithInode(stat: Awaited<ReturnType<typeof lstat>>, ino: number): Awaited<ReturnType<typeof lstat>> {
+  return new Proxy(stat, { get(target, property) { return property === 'ino' ? ino : Reflect.get(target, property, target) } })
 }

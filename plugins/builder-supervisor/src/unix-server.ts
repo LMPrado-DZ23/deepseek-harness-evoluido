@@ -160,8 +160,6 @@ async function closeOwnedSocket(path: string, identity: { readonly dev: number; 
   const owned = current.isSocket() && current.uid === uid && current.dev === identity.dev && current.ino === identity.ino
   if (!owned) {
     detachServerWithoutPathMutation(server, afterStopAccepting)
-    const preserved = await runtime.lstat(path)
-    if (!preserved.isSocket() || preserved.uid !== current.uid || preserved.dev !== current.dev || preserved.ino !== current.ino) throw new Error('SOCKET_IDENTITY_MISMATCH')
     throw new Error('SOCKET_IDENTITY_MISMATCH')
   }
   await closeServerBounded(server, timeoutMs, runtime, afterStopAccepting)

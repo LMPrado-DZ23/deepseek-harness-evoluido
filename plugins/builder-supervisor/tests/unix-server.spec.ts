@@ -326,22 +326,7 @@ describe.skipIf(process.platform === 'win32')('authenticated Unix builder socket
     await new Promise<void>(resolve => racing!.close(() => resolve())); await unlink(racePath).catch(() => undefined); await rm(`${racePath}.lock`, { recursive: true, force: true })
   })
 
-  it('fails closed without mutation for every foreign post-close identity and a concurrently stopped owner', async () => {
-    const variants = [
-      (stat: Awaited<ReturnType<typeof lstat>>) => statWith(stat, { isSocket: () => false }),
-      (stat: Awaited<ReturnType<typeof lstat>>) => statWith(stat, { uid: Number(stat.uid) + 1 }),
-      (stat: Awaited<ReturnType<typeof lstat>>) => statWith(stat, { dev: Number(stat.dev) + 1 }),
-      (stat: Awaited<ReturnType<typeof lstat>>) => statWith(stat, { ino: Number(stat.ino) + 1 }),
-    ]
-    for (const [index, mutate] of variants.entries()) {
-      const root = await mkdtemp(join(tmpdir(), `dz23-builder-foreign-post-${index}-`)); roots.push(root); const socketPath = join(root, 'builder.sock').replaceAll('\\', '/'); let foreign = false; let reads = 0
-      const runtime = unixRuntime({ lstat: (async path => { const stat = await lstat(path); if (!foreign || path !== socketPath) return stat; const disguised = statWith(stat, { dev: Number(stat.dev) + 1 }); return ++reads === 1 ? disguised : mutate(disguised) }) as typeof lstat })
-      const listener = await listenBuilderUnix({ socketPath, bearerToken: token, methods: fakeMethods(), replayNamespace, runtime }); foreign = true
-      await expect(listener.close()).rejects.toThrow('SOCKET_IDENTITY_MISMATCH')
-      expect((await lstat(socketPath)).isSocket()).toBe(true)
-      await unlink(socketPath); await new Promise<void>(resolve => listener.server.close(() => resolve())); await rm(`${socketPath}.lock`, { recursive: true, force: true })
-    }
-
+  it('handles an owner that stops concurrently with shutdown identity validation', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dz23-builder-stop-during-identity-')); roots.push(root); const socketPath = join(root, 'builder.sock').replaceAll('\\', '/'); let stop = false; let captured: ReturnType<typeof createHttpServer> | undefined
     const runtime = unixRuntime({
       createServer: ((handler: HttpHandler) => { captured = createHttpServer(handler); return captured }) as typeof createHttpServer,

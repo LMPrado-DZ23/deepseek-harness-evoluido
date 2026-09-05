@@ -144,7 +144,8 @@ async function readSecureFile(path: string, kind: 'config' | 'secret', runtime: 
     const linked = await runtime.lstat(path)
     if (!opened.isFile() || opened.isSymbolicLink() || opened.nlink !== 1 || opened.size < 1 || opened.size > 16_384) invalid()
     if (!linked.isFile() || linked.isSymbolicLink() || linked.dev !== opened.dev || linked.ino !== opened.ino || await runtime.realpath(path) !== path) invalid()
-    if ((opened.uid !== 0 && opened.uid !== runtime.uid) || (opened.mode & 0o022) !== 0 || (kind === 'secret' && (opened.mode & 0o077) !== 0)) invalid()
+    const mode = opened.mode & 0o7777
+    if ((opened.uid !== 0 && opened.uid !== runtime.uid) || (opened.mode & 0o022) !== 0 || (kind === 'secret' && mode !== 0o400 && mode !== 0o600)) invalid()
     const value = await handle.readFile('utf8')
     const normalized = value.endsWith('\r\n') ? value.slice(0, -2) : value.endsWith('\n') ? value.slice(0, -1) : value
     if (normalized.length === 0 || normalized.trim() !== normalized || /[\r\n\0]/u.test(normalized)) invalid()
