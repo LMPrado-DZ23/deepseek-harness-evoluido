@@ -129,10 +129,19 @@ export interface DomainDeclaration {
 }
 
 export async function discoverDomainDeclarations(root: string): Promise<DomainDeclaration[]> {
-  const sourceRoot = resolve(root, 'plugins')
-  const files = await walk(sourceRoot)
+  const pluginsRoot = resolve(root, 'plugins')
+  const plugins = await readdir(pluginsRoot, { withFileTypes: true })
+  const trees = await Promise.all(plugins.filter(entry => entry.isDirectory()).map(async entry => {
+    try {
+      return await walk(resolve(pluginsRoot, entry.name, 'src'))
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+      throw error
+    }
+  }))
+  const files = trees.flat()
   const declarations: DomainDeclaration[] = []
-  for (const filename of files.filter(file => file.endsWith('.ts') && file.includes(`${separator()}src${separator()}`))) {
+  for (const filename of files.filter(file => file.endsWith('.ts'))) {
     const text = await readFile(filename, 'utf8')
     const file = ts.createSourceFile(filename, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
     file.forEachChild(node => {
@@ -180,10 +189,6 @@ async function walk(directory: string): Promise<string[]> {
     return entry.isDirectory() ? walk(path) : Promise.resolve([path])
   }))
   return nested.flat()
-}
-
-function separator(): string {
-  return process.platform === 'win32' ? '\\' : '/'
 }
 
 function compareDeclaration(left: DomainDeclaration, right: DomainDeclaration): number {
