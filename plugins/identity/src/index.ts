@@ -1,6 +1,4 @@
 import type { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
-import type { SessionId } from '@deepseek-ai/dsh-session'
 import { isIP } from 'node:net'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import type {} from '@deepseek-ai/dsh-host-webserver'
@@ -36,13 +34,25 @@ export * from './service.js'
 
 export const name = 'dz23-studio-identity'
 
-export interface AgentLookup { get(id: SessionId): Agent | undefined }
+/**
+ * Structural boundary for agent lineage. Harness session identifiers are
+ * persisted strings; keeping the boundary structural prevents two injected
+ * workspace copies from creating incompatible nominal brand symbols.
+ */
+export interface AgentLineageNode {
+  readonly session: {
+    readonly id: string
+    readonly header?: { readonly parentSession?: string }
+  }
+}
+
+export interface AgentLookup { getBySessionId(id: string): AgentLineageNode | undefined }
 
 /** Resolve identity through an explicitly recorded agent lineage, never through ambient process state. */
 export function identityStateForAgent(
   service: StudioIdentityService,
   agents: AgentLookup,
-  agent: Agent | undefined,
+  agent: AgentLineageNode | undefined,
   bindHost: '127.0.0.1' | '0.0.0.0',
 ): PolicyIdentityState {
   for (const candidate of agentLineage(agents, agent)) {
@@ -56,7 +66,7 @@ export function identityStateForAgent(
 export function principalForAgent(
   service: StudioIdentityService,
   agents: AgentLookup,
-  agent: Agent | undefined,
+  agent: AgentLineageNode | undefined,
 ): IdentityPrincipal | undefined {
   for (const candidate of agentLineage(agents, agent)) {
     const principal = service.principalForHarnessSession(String(candidate.session.id))
@@ -65,14 +75,14 @@ export function principalForAgent(
   return undefined
 }
 
-function* agentLineage(agents: AgentLookup, start: Agent | undefined): Generator<Agent> {
+function* agentLineage(agents: AgentLookup, start: AgentLineageNode | undefined): Generator<AgentLineageNode> {
   const seen = new Set<string>()
   let current = start
   while (current !== undefined && !seen.has(String(current.session.id))) {
     seen.add(String(current.session.id))
     yield current
     const parent = current.session.header?.parentSession
-    current = parent === undefined ? undefined : agents.get(parent)
+    current = parent === undefined ? undefined : agents.getBySessionId(parent)
   }
 }
 export const inject = ['agents', 'storageDomain', 'webServer', 'studioPolicy', 'credentials']
@@ -206,8 +216,12 @@ export async function apply(ctx: Context, config: IdentityPluginConfig = {}): Pr
     service,
     ...(email.capture === undefined ? {} : { developmentEmailCapture: email.capture }),
   })
+  type RegistrySessionId = Parameters<typeof ctx.agents.get>[0]
+  const agentLookup: AgentLookup = {
+    getBySessionId: sessionId => ctx.agents.get(sessionId as RegistrySessionId),
+  }
   const unsetResolver = ctx.studioPolicy.setIdentityResolver(execution => {
-    return identityStateForAgent(service, ctx.agents, execution.agent, ctx.webServer.host)
+    return identityStateForAgent(service, agentLookup, execution.agent, ctx.webServer.host)
   })
   ctx.effect(() => unsetResolver, 'dz23-studio-identity.policyResolver')
   ctx.effect(() => ctx.webServer.register({

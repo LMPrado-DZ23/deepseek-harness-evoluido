@@ -96,8 +96,12 @@ export async function apply(ctx: Context, config: TenancyPluginConfig = {}): Pro
   const unsetProvisioner = ctx.studioIdentity.service.setUserProvisioner((user, source) => (
     source === 'bootstrap' ? service.ensureBootstrap(user) : Promise.resolve()
   ))
+  type RegistrySessionId = Parameters<typeof ctx.agents.get>[0]
+  const agentLookup = {
+    getBySessionId: (sessionId: string) => ctx.agents.get(sessionId as RegistrySessionId),
+  }
   const unsetAuthorization = ctx.studioPolicy.setAuthorizationResolver(execution => {
-    const principal = principalForAgent(ctx.studioIdentity.service, ctx.agents, execution.agent)
+    const principal = principalForAgent(ctx.studioIdentity.service, agentLookup, execution.agent)
     return principal === undefined
       ? undefined
       : service.authorizationFor(principal.userId, principal.orgId, principal.tenantId)
