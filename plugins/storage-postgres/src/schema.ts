@@ -1,7 +1,9 @@
+import { randomUUID } from 'node:crypto'
 import type { Pool, PoolClient } from 'pg'
 import { StorageError, UNIT_NAME_RE } from '@deepseek-ai/dsh-storage'
 
 export const STORAGE_POSTGRES_LAYOUT_VERSION = 1
+export const INSTALLATION_ID_KEY = 'installation_id'
 export const POSTGRES_SCHEMA_MAX_LENGTH = 40
 export const POSTGRES_IDENTIFIER_MAX_LENGTH = 63
 
@@ -80,6 +82,8 @@ async function createLayout(client: PoolClient, schema: string): Promise<void> {
     key TEXT PRIMARY KEY,
     value INTEGER NOT NULL
   )`)
+  // Additive and nullable so an older schema remains readable before upgrade.
+  await client.query(`ALTER TABLE ${quoted}."storage_meta" ADD COLUMN IF NOT EXISTS text_value TEXT`)
   const version = await client.query<{ value: number }>(
     `SELECT value FROM ${quoted}."storage_meta" WHERE key = 'layout_version'`,
   )
@@ -128,4 +132,9 @@ async function createLayout(client: PoolClient, schema: string): Promise<void> {
       [STORAGE_POSTGRES_LAYOUT_VERSION],
     )
   }
+  // The logical installation identity is created once and is never rewritten by startup.
+  await client.query(
+    `INSERT INTO ${quoted}."storage_meta" (key, value, text_value) VALUES ($1, 0, $2) ON CONFLICT (key) DO NOTHING`,
+    [INSTALLATION_ID_KEY, randomUUID()],
+  )
 }

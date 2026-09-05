@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest'
 import { exportedDomain, sealBundle } from '../src/bundle.ts'
 import {
   assertDomainLossAllowed,
+  assertForeignInstallationAllowed,
+  assertRecordLossAllowed,
   assertReplacementAllowed,
   assertRestorableBundle,
   assertRestoreIntent,
+  assertUnknownObjectsAllowed,
   postgresDumpInvocation,
 } from '../src/restore-policy.ts'
 
@@ -39,6 +42,36 @@ describe('restore destructive boundary policy', () => {
     expect(() => assertDomainLossAllowed(['old'], true, 'REPLACE_DZ23_STORAGE')).not.toThrow()
     expect(() => assertDomainLossAllowed(['old'], false, 'REPLACE_DZ23_STORAGE')).toThrow('apagaria')
     expect(() => assertDomainLossAllowed(['old'], true, 'wrong')).toThrow('apagaria')
+  })
+
+  it('requires record-loss permission and confirmation together for losses per domain or global value', () => {
+    const recordLoss = [{ domain: 'studio_projects', recordsInBackup: 2, recordsInTarget: 5, globalWouldBeLost: false }]
+    const globalLoss = [{ domain: 'studio_settings', recordsInBackup: 1, recordsInTarget: 1, globalWouldBeLost: true }]
+    const noLoss = [{ domain: 'studio_projects', recordsInBackup: 5, recordsInTarget: 5, globalWouldBeLost: false }]
+
+    expect(() => assertRecordLossAllowed(noLoss, false, undefined)).not.toThrow()
+    expect(() => assertRecordLossAllowed(recordLoss, true, 'REPLACE_DZ23_STORAGE')).not.toThrow()
+    expect(() => assertRecordLossAllowed(recordLoss, false, 'REPLACE_DZ23_STORAGE')).toThrow('--allow-record-loss')
+    expect(() => assertRecordLossAllowed(recordLoss, true, 'wrong')).toThrow('--confirm REPLACE_DZ23_STORAGE')
+    expect(() => assertRecordLossAllowed(globalLoss, false, undefined)).toThrow('valor global')
+  })
+
+  it('requires unknown-object permission and confirmation together', () => {
+    const unknown = ['tabela "future_records"', 'coluna "units.future_value"']
+
+    expect(() => assertUnknownObjectsAllowed([], false, undefined)).not.toThrow()
+    expect(() => assertUnknownObjectsAllowed(unknown, true, 'REPLACE_DZ23_STORAGE')).not.toThrow()
+    expect(() => assertUnknownObjectsAllowed(unknown, false, 'REPLACE_DZ23_STORAGE')).toThrow('--allow-unknown-objects')
+    expect(() => assertUnknownObjectsAllowed(unknown, true, 'wrong')).toThrow('--confirm REPLACE_DZ23_STORAGE')
+  })
+
+  it('requires foreign-installation permission and confirmation together only for known different identities', () => {
+    expect(() => assertForeignInstallationAllowed('installation-a', 'installation-a', false, undefined)).not.toThrow()
+    expect(() => assertForeignInstallationAllowed(undefined, 'installation-a', false, undefined)).not.toThrow()
+    expect(() => assertForeignInstallationAllowed('installation-a', null, false, undefined)).not.toThrow()
+    expect(() => assertForeignInstallationAllowed('installation-a', 'installation-b', true, 'REPLACE_DZ23_STORAGE')).not.toThrow()
+    expect(() => assertForeignInstallationAllowed('installation-a', 'installation-b', false, 'REPLACE_DZ23_STORAGE')).toThrow('--allow-foreign-installation')
+    expect(() => assertForeignInstallationAllowed('installation-a', 'installation-b', true, 'wrong')).toThrow('--confirm REPLACE_DZ23_STORAGE')
   })
 
   it('puts connection material only in the child environment', () => {

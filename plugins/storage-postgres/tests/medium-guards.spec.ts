@@ -14,6 +14,7 @@ import { descriptorOf } from '@deepseek-ai/dsh-storage-domain'
 import { PostgresStorageBackend } from '../src/backend.ts'
 import { writeBackupBundle } from '../src/backup-worker.ts'
 import { snapshotPostgresStorage } from '../src/snapshot.ts'
+import { validateBundle } from '../src/bundle.ts'
 import { quoteIdentifier, unitsTable, STORAGE_POSTGRES_LAYOUT_VERSION } from '../src/schema.ts'
 import { apply } from '../src/index.ts'
 import { STUDIO_DOMAIN_SPECS } from '../../../scripts/studio-domain-specs.ts'
@@ -109,6 +110,52 @@ describePostgres('a units row written by a build that predates the declared shap
     expect(bundle.domains.map(domain => domain.descriptor)).toEqual([{ name: hello.name, version: hello.version, tables: ['records'], hasGlobal: false }])
     expect(Object.keys(bundle.domains[0]!.snapshot.tables['records'] ?? {})).toEqual(['one'])
   })
+})
+
+describePostgres('a schema written before the additive metadata columns existed', () => {
+  async function downgrade(schema: string): Promise<void> {
+    await onSchema(async client => {
+      await client.query(`ALTER TABLE ${unitsTable(schema)} DROP COLUMN "tables", DROP COLUMN "has_global", DROP COLUMN "descriptor_sha256"`)
+      await client.query(`ALTER TABLE ${quoteIdentifier(schema)}."storage_meta" DROP COLUMN "text_value"`)
+    })
+  }
+
+  it('the diagnostic snapshot reads the old schema using typed NULL projections', async () => {
+    const schema = await populated('old_snap')
+    await downgrade(schema)
+    const bundle = await snapshotPostgresStorage({ connectionString: dsn!, ssl: false, schema })
+    expect(bundle.installation).toBeUndefined()
+    expect(bundle.domains[0]!.descriptor).toEqual({ name: hello.name, version: hello.version, tables: ['records'], hasGlobal: false })
+    expect(() => validateBundle(bundle)).not.toThrow()
+  }, 60_000)
+
+  it('the streaming worker writes a valid identity-less bundle from the old schema', async () => {
+    const schema = await populated('old_worker')
+    await downgrade(schema)
+    const out = join(await directory('dz23-old-worker-'), 'bundle.json')
+    const report = await writeBackupBundle({ dsnRef: 'unused', schema, ssl: 'off', out, maxBytes: 64 * 1024 * 1024 }, dsn!)
+    expect(report).toMatchObject({ domains: 1, records: 1 })
+    const bundle = JSON.parse(await readFile(out, 'utf8')) as unknown
+    expect(() => validateBundle(bundle)).not.toThrow()
+    expect((bundle as { installation?: string }).installation).toBeUndefined()
+  }, 60_000)
+})
+
+describePostgres('a declaration whose fingerprint was removed', () => {
+  it('is refused while the all-NULL legacy row still degrades to inference', async () => {
+    const tampered = await populated('finger_null')
+    await onSchema(client => client.query(
+      `UPDATE ${unitsTable(tampered)} SET tables = $1::jsonb, descriptor_sha256 = NULL WHERE name = $2`,
+      ['["records", "smuggled"]', hello.name],
+    ))
+    await expect(snapshotPostgresStorage({ connectionString: dsn!, ssl: false, schema: tampered }))
+      .rejects.toMatchObject({ code: 'malformed-medium', message: expect.stringContaining('no fingerprint') as unknown as string })
+
+    const legacy = await populated('finger_legacy')
+    await onSchema(client => client.query(`UPDATE ${unitsTable(legacy)} SET tables = NULL, has_global = NULL, descriptor_sha256 = NULL WHERE name = $1`, [hello.name]))
+    const bundle = await snapshotPostgresStorage({ connectionString: dsn!, ssl: false, schema: legacy })
+    expect(bundle.domains[0]!.descriptor.tables).toEqual(['records'])
+  }, 60_000)
 })
 
 describePostgres('the scheduled backup as the plugin wires it', () => {

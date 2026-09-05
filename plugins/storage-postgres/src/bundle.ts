@@ -22,6 +22,8 @@ export interface StorageExportBundle {
   upstreamCommit: typeof HARNESS_UPSTREAM_COMMIT
   source: { kind: StorageExportSourceKind; sha256: string }
   createdAt: string
+  /** Logical identity of the installation that owns the exported schema. */
+  installation?: string
   domains: ExportedDomain[]
   payloadSha256: string
 }
@@ -47,6 +49,7 @@ export function sealBundle(
   source: StorageExportBundle['source'],
   domains: ExportedDomain[],
   createdAt: string,
+  installation?: string,
 ): StorageExportBundle {
   const payload: Omit<StorageExportBundle, 'payloadSha256'> = {
     format: STORAGE_EXPORT_FORMAT,
@@ -54,6 +57,7 @@ export function sealBundle(
     source,
     createdAt,
     domains,
+    ...(installation === undefined ? {} : { installation }),
   }
   return { ...payload, payloadSha256: sha256(canonicalJson(payload)) }
 }
@@ -64,7 +68,9 @@ export function validateBundle(
 ): asserts value is StorageExportBundle {
   assertLimits(limits)
   assertPlainObject(value, 'storage export')
-  assertExactKeys(value, ['format', 'upstreamCommit', 'source', 'createdAt', 'domains', 'payloadSha256'], 'storage export')
+  const topLevelKeys = ['format', 'upstreamCommit', 'source', 'createdAt', 'domains', 'payloadSha256']
+  if ('installation' in value) topLevelKeys.push('installation')
+  assertExactKeys(value, topLevelKeys, 'storage export')
   if (value.format !== STORAGE_EXPORT_FORMAT || value.upstreamCommit !== HARNESS_UPSTREAM_COMMIT) {
     throw new Error('storage export format or Harness pin is incompatible')
   }
@@ -73,6 +79,9 @@ export function validateBundle(
   if (!['sqlite', 'json', 'postgres'].includes(String(value.source.kind))) throw new Error('storage export source kind is unknown')
   assertSha256(value.source.sha256, 'storage export source checksum')
   if (typeof value.createdAt !== 'string' || !Number.isFinite(Date.parse(value.createdAt))) throw new Error('storage export creation time is invalid')
+  if ('installation' in value && (typeof value.installation !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value.installation))) {
+    throw new Error('storage export installation identity is invalid')
+  }
   if (!Array.isArray(value.domains)) throw new Error('storage export domains must be an array')
   if (value.domains.length > limits.maxDomains) throw new Error(`storage export exceeds the ${String(limits.maxDomains)} domain limit`)
   assertSha256(value.payloadSha256, 'storage export payload checksum')

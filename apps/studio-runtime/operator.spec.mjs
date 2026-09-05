@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { readFile } from 'node:fs/promises'
+import { EventEmitter } from 'node:events'
 import { main, parseOperatorCommand, runOperator, sanitizeOperatorError } from './operator.mjs'
 import { runStorageRestoreStopped } from '../../scripts/run-storage-operator.mjs'
 
@@ -34,6 +35,10 @@ describe('internal storage operator', () => {
     expect(() => parseOperatorCommand(['backup', '--dsn-ref', 'A'])).toThrow('Falta --out')
     expect(() => parseOperatorCommand(['restore', '--dsn-ref', 'A', '--input', 'x', '--attempt-id', 'attempt-1', '--write'])).toThrow('Falta --backup')
     expect(parseOperatorCommand(['restore', '--dsn-ref', 'A', '--input', 'x', '--attempt-id', 'attempt-1'])).toMatchObject({ command: 'restore', write: false, backup: '' })
+    expect(parseOperatorCommand([
+      'restore', '--dsn-ref', 'A', '--input', 'x', '--attempt-id', 'attempt-1',
+      '--allow-record-loss', '--allow-unknown-objects', '--allow-foreign-installation',
+    ])).toMatchObject({ allowRecordLoss: true, allowUnknownObjects: true, allowForeignInstallation: true })
   })
 
   it('runs write restore with Harness stopped and reopens it only after operator success', async () => {
@@ -146,13 +151,21 @@ describe('internal storage operator', () => {
 
   it('passes write intent to the fail-closed restore core and reports readiness', async () => {
     let received
-    const command = parseOperatorCommand(['restore', '--dsn-ref', 'DZ23_POSTGRES_DSN', '--input', 'ok.json', '--attempt-id', 'attempt-good1', '--backup', 'safety.dump', '--write', '--force', '--confirm', 'REPLACE_DZ23_STORAGE'])
+    const command = parseOperatorCommand([
+      'restore', '--dsn-ref', 'DZ23_POSTGRES_DSN', '--input', 'ok.json', '--attempt-id', 'attempt-good1',
+      '--backup', 'safety.dump', '--write', '--force', '--allow-record-loss', '--allow-unknown-objects',
+      '--allow-foreign-installation', '--confirm', 'REPLACE_DZ23_STORAGE',
+    ])
     const result = await runOperator(command, {
       environment: { DZ23_POSTGRES_DSN: 'postgres://user:secret@host/db', DZ23_OPERATOR_STATE_DIR: '/private/operator' },
       readVerifiedStorageBundleFile: async () => ({ file: 'ok.json', bytes: 1, inputSha256: 'a'.repeat(64), bundle: { domains: [{}] } }),
       restorePostgresStorage: async value => { received = value; return { mode: 'write', domains: 1, safetyBackup: 'safety.dump', safetyBackupStatus: 'created', replacedDomains: [], droppedDomains: [], reapedStaging: [], readyToStart: true } },
     })
-    expect(received).toMatchObject({ write: true, force: true, confirmation: 'REPLACE_DZ23_STORAGE', safetyBackup: 'safety.dump', attemptId: 'attempt-good1', stateDirectory: '/private/operator' })
+    expect(received).toMatchObject({
+      write: true, force: true, allowRecordLoss: true, allowUnknownObjects: true,
+      allowForeignInstallation: true, confirmation: 'REPLACE_DZ23_STORAGE',
+      safetyBackup: 'safety.dump', attemptId: 'attempt-good1', stateDirectory: '/private/operator',
+    })
     expect(result.readyToStart).toBe(true)
   })
 
@@ -267,6 +280,34 @@ describe('internal storage operator', () => {
     })
     expect(opaque).toBe(1)
     expect(err.at(-1)).not.toContain(opaqueSecret)
+  })
+
+  it('keeps the Harness stopped and names the same attempt when stdout fails after a committed restore', async () => {
+    class BrokenOutput extends EventEmitter {
+      write(_value, callback) {
+        const error = new Error('EPIPE')
+        queueMicrotask(() => {
+          this.emit('error', error)
+          callback?.(error)
+        })
+        return false
+      }
+    }
+    const errors = []
+    const code = await main({
+      argv: ['restore', '--dsn-ref', 'DSN', '--input', 'ok.json', '--attempt-id', 'attempt-output', '--backup', 'safety.dump', '--write'],
+      environment: { DSN: 'postgres://operator:secret@database/studio', DZ23_OPERATOR_STATE_DIR: '/private/operator' },
+      stdout: new BrokenOutput(), stderr: { write: value => errors.push(value) },
+      signals: { once: () => undefined, off: () => undefined },
+      dependencies: {
+        readVerifiedStorageBundleFile: async () => ({ file: 'ok.json', bytes: 1, inputSha256: 'a'.repeat(64), bundle: { domains: [{}] } }),
+        restorePostgresStorage: async () => ({ mode: 'write', domains: 1, safetyBackup: 'safety.dump', safetyBackupStatus: 'created', replacedDomains: [], droppedDomains: [], reapedStaging: [], readyToStart: true }),
+      },
+    })
+    expect(code).toBe(2)
+    expect(errors.join('')).toContain('JÁ FOI CONCLUÍDA')
+    expect(errors.join('')).toContain("attempt-output")
+    expect(errors.join('')).not.toContain('secret')
   })
 
   it('cancels main through its registered signal before a dependency can report success', async () => {

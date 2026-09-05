@@ -1050,6 +1050,9 @@ describe('integration hub service', () => {
     const entered = new Set<string>()
     let release: () => void = () => undefined
     const stored = new Promise<void>(resolve => { release = resolve })
+    let storesStarted = 0
+    let twoStoresStarted: () => void = () => undefined
+    const bothWritersReachedRepository = new Promise<void>(resolve => { twoStoresStarted = resolve })
     const service = new IntegrationHubService({
       repository, exportsRoot, publisherKeys, channel: 'stable', runsRoot: dirname(runDirectory),
       secrets: { inspect: async () => ({ present: false, shapeOk: false }) },
@@ -1058,16 +1061,28 @@ describe('integration hub service', () => {
         project: (_actor, projectId) => { entered.add(projectId); return { project_id: projectId, name: 'Agenda do Salão', state: 'VERIFIED_PROTOTYPE' } },
         runs: () => [{ run_id: 'run-1', state: 'PASSED', started_at: '2026-09-03T11:00:00.000Z', attempt: 1, run_directory: runDirectory }],
       },
-      packagingTimeoutMs: 40,
+      // Give the real ZIP walk ample room even when Vitest is running every Hub
+      // file concurrently. The assertion below starts the deadline check only
+      // after both builds have claimed their outcome and reached the deliberately
+      // blocked repository write; it therefore tests the intended boundary, not
+      // scheduler speed on the CI host.
+      packagingTimeoutMs: 5_000,
       now: () => new Date('2026-09-04T00:00:00.000Z'), createId: () => `id-${++sequence}`,
     })
     // The table is what is slow here — well past the ceiling — and the row it is writing is real.
     const original = repository.putExport
-    repository.putExport = async (value: StudioExport) => { await stored; await original(value) }
+    repository.putExport = async (value: StudioExport) => {
+      storesStarted += 1
+      if (storesStarted === 2) twoStoresStarted()
+      await stored
+      await original(value)
+    }
 
     const all = Promise.all([0, 1, 2].map(index => service.createExport(builder, `p${index}`)))
-    // Long enough for the ceiling to expire on the two that took a slot first.
-    await new Promise<void>(resolve => { setTimeout(resolve, 150) })
+    await bothWritersReachedRepository
+    // Long enough for the ceiling to expire on the two that took a slot first,
+    // measured from a known state rather than from the start of filesystem work.
+    await new Promise<void>(resolve => { setTimeout(resolve, 5_100) })
     // The third one is packaging: the slots came back although nothing has finished.
     expect([...entered].sort()).toEqual(['p0', 'p1', 'p2'])
     // And nobody has been told anything yet — no refusal invented over a row being written.

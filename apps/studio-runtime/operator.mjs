@@ -16,7 +16,10 @@ import {
 
 const COMMANDS = new Set(['backup', 'verify-backup', 'restore', 'status'])
 const VALUE_FLAGS = new Set(['--dsn-ref', '--schema', '--ssl', '--out', '--input', '--backup', '--keep', '--max-bytes', '--confirm', '--attempt-id'])
-const BOOL_FLAGS = new Set(['--write', '--force', '--allow-domain-loss'])
+const BOOL_FLAGS = new Set([
+  '--write', '--force', '--allow-domain-loss', '--allow-record-loss',
+  '--allow-unknown-objects', '--allow-foreign-installation',
+])
 
 export function parseOperatorCommand(argv) {
   const [command, ...tokens] = argv
@@ -75,6 +78,9 @@ export function parseOperatorCommand(argv) {
     command, ...common, dsnRef, input: required('--input'), attemptId: required('--attempt-id'), backup: write ? required('--backup') : (values.get('--backup') ?? ''),
     maxBytes: positiveInteger('--max-bytes', BACKUP_MAX_BYTES_DEFAULT), write: booleans.has('--write'),
     force: booleans.has('--force'), allowDomainLoss: booleans.has('--allow-domain-loss'),
+    allowRecordLoss: booleans.has('--allow-record-loss'),
+    allowUnknownObjects: booleans.has('--allow-unknown-objects'),
+    allowForeignInstallation: booleans.has('--allow-foreign-installation'),
     confirmation: values.get('--confirm') ?? '',
   }
 }
@@ -121,6 +127,8 @@ export async function runOperator(command, dependencies = {}) {
   const report = await (dependencies.restorePostgresStorage ?? restorePostgresStorage)({
     verifiedInput: verified, attemptId: command.attemptId, dsn, schema: command.schema, ssl: command.ssl, write: command.write,
     safetyBackup: command.backup, force: command.force, allowDomainLoss: command.allowDomainLoss,
+    allowRecordLoss: command.allowRecordLoss, allowUnknownObjects: command.allowUnknownObjects,
+    allowForeignInstallation: command.allowForeignInstallation,
     confirmation: command.confirmation, signal, environment, maxBytes: command.maxBytes, stateDirectory,
   })
   return { command: 'restore', ...report }
@@ -157,7 +165,17 @@ export async function main(runtime = {}) {
   try {
     command = parseOperatorCommand(argv)
     const result = await runOperator(command, { ...runtime.dependencies, signal: controller.signal, environment })
-    stdout.write(`${JSON.stringify(result)}\n`)
+    try {
+      await writeOperatorOutput(stdout, `${JSON.stringify(result)}\n`)
+    } catch (error) {
+      if (command.command === 'restore' && command.write === true && result.readyToStart === true) {
+        const message = `A restauração JÁ FOI CONCLUÍDA, mas o relatório não pôde ser entregue. ` +
+          `Mantenha o Harness parado, NÃO repita a restauração e reconcilie com o mesmo attempt-id '${command.attemptId}'.`
+        stderr.write(`${JSON.stringify({ status: 'completed-report-failed', error: sanitizeOperatorError(new Error(message), credentialFragments(environment[command.dsnRef])) })}\n`)
+        return 2
+      }
+      throw error
+    }
     return 0
   } catch (error) {
     const secret = command?.dsnRef === undefined ? [] : credentialFragments(environment[command.dsnRef])
@@ -167,6 +185,33 @@ export async function main(runtime = {}) {
     signals.off('SIGINT', cancel)
     signals.off('SIGTERM', cancel)
   }
+}
+
+async function writeOperatorOutput(stream, value) {
+  // Test doubles and in-memory collectors are synchronous and have no event
+  // surface. Real Node streams report EPIPE/ENOSPC either in the callback or
+  // through an `error` event; both must be contained.
+  if (typeof stream.once !== 'function' || typeof stream.off !== 'function') {
+    stream.write(value)
+    return
+  }
+  await new Promise((resolvePromise, reject) => {
+    let settled = false
+    const finish = error => {
+      if (settled) return
+      settled = true
+      stream.off('error', onError)
+      if (error === undefined || error === null) resolvePromise()
+      else reject(error)
+    }
+    const onError = error => finish(error)
+    stream.once('error', onError)
+    try {
+      stream.write(value, error => finish(error))
+    } catch (error) {
+      finish(error)
+    }
+  })
 }
 
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) process.exitCode = await main()

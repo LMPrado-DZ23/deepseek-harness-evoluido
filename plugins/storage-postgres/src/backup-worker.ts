@@ -16,7 +16,7 @@ import { Client } from 'pg'
 import { HARNESS_UPSTREAM_COMMIT, STORAGE_EXPORT_FORMAT, canonicalJson, sha256 } from './bundle.js'
 import { postgresClientConnection } from './dsn.js'
 import { assertConfiguredSchemaName, globalsTable, quoteIdentifier, recordsTable, STORAGE_POSTGRES_LAYOUT_VERSION, unitsTable } from './schema.js'
-import { storedDescriptor, type UnitRow } from './snapshot.js'
+import { readInstallation, storedDescriptor, unitsProjection, type UnitRow } from './snapshot.js'
 import { assertPinnedDirectory, openNewPinnedFile, pinnedChildPath, pinParent } from './safe-path.js'
 import { OPERATOR_BUNDLE_MAX_BYTES, assertOperatorBundleLimit } from './operator-limits.js'
 
@@ -82,12 +82,14 @@ export async function writeBackupBundle(args: WorkerArgs, dsn: string): Promise<
     const marker = await client.query<{ snapshot: string }>('SELECT pg_current_snapshot()::text AS snapshot')
     const createdAt = (args.now ?? (() => new Date()))().toISOString()
     const source = { kind: 'postgres' as const, sha256: sha256(`${args.schema}\0${marker.rows[0]!.snapshot}`) }
+    const installation = await readInstallation(client, args.schema)
+    const installationJson = installation === undefined ? '' : `"installation":${JSON.stringify(installation)},`
 
-    // The canonical payload has its keys in code-point order: createdAt, domains, format, source, upstreamCommit.
+    // The canonical payload has its keys in code-point order: createdAt, domains, format, installation, source, upstreamCommit.
     payloadHash.update(`{"createdAt":${JSON.stringify(createdAt)},"domains":[`, 'utf8')
-    await write(`{"format":${JSON.stringify(STORAGE_EXPORT_FORMAT)},"upstreamCommit":${JSON.stringify(HARNESS_UPSTREAM_COMMIT)},"source":${JSON.stringify(source)},"createdAt":${JSON.stringify(createdAt)},"domains":[`)
+    await write(`{"format":${JSON.stringify(STORAGE_EXPORT_FORMAT)},"upstreamCommit":${JSON.stringify(HARNESS_UPSTREAM_COMMIT)},${installationJson}"source":${JSON.stringify(source)},"createdAt":${JSON.stringify(createdAt)},"domains":[`)
 
-    for await (const unit of cursorUnits(client, args.schema)) {
+    for await (const unit of cursorUnits(client, args.schema, await unitsProjection(client, args.schema))) {
       throwIfAborted(args.signal)
       const globalRow = await client.query<{ value: unknown }>(
         `SELECT value FROM ${globalsTable(args.schema)} WHERE unit = $1`,
@@ -162,7 +164,7 @@ export async function writeBackupBundle(args: WorkerArgs, dsn: string): Promise<
     throwIfAborted(args.signal)
     await client.query('COMMIT')
 
-    payloadHash.update(`],"format":${JSON.stringify(STORAGE_EXPORT_FORMAT)},"source":${canonicalJson(source)},"upstreamCommit":${JSON.stringify(HARNESS_UPSTREAM_COMMIT)}}`, 'utf8')
+    payloadHash.update(`],"format":${JSON.stringify(STORAGE_EXPORT_FORMAT)},${installationJson}"source":${canonicalJson(source)},"upstreamCommit":${JSON.stringify(HARNESS_UPSTREAM_COMMIT)}}`, 'utf8')
     await write(`],"payloadSha256":${JSON.stringify(payloadHash.digest('hex'))}}\n`)
     await assertPinnedDirectory(output.directory)
     await file.sync()
@@ -188,10 +190,10 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
 }
 
 /** Units are cursored too: a schema with many small domains stays bounded just like one huge domain. */
-async function* cursorUnits(client: Client, schema: string): AsyncGenerator<UnitRow> {
+async function* cursorUnits(client: Client, schema: string, projection: string): AsyncGenerator<UnitRow> {
   const name = `dz23_backup_units_${randomUUID().replaceAll('-', '')}`
   await client.query(
-    `DECLARE ${name} NO SCROLL CURSOR FOR SELECT name, version, tables, has_global, descriptor_sha256 FROM ${unitsTable(schema)} ORDER BY name COLLATE "C"`,
+    `DECLARE ${name} NO SCROLL CURSOR FOR SELECT ${projection} FROM ${unitsTable(schema)} ORDER BY name COLLATE "C"`,
   )
   try {
     for (;;) {

@@ -7,13 +7,18 @@ import { spawn } from 'node:child_process'
 import { Client } from 'pg'
 import type { StorageBackend } from '@deepseek-ai/dsh-storage'
 import { PostgresStorageBackend } from './backend.js'
-import { canonicalJson, sha256, type StorageExportBundle } from './bundle.js'
+import { bundleRecordCount, canonicalJson, sha256, type StorageExportBundle } from './bundle.js'
 import { postgresClientConnection, type PostgresClientConnection, type TlsPolicy } from './dsn.js'
 import type { VerifiedStorageBundle } from './import-file.js'
 import { advanceJournal, assertJournalIdentity, journalReached, loadRestoreJournal, reserveRestoreJournal, writeRestoreJournal, type RestoreJournal } from './restore-journal.js'
-import { assertDomainLossAllowed, assertReplacementAllowed, assertRestorableBundle, assertRestoreIntent, postgresDumpInvocation } from './restore-policy.js'
+import {
+  assertDomainLossAllowed, assertForeignInstallationAllowed, assertRecordLossAllowed,
+  assertReplacementAllowed, assertRestorableBundle, assertRestoreIntent,
+  assertUnknownObjectsAllowed, postgresDumpInvocation, type RestoreRecordLoss,
+} from './restore-policy.js'
 import { assertPinnedDirectory, openNewPinnedFile, openNewPinnedReadWriteFile, pinnedChildPath, pinParent, syncPinnedDirectory } from './safe-path.js'
-import { assertConfiguredSchemaName, assertIdentifier, quoteIdentifier, STORAGE_POSTGRES_LAYOUT_VERSION, storageMaintenanceLockName, storageUnitLockName } from './schema.js'
+import { assertConfiguredSchemaName, assertIdentifier, INSTALLATION_ID_KEY, quoteIdentifier, STORAGE_POSTGRES_LAYOUT_VERSION, storageMaintenanceLockName, storageUnitLockName } from './schema.js'
+import { readInstallation } from './snapshot.js'
 import { OPERATOR_BUNDLE_MAX_BYTES, assertOperatorBundleLimit } from './operator-limits.js'
 
 /**
@@ -26,6 +31,7 @@ import { OPERATOR_BUNDLE_MAX_BYTES, assertOperatorBundleLimit } from './operator
 const STAGING_MARKER_TABLE = 'dz23_import_staging'
 const STAGING_MARKER_TOOL = 'dz23-studio/import-postgres-storage'
 const RESTORE_RECEIPT_TABLE = 'dz23_restore_receipt'
+const RESTORE_AUDIT_TABLE = 'studio_restore_audit'
 
 const STUDIO_LAYOUT: Readonly<Record<string, readonly string[]>> = {
   storage_meta: ['key', 'value'],
@@ -33,6 +39,23 @@ const STUDIO_LAYOUT: Readonly<Record<string, readonly string[]>> = {
   records: ['unit', 'table_name', 'key', 'value'],
   unit_globals: ['unit', 'value'],
   unit_leases: ['unit', 'holder', 'acquired_at', 'heartbeat_at'],
+}
+
+const STUDIO_OPTIONAL_COLUMNS: Readonly<Record<string, readonly string[]>> = {
+  storage_meta: ['text_value'],
+  units: ['tables', 'has_global', 'descriptor_sha256'],
+}
+const AUDIT_REQUIRED_COLUMNS = [
+  'restored_at', 'operator', 'target_schema', 'source_file', 'payload_sha256', 'bundle_created_at',
+  'records_before', 'records_after', 'domains_before', 'domains_after', 'flags',
+] as const
+const AUDIT_ADDED_COLUMNS = ['installation_before', 'installation_after'] as const
+const AUDIT_ALL_COLUMNS = [...AUDIT_REQUIRED_COLUMNS, ...AUDIT_ADDED_COLUMNS] as const
+const STUDIO_KNOWN_TABLES = [...Object.keys(STUDIO_LAYOUT), RESTORE_AUDIT_TABLE, RESTORE_RECEIPT_TABLE]
+const STUDIO_KNOWN_COLUMNS: Readonly<Record<string, readonly string[]>> = {
+  ...Object.fromEntries(Object.entries(STUDIO_LAYOUT).map(([table, columns]) => [table, [...columns, ...(STUDIO_OPTIONAL_COLUMNS[table] ?? [])]])),
+  [RESTORE_AUDIT_TABLE]: AUDIT_ALL_COLUMNS,
+  [RESTORE_RECEIPT_TABLE]: ['attempt_id', 'target_fingerprint', 'input_sha256', 'safety_sha256'],
 }
 
 export interface RestorePostgresOptions {
@@ -46,6 +69,9 @@ export interface RestorePostgresOptions {
   stateDirectory?: string
   force?: boolean
   allowDomainLoss?: boolean
+  allowRecordLoss?: boolean
+  allowUnknownObjects?: boolean
+  allowForeignInstallation?: boolean
   confirmation?: string
   signal?: AbortSignal
   environment?: NodeJS.ProcessEnv
@@ -60,6 +86,16 @@ export interface RestoreInspectionReport {
   wouldBeLost: string[]
   targetSchemaExists: boolean
   targetHasContent: boolean
+  recordsInBackup: number
+  recordsInTarget: number
+  recordLoss: RestoreRecordLoss[]
+  unknownObjects: string[]
+  unknownObjectCount: number
+  orphanStaging: string[]
+  layoutProblem: string | null
+  backupInstallation: string | null
+  targetInstallation: string | null
+  installationAfter: string | null
 }
 
 export interface RestoreWriteReport {
@@ -71,6 +107,13 @@ export interface RestoreWriteReport {
   replacedDomains: string[]
   droppedDomains: string[]
   reapedStaging: string[]
+  recordsInBackup: number
+  recordsInTarget: number
+  recordLoss: RestoreRecordLoss[]
+  unknownObjectsRemoved: string[]
+  backupInstallation: string | null
+  targetInstallation: string | null
+  installationAfter: string | null
   readyToStart: true
 }
 
@@ -141,6 +184,9 @@ export async function restorePostgresStorage(
   const client = (dependencies.createClient ?? (value => new Client(value)))(connection)
   await client.connect()
   let staging: string | undefined
+  // Point of no return for the physical swap. Once true, cleanup errors must
+  // never be translated into "nothing changed", and no rollback/drop may run.
+  let swapCommitted = false
   try {
     // Order matters: everything that can refuse runs BEFORE pg_dump, staging or DROP.
     if (write) await acquireMaintenanceLock(client, schema)
@@ -203,22 +249,62 @@ export async function restorePostgresStorage(
     const targetHasContent = targetSchemaExists && await schemaHasContent(client, schema)
     let existingUnits = 0
     let targetDomains: string[] = []
+    let recordsByUnit = new Map<string, number>()
+    let globalUnits = new Set<string>()
+    let unknown = { items: [] as string[], total: 0 }
+    let targetInstallation: string | undefined
+    let layoutProblem: string | null = null
     if (targetHasContent) {
-      await assertStudioLayout(client, schema)
-      const result = await client.query<{ name: string }>(`SELECT name FROM ${quoteIdentifier(schema)}."units" ORDER BY name COLLATE "C"`)
-      targetDomains = result.rows.map(row => row.name)
-      existingUnits = targetDomains.length
+      try {
+        await assertStudioLayout(client, schema)
+      } catch (error) {
+        if (write) throw error
+        layoutProblem = error instanceof Error ? error.message : String(error)
+      }
+      unknown = await unknownSchemaObjects(client, schema)
+      if (layoutProblem === null) {
+        const result = await client.query<{ name: string }>(`SELECT name FROM ${quoteIdentifier(schema)}."units" ORDER BY name COLLATE "C"`)
+        targetDomains = result.rows.map(row => row.name)
+        existingUnits = targetDomains.length
+        recordsByUnit = await countRecordsByUnit(client, schema)
+        globalUnits = await readGlobalUnits(client, schema)
+        targetInstallation = await readInstallation(client, schema)
+      }
     }
-    // Anything already in the schema — units, zero units but other tables, anything — needs the
-    // spoken confirmation before it is replaced.
-    assertReplacementAllowed(targetHasContent, options.force === true, options.confirmation)
     // A bundle that does not carry every domain the target holds would silently DESTROY the missing ones.
     const bundleDomains = new Set(bundle.domains.map(domain => domain.descriptor.name))
     const wouldBeLost = targetDomains.filter(name => !bundleDomains.has(name))
-    assertDomainLossAllowed(wouldBeLost, options.allowDomainLoss === true, options.confirmation)
-    if (!write) {
-      return { mode: 'dry-run', domains: bundle.domains.length, existingUnits, targetDomains, wouldBeLost, targetSchemaExists, targetHasContent }
+    const recordLoss: RestoreRecordLoss[] = []
+    for (const domain of bundle.domains) {
+      if (!targetDomains.includes(domain.descriptor.name)) continue
+      const recordsInBackup = Object.values(domain.snapshot.tables).reduce((total, table) => total + Object.keys(table).length, 0)
+      const recordsInTarget = recordsByUnit.get(domain.descriptor.name) ?? 0
+      const globalWouldBeLost = globalUnits.has(domain.descriptor.name) && domain.snapshot.global === null
+      if (recordsInBackup < recordsInTarget || globalWouldBeLost) {
+        recordLoss.push({ domain: domain.descriptor.name, recordsInBackup, recordsInTarget, globalWouldBeLost })
+      }
     }
+    const recordsInBackup = bundleRecordCount(bundle)
+    const recordsInTarget = [...recordsByUnit.values()].reduce((total, count) => total + count, 0)
+    const backupInstallation = bundle.installation ?? null
+    const targetInstallationValue = targetInstallation ?? null
+    const installationAfter = backupInstallation ?? targetInstallationValue
+    const orphanStaging = await findStagingSchemas(client, schema)
+    if (!write) {
+      return {
+        mode: 'dry-run', domains: bundle.domains.length, existingUnits, targetDomains, wouldBeLost,
+        targetSchemaExists, targetHasContent, recordsInBackup, recordsInTarget, recordLoss,
+        unknownObjects: unknown.items, unknownObjectCount: unknown.total, orphanStaging,
+        layoutProblem, backupInstallation, targetInstallation: targetInstallationValue, installationAfter,
+      }
+    }
+    // Dry-run above is always a pure preview. Destructive confirmations apply
+    // only when a write was explicitly requested.
+    assertReplacementAllowed(targetHasContent, options.force === true, options.confirmation)
+    assertDomainLossAllowed(wouldBeLost, options.allowDomainLoss === true, options.confirmation)
+    assertRecordLossAllowed(recordLoss, options.allowRecordLoss === true, options.confirmation)
+    assertUnknownObjectsAllowed(unknown.items, options.allowUnknownObjects === true, options.confirmation)
+    assertForeignInstallationAllowed(backupInstallation, targetInstallationValue, options.allowForeignInstallation === true, options.confirmation)
     if (journal === undefined) throw new Error('Journal da restauração não foi reservado. Restauração recusada.')
 
     throwIfAborted(options.signal)
@@ -250,7 +336,7 @@ export async function restorePostgresStorage(
     // A run killed with SIGKILL leaves a full copy of the data in its staging schema, which nothing
     // would ever reap. Under the exclusive maintenance lock nobody else can own one, so the old ones
     // go now — before another copy is made.
-    const orphans = await reapStagingSchemas(client, schema)
+    const orphans = await reapStagingSchemas(client, schema, orphanStaging)
     staging = `${schema.slice(0, 36)}_staging_${sha256(`${options.attemptId}\0${options.verifiedInput.inputSha256}`).slice(0, 12)}`
     assertIdentifier(staging, 'staging schema')
     // Created here, with its ownership marker, in ONE transaction: a staging schema that
@@ -280,13 +366,21 @@ export async function restorePostgresStorage(
       await backend.waitUntilReady()
       await importStorage(backend, bundle, options.signal)
       throwIfAborted(options.signal)
+      if (installationAfter !== null) await writeInstallation(client, staging, installationAfter)
+      const restoredInstallation = (await readInstallation(client, staging)) ?? null
+      const restoredRecordCounts = await countRecordsByUnit(client, staging)
+      const recordsAfter = [...restoredRecordCounts.values()].reduce((total, count) => total + count, 0)
+      await createRestoreAuditTable(client, staging)
       if (!journalReached(journal, 'staged_verified')) {
         journal = advanceJournal(journal, 'staged_verified')
         await writeJournal(journalPath, journal)
       }
       const planned: RestoreWriteReport = {
         mode: 'write', domains: bundle.domains.length, safetyBackup, safetyBackupStatus, safetyBackupSha256,
-        replacedDomains: targetDomains, droppedDomains: wouldBeLost, reapedStaging: orphans, readyToStart: true,
+        replacedDomains: targetDomains, droppedDomains: wouldBeLost, reapedStaging: orphans,
+        recordsInBackup, recordsInTarget, recordLoss, unknownObjectsRemoved: unknown.items,
+        backupInstallation, targetInstallation: targetInstallationValue, installationAfter: restoredInstallation,
+        readyToStart: true,
       }
       journal = advanceJournal(journal, 'swap_started', { result: planned as unknown as Record<string, unknown> })
       await writeJournal(journalPath, journal)
@@ -303,6 +397,14 @@ export async function restorePostgresStorage(
           `INSERT INTO ${quoteIdentifier(staging)}.${quoteIdentifier(RESTORE_RECEIPT_TABLE)} (attempt_id, target_fingerprint, input_sha256, safety_sha256) VALUES ($1, $2, $3, $4)`,
           [options.attemptId, targetFingerprint, options.verifiedInput.inputSha256, safetyBackupSha256],
         )
+        await carryRestoreAudit(client, schema, staging)
+        await insertRestoreAudit(client, staging, {
+          targetSchema: schema, sourceFile: options.verifiedInput.file, payloadSha256: bundle.payloadSha256,
+          bundleCreatedAt: bundle.createdAt, recordsBefore: recordsInTarget, recordsAfter,
+          domainsBefore: targetDomains.length, domainsAfter: bundle.domains.length,
+          flags: restoreFlags(options), installationBefore: targetInstallationValue,
+          installationAfter: restoredInstallation,
+        })
         await client.query(`DROP SCHEMA IF EXISTS ${quoteIdentifier(schema)} CASCADE`)
         await client.query(`ALTER SCHEMA ${quoteIdentifier(staging)} RENAME TO ${quoteIdentifier(schema)}`)
         // Readiness is proved inside the same transaction as the swap. If it
@@ -316,11 +418,16 @@ export async function restorePostgresStorage(
         }
         throwIfAborted(options.signal)
         await client.query('COMMIT')
+        swapCommitted = true
         staging = undefined
         journal = advanceJournal(journal, 'committed')
-        await writeJournal(journalPath, journal)
+        try {
+          await writeJournal(journalPath, journal)
+        } catch (error) {
+          throw postCommitReconciliationError(schema, options.attemptId, error)
+        }
       } catch (error) {
-        await client.query('ROLLBACK')
+        if (!swapCommitted) await client.query('ROLLBACK').catch(() => undefined)
         throw error
       }
     } catch (error) {
@@ -331,12 +438,25 @@ export async function restorePostgresStorage(
     }
     const result = journal.result as unknown as RestoreWriteReport
     journal = advanceJournal(journal, 'cleanup_complete')
-    await writeJournal(journalPath, journal)
+    try {
+      await writeJournal(journalPath, journal)
+    } catch (error) {
+      throw postCommitReconciliationError(schema, options.attemptId, error)
+    }
     return result
   } finally {
     await client.query('SELECT pg_advisory_unlock_all()').catch(() => undefined)
     await client.end()
   }
+}
+
+function postCommitReconciliationError(schema: string, attemptId: string, cause: unknown): Error {
+  const detail = cause instanceof Error ? cause.message : String(cause)
+  return new Error(
+    `A restauração do esquema '${schema}' JÁ FOI CONCLUÍDA no PostgreSQL, mas o journal local não pôde ser finalizado (${detail}). ` +
+    `Mantenha o Harness parado, NÃO inicie outra restauração e reconcilie usando exatamente o mesmo attempt-id '${attemptId}'.`,
+    { cause },
+  )
 }
 
 /** Read-only operator health. No connection material is ever returned. */
@@ -923,6 +1043,182 @@ async function hasRestoreReceipt(client: Client, schema: string, attemptId: stri
   return receipt.rows[0]?.target_fingerprint === targetFingerprint && receipt.rows[0]?.input_sha256 === inputSha256 && receipt.rows[0]?.safety_sha256 === safetySha256
 }
 
+interface UnknownObjects { items: string[]; total: number }
+const INVENTORY_SAMPLE = 3
+const CATALOG_LABELS: Readonly<Record<string, string>> = {
+  pg_proc: 'função', pg_type: 'tipo', pg_operator: 'operador', pg_opclass: 'classe de operador',
+  pg_opfamily: 'família de operadores', pg_conversion: 'conversão', pg_collation: 'ordenação',
+  pg_ts_config: 'configuração de busca textual', pg_ts_dict: 'dicionário de busca textual',
+  pg_ts_parser: 'analisador de busca textual', pg_ts_template: 'modelo de busca textual',
+  pg_statistic_ext: 'estatística estendida', pg_extension: 'extensão', pg_default_acl: 'permissão padrão',
+}
+const CATALOG_BYPRODUCTS: Readonly<Record<string, string>> = {
+  pg_class: 'false',
+  pg_type: `typrelid = 0 AND NOT (typtype = 'b' AND typcategory = 'A')`,
+  pg_constraint: 'false',
+}
+
+/** Every schema-scoped object this build cannot preserve across DROP SCHEMA. */
+async function unknownSchemaObjects(client: Client, schema: string): Promise<UnknownObjects> {
+  const found: Array<{ kind: string; name: string }> = []
+  const relations = await client.query<{ relname: string; relkind: string }>(
+    `SELECT c.relname, c.relkind FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = $1 AND c.relkind NOT IN ('i', 'I', 't') AND NOT (c.relname = ANY($2))
+      ORDER BY c.relname COLLATE "C"`,
+    [schema, STUDIO_KNOWN_TABLES],
+  )
+  const relationKinds: Readonly<Record<string, string>> = {
+    r: 'tabela', p: 'tabela particionada', v: 'visão', m: 'visão materializada',
+    S: 'sequência', f: 'tabela externa', c: 'tipo composto',
+  }
+  for (const row of relations.rows) found.push({ kind: relationKinds[row.relkind] ?? 'objeto', name: row.relname })
+
+  const catalogs = await client.query<{ catalog: string; nsattr: string; nameattr: string | null }>(
+    `SELECT c.relname AS catalog,
+            (SELECT a.attname FROM pg_catalog.pg_attribute a
+               WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+                 AND a.atttypid = 'oid'::regtype AND a.attname LIKE '%namespace' ORDER BY a.attnum LIMIT 1) AS nsattr,
+            (SELECT a.attname FROM pg_catalog.pg_attribute a
+               WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+                 AND a.atttypid = 'name'::regtype ORDER BY a.attnum LIMIT 1) AS nameattr
+       FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'pg_catalog' AND c.relkind = 'r'
+        AND EXISTS (SELECT 1 FROM pg_catalog.pg_attribute a
+                     WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+                       AND a.atttypid = 'oid'::regtype AND a.attname LIKE '%namespace')
+      ORDER BY c.relname COLLATE "C"`,
+  )
+  if (catalogs.rows.length === 0) throw new Error('Não foi possível inspecionar os objetos do esquema de destino. Importação recusada.')
+  const safe = /^[a-z][a-z0-9_]*$/u
+  for (const catalog of catalogs.rows) {
+    const filter = CATALOG_BYPRODUCTS[catalog.catalog] ?? 'true'
+    if (filter === 'false') continue
+    if (!safe.test(catalog.catalog) || !safe.test(catalog.nsattr) || (catalog.nameattr !== null && !safe.test(catalog.nameattr))) {
+      throw new Error(`Nome inesperado no catálogo do PostgreSQL ('${catalog.catalog}'). Importação recusada.`)
+    }
+    const naming = catalog.nameattr === null ? 'oid::text' : `"${catalog.nameattr}"::text`
+    const rows = await client.query<{ name: string }>(
+      `SELECT ${naming} AS name FROM pg_catalog."${catalog.catalog}"
+        WHERE "${catalog.nsattr}" = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = $1) AND (${filter})
+        ORDER BY (${naming}) COLLATE "C"`,
+      [schema],
+    )
+    const label = CATALOG_LABELS[catalog.catalog] ?? `objeto de ${catalog.catalog}`
+    for (const row of rows.rows) found.push({ kind: label, name: row.name })
+  }
+
+  const columns = await client.query<{ relname: string; attname: string }>(
+    `SELECT c.relname, a.attname FROM pg_catalog.pg_attribute a
+       JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+       JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = $1 AND c.relkind = 'r' AND c.relname = ANY($2)
+        AND a.attnum > 0 AND NOT a.attisdropped
+      ORDER BY c.relname COLLATE "C", a.attnum`,
+    [schema, Object.keys(STUDIO_KNOWN_COLUMNS)],
+  )
+  const auditColumns = new Set<string>()
+  for (const row of columns.rows) {
+    if (row.relname === RESTORE_AUDIT_TABLE) auditColumns.add(row.attname)
+    if (!(STUDIO_KNOWN_COLUMNS[row.relname] ?? []).includes(row.attname)) found.push({ kind: 'coluna', name: `${row.relname}.${row.attname}` })
+  }
+  const summary = summariseUnknown(found)
+  if (auditColumns.size > 0) {
+    const missing = AUDIT_REQUIRED_COLUMNS.filter(column => !auditColumns.has(column))
+    if (missing.length > 0) {
+      summary.items.push(`tabela "${RESTORE_AUDIT_TABLE}" não reconhecida; faltam ${missing.join(', ')}`)
+      summary.total += 1
+    }
+  }
+  return summary
+}
+
+function summariseUnknown(found: readonly { kind: string; name: string }[]): UnknownObjects {
+  const grouped = new Map<string, string[]>()
+  for (const item of found) grouped.set(item.kind, [...(grouped.get(item.kind) ?? []), item.name])
+  const items: string[] = []
+  for (const [kind, names] of grouped) {
+    if (names.length <= INVENTORY_SAMPLE) items.push(...names.map(name => `${kind} "${name}"`))
+    else items.push(`${kind} (${String(names.length)} no total): ${names.slice(0, INVENTORY_SAMPLE).map(name => `"${name}"`).join(', ')} e mais ${String(names.length - INVENTORY_SAMPLE)}`)
+  }
+  return { items, total: found.length }
+}
+
+async function countRecordsByUnit(client: Client, schema: string): Promise<Map<string, number>> {
+  const rows = await client.query<{ unit: string; count: string }>(
+    `SELECT unit, count(*)::text AS count FROM ${quoteIdentifier(schema)}."records" GROUP BY unit`,
+  )
+  return new Map(rows.rows.map(row => [row.unit, Number(row.count)]))
+}
+
+async function readGlobalUnits(client: Client, schema: string): Promise<Set<string>> {
+  const rows = await client.query<{ unit: string }>(`SELECT unit FROM ${quoteIdentifier(schema)}."unit_globals"`)
+  return new Set(rows.rows.map(row => row.unit))
+}
+
+async function writeInstallation(client: Client, schema: string, installation: string): Promise<void> {
+  await client.query(
+    `INSERT INTO ${quoteIdentifier(schema)}."storage_meta" (key, value, text_value) VALUES ($1, 0, $2)
+       ON CONFLICT (key) DO UPDATE SET text_value = EXCLUDED.text_value`,
+    [INSTALLATION_ID_KEY, installation],
+  )
+}
+
+async function createRestoreAuditTable(client: Client, schema: string): Promise<void> {
+  await client.query(`CREATE TABLE IF NOT EXISTS ${quoteIdentifier(schema)}.${quoteIdentifier(RESTORE_AUDIT_TABLE)} (
+    restored_at TIMESTAMPTZ NOT NULL, operator TEXT NOT NULL, target_schema TEXT NOT NULL,
+    source_file TEXT NOT NULL, payload_sha256 TEXT NOT NULL, bundle_created_at TEXT NOT NULL,
+    records_before INTEGER NOT NULL, records_after INTEGER NOT NULL,
+    domains_before INTEGER NOT NULL, domains_after INTEGER NOT NULL, flags TEXT NOT NULL,
+    installation_before TEXT, installation_after TEXT
+  )`)
+}
+
+async function auditTableColumns(client: Client, schema: string): Promise<Set<string> | null> {
+  const rows = await client.query<{ attname: string }>(
+    `SELECT a.attname FROM pg_catalog.pg_attribute a
+       JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+       JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = $1 AND c.relkind = 'r' AND c.relname = $2
+        AND a.attnum > 0 AND NOT a.attisdropped`,
+    [schema, RESTORE_AUDIT_TABLE],
+  )
+  return rows.rows.length === 0 ? null : new Set(rows.rows.map(row => row.attname))
+}
+
+async function carryRestoreAudit(client: Client, from: string, to: string): Promise<void> {
+  const present = await auditTableColumns(client, from)
+  if (present === null || AUDIT_REQUIRED_COLUMNS.some(column => !present.has(column))) return
+  const target = AUDIT_ALL_COLUMNS.map(column => quoteIdentifier(column)).join(', ')
+  const source = AUDIT_ALL_COLUMNS.map(column => present.has(column) ? quoteIdentifier(column) : `NULL::text AS ${quoteIdentifier(column)}`).join(', ')
+  await client.query(
+    `INSERT INTO ${quoteIdentifier(to)}.${quoteIdentifier(RESTORE_AUDIT_TABLE)} (${target})
+     SELECT ${source} FROM ${quoteIdentifier(from)}.${quoteIdentifier(RESTORE_AUDIT_TABLE)}`,
+  )
+}
+
+async function insertRestoreAudit(client: Client, schema: string, entry: {
+  targetSchema: string; sourceFile: string; payloadSha256: string; bundleCreatedAt: string
+  recordsBefore: number; recordsAfter: number; domainsBefore: number; domainsAfter: number
+  flags: string; installationBefore: string | null; installationAfter: string | null
+}): Promise<void> {
+  await client.query(
+    `INSERT INTO ${quoteIdentifier(schema)}.${quoteIdentifier(RESTORE_AUDIT_TABLE)} (${AUDIT_ALL_COLUMNS.map(column => quoteIdentifier(column)).join(', ')})
+     VALUES (now(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+    ['dz23-studio-operator', entry.targetSchema, entry.sourceFile, entry.payloadSha256, entry.bundleCreatedAt,
+      entry.recordsBefore, entry.recordsAfter, entry.domainsBefore, entry.domainsAfter, entry.flags,
+      entry.installationBefore, entry.installationAfter],
+  )
+}
+
+function restoreFlags(options: RestorePostgresOptions): string {
+  return [
+    options.force === true ? '--force' : '', options.allowDomainLoss === true ? '--allow-domain-loss' : '',
+    options.allowRecordLoss === true ? '--allow-record-loss' : '',
+    options.allowUnknownObjects === true ? '--allow-unknown-objects' : '',
+    options.allowForeignInstallation === true ? '--allow-foreign-installation' : '',
+  ].filter(Boolean).join(' ')
+}
+
 /**
  * Drop the staging schemas THIS tool left behind for THIS target, and nothing
  * else. Two independent conditions, both required:
@@ -934,14 +1230,14 @@ async function hasRestoreReceipt(client: Client, schema: string, attemptId: stri
  *  - the schema carries the marker table this tool writes when it creates one,
  *    naming this tool and this exact target schema.
  */
-async function reapStagingSchemas(client: Client, schema: string): Promise<string[]> {
+async function findStagingSchemas(client: Client, schema: string): Promise<string[]> {
   const escaped = `${schema.replaceAll('\\', '\\\\').replaceAll('_', '\\_').replaceAll('%', '\\%')}\\_staging\\_%`
   const candidates = await client.query<{ nspname: string }>(
     `SELECT n.nspname FROM pg_catalog.pg_namespace n WHERE n.nspname LIKE $1 ESCAPE '\\'`,
     [escaped],
   )
   const shape = new RegExp(`^${schema.replaceAll(/[.*+?^${}()|[\]\\]/gu, '\\$&')}_staging_[a-z0-9]+$`, 'u')
-  const reaped: string[] = []
+  const found: string[] = []
   for (const candidate of candidates.rows) {
     if (!shape.test(candidate.nspname)) continue
     assertIdentifier(candidate.nspname, 'staging schema')
@@ -951,8 +1247,13 @@ async function reapStagingSchemas(client: Client, schema: string): Promise<strin
       [STAGING_MARKER_TOOL, schema],
     ).catch(() => ({ rows: [] as { tool: string; target_schema: string }[] }))
     if (marker.rows.length === 0) continue
-    await client.query(`DROP SCHEMA IF EXISTS ${quoteIdentifier(candidate.nspname)} CASCADE`)
-    reaped.push(candidate.nspname)
+    found.push(candidate.nspname)
   }
-  return reaped
+  return found
+}
+
+async function reapStagingSchemas(client: Client, schema: string, candidates?: readonly string[]): Promise<string[]> {
+  const owned = candidates ?? await findStagingSchemas(client, schema)
+  for (const staging of owned) await client.query(`DROP SCHEMA IF EXISTS ${quoteIdentifier(staging)} CASCADE`)
+  return [...owned]
 }

@@ -13,6 +13,20 @@ describe('storage export bundle', () => {
     expect(bundleRecordCount(bundle)).toBe(2)
   })
 
+  it('seals a logical installation identity while preserving legacy identity-less bundles', () => {
+    const installation = '11111111-1111-4111-8111-111111111111'
+    const identified = sealBundle(sealed().source, sealed().domains, sealed().createdAt, installation)
+    expect(identified.installation).toBe(installation)
+    expect(() => validateBundle(identified)).not.toThrow()
+
+    const legacy = sealed()
+    expect(Object.hasOwn(legacy, 'installation')).toBe(false)
+    expect(() => validateBundle(legacy)).not.toThrow()
+
+    const invalid = sealBundle(sealed().source, sealed().domains, sealed().createdAt, 'not-an-installation-id')
+    expect(() => validateBundle(invalid)).toThrow('installation identity is invalid')
+  })
+
   it('rejects a foreign format or pin, an unknown source kind, a payload edit, a duplicate domain and a domain edit', () => {
     expect(() => validateBundle({ ...sealed(), format: 'other' } as unknown as StorageExportBundle)).toThrow('incompatible')
     expect(() => validateBundle({ ...sealed(), upstreamCommit: 'deadbeef' } as unknown as StorageExportBundle)).toThrow('incompatible')

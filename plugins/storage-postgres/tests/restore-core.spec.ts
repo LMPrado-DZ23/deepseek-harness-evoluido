@@ -307,8 +307,11 @@ describe('restore core without Docker', () => {
       },
       resolveConnection: async () => connection, createClient: () => client as never, createBackend: () => fakeBackend() as never,
     }
-    await expect(restorePostgresStorage({ ...restoreBase, ssl: 'off', write: true, safetyBackup: 'unused.dump' }, dependencies))
-      .rejects.toThrow('simulated crash after commit')
+    const failure = await restorePostgresStorage({ ...restoreBase, ssl: 'off', write: true, safetyBackup: 'unused.dump' }, dependencies)
+      .then(() => undefined, (error: unknown) => error as Error)
+    expect(failure?.message).toContain('JÁ FOI CONCLUÍDA')
+    expect(failure?.message).toContain(`mesmo attempt-id '${restoreBase.attemptId}'`)
+    expect(client.sql.filter(sql => sql === 'ROLLBACK')).toEqual([])
     const swaps = client.sql.filter(sql => sql.includes('ALTER SCHEMA')).length
     const destructivePreflights = client.sql.filter(sql => sql.includes('pg_catalog.pg_namespace WHERE nspname')).length
     failCommitted = false

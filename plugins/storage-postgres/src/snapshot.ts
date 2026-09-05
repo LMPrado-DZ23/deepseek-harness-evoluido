@@ -3,7 +3,7 @@ import { StorageError } from '@deepseek-ai/dsh-storage'
 import type { KvUnitDescriptor } from '@deepseek-ai/dsh-storage'
 import { compareUtf8, DEFAULT_STORAGE_BUNDLE_LIMITS, descriptorFingerprint, exportedDomain, sealBundle, sha256, type ExportedDomain, type StorageExportBundle } from './bundle.js'
 import { withoutTlsParams } from './dsn.js'
-import { assertConfiguredSchemaName, globalsTable, quoteIdentifier, recordsTable, STORAGE_POSTGRES_LAYOUT_VERSION, unitsTable } from './schema.js'
+import { assertConfiguredSchemaName, globalsTable, INSTALLATION_ID_KEY, quoteIdentifier, recordsTable, STORAGE_POSTGRES_LAYOUT_VERSION, unitsTable } from './schema.js'
 
 export interface SnapshotOptions {
   connectionString: string
@@ -53,10 +53,11 @@ export async function snapshotPostgresStorage(options: SnapshotOptions): Promise
       throw new StorageError('version-mismatch', `postgres storage schema '${options.schema}' has layout version ${String(layout.rows[0].value)}, incompatible with this build (${String(STORAGE_POSTGRES_LAYOUT_VERSION)})`)
     }
     const marker = await client.query<{ snapshot: string }>('SELECT pg_current_snapshot()::text AS snapshot')
+    const installation = await readInstallation(client, options.schema)
     const maxDomains = options.maxDomains ?? DEFAULT_STORAGE_BUNDLE_LIMITS.maxDomains
     const maxRecords = options.maxRecords ?? DEFAULT_STORAGE_BUNDLE_LIMITS.maxRecords
     const units = await client.query<UnitRow>(
-      `SELECT name, version, tables, has_global, descriptor_sha256 FROM ${unitsTable(options.schema)} ORDER BY name COLLATE "C" LIMIT $1`,
+      `SELECT ${await unitsProjection(client, options.schema)} FROM ${unitsTable(options.schema)} ORDER BY name COLLATE "C" LIMIT $1`,
       [maxDomains + 1],
     )
     if (units.rows.length > maxDomains) throw new Error(`postgres diagnostic snapshot exceeds the ${String(maxDomains)} domain limit; use the streaming backup worker`)
@@ -102,7 +103,7 @@ export async function snapshotPostgresStorage(options: SnapshotOptions): Promise
       domains.push(exportedDomain(descriptor, { tables, global }))
     }
     const createdAt = (options.now ?? (() => new Date()))().toISOString()
-    return sealBundle({ kind: 'postgres', sha256: sha256(`${options.schema}\0${marker.rows[0]!.snapshot}`) }, domains, createdAt)
+    return sealBundle({ kind: 'postgres', sha256: sha256(`${options.schema}\0${marker.rows[0]!.snapshot}`) }, domains, createdAt, installation)
   } catch (error) {
     /* v8 ignore next -- rollback failure cannot supersede the snapshot error. */
     await client.query('ROLLBACK').catch(() => undefined)
@@ -110,6 +111,47 @@ export async function snapshotPostgresStorage(options: SnapshotOptions): Promise
   } finally {
     await client.end()
   }
+}
+
+/** Read the logical installation identity without aborting a snapshot of an older schema. */
+export async function readInstallation(client: Client, schema: string): Promise<string | undefined> {
+  const column = await client.query<{ n: number }>(
+    `SELECT count(*)::int AS n FROM pg_catalog.pg_attribute a
+       JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+       JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = $1 AND c.relname = 'storage_meta' AND a.attname = 'text_value'
+        AND a.attnum > 0 AND NOT a.attisdropped`,
+    [schema],
+  )
+  if ((column.rows[0]?.n ?? 0) === 0) return undefined
+  const rows = await client.query<{ text_value: string | null }>(
+    `SELECT text_value FROM ${quoteIdentifier(schema)}."storage_meta" WHERE key = $1`,
+    [INSTALLATION_ID_KEY],
+  )
+  const value = rows.rows[0]?.text_value
+  return value === undefined || value === null || value === '' ? undefined : value
+}
+
+const UNIT_OPTIONAL_COLUMNS: Readonly<Record<string, string>> = {
+  tables: 'NULL::jsonb',
+  has_global: 'NULL::boolean',
+  descriptor_sha256: 'NULL::text',
+}
+
+/** Build a read-only projection that also works before additive columns existed. */
+export async function unitsProjection(client: Client, schema: string): Promise<string> {
+  const names = Object.keys(UNIT_OPTIONAL_COLUMNS)
+  const present = await client.query<{ attname: string }>(
+    `SELECT a.attname FROM pg_catalog.pg_attribute a
+       JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+       JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = $1 AND c.relname = 'units' AND a.attnum > 0 AND NOT a.attisdropped
+        AND a.attname = ANY($2)`,
+    [schema, names],
+  )
+  const have = new Set(present.rows.map(row => row.attname))
+  const optional = names.map(name => have.has(name) ? `"${name}"` : `${UNIT_OPTIONAL_COLUMNS[name]!} AS "${name}"`)
+  return ['"name"', '"version"', ...optional].join(', ')
 }
 
 /**
@@ -149,6 +191,10 @@ export function storedDescriptor(unit: UnitRow, observedTables: ReadonlySet<stri
   }
   // A stored declaration must match the fingerprint written with it: a hand-edited
   // `units` row must not be able to redefine a unit's shape behind the product's back.
+  const declares = declared !== null || unit.has_global !== null
+  if (declares && unit.descriptor_sha256 === null) {
+    throw new StorageError('malformed-medium', `kv unit '${unit.name}' declares a shape on the medium with no fingerprint next to it`)
+  }
   if (unit.descriptor_sha256 !== null && descriptorFingerprint(stored) !== unit.descriptor_sha256) {
     throw new StorageError('malformed-medium', `kv unit '${unit.name}' has a declared shape that does not match its stored fingerprint`)
   }
