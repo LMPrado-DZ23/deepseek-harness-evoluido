@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { copyFile, lstat, mkdir, readFile, readlink, rename, symlink, unlink, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
+import { classifyShutdown } from './shutdown-contract.mjs'
 
 const require = createRequire(import.meta.url)
 const dshHome = resolve(process.env.DSH_HOME ?? '/var/lib/dz23-studio')
@@ -109,19 +111,34 @@ child.once('error', error => {
 child.once('exit', async (code, signal) => {
   for (const [name, handler] of handlers) process.removeListener(name, handler)
   if (requestedSignal !== undefined) {
+    const shutdownOutcome = classifyShutdown(code, signal, requestedSignal)
+    if (shutdownOutcome === null) {
+      process.stderr.write(`DZ23_STUDIO_SHUTDOWN=FAIL childCode=${String(code)} childSignal=${String(signal)} requestedSignal=${requestedSignal}\n`)
+      process.exitCode = typeof code === 'number' && code !== 0 ? code : 1
+      return
+    }
+    let temporary
     try {
-      const temporary = `${shutdownMarker}.tmp-${process.pid}`
+      temporary = `${shutdownMarker}.tmp-${process.pid}-${randomBytes(8).toString('hex')}`
       await writeFile(temporary, `${JSON.stringify({
         childCode: code,
         childSignal: signal,
         imageRevision,
         requestedSignal,
+        shutdownOutcome,
       })}\n`, { flag: 'wx', mode: 0o600 })
       await rename(temporary, shutdownMarker)
       process.exitCode = 0
     } catch (error) {
       process.stderr.write(`DZ23_STUDIO_SHUTDOWN=FAIL ${error.message}\n`)
       process.exitCode = 1
+    } finally {
+      if (temporary !== undefined) await unlink(temporary).catch(error => {
+        if (error?.code !== 'ENOENT') {
+          process.stderr.write(`DZ23_STUDIO_SHUTDOWN=FAIL ${error.message}\n`)
+          process.exitCode = 1
+        }
+      })
     }
     return
   }

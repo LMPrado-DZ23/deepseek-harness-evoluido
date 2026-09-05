@@ -7,7 +7,8 @@
     "dz23-studio": "./entrypoint.mjs"
   },
   "files": [
-    "entrypoint.mjs"
+    "entrypoint.mjs",
+    "shutdown-contract.mjs"
   ],
   "dependencies": {
     "@deepseek-ai/dsh": "workspace:*",

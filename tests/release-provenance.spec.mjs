@@ -27,7 +27,7 @@ async function json(path, value) {
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
 }
 
-function spdx(architecture) {
+function spdx(architecture, imageDigest = SHA[architecture]) {
   return {
     spdxVersion: 'SPDX-2.3',
     dataLicense: 'CC0-1.0',
@@ -38,7 +38,15 @@ function spdx(architecture) {
       created: '2026-09-04T15:30:00Z',
       creators: ['Tool: syft-1.0.0'],
     },
-    packages: [{ SPDXID: 'SPDXRef-Package-runtime', name: 'runtime' }],
+    packages: [{
+      SPDXID: 'SPDXRef-Package-runtime',
+      name: 'runtime',
+      externalRefs: [{
+        referenceCategory: 'OTHER',
+        referenceType: 'dz23-studio-image-digest',
+        referenceLocator: `linux/${architecture}@${imageDigest}`,
+      }],
+    }],
     files: [],
     relationships: [{
       spdxElementId: 'SPDXRef-DOCUMENT',
@@ -183,6 +191,16 @@ test('rejeita SBOM vazio ou sem relação DESCRIBES', async (t) => {
   unrelated.relationships = []
   await json(optionsWithoutRoot.sbomArm64Path, unrelated)
   await assert.rejects(() => buildReleaseProvenance(optionsWithoutRoot), /não descreve nenhum pacote raiz/u)
+})
+
+test('rejeita SBOM de outra imagem ou arquitetura', async (t) => {
+  const wrongDigest = await fixture(t)
+  await json(wrongDigest.sbomAmd64Path, spdx('amd64', SHA.arm64))
+  await assert.rejects(() => buildReleaseProvenance(wrongDigest), /não está ligado ao digest e à arquitetura/u)
+
+  const swappedArchitecture = await fixture(t)
+  await json(swappedArchitecture.sbomAmd64Path, spdx('arm64'))
+  await assert.rejects(() => buildReleaseProvenance(swappedArchitecture), /não está ligado ao digest e à arquitetura/u)
 })
 
 test('rejeita proveniência adulterada ou não canônica', async (t) => {

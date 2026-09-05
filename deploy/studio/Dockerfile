@@ -63,6 +63,7 @@ RUN --mount=type=cache,id=dz23-studio-pnpm-11,target=/pnpm/store,sharing=locked 
     pnpm install --offline --frozen-lockfile --trust-lockfile --filter '@dz23-studio/*...' --force --store-dir /pnpm/store \
  && pnpm --filter @dz23-studio/runtime deploy --prod /opt/runtime \
  && test -f /opt/runtime/entrypoint.mjs \
+ && test -f /opt/runtime/shutdown-contract.mjs \
  && test -f /opt/runtime/node_modules/@deepseek-ai/dsh/lib/bin.js \
  && test -f /opt/runtime/node_modules/@dz23-studio/web/lib/client/index.html \
  && test -f /opt/runtime/node_modules/@dz23-studio/prompt-to-app/template/nextjs-app@1/package.json

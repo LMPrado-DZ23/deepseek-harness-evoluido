@@ -94,9 +94,23 @@ export function validateDockerfileBase(dockerfile, lock) {
   if (fromLines[0] !== expected) {
     throw new Error(`Dockerfile do Studio não usa a imagem Node fixada (${expected})`)
   }
-  const external = fromLines.filter(line => !/^FROM\s+[A-Za-z][A-Za-z0-9_.-]*\s+AS\s+/u.test(line))
-  if (external.length !== 1 || external[0] !== expected) {
-    throw new Error('Dockerfile do Studio contém base externa não fixada pelo images.lock')
+  const declaredStages = new Set()
+  let externalCount = 0
+  for (const line of fromLines) {
+    const match = /^FROM\s+(\S+)(?:\s+AS\s+([A-Za-z][A-Za-z0-9_.-]*))?$/u.exec(line)
+    if (match === null) throw new Error('Dockerfile do Studio contém FROM inválido')
+    const [, source, alias] = match
+    if (!declaredStages.has(source)) {
+      externalCount += 1
+      if (line !== expected) throw new Error('Dockerfile do Studio contém base externa não fixada pelo images.lock')
+    }
+    if (alias !== undefined) {
+      if (declaredStages.has(alias)) throw new Error('Dockerfile do Studio repete nome de estágio')
+      declaredStages.add(alias)
+    }
+  }
+  if (externalCount !== 1) {
+    throw new Error('Dockerfile do Studio precisa conter exatamente uma base externa fixada')
   }
   return { base: `${lock.images.node.reference}@${lock.images.node.indexDigest}`, fromLines }
 }

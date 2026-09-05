@@ -147,7 +147,7 @@ function validateOciDescriptor(input, expectedIndexDigest) {
   return { digest: descriptor.digest, mediaType: descriptor.mediaType, size: descriptor.size }
 }
 
-function validateSpdx(input, platform) {
+function validateSpdx(input, platform, expectedImageDigest) {
   const spdx = object(input, `SBOM ${platform}`)
   if (!['SPDX-2.2', 'SPDX-2.3'].includes(spdx.spdxVersion)) fail(`SBOM ${platform}: versão SPDX inválida`)
   if (spdx.dataLicense !== 'CC0-1.0' || spdx.SPDXID !== 'SPDXRef-DOCUMENT') {
@@ -167,13 +167,25 @@ function validateSpdx(input, platform) {
   if (!Array.isArray(spdx.packages) || spdx.packages.length === 0) {
     fail(`SBOM ${platform}: nenhum pacote descrito`)
   }
-  const packageIds = new Set(spdx.packages.map(item => item?.SPDXID).filter(item => typeof item === 'string'))
-  const describes = Array.isArray(spdx.relationships) && spdx.relationships.some(relationship => (
+  const packagesById = new Map(spdx.packages
+    .filter(item => typeof item?.SPDXID === 'string')
+    .map(item => [item.SPDXID, item]))
+  const describedIds = Array.isArray(spdx.relationships) ? spdx.relationships.filter(relationship => (
     relationship?.spdxElementId === 'SPDXRef-DOCUMENT'
     && relationship?.relationshipType === 'DESCRIBES'
-    && packageIds.has(relationship?.relatedSpdxElement)
-  ))
-  if (!describes) fail(`SBOM ${platform}: documento não descreve nenhum pacote raiz`)
+    && packagesById.has(relationship?.relatedSpdxElement)
+  )).map(relationship => relationship.relatedSpdxElement) : []
+  if (describedIds.length === 0) fail(`SBOM ${platform}: documento não descreve nenhum pacote raiz`)
+  const locator = `${platform}@${expectedImageDigest}`
+  const linked = describedIds.some(id => {
+    const rootPackage = packagesById.get(id)
+    return Array.isArray(rootPackage?.externalRefs) && rootPackage.externalRefs.some(reference => (
+      reference?.referenceCategory === 'OTHER'
+      && reference?.referenceType === 'dz23-studio-image-digest'
+      && reference?.referenceLocator === locator
+    ))
+  })
+  if (!linked) fail(`SBOM ${platform}: pacote raiz não está ligado ao digest e à arquitetura esperados`)
   return {
     documentNamespace: namespace,
     fileCount: Array.isArray(spdx.files) ? spdx.files.length : 0,
@@ -181,6 +193,7 @@ function validateSpdx(input, platform) {
     packageCount: Array.isArray(spdx.packages) ? spdx.packages.length : 0,
     relationshipCount: Array.isArray(spdx.relationships) ? spdx.relationships.length : 0,
     spdxVersion: spdx.spdxVersion,
+    imageDigest: expectedImageDigest,
   }
 }
 
@@ -239,7 +252,7 @@ export async function buildReleaseProvenance({
   const descriptor = validateOciDescriptor(parseJson(descriptorFile.bytes, 'descritor OCI'), metadata.image.indexDigest)
   const spdx = Object.fromEntries(EXPECTED_PLATFORMS.map(item => [
     item.id,
-    validateSpdx(parseJson(sbomFiles[item.id].bytes, `SBOM ${item.id}`), item.id),
+    validateSpdx(parseJson(sbomFiles[item.id].bytes, `SBOM ${item.id}`), item.id, metadata.image.platforms[item.id]),
   ]))
   if (spdx['linux/amd64'].documentNamespace === spdx['linux/arm64'].documentNamespace) {
     fail('SBOMs: documentNamespace precisa ser único por arquitetura')

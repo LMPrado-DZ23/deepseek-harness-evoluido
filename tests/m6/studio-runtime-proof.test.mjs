@@ -6,9 +6,11 @@ import test from 'node:test'
 
 import {
   assertCleanDumpConfig,
+  assertCleanShutdownMarker,
   assertGracefulExit,
   assertHardenedContainer,
   assertImageMetadata,
+  assertPersistentRestart,
   hardenedRunArgs,
   proveStudioRuntime,
   validateInputs,
@@ -108,6 +110,22 @@ test('saída limpa prova encerramento observado; 137 é tratada como SIGKILL', (
   assert.throws(() => assertGracefulExit(state(143)), /CLEAN_SHUTDOWN_NOT_CONFIRMED/u)
 })
 
+test('marcador só aceita o desfecho limpo observado do processo filho', () => {
+  const base = { imageRevision: REVISION, requestedSignal: 'SIGTERM' }
+  assert.equal(assertCleanShutdownMarker({ ...base, childCode: null, childSignal: 'SIGTERM', shutdownOutcome: 'forwarded-signal' }, REVISION).shutdownOutcome, 'forwarded-signal')
+  assert.equal(assertCleanShutdownMarker({ ...base, childCode: 0, childSignal: null, shutdownOutcome: 'zero-exit' }, REVISION).shutdownOutcome, 'zero-exit')
+  assert.throws(() => assertCleanShutdownMarker({ ...base, childCode: 1, childSignal: null, shutdownOutcome: 'zero-exit' }, REVISION), /CLEAN_SHUTDOWN_MARKER_INVALID/u)
+  assert.throws(() => assertCleanShutdownMarker({ ...base, childCode: null, childSignal: 'SIGKILL', shutdownOutcome: 'forwarded-signal' }, REVISION), /CLEAN_SHUTDOWN_MARKER_INVALID/u)
+})
+
+test('reinício persistente exige perfil gerenciado, marker e shape completos', () => {
+  const shutdown = { childCode: null, childSignal: 'SIGTERM', imageRevision: REVISION, requestedSignal: 'SIGTERM', shutdownOutcome: 'forwarded-signal' }
+  const evidence = { target: `/var/lib/dz23-studio/profiles/.dz23-managed/studio-${REVISION}`, persisted: true, shutdown }
+  assert.equal(assertPersistentRestart(evidence, REVISION).persisted, true)
+  assert.throws(() => assertPersistentRestart({ ...evidence, persisted: false }, REVISION), /PERSISTENCE_EVIDENCE_INVALID/u)
+  assert.throws(() => assertPersistentRestart({ ...evidence, cleanShutdown: true }, REVISION), /PERSISTENCE_EVIDENCE_INVALID/u)
+})
+
 test('Docker ausente falha no primeiro check e deixa os demais NOT_EXECUTED', async () => {
   const runner = () => ({
     durationMs: 0,
@@ -165,7 +183,11 @@ test('orquestra duas inicializações reais pelo contrato Docker e fecha todos o
       if (args.at(-2) === '-e' && args.at(-1).includes("fetch('http://127.0.0.1:3210/studio/'))")) {
         return ok(JSON.stringify({ asset: '/studio/assets/main.js', assetBytes: 50, htmlBytes: 80 }))
       }
-      return ok(JSON.stringify({ target: '/var/lib/dz23-studio/profiles/.dz23-managed/studio-' + REVISION, persisted: true }))
+      return ok(JSON.stringify({
+        target: '/var/lib/dz23-studio/profiles/.dz23-managed/studio-' + REVISION,
+        persisted: true,
+        shutdown: { childCode: null, childSignal: 'SIGTERM', imageRevision: REVISION, requestedSignal: 'SIGTERM', shutdownOutcome: 'forwarded-signal' },
+      }))
     }
     if (args[0] === 'stop') {
       const item = containers.get(args.at(-1))

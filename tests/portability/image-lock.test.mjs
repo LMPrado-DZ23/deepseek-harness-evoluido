@@ -42,4 +42,8 @@ test('Dockerfile usa exatamente a base Node fixada no lock', () => {
     () => validateDockerfileBase(`${dockerfile}\nFROM node:latest AS hidden\n`, canonical),
     /base externa não fixada/u,
   )
+  assert.throws(
+    () => validateDockerfileBase(`${dockerfile}\nFROM ubuntu AS hidden\n`, canonical),
+    /base externa não fixada/u,
+  )
 })

@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process'
-import { resolve } from 'node:path'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { basename, dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const SAFE_IMAGE = /^(?!-)[A-Za-z0-9][A-Za-z0-9._:/@-]{0,510}$/u
@@ -49,23 +51,52 @@ function parseCli(argv) {
   return { tag: argv[1] }
 }
 
-export function main(argv = process.argv.slice(2), projectRoot = process.cwd()) {
+function assertTemporaryParent(path) {
+  const absolute = resolve(path)
+  if (dirname(absolute) !== resolve(tmpdir()) || !basename(absolute).startsWith('dz23-studio-build-')) {
+    fail('diretório temporário de build fora da raiz permitida')
+  }
+  return absolute
+}
+
+export async function main(argv = process.argv.slice(2), projectRoot = process.cwd()) {
   const { tag } = parseCli(argv)
   const root = resolve(projectRoot)
   const head = run('git', ['rev-parse', '--verify', 'HEAD'], { cwd: root })
   const status = run('git', ['status', '--porcelain=v1', '--untracked-files=all'], { cwd: root })
   validateBuildState({ head, status, tag })
-  run(process.env.DZ23_DOCKER_BIN ?? 'docker', buildPlan({ head, tag }), {
-    cwd: root,
-    env: { ...process.env, DOCKER_BUILDKIT: '1' },
-    inherit: true,
-  })
-  process.stdout.write(`STUDIO_IMAGE_BUILD=PASS image=${tag} revision=${head}\n`)
+  const temporaryParent = assertTemporaryParent(await mkdtemp(join(tmpdir(), 'dz23-studio-build-')))
+  const snapshotRoot = join(temporaryParent, 'context')
+  let registeredWorktree = false
+  try {
+    run('git', ['worktree', 'add', '--detach', snapshotRoot, head], { cwd: root })
+    registeredWorktree = true
+    run('git', ['submodule', 'update', '--init', '--recursive', '--checkout', '--no-fetch'], { cwd: snapshotRoot })
+    const snapshotHead = run('git', ['rev-parse', '--verify', 'HEAD'], { cwd: snapshotRoot })
+    const snapshotStatus = run('git', ['status', '--porcelain=v1', '--untracked-files=all'], { cwd: snapshotRoot })
+    validateBuildState({ head: snapshotHead, status: snapshotStatus, tag })
+    if (snapshotHead !== head) fail('snapshot Git diverge do commit validado')
+    run(process.env.DZ23_DOCKER_BIN ?? 'docker', buildPlan({ head, tag }), {
+      cwd: snapshotRoot,
+      env: { ...process.env, DOCKER_BUILDKIT: '1' },
+      inherit: true,
+    })
+    const finalHead = run('git', ['rev-parse', '--verify', 'HEAD'], { cwd: root })
+    const finalStatus = run('git', ['status', '--porcelain=v1', '--untracked-files=all'], { cwd: root })
+    validateBuildState({ head: finalHead, status: finalStatus, tag })
+    if (finalHead !== head) fail('HEAD mudou durante a construção da imagem')
+    process.stdout.write(`STUDIO_IMAGE_BUILD=PASS image=${tag} revision=${head} context=detached-worktree\n`)
+  } finally {
+    if (registeredWorktree) {
+      run('git', ['worktree', 'remove', '--force', snapshotRoot], { cwd: root })
+    }
+    await rm(temporaryParent, { recursive: true, force: true })
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   try {
-    main()
+    await main()
   } catch (error) {
     process.stderr.write(`STUDIO_IMAGE_BUILD=FAIL ${error.message}\n`)
     process.exitCode = 1

@@ -4,6 +4,7 @@ import { link, mkdir, unlink, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { spawnSync } from 'node:child_process'
+import { classifyShutdown } from '../apps/studio-runtime/shutdown-contract.mjs'
 
 export const CHECK_NAMES = Object.freeze([
   'image_metadata',
@@ -181,6 +182,39 @@ export function assertGracefulExit(raw) {
   return { exitCode: state.ExitCode, oomKilled: state.OOMKilled }
 }
 
+export function assertCleanShutdownMarker(value, expectedRevision, expectedSignal = 'SIGTERM') {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    fail('CLEAN_SHUTDOWN_MARKER_INVALID', 'marcador de encerramento precisa ser um objeto')
+  }
+  const keys = Object.keys(value).sort()
+  const expectedKeys = ['childCode', 'childSignal', 'imageRevision', 'requestedSignal', 'shutdownOutcome'].sort()
+  if (keys.join('\0') !== expectedKeys.join('\0')) {
+    fail('CLEAN_SHUTDOWN_MARKER_INVALID', 'campos do marcador de encerramento divergentes')
+  }
+  if (value.imageRevision !== expectedRevision || value.requestedSignal !== expectedSignal) {
+    fail('CLEAN_SHUTDOWN_MARKER_INVALID', 'revisão ou sinal solicitado divergente')
+  }
+  if (classifyShutdown(value.childCode, value.childSignal, value.requestedSignal) !== value.shutdownOutcome) {
+    fail('CLEAN_SHUTDOWN_MARKER_INVALID', 'processo filho não confirmou encerramento limpo')
+  }
+  return { childCode: value.childCode, childSignal: value.childSignal, shutdownOutcome: value.shutdownOutcome }
+}
+
+export function assertPersistentRestart(value, expectedRevision) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    fail('PERSISTENCE_EVIDENCE_INVALID', 'evidência de persistência precisa ser um objeto')
+  }
+  const keys = Object.keys(value).sort()
+  if (keys.join('\0') !== ['persisted', 'shutdown', 'target'].sort().join('\0')) {
+    fail('PERSISTENCE_EVIDENCE_INVALID', 'campos da evidência de persistência divergentes')
+  }
+  const expectedPrefix = `${HOME_PATH}/profiles/.dz23-managed/studio-`
+  if (value.persisted !== true || typeof value.target !== 'string' || !value.target.startsWith(expectedPrefix)) {
+    fail('PERSISTENCE_EVIDENCE_INVALID', 'perfil persistido ou destino gerenciado não confirmado')
+  }
+  return { target: value.target, persisted: true, cleanShutdown: assertCleanShutdownMarker(value.shutdown, expectedRevision) }
+}
+
 function inspect(runner, kind, target, label) {
   return statusResult(runner([kind, 'inspect', target]), label).stdout
 }
@@ -239,7 +273,7 @@ function managedProfileScript(revision, mode) {
     `if(fs.readFileSync(path.join(target,'.image-revision'),'utf8').trim()!=='${revision}')throw new Error('PROFILE_REVISION_MISMATCH');`,
     mode === 'write'
       ? "fs.writeFileSync(path.join(target,'.m61-persistence-proof'),'persisted\\n',{mode:0o600});process.stdout.write(JSON.stringify({target,writable:true}));"
-      : `const marker=fs.readFileSync(path.join(target,'.m61-persistence-proof'),'utf8');if(marker!=='persisted\\n')throw new Error('PROFILE_MARKER_MISSING');const shutdown=JSON.parse(fs.readFileSync('${HOME_PATH}/.last-clean-shutdown.json','utf8'));if(shutdown.imageRevision!=='${revision}'||shutdown.requestedSignal!=='SIGTERM')throw new Error('CLEAN_SHUTDOWN_MARKER_INVALID');process.stdout.write(JSON.stringify({target,persisted:true,cleanShutdown:true}));`,
+      : `const marker=fs.readFileSync(path.join(target,'.m61-persistence-proof'),'utf8');if(marker!=='persisted\\n')throw new Error('PROFILE_MARKER_MISSING');const shutdown=JSON.parse(fs.readFileSync('${HOME_PATH}/.last-clean-shutdown.json','utf8'));process.stdout.write(JSON.stringify({target,persisted:true,shutdown}));`,
   ].join('')
 }
 
@@ -360,10 +394,11 @@ export async function proveStudioRuntime({ image, revision, runner = createDocke
     const persistence = runOrFail(runner, [
       'exec', '--user', '10001:10001', second, 'node', '-e', managedProfileScript(revision, 'read'),
     ], 'leitura do perfil após reinício')
+    const persistenceEvidence = assertPersistentRestart(parseJson(persistence.stdout, 'persistência do perfil'), revision)
     runOrFail(runner, ['stop', '--signal', 'SIGTERM', '--time', '10', second], 'SIGTERM do segundo boot', 20_000)
     const secondStop = assertGracefulExit(inspect(runner, 'container', second, 'estado do segundo boot'))
     mark(report, 'persistent_restart', 'PASS', {
-      ...parseJson(persistence.stdout, 'persistência do perfil'),
+      ...persistenceEvidence,
       http: secondHttp,
       exitCode: secondStop.exitCode,
     })
