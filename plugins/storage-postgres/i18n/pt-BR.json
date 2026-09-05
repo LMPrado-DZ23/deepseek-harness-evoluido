@@ -43,6 +43,7 @@
     "lockHeldByRestore": "Outra restauração já está em andamento neste mesmo banco (processo {pids}, iniciada em {started}). Espere ela terminar — NÃO encerre esse processo, ele pode estar no meio da troca dos dados.",
     "lockHeldByOther": "Outro programa está usando este armazenamento agora (processo {owners}). Descubra o que é antes de continuar: pode ser o Studio com outro nome, outra restauração ou uma manutenção.",
     "lockOwnerVanished": "Não foi possível reservar o armazenamento para uso exclusivo, e quem o estava usando já não aparece na lista do banco. Repita o comando; se insistir, verifique se o Studio está mesmo parado.",
+    "lockInspectionUnavailable": "O armazenamento continua reservado por outro processo, mas o diagnóstico do responsável está indisponível. A importação foi recusada com segurança; investigue a conexão e o PostgreSQL antes de qualquer ação.",
     "layoutTablesMissing": "O esquema '{schema}' não tem a estrutura do DZ23 STUDIO (faltam: {missing}). Importação recusada para não apagar dados de outra coisa.",
     "layoutColumnsMissing": "A tabela '{table}' do esquema '{schema}' não tem a forma do DZ23 STUDIO (faltam colunas: {missing}). Importação recusada.",
     "layoutVersionMissing": "O esquema '{schema}' não registra a versão do armazenamento. Importação recusada.",

@@ -588,9 +588,11 @@ interface LockOwnerRow { pid: number; application_name: string; started: string 
 
 /** Explain a contended advisory lock without telling an operator to stop the wrong process. */
 async function explainLockOwner(client: Client, lockName: string): Promise<string> {
-  const holders = await client.query<LockOwnerRow>(
-    `SELECT a.pid, coalesce(a.application_name, '') AS application_name,
-            to_char(a.backend_start, 'DD/MM/YYYY HH24:MI') AS started
+  let holders: { rows: LockOwnerRow[] }
+  try {
+    holders = await client.query<LockOwnerRow>(
+      `SELECT a.pid, coalesce(a.application_name, '') AS application_name,
+             to_char(a.backend_start, 'DD/MM/YYYY HH24:MI') AS started
        FROM pg_catalog.pg_locks l
        JOIN pg_catalog.pg_stat_activity a ON a.pid = l.pid
       WHERE l.locktype = 'advisory' AND l.granted AND l.objsubid = 1
@@ -598,8 +600,13 @@ async function explainLockOwner(client: Client, lockName: string): Promise<strin
         AND l.objid::bigint = (hashtext($1)::bigint & 4294967295)
         AND a.pid <> pg_backend_pid()
       ORDER BY a.backend_start`,
-    [lockName],
-  ).catch(() => ({ rows: [] as LockOwnerRow[] }))
+      [lockName],
+    )
+  } catch {
+    // The lock is still contended; a failed inspection is not evidence that its holder vanished.
+    // Give no operational advice based on an identity we could not establish.
+    return t('restore.lockInspectionUnavailable')
+  }
   const studios = holders.rows.filter(row => row.application_name.startsWith('dz23-storage:maintenance:'))
   if (studios.length > 0) {
     return t('restore.lockHeldByStudio', {

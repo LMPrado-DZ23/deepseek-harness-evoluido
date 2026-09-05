@@ -70,8 +70,16 @@ process.stdout.write(JSON.stringify({ sha256: 'a'.repeat(64), bytes: 12, records
     await writeFile(worker, `setTimeout(() => process.stdout.write('{}\\n'), 10_000)\n`)
     const controller = new AbortController()
     const running = childProcessBackupRunner(options).run(join(root, 'unused'), controller.signal)
-    controller.abort(new Error('cancelled-worker'))
-    await expect(running).rejects.toThrow()
+    const privateReason = `cancelled-worker ${options.dsnRef} ${options.env.TEST_DSN} ${worker}`
+    controller.abort(new Error(privateReason))
+    const cancellation = await running.then(() => undefined, (error: unknown) => error as Error & { code?: string })
+    expect(cancellation).toBeInstanceOf(Error)
+    expect(cancellation).toMatchObject({ name: 'AbortError', code: 'ABORT_ERR' })
+    expect(cancellation!.message).toBe('backup process was cancelled by its caller before it finished')
+    expect(cancellation!.message).not.toContain(privateReason)
+    expect(cancellation!.message).not.toContain(options.dsnRef)
+    expect(cancellation!.message).not.toContain(options.env.TEST_DSN!)
+    expect(cancellation!.message).not.toContain(worker)
   })
 
   it('writes a verifiable bundle, a sidecar digest and a ledger line with private permissions', async () => {

@@ -516,6 +516,27 @@ describe('restore core without Docker', () => {
     }
   })
 
+  it('keeps a contended lock fail-closed when pg_stat_activity cannot be inspected', async () => {
+    const client = new ScriptClient()
+    const base = client.query.bind(client)
+    client.query = async function <T>(sql: string, values?: unknown[]): Promise<{ rows: T[] }> {
+      if (sql.includes('pg_try_advisory_lock')) { this.sql.push(sql); return { rows: [{ acquired: false } as T] } }
+      if (sql.includes('pg_catalog.pg_locks') && sql.includes('pg_catalog.pg_stat_activity')) {
+        this.sql.push(sql)
+        throw new Error('inspection-secret-that-must-not-leak')
+      }
+      return base<T>(sql, values)
+    }
+    let message = ''
+    await restorePostgresStorage({ ...restoreBase, ssl: 'off', write: true, safetyBackup: 'unused.dump' }, {
+      ...journalMemory(), resolveConnection: async () => connection, createClient: () => client as never,
+    }).catch((error: unknown) => { message = (error as Error).message })
+    expect(message).toContain('continua reservado por outro processo')
+    expect(message).toContain('diagnóstico do responsável está indisponível')
+    expect(message).not.toContain('inspection-secret-that-must-not-leak')
+    expect(message).not.toMatch(/repita|tente novamente|encerre|pare-o/iu)
+  })
+
   it('refuses a contended legacy per-unit lock', async () => {
     const client = new ScriptClient()
     let lockCalls = 0

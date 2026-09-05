@@ -15,7 +15,7 @@ export const STORAGE_POSTGRES_I18N_KEYS = [
   'restore.committedResultInvalid', 'restore.receiptMismatch', 'restore.journalNotReserved',
   'restore.safetyJournalMismatch', 'restore.domainSetMismatch', 'restore.postCommitReconciliation',
   'restore.attemptIdInvalid', 'restore.serverRunning', 'restore.lockHeldByStudio', 'restore.lockHeldByRestore',
-  'restore.lockHeldByOther', 'restore.lockOwnerVanished', 'restore.layoutTablesMissing', 'restore.layoutColumnsMissing',
+  'restore.lockHeldByOther', 'restore.lockOwnerVanished', 'restore.lockInspectionUnavailable', 'restore.layoutTablesMissing', 'restore.layoutColumnsMissing',
   'restore.layoutVersionMissing', 'restore.layoutVersionMismatch', 'restore.safetyLinuxRequired', 'restore.safetyIdentityRequired',
   'restore.backupDestinationExists', 'restore.safetyIdentityInvalid', 'restore.safetyTargetIdentityInvalid',
   'restore.safetyDestinationOwnedByOtherAttempt', 'restore.safetyDestinationUnauthenticatedHardlink',

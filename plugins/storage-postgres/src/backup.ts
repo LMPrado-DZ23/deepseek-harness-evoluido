@@ -126,6 +126,16 @@ export function childProcessBackupRunner(options: ChildBackupRunnerOptions): Bac
               // `Command failed: <argv>` message (which contains paths and the DSN reference).
               const child = error as Error & { killed?: boolean; signal?: NodeJS.Signals | null; code?: number | string }
               const context = detail === '' ? '' : ` (${detail})`
+              // An AbortSignal is the caller deliberately cancelling this run. Node reports it
+              // as AbortError/ABORT_ERR; do not mislabel it as an unknown exit or expose its
+              // arbitrary reason (which can contain operator input, paths or credentials).
+              if (child.code === 'ABORT_ERR' || child.name === 'AbortError') {
+                const cancelled = new Error('backup process was cancelled by its caller before it finished') as Error & { code: string }
+                cancelled.name = 'AbortError'
+                cancelled.code = 'ABORT_ERR'
+                reject(cancelled)
+                return
+              }
               if (typeof child.signal === 'string') {
                 if (child.killed === true) {
                   reject(new Error(`backup process exceeded the ${String(timeoutMs)} ms time limit and was killed with ${child.signal}${context}`))
