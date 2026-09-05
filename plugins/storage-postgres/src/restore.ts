@@ -182,7 +182,9 @@ export async function restorePostgresStorage(
   // in the DSN is stripped before node-postgres sees it.
   const resolveConnection = dependencies.resolveConnection ?? postgresClientConnection
   const connection = await resolveConnection(options.dsn, ssl)
-  const client = (dependencies.createClient ?? (value => new Client(value)))(connection)
+  // The application name is operational evidence: if this process owns the exclusive
+  // maintenance lock, a concurrent operator can distinguish it from a running Studio.
+  const client = (dependencies.createClient ?? (value => new Client({ ...value, application_name: `dz23-storage:restore:${schema}` })))(connection)
   await client.connect()
   let staging: string | undefined
   // Point of no return for the physical swap. Once true, cleanup errors must
@@ -556,12 +558,13 @@ async function importStorage(backend: StorageBackend, bundle: StorageExportBundl
  * the maintenance lock.
  */
 async function acquireMaintenanceLock(client: Client, schema: string): Promise<void> {
+  const maintenanceLock = storageMaintenanceLockName(schema)
   const result = await client.query<{ acquired: boolean }>(
     'SELECT pg_try_advisory_lock(hashtext($1)) AS acquired',
-    [storageMaintenanceLockName(schema)],
+    [maintenanceLock],
   )
   if (result.rows[0]?.acquired !== true) {
-    throw new Error(t('restore.serverRunning'))
+    throw new Error(await explainLockOwner(client, maintenanceLock))
   }
   const hasUnits = await client.query<{ count: string }>(
     `SELECT count(*) FROM pg_catalog.pg_tables WHERE schemaname = $1 AND tablename = 'units'`,
@@ -576,9 +579,47 @@ async function acquireMaintenanceLock(client: Client, schema: string): Promise<v
       [storageUnitLockName(schema, row.name)],
     )
     if (unit.rows[0]?.acquired !== true) {
-      throw new Error(t('restore.serverRunning'))
+      throw new Error(await explainLockOwner(client, storageUnitLockName(schema, row.name)))
     }
   }
+}
+
+interface LockOwnerRow { pid: number; application_name: string; started: string }
+
+/** Explain a contended advisory lock without telling an operator to stop the wrong process. */
+async function explainLockOwner(client: Client, lockName: string): Promise<string> {
+  const holders = await client.query<LockOwnerRow>(
+    `SELECT a.pid, coalesce(a.application_name, '') AS application_name,
+            to_char(a.backend_start, 'DD/MM/YYYY HH24:MI') AS started
+       FROM pg_catalog.pg_locks l
+       JOIN pg_catalog.pg_stat_activity a ON a.pid = l.pid
+      WHERE l.locktype = 'advisory' AND l.granted AND l.objsubid = 1
+        AND l.classid::bigint = ((hashtext($1)::bigint >> 32) & 4294967295)
+        AND l.objid::bigint = (hashtext($1)::bigint & 4294967295)
+        AND a.pid <> pg_backend_pid()
+      ORDER BY a.backend_start`,
+    [lockName],
+  ).catch(() => ({ rows: [] as LockOwnerRow[] }))
+  const studios = holders.rows.filter(row => row.application_name.startsWith('dz23-storage:maintenance:'))
+  if (studios.length > 0) {
+    return t('restore.lockHeldByStudio', {
+      pids: studios.map(row => String(row.pid)).join(', '),
+      started: studios[0]!.started,
+    })
+  }
+  const restores = holders.rows.filter(row => row.application_name.startsWith('dz23-storage:restore:'))
+  if (restores.length > 0) {
+    return t('restore.lockHeldByRestore', {
+      pids: restores.map(row => String(row.pid)).join(', '),
+      started: restores[0]!.started,
+    })
+  }
+  if (holders.rows.length > 0) {
+    return t('restore.lockHeldByOther', {
+      owners: holders.rows.map(row => `${String(row.pid)}${row.application_name === '' ? '' : ` (${row.application_name})`}`).join(', '),
+    })
+  }
+  return t('restore.lockOwnerVanished')
 }
 
 /** A schema that has a `units` table but not the rest of the layout is not a Studio schema: refuse instead of dropping it. */

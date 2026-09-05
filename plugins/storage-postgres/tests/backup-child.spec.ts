@@ -39,16 +39,51 @@ describe('childProcessBackupRunner: what the Studio is told when the backup proc
     // as the reason the run failed — that sentence goes into backups.jsonl forever.
     const worker = await fakeWorker(`process.stderr.write('a note from the worker\\n')\nsetInterval(() => {}, 1000)`)
     await expect(runner(worker, 800).run(join(tmpdir(), 'never-written.json')))
-      .rejects.toThrow(/exceeded the 800 ms time limit and was killed \(a note from the worker\)/u)
+      .rejects.toThrow(/exceeded the 800 ms time limit and was killed with SIGTERM \(a note from the worker\)/u)
   })
 
   it('names the time limit when the killed child left nothing behind at all', async () => {
     const worker = await fakeWorker('setInterval(() => {}, 1000)')
     let failure = ''
     await runner(worker, 800).run(join(tmpdir(), 'never-written.json')).catch((error: unknown) => { failure = (error as Error).message })
-    expect(failure).toBe('backup process exceeded the 800 ms time limit and was killed')
+    expect(failure).toBe('backup process exceeded the 800 ms time limit and was killed with SIGTERM')
     // The bare execFile message used to be surfaced instead: the whole command line, and no reason.
     expect(failure).not.toContain('Command failed')
+  })
+
+  it('records an external SIGKILL without leaking argv, paths or the DSN reference', async () => {
+    const worker = await fakeWorker(`process.kill(process.pid, 'SIGKILL')`)
+    const target = join(tmpdir(), 'never-written-external.json')
+    let failure = ''
+    await runner(worker).run(target).catch((error: unknown) => { failure = (error as Error).message })
+    expect(failure).toContain('killed from outside this Studio with SIGKILL')
+    expect(failure).toContain('did not reach the 30000 ms time limit')
+    expect(failure).not.toContain('Command failed')
+    expect(failure).not.toContain('--dsn-ref')
+    expect(failure).not.toContain('DZ23_STORAGE_BACKUP_DSN')
+    expect(failure).not.toContain('--max-old-space-size')
+    expect(failure).not.toContain(worker)
+    expect(failure).not.toContain(target)
+  })
+
+  it('never exposes execFile argv when a child exits silently', async () => {
+    const worker = await fakeWorker('process.exit(9)')
+    let failure = ''
+    await runner(worker).run(join(tmpdir(), 'never-written-quiet.json')).catch((error: unknown) => { failure = (error as Error).message })
+    expect(failure).toBe('backup process failed with exit code 9 and said nothing on stderr')
+    expect(failure).not.toContain('Command failed')
+    expect(failure).not.toContain('--dsn-ref')
+  })
+
+  it('confronts report.bytes with the real file and rejects missing or truncated output', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dz23-backup-bytes-'))
+    scratch.push(directory)
+    const target = join(directory, 'truncated.json')
+    const lying = await fakeWorker(`import { writeFileSync } from 'node:fs'\nwriteFileSync(process.argv[process.argv.indexOf('--out') + 1], 'x'.repeat(10))\nprocess.stdout.write(JSON.stringify({ sha256: 'a'.repeat(64), bytes: 4096, records: 3, domains: 1 }) + '\\n')`)
+    await expect(runner(lying).run(target)).rejects.toThrow('backup worker reported 4096 bytes but the file holds 10')
+
+    const absent = await fakeWorker(`process.stdout.write(JSON.stringify({ sha256: 'a'.repeat(64), bytes: 0, records: 0, domains: 0 }) + '\\n')`)
+    await expect(runner(absent).run(join(directory, 'absent.json'))).rejects.toThrow('no regular file was written')
   })
 
   it('surfaces the child\'s own error line when it fails for a reason of its own', async () => {
@@ -104,15 +139,22 @@ describe('childProcessBackupRunner: what the Studio is told when the backup proc
   })
 
   it('accepts a complete report, reading only the last line the child printed', async () => {
-    const worker = await fakeWorker(`process.stdout.write('chatter the worker printed first\\n')\nprocess.stdout.write(JSON.stringify({ sha256: 'b'.repeat(64), bytes: 42, records: 7, domains: 2 }) + '\\n')`)
-    await expect(runner(worker).run(join(tmpdir(), 'never-written.json'))).resolves.toEqual({ sha256: 'b'.repeat(64), bytes: 42, records: 7, domains: 2 })
+    const directory = await mkdtemp(join(tmpdir(), 'dz23-complete-report-'))
+    scratch.push(directory)
+    const target = join(directory, 'written.json')
+    const worker = await fakeWorker(`import { writeFileSync } from 'node:fs'\nwriteFileSync(process.argv[process.argv.indexOf('--out') + 1], 'x'.repeat(42))\nprocess.stdout.write('chatter the worker printed first\\n')\nprocess.stdout.write(JSON.stringify({ sha256: 'b'.repeat(64), bytes: 42, records: 7, domains: 2 }) + '\\n')`)
+    await expect(runner(worker).run(target)).resolves.toEqual({ sha256: 'b'.repeat(64), bytes: 42, records: 7, domains: 2 })
   })
 
   it('hands the child the schema, the target and the DSN by reference only', async () => {
     // The DSN itself must never reach argv: a command line is readable by every user on the machine.
-    const worker = await fakeWorker(`process.stdout.write(JSON.stringify({ sha256: 'c'.repeat(64), bytes: process.argv.slice(2).join(' ').length, records: 0, domains: 0 }) + '\\n')\nprocess.stderr.write(process.argv.slice(2).join(' '))`)
-    const report = await childProcessBackupRunner({ dsnRef: 'DZ23_STORAGE_BACKUP_DSN', schema: 'dz23_storage', ssl: 'verify-full', workerPath: worker, maxBytes: 1024 }).run('/tmp/target.json')
-    expect(report.bytes).toBe('--dsn-ref DZ23_STORAGE_BACKUP_DSN --schema dz23_storage --ssl verify-full --out /tmp/target.json --max-bytes 1024'.length)
+    const directory = await mkdtemp(join(tmpdir(), 'dz23-backup-argv-'))
+    scratch.push(directory)
+    const target = join(directory, 'target.json')
+    const argv = `--dsn-ref DZ23_STORAGE_BACKUP_DSN --schema dz23_storage --ssl verify-full --out ${target} --max-bytes 1024`
+    const worker = await fakeWorker(`import { writeFileSync } from 'node:fs'\nconst argv = process.argv.slice(2).join(' ')\nwriteFileSync(process.argv[process.argv.indexOf('--out') + 1], 'x'.repeat(argv.length))\nprocess.stdout.write(JSON.stringify({ sha256: 'c'.repeat(64), bytes: argv.length, records: 0, domains: 0 }) + '\\n')\nprocess.stderr.write(argv)`)
+    const report = await childProcessBackupRunner({ dsnRef: 'DZ23_STORAGE_BACKUP_DSN', schema: 'dz23_storage', ssl: 'verify-full', workerPath: worker, maxBytes: 1024 }).run(target)
+    expect(report.bytes).toBe(argv.length)
   })
 })
 

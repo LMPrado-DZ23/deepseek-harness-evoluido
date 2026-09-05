@@ -810,6 +810,20 @@ describe('integration hub service', () => {
     expect(service.listExports(viewer, 'p1')).toHaveLength(1)
   })
 
+  it('creates a package with O_EXCL so a planted export id is refused and never overwritten', async () => {
+    const runDirectory = await fakeRun()
+    const { service, exportsRoot, repository } = await build({ runDirectory })
+    const workspace = join(exportsRoot, 'org-a', 'ws-a')
+    await mkdir(workspace, { recursive: true })
+    const planted = join(workspace, 'id-1.zip')
+    const sentinel = Buffer.from('package already owned by another attempt; preserve every byte')
+    await writeFile(planted, sentinel, { flag: 'wx', mode: 0o600 })
+
+    await expect(service.createExport(builder, 'p1')).rejects.toMatchObject({ code: 'EEXIST' })
+    expect(await readFile(planted)).toEqual(sentinel)
+    expect(repository.exportRows).toEqual([])
+  })
+
   it('refuses a run directory that is not inside the runs root, following symlinks, before reading anything', async () => {
     const runsRoot = await mkdtemp(join(tmpdir(), 'dz23-hub-runs-'))
     scratch.push(runsRoot)

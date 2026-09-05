@@ -39,6 +39,7 @@ describe('StorageBackupScheduler', () => {
     const secret = 'postgres://operator:p%40ssword@database/studio'
     await writeFile(worker, `
 if (process.argv.join(' ').includes(process.env.TEST_DSN)) process.exit(9)
+await import('node:fs/promises').then(({ writeFile }) => writeFile(process.argv[process.argv.indexOf('--out') + 1], 'hello world!'))
 process.stdout.write(JSON.stringify({ sha256: 'a'.repeat(64), bytes: 12, records: 2, domains: 1 }) + '\\n')
 `)
     const runner = childProcessBackupRunner({

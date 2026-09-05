@@ -460,6 +460,10 @@ describe('restore core without Docker', () => {
     const lockedBase = locked.query.bind(locked)
     locked.query = async function <T>(sql: string, values?: unknown[]): Promise<{ rows: T[] }> {
       if (sql.includes('pg_try_advisory_lock')) { this.sql.push(sql); return { rows: [{ acquired: false } as T] } }
+      if (sql.includes('pg_catalog.pg_locks')) {
+        this.sql.push(sql)
+        return { rows: [{ pid: 2718, application_name: 'dz23-storage:maintenance:dz23_storage', started: '05/09/2026 13:30' } as T] }
+      }
       return lockedBase<T>(sql, values)
     }
     await expect(restorePostgresStorage({ ...restoreBase, ssl: 'off', write: true, safetyBackup: 'unused.dump' }, {
@@ -478,6 +482,40 @@ describe('restore core without Docker', () => {
     expect(broken.sql).toContain('ROLLBACK')
   })
 
+  it('diagnoses a running Studio separately from another restore through pg_stat_activity', async () => {
+    const cases = [
+      {
+        application: 'dz23-storage:maintenance:dz23_storage',
+        expected: ['ainda está em execução', 'processo 2718', 'Pare-o antes de importar'],
+        absent: 'NÃO encerre esse processo',
+      },
+      {
+        application: 'dz23-storage:restore:dz23_storage',
+        expected: ['Outra restauração já está em andamento', 'processo 2718', 'NÃO encerre esse processo'],
+        absent: 'Pare-o antes de importar',
+      },
+    ]
+    for (const item of cases) {
+      const client = new ScriptClient()
+      const base = client.query.bind(client)
+      client.query = async function <T>(sql: string, values?: unknown[]): Promise<{ rows: T[] }> {
+        if (sql.includes('pg_try_advisory_lock')) { this.sql.push(sql); return { rows: [{ acquired: false } as T] } }
+        if (sql.includes('pg_catalog.pg_locks') && sql.includes('pg_catalog.pg_stat_activity')) {
+          this.sql.push(sql)
+          return { rows: [{ pid: 2718, application_name: item.application, started: '05/09/2026 13:30' } as T] }
+        }
+        return base<T>(sql, values)
+      }
+      let message = ''
+      await restorePostgresStorage({ ...restoreBase, ssl: 'off', write: true, safetyBackup: 'unused.dump' }, {
+        ...journalMemory(), resolveConnection: async () => connection, createClient: () => client as never,
+      }).catch((error: unknown) => { message = (error as Error).message })
+      for (const expected of item.expected) expect(message).toContain(expected)
+      expect(message).not.toContain(item.absent)
+      expect(client.sql.some(sql => sql.includes('pg_catalog.pg_stat_activity'))).toBe(true)
+    }
+  })
+
   it('refuses a contended legacy per-unit lock', async () => {
     const client = new ScriptClient()
     let lockCalls = 0
@@ -490,8 +528,43 @@ describe('restore core without Docker', () => {
     }
     await expect(restorePostgresStorage({ ...restoreBase, ssl: 'off', write: true, safetyBackup: 'unused.dump' }, {
       ...journalMemory(), resolveConnection: async () => connection, createClient: () => client as never,
-    })).rejects.toThrow('ainda está em execução')
+    })).rejects.toThrow('Não foi possível reservar o armazenamento para uso exclusivo')
     expect(lockCalls).toBe(2)
+  })
+
+  it('keeps pg_type byproducts out of the destructive inventory and detects a malformed restore-audit table', async () => {
+    const client = new ExistingClient()
+    const base = client.query.bind(client)
+    client.query = async function <T>(sql: string, values?: unknown[]): Promise<{ rows: T[] }> {
+      if (sql.includes('SELECT c.relname AS catalog')) {
+        this.sql.push(sql)
+        return { rows: [
+          { catalog: 'pg_class', nsattr: 'relnamespace', nameattr: 'relname' } as T,
+          { catalog: 'pg_type', nsattr: 'typnamespace', nameattr: 'typname' } as T,
+        ] }
+      }
+      if (sql.includes('FROM pg_catalog."pg_type"')) {
+        this.sql.push(sql)
+        return { rows: [{ name: 'status_do_pedido' } as T] }
+      }
+      if (sql.includes('SELECT c.relname, a.attname FROM pg_catalog.pg_attribute a')
+        && Array.isArray(values?.[1]) && (values![1] as unknown[]).includes('studio_restore_audit')) {
+        this.sql.push(sql)
+        return { rows: [{ relname: 'studio_restore_audit', attname: 'restored_at' } as T] }
+      }
+      return base<T>(sql)
+    }
+
+    const report = await restorePostgresStorage(restoreBase, {
+      resolveConnection: async () => connection, createClient: () => client as never,
+    })
+    expect(report.mode).toBe('dry-run')
+    if (report.mode !== 'dry-run') throw new Error('expected dry-run')
+    const typeQuery = client.sql.find(sql => sql.includes('FROM pg_catalog."pg_type"'))
+    expect(typeQuery).toContain("typrelid = 0")
+    expect(typeQuery).toContain("NOT (typtype = 'b' AND typcategory = 'A')")
+    expect(report.unknownObjects).toContain('tipo "status_do_pedido"')
+    expect(report.unknownObjects.some(item => item.includes('studio_restore_audit') && item.includes('operator'))).toBe(true)
   })
 
   it('refuses non-empty, unverifiable and facet-less staging backends', async () => {

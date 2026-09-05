@@ -120,15 +120,25 @@ export function childProcessBackupRunner(options: ChildBackupRunnerOptions): Bac
               // named everything except the one condition this guard exists to make visible, and
               // the scheduler writes that sentence into `backups.jsonl` forever. The stderr line
               // is kept, as context, after the real reason.
-              const child = error as Error & { killed?: boolean; signal?: NodeJS.Signals | null }
-              if (child.killed === true && typeof child.signal === 'string') {
-                reject(new Error(`backup process exceeded the ${String(timeoutMs)} ms time limit and was killed${detail === '' ? '' : ` (${detail})`}`))
+              // `signal` answers whether the process was killed; `killed` only answers whether
+              // execFile itself sent that signal. OOM/cgroup/operator kills therefore arrive as
+              // `killed: false, signal: 'SIGKILL'` and must never fall through to execFile's raw
+              // `Command failed: <argv>` message (which contains paths and the DSN reference).
+              const child = error as Error & { killed?: boolean; signal?: NodeJS.Signals | null; code?: number | string }
+              const context = detail === '' ? '' : ` (${detail})`
+              if (typeof child.signal === 'string') {
+                if (child.killed === true) {
+                  reject(new Error(`backup process exceeded the ${String(timeoutMs)} ms time limit and was killed with ${child.signal}${context}`))
+                  return
+                }
+                reject(new Error(`backup process was killed from outside this Studio with ${child.signal} before it finished; it did not reach the ${String(timeoutMs)} ms time limit${context}`))
                 return
               }
-              reject(new Error(detail === '' ? error.message : detail))
+              const exit = typeof child.code === 'number' ? String(child.code) : 'unknown'
+              reject(new Error(detail === '' ? `backup process failed with exit code ${exit} and said nothing on stderr` : detail))
               return
             }
-            try {
+            void (async () => {
               const report = JSON.parse(String(stdout).trim().split('\n').at(-1) ?? '') as { sha256: string; bytes: number; records: number; domains: number }
               // All four fields, not two. `records` and `domains` used to pass unchecked, so a
               // report missing them resolved as `status: 'created'` with `records: undefined`,
@@ -139,10 +149,20 @@ export function childProcessBackupRunner(options: ChildBackupRunnerOptions): Bac
                 || counts.some(count => typeof count !== 'number' || !Number.isInteger(count) || count < 0)) {
                 throw new Error('backup worker report is malformed')
               }
+              // A syntactically valid report is still only a claim. Bind the accepted byte count
+              // to the regular file the worker actually left on disk, so a truncated/missing file
+              // can never be recorded as a complete backup.
+              const onDisk = await lstat(target).catch(() => undefined)
+              if (onDisk === undefined || !onDisk.isFile()) {
+                throw new Error(`backup worker reported success but no regular file was written to '${target}'`)
+              }
+              if (onDisk.size !== report.bytes) {
+                throw new Error(`backup worker reported ${String(report.bytes)} bytes but the file holds ${String(onDisk.size)}`)
+              }
               resolvePromise(report)
-            } catch (parseError) {
+            })().catch((parseError: unknown) => {
               reject(parseError instanceof Error ? parseError : new Error(String(parseError)))
-            }
+            })
           },
         )
       })
