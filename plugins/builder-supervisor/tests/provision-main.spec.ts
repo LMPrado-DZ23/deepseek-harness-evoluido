@@ -3,13 +3,13 @@ import { BUILDER_PROVISION_EXIT, executeBuilderProvisionCli } from '../src/provi
 import { BuilderProvisionError, type BuilderProvisionResult } from '../src/store-provision.js'
 
 const argv = [
-  '--tenant', 'tenant-one', '--instance', 'instance-one', '--source-root', '/opt/source',
+  '--installation-id', 'a'.repeat(64), '--tenant', 'tenant-one', '--instance', 'instance-one', '--source-root', '/opt/source',
   '--manifest', 'file:/opt/manifest.json', '--manifest-sha256', 'a'.repeat(64),
   '--image-digest', `sha256:${'b'.repeat(64)}`, '--policy-sha256', 'c'.repeat(64),
 ] as const
 
 const result: BuilderProvisionResult = {
-  state: 'CREATED', tenant_id: 'tenant-one', instance_id: 'instance-one', template_store_version: 'v1',
+  state: 'CREATED', scope_id: `s_${'d'.repeat(48)}`, template_store_version: 'v1',
   template_store_sha256: 'd'.repeat(64), manifest_sha256: 'a'.repeat(64), config_reference: 'file:/secret/config.json',
 }
 
@@ -18,12 +18,17 @@ describe('local builder provision CLI', () => {
     const provision = vi.fn(async () => result)
     const output = vi.fn(); const error = vi.fn()
     await expect(executeBuilderProvisionCli(argv, { provision, output, error })).resolves.toBe(BUILDER_PROVISION_EXIT.ok)
-    expect(provision).toHaveBeenCalledWith(expect.objectContaining({ tenantId: 'tenant-one', instanceId: 'instance-one', sourceRoot: '/opt/source' }))
+    expect(provision).toHaveBeenCalledWith(expect.objectContaining({ installationId: 'a'.repeat(64), tenantId: 'tenant-one', instanceId: 'instance-one', sourceRoot: '/opt/source' }))
     expect(output).toHaveBeenCalledOnce()
     const emitted = output.mock.calls[0]?.[0] ?? ''
     expect(emitted).toContain('builder-provisioned')
     expect(emitted).not.toContain(result.config_reference)
     expect(emitted).not.toContain(result.template_store_sha256)
+    expect(emitted).not.toContain(result.template_store_version)
+    expect(emitted).not.toContain('tenant-one')
+    expect(emitted).not.toContain('instance-one')
+    expect(emitted).toContain(result.scope_id)
+    expect(Object.keys(JSON.parse(emitted) as Record<string, unknown>).sort()).toEqual(['event', 'scope_id', 'state'])
     expect(error).not.toHaveBeenCalled()
   })
 

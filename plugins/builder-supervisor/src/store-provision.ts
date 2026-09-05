@@ -24,6 +24,12 @@ import {
   type BuilderSupervisorRootPolicy,
 } from './supervisor-config.js'
 import {
+  builderRuntimeSocketPath,
+  deriveBuilderRuntimeScopeId,
+  isInstallationId,
+  type BuilderRuntimeScopeId,
+} from './runtime-scope.js'
+import {
   TEMPLATE_ENTRY_MAX_BYTES,
   TEMPLATE_MANIFEST_MAX_BYTES,
   TEMPLATE_STORE_MAX_BYTES,
@@ -60,6 +66,7 @@ export class BuilderProvisionError extends Error {
 }
 
 export interface BuilderProvisionRequest {
+  readonly installationId: string
   readonly tenantId: string
   readonly instanceId: string
   readonly sourceRoot: string
@@ -72,8 +79,7 @@ export interface BuilderProvisionRequest {
 
 export interface BuilderProvisionResult {
   readonly state: 'CREATED'
-  readonly tenant_id: string
-  readonly instance_id: string
+  readonly scope_id: BuilderRuntimeScopeId
   readonly template_store_version: string
   readonly template_store_sha256: string
   readonly manifest_sha256: string
@@ -138,8 +144,19 @@ export async function provisionBuilderSupervisor(
     if (process.platform !== 'linux' || process.getuid === undefined) invalidRequest()
     const roots = request.roots ?? PRODUCTION_BUILDER_ROOT_POLICY
     validateBuilderSupervisorRootPolicy(roots)
+    const installationId = installationIdentifier(request.installationId)
     const tenantId = provisionIdentifier(request.tenantId)
     const instanceId = provisionIdentifier(request.instanceId)
+    const scopeId = deriveBuilderRuntimeScopeId({ installationId, tenantId, instanceId })
+    const scopePaths = {
+      config: scopeInstancePath(roots.configRoot, scopeId),
+      secret: scopeInstancePath(roots.secretRoot, scopeId),
+      socket: scopeInstancePath(roots.socketRoot, scopeId),
+      artifact: scopeInstancePath(roots.artifactRoot, scopeId),
+      export: scopeInstancePath(roots.exportRoot, scopeId),
+      state: scopeInstancePath(roots.stateRoot, scopeId),
+    }
+    const socketPath = builderRuntimeSocketPath(roots.socketRoot, scopeId)
     const sourceRoot = canonicalSourceRoot(request.sourceRoot)
     const manifestPath = manifestReferencePath(request.manifestReference)
     const expectedManifestSha256 = sha256Value(request.manifestSha256)
@@ -148,7 +165,7 @@ export async function provisionBuilderSupervisor(
     assertSourceOutsideManagedRoots(sourceRoot, manifestPath, roots)
     await Promise.all(managedRoots(roots).map(assertPrivateRoot))
 
-    const stateInstanceRoot = await ensureTenantInstance(roots.stateRoot, tenantId, instanceId)
+    const stateInstanceRoot = await ensureScopeInstance(roots.stateRoot, scopePaths.state)
     const lock = await acquireProvisionLock(stateInstanceRoot, runtime)
     try {
       const manifest = await loadPinnedManifest(manifestPath, expectedManifestSha256)
@@ -162,15 +179,13 @@ export async function provisionBuilderSupervisor(
       }
       await publishTemplateStore(sourceRoot, templateStoreParent, storePath, manifest, runtime)
 
-      const configDirectory = await ensureTenantInstance(roots.configRoot, tenantId, instanceId)
-      const secretDirectory = await ensureTenantInstance(roots.secretRoot, tenantId, instanceId)
-      await ensurePrivateDirectory(posix.join(roots.socketRoot, tenantId))
-      await ensurePrivateDirectory(posix.join(roots.socketRoot, tenantId, instanceId))
-      await ensurePrivateDirectory(posix.join(roots.artifactRoot, tenantId))
-      await ensurePrivateDirectory(posix.join(roots.artifactRoot, tenantId, instanceId))
-      await ensurePrivateDirectory(posix.join(roots.exportRoot, tenantId))
-      await ensurePrivateDirectory(posix.join(roots.exportRoot, tenantId, instanceId))
-      await ensurePrivateDirectory(posix.join(stateInstanceRoot, 'journal'))
+      const configDirectory = await ensureScopeInstance(roots.configRoot, scopePaths.config)
+      const secretDirectory = await ensureScopeInstance(roots.secretRoot, scopePaths.secret)
+      await ensureScopeInstance(roots.socketRoot, scopePaths.socket)
+      const artifactDirectory = await ensureScopeInstance(roots.artifactRoot, scopePaths.artifact)
+      const exportDirectory = await ensureScopeInstance(roots.exportRoot, scopePaths.export)
+      const journalDirectory = await ensurePrivateDirectory(posix.join(stateInstanceRoot, 'journal'))
+      const replayDirectory = await ensurePrivateDirectory(posix.join(stateInstanceRoot, 'rpc-replay'))
       const configPath = posix.join(configDirectory, 'supervisor.json')
       const configExists = await exists(configPath)
       await recoverAuthorityLinkTemps(configDirectory, secretDirectory, configExists)
@@ -193,12 +208,14 @@ export async function provisionBuilderSupervisor(
       await writeAuthorityFile(policyPath, `${policySha256}\n`, 0o600)
       const config = {
         version: 1,
+        installation_id: installationId,
         tenant_id: tenantId,
         instance_id: instanceId,
-        socket_path: posix.join(roots.socketRoot, tenantId, instanceId, 'builder.sock'),
-        artifact_root: posix.join(roots.artifactRoot, tenantId, instanceId),
-        export_root: posix.join(roots.exportRoot, tenantId, instanceId),
-        journal_root: posix.join(roots.stateRoot, tenantId, instanceId, 'journal'),
+        socket_path: socketPath,
+        artifact_root: artifactDirectory,
+        export_root: exportDirectory,
+        journal_root: journalDirectory,
+        replay_root: replayDirectory,
         docker_socket_path: roots.dockerSocketPath,
         bearer_token_ref: `file:${tokenPath}`,
         image_digest_ref: `file:${imagePath}`,
@@ -211,7 +228,7 @@ export async function provisionBuilderSupervisor(
       await syncDirectory(secretDirectory)
       await lock.completeRecovery()
       return {
-        state: 'CREATED', tenant_id: tenantId, instance_id: instanceId,
+        state: 'CREATED', scope_id: scopeId,
         template_store_version: manifest.template_store_version,
         template_store_sha256: manifest.tree_sha256,
         manifest_sha256: expectedManifestSha256,
@@ -1075,9 +1092,19 @@ async function processStartTicks(pid: number): Promise<string> {
   return start
 }
 
-async function ensureTenantInstance(root: string, tenantId: string, instanceId: string): Promise<string> {
-  const tenant = await ensurePrivateDirectory(posix.join(root, tenantId))
-  return ensurePrivateDirectory(posix.join(tenant, instanceId))
+function scopeInstancePath(root: string, scopeId: BuilderRuntimeScopeId): string {
+  return posix.join(root, 'instances', scopeId)
+}
+
+async function ensureScopeInstance(root: string, path: string): Promise<string> {
+  const instances = await ensurePrivateDirectory(posix.join(root, 'instances'))
+  if (!beneath(instances, path)) return invalidRequest()
+  return ensurePrivateDirectory(path)
+}
+
+function installationIdentifier(value: unknown): string {
+  if (!isInstallationId(value)) return invalidRequest()
+  return value
 }
 
 async function ensurePrivateDirectory(path: string): Promise<string> {

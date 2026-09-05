@@ -6,6 +6,7 @@ import { posix } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
 import { loadBuilderSupervisorConfig, type BuilderSupervisorRootPolicy } from '../src/supervisor-config.js'
+import { BUILDER_UNIX_SOCKET_MAX_BYTES, deriveBuilderRuntimeScopeId } from '../src/runtime-scope.js'
 import { BuilderProvisionError, STORE_PROVISION_GUARD_TEST_ONLY, provisionBuilderSupervisor, type BuilderProvisionRequest } from '../src/store-provision.js'
 import { TEMPLATE_ENTRY_MAX_BYTES, TEMPLATE_MANIFEST_MAX_BYTES, computeTemplateTreeSha256, type TemplateManifestEntry } from '../src/store-security.js'
 
@@ -24,14 +25,33 @@ linux('immutable builder template-store provisioning', () => {
     const fixture = await createFixture()
     const result = await provisionBuilderSupervisor(fixture.request)
     expect(result).toEqual(expect.objectContaining({
-      state: 'CREATED', tenant_id: 'tenant-one', instance_id: 'instance-one',
+      state: 'CREATED', scope_id: fixture.scopeId,
       template_store_version: 'v1.0.0', template_store_sha256: fixture.treeSha, manifest_sha256: fixture.manifestSha,
     }))
+    expect(result).not.toHaveProperty('tenant_id')
+    expect(result).not.toHaveProperty('instance_id')
     const config = await loadBuilderSupervisorConfig(result.config_reference, fixture.policy)
-    expect(config).toEqual(expect.objectContaining({ tenantId: 'tenant-one', instanceId: 'instance-one', templateStoreVersion: 'v1.0.0', templateStoreSha256: fixture.treeSha }))
-    const configDirectory = posix.join(fixture.policy.configRoot, 'tenant-one', 'instance-one')
-    const secretDirectory = posix.join(fixture.policy.secretRoot, 'tenant-one', 'instance-one')
-    const storeRoot = posix.join(fixture.policy.stateRoot, 'tenant-one', 'instance-one', 'template-store', 'v1.0.0')
+    expect(config).toEqual(expect.objectContaining({ installationId: fixture.request.installationId, tenantId: 'tenant-one', instanceId: 'instance-one', scopeId: fixture.scopeId, templateStoreVersion: 'v1.0.0', templateStoreSha256: fixture.treeSha }))
+    const configDirectory = scopePath(fixture, fixture.policy.configRoot)
+    const secretDirectory = scopePath(fixture, fixture.policy.secretRoot)
+    const rawConfig = JSON.parse(await readFile(posix.join(configDirectory, 'supervisor.json'), 'utf8')) as Record<string, unknown>
+    expect(Object.keys(rawConfig).sort()).toEqual([
+      'artifact_root', 'bearer_token_ref', 'docker_socket_path', 'export_root', 'image_digest_ref',
+      'installation_id', 'instance_id', 'journal_root', 'policy_sha256_ref', 'replay_root', 'socket_path',
+      'template_store_sha256_ref', 'template_store_version', 'tenant_id', 'version',
+    ].sort())
+    expect(rawConfig).toEqual(expect.objectContaining({
+      installation_id: fixture.request.installationId,
+      tenant_id: fixture.request.tenantId,
+      instance_id: fixture.request.instanceId,
+      socket_path: posix.join(scopePath(fixture, fixture.policy.socketRoot), 'rpc.sock'),
+      artifact_root: scopePath(fixture, fixture.policy.artifactRoot),
+      export_root: scopePath(fixture, fixture.policy.exportRoot),
+      journal_root: posix.join(scopePath(fixture, fixture.policy.stateRoot), 'journal'),
+      replay_root: posix.join(scopePath(fixture, fixture.policy.stateRoot), 'rpc-replay'),
+    }))
+    expect(Buffer.byteLength(String(rawConfig.socket_path), 'utf8')).toBeLessThanOrEqual(BUILDER_UNIX_SOCKET_MAX_BYTES)
+    const storeRoot = posix.join(scopePath(fixture, fixture.policy.stateRoot), 'template-store', 'v1.0.0')
     const storeTree = posix.join(storeRoot, 'tree')
     expect((await lstat(storeRoot)).mode & 0o777).toBe(0o555)
     expect((await lstat(posix.join(storeRoot, '.complete'))).mode & 0o777).toBe(0o444)
@@ -45,7 +65,11 @@ linux('immutable builder template-store provisioning', () => {
     const token = (await readFile(posix.join(secretDirectory, 'token'), 'utf8')).trim()
     expect(JSON.stringify(result)).not.toContain(token)
     expect(await readFile(posix.join(configDirectory, 'template-manifest.sha256'), 'utf8')).toBe(`${fixture.manifestSha}\n`)
-    const instanceRoot = posix.join(fixture.policy.stateRoot, 'tenant-one', 'instance-one')
+    const instanceRoot = scopePath(fixture, fixture.policy.stateRoot)
+    expect(await pathExists(posix.join(instanceRoot, 'journal'))).toBe(true)
+    expect(await pathExists(posix.join(instanceRoot, 'rpc-replay'))).toBe(true)
+    expect(await pathExists(posix.join(fixture.policy.configRoot, 'tenant-one'))).toBe(false)
+    expect(await pathExists(posix.join(fixture.policy.stateRoot, 'tenant-one'))).toBe(false)
     const guard = await lstat(posix.join(instanceRoot, '.provision.guard'))
     expect({ regular: guard.isFile(), links: guard.nlink, mode: guard.mode & 0o777 }).toEqual({ regular: true, links: 1, mode: 0o600 })
     expect(await pathExists(posix.join(instanceRoot, '3'))).toBe(false)
@@ -72,18 +96,18 @@ linux('immutable builder template-store provisioning', () => {
   it('fails closed when the permanent guard mode, inode type or link count diverges', async () => {
     const modeFixture = await createFixture()
     await provisionBuilderSupervisor(modeFixture.request)
-    const modeGuard = posix.join(modeFixture.policy.stateRoot, 'tenant-one', 'instance-one', '.provision.guard')
+    const modeGuard = posix.join(scopePath(modeFixture, modeFixture.policy.stateRoot), '.provision.guard')
     await chmod(modeGuard, 0o660)
     await expect(provisionBuilderSupervisor(modeFixture.request)).rejects.toMatchObject({ code: 'PROVISION_RECOVERY_FAILED' })
 
     const linkedFixture = await createFixture()
     await provisionBuilderSupervisor(linkedFixture.request)
-    const linkedGuard = posix.join(linkedFixture.policy.stateRoot, 'tenant-one', 'instance-one', '.provision.guard')
+    const linkedGuard = posix.join(scopePath(linkedFixture, linkedFixture.policy.stateRoot), '.provision.guard')
     await link(linkedGuard, posix.join(linkedFixture.root, 'guard-alias'))
     await expect(provisionBuilderSupervisor(linkedFixture.request)).rejects.toMatchObject({ code: 'PROVISION_RECOVERY_FAILED' })
 
     const symlinkFixture = await createFixture()
-    const instanceRoot = posix.join(symlinkFixture.policy.stateRoot, 'tenant-one', 'instance-one')
+    const instanceRoot = scopePath(symlinkFixture, symlinkFixture.policy.stateRoot)
     await mkdir(instanceRoot, { recursive: true, mode: 0o700 })
     const target = posix.join(symlinkFixture.root, 'guard-target')
     await writeFile(target, '', { mode: 0o600 })
@@ -92,7 +116,7 @@ linux('immutable builder template-store provisioning', () => {
 
     const missingFixture = await createFixture()
     await provisionBuilderSupervisor(missingFixture.request)
-    const missingGuard = posix.join(missingFixture.policy.stateRoot, 'tenant-one', 'instance-one', '.provision.guard')
+    const missingGuard = posix.join(scopePath(missingFixture, missingFixture.policy.stateRoot), '.provision.guard')
     await unlink(missingGuard)
     await expect(provisionBuilderSupervisor(missingFixture.request)).rejects.toMatchObject({ code: 'PROVISION_RECOVERY_FAILED' })
   })
@@ -118,8 +142,8 @@ linux('immutable builder template-store provisioning', () => {
   it('rejects reprovisioning and never overwrites an existing authority set', async () => {
     const fixture = await createFixture()
     await provisionBuilderSupervisor(fixture.request)
-    const tokenPath = posix.join(fixture.policy.secretRoot, 'tenant-one', 'instance-one', 'token')
-    const configPath = posix.join(fixture.policy.configRoot, 'tenant-one', 'instance-one', 'supervisor.json')
+    const tokenPath = posix.join(scopePath(fixture, fixture.policy.secretRoot), 'token')
+    const configPath = posix.join(scopePath(fixture, fixture.policy.configRoot), 'supervisor.json')
     const before = await readFile(tokenPath, 'utf8')
     const interruptedLink = posix.join(posix.dirname(configPath), '.staging-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
     await link(configPath, interruptedLink)
@@ -132,7 +156,7 @@ linux('immutable builder template-store provisioning', () => {
   it('rejects a mutated published store instead of overwriting or repairing it', async () => {
     const fixture = await createFixture()
     await provisionBuilderSupervisor(fixture.request)
-    const file = posix.join(fixture.policy.stateRoot, 'tenant-one', 'instance-one', 'template-store', 'v1.0.0', 'tree', 'README.md')
+    const file = posix.join(scopePath(fixture, fixture.policy.stateRoot), 'template-store', 'v1.0.0', 'tree', 'README.md')
     await chmod(file, 0o644)
     await expect(provisionBuilderSupervisor(fixture.request)).rejects.toMatchObject({ code: 'TARGET_MISMATCH' })
   })
@@ -140,7 +164,7 @@ linux('immutable builder template-store provisioning', () => {
   it('rejects content drift in a sealed store even when permissions are restored', async () => {
     const fixture = await createFixture()
     await provisionBuilderSupervisor(fixture.request)
-    const file = posix.join(fixture.policy.stateRoot, 'tenant-one', 'instance-one', 'template-store', 'v1.0.0', 'tree', 'README.md')
+    const file = posix.join(scopePath(fixture, fixture.policy.stateRoot), 'template-store', 'v1.0.0', 'tree', 'README.md')
     await chmod(file, 0o600); await writeFile(file, 'mutated template\n'); await chmod(file, 0o444)
     await expect(provisionBuilderSupervisor(fixture.request)).rejects.toMatchObject({ code: 'TARGET_MISMATCH' })
   })
@@ -152,7 +176,7 @@ linux('immutable builder template-store provisioning', () => {
     else if (kind === 'hardlink') await link(posix.join(fixture.sourceRoot, 'README.md'), unsafe)
     else await run('mkfifo', [unsafe])
     await expect(provisionBuilderSupervisor(fixture.request)).rejects.toMatchObject({ code: 'SOURCE_UNSAFE' })
-    expect(await pathExists(posix.join(fixture.policy.configRoot, 'tenant-one', 'instance-one', 'supervisor.json'))).toBe(false)
+    expect(await pathExists(posix.join(scopePath(fixture, fixture.policy.configRoot), 'supervisor.json'))).toBe(false)
   })
 
   it('rejects manifest substitution, dishonest tree declarations and source paths inside managed roots', async () => {
@@ -186,12 +210,63 @@ linux('immutable builder template-store provisioning', () => {
   it('maps invalid typed input to the closed public error without creating tenant paths', async () => {
     const fixture = await createFixture()
     await expect(provisionBuilderSupervisor({ ...fixture.request, tenantId: 'Tenant-One' })).rejects.toMatchObject({ code: 'INVALID_PROVISION_REQUEST' })
+    await expect(provisionBuilderSupervisor({ ...fixture.request, installationId: 'not-an-installation-id' })).rejects.toMatchObject({ code: 'INVALID_PROVISION_REQUEST' })
     expect(await pathExists(posix.join(fixture.policy.configRoot, 'Tenant-One'))).toBe(false)
+    expect(await pathExists(posix.join(fixture.policy.configRoot, 'instances'))).toBe(false)
+  })
+
+  it('rejects an overlong canonical socket before publishing config or secret authority', async () => {
+    const fixture = await createFixture()
+    const sourceBefore = await Promise.all(Object.keys(fixture.files).sort().map(path => readFile(posix.join(fixture.sourceRoot, path), 'utf8')))
+    const socketRoot = posix.join(fixture.root, 's'.repeat(96))
+    await mkdir(socketRoot, { mode: 0o700 })
+    const rootsWithLongSocket = { ...fixture.policy, socketRoot }
+    await expect(provisionBuilderSupervisor({ ...fixture.request, roots: rootsWithLongSocket })).rejects.toMatchObject({ code: 'INVALID_PROVISION_REQUEST' })
+    for (const root of [rootsWithLongSocket.configRoot, rootsWithLongSocket.secretRoot, rootsWithLongSocket.socketRoot, rootsWithLongSocket.artifactRoot, rootsWithLongSocket.exportRoot, rootsWithLongSocket.stateRoot]) {
+      expect(await pathExists(posix.join(root, 'instances'))).toBe(false)
+    }
+    expect(await Promise.all(Object.keys(fixture.files).sort().map(path => readFile(posix.join(fixture.sourceRoot, path), 'utf8')))).toEqual(sourceBefore)
+  })
+
+  it('derives a different opaque scope for every logical or installation identity and rejects config identity or layout mutation', async () => {
+    const identities = [
+      { installationId: 'e'.repeat(64) },
+      { tenantId: 'tenant-two' },
+      { instanceId: 'instance-two' },
+    ] as const
+    for (const change of identities) {
+      const fixture = await createFixture()
+      const request = { ...fixture.request, ...change }
+      const result = await provisionBuilderSupervisor(request)
+      expect(result.scope_id).toBe(deriveBuilderRuntimeScopeId({
+        installationId: request.installationId,
+        tenantId: request.tenantId,
+        instanceId: request.instanceId,
+      }))
+      expect(result.scope_id).not.toBe(fixture.scopeId)
+      expect(await pathExists(posix.join(fixture.policy.configRoot, request.tenantId))).toBe(false)
+    }
+
+    const installationMutation = await createFixture()
+    const installationResult = await provisionBuilderSupervisor(installationMutation.request)
+    const installationConfigPath = installationResult.config_reference.slice('file:'.length)
+    const installationConfig = JSON.parse(await readFile(installationConfigPath, 'utf8')) as Record<string, unknown>
+    installationConfig.installation_id = 'f'.repeat(64)
+    await writeFile(installationConfigPath, `${JSON.stringify(installationConfig)}\n`)
+    await expect(loadBuilderSupervisorConfig(installationResult.config_reference, installationMutation.policy)).rejects.toMatchObject({ code: 'INVALID_SUPERVISOR_CONFIGURATION' })
+
+    const layoutMutation = await createFixture()
+    const layoutResult = await provisionBuilderSupervisor(layoutMutation.request)
+    const layoutConfigPath = layoutResult.config_reference.slice('file:'.length)
+    const layoutConfig = JSON.parse(await readFile(layoutConfigPath, 'utf8')) as Record<string, unknown>
+    layoutConfig.socket_path = posix.join(layoutMutation.policy.socketRoot, 'tenant-one', 'instance-one', 'builder.sock')
+    await writeFile(layoutConfigPath, `${JSON.stringify(layoutConfig)}\n`)
+    await expect(loadBuilderSupervisorConfig(layoutResult.config_reference, layoutMutation.policy)).rejects.toMatchObject({ code: 'INVALID_SUPERVISOR_CONFIGURATION' })
   })
 
   it('serializes concurrent provisioners with a live process-identity lock', async () => {
     const fixture = await createFixture()
-    const instanceRoot = posix.join(fixture.policy.stateRoot, 'tenant-one', 'instance-one')
+    const instanceRoot = scopePath(fixture, fixture.policy.stateRoot)
     await mkdir(instanceRoot, { recursive: true, mode: 0o700 })
     await installProvisionGuard(instanceRoot)
     const claim = '.claim-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
@@ -207,7 +282,7 @@ linux('immutable builder template-store provisioning', () => {
 
   it('preserves a live L1 substituted between stale L0 proof and reclaim', async () => {
     const fixture = await createFixture()
-    const instanceRoot = posix.join(fixture.policy.stateRoot, 'tenant-one', 'instance-one')
+    const instanceRoot = scopePath(fixture, fixture.policy.stateRoot)
     await mkdir(instanceRoot, { recursive: true, mode: 0o700 })
     await installProvisionGuard(instanceRoot)
     const lockPath = posix.join(instanceRoot, '.provision.lock')
@@ -236,7 +311,7 @@ linux('immutable builder template-store provisioning', () => {
 
   it('arbitrates a takeover immediately before unlink and never touches L1 installed afterward', async () => {
     const fixture = await createFixture()
-    const instanceRoot = posix.join(fixture.policy.stateRoot, 'tenant-one', 'instance-one')
+    const instanceRoot = scopePath(fixture, fixture.policy.stateRoot)
     await mkdir(instanceRoot, { recursive: true, mode: 0o700 })
     await installProvisionGuard(instanceRoot)
     const lockPath = posix.join(instanceRoot, '.provision.lock')
@@ -377,7 +452,7 @@ linux('immutable builder template-store provisioning', () => {
         if (!injected) { injected = true; throw new Error('graceful injected copy failure') }
       },
     })).rejects.toMatchObject({ code: 'INVALID_PROVISION_REQUEST' })
-    const instanceRoot = posix.join(fixture.policy.stateRoot, 'tenant-one', 'instance-one')
+    const instanceRoot = scopePath(fixture, fixture.policy.stateRoot)
     expect(await lockArtifacts(instanceRoot)).toEqual([])
     expect(await readdir(posix.join(instanceRoot, 'template-store'))).toEqual([])
     await expect(provisionBuilderSupervisor(fixture.request)).resolves.toMatchObject({ state: 'CREATED' })
@@ -413,7 +488,7 @@ linux('immutable builder template-store provisioning', () => {
 
   it('recovers automatically after a real SIGKILL during long template-store I/O', async () => {
     const fixture = await createFixture()
-    const instanceRoot = posix.join(fixture.policy.stateRoot, 'tenant-one', 'instance-one')
+    const instanceRoot = scopePath(fixture, fixture.policy.stateRoot)
     const child = await startProvisionChild(fixture, 'crash-during-store')
     expect(wasKilled(await child.completed)).toBe(true)
     expect(await pathExists(posix.join(instanceRoot, '.provision.guard'))).toBe(true)
@@ -446,7 +521,7 @@ linux('immutable builder template-store provisioning', () => {
 
   it('holds the same kernel guard against fifty simultaneous provision processes', async () => {
     const fixture = await createFixture()
-    const instanceRoot = posix.join(fixture.policy.stateRoot, 'tenant-one', 'instance-one')
+    const instanceRoot = scopePath(fixture, fixture.policy.stateRoot)
     const ready = posix.join(fixture.root, 'stress-owner.ready')
     const gate = posix.join(fixture.root, 'stress-owner.go')
     const ownerResult = posix.join(fixture.root, 'stress-owner.json')
@@ -466,7 +541,7 @@ linux('immutable builder template-store provisioning', () => {
 
   it('bootstraps one permanent guard after fifty processes observe the same empty root', async () => {
     const fixture = await createFixture()
-    const instanceRoot = posix.join(fixture.policy.stateRoot, 'tenant-one', 'instance-one')
+    const instanceRoot = scopePath(fixture, fixture.policy.stateRoot)
     const gate = posix.join(fixture.root, 'bootstrap-race.go')
     const readyPaths = Array.from({ length: 50 }, (_, index) => posix.join(fixture.root, `bootstrap-race-${index}.ready`))
     const resultPaths = Array.from({ length: 50 }, (_, index) => posix.join(fixture.root, `bootstrap-race-${index}.json`))
@@ -490,7 +565,7 @@ linux('immutable builder template-store provisioning', () => {
 
   it('serializes release against a competing reclaim process under the same crash-releasing mutex', async () => {
     const fixture = await createFixture()
-    const instanceRoot = posix.join(fixture.policy.stateRoot, 'tenant-one', 'instance-one')
+    const instanceRoot = scopePath(fixture, fixture.policy.stateRoot)
     const ready = posix.join(fixture.root, 'release.ready')
     const gate = posix.join(fixture.root, 'release.go')
     const ownerResult = posix.join(fixture.root, 'release-owner.json')
@@ -556,9 +631,9 @@ linux('immutable builder template-store provisioning', () => {
 
   it('never replaces a version directory created by a competing same-uid process', async () => {
     const fixture = await createFixture()
-    const instanceRoot = posix.join(fixture.policy.stateRoot, 'tenant-one', 'instance-one')
+    const instanceRoot = scopePath(fixture, fixture.policy.stateRoot)
     await installProvisionGuard(instanceRoot)
-    const target = posix.join(fixture.policy.stateRoot, 'tenant-one', 'instance-one', 'template-store', 'v1.0.0')
+    const target = posix.join(scopePath(fixture, fixture.policy.stateRoot), 'template-store', 'v1.0.0')
     await mkdir(target, { recursive: true, mode: 0o700 })
     const foreign = posix.join(target, 'foreign-owner')
     await writeFile(foreign, 'must survive\n', { mode: 0o600 })
@@ -570,7 +645,7 @@ linux('immutable builder template-store provisioning', () => {
   it('rejects an oversized sparse published entry before attempting to hash its contents', async () => {
     const fixture = await createFixture()
     await provisionBuilderSupervisor(fixture.request)
-    const target = posix.join(fixture.policy.stateRoot, 'tenant-one', 'instance-one', 'template-store', 'v1.0.0')
+    const target = posix.join(scopePath(fixture, fixture.policy.stateRoot), 'template-store', 'v1.0.0')
     const tree = posix.join(target, 'tree')
     const file = posix.join(tree, 'README.md')
     await chmod(target, 0o700); await chmod(tree, 0o700); await chmod(file, 0o600)
@@ -583,7 +658,7 @@ linux('immutable builder template-store provisioning', () => {
 
   it('recovers stale locks, sealed staging and partial authority from an interrupted provision', async () => {
     const fixture = await createFixture()
-    const instanceRoot = posix.join(fixture.policy.stateRoot, 'tenant-one', 'instance-one')
+    const instanceRoot = scopePath(fixture, fixture.policy.stateRoot)
     await installProvisionGuard(instanceRoot)
     const storeParent = posix.join(instanceRoot, 'template-store')
     await mkdir(storeParent, { recursive: true, mode: 0o700 })
@@ -597,8 +672,8 @@ linux('immutable builder template-store provisioning', () => {
     const interruptedTarget = posix.join(storeParent, 'v1.0.0')
     await mkdir(posix.join(interruptedTarget, 'tree'), { recursive: true, mode: 0o700 })
     await writeFile(posix.join(interruptedTarget, 'tree', 'partial'), 'x', { mode: 0o600 })
-    const configDirectory = posix.join(fixture.policy.configRoot, 'tenant-one', 'instance-one')
-    const secretDirectory = posix.join(fixture.policy.secretRoot, 'tenant-one', 'instance-one')
+    const configDirectory = scopePath(fixture, fixture.policy.configRoot)
+    const secretDirectory = scopePath(fixture, fixture.policy.secretRoot)
     await mkdir(configDirectory, { recursive: true, mode: 0o700 }); await mkdir(secretDirectory, { recursive: true, mode: 0o700 })
     await writeFile(posix.join(configDirectory, 'policy.sha256'), 'partial\n', { mode: 0o600 })
     const linkedStaging = posix.join(configDirectory, '.staging-cccccccccccccccccccccccccccccccc')
@@ -614,7 +689,7 @@ linux('immutable builder template-store provisioning', () => {
   it('durably completes a valid envelope left after marker sync when its owner is proven stale', async () => {
     const fixture = await createFixture()
     await provisionBuilderSupervisor(fixture.request)
-    const instanceRoot = posix.join(fixture.policy.stateRoot, 'tenant-one', 'instance-one')
+    const instanceRoot = scopePath(fixture, fixture.policy.stateRoot)
     const target = posix.join(instanceRoot, 'template-store', 'v1.0.0')
     await chmod(target, 0o700)
     const claim = '.claim-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
@@ -630,7 +705,7 @@ linux('immutable builder template-store provisioning', () => {
   it('preserves a corrupt completion marker even after proving the previous lock owner stale', async () => {
     const fixture = await createFixture()
     await provisionBuilderSupervisor(fixture.request)
-    const instanceRoot = posix.join(fixture.policy.stateRoot, 'tenant-one', 'instance-one')
+    const instanceRoot = scopePath(fixture, fixture.policy.stateRoot)
     const target = posix.join(instanceRoot, 'template-store', 'v1.0.0')
     const marker = posix.join(target, '.complete')
     await chmod(target, 0o700); await chmod(marker, 0o600); await writeFile(marker, `${'f'.repeat(64)}\n`); await chmod(marker, 0o444)
@@ -647,7 +722,7 @@ linux('immutable builder template-store provisioning', () => {
   it('rejects missing entries and file/directory type substitution in a published envelope', async () => {
     const missing = await createFixture()
     await provisionBuilderSupervisor(missing.request)
-    const missingTarget = posix.join(missing.policy.stateRoot, 'tenant-one', 'instance-one', 'template-store', 'v1.0.0')
+    const missingTarget = posix.join(scopePath(missing, missing.policy.stateRoot), 'template-store', 'v1.0.0')
     const missingTree = posix.join(missingTarget, 'tree')
     await chmod(missingTarget, 0o700); await chmod(missingTree, 0o700)
     await rm(posix.join(missingTree, 'README.md'))
@@ -656,7 +731,7 @@ linux('immutable builder template-store provisioning', () => {
 
     const changedType = await createFixture()
     await provisionBuilderSupervisor(changedType.request)
-    const typeTarget = posix.join(changedType.policy.stateRoot, 'tenant-one', 'instance-one', 'template-store', 'v1.0.0')
+    const typeTarget = posix.join(scopePath(changedType, changedType.policy.stateRoot), 'template-store', 'v1.0.0')
     const typeTree = posix.join(typeTarget, 'tree')
     await chmod(typeTarget, 0o700); await chmod(typeTree, 0o700)
     await rm(posix.join(typeTree, 'README.md'))
@@ -666,14 +741,14 @@ linux('immutable builder template-store provisioning', () => {
 
     const extraEnvelopeEntry = await createFixture()
     await provisionBuilderSupervisor(extraEnvelopeEntry.request)
-    const extraTarget = posix.join(extraEnvelopeEntry.policy.stateRoot, 'tenant-one', 'instance-one', 'template-store', 'v1.0.0')
+    const extraTarget = posix.join(scopePath(extraEnvelopeEntry, extraEnvelopeEntry.policy.stateRoot), 'template-store', 'v1.0.0')
     await chmod(extraTarget, 0o700); await writeFile(posix.join(extraTarget, 'unexpected'), 'x', { mode: 0o444 }); await chmod(extraTarget, 0o555)
     await expect(provisionBuilderSupervisor(extraEnvelopeEntry.request)).rejects.toMatchObject({ code: 'TARGET_MISMATCH' })
   })
 
   it('fails closed on malformed recovery entries and insecure managed roots', async () => {
     const fixture = await createFixture()
-    const instanceRoot = posix.join(fixture.policy.stateRoot, 'tenant-one', 'instance-one')
+    const instanceRoot = scopePath(fixture, fixture.policy.stateRoot)
     await installProvisionGuard(instanceRoot)
     const storeParent = posix.join(instanceRoot, 'template-store')
     await mkdir(storeParent, { recursive: true, mode: 0o700 })
@@ -686,7 +761,7 @@ linux('immutable builder template-store provisioning', () => {
 
   it('fails closed when interrupted staging or partial authority contains links', async () => {
     const stagingFixture = await createFixture()
-    const stagingInstanceRoot = posix.join(stagingFixture.policy.stateRoot, 'tenant-one', 'instance-one')
+    const stagingInstanceRoot = scopePath(stagingFixture, stagingFixture.policy.stateRoot)
     await installProvisionGuard(stagingInstanceRoot)
     const storeParent = posix.join(stagingInstanceRoot, 'template-store')
     const staging = posix.join(storeParent, '.staging-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
@@ -695,7 +770,7 @@ linux('immutable builder template-store provisioning', () => {
     await expect(provisionBuilderSupervisor(stagingFixture.request)).rejects.toMatchObject({ code: 'PROVISION_RECOVERY_FAILED' })
 
     const rootLinkFixture = await createFixture()
-    const linkedInstanceRoot = posix.join(rootLinkFixture.policy.stateRoot, 'tenant-one', 'instance-one')
+    const linkedInstanceRoot = scopePath(rootLinkFixture, rootLinkFixture.policy.stateRoot)
     await installProvisionGuard(linkedInstanceRoot)
     const linkedParent = posix.join(linkedInstanceRoot, 'template-store')
     await mkdir(linkedParent, { recursive: true, mode: 0o700 })
@@ -703,7 +778,7 @@ linux('immutable builder template-store provisioning', () => {
     await expect(provisionBuilderSupervisor(rootLinkFixture.request)).rejects.toMatchObject({ code: 'PROVISION_RECOVERY_FAILED' })
 
     const authorityFixture = await createFixture()
-    const configDirectory = posix.join(authorityFixture.policy.configRoot, 'tenant-one', 'instance-one')
+    const configDirectory = scopePath(authorityFixture, authorityFixture.policy.configRoot)
     await mkdir(configDirectory, { recursive: true, mode: 0o700 })
     await symlink(authorityFixture.manifestPath, posix.join(configDirectory, 'policy.sha256'))
     await expect(provisionBuilderSupervisor(authorityFixture.request)).rejects.toMatchObject({ code: 'PROVISION_RECOVERY_FAILED' })
@@ -711,12 +786,12 @@ linux('immutable builder template-store provisioning', () => {
 
   it('rejects malformed authority recovery objects, excess links and links to unknown targets', async () => {
     const directoryFixture = await createFixture()
-    const directoryConfig = posix.join(directoryFixture.policy.configRoot, 'tenant-one', 'instance-one')
+    const directoryConfig = scopePath(directoryFixture, directoryFixture.policy.configRoot)
     await mkdir(posix.join(directoryConfig, '.staging-11111111111111111111111111111111'), { recursive: true, mode: 0o700 })
     await expect(provisionBuilderSupervisor(directoryFixture.request)).rejects.toMatchObject({ code: 'PROVISION_RECOVERY_FAILED' })
 
     const excessLinksFixture = await createFixture()
-    const excessConfig = posix.join(excessLinksFixture.policy.configRoot, 'tenant-one', 'instance-one')
+    const excessConfig = scopePath(excessLinksFixture, excessLinksFixture.policy.configRoot)
     await mkdir(excessConfig, { recursive: true, mode: 0o700 })
     const allowedTarget = posix.join(excessConfig, 'policy.sha256')
     const excessStaging = posix.join(excessConfig, '.staging-22222222222222222222222222222222')
@@ -726,7 +801,7 @@ linux('immutable builder template-store provisioning', () => {
     await expect(provisionBuilderSupervisor(excessLinksFixture.request)).rejects.toMatchObject({ code: 'PROVISION_RECOVERY_FAILED' })
 
     const unknownTargetFixture = await createFixture()
-    const unknownConfig = posix.join(unknownTargetFixture.policy.configRoot, 'tenant-one', 'instance-one')
+    const unknownConfig = scopePath(unknownTargetFixture, unknownTargetFixture.policy.configRoot)
     await mkdir(unknownConfig, { recursive: true, mode: 0o700 })
     const unknownTarget = posix.join(unknownConfig, 'unknown-target')
     await writeFile(unknownTarget, 'partial\n', { mode: 0o600 })
@@ -748,12 +823,13 @@ interface Fixture {
   readonly manifestPath: string
   readonly manifestSha: string
   readonly treeSha: string
+  readonly scopeId: ReturnType<typeof deriveBuilderRuntimeScopeId>
   readonly files: Readonly<Record<string, string>>
   readonly request: BuilderProvisionRequest
 }
 
 async function createFixture(): Promise<Fixture> {
-  const root = await mkdtemp(posix.join(tmpdir(), 'dz23-store-provision-')); roots.push(root)
+  const root = await mkdtemp(posix.join(tmpdir(), 'dsp-')); roots.push(root)
   const managed = posix.join(root, 'managed')
   const policy: BuilderSupervisorRootPolicy = {
     configRoot: posix.join(managed, 'config'), secretRoot: posix.join(managed, 'secrets'), socketRoot: posix.join(managed, 'run'),
@@ -777,10 +853,16 @@ async function createFixture(): Promise<Fixture> {
   const manifestRaw = `${JSON.stringify({ version: 1, template_store_version: 'v1.0.0', tree_sha256: treeSha, entries })}\n`
   const manifestPath = posix.join(root, 'template-store.manifest.json'); await writeFile(manifestPath, manifestRaw, { mode: 0o600 })
   const manifestSha = sha(manifestRaw)
-  return { root, policy, sourceRoot, manifestPath, manifestSha, treeSha, files, request: {
-    tenantId: 'tenant-one', instanceId: 'instance-one', sourceRoot, manifestReference: `file:${manifestPath}`,
+  const installationId = 'd'.repeat(64)
+  const scopeId = deriveBuilderRuntimeScopeId({ installationId, tenantId: 'tenant-one', instanceId: 'instance-one' })
+  return { root, policy, sourceRoot, manifestPath, manifestSha, treeSha, scopeId, files, request: {
+    installationId, tenantId: 'tenant-one', instanceId: 'instance-one', sourceRoot, manifestReference: `file:${manifestPath}`,
     manifestSha256: manifestSha, imageDigest: `sha256:${'a'.repeat(64)}`, policySha256: 'b'.repeat(64), roots: policy,
   } }
+}
+
+function scopePath(fixture: Fixture, root: string): string {
+  return posix.join(root, 'instances', fixture.scopeId)
 }
 
 async function createStaleLock(fixture: Fixture, claim: string): Promise<{
@@ -788,7 +870,7 @@ async function createStaleLock(fixture: Fixture, claim: string): Promise<{
   readonly claimPath: string
   readonly lockPath: string
 }> {
-  const instanceRoot = posix.join(fixture.policy.stateRoot, 'tenant-one', 'instance-one')
+  const instanceRoot = scopePath(fixture, fixture.policy.stateRoot)
   await mkdir(instanceRoot, { recursive: true, mode: 0o700 })
   await installProvisionGuard(instanceRoot)
   const claimPath = posix.join(instanceRoot, claim)

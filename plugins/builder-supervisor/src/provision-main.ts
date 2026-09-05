@@ -27,6 +27,7 @@ export async function executeBuilderProvisionCli(
   }
   try {
     const result = await dependencies.provision({
+      installationId: values['--installation-id']!,
       tenantId: values['--tenant']!,
       instanceId: values['--instance']!,
       sourceRoot: values['--source-root']!,
@@ -45,7 +46,7 @@ export async function executeBuilderProvisionCli(
 }
 
 function parseArguments(argv: readonly string[]): Readonly<Record<string, string>> {
-  const expected = ['--tenant', '--instance', '--source-root', '--manifest', '--manifest-sha256', '--image-digest', '--policy-sha256'] as const
+  const expected = ['--installation-id', '--tenant', '--instance', '--source-root', '--manifest', '--manifest-sha256', '--image-digest', '--policy-sha256'] as const
   if (argv.length !== expected.length * 2) invalidArguments()
   const values: Record<string, string> = {}
   for (let index = 0; index < argv.length; index += 2) {
@@ -62,9 +63,7 @@ function publicResult(result: BuilderProvisionResult): string {
   return JSON.stringify({
     event: 'builder-provisioned',
     state: result.state,
-    tenant_id: result.tenant_id,
-    instance_id: result.instance_id,
-    template_store_version: result.template_store_version,
+    scope_id: result.scope_id,
   })
 }
 

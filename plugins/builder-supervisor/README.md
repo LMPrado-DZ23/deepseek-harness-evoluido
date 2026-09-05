@@ -171,6 +171,7 @@ Depois do build do pacote, em Linux:
 
 ```sh
 node lib/provision-cli.js \
+  --installation-id <sha256-da-instalacao> \
   --tenant tenant-one \
   --instance instance-one \
   --source-root /opt/dz23/templates/v1 \
