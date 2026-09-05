@@ -49,7 +49,9 @@ function context(users: readonly IdentityUser[] = [owner]) {
     ? { userId: owner.user_id, orgId: owner.org_id, tenantId: owner.tenant_id, sessionId: 'session-1' }
     : undefined)
   const ctx = {
-    agents: { get: vi.fn(() => undefined) },
+    agents: { get: vi.fn((sessionId: string) => sessionId === 'agent-1'
+      ? { session: { id: 'agent-1' } }
+      : undefined) },
     storageDomain: { open: vi.fn((_spec: { readonly name: string }) => Promise.resolve(domains[opened++]!)) },
     webServer: { host: '127.0.0.1', port: 4321, register: vi.fn((candidate: WebRoute) => { route = candidate; return vi.fn() }) },
     studioIdentity: { service: {
@@ -96,6 +98,9 @@ describe('tenancy Cordis plugin composition', () => {
     expect(f.route()).toMatchObject({ kind: 'prefix', path: '/api/studio/tenancy' })
     expect(f.provided.tenancy).toBeDefined()
     expect(f.authorizationResolver()?.({ agent: { session: { id: 'agent-1' } } } as never)).toMatchObject({ role: 'owner' })
+    expect(f.authorizationResolver()?.({ agent: { session: { id: 'child', header: { parentSession: 'agent-1' } } } } as never))
+      .toMatchObject({ role: 'owner' })
+    expect(f.ctx.agents.get).toHaveBeenCalledWith('agent-1')
     expect(f.authorizationResolver()?.({} as never)).toBeUndefined()
     expect(f.authorizationResolver()?.({ agent: { session: { id: 'missing' } } } as never)).toBeUndefined()
 
