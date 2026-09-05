@@ -104,14 +104,40 @@ export function childProcessBackupRunner(options: ChildBackupRunnerOptions): Bac
           (error, stdout, stderr) => {
             if (error !== null) {
               const lines = String(stderr).split('\n').map(line => line.trim()).filter(line => line !== '')
-              const rawDetail = lines.find(line => /error/iu.test(line)) ?? lines.at(-1) ?? ''
+              // The THROWN line, not merely a line with the word "error" in it. Node's uncaught
+              // dump echoes the offending source line first, so `/error/i` used to pick
+              //   throw new Error(`backup exceeds the ${String(args.maxBytes)} byte limit`)
+              // — a fragment of this product's source, with the number still unexpanded — and
+              // that is what the operator read and what `backups.jsonl` kept as the reason. The
+              // loose match stays as a fallback for a child that dies without a JS exception
+              // (a heap-limit `FATAL ERROR`, for one).
+              const thrown = lines.find(line => /^(?:[A-Z][A-Za-z0-9_$]*)?Error(?: \[[^\]]*\])?:/u.test(line))
+              const rawDetail = thrown ?? lines.find(line => /error/iu.test(line)) ?? lines.at(-1) ?? ''
               const detail = sanitizeChildDetail(rawDetail, options.env?.[options.dsnRef] ?? process.env[options.dsnRef]).slice(0, 300)
+              // A child KILLED by the time limit must say so. Reporting whatever it happened to
+              // leave on stderr — or, when it left nothing, a bare `Command failed: <argv>` —
+              // named everything except the one condition this guard exists to make visible, and
+              // the scheduler writes that sentence into `backups.jsonl` forever. The stderr line
+              // is kept, as context, after the real reason.
+              const child = error as Error & { killed?: boolean; signal?: NodeJS.Signals | null }
+              if (child.killed === true && typeof child.signal === 'string') {
+                reject(new Error(`backup process exceeded the ${String(timeoutMs)} ms time limit and was killed${detail === '' ? '' : ` (${detail})`}`))
+                return
+              }
               reject(new Error(detail === '' ? error.message : detail))
               return
             }
             try {
               const report = JSON.parse(String(stdout).trim().split('\n').at(-1) ?? '') as { sha256: string; bytes: number; records: number; domains: number }
-              if (typeof report.sha256 !== 'string' || typeof report.bytes !== 'number') throw new Error('backup worker report is malformed')
+              // All four fields, not two. `records` and `domains` used to pass unchecked, so a
+              // report missing them resolved as `status: 'created'` with `records: undefined`,
+              // and `JSON.stringify` then dropped the fields from the ledger line entirely: a
+              // run recorded as complete that never says how much of the database it copied.
+              const counts = [report.bytes, report.records, report.domains]
+              if (typeof report.sha256 !== 'string' || !/^[a-f0-9]{64}$/u.test(report.sha256)
+                || counts.some(count => typeof count !== 'number' || !Number.isInteger(count) || count < 0)) {
+                throw new Error('backup worker report is malformed')
+              }
               resolvePromise(report)
             } catch (parseError) {
               reject(parseError instanceof Error ? parseError : new Error(String(parseError)))
