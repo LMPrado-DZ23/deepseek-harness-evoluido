@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process'
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
+import { discoverPostgresSpecs } from './postgres-specs-lib.mjs'
 
 /**
  * PostgreSQL gate. Two ways to obtain a real server:
@@ -20,6 +21,14 @@ const coverage = process.argv.includes('--coverage')
 const runtime = process.argv.includes('--runtime')
 const presetDsn = process.env.DZ23_POSTGRES_TEST_DSN
 const useCompose = presetDsn === undefined || presetDsn === ''
+const postgresSpecs = await discoverPostgresSpecs({
+  testsDirectory: new URL('../plugins/storage-postgres/tests/', import.meta.url),
+  repositoryPrefix: 'plugins/storage-postgres/tests',
+})
+if (process.argv.includes('--list')) {
+  process.stdout.write(`POSTGRES_SPECS=${postgresSpecs.length}\n${postgresSpecs.join('\n')}\n`)
+  process.exit(0)
+}
 let started = false
 let toolDirectory
 
@@ -71,12 +80,7 @@ exec docker exec -i ${container} pg_dump --username dz23_test --dbname dz23_test
     ? ['run', 'prove:postgres-runtime']
     : coverage
       ? ['exec', 'vitest', 'run', '--coverage', '--maxWorkers=1']
-      : ['exec', 'vitest', 'run',
-          'plugins/storage-postgres/tests/postgres.spec.ts',
-          'plugins/storage-postgres/tests/capacity.spec.ts',
-          'plugins/storage-postgres/tests/snapshot.spec.ts',
-          'plugins/storage-postgres/tests/import-hardening.spec.ts',
-          '--maxWorkers=1', '--reporter=verbose']
+      : ['exec', 'vitest', 'run', ...postgresSpecs, '--maxWorkers=1', '--reporter=verbose']
   await run('pnpm', vitest, testEnv)
   process.stdout.write(`POSTGRES_GATE=PASS server=${useCompose ? 'compose' : 'preset-dsn'} mode=${runtime ? 'runtime' : coverage ? 'coverage' : 'integration'}\n`)
 } finally {

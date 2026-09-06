@@ -42,6 +42,7 @@
     "prove:auth-crud": "tsx scripts/prove-generated-auth-crud.ts",
     "prove:preview-runtime": "tsx scripts/prove-preview-runtime.ts",
     "test:postgres": "node scripts/test-postgres.mjs",
+    "test:postgres-discovery": "node --test scripts/postgres-specs-lib.test.mjs",
     "test:postgres:coverage": "node scripts/test-postgres.mjs --coverage",
     "test:postgres:runtime": "node scripts/test-postgres.mjs --runtime",
     "typecheck": "tsc --noEmit",

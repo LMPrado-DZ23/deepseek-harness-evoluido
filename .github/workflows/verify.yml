@@ -1,0 +1,95 @@
+name: Verify DZ23 STUDIO
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux-and-postgres:
+    name: Linux clean clone and PostgreSQL 16
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+        env:
+          POSTGRES_DB: dz23_test
+          POSTGRES_USER: dz23_test
+          POSTGRES_PASSWORD: dz23_ci_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U dz23_test -d dz23_test"
+          --health-interval 1s
+          --health-timeout 3s
+          --health-retries 30
+
+    steps:
+      - name: Checkout with pinned Harness
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 11.7.0
+          run_install: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.23.1
+          cache: pnpm
+
+      - name: Verify pinned upstream content
+        run: |
+          node scripts/check-upstream-content.mjs --materialize-symlinks
+          node scripts/check-upstream-pin.mjs --self-test
+
+      - name: Build pinned Harness
+        run: |
+          pnpm --dir third_party/deepseek-harness install --frozen-lockfile
+          pnpm --dir third_party/deepseek-harness build:official
+
+      - name: Install and build Studio
+        run: |
+          pnpm install --frozen-lockfile --filter '@dz23-studio/*...'
+          pnpm build
+
+      - name: Static and policy gates
+        run: |
+          pnpm typecheck
+          pnpm gate:i18n
+          pnpm gate:portability
+          pnpm gate:domain-scopes
+          pnpm gate:domain-routes
+          pnpm test:postgres-discovery
+          node scripts/test-postgres.mjs --list
+
+      - name: Unit and contract suite
+        run: pnpm test -- --maxWorkers=2
+
+      - name: Install PostgreSQL 16 client
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends postgresql-client-16
+
+      - name: PostgreSQL integration suite
+        env:
+          DZ23_POSTGRES_TEST_DSN: postgresql://dz23_test:dz23_ci_only@127.0.0.1:5432/dz23_test
+        run: pnpm test:postgres
+
+      - name: Refuse unexpected build mutations
+        run: git diff --exit-code -- . ':(exclude)plugins/*/lib/**'
