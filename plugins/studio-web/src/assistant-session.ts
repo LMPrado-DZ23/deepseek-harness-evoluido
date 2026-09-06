@@ -41,7 +41,7 @@ export class AssistantSessionLaunchError extends Error {
 }
 
 export interface AssistantSessionLauncherOptions {
-  readonly identity: Pick<StudioIdentityService, 'bindHarnessSession'>
+  readonly identity: Pick<StudioIdentityService, 'bindHarnessSession' | 'isSharedHarnessClientAllowed'>
   readonly tenancy: Pick<StudioTenancyService, 'authorizationFor'>
   readonly sessions: AssistantSessionControllerPort
   readonly repositories: readonly AssistantRepositoryLaunchConfig[]
@@ -74,6 +74,9 @@ export class AssistantSessionLauncher {
   }
 
   async #launchLocked(identitySession: SessionRecord): Promise<AssistantSessionLaunch> {
+    if (!this.options.identity.isSharedHarnessClientAllowed(identitySession)) {
+      throw new AssistantSessionLaunchError('FORBIDDEN', t('assistant.personalOnly'))
+    }
     const authorization = this.options.tenancy.authorizationFor(
       identitySession.user_id,
       identitySession.org_id,

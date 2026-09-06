@@ -161,6 +161,18 @@ export class StudioIdentityService {
     return { userId: 'user_local', orgId: 'org_local', tenantId: 'tenant_local', sessionId: 'session_local' }
   }
 
+  /**
+   * The upstream Harness browser cookie authenticates one process, not one
+   * Studio identity. Expose that client only for a local installation with a
+   * single registered person; team/server installations need a tenant-aware
+   * transport instead of this process-wide cookie.
+   */
+  isSharedHarnessClientAllowed(session: SessionRecord): boolean {
+    if (!this.#personalModeAllowed) return false
+    const users = this.#repository.users()
+    return users.length === 1 && users[0]?.user_id === session.user_id
+  }
+
   isEnrollmentOpen(email?: string): boolean {
     if (this.#repository.users().length !== 0) return false
     if (this.#enrollment === 'open') return true

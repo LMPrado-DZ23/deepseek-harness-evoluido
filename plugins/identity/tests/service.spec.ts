@@ -146,6 +146,22 @@ describe('StudioIdentityService', () => {
     })
   })
 
+  it('allows the process-wide Harness browser client only for one local registered person', async () => {
+    const local = makeHarness()
+    const first = await login(local)
+    expect(local.service.isSharedHarnessClientAllowed(first.session)).toBe(true)
+
+    const edge = makeHarness('closed', false)
+    expect(edge.service.isSharedHarnessClientAllowed(first.session)).toBe(false)
+
+    const secondUser = {
+      ...local.repository.users()[0]!, user_id: 'user-2', email: 'second@example.com', bootstrap_owner: false,
+    }
+    await local.repository.putUser(secondUser)
+    expect(local.service.isSharedHarnessClientAllowed(first.session)).toBe(false)
+    expect(local.service.isSharedHarnessClientAllowed({ ...first.session, user_id: 'user-2' })).toBe(false)
+  })
+
   it('allows only the configured email to win bootstrap enrollment', async () => {
     const h = makeHarness({ mode: 'bootstrap-email', email: ' Owner@Example.com ' }, false)
     const [competitor, owner] = await Promise.all([

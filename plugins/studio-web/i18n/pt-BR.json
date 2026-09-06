@@ -4,6 +4,7 @@
   },
   "assistant": {
     "forbidden": "Seu acesso a este projeto não está ativo.",
+    "personalOnly": "A conversa integrada está disponível apenas na instalação pessoal. No modo equipe, cada conversa precisa de isolamento próprio.",
     "notConfigured": "O administrador ainda não liberou um projeto para esta conversa.",
     "serviceNotConfigured": "A conversa segura ainda não foi configurada.",
     "createUnavailable": "A conversa não pôde ser criada agora. Tente novamente em instantes.",

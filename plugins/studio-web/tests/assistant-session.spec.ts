@@ -46,6 +46,7 @@ async function fixture(options: {
   readonly authorization?: boolean
   readonly inspect?: AssistantSessionControllerPort['inspect']
   readonly create?: AssistantSessionControllerPort['create']
+  readonly sharedHarnessClientAllowed?: boolean
 } = {}) {
   const binds: string[] = []
   const failures: Array<{ readonly phase: string; readonly error: unknown }> = []
@@ -58,7 +59,10 @@ async function fixture(options: {
   }))
   const repositories = options.repositories ?? [await repository()]
   const launcher = await AssistantSessionLauncher.create({
-    identity: { bindHarnessSession: async (_session, id) => { binds.push(id) } },
+    identity: {
+      bindHarnessSession: async (_session, id) => { binds.push(id) },
+      isSharedHarnessClientAllowed: () => options.sharedHarnessClientAllowed !== false,
+    },
     tenancy: {
       authorizationFor: () => options.authorization === false ? undefined : ({
         userId: 'user-1', orgId: 'org-1', tenantId: 'tenant-1', role: options.role ?? 'owner',
@@ -108,6 +112,11 @@ describe('governed Assistant Session launcher', () => {
   })
 
   it('fails closed for absent membership or repository configuration', async () => {
+    const team = await fixture({ sharedHarnessClientAllowed: false })
+    await expect(team.launcher.launch(identitySession())).rejects.toMatchObject({
+      code: 'FORBIDDEN', message: expect.stringContaining('instalação pessoal'),
+    })
+    expect(team.create).not.toHaveBeenCalled()
     const forbidden = await fixture({ authorization: false })
     await expect(forbidden.launcher.launch(identitySession())).rejects.toMatchObject({ code: 'FORBIDDEN' })
     const missing = await fixture({ repositories: [] })

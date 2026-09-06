@@ -151,7 +151,11 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
       }
 
       if (request.method === 'GET' && route === '/harness/session') {
-        await authenticatedMutation(request, config.service)
+        const identitySession = await authenticatedMutation(request, config.service)
+        if (!config.service.isSharedHarnessClientAllowed(identitySession)) {
+          json(response, 403, { error: 'A interface do Harness ainda não está disponível.' })
+          return
+        }
         const host = singleHeader(request.headers.host)!
         const forwardedProtocol = config.edgeRequired === true
           ? singleHeader(request.headers['x-forwarded-proto'])

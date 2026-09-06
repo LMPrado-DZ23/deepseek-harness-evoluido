@@ -48,7 +48,7 @@ codeForm.addEventListener('submit', async event => {
     if (typeof issued.csrf_token !== 'string' || issued.csrf_token.length < 32) throw new Error('A sessão não pôde ser protegida.')
     window.sessionStorage.setItem('dz23.studio.csrf.v1', issued.csrf_token)
     message('Tudo certo. Abrindo seu espaço…', 'success')
-    window.location.assign('/api/studio/identity/harness/session')
+    window.location.assign('/studio/')
   } catch (error) {
     message(error instanceof Error ? error.message : 'Código inválido ou expirado.', 'error')
   }

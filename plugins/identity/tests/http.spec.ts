@@ -45,6 +45,7 @@ function fakeService() {
     revokeSession: vi.fn(() => Promise.resolve()),
     revokeAllSessions: vi.fn(() => Promise.resolve()),
     bindHarnessSession: vi.fn(() => Promise.resolve()),
+    isSharedHarnessClientAllowed: vi.fn(() => true),
   }
 }
 
@@ -56,6 +57,7 @@ async function fixture(
   edge?: { secret?: string; harnessAuthenticationUrl?: (baseUrl: string) => string | undefined },
 ) {
   const service = fakeService()
+  service.isSharedHarnessClientAllowed.mockReturnValue(edge === undefined)
   const allowedHosts: string[] = []
   const allowedOrigins: string[] = []
   const server = createServer(createIdentityHttpHandler({
@@ -203,7 +205,7 @@ describe('identity HTTP boundary', () => {
     await expect(authenticatedMutation(request(tooMany), service as unknown as StudioIdentityService)).rejects.toMatchObject({ code: 'invalid' })
   })
 
-  it('requires the rotatable edge secret and creates the native Harness session exchange', async () => {
+  it('requires the rotatable edge secret and blocks the process-wide Harness client at the edge', async () => {
     const edgeOnLoopback = await fixture('127.0.0.1', { secret: 'edge-secret' })
     expect((await edgeOnLoopback.request('/session', {
       method: 'GET', headers: { 'x-dz23-edge': 'edge-secret' },
@@ -226,17 +228,22 @@ describe('identity HTTP boundary', () => {
         cookie: `${SESSION_COOKIE}=session-token`,
       },
     })
-    expect(exchange.status).toBe(303)
-    expect(exchange.headers.get('location')).toBe(`https://${f.host}/?token=native-launch`)
-    expect(exchange.headers.get('referrer-policy')).toBe('no-referrer')
-    const invalidForwardedProtocol = await f.request('/harness/session', {
+    expect(exchange.status).toBe(403)
+    expect(exchange.headers.get('location')).toBeNull()
+    expect(f.service.isSharedHarnessClientAllowed).toHaveBeenCalledWith(session)
+
+    const personal = await fixture('127.0.0.1', {
+      harnessAuthenticationUrl: baseUrl => `${baseUrl}?token=native-launch`,
+    })
+    const personalExchange = await personal.request('/harness/session', {
       method: 'GET', redirect: 'manual', headers: {
-        'x-dz23-edge': 'edge-secret',
         'x-forwarded-proto': 'ftp',
         cookie: `${SESSION_COOKIE}=session-token`,
       },
     })
-    expect(invalidForwardedProtocol.headers.get('location')).toBe(`https://${f.host}/?token=native-launch`)
+    expect(personalExchange.status).toBe(303)
+    expect(personalExchange.headers.get('location')).toBe(`http://${personal.host}/?token=native-launch`)
+    expect(personalExchange.headers.get('referrer-policy')).toBe('no-referrer')
   })
 
   it('fails closed when the edge secret or Harness connection is unavailable', async () => {
