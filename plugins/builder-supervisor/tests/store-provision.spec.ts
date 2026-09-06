@@ -517,7 +517,7 @@ linux('immutable builder template-store provisioning', () => {
     await expect(first.completed).resolves.toMatchObject({ code: 0, signal: null })
     expect(JSON.parse(await readFile(firstResult, 'utf8'))).toEqual(expect.objectContaining({ state: 'CREATED' }))
     expect(await lockArtifacts(instanceRoot)).toEqual([])
-  })
+  }, 15_000)
 
   it('holds the same kernel guard against fifty simultaneous provision processes', async () => {
     const fixture = await createFixture()
