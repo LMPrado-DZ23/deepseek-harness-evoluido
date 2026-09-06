@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { mkdir, mkdtemp, rm, symlink } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -17,6 +17,12 @@ const scratch = await mkdtemp(join(tmpdir(), 'dz23-assistant-session-proof-'))
 const runtimeHome = join(scratch, 'dsh-home')
 const repository = join(scratch, 'repository')
 const worktrees = join(scratch, 'worktrees')
+const runsRoot = join(scratch, 'generated-runs')
+const assetsRoot = join(scratch, 'assets')
+const exportsRoot = join(scratch, 'exports')
+const templateStore = join(scratch, 'template-store')
+const imageDigestFile = join(scratch, 'builder-image-digest')
+const proofPatch = join(scratch, 'runtime-paths.patch.yml')
 const email = 'assistant-runtime-proof@example.com'
 
 assert.equal(process.platform, 'linux', 'A prova da sessão do Assistente exige Linux/WSL2.')
@@ -38,6 +44,24 @@ try {
   ])
   await symlink(join(sourceHome, 'profiles', 'studio'), join(runtimeHome, 'profiles', 'studio'), 'dir')
   await execFileAsync('git', ['init', '-q'], { cwd: repository })
+  await writeFile(proofPatch, [
+    '- id: dz23-studio-prompt-to-app',
+    '  config:',
+    '    runsRoot: !!js process.env.DZ23_PROOF_RUNS_ROOT',
+    '    logoStoreRoot: !!js process.env.DZ23_PROOF_ASSETS_ROOT',
+    '    builder:',
+    '      imageDigestFile: !!js process.env.DZ23_PROOF_IMAGE_DIGEST_FILE',
+    '      templateStore: !!js process.env.DZ23_PROOF_TEMPLATE_STORE',
+    '- id: dz23-studio-preview',
+    '  config:',
+    '    supervisor:',
+    '      artifactRoot: !!js process.env.DZ23_PROOF_RUNS_ROOT',
+    '- id: dz23-studio-integration-hub',
+    '  config:',
+    '    runsRoot: !!js process.env.DZ23_PROOF_RUNS_ROOT',
+    '    exportsRoot: !!js process.env.DZ23_PROOF_EXPORTS_ROOT',
+    '',
+  ].join('\n'))
 
   const repositories = [{
     orgId: 'org-personal',
@@ -55,11 +79,16 @@ try {
   process.env.DZ23_ASSISTANT_REPOSITORIES = JSON.stringify(repositories)
   process.env.DZ23_AGENT_WORKTREE_ROOT = worktrees
   process.env.DZ23_OLLAMA_PLACEHOLDER = 'local-placeholder-not-a-secret'
+  process.env.DZ23_PROOF_RUNS_ROOT = runsRoot
+  process.env.DZ23_PROOF_ASSETS_ROOT = assetsRoot
+  process.env.DZ23_PROOF_EXPORTS_ROOT = exportsRoot
+  process.env.DZ23_PROOF_TEMPLATE_STORE = templateStore
+  process.env.DZ23_PROOF_IMAGE_DIGEST_FILE = imageDigestFile
 
   booted = await runProfile({
     environment: loadLayeredEnv('dsh-studio-m71-proof', studioRoot),
     profile: 'studio',
-    patchFiles: [join(sourceHome, 'profiles', 'studio', 'poc-01b.patch.yml')],
+    patchFiles: [join(sourceHome, 'profiles', 'studio', 'poc-01b.patch.yml'), proofPatch],
     args: ['--host', '127.0.0.1', '--port', '0', '--no-open'],
   })
 
