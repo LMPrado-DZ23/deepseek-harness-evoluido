@@ -15,7 +15,7 @@
     "notFound": "A equipe não foi encontrada.",
     "state": "Esta equipe não pode avançar no estado atual.",
     "tier": "Use a confirmação correspondente ao nível de segurança da equipe.",
-    "nothingReady": "Nenhuma tarefa está pronta. Revise e aplique as propostas anteriores antes de continuar.",
+    "nothingReady": "Nenhuma tarefa pode começar agora. Revise e aplique as propostas anteriores antes de continuar.",
     "owner": "Somente a pessoa que iniciou a equipe pode continuá-la ou cancelá-la.",
     "persistence": "Não foi possível registrar a execução da tarefa; ela foi cancelada com segurança."
   },
