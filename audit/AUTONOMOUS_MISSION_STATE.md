@@ -2,19 +2,35 @@
 
 - mission_id: `DZ23-STUDIO-V1-20260904`
 - objetivo: concluir o DZ23 STUDIO v1.0 com runtime portátil, geração isolada, gates Windows/Linux, testes com cinco pessoas e pacote open source somente após licença escolhida
-- estado: `REVIEW_REQUIRED`
-- iteração: 15
+- estado: `VALIDATING`
+- iteração: 16
 - início: 2026-09-04
-- último heartbeat: 2026-09-06T05:41:00-03:00
-- último progresso real: deploy moderno congelado e offline provado com 533 pacotes; typecheck/build e suíte integral repetidos com 1.896 aprovados, 61 integrações externas puladas e 0 falhas
-- tarefa atual: fechar e entregar a candidata M6.4 cumulativa corrigida para revisão independente, sem merge na principal
-- branch: `codex/m64-integration-candidate`
+- último heartbeat: 2026-09-06T10:05:00-03:00
+- último progresso real: sessão governada real do Assistente criada por HTTP no Harness, com login/CSRF/revogação, preset, repositório, treze ferramentas e retomada do mesmo ID provados
+- tarefa atual: concluir prova em clone limpo e entregar M71 para revisão independente, sem merge na principal
+- branch: `codex/m71-assistant-session`
 - base: `17e79aaab4c1ac54c1b4fc05f780f6485c5941b7`
 - upstream: `deepseek-harness@6c705be1ce6774a000d061da41d1823b03a3d42c`
 - staging válido: `/home/leandro/dz23-gates/m63-integration-20260906`
 - staging inválido preservado: `/home/leandro/dz23-m61-lock-20260904a` (origem calculada incorretamente e sincronização interrompida)
 
-## Checkpoint atual — M6.3
+## Checkpoint atual — M71
+
+- `/studio/assistente` cria ou retoma uma sessão real do Harness, sem duplicar o
+  chat;
+- preset `dz23-assistant` e repositório são derivados pelo servidor;
+- login, CSRF, revogação, criação, inspeção, vínculo e retomada foram exercitados
+  no runtime real do pin upstream;
+- treze ferramentas governadas estão visíveis no Agent da sessão;
+- o serviço `studioAssistant` foi isolado por sessão no Cordis depois de uma
+  falha real de boot revelar o singleton indevido;
+- 58 testes críticos e 3 testes de interface passaram; os serviços críticos têm
+  100% de cobertura; o pacote staged passou;
+- conversas multiusuário continuam `NOT_SUPPORTED` porque o cliente atual do
+  Harness não isola lista/histórico por tenant;
+- prova de modelo real e redirecionamento Chromium continuam `NOT_EXECUTED`.
+
+## Checkpoint anterior — M6.3
 
 - quatro fatias locais compostas sem tocar na branch principal;
 - contrato cliente→builder reduzido a `upload_ref` opaco;

@@ -95,7 +95,10 @@ arquivos grandes e provas multiprocesso no mesmo runner.
 
 ## Limites honestos
 
-- Criação automática de uma sessão dedicada pelo botão: `NOT_PRESENT`.
+- Criação/retomada automática de uma sessão dedicada pelo botão foi
+  implementada posteriormente em M71; consulte
+  `docs/proofs/M71-assistant-session-proof.md`. O limite multiusuário do cliente
+  do Harness permanece `NOT_SUPPORTED`.
 - Codex CLI e Claude Code reais pela ponte: `NOT_CONFIGURED` e `NOT_EXECUTED`.
 - A extensão M70 acrescenta equipe multiagente/DAG governada em fatia separada;
   consenso automático, aplicação automática e Hermes real continuam
@@ -112,8 +115,9 @@ arquivos grandes e provas multiprocesso no mesmo runner.
 ## Decisão técnica
 
 A composição, o confinamento local, o pacote, o clone limpo e o gate D30 estão
-provados. P36 permanece **BETA** até uma sessão real no Harness e a prova de
-runtime com PostgreSQL/Docker serem executadas. Multiagentes não faziam parte
+provados. P36 permanece **BETA**; a sessão real no Harness foi fechada
+posteriormente em M71, enquanto PostgreSQL/Docker e modelo real continuam
+pendentes. Multiagentes não faziam parte
 deste checkpoint. A fatia M70 posterior adiciona sete ferramentas de equipe sem
 ampliar a autoridade das seis ferramentas individuais existentes e preserva o
 mesmo serviço de agentes como autoridade única para worktrees, runs, revisão e
