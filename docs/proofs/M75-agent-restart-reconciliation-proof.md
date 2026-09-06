@@ -49,8 +49,9 @@ mesmo `DSH_HOME` isolado e o mesmo backend persistente do profile:
 
 Resultado: `decision=GO`, `transport=three-separate-node-processes` e
 `worktreePreservedAcrossRestart=true`. O ambiente dos filhos não recebeu
-credenciais de provedores; modelos externos ficaram `NOT_EXECUTED`. A prova
-remove seu diretório temporário próprio somente depois das três validações.
+credenciais de provedores e a prova recusa iniciar se houver `.env` no projeto;
+modelos externos ficaram `NOT_EXECUTED`. A prova remove seu diretório
+temporário próprio somente depois das três validações.
 
 A suíte cumulativa terminou em **2.028 PASS / 62 SKIP / 5 FAIL**. As cinco
 falhas ocorreram em testes pesados e não alterados de `builder-supervisor`:

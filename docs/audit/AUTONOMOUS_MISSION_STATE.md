@@ -3,10 +3,10 @@
 - `mission_id`: `M1-M6-finalizacao-2026-09-04`
 - `objective`: integrar e provar M1-M6 com segurança, sem push, PR, deploy ou exclusões não autorizadas
 - `state`: `INTEGRATING_AND_HARDENING`
-- `iteration`: `2026-09-06.16`
+- `iteration`: `2026-09-06.17`
 - `started_at`: `2026-09-04 America/Sao_Paulo`
-- `heartbeat_at`: `2026-09-06T15:45:00-03:00`
-- `last_progress_at`: `2026-09-06T15:45:00-03:00`
+- `heartbeat_at`: `2026-09-06T16:00:00-03:00`
+- `last_progress_at`: `2026-09-06T16:00:00-03:00`
 - `branch`: `codex/p30-policy-foundation`
 - `head`: `17e79aaab4c1ac54c1b4fc05f780f6485c5941b7`
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c`
