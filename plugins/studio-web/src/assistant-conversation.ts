@@ -78,8 +78,7 @@ export class AssistantConversationService {
     try {
       const inspected = await this.options.sessions.inspect(conversationId as SessionId, signal)
       return sanitizeAssistantSnapshot(conversationId, inspected.events)
-    } catch (error) {
-      if (error instanceof AssistantConversationError) throw error
+    } catch {
       throw new AssistantConversationError('NOT_FOUND', 'Conversa não encontrada.')
     }
   }

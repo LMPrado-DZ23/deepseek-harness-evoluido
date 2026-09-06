@@ -289,6 +289,9 @@ describe('StudioIdentityService', () => {
     await h.service.bindHarnessSession(first.session, 'agent-1')
     await h.service.bindHarnessSession(h.repository.sessionMap.get(first.session.session_id)!, 'agent-1')
     expect(h.service.ownsHarnessSession(first.session, 'agent-1')).toBe(true)
+    expect(h.service.ownsHarnessSession({ ...first.session, user_id: 'other' }, 'agent-1')).toBe(false)
+    expect(h.service.ownsHarnessSession({ ...first.session, org_id: 'other' }, 'agent-1')).toBe(false)
+    expect(h.service.ownsHarnessSession({ ...first.session, tenant_id: 'other' }, 'agent-1')).toBe(false)
     expect(h.service.ownsHarnessSession(second.session, 'agent-1')).toBe(false)
     expect(h.service.ownsHarnessSession(first.session, ' ')).toBe(false)
     await expect(h.service.bindHarnessSession(second.session, 'agent-1')).rejects.toMatchObject({ code: 'replay' })
@@ -302,6 +305,7 @@ describe('StudioIdentityService', () => {
     expect(h.service.sessionRecords()).toHaveLength(2)
     await h.service.revokeAllSessions(second.session)
     expect(h.repository.sessions().every(session => session.revoked_at !== null)).toBe(true)
+    expect(h.service.ownsHarnessSession(first.session, 'agent-1')).toBe(false)
     expect(h.service.strongIdentityForHarnessSession('agent-1')).toBe(false)
     expect(h.service.identityStateForHarnessSession('agent-1', '0.0.0.0')).toEqual({
       authenticated: false, strongIdentityVerified: false,
@@ -470,6 +474,9 @@ describe('StudioIdentityService', () => {
     await h.service.bindHarnessSession(issued.session, 'agent-invited')
     expect(h.service.principalForHarnessSession('agent-invited')).toMatchObject({ orgId: 'org-invite' })
     expect(h.service.principalForHarnessSession('missing')).toBeUndefined()
+    h.repository.userMap.clear()
+    expect(h.service.principalForHarnessSession('agent-invited')).toBeUndefined()
+    await h.repository.putUser(user)
     h.setNow('2027-01-01T00:00:00.000Z')
     expect(h.service.principalForHarnessSession('agent-invited')).toBeUndefined()
     await h.service.recordAdministrationEvent(

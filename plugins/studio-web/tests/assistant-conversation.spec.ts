@@ -17,7 +17,12 @@ const identitySession = (overrides: Partial<SessionRecord> = {}): SessionRecord 
   harness_session_ids: ['conversation-1'], ...overrides,
 })
 
-function fixture(input: { readonly allowed?: boolean; readonly owned?: boolean } = {}) {
+function fixture(input: {
+  readonly allowed?: boolean
+  readonly owned?: boolean
+  readonly role?: 'owner' | 'admin' | 'builder' | 'viewer'
+  readonly randomRequestId?: boolean
+} = {}) {
   const inspect = vi.fn<AssistantConversationControllerPort['inspect']>(async () => ({ events: [] }))
   const prompt = vi.fn<AssistantConversationControllerPort['prompt']>(async () => ({ accepted: true }))
   const cancel = vi.fn<AssistantConversationControllerPort['cancel']>(() => ({ accepted: true }))
@@ -27,11 +32,11 @@ function fixture(input: { readonly allowed?: boolean; readonly owned?: boolean }
   const service = new AssistantConversationService({
     identity: { ownsHarnessSession: () => input.owned !== false },
     tenancy: { authorizationFor: () => input.allowed === false ? undefined : ({
-      userId: 'user-1', orgId: 'org-1', tenantId: 'tenant-1', role: 'viewer',
+      userId: 'user-1', orgId: 'org-1', tenantId: 'tenant-1', role: input.role ?? 'viewer',
     }) },
     launcher: { launchTenantConversation },
     sessions: { inspect, prompt, cancel },
-    createRequestId: () => 'request-1',
+    ...(input.randomRequestId === true ? {} : { createRequestId: () => 'request-1' }),
   })
   return { service, inspect, prompt, cancel, launchTenantConversation }
 }
@@ -77,6 +82,10 @@ describe('AssistantConversationService', () => {
     f.prompt.mockRejectedValueOnce(new Error('provider details must stay private'))
     await expect(f.service.send(identitySession(), 'conversation-1', 'tente', new AbortController().signal))
       .rejects.toEqual(expect.objectContaining({ code: 'SESSION_UNAVAILABLE', message: expect.not.stringContaining('provider') }))
+
+    const generated = fixture({ randomRequestId: true })
+    const receipt = await generated.service.send(identitySession(), 'conversation-1', 'id seguro', new AbortController().signal)
+    expect(receipt.request_id).toMatch(/^[0-9a-f-]{36}$/u)
   })
 
   it('returns a sanitized snapshot and contains inspection and cancellation failures', async () => {
@@ -126,6 +135,29 @@ describe('assistant transcript sanitization', () => {
     expect(JSON.stringify(snapshot)).not.toMatch(/password|senha|secret|reasoning|arguments|unknown-tool/u)
   })
 
+  it('uses friendly labels for every supported assistant action and accepts only closed outcomes', () => {
+    const labels = [
+      ['studio_agent_list', 'Consultar assistentes disponíveis'],
+      ['studio_agent_start', 'Iniciar um assistente especializado'],
+      ['studio_agent_status', 'Acompanhar o trabalho do assistente'],
+      ['studio_agent_cancel', 'Interromper o trabalho do assistente'],
+      ['studio_agent_apply', 'Aplicar uma proposta ao projeto'],
+      ['studio_team_start', 'Coordenar uma equipe de assistentes'],
+      ['studio_echo', 'Executar uma ação do DZ23 STUDIO'],
+      ['foreign', 'Ação do assistente'],
+    ] as const
+    for (const [name, label] of labels) {
+      expect(sanitizeAssistantEvent(event('tool/call', 1, { callId: `call-${name}`, name }))).toMatchObject({ label })
+    }
+    for (const outcome of ['allowed-once', 'rejected', 'cancelled', 'unavailable'] as const) {
+      expect(sanitizeAssistantEvent(event('approval/decided', 2, { id: `approval-${outcome}`, outcome }))).toMatchObject({ outcome })
+    }
+    expect(sanitizeAssistantEvent(event('assistant/message', 3, {
+      message: { id: 'complete', content: [{ type: 'text', text: 'fim' }] },
+    }))).toMatchObject({ interrupted: false })
+    expect(sanitizeAssistantEvent(event('tool/call', 4, { callId: 'generic', name: 123 }))).toMatchObject({ label: 'Ação do assistente' })
+  })
+
   it('drops malformed events, invalid decisions and empty messages', () => {
     const malformed = [
       null, [], {}, { type: 'turn/start', seq: -1, time: 1, data: {} },
@@ -133,13 +165,20 @@ describe('assistant transcript sanitization', () => {
       { type: 'turn/start', seq: 0, time: Number.NaN, data: {} },
       { type: 'turn/start', seq: 0, time: 1, data: null },
       event('user/message', 1, { id: '', source: { kind: 'user' }, content: [] }),
+      event('user/message', 1, { id: 'x', source: { kind: 'user' }, content: null }),
+      event('user/message', 1, { id: 'x', source: { kind: 'user' }, content: [{ type: 'image' }] }),
       event('assistant/message', 2, { message: null }),
       event('tool/call', 3, { callId: '', name: 'studio_agent_start' }),
+      event('tool/call', 3, { callId: 'x'.repeat(257), name: 'studio_agent_start' }),
+      event('tool/call', 3, { callId: 'a\0b', name: 'studio_agent_start' }),
       event('tool/result', 4, { message: {} }),
       event('approval/asked', 5, { id: '', toolName: 'x' }),
       event('approval/decided', 6, { id: 'x', outcome: 'invented' }),
     ]
     expect(malformed.map(sanitizeAssistantEvent)).toEqual(malformed.map(() => undefined))
+    expect(sanitizeAssistantSnapshot('empty', malformed)).toEqual({
+      conversation_id: 'empty', cursor: 6, events: [], truncated: false,
+    })
   })
 
   it('bounds public text and transcript size while retaining the durable cursor', () => {
