@@ -20,6 +20,8 @@ separadamente todo teste que declara a dependência de PostgreSQL real.
   `DZ23_POSTGRES_TEST_DSN`, com falha se o conjunto ficar vazio;
 - modo `--list` verificável sem servidor para tornar a seleção visível no log;
 - recusa de mutação da árvore fora de `plugins/*/lib/**`.
+- job Windows separado com 16 contratos herméticos de imagem, runtime e
+  preflight; ele não inicia Docker, WSL ou serviços.
 
 A exclusão temporária de `plugins/*/lib/**` no último item não declara esses
 artefatos aceitáveis: 95 arquivos ainda estão rastreados e 42 mudam no build.
@@ -35,6 +37,11 @@ localmente. A descoberta selecionou as seis specs PostgreSQL atuais e seus três
 testes de seleção/ordenação, conjunto vazio e entradas ambíguas passaram. O YAML
 foi analisado com sucesso e os três SHAs das actions foram confrontados com os
 tags remotos oficiais em 06/09/2026.
+
+Os mesmos três arquivos do job Windows passaram no Windows 11 local: **16/16**.
+Isso prova seus contratos e o preflight simulado; instalação, update, rollback,
+uninstall, WSL2 e Docker reais continuam fora desse job e permanecem
+`NOT_EXECUTED` até a prova física autorizada.
 
 Não existe remoto configurado; por isso uma execução real do GitHub Actions
 permanece `NOT_EXECUTED` e não pode ser chamada de PASS. O serviço PostgreSQL do
