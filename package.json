@@ -22,6 +22,7 @@
     "gate:domain-routes": "tsx scripts/check-domain-routes.ts",
     "gate:assistant-tools": "tsx scripts/check-assistant-tool-catalog.ts",
     "prove:assistant-package": "pnpm --filter @dz23-studio/agents build && pnpm --filter @dz23-studio/agent-team build && pnpm --filter @dz23-studio/assistant-bridge build && node scripts/prove-assistant-package.mjs",
+    "prove:assistant-session": "node scripts/prove-assistant-session-runtime.mjs",
     "storage:export-sqlite": "tsx scripts/export-sqlite-storage.ts",
     "storage:export-json": "tsx scripts/export-json-storage.ts",
     "storage:import-postgres": "tsx scripts/import-postgres-storage.ts",
