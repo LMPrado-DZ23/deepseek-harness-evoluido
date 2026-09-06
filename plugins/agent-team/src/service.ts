@@ -321,11 +321,11 @@ function validateRequest(request: AgentTeamStartRequest): { name: string; tasks:
     if (prompt.length < 3 || prompt.length > 20_000) throw new AgentTeamError('INVALID_PLAN', t('errors.taskPrompt'))
     if (!['implementer', 'reviewer', 'tester', 'synthesizer'].includes(task.role)) throw new AgentTeamError('INVALID_PLAN', t('errors.taskRole'))
     if (!Array.isArray(task.intendedPaths) || task.intendedPaths.length < 1 || task.intendedPaths.length > 20
-      || task.intendedPaths.some(path => typeof path !== 'string')) {
+      || task.intendedPaths.some((path: unknown) => typeof path !== 'string')) {
       throw new AgentTeamError('INVALID_PLAN', t('errors.taskPaths'))
     }
     const intendedPaths = [...new Set<string>(task.intendedPaths.map((path: string) => normalizeDelegationPath(path)))]
-    if (!Array.isArray(task.dependsOn) || task.dependsOn.some(id => typeof id !== 'string')) {
+    if (!Array.isArray(task.dependsOn) || task.dependsOn.some((id: unknown) => typeof id !== 'string')) {
       throw new AgentTeamError('INVALID_PLAN', t('errors.dependency', { task: task.taskId }))
     }
     const dependsOn = [...new Set<string>(task.dependsOn)]
