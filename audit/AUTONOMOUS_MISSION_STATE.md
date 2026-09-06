@@ -15,7 +15,25 @@
 - staging de teste M73: `/home/leandro/dz23-gates/m73-clean-dc35c1f`
 - staging inválido preservado: `/home/leandro/dz23-m61-lock-20260904a` (origem calculada incorretamente e sincronização interrompida)
 
-## Checkpoint atual — M73
+## Checkpoint atual — M74-A
+
+- o modo equipe ganhou um serviço interno de conversa que reutiliza o
+  `SessionController` fixado sem expor Remote, RPC, WebSocket ou diário bruto;
+- cada conversa tem um único proprietário de sessão de identidade; vínculo
+  ausente, revogado, cruzado ou ambíguo falha fechado;
+- toda leitura, mensagem e cancelamento repete autorização de pessoa,
+  organização, tenant e papel;
+- a saída pública aceita somente seis tipos de evento e remove contexto interno,
+  ferramentas, raciocínio, headers, caminhos e configuração;
+- 2.043 testes passaram, 62 integrações PostgreSQL foram puladas e a cobertura
+  global ficou em 96,15/93,65/96,65/98,17%; identidade e os dois serviços do
+  Assistente ficaram em 100%;
+- typecheck, build, i18n, domínios, catálogo, portabilidade e pin passaram;
+- nenhuma rota HTTP/SSE ou interface foi adicionada: conversa multiusuário
+  continua `NOT_SUPPORTED` até M74-B/C;
+- prova detalhada em `docs/proofs/M74A-tenant-conversation-service-proof.md`.
+
+## Checkpoint anterior — M73
 
 - inspeção do upstream fixado provou que o cliente oficial autentica o processo,
   mas não transporta principal DZ23/tenant por chamada lógica ou frame;
@@ -79,8 +97,8 @@
 
 ## Próxima ação
 
-1. gerar bundle, arquivo-fonte e relatório P37 do pin M73;
-2. aguardar e tratar a revisão independente do Claude sem merge;
+1. gerar bundle, arquivo-fonte e relatório P37 da M74-A;
+2. aguardar e tratar a revisão independente do Claude antes de iniciar M74-B;
 3. tratar os artefatos `plugins/*/lib/**` rastreados em commit separado, somente
    com autorização explícita;
 4. repetir o preflight somente leitura quando Docker e pins estiverem disponíveis;
