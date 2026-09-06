@@ -62,6 +62,15 @@ const FAILURE_STATUSES = new Set<AgentTeamTaskRecord['status']>([
   'FAILED', 'CANCELLED', 'BUDGET_EXCEEDED', 'REJECTED',
 ])
 
+type DerivedTeamStatus = Exclude<AgentTeamRecord['status'], 'CANCELLED'>
+
+const STATUS_DIAGNOSTIC_KEYS: Readonly<Record<DerivedTeamStatus, string>> = {
+  RUNNING: 'status.running',
+  WAITING_FOR_APPROVAL: 'status.waiting',
+  NEEDS_ATTENTION: 'status.attention',
+  COMPLETED: 'status.completed',
+}
+
 export class StudioAgentTeamService {
   readonly #active = new Map<string, ActiveTask>()
   readonly #locks = new Map<string, Promise<void>>()
@@ -291,22 +300,34 @@ export class StudioAgentTeamService {
 
 function validateRequest(request: AgentTeamStartRequest): { name: string; tasks: AgentTeamTaskInput[] } {
   if (request.provider !== 'spawn-in-process') throw new AgentTeamError('INVALID_PLAN', t('errors.provider'))
+  if (typeof request.name !== 'string') throw new AgentTeamError('INVALID_PLAN', t('errors.teamName'))
   const name = request.name.trim()
   if (name.length < 3 || name.length > 100) throw new AgentTeamError('INVALID_PLAN', t('errors.teamName'))
   if (!Array.isArray(request.tasks) || request.tasks.length < 1 || request.tasks.length > 8) {
     throw new AgentTeamError('INVALID_PLAN', t('errors.taskCount'))
   }
   const tasks = request.tasks.map(task => {
-    if (!/^[a-z][a-z0-9_-]{0,63}$/u.test(task.taskId)) throw new AgentTeamError('INVALID_PLAN', t('errors.taskId'))
+    if (task === null || typeof task !== 'object' || Array.isArray(task)) {
+      throw new AgentTeamError('INVALID_PLAN', t('errors.taskId'))
+    }
+    if (typeof task.taskId !== 'string' || !/^[a-z][a-z0-9_-]{0,63}$/u.test(task.taskId)) {
+      throw new AgentTeamError('INVALID_PLAN', t('errors.taskId'))
+    }
+    if (typeof task.title !== 'string') throw new AgentTeamError('INVALID_PLAN', t('errors.taskTitle'))
     const title = task.title.trim()
     if (title.length < 3 || title.length > 120) throw new AgentTeamError('INVALID_PLAN', t('errors.taskTitle'))
+    if (typeof task.prompt !== 'string') throw new AgentTeamError('INVALID_PLAN', t('errors.taskPrompt'))
     const prompt = task.prompt.trim()
     if (prompt.length < 3 || prompt.length > 20_000) throw new AgentTeamError('INVALID_PLAN', t('errors.taskPrompt'))
     if (!['implementer', 'reviewer', 'tester', 'synthesizer'].includes(task.role)) throw new AgentTeamError('INVALID_PLAN', t('errors.taskRole'))
-    if (!Array.isArray(task.intendedPaths) || task.intendedPaths.length < 1 || task.intendedPaths.length > 20) {
+    if (!Array.isArray(task.intendedPaths) || task.intendedPaths.length < 1 || task.intendedPaths.length > 20
+      || task.intendedPaths.some(path => typeof path !== 'string')) {
       throw new AgentTeamError('INVALID_PLAN', t('errors.taskPaths'))
     }
     const intendedPaths = [...new Set<string>(task.intendedPaths.map((path: string) => normalizeDelegationPath(path)))]
+    if (!Array.isArray(task.dependsOn) || task.dependsOn.some(id => typeof id !== 'string')) {
+      throw new AgentTeamError('INVALID_PLAN', t('errors.dependency', { task: task.taskId }))
+    }
     const dependsOn = [...new Set<string>(task.dependsOn)]
     return { ...task, title, prompt, intendedPaths, dependsOn }
   })
@@ -340,7 +361,7 @@ function dependencyAncestors(tasks: readonly AgentTeamTaskInput[]): Map<string, 
     if (trail.has(id)) throw new AgentTeamError('INVALID_PLAN', t('errors.cycle'))
     const nextTrail = new Set(trail).add(id)
     const ancestors = new Set<string>()
-    for (const dependency of byId.get(id)?.dependsOn ?? []) {
+    for (const dependency of byId.get(id)!.dependsOn) {
       ancestors.add(dependency)
       for (const ancestor of visit(dependency, nextTrail)) ancestors.add(ancestor)
     }
@@ -366,19 +387,15 @@ function taskStatus(status: AgentRunRecord['status']): AgentTeamTaskRecord['stat
   return status
 }
 
-function deriveTeamStatus(tasks: readonly AgentTeamTaskRecord[]): AgentTeamRecord['status'] {
+function deriveTeamStatus(tasks: readonly AgentTeamTaskRecord[]): DerivedTeamStatus {
   if (tasks.length > 0 && tasks.every(task => task.status === 'APPLIED')) return 'COMPLETED'
   if (tasks.some(task => task.status === 'RUNNING')) return 'RUNNING'
   if (tasks.some(task => FAILURE_STATUSES.has(task.status))) return 'NEEDS_ATTENTION'
   return 'WAITING_FOR_APPROVAL'
 }
 
-function statusDiagnostic(status: AgentTeamRecord['status']): string {
-  if (status === 'RUNNING') return t('status.running')
-  if (status === 'WAITING_FOR_APPROVAL') return t('status.waiting')
-  if (status === 'NEEDS_ATTENTION') return t('status.attention')
-  if (status === 'COMPLETED') return t('status.completed')
-  return t('status.cancelled')
+function statusDiagnostic(status: DerivedTeamStatus): string {
+  return t(STATUS_DIAGNOSTIC_KEYS[status]!)
 }
 
 function assertApproval(approval: DelegationApproval, tier: 'T2' | 'T3'): void {

@@ -346,6 +346,22 @@ describe('StudioAssistantBridge', () => {
       provider: 'spawn-in-process', prompt: 'Use os limites seguros.', intendedPaths: ['src/safe'],
     })).toMatchObject({ status: 'RUNNING' })
     expect(h.start).toHaveBeenCalledWith(expect.not.objectContaining({ budget: expect.anything() }))
+
+    const bridgeWithTeams = await StudioAssistantBridge.create({
+      resolvePrincipal: () => h.principal,
+      authorizationFor: () => ({ role: 'builder' }),
+      studioAgents: {
+        service: { start: h.start }, runs: () => [], leases: () => [], providerStates: () => ({}),
+      } as never,
+      studioAgentTeams: h.studioAgentTeams,
+      killJob: h.jobs.kill as never,
+    }, [minimal])
+    await bridgeWithTeams.startTeam(agent(), {
+      provider: 'spawn-in-process', name: 'Equipe sem orçamento', tasks: [{
+        taskId: 'test', title: 'Testar', role: 'tester', prompt: 'Teste.', intendedPaths: ['src/safe'], dependsOn: [],
+      }],
+    })
+    expect(h.teamStart).toHaveBeenCalledWith(expect.not.objectContaining({ budget: expect.anything() }))
   })
 
   it('denies writes to a viewer even when the model asks for them', async () => {

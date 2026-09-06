@@ -42,6 +42,7 @@ function run(id: string, status: AgentRunRecord['status'], diagnostic: string | 
 function harness(options: {
   start?: ReturnType<typeof vi.fn>
   putTask?: (record: AgentTeamTaskRecord) => Promise<void>
+  afterPutTeam?: (record: AgentTeamRecord) => Promise<void>
 } = {}) {
   const teams = new Map<string, AgentTeamRecord>()
   const tasks = new Map<string, AgentTeamTaskRecord>()
@@ -54,7 +55,10 @@ function harness(options: {
   const repository: AgentTeamRepository = {
     teams: () => [...teams.values()],
     tasks: () => [...tasks.values()],
-    putTeam: record => { teams.set(record.team_id, record); return Promise.resolve() },
+    putTeam: async record => {
+      teams.set(record.team_id, record)
+      await options.afterPutTeam?.(record)
+    },
     putTask: options.putTask ?? (record => { tasks.set(`${record.team_id}:${record.task_id}`, record); return Promise.resolve() }),
   }
   const killJob = vi.fn((): 'requested' | 'already-finished' => 'requested')
@@ -89,6 +93,10 @@ describe('StudioAgentTeamService', () => {
       inProcess: { toolFilter: { deny: ['network'] }, persona: expect.stringContaining('Implemente somente') },
     }))
     expect(h.service.activeTaskCount()).toBe(2)
+    expect(h.service.teams()).toHaveLength(1)
+    expect(h.service.tasks()).toHaveLength(2)
+    h.service.releaseJob('job-1' as JobId)
+    expect(h.service.activeTaskCount()).toBe(1)
     h.runs.push(run('run-1', 'PROPOSED', 'proposta 1'), run('run-2', 'PROPOSED', 'proposta 2'))
     const waiting = await h.service.status('team-1')
     expect(waiting.team.status).toBe('WAITING_FOR_APPROVAL')
@@ -132,6 +140,19 @@ describe('StudioAgentTeamService', () => {
       approval: { approved: true, tier: 'T3', approvedBy: 'user-1' },
       inProcess: expect.objectContaining({ toolFilter: undefined }),
     }))
+
+    for (const sensitive of ['secrets', 'deploy'] as const) {
+      const next = harness()
+      await next.service.start(next.request({
+        sensitive,
+        approval: { approved: true, tier: 'T3', approvedBy: 'user-1' },
+        budget: { timeoutMs: 30_000 },
+      }))
+      expect(next.start).toHaveBeenCalledWith(expect.objectContaining({
+        ...(sensitive === 'secrets' ? { touchesSecrets: true } : { touchesDeploy: true }),
+        budget: { timeoutMs: 30_000 },
+      }))
+    }
   })
 
   it.each([
@@ -139,14 +160,24 @@ describe('StudioAgentTeamService', () => {
     [{ tasks: [] }, /entre 1 e 8/],
     [{ tasks: Array.from({ length: 9 }, (_, index) => task({ taskId: `t${index}`, intendedPaths: [`src/${index}`] })) }, /entre 1 e 8/],
     [{ provider: 'codex' as never }, /agente local/],
+    [{ name: 42 as never }, /nome/],
+    [{ tasks: [null as never] }, /identificador/],
+    [{ tasks: ['task' as never] }, /identificador/],
+    [{ tasks: [[] as never] }, /identificador/],
+    [{ tasks: [task({ taskId: 42 as never })] }, /identificador/],
     [{ tasks: [task({ taskId: '1bad' })] }, /identificador/],
     [{ tasks: [task(), task()] }, /identificador/],
     [{ tasks: [task({ title: ' x ' })] }, /título/],
+    [{ tasks: [task({ title: 42 as never })] }, /título/],
     [{ tasks: [task({ prompt: ' x ' })] }, /instrução/],
+    [{ tasks: [task({ prompt: 42 as never })] }, /instrução/],
     [{ tasks: [task({ role: 'owner' as never })] }, /papel/],
     [{ tasks: [task({ intendedPaths: [] })] }, /caminhos/],
+    [{ tasks: [task({ intendedPaths: [42 as never] })] }, /caminhos/],
     [{ tasks: [task({ intendedPaths: Array.from({ length: 21 }, (_, index) => `src/${index}`) })] }, /caminhos/],
     [{ tasks: [task({ dependsOn: ['missing'] })] }, /inexistente/],
+    [{ tasks: [task({ dependsOn: null as never })] }, /inexistente/],
+    [{ tasks: [task({ dependsOn: [42 as never] })] }, /inexistente/],
     [{ tasks: [task({ dependsOn: ['implementation'] })] }, /inexistente/],
     [{ tasks: [task(), task({ taskId: 'other', dependsOn: [], intendedPaths: ['src/core/file.ts'] })] }, /disputam/],
     [{ tasks: [task({ dependsOn: ['other'] }), task({ taskId: 'other', dependsOn: ['implementation'] })] }, /ciclo/],
@@ -170,6 +201,12 @@ describe('StudioAgentTeamService', () => {
     const snapshot = await h.service.start(h.request())
     expect(snapshot.team.status).toBe('NEEDS_ATTENTION')
     expect(snapshot.tasks[0]).toMatchObject({ status: 'FAILED', diagnostic: 'provider unavailable' })
+  })
+
+  it('records non-Error provider failures without losing their diagnostic', async () => {
+    const h = harness({ start: vi.fn(() => { throw 'provider offline' }) })
+    const snapshot = await h.service.start(h.request())
+    expect(snapshot.tasks[0]).toMatchObject({ status: 'FAILED', diagnostic: 'provider offline' })
   })
 
   it('kills an accepted job when the running link cannot be persisted', async () => {
@@ -204,9 +241,13 @@ describe('StudioAgentTeamService', () => {
   it('covers already-finished cancellation and all terminal run mappings', async () => {
     const h = harness()
     h.killJob.mockReturnValue('already-finished')
-    await h.service.start(h.request())
+    await h.service.start(h.request({ tasks: [
+      task(),
+      task({ taskId: 'review', title: 'Revisar núcleo', dependsOn: ['implementation'] }),
+    ] }))
     await h.service.cancel('team-1', 'user-1')
     expect(h.service.activeTaskCount()).toBe(0)
+    expect(h.tasks.get('team-1:review')).toMatchObject({ diagnostic: expect.stringContaining('cancelada') })
 
     for (const status of ['PENDING_APPROVAL', 'FAILED', 'CANCELLED', 'BUDGET_EXCEEDED', 'REJECTED'] as const) {
       const next = harness()
@@ -215,6 +256,32 @@ describe('StudioAgentTeamService', () => {
       const snapshot = await next.service.status('team-1')
       expect(snapshot.tasks[0]?.status).toBe(status === 'PENDING_APPROVAL' ? 'QUEUED' : status)
     }
+
+    const running = harness()
+    await running.service.start(running.request())
+    running.runs.push(run('run-1', 'RUNNING'))
+    await expect(running.service.status('team-1')).resolves.toMatchObject({ team: { status: 'RUNNING' } })
+  })
+
+  it('serializes concurrent refreshes without releasing a queued team lock', async () => {
+    let release!: () => void
+    const blocked = new Promise<void>(resolve => { release = resolve })
+    let blockedOnce = false
+    const h = harness({
+      afterPutTeam: async record => {
+        if (record.status === 'WAITING_FOR_APPROVAL' && !blockedOnce) {
+          blockedOnce = true
+          await blocked
+        }
+      },
+    })
+    await h.service.start(h.request())
+    h.runs.push(run('run-1', 'PROPOSED'))
+    const first = h.service.status('team-1')
+    const second = h.service.status('team-1')
+    await Promise.resolve()
+    release()
+    await expect(Promise.all([first, second])).resolves.toHaveLength(2)
   })
 
   it('rejects missing, completed, wrong-owner and wrong-tier continuation', async () => {
