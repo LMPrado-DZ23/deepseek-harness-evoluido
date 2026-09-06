@@ -118,6 +118,9 @@ importers:
       '@dz23-studio/agents':
         specifier: workspace:*
         version: link:../../../plugins/agents
+      '@dz23-studio/assistant-bridge':
+        specifier: workspace:*
+        version: link:../../../plugins/assistant-bridge
       '@dz23-studio/identity':
         specifier: workspace:*
         version: link:../../../plugins/identity
@@ -18802,6 +18805,7 @@ snapshots:
       '@deepseek-ai/dsh-subagent-spawn-in-process': link:third_party/deepseek-harness/packages/subagent/subagent-spawn-in-process
       '@deepseek-ai/dsh-web-app': link:third_party/deepseek-harness/packages/bundle/web-app
       '@dz23-studio/agents': link:plugins/agents
+      '@dz23-studio/assistant-bridge': link:plugins/assistant-bridge
       '@dz23-studio/identity': link:plugins/identity
       '@dz23-studio/integration-hub': link:plugins/integration-hub
       '@dz23-studio/policy': link:plugins/policy
