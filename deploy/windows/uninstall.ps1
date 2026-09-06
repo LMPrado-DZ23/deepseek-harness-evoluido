@@ -30,6 +30,23 @@ secure_layout "$root_real"
 acquire_operation_lock "$root_real"
 assert_no_operation_journal "$root_real"
 installation_id="$(read_installation_id "$root_real")"
+installed_commit_path="$root_real/state/installed-commit"
+installed_commit=''
+if [ -e "$installed_commit_path" ] || [ -L "$installed_commit_path" ]; then
+  test -f "$installed_commit_path" && test ! -L "$installed_commit_path" ||
+    die 'installed-commit inseguro; nada foi removido' 152
+  installed_commit="$(cat -- "$installed_commit_path")"
+  printf '%s' "$installed_commit" | grep -Eq '^[0-9a-f]{40}$' ||
+    die 'installed-commit inválido; nada foi removido' 153
+fi
+if [ -e "$root_real/current" ] || [ -L "$root_real/current" ]; then
+  test -L "$root_real/current" ||
+    die 'current danificado: recusado remover objeto que não é link simbólico' 87
+  current_release="$(resolve_current_release "$root_real")"
+  test -n "$installed_commit" || die 'current existe sem installed-commit válido; nada foi removido' 154
+  test "$(basename -- "$current_release")" = "$installed_commit" ||
+    die 'current e installed-commit divergem; nada foi removido' 155
+fi
 
 uninstall_containers() {
   local by_label by_name
@@ -95,10 +112,12 @@ fi
 remaining_networks="$(uninstall_networks)" || die 'Falha ao confirmar a remoção das redes do projeto' 151
 test -z "$remaining_networks" || die 'Não foi possível comprovar a remoção das redes do projeto' 151
 
-if [ -e "$root_real/current" ] && [ ! -L "$root_real/current" ]; then
-  die 'current danificado: recusado remover objeto que não é link simbólico' 87
-fi
 if [ -L "$root_real/current" ]; then rm -f -- "$root_real/current"; fi
+if [ -e "$installed_commit_path" ] || [ -L "$installed_commit_path" ]; then
+  test -f "$installed_commit_path" && test ! -L "$installed_commit_path" ||
+    die 'installed-commit mudou durante a desinstalação; intervenção manual obrigatória' 156
+  rm -f -- "$installed_commit_path"
+fi
 
 if [ "$purge" = true ]; then
   if [ -n "$volumes" ]; then

@@ -132,6 +132,6 @@ const simulation = spawnSync(pwsh, ['-NoLogo', '-NoProfile', '-NonInteractive', 
   encoding: 'utf8', timeout: simulationTimeoutMs, maxBuffer: 4 * 1024 * 1024,
 })
 assert.equal(simulation.status, 0, `${simulation.stdout}\n${simulation.stderr}\n${simulation.error ?? ''}`)
-assert.match(simulation.stdout, /M6_COMMAND_SIMULATION=PASS bash=real windows-path=space-unicode upstream-tamper=fail-closed journal=recovered concurrency=locked health=missing-and-unhealthy inventory-error=fail-closed homonym=install-update-uninstall-fail-closed rollback=healthy-and-failed purge=verified/)
+assert.match(simulation.stdout, /M6_COMMAND_SIMULATION=PASS bash=real windows-path=space-unicode upstream-tamper=fail-closed journal=recovered concurrency=locked health=missing-and-unhealthy inventory-error=fail-closed homonym=install-update-uninstall-fail-closed rollback=healthy-and-failed reinstall=preserved-data purge=verified/)
 
 console.log('M6 Windows shell: PASS (PowerShell e Bash reais, Docker isolado).')

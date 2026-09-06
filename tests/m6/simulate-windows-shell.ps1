@@ -442,6 +442,38 @@ printf recovered
     Invoke-TestWsl -Script 'rm -f "$1/homonym-network-id"' -Arguments @($fakeState) | Out-Null
     if (-not $networkIdentityRejected) { throw 'Doctor aceitou rede com identidade divergente.' }
 
+    $pointerSentinel = "$sandbox/pointer-sentinel"
+    Invoke-TestWsl -Script @'
+set -euo pipefail
+mv -- "$1/state/installed-commit" "$1/state/installed-commit.safe"
+printf 'safe\n' > "$2"
+ln -s -- "$2" "$1/state/installed-commit"
+'@ -Arguments @($installRoot, $pointerSentinel) | Out-Null
+    $unsafePointerRejected = $false
+    try { & $uninstallPath -InstallRoot $installRoot -Distro $distro -CommandInvoker $invoker -Confirm:$false }
+    catch { $unsafePointerRejected = $_.Exception.Message -match 'installed-commit inseguro' }
+    $unsafePointerPreserved = Invoke-TestWsl -Script @'
+set -euo pipefail
+test -s "$3/containers"
+test "$(cat "$2")" = safe
+rm -f -- "$1/state/installed-commit" "$2"
+mv -- "$1/state/installed-commit.safe" "$1/state/installed-commit"
+printf preserved
+'@ -Arguments @($installRoot, $pointerSentinel, $fakeState)
+    if (-not $unsafePointerRejected -or $unsafePointerPreserved -ne 'preserved') { throw 'Uninstall removeu recursos antes de validar installed-commit.' }
+
+    Invoke-TestWsl -Script 'printf "%s\n" "$2" > "$1/state/installed-commit"' -Arguments @($installRoot, $commitOne) | Out-Null
+    $divergentPointerRejected = $false
+    try { & $uninstallPath -InstallRoot $installRoot -Distro $distro -CommandInvoker $invoker -Confirm:$false }
+    catch { $divergentPointerRejected = $_.Exception.Message -match 'current e installed-commit divergem' }
+    $divergentPointerPreserved = Invoke-TestWsl -Script @'
+set -euo pipefail
+test -s "$1/containers"
+printf '%s\n' "$2" > "$3/state/installed-commit"
+printf preserved
+'@ -Arguments @($fakeState, $commitTwo, $installRoot)
+    if (-not $divergentPointerRejected -or $divergentPointerPreserved -ne 'preserved') { throw 'Uninstall removeu recursos com ponteiros divergentes.' }
+
     Invoke-TestWsl -Script 'printf "%064d\n" 0 | tr 0 e > "$1/homonym-volume-id"; touch "$1/unlabeled-volume"' -Arguments @($fakeState) | Out-Null
     $uninstallVolumeRejected = $false
     try { & $uninstallPath -InstallRoot $installRoot -Distro $distro -CommandInvoker $invoker -Confirm:$false }
@@ -468,6 +500,7 @@ printf recovered
 set -euo pipefail
 test ! -e "$1/current"; test ! -L "$1/current"
 test -d "$1/releases"; test -d "$1/state"
+test ! -e "$1/state/installed-commit"; test ! -L "$1/state/installed-commit"
 test ! -s "$2/containers"; test -s "$2/volumes"; test ! -s "$2/networks"
 printf 'preserved\n'
 '@ -Arguments @($installRoot, $fakeState)
@@ -489,6 +522,14 @@ printf 'preserved\n'
 
     & $installPath -SourcePath $source -ExpectedCommit $commitOne -Image $image -CaddyImage $caddyImage -SecretsFile $secrets `
         -Start -InstallRoot $installRoot -Distro $distro -CommandInvoker $invoker -Confirm:$false
+    $reinstalled = Invoke-TestWsl -Script @'
+set -euo pipefail
+test "$(basename "$(readlink -f "$1/current")")" = "$2"
+test "$(cat "$1/state/installed-commit")" = "$2"
+test -s "$3/volumes"
+printf reinstalled
+'@ -Arguments @($installRoot, $commitOne, $fakeState)
+    if ($reinstalled -ne 'reinstalled') { throw 'A reinstalação não reutilizou com segurança os dados preservados.' }
     & $uninstallPath -InstallRoot $installRoot -Distro $distro -PurgeData `
         -PurgeConfirmation 'APAGAR DADOS DO DZ23 STUDIO' -CommandInvoker $invoker -Confirm:$false
     $purged = Invoke-TestWsl -Script @'
@@ -501,7 +542,7 @@ printf 'purged\n'
     if ($purged -ne 'purged') { throw 'O purge isolado não foi comprovado.' }
 
     if (-not ($calls | Where-Object { $_ -like 'wsl.exe *bash*' })) { throw 'O Bash real não foi executado.' }
-    Write-Output "M6_COMMAND_SIMULATION=PASS bash=real windows-path=space-unicode upstream-tamper=fail-closed journal=recovered concurrency=locked health=missing-and-unhealthy inventory-error=fail-closed homonym=install-update-uninstall-fail-closed rollback=healthy-and-failed purge=verified calls=$($calls.Count)"
+    Write-Output "M6_COMMAND_SIMULATION=PASS bash=real windows-path=space-unicode upstream-tamper=fail-closed journal=recovered concurrency=locked health=missing-and-unhealthy inventory-error=fail-closed homonym=install-update-uninstall-fail-closed rollback=healthy-and-failed reinstall=preserved-data purge=verified calls=$($calls.Count)"
 }
 finally {
     if ($sandbox) {
