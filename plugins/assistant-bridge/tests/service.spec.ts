@@ -262,7 +262,7 @@ describe('StudioAssistantBridge', () => {
     await expect(h.bridge.review(agent(), 'run-1')).rejects.toBe(failure)
   })
 
-  it('cancels only a run started by the same person and fails closed after restart', async () => {
+  it('cancels only a run started by the same person and reports a reconciled terminal run after restart', async () => {
     const h = await harness()
     h.bridge.start(agent(), { provider: 'spawn-in-process', prompt: 'Ajuste.', intendedPaths: ['src/safe'] })
     expect(h.bridge.cancel(agent(), 'run-1')).toMatchObject({ outcome: 'requested', limitation: expect.stringContaining('BETA') })
@@ -273,13 +273,41 @@ describe('StudioAssistantBridge', () => {
       studioAgents: { service: h.bridge, runs: () => [run({ repository_path: h.repositoryPath })], leases: () => [], providerStates: () => ({}) } as never,
       killJob: h.jobs.kill as never,
     }, [h.config])
-    expect(() => restarted.cancel(agent(), 'run-1')).toThrowError(expect.objectContaining({ code: 'CANCEL_UNAVAILABLE' }))
+    expect(restarted.cancel(agent(), 'run-1')).toMatchObject({
+      outcome: 'already-finished',
+      limitation: expect.stringContaining('recuperação do reinício'),
+    })
+    expect(h.jobs.kill).toHaveBeenCalledTimes(1)
+
+    const unreconciled = await StudioAssistantBridge.create({
+      resolvePrincipal: () => h.principal,
+      authorizationFor: () => ({ role: 'builder' }),
+      studioAgents: {
+        service: h.bridge,
+        runs: () => [run({ repository_path: h.repositoryPath, status: 'RUNNING' })],
+        leases: () => [],
+        providerStates: () => ({}),
+      } as never,
+      killJob: h.jobs.kill as never,
+    }, [h.config])
+    expect(() => unreconciled.cancel(agent(), 'run-1'))
+      .toThrowError(expect.objectContaining({ code: 'CANCEL_UNAVAILABLE' }))
+    expect(h.jobs.kill).toHaveBeenCalledTimes(1)
   })
 
   it('refuses cancellation by a different authenticated owner and ignores unknown lifecycle ids', async () => {
     const h = await harness()
     h.runs.splice(0, h.runs.length, run({ repository_path: h.repositoryPath, approved_by: 'other-user' }))
     h.bridge.releaseJob('unknown-job' as JobId)
+    expect(() => h.bridge.cancel(agent(), 'run-1')).toThrowError(expect.objectContaining({ code: 'FORBIDDEN' }))
+    expect(h.jobs.kill).not.toHaveBeenCalled()
+  })
+
+  it('fails closed when an active cancellation handle disagrees with the persisted owner', async () => {
+    const h = await harness()
+    h.bridge.start(agent(), { provider: 'spawn-in-process', prompt: 'Ajuste.', intendedPaths: ['src/safe'] })
+    h.principal.userId = 'replacement-user'
+    h.runs.splice(0, h.runs.length, run({ repository_path: h.repositoryPath, approved_by: 'replacement-user' }))
     expect(() => h.bridge.cancel(agent(), 'run-1')).toThrowError(expect.objectContaining({ code: 'FORBIDDEN' }))
     expect(h.jobs.kill).not.toHaveBeenCalled()
   })

@@ -22,6 +22,7 @@ import {
 import {
   GitWorktreeManager,
   StudioAgentService,
+  type AgentRestartReconciliation,
   type AgentProvider,
   type AgentRepository,
   type DelegationRequest,
@@ -44,6 +45,7 @@ export interface Config {
 
 export interface StudioAgentsRuntime {
   readonly service: StudioAgentService
+  readonly restartReconciliation: AgentRestartReconciliation
   runs(): readonly AgentRunRecord[]
   leases(): readonly AgentLeaseRecord[]
   providerStates(): Readonly<Record<'codex' | 'claude-code', 'OK' | 'NOT_PRESENT' | 'NOT_CONFIGURED'>>
@@ -159,14 +161,27 @@ export async function apply(ctx: Context, config: Config = {}): Promise<void> {
       },
     },
     jobs: {
+      hasLiveJobs() {
+        const seen = new Set<string>()
+        for (const agent of ctx.agents.list()) {
+          for (const job of ctx.jobs.list(agent)) {
+            if (seen.has(String(job.id))) continue
+            seen.add(String(job.id))
+            if (String(job.kind) === 'studio-agent' && (job.status === 'running' || job.status === 'stopping')) return true
+          }
+        }
+        return false
+      },
       start(spec) {
         return ctx.jobs.start(spec as unknown as JobStart) as JobId
       },
     } satisfies JobPort,
   })
+  const restartReconciliation = await service.reconcileInterruptedRuns()
   ctx.jobs.attachController('dz23-studio-agents')
   ctx.provide('studioAgents', {
     service,
+    restartReconciliation,
     runs: () => repository.runs(),
     leases: () => repository.leases(),
     providerStates: () => ({ codex: providerState(ctx, 'codex'), 'claude-code': providerState(ctx, 'claude-code') }),

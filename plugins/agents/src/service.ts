@@ -100,6 +100,7 @@ export interface AgentRepository {
 }
 
 export interface JobPort {
+  hasLiveJobs(): boolean
   start(spec: {
     readonly kind: 'studio-agent'
     readonly label: string
@@ -118,6 +119,12 @@ export interface ProposalApplied {
   readonly runId: string
   readonly status: 'APPLIED'
   readonly changedFiles: readonly string[]
+}
+
+export interface AgentRestartReconciliation {
+  readonly interruptedRuns: number
+  readonly releasedLeases: number
+  readonly reconciledAt: string
 }
 
 export class DelegationError extends Error {
@@ -166,6 +173,8 @@ function terminalText(result: SubagentResult): string {
 export class StudioAgentService {
   readonly #activePaths = new Map<string, readonly string[]>()
   readonly #applyingWorkspaces = new Set<string>()
+  #ready: boolean
+  #reconciliation: Promise<AgentRestartReconciliation> | undefined
 
   constructor(private readonly dependencies: {
     readonly repository: AgentRepository
@@ -177,9 +186,24 @@ export class StudioAgentService {
     readonly jobs: JobPort
     readonly now?: () => Date
     readonly createId?: () => string
-  }) {}
+  }) {
+    this.#ready = !this.#hasPersistedWork() && !dependencies.jobs.hasLiveJobs()
+  }
+
+  reconcileInterruptedRuns(): Promise<AgentRestartReconciliation> {
+    if (this.#reconciliation !== undefined) return this.#reconciliation
+    const reconciliation = this.#performRestartReconciliation()
+    this.#reconciliation = reconciliation
+    void reconciliation.finally(() => {
+      this.#reconciliation = undefined
+    }).catch(() => undefined)
+    return reconciliation
+  }
 
   start(request: DelegationRequest): DelegationAccepted {
+    if (!this.#ready) {
+      throw new DelegationError('INVALID_STATE', t('recovery.required'))
+    }
     const tier = requiredTier(request)
     if (!request.approval.approved || request.approval.tier !== tier) {
       throw new DelegationError('APPROVAL_REQUIRED', tier === 'T3'
@@ -262,6 +286,52 @@ export class StudioAgentService {
     } finally {
       this.#applyingWorkspaces.delete(workspaceKey)
     }
+  }
+
+  async #performRestartReconciliation(): Promise<AgentRestartReconciliation> {
+    this.#ready = false
+    if (this.dependencies.jobs.hasLiveJobs()) {
+      throw new DelegationError('INVALID_STATE', t('recovery.liveJobs'))
+    }
+    const interrupted = this.dependencies.repository.runs()
+      .filter(run => run.status === 'RUNNING')
+      .sort((left, right) => left.run_id.localeCompare(right.run_id))
+    const activeLeases = this.dependencies.repository.leases()
+      .filter(lease => lease.active)
+      .sort((left, right) => left.lease_id.localeCompare(right.lease_id))
+    if (this.dependencies.jobs.hasLiveJobs()) {
+      throw new DelegationError('INVALID_STATE', t('recovery.liveJobs'))
+    }
+    const reconciledAt = (this.dependencies.now?.() ?? new Date()).toISOString()
+    for (const run of interrupted) {
+      await this.dependencies.repository.putRun({
+        ...run,
+        status: 'FAILED',
+        diagnostic: t('recovery.interrupted'),
+        updated_at: reconciledAt,
+      })
+    }
+    for (const lease of activeLeases) {
+      await this.dependencies.repository.putLease({
+        ...lease,
+        active: false,
+        released_at: reconciledAt,
+      })
+    }
+    if (this.#hasPersistedWork() || this.dependencies.jobs.hasLiveJobs()) {
+      throw new DelegationError('INVALID_STATE', t('recovery.incomplete'))
+    }
+    this.#ready = true
+    return {
+      interruptedRuns: interrupted.length,
+      releasedLeases: activeLeases.length,
+      reconciledAt,
+    }
+  }
+
+  #hasPersistedWork(): boolean {
+    return this.dependencies.repository.runs().some(run => run.status === 'RUNNING')
+      || this.dependencies.repository.leases().some(lease => lease.active)
   }
 
   async #execute(

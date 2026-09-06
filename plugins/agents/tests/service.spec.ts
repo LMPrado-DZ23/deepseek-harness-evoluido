@@ -16,13 +16,20 @@ import {
 } from '../src/service.ts'
 
 class MemoryRepository implements AgentRepository {
-  constructor(private readonly hideLeases = false, private readonly hideRuns = false) {}
+  constructor(
+    private readonly hideLeases = false,
+    private readonly hideRuns = false,
+    private readonly discardLeaseWrites = false,
+  ) {}
   readonly runMap = new Map<string, AgentRunRecord>()
   readonly leaseMap = new Map<string, AgentLeaseRecord>()
   runs() { return this.hideRuns ? [] : [...this.runMap.values()] }
   leases() { return this.hideLeases ? [] : [...this.leaseMap.values()] }
   putRun(record: AgentRunRecord) { this.runMap.set(record.run_id, record); return Promise.resolve() }
-  putLease(record: AgentLeaseRecord) { this.leaseMap.set(record.lease_id, record); return Promise.resolve() }
+  putLease(record: AgentLeaseRecord) {
+    if (!this.discardLeaseWrites) this.leaseMap.set(record.lease_id, record)
+    return Promise.resolve()
+  }
 }
 
 class MemoryJobs implements JobPort {
@@ -32,6 +39,9 @@ class MemoryJobs implements JobPort {
     done: Promise<JobOutcome>
   }> = []
   fail = false
+  live = false
+  liveChecks: boolean[] = []
+  hasLiveJobs(): boolean { return this.liveChecks.shift() ?? this.live }
   start(spec: Parameters<JobPort['start']>[0]): JobId {
     if (this.fail) throw new Error('jobs unavailable')
     const hooks = spec.run()
@@ -67,6 +77,25 @@ function request(overrides: Partial<DelegationRequest> = {}): DelegationRequest 
   }
 }
 
+function persistedRun(runId: string, status: AgentRunRecord['status'] = 'RUNNING'): AgentRunRecord {
+  const timestamp = '2026-09-02T00:00:00.000Z'
+  return {
+    run_id: runId, org_id: 'org-1', tenant_id: 'tenant-1', workspace_id: 'workspace-1',
+    parent_session_id: 'old-session', coordinator_session_id: 'old-coordinator', provider: 'spawn-in-process',
+    worktree_path: `/copies/${runId}`, repository_path: '/repo', base_commit: 'abcdef1', status,
+    changed_files: [], diff_bytes: 0, diff_sha256: '0'.repeat(64), main_changed_during_run: false,
+    approved_by: 'user-1', approved_at: timestamp, diagnostic: null, created_at: timestamp, updated_at: timestamp,
+  }
+}
+
+function persistedLease(leaseId: string, runId: string, active = true): AgentLeaseRecord {
+  const timestamp = '2026-09-02T00:00:00.000Z'
+  return {
+    lease_id: leaseId, run_id: runId, org_id: 'org-1', tenant_id: 'tenant-1', workspace_id: 'workspace-1',
+    repository_path: '/repo', paths: ['src'], active, created_at: timestamp, released_at: active ? null : timestamp,
+  }
+}
+
 function harness(options: {
   result?: SubagentResult
   resultFactory?: (signal: AbortSignal) => Promise<SubagentResult>
@@ -85,9 +114,18 @@ function harness(options: {
   omitId?: boolean
   omitClock?: boolean
   strongIdentity?: boolean
+  initialRuns?: readonly AgentRunRecord[]
+  initialLeases?: readonly AgentLeaseRecord[]
+  liveJobs?: boolean
+  liveJobChecks?: readonly boolean[]
+  discardLeaseWrites?: boolean
 } = {}) {
-  const repository = new MemoryRepository(options.hideLeases, options.hideRuns)
+  const repository = new MemoryRepository(options.hideLeases, options.hideRuns, options.discardLeaseWrites)
+  for (const record of options.initialRuns ?? []) repository.runMap.set(record.run_id, record)
+  for (const record of options.initialLeases ?? []) repository.leaseMap.set(record.lease_id, record)
   const jobs = new MemoryJobs()
+  jobs.live = options.liveJobs ?? false
+  jobs.liveChecks.push(...options.liveJobChecks ?? [])
   const snapshot: WorktreeSnapshot = {
     repositoryPath: '/repo', worktreePath: '/copies/run', baseCommit: 'abcdef1234567', mainFingerprint: 'main-before',
   }
@@ -133,6 +171,75 @@ function harness(options: {
 }
 
 describe('StudioAgentService PoC 3A', () => {
+  it('reconciles interrupted runs and leases before accepting new work, idempotently', async () => {
+    const terminal = persistedRun('finished-run', 'PROPOSED')
+    const h = harness({
+      initialRuns: [persistedRun('stale-run-z'), persistedRun('stale-run-a'), terminal],
+      initialLeases: [
+        persistedLease('lease-stale', 'stale-run-z'),
+        persistedLease('lease-orphan', 'missing-run'),
+        persistedLease('lease-finished', 'finished-run', false),
+      ],
+    })
+    expect(() => h.service.start(request())).toThrowError(expect.objectContaining({ code: 'INVALID_STATE' }))
+
+    const [first, concurrent] = await Promise.all([
+      h.service.reconcileInterruptedRuns(),
+      h.service.reconcileInterruptedRuns(),
+    ])
+    expect(first).toEqual({ interruptedRuns: 2, releasedLeases: 2, reconciledAt: '2026-09-03T00:00:00.000Z' })
+    expect(concurrent).toEqual(first)
+    expect(h.repository.runMap.get('stale-run-z')).toMatchObject({
+      status: 'FAILED',
+      diagnostic: expect.stringContaining('interrompida pelo reinício'),
+      worktree_path: '/copies/stale-run-z',
+    })
+    expect(h.repository.runMap.get('stale-run-a')).toMatchObject({ status: 'FAILED' })
+    expect(h.repository.runMap.get('finished-run')).toEqual(terminal)
+    expect(h.repository.leaseMap.get('lease-stale')).toMatchObject({ active: false, released_at: first.reconciledAt })
+    expect(h.repository.leaseMap.get('lease-orphan')).toMatchObject({ active: false, released_at: first.reconciledAt })
+
+    await expect(h.service.reconcileInterruptedRuns()).resolves.toEqual({
+      interruptedRuns: 0, releasedLeases: 0, reconciledAt: '2026-09-03T00:00:00.000Z',
+    })
+    expect(() => h.service.start(request())).not.toThrow()
+    await h.jobs.entries[0]!.done
+  })
+
+  it('blocks plugin reload while any Harness agent job is still alive', async () => {
+    const h = harness({
+      initialRuns: [persistedRun('stale-run')],
+      initialLeases: [persistedLease('lease-stale', 'stale-run')],
+      liveJobs: true,
+    })
+    await expect(h.service.reconcileInterruptedRuns()).rejects.toThrow(/trabalho de agente ativo/)
+    expect(h.repository.runMap.get('stale-run')).toMatchObject({ status: 'RUNNING' })
+    expect(h.repository.leaseMap.get('lease-stale')).toMatchObject({ active: true })
+    expect(() => h.service.start(request())).toThrowError(expect.objectContaining({ code: 'INVALID_STATE' }))
+
+    h.jobs.live = false
+    await expect(h.service.reconcileInterruptedRuns()).resolves.toMatchObject({ interruptedRuns: 1, releasedLeases: 1 })
+  })
+
+  it('rechecks live jobs before mutation and stays blocked after an incomplete storage write', async () => {
+    const raced = harness({
+      initialRuns: [persistedRun('stale-run')],
+      initialLeases: [persistedLease('lease-stale', 'stale-run')],
+      liveJobChecks: [false, true],
+    })
+    await expect(raced.service.reconcileInterruptedRuns()).rejects.toThrow(/trabalho de agente ativo/)
+    expect(raced.repository.runMap.get('stale-run')).toMatchObject({ status: 'RUNNING' })
+    expect(raced.repository.leaseMap.get('lease-stale')).toMatchObject({ active: true })
+
+    const incomplete = harness({
+      initialLeases: [persistedLease('lease-orphan', 'missing-run')],
+      discardLeaseWrites: true,
+    })
+    await expect(incomplete.service.reconcileInterruptedRuns()).rejects.toThrow(/não conseguiu eliminar/)
+    expect(incomplete.repository.leaseMap.get('lease-orphan')).toMatchObject({ active: true })
+    expect(() => incomplete.service.start(request())).toThrowError(expect.objectContaining({ code: 'INVALID_STATE' }))
+  })
+
   it('uses one canonical lease-path grammar and rejects ambiguous platform paths', () => {
     expect(normalizeDelegationPath('src/safe')).toBe('src/safe')
     expect(normalizeDelegationPath('src\\safe')).toBe('src/safe')

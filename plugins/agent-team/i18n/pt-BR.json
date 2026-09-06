@@ -17,7 +17,8 @@
     "tier": "Use a confirmação correspondente ao nível de segurança da equipe.",
     "nothingReady": "Nenhuma tarefa pode começar agora. Revise e aplique as propostas anteriores antes de continuar.",
     "owner": "Somente a pessoa que iniciou a equipe pode continuá-la ou cancelá-la.",
-    "persistence": "Não foi possível registrar a execução da tarefa; ela foi cancelada com segurança."
+    "persistence": "Não foi possível registrar a execução da tarefa; ela foi cancelada com segurança.",
+    "reconciliationIncomplete": "A equipe não pode reconciliar enquanto o registro do Harness ainda informa trabalho ativo."
   },
   "status": {
     "running": "Há assistentes trabalhando em cópias isoladas.",
@@ -25,7 +26,8 @@
     "attention": "Uma ou mais tarefas precisam de atenção antes de continuar.",
     "completed": "Todas as tarefas foram revisadas e aplicadas pela pessoa.",
     "cancelled": "A equipe foi cancelada; propostas já concluídas continuam disponíveis para revisão.",
-    "cancelReason": "Equipe cancelada pela pessoa no DZ23 STUDIO."
+    "cancelReason": "Equipe cancelada pela pessoa no DZ23 STUDIO.",
+    "processLost": "A tarefa foi interrompida pelo reinício do DZ23 STUDIO; a cópia isolada foi preservada para revisão."
   },
   "roles": {
     "implementer": "Implemente somente a tarefa descrita e respeite os caminhos aprovados.",

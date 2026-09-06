@@ -265,9 +265,13 @@ export class StudioAssistantBridge {
     const run = this.#scopedRun(runId, principal, repository)
     if (run.approved_by !== principal.userId) throw new AssistantBridgeError('FORBIDDEN', t('errors.cancelOwner'))
     const active = this.#jobs.get(runId)
-    if (active === undefined || active.userId !== principal.userId) {
+    if (active === undefined) {
+      if (run.status !== 'RUNNING') {
+        return { run_id: runId, outcome: 'already-finished' as const, limitation: t('runtime.cancelReconciled') }
+      }
       throw new AssistantBridgeError('CANCEL_UNAVAILABLE', t('errors.cancelUnavailable'))
     }
+    if (active.userId !== principal.userId) throw new AssistantBridgeError('FORBIDDEN', t('errors.cancelOwner'))
     const outcome = this.dependencies.killJob(active.jobId, active.owner, reason?.trim() || t('runtime.cancelReason'))
     if (outcome === 'already-finished') this.releaseJob(active.jobId)
     return { run_id: runId, outcome, limitation: t('runtime.cancelBeta') }

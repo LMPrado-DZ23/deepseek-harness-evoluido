@@ -75,10 +75,80 @@ function harness(options: {
     approval: { approved: true, tier: 'T2', approvedBy: 'user-1' },
     ...overrides,
   })
-  return { service, request, teams, tasks, runs, start, killJob }
+  return { service, request, teams, tasks, runs, start, killJob, repository, agents }
 }
 
 describe('StudioAgentTeamService', () => {
+  it('reconciles team tasks from the authoritative agent runs after restart', async () => {
+    const h = harness()
+    await h.service.start(h.request())
+    const firstTeam = h.teams.get('team-1')!
+    const firstTask = h.tasks.get('team-1:implementation')!
+    h.teams.set('team-2', { ...firstTeam, team_id: 'team-2' })
+    h.tasks.set('team-2:implementation', { ...firstTask, team_id: 'team-2', run_id: 'run-2', job_id: 'job-2' })
+    h.teams.set('team-3', {
+      ...firstTeam,
+      team_id: 'team-3',
+      status: 'WAITING_FOR_APPROVAL',
+      diagnostic: 'Há propostas para revisar ou tarefas aguardando a aplicação das dependências.',
+    })
+    h.tasks.set('team-3:implementation', { ...firstTask, team_id: 'team-3', status: 'PROPOSED', run_id: 'run-3', job_id: null })
+    h.teams.set('team-4', { ...firstTeam, team_id: 'team-4' })
+    h.tasks.set('team-4:implementation', { ...firstTask, team_id: 'team-4', run_id: 'run-4', job_id: 'job-4' })
+    h.teams.set('team-5', { ...firstTeam, team_id: 'team-5' })
+    h.tasks.set('team-5:implementation', { ...firstTask, team_id: 'team-5', run_id: null, job_id: null })
+    h.runs.push(
+      run('run-4', 'PROPOSED'),
+      run('run-3', 'PROPOSED'),
+      run('run-2', 'FAILED', 'segundo reinício'),
+      run('run-1', 'FAILED', 'reinício detectado'),
+    )
+    const restarted = new StudioAgentTeamService({
+      repository: h.repository,
+      agents: h.agents,
+      killJob: h.killJob,
+      now: () => new Date(now),
+    })
+    await expect(restarted.reconcileInterruptedTeams()).resolves.toEqual({
+      updatedTasks: 4, updatedTeams: 4, reconciledAt: now,
+    })
+    expect(h.tasks.get('team-1:implementation')).toMatchObject({ status: 'FAILED', diagnostic: 'reinício detectado' })
+    expect(h.teams.get('team-1')).toMatchObject({ status: 'NEEDS_ATTENTION' })
+    expect(h.tasks.get('team-2:implementation')).toMatchObject({ status: 'FAILED', diagnostic: 'segundo reinício' })
+    expect(h.teams.get('team-2')).toMatchObject({ status: 'NEEDS_ATTENTION' })
+    expect(h.teams.get('team-3')).toMatchObject({ status: 'WAITING_FOR_APPROVAL' })
+    expect(h.tasks.get('team-4:implementation')).toMatchObject({ status: 'PROPOSED', diagnostic: null })
+    expect(h.teams.get('team-4')).toMatchObject({ status: 'WAITING_FOR_APPROVAL' })
+    expect(h.tasks.get('team-5:implementation')).toMatchObject({
+      status: 'FAILED', diagnostic: expect.stringContaining('interrompida pelo reinício'),
+    })
+    expect(restarted.activeTaskCount()).toBe(0)
+    expect(h.killJob).not.toHaveBeenCalled()
+  })
+
+  it('fails closed when agent reconciliation is incomplete and marks a missing run as lost', async () => {
+    const live = harness()
+    await live.service.start(live.request())
+    live.runs.push(run('run-1', 'RUNNING'))
+    const blocked = new StudioAgentTeamService({
+      repository: live.repository, agents: live.agents, killJob: live.killJob,
+      now: () => new Date(now),
+    })
+    await expect(blocked.reconcileInterruptedTeams()).rejects.toThrow(/ainda informa trabalho ativo/)
+    expect(live.tasks.get('team-1:implementation')).toMatchObject({ status: 'RUNNING' })
+
+    const missing = harness()
+    await missing.service.start(missing.request())
+    const restarted = new StudioAgentTeamService({
+      repository: missing.repository, agents: missing.agents, killJob: missing.killJob,
+      now: () => new Date(now),
+    })
+    await expect(restarted.reconcileInterruptedTeams()).resolves.toMatchObject({ updatedTasks: 1, updatedTeams: 1 })
+    expect(missing.tasks.get('team-1:implementation')).toMatchObject({
+      status: 'FAILED', diagnostic: expect.stringContaining('interrompida pelo reinício'),
+    })
+  })
+
   it('starts independent tasks in parallel and derives waiting and completed states from authoritative runs', async () => {
     const h = harness()
     const started = await h.service.start(h.request({ tasks: [
