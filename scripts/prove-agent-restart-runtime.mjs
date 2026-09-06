@@ -16,6 +16,8 @@ const runtimeRoot = process.env.DZ23_M75_RUNTIME_ROOT
 
 assert.equal(process.platform, 'linux', 'M75 runtime restart proof must run on Linux/WSL2')
 assert.ok(studioRoot.startsWith('/home/'), `M75 proof must run on ext4, got ${studioRoot}`)
+assert.equal(existsSync(join(studioRoot, '.env')), false,
+  'M75 proof refuses a project .env so provider credentials cannot enter the child runtime')
 assert.ok(existsSync(join(upstreamRoot, '.git')), `missing pinned upstream: ${upstreamRoot}`)
 assert.equal(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: upstreamRoot, encoding: 'utf8' }).trim(),
   '6c705be1ce6774a000d061da41d1823b03a3d42c')
