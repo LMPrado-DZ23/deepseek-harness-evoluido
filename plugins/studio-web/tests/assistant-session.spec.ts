@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -127,6 +127,13 @@ describe('governed Assistant Session launcher', () => {
     adoption.inspect.mockResolvedValue({ meta: { cwd: adoption.repository.repositoryPath, agentPreset: ASSISTANT_AGENT_PRESET } })
     adoption.create.mockRejectedValue(new Error('preset changed'))
     await expect(adoption.launcher.launch(identitySession(['existing']))).rejects.toMatchObject({ code: 'SESSION_CONFLICT' })
+
+    const changedPreset = await fixture({
+      inspect: async () => ({ meta: { cwd: '', agentPreset: ASSISTANT_AGENT_PRESET } }),
+    })
+    changedPreset.inspect.mockResolvedValue({ meta: { cwd: changedPreset.repository.repositoryPath, agentPreset: ASSISTANT_AGENT_PRESET } })
+    changedPreset.create.mockResolvedValue({ sessionId: 'existing' as never, agentPreset: 'default' })
+    await expect(changedPreset.launcher.launch(identitySession(['existing']))).rejects.toMatchObject({ code: 'SESSION_CONFLICT' })
   })
 
   it('validates repository scope, uniqueness, absolute Git roots and input shape before serving', async () => {
@@ -156,11 +163,28 @@ describe('governed Assistant Session launcher', () => {
       identity: {} as never, tenancy: {} as never, sessions: {} as never,
       repositories: [null as never],
     })).rejects.toThrow('objeto')
+    await expect(AssistantSessionLauncher.create({
+      identity: {} as never, tenancy: {} as never, sessions: {} as never,
+      repositories: [[] as never],
+    })).rejects.toThrow('objeto')
     await writeFile(join(plain, '.git'), 'bad')
     await expect(AssistantSessionLauncher.create({
       identity: {} as never, tenancy: {} as never, sessions: {} as never,
       repositories: [{ ...valid, orgId: '', repositoryPath: plain }],
     })).rejects.toThrow('organização')
+
+    const file = join(plain, 'not-a-directory'); await writeFile(file, 'plain')
+    await expect(AssistantSessionLauncher.create({
+      identity: {} as never, tenancy: {} as never, sessions: {} as never,
+      repositories: [{ ...valid, repositoryPath: file }],
+    })).rejects.toThrow('pasta')
+
+    const linked = await mkdtemp(join(tmpdir(), 'dz23-linked-git-')); roots.push(linked)
+    await symlink(join(valid.repositoryPath, '.git'), join(linked, '.git'))
+    await expect(AssistantSessionLauncher.create({
+      identity: {} as never, tenancy: {} as never, sessions: {} as never,
+      repositories: [{ ...valid, repositoryPath: linked }],
+    })).rejects.toThrow('raiz Git')
   })
 })
 

@@ -49,6 +49,7 @@ export default defineConfig({
         'plugins/agents/src/{model,service}.ts': { 100: true },
         'plugins/agent-team/src/{model,service}.ts': { 100: true },
         'plugins/assistant-bridge/src/{catalog,closed-tool,service}.ts': { 100: true },
+        'plugins/studio-web/src/assistant-session.ts': { 100: true },
         'plugins/route-health/src/{model,service}.ts': { 100: true },
         'plugins/prompt-to-app/src/{model,security,state}.ts': { 100: true },
         'plugins/prompt-to-app/src/{data-generator,import-policy}.ts': { 100: true },
