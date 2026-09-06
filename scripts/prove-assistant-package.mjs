@@ -30,12 +30,13 @@ try {
   await writeFile(resolve(stagedAgents, 'package.json'), JSON.stringify({ type: agentsManifest.type }))
   const profileRoot = resolve(root, 'dsh-home/profiles/studio')
   const profileManifest = JSON.parse(await readFile(resolve(profileRoot, 'package.json'), 'utf8'))
-  if (profileManifest.dependencies?.['@dz23-studio/assistant-bridge'] !== 'link:../../../plugins/assistant-bridge') {
+  if (profileManifest.dependencies?.['@dz23-studio/assistant-bridge'] !== 'workspace:*') {
     throw new Error('O profile studio não declara a ponte do Assistente.')
   }
-  const profileLock = await readFile(resolve(profileRoot, 'pnpm-lock.yaml'), 'utf8')
-  if (!profileLock.includes("'@dz23-studio/assistant-bridge':") || !profileLock.includes('specifier: link:../../../plugins/assistant-bridge')) {
-    throw new Error('O lockfile do profile não fixa a ponte do Assistente.')
+  const rootLock = await readFile(resolve(root, 'pnpm-lock.yaml'), 'utf8')
+  const profileImporter = lockImporter(rootLock, 'dsh-home/profiles/studio')
+  if (!profileImporter.includes("'@dz23-studio/assistant-bridge':") || !profileImporter.includes('specifier: workspace:*')) {
+    throw new Error('O lockfile raiz não fixa a ponte no profile studio.')
   }
   const presetRoot = resolve(root, 'dsh-home/.agent-presets')
   const preset = await readFile(resolve(presetRoot, 'dz23-assistant/agent.cordis.yml'), 'utf8')
@@ -78,6 +79,13 @@ try {
     rm(stagedProfile, { recursive: true, force: true }),
     rm(runtimeGitProofRoot, { recursive: true, force: true }),
   ])
+}
+
+function lockImporter(lockfile, name) {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const match = lockfile.match(new RegExp(`^  ${escaped}:\\r?\\n([\\s\\S]*?)(?=^  [^ \\r\\n].*:\\r?$|^packages:|^snapshots:)`, 'm'))
+  if (match === null) throw new Error(`Importador ausente no lockfile raiz: ${name}`)
+  return match[0]
 }
 
 async function proveEmittedGitBoundary(GitWorktreeManager) {
