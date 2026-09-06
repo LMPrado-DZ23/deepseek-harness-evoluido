@@ -306,14 +306,14 @@ function validateRequest(request: AgentTeamStartRequest): { name: string; tasks:
     if (!Array.isArray(task.intendedPaths) || task.intendedPaths.length < 1 || task.intendedPaths.length > 20) {
       throw new AgentTeamError('INVALID_PLAN', t('errors.taskPaths'))
     }
-    const intendedPaths = [...new Set(task.intendedPaths.map(path => normalizeDelegationPath(path)))]
-    const dependsOn = [...new Set(task.dependsOn)]
+    const intendedPaths = [...new Set<string>(task.intendedPaths.map((path: string) => normalizeDelegationPath(path)))]
+    const dependsOn = [...new Set<string>(task.dependsOn)]
     return { ...task, title, prompt, intendedPaths, dependsOn }
   })
   const ids = new Set(tasks.map(task => task.taskId))
   if (ids.size !== tasks.length) throw new AgentTeamError('INVALID_PLAN', t('errors.taskId'))
   for (const task of tasks) {
-    if (task.dependsOn.some(id => id === task.taskId || !ids.has(id))) {
+    if (task.dependsOn.some((id: string) => id === task.taskId || !ids.has(id))) {
       throw new AgentTeamError('INVALID_PLAN', t('errors.dependency', { task: task.taskId }))
     }
   }
