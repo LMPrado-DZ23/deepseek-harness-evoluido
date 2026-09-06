@@ -777,7 +777,407 @@ docker image inspect --format '{{json .RepoDigests}}' "$image" | grep -Fq "@$dig
         -TimeoutSeconds 60 | Out-Null
 }
 
+function New-Dz23PreflightCheck {
+    param(
+        [Parameter(Mandatory)][string]$Id,
+        [Parameter(Mandatory)][ValidateSet('PASS', 'WARN', 'BLOCKED', 'NOT_CONFIGURED')][string]$State,
+        [Parameter(Mandatory)][string]$Summary,
+        [Parameter(Mandatory)][string]$Remediation,
+        [hashtable]$Details = @{}
+    )
+    [pscustomobject][ordered]@{
+        id = $Id
+        state = $State
+        summary = $Summary
+        remediation = $Remediation
+        details = [pscustomobject]$Details
+    }
+}
+
+function ConvertFrom-Dz23ProbeLines {
+    param([AllowNull()][string]$Value, [Parameter(Mandatory)][string[]]$AllowedKeys)
+    $values = @{}
+    foreach ($rawLine in ($Value -split "`r?`n")) {
+        if ([string]::IsNullOrWhiteSpace($rawLine)) { continue }
+        if ($rawLine -cnotmatch '^([a-z][a-z0-9_]*)=([A-Za-z0-9._/+:-]*)$') {
+            throw 'A sonda retornou dados malformados.'
+        }
+        $key = $Matches[1]
+        if ($AllowedKeys -cnotcontains $key -or $values.ContainsKey($key)) {
+            throw 'A sonda retornou campos inesperados ou duplicados.'
+        }
+        $values[$key] = $Matches[2]
+    }
+    $values
+}
+
+function Invoke-Dz23WindowsPreflight {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Distro,
+        [ValidateSet('local', 'tailscale', 'public')][string]$Profile = 'local',
+        [string]$Hostname = '',
+        [string]$Origin = '',
+        [string]$RpId = '',
+        [ValidateRange(1, 65535)][int[]]$Ports = @(),
+        [string]$SourcePath = '',
+        [scriptblock]$CommandInvoker,
+        [hashtable]$SystemSnapshot,
+        [object[]]$PortSnapshot,
+        [string[]]$DnsSnapshot,
+        [hashtable]$FirewallSnapshot,
+        [hashtable]$ClockSnapshot
+    )
+
+    if ($CommandInvoker -and $env:DZ23_M6_TEST_MODE -ne '1') {
+        throw 'O executor simulado só pode ser usado pelos testes, com DZ23_M6_TEST_MODE=1.'
+    }
+    if ($Distro -cnotmatch '^[A-Za-z0-9._-]{1,80}$') {
+        throw 'Informe explicitamente um nome de distribuição WSL válido.'
+    }
+    $Ports = @($Ports | Sort-Object -Unique)
+    if ($Ports.Count -eq 0) {
+        $Ports = if ($Profile -eq 'local') { @(8080, 8443) } else { @(80, 443) }
+    }
+
+    $checks = [Collections.Generic.List[object]]::new()
+    $add = {
+        param($Id, $State, $Summary, $Remediation, $Details = @{})
+        $checks.Add((New-Dz23PreflightCheck -Id $Id -State $State -Summary $Summary -Remediation $Remediation -Details $Details))
+    }
+    $run = {
+        param([string]$FilePath, [string[]]$Arguments, [int]$TimeoutSeconds = 30)
+        try {
+            Invoke-Dz23Native -FilePath $FilePath -ArgumentList $Arguments -CommandInvoker $CommandInvoker `
+                -TimeoutSeconds $TimeoutSeconds -OutputLimit 65536
+        }
+        catch {
+            # Erros nativos podem conter ambiente, caminhos ou credenciais. O relatório
+            # deliberadamente conserva apenas a categoria e nunca a mensagem original.
+            New-Dz23Result -ExitCode 127
+        }
+    }
+
+    if (-not $SystemSnapshot) {
+        try {
+            $computer = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop
+            $processors = @(Get-CimInstance Win32_Processor -ErrorAction Stop)
+            $longPaths = (Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' `
+                -Name LongPathsEnabled -ErrorAction Stop).LongPathsEnabled
+            $SystemSnapshot = @{
+                IsWindows = $IsWindows
+                PowerShellMajor = $PSVersionTable.PSVersion.Major
+                WindowsBuild = [Environment]::OSVersion.Version.Build
+                CpuCount = [Environment]::ProcessorCount
+                MemoryBytes = [uint64]$computer.TotalPhysicalMemory
+                Virtualization = [bool]($computer.HypervisorPresent -or ($processors | Where-Object VirtualizationFirmwareEnabled))
+                LongPathsEnabled = ([int]$longPaths -eq 1)
+            }
+        }
+        catch {
+            $SystemSnapshot = @{ IsWindows = $IsWindows; PowerShellMajor = $PSVersionTable.PSVersion.Major }
+        }
+    }
+    $psMajor = [int]($SystemSnapshot.PowerShellMajor ?? 0)
+    if ($psMajor -ge 7) {
+        & $add 'powershell.version' PASS 'PowerShell 7 ou superior está disponível.' 'Nenhuma ação necessária.' @{ major = $psMajor }
+    } else {
+        & $add 'powershell.version' BLOCKED 'PowerShell 7 ou superior é obrigatório.' 'Instale PowerShell 7 pelo canal oficial e execute este diagnóstico novamente.' @{ detected_major = $psMajor }
+    }
+    $build = [int]($SystemSnapshot.WindowsBuild ?? 0)
+    if ([bool]$SystemSnapshot.IsWindows -and $build -ge 22000) {
+        & $add 'windows.version' PASS 'Windows 11 foi confirmado.' 'Nenhuma ação necessária.' @{ build = $build }
+    } else {
+        & $add 'windows.version' BLOCKED 'Windows 11 build 22000 ou superior não foi confirmado.' 'Atualize para uma edição suportada do Windows 11.' @{ build = $build }
+    }
+
+    $wslScript = @'
+set -u
+kernel="$(uname -r 2>/dev/null || true)"
+uid="$(id -u 2>/dev/null || true)"
+home_path="$(getent passwd "$uid" 2>/dev/null | cut -d: -f6)"
+if [ -n "$home_path" ] && [ -d "$home_path" ] && [ ! -L "$home_path" ]; then
+  resolved_home="$(realpath -e -- "$home_path" 2>/dev/null || true)"
+  if [ "$resolved_home" = "$home_path" ] && [ "$(stat -c %u -- "$home_path" 2>/dev/null || true)" = "$uid" ]; then
+    home_fs="$(findmnt -n -o FSTYPE -T "$home_path" 2>/dev/null || true)"
+    available_kb="$(df -Pk "$home_path" 2>/dev/null | awk 'NR==2 {print $4}')"
+  else home_fs=''; available_kb=''; fi
+else home_fs=''; available_kb=''; fi
+printf 'kernel=%s\nhome_fs=%s\nhome_path=%s\navailable_kb=%s\n' "$kernel" "$home_fs" "$home_path" "$available_kb"
+for utility in bash id getent cut stat df git docker realpath mountpoint findmnt sha256sum gzip flock od awk sed grep sort; do
+  if command -v "$utility" >/dev/null 2>&1; then value=1; else value=0; fi
+  printf 'util_%s=%s\n' "$utility" "$value"
+done
+docker_os=''
+if command -v docker >/dev/null 2>&1; then docker_os="$(docker info --format '{{.OSType}}' 2>/dev/null || true)"; fi
+printf 'docker_os=%s\n' "$docker_os"
+'@
+    $wslResult = & $run 'wsl.exe' @(
+        '-d', $Distro, '--exec', '/usr/bin/env', '-i', 'PATH=/usr/bin:/bin', 'LANG=C.UTF-8',
+        '/bin/bash', '--noprofile', '--norc', '-c', $wslScript
+    ) 60
+    $wslValues = $null
+    if ($wslResult.ExitCode -eq 0) {
+        try {
+            $wslValues = ConvertFrom-Dz23ProbeLines -Value $wslResult.StdOut -AllowedKeys @(
+                'kernel', 'home_fs', 'home_path', 'available_kb', 'docker_os',
+                'util_bash', 'util_id', 'util_getent', 'util_cut', 'util_stat', 'util_df',
+                'util_git', 'util_docker', 'util_realpath', 'util_mountpoint', 'util_findmnt',
+                'util_sha256sum', 'util_gzip', 'util_flock', 'util_od', 'util_awk', 'util_sed',
+                'util_grep', 'util_sort'
+            )
+        } catch { $wslValues = $null }
+    }
+    $isWsl2 = $wslValues -and $wslValues.kernel -match '(?i)microsoft-standard-wsl2'
+    if ($isWsl2) {
+        & $add 'wsl.distro' PASS 'A distribuição escolhida está operacional como WSL2.' 'Nenhuma ação necessária.' @{}
+    } else {
+        & $add 'wsl.distro' BLOCKED 'A distribuição escolhida não respondeu como WSL2.' 'Confirme o nome em wsl --list --verbose e configure essa distribuição como versão 2.' @{}
+    }
+    $linuxHome = $wslValues -and $wslValues.home_path -match '^/(home/[^/]+|root)$' -and $wslValues.home_fs -match '^(ext2/ext3|ext2|ext3|ext4)$'
+    if ($linuxHome) {
+        & $add 'wsl.linux-filesystem' PASS 'A pasta pessoal está no disco Linux do WSL2.' 'Mantenha a instalação sob /home, nunca em /mnt.' @{ filesystem = $wslValues.home_fs }
+    } else {
+        & $add 'wsl.linux-filesystem' BLOCKED 'Não foi possível confirmar /home em ext2/ext3/ext4.' 'Escolha uma distribuição WSL2 saudável e instale sob /home, nunca em /mnt/c.' @{}
+    }
+    $requiredUtilities = @('bash', 'id', 'getent', 'cut', 'stat', 'df', 'git', 'docker', 'realpath', 'mountpoint', 'findmnt', 'sha256sum', 'gzip', 'flock', 'od', 'awk', 'sed', 'grep', 'sort')
+    $missingUtilities = @($requiredUtilities | Where-Object { -not $wslValues -or $wslValues["util_$_"] -ne '1' })
+    if ($missingUtilities.Count -eq 0) {
+        & $add 'wsl.utilities' PASS 'Os utilitários Linux necessários estão disponíveis.' 'Nenhuma ação necessária.' @{ count = $requiredUtilities.Count }
+    } else {
+        & $add 'wsl.utilities' BLOCKED 'Faltam utilitários obrigatórios dentro da distribuição.' 'Instale os pacotes ausentes na distribuição e execute novamente.' @{ missing = @($missingUtilities) }
+    }
+    if ($wslValues -and $wslValues.docker_os -ceq 'linux') {
+        & $add 'docker.wsl-integration' PASS 'A integração Docker da distribuição responde com engine Linux.' 'Nenhuma ação necessária.' @{}
+    } else {
+        & $add 'docker.wsl-integration' BLOCKED 'O Docker não está operacional dentro da distribuição escolhida.' 'No Docker Desktop, habilite a integração apenas para essa distribuição e confirme contêineres Linux.' @{}
+    }
+
+    $dockerResult = & $run 'docker.exe' @('info', '--format', '{{.OSType}}') 30
+    if ($dockerResult.ExitCode -eq 0 -and $dockerResult.StdOut.Trim() -ceq 'linux') {
+        & $add 'docker.engine' PASS 'Docker CLI e daemon estão disponíveis em modo Linux.' 'Nenhuma ação necessária.' @{}
+    } elseif ($dockerResult.ExitCode -eq 0) {
+        & $add 'docker.engine' BLOCKED 'O Docker está usando contêineres Windows.' 'Altere o Docker Desktop para contêineres Linux e execute novamente.' @{}
+    } else {
+        & $add 'docker.engine' BLOCKED 'Docker CLI ou daemon não está disponível.' 'Instale e abra o Docker Desktop manualmente; este diagnóstico não o inicia.' @{}
+    }
+    $gitResult = & $run 'git.exe' @('--version') 20
+    if ($gitResult.ExitCode -eq 0 -and $gitResult.StdOut -match '(?i)^git version\s+[0-9]+\.[0-9]+') {
+        & $add 'git.windows' PASS 'Git para Windows está disponível.' 'Nenhuma ação necessária.' @{}
+    } else {
+        & $add 'git.windows' BLOCKED 'Git para Windows não foi confirmado.' 'Instale Git para Windows e abra um novo PowerShell.' @{}
+    }
+
+    $composeVersionResult = & $run 'docker.exe' @('compose', 'version', '--short') 20
+    $composeVersion = $null
+    if ($composeVersionResult.ExitCode -eq 0 -and $composeVersionResult.StdOut.Trim() -match '^v?([0-9]+)\.([0-9]+)\.([0-9]+)(?:[-+][0-9A-Za-z.-]+)?$') {
+        $composeVersion = [version]"$($Matches[1]).$($Matches[2]).$($Matches[3])"
+    }
+    if ($composeVersion -and $composeVersion -ge [version]'2.20.0') {
+        & $add 'compose.version' PASS 'Docker Compose v2 compatível foi confirmado.' 'Nenhuma ação necessária.' @{ version = $composeVersion.ToString() }
+    } else {
+        & $add 'compose.version' BLOCKED 'Não foi possível confirmar Docker Compose v2.20 ou superior.' 'Atualize o Docker Desktop e confirme docker compose version.' @{}
+    }
+    $composeHelp = @(
+        @{ Args = @('compose', 'up', '--help'); Flags = @('--wait', '--wait-timeout', '--no-build') },
+        @{ Args = @('compose', 'config', '--help'); Flags = @('--images', '--services', '--volumes', '--networks', '--quiet') },
+        @{ Args = @('compose', 'ps', '--help'); Flags = @('--status', '--services', '--quiet') }
+    )
+    $unsupported = [Collections.Generic.List[string]]::new()
+    foreach ($help in $composeHelp) {
+        $helpResult = & $run 'docker.exe' $help.Args 20
+        foreach ($flag in $help.Flags) {
+            if ($helpResult.ExitCode -ne 0 -or $helpResult.StdOut -notmatch "(?m)(^|[ ,])$([regex]::Escape($flag))([ =,]|$)") { $unsupported.Add($flag) }
+        }
+    }
+    if ($unsupported.Count -eq 0) {
+        & $add 'compose.flags' PASS 'As flags usadas pelo lifecycle são suportadas, sem iniciar serviços.' 'Nenhuma ação necessária.' @{ probed_with_help_only = $true }
+    } else {
+        & $add 'compose.flags' BLOCKED 'O Compose não comprovou suporte a todas as flags necessárias.' 'Atualize o Docker Desktop; nenhuma pilha foi iniciada por este diagnóstico.' @{ missing = @($unsupported | Sort-Object -Unique) }
+    }
+
+    $cpu = [int]($SystemSnapshot.CpuCount ?? 0)
+    if ($cpu -lt 4) { & $add 'resources.cpu' BLOCKED 'Há menos de 4 CPUs lógicas disponíveis.' 'Disponibilize no mínimo 4 CPUs lógicas; 8 são recomendadas.' @{ detected = $cpu; minimum = 4; recommended = 8 } }
+    elseif ($cpu -lt 8) { & $add 'resources.cpu' WARN 'CPU atende ao mínimo, mas fica abaixo do recomendado.' 'Use 8 CPUs lógicas para melhor desempenho.' @{ detected = $cpu; minimum = 4; recommended = 8 } }
+    else { & $add 'resources.cpu' PASS 'CPU atende à recomendação.' 'Nenhuma ação necessária.' @{ detected = $cpu; minimum = 4; recommended = 8 } }
+    $memoryGiB = [math]::Floor(([double]($SystemSnapshot.MemoryBytes ?? 0)) / 1GB)
+    if ($memoryGiB -lt 8) { & $add 'resources.memory' BLOCKED 'Há menos de 8 GiB de memória física.' 'Disponibilize no mínimo 8 GiB; 16 GiB são recomendados.' @{ detected_gib = $memoryGiB; minimum_gib = 8; recommended_gib = 16 } }
+    elseif ($memoryGiB -lt 16) { & $add 'resources.memory' WARN 'Memória atende ao mínimo, mas fica abaixo do recomendado.' 'Use 16 GiB para melhor desempenho.' @{ detected_gib = $memoryGiB; minimum_gib = 8; recommended_gib = 16 } }
+    else { & $add 'resources.memory' PASS 'Memória atende à recomendação.' 'Nenhuma ação necessária.' @{ detected_gib = $memoryGiB; minimum_gib = 8; recommended_gib = 16 } }
+    $diskGiB = if ($wslValues -and $wslValues.available_kb -match '^[0-9]+$') { [math]::Floor(([double]$wslValues.available_kb * 1KB) / 1GB) } else { 0 }
+    if ($diskGiB -lt 20) { & $add 'resources.disk' BLOCKED 'Há menos de 20 GiB livres no disco Linux do WSL2.' 'Libere no mínimo 20 GiB em /home; 50 GiB são recomendados.' @{ detected_gib = $diskGiB; minimum_gib = 20; recommended_gib = 50 } }
+    elseif ($diskGiB -lt 50) { & $add 'resources.disk' WARN 'Disco atende ao mínimo, mas fica abaixo do recomendado.' 'Mantenha 50 GiB livres no disco Linux.' @{ detected_gib = $diskGiB; minimum_gib = 20; recommended_gib = 50 } }
+    else { & $add 'resources.disk' PASS 'Disco Linux atende à recomendação.' 'Nenhuma ação necessária.' @{ detected_gib = $diskGiB; minimum_gib = 20; recommended_gib = 50 } }
+
+    if ([bool]$SystemSnapshot.Virtualization -or $isWsl2) {
+        & $add 'windows.virtualization' PASS 'A virtualização necessária ao WSL2 está operacional.' 'Nenhuma ação necessária.' @{}
+    } else {
+        & $add 'windows.virtualization' BLOCKED 'A virtualização não foi confirmada.' 'Habilite a virtualização no firmware e os recursos oficiais do WSL2.' @{}
+    }
+
+    $portInspectionAvailable = $true
+    if ($null -eq $PortSnapshot) {
+        try {
+            $PortSnapshot = @(Get-NetTCPConnection -State Listen -ErrorAction Stop | Where-Object { $Ports -contains $_.LocalPort } | ForEach-Object {
+                $name = 'processo-desconhecido'
+                try { $name = (Get-Process -Id $_.OwningProcess -ErrorAction Stop).ProcessName } catch {}
+                [pscustomobject]@{ Port = [int]$_.LocalPort; ProcessName = $name }
+            })
+        } catch { $PortSnapshot = @(); $portInspectionAvailable = $false }
+    }
+    $occupied = @($PortSnapshot | Where-Object { $Ports -contains [int]$_.Port } | ForEach-Object {
+        $safeName = ([string]$_.ProcessName -replace '[^A-Za-z0-9._-]', '_')
+        if ($safeName.Length -gt 40) { $safeName = $safeName.Substring(0, 40) }
+        if (-not $safeName -or $safeName -match '(?i)(secret|token|password|passwd|bearer|api[_-]?key)') { $safeName = 'processo-redigido' }
+        [pscustomobject]@{ port = [int]$_.Port; process = $safeName }
+    })
+    if (-not $portInspectionAvailable) {
+        & $add 'network.ports' BLOCKED 'O Windows não permitiu verificar as portas necessárias.' 'Execute o diagnóstico em uma sessão que possa consultar as conexões TCP; nenhuma porta foi alterada.' @{ ports = @($Ports) }
+    } elseif ($occupied.Count -eq 0) {
+        & $add 'network.ports' PASS 'As portas configuradas estão livres.' 'Nenhuma ação necessária.' @{ ports = @($Ports) }
+    } else {
+        & $add 'network.ports' BLOCKED 'Uma ou mais portas necessárias já estão em uso.' 'Feche ou reconfigure o aplicativo indicado e execute novamente.' @{ occupied = $occupied }
+    }
+
+    if (-not $Hostname) { $Hostname = if ($Profile -eq 'local') { 'studio.dz23.localhost' } else { '' } }
+    if (-not $Origin) { $Origin = if ($Profile -eq 'local') { 'http://studio.dz23.localhost:8080' } else { '' } }
+    if (-not $RpId) { $RpId = if ($Profile -eq 'local') { 'localhost' } else { '' } }
+    $networkValid = $Hostname.Length -le 253 -and $Hostname -ceq $Hostname.ToLowerInvariant() -and
+        $Hostname -eq $Hostname.TrimEnd('.') -and [Uri]::CheckHostName($Hostname) -eq [UriHostNameType]::Dns
+    $originUri = $null
+    try { if ($Origin) { $originUri = [uri]$Origin } } catch {}
+    $originValid = $originUri -and -not $originUri.UserInfo -and -not $originUri.Query -and -not $originUri.Fragment -and $originUri.AbsolutePath -eq '/' -and $originUri.Host -ieq $Hostname
+    if ($Profile -eq 'local') {
+        $networkValid = $networkValid -and $Hostname -ceq 'studio.dz23.localhost' -and $RpId -ceq 'localhost' -and
+            $originValid -and $originUri.Scheme -ceq 'http' -and $originUri.Port -eq 8080
+    } elseif ($Profile -eq 'tailscale') {
+        $networkValid = $networkValid -and $Hostname -match '(?i)^[a-z0-9-]+(?:\.[a-z0-9-]+)*\.ts\.net$' -and $RpId -ieq $Hostname -and $originValid -and $originUri.Scheme -ceq 'https'
+    } else {
+        $networkValid = $networkValid -and $Hostname.Contains('.') -and $Hostname -notmatch '(?i)(^|\.)(localhost|local|internal|invalid|example|test)$' -and $RpId -ieq $Hostname -and $originValid -and $originUri.Scheme -ceq 'https'
+    }
+    if ($networkValid) {
+        & $add 'identity.profile' PASS 'Hostname, origem e RP ID são coerentes com o perfil escolhido.' 'Nenhuma ação necessária.' @{ profile = $Profile }
+    } else {
+        & $add 'identity.profile' BLOCKED 'Hostname, origem e RP ID estão ausentes ou incoerentes.' 'Use localhost no perfil local; nos demais, use HTTPS e o mesmo hostname no RP ID.' @{ profile = $Profile }
+    }
+    $dnsQueried = $false
+    if ($Profile -eq 'local') {
+        & $add 'network.dns' NOT_CONFIGURED 'DNS externo não é necessário no perfil local.' 'Nenhuma ação necessária.' @{}
+    } else {
+        if ($null -eq $DnsSnapshot) {
+            $dnsQueried = $true
+            try { $DnsSnapshot = @([Net.Dns]::GetHostAddresses($Hostname) | ForEach-Object IPAddressToString) }
+            catch { $DnsSnapshot = @() }
+        }
+        if ($DnsSnapshot.Count -gt 0) {
+            & $add 'network.dns' PASS 'O hostname possui resolução DNS.' 'Nenhuma conexão com o endpoint foi feita.' @{ address_count = $DnsSnapshot.Count }
+        } else {
+            & $add 'network.dns' BLOCKED 'O hostname não possui resolução DNS confirmada.' 'Corrija o DNS e aguarde a propagação antes de continuar.' @{}
+        }
+    }
+
+    if (-not $FirewallSnapshot) {
+        try {
+            $profiles = @(Get-NetFirewallProfile -ErrorAction Stop)
+            $FirewallSnapshot = @{ Available = $true; AllEnabled = ($profiles.Count -gt 0 -and @($profiles | Where-Object { -not $_.Enabled }).Count -eq 0) }
+        } catch { $FirewallSnapshot = @{ Available = $false; AllEnabled = $false } }
+    }
+    if (-not [bool]$FirewallSnapshot.Available) {
+        & $add 'windows.firewall' NOT_CONFIGURED 'Não foi possível ler o estado do firewall.' 'Consulte o Windows Security manualmente; nenhuma regra foi alterada.' @{}
+    } elseif ([bool]$FirewallSnapshot.AllEnabled) {
+        & $add 'windows.firewall' PASS 'Os perfis do firewall estão habilitados.' 'Revise regras de entrada conforme o perfil; este diagnóstico não as altera.' @{}
+    } else {
+        & $add 'windows.firewall' WARN 'Ao menos um perfil do firewall está desabilitado.' 'Habilite-o manualmente no Windows Security após revisar sua política.' @{}
+    }
+
+    if (-not $ClockSnapshot) {
+        try {
+            $timeService = Get-Service W32Time -ErrorAction Stop
+            $ClockSnapshot = @{ Readable = $true; ServiceRunning = ($timeService.Status -eq 'Running'); UtcYear = [DateTime]::UtcNow.Year }
+        } catch { $ClockSnapshot = @{ Readable = $true; ServiceRunning = $false; UtcYear = [DateTime]::UtcNow.Year } }
+    }
+    if (-not [bool]$ClockSnapshot.Readable -or [int]($ClockSnapshot.UtcYear ?? 0) -lt 2024) {
+        & $add 'windows.clock' BLOCKED 'O relógio do sistema não pôde ser validado.' 'Corrija data, hora e fuso nas configurações do Windows.' @{}
+    } elseif (-not [bool]$ClockSnapshot.ServiceRunning) {
+        & $add 'windows.clock' WARN 'O relógio existe, mas o serviço de sincronização não está ativo.' 'Ative manualmente a sincronização de horário do Windows.' @{}
+    } else {
+        & $add 'windows.clock' PASS 'Relógio e serviço de sincronização estão disponíveis.' 'Nenhuma ação necessária.' @{}
+    }
+
+    $longPaths = [bool]$SystemSnapshot.LongPathsEnabled
+    $pathTooLong = $SourcePath -and $SourcePath.Length -ge 260
+    if ($longPaths) {
+        & $add 'windows.paths' PASS 'Suporte a caminhos longos e Unicode está habilitado.' 'Nenhuma ação necessária.' @{ unicode_safe = $true }
+    } elseif ($pathTooLong) {
+        & $add 'windows.paths' BLOCKED 'O caminho de origem excede 259 caracteres e caminhos longos estão desabilitados.' 'Mova o checkout para um caminho mais curto ou habilite a política manualmente.' @{}
+    } else {
+        & $add 'windows.paths' WARN 'Caminhos Unicode funcionam, mas a política de caminhos longos está desabilitada.' 'Use um caminho curto ou habilite LongPathsEnabled manualmente.' @{ unicode_safe = $true }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($SourcePath)) {
+        & $add 'source.upstream-pin' NOT_CONFIGURED 'Nenhum caminho de origem foi informado.' 'Informe -SourcePath antes de instalar a partir de um checkout.' @{}
+    } else {
+        $sourceOk = $false
+        try {
+            $resolvedSource = (Resolve-Path -LiteralPath $SourcePath -ErrorAction Stop).Path
+            if (-not (Test-Path -LiteralPath $resolvedSource -PathType Container)) { throw 'invalid' }
+            $sourceWsl = (& $run 'wsl.exe' @('-d', $Distro, '--exec', '/usr/bin/env', '-i', 'PATH=/usr/bin:/bin', '/usr/bin/wslpath', '-a', $resolvedSource) 20).StdOut.Trim()
+            if ($sourceWsl -notmatch '^/' -or $sourceWsl -match "[`r`n`0]") { throw 'invalid' }
+            $sourceProbe = @'
+set -euo pipefail
+root="$1"
+test -d "$root"; test ! -L "$root"; test "$(realpath -e -- "$root")" = "$root"
+lock="$root/UPSTREAM.lock"; modules="$root/.gitmodules"
+test -f "$lock"; test ! -L "$lock"; test -f "$modules"; test ! -L "$modules"
+value() { key="$1"; test "$(grep -c "^${key}=" "$lock")" -eq 1; sed -n "s/^${key}=//p" "$lock"; }
+repository="$(value repository)"; path="$(value path)"; commit="$(value commit)"; tree="$(value tree)"; manifest="$(value manifest_sha256)"
+case "$path" in /*|../*|*/../*|*/..|.|*\\*|'') exit 21;; esac
+case "$path" in *[!A-Za-z0-9._/-]*) exit 22;; esac
+printf '%s' "$commit" | grep -Eq '^[0-9a-f]{40}$'; printf '%s' "$tree" | grep -Eq '^[0-9a-f]{40}$'; printf '%s' "$manifest" | grep -Eq '^[0-9a-f]{64}$'
+keys="$(git -C "$root" config --file .gitmodules --get-regexp '^submodule\..*\.path$' | awk -v p="$path" '$2 == p { print $1 }')"
+test "$(printf '%s\n' "$keys" | sed '/^$/d' | wc -l)" -eq 1
+key="${keys%.path}"; test "$(git -C "$root" config --file .gitmodules --get "${key}.url")" = "$repository"
+test "$(git -C "$root" ls-files --stage -- "$path")" = "160000 $commit 0$(printf '\t')$path"
+upstream="$root/$path"; test -d "$upstream"; test ! -L "$upstream"; test "$(realpath -e -- "$upstream")" = "$upstream"
+test "$(git -C "$upstream" remote get-url origin)" = "$repository"
+test "$(git -C "$upstream" rev-parse --verify HEAD)" = "$commit"
+test "$(git -C "$upstream" rev-parse 'HEAD^{tree}')" = "$tree"
+test -z "$(git -C "$upstream" status --porcelain=v1 --untracked-files=all)"
+test "$(git -C "$upstream" ls-tree -r -z --full-tree HEAD | sha256sum | awk '{print $1}')" = "$manifest"
+'@
+            $probeResult = & $run 'wsl.exe' @(
+                '-d', $Distro, '--exec', '/usr/bin/env', '-i', 'PATH=/usr/bin:/bin', 'LANG=C.UTF-8',
+                '/bin/bash', '--noprofile', '--norc', '-c', $sourceProbe, '--', $sourceWsl
+            ) 120
+            $sourceOk = $probeResult.ExitCode -eq 0
+        } catch { $sourceOk = $false }
+        if ($sourceOk) {
+            & $add 'source.upstream-pin' PASS 'Checkout, submódulo, pin e manifesto estão íntegros.' 'Nenhuma ação necessária.' @{}
+        } else {
+            & $add 'source.upstream-pin' BLOCKED 'Não foi possível comprovar o checkout e o upstream fixado.' 'Materialize o submódulo no commit aprovado e execute o gate de upstream antes de continuar.' @{}
+        }
+    }
+
+    $states = @($checks | ForEach-Object state)
+    $overall = if ($states -contains 'BLOCKED') { 'BLOCKED' } elseif ($states -contains 'WARN') { 'WARN' } elseif ($states -contains 'NOT_CONFIGURED') { 'NOT_CONFIGURED' } else { 'PASS' }
+    [pscustomobject][ordered]@{
+        schema_version = 1
+        overall_state = $overall
+        exit_code = if ($overall -eq 'BLOCKED') { 2 } else { 0 }
+        profile = $Profile
+        checks = @($checks)
+        safety = [pscustomobject][ordered]@{
+            read_only = $true
+            elevated = $false
+            services_started = $false
+            endpoint_contacted = $false
+            dns_queried = $dnsQueried
+            local_docker_daemon_queried = $true
+        }
+    }
+}
+
 Export-ModuleMember -Function Assert-Dz23Commit, Assert-Dz23ImageDigest, Assert-Dz23LinuxPath, `
     ConvertTo-Dz23ShellLiteral, Invoke-Dz23Native, Invoke-Dz23Checked, Invoke-Dz23WslScript, `
     ConvertTo-Dz23WslSourcePath, Resolve-Dz23InstallRoot, Test-Dz23Prerequisites, Test-Dz23Source, Test-Dz23Image, `
-    Get-Dz23WslSafetyPrelude, New-Dz23Result
+    Get-Dz23WslSafetyPrelude, New-Dz23Result, Invoke-Dz23WindowsPreflight
