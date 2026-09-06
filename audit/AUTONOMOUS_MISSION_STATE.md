@@ -2,19 +2,48 @@
 
 - mission_id: `DZ23-STUDIO-V1-20260904`
 - objetivo: concluir o DZ23 STUDIO v1.0 com runtime portátil, geração isolada, gates Windows/Linux, testes com cinco pessoas e pacote open source somente após licença escolhida
-- estado: `TESTING`
-- iteração: 7
+- estado: `REVIEW_REQUIRED`
+- iteração: 12
 - início: 2026-09-04
-- último heartbeat: 2026-09-04T18:35:27-03:00
-- último progresso real: primeira prova Docker confirmou fetch íntegro e expôs revalidação online do pnpm durante `--offline`; correção oficial `--trust-lockfile` aplicada somente após o fetch verificado
-- tarefa atual: construir e provar a imagem runtime M6.1 a partir do staging WSL2/ext4
-- branch: `codex/m61-final`
-- base: `c57f914a49787de28d12141b167874357734f2d7`
+- último heartbeat: 2026-09-06T04:13:16-03:00
+- último progresso real: integração do lifecycle, manager e ingresso autenticado fechou 648/648 testes do supervisor com 100% nos arquivos críticos e 1.896/1.896 testes executados na suíte integral
+- tarefa atual: entregar checkpoint M6.3 para revisão independente e fechar o typecheck agregado antes de qualquer merge
+- branch: `codex/m63-integration-candidate`
+- base: `17e79aaab4c1ac54c1b4fc05f780f6485c5941b7`
 - upstream: `deepseek-harness@6c705be1ce6774a000d061da41d1823b03a3d42c`
-- staging válido: `/home/leandro/dz23-m61-build-20260904c`
+- staging válido: `/home/leandro/dz23-gates/m63-integration-20260906`
 - staging inválido preservado: `/home/leandro/dz23-m61-lock-20260904a` (origem calculada incorretamente e sincronização interrompida)
 
-## Concluído nesta iteração
+## Checkpoint atual — M6.3
+
+- quatro fatias locais compostas sem tocar na branch principal;
+- contrato cliente→builder reduzido a `upload_ref` opaco;
+- TAR canônico transmitido por fluxo autenticado e vinculado no servidor a build, escopo, imagem e política;
+- rollback e settlement endurecidos contra falhas simultâneas de journal, Docker e ingresso;
+- `648/648` testes do supervisor e cobertura crítica de `100%`;
+- suíte integral `1.896 passed`, `61 skipped`, `0 failed`;
+- build da interface e dos 14 plugins, portabilidade, i18n e gates de domínio aprovados;
+- relatório detalhado em `audit/M63_INTEGRATION_CHECKPOINT.md`.
+
+## Bloqueadores atuais
+
+- typecheck agregado falha por identidades duplicadas dos workspaces injetados no staging hoisted; builds individuais passam, mas o gate agregado precisa ser fechado;
+- Docker continua desligado; provas físicas de imagem, rede e execução são `NOT_EXECUTED`;
+- gate completo de origem requer um remoto `origin`, que não existe neste repositório local;
+- licença open source exata ainda depende do Prado; sem ela não há redistribuição pública;
+- cinco sessões leigas, piloto e release continuam pendentes.
+
+## Próxima ação
+
+1. criar commit e bundle local deste checkpoint;
+2. solicitar revisão independente do Claude sem merge;
+3. fechar o typecheck agregado com uma resolução canônica de módulos, sem casts ou relaxamento de tipos;
+4. repetir os gates afetados;
+5. quando o Docker estiver disponível, executar as provas físicas pendentes.
+
+## Histórico preservado — iteração 7 / M6.1
+
+### Concluído naquela iteração
 
 - workspace unificado sem links absolutos e lock regenerado no ext4;
 - manifesto independente de Git validando 8.953 blobs, 11 symlinks e modos do upstream;
@@ -28,13 +57,13 @@
 - gate de proveniência/SBOM determinístico: 6/6 testes;
 - gate de imagens: 2/2 testes; portabilidade e `git diff --check`: PASS.
 
-## Auditorias delegadas
+### Auditorias delegadas naquela iteração
 
 - runtime: NO-GO inicial; achados incorporados no worktree e aguardando prova física;
 - supply chain: NO-GO inicial; pnpm, rede, contexto secreto, licença falsa e manifesto corrigidos; SBOM/proveniência aguardam imagem OCI real;
 - builder multiarch: desenho M6.2 definido; não montar Docker socket no Harness.
 
-## Bloqueadores atuais
+### Bloqueadores registrados naquela iteração
 
 - imagem runtime ainda não construída após as correções;
 - `builder-supervisor` M6.2 ainda não implementado; geração no runtime final deve permanecer `BLOCKED_EXTERNAL` até ele existir;
@@ -42,14 +71,14 @@
 - licença open source exata ainda depende do Prado; sem ela não há redistribuição pública;
 - gate Windows, cinco sessões leigas e piloto continuam pendentes.
 
-## Falhas observadas
+### Falhas observadas naquela iteração
 
 - build anterior: `@deepseek-ai/dsh-subprocess-local` não estava na allowlist de scripts; corrigido, reteste pendente;
 - build `15e80ec`: a instalação fisicamente sem rede tentou revalidar metadata/attestations e entrou em retries; interrompida e corrigida com `--trust-lockfile` pós-fetch, mantendo `--network=none`;
 - primeira sincronização WSL resolveu a origem incorretamente e começou a copiar `/` para staging; foi interrompida, não tocou no repositório, e um staging novo explícito foi criado;
 - sincronização seguinte excluiu diretórios aninhados chamados `runtime`; o upstream ficou incompleto; a subárvore foi ressincronizada sem esse padrão e o manifesto passou.
 
-## Próxima ação
+### Próxima ação registrada naquela iteração
 
 1. criar commit local de checkpoint da M6.1;
 2. construir a imagem no staging ext4 com o hash exato;
@@ -59,4 +88,4 @@
 
 ## Resume instructions
 
-Leia este arquivo, confira `git status`, `git log -3`, os processos Docker/WSL e o conteúdo de `HANDOFF_CODEX_CLAUDE.md`. Preserve todos os worktrees e stagings. Não faça push, PR, deploy público nem escolha licença em nome do Prado.
+Leia este arquivo e `audit/M63_INTEGRATION_CHECKPOINT.md`; confira `git status`, `git log -5`, a branch principal separada e o conteúdo de `HANDOFF_CODEX_CLAUDE.md`. Preserve todos os worktrees e stagings. Não faça merge, push, PR, deploy público, limpeza Docker nem escolha licença em nome do Prado.

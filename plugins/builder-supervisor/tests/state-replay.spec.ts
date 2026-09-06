@@ -43,9 +43,10 @@ describe('bounded execution semaphore', () => {
 
   it('removes one hundred thousand aborted waiters without leaking queue entries', async () => {
     const semaphore = new Semaphore(1); const first = await semaphore.acquire(new AbortController().signal); const listeners = new Set<() => void>(); const reason = new Error('cancelled')
-    const signal = { aborted: false, reason, throwIfAborted() { if (this.aborted) throw reason }, addEventListener(_name: string, listener: () => void) { listeners.add(listener) }, removeEventListener(_name: string, listener: () => void) { listeners.delete(listener) } } as unknown as AbortSignal
+    const signalState = { aborted: false, reason, throwIfAborted() { if (this.aborted) throw reason }, addEventListener(_name: string, listener: () => void) { listeners.add(listener) }, removeEventListener(_name: string, listener: () => void) { listeners.delete(listener) } }
+    const signal = signalState as unknown as AbortSignal
     const waiters = Array.from({ length: 100_000 }, () => semaphore.acquire(signal))
-    expect(semaphore.queued).toBe(100_000); Object.assign(signal, { aborted: true }); for (const listener of [...listeners]) listener()
+    expect(semaphore.queued).toBe(100_000); signalState.aborted = true; for (const listener of [...listeners]) listener()
     expect((await Promise.allSettled(waiters)).every(item => item.status === 'rejected')).toBe(true); expect(semaphore.queued).toBe(0)
     first(); const release = await semaphore.acquire(new AbortController().signal); release(); expect(semaphore.active).toBe(0)
   })

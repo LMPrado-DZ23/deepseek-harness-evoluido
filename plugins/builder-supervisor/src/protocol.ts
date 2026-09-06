@@ -13,8 +13,7 @@ export interface ListManagedRequest extends RequestIdentity { readonly build_id?
 export interface PreflightRequest extends RequestIdentity {}
 export interface PrepareRequest extends RequestIdentity {
   readonly build_id: string
-  readonly artifact_relative_path: string
-  readonly artifact_sha256: string
+  readonly upload_ref: string
 }
 export interface ExecuteRequest extends RequestIdentity { readonly build_ref: string; readonly step: BuildStep }
 export interface BuildReferenceRequest extends RequestIdentity { readonly build_ref: string }
@@ -50,12 +49,11 @@ export function parseBuilderRpcRequest(value: unknown): BuilderRpcRequest {
   if (operation === 'preflight') return { operation, body: parseIdentity(envelope.body) }
   if (operation === 'listManaged') return { operation, body: parseListManaged(envelope.body) }
   if (operation === 'prepare') {
-    const body = strictRecord(envelope.body, ['request_id', 'build_id', 'artifact_relative_path', 'artifact_sha256'])
+    const body = strictRecord(envelope.body, ['request_id', 'build_id', 'upload_ref'])
     const request_id = requestId(body.request_id)
     if (!validBuildId(body.build_id)) invalid()
-    if (typeof body.artifact_relative_path !== 'string' || !safeRelativePath(body.artifact_relative_path)) invalid()
-    if (typeof body.artifact_sha256 !== 'string' || !/^[a-f0-9]{64}$/u.test(body.artifact_sha256)) invalid()
-    return { operation, body: { request_id, build_id: body.build_id, artifact_relative_path: body.artifact_relative_path, artifact_sha256: body.artifact_sha256 } }
+    if (typeof body.upload_ref !== 'string' || !/^upload_[a-f0-9]{32}$/u.test(body.upload_ref)) invalid()
+    return { operation, body: { request_id, build_id: body.build_id, upload_ref: body.upload_ref } }
   }
   if (operation === 'execute') {
     const body = strictRecord(envelope.body, ['request_id', 'build_ref', 'step'])
@@ -196,9 +194,6 @@ function requestId(value: unknown): string { if (typeof value !== 'string' || !/
 function buildReference(value: unknown): string { if (!validBuildRef(value)) invalid(); return value as string }
 function validBuildRef(value: unknown): boolean { return typeof value === 'string' && /^build_[a-f0-9]{32}$/u.test(value) }
 function validBuildId(value: unknown): value is string { return typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/u.test(value) }
-function safeRelativePath(value: string): boolean {
-  return value.length <= 500 && /^[A-Za-z0-9._/-]+$/u.test(value) && !value.startsWith('/') && !value.includes('\\') && !value.includes('\0') && value.split('/').every(part => part !== '' && part !== '.' && part !== '..')
-}
 function strictRecord(value: unknown, keys: readonly string[]): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return invalid()
   const row = value as Record<string, unknown>

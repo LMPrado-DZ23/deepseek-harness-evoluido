@@ -485,7 +485,7 @@ export function wrapBuilderSupervisorWithGlobalCapacity(scopeId: BuilderRuntimeS
   const releases = new Map<string, () => void>()
   const release = (buildRef: string) => { const current = releases.get(buildRef); if (current !== undefined) { releases.delete(buildRef); current() } }
   const methods = composition.methods
-  return { methods: {
+  return { ...(composition.artifactIngress === undefined ? {} : { artifactIngress: composition.artifactIngress }), methods: {
     initialize: methods.initialize.bind(methods),
     preflight: methods.preflight.bind(methods),
     prepare: async (body, signal) => {
@@ -530,6 +530,7 @@ async function listenManagedRuntime(config: BuilderSupervisorResolvedConfig, com
     scopeId: config.scopeId,
     policySha256: config.policySha256,
     replayRoot: config.replayRoot,
+    ...(composition.artifactIngress === undefined ? {} : { artifactIngress: composition.artifactIngress }),
     signal: controller.signal,
   })
   try {

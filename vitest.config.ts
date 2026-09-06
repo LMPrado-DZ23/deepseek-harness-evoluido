@@ -6,6 +6,7 @@ const postgresEnabled = process.env.DZ23_POSTGRES_TEST_DSN !== undefined
 export default defineConfig({
   resolve: {
     alias: {
+      '@dz23-studio/builder-supervisor': fileURLToPath(new URL('./plugins/builder-supervisor/src/index.ts', import.meta.url)),
       '@dz23-studio/storage-postgres/operator': fileURLToPath(new URL('./plugins/storage-postgres/src/operator.ts', import.meta.url)),
       '@dz23-studio/identity': fileURLToPath(new URL('./plugins/identity/src/index.ts', import.meta.url)),
       '@dz23-studio/integration-hub': fileURLToPath(new URL('./plugins/integration-hub/src/index.ts', import.meta.url)),

@@ -5,6 +5,9 @@ import { createConnection, createServer as createNetServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createVerifiedBuildArchive } from '../src/artifact.js'
+import { ArtifactIngressStore } from '../src/artifact-ingress.js'
+import { createArtifactIngressUnixClient } from '../src/artifact-ingress-client.js'
 import type { BuilderRpcMethods } from '../src/protocol.js'
 import { BuilderUnixListenerCleanupError, listenBuilderUnix as listenBuilderUnixActual, type BuilderUnixRuntime, type BuilderUnixServerOptions } from '../src/unix-server.js'
 
@@ -18,6 +21,23 @@ afterEach(async () => {
 })
 
 describe.skipIf(process.platform === 'win32')('authenticated Unix builder socket', () => {
+  it('streams an authenticated TAR through the production socket without a shared source path', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dz23-builder-ingress-wire-')); roots.push(root)
+    const source = join(root, 'source'); await mkdir(source); await writeFile(join(source, 'package.json'), '{}')
+    const archive = await createVerifiedBuildArchive(root, 'source')
+    const socketPath = join(root, 'builder.sock').replaceAll('\\', '/')
+    const ingress = new ArtifactIngressStore({ spoolRoot: join(root, 'spool'), scopeId: replayNamespace.scopeId, imageDigest: `sha256:${'a'.repeat(64)}`, policySha256: replayNamespace.policySha256 })
+    const listener = await listenBuilderUnix({ socketPath, bearerToken: token, methods: fakeMethods(), replayNamespace, artifactIngress: ingress }); listeners.push(listener)
+    const client = createArtifactIngressUnixClient({ socketPath, credentialRef: 'file:/run/token', credentials: { resolve: async () => token } })
+    const bytes = await readFile(archive.archivePath)
+    const begun = await client.begin({ requestId: `req_${'1'.repeat(32)}`, buildId: 'wire-build', contentLength: bytes.byteLength, wireSha256: archive.wireSha256 })
+    async function* chunks(): AsyncGenerator<Uint8Array> { yield bytes.subarray(0, 513); yield bytes.subarray(513) }
+    await expect(client.upload({ uploadRef: begun.uploadRef, contentLength: bytes.byteLength, source: chunks() })).resolves.toMatchObject({ state: 'READY' })
+    const claimed = await ingress.claim(begun.uploadRef, { buildId: 'wire-build', attestation: { state: 'OK', protocol_version: 1, scope_id: replayNamespace.scopeId as `s_${string}`, image_id: `sha256:${'a'.repeat(64)}`, policy_sha256: replayNamespace.policySha256 } })
+    expect(claimed.artifact).toMatchObject({ files: 1, bytes: 2, archiveBytes: bytes.byteLength })
+    await claimed.fail(); await archive.dispose()
+  })
+
   it('creates mode 0660, rejects unauthenticated input and removes the socket', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dz23-builder-unix-')); roots.push(root)
     const socketPath = join(root, 'builder.sock').replaceAll('\\', '/')
@@ -28,8 +48,21 @@ describe.skipIf(process.platform === 'win32')('authenticated Unix builder socket
     expect(await send(socketPath, undefined)).toMatchObject({ status: 401 })
     expect(methods.preflight).not.toHaveBeenCalled()
     expect(await send(socketPath, token)).toMatchObject({ status: 200, body: { ok: true, result: { state: 'OK', protocol_version: 1 } } })
+    await expect(sendArtifactRaw(socketPath, Buffer.from('not-a-tar'))).resolves.toEqual({ status: 503, body: { error: 'ARTIFACT_INGRESS_UNAVAILABLE' }, connection: 'close' })
     await listener.close(); listeners.splice(0, 1)
     await expect(lstat(socketPath)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('fails closed when an artifact request has no HTTP method', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dz23-builder-methodless-')); roots.push(root)
+    const socketPath = join(root, 'builder.sock').replaceAll('\\', '/')
+    const ingress = new ArtifactIngressStore({ spoolRoot: join(root, 'spool'), scopeId: replayNamespace.scopeId, imageDigest: `sha256:${'a'.repeat(64)}`, policySha256: replayNamespace.policySha256 })
+    const createServer = ((handler: HttpHandler) => createHttpServer((request, response) => {
+      const methodless = new Proxy(request, { get(target, property, receiver) { if (property === 'method') return undefined; const value = Reflect.get(target, property, receiver); return typeof value === 'function' ? value.bind(target) : value } })
+      handler(methodless, response)
+    })) as typeof createHttpServer
+    const listener = await listenBuilderUnix({ socketPath, bearerToken: token, methods: fakeMethods(), replayNamespace, artifactIngress: ingress, runtime: unixRuntime({ createServer }) }); listeners.push(listener)
+    await expect(sendArtifactRaw(socketPath, Buffer.from('not-a-tar'))).resolves.toMatchObject({ status: 405, body: { error: 'METHOD_NOT_ALLOWED' } })
   })
 
   it('carries the public test step and bounded termination fields over the real Unix wire', async () => {
@@ -451,6 +484,18 @@ async function sendRaw(socketPath: string, bearer: string | undefined, body: Buf
       const chunks: Buffer[] = []
       response.on('data', chunk => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)))
       response.on('end', () => resolve({ status: response.statusCode ?? 0, body: JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown }))
+    })
+    request.once('error', reject); request.end(body)
+  })
+}
+async function sendArtifactRaw(socketPath: string, body: Buffer): Promise<{ readonly status: number; readonly body: unknown; readonly connection: string | undefined }> {
+  return new Promise((resolve, reject) => {
+    const request = httpRequest({ socketPath, path: `/v1/artifacts/upload_${'a'.repeat(32)}`, method: 'PUT', headers: {
+      'content-type': 'application/x-tar', 'content-length': String(body.byteLength), authorization: `Bearer ${token}`,
+    } }, response => {
+      const chunks: Buffer[] = []
+      response.on('data', chunk => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)))
+      response.on('end', () => resolve({ status: response.statusCode ?? 0, body: JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown, connection: response.headers.connection }))
     })
     request.once('error', reject); request.end(body)
   })

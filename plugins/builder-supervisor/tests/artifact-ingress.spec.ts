@@ -123,7 +123,7 @@ describe('authenticated canonical artifact ingress core', () => {
       ['oversized file', canonicalTar([{ name: 'a', type: '0', declaredSize: ARTIFACT_UPLOAD_MAX_FILE_BYTES + 1, body: Buffer.alloc(0) }], false)],
       ['oversized logical', canonicalTar([{ name: 'a', type: '0', declaredSize: 256 * 1024 * 1024 + 1, body: Buffer.alloc(0) }], false)],
       ['bad padding', mutate(valid, value => { value[513] = 1 })],
-      ['bad checksum', mutate(valid, value => { value[0] ^= 1 })],
+      ['bad checksum', mutate(valid, value => { value[0] = value[0]! ^ 1 })],
       ['bad mode', mutateHeader(valid, value => octal(value, 100, 8, 0o777))],
       ['bad uid', mutateHeader(valid, value => octal(value, 108, 8, 0))],
       ['bad magic', mutateHeader(valid, value => { value[257] = 0 })],

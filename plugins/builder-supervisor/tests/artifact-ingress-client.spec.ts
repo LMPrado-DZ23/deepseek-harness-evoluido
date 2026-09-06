@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events'
 import { Readable } from 'node:stream'
 import type { ClientRequest, IncomingMessage, request as httpRequest } from 'node:http'
 import { describe, expect, it, vi } from 'vitest'
-import { createArtifactIngressUnixClient, ArtifactIngressUnixClientError } from '../src/artifact-ingress-client.js'
+import { classifyArtifactIngressUnixClientFailure, createArtifactIngressUnixClient, ArtifactIngressUnixClientError } from '../src/artifact-ingress-client.js'
 
 const token = 'A'.repeat(43)
 const uploadRef = `upload_${'b'.repeat(32)}`
@@ -179,6 +179,24 @@ describe('artifact ingress Unix client', () => {
 
   it('exports a typed error with a stable sanitized message', () => {
     expect(new ArtifactIngressUnixClientError('CODE', 409)).toMatchObject({ name: 'ArtifactIngressUnixClientError', code: 'CODE', message: 'CODE', status: 409 })
+  })
+
+  it.each([
+    ['ABORTED', 'CANCELLED'],
+    ['ARTIFACT_INVALID', 'BUILD_FAILED'],
+    ['INVALID_CONFIGURATION', 'INTERNAL'],
+    ['INVALID_REQUEST', 'INTERNAL'],
+    ['ARTIFACT_CONFLICT', 'INTERNAL'],
+    ['ARTIFACT_NOT_READY', 'INTERNAL'],
+    ['UNSUPPORTED_MEDIA_TYPE', 'INTERNAL'],
+    ['ARTIFACT_QUOTA_EXCEEDED', 'BLOCKED_EXTERNAL'],
+    ['TRANSPORT_ERROR', 'BLOCKED_EXTERNAL'],
+  ] as const)('classifies %s without exposing transport detail', (code, state) => {
+    expect(classifyArtifactIngressUnixClientFailure(new ArtifactIngressUnixClientError(code))).toEqual({ code, state })
+  })
+
+  it('classifies unknown thrown values as an internal programming failure', () => {
+    expect(classifyArtifactIngressUnixClientFailure(new Error('private'))).toEqual({ code: 'UNKNOWN', state: 'INTERNAL' })
   })
 })
 

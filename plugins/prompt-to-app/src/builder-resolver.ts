@@ -1,10 +1,14 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { constants, type Stats } from 'node:fs'
 import { lstat, open, realpath, type FileHandle } from 'node:fs/promises'
-import { posix } from 'node:path'
+import { basename, dirname, posix } from 'node:path'
 import {
+  ArtifactIngressUnixClientError,
   PRODUCTION_BUILDER_ROOT_POLICY,
+  classifyArtifactIngressUnixClientFailure,
   classifyBuilderUnixClientFailure,
+  createArtifactIngressUnixClient,
+  createVerifiedBuildArchive,
   createBuilderUnixClient,
   deriveBuilderRuntimeScopeId,
   loadBuilderRuntimeRegistry,
@@ -13,6 +17,7 @@ import {
   type BuilderSupervisorResolvedConfig,
   type BuilderSupervisorRootPolicy,
   type BuilderUnixClient,
+  type ArtifactIngressUnixClient,
 } from '@dz23-studio/builder-supervisor'
 import { roleAllows } from '@dz23-studio/policy'
 import type { PromptToAppActor } from './service.js'
@@ -37,6 +42,9 @@ export interface BuilderLifecycleResolverDependencies {
   readonly loadRegistry: typeof loadBuilderRuntimeRegistry
   readonly loadConfig: typeof loadPinnedBuilderSupervisorConfig
   readonly createClient: typeof createBuilderUnixClient
+  readonly createArtifactClient: typeof createArtifactIngressUnixClient
+  readonly createArchive: typeof createVerifiedBuildArchive
+  readonly openArchive: typeof open
   readonly readCredential: (reference: string, signal: AbortSignal) => Promise<string>
 }
 
@@ -44,6 +52,9 @@ const DEFAULT_DEPENDENCIES: BuilderLifecycleResolverDependencies = {
   loadRegistry: loadBuilderRuntimeRegistry,
   loadConfig: loadPinnedBuilderSupervisorConfig,
   createClient: createBuilderUnixClient,
+  createArtifactClient: createArtifactIngressUnixClient,
+  createArchive: createVerifiedBuildArchive,
+  openArchive: open,
   readCredential: readSecureLifecycleCredential,
 }
 
@@ -75,12 +86,17 @@ export class ManagedBuilderLifecycleResolver implements BuilderLifecycleResolver
         credentialRef: credentialReference,
         credentials: { resolve: (reference, signal) => this.#dependencies.readCredential(reference, signal) },
       })
+      const artifactClient = this.#dependencies.createArtifactClient({
+        socketPath: config.socketPath,
+        credentialRef: credentialReference,
+        credentials: { resolve: (reference, signal) => this.#dependencies.readCredential(reference, signal) },
+      })
       const lifecycleScope: BuilderLifecycleResolvedScope = {
         scopeId: config.scopeId,
         imageDigest: config.imageDigest,
         policySha256: config.policySha256,
       }
-      return lifecycleSession(client, lifecycleScope)
+      return lifecycleSession(client, artifactClient, lifecycleScope, this.#dependencies.createArchive, this.#dependencies.openArchive)
     } catch (error) {
       if (error instanceof BuilderLifecycleError) throw error
       throw new BuilderLifecycleError('BLOCKED_EXTERNAL', 'BUILDER_SCOPE_UNAVAILABLE', { cause: error })
@@ -90,12 +106,14 @@ export class ManagedBuilderLifecycleResolver implements BuilderLifecycleResolver
 
 type BuilderLifecycleResolvedScope = Pick<BuilderSupervisorResolvedConfig, 'scopeId' | 'imageDigest' | 'policySha256'>
 
-function lifecycleSession(client: BuilderUnixClient, config: BuilderLifecycleResolvedScope): BuilderLifecycleSession {
+function lifecycleSession(client: BuilderUnixClient, artifactClient: ArtifactIngressUnixClient, config: BuilderLifecycleResolvedScope, createArchive: typeof createVerifiedBuildArchive, openArchive: typeof open): BuilderLifecycleSession {
   const invoke = async <T>(action: () => Promise<T>): Promise<T> => {
     try { return await action() }
     catch (error) {
       if (error instanceof BuilderLifecycleError) throw error
-      const classification = classifyBuilderUnixClientFailure(error)
+      const classification = error instanceof ArtifactIngressUnixClientError
+        ? classifyArtifactIngressUnixClientFailure(error)
+        : classifyBuilderUnixClientFailure(error)
       const state = classification.state === 'INTERNAL' ? 'INTERRUPTED' : classification.state
       throw new BuilderLifecycleError(state, classification.code, { cause: error })
     }
@@ -109,13 +127,45 @@ function lifecycleSession(client: BuilderUnixClient, config: BuilderLifecycleRes
         if (result.state !== 'OK' || result.scope_id !== config.scopeId || result.image_id !== config.imageDigest || result.policy_sha256 !== config.policySha256) {
           return { state: 'BLOCKED_EXTERNAL' }
         }
-        // The supervisor has no authenticated archive/stream ingress yet. An
-        // attested manager alone is not enough to advertise a buildable route.
-        return { state: 'BLOCKED_EXTERNAL' }
+        return { state: 'OK' }
       } catch { return { state: 'BLOCKED_EXTERNAL' } }
     },
-    prepare: async () => { throw new BuilderLifecycleError('BLOCKED_EXTERNAL', 'UNSUPPORTED_INGRESS') },
-    execute: async () => { throw new BuilderLifecycleError('BLOCKED_EXTERNAL', 'UNSUPPORTED_INGRESS') },
+    prepare: (sourceDirectory, buildId, signal) => invoke(async () => {
+      if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/u.test(buildId)) throw new BuilderLifecycleError('INTERRUPTED', 'INVALID_BUILD_ID')
+      const call = callSignal(signal)
+      const archive = await createArchive(dirname(sourceDirectory), basename(sourceDirectory), undefined, call)
+      let uploadRef: string | undefined
+      let transferred = false
+      let archiveDisposed = false
+      let handle: FileHandle | undefined
+      try {
+        const begun = await artifactClient.begin({ requestId: requestId(), buildId, contentLength: archive.archiveBytes, wireSha256: archive.wireSha256 }, call)
+        uploadRef = begun.uploadRef
+        handle = await openArchive(archive.archivePath, constants.O_RDONLY | constants.O_NOFOLLOW)
+        const before = await handle.stat()
+        if (!before.isFile() || before.nlink !== 1 || before.size !== archive.archiveBytes) throw new ArtifactIngressUnixClientError('INVALID_REQUEST')
+        const uploaded = await artifactClient.upload({ uploadRef, contentLength: archive.archiveBytes, source: archiveChunks(handle, archive.archiveBytes, call) }, call)
+        if (uploaded.uploadRef !== uploadRef || uploaded.state !== 'READY') throw new ArtifactIngressUnixClientError('INVALID_RESPONSE')
+        const after = await handle.stat()
+        if (!sameArchiveStat(before, after)) throw new ArtifactIngressUnixClientError('INVALID_REQUEST')
+        await handle.close(); handle = undefined
+        try { await archive.dispose(); archiveDisposed = true }
+        catch { throw new ArtifactIngressUnixClientError('CLEANUP_INCOMPLETE') }
+        const prepared = await client.prepare({ request_id: requestId(), build_id: buildId, upload_ref: uploadRef }, { signal: call })
+        transferred = true
+        return { buildRef: prepared.build_ref }
+      } finally {
+        let cleanupFailed = false
+        if (handle !== undefined) try { await handle.close() } catch { cleanupFailed = true }
+        if (uploadRef !== undefined && !transferred) try { await artifactClient.abort({ requestId: requestId(), uploadRef }, AbortSignal.timeout(30_000)) } catch { cleanupFailed = true }
+        if (!archiveDisposed) try { await archive.dispose() } catch { cleanupFailed = true }
+        if (cleanupFailed) throw new ArtifactIngressUnixClientError('CLEANUP_INCOMPLETE')
+      }
+    }),
+    execute: (buildRef, step, signal) => invoke(async () => {
+      const value = await client.execute({ request_id: requestId(), build_ref: buildRef, step }, { signal: callSignal(signal) })
+      return { state: value.state, step: value.step, result: value.result }
+    }),
     cancel: (buildRef, signal) => invoke(async () => { await client.cancel({ request_id: requestId(), build_ref: buildRef }, { signal: callSignal(signal) }) }),
     finish: (buildRef, signal) => invoke(async () => {
       const value = await client.finish({ request_id: requestId(), build_ref: buildRef }, { signal: callSignal(signal) })
@@ -128,6 +178,22 @@ function lifecycleSession(client: BuilderUnixClient, config: BuilderLifecycleRes
     }),
     listManaged: signal => invoke(async () => (await client.listManaged({ request_id: requestId() }, { signal: callSignal(signal) })).builds.map(managedBuild)),
   }
+}
+
+async function* archiveChunks(handle: FileHandle, expected: number, signal: AbortSignal): AsyncGenerator<Uint8Array> {
+  let offset = 0
+  const buffer = Buffer.allocUnsafe(64 * 1024)
+  while (offset < expected) {
+    signal.throwIfAborted()
+    const { bytesRead } = await handle.read(buffer, 0, Math.min(buffer.byteLength, expected - offset), offset)
+    if (bytesRead === 0) throw new ArtifactIngressUnixClientError('INVALID_REQUEST')
+    offset += bytesRead
+    yield buffer.subarray(0, bytesRead)
+  }
+}
+
+function sameArchiveStat(left: Stats, right: Stats): boolean {
+  return left.isFile() && right.isFile() && left.dev === right.dev && left.ino === right.ino && left.nlink === 1 && right.nlink === 1 && left.size === right.size && left.mtimeMs === right.mtimeMs && left.ctimeMs === right.ctimeMs
 }
 
 function assertResolvedScope(

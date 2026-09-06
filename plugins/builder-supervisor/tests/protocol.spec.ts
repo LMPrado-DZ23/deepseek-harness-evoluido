@@ -6,7 +6,7 @@ const requestId = (digit: string) => `req_${digit.repeat(32)}`
 const buildRef = `build_${'a'.repeat(32)}`
 const valid = [
   { operation: 'preflight', body: { request_id: requestId('1') } },
-  { operation: 'prepare', body: { request_id: requestId('2'), build_id: 'run-1', artifact_relative_path: 'runs/run-1', artifact_sha256: 'a'.repeat(64) } },
+  { operation: 'prepare', body: { request_id: requestId('2'), build_id: 'run-1', upload_ref: `upload_${'a'.repeat(32)}` } },
   { operation: 'execute', body: { request_id: requestId('3'), build_ref: buildRef, step: 'install' } },
   { operation: 'cancel', body: { request_id: requestId('4'), build_ref: buildRef } },
   { operation: 'finish', body: { request_id: requestId('5'), build_ref: buildRef } },
@@ -32,8 +32,8 @@ describe('builder supervisor closed RPC schema', () => {
     for (const request of valid) expect(() => parseBuilderRpcRequest({ operation: request.operation, body: { ...request.body, [field]: 'attacker' } })).toThrow('INVALID_REQUEST')
   })
 
-  it.each(['../outside', '/absolute', './run', 'runs//one', 'runs\\one', 'runs/../../outside', 'runs/one\0hidden', 'runs/line\nfeed', 'runs/colon:value'])('rejects traversal or non-canonical path %j', artifact_relative_path => {
-    expect(() => parseBuilderRpcRequest({ operation: 'prepare', body: { ...valid[1].body, artifact_relative_path } })).toThrow('INVALID_REQUEST')
+  it.each(['../outside', '/absolute', 'upload_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', 'upload_short', `upload_${'a'.repeat(33)}`, 'upload_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\0'])('rejects an invalid upload reference %j', upload_ref => {
+    expect(() => parseBuilderRpcRequest({ operation: 'prepare', body: { ...valid[1].body, upload_ref } })).toThrow('INVALID_REQUEST')
   })
 
   it.each(['shell', 'lint', 'deploy', '', 'INSTALL'])('rejects caller-defined or unknown step %j', step => {
@@ -43,7 +43,7 @@ describe('builder supervisor closed RPC schema', () => {
   it('rejects invalid ids, hashes, operations and scalar bodies', () => {
     expect(() => parseBuilderRpcRequest({ operation: 'preflight', body: { request_id: 'no' } })).toThrow()
     expect(() => parseBuilderRpcRequest({ operation: 'prepare', body: { ...valid[1].body, build_id: '../bad' } })).toThrow()
-    expect(() => parseBuilderRpcRequest({ operation: 'prepare', body: { ...valid[1].body, artifact_sha256: 'A'.repeat(64) } })).toThrow()
+    expect(() => parseBuilderRpcRequest({ operation: 'prepare', body: { ...valid[1].body, upload_ref: 'upload_bad' } })).toThrow()
     expect(() => parseBuilderRpcRequest({ operation: 'execute', body: { ...valid[2].body, build_ref: 'bad' } })).toThrow()
     expect(() => parseBuilderRpcRequest({ operation: 'unknown', body: {} })).toThrow()
     expect(() => parseBuilderRpcRequest(null)).toThrow()

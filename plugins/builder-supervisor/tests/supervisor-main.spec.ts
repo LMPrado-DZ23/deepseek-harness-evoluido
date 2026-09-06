@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { createServer } from 'node:http'
-import { lstat, mkdir, mkdtemp, rm, unlink, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { posix } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createVerifiedBuildArchive } from '../src/artifact.js'
 import { DockerBuilderAdapter, type BuilderLimits } from '../src/docker-adapter.js'
 import type { DockerEnginePort } from '../src/docker-engine.js'
 import type { BuilderRpcMethods } from '../src/protocol.js'
@@ -17,6 +18,7 @@ import {
   executeBuilderSupervisorCli,
   runBuilderSupervisorMain,
   type BuilderSupervisorListener,
+  type BuilderSupervisorMainDependencies,
   type BuilderSupervisorSignalSource,
 } from '../src/supervisor-main.js'
 import { listenBuilderUnix } from '../src/unix-server.js'
@@ -79,7 +81,7 @@ describe('builder supervisor process entrypoint', () => {
       dependencies: dependencies({
         signals,
         loadConfig: async () => config(),
-        listen: async options => { capturedSignal = options.signal; capturedSignal.addEventListener('abort', () => events.push('abort')); setTimeout(started, 0); return { server, close: async (afterStop?: () => void) => { events.push('close-idle', 'stop-accepting'); afterStop?.(); await closePending; events.push('release-authority') } } as unknown as BuilderSupervisorListener },
+        listen: async options => { if (options.signal === undefined) throw new Error('SIGNAL_REQUIRED'); const listenerSignal = options.signal; capturedSignal = listenerSignal; listenerSignal.addEventListener('abort', () => events.push('abort')); setTimeout(started, 0); return { server, close: async (afterStop?: () => void) => { events.push('close-idle', 'stop-accepting'); afterStop?.(); await closePending; events.push('release-authority') } } as unknown as BuilderSupervisorListener },
       }),
     })
     await ready; signals.emit('SIGTERM'); signals.emit('SIGINT')
@@ -174,6 +176,13 @@ describe('builder supervisor process entrypoint', () => {
     await composition.methods.initialize(new AbortController().signal)
     expect(engine.activeContainers()).toEqual([])
     expect(await composition.methods.preflight({ request_id: `req_${'1'.repeat(32)}` }, new AbortController().signal)).toMatchObject({ state: 'OK', policy_sha256: policySha256 })
+    const source = posix.join(root, 'source'); await mkdir(source); await writeFile(posix.join(source, 'package.json'), '{}')
+    const archive = await createVerifiedBuildArchive(root, 'source'); const bytes = await readFile(archive.archivePath)
+    const begun = await composition.artifactIngress!.begin({ buildId: 'composed-build', contentLength: bytes.byteLength, wireSha256: archive.wireSha256 })
+    async function* upload(): AsyncGenerator<Uint8Array> { yield bytes }
+    await composition.artifactIngress!.upload(begun.uploadRef, upload(), bytes.byteLength, new AbortController().signal)
+    await expect(composition.methods.prepare({ request_id: `req_${'2'.repeat(32)}`, build_id: 'composed-build', upload_ref: begun.uploadRef }, new AbortController().signal)).resolves.toMatchObject({ state: 'PREPARED' })
+    await archive.dispose()
     const mismatched = composeBuilderSupervisor({ ...pinned, policySha256: 'f'.repeat(64) }, engine)
     await expect(mismatched.methods.initialize(new AbortController().signal)).rejects.toThrow('BUILDER_ATTESTATION_FAILED')
   })
@@ -222,14 +231,15 @@ class Signals extends EventEmitter implements BuilderSupervisorSignalSource {
   emit(signal: 'SIGINT' | 'SIGTERM'): boolean { return super.emit(signal) }
 }
 
-function dependencies(overrides: Record<string, unknown>) {
-  return {
+function dependencies(overrides: Partial<BuilderSupervisorMainDependencies>): BuilderSupervisorMainDependencies {
+  const defaults: BuilderSupervisorMainDependencies = {
+    loadConfig: async () => config(),
     signals: new Signals(),
     compose: () => ({ methods: fakeMethods() }),
     listen: async () => { throw new Error('LISTENER_NOT_CONFIGURED') },
     error: vi.fn(),
-    ...overrides,
-  } as never
+  }
+  return { ...defaults, ...overrides }
 }
 
 function fakeMethods(): BuilderRpcMethods & { initialize(signal: AbortSignal): Promise<void> } {
@@ -259,16 +269,19 @@ function config(overrides: Partial<BuilderSupervisorResolvedConfig> = {}): Build
 class HealthyEngine implements DockerEnginePort {
   readonly #templateVolume: string
   readonly #containers = new Map<string, { readonly name: string; readonly labels: Record<string, string>; state: string }>()
+  readonly #volumes = new Map<string, Record<string, string>>()
   constructor(private readonly config: BuilderSupervisorResolvedConfig) {
     this.#templateVolume = templateStoreVolumeName(config.installationId, config.scopeId, config.templateStoreVersion, config.templateStoreSha256)
   }
   async ping(): Promise<void> {}
   async inspectImage(): Promise<{ readonly Id: string }> { return { Id: this.config.imageDigest } }
-  async createVolume(): Promise<void> { throw new Error('UNEXPECTED_CREATE_VOLUME') }
-  async removeVolume(): Promise<void> {}
+  async createVolume(name: string, labels: Readonly<Record<string, string>>): Promise<void> { this.#volumes.set(name, { ...labels }) }
+  async removeVolume(name: string): Promise<void> { this.#volumes.delete(name) }
   async listVolumes(filters: Readonly<Record<string, readonly string[]>>): Promise<readonly Record<string, unknown>[]> {
     const names = filters.name ?? []
-    return names.includes(this.#templateVolume) ? [{ Name: this.#templateVolume, Labels: { 'dz23.managed': 'builder-template-store', 'com.dz23.studio.installation-id': this.config.installationId, 'com.dz23.studio.scope-id': this.config.scopeId, 'dz23.template_version': this.config.templateStoreVersion, 'dz23.template_sha256': this.config.templateStoreSha256, 'dz23.materialization_nonce': 'a'.repeat(32) } }] : []
+    const wanted = filters.label ?? []
+    const template: { readonly Name: string; readonly Labels: Record<string, string> } = { Name: this.#templateVolume, Labels: { 'dz23.managed': 'builder-template-store', 'com.dz23.studio.installation-id': this.config.installationId, 'com.dz23.studio.scope-id': this.config.scopeId, 'dz23.template_version': this.config.templateStoreVersion, 'dz23.template_sha256': this.config.templateStoreSha256, 'dz23.materialization_nonce': 'a'.repeat(32) } }
+    return [template, ...[...this.#volumes].map(([Name, Labels]) => ({ Name, Labels }))].filter(row => (names.length === 0 || names.includes(row.Name)) && wanted.every(item => { const [key, value] = item.split(/=(.*)/su); return row.Labels[key!] === value }))
   }
   async createContainer(name: string, bodyValue: unknown): Promise<string> {
     const body = bodyValue as { readonly Labels?: unknown }
@@ -276,6 +289,7 @@ class HealthyEngine implements DockerEnginePort {
     const id = String(this.#containers.size + 1).padStart(12, 'a'); this.#containers.set(id, { name, labels: { ...labels }, state: 'created' }); return id
   }
   async putArchive(): Promise<void> { throw new Error('UNEXPECTED_PUT_ARCHIVE') }
+  async putArchiveHandle(): Promise<void> {}
   async startContainer(id: string): Promise<void> { const row = this.#containers.get(id); if (row !== undefined) row.state = 'running' }
   async waitContainer(): Promise<{ readonly StatusCode: number }> { return { StatusCode: 0 } }
   async containerLogs(): Promise<{ readonly stdout: Buffer; readonly stderr: Buffer }> { return { stdout: Buffer.from(this.config.templateStoreSha256), stderr: Buffer.alloc(0) } }

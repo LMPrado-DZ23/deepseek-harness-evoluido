@@ -10,7 +10,7 @@ const argv = [
 
 const result: BuilderProvisionResult = {
   state: 'CREATED', scope_id: `s_${'d'.repeat(48)}`, template_store_version: 'v1',
-  template_store_sha256: 'd'.repeat(64), manifest_sha256: 'a'.repeat(64), config_reference: 'file:/secret/config.json',
+  template_store_sha256: 'd'.repeat(64), manifest_sha256: 'a'.repeat(64), config_reference: 'file:/secret/config.json', config_sha256: 'e'.repeat(64),
 }
 
 describe('local builder provision CLI', () => {

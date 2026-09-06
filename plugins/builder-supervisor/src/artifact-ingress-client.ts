@@ -26,6 +26,23 @@ export class ArtifactIngressUnixClientError extends Error {
   constructor(readonly code: string, readonly status?: number) { super(code); this.name = 'ArtifactIngressUnixClientError' }
 }
 
+export type ArtifactIngressUnixClientFailureState = 'BLOCKED_EXTERNAL' | 'BUILD_FAILED' | 'CANCELLED' | 'INTERNAL'
+
+export interface ArtifactIngressUnixClientFailureClassification {
+  readonly state: ArtifactIngressUnixClientFailureState
+  readonly code: string
+}
+
+export function classifyArtifactIngressUnixClientFailure(error: unknown): ArtifactIngressUnixClientFailureClassification {
+  if (!(error instanceof ArtifactIngressUnixClientError)) return { state: 'INTERNAL', code: 'UNKNOWN' }
+  if (error.code === 'ABORTED') return { state: 'CANCELLED', code: error.code }
+  if (error.code === 'ARTIFACT_INVALID') return { state: 'BUILD_FAILED', code: error.code }
+  if (error.code === 'INVALID_CONFIGURATION' || error.code === 'INVALID_REQUEST' || error.code === 'ARTIFACT_CONFLICT' || error.code === 'ARTIFACT_NOT_READY' || error.code === 'UNSUPPORTED_MEDIA_TYPE') {
+    return { state: 'INTERNAL', code: error.code }
+  }
+  return { state: 'BLOCKED_EXTERNAL', code: error.code }
+}
+
 export function createArtifactIngressUnixClient(options: ArtifactIngressUnixClientOptions): ArtifactIngressUnixClient {
   if (!posix.isAbsolute(options.socketPath) || posix.normalize(options.socketPath) !== options.socketPath || options.socketPath.includes('\\') || options.socketPath.includes('\0') || Buffer.byteLength(options.socketPath, 'utf8') > 107 || !isBuilderCredentialReference(options.credentialRef)) throw new ArtifactIngressUnixClientError('INVALID_CONFIGURATION')
   const timeoutMs = options.timeoutMs ?? 15 * 60_000

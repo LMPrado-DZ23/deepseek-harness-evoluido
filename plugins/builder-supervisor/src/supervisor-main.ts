@@ -1,5 +1,7 @@
 import { pathToFileURL } from 'node:url'
 import type { Server } from 'node:http'
+import { posix } from 'node:path'
+import { ArtifactIngressStore, type ArtifactIngressPort } from './artifact-ingress.js'
 import { DockerBuilderAdapter } from './docker-adapter.js'
 import { DockerEngine, type DockerEnginePort } from './docker-engine.js'
 import { FileBuildIdGuard } from './persistent-replay.js'
@@ -34,6 +36,7 @@ export interface BuilderSupervisorLifecycleMethods extends BuilderRpcMethods {
 
 export interface BuilderSupervisorComposition {
   readonly methods: BuilderSupervisorLifecycleMethods
+  readonly artifactIngress?: ArtifactIngressPort
 }
 
 export interface BuilderSupervisorMainDependencies {
@@ -62,12 +65,19 @@ export function composeBuilderSupervisor(config: BuilderSupervisorResolvedConfig
     templateStoreVersion: config.templateStoreVersion,
     templateStoreSha256: config.templateStoreSha256,
   })
-  const service = new BuilderSupervisor({ artifactRoot: config.artifactRoot, adapter, buildClaims: new FileBuildIdGuard(config.journalRoot) })
+  const artifactIngress = new ArtifactIngressStore({
+    spoolRoot: posix.join(config.journalRoot, 'artifact-ingress'),
+    scopeId: config.scopeId,
+    imageDigest: config.imageDigest,
+    policySha256: config.policySha256,
+  })
+  const service = new BuilderSupervisor({ artifactIngress, adapter, buildClaims: new FileBuildIdGuard(config.journalRoot) })
   const initialize = async (signal: AbortSignal): Promise<void> => {
+    await artifactIngress.sweep()
     await service.initialize(signal)
     assertAttestation(await adapter.preflight(signal), config)
   }
-  return { methods: {
+  return { artifactIngress, methods: {
     initialize,
     preflight: service.preflight.bind(service),
     prepare: service.prepare.bind(service),
@@ -114,6 +124,7 @@ export async function runBuilderSupervisorMain(options: {
       scopeId: config.scopeId,
       policySha256: config.policySha256,
       replayRoot: config.replayRoot,
+      ...(composition.artifactIngress === undefined ? {} : { artifactIngress: composition.artifactIngress }),
       signal: controller.signal,
     })
     if (shutdownRequested) shutdown = stopSupervisor(listener, controller)

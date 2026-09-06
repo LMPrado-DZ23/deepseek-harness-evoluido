@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { createVerifiedBuildArchive } from './artifact.js'
+import { ArtifactIngressError, type ArtifactIngressPort, type ClaimedArtifact } from './artifact-ingress.js'
 import type { BuilderExecutionPort } from './docker-adapter.js'
 import type { BuilderAttestation, BuilderErrorCode, BuildState, ExportedArtifact, FinishResult, ManagedBuild } from './model.js'
 import { BuilderSupervisorError, isTerminalState } from './model.js'
@@ -21,7 +21,7 @@ interface MutableBuild {
 }
 
 export interface BuilderSupervisorOptions {
-  readonly artifactRoot: string
+  readonly artifactIngress?: ArtifactIngressPort
   readonly adapter: BuilderExecutionPort
   readonly replay?: ReplayClaimPort
   readonly createReference?: () => string
@@ -126,21 +126,41 @@ export class BuilderSupervisor implements BuilderRpcMethods {
       if (!/^build_[a-f0-9]{32}$/u.test(buildRef) || this.#builds.has(buildRef) || this.#buildRefs.has(buildRef) || (await this.options.adapter.listManaged(signal)).includes(buildRef)) {
         throw new BuilderSupervisorError('BUILD_ALREADY_EXISTS')
       }
-      const artifact = await createVerifiedBuildArchive(this.options.artifactRoot, body.artifact_relative_path, body.artifact_sha256, signal)
+      let claimed: ClaimedArtifact
       try {
-        await this.#buildClaims.claim(body.build_id, buildRef); this.#buildIds.add(body.build_id)
-        try { await this.options.adapter.prepare(buildRef, body.build_id, artifact, signal) }
-        catch (error) {
-          this.#buildIds.delete(body.build_id)
-          if (error instanceof BuilderSupervisorError && error.code === 'CLEANUP_INCOMPLETE') {
-            this.#buildIds.add(body.build_id); this.#buildRefs.add(buildRef)
-            const failed = { build_ref: buildRef, build_id: body.build_id, state: 'CANCELLED' as const, cleanup_pending: true }
-            this.#builds.set(buildRef, failed); await this.#buildClaims.update(this.#record(failed))
-          } else await this.#buildClaims.release(body.build_id)
-          throw error
+        if (this.options.artifactIngress === undefined) throw new BuilderSupervisorError('RECOVERY_FAILED')
+        const attestation = await this.options.adapter.preflight(signal)
+        claimed = await this.options.artifactIngress.claim(body.upload_ref, { buildId: body.build_id, attestation })
+      } catch (error) { throw ingressFailure(error) }
+      try { await this.#buildClaims.claim(body.build_id, buildRef); this.#buildIds.add(body.build_id) }
+      catch (error) { await settleFailed(claimed); throw error }
+      try { await this.options.adapter.prepare(buildRef, body.build_id, claimed.artifact, signal) }
+      catch (error) {
+        let rollbackFailed = false
+        if (error instanceof BuilderSupervisorError && error.code === 'CLEANUP_INCOMPLETE') {
+          this.#buildRefs.add(buildRef)
+          const failed = { build_ref: buildRef, build_id: body.build_id, state: 'CANCELLED' as const, cleanup_pending: true }
+          this.#builds.set(buildRef, failed)
+          try { await this.#buildClaims.update(this.#record(failed)) } catch { rollbackFailed = true }
+        } else {
+          try { await this.#buildClaims.release(body.build_id); this.#buildIds.delete(body.build_id) }
+          catch { rollbackFailed = true }
         }
-      } finally { await artifact.dispose() }
-      this.#buildRefs.add(buildRef); const prepared = { build_ref: buildRef, build_id: body.build_id, state: 'PREPARED' as const, cleanup_pending: false }; this.#builds.set(buildRef, prepared); await this.#buildClaims.update(this.#record(prepared))
+        try { await claimed.fail() } catch { rollbackFailed = true }
+        if (rollbackFailed) throw new BuilderSupervisorError('CLEANUP_INCOMPLETE')
+        throw error
+      }
+      this.#buildRefs.add(buildRef); const prepared: MutableBuild = { build_ref: buildRef, build_id: body.build_id, state: 'PREPARED', cleanup_pending: false }; this.#builds.set(buildRef, prepared)
+      try { await this.#buildClaims.update(this.#record(prepared)) }
+      catch (error) {
+        await this.#rollbackUnpublishedPrepare(prepared, claimed)
+        throw error
+      }
+      try { await claimed.complete() }
+      catch {
+        await this.#rollbackUnpublishedPrepare(prepared)
+        throw new BuilderSupervisorError('CLEANUP_INCOMPLETE')
+      }
       return { build_ref: buildRef, state: 'PREPARED' }
     } finally { release() }
   }
@@ -243,6 +263,19 @@ export class BuilderSupervisor implements BuilderRpcMethods {
 
   #record(build: MutableBuild): BuildJournalRecord { return { build_id: build.build_id, build_ref: build.build_ref, build_state: build.state, exported: build.exported ?? null, cleanup_pending: build.cleanup_pending, finish_result: build.finish_result ?? null, finish_error: build.finish_error ?? null } }
 
+  async #rollbackUnpublishedPrepare(build: MutableBuild, claimed?: ClaimedArtifact): Promise<void> {
+    build.state = 'CANCELLED'; build.cleanup_pending = true
+    await this.#buildClaims.update(this.#record(build)).catch(() => undefined)
+    let cleanupFailed = false
+    try { await this.options.adapter.cleanup(build.build_ref, cleanupSignal()) } catch { cleanupFailed = true }
+    if (claimed !== undefined) try { await claimed.fail() } catch { cleanupFailed = true }
+    if (cleanupFailed) throw new BuilderSupervisorError('CLEANUP_INCOMPLETE')
+    build.cleanup_pending = false
+    const result: FinishResult = { build_ref: build.build_ref, final_state: 'CANCELLED', exported: null, cleanup_pending: false, cleaned: true }
+    build.finish_result = result
+    await this.#buildClaims.complete({ ...this.#record(build), finish_result: result })
+  }
+
   async #pruneCompleted(): Promise<void> {
     const retained = new Set((await this.#buildClaims.list()).map(record => record.build_ref))
     for (const [buildRef, build] of this.#builds) if ((build.finish_result !== undefined || build.finish_error !== undefined) && !retained.has(buildRef)) { this.#builds.delete(buildRef); this.#buildIds.delete(build.build_id); this.#buildRefs.delete(buildRef) }
@@ -261,6 +294,12 @@ export class BuilderSupervisor implements BuilderRpcMethods {
 }
 
 function cleanupSignal(): AbortSignal { return AbortSignal.timeout(30_000) }
+async function settleFailed(claimed: ClaimedArtifact): Promise<void> { try { await claimed.fail() } catch { throw new BuilderSupervisorError('CLEANUP_INCOMPLETE') } }
+function ingressFailure(error: unknown): Error {
+  if (!(error instanceof ArtifactIngressError)) return error instanceof Error ? error : new BuilderSupervisorError('RECOVERY_FAILED')
+  if (error.code === 'INVALID_CONFIGURATION') return new BuilderSupervisorError('RECOVERY_FAILED')
+  return new BuilderSupervisorError(error.code)
+}
 function lifecycleSignal(): AbortSignal { return AbortSignal.timeout(210_000) }
 function pinnedExportRefs(records: Iterable<BuildJournalRecord>, current: string): ReadonlySet<string> {
   const pinned = new Set<string>()

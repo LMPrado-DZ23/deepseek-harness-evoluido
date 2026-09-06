@@ -3,6 +3,8 @@ import { constants, lstatSync } from 'node:fs'
 import { chmod, lstat, mkdir, open, readFile, realpath, rename, rm, unlink, writeFile } from 'node:fs/promises'
 import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { dirname, posix } from 'node:path'
+import { createArtifactIngressHttpHandler } from './artifact-ingress-http.js'
+import type { ArtifactIngressPort } from './artifact-ingress.js'
 import type { BuilderRpcMethods } from './protocol.js'
 import { BUILDER_RPC_MAX_BODY_BYTES, createBuilderRpcHandler } from './protocol.js'
 import { FileRpcReplayGuard } from './persistent-replay.js'
@@ -25,7 +27,8 @@ const DEFAULT_RUNTIME: BuilderUnixRuntime = { platform: process.platform, pid: p
 export interface BuilderUnixServerOptions {
   readonly socketPath: string; readonly bearerToken: string; readonly methods: LifecycleMethods
   readonly scopeId: BuilderRuntimeScopeId; readonly policySha256: string; readonly replayRoot: string
-  readonly signal?: AbortSignal; readonly operationTimeoutMs?: number; readonly stepTimeoutMs?: number; readonly cleanupTimeoutMs?: number; readonly runtime?: BuilderUnixRuntime
+  readonly artifactIngress?: ArtifactIngressPort
+  readonly signal?: AbortSignal; readonly operationTimeoutMs?: number; readonly artifactTimeoutMs?: number; readonly stepTimeoutMs?: number; readonly cleanupTimeoutMs?: number; readonly runtime?: BuilderUnixRuntime
 }
 
 export async function listenBuilderUnix(options: BuilderUnixServerOptions): Promise<{ readonly server: Server; close(afterStopAccepting?: () => void): Promise<void> }> {
@@ -35,8 +38,8 @@ export async function listenBuilderUnix(options: BuilderUnixServerOptions): Prom
   if (!/^[A-Za-z0-9_-]{43,200}$/u.test(options.bearerToken)) throw new Error('INVALID_SUPERVISOR_TOKEN')
   if (!isBuilderRuntimeScopeId(options.scopeId) || !/^[a-f0-9]{64}$/u.test(options.policySha256)) throw new Error('INVALID_REPLAY_NAMESPACE')
   const replayRoot = validReplayRoot(options.replayRoot)
-  const stepTimeoutMs = options.stepTimeoutMs ?? 180_000; const cleanupTimeoutMs = options.cleanupTimeoutMs ?? 30_000; const timeoutMs = options.operationTimeoutMs ?? 240_000
-  if (![stepTimeoutMs, cleanupTimeoutMs, timeoutMs].every(value => Number.isSafeInteger(value) && value > 0) || timeoutMs < stepTimeoutMs + cleanupTimeoutMs) throw new Error('INVALID_OPERATION_TIMEOUT')
+  const stepTimeoutMs = options.stepTimeoutMs ?? 180_000; const cleanupTimeoutMs = options.cleanupTimeoutMs ?? 30_000; const timeoutMs = options.operationTimeoutMs ?? 240_000; const artifactTimeoutMs = options.artifactTimeoutMs ?? 15 * 60_000
+  if (![stepTimeoutMs, cleanupTimeoutMs, timeoutMs, artifactTimeoutMs].every(value => Number.isSafeInteger(value) && value > 0) || timeoutMs < stepTimeoutMs + cleanupTimeoutMs || artifactTimeoutMs > 60 * 60_000) throw new Error('INVALID_OPERATION_TIMEOUT')
   options.signal?.throwIfAborted()
   const processStartTicks = await processStartIdentity(runtime.pid, runtime)
   await ensureSocketDirectory(parent, uid, runtime)
@@ -51,8 +54,9 @@ export async function listenBuilderUnix(options: BuilderUnixServerOptions): Prom
     for (const directory of [replayRoot, replayScopeRoot]) await new FileRpcReplayGuard(directory).initialize()
     const replay = new FileRpcReplayGuard(replayDirectory); await replay.initialize()
     const rpc = createBuilderRpcHandler({ credentialRef: CREDENTIAL_REFERENCE, credentials: { resolve: async () => options.bearerToken }, methods: options.methods, replay })
-    server = runtime.createServer((request, response) => { void handle(request, response, options, timeoutMs, rpc).catch(() => failure(response)) })
-    server.requestTimeout = timeoutMs; server.headersTimeout = Math.min(timeoutMs, 10_000); server.maxHeadersCount = 64
+    const artifact = options.artifactIngress === undefined ? undefined : createArtifactIngressHttpHandler({ bearerToken: options.bearerToken, ingress: options.artifactIngress, totalTimeoutMs: artifactTimeoutMs })
+    server = runtime.createServer((request, response) => { void handle(request, response, options, timeoutMs, artifactTimeoutMs, rpc, artifact).catch(() => failure(response)) })
+    server.requestTimeout = Math.max(timeoutMs, artifactTimeoutMs); server.headersTimeout = Math.min(timeoutMs, 10_000); server.maxHeadersCount = 64
     const previousUmask = runtime.umask(0o117)
     try { await new Promise<void>((resolve, reject) => { server!.once('error', reject); server!.listen(socketPath, () => { server!.off('error', reject); const bound = runtime.lstatSync(socketPath); socketIdentity = { dev: bound.dev, ino: bound.ino }; listenSucceeded = true; resolve() }) }) }
     finally { runtime.umask(previousUmask) }
@@ -77,16 +81,29 @@ export async function listenBuilderUnix(options: BuilderUnixServerOptions): Prom
   } }
 }
 
-async function handle(request: IncomingMessage, response: ServerResponse, options: BuilderUnixServerOptions, timeoutMs: number, rpc: ReturnType<typeof createBuilderRpcHandler>): Promise<void> {
-  const controller = new AbortController(); const timeout = AbortSignal.timeout(timeoutMs); let cause: 'timeout' | 'disconnect' | 'shutdown' | undefined
+async function handle(request: IncomingMessage, response: ServerResponse, options: BuilderUnixServerOptions, timeoutMs: number, artifactTimeoutMs: number, rpc: ReturnType<typeof createBuilderRpcHandler>, artifact: ReturnType<typeof createArtifactIngressHttpHandler> | undefined): Promise<void> {
+  const path = request.url ?? '/'
+  const artifactRoute = path.startsWith('/v1/artifacts/')
+  const controller = new AbortController(); const timeout = AbortSignal.timeout(artifactRoute ? artifactTimeoutMs : timeoutMs); let cause: 'timeout' | 'disconnect' | 'shutdown' | undefined
   const abort = (next: typeof cause) => { cause ??= next; controller.abort(new Error(`SUPERVISOR_${next?.toUpperCase()}`)) }
   const shutdown = () => abort('shutdown'); const deadline = () => abort('timeout'); const disconnect = () => abort('disconnect')
   if (options.signal?.aborted === true) shutdown(); else options.signal?.addEventListener('abort', shutdown, { once: true })
   timeout.addEventListener('abort', deadline, { once: true }); request.once('aborted', disconnect); response.once('close', () => { if (!response.writableEnded) disconnect() })
   try {
+    if (artifactRoute) {
+      if (artifact === undefined) {
+        request.resume()
+        const body = Buffer.from('{"error":"ARTIFACT_INGRESS_UNAVAILABLE"}', 'utf8')
+        response.writeHead(503, { 'content-type': 'application/json; charset=utf-8', 'content-length': String(body.byteLength), 'cache-control': 'no-store', connection: 'close' })
+        response.end(body)
+        return
+      }
+      const result = await artifact.handle({ method: request.method ?? '', path, headers: request.headers, body: request, signal: controller.signal })
+      response.writeHead(result.status, result.headers); response.end(result.body); return
+    }
     let body: Buffer; try { body = await readBounded(request) } catch { body = Buffer.alloc(BUILDER_RPC_MAX_BODY_BYTES + 1) }
     let result
-    try { result = await rpc.handle({ path: request.url ?? '/', method: request.method ?? '', headers: { authorization: typeof request.headers.authorization === 'string' ? request.headers.authorization : undefined }, body, signal: controller.signal }) }
+    try { result = await rpc.handle({ path, method: request.method ?? '', headers: { authorization: typeof request.headers.authorization === 'string' ? request.headers.authorization : undefined }, body, signal: controller.signal }) }
     catch {
       if (cause === 'disconnect') return
       const status = cause === 'timeout' ? 504 : 503; const code = cause === 'timeout' ? 'DEADLINE_EXCEEDED' : 'SUPERVISOR_SHUTTING_DOWN'

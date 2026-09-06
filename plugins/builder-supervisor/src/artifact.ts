@@ -11,6 +11,7 @@ const MAX_BYTES = 256 * 1024 * 1024
 export interface VerifiedBuildArtifact {
   readonly archivePath: string
   readonly archiveBytes: number
+  readonly wireSha256: string
   readonly sha256: string
   readonly files: number
   readonly bytes: number
@@ -20,7 +21,7 @@ export interface VerifiedBuildArtifact {
 export async function createVerifiedBuildArchive(
   artifactRoot: string,
   relativePath: string,
-  expectedSha256: string,
+  expectedSha256?: string,
   signal?: AbortSignal,
 ): Promise<VerifiedBuildArtifact> {
   signal?.throwIfAborted()
@@ -34,6 +35,7 @@ export async function createVerifiedBuildArchive(
   if (paths.length === 0 || paths.length > MAX_FILES) throw new BuilderSupervisorError('ARTIFACT_UNSAFE_ENTRY')
   const folded = new Set<string>()
   const hash = createHash('sha256')
+  const wireHash = createHash('sha256')
   let total = 0
   const stage = await mkdtemp(join(tmpdir(), 'dz23-builder-stage-'))
   const archivePath = join(stage, 'input.tar'); let archive: FileHandle | undefined; let archiveBytes = 0
@@ -41,7 +43,11 @@ export async function createVerifiedBuildArchive(
     archive = await open(archivePath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | noFollow(), 0o600)
     const directories = new Set<string>()
     for (const name of paths) { let current = posix.dirname(name); while (current !== '.') { directories.add(`${current}/`); current = posix.dirname(current) } }
-    for (const directory of [...directories].sort()) archiveBytes += await writeAll(archive, tarHeader(directory, 0, '5'))
+    const writeArchive = async (value: Buffer): Promise<void> => {
+      wireHash.update(value)
+      archiveBytes += await writeAll(archive!, value)
+    }
+    for (const directory of [...directories].sort()) await writeArchive(tarHeader(directory, 0, '5'))
     for (const name of paths) {
       signal?.throwIfAborted()
       const normalized = name.toLocaleLowerCase('en-US')
@@ -53,27 +59,27 @@ export async function createVerifiedBuildArchive(
         if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) throw new BuilderSupervisorError('ARTIFACT_UNSAFE_ENTRY')
         total += before.size
         if (total > MAX_BYTES) throw new BuilderSupervisorError('ARTIFACT_UNSAFE_ENTRY')
-        hash.update(name).update('\0'); archiveBytes += await writeAll(archive, tarHeader(name, before.size, '0'))
+        hash.update(name).update('\0'); await writeArchive(tarHeader(name, before.size, '0'))
         const chunk = Buffer.allocUnsafe(64 * 1024); let position = 0
         while (position < before.size) {
           signal?.throwIfAborted()
           const { bytesRead } = await handle.read(chunk, 0, Math.min(chunk.byteLength, before.size - position), position)
           if (bytesRead === 0) throw new BuilderSupervisorError('ARTIFACT_CHANGED_DURING_STAGE')
-          const value = chunk.subarray(0, bytesRead); hash.update(value); archiveBytes += await writeAll(archive, value); position += bytesRead
+          const value = chunk.subarray(0, bytesRead); hash.update(value); await writeArchive(value); position += bytesRead
         }
         hash.update('\0')
         const after = await handle.stat()
         if (position !== before.size || before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs) throw new BuilderSupervisorError('ARTIFACT_CHANGED_DURING_STAGE')
         const padding = (512 - before.size % 512) % 512
-        if (padding > 0) archiveBytes += await writeAll(archive, Buffer.alloc(padding))
+        if (padding > 0) await writeArchive(Buffer.alloc(padding))
       } finally { await handle.close() }
     }
     const sourceAfter = await lstat(source)
     if (sourceBefore.dev !== sourceAfter.dev || sourceBefore.ino !== sourceAfter.ino || sourceBefore.mtimeMs !== sourceAfter.mtimeMs) throw new BuilderSupervisorError('ARTIFACT_CHANGED_DURING_STAGE')
     const sha256 = hash.digest('hex')
-    if (sha256 !== expectedSha256) throw new BuilderSupervisorError('ARTIFACT_HASH_MISMATCH')
-    archiveBytes += await writeAll(archive, Buffer.alloc(1_024)); await archive.sync(); await archive.close(); archive = undefined
-    return { archivePath, archiveBytes, sha256, files: paths.length, bytes: total, dispose: async () => { await rm(stage, { recursive: true, force: true }) } }
+    if (expectedSha256 !== undefined && sha256 !== expectedSha256) throw new BuilderSupervisorError('ARTIFACT_HASH_MISMATCH')
+    await writeArchive(Buffer.alloc(1_024)); await archive.sync(); await archive.close(); archive = undefined
+    return { archivePath, archiveBytes, wireSha256: wireHash.digest('hex'), sha256, files: paths.length, bytes: total, dispose: async () => { await rm(stage, { recursive: true, force: true }) } }
   } catch (error) { await archive?.close().catch(() => undefined); await rm(stage, { recursive: true, force: true }); throw error }
 }
 

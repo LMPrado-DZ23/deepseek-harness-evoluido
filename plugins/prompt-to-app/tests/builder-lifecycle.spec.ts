@@ -1,8 +1,12 @@
 import type { Stats } from 'node:fs'
-import type { FileHandle } from 'node:fs/promises'
+import { appendFile, mkdir, mkdtemp, rm, writeFile, type FileHandle } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import {
   deriveBuilderRuntimeScopeId,
+  ArtifactIngressUnixClientError,
+  createVerifiedBuildArchive,
   BuilderUnixClientError,
   type BuilderAttestation,
   type BuilderRuntimeRegistry,
@@ -10,6 +14,7 @@ import {
   type BuilderSupervisorRootPolicy,
   type BuilderUnixClient,
   type BuilderUnixClientOptions,
+  type ArtifactIngressUnixClient,
 } from '@dz23-studio/builder-supervisor'
 import { BuilderLifecycleError, managedBuild } from '../src/builder-lifecycle.js'
 import {
@@ -17,7 +22,7 @@ import {
   opaqueTenantIdentity,
   PROMPT_APP_BUILDER_INSTANCE_ID,
   readSecureLifecycleCredential,
-  type BuilderLifecycleResolverOptions,
+  type BuilderLifecycleResolverDependencies,
   type LifecycleCredentialRuntime,
 } from '../src/builder-resolver.js'
 import type { PromptToAppActor } from '../src/service.js'
@@ -52,7 +57,7 @@ describe('builder lifecycle resolver', () => {
     expect(loadRegistry).toHaveBeenCalledOnce()
   })
 
-  it('pins scope and attestation but keeps preflight blocked until authenticated ingress exists', async () => {
+  it('pins scope and attestation and advertises the authenticated ingress route', async () => {
     const tenantId = opaqueTenantIdentity(actor.orgId, actor.tenantId)
     const scopeId = deriveBuilderRuntimeScopeId({ installationId, tenantId, instanceId: PROMPT_APP_BUILDER_INSTANCE_ID })
     const readCredential = vi.fn(async () => 'x'.repeat(43))
@@ -69,7 +74,7 @@ describe('builder lifecycle resolver', () => {
       },
     })
     const session = await resolver.forActor(actor)
-    await expect(session.preflight()).resolves.toEqual({ state: 'BLOCKED_EXTERNAL' })
+    await expect(session.preflight()).resolves.toEqual({ state: 'OK' })
     expect(readCredential).toHaveBeenCalledOnce()
     expect(executeBodies).toEqual([])
     expect(fakeClient.execute).not.toHaveBeenCalled()
@@ -83,28 +88,129 @@ describe('builder lifecycle resolver', () => {
     await expect((await resolverFixture(actor, installationId, client).forActor(actor)).preflight()).resolves.toEqual({ state: 'BLOCKED_EXTERNAL' })
   })
 
-  it.each([
-    ['linux shared path', '/srv/shared/.staging-attack/source'],
-    ['windows junction path', 'C:\\shared\\junction\\source'],
-  ])('keeps filesystem ingress unavailable for %s without invoking prepare or touching the supplied path', async (_case, sourcePath) => {
+  it('packages locally, streams through authenticated ingress and sends only the opaque upload reference', async () => {
     const tenantId = opaqueTenantIdentity(actor.orgId, actor.tenantId)
     const scopeId = deriveBuilderRuntimeScopeId({ installationId, tenantId, instanceId: PROMPT_APP_BUILDER_INSTANCE_ID })
     const client = clientFixture(scopeId, [])
-    const adversarialOptions = {
+    const uploadRef = `upload_${'a'.repeat(32)}`
+    let uploadedBytes = 0
+    const artifactClient: ArtifactIngressUnixClient = {
+      begin: vi.fn(async () => ({ uploadRef, state: 'RECEIVING' as const, idempotent: false })),
+      upload: vi.fn(async input => { for await (const chunk of input.source) uploadedBytes += chunk.byteLength; return { uploadRef, state: 'READY' as const, idempotent: false } }),
+      abort: vi.fn(async () => undefined),
+    }
+    let resolveArtifactCredential: ((reference: string, signal: AbortSignal) => Promise<string | undefined>) | undefined
+    const resolver = new ManagedBuilderLifecycleResolver({
       registryReference: 'file:/etc/dz23-studio/builder/manager/runtime-registry.json',
       dependencies: {
         loadRegistry: vi.fn(async () => registryFixture(installationId, scopeId)),
         loadConfig: vi.fn(async () => configFixture(installationId, tenantId, scopeId)),
-        createClient: vi.fn(() => client), readCredential: vi.fn(async () => 'x'.repeat(43)),
+        createClient: vi.fn(() => client),
+        createArtifactClient: vi.fn(options => { resolveArtifactCredential = options.credentials.resolve; return artifactClient }),
+        readCredential: vi.fn(async () => 'x'.repeat(43)),
       },
-      ingress: 'shared-filesystem',
-    } satisfies BuilderLifecycleResolverOptions & { readonly ingress: 'shared-filesystem' }
-    const resolver = new ManagedBuilderLifecycleResolver(adversarialOptions)
-    const session = await resolver.forActor(actor)
-    await expect(session.prepare(sourcePath, '../logical-build')).rejects.toMatchObject({ state: 'BLOCKED_EXTERNAL', code: 'UNSUPPORTED_INGRESS' })
-    await expect(session.execute('build_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'build')).rejects.toMatchObject({ state: 'BLOCKED_EXTERNAL', code: 'UNSUPPORTED_INGRESS' })
-    expect(client.prepare).not.toHaveBeenCalled()
-    expect(client.execute).not.toHaveBeenCalled()
+    })
+    const root = await mkdtemp(join(tmpdir(), 'dz23-lifecycle-upload-'))
+    const sourcePath = join(root, 'source')
+    try {
+      await mkdir(sourcePath); await writeFile(join(sourcePath, 'package.json'), '{}')
+      const session = await resolver.forActor(actor)
+      await expect(resolveArtifactCredential?.('file:/run/test', new AbortController().signal)).resolves.toBe('x'.repeat(43))
+      await expect(session.prepare(sourcePath, '../invalid')).rejects.toMatchObject({ state: 'INTERRUPTED', code: 'INVALID_BUILD_ID' })
+      expect(artifactClient.begin).not.toHaveBeenCalled()
+      await expect(session.prepare(sourcePath, 'logical-build')).resolves.toEqual({ buildRef: 'build_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' })
+      expect(uploadedBytes).toBeGreaterThan(0)
+      expect(client.prepare).toHaveBeenCalledWith(expect.objectContaining({ build_id: 'logical-build', upload_ref: uploadRef }), expect.anything())
+      await expect(session.execute('build_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'build')).resolves.toMatchObject({ state: 'BUILD_OK', step: 'build' })
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
+
+  it.each(['metadata', 'response', 'mutation'] as const)('rejects staged archive %s failures and aborts the opaque upload', async mode => {
+    const tenantId = opaqueTenantIdentity(actor.orgId, actor.tenantId)
+    const scopeId = deriveBuilderRuntimeScopeId({ installationId, tenantId, instanceId: PROMPT_APP_BUILDER_INSTANCE_ID })
+    const root = await mkdtemp(join(tmpdir(), `dz23-lifecycle-${mode}-`)); const sourcePath = join(root, 'source'); await mkdir(sourcePath); await writeFile(join(sourcePath, 'package.json'), '{}')
+    let archivePath = ''
+    const createArchive: typeof createVerifiedBuildArchive = async (...args) => {
+      const archive = await createVerifiedBuildArchive(...args); archivePath = archive.archivePath
+      return mode === 'metadata' ? { ...archive, archiveBytes: archive.archiveBytes + 1 } : archive
+    }
+    const uploadRef = `upload_${'b'.repeat(32)}`; const abort = vi.fn(async () => undefined)
+    const artifactClient: ArtifactIngressUnixClient = {
+      begin: vi.fn(async () => ({ uploadRef, state: 'RECEIVING' as const, idempotent: false })),
+      upload: vi.fn(async input => {
+        for await (const _chunk of input.source) { /* consume the pinned archive */ }
+        if (mode === 'mutation') await appendFile(archivePath, 'changed')
+        return { uploadRef: mode === 'response' ? `upload_${'c'.repeat(32)}` : uploadRef, state: 'READY' as const, idempotent: false }
+      }),
+      abort,
+    }
+    try {
+      const session = await resolverFixture(actor, installationId, clientFixture(scopeId, []), { createArchive, createArtifactClient: () => artifactClient }).forActor(actor)
+      await expect(session.prepare(sourcePath, `failure-${mode}`)).rejects.toMatchObject({ state: mode === 'response' ? 'BLOCKED_EXTERNAL' : 'INTERRUPTED' })
+      expect(abort).toHaveBeenCalledOnce()
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
+
+  it.each(['close', 'abort', 'dispose', 'early-eof'] as const)('reports cleanup failure for the %s boundary without leaking its cause', async mode => {
+    const tenantId = opaqueTenantIdentity(actor.orgId, actor.tenantId)
+    const scopeId = deriveBuilderRuntimeScopeId({ installationId, tenantId, instanceId: PROMPT_APP_BUILDER_INSTANCE_ID })
+    let reads = 0
+    const handle = {
+      stat: async () => fakeStat({ size: mode === 'early-eof' ? 2 : 1 }),
+      read: async (buffer: Buffer) => {
+        if (mode === 'early-eof' && reads++ > 0) return { bytesRead: 0, buffer }
+        buffer[0] = 120; return { bytesRead: 1, buffer }
+      },
+      close: async () => { if (mode === 'close') throw new Error('private close failure') },
+    } as unknown as FileHandle
+    const dispose = vi.fn(async () => { if (mode === 'dispose') throw new Error('private dispose failure') })
+    const createArchive = vi.fn(async () => ({ archivePath: '/private/staged.tar', archiveBytes: mode === 'early-eof' ? 2 : 1, wireSha256: 'a'.repeat(64), sha256: 'b'.repeat(64), files: 1, bytes: 1, dispose })) as unknown as typeof createVerifiedBuildArchive
+    const uploadRef = `upload_${'d'.repeat(32)}`
+    const artifactClient: ArtifactIngressUnixClient = {
+      begin: vi.fn(async () => ({ uploadRef, state: 'RECEIVING' as const, idempotent: false })),
+      upload: vi.fn(async input => {
+        if (mode === 'abort') throw new ArtifactIngressUnixClientError('TRANSPORT_ERROR')
+        for await (const _chunk of input.source) { /* consume */ }
+        return { uploadRef, state: 'READY' as const, idempotent: false }
+      }),
+      abort: vi.fn(async () => { if (mode === 'abort') throw new Error('private abort failure') }),
+    }
+    const session = await resolverFixture(actor, installationId, clientFixture(scopeId, []), { createArchive, createArtifactClient: () => artifactClient, openArchive: async () => handle }).forActor(actor)
+    const expected = mode === 'early-eof'
+      ? { state: 'INTERRUPTED', code: 'INVALID_REQUEST' }
+      : { state: 'BLOCKED_EXTERNAL', code: 'CLEANUP_INCOMPLETE' }
+    await expect(session.prepare('/private/source', `cleanup-${mode}`)).rejects.toMatchObject(expected)
+  })
+
+  it.each([
+    ['ARTIFACT_INVALID', 'BUILD_FAILED'],
+    ['ARTIFACT_QUOTA_EXCEEDED', 'BLOCKED_EXTERNAL'],
+    ['INVALID_REQUEST', 'INTERRUPTED'],
+    ['ABORTED', 'CANCELLED'],
+  ] as const)('maps artifact ingress %s to lifecycle %s', async (code, state) => {
+    const tenantId = opaqueTenantIdentity(actor.orgId, actor.tenantId)
+    const scopeId = deriveBuilderRuntimeScopeId({ installationId, tenantId, instanceId: PROMPT_APP_BUILDER_INSTANCE_ID })
+    const artifactClient: ArtifactIngressUnixClient = {
+      begin: vi.fn(async () => { throw new ArtifactIngressUnixClientError(code) }),
+      upload: vi.fn(),
+      abort: vi.fn(),
+    }
+    const resolver = new ManagedBuilderLifecycleResolver({
+      registryReference: 'file:/etc/dz23-studio/builder/manager/runtime-registry.json',
+      dependencies: {
+        loadRegistry: vi.fn(async () => registryFixture(installationId, scopeId)),
+        loadConfig: vi.fn(async () => configFixture(installationId, tenantId, scopeId)),
+        createClient: vi.fn(() => clientFixture(scopeId, [])),
+        createArtifactClient: vi.fn(() => artifactClient),
+        readCredential: vi.fn(async () => 'x'.repeat(43)),
+      },
+    })
+    const root = await mkdtemp(join(tmpdir(), 'dz23-lifecycle-error-'))
+    const sourcePath = join(root, 'source')
+    try {
+      await mkdir(sourcePath); await writeFile(join(sourcePath, 'package.json'), '{}')
+      await expect((await resolver.forActor(actor)).prepare(sourcePath, 'logical-build')).rejects.toMatchObject({ state, code })
+    } finally { await rm(root, { recursive: true, force: true }) }
   })
 
   it('fails preflight closed when the attestation differs from the selected scope', async () => {
@@ -344,7 +450,7 @@ function customRoots(): BuilderSupervisorRootPolicy {
   }
 }
 
-function resolverFixture(actor: PromptToAppActor, installationId: string, client: BuilderUnixClient): ManagedBuilderLifecycleResolver {
+function resolverFixture(actor: PromptToAppActor, installationId: string, client: BuilderUnixClient, overrides: Partial<BuilderLifecycleResolverDependencies> = {}): ManagedBuilderLifecycleResolver {
   const tenantId = opaqueTenantIdentity(actor.orgId, actor.tenantId)
   const scopeId = deriveBuilderRuntimeScopeId({ installationId, tenantId, instanceId: PROMPT_APP_BUILDER_INSTANCE_ID })
   return new ManagedBuilderLifecycleResolver({
@@ -354,6 +460,7 @@ function resolverFixture(actor: PromptToAppActor, installationId: string, client
       loadConfig: async () => configFixture(installationId, tenantId, scopeId),
       createClient: () => client,
       readCredential: async () => 'x'.repeat(43),
+      ...overrides,
     },
   })
 }

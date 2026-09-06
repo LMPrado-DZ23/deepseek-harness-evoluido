@@ -3,6 +3,8 @@ import { execFile, spawn } from 'node:child_process'
 import { chmod, link, lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { posix } from 'node:path'
+import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
 import { computeBuilderSupervisorConfigEnvelopeV2Sha256, loadBuilderSupervisorConfig, type BuilderSupervisorRootPolicy } from '../src/supervisor-config.js'
@@ -11,6 +13,7 @@ import { BuilderProvisionError, STORE_PROVISION_GUARD_TEST_ONLY, provisionBuilde
 import { TEMPLATE_ENTRY_MAX_BYTES, TEMPLATE_MANIFEST_MAX_BYTES, canonicalTemplateStoreManifestBytes, computeTemplateTreeSha256, type TemplateManifestEntry } from '../src/store-security.js'
 
 const run = promisify(execFile)
+const require = createRequire(import.meta.url)
 const linux = process.platform === 'linux' ? describe : describe.skip
 const roots: string[] = []
 afterEach(async () => {
@@ -1020,8 +1023,8 @@ async function startProvisionChild(
   provisionChildSequence += 1
   const requestPath = posix.join(fixture.root, `child-${provisionChildSequence}.request.json`)
   await writeFile(requestPath, `${JSON.stringify(fixture.request)}\n`, { mode: 0o600 })
-  const childScript = posix.resolve(process.cwd(), 'tests/fixtures/store-provision-child.ts')
-  const tsx = posix.resolve(process.cwd(), '../../node_modules/tsx/dist/cli.mjs')
+  const childScript = fileURLToPath(new URL('fixtures/store-provision-child.ts', import.meta.url))
+  const tsx = require.resolve('tsx/cli')
   const child = spawn(process.execPath, [tsx, childScript, requestPath, mode, readyPath ?? '-', gatePath ?? '-', resultPath ?? '-'], {
     stdio: ['ignore', 'ignore', 'ignore'],
   })

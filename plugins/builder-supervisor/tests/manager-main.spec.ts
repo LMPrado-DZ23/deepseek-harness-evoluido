@@ -534,6 +534,7 @@ describe('multi-runtime manager', () => {
 describe('slot starter lifecycle', () => {
   it('materializes config v2 with one shared engine, initializes exactly once, and only then listens', async () => {
     const order: string[] = []; const config = resolvedConfig(); const engine = {} as DockerEnginePort
+    const artifactIngress = {} as NonNullable<BuilderSupervisorComposition['artifactIngress']>
     const base = methods('1')
     const runtime = slotStartRuntime({
       loadConfig: async () => { order.push('load-config'); return config },
@@ -554,7 +555,7 @@ describe('slot starter lifecycle', () => {
       },
       compose: (value, reused) => {
         order.push('compose'); expect({ value, reused }).toEqual({ value: config, reused: engine })
-        return { methods: {
+        return { artifactIngress, methods: {
           ...base,
           initialize: async signal => { signal.throwIfAborted(); order.push('initialize') },
           preflight: async () => { order.push('rpc-preflight'); return base.preflight({ request_id: `req_${'0'.repeat(32)}` }, new AbortController().signal) },
@@ -563,6 +564,7 @@ describe('slot starter lifecycle', () => {
       listen: async options => {
         order.push('listen')
         expect('initialize' in options.methods).toBe(false)
+        expect(options.artifactIngress).toBe(artifactIngress)
         return { server: { close: vi.fn(), closeAllConnections: vi.fn(), closeIdleConnections: vi.fn() }, close: async () => undefined }
       },
     })
@@ -763,6 +765,12 @@ describe('slot starter lifecycle', () => {
 })
 
 describe('global capacity wiring', () => {
+  it('preserves the authenticated artifact-ingress port while wrapping capacity', () => {
+    const artifactIngress = {} as NonNullable<BuilderSupervisorComposition['artifactIngress']>
+    const wrapped = wrapBuilderSupervisorWithGlobalCapacity(scope('1'), { artifactIngress, methods: methods('1') }, new FairGlobalBuilderCapacity(1))
+    expect(wrapped.artifactIngress).toBe(artifactIngress)
+  })
+
   it('holds one global lease from prepare until cancel and then admits the next scope', async () => {
     const capacity = new FairGlobalBuilderCapacity(1)
     const first = wrapBuilderSupervisorWithGlobalCapacity(scope('1'), { methods: methods('1') }, capacity)
@@ -1027,7 +1035,7 @@ function methods(digit: string): BuilderRpcMethods & { initialize(signal: AbortS
 }
 
 function prepareBody(digit: string, buildId: string): PrepareRequest {
-  return { request_id: `req_${digit.repeat(32)}`, build_id: buildId, artifact_relative_path: 'artifact', artifact_sha256: 'a'.repeat(64) }
+  return { request_id: `req_${digit.repeat(32)}`, build_id: buildId, upload_ref: `upload_${digit.repeat(32)}` }
 }
 
 function resolvedConfig(): BuilderSupervisorResolvedConfig {

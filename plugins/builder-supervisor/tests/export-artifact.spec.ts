@@ -13,6 +13,7 @@ describe('validated Docker export publication', () => {
     const root = await mkdtemp(join(tmpdir(), 'dz23-export-')); roots.push(root); const source = join(root, 'source'); const exports = join(root, 'published'); await validExportTree(source)
     const expected = await hashExportTree()
     const artifact = await createVerifiedBuildArchive(root, 'source', expected); const archive = artifact.archivePath
+    expect(artifact.wireSha256).toBe(createHash('sha256').update(await readFile(archive)).digest('hex'))
     const ref = `build_${'a'.repeat(32)}`; const result = await publishValidatedDockerArchive(exports, ref, archive, new AbortController().signal)
     expect(result).toEqual({ relative_path: `exports/${ref}`, sha256: expected, files: 4, bytes: 17 }); expect(await readFile(join(exports, 'exports', ref, '.next', 'standalone', 'server.js'), 'utf8')).toBe('server'); expect(await readFile(join(exports, 'exports', ref, 'public', 'logo.svg'), 'utf8')).toBe('logo')
     await expect(publishValidatedDockerArchive(exports, ref, archive, new AbortController().signal)).resolves.toEqual(result); await artifact.dispose()
