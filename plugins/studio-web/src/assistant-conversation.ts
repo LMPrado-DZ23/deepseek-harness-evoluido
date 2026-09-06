@@ -66,7 +66,7 @@ export class AssistantConversationService {
   }
 
   async open(identitySession: SessionRecord): Promise<AssistantSessionLaunch> {
-    this.#authorize(identitySession)
+    this.#authorize(identitySession, 'project.write')
     return this.options.launcher.launchTenantConversation(identitySession)
   }
 
@@ -75,7 +75,7 @@ export class AssistantConversationService {
     conversationId: string,
     signal?: AbortSignal,
   ): Promise<AssistantConversationSnapshot> {
-    this.#assertOwned(identitySession, conversationId)
+    this.#assertOwned(identitySession, conversationId, 'project.read')
     try {
       const inspected = await this.options.sessions.inspect(conversationId as SessionId, signal)
       return sanitizeAssistantSnapshot(conversationId, inspected.events)
@@ -90,7 +90,7 @@ export class AssistantConversationService {
     text: string,
     signal: AbortSignal,
   ): Promise<{ readonly accepted: true; readonly request_id: string }> {
-    this.#assertOwned(identitySession, conversationId)
+    this.#assertOwned(identitySession, conversationId, 'project.write')
     assertPromptText(text)
     const requestId = this.#createRequestId()
     try {
@@ -107,7 +107,7 @@ export class AssistantConversationService {
   }
 
   cancel(identitySession: SessionRecord, conversationId: string): { readonly accepted: true } {
-    this.#assertOwned(identitySession, conversationId)
+    this.#assertOwned(identitySession, conversationId, 'project.write')
     try {
       return this.options.sessions.cancel({ sessionId: conversationId as SessionId })
     } catch {
@@ -115,20 +115,24 @@ export class AssistantConversationService {
     }
   }
 
-  #assertOwned(identitySession: SessionRecord, conversationId: string): void {
-    this.#authorize(identitySession)
+  #assertOwned(
+    identitySession: SessionRecord,
+    conversationId: string,
+    permission: 'project.read' | 'project.write',
+  ): void {
+    this.#authorize(identitySession, permission)
     if (!this.options.identity.ownsHarnessSession(identitySession, conversationId)) {
       throw new AssistantConversationError('NOT_FOUND', t('assistant.conversationMissing'))
     }
   }
 
-  #authorize(identitySession: SessionRecord): void {
+  #authorize(identitySession: SessionRecord, permission: 'project.read' | 'project.write'): void {
     const authorization = this.options.tenancy.authorizationFor(
       identitySession.user_id,
       identitySession.org_id,
       identitySession.tenant_id,
     )
-    if (authorization === undefined || !roleAllows(authorization.role, 'project.read')) {
+    if (authorization === undefined || !roleAllows(authorization.role, permission)) {
       throw new AssistantConversationError('FORBIDDEN', t('assistant.projectForbidden'))
     }
   }

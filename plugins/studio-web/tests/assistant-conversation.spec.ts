@@ -32,7 +32,7 @@ function fixture(input: {
   const service = new AssistantConversationService({
     identity: { ownsHarnessSession: () => input.owned !== false },
     tenancy: { authorizationFor: () => input.allowed === false ? undefined : ({
-      userId: 'user-1', orgId: 'org-1', tenantId: 'tenant-1', role: input.role ?? 'viewer',
+      userId: 'user-1', orgId: 'org-1', tenantId: 'tenant-1', role: input.role ?? 'builder',
     }) },
     launcher: { launchTenantConversation },
     sessions: { inspect, prompt, cancel },
@@ -52,6 +52,23 @@ describe('AssistantConversationService', () => {
     const forbidden = fixture({ allowed: false })
     await expect(forbidden.service.open(identitySession())).rejects.toEqual(expect.objectContaining({ code: 'FORBIDDEN' }))
     expect(forbidden.launchTenantConversation).not.toHaveBeenCalled()
+
+    const viewer = fixture({ role: 'viewer' })
+    await expect(viewer.service.open(identitySession())).rejects.toEqual(expect.objectContaining({ code: 'FORBIDDEN' }))
+    expect(viewer.launchTenantConversation).not.toHaveBeenCalled()
+  })
+
+  it('lets a viewer read an owned transcript but never create, send or cancel work', async () => {
+    const viewer = fixture({ role: 'viewer' })
+    await expect(viewer.service.snapshot(identitySession(), 'conversation-1')).resolves.toMatchObject({
+      conversation_id: 'conversation-1',
+    })
+    await expect(viewer.service.send(identitySession(), 'conversation-1', 'execute', new AbortController().signal))
+      .rejects.toEqual(expect.objectContaining({ code: 'FORBIDDEN' }))
+    expect(() => viewer.service.cancel(identitySession(), 'conversation-1'))
+      .toThrowError(expect.objectContaining({ code: 'FORBIDDEN' }))
+    expect(viewer.prompt).not.toHaveBeenCalled()
+    expect(viewer.cancel).not.toHaveBeenCalled()
   })
 
   it('checks exact ownership before every read, send and cancel without revealing a foreign id', async () => {

@@ -86,7 +86,7 @@ export class AssistantSessionLauncher {
       identitySession.org_id,
       identitySession.tenant_id,
     )
-    if (authorization === undefined || !roleAllows(authorization.role, 'project.read')) {
+    if (authorization === undefined || !roleAllows(authorization.role, 'project.write')) {
       throw new AssistantSessionLaunchError('FORBIDDEN', t('assistant.forbidden'))
     }
     const repository = this.repositories.find(candidate => (
