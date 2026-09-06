@@ -288,6 +288,13 @@ describe('StudioIdentityService', () => {
     await expect(h.service.bindHarnessSession(first.session, ' ')).rejects.toMatchObject({ code: 'invalid' })
     await h.service.bindHarnessSession(first.session, 'agent-1')
     await h.service.bindHarnessSession(h.repository.sessionMap.get(first.session.session_id)!, 'agent-1')
+    expect(h.service.ownsHarnessSession(first.session, 'agent-1')).toBe(true)
+    expect(h.service.ownsHarnessSession(second.session, 'agent-1')).toBe(false)
+    expect(h.service.ownsHarnessSession(first.session, ' ')).toBe(false)
+    await expect(h.service.bindHarnessSession(second.session, 'agent-1')).rejects.toMatchObject({ code: 'replay' })
+    expect(h.service.auditRecords()).toContainEqual(expect.objectContaining({
+      event_type: 'harness_session_bound', outcome: 'failure', session_id: second.session.session_id,
+    }))
     expect(h.service.strongIdentityForHarnessSession('agent-1')).toBe(false)
     expect(h.service.identityStateForHarnessSession('agent-1', '0.0.0.0')).toEqual({
       authenticated: true, strongIdentityVerified: false,
@@ -297,6 +304,40 @@ describe('StudioIdentityService', () => {
     expect(h.repository.sessions().every(session => session.revoked_at !== null)).toBe(true)
     expect(h.service.strongIdentityForHarnessSession('agent-1')).toBe(false)
     expect(h.service.identityStateForHarnessSession('agent-1', '0.0.0.0')).toEqual({
+      authenticated: false, strongIdentityVerified: false,
+    })
+  })
+
+  it('serializes assistant bindings and fails closed on ambiguous imported ownership', async () => {
+    const h = makeHarness()
+    const first = await login(h)
+    await h.service.requestMagicCode('owner@example.com')
+    const second = await h.service.verifyMagicCode('owner@example.com', '123456', { ...device, label: 'Celular' })
+
+    await Promise.all([
+      h.service.bindHarnessSession(first.session, 'agent-a'),
+      h.service.bindHarnessSession(first.session, 'agent-b'),
+    ])
+    expect(h.repository.sessionMap.get(first.session.session_id)?.harness_session_ids).toEqual(['agent-a', 'agent-b'])
+
+    const contested = await Promise.allSettled([
+      h.service.bindHarnessSession(first.session, 'agent-contested'),
+      h.service.bindHarnessSession(second.session, 'agent-contested'),
+    ])
+    expect(contested.filter(result => result.status === 'fulfilled')).toHaveLength(1)
+    expect(contested.filter(result => result.status === 'rejected')).toHaveLength(1)
+    expect(h.repository.sessions().filter(session => session.harness_session_ids.includes('agent-contested'))).toHaveLength(1)
+
+    const secondStored = h.repository.sessionMap.get(second.session.session_id)!
+    h.repository.sessionMap.set(secondStored.session_id, {
+      ...secondStored,
+      harness_session_ids: [...secondStored.harness_session_ids, 'agent-a'],
+    })
+    expect(h.service.ownsHarnessSession(first.session, 'agent-a')).toBe(false)
+    expect(h.service.ownsHarnessSession(second.session, 'agent-a')).toBe(false)
+    expect(h.service.principalForHarnessSession('agent-a')).toBeUndefined()
+    expect(h.service.strongIdentityForHarnessSession('agent-a')).toBe(false)
+    expect(h.service.identityStateForHarnessSession('agent-a', '0.0.0.0')).toEqual({
       authenticated: false, strongIdentityVerified: false,
     })
   })
