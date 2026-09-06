@@ -45,6 +45,42 @@ Se o Compose do artefato ainda declarar um serviço apenas com `build:` ou uma i
 
 Os snapshots acima leem quatro stores do Windows (`CurrentUser/Root`, `CurrentUser/CA`, `LocalMachine/Root` e `LocalMachine/CA`) e as três raízes de certificados da distribuição WSL2. A comparação ignora somente horário e informações do host; qualquer certificado, arquivo ou link acrescentado, removido ou alterado produz `CHANGED` e código de saída 3. Os coletores não instalam, removem ou atualizam certificados e nunca sobrescrevem uma evidência anterior.
 
+## Executor da prova real M77
+
+`Invoke-Dz23LifecycleProof.ps1` prepara e, somente com confirmação literal,
+executa a sequência completa em um ambiente descartável: instalação saudável,
+diagnóstico, sentinela PostgreSQL, atualização saudável, atualização que deve
+falhar com rollback comprovado, desinstalação preservando dados, reinstalação,
+verificação do sentinela e desinstalação final preservando dados. O trust store
+é fotografado antes e depois.
+
+Sem `-Execute`, o comando devolve `PREPARED_NOT_EXECUTED`: não consulta Docker,
+não cria pasta e não altera o host. A execução exige Docker Desktop já iniciado
+externamente; o runner nunca inicia o Docker, nunca aceita uma instalação
+existente e nunca chama `-PurgeData`.
+
+São necessários três checkouts limpos em commits distintos e três imagens
+locais fixadas por digest: instalação, atualização saudável e imagem de falha
+controlada. A última precisa existir localmente, mas falhar no readiness. O
+ambiente deve estar sem contêineres, volumes ou redes DZ23.
+
+```powershell
+./deploy/windows/Invoke-Dz23LifecycleProof.ps1 `
+  -InitialSourcePath C:\audit\initial -InitialCommit <40_hex> -InitialImage <image@sha256:...> `
+  -UpgradeSourcePath C:\audit\upgrade -UpgradeCommit <40_hex> -UpgradeImage <image@sha256:...> `
+  -FailureSourcePath C:\audit\failure -FailureCommit <40_hex> -FailureImage <imagem_inoperante@sha256:...> `
+  -CaddyImage <caddy@sha256:...> -SecretsFile /home/usuario/.config/dz23/m77.env `
+  -InstallRoot /home/usuario/.local/share/dz23-m77-proof `
+  -EvidenceDirectory C:\evidencias\m77-AAAA-MM-DD `
+  -Execute -ExecutionConfirmation 'EXECUTAR PROVA REAL M77 EM AMBIENTE DESCARTAVEL' -Confirm:$false
+```
+
+Se uma fase falhar, a execução registra `FAILED`, para e preserva o estado para
+inspeção; não tenta limpeza automática. Sucesso termina em
+`UNINSTALLED_DATA_PRESERVED`, deixando releases e volumes para conferência ou
+remoção manual posterior. Enquanto não for executado com imagens auditadas, o
+estado permanece `NOT_EXECUTED`.
+
 ## Limites comprovados
 
 - Scripts e testes em sandbox com PowerShell e Bash reais e Docker falso: implementados.
