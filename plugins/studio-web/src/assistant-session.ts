@@ -68,15 +68,19 @@ export class AssistantSessionLauncher {
   }
 
   launch(identitySession: SessionRecord): Promise<AssistantSessionLaunch> {
+    if (!this.options.identity.isSharedHarnessClientAllowed(identitySession)) {
+      return Promise.reject(new AssistantSessionLaunchError('FORBIDDEN', t('assistant.personalOnly')))
+    }
+    return this.launchTenantConversation(identitySession)
+  }
+
+  launchTenantConversation(identitySession: SessionRecord): Promise<AssistantSessionLaunch> {
     return this.#mutex.run(`assistant-session:${identitySession.session_id}`, () => (
       this.#launchLocked(identitySession)
     ))
   }
 
   async #launchLocked(identitySession: SessionRecord): Promise<AssistantSessionLaunch> {
-    if (!this.options.identity.isSharedHarnessClientAllowed(identitySession)) {
-      throw new AssistantSessionLaunchError('FORBIDDEN', t('assistant.personalOnly'))
-    }
     const authorization = this.options.tenancy.authorizationFor(
       identitySession.user_id,
       identitySession.org_id,

@@ -22,6 +22,7 @@ import {
 } from './assistant-session.js'
 
 export * from './assistant-session.js'
+export * from './assistant-conversation.js'
 
 export const name = 'dz23-studio-web'
 export const inject = ['sessionController', 'studioIdentity', 'studioPreview', 'studioTenancy', 'webServer']

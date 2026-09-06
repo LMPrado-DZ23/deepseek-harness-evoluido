@@ -117,6 +117,9 @@ describe('governed Assistant Session launcher', () => {
       code: 'FORBIDDEN', message: expect.stringContaining('instalação pessoal'),
     })
     expect(team.create).not.toHaveBeenCalled()
+    await expect(team.launcher.launchTenantConversation(identitySession())).resolves.toEqual({
+      session_id: 'assistant-new', reused: false, preset: ASSISTANT_AGENT_PRESET,
+    })
     const forbidden = await fixture({ authorization: false })
     await expect(forbidden.launcher.launch(identitySession())).rejects.toMatchObject({ code: 'FORBIDDEN' })
     const missing = await fixture({ repositories: [] })
