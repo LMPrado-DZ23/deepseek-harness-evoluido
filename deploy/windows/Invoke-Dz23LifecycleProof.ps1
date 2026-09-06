@@ -41,6 +41,7 @@ if ($Distro -cnotmatch '^[A-Za-z0-9._-]{1,80}$') { throw 'Nome de distribuição
 if ($OperationInvoker -and $env:DZ23_M77_TEST_MODE -ne '1') {
     throw 'O executor simulado do lifecycle é exclusivo dos testes.'
 }
+$isSimulation = [bool]$OperationInvoker
 
 $plan = [ordered]@{
     schema_version = 1
@@ -51,6 +52,7 @@ $plan = [ordered]@{
     failure_commit = $FailureCommit
     planned_final_state = 'UNINSTALLED_DATA_PRESERVED'
     source_and_images = 'NOT_VERIFIED'
+    execution_mode = 'PREPARED'
     docker_desktop_started_by_runner = $false
     docker_containers = 'NOT_STARTED'
     note = 'A execução exige Docker Desktop já iniciado externamente e um ambiente descartável sem instalação DZ23 existente.'
@@ -97,14 +99,16 @@ function Write-M77Report {
         initial_commit = $InitialCommit
         upgrade_commit = $UpgradeCommit
         failure_commit = $FailureCommit
+        execution_mode = if ($isSimulation) { 'SIMULATED' } else { 'REAL' }
         final_state = switch ($State) {
             'PASS' { 'UNINSTALLED_DATA_PRESERVED' }
+            'SIMULATED_PASS' { 'SIMULATED_NO_REAL_STATE_CHANGE' }
             'FAILED' { 'REQUIRES_INSPECTION' }
             default { 'IN_PROGRESS' }
         }
-        source_and_images = if ($State -eq 'PASS') { 'VERIFIED_BY_LIFECYCLE_SCRIPTS' } else { 'PARTIAL_OR_NOT_VERIFIED' }
+        source_and_images = if ($State -eq 'PASS' -and -not $isSimulation) { 'VERIFIED_BY_LIFECYCLE_SCRIPTS' } else { 'PARTIAL_OR_NOT_VERIFIED' }
         docker_desktop_started_by_runner = $false
-        docker_containers = 'STARTED_AND_STOPPED_DURING_PROOF'
+        docker_containers = if ($isSimulation) { 'SIMULATED_ONLY' } else { 'STARTED_AND_STOPPED_DURING_PROOF' }
         phases = @($Phases)
         artifacts = $Artifacts
         updated_at = [DateTimeOffset]::UtcNow.ToString('O')
@@ -153,6 +157,17 @@ fi
 
 function Invoke-M77IsolationProbe {
     Test-Dz23Prerequisites -Distro $Distro
+    $sources = @(
+        Test-Dz23Source -SourcePath $InitialSourcePath -ExpectedCommit $InitialCommit
+        Test-Dz23Source -SourcePath $UpgradeSourcePath -ExpectedCommit $UpgradeCommit
+        Test-Dz23Source -SourcePath $FailureSourcePath -ExpectedCommit $FailureCommit
+    )
+    if (($sources | Select-Object -Unique).Count -ne 3) {
+        throw 'A prova exige três checkouts físicos distintos para impedir troca de HEAD durante o lifecycle.'
+    }
+    foreach ($image in @($InitialImage, $UpgradeImage, $FailureImage, $CaddyImage)) {
+        Test-Dz23Image -Image $image -Distro $Distro
+    }
     $probe = @'
 set -euo pipefail
 root="$1"
@@ -339,11 +354,13 @@ try {
         Write-M77Report -Path $reportPath -State 'FAILED' -Phases $phases -Artifacts $artifacts
         throw "A fase M77 'evidence-finalize' falhou. A evidência parcial foi preservada."
     }
-    Write-M77Report -Path $reportPath -State 'PASS' -Phases $phases -Artifacts $artifacts
+    $finalReportState = if ($isSimulation) { 'SIMULATED_PASS' } else { 'PASS' }
+    $finalLifecycleState = if ($isSimulation) { 'SIMULATED_NO_REAL_STATE_CHANGE' } else { 'UNINSTALLED_DATA_PRESERVED' }
+    Write-M77Report -Path $reportPath -State $finalReportState -Phases $phases -Artifacts $artifacts
     [pscustomobject]@{
-        state = 'PASS'
+        state = $finalReportState
         phases = $phases.Count
-        final_state = 'UNINSTALLED_DATA_PRESERVED'
+        final_state = $finalLifecycleState
         report = $reportPath
     }
 }

@@ -64,7 +64,7 @@ try {
     $result = & $runner @base -EvidenceDirectory $successPath -Execute `
         -ExecutionConfirmation 'EXECUTAR PROVA REAL M77 EM AMBIENTE DESCARTAVEL' `
         -OperationInvoker $successInvoker -Confirm:$false
-    if ($result.state -cne 'PASS' -or $result.phases -ne 17) { throw 'Fluxo completo não terminou PASS.' }
+    if ($result.state -cne 'SIMULATED_PASS' -or $result.phases -ne 17) { throw 'Fluxo simulado completo não terminou SIMULATED_PASS.' }
     $expected = @(
         'trust-before', 'isolation-preflight', 'install-initial', 'doctor-initial',
         'sentinel-create', 'update-success', 'doctor-upgrade', 'update-failure-rollback',
@@ -75,7 +75,7 @@ try {
     if (($global:M77Calls -join '|') -cne ($expected -join '|')) { throw 'A ordem do lifecycle divergiu do contrato.' }
     $reportText = Get-Content -Raw -LiteralPath (Join-Path $successPath 'lifecycle-report.json')
     $report = $reportText | ConvertFrom-Json
-    if ($report.state -cne 'PASS' -or $report.final_state -cne 'UNINSTALLED_DATA_PRESERVED') { throw 'Relatório final inválido.' }
+    if ($report.state -cne 'SIMULATED_PASS' -or $report.final_state -cne 'SIMULATED_NO_REAL_STATE_CHANGE') { throw 'Relatório simulado foi confundido com prova real.' }
     if ($reportText.Contains($base.SecretsFile) -or $reportText -match '"token"\s*:') { throw 'Relatório expôs caminho de segredo ou token do sentinela.' }
     if ((@($report.phases | Where-Object status -eq 'EXPECTED_FAILURE_ROLLBACK_CONFIRMED')).Count -ne 1) {
         throw 'Rollback esperado não foi registrado uma única vez.'
@@ -83,9 +83,13 @@ try {
     if ($report.phases[-1].name -cne 'evidence-finalize' -or $report.phases[-1].status -cne 'PASS') {
         throw 'A finalização de evidências não foi registrada.'
     }
-    if ($report.docker_desktop_started_by_runner -ne $false -or $report.docker_containers -cne 'STARTED_AND_STOPPED_DURING_PROOF') {
+    if ($report.execution_mode -cne 'SIMULATED' -or $report.source_and_images -cne 'PARTIAL_OR_NOT_VERIFIED') {
+        throw 'O relatório simulado declarou verificação real.'
+    }
+    if ($report.docker_desktop_started_by_runner -ne $false -or $report.docker_containers -cne 'SIMULATED_ONLY') {
         throw 'O relatório não distingue Docker Desktop de contêineres.'
     }
+    if ($reportText -match '"state"\s*:\s*"PASS"') { throw 'A simulação ainda emitiu state PASS.' }
 
     try {
         & $runner @base -EvidenceDirectory $successPath -Execute `

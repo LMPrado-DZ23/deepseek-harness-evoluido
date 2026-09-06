@@ -59,6 +59,11 @@ não cria pasta e não altera o host. A execução exige Docker Desktop já inic
 externamente; o runner nunca inicia o Docker, nunca aceita uma instalação
 existente e nunca chama `-PurgeData`.
 
+O gancho interno usado pelos testes nunca pode produzir prova real: seu
+relatório recebe `SIMULATED_PASS`, `SIMULATED_NO_REAL_STATE_CHANGE` e
+`source_and_images=PARTIAL_OR_NOT_VERIFIED`. Somente a execução sem esse gancho
+pode terminar em `PASS`.
+
 São necessários três checkouts limpos em commits distintos e três imagens
 locais fixadas por digest: instalação, atualização saudável e imagem de falha
 controlada. A última precisa existir localmente, mas falhar no readiness. O
