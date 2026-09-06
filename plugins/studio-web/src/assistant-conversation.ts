@@ -142,7 +142,7 @@ export function sanitizeAssistantSnapshot(
     const event = sanitizeAssistantEvent(record)
     return event === undefined ? [] : [event]
   })
-  const cursor = records.reduce((latest, record) => {
+  const cursor = records.reduce<number>((latest, record) => {
     const seq = eventEnvelope(record)?.seq
     return seq === undefined ? latest : Math.max(latest, seq)
   }, -1)
