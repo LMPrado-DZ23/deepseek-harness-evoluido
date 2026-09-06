@@ -37,9 +37,16 @@ import {
 } from './supervisor-config.js'
 import { listenBuilderUnix } from './unix-server.js'
 import { isTerminalState } from './model.js'
+import { DockerEngine, type DockerEnginePort } from './docker-engine.js'
+import { ensureTemplateStoreVolume } from './template-store-volume.js'
+import type { BuilderRpcMethods } from './protocol.js'
 
 export const BUILDER_MANAGER_EXIT = Object.freeze({ ok: 0, usage: 64, startup: 70, shutdown: 74 })
 export const BUILDER_MANAGER_MAX_SLOTS = 512
+const DEFAULT_LISTENER_INITIALIZATION_TIMEOUT_MS = 30_000
+// Covers store materialization (10m), adapter verification (8m), bounded overhead, and the
+// listener's complete independent deadline. Registry reload never truncates either phase.
+const DEFAULT_SLOT_STARTUP_TIMEOUT_MS = 21 * 60_000
 type ManagerSignal = 'SIGHUP' | 'SIGINT' | 'SIGTERM'
 
 export interface BuilderManagedRuntime {
@@ -56,7 +63,7 @@ export interface BuilderRuntimeManagerSnapshot {
 
 export interface BuilderRuntimeManagerDependencies {
   readonly loadRegistry: (reference: string, roots: BuilderSupervisorRootPolicy) => Promise<BuilderRuntimeRegistry>
-  readonly startSlot: (slot: BuilderRuntimeRegistrySlot, installationId: string, roots: BuilderSupervisorRootPolicy, capacity: GlobalBuilderCapacityPort, drainTimeoutMs: number, signal: AbortSignal) => Promise<BuilderManagedRuntime>
+  readonly startSlot: (slot: BuilderRuntimeRegistrySlot, installationId: string, roots: BuilderSupervisorRootPolicy, capacity: GlobalBuilderCapacityPort, drainTimeoutMs: number, signal: AbortSignal, listenerInitializationTimeoutMs?: number) => Promise<BuilderManagedRuntime>
   readonly health: BuilderRuntimeHealthPort
   readonly lease: BuilderManagerLeasePort
   readonly checkpoint: BuilderManagerCheckpointPort
@@ -66,6 +73,8 @@ export interface BuilderRuntimeManagerDependencies {
 
 export interface BuilderRuntimeSlotStartRuntime {
   readonly loadConfig: typeof loadPinnedBuilderSupervisorConfig
+  readonly createEngine: (config: BuilderSupervisorResolvedConfig) => DockerEnginePort
+  readonly ensureTemplateStore: typeof ensureTemplateStoreVolume
   readonly compose: typeof composeBuilderSupervisor
   readonly listen: (options: Parameters<typeof listenBuilderUnix>[0]) => Promise<BuilderSupervisorListener>
   readonly scheduleTimeout: (callback: () => void, timeoutMs: number) => ReturnType<typeof setTimeout>
@@ -74,6 +83,8 @@ export interface BuilderRuntimeSlotStartRuntime {
 
 const DEFAULT_SLOT_START_RUNTIME: BuilderRuntimeSlotStartRuntime = {
   loadConfig: loadPinnedBuilderSupervisorConfig,
+  createEngine: createBuilderDockerEngine,
+  ensureTemplateStore: ensureTemplateStoreVolume,
   compose: composeBuilderSupervisor,
   listen: listenBuilderUnix,
   scheduleTimeout: setTimeout,
@@ -111,10 +122,12 @@ export class BuilderRuntimeManager {
     readonly roots: BuilderSupervisorRootPolicy
     readonly drainTimeoutMs: number
     readonly reloadTimeoutMs: number
+    readonly slotStartupTimeoutMs?: number
+    readonly listenerInitializationTimeoutMs?: number
     readonly maximumGlobalBuilds: number
     readonly dependencies: BuilderRuntimeManagerDependencies
   }) {
-    if (![options.drainTimeoutMs, options.reloadTimeoutMs, options.maximumGlobalBuilds].every(value => Number.isSafeInteger(value) && value > 0)) throw new BuilderRuntimeRegistryError()
+    if (![options.drainTimeoutMs, options.reloadTimeoutMs, options.slotStartupTimeoutMs ?? DEFAULT_SLOT_STARTUP_TIMEOUT_MS, options.listenerInitializationTimeoutMs ?? DEFAULT_LISTENER_INITIALIZATION_TIMEOUT_MS, options.maximumGlobalBuilds].every(value => Number.isSafeInteger(value) && value > 0)) throw new BuilderRuntimeRegistryError()
     this.#capacity = new FairGlobalBuilderCapacity(options.maximumGlobalBuilds)
   }
 
@@ -245,12 +258,12 @@ export class BuilderRuntimeManager {
   async #startBounded(slot: BuilderRuntimeRegistrySlot, installationId: string): Promise<BuilderManagedRuntime> {
     const controller = new AbortController()
     const outcome: Promise<SlotStartOutcome> = Promise.resolve()
-      .then(() => this.options.dependencies.startSlot(slot, installationId, this.options.roots, this.#capacity, this.options.drainTimeoutMs, controller.signal))
+      .then(() => this.options.dependencies.startSlot(slot, installationId, this.options.roots, this.#capacity, this.options.drainTimeoutMs, controller.signal, this.options.listenerInitializationTimeoutMs ?? DEFAULT_LISTENER_INITIALIZATION_TIMEOUT_MS))
       .then(runtime => ({ kind: 'runtime' as const, runtime }), error => ({ kind: 'error' as const, error }))
     const pending: UncertainSlotStart = { controller, outcome, cleanup: undefined }
     this.#uncertainStarts.add(pending)
     try {
-      const settled = await deadline(outcome, this.options.reloadTimeoutMs, 'SLOT_START_TIMEOUT')
+      const settled = await deadline(outcome, this.options.slotStartupTimeoutMs ?? DEFAULT_SLOT_STARTUP_TIMEOUT_MS, 'SLOT_START_TIMEOUT')
       if (settled.kind === 'error') throw settled.error
       pending.runtime = settled.runtime
       if (controller.signal.aborted) throw new Error('SLOT_START_CANCELLED')
@@ -283,7 +296,11 @@ export class BuilderRuntimeManager {
     if (pending.cleanup !== undefined) return pending.cleanup
     const execution = (async () => {
       const outcome = await pending.outcome
-      if (outcome.kind === 'error') { this.#uncertainStarts.delete(pending); return }
+      if (outcome.kind === 'error') {
+        if (outcome.error instanceof RuntimeCleanupIncomplete) throw outcome.error
+        this.#uncertainStarts.delete(pending)
+        return
+      }
       pending.runtime ??= outcome.runtime
       await pending.runtime.retire(this.options.drainTimeoutMs)
       this.#uncertainStarts.delete(pending)
@@ -362,6 +379,8 @@ export async function runBuilderRuntimeManager(options: {
   readonly roots?: BuilderSupervisorRootPolicy
   readonly pollIntervalMs?: number
   readonly reloadTimeoutMs?: number
+  readonly slotStartupTimeoutMs?: number
+  readonly listenerInitializationTimeoutMs?: number
   readonly drainTimeoutMs?: number
   readonly maximumGlobalBuilds?: number
   readonly dependencies?: Partial<BuilderRuntimeManagerDependencies>
@@ -371,9 +390,11 @@ export async function runBuilderRuntimeManager(options: {
   const runtime = options.runtime ?? { signals: process, setInterval, clearInterval }
   const pollIntervalMs = options.pollIntervalMs ?? 5_000
   const reloadTimeoutMs = options.reloadTimeoutMs ?? 5_000
+  const slotStartupTimeoutMs = options.slotStartupTimeoutMs ?? DEFAULT_SLOT_STARTUP_TIMEOUT_MS
+  const listenerInitializationTimeoutMs = options.listenerInitializationTimeoutMs ?? DEFAULT_LISTENER_INITIALIZATION_TIMEOUT_MS
   const drainTimeoutMs = options.drainTimeoutMs ?? 30_000
   const maximumGlobalBuilds = options.maximumGlobalBuilds ?? 4
-  if (![pollIntervalMs, reloadTimeoutMs, drainTimeoutMs, maximumGlobalBuilds].every(value => Number.isSafeInteger(value) && value > 0)) return BUILDER_MANAGER_EXIT.usage
+  if (![pollIntervalMs, reloadTimeoutMs, slotStartupTimeoutMs, listenerInitializationTimeoutMs, drainTimeoutMs, maximumGlobalBuilds].every(value => Number.isSafeInteger(value) && value > 0)) return BUILDER_MANAGER_EXIT.usage
   const health = new FileBuilderRuntimeHealthStore(`${roots.stateRoot}/manager-health`)
   const authority = new FileBuilderManagerAuthority()
   const dependencies: BuilderRuntimeManagerDependencies = {
@@ -391,6 +412,8 @@ export async function runBuilderRuntimeManager(options: {
     roots,
     drainTimeoutMs,
     reloadTimeoutMs,
+    slotStartupTimeoutMs,
+    listenerInitializationTimeoutMs,
     maximumGlobalBuilds,
     dependencies,
   })
@@ -428,13 +451,33 @@ export async function executeBuilderRuntimeManagerCli(argv: readonly string[]): 
 }
 
 export function createBuilderRuntimeSlotStarter(runtime: BuilderRuntimeSlotStartRuntime = DEFAULT_SLOT_START_RUNTIME): BuilderRuntimeManagerDependencies['startSlot'] {
-  return async (slot, installationId, roots, capacity, drainTimeoutMs, signal) => {
+  return async (slot, installationId, roots, capacity, drainTimeoutMs, signal, listenerInitializationTimeoutMs = DEFAULT_LISTENER_INITIALIZATION_TIMEOUT_MS) => {
     signal.throwIfAborted()
     const config = await runtime.loadConfig(slot.configReference, slot.configSha256, roots)
     signal.throwIfAborted()
-    if (config.scopeId !== slot.scopeId || config.installationId !== installationId) throw new BuilderRuntimeRegistryError()
-    const composition = runtime.compose(config)
-    return listenManagedRuntime(config, wrapBuilderSupervisorWithGlobalCapacity(config.scopeId, composition, capacity), drainTimeoutMs, signal, runtime)
+    if (config.scopeId !== slot.scopeId || config.installationId !== installationId || config.templateStoreManifest === undefined) throw new BuilderRuntimeRegistryError()
+    const engine = runtime.createEngine(config)
+    try {
+      await runtime.ensureTemplateStore({
+        engine,
+        installationId: config.installationId,
+        scopeId: config.scopeId,
+        version: config.templateStoreVersion,
+        treeSha256: config.templateStoreSha256,
+        imageDigest: config.imageDigest,
+        sourceEnvelope: posix.join(roots.stateRoot, 'instances', config.scopeId, 'template-store', config.templateStoreVersion),
+        manifest: config.templateStoreManifest,
+      }, signal)
+    } catch (error) {
+      if (typeof error === 'object' && error !== null && 'code' in error && (error as { readonly code: unknown }).code === 'TEMPLATE_STORE_CLEANUP_INCOMPLETE') throw new RuntimeCleanupIncomplete()
+      signal.throwIfAborted()
+      throw Object.assign(new Error('BLOCKED_EXTERNAL'), { code: 'BLOCKED_EXTERNAL' })
+    }
+    signal.throwIfAborted()
+    const composition = wrapBuilderSupervisorWithGlobalCapacity(config.scopeId, runtime.compose(config, engine), capacity)
+    await composition.methods.initialize(signal)
+    signal.throwIfAborted()
+    return listenManagedRuntime(config, composition, drainTimeoutMs, listenerInitializationTimeoutMs, signal, runtime)
   }
 }
 
@@ -473,21 +516,40 @@ export function wrapBuilderSupervisorWithGlobalCapacity(scopeId: BuilderRuntimeS
   }, releaseAll: () => { for (const current of releases.values()) current(); releases.clear() } }
 }
 
-async function listenManagedRuntime(config: BuilderSupervisorResolvedConfig, composition: BuilderSupervisorComposition & { releaseAll(): void }, drainTimeoutMs: number, managerSignal: AbortSignal, runtime: BuilderRuntimeSlotStartRuntime): Promise<BuilderManagedRuntime> {
+async function listenManagedRuntime(config: BuilderSupervisorResolvedConfig, composition: BuilderSupervisorComposition & { releaseAll(): void }, drainTimeoutMs: number, listenerInitializationTimeoutMs: number, managerSignal: AbortSignal, runtime: BuilderRuntimeSlotStartRuntime): Promise<BuilderManagedRuntime> {
   const controller = new AbortController()
   const cancel = () => controller.abort(managerSignal.reason)
-  if (managerSignal.aborted) cancel(); else managerSignal.addEventListener('abort', cancel, { once: true })
+  managerSignal.addEventListener('abort', cancel, { once: true })
   let listener: BuilderSupervisorListener
+  const listening = runtime.listen({
+    socketPath: config.socketPath,
+    bearerToken: config.bearerToken,
+    // initialize() already proved service readiness, adapter preflight, and attestation.
+    // Exposing only the RPC surface makes the standalone listener's optional lifecycle hook inert.
+    methods: initializedRpcMethods(composition.methods),
+    scopeId: config.scopeId,
+    policySha256: config.policySha256,
+    replayRoot: config.replayRoot,
+    signal: controller.signal,
+  })
   try {
-    listener = await runtime.listen({
-      socketPath: config.socketPath,
-      bearerToken: config.bearerToken,
-      methods: composition.methods,
-      scopeId: config.scopeId,
-      policySha256: config.policySha256,
-      replayRoot: config.replayRoot,
-      signal: controller.signal,
-    })
+    listener = await deadline(listening, listenerInitializationTimeoutMs, 'LISTENER_INITIALIZATION_TIMEOUT')
+  } catch (error) {
+    controller.abort(new Error('RUNTIME_START_FAILED'))
+    composition.releaseAll()
+    const outcome = listening.then(
+      late => ({ kind: 'listener' as const, listener: late }),
+      listenerError => ({ kind: 'error' as const, error: listenerError }),
+    )
+    let settled: Awaited<typeof outcome>
+    try { settled = await deadline(outcome, drainTimeoutMs + 250, 'LISTENER_START_CLEANUP_TIMEOUT') }
+    catch { throw new RuntimeCleanupIncomplete() }
+    if (settled.kind === 'listener') {
+      try { await deadline(settled.listener.close(), drainTimeoutMs + 250, 'LISTENER_START_CLEANUP_TIMEOUT') }
+      catch { throw new RuntimeCleanupIncomplete() }
+    }
+    if (settled.kind === 'error' && isListenerCleanupIncomplete(settled.error)) throw new RuntimeCleanupIncomplete()
+    throw error
   } finally { managerSignal.removeEventListener('abort', cancel) }
   let closing: Promise<void> | undefined
   let closed = false
@@ -511,6 +573,25 @@ async function listenManagedRuntime(config: BuilderSupervisorResolvedConfig, com
     },
   }
 }
+
+function initializedRpcMethods(methods: BuilderSupervisorComposition['methods']): BuilderRpcMethods {
+  return {
+    preflight: methods.preflight.bind(methods),
+    prepare: methods.prepare.bind(methods),
+    execute: methods.execute.bind(methods),
+    cancel: methods.cancel.bind(methods),
+    finish: methods.finish.bind(methods),
+    listManaged: methods.listManaged.bind(methods),
+  }
+}
+
+function isListenerCleanupIncomplete(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && (error as { readonly code: unknown }).code === 'LISTENER_CLEANUP_INCOMPLETE'
+}
+
+function createBuilderDockerEngine(config: BuilderSupervisorResolvedConfig): DockerEnginePort { return new DockerEngine(config.dockerSocketPath) }
+
+export const BUILDER_MANAGER_TEST_ONLY = Object.freeze({ createBuilderDockerEngine })
 
 async function deadline<T>(execution: Promise<T>, timeoutMs: number, code: string): Promise<T> {
   let timer!: ReturnType<typeof setTimeout>

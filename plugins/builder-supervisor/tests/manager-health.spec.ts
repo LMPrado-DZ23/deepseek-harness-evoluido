@@ -17,6 +17,8 @@ describe('runtime health records', () => {
     const healthy = runtimeHealth(scope, 'HEALTHY', same, 'NONE', new Date('2026-01-01T00:00:02.000Z'))
     expect(same.since).toBe(first.since); expect(healthy.since).toBe(healthy.updated_at)
     expect(sanitizeRuntimeHealthCode(Object.assign(new Error('secret-value'), { code: 'BLOCKED_EXTERNAL' }))).toEqual({ state: 'BLOCKED_EXTERNAL', code: 'EXTERNAL_DEPENDENCY' })
+    expect(sanitizeRuntimeHealthCode(Object.assign(new Error('secret-value'), { code: 'SLOT_START_TIMEOUT' }))).toEqual({ state: 'BLOCKED_EXTERNAL', code: 'EXTERNAL_DEPENDENCY' })
+    expect(sanitizeRuntimeHealthCode(Object.assign(new Error('secret-value'), { code: 'LISTENER_INITIALIZATION_TIMEOUT' }))).toEqual({ state: 'BLOCKED_EXTERNAL', code: 'EXTERNAL_DEPENDENCY' })
     expect(sanitizeRuntimeHealthCode({ code: 'INVALID_SUPERVISOR_CONFIGURATION' })).toEqual({ state: 'DEGRADED', code: 'CONFIG_INVALID' })
     expect(sanitizeRuntimeHealthCode(new Error('secret-value'))).toEqual({ state: 'DEGRADED', code: 'START_FAILED' })
   })

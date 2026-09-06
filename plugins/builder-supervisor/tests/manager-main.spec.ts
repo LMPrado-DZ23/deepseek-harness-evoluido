@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { createHash } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
-import { BUILDER_MANAGER_EXIT, BuilderRuntimeManager, createBuilderRuntimeSlotStarter, executeBuilderRuntimeManagerCli, runBuilderRuntimeManager, wrapBuilderSupervisorWithGlobalCapacity, type BuilderManagedRuntime, type BuilderRuntimeManagerDependencies, type BuilderRuntimeManagerRuntime, type BuilderRuntimeSlotStartRuntime } from '../src/manager-main.js'
+import { BUILDER_MANAGER_EXIT, BUILDER_MANAGER_TEST_ONLY, BuilderRuntimeManager, createBuilderRuntimeSlotStarter, executeBuilderRuntimeManagerCli, runBuilderRuntimeManager, wrapBuilderSupervisorWithGlobalCapacity, type BuilderManagedRuntime, type BuilderRuntimeManagerDependencies, type BuilderRuntimeManagerRuntime, type BuilderRuntimeSlotStartRuntime } from '../src/manager-main.js'
 import { FairGlobalBuilderCapacity } from '../src/manager-capacity.js'
 import type { BuilderRpcMethods, PrepareRequest } from '../src/protocol.js'
 import { MemoryBuilderRuntimeHealthStore } from '../src/manager-health.js'
@@ -10,6 +10,12 @@ import { BuilderManagerStateError, MemoryBuilderManagerCheckpointPort, MemoryBui
 import type { BuilderRuntimeScopeId } from '../src/runtime-scope.js'
 import type { BuilderSupervisorResolvedConfig, BuilderSupervisorRootPolicy } from '../src/supervisor-config.js'
 import type { BuilderSupervisorComposition, BuilderSupervisorListener } from '../src/supervisor-main.js'
+import type { DockerEnginePort } from '../src/docker-engine.js'
+import { DockerEngine } from '../src/docker-engine.js'
+import { BuilderUnixListenerCleanupError, listenBuilderUnix } from '../src/unix-server.js'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 const scope = (digit: string): BuilderRuntimeScopeId => `s_${digit.repeat(48)}`
 const roots: BuilderSupervisorRootPolicy = { configRoot: '/config', secretRoot: '/secret', socketRoot: '/run', artifactRoot: '/artifact', exportRoot: '/export', stateRoot: '/state', dockerSocketPath: '/docker.sock' }
@@ -30,6 +36,120 @@ describe('multi-runtime manager', () => {
     expect(harness.manager.snapshot().health.map(item => [item.scope_id, item.state])).toEqual([[scope('1'), 'HEALTHY'], [scope('2'), 'HEALTHY']])
     expect(JSON.stringify(harness.manager.snapshot())).not.toMatch(/tenant|org|instance|token|secret/u)
     await harness.manager.shutdown()
+  })
+
+  it('keeps healthy scopes active when another slot is blocked by materialization', async () => {
+    const first = slot('1'); const second = slot('2'); const health = new MemoryBuilderRuntimeHealthStore(); let load = 0
+    const dependencies: BuilderRuntimeManagerDependencies = {
+      ...memoryState(),
+      loadRegistry: async () => load++ === 0 ? registry(1, [first]) : registry(2, [first, second]),
+      startSlot: async candidate => {
+        if (candidate.scopeId === second.scopeId) throw Object.assign(new Error('must-not-leak-token-or-path'), { code: 'BLOCKED_EXTERNAL' })
+        return { scopeId: candidate.scopeId, retire: async () => undefined }
+      },
+      health, now: () => new Date(0), error: vi.fn(),
+    }
+    const manager = new BuilderRuntimeManager({ registryReference: 'file:/config/manager/runtime-registry.json', roots, drainTimeoutMs: 100, reloadTimeoutMs: 5, slotStartupTimeoutMs: 100, maximumGlobalBuilds: 1, dependencies })
+    await manager.initialize(); await manager.requestReload()
+    expect(manager.snapshot()).toMatchObject({
+      activeScopes: [first.scopeId],
+      health: [
+        { scope_id: first.scopeId, state: 'HEALTHY', code: 'NONE' },
+        { scope_id: second.scopeId, state: 'BLOCKED_EXTERNAL', code: 'EXTERNAL_DEPENDENCY' },
+      ],
+    })
+    expect(JSON.stringify(manager.snapshot())).not.toMatch(/token|path|tenant/u)
+    await manager.shutdown()
+  })
+
+  it('uses the slot startup deadline rather than the registry reload deadline', async () => {
+    const first = slot('1'); const health = new MemoryBuilderRuntimeHealthStore()
+    const dependencies: BuilderRuntimeManagerDependencies = {
+      ...memoryState(), loadRegistry: async () => registry(1, [first]),
+      startSlot: async candidate => { await new Promise(resolve => setTimeout(resolve, 20)); return { scopeId: candidate.scopeId, retire: async () => undefined } },
+      health, now: () => new Date(0), error: vi.fn(),
+    }
+    const manager = new BuilderRuntimeManager({ registryReference: 'file:/config/manager/runtime-registry.json', roots, drainTimeoutMs: 100, reloadTimeoutMs: 5, slotStartupTimeoutMs: 100, maximumGlobalBuilds: 1, dependencies })
+    await manager.initialize()
+    expect(manager.snapshot().activeScopes).toEqual([first.scopeId])
+    await manager.shutdown()
+  })
+
+  it('classifies a timed-out materialization as blocked external without publishing a socket', async () => {
+    const first = slot('1'); const health = new MemoryBuilderRuntimeHealthStore(); const listen = vi.fn<BuilderRuntimeSlotStartRuntime['listen']>()
+    const starter = createBuilderRuntimeSlotStarter(slotStartRuntime({
+      ensureTemplateStore: async (_options, signal) => new Promise<never>((_resolve, reject) => {
+        const stop = () => reject(signal.reason)
+        if (signal.aborted) stop(); else signal.addEventListener('abort', stop, { once: true })
+      }),
+      listen,
+    }))
+    const dependencies: BuilderRuntimeManagerDependencies = {
+      ...memoryState(), loadRegistry: async () => registry(1, [first]), startSlot: starter,
+      health, now: () => new Date(0), error: vi.fn(),
+    }
+    const manager = new BuilderRuntimeManager({ registryReference: 'file:/config/manager/runtime-registry.json', roots, drainTimeoutMs: 100, reloadTimeoutMs: 100, slotStartupTimeoutMs: 5, maximumGlobalBuilds: 1, dependencies })
+    await manager.initialize()
+    expect(manager.snapshot().health).toEqual([expect.objectContaining({ scope_id: first.scopeId, state: 'BLOCKED_EXTERNAL', code: 'EXTERNAL_DEPENDENCY' })])
+    expect(listen).not.toHaveBeenCalled()
+    await manager.shutdown()
+  })
+
+  it('classifies a listener deadline as blocked external and never publishes a runtime', async () => {
+    const first = slot('1'); const health = new MemoryBuilderRuntimeHealthStore(); let published = false
+    const starter = createBuilderRuntimeSlotStarter(slotStartRuntime({
+      listen: async options => new Promise<BuilderSupervisorListener>((_resolve, reject) => {
+        const stop = () => reject(options.signal?.reason)
+        if (options.signal?.aborted === true) stop(); else options.signal?.addEventListener('abort', stop, { once: true })
+      }),
+    }))
+    const dependencies: BuilderRuntimeManagerDependencies = {
+      ...memoryState(), loadRegistry: async () => registry(1, [first]),
+      startSlot: async (...args) => { const value = await starter(...args); published = true; return value },
+      health, now: () => new Date(0), error: vi.fn(),
+    }
+    const manager = new BuilderRuntimeManager({ registryReference: 'file:/config/manager/runtime-registry.json', roots, drainTimeoutMs: 100, reloadTimeoutMs: 100, slotStartupTimeoutMs: 100, listenerInitializationTimeoutMs: 5, maximumGlobalBuilds: 1, dependencies })
+    await manager.initialize()
+    expect({ published, active: manager.snapshot().activeScopes }).toEqual({ published: false, active: [] })
+    expect(manager.snapshot().health).toEqual([expect.objectContaining({ scope_id: first.scopeId, state: 'BLOCKED_EXTERNAL', code: 'EXTERNAL_DEPENDENCY' })])
+    await manager.shutdown()
+  })
+
+  it('retains authority and a sanitized cleanup witness when template-store cleanup is unproved', async () => {
+    const firstSlot = slot('1'); const state = memoryState(); const listen = vi.fn<BuilderRuntimeSlotStartRuntime['listen']>()
+    const starter = createBuilderRuntimeSlotStarter(slotStartRuntime({
+      ensureTemplateStore: async () => { throw Object.assign(new Error('store-path-token-secret'), { code: 'TEMPLATE_STORE_CLEANUP_INCOMPLETE' }) },
+      listen,
+    }))
+    const dependencies: BuilderRuntimeManagerDependencies = {
+      ...state, loadRegistry: async () => registry(1, [firstSlot]), startSlot: starter,
+      health: new MemoryBuilderRuntimeHealthStore(), now: () => new Date(0), error: vi.fn(),
+    }
+    const first = new BuilderRuntimeManager({ registryReference: 'file:/config/manager/runtime-registry.json', roots, drainTimeoutMs: 10, reloadTimeoutMs: 100, slotStartupTimeoutMs: 100, maximumGlobalBuilds: 1, dependencies })
+    const second = fixture([registry(1, [firstSlot])], undefined, undefined, state)
+    await expect(first.initialize()).rejects.toBeInstanceOf(Error)
+    expect(first.snapshot().health).toEqual([expect.objectContaining({ scope_id: firstSlot.scopeId, state: 'DEGRADED', code: 'DRAIN_FAILED' })])
+    expect(JSON.stringify(first.snapshot())).not.toMatch(/store-path|token|secret/u)
+    expect(listen).not.toHaveBeenCalled()
+    await expect(second.manager.initialize()).rejects.toThrow('MANAGER_ALREADY_RUNNING')
+    await expect(first.shutdown()).rejects.toThrow('MANAGER_SHUTDOWN_FAILED')
+  })
+
+  it('retains authority when listener setup reports cleanup incomplete', async () => {
+    const firstSlot = slot('1'); const state = memoryState()
+    const starter = createBuilderRuntimeSlotStarter(slotStartRuntime({
+      listen: async () => { throw new BuilderUnixListenerCleanupError() },
+    }))
+    const dependencies: BuilderRuntimeManagerDependencies = {
+      ...state, loadRegistry: async () => registry(1, [firstSlot]), startSlot: starter,
+      health: new MemoryBuilderRuntimeHealthStore(), now: () => new Date(0), error: vi.fn(),
+    }
+    const first = new BuilderRuntimeManager({ registryReference: 'file:/config/manager/runtime-registry.json', roots, drainTimeoutMs: 10, reloadTimeoutMs: 100, slotStartupTimeoutMs: 100, maximumGlobalBuilds: 1, dependencies })
+    const second = fixture([registry(1, [firstSlot])], undefined, undefined, state)
+    await expect(first.initialize()).rejects.toBeInstanceOf(Error)
+    expect(first.snapshot().health).toEqual([expect.objectContaining({ state: 'DEGRADED', code: 'DRAIN_FAILED' })])
+    await expect(second.manager.initialize()).rejects.toThrow('MANAGER_ALREADY_RUNNING')
+    await expect(first.shutdown()).rejects.toThrow('MANAGER_SHUTDOWN_FAILED')
   })
 
   it('makes initialize idempotent and ignores reload after a proved shutdown', async () => {
@@ -199,10 +319,10 @@ describe('multi-runtime manager', () => {
       },
       health, now: () => new Date(0), error: vi.fn(),
     }
-    const manager = new BuilderRuntimeManager({ registryReference: 'file:/config/manager/runtime-registry.json', roots, drainTimeoutMs: 100, reloadTimeoutMs: 5, maximumGlobalBuilds: 1, dependencies })
+    const manager = new BuilderRuntimeManager({ registryReference: 'file:/config/manager/runtime-registry.json', roots, drainTimeoutMs: 100, reloadTimeoutMs: 5, slotStartupTimeoutMs: 5, maximumGlobalBuilds: 1, dependencies })
     await manager.initialize()
     expect({ retired, observedAbort, active: manager.snapshot().activeScopes }).toEqual({ retired: true, observedAbort: true, active: [] })
-    expect(manager.snapshot().health[0]).toEqual(expect.objectContaining({ state: 'DEGRADED', code: 'START_FAILED' }))
+    expect(manager.snapshot().health[0]).toEqual(expect.objectContaining({ state: 'BLOCKED_EXTERNAL', code: 'EXTERNAL_DEPENDENCY' }))
   })
 
   it('waits for cleanup proof when a runtime appears after its startup deadline', async () => {
@@ -213,7 +333,7 @@ describe('multi-runtime manager', () => {
       startSlot: async () => { await new Promise(resolve => setTimeout(resolve, 40)); return { scopeId: first.scopeId, retire: async () => { retired = true } } },
       health: new MemoryBuilderRuntimeHealthStore(), now: () => new Date(0), error: vi.fn(),
     }
-    const manager = new BuilderRuntimeManager({ registryReference: 'file:/config/manager/runtime-registry.json', roots, drainTimeoutMs: 10, reloadTimeoutMs: 5, maximumGlobalBuilds: 1, dependencies })
+    const manager = new BuilderRuntimeManager({ registryReference: 'file:/config/manager/runtime-registry.json', roots, drainTimeoutMs: 10, reloadTimeoutMs: 5, slotStartupTimeoutMs: 5, maximumGlobalBuilds: 1, dependencies })
     await manager.initialize(); expect(retired).toBe(true)
     expect(manager.snapshot().activeScopes).toEqual([])
   })
@@ -231,7 +351,7 @@ describe('multi-runtime manager', () => {
       },
       health: new MemoryBuilderRuntimeHealthStore(), now: () => new Date(0), error: vi.fn(),
     }
-    const first = new BuilderRuntimeManager({ registryReference: 'file:/config/manager/runtime-registry.json', roots, drainTimeoutMs: 10, reloadTimeoutMs: 5, maximumGlobalBuilds: 1, dependencies })
+    const first = new BuilderRuntimeManager({ registryReference: 'file:/config/manager/runtime-registry.json', roots, drainTimeoutMs: 10, reloadTimeoutMs: 5, slotStartupTimeoutMs: 5, maximumGlobalBuilds: 1, dependencies })
     const second = fixture([registry(1, [firstSlot])], undefined, undefined, state)
     const initializing = first.initialize()
     await until(() => started)
@@ -412,6 +532,138 @@ describe('multi-runtime manager', () => {
 })
 
 describe('slot starter lifecycle', () => {
+  it('materializes config v2 with one shared engine, initializes exactly once, and only then listens', async () => {
+    const order: string[] = []; const config = resolvedConfig(); const engine = {} as DockerEnginePort
+    const base = methods('1')
+    const runtime = slotStartRuntime({
+      loadConfig: async () => { order.push('load-config'); return config },
+      createEngine: value => { order.push('create-engine'); expect(value).toBe(config); return engine },
+      ensureTemplateStore: async options => {
+        order.push('materialize')
+        expect(options).toMatchObject({
+          engine,
+          installationId: config.installationId,
+          scopeId: config.scopeId,
+          version: config.templateStoreVersion,
+          treeSha256: config.templateStoreSha256,
+          imageDigest: config.imageDigest,
+          sourceEnvelope: `/state/instances/${config.scopeId}/template-store/v1`,
+          manifest: config.templateStoreManifest,
+        })
+        return { state: 'REUSED', volumeName: 'opaque-volume', treeSha256: config.templateStoreSha256 }
+      },
+      compose: (value, reused) => {
+        order.push('compose'); expect({ value, reused }).toEqual({ value: config, reused: engine })
+        return { methods: {
+          ...base,
+          initialize: async signal => { signal.throwIfAborted(); order.push('initialize') },
+          preflight: async () => { order.push('rpc-preflight'); return base.preflight({ request_id: `req_${'0'.repeat(32)}` }, new AbortController().signal) },
+        } }
+      },
+      listen: async options => {
+        order.push('listen')
+        expect('initialize' in options.methods).toBe(false)
+        return { server: { close: vi.fn(), closeAllConnections: vi.fn(), closeIdleConnections: vi.fn() }, close: async () => undefined }
+      },
+    })
+    const managed = await createBuilderRuntimeSlotStarter(runtime)(slot('1'), config.installationId, roots, new FairGlobalBuilderCapacity(1), 100, new AbortController().signal, 100)
+    expect(order).toEqual(['load-config', 'create-engine', 'materialize', 'compose', 'initialize', 'listen'])
+    await managed.retire(100)
+  })
+
+  it.skipIf(process.platform === 'win32')('opens a real Unix listener after exactly one authoritative initialization', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dz23-manager-listener-'))
+    try {
+      const base = methods('1'); const initialize = vi.fn(base.initialize)
+      const config: BuilderSupervisorResolvedConfig = {
+        ...resolvedConfig(),
+        bearerToken: 'A'.repeat(43),
+        socketPath: join(root, 'builder.sock').replaceAll('\\', '/'),
+        replayRoot: join(root, 'replay').replaceAll('\\', '/'),
+      }
+      const managed = await createBuilderRuntimeSlotStarter(slotStartRuntime({
+        loadConfig: async () => config,
+        compose: () => ({ methods: { ...base, initialize } }),
+        listen: listenBuilderUnix,
+      }))(slot('1'), config.installationId, roots, new FairGlobalBuilderCapacity(1), 100, new AbortController().signal, 100)
+      expect(initialize).toHaveBeenCalledOnce()
+      await managed.retire(100)
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
+
+  it('rejects v1 authority and materialization failure before composition or socket publication', async () => {
+    const compose = vi.fn<BuilderRuntimeSlotStartRuntime['compose']>(); const listen = vi.fn<BuilderRuntimeSlotStartRuntime['listen']>()
+    const { templateStoreManifest: _manifest, templateStoreManifestReference: _manifestReference, ...v1 } = resolvedConfig()
+    const createEngine = vi.fn<BuilderRuntimeSlotStartRuntime['createEngine']>()
+    await expect(createBuilderRuntimeSlotStarter(slotStartRuntime({ loadConfig: async () => v1, createEngine, compose, listen }))(slot('1'), v1.installationId, roots, new FairGlobalBuilderCapacity(1), 100, new AbortController().signal)).rejects.toThrow('INVALID_RUNTIME_REGISTRY')
+    expect(createEngine).not.toHaveBeenCalled()
+
+    const blocked = createBuilderRuntimeSlotStarter(slotStartRuntime({
+      ensureTemplateStore: async () => { throw new Error('tenant-path-token-secret') }, compose, listen,
+    }))
+    await expect(blocked(slot('1'), 'a'.repeat(64), roots, new FairGlobalBuilderCapacity(1), 100, new AbortController().signal)).rejects.toMatchObject({ message: 'BLOCKED_EXTERNAL', code: 'BLOCKED_EXTERNAL' })
+    expect(compose).not.toHaveBeenCalled(); expect(listen).not.toHaveBeenCalled()
+
+    const unprovedCleanup = createBuilderRuntimeSlotStarter(slotStartRuntime({
+      ensureTemplateStore: async () => { throw Object.assign(new Error('cleanup-secret'), { code: 'TEMPLATE_STORE_CLEANUP_INCOMPLETE' }) }, compose, listen,
+    }))
+    await expect(unprovedCleanup(slot('1'), 'a'.repeat(64), roots, new FairGlobalBuilderCapacity(1), 100, new AbortController().signal)).rejects.toBeInstanceOf(Error)
+    expect(compose).not.toHaveBeenCalled(); expect(listen).not.toHaveBeenCalled()
+  })
+
+  it('cancels materialization without composing or opening a listener', async () => {
+    const controller = new AbortController(); const compose = vi.fn<BuilderRuntimeSlotStartRuntime['compose']>(); const listen = vi.fn<BuilderRuntimeSlotStartRuntime['listen']>()
+    const ensureTemplateStore = vi.fn<BuilderRuntimeSlotStartRuntime['ensureTemplateStore']>(async (_options, signal) => {
+      controller.abort(new Error('manager-cancelled'))
+      signal.throwIfAborted()
+      throw new Error('unreachable')
+    })
+    const starter = createBuilderRuntimeSlotStarter(slotStartRuntime({ ensureTemplateStore, compose, listen }))
+    await expect(starter(slot('1'), 'a'.repeat(64), roots, new FairGlobalBuilderCapacity(1), 100, controller.signal)).rejects.toThrow('manager-cancelled')
+    expect(ensureTemplateStore).toHaveBeenCalledOnce(); expect(compose).not.toHaveBeenCalled(); expect(listen).not.toHaveBeenCalled()
+  })
+
+  it('bounds listener initialization independently and closes a listener that resolves late', async () => {
+    let resolve!: (listener: BuilderSupervisorListener) => void; let observedSignal: AbortSignal | undefined
+    const close = vi.fn(async () => undefined)
+    const listening = new Promise<BuilderSupervisorListener>(done => { resolve = done })
+    const runtime = slotStartRuntime({ listen: async options => { observedSignal = options.signal; return listening } })
+    const startup = createBuilderRuntimeSlotStarter(runtime)(slot('1'), 'a'.repeat(64), roots, new FairGlobalBuilderCapacity(1), 100, new AbortController().signal, 5)
+    await until(() => observedSignal?.aborted === true)
+    resolve({ server: { close: vi.fn(), closeAllConnections: vi.fn(), closeIdleConnections: vi.fn() }, close })
+    await expect(startup).rejects.toThrow('LISTENER_INITIALIZATION_TIMEOUT'); expect(close).toHaveBeenCalledOnce()
+
+    let reject!: (error: Error) => void; let rejectedSignal: AbortSignal | undefined
+    const rejected = new Promise<BuilderSupervisorListener>((_resolve, rejectPromise) => { reject = rejectPromise })
+    const rejectedStart = createBuilderRuntimeSlotStarter(slotStartRuntime({ listen: async options => { rejectedSignal = options.signal; return rejected } }))(slot('1'), 'a'.repeat(64), roots, new FairGlobalBuilderCapacity(1), 100, new AbortController().signal, 5)
+    await until(() => rejectedSignal?.aborted === true)
+    reject(new Error('late-listener-secret'))
+    await expect(rejectedStart).rejects.toThrow('LISTENER_INITIALIZATION_TIMEOUT')
+
+    let resolveUnclean!: (listener: BuilderSupervisorListener) => void; let uncleanSignal: AbortSignal | undefined
+    const unclean = new Promise<BuilderSupervisorListener>(done => { resolveUnclean = done })
+    const uncleanStart = createBuilderRuntimeSlotStarter(slotStartRuntime({ listen: async options => { uncleanSignal = options.signal; return unclean } }))(slot('1'), 'a'.repeat(64), roots, new FairGlobalBuilderCapacity(1), 100, new AbortController().signal, 5)
+    await until(() => uncleanSignal?.aborted === true)
+    resolveUnclean({ server: { close: vi.fn(), closeAllConnections: vi.fn(), closeIdleConnections: vi.fn() }, close: async () => { throw new Error('late-close-secret') } })
+    await expect(uncleanStart).rejects.toBeInstanceOf(Error)
+
+    const never = new Promise<BuilderSupervisorListener>(() => undefined)
+    const unprovedStart = createBuilderRuntimeSlotStarter(slotStartRuntime({ listen: async () => never }))(slot('1'), 'a'.repeat(64), roots, new FairGlobalBuilderCapacity(1), 1, new AbortController().signal, 1)
+    await expect(unprovedStart).rejects.toBeInstanceOf(Error)
+  })
+
+  it('rejects an attestation failure from authoritative initialization and covers the inert Docker engine factory', async () => {
+    const config = resolvedConfig(); const listen = vi.fn<BuilderRuntimeSlotStartRuntime['listen']>()
+    const base = methods('1')
+    const runtime = slotStartRuntime({
+      compose: () => ({ methods: { ...base, initialize: async () => { throw new Error('BUILDER_ATTESTATION_FAILED') } } }),
+      listen,
+    })
+    await expect(createBuilderRuntimeSlotStarter(runtime)(slot('1'), config.installationId, roots, new FairGlobalBuilderCapacity(1), 100, new AbortController().signal)).rejects.toThrow('BUILDER_ATTESTATION_FAILED')
+    expect(listen).not.toHaveBeenCalled()
+    expect(BUILDER_MANAGER_TEST_ONLY.createBuilderDockerEngine(config)).toBeInstanceOf(DockerEngine)
+  })
+
   it('loads the pinned config once and rejects cancellation or identity mismatches before listen', async () => {
     const capacity = new FairGlobalBuilderCapacity(1); const first = slot('1'); const baseConfig = resolvedConfig()
     for (const mismatch of [{ ...baseConfig, scopeId: scope('2') }, { ...baseConfig, installationId: 'f'.repeat(64) }]) {
@@ -495,13 +747,18 @@ describe('slot starter lifecycle', () => {
     await expect(createBuilderRuntimeSlotStarter(slotStartRuntime({ listen }))(first, 'a'.repeat(64), roots, capacity, 100, failureSignal.signal)).rejects.toThrow('listen-failed')
     failureSignal.abort(new Error('after-listen-failure'))
 
+    const duringListen = new AbortController(); let cancelledListenSignal: AbortSignal | undefined
+    const cancelledRuntime = slotStartRuntime({ listen: async options => { cancelledListenSignal = options.signal; duringListen.abort(new Error('cancelled-during-listen')); throw new Error('listener-cancelled') } })
+    await expect(createBuilderRuntimeSlotStarter(cancelledRuntime)(first, 'a'.repeat(64), roots, capacity, 100, duringListen.signal)).rejects.toThrow('listener-cancelled')
+    expect(cancelledListenSignal?.aborted).toBe(true)
+
     const abortedDuringCompose = new AbortController(); let observed: AbortSignal | undefined
     const runtime = slotStartRuntime({
       compose: config => { abortedDuringCompose.abort(new Error('abort-before-listen')); return { methods: methods(config.scopeId[2] ?? '1') } },
       listen: async options => { observed = options.signal; throw new Error('listener-refused-aborted-start') },
     })
-    await expect(createBuilderRuntimeSlotStarter(runtime)(first, 'a'.repeat(64), roots, capacity, 100, abortedDuringCompose.signal)).rejects.toThrow('listener-refused-aborted-start')
-    expect(observed?.aborted).toBe(true)
+    await expect(createBuilderRuntimeSlotStarter(runtime)(first, 'a'.repeat(64), roots, capacity, 100, abortedDuringCompose.signal)).rejects.toThrow('abort-before-listen')
+    expect(observed).toBeUndefined()
   })
 })
 
@@ -774,18 +1031,24 @@ function prepareBody(digit: string, buildId: string): PrepareRequest {
 }
 
 function resolvedConfig(): BuilderSupervisorResolvedConfig {
+  const templateStoreSha256 = 'b'.repeat(64)
   return {
     installationId: 'a'.repeat(64), tenantId: 'tenant-internal', instanceId: 'instance-internal', scopeId: scope('1'),
     socketPath: '/run/builder.sock', artifactRoot: '/artifact', exportRoot: '/export', journalRoot: '/state/journal', replayRoot: '/state/replay', dockerSocketPath: '/docker.sock',
-    bearerToken: 'test-only-token', imageDigest: `sha256:${'a'.repeat(64)}`, templateStoreVersion: 'v1', templateStoreSha256: 'b'.repeat(64), policySha256: 'c'.repeat(64),
+    bearerToken: 'test-only-token', imageDigest: `sha256:${'a'.repeat(64)}`, templateStoreVersion: 'v1', templateStoreSha256,
+    templateStoreManifest: { version: 1, template_store_version: 'v1', tree_sha256: templateStoreSha256, entries: [] },
+    templateStoreManifestReference: `file:/config/instances/${scope('1')}/template-store.manifest.json`, policySha256: 'b'.repeat(64),
   }
 }
 
 function slotStartRuntime(overrides: Partial<BuilderRuntimeSlotStartRuntime> = {}): BuilderRuntimeSlotStartRuntime {
   const config = resolvedConfig()
   const composition: BuilderSupervisorComposition = { methods: methods('1') }
+  const engine = {} as DockerEnginePort
   return {
     loadConfig: async () => config,
+    createEngine: () => engine,
+    ensureTemplateStore: async options => ({ state: 'REUSED', volumeName: `test-${options.scopeId}`, treeSha256: options.treeSha256 }),
     compose: () => composition,
     listen: async () => ({ server: { close: vi.fn(), closeAllConnections: vi.fn(), closeIdleConnections: vi.fn() }, close: async () => undefined }),
     scheduleTimeout: (callback, timeoutMs) => setTimeout(callback, timeoutMs),

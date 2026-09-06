@@ -69,7 +69,7 @@ export function runtimeHealth(
 
 export function sanitizeRuntimeHealthCode(error: unknown): { readonly state: 'DEGRADED' | 'BLOCKED_EXTERNAL'; readonly code: BuilderRuntimeHealthCode } {
   const code = typeof error === 'object' && error !== null && 'code' in error ? String((error as { readonly code: unknown }).code) : ''
-  if (code === 'BLOCKED_EXTERNAL' || code === 'EXTERNAL_DEPENDENCY') return { state: 'BLOCKED_EXTERNAL', code: 'EXTERNAL_DEPENDENCY' }
+  if (code === 'BLOCKED_EXTERNAL' || code === 'EXTERNAL_DEPENDENCY' || code === 'SLOT_START_TIMEOUT' || code === 'LISTENER_INITIALIZATION_TIMEOUT') return { state: 'BLOCKED_EXTERNAL', code: 'EXTERNAL_DEPENDENCY' }
   if (code === 'INVALID_SUPERVISOR_CONFIGURATION' || code === 'INVALID_RUNTIME_REGISTRY') return { state: 'DEGRADED', code: 'CONFIG_INVALID' }
   return { state: 'DEGRADED', code: 'START_FAILED' }
 }

@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { BuilderRpcMethods } from '../src/protocol.js'
-import { listenBuilderUnix as listenBuilderUnixActual, type BuilderUnixRuntime, type BuilderUnixServerOptions } from '../src/unix-server.js'
+import { BuilderUnixListenerCleanupError, listenBuilderUnix as listenBuilderUnixActual, type BuilderUnixRuntime, type BuilderUnixServerOptions } from '../src/unix-server.js'
 
 const roots: string[] = []; const listeners: Array<{ close(): Promise<void> }> = []
 const token = 'A'.repeat(43)
@@ -82,6 +82,24 @@ describe.skipIf(process.platform === 'win32')('authenticated Unix builder socket
     await expect(listenBuilderUnix({ socketPath, bearerToken: token, methods: { ...fakeMethods(), initialize: async () => { throw new Error('init failed') } }, replayNamespace })).rejects.toThrow('init failed')
     await expect(lstat(`${socketPath}.lock`)).rejects.toMatchObject({ code: 'ENOENT' })
     const listener = await listenBuilderUnix({ socketPath, bearerToken: token, methods: fakeMethods(), replayNamespace }); listeners.push(listener)
+  })
+
+  it('never publishes a socket when startup is cancelled before or during listener binding', async () => {
+    const firstRoot = await mkdtemp(join(tmpdir(), 'dz23-builder-pre-abort-')); roots.push(firstRoot); const firstPath = join(firstRoot, 'builder.sock').replaceAll('\\', '/')
+    const before = new AbortController(); before.abort(new Error('startup-cancelled'))
+    const initialize = vi.fn(async () => undefined)
+    await expect(listenBuilderUnix({ socketPath: firstPath, bearerToken: token, methods: { ...fakeMethods(), initialize }, replayNamespace, signal: before.signal })).rejects.toThrow('startup-cancelled')
+    expect(initialize).not.toHaveBeenCalled()
+    await expect(lstat(firstPath)).rejects.toMatchObject({ code: 'ENOENT' }); await expect(lstat(`${firstPath}.lock`)).rejects.toMatchObject({ code: 'ENOENT' })
+
+    const secondRoot = await mkdtemp(join(tmpdir(), 'dz23-builder-bind-abort-')); roots.push(secondRoot); const secondPath = join(secondRoot, 'builder.sock').replaceAll('\\', '/'); const during = new AbortController()
+    const createServer = ((handler: HttpHandler) => {
+      const server = createHttpServer(handler); const listen = server.listen.bind(server)
+      server.listen = ((path: string, callback: () => void) => listen(path, () => { during.abort(new Error('binding-cancelled')); callback() })) as typeof server.listen
+      return server
+    }) as typeof createHttpServer
+    await expect(listenBuilderUnix({ socketPath: secondPath, bearerToken: token, methods: fakeMethods(), replayNamespace, signal: during.signal, runtime: unixRuntime({ createServer }) })).rejects.toThrow('binding-cancelled')
+    await expect(lstat(secondPath)).rejects.toMatchObject({ code: 'ENOENT' }); await expect(lstat(`${secondPath}.lock`)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('uses an authenticated probe and exclusive lease to reject split-brain', async () => {
@@ -208,15 +226,19 @@ describe.skipIf(process.platform === 'win32')('authenticated Unix builder socket
     const root = await mkdtemp(join(tmpdir(), 'dz23-builder-cleanup-fail-')); roots.push(root); const socketPath = join(root, 'builder.sock').replaceAll('\\', '/'); const realCreate = createHttpServer
     const createServer = ((handler: Parameters<typeof realCreate>[0]) => { const server = realCreate(handler); const close = server.close.bind(server); server.close = ((callback?: (error?: Error) => void) => close(() => callback?.(new Error('close failed')))) as typeof server.close; return server }) as typeof realCreate
     const runtime = unixRuntime({ createServer, lstat: (async path => { const stat = await lstat(path); return path === socketPath ? { ...stat, isSocket: () => false } as never : stat }) as typeof lstat })
-    await expect(listenBuilderUnix({ socketPath, bearerToken: token, methods: fakeMethods(), replayNamespace, runtime })).rejects.toThrow('close failed')
+    const closeFailure = listenBuilderUnix({ socketPath, bearerToken: token, methods: fakeMethods(), replayNamespace, runtime })
+    await expect(closeFailure).rejects.toBeInstanceOf(BuilderUnixListenerCleanupError)
+    await expect(closeFailure).rejects.toMatchObject({ code: 'LISTENER_CLEANUP_INCOMPLETE', message: 'LISTENER_CLEANUP_INCOMPLETE' })
     const lockRoot = await mkdtemp(join(tmpdir(), 'dz23-builder-release-fail-')); roots.push(lockRoot); const lockSocket = join(lockRoot, 'builder.sock').replaceAll('\\', '/'); const remove = (async path => { if (String(path).endsWith('.lock')) throw new Error('release failed'); return rm(path, { recursive: true, force: true }) }) as typeof rm
-    await expect(listenBuilderUnix({ socketPath: lockSocket, bearerToken: token, methods: { ...fakeMethods(), initialize: async () => { throw new Error('init failed') } }, replayNamespace, runtime: unixRuntime({ remove }) })).rejects.toThrow('release failed')
+    const releaseFailure = listenBuilderUnix({ socketPath: lockSocket, bearerToken: token, methods: { ...fakeMethods(), initialize: async () => { throw new Error('init failed') } }, replayNamespace, runtime: unixRuntime({ remove }) })
+    await expect(releaseFailure).rejects.toBeInstanceOf(BuilderUnixListenerCleanupError)
+    await expect(releaseFailure).rejects.toMatchObject({ code: 'LISTENER_CLEANUP_INCOMPLETE', message: 'LISTENER_CLEANUP_INCOMPLETE' })
     await rm(`${lockSocket}.lock`, { recursive: true, force: true })
   })
 
   it('applies shutdown signals and treats a missing lock during close as already released', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'dz23-builder-shutdown-')); roots.push(root); const socketPath = join(root, 'builder.sock').replaceAll('\\', '/'); const controller = new AbortController(); controller.abort(new Error('shutdown'))
-    const listener = await listenBuilderUnix({ socketPath, bearerToken: token, methods: fakeMethods(), replayNamespace, signal: controller.signal }); expect(await send(socketPath, token)).toMatchObject({ status: 503, body: { ok: false, error: { code: 'SUPERVISOR_SHUTTING_DOWN' } } })
+    const root = await mkdtemp(join(tmpdir(), 'dz23-builder-shutdown-')); roots.push(root); const socketPath = join(root, 'builder.sock').replaceAll('\\', '/'); const controller = new AbortController()
+    const listener = await listenBuilderUnix({ socketPath, bearerToken: token, methods: fakeMethods(), replayNamespace, signal: controller.signal }); controller.abort(new Error('shutdown')); expect(await send(socketPath, token)).toMatchObject({ status: 503, body: { ok: false, error: { code: 'SUPERVISOR_SHUTTING_DOWN' } } })
     await rm(`${socketPath}.lock`, { recursive: true }); await expect(listener.close()).resolves.toBeUndefined()
   })
 
@@ -276,7 +298,7 @@ describe.skipIf(process.platform === 'win32')('authenticated Unix builder socket
       lstat: (async path => { const stat = await lstat(path); if (path === cleanupPath && ++reads === 2) return { ...stat, isSocket: () => false } as never; return stat }) as typeof lstat,
       unlink: (async path => { if (path === cleanupPath) throw new Error('unlink failed'); return unlink(path) }) as typeof unlink,
     })
-    await expect(listenBuilderUnix({ socketPath: cleanupPath, bearerToken: token, methods: fakeMethods(), replayNamespace, runtime: cleanupRuntime })).rejects.toThrow('unlink failed')
+    await expect(listenBuilderUnix({ socketPath: cleanupPath, bearerToken: token, methods: fakeMethods(), replayNamespace, runtime: cleanupRuntime })).rejects.toMatchObject({ code: 'LISTENER_CLEANUP_INCOMPLETE', message: 'LISTENER_CLEANUP_INCOMPLETE' })
     await new Promise<void>(resolve => realClose!(() => resolve())); await unlink(cleanupPath).catch(() => undefined); await rm(`${cleanupPath}.lock`, { recursive: true, force: true })
   })
 

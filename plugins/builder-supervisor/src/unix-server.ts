@@ -11,6 +11,10 @@ import { BUILDER_UNIX_SOCKET_MAX_BYTES, isBuilderRuntimeScopeId, type BuilderRun
 const CREDENTIAL_REFERENCE = 'file:/run/secrets/dz23-builder-supervisor-token'
 interface LockMetadata { readonly nonce: string; readonly pid: number; readonly process_start_ticks: string; readonly uid: number; readonly socket_dev: number | null; readonly socket_ino: number | null }
 interface LifecycleMethods extends BuilderRpcMethods { initialize?(signal: AbortSignal): Promise<void> }
+export class BuilderUnixListenerCleanupError extends Error {
+  readonly code = 'LISTENER_CLEANUP_INCOMPLETE'
+  constructor() { super('LISTENER_CLEANUP_INCOMPLETE'); this.name = 'BuilderUnixListenerCleanupError' }
+}
 export interface BuilderUnixRuntime {
   readonly platform: NodeJS.Platform; readonly pid: number; readonly getuid: (() => number) | undefined; readonly kill: typeof process.kill; readonly umask: typeof process.umask
   readonly lstatSync: typeof lstatSync; readonly chmod: typeof chmod; readonly lstat: typeof lstat; readonly mkdir: typeof mkdir; readonly open: typeof open
@@ -33,12 +37,14 @@ export async function listenBuilderUnix(options: BuilderUnixServerOptions): Prom
   const replayRoot = validReplayRoot(options.replayRoot)
   const stepTimeoutMs = options.stepTimeoutMs ?? 180_000; const cleanupTimeoutMs = options.cleanupTimeoutMs ?? 30_000; const timeoutMs = options.operationTimeoutMs ?? 240_000
   if (![stepTimeoutMs, cleanupTimeoutMs, timeoutMs].every(value => Number.isSafeInteger(value) && value > 0) || timeoutMs < stepTimeoutMs + cleanupTimeoutMs) throw new Error('INVALID_OPERATION_TIMEOUT')
+  options.signal?.throwIfAborted()
   const processStartTicks = await processStartIdentity(runtime.pid, runtime)
   await ensureSocketDirectory(parent, uid, runtime)
   let socketIdentity: { readonly dev: number; readonly ino: number } | undefined; let server: Server | undefined; let lockHeld = false; let listenSucceeded = false
   try {
     await acquireLock(lockPath, socketPath, options.bearerToken, uid, nonce, processStartTicks, runtime); lockHeld = true
     await options.methods.initialize?.(AbortSignal.any([options.signal ?? new AbortController().signal, AbortSignal.timeout(timeoutMs)]))
+    options.signal?.throwIfAborted()
     await assertAbsent(socketPath, runtime)
     const replayScopeRoot = posix.join(replayRoot, options.scopeId)
     const replayDirectory = posix.join(replayScopeRoot, options.policySha256)
@@ -50,6 +56,7 @@ export async function listenBuilderUnix(options: BuilderUnixServerOptions): Prom
     const previousUmask = runtime.umask(0o117)
     try { await new Promise<void>((resolve, reject) => { server!.once('error', reject); server!.listen(socketPath, () => { server!.off('error', reject); const bound = runtime.lstatSync(socketPath); socketIdentity = { dev: bound.dev, ino: bound.ino }; listenSucceeded = true; resolve() }) }) }
     finally { runtime.umask(previousUmask) }
+    options.signal?.throwIfAborted()
     const bound = await runtime.lstat(socketPath)
     if (!bound.isSocket() || bound.uid !== uid) throw new Error('UNSAFE_SOCKET')
     if (socketIdentity!.dev !== bound.dev || socketIdentity!.ino !== bound.ino) throw new Error('SOCKET_IDENTITY_MISMATCH')
@@ -60,7 +67,7 @@ export async function listenBuilderUnix(options: BuilderUnixServerOptions): Prom
     if (server !== undefined) await closeServerBounded(server, timeoutMs, runtime).catch(item => { cleanupError ??= item })
     if (listenSucceeded) await safeUnlinkSocket(socketPath, socketIdentity!, uid, runtime).catch(item => { cleanupError ??= item })
     if (lockHeld) await releaseLock(lockPath, nonce, runtime).catch(item => { cleanupError ??= item })
-    if (cleanupError !== undefined) throw cleanupError
+    if (cleanupError !== undefined) throw new BuilderUnixListenerCleanupError()
     throw error
   }
   const activeServer = server
