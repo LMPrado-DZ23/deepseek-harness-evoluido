@@ -2,13 +2,13 @@
 
 - `mission_id`: `M1-M6-finalizacao-2026-09-04`
 - `objective`: integrar e provar M1-M6 com segurança, sem push, PR, deploy ou exclusões não autorizadas
-- `state`: `INTEGRATING`
-- `iteration`: `2026-09-04.11`
+- `state`: `INTEGRATING_AND_PROVING`
+- `iteration`: `2026-09-06.16`
 - `started_at`: `2026-09-04 America/Sao_Paulo`
-- `heartbeat_at`: `2026-09-04T15:46:21-03:00`
-- `last_progress_at`: `2026-09-04T15:46:21-03:00`
-- `branch`: `codex/p30-policy-foundation`
-- `head`: `bddf0ff`
+- `heartbeat_at`: `2026-09-06T17:02:17-03:00`
+- `last_progress_at`: `2026-09-06T17:02:17-03:00`
+- `branch`: `codex/m76-windows-lifecycle-evidence`
+- `head`: `098720641e37ac15e122fd58aecab03855c7c9b0`
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c`
 
 ## Critérios de aceite
@@ -32,6 +32,17 @@
   (tracked, untracked, `.gitmodules`, manifesto e origin) e uma verificação
   positiva final. O checkout Windows continua inadequado para o gate normal
   por não materializar todos os symlinks; a prova canônica permanece WSL/ext4.
+- M71 consolidou a sessão real e governada do Assistente em `646c47b`: HTTP,
+  identidade, CSRF, retomada, approval e turno determinístico passaram; um
+  segundo turno usou Ollama local real e o handoff foi exercitado no Edge.
+- M76 registrou os trust stores do Windows e WSL2 antes/depois sem alteração
+  (149 certificados Windows e 364 entradas WSL, zero diferenças). A auditoria
+  de segurança do coletor e comparador fechou com zero achados.
+- M76 encontrou que a desinstalação comum deixava um estado impossível de
+  reinstalar. `0987206` remove os dois ponteiros operacionais após validação,
+  preserva releases/estado/volumes e prova a reinstalação com o sentinela de
+  dados intacto. A suíte Windows cumulativa passou 17/17 e a segunda auditoria
+  de segurança fechou com zero achados.
 - Claude entregou M3+M4+M5 em `9034a85`; transporte íntegro, mas ainda baseado em `b95d23c`. A composição sobre `d819314` foi solicitada novamente com evidência do merge-base.
 - Preview recebeu o checkpoint isolado `7273b38`: instalação offline com lock congelado, 178/178 testes e build passaram em WSL/ext4. A prova de ausência usa `previewId`, portanto uma troca de `runtimeRef` não libera capacidade prematuramente.
 - Retenção fail-closed foi fechada em `011f118`: nenhuma remoção física de artefatos na v1, 28/28 testes executados, 2 skips explícitos e 21/21 no namespace Linux com bind mounts reais.
@@ -73,12 +84,15 @@
 
 ## Próxima ação
 
-1. receber e auditar o primeiro candidato M3–M5 completo, seja Claude ou a contingência Codex;
-2. integrar por commits verificáveis, sem aceitar exclusões de `plugins/*/lib/**`;
-3. compor `64e9686` e resolver manualmente o wiring compartilhado do `storage-postgres`;
-4. executar M6.1: workspace/lock portátil, runtime agregador, imagem multiarch e SBOM;
+1. Claude revisar M74-A, M75 e o checkpoint M76 sem sobreposição de arquivos;
+2. manter M74-B parado até GO explícito de M74-A e não tocar na M72 de Claude;
+3. preparar, em branch isolada, o orquestrador da prova real do lifecycle
+   Windows, sem ligar o Docker automaticamente;
+4. integrar por commits verificáveis somente após parecer independente, sem
+   aceitar exclusões de `plugins/*/lib/**`;
 5. rodar gates completos serializados em WSL/ext4 e auditoria final independente;
-6. somente então executar lifecycle Windows real com as imagens produzidas.
+6. executar o lifecycle Windows real com as imagens produzidas quando o Docker
+   for explicitamente autorizado.
 
 ## Instruções de retomada
 
