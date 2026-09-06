@@ -105,7 +105,9 @@ jobs:
           node scripts/test-postgres.mjs --list
 
       - name: Unit and contract suite
-        run: pnpm test -- --maxWorkers=2
+        # One worker is intentional: this suite exercises subprocesses, PTYs,
+        # large archive ceilings and filesystem races in the same job.
+        run: pnpm exec vitest run --maxWorkers=1
 
       - name: Install PostgreSQL 16 client
         run: |
