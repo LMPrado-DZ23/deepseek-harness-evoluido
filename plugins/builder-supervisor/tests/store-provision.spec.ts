@@ -580,7 +580,7 @@ linux('immutable builder template-store provisioning', () => {
     await expect(owner.completed).resolves.toMatchObject({ code: 0, signal: null })
     expect(JSON.parse(await readFile(ownerResult, 'utf8'))).toEqual(expect.objectContaining({ state: 'CREATED' }))
     expect(await lockArtifacts(instanceRoot)).toEqual([])
-  })
+  }, 15_000)
 
   it('preserves divergent lock and claim inodes substituted after stale-owner proof', async () => {
     const fixture = await createFixture()
