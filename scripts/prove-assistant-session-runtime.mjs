@@ -64,9 +64,9 @@ try {
   ].join('\n'))
 
   const repositories = [{
-    orgId: 'org-personal',
-    tenantId: 'tenant-personal',
-    workspaceId: 'tenant-personal',
+    orgId: 'org_local',
+    tenantId: 'tenant_local',
+    workspaceId: 'tenant_local',
     repositoryPath: repository,
     allowedPaths: ['src'],
     providers: ['spawn-in-process'],
