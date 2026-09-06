@@ -1,136 +1,116 @@
 # P36 — Ponte segura entre o DZ23 STUDIO e conversa/agentes
 
-Estado: **BETA**, árvore não commitada na branch isolada
-`codex/p36-studio-assistant-bridge`, baseada em `17e79aa`.
+Estado: **BETA**, implementação isolada em
+`codex/m69-assistant-bridge-integration@f7b9c69b82abb705cb534b11d6bba28bca90db17`.
+Esta prova não autoriza merge, push, deploy ou uso de provedor externo.
 
 ## O que existe
 
-- `/studio/assistente` apresenta uma entrada simples para o chat já existente do
-  Harness. Não há cópia do chat e não existe API inventada para criar sessão.
-- O preset mínimo `dz23-assistant` expõe somente seis ferramentas tipadas:
-  iniciar T2, iniciar sensível T3, listar, revisar, cancelar e aplicar.
-- Tanto o início T2 quanto o início sensível T3 aceitam somente
-  `spawn-in-process`. Codex e Claude Code continuam disponíveis no seam global
-  da fase 3, mas estão `NOT_CONFIGURED` nesta ponte: configuração
-  administrativa com qualquer um deles falha no boot, os schemas não os
-  anunciam e uma chamada direta do serviço também falha antes de alcançar o
-  `StudioAgentService`.
-- Organização, tenant, workspace, usuário e papel vêm da sessão do servidor.
-  Nenhum desses campos existe nos argumentos que o modelo pode enviar.
-- A configuração administrativa valida repositório Git canônico, escopo,
-  provedores, caminhos e orçamentos. Caminho pai de uma allowlist é recusado.
-- Runs lidos do domínio compartilhado só aparecem, podem ser revisados,
-  cancelados ou aplicados se forem `spawn-in-process`, apontarem para o mesmo
-  repositório canônico configurado e todos os arquivos alterados estiverem na
-  allowlist administrativa. Runs externos da fase 3 ou de outro repositório e
-  caminho ficam invisíveis e falham antes do `StudioAgentService`.
-- A fronteira administrativa recusa `.git` simbólico. Aceita diretório Git
-  normal somente com `HEAD`, `objects` e `refs` tipados e sem symlink (e
-  `config`/`config.worktree`/`index` regulares quando presentes). O descritor de
-  worktree precisa apontar para um filho direto de `<common>/worktrees`, com
-  vínculo recíproco.
-- O gerenciador de worktrees revalida top-level, git-dir, common-dir, revisão e
-  vínculo recíproco antes de todo diff. O diff usa índice temporário explícito,
-  nunca o índice real do worktree ou do projeto principal, e sempre remove o
-  índice temporário.
-- Subprocessos Git recebem uma allowlist mínima de ambiente, sem chaves de IA,
-  proxies, credenciais ou configuração Git herdada. Hooks, fsmonitor, external
-  diff, textconv e filtros clean/smudge/process são neutralizados; nomes de
-  driver fora da allowlist ou mais de 128 drivers falham fechados. Filtros
-  ativados apenas por `includeIf` no git-dir do linked worktree são reavaliados
-  no binding exato antes de materializar arquivos.
-- Toda delegação usa `StudioAgentService`: worktree, diff verificado, limites,
-  auditoria e aprovação existentes são preservados. Aplicar é uma segunda ação
-  T2; a ferramenta T3 continua dependendo de identidade forte na policy.
-- Filhos/subagentes e presets comuns não podem chamar a ponte. Isso impede
-  delegação recursiva usando a identidade herdada.
-- Esquemas têm `additionalProperties: false` e o mesmo contrato é imposto de
-  novo em runtime, inclusive recusando uma raiz que não seja objeto. Campos
-  como `org_id`, `approval` e `repositoryPath` falham.
-- O antigo helper lexical `assertInsideWorktree` e o equivalente não usado
-  `isCanonicalChild` foram removidos. Eles não seguiam symlink/junction e não
-  constituíam uma fronteira de segurança. Uma junction reproduzida dentro de
-  um caminho aparentemente permitido não torna provider externo alcançável.
+- `/studio/assistente` é uma entrada simples para o chat existente do Harness.
+  Não há cópia do chat nem API inventada para criar sessão.
+- O preset `dz23-assistant` expõe seis ferramentas tipadas: iniciar T2, iniciar
+  sensível T3, listar, revisar, cancelar e aplicar.
+- A ponte aceita somente `spawn-in-process`. Codex CLI e Claude Code continuam
+  `NOT_CONFIGURED`: a configuração administrativa, o catálogo e o runtime os
+  recusam antes de chamar o serviço de agentes.
+- Organização, tenant, workspace, usuário e papel são derivados da sessão do
+  servidor. Esses campos não existem nos argumentos controlados pelo modelo.
+- Toda delegação passa pelo `StudioAgentService`: worktree isolado, diff
+  verificado, orçamento, auditoria e aprovações T2/T3 são preservados.
+- Runs de outro tenant, repositório, provider ou caminho permitido ficam
+  invisíveis. Cancelamento só alcança o job vivo iniciado pela mesma pessoa;
+  aplicar exige uma segunda aprovação T2.
+- O preset não é exposto a filhos. Subagentes não podem delegar de novo usando
+  a identidade herdada.
+- Repositórios e linked worktrees são validados por caminho canônico, marcador
+  `.git`, `HEAD`, `objects`, `refs`, descritores recíprocos e tipos de inode.
+  Symlink/junction, descritor ambíguo e caminho fora da allowlist falham
+  fechados.
+- O Git usa índice temporário e ambiente mínimo. Hooks, fsmonitor, external
+  diff, textconv, filtros clean/smudge/process, proxies e credenciais herdadas
+  são neutralizados ou recusados.
+- Schemas usam `additionalProperties: false`, e o mesmo contrato é conferido
+  novamente no runtime.
 
-## Provas executadas sem Docker, rede ou instalação
+## Ambiente da prova final
 
-- assistant-bridge: 58/58 testes no freeze fail-closed.
-- agents + assistant-bridge: 97/97 testes serializados no freeze fail-closed;
-  gerenciador Git: 13/13 no Windows. As provas incluem troca adversarial de
-  `.git` sem mudar um byte do índice/status principal, extensões Git hostis,
-  filtro ativado somente por `includeIf` no linked worktree, allowlist/teto de
-  drivers, remoção de segredos/proxies do ambiente do subprocesso e uso de um
-  repositório autorizado que já é um linked worktree real, além da recusa do
-  vínculo recíproco ausente ou apontando para outro `.git`.
-- launcher React: o 1/1 do freeze anterior continua registrado, mas a repetição
-  atual ficou `BLOCKED_ENVIRONMENT` antes de coletar testes porque
-  `lucide-react` não existe na instalação parcial local.
-- cobertura do freeze anterior: 98,89% statements, 99,08% branches, 95,83%
-  functions e 98,64% lines; `catalog.ts`, `closed-tool.ts` e `service.ts` tinham
-  100% em todas as métricas. A repetição após o fail-closed ficou
-  `BLOCKED_ENVIRONMENT` na conversão V8 (`ast-v8-to-istanbul: d is not a
-  function`), depois dos testes, portanto esses percentuais não são
-  reapresentados como medição do freeze atual.
-- builds isolados de agents e assistant-bridge: PASS.
-- pacote isolado: `pnpm pack --dry-run` lista 23 arquivos e inclui
-  `i18n/pt-BR.json`, `lib/i18n.js`, `lib/index.js` e `package.json`; o `lib`
-  staged carregou e traduziu uma chave usando somente o catálogo empacotado.
-- prova Node pura do freeze anterior resolveu `@dz23-studio/agents` pelo export do pacote
-  (`lib/index.js`), não pelo alias de testes, e confirmou que filtros normais e
-  condicionais não executam e que nome inseguro de driver é bloqueado antes de
-  criar worktree. Uma segunda carga usou cópia staged contendo somente
-  `lib`/`i18n` e repetiu a prova. O manifesto de agents inclui explicitamente
-  `lib`, `i18n` e `src`; o comando canônico `prove:assistant-package` agora
-  compila agents e assistant-bridge antes da prova, portanto um clone limpo não
-  depende de artefato oculto pré-existente. Para o freeze fail-closed, os dois
-  `lib` foram regenerados e o catálogo compilado confirmou somente
-  `spawn-in-process`; a prova completa de pacote ficou `BLOCKED_ENVIRONMENT`
-  ao importar a identidade porque `tsyringe` não existe na instalação local.
-- o profile e seu lockfile declaram a ponte; a raiz de presets é explícita no
-  Compose local e de servidor; uma resolução offline a partir de um profile
-  staged carregou o módulo real `dz23-studio-assistant-bridge`.
-- build do Studio Web: TypeScript + Vite web + service worker: PASS.
-- `I18N_GATE=PASS`: 10 catálogos, 287 chaves, baseline sem crescimento.
+- Clone limpo em ext4 do WSL2:
+  `/home/leandro/dz23-gates/m69-assistant-74446a6`.
+- DeepSeek Harness fixado em
+  `6c705be1ce6774a000d061da41d1823b03a3d42c`.
+- Instalação com lock congelado: **PASS**.
+- Build oficial do upstream e build recursivo do Studio: **PASS**.
+- `pnpm typecheck`: **PASS**.
+- O build regenerou somente artefatos rastreados `plugins/*/lib/**` no clone de
+  prova. Eles não foram copiados para a branch de fonte nem usados para
+  esconder dependência ausente.
+
+## Testes e cobertura
+
+Comando canônico:
+
+```text
+pnpm exec vitest run --coverage --maxWorkers=1
+```
+
+Resultado final:
+
+- 121 arquivos aprovados; 6 arquivos de integração PostgreSQL pulados;
+- 1.974 testes aprovados; 62 pulados porque `DZ23_POSTGRES_TEST_DSN` não foi
+  configurado nesta prova sem Docker;
+- cobertura global: 96,03% statements, 93,44% branches, 96,53% functions e
+  98,10% lines;
+- 100% em identidade, política, tenancy, núcleo do agente, catálogo/fechamento/
+  serviço da ponte, saúde de rotas e módulos críticos do Prompt-to-App.
+
+A interface tem suíte própria, fora do include da raiz:
+
+```text
+pnpm --dir apps/studio-web test
+```
+
+Resultado: 11 arquivos e 54 testes aprovados, incluindo
+`AssistantEntry.spec.ts`.
+
+O workflow usa exatamente `pnpm exec vitest run --maxWorkers=1`. A forma antiga
+`pnpm test -- --maxWorkers=2` não repassava o argumento ao Vitest e foi
+removida. O limite serial é intencional porque a suíte reúne PTY, subprocessos,
+arquivos grandes e provas multiprocesso no mesmo runner.
+
+## Gates de composição e empacotamento
+
+- `UPSTREAM_PIN=PASS`: commit e árvore do Harness conferidos, com autoteste
+  negativo.
+- `PORTABILITY=PASS`: zero achados, com fixture negativa.
+- `I18N_GATE=PASS`: 11 catálogos, 287 chaves e baseline sem crescimento.
+- `DOMAIN_ROUTE_GATE=PASS`: 23 domínios em dois patches de produção.
 - `ASSISTANT_TOOL_CATALOG=PASS`: seis ferramentas, provider exclusivo
-  `spawn-in-process` e mutações negativas de remoção, valor da regra e
-  `source`.
-- o contrato TypeScript da ponte aceita `spawn-in-process` e contém
-  `@ts-expect-error` verificado para Codex e Claude Code; compilação focada:
-  PASS. O `lib/service.d.ts` emitido usa `AssistantProvider`, não a união global.
-- P37 no worktree: PASS, 11.519 arquivos, 371 manifests, 50 licenças, zero
-  achado. A contagem está contaminada por módulos ignorados da instalação
-  parcial e não representa o artefato final; o release gate deve rodar no
-  artefato limpo/staged.
+  `spawn-in-process` e três mutações negativas.
+- `ASSISTANT_PACKAGE_PROOF=PASS`: `lib` e i18n staged, manifesto/profile/root
+  lock, preset, resolução do plugin e de agents, provider local exclusivo e
+  recusas de extensões/drivers Git hostis.
+- P37 no `git archive` de `f7b9c69`: **PASS**, 819 arquivos, 21 manifests, um
+  arquivo de licença e zero achado. SHA-256 do ZIP auditado:
+  `C69EA955F72BD7341454C1C56541A59DCA72D1ADE35FB90C784972C2FFF24D77`.
 
 ## Limites honestos
 
-- Criar automaticamente uma sessão dedicada pelo botão: `NOT_PRESENT`. O
-  launcher abre somente a rota pública e estável do chat do Harness.
-- Codex CLI e Claude Code reais pela ponte: `NOT_CONFIGURED`; o E2E de
-  confinamento em Windows e Linux continua `NOT_EXECUTED`. O provider
-  in-process é o único habilitado; Hermes: `NOT_PRESENT`.
-- Cancelamento sobrevive somente no mesmo processo: `BETA`, fail-closed depois
-  de restart. Jobs concluídos são removidos do mapa para não vazar memória.
-- MCP, skills, memória semântica e uma interface visual de equipe de agentes:
-  `NOT_PRESENT` neste preset mínimo.
-- Equipe multiagente/DAG estilo Hermes: `NOT_PRESENT`. Cada chamada inicia uma
-  única execução; não há consenso, dependências entre tarefas nem síntese de
-  vários agentes.
-- Não houve Docker, rede, browser E2E, commit, merge, push ou deploy.
-- `safeTextFile()` ainda faz `lstat` seguido de leitura pelo pathname. A janela
-  TOCTOU foi registrada como defesa em profundidade de baixa prioridade; não
-  se tentou um `O_NOFOLLOW` sem prova portátil em Windows e Linux. Providers
-  externos permanecem fail-closed, e o provider in-process não recebe shell,
-  processo em segundo plano nem ferramenta interativa.
-- `dump-config` real no WSL2 está `BLOCKED_ENVIRONMENT`: o CLI upstream fixado
-  falha antes de ler o Studio com `SyntaxError: ./lib/argument.js does not
-  provide an export named Argument` na instalação local de `commander`. Nenhuma
-  dependência foi reparada ou hidratada. Portanto o carregamento ponta a ponta
-  do preset no Harness permanece `NOT_EXECUTED`.
-- O typecheck de raiz não foi usado como evidência: os links locais atuais não
-  contêm várias dependências já declaradas (por exemplo `pg`, `sharp`,
-  `typescript` e plugins do próprio workspace). Os plugins agents e
-  assistant-bridge foram compilados separadamente com o compilador já presente,
-  sem instalar ou hidratar pacotes. A repetição atual de `pnpm pack --dry-run`
-  também ficou `BLOCKED_ENVIRONMENT` porque o workspace dependency
-  `@dz23-studio/agents` não está instalado; a prova staged/Node acima passou.
+- Criação automática de uma sessão dedicada pelo botão: `NOT_PRESENT`.
+- Codex CLI e Claude Code reais pela ponte: `NOT_CONFIGURED` e `NOT_EXECUTED`.
+- Equipe multiagente/DAG, consenso e síntese estilo Hermes: `NOT_PRESENT`.
+- MCP, skills e memória semântica dentro deste preset mínimo: `NOT_PRESENT`.
+- Cancelamento após reinício: `BETA`, fail-closed; jobs concluídos são removidos
+  do mapa em memória.
+- PostgreSQL físico, Docker, navegador E2E, domínio real, celular e CI remoto:
+  `NOT_EXECUTED` nesta prova.
+- A suíte PostgreSQL permanece uma etapa separada do CI e não é substituída
+  pelos 62 testes pulados acima.
+- Não houve merge na principal, push, PR, deploy ou alteração do upstream.
+
+## Decisão técnica
+
+A composição, o confinamento local, o pacote, o clone limpo e o gate D30 estão
+provados. P36 permanece **BETA** até uma sessão real no Harness e a prova de
+runtime com PostgreSQL/Docker serem executadas. Multiagentes não fazem parte
+deste checkpoint e devem entrar como fatia separada, sem ampliar a autoridade
+das seis ferramentas existentes.
