@@ -8,8 +8,8 @@ const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const preset = await readFile(resolve(root, 'dsh-home/.agent-presets/dz23-assistant/agent.cordis.yml'), 'utf8')
 const profile = await readFile(resolve(root, 'dsh-home/profiles/studio/cordis.patch.yml'), 'utf8')
 
-const exposedBlock = preset.match(/\n    exposedTools:\n(?<items>(?:      - [a-z0-9_-]+\n)+)/)?.groups?.items ?? ''
-const exposed = [...exposedBlock.matchAll(/^      - ([a-z0-9_-]+)$/gm)].map(match => match[1]!)
+const exposedBlock = preset.match(/\n\s+exposedTools:\n(?<items>(?:\s+- [a-z0-9_-]+\n)+)/)?.groups?.items ?? ''
+const exposed = [...exposedBlock.matchAll(/^\s+- ([a-z0-9_-]+)$/gm)].map(match => match[1]!)
 const rulesBlock = profile.match(/\n        rules:\n(?<rules>[\s\S]*?)\n    - id: dz23-studio-identity/)?.groups?.rules ?? ''
 const classified = [...rulesBlock.matchAll(/^          ([a-z0-9_-]+):$/gm)].map(match => match[1]!)
 

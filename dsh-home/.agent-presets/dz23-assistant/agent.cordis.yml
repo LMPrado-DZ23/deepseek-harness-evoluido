@@ -12,20 +12,26 @@
       Claude Code externos não podem ser iniciados por esta ponte.
 
 - id: dz23-assistant-tools
-  name: '@dz23-studio/assistant-bridge'
+  name: cordis:group
+  group: true
+  isolate:
+    studioAssistant: true
   config:
-    exposedTools:
-      - studio_agent_start
-      - studio_agent_start_sensitive
-      - studio_agent_list
-      - studio_agent_review
-      - studio_agent_cancel
-      - studio_agent_apply
-      - studio_team_start
-      - studio_team_start_sensitive
-      - studio_team_list
-      - studio_team_status
-      - studio_team_continue
-      - studio_team_continue_sensitive
-      - studio_team_cancel
-    repositories: !!js JSON.parse(process.env.DZ23_ASSISTANT_REPOSITORIES ?? '[]')
+    - id: dz23-assistant-bridge
+      name: '@dz23-studio/assistant-bridge'
+      config:
+        exposedTools:
+          - studio_agent_start
+          - studio_agent_start_sensitive
+          - studio_agent_list
+          - studio_agent_review
+          - studio_agent_cancel
+          - studio_agent_apply
+          - studio_team_start
+          - studio_team_start_sensitive
+          - studio_team_list
+          - studio_team_status
+          - studio_team_continue
+          - studio_team_continue_sensitive
+          - studio_team_cancel
+        repositories: !!js JSON.parse(process.env.DZ23_ASSISTANT_REPOSITORIES ?? '[]')

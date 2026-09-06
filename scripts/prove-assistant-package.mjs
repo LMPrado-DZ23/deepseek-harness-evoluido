@@ -60,6 +60,9 @@ try {
   const presetRoot = resolve(root, 'dsh-home/.agent-presets')
   const preset = await readFile(resolve(presetRoot, 'dz23-assistant/agent.cordis.yml'), 'utf8')
   if (!preset.includes("name: '@dz23-studio/assistant-bridge'")) throw new Error('Preset não monta a ponte do Assistente.')
+  if (!preset.includes('name: cordis:group') || !preset.includes('studioAssistant: true')) {
+    throw new Error('Preset não isola o serviço por sessão do Assistente.')
+  }
   for (const composePath of ['docker-compose.yml', 'deploy/caddy/docker-compose.local.yml']) {
     const compose = await readFile(resolve(root, composePath), 'utf8')
     if (!compose.includes('DZ23_COORDINATOR_PRESET_ROOT: /opt/dz23-studio/dsh-home/.agent-presets')) {
