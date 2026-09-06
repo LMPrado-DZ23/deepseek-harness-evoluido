@@ -115,12 +115,12 @@ importers:
       '@deepseek-ai/dsh-web-app':
         specifier: workspace:*
         version: link:../../../third_party/deepseek-harness/packages/bundle/web-app
-      '@dz23-studio/agents':
-        specifier: workspace:*
-        version: link:../../../plugins/agents
       '@dz23-studio/agent-team':
         specifier: workspace:*
         version: link:../../../plugins/agent-team
+      '@dz23-studio/agents':
+        specifier: workspace:*
+        version: link:../../../plugins/agents
       '@dz23-studio/assistant-bridge':
         specifier: workspace:*
         version: link:../../../plugins/assistant-bridge
@@ -155,6 +155,27 @@ importers:
       '@studio/hello':
         specifier: workspace:*
         version: link:../../../plugins/hello
+
+  plugins/agent-team:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:*
+        version: link:../../third_party/deepseek-harness/vendor/cordis
+      '@deepseek-ai/dsh-agent':
+        specifier: workspace:*
+        version: link:../../third_party/deepseek-harness/packages/core/agent
+      '@deepseek-ai/dsh-jobs':
+        specifier: workspace:*
+        version: link:../../third_party/deepseek-harness/packages/jobs/jobs
+      '@deepseek-ai/dsh-storage-domain':
+        specifier: workspace:*
+        version: link:../../third_party/deepseek-harness/packages/storage/storage-domain
+      '@dz23-studio/agents':
+        specifier: workspace:*
+        version: link:../agents
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
 
   plugins/agents:
     dependencies:
@@ -195,29 +216,6 @@ importers:
         specifier: 4.4.3
         version: 4.4.3
 
-  plugins/agent-team:
-    dependencies:
-      '@deepseek-ai/cordis':
-        specifier: workspace:*
-        version: link:../../third_party/deepseek-harness/vendor/cordis
-      '@deepseek-ai/dsh-agent':
-        specifier: workspace:*
-        version: link:../../third_party/deepseek-harness/packages/core/agent
-      '@deepseek-ai/dsh-jobs':
-        specifier: workspace:*
-        version: link:../../third_party/deepseek-harness/packages/jobs/jobs
-      '@deepseek-ai/dsh-storage-domain':
-        specifier: workspace:*
-        version: link:../../third_party/deepseek-harness/packages/storage/storage-domain
-      '@dz23-studio/agents':
-        specifier: workspace:*
-        version: link:../agents
-      zod:
-        specifier: 4.4.3
-        version: 4.4.3
-
-  plugins/builder-supervisor: {}
-
   plugins/assistant-bridge:
     dependencies:
       '@deepseek-ai/cordis':
@@ -232,12 +230,12 @@ importers:
       '@deepseek-ai/dsh-tools':
         specifier: workspace:*
         version: link:../../third_party/deepseek-harness/packages/core/tools
-      '@dz23-studio/agents':
-        specifier: workspace:*
-        version: link:../agents
       '@dz23-studio/agent-team':
         specifier: workspace:*
         version: link:../agent-team
+      '@dz23-studio/agents':
+        specifier: workspace:*
+        version: link:../agents
       '@dz23-studio/identity':
         specifier: workspace:*
         version: link:../identity
@@ -247,6 +245,8 @@ importers:
       '@dz23-studio/tenancy':
         specifier: workspace:*
         version: link:../tenancy
+
+  plugins/builder-supervisor: {}
 
   plugins/hello:
     dependencies:
@@ -509,15 +509,30 @@ importers:
       '@deepseek-ai/cordis':
         specifier: workspace:*
         version: link:../../third_party/deepseek-harness/vendor/cordis
+      '@deepseek-ai/dsh-api-session-controller':
+        specifier: workspace:*
+        version: link:../../third_party/deepseek-harness/packages/api/session-controller
       '@deepseek-ai/dsh-host-webserver':
         specifier: workspace:*
         version: link:../../third_party/deepseek-harness/packages/host/webserver
+      '@deepseek-ai/dsh-session':
+        specifier: workspace:*
+        version: link:../../third_party/deepseek-harness/packages/core/session
+      '@deepseek-ai/dsh-storage-domain':
+        specifier: workspace:*
+        version: link:../../third_party/deepseek-harness/packages/storage/storage-domain
       '@dz23-studio/identity':
         specifier: workspace:*
         version: link:../identity
+      '@dz23-studio/policy':
+        specifier: workspace:*
+        version: link:../policy
       '@dz23-studio/preview':
         specifier: workspace:*
         version: link:../preview
+      '@dz23-studio/tenancy':
+        specifier: workspace:*
+        version: link:../tenancy
 
   plugins/tenancy:
     dependencies:
@@ -18831,6 +18846,7 @@ snapshots:
       '@deepseek-ai/dsh-subagent-codex': link:third_party/deepseek-harness/packages/subagent/subagent-codex
       '@deepseek-ai/dsh-subagent-spawn-in-process': link:third_party/deepseek-harness/packages/subagent/subagent-spawn-in-process
       '@deepseek-ai/dsh-web-app': link:third_party/deepseek-harness/packages/bundle/web-app
+      '@dz23-studio/agent-team': link:plugins/agent-team
       '@dz23-studio/agents': link:plugins/agents
       '@dz23-studio/assistant-bridge': link:plugins/assistant-bridge
       '@dz23-studio/identity': link:plugins/identity
