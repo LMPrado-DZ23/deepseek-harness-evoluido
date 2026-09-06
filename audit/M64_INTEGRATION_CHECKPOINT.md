@@ -1,6 +1,6 @@
 # M6.4 — Checkpoint de integração Windows
 
-- data: `2026-09-06T05:41:00-03:00`
+- data: `2026-09-06T05:49:09-03:00`
 - branch candidata: `codex/m64-integration-candidate`
 - base funcional: `c122c8a8df120844868df9cdb6cf603cd46fd5af`
 - principal preservada: `codex/p30-policy-foundation@17e79aaab4c1ac54c1b4fc05f780f6485c5941b7`
@@ -19,7 +19,7 @@ O deploy legado herdado de `8059590` foi revogado depois que um store novo provo
 
 | Gate | Resultado |
 | --- | --- |
-| preflight hermético/adversarial | `PASS`, 18 cenários |
+| preflight hermético/adversarial | `PASS`, 19 cenários; listeners IPv4/IPv6 deduplicados |
 | primeiro acesso e segredos | `PASS`, 12 testes |
 | parser PowerShell exercitado pelas suítes | `PASS` |
 | portabilidade Git + filesystem | `PASS` |
@@ -30,7 +30,7 @@ O deploy legado herdado de `8059590` foi revogado depois que um store novo provo
 | suíte integral com um worker | `1.896 passed`, `61 skipped`, `0 failed` |
 | deploy portátil materializado | `PASS`, 533 pacotes e arquivos críticos presentes |
 
-O preflight real da máquina não foi promovido a passe: Docker continua desligado, a porta 8080 estava ocupada por `wslrelay` na auditoria anterior e o pin da fonte ainda não está configurado. SMTP, domínio, certificado, firewall, Tailscale e envio real também continuam sem execução.
+O preflight real foi repetido com a identidade local correta e não foi promovido a passe: `identity.profile=PASS`; Docker continua desligado; a porta 8080 está ocupada por `wslrelay` (uma única ocorrência após deduplicar IPv4/IPv6); e o pin da fonte não pôde ser comprovado porque o submódulo upstream não está materializado neste worktree. A sonda consultou o estado do daemon local em modo somente leitura, sem iniciá-lo. SMTP, domínio, certificado, Tailscale e envio real continuam sem execução; o estado habilitado do firewall foi apenas consultado.
 
 ## Limites
 
@@ -41,4 +41,4 @@ O preflight real da máquina não foi promovido a passe: Docker continua desliga
 
 ## Próxima decisão técnica
 
-Após a revisão independente de M6.3b e deste encaixe, a próxima prova é o preflight somente leitura na máquina real. A construção e execução de imagens só podem voltar quando o Docker for autorizado e houver espaço seguro; até lá permanecem `NOT_EXECUTED`.
+Após a revisão independente de M6.3b e deste encaixe, a próxima prova física é a construção da imagem e o lifecycle completo. Ela só pode ocorrer quando o Docker for autorizado, a porta 8080 estiver livre ou reconfigurada e houver espaço seguro; até lá permanece `NOT_EXECUTED`.

@@ -1030,7 +1030,7 @@ printf 'docker_os=%s\n' "$docker_os"
         if ($safeName.Length -gt 40) { $safeName = $safeName.Substring(0, 40) }
         if (-not $safeName -or $safeName -match '(?i)(secret|token|password|passwd|bearer|api[_-]?key)') { $safeName = 'processo-redigido' }
         [pscustomobject]@{ port = [int]$_.Port; process = $safeName }
-    })
+    } | Sort-Object -Property port, process -Unique)
     if (-not $portInspectionAvailable) {
         & $add 'network.ports' BLOCKED 'O Windows não permitiu verificar as portas necessárias.' 'Execute o diagnóstico em uma sessão que possa consultar as conexões TCP; nenhuma porta foi alterada.' @{ ports = @($Ports) }
     } elseif ($occupied.Count -eq 0) {

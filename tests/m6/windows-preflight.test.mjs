@@ -178,6 +178,15 @@ Assert-State $occupied 'network.ports' BLOCKED
 $occupiedJson = $occupied | ConvertTo-Json -Depth 8 -Compress
 if ($occupiedJson -match 'ULTRA_SECRET_VALUE') { throw 'Segredo vazou no relatório de porta.' }
 if ($occupiedJson -notmatch 'processo-redigido') { throw 'Processo sensível não foi redigido.' }
+$duplicateListeners = Invoke-Scenario good -Ports @(
+  [pscustomobject]@{ Port = 8080; ProcessName = 'wslrelay' },
+  [pscustomobject]@{ Port = 8080; ProcessName = 'wslrelay' },
+  [pscustomobject]@{ Port = 8443; ProcessName = 'outro-processo' }
+)
+Assert-State $duplicateListeners 'network.ports' BLOCKED
+$deduplicated = @(($duplicateListeners.checks | Where-Object id -eq 'network.ports').details.occupied)
+if ($deduplicated.Count -ne 2) { throw "Listeners repetidos não foram deduplicados: $($deduplicated | ConvertTo-Json -Compress)" }
+if (($deduplicated | Where-Object { $_.port -eq 8080 -and $_.process -eq 'wslrelay' }).Count -ne 1) { throw 'Listener IPv4/IPv6 duplicado permaneceu no relatório.' }
 
 $mismatch = Invoke-Scenario good -Profile public -Hostname app.dz23.com.br -Origin 'https://outro.dz23.com.br' -RpId app.dz23.com.br -Dns @('192.0.2.10')
 Assert-State $mismatch 'identity.profile' BLOCKED
@@ -197,7 +206,7 @@ $env:DZ23_M6_TEST_MODE = '0'
 try { Invoke-Dz23WindowsPreflight -Distro Ubuntu -CommandInvoker (New-TestInvoker good) | Out-Null } catch { $preAbuse = $true }
 if (-not $preAbuse) { throw 'Injeção foi aceita fora do modo de teste.' }
 
-'M64A_WINDOWS_PREFLIGHT=PASS scenarios=18 read_only=true secrets=redacted'
+'M64A_WINDOWS_PREFLIGHT=PASS scenarios=19 read_only=true secrets=redacted ports=deduplicated'
 `
   const encoded = Buffer.from(probe, 'utf16le').toString('base64')
   const pwsh = process.platform === 'win32' ? 'pwsh.exe' : 'pwsh'
@@ -206,9 +215,9 @@ if (-not $preAbuse) { throw 'Injeção foi aceita fora do modo de teste.' }
   })
   assert.notEqual(result.error?.code, 'ENOENT', 'PowerShell 7 é obrigatório para provar o preflight Windows.')
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}\n${result.error ?? ''}`)
-  assert.match(result.stdout, /M64A_WINDOWS_PREFLIGHT=PASS scenarios=18 read_only=true secrets=redacted/u)
+  assert.match(result.stdout, /M64A_WINDOWS_PREFLIGHT=PASS scenarios=19 read_only=true secrets=redacted ports=deduplicated/u)
 } finally {
   await rm(fixtureRoot, { recursive: true, force: true })
 }
 
-console.log('M6.4-A Windows preflight: PASS (18 cenários herméticos e adversariais).')
+console.log('M6.4-A Windows preflight: PASS (19 cenários herméticos e adversariais).')
