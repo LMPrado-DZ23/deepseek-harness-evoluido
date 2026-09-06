@@ -10,6 +10,7 @@
     "@deepseek-ai/dsh-subagent-spawn-in-process": "workspace:*",
     "@deepseek-ai/dsh-web-app": "workspace:*",
     "@dz23-studio/agents": "workspace:*",
+    "@dz23-studio/agent-team": "workspace:*",
     "@dz23-studio/assistant-bridge": "workspace:*",
     "@dz23-studio/identity": "workspace:*",
     "@dz23-studio/integration-hub": "workspace:*",

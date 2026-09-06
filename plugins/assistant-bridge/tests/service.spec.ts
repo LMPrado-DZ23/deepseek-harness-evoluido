@@ -1,5 +1,6 @@
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { JobId } from '@deepseek-ai/dsh-jobs'
+import type { AgentTeamRecord, AgentTeamTaskRecord, StudioAgentTeamRuntime } from '@dz23-studio/agent-team'
 import type { AgentRunRecord, StudioAgentsRuntime } from '@dz23-studio/agents'
 import type { StudioIdentityRuntime } from '@dz23-studio/identity'
 import type { StudioTenancyRuntime } from '@dz23-studio/tenancy'
@@ -33,6 +34,26 @@ function run(overrides: Partial<AgentRunRecord> = {}): AgentRunRecord {
     changed_files: ['src/safe/a.ts'], diff_bytes: 4, diff_sha256: 'a'.repeat(64),
     main_changed_during_run: false, approved_by: 'user-1', approved_at: '2026-09-05T00:00:00.000Z',
     diagnostic: null, created_at: '2026-09-05T00:00:00.000Z', updated_at: '2026-09-05T00:00:00.000Z',
+    ...overrides,
+  }
+}
+
+function team(overrides: Partial<AgentTeamRecord> = {}): AgentTeamRecord {
+  return {
+    team_id: 'team-1', org_id: 'org-1', tenant_id: 'tenant-1', workspace_id: 'tenant-1',
+    repository_path: '/repo', parent_session_id: 'session-1', name: 'Equipe segura', provider: 'spawn-in-process',
+    required_tier: 'T2', sensitive_operation: null, status: 'RUNNING', approved_by: 'user-1', approved_at: '2026-09-05T00:00:00.000Z',
+    diagnostic: null, created_at: '2026-09-05T00:00:00.000Z', updated_at: '2026-09-05T00:00:00.000Z',
+    ...overrides,
+  }
+}
+
+function teamTask(overrides: Partial<AgentTeamTaskRecord> = {}): AgentTeamTaskRecord {
+  return {
+    task_id: 'implementation', team_id: 'team-1', org_id: 'org-1', tenant_id: 'tenant-1', workspace_id: 'tenant-1',
+    title: 'Implementar', role: 'implementer', prompt: 'Faça.', intended_paths: ['src/safe'], depends_on: [],
+    status: 'RUNNING', run_id: 'run-1', job_id: 'job-1', diagnostic: null,
+    created_at: '2026-09-05T00:00:00.000Z', updated_at: '2026-09-05T00:00:00.000Z',
     ...overrides,
   }
 }
@@ -71,13 +92,29 @@ async function harness(options: {
     allowedPaths: ['src/safe'], providers: options.providers ?? ['spawn-in-process'], maxPaths: 4,
     budget: { timeoutMs: 60_000, maxFiles: 4, maxDiffBytes: 1_000, maxTokens: 2_000 },
   }
+  const teams = [team({ repository_path: repositoryPath })]
+  const teamTasks = [teamTask()]
+  const teamStart = vi.fn(async () => ({ team: teams[0]!, tasks: teamTasks }))
+  const teamStatus = vi.fn(async () => ({ team: teams[0]!, tasks: teamTasks }))
+  const teamContinue = vi.fn(async () => ({ team: teams[0]!, tasks: teamTasks }))
+  const teamCancel = vi.fn(async () => ({ team: { ...teams[0]!, status: 'CANCELLED' as const }, tasks: teamTasks }))
+  const studioAgentTeams = {
+    service: { start: teamStart, status: teamStatus, continue: teamContinue, cancel: teamCancel },
+    teams: () => teams,
+    tasks: () => teamTasks,
+    automaticDependentStart: 'NOT_PRESENT',
+  } as unknown as StudioAgentTeamRuntime
   const bridge = await StudioAssistantBridge.create({
     resolvePrincipal: current => identity.service.principalForHarnessSession(current.session.id) as never,
     authorizationFor: (userId, orgId, tenantId) => tenancy.service.authorizationFor(userId, orgId, tenantId),
     studioAgents,
+    studioAgentTeams,
     killJob: jobs.kill as never,
   }, [config])
-  return { bridge, config, repositoryPath, runs, start, reviewProposal, applyProposal, jobs, principal }
+  return {
+    bridge, config, repositoryPath, runs, start, reviewProposal, applyProposal, jobs, principal,
+    teams, teamTasks, teamStart, teamStatus, teamContinue, teamCancel, studioAgentTeams,
+  }
 }
 
 const invalidConfigurations: ReadonlyArray<readonly [Partial<AssistantRepositoryConfig>, RegExp]> = [
@@ -558,6 +595,75 @@ describe('StudioAssistantBridge', () => {
     ]) {
       expect(() => normalizeRelativePath(value)).toThrowError(expect.objectContaining({ code: 'INVALID_REQUEST' }))
     }
+  })
+
+  it('starts normal and sensitive teams with server-side scope, path policy and approval tier', async () => {
+    const h = await harness()
+    const input = {
+      provider: 'spawn-in-process' as const,
+      name: 'Equipe núcleo',
+      tasks: [{
+        taskId: 'implementation', title: 'Implementar', role: 'implementer' as const,
+        prompt: 'Faça a mudança.', intendedPaths: ['src\\safe\\a.ts'], dependsOn: [],
+      }],
+    }
+    await expect(h.bridge.startTeam(agent(), input)).resolves.toMatchObject({ team_id: 'team-1', tasks: [{ task_id: 'implementation' }] })
+    expect(h.teamStart).toHaveBeenLastCalledWith(expect.objectContaining({
+      orgId: 'org-1', tenantId: 'tenant-1', workspaceId: 'tenant-1', repositoryPath: h.repositoryPath,
+      approval: { approved: true, tier: 'T2', approvedBy: 'user-1' },
+      tasks: [expect.objectContaining({ intendedPaths: ['src/safe/a.ts'] })],
+    }))
+    await h.bridge.startTeam(agent(), input, 'deploy')
+    expect(h.teamStart).toHaveBeenLastCalledWith(expect.objectContaining({
+      sensitive: 'deploy', approval: { approved: true, tier: 'T3', approvedBy: 'user-1' },
+    }))
+    await expect(h.bridge.startTeam(agent(), { ...input, provider: 'codex' as never }))
+      .rejects.toMatchObject({ code: 'NOT_CONFIGURED' })
+    await expect(h.bridge.startTeam(agent(), { ...input, tasks: [{ ...input.tasks[0]!, intendedPaths: ['outside'] }] }))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' })
+    await expect(h.bridge.startTeam(agent(), { ...input, tasks: [{ ...input.tasks[0]!, intendedPaths: [] }] }))
+      .rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+  })
+
+  it('lists, reads, continues and cancels only a scoped team', async () => {
+    const h = await harness()
+    expect(h.bridge.listTeams(agent())).toEqual([expect.objectContaining({
+      team_id: 'team-1', name: 'Equipe segura', tasks: [expect.objectContaining({ task_id: 'implementation' })],
+    })])
+    await expect(h.bridge.teamStatus(agent(), 'team-1')).resolves.toMatchObject({ team_id: 'team-1' })
+    await expect(h.bridge.continueTeam(agent(), 'team-1', false)).resolves.toMatchObject({ team_id: 'team-1' })
+    expect(h.teamContinue).toHaveBeenCalledWith('team-1', expect.anything(), {
+      approved: true, tier: 'T2', approvedBy: 'user-1',
+    }, h.config.budget)
+    await expect(h.bridge.continueTeam(agent(), 'team-1', true)).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    h.teams[0] = { ...h.teams[0]!, required_tier: 'T3', sensitive_operation: 'secrets' }
+    await expect(h.bridge.continueTeam(agent(), 'team-1', true)).resolves.toMatchObject({ team_id: 'team-1' })
+    await expect(h.bridge.cancelTeam(agent(), 'team-1', 'pare')).resolves.toMatchObject({ status: 'CANCELLED' })
+    expect(h.teamCancel).toHaveBeenCalledWith('team-1', 'user-1', 'pare')
+
+    h.teams[0] = { ...h.teams[0]!, org_id: 'foreign' }
+    expect(h.bridge.listTeams(agent())).toEqual([])
+    await expect(h.bridge.teamStatus(agent(), 'team-1')).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    await expect(h.bridge.cancelTeam(agent(), 'team-1')).rejects.toMatchObject({ code: 'NOT_FOUND' })
+  })
+
+  it('fails closed when team composition is absent or a returned task crosses scope', async () => {
+    const h = await harness()
+    const withoutTeams = await StudioAssistantBridge.create({
+      resolvePrincipal: () => h.principal,
+      authorizationFor: () => ({ role: 'builder' }),
+      studioAgents: {} as never,
+      killJob: vi.fn(),
+    }, [h.config])
+    await expect(withoutTeams.startTeam(agent(), {
+      provider: 'spawn-in-process', name: 'Equipe', tasks: [{
+        taskId: 'task', title: 'Tarefa', role: 'tester', prompt: 'Teste.', intendedPaths: ['src/safe'], dependsOn: [],
+      }],
+    })).rejects.toMatchObject({ code: 'NOT_CONFIGURED' })
+
+    h.teamTasks[0] = { ...h.teamTasks[0]!, tenant_id: 'foreign' }
+    expect(() => h.bridge.listTeams(agent())).toThrowError(expect.objectContaining({ code: 'NOT_FOUND' }))
+    await expect(h.bridge.teamStatus(agent(), 'team-1')).rejects.toMatchObject({ code: 'NOT_FOUND' })
   })
 
 })

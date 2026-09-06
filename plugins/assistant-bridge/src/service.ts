@@ -1,4 +1,11 @@
 import { normalizeDelegationPath, type AgentProvider, type AgentRunRecord, type DelegationAccepted, type DelegationBudget, type DelegationRequest, type StudioAgentsRuntime } from '@dz23-studio/agents'
+import type {
+  AgentTeamRecord,
+  AgentTeamRole,
+  AgentTeamSnapshot,
+  AgentTeamTaskRecord,
+  StudioAgentTeamRuntime,
+} from '@dz23-studio/agent-team'
 import { roleAllows, type StudioRole } from '@dz23-studio/policy'
 import { lstat, readFile, realpath, stat } from 'node:fs/promises'
 import { dirname, isAbsolute, relative, resolve } from 'node:path'
@@ -57,6 +64,26 @@ export interface AssistantRunReview extends AssistantRunSummary {
   readonly main_changed_during_run: boolean
 }
 
+export interface AssistantTeamTaskInput {
+  readonly taskId: string
+  readonly title: string
+  readonly role: AgentTeamRole
+  readonly prompt: string
+  readonly intendedPaths: readonly string[]
+  readonly dependsOn: readonly string[]
+}
+
+export interface AssistantTeamSummary {
+  readonly team_id: string
+  readonly name: string
+  readonly status: AgentTeamRecord['status']
+  readonly required_tier: AgentTeamRecord['required_tier']
+  readonly diagnostic: string | null
+  readonly tasks: readonly Pick<AgentTeamTaskRecord, 'task_id' | 'title' | 'role' | 'status' | 'run_id' | 'depends_on' | 'diagnostic'>[]
+  readonly created_at: string
+  readonly updated_at: string
+}
+
 export class AssistantBridgeError extends Error {
   constructor(readonly code: 'UNAUTHENTICATED' | 'FORBIDDEN' | 'NOT_CONFIGURED' | 'INVALID_REQUEST' | 'NOT_FOUND' | 'CANCEL_UNAVAILABLE', message: string) {
     super(message)
@@ -67,6 +94,7 @@ export interface AssistantBridgeDependencies {
   resolvePrincipal(agent: AssistantAgent): Omit<AssistantPrincipal, 'role'> | undefined
   authorizationFor(userId: string, orgId: string, tenantId: string): { readonly role: StudioRole } | undefined
   readonly studioAgents: StudioAgentsRuntime
+  readonly studioAgentTeams?: StudioAgentTeamRuntime
   killJob(jobId: AssistantJobId, owner: AssistantAgent, reason: string): 'requested' | 'already-finished'
 }
 
@@ -133,6 +161,81 @@ export class StudioAssistantBridge {
     this.#jobs.set(accepted.runId, { jobId: accepted.jobId, owner: agent!, userId: principal.userId })
     this.#runsByJob.set(String(accepted.jobId), accepted.runId)
     return { run_id: accepted.runId, job_id: String(accepted.jobId), status: 'RUNNING' as const, required_tier: accepted.requiredTier }
+  }
+
+  async startTeam(agent: AssistantAgent | undefined, input: {
+    readonly provider: AssistantProvider
+    readonly name: string
+    readonly tasks: readonly AssistantTeamTaskInput[]
+  }, sensitive?: AssistantSensitiveOperation | 'deploy'): Promise<AssistantTeamSummary> {
+    const principal = this.#principal(agent, 'project.write')
+    const repository = this.#repository(principal)
+    if (!isAssistantProvider(input.provider)) {
+      throw new AssistantBridgeError('NOT_CONFIGURED', t('errors.externalProviderNotConfigured'))
+    }
+    const tasks = input.tasks.map(task => ({
+      ...task,
+      intendedPaths: this.#validatedPaths(task.intendedPaths, repository),
+    }))
+    const snapshot = await this.#teamsRuntime().service.start({
+      orgId: principal.orgId,
+      tenantId: principal.tenantId,
+      workspaceId: repository.workspaceId,
+      repositoryPath: repository.repositoryPath,
+      parent: agent!,
+      provider: input.provider,
+      name: input.name,
+      tasks,
+      approval: {
+        approved: true,
+        tier: sensitive === undefined ? 'T2' : 'T3',
+        approvedBy: principal.userId,
+      },
+      ...(sensitive === undefined ? {} : { sensitive }),
+      ...(repository.budget === undefined ? {} : { budget: repository.budget }),
+    })
+    return this.#summarizeTeam(snapshot, principal, repository)
+  }
+
+  listTeams(agent: AssistantAgent | undefined): readonly AssistantTeamSummary[] {
+    const principal = this.#principal(agent, 'project.read')
+    const repository = this.#repository(principal)
+    const runtime = this.#teamsRuntime()
+    return runtime.teams()
+      .filter(team => teamBelongsToRepository(team, principal, repository))
+      .map(team => this.#summarizeTeam({
+        team,
+        tasks: runtime.tasks().filter(task => task.team_id === team.team_id),
+      }, principal, repository))
+  }
+
+  async teamStatus(agent: AssistantAgent | undefined, teamId: string): Promise<AssistantTeamSummary> {
+    const principal = this.#principal(agent, 'project.read')
+    const repository = this.#repository(principal)
+    this.#scopedTeam(teamId, principal, repository)
+    return this.#summarizeTeam(await this.#teamsRuntime().service.status(teamId), principal, repository)
+  }
+
+  async continueTeam(agent: AssistantAgent | undefined, teamId: string, sensitive: boolean): Promise<AssistantTeamSummary> {
+    const principal = this.#principal(agent, 'project.write')
+    const repository = this.#repository(principal)
+    const team = this.#scopedTeam(teamId, principal, repository)
+    const expectedTier = sensitive ? 'T3' : 'T2'
+    if (team.required_tier !== expectedTier) {
+      throw new AssistantBridgeError('INVALID_REQUEST', t('errors.teamTier'))
+    }
+    return this.#summarizeTeam(await this.#teamsRuntime().service.continue(teamId, agent!, {
+      approved: true,
+      tier: expectedTier,
+      approvedBy: principal.userId,
+    }, repository.budget), principal, repository)
+  }
+
+  async cancelTeam(agent: AssistantAgent | undefined, teamId: string, reason?: string): Promise<AssistantTeamSummary> {
+    const principal = this.#principal(agent, 'project.write')
+    const repository = this.#repository(principal)
+    this.#scopedTeam(teamId, principal, repository)
+    return this.#summarizeTeam(await this.#teamsRuntime().service.cancel(teamId, principal.userId, reason), principal, repository)
   }
 
   list(agent: AssistantAgent | undefined): readonly AssistantRunSummary[] {
@@ -224,6 +327,40 @@ export class StudioAssistantBridge {
       throw new AssistantBridgeError('NOT_FOUND', t('errors.runMissing'))
     }
     return run
+  }
+
+  #scopedTeam(teamId: string, principal: AssistantPrincipal, repository: ValidatedRepositoryConfig): AgentTeamRecord {
+    const team = this.#teamsRuntime().teams().find(candidate => candidate.team_id === teamId)
+    if (team === undefined || !teamBelongsToRepository(team, principal, repository)) {
+      throw new AssistantBridgeError('NOT_FOUND', t('errors.teamMissing'))
+    }
+    return team
+  }
+
+  #validatedPaths(paths: readonly string[], repository: ValidatedRepositoryConfig): string[] {
+    if (!Array.isArray(paths) || paths.length === 0 || paths.length > repository.maxPaths) {
+      throw new AssistantBridgeError('INVALID_REQUEST', t('errors.pathCount', { max: repository.maxPaths }))
+    }
+    const normalized = [...new Set(paths.map(normalizeRelativePath))]
+    if (normalized.some(path => !repository.allowedPaths.some(allowed => withinAllowedPath(path, allowed)))) {
+      throw new AssistantBridgeError('FORBIDDEN', t('errors.pathForbidden'))
+    }
+    return normalized
+  }
+
+  #summarizeTeam(snapshot: AgentTeamSnapshot, principal: AssistantPrincipal, repository: ValidatedRepositoryConfig): AssistantTeamSummary {
+    if (!teamBelongsToRepository(snapshot.team, principal, repository)
+      || snapshot.tasks.some(task => !taskBelongsToTeam(task, snapshot.team))) {
+      throw new AssistantBridgeError('NOT_FOUND', t('errors.teamMissing'))
+    }
+    return summarizeTeam(snapshot)
+  }
+
+  #teamsRuntime(): StudioAgentTeamRuntime {
+    if (this.dependencies.studioAgentTeams === undefined) {
+      throw new AssistantBridgeError('NOT_CONFIGURED', t('errors.teamNotConfigured'))
+    }
+    return this.dependencies.studioAgentTeams
   }
 }
 
@@ -436,4 +573,44 @@ function runBelongsToRepository(
       return false
     }
   })
+}
+
+function teamBelongsToRepository(
+  team: AgentTeamRecord,
+  principal: AssistantPrincipal,
+  repository: ValidatedRepositoryConfig,
+): boolean {
+  return team.org_id === principal.orgId
+    && team.tenant_id === principal.tenantId
+    && team.workspace_id === repository.workspaceId
+    && team.provider === 'spawn-in-process'
+    && sameCanonicalPath(team.repository_path, repository.repositoryPath)
+}
+
+function taskBelongsToTeam(task: AgentTeamTaskRecord, team: AgentTeamRecord): boolean {
+  return task.team_id === team.team_id
+    && task.org_id === team.org_id
+    && task.tenant_id === team.tenant_id
+    && task.workspace_id === team.workspace_id
+}
+
+function summarizeTeam(snapshot: AgentTeamSnapshot): AssistantTeamSummary {
+  return {
+    team_id: snapshot.team.team_id,
+    name: snapshot.team.name,
+    status: snapshot.team.status,
+    required_tier: snapshot.team.required_tier,
+    diagnostic: snapshot.team.diagnostic,
+    tasks: snapshot.tasks.map(task => ({
+      task_id: task.task_id,
+      title: task.title,
+      role: task.role,
+      status: task.status,
+      run_id: task.run_id,
+      depends_on: task.depends_on,
+      diagnostic: task.diagnostic,
+    })),
+    created_at: snapshot.team.created_at,
+    updated_at: snapshot.team.updated_at,
+  }
 }

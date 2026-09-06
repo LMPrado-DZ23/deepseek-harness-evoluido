@@ -28,6 +28,7 @@
       studio_policy_audit: postgres
       studio_agent_runs: postgres
       studio_agent_leases: postgres
+      studio_agent_teams: postgres
       studio_route_health: postgres
       studio_previews: postgres
       studio_preview_admissions: postgres

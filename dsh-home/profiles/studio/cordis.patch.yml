@@ -118,6 +118,48 @@
             sandboxMode: workspace-write
             requiredPermission: project.write
             scope: project
+          studio_team_start:
+            source: { kind: studio, external: false, stableChannel: true }
+            inferredTier: T2
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          studio_team_start_sensitive:
+            source: { kind: studio, external: false, stableChannel: true }
+            inferredTier: T3
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          studio_team_list:
+            source: { kind: studio, external: false, stableChannel: true }
+            inferredTier: T0
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          studio_team_status:
+            source: { kind: studio, external: false, stableChannel: true }
+            inferredTier: T0
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          studio_team_continue:
+            source: { kind: studio, external: false, stableChannel: true }
+            inferredTier: T2
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          studio_team_continue_sensitive:
+            source: { kind: studio, external: false, stableChannel: true }
+            inferredTier: T3
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          studio_team_cancel:
+            source: { kind: studio, external: false, stableChannel: true }
+            inferredTier: T2
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
     - id: dz23-studio-identity
       name: '@dz23-studio/identity'
     - id: dz23-studio-tenancy
@@ -128,6 +170,8 @@
         coordinatorPreset: dz23-coordinator
         inProcessCoordinatorPreset: dz23-coordinator-in-process
         worktreeRoot: !!js process.env.DZ23_AGENT_WORKTREE_ROOT
+    - id: dz23-studio-agent-team
+      name: '@dz23-studio/agent-team'
     - id: dz23-studio-route-health
       name: '@dz23-studio/route-health'
     - id: dz23-studio-prompt-to-app

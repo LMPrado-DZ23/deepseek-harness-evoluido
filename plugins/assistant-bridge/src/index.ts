@@ -1,6 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool, type ToolDefinition } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-jobs'
+import type {} from '@dz23-studio/agent-team'
 import type { DelegationAccepted, DelegationRequest } from '@dz23-studio/agents'
 import { principalForAgent, type AgentLookup } from '@dz23-studio/identity'
 import type {} from '@dz23-studio/tenancy'
@@ -17,7 +18,7 @@ export * from './closed-tool.js'
 export * from './service.js'
 
 export const name = 'dz23-studio-assistant-bridge'
-export const inject = ['agents', 'jobs', 'studioAgents', 'studioIdentity', 'studioTenancy', 'tools']
+export const inject = ['agents', 'jobs', 'studioAgents', 'studioAgentTeams', 'studioIdentity', 'studioTenancy', 'tools']
 
 export interface Config {
   readonly exposedTools: readonly string[]
@@ -28,6 +29,7 @@ export interface StudioAssistantRuntime {
   readonly bridge: StudioAssistantBridge
   readonly tools: readonly string[]
   readonly automaticSessionCreation: 'NOT_PRESENT'
+  readonly teamCoordination: 'BETA_MANUAL_DEPENDENCY_CONTINUE'
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -52,6 +54,29 @@ export function createAssistantTools(bridge: StudioAssistantBridge): readonly To
       type: 'array', required: true, items: { type: 'string' },
       description: t('tools.paths'),
     },
+  } as const
+  const teamTaskItems = {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      task_id: { type: 'string', required: true, description: t('tools.taskId') },
+      title: { type: 'string', required: true, description: t('tools.taskTitle') },
+      role: {
+        type: 'string', required: true, enum: ['implementer', 'reviewer', 'tester', 'synthesizer'],
+        description: t('tools.taskRole'),
+      },
+      prompt: { type: 'string', required: true, description: t('tools.prompt') },
+      intended_paths: { type: 'array', required: true, items: { type: 'string' }, description: t('tools.paths') },
+      depends_on: { type: 'array', required: true, items: { type: 'string' }, description: t('tools.taskDependencies') },
+    },
+  } as const
+  const teamParameters = {
+    provider: {
+      type: 'string', required: true, enum: [...ASSISTANT_ALLOWED_PROVIDERS],
+      description: t('tools.localProvider'),
+    },
+    name: { type: 'string', required: true, description: t('tools.teamName') },
+    tasks: { type: 'array', required: true, items: teamTaskItems, description: t('tools.teamTasks') },
   } as const
 
   return [
@@ -128,6 +153,82 @@ export function createAssistantTools(bridge: StudioAssistantBridge): readonly To
       output: jsonOutput,
       async execute(args, exec) { return { json: JSON.stringify(await bridge.apply(asAssistantAgent(exec.agent), args.run_id)) } },
     }), ['run_id']),
+    closedTool(defineTool({
+      name: 'studio_team_start',
+      description: t('tools.teamStart'),
+      parameters: teamParameters,
+      output: jsonOutput,
+      async execute(args, exec) {
+        return { json: JSON.stringify(await bridge.startTeam(asAssistantAgent(exec.agent), {
+          provider: args.provider,
+          name: args.name,
+          tasks: args.tasks.map(task => ({
+            taskId: task.task_id, title: task.title, role: task.role, prompt: task.prompt,
+            intendedPaths: task.intended_paths, dependsOn: task.depends_on,
+          })),
+        })) }
+      },
+    }), ['provider', 'name', 'tasks']),
+    closedTool(defineTool({
+      name: 'studio_team_start_sensitive',
+      description: t('tools.teamStartSensitive'),
+      parameters: {
+        ...teamParameters,
+        operation: {
+          type: 'string', required: true, enum: ['secrets', 'external-network', 'deploy'],
+          description: t('tools.operation'),
+        },
+      },
+      output: jsonOutput,
+      async execute(args, exec) {
+        return { json: JSON.stringify(await bridge.startTeam(asAssistantAgent(exec.agent), {
+          provider: args.provider,
+          name: args.name,
+          tasks: args.tasks.map(task => ({
+            taskId: task.task_id, title: task.title, role: task.role, prompt: task.prompt,
+            intendedPaths: task.intended_paths, dependsOn: task.depends_on,
+          })),
+        }, args.operation)) }
+      },
+    }), ['provider', 'name', 'tasks', 'operation']),
+    closedTool(defineTool({
+      name: 'studio_team_list',
+      description: t('tools.teamList'),
+      parameters: {},
+      output: jsonOutput,
+      async execute(_args, exec) { return { json: JSON.stringify(bridge.listTeams(asAssistantAgent(exec.agent))) } },
+    }), []),
+    closedTool(defineTool({
+      name: 'studio_team_status',
+      description: t('tools.teamStatus'),
+      parameters: { team_id: { type: 'string', required: true, description: t('tools.teamId') } },
+      output: jsonOutput,
+      async execute(args, exec) { return { json: JSON.stringify(await bridge.teamStatus(asAssistantAgent(exec.agent), args.team_id)) } },
+    }), ['team_id']),
+    closedTool(defineTool({
+      name: 'studio_team_continue',
+      description: t('tools.teamContinue'),
+      parameters: { team_id: { type: 'string', required: true, description: t('tools.teamId') } },
+      output: jsonOutput,
+      async execute(args, exec) { return { json: JSON.stringify(await bridge.continueTeam(asAssistantAgent(exec.agent), args.team_id, false)) } },
+    }), ['team_id']),
+    closedTool(defineTool({
+      name: 'studio_team_continue_sensitive',
+      description: t('tools.teamContinueSensitive'),
+      parameters: { team_id: { type: 'string', required: true, description: t('tools.teamId') } },
+      output: jsonOutput,
+      async execute(args, exec) { return { json: JSON.stringify(await bridge.continueTeam(asAssistantAgent(exec.agent), args.team_id, true)) } },
+    }), ['team_id']),
+    closedTool(defineTool({
+      name: 'studio_team_cancel',
+      description: t('tools.teamCancel'),
+      parameters: {
+        team_id: { type: 'string', required: true, description: t('tools.teamId') },
+        reason: { type: 'string', description: t('tools.reason') },
+      },
+      output: jsonOutput,
+      async execute(args, exec) { return { json: JSON.stringify(await bridge.cancelTeam(asAssistantAgent(exec.agent), args.team_id, args.reason)) } },
+    }), ['team_id', 'reason']),
   ]
 }
 
@@ -145,6 +246,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     resolvePrincipal: agent => principalForAgent(ctx.studioIdentity.service, agentLookup, agent as never),
     authorizationFor: (userId, orgId, tenantId) => ctx.studioTenancy.service.authorizationFor(userId, orgId, tenantId),
     studioAgents: ctx.studioAgents,
+    studioAgentTeams: ctx.studioAgentTeams,
     killJob: (jobId, owner, reason) => ctx.jobs.kill(jobId as never, owner as never, reason),
   }, config.repositories ?? [])
   const tools = createAssistantTools(bridge)
@@ -159,6 +261,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     bridge,
     tools: tools.map(tool => tool.name),
     automaticSessionCreation: 'NOT_PRESENT',
+    teamCoordination: 'BETA_MANUAL_DEPENDENCY_CONTINUE',
   })
 }
 

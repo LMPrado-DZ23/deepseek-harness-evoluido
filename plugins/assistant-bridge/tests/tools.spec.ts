@@ -19,6 +19,7 @@ describe('assistant bridge tool schemas', () => {
   it('publishes and enforces a closed root schema for every tool', async () => {
     const bridge = {
       start: vi.fn(), list: vi.fn(), review: vi.fn(), cancel: vi.fn(), apply: vi.fn(),
+      startTeam: vi.fn(), listTeams: vi.fn(), teamStatus: vi.fn(), continueTeam: vi.fn(), cancelTeam: vi.fn(),
     }
     const tools = createAssistantTools(bridge as never)
     const valid: Record<string, Record<string, unknown>> = {
@@ -28,6 +29,17 @@ describe('assistant bridge tool schemas', () => {
       studio_agent_review: { run_id: 'run-1' },
       studio_agent_cancel: { run_id: 'run-1' },
       studio_agent_apply: { run_id: 'run-1' },
+      studio_team_start: { provider: 'spawn-in-process', name: 'Equipe', tasks: [{
+        task_id: 'implementation', title: 'Implementar', role: 'implementer', prompt: 'Faça.', intended_paths: ['src'], depends_on: [],
+      }] },
+      studio_team_start_sensitive: { provider: 'spawn-in-process', name: 'Equipe', operation: 'secrets', tasks: [{
+        task_id: 'implementation', title: 'Implementar', role: 'implementer', prompt: 'Faça.', intended_paths: ['src'], depends_on: [],
+      }] },
+      studio_team_list: {},
+      studio_team_status: { team_id: 'team-1' },
+      studio_team_continue: { team_id: 'team-1' },
+      studio_team_continue_sensitive: { team_id: 'team-1' },
+      studio_team_cancel: { team_id: 'team-1' },
     }
     const maliciousKeys = ['org_id', 'tenant_id', 'approval', 'repositoryPath']
     for (const tool of tools) {
@@ -42,6 +54,8 @@ describe('assistant bridge tool schemas', () => {
     expect(bridge.review).not.toHaveBeenCalled()
     expect(bridge.cancel).not.toHaveBeenCalled()
     expect(bridge.apply).not.toHaveBeenCalled()
+    expect(bridge.startTeam).not.toHaveBeenCalled()
+    expect(bridge.listTeams).not.toHaveBeenCalled()
   })
 
   it('routes every valid tool to the bridge with only its declared arguments', async () => {
@@ -51,6 +65,11 @@ describe('assistant bridge tool schemas', () => {
       review: vi.fn(() => Promise.resolve({ run_id: 'run-1', diff_text: 'diff' })),
       cancel: vi.fn(() => ({ run_id: 'run-1', outcome: 'requested' })),
       apply: vi.fn(() => Promise.resolve({ runId: 'run-1', status: 'APPLIED' })),
+      startTeam: vi.fn(() => Promise.resolve({ team_id: 'team-1' })),
+      listTeams: vi.fn(() => [{ team_id: 'team-1' }]),
+      teamStatus: vi.fn(() => Promise.resolve({ team_id: 'team-1' })),
+      continueTeam: vi.fn(() => Promise.resolve({ team_id: 'team-1' })),
+      cancelTeam: vi.fn(() => Promise.resolve({ team_id: 'team-1' })),
     }
     const byName = new Map(createAssistantTools(bridge as never).map(tool => [tool.name, tool]))
     const exec = { agent: undefined } as never
@@ -62,6 +81,14 @@ describe('assistant bridge tool schemas', () => {
     await byName.get('studio_agent_review')!.execute({ run_id: 'run-1' }, exec)
     await byName.get('studio_agent_cancel')!.execute({ run_id: 'run-1', reason: 'pedido' }, exec)
     await byName.get('studio_agent_apply')!.execute({ run_id: 'run-1' }, exec)
+    const team = [{ task_id: 'implementation', title: 'Implementar', role: 'implementer', prompt: 'Faça.', intended_paths: ['src'], depends_on: [] }]
+    await byName.get('studio_team_start')!.execute({ provider: 'spawn-in-process', name: 'Equipe', tasks: team }, exec)
+    await byName.get('studio_team_start_sensitive')!.execute({ provider: 'spawn-in-process', name: 'Equipe', tasks: team, operation: 'deploy' }, exec)
+    await byName.get('studio_team_list')!.execute({}, exec)
+    await byName.get('studio_team_status')!.execute({ team_id: 'team-1' }, exec)
+    await byName.get('studio_team_continue')!.execute({ team_id: 'team-1' }, exec)
+    await byName.get('studio_team_continue_sensitive')!.execute({ team_id: 'team-1' }, exec)
+    await byName.get('studio_team_cancel')!.execute({ team_id: 'team-1', reason: 'pare' }, exec)
     expect(bridge.start).toHaveBeenNthCalledWith(1, undefined, {
       provider: 'spawn-in-process', prompt: 'Faça.', intendedPaths: ['src'],
     })
@@ -72,6 +99,17 @@ describe('assistant bridge tool schemas', () => {
     expect(bridge.review).toHaveBeenCalledWith(undefined, 'run-1')
     expect(bridge.cancel).toHaveBeenCalledWith(undefined, 'run-1', 'pedido')
     expect(bridge.apply).toHaveBeenCalledWith(undefined, 'run-1')
+    expect(bridge.startTeam).toHaveBeenNthCalledWith(1, undefined, {
+      provider: 'spawn-in-process', name: 'Equipe', tasks: [{
+        taskId: 'implementation', title: 'Implementar', role: 'implementer', prompt: 'Faça.', intendedPaths: ['src'], dependsOn: [],
+      }],
+    })
+    expect(bridge.startTeam).toHaveBeenNthCalledWith(2, undefined, expect.anything(), 'deploy')
+    expect(bridge.listTeams).toHaveBeenCalledWith(undefined)
+    expect(bridge.teamStatus).toHaveBeenCalledWith(undefined, 'team-1')
+    expect(bridge.continueTeam).toHaveBeenNthCalledWith(1, undefined, 'team-1', false)
+    expect(bridge.continueTeam).toHaveBeenNthCalledWith(2, undefined, 'team-1', true)
+    expect(bridge.cancelTeam).toHaveBeenCalledWith(undefined, 'team-1', 'pare')
     expect(byName.get('studio_agent_list')!.output.render({}, { json: '[{"run_id":"run-1"}]' } as never))
       .toEqual([{ type: 'text', text: '[{"run_id":"run-1"}]' }])
   })
@@ -91,7 +129,7 @@ describe('assistant bridge tool schemas', () => {
     let cleanup: (() => void) | undefined
     const provide = vi.fn()
     const ctx = {
-      agents: {}, studioIdentity: { service: {} }, studioTenancy: { service: {} }, studioAgents: {},
+      agents: {}, studioIdentity: { service: {} }, studioTenancy: { service: {} }, studioAgents: {}, studioAgentTeams: {},
       jobs: {
         kill: vi.fn(),
         onJobDone: vi.fn((listener: typeof doneListener) => { doneListener = listener; return vi.fn(() => disposed.push('listener')) }),
@@ -103,7 +141,11 @@ describe('assistant bridge tool schemas', () => {
     await apply(ctx as never, { exposedTools: ASSISTANT_TOOL_NAMES, repositories: [] })
     expect(registered).toEqual(ASSISTANT_TOOL_NAMES)
     const runtime = provide.mock.calls[0]![1]
-    expect(runtime).toMatchObject({ tools: ASSISTANT_TOOL_NAMES, automaticSessionCreation: 'NOT_PRESENT' })
+    expect(runtime).toMatchObject({
+      tools: ASSISTANT_TOOL_NAMES,
+      automaticSessionCreation: 'NOT_PRESENT',
+      teamCoordination: 'BETA_MANUAL_DEPENDENCY_CONTINUE',
+    })
     const release = vi.spyOn(runtime.bridge, 'releaseJob')
     doneListener!({ id: 'job-finished' })
     expect(release).toHaveBeenCalledWith('job-finished')

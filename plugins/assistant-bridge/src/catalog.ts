@@ -8,6 +8,13 @@ export const ASSISTANT_TOOL_NAMES = [
   'studio_agent_review',
   'studio_agent_cancel',
   'studio_agent_apply',
+  'studio_team_start',
+  'studio_team_start_sensitive',
+  'studio_team_list',
+  'studio_team_status',
+  'studio_team_continue',
+  'studio_team_continue_sensitive',
+  'studio_team_cancel',
 ] as const
 
 export type AssistantToolName = typeof ASSISTANT_TOOL_NAMES[number]
@@ -41,6 +48,13 @@ export const ASSISTANT_TOOL_POLICY = {
   studio_agent_review: studioRule('T0', 'project.read', 'read-only'),
   studio_agent_cancel: studioRule('T2', 'project.write', 'workspace-write'),
   studio_agent_apply: studioRule('T2', 'project.write', 'workspace-write'),
+  studio_team_start: studioRule('T2', 'project.write', 'workspace-write'),
+  studio_team_start_sensitive: studioRule('T3', 'project.write', 'workspace-write'),
+  studio_team_list: studioRule('T0', 'project.read', 'read-only'),
+  studio_team_status: studioRule('T0', 'project.read', 'read-only'),
+  studio_team_continue: studioRule('T2', 'project.write', 'workspace-write'),
+  studio_team_continue_sensitive: studioRule('T3', 'project.write', 'workspace-write'),
+  studio_team_cancel: studioRule('T2', 'project.write', 'workspace-write'),
 } satisfies Record<AssistantToolName, ToolPolicyRule>
 
 export function assertAssistantToolCatalog(exposedTools: readonly string[], classifiedTools: readonly string[]): void {

@@ -62,6 +62,13 @@ export const STUDIO_DOMAIN_SCOPES: readonly DomainScopeEntry[] = [
     tables: { leases: { scope: 'workspace-tenant', requiredFields: ['org_id', 'tenant_id', 'workspace_id'], reason: 'A path lease excludes writers inside one workspace.' } },
   },
   {
+    source: 'plugins/agent-team/src/model.ts', exportName: 'studioAgentTeamsDomainSpec', physicalName: 'studio_agent_teams',
+    tables: {
+      teams: { scope: 'workspace-tenant', requiredFields: ['org_id', 'tenant_id', 'workspace_id'], reason: 'A team coordinates only one approved workspace.' },
+      tasks: { scope: 'workspace-tenant', requiredFields: ['org_id', 'tenant_id', 'workspace_id'], reason: 'Every team task inherits the same workspace boundary.' },
+    },
+  },
+  {
     source: 'plugins/route-health/src/model.ts', exportName: 'studioRouteHealthDomainSpec', physicalName: 'studio_route_health',
     tables: {
       routes: { scope: 'org-tenant', requiredFields: ['org_id', 'tenant_id'] },

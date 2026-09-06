@@ -21,4 +21,11 @@
       - studio_agent_review
       - studio_agent_cancel
       - studio_agent_apply
+      - studio_team_start
+      - studio_team_start_sensitive
+      - studio_team_list
+      - studio_team_status
+      - studio_team_continue
+      - studio_team_continue_sensitive
+      - studio_team_cancel
     repositories: !!js JSON.parse(process.env.DZ23_ASSISTANT_REPOSITORIES ?? '[]')
