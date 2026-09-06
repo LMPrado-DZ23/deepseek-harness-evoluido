@@ -46,6 +46,20 @@ Também foram provados entrada aninhada malformada, falha de provider que não �
 objeto `Error`, falha ao persistir o vínculo de job, cancelamento concorrente,
 serialização por equipe, dependência transitiva e conflito de caminhos.
 
+## Gates de composição e pacote
+
+- build completo da interface e dos 16 plugins: **PASS**; typecheck depois do
+  build: **PASS**;
+- `ASSISTANT_PACKAGE_PROOF=PASS`: pacote staged com `lib` e i18n da equipe,
+  resolução do profile, domínio esperado, treze ferramentas e somente
+  `spawn-in-process`;
+- `ASSISTANT_TOOL_CATALOG=PASS`: 13 ferramentas e autotestes negativos de
+  remoção, rebaixamento de T3 e perda de metadado de origem;
+- `DOMAIN_ROUTE_GATE=PASS`: 24 domínios nos dois patches Postgres;
+- `I18N_GATE=PASS`: 12 catálogos e 287 chaves;
+- `UPSTREAM_PIN=PASS` e `PORTABILITY=PASS`, ambos com autoteste negativo;
+- interface: 11 arquivos e 54 testes aprovados.
+
 ## Limites honestos
 
 - início automático de dependentes: `NOT_PRESENT`; a pessoa usa a ação
