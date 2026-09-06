@@ -48,6 +48,7 @@ async function fixture(options: {
   readonly create?: AssistantSessionControllerPort['create']
 } = {}) {
   const binds: string[] = []
+  const failures: Array<{ readonly phase: string; readonly error: unknown }> = []
   const create = vi.fn<AssistantSessionControllerPort['create']>(options.create ?? (async request => ({
     sessionId: (request.sessionId ?? 'assistant-new') as never,
     agentPreset: request.agentPreset,
@@ -65,8 +66,9 @@ async function fixture(options: {
     },
     sessions: { create, inspect },
     repositories,
+    reportFailure: (phase, error) => { failures.push({ phase, error }) },
   })
-  return { launcher, create, inspect, binds, repository: repositories[0]! }
+  return { launcher, create, inspect, binds, failures, repository: repositories[0]! }
 }
 
 describe('governed Assistant Session launcher', () => {
@@ -121,9 +123,11 @@ describe('governed Assistant Session launcher', () => {
   it('separates transient inspection and creation failures from safe conflicts', async () => {
     const unavailable = await fixture({ inspect: async () => { throw new Error('storage offline') } })
     await expect(unavailable.launcher.launch(identitySession(['existing']))).rejects.toMatchObject({ code: 'SESSION_UNAVAILABLE' })
+    expect(unavailable.failures.map(failure => failure.phase)).toEqual(['inspect'])
 
     const creation = await fixture({ create: async () => { throw new Error('unavailable') } })
     await expect(creation.launcher.launch(identitySession())).rejects.toMatchObject({ code: 'SESSION_UNAVAILABLE' })
+    expect(creation.failures.map(failure => failure.phase)).toEqual(['create'])
 
     const wrongPreset = await fixture({ create: async () => ({ sessionId: 'new' as never, agentPreset: 'default' }) })
     await expect(wrongPreset.launcher.launch(identitySession())).rejects.toMatchObject({ code: 'SESSION_CONFLICT' })
@@ -134,6 +138,7 @@ describe('governed Assistant Session launcher', () => {
     adoption.inspect.mockResolvedValue({ meta: { cwd: adoption.repository.repositoryPath, agentPreset: ASSISTANT_AGENT_PRESET } })
     adoption.create.mockRejectedValue(new Error('preset changed'))
     await expect(adoption.launcher.launch(identitySession(['existing']))).rejects.toMatchObject({ code: 'SESSION_CONFLICT' })
+    expect(adoption.failures.map(failure => failure.phase)).toEqual(['adopt'])
 
     const changedPreset = await fixture({
       inspect: async () => ({ meta: { cwd: '', agentPreset: ASSISTANT_AGENT_PRESET } }),

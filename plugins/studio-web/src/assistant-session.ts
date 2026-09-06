@@ -44,6 +44,7 @@ export interface AssistantSessionLauncherOptions {
   readonly tenancy: Pick<StudioTenancyService, 'authorizationFor'>
   readonly sessions: AssistantSessionControllerPort
   readonly repositories: readonly AssistantRepositoryLaunchConfig[]
+  readonly reportFailure?: (phase: 'inspect' | 'create' | 'adopt', error: unknown) => void
 }
 
 /**
@@ -104,7 +105,8 @@ export class AssistantSessionLauncher {
         cwd: repository.repositoryPath,
         agentPreset: ASSISTANT_AGENT_PRESET,
       })
-    } catch {
+    } catch (error) {
+      this.options.reportFailure?.('create', error)
       throw new AssistantSessionLaunchError(
         'SESSION_UNAVAILABLE',
         'A conversa não pôde ser criada agora. Tente novamente em instantes.',
@@ -141,6 +143,7 @@ export class AssistantSessionLauncher {
         inspected = await this.options.sessions.inspect(sessionId)
       } catch (error) {
         if (error instanceof ApiSessionNotFound) continue
+        this.options.reportFailure?.('inspect', error)
         throw new AssistantSessionLaunchError(
           'SESSION_UNAVAILABLE',
           'A conversa existente não pôde ser conferida agora. Tente novamente em instantes.',
@@ -160,7 +163,8 @@ export class AssistantSessionLauncher {
           agentPreset: ASSISTANT_AGENT_PRESET,
         })
         if (adopted.agentPreset !== ASSISTANT_AGENT_PRESET) throw new Error('preset mismatch')
-      } catch {
+      } catch (error) {
+        this.options.reportFailure?.('adopt', error)
         throw new AssistantSessionLaunchError(
           'SESSION_CONFLICT',
           'A conversa existente não pôde ser retomada com o perfil seguro.',

@@ -96,6 +96,9 @@ export async function apply(ctx: Context, config: StudioWebConfig = {}): Promise
     tenancy: ctx.studioTenancy.service,
     sessions: ctx.sessionController,
     repositories: config.assistantRepositories ?? [],
+    reportFailure: (phase, error) => {
+      ctx.logger.warn(`dz23-studio-web: assistant session ${phase} failed: ${String(error)}`)
+    },
   })
   ctx.effect(() => ctx.webServer.register({
     kind: 'prefix', path: '/studio',
