@@ -118,7 +118,7 @@ opcionais: eles geram os módulos usados pelo typecheck e pelos testes.
 
 ```sh
 node scripts/bootstrap-upstream.mjs
-node scripts/check-upstream-content.mjs --materialize-symlinks
+node scripts/check-upstream-content.mjs
 pnpm --dir third_party/deepseek-harness install --frozen-lockfile
 pnpm --dir third_party/deepseek-harness build:official
 pnpm install --frozen-lockfile --filter '@dz23-studio/*...'
@@ -126,6 +126,12 @@ pnpm build
 pnpm typecheck
 pnpm test -- --maxWorkers=2
 ```
+
+O bootstrap valida a origem e o commit antes de converter os placeholders de
+symlink criados por checkouts Windows. A conversão é transacional: se o sistema
+não permitir criar symlinks, o placeholder original permanece intacto e o
+comando orienta ativar o Modo de Desenvolvedor ou usar o WSL2. O segundo comando
+é uma verificação somente leitura do conteúdo já materializado.
 
 O limite de dois workers é temporariamente obrigatório no gate de clone limpo:
 três testes de filesystem/multiprocesso passaram isoladamente e juntos com dois

@@ -108,7 +108,11 @@ async function assertRealSymlinks(repositoryRoot) {
   }
 }
 
-export async function verifyUpstreamPin({ studioRoot, lockPath = 'UPSTREAM.lock' }) {
+export async function verifyUpstreamPin({
+  studioRoot,
+  lockPath = 'UPSTREAM.lock',
+  requireRealSymlinks = true,
+}) {
   const lock = parseUpstreamLock(await readFile(resolve(studioRoot, lockPath), 'utf8'))
   const upstreamRoot = confinedPath(studioRoot, lock.path)
   const rootStat = await lstat(upstreamRoot).catch(() => undefined)
@@ -142,7 +146,7 @@ export async function verifyUpstreamPin({ studioRoot, lockPath = 'UPSTREAM.lock'
   if (manifest.sha256 !== lock.manifest_sha256) {
     throw new Error(`upstream: manifesto divergente (${manifest.sha256})`)
   }
-  await assertRealSymlinks(upstreamRoot)
+  if (requireRealSymlinks) await assertRealSymlinks(upstreamRoot)
 
   return { ...lock, upstreamRoot, commit, tree, manifest_sha256: manifest.sha256 }
 }

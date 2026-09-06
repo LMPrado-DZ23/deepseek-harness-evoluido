@@ -1,11 +1,64 @@
 #!/usr/bin/env node
-import { createHash } from 'node:crypto'
-import { chmod, lstat, readFile, readlink, readdir, symlink, unlink } from 'node:fs/promises'
+import { createHash, randomUUID } from 'node:crypto'
+import { chmod, lstat, readFile, readlink, readdir, rename, symlink, unlink } from 'node:fs/promises'
 import { isAbsolute, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 function gitBlobOid(bytes) {
   return createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex')
+}
+
+const defaultSymlinkOperations = { rename, symlink, unlink }
+
+function symlinkFailure(error, path) {
+  const detail = error instanceof Error ? error.message : String(error)
+  if (error?.code === 'EPERM' || error?.code === 'EACCES') {
+    return new Error(
+      `não foi possível criar symlink para ${path}; placeholder preservado. `
+      + 'Ative o Modo de Desenvolvedor do Windows ou execute o bootstrap no WSL2',
+      { cause: error },
+    )
+  }
+  return new Error(`não foi possível criar symlink para ${path}; placeholder preservado: ${detail}`, { cause: error })
+}
+
+export async function replacePlaceholderWithSymlink(
+  absolute,
+  target,
+  { operations = defaultSymlinkOperations, token = `${process.pid}-${randomUUID()}` } = {},
+) {
+  const staged = `${absolute}.dz23-symlink-${token}`
+  const backup = `${absolute}.dz23-placeholder-${token}`
+  try {
+    await operations.symlink(target, staged)
+  } catch (error) {
+    throw symlinkFailure(error, absolute)
+  }
+
+  try {
+    await operations.rename(absolute, backup)
+  } catch (error) {
+    await operations.unlink(staged).catch(() => undefined)
+    throw new Error(`não foi possível preservar o placeholder de ${absolute}`, { cause: error })
+  }
+
+  try {
+    await operations.rename(staged, absolute)
+  } catch (error) {
+    const rollbackErrors = []
+    await operations.rename(backup, absolute).catch(rollbackError => rollbackErrors.push(rollbackError))
+    await operations.unlink(staged).catch(cleanupError => rollbackErrors.push(cleanupError))
+    if (rollbackErrors.length > 0) {
+      throw new AggregateError([error, ...rollbackErrors], `falha ao instalar e restaurar symlink em ${absolute}`)
+    }
+    throw new Error(`falha ao instalar symlink em ${absolute}; placeholder restaurado`, { cause: error })
+  }
+
+  try {
+    await operations.unlink(backup)
+  } catch (error) {
+    throw new Error(`symlink instalado, mas o placeholder de segurança não pôde ser removido: ${backup}`, { cause: error })
+  }
 }
 
 async function presentFiles(root, current = root, result = []) {
@@ -51,8 +104,7 @@ export async function verifyUpstreamContent(studioRoot, { materializeSymlinks = 
       if (gitBlobOid(bytes) !== entry.oid) throw new Error(`placeholder de symlink divergente: ${entry.path}`)
       const target = bytes.toString('utf8')
       if (!target || target.includes('\0')) throw new Error(`alvo de symlink inválido: ${entry.path}`)
-      await unlink(absolute)
-      await symlink(target, absolute)
+      await replacePlaceholderWithSymlink(absolute, target)
       stat = await lstat(absolute)
     }
     bytes = entry.mode === '120000'
