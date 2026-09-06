@@ -2,12 +2,12 @@
 
 - mission_id: `DZ23-STUDIO-V1-20260904`
 - objetivo: concluir o DZ23 STUDIO v1.0 com runtime portátil, geração isolada, gates Windows/Linux, testes com cinco pessoas e pacote open source somente após licença escolhida
-- estado: `VALIDATING`
+- estado: `REVIEW_REQUIRED`
 - iteração: 16
 - início: 2026-09-04
-- último heartbeat: 2026-09-06T10:05:00-03:00
-- último progresso real: sessão governada real do Assistente criada por HTTP no Harness, com login/CSRF/revogação, preset, repositório, treze ferramentas e retomada do mesmo ID provados
-- tarefa atual: concluir prova em clone limpo e entregar M71 para revisão independente, sem merge na principal
+- último heartbeat: 2026-09-06T10:23:00-03:00
+- último progresso real: M71 fechada em clone novo com 2.027 testes raiz, 56 da interface, cobertura D30, build, typecheck, i18n, pacote e runtime real aprovados
+- tarefa atual: empacotar M71 e solicitar revisão independente do Claude, sem merge na principal
 - branch: `codex/m71-assistant-session`
 - base: `17e79aaab4c1ac54c1b4fc05f780f6485c5941b7`
 - upstream: `deepseek-harness@6c705be1ce6774a000d061da41d1823b03a3d42c`
@@ -29,6 +29,10 @@
 - conversas multiusuário continuam `NOT_SUPPORTED` porque o cliente atual do
   Harness não isola lista/histórico por tenant;
 - prova de modelo real e redirecionamento Chromium continuam `NOT_EXECUTED`.
+- clone novo em ext4 passou build oficial upstream, build do Studio, typecheck,
+  2.027 testes raiz, 56 testes da interface e cobertura global 96,11/93,56/96,61/98,14;
+- o gate de i18n encontrou onze mensagens novas em código, todas migradas para
+  catálogos antes do fechamento.
 
 ## Checkpoint anterior — M6.3
 

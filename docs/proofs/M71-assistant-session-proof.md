@@ -23,8 +23,12 @@ deploy ou Docker.
 
 ## Provas executadas no WSL2/ext4
 
-Árvore de prova: `/home/leandro/dz23-gates/m71-fe32fee`. Harness fixado em
-`6c705be1ce6774a000d061da41d1823b03a3d42c` e compilado.
+Prova focada inicial: `/home/leandro/dz23-gates/m71-fe32fee`. Prova final em
+clone novo: `/home/leandro/dz23-gates/m71-clean-622cc03`, atualizada por
+fast-forward ao pin `7a11f6676f3d4326aa835279683a0c9f9f888585`. Harness clonado da origem,
+fixado em `6c705be1ce6774a000d061da41d1823b03a3d42c` e compilado pelo
+`build:official`. O manifesto conferiu 8.953 entradas e SHA-256
+`862b92782c2f5cd67f81debd1116b16150dfafd84fb4ce2602a729f9cf3d26dc`.
 
 O runtime real abriu o profile `studio` em porta efêmera, usou login por código
 capturado no modo local, criou a sessão via HTTP real e consultou o Agent do
@@ -50,6 +54,11 @@ era publicado globalmente, embora fosse criado por sessão. O preset foi
 corrigido para um grupo Cordis com `isolate.studioAssistant: true`; o boot e a
 prova passaram depois da correção. O gate do pacote agora exige esse isolamento.
 
+O primeiro gate de i18n no clone novo também falhou por onze mensagens da M71
+embutidas em código. Todas foram movidas para os catálogos pt-BR no commit
+`7a11f66`; a repetição passou com 12 catálogos, 287 chaves e nenhum crescimento
+do baseline legado.
+
 Testes focados após a correção:
 
 - `assistant-bridge/service` + `studio-web/assistant-session`: 58/58;
@@ -58,6 +67,18 @@ Testes focados após a correção:
 - helpers/componentes de abertura da interface: 3/3;
 - `ASSISTANT_PACKAGE_PROOF=PASS`, pacote staged com exatamente treze
   ferramentas e somente `spawn-in-process`.
+
+Gate cumulativo no clone novo:
+
+- build oficial do upstream e build da interface + 16 plugins: PASS;
+- `pnpm typecheck`: PASS;
+- suíte raiz com cobertura e um worker: **2.027 PASS / 62 SKIP / 0 FAIL**,
+  125 arquivos aprovados e 6 specs PostgreSQL puladas por ausência de DSN;
+- cobertura global: 96,11% statements, 93,56% branches, 96,61% functions e
+  98,14% lines; `assistant-session.ts` em 100% nas quatro métricas;
+- interface separada: **56/56 PASS**;
+- catálogo, 24 rotas de domínio, i18n, upstream pin, portabilidade, pacote e
+  runtime da sessão: PASS.
 
 ## Limites honestos
 
@@ -69,8 +90,10 @@ Testes focados após a correção:
   instalação de equipe/multiusuário para conversas é `NOT_SUPPORTED`;
 - PostgreSQL físico, reinício, celular, HTTPS e operação prolongada não foram
   executados;
-- a prova final em clone novo pertence ao fechamento deste checkpoint e deve
-  constar aqui antes de pedir revisão independente.
+- as seis specs PostgreSQL foram puladas nesta máquina; M71 não acrescenta
+  persistência PostgreSQL nova e não usa esse skip como prova de banco;
+- os `plugins/*/lib/**` rastreados e defasados continuam preservados por decisão
+  de processo; removê-los do índice exige autorização separada.
 
 O resultado não transforma o produto em “pronto” nem valida a experiência para
 pessoas leigas.
