@@ -45,6 +45,7 @@ governedTools=13
 conversationTurn=PASS_WITH_DETERMINISTIC_PROVIDER
 approval=ask -> allowed-once
 resumedSameSession=true
+browserHandoff=PASS_IN_WINDOWS_EDGE
 ```
 
 A prova negativa sem CSRF retornou 401. Depois da revogação da sessão de
@@ -55,6 +56,16 @@ real, o adaptador determinístico solicitou `studio_echo`, o policy/approval do
 Harness registrou uma única decisão `allowed-once` e a resposta
 `STUDIO_ECHO_OK` ficou no histórico da sessão. Isso prova o encadeamento da
 conversa, não a qualidade nem a disponibilidade de um modelo externo.
+
+O handoff foi então exercitado com o runtime ainda no WSL2 e Microsoft Edge
+real no Windows. A página `/studio/assistente` foi carregada com a sessão de
+identidade, o botão **Abrir conversa segura** foi acionado, o cliente gravou
+`dsh.sessions.current` com o mesmo `session_id` e o redirecionamento terminou
+na raiz do chat oficial do Harness. A prova usou `playwright-core@1.50.1` em
+instalação temporária isolada; o `package.json` conferido teve SHA-256
+`24839e2e3e62690810edbccc7aa4c03156744b7dd28df849e18845d811cc3dcf`.
+O canal de controle continha uma sessão efêmera, nunca foi impresso e seus dois
+arquivos foram removidos antes do encerramento do runtime.
 
 O primeiro boot real encontrou um defeito de composição: o serviço da ponte
 era publicado globalmente, embora fosse criado por sessão. O preset foi
@@ -92,8 +103,9 @@ Gate cumulativo no clone novo:
 - o único turno usa `studio-fake/studio-deterministic`, exclusivo de prova;
   nenhum turno com DeepSeek, Ollama, Codex CLI ou Claude Code real foi enviado:
   `NOT_EXECUTED`;
-- o redirecionamento e a gravação no navegador estão cobertos por unidade, mas
-  não foram executados em Chromium: `UNIT_PROVEN_NOT_BROWSER_EXECUTED`;
+- o handoff foi executado em Microsoft Edge headless no Windows; interação
+  visual acompanhada, acessibilidade com leitor de tela e navegador móvel
+  físico continuam `NOT_EXECUTED`;
 - o cliente do Harness não isola sua lista/histórico de sessões por tenant;
   instalação de equipe/multiusuário para conversas é `NOT_SUPPORTED`;
 - PostgreSQL físico, reinício, celular, HTTPS e operação prolongada não foram

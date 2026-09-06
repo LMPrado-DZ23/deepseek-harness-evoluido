@@ -2,9 +2,9 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 
@@ -38,6 +38,7 @@ const [{ loadLayeredEnv }, { runProfile }, { SessionId }, { createUserMessage }]
 
 let booted
 let approvalOff
+let browserHandoff = 'NOT_EXECUTED'
 try {
   await Promise.all([
     mkdir(join(runtimeHome, 'profiles'), { recursive: true }),
@@ -165,6 +166,27 @@ try {
     && event.data.outcome === 'allowed-once'))
   await booted.ctx.sessions.flush(agent.session)
 
+  const browserControlDirectory = process.env.DZ23_BROWSER_PROOF_CONTROL_DIR?.trim()
+  if (browserControlDirectory !== undefined && browserControlDirectory !== '') {
+    assert.ok(isAbsolute(browserControlDirectory), 'O diretório de controle do navegador deve ser absoluto.')
+    assert.match(basename(browserControlDirectory), /^dz23-assistant-browser-proof-[a-z0-9-]+$/u)
+    const control = join(browserControlDirectory, 'ready.json')
+    const result = join(browserControlDirectory, 'result.json')
+    await mkdir(browserControlDirectory, { recursive: false, mode: 0o700 })
+    await writeFile(control, JSON.stringify({
+      origin,
+      sessionToken: issued.token,
+      expectedSessionId: first.session_id,
+    }), { encoding: 'utf8', mode: 0o600, flag: 'wx' })
+    try {
+      const browserResult = await waitForBrowserResult(result)
+      assert.deepEqual(browserResult, { status: 'PASS', sessionId: first.session_id })
+      browserHandoff = 'PASS_IN_WINDOWS_EDGE'
+    } finally {
+      await Promise.all([rm(control, { force: true }), rm(result, { force: true })])
+    }
+  }
+
   const secondResponse = await fetch(`${origin}/studio/assistant/session`, {
     method: 'POST',
     headers: { ...headers, 'x-dz23-csrf': issued.csrfToken },
@@ -203,9 +225,9 @@ try {
     deterministicProvider: 'studio-fake/studio-deterministic',
     approval: { policy: 'ask', outcome: 'allowed-once', requests: approvals.length },
     resumedSameSession: second.session_id === first.session_id && second.reused === true,
+    browserHandoff,
     limitations: {
       realModelTurn: 'NOT_EXECUTED',
-      browserHandoff: 'UNIT_PROVEN_NOT_BROWSER_EXECUTED',
       multiUserConversationIsolation: 'NOT_SUPPORTED',
     },
   }, null, 2)}\n`)
@@ -224,4 +246,15 @@ async function findProfileBoot() {
   const available = await readdir(cliRoot)
   assert.ok(available.includes(chunk), `O chunk do profile não existe: ${chunk}`)
   return import(pathToFileURL(join(cliRoot, chunk)).href)
+}
+
+async function waitForBrowserResult(path) {
+  const deadline = Date.now() + 120_000
+  while (Date.now() < deadline) {
+    const info = await lstat(path).catch(() => undefined)
+    if (info?.isSymbolicLink()) throw new Error('O resultado do navegador não pode ser um link simbólico.')
+    if (info?.isFile()) return JSON.parse(await readFile(path, 'utf8'))
+    await new Promise(resolvePromise => setTimeout(resolvePromise, 100))
+  }
+  throw new Error('O navegador não concluiu a prova em 120 segundos.')
 }

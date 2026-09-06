@@ -5,9 +5,9 @@
 - estado: `REVIEW_REQUIRED`
 - iteração: 16
 - início: 2026-09-04
-- último heartbeat: 2026-09-06T10:28:09-03:00
-- último progresso real: M71 passou também um turno completo do Agent com provedor determinístico, aprovação `allowed-once`, ferramenta governada e resposta persistida
-- tarefa atual: empacotar o pin cumulativo M71 e aguardar revisão independente do Claude, sem merge na principal
+- último heartbeat: 2026-09-06T10:47:00-03:00
+- último progresso real: M71 passou o handoff completo da tela do Studio para o chat oficial em Microsoft Edge no Windows, além do turno governado do Agent
+- tarefa atual: fechar o novo pin cumulativo M71 e aguardar revisão independente do Claude, sem merge na principal
 - branch: `codex/m71-assistant-session`
 - base: `17e79aaab4c1ac54c1b4fc05f780f6485c5941b7`
 - upstream: `deepseek-harness@6c705be1ce6774a000d061da41d1823b03a3d42c`
@@ -25,13 +25,15 @@
 - o Agent real processou uma mensagem, chamou `studio_echo` após uma única
   aprovação `allowed-once` e persistiu `STUDIO_ECHO_OK`; o provedor usado foi
   somente `studio-fake/studio-deterministic`;
+- Microsoft Edge real abriu a entrada do Assistente, selecionou o mesmo
+  `session_id` no contrato do Harness e terminou no chat oficial;
 - o serviço `studioAssistant` foi isolado por sessão no Cordis depois de uma
   falha real de boot revelar o singleton indevido;
 - 58 testes críticos e 3 testes de interface passaram; os serviços críticos têm
   100% de cobertura; o pacote staged passou;
 - conversas multiusuário continuam `NOT_SUPPORTED` porque o cliente atual do
   Harness não isola lista/histórico por tenant;
-- prova com modelo externo real e redirecionamento Chromium continuam
+- prova com modelo externo real, navegador móvel e interação humana continuam
   `NOT_EXECUTED`.
 - clone novo em ext4 passou build oficial upstream, build do Studio, typecheck,
   2.027 testes raiz, 56 testes da interface e cobertura global 96,11/93,56/96,61/98,14;
