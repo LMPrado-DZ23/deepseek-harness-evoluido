@@ -3,18 +3,35 @@
 - mission_id: `DZ23-STUDIO-V1-20260904`
 - objetivo: concluir o DZ23 STUDIO v1.0 com runtime portátil, geração isolada, gates Windows/Linux, testes com cinco pessoas e pacote open source somente após licença escolhida
 - estado: `REVIEW_REQUIRED`
-- iteração: 16
+- iteração: 17
 - início: 2026-09-04
-- último heartbeat: 2026-09-06T11:00:00-03:00
-- último progresso real: M71 passou, na mesma inicialização, um turno real por Ollama local e o handoff da tela do Studio ao chat oficial em Microsoft Edge
-- tarefa atual: fechar o novo pin cumulativo M71 e aguardar revisão independente do Claude, sem merge na principal
-- branch: `codex/m71-assistant-session`
-- base: `17e79aaab4c1ac54c1b4fc05f780f6485c5941b7`
+- último heartbeat: 2026-09-06T12:16:00-03:00
+- último progresso real: M73 bloqueou fail-closed o cliente oficial do Harness em instalações edge/equipe e fechou suíte cumulativa e cobertura crítica
+- tarefa atual: concluir a proveniência e empacotamento do pin M73 e aguardar revisão independente do Claude, sem merge na principal
+- branch: `codex/m73-assistant-tenant-boundary`
+- base: `646c47b53ad7c76c0ca3010e6abdd7001aec0ae0`
 - upstream: `deepseek-harness@6c705be1ce6774a000d061da41d1823b03a3d42c`
 - staging válido: `/home/leandro/dz23-gates/m63-integration-20260906`
+- staging de teste M73: `/home/leandro/dz23-gates/m73-clean-dc35c1f`
 - staging inválido preservado: `/home/leandro/dz23-m61-lock-20260904a` (origem calculada incorretamente e sincronização interrompida)
 
-## Checkpoint atual — M71
+## Checkpoint atual — M73
+
+- inspeção do upstream fixado provou que o cliente oficial autentica o processo,
+  mas não transporta principal DZ23/tenant por chamada lógica ou frame;
+- troca de cookie nativo permitida somente no modo pessoal/loopback com um único
+  usuário; edge/equipe retorna 403 sem redirecionamento;
+- Caddy expõe somente a interface e APIs DZ23 e bloqueia a superfície crua do
+  Harness com 404;
+- chat de equipe permanece `NOT_SUPPORTED`, sem filtro parcial apresentado como
+  isolamento;
+- 2.031 testes cumulativos passaram, 62 specs PostgreSQL externas foram puladas,
+  cobertura global ficou acima de 90% e identidade fechou em 100%;
+- typecheck, build, pacote do assistente, i18n, portabilidade, domínios e catálogo
+  passaram;
+- prova física do Caddy continua `NOT_EXECUTED` porque Docker está desligado.
+
+## Checkpoint anterior — M71
 
 - `/studio/assistente` cria ou retoma uma sessão real do Harness, sem duplicar o
   chat;
@@ -62,7 +79,7 @@
 
 ## Próxima ação
 
-1. gerar bundle, arquivo-fonte e relatório P37 do pin cumulativo M71;
+1. gerar staging Git correto, bundle, arquivo-fonte e relatório P37 do pin M73;
 2. aguardar e tratar a revisão independente do Claude sem merge;
 3. tratar os artefatos `plugins/*/lib/**` rastreados em commit separado, somente
    com autorização explícita;
