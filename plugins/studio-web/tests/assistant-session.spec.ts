@@ -32,8 +32,8 @@ async function repository(overrides: Partial<AssistantRepositoryLaunchConfig> = 
   await Promise.all([
     mkdir(join(root, '.git', 'objects'), { recursive: true }),
     mkdir(join(root, '.git', 'refs'), { recursive: true }),
-    writeFile(join(root, '.git', 'HEAD'), 'ref: refs/heads/main\n'),
   ])
+  await writeFile(join(root, '.git', 'HEAD'), 'ref: refs/heads/main\n')
   return {
     orgId: 'org-1', tenantId: 'tenant-1', workspaceId: 'tenant-1', repositoryPath: root,
     allowedPaths: ['src'], providers: ['spawn-in-process'], ...overrides,
