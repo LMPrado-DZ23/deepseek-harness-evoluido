@@ -1,5 +1,6 @@
 import type { AgentRunRecord } from './model.js';
 import { type WorktreeDiff, type WorktreePort, type WorktreeSnapshot } from './service.js';
+export declare function isolatedGitEnvironment(indexFile?: string): NodeJS.ProcessEnv;
 export declare class GitWorktreeManager implements WorktreePort {
     private readonly worktreeRoot;
     constructor(worktreeRoot: string);
@@ -8,5 +9,4 @@ export declare class GitWorktreeManager implements WorktreePort {
     mainFingerprint(repositoryPath: string): Promise<string>;
     applyProposal(record: AgentRunRecord): Promise<void>;
 }
-export declare function assertInsideWorktree(worktreePath: string, candidate: string): string;
 //# sourceMappingURL=git.d.ts.map

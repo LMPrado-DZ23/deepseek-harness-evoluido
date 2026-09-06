@@ -1,0 +1,22 @@
+{
+  "delegation": {
+    "invalidPath": "Caminho de delegação inválido: {path}"
+  },
+  "git": {
+    "filterUnsafe": "A configuração de filtros Git não pode ser neutralizada com segurança.",
+    "filterLimit": "O repositório declara filtros Git em excesso.",
+    "boundaryChanged": "A fronteira Git da cópia isolada mudou e a operação foi bloqueada.",
+    "worktreeDirectory": "A cópia isolada não é mais um diretório confiável.",
+    "worktreePath": "A cópia isolada mudou de caminho e a operação foi bloqueada.",
+    "linkInvalid": "O vínculo Git da cópia isolada é inválido.",
+    "linkTarget": "O vínculo Git da cópia isolada aponta para um destino inválido.",
+    "commonDirectory": "O diretório Git compartilhado é inválido.",
+    "structureInvalid": "A estrutura Git da cópia isolada é inválida.",
+    "structureUnsafe": "A estrutura Git da cópia isolada contém uma entrada insegura.",
+    "repositoryBoundary": "Git não confirmou a fronteira esperada do repositório.",
+    "worktreeOwner": "A cópia isolada não pertence ao repositório autorizado.",
+    "reciprocalInvalid": "O vínculo recíproco da cópia isolada é inválido.",
+    "reciprocalChanged": "O vínculo recíproco da cópia isolada mudou.",
+    "worktreeBoundary": "Git não confirmou o vínculo e a revisão esperados da cópia isolada."
+  }
+}

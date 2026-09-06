@@ -1,9 +1,10 @@
-import { Bell, CircleHelp, Eye, FolderKanban, Home, LineChart, Menu, Plug, Settings, Sparkles, UserRound } from 'lucide-react'
+import { Bell, CircleHelp, Eye, FolderKanban, Home, LineChart, Menu, MessageCircle, Plug, Settings, Sparkles, UserRound } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, apiResponse, type HealthState } from './api'
 import type { Category } from './categories'
 import { HUB_PATH } from './hub/presentation'
 import hub from './i18n/hub.pt-BR.json'
+import assistant from './i18n/assistant.pt-BR.json'
 import t from './i18n/pt-BR.json'
 import { currentStepIndex, permanentTruthKind, privacyNotice, type ProjectUiState } from './presentation'
 import { apiFailureMessage, apiFailureText, type ApiCallKind } from './pwa/apiFailure'
@@ -216,6 +217,7 @@ export function App() {
   return <div className="shell">
     <aside className="sidebar"><img src="/studio/brand/dz23-studio-logo.jpg" alt={t.brand} className="brand" /><nav aria-label={t.brand}>
       <Nav icon={<Home />} label={t.nav.home} active /><Nav icon={<FolderKanban />} label={t.nav.projects} /><Nav icon={<LineChart />} label={t.nav.progress} /><Nav icon={<Eye />} label={t.nav.result} />
+      <a className="nav" href="/studio/assistente"><MessageCircle aria-hidden="true" /><span>{assistant.navLabel}</span></a>
       <a className="nav" href={HUB_PATH}><Plug aria-hidden="true" /><span>{hub.navLabel}</span></a>
     </nav><div className="sidebar-footer"><button aria-label={t.nav.help}><CircleHelp /></button><button aria-label={t.nav.settings}><Settings /></button></div></aside>
     <section className="workspace"><header className="topbar"><button className="mobile-menu" aria-label={t.mobile.menu}><Menu /></button><Status health={health} /><div className="top-actions"><NotificationOptIn /><Bell /><UserRound /></div></header>

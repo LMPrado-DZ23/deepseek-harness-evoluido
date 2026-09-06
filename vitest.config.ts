@@ -6,6 +6,8 @@ const postgresEnabled = process.env.DZ23_POSTGRES_TEST_DSN !== undefined
 export default defineConfig({
   resolve: {
     alias: {
+      '@dz23-studio/agents': fileURLToPath(new URL('./plugins/agents/src/index.ts', import.meta.url)),
+      '@dz23-studio/assistant-bridge': fileURLToPath(new URL('./plugins/assistant-bridge/src/index.ts', import.meta.url)),
       '@dz23-studio/builder-supervisor': fileURLToPath(new URL('./plugins/builder-supervisor/src/index.ts', import.meta.url)),
       '@dz23-studio/storage-postgres/operator': fileURLToPath(new URL('./plugins/storage-postgres/src/operator.ts', import.meta.url)),
       '@dz23-studio/identity': fileURLToPath(new URL('./plugins/identity/src/index.ts', import.meta.url)),
@@ -43,6 +45,7 @@ export default defineConfig({
         'plugins/policy/src/**/*.ts': { 100: true },
         'plugins/tenancy/src/**/*.ts': { 100: true },
         'plugins/agents/src/{model,service}.ts': { 100: true },
+        'plugins/assistant-bridge/src/{catalog,closed-tool,service}.ts': { 100: true },
         'plugins/route-health/src/{model,service}.ts': { 100: true },
         'plugins/prompt-to-app/src/{model,security,state}.ts': { 100: true },
         'plugins/prompt-to-app/src/{data-generator,import-policy}.ts': { 100: true },

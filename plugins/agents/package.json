@@ -12,7 +12,11 @@
       "default": "./lib/index.js"
     }
   },
-  "files": ["lib"],
+  "files": [
+    "lib",
+    "i18n",
+    "src"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json"
   },

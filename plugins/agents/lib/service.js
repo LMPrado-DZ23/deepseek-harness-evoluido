@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-export { GitWorktreeManager, assertInsideWorktree } from './git.js';
+import { t } from './i18n.js';
+export { GitWorktreeManager } from './git.js';
 export class DelegationError extends Error {
     code;
     constructor(code, message) {
@@ -14,12 +15,19 @@ const DEFAULT_MAX_DIFF_BYTES = 2 * 1024 * 1024;
 function requiredTier(request) {
     return request.touchesDeploy || request.touchesSecrets || request.usesExternalNetwork ? 'T3' : 'T2';
 }
-function normalizeLeasePath(value) {
-    const normalized = value.replaceAll('\\', '/').replace(/^\.\//, '').replace(/\/$/, '');
-    if (normalized === '' || normalized === '.' || normalized === '*')
+export function normalizeDelegationPath(value, allowWildcard = true, invalid = path => new DelegationError('INVALID_PATH', t('delegation.invalidPath', { path }))) {
+    if (value !== value.trim() || /[\u0000-\u001f\u007f]/u.test(value)) {
+        throw invalid(value);
+    }
+    const normalized = value.replaceAll('\\', '/');
+    if (allowWildcard && normalized === '*')
         return '*';
-    if (normalized.startsWith('/') || normalized === '..' || normalized.startsWith('../') || normalized.includes('/../')) {
-        throw new DelegationError('INVALID_PATH', `Caminho de delegação inválido: ${value}`);
+    if (normalized === '' || normalized === '*' || normalized.startsWith('/') || /^[A-Za-z]:/u.test(normalized)) {
+        throw invalid(value);
+    }
+    const segments = normalized.split('/');
+    if (segments.some(segment => segment === '' || segment === '.' || segment === '..')) {
+        throw invalid(value);
     }
     return normalized;
 }
@@ -46,7 +54,7 @@ export class StudioAgentService {
         if (tier === 'T3' && !this.dependencies.identity.strongIdentityVerified(request.parent.session.id)) {
             throw new DelegationError('APPROVAL_REQUIRED', 'Confirme com sua passkey antes de iniciar esta tarefa sensível.');
         }
-        const paths = request.intendedPaths.map(normalizeLeasePath);
+        const paths = request.intendedPaths.map(path => normalizeDelegationPath(path));
         if (paths.length === 0)
             throw new DelegationError('INVALID_PATH', 'Declare ao menos um caminho que o assistente pretende alterar.');
         for (const active of this.#activePaths.values()) {
@@ -76,6 +84,27 @@ export class StudioAgentService {
             this.#activePaths.delete(runId);
             throw error;
         }
+    }
+    /** Recompute and verify a proposal without applying it or persisting its body. */
+    async reviewProposal(runId) {
+        const record = this.dependencies.repository.runs().find(candidate => candidate.run_id === runId);
+        if (record === undefined || record.status !== 'PROPOSED') {
+            throw new DelegationError('INVALID_STATE', 'Somente uma proposta pendente pode ser revisada.');
+        }
+        const snapshot = {
+            repositoryPath: record.repository_path,
+            worktreePath: record.worktree_path,
+            baseCommit: record.base_commit,
+            mainFingerprint: '',
+        };
+        const current = await this.dependencies.worktrees.diff(snapshot);
+        const currentHash = createHash('sha256').update(current.text).digest('hex');
+        if (currentHash !== record.diff_sha256
+            || current.bytes !== record.diff_bytes
+            || JSON.stringify([...current.files].sort()) !== JSON.stringify([...record.changed_files].sort())) {
+            throw new DelegationError('PROPOSAL_TAMPERED', 'PROPOSAL_TAMPERED');
+        }
+        return current;
     }
     async applyProposal(runId, approval) {
         if (!approval.approved || approval.tier !== 'T2') {

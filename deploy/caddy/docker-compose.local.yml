@@ -4,6 +4,9 @@ services:
     command: ["--profile", "studio", "--patch", "/opt/dz23-studio/deploy/harness/edge.patch.yml", "--host", "127.0.0.1", "--port", "3210", "--no-open"]
     environment:
       DSH_HOME: /var/lib/dz23-studio
+      DZ23_COORDINATOR_PRESET_ROOT: /opt/dz23-studio/dsh-home/.agent-presets
+      DZ23_AGENT_WORKTREE_ROOT: /var/lib/dz23-studio/worktrees
+      DZ23_ASSISTANT_REPOSITORIES: ${DZ23_ASSISTANT_REPOSITORIES:-[]}
       DZ23_EDGE_SECRET: ${DZ23_EDGE_SECRET:?Defina DZ23_EDGE_SECRET}
       DZ23_PUBLIC_HOST: studio.dz23.localhost:${DZ23_HTTP_PORT:-8080}
       DZ23_PUBLIC_ORIGIN: http://studio.dz23.localhost:${DZ23_HTTP_PORT:-8080}

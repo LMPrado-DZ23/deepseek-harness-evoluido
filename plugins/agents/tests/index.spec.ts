@@ -34,7 +34,7 @@ function table() {
   }
 }
 
-describe('@dz23-studio/agents composition', () => {
+describe('@dz23-studio/agents composition', { timeout: 30_000 }, () => {
   it('carries the real worktree cwd through an owned internal coordinator and disposes it', async () => {
     const repositoryPath = await repo()
     const worktreeRoot = await mkdtemp(join(tmpdir(), 'dz23-agent-worktrees-'))

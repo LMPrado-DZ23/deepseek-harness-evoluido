@@ -4,7 +4,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session';
 import type { ContentBlock } from '@deepseek-ai/dsh-llm';
 import type { SubagentRun } from '@deepseek-ai/dsh-subagent';
 import type { AgentLeaseRecord, AgentRunRecord } from './model.js';
-export { GitWorktreeManager, assertInsideWorktree } from './git.js';
+export { GitWorktreeManager } from './git.js';
 export type AgentProvider = 'spawn-in-process' | 'codex' | 'claude-code';
 export type ApprovalTier = 'T2' | 'T3';
 export interface DelegationApproval {
@@ -104,9 +104,10 @@ export interface ProposalApplied {
     readonly changedFiles: readonly string[];
 }
 export declare class DelegationError extends Error {
-    readonly code: 'APPROVAL_REQUIRED' | 'WRITE_CONFLICT' | 'INVALID_PATH' | 'INVALID_STATE' | 'PROPOSAL_TAMPERED';
-    constructor(code: 'APPROVAL_REQUIRED' | 'WRITE_CONFLICT' | 'INVALID_PATH' | 'INVALID_STATE' | 'PROPOSAL_TAMPERED', message: string);
+    readonly code: 'APPROVAL_REQUIRED' | 'WRITE_CONFLICT' | 'INVALID_PATH' | 'INVALID_STATE' | 'PROPOSAL_TAMPERED' | 'WORKTREE_TAMPERED';
+    constructor(code: 'APPROVAL_REQUIRED' | 'WRITE_CONFLICT' | 'INVALID_PATH' | 'INVALID_STATE' | 'PROPOSAL_TAMPERED' | 'WORKTREE_TAMPERED', message: string);
 }
+export declare function normalizeDelegationPath(value: string, allowWildcard?: boolean, invalid?: (path: string) => Error): string;
 export declare class StudioAgentService {
     #private;
     private readonly dependencies;
@@ -122,6 +123,8 @@ export declare class StudioAgentService {
         readonly createId?: () => string;
     });
     start(request: DelegationRequest): DelegationAccepted;
+    /** Recompute and verify a proposal without applying it or persisting its body. */
+    reviewProposal(runId: string): Promise<WorktreeDiff>;
     applyProposal(runId: string, approval: DelegationApproval): Promise<ProposalApplied>;
 }
 //# sourceMappingURL=service.d.ts.map

@@ -1,0 +1,16 @@
+{
+  "navLabel": "Conversar com o DZ23",
+  "title": "Converse com o DZ23",
+  "subtitle": "Use a conversa completa do Harness para explicar uma tarefa, acompanhar o raciocínio e aprovar ações.",
+  "reuse": "A conversa, o histórico, o envio durante a execução e o botão Parar são os componentes originais do Harness. O Studio não mantém uma segunda cópia do chat.",
+  "safetyTitle": "Como seus projetos são protegidos",
+  "safetyItems": [
+    "O assistente só trabalha em um repositório liberado pelo administrador.",
+    "Alterações são preparadas em uma cópia isolada e voltam como proposta.",
+    "Você precisa confirmar antes de iniciar e confirmar novamente antes de aplicar.",
+    "Organização, espaço e identidade vêm da sessão; a IA não escolhe esses dados."
+  ],
+  "open": "Abrir conversa segura",
+  "automaticSession": "Novas conversas usam o preset seguro dz23-assistant. Criar automaticamente uma sessão separada por este botão ainda não existe nesta versão.",
+  "back": "Voltar ao Studio"
+}

@@ -1,0 +1,24 @@
+# Conversa principal do DZ23 STUDIO. O chat, histórico, streaming e controles
+# continuam sendo os componentes oficiais do Harness; este preset adiciona
+# somente a ponte governada do Studio.
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    text: >-
+      Você é o assistente do DZ23 STUDIO. Fale em português simples. Explique
+      claramente o que é conversa, proposta, teste e aplicação. Nunca diga que
+      uma proposta foi aplicada antes da segunda confirmação da pessoa. Nesta
+      versão, somente o agente local spawn-in-process está configurado. Codex e
+      Claude Code externos não podem ser iniciados por esta ponte.
+
+- id: dz23-assistant-tools
+  name: '@dz23-studio/assistant-bridge'
+  config:
+    exposedTools:
+      - studio_agent_start
+      - studio_agent_start_sensitive
+      - studio_agent_list
+      - studio_agent_review
+      - studio_agent_cancel
+      - studio_agent_apply
+    repositories: !!js JSON.parse(process.env.DZ23_ASSISTANT_REPOSITORIES ?? '[]')

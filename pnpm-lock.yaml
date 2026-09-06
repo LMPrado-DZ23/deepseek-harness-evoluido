@@ -191,6 +191,33 @@ importers:
 
   plugins/builder-supervisor: {}
 
+  plugins/assistant-bridge:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:*
+        version: link:../../third_party/deepseek-harness/vendor/cordis
+      '@deepseek-ai/dsh-agent':
+        specifier: workspace:*
+        version: link:../../third_party/deepseek-harness/packages/core/agent
+      '@deepseek-ai/dsh-jobs':
+        specifier: workspace:*
+        version: link:../../third_party/deepseek-harness/packages/jobs/jobs
+      '@deepseek-ai/dsh-tools':
+        specifier: workspace:*
+        version: link:../../third_party/deepseek-harness/packages/core/tools
+      '@dz23-studio/agents':
+        specifier: workspace:*
+        version: link:../agents
+      '@dz23-studio/identity':
+        specifier: workspace:*
+        version: link:../identity
+      '@dz23-studio/policy':
+        specifier: workspace:*
+        version: link:../policy
+      '@dz23-studio/tenancy':
+        specifier: workspace:*
+        version: link:../tenancy
+
   plugins/hello:
     dependencies:
       '@deepseek-ai/cordis':

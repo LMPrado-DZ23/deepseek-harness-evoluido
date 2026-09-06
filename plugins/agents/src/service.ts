@@ -5,8 +5,9 @@ import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { SubagentResult, SubagentRun } from '@deepseek-ai/dsh-subagent'
 import { createHash, randomUUID } from 'node:crypto'
 import type { AgentLeaseRecord, AgentRunRecord } from './model.js'
+import { t } from './i18n.js'
 
-export { GitWorktreeManager, assertInsideWorktree } from './git.js'
+export { GitWorktreeManager } from './git.js'
 
 export type AgentProvider = 'spawn-in-process' | 'codex' | 'claude-code'
 export type ApprovalTier = 'T2' | 'T3'
@@ -120,7 +121,7 @@ export interface ProposalApplied {
 }
 
 export class DelegationError extends Error {
-  constructor(readonly code: 'APPROVAL_REQUIRED' | 'WRITE_CONFLICT' | 'INVALID_PATH' | 'INVALID_STATE' | 'PROPOSAL_TAMPERED', message: string) {
+  constructor(readonly code: 'APPROVAL_REQUIRED' | 'WRITE_CONFLICT' | 'INVALID_PATH' | 'INVALID_STATE' | 'PROPOSAL_TAMPERED' | 'WORKTREE_TAMPERED', message: string) {
     super(message)
   }
 }
@@ -134,11 +135,22 @@ function requiredTier(request: DelegationRequest): ApprovalTier {
   return request.touchesDeploy || request.touchesSecrets || request.usesExternalNetwork ? 'T3' : 'T2'
 }
 
-function normalizeLeasePath(value: string): string {
-  const normalized = value.replaceAll('\\', '/').replace(/^\.\//, '').replace(/\/$/, '')
-  if (normalized === '' || normalized === '.' || normalized === '*') return '*'
-  if (normalized.startsWith('/') || normalized === '..' || normalized.startsWith('../') || normalized.includes('/../')) {
-    throw new DelegationError('INVALID_PATH', `Caminho de delegação inválido: ${value}`)
+export function normalizeDelegationPath(
+  value: string,
+  allowWildcard = true,
+  invalid: (path: string) => Error = path => new DelegationError('INVALID_PATH', t('delegation.invalidPath', { path })),
+): string {
+  if (value !== value.trim() || /[\u0000-\u001f\u007f]/u.test(value)) {
+    throw invalid(value)
+  }
+  const normalized = value.replaceAll('\\', '/')
+  if (allowWildcard && normalized === '*') return '*'
+  if (normalized === '' || normalized === '*' || normalized.startsWith('/') || /^[A-Za-z]:/u.test(normalized)) {
+    throw invalid(value)
+  }
+  const segments = normalized.split('/')
+  if (segments.some(segment => segment === '' || segment === '.' || segment === '..')) {
+    throw invalid(value)
   }
   return normalized
 }
@@ -177,7 +189,7 @@ export class StudioAgentService {
     if (tier === 'T3' && !this.dependencies.identity.strongIdentityVerified(request.parent.session.id)) {
       throw new DelegationError('APPROVAL_REQUIRED', 'Confirme com sua passkey antes de iniciar esta tarefa sensível.')
     }
-    const paths = request.intendedPaths.map(normalizeLeasePath)
+    const paths = request.intendedPaths.map(path => normalizeDelegationPath(path))
     if (paths.length === 0) throw new DelegationError('INVALID_PATH', 'Declare ao menos um caminho que o assistente pretende alterar.')
     for (const active of this.#activePaths.values()) {
       if (pathsOverlap(active, paths)) {
@@ -205,6 +217,28 @@ export class StudioAgentService {
       this.#activePaths.delete(runId)
       throw error
     }
+  }
+
+  /** Recompute and verify a proposal without applying it or persisting its body. */
+  async reviewProposal(runId: string): Promise<WorktreeDiff> {
+    const record = this.dependencies.repository.runs().find(candidate => candidate.run_id === runId)
+    if (record === undefined || record.status !== 'PROPOSED') {
+      throw new DelegationError('INVALID_STATE', 'Somente uma proposta pendente pode ser revisada.')
+    }
+    const snapshot: WorktreeSnapshot = {
+      repositoryPath: record.repository_path,
+      worktreePath: record.worktree_path,
+      baseCommit: record.base_commit,
+      mainFingerprint: '',
+    }
+    const current = await this.dependencies.worktrees.diff(snapshot)
+    const currentHash = createHash('sha256').update(current.text).digest('hex')
+    if (currentHash !== record.diff_sha256
+      || current.bytes !== record.diff_bytes
+      || JSON.stringify([...current.files].sort()) !== JSON.stringify([...record.changed_files].sort())) {
+      throw new DelegationError('PROPOSAL_TAMPERED', 'PROPOSAL_TAMPERED')
+    }
+    return current
   }
 
   async applyProposal(runId: string, approval: DelegationApproval): Promise<ProposalApplied> {

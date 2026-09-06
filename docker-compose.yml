@@ -5,6 +5,9 @@ services:
     environment:
       HOME: /var/lib/dz23-studio
       DSH_HOME: /var/lib/dz23-studio
+      DZ23_COORDINATOR_PRESET_ROOT: /opt/dz23-studio/dsh-home/.agent-presets
+      DZ23_AGENT_WORKTREE_ROOT: /var/lib/dz23-studio/worktrees
+      DZ23_ASSISTANT_REPOSITORIES: ${DZ23_ASSISTANT_REPOSITORIES:-[]}
       DZ23_EDGE_SECRET: ${DZ23_EDGE_SECRET:?Defina DZ23_EDGE_SECRET}
       DZ23_PUBLIC_HOST: ${DZ23_PUBLIC_HOST:?Defina o dominio publico sem protocolo}
       DZ23_PUBLIC_ORIGIN: ${DZ23_PUBLIC_ORIGIN:?Defina a origem HTTPS publica}
@@ -16,7 +19,6 @@ services:
       DZ23_OPERATOR_STATE_DIR: /var/lib/dz23-studio/operator
       DZ23_POSTGRES_BACKUP_INTERVAL_MINUTES: ${DZ23_POSTGRES_BACKUP_INTERVAL_MINUTES:-60}
       DZ23_POSTGRES_BACKUP_KEEP: ${DZ23_POSTGRES_BACKUP_KEEP:-48}
-      DZ23_AGENT_WORKTREE_ROOT: /var/lib/dz23-studio/worktrees
     volumes:
       - studio-data:/var/lib/dz23-studio
       - studio-backups:/var/lib/dz23-studio-backups

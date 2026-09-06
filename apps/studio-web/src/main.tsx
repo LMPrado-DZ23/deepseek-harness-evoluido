@@ -3,9 +3,11 @@ import ReactDOM from 'react-dom/client'
 import { App } from './App'
 import { HubPanel } from './hub/HubPanel'
 import { isHubPath } from './hub/presentation'
+import { AssistantEntry, ASSISTANT_PATH } from './assistant/AssistantEntry'
 import './styles.css'
 import { registerStudioPwa } from './pwa/register'
-// `/studio/hub` opens the Integration Hub; every other path stays with the main application.
-const Screen = isHubPath(window.location.pathname) ? HubPanel : App
+const Screen = window.location.pathname === ASSISTANT_PATH
+  ? AssistantEntry
+  : isHubPath(window.location.pathname) ? HubPanel : App
 ReactDOM.createRoot(document.getElementById('root')!).render(<React.StrictMode><Screen /></React.StrictMode>)
 registerStudioPwa()

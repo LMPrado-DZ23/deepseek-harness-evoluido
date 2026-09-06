@@ -1,0 +1,79 @@
+import { type AgentRunRecord, type DelegationAccepted, type DelegationBudget, type DelegationRequest, type StudioAgentsRuntime } from '@dz23-studio/agents';
+import { type StudioRole } from '@dz23-studio/policy';
+import { type AssistantProvider } from './catalog.js';
+export type AssistantSensitiveOperation = 'secrets' | 'external-network';
+export interface AssistantRepositoryConfig {
+    readonly orgId: string;
+    readonly tenantId: string;
+    readonly workspaceId: string;
+    readonly repositoryPath: string;
+    readonly allowedPaths: readonly string[];
+    readonly providers: readonly AssistantProvider[];
+    readonly budget?: DelegationBudget;
+    readonly maxPaths?: number;
+}
+type AssistantAgent = DelegationRequest['parent'];
+type AssistantJobId = DelegationAccepted['jobId'];
+interface AssistantPrincipal {
+    readonly userId: string;
+    readonly orgId: string;
+    readonly tenantId: string;
+    readonly sessionId: string;
+    readonly role: StudioRole;
+}
+export interface AssistantRunSummary {
+    readonly run_id: string;
+    readonly status: AgentRunRecord['status'];
+    readonly provider: AssistantProvider;
+    readonly changed_files: readonly string[];
+    readonly diagnostic: string | null;
+    readonly created_at: string;
+    readonly updated_at: string;
+}
+export interface AssistantRunReview extends AssistantRunSummary {
+    readonly diff_text: string;
+    readonly main_changed_during_run: boolean;
+}
+export declare class AssistantBridgeError extends Error {
+    readonly code: 'UNAUTHENTICATED' | 'FORBIDDEN' | 'NOT_CONFIGURED' | 'INVALID_REQUEST' | 'NOT_FOUND' | 'CANCEL_UNAVAILABLE';
+    constructor(code: 'UNAUTHENTICATED' | 'FORBIDDEN' | 'NOT_CONFIGURED' | 'INVALID_REQUEST' | 'NOT_FOUND' | 'CANCEL_UNAVAILABLE', message: string);
+}
+export interface AssistantBridgeDependencies {
+    resolvePrincipal(agent: AssistantAgent): Omit<AssistantPrincipal, 'role'> | undefined;
+    authorizationFor(userId: string, orgId: string, tenantId: string): {
+        readonly role: StudioRole;
+    } | undefined;
+    readonly studioAgents: StudioAgentsRuntime;
+    killJob(jobId: AssistantJobId, owner: AssistantAgent, reason: string): 'requested' | 'already-finished';
+}
+export declare class StudioAssistantBridge {
+    #private;
+    private readonly dependencies;
+    private constructor();
+    static create(dependencies: AssistantBridgeDependencies, repositories: readonly AssistantRepositoryConfig[]): Promise<StudioAssistantBridge>;
+    start(agent: AssistantAgent | undefined, input: {
+        readonly provider: AssistantProvider;
+        readonly prompt: string;
+        readonly intendedPaths: readonly string[];
+    }, sensitive?: AssistantSensitiveOperation): {
+        run_id: string;
+        job_id: string;
+        status: "RUNNING";
+        required_tier: import("@dz23-studio/agents").ApprovalTier;
+    };
+    list(agent: AssistantAgent | undefined): readonly AssistantRunSummary[];
+    review(agent: AssistantAgent | undefined, runId: string): Promise<AssistantRunReview>;
+    cancel(agent: AssistantAgent | undefined, runId: string, reason?: string): {
+        run_id: string;
+        outcome: "requested" | "already-finished";
+        limitation: string;
+    };
+    /** Called by the authoritative Harness job lifecycle; it never changes a persisted run. */
+    releaseJob(jobId: AssistantJobId): void;
+    /** Bounded diagnostic used by the runtime proof to detect stale cancel handles. */
+    activeJobCount(): number;
+    apply(agent: AssistantAgent | undefined, runId: string): Promise<import("@dz23-studio/agents").ProposalApplied>;
+}
+export declare function normalizeRelativePath(value: string): string;
+export {};
+//# sourceMappingURL=service.d.ts.map

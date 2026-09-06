@@ -7,7 +7,7 @@ import type { AgentLeaseRecord, AgentRunRecord } from '../src/model.ts'
 import {
   DelegationError,
   StudioAgentService,
-  assertInsideWorktree,
+  normalizeDelegationPath,
   type AgentRepository,
   type DelegationRequest,
   type JobPort,
@@ -133,6 +133,19 @@ function harness(options: {
 }
 
 describe('StudioAgentService PoC 3A', () => {
+  it('uses one canonical lease-path grammar and rejects ambiguous platform paths', () => {
+    expect(normalizeDelegationPath('src/safe')).toBe('src/safe')
+    expect(normalizeDelegationPath('src\\safe')).toBe('src/safe')
+    expect(normalizeDelegationPath('*')).toBe('*')
+    for (const value of [
+      '', '.', './src', 'src/.', 'src/..', 'src//safe', '/src', '\\server\\share',
+      'C:/src', 'C:\\src', ' src', 'src ', 'src\0safe', 'src\nsafe',
+    ]) {
+      expect(() => normalizeDelegationPath(value)).toThrowError(expect.objectContaining({ code: 'INVALID_PATH' }))
+    }
+    expect(() => normalizeDelegationPath('*', false)).toThrowError(expect.objectContaining({ code: 'INVALID_PATH' }))
+  })
+
   it('requires the exact T2 or T3 approval before creating any work', () => {
     const h = harness()
     expect(() => h.service.start(request({ approval: { approved: false, tier: 'T2', approvedBy: 'u' } })))
@@ -162,6 +175,18 @@ describe('StudioAgentService PoC 3A', () => {
     expect(h.repository.leases()[0]).toMatchObject({ active: false, paths: ['src'], released_at: expect.any(String) })
     expect(h.childDispose).toHaveBeenCalledOnce()
     expect(h.coordinatorDispose).toHaveBeenCalledOnce()
+  })
+
+  it('recomputes a proposal for review and rejects a changed worktree without persisting the diff body', async () => {
+    const diff = { text: 'diff --git a/src/a.ts b/src/a.ts', bytes: 35, files: ['src/a.ts'] }
+    const h = harness({ diff })
+    const accepted = h.service.start(request())
+    await h.jobs.entries[0]!.done
+    await expect(h.service.reviewProposal(accepted.runId)).resolves.toEqual(diff)
+    expect(JSON.stringify(h.repository.runs()[0])).not.toContain('diff_text')
+    diff.text = 'tampered'
+    await expect(h.service.reviewProposal(accepted.runId)).rejects.toMatchObject({ code: 'PROPOSAL_TAMPERED' })
+    await expect(h.service.reviewProposal('missing')).rejects.toMatchObject({ code: 'INVALID_STATE' })
   })
 
   it('requires a second T2 approval to apply a reviewed proposal and records the result', async () => {
@@ -239,13 +264,10 @@ describe('StudioAgentService PoC 3A', () => {
     expect(timed.repository.runs()[0]?.status).toBe('BUDGET_EXCEEDED')
   })
 
-  it('rejects unsafe declarations and validates absolute output paths', () => {
+  it('rejects unsafe declarations', () => {
     const h = harness()
     expect(() => h.service.start(request({ intendedPaths: [] }))).toThrowError(expect.objectContaining({ code: 'INVALID_PATH' }))
     expect(() => h.service.start(request({ intendedPaths: ['../outside'] }))).toThrow(/inválido/)
-    expect(assertInsideWorktree('/copies/run', '/copies/run/src/a.ts')).toBe('src/a.ts')
-    expect(() => assertInsideWorktree('/copies/run', 'src/a.ts')).toThrow(/absoluto/)
-    expect(() => assertInsideWorktree('/copies/run', '/copies/outside.ts')).toThrow(/fora da cópia/)
   })
 
   it('releases admission when job registration fails', () => {
@@ -284,7 +306,7 @@ describe('StudioAgentService PoC 3A', () => {
       createId: () => `run-${++id}`,
       resultFactory: () => id === 1 ? new Promise(resolve => { release = resolve }) : Promise.resolve(completed('')),
     })
-    h.service.start(request({ intendedPaths: ['.'] }))
+    h.service.start(request({ intendedPaths: ['*'] }))
     await vi.waitFor(() => expect(h.repository.leases()[0]?.paths).toEqual(['*']))
     release(completed())
     await h.jobs.entries[0]!.done

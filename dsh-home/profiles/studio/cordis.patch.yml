@@ -3,7 +3,7 @@
 
 - id: agent-presets
   config:
-    default: standard
+    default: dz23-assistant
     roots: !!js >-
       process.env.DZ23_COORDINATOR_PRESET_ROOT
         ? [{ path: process.env.DZ23_COORDINATOR_PRESET_ROOT, trust: 'system' }]
@@ -78,6 +78,42 @@
           write:
             source:
               kind: harness
+            inferredTier: T2
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          studio_agent_start:
+            source: { kind: studio, external: false, stableChannel: true }
+            inferredTier: T2
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          studio_agent_start_sensitive:
+            source: { kind: studio, external: false, stableChannel: true }
+            inferredTier: T3
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          studio_agent_list:
+            source: { kind: studio, external: false, stableChannel: true }
+            inferredTier: T0
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          studio_agent_review:
+            source: { kind: studio, external: false, stableChannel: true }
+            inferredTier: T0
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          studio_agent_cancel:
+            source: { kind: studio, external: false, stableChannel: true }
+            inferredTier: T2
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          studio_agent_apply:
+            source: { kind: studio, external: false, stableChannel: true }
             inferredTier: T2
             sandboxMode: workspace-write
             requiredPermission: project.write
