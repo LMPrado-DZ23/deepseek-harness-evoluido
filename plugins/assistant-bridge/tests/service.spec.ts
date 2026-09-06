@@ -167,6 +167,7 @@ describe('StudioAssistantBridge', () => {
   it.each([
     ['another repository', { repository_path: 'C:/not-configured/repository' }],
     ['a path outside the administrative allowlist', { changed_files: ['outside-policy/secret.ts'] }],
+    ['an invalid traversal path', { changed_files: ['../outside-policy/secret.ts'] }],
   ] satisfies ReadonlyArray<readonly [string, Partial<AgentRunRecord>]>)('hides and rejects a local run bound to %s', async (_label, override) => {
     const h = await harness()
     h.runs.splice(0, h.runs.length, run({ repository_path: h.repositoryPath, ...override }))
@@ -365,6 +366,17 @@ describe('StudioAssistantBridge', () => {
       .rejects.toThrow(/diretório/)
     await expect(StudioAssistantBridge.create(dependencies, [{ ...h.config, repositoryPath: 12 as never }]))
       .rejects.toThrow(/precisam ser texto/)
+  })
+
+  it('rejects a Git root whose HEAD entry disappears', async () => {
+    const h = await harness()
+    await rm(join(h.repositoryPath, '.git', 'HEAD'))
+    await expect(StudioAssistantBridge.create({
+      resolvePrincipal: () => undefined,
+      authorizationFor: () => undefined,
+      studioAgents: {} as never,
+      killJob: vi.fn(),
+    }, [h.config])).rejects.toThrow(/Git/)
   })
 
   it('rejects a .git symlink to an external directory before any agent work can start', async () => {

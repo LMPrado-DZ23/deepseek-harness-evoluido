@@ -104,9 +104,6 @@ export class StudioAssistantBridge {
     if (!isAssistantProvider(input.provider)) {
       throw new AssistantBridgeError('NOT_CONFIGURED', t('errors.externalProviderNotConfigured'))
     }
-    if (!repository.providers.has(input.provider)) {
-      throw new AssistantBridgeError('FORBIDDEN', t('errors.providerForbidden'))
-    }
     const maxPaths = repository.maxPaths
     if (input.intendedPaths.length === 0 || input.intendedPaths.length > maxPaths) {
       throw new AssistantBridgeError('INVALID_REQUEST', t('errors.pathCount', { max: maxPaths }))

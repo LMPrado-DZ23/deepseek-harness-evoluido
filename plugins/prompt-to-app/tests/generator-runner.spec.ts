@@ -67,6 +67,7 @@ describe('generated file fence', () => {
     expect(isValidCpf('529.982.247-25')).toBe(true)
     expect(isValidCpf('123.456.789-00')).toBe(false)
     expect(scanGeneratedContent({ 'src/a.ts': 'const key="sk-abcdefghijklmnopqrstuvwxyz"', 'content/a': 'CPF 529.982.247-25' })).toEqual(['src/a.ts:SECRET_PATTERN', 'content/a:PII_PATTERN'])
+    expect(scanGeneratedContent({ 'content/a': 'cpf: 52998224725' })).toEqual(['content/a:PII_PATTERN'])
     expect(scanGeneratedContent({ 'src/a.ts': 'Telefone 11987654321' })).toEqual([])
   })
 })
