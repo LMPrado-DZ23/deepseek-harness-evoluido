@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { IdentityError, SESSION_COOKIE, type StudioIdentityService } from '@dz23-studio/identity'
-import { apply, createStudioWebHandler } from '../src/index.js'
+import { AssistantSessionLaunchError, apply, createStudioWebHandler } from '../src/index.js'
 
 const servers: ReturnType<typeof createServer>[] = []; const temporary: string[] = []
 afterEach(async () => {
@@ -16,7 +16,10 @@ afterEach(async () => {
 async function fixture(previewFrameSources: readonly string[] = []) {
   const root = await mkdtemp(join(tmpdir(), 'dz23-web-')); temporary.push(root)
   await mkdir(join(root, 'assets')); await writeFile(join(root, 'index.html'), '<main>DZ23 STUDIO</main>'); await writeFile(join(root, 'assets/app.js'), 'ok')
-  const identity = { authenticate: vi.fn(() => Promise.resolve({ session_id: 'session' })) }
+  const identity = {
+    authenticate: vi.fn(() => Promise.resolve({ session_id: 'session' })),
+    validateCsrfToken: vi.fn(),
+  }
   const allowedHosts: string[] = []
   const allowedOrigins: string[] = []
   const assistantSessions = { launch: vi.fn(async () => ({ session_id: 'assistant-1', reused: false, preset: 'dz23-assistant' as const })) }
@@ -85,6 +88,13 @@ describe('authenticated Studio web surface', () => {
 
   it('reports launcher policy failures as JSON and fails closed when the launcher is absent', async () => {
     const f = await fixture()
+    f.assistantSessions.launch.mockRejectedValueOnce(new AssistantSessionLaunchError('FORBIDDEN', 'Projeto não liberado.'))
+    const denied = await f.request('/assistant/session', {
+      method: 'POST', body: '{}', headers: { origin: `http://${f.host}`, 'x-dz23-csrf': 'csrf' },
+    })
+    expect(denied.status).toBe(403)
+    expect(await denied.json()).toEqual({ error: 'Projeto não liberado.' })
+
     f.assistantSessions.launch.mockRejectedValueOnce(Object.assign(new Error('Projeto não liberado.'), {
       code: 'FORBIDDEN', name: 'AssistantSessionLaunchError',
     }))
@@ -96,18 +106,22 @@ describe('authenticated Studio web surface', () => {
 
     const root = await mkdtemp(join(tmpdir(), 'dz23-web-no-launcher-')); temporary.push(root)
     await writeFile(join(root, 'index.html'), 'ok')
+    const noLauncherHosts: string[] = []
+    const noLauncherOrigins: string[] = []
     const noLauncher = createServer(createStudioWebHandler({
       distDirectory: root,
       identity: f.identity as unknown as StudioIdentityService,
-      allowedHosts: [f.host],
-      allowedOrigins: [`http://${f.host}`],
+      allowedHosts: noLauncherHosts,
+      allowedOrigins: noLauncherOrigins,
     }))
     servers.push(noLauncher)
     await new Promise<void>((resolve, reject) => { noLauncher.once('error', reject); noLauncher.listen(0, '127.0.0.1', resolve) })
     const port = (noLauncher.address() as AddressInfo).port
+    const noLauncherHost = `127.0.0.1:${port}`
+    noLauncherHosts.push(noLauncherHost); noLauncherOrigins.push(`http://${noLauncherHost}`)
     const missing = await fetch(`http://127.0.0.1:${port}/studio/assistant/session`, {
       method: 'POST', body: '{}', headers: {
-        host: f.host, origin: `http://${f.host}`, cookie: `${SESSION_COOKIE}=token`, 'x-dz23-csrf': 'csrf',
+        origin: `http://${noLauncherHost}`, cookie: `${SESSION_COOKIE}=token`, 'x-dz23-csrf': 'csrf',
       },
     })
     expect(missing.status).toBe(503)
