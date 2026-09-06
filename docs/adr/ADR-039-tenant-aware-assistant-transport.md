@@ -22,9 +22,15 @@ mensagem e cancelamento exige simultaneamente:
 
 - sessão de identidade ativa e não revogada;
 - organização e tenant derivados no servidor;
-- papel com `project.read` no escopo atual;
+- papel com `project.read` para consultar o histórico e `project.write` para
+  criar/retomar, enviar mensagem ou cancelar trabalho;
 - vínculo exclusivo entre a sessão de identidade e o identificador interno da
   conversa.
+
+Uma pessoa `viewer` pode consultar o histórico já pertencente à sua sessão,
+mas não pode criar uma conversa, gerar custo, iniciar trabalho do Agent nem
+cancelar uma execução. As ferramentas do Assistente continuam aplicando seus
+próprios tiers e permissões; esta barreira externa não os substitui.
 
 Identificadores desconhecidos, de outra pessoa ou com vínculo ambíguo retornam o
 mesmo estado público de conversa inexistente. O servidor nunca devolve headers,

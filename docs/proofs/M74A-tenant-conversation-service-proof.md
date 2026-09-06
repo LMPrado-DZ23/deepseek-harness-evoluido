@@ -6,6 +6,11 @@ existem. Base M73 `dcae68bf80d3f1f4ecee4b97782d60d9bc9467f5`;
 implementação de código em `1f5f937`. Nenhum merge na principal, push, PR,
 deploy ou uso de Docker foi realizado.
 
+Hardening de autorização em `251ffd1`: a revisão adversarial confirmou que
+o `viewer` podia criar, enviar e cancelar usando apenas `project.read`. O serviço
+e o launcher agora exigem `project.write` antes de qualquer uma dessas ações;
+o histórico próprio permanece legível com `project.read`.
+
 ## Problema
 
 O bloqueio da M73 eliminou a exposição cruzada, mas deixou o modo equipe sem
@@ -21,8 +26,10 @@ reabrir sua API, RPC, WebSocket ou diário bruto.
   organização e tenant;
 - `launchTenantConversation` cria a sessão interna governada sem abrir o cliente
   oficial, que continua pessoal-only;
-- `AssistantConversationService` autoriza `open`, `snapshot`, `send` e `cancel`
-  em toda chamada e aceita somente texto de até 32 KiB;
+- `AssistantConversationService` autoriza toda chamada: `snapshot` exige
+  `project.read`, enquanto `open`, `send` e `cancel` exigem `project.write`; um
+  `viewer` consegue ler o próprio histórico, mas nunca criar custo ou trabalho;
+  mensagens aceitas continuam somente texto de até 32 KiB;
 - o sanitizador usa allowlist de seis tipos públicos e elimina headers, `cwd`,
   configuração, raciocínio, argumentos/resultados de ferramentas, contexto de
   plugins, replay interno e eventos desconhecidos;
@@ -52,6 +59,11 @@ SHA-256 `862b92782c2f5cd67f81debd1116b16150dfafd84fb4ce2602a729f9cf3d26dc`.
 - `plugins/identity/src/**`: **100%** nas quatro métricas;
 - `assistant-session.ts` e `assistant-conversation.ts`: **100%** nas quatro
   métricas;
+- regressão de permissão após `251ffd1`: **15/15** testes focados e 100% nas
+  quatro métricas dos dois serviços;
+- validação cumulativa pós-hardening: typecheck, build da interface e dos 16
+  plugins, i18n, escopos, 24 rotas de domínio, catálogo de 13 ferramentas,
+  portabilidade e pin upstream: PASS;
 - i18n: PASS, 13 catálogos, 287 chaves, sem crescimento do legado;
 - escopos, 24 rotas de domínio, catálogo de 13 ferramentas, portabilidade e pin
   upstream com cinco fixtures negativas: PASS.
@@ -59,8 +71,17 @@ SHA-256 `862b92782c2f5cd67f81debd1116b16150dfafd84fb4ce2602a729f9cf3d26dc`.
 O primeiro passe integral teve um timeout de 5 s no teste de descritores sob
 paralelismo. A cobertura paralela também excedeu 5 s em duas provas de 20 mil
 entradas e expôs uma corrida de teste de socket. Cada uma passou 3/3 isolada; a
-suíte completa e a cobertura passaram com um worker. Classificação: ambiente e
-competição por I/O, classe (d), sem alteração nos pacotes não relacionados.
+suíte completa e a cobertura passaram com um worker antes do hardening.
+
+Após `251ffd1`, a rodada cumulativa com cobertura e um worker registrou **2.041
+PASS / 62 SKIP / 3 timeouts**: duas provas TAR de 20 mil entradas e o inventário
+de escopos excederam seus limites de 5 s/15 s sob a carga total. Os dois arquivos
+foram reexecutados isoladamente logo depois e fecharam **20/20 PASS** em 16,13 s;
+os três casos que haviam expirado terminaram em 1,50 s, 2,68 s e 1,71 s. Como a
+rodada falhou, ela não é declarada verde nem usada para publicar nova cobertura
+global. A prova focada da mudança permanece 15/15 e 100% nos dois serviços.
+Classificação: contenção de I/O/CPU, classe (d), sem falha lógica reproduzível e
+sem alteração nos pacotes envolvidos.
 
 O `build:official` do upstream encontrou a limitação já conhecida do postinstall
 em worktree Git vinculado. Foram reutilizadas apenas as saídas `lib/**` do

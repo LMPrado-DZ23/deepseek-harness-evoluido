@@ -3,13 +3,13 @@
 - mission_id: `DZ23-STUDIO-V1-20260904`
 - objetivo: concluir o DZ23 STUDIO v1.0 com runtime portátil, geração isolada, gates Windows/Linux, testes com cinco pessoas e pacote open source somente após licença escolhida
 - estado: `REVIEW_REQUIRED`
-- iteração: 17
+- iteração: 19
 - início: 2026-09-04
-- último heartbeat: 2026-09-06T12:16:00-03:00
-- último progresso real: M73 bloqueou fail-closed o cliente oficial do Harness em instalações edge/equipe e fechou suíte cumulativa e cobertura crítica
-- tarefa atual: empacotar o pin M73 e aguardar revisão independente do Claude, sem merge na principal
-- branch: `codex/m73-assistant-tenant-boundary`
-- base: `646c47b53ad7c76c0ca3010e6abdd7001aec0ae0`
+- último heartbeat: 2026-09-06T14:07:49-03:00
+- último progresso real: gates pós-hardening fecharam; três timeouts cumulativos passaram 20/20 na reexecução isolada
+- tarefa atual: selar a nova ponta M74-A e entregar revisão cumulativa ao Claude, sem merge na principal nem início da M74-B
+- branch: `codex/m74-tenant-chat-service`
+- base: `dcae68bf80d3f1f4ecee4b97782d60d9bc9467f5`
 - upstream: `deepseek-harness@6c705be1ce6774a000d061da41d1823b03a3d42c`
 - staging válido: `/home/leandro/dz23-gates/m63-integration-20260906`
 - staging de teste M73: `/home/leandro/dz23-gates/m73-clean-dc35c1f`
@@ -21,17 +21,24 @@
   `SessionController` fixado sem expor Remote, RPC, WebSocket ou diário bruto;
 - cada conversa tem um único proprietário de sessão de identidade; vínculo
   ausente, revogado, cruzado ou ambíguo falha fechado;
-- toda leitura, mensagem e cancelamento repete autorização de pessoa,
-  organização, tenant e papel;
+- toda operação repete autorização de pessoa, organização, tenant e papel;
+  leitura exige `project.read`, e criar/retomar, enviar ou cancelar exige
+  `project.write`;
 - a saída pública aceita somente seis tipos de evento e remove contexto interno,
   ferramentas, raciocínio, headers, caminhos e configuração;
-- 2.043 testes passaram, 62 integrações PostgreSQL foram puladas e a cobertura
-  global ficou em 96,15/93,65/96,65/98,17%; identidade e os dois serviços do
-  Assistente ficaram em 100%;
+- baseline anterior: 2.043 testes passaram, 62 integrações PostgreSQL foram
+  puladas e a cobertura global ficou em 96,15/93,65/96,65/98,17%; identidade e
+  os dois serviços do Assistente ficaram em 100%;
 - typecheck, build, i18n, domínios, catálogo, portabilidade e pin passaram;
 - nenhuma rota HTTP/SSE ou interface foi adicionada: conversa multiusuário
   continua `NOT_SUPPORTED` até M74-B/C;
 - prova detalhada em `docs/proofs/M74A-tenant-conversation-service-proof.md`.
+- hardening `251ffd1`: `viewer` lê o próprio histórico, mas criar/retomar,
+  enviar e cancelar exigem `project.write`; 15/15 testes focados e 100% de
+  cobertura nos dois serviços.
+- rodada cumulativa pós-hardening: 2.041 PASS / 62 SKIP / 3 timeouts em provas
+  pesadas não relacionadas; reexecução imediata dos dois arquivos: 20/20 PASS.
+  Typecheck, build, i18n, escopos, rotas, catálogo, portabilidade e pin: PASS.
 
 ## Checkpoint anterior — M73
 
