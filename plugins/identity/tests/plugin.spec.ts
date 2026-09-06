@@ -100,6 +100,26 @@ describe('identity Cordis plugin composition', () => {
     const registration = await runtime.service.beginPasskeyRegistration(issued.token)
     await runtime.service.finishPasskeyRegistration(issued.token, registration.challengeId, {} as never, 'Windows Hello')
     await runtime.service.bindHarnessSession(issued.session, 'agent-1')
+    const launch = { status: 0, headers: {} as Record<string, string> }
+    await f.getRoute()!.handler({
+      method: 'GET',
+      url: '/api/studio/identity/harness/session',
+      headers: { host: '127.0.0.1:4321', cookie: `${SESSION_COOKIE}=${issued.token}` },
+      socket: { remoteAddress: '127.0.0.1' },
+    } as never, {
+      writableEnded: false,
+      setHeader: () => undefined,
+      writeHead: (status: number, headers: Record<string, string>) => { launch.status = status; launch.headers = headers },
+      end: () => undefined,
+    } as never)
+    expect(launch).toEqual({
+      status: 303,
+      headers: {
+        'cache-control': 'no-store',
+        location: 'http://127.0.0.1:4321/?token=harness',
+        'referrer-policy': 'no-referrer',
+      },
+    })
     expect(f.getResolver()?.({ agent: { session: { id: 'agent-1' } } } as never)).toEqual({ authenticated: true, strongIdentityVerified: false })
     const parent = { session: { id: 'agent-1', header: {} } }
     const coordinator = { session: { id: 'coordinator', header: { parentSession: 'agent-1' } } }

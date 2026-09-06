@@ -54,11 +54,16 @@ afterEach(async () => Promise.all(servers.splice(0).map(server => new Promise<vo
 
 async function fixture(
   bindHost: '127.0.0.1' | '0.0.0.0' = '127.0.0.1',
-  edge?: { required?: boolean; secret?: string; harnessAuthenticationUrl?: (baseUrl: string) => string | undefined },
+  edge?: {
+    required?: boolean
+    secret?: string
+    sharedHarnessClientAllowed?: boolean
+    harnessAuthenticationUrl?: (baseUrl: string) => string | undefined
+  },
 ) {
   const service = fakeService()
   const edgeRequired = edge?.required ?? edge !== undefined
-  service.isSharedHarnessClientAllowed.mockReturnValue(!edgeRequired)
+  service.isSharedHarnessClientAllowed.mockReturnValue(edge?.sharedHarnessClientAllowed ?? !edgeRequired)
   const allowedHosts: string[] = []
   const allowedOrigins: string[] = []
   const server = createServer(createIdentityHttpHandler({
@@ -232,6 +237,28 @@ describe('identity HTTP boundary', () => {
     expect(exchange.status).toBe(403)
     expect(exchange.headers.get('location')).toBeNull()
     expect(f.service.isSharedHarnessClientAllowed).toHaveBeenCalledWith(session)
+
+    const defensiveForwarding = await fixture('0.0.0.0', {
+      secret: 'edge-secret',
+      sharedHarnessClientAllowed: true,
+      harnessAuthenticationUrl: baseUrl => `${baseUrl}?token=native-launch`,
+    })
+    const forwardedHttp = await defensiveForwarding.request('/harness/session', {
+      method: 'GET', redirect: 'manual', headers: {
+        'x-dz23-edge': 'edge-secret',
+        'x-forwarded-proto': 'http',
+        cookie: `${SESSION_COOKIE}=session-token`,
+      },
+    })
+    expect(forwardedHttp.headers.get('location')).toBe(`http://${defensiveForwarding.host}/?token=native-launch`)
+    const invalidForwardedProtocol = await defensiveForwarding.request('/harness/session', {
+      method: 'GET', redirect: 'manual', headers: {
+        'x-dz23-edge': 'edge-secret',
+        'x-forwarded-proto': 'ftp',
+        cookie: `${SESSION_COOKIE}=session-token`,
+      },
+    })
+    expect(invalidForwardedProtocol.headers.get('location')).toBe(`https://${defensiveForwarding.host}/?token=native-launch`)
 
     const personal = await fixture('127.0.0.1', {
       required: false,
