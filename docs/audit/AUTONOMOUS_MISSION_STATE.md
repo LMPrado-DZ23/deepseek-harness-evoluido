@@ -3,12 +3,12 @@
 - `mission_id`: `M1-M6-finalizacao-2026-09-04`
 - `objective`: integrar e provar M1-M6 com segurança, sem push, PR, deploy ou exclusões não autorizadas
 - `state`: `INTEGRATING_AND_PROVING`
-- `iteration`: `2026-09-06.17`
+- `iteration`: `2026-09-06.18`
 - `started_at`: `2026-09-04 America/Sao_Paulo`
-- `heartbeat_at`: `2026-09-06T17:30:08-03:00`
-- `last_progress_at`: `2026-09-06T17:30:08-03:00`
-- `branch`: `codex/m77-windows-lifecycle-runner`
-- `head`: `78e80451af4b93df855b961f765b2273e01734fa`
+- `heartbeat_at`: `2026-09-06T18:03:00-03:00`
+- `last_progress_at`: `2026-09-06T18:03:00-03:00`
+- `branch`: `codex/m78-windows-release-evidence-gate`
+- `head`: `56fd26f7fb40964f44094c43165f54fdda1f3efa`
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c`
 
 ## Critérios de aceite
@@ -51,6 +51,13 @@
   `PASS` sem executar o lifecycle. `78e8045` separa a simulação como
   `SIMULATED_PASS`; o scan de verificação fechou com zero achados e a suíte
   Windows cumulativa passou 18/18. O lifecycle real continua `NOT_EXECUTED`.
+- M78 adicionou um gate somente leitura para a evidência real do M77: estado,
+  17 fases, commits, hashes, snapshots e trust store são validados antes de
+  emitir o único token de release. O scan inicial encontrou que hashes
+  autodeclarados permitiam forjar o pacote inteiro; `56fd26f` passa a exigir o
+  SHA-256 final do relatório por canal externo antes do parse. A verificação de
+  segurança fechou com zero achados e a suíte Windows passou 23/23. O lifecycle
+  real continua `NOT_EXECUTED`.
 - Claude entregou M3+M4+M5 em `9034a85`; transporte íntegro, mas ainda baseado em `b95d23c`. A composição sobre `d819314` foi solicitada novamente com evidência do merge-base.
 - Preview recebeu o checkpoint isolado `7273b38`: instalação offline com lock congelado, 178/178 testes e build passaram em WSL/ext4. A prova de ausência usa `previewId`, portanto uma troca de `runtimeRef` não libera capacidade prematuramente.
 - Retenção fail-closed foi fechada em `011f118`: nenhuma remoção física de artefatos na v1, 28/28 testes executados, 2 skips explícitos e 21/21 no namespace Linux com bind mounts reais.
@@ -96,10 +103,12 @@
 2. manter M74-B parado até GO explícito de M74-A e não tocar na M72 de Claude;
 3. Claude revisar somente leitura o M77; a execução real fica aguardando
    imagens finais e autorização explícita para Docker;
-4. integrar por commits verificáveis somente após parecer independente, sem
+4. Claude revisar somente leitura o M78 (`6d88639..56fd26f`), incluindo a
+   âncora externa do relatório; nenhuma execução real é autorizada por isso;
+5. integrar por commits verificáveis somente após parecer independente, sem
    aceitar exclusões de `plugins/*/lib/**`;
-5. rodar gates completos serializados em WSL/ext4 e auditoria final independente;
-6. executar o lifecycle Windows real com as imagens produzidas quando o Docker
+6. rodar gates completos serializados em WSL/ext4 e auditoria final independente;
+7. executar o lifecycle Windows real com as imagens produzidas quando o Docker
    for explicitamente autorizado.
 
 ## Instruções de retomada
