@@ -1,0 +1,213 @@
+import { createHash, randomBytes } from 'node:crypto'
+import { constants, type Stats } from 'node:fs'
+import { lstat, open, realpath, type FileHandle } from 'node:fs/promises'
+import { posix } from 'node:path'
+import {
+  PRODUCTION_BUILDER_ROOT_POLICY,
+  classifyBuilderUnixClientFailure,
+  createBuilderUnixClient,
+  deriveBuilderRuntimeScopeId,
+  loadBuilderRuntimeRegistry,
+  loadPinnedBuilderSupervisorConfig,
+  type BuilderRuntimeRegistry,
+  type BuilderSupervisorResolvedConfig,
+  type BuilderSupervisorRootPolicy,
+  type BuilderUnixClient,
+} from '@dz23-studio/builder-supervisor'
+import { roleAllows } from '@dz23-studio/policy'
+import type { PromptToAppActor } from './service.js'
+import {
+  BuilderLifecycleError,
+  managedBuild,
+  type BuilderLifecycleFinished,
+  type BuilderLifecycleResolverPort,
+  type BuilderLifecycleSession,
+} from './builder-lifecycle.js'
+
+export const PROMPT_APP_BUILDER_INSTANCE_ID = 'prompt_app_v1'
+
+export interface BuilderLifecycleResolverOptions {
+  readonly registryReference: `file:${string}`
+  readonly roots?: BuilderSupervisorRootPolicy
+  readonly instanceId?: typeof PROMPT_APP_BUILDER_INSTANCE_ID
+  readonly dependencies?: Partial<BuilderLifecycleResolverDependencies>
+}
+
+export interface BuilderLifecycleResolverDependencies {
+  readonly loadRegistry: typeof loadBuilderRuntimeRegistry
+  readonly loadConfig: typeof loadPinnedBuilderSupervisorConfig
+  readonly createClient: typeof createBuilderUnixClient
+  readonly readCredential: (reference: string, signal: AbortSignal) => Promise<string>
+}
+
+const DEFAULT_DEPENDENCIES: BuilderLifecycleResolverDependencies = {
+  loadRegistry: loadBuilderRuntimeRegistry,
+  loadConfig: loadPinnedBuilderSupervisorConfig,
+  createClient: createBuilderUnixClient,
+  readCredential: readSecureLifecycleCredential,
+}
+
+export class ManagedBuilderLifecycleResolver implements BuilderLifecycleResolverPort<PromptToAppActor> {
+  readonly #roots: BuilderSupervisorRootPolicy
+  readonly #instanceId: typeof PROMPT_APP_BUILDER_INSTANCE_ID
+  readonly #dependencies: BuilderLifecycleResolverDependencies
+
+  constructor(private readonly options: BuilderLifecycleResolverOptions) {
+    this.#roots = options.roots ?? PRODUCTION_BUILDER_ROOT_POLICY
+    this.#instanceId = options.instanceId ?? PROMPT_APP_BUILDER_INSTANCE_ID
+    this.#dependencies = { ...DEFAULT_DEPENDENCIES, ...options.dependencies }
+  }
+
+  async forActor(actor: PromptToAppActor): Promise<BuilderLifecycleSession> {
+    if (!roleAllows(actor.role, 'project.write')) throw new BuilderLifecycleError('BLOCKED_EXTERNAL', 'BUILDER_ROLE_REQUIRED')
+    try {
+      const registry = await this.#dependencies.loadRegistry(this.options.registryReference, this.#roots)
+      const tenantId = opaqueTenantIdentity(actor.orgId, actor.tenantId)
+      const scopeId = deriveBuilderRuntimeScopeId({ installationId: registry.installationId, tenantId, instanceId: this.#instanceId })
+      const slots = registry.slots.filter(candidate => candidate.scopeId === scopeId && candidate.state === 'active')
+      if (slots.length !== 1) unavailable('BUILDER_SCOPE_UNAVAILABLE')
+      const slot = slots[0]!
+      const config = await this.#dependencies.loadConfig(slot.configReference, slot.configSha256, this.#roots)
+      assertResolvedScope(config, registry, tenantId, this.#instanceId, scopeId)
+      const credentialReference = `file:${posix.join(this.#roots.secretRoot, 'instances', scopeId, 'token')}`
+      const client = this.#dependencies.createClient({
+        socketPath: config.socketPath,
+        credentialRef: credentialReference,
+        credentials: { resolve: (reference, signal) => this.#dependencies.readCredential(reference, signal) },
+      })
+      const lifecycleScope: BuilderLifecycleResolvedScope = {
+        scopeId: config.scopeId,
+        imageDigest: config.imageDigest,
+        policySha256: config.policySha256,
+      }
+      return lifecycleSession(client, lifecycleScope)
+    } catch (error) {
+      if (error instanceof BuilderLifecycleError) throw error
+      throw new BuilderLifecycleError('BLOCKED_EXTERNAL', 'BUILDER_SCOPE_UNAVAILABLE', { cause: error })
+    }
+  }
+}
+
+type BuilderLifecycleResolvedScope = Pick<BuilderSupervisorResolvedConfig, 'scopeId' | 'imageDigest' | 'policySha256'>
+
+function lifecycleSession(client: BuilderUnixClient, config: BuilderLifecycleResolvedScope): BuilderLifecycleSession {
+  const invoke = async <T>(action: () => Promise<T>): Promise<T> => {
+    try { return await action() }
+    catch (error) {
+      if (error instanceof BuilderLifecycleError) throw error
+      const classification = classifyBuilderUnixClientFailure(error)
+      const state = classification.state === 'INTERNAL' ? 'INTERRUPTED' : classification.state
+      throw new BuilderLifecycleError(state, classification.code, { cause: error })
+    }
+  }
+  const requestId = () => `req_${randomBytes(16).toString('hex')}`
+  const callSignal = (signal?: AbortSignal) => signal ?? AbortSignal.timeout(240_000)
+  return {
+    preflight: async signal => {
+      try {
+        const result = await client.preflight({ request_id: requestId() }, { signal: callSignal(signal) })
+        if (result.state !== 'OK' || result.scope_id !== config.scopeId || result.image_id !== config.imageDigest || result.policy_sha256 !== config.policySha256) {
+          return { state: 'BLOCKED_EXTERNAL' }
+        }
+        // The supervisor has no authenticated archive/stream ingress yet. An
+        // attested manager alone is not enough to advertise a buildable route.
+        return { state: 'BLOCKED_EXTERNAL' }
+      } catch { return { state: 'BLOCKED_EXTERNAL' } }
+    },
+    prepare: async () => { throw new BuilderLifecycleError('BLOCKED_EXTERNAL', 'UNSUPPORTED_INGRESS') },
+    execute: async () => { throw new BuilderLifecycleError('BLOCKED_EXTERNAL', 'UNSUPPORTED_INGRESS') },
+    cancel: (buildRef, signal) => invoke(async () => { await client.cancel({ request_id: requestId(), build_ref: buildRef }, { signal: callSignal(signal) }) }),
+    finish: (buildRef, signal) => invoke(async () => {
+      const value = await client.finish({ request_id: requestId(), build_ref: buildRef }, { signal: callSignal(signal) })
+      return {
+        finalState: value.final_state,
+        exported: value.exported,
+        cleanupPending: value.cleanup_pending,
+        cleaned: value.cleaned,
+      } satisfies BuilderLifecycleFinished
+    }),
+    listManaged: signal => invoke(async () => (await client.listManaged({ request_id: requestId() }, { signal: callSignal(signal) })).builds.map(managedBuild)),
+  }
+}
+
+function assertResolvedScope(
+  config: BuilderSupervisorResolvedConfig,
+  registry: BuilderRuntimeRegistry,
+  tenantId: string,
+  instanceId: string,
+  scopeId: string,
+): void {
+  if (config.installationId !== registry.installationId || config.tenantId !== tenantId || config.instanceId !== instanceId || config.scopeId !== scopeId) unavailable('BUILDER_SCOPE_MISMATCH')
+}
+
+export function opaqueTenantIdentity(orgId: string, tenantId: string): string {
+  if (![orgId, tenantId].every(value => typeof value === 'string' && value.length > 0 && value.length <= 512 && !/[\r\n\0]/u.test(value))) unavailable('INVALID_ACTOR_SCOPE')
+  const canonical = JSON.stringify({ domain: 'com.dz23.studio.prompt-app.scope', version: 1, org_id: orgId, tenant_id: tenantId })
+  return `t_${createHash('sha256').update(canonical, 'utf8').digest('hex').slice(0, 48)}`
+}
+
+export interface LifecycleCredentialRuntime {
+  readonly platform: NodeJS.Platform
+  readonly uid: number | undefined
+  readonly noFollowFlag: number
+  readonly open: (path: string, flags: number) => Promise<FileHandle>
+  readonly lstat: (path: string) => Promise<Stats>
+  readonly realpath: (path: string) => Promise<string>
+}
+
+const DEFAULT_CREDENTIAL_RUNTIME: LifecycleCredentialRuntime = {
+  platform: process.platform,
+  uid: process.getuid?.(),
+  noFollowFlag: constants.O_NOFOLLOW,
+  open,
+  lstat,
+  realpath,
+}
+
+export async function readSecureLifecycleCredential(reference: string, signal: AbortSignal, runtime: LifecycleCredentialRuntime = DEFAULT_CREDENTIAL_RUNTIME): Promise<string> {
+  let handle: FileHandle | undefined
+  let credential = ''
+  let failure: BuilderLifecycleError | undefined
+  try {
+    signal.throwIfAborted()
+    if (runtime.platform !== 'linux' || runtime.uid === undefined || typeof reference !== 'string' || !reference.startsWith('file:')) unavailable('CREDENTIAL_UNAVAILABLE')
+    const path = reference.slice(5)
+    if (!posix.isAbsolute(path) || path.includes('\\') || path.includes('\0') || path.includes('://') || posix.normalize(path) !== path) unavailable('CREDENTIAL_UNAVAILABLE')
+    handle = await runtime.open(path, constants.O_RDONLY | runtime.noFollowFlag)
+    const openedBefore = await handle.stat()
+    const linkedBefore = await runtime.lstat(path)
+    if (!secureCredentialStat(openedBefore, runtime.uid) || !sameCredentialStat(openedBefore, linkedBefore) || await runtime.realpath(path) !== path) unavailable('CREDENTIAL_UNAVAILABLE')
+    const bytes = await handle.readFile()
+    signal.throwIfAborted()
+    const openedAfter = await handle.stat()
+    const linkedAfter = await runtime.lstat(path)
+    if (!sameCredentialStat(openedBefore, openedAfter) || !sameCredentialStat(openedAfter, linkedAfter) || await runtime.realpath(path) !== path || bytes.byteLength < 43 || bytes.byteLength > 202 || bytes.includes(0)) unavailable('CREDENTIAL_UNAVAILABLE')
+    let decoded: string
+    try { decoded = new TextDecoder('utf-8', { fatal: true }).decode(bytes) }
+    catch { return unavailable('CREDENTIAL_UNAVAILABLE') }
+    const token = decoded.endsWith('\r\n') ? decoded.slice(0, -2) : decoded.endsWith('\n') ? decoded.slice(0, -1) : decoded
+    if (!/^[A-Za-z0-9_-]{43,200}$/u.test(token)) unavailable('CREDENTIAL_UNAVAILABLE')
+    credential = token
+  } catch (error) {
+    failure = error instanceof BuilderLifecycleError
+      ? error
+      : new BuilderLifecycleError('BLOCKED_EXTERNAL', 'CREDENTIAL_UNAVAILABLE', { cause: error })
+  }
+  if (handle !== undefined) {
+    try { await handle.close() }
+    catch (error) {
+      if (failure === undefined) failure = new BuilderLifecycleError('BLOCKED_EXTERNAL', 'CREDENTIAL_UNAVAILABLE', { cause: error })
+    }
+  }
+  if (failure !== undefined) throw failure
+  return credential
+}
+
+function secureCredentialStat(stat: Stats, uid: number): boolean {
+  const mode = stat.mode & 0o7777
+  return stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1 && (stat.uid === 0 || stat.uid === uid) && (mode === 0o400 || mode === 0o600)
+}
+function sameCredentialStat(left: Stats, right: Stats): boolean {
+  return left.isFile() && right.isFile() && !left.isSymbolicLink() && !right.isSymbolicLink() && left.dev === right.dev && left.ino === right.ino && left.nlink === 1 && right.nlink === 1 && left.uid === right.uid && left.gid === right.gid && left.mode === right.mode && left.size === right.size && left.mtimeMs === right.mtimeMs && left.ctimeMs === right.ctimeMs
+}
+function unavailable(code: string): never { throw new BuilderLifecycleError('BLOCKED_EXTERNAL', code) }

@@ -7,7 +7,8 @@ import type { Domain, KvTable } from '@deepseek-ai/dsh-storage-domain'
 import type {} from '@dz23-studio/identity'
 import type {} from '@dz23-studio/route-health'
 import type {} from '@dz23-studio/tenancy'
-import { mkdir, readFile, statfs } from 'node:fs/promises'
+import { PRODUCTION_BUILDER_ROOT_POLICY, builderRuntimeRegistryPath, type BuilderSupervisorRootPolicy } from '@dz23-studio/builder-supervisor'
+import { mkdir, statfs } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 import { createPromptToAppHttpHandler, type StudioAppsHealth } from './http.js'
@@ -35,13 +36,15 @@ import { IntakeEngine } from './intake.js'
 import { ModelCodeGenerator, PromptToAppPipeline } from './pipeline.js'
 import { PlannerEngine } from './planner.js'
 import { HarnessPromptModel } from './ports.js'
-import { ContainerBuilder, NodeProcessPort } from './runner.js'
+import { ManagedBuilderLifecycleResolver } from './builder-resolver.js'
 import { PromptToAppService, type PromptToAppRepository } from './service.js'
 import { SharpLogoProcessor } from './logo.js'
 import { productionTemplateDirectory } from './template-policy.js'
 
 export * from './appspec.js'
 export * from './auth-generator.js'
+export * from './builder-lifecycle.js'
+export * from './builder-resolver.js'
 export * from './crud-generator.js'
 export * from './generator.js'
 export * from './design.js'
@@ -71,13 +74,9 @@ export interface PromptToAppPluginConfig {
   readonly modelByRoute?: Readonly<Record<string, string>>
   readonly runsRoot?: string
   readonly logoStoreRoot?: string
-  readonly builder?: {
-    readonly engine?: 'docker' | 'podman'
-    readonly imageDigest?: `sha256:${string}`
-    readonly imageDigestFile?: string
-    readonly templateStore?: string
-    readonly user?: `${number}:${number}`
-    readonly limits?: { readonly pids?: number; readonly memory?: string; readonly cpus?: string; readonly timeoutMs?: number }
+  readonly builderLifecycle?: {
+    readonly registryReference?: `file:${string}`
+    readonly roots?: BuilderSupervisorRootPolicy
   }
 }
 
@@ -155,19 +154,12 @@ export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}):
   const runsRoot = resolve(config.runsRoot ?? resolve(homedir(), '.dz23-studio', 'generated-runs'))
   const logoStoreRoot = resolve(config.logoStoreRoot ?? resolve(homedir(), '.dz23-studio', 'assets'))
   const templateDirectory = productionTemplateDirectory()
-  const templateStore = resolve(config.builder?.templateStore ?? resolve(homedir(), '.dz23-studio', 'template-store-v2'))
-  const imageDigest = config.builder?.imageDigest ?? await readDigest(config.builder?.imageDigestFile ?? resolve(homedir(), '.dz23-studio', 'builder-image-digest'))
   await Promise.all([mkdir(runsRoot, { recursive: true }), mkdir(logoStoreRoot, { recursive: true })])
-  const builder = new ContainerBuilder({
-    engine: config.builder?.engine ?? 'docker', imageDigest, templateStore,
-    user: config.builder?.user ?? defaultContainerUser(),
-    limits: {
-      pids: config.builder?.limits?.pids ?? 256,
-      memory: config.builder?.limits?.memory ?? '2g',
-      cpus: config.builder?.limits?.cpus ?? '2',
-      timeoutMs: config.builder?.limits?.timeoutMs ?? 180_000,
-    },
-  }, new NodeProcessPort())
+  const builderRoots = config.builderLifecycle?.roots ?? PRODUCTION_BUILDER_ROOT_POLICY
+  const builder = new ManagedBuilderLifecycleResolver({
+    roots: builderRoots,
+    registryReference: config.builderLifecycle?.registryReference ?? `file:${builderRuntimeRegistryPath(builderRoots)}`,
+  })
   const pipeline = new PromptToAppPipeline({ service, builder, templateDirectory, runsRoot, logoStoreRoot })
   const registry: PromptToAppJobRegistry = {
     start: spec => ctx.jobs.start(spec as JobStart) as JobId,
@@ -191,7 +183,10 @@ export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}):
   const healthFor = async (scope: { readonly orgId: string; readonly tenantId: string }): Promise<StudioAppsHealth> => {
     const routes = ctx.studioRouteHealth.service.list(scope)
     const route = routes.find(candidate => candidate.state === 'OK')?.route ?? null
-    const [builderHealth, disk] = await Promise.all([builder.preflight(), diskState(runsRoot)])
+    const [builderHealth, disk] = await Promise.all([
+      builder.forActor({ userId: 'studio-health', orgId: scope.orgId, tenantId: scope.tenantId, role: 'owner' }).then(session => session.preflight()).catch(() => ({ state: 'BLOCKED_EXTERNAL' as const })),
+      diskState(runsRoot),
+    ])
     const state = route !== null && builderHealth.state === 'OK' && disk === 'OK' ? 'OK' : 'ATTENTION'
     return { state, route, builder: builderHealth.state, disk }
   }
@@ -212,16 +207,6 @@ export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}):
       allowedOrigins: config.allowedOrigins ?? [defaultOrigin, `http://${defaultHost}`],
     }),
   }), 'studio-prompt-to-app.http')
-}
-
-function defaultContainerUser(): `${number}:${number}` {
-  const uid = typeof process.getuid === 'function' ? process.getuid() : 1000
-  const gid = typeof process.getgid === 'function' ? process.getgid() : 1000
-  return `${uid}:${gid}`
-}
-
-async function readDigest(path: string): Promise<`sha256:${string}`> {
-  try { return (await readFile(path, 'utf8')).trim() as `sha256:${string}` } catch { return 'sha256:unconfigured' }
 }
 
 async function diskState(path: string): Promise<'OK' | 'ATTENTION'> {

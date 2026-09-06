@@ -4,10 +4,10 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { writeAcceptanceArtifacts } from '../plugins/prompt-to-app/src/acceptance.js'
 import type { AppSpecV1 } from '../plugins/prompt-to-app/src/appspec.js'
+import type { BuilderLifecycleResolverPort } from '../plugins/prompt-to-app/src/builder-lifecycle.js'
 import { generateAuthLayer, writeAuthLayer } from '../plugins/prompt-to-app/src/auth-generator.js'
 import { generateDataLayer, writeDataLayer } from '../plugins/prompt-to-app/src/data-generator.js'
 import { generateFormLayer, writeFormLayer } from '../plugins/prompt-to-app/src/form-generator.js'
-import { ContainerBuilder, OFFLINE_PIPELINE_COMMANDS } from '../plugins/prompt-to-app/src/runner.js'
 
 const spec: AppSpecV1 = {
   schema_version: 1, problem: 'Cadastrar contatos e consultar a lista sem usar planilhas.', audience: 'Equipe de uma pequena empresa',
@@ -23,13 +23,8 @@ const spec: AppSpecV1 = {
 const root = process.cwd()
 const proofRoot = mkdtempSync(join(tmpdir(), 'dz23-form-database-proof-'))
 const runDirectory = resolve(proofRoot, 'generated-app')
-const digest = readFileSync(resolve(root, 'runtime/builder-image-digest'), 'utf8').trim() as `sha256:${string}`
-const uid = typeof process.getuid === 'function' ? process.getuid() : 1000
-const gid = typeof process.getgid === 'function' ? process.getgid() : 1000
-const builder = new ContainerBuilder({
-  engine: 'docker', imageDigest: digest, templateStore: resolve(root, 'runtime/template-store-v2'), user: `${uid}:${gid}`,
-  limits: { pids: 256, memory: '2g', cpus: '2', timeoutMs: 180_000 },
-})
+const unsupported = async (): Promise<never> => { throw new Error('UNSUPPORTED_INGRESS') }
+const builder: BuilderLifecycleResolverPort<unknown> = { forActor: async () => ({ preflight: async () => ({ state: 'BLOCKED_EXTERNAL' }), prepare: unsupported, execute: unsupported, cancel: unsupported, finish: unsupported, listManaged: async () => [] }) }
 
 try {
   cpSync(resolve(root, 'templates/nextjs-app@1'), runDirectory, { recursive: true })
@@ -48,34 +43,17 @@ try {
   const protectedPaths = [...data.protectedPaths, ...auth.protectedPaths, ...form.protectedPaths]
   const before = new Map(protectedPaths.map(path => [path, hash(resolve(runDirectory, path))]))
 
-  const preflight = await builder.preflight()
-  if (preflight.state !== 'OK') throw new Error(preflight.message)
-  const results = []
-  for (const command of OFFLINE_PIPELINE_COMMANDS) {
-    const result = await builder.execute(runDirectory, command)
-    results.push(result)
-    if (!hasIsolatedNetwork(result.securityArgs) || result.exitCode !== 0 || result.timedOut) {
-      throw new Error(`${command} falhou (exit=${result.exitCode}, timeout=${result.timedOut})\n${result.stdout.slice(-5000)}\n${result.stderr.slice(-5000)}`)
-    }
-  }
+  const preflight = await (await builder.forActor({})).preflight()
+  if (preflight.state !== 'BLOCKED_EXTERNAL') throw new Error('INGRESS_MUST_REMAIN_BLOCKED')
   const changed = protectedPaths.filter(path => hash(resolve(runDirectory, path)) !== before.get(path))
   if (changed.length > 0) throw new Error(`Arquivos protegidos alterados: ${changed.join(', ')}`)
-  const report = JSON.parse(readFileSync(resolve(runDirectory, 'evidence/appspec-report.json'), 'utf8')) as { checks: Array<{ kind: string; status: string }> }
-  const flow = report.checks.find(check => check.kind === 'flow')
-  if (flow?.status !== 'PASSED') throw new Error('O fluxo preencher, salvar e listar não passou no navegador.')
-  if (!readFileSync(resolve(runDirectory, 'data/app.sqlite')).byteLength) throw new Error('O banco em arquivo não foi criado.')
-  if (process.platform !== 'win32' && (statSync(resolve(runDirectory, 'data/app.sqlite')).mode & 0o777) !== 0o600) throw new Error('O banco não ficou restrito ao usuário do processo.')
 
-  const proof = `# P32/P33 — Prova da categoria cadastro e lista\n\n- Resultado: **PASS**\n- Imagem fixada: \`${digest}\`\n- Rede do contêiner: \`none\`; capacidades removidas e filesystem raiz somente leitura.\n- Fluxo real no navegador: preencher anonimamente → lista ausente para visitante → entrar como proprietário → registro aparece na lista: PASS.\n- Banco: arquivo \`data/app.sqlite\` criado pela aplicação gerada, restrito a modo \`0600\` no Linux; migração e repositório protegidos pelo Studio.\n- Build Next.js, Vitest, Playwright, acessibilidade e scan offline: PASS.\n- Arquivos protegidos alterados durante build/teste: nenhum.\n- Dados sensíveis confirmados exigem autenticação também no envio; esta prova usa dados comuns com envio público e leitura privada.\n\nO resultado é um protótipo local verificado. Não houve preview remoto, publicação ou modelo real.\n`
+  const proof = `# P32/P33 — Verificação lógica da categoria cadastro e lista\n\n- Geração das camadas de dados, autenticação, formulário e aceite: **PASS**\n- Ingresso autenticado do builder: **NOT_PRESENT**\n- Build, banco em execução, navegador e E2E: **NOT_EXECUTED**\n- Estado de promoção: **BLOCKED_EXTERNAL**\n- Arquivos protegidos alterados: nenhum.\n\nEsta verificação não chama a aplicação de pronta ou de protótipo verificado.\n`
   mkdirSync(resolve(root, 'docs/proofs'), { recursive: true })
   writeFileSync(resolve(root, 'docs/proofs/P32-form-database-proof.md'), proof)
-  process.stdout.write(`FORM_DATABASE_PROOF=PASS protected=${protectedPaths.length} checks=${report.checks.length} steps=${results.length}\n`)
+  process.stdout.write(`FORM_DATABASE_GENERATION=PASS protected=${protectedPaths.length} build=BLOCKED_EXTERNAL ingress=NOT_PRESENT\n`)
 } finally {
   rmSync(proofRoot, { recursive: true, force: true })
 }
 
-function hasIsolatedNetwork(args: readonly string[]): boolean {
-  const index = args.indexOf('--network')
-  return index >= 0 && args[index + 1] === 'none' && args.includes('--cap-drop') && args.includes('ALL')
-}
 function hash(path: string): string { return createHash('sha256').update(readFileSync(path)).digest('hex') }

@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { lstat, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -6,7 +6,7 @@ import type { AppSpecV1 } from '../src/appspec.js'
 import { createDesignSpec } from '../src/design.js'
 import type { StudioPlan, StudioRun } from '../src/model.js'
 import { PromptToAppPipeline, type CodeGeneratorPort } from '../src/pipeline.js'
-import { hashTree, PREVIEW_ARTIFACT_RELATIVE_PATH, type ContainerBuilder } from '../src/runner.js'
+import { BuilderLifecycleError, type BuildStep, type BuilderLifecycleFinished, type BuilderLifecycleResolverPort, type BuilderLifecycleSession, type BuilderLifecycleStepResult } from '../src/builder-lifecycle.js'
 import { PromptToAppError, type PromptToAppActor, type PromptToAppService } from '../src/service.js'
 
 const actor: PromptToAppActor = { userId: 'owner', orgId: 'org-a', tenantId: 'tenant-a', role: 'owner' }
@@ -30,7 +30,14 @@ const cleanGeneration = {
 const roots: string[] = []
 afterEach(async () => Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))))
 
-async function fixture(options: { readonly preflight?: 'OK' | 'BLOCKED_EXTERNAL'; readonly execute?: (directory: string, command: string) => Promise<{ exitCode: number; stdout: string; stderr: string; timedOut: boolean }> } = {}) {
+interface FixtureExecutionResult { readonly exitCode: number; readonly stdout: string; readonly stderr: string; readonly timedOut: boolean; readonly outputLimitExceeded?: boolean }
+interface FixtureOptions {
+  readonly preflight?: 'OK' | 'BLOCKED_EXTERNAL'
+  readonly execute?: (directory: string, command: string) => Promise<FixtureExecutionResult>
+  readonly finish?: BuilderLifecycleSession['finish']
+}
+
+async function fixture(options: FixtureOptions = {}) {
   const root = await mkdtemp(join(tmpdir(), 'dz23-pipeline-test-')); roots.push(root)
   const templateDirectory = resolve(root, 'template'); const runsRoot = resolve(root, 'runs')
   await mkdir(resolve(templateDirectory, 'src'), { recursive: true })
@@ -46,32 +53,35 @@ async function fixture(options: { readonly preflight?: 'OK' | 'BLOCKED_EXTERNAL'
     putRun: vi.fn(async (_actor, run: StudioRun) => { runs.push(run) }),
     putEvidence: vi.fn(async (_actor, item: unknown) => { evidence.push(item) }),
   }
-  const execute = vi.fn(options.execute ?? (async (directory: string, command: string) => {
-    if (command === 'pnpm run build') await writeRuntimeOutput(directory)
-    if (command === 'pnpm run test:e2e') {
-      const reportPath = resolve(directory, 'evidence/appspec-report.json')
-      const report = JSON.parse(await readFile(reportPath, 'utf8')) as { checks: Array<{ status: string }> }
-      report.checks = report.checks.map(check => check.status === 'PENDING' ? { ...check, status: 'PASSED' } : check)
-      await writeFile(reportPath, JSON.stringify(report))
-    }
-    return { exitCode: 0, stdout: 'ok', stderr: '', timedOut: false }
-  }))
-  const builder = {
+  const executeImplementation: NonNullable<FixtureOptions['execute']> = options.execute ?? (async (): Promise<FixtureExecutionResult> => ({ exitCode: 0, stdout: 'ok', stderr: '', timedOut: false }))
+  const execute = vi.fn(executeImplementation)
+  let preparedDirectory = ''; let buildState: 'PREPARED' | 'INSTALL_OK' | 'BUILD_OK' | 'TEST_OK' | 'E2E_OK' | 'FAILED' | 'CANCELLED' = 'PREPARED'
+  const builder: BuilderLifecycleSession = {
     preflight: vi.fn(async () => options.preflight === 'BLOCKED_EXTERNAL'
-      ? { state: 'BLOCKED_EXTERNAL' as const, message: 'Construtor indisponível.' }
-      : { state: 'OK' as const, message: 'ok' }),
-    execute,
+      ? { state: 'BLOCKED_EXTERNAL' as const }
+      : { state: 'OK' as const }),
+    prepare: vi.fn(async directory => { preparedDirectory = directory; buildState = 'PREPARED'; return { buildRef: 'build_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' } }),
+    execute: vi.fn(async (_buildRef: string, step: BuildStep) => {
+      const command = ({ install: 'pnpm install --offline', build: 'pnpm run build', test: 'pnpm run test', e2e: 'pnpm run test:e2e' } as const)[step]
+      const result = await execute(preparedDirectory, command)
+      buildState = result.exitCode === 0 ? ({ install: 'INSTALL_OK', build: 'BUILD_OK', test: 'TEST_OK', e2e: 'E2E_OK' } as const)[step] : 'FAILED'
+      return { state: buildState, step, result: { exit_code: result.exitCode, stdout: result.stdout, stderr: result.stderr, timed_out: result.timedOut, termination_reason: result.outputLimitExceeded === true ? 'output_limit' as const : result.timedOut ? 'timeout' as const : null, output_limit_exceeded: result.outputLimitExceeded === true } }
+    }),
+    cancel: vi.fn(async () => { buildState = 'CANCELLED' }),
+    finish: vi.fn(options.finish ?? (async () => ({ finalState: buildState === 'E2E_OK' ? 'E2E_OK' as const : buildState === 'CANCELLED' ? 'CANCELLED' as const : 'FAILED' as const, exported: buildState === 'E2E_OK' ? { relative_path: 'exports/build_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', sha256: 'a'.repeat(64), files: 1, bytes: 1 } : null, cleanupPending: false, cleaned: true }))),
+    listManaged: vi.fn(async () => []),
   }
+  const resolver: BuilderLifecycleResolverPort<PromptToAppActor> = { forActor: vi.fn(async () => builder) }
   let id = 0
   const pipeline = new PromptToAppPipeline({
-    service: service as unknown as PromptToAppService, builder: builder as unknown as ContainerBuilder,
+    service: service as unknown as PromptToAppService, builder: resolver,
     templateDirectory, runsRoot, now: () => new Date('2026-09-03T12:00:00.000Z'), createId: () => `id-${++id}`,
   })
-  return { pipeline, service, builder, execute, runs, transitions, evidence, templateDirectory }
+  return { pipeline, service, builder, resolver, execute, runs, transitions, evidence, templateDirectory, runsRoot }
 }
 
 describe('Prompt-to-App pipeline', () => {
-  it('rejects a template symlink before creating a run or changing project state', async () => {
+  it.skipIf(process.platform === 'win32')('rejects a template symlink before creating a run or changing project state', async () => {
     const f = await fixture(); const outside = await mkdtemp(join(tmpdir(), 'dz23-template-outside-')); roots.push(outside)
     await symlink(outside, resolve(f.templateDirectory, 'linked'), 'dir')
     const generator = { generate: vi.fn(async () => cleanGeneration) }
@@ -81,25 +91,26 @@ describe('Prompt-to-App pipeline', () => {
     expect(f.transitions).toEqual([])
   })
 
-  it('records a verified prototype only after every offline step passes', async () => {
+  it('does not promote supervisor success while the authenticated exported acceptance report is unavailable', async () => {
     const f = await fixture(); const generator = { generate: vi.fn(async () => cleanGeneration) }
     const result = await f.pipeline.run(actor, 'project', generator)
-    expect({ result, runs: f.runs, transitions: f.transitions }).toMatchObject({ result: { state: 'VERIFIED_PROTOTYPE', attempts: 1 } })
-    expect(f.transitions).toEqual(['GENERATING', 'BUILD_OK', 'TESTS_OK', 'VERIFIED_PROTOTYPE'])
+    expect(result).toMatchObject({ state: 'BLOCKED_EXTERNAL', attempts: 1 })
+    expect(f.transitions).toEqual(['GENERATING', 'INTERRUPTED'])
     expect(f.execute).toHaveBeenCalledTimes(4)
-    expect(f.runs.at(-1)).toMatchObject({ stage: 'verify', state: 'PASSED', route: 'ollama', input_tokens: 10, output_tokens: 20, failure_code: null })
-    expect(result.runDirectory).toBeDefined()
-    const passedRun = f.runs.at(-1)
-    expect(passedRun?.artifact_sha256).toMatch(/^[a-f0-9]{64}$/u)
-    const artifactPath = resolve(result.runDirectory!, PREVIEW_ARTIFACT_RELATIVE_PATH)
-    expect(passedRun?.artifact_sha256).toBe(await hashTree(artifactPath))
-    expect(f.runs.filter(run => run.state !== 'PASSED').every(run => run.artifact_sha256 == null)).toBe(true)
-    await writeFile(resolve(artifactPath, '.next/standalone/server.js'), 'tampered')
-    expect(await hashTree(artifactPath)).not.toBe(passedRun?.artifact_sha256)
-    expect(f.runs.at(-1)?.acceptance_checks.filter(check => check.status === 'PASSED').length).toBeGreaterThanOrEqual(4)
-    expect(f.runs.at(-1)?.acceptance_checks).toContainEqual(expect.objectContaining({ kind: 'criterion', status: 'NOT_AUTOMATED' }))
+    expect(f.resolver.forActor).toHaveBeenCalledOnce()
+    expect(f.runs.at(-1)).toMatchObject({ stage: 'verify', state: 'BLOCKED_EXTERNAL', failure_code: 'ACCEPTANCE_ATTESTATION_UNAVAILABLE', artifact_sha256: null })
+    expect(f.runs.some(run => run.state === 'PASSED')).toBe(false)
+    expect(f.runs.flatMap(run => run.acceptance_checks).some(check => check.status === 'PENDING')).toBe(true)
     expect(f.runs.at(-1)).toMatchObject({ operation_id: expect.any(String), owner_session_id: 'direct-execution' })
-    expect(f.evidence).toHaveLength(2)
+    expect(f.evidence).toHaveLength(0)
+  })
+
+  it('rejects hostile operation identifiers before creating a run path', async () => {
+    const f = await fixture(); const escaped = resolve(f.runsRoot, '..', 'escaped')
+    await expect(f.pipeline.run(actor, 'project', { generate: vi.fn(async () => cleanGeneration) }, { operationId: '../escaped' })).rejects.toMatchObject({ code: 'INVALID' })
+    await expect(lstat(escaped)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(f.runs).toEqual([])
+    expect(f.transitions).toEqual([])
   })
 
   it.each([
@@ -117,15 +128,15 @@ describe('Prompt-to-App pipeline', () => {
     expect(f.runs.at(-1)).toMatchObject({ state: 'FAILED', failure_code: 'APPSPEC_REPORT_INVALID' })
   })
 
-  it('terminalizes the run and project when artifact materialization fails', async () => {
+  it('never records PASS when finish cannot prove cleanup', async () => {
     const f = await fixture({ execute: async (directory, command) => {
       if (command === 'pnpm run test:e2e') await passAcceptance(directory)
       return { exitCode: 0, stdout: 'ok', stderr: '', timedOut: false }
-    } })
-    await expect(f.pipeline.run(actor, 'project', { generate: vi.fn(async () => cleanGeneration) })).resolves.toMatchObject({ state: 'BUILD_FAILED', attempts: 1 })
-    expect(f.runs.at(-1)).toMatchObject({ state: 'FAILED', failure_code: 'ARTIFACT_MATERIALIZATION_FAILED', artifact_sha256: null })
-    expect(f.transitions).toEqual(['GENERATING', 'BUILD_FAILED'])
-    expect(f.service.project()).toMatchObject({ state: 'BUILD_FAILED' })
+    }, finish: async () => ({ finalState: 'E2E_OK', exported: { relative_path: 'exports/build_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', sha256: 'a'.repeat(64), files: 1, bytes: 1 }, cleanupPending: true, cleaned: false }) })
+    await expect(f.pipeline.run(actor, 'project', { generate: vi.fn(async () => cleanGeneration) })).resolves.toMatchObject({ state: 'BLOCKED_EXTERNAL', attempts: 1 })
+    expect(f.runs.at(-1)).toMatchObject({ state: 'BLOCKED_EXTERNAL', failure_code: 'FINISH_INCONCLUSIVE', artifact_sha256: null })
+    expect(f.transitions).toEqual(['GENERATING', 'INTERRUPTED'])
+    expect(f.service.project()).toMatchObject({ state: 'INTERRUPTED' })
   })
 
   it('terminalizes an unexpected test-process failure without leaving GENERATING', async () => {
@@ -139,11 +150,26 @@ describe('Prompt-to-App pipeline', () => {
     expect(f.transitions).toEqual(['GENERATING', 'BUILD_OK', 'TESTS_FAILED'])
   })
 
-  it('interrupts a verified attempt if mandatory evidence cannot be persisted', async () => {
+  it('records an inconclusive lifecycle channel as interrupted instead of a logical build failure', async () => {
     const f = await fixture()
-    f.service.putEvidence.mockRejectedValueOnce(new Error('storage-unavailable'))
-    await expect(f.pipeline.run(actor, 'project', { generate: vi.fn(async () => cleanGeneration) })).resolves.toMatchObject({ state: 'INTERRUPTED' })
-    expect(f.runs.at(-1)).toMatchObject({ state: 'FAILED', stage: 'verify', failure_code: 'PIPELINE_UNEXPECTED_FAILURE', artifact_sha256: null })
+    f.builder.execute = vi.fn(async () => { throw new BuilderLifecycleError('INTERRUPTED', 'INVALID_STEP_ORDER') })
+    const result = await f.pipeline.run(actor, 'project', { generate: vi.fn(async () => cleanGeneration) })
+    expect(result).toMatchObject({ state: 'INTERRUPTED', attempts: 1 })
+    expect(f.runs.at(-1)).toMatchObject({ state: 'FAILED', failure_code: 'INVALID_STEP_ORDER', artifact_sha256: null })
+    expect(f.transitions).toEqual(['GENERATING', 'INTERRUPTED'])
+  })
+
+  it('does not trust a locally forged PASSED report as exported evidence', async () => {
+    const f = await fixture()
+    const execute: BuilderLifecycleSession['execute'] = async (_buildRef: string, step: BuildStep): Promise<BuilderLifecycleStepResult> => {
+      if (step === 'e2e') await passAcceptance(resolve(f.runsRoot, 'id-1'))
+      return { state: ({ install: 'INSTALL_OK', build: 'BUILD_OK', test: 'TEST_OK', e2e: 'E2E_OK' } as const)[step], step, result: { exit_code: 0, stdout: '', stderr: '', timed_out: false, termination_reason: null, output_limit_exceeded: false } }
+    }
+    const finish: BuilderLifecycleSession['finish'] = async (): Promise<BuilderLifecycleFinished> => ({ finalState: 'E2E_OK', exported: { relative_path: 'exports/build_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', sha256: 'a'.repeat(64), files: 1, bytes: 1 }, cleanupPending: false, cleaned: true })
+    f.builder.execute = vi.fn(execute)
+    f.builder.finish = vi.fn(finish)
+    await expect(f.pipeline.run(actor, 'project', { generate: vi.fn(async () => cleanGeneration) })).resolves.toMatchObject({ state: 'BLOCKED_EXTERNAL' })
+    expect(f.runs.at(-1)).toMatchObject({ state: 'BLOCKED_EXTERNAL', stage: 'verify', failure_code: 'ACCEPTANCE_ATTESTATION_UNAVAILABLE', artifact_sha256: null })
     expect(f.transitions).toEqual(['GENERATING', 'INTERRUPTED'])
     expect(f.transitions).not.toContain('VERIFIED_PROTOTYPE')
   })
@@ -173,7 +199,7 @@ describe('Prompt-to-App pipeline', () => {
       if (command === 'pnpm run test:e2e') await passAcceptance(directory)
       return { exitCode: 0, stdout: 'ok', stderr: '', timedOut: false }
     } })
-    await expect(f.pipeline.run(actor, 'project', { generate: vi.fn(async () => cleanGeneration) })).resolves.toMatchObject({ state: 'VERIFIED_PROTOTYPE' })
+    await expect(f.pipeline.run(actor, 'project', { generate: vi.fn(async () => cleanGeneration) })).resolves.toMatchObject({ state: 'BLOCKED_EXTERNAL' })
   })
 
   it('rejects a build that changes another protected template file', async () => {
@@ -192,7 +218,7 @@ describe('Prompt-to-App pipeline', () => {
     expect(f.transitions).toEqual(['GENERATING', 'BUILD_OK', 'TESTS_FAILED'])
     const failures = f.runs.filter(run => run.state === 'FAILED')
     expect(failures).toHaveLength(3)
-    expect(failures.every(run => run.stage === 'test' && run.failure_code === 'pnpm run test: exit 1')).toBe(true)
+    expect(failures.every(run => run.stage === 'test' && run.failure_code === 'test: exit 1')).toBe(true)
     expect(failures.every(run => run.artifact_sha256 == null)).toBe(true)
   })
 
@@ -241,10 +267,11 @@ describe('Prompt-to-App pipeline', () => {
 
   it('blocks before generation when the isolated builder is unavailable', async () => {
     const f = await fixture({ preflight: 'BLOCKED_EXTERNAL' }); const generator = { generate: vi.fn(async () => cleanGeneration) }
-    await expect(f.pipeline.run(actor, 'project', generator)).resolves.toEqual({ state: 'BLOCKED_EXTERNAL', attempts: 0, message: 'Construtor indisponível.' })
+    await expect(f.pipeline.run(actor, 'project', generator)).resolves.toEqual({ state: 'BLOCKED_EXTERNAL', attempts: 0, message: 'O ambiente isolado para criar seu projeto não está disponível neste computador.' })
     expect(generator.generate).not.toHaveBeenCalled()
     expect(f.transitions).toEqual([])
     expect(f.runs.at(-1)).toMatchObject({ stage: 'build', state: 'BLOCKED_EXTERNAL', sandbox: 'unavailable', artifact_sha256: null, failure_code: 'BUILDER_UNAVAILABLE' })
+    await expect(lstat(f.runsRoot)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('refuses to start without the approved plan and approved project state', async () => {
@@ -261,6 +288,8 @@ describe('Prompt-to-App pipeline', () => {
     expect(result).toMatchObject({ state: 'CANCELLED', attempts: 1 })
     expect(f.runs.at(-1)).toMatchObject({ run_id: 'operation', operation_id: 'operation', owner_session_id: 'browser-session', state: 'CANCELLED', artifact_sha256: null })
     expect(f.transitions).toEqual(['GENERATING', 'CANCELLED'])
+    expect(f.builder.cancel).toHaveBeenCalledOnce()
+    expect(f.builder.finish).toHaveBeenCalledOnce()
   })
 })
 

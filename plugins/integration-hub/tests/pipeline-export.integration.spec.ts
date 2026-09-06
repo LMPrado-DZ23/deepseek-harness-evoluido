@@ -8,7 +8,7 @@ import type {
   StudioPlan, StudioProject, StudioRun,
 } from '../../prompt-to-app/src/model.js'
 import { PromptToAppPipeline } from '../../prompt-to-app/src/pipeline.js'
-import { ContainerBuilder } from '../../prompt-to-app/src/runner.js'
+import type { BuilderLifecycleResolverPort } from '../../prompt-to-app/src/builder-lifecycle.js'
 import { PromptToAppService, type PromptToAppActor, type PromptToAppRepository } from '../../prompt-to-app/src/service.js'
 import type { HubEvent, StudioExport, StudioIntegration } from '../src/model.js'
 import { IntegrationHubService, type HubActor, type HubRepository } from '../src/service.js'
@@ -59,13 +59,14 @@ const spec: AppSpecV1 = {
 }
 
 describe('Prompt-to-App → Integration Hub export boundary', () => {
-  it('keeps the executable proof on the real pipeline path with no manual PASSED or server fabrication', async () => {
+  it('keeps the executable proof fail-closed while authenticated ingress is absent', async () => {
     const proof = await readFile(resolve(process.cwd(), 'scripts/prove-integration-hub.mjs'), 'utf8')
-    expect(proof).toContain('pipeline.run(actor, project.project_id')
-    expect(proof).toContain("pipelineResult.state === 'BLOCKED_EXTERNAL'")
-    expect(proof).not.toContain('p2a.putRun(')
+    expect(proof).toContain("reason: 'AUTHENTICATED_BUILDER_INGRESS_NOT_PRESENT'")
+    expect(proof).toContain("builderIngress: 'NOT_PRESENT'")
+    expect(proof).toContain("export: 'NOT_EXECUTED'")
+    expect(proof).not.toContain('pipeline.run(')
     expect(proof).not.toMatch(/writeFile\([^\n]*standalone[^\n]*server\.js/u)
-    expect(proof).not.toContain("transition(actor, project.project_id, 'VERIFIED_PROTOTYPE')")
+    expect(proof).not.toMatch(/await\s+[^;\n]*\.transition\(/u)
   })
 
   it('keeps export NOT_EXECUTED when the real isolated builder is unavailable, without forging PASSED', async () => {
@@ -80,13 +81,7 @@ describe('Prompt-to-App → Integration Hub export boundary', () => {
     await prompt.proposePlan(actor, project.project_id, [{ slice_id: 'slice', title: 'Tela', description: 'Agenda', acceptance_criteria: ['Compila'], planned_files: ['src/GeneratedApp.tsx'] }])
     await prompt.approvePlan(actor, project.project_id)
 
-    // An invalid pin makes the production ContainerBuilder fail closed before
-    // invoking Docker. This is the exact state of a machine with no prepared
-    // builder image: the test proves composition, not an application build.
-    const builder = new ContainerBuilder({
-      engine: 'docker', imageDigest: 'sha256:unconfigured', templateStore: resolve(root, 'store'), user: '1000:1000',
-      limits: { pids: 16, memory: '128m', cpus: '1', timeoutMs: 1_000 },
-    })
+    const builder = blockedLifecycleResolver<PromptToAppActor>()
     const pipeline = new PromptToAppPipeline({ service: prompt, builder, templateDirectory, runsRoot, createId: () => `run-${++id}` })
     const generator = { generate: async () => { throw new Error('GENERATOR_MUST_NOT_RUN') } }
     await expect(pipeline.run(actor, project.project_id, generator)).resolves.toMatchObject({ state: 'BLOCKED_EXTERNAL', attempts: 0 })
@@ -109,3 +104,7 @@ describe('Prompt-to-App → Integration Hub export boundary', () => {
 
 function upsert<T, K extends keyof T>(rows: T[], value: T, key: K): T[] { return [...rows.filter(row => row[key] !== value[key]), value] }
 function sameScope(scope: HubActor, row: { readonly org_id: string; readonly tenant_id: string }): boolean { return scope.orgId === row.org_id && scope.tenantId === row.tenant_id }
+function blockedLifecycleResolver<Actor>(): BuilderLifecycleResolverPort<Actor> {
+  const unsupported = async (): Promise<never> => { throw new Error('UNSUPPORTED_INGRESS') }
+  return { forActor: async () => ({ preflight: async () => ({ state: 'BLOCKED_EXTERNAL' }), prepare: unsupported, execute: unsupported, cancel: unsupported, finish: unsupported, listManaged: async () => [] }) }
+}

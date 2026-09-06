@@ -1,7 +1,7 @@
 import type { JobId, JobOutcome } from '@deepseek-ai/dsh-jobs'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createIdentityHttpHandler, CSRF_COOKIE, IdentityError, SESSION_COOKIE, type SessionRecord, type StudioIdentityService } from '../../../plugins/identity/src/index.js'
@@ -13,10 +13,11 @@ import { IntakeEngine } from '../../../plugins/prompt-to-app/src/intake.js'
 import { PromptToAppJobService, type PromptToAppJobRegistry } from '../../../plugins/prompt-to-app/src/jobs.js'
 import type { StudioApproval, StudioAppSpecRecord, StudioDesignSpecRecord, StudioEvidence, StudioIntakeTurn, StudioPlan, StudioProject, StudioRun } from '../../../plugins/prompt-to-app/src/model.js'
 import { ModelCodeGenerator, PromptToAppPipeline } from '../../../plugins/prompt-to-app/src/pipeline.js'
+import type { BuilderLifecycleResolverPort } from '../../../plugins/prompt-to-app/src/builder-lifecycle.js'
 import { PlannerEngine } from '../../../plugins/prompt-to-app/src/planner.js'
 import type { PromptModelPort } from '../../../plugins/prompt-to-app/src/ports.js'
-import { hashTree, PREVIEW_ARTIFACT_RELATIVE_PATH, type ContainerBuilder } from '../../../plugins/prompt-to-app/src/runner.js'
-import { PromptToAppService, type PromptToAppRepository } from '../../../plugins/prompt-to-app/src/service.js'
+import { hashTree, PREVIEW_ARTIFACT_RELATIVE_PATH } from '../../../plugins/prompt-to-app/src/runner.js'
+import { PromptToAppService, type PromptToAppActor, type PromptToAppRepository } from '../../../plugins/prompt-to-app/src/service.js'
 import { createPreviewGatewayHttpHandler, type PreviewForwardPort } from '../../../plugins/preview/src/gateway.js'
 import { createPreviewProjectHttpExtension } from '../../../plugins/preview/src/http.js'
 import type { PreviewAdmission, PreviewRecord } from '../../../plugins/preview/src/model.js'
@@ -122,24 +123,10 @@ const model: PromptModelPort = {
     ] } }
   },
 }
-const builder = {
-  preflight: async () => ({ state: 'OK' as const, message: 'fixture' }),
-  execute: async (directory: string, command: string) => {
-    if (command === 'pnpm run build') {
-      await mkdir(resolve(directory, '.next', 'standalone'), { recursive: true })
-      await mkdir(resolve(directory, '.next', 'static'), { recursive: true })
-      await writeFile(resolve(directory, '.next', 'standalone', 'server.js'), "import http from 'node:http';http.createServer((_,res)=>res.end('fixture')).listen(3000)")
-      await writeFile(resolve(directory, '.next', 'static', 'fixture.js'), 'export {}')
-    }
-    if (command === 'pnpm run test:e2e') {
-      const path = resolve(directory, 'evidence', 'appspec-report.json')
-      const report = JSON.parse(await readFile(path, 'utf8')) as { checks: Array<{ status: string }> }
-      report.checks = report.checks.map(check => check.status === 'PENDING' ? { ...check, status: 'PASSED' } : check)
-      await writeFile(path, JSON.stringify(report))
-    }
-    return { exitCode: 0, stdout: command, stderr: '', timedOut: false, command, securityArgs: [] }
-  },
-} as unknown as ContainerBuilder
+const unsupported = async (): Promise<never> => { throw new Error('UNSUPPORTED_INGRESS') }
+const builder: BuilderLifecycleResolverPort<PromptToAppActor> = {
+  forActor: async () => ({ preflight: async () => ({ state: 'BLOCKED_EXTERNAL' }), prepare: unsupported, execute: unsupported, cancel: unsupported, finish: unsupported, listManaged: async () => [] }),
+}
 const pipeline = new PromptToAppPipeline({ service, builder, templateDirectory: resolve(root, 'templates', 'nextjs-app@1'), runsRoot: resolve(scratch, 'runs'), createId: () => `pipeline-${++id}` })
 const active = new Map<JobId, { cancel(reason?: string): void; done: Promise<JobOutcome> }>()
 let jobSequence = 0

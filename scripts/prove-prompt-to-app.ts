@@ -1,11 +1,11 @@
 import { createHash } from 'node:crypto'
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve, sep } from 'node:path'
+import { join, resolve } from 'node:path'
 import type { AppSpecV1 } from '../plugins/prompt-to-app/src/appspec.js'
+import type { BuilderLifecycleResolverPort } from '../plugins/prompt-to-app/src/builder-lifecycle.js'
 import type { StudioApproval, StudioAppSpecRecord, StudioDesignSpecRecord, StudioEvidence, StudioIntakeTurn, StudioPlan, StudioProject, StudioRun } from '../plugins/prompt-to-app/src/model.js'
 import { PromptToAppPipeline, type CodeGeneratorPort } from '../plugins/prompt-to-app/src/pipeline.js'
-import { ContainerBuilder } from '../plugins/prompt-to-app/src/runner.js'
 import { PromptToAppError, PromptToAppService, type PromptToAppActor, type PromptToAppRepository } from '../plugins/prompt-to-app/src/service.js'
 
 class MemoryRepository implements PromptToAppRepository {
@@ -42,13 +42,17 @@ const spec: AppSpecV1 = {
   accessibility: { wcag_level: 'AA', keyboard_required: true, reduced_motion: true },
   language: 'pt-BR', acceptance_criteria: ['Mostrar o texto “Fale com a equipe”.', 'A página deve ser clara.'],
 }
-const digest = (await readFile(resolve(root, 'runtime/builder-image-digest'), 'utf8')).trim() as `sha256:${string}`
-const uid = typeof process.getuid === 'function' ? process.getuid() : 1000
-const gid = typeof process.getgid === 'function' ? process.getgid() : 1000
-const builder = new ContainerBuilder({
-  engine: 'docker', imageDigest: digest, templateStore: resolve(root, 'runtime/template-store-v2'), user: `${uid}:${gid}`,
-  limits: { pids: 256, memory: '2g', cpus: '2', timeoutMs: 180_000 },
-})
+const unsupported = async (): Promise<never> => { throw new Error('UNSUPPORTED_INGRESS') }
+const builder: BuilderLifecycleResolverPort<PromptToAppActor> = {
+  forActor: async () => ({
+    preflight: async () => ({ state: 'BLOCKED_EXTERNAL' }),
+    prepare: unsupported,
+    execute: unsupported,
+    cancel: unsupported,
+    finish: unsupported,
+    listManaged: async () => [],
+  }),
+}
 
 try {
   const project = await service.createProject(actor, {
@@ -60,46 +64,49 @@ try {
     acceptance_criteria: ['Build e testes passam.'], planned_files: ['content/app.json', 'src/GeneratedApp.tsx'],
   }])
   await service.approvePlan(actor, project.project_id)
-  const generator: CodeGeneratorPort = { generate: async () => ({
+  let generatorCalled = false
+  const generator: CodeGeneratorPort = { generate: async () => {
+    generatorCalled = true
+    return ({
     route: 'deterministic-fixture', model: 'fixture-v1', inputTokens: 0, outputTokens: 0,
     files: [
       { path: 'content/app.json', content: '{"title":"Ateliê Aurora","description":"Serviços locais e contato."}' },
       { path: 'src/GeneratedApp.tsx', content: 'export default function GeneratedApp() { return <main><h1>Ateliê Aurora</h1><section><h2>Serviços locais</h2></section><section><h2>Contato</h2><p>Fale com a equipe</p></section></main> }\n' },
     ],
-  }) }
+    })
+  } }
   const pipeline = new PromptToAppPipeline({
     service, builder, templateDirectory: resolve(root, 'templates/nextjs-app@1'), runsRoot,
     now: () => new Date('2026-09-03T12:00:00.000Z'), createId: () => `proof-${++sequence}`,
   })
   const result = await pipeline.run(actor, project.project_id, generator)
-  if (result.state !== 'VERIFIED_PROTOTYPE' || result.runDirectory === undefined) {
+  if (result.state !== 'BLOCKED_EXTERNAL' || result.attempts !== 0 || result.runDirectory !== undefined) {
     const failure = [...repository.runRows].sort((left, right) => right.attempt - left.attempt)[0]
     throw new Error(`Pipeline terminou em ${result.state}: ${failure?.failure_code ?? result.message}`)
   }
-  if (!result.runDirectory.startsWith(`${runsRoot}${sep}`)) throw new Error('Diretório de execução saiu da raiz autorizada.')
+  if (generatorCalled) throw new Error('GENERATOR_RAN_WITHOUT_AUTHENTICATED_INGRESS')
   if (await readFile(outside, 'utf8') !== 'unchanged') throw new Error('Arquivo fora do sandbox foi alterado.')
   const outsideAfter = createHash('sha256').update(await readFile(outside)).digest('hex')
   if (outsideAfter !== outsideBefore) throw new Error('Hash externo mudou.')
   let isolated = false
   try { service.project(attacker, project.project_id) } catch (error) { isolated = error instanceof PromptToAppError && error.code === 'NOT_FOUND' }
   if (!isolated) throw new Error('Isolamento tenant não foi provado.')
-  if (repository.runRows.length !== 1 || repository.evidenceRows.length !== 2) throw new Error('Run ou evidência ausente.')
-  if (repository.runRows[0]!.acceptance_checks.some(check => check.status !== 'PASSED' && check.status !== 'NOT_AUTOMATED')) throw new Error('Critério automático não passou.')
-  if (!(await stat(resolve(result.runDirectory, 'pipeline.log'))).isFile()) throw new Error('Log do pipeline ausente.')
+  if (repository.runRows.length !== 1 || repository.evidenceRows.length !== 0) throw new Error('Estado bloqueado não foi registrado de forma honesta.')
+  if (repository.runRows[0]!.state !== 'BLOCKED_EXTERNAL' || repository.runRows[0]!.failure_code !== 'BUILDER_UNAVAILABLE') throw new Error('Bloqueio externo ausente.')
 
   const proof = [
     '# P32/P33 + P31-B — Prova da fatia vertical 1', '',
-    '- Resultado: **PASS**', '- Estado final: `VERIFIED_PROTOTYPE`', '- Modelo: fixture determinística; LLM real: `NOT_EXECUTED`',
-    `- Imagem do construtor: \`${digest}\``, '- Build, Vitest, Playwright e axe: PASS em contêiner sem rede',
-    '- Tentativas: 1/3', '- Isolamento tenant adversarial: PASS (`org-b` recebeu `NOT_FOUND`)',
+    '- Resultado lógico: **PASS**', '- Estado final: `BLOCKED_EXTERNAL`', '- Modelo e LLM real: `NOT_EXECUTED`',
+    '- Ingresso autenticado do builder: `NOT_PRESENT`', '- Build, Vitest, Playwright e axe: `NOT_EXECUTED`',
+    '- Tentativas: 0/3', '- Isolamento tenant adversarial: PASS (`org-b` recebeu `NOT_FOUND`)',
     `- Arquivo sentinela fora da raiz: hash antes/depois idêntico \`${outsideBefore}\``,
-    `- Evidências gravadas: ${repository.evidenceRows.map(value => `\`${value.kind}:${value.sha256}\``).join(', ')}`,
-    '- Critérios AppSpec: páginas, seções, idioma, título e texto literal passaram; o critério subjetivo ficou `NOT_AUTOMATED`.',
+    '- Evidências de build gravadas: nenhuma.',
+    '- Critérios AppSpec: `NOT_EXECUTED`; nenhuma promoção foi alegada.',
     '- Preview: `NOT_PRESENT`; publicação: `NOT_PRESENT`; experiência leiga: `NOT_VALIDATED`', '',
-    'Esta prova valida a composição técnica determinística da fatia. Ela não valida qualidade com LLM real, uso por pessoas leigas, celular físico, preview ou deploy.', '',
+    'Esta prova valida somente composição lógica, isolamento tenant e contenção fail-closed. Ela não valida build, testes, qualidade com LLM real, uso por pessoas leigas, celular físico, preview ou deploy.', '',
   ].join('\n')
   await writeFile(resolve(root, 'docs/proofs/P32-prompt-to-app-fatia1-proof.md'), proof)
-  process.stdout.write('PROMPT_TO_APP_PROOF=PASS state=VERIFIED_PROTOTYPE real_llm=NOT_EXECUTED\n')
+  process.stdout.write('PROMPT_TO_APP_LOGIC_PROOF=PASS state=BLOCKED_EXTERNAL ingress=NOT_PRESENT build=NOT_EXECUTED real_llm=NOT_EXECUTED\n')
 } finally {
   await rm(scratch, { recursive: true, force: true })
 }

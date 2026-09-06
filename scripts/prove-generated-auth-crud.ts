@@ -1,14 +1,13 @@
-import { createHash, randomUUID } from 'node:crypto'
-import { execFileSync, spawnSync } from 'node:child_process'
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { writeAcceptanceArtifacts } from '../plugins/prompt-to-app/src/acceptance.js'
 import type { AppSpecV1 } from '../plugins/prompt-to-app/src/appspec.js'
+import type { BuilderLifecycleResolverPort } from '../plugins/prompt-to-app/src/builder-lifecycle.js'
 import { generateAuthLayer, writeAuthLayer } from '../plugins/prompt-to-app/src/auth-generator.js'
 import { generateCrudLayer, writeCrudLayer } from '../plugins/prompt-to-app/src/crud-generator.js'
 import { generateDataLayer, writeDataLayer } from '../plugins/prompt-to-app/src/data-generator.js'
-import { ContainerBuilder, OFFLINE_PIPELINE_COMMANDS } from '../plugins/prompt-to-app/src/runner.js'
 
 const spec: AppSpecV1 = {
   schema_version: 1,
@@ -33,13 +32,8 @@ const spec: AppSpecV1 = {
 const root = process.cwd()
 const proofRoot = mkdtempSync(join(tmpdir(), 'dz23-auth-crud-proof-'))
 const runDirectory = resolve(proofRoot, 'generated-app')
-const digest = readFileSync(resolve(root, 'runtime/builder-image-digest'), 'utf8').trim() as `sha256:${string}`
-const uid = typeof process.getuid === 'function' ? process.getuid() : 1000
-const gid = typeof process.getgid === 'function' ? process.getgid() : 1000
-const builder = new ContainerBuilder({
-  engine: 'docker', imageDigest: digest, templateStore: resolve(root, 'runtime/template-store-v2'), user: `${uid}:${gid}`,
-  limits: { pids: 256, memory: '2g', cpus: '2', timeoutMs: 180_000 },
-})
+const unsupported = async (): Promise<never> => { throw new Error('UNSUPPORTED_INGRESS') }
+const builder: BuilderLifecycleResolverPort<unknown> = { forActor: async () => ({ preflight: async () => ({ state: 'BLOCKED_EXTERNAL' }), prepare: unsupported, execute: unsupported, cancel: unsupported, finish: unsupported, listManaged: async () => [] }) }
 
 try {
   cpSync(resolve(root, 'templates/nextjs-app@1'), runDirectory, { recursive: true })
@@ -59,57 +53,16 @@ try {
   const protectedPaths = [...data.protectedPaths, ...auth.protectedPaths, ...crud.protectedPaths]
   const before = new Map(protectedPaths.map(path => [path, hash(resolve(runDirectory, path))]))
 
-  const preflight = await builder.preflight()
-  if (preflight.state !== 'OK') throw new Error(preflight.message)
-  const isolation = await builder.execute(runDirectory, "node -e \"fetch('http://example.com').then(()=>process.exit(9)).catch(()=>process.stdout.write('NETWORK_BLOCKED'))\"")
-  if (isolation.exitCode !== 0 || !isolation.stdout.includes('NETWORK_BLOCKED') || !hasIsolatedNetwork(isolation.securityArgs)) {
-    throw new Error(`A prova negativa de rede falhou: ${isolation.stdout} ${isolation.stderr}`)
-  }
-  const inspectedMode = inspectDisposableNetworkMode(digest)
-  if (inspectedMode !== 'none') throw new Error(`Docker NetworkMode inesperado: ${inspectedMode}`)
-
-  const results = []
-  for (const command of OFFLINE_PIPELINE_COMMANDS) {
-    const result = await builder.execute(runDirectory, command)
-    results.push(result)
-    if (!hasIsolatedNetwork(result.securityArgs) || result.exitCode !== 0 || result.timedOut) {
-      throw new Error(`${command} falhou (exit=${result.exitCode}, timeout=${result.timedOut})\n${result.stdout.slice(-8000)}\n${result.stderr.slice(-8000)}`)
-    }
-  }
+  const preflight = await (await builder.forActor({})).preflight()
+  if (preflight.state !== 'BLOCKED_EXTERNAL') throw new Error('INGRESS_MUST_REMAIN_BLOCKED')
   const changed = protectedPaths.filter(path => hash(resolve(runDirectory, path)) !== before.get(path))
   if (changed.length > 0) throw new Error(`Arquivos protegidos alterados: ${changed.join(', ')}`)
-  const report = JSON.parse(readFileSync(resolve(runDirectory, 'evidence/appspec-report.json'), 'utf8')) as { checks: Array<{ kind: string; status: string }> }
-  for (const kind of ['auth', 'crud']) {
-    if (!report.checks.some(check => check.kind === kind && check.status === 'PASSED')) throw new Error(`Aceite ${kind} não passou.`)
-  }
-  if (!readFileSync(resolve(runDirectory, 'data/app.sqlite')).byteLength) throw new Error('O banco em arquivo não foi criado.')
-  if (process.platform !== 'win32' && (statSync(resolve(runDirectory, 'data/app.sqlite')).mode & 0o777) !== 0o600) throw new Error('O banco não ficou restrito ao usuário do processo.')
-  const captures = JSON.parse(readFileSync(resolve(runDirectory, 'data/studio-capture.json'), 'utf8')) as Array<{ kind: string }>
-  if (!captures.some(capture => capture.kind === 'code')) throw new Error('O canal de código de desenvolvimento não foi exercitado.')
-
-  const proof = `# P32/P33 — Prova de acesso e painel CRUD\n\n- Resultado: **PASS**\n- Imagem fixada: \`${digest}\`\n- \`docker inspect\`: \`HostConfig.NetworkMode=none\`.\n- Tentativa de conexão externa dentro do contêiner: bloqueada.\n- Login: código de 6 dígitos ligado ao cookie HttpOnly do pedido; sessão real em SQLite.\n- Rota \`/api/auth/session\`: 401 sem sessão e 200 após autenticação.\n- Fluxo real no navegador: login → listar → criar → editar → excluir com confirmação: PASS.\n- Vitest cobre sessão válida, expirada e revogada, CSRF ausente, cinco tentativas isoladas por pedido, limite de emissão e recusa de captura fora do verificador.\n- O Next roda com \`NODE_ENV=production\`; somente o Playwright protegido define \`DZ23_STUDIO_VERIFICATION=1\`.\n- Build Next.js, testes, Playwright, acessibilidade e scan: PASS em contêiner sem rede.\n- SQLite restrito a modo \`0600\` no Linux.\n- Arquivos de banco, autenticação e CRUD alterados durante build/teste: nenhum.\n\nO modo \`studio-capture\` é somente para verificar o protótipo e falha fechado sem a flag interna. Não houve preview remoto, publicação ou modelo real.\n`
+  const proof = `# P32/P33 — Verificação lógica de acesso e painel CRUD\n\n- Geração das camadas de dados, autenticação, CRUD e aceite: **PASS**\n- Ingresso autenticado do builder: **NOT_PRESENT**\n- Build, Docker, login real, banco em execução e E2E: **NOT_EXECUTED**\n- Estado de promoção: **BLOCKED_EXTERNAL**\n- Arquivos protegidos alterados: nenhum.\n\nEsta verificação não chama a aplicação de pronta ou de protótipo verificado.\n`
   mkdirSync(resolve(root, 'docs/proofs'), { recursive: true })
   writeFileSync(resolve(root, 'docs/proofs/P32-auth-crud-proof.md'), proof)
-  process.stdout.write(`AUTH_CRUD_PROOF=PASS protected=${protectedPaths.length} checks=${report.checks.length} steps=${results.length} network=${inspectedMode}\n`)
+  process.stdout.write(`AUTH_CRUD_GENERATION=PASS protected=${protectedPaths.length} build=BLOCKED_EXTERNAL ingress=NOT_PRESENT\n`)
 } finally {
   rmSync(proofRoot, { recursive: true, force: true })
-}
-
-function hasIsolatedNetwork(args: readonly string[]): boolean {
-  const index = args.indexOf('--network')
-  return index >= 0 && args[index + 1] === 'none' && args.includes('--cap-drop') && args.includes('ALL') && args.includes('no-new-privileges')
-}
-
-function inspectDisposableNetworkMode(image: string): string {
-  const name = `dz23-network-proof-${randomUUID()}`
-  let created = false
-  try {
-    execFileSync('docker', ['create', '--name', name, '--network', 'none', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', image, 'node', '-e', 'process.exit(0)'], { stdio: 'pipe' })
-    created = true
-    return execFileSync('docker', ['inspect', name, '--format', '{{.HostConfig.NetworkMode}}'], { encoding: 'utf8' }).trim()
-  } finally {
-    if (created) spawnSync('docker', ['rm', '-f', name], { stdio: 'ignore' })
-  }
 }
 
 function hash(path: string): string { return createHash('sha256').update(readFileSync(path)).digest('hex') }

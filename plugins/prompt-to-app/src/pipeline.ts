@@ -18,7 +18,8 @@ import { t } from './i18n.js'
 import type { StudioPlan, StudioRun } from './model.js'
 import { assertCategoryCanGenerate } from './planner.js'
 import type { PromptModelPort } from './ports.js'
-import { ContainerBuilder, listTreeFiles, materializePreviewArtifact, OFFLINE_PIPELINE_COMMANDS } from './runner.js'
+import { BUILD_STEPS, BuilderLifecycleError, type BuilderLifecycleResolverPort, type BuilderLifecycleSession } from './builder-lifecycle.js'
+import { listTreeFiles } from './runner.js'
 import { scanGeneratedContent } from './security.js'
 import { PromptToAppError, type PromptToAppActor, type PromptToAppService } from './service.js'
 import { canStartGeneration } from './state.js'
@@ -47,7 +48,7 @@ export class ModelCodeGenerator implements CodeGeneratorPort {
 
 export interface PipelineOptions {
   readonly service: PromptToAppService
-  readonly builder: ContainerBuilder
+  readonly builder: BuilderLifecycleResolverPort<PromptToAppActor>
   readonly templateDirectory: string
   readonly runsRoot: string
   readonly logoStoreRoot?: string
@@ -68,7 +69,7 @@ export class PromptToAppPipeline {
     if (plan.status !== 'APPROVED' || !canStartGeneration(project.state)) {
       throw new PromptToAppError('INVALID', t('errors.planRequired'))
     }
-    const operationId = runOptions.operationId ?? this.#createId()
+    const operationId = opaqueOperationId(runOptions.operationId ?? this.#createId())
     const ownerSessionId = runOptions.ownerSessionId ?? actor.sessionId ?? 'direct-execution'
     const spec = this.options.service.latestSpec(actor, projectId).app_spec
     assertCategoryCanGenerate(project.category, spec)
@@ -81,11 +82,18 @@ export class PromptToAppPipeline {
     let activeAttempt = 1; let activeRunId = operationId; let activeRunDirectory = 'not-created'; let activeStage: StudioRun['stage'] = 'generate'
     try {
       if (isAborted(runOptions.signal)) return this.cancelled(actor, projectId, plan.plan_id, operationId, ownerSessionId, 0)
-      const preflight = await this.options.builder.preflight()
+      let lifecycle: BuilderLifecycleSession
+      try { lifecycle = await this.options.builder.forActor(actor) }
+      catch (error) {
+        const code = error instanceof BuilderLifecycleError ? error.code : 'BUILDER_SCOPE_UNAVAILABLE'
+        await this.options.service.putRun(actor, this.runRecord(actor, projectId, plan.plan_id, 'build', 1, 'BLOCKED_EXTERNAL', 'unavailable', 'not-created', null, code, operationId, operationId, ownerSessionId))
+        return { state: 'BLOCKED_EXTERNAL', attempts: 0, message: t('errors.builderUnavailable') }
+      }
+      const preflight = await lifecycle.preflight(runOptions.signal)
       activeStage = 'build'
       if (preflight.state !== 'OK') {
         await this.options.service.putRun(actor, this.runRecord(actor, projectId, plan.plan_id, 'build', 1, 'BLOCKED_EXTERNAL', 'unavailable', 'not-created', null, 'BUILDER_UNAVAILABLE', operationId, operationId, ownerSessionId))
-        return { state: 'BLOCKED_EXTERNAL', attempts: 0, message: preflight.message }
+        return { state: 'BLOCKED_EXTERNAL', attempts: 0, message: t('errors.builderUnavailable') }
       }
       await this.options.service.transition(actor, projectId, 'GENERATING')
       let diagnostic: string | undefined
@@ -97,7 +105,7 @@ export class PromptToAppPipeline {
       completedAttempts = attempt
       activeStage = 'generate'
       if (isAborted(runOptions.signal)) return this.cancelled(actor, projectId, plan.plan_id, operationId, ownerSessionId, attempt - 1)
-      const runId = attempt === 1 ? operationId : `${operationId}-attempt-${attempt}`; const runDirectory = resolve(this.options.runsRoot, runId)
+      const runId = attempt === 1 ? operationId : opaqueOperationId(`${operationId}-attempt-${attempt}`); const runDirectory = resolve(this.options.runsRoot, runId)
       activeRunId = runId; activeRunDirectory = runDirectory
       await mkdir(this.options.runsRoot, { recursive: true }); await cp(this.options.templateDirectory, runDirectory, { recursive: true, errorOnExist: true })
       await writeDesignAssets(runDirectory, design, this.options.logoStoreRoot)
@@ -149,38 +157,68 @@ export class PromptToAppPipeline {
         continue
       }
       let buildPassed = false; let testPassed = false; let log = ''; let failedStage: StudioRun['stage'] = 'build'
-      for (const command of OFFLINE_PIPELINE_COMMANDS) {
-        if (isAborted(runOptions.signal)) return this.cancelled(actor, projectId, plan.plan_id, operationId, ownerSessionId, attempt, runDirectory)
-        const stage: StudioRun['stage'] = command === 'pnpm run test' || command === 'pnpm run test:e2e' ? 'test' : 'build'
-        activeStage = stage
-        await this.options.service.putRun(actor, this.runRecord(actor, projectId, plan.plan_id, stage, attempt, 'RUNNING', 'full', runDirectory, generated, null, runId, operationId, ownerSessionId, await readAcceptanceChecks(runDirectory, expectedAcceptanceChecks)))
-        const result = await this.options.builder.execute(runDirectory, command)
-        log += `$ ${command}\n${result.stdout}\n${result.stderr}\n`
-        if (result.outputLimitExceeded === true || result.terminationReason === 'output_limit') {
-          diagnostic = 'PROCESS_OUTPUT_LIMIT_EXCEEDED'; failedStage = buildPassed ? 'test' : 'build'; stopRetries = true; break
+      let buildRef: string | undefined
+      let finished: Awaited<ReturnType<BuilderLifecycleSession['finish']>> | undefined
+      try {
+        const prepared = await lifecycle.prepare(runDirectory, runId, runOptions.signal)
+        buildRef = prepared.buildRef
+        for (const step of BUILD_STEPS) {
+          if (isAborted(runOptions.signal)) {
+            await this.cancelLifecycle(lifecycle, buildRef)
+            return this.cancelled(actor, projectId, plan.plan_id, operationId, ownerSessionId, attempt, runDirectory)
+          }
+          const stage: StudioRun['stage'] = step === 'test' || step === 'e2e' ? 'test' : 'build'
+          activeStage = stage
+          await this.options.service.putRun(actor, this.runRecord(actor, projectId, plan.plan_id, stage, attempt, 'RUNNING', 'full', runDirectory, generated, null, runId, operationId, ownerSessionId, await readAcceptanceChecks(runDirectory, expectedAcceptanceChecks)))
+          const execution = await lifecycle.execute(buildRef, step, runOptions.signal)
+          const result = execution.result
+          log += `[${step}]\n${result.stdout}\n${result.stderr}\n`
+          if (result.output_limit_exceeded || result.termination_reason === 'output_limit') {
+            diagnostic = 'PROCESS_OUTPUT_LIMIT_EXCEEDED'; failedStage = buildPassed ? 'test' : 'build'; stopRetries = true; break
+          }
+          if (result.timed_out) { diagnostic = 'BUDGET_EXCEEDED'; failedStage = buildPassed ? 'test' : 'build'; break }
+          if (result.exit_code !== 0 || execution.state === 'FAILED') { diagnostic = `${step}: exit ${result.exit_code}`; failedStage = buildPassed ? 'test' : 'build'; break }
+          if (step === 'build' && execution.state === 'BUILD_OK') buildPassed = true
+          if (step === 'e2e' && execution.state === 'E2E_OK') testPassed = true
         }
-        if (result.timedOut) { diagnostic = 'BUDGET_EXCEEDED'; failedStage = buildPassed ? 'test' : 'build'; break }
-        if (result.exitCode !== 0) { diagnostic = `${command}: exit ${result.exitCode}`; failedStage = buildPassed ? 'test' : 'build'; break }
-        if (command === 'pnpm run build') buildPassed = true
-        if (command === 'pnpm run test:e2e') testPassed = true
+        if (isAborted(runOptions.signal)) {
+          await this.cancelLifecycle(lifecycle, buildRef)
+          return this.cancelled(actor, projectId, plan.plan_id, operationId, ownerSessionId, attempt, runDirectory)
+        }
+        activeStage = 'verify'
+        finished = await lifecycle.finish(buildRef, AbortSignal.timeout(210_000))
+      } catch (error) {
+        if (buildRef !== undefined && isAborted(runOptions.signal)) {
+          await this.cancelLifecycle(lifecycle, buildRef)
+          return this.cancelled(actor, projectId, plan.plan_id, operationId, ownerSessionId, attempt, runDirectory)
+        }
+        if (buildRef !== undefined && finished === undefined) {
+          try { finished = await lifecycle.finish(buildRef, AbortSignal.timeout(210_000)) }
+          catch (finishError) { throw new BuilderLifecycleError('BLOCKED_EXTERNAL', 'FINISH_INCONCLUSIVE', { cause: finishError }) }
+        }
+        throw error
       }
-      if (isAborted(runOptions.signal)) return this.cancelled(actor, projectId, plan.plan_id, operationId, ownerSessionId, attempt, runDirectory)
+      if (finished === undefined) throw new BuilderLifecycleError('BLOCKED_EXTERNAL', 'FINISH_INCONCLUSIVE')
+      if (!finished.cleaned || finished.cleanupPending || (finished.finalState === 'E2E_OK') !== (finished.exported !== null)) {
+        throw new BuilderLifecycleError('BLOCKED_EXTERNAL', 'FINISH_INCONCLUSIVE')
+      }
       const verifiedAcceptanceChecks = await readAcceptanceChecks(runDirectory, expectedAcceptanceChecks)
-      if (diagnostic === undefined && verifiedAcceptanceChecks.some(check => check.status !== 'PASSED' && check.status !== 'NOT_AUTOMATED')) {
-        diagnostic = 'APPSPEC_ACCEPTANCE_INCOMPLETE'; failedStage = 'test'; testPassed = false
-      }
       try {
         const immutableAfter = await immutableHash(runDirectory, protectedTemplatePaths)
         if (immutableAfter !== immutableBefore) { diagnostic = 'TEMPLATE_INTEGRITY_FAILED'; failedStage = 'verify' }
       } catch { diagnostic = 'TEMPLATE_INTEGRITY_FAILED'; failedStage = 'verify' }
-      const state = diagnostic === undefined && buildPassed && testPassed ? 'PASSED' : diagnostic === 'BUDGET_EXCEEDED' ? 'BUDGET_EXCEEDED' : 'FAILED'
+      const lifecyclePassed = finished.finalState === 'E2E_OK' && finished.exported !== null && finished.cleaned && !finished.cleanupPending
+      if (!lifecyclePassed && diagnostic === undefined) diagnostic = finished.finalState === 'CANCELLED' ? 'BUILDER_CANCELLED' : 'BUILDER_FAILED'
+      if (diagnostic === undefined && lifecyclePassed) {
+        throw new BuilderLifecycleError('BLOCKED_EXTERNAL', 'ACCEPTANCE_ATTESTATION_UNAVAILABLE')
+      }
+      const state = diagnostic === undefined && buildPassed && testPassed && lifecyclePassed ? 'PASSED' : diagnostic === 'BUDGET_EXCEEDED' ? 'BUDGET_EXCEEDED' : 'FAILED'
       if (state !== 'PASSED') finalFailureState = failedStage === 'test' ? 'TESTS_FAILED' : 'BUILD_FAILED'
       await writeFile(resolve(runDirectory, 'pipeline.log'), log, 'utf8')
       activeStage = 'verify'
-      const artifactSha256 = state === 'PASSED' ? (await materializePreviewArtifact(runDirectory)).sha256 : null
+      const artifactSha256 = state === 'PASSED' ? finished.exported!.sha256 : null
       await this.options.service.putRun(actor, this.runRecord(actor, projectId, plan.plan_id, state === 'PASSED' ? 'verify' : failedStage, attempt, state, 'full', runDirectory, generated, diagnostic ?? null, runId, operationId, ownerSessionId, verifiedAcceptanceChecks, artifactSha256))
       await this.recordEvidence(actor, projectId, runId, runDirectory, 'pipeline.log', 'build-log')
-      await this.recordEvidence(actor, projectId, runId, runDirectory, 'evidence/appspec-report.json', 'test-report')
       if (state === 'PASSED') {
         await this.options.service.transition(actor, projectId, 'BUILD_OK'); await this.options.service.transition(actor, projectId, 'TESTS_OK'); await this.options.service.transition(actor, projectId, 'VERIFIED_PROTOTYPE')
         return { state: 'VERIFIED_PROTOTYPE', runDirectory, attempts: attempt, message: t('pipeline.verified') }
@@ -216,13 +254,27 @@ export class PromptToAppPipeline {
     await this.options.service.putEvidence(actor, { evidence_id: id, run_id: runId, project_id: projectId, org_id: actor.orgId, tenant_id: actor.tenantId, kind, sha256: createHash('sha256').update(bytes).digest('hex'), size_bytes: bytes.byteLength, relative_path: `${runId}/${filename}`, created_at: this.#now().toISOString() })
   }
 
+  private async cancelLifecycle(lifecycle: BuilderLifecycleSession, buildRef: string): Promise<void> {
+    const cancelSignal = AbortSignal.timeout(30_000)
+    let cancelError: unknown
+    try { await lifecycle.cancel(buildRef, cancelSignal) } catch (error) { cancelError = error }
+    let finishError: unknown
+    try {
+      const finished = await lifecycle.finish(buildRef, AbortSignal.timeout(210_000))
+      if (finished.finalState !== 'CANCELLED' || !finished.cleaned || finished.cleanupPending || finished.exported !== null) finishError = new Error('CANCEL_FINISH_INVALID')
+    } catch (error) { finishError = error }
+    if (cancelError !== undefined || finishError !== undefined) throw new BuilderLifecycleError('BLOCKED_EXTERNAL', 'CANCEL_FINISH_INCONCLUSIVE', { cause: finishError ?? cancelError })
+  }
+
   private async unexpectedFailure(actor: PromptToAppActor, projectId: string, planId: string, operationId: string, ownerSessionId: string, attempt: number, runId: string, runDirectory: string, stage: StudioRun['stage'], error: unknown): Promise<PipelineResult> {
     const failure = pipelineFailureCode(error)
-    const finalState: 'BUILD_FAILED' | 'TESTS_FAILED' | 'INTERRUPTED' = failure.startsWith('APPSPEC_') || stage === 'test'
+    const external = error instanceof BuilderLifecycleError && error.state === 'BLOCKED_EXTERNAL'
+    const lifecycleInterrupted = error instanceof BuilderLifecycleError && (error.state === 'INTERRUPTED' || error.state === 'CANCELLED')
+    const finalState: 'BUILD_FAILED' | 'TESTS_FAILED' | 'BLOCKED_EXTERNAL' | 'INTERRUPTED' = external ? 'BLOCKED_EXTERNAL' : lifecycleInterrupted ? 'INTERRUPTED' : failure.startsWith('APPSPEC_') || stage === 'test'
       ? 'TESTS_FAILED'
       : failure === 'ARTIFACT_MATERIALIZATION_FAILED' || stage === 'build' || stage === 'generate' ? 'BUILD_FAILED' : 'INTERRUPTED'
     if (runDirectory !== 'not-created') await writeFile(resolve(runDirectory, 'pipeline.log'), `${failure}\n`, 'utf8').catch(() => undefined)
-    await this.options.service.putRun(actor, this.runRecord(actor, projectId, planId, finalState === 'TESTS_FAILED' ? 'test' : stage, attempt, 'FAILED', 'full', runDirectory, null, failure, runId, operationId, ownerSessionId))
+    await this.options.service.putRun(actor, this.runRecord(actor, projectId, planId, finalState === 'TESTS_FAILED' ? 'test' : stage, attempt, finalState === 'BLOCKED_EXTERNAL' ? 'BLOCKED_EXTERNAL' : 'FAILED', finalState === 'BLOCKED_EXTERNAL' ? 'unavailable' : 'full', runDirectory, null, failure, runId, operationId, ownerSessionId))
     const current = this.options.service.project(actor, projectId)
     if (current.state === 'GENERATING') {
       if (finalState === 'TESTS_FAILED') {
@@ -233,7 +285,7 @@ export class PromptToAppPipeline {
     } else if (current.state === 'BUILD_OK' || current.state === 'TESTS_OK') {
       await this.options.service.transition(actor, projectId, 'INTERRUPTED')
     }
-    return { state: finalState, attempts: attempt, message: finalState === 'INTERRUPTED' ? t('pipeline.interrupted') : t('pipeline.failed') }
+    return { state: finalState, attempts: attempt, message: finalState === 'INTERRUPTED' || finalState === 'BLOCKED_EXTERNAL' ? t('pipeline.interrupted') : t('pipeline.failed') }
   }
 
   private async cancelled(actor: PromptToAppActor, projectId: string, planId: string, operationId: string, ownerSessionId: string, attempts: number, runDirectory = 'not-created'): Promise<PipelineResult> {
@@ -279,7 +331,15 @@ async function readAcceptanceChecks(runDirectory: string, expected: readonly Acc
 
 function isAborted(signal: AbortSignal | undefined): boolean { return signal?.aborted === true }
 
+function opaqueOperationId(value: string): string {
+  if (typeof value !== 'string' || value.length < 1 || value.length > 96 || !/^[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?$/u.test(value)) {
+    throw new PromptToAppError('INVALID', 'INVALID_OPERATION_ID')
+  }
+  return value
+}
+
 function pipelineFailureCode(error: unknown): string {
+  if (error instanceof BuilderLifecycleError) return error.code
   const message = error instanceof Error ? error.message : ''
   if (message.startsWith('APPSPEC_')) return message
   if (message.startsWith('PREVIEW_ARTIFACT_')) return 'ARTIFACT_MATERIALIZATION_FAILED'

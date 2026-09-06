@@ -359,6 +359,9 @@ importers:
       '@deepseek-ai/dsh-storage-domain':
         specifier: workspace:*
         version: link:../../third_party/deepseek-harness/packages/storage/storage-domain
+      '@dz23-studio/builder-supervisor':
+        specifier: workspace:*
+        version: link:../builder-supervisor
       '@dz23-studio/identity':
         specifier: workspace:*
         version: file:plugins/identity(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)

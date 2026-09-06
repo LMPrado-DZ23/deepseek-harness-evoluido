@@ -1,9 +1,8 @@
 import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
-import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
-import { ContainerBuilder, OFFLINE_PIPELINE_COMMANDS } from '../plugins/prompt-to-app/src/runner.js'
+import type { BuilderLifecycleResolverPort } from '../plugins/prompt-to-app/src/builder-lifecycle.js'
 import { scanGeneratedContent } from '../plugins/prompt-to-app/src/security.js'
 import type { AppSpecV1 } from '../plugins/prompt-to-app/src/appspec.js'
 import { generateAuthLayer, writeAuthLayer } from '../plugins/prompt-to-app/src/auth-generator.js'
@@ -16,7 +15,7 @@ import { generateSchedulingLayer, writeSchedulingLayer } from '../plugins/prompt
 import { generateDashboardLayer, writeDashboardLayer } from '../plugins/prompt-to-app/src/dashboard-generator.js'
 import { generateSaasLayer, writeSaasLayer } from '../plugins/prompt-to-app/src/saas-generator.js'
 
-type GoldenState = 'PIPELINE_VERIFIED_CRITERIA_PARTIAL' | 'NOT_IMPLEMENTED'
+type GoldenState = 'LOGICAL_GENERATION_ONLY' | 'NOT_IMPLEMENTED'
 interface Criterion {
   readonly id: string
   readonly category: 'landing-page' | 'catalog' | 'form-database' | 'crud-panel' | 'scheduling' | 'saas-authenticated' | 'dashboard'
@@ -38,15 +37,19 @@ if (realLlmRequested) {
   process.exit(2)
 }
 
-const digest = (await readFile(resolve(root, 'runtime/builder-image-digest'), 'utf8')).trim() as `sha256:${string}`
-const uid = typeof process.getuid === 'function' ? process.getuid() : 1000
-const gid = typeof process.getgid === 'function' ? process.getgid() : 1000
-const builder = new ContainerBuilder({
-  engine: 'docker', imageDigest: digest, templateStore: resolve(root, 'runtime/template-store-v2'),
-  user: `${uid}:${gid}`, limits: { pids: 256, memory: '2g', cpus: '2', timeoutMs: 180_000 },
-})
-const preflight = await builder.preflight()
-if (preflight.state !== 'OK') throw new Error(preflight.message)
+const unsupported = async (): Promise<never> => { throw new Error('UNSUPPORTED_INGRESS') }
+const builder: BuilderLifecycleResolverPort<unknown> = {
+  forActor: async () => ({
+    preflight: async () => ({ state: 'BLOCKED_EXTERNAL' }),
+    prepare: unsupported,
+    execute: unsupported,
+    cancel: unsupported,
+    finish: unsupported,
+    listManaged: async () => [],
+  }),
+}
+const preflight = await (await builder.forActor({})).preflight()
+if (preflight.state !== 'BLOCKED_EXTERNAL') throw new Error('INGRESS_MUST_REMAIN_BLOCKED')
 
 const criteriaFiles = (await readdir(criteriaDir)).filter(file => file.endsWith('.yml')).sort()
 const briefFiles = (await readdir(briefsDir)).filter(file => file.endsWith('.md')).sort()
@@ -106,30 +109,13 @@ try {
     if (criterion.category === 'dashboard') await writeDashboardLayer(runDirectory, generateDashboardLayer(appSpec, criterion.category))
     if (criterion.category === 'saas-authenticated') await writeSaasLayer(runDirectory, generateSaasLayer(appSpec, criterion.category))
     await writeAcceptanceArtifacts(runDirectory, appSpec, criterion.category)
-    for (const command of OFFLINE_PIPELINE_COMMANDS) {
-      const result = await builder.execute(runDirectory, command)
-      if (result.exitCode !== 0 || result.timedOut) {
-        const output = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join('\n').slice(-8_000)
-        throw new Error(`${criterion.id}: ${command} falhou${result.timedOut ? ' por tempo excedido' : ''}.\n${output}`)
-      }
-    }
-    const acceptanceReport = JSON.parse(await readFile(resolve(runDirectory, 'evidence/appspec-report.json'), 'utf8')) as { checks: Array<{ id: string; kind: string; status: string }> }
-    const allowedStatuses = new Set(['PASSED', 'NOT_AUTOMATED'])
-    const invalid = acceptanceReport.checks.filter(check => !allowedStatuses.has(check.status))
-    if (invalid.length > 0) throw new Error(`${criterion.id}: estados de verificação inválidos: ${invalid.map(check => `${check.id}=${check.status}`).join(', ')}`)
-    const unfinished = acceptanceReport.checks.filter(check => check.status === 'PENDING' || check.status === 'FAILED')
-    if (unfinished.length > 0) throw new Error(`${criterion.id}: critérios automáticos sem aprovação: ${unfinished.map(check => `${check.id}=${check.status}`).join(', ')}`)
-    const declared = acceptanceReport.checks.filter(check => check.kind === 'criterion')
-    const declaredPassed = declared.filter(check => check.status === 'PASSED').length
-    const declaredNotAutomated = declared.filter(check => check.status === 'NOT_AUTOMATED').length
-    const technicalPassed = acceptanceReport.checks.filter(check => check.kind !== 'criterion' && check.status === 'PASSED').length
     results.push({
-      id: criterion.id, category: criterion.category, state: 'PIPELINE_VERIFIED_CRITERIA_PARTIAL',
+      id: criterion.id, category: criterion.category, state: 'LOGICAL_GENERATION_ONLY',
       critical: criterion.sensitive ? 'SENSITIVE_GATE_NOT_EXECUTED' : 'NOT_APPLICABLE',
-      technical_checks_passed: technicalPassed,
-      declared_criteria_passed: declaredPassed,
-      declared_criteria_not_automated: declaredNotAutomated,
-      detail: `Pipeline técnico, testes gerados, Playwright, axe e scan passaram em contêiner sem rede; ${declaredPassed}/${declared.length} critérios declarados foram verificados automaticamente e ${declaredNotAutomated} não foram automatizados.`,
+      technical_checks_passed: null,
+      declared_criteria_passed: null,
+      declared_criteria_not_automated: null,
+      detail: 'A geração declarativa e o scan estático local passaram; build, testes, E2E e critérios permanecem NOT_EXECUTED porque o ingresso autenticado do builder não existe.',
     })
   }
 } finally {
@@ -138,17 +124,15 @@ try {
 
 const generatedAt = new Date().toISOString()
 const stamp = generatedAt.replaceAll(':', '-').replaceAll('.', '-')
-const sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim()
-const workingTreeDirty = execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).trim().length > 0
 const fixtureSha256 = await hashFixtures([...criteriaFiles.map(file => resolve(criteriaDir, file)), ...briefFiles.map(file => resolve(briefsDir, file))])
 await mkdir(reportsDir, { recursive: true })
 const report = {
-  schema_version: 2, generated_at: generatedAt, route: 'deterministic-fixture', source_commit: sourceCommit,
-  working_tree_dirty: workingTreeDirty, builder_image_digest: digest, fixture_sha256: fixtureSha256,
-  real_llm: 'NOT_EXECUTED', promotion_eligible: false,
+  schema_version: 3, generated_at: generatedAt, route: 'deterministic-fixture', source_commit: 'NOT_CAPTURED_NO_SUBPROCESS',
+  working_tree_dirty: 'NOT_CAPTURED_NO_SUBPROCESS', builder_ingress: 'NOT_PRESENT', fixture_sha256: fixtureSha256,
+  real_llm: 'NOT_EXECUTED', build: 'NOT_EXECUTED', acceptance_attestation: 'NOT_PRESENT', promotion_eligible: false,
   counts: {
     total: results.length,
-    pipeline_verified: results.filter(value => value.state === 'PIPELINE_VERIFIED_CRITERIA_PARTIAL').length,
+    logical_generation_only: results.filter(value => value.state === 'LOGICAL_GENERATION_ONLY').length,
     not_implemented: results.filter(value => value.state === 'NOT_IMPLEMENTED').length,
     technical_checks_passed: results.reduce((total, value) => total + (value.technical_checks_passed ?? 0), 0),
     declared_criteria_passed: results.reduce((total, value) => total + (value.declared_criteria_passed ?? 0), 0),
@@ -160,16 +144,15 @@ await writeFile(resolve(reportsDir, `${stamp}-deterministic.json`), `${JSON.stri
 await writeFile(resolve(reportsDir, `${stamp}-deterministic.md`), [
   '# Golden set — execução determinística', '',
   '- LLM real: **NOT_EXECUTED**', '- Elegível para promoção: **não**',
-  `- Commit de origem: \`${sourceCommit}\`; árvore suja durante a prova: **${workingTreeDirty ? 'sim' : 'não'}**.`,
-  `- Imagem do builder: \`${digest}\`; SHA-256 conjunto das fixtures: \`${fixtureSha256}\`.`,
-  `- Fixtures: ${report.counts.total}; pipeline técnico verificado: ${report.counts.pipeline_verified}; NOT_IMPLEMENTED: ${report.counts.not_implemented}.`,
-  `- Checks técnicos aprovados: **${report.counts.technical_checks_passed}**.`,
-  `- Critérios de negócio declarados aprovados automaticamente: **${report.counts.declared_criteria_passed}**; não automatizados: **${report.counts.declared_criteria_not_automated}**.`,
+  '- Ingresso autenticado do builder: **NOT_PRESENT**; build, testes e E2E: **NOT_EXECUTED**.',
+  `- SHA-256 conjunto das fixtures: \`${fixtureSha256}\`.`,
+  `- Fixtures: ${report.counts.total}; geração lógica somente: ${report.counts.logical_generation_only}; NOT_IMPLEMENTED: ${report.counts.not_implemented}.`,
+  '- Checks técnicos e critérios de negócio: **NOT_EXECUTED**.',
   '', '| Brief | Categoria | Estado técnico | Controle sensível | Checks técnicos | Critérios aprovados | Critérios não automatizados |', '| --- | --- | --- | --- | ---: | ---: | ---: |',
   ...results.map(value => `| ${value.id} | ${value.category} | ${value.state} | ${value.critical} | ${value.technical_checks_passed ?? 'NOT_EXECUTED'} | ${value.declared_criteria_passed ?? 'NOT_EXECUTED'} | ${value.declared_criteria_not_automated ?? 'NOT_EXECUTED'} |`), '',
-  'Este relatório prova o pipeline técnico determinístico. Ele não afirma aceite integral dos briefs, não executa o gate de confirmação sensível, não valida qualidade com modelo real e não promove o produto.', '',
+  'Este relatório prova somente a geração declarativa local e o scan estático. Ele não prova pipeline, build, E2E, aceite integral dos briefs, gate sensível ou qualidade com modelo real, e não promove o produto.', '',
 ].join('\n'))
-process.stdout.write(`GOLDEN_SET=PIPELINE_VERIFIED_CRITERIA_PARTIAL total=${results.length} pipeline_verified=${report.counts.pipeline_verified} declared_passed=${report.counts.declared_criteria_passed} declared_not_automated=${report.counts.declared_criteria_not_automated} real_llm=NOT_EXECUTED\n`)
+process.stdout.write(`GOLDEN_SET=LOGICAL_GENERATION_ONLY total=${results.length} generated=${report.counts.logical_generation_only} ingress=NOT_PRESENT build=NOT_EXECUTED real_llm=NOT_EXECUTED\n`)
 
 function parseCriterion(value: unknown, file: string): Criterion {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error(`Fixture inválida: ${file}.`)
