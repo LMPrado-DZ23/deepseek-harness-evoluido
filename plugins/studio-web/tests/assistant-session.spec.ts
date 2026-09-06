@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -29,8 +29,15 @@ function identitySession(ids: readonly string[] = []): SessionRecord {
 
 async function repository(overrides: Partial<AssistantRepositoryLaunchConfig> = {}): Promise<AssistantRepositoryLaunchConfig> {
   const root = await mkdtemp(join(tmpdir(), 'dz23-assistant-launch-')); roots.push(root)
-  await mkdir(join(root, '.git'))
-  return { orgId: 'org-1', tenantId: 'tenant-1', workspaceId: 'tenant-1', repositoryPath: root, ...overrides }
+  await Promise.all([
+    mkdir(join(root, '.git', 'objects'), { recursive: true }),
+    mkdir(join(root, '.git', 'refs'), { recursive: true }),
+    writeFile(join(root, '.git', 'HEAD'), 'ref: refs/heads/main\n'),
+  ])
+  return {
+    orgId: 'org-1', tenantId: 'tenant-1', workspaceId: 'tenant-1', repositoryPath: root,
+    allowedPaths: ['src'], providers: ['spawn-in-process'], ...overrides,
+  }
 }
 
 async function fixture(options: {
@@ -136,7 +143,7 @@ describe('governed Assistant Session launcher', () => {
     await expect(changedPreset.launcher.launch(identitySession(['existing']))).rejects.toMatchObject({ code: 'SESSION_CONFLICT' })
   })
 
-  it('validates repository scope, uniqueness, absolute Git roots and input shape before serving', async () => {
+  it('reuses the bridge repository contract and rejects duplicate scopes or malformed lists', async () => {
     const valid = await repository()
     await expect(AssistantSessionLauncher.create({
       identity: {} as never, tenancy: {} as never, sessions: {} as never,
@@ -144,47 +151,12 @@ describe('governed Assistant Session launcher', () => {
     })).rejects.toThrow('mais de um')
     await expect(AssistantSessionLauncher.create({
       identity: {} as never, tenancy: {} as never, sessions: {} as never,
-      repositories: [{ ...valid, workspaceId: 'outro' }],
-    })).rejects.toThrow('mesmo identificador')
-    await expect(AssistantSessionLauncher.create({
-      identity: {} as never, tenancy: {} as never, sessions: {} as never,
-      repositories: [{ ...valid, repositoryPath: 'relative' }],
-    })).rejects.toThrow('absoluto')
-    const plain = await mkdtemp(join(tmpdir(), 'dz23-plain-')); roots.push(plain)
-    await expect(AssistantSessionLauncher.create({
-      identity: {} as never, tenancy: {} as never, sessions: {} as never,
-      repositories: [{ ...valid, repositoryPath: plain }],
-    })).rejects.toThrow('raiz Git')
-    await expect(AssistantSessionLauncher.create({
-      identity: {} as never, tenancy: {} as never, sessions: {} as never,
       repositories: 'bad' as never,
     })).rejects.toThrow('lista')
     await expect(AssistantSessionLauncher.create({
       identity: {} as never, tenancy: {} as never, sessions: {} as never,
-      repositories: [null as never],
-    })).rejects.toThrow('objeto')
-    await expect(AssistantSessionLauncher.create({
-      identity: {} as never, tenancy: {} as never, sessions: {} as never,
-      repositories: [[] as never],
-    })).rejects.toThrow('objeto')
-    await writeFile(join(plain, '.git'), 'bad')
-    await expect(AssistantSessionLauncher.create({
-      identity: {} as never, tenancy: {} as never, sessions: {} as never,
-      repositories: [{ ...valid, orgId: '', repositoryPath: plain }],
-    })).rejects.toThrow('organização')
-
-    const file = join(plain, 'not-a-directory'); await writeFile(file, 'plain')
-    await expect(AssistantSessionLauncher.create({
-      identity: {} as never, tenancy: {} as never, sessions: {} as never,
-      repositories: [{ ...valid, repositoryPath: file }],
-    })).rejects.toThrow('pasta')
-
-    const linked = await mkdtemp(join(tmpdir(), 'dz23-linked-git-')); roots.push(linked)
-    await symlink(join(valid.repositoryPath, '.git'), join(linked, '.git'))
-    await expect(AssistantSessionLauncher.create({
-      identity: {} as never, tenancy: {} as never, sessions: {} as never,
-      repositories: [{ ...valid, repositoryPath: linked }],
-    })).rejects.toThrow('raiz Git')
+      repositories: [{ ...valid, workspaceId: 'outro' }],
+    })).rejects.toThrow('mesmo identificador')
   })
 })
 

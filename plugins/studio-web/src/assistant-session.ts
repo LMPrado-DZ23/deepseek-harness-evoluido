@@ -1,26 +1,17 @@
 import { ApiSessionNotFound } from '@deepseek-ai/dsh-api-session-controller'
 import type { SessionId } from '@deepseek-ai/dsh-session'
+import {
+  validateAssistantRepository,
+  type AssistantRepositoryConfig,
+  type ValidatedRepositoryConfig,
+} from '@dz23-studio/assistant-bridge'
 import { KeyedMutex, type SessionRecord, type StudioIdentityService } from '@dz23-studio/identity'
 import { roleAllows } from '@dz23-studio/policy'
 import type { StudioTenancyService } from '@dz23-studio/tenancy'
-import { isAbsolute, resolve } from 'node:path'
-import { lstat, realpath, stat } from 'node:fs/promises'
 
 export const ASSISTANT_AGENT_PRESET = 'dz23-assistant'
 
-export interface AssistantRepositoryLaunchConfig {
-  readonly orgId: string
-  readonly tenantId: string
-  readonly workspaceId: string
-  readonly repositoryPath: string
-}
-
-interface ValidatedAssistantRepository {
-  readonly orgId: string
-  readonly tenantId: string
-  readonly workspaceId: string
-  readonly repositoryPath: string
-}
+export type AssistantRepositoryLaunchConfig = AssistantRepositoryConfig
 
 export interface AssistantSessionControllerPort {
   create(request: {
@@ -66,7 +57,7 @@ export class AssistantSessionLauncher {
 
   private constructor(
     private readonly options: Omit<AssistantSessionLauncherOptions, 'repositories'>,
-    private readonly repositories: readonly ValidatedAssistantRepository[],
+    private readonly repositories: readonly ValidatedRepositoryConfig[],
   ) {}
 
   static async create(options: AssistantSessionLauncherOptions): Promise<AssistantSessionLauncher> {
@@ -136,7 +127,7 @@ export class AssistantSessionLauncher {
 
   async #existingSession(
     identitySession: SessionRecord,
-    repository: ValidatedAssistantRepository,
+    repository: ValidatedRepositoryConfig,
   ): Promise<string | undefined> {
     const active = this.#activeByIdentitySession.get(identitySession.session_id)
     const candidates = [...new Set([
@@ -184,28 +175,9 @@ export class AssistantSessionLauncher {
 
 async function validateRepositories(
   values: readonly AssistantRepositoryLaunchConfig[],
-): Promise<readonly ValidatedAssistantRepository[]> {
+): Promise<readonly ValidatedRepositoryConfig[]> {
   if (!Array.isArray(values)) throw new Error('assistantRepositories deve ser uma lista.')
-  const repositories = await Promise.all(values.map(async (value) => {
-    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-      throw new Error('Cada projeto do Assistente deve ser um objeto.')
-    }
-    const strings = [value.orgId, value.tenantId, value.workspaceId, value.repositoryPath]
-    if (!strings.every(candidate => typeof candidate === 'string' && /^\S(?:.*\S)?$/u.test(candidate))) {
-      throw new Error('O projeto do Assistente exige organização, espaço e caminho válidos.')
-    }
-    if (value.workspaceId !== value.tenantId) {
-      throw new Error('O espaço do Assistente deve usar o mesmo identificador do tenant.')
-    }
-    if (!isAbsolute(value.repositoryPath)) throw new Error('O caminho do projeto do Assistente deve ser absoluto.')
-    const repositoryPath = await realpath(resolve(value.repositoryPath))
-    if (!(await stat(repositoryPath)).isDirectory()) throw new Error('O projeto do Assistente deve ser uma pasta.')
-    const marker = await lstat(resolve(repositoryPath, '.git')).catch(() => undefined)
-    if (marker === undefined || marker.isSymbolicLink() || (!marker.isDirectory() && !marker.isFile())) {
-      throw new Error('O projeto do Assistente deve ser uma raiz Git válida.')
-    }
-    return { ...value, repositoryPath }
-  }))
+  const repositories = await Promise.all(values.map(validateAssistantRepository))
   const keys = repositories.map(repository => `${repository.orgId}\u0000${repository.tenantId}`)
   if (new Set(keys).size !== keys.length) {
     throw new Error('Existe mais de um projeto do Assistente para a mesma organização e espaço.')

@@ -25,7 +25,7 @@ export interface AssistantRepositoryConfig {
   readonly maxPaths?: number
 }
 
-interface ValidatedRepositoryConfig extends Omit<AssistantRepositoryConfig, 'repositoryPath' | 'allowedPaths' | 'providers' | 'maxPaths'> {
+export interface ValidatedRepositoryConfig extends Omit<AssistantRepositoryConfig, 'repositoryPath' | 'allowedPaths' | 'providers' | 'maxPaths'> {
   readonly repositoryPath: string
   readonly allowedPaths: readonly string[]
   readonly providers: ReadonlySet<AssistantProvider>
@@ -108,7 +108,7 @@ export class StudioAssistantBridge {
   }
 
   static async create(dependencies: AssistantBridgeDependencies, repositories: readonly AssistantRepositoryConfig[]): Promise<StudioAssistantBridge> {
-    const validated = await Promise.all(repositories.map(validateRepository))
+    const validated = await Promise.all(repositories.map(validateAssistantRepository))
     const keys = new Set<string>()
     for (const repository of validated) {
       const key = scopeKey(repository)
@@ -364,7 +364,7 @@ export class StudioAssistantBridge {
   }
 }
 
-async function validateRepository(input: AssistantRepositoryConfig): Promise<ValidatedRepositoryConfig> {
+export async function validateAssistantRepository(input: AssistantRepositoryConfig): Promise<ValidatedRepositoryConfig> {
   assertExactObject(input, ['orgId', 'tenantId', 'workspaceId', 'repositoryPath', 'allowedPaths', 'providers', 'budget', 'maxPaths'], 'repository')
   if (![input.orgId, input.tenantId, input.workspaceId, input.repositoryPath].every(value => typeof value === 'string')) {
     throw new AssistantBridgeError('INVALID_REQUEST', t('errors.repositoryStrings'))
