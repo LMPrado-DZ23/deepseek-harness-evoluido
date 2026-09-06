@@ -127,6 +127,18 @@ describe('StudioAgentTeamService', () => {
     expect(h.start).toHaveBeenLastCalledWith(expect.objectContaining({ parent: expect.objectContaining({ session: expect.objectContaining({ id: 'new-session' }) }) }))
   })
 
+  it('accepts a transitively ordered DAG and does not mistake its shared path for parallel work', async () => {
+    const h = harness()
+    const snapshot = await h.service.start(h.request({ tasks: [
+      task(),
+      task({ taskId: 'review', title: 'Revisar núcleo', role: 'reviewer', prompt: 'Revise o núcleo.', intendedPaths: ['tests/core'], dependsOn: ['implementation'] }),
+      task({ taskId: 'synthesis', title: 'Sintetizar núcleo', role: 'synthesizer', prompt: 'Sintetize o núcleo.', intendedPaths: ['src/core'], dependsOn: ['review'] }),
+    ] }))
+    expect(snapshot.tasks.map(item => [item.task_id, item.status])).toEqual([
+      ['implementation', 'RUNNING'], ['review', 'QUEUED'], ['synthesis', 'QUEUED'],
+    ])
+  })
+
   it('preserves the declared T3 operation and requires the exact approval tier', async () => {
     const h = harness()
     await expect(h.service.start(h.request({ sensitive: 'external-network' }))).rejects.toMatchObject({ code: 'APPROVAL_REQUIRED' })
