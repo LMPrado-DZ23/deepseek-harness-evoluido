@@ -54,10 +54,11 @@ afterEach(async () => Promise.all(servers.splice(0).map(server => new Promise<vo
 
 async function fixture(
   bindHost: '127.0.0.1' | '0.0.0.0' = '127.0.0.1',
-  edge?: { secret?: string; harnessAuthenticationUrl?: (baseUrl: string) => string | undefined },
+  edge?: { required?: boolean; secret?: string; harnessAuthenticationUrl?: (baseUrl: string) => string | undefined },
 ) {
   const service = fakeService()
-  service.isSharedHarnessClientAllowed.mockReturnValue(edge === undefined)
+  const edgeRequired = edge?.required ?? edge !== undefined
+  service.isSharedHarnessClientAllowed.mockReturnValue(!edgeRequired)
   const allowedHosts: string[] = []
   const allowedOrigins: string[] = []
   const server = createServer(createIdentityHttpHandler({
@@ -65,7 +66,7 @@ async function fixture(
     bindHost,
     allowedHosts,
     allowedOrigins,
-    edgeRequired: edge !== undefined,
+    edgeRequired,
     ...(edge?.secret === undefined ? {} : { resolveEdgeSecret: () => Promise.resolve(edge.secret) }),
     ...(edge?.harnessAuthenticationUrl === undefined ? {} : { harnessAuthenticationUrl: edge.harnessAuthenticationUrl }),
   }))
@@ -233,6 +234,7 @@ describe('identity HTTP boundary', () => {
     expect(f.service.isSharedHarnessClientAllowed).toHaveBeenCalledWith(session)
 
     const personal = await fixture('127.0.0.1', {
+      required: false,
       harnessAuthenticationUrl: baseUrl => `${baseUrl}?token=native-launch`,
     })
     const personalExchange = await personal.request('/harness/session', {

@@ -177,11 +177,11 @@ describe('identity Cordis plugin composition', () => {
       end: () => undefined,
     } as never)
     expect(result).toEqual({
-      status: 303,
+      status: 403,
       headers: {
         'cache-control': 'no-store',
-        location: 'https://studio.example/?token=harness',
-        'referrer-policy': 'no-referrer',
+        'content-type': 'application/json; charset=utf-8',
+        'x-content-type-options': 'nosniff',
       },
     })
   })
