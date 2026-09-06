@@ -7,7 +7,7 @@
 - Playwright `apps/studio-web` 6/6 em Chromium (mesmos 6 testes, reexecutados e ampliados na rodada nova): jornada original com axe intacta; manifesto instalável servido com três ícones PNG reais, `crossorigin="use-credentials"` e `Page.getAppManifest` sem erros; `/studio/sw.js` servido como `text/javascript`, IIFE sem `import`; service worker registrado e controlando a página; **com o servidor realmente fora do ar (proxy do teste fechado e sockets destruídos), a recarga mostra a casca e `/api/…` responde 503 `OFFLINE`**; o cache não contém nenhuma entrada `/api/`; faixa "Você está sem internet…" dirigida por `navigator.onLine`; `appinstalled` mostra a confirmação e volta a esconder a faixa; notificação local disparada pelo evento sintético com a aba oculta.
 - Gates: `gate:i18n` PASS (catálogo PWA e manifesto varridos contra "pronto"), typecheck PASS, build reprodutível (versão do worker por digest do conteúdo).
 
-Não executado ou pendente: instalação em aparelho físico (Android/iOS); Lighthouse (substituído pelas verificações acima); preview no celular (M1/HTTPS); **disparo real do evento de fim de criação e botão de permissão na interface** (integração em `App.tsx`, no handoff — até lá a notificação é `NOT_IMPLEMENTED` do lado da interface).
+Não executado ou pendente: instalação em aparelho físico (Android/iOS); Lighthouse (substituído pelas verificações acima); preview no celular (M1/HTTPS); notificação em aparelho físico. O evento de fim de criação e o botão de permissão foram integrados posteriormente em `App.tsx`; veja o adendo de integração abaixo.
 
 ## Correção de honestidade (04/09/2026, após revisão do Codex)
 
@@ -37,10 +37,10 @@ clique** (fora de um gesto do usuário o navegador recusa, e um pedido não soli
 mais rápido para um "bloqueado" permanente) e diz em palavras o que o navegador respondeu,
 inclusive quando ficou bloqueado — o que só as configurações do próprio navegador desfazem.
 
-**O estado da matriz continua `NOT_IMPLEMENTED`, de propósito:** a interface principal
-(`App.tsx`, arquivo do Codex) ainda não aplicou `INTEGRACAO_App_tsx_M4_M5.patch`, e **nada disso
-foi provado em aparelho físico**. Notificação em celular real não é algo que se declare pronto a
-partir de um teste em Chromium de mesa.
+Na árvore original desta prova, a matriz continuava `NOT_IMPLEMENTED` porque `App.tsx` ainda não
+aplicava o patch. Essa limitação histórica foi fechada na candidata integrada `2108f86`; o estado
+atual é `BETA`, nunca `ESTÁVEL`, pois **nada disso foi provado em aparelho físico**. Notificação em
+celular real não é algo que se declare validado a partir de um teste em Chromium de mesa.
 
 ### Achado meu, na própria correção
 
@@ -114,14 +114,13 @@ Esta é a rodada cujos números valem. **Executado agora, nesta árvore
 ### O que continua NÃO provado, de propósito
 
 - **Notificação em aparelho físico: `NOT_EXECUTED`.** Nada aqui foi visto em um
-  celular real; Chromium de mesa não prova telefone. O estado da matriz para
-  esse item permanece `NOT_IMPLEMENTED`/`NOT_EXECUTED`.
+  celular real; Chromium de mesa não prova telefone. A implementação integrada
+  é `BETA`, enquanto a prova física continua ausente.
 - **Instalação em Android/iOS reais: `NOT_EXECUTED`.**
-- **Ponta a ponta da tela com o patch aplicado: `NOT_EXECUTED`.** O `App.tsx`
-  desta árvore é do Codex e não foi alterado; o patch foi provado por
-  `git apply --check` e por testes de unidade dos módulos que ele chama, não
-  por uma jornada com a tela já integrada. Isso só pode ser provado na árvore
-  onde o patch for aplicado.
+- **Ponta a ponta física no celular: `NOT_EXECUTED`.** A candidata integrada
+  monta `NotificationOptIn` e despacha o evento somente após estado terminal
+  real. A repetição Chromium atual não iniciou por ausência de `libnss3.so` no
+  WSL; isso é `BLOCKED_ENVIRONMENT`, não aprovação nem falha do produto.
 - **Fila / `background sync`: `NOT_PRESENT`**, e há teste que falha se o patch
   introduzir um esboço de fila.
 
@@ -261,8 +260,8 @@ era de **estado que ninguém consegue entender**, não de dado exposto.
 
 ### O que continua NÃO provado — sem mudança nesta rodada
 
-- Notificação em aparelho físico: `NOT_IMPLEMENTED`.
+- Notificação em aparelho físico: `NOT_EXECUTED`; implementação integrada `BETA`.
 - Instalação em Android/iOS reais: `NOT_EXECUTED`.
-- Ponta a ponta com o patch de `App.tsx` aplicado: `NOT_EXECUTED`.
+- Ponta a ponta em aparelho físico: `NOT_EXECUTED`; ligação de `App.tsx` presente.
 - Botão de sair no Studio: `NOT_PRESENT` — `forgetSavedShell()` existe e é
   testado, mas nenhuma tela o chama hoje, e esta prova não finge o contrário.

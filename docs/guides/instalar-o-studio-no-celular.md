@@ -11,13 +11,14 @@ de testes; ainda **não** foi testado em um aparelho físico (ver `docs/CAPABILI
   instalar (Chrome e Edge no Android e no computador; no iPhone use "Compartilhar → Adicionar à
   Tela de Início"). Depois de instalado, a interface confirma em palavras.
 - **Sem internet**, a tela do Studio ainda abre e uma faixa avisa: "Você está sem internet. O
-  Studio continua aberto, mas suas ações vão esperar a conexão voltar." Nenhum dado de projeto é
-  guardado no aparelho — só a interface. Ao tentar agir sem rede, a mensagem diz isso em vez de
-  mostrar um código.
+  Studio continua aberto para você ver o que já está na tela, mas nada pode ser criado, salvo ou
+  enviado até a conexão voltar." Nenhum dado de projeto é guardado no aparelho — só a interface.
+  Ao tentar agir sem rede, a mensagem preserva o que foi digitado e pede uma nova tentativa quando
+  a conexão voltar; não existe fila escondida.
 - **Avisar quando a criação terminar**: durante a criação de um aplicativo, um botão pede sua
   permissão para avisar quando terminar, mesmo com a aba em segundo plano. O aviso é local (não
-  há servidor de notificações nem envio para terceiros). Esta parte depende de duas linhas na
-  interface principal que entram na integração com a M1; até lá consta como `NOT_IMPLEMENTED`.
+  há servidor de notificações nem envio para terceiros). A ligação com o estado final real já está
+  integrada e permanece `BETA`; ainda falta provar a notificação em um celular físico.
 
 ## O que NÃO acontece
 
