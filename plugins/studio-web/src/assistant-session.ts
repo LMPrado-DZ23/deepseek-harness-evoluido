@@ -8,6 +8,7 @@ import {
 import { KeyedMutex, type SessionRecord, type StudioIdentityService } from '@dz23-studio/identity'
 import { roleAllows } from '@dz23-studio/policy'
 import type { StudioTenancyService } from '@dz23-studio/tenancy'
+import { t } from './i18n.js'
 
 export const ASSISTANT_AGENT_PRESET = 'dz23-assistant'
 
@@ -79,7 +80,7 @@ export class AssistantSessionLauncher {
       identitySession.tenant_id,
     )
     if (authorization === undefined || !roleAllows(authorization.role, 'project.read')) {
-      throw new AssistantSessionLaunchError('FORBIDDEN', 'Seu acesso a este projeto não está ativo.')
+      throw new AssistantSessionLaunchError('FORBIDDEN', t('assistant.forbidden'))
     }
     const repository = this.repositories.find(candidate => (
       candidate.orgId === identitySession.org_id
@@ -89,7 +90,7 @@ export class AssistantSessionLauncher {
     if (repository === undefined) {
       throw new AssistantSessionLaunchError(
         'NOT_CONFIGURED',
-        'O administrador ainda não liberou um projeto para esta conversa.',
+        t('assistant.notConfigured'),
       )
     }
 
@@ -109,13 +110,13 @@ export class AssistantSessionLauncher {
       this.options.reportFailure?.('create', error)
       throw new AssistantSessionLaunchError(
         'SESSION_UNAVAILABLE',
-        'A conversa não pôde ser criada agora. Tente novamente em instantes.',
+        t('assistant.createUnavailable'),
       )
     }
     if (created.agentPreset !== ASSISTANT_AGENT_PRESET) {
       throw new AssistantSessionLaunchError(
         'SESSION_CONFLICT',
-        'A conversa foi recusada porque o perfil seguro não foi aplicado.',
+        t('assistant.presetConflict'),
       )
     }
     await this.options.identity.bindHarnessSession(identitySession, String(created.sessionId))
@@ -146,14 +147,14 @@ export class AssistantSessionLauncher {
         this.options.reportFailure?.('inspect', error)
         throw new AssistantSessionLaunchError(
           'SESSION_UNAVAILABLE',
-          'A conversa existente não pôde ser conferida agora. Tente novamente em instantes.',
+          t('assistant.inspectUnavailable'),
         )
       }
       if (inspected.meta.agentPreset !== ASSISTANT_AGENT_PRESET) continue
       if (inspected.meta.cwd !== repository.repositoryPath) {
         throw new AssistantSessionLaunchError(
           'SESSION_CONFLICT',
-          'A conversa existente pertence a outro projeto e não será aberta.',
+          t('assistant.repositoryConflict'),
         )
       }
       try {
@@ -167,7 +168,7 @@ export class AssistantSessionLauncher {
         this.options.reportFailure?.('adopt', error)
         throw new AssistantSessionLaunchError(
           'SESSION_CONFLICT',
-          'A conversa existente não pôde ser retomada com o perfil seguro.',
+          t('assistant.adoptConflict'),
         )
       }
       this.#activeByIdentitySession.set(identitySession.session_id, rawId)
@@ -180,11 +181,11 @@ export class AssistantSessionLauncher {
 async function validateRepositories(
   values: readonly AssistantRepositoryLaunchConfig[],
 ): Promise<readonly ValidatedRepositoryConfig[]> {
-  if (!Array.isArray(values)) throw new Error('assistantRepositories deve ser uma lista.')
+  if (!Array.isArray(values)) throw new Error(t('assistant.repositoriesList'))
   const repositories = await Promise.all(values.map(validateAssistantRepository))
   const keys = repositories.map(repository => `${repository.orgId}\u0000${repository.tenantId}`)
   if (new Set(keys).size !== keys.length) {
-    throw new Error('Existe mais de um projeto do Assistente para a mesma organização e espaço.')
+    throw new Error(t('assistant.duplicateRepository'))
   }
   return repositories
 }

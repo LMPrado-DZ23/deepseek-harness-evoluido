@@ -1,4 +1,5 @@
 import { csrfToken } from '../api'
+import copy from '../i18n/assistant.pt-BR.json'
 
 export const ASSISTANT_SESSION_ENDPOINT = '/studio/assistant/session'
 export const HARNESS_AUTHENTICATION_PATH = '/api/studio/identity/harness/session'
@@ -38,9 +39,9 @@ export async function openGovernedAssistant(
     body: '{}',
   })
   const body = await response.json().catch(() => undefined) as (Partial<AssistantLaunchResponse> & { error?: string }) | undefined
-  if (!response.ok) throw new Error(body?.error ?? 'Não foi possível abrir a conversa segura.')
+  if (!response.ok) throw new Error(body?.error ?? copy.openError)
   if (body?.preset !== 'dz23-assistant' || typeof body.session_id !== 'string' || body.session_id === '') {
-    throw new Error('O servidor não confirmou o perfil seguro da conversa.')
+    throw new Error(copy.invalidServerResponse)
   }
   port.selectSession(body.session_id)
   port.openHarness()

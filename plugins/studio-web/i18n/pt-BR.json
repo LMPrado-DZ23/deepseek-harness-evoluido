@@ -1,5 +1,17 @@
 {
   "config": {
     "invalidPreviewFrameSource": "previewFrameSources aceita somente HTTP local com porta exata ou HTTPS em *.preview.<domínio>."
+  },
+  "assistant": {
+    "forbidden": "Seu acesso a este projeto não está ativo.",
+    "notConfigured": "O administrador ainda não liberou um projeto para esta conversa.",
+    "serviceNotConfigured": "A conversa segura ainda não foi configurada.",
+    "createUnavailable": "A conversa não pôde ser criada agora. Tente novamente em instantes.",
+    "presetConflict": "A conversa foi recusada porque o perfil seguro não foi aplicado.",
+    "inspectUnavailable": "A conversa existente não pôde ser conferida agora. Tente novamente em instantes.",
+    "repositoryConflict": "A conversa existente pertence a outro projeto e não será aberta.",
+    "adoptConflict": "A conversa existente não pôde ser retomada com o perfil seguro.",
+    "repositoriesList": "assistantRepositories deve ser uma lista.",
+    "duplicateRepository": "Existe mais de um projeto do Assistente para a mesma organização e espaço."
   }
 }

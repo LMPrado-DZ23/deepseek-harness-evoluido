@@ -53,7 +53,7 @@ export function createStudioWebHandler(config: {
         if (request.method !== 'POST') return send(response, 405, 'Método não permitido.', frameSources)
         const identitySession = await authenticatedMutation(request, config.identity)
         if (config.assistantSessions === undefined) {
-          return sendJson(response, 503, { error: 'A conversa segura ainda não foi configurada.' }, frameSources)
+          return sendJson(response, 503, { error: t('assistant.serviceNotConfigured') }, frameSources)
         }
         const launched = await config.assistantSessions.launch(identitySession)
         return sendJson(response, 200, launched, frameSources)

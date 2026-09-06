@@ -13,6 +13,7 @@
   "open": "Abrir conversa segura",
   "opening": "Protegendo sua conversa...",
   "openError": "Não foi possível abrir a conversa segura.",
+  "invalidServerResponse": "O servidor não confirmou o perfil seguro da conversa.",
   "automaticSession": "Este botão cria ou retoma uma conversa separada neste dispositivo e confirma o perfil seguro antes de abrir o chat.",
   "back": "Voltar ao Studio"
 }
