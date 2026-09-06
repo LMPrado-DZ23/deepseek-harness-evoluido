@@ -86,6 +86,25 @@ inspeção; não tenta limpeza automática. Sucesso termina em
 remoção manual posterior. Enquanto não for executado com imagens auditadas, o
 estado permanece `NOT_EXECUTED`.
 
+## Gate de evidência de release M78
+
+Depois de uma execução **real** do M77, valide o diretório sem iniciar Docker,
+WSL2, rede ou qualquer serviço:
+
+```powershell
+./deploy/windows/Test-Dz23LifecycleEvidence.ps1 `
+  -ReportPath C:\evidencias\m77-real\lifecycle-report.json `
+  -EvidenceDirectory C:\evidencias\m77-real `
+  -ExpectedInitialCommit <sha-inicial-de-40-caracteres> `
+  -ExpectedUpgradeCommit <sha-atualizacao-de-40-caracteres> `
+  -ExpectedFailureCommit <sha-falha-controlada-de-40-caracteres>
+```
+
+O único resultado de sucesso é `DZ23_M78_RELEASE_EVIDENCE=PASS`. O gate recusa
+simulação, fase ausente ou duplicada, hash divergente, caminho fora do
+diretório, arquivo ou link não regular, comparação inconsistente e qualquer
+alteração independente entre os snapshots do trust store.
+
 ## Limites comprovados
 
 - Scripts e testes em sandbox com PowerShell e Bash reais e Docker falso: implementados.
