@@ -3,12 +3,12 @@
 - `mission_id`: `M1-M6-finalizacao-2026-09-04`
 - `objective`: integrar e provar M1-M6 com segurança, sem push, PR, deploy ou exclusões não autorizadas
 - `state`: `INTEGRATING_AND_PROVING`
-- `iteration`: `2026-09-06.19`
+- `iteration`: `2026-09-06.20`
 - `started_at`: `2026-09-04 America/Sao_Paulo`
-- `heartbeat_at`: `2026-09-06T19:10:00-03:00`
-- `last_progress_at`: `2026-09-06T19:10:00-03:00`
-- `branch`: `codex/m79-windows-bootstrap-transaction`
-- `head`: `0199f13f7ee428f482da65c95674777a913f6367` (ponta funcional; documentação posterior não altera a implementação)
+- `heartbeat_at`: `2026-09-06T20:20:00-03:00`
+- `last_progress_at`: `2026-09-06T20:20:00-03:00`
+- `branch`: `codex/m80-secure-signout`
+- `head`: `fb88dd3b3db1bd229ef8367115c7ce542113fdf3` (ponta funcional; documentação posterior não altera a implementação)
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c`
 
 ## Critérios de aceite
@@ -63,6 +63,12 @@
   só é normalizado sob invariantes estritos. A falha Windows preservou o
   placeholder; um clone novo WSL2/ext4 passou builds, typecheck e 2.027 testes
   raiz. O scan de segurança fechou com cobertura completa e zero achado.
+- M80 adicionou saída autenticada e protegida por CSRF da sessão atual. A
+  revogação do servidor precede cookies, cache, chaves DZ23 e redirecionamento;
+  falhas não fingem sucesso. Identidade 16/16, recorte saída/PWA 8/8 e app
+  60/60 passaram. O scan `377b88f6-552e-446a-9f4e-cd7687c59385` cobriu 8/8
+  superfícies e terminou com zero achado. PostgreSQL físico, Docker, navegador
+  E2E e celular seguem `NOT_EXECUTED`.
 - Claude entregou M3+M4+M5 em `9034a85`; transporte íntegro, mas ainda baseado em `b95d23c`. A composição sobre `d819314` foi solicitada novamente com evidência do merge-base.
 - Preview recebeu o checkpoint isolado `7273b38`: instalação offline com lock congelado, 178/178 testes e build passaram em WSL/ext4. A prova de ausência usa `previewId`, portanto uma troca de `runtimeRef` não libera capacidade prematuramente.
 - Retenção fail-closed foi fechada em `011f118`: nenhuma remoção física de artefatos na v1, 28/28 testes executados, 2 skips explícitos e 21/21 no namespace Linux com bind mounts reais.
@@ -104,7 +110,7 @@
 
 ## Próxima ação
 
-1. Claude revisar M74-A, M75, M76, M77, M78 e M79 sem sobreposição de arquivos;
+1. Claude revisar M74-A, M75, M76, M77, M78, M79 e M80 sem sobreposição de arquivos;
 2. manter M74-B parado até GO explícito de M74-A e não tocar na M72 de Claude;
 3. Claude revisar somente leitura o M77; a execução real fica aguardando
    imagens finais e autorização explícita para Docker;

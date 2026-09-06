@@ -1,7 +1,7 @@
 # ADR-030 — Interface do Studio como PWA (M4)
 
-Status: aceita e implementada na etapa M4 (Claude). Numeração: a ADR-028 está
-reservada à M1 (preview) do Codex.
+Status: aceita e implementada na etapa M4 (Claude), com saída segura integrada
+na M80 (Codex). Numeração: a ADR-028 está reservada à M1 (preview) do Codex.
 
 ## Decisões
 
@@ -96,10 +96,11 @@ reservada à M1 (preview) do Codex.
    quando a sessão acabou; o worker ignorava as duas coisas. Sessão encerrada
    + aparelho offline devolvia a interface autenticada inteira, e a única
    coisa dita à pessoa era "você está sem internet" — quando a verdade era
-   "sua sessão terminou". Não é vazamento (nenhum dado de projeto é cacheado,
-   `/api/` nunca é cacheado, e não há `localStorage`, `sessionStorage` nem
-   `indexedDB` em lugar nenhum de `apps/studio-web/src` ou `plugins/*/src`):
-   é um estado que ninguém consegue entender, e num aparelho compartilhado a
+   "sua sessão terminou". Não é vazamento do cache (nenhum dado de projeto é
+   cacheado e `/api/` nunca é cacheado). O cliente usa somente duas chaves
+   próprias fora do Cache Storage: o CSRF da sessão em `sessionStorage` e a
+   seleção da sessão do Assistente em `localStorage`; não usa `indexedDB`. Era
+   um estado que ninguém conseguia entender, e num aparelho compartilhado a
    próxima pessoa vê o Studio "aberto". Agora: (a) o worker marca a origem da
    casca **por navegação**, em `/studio/__shell-source?client=<id da página>`
    dentro do próprio Cache Storage — uma página não lê os cabeçalhos da própria
@@ -115,7 +116,14 @@ reservada à M1 (preview) do Codex.
    existe hoje neste produto; (d) `forgetSavedShell()`
    é o gancho para um botão de sair — a página avisa o worker
    (`dz23:shell-logout`), ele apaga os caches e confirma; sem worker, a própria
-   página apaga. Não há botão de sair no Studio hoje: `NOT_PRESENT`.
+   página apaga. A M80 ligou esse gancho ao botão **Sair**: o cliente faz um
+   `POST /api/studio/identity/logout` autenticado e protegido por CSRF; o
+   servidor revoga exatamente a sessão corrente e só então responde
+   `signed_out: true`. Somente após essa prova o cliente apaga os caches e as
+   duas chaves DZ23 e segue para o caminho fixo `/login`. Falha do servidor
+   preserva a tela e o estado local e mostra erro, sem fingir que a saída
+   ocorreu. Falha de limpeza do navegador depois da revogação é melhor esforço
+   e não restaura autoridade no servidor.
 
 13. **A marca era global; agora é de cada tela, e o `401` só conta quando é
    uma tela.** Duas suspeitas da auditoria, as duas verificadas no navegador:
@@ -148,6 +156,13 @@ em Android/Chrome real e em iOS (`apple-touch-icon` presente; Safari não emite
 `beforeinstallprompt`) não foram executadas em aparelho físico:
 `NOT_EXECUTED`. O preview no celular depende da M1 (HTTPS em domínio real) e
 segue `NOT_EXECUTED` com o texto do próprio cartão de preview.
+
+A M80 foi provada por testes unitários e build em clone WSL2/ext4, não por uma
+jornada completa em navegador ou aparelho físico. A rota `/login` existe no
+Caddy; o modo pessoal direto em loopback ainda não demonstrou destino
+equivalente. Uma tentativa de sair com cookie já revogado para na autenticação
+antes de limpar o navegador, e uma prévia ativa continua sob o ticket/TTL
+próprio. Esses limites estão registrados em `docs/proofs/M80-secure-signout.md`.
 
 ## O que continua em aberto
 

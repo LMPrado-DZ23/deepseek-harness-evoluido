@@ -3,19 +3,19 @@
 - mission_id: `DZ23-STUDIO-V1-20260904`
 - objetivo: concluir o DZ23 STUDIO v1.0 com runtime portátil, geração isolada, gates Windows/Linux, testes com cinco pessoas e pacote open source somente após licença escolhida
 - estado: `INTEGRATING_AND_PROVING`
-- iteração: 19
+- iteração: 20
 - início: 2026-09-04
-- último heartbeat: 2026-09-06T19:10:00-03:00
-- último progresso real: M79 provou o bootstrap canônico em clone WSL2/ext4 e preservou o placeholder numa falha real de symlink no Windows
-- tarefa atual: empacotar a ponta M79 e aguardar revisão independente do Claude, sem merge na principal
-- branch: `codex/m79-windows-bootstrap-transaction`
-- ponta funcional: `0199f13f7ee428f482da65c95674777a913f6367`
-- base: `17e79aaab4c1ac54c1b4fc05f780f6485c5941b7`
+- último heartbeat: 2026-09-06T20:20:00-03:00
+- último progresso real: M80 implementou saída da sessão atual e fechou scan de segurança completo com zero achado
+- tarefa atual: empacotar a ponta M80 e solicitar revisão independente do Claude, sem merge na principal
+- branch: `codex/m80-secure-signout`
+- ponta funcional: `fb88dd3b3db1bd229ef8367115c7ce542113fdf3`
+- base: `d85cc87940f675d4c74d0bb2f77f809c689b0c98`
 - upstream: `deepseek-harness@6c705be1ce6774a000d061da41d1823b03a3d42c`
 - staging válido: `/home/leandro/dz23-gates/m63-integration-20260906`
 - staging inválido preservado: `/home/leandro/dz23-m61-lock-20260904a` (origem calculada incorretamente e sincronização interrompida)
 
-## Checkpoint mais recente — M79
+## Checkpoint preservado — M79
 
 - bootstrap prova origem, gitlink, commit, tree, limpeza e manifesto antes de
   converter placeholders de symlink;
@@ -30,6 +30,21 @@
   completa, zero achado;
 - Docker e PostgreSQL físico não foram usados; lifecycle real continua
   `NOT_EXECUTED`.
+
+## Checkpoint mais recente — M80
+
+- saída exige sessão autenticada, origem permitida e CSRF válido;
+- o servidor revoga exatamente a sessão corrente e só então expira cookies e
+  confirma `signed_out: true`;
+- o navegador só após essa prova apaga caches e chaves DZ23 e segue para
+  `/login`; falha do servidor não finge sucesso;
+- identidade HTTP 16/16, recorte de saída/PWA 8/8 e app completo 60/60 passaram;
+- clone limpo WSL2/ext4 passou bootstrap, builds, typecheck e gates estáticos;
+- suíte raiz ficou conhecida, não verde: um timeout não relacionado da
+  builder-supervisor persistiu sob carga e o arquivo passou 52/52 isolado;
+- Security Diff Scan `377b88f6-552e-446a-9f4e-cd7687c59385`: 8/8 superfícies,
+  cobertura completa e zero achado;
+- Docker, PostgreSQL físico, navegador E2E e celular continuam `NOT_EXECUTED`.
 
 ## Checkpoint preservado — M71
 
@@ -79,8 +94,8 @@
 
 ## Próxima ação
 
-1. gerar bundle, arquivos-fonte e relatório P37 do pin cumulativo M79;
-2. aguardar e tratar as revisões independentes do Claude sem merge;
+1. gerar bundle, arquivos-fonte e relatório P37 do pin cumulativo M80;
+2. pedir e tratar a revisão independente do Claude sem merge;
 3. tratar os artefatos `plugins/*/lib/**` rastreados em commit separado, somente
    com autorização explícita;
 4. repetir o preflight somente leitura quando Docker e pins estiverem disponíveis;
