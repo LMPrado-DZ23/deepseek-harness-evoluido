@@ -1,0 +1,6 @@
+{
+  "assistant": {
+    "bindingConflictAudit": "Sessão do agente já vinculada a outra sessão de identidade.",
+    "bindingConflict": "Esta conversa já pertence a outra sessão."
+  }
+}

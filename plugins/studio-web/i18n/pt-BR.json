@@ -13,6 +13,20 @@
     "repositoryConflict": "A conversa existente pertence a outro projeto e não será aberta.",
     "adoptConflict": "A conversa existente não pôde ser retomada com o perfil seguro.",
     "repositoriesList": "assistantRepositories deve ser uma lista.",
-    "duplicateRepository": "Existe mais de um projeto do Assistente para a mesma organização e espaço."
+    "duplicateRepository": "Existe mais de um projeto do Assistente para a mesma organização e espaço.",
+    "conversationMissing": "Conversa não encontrada.",
+    "sendUnavailable": "Não foi possível enviar sua mensagem agora.",
+    "cancelUnavailable": "Não foi possível interromper esta tarefa agora.",
+    "projectForbidden": "Você não tem acesso ao assistente neste projeto.",
+    "genericAction": "Ação do assistente",
+    "approvalExplanation": "Esta ação precisa da sua confirmação antes de continuar.",
+    "toolList": "Consultar assistentes disponíveis",
+    "toolStart": "Iniciar um assistente especializado",
+    "toolStatus": "Acompanhar o trabalho do assistente",
+    "toolCancel": "Interromper o trabalho do assistente",
+    "toolApply": "Aplicar uma proposta ao projeto",
+    "toolTeam": "Coordenar uma equipe de assistentes",
+    "toolStudio": "Executar uma ação do DZ23 STUDIO",
+    "invalidMessage": "Escreva uma mensagem válida de até 32 KB."
   }
 }

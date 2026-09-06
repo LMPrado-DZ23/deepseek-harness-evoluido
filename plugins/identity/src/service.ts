@@ -17,6 +17,7 @@ import type {
   SessionRecord,
 } from './model.js'
 import { KeyedMutex } from './mutex.js'
+import { t } from './i18n.js'
 
 const MINUTE = 60_000
 const DAY = 24 * 60 * MINUTE
@@ -387,9 +388,9 @@ export class StudioIdentityService {
         await this.#audit(
           'harness_session_bound', current.user_id, current.session_id,
           current.org_id, current.tenant_id, 'failure',
-          'Sessão do agente já vinculada a outra sessão de identidade.',
+          t('assistant.bindingConflictAudit'),
         )
-        throw new IdentityError('replay', 'Esta conversa já pertence a outra sessão.')
+        throw new IdentityError('replay', t('assistant.bindingConflict'))
       }
       if (current.harness_session_ids.includes(harnessSessionId)) return
       await this.#repository.putSession({

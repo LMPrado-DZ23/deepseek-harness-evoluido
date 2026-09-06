@@ -10,6 +10,7 @@ import type { SessionRecord, StudioIdentityService } from '@dz23-studio/identity
 import { roleAllows } from '@dz23-studio/policy'
 import type { StudioTenancyService } from '@dz23-studio/tenancy'
 import type { AssistantSessionLaunch, AssistantSessionLauncher } from './assistant-session.js'
+import { t } from './i18n.js'
 
 const MAX_PROMPT_BYTES = 32 * 1024
 const MAX_PUBLIC_EVENTS = 500
@@ -79,7 +80,7 @@ export class AssistantConversationService {
       const inspected = await this.options.sessions.inspect(conversationId as SessionId, signal)
       return sanitizeAssistantSnapshot(conversationId, inspected.events)
     } catch {
-      throw new AssistantConversationError('NOT_FOUND', 'Conversa não encontrada.')
+      throw new AssistantConversationError('NOT_FOUND', t('assistant.conversationMissing'))
     }
   }
 
@@ -101,7 +102,7 @@ export class AssistantConversationService {
       }, signal)
       return { accepted: true, request_id: requestId }
     } catch {
-      throw new AssistantConversationError('SESSION_UNAVAILABLE', 'Não foi possível enviar sua mensagem agora.')
+      throw new AssistantConversationError('SESSION_UNAVAILABLE', t('assistant.sendUnavailable'))
     }
   }
 
@@ -110,14 +111,14 @@ export class AssistantConversationService {
     try {
       return this.options.sessions.cancel({ sessionId: conversationId as SessionId })
     } catch {
-      throw new AssistantConversationError('SESSION_UNAVAILABLE', 'Não foi possível interromper esta tarefa agora.')
+      throw new AssistantConversationError('SESSION_UNAVAILABLE', t('assistant.cancelUnavailable'))
     }
   }
 
   #assertOwned(identitySession: SessionRecord, conversationId: string): void {
     this.#authorize(identitySession)
     if (!this.options.identity.ownsHarnessSession(identitySession, conversationId)) {
-      throw new AssistantConversationError('NOT_FOUND', 'Conversa não encontrada.')
+      throw new AssistantConversationError('NOT_FOUND', t('assistant.conversationMissing'))
     }
   }
 
@@ -128,7 +129,7 @@ export class AssistantConversationService {
       identitySession.tenant_id,
     )
     if (authorization === undefined || !roleAllows(authorization.role, 'project.read')) {
-      throw new AssistantConversationError('FORBIDDEN', 'Você não tem acesso ao assistente neste projeto.')
+      throw new AssistantConversationError('FORBIDDEN', t('assistant.projectForbidden'))
     }
   }
 }
@@ -195,7 +196,7 @@ export function sanitizeAssistantEvent(value: unknown): AssistantPublicEvent | u
     const callId = source === undefined ? undefined : safeIdentifier(source.callId)
     if (callId === undefined) return undefined
     return {
-      type: 'tool.state', seq, at, call_id: callId, label: 'Ação do assistente',
+      type: 'tool.state', seq, at, call_id: callId, label: t('assistant.genericAction'),
       state: data.error === undefined ? 'succeeded' : 'failed',
     }
   }
@@ -206,7 +207,7 @@ export function sanitizeAssistantEvent(value: unknown): AssistantPublicEvent | u
     return {
       type: 'approval.requested', seq, at, request_id: requestId,
       tool_label: publicToolLabel(typeof data.toolName === 'string' ? data.toolName : ''),
-      explanation: 'Esta ação precisa da sua confirmação antes de continuar.',
+      explanation: t('assistant.approvalExplanation'),
     }
   }
 
@@ -258,14 +259,14 @@ function safeIdentifier(value: unknown): string | undefined {
 }
 
 function publicToolLabel(name: string): string {
-  if (name === 'studio_agent_list') return 'Consultar assistentes disponíveis'
-  if (name === 'studio_agent_start') return 'Iniciar um assistente especializado'
-  if (name === 'studio_agent_status') return 'Acompanhar o trabalho do assistente'
-  if (name === 'studio_agent_cancel') return 'Interromper o trabalho do assistente'
-  if (name === 'studio_agent_apply') return 'Aplicar uma proposta ao projeto'
-  if (name.startsWith('studio_team_')) return 'Coordenar uma equipe de assistentes'
-  if (name.startsWith('studio_')) return 'Executar uma ação do DZ23 STUDIO'
-  return 'Ação do assistente'
+  if (name === 'studio_agent_list') return t('assistant.toolList')
+  if (name === 'studio_agent_start') return t('assistant.toolStart')
+  if (name === 'studio_agent_status') return t('assistant.toolStatus')
+  if (name === 'studio_agent_cancel') return t('assistant.toolCancel')
+  if (name === 'studio_agent_apply') return t('assistant.toolApply')
+  if (name.startsWith('studio_team_')) return t('assistant.toolTeam')
+  if (name.startsWith('studio_')) return t('assistant.toolStudio')
+  return t('assistant.genericAction')
 }
 
 function isApprovalOutcome(value: unknown): value is 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable' {
@@ -274,6 +275,6 @@ function isApprovalOutcome(value: unknown): value is 'allowed-once' | 'rejected'
 
 function assertPromptText(text: string): void {
   if (text.trim() === '' || text.includes('\0') || Buffer.byteLength(text, 'utf8') > MAX_PROMPT_BYTES) {
-    throw new AssistantConversationError('INVALID_MESSAGE', 'Escreva uma mensagem válida de até 32 KB.')
+    throw new AssistantConversationError('INVALID_MESSAGE', t('assistant.invalidMessage'))
   }
 }
