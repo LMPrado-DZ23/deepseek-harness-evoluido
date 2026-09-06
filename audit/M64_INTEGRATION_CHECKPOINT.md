@@ -1,8 +1,8 @@
 # M6.4 — Checkpoint de integração Windows
 
-- data: `2026-09-06T04:59:00-03:00`
+- data: `2026-09-06T06:03:00-03:00`
 - branch candidata: `codex/m64-integration-candidate`
-- base funcional: `8059590adb14ea6464d559836ae4cb51117f9a71`
+- base funcional: `c122c8a8df120844868df9cdb6cf603cd46fd5af`
 - principal preservada: `codex/p30-policy-foundation@17e79aaab4c1ac54c1b4fc05f780f6485c5941b7`
 - classificação: `REVIEW_REQUIRED`
 
@@ -12,6 +12,8 @@
 2. `a9bde84` integra a criação segura dos segredos do primeiro acesso.
 
 As duas fatias foram reaplicadas sobre a ponta cumulativa M6.3b sem conflito. Nenhum merge ocorreu na principal.
+
+O deploy legado herdado de `8059590` foi revogado depois que um store novo provou re-resolução fora do lock. A candidata passa a incluir a topologia dual documentada em `audit/M63_INSTALL_TOPOLOGY.md`: desenvolvimento com tipos canônicos e release moderno, congelado e offline.
 
 ## Evidência executada no Windows 11 com WSL2
 
@@ -23,6 +25,10 @@ As duas fatias foram reaplicadas sobre a ponta cumulativa M6.3b sem conflito. Ne
 | portabilidade Git + filesystem | `PASS` |
 | self-test negativo de portabilidade | `PASS` |
 | `git diff --check` das duas fatias | `PASS` |
+| topologia de desenvolvimento + release | `PASS`, lock moderno offline |
+| typecheck agregado e build | `PASS` no WSL2/ext4 |
+| suíte integral com um worker | `1.896 passed`, `61 skipped`, `0 failed` |
+| deploy portátil materializado | `PASS`, 533 pacotes e arquivos críticos presentes |
 
 O preflight real da máquina não foi promovido a passe: Docker continua desligado, a porta 8080 estava ocupada por `wslrelay` na auditoria anterior e o pin da fonte ainda não está configurado. SMTP, domínio, certificado, firewall, Tailscale e envio real também continuam sem execução.
 

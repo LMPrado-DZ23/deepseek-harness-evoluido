@@ -21,6 +21,9 @@ ENV CI=1 \
     PNPM_STORE_DIR=/pnpm/store
 COPY deploy/images.lock.json deploy/images.lock.json
 COPY deploy/studio/Dockerfile deploy/studio/Dockerfile
+COPY pnpm-workspace.yaml pnpm-workspace.yaml
+COPY pnpm-workspace.release.yaml pnpm-workspace.release.yaml
+COPY pnpm-lock.release.yaml pnpm-lock.release.yaml
 COPY scripts/check-image-lock.mjs scripts/check-image-lock.mjs
 COPY scripts/fetch-verified-pnpm.mjs scripts/fetch-verified-pnpm.mjs
 RUN node scripts/check-image-lock.mjs \
@@ -38,6 +41,10 @@ RUN --mount=type=cache,id=dz23-studio-pnpm-11,target=/pnpm/store,sharing=locked 
  && node scripts/check-portability.mjs --all-files \
  && pnpm fetch --frozen-lockfile --store-dir /pnpm/store \
  && pnpm --dir third_party/deepseek-harness fetch --frozen-lockfile --store-dir /pnpm/store \
+ && cp pnpm-workspace.release.yaml pnpm-workspace.yaml \
+ && cp pnpm-lock.release.yaml pnpm-lock.yaml \
+ && sed -i 's#__DZ23_ABSOLUTE_FILE_ROOT__#file:///workspace#g' pnpm-workspace.yaml \
+ && pnpm fetch --frozen-lockfile --store-dir /pnpm/store \
  && touch /workspace/.dz23-fetch-complete
 
 FROM toolchain AS build
@@ -57,8 +64,12 @@ RUN --mount=type=cache,id=dz23-studio-pnpm-11,target=/pnpm/store,sharing=locked 
     --network=none \
     pnpm --dir third_party/deepseek-harness install --offline --frozen-lockfile --trust-lockfile --store-dir /pnpm/store
 RUN --network=none pnpm --dir third_party/deepseek-harness build:official
-# Install the workspace with symlinked development dependencies. Only the
-# runtime's deploy inputs are injected explicitly in its package manifest.
+# The development lock deliberately keeps one canonical type identity. The
+# release lock is generated from the same manifests with workspace injection
+# enabled, which lets modern pnpm deploy consume the frozen dependency graph.
+RUN cp pnpm-workspace.release.yaml pnpm-workspace.yaml \
+ && cp pnpm-lock.release.yaml pnpm-lock.yaml \
+ && sed -i 's#__DZ23_ABSOLUTE_FILE_ROOT__#file:///workspace#g' pnpm-workspace.yaml
 RUN --mount=type=cache,id=dz23-studio-pnpm-11,target=/pnpm/store,sharing=locked \
     --network=none \
     pnpm install --offline --frozen-lockfile --trust-lockfile --filter '@dz23-studio/*...' --store-dir /pnpm/store
@@ -75,7 +86,7 @@ RUN rm -rf \
 RUN --mount=type=cache,id=dz23-studio-pnpm-11,target=/pnpm/store,sharing=locked \
     --network=none \
     pnpm install --offline --frozen-lockfile --trust-lockfile --filter '@dz23-studio/*...' --store-dir /pnpm/store \
- && pnpm --filter @dz23-studio/runtime deploy --legacy --prod --offline /opt/runtime \
+ && pnpm --store-dir /pnpm/store --filter @dz23-studio/runtime deploy --prod --offline /opt/runtime \
  && test -f /opt/runtime/entrypoint.mjs \
  && test -f /opt/runtime/operator.mjs \
  && test -f /opt/runtime/shutdown-contract.mjs \

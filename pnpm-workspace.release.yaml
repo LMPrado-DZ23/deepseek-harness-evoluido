@@ -10,7 +10,7 @@ packages:
   - third_party/deepseek-harness/native/landlock-run/packages/*
 
 nodeLinker: hoisted
-injectWorkspacePackages: false
+injectWorkspacePackages: true
 syncInjectedDepsAfterScripts:
   - build
 autoInstallPeers: false

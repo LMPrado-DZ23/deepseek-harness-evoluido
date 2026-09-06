@@ -157,10 +157,18 @@ export function validateDockerfileBase(dockerfile, lock) {
       !dockerfile.includes(`test "$(pg_restore --version)" = '${postgres.pgRestoreVersion}'`)) {
     throw new Error('Dockerfile não valida versões exatas de pg_dump/pg_restore')
   }
+  const releaseWorkspaceCopies = [...dockerfile.matchAll(/cp pnpm-workspace\.release\.yaml pnpm-workspace\.yaml/gu)]
+  const releaseLockCopies = [...dockerfile.matchAll(/cp pnpm-lock\.release\.yaml pnpm-lock\.yaml/gu)]
+  const workspaceRootSubstitutions = [...dockerfile.matchAll(/sed -i 's#__DZ23_ABSOLUTE_FILE_ROOT__#file:\/\/\/workspace#g' pnpm-workspace\.yaml/gu)]
+  const releaseFetch = dockerfile.indexOf('pnpm fetch --frozen-lockfile --store-dir /pnpm/store', releaseWorkspaceCopies[0]?.index ?? 0)
+  if (releaseWorkspaceCopies.length !== 2 || releaseLockCopies.length !== 2 || workspaceRootSubstitutions.length !== 2
+      || releaseFetch < (releaseLockCopies[0]?.index ?? -1)) {
+    throw new Error('Dockerfile não busca e instala a topologia de release congelada')
+  }
   const studioBuild = dockerfile.indexOf('--network=none pnpm build')
   const injectionReset = dockerfile.indexOf('RUN rm -rf', studioBuild)
   const finalInstall = dockerfile.indexOf("pnpm install --offline --frozen-lockfile --trust-lockfile --filter '@dz23-studio/*...'", injectionReset)
-  const deploy = dockerfile.indexOf('pnpm --filter @dz23-studio/runtime deploy', finalInstall)
+  const deploy = dockerfile.indexOf('pnpm --store-dir /pnpm/store --filter @dz23-studio/runtime deploy', finalInstall)
   const resetBlock = injectionReset < 0 || finalInstall < 0 ? '' : dockerfile.slice(injectionReset, finalInstall)
   const resetTargets = [
     '/workspace/node_modules',
@@ -176,10 +184,31 @@ export function validateDockerfileBase(dockerfile, lock) {
     throw new Error('Dockerfile tenta atualizar cópias injetadas com --force sem instalação limpa')
   }
   const deployCommand = dockerfile.slice(deploy, dockerfile.indexOf('\n', deploy))
-  if (!deployCommand.includes('deploy --legacy --prod --offline /opt/runtime')) {
-    throw new Error('Dockerfile não usa deploy legado e offline com workspaces seletivamente injetados')
+  if (!deployCommand.includes('--store-dir /pnpm/store') || !deployCommand.includes('deploy --prod --offline /opt/runtime') || deployCommand.includes('--legacy')) {
+    throw new Error('Dockerfile não usa deploy moderno, congelado e offline')
   }
   return { base: `${lock.images.node.reference}@${lock.images.node.indexDigest}`, postgresBase: postgres.sourceImage, frontend: expectedSyntax.slice('# syntax='.length), fromLines }
+}
+
+export function validateWorkspaceTopologies(development, release, releaseLock) {
+  if (!/(?:^|\n)injectWorkspacePackages:\s+false(?:\n|$)/u.test(development)) {
+    throw new Error('workspace de desenvolvimento precisa preservar links canônicos')
+  }
+  if (!/(?:^|\n)injectWorkspacePackages:\s+true(?:\n|$)/u.test(release)) {
+    throw new Error('workspace de release precisa injetar pacotes')
+  }
+  if (!/(?:^|\n)\s{2}injectWorkspacePackages:\s+true(?:\n|$)/u.test(releaseLock)) {
+    throw new Error('lock de release não foi resolvido com injeção de pacotes')
+  }
+  const localSubprocessResolution = "'@deepseek-ai/dsh-subprocess-local@file:third_party/deepseek-harness/packages/subprocess/subprocess-local"
+  if (!releaseLock.includes(localSubprocessResolution) || /'@deepseek-ai\/dsh-subprocess-local@[0-9]/u.test(releaseLock)) {
+    throw new Error('permissão de build do subprocesso não está limitada ao pacote local fixado')
+  }
+  const normalizedDevelopment = development.replace('injectWorkspacePackages: false', 'injectWorkspacePackages: true')
+  if (normalizedDevelopment !== release) {
+    throw new Error('workspace de release diverge do desenvolvimento além da injeção')
+  }
+  return true
 }
 
 export async function main(argv = process.argv.slice(2)) {
@@ -187,9 +216,17 @@ export async function main(argv = process.argv.slice(2)) {
   const lockPath = resolve(pathIndex >= 0 ? argv[pathIndex + 1] : 'deploy/images.lock.json')
   const dockerfileIndex = argv.indexOf('--dockerfile')
   const dockerfilePath = resolve(dockerfileIndex >= 0 ? argv[dockerfileIndex + 1] : 'deploy/studio/Dockerfile')
+  const developmentWorkspacePath = resolve('pnpm-workspace.yaml')
+  const releaseWorkspacePath = resolve('pnpm-workspace.release.yaml')
+  const releaseLockPath = resolve('pnpm-lock.release.yaml')
   const parsed = JSON.parse(await readFile(lockPath, 'utf8'))
   const lock = validateImageLock(parsed)
   validateDockerfileBase(await readFile(dockerfilePath, 'utf8'), lock)
+  validateWorkspaceTopologies(
+    await readFile(developmentWorkspacePath, 'utf8'),
+    await readFile(releaseWorkspacePath, 'utf8'),
+    await readFile(releaseLockPath, 'utf8'),
+  )
   process.stdout.write(
     `IMAGE_LOCK=PASS node=${lock.images.node.indexDigest} platforms=${EXPECTED_PLATFORMS.length} pnpm=${lock.tools.pnpm.version}\n`,
   )

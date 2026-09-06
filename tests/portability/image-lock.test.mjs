@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
-import { validateDockerfileBase, validateImageLock } from '../../scripts/check-image-lock.mjs'
+import { validateDockerfileBase, validateImageLock, validateWorkspaceTopologies } from '../../scripts/check-image-lock.mjs'
 
 const canonical = JSON.parse(await readFile(new URL('../../deploy/images.lock.json', import.meta.url), 'utf8'))
 const dockerfile = await readFile(new URL('../../deploy/studio/Dockerfile', import.meta.url), 'utf8')
 const workspaceConfig = await readFile(new URL('../../pnpm-workspace.yaml', import.meta.url), 'utf8')
+const releaseWorkspaceConfig = await readFile(new URL('../../pnpm-workspace.release.yaml', import.meta.url), 'utf8')
+const releaseLock = await readFile(new URL('../../pnpm-lock.release.yaml', import.meta.url), 'utf8')
 const runtimeManifest = JSON.parse(await readFile(new URL('../../apps/studio-runtime/package.json', import.meta.url), 'utf8'))
 const studioLibraries = [
   'agents',
@@ -93,13 +95,33 @@ test('Dockerfile usa exatamente as bases Node e PostgreSQL fixadas no lock', () 
   const forced = `${dockerfile.slice(0, finalInstall)}${install} --force${dockerfile.slice(finalInstall + install.length)}`
   assert.throws(() => validateDockerfileBase(forced, canonical), /sem instalação limpa/u)
   assert.throws(
-    () => validateDockerfileBase(dockerfile.replace('deploy --legacy --prod --offline /opt/runtime', 'deploy --prod /opt/runtime'), canonical),
-    /não usa deploy legado e offline/u,
+    () => validateDockerfileBase(dockerfile.replace('deploy --prod --offline /opt/runtime', 'deploy --legacy --prod /opt/runtime'), canonical),
+    /não usa deploy moderno, congelado e offline/u,
+  )
+  assert.throws(
+    () => validateDockerfileBase(dockerfile.replace("sed -i 's#__DZ23_ABSOLUTE_FILE_ROOT__#file:///workspace#g' pnpm-workspace.yaml", 'true'), canonical),
+    /não busca e instala a topologia de release congelada/u,
   )
 })
 
 test('workspace preserva identidade única de tipos e injeta somente entradas do runtime', () => {
-  assert.match(workspaceConfig, /(?:^|\n)injectWorkspacePackages:\s+false(?:\n|$)/u)
+  assert.equal(validateWorkspaceTopologies(workspaceConfig, releaseWorkspaceConfig, releaseLock), true)
+  assert.throws(
+    () => validateWorkspaceTopologies(workspaceConfig, releaseWorkspaceConfig.replace('true', 'false'), releaseLock),
+    /workspace de release precisa injetar/u,
+  )
+  assert.throws(
+    () => validateWorkspaceTopologies(workspaceConfig, `${releaseWorkspaceConfig}\nfoo: bar\n`, releaseLock),
+    /diverge do desenvolvimento/u,
+  )
+  assert.throws(
+    () => validateWorkspaceTopologies(workspaceConfig, releaseWorkspaceConfig, releaseLock.replace('injectWorkspacePackages: true', 'injectWorkspacePackages: false')),
+    /lock de release não foi resolvido/u,
+  )
+  assert.throws(
+    () => validateWorkspaceTopologies(workspaceConfig, releaseWorkspaceConfig, `${releaseLock}\n  '@deepseek-ai/dsh-subprocess-local@9.9.9': {}`),
+    /permissão de build do subprocesso não está limitada/u,
+  )
   assert.deepEqual(Object.keys(runtimeManifest.dependenciesMeta).sort(), [
     '@deepseek-ai/dsh',
     '@dz23-studio/storage-postgres',

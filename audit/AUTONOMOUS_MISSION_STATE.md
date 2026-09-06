@@ -3,11 +3,11 @@
 - mission_id: `DZ23-STUDIO-V1-20260904`
 - objetivo: concluir o DZ23 STUDIO v1.0 com runtime portátil, geração isolada, gates Windows/Linux, testes com cinco pessoas e pacote open source somente após licença escolhida
 - estado: `REVIEW_REQUIRED`
-- iteração: 14
+- iteração: 15
 - início: 2026-09-04
-- último heartbeat: 2026-09-06T04:59:00-03:00
-- último progresso real: preflight Windows e primeiro acesso seguro compostos sobre M6.3b; 18 cenários de preflight e 12 testes de segredos passaram no Windows 11 + WSL2
-- tarefa atual: entregar a candidata M6.4 cumulativa para revisão independente, sem merge na principal
+- último heartbeat: 2026-09-06T06:03:00-03:00
+- último progresso real: deploy moderno congelado e offline provado com 533 pacotes; typecheck/build e suíte integral repetidos com 1.896 aprovados, 61 integrações externas puladas e 0 falhas
+- tarefa atual: fechar e entregar a candidata M6.4 cumulativa corrigida para revisão independente, sem merge na principal
 - branch: `codex/m64-integration-candidate`
 - base: `17e79aaab4c1ac54c1b4fc05f780f6485c5941b7`
 - upstream: `deepseek-harness@6c705be1ce6774a000d061da41d1823b03a3d42c`
@@ -34,7 +34,7 @@
 
 ## Próxima ação
 
-1. criar commit e bundle local do checkpoint cumulativo M6.4;
+1. criar commit e bundle local do checkpoint cumulativo M6.4 com o lock de release;
 2. solicitar revisão independente do Claude sem merge;
 3. tratar os 95 artefatos `lib/` rastreados em commit separado, somente após parecer;
 4. repetir o preflight somente leitura quando Docker e pins estiverem disponíveis;
