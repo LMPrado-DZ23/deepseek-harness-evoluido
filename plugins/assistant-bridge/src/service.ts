@@ -344,8 +344,9 @@ async function validateGitBoundary(repositoryPath: string): Promise<void> {
     throw new AssistantBridgeError('INVALID_REQUEST', t('errors.gitRoot'))
   }
   const reciprocalPath = await realpath(resolve(adminPath, reciprocalDescriptor.trim())).catch(() => undefined)
-  const markerPath = await realpath(gitMarker).catch(() => undefined)
-  if (reciprocalPath === undefined || markerPath === undefined || !sameCanonicalPath(reciprocalPath, markerPath)) {
+  // repositoryPath is already canonical and .git was lstat-verified as a
+  // regular file, so resolving the marker again only introduced a TOCTOU gap.
+  if (reciprocalPath === undefined || !sameCanonicalPath(reciprocalPath, gitMarker)) {
     throw new AssistantBridgeError('INVALID_REQUEST', t('errors.gitRoot'))
   }
   await validateGitEntries(adminPath, commonPath)
