@@ -7,7 +7,7 @@
 - início: 2026-09-04
 - último heartbeat: 2026-09-06T12:16:00-03:00
 - último progresso real: M73 bloqueou fail-closed o cliente oficial do Harness em instalações edge/equipe e fechou suíte cumulativa e cobertura crítica
-- tarefa atual: concluir a proveniência e empacotamento do pin M73 e aguardar revisão independente do Claude, sem merge na principal
+- tarefa atual: empacotar o pin M73 e aguardar revisão independente do Claude, sem merge na principal
 - branch: `codex/m73-assistant-tenant-boundary`
 - base: `646c47b53ad7c76c0ca3010e6abdd7001aec0ae0`
 - upstream: `deepseek-harness@6c705be1ce6774a000d061da41d1823b03a3d42c`
@@ -27,8 +27,8 @@
   isolamento;
 - 2.031 testes cumulativos passaram, 62 specs PostgreSQL externas foram puladas,
   cobertura global ficou acima de 90% e identidade fechou em 100%;
-- typecheck, build, pacote do assistente, i18n, portabilidade, domínios e catálogo
-  passaram;
+- typecheck, build, pacote do assistente, i18n, portabilidade, domínios, catálogo
+  e pin/origem do upstream passaram;
 - prova física do Caddy continua `NOT_EXECUTED` porque Docker está desligado.
 
 ## Checkpoint anterior — M71
@@ -79,7 +79,7 @@
 
 ## Próxima ação
 
-1. gerar staging Git correto, bundle, arquivo-fonte e relatório P37 do pin M73;
+1. gerar bundle, arquivo-fonte e relatório P37 do pin M73;
 2. aguardar e tratar a revisão independente do Claude sem merge;
 3. tratar os artefatos `plugins/*/lib/**` rastreados em commit separado, somente
    com autorização explícita;

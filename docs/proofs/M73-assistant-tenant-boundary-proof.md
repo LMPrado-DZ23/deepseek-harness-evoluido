@@ -55,7 +55,8 @@ saída de build foi sincronizada de volta à branch.
   local `spawn-in-process`;
 - gates de escopo e 24 rotas de domínio, catálogo de ferramentas,
   portabilidade e i18n: PASS;
-- self-test do gate de pin: PASS com cinco fixtures negativas.
+- gate de pin: PASS para commit, árvore, origin e manifesto; self-test PASS com
+  cinco fixtures negativas.
 
 O primeiro passe cumulativo encontrou um teste legado que ainda esperava 303
 no modo edge. A expectativa foi corrigida para 403. O primeiro passe de
@@ -64,9 +65,10 @@ o gate crítico fechou em 100%, sem redução de limiar.
 
 ## Limites honestos
 
-- o gate positivo de pin será executado novamente em staging cujo submodule
-  tenha metadados Git e origin oficiais; o clone acima materializou por engano
-  um `.git` interno com origin do bundle e foi corretamente recusado;
+- o primeiro clone de teste materializou por engano um `.git` interno com
+  origin do bundle e foi corretamente recusado pelo gate. A prova positiva foi
+  repetida em `/home/leandro/dz23-gates/m73-pin-gate-9d3faf8`, com submodule
+  clonado da origem oficial no commit fixado, e passou;
 - a prova estática do Caddy cobre a allowlist e as negativas, mas Docker segue
   desligado; proxy, WebSocket e bloqueios em Caddy físico são `NOT_EXECUTED`;
 - chat oficial no modo pessoal continua BETA conforme M71; chat de equipe e
