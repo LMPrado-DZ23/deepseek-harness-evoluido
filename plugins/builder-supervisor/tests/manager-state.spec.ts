@@ -104,17 +104,29 @@ describe.skipIf(!linux)('manager authority on Linux', () => {
 
   it('creates a permanent private guard and rejects a hardlink added while held', async () => {
     await withRoot(async (root, roots) => {
-      const authority = new FileBuilderManagerAuthority()
-      const lease = await authority.acquire(installationId, roots)
       const guard = guardPath(root)
+      let guardHandle: Awaited<ReturnType<typeof open>> | undefined
+      const authority = new FileBuilderManagerAuthority(stateRuntime({
+        open: async (path, flags, mode) => {
+          const handle = await open(path, flags, mode)
+          if (path === guard && flags === constants.O_RDONLY + constants.O_NOFOLLOW) guardHandle = handle
+          return handle
+        },
+      }))
+      const lease = await authority.acquire(installationId, roots)
       expect((await lstat(guard)).mode & 0o7777).toBe(0o600)
       const linked = `${guard}.linked`
-      await link(guard, linked)
-      await expect(lease.close()).rejects.toEqual(expect.objectContaining({ code: 'INVALID_MANAGER_STATE' }))
-      await expect(authority.acquire(installationId, roots)).rejects.toEqual(expect.objectContaining({ code: 'MANAGER_ALREADY_RUNNING' }))
-      await unlink(linked)
-      await expect(lease.close()).rejects.toEqual(expect.objectContaining({ code: 'INVALID_MANAGER_STATE' }))
-      await expect(authority.acquire(installationId, roots)).rejects.toEqual(expect.objectContaining({ code: 'MANAGER_ALREADY_RUNNING' }))
+      try {
+        await link(guard, linked)
+        await expect(lease.close()).rejects.toEqual(expect.objectContaining({ code: 'INVALID_MANAGER_STATE' }))
+        await expect(authority.acquire(installationId, roots)).rejects.toEqual(expect.objectContaining({ code: 'MANAGER_ALREADY_RUNNING' }))
+        await unlink(linked)
+        await expect(lease.close()).rejects.toEqual(expect.objectContaining({ code: 'INVALID_MANAGER_STATE' }))
+        await expect(authority.acquire(installationId, roots)).rejects.toEqual(expect.objectContaining({ code: 'MANAGER_ALREADY_RUNNING' }))
+      } finally {
+        await unlink(linked).catch(() => undefined)
+        await guardHandle?.close().catch(() => undefined)
+      }
     })
   })
 
