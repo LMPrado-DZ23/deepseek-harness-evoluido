@@ -64,6 +64,16 @@ export async function loadBuilderRuntimeRegistry(
     const path = referencePath(registryReference)
     if (path !== expectedPath) invalid()
     const bytes = await readSecureManagerFile(path, MAX_REGISTRY_BYTES, runtime)
+    return parseBuilderRuntimeRegistryBytes(bytes, roots)
+  } catch (error) {
+    if (error instanceof BuilderRuntimeRegistryError) throw error
+    throw new BuilderRuntimeRegistryError()
+  }
+}
+
+export function parseBuilderRuntimeRegistryBytes(bytes: Buffer, roots: BuilderSupervisorRootPolicy): BuilderRuntimeRegistry {
+  try {
+    if (bytes.byteLength < 1 || bytes.byteLength > MAX_REGISTRY_BYTES || bytes.includes(0)) invalid()
     const raw = decodeUtf8(bytes)
     const value = strictRecord(JSON.parse(raw), REGISTRY_KEYS)
     if (value.version !== 1 || !isInstallationId(value.installation_id) || !Number.isSafeInteger(value.generation) || Number(value.generation) < 0) invalid()

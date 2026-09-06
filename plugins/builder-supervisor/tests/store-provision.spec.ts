@@ -5,10 +5,10 @@ import { tmpdir } from 'node:os'
 import { posix } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
-import { loadBuilderSupervisorConfig, type BuilderSupervisorRootPolicy } from '../src/supervisor-config.js'
+import { computeBuilderSupervisorConfigEnvelopeV2Sha256, loadBuilderSupervisorConfig, type BuilderSupervisorRootPolicy } from '../src/supervisor-config.js'
 import { BUILDER_UNIX_SOCKET_MAX_BYTES, deriveBuilderRuntimeScopeId } from '../src/runtime-scope.js'
 import { BuilderProvisionError, STORE_PROVISION_GUARD_TEST_ONLY, provisionBuilderSupervisor, type BuilderProvisionRequest } from '../src/store-provision.js'
-import { TEMPLATE_ENTRY_MAX_BYTES, TEMPLATE_MANIFEST_MAX_BYTES, computeTemplateTreeSha256, type TemplateManifestEntry } from '../src/store-security.js'
+import { TEMPLATE_ENTRY_MAX_BYTES, TEMPLATE_MANIFEST_MAX_BYTES, canonicalTemplateStoreManifestBytes, computeTemplateTreeSha256, type TemplateManifestEntry } from '../src/store-security.js'
 
 const run = promisify(execFile)
 const linux = process.platform === 'linux' ? describe : describe.skip
@@ -38,7 +38,7 @@ linux('immutable builder template-store provisioning', () => {
     expect(Object.keys(rawConfig).sort()).toEqual([
       'artifact_root', 'bearer_token_ref', 'docker_socket_path', 'export_root', 'image_digest_ref',
       'installation_id', 'instance_id', 'journal_root', 'policy_sha256_ref', 'replay_root', 'socket_path',
-      'template_store_sha256_ref', 'template_store_version', 'tenant_id', 'version',
+      'template_store_manifest_ref', 'template_store_sha256_ref', 'template_store_version', 'tenant_id', 'version',
     ].sort())
     expect(rawConfig).toEqual(expect.objectContaining({
       installation_id: fixture.request.installationId,
@@ -59,12 +59,20 @@ linux('immutable builder template-store provisioning', () => {
     expect((await lstat(posix.join(storeTree, 'app', 'package.json'))).mode & 0o777).toBe(0o444)
     expect(await readFile(posix.join(storeTree, 'app', 'package.json'), 'utf8')).toBe(fixture.files['app/package.json'])
     expect((await lstat(posix.join(secretDirectory, 'token'))).mode & 0o777).toBe(0o400)
-    for (const name of ['supervisor.json', 'builder-image.sha256', 'template-store.sha256', 'template-manifest.sha256', 'policy.sha256']) {
+    for (const name of ['supervisor.json', 'builder-image.sha256', 'template-store.sha256', 'template-manifest.sha256', 'template-store.manifest.json', 'policy.sha256']) {
       expect((await lstat(posix.join(configDirectory, name))).mode & 0o777).toBe(0o600)
     }
     const token = (await readFile(posix.join(secretDirectory, 'token'), 'utf8')).trim()
     expect(JSON.stringify(result)).not.toContain(token)
     expect(await readFile(posix.join(configDirectory, 'template-manifest.sha256'), 'utf8')).toBe(`${fixture.manifestSha}\n`)
+    expect(await readFile(posix.join(configDirectory, 'template-store.manifest.json'))).toEqual(canonicalTemplateStoreManifestBytes(fixture.manifest))
+    expect(result.config_sha256).toBe(computeBuilderSupervisorConfigEnvelopeV2Sha256({
+      configBytes: await readFile(posix.join(configDirectory, 'supervisor.json')),
+      imageDigestBytes: await readFile(posix.join(configDirectory, 'builder-image.sha256')),
+      templateStoreSha256Bytes: await readFile(posix.join(configDirectory, 'template-store.sha256')),
+      templateStoreManifestBytes: await readFile(posix.join(configDirectory, 'template-store.manifest.json')),
+      policySha256Bytes: await readFile(posix.join(configDirectory, 'policy.sha256')),
+    }))
     const instanceRoot = scopePath(fixture, fixture.policy.stateRoot)
     expect(await pathExists(posix.join(instanceRoot, 'journal'))).toBe(true)
     expect(await pathExists(posix.join(instanceRoot, 'rpc-replay'))).toBe(true)
@@ -91,6 +99,10 @@ linux('immutable builder template-store provisioning', () => {
       { code: null, signal: 'SIGKILL' as const, failed: false },
       { code: 0, signal: null, failed: true },
     ]) expect(() => STORE_PROVISION_GUARD_TEST_ONLY.classifyProvisionFlockOutcome(outcome)).toThrow(expect.objectContaining({ code: 'PROVISION_RECOVERY_FAILED' }))
+    let killed = 0
+    expect(STORE_PROVISION_GUARD_TEST_ONLY.consumeProvisionFlockStderr(0, Buffer.from('small'), () => { killed += 1 })).toBe(5)
+    STORE_PROVISION_GUARD_TEST_ONLY.consumeProvisionFlockStderr(0, Buffer.alloc(1024 * 1024), () => { killed += 1 })
+    expect(killed).toBe(1)
   })
 
   it('fails closed when the permanent guard mode, inode type or link count diverges', async () => {
@@ -139,7 +151,7 @@ linux('immutable builder template-store provisioning', () => {
     expect(descriptorsAfter).toBeLessThanOrEqual(descriptorsBefore + 1)
   })
 
-  it('rejects reprovisioning and never overwrites an existing authority set', async () => {
+  it('reprovisions idempotently and never overwrites an existing authority set', async () => {
     const fixture = await createFixture()
     await provisionBuilderSupervisor(fixture.request)
     const tokenPath = posix.join(scopePath(fixture, fixture.policy.secretRoot), 'token')
@@ -147,10 +159,102 @@ linux('immutable builder template-store provisioning', () => {
     const before = await readFile(tokenPath, 'utf8')
     const interruptedLink = posix.join(posix.dirname(configPath), '.staging-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
     await link(configPath, interruptedLink)
-    await expect(provisionBuilderSupervisor(fixture.request)).rejects.toMatchObject({ code: 'ALREADY_PROVISIONED' })
+    const repeated = await provisionBuilderSupervisor(fixture.request)
+    expect(repeated).toMatchObject({ state: 'CREATED', scope_id: fixture.scopeId })
     expect(await readFile(tokenPath, 'utf8')).toBe(before)
     expect((await lstat(configPath)).nlink).toBe(1)
     expect(await pathExists(interruptedLink)).toBe(false)
+  })
+
+  it('persists one canonical manifest independent of source JSON formatting and entry order', async () => {
+    const fixture = await createFixture()
+    const first = await provisionBuilderSupervisor(fixture.request)
+    const configDirectory = scopePath(fixture, fixture.policy.configRoot)
+    const manifestPath = posix.join(configDirectory, 'template-store.manifest.json')
+    const persisted = await readFile(manifestPath)
+    const canonicalManifestSha256 = createHash('sha256').update(persisted).digest('hex')
+    const reformatted = `${JSON.stringify({ entries: [...fixture.manifest.entries].reverse(), tree_sha256: fixture.treeSha, template_store_version: 'v1.0.0', version: 1 }, null, 2)}\n`
+    await writeFile(fixture.manifestPath, reformatted, { mode: 0o600 })
+    const repeated = await provisionBuilderSupervisor({ ...fixture.request, manifestSha256: sha(reformatted) })
+    expect(repeated.config_sha256).toBe(first.config_sha256)
+    expect(first.manifest_sha256).toBe(canonicalManifestSha256)
+    expect(repeated.manifest_sha256).toBe(canonicalManifestSha256)
+    expect(repeated.manifest_sha256).not.toBe(sha(reformatted))
+    expect(await readFile(posix.join(configDirectory, 'template-manifest.sha256'), 'utf8')).toBe(`${canonicalManifestSha256}\n`)
+    expect(await readFile(manifestPath)).toEqual(persisted)
+    expect(persisted).toEqual(canonicalTemplateStoreManifestBytes(fixture.manifest))
+  })
+
+  it('validates existing authority before materializing a newly requested store version', async () => {
+    const fixture = await createFixture()
+    await provisionBuilderSupervisor(fixture.request)
+    const stateRoot = scopePath(fixture, fixture.policy.stateRoot)
+    const storeParent = posix.join(stateRoot, 'template-store')
+    const configPath = posix.join(scopePath(fixture, fixture.policy.configRoot), 'supervisor.json')
+    const tokenPath = posix.join(scopePath(fixture, fixture.policy.secretRoot), 'token')
+    const before = {
+      stores: await readdir(storeParent),
+      config: await readFile(configPath),
+      token: await readFile(tokenPath),
+    }
+    const version = 'v2.0.0'
+    const treeSha = computeTemplateTreeSha256(version, fixture.manifest.entries)
+    const changedManifest = {
+      version: 1 as const,
+      template_store_version: version,
+      tree_sha256: treeSha,
+      entries: fixture.manifest.entries,
+    }
+    const changedRaw = `${JSON.stringify(changedManifest)}\n`
+    await writeFile(fixture.manifestPath, changedRaw, { mode: 0o600 })
+
+    await expect(provisionBuilderSupervisor({ ...fixture.request, manifestSha256: sha(changedRaw) }))
+      .rejects.toMatchObject({ code: 'TARGET_MISMATCH' })
+    expect(await pathExists(posix.join(storeParent, version))).toBe(false)
+    expect(await readdir(storeParent)).toEqual(before.stores)
+    expect(await readFile(configPath)).toEqual(before.config)
+    expect(await readFile(tokenPath)).toEqual(before.token)
+  })
+
+  it('rejects a missing published store parent without recreating or changing any durable path', async () => {
+    const fixture = await createFixture()
+    await provisionBuilderSupervisor(fixture.request)
+    const managedRoot = posix.join(fixture.root, 'managed')
+    const storeParent = posix.join(scopePath(fixture, fixture.policy.stateRoot), 'template-store')
+    await makeWritable(storeParent)
+    await rm(storeParent, { recursive: true })
+    const before = await snapshotTree(managedRoot)
+
+    await expect(provisionBuilderSupervisor(fixture.request)).rejects.toMatchObject({ code: 'TARGET_MISMATCH' })
+    expect(await pathExists(storeParent)).toBe(false)
+    expect(await snapshotTree(managedRoot)).toEqual(before)
+  })
+
+  it('rejects a missing version inside an existing store parent without changing durable state', async () => {
+    const fixture = await createFixture()
+    await provisionBuilderSupervisor(fixture.request)
+    const managedRoot = posix.join(fixture.root, 'managed')
+    const storeParent = posix.join(scopePath(fixture, fixture.policy.stateRoot), 'template-store')
+    const store = posix.join(storeParent, fixture.manifest.template_store_version)
+    await makeWritable(store)
+    await rm(store, { recursive: true })
+    const before = await snapshotTree(managedRoot)
+    await expect(provisionBuilderSupervisor(fixture.request)).rejects.toMatchObject({ code: 'TARGET_MISMATCH' })
+    expect(await snapshotTree(managedRoot)).toEqual(before)
+  })
+
+  it('fails closed on malformed existing config and canonical-manifest hash authority', async () => {
+    const malformed = await createFixture()
+    await provisionBuilderSupervisor(malformed.request)
+    const malformedConfig = posix.join(scopePath(malformed, malformed.policy.configRoot), 'supervisor.json')
+    await writeFile(malformedConfig, '{broken\n', { mode: 0o600 })
+    await expect(provisionBuilderSupervisor(malformed.request)).rejects.toMatchObject({ code: 'TARGET_MISMATCH' })
+
+    const hash = await createFixture()
+    await provisionBuilderSupervisor(hash.request)
+    const manifestHash = posix.join(scopePath(hash, hash.policy.configRoot), 'template-manifest.sha256')
+    await writeFile(manifestHash, `${'f'.repeat(64)}\n`, { mode: 0o600 })
+    await expect(provisionBuilderSupervisor(hash.request)).rejects.toMatchObject({ code: 'TARGET_MISMATCH' })
   })
 
   it('rejects a mutated published store instead of overwriting or repairing it', async () => {
@@ -177,6 +281,23 @@ linux('immutable builder template-store provisioning', () => {
     else await run('mkfifo', [unsafe])
     await expect(provisionBuilderSupervisor(fixture.request)).rejects.toMatchObject({ code: 'SOURCE_UNSAFE' })
     expect(await pathExists(posix.join(scopePath(fixture, fixture.policy.configRoot), 'supervisor.json'))).toBe(false)
+  })
+
+  it('rejects a manifest path that cannot be encoded as strict USTAR before creating scope state', async () => {
+    const fixture = await createFixture()
+    const first = 'a'.repeat(90); const second = 'b'.repeat(70); const file = 'c'.repeat(101)
+    await mkdir(posix.join(fixture.sourceRoot, first, second), { recursive: true, mode: 0o700 })
+    await writeFile(posix.join(fixture.sourceRoot, first, second, file), 'x', { mode: 0o600 })
+    const entries: TemplateManifestEntry[] = [...fixture.manifest.entries,
+      { path: first, type: 'directory' },
+      { path: `${first}/${second}`, type: 'directory' },
+      { path: `${first}/${second}/${file}`, type: 'file', bytes: 1, sha256: sha('x') },
+    ]
+    const tree = computeTemplateTreeSha256('v1.0.0', entries)
+    const raw = `${JSON.stringify({ version: 1, template_store_version: 'v1.0.0', tree_sha256: tree, entries })}\n`
+    await writeFile(fixture.manifestPath, raw, { mode: 0o600 })
+    await expect(provisionBuilderSupervisor({ ...fixture.request, manifestSha256: sha(raw) })).rejects.toMatchObject({ code: 'INVALID_PROVISION_REQUEST' })
+    expect(await pathExists(scopePath(fixture, fixture.policy.stateRoot))).toBe(false)
   })
 
   it('rejects manifest substitution, dishonest tree declarations and source paths inside managed roots', async () => {
@@ -697,7 +818,7 @@ linux('immutable builder template-store provisioning', () => {
     const bootId = (await readFile('/proc/sys/kernel/random/boot_id', 'utf8')).trim()
     await writeFile(claimPath, `${JSON.stringify({ pid: 2_147_483_647, boot_id: bootId, start_ticks: '1', claim })}\n`, { mode: 0o400 })
     await link(claimPath, posix.join(instanceRoot, '.provision.lock'))
-    await expect(provisionBuilderSupervisor(fixture.request)).rejects.toMatchObject({ code: 'ALREADY_PROVISIONED' })
+    await expect(provisionBuilderSupervisor(fixture.request)).resolves.toMatchObject({ state: 'CREATED', scope_id: fixture.scopeId })
     expect((await lstat(target)).mode & 0o777).toBe(0o555)
     expect(await pathExists(claimPath)).toBe(false)
   })
@@ -825,6 +946,7 @@ interface Fixture {
   readonly treeSha: string
   readonly scopeId: ReturnType<typeof deriveBuilderRuntimeScopeId>
   readonly files: Readonly<Record<string, string>>
+  readonly manifest: { readonly version: 1; readonly template_store_version: string; readonly tree_sha256: string; readonly entries: readonly TemplateManifestEntry[] }
   readonly request: BuilderProvisionRequest
 }
 
@@ -850,12 +972,13 @@ async function createFixture(): Promise<Fixture> {
     { path: 'app/package.json', type: 'file', bytes: Buffer.byteLength(files['app/package.json']), sha256: sha(files['app/package.json']) },
   ]
   const treeSha = computeTemplateTreeSha256('v1.0.0', entries)
-  const manifestRaw = `${JSON.stringify({ version: 1, template_store_version: 'v1.0.0', tree_sha256: treeSha, entries })}\n`
+  const manifest = { version: 1 as const, template_store_version: 'v1.0.0', tree_sha256: treeSha, entries }
+  const manifestRaw = `${JSON.stringify(manifest)}\n`
   const manifestPath = posix.join(root, 'template-store.manifest.json'); await writeFile(manifestPath, manifestRaw, { mode: 0o600 })
   const manifestSha = sha(manifestRaw)
   const installationId = 'd'.repeat(64)
   const scopeId = deriveBuilderRuntimeScopeId({ installationId, tenantId: 'tenant-one', instanceId: 'instance-one' })
-  return { root, policy, sourceRoot, manifestPath, manifestSha, treeSha, scopeId, files, request: {
+  return { root, policy, sourceRoot, manifestPath, manifestSha, treeSha, scopeId, files, manifest, request: {
     installationId, tenantId: 'tenant-one', instanceId: 'instance-one', sourceRoot, manifestReference: `file:${manifestPath}`,
     manifestSha256: manifestSha, imageDigest: `sha256:${'a'.repeat(64)}`, policySha256: 'b'.repeat(64), roots: policy,
   } }
@@ -928,6 +1051,25 @@ function wasKilled(result: { code: number | null; signal: NodeJS.Signals | null 
 
 function sha(value: string): string { return createHash('sha256').update(value).digest('hex') }
 async function pathExists(path: string): Promise<boolean> { try { await lstat(path); return true } catch { return false } }
+async function snapshotTree(root: string): Promise<readonly string[]> {
+  const snapshot: string[] = []
+  const visit = async (directory: string, relative: string): Promise<void> => {
+    const names = (await readdir(directory)).sort((left, right) => Buffer.from(left).compare(Buffer.from(right)))
+    for (const name of names) {
+      const path = posix.join(directory, name)
+      const child = relative === '' ? name : posix.join(relative, name)
+      const stat = await lstat(path)
+      if (stat.isDirectory()) {
+        snapshot.push(`d:${child}:${stat.mode & 0o7777}`)
+        await visit(path, child)
+      } else if (stat.isFile()) {
+        snapshot.push(`f:${child}:${stat.mode & 0o7777}:${createHash('sha256').update(await readFile(path)).digest('hex')}`)
+      } else snapshot.push(`x:${child}:${stat.mode & 0o7777}`)
+    }
+  }
+  await visit(root, '')
+  return snapshot
+}
 async function makeWritable(root: string): Promise<void> {
   if (!await pathExists(root)) return
   const stat = await lstat(root)

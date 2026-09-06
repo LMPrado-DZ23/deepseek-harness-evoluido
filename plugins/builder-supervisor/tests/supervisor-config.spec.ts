@@ -6,18 +6,25 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   BuilderSupervisorConfigError,
   computeBuilderSupervisorConfigEnvelopeSha256,
+  computeBuilderSupervisorConfigEnvelopeV2Sha256,
   loadBuilderSupervisorConfig,
   loadPinnedBuilderSupervisorConfig,
   type BuilderSupervisorRootPolicy,
   type SupervisorConfigRuntime,
 } from '../src/supervisor-config.js'
 import { deriveBuilderRuntimeScopeId } from '../src/runtime-scope.js'
+import { canonicalTemplateStoreManifestBytes, computeTemplateTreeSha256 } from '../src/store-security.js'
 
 const linux = process.platform === 'linux' ? describe : describe.skip
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map(path => rm(path, { recursive: true, force: true }))) })
 
 linux('builder supervisor fail-closed configuration', () => {
+  it('preserves the v1 framing vector and fixes a distinct v2 framing vector', () => {
+    const common = { configBytes: Buffer.from('{}\n'), imageDigestBytes: Buffer.from(`sha256:${'a'.repeat(64)}\n`), templateStoreSha256Bytes: Buffer.from(`${'b'.repeat(64)}\n`), policySha256Bytes: Buffer.from(`${'c'.repeat(64)}\n`) }
+    expect(computeBuilderSupervisorConfigEnvelopeSha256(common)).toBe('ab3accfe88892d051cd4d39e6ef040f4cec9630620299006964c4850e6a7e6fe')
+    expect(computeBuilderSupervisorConfigEnvelopeV2Sha256({ ...common, templateStoreManifestBytes: Buffer.from('{"version":1}\n') })).toBe('2882eeb6faae9648bc65d4aa2bde69bde76a6b7a87fac97625e44a054a25fefe')
+  })
   it('loads only the exact opaque-scope paths and file-backed secret/digests', async () => {
     const fixture = await createFixture()
     const config = await loadBuilderSupervisorConfig(`file:${fixture.configPath}`, fixture.policy)
@@ -123,6 +130,8 @@ linux('builder supervisor fail-closed configuration', () => {
     await expectInvalid(`file:${fixture.configPath}`, fixture.policy)
     await writeFile(fixture.configPath, Buffer.from([0xc3]), { mode: 0o600 })
     await expectInvalid(`file:${fixture.configPath}`, fixture.policy)
+    await rewriteConfig(fixture, { version: 3 })
+    await expectInvalid(`file:${fixture.configPath}`, fixture.policy)
   })
 
   it('accepts canonical CRLF termination without changing resolved values', async () => {
@@ -186,6 +195,62 @@ linux('builder supervisor fail-closed configuration', () => {
       if (previous === undefined) delete process.env.DZ23_BUILDER_SUPERVISOR_TOKEN
       else process.env.DZ23_BUILDER_SUPERVISOR_TOKEN = previous
     }
+  })
+
+  it('loads canonical config v2, binds its manifest, and keeps bearer rotation outside both envelope versions', async () => {
+    const fixture = await createFixture()
+    const entries = [{ path: 'app', type: 'directory' as const }]
+    const tree = computeTemplateTreeSha256('v2.0.0', entries)
+    const manifestBytes = canonicalTemplateStoreManifestBytes({ version: 1, template_store_version: 'v2.0.0', tree_sha256: tree, entries })
+    const manifestPath = posix.join(posix.dirname(fixture.configPath), 'template-store.manifest.json')
+    await writeFile(manifestPath, manifestBytes, { mode: 0o600 })
+    await writeFile(fixture.storePath, `${tree}\n`, { mode: 0o600 })
+    await rewriteConfig(fixture, { version: 2, template_store_manifest_ref: `file:${manifestPath}` })
+    const configBytes = await readFile(fixture.configPath)
+    const imageDigestBytes = await readFile(fixture.imagePath)
+    const templateStoreSha256Bytes = await readFile(fixture.storePath)
+    const policySha256Bytes = await readFile(fixture.policyPath)
+    const digest = computeBuilderSupervisorConfigEnvelopeV2Sha256({ configBytes, imageDigestBytes, templateStoreSha256Bytes, templateStoreManifestBytes: manifestBytes, policySha256Bytes })
+    const loaded = await loadPinnedBuilderSupervisorConfig(`file:${fixture.configPath}`, digest, fixture.policy)
+    expect(loaded).toMatchObject({ templateStoreVersion: 'v2.0.0', templateStoreSha256: tree, templateStoreManifestReference: `file:${manifestPath}` })
+    expect(loaded.templateStoreManifest).toEqual({ version: 1, template_store_version: 'v2.0.0', tree_sha256: tree, entries })
+    await writeFile(fixture.tokenPath, `token_${'R'.repeat(48)}\n`, { mode: 0o600 })
+    await expect(loadPinnedBuilderSupervisorConfig(`file:${fixture.configPath}`, digest, fixture.policy)).resolves.toMatchObject({ bearerToken: `token_${'R'.repeat(48)}` })
+
+    const v1Fixture = await createFixture()
+    const v1Before = await envelopeDigest(v1Fixture)
+    await writeFile(v1Fixture.tokenPath, `token_${'S'.repeat(48)}\n`, { mode: 0o600 })
+    expect(await envelopeDigest(v1Fixture)).toBe(v1Before)
+  })
+
+  it('rejects noncanonical, linked, oversized and mismatched durable manifests in config v2', async () => {
+    const fixture = await createFixture()
+    const entries = [{ path: 'app', type: 'directory' as const }]
+    const tree = computeTemplateTreeSha256('v2.0.0', entries)
+    const manifestPath = posix.join(posix.dirname(fixture.configPath), 'template-store.manifest.json')
+    const canonical = canonicalTemplateStoreManifestBytes({ version: 1, template_store_version: 'v2.0.0', tree_sha256: tree, entries })
+    await writeFile(fixture.storePath, `${tree}\n`, { mode: 0o600 })
+    await writeFile(manifestPath, Buffer.from(` ${canonical.toString('utf8')}`), { mode: 0o600 })
+    await rewriteConfig(fixture, { version: 2, template_store_manifest_ref: `file:${manifestPath}` })
+    await expectInvalid(`file:${fixture.configPath}`, fixture.policy)
+    await writeFile(manifestPath, canonical, { mode: 0o600 })
+    await writeFile(fixture.storePath, `${'b'.repeat(64)}\n`, { mode: 0o600 })
+    await expectInvalid(`file:${fixture.configPath}`, fixture.policy)
+    await writeFile(fixture.storePath, `${tree}\n`, { mode: 0o600 })
+    const alias = `${manifestPath}.alias`; await link(manifestPath, alias); await expectInvalid(`file:${fixture.configPath}`, fixture.policy); await unlink(alias)
+    await chmod(manifestPath, 0o644); await expectInvalid(`file:${fixture.configPath}`, fixture.policy); await chmod(manifestPath, 0o600)
+    await rewriteConfig(fixture, { version: 2, template_store_manifest_ref: `file:${manifestPath}`, template_store_version: 'other' })
+    await expectInvalid(`file:${fixture.configPath}`, fixture.policy)
+    await rewriteConfig(fixture, { version: 2, template_store_manifest_ref: `file:${manifestPath}`, template_store_version: 'v2.0.0' })
+    await writeFile(manifestPath, Buffer.alloc(2 * 1024 * 1024 + 1, 0x20), { mode: 0o600 })
+    await expectInvalid(`file:${fixture.configPath}`, fixture.policy)
+    await writeFile(manifestPath, Buffer.from([0xff, 0xfe, 0x0a]), { mode: 0o600 })
+    await expectInvalid(`file:${fixture.configPath}`, fixture.policy)
+    await writeFile(manifestPath, canonical.subarray(0, canonical.length - 1), { mode: 0o600 })
+    await expectInvalid(`file:${fixture.configPath}`, fixture.policy)
+    await writeFile(manifestPath, canonical, { mode: 0o600 })
+    await rewriteConfig(fixture, { version: 2, template_store_manifest_ref: `file:${manifestPath}`, unexpected: true })
+    await expectInvalid(`file:${fixture.configPath}`, fixture.policy)
   })
 })
 

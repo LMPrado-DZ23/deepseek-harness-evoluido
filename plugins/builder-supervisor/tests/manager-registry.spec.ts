@@ -4,7 +4,7 @@ import { chmod, link, lstat, mkdir, mkdtemp, open, realpath, rm, symlink, unlink
 import { tmpdir } from 'node:os'
 import { posix } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { builderRuntimeRegistryPath, loadBuilderRuntimeRegistry, type BuilderRuntimeRegistrySlot, type ManagerSecureFileRuntime } from '../src/manager-registry.js'
+import { builderRuntimeRegistryPath, loadBuilderRuntimeRegistry, parseBuilderRuntimeRegistryBytes, type BuilderRuntimeRegistrySlot, type ManagerSecureFileRuntime } from '../src/manager-registry.js'
 import type { BuilderRuntimeScopeId } from '../src/runtime-scope.js'
 import type { BuilderSupervisorRootPolicy } from '../src/supervisor-config.js'
 
@@ -48,6 +48,7 @@ linux('authoritative runtime registry', () => {
     const target = `${fixture.registryPath}.target`; await writeFile(target, fixture.raw, { mode: 0o600 }); await unlink(fixture.registryPath); await symlink(target, fixture.registryPath); await expectInvalid(fixture)
     await unlink(fixture.registryPath); await writeFile(fixture.registryPath, Buffer.from([0xff, 0xfe]), { mode: 0o600 }); await expectInvalid(fixture)
     await writeFile(fixture.registryPath, Buffer.from([0x7b, 0x00, 0x7d]), { mode: 0o600 }); await expectInvalid(fixture)
+    expect(() => parseBuilderRuntimeRegistryBytes(Buffer.alloc(0), fixture.roots)).toThrow('INVALID_RUNTIME_REGISTRY')
   })
 
   it('rejects unsupported runtime identity, inode drift, realpath drift, and unsafe config roots', async () => {

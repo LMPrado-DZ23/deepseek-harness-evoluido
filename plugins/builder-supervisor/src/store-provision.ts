@@ -20,6 +20,7 @@ import {
 import { posix } from 'node:path'
 import {
   PRODUCTION_BUILDER_ROOT_POLICY,
+  loadBuilderSupervisorConfigEnvelope,
   validateBuilderSupervisorRootPolicy,
   type BuilderSupervisorRootPolicy,
 } from './supervisor-config.js'
@@ -36,6 +37,7 @@ import {
   TEMPLATE_STORE_MAX_ENTRIES,
   assertSafeStoreStat,
   assertSourceIdentity,
+  canonicalTemplateStoreManifestBytes,
   canonicalSourceRoot,
   computeTemplateTreeSha256,
   imageDigestValue,
@@ -48,6 +50,7 @@ import {
   type TemplateManifestEntry,
   type TemplateStoreManifest,
 } from './store-security.js'
+import { templateStoreUstarEntryPath } from './template-store-volume.js'
 
 export type BuilderProvisionErrorCode =
   | 'ALREADY_PROVISIONED'
@@ -84,6 +87,7 @@ export interface BuilderProvisionResult {
   readonly template_store_sha256: string
   readonly manifest_sha256: string
   readonly config_reference: string
+  readonly config_sha256: string
 }
 
 interface ProvisionIdentity {
@@ -165,12 +169,47 @@ export async function provisionBuilderSupervisor(
     assertSourceOutsideManagedRoots(sourceRoot, manifestPath, roots)
     await Promise.all(managedRoots(roots).map(assertPrivateRoot))
 
-    const stateInstanceRoot = await ensureScopeInstance(roots.stateRoot, scopePaths.state)
+    // Manifest compatibility and the entire source are proven before the first
+    // managed path is created. An entry that cannot be encoded by the strict
+    // USTAR materializer therefore fails without leaving provisioning effects.
+    const manifest = await loadPinnedManifest(manifestPath, expectedManifestSha256)
+    for (const entry of manifest.entries) templateStoreUstarEntryPath(entry.path)
+    const canonicalManifestBytes = canonicalTemplateStoreManifestBytes(manifest)
+    const canonicalManifestSha256 = createHash('sha256').update(canonicalManifestBytes).digest('hex')
+    const sourceEntries = await inspectSourceTree(sourceRoot)
+    assertTreeMatchesManifest(sourceEntries, manifest.entries)
+
+    const configPath = posix.join(scopePaths.config, 'supervisor.json')
+    const authorityAlreadyPublished = await exists(configPath)
+    const stateInstanceRoot = authorityAlreadyPublished
+      ? await requireScopeInstance(roots.stateRoot, scopePaths.state)
+      : await ensureScopeInstance(roots.stateRoot, scopePaths.state)
     const lock = await acquireProvisionLock(stateInstanceRoot, runtime)
     try {
-      const manifest = await loadPinnedManifest(manifestPath, expectedManifestSha256)
-      const sourceEntries = await inspectSourceTree(sourceRoot)
-      assertTreeMatchesManifest(sourceEntries, manifest.entries)
+      if (await exists(configPath)) {
+        const configDirectory = await requireScopeInstance(roots.configRoot, scopePaths.config)
+        const secretDirectory = await requireScopeInstance(roots.secretRoot, scopePaths.secret)
+        await recoverAuthorityLinkTemps(configDirectory, secretDirectory, true)
+        const authority = {
+          roots, installationId, tenantId, instanceId, scopeId, manifest,
+          canonicalManifestSha256, imageDigest, policySha256, configPath,
+        }
+        // Authenticate the immutable target already named by this scope before
+        // touching template-store. A request for another version therefore
+        // cannot materialize that version and only then discover the conflict.
+        await existingProvisionResult(authority)
+        const templateStoreParent = await requirePrivateDirectory(posix.join(stateInstanceRoot, 'template-store'))
+        const storePath = posix.join(templateStoreParent, manifest.template_store_version)
+        if (!await exists(storePath)) mismatch()
+        await recoverInterruptedStaging(templateStoreParent)
+        await recoverInterruptedStoreTarget(storePath, manifest, lock.recoveredStaleOwner)
+        await verifyPublishedStore(storePath, manifest)
+        // Pin the result to a second authority read after store validation so a
+        // cooperative reprovision never returns a stale pre-check envelope.
+        const existing = await existingProvisionResult(authority)
+        await lock.completeRecovery()
+        return existing
+      }
       const templateStoreParent = await ensurePrivateDirectory(posix.join(stateInstanceRoot, 'template-store'))
       await recoverInterruptedStaging(templateStoreParent)
       const storePath = posix.join(templateStoreParent, manifest.template_store_version)
@@ -186,12 +225,15 @@ export async function provisionBuilderSupervisor(
       const exportDirectory = await ensureScopeInstance(roots.exportRoot, scopePaths.export)
       const journalDirectory = await ensurePrivateDirectory(posix.join(stateInstanceRoot, 'journal'))
       const replayDirectory = await ensurePrivateDirectory(posix.join(stateInstanceRoot, 'rpc-replay'))
-      const configPath = posix.join(configDirectory, 'supervisor.json')
       const configExists = await exists(configPath)
       await recoverAuthorityLinkTemps(configDirectory, secretDirectory, configExists)
       if (configExists) {
+        const existing = await existingProvisionResult({
+          roots, installationId, tenantId, instanceId, scopeId, manifest,
+          canonicalManifestSha256, imageDigest, policySha256, configPath,
+        })
         await lock.completeRecovery()
-        throw new BuilderProvisionError('ALREADY_PROVISIONED')
+        return existing
       }
       await recoverPartialAuthority(configDirectory, secretDirectory)
 
@@ -200,14 +242,16 @@ export async function provisionBuilderSupervisor(
       const imagePath = posix.join(configDirectory, 'builder-image.sha256')
       const storeHashPath = posix.join(configDirectory, 'template-store.sha256')
       const manifestHashPath = posix.join(configDirectory, 'template-manifest.sha256')
+      const canonicalManifestPath = posix.join(configDirectory, 'template-store.manifest.json')
       const policyPath = posix.join(configDirectory, 'policy.sha256')
       await writeAuthorityFile(tokenPath, `${token}\n`, 0o400)
       await writeAuthorityFile(imagePath, `${imageDigest}\n`, 0o600)
       await writeAuthorityFile(storeHashPath, `${manifest.tree_sha256}\n`, 0o600)
-      await writeAuthorityFile(manifestHashPath, `${expectedManifestSha256}\n`, 0o600)
+      await writeAuthorityFile(manifestHashPath, `${canonicalManifestSha256}\n`, 0o600)
+      await writeAuthorityFile(canonicalManifestPath, canonicalManifestBytes, 0o600)
       await writeAuthorityFile(policyPath, `${policySha256}\n`, 0o600)
       const config = {
-        version: 1,
+        version: 2,
         installation_id: installationId,
         tenant_id: tenantId,
         instance_id: instanceId,
@@ -221,19 +265,18 @@ export async function provisionBuilderSupervisor(
         image_digest_ref: `file:${imagePath}`,
         template_store_version: manifest.template_store_version,
         template_store_sha256_ref: `file:${storeHashPath}`,
+        template_store_manifest_ref: `file:${canonicalManifestPath}`,
         policy_sha256_ref: `file:${policyPath}`,
       }
       await writeAuthorityFile(configPath, `${JSON.stringify(config)}\n`, 0o600)
       await syncDirectory(configDirectory)
       await syncDirectory(secretDirectory)
+      const created = await existingProvisionResult({
+        roots, installationId, tenantId, instanceId, scopeId, manifest,
+        canonicalManifestSha256, imageDigest, policySha256, configPath,
+      })
       await lock.completeRecovery()
-      return {
-        state: 'CREATED', scope_id: scopeId,
-        template_store_version: manifest.template_store_version,
-        template_store_sha256: manifest.tree_sha256,
-        manifest_sha256: expectedManifestSha256,
-        config_reference: `file:${configPath}`,
-      }
+      return created
     } finally {
       await lock.release()
     }
@@ -241,6 +284,52 @@ export async function provisionBuilderSupervisor(
     if (error instanceof BuilderProvisionError) throw error
     throw new BuilderProvisionError('INVALID_PROVISION_REQUEST')
   }
+}
+
+interface ExistingProvisionInput {
+  readonly roots: BuilderSupervisorRootPolicy
+  readonly installationId: string
+  readonly tenantId: string
+  readonly instanceId: string
+  readonly scopeId: BuilderRuntimeScopeId
+  readonly manifest: TemplateStoreManifest
+  readonly canonicalManifestSha256: string
+  readonly imageDigest: `sha256:${string}`
+  readonly policySha256: string
+  readonly configPath: string
+}
+
+async function existingProvisionResult(input: ExistingProvisionInput): Promise<BuilderProvisionResult> {
+  try {
+    const loaded = await loadBuilderSupervisorConfigEnvelope(`file:${input.configPath}`, input.roots)
+    const config = loaded.config
+    if (config.installationId !== input.installationId || config.tenantId !== input.tenantId || config.instanceId !== input.instanceId ||
+      config.scopeId !== input.scopeId || config.imageDigest !== input.imageDigest || config.policySha256 !== input.policySha256 ||
+      config.templateStoreVersion !== input.manifest.template_store_version || config.templateStoreSha256 !== input.manifest.tree_sha256 ||
+      config.templateStoreManifest === undefined || !canonicalTemplateStoreManifestBytes(config.templateStoreManifest).equals(canonicalTemplateStoreManifestBytes(input.manifest))) mismatch()
+    await verifyAuthoritySha256(posix.join(posix.dirname(input.configPath), 'template-manifest.sha256'), input.canonicalManifestSha256)
+    return {
+      state: 'CREATED', scope_id: input.scopeId,
+      template_store_version: input.manifest.template_store_version,
+      template_store_sha256: input.manifest.tree_sha256,
+      manifest_sha256: input.canonicalManifestSha256,
+      config_reference: `file:${input.configPath}`,
+      config_sha256: loaded.envelopeSha256,
+    }
+  } catch (error) {
+    if (error instanceof BuilderProvisionError) throw error
+    return mismatch()
+  }
+}
+
+async function verifyAuthoritySha256(path: string, expected: string): Promise<void> {
+  let handle: FileHandle | undefined
+  try {
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+    const opened = await handle.stat(); const linked = await lstat(path)
+    if (!opened.isFile() || opened.isSymbolicLink() || opened.nlink !== 1 || (opened.mode & 0o7777) !== 0o600 || !trustedOwner(opened) ||
+      !sameIdentity(opened, linked) || await realpath(path) !== path || opened.size !== 65 || await handle.readFile('utf8') !== `${expected}\n`) mismatch()
+  } finally { await handle?.close() }
 }
 
 async function loadPinnedManifest(path: string, expectedSha256: string): Promise<TemplateStoreManifest> {
@@ -590,7 +679,7 @@ async function makeStagingRemovable(root: string): Promise<void> {
 async function recoverPartialAuthority(configDirectory: string, secretDirectory: string): Promise<void> {
   const paths = [
     posix.join(secretDirectory, 'token'),
-    ...['builder-image.sha256', 'template-store.sha256', 'template-manifest.sha256', 'policy.sha256'].map(name => posix.join(configDirectory, name)),
+    ...['builder-image.sha256', 'template-store.sha256', 'template-manifest.sha256', 'template-store.manifest.json', 'policy.sha256'].map(name => posix.join(configDirectory, name)),
   ]
   for (const path of paths) {
     if (!await exists(path)) continue
@@ -601,7 +690,7 @@ async function recoverPartialAuthority(configDirectory: string, secretDirectory:
 }
 
 async function recoverAuthorityLinkTemps(configDirectory: string, secretDirectory: string, preserveTargets: boolean): Promise<void> {
-  const configTargets = ['supervisor.json', 'builder-image.sha256', 'template-store.sha256', 'template-manifest.sha256', 'policy.sha256'].map(name => posix.join(configDirectory, name))
+  const configTargets = ['supervisor.json', 'builder-image.sha256', 'template-store.sha256', 'template-manifest.sha256', 'template-store.manifest.json', 'policy.sha256'].map(name => posix.join(configDirectory, name))
   await recoverDirectoryLinkTemps(configDirectory, configTargets, preserveTargets)
   await recoverDirectoryLinkTemps(secretDirectory, [posix.join(secretDirectory, 'token')], preserveTargets)
 }
@@ -627,7 +716,7 @@ async function recoverDirectoryLinkTemps(directory: string, targets: readonly st
   }
 }
 
-async function writeAuthorityFile(path: string, value: string, mode: 0o400 | 0o600): Promise<void> {
+async function writeAuthorityFile(path: string, value: string | Uint8Array, mode: 0o400 | 0o600): Promise<void> {
   const directory = posix.dirname(path)
   const staging = posix.join(directory, `.staging-${randomBytes(16).toString('hex')}`)
   let handle: FileHandle | undefined
@@ -1010,14 +1099,19 @@ async function acquireProvisionGuard(guard: FileHandle): Promise<void> {
     timer = setTimeout(killAndBound, PROVISION_FLOCK_TIMEOUT_MS)
     timer.unref()
     const consumeStderr = (chunk: Buffer): void => {
-      stderrBytes += chunk.byteLength
-      if (stderrBytes > PROVISION_FLOCK_STDERR_LIMIT) killAndBound()
+      stderrBytes = consumeProvisionFlockStderr(stderrBytes, chunk, killAndBound)
     }
     stderr.on('data', consumeStderr)
     child.once('error', finish.bind(null, null, null))
     child.once('exit', finish)
   })
   classifyProvisionFlockOutcome(outcome)
+}
+
+function consumeProvisionFlockStderr(currentBytes: number, chunk: Buffer, kill: () => void): number {
+  const nextBytes = currentBytes + chunk.byteLength
+  if (nextBytes > PROVISION_FLOCK_STDERR_LIMIT) kill()
+  return nextBytes
 }
 
 function classifyProvisionFlockOutcome(outcome: {
@@ -1034,6 +1128,7 @@ export const STORE_PROVISION_GUARD_TEST_ONLY = Object.freeze({
   assertProvisionGuardFilesystem,
   assertTrustedFlockBinary,
   classifyProvisionFlockOutcome,
+  consumeProvisionFlockStderr,
 })
 
 function sameGuardIdentity(left: Stats, right: Stats): boolean {
@@ -1102,6 +1197,12 @@ async function ensureScopeInstance(root: string, path: string): Promise<string> 
   return ensurePrivateDirectory(path)
 }
 
+async function requireScopeInstance(root: string, path: string): Promise<string> {
+  const instances = await requirePrivateDirectory(posix.join(root, 'instances'))
+  if (!beneath(instances, path)) return invalidRequest()
+  return requirePrivateDirectory(path)
+}
+
 function installationIdentifier(value: unknown): string {
   if (!isInstallationId(value)) return invalidRequest()
   return value
@@ -1112,6 +1213,17 @@ async function ensurePrivateDirectory(path: string): Promise<string> {
   const stat = await lstat(path)
   if (!stat.isDirectory() || stat.isSymbolicLink() || !trustedOwner(stat) || (stat.mode & 0o777) !== 0o700 || await realpath(path) !== path) recoveryFailed()
   return path
+}
+
+async function requirePrivateDirectory(path: string): Promise<string> {
+  try {
+    const stat = await lstat(path)
+    if (!stat.isDirectory() || stat.isSymbolicLink() || !trustedOwner(stat) || (stat.mode & 0o777) !== 0o700 || await realpath(path) !== path) mismatch()
+    return path
+  } catch (error) {
+    if (error instanceof BuilderProvisionError) throw error
+    return mismatch()
+  }
 }
 
 async function assertPrivateRoot(path: string): Promise<void> {

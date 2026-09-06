@@ -3,6 +3,12 @@ import { constants, type Stats } from 'node:fs'
 import { lstat, open, realpath, type FileHandle } from 'node:fs/promises'
 import { posix } from 'node:path'
 import {
+  TEMPLATE_MANIFEST_MAX_BYTES,
+  canonicalTemplateStoreManifestBytes,
+  parseTemplateStoreManifest,
+  type TemplateStoreManifest,
+} from './store-security.js'
+import {
   builderRuntimeSocketPath,
   deriveBuilderRuntimeScopeId,
   isInstallationId,
@@ -10,7 +16,7 @@ import {
   type BuilderRuntimeScopeId,
 } from './runtime-scope.js'
 
-const CONFIG_KEYS = [
+const CONFIG_KEYS_V1 = [
   'artifact_root',
   'bearer_token_ref',
   'docker_socket_path',
@@ -27,6 +33,8 @@ const CONFIG_KEYS = [
   'tenant_id',
   'version',
 ] as const
+
+const CONFIG_KEYS_V2 = [...CONFIG_KEYS_V1, 'template_store_manifest_ref'] as const
 
 export class BuilderSupervisorConfigError extends Error {
   readonly code = 'INVALID_SUPERVISOR_CONFIGURATION'
@@ -68,7 +76,14 @@ export interface BuilderSupervisorResolvedConfig {
   readonly imageDigest: `sha256:${string}`
   readonly templateStoreVersion: string
   readonly templateStoreSha256: string
+  readonly templateStoreManifest?: TemplateStoreManifest
+  readonly templateStoreManifestReference?: `file:${string}`
   readonly policySha256: string
+}
+
+export interface BuilderSupervisorConfigEnvelope {
+  readonly config: BuilderSupervisorResolvedConfig
+  readonly envelopeSha256: string
 }
 
 export interface SupervisorConfigRuntime {
@@ -94,6 +109,14 @@ export async function loadBuilderSupervisorConfig(
   roots: BuilderSupervisorRootPolicy = PRODUCTION_BUILDER_ROOT_POLICY,
   runtime: SupervisorConfigRuntime = DEFAULT_RUNTIME,
 ): Promise<BuilderSupervisorResolvedConfig> {
+  return (await loadResolvedConfig(configReference, roots, runtime)).config
+}
+
+export async function loadBuilderSupervisorConfigEnvelope(
+  configReference: string,
+  roots: BuilderSupervisorRootPolicy = PRODUCTION_BUILDER_ROOT_POLICY,
+  runtime: SupervisorConfigRuntime = DEFAULT_RUNTIME,
+): Promise<BuilderSupervisorConfigEnvelope> {
   return loadResolvedConfig(configReference, roots, runtime)
 }
 
@@ -109,7 +132,7 @@ export async function loadPinnedBuilderSupervisorConfig(
   runtime: SupervisorConfigRuntime = DEFAULT_RUNTIME,
 ): Promise<BuilderSupervisorResolvedConfig> {
   if (!/^[a-f0-9]{64}$/u.test(expectedEnvelopeSha256)) throw new BuilderSupervisorConfigError()
-  return loadResolvedConfig(configReference, roots, runtime, expectedEnvelopeSha256)
+  return (await loadResolvedConfig(configReference, roots, runtime, expectedEnvelopeSha256)).config
 }
 
 async function loadResolvedConfig(
@@ -117,7 +140,7 @@ async function loadResolvedConfig(
   roots: BuilderSupervisorRootPolicy,
   runtime: SupervisorConfigRuntime,
   expectedEnvelopeSha256?: string,
-): Promise<BuilderSupervisorResolvedConfig> {
+): Promise<BuilderSupervisorConfigEnvelope> {
   try {
     if (runtime.platform !== 'linux' || runtime.uid === undefined) invalid()
     validateBuilderSupervisorRootPolicy(roots)
@@ -125,8 +148,12 @@ async function loadResolvedConfig(
     if (!beneath(roots.configRoot, configPath)) invalid()
     const configBytes = await readSecureFileBytes(configPath, 'config', runtime)
     const raw = secureText(configBytes)
-    const value = strictRecord(JSON.parse(raw), CONFIG_KEYS)
-    if (value.version !== 1) invalid()
+    const parsed = JSON.parse(raw) as unknown
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) invalid()
+    const rawVersion = (parsed as Record<string, unknown>).version
+    if (rawVersion !== 1 && rawVersion !== 2) invalid()
+    const version = rawVersion
+    const value = strictRecord(parsed, version === 1 ? CONFIG_KEYS_V1 : CONFIG_KEYS_V2)
     const installationId = installationIdentifier(value.installation_id)
     const tenantId = identifier(value.tenant_id)
     const instanceId = identifier(value.instance_id)
@@ -145,17 +172,24 @@ async function loadResolvedConfig(
     const bearerTokenRef = exactReference(value.bearer_token_ref, posix.join(secretDirectory, 'token'))
     const imageDigestRef = exactReference(value.image_digest_ref, posix.join(configDirectory, 'builder-image.sha256'))
     const templateStoreSha256Ref = exactReference(value.template_store_sha256_ref, posix.join(configDirectory, 'template-store.sha256'))
+    const templateStoreManifestRef = version === 2
+      ? exactReference(value.template_store_manifest_ref, posix.join(configDirectory, 'template-store.manifest.json'))
+      : undefined
     const policySha256Ref = exactReference(value.policy_sha256_ref, posix.join(configDirectory, 'policy.sha256'))
     const templateStoreVersion = scalar(value.template_store_version)
     if (!/^[A-Za-z0-9][A-Za-z0-9_.@-]{0,63}$/u.test(templateStoreVersion)) invalid()
 
-    const [bearerTokenBytes, imageDigestBytes, templateStoreSha256Bytes, policySha256Bytes] = await Promise.all([
+    const [bearerTokenBytes, imageDigestBytes, templateStoreSha256Bytes, templateStoreManifestBytes, policySha256Bytes] = await Promise.all([
       readSecureFileBytes(referencePath(bearerTokenRef), 'secret', runtime),
       readSecureFileBytes(referencePath(imageDigestRef), 'config', runtime),
       readSecureFileBytes(referencePath(templateStoreSha256Ref), 'config', runtime),
+      templateStoreManifestRef === undefined ? Promise.resolve(undefined) : readSecureFileBytes(referencePath(templateStoreManifestRef), 'manifest', runtime, TEMPLATE_MANIFEST_MAX_BYTES),
       readSecureFileBytes(referencePath(policySha256Ref), 'config', runtime),
     ])
-    if (expectedEnvelopeSha256 !== undefined && computeBuilderSupervisorConfigEnvelopeSha256({ configBytes, imageDigestBytes, templateStoreSha256Bytes, policySha256Bytes }) !== expectedEnvelopeSha256) invalid()
+    const envelopeSha256 = version === 1
+      ? computeBuilderSupervisorConfigEnvelopeSha256({ configBytes, imageDigestBytes, templateStoreSha256Bytes, policySha256Bytes })
+      : computeBuilderSupervisorConfigEnvelopeV2Sha256({ configBytes, imageDigestBytes, templateStoreSha256Bytes, templateStoreManifestBytes: templateStoreManifestBytes!, policySha256Bytes })
+    if (expectedEnvelopeSha256 !== undefined && envelopeSha256 !== expectedEnvelopeSha256) invalid()
     const bearerToken = secureText(bearerTokenBytes)
     const imageDigest = secureText(imageDigestBytes)
     const templateStoreSha256 = secureText(templateStoreSha256Bytes)
@@ -163,7 +197,12 @@ async function loadResolvedConfig(
     if (!/^[A-Za-z0-9_-]{43,200}$/u.test(bearerToken)) invalid()
     if (!/^sha256:[a-f0-9]{64}$/u.test(imageDigest)) invalid()
     if (!/^[a-f0-9]{64}$/u.test(templateStoreSha256) || !/^[a-f0-9]{64}$/u.test(policySha256)) invalid()
-    return {
+    let templateStoreManifest: TemplateStoreManifest | undefined
+    if (templateStoreManifestBytes !== undefined) {
+      templateStoreManifest = parseTemplateStoreManifest(JSON.parse(secureJsonText(templateStoreManifestBytes)) as unknown)
+      if (!canonicalTemplateStoreManifestBytes(templateStoreManifest).equals(templateStoreManifestBytes) || templateStoreManifest.template_store_version !== templateStoreVersion || templateStoreManifest.tree_sha256 !== templateStoreSha256) invalid()
+    }
+    const config: BuilderSupervisorResolvedConfig = {
       installationId,
       tenantId,
       instanceId,
@@ -178,8 +217,10 @@ async function loadResolvedConfig(
       imageDigest: imageDigest as `sha256:${string}`,
       templateStoreVersion,
       templateStoreSha256,
+      ...(templateStoreManifest === undefined ? {} : { templateStoreManifest, templateStoreManifestReference: templateStoreManifestRef as `file:${string}` }),
       policySha256,
     }
+    return { config, envelopeSha256 }
   } catch (error) {
     if (error instanceof BuilderSupervisorConfigError) throw error
     throw new BuilderSupervisorConfigError()
@@ -202,16 +243,38 @@ export function computeBuilderSupervisorConfigEnvelopeSha256(input: {
   return hash.digest('hex')
 }
 
-async function readSecureFileBytes(path: string, kind: 'config' | 'secret', runtime: SupervisorConfigRuntime): Promise<Buffer> {
+export function computeBuilderSupervisorConfigEnvelopeV2Sha256(input: {
+  readonly configBytes: Uint8Array
+  readonly imageDigestBytes: Uint8Array
+  readonly templateStoreSha256Bytes: Uint8Array
+  readonly templateStoreManifestBytes: Uint8Array
+  readonly policySha256Bytes: Uint8Array
+}): string {
+  return computeEnvelope('dz23-builder-config-envelope-v2\0', [
+    ['supervisor.json', input.configBytes],
+    ['builder-image.sha256', input.imageDigestBytes],
+    ['template-store.sha256', input.templateStoreSha256Bytes],
+    ['template-store.manifest.json', input.templateStoreManifestBytes],
+    ['policy.sha256', input.policySha256Bytes],
+  ])
+}
+
+function computeEnvelope(domain: string, entries: ReadonlyArray<readonly [string, Uint8Array]>): string {
+  const hash = createHash('sha256').update(domain)
+  for (const [label, bytes] of entries) hash.update(label).update('\0').update(String(bytes.byteLength)).update('\0').update(bytes)
+  return hash.digest('hex')
+}
+
+async function readSecureFileBytes(path: string, kind: 'config' | 'secret' | 'manifest', runtime: SupervisorConfigRuntime, maximumBytes = 16_384): Promise<Buffer> {
   let handle: FileHandle | undefined
   try {
     handle = await runtime.open(path, constants.O_RDONLY | runtime.noFollowFlag)
     const opened = await handle.stat()
     const linked = await runtime.lstat(path)
-    if (!opened.isFile() || opened.isSymbolicLink() || opened.nlink !== 1 || opened.size < 1 || opened.size > 16_384) invalid()
+    if (!opened.isFile() || opened.isSymbolicLink() || opened.nlink !== 1 || opened.size < 1 || opened.size > maximumBytes) invalid()
     if (!linked.isFile() || linked.isSymbolicLink() || linked.dev !== opened.dev || linked.ino !== opened.ino || await runtime.realpath(path) !== path) invalid()
     const mode = opened.mode & 0o7777
-    if ((opened.uid !== 0 && opened.uid !== runtime.uid) || (opened.mode & 0o022) !== 0 || (kind === 'secret' && mode !== 0o400 && mode !== 0o600)) invalid()
+    if ((opened.uid !== 0 && opened.uid !== runtime.uid) || (opened.mode & 0o022) !== 0 || (kind === 'secret' && mode !== 0o400 && mode !== 0o600) || (kind === 'manifest' && mode !== 0o600)) invalid()
     const value = await handle.readFile()
     if (value.byteLength === 0 || value.includes(0)) invalid()
     return value
@@ -229,6 +292,14 @@ function secureText(value: Uint8Array): string {
   return normalized
 }
 
+function secureJsonText(value: Uint8Array): string {
+  let decoded: string
+  try { decoded = new TextDecoder('utf-8', { fatal: true }).decode(value) }
+  catch { return invalid() }
+  if (!decoded.endsWith('\n') || decoded.endsWith('\n\n') || decoded.includes('\r') || decoded.includes('\0')) invalid()
+  return decoded.slice(0, -1)
+}
+
 export function validateBuilderSupervisorRootPolicy(roots: BuilderSupervisorRootPolicy): void {
   const paths = [roots.configRoot, roots.secretRoot, roots.socketRoot, roots.artifactRoot, roots.exportRoot, roots.stateRoot, roots.dockerSocketPath]
   for (const path of paths) canonicalAbsolute(path)
@@ -243,7 +314,6 @@ export function validateBuilderSupervisorRootPolicy(roots: BuilderSupervisorRoot
 }
 
 function strictRecord(value: unknown, keys: readonly string[]): Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return invalid()
   const row = value as Record<string, unknown>
   if (Object.keys(row).sort().join('\0') !== [...keys].sort().join('\0')) invalid()
   return row

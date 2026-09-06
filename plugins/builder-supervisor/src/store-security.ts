@@ -18,6 +18,19 @@ export interface TemplateStoreManifest {
   readonly entries: readonly TemplateManifestEntry[]
 }
 
+export function canonicalTemplateStoreManifestBytes(value: unknown): Buffer {
+  const manifest = parseTemplateStoreManifest(value)
+  const entries = manifest.entries.map(entry => entry.type === 'directory'
+    ? { path: entry.path, type: entry.type }
+    : { path: entry.path, type: entry.type, bytes: entry.bytes, sha256: entry.sha256 })
+  return Buffer.from(`${JSON.stringify({
+    version: manifest.version,
+    template_store_version: manifest.template_store_version,
+    tree_sha256: manifest.tree_sha256,
+    entries,
+  })}\n`, 'utf8')
+}
+
 export function parseTemplateStoreManifest(value: unknown): TemplateStoreManifest {
   const record = exactRecord(value, ['version', 'template_store_version', 'tree_sha256', 'entries'])
   if (record.version !== 1 || !isVersion(record.template_store_version) || !isSha256(record.tree_sha256) || !Array.isArray(record.entries)) invalid()
