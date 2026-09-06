@@ -47,7 +47,7 @@ ENV DSH_CLIENT_COMMIT_HASH=6c705be1ce6774a000d061da41d1823b03a3d42c
 COPY --from=dependency-fetch /workspace/.dz23-fetch-complete /tmp/.dz23-fetch-complete
 COPY . .
 # Compile the pinned upstream against its own audited lock before the Studio
-# workspace injects those built packages into the product dependency graph.
+# workspace resolves the product dependency graph.
 RUN test -n "${STUDIO_COMMIT}" \
  && test -f /tmp/.dz23-fetch-complete \
  && node scripts/check-image-lock.mjs \
@@ -57,17 +57,16 @@ RUN --mount=type=cache,id=dz23-studio-pnpm-11,target=/pnpm/store,sharing=locked 
     --network=none \
     pnpm --dir third_party/deepseek-harness install --offline --frozen-lockfile --trust-lockfile --store-dir /pnpm/store
 RUN --network=none pnpm --dir third_party/deepseek-harness build:official
-# Inject the now-built upstream packages into the Studio workspace.
+# Install the workspace with symlinked development dependencies. Only the
+# runtime's deploy inputs are injected explicitly in its package manifest.
 RUN --mount=type=cache,id=dz23-studio-pnpm-11,target=/pnpm/store,sharing=locked \
     --network=none \
     pnpm install --offline --frozen-lockfile --trust-lockfile --filter '@dz23-studio/*...' --store-dir /pnpm/store
 RUN --mount=type=cache,id=dz23-studio-pnpm-11,target=/pnpm/store,sharing=locked \
     --network=none pnpm build
-# pnpm's injected workspace copies are snapshots taken at install time. A
-# second install with --force does not refresh those snapshots after `build`,
-# so a deploy could silently contain stale `lib/` files. Remove only the
-# Studio workspace installation (the separately built upstream stays intact),
-# then recreate the injected graph from the freshly built packages.
+# pnpm's selectively injected runtime inputs are snapshots taken at install
+# time. Remove only the Studio workspace installation (the separately built
+# upstream stays intact), then recreate those snapshots from the fresh build.
 RUN rm -rf \
       /workspace/node_modules \
       /workspace/plugins/*/node_modules \
@@ -76,7 +75,7 @@ RUN rm -rf \
 RUN --mount=type=cache,id=dz23-studio-pnpm-11,target=/pnpm/store,sharing=locked \
     --network=none \
     pnpm install --offline --frozen-lockfile --trust-lockfile --filter '@dz23-studio/*...' --store-dir /pnpm/store \
- && pnpm --filter @dz23-studio/runtime deploy --prod /opt/runtime \
+ && pnpm --filter @dz23-studio/runtime deploy --legacy --prod --offline /opt/runtime \
  && test -f /opt/runtime/entrypoint.mjs \
  && test -f /opt/runtime/operator.mjs \
  && test -f /opt/runtime/shutdown-contract.mjs \

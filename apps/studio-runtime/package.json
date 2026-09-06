@@ -16,5 +16,16 @@
     "@deepseek-ai/dsh": "workspace:*",
     "@dz23-studio/storage-postgres": "workspace:*",
     "dsh-profile-studio": "workspace:*"
+  },
+  "dependenciesMeta": {
+    "@deepseek-ai/dsh": {
+      "injected": true
+    },
+    "@dz23-studio/storage-postgres": {
+      "injected": true
+    },
+    "dsh-profile-studio": {
+      "injected": true
+    }
   }
 }

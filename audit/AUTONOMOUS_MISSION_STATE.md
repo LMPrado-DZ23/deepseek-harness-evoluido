@@ -3,12 +3,12 @@
 - mission_id: `DZ23-STUDIO-V1-20260904`
 - objetivo: concluir o DZ23 STUDIO v1.0 com runtime portátil, geração isolada, gates Windows/Linux, testes com cinco pessoas e pacote open source somente após licença escolhida
 - estado: `REVIEW_REQUIRED`
-- iteração: 12
+- iteração: 13
 - início: 2026-09-04
-- último heartbeat: 2026-09-06T04:13:16-03:00
-- último progresso real: integração do lifecycle, manager e ingresso autenticado fechou 648/648 testes do supervisor com 100% nos arquivos críticos e 1.896/1.896 testes executados na suíte integral
-- tarefa atual: entregar checkpoint M6.3 para revisão independente e fechar o typecheck agregado antes de qualquer merge
-- branch: `codex/m63-integration-candidate`
+- último heartbeat: 2026-09-06T04:53:52-03:00
+- último progresso real: topologia de instalação corrigida na causa raiz; typecheck agregado, build, 1.896 testes executados e deploy offline do runtime passaram
+- tarefa atual: entregar a fatia M6.3b para revisão independente, sem merge na principal
+- branch: `codex/m63-install-topology`
 - base: `17e79aaab4c1ac54c1b4fc05f780f6485c5941b7`
 - upstream: `deepseek-harness@6c705be1ce6774a000d061da41d1823b03a3d42c`
 - staging válido: `/home/leandro/dz23-gates/m63-integration-20260906`
@@ -27,7 +27,6 @@
 
 ## Bloqueadores atuais
 
-- typecheck agregado falha por identidades duplicadas dos workspaces injetados no staging hoisted; builds individuais passam, mas o gate agregado precisa ser fechado;
 - Docker continua desligado; provas físicas de imagem, rede e execução são `NOT_EXECUTED`;
 - gate completo de origem requer um remoto `origin`, que não existe neste repositório local;
 - licença open source exata ainda depende do Prado; sem ela não há redistribuição pública;
@@ -35,11 +34,10 @@
 
 ## Próxima ação
 
-1. criar commit e bundle local deste checkpoint;
+1. criar commit e bundle local da fatia M6.3b;
 2. solicitar revisão independente do Claude sem merge;
-3. fechar o typecheck agregado com uma resolução canônica de módulos, sem casts ou relaxamento de tipos;
-4. repetir os gates afetados;
-5. quando o Docker estiver disponível, executar as provas físicas pendentes.
+3. tratar os 95 artefatos `lib/` rastreados em commit separado, somente após parecer;
+4. quando o Docker estiver disponível, executar as provas físicas pendentes.
 
 ## Histórico preservado — iteração 7 / M6.1
 

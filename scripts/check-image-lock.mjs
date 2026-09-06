@@ -175,6 +175,10 @@ export function validateDockerfileBase(dockerfile, lock) {
   if (dockerfile.slice(finalInstall, deploy).includes('--force')) {
     throw new Error('Dockerfile tenta atualizar cópias injetadas com --force sem instalação limpa')
   }
+  const deployCommand = dockerfile.slice(deploy, dockerfile.indexOf('\n', deploy))
+  if (!deployCommand.includes('deploy --legacy --prod --offline /opt/runtime')) {
+    throw new Error('Dockerfile não usa deploy legado e offline com workspaces seletivamente injetados')
+  }
   return { base: `${lock.images.node.reference}@${lock.images.node.indexDigest}`, postgresBase: postgres.sourceImage, frontend: expectedSyntax.slice('# syntax='.length), fromLines }
 }
 

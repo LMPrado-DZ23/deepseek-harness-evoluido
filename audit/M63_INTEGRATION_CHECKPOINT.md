@@ -58,7 +58,7 @@ Os 61 testes pulados são as suítes que exigem PostgreSQL externo; não foram c
 
 ## Limitações e provas ainda ausentes
 
-- `pnpm typecheck` agregado não está verde no staging: o modo `nodeLinker=hoisted` com pacotes de workspace injetados materializou identidades duplicadas de tipos com marca privada. Os builds TypeScript individuais dos 14 plugins passam. Isto é uma pendência real do gate agregado, não defeito ocultado como sucesso.
+- O bloqueio original do `pnpm typecheck` agregado foi fechado estruturalmente na fatia M6.3b: links preservam uma identidade única em desenvolvimento e somente três insumos do runtime são injetados. Evidência em `audit/M63_INSTALL_TOPOLOGY.md`.
 - O gate completo de pin não consegue validar URL de `origin` porque este repositório local não possui remoto. O self-test e o gitlink fixado passam.
 - Docker permanece desligado. A construção/execução do builder real, inspeção de `NetworkMode`, isolamento de rede e fluxo contêiner-a-contêiner estão `NOT_EXECUTED`.
 - PostgreSQL real não estava configurado neste staging; suas 61 integrações estão `NOT_EXECUTED` nesta rodada.
@@ -67,4 +67,4 @@ Os 61 testes pulados são as suítes que exigem PostgreSQL externo; não foram c
 
 ## Decisão deste checkpoint
 
-O código integrado está apto a revisão independente como candidato local. Ele não deve ser mesclado na principal antes do parecer do Claude e do fechamento explícito do typecheck agregado. As provas físicas de Docker permanecem obrigatórias quando o daemon voltar a estar disponível.
+O código integrado está apto a revisão independente como candidato local. O typecheck agregado já foi fechado na fatia M6.3b, mas a ponta ainda não deve ser mesclada na principal antes do parecer do Claude. As provas físicas de Docker permanecem obrigatórias quando o daemon voltar a estar disponível.

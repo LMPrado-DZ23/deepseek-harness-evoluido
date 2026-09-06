@@ -5,6 +5,8 @@ import { validateDockerfileBase, validateImageLock } from '../../scripts/check-i
 
 const canonical = JSON.parse(await readFile(new URL('../../deploy/images.lock.json', import.meta.url), 'utf8'))
 const dockerfile = await readFile(new URL('../../deploy/studio/Dockerfile', import.meta.url), 'utf8')
+const workspaceConfig = await readFile(new URL('../../pnpm-workspace.yaml', import.meta.url), 'utf8')
+const runtimeManifest = JSON.parse(await readFile(new URL('../../apps/studio-runtime/package.json', import.meta.url), 'utf8'))
 const studioLibraries = [
   'agents',
   'hello',
@@ -90,6 +92,22 @@ test('Dockerfile usa exatamente as bases Node e PostgreSQL fixadas no lock', () 
   assert.notEqual(finalInstall, -1)
   const forced = `${dockerfile.slice(0, finalInstall)}${install} --force${dockerfile.slice(finalInstall + install.length)}`
   assert.throws(() => validateDockerfileBase(forced, canonical), /sem instalação limpa/u)
+  assert.throws(
+    () => validateDockerfileBase(dockerfile.replace('deploy --legacy --prod --offline /opt/runtime', 'deploy --prod /opt/runtime'), canonical),
+    /não usa deploy legado e offline/u,
+  )
+})
+
+test('workspace preserva identidade única de tipos e injeta somente entradas do runtime', () => {
+  assert.match(workspaceConfig, /(?:^|\n)injectWorkspacePackages:\s+false(?:\n|$)/u)
+  assert.deepEqual(Object.keys(runtimeManifest.dependenciesMeta).sort(), [
+    '@deepseek-ai/dsh',
+    '@dz23-studio/storage-postgres',
+    'dsh-profile-studio',
+  ])
+  for (const metadata of Object.values(runtimeManifest.dependenciesMeta)) {
+    assert.deepEqual(metadata, { injected: true })
+  }
 })
 
 test('build isolado usa declarações compiladas sem enfraquecer o typecheck de desenvolvimento', async () => {
