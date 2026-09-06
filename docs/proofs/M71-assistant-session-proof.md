@@ -31,8 +31,9 @@ fixado em `6c705be1ce6774a000d061da41d1823b03a3d42c` e compilado pelo
 `862b92782c2f5cd67f81debd1116b16150dfafd84fb4ce2602a729f9cf3d26dc`.
 
 O runtime real abriu o profile `studio` em porta efêmera, usou login por código
-capturado no modo local, criou a sessão via HTTP real e consultou o Agent do
-Harness. Resultado:
+capturado no modo local, criou a sessão via HTTP real, consultou o Agent do
+Harness e executou um turno completo do motor de conversa com o provedor
+determinístico de prova. Resultado:
 
 ```text
 DZ23_STUDIO_M71_ASSISTANT_SESSION=PASS
@@ -41,13 +42,19 @@ sessionController=real
 identity=real login + CSRF + revocation
 agentPreset=dz23-assistant
 governedTools=13
+conversationTurn=PASS_WITH_DETERMINISTIC_PROVIDER
+approval=ask -> allowed-once
 resumedSameSession=true
 ```
 
 A prova negativa sem CSRF retornou 401. Depois da revogação da sessão de
 identidade, uma nova abertura também retornou 401. A sessão criada apresentou
 o `cwd` do repositório temporário e o preset exato. A segunda abertura retornou
-o mesmo `session_id`.
+o mesmo `session_id`. Entre as duas aberturas, a mensagem entrou pelo `Agent`
+real, o adaptador determinístico solicitou `studio_echo`, o policy/approval do
+Harness registrou uma única decisão `allowed-once` e a resposta
+`STUDIO_ECHO_OK` ficou no histórico da sessão. Isso prova o encadeamento da
+conversa, não a qualidade nem a disponibilidade de um modelo externo.
 
 O primeiro boot real encontrou um defeito de composição: o serviço da ponte
 era publicado globalmente, embora fosse criado por sessão. O preset foi
@@ -82,7 +89,8 @@ Gate cumulativo no clone novo:
 
 ## Limites honestos
 
-- nenhum turno com DeepSeek, Ollama, Codex CLI ou Claude Code real foi enviado:
+- o único turno usa `studio-fake/studio-deterministic`, exclusivo de prova;
+  nenhum turno com DeepSeek, Ollama, Codex CLI ou Claude Code real foi enviado:
   `NOT_EXECUTED`;
 - o redirecionamento e a gravação no navegador estão cobertos por unidade, mas
   não foram executados em Chromium: `UNIT_PROVEN_NOT_BROWSER_EXECUTED`;

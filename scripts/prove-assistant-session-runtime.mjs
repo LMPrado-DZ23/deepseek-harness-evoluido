@@ -29,13 +29,15 @@ assert.equal(process.platform, 'linux', 'A prova da sessão do Assistente exige 
 assert.ok(studioRoot.startsWith('/home/'), `A prova deve rodar no ext4 do WSL2: ${studioRoot}`)
 
 const moduleAt = relative => import(pathToFileURL(join(upstreamRoot, relative)).href)
-const [{ loadLayeredEnv }, { runProfile }, { SessionId }] = await Promise.all([
+const [{ loadLayeredEnv }, { runProfile }, { SessionId }, { createUserMessage }] = await Promise.all([
   moduleAt('packages/boot/app-boot/lib/index.js'),
   findProfileBoot(),
   moduleAt('packages/core/session/lib/index.js'),
+  moduleAt('packages/llm/llm/lib/index.js'),
 ])
 
 let booted
+let approvalOff
 try {
   await Promise.all([
     mkdir(join(runtimeHome, 'profiles'), { recursive: true }),
@@ -141,6 +143,28 @@ try {
   const tools = booted.ctx.tools.schemas(agent).map(tool => tool.name).sort()
   assert.equal(tools.filter(name => name.startsWith('studio_agent_') || name.startsWith('studio_team_')).length, 13)
 
+  const approvals = []
+  approvalOff = booted.ctx.on('approval/request', (request) => {
+    approvals.push({ toolName: request.toolName, callId: String(request.callId) })
+    return Promise.resolve('allowed-once')
+  }, { prepend: true })
+  agent.followup(createUserMessage({
+    content: [{ type: 'text', text: 'Run the deterministic Studio echo proof.' }],
+    source: { kind: 'user' },
+  }))
+  await agent.whenIdle()
+  const conversationText = agent.session.deriveMessages()
+    .flatMap(message => message.content)
+    .filter(block => block.type === 'text')
+    .map(block => block.text)
+    .join('\n')
+  assert.match(conversationText, /STUDIO_ECHO_OK/)
+  assert.deepEqual(approvals.map(item => item.toolName), ['studio_echo'])
+  assert.ok(agent.session.events.some(event => event.type === 'approval/asked'))
+  assert.ok(agent.session.events.some(event => event.type === 'approval/decided'
+    && event.data.outcome === 'allowed-once'))
+  await booted.ctx.sessions.flush(agent.session)
+
   const secondResponse = await fetch(`${origin}/studio/assistant/session`, {
     method: 'POST',
     headers: { ...headers, 'x-dz23-csrf': issued.csrfToken },
@@ -175,14 +199,18 @@ try {
     repository: inspected.meta.cwd,
     tools: tools.length,
     governedTools: 13,
+    conversationTurn: 'PASS_WITH_DETERMINISTIC_PROVIDER',
+    deterministicProvider: 'studio-fake/studio-deterministic',
+    approval: { policy: 'ask', outcome: 'allowed-once', requests: approvals.length },
     resumedSameSession: second.session_id === first.session_id && second.reused === true,
     limitations: {
-      modelTurn: 'NOT_EXECUTED',
+      realModelTurn: 'NOT_EXECUTED',
       browserHandoff: 'UNIT_PROVEN_NOT_BROWSER_EXECUTED',
       multiUserConversationIsolation: 'NOT_SUPPORTED',
     },
   }, null, 2)}\n`)
 } finally {
+  approvalOff?.()
   if (booted !== undefined) await booted.shutdown.shutdown(0)
   await rm(scratch, { recursive: true, force: true })
 }
