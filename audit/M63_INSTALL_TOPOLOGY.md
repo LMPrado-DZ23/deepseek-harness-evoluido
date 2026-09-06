@@ -1,6 +1,6 @@
 # M6.3b — Topologia de instalação e locks de desenvolvimento/release
 
-- data: `2026-09-06T06:03:00-03:00`
+- data: `2026-09-06T05:41:00-03:00`
 - branch candidata: `codex/m64-integration-candidate`
 - base: `bb4bf55bad031a3f27916d957f2a89755ed32182`
 - principal preservada: `codex/p30-policy-foundation@17e79aaab4c1ac54c1b4fc05f780f6485c5941b7`

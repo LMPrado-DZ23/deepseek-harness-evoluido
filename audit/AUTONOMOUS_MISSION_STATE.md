@@ -5,7 +5,7 @@
 - estado: `REVIEW_REQUIRED`
 - iteração: 15
 - início: 2026-09-04
-- último heartbeat: 2026-09-06T06:03:00-03:00
+- último heartbeat: 2026-09-06T05:41:00-03:00
 - último progresso real: deploy moderno congelado e offline provado com 533 pacotes; typecheck/build e suíte integral repetidos com 1.896 aprovados, 61 integrações externas puladas e 0 falhas
 - tarefa atual: fechar e entregar a candidata M6.4 cumulativa corrigida para revisão independente, sem merge na principal
 - branch: `codex/m64-integration-candidate`

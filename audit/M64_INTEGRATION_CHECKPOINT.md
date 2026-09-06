@@ -1,6 +1,6 @@
 # M6.4 — Checkpoint de integração Windows
 
-- data: `2026-09-06T06:03:00-03:00`
+- data: `2026-09-06T05:41:00-03:00`
 - branch candidata: `codex/m64-integration-candidate`
 - base funcional: `c122c8a8df120844868df9cdb6cf603cd46fd5af`
 - principal preservada: `codex/p30-policy-foundation@17e79aaab4c1ac54c1b4fc05f780f6485c5941b7`
