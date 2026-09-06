@@ -2,7 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { defineTool, type ToolDefinition } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-jobs'
 import type { DelegationAccepted, DelegationRequest } from '@dz23-studio/agents'
-import { principalForAgent } from '@dz23-studio/identity'
+import { principalForAgent, type AgentLookup } from '@dz23-studio/identity'
 import type {} from '@dz23-studio/tenancy'
 import { ASSISTANT_ALLOWED_PROVIDERS, ASSISTANT_TOOL_NAMES, assertAssistantToolCatalog } from './catalog.js'
 import {
@@ -137,8 +137,12 @@ function asAssistantAgent(agent: unknown): DelegationRequest['parent'] | undefin
 
 export async function apply(ctx: Context, config: Config): Promise<void> {
   validatePluginConfig(config)
+  type RegistrySessionId = Parameters<typeof ctx.agents.get>[0]
+  const agentLookup: AgentLookup = {
+    getBySessionId: sessionId => ctx.agents.get(sessionId as RegistrySessionId),
+  }
   const bridge = await StudioAssistantBridge.create({
-    resolvePrincipal: agent => principalForAgent(ctx.studioIdentity.service, ctx.agents, agent as never),
+    resolvePrincipal: agent => principalForAgent(ctx.studioIdentity.service, agentLookup, agent as never),
     authorizationFor: (userId, orgId, tenantId) => ctx.studioTenancy.service.authorizationFor(userId, orgId, tenantId),
     studioAgents: ctx.studioAgents,
     killJob: (jobId, owner, reason) => ctx.jobs.kill(jobId as never, owner as never, reason),
