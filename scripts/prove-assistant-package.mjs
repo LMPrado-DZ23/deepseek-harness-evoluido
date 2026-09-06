@@ -9,8 +9,10 @@ import { promisify } from 'node:util'
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const packageRoot = resolve(root, 'plugins/assistant-bridge')
 const agentsPackageRoot = resolve(root, 'plugins/agents')
+const agentTeamPackageRoot = resolve(root, 'plugins/agent-team')
 const staged = await mkdtemp(join(tmpdir(), 'dz23-assistant-package-'))
 const stagedAgents = await mkdtemp(join(tmpdir(), 'dz23-agents-package-'))
+const stagedAgentTeam = await mkdtemp(join(tmpdir(), 'dz23-agent-team-package-'))
 const stagedProfile = await mkdtemp(join(tmpdir(), 'dz23-assistant-profile-'))
 const runtimeGitProofRoot = await mkdtemp(join(tmpdir(), 'dz23-agent-lib-proof-'))
 const execFileAsync = promisify(execFile)
@@ -28,15 +30,32 @@ try {
   }
   for (const name of ['lib', 'i18n']) await cp(resolve(agentsPackageRoot, name), resolve(stagedAgents, name), { recursive: true })
   await writeFile(resolve(stagedAgents, 'package.json'), JSON.stringify({ type: agentsManifest.type }))
+  const agentTeamManifest = JSON.parse(await readFile(resolve(agentTeamPackageRoot, 'package.json'), 'utf8'))
+  if (JSON.stringify(agentTeamManifest.files) !== JSON.stringify(['lib', 'i18n', 'src'])) {
+    throw new Error('O pacote de equipe de agentes não inclui explicitamente lib, i18n e src.')
+  }
+  for (const name of ['lib', 'i18n']) await cp(resolve(agentTeamPackageRoot, name), resolve(stagedAgentTeam, name), { recursive: true })
+  await writeFile(resolve(stagedAgentTeam, 'package.json'), JSON.stringify({ type: agentTeamManifest.type }))
+  const teamI18n = await import(pathToFileURL(resolve(stagedAgentTeam, 'lib/i18n.js')).href)
+  const teamMessage = teamI18n.t('errors.nothingReady')
+  if (!teamMessage.includes('Nenhuma tarefa pode começar agora') || /\bpront[oa]s?\b/iu.test(teamMessage)) {
+    throw new Error(`Catálogo empacotado da equipe contém estado enganoso: ${teamMessage}`)
+  }
   const profileRoot = resolve(root, 'dsh-home/profiles/studio')
   const profileManifest = JSON.parse(await readFile(resolve(profileRoot, 'package.json'), 'utf8'))
   if (profileManifest.dependencies?.['@dz23-studio/assistant-bridge'] !== 'workspace:*') {
     throw new Error('O profile studio não declara a ponte do Assistente.')
   }
+  if (profileManifest.dependencies?.['@dz23-studio/agent-team'] !== 'workspace:*') {
+    throw new Error('O profile studio não declara a equipe governada de agentes.')
+  }
   const rootLock = await readFile(resolve(root, 'pnpm-lock.yaml'), 'utf8')
   const profileImporter = lockImporter(rootLock, 'dsh-home/profiles/studio')
   if (!profileImporter.includes("'@dz23-studio/assistant-bridge':") || !profileImporter.includes('specifier: workspace:*')) {
     throw new Error('O lockfile raiz não fixa a ponte no profile studio.')
+  }
+  if (!profileImporter.includes("'@dz23-studio/agent-team':")) {
+    throw new Error('O lockfile raiz não fixa a equipe governada no profile studio.')
   }
   const presetRoot = resolve(root, 'dsh-home/.agent-presets')
   const preset = await readFile(resolve(presetRoot, 'dz23-assistant/agent.cordis.yml'), 'utf8')
@@ -51,6 +70,7 @@ try {
   await writeFile(resolve(stagedProfile, 'package.json'), JSON.stringify({ type: 'module' }))
   await symlink(packageRoot, resolve(stagedProfile, 'node_modules/@dz23-studio/assistant-bridge'), process.platform === 'win32' ? 'junction' : 'dir')
   await symlink(agentsPackageRoot, resolve(stagedProfile, 'node_modules/@dz23-studio/agents'), process.platform === 'win32' ? 'junction' : 'dir')
+  await symlink(agentTeamPackageRoot, resolve(stagedProfile, 'node_modules/@dz23-studio/agent-team'), process.platform === 'win32' ? 'junction' : 'dir')
   const requireFromProfile = createRequire(resolve(stagedProfile, 'package.json'))
   const resolvedPlugin = requireFromProfile.resolve('@dz23-studio/assistant-bridge')
   const plugin = await import(pathToFileURL(resolvedPlugin).href)
@@ -58,24 +78,35 @@ try {
   if (JSON.stringify(plugin.ASSISTANT_ALLOWED_PROVIDERS) !== JSON.stringify(['spawn-in-process'])) {
     throw new Error(`O pacote anunciou provider externo sem prova de confinamento: ${plugin.ASSISTANT_ALLOWED_PROVIDERS?.join(',')}`)
   }
-  const providerEnums = plugin.createAssistantTools({}).filter(tool => tool.name.startsWith('studio_agent_start'))
+  const providerEnums = plugin.createAssistantTools({}).filter(tool => tool.name.startsWith('studio_agent_start') || tool.name.startsWith('studio_team_start'))
     .map(tool => tool.parameters.properties.provider.enum)
-  if (providerEnums.length !== 2 || providerEnums.some(values => JSON.stringify(values) !== JSON.stringify(['spawn-in-process']))) {
+  if (providerEnums.length !== 4 || providerEnums.some(values => JSON.stringify(values) !== JSON.stringify(['spawn-in-process']))) {
     throw new Error(`O pacote anunciou provider externo no schema: ${JSON.stringify(providerEnums)}`)
   }
+  if (plugin.createAssistantTools({}).length !== 13) throw new Error('O pacote não expõe exatamente treze ferramentas governadas.')
   const resolvedAgents = requireFromProfile.resolve('@dz23-studio/agents')
   if (!resolvedAgents.replaceAll('\\', '/').endsWith('/plugins/agents/lib/index.js')) {
     throw new Error(`O profile não resolveu o artefato lib dos agentes: ${resolvedAgents}`)
   }
   const agents = await import(pathToFileURL(resolvedAgents).href)
   if (typeof agents.GitWorktreeManager !== 'function') throw new Error('O export do pacote não expõe GitWorktreeManager.')
+  const resolvedAgentTeam = requireFromProfile.resolve('@dz23-studio/agent-team')
+  if (!resolvedAgentTeam.replaceAll('\\', '/').endsWith('/plugins/agent-team/lib/index.js')) {
+    throw new Error(`O profile não resolveu o artefato lib da equipe: ${resolvedAgentTeam}`)
+  }
+  const agentTeam = await import(pathToFileURL(resolvedAgentTeam).href)
+  if (typeof agentTeam.StudioAgentTeamService !== 'function'
+    || agentTeam.STUDIO_AGENT_TEAMS_PHYSICAL_DOMAIN !== 'studio_agent_teams') {
+    throw new Error('O pacote da equipe não expõe serviço e domínio esperados.')
+  }
   const stagedGit = await import(pathToFileURL(resolve(stagedAgents, 'lib/git.js')).href)
   await proveEmittedGitBoundary(stagedGit.GitWorktreeManager)
-  process.stdout.write('ASSISTANT_PACKAGE_PROOF=PASS staged_lib=PASS staged_i18n=PASS profile_manifest=PASS preset_root=PASS plugin_resolve=PASS local_provider_only=PASS agents_lib_resolve=PASS agents_staged_lib=PASS agents_staged_i18n=PASS git_extensions_blocked=PASS git_driver_name_negative=PASS\n')
+  process.stdout.write('ASSISTANT_PACKAGE_PROOF=PASS staged_lib=PASS staged_i18n=PASS profile_manifest=PASS preset_root=PASS plugin_resolve=PASS tools=13 local_provider_only=PASS agents_lib_resolve=PASS agents_staged_lib=PASS agents_staged_i18n=PASS agent_team_lib_resolve=PASS agent_team_staged_lib=PASS agent_team_staged_i18n=PASS git_extensions_blocked=PASS git_driver_name_negative=PASS\n')
 } finally {
   await Promise.all([
     rm(staged, { recursive: true, force: true }),
     rm(stagedAgents, { recursive: true, force: true }),
+    rm(stagedAgentTeam, { recursive: true, force: true }),
     rm(stagedProfile, { recursive: true, force: true }),
     rm(runtimeGitProofRoot, { recursive: true, force: true }),
   ])

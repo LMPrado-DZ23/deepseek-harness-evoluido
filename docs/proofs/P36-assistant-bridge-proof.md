@@ -97,7 +97,9 @@ arquivos grandes e provas multiprocesso no mesmo runner.
 
 - Criação automática de uma sessão dedicada pelo botão: `NOT_PRESENT`.
 - Codex CLI e Claude Code reais pela ponte: `NOT_CONFIGURED` e `NOT_EXECUTED`.
-- Equipe multiagente/DAG, consenso e síntese estilo Hermes: `NOT_PRESENT`.
+- A extensão M70 acrescenta equipe multiagente/DAG governada em fatia separada;
+  consenso automático, aplicação automática e Hermes real continuam
+  `NOT_PRESENT`. Veja `M70-governed-multiagent-team-proof.md`.
 - MCP, skills e memória semântica dentro deste preset mínimo: `NOT_PRESENT`.
 - Cancelamento após reinício: `BETA`, fail-closed; jobs concluídos são removidos
   do mapa em memória.
@@ -111,6 +113,8 @@ arquivos grandes e provas multiprocesso no mesmo runner.
 
 A composição, o confinamento local, o pacote, o clone limpo e o gate D30 estão
 provados. P36 permanece **BETA** até uma sessão real no Harness e a prova de
-runtime com PostgreSQL/Docker serem executadas. Multiagentes não fazem parte
-deste checkpoint e devem entrar como fatia separada, sem ampliar a autoridade
-das seis ferramentas existentes.
+runtime com PostgreSQL/Docker serem executadas. Multiagentes não faziam parte
+deste checkpoint. A fatia M70 posterior adiciona sete ferramentas de equipe sem
+ampliar a autoridade das seis ferramentas individuais existentes e preserva o
+mesmo serviço de agentes como autoridade única para worktrees, runs, revisão e
+aplicação.
