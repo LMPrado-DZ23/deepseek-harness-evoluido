@@ -345,11 +345,15 @@ exec docker exec -i "$DZ23_POSTGRES_TEST_CONTAINER" pg_restore --list < "$file"
 
       const activeBackend = backend(targetSchema)
       await activeBackend.kv!.open(helloDescriptor)
-      await expect(invoke(targetSchema, backup, ['--force', '--confirm', 'REPLACE_DZ23_STORAGE']))
+      await expect(invoke(targetSchema, backup, [
+        '--force', '--allow-record-loss', '--confirm', 'REPLACE_DZ23_STORAGE',
+      ]))
         .rejects.toThrow('ainda está em execução no servidor')
       await activeBackend.close()
 
-      const replaced = JSON.parse((await invoke(targetSchema, backup, ['--force', '--confirm', 'REPLACE_DZ23_STORAGE'])).stdout) as Record<string, unknown>
+      const replaced = JSON.parse((await invoke(targetSchema, backup, [
+        '--force', '--allow-record-loss', '--confirm', 'REPLACE_DZ23_STORAGE',
+      ])).stdout) as Record<string, unknown>
       expect(replaced).toMatchObject({ mode: 'write', backup, backupStatus: 'created' })
       await access(backup)
       expect((await stat(backup)).mode & 0o777).toBe(0o600)

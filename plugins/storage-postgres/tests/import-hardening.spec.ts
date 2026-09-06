@@ -121,7 +121,9 @@ describePostgres('restore CLI hardening', () => {
       await client.query(`INSERT INTO ${quoteIdentifier(orphan)}."dz23_import_staging" (tool, target_schema, created_at) VALUES ('dz23-studio/import-postgres-storage', $1, now())`, [target])
 
       const input = await writeBundleFile(directory)
-      const result = JSON.parse((await invoke(input, target, join(directory, 'backup.dump'), ['--force', '--confirm', 'REPLACE_DZ23_STORAGE'])).stdout) as { reapedStaging: string[] }
+      const result = JSON.parse((await invoke(input, target, join(directory, 'backup.dump'), [
+        '--force', '--allow-record-loss', '--confirm', 'REPLACE_DZ23_STORAGE',
+      ])).stdout) as { reapedStaging: string[] }
       expect(result.reapedStaging).toEqual([orphan])
 
       const still = async (schema: string): Promise<number> => (await client.query<{ n: number }>(
@@ -168,7 +170,9 @@ describePostgres('restore CLI hardening', () => {
       await chmod(fakeRestore, 0o700)
 
       const input = await writeBundleFile(directory)
-      await invoke(input, target, join(directory, 'backup.dump'), ['--force', '--confirm', 'REPLACE_DZ23_STORAGE'], {
+      await invoke(input, target, join(directory, 'backup.dump'), [
+        '--force', '--allow-record-loss', '--confirm', 'REPLACE_DZ23_STORAGE',
+      ], {
         PATH: `${binaries}${delimiter}${process.env.PATH ?? ''}`,
       })
 
