@@ -25,6 +25,12 @@ Execute em PowerShell comum, nunca como Administrador:
 ./deploy/windows/uninstall.ps1
 
 ./deploy/windows/uninstall.ps1 -PurgeData -PurgeConfirmation 'APAGAR DADOS DO DZ23 STUDIO'
+
+./deploy/windows/Get-Dz23TrustStoreSnapshot.ps1 -Distro Ubuntu -OutputPath C:\evidencias\trust-before.json
+
+./deploy/windows/Get-Dz23TrustStoreSnapshot.ps1 -Distro Ubuntu -OutputPath C:\evidencias\trust-after.json
+
+./deploy/windows/Compare-Dz23TrustStoreSnapshot.ps1 -BeforePath C:\evidencias\trust-before.json -AfterPath C:\evidencias\trust-after.json -ReportPath C:\evidencias\trust-diff.json
 ```
 
 Quando `-InstallRoot` não é informado, os scripts descobrem a pasta pessoal do usuário da distribuição WSL2 e usam `.local/share/dz23-studio`; não presumem que exista um usuário chamado `dz23`. `-SourcePath` continua sendo validado pelo Git do Windows e depois é convertido explicitamente por `wslpath -a` dentro da distribuição escolhida. O caminho Linux resultante precisa existir, ser um diretório real e é novamente validado pelo Git no Bash; caminhos com espaços ou Unicode não são remontados por concatenação textual.
@@ -36,6 +42,8 @@ Por padrão, a desinstalação preserva volumes de dados, releases, estado e o a
 Use `-WhatIf` em instalação, atualização ou desinstalação para validar pré-requisitos e ver o plano sem alterar arquivos ou contêineres. Instalação e atualização iniciadas usam `docker compose up --no-build --wait` e validam imagem, commit, hash do Compose, identidade da instalação, estado e saúde de cada serviço. Uma trava impede operações concorrentes; um journal atômico permite que a próxima instalação/atualização conclua ou reverta uma operação interrompida. O diagnóstico e a remoção recusam operar enquanto houver journal pendente. Antes do start, `docker compose config --images` precisa mostrar somente imagens fixadas por digest completo. Nenhum Dockerfile do checkout é construído silenciosamente. Se uma atualização falhar, o script só declara rollback concluído quando a versão anterior também passar pelo gate de imagens, por `--wait` e pela validação de readiness; caso contrário, informa falha de rollback e exige intervenção manual.
 
 Se o Compose do artefato ainda declarar um serviço apenas com `build:` ou uma imagem sem digest, o gate falha de propósito. Publicar e registrar por digest essa imagem é integração posterior M6.1; até isso acontecer, esse artefato não deve ser descrito como instalável em uma máquina nova.
+
+Os snapshots acima leem quatro stores do Windows (`CurrentUser/Root`, `CurrentUser/CA`, `LocalMachine/Root` e `LocalMachine/CA`) e as três raízes de certificados da distribuição WSL2. A comparação ignora somente horário e informações do host; qualquer certificado, arquivo ou link acrescentado, removido ou alterado produz `CHANGED` e código de saída 3. Os coletores não instalam, removem ou atualizam certificados e nunca sobrescrevem uma evidência anterior.
 
 ## Limites comprovados
 
