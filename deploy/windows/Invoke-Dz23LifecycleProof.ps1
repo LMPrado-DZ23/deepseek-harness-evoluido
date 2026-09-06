@@ -357,11 +357,13 @@ try {
     $finalReportState = if ($isSimulation) { 'SIMULATED_PASS' } else { 'PASS' }
     $finalLifecycleState = if ($isSimulation) { 'SIMULATED_NO_REAL_STATE_CHANGE' } else { 'UNINSTALLED_DATA_PRESERVED' }
     Write-M77Report -Path $reportPath -State $finalReportState -Phases $phases -Artifacts $artifacts
+    $reportSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $reportPath).Hash
     [pscustomobject]@{
         state = $finalReportState
         phases = $phases.Count
         final_state = $finalLifecycleState
         report = $reportPath
+        report_sha256 = $reportSha256
     }
 }
 finally {

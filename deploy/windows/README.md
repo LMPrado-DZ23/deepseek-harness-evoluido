@@ -86,6 +86,10 @@ inspeção; não tenta limpeza automática. Sucesso termina em
 remoção manual posterior. Enquanto não for executado com imagens auditadas, o
 estado permanece `NOT_EXECUTED`.
 
+Ao terminar, copie o campo `report_sha256` exibido pelo runner para um registro
+de release separado do diretório de evidências. Esse valor é a âncora externa
+que impede a substituição integral do pacote antes da conferência M78.
+
 ## Gate de evidência de release M78
 
 Depois de uma execução **real** do M77, valide o diretório sem iniciar Docker,
@@ -95,6 +99,7 @@ WSL2, rede ou qualquer serviço:
 ./deploy/windows/Test-Dz23LifecycleEvidence.ps1 `
   -ReportPath C:\evidencias\m77-real\lifecycle-report.json `
   -EvidenceDirectory C:\evidencias\m77-real `
+  -ExpectedReportSha256 <sha256-exibido-pelo-runner-m77> `
   -ExpectedInitialCommit <sha-inicial-de-40-caracteres> `
   -ExpectedUpgradeCommit <sha-atualizacao-de-40-caracteres> `
   -ExpectedFailureCommit <sha-falha-controlada-de-40-caracteres>

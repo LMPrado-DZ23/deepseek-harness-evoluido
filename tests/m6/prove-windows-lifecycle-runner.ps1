@@ -65,6 +65,10 @@ try {
         -ExecutionConfirmation 'EXECUTAR PROVA REAL M77 EM AMBIENTE DESCARTAVEL' `
         -OperationInvoker $successInvoker -Confirm:$false
     if ($result.state -cne 'SIMULATED_PASS' -or $result.phases -ne 17) { throw 'Fluxo simulado completo não terminou SIMULATED_PASS.' }
+    $actualReportSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $successPath 'lifecycle-report.json')).Hash
+    if ($result.report_sha256 -cnotmatch '^[0-9A-F]{64}$' -or $result.report_sha256 -cne $actualReportSha256) {
+        throw 'O runner não devolveu o SHA-256 final do relatório pelo canal de execução.'
+    }
     $expected = @(
         'trust-before', 'isolation-preflight', 'install-initial', 'doctor-initial',
         'sentinel-create', 'update-success', 'doctor-upgrade', 'update-failure-rollback',

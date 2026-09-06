@@ -99,6 +99,7 @@ function run(directory, report = join(directory, 'lifecycle-report.json')) {
     '-NoLogo', '-NoProfile', '-NonInteractive', '-File', verifier,
     '-ReportPath', report,
     '-EvidenceDirectory', directory,
+    '-ExpectedReportSha256', sha256(report),
     '-ExpectedInitialCommit', commits[0],
     '-ExpectedUpgradeCommit', commits[1],
     '-ExpectedFailureCommit', commits[2],
@@ -127,6 +128,29 @@ test('gate M78 aceita somente a evidência real completa e intacta', (t) => {
   assert.notEqual(result.error?.code, 'ENOENT', 'PowerShell 7 é obrigatório para o gate M78.')
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
   assert.equal(result.stdout.trim(), 'DZ23_M78_RELEASE_EVIDENCE=PASS')
+})
+
+test('gate M78 rejeita pacote inteiramente refeito sem o digest externo confiável', (t) => {
+  const scratch = mkdtempSync(join(tmpdir(), 'dz23-m78-forged-'))
+  t.after(() => rmSync(scratch, { recursive: true, force: true }))
+  const directory = createFixture(scratch)
+  const reportPath = join(directory, 'lifecycle-report.json')
+  const trustedDigest = sha256(reportPath)
+  const report = JSON.parse(readFileSync(reportPath, 'utf8'))
+  report.updated_at = '2026-09-06T20:03:00.0000000+00:00'
+  writeJson(reportPath, report)
+  assert.notEqual(sha256(reportPath), trustedDigest)
+  const result = spawnSync(pwsh, [
+    '-NoLogo', '-NoProfile', '-NonInteractive', '-File', verifier,
+    '-ReportPath', reportPath,
+    '-EvidenceDirectory', directory,
+    '-ExpectedReportSha256', trustedDigest,
+    '-ExpectedInitialCommit', commits[0],
+    '-ExpectedUpgradeCommit', commits[1],
+    '-ExpectedFailureCommit', commits[2],
+  ], { encoding: 'utf8', timeout: 60_000, maxBuffer: 4 * 1024 * 1024 })
+  assert.notEqual(result.status, 0, `${result.stdout}\n${result.stderr}`)
+  assert.match(`${result.stdout}\n${result.stderr}`, /canal confiável/iu)
 })
 
 test('gate M78 falha fechado para simulação e adulterações estruturais', (t) => {

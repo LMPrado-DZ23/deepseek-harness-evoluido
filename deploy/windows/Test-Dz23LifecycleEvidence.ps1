@@ -2,6 +2,7 @@
 param(
     [Parameter(Mandatory)][string]$ReportPath,
     [Parameter(Mandatory)][string]$EvidenceDirectory,
+    [Parameter(Mandatory)][string]$ExpectedReportSha256,
     [Parameter(Mandatory)][string]$ExpectedInitialCommit,
     [Parameter(Mandatory)][string]$ExpectedUpgradeCommit,
     [Parameter(Mandatory)][string]$ExpectedFailureCommit
@@ -51,12 +52,22 @@ function Assert-Dz23NoDuplicateJsonProperties {
 }
 
 function Read-Dz23JsonBytes {
-    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Label)
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Label,
+        [string]$ExpectedSha256 = ''
+    )
     $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
     if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
         throw "$Label precisa ser um arquivo físico regular."
     }
     $bytes = [IO.File]::ReadAllBytes($item.FullName)
+    $sha256 = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes))
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedSha256)) {
+        if ($ExpectedSha256 -cnotmatch '^[0-9A-Fa-f]{64}$' -or $sha256 -cne $ExpectedSha256.ToUpperInvariant()) {
+            throw "$Label não corresponde ao SHA-256 fornecido pelo canal confiável."
+        }
+    }
     $text = [Text.UTF8Encoding]::new($false, $true).GetString($bytes)
     Assert-Dz23NoDuplicateJsonProperties -Text $text -Label $Label
     try { $json = $text | ConvertFrom-Json -Depth 20 -DateKind String }
@@ -65,7 +76,7 @@ function Read-Dz23JsonBytes {
         Item = $item
         Bytes = $bytes
         Json = $json
-        Sha256 = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes))
+        Sha256 = $sha256
     }
 }
 
@@ -169,7 +180,7 @@ Assert-Dz23RealPathChain $evidence
 $expectedReportPath = Join-Path $evidence.FullName 'lifecycle-report.json'
 $reportInput = [IO.Path]::GetFullPath($ReportPath)
 if ($reportInput -cne $expectedReportPath) { throw 'ReportPath precisa ser lifecycle-report.json diretamente dentro de EvidenceDirectory.' }
-$reportFile = Read-Dz23JsonBytes -Path $reportInput -Label 'lifecycle-report.json'
+$reportFile = Read-Dz23JsonBytes -Path $reportInput -Label 'lifecycle-report.json' -ExpectedSha256 $ExpectedReportSha256
 $report = $reportFile.Json
 Assert-Dz23ExactProperties $report @(
     'schema_version', 'state', 'initial_commit', 'upgrade_commit', 'failure_commit',
