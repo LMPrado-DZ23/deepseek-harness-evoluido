@@ -156,7 +156,7 @@ describe('governed Assistant Session launcher', () => {
     await expect(AssistantSessionLauncher.create({
       identity: {} as never, tenancy: {} as never, sessions: {} as never,
       repositories: [{ ...valid, workspaceId: 'outro' }],
-    })).rejects.toThrow('mesmo identificador')
+    })).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
   })
 })
 
