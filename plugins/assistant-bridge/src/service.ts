@@ -352,9 +352,7 @@ async function validateGitBoundary(repositoryPath: string): Promise<void> {
 }
 
 function sameCanonicalPath(left: string, right: string): boolean {
-  return process.platform === 'win32'
-    ? resolve(left).toLowerCase() === resolve(right).toLowerCase()
-    : relative(resolve(left), resolve(right)) === ''
+  return relative(resolve(left), resolve(right)) === ''
 }
 
 function isAssistantProvider(provider: AgentProvider): provider is typeof ASSISTANT_ALLOWED_PROVIDERS[number] {

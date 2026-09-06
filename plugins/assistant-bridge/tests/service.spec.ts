@@ -168,6 +168,7 @@ describe('StudioAssistantBridge', () => {
     ['another repository', { repository_path: 'C:/not-configured/repository' }],
     ['a path outside the administrative allowlist', { changed_files: ['outside-policy/secret.ts'] }],
     ['an invalid traversal path', { changed_files: ['../outside-policy/secret.ts'] }],
+    ['a non-text changed path', { changed_files: [12 as never] }],
   ] satisfies ReadonlyArray<readonly [string, Partial<AgentRunRecord>]>)('hides and rejects a local run bound to %s', async (_label, override) => {
     const h = await harness()
     h.runs.splice(0, h.runs.length, run({ repository_path: h.repositoryPath, ...override }))

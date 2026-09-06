@@ -65,6 +65,8 @@ describe('generated file fence', () => {
       await expect(hashTree(linkedRoot)).rejects.toThrow('Link simbólico')
     }
     expect(isValidCpf('529.982.247-25')).toBe(true)
+    expect(isValidCpf('123')).toBe(false)
+    expect(isValidCpf('111.111.111-11')).toBe(false)
     expect(isValidCpf('123.456.789-00')).toBe(false)
     expect(scanGeneratedContent({ 'src/a.ts': 'const key="sk-abcdefghijklmnopqrstuvwxyz"', 'content/a': 'CPF 529.982.247-25' })).toEqual(['src/a.ts:SECRET_PATTERN', 'content/a:PII_PATTERN'])
     expect(scanGeneratedContent({ 'content/a': 'cpf: 52998224725' })).toEqual(['content/a:PII_PATTERN'])
