@@ -92,4 +92,3 @@ TypeScript de produção.
 - assinatura/proveniência OCI e automação pública de release continuam fora
   desta fatia;
 - nenhum merge na principal, push, PR, deploy, purge ou exclusão foi feito.
-
