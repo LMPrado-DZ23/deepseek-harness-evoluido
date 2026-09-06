@@ -521,6 +521,9 @@ importers:
       '@deepseek-ai/dsh-storage-domain':
         specifier: workspace:*
         version: link:../../third_party/deepseek-harness/packages/storage/storage-domain
+      '@dz23-studio/assistant-bridge':
+        specifier: workspace:*
+        version: link:../assistant-bridge
       '@dz23-studio/identity':
         specifier: workspace:*
         version: link:../identity
