@@ -172,12 +172,19 @@ describe('assistant transcript sanitization', () => {
       event('tool/call', 3, { callId: 'x'.repeat(257), name: 'studio_agent_start' }),
       event('tool/call', 3, { callId: 'a\0b', name: 'studio_agent_start' }),
       event('tool/result', 4, { message: {} }),
+      event('tool/result', 4, { message: null }),
       event('approval/asked', 5, { id: '', toolName: 'x' }),
+      event('approval/asked', 5, { id: 'valid-id', toolName: 123 }),
       event('approval/decided', 6, { id: 'x', outcome: 'invented' }),
     ]
-    expect(malformed.map(sanitizeAssistantEvent)).toEqual(malformed.map(() => undefined))
+    const projected = malformed.map(sanitizeAssistantEvent)
+    expect(projected.filter(value => value !== undefined)).toEqual([
+      expect.objectContaining({ type: 'approval.requested', tool_label: 'Ação do assistente' }),
+    ])
     expect(sanitizeAssistantSnapshot('empty', malformed)).toEqual({
-      conversation_id: 'empty', cursor: 6, events: [], truncated: false,
+      conversation_id: 'empty', cursor: 6,
+      events: [expect.objectContaining({ type: 'approval.requested', tool_label: 'Ação do assistente' })],
+      truncated: false,
     })
   })
 

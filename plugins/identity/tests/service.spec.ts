@@ -346,6 +346,30 @@ describe('StudioIdentityService', () => {
     })
   })
 
+  it('fails closed when session rows disappear or are revoked during serialized mutations', async () => {
+    const missingBinding = makeHarness()
+    const issued = await login(missingBinding)
+    missingBinding.repository.sessionMap.clear()
+    await expect(missingBinding.service.bindHarnessSession(issued.session, 'agent-gone'))
+      .rejects.toMatchObject({ code: 'invalid' })
+
+    const removedDuringRevoke = makeHarness()
+    const removed = await login(removedDuringRevoke)
+    const removedRows = removedDuringRevoke.repository.sessions.bind(removedDuringRevoke.repository)
+    let removedReads = 0
+    removedDuringRevoke.repository.sessions = () => ++removedReads === 1 ? removedRows() : []
+    await expect(removedDuringRevoke.service.revokeAllSessions(removed.session)).resolves.toBeUndefined()
+
+    const revokedDuringRevoke = makeHarness()
+    const revoked = await login(revokedDuringRevoke)
+    const revokedRows = revokedDuringRevoke.repository.sessions.bind(revokedDuringRevoke.repository)
+    let revokedReads = 0
+    revokedDuringRevoke.repository.sessions = () => ++revokedReads === 1
+      ? revokedRows()
+      : revokedRows().map(row => ({ ...row, revoked_at: '2026-09-06T00:00:00.000Z' }))
+    await expect(revokedDuringRevoke.service.revokeAllSessions(revoked.session)).resolves.toBeUndefined()
+  })
+
   it('registers a passkey, rejects duplicate credentials and expired or replayed challenges', async () => {
     const h = makeHarness()
     const issued = await login(h)
@@ -429,6 +453,23 @@ describe('StudioIdentityService', () => {
     })
     h.setNow('2026-09-02T12:05:00.000Z')
     expect(h.service.strongIdentityForHarnessSession('agent-strong')).toBe(false)
+  })
+
+  it('does not recreate a session removed while a strong-identity ceremony is finishing', async () => {
+    const h = makeHarness()
+    const issued = await login(h)
+    const registration = await h.service.beginPasskeyRegistration(issued.token)
+    await h.service.finishPasskeyRegistration(issued.token, registration.challengeId, registrationResponse, 'Passkey')
+    const stepUp = await h.service.beginStepUp(issued.token)
+    const putCredential = h.repository.putCredential.bind(h.repository)
+    h.repository.putCredential = async value => {
+      await putCredential(value)
+      h.repository.sessionMap.clear()
+    }
+    h.passkeys.counter = 2
+    await expect(h.service.finishStepUp(issued.token, stepUp.challengeId, authResponse()))
+      .rejects.toMatchObject({ code: 'invalid' })
+    expect(h.repository.sessions()).toHaveLength(0)
   })
 
   it('serializes concurrent one-time code and challenge consumption', async () => {
