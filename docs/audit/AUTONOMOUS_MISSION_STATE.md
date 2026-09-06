@@ -3,12 +3,12 @@
 - `mission_id`: `M1-M6-finalizacao-2026-09-04`
 - `objective`: integrar e provar M1-M6 com segurança, sem push, PR, deploy ou exclusões não autorizadas
 - `state`: `INTEGRATING_AND_PROVING`
-- `iteration`: `2026-09-06.16`
+- `iteration`: `2026-09-06.17`
 - `started_at`: `2026-09-04 America/Sao_Paulo`
-- `heartbeat_at`: `2026-09-06T17:02:17-03:00`
-- `last_progress_at`: `2026-09-06T17:02:17-03:00`
-- `branch`: `codex/m76-windows-lifecycle-evidence`
-- `head`: `098720641e37ac15e122fd58aecab03855c7c9b0`
+- `heartbeat_at`: `2026-09-06T17:30:08-03:00`
+- `last_progress_at`: `2026-09-06T17:30:08-03:00`
+- `branch`: `codex/m77-windows-lifecycle-runner`
+- `head`: `78e80451af4b93df855b961f765b2273e01734fa`
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c`
 
 ## Critérios de aceite
@@ -43,6 +43,14 @@
   preserva releases/estado/volumes e prova a reinstalação com o sentinela de
   dados intacto. A suíte Windows cumulativa passou 17/17 e a segunda auditoria
   de segurança fechou com zero achados.
+- M77 preparou o executor do lifecycle real em 17 fases auditáveis. O dry-run
+  não tem efeitos, o ambiente precisa estar vazio, três origens e quatro
+  imagens são validadas antes de instalar, um sentinela PostgreSQL prova
+  persistência e o trust store é comparado antes/depois.
+- A auditoria inicial do M77 encontrou que o gancho de teste podia emitir
+  `PASS` sem executar o lifecycle. `78e8045` separa a simulação como
+  `SIMULATED_PASS`; o scan de verificação fechou com zero achados e a suíte
+  Windows cumulativa passou 18/18. O lifecycle real continua `NOT_EXECUTED`.
 - Claude entregou M3+M4+M5 em `9034a85`; transporte íntegro, mas ainda baseado em `b95d23c`. A composição sobre `d819314` foi solicitada novamente com evidência do merge-base.
 - Preview recebeu o checkpoint isolado `7273b38`: instalação offline com lock congelado, 178/178 testes e build passaram em WSL/ext4. A prova de ausência usa `previewId`, portanto uma troca de `runtimeRef` não libera capacidade prematuramente.
 - Retenção fail-closed foi fechada em `011f118`: nenhuma remoção física de artefatos na v1, 28/28 testes executados, 2 skips explícitos e 21/21 no namespace Linux com bind mounts reais.
@@ -86,8 +94,8 @@
 
 1. Claude revisar M74-A, M75 e o checkpoint M76 sem sobreposição de arquivos;
 2. manter M74-B parado até GO explícito de M74-A e não tocar na M72 de Claude;
-3. preparar, em branch isolada, o orquestrador da prova real do lifecycle
-   Windows, sem ligar o Docker automaticamente;
+3. Claude revisar somente leitura o M77; a execução real fica aguardando
+   imagens finais e autorização explícita para Docker;
 4. integrar por commits verificáveis somente após parecer independente, sem
    aceitar exclusões de `plugins/*/lib/**`;
 5. rodar gates completos serializados em WSL/ext4 e auditoria final independente;
