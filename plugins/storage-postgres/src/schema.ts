@@ -60,6 +60,10 @@ export function leasesTable(schema: string): string {
   return `${quoteIdentifier(schema)}."unit_leases"`
 }
 
+export function tenantRecordsTable(schema: string): string {
+  return `${quoteIdentifier(schema)}."tenant_records"`
+}
+
 /** Create and version the physical layout under a database advisory lock. */
 export async function ensureSchema(pool: Pool, schema: string): Promise<void> {
   assertIdentifier(schema, 'postgres schema')

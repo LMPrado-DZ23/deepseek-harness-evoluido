@@ -10,6 +10,7 @@ import { postgresClientConnection } from './dsn.js'
 import { PostgresCapacityGovernor } from './capacity.js'
 import { assertConfiguredSchemaName } from './schema.js'
 import { snapshotPostgresStorage } from './snapshot.js'
+import { PostgresTenantRecordStore } from './tenant-store.js'
 
 export { PostgresStorageBackend } from './backend.js'
 export type { PostgresStorageBackendConfig } from './backend.js'
@@ -18,6 +19,8 @@ export { PostgresCapacityGovernor } from './capacity.js'
 export type { PostgresCapacityGovernorOptions } from './capacity.js'
 export type { CapacityTakeoverRequest } from '@dz23-studio/runtime-governor'
 export { CAPACITY_POSTGRES_LAYOUT_VERSION } from './capacity-schema.js'
+export { PostgresTenantRecordStore } from './tenant-store.js'
+export type { PostgresTenantStoreConfig, TenantRecord, TenantScope } from './tenant-store.js'
 export * from './bundle.js'
 export { DEFAULT_STORAGE_IMPORT_LIMITS, IMPORT_MAX_BYTES_DEFAULT, readStorageBundleFile, type StorageImportLimits } from './import-file.js'
 export { snapshotPostgresStorage, storedDescriptor, deriveDescriptors, type SnapshotOptions } from './snapshot.js'
@@ -57,6 +60,8 @@ declare module '@deepseek-ai/cordis' {
 
 export interface Config {
   dsnRef: string
+  /** Separate NOSUPERUSER/NOBYPASSRLS credential for the tenant-aware repository. Empty = RLS repository disabled. */
+  tenantRuntimeDsnRef?: string
   schema?: string
   ssl?: 'off' | 'require' | 'verify-full'
   poolMax?: number
@@ -74,6 +79,7 @@ export interface Config {
 
 export const Config: z<Config> = z.object({
   dsnRef: z.string().role('credential-ref').required(),
+  tenantRuntimeDsnRef: z.string().role('credential-ref').default(''),
   schema: z.string().default('dz23_storage'),
   ssl: z.union(['off', 'require', 'verify-full'] as const).default('verify-full'),
   poolMax: z.number().step(1).min(1).max(32).default(4),
@@ -91,9 +97,14 @@ export interface StudioStorageBackupService {
   snapshot(): Promise<ReturnType<typeof snapshotPostgresStorage>>
 }
 
+export interface StudioTenantStorageService {
+  readonly records: PostgresTenantRecordStore
+}
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     studioStorageBackup?: StudioStorageBackupService
+    studioTenantStorage?: StudioTenantStorageService
     studioCapacity: DistributedCapacityGovernor
   }
 }
@@ -117,6 +128,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     poolMax: config.poolMax ?? 4,
   })
   let capacity: PostgresCapacityGovernor | undefined
+  let tenantStore: PostgresTenantRecordStore | undefined
   try {
     // Both services share one PostgreSQL schema. Initialise the storage writer
     // first so its physical layout exists before the capacity tables are added;
@@ -130,19 +142,37 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       poolMax: Math.min(4, config.poolMax ?? 4),
     })
     await capacity.waitUntilReady()
+    if (config.tenantRuntimeDsnRef !== undefined && config.tenantRuntimeDsnRef !== '') {
+      if (config.tenantRuntimeDsnRef === config.dsnRef) {
+        throw new Error('storage-postgres: tenant runtime credential must be separate from the admin credential')
+      }
+      const tenantResolved = await ctx.credentials.resolve(credentialRef(config.tenantRuntimeDsnRef))
+      if (tenantResolved === undefined) {
+        throw new Error(`storage-postgres: credential reference '${config.tenantRuntimeDsnRef}' is not configured`)
+      }
+      const tenantConnection = await postgresClientConnection(tenantResolved.value, sslMode)
+      tenantStore = await PostgresTenantRecordStore.create({
+        adminConnectionString: connection.connectionString,
+        runtimeConnectionString: tenantConnection.connectionString,
+        schema,
+        ssl: tenantConnection.ssl,
+        poolMax: config.poolMax ?? 4,
+      })
+    }
   } catch (error) {
-    await Promise.allSettled([backend.close(), capacity?.close()])
+    await Promise.allSettled([backend.close(), capacity?.close(), tenantStore?.close()])
     throw new Error('storage-postgres: PostgreSQL is unavailable or incompatible', { cause: error })
   }
   ctx.effect(() => {
     const dispose = ctx.storage.backend.register('postgres', backend)
     return async () => {
       dispose()
-      await Promise.all([backend.close(), capacity.close()])
+      await Promise.all([backend.close(), capacity.close(), tenantStore?.close()])
     }
   }, 'storage-postgres.registerBackend')
   ctx.provide(storageBackendServiceKey('postgres'), backend)
   ctx.provide('studioCapacity', capacity)
+  if (tenantStore !== undefined) ctx.provide('studioTenantStorage', { records: tenantStore })
 
   // Descriptors are derived from the medium: every unit stamped on this schema.
   const snapshot = () => snapshotPostgresStorage({ connectionString: connection.connectionString, ssl, schema })
