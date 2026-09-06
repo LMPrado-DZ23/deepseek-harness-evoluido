@@ -23,7 +23,10 @@ const exportsRoot = join(scratch, 'exports')
 const templateStore = join(scratch, 'template-store')
 const imageDigestFile = join(scratch, 'builder-image-digest')
 const proofPatch = join(scratch, 'runtime-paths.patch.yml')
+const localModelPatch = join(scratch, 'local-model.patch.yml')
 const email = 'assistant-runtime-proof@example.com'
+const realLocalModel = process.env.DZ23_PROOF_REAL_LOCAL_MODEL === '1'
+const localModel = 'qwen2.5:0.5b'
 
 assert.equal(process.platform, 'linux', 'A prova da sessão do Assistente exige Linux/WSL2.')
 assert.ok(studioRoot.startsWith('/home/'), `A prova deve rodar no ext4 do WSL2: ${studioRoot}`)
@@ -65,6 +68,16 @@ try {
     '    exportsRoot: !!js process.env.DZ23_PROOF_EXPORTS_ROOT',
     '',
   ].join('\n'))
+  if (realLocalModel) {
+    assert.match(process.env.DZ23_OLLAMA_BASE_URL ?? '', /^http:\/\/172\.\d+\.\d+\.1:11434\/v1$/u)
+    await writeFile(localModelPatch, [
+      '- id: agent-default-model',
+      '  config:',
+      '    provider: ollama',
+      `    model: ${localModel}`,
+      '',
+    ].join('\n'))
+  }
 
   const repositories = [{
     orgId: 'org_local',
@@ -91,7 +104,11 @@ try {
   booted = await runProfile({
     environment: loadLayeredEnv('dsh-studio-m71-proof', studioRoot),
     profile: 'studio',
-    patchFiles: [join(sourceHome, 'profiles', 'studio', 'poc-01b.patch.yml'), proofPatch],
+    patchFiles: [
+      join(sourceHome, 'profiles', 'studio', 'poc-01b.patch.yml'),
+      ...(realLocalModel ? [localModelPatch] : []),
+      proofPatch,
+    ],
     args: ['--host', '127.0.0.1', '--port', '0', '--no-open'],
   })
 
@@ -149,21 +166,31 @@ try {
     approvals.push({ toolName: request.toolName, callId: String(request.callId) })
     return Promise.resolve('allowed-once')
   }, { prepend: true })
+  const prompt = realLocalModel
+    ? 'Responda exatamente DZ23_REAL_LOCAL_OK. Não chame ferramentas.'
+    : 'Run the deterministic Studio echo proof.'
   agent.followup(createUserMessage({
-    content: [{ type: 'text', text: 'Run the deterministic Studio echo proof.' }],
+    content: [{ type: 'text', text: prompt }],
     source: { kind: 'user' },
   }))
-  await agent.whenIdle()
+  await withTimeout(agent.whenIdle(), 120_000, 'O turno do Assistente excedeu 120 segundos.')
   const conversationText = agent.session.deriveMessages()
     .flatMap(message => message.content)
     .filter(block => block.type === 'text')
     .map(block => block.text)
     .join('\n')
-  assert.match(conversationText, /STUDIO_ECHO_OK/)
-  assert.deepEqual(approvals.map(item => item.toolName), ['studio_echo'])
-  assert.ok(agent.session.events.some(event => event.type === 'approval/asked'))
-  assert.ok(agent.session.events.some(event => event.type === 'approval/decided'
-    && event.data.outcome === 'allowed-once'))
+  if (realLocalModel) {
+    assert.equal(agent.options.provider, 'ollama')
+    assert.equal(agent.options.model, localModel)
+    assert.match(conversationText, /DZ23_REAL_LOCAL_OK/)
+    assert.equal(approvals.length, 0)
+  } else {
+    assert.match(conversationText, /STUDIO_ECHO_OK/)
+    assert.deepEqual(approvals.map(item => item.toolName), ['studio_echo'])
+    assert.ok(agent.session.events.some(event => event.type === 'approval/asked'))
+    assert.ok(agent.session.events.some(event => event.type === 'approval/decided'
+      && event.data.outcome === 'allowed-once'))
+  }
   await booted.ctx.sessions.flush(agent.session)
 
   const browserControlDirectory = process.env.DZ23_BROWSER_PROOF_CONTROL_DIR?.trim()
@@ -221,13 +248,17 @@ try {
     repository: inspected.meta.cwd,
     tools: tools.length,
     governedTools: 13,
-    conversationTurn: 'PASS_WITH_DETERMINISTIC_PROVIDER',
-    deterministicProvider: 'studio-fake/studio-deterministic',
-    approval: { policy: 'ask', outcome: 'allowed-once', requests: approvals.length },
+    conversationTurn: realLocalModel ? 'PASS_WITH_REAL_LOCAL_MODEL' : 'PASS_WITH_DETERMINISTIC_PROVIDER',
+    provider: realLocalModel ? `ollama/${localModel}` : 'studio-fake/studio-deterministic',
+    approval: {
+      policy: 'ask',
+      outcome: realLocalModel ? 'not-requested' : 'allowed-once',
+      requests: approvals.length,
+    },
     resumedSameSession: second.session_id === first.session_id && second.reused === true,
     browserHandoff,
     limitations: {
-      realModelTurn: 'NOT_EXECUTED',
+      externalModelTurn: 'NOT_EXECUTED',
       multiUserConversationIsolation: 'NOT_SUPPORTED',
     },
   }, null, 2)}\n`)
@@ -257,4 +288,16 @@ async function waitForBrowserResult(path) {
     await new Promise(resolvePromise => setTimeout(resolvePromise, 100))
   }
   throw new Error('O navegador não concluiu a prova em 120 segundos.')
+}
+
+async function withTimeout(promise, timeoutMs, message) {
+  let timer
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(message)), timeoutMs) }),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
 }

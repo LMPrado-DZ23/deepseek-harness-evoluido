@@ -67,6 +67,27 @@ instalação temporária isolada; o `package.json` conferido teve SHA-256
 O canal de controle continha uma sessão efêmera, nunca foi impresso e seus dois
 arquivos foram removidos antes do encerramento do runtime.
 
+Uma segunda execução combinou o mesmo handoff do Edge com uma resposta de IA
+local real. O Ollama do Windows foi vinculado apenas a
+`172.23.240.1:11434`, endereço da interface `vEthernet (WSL (Hyper-V
+firewall))`; nenhuma porta foi aberta em `0.0.0.0` e nenhuma regra de firewall
+foi alterada. O Agent criado pelo endpoint usou
+`ollama/qwen2.5:0.5b` (manifesto local com digest
+`a8b0c51577010a279d933d14c2a8ab4b268079d44c5c8830c0a93900f1827c67`),
+processou a mensagem e devolveu o marcador esperado. O mesmo runtime passou o
+handoff no Edge e retomou a sessão. O processo Ollama foi encerrado ao fim.
+
+```text
+conversationTurn=PASS_WITH_REAL_LOCAL_MODEL
+provider=ollama/qwen2.5:0.5b
+browserHandoff=PASS_IN_WINDOWS_EDGE
+externalModelTurn=NOT_EXECUTED
+```
+
+Essa execução prova transporte, seleção do modelo local e ciclo do Agent; não
+mede qualidade da resposta, desempenho prolongado ou capacidade de programação
+do modelo pequeno.
+
 O primeiro boot real encontrou um defeito de composição: o serviço da ponte
 era publicado globalmente, embora fosse criado por sessão. O preset foi
 corrigido para um grupo Cordis com `isolate.studioAssistant: true`; o boot e a
@@ -100,9 +121,8 @@ Gate cumulativo no clone novo:
 
 ## Limites honestos
 
-- o único turno usa `studio-fake/studio-deterministic`, exclusivo de prova;
-  nenhum turno com DeepSeek, Ollama, Codex CLI ou Claude Code real foi enviado:
-  `NOT_EXECUTED`;
+- o turno determinístico e um turno real com Ollama local foram executados;
+  DeepSeek externo, Codex CLI e Claude Code continuam `NOT_EXECUTED`;
 - o handoff foi executado em Microsoft Edge headless no Windows; interação
   visual acompanhada, acessibilidade com leitor de tela e navegador móvel
   físico continuam `NOT_EXECUTED`;
