@@ -1,9 +1,10 @@
 import { strict as assert } from 'node:assert'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { spawnSync } from 'node:child_process'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, it } from 'node:test'
-import { bootstrapUpstream } from '../../scripts/bootstrap-upstream.mjs'
+import { bootstrapUpstream, normalizeSubmoduleWorktreeConfig } from '../../scripts/bootstrap-upstream.mjs'
 import { replacePlaceholderWithSymlink } from '../../scripts/check-upstream-content.mjs'
 
 const sandboxes = []
@@ -26,6 +27,12 @@ async function studioFixture() {
   return root
 }
 
+function git(cwd, args, { allowFailure = false } = {}) {
+  const result = spawnSync('git', args, { cwd, encoding: 'utf8', windowsHide: true })
+  if (!allowFailure) assert.equal(result.status, 0, result.stderr)
+  return { status: result.status, stdout: result.stdout.trim(), stderr: result.stderr.trim() }
+}
+
 describe('bootstrap do upstream', () => {
   it('prova a origem antes de materializar symlinks e repete a prova completa depois', async () => {
     const studioRoot = await studioFixture()
@@ -39,6 +46,7 @@ describe('bootstrap do upstream', () => {
         return { commit: '1'.repeat(40) }
       },
       verifyContent: async (_root, options) => events.push(`content:${String(options.materializeSymlinks)}`),
+      normalizeWorktreeConfig: async () => events.push('normalize'),
       output: { write: value => output.push(value) },
     })
 
@@ -48,6 +56,7 @@ describe('bootstrap do upstream', () => {
       'git:submodule update --init --checkout -- third_party/deepseek-harness',
       'pin:false',
       'content:true',
+      'normalize',
       'pin:undefined',
     ])
     assert.deepEqual(output, [`UPSTREAM_BOOTSTRAP=PASS commit=${'1'.repeat(40)}\n`])
@@ -63,12 +72,76 @@ describe('bootstrap do upstream', () => {
         runGit: () => undefined,
         verifyPin: async () => { throw new Error('origin divergente') },
         verifyContent: async () => { contentCalled = true },
+        normalizeWorktreeConfig: async () => { throw new Error('não deveria normalizar') },
         output: { write: () => { outputCalled = true } },
       }),
       /origin divergente/u,
     )
     assert.equal(contentCalled, false)
     assert.equal(outputCalled, false)
+  })
+
+  it('move apenas core.worktree canônico para configuração local e é idempotente', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dz23-worktree-config-'))
+    sandboxes.push(root)
+    git(root, ['init', '-q'])
+    git(root, ['config', 'core.worktree', '..'])
+
+    const first = await normalizeSubmoduleWorktreeConfig({ studioRoot: root, upstreamRoot: root })
+    assert.equal(first.changed, true)
+    assert.equal(git(root, ['config', '--file', first.commonConfig, '--get', 'core.worktree'], { allowFailure: true }).status, 1)
+    assert.equal(git(root, ['config', '--file', first.commonConfig, '--get', 'core.repositoryFormatVersion']).stdout, '1')
+    assert.equal(git(root, ['config', '--file', first.commonConfig, '--get', 'extensions.worktreeConfig']).stdout, 'true')
+    assert.equal(git(root, ['config', '--file', first.worktreeConfig, '--get', 'core.worktree']).stdout, '..')
+    assert.equal(git(root, ['config', '--get', 'core.worktree']).stdout, '..')
+
+    const second = await normalizeSubmoduleWorktreeConfig({ studioRoot: root, upstreamRoot: root })
+    assert.equal(second.changed, false)
+  })
+
+  it('recusa core.worktree que aponta para outro diretório sem alterar a configuração', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dz23-worktree-wrong-'))
+    sandboxes.push(root)
+    git(root, ['init', '-q'])
+    await mkdir(join(root, 'outro-diretorio'))
+    git(root, ['config', 'core.worktree', '../outro-diretorio'])
+    const before = git(root, ['config', '--local', '--list']).stdout
+
+    await assert.rejects(
+      normalizeSubmoduleWorktreeConfig({ studioRoot: root, upstreamRoot: root }),
+      /não aponta para o submódulo fixado/u,
+    )
+    assert.equal(git(root, ['config', '--local', '--list']).stdout, before)
+  })
+
+  it('recusa configuração worktree preexistente em vez de ativar valores do usuário', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dz23-worktree-owned-'))
+    sandboxes.push(root)
+    git(root, ['init', '-q'])
+    git(root, ['config', 'core.worktree', '..'])
+    await writeFile(join(root, '.git', 'config.worktree'), '[user]\n\tname = Não ativar\n')
+    const before = git(root, ['config', '--local', '--list']).stdout
+
+    await assert.rejects(
+      normalizeSubmoduleWorktreeConfig({ studioRoot: root, upstreamRoot: root }),
+      /valores que exigem migração manual/u,
+    )
+    assert.equal(git(root, ['config', '--local', '--list']).stdout, before)
+  })
+
+  it('recusa extensões Git desconhecidas antes de migrar a configuração', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dz23-worktree-extension-'))
+    sandboxes.push(root)
+    git(root, ['init', '-q'])
+    git(root, ['config', 'core.repositoryFormatVersion', '1'])
+    git(root, ['config', 'core.worktree', '..'])
+    git(root, ['config', 'extensions.objectFormat', 'sha1'])
+
+    await assert.rejects(
+      normalizeSubmoduleWorktreeConfig({ studioRoot: root, upstreamRoot: root }),
+      /extensão Git que exige auditoria manual/u,
+    )
+    assert.equal(git(root, ['config', '--get', 'core.worktree']).stdout, '..')
   })
 })
 

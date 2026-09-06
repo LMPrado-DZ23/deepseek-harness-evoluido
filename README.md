@@ -131,7 +131,10 @@ O bootstrap valida a origem e o commit antes de converter os placeholders de
 symlink criados por checkouts Windows. A conversão é transacional: se o sistema
 não permitir criar symlinks, o placeholder original permanece intacto e o
 comando orienta ativar o Modo de Desenvolvedor ou usar o WSL2. O segundo comando
-é uma verificação somente leitura do conteúdo já materializado.
+é uma verificação somente leitura do conteúdo já materializado. O bootstrap
+também migra `core.worktree` para a configuração local exigida pelo Harness,
+mas somente quando o valor aponta exatamente para o submódulo fixado e não há
+configuração ou extensão preexistente que precise de decisão manual.
 
 O limite de dois workers é temporariamente obrigatório no gate de clone limpo:
 três testes de filesystem/multiprocesso passaram isoladamente e juntos com dois
