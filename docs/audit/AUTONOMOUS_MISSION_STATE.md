@@ -3,12 +3,12 @@
 - `mission_id`: `M1-M6-finalizacao-2026-09-04`
 - `objective`: integrar e provar M1-M6 com segurança, sem push, PR, deploy ou exclusões não autorizadas
 - `state`: `INTEGRATING_AND_PROVING`
-- `iteration`: `2026-09-06.18`
+- `iteration`: `2026-09-06.19`
 - `started_at`: `2026-09-04 America/Sao_Paulo`
-- `heartbeat_at`: `2026-09-06T18:03:00-03:00`
-- `last_progress_at`: `2026-09-06T18:03:00-03:00`
-- `branch`: `codex/m78-windows-release-evidence-gate`
-- `head`: `56fd26f7fb40964f44094c43165f54fdda1f3efa`
+- `heartbeat_at`: `2026-09-06T19:10:00-03:00`
+- `last_progress_at`: `2026-09-06T19:10:00-03:00`
+- `branch`: `codex/m79-windows-bootstrap-transaction`
+- `head`: `0199f13f7ee428f482da65c95674777a913f6367` (ponta funcional; documentação posterior não altera a implementação)
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c`
 
 ## Critérios de aceite
@@ -58,6 +58,11 @@
   SHA-256 final do relatório por canal externo antes do parse. A verificação de
   segurança fechou com zero achados e a suíte Windows passou 23/23. O lifecycle
   real continua `NOT_EXECUTED`.
+- M79 corrigiu a ordem impossível do primeiro uso: o pin é provado antes da
+  conversão, symlinks são promovidos de forma transacional e `core.worktree`
+  só é normalizado sob invariantes estritos. A falha Windows preservou o
+  placeholder; um clone novo WSL2/ext4 passou builds, typecheck e 2.027 testes
+  raiz. O scan de segurança fechou com cobertura completa e zero achado.
 - Claude entregou M3+M4+M5 em `9034a85`; transporte íntegro, mas ainda baseado em `b95d23c`. A composição sobre `d819314` foi solicitada novamente com evidência do merge-base.
 - Preview recebeu o checkpoint isolado `7273b38`: instalação offline com lock congelado, 178/178 testes e build passaram em WSL/ext4. A prova de ausência usa `previewId`, portanto uma troca de `runtimeRef` não libera capacidade prematuramente.
 - Retenção fail-closed foi fechada em `011f118`: nenhuma remoção física de artefatos na v1, 28/28 testes executados, 2 skips explícitos e 21/21 no namespace Linux com bind mounts reais.
@@ -99,12 +104,14 @@
 
 ## Próxima ação
 
-1. Claude revisar M74-A, M75 e o checkpoint M76 sem sobreposição de arquivos;
+1. Claude revisar M74-A, M75, M76, M77, M78 e M79 sem sobreposição de arquivos;
 2. manter M74-B parado até GO explícito de M74-A e não tocar na M72 de Claude;
 3. Claude revisar somente leitura o M77; a execução real fica aguardando
    imagens finais e autorização explícita para Docker;
-4. Claude revisar somente leitura o M78 (`6d88639..56fd26f`), incluindo a
-   âncora externa do relatório; nenhuma execução real é autorizada por isso;
+4. Claude revisar somente leitura o M78 (`6d88639..e1d8134`) e o M79
+   (`e1d8134..0199f13`), incluindo a âncora externa do relatório M78 e a
+   transação de symlink/configuração Git do M79; nenhuma execução real é
+   autorizada por isso;
 5. integrar por commits verificáveis somente após parecer independente, sem
    aceitar exclusões de `plugins/*/lib/**`;
 6. rodar gates completos serializados em WSL/ext4 e auditoria final independente;

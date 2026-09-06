@@ -2,19 +2,36 @@
 
 - mission_id: `DZ23-STUDIO-V1-20260904`
 - objetivo: concluir o DZ23 STUDIO v1.0 com runtime portátil, geração isolada, gates Windows/Linux, testes com cinco pessoas e pacote open source somente após licença escolhida
-- estado: `REVIEW_REQUIRED`
-- iteração: 16
+- estado: `INTEGRATING_AND_PROVING`
+- iteração: 19
 - início: 2026-09-04
-- último heartbeat: 2026-09-06T11:00:00-03:00
-- último progresso real: M71 passou, na mesma inicialização, um turno real por Ollama local e o handoff da tela do Studio ao chat oficial em Microsoft Edge
-- tarefa atual: fechar o novo pin cumulativo M71 e aguardar revisão independente do Claude, sem merge na principal
-- branch: `codex/m71-assistant-session`
+- último heartbeat: 2026-09-06T19:10:00-03:00
+- último progresso real: M79 provou o bootstrap canônico em clone WSL2/ext4 e preservou o placeholder numa falha real de symlink no Windows
+- tarefa atual: empacotar a ponta M79 e aguardar revisão independente do Claude, sem merge na principal
+- branch: `codex/m79-windows-bootstrap-transaction`
+- ponta funcional: `0199f13f7ee428f482da65c95674777a913f6367`
 - base: `17e79aaab4c1ac54c1b4fc05f780f6485c5941b7`
 - upstream: `deepseek-harness@6c705be1ce6774a000d061da41d1823b03a3d42c`
 - staging válido: `/home/leandro/dz23-gates/m63-integration-20260906`
 - staging inválido preservado: `/home/leandro/dz23-m61-lock-20260904a` (origem calculada incorretamente e sincronização interrompida)
 
-## Checkpoint atual — M71
+## Checkpoint mais recente — M79
+
+- bootstrap prova origem, gitlink, commit, tree, limpeza e manifesto antes de
+  converter placeholders de symlink;
+- materialização de symlink é transacional e preserva/restaura o placeholder
+  quando o Windows recusa a operação;
+- `core.worktree` só migra para configuração local sob invariantes estritos e
+  sem ativar configuração ou extensão preexistente;
+- falha real no Windows sem Modo de Desenvolvedor preservou blob e limpeza;
+- clone novo WSL2/ext4 passou bootstrap, builds, typecheck, gates estáticos e
+  2.027 testes raiz, com zero falha;
+- Security Diff Scan `0d486eee-a292-4b2b-8cfd-e8ce91897824`: cobertura
+  completa, zero achado;
+- Docker e PostgreSQL físico não foram usados; lifecycle real continua
+  `NOT_EXECUTED`.
+
+## Checkpoint preservado — M71
 
 - `/studio/assistente` cria ou retoma uma sessão real do Harness, sem duplicar o
   chat;
@@ -62,8 +79,8 @@
 
 ## Próxima ação
 
-1. gerar bundle, arquivo-fonte e relatório P37 do pin cumulativo M71;
-2. aguardar e tratar a revisão independente do Claude sem merge;
+1. gerar bundle, arquivos-fonte e relatório P37 do pin cumulativo M79;
+2. aguardar e tratar as revisões independentes do Claude sem merge;
 3. tratar os artefatos `plugins/*/lib/**` rastreados em commit separado, somente
    com autorização explícita;
 4. repetir o preflight somente leitura quando Docker e pins estiverem disponíveis;
