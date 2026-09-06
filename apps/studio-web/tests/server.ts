@@ -87,18 +87,30 @@ function upsert<T, K extends keyof T>(rows: T[], value: T, key: K): T[] { return
 const root = resolve(import.meta.dirname, '..', '..', '..')
 const scratch = await mkdtemp(join(tmpdir(), 'dz23-studio-e2e-'))
 const session = { session_id: 'e2e-session', user_id: 'owner', org_id: 'org-e2e', tenant_id: 'tenant-e2e' } as SessionRecord
+const logoutSession = { ...session, session_id: 'e2e-logout-session' }
+const failingLogoutSession = { ...session, session_id: 'e2e-logout-fail-session' }
+const revokedSessions = new Set<string>()
 const identity = {
   requestMagicCode: async () => undefined,
   verifyMagicCode: async () => ({ token: 'session-token', csrfToken: 'csrf-e2e', session }),
   authenticate: async (token: string) => {
-    if (token !== 'e2e') throw new IdentityError('invalid', 'invalid-session')
-    return session
+    const authenticated = token === 'e2e' ? session
+      : token === 'e2e-logout' ? logoutSession
+        : token === 'e2e-logout-fail' ? failingLogoutSession
+          : undefined
+    if (authenticated === undefined || revokedSessions.has(authenticated.session_id)) throw new IdentityError('invalid', 'invalid-session')
+    return authenticated
   },
   validateCsrf: (_session: SessionRecord, cookie: string | undefined, header: string | undefined) => {
     if (cookie !== 'csrf-e2e' || header !== 'csrf-e2e') throw new Error('invalid-csrf')
   },
   validateCsrfToken: (_session: SessionRecord, header: string | undefined) => {
     if (header !== 'csrf-e2e') throw new IdentityError('csrf', 'invalid-csrf')
+  },
+  revokeSession: async (actor: SessionRecord, sessionId: string) => {
+    if (actor.session_id !== sessionId || actor.user_id !== session.user_id) throw new IdentityError('not-found', 'invalid-session')
+    if (sessionId === failingLogoutSession.session_id) throw new IdentityError('invalid', 'forced-logout-failure')
+    revokedSessions.add(sessionId)
   },
 } as unknown as StudioIdentityService
 const tenancy = { authorizationFor: (userId: string, orgId: string, tenantId: string) => ({ userId, orgId, tenantId, role: 'owner' as const }) } as unknown as StudioTenancyService
