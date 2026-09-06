@@ -1,6 +1,9 @@
 import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-api-session-controller'
 import type {} from '@deepseek-ai/dsh-host-webserver'
+import type {} from '@deepseek-ai/dsh-storage-domain'
 import type {} from '@dz23-studio/preview'
+import type {} from '@dz23-studio/tenancy'
 import {
   IdentityError,
   authenticatedMutation,
@@ -12,30 +15,52 @@ import { lstat, readFile, realpath } from 'node:fs/promises'
 import { extname, relative, resolve, sep } from 'node:path'
 import { t } from './i18n.js'
 import { fileURLToPath } from 'node:url'
+import {
+  AssistantSessionLaunchError,
+  AssistantSessionLauncher,
+  type AssistantRepositoryLaunchConfig,
+} from './assistant-session.js'
+
+export * from './assistant-session.js'
 
 export const name = 'dz23-studio-web'
-export const inject = ['studioIdentity', 'studioPreview', 'webServer']
+export const inject = ['sessionController', 'studioIdentity', 'studioPreview', 'studioTenancy', 'webServer']
+
+export const ASSISTANT_SESSION_PATH = '/studio/assistant/session'
 
 export interface StudioWebConfig {
   readonly distDirectory?: string
   readonly allowedHosts?: readonly string[]
+  readonly allowedOrigins?: readonly string[]
   readonly previewFrameSources?: readonly string[]
+  readonly assistantRepositories?: readonly AssistantRepositoryLaunchConfig[]
 }
 
 export function createStudioWebHandler(config: {
   readonly distDirectory: string
   readonly identity: StudioIdentityService
   readonly allowedHosts: readonly string[]
+  readonly allowedOrigins: readonly string[]
   readonly previewFrameSources?: readonly string[]
+  readonly assistantSessions?: Pick<AssistantSessionLauncher, 'launch'>
 }) {
   const frameSources = normalizePreviewFrameSources(config.previewFrameSources ?? [])
   return async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     try {
-      assertRequestTrust(request, { allowedHosts: config.allowedHosts, allowedOrigins: [] })
+      assertRequestTrust(request, { allowedHosts: config.allowedHosts, allowedOrigins: config.allowedOrigins })
+      const pathname = new URL(request.url ?? '/studio', 'http://local').pathname
+      if (pathname === ASSISTANT_SESSION_PATH) {
+        if (request.method !== 'POST') return send(response, 405, 'Método não permitido.', frameSources)
+        const identitySession = await authenticatedMutation(request, config.identity)
+        if (config.assistantSessions === undefined) {
+          return sendJson(response, 503, { error: 'A conversa segura ainda não foi configurada.' }, frameSources)
+        }
+        const launched = await config.assistantSessions.launch(identitySession)
+        return sendJson(response, 200, launched, frameSources)
+      }
       if (request.method !== 'GET' && request.method !== 'HEAD') return send(response, 405, 'Método não permitido.', frameSources)
       await authenticatedMutation(request, config.identity)
       const root = await realpath(config.distDirectory)
-      const pathname = new URL(request.url ?? '/studio', 'http://local').pathname
       const requested = pathname === '/studio' || pathname === '/studio/' ? 'index.html' : decodeURIComponent(pathname.slice('/studio/'.length))
       const candidate = safeTarget(root, requested)
       const selected = await selectFile(root, candidate, requested)
@@ -44,8 +69,18 @@ export function createStudioWebHandler(config: {
       response.end(request.method === 'HEAD' ? undefined : body)
     } catch (error) {
       const status = error instanceof IdentityError ? error.code === 'locked' ? 429 : 401
+        : error instanceof AssistantSessionLaunchError ? ({
+          NOT_CONFIGURED: 503,
+          FORBIDDEN: 403,
+          SESSION_CONFLICT: 409,
+          SESSION_UNAVAILABLE: 503,
+        } as const)[error.code]
         : error instanceof StaticFileError ? error.status : 500
-      send(response, status, error instanceof Error ? error.message : 'Não foi possível abrir a interface.', frameSources)
+      if (error instanceof AssistantSessionLaunchError) {
+        sendJson(response, status, { error: error.message }, frameSources)
+      } else {
+        send(response, status, error instanceof Error ? error.message : 'Não foi possível abrir a interface.', frameSources)
+      }
     }
   }
 }
@@ -53,14 +88,23 @@ export function createStudioWebHandler(config: {
 export async function apply(ctx: Context, config: StudioWebConfig = {}): Promise<void> {
   const port = ctx.webServer.port
   const defaultHost = `127.0.0.1:${port}`
+  const defaultOrigins = [`http://localhost:${port}`, `http://${defaultHost}`]
   const packagedClient = fileURLToPath(new URL('./client/', import.meta.url))
   const distDirectory = resolve(config.distDirectory ?? packagedClient)
+  const assistantSessions = await AssistantSessionLauncher.create({
+    identity: ctx.studioIdentity.service,
+    tenancy: ctx.studioTenancy.service,
+    sessions: ctx.sessionController,
+    repositories: config.assistantRepositories ?? [],
+  })
   ctx.effect(() => ctx.webServer.register({
     kind: 'prefix', path: '/studio',
     handler: createStudioWebHandler({
       distDirectory, identity: ctx.studioIdentity.service,
       allowedHosts: config.allowedHosts ?? [defaultHost, `localhost:${port}`],
+      allowedOrigins: config.allowedOrigins ?? defaultOrigins,
       previewFrameSources: config.previewFrameSources ?? [ctx.studioPreview.frameSource],
+      assistantSessions,
     }),
   }), 'dz23-studio-web.http')
 }
@@ -117,4 +161,15 @@ function send(response: ServerResponse, status: number, message: string, frameSo
   if (response.writableEnded) return
   response.writeHead(status, securityHeaders('text/plain; charset=utf-8', frameSources))
   response.end(message)
+}
+
+function sendJson(
+  response: ServerResponse,
+  status: number,
+  body: unknown,
+  frameSources: readonly string[] = [],
+): void {
+  if (response.writableEnded) return
+  response.writeHead(status, securityHeaders('application/json; charset=utf-8', frameSources))
+  response.end(JSON.stringify(body))
 }

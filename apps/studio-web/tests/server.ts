@@ -192,7 +192,7 @@ const apiHandler = createPromptToAppHttpHandler({
   health: async () => ({ state: 'OK', route: 'ollama-local', builder: 'OK', disk: 'OK' }), allowedHosts, allowedOrigins,
 })
 const webHandler = createStudioWebHandler({
-  distDirectory: resolve(root, 'apps', 'studio-web', 'dist'), identity, allowedHosts,
+  distDirectory: resolve(root, 'apps', 'studio-web', 'dist'), identity, allowedHosts, allowedOrigins,
   previewFrameSources: ['http://*.dz23.localhost:4179'],
 })
 const previewForward: PreviewForwardPort = {

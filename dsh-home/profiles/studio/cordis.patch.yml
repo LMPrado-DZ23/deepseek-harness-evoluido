@@ -217,3 +217,5 @@
         exportsRoot: /var/lib/dz23-studio/exports
     - id: dz23-studio-web
       name: '@dz23-studio/web'
+      config:
+        assistantRepositories: !!js JSON.parse(process.env.DZ23_ASSISTANT_REPOSITORIES ?? '[]')

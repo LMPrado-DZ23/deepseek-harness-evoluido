@@ -18,16 +18,20 @@ async function fixture(previewFrameSources: readonly string[] = []) {
   await mkdir(join(root, 'assets')); await writeFile(join(root, 'index.html'), '<main>DZ23 STUDIO</main>'); await writeFile(join(root, 'assets/app.js'), 'ok')
   const identity = { authenticate: vi.fn(() => Promise.resolve({ session_id: 'session' })) }
   const allowedHosts: string[] = []
+  const allowedOrigins: string[] = []
+  const assistantSessions = { launch: vi.fn(async () => ({ session_id: 'assistant-1', reused: false, preset: 'dz23-assistant' as const })) }
   const server = createServer(createStudioWebHandler({
-    distDirectory: root, identity: identity as unknown as StudioIdentityService, allowedHosts, previewFrameSources,
+    distDirectory: root, identity: identity as unknown as StudioIdentityService, allowedHosts, allowedOrigins,
+    previewFrameSources, assistantSessions,
   }))
   servers.push(server)
   await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve) })
   const port = (server.address() as AddressInfo).port; const host = `127.0.0.1:${port}`; allowedHosts.push(host)
+  allowedOrigins.push(`http://${host}`)
   const request = (path: string, init: RequestInit = {}) => fetch(`http://${host}/studio${path}`, {
     ...init, headers: { host, cookie: `${SESSION_COOKIE}=token`, ...(init.headers ?? {}) },
   })
-  return { request, identity, allowedHosts, host, root }
+  return { request, identity, allowedHosts, allowedOrigins, assistantSessions, host, root }
 }
 
 describe('authenticated Studio web surface', () => {
@@ -51,7 +55,7 @@ describe('authenticated Studio web surface', () => {
   })
 
   it('fails at startup for broad or injectable preview frame sources', () => {
-    const input = { distDirectory: '.', identity: {} as StudioIdentityService, allowedHosts: [] }
+    const input = { distDirectory: '.', identity: {} as StudioIdentityService, allowedHosts: [], allowedOrigins: [] }
     expect(() => createStudioWebHandler({ ...input, previewFrameSources: ['*'] })).toThrow('previewFrameSources')
     expect(() => createStudioWebHandler({ ...input, previewFrameSources: ['http://*.dz23.localhost:4179; script-src *'] })).toThrow('previewFrameSources')
     expect(() => createStudioWebHandler({ ...input, previewFrameSources: ['https://*.example.com'] })).toThrow('previewFrameSources')
@@ -65,6 +69,49 @@ describe('authenticated Studio web surface', () => {
     expect((await f.request('/%2e%2e/secret')).status).toBe(400)
     expect((await f.request('/assets/missing.js')).status).toBe(404)
     expect((await f.request('/', { method: 'POST' })).status).toBe(401)
+  })
+
+  it('creates a governed Assistant Session only through authenticated same-origin POST', async () => {
+    const f = await fixture()
+    const response = await f.request('/assistant/session', {
+      method: 'POST', body: '{}', headers: { origin: `http://${f.host}`, 'x-dz23-csrf': 'csrf' },
+    })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ session_id: 'assistant-1', reused: false, preset: 'dz23-assistant' })
+    expect(f.assistantSessions.launch).toHaveBeenCalledWith(expect.objectContaining({ session_id: 'session' }))
+    expect((await f.request('/assistant/session')).status).toBe(405)
+    expect((await f.request('/assistant/session', { method: 'POST', body: '{}', headers: { 'x-dz23-csrf': 'csrf' } })).status).toBe(401)
+  })
+
+  it('reports launcher policy failures as JSON and fails closed when the launcher is absent', async () => {
+    const f = await fixture()
+    f.assistantSessions.launch.mockRejectedValueOnce(Object.assign(new Error('Projeto não liberado.'), {
+      code: 'FORBIDDEN', name: 'AssistantSessionLaunchError',
+    }))
+    // A lookalike error is not trusted as a policy error and remains an opaque 500.
+    const opaque = await f.request('/assistant/session', {
+      method: 'POST', body: '{}', headers: { origin: `http://${f.host}`, 'x-dz23-csrf': 'csrf' },
+    })
+    expect(opaque.status).toBe(500)
+
+    const root = await mkdtemp(join(tmpdir(), 'dz23-web-no-launcher-')); temporary.push(root)
+    await writeFile(join(root, 'index.html'), 'ok')
+    const noLauncher = createServer(createStudioWebHandler({
+      distDirectory: root,
+      identity: f.identity as unknown as StudioIdentityService,
+      allowedHosts: [f.host],
+      allowedOrigins: [`http://${f.host}`],
+    }))
+    servers.push(noLauncher)
+    await new Promise<void>((resolve, reject) => { noLauncher.once('error', reject); noLauncher.listen(0, '127.0.0.1', resolve) })
+    const port = (noLauncher.address() as AddressInfo).port
+    const missing = await fetch(`http://127.0.0.1:${port}/studio/assistant/session`, {
+      method: 'POST', body: '{}', headers: {
+        host: f.host, origin: `http://${f.host}`, cookie: `${SESSION_COOKIE}=token`, 'x-dz23-csrf': 'csrf',
+      },
+    })
+    expect(missing.status).toBe(503)
+    expect(await missing.json()).toEqual({ error: 'A conversa segura ainda não foi configurada.' })
   })
 
   it('maps authentication lockout, unknown failures, invalid methods, and missing builds honestly', async () => {
@@ -106,7 +153,7 @@ describe('authenticated Studio web surface', () => {
     expect(policy).toContain('http://*.dz23.localhost http://*.dz23.localhost:65535 https://*.preview.apps.example.com')
     expect(policy.match(/https:\/\/\*\.preview\.apps\.example\.com/gu)).toHaveLength(1)
 
-    const input = { distDirectory: '.', identity: {} as StudioIdentityService, allowedHosts: [] }
+    const input = { distDirectory: '.', identity: {} as StudioIdentityService, allowedHosts: [], allowedOrigins: [] }
     for (const source of [
       'http://*.dz23.localhost:65536',
       'http://*.dz23.localhost:0',
@@ -122,6 +169,8 @@ describe('authenticated Studio web surface', () => {
       webServer: { port: 3210, register: (value: Record<string, unknown>) => { registrations.push(value); return () => undefined } },
       studioIdentity: { service: {} as StudioIdentityService },
       studioPreview: { frameSource: 'http://*.dz23.localhost:4179' },
+      studioTenancy: { service: {} },
+      sessionController: {},
       effect: (factory: () => unknown, label: string) => { effects.push(label); factory() },
     }
     await apply(ctx as never)

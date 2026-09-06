@@ -5,7 +5,7 @@ const CSRF_STORAGE_KEY = 'dz23.studio.csrf.v1'
 
 export type ApiResponse<T> = { status: number; body: T | null }
 
-async function csrf(): Promise<string> {
+export async function csrfToken(): Promise<string> {
   const stored = window.sessionStorage.getItem(CSRF_STORAGE_KEY)
   if (stored !== null && stored !== '') return stored
   const response = await fetch('/api/studio/identity/csrf', { credentials: 'same-origin' })
@@ -17,10 +17,10 @@ async function csrf(): Promise<string> {
 }
 
 async function request<T>(path: string, init: RequestInit): Promise<{ response: Response; body: (T & { error?: string }) | null }> {
-  const csrfToken = init.body === undefined ? '' : await csrf()
+  const csrfValue = init.body === undefined ? '' : await csrfToken()
   const bodyHeaders = init.body === undefined ? {} : typeof init.body === 'string'
-    ? { 'content-type': 'application/json', 'x-dz23-csrf': csrfToken }
-    : { 'x-dz23-csrf': csrfToken }
+    ? { 'content-type': 'application/json', 'x-dz23-csrf': csrfValue }
+    : { 'x-dz23-csrf': csrfValue }
   const response = await fetch(`/api/studio/apps${path}`, {
     ...init,
     credentials: 'same-origin',

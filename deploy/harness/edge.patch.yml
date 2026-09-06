@@ -73,3 +73,11 @@
     email:
       kind: smtp
       secretRef: DZ23_SMTP_SECRET
+
+- id: dz23-studio-web
+  config:
+    allowedHosts:
+      - !!js process.env.DZ23_PUBLIC_HOST
+    allowedOrigins:
+      - !!js process.env.DZ23_PUBLIC_ORIGIN
+    assistantRepositories: !!js JSON.parse(process.env.DZ23_ASSISTANT_REPOSITORIES ?? '[]')

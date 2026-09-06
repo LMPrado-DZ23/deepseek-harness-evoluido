@@ -11,6 +11,8 @@
     "Organização, espaço e identidade vêm da sessão; a IA não escolhe esses dados."
   ],
   "open": "Abrir conversa segura",
-  "automaticSession": "Novas conversas usam o preset seguro dz23-assistant. Criar automaticamente uma sessão separada por este botão ainda não existe nesta versão.",
+  "opening": "Protegendo sua conversa...",
+  "openError": "Não foi possível abrir a conversa segura.",
+  "automaticSession": "Este botão cria ou retoma uma conversa separada neste dispositivo e confirma o perfil seguro antes de abrir o chat.",
   "back": "Voltar ao Studio"
 }
