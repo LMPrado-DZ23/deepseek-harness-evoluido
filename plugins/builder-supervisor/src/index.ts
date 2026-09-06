@@ -1,4 +1,7 @@
 export * from './artifact.js'
+export * from './artifact-ingress.js'
+export * from './artifact-ingress-client.js'
+export * from './artifact-ingress-http.js'
 export * from './docker-adapter.js'
 export * from './docker-engine.js'
 export * from './export-artifact.js'

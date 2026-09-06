@@ -16,6 +16,7 @@ export interface DockerEnginePort {
   listVolumes(filters: Readonly<Record<string, readonly string[]>>, signal: AbortSignal): Promise<readonly Record<string, unknown>[]>
   createContainer(name: string, body: unknown, signal: AbortSignal): Promise<string>
   putArchive(container: string, destination: string, archivePath: string, maximumBytes: number, signal: AbortSignal): Promise<void>
+  putArchiveHandle?(container: string, destination: string, archiveHandle: FileHandle, maximumBytes: number, signal: AbortSignal): Promise<void>
   startContainer(id: string, signal: AbortSignal): Promise<void>
   waitContainer(id: string, signal: AbortSignal): Promise<{ readonly StatusCode: number }>
   containerLogs(id: string, maximumBytes: number, signal: AbortSignal): Promise<{ readonly stdout: Buffer; readonly stderr: Buffer }>
@@ -55,7 +56,14 @@ export class DockerEngine implements DockerEnginePort {
   async putArchive(container: string, destination: string, archivePath: string, maximumBytes: number, signal: AbortSignal): Promise<void> {
     if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) throw new Error('INVALID_ARCHIVE_LIMIT')
     const handle = await this.runtime.open(archivePath, constants.O_RDONLY | this.runtime.noFollowFlag)
-    try {
+    try { await this.#putArchiveHandle(container, destination, handle, maximumBytes, signal) }
+    finally { await handle.close() }
+  }
+  async putArchiveHandle(container: string, destination: string, archiveHandle: FileHandle, maximumBytes: number, signal: AbortSignal): Promise<void> {
+    if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) throw new Error('INVALID_ARCHIVE_LIMIT')
+    await this.#putArchiveHandle(container, destination, archiveHandle, maximumBytes, signal)
+  }
+  async #putArchiveHandle(container: string, destination: string, handle: FileHandle, maximumBytes: number, signal: AbortSignal): Promise<void> {
       const stat = await handle.stat()
       if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.size < 1 || stat.size > maximumBytes) throw new Error('INVALID_ARCHIVE')
       await new Promise<void>((resolve, reject) => {
@@ -80,7 +88,6 @@ export class DockerEngine implements DockerEnginePort {
         stream = handle.createReadStream({ autoClose: false, start: 0 })
         stream.once('error', fail); stream.pipe(request)
       })
-    } finally { await handle.close() }
   }
   async startContainer(id: string, signal: AbortSignal): Promise<void> { await this.#request('POST', `/containers/${encodeURIComponent(id)}/start`, undefined, signal, [204, 304]) }
   async waitContainer(id: string, signal: AbortSignal): Promise<{ readonly StatusCode: number }> {

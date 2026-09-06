@@ -10,6 +10,9 @@ export default defineConfig({
       provider: 'v8',
       include: [
         'src/artifact.ts',
+        'src/artifact-ingress.ts',
+        'src/artifact-ingress-client.ts',
+        'src/artifact-ingress-http.ts',
         'src/docker-adapter.ts',
         'src/docker-engine.ts',
         'src/export-artifact.ts',
@@ -47,6 +50,7 @@ export default defineConfig({
         'src/{manager-capacity,manager-health,manager-main,manager-registry,manager-registry-writer,manager-state,runtime-activation}.ts': { 100: true },
         'src/{docker-adapter,docker-engine,export-artifact,persistent-replay,service,unix-server}.ts': { 100: true },
         'src/{store-security,template-store-volume}.ts': { 100: true },
+        'src/{artifact-ingress,artifact-ingress-client,artifact-ingress-http}.ts': { 100: true },
         'src/unix-client.ts': { statements: 95, branches: 85, functions: 100, lines: 100 },
         'src/supervisor-config.ts': { 100: true },
         'src/supervisor-main.ts': { statements: 90, branches: 80, functions: 90, lines: 95 },

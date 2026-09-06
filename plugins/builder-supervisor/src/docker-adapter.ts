@@ -32,7 +32,14 @@ export interface DockerBuilderAdapterOptions {
   /** @internal Deterministic descriptor-close fault seam. */
   readonly closeArchive?: (handle: FileHandle) => Promise<void>
 }
-export interface PreparedArtifact { readonly archivePath: string; readonly archiveBytes: number; readonly sha256: string; readonly files: number; readonly bytes: number }
+export interface PreparedArtifact {
+  readonly archivePath: string
+  readonly archiveHandle?: FileHandle
+  readonly archiveBytes: number
+  readonly sha256: string
+  readonly files: number
+  readonly bytes: number
+}
 export interface RecoveredBuild { readonly build_ref: string; readonly build_id: string }
 export interface BuilderExecutionPort {
   preflight(signal: AbortSignal): Promise<BuilderAttestation>
@@ -111,7 +118,11 @@ export class DockerBuilderAdapter implements BuilderExecutionPort {
       await this.options.engine.createVolume(resources.volume, { ...labels, 'dz23.resource': 'workspace' }, { type: 'tmpfs', device: 'tmpfs', o: `size=${this.#limits.workspaceBytes},uid=10001,gid=10001,mode=0700` }, signal)
       volumeCreated = true
       anchor = await this.options.engine.createContainer(resources.anchor, containerBody(this.options.imageDigest, ['sleep', 'infinity'], labels, 'anchor', this.#limits, [{ Type: 'volume', Source: resources.volume, Target: '/workspace', ReadOnly: false }]), signal)
-      await this.options.engine.putArchive(anchor, '/workspace', artifact.archivePath, artifact.archiveBytes, signal); await this.options.engine.startContainer(anchor, signal)
+      if (artifact.archiveHandle !== undefined) {
+        if (this.options.engine.putArchiveHandle === undefined) throw new BuilderSupervisorError('RECOVERY_FAILED')
+        await this.options.engine.putArchiveHandle(anchor, '/workspace', artifact.archiveHandle, artifact.archiveBytes, signal)
+      } else await this.options.engine.putArchive(anchor, '/workspace', artifact.archivePath, artifact.archiveBytes, signal)
+      await this.options.engine.startContainer(anchor, signal)
       this.#buildIds.set(buildRef, buildId)
     } catch (error) {
       const rollbackErrors: unknown[] = []

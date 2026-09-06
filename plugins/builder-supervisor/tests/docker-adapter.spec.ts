@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { FileHandle } from 'node:fs/promises'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { describe, expect, it, vi } from 'vitest'
@@ -22,6 +22,18 @@ const buildRef = `build_${'b'.repeat(32)}`
 const artifact = { archivePath: '/tmp/dz23-input.tar', archiveBytes: 1_024, sha256: 'c'.repeat(64), files: 1, bytes: 1 }
 
 describe('server-authoritative Docker builder adapter', () => {
+  it('streams a claimed inode through the handle-only ingress path and fails closed without support', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dz23-handle-')); const path = join(root, 'input.tar'); await writeFile(path, 'x')
+    const handle = await open(path, 'r')
+    try {
+      const engine = new FakeEngine()
+      await create(engine).prepare(buildRef, 'handle-run', { ...artifact, archivePath: path, archiveHandle: handle }, new AbortController().signal)
+      expect(engine.handleArchives).toBe(1)
+      const unsupported = new FakeEngine()
+      Object.defineProperty(unsupported, 'putArchiveHandle', { value: undefined })
+      await expect(create(unsupported).prepare(buildRef, 'unsupported', { ...artifact, archivePath: path, archiveHandle: handle }, new AbortController().signal)).rejects.toThrow('RECOVERY_FAILED')
+    } finally { await handle.close(); await rm(root, { recursive: true, force: true }) }
+  })
   it('mounts the validated volume root read-only and installs from its materialized tree', async () => {
     const engine = new FakeEngine()
     const adapter = create(engine)
@@ -440,6 +452,7 @@ class FakeEngine implements DockerEnginePort {
   containers: Array<{ Id: string; Labels: Record<string, string>; Names?: string[]; State?: string }> = []
   volumes: Array<{ Name: string; Labels: Record<string, string> }> = [{ Name: templateVolume(), Labels: { 'dz23.managed': 'builder-template-store', ...physicalIdentityLabels(), 'dz23.template_version': templateVersion, 'dz23.template_sha256': templateStoreSha256, 'dz23.materialization_nonce': 'a'.repeat(32) } }]
   readonly started: string[] = []
+  handleArchives = 0
   readonly waitResolvers = new Map<string, (value: { readonly StatusCode: number }) => void>()
   downloadPayload: Buffer = Buffer.alloc(0)
   async ping(): Promise<void> { if (this.pingFailure) throw new Error('down') }
@@ -454,6 +467,10 @@ class FakeEngine implements DockerEnginePort {
   async putArchive(_container: string, destination: string, _archivePath: string, archiveBytes: number): Promise<void> {
     if (this.archiveFailure) throw new Error('archive failed')
     this.archives.push({ destination, bytes: archiveBytes })
+  }
+  async putArchiveHandle(_container: string, destination: string, _archiveHandle: FileHandle, archiveBytes: number): Promise<void> {
+    this.handleArchives += 1
+    await this.putArchive(_container, destination, '<claimed-handle>', archiveBytes)
   }
   async startContainer(id: string): Promise<void> { this.started.push(id); const row = this.containers.find(value => value.Id === id); if (row !== undefined) row.State = 'running' }
   async waitContainer(id: string, signal: AbortSignal): Promise<{ readonly StatusCode: number }> {
