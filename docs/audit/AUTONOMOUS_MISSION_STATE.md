@@ -2,13 +2,13 @@
 
 - `mission_id`: `M1-M6-finalizacao-2026-09-04`
 - `objective`: integrar e provar M1-M6 com segurança, sem push, PR, deploy ou exclusões não autorizadas
-- `state`: `INTEGRATING`
-- `iteration`: `2026-09-04.11`
+- `state`: `INTEGRATING_AND_HARDENING`
+- `iteration`: `2026-09-06.15`
 - `started_at`: `2026-09-04 America/Sao_Paulo`
-- `heartbeat_at`: `2026-09-04T15:46:21-03:00`
-- `last_progress_at`: `2026-09-04T15:46:21-03:00`
+- `heartbeat_at`: `2026-09-06T15:20:04-03:00`
+- `last_progress_at`: `2026-09-06T15:20:04-03:00`
 - `branch`: `codex/p30-policy-foundation`
-- `head`: `bddf0ff`
+- `head`: `17e79aaab4c1ac54c1b4fc05f780f6485c5941b7`
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c`
 
 ## Critérios de aceite
@@ -40,6 +40,14 @@
   quarentena persistente no segundo reinício e bloqueio de HTTP antes do
   reconcile passaram revisão independente; 212 testes/2 skips e recorte 60/60.
   Single-active = GO; active-active = `NOT_IMPLEMENTED`.
+- Conversa tenant-aware está isolada em M74-A `c7482e6`: transporte, histórico
+  e autorização passaram gates próprios; M74-B continua aguardando parecer do
+  Claude e não foi iniciado.
+- Reconciliação segura de agentes está em fechamento isolado na M75 sobre
+  `646c47b`: 122/122 focados, cobertura crítica de 100%, typecheck, builds e
+  gates de contrato passaram. A suíte cumulativa teve cinco falhas de carga em
+  `builder-supervisor`; os dois arquivos residuais passaram 89/89 na base
+  intacta. Revisão independente ainda será solicitada antes de qualquer merge.
 
 ## Tarefas atuais e propriedade de arquivos
 
@@ -73,12 +81,13 @@
 
 ## Próxima ação
 
-1. receber e auditar o primeiro candidato M3–M5 completo, seja Claude ou a contingência Codex;
-2. integrar por commits verificáveis, sem aceitar exclusões de `plugins/*/lib/**`;
-3. compor `64e9686` e resolver manualmente o wiring compartilhado do `storage-postgres`;
-4. executar M6.1: workspace/lock portátil, runtime agregador, imagem multiarch e SBOM;
-5. rodar gates completos serializados em WSL/ext4 e auditoria final independente;
-6. somente então executar lifecycle Windows real com as imagens produzidas.
+1. fechar e entregar M75 para revisão independente, sem merge na principal;
+2. receber o parecer do Claude sobre M74-A e M75;
+3. iniciar M74-B somente depois do GO explícito da M74-A;
+4. integrar somente commits aprovados e autorizados, sem excluir branches,
+   worktrees ou `plugins/*/lib/**`;
+5. concluir as provas de Windows/celular, fase 0.5, piloto e release mantendo os
+   estados externos honestos.
 
 ## Instruções de retomada
 
