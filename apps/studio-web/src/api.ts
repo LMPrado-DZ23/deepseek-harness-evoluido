@@ -1,7 +1,7 @@
 export type HealthState = { state: 'OK' | 'ATTENTION'; route: string | null; builder: 'OK' | 'BLOCKED_EXTERNAL'; disk: 'OK' | 'ATTENTION' }
 export type ProjectSummary = { project_id: string; name: string; state: string }
 
-const CSRF_STORAGE_KEY = 'dz23.studio.csrf.v1'
+export const CSRF_STORAGE_KEY = 'dz23.studio.csrf.v1'
 
 export type ApiResponse<T> = { status: number; body: T | null }
 

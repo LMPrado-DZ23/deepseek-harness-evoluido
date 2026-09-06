@@ -293,6 +293,30 @@ describe('identity HTTP boundary', () => {
     expect(f.service.validateCsrfToken).toHaveBeenCalled()
   })
 
+  it('revokes exactly the current session and clears its cookies on logout', async () => {
+    const f = await fixture()
+    const response = await f.request('/logout', { method: 'POST', headers: authHeaders })
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ signed_out: true })
+    expect(f.service.revokeSession).toHaveBeenCalledOnce()
+    expect(f.service.revokeSession).toHaveBeenCalledWith(session, session.session_id)
+    expect(f.service.revokeAllSessions).not.toHaveBeenCalled()
+    expect(response.headers.getSetCookie().join(';')).toContain('Max-Age=0')
+    expect(f.service.validateCsrfToken).toHaveBeenCalledWith(session, 'csrf-token')
+  })
+
+  it('does not revoke the current session when logout CSRF validation fails', async () => {
+    const f = await fixture()
+    f.service.validateCsrfToken.mockImplementationOnce(() => { throw new IdentityError('csrf', 'csrf') })
+
+    const response = await f.request('/logout', { method: 'POST', headers: authHeaders })
+
+    expect(response.status).toBe(401)
+    expect(f.service.revokeSession).not.toHaveBeenCalled()
+    expect(response.headers.getSetCookie()).toEqual([])
+  })
+
   it('rejects absent session, missing CSRF, untrusted host and untrusted origin', async () => {
     const f = await fixture()
     expect((await f.request('/devices', { method: 'GET' })).status).toBe(401)

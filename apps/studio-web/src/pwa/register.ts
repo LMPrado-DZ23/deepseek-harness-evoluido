@@ -52,10 +52,9 @@ export async function shellSource(env: { navigator: Navigator } = { navigator },
 }
 
 /**
- * Signing out. There is no sign-out button in the Studio yet — the session ends by expiring, and the
- * worker handles THAT on its own (a 401 on `/studio/` drops the caches). This is the hook for the
- * button when it arrives, and the same thing a page can call after clearing the session itself:
- * without it the copy of the authenticated interface stays on the device and comes back offline.
+ * Signing out. The Studio revokes the server session first and then calls this hook. The worker also
+ * handles expiration on its own (a 401 on `/studio/` drops the caches). Without this explicit step,
+ * the copy of the authenticated interface stays on the device and comes back offline.
  *
  * Resolves `true` when the worker confirmed the caches are gone, `false` when there was no worker to
  * ask — in which case the caller falls back to deleting them from the page, which this does too.

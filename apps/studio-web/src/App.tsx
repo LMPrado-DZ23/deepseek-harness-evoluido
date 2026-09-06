@@ -1,4 +1,4 @@
-import { Bell, CircleHelp, Eye, FolderKanban, Home, LineChart, Menu, MessageCircle, Plug, Settings, Sparkles, UserRound } from 'lucide-react'
+import { Bell, CircleHelp, Eye, FolderKanban, Home, LineChart, LogOut, Menu, MessageCircle, Plug, Settings, Sparkles, UserRound } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, apiResponse, type HealthState } from './api'
 import type { Category } from './categories'
@@ -11,6 +11,7 @@ import { apiFailureMessage, apiFailureText, type ApiCallKind } from './pwa/apiFa
 import { GENERATION_REJECTED_STATE, postGeneration, startGeneration } from './pwa/generation'
 import { NotificationOptIn } from './pwa/NotificationOptIn'
 import { dispatchGenerationFinished } from './pwa/notifications'
+import { signOutInBrowser } from './session/signOut'
 
 type DesignPreset = 'modern' | 'professional' | 'colorful' | 'brand'
 type Question = { id: 'audience' | 'goal' | 'content' | 'sensitive-confirmation'; text: string }
@@ -51,6 +52,7 @@ export function App() {
   const [preview, setPreview] = useState<Preview | null>(null)
   const [admissionTicket, setAdmissionTicket] = useState<string | null>(null)
   const [previewCodes, setPreviewCodes] = useState<VerificationCode[]>([])
+  const [signingOut, setSigningOut] = useState(false)
   const previewFrame = useRef<HTMLIFrameElement>(null)
   useEffect(() => { void api<HealthState>('/health').then(value => { setHealth(value); setRoute(value.route) }).catch((cause: unknown) => {
     const message = apiFailureMessage(cause, navigator.onLine, 'read')
@@ -213,6 +215,12 @@ export function App() {
       setPreviewCodes([])
     })
   }
+  async function signOut() {
+    setError('')
+    setSigningOut(true)
+    try { await signOutInBrowser() }
+    catch { setError(t.account.signOutFailed); setSigningOut(false) }
+  }
   function chooseSuggestion(value: string, selected: Category) { setBrief(value); setCategory(selected) }
   return <div className="shell">
     <aside className="sidebar"><img src="/studio/brand/dz23-studio-logo.jpg" alt={t.brand} className="brand" /><nav aria-label={t.brand}>
@@ -220,7 +228,7 @@ export function App() {
       <a className="nav" href="/studio/assistente"><MessageCircle aria-hidden="true" /><span>{assistant.navLabel}</span></a>
       <a className="nav" href={HUB_PATH}><Plug aria-hidden="true" /><span>{hub.navLabel}</span></a>
     </nav><div className="sidebar-footer"><button aria-label={t.nav.help}><CircleHelp /></button><button aria-label={t.nav.settings}><Settings /></button></div></aside>
-    <section className="workspace"><header className="topbar"><button className="mobile-menu" aria-label={t.mobile.menu}><Menu /></button><Status health={health} /><div className="top-actions"><NotificationOptIn /><Bell /><UserRound /></div></header>
+    <section className="workspace"><header className="topbar"><button className="mobile-menu" aria-label={t.mobile.menu}><Menu /></button><Status health={health} /><div className="top-actions"><NotificationOptIn /><Bell aria-hidden="true" /><UserRound aria-hidden="true" /><button className="signout-button" type="button" disabled={signingOut} aria-busy={signingOut} onClick={() => void signOut()}><LogOut aria-hidden="true" /><span>{signingOut ? t.account.signingOut : t.account.signOut}</span></button></div></header>
       <main className="canvas"><section className="idea-panel">
         {projectState === null ? <Idea brief={brief} setBrief={setBrief} privacy={privacy} setPrivacy={setPrivacy} route={route ?? health.route} ready={ready} chooseSuggestion={chooseSuggestion} create={create}
           designPreset={designPreset} setDesignPreset={setDesignPreset} brandColor={brandColor} setBrandColor={setBrandColor}

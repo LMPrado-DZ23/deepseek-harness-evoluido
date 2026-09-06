@@ -2,6 +2,7 @@
   "brand": "DZ23 STUDIO",
   "nav": { "home": "Início", "projects": "Meus projetos", "progress": "Acompanhar criação", "result": "Ver resultado", "help": "Ajuda", "settings": "Configurações" },
   "health": { "ok": "Tudo certo", "attention": "Atenção" },
+  "account": { "signOut": "Sair", "signingOut": "Saindo…", "signOutFailed": "Não foi possível encerrar sua sessão. Confira a conexão e tente novamente." },
   "idea": {
     "title": "Vamos criar seu aplicativo", "subtitle": "Conte com suas palavras o que você precisa",
     "placeholder": "Ex.: Preciso de uma página para apresentar meu trabalho e receber contatos.",
