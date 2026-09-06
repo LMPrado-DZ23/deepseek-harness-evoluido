@@ -111,6 +111,34 @@ pnpm prove:auth-crud
 pnpm golden
 ```
 
+### Primeiro uso em um clone novo
+
+Esta é a ordem canônica. O build do Harness e o build do Studio não são
+opcionais: eles geram os módulos usados pelo typecheck e pelos testes.
+
+```sh
+node scripts/bootstrap-upstream.mjs
+node scripts/check-upstream-content.mjs --materialize-symlinks
+pnpm --dir third_party/deepseek-harness install --frozen-lockfile
+pnpm --dir third_party/deepseek-harness build:official
+pnpm install --frozen-lockfile --filter '@dz23-studio/*...'
+pnpm build
+pnpm typecheck
+pnpm test -- --maxWorkers=2
+```
+
+O limite de dois workers é temporariamente obrigatório no gate de clone limpo:
+três testes de filesystem/multiprocesso passaram isoladamente e juntos com dois
+workers, mas falharam de forma alternada sob maior carga. A evidência completa
+está em
+[M67-clean-clone-follow-up](./docs/proofs/M67-clean-clone-follow-up.md).
+Não se deve repetir silenciosamente um teste até ele passar.
+
+O repositório ainda contém 95 saídas `plugins/*/lib/**` antigas rastreadas pelo
+Git. O `pnpm build` as substitui pela saída atual, mas removê-las do índice é uma
+mudança estrutural pendente de autorização. Até essa decisão, confira o diff
+após o build e não commite essas saídas por acidente.
+
 No gate puro atual, os testes unitários passam e os 18 casos que exigem PostgreSQL real
 ficam explicitamente pulados; a execução PostgreSQL do P31-A permanece
 registrada na prova própria, sem ser apresentada como reexecução desta fatia.
