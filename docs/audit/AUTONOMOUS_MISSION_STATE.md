@@ -3,10 +3,10 @@
 - `mission_id`: `M1-M6-finalizacao-2026-09-04`
 - `objective`: integrar e provar M1-M6 com segurança, sem push, PR, deploy ou exclusões não autorizadas
 - `state`: `INTEGRATING_AND_HARDENING`
-- `iteration`: `2026-09-06.15`
+- `iteration`: `2026-09-06.16`
 - `started_at`: `2026-09-04 America/Sao_Paulo`
-- `heartbeat_at`: `2026-09-06T15:20:04-03:00`
-- `last_progress_at`: `2026-09-06T15:20:04-03:00`
+- `heartbeat_at`: `2026-09-06T15:45:00-03:00`
+- `last_progress_at`: `2026-09-06T15:45:00-03:00`
 - `branch`: `codex/p30-policy-foundation`
 - `head`: `17e79aaab4c1ac54c1b4fc05f780f6485c5941b7`
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c`
@@ -47,7 +47,9 @@
   `646c47b`: 122/122 focados, cobertura crítica de 100%, typecheck, builds e
   gates de contrato passaram. A suíte cumulativa teve cinco falhas de carga em
   `builder-supervisor`; os dois arquivos residuais passaram 89/89 na base
-  intacta. Revisão independente ainda será solicitada antes de qualquer merge.
+  intacta. Três processos Node separados provaram seed, recuperação e
+  idempotência com o mesmo armazenamento, preservando o Git worktree. Revisão
+  independente ainda será solicitada antes de qualquer merge.
 
 ## Tarefas atuais e propriedade de arquivos
 

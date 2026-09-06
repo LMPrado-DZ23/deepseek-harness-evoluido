@@ -35,6 +35,23 @@ do Harness permaneceu
   portabilidade e pin do upstream: PASS, incluindo as mutações negativas dos
   gates que as possuem.
 
+`pnpm prove:agent-restart` iniciou **três processos Node separados** sobre o
+mesmo `DSH_HOME` isolado e o mesmo backend persistente do profile:
+
+1. o primeiro boot registrou uma run e uma tarefa `RUNNING`, uma lease ativa e
+   um Git worktree real com uma proposta não commitada;
+2. o segundo boot carregou os registros do processo anterior, informou
+   `interruptedRuns=1`, `releasedLeases=1`, `updatedTasks=1` e
+   `updatedTeams=1`, convergiu para `FAILED`/`NEEDS_ATTENTION` e manteve o
+   worktree listado pelo Git com o mesmo conteúdo;
+3. o terceiro boot informou zero alterações e preservou os estados terminais,
+   provando idempotência entre processos.
+
+Resultado: `decision=GO`, `transport=three-separate-node-processes` e
+`worktreePreservedAcrossRestart=true`. O ambiente dos filhos não recebeu
+credenciais de provedores; modelos externos ficaram `NOT_EXECUTED`. A prova
+remove seu diretório temporário próprio somente depois das três validações.
+
 A suíte cumulativa terminou em **2.028 PASS / 62 SKIP / 5 FAIL**. As cinco
 falhas ocorreram em testes pesados e não alterados de `builder-supervisor`:
 quatro timeouts de cinco segundos e uma resposta 504 em `unix-server` sob
@@ -63,7 +80,7 @@ cobertura. Não se afirma que essa linha posterior pertence ao snapshot formal.
   agente.
 - Garantia active-active e coordenação distribuída continuam `NOT_PRESENT`.
 - Codex CLI, Claude Code e OmniRoute continuam fora desta prova.
-- O teste foi no WSL2/ext4; reinício real no Windows, celular, operação
-  prolongada e cinco pessoas leigas continuam pendentes.
+- O reinício de processos foi provado no WSL2/ext4; reinício real no Windows,
+  celular, operação prolongada e cinco pessoas leigas continuam pendentes.
 - A fatia só pode entrar na principal depois de revisão independente do Claude
   e autorização de merge do Prado.

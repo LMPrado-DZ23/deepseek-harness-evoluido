@@ -67,6 +67,8 @@ projeto e autor da aprovação continuam sendo verificados antes dessa decisão.
 - escrita persistente incompleta mantém o serviço fechado;
 - equipes com run terminal, ausente e ainda ativa seguem os três caminhos;
 - cancelamento diferencia run reconciliada de run ativa sem handle;
+- três processos reais e separados comprovam semeadura persistente,
+  reconciliação no boot seguinte e idempotência no terceiro boot;
 - testes focados e cobertura crítica em 100%; typecheck, builds, i18n,
   contratos de domínio, ferramentas, portabilidade e pin do upstream verdes;
 - suíte cumulativa registrada integralmente, sem atribuir falhas de outro
