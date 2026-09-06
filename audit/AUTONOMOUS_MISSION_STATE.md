@@ -5,9 +5,9 @@
 - estado: `REVIEW_REQUIRED`
 - iteração: 16
 - início: 2026-09-04
-- último heartbeat: 2026-09-06T10:23:00-03:00
-- último progresso real: M71 fechada em clone novo com 2.027 testes raiz, 56 da interface, cobertura D30, build, typecheck, i18n, pacote e runtime real aprovados
-- tarefa atual: empacotar M71 e solicitar revisão independente do Claude, sem merge na principal
+- último heartbeat: 2026-09-06T10:28:09-03:00
+- último progresso real: M71 passou também um turno completo do Agent com provedor determinístico, aprovação `allowed-once`, ferramenta governada e resposta persistida
+- tarefa atual: empacotar o pin cumulativo M71 e aguardar revisão independente do Claude, sem merge na principal
 - branch: `codex/m71-assistant-session`
 - base: `17e79aaab4c1ac54c1b4fc05f780f6485c5941b7`
 - upstream: `deepseek-harness@6c705be1ce6774a000d061da41d1823b03a3d42c`
@@ -22,13 +22,17 @@
 - login, CSRF, revogação, criação, inspeção, vínculo e retomada foram exercitados
   no runtime real do pin upstream;
 - treze ferramentas governadas estão visíveis no Agent da sessão;
+- o Agent real processou uma mensagem, chamou `studio_echo` após uma única
+  aprovação `allowed-once` e persistiu `STUDIO_ECHO_OK`; o provedor usado foi
+  somente `studio-fake/studio-deterministic`;
 - o serviço `studioAssistant` foi isolado por sessão no Cordis depois de uma
   falha real de boot revelar o singleton indevido;
 - 58 testes críticos e 3 testes de interface passaram; os serviços críticos têm
   100% de cobertura; o pacote staged passou;
 - conversas multiusuário continuam `NOT_SUPPORTED` porque o cliente atual do
   Harness não isola lista/histórico por tenant;
-- prova de modelo real e redirecionamento Chromium continuam `NOT_EXECUTED`.
+- prova com modelo externo real e redirecionamento Chromium continuam
+  `NOT_EXECUTED`.
 - clone novo em ext4 passou build oficial upstream, build do Studio, typecheck,
   2.027 testes raiz, 56 testes da interface e cobertura global 96,11/93,56/96,61/98,14;
 - o gate de i18n encontrou onze mensagens novas em código, todas migradas para
@@ -54,9 +58,10 @@
 
 ## Próxima ação
 
-1. criar commit e bundle local do checkpoint cumulativo M6.4 com o lock de release;
-2. solicitar revisão independente do Claude sem merge;
-3. tratar os 95 artefatos `lib/` rastreados em commit separado, somente após parecer;
+1. gerar bundle, arquivo-fonte e relatório P37 do pin cumulativo M71;
+2. aguardar e tratar a revisão independente do Claude sem merge;
+3. tratar os artefatos `plugins/*/lib/**` rastreados em commit separado, somente
+   com autorização explícita;
 4. repetir o preflight somente leitura quando Docker e pins estiverem disponíveis;
 5. executar as provas físicas somente após autorização para ligar o Docker.
 
