@@ -76,6 +76,12 @@ export const STUDIO_DOMAIN_SCOPES: readonly DomainScopeEntry[] = [
     },
   },
   {
+    source: 'plugins/staging/src/domain.ts', exportName: 'studioStagingReleasesDomainSpec', physicalName: 'studio_staging_releases',
+    tables: {
+      releases: { scope: 'org-tenant', requiredFields: ['org_id', 'tenant_id'], reason: 'A staging journal and its physical target binding belong to one organization and tenant.' },
+    },
+  },
+  {
     source: 'plugins/hello/src/index.ts', exportName: 'studioHelloDomainSpec', physicalName: 'studio_hello',
     tables: { records: { scope: 'tenant-only-poc', requiredFields: ['tenant_id'], reason: 'PoC domain predates organizations.' } },
   },

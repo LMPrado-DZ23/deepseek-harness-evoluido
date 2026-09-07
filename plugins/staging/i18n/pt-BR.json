@@ -1,0 +1,16 @@
+{
+  "errors": {
+    "forbidden": "Seu papel neste espaço não permite publicar em staging.",
+    "invalidRequest": "A solicitação de staging é inválida.",
+    "sourceMismatch": "O artefato verificado não pertence a este projeto ou execução.",
+    "operationConflict": "Este identificador de operação já foi usado para outro pedido.",
+    "targetBusy": "Já existe uma publicação ou conferência pendente para este destino.",
+    "approvalMismatch": "A confirmação não corresponde exatamente a esta publicação.",
+    "notFound": "Publicação de staging não encontrada.",
+    "invalidTransition": "O estado da publicação mudou; confira o histórico antes de tentar novamente.",
+    "invalidReceipt": "O provedor não comprovou o mesmo artefato e destino solicitados.",
+    "rollbackTarget": "A versão escolhida não é uma publicação de staging concluída.",
+    "nothingToRollback": "Não existe outra publicação ativa para reverter.",
+    "cancelled": "A operação de staging foi cancelada antes do efeito externo."
+  }
+}

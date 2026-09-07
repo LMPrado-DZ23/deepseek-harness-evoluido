@@ -9,6 +9,7 @@ import { studioPreviewAdmissionsDomainSpec, studioPreviewsDomainSpec } from '../
 import { studioMembershipsDomainSpec, studioOrgsDomainSpec, studioWorkspacesDomainSpec } from '../plugins/tenancy/src/model.ts'
 import { PROMPT_TO_APP_DOMAIN_SPECS } from '../plugins/prompt-to-app/src/model.ts'
 import { studioIntegrationsDomainSpec } from '../plugins/integration-hub/src/model.ts'
+import { studioStagingReleasesDomainSpec } from '../plugins/staging/src/domain.ts'
 
 /** The only units migration tools may touch. Session/event logs use another seam. */
 export const STUDIO_DOMAIN_SPECS: readonly DomainSpec[] = [
@@ -29,4 +30,5 @@ export const STUDIO_DOMAIN_SPECS: readonly DomainSpec[] = [
   studioPreviewAdmissionsDomainSpec,
   ...PROMPT_TO_APP_DOMAIN_SPECS,
   studioIntegrationsDomainSpec,
+  studioStagingReleasesDomainSpec,
 ]

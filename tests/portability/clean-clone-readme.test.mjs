@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 const readme = await readFile(new URL('../../README.md', import.meta.url), 'utf8')
+const rootPackage = JSON.parse(await readFile(new URL('../../package.json', import.meta.url), 'utf8'))
 
 function documentedCleanCloneCommands(source) {
   const section = /### Primeiro uso em um clone novo[\s\S]*?```sh\r?\n([\s\S]*?)\r?\n```/u.exec(source)
@@ -25,4 +26,12 @@ test('README fixa a mesma sequência de clone limpo executada pelo CI e pela ima
     'pnpm exec vitest run --maxWorkers=1',
   ])
   assert.doesNotMatch(readme, /pnpm test -- --maxWorkers/u)
+})
+
+test('build raiz seleciona os namespaces dos pacotes em vez de um filtro de caminho que vira no-op no Windows', () => {
+  assert.equal(
+    rootPackage.scripts.build,
+    'pnpm --recursive --filter "@dz23-studio/*" --filter "@studio/*" --if-present run build',
+  )
+  assert.doesNotMatch(rootPackage.scripts.build, /\.\/plugins\/\*\*/u)
 })

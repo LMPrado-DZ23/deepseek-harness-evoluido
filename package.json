@@ -52,7 +52,7 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:w3:coverage": "vitest run --config vitest.w3.config.ts --coverage",
-    "build": "pnpm --filter @dz23-studio/studio-web-app run build && pnpm --filter './plugins/**' --recursive run build",
+    "build": "pnpm --recursive --filter \"@dz23-studio/*\" --filter \"@studio/*\" --if-present run build",
     "gate:upstream-pin": "node scripts/check-upstream-pin.mjs --self-test",
     "gate:portability": "node scripts/check-portability.mjs --self-test",
     "gate:i18n": "node scripts/check-i18n.mjs",

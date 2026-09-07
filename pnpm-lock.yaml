@@ -473,6 +473,18 @@ importers:
 
   plugins/runtime-governor: {}
 
+  plugins/staging:
+    dependencies:
+      '@deepseek-ai/dsh-storage-domain':
+        specifier: workspace:*
+        version: link:../../third_party/deepseek-harness/packages/storage/storage-domain
+      '@dz23-studio/policy':
+        specifier: workspace:*
+        version: link:../policy
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
+
   plugins/storage-postgres:
     dependencies:
       '@deepseek-ai/cordis':
