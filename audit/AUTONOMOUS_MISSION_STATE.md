@@ -5,9 +5,9 @@
 - estado: `CHECKPOINTING`
 - iteração: 29
 - início: 2026-09-04
-- último heartbeat: 2026-09-07T06:55:00-03:00
-- último progresso real: M89 concluiu o núcleo governado de staging imutável, com revisão adversarial GO e sem efeito externo
-- tarefa atual: registrar, empacotar e entregar a ponta M89 para revisão independente do Claude, sem merge na principal
+- último heartbeat: 2026-09-07T07:21:00-03:00
+- último progresso real: M89 passou integralmente em clone limpo WSL2/ext4, com 2.066 testes aprovados, 62 pulados e zero falha
+- tarefa atual: consolidar a evidência limpa da M89 e aguardar revisão independente do Claude, sem merge na principal
 - branch: `codex/m89-immutable-staging`
 - ponta funcional: `2093dc0a524bc03671c3c0e35406cd84dd2f3c42`
 - base: `2f2a772d98d916514652e0f7797f00339c9a3877`
@@ -305,9 +305,13 @@ Leia este arquivo e `audit/M63_INTEGRATION_CHECKPOINT.md`; confira `git status`,
   dez arquivos; nenhuma falha pertence ao novo plugin. As falhas observadas são
   contratos Unix ou limitações já conhecidas do ambiente Windows (symlink,
   FIFO, socket Unix, sparse files, sinal POSIX e OpenSSL ausente);
-- a repetição integral da M89 em clone limpo WSL2/ext4 permanece
-  `NOT_EXECUTED`; a M87 anterior provou a base pré-M89 com 2.036 aprovados,
-  62 pulados e zero falha, mas não é evidência substituta desta iteração;
+- repetição integral em clone limpo WSL2/ext4, destacado em
+  `c2bc3a9dd75ab6f50d3baa95746b54e4fc1602f9`: bootstrap do upstream, pin,
+  install congelado, build oficial, build Studio, typecheck e suíte completa
+  passaram; **129 arquivos e 2.066 testes aprovados, 6 arquivos e 62 testes
+  pulados, zero falha**;
+- a compilação do clone alterou somente artefatos rastreados sob
+  `plugins/*/lib/**`; o submódulo Harness permaneceu limpo no pin `6c705be1`;
 - provider, rota HTTP, montagem no runtime, Docker, rede, credencial e staging
   físico continuam `NOT_CONFIGURED` / `NOT_PRESENT` / `NOT_EXECUTED`;
 - principal `codex/p30-policy-foundation@17e79aa` preservada;

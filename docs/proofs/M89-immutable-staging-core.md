@@ -62,6 +62,28 @@ limpo anterior em WSL2/ext4 (M87) terminou com 2.036 testes aprovados, 62
 pulados e zero falha, antes do M89. Esta evidência não substitui uma repetição
 do M89 naquele ambiente e não chama a suíte Windows de verde.
 
+## Clone limpo WSL2/ext4
+
+A ponta de auditoria `c2bc3a9dd75ab6f50d3baa95746b54e4fc1602f9`
+foi clonada do bundle em `/home/leandro/dz23-gates/m89-clean-clone-c2bc3a9`,
+em ext4, destacada e sem reaproveitar `node_modules` da cópia Windows. O
+submódulo Harness foi materializado no pin
+`6c705be1ce6774a000d061da41d1823b03a3d42c`.
+
+- bootstrap e verificação de conteúdo do upstream: **PASS**, 8.953 entradas,
+  SHA-256 `862b92782c2f5cd67f81debd1116b16150dfafd84fb4ce2602a729f9cf3d26dc`;
+- instalação congelada do Harness: **PASS**;
+- `build:official` do Harness: **PASS**;
+- instalação congelada dos pacotes Studio: **PASS**;
+- `pnpm build`: **PASS**, 19 projetos;
+- `pnpm typecheck`: **PASS**;
+- `pnpm exec vitest run --maxWorkers=1`: **129 arquivos aprovados, 6 pulados;
+  2.066 testes aprovados, 62 pulados; zero falha**, em 249,22 s.
+
+Após a prova, o submódulo Harness continuou limpo. A compilação modificou
+somente saídas rastreadas em `plugins/*/lib/**` no clone descartável; elas não
+foram restauradas, removidas nem incorporadas à branch M89.
+
 ## Revisão adversarial
 
 A primeira passagem independente encontrou uma corrida de quarentena contra
