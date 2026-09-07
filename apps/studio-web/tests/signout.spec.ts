@@ -5,6 +5,7 @@ const origin = 'http://studio.dz23.localhost:4179'
 async function prepareBrowserState(context: BrowserContext, page: Page, token: string): Promise<void> {
   await context.addCookies([{ name: 'dz23_studio_session', value: token, url: origin }])
   await page.addInitScript(() => {
+    if (!window.location.pathname.startsWith('/studio/')) return
     window.sessionStorage.setItem('dz23.studio.csrf.v1', 'csrf-e2e')
     window.sessionStorage.setItem('test.session.keep', 'preservado')
     window.localStorage.setItem('dsh.sessions.current', 'sessão-do-assistente')
@@ -59,7 +60,7 @@ test('preserva cookie, tela, cache e storage quando o servidor não revoga', asy
   await page.getByRole('button', { name: 'Sair' }).click()
   expect((await logoutResponse).status()).toBe(401)
   await expect(page).toHaveURL(/\/studio\/$/u)
-  await expect(page.getByRole('alert')).toHaveText('Não foi possível sair agora. Sua sessão continua nesta tela; tente novamente.')
+  await expect(page.getByRole('alert')).toHaveText('Não foi possível encerrar sua sessão. Confira a conexão e tente novamente.')
   await expect(page.getByRole('button', { name: 'Sair' })).toBeEnabled()
 
   await expect(browserState(page)).resolves.toEqual({
