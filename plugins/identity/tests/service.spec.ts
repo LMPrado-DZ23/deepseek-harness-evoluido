@@ -346,6 +346,26 @@ describe('StudioIdentityService', () => {
     })
   })
 
+  it('bounds Harness bindings per device session and audits every dropped pointer', async () => {
+    const h = makeHarness()
+    const issued = await login(h)
+    for (let index = 0; index < 9; index += 1) {
+      await h.service.bindHarnessSession(h.repository.sessionMap.get(issued.session.session_id)!, `agent-${String(index)}`)
+    }
+    const stored = h.repository.sessionMap.get(issued.session.session_id)!
+    expect(stored.harness_session_ids).toHaveLength(8)
+    expect(stored.harness_session_ids).not.toContain('agent-0')
+    expect(stored.harness_session_ids[0]).toBe('agent-1')
+    expect(stored.harness_session_ids.at(-1)).toBe('agent-8')
+    expect(h.service.ownsHarnessSession(stored, 'agent-0')).toBe(false)
+    expect(h.service.ownsHarnessSession(stored, 'agent-8')).toBe(true)
+    const unbound = h.service.auditRecords().filter(record => record.event_type === 'harness_session_unbound')
+    expect(unbound).toHaveLength(1)
+    expect(unbound[0]).toMatchObject({ outcome: 'success', session_id: issued.session.session_id })
+    expect(unbound[0]?.reason).toContain('agent-0')
+    expect(unbound[0]?.reason).not.toContain('undefined')
+  })
+
   it('fails closed when session rows disappear or are revoked during serialized mutations', async () => {
     const missingBinding = makeHarness()
     const issued = await login(missingBinding)

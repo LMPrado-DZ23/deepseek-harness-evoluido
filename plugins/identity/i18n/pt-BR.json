@@ -1,4 +1,5 @@
 {
   "assistant.bindingConflictAudit": "Sessão do agente já vinculada a outra sessão de identidade.",
-  "assistant.bindingConflict": "Esta conversa já pertence a outra sessão."
+  "assistant.bindingConflict": "Esta conversa já pertence a outra sessão.",
+  "assistant.bindingQuotaAudit": "Vínculo mais antigo de conversa liberado por limite de vínculos por dispositivo."
 }

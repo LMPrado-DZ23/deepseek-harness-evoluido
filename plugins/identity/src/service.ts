@@ -20,6 +20,14 @@ import { KeyedMutex } from './mutex.js'
 import { t } from './i18n.js'
 
 const MINUTE = 60_000
+/**
+ * A device session indexes the Assistant conversations opened from it. The list
+ * is bounded so an authenticated caller cannot grow one session record without
+ * limit; the oldest pointer is dropped, audited, and never silently. Dropping a
+ * pointer does not delete the Harness conversation or its journal — it only
+ * stops that device session from resuming it.
+ */
+const MAX_HARNESS_SESSION_BINDINGS = 8
 const DAY = 24 * 60 * MINUTE
 const CHALLENGE_TTL = 5 * MINUTE
 const MAGIC_TTL = 10 * MINUTE
@@ -393,10 +401,20 @@ export class StudioIdentityService {
         throw new IdentityError('replay', t('assistant.bindingConflict'))
       }
       if (current.harness_session_ids.includes(harnessSessionId)) return
+      const appended = [...current.harness_session_ids, harnessSessionId]
+      const evicted = appended.slice(0, Math.max(0, appended.length - MAX_HARNESS_SESSION_BINDINGS))
+      const retained = appended.slice(evicted.length)
       await this.#repository.putSession({
         ...current,
-        harness_session_ids: [...current.harness_session_ids, harnessSessionId],
+        harness_session_ids: retained,
       })
+      for (const dropped of evicted) {
+        await this.#audit(
+          'harness_session_unbound', current.user_id, current.session_id,
+          current.org_id, current.tenant_id, 'success',
+          `${t('assistant.bindingQuotaAudit')} (${dropped})`,
+        )
+      }
       await this.#audit('harness_session_bound', current.user_id, current.session_id, current.org_id, current.tenant_id, 'success', 'Sessão do agente vinculada.')
     }))
   }

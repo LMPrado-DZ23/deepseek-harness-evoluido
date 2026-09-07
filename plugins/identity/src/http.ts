@@ -21,7 +21,6 @@ const magicVerifySchema = emailSchema.extend({
 const challengeSchema = z.object({ challenge_id: z.string().min(1), response: z.unknown() }).strict()
 const registerVerifySchema = challengeSchema.extend({ device_label: z.string().min(1).max(100) }).strict()
 const revokeSchema = z.object({ session_id: z.string().min(1) }).strict()
-const bindSchema = z.object({ harness_session_id: z.string().min(1) }).strict()
 
 export const IDENTITY_ROUTE_CONTRACTS = [
   { method: 'POST', path: '/magic/start', access: 'public', permission: null, scope: 'none' },
@@ -38,7 +37,6 @@ export const IDENTITY_ROUTE_CONTRACTS = [
   { method: 'GET', path: '/devices', access: 'authorized', permission: 'identity.self', scope: 'identity' },
   { method: 'POST', path: '/devices/revoke', access: 'authorized', permission: 'identity.self', scope: 'identity' },
   { method: 'POST', path: '/devices/revoke-all', access: 'authorized', permission: 'identity.self', scope: 'identity' },
-  { method: 'POST', path: '/bind-agent', access: 'authorized', permission: 'identity.self', scope: 'identity' },
 ] as const satisfies readonly StudioRouteContract[]
 
 assertRouteContracts(IDENTITY_ROUTE_CONTRACTS)
@@ -221,9 +219,8 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
         json(response, 200, { message: 'Todos os dispositivos foram desconectados.' })
         return
       }
-      const body = bindSchema.parse(await readJson(request))
-      await config.service.bindHarnessSession(session, body.harness_session_id)
-      json(response, 200, { message: 'Sessão de trabalho protegida.' })
+      /* v8 ignore next 2 -- every contracted route returns above; this is the fail-closed tail. */
+      json(response, 404, { error: 'Rota não encontrada.' })
     } catch (error) {
       const status = error instanceof IdentityError
         ? error.code === 'not-found' ? 404 : error.code === 'locked' ? 429 : 401

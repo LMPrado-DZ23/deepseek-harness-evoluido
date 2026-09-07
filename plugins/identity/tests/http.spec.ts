@@ -7,6 +7,7 @@ import {
   authenticatedMutation,
   CSRF_COOKIE,
   deviceOf,
+  IDENTITY_ROUTE_CONTRACTS,
   parseCookies,
   parseCookieValues,
   requiredSessionToken,
@@ -312,7 +313,6 @@ describe('identity HTTP boundary', () => {
       ['/passkey/step-up/options', {}],
       ['/passkey/step-up/verify', { challenge_id: 'step', response: { id: 'cred' } }],
       ['/devices/revoke', { session_id: 'other-session' }],
-      ['/bind-agent', { harness_session_id: 'agent-1' }],
     ]
     for (const [path, body] of cases) {
       const response = await f.request(path, { method: 'POST', headers: authHeaders, body: JSON.stringify(body) })
@@ -329,14 +329,28 @@ describe('identity HTTP boundary', () => {
     expect(f.service.validateCsrfToken).toHaveBeenCalled()
   })
 
+  it('does not expose any route that binds a client-supplied Harness session id', async () => {
+    const f = await fixture()
+    for (const method of ['POST', 'GET', 'PUT', 'DELETE'] as const) {
+      const response = await f.request('/bind-agent', {
+        method,
+        headers: authHeaders,
+        body: method === 'GET' ? undefined : JSON.stringify({ harness_session_id: 'agent-roubada' }),
+      })
+      expect(response.status, method).toBe(404)
+    }
+    expect(f.service.bindHarnessSession).not.toHaveBeenCalled()
+    expect(IDENTITY_ROUTE_CONTRACTS.some(contract => contract.path === '/bind-agent')).toBe(false)
+  })
+
   it('rejects absent session, missing CSRF, untrusted host and untrusted origin', async () => {
     const f = await fixture()
     expect((await f.request('/devices', { method: 'GET' })).status).toBe(401)
-    expect((await f.request('/bind-agent', {
-      method: 'POST', headers: { cookie: `${SESSION_COOKIE}=session-token` }, body: JSON.stringify({ harness_session_id: 'a' }),
+    expect((await f.request('/devices/revoke', {
+      method: 'POST', headers: { cookie: `${SESSION_COOKIE}=session-token` }, body: JSON.stringify({ session_id: 'other-session' }),
     })).status).toBe(200)
     f.service.validateCsrfToken.mockImplementationOnce(() => { throw new IdentityError('csrf', 'csrf') })
-    expect((await f.request('/bind-agent', { method: 'POST', headers: authHeaders, body: JSON.stringify({ harness_session_id: 'a' }) })).status).toBe(401)
+    expect((await f.request('/devices/revoke', { method: 'POST', headers: authHeaders, body: JSON.stringify({ session_id: 'other-session' }) })).status).toBe(401)
     f.allowedHosts.splice(0)
     expect((await f.request('/session', { method: 'GET' })).status).toBe(401)
     f.allowedHosts.push(f.host)
