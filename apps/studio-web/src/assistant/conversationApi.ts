@@ -1,0 +1,161 @@
+import { csrfToken } from '../api'
+import copy from '../../src/i18n/assistant.pt-BR.json'
+
+export const CONVERSATION_ENDPOINT = '/studio/assistant/conversation'
+
+export type ConversationEvent =
+  | { readonly type: 'message.user'; readonly seq: number; readonly at: number; readonly id: string; readonly text: string; readonly truncated: boolean }
+  | { readonly type: 'message.assistant'; readonly seq: number; readonly at: number; readonly id: string; readonly text: string; readonly interrupted: boolean; readonly truncated: boolean }
+  | { readonly type: 'turn.state'; readonly seq: number; readonly at: number; readonly state: 'working' | 'idle' }
+  | { readonly type: 'tool.state'; readonly seq: number; readonly at: number; readonly call_id: string; readonly label: string; readonly state: 'running' | 'succeeded' | 'failed' }
+  | { readonly type: 'approval.requested'; readonly seq: number; readonly at: number; readonly request_id: string; readonly tool_label: string; readonly explanation: string }
+  | { readonly type: 'approval.resolved'; readonly seq: number; readonly at: number; readonly request_id: string; readonly outcome: 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable' }
+
+export interface ConversationSnapshot {
+  readonly conversation_id: string
+  readonly cursor: number
+  readonly events: readonly ConversationEvent[]
+  readonly truncated: boolean
+}
+
+export interface ConversationOpened {
+  readonly session_id: string
+  readonly reused: boolean
+  readonly preset: 'dz23-assistant'
+}
+
+export interface ConversationPort {
+  fetch(input: string, init: RequestInit): Promise<Response>
+}
+
+const defaultPort: ConversationPort = { fetch: (input, init) => fetch(input, init) }
+
+/**
+ * A conversation failure the person can act on. `retryable` separates "try
+ * again" from "this will not work until something changes", so the screen can
+ * say the right thing instead of showing the same dead end twice.
+ */
+export class ConversationRequestError extends Error {
+  constructor(readonly status: number, message: string, readonly retryable: boolean) {
+    super(message)
+  }
+}
+
+export async function openConversation(
+  port: ConversationPort = defaultPort,
+  getCsrf: () => Promise<string> = csrfToken,
+): Promise<ConversationOpened> {
+  const body = await mutate(port, getCsrf, CONVERSATION_ENDPOINT, undefined)
+  if (!isRecord(body) || body.preset !== 'dz23-assistant' || typeof body.session_id !== 'string' || body.session_id === '') {
+    throw new ConversationRequestError(200, copy.invalidServerResponse, false)
+  }
+  return { session_id: body.session_id, reused: body.reused === true, preset: 'dz23-assistant' }
+}
+
+export async function readConversation(
+  conversationId: string,
+  port: ConversationPort = defaultPort,
+  signal?: AbortSignal,
+): Promise<ConversationSnapshot> {
+  const response = await port.fetch(`${CONVERSATION_ENDPOINT}/${encodeURIComponent(conversationId)}/events`, {
+    method: 'GET',
+    credentials: 'same-origin',
+    ...(signal === undefined ? {} : { signal }),
+  })
+  const body = await readBody(response)
+  if (!response.ok) throw failure(response.status, body)
+  if (!isRecord(body) || typeof body.conversation_id !== 'string' || typeof body.cursor !== 'number' || !Array.isArray(body.events)) {
+    throw new ConversationRequestError(response.status, copy.invalidServerResponse, false)
+  }
+  return {
+    conversation_id: body.conversation_id,
+    cursor: body.cursor,
+    truncated: body.truncated === true,
+    events: body.events.filter(isConversationEvent),
+  }
+}
+
+export async function sendConversationMessage(
+  conversationId: string,
+  text: string,
+  port: ConversationPort = defaultPort,
+  getCsrf: () => Promise<string> = csrfToken,
+): Promise<{ readonly request_id: string }> {
+  const body = await mutate(
+    port, getCsrf,
+    `${CONVERSATION_ENDPOINT}/${encodeURIComponent(conversationId)}/messages`,
+    JSON.stringify({ text }),
+  )
+  if (!isRecord(body) || typeof body.request_id !== 'string' || body.request_id === '') {
+    throw new ConversationRequestError(202, copy.invalidServerResponse, false)
+  }
+  return { request_id: body.request_id }
+}
+
+export async function cancelConversationTurn(
+  conversationId: string,
+  port: ConversationPort = defaultPort,
+  getCsrf: () => Promise<string> = csrfToken,
+): Promise<void> {
+  await mutate(port, getCsrf, `${CONVERSATION_ENDPOINT}/${encodeURIComponent(conversationId)}/cancel`, undefined)
+}
+
+async function mutate(
+  port: ConversationPort,
+  getCsrf: () => Promise<string>,
+  path: string,
+  body: string | undefined,
+): Promise<unknown> {
+  const response = await port.fetch(path, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'content-type': 'application/json', 'x-dz23-csrf': await getCsrf() },
+    body: body ?? '{}',
+  })
+  const parsed = await readBody(response)
+  if (!response.ok) throw failure(response.status, parsed)
+  return parsed
+}
+
+async function readBody(response: Response): Promise<unknown> {
+  return response.json().catch(() => undefined)
+}
+
+/**
+ * 401 and 403 mean the person's access changed, 404 that the conversation is
+ * not theirs any more: retrying those only repeats the same refusal. A 5xx or a
+ * timeout is worth trying again.
+ */
+function failure(status: number, body: unknown): ConversationRequestError {
+  const message = isRecord(body) && typeof body.error === 'string' && body.error !== '' ? body.error : copy.openError
+  return new ConversationRequestError(status, message, status >= 500 || status === 429)
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/**
+ * Forward compatible on purpose: an event type this build does not know is
+ * ignored instead of breaking the screen. A KNOWN type with a broken shape is
+ * also dropped - rendering half an event would show the person something the
+ * server never said.
+ */
+export function isConversationEvent(value: unknown): value is ConversationEvent {
+  if (!isRecord(value) || typeof value.seq !== 'number' || typeof value.at !== 'number') return false
+  if (value.type === 'message.user') return typeof value.id === 'string' && typeof value.text === 'string'
+  if (value.type === 'message.assistant') return typeof value.id === 'string' && typeof value.text === 'string'
+  if (value.type === 'turn.state') return value.state === 'working' || value.state === 'idle'
+  if (value.type === 'tool.state') {
+    return typeof value.call_id === 'string' && typeof value.label === 'string'
+      && (value.state === 'running' || value.state === 'succeeded' || value.state === 'failed')
+  }
+  if (value.type === 'approval.requested') {
+    return typeof value.request_id === 'string' && typeof value.tool_label === 'string' && typeof value.explanation === 'string'
+  }
+  if (value.type === 'approval.resolved') {
+    return typeof value.request_id === 'string'
+      && ['allowed-once', 'rejected', 'cancelled', 'unavailable'].includes(value.outcome as string)
+  }
+  return false
+}

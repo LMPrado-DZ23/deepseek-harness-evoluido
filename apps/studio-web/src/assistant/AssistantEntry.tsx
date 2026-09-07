@@ -2,22 +2,52 @@ import { ArrowLeft, MessageCircle, ShieldCheck } from 'lucide-react'
 import { useState } from 'react'
 import copy from '../i18n/assistant.pt-BR.json'
 import { openGovernedAssistant } from './assistantLaunch'
+import { Conversation } from './Conversation'
+import { ConversationRequestError, openConversation, type ConversationPort } from './conversationApi'
 
 export const ASSISTANT_PATH = '/studio/assistente'
 
-export function AssistantEntry() {
+export interface AssistantEntryProps {
+  readonly port?: ConversationPort
+  readonly getCsrf?: () => Promise<string>
+}
+
+export function AssistantEntry({ port, getCsrf }: AssistantEntryProps = {}) {
   const [opening, setOpening] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [conversationId, setConversationId] = useState<string | null>(null)
 
   const open = async () => {
     setOpening(true)
     setError(null)
     try {
+      const opened = await openConversation(port, getCsrf)
+      setConversationId(opened.session_id)
+    } catch (reason) {
+      setError(reason instanceof ConversationRequestError || reason instanceof Error ? reason.message : copy.openError)
+    } finally {
+      setOpening(false)
+    }
+  }
+
+  const openInHarness = async () => {
+    setError(null)
+    try {
       await openGovernedAssistant()
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : copy.openError)
-      setOpening(false)
     }
+  }
+
+  if (conversationId !== null) {
+    return <main className="assistant-entry">
+      <Conversation
+        conversationId={conversationId}
+        {...(port === undefined ? {} : { port })}
+        {...(getCsrf === undefined ? {} : { getCsrf })}
+      />
+      <a className="secondary assistant-link" href="/studio"><ArrowLeft aria-hidden="true" />{copy.back}</a>
+    </main>
   }
 
   return <main className="assistant-entry">
@@ -34,6 +64,9 @@ export function AssistantEntry() {
         {opening ? copy.opening : copy.open}
       </button>
       <p className="coming">{copy.automaticSession}</p>
+      <button className="secondary assistant-link" type="button" onClick={() => { void openInHarness() }}>
+        {copy.openInHarness}
+      </button>
       {error === null ? null : <p className="error" role="alert">{error}</p>}
       <a className="secondary assistant-link" href="/studio"><ArrowLeft aria-hidden="true" />{copy.back}</a>
     </section>
