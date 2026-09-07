@@ -90,6 +90,7 @@ const session = { session_id: 'e2e-session', user_id: 'owner', org_id: 'org-e2e'
 const logoutSession = { ...session, session_id: 'e2e-logout-session' }
 const failingLogoutSession = { ...session, session_id: 'e2e-logout-fail-session' }
 const crossTabLogoutSession = { ...session, session_id: 'e2e-logout-cross-tab-session' }
+const generationRaceSession = { ...session, session_id: 'e2e-logout-generation-race-session' }
 const revokedSessions = new Set<string>()
 const identity = {
   requestMagicCode: async () => undefined,
@@ -100,6 +101,7 @@ const identity = {
       : token === 'e2e-logout' ? logoutSession
         : token === 'e2e-logout-fail' ? failingLogoutSession
           : token === 'e2e-logout-cross-tab' ? crossTabLogoutSession
+            : token === 'e2e-logout-generation-race' ? generationRaceSession
           : undefined
     if (authenticated === undefined || revokedSessions.has(authenticated.session_id)) throw new IdentityError('invalid', 'invalid-session')
     return authenticated

@@ -12,6 +12,7 @@ import {
   requiredSessionToken,
   serializeSessionCookies,
   SESSION_COOKIE,
+  SESSION_GENERATION_COOKIE,
   singleHeader,
 } from '../src/http.ts'
 import type { SessionRecord } from '../src/model.ts'
@@ -96,16 +97,19 @@ const authHeaders = {
 
 describe('identity HTTP boundary', () => {
   it('serializes secure cookies and parses malformed cookie values safely', () => {
-    expect(serializeSessionCookies('a b', 'c d')).toEqual([
+    expect(serializeSessionCookies('a b', 'c d', true, '1'.repeat(32))).toEqual([
       `${SESSION_COOKIE}=a%20b; HttpOnly; Secure; SameSite=Lax; Path=/`,
+      `${SESSION_GENERATION_COOKIE}=${'1'.repeat(32)}; Secure; SameSite=Strict; Path=/`,
       `${CSRF_COOKIE}=; Secure; SameSite=Lax; Path=/; Max-Age=0`,
     ])
-    expect(serializeSessionCookies('local', 'unused', false)).toEqual([
+    expect(serializeSessionCookies('local', 'unused', false, '2'.repeat(32))).toEqual([
       `${SESSION_COOKIE}=local; HttpOnly; SameSite=Lax; Path=/`,
+      `${SESSION_GENERATION_COOKIE}=${'2'.repeat(32)}; SameSite=Strict; Path=/`,
       `${CSRF_COOKIE}=; SameSite=Lax; Path=/; Max-Age=0`,
     ])
-    expect(clearSessionCookies()).toHaveLength(2)
+    expect(clearSessionCookies()).toHaveLength(3)
     expect(clearSessionCookies(false).every(cookie => !cookie.includes('Secure'))).toBe(true)
+    expect(() => serializeSessionCookies('local', 'unused', false, 'invalid')).toThrow(TypeError)
     expect(parseCookies(undefined)).toEqual({})
     expect(parseCookies('a=1; lone; bad=%E0%A4%A')).toEqual({ a: '1', lone: '', bad: '' })
     expect(parseCookieValues('a=first; a=second; a=%E0%A4%A; b=other', 'a')).toEqual(['first', 'second'])
@@ -137,6 +141,7 @@ describe('identity HTTP boundary', () => {
     })
     expect(verified.status).toBe(200)
     expect(verified.headers.getSetCookie().join(';')).toContain('HttpOnly')
+    expect(verified.headers.getSetCookie().join(';')).toContain(`${SESSION_GENERATION_COOKIE}=`)
   })
 
   it('serves passkey login options and verification', async () => {
@@ -147,6 +152,7 @@ describe('identity HTTP boundary', () => {
     })
     expect(response.status).toBe(200)
     expect(response.headers.getSetCookie().join(';')).toContain('passkey-token')
+    expect(response.headers.getSetCookie().join(';')).toContain(`${SESSION_GENERATION_COOKIE}=`)
   })
 
   it('returns the implicit personal principal only on loopback', async () => {

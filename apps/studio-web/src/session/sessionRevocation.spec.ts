@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   SESSION_REVOCATION_CHANNEL,
+  SESSION_GENERATION_COOKIE,
   SESSION_REVOCATION_STORAGE_KEY,
   followRemoteSessionRevocation,
   listenForSessionRevocation,
   parseSessionRevocationSignal,
   publishSessionRevocation,
+  browserSessionGeneration,
   type SessionRevocationEnvironment,
 } from './sessionRevocation'
 
@@ -39,6 +41,13 @@ function environmentFixture() {
 }
 
 describe('cross-tab session revocation', () => {
+  it('reads only valid login generations and normalizes cookie shadows', () => {
+    const first = '3'.repeat(32)
+    const second = '4'.repeat(32)
+    expect(browserSessionGeneration(`other=1; ${SESSION_GENERATION_COOKIE}=${second}; ${SESSION_GENERATION_COOKIE}=${first}; ${SESSION_GENERATION_COOKIE}=bad`)).toBe(`${first}.${second}`)
+    expect(browserSessionGeneration(`${SESSION_GENERATION_COOKIE}=%E0%A4%A`)).toBe('')
+  })
+
   it('accepts only the closed versioned signal', () => {
     const valid = { schema_version: 1, kind: 'signed-out', event_id: eventId, source_id: sourceId }
     expect(parseSessionRevocationSignal(valid)).toEqual(valid)
@@ -91,13 +100,13 @@ describe('cross-tab session revocation', () => {
     const cleanup = vi.fn(async () => undefined)
     const redirect = vi.fn()
 
-    await expect(followRemoteSessionRevocation({ currentMode: async () => 'authenticated', clearOwnedState: cleanup, redirect })).resolves.toBe('kept-authenticated')
+    await expect(followRemoteSessionRevocation({ currentMode: async () => 'authenticated', currentGeneration: () => 'old', clearOwnedState: cleanup, redirect })).resolves.toBe('kept-authenticated')
     expect(cleanup).not.toHaveBeenCalled()
     expect(redirect).not.toHaveBeenCalled()
 
     cleanup.mockRejectedValueOnce(new Error('cache unavailable'))
     const unavailable = vi.fn(async () => { throw new Error('offline') })
-    await expect(followRemoteSessionRevocation({ currentMode: unavailable, clearOwnedState: cleanup, redirect })).resolves.toBe('redirected')
+    await expect(followRemoteSessionRevocation({ currentMode: unavailable, currentGeneration: () => '', clearOwnedState: cleanup, redirect })).resolves.toBe('redirected')
     expect(unavailable).toHaveBeenCalledTimes(2)
     expect(redirect).toHaveBeenCalledWith('/login')
   })
@@ -111,11 +120,31 @@ describe('cross-tab session revocation', () => {
     const cleanup = vi.fn(async () => undefined)
     const redirect = vi.fn()
 
-    const following = followRemoteSessionRevocation({ currentMode, clearOwnedState: cleanup, redirect })
+    const following = followRemoteSessionRevocation({ currentMode, currentGeneration: () => '', clearOwnedState: cleanup, redirect })
     resolveOldRequest?.('unavailable')
 
     await expect(following).resolves.toBe('kept-authenticated')
     expect(currentMode).toHaveBeenCalledTimes(2)
+    expect(cleanup).not.toHaveBeenCalled()
+    expect(redirect).not.toHaveBeenCalled()
+  })
+
+  it('does not clear a login completed while the final server probe is in flight', async () => {
+    let generation = ''
+    let resolveFinalProbe: ((mode: 'unavailable') => void) | undefined
+    const finalProbe = new Promise<'unavailable'>(resolve => { resolveFinalProbe = resolve })
+    const currentMode = vi.fn()
+      .mockResolvedValueOnce('unavailable')
+      .mockImplementationOnce(() => finalProbe)
+    const cleanup = vi.fn(async () => undefined)
+    const redirect = vi.fn()
+
+    const following = followRemoteSessionRevocation({ currentMode, currentGeneration: () => generation, clearOwnedState: cleanup, redirect })
+    await vi.waitFor(() => expect(currentMode).toHaveBeenCalledTimes(2))
+    generation = '5'.repeat(32)
+    resolveFinalProbe?.('unavailable')
+
+    await expect(following).resolves.toBe('kept-authenticated')
     expect(cleanup).not.toHaveBeenCalled()
     expect(redirect).not.toHaveBeenCalled()
   })

@@ -2,6 +2,7 @@ import type { CurrentSessionMode } from './currentSession'
 
 export const SESSION_REVOCATION_CHANNEL = 'dz23.studio.session-revocation.v1'
 export const SESSION_REVOCATION_STORAGE_KEY = 'dz23.studio.session-revocation.event.v1'
+export const SESSION_GENERATION_COOKIE = 'dz23_studio_session_generation'
 
 export type SessionRevocationSignal = {
   readonly schema_version: 1
@@ -27,8 +28,21 @@ export interface SessionRevocationEnvironment {
 
 export interface RemoteRevocationPort {
   currentMode(): Promise<CurrentSessionMode>
+  currentGeneration(): string
   clearOwnedState(): Promise<void>
   redirect(path: string): void
+}
+
+export function browserSessionGeneration(cookie = document.cookie): string {
+  const values = cookie.split(';').flatMap(part => {
+    const at = part.indexOf('=')
+    if (at < 1 || part.slice(0, at).trim() !== SESSION_GENERATION_COOKIE) return []
+    try {
+      const value = decodeURIComponent(part.slice(at + 1).trim())
+      return /^[a-f0-9]{32}$/u.test(value) ? [value] : []
+    } catch { return [] }
+  })
+  return [...new Set(values)].sort().join('.')
 }
 
 function createBrowserId(): string {
@@ -156,6 +170,7 @@ export function listenForSessionRevocation(
 }
 
 export async function followRemoteSessionRevocation(port: RemoteRevocationPort): Promise<'kept-authenticated' | 'redirected'> {
+  const generation = port.currentGeneration()
   const firstMode = await port.currentMode().catch(() => 'unavailable' as const)
   if (firstMode === 'authenticated') return 'kept-authenticated'
 
@@ -164,6 +179,7 @@ export async function followRemoteSessionRevocation(port: RemoteRevocationPort):
   // point before touching browser state; the server remains the authority.
   const confirmedMode = await port.currentMode().catch(() => 'unavailable' as const)
   if (confirmedMode === 'authenticated') return 'kept-authenticated'
+  if (port.currentGeneration() !== generation) return 'kept-authenticated'
   await port.clearOwnedState().catch(() => undefined)
   port.redirect('/login')
   return 'redirected'

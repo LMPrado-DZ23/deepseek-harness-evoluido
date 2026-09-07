@@ -123,6 +123,53 @@ test('sincroniza a saída confirmada com outra aba sem repetir a mutação', asy
   ]))
 })
 
+test('preserva um login novo concluído enquanto a confirmação final antiga estava em voo', async ({ context, page }) => {
+  const sibling = await context.newPage()
+  await prepareBrowserState(context, page, 'e2e-logout-generation-race')
+  await prepareBrowserState(context, sibling, 'e2e-logout-generation-race', '/studio/hub')
+  const cdp = await context.newCDPSession(sibling)
+  await cdp.send('Network.enable')
+  await cdp.send('Network.setBypassServiceWorker', { bypass: true })
+
+  let probes = 0
+  let releaseFinalProbe: (() => void) | undefined
+  let markFinalProbeStarted: (() => void) | undefined
+  const finalProbeStarted = new Promise<void>(resolve => { markFinalProbeStarted = resolve })
+  const finalProbeRelease = new Promise<void>(resolve => { releaseFinalProbe = resolve })
+  await sibling.route('**/api/studio/identity/session', async route => {
+    probes += 1
+    if (probes === 2) {
+      markFinalProbeStarted?.()
+      await finalProbeRelease
+    }
+    await route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ error: 'old-session' }) })
+  })
+
+  await page.getByRole('button', { name: 'Sair' }).click()
+  await finalProbeStarted
+  await context.addCookies([
+    { name: 'dz23_studio_session', value: 'e2e-logout-fail', url: origin },
+    { name: 'dz23_studio_session_generation', value: '88888888888888888888888888888888', url: origin, sameSite: 'Strict' },
+  ])
+  releaseFinalProbe?.()
+
+  await expect.poll(() => probes).toBe(2)
+  await expect(page).toHaveURL(/\/login$/u)
+  await sibling.waitForTimeout(250)
+  await expect(sibling).toHaveURL(/\/studio\/hub$/u)
+  await expect(browserState(sibling)).resolves.toEqual({
+    csrf: 'csrf-e2e',
+    // Cache Storage and localStorage are origin-wide, so the initiating tab
+    // already removed its own DZ23 values. The guarded sibling must preserve
+    // its tab-scoped CSRF state and screen instead of performing cleanup too.
+    selectedSession: null,
+    keptSession: 'preservado',
+    keptLocal: 'preservado',
+    caches: ['test-unrelated-cache'],
+  })
+  await cdp.detach()
+})
+
 test('não oferece sair no modo pessoal sem sessão revogável', async ({ page }) => {
   await page.goto('/studio/')
 

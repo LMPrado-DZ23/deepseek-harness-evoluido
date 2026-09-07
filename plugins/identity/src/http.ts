@@ -1,16 +1,16 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { createHash, timingSafeEqual } from 'node:crypto'
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { z } from 'zod'
 import { truncateIp } from './crypto.js'
 import type { AuthenticationResponse, RegistrationResponse } from './passkey.js'
 import type { SessionRecord } from './model.js'
 import { IdentityError, type StudioIdentityService } from './service.js'
 import { assertRouteContracts, type StudioRouteContract } from '@dz23-studio/policy'
-import { CSRF_COOKIE, parseCookies, parseCookieValues, SESSION_COOKIE } from './cookies.js'
+import { CSRF_COOKIE, parseCookies, parseCookieValues, SESSION_COOKIE, SESSION_GENERATION_COOKIE } from './cookies.js'
 import { InMemoryIdentityRateLimiter, rateLimitBuckets, rateLimitKey } from './rate-limit.js'
 
 const JSON_LIMIT = 64 * 1024
-export { CSRF_COOKIE, parseCookies, parseCookieValues, SESSION_COOKIE } from './cookies.js'
+export { CSRF_COOKIE, parseCookies, parseCookieValues, SESSION_COOKIE, SESSION_GENERATION_COOKIE } from './cookies.js'
 
 const emailSchema = z.object({ email: z.email() }).strict()
 const magicStartSchema = emailSchema
@@ -54,13 +54,16 @@ export interface IdentityHttpConfig {
   readonly harnessAuthenticationUrl?: (baseUrl: string) => string | undefined
   readonly rateLimiter?: InMemoryIdentityRateLimiter
   readonly secureCookies?: boolean
+  readonly createSessionGeneration?: () => string
 }
 
-export function serializeSessionCookies(token: string, csrfToken: string, secure = true): readonly string[] {
+export function serializeSessionCookies(token: string, csrfToken: string, secure = true, generation = randomBytes(16).toString('hex')): readonly string[] {
   void csrfToken
+  if (!/^[a-f0-9]{32}$/u.test(generation)) throw new TypeError()
   const secureAttribute = secure ? '; Secure' : ''
   return [
     `${SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly${secureAttribute}; SameSite=Lax; Path=/`,
+    `${SESSION_GENERATION_COOKIE}=${encodeURIComponent(generation)}${secureAttribute}; SameSite=Strict; Path=/`,
     `${CSRF_COOKIE}=${secureAttribute}; SameSite=Lax; Path=/; Max-Age=0`,
   ]
 }
@@ -69,6 +72,7 @@ export function clearSessionCookies(secure = true): readonly string[] {
   const secureAttribute = secure ? '; Secure' : ''
   return [
     `${SESSION_COOKIE}=; HttpOnly${secureAttribute}; SameSite=Lax; Path=/; Max-Age=0`,
+    `${SESSION_GENERATION_COOKIE}=${secureAttribute}; SameSite=Strict; Path=/; Max-Age=0`,
     `${CSRF_COOKIE}=${secureAttribute}; SameSite=Lax; Path=/; Max-Age=0`,
   ]
 }
@@ -76,6 +80,7 @@ export function clearSessionCookies(secure = true): readonly string[] {
 export function createIdentityHttpHandler(config: IdentityHttpConfig) {
   const limiter = config.rateLimiter ?? new InMemoryIdentityRateLimiter()
   const secureCookies = config.secureCookies !== false
+  const createSessionGeneration = config.createSessionGeneration ?? (() => randomBytes(16).toString('hex'))
   return async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     try {
       await assertEdgeTrust(request, config)
@@ -110,7 +115,7 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
       if (request.method === 'POST' && route === '/magic/verify') {
         const body = magicVerifySchema.parse(await readJson(request))
         const issued = await config.service.verifyMagicCode(body.email, body.code, deviceOf(request, body.device_label))
-        response.setHeader('set-cookie', serializeSessionCookies(issued.token, issued.csrfToken, secureCookies))
+        response.setHeader('set-cookie', serializeSessionCookies(issued.token, issued.csrfToken, secureCookies, createSessionGeneration()))
         json(response, 200, { session_id: issued.session.session_id, csrf_token: issued.csrfToken })
         return
       }
@@ -126,7 +131,7 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
           body.response as AuthenticationResponse,
           deviceOf(request, 'Chave de acesso'),
         )
-        response.setHeader('set-cookie', serializeSessionCookies(issued.token, issued.csrfToken, secureCookies))
+        response.setHeader('set-cookie', serializeSessionCookies(issued.token, issued.csrfToken, secureCookies, createSessionGeneration()))
         json(response, 200, { session_id: issued.session.session_id, csrf_token: issued.csrfToken })
         return
       }
