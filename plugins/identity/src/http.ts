@@ -28,7 +28,6 @@ const magicVerifySchema = emailSchema.extend({
 const challengeSchema = z.object({ challenge_id: z.string().min(1), response: z.unknown() }).strict()
 const registerVerifySchema = challengeSchema.extend({ device_label: z.string().min(1).max(100) }).strict()
 const revokeSchema = z.object({ session_id: z.string().min(1) }).strict()
-const bindSchema = z.object({ harness_session_id: z.string().min(1) }).strict()
 
 export const IDENTITY_ROUTE_CONTRACTS = [
   { method: 'POST', path: '/magic/start', access: 'public', permission: null, scope: 'none' },
@@ -46,7 +45,6 @@ export const IDENTITY_ROUTE_CONTRACTS = [
   { method: 'GET', path: '/devices', access: 'authorized', permission: 'identity.self', scope: 'identity' },
   { method: 'POST', path: '/devices/revoke', access: 'authorized', permission: 'identity.self', scope: 'identity' },
   { method: 'POST', path: '/devices/revoke-all', access: 'authorized', permission: 'identity.self', scope: 'identity' },
-  { method: 'POST', path: '/bind-agent', access: 'authorized', permission: 'identity.self', scope: 'identity' },
 ] as const satisfies readonly StudioRouteContract[]
 
 assertRouteContracts(IDENTITY_ROUTE_CONTRACTS)
@@ -169,7 +167,11 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
       }
 
       if (request.method === 'GET' && route === '/harness/session') {
-        await authenticatedMutation(request, config.service)
+        const identitySession = await authenticatedMutation(request, config.service)
+        if (!config.service.isSharedHarnessClientAllowed(identitySession)) {
+          json(response, 403, { error: 'A interface do Harness ainda não está disponível.' })
+          return
+        }
         const host = singleHeader(request.headers.host)!
         const forwardedProtocol = config.edgeRequired === true
           ? singleHeader(request.headers['x-forwarded-proto'])
@@ -253,15 +255,15 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
         json(response, 200, { message: 'Dispositivo desconectado.' })
         return
       }
+      /* v8 ignore next -- last contracted route: the false side is unreachable because every other contract returns above. O teste percorre IDENTITY_ROUTE_CONTRACTS e prova que nenhuma rota contratada cai na cauda 404. */
       if (request.method === 'POST' && route === '/devices/revoke-all') {
         await config.service.revokeAllSessions(session)
         response.setHeader('set-cookie', clearSessionCookies(secureCookies))
         json(response, 200, { message: 'Todos os dispositivos foram desconectados.' })
         return
       }
-      const body = bindSchema.parse(await readJson(request))
-      await config.service.bindHarnessSession(session, body.harness_session_id)
-      json(response, 200, { message: 'Sessão de trabalho protegida.' })
+      /* v8 ignore next 2 -- every contracted route returns above; this is the fail-closed tail. */
+      json(response, 404, { error: 'Rota não encontrada.' })
     } catch (error) {
       if (error instanceof CookieHeaderBudgetError) {
         json(response, 431, { error: COOKIE_HEADER_TOO_LARGE })

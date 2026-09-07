@@ -8,6 +8,7 @@ import {
   authenticatedMutation,
   CSRF_COOKIE,
   deviceOf,
+  IDENTITY_ROUTE_CONTRACTS,
   parseCookies,
   parseCookieValues,
   requiredSessionToken,
@@ -47,6 +48,7 @@ function fakeService() {
     revokeSession: vi.fn(() => Promise.resolve()),
     revokeAllSessions: vi.fn(() => Promise.resolve()),
     bindHarnessSession: vi.fn(() => Promise.resolve()),
+    isSharedHarnessClientAllowed: vi.fn(() => true),
   }
 }
 
@@ -55,9 +57,16 @@ afterEach(async () => Promise.all(servers.splice(0).map(server => new Promise<vo
 
 async function fixture(
   bindHost: '127.0.0.1' | '0.0.0.0' = '127.0.0.1',
-  edge?: { secret?: string; harnessAuthenticationUrl?: (baseUrl: string) => string | undefined },
+  edge?: {
+    required?: boolean
+    secret?: string
+    sharedHarnessClientAllowed?: boolean
+    harnessAuthenticationUrl?: (baseUrl: string) => string | undefined
+  },
 ) {
   const service = fakeService()
+  const edgeRequired = edge?.required ?? edge !== undefined
+  service.isSharedHarnessClientAllowed.mockReturnValue(edge?.sharedHarnessClientAllowed ?? !edgeRequired)
   const allowedHosts: string[] = []
   const allowedOrigins: string[] = []
   const server = createServer(createIdentityHttpHandler({
@@ -65,7 +74,7 @@ async function fixture(
     bindHost,
     allowedHosts,
     allowedOrigins,
-    edgeRequired: edge !== undefined,
+    edgeRequired,
     ...(edge?.secret === undefined ? {} : { resolveEdgeSecret: () => Promise.resolve(edge.secret) }),
     ...(edge?.harnessAuthenticationUrl === undefined ? {} : { harnessAuthenticationUrl: edge.harnessAuthenticationUrl }),
   }))
@@ -209,7 +218,7 @@ describe('identity HTTP boundary', () => {
     await expect(authenticatedMutation(request(tooMany), service as unknown as StudioIdentityService)).rejects.toMatchObject({ code: 'invalid' })
   })
 
-  it('requires the rotatable edge secret and creates the native Harness session exchange', async () => {
+  it('requires the rotatable edge secret and blocks the process-wide Harness client at the edge', async () => {
     const edgeOnLoopback = await fixture('127.0.0.1', { secret: 'edge-secret' })
     expect((await edgeOnLoopback.request('/session', {
       method: 'GET', headers: { 'x-dz23-edge': 'edge-secret' },
@@ -232,17 +241,45 @@ describe('identity HTTP boundary', () => {
         cookie: `${SESSION_COOKIE}=session-token`,
       },
     })
-    expect(exchange.status).toBe(303)
-    expect(exchange.headers.get('location')).toBe(`https://${f.host}/?token=native-launch`)
-    expect(exchange.headers.get('referrer-policy')).toBe('no-referrer')
-    const invalidForwardedProtocol = await f.request('/harness/session', {
+    expect(exchange.status).toBe(403)
+    expect(exchange.headers.get('location')).toBeNull()
+    expect(f.service.isSharedHarnessClientAllowed).toHaveBeenCalledWith(session)
+
+    const defensiveForwarding = await fixture('0.0.0.0', {
+      secret: 'edge-secret',
+      sharedHarnessClientAllowed: true,
+      harnessAuthenticationUrl: baseUrl => `${baseUrl}?token=native-launch`,
+    })
+    const forwardedHttp = await defensiveForwarding.request('/harness/session', {
+      method: 'GET', redirect: 'manual', headers: {
+        'x-dz23-edge': 'edge-secret',
+        'x-forwarded-proto': 'http',
+        cookie: `${SESSION_COOKIE}=session-token`,
+      },
+    })
+    expect(forwardedHttp.headers.get('location')).toBe(`http://${defensiveForwarding.host}/?token=native-launch`)
+    const invalidForwardedProtocol = await defensiveForwarding.request('/harness/session', {
       method: 'GET', redirect: 'manual', headers: {
         'x-dz23-edge': 'edge-secret',
         'x-forwarded-proto': 'ftp',
         cookie: `${SESSION_COOKIE}=session-token`,
       },
     })
-    expect(invalidForwardedProtocol.headers.get('location')).toBe(`https://${f.host}/?token=native-launch`)
+    expect(invalidForwardedProtocol.headers.get('location')).toBe(`https://${defensiveForwarding.host}/?token=native-launch`)
+
+    const personal = await fixture('127.0.0.1', {
+      required: false,
+      harnessAuthenticationUrl: baseUrl => `${baseUrl}?token=native-launch`,
+    })
+    const personalExchange = await personal.request('/harness/session', {
+      method: 'GET', redirect: 'manual', headers: {
+        'x-forwarded-proto': 'ftp',
+        cookie: `${SESSION_COOKIE}=session-token`,
+      },
+    })
+    expect(personalExchange.status).toBe(303)
+    expect(personalExchange.headers.get('location')).toBe(`http://${personal.host}/?token=native-launch`)
+    expect(personalExchange.headers.get('referrer-policy')).toBe('no-referrer')
   })
 
   it('fails closed when the edge secret or Harness connection is unavailable', async () => {
@@ -282,7 +319,6 @@ describe('identity HTTP boundary', () => {
       ['/passkey/step-up/options', {}],
       ['/passkey/step-up/verify', { challenge_id: 'step', response: { id: 'cred' } }],
       ['/devices/revoke', { session_id: 'other-session' }],
-      ['/bind-agent', { harness_session_id: 'agent-1' }],
     ]
     for (const [path, body] of cases) {
       const response = await f.request(path, { method: 'POST', headers: authHeaders, body: JSON.stringify(body) })
@@ -403,14 +439,40 @@ describe('identity HTTP boundary', () => {
     expect(exceeded.service.revokeSession).not.toHaveBeenCalled()
   })
 
+  it('does not expose any route that binds a client-supplied Harness session id', async () => {
+    const f = await fixture()
+    for (const method of ['POST', 'GET', 'PUT', 'DELETE'] as const) {
+      const response = await f.request('/bind-agent', {
+        method,
+        headers: authHeaders,
+        ...(method === 'GET' ? {} : { body: JSON.stringify({ harness_session_id: 'agent-roubada' }) }),
+      })
+      expect(response.status, method).toBe(404)
+    }
+    expect(f.service.bindHarnessSession).not.toHaveBeenCalled()
+    const paths: readonly string[] = IDENTITY_ROUTE_CONTRACTS.map(contract => contract.path)
+    expect(paths).not.toContain('/bind-agent')
+    // Nenhuma rota contratada alcança o vínculo de sessão do Harness, e nenhuma
+    // rota contratada cai na cauda 404 - contrato sem handler seria um 404 mudo.
+    for (const contract of IDENTITY_ROUTE_CONTRACTS) {
+      const response = await f.request(contract.path, {
+        method: contract.method,
+        headers: authHeaders,
+        ...(contract.method === 'GET' ? {} : { body: JSON.stringify({ harness_session_id: 'agent-roubada' }) }),
+      })
+      expect(response.status, `${contract.method} ${contract.path}`).not.toBe(404)
+    }
+    expect(f.service.bindHarnessSession).not.toHaveBeenCalled()
+  })
+
   it('rejects absent session, missing CSRF, untrusted host and untrusted origin', async () => {
     const f = await fixture()
     expect((await f.request('/devices', { method: 'GET' })).status).toBe(401)
-    expect((await f.request('/bind-agent', {
-      method: 'POST', headers: { cookie: `${SESSION_COOKIE}=session-token` }, body: JSON.stringify({ harness_session_id: 'a' }),
+    expect((await f.request('/devices/revoke', {
+      method: 'POST', headers: { cookie: `${SESSION_COOKIE}=session-token` }, body: JSON.stringify({ session_id: 'other-session' }),
     })).status).toBe(200)
     f.service.validateCsrfToken.mockImplementationOnce(() => { throw new IdentityError('csrf', 'csrf') })
-    expect((await f.request('/bind-agent', { method: 'POST', headers: authHeaders, body: JSON.stringify({ harness_session_id: 'a' }) })).status).toBe(401)
+    expect((await f.request('/devices/revoke', { method: 'POST', headers: authHeaders, body: JSON.stringify({ session_id: 'other-session' }) })).status).toBe(401)
     f.allowedHosts.splice(0)
     expect((await f.request('/session', { method: 'GET' })).status).toBe(401)
     f.allowedHosts.push(f.host)

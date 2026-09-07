@@ -69,7 +69,8 @@
 			}
 		}
 
-		handle {
+		@studio_surface path /studio /studio/* /api/studio/*
+		handle @studio_surface {
 			forward_auth {$DZ23_HARNESS_UPSTREAM:127.0.0.1:3210} {
 				uri /api/studio/identity/session
 				header_up X-DZ23-Edge "{$DZ23_EDGE_SECRET}"
@@ -79,6 +80,10 @@
 			reverse_proxy {$DZ23_HARNESS_UPSTREAM:127.0.0.1:3210} {
 				header_up X-DZ23-Edge "{$DZ23_EDGE_SECRET}"
 			}
+		}
+
+		handle {
+			respond "not found" 404
 		}
 	}
 }

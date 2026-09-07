@@ -41,7 +41,7 @@ export class AssistantSessionLaunchError extends Error {
 }
 
 export interface AssistantSessionLauncherOptions {
-  readonly identity: Pick<StudioIdentityService, 'bindHarnessSession'>
+  readonly identity: Pick<StudioIdentityService, 'bindHarnessSession' | 'isSharedHarnessClientAllowed' | 'releaseHarnessSession'>
   readonly tenancy: Pick<StudioTenancyService, 'authorizationFor'>
   readonly sessions: AssistantSessionControllerPort
   readonly repositories: readonly AssistantRepositoryLaunchConfig[]
@@ -68,6 +68,13 @@ export class AssistantSessionLauncher {
   }
 
   launch(identitySession: SessionRecord): Promise<AssistantSessionLaunch> {
+    if (!this.options.identity.isSharedHarnessClientAllowed(identitySession)) {
+      return Promise.reject(new AssistantSessionLaunchError('FORBIDDEN', t('assistant.personalOnly')))
+    }
+    return this.launchTenantConversation(identitySession)
+  }
+
+  launchTenantConversation(identitySession: SessionRecord): Promise<AssistantSessionLaunch> {
     return this.#mutex.run(`assistant-session:${identitySession.session_id}`, () => (
       this.#launchLocked(identitySession)
     ))
@@ -79,7 +86,7 @@ export class AssistantSessionLauncher {
       identitySession.org_id,
       identitySession.tenant_id,
     )
-    if (authorization === undefined || !roleAllows(authorization.role, 'project.read')) {
+    if (authorization === undefined || !roleAllows(authorization.role, 'project.write')) {
       throw new AssistantSessionLaunchError('FORBIDDEN', t('assistant.forbidden'))
     }
     const repository = this.repositories.find(candidate => (
@@ -128,6 +135,21 @@ export class AssistantSessionLauncher {
     }
   }
 
+  /**
+   * Drops a pointer the Harness itself refused to resume. Losing the pointer is
+   * never worse than keeping it: the conversation is already unreachable. A
+   * failure to record the release must not break opening a new conversation, so
+   * it is reported and swallowed.
+   */
+  async #release(identitySession: SessionRecord, harnessSessionId: string, reason: string): Promise<void> {
+    this.#activeByIdentitySession.delete(identitySession.session_id)
+    try {
+      await this.options.identity.releaseHarnessSession(identitySession, harnessSessionId, reason)
+    } catch (error) {
+      this.options.reportFailure?.('inspect', error)
+    }
+  }
+
   async #existingSession(
     identitySession: SessionRecord,
     repository: ValidatedRepositoryConfig,
@@ -143,14 +165,20 @@ export class AssistantSessionLauncher {
       try {
         inspected = await this.options.sessions.inspect(sessionId)
       } catch (error) {
-        if (error instanceof ApiSessionNotFound) continue
+        if (error instanceof ApiSessionNotFound) {
+          await this.#release(identitySession, rawId, t('assistant.releasedMissing'))
+          continue
+        }
         this.options.reportFailure?.('inspect', error)
         throw new AssistantSessionLaunchError(
           'SESSION_UNAVAILABLE',
           t('assistant.inspectUnavailable'),
         )
       }
-      if (inspected.meta.agentPreset !== ASSISTANT_AGENT_PRESET) continue
+      if (inspected.meta.agentPreset !== ASSISTANT_AGENT_PRESET) {
+        await this.#release(identitySession, rawId, t('assistant.releasedForeign'))
+        continue
+      }
       if (inspected.meta.cwd !== repository.repositoryPath) {
         throw new AssistantSessionLaunchError(
           'SESSION_CONFLICT',

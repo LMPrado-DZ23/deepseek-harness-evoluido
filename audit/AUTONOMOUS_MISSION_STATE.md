@@ -13,6 +13,7 @@
 - base: `2f2a772d98d916514652e0f7797f00339c9a3877`
 - upstream: `deepseek-harness@6c705be1ce6774a000d061da41d1823b03a3d42c`
 - staging válido: `/home/leandro/dz23-gates/m63-integration-20260906`
+- staging de teste M73: `/home/leandro/dz23-gates/m73-clean-dc35c1f`
 - staging inválido preservado: `/home/leandro/dz23-m61-lock-20260904a` (origem calculada incorretamente e sincronização interrompida)
 
 ## Checkpoint preservado — M79

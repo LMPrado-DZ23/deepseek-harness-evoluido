@@ -4,6 +4,7 @@
   },
   "assistant": {
     "forbidden": "Seu acesso a este projeto não está ativo.",
+    "personalOnly": "A conversa integrada está disponível apenas na instalação pessoal. No modo equipe, cada conversa precisa de isolamento próprio.",
     "notConfigured": "O administrador ainda não liberou um projeto para esta conversa.",
     "serviceNotConfigured": "A conversa segura ainda não foi configurada.",
     "createUnavailable": "A conversa não pôde ser criada agora. Tente novamente em instantes.",
@@ -12,6 +13,25 @@
     "repositoryConflict": "A conversa existente pertence a outro projeto e não será aberta.",
     "adoptConflict": "A conversa existente não pôde ser retomada com o perfil seguro.",
     "repositoriesList": "assistantRepositories deve ser uma lista.",
-    "duplicateRepository": "Existe mais de um projeto do Assistente para a mesma organização e espaço."
+    "duplicateRepository": "Existe mais de um projeto do Assistente para a mesma organização e espaço.",
+    "conversationMissing": "Conversa não encontrada.",
+    "sendUnavailable": "Não foi possível enviar sua mensagem agora.",
+    "cancelUnavailable": "Não foi possível interromper esta tarefa agora.",
+    "projectForbidden": "Você não tem acesso ao assistente neste projeto.",
+    "genericAction": "Ação do assistente",
+    "approvalExplanation": "Esta ação precisa da sua confirmação antes de continuar.",
+    "toolList": "Consultar assistentes disponíveis",
+    "toolStart": "Iniciar um assistente especializado",
+    "toolStatus": "Acompanhar o trabalho do assistente",
+    "toolCancel": "Interromper o trabalho do assistente",
+    "toolApply": "Aplicar uma proposta ao projeto",
+    "toolTeam": "Coordenar uma equipe de assistentes",
+    "toolStudio": "Executar uma ação do DZ23 STUDIO",
+    "invalidMessage": "Envie a mensagem em JSON, no formato {\"text\": \"sua mensagem\"}.",
+    "releasedMissing": "o Harness não encontrou mais esta conversa",
+    "releasedForeign": "esta sessão não é uma conversa do assistente",
+    "methodNotAllowed": "Esta ação não é permitida neste endereço.",
+    "messageTooLarge": "Esta mensagem é grande demais. Divida em partes menores.",
+    "interfaceUnavailable": "Não foi possível abrir a interface agora. Tente de novo em instantes; nada do seu trabalho foi perdido."
   }
 }

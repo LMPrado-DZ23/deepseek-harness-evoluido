@@ -1,6 +1,7 @@
 # ADR-037 — Sessão governada do Assistente no Harness
 
-Status: aceito para BETA pessoal/dispositivo em M71.
+Status: aceito para BETA pessoal/dispositivo em M71; perfil servidor fechado
+pela ADR-038.
 
 ## Contexto
 
@@ -55,6 +56,8 @@ mesmo grupo isolado.
 - A listagem e o histórico de sessões do cliente atual do Harness não possuem
   isolamento por tenant. Uso simultâneo por várias pessoas na mesma instalação
   é `NOT_SUPPORTED`, não apenas pendência de teste.
+- No perfil servidor, o launcher e a troca do cookie nativo recusam a abertura;
+  a borda não encaminha raiz, API, RPC nem WebSocket do Harness.
 - Turno com modelo real, redirecionamento em navegador real, PostgreSQL físico,
   reinício, celular e operação prolongada continuam `NOT_EXECUTED`.
 

@@ -7,8 +7,8 @@
 
 O WebServer do Harness fixado não oferece um interceptor global externo. Proteger
 somente as APIs do Studio deixaria a interface, os assets, o RPC e o WebSocket
-nativos fora da mesma política. Além disso, o Harness mantém uma sessão nativa
-própria, necessária para suas rotas internas.
+nativos fora da mesma política. A investigação M73 também confirmou que a sessão
+de navegador nativa é autenticada por processo/autoridade, sem identidade DZ23.
 
 ## Decisão
 
@@ -17,8 +17,9 @@ porta `3210` não é publicada. No Compose, o serviço Harness compartilha o
 namespace de rede do Caddy para que ambos vejam o mesmo loopback. Somente o
 serviço Caddy publica 80/443, e somente o processo Caddy escuta nessas portas.
 
-Toda rota passa por `forward_auth` em
-`GET /api/studio/identity/session`, exceto:
+Somente a superfície do Studio (`/studio`, `/studio/*` e `/api/studio/*`) passa
+por `forward_auth` em `GET /api/studio/identity/session`. Permanecem públicas
+apenas:
 
 - `/api/studio/identity/magic/*`;
 - `/api/studio/identity/passkey/login/*`;
@@ -26,8 +27,9 @@ Toda rota passa por `forward_auth` em
 - `/healthz`.
 
 Não há Basic Auth nem outra exceção implícita. O subpedido de autenticação remove
-`Connection` e `Upgrade`; depois da autorização, o proxy normal preserva o
-upgrade do WebSocket.
+`Connection` e `Upgrade`. Qualquer rota restante, inclusive a raiz, RPCs,
+`/api/session/*` e o mux WebSocket `/api/remote.mux`, recebe 404. O perfil servidor
+não expõe o cliente nativo do Harness.
 
 O Caddy sobrescreve `X-DZ23-Edge` com o valor de `DZ23_EDGE_SECRET`. A configuração
 do plugin contém apenas `edge.secretRef`; o segredo é resolvido novamente a cada
@@ -39,10 +41,10 @@ modo pessoal em loopback e
 borda é exigida, o modo pessoal implícito também é desligado, mesmo que o processo
 esteja em loopback atrás do sidecar.
 
-Depois do login DZ23, `/api/studio/identity/harness/session` autentica a sessão e
-redireciona uma única vez para o mecanismo oficial de troca do Harness. O navegador
-passa a carregar os dois cookies HttpOnly. Isso preserva a autenticação nativa sem
-alterar o upstream.
+Depois do login DZ23, o navegador segue para `/studio/`. No perfil servidor,
+`/api/studio/identity/harness/session` responde 403 e nunca emite o cookie nativo
+do Harness. A troca nativa permanece disponível apenas na instalação pessoal em
+loopback, com uma única pessoa cadastrada. A razão e a evidência estão na ADR-038.
 
 O primeiro proprietário nunca é escolhido por corrida pública. Em instalação de
 servidor, `DZ23_BOOTSTRAP_OWNER_EMAIL` é obrigatório e o enrollment usa o modo
@@ -71,8 +73,8 @@ rotas protegidas podem usar a sessão opaca como chave.
 
 ## TLS e headers
 
-Servidor usa ACME automático e HSTS. O perfil local usa `tls internal`, grava sua
-CA apenas no volume do Caddy e nunca instala certificado no host. CSP não admite
+Servidor usa ACME automático e HSTS. O perfil local usa HTTP em domínio
+`.localhost`, sem CA própria e sem instalar certificado no host. CSP não admite
 `unsafe-eval` nem scripts/estilos inline; o artefato React fixado foi inspecionado
 e suas referências são externas. Também são enviados `frame-ancestors 'none'`,
 `X-Frame-Options: DENY`, `nosniff`, Permissions Policy e
@@ -80,10 +82,11 @@ e suas referências são externas. Também são enviados `frame-ancestors 'none'
 
 ## Evidência e limites
 
-`pnpm prove:edge` subiu o Harness real e a imagem Caddy sem privilégios em portas
-efêmeras. Provou 401/200 para raiz, asset e conexão HTTP, 401/200 para RPC e
-401/101 para WebSocket; revogação imediata; 429 e liberação; cabeçalhos; e recusa
-da porta interna a um contêiner externo.
+O P29-C original provou a borda anterior com Harness real e Caddy sem privilégios.
+M73 alterou deliberadamente essa superfície: o gate agora exige 401/200 somente
+para o Studio, 403 na troca de cookie nativo e 404 para raiz, API, RPC e WebSocket
+do Harness. A configuração e as negativas são cobertas sem Docker; a repetição
+física do `pnpm prove:edge` permanece necessária antes de promover a borda M73.
 
 Isso autoriza a capacidade como BETA, não como produção pronta. Ainda não foram
 executados: ACME num domínio real, aparelho físico, Tailscale, instalação da imagem

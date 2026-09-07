@@ -146,6 +146,22 @@ describe('StudioIdentityService', () => {
     })
   })
 
+  it('allows the process-wide Harness browser client only for one local registered person', async () => {
+    const local = makeHarness()
+    const first = await login(local)
+    expect(local.service.isSharedHarnessClientAllowed(first.session)).toBe(true)
+
+    const edge = makeHarness('closed', false)
+    expect(edge.service.isSharedHarnessClientAllowed(first.session)).toBe(false)
+
+    const secondUser = {
+      ...local.repository.users()[0]!, user_id: 'user-2', email: 'second@example.com', bootstrap_owner: false,
+    }
+    await local.repository.putUser(secondUser)
+    expect(local.service.isSharedHarnessClientAllowed(first.session)).toBe(false)
+    expect(local.service.isSharedHarnessClientAllowed({ ...first.session, user_id: 'user-2' })).toBe(false)
+  })
+
   it('allows only the configured email to win bootstrap enrollment', async () => {
     const h = makeHarness({ mode: 'bootstrap-email', email: ' Owner@Example.com ' }, false)
     const [competitor, owner] = await Promise.all([
@@ -272,6 +288,16 @@ describe('StudioIdentityService', () => {
     await expect(h.service.bindHarnessSession(first.session, ' ')).rejects.toMatchObject({ code: 'invalid' })
     await h.service.bindHarnessSession(first.session, 'agent-1')
     await h.service.bindHarnessSession(h.repository.sessionMap.get(first.session.session_id)!, 'agent-1')
+    expect(h.service.ownsHarnessSession(first.session, 'agent-1')).toBe(true)
+    expect(h.service.ownsHarnessSession({ ...first.session, user_id: 'other' }, 'agent-1')).toBe(false)
+    expect(h.service.ownsHarnessSession({ ...first.session, org_id: 'other' }, 'agent-1')).toBe(false)
+    expect(h.service.ownsHarnessSession({ ...first.session, tenant_id: 'other' }, 'agent-1')).toBe(false)
+    expect(h.service.ownsHarnessSession(second.session, 'agent-1')).toBe(false)
+    expect(h.service.ownsHarnessSession(first.session, ' ')).toBe(false)
+    await expect(h.service.bindHarnessSession(second.session, 'agent-1')).rejects.toMatchObject({ code: 'replay' })
+    expect(h.service.auditRecords()).toContainEqual(expect.objectContaining({
+      event_type: 'harness_session_bound', outcome: 'failure', session_id: second.session.session_id,
+    }))
     expect(h.service.strongIdentityForHarnessSession('agent-1')).toBe(false)
     expect(h.service.identityStateForHarnessSession('agent-1', '0.0.0.0')).toEqual({
       authenticated: true, strongIdentityVerified: false,
@@ -279,10 +305,139 @@ describe('StudioIdentityService', () => {
     expect(h.service.sessionRecords()).toHaveLength(2)
     await h.service.revokeAllSessions(second.session)
     expect(h.repository.sessions().every(session => session.revoked_at !== null)).toBe(true)
+    expect(h.service.ownsHarnessSession(first.session, 'agent-1')).toBe(false)
     expect(h.service.strongIdentityForHarnessSession('agent-1')).toBe(false)
     expect(h.service.identityStateForHarnessSession('agent-1', '0.0.0.0')).toEqual({
       authenticated: false, strongIdentityVerified: false,
     })
+  })
+
+  it('serializes assistant bindings and fails closed on ambiguous imported ownership', async () => {
+    const h = makeHarness()
+    const first = await login(h)
+    await h.service.requestMagicCode('owner@example.com')
+    const second = await h.service.verifyMagicCode('owner@example.com', '123456', { ...device, label: 'Celular' })
+
+    await Promise.all([
+      h.service.bindHarnessSession(first.session, 'agent-a'),
+      h.service.bindHarnessSession(first.session, 'agent-b'),
+    ])
+    expect(h.repository.sessionMap.get(first.session.session_id)?.harness_session_ids).toEqual(['agent-a', 'agent-b'])
+
+    const contested = await Promise.allSettled([
+      h.service.bindHarnessSession(first.session, 'agent-contested'),
+      h.service.bindHarnessSession(second.session, 'agent-contested'),
+    ])
+    expect(contested.filter(result => result.status === 'fulfilled')).toHaveLength(1)
+    expect(contested.filter(result => result.status === 'rejected')).toHaveLength(1)
+    expect(h.repository.sessions().filter(session => session.harness_session_ids.includes('agent-contested'))).toHaveLength(1)
+
+    const secondStored = h.repository.sessionMap.get(second.session.session_id)!
+    h.repository.sessionMap.set(secondStored.session_id, {
+      ...secondStored,
+      harness_session_ids: [...secondStored.harness_session_ids, 'agent-a'],
+    })
+    expect(h.service.ownsHarnessSession(first.session, 'agent-a')).toBe(false)
+    expect(h.service.ownsHarnessSession(second.session, 'agent-a')).toBe(false)
+    expect(h.service.principalForHarnessSession('agent-a')).toBeUndefined()
+    expect(h.service.strongIdentityForHarnessSession('agent-a')).toBe(false)
+    expect(h.service.identityStateForHarnessSession('agent-a', '0.0.0.0')).toEqual({
+      authenticated: false, strongIdentityVerified: false,
+    })
+  })
+
+  it('refuses a ninth conversation pointer instead of silently dropping one', async () => {
+    const h = makeHarness()
+    const issued = await login(h)
+    for (let index = 0; index < 8; index += 1) {
+      await h.service.bindHarnessSession(h.repository.sessionMap.get(issued.session.session_id)!, `agent-${String(index)}`)
+    }
+    const full = h.repository.sessionMap.get(issued.session.session_id)!
+    expect(full.harness_session_ids).toHaveLength(8)
+    await expect(h.service.bindHarnessSession(full, 'agent-8')).rejects.toMatchObject({ code: 'invalid' })
+    const stored = h.repository.sessionMap.get(issued.session.session_id)!
+    expect(stored.harness_session_ids).toHaveLength(8)
+    expect(stored.harness_session_ids[0]).toBe('agent-0')
+    expect(stored.harness_session_ids).not.toContain('agent-8')
+    expect(h.service.ownsHarnessSession(stored, 'agent-0')).toBe(true)
+    const refused = h.service.auditRecords().filter(record => (
+      record.event_type === 'harness_session_bound' && record.outcome === 'failure'
+    ))
+    expect(refused).toHaveLength(1)
+    expect(refused[0]?.reason).toContain('8')
+  })
+
+  it('releases a pointer only with an audit written first, and lets the freed slot be reused', async () => {
+    const h = makeHarness()
+    const issued = await login(h)
+    for (let index = 0; index < 8; index += 1) {
+      await h.service.bindHarnessSession(h.repository.sessionMap.get(issued.session.session_id)!, `agent-${String(index)}`)
+    }
+    await h.service.releaseHarnessSession(
+      h.repository.sessionMap.get(issued.session.session_id)!, 'agent-0', 'o Harness não encontrou mais esta conversa',
+    )
+    const afterRelease = h.repository.sessionMap.get(issued.session.session_id)!
+    expect(afterRelease.harness_session_ids).toHaveLength(7)
+    expect(afterRelease.harness_session_ids).not.toContain('agent-0')
+    expect(h.service.ownsHarnessSession(afterRelease, 'agent-0')).toBe(false)
+    const released = h.service.auditRecords().filter(record => record.event_type === 'harness_session_unbound')
+    expect(released).toHaveLength(1)
+    expect(released[0]).toMatchObject({ outcome: 'success', session_id: issued.session.session_id })
+    expect(released[0]?.reason).toContain('agent-0')
+    // Liberar é idempotente e não inventa auditoria para ponteiro inexistente.
+    await h.service.releaseHarnessSession(afterRelease, 'agent-0', 'de novo')
+    expect(h.service.auditRecords().filter(record => record.event_type === 'harness_session_unbound')).toHaveLength(1)
+    await expect(h.service.releaseHarnessSession(afterRelease, ' ', 'vazio')).rejects.toMatchObject({ code: 'invalid' })
+    // Linha de sessão que sumiu no meio do caminho falha fechado.
+    const vanished = makeHarness()
+    const gone = await login(vanished)
+    await vanished.service.bindHarnessSession(vanished.repository.sessionMap.get(gone.session.session_id)!, 'agent-x')
+    vanished.repository.sessionMap.clear()
+    await expect(vanished.service.releaseHarnessSession(gone.session, 'agent-x', 'motivo'))
+      .rejects.toMatchObject({ code: 'invalid' })
+    // A vaga liberada volta a aceitar uma conversa nova.
+    await h.service.bindHarnessSession(h.repository.sessionMap.get(issued.session.session_id)!, 'agent-8')
+    expect(h.repository.sessionMap.get(issued.session.session_id)!.harness_session_ids).toHaveLength(8)
+  })
+
+  it('does not write the session before the release audit succeeds', async () => {
+    const h = makeHarness()
+    const issued = await login(h)
+    await h.service.bindHarnessSession(h.repository.sessionMap.get(issued.session.session_id)!, 'agent-0')
+    const putAudit = h.repository.putAudit.bind(h.repository)
+    h.repository.putAudit = async record => {
+      if (record.event_type === 'harness_session_unbound') throw new Error('auditoria indisponível')
+      return putAudit(record)
+    }
+    await expect(h.service.releaseHarnessSession(
+      h.repository.sessionMap.get(issued.session.session_id)!, 'agent-0', 'motivo',
+    )).rejects.toThrow()
+    expect(h.repository.sessionMap.get(issued.session.session_id)!.harness_session_ids).toContain('agent-0')
+  })
+
+
+  it('fails closed when session rows disappear or are revoked during serialized mutations', async () => {
+    const missingBinding = makeHarness()
+    const issued = await login(missingBinding)
+    missingBinding.repository.sessionMap.clear()
+    await expect(missingBinding.service.bindHarnessSession(issued.session, 'agent-gone'))
+      .rejects.toMatchObject({ code: 'invalid' })
+
+    const removedDuringRevoke = makeHarness()
+    const removed = await login(removedDuringRevoke)
+    const removedRows = removedDuringRevoke.repository.sessions.bind(removedDuringRevoke.repository)
+    let removedReads = 0
+    removedDuringRevoke.repository.sessions = () => ++removedReads === 1 ? removedRows() : []
+    await expect(removedDuringRevoke.service.revokeAllSessions(removed.session)).resolves.toBeUndefined()
+
+    const revokedDuringRevoke = makeHarness()
+    const revoked = await login(revokedDuringRevoke)
+    const revokedRows = revokedDuringRevoke.repository.sessions.bind(revokedDuringRevoke.repository)
+    let revokedReads = 0
+    revokedDuringRevoke.repository.sessions = () => ++revokedReads === 1
+      ? revokedRows()
+      : revokedRows().map(row => ({ ...row, revoked_at: '2026-09-06T00:00:00.000Z' }))
+    await expect(revokedDuringRevoke.service.revokeAllSessions(revoked.session)).resolves.toBeUndefined()
   })
 
   it('registers a passkey, rejects duplicate credentials and expired or replayed challenges', async () => {
@@ -370,6 +525,23 @@ describe('StudioIdentityService', () => {
     expect(h.service.strongIdentityForHarnessSession('agent-strong')).toBe(false)
   })
 
+  it('does not recreate a session removed while a strong-identity ceremony is finishing', async () => {
+    const h = makeHarness()
+    const issued = await login(h)
+    const registration = await h.service.beginPasskeyRegistration(issued.token)
+    await h.service.finishPasskeyRegistration(issued.token, registration.challengeId, registrationResponse, 'Passkey')
+    const stepUp = await h.service.beginStepUp(issued.token)
+    const putCredential = h.repository.putCredential.bind(h.repository)
+    h.repository.putCredential = async value => {
+      await putCredential(value)
+      h.repository.sessionMap.clear()
+    }
+    h.passkeys.counter = 2
+    await expect(h.service.finishStepUp(issued.token, stepUp.challengeId, authResponse()))
+      .rejects.toMatchObject({ code: 'invalid' })
+    expect(h.repository.sessions()).toHaveLength(0)
+  })
+
   it('serializes concurrent one-time code and challenge consumption', async () => {
     const h = makeHarness()
     const issued = await login(h)
@@ -413,6 +585,9 @@ describe('StudioIdentityService', () => {
     await h.service.bindHarnessSession(issued.session, 'agent-invited')
     expect(h.service.principalForHarnessSession('agent-invited')).toMatchObject({ orgId: 'org-invite' })
     expect(h.service.principalForHarnessSession('missing')).toBeUndefined()
+    h.repository.userMap.clear()
+    expect(h.service.principalForHarnessSession('agent-invited')).toBeUndefined()
+    await h.repository.putUser(user)
     h.setNow('2027-01-01T00:00:00.000Z')
     expect(h.service.principalForHarnessSession('agent-invited')).toBeUndefined()
     await h.service.recordAdministrationEvent(

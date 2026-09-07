@@ -133,10 +133,6 @@ function cookieHeader(response) {
   return response.headers.getSetCookie().map(value => value.split(';', 1)[0]).join('; ')
 }
 
-function mergeCookies(...headers) {
-  return headers.flatMap(value => value.split('; ')).join('; ')
-}
-
 async function websocketStatus(url, cookies, origin) {
   const wsPackage = readdirSync(join(upstreamRoot, 'node_modules', '.pnpm'))
     .find(name => name.startsWith('ws@8.21.0'))
@@ -181,21 +177,17 @@ try {
   caddy = startCaddy(edgePort, harnessPort)
   await waitUntilReady(edgeOrigin, caddy)
 
-  const builtIndex = readFileSync(join(upstreamRoot, 'apps', 'web', 'dist', 'index.html'), 'utf8')
-  const asset = builtIndex.match(/(?:src|href)="\.\/(assets\/[^\"]+)"/)?.[1]
-  assert.ok(asset, 'real Harness index did not declare a built asset')
-  assert.doesNotMatch(builtIndex, /<script(?![^>]*\bsrc=)[^>]*>/i, 'CSP proof found an inline script')
-  assert.doesNotMatch(builtIndex, /<style\b/i, 'CSP proof found an inline style')
-
-  const unauthenticatedPaths = ['/', `/${asset}`, '/api/edge-proof']
+  const unauthenticatedPaths = ['/studio/', '/api/studio/identity/csrf']
   for (const path of unauthenticatedPaths) {
     assert.equal((await fetch(`${edgeOrigin}${path}`)).status, 401, `${path} was not protected`)
   }
+  assert.equal((await fetch(`${edgeOrigin}/`)).status, 404, 'raw Harness root was exposed')
+  assert.equal((await fetch(`${edgeOrigin}/api/edge-proof`)).status, 404, 'raw Harness API was exposed')
   assert.equal((await fetch(`${edgeOrigin}/edge-proof/ping`, {
     method: 'POST', headers: { 'content-type': 'application/json', origin: edgeOrigin },
     body: JSON.stringify({ type: 'client-request', rpcId: 'unauthenticated', method: 'ping', payload: {} }),
-  })).status, 401)
-  assert.equal(await websocketStatus(`ws://127.0.0.1:${edgePort}/api/remote.mux`, '', edgeOrigin), 401)
+  })).status, 404)
+  assert.equal(await websocketStatus(`ws://127.0.0.1:${edgePort}/api/remote.mux`, '', edgeOrigin), 404)
 
   const direct = await fetch(`http://127.0.0.1:${harnessPort}/api/studio/identity/session`, {
     headers: { host: `127.0.0.1:${edgePort}` },
@@ -248,37 +240,27 @@ try {
   const exchange = await fetch(`${edgeOrigin}/api/studio/identity/harness/session`, {
     redirect: 'manual', headers: { cookie: studioCookies },
   })
-  assert.equal(exchange.status, 303)
-  const launchLocation = exchange.headers.get('location')
-  assert.ok(launchLocation?.startsWith(`${edgeOrigin}/?token=`))
-  const nativeExchange = await fetch(launchLocation, { redirect: 'manual', headers: { cookie: studioCookies } })
-  assert.equal(nativeExchange.status, 303)
-  const allCookies = mergeCookies(studioCookies, cookieHeader(nativeExchange))
-  const authenticatedHeaders = { cookie: allCookies, origin: edgeOrigin }
+  assert.equal(exchange.status, 403)
+  assert.equal(exchange.headers.get('location'), null)
+  const authenticatedHeaders = { cookie: studioCookies, origin: edgeOrigin }
 
-  const root = await fetch(`${edgeOrigin}/`, { headers: authenticatedHeaders })
-  assert.equal(root.status, 200)
-  assert.match(await root.text(), /<div id="root"><\/div>/)
-  assert.equal(root.headers.get('content-security-policy')?.includes("'unsafe-eval'"), false)
-  assert.equal(root.headers.get('x-frame-options'), 'DENY')
-  assert.equal(root.headers.get('x-content-type-options'), 'nosniff')
-  assert.equal(root.headers.get('referrer-policy'), 'strict-origin-when-cross-origin')
-  assert.equal(root.headers.get('strict-transport-security'), null, 'test/local HTTP must not emit HSTS')
-  assert.equal(root.headers.get('server'), null)
-  assert.equal((await fetch(`${edgeOrigin}/${asset}`, { headers: authenticatedHeaders })).status, 200)
+  const studio = await fetch(`${edgeOrigin}/studio/`, { headers: authenticatedHeaders })
+  assert.equal(studio.status, 200)
+  assert.match(await studio.text(), /<div id="root"><\/div>/)
+  assert.equal(studio.headers.get('content-security-policy')?.includes("'unsafe-eval'"), false)
+  assert.equal(studio.headers.get('x-frame-options'), 'DENY')
+  assert.equal(studio.headers.get('x-content-type-options'), 'nosniff')
+  assert.equal(studio.headers.get('referrer-policy'), 'strict-origin-when-cross-origin')
+  assert.equal(studio.headers.get('strict-transport-security'), null, 'test/local HTTP must not emit HSTS')
+  assert.equal(studio.headers.get('server'), null)
   const api = await fetch(`${edgeOrigin}/api/edge-proof`, { headers: authenticatedHeaders })
-  assert.equal(api.status, 200)
-  assert.deepEqual(await api.json(), { ok: true, carrier: 'connection.fetch' })
+  assert.equal(api.status, 404)
   const rpc = await fetch(`${edgeOrigin}/edge-proof/ping`, {
     method: 'POST', headers: { ...authenticatedHeaders, 'content-type': 'application/json' },
     body: JSON.stringify({ type: 'client-request', rpcId: 'edge-rpc', method: 'ping', payload: { proof: true } }),
   })
-  assert.equal(rpc.status, 200)
-  assert.deepEqual(await rpc.json(), {
-    type: 'server-response', rpcId: 'edge-rpc',
-    result: { ok: true, value: { endpoint: 'ping', payload: { proof: true }, carrier: 'connection.rpc' } },
-  })
-  assert.equal(await websocketStatus(`ws://127.0.0.1:${edgePort}/api/remote.mux`, allCookies, edgeOrigin), 101)
+  assert.equal(rpc.status, 404)
+  assert.equal(await websocketStatus(`ws://127.0.0.1:${edgePort}/api/remote.mux`, studioCookies, edgeOrigin), 404)
 
   const sessionToken = decodeURIComponent(studioCookies.match(/(?:^|;\s*)dz23_studio_session=([^;]+)/)?.[1] ?? '')
   const identitySession = await booted.ctx.studioIdentity.service.authenticate(sessionToken, false)
@@ -313,13 +295,13 @@ try {
     platform: process.platform,
     filesystem: 'WSL2 ext4 (/home)',
     routes: {
-      root: { unauthenticated: 401, authenticated: 200 },
-      asset: { path: `/${asset}`, unauthenticated: 401, authenticated: 200 },
-      clientConnection: { path: '/api/edge-proof', unauthenticated: 401, authenticated: 200 },
-      rpc: { path: '/edge-proof/ping', unauthenticated: 401, authenticated: 200 },
-      websocket: { path: '/api/remote.mux', unauthenticated: 401, authenticated: 101 },
+      studio: { path: '/studio/', unauthenticated: 401, authenticated: 200 },
+      harnessRoot: { path: '/', status: 404 },
+      clientConnection: { path: '/api/edge-proof', status: 404 },
+      rpc: { path: '/edge-proof/ping', status: 404 },
+      websocket: { path: '/api/remote.mux', status: 404 },
     },
-    nativeSessionBridge: true,
+    nativeSessionBridge: 'BLOCKED_IN_TEAM_MODE',
     bootstrapOwnerRace: 'configured-email-only',
     revocationNextRequest: 401,
     staleCookieLogout: 200,

@@ -51,7 +51,7 @@ codeForm.addEventListener('submit', async event => {
     window.sessionStorage.setItem('dz23.studio.csrf.v1', issued.csrf_token)
     window.localStorage.setItem(sessionGenerationKey, issued.session_generation)
     message('Tudo certo. Abrindo seu espaço…', 'success')
-    window.location.assign('/api/studio/identity/harness/session')
+    window.location.assign('/studio/')
   } catch (error) {
     message(error instanceof Error ? error.message : 'Código inválido ou expirado.', 'error')
   }

@@ -46,8 +46,11 @@ async function fixture(options: {
   readonly authorization?: boolean
   readonly inspect?: AssistantSessionControllerPort['inspect']
   readonly create?: AssistantSessionControllerPort['create']
+  readonly sharedHarnessClientAllowed?: boolean
+  readonly releaseFails?: boolean
 } = {}) {
   const binds: string[] = []
+  const releases: string[] = []
   const failures: Array<{ readonly phase: string; readonly error: unknown }> = []
   const create = vi.fn<AssistantSessionControllerPort['create']>(options.create ?? (async request => ({
     sessionId: (request.sessionId ?? 'assistant-new') as never,
@@ -58,7 +61,14 @@ async function fixture(options: {
   }))
   const repositories = options.repositories ?? [await repository()]
   const launcher = await AssistantSessionLauncher.create({
-    identity: { bindHarnessSession: async (_session, id) => { binds.push(id) } },
+    identity: {
+      bindHarnessSession: async (_session, id) => { binds.push(id) },
+      releaseHarnessSession: async (_session, id) => {
+        releases.push(id)
+        if (options.releaseFails === true) throw new Error('auditoria indisponível')
+      },
+      isSharedHarnessClientAllowed: () => options.sharedHarnessClientAllowed !== false,
+    },
     tenancy: {
       authorizationFor: () => options.authorization === false ? undefined : ({
         userId: 'user-1', orgId: 'org-1', tenantId: 'tenant-1', role: options.role ?? 'owner',
@@ -68,7 +78,7 @@ async function fixture(options: {
     repositories,
     reportFailure: (phase, error) => { failures.push({ phase, error }) },
   })
-  return { launcher, create, inspect, binds, failures, repository: repositories[0]! }
+  return { launcher, create, inspect, binds, releases, failures, repository: repositories[0]! }
 }
 
 describe('governed Assistant Session launcher', () => {
@@ -105,11 +115,41 @@ describe('governed Assistant Session launcher', () => {
       session_id: 'match', reused: true, preset: ASSISTANT_AGENT_PRESET,
     })
     expect(f.create).toHaveBeenCalledWith({ cwd, sessionId: 'match', agentPreset: ASSISTANT_AGENT_PRESET })
+    // Ponteiro comprovadamente inutilizável é liberado; o que ainda serve permanece.
+    expect(f.releases).toEqual(['gone', 'other'])
+    expect(f.releases).not.toContain('match')
+  })
+
+  it('não perde a conversa quando o registro da liberação falha', async () => {
+    const f = await fixture({ releaseFails: true })
+    const cwd = f.repository.repositoryPath
+    f.inspect.mockImplementation(async id => {
+      if (id === 'gone') throw new ApiSessionNotFound('gone')
+      return { meta: { cwd, agentPreset: ASSISTANT_AGENT_PRESET } }
+    })
+    // Falhar ao registrar a liberação é reportado, não propagado: a pessoa
+    // continua conseguindo abrir a conversa.
+    await expect(f.launcher.launch(identitySession(['match', 'gone']))).resolves.toMatchObject({
+      session_id: 'match', reused: true,
+    })
+    expect(f.releases).toEqual(['gone'])
+    expect(f.failures.map(entry => entry.phase)).toContain('inspect')
   })
 
   it('fails closed for absent membership or repository configuration', async () => {
+    const team = await fixture({ sharedHarnessClientAllowed: false })
+    await expect(team.launcher.launch(identitySession())).rejects.toMatchObject({
+      code: 'FORBIDDEN', message: expect.stringContaining('instalação pessoal'),
+    })
+    expect(team.create).not.toHaveBeenCalled()
+    await expect(team.launcher.launchTenantConversation(identitySession())).resolves.toEqual({
+      session_id: 'assistant-new', reused: false, preset: ASSISTANT_AGENT_PRESET,
+    })
     const forbidden = await fixture({ authorization: false })
     await expect(forbidden.launcher.launch(identitySession())).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    const viewer = await fixture({ role: 'viewer' })
+    await expect(viewer.launcher.launchTenantConversation(identitySession())).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    expect(viewer.create).not.toHaveBeenCalled()
     const missing = await fixture({ repositories: [] })
     await expect(missing.launcher.launch(identitySession())).rejects.toMatchObject({ code: 'NOT_CONFIGURED' })
   })
