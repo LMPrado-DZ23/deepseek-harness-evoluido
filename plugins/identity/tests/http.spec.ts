@@ -335,6 +335,19 @@ describe('identity HTTP boundary', () => {
     expect(f.service.revokeSession).not.toHaveBeenCalled()
   })
 
+  it('does not claim logout completion when session lookup fails unexpectedly', async () => {
+    const f = await fixture()
+    f.service.authenticate.mockRejectedValueOnce(new Error('storage unavailable'))
+
+    const response = await f.request('/logout', {
+      method: 'POST', headers: { cookie: `${SESSION_COOKIE}=session-token` },
+    })
+
+    expect(response.status).not.toBe(200)
+    expect(response.headers.getSetCookie()).toEqual([])
+    expect(f.service.revokeSession).not.toHaveBeenCalled()
+  })
+
   it('does not let a shadow cookie bypass CSRF for a later active session', async () => {
     const f = await fixture()
     f.service.authenticate.mockImplementation(token => token === 'session-token'
