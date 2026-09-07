@@ -3,6 +3,7 @@ import type { AddressInfo } from 'node:net'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   clearSessionCookies,
+  COOKIE_HEADER_LIMIT_BYTES,
   createIdentityHttpHandler,
   authenticatedMutation,
   CSRF_COOKIE,
@@ -342,13 +343,14 @@ describe('identity HTTP boundary', () => {
 
   it('does not claim logout completion when session lookup fails unexpectedly', async () => {
     const f = await fixture()
-    f.service.authenticate.mockRejectedValueOnce(new Error('storage unavailable'))
+    f.service.authenticate.mockRejectedValueOnce(new Error('storage unavailable: password=top-secret path=/srv/private'))
 
     const response = await f.request('/logout', {
       method: 'POST', headers: { cookie: `${SESSION_COOKIE}=session-token` },
     })
 
-    expect(response.status).not.toBe(200)
+    expect(response.status).toBe(500)
+    expect(await response.json()).toEqual({ error: 'IDENTITY_INTERNAL_ERROR' })
     expect(response.headers.getSetCookie()).toEqual([])
     expect(f.service.revokeSession).not.toHaveBeenCalled()
   })
@@ -375,11 +377,30 @@ describe('identity HTTP boundary', () => {
   it('rejects an unbounded logout cookie set without claiming completion', async () => {
     const f = await fixture()
     const cookie = Array.from({ length: 65 }, (_, index) => `${SESSION_COOKIE}=candidate-${index}`).join('; ')
+    expect(Buffer.byteLength(cookie)).toBeLessThan(COOKIE_HEADER_LIMIT_BYTES)
     const response = await f.request('/logout', { method: 'POST', headers: { cookie } })
 
     expect(response.status).toBe(401)
     expect(response.headers.getSetCookie()).toEqual([])
     expect(f.service.authenticate).not.toHaveBeenCalled()
+  })
+
+  it('accepts the exact Cookie budget and rejects one byte more before parsing or authentication', async () => {
+    const exact = await fixture()
+    const prefix = 'padding='
+    const exactCookie = `${prefix}${'x'.repeat(COOKIE_HEADER_LIMIT_BYTES - Buffer.byteLength(prefix))}`
+    expect(Buffer.byteLength(exactCookie)).toBe(COOKIE_HEADER_LIMIT_BYTES)
+    expect((await exact.request('/session', { method: 'GET', headers: { cookie: exactCookie } })).status).toBe(200)
+
+    const exceeded = await fixture()
+    const oversizedCookie = `${exactCookie}x`
+    const response = await exceeded.request('/logout', { method: 'POST', headers: { cookie: oversizedCookie } })
+    expect(Buffer.byteLength(oversizedCookie)).toBe(COOKIE_HEADER_LIMIT_BYTES + 1)
+    expect(response.status).toBe(431)
+    expect(await response.json()).toEqual({ error: 'COOKIE_HEADER_TOO_LARGE' })
+    expect(response.headers.getSetCookie()).toEqual([])
+    expect(exceeded.service.authenticate).not.toHaveBeenCalled()
+    expect(exceeded.service.revokeSession).not.toHaveBeenCalled()
   })
 
   it('rejects absent session, missing CSRF, untrusted host and untrusted origin', async () => {
@@ -400,7 +421,9 @@ describe('identity HTTP boundary', () => {
 
   it('contains invalid JSON, wrong content type, oversized bodies and unknown routes', async () => {
     const f = await fixture()
-    expect((await f.request('/magic/start', { method: 'POST', body: '{' })).status).toBe(400)
+    const invalidJson = await f.request('/magic/start', { method: 'POST', body: '{' })
+    expect(invalidJson.status).toBe(400)
+    expect(await invalidJson.json()).toEqual({ error: 'JSON inválido.' })
     expect((await f.request('/magic/start', {
       method: 'POST', headers: { 'content-type': 'text/plain' }, body: '{}',
     })).status).toBe(400)
@@ -417,7 +440,15 @@ describe('identity HTTP boundary', () => {
     expect((await f.request('/magic/start', { method: 'POST', body: JSON.stringify({ email: 'bad' }) })).status).toBe(400)
     f.service.requestMagicCode.mockRejectedValueOnce('non-error')
     const nonError = await f.request('/magic/start', { method: 'POST', body: JSON.stringify({ email: 'a@example.com' }) })
-    expect(await nonError.json()).toEqual({ error: 'Solicitação inválida.' })
+    expect(nonError.status).toBe(500)
+    expect(await nonError.json()).toEqual({ error: 'IDENTITY_INTERNAL_ERROR' })
+    f.service.requestMagicCode.mockRejectedValueOnce(new Error('token=super-secret C:\\private\\identity.db'))
+    const secretFailure = await f.request('/magic/start', { method: 'POST', body: JSON.stringify({ email: 'a@example.com' }) })
+    const secretFailureText = await secretFailure.text()
+    expect(secretFailure.status).toBe(500)
+    expect(secretFailureText).toBe('{"error":"IDENTITY_INTERNAL_ERROR"}')
+    expect(secretFailureText).not.toContain('super-secret')
+    expect(secretFailureText).not.toContain('identity.db')
     const head = await f.request('/missing', { method: 'HEAD', headers: { cookie: `${SESSION_COOKIE}=session-token` } })
     expect(head.status).toBe(404)
   })

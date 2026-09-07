@@ -10,6 +10,13 @@ import { CSRF_COOKIE, parseCookies, parseCookieValues, SESSION_COOKIE, SESSION_G
 import { InMemoryIdentityRateLimiter, rateLimitBuckets, rateLimitKey } from './rate-limit.js'
 
 const JSON_LIMIT = 64 * 1024
+export const COOKIE_HEADER_LIMIT_BYTES = 8 * 1024
+const COOKIE_HEADER_TOO_LARGE = 'COOKIE_HEADER_TOO_LARGE'
+const IDENTITY_INTERNAL_ERROR = 'IDENTITY_INTERNAL_ERROR'
+
+class IdentityHttpInputError extends Error {}
+class CookieHeaderBudgetError extends Error {}
+
 export { CSRF_COOKIE, parseCookies, parseCookieValues, SESSION_COOKIE, SESSION_GENERATION_COOKIE } from './cookies.js'
 
 const emailSchema = z.object({ email: z.email() }).strict()
@@ -81,6 +88,7 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
   const createSessionGeneration = config.createSessionGeneration ?? (() => randomBytes(16).toString('hex'))
   return async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     try {
+      assertCookieHeaderBudget(request)
       await assertEdgeTrust(request, config)
       assertRequestTrust(request, config)
       /* v8 ignore next -- node:http always supplies a URL for server requests. */
@@ -253,15 +261,26 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
       await config.service.bindHarnessSession(session, body.harness_session_id)
       json(response, 200, { message: 'Sessão de trabalho protegida.' })
     } catch (error) {
-      const status = error instanceof IdentityError
-        ? error.code === 'not-found' ? 404 : error.code === 'locked' ? 429 : 401
-        : error instanceof z.ZodError ? 400 : 400
-      json(response, status, { error: error instanceof Error ? error.message : 'Solicitação inválida.' })
+      if (error instanceof CookieHeaderBudgetError) {
+        json(response, 431, { error: COOKIE_HEADER_TOO_LARGE })
+        return
+      }
+      if (error instanceof IdentityError) {
+        const status = error.code === 'not-found' ? 404 : error.code === 'locked' ? 429 : 401
+        json(response, status, { error: error.message })
+        return
+      }
+      if (error instanceof z.ZodError || error instanceof IdentityHttpInputError) {
+        json(response, 400, { error: error instanceof IdentityHttpInputError ? error.message : 'Solicitação inválida.' })
+        return
+      }
+      json(response, 500, { error: IDENTITY_INTERNAL_ERROR })
     }
   }
 }
 
 export async function authenticatedMutation(request: IncomingMessage, service: StudioIdentityService): Promise<SessionRecord> {
+  assertCookieHeaderBudget(request)
   const { session } = await authenticateCookieRequest(request, service)
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     const header = singleHeader(request.headers['x-dz23-csrf'])
@@ -271,12 +290,14 @@ export async function authenticatedMutation(request: IncomingMessage, service: S
 }
 
 export function requiredSessionToken(request: IncomingMessage): string {
+  assertCookieHeaderBudget(request)
   const token = parseCookieValues(request.headers.cookie, SESSION_COOKIE)[0]
   if (token === undefined || token === '') throw new IdentityError('invalid', 'Entre para continuar.')
   return token
 }
 
 async function authenticateCookieRequest(request: IncomingMessage, service: StudioIdentityService): Promise<{ readonly token: string; readonly session: SessionRecord }> {
+  assertCookieHeaderBudget(request)
   const candidates = [...new Set(parseCookieValues(request.headers.cookie, SESSION_COOKIE))]
   if (candidates.length === 0 || candidates.length > 64) throw new IdentityError('invalid', 'Entre para continuar.')
   let lastError: IdentityError | undefined
@@ -327,6 +348,13 @@ export function singleHeader(value: string | string[] | undefined): string | und
   return Array.isArray(value) ? value.length === 1 ? value[0] : undefined : value
 }
 
+function assertCookieHeaderBudget(request: IncomingMessage): void {
+  const header = request.headers.cookie
+  if (header !== undefined && Buffer.byteLength(header, 'utf8') > COOKIE_HEADER_LIMIT_BYTES) {
+    throw new CookieHeaderBudgetError()
+  }
+}
+
 export function deviceOf(request: IncomingMessage, label: string) {
   return {
     label,
@@ -346,7 +374,7 @@ function principalOf(session: SessionRecord) {
 
 async function readJson(request: IncomingMessage): Promise<unknown> {
   if (!singleHeader(request.headers['content-type'])?.toLowerCase().startsWith('application/json')) {
-    throw new Error('Envie os dados em formato JSON.')
+    throw new IdentityHttpInputError('Envie os dados em formato JSON.')
   }
   const chunks: Buffer[] = []
   let size = 0
@@ -354,13 +382,13 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
     /* v8 ignore next -- node:http request body chunks are Buffers. */
     const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
     size += bytes.length
-    if (size > JSON_LIMIT) throw new Error('Solicitação grande demais.')
+    if (size > JSON_LIMIT) throw new IdentityHttpInputError('Solicitação grande demais.')
     chunks.push(bytes)
   }
   try {
     return JSON.parse(Buffer.concat(chunks).toString('utf8'))
   } catch {
-    throw new Error('JSON inválido.')
+    throw new IdentityHttpInputError('JSON inválido.')
   }
 }
 
