@@ -40,6 +40,7 @@ jobs:
           tests/m6/studio-runtime-proof.test.mjs
           tests/m6/windows-preflight.test.mjs
           tests/portability/bootstrap-upstream.test.mjs
+          tests/portability/image-lock.test.mjs
 
   linux-and-postgres:
     name: Linux clean clone and PostgreSQL 16

@@ -87,9 +87,46 @@ test('Dockerfile usa exatamente as bases Node e PostgreSQL fixadas no lock', () 
   )
   assert.throws(
     () => validateDockerfileBase(dockerfile.replace('      /workspace/plugins/*/node_modules \\\n', ''), canonical),
-    /não reinjeta os pacotes compilados/u,
+    /não prova a topologia de desenvolvimento/u,
   )
-  const install = "pnpm install --offline --frozen-lockfile --trust-lockfile --filter '@dz23-studio/*...'"
+  assert.throws(
+    () => validateDockerfileBase(dockerfile.replace('RUN --network=none pnpm typecheck', 'RUN true'), canonical),
+    /sequência única/u,
+  )
+  assert.throws(
+    () => validateDockerfileBase(dockerfile.replace('RUN --network=none pnpm exec vitest run --maxWorkers=1', 'RUN true'), canonical),
+    /sequência única/u,
+  )
+  assert.throws(
+    () => validateDockerfileBase(dockerfile.replace('--network=none pnpm build', 'echo --network=none pnpm build'), canonical),
+    /sequência única/u,
+  )
+  assert.throws(
+    () => validateDockerfileBase(dockerfile.replace('--network=none pnpm build', '--network=none pnpm build || true'), canonical),
+    /sequência única/u,
+  )
+  const releaseActivation = dockerfile.lastIndexOf('RUN cp pnpm-workspace.release.yaml pnpm-workspace.yaml')
+  const tests = dockerfile.indexOf('RUN --network=none pnpm exec vitest run --maxWorkers=1')
+  const releaseActivationEnd = dockerfile.indexOf('\nRUN', releaseActivation) + 1
+  const releaseActivationBlock = dockerfile.slice(releaseActivation, releaseActivationEnd)
+  const withoutReleaseActivation = `${dockerfile.slice(0, releaseActivation)}${dockerfile.slice(releaseActivationEnd)}`
+  const activatedTooEarly = `${withoutReleaseActivation.slice(0, tests)}${releaseActivationBlock}${withoutReleaseActivation.slice(tests)}`
+  assert.throws(
+    () => validateDockerfileBase(activatedTooEarly, canonical),
+    /não prova a topologia de desenvolvimento/u,
+  )
+  const commentBypass = dockerfile
+    .replace('RUN --network=none pnpm typecheck', '# RUN --network=none pnpm typecheck\nRUN true')
+    .replace('RUN --network=none pnpm exec vitest run --maxWorkers=1', '# RUN --network=none pnpm exec vitest run --maxWorkers=1\nRUN true')
+  assert.throws(
+    () => validateDockerfileBase(commentBypass, canonical),
+    /sequência única/u,
+  )
+  assert.throws(
+    () => validateDockerfileBase(dockerfile.replace('FROM toolchain AS build', 'FROM dependency-fetch AS build'), canonical),
+    /partir diretamente de toolchain/u,
+  )
+  const install = "pnpm install --offline --frozen-lockfile --trust-lockfile --filter '@dz23-studio/*...' --store-dir /pnpm/store"
   const finalInstall = dockerfile.lastIndexOf(install)
   assert.notEqual(finalInstall, -1)
   const forced = `${dockerfile.slice(0, finalInstall)}${install} --force${dockerfile.slice(finalInstall + install.length)}`

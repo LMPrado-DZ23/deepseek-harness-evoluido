@@ -9,6 +9,34 @@ const SHA256_HEX = /^[0-9a-f]{64}$/u
 const SHA512_INTEGRITY = /^sha512-[A-Za-z0-9+/]+={0,2}$/u
 const EXPECTED_PLATFORMS = ['linux/amd64', 'linux/arm64']
 
+function dockerfileInstructions(source) {
+  const instructions = []
+  let current = ''
+  for (const rawLine of source.split(/\r?\n/u)) {
+    const line = rawLine.trim()
+    if (current === '' && (line === '' || line.startsWith('#'))) continue
+    const continued = /\\\s*$/u.test(line)
+    const segment = continued ? line.replace(/\\\s*$/u, '').trimEnd() : line
+    current = current === '' ? segment : `${current} ${segment}`
+    if (!continued) {
+      instructions.push(current.replace(/\s+/gu, ' ').trim())
+      current = ''
+    }
+  }
+  if (current !== '') throw new Error('Dockerfile termina com instrução incompleta')
+  return instructions
+}
+
+function dockerfileStage(dockerfile, alias) {
+  const headers = [...dockerfile.matchAll(/^FROM\s+(\S+)(?:\s+AS\s+([A-Za-z][A-Za-z0-9_.-]*))?\s*$/gimu)]
+  const index = headers.findIndex(match => match[2]?.toLowerCase() === alias.toLowerCase())
+  if (index < 0) throw new Error(`Dockerfile não declara estágio ${alias}`)
+  const header = headers[index]
+  const start = (header.index ?? 0) + header[0].length
+  const end = headers[index + 1]?.index ?? dockerfile.length
+  return { source: header[1], instructions: dockerfileInstructions(dockerfile.slice(start, end)) }
+}
+
 function exactKeys(value, expected, label) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error(`${label}: objeto esperado`)
@@ -165,25 +193,62 @@ export function validateDockerfileBase(dockerfile, lock) {
       || releaseFetch < (releaseLockCopies[0]?.index ?? -1)) {
     throw new Error('Dockerfile não busca e instala a topologia de release congelada')
   }
-  const studioBuild = dockerfile.indexOf('--network=none pnpm build')
-  const injectionReset = dockerfile.indexOf('RUN rm -rf', studioBuild)
-  const finalInstall = dockerfile.indexOf("pnpm install --offline --frozen-lockfile --trust-lockfile --filter '@dz23-studio/*...'", injectionReset)
-  const deploy = dockerfile.indexOf('pnpm --store-dir /pnpm/store --filter @dz23-studio/runtime deploy', finalInstall)
-  const resetBlock = injectionReset < 0 || finalInstall < 0 ? '' : dockerfile.slice(injectionReset, finalInstall)
+  const buildStage = dockerfileStage(dockerfile, 'build')
+  if (buildStage.source !== 'toolchain') {
+    throw new Error('estágio build precisa partir diretamente de toolchain')
+  }
+  const studioInstallCommand = "RUN --mount=type=cache,id=dz23-studio-pnpm-11,target=/pnpm/store,sharing=locked --network=none pnpm install --offline --frozen-lockfile --trust-lockfile --filter '@dz23-studio/*...' --store-dir /pnpm/store"
+  const studioBuildCommand = 'RUN --mount=type=cache,id=dz23-studio-pnpm-11,target=/pnpm/store,sharing=locked --network=none pnpm build'
+  const releaseActivationCommand = "RUN cp pnpm-workspace.release.yaml pnpm-workspace.yaml && cp pnpm-lock.release.yaml pnpm-lock.yaml && sed -i 's#__DZ23_ABSOLUTE_FILE_ROOT__#file:///workspace#g' pnpm-workspace.yaml"
+  const studioInstalls = buildStage.instructions
+    .map((instruction, index) => ({ instruction, index }))
+    .filter(({ instruction }) => instruction.startsWith(studioInstallCommand))
+  const studioBuilds = buildStage.instructions
+    .map((instruction, index) => ({ instruction, index }))
+    .filter(({ instruction }) => instruction === studioBuildCommand)
+  const typechecks = buildStage.instructions
+    .map((instruction, index) => ({ instruction, index }))
+    .filter(({ instruction }) => instruction === 'RUN --network=none pnpm typecheck')
+  const tests = buildStage.instructions
+    .map((instruction, index) => ({ instruction, index }))
+    .filter(({ instruction }) => instruction === 'RUN --network=none pnpm exec vitest run --maxWorkers=1')
+  const resets = buildStage.instructions
+    .map((instruction, index) => ({ instruction, index }))
+    .filter(({ instruction }) => instruction.startsWith('RUN rm -rf '))
+  const releaseActivations = buildStage.instructions
+    .map((instruction, index) => ({ instruction, index }))
+    .filter(({ instruction }) => instruction === releaseActivationCommand)
+  if (studioInstalls.length !== 2 || studioBuilds.length !== 1 || typechecks.length !== 1 || tests.length !== 1
+      || resets.length !== 1 || releaseActivations.length !== 1) {
+    throw new Error('Dockerfile não contém uma sequência única de build, verificação e ativação de release')
+  }
+  const [developmentInstall, finalInstall] = studioInstalls
+  const [studioBuild] = studioBuilds
+  const [studioTypecheck] = typechecks
+  const [studioTests] = tests
+  const [injectionReset] = resets
+  const [releaseActivation] = releaseActivations
   const resetTargets = [
     '/workspace/node_modules',
     '/workspace/plugins/*/node_modules',
     '/workspace/apps/*/node_modules',
     '/workspace/dsh-home/profiles/studio/node_modules',
   ]
-  if (studioBuild < 0 || injectionReset < studioBuild || finalInstall < injectionReset || deploy < finalInstall
-      || resetTargets.some(target => !resetBlock.includes(target))) {
-    throw new Error('Dockerfile não reinjeta os pacotes compilados antes do deploy')
+  if (studioBuild.index <= developmentInstall.index || studioTypecheck.index <= studioBuild.index
+      || studioTests.index <= studioTypecheck.index || injectionReset.index <= studioTests.index
+      || releaseActivation.index <= injectionReset.index || finalInstall.index <= releaseActivation.index
+      || developmentInstall.instruction !== studioInstallCommand
+      || finalInstall.instruction.includes('|| true')
+      || resetTargets.some(target => !injectionReset.instruction.includes(target))) {
+    throw new Error('Dockerfile não prova a topologia de desenvolvimento e reinjeta os pacotes compilados antes do deploy')
   }
-  if (dockerfile.slice(finalInstall, deploy).includes('--force')) {
+  if (!finalInstall.instruction.includes('pnpm --store-dir /pnpm/store --filter @dz23-studio/runtime deploy')) {
+    throw new Error('Dockerfile não reinjeta e publica o runtime na mesma instrução de release')
+  }
+  if (finalInstall.instruction.includes('--force')) {
     throw new Error('Dockerfile tenta atualizar cópias injetadas com --force sem instalação limpa')
   }
-  const deployCommand = dockerfile.slice(deploy, dockerfile.indexOf('\n', deploy))
+  const deployCommand = finalInstall.instruction.slice(finalInstall.instruction.indexOf('pnpm --store-dir /pnpm/store --filter @dz23-studio/runtime deploy'))
   if (!deployCommand.includes('--store-dir /pnpm/store') || !deployCommand.includes('deploy --prod --offline /opt/runtime') || deployCommand.includes('--legacy')) {
     throw new Error('Dockerfile não usa deploy moderno, congelado e offline')
   }

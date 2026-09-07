@@ -64,25 +64,28 @@ RUN --mount=type=cache,id=dz23-studio-pnpm-11,target=/pnpm/store,sharing=locked 
     --network=none \
     pnpm --dir third_party/deepseek-harness install --offline --frozen-lockfile --trust-lockfile --store-dir /pnpm/store
 RUN --network=none pnpm --dir third_party/deepseek-harness build:official
-# The development lock deliberately keeps one canonical type identity. The
-# release lock is generated from the same manifests with workspace injection
-# enabled, which lets modern pnpm deploy consume the frozen dependency graph.
-RUN cp pnpm-workspace.release.yaml pnpm-workspace.yaml \
- && cp pnpm-lock.release.yaml pnpm-lock.yaml \
- && sed -i 's#__DZ23_ABSOLUTE_FILE_ROOT__#file:///workspace#g' pnpm-workspace.yaml
+# Compile and verify the product under the development topology first. It keeps
+# one canonical type identity and makes the image build itself refuse source
+# that fails typecheck or the deterministic non-PostgreSQL suite.
 RUN --mount=type=cache,id=dz23-studio-pnpm-11,target=/pnpm/store,sharing=locked \
     --network=none \
     pnpm install --offline --frozen-lockfile --trust-lockfile --filter '@dz23-studio/*...' --store-dir /pnpm/store
 RUN --mount=type=cache,id=dz23-studio-pnpm-11,target=/pnpm/store,sharing=locked \
     --network=none pnpm build
-# pnpm's selectively injected runtime inputs are snapshots taken at install
-# time. Remove only the Studio workspace installation (the separately built
-# upstream stays intact), then recreate those snapshots from the fresh build.
+RUN --network=none pnpm typecheck
+RUN --network=none pnpm exec vitest run --maxWorkers=1
+# The release lock is generated from the same manifests with workspace
+# injection enabled, which lets modern pnpm deploy consume the frozen graph.
+# Remove only the verified development installation (the separately built
+# upstream stays intact), then create release snapshots from the fresh build.
 RUN rm -rf \
       /workspace/node_modules \
       /workspace/plugins/*/node_modules \
       /workspace/apps/*/node_modules \
       /workspace/dsh-home/profiles/studio/node_modules
+RUN cp pnpm-workspace.release.yaml pnpm-workspace.yaml \
+ && cp pnpm-lock.release.yaml pnpm-lock.yaml \
+ && sed -i 's#__DZ23_ABSOLUTE_FILE_ROOT__#file:///workspace#g' pnpm-workspace.yaml
 RUN --mount=type=cache,id=dz23-studio-pnpm-11,target=/pnpm/store,sharing=locked \
     --network=none \
     pnpm install --offline --frozen-lockfile --trust-lockfile --filter '@dz23-studio/*...' --store-dir /pnpm/store \
