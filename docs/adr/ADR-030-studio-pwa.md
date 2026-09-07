@@ -146,6 +146,23 @@ na M80 (Codex). Numeração: a ADR-028 está reservada à M1 (preview) do Codex.
    aparelho; a recusa de uma navegação continua esvaziando, e há teste para as
    duas metades.
 
+14. **Uma saída confirmada alcança todas as abas, mas uma prévia não decide o
+    que preservar.** A M82 coloca um boundary acima da escolha de tela em
+    `main.tsx`; Início, Hub e Assistente recebem o mesmo sinal versionado e sem
+    dados por `BroadcastChannel`, com evento de `localStorage` como fallback.
+    A aba receptora nunca repete o POST: consulta a sessão duas vezes e limpa
+    somente depois de duas respostas não autenticadas. Para não apagar um
+    login novo concluído enquanto a resposta antiga estava em voo, magic e
+    passkey devolvem um nonce aleatório não autoritativo que a página de login
+    grava em `localStorage` na origem do Studio. Cookies não são usados nessa
+    decisão: uma prévia em `p-*.dz23.localhost` pode criar um cookie para o
+    domínio pai, mas não pode escrever no armazenamento da origem
+    `studio.dz23.localhost`. O teste adversarial rotaciona esse cookie durante
+    a consulta final e exige limpeza e `/login`; outro teste conclui um login
+    legítimo no mesmo instante e exige preservação da nova sessão. Sinais
+    duplicados são deduplicados, callbacks concorrentes são agrupados e todos
+    os listeners são removidos no unmount.
+
 ## Limites verdadeiros
 
 Sem push, sem sincronização em segundo plano, sem cache de dados: **não há
@@ -167,7 +184,10 @@ ticket/TTL próprio, mas a autorização revalida a sessão de origem a cada ped
 e o teste prova a recusa imediatamente após revogação. Caddy/Docker real nesta
 etapa e aparelho físico continuam `NOT_EXECUTED`. Evidência em
 `docs/proofs/M80-secure-signout.md` e
-`docs/proofs/M81-secure-signout-browser-e2e.md`.
+`docs/proofs/M81-secure-signout-browser-e2e.md`. A M82 acrescentou a
+sincronização entre telas e abas, a proteção da corrida de novo login e a
+prova de que cookie plantado pela prévia não controla a limpeza. Evidência em
+`docs/proofs/M82-cross-tab-secure-signout.md`.
 
 ## O que continua em aberto
 

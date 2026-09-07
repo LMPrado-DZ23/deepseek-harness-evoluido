@@ -3,12 +3,12 @@
 - `mission_id`: `M1-M6-finalizacao-2026-09-04`
 - `objective`: integrar e provar M1-M6 com segurança, sem push, PR, deploy ou exclusões não autorizadas
 - `state`: `INTEGRATING_AND_PROVING`
-- `iteration`: `2026-09-06.21`
+- `iteration`: `2026-09-07.22`
 - `started_at`: `2026-09-04 America/Sao_Paulo`
-- `heartbeat_at`: `2026-09-06T22:53:20-03:00`
-- `last_progress_at`: `2026-09-06T22:53:20-03:00`
-- `branch`: `codex/m81-signout-browser-e2e`
-- `head`: `ac4860e` (ponta funcional; documentação posterior não altera a implementação)
+- `heartbeat_at`: `2026-09-07T01:24:00-03:00`
+- `last_progress_at`: `2026-09-07T01:24:00-03:00`
+- `branch`: `codex/m82-cross-tab-signout`
+- `head`: `2056fb0` (ponta funcional; documentação posterior não altera a implementação)
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c`
 
 ## Critérios de aceite
@@ -77,6 +77,15 @@
   cobertura, builds/typecheck/gates limpos e scan
   `781b183b-a00b-4c09-9e76-2be9a266b84e` com zero achado. Caddy/Docker real e
   celular físico seguem `NOT_EXECUTED`.
+- M82 sincroniza a saída confirmada entre Início, Hub e Assistente sem repetir
+  a mutação. Quatro revisões independentes encontraram e fecharam cobertura
+  parcial de telas, corrida com login novo e controle do marcador por cookie
+  de domínio pai vindo da prévia. O marcador final fica no `localStorage` da
+  origem Studio e não tem autoridade. Aplicativo 72/72, identidade 20/20,
+  builds/typecheck/gates e Chromium adversarial passaram. Scan
+  `14ad9210-23d6-42d4-a411-0a13800496b3`: nove superfícies, zero achado. A
+  suíte Playwright 1.50.1 canônica ficou `BLOCKED_ENVIRONMENT` pelo cache
+  offline inconsistente; a prova alternativa não mascara essa limitação.
 - Claude entregou M3+M4+M5 em `9034a85`; transporte íntegro, mas ainda baseado em `b95d23c`. A composição sobre `d819314` foi solicitada novamente com evidência do merge-base.
 - Preview recebeu o checkpoint isolado `7273b38`: instalação offline com lock congelado, 178/178 testes e build passaram em WSL/ext4. A prova de ausência usa `previewId`, portanto uma troca de `runtimeRef` não libera capacidade prematuramente.
 - Retenção fail-closed foi fechada em `011f118`: nenhuma remoção física de artefatos na v1, 28/28 testes executados, 2 skips explícitos e 21/21 no namespace Linux com bind mounts reais.
@@ -118,7 +127,7 @@
 
 ## Próxima ação
 
-1. Claude revisar M74-A, M75, M76, M77, M78, M79, M80 e M81 sem sobreposição de arquivos;
+1. Claude revisar M74-A, M75, M76, M77, M78, M79, M80, M81 e M82 sem sobreposição de arquivos;
 2. manter M74-B parado até GO explícito de M74-A e não tocar na M72 de Claude;
 3. Claude revisar somente leitura o M77; a execução real fica aguardando
    imagens finais e autorização explícita para Docker;
