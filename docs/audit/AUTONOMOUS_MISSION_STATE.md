@@ -94,6 +94,16 @@
   quarentena persistente no segundo reinício e bloqueio de HTTP antes do
   reconcile passaram revisão independente; 212 testes/2 skips e recorte 60/60.
   Single-active = GO; active-active = `NOT_IMPLEMENTED`.
+- Conversa tenant-aware está isolada em M74-A `c7482e6`: transporte, histórico
+  e autorização passaram gates próprios; M74-B continua aguardando parecer do
+  Claude e não foi iniciado.
+- Reconciliação segura de agentes está em fechamento isolado na M75 sobre
+  `646c47b`: 122/122 focados, cobertura crítica de 100%, typecheck, builds e
+  gates de contrato passaram. A suíte cumulativa teve cinco falhas de carga em
+  `builder-supervisor`; os dois arquivos residuais passaram 89/89 na base
+  intacta. Três processos Node separados provaram seed, recuperação e
+  idempotência com o mesmo armazenamento, preservando o Git worktree. Revisão
+  independente ainda será solicitada antes de qualquer merge.
 
 ## Tarefas atuais e propriedade de arquivos
 
@@ -148,3 +158,13 @@ Executar `git status`, `git rev-parse HEAD`, ler este arquivo e os finais de
 `outputs/HANDOFF_CODEX_CLAUDE.md`. Não resetar a árvore compartilhada. Consultar
 os agentes vivos antes de editar `plugins/preview/**`,
 `plugins/runtime-governor/**`, `deploy/windows/**` ou `tests/m6/**`.
+
+## Integração cumulativa (Claude, 07/09/2026)
+
+Candidata nova a partir de `codex/m89-immutable-staging@f1677b4`. A principal
+antiga em `17e79aa` **permanece preservada** e não recebeu merge.
+
+Ordem: M90/M72 por avanço direto (descende de M89), depois M75-B, depois a
+linha M74/M91. Conflito único e documental neste arquivo, resolvido mantendo o
+estado mais recente da linha M89 — a fila de ações do ramo M75 já tinha sido
+cumprida pelos pareceres emitidos.

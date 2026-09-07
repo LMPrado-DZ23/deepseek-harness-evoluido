@@ -77,6 +77,7 @@
   "runtime": {
     "persona": "Trabalhe somente na cópia isolada e nos caminhos aprovados.",
     "cancelReason": "Cancelada pela pessoa no DZ23 STUDIO.",
-    "cancelBeta": "BETA: o cancelamento ativo é mantido somente neste processo."
+    "cancelBeta": "BETA: o cancelamento ativo é mantido somente neste processo.",
+    "cancelReconciled": "A execução já foi encerrada com segurança durante a recuperação do reinício; a cópia de trabalho foi preservada para conferência."
   }
 }

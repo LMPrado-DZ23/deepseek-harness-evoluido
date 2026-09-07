@@ -47,6 +47,12 @@ export interface AgentTeamSnapshot {
   readonly tasks: readonly AgentTeamTaskRecord[]
 }
 
+export interface AgentTeamRestartReconciliation {
+  readonly updatedTasks: number
+  readonly updatedTeams: number
+  readonly reconciledAt: string
+}
+
 interface ActiveTask {
   readonly jobId: JobId
   readonly owner: Agent
@@ -60,6 +66,9 @@ export class AgentTeamError extends Error {
 
 const FAILURE_STATUSES = new Set<AgentTeamTaskRecord['status']>([
   'FAILED', 'CANCELLED', 'BUDGET_EXCEEDED', 'REJECTED',
+  // UNKNOWN pede atencao humana: a equipe nao pode ser dada como concluida
+  // enquanto uma tarefa nao tiver encerramento comprovado.
+  'UNKNOWN',
 ])
 
 type DerivedTeamStatus = Exclude<AgentTeamRecord['status'], 'CANCELLED'>
@@ -187,6 +196,38 @@ export class StudioAgentTeamService {
   }
 
   activeTaskCount(): number { return this.#active.size }
+
+  async reconcileInterruptedTeams(): Promise<AgentTeamRestartReconciliation> {
+    const runs = new Map(this.dependencies.agents.runs().map(run => [run.run_id, run]))
+    const interruptedTasks = this.dependencies.repository.tasks()
+      .filter(task => task.status === 'RUNNING')
+      .sort((left, right) => taskKey(left.team_id, left.task_id).localeCompare(taskKey(right.team_id, right.task_id)))
+    if (interruptedTasks.some(task => task.run_id !== null && runs.get(task.run_id)?.status === 'RUNNING')) {
+      throw new AgentTeamError('INVALID_STATE', t('errors.reconciliationIncomplete'))
+    }
+    const reconciledAt = this.#now()
+    for (const task of interruptedTasks) {
+      const run = task.run_id === null ? undefined : runs.get(task.run_id)
+      const status = run === undefined ? 'FAILED' as const : taskStatus(run.status)
+      await this.dependencies.repository.putTask({
+        ...task,
+        status,
+        diagnostic: run?.diagnostic ?? (status === 'FAILED' ? t('status.processLost') : null),
+        updated_at: run?.updated_at ?? reconciledAt,
+      })
+    }
+    let updatedTeams = 0
+    for (const team of this.dependencies.repository.teams()
+      .filter(candidate => candidate.status !== 'CANCELLED' && candidate.status !== 'COMPLETED')
+      .sort((left, right) => left.team_id.localeCompare(right.team_id))) {
+      const status = deriveTeamStatus(this.#teamTasks(team.team_id))
+      const diagnostic = statusDiagnostic(status)
+      if (status === team.status && diagnostic === team.diagnostic) continue
+      await this.dependencies.repository.putTeam({ ...team, status, diagnostic, updated_at: reconciledAt })
+      updatedTeams += 1
+    }
+    return { updatedTasks: interruptedTasks.length, updatedTeams, reconciledAt }
+  }
 
   async #launchReady(
     team: AgentTeamRecord,

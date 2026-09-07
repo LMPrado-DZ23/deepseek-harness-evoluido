@@ -59,6 +59,7 @@ describe('@dz23-studio/agents composition', { timeout: 30_000 }, () => {
       studioIdentity: { service: { strongIdentityForHarnessSession: vi.fn(() => true) } },
       agentPresets: { mount: vi.fn(() => Promise.resolve()) },
       agents: {
+        list: vi.fn(() => [parent]),
         create: vi.fn((options: { sessionId: ReturnType<typeof SessionId>; meta: { cwd: string }; setup(agentCtx: unknown): Promise<void> }) => {
           void options.setup({})
           return Promise.resolve({
@@ -80,10 +81,12 @@ describe('@dz23-studio/agents composition', { timeout: 30_000 }, () => {
       },
       jobs: {
         attachController: vi.fn(() => vi.fn()),
+        list: vi.fn(() => []),
         start: vi.fn((spec: JobStart) => { hooks = spec.run(); return 'studio-agent-1' }),
       },
     }
     await apply(ctx as never, { worktreeRoot, coordinatorPreset: 'dz23-coordinator' })
+    expect(runtime.restartReconciliation).toMatchObject({ interruptedRuns: 0, releasedLeases: 0 })
     expect(runtime.providerStates().codex).toMatch(/^(OK|NOT_PRESENT|NOT_CONFIGURED)$/)
     expect(runtime.providerStates()['claude-code']).toBe('NOT_CONFIGURED')
     runtime.service.start({

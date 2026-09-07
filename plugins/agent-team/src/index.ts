@@ -9,7 +9,11 @@ import {
   type AgentTeamTaskKey,
   type AgentTeamTaskRecord,
 } from './model.js'
-import { StudioAgentTeamService, type AgentTeamRepository } from './service.js'
+import {
+  StudioAgentTeamService,
+  type AgentTeamRepository,
+  type AgentTeamRestartReconciliation,
+} from './service.js'
 
 export * from './model.js'
 export * from './service.js'
@@ -19,6 +23,7 @@ export const inject = ['jobs', 'storageDomain', 'studioAgents']
 
 export interface StudioAgentTeamRuntime {
   readonly service: StudioAgentTeamService
+  readonly restartReconciliation: AgentTeamRestartReconciliation
   teams(): readonly AgentTeamRecord[]
   tasks(): readonly AgentTeamTaskRecord[]
   readonly automaticDependentStart: 'NOT_PRESENT'
@@ -53,10 +58,12 @@ export async function apply(ctx: Context): Promise<void> {
     agents: ctx.studioAgents,
     killJob: (jobId, owner, reason) => ctx.jobs.kill(jobId as JobId, owner, reason),
   })
+  const restartReconciliation = await service.reconcileInterruptedTeams()
   const detachJobDone = ctx.jobs.onJobDone(snapshot => service.releaseJob(snapshot.id as JobId))
   ctx.effect(() => detachJobDone, 'studio-agent-team.jobDone')
   ctx.provide('studioAgentTeams', {
     service,
+    restartReconciliation,
     teams: () => repository.teams(),
     tasks: () => repository.tasks(),
     automaticDependentStart: 'NOT_PRESENT',

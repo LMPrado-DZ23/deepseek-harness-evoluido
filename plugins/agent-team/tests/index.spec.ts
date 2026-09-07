@@ -39,6 +39,7 @@ describe('@dz23-studio/agent-team composition', () => {
     }
     await apply(ctx as never)
     expect(runtime.automaticDependentStart).toBe('NOT_PRESENT')
+    expect(runtime.restartReconciliation).toMatchObject({ updatedTasks: 0, updatedTeams: 0 })
     await runtime.service.start({
       orgId: 'org', tenantId: 'tenant', workspaceId: 'tenant', repositoryPath: '/repo',
       parent: { session: { id: 'person' } } as Agent,
