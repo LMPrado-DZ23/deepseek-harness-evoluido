@@ -9,6 +9,9 @@ export class CapacityGovernorError extends Error {
         this.name = 'CapacityGovernorError';
     }
 }
+export function isDistributedCapacityGovernor(value) {
+    return typeof value.takeover === 'function';
+}
 export const DEFAULT_CAPACITY_LIMITS = Object.freeze({
     'prompt-job': Object.freeze({ global: 4, perTenant: 2, perProject: 1 }),
     build: Object.freeze({ global: 1, perTenant: 1, perProject: 1 }),

@@ -1,4 +1,4 @@
-import { CSRF_COOKIE, assertRequestTrust, parseCookies, requiredSessionToken, singleHeader, IdentityError, } from '@dz23-studio/identity';
+import { authenticatedMutation, assertRequestTrust, singleHeader, IdentityError, } from '@dz23-studio/identity';
 import { assertRouteContracts, roleAllows, studioRoleSchema, } from '@dz23-studio/policy';
 import { z } from 'zod';
 import { StudioTenancyService, TenancyError } from './service.js';
@@ -25,12 +25,7 @@ export function createTenancyHttpHandler(config) {
             const match = matchRoute(request.method, route);
             if (match === undefined)
                 return json(response, 404, { error: 'Rota não encontrada.' });
-            const token = requiredSessionToken(request);
-            const session = await config.identity.authenticate(token);
-            if (request.method !== 'GET') {
-                const cookies = parseCookies(request.headers.cookie);
-                config.identity.validateCsrf(session, cookies[CSRF_COOKIE], singleHeader(request.headers['x-dz23-csrf']));
-            }
+            const session = await authenticatedMutation(request, config.identity);
             const actor = config.service.actorFromSession(session);
             if (request.method === 'GET' && route === '/workspaces') {
                 return json(response, 200, { workspaces: config.service.listWorkspaces(actor) });

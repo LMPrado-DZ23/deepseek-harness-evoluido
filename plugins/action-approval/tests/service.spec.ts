@@ -208,6 +208,33 @@ describe('M90-A — autoridade genérica de confirmação', () => {
     expect(await h.service.get(actor, created.approval_id)).toMatchObject({ state: 'CONSUMED', claim_id: 'release-1' })
   })
 
+  it('a correção NÃO depende de escrita condicional: sem ela, ainda há um só recibo', async () => {
+    // Este repositório se comporta como o seam real de domínio: `put(chave,
+    // valor)`, sem "grave só se o estado ainda for X". Quem segura a corrida
+    // aqui é o mutex do serviço, e é exatamente isso que este teste prova.
+    const repository = new InMemoryActionApprovalRepository(false)
+    const service = new StudioActionApprovalService({
+      repository, identity: { strongIdentityVerified: () => true }, now: () => new Date(START),
+    })
+    const created = await service.request(descriptor())
+    const confirms = await Promise.allSettled([
+      service.confirm(actor, created.approval_id),
+      service.confirm(actor, created.approval_id),
+    ])
+    expect(confirms.filter(result => result.status === 'fulfilled')).toHaveLength(1)
+
+    const consumes = await Promise.allSettled([
+      service.consume(claim(created.approval_id)),
+      service.consume(claim(created.approval_id, { claimId: 'release-rival' })),
+    ])
+    const receipts = consumes.flatMap(result => result.status === 'fulfilled' ? [result.value] : [])
+    // Uma confirmação vale por UMA ação: a segunda reivindicação é recusada.
+    expect(receipts).toHaveLength(1)
+    expect(receipts[0]).toMatchObject({ claim_id: 'release-1' })
+    const stored = await service.get(actor, created.approval_id)
+    expect(stored).toMatchObject({ state: 'CONSUMED', claim_id: 'release-1' })
+  })
+
   it('dois pedidos concorrentes com o mesmo descritor convergem para um só', async () => {
     const h = harness()
     const [first, second] = await Promise.all([

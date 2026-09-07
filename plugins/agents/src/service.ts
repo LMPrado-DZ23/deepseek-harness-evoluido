@@ -418,10 +418,13 @@ export class StudioAgentService {
   }
 
   #hasPersistedWork(): boolean {
-    return this.dependencies.repository.runs().some(run => run.status === 'RUNNING')
-      || this.dependencies.repository.leases().some(lease => (
-        lease.active && !this.#unknownRunIds().has(lease.run_id)
-      ))
+    if (this.dependencies.repository.runs().some(run => run.status === 'RUNNING')) return true
+    const active = this.dependencies.repository.leases().filter(lease => lease.active)
+    if (active.length === 0) return false
+    // O conjunto é construído UMA vez. Dentro do predicado, ele seria
+    // reconstruído sobre todas as execuções a cada reserva ativa.
+    const unknown = this.#unknownRunIds()
+    return active.some(lease => !unknown.has(lease.run_id))
   }
 
   #unknownRunIds(): ReadonlySet<string> {

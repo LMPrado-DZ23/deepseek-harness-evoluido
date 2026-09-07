@@ -21,7 +21,7 @@ export class StudioAssistantBridge {
         this.#repositories = repositories;
     }
     static async create(dependencies, repositories) {
-        const validated = await Promise.all(repositories.map(validateRepository));
+        const validated = await Promise.all(repositories.map(validateAssistantRepository));
         const keys = new Set();
         for (const repository of validated) {
             const key = scopeKey(repository);
@@ -40,9 +40,6 @@ export class StudioAssistantBridge {
         }
         if (!isAssistantProvider(input.provider)) {
             throw new AssistantBridgeError('NOT_CONFIGURED', t('errors.externalProviderNotConfigured'));
-        }
-        if (!repository.providers.has(input.provider)) {
-            throw new AssistantBridgeError('FORBIDDEN', t('errors.providerForbidden'));
         }
         const maxPaths = repository.maxPaths;
         if (input.intendedPaths.length === 0 || input.intendedPaths.length > maxPaths) {
@@ -74,6 +71,72 @@ export class StudioAssistantBridge {
         this.#runsByJob.set(String(accepted.jobId), accepted.runId);
         return { run_id: accepted.runId, job_id: String(accepted.jobId), status: 'RUNNING', required_tier: accepted.requiredTier };
     }
+    async startTeam(agent, input, sensitive) {
+        const principal = this.#principal(agent, 'project.write');
+        const repository = this.#repository(principal);
+        if (!isAssistantProvider(input.provider)) {
+            throw new AssistantBridgeError('NOT_CONFIGURED', t('errors.externalProviderNotConfigured'));
+        }
+        const tasks = input.tasks.map(task => ({
+            ...task,
+            intendedPaths: this.#validatedPaths(task.intendedPaths, repository),
+        }));
+        const snapshot = await this.#teamsRuntime().service.start({
+            orgId: principal.orgId,
+            tenantId: principal.tenantId,
+            workspaceId: repository.workspaceId,
+            repositoryPath: repository.repositoryPath,
+            parent: agent,
+            provider: input.provider,
+            name: input.name,
+            tasks,
+            approval: {
+                approved: true,
+                tier: sensitive === undefined ? 'T2' : 'T3',
+                approvedBy: principal.userId,
+            },
+            ...(sensitive === undefined ? {} : { sensitive }),
+            ...(repository.budget === undefined ? {} : { budget: repository.budget }),
+        });
+        return this.#summarizeTeam(snapshot, principal, repository);
+    }
+    listTeams(agent) {
+        const principal = this.#principal(agent, 'project.read');
+        const repository = this.#repository(principal);
+        const runtime = this.#teamsRuntime();
+        return runtime.teams()
+            .filter(team => teamBelongsToRepository(team, principal, repository))
+            .map(team => this.#summarizeTeam({
+            team,
+            tasks: runtime.tasks().filter(task => task.team_id === team.team_id),
+        }, principal, repository));
+    }
+    async teamStatus(agent, teamId) {
+        const principal = this.#principal(agent, 'project.read');
+        const repository = this.#repository(principal);
+        this.#scopedTeam(teamId, principal, repository);
+        return this.#summarizeTeam(await this.#teamsRuntime().service.status(teamId), principal, repository);
+    }
+    async continueTeam(agent, teamId, sensitive) {
+        const principal = this.#principal(agent, 'project.write');
+        const repository = this.#repository(principal);
+        const team = this.#scopedTeam(teamId, principal, repository);
+        const expectedTier = sensitive ? 'T3' : 'T2';
+        if (team.required_tier !== expectedTier) {
+            throw new AssistantBridgeError('INVALID_REQUEST', t('errors.teamTier'));
+        }
+        return this.#summarizeTeam(await this.#teamsRuntime().service.continue(teamId, agent, {
+            approved: true,
+            tier: expectedTier,
+            approvedBy: principal.userId,
+        }, repository.budget), principal, repository);
+    }
+    async cancelTeam(agent, teamId, reason) {
+        const principal = this.#principal(agent, 'project.write');
+        const repository = this.#repository(principal);
+        this.#scopedTeam(teamId, principal, repository);
+        return this.#summarizeTeam(await this.#teamsRuntime().service.cancel(teamId, principal.userId, reason), principal, repository);
+    }
     list(agent) {
         const principal = this.#principal(agent, 'project.read');
         const repository = this.#repository(principal);
@@ -100,9 +163,14 @@ export class StudioAssistantBridge {
         if (run.approved_by !== principal.userId)
             throw new AssistantBridgeError('FORBIDDEN', t('errors.cancelOwner'));
         const active = this.#jobs.get(runId);
-        if (active === undefined || active.userId !== principal.userId) {
+        if (active === undefined) {
+            if (run.status !== 'RUNNING') {
+                return { run_id: runId, outcome: 'already-finished', limitation: t('runtime.cancelReconciled') };
+            }
             throw new AssistantBridgeError('CANCEL_UNAVAILABLE', t('errors.cancelUnavailable'));
         }
+        if (active.userId !== principal.userId)
+            throw new AssistantBridgeError('FORBIDDEN', t('errors.cancelOwner'));
         const outcome = this.dependencies.killJob(active.jobId, active.owner, reason?.trim() || t('runtime.cancelReason'));
         if (outcome === 'already-finished')
             this.releaseJob(active.jobId);
@@ -162,8 +230,38 @@ export class StudioAssistantBridge {
         }
         return run;
     }
+    #scopedTeam(teamId, principal, repository) {
+        const team = this.#teamsRuntime().teams().find(candidate => candidate.team_id === teamId);
+        if (team === undefined || !teamBelongsToRepository(team, principal, repository)) {
+            throw new AssistantBridgeError('NOT_FOUND', t('errors.teamMissing'));
+        }
+        return team;
+    }
+    #validatedPaths(paths, repository) {
+        if (!Array.isArray(paths) || paths.length === 0 || paths.length > repository.maxPaths) {
+            throw new AssistantBridgeError('INVALID_REQUEST', t('errors.pathCount', { max: repository.maxPaths }));
+        }
+        const normalized = [...new Set(paths.map(normalizeRelativePath))];
+        if (normalized.some(path => !repository.allowedPaths.some(allowed => withinAllowedPath(path, allowed)))) {
+            throw new AssistantBridgeError('FORBIDDEN', t('errors.pathForbidden'));
+        }
+        return normalized;
+    }
+    #summarizeTeam(snapshot, principal, repository) {
+        if (!teamBelongsToRepository(snapshot.team, principal, repository)
+            || snapshot.tasks.some(task => !taskBelongsToTeam(task, snapshot.team))) {
+            throw new AssistantBridgeError('NOT_FOUND', t('errors.teamMissing'));
+        }
+        return summarizeTeam(snapshot);
+    }
+    #teamsRuntime() {
+        if (this.dependencies.studioAgentTeams === undefined) {
+            throw new AssistantBridgeError('NOT_CONFIGURED', t('errors.teamNotConfigured'));
+        }
+        return this.dependencies.studioAgentTeams;
+    }
 }
-async function validateRepository(input) {
+export async function validateAssistantRepository(input) {
     assertExactObject(input, ['orgId', 'tenantId', 'workspaceId', 'repositoryPath', 'allowedPaths', 'providers', 'budget', 'maxPaths'], 'repository');
     if (![input.orgId, input.tenantId, input.workspaceId, input.repositoryPath].every(value => typeof value === 'string')) {
         throw new AssistantBridgeError('INVALID_REQUEST', t('errors.repositoryStrings'));
@@ -284,16 +382,15 @@ async function validateGitBoundary(repositoryPath) {
         throw new AssistantBridgeError('INVALID_REQUEST', t('errors.gitRoot'));
     }
     const reciprocalPath = await realpath(resolve(adminPath, reciprocalDescriptor.trim())).catch(() => undefined);
-    const markerPath = await realpath(gitMarker).catch(() => undefined);
-    if (reciprocalPath === undefined || markerPath === undefined || !sameCanonicalPath(reciprocalPath, markerPath)) {
+    // repositoryPath is already canonical and .git was lstat-verified as a
+    // regular file, so resolving the marker again only introduced a TOCTOU gap.
+    if (reciprocalPath === undefined || !sameCanonicalPath(reciprocalPath, gitMarker)) {
         throw new AssistantBridgeError('INVALID_REQUEST', t('errors.gitRoot'));
     }
     await validateGitEntries(adminPath, commonPath);
 }
 function sameCanonicalPath(left, right) {
-    return process.platform === 'win32'
-        ? resolve(left).toLowerCase() === resolve(right).toLowerCase()
-        : relative(resolve(left), resolve(right)) === '';
+    return relative(resolve(left), resolve(right)) === '';
 }
 function isAssistantProvider(provider) {
     return ASSISTANT_ALLOWED_PROVIDERS.includes(provider);
@@ -366,4 +463,37 @@ function runBelongsToRepository(run, principal, repository) {
             return false;
         }
     });
+}
+function teamBelongsToRepository(team, principal, repository) {
+    return team.org_id === principal.orgId
+        && team.tenant_id === principal.tenantId
+        && team.workspace_id === repository.workspaceId
+        && team.provider === 'spawn-in-process'
+        && sameCanonicalPath(team.repository_path, repository.repositoryPath);
+}
+function taskBelongsToTeam(task, team) {
+    return task.team_id === team.team_id
+        && task.org_id === team.org_id
+        && task.tenant_id === team.tenant_id
+        && task.workspace_id === team.workspace_id;
+}
+function summarizeTeam(snapshot) {
+    return {
+        team_id: snapshot.team.team_id,
+        name: snapshot.team.name,
+        status: snapshot.team.status,
+        required_tier: snapshot.team.required_tier,
+        diagnostic: snapshot.team.diagnostic,
+        tasks: snapshot.tasks.map(task => ({
+            task_id: task.task_id,
+            title: task.title,
+            role: task.role,
+            status: task.status,
+            run_id: task.run_id,
+            depends_on: task.depends_on,
+            diagnostic: task.diagnostic,
+        })),
+        created_at: snapshot.team.created_at,
+        updated_at: snapshot.team.updated_at,
+    };
 }

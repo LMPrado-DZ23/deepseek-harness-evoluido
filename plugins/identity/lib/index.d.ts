@@ -1,6 +1,4 @@
 import type { Context } from '@deepseek-ai/cordis';
-import type { Agent } from '@deepseek-ai/dsh-agent';
-import type { SessionId } from '@deepseek-ai/dsh-session';
 import type { PolicyIdentityState } from '@dz23-studio/policy';
 import { MemoryEmailSender, type EmailSender } from './email.js';
 import { type PasskeyProvider } from './passkey.js';
@@ -14,13 +12,26 @@ export * from './passkey.js';
 export * from './rate-limit.js';
 export * from './service.js';
 export declare const name = "dz23-studio-identity";
+/**
+ * Structural boundary for agent lineage. Harness session identifiers are
+ * persisted strings; keeping the boundary structural prevents two injected
+ * workspace copies from creating incompatible nominal brand symbols.
+ */
+export interface AgentLineageNode {
+    readonly session: {
+        readonly id: string;
+        readonly header?: {
+            readonly parentSession?: string;
+        };
+    };
+}
 export interface AgentLookup {
-    get(id: SessionId): Agent | undefined;
+    getBySessionId(id: string): AgentLineageNode | undefined;
 }
 /** Resolve identity through an explicitly recorded agent lineage, never through ambient process state. */
-export declare function identityStateForAgent(service: StudioIdentityService, agents: AgentLookup, agent: Agent | undefined, bindHost: '127.0.0.1' | '0.0.0.0'): PolicyIdentityState;
+export declare function identityStateForAgent(service: StudioIdentityService, agents: AgentLookup, agent: AgentLineageNode | undefined, bindHost: '127.0.0.1' | '0.0.0.0'): PolicyIdentityState;
 /** Resolve the tenant principal through the same durable parentSession lineage. */
-export declare function principalForAgent(service: StudioIdentityService, agents: AgentLookup, agent: Agent | undefined): IdentityPrincipal | undefined;
+export declare function principalForAgent(service: StudioIdentityService, agents: AgentLookup, agent: AgentLineageNode | undefined): IdentityPrincipal | undefined;
 export declare const inject: string[];
 export interface IdentityPluginConfig {
     readonly rpName?: string;
@@ -35,6 +46,7 @@ export interface IdentityPluginConfig {
         readonly required?: boolean;
         readonly secretRef?: string;
     };
+    readonly cookieSecurity?: 'secure' | 'loopback-http';
     readonly email?: {
         readonly kind: 'memory';
     } | {

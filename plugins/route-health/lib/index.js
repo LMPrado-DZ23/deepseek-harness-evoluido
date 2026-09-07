@@ -1,4 +1,4 @@
-import { requiredSessionToken } from '@dz23-studio/identity';
+import { authenticatedMutation } from '@dz23-studio/identity';
 import { studioRouteHealthDomainSpec, } from './model.js';
 import { StudioRouteHealthService } from './service.js';
 export * from './model.js';
@@ -34,15 +34,19 @@ export async function apply(ctx) {
     const configured = new Set(ctx.llm.listProviders().map(provider => provider.id));
     await service.initialize({ orgId: 'studio-system', tenantId: 'studio-system' }, configured);
     const explicitRequests = new WeakSet();
+    const requestScopes = new WeakMap();
     ctx.provide('studioRouteHealth', {
         service,
         markExplicit(options) { explicitRequests.add(options); return options; },
+        markScope(options, scope) { requestScopes.set(options, scope); return options; },
     });
     const bypass = new WeakSet();
     ctx.on('llm/stream', (options, next) => {
         if (bypass.delete(options))
             return next();
-        const scope = scopeFor(ctx.studioIdentity.service, options.sessionId === undefined ? undefined : String(options.sessionId));
+        const scope = requestScopes.get(options)
+            ?? scopeFor(ctx.studioIdentity.service, options.sessionId === undefined ? undefined : String(options.sessionId));
+        requestScopes.delete(options);
         const explicit = explicitRequests.delete(options);
         return service.streamWithFallback(scope, options, next, fallbackOptions => {
             bypass.add(fallbackOptions);
@@ -59,7 +63,7 @@ export function createRouteHealthHandler(service, identity) {
         try {
             if (request.method !== 'GET')
                 return send(response, 405, { error: 'Método não permitido.' });
-            const session = await identity.authenticate(requiredSessionToken(request));
+            const session = await authenticatedMutation(request, identity);
             const scope = { orgId: session.org_id, tenantId: session.tenant_id };
             return send(response, 200, { routes: service.list(scope), switches: service.switches(scope) });
         }

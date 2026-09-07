@@ -45,7 +45,6 @@ export function applySnapshot(state: ConversationState, snapshot: ConversationSn
   }
   const events = [...bySeq.values()].sort((left, right) => left.seq - right.seq)
   const cursor = Math.max(state.cursor, snapshot.cursor, events.at(-1)?.seq ?? 0)
-  const delivered = new Set(events.filter(isUserMessage).map(event => event.text))
   return {
     ...state,
     conversationId: state.conversationId ?? snapshot.conversation_id,
@@ -53,8 +52,33 @@ export function applySnapshot(state: ConversationState, snapshot: ConversationSn
     cursor,
     truncated: state.truncated || snapshot.truncated,
     turn: latestTurn(events, state.turn),
-    queued: state.queued.filter(message => !delivered.has(message.text)),
+    queued: settleQueue(state.queued, events),
   }
+}
+
+/**
+ * Casa fila com journal por CONTAGEM, não por conjunto. Duas mensagens iguais
+ * na fila só saem quando duas mensagens iguais aparecem no histórico: casar por
+ * conjunto sumiria com as duas quando a primeira chegasse, e a pessoa perderia
+ * exatamente a mensagem que lhe prometemos guardar.
+ */
+function settleQueue(
+  queued: readonly QueuedMessage[],
+  events: readonly ConversationEvent[],
+): readonly QueuedMessage[] {
+  if (queued.length === 0) return queued
+  const remaining = new Map<string, number>()
+  for (const event of events) {
+    if (!isUserMessage(event)) continue
+    remaining.set(event.text, (remaining.get(event.text) ?? 0) + 1)
+  }
+  const kept: QueuedMessage[] = []
+  for (const message of queued) {
+    const available = remaining.get(message.text) ?? 0
+    if (available > 0) { remaining.set(message.text, available - 1); continue }
+    kept.push(message)
+  }
+  return kept.length === queued.length ? queued : kept
 }
 
 export function setDraft(state: ConversationState, draft: string): ConversationState {

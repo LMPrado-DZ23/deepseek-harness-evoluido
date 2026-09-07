@@ -29,7 +29,7 @@
   "emptyTitle": "Ainda não há mensagens",
   "emptyBody": "Escreva abaixo o que você precisa. Você pode parar a qualquer momento.",
   "truncated": "Mostrando as mensagens mais recentes desta conversa.",
-  "loadError": "Não foi possível ler a conversa agora.",
+  "loadError": "Não consegui ler a conversa agora. Suas mensagens continuam guardadas.",
   "retry": "Tentar de novo",
   "you": "Você",
   "assistant": "DZ23",
@@ -53,5 +53,6 @@
   "compactionMarkerItems": "itens",
   "compactionMarkerTokens": "tokens aproximados",
   "compactNow": "Organizar conversa agora",
-  "advancedOptions": "Opções avançadas"
+  "advancedOptions": "Opções avançadas",
+  "dismiss": "Entendi"
 }

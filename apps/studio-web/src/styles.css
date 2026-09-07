@@ -36,12 +36,22 @@
 @media (max-width:640px){.conversation{padding:14px}.conversation-log{max-height:none}.conversation-actions .primary,.conversation-actions .secondary{flex:1 1 auto}}
 @media (prefers-reduced-motion:reduce){.conversation *{animation:none!important;transition:none!important}}
 @media (prefers-color-scheme:dark){
-.conversation-log{border-color:#2b3550}
-.conversation-item{background:#161d2f}
-.conversation-item.message-user{background:#12233f}
-.conversation-item .who,.conversation .context-note,.conversation-status,.conversation-empty{color:#a9b4cb}
+.conversation{color:#eef2f9}
+.conversation-log{border-color:#2b3550;background:#0c111c}
+/* O texto TEM de ser redefinido junto com o fundo. Escurecer o balão e deixar a
+   cor herdada do tema claro deixa a conversa ilegível para quem usa o celular
+   no modo escuro - contraste de 1,05:1 onde o mínimo é 4,5:1. */
+.conversation-item{background:#161d2f;color:#eef2f9}
+.conversation-item.message-user{background:#12233f;color:#eef2f9}
+.conversation-item p,.conversation-item strong{color:#eef2f9}
+.conversation-item .who,.conversation .context-note,.conversation-status,.conversation-empty{color:#b9c4da}
+.conversation-empty strong{color:#eef2f9}
+.conversation-composer,.conversation-composer label{color:#eef2f9}
 .conversation-composer textarea{background:#0f1523;color:#eef2f9;border-color:#2b3550}
+.conversation-composer textarea::placeholder{color:#94a2bd}
 .conversation-actions .secondary{background:#0f1523;color:#eef2f9;border-color:#2b3550}
+.conversation .error{color:#ffb4ab}
+.conversation-advanced summary{color:#8fb6ff}
 }
 .compaction-band{display:flex;flex-direction:column;gap:6px;border:1px solid #cfe0fb;background:#f4f8ff;border-radius:10px;padding:12px 14px}
 .compaction-band.failed{background:#fef4f3;border-color:#f5c6c2;color:#b42318}
@@ -54,8 +64,11 @@
 .conversation-advanced button{margin-top:8px}
 @media (prefers-reduced-motion:reduce){.compaction-bar::after{animation:none;width:100%;opacity:.55}}
 @media (prefers-color-scheme:dark){
-.compaction-band{background:#101c31;border-color:#23406b}
+.compaction-band{background:#101c31;border-color:#23406b;color:#eef2f9}
+.compaction-band strong{color:#eef2f9}
+.compaction-band .context-note{color:#b9c4da}
 .compaction-band.failed{background:#2a1616;border-color:#6b2b2b;color:#ffb4ab}
 .compaction-bar{background:#1b2b47}
-.compaction-marker{color:#c6d2e8}
+.compaction-marker,.compaction-marker strong{color:#eef2f9}
+.compaction-marker .context-note{color:#b9c4da}
 }

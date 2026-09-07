@@ -119,14 +119,29 @@ export async function apply(ctx, config = {}) {
             },
         },
         jobs: {
+            hasLiveJobs() {
+                const seen = new Set();
+                for (const agent of ctx.agents.list()) {
+                    for (const job of ctx.jobs.list(agent)) {
+                        if (seen.has(String(job.id)))
+                            continue;
+                        seen.add(String(job.id));
+                        if (String(job.kind) === 'studio-agent' && (job.status === 'running' || job.status === 'stopping'))
+                            return true;
+                    }
+                }
+                return false;
+            },
             start(spec) {
                 return ctx.jobs.start(spec);
             },
         },
     });
+    const restartReconciliation = await service.reconcileInterruptedRuns();
     ctx.jobs.attachController('dz23-studio-agents');
     ctx.provide('studioAgents', {
         service,
+        restartReconciliation,
         runs: () => repository.runs(),
         leases: () => repository.leases(),
         providerStates: () => ({ codex: providerState(ctx, 'codex'), 'claude-code': providerState(ctx, 'claude-code') }),

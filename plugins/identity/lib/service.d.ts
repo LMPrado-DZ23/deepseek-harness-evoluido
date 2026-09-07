@@ -75,6 +75,13 @@ export declare class StudioIdentityService {
     constructor(options: IdentityServiceOptions);
     isPersonalMode(bindHost: '127.0.0.1' | '0.0.0.0'): boolean;
     personalPrincipal(bindHost: '127.0.0.1' | '0.0.0.0'): IdentityPrincipal | undefined;
+    /**
+     * The upstream Harness browser cookie authenticates one process, not one
+     * Studio identity. Expose that client only for a local installation with a
+     * single registered person; team/server installations need a tenant-aware
+     * transport instead of this process-wide cookie.
+     */
+    isSharedHarnessClientAllowed(session: SessionRecord): boolean;
     isEnrollmentOpen(email?: string): boolean;
     setEnrollmentResolver(resolver: (email: string) => EnrollmentGrant | undefined): () => void;
     setUserProvisioner(provisioner: (user: IdentityUser, source: IdentityUserProvisioningSource) => Promise<void>): () => void;
@@ -84,10 +91,20 @@ export declare class StudioIdentityService {
     verifyMagicCode(email: string, code: string, device: DeviceInput): Promise<IssuedSession>;
     authenticate(token: string, touch?: boolean): Promise<SessionRecord>;
     validateCsrf(session: SessionRecord, cookieToken: string | undefined, headerToken: string | undefined): void;
+    validateCsrfToken(session: SessionRecord, headerToken: string | undefined): void;
+    csrfTokenFor(session: SessionRecord): Promise<string>;
     listDevices(userId: string): readonly Omit<SessionRecord, 'token_hash' | 'csrf_hash'>[];
     revokeSession(actor: SessionRecord, sessionId: string, reason?: string): Promise<void>;
     revokeAllSessions(actor: SessionRecord): Promise<void>;
     bindHarnessSession(session: SessionRecord, harnessSessionId: string): Promise<void>;
+    /**
+     * Drops one conversation pointer from a device session. Only the launcher
+     * calls this, and only after the Harness itself proved the conversation is
+     * gone or is not an Assistant conversation. The audit row is written before
+     * the session is rewritten, so a pointer never disappears unrecorded.
+     */
+    releaseHarnessSession(session: SessionRecord, harnessSessionId: string, reason: string): Promise<void>;
+    ownsHarnessSession(session: SessionRecord, harnessSessionId: string): boolean;
     strongIdentityForHarnessSession(harnessSessionId: string): boolean;
     identityStateForHarnessSession(harnessSessionId: string, bindHost: '127.0.0.1' | '0.0.0.0'): IdentityExecutionState;
     beginPasskeyRegistration(token: string): Promise<PasskeyCeremony<RegistrationOptions>>;

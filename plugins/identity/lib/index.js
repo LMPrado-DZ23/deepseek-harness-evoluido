@@ -39,7 +39,7 @@ function* agentLineage(agents, start) {
         seen.add(String(current.session.id));
         yield current;
         const parent = current.session.header?.parentSession;
-        current = parent === undefined ? undefined : agents.get(parent);
+        current = parent === undefined ? undefined : agents.getBySessionId(parent);
     }
 }
 export const inject = ['agents', 'storageDomain', 'webServer', 'studioPolicy', 'credentials'];
@@ -88,6 +88,14 @@ export async function apply(ctx, config = {}) {
     if (edgeRequired && config.enrollment === 'open') {
         throw new Error('A borda autenticada proíbe enrollment aberto; configure bootstrap-email ou closed.');
     }
+    const port = ctx.webServer.port;
+    const defaultHost = `127.0.0.1:${port}`;
+    const defaultOrigin = `http://localhost:${port}`;
+    const allowedHosts = config.allowedHosts ?? [defaultHost, `localhost:${port}`];
+    const allowedOrigins = config.allowedOrigins ?? [defaultOrigin, `http://${defaultHost}`];
+    const cookieSecurity = config.cookieSecurity ?? (!edgeRequired && ctx.webServer.host === '127.0.0.1' ? 'loopback-http' : 'secure');
+    if (cookieSecurity === 'loopback-http')
+        assertLoopbackHttpCookies(ctx.webServer.host, allowedHosts, allowedOrigins);
     const [usersDomain, credentialsDomain, sessionsDomain, auditDomain] = await Promise.all([
         ctx.storageDomain.open(identityUsersDomainSpec),
         ctx.storageDomain.open(identityCredentialsDomainSpec),
@@ -98,9 +106,6 @@ export async function apply(ctx, config = {}) {
         await Promise.all([usersDomain.close(), credentialsDomain.close(), sessionsDomain.close(), auditDomain.close()]);
     }, 'dz23-studio-identity.domainClose');
     const repository = new DomainIdentityRepository(usersDomain.table('users'), credentialsDomain.table('credentials'), credentialsDomain.table('challenges'), usersDomain.table('magic_codes'), sessionsDomain.table('sessions'), auditDomain.table('events'));
-    const port = ctx.webServer.port;
-    const defaultHost = `127.0.0.1:${port}`;
-    const defaultOrigin = `http://localhost:${port}`;
     const email = resolveEmailSender(ctx, config, edgeRequired);
     let harnessAuthenticationUrl;
     ctx.inject(['connection'], (connectionCtx) => {
@@ -127,8 +132,11 @@ export async function apply(ctx, config = {}) {
         service,
         ...(email.capture === undefined ? {} : { developmentEmailCapture: email.capture }),
     });
+    const agentLookup = {
+        getBySessionId: sessionId => ctx.agents.get(sessionId),
+    };
     const unsetResolver = ctx.studioPolicy.setIdentityResolver(execution => {
-        return identityStateForAgent(service, ctx.agents, execution.agent, ctx.webServer.host);
+        return identityStateForAgent(service, agentLookup, execution.agent, ctx.webServer.host);
     });
     ctx.effect(() => unsetResolver, 'dz23-studio-identity.policyResolver');
     ctx.effect(() => ctx.webServer.register({
@@ -137,15 +145,32 @@ export async function apply(ctx, config = {}) {
         handler: createIdentityHttpHandler({
             service,
             bindHost: ctx.webServer.host,
-            allowedHosts: config.allowedHosts ?? [defaultHost, `localhost:${port}`],
-            allowedOrigins: config.allowedOrigins ?? [defaultOrigin, `http://${defaultHost}`],
+            allowedHosts,
+            allowedOrigins,
             edgeRequired,
+            secureCookies: cookieSecurity === 'secure',
             ...(edgeSecretRef === undefined ? {} : {
                 resolveEdgeSecret: async () => (await ctx.credentials.resolve(edgeSecretRef))?.value,
             }),
             harnessAuthenticationUrl: baseUrl => harnessAuthenticationUrl?.(baseUrl),
         }),
     }), 'dz23-studio-identity.http');
+}
+function assertLoopbackHttpCookies(bindHost, allowedHosts, allowedOrigins) {
+    const localName = (hostname) => hostname === 'localhost' || hostname.endsWith('.localhost') || hostname === '127.0.0.1';
+    let valid = bindHost === '127.0.0.1' && allowedHosts.length > 0 && allowedOrigins.length > 0;
+    try {
+        valid &&= allowedHosts.every(host => localName(new URL(`http://${host}`).hostname));
+        valid &&= allowedOrigins.every(origin => {
+            const parsed = new URL(origin);
+            return parsed.protocol === 'http:' && parsed.username === '' && parsed.password === '' && localName(parsed.hostname);
+        });
+    }
+    catch {
+        valid = false;
+    }
+    if (!valid)
+        throw new Error('cookieSecurity loopback-http exige bind 127.0.0.1 e somente origens HTTP *.localhost.');
 }
 export function assertValidRpId(rpId) {
     const domain = rpId.toLowerCase();

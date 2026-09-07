@@ -8,6 +8,7 @@ import {
   type ApprovalRecord,
   type ApprovalTier,
 } from './model.js'
+import { KeyedMutex } from './mutex.js'
 import { ApprovalConflictError, type ActionApprovalRepository } from './repository.js'
 
 /** Prazo de vida de um pedido de confirmação. */
@@ -60,6 +61,8 @@ export function approvalId(descriptor: Pick<ApprovalDescriptor, 'org_id' | 'tena
  */
 export class StudioActionApprovalService {
   readonly #ttlMs: number
+  /** Uma aprovação por vez. Ver `mutex.ts` para por que isto não é opcional. */
+  readonly #mutex = new KeyedMutex()
 
   constructor(private readonly options: ActionApprovalServiceOptions) {
     this.#ttlMs = options.ttlMs ?? APPROVAL_TTL_MS
@@ -71,7 +74,13 @@ export class StudioActionApprovalService {
    * conflito, não sobrescrita.
    */
   async request(input: ApprovalDescriptor): Promise<ApprovalRecord> {
+    // `async` de propósito: um descritor fora do contrato vira REJEIÇÃO, não uma
+    // exceção síncrona que o chamador esqueceria de tratar.
     const descriptor = this.#parseDescriptor(input)
+    return this.#mutex.run(approvalId(descriptor), () => this.#requestLocked(descriptor))
+  }
+
+  async #requestLocked(descriptor: ApprovalDescriptor): Promise<ApprovalRecord> {
     const id = approvalId(descriptor)
     const existing = await this.options.repository.get(id)
     if (existing !== undefined) {
@@ -107,7 +116,11 @@ export class StudioActionApprovalService {
   }
 
   /** A pessoa confirma. É a única coisa que o cliente pode fazer, junto com negar. */
-  async confirm(actor: ApprovalActor, id: string): Promise<ApprovalRecord> {
+  confirm(actor: ApprovalActor, id: string): Promise<ApprovalRecord> {
+    return this.#mutex.run(id, () => this.#confirmLocked(actor, id))
+  }
+
+  async #confirmLocked(actor: ApprovalActor, id: string): Promise<ApprovalRecord> {
     const record = await this.#owned(actor, id)
     if (record.state !== 'PENDING') throw this.#resolved(record)
     if (record.tier === 'T3' && !this.options.identity.strongIdentityVerified(actor.sessionId)) {
@@ -121,7 +134,11 @@ export class StudioActionApprovalService {
     return next
   }
 
-  async deny(actor: ApprovalActor, id: string): Promise<ApprovalRecord> {
+  deny(actor: ApprovalActor, id: string): Promise<ApprovalRecord> {
+    return this.#mutex.run(id, () => this.#denyLocked(actor, id))
+  }
+
+  async #denyLocked(actor: ApprovalActor, id: string): Promise<ApprovalRecord> {
     const record = await this.#owned(actor, id)
     if (record.state === 'DENIED') return record
     if (record.state !== 'PENDING' && record.state !== 'AVAILABLE') throw this.#resolved(record)
@@ -135,7 +152,19 @@ export class StudioActionApprovalService {
    * Repetir exatamente devolve o mesmo recibo, inclusive depois de reiniciar o
    * processo. Qualquer divergência recusa - fechado, nunca aberto.
    */
-  async consume(input: {
+  consume(input: {
+    readonly actor: ApprovalActor
+    readonly approvalId: string
+    readonly claimId: string
+    readonly action: string
+    readonly subjectId: string
+    readonly fingerprint: string
+    readonly tier: ApprovalTier
+  }): Promise<ApprovalReceipt> {
+    return this.#mutex.run(input.approvalId, () => this.#consumeLocked(input))
+  }
+
+  async #consumeLocked(input: {
     readonly actor: ApprovalActor
     readonly approvalId: string
     readonly claimId: string

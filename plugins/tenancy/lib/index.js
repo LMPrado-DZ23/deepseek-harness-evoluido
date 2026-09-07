@@ -51,8 +51,11 @@ export async function apply(ctx, config = {}) {
         await service.ensureBootstrap(user);
     const unsetEnrollment = ctx.studioIdentity.service.setEnrollmentResolver(email => service.enrollmentGrantFor(email));
     const unsetProvisioner = ctx.studioIdentity.service.setUserProvisioner((user, source) => (source === 'bootstrap' ? service.ensureBootstrap(user) : Promise.resolve()));
+    const agentLookup = {
+        getBySessionId: (sessionId) => ctx.agents.get(sessionId),
+    };
     const unsetAuthorization = ctx.studioPolicy.setAuthorizationResolver(execution => {
-        const principal = principalForAgent(ctx.studioIdentity.service, ctx.agents, execution.agent);
+        const principal = principalForAgent(ctx.studioIdentity.service, agentLookup, execution.agent);
         return principal === undefined
             ? undefined
             : service.authorizationFor(principal.userId, principal.orgId, principal.tenantId);

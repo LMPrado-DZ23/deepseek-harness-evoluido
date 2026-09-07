@@ -1,7 +1,18 @@
 import { randomUUID } from 'node:crypto';
 import { newMagicCode, newOpaqueSecret, secretHash, secretMatches } from './crypto.js';
 import { KeyedMutex } from './mutex.js';
+import { t } from './i18n.js';
 const MINUTE = 60_000;
+/**
+ * A device session indexes the Assistant conversations opened from it. The list
+ * is bounded so an authenticated caller cannot grow one session record without
+ * limit. Reaching the ceiling refuses the new binding with an explained error;
+ * nothing is dropped to make room, because dropping a live pointer would cost
+ * the person a conversation they can still use. Pointers leave the list only
+ * through `releaseHarnessSession`, which the launcher calls after the Harness
+ * proved the conversation no longer exists.
+ */
+const MAX_HARNESS_SESSION_BINDINGS = 8;
 const DAY = 24 * 60 * MINUTE;
 const CHALLENGE_TTL = 5 * MINUTE;
 const MAGIC_TTL = 10 * MINUTE;
@@ -10,6 +21,7 @@ const ABSOLUTE_TTL = 90 * DAY;
 const STRONG_AUTH_TTL = 5 * MINUTE;
 const MAX_MAGIC_ATTEMPTS = 5;
 const SESSION_TOUCH_INTERVAL = MINUTE;
+function derivedCsrfToken(tokenHash) { return secretHash(`dz23-csrf-v1:${tokenHash}`); }
 export class IdentityError extends Error {
     code;
     constructor(code, message) {
@@ -60,6 +72,18 @@ export class StudioIdentityService {
         if (!this.isPersonalMode(bindHost))
             return undefined;
         return { userId: 'user_local', orgId: 'org_local', tenantId: 'tenant_local', sessionId: 'session_local' };
+    }
+    /**
+     * The upstream Harness browser cookie authenticates one process, not one
+     * Studio identity. Expose that client only for a local installation with a
+     * single registered person; team/server installations need a tenant-aware
+     * transport instead of this process-wide cookie.
+     */
+    isSharedHarnessClientAllowed(session) {
+        if (!this.#personalModeAllowed)
+            return false;
+        const users = this.#repository.users();
+        return users.length === 1 && users[0]?.user_id === session.user_id;
     }
     isEnrollmentOpen(email) {
         if (this.#repository.users().length !== 0)
@@ -178,21 +202,24 @@ export class StudioIdentityService {
         return issued;
     }
     async authenticate(token, touch = true) {
-        const session = this.#findSessionByToken(token);
-        const now = this.#now();
-        this.#assertSessionUsable(session, now);
-        if (!touch)
-            return session;
-        if (now.getTime() - Date.parse(session.last_seen_at) < SESSION_TOUCH_INTERVAL)
-            return session;
-        const sliding = Math.min(now.getTime() + SLIDING_TTL, Date.parse(session.expires_absolute_at));
-        const updated = {
-            ...session,
-            last_seen_at: now.toISOString(),
-            expires_sliding_at: new Date(sliding).toISOString(),
-        };
-        await this.#repository.putSession(updated);
-        return updated;
+        const located = this.#findSessionByToken(token);
+        return this.#mutex.run(`session:${located.session_id}`, async () => {
+            const session = this.#findSessionByToken(token);
+            const now = this.#now();
+            this.#assertSessionUsable(session, now);
+            if (!touch)
+                return session;
+            if (now.getTime() - Date.parse(session.last_seen_at) < SESSION_TOUCH_INTERVAL)
+                return session;
+            const sliding = Math.min(now.getTime() + SLIDING_TTL, Date.parse(session.expires_absolute_at));
+            const updated = {
+                ...session,
+                last_seen_at: now.toISOString(),
+                expires_sliding_at: new Date(sliding).toISOString(),
+            };
+            await this.#repository.putSession(updated);
+            return updated;
+        });
     }
     validateCsrf(session, cookieToken, headerToken) {
         if (cookieToken === undefined || headerToken === undefined
@@ -200,71 +227,149 @@ export class StudioIdentityService {
             throw new IdentityError('csrf', 'A confirmação desta solicitação é inválida.');
         }
     }
+    validateCsrfToken(session, headerToken) {
+        if (headerToken === undefined || !secretMatches(headerToken, session.csrf_hash)) {
+            throw new IdentityError('csrf', 'A confirmação desta solicitação é inválida.');
+        }
+    }
+    async csrfTokenFor(session) {
+        return this.#mutex.run(`session:${session.session_id}`, async () => {
+            const current = this.#repository.sessions().find(candidate => candidate.session_id === session.session_id);
+            if (current === undefined)
+                throw new IdentityError('invalid', 'Sessão inválida.');
+            this.#assertSessionUsable(current, this.#now());
+            const csrfToken = derivedCsrfToken(current.token_hash);
+            const csrfHash = secretHash(csrfToken);
+            if (current.csrf_hash !== csrfHash)
+                await this.#repository.putSession({ ...current, csrf_hash: csrfHash });
+            return csrfToken;
+        });
+    }
     listDevices(userId) {
         return this.#repository.sessions()
             .filter(session => session.user_id === userId)
             .map(({ token_hash: _tokenHash, csrf_hash: _csrfHash, ...safe }) => safe);
     }
     async revokeSession(actor, sessionId, reason = 'Revogada pela pessoa usuária.') {
-        const target = this.#repository.sessions().find(session => session.session_id === sessionId && session.user_id === actor.user_id);
-        if (target === undefined)
-            throw new IdentityError('not-found', 'Dispositivo não encontrado.');
-        if (target.revoked_at !== null)
-            return;
-        const revoked = { ...target, revoked_at: this.#now().toISOString(), revoked_reason: reason };
-        await this.#repository.putSession(revoked);
-        await this.#audit('session_revoked', actor.user_id, target.session_id, actor.org_id, actor.tenant_id, 'success', reason);
+        await this.#mutex.run(`session:${sessionId}`, async () => {
+            const target = this.#repository.sessions().find(session => session.session_id === sessionId && session.user_id === actor.user_id);
+            if (target === undefined)
+                throw new IdentityError('not-found', 'Dispositivo não encontrado.');
+            if (target.revoked_at !== null)
+                return;
+            const revoked = { ...target, revoked_at: this.#now().toISOString(), revoked_reason: reason };
+            await this.#repository.putSession(revoked);
+            await this.#audit('session_revoked', actor.user_id, target.session_id, actor.org_id, actor.tenant_id, 'success', reason);
+        });
     }
     async revokeAllSessions(actor) {
-        const active = this.#repository.sessions().filter(session => session.user_id === actor.user_id && session.revoked_at === null);
+        const activeIds = this.#repository.sessions()
+            .filter(session => session.user_id === actor.user_id && session.revoked_at === null)
+            .map(session => session.session_id);
         const now = this.#now().toISOString();
-        await Promise.all(active.map(session => this.#repository.putSession({
-            ...session,
-            revoked_at: now,
-            revoked_reason: 'Saída de todos os dispositivos.',
+        await Promise.all(activeIds.map(sessionId => this.#mutex.run(`session:${sessionId}`, async () => {
+            const current = this.#repository.sessions().find(session => session.session_id === sessionId && session.user_id === actor.user_id);
+            if (current === undefined || current.revoked_at !== null)
+                return;
+            await this.#repository.putSession({
+                ...current,
+                revoked_at: now,
+                revoked_reason: 'Saída de todos os dispositivos.',
+            });
         })));
         await this.#audit('all_sessions_revoked', actor.user_id, actor.session_id, actor.org_id, actor.tenant_id, 'success', 'Todas as sessões foram revogadas.');
     }
     async bindHarnessSession(session, harnessSessionId) {
         if (harnessSessionId.trim() === '')
             throw new IdentityError('invalid', 'Sessão do agente inválida.');
-        if (session.harness_session_ids.includes(harnessSessionId))
-            return;
-        await this.#repository.putSession({
-            ...session,
-            harness_session_ids: [...session.harness_session_ids, harnessSessionId],
-        });
-        await this.#audit('harness_session_bound', session.user_id, session.session_id, session.org_id, session.tenant_id, 'success', 'Sessão do agente vinculada.');
+        await this.#mutex.run('harness-session-bindings', () => this.#mutex.run(`session:${session.session_id}`, async () => {
+            const sessions = this.#repository.sessions();
+            const current = sessions.find(candidate => candidate.session_id === session.session_id);
+            if (current === undefined)
+                throw new IdentityError('invalid', 'Sessão inválida.');
+            this.#assertSessionUsable(current, this.#now());
+            const existing = sessions.filter(candidate => candidate.harness_session_ids.includes(harnessSessionId));
+            if (existing.some(candidate => candidate.session_id !== current.session_id)) {
+                await this.#audit('harness_session_bound', current.user_id, current.session_id, current.org_id, current.tenant_id, 'failure', t('assistant.bindingConflictAudit'));
+                throw new IdentityError('replay', t('assistant.bindingConflict'));
+            }
+            if (current.harness_session_ids.includes(harnessSessionId))
+                return;
+            if (current.harness_session_ids.length >= MAX_HARNESS_SESSION_BINDINGS) {
+                await this.#audit('harness_session_bound', current.user_id, current.session_id, current.org_id, current.tenant_id, 'failure', t('assistant.bindingQuotaAudit'));
+                throw new IdentityError('invalid', t('assistant.bindingQuota'));
+            }
+            await this.#repository.putSession({
+                ...current,
+                harness_session_ids: [...current.harness_session_ids, harnessSessionId],
+            });
+            await this.#audit('harness_session_bound', current.user_id, current.session_id, current.org_id, current.tenant_id, 'success', 'Sessão do agente vinculada.');
+        }));
+    }
+    /**
+     * Drops one conversation pointer from a device session. Only the launcher
+     * calls this, and only after the Harness itself proved the conversation is
+     * gone or is not an Assistant conversation. The audit row is written before
+     * the session is rewritten, so a pointer never disappears unrecorded.
+     */
+    async releaseHarnessSession(session, harnessSessionId, reason) {
+        if (harnessSessionId.trim() === '')
+            throw new IdentityError('invalid', 'Sessão do agente inválida.');
+        await this.#mutex.run('harness-session-bindings', () => this.#mutex.run(`session:${session.session_id}`, async () => {
+            const current = this.#repository.sessions().find(candidate => candidate.session_id === session.session_id);
+            if (current === undefined)
+                throw new IdentityError('invalid', 'Sessão inválida.');
+            if (!current.harness_session_ids.includes(harnessSessionId))
+                return;
+            await this.#audit('harness_session_unbound', current.user_id, current.session_id, current.org_id, current.tenant_id, 'success', `${t('assistant.bindingReleasedAudit')} (${harnessSessionId}) ${reason}`.trim());
+            await this.#repository.putSession({
+                ...current,
+                harness_session_ids: current.harness_session_ids.filter(candidate => candidate !== harnessSessionId),
+            });
+        }));
+    }
+    ownsHarnessSession(session, harnessSessionId) {
+        if (harnessSessionId.trim() === '')
+            return false;
+        const bindings = this.#repository.sessions().filter(candidate => candidate.harness_session_ids.includes(harnessSessionId));
+        if (bindings.length !== 1 || bindings[0]?.session_id !== session.session_id)
+            return false;
+        try {
+            this.#assertSessionUsable(bindings[0], this.#now());
+            return bindings[0].user_id === session.user_id
+                && bindings[0].org_id === session.org_id
+                && bindings[0].tenant_id === session.tenant_id;
+        }
+        catch {
+            return false;
+        }
+    }
+    #usableHarnessSessionBinding(harnessSessionId) {
+        const bindings = this.#repository.sessions().filter(session => session.harness_session_ids.includes(harnessSessionId));
+        if (bindings.length !== 1)
+            return undefined;
+        const session = bindings[0];
+        try {
+            this.#assertSessionUsable(session, this.#now());
+            return session;
+        }
+        catch {
+            return undefined;
+        }
     }
     strongIdentityForHarnessSession(harnessSessionId) {
+        const session = this.#usableHarnessSessionBinding(harnessSessionId);
+        if (session === undefined)
+            return false;
         const now = this.#now();
-        return this.#repository.sessions().some(session => {
-            if (!session.harness_session_ids.includes(harnessSessionId))
-                return false;
-            try {
-                this.#assertSessionUsable(session, now);
-            }
-            catch {
-                return false;
-            }
-            return session.last_strong_auth_method === 'passkey'
-                && session.last_strong_auth_at !== null
-                && now.getTime() - Date.parse(session.last_strong_auth_at) < STRONG_AUTH_TTL;
-        });
+        return session.last_strong_auth_method === 'passkey'
+            && session.last_strong_auth_at !== null
+            && now.getTime() - Date.parse(session.last_strong_auth_at) < STRONG_AUTH_TTL;
     }
     identityStateForHarnessSession(harnessSessionId, bindHost) {
         if (this.isPersonalMode(bindHost))
             return { authenticated: true, strongIdentityVerified: false };
-        const bound = this.#repository.sessions().filter(session => session.harness_session_ids.includes(harnessSessionId));
-        const authenticated = bound.some(session => {
-            try {
-                this.#assertSessionUsable(session, this.#now());
-                return true;
-            }
-            catch {
-                return false;
-            }
-        });
+        const authenticated = this.#usableHarnessSessionBinding(harnessSessionId) !== undefined;
         return {
             authenticated,
             strongIdentityVerified: authenticated && this.strongIdentityForHarnessSession(harnessSessionId),
@@ -353,10 +458,16 @@ export class StudioIdentityService {
             if (!verified.userVerified)
                 throw new IdentityError('invalid', 'A biometria ou o PIN do dispositivo não foi confirmado.');
             await this.#updateCounter(credential, verified.newCounter);
-            await this.#repository.putSession({
-                ...session,
-                last_strong_auth_at: this.#now().toISOString(),
-                last_strong_auth_method: 'passkey',
+            await this.#mutex.run(`session:${session.session_id}`, async () => {
+                const current = this.#repository.sessions().find(candidate => candidate.session_id === session.session_id);
+                if (current === undefined)
+                    throw new IdentityError('invalid', 'Sessão inválida.');
+                this.#assertSessionUsable(current, this.#now());
+                await this.#repository.putSession({
+                    ...current,
+                    last_strong_auth_at: this.#now().toISOString(),
+                    last_strong_auth_method: 'passkey',
+                });
             });
         })));
         await this.#audit('step_up_succeeded', session.user_id, session.session_id, session.org_id, session.tenant_id, 'success', 'Identidade forte confirmada por chave de acesso.');
@@ -371,12 +482,10 @@ export class StudioIdentityService {
         return this.#user(session.user_id);
     }
     principalForHarnessSession(harnessSessionId) {
-        const now = this.#now();
-        const session = this.#repository.sessions().find(candidate => candidate.harness_session_ids.includes(harnessSessionId));
+        const session = this.#usableHarnessSessionBinding(harnessSessionId);
         if (session === undefined)
             return undefined;
         try {
-            this.#assertSessionUsable(session, now);
             const user = this.#user(session.user_id);
             return { userId: user.user_id, orgId: session.org_id, tenantId: session.tenant_id, sessionId: session.session_id };
         }
@@ -390,13 +499,14 @@ export class StudioIdentityService {
     async #issueSession(user, device) {
         const now = this.#now();
         const token = this.#createSecret();
-        const csrfToken = this.#createSecret();
+        const tokenHash = secretHash(token);
+        const csrfToken = derivedCsrfToken(tokenHash);
         const session = {
             session_id: this.#createId(),
             user_id: user.user_id,
             org_id: user.org_id,
             tenant_id: user.tenant_id,
-            token_hash: secretHash(token),
+            token_hash: tokenHash,
             csrf_hash: secretHash(csrfToken),
             device_label: device.label,
             user_agent: device.userAgent,

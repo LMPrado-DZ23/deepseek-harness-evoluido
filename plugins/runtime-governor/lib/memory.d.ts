@@ -1,4 +1,4 @@
-import { type AcquireBundleRequest, type CapacityGovernor, type CapacityLease, type CapacityLimits, type CapacitySnapshot, type LeaseReference, type ReconcileResult } from './model.js';
+import { type AcquireBundleRequest, type CapacityGovernor, type CapacityLease, type CapacityLimits, type CapacitySnapshot, type CapacityTakeoverRequest, type LeaseReference, type ReconcileResult } from './model.js';
 export type MemoryCapacityGovernorOptions = Readonly<{
     limits?: CapacityLimits;
     defaultTtlMs?: number;
@@ -12,6 +12,7 @@ export declare class MemoryCapacityGovernor implements CapacityGovernor {
     acquireBundle(request: AcquireBundleRequest): Promise<CapacityLease>;
     heartbeat(reference: LeaseReference, ttlMs?: number): Promise<CapacityLease>;
     release(reference: LeaseReference): Promise<void>;
+    takeover(request: CapacityTakeoverRequest): Promise<CapacityLease>;
     reconcile(): Promise<ReconcileResult>;
     snapshot(): Promise<CapacitySnapshot>;
 }

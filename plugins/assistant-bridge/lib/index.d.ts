@@ -14,6 +14,7 @@ export interface StudioAssistantRuntime {
     readonly bridge: StudioAssistantBridge;
     readonly tools: readonly string[];
     readonly automaticSessionCreation: 'NOT_PRESENT';
+    readonly teamCoordination: 'BETA_MANUAL_DEPENDENCY_CONTINUE';
 }
 declare module '@deepseek-ai/cordis' {
     interface Context {

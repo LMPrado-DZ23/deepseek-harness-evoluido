@@ -78,6 +78,17 @@ describe('restore destructive boundary policy', () => {
     const dsn = 'postgres://operator:secret@database/studio?sslmode=disable'
     const explicit = postgresDumpInvocation(dsn, 'dz23_storage', 'require', {})
     const implicit = postgresDumpInvocation('postgres://database/studio', 'dz23_storage', 'off')
+
+    // Variável herdada NUNCA sobrevive contradizendo o alvo: sem usuário e sem
+    // porta na URI, PGUSER e PGPORT herdados são APAGADOS, não deixados como
+    // estavam - a ferramenta iria para outro servidor achando que foi para este.
+    const inherited = postgresDumpInvocation('postgres://database/studio', 'dz23_storage', 'off', {
+      PGHOST: 'outro-servidor', PGPORT: '6543', PGUSER: 'outra-pessoa', PGDATABASE: 'outro-banco',
+    })
+    expect(inherited.environment.PGHOST).toBe('database')
+    expect(inherited.environment.PGDATABASE).toBe('studio')
+    expect(inherited.environment.PGUSER).toBeUndefined()
+    expect(inherited.environment.PGPORT).toBeUndefined()
     expect(explicit.args).toEqual(['--schema=dz23_storage', '--format=custom'])
     expect(explicit.args.join(' ')).not.toContain('secret')
     expect(explicit.environment.PGPASSWORD).toBe('secret')

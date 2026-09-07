@@ -18,6 +18,13 @@ export class ApprovalConflictError extends Error {}
  * durável: um registro que não passa no modelo não entra e não sai.
  */
 export class InMemoryActionApprovalRepository implements ActionApprovalRepository {
+  /**
+   * Espelha o seam REAL de domínio quando `false`: `put(chave, valor)`, sem
+   * "grave só se o estado ainda for X". É assim que as provas verificam que a
+   * correção não depende de escrita condicional.
+   */
+  constructor(private readonly enforceExpectedState = true) {}
+
   readonly #rows = new Map<string, ApprovalRecord>()
   #failure: Error | undefined
   #beforePut: ((record: ApprovalRecord) => void) | undefined
@@ -58,7 +65,9 @@ export class InMemoryActionApprovalRepository implements ActionApprovalRepositor
     assertValidApproval(record)
     const current = this.#rows.get(record.approval_id)
     const observed = current === undefined ? 'new' : current.state
-    if (observed !== expectedState) throw new ApprovalConflictError('approval changed under this write')
+    if (this.enforceExpectedState && observed !== expectedState) {
+      throw new ApprovalConflictError('approval changed under this write')
+    }
     this.#rows.set(record.approval_id, record)
     return Promise.resolve()
   }

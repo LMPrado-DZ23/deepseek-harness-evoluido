@@ -117,10 +117,17 @@ describe('AssistantConversationService', () => {
     expect(snapshot.events).toHaveLength(2)
     expect(JSON.stringify(snapshot)).not.toMatch(/segredo|secret|private|reasoning|replayState|cwd/u)
 
+    // Falha do Harness é indisponibilidade, NÃO "conversa não encontrada": a
+    // posse já foi verificada antes desta chamada, e dizer que a conversa sumiu
+    // faria a pessoa acreditar que perdeu o histórico por uma queda passageira.
     f.inspect.mockRejectedValueOnce(new Error('storage path /private'))
     await expect(f.service.snapshot(identitySession(), 'conversation-1')).rejects.toEqual(expect.objectContaining({
-      code: 'NOT_FOUND', message: expect.not.stringContaining('/private'),
+      code: 'SESSION_UNAVAILABLE', message: expect.not.stringContaining('/private'),
     }))
+    // E continua sendo 404 quando a conversa realmente não é da pessoa.
+    const foreign = fixture({ owned: false })
+    await expect(foreign.service.snapshot(identitySession(), 'conversa-de-outro'))
+      .rejects.toMatchObject({ code: 'NOT_FOUND' })
     expect(f.service.cancel(identitySession(), 'conversation-1')).toEqual({ accepted: true })
     f.cancel.mockImplementationOnce(() => { throw new Error('internal') })
     expect(() => f.service.cancel(identitySession(), 'conversation-1')).toThrowError(expect.objectContaining({ code: 'SESSION_UNAVAILABLE' }))

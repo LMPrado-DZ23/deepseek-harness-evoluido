@@ -1,12 +1,19 @@
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { truncateIp } from './crypto.js';
 import { IdentityError } from './service.js';
 import { assertRouteContracts } from '@dz23-studio/policy';
-import { CSRF_COOKIE, parseCookies, SESSION_COOKIE } from './cookies.js';
+import { CSRF_COOKIE, parseCookies, parseCookieValues, SESSION_COOKIE, SESSION_GENERATION_COOKIE } from './cookies.js';
 import { InMemoryIdentityRateLimiter, rateLimitBuckets, rateLimitKey } from './rate-limit.js';
 const JSON_LIMIT = 64 * 1024;
-export { CSRF_COOKIE, parseCookies, SESSION_COOKIE } from './cookies.js';
+export const COOKIE_HEADER_LIMIT_BYTES = 8 * 1024;
+const COOKIE_HEADER_TOO_LARGE = 'COOKIE_HEADER_TOO_LARGE';
+const IDENTITY_INTERNAL_ERROR = 'IDENTITY_INTERNAL_ERROR';
+class IdentityHttpInputError extends Error {
+}
+class CookieHeaderBudgetError extends Error {
+}
+export { CSRF_COOKIE, parseCookies, parseCookieValues, SESSION_COOKIE, SESSION_GENERATION_COOKIE } from './cookies.js';
 const emailSchema = z.object({ email: z.email() }).strict();
 const magicStartSchema = emailSchema;
 const magicVerifySchema = emailSchema.extend({
@@ -16,14 +23,15 @@ const magicVerifySchema = emailSchema.extend({
 const challengeSchema = z.object({ challenge_id: z.string().min(1), response: z.unknown() }).strict();
 const registerVerifySchema = challengeSchema.extend({ device_label: z.string().min(1).max(100) }).strict();
 const revokeSchema = z.object({ session_id: z.string().min(1) }).strict();
-const bindSchema = z.object({ harness_session_id: z.string().min(1) }).strict();
 export const IDENTITY_ROUTE_CONTRACTS = [
     { method: 'POST', path: '/magic/start', access: 'public', permission: null, scope: 'none' },
     { method: 'POST', path: '/magic/verify', access: 'public', permission: null, scope: 'none' },
     { method: 'POST', path: '/passkey/login/options', access: 'public', permission: null, scope: 'none' },
     { method: 'POST', path: '/passkey/login/verify', access: 'public', permission: null, scope: 'none' },
     { method: 'GET', path: '/session', access: 'public', permission: null, scope: 'identity' },
+    { method: 'GET', path: '/csrf', access: 'authorized', permission: 'identity.self', scope: 'identity' },
     { method: 'GET', path: '/harness/session', access: 'authorized', permission: 'identity.self', scope: 'identity' },
+    { method: 'POST', path: '/logout', access: 'public', permission: null, scope: 'identity' },
     { method: 'POST', path: '/passkey/register/options', access: 'authorized', permission: 'identity.self', scope: 'identity' },
     { method: 'POST', path: '/passkey/register/verify', access: 'authorized', permission: 'identity.self', scope: 'identity' },
     { method: 'POST', path: '/passkey/step-up/options', access: 'authorized', permission: 'identity.self', scope: 'identity' },
@@ -31,25 +39,31 @@ export const IDENTITY_ROUTE_CONTRACTS = [
     { method: 'GET', path: '/devices', access: 'authorized', permission: 'identity.self', scope: 'identity' },
     { method: 'POST', path: '/devices/revoke', access: 'authorized', permission: 'identity.self', scope: 'identity' },
     { method: 'POST', path: '/devices/revoke-all', access: 'authorized', permission: 'identity.self', scope: 'identity' },
-    { method: 'POST', path: '/bind-agent', access: 'authorized', permission: 'identity.self', scope: 'identity' },
 ];
 assertRouteContracts(IDENTITY_ROUTE_CONTRACTS);
-export function serializeSessionCookies(token, csrfToken) {
+export function serializeSessionCookies(token, csrfToken, secure = true) {
+    void csrfToken;
+    const secureAttribute = secure ? '; Secure' : '';
     return [
-        `${SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Lax; Path=/`,
-        `${CSRF_COOKIE}=${encodeURIComponent(csrfToken)}; Secure; SameSite=Lax; Path=/`,
+        `${SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly${secureAttribute}; SameSite=Lax; Path=/`,
+        `${CSRF_COOKIE}=${secureAttribute}; SameSite=Lax; Path=/; Max-Age=0`,
     ];
 }
-export function clearSessionCookies() {
+export function clearSessionCookies(secure = true) {
+    const secureAttribute = secure ? '; Secure' : '';
     return [
-        `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`,
-        `${CSRF_COOKIE}=; Secure; SameSite=Lax; Path=/; Max-Age=0`,
+        `${SESSION_COOKIE}=; HttpOnly${secureAttribute}; SameSite=Lax; Path=/; Max-Age=0`,
+        `${SESSION_GENERATION_COOKIE}=${secureAttribute}; SameSite=Strict; Path=/; Max-Age=0`,
+        `${CSRF_COOKIE}=${secureAttribute}; SameSite=Lax; Path=/; Max-Age=0`,
     ];
 }
 export function createIdentityHttpHandler(config) {
     const limiter = config.rateLimiter ?? new InMemoryIdentityRateLimiter();
+    const secureCookies = config.secureCookies !== false;
+    const createSessionGeneration = config.createSessionGeneration ?? (() => randomBytes(16).toString('hex'));
     return async (request, response) => {
         try {
+            assertCookieHeaderBudget(request);
             await assertEdgeTrust(request, config);
             assertRequestTrust(request, config);
             /* v8 ignore next -- node:http always supplies a URL for server requests. */
@@ -62,10 +76,7 @@ export function createIdentityHttpHandler(config) {
             const forwardedAddress = config.edgeRequired === true
                 ? singleHeader(request.headers['x-forwarded-for'])?.split(',')[0]?.trim()
                 : undefined;
-            const publicAuthentication = route === '/magic/start'
-                || route === '/magic/verify'
-                || route.startsWith('/passkey/login/');
-            const key = rateLimitKey(request, forwardedAddress, !publicAuthentication);
+            const key = rateLimitKey(request, forwardedAddress);
             for (const bucket of rateLimitBuckets(route)) {
                 const decision = limiter.consume(bucket, key);
                 if (!decision.allowed) {
@@ -85,8 +96,12 @@ export function createIdentityHttpHandler(config) {
             if (request.method === 'POST' && route === '/magic/verify') {
                 const body = magicVerifySchema.parse(await readJson(request));
                 const issued = await config.service.verifyMagicCode(body.email, body.code, deviceOf(request, body.device_label));
-                response.setHeader('set-cookie', serializeSessionCookies(issued.token, issued.csrfToken));
-                json(response, 200, { session_id: issued.session.session_id, csrf_token: issued.csrfToken });
+                const sessionGeneration = createSessionGeneration();
+                /* v8 ignore next -- guarda defensiva sobre createSessionGeneration, que sempre devolve 32 hex; o braço de falha existe para falhar fechado se essa invariante mudar, e não é acionável por teste. */
+                if (!/^[a-f0-9]{32}$/u.test(sessionGeneration))
+                    throw new TypeError();
+                response.setHeader('set-cookie', serializeSessionCookies(issued.token, issued.csrfToken, secureCookies));
+                json(response, 200, { session_id: issued.session.session_id, csrf_token: issued.csrfToken, session_generation: sessionGeneration });
                 return;
             }
             if (request.method === 'POST' && route === '/passkey/login/options') {
@@ -97,13 +112,17 @@ export function createIdentityHttpHandler(config) {
             if (request.method === 'POST' && route === '/passkey/login/verify') {
                 const body = challengeSchema.parse(await readJson(request));
                 const issued = await config.service.finishPasskeyLogin(body.challenge_id, body.response, deviceOf(request, 'Chave de acesso'));
-                response.setHeader('set-cookie', serializeSessionCookies(issued.token, issued.csrfToken));
-                json(response, 200, { session_id: issued.session.session_id, csrf_token: issued.csrfToken });
+                const sessionGeneration = createSessionGeneration();
+                /* v8 ignore next -- guarda defensiva sobre createSessionGeneration, que sempre devolve 32 hex; o braço de falha existe para falhar fechado se essa invariante mudar, e não é acionável por teste. */
+                if (!/^[a-f0-9]{32}$/u.test(sessionGeneration))
+                    throw new TypeError();
+                response.setHeader('set-cookie', serializeSessionCookies(issued.token, issued.csrfToken, secureCookies));
+                json(response, 200, { session_id: issued.session.session_id, csrf_token: issued.csrfToken, session_generation: sessionGeneration });
                 return;
             }
             if (request.method === 'GET' && route === '/session') {
-                const token = parseCookies(request.headers.cookie)[SESSION_COOKIE];
-                if (token === undefined) {
+                const tokens = parseCookieValues(request.headers.cookie, SESSION_COOKIE);
+                if (tokens.length === 0) {
                     const principal = config.edgeRequired === true
                         ? undefined
                         : config.service.personalPrincipal(config.bindHost);
@@ -112,12 +131,21 @@ export function createIdentityHttpHandler(config) {
                     json(response, 200, { mode: 'personal', principal });
                     return;
                 }
-                const session = await config.service.authenticate(token);
+                const { session } = await authenticateCookieRequest(request, config.service);
                 json(response, 200, { mode: 'authenticated', principal: principalOf(session) });
                 return;
             }
+            if (request.method === 'GET' && route === '/csrf') {
+                const { session } = await authenticateCookieRequest(request, config.service);
+                json(response, 200, { csrf_token: await config.service.csrfTokenFor(session) });
+                return;
+            }
             if (request.method === 'GET' && route === '/harness/session') {
-                await authenticatedMutation(request, config.service);
+                const identitySession = await authenticatedMutation(request, config.service);
+                if (!config.service.isSharedHarnessClientAllowed(identitySession)) {
+                    json(response, 403, { error: 'A interface do Harness ainda não está disponível.' });
+                    return;
+                }
                 const host = singleHeader(request.headers.host);
                 const forwardedProtocol = config.edgeRequired === true
                     ? singleHeader(request.headers['x-forwarded-proto'])
@@ -138,24 +166,54 @@ export function createIdentityHttpHandler(config) {
                 response.end();
                 return;
             }
-            const session = await authenticatedMutation(request, config.service);
+            if (request.method === 'POST' && route === '/logout') {
+                const candidates = [...new Set(parseCookieValues(request.headers.cookie, SESSION_COOKIE))];
+                if (candidates.length > 64)
+                    throw new IdentityError('invalid', 'Entre para continuar.');
+                if (candidates.length === 0) {
+                    response.setHeader('set-cookie', clearSessionCookies(secureCookies));
+                    json(response, 200, { signed_out: true });
+                    return;
+                }
+                let authentication;
+                try {
+                    authentication = await authenticateCookieRequest(request, config.service);
+                }
+                catch (error) {
+                    if (!(error instanceof IdentityError))
+                        throw error;
+                    response.setHeader('set-cookie', clearSessionCookies(secureCookies));
+                    json(response, 200, { signed_out: true });
+                    return;
+                }
+                config.service.validateCsrfToken(authentication.session, singleHeader(request.headers['x-dz23-csrf']));
+                await config.service.revokeSession(authentication.session, authentication.session.session_id);
+                response.setHeader('set-cookie', clearSessionCookies(secureCookies));
+                json(response, 200, { signed_out: true });
+                return;
+            }
+            const authentication = await authenticateCookieRequest(request, config.service);
+            const session = authentication.session;
+            if (request.method !== 'GET' && request.method !== 'HEAD') {
+                config.service.validateCsrfToken(session, singleHeader(request.headers['x-dz23-csrf']));
+            }
             if (request.method === 'POST' && route === '/passkey/register/options') {
-                json(response, 200, await config.service.beginPasskeyRegistration(requiredSessionToken(request)));
+                json(response, 200, await config.service.beginPasskeyRegistration(authentication.token));
                 return;
             }
             if (request.method === 'POST' && route === '/passkey/register/verify') {
                 const body = registerVerifySchema.parse(await readJson(request));
-                await config.service.finishPasskeyRegistration(requiredSessionToken(request), body.challenge_id, body.response, body.device_label);
+                await config.service.finishPasskeyRegistration(authentication.token, body.challenge_id, body.response, body.device_label);
                 json(response, 200, { message: 'Chave de acesso criada com segurança.' });
                 return;
             }
             if (request.method === 'POST' && route === '/passkey/step-up/options') {
-                json(response, 200, await config.service.beginStepUp(requiredSessionToken(request)));
+                json(response, 200, await config.service.beginStepUp(authentication.token));
                 return;
             }
             if (request.method === 'POST' && route === '/passkey/step-up/verify') {
                 const body = challengeSchema.parse(await readJson(request));
-                await config.service.finishStepUp(requiredSessionToken(request), body.challenge_id, body.response);
+                await config.service.finishStepUp(authentication.token, body.challenge_id, body.response);
                 json(response, 200, { message: 'Ação sensível confirmada.' });
                 return;
             }
@@ -167,43 +225,73 @@ export function createIdentityHttpHandler(config) {
                 const body = revokeSchema.parse(await readJson(request));
                 await config.service.revokeSession(session, body.session_id);
                 if (body.session_id === session.session_id)
-                    response.setHeader('set-cookie', clearSessionCookies());
+                    response.setHeader('set-cookie', clearSessionCookies(secureCookies));
                 json(response, 200, { message: 'Dispositivo desconectado.' });
                 return;
             }
+            /* v8 ignore next -- last contracted route: the false side is unreachable because every other contract returns above. O teste percorre IDENTITY_ROUTE_CONTRACTS e prova que nenhuma rota contratada cai na cauda 404. */
             if (request.method === 'POST' && route === '/devices/revoke-all') {
                 await config.service.revokeAllSessions(session);
-                response.setHeader('set-cookie', clearSessionCookies());
+                response.setHeader('set-cookie', clearSessionCookies(secureCookies));
                 json(response, 200, { message: 'Todos os dispositivos foram desconectados.' });
                 return;
             }
-            const body = bindSchema.parse(await readJson(request));
-            await config.service.bindHarnessSession(session, body.harness_session_id);
-            json(response, 200, { message: 'Sessão de trabalho protegida.' });
+            /* v8 ignore next 2 -- every contracted route returns above; this is the fail-closed tail. */
+            json(response, 404, { error: 'Rota não encontrada.' });
         }
         catch (error) {
-            const status = error instanceof IdentityError
-                ? error.code === 'not-found' ? 404 : error.code === 'locked' ? 429 : 401
-                : error instanceof z.ZodError ? 400 : 400;
-            json(response, status, { error: error instanceof Error ? error.message : 'Solicitação inválida.' });
+            if (error instanceof CookieHeaderBudgetError) {
+                json(response, 431, { error: COOKIE_HEADER_TOO_LARGE });
+                return;
+            }
+            if (error instanceof IdentityError) {
+                const status = error.code === 'not-found' ? 404 : error.code === 'locked' ? 429 : 401;
+                json(response, status, { error: error.message });
+                return;
+            }
+            if (error instanceof z.ZodError || error instanceof IdentityHttpInputError) {
+                json(response, 400, { error: error instanceof IdentityHttpInputError ? error.message : 'Solicitação inválida.' });
+                return;
+            }
+            json(response, 500, { error: IDENTITY_INTERNAL_ERROR });
         }
     };
 }
 export async function authenticatedMutation(request, service) {
-    const token = requiredSessionToken(request);
-    const session = await service.authenticate(token);
+    assertCookieHeaderBudget(request);
+    const { session } = await authenticateCookieRequest(request, service);
     if (request.method !== 'GET' && request.method !== 'HEAD') {
-        const cookies = parseCookies(request.headers.cookie);
         const header = singleHeader(request.headers['x-dz23-csrf']);
-        service.validateCsrf(session, cookies[CSRF_COOKIE], header);
+        service.validateCsrfToken(session, header);
     }
     return session;
 }
 export function requiredSessionToken(request) {
-    const token = parseCookies(request.headers.cookie)[SESSION_COOKIE];
+    assertCookieHeaderBudget(request);
+    const token = parseCookieValues(request.headers.cookie, SESSION_COOKIE)[0];
     if (token === undefined || token === '')
         throw new IdentityError('invalid', 'Entre para continuar.');
     return token;
+}
+async function authenticateCookieRequest(request, service) {
+    assertCookieHeaderBudget(request);
+    const candidates = [...new Set(parseCookieValues(request.headers.cookie, SESSION_COOKIE))];
+    if (candidates.length === 0 || candidates.length > 64)
+        throw new IdentityError('invalid', 'Entre para continuar.');
+    let lastError;
+    for (const token of candidates) {
+        if (token === '')
+            continue;
+        try {
+            return { token, session: await service.authenticate(token) };
+        }
+        catch (error) {
+            if (!(error instanceof IdentityError))
+                throw error;
+            lastError = error;
+        }
+    }
+    throw lastError ?? new IdentityError('invalid', 'Entre para continuar.');
 }
 async function assertEdgeTrust(request, config) {
     if (config.edgeRequired === true) {
@@ -234,6 +322,12 @@ function secretMatches(actual, expected) {
 export function singleHeader(value) {
     return Array.isArray(value) ? value.length === 1 ? value[0] : undefined : value;
 }
+function assertCookieHeaderBudget(request) {
+    const header = request.headers.cookie;
+    if (header !== undefined && Buffer.byteLength(header, 'utf8') > COOKIE_HEADER_LIMIT_BYTES) {
+        throw new CookieHeaderBudgetError();
+    }
+}
 export function deviceOf(request, label) {
     return {
         label,
@@ -251,7 +345,7 @@ function principalOf(session) {
 }
 async function readJson(request) {
     if (!singleHeader(request.headers['content-type'])?.toLowerCase().startsWith('application/json')) {
-        throw new Error('Envie os dados em formato JSON.');
+        throw new IdentityHttpInputError('Envie os dados em formato JSON.');
     }
     const chunks = [];
     let size = 0;
@@ -260,14 +354,14 @@ async function readJson(request) {
         const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
         size += bytes.length;
         if (size > JSON_LIMIT)
-            throw new Error('Solicitação grande demais.');
+            throw new IdentityHttpInputError('Solicitação grande demais.');
         chunks.push(bytes);
     }
     try {
         return JSON.parse(Buffer.concat(chunks).toString('utf8'));
     }
     catch {
-        throw new Error('JSON inválido.');
+        throw new IdentityHttpInputError('JSON inválido.');
     }
 }
 function json(response, status, body) {

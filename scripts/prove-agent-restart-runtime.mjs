@@ -121,8 +121,8 @@ async function seedInterruptedState(ctx) {
 }
 
 function assertRecoveredState(ctx, expectedCounts) {
-  assert.deepEqual(ctx.studioAgents.restartReconciliation, expectedCounts.agents)
-  assert.deepEqual(ctx.studioAgentTeams.restartReconciliation, expectedCounts.teams)
+  assertReconciliation(ctx.studioAgents.restartReconciliation, expectedCounts.agents)
+  assertReconciliation(ctx.studioAgentTeams.restartReconciliation, expectedCounts.teams)
   const run = ctx.studioAgents.runs().find(candidate => candidate.run_id === 'run-restart-proof')
   const lease = ctx.studioAgents.leases().find(candidate => candidate.lease_id === 'lease-restart-proof')
   const team = ctx.studioAgentTeams.teams().find(candidate => candidate.team_id === 'team-restart-proof')
@@ -142,29 +142,41 @@ function assertRecoveredState(ctx, expectedCounts) {
   return { runStatus: run.status, leaseActive: lease.active, taskStatus: task.status, teamStatus: team.status }
 }
 
+/**
+ * Compara os contadores e valida `reconciledAt` como carimbo real.
+ * Antes isto era `reconciledAt: <o próprio valor lido>` — uma asserção
+ * tautológica, que passa com qualquer coisa e não prova nada.
+ */
+function assertReconciliation(actual, expectedCounts) {
+  const { reconciledAt, ...counts } = actual
+  assert.deepEqual(counts, expectedCounts)
+  assert.match(reconciledAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u)
+  assert.ok(Number.isFinite(Date.parse(reconciledAt)))
+}
+
 async function runPhase() {
   let app
   try {
     app = await boot()
     if (phase === 'seed') {
-      assert.deepEqual(app.ctx.studioAgents.restartReconciliation,
-        { interruptedRuns: 0, releasedLeases: 0, reconciledAt: app.ctx.studioAgents.restartReconciliation.reconciledAt })
+      assertReconciliation(app.ctx.studioAgents.restartReconciliation,
+        { interruptedRuns: 0, releasedLeases: 0, unresolvedRuns: 0, keptLeases: 0 })
       const result = await seedInterruptedState(app.ctx)
       process.stdout.write(`M75_PHASE_RESULT=${JSON.stringify({ phase, ...result })}\n`)
       return
     }
     if (phase === 'recover') {
       const result = assertRecoveredState(app.ctx, {
-        agents: { interruptedRuns: 1, releasedLeases: 1, reconciledAt: app.ctx.studioAgents.restartReconciliation.reconciledAt },
-        teams: { updatedTasks: 1, updatedTeams: 1, reconciledAt: app.ctx.studioAgentTeams.restartReconciliation.reconciledAt },
+        agents: { interruptedRuns: 1, releasedLeases: 1, unresolvedRuns: 0, keptLeases: 0 },
+        teams: { updatedTasks: 1, updatedTeams: 1 },
       })
       process.stdout.write(`M75_PHASE_RESULT=${JSON.stringify({ phase, ...result })}\n`)
       return
     }
     if (phase === 'idempotent') {
       const result = assertRecoveredState(app.ctx, {
-        agents: { interruptedRuns: 0, releasedLeases: 0, reconciledAt: app.ctx.studioAgents.restartReconciliation.reconciledAt },
-        teams: { updatedTasks: 0, updatedTeams: 0, reconciledAt: app.ctx.studioAgentTeams.restartReconciliation.reconciledAt },
+        agents: { interruptedRuns: 0, releasedLeases: 0, unresolvedRuns: 0, keptLeases: 0 },
+        teams: { updatedTasks: 0, updatedTeams: 0 },
       })
       process.stdout.write(`M75_PHASE_RESULT=${JSON.stringify({ phase, ...result })}\n`)
       return

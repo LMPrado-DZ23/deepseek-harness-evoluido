@@ -8,7 +8,7 @@
     "interrupted": "A execução foi interrompida pelo reinício do DZ23 STUDIO; a cópia isolada foi preservada para revisão.",
     "incomplete": "A reconciliação de agentes não conseguiu eliminar todos os estados ativos e o serviço permaneceu bloqueado.",
     "unknownExternal": "O DZ23 STUDIO reiniciou enquanto um assistente externo trabalhava nesta cópia. Ele não consegue provar que aquele programa terminou, então preservou tudo e bloqueou estes arquivos até alguém confirmar.",
-    "blockedByUnknown": "Estes arquivos estão reservados por uma execução anterior que o Studio não conseguiu confirmar como encerrada. Nada foi perdido; é preciso resolver aquela execução antes de começar outra aqui.",
+    "blockedByUnknown": "Estes arquivos estão reservados por uma execução anterior que o DZ23 STUDIO não conseguiu confirmar como encerrada. Nada foi perdido. Enquanto isso, escolha outros arquivos ou peça a quem cuida da instalação para confirmar aquela execução — esta versão ainda não tem um botão para isso.",
     "resolveReason": "Informe o motivo ao confirmar que a execução anterior terminou.",
     "resolveNotUnknown": "Só uma execução em estado desconhecido pode ser confirmada como encerrada.",
     "resolved": "Encerramento confirmado por uma pessoa: ",

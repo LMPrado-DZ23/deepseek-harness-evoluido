@@ -1,4 +1,5 @@
 import { type AgentRunRecord, type DelegationAccepted, type DelegationBudget, type DelegationRequest, type StudioAgentsRuntime } from '@dz23-studio/agents';
+import type { AgentTeamRecord, AgentTeamRole, AgentTeamTaskRecord, StudioAgentTeamRuntime } from '@dz23-studio/agent-team';
 import { type StudioRole } from '@dz23-studio/policy';
 import { type AssistantProvider } from './catalog.js';
 export type AssistantSensitiveOperation = 'secrets' | 'external-network';
@@ -11,6 +12,12 @@ export interface AssistantRepositoryConfig {
     readonly providers: readonly AssistantProvider[];
     readonly budget?: DelegationBudget;
     readonly maxPaths?: number;
+}
+export interface ValidatedRepositoryConfig extends Omit<AssistantRepositoryConfig, 'repositoryPath' | 'allowedPaths' | 'providers' | 'maxPaths'> {
+    readonly repositoryPath: string;
+    readonly allowedPaths: readonly string[];
+    readonly providers: ReadonlySet<AssistantProvider>;
+    readonly maxPaths: number;
 }
 type AssistantAgent = DelegationRequest['parent'];
 type AssistantJobId = DelegationAccepted['jobId'];
@@ -34,6 +41,24 @@ export interface AssistantRunReview extends AssistantRunSummary {
     readonly diff_text: string;
     readonly main_changed_during_run: boolean;
 }
+export interface AssistantTeamTaskInput {
+    readonly taskId: string;
+    readonly title: string;
+    readonly role: AgentTeamRole;
+    readonly prompt: string;
+    readonly intendedPaths: readonly string[];
+    readonly dependsOn: readonly string[];
+}
+export interface AssistantTeamSummary {
+    readonly team_id: string;
+    readonly name: string;
+    readonly status: AgentTeamRecord['status'];
+    readonly required_tier: AgentTeamRecord['required_tier'];
+    readonly diagnostic: string | null;
+    readonly tasks: readonly Pick<AgentTeamTaskRecord, 'task_id' | 'title' | 'role' | 'status' | 'run_id' | 'depends_on' | 'diagnostic'>[];
+    readonly created_at: string;
+    readonly updated_at: string;
+}
 export declare class AssistantBridgeError extends Error {
     readonly code: 'UNAUTHENTICATED' | 'FORBIDDEN' | 'NOT_CONFIGURED' | 'INVALID_REQUEST' | 'NOT_FOUND' | 'CANCEL_UNAVAILABLE';
     constructor(code: 'UNAUTHENTICATED' | 'FORBIDDEN' | 'NOT_CONFIGURED' | 'INVALID_REQUEST' | 'NOT_FOUND' | 'CANCEL_UNAVAILABLE', message: string);
@@ -44,6 +69,7 @@ export interface AssistantBridgeDependencies {
         readonly role: StudioRole;
     } | undefined;
     readonly studioAgents: StudioAgentsRuntime;
+    readonly studioAgentTeams?: StudioAgentTeamRuntime;
     killJob(jobId: AssistantJobId, owner: AssistantAgent, reason: string): 'requested' | 'already-finished';
 }
 export declare class StudioAssistantBridge {
@@ -61,6 +87,15 @@ export declare class StudioAssistantBridge {
         status: "RUNNING";
         required_tier: import("@dz23-studio/agents").ApprovalTier;
     };
+    startTeam(agent: AssistantAgent | undefined, input: {
+        readonly provider: AssistantProvider;
+        readonly name: string;
+        readonly tasks: readonly AssistantTeamTaskInput[];
+    }, sensitive?: AssistantSensitiveOperation | 'deploy'): Promise<AssistantTeamSummary>;
+    listTeams(agent: AssistantAgent | undefined): readonly AssistantTeamSummary[];
+    teamStatus(agent: AssistantAgent | undefined, teamId: string): Promise<AssistantTeamSummary>;
+    continueTeam(agent: AssistantAgent | undefined, teamId: string, sensitive: boolean): Promise<AssistantTeamSummary>;
+    cancelTeam(agent: AssistantAgent | undefined, teamId: string, reason?: string): Promise<AssistantTeamSummary>;
     list(agent: AssistantAgent | undefined): readonly AssistantRunSummary[];
     review(agent: AssistantAgent | undefined, runId: string): Promise<AssistantRunReview>;
     cancel(agent: AssistantAgent | undefined, runId: string, reason?: string): {
@@ -74,6 +109,7 @@ export declare class StudioAssistantBridge {
     activeJobCount(): number;
     apply(agent: AssistantAgent | undefined, runId: string): Promise<import("@dz23-studio/agents").ProposalApplied>;
 }
+export declare function validateAssistantRepository(input: AssistantRepositoryConfig): Promise<ValidatedRepositoryConfig>;
 export declare function normalizeRelativePath(value: string): string;
 export {};
 //# sourceMappingURL=service.d.ts.map

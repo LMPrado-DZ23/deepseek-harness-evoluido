@@ -2,7 +2,7 @@ import type { Context } from '@deepseek-ai/cordis';
 import type { Agent } from '@deepseek-ai/dsh-agent';
 import type { PolicyDelegationGrant } from '@dz23-studio/policy';
 import { type AgentLeaseRecord, type AgentRunRecord } from './model.js';
-import { StudioAgentService, type DelegationRequest } from './service.js';
+import { StudioAgentService, type AgentRestartReconciliation, type DelegationRequest } from './service.js';
 export * from './model.js';
 export * from './service.js';
 export declare const name = "dz23-studio-agents";
@@ -16,6 +16,7 @@ export interface Config {
 }
 export interface StudioAgentsRuntime {
     readonly service: StudioAgentService;
+    readonly restartReconciliation: AgentRestartReconciliation;
     runs(): readonly AgentRunRecord[];
     leases(): readonly AgentLeaseRecord[];
     providerStates(): Readonly<Record<'codex' | 'claude-code', 'OK' | 'NOT_PRESENT' | 'NOT_CONFIGURED'>>;

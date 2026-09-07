@@ -21,6 +21,9 @@ export type AcquireBundleRequest = Readonly<{
     requests: readonly CapacityRequest[];
     ttlMs?: number;
 }>;
+export type CapacityTakeoverRequest = AcquireBundleRequest & Readonly<{
+    reference: LeaseReference;
+}>;
 export type LeaseReference = Readonly<{
     leaseId: string;
     fencingToken: number;
@@ -71,6 +74,15 @@ export interface CapacityGovernor {
     reconcile(): Promise<ReconcileResult>;
     snapshot(): Promise<CapacitySnapshot>;
 }
+/**
+ * Persistent governor whose lease ownership is tied to a concrete process.
+ * A recovering single-active process must rotate the fence before it controls
+ * an already-running workload.
+ */
+export interface DistributedCapacityGovernor extends CapacityGovernor {
+    takeover(request: CapacityTakeoverRequest): Promise<CapacityLease>;
+}
+export declare function isDistributedCapacityGovernor(value: CapacityGovernor): value is DistributedCapacityGovernor;
 export declare const DEFAULT_CAPACITY_LIMITS: CapacityLimits;
 export declare const DEFAULT_LEASE_TTL_MS = 120000;
 export declare const MIN_LEASE_TTL_MS = 1000;

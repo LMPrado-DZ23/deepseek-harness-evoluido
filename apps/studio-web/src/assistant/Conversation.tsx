@@ -50,7 +50,15 @@ export interface ConversationProps {
 
 export function Conversation({ conversationId, port, getCsrf, pollMs = CONVERSATION_POLL_MS }: ConversationProps) {
   const [state, dispatch] = useReducer(conversationReducer, undefined, emptyConversation)
-  const [error, setError] = useState<{ readonly message: string; readonly retryable: boolean } | null>(null)
+  /**
+   * Dois avisos diferentes. O de LEITURA some sozinho quando a leitura volta a
+   * funcionar - ele descreve o agora. O de AÇÃO (enviar, parar, organizar) é
+   * sobre algo que a pessoa fez e NÃO some sozinho: um envio recusado que
+   * desaparece em um segundo e meio faz a pessoa acreditar que enviou.
+   */
+  const [readError, setReadError] = useState<{ readonly message: string; readonly retryable: boolean } | null>(null)
+  const [actionError, setActionError] = useState<{ readonly message: string; readonly retryable: boolean } | null>(null)
+  const error = actionError ?? readError
   const [busy, setBusy] = useState(false)
   const [attempt, setAttempt] = useState(0)
   const draftRef = useRef<HTMLTextAreaElement | null>(null)
@@ -65,10 +73,10 @@ export function Conversation({ conversationId, port, getCsrf, pollMs = CONVERSAT
         const snapshot = await readConversation(conversationId, port, controller.signal)
         if (!live) return
         dispatch({ kind: 'snapshot', snapshot })
-        setError(null)
+        setReadError(null)
       } catch (reason) {
         if (!live || controller.signal.aborted) return
-        setError(describe(reason))
+        setReadError(describe(reason))
       }
     }
     void read()
@@ -87,10 +95,10 @@ export function Conversation({ conversationId, port, getCsrf, pollMs = CONVERSAT
       const accepted = await sendConversationMessage(conversationId, text, port, getCsrf)
       requestId = accepted.request_id
       dispatch({ kind: 'queued', requestId: accepted.request_id, text })
-      setError(null)
+      setActionError(null)
     } catch (reason) {
       if (requestId !== undefined) dispatch({ kind: 'dropped', requestId })
-      setError(describe(reason))
+      setActionError(describe(reason))
     } finally {
       setBusy(false)
       draftRef.current?.focus()
@@ -100,9 +108,9 @@ export function Conversation({ conversationId, port, getCsrf, pollMs = CONVERSAT
   const stop = useCallback(async () => {
     try {
       await cancelConversationTurn(conversationId, port, getCsrf)
-      setError(null)
+      setActionError(null)
     } catch (reason) {
-      setError(describe(reason))
+      setActionError(describe(reason))
     }
   }, [conversationId, getCsrf, port])
 
@@ -115,9 +123,9 @@ export function Conversation({ conversationId, port, getCsrf, pollMs = CONVERSAT
     try {
       const accepted = await sendConversationMessage(conversationId, '/compact', port, getCsrf)
       dispatch({ kind: 'queued', requestId: accepted.request_id, text: '/compact' })
-      setError(null)
+      setActionError(null)
     } catch (reason) {
-      setError(describe(reason))
+      setActionError(describe(reason))
     }
   }, [conversationId, getCsrf, organizing, port])
 
@@ -157,8 +165,13 @@ export function Conversation({ conversationId, port, getCsrf, pollMs = CONVERSAT
       <TriangleAlert aria-hidden="true" />
       {error.message}
       {error.retryable
-        ? <button type="button" className="secondary" onClick={() => { setAttempt(value => value + 1) }}>{copy.retry}</button>
+        ? <button type="button" className="secondary" onClick={() => {
+            setReadError(null); setActionError(null); setAttempt(value => value + 1)
+          }}>{copy.retry}</button>
         : null}
+      {actionError === null
+        ? null
+        : <button type="button" className="secondary" onClick={() => { setActionError(null) }}>{copy.dismiss}</button>}
     </p>}
 
     <form

@@ -17,6 +17,6 @@ export declare class InMemoryIdentityRateLimiter {
     consume(bucket: IdentityRateLimitBucket, key: string, now?: number): IdentityRateLimitDecision;
 }
 export declare function rateLimitBuckets(route: string): readonly IdentityRateLimitBucket[];
-/** Stable pseudonymous key: authenticated session when present, otherwise trusted client address. */
-export declare function rateLimitKey(request: IncomingMessage, forwardedAddress?: string, allowSession?: boolean): string;
+/** Stable pseudonymous key. Session ids must come from server-side authentication, never from an untrusted cookie. */
+export declare function rateLimitKey(request: IncomingMessage, forwardedAddress?: string, authenticatedSessionId?: string): string;
 //# sourceMappingURL=rate-limit.d.ts.map

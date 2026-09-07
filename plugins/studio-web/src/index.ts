@@ -57,10 +57,11 @@ export function createStudioWebHandler(config: {
 }) {
   const frameSources = normalizePreviewFrameSources(config.previewFrameSources ?? [])
   return async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
+    let conversationRoute: ReturnType<typeof routeAssistantConversation>
     try {
       assertRequestTrust(request, { allowedHosts: config.allowedHosts, allowedOrigins: config.allowedOrigins })
       const pathname = new URL(request.url ?? '/studio', 'http://local').pathname
-      const conversationRoute = routeAssistantConversation(request.method, pathname)
+      conversationRoute = routeAssistantConversation(request.method, pathname)
       if (conversationRoute !== undefined) {
         const outcome = await handleAssistantConversation(request, conversationRoute, {
           identity: config.identity,
@@ -107,7 +108,12 @@ export function createStudioWebHandler(config: {
         // inesperado pode carregar caminho local, segredo ou detalhe de
         // implementação, e não é ela que ajuda quem está usando o Studio.
         const catalogued = error instanceof IdentityError || error instanceof StaticFileError
-        send(response, status, catalogued ? error.message : t('assistant.interfaceUnavailable'), frameSources)
+        const message = catalogued ? error.message : t('assistant.interfaceUnavailable')
+        // Quem chamou uma rota da conversa espera JSON. Responder `text/plain`
+        // faz o cliente perder a mensagem e mostrar um erro genérico no lugar
+        // de "entre de novo" ou "aguarde um instante".
+        if (conversationRoute !== undefined) sendJson(response, status, { error: message }, frameSources)
+        else send(response, status, message, frameSources)
       }
     }
   }

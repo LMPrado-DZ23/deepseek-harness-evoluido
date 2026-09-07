@@ -9,6 +9,11 @@ export const agentRunStatusSchema = z.enum([
     'CANCELLED',
     'BUDGET_EXCEEDED',
     'REJECTED',
+    /**
+     * O Studio nao conseguiu PROVAR que o trabalhador externo terminou. Nao e
+     * falha nem sucesso: e ausencia de prova, e por isso e bloqueante.
+     */
+    'UNKNOWN',
 ]);
 export const agentRunSchema = z.object({
     run_id: z.string().min(1),
@@ -49,8 +54,10 @@ export const STUDIO_AGENT_RUNS_LOGICAL_DOMAIN = 'studio.agent.runs';
 export const STUDIO_AGENT_LEASES_PHYSICAL_DOMAIN = 'studio_agent_leases';
 export const STUDIO_AGENT_LEASES_LOGICAL_DOMAIN = 'studio.agent.leases';
 export const studioAgentRunsDomainSpec = defineDomain({
+    // v3 acrescenta o estado UNKNOWN. Um leitor preso a v2 recusaria a linha em
+    // vez de le-la errado, que e o comportamento certo para um estado bloqueante.
     name: STUDIO_AGENT_RUNS_PHYSICAL_DOMAIN,
-    version: 2,
+    version: 3,
     tables: { runs: domainTable(agentRunSchema) },
 });
 export const studioAgentLeasesDomainSpec = defineDomain({

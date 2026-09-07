@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto';
-import { parseCookies, SESSION_COOKIE } from './cookies.js';
 export const IDENTITY_RATE_LIMITS = {
     global: { limit: 300, windowMs: 60_000 },
     'magic-start': { limit: 5, windowMs: 15 * 60_000 },
@@ -42,11 +41,10 @@ export function rateLimitBuckets(route) {
         return ['global', 'passkey'];
     return ['global'];
 }
-/** Stable pseudonymous key: authenticated session when present, otherwise trusted client address. */
-export function rateLimitKey(request, forwardedAddress, allowSession = true) {
-    const session = allowSession ? parseCookies(request.headers.cookie)[SESSION_COOKIE] : undefined;
-    if (session !== undefined && session !== '')
-        return digest(`session:${session}`);
+/** Stable pseudonymous key. Session ids must come from server-side authentication, never from an untrusted cookie. */
+export function rateLimitKey(request, forwardedAddress, authenticatedSessionId) {
+    if (authenticatedSessionId !== undefined && authenticatedSessionId !== '')
+        return digest(`session:${authenticatedSessionId}`);
     return digest(`address:${forwardedAddress === undefined || forwardedAddress === ''
         ? request.socket.remoteAddress ?? 'unknown'
         : forwardedAddress}`);

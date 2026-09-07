@@ -2,7 +2,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { SessionRecord } from './model.js';
 import { type StudioIdentityService } from './service.js';
 import { InMemoryIdentityRateLimiter } from './rate-limit.js';
-export { CSRF_COOKIE, parseCookies, SESSION_COOKIE } from './cookies.js';
+export declare const COOKIE_HEADER_LIMIT_BYTES: number;
+export { CSRF_COOKIE, parseCookies, parseCookieValues, SESSION_COOKIE, SESSION_GENERATION_COOKIE } from './cookies.js';
 export declare const IDENTITY_ROUTE_CONTRACTS: readonly [{
     readonly method: "POST";
     readonly path: "/magic/start";
@@ -35,9 +36,21 @@ export declare const IDENTITY_ROUTE_CONTRACTS: readonly [{
     readonly scope: "identity";
 }, {
     readonly method: "GET";
+    readonly path: "/csrf";
+    readonly access: "authorized";
+    readonly permission: "identity.self";
+    readonly scope: "identity";
+}, {
+    readonly method: "GET";
     readonly path: "/harness/session";
     readonly access: "authorized";
     readonly permission: "identity.self";
+    readonly scope: "identity";
+}, {
+    readonly method: "POST";
+    readonly path: "/logout";
+    readonly access: "public";
+    readonly permission: null;
     readonly scope: "identity";
 }, {
     readonly method: "POST";
@@ -81,12 +94,6 @@ export declare const IDENTITY_ROUTE_CONTRACTS: readonly [{
     readonly access: "authorized";
     readonly permission: "identity.self";
     readonly scope: "identity";
-}, {
-    readonly method: "POST";
-    readonly path: "/bind-agent";
-    readonly access: "authorized";
-    readonly permission: "identity.self";
-    readonly scope: "identity";
 }];
 export interface IdentityHttpConfig {
     readonly service: StudioIdentityService;
@@ -97,9 +104,11 @@ export interface IdentityHttpConfig {
     readonly resolveEdgeSecret?: () => Promise<string | undefined>;
     readonly harnessAuthenticationUrl?: (baseUrl: string) => string | undefined;
     readonly rateLimiter?: InMemoryIdentityRateLimiter;
+    readonly secureCookies?: boolean;
+    readonly createSessionGeneration?: () => string;
 }
-export declare function serializeSessionCookies(token: string, csrfToken: string): readonly string[];
-export declare function clearSessionCookies(): readonly string[];
+export declare function serializeSessionCookies(token: string, csrfToken: string, secure?: boolean): readonly string[];
+export declare function clearSessionCookies(secure?: boolean): readonly string[];
 export declare function createIdentityHttpHandler(config: IdentityHttpConfig): (request: IncomingMessage, response: ServerResponse) => Promise<void>;
 export declare function authenticatedMutation(request: IncomingMessage, service: StudioIdentityService): Promise<SessionRecord>;
 export declare function requiredSessionToken(request: IncomingMessage): string;

@@ -125,6 +125,17 @@ describe('superfície HTTP da conversa do assistente', () => {
     expect(calls[1]![2]).toBe('oi')
   })
 
+  it('erro numa rota da conversa responde JSON, não texto solto', async () => {
+    const f = await fixture()
+    f.identity.authenticate.mockRejectedValueOnce(new IdentityError('invalid', 'Entre para continuar.'))
+    const response = await f.request(ASSISTANT_CONVERSATION_PREFIX, { method: 'POST' })
+    expect(response.status).toBe(401)
+    expect(response.headers.get('content-type')).toContain('application/json')
+    // O cliente lê `error`; com texto solto a pessoa veria uma mensagem genérica
+    // em vez de "entre de novo".
+    expect(await response.json()).toEqual({ error: 'Entre para continuar.' })
+  })
+
   it('exige sessão e CSRF em toda ação da conversa', async () => {
     const f = await fixture()
     f.identity.authenticate.mockRejectedValueOnce(new IdentityError('invalid', 'Entre para continuar.'))

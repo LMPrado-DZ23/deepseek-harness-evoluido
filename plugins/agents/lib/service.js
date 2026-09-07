@@ -1,6 +1,21 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { t } from './i18n.js';
 export { GitWorktreeManager } from './git.js';
+/**
+ * Prazo para o encerramento ativo. O que continuar vivo depois disso nao e
+ * declarado morto: fica para a reconciliacao do proximo inicio.
+ */
+export const SHUTDOWN_DEADLINE_MS = 15_000;
+/**
+ * `spawn-in-process` morre junto com o Studio, entao um reinicio ja e prova de
+ * que terminou. `codex` e `claude-code` sao processos do sistema operacional
+ * com vida propria: o pin do Harness nao entrega identidade de processo pelo
+ * seam publico, entao o Studio NAO consegue provar que eles morreram - e nao
+ * vai fingir que consegue.
+ */
+export function survivesRestart(provider) {
+    return provider !== 'spawn-in-process';
+}
 export class DelegationError extends Error {
     code;
     constructor(code, message) {
@@ -40,11 +55,28 @@ function terminalText(result) {
 export class StudioAgentService {
     dependencies;
     #activePaths = new Map();
+    #inFlight = new Map();
     #applyingWorkspaces = new Set();
+    #ready;
+    #reconciliation;
     constructor(dependencies) {
         this.dependencies = dependencies;
+        this.#ready = !this.#hasPersistedWork() && !dependencies.jobs.hasLiveJobs();
+    }
+    reconcileInterruptedRuns() {
+        if (this.#reconciliation !== undefined)
+            return this.#reconciliation;
+        const reconciliation = this.#performRestartReconciliation();
+        this.#reconciliation = reconciliation;
+        void reconciliation.finally(() => {
+            this.#reconciliation = undefined;
+        }).catch(() => undefined);
+        return reconciliation;
     }
     start(request) {
+        if (!this.#ready) {
+            throw new DelegationError('INVALID_STATE', t('recovery.required'));
+        }
         const tier = requiredTier(request);
         if (!request.approval.approved || request.approval.tier !== tier) {
             throw new DelegationError('APPROVAL_REQUIRED', tier === 'T3'
@@ -57,16 +89,34 @@ export class StudioAgentService {
         const paths = request.intendedPaths.map(path => normalizeDelegationPath(path));
         if (paths.length === 0)
             throw new DelegationError('INVALID_PATH', 'Declare ao menos um caminho que o assistente pretende alterar.');
+        // O conflito é do espaço de trabalho e do repositório. Sem esse recorte,
+        // duas organizações diferentes que por acaso editam `src` bloqueariam uma
+        // à outra - e cada uma saberia que a outra está trabalhando ali.
         for (const active of this.#activePaths.values()) {
-            if (pathsOverlap(active, paths)) {
+            if (active.workspaceId !== request.workspaceId || active.repositoryPath !== request.repositoryPath)
+                continue;
+            if (pathsOverlap(active.paths, paths)) {
                 throw new DelegationError('WRITE_CONFLICT', 'Outro assistente já está trabalhando nos mesmos arquivos.');
             }
         }
+        // A reserva durável também vale. Sem esta checagem, uma reserva preservada
+        // por uma execução em estado desconhecido não protegeria nada: bastaria
+        // reiniciar o Studio para que a memória esquecesse o conflito.
+        for (const lease of this.dependencies.repository.leases()) {
+            if (!lease.active)
+                continue;
+            if (lease.workspace_id !== request.workspaceId || lease.repository_path !== request.repositoryPath)
+                continue;
+            if (pathsOverlap(lease.paths, paths)) {
+                throw new DelegationError('WRITE_CONFLICT', t('recovery.blockedByUnknown'));
+            }
+        }
         const runId = this.dependencies.createId?.() ?? randomUUID();
-        this.#activePaths.set(runId, paths);
+        this.#activePaths.set(runId, { workspaceId: request.workspaceId, repositoryPath: request.repositoryPath, paths });
         const controller = new AbortController();
         const done = this.#execute(runId, request, paths, controller.signal)
-            .finally(() => { this.#activePaths.delete(runId); });
+            .finally(() => { this.#activePaths.delete(runId); this.#inFlight.delete(runId); });
+        this.#inFlight.set(runId, { cancel: reason => { controller.abort(reason); }, done });
         try {
             const jobId = this.dependencies.jobs.start({
                 kind: 'studio-agent',
@@ -128,6 +178,111 @@ export class StudioAgentService {
         finally {
             this.#applyingWorkspaces.delete(workspaceKey);
         }
+    }
+    async #performRestartReconciliation() {
+        this.#ready = false;
+        if (this.dependencies.jobs.hasLiveJobs()) {
+            throw new DelegationError('INVALID_STATE', t('recovery.liveJobs'));
+        }
+        const interrupted = this.dependencies.repository.runs()
+            .filter(run => run.status === 'RUNNING')
+            .sort((left, right) => left.run_id.localeCompare(right.run_id));
+        if (this.dependencies.jobs.hasLiveJobs()) {
+            throw new DelegationError('INVALID_STATE', t('recovery.liveJobs'));
+        }
+        const reconciledAt = (this.dependencies.now?.() ?? new Date()).toISOString();
+        const unresolved = new Set();
+        for (const run of interrupted) {
+            const provable = !survivesRestart(run.provider);
+            if (!provable)
+                unresolved.add(run.run_id);
+            await this.dependencies.repository.putRun({
+                ...run,
+                status: provable ? 'FAILED' : 'UNKNOWN',
+                diagnostic: provable ? t('recovery.interrupted') : t('recovery.unknownExternal'),
+                updated_at: reconciledAt,
+            });
+        }
+        // A reserva de arquivos so e liberada quando ha prova de encerramento. Sem
+        // prova ela FICA: liberar aqui seria abrir caminho para dois processos
+        // escrevendo no mesmo lugar, com o registro dizendo que o primeiro falhou.
+        let released = 0;
+        let kept = 0;
+        for (const lease of this.dependencies.repository.leases()
+            .filter(item => item.active)
+            .sort((left, right) => left.lease_id.localeCompare(right.lease_id))) {
+            if (unresolved.has(lease.run_id)) {
+                kept += 1;
+                continue;
+            }
+            released += 1;
+            await this.dependencies.repository.putLease({ ...lease, active: false, released_at: reconciledAt });
+        }
+        if (this.#hasPersistedWork() || this.dependencies.jobs.hasLiveJobs()) {
+            throw new DelegationError('INVALID_STATE', t('recovery.incomplete'));
+        }
+        this.#ready = true;
+        return {
+            interruptedRuns: interrupted.length - unresolved.size,
+            releasedLeases: released,
+            unresolvedRuns: unresolved.size,
+            keptLeases: kept,
+            reconciledAt,
+        };
+    }
+    /**
+     * Uma pessoa confirma que o programa externo terminou. E a unica saida do
+     * estado UNKNOWN, e exige motivo: o registro precisa dizer quem decidiu e
+     * por que, porque nenhuma prova tecnica sustentou essa conclusao.
+     */
+    async resolveUnknownRun(runId, reason) {
+        const trimmed = reason.trim();
+        if (trimmed === '')
+            throw new DelegationError('INVALID_STATE', t('recovery.resolveReason'));
+        const run = this.dependencies.repository.runs().find(candidate => candidate.run_id === runId);
+        if (run === undefined || run.status !== 'UNKNOWN') {
+            throw new DelegationError('INVALID_STATE', t('recovery.resolveNotUnknown'));
+        }
+        const now = (this.dependencies.now?.() ?? new Date()).toISOString();
+        await this.dependencies.repository.putRun({
+            ...run, status: 'FAILED', diagnostic: `${t('recovery.resolved')}${trimmed}`, updated_at: now,
+        });
+        for (const lease of this.dependencies.repository.leases().filter(item => item.active && item.run_id === runId)) {
+            await this.dependencies.repository.putLease({ ...lease, active: false, released_at: now });
+        }
+    }
+    /**
+     * Encerramento ativo com prazo. Pede cancelamento a tudo que esta em voo e
+     * espera ate `SHUTDOWN_DEADLINE_MS`. O que sobreviver ao prazo NAO e
+     * declarado morto - fica para a reconciliacao do proximo inicio.
+     */
+    async shutdown(deadlineMs = SHUTDOWN_DEADLINE_MS) {
+        const inFlight = [...this.#inFlight.entries()];
+        for (const [, entry] of inFlight)
+            entry.cancel('shutdown');
+        let stopped = 0;
+        await Promise.all(inFlight.map(async ([runId, entry]) => {
+            const finished = await Promise.race([
+                /* v8 ignore start -- o braço de rejeição não é alcançável hoje (#execute sempre resolve); existe para que uma rejeição futura não vire unhandled rejection nem prenda o encerramento até o prazo. */
+                entry.done.then(() => true, () => true),
+                /* v8 ignore stop */
+                new Promise(resolve => { setTimeout(() => { resolve(false); }, deadlineMs).unref?.(); }),
+            ]);
+            if (finished) {
+                stopped += 1;
+                this.#inFlight.delete(runId);
+            }
+        }));
+        return { stopped, pending: inFlight.length - stopped };
+    }
+    #hasPersistedWork() {
+        return this.dependencies.repository.runs().some(run => run.status === 'RUNNING')
+            || this.dependencies.repository.leases().some(lease => (lease.active && !this.#unknownRunIds().has(lease.run_id)));
+    }
+    #unknownRunIds() {
+        return new Set(this.dependencies.repository.runs()
+            .filter(run => run.status === 'UNKNOWN')
+            .map(run => run.run_id));
     }
     async #execute(runId, request, paths, signal) {
         const now = this.dependencies.now ?? (() => new Date());

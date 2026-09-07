@@ -158,13 +158,20 @@ export interface PostgresToolConnection {
  * host, porta, usuário e banco ficam só no ambiente do processo filho.
  */
 function applyTargetEnvironment(env: NodeJS.ProcessEnv, url: URL): void {
-  const host = decodeURIComponent(url.hostname)
-  if (host !== '') env.PGHOST = host
-  if (url.port !== '') env.PGPORT = url.port
-  const user = decodeURIComponent(url.username)
-  if (user !== '') env.PGUSER = user
-  const database = decodeURIComponent(url.pathname.replace(/^\//u, ''))
-  if (database !== '') env.PGDATABASE = database
+  // Cada campo é DEFINIDO ou APAGADO. Nunca deixado como estava: uma variável
+  // `PGHOST` ou `PGUSER` herdada do ambiente de quem opera contradiria o alvo
+  // em silêncio, e a ferramenta iria para outro servidor achando que foi para
+  // este. O alvo é o que a URI diz, e só ele.
+  const fields: ReadonlyArray<readonly [string, string]> = [
+    ['PGHOST', decodeURIComponent(url.hostname)],
+    ['PGPORT', url.port],
+    ['PGUSER', decodeURIComponent(url.username)],
+    ['PGDATABASE', decodeURIComponent(url.pathname.replace(/^\//u, ''))],
+  ]
+  for (const [variable, value] of fields) {
+    if (value === '') delete env[variable]
+    else env[variable] = value
+  }
 }
 
 export function postgresToolConnection(dsn: string, policy: TlsPolicy, base: NodeJS.ProcessEnv = {}): PostgresToolConnection {

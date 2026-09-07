@@ -8,6 +8,7 @@ export declare const agentRunStatusSchema: z.ZodEnum<{
     CANCELLED: "CANCELLED";
     BUDGET_EXCEEDED: "BUDGET_EXCEEDED";
     REJECTED: "REJECTED";
+    UNKNOWN: "UNKNOWN";
 }>;
 export declare const agentRunSchema: z.ZodObject<{
     run_id: z.ZodString;
@@ -33,6 +34,7 @@ export declare const agentRunSchema: z.ZodObject<{
         CANCELLED: "CANCELLED";
         BUDGET_EXCEEDED: "BUDGET_EXCEEDED";
         REJECTED: "REJECTED";
+        UNKNOWN: "UNKNOWN";
     }>;
     changed_files: z.ZodArray<z.ZodString>;
     diff_bytes: z.ZodNumber;
@@ -85,7 +87,7 @@ export declare const studioAgentRunsDomainSpec: {
             worktree_path: string;
             repository_path: string;
             base_commit: string;
-            status: "PENDING_APPROVAL" | "RUNNING" | "PROPOSED" | "APPLIED" | "FAILED" | "CANCELLED" | "BUDGET_EXCEEDED" | "REJECTED";
+            status: "PENDING_APPROVAL" | "RUNNING" | "PROPOSED" | "APPLIED" | "FAILED" | "CANCELLED" | "BUDGET_EXCEEDED" | "REJECTED" | "UNKNOWN";
             changed_files: string[];
             diff_bytes: number;
             diff_sha256: string;

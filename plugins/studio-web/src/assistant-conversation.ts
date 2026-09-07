@@ -89,7 +89,11 @@ export class AssistantConversationService {
       const inspected = await this.options.sessions.inspect(conversationId as SessionId, signal)
       return sanitizeAssistantSnapshot(conversationId, inspected.events)
     } catch {
-      throw new AssistantConversationError('NOT_FOUND', t('assistant.conversationMissing'))
+      // A POSSE já foi verificada acima. Uma falha aqui é do Harness, não da
+      // pessoa: dizer "conversa não encontrada" faria alguém acreditar que a
+      // própria conversa sumiu por causa de uma indisponibilidade passageira -
+      // e ainda tiraria dela o botão de tentar de novo.
+      throw new AssistantConversationError('SESSION_UNAVAILABLE', t('assistant.readUnavailable'))
     }
   }
 
