@@ -284,6 +284,12 @@ try {
   const identitySession = await booted.ctx.studioIdentity.service.authenticate(sessionToken, false)
   await booted.ctx.studioIdentity.service.revokeSession(identitySession, identitySession.session_id)
   assert.equal((await fetch(`${edgeOrigin}/`, { headers: authenticatedHeaders })).status, 401)
+  const staleLogout = await fetch(`${edgeOrigin}/api/studio/identity/logout`, {
+    method: 'POST', headers: authenticatedHeaders,
+  })
+  assert.equal(staleLogout.status, 200)
+  assert.deepEqual(await staleLogout.json(), { signed_out: true })
+  assert.match(staleLogout.headers.getSetCookie().join(';'), /Max-Age=0/u)
 
   await stopCaddy(caddy)
   caddy = startCaddy(edgePort, harnessPort, true)
@@ -316,6 +322,7 @@ try {
     nativeSessionBridge: true,
     bootstrapOwnerRace: 'configured-email-only',
     revocationNextRequest: 401,
+    staleCookieLogout: 200,
     directInternalFromForeignContainer: 'connection-refused',
     directInternalFromHost: '401-edge-required',
     edgeRateLimit: { limited: 429, releasedAfterWindow: 200 },

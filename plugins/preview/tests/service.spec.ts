@@ -422,7 +422,7 @@ describe('StudioPreviewService admissions', () => {
     expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({ code: 'NOT_FOUND' })
   })
 
-  it('rejects exchange after session revocation and authorization after membership removal', async () => {
+  it('rejects exchange and an issued preview cookie after session revocation, then rejects membership removal', async () => {
     let active = true
     let membership = true
     const h = createHarness({
@@ -439,6 +439,9 @@ describe('StudioPreviewService admissions', () => {
     active = true
     const cookie = (await h.service.exchange(host, first.admissionTicket)).cookie
     expect(h.service.authorize(host, cookie)).toEqual({ previewId: first.preview.preview_id, runtimeRef: 'container:preview-1', maxAge: 1800 })
+    active = false
+    expect(() => h.service.authorize(host, cookie)).toThrowError(expect.objectContaining({ code: 'UNAUTHENTICATED' }))
+    active = true
     membership = false
     expect(() => h.service.authorize(host, cookie)).toThrowError(expect.objectContaining({ code: 'UNAUTHENTICATED' }))
   })

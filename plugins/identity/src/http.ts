@@ -31,7 +31,7 @@ export const IDENTITY_ROUTE_CONTRACTS = [
   { method: 'GET', path: '/session', access: 'public', permission: null, scope: 'identity' },
   { method: 'GET', path: '/csrf', access: 'authorized', permission: 'identity.self', scope: 'identity' },
   { method: 'GET', path: '/harness/session', access: 'authorized', permission: 'identity.self', scope: 'identity' },
-  { method: 'POST', path: '/logout', access: 'authorized', permission: 'identity.self', scope: 'identity' },
+  { method: 'POST', path: '/logout', access: 'public', permission: null, scope: 'identity' },
   { method: 'POST', path: '/passkey/register/options', access: 'authorized', permission: 'identity.self', scope: 'identity' },
   { method: 'POST', path: '/passkey/register/verify', access: 'authorized', permission: 'identity.self', scope: 'identity' },
   { method: 'POST', path: '/passkey/step-up/options', access: 'authorized', permission: 'identity.self', scope: 'identity' },
@@ -174,16 +174,34 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
         return
       }
 
+      if (request.method === 'POST' && route === '/logout') {
+        const candidates = [...new Set(parseCookieValues(request.headers.cookie, SESSION_COOKIE))]
+        if (candidates.length > 64) throw new IdentityError('invalid', 'Entre para continuar.')
+        if (candidates.length === 0) {
+          response.setHeader('set-cookie', clearSessionCookies(secureCookies))
+          json(response, 200, { signed_out: true })
+          return
+        }
+        let authentication: { readonly token: string; readonly session: SessionRecord }
+        try {
+          authentication = await authenticateCookieRequest(request, config.service)
+        } catch (error) {
+          if (!(error instanceof IdentityError)) throw error
+          response.setHeader('set-cookie', clearSessionCookies(secureCookies))
+          json(response, 200, { signed_out: true })
+          return
+        }
+        config.service.validateCsrfToken(authentication.session, singleHeader(request.headers['x-dz23-csrf']))
+        await config.service.revokeSession(authentication.session, authentication.session.session_id)
+        response.setHeader('set-cookie', clearSessionCookies(secureCookies))
+        json(response, 200, { signed_out: true })
+        return
+      }
+
       const authentication = await authenticateCookieRequest(request, config.service)
       const session = authentication.session
       if (request.method !== 'GET' && request.method !== 'HEAD') {
         config.service.validateCsrfToken(session, singleHeader(request.headers['x-dz23-csrf']))
-      }
-      if (request.method === 'POST' && route === '/logout') {
-        await config.service.revokeSession(session, session.session_id)
-        response.setHeader('set-cookie', clearSessionCookies(secureCookies))
-        json(response, 200, { signed_out: true })
-        return
       }
       if (request.method === 'POST' && route === '/passkey/register/options') {
         json(response, 200, await config.service.beginPasskeyRegistration(authentication.token))

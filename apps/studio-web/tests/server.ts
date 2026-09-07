@@ -93,6 +93,7 @@ const revokedSessions = new Set<string>()
 const identity = {
   requestMagicCode: async () => undefined,
   verifyMagicCode: async () => ({ token: 'session-token', csrfToken: 'csrf-e2e', session }),
+  personalPrincipal: () => ({ userId: 'local', orgId: 'local', tenantId: 'local', sessionId: 'local' }),
   authenticate: async (token: string) => {
     const authenticated = token === 'e2e' ? session
       : token === 'e2e-logout' ? logoutSession

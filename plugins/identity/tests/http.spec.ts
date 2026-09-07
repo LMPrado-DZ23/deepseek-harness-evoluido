@@ -317,6 +317,53 @@ describe('identity HTTP boundary', () => {
     expect(response.headers.getSetCookie()).toEqual([])
   })
 
+  it('finishes logout and clears stale cookies when no active session remains', async () => {
+    const f = await fixture()
+    const absent = await f.request('/logout', { method: 'POST' })
+    expect(absent.status).toBe(200)
+    expect(await absent.json()).toEqual({ signed_out: true })
+    expect(absent.headers.getSetCookie().join(';')).toContain('Max-Age=0')
+
+    f.service.authenticate.mockRejectedValueOnce(new IdentityError('invalid', 'expired-session'))
+    const expired = await f.request('/logout', {
+      method: 'POST', headers: { cookie: `${SESSION_COOKIE}=expired-token` },
+    })
+    expect(expired.status).toBe(200)
+    expect(await expired.json()).toEqual({ signed_out: true })
+    expect(expired.headers.getSetCookie().join(';')).toContain('Max-Age=0')
+    expect(f.service.validateCsrfToken).not.toHaveBeenCalled()
+    expect(f.service.revokeSession).not.toHaveBeenCalled()
+  })
+
+  it('does not let a shadow cookie bypass CSRF for a later active session', async () => {
+    const f = await fixture()
+    f.service.authenticate.mockImplementation(token => token === 'session-token'
+      ? Promise.resolve(session)
+      : Promise.reject(new IdentityError('invalid', 'invalid-session')))
+    f.service.validateCsrfToken.mockImplementationOnce(() => { throw new IdentityError('csrf', 'csrf') })
+
+    const response = await f.request('/logout', {
+      method: 'POST',
+      headers: { cookie: `${SESSION_COOKIE}=shadow; ${SESSION_COOKIE}=session-token`, 'x-dz23-csrf': 'wrong' },
+    })
+
+    expect(response.status).toBe(401)
+    expect(f.service.authenticate).toHaveBeenCalledWith('shadow')
+    expect(f.service.authenticate).toHaveBeenCalledWith('session-token')
+    expect(f.service.revokeSession).not.toHaveBeenCalled()
+    expect(response.headers.getSetCookie()).toEqual([])
+  })
+
+  it('rejects an unbounded logout cookie set without claiming completion', async () => {
+    const f = await fixture()
+    const cookie = Array.from({ length: 65 }, (_, index) => `${SESSION_COOKIE}=candidate-${index}`).join('; ')
+    const response = await f.request('/logout', { method: 'POST', headers: { cookie } })
+
+    expect(response.status).toBe(401)
+    expect(response.headers.getSetCookie()).toEqual([])
+    expect(f.service.authenticate).not.toHaveBeenCalled()
+  })
+
   it('rejects absent session, missing CSRF, untrusted host and untrusted origin', async () => {
     const f = await fixture()
     expect((await f.request('/devices', { method: 'GET' })).status).toBe(401)

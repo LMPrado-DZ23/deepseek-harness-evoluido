@@ -79,3 +79,9 @@ test('preserva cookie, tela, cache e storage quando o servidor não revoga', asy
   expect((await stillActive.get('/api/studio/identity/session')).status()).toBe(200)
   await stillActive.dispose()
 })
+
+test('não oferece sair no modo pessoal sem sessão revogável', async ({ page }) => {
+  await page.goto('/studio/')
+
+  await expect(page.getByRole('button', { name: 'Sair' })).toHaveCount(0)
+})

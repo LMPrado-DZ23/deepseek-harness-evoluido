@@ -62,7 +62,7 @@
 			file_server
 		}
 
-		@public_identity path /api/studio/identity/magic/* /api/studio/identity/passkey/login/*
+		@public_identity path /api/studio/identity/magic/* /api/studio/identity/passkey/login/* /api/studio/identity/logout
 		handle @public_identity {
 			reverse_proxy {$DZ23_HARNESS_UPSTREAM:127.0.0.1:3210} {
 				header_up X-DZ23-Edge "{$DZ23_EDGE_SECRET}"
