@@ -169,3 +169,37 @@
 ## Resume instructions
 
 Leia este arquivo e `audit/M63_INTEGRATION_CHECKPOINT.md`; confira `git status`, `git log -5`, a branch principal separada e o conteúdo de `HANDOFF_CODEX_CLAUDE.md`. Preserve todos os worktrees e stagings. Não faça merge, push, PR, deploy público, limpeza Docker nem escolha licença em nome do Prado.
+
+## Iteração M86 — transporte HTTP bruto do limite de Cookie
+
+- estado: `CHECKPOINTING`;
+- branch: `codex/m86-raw-cookie-transport`;
+- base: `codex/m84-image-self-verification@b74bf6ea82d2549a545d706540dfebfc6116ccae`;
+- commit funcional: `1788d036a878080c4a10ee2b2718ce328e1deef5`;
+- objetivo: fechar o limite residual explicitamente `NOT_EXECUTED` da M83 com
+  duas linhas `Cookie` reais sobre socket TCP, após a normalização do
+  `node:http`;
+- alteração funcional: apenas
+  `plugins/identity/tests/http-raw-cookie.spec.ts`; nenhuma linha de produção
+  foi alterada;
+- exatamente 8.192 bytes normalizados: aceito, logout autenticado, CSRF e
+  revogação executados;
+- exatamente 8.193 bytes normalizados: `431 COOKIE_HEADER_TOO_LARGE`, sem
+  consulta ao segredo de borda, autenticação, CSRF, revogação ou `Set-Cookie`;
+- o servidor da prova usa `maxHeaderSize: 32 KiB`, impedindo falso positivo do
+  parser HTTP do próprio Node;
+- teste focado: 2/2 `PASS`;
+- regressão do plugin Identity: 58/58 `PASS` em seis arquivos;
+- compilador TypeScript chamado diretamente: `PASS`; o script canônico
+  `pnpm typecheck` ficou `BLOCKED_ENVIRONMENT` antes do compilador porque o
+  `postinstall` do submódulo recusou a configuração Git compartilhada do
+  worktree;
+- revisão independente somente leitura: nenhum bypass estático; recomendação
+  de socket bruto, captura do cabeçalho normalizado e aumento do parser
+  incorporada;
+- P37 self-test positivo/negativo/vazio: `PASS`; fonte funcional: 866 arquivos,
+  22 manifests, uma licença, zero achado;
+- principal `codex/p30-policy-foundation@17e79aa` preservada;
+- nenhum merge, push, PR, deploy, Docker, exclusão ou limpeza executado;
+- próxima ação: gerar evidência final e solicitar revisão somente leitura do
+  Claude depois das prioridades M72/M73/M74-A/M75/M83/M84 já registradas.
