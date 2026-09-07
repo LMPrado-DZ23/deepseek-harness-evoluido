@@ -124,7 +124,7 @@ pnpm --dir third_party/deepseek-harness build:official
 pnpm install --frozen-lockfile --filter '@dz23-studio/*...'
 pnpm build
 pnpm typecheck
-pnpm test -- --maxWorkers=2
+pnpm exec vitest run --maxWorkers=1
 ```
 
 O bootstrap valida a origem e o commit antes de converter os placeholders de
