@@ -23,6 +23,15 @@ export type AssistantPublicEvent =
   | { readonly type: 'tool.state'; readonly seq: number; readonly at: number; readonly call_id: string; readonly label: string; readonly state: 'running' | 'succeeded' | 'failed' }
   | { readonly type: 'approval.requested'; readonly seq: number; readonly at: number; readonly request_id: string; readonly tool_label: string; readonly explanation: string }
   | { readonly type: 'approval.resolved'; readonly seq: number; readonly at: number; readonly request_id: string; readonly outcome: 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable' }
+  /**
+   * Projection of the Harness compaction lifecycle. The Studio never runs a
+   * second compaction and never copies the summary: the summary itself arrives
+   * as the ordinary replacement message right after `compaction/summary`. What
+   * travels here is only the state and, once the summary exists, the real
+   * counts. There is no progress fraction because the upstream contract does
+   * not carry one - inventing a percentage would be inventing evidence.
+   */
+  | { readonly type: 'compaction.state'; readonly seq: number; readonly at: number; readonly compaction_id: string; readonly state: 'summarizing' | 'committing' | 'completed' | 'failed'; readonly items?: number; readonly tokens?: number }
 
 export interface AssistantConversationSnapshot {
   readonly conversation_id: string
@@ -215,6 +224,37 @@ export function sanitizeAssistantEvent(value: unknown): AssistantPublicEvent | u
     }
   }
 
+  if (type === 'compaction/start') {
+    const compactionId = safeIdentifier(data.compactionId)
+    if (compactionId === undefined) return undefined
+    return { type: 'compaction.state', seq, at, compaction_id: compactionId, state: 'summarizing' }
+  }
+
+  if (type === 'compaction/summary') {
+    // `summary`, `rawOutput`, `provider`, `model`, `usage` and `maxTokens` stay
+    // on the server. Only how much was organized crosses to the browser.
+    const compactionId = safeIdentifier(data.compactionId)
+    if (compactionId === undefined) return undefined
+    const items = Array.isArray(data.shadowedSeqs) ? data.shadowedSeqs.length : undefined
+    const tokens = safeCount(data.shadowedTokenCount)
+    return {
+      type: 'compaction.state', seq, at, compaction_id: compactionId, state: 'committing',
+      ...(items === undefined ? {} : { items }),
+      ...(tokens === undefined ? {} : { tokens }),
+    }
+  }
+
+  if (type === 'compaction/end') {
+    // `error` is an upstream string: it can carry a path or a provider detail,
+    // so only its PRESENCE crosses. The screen says the catalogued sentence.
+    const compactionId = safeIdentifier(data.compactionId)
+    if (compactionId === undefined) return undefined
+    return {
+      type: 'compaction.state', seq, at, compaction_id: compactionId,
+      state: data.error === undefined ? 'completed' : 'failed',
+    }
+  }
+
   if (type === 'approval/decided') {
     const requestId = safeIdentifier(data.id)
     const outcome = data.outcome
@@ -254,6 +294,10 @@ function objectValue(value: unknown): Record<string, unknown> | undefined {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
     ? value as Record<string, unknown>
     : undefined
+}
+
+function safeCount(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined
 }
 
 function safeIdentifier(value: unknown): string | undefined {

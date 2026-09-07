@@ -42,3 +42,19 @@
 .conversation-composer textarea{background:#0f1523;color:#eef2f9;border-color:#2b3550}
 .conversation-actions .secondary{background:#0f1523;color:#eef2f9;border-color:#2b3550}
 }
+.compaction-band{display:flex;flex-direction:column;gap:6px;border:1px solid #cfe0fb;background:#f4f8ff;border-radius:10px;padding:12px 14px}
+.compaction-band.failed{background:#fef4f3;border-color:#f5c6c2;color:#b42318}
+.compaction-bar{display:block;height:4px;border-radius:2px;background:#dbe7fb;overflow:hidden;position:relative}
+.compaction-bar::after{content:'';position:absolute;inset:0;width:38%;border-radius:2px;background:#075ee5;animation:compaction-slide 1.4s ease-in-out infinite}
+@keyframes compaction-slide{0%{transform:translateX(-100%)}100%{transform:translateX(300%)}}
+.compaction-marker{display:flex;flex-direction:column;gap:4px;margin:0;color:#2c3a57;font-size:14px}
+.conversation-advanced{margin-top:4px}
+.conversation-advanced summary{cursor:pointer;color:#075ee5;font-size:14px;padding:6px 0}
+.conversation-advanced button{margin-top:8px}
+@media (prefers-reduced-motion:reduce){.compaction-bar::after{animation:none;width:100%;opacity:.55}}
+@media (prefers-color-scheme:dark){
+.compaction-band{background:#101c31;border-color:#23406b}
+.compaction-band.failed{background:#2a1616;border-color:#6b2b2b;color:#ffb4ab}
+.compaction-bar{background:#1b2b47}
+.compaction-marker{color:#c6d2e8}
+}

@@ -97,3 +97,72 @@ export function conversationStatus(state: ConversationState): 'idle' | 'working'
   if (state.queued.length > 0) return 'queued'
   return state.turn
 }
+
+/**
+ * What the screen shows about compaction. `reconciling` is not a server state:
+ * it is what the client says when the journal moved past the summary without an
+ * end marker - the honest answer there is "still organizing", never "done".
+ */
+export type CompactionPhase = 'summarizing' | 'committing' | 'completed' | 'failed' | 'reconciling'
+
+export interface CompactionView {
+  readonly compactionId: string
+  readonly phase: CompactionPhase
+  /** Real counts, and only after the summary exists. Never estimated. */
+  readonly items?: number
+  readonly tokens?: number
+}
+
+const PHASE_RANK: Readonly<Record<'summarizing' | 'committing' | 'completed' | 'failed', number>> = {
+  summarizing: 1, committing: 2, completed: 3, failed: 3,
+}
+
+/**
+ * Folds the journal into the current compaction. Monotonic by construction: a
+ * duplicated or late event cannot move the phase backwards, and only the newest
+ * compaction is shown. Counts, once seen, are kept - the end marker does not
+ * carry them.
+ */
+export function compactionView(state: ConversationState): CompactionView | null {
+  let current: { compactionId: string; rank: number; state: 'summarizing' | 'committing' | 'completed' | 'failed'; items?: number; tokens?: number; seq: number } | null = null
+  let latestOtherSeq = -1
+  for (const event of state.events) {
+    if (event.type !== 'compaction.state') {
+      latestOtherSeq = Math.max(latestOtherSeq, event.seq)
+      continue
+    }
+    if (current === null || current.compactionId !== event.compaction_id) {
+      if (current !== null && event.seq < current.seq) continue
+      current = {
+        compactionId: event.compaction_id, rank: PHASE_RANK[event.state], state: event.state, seq: event.seq,
+        ...(event.items === undefined ? {} : { items: event.items }),
+        ...(event.tokens === undefined ? {} : { tokens: event.tokens }),
+      }
+      continue
+    }
+    if (PHASE_RANK[event.state] < current.rank) continue
+    current = {
+      ...current,
+      rank: PHASE_RANK[event.state],
+      state: event.state,
+      seq: Math.max(current.seq, event.seq),
+      ...(event.items === undefined ? {} : { items: event.items }),
+      ...(event.tokens === undefined ? {} : { tokens: event.tokens }),
+    }
+  }
+  if (current === null) return null
+  const phase: CompactionPhase = current.state === 'committing' && latestOtherSeq > current.seq
+    ? 'reconciling'
+    : current.state
+  return {
+    compactionId: current.compactionId,
+    phase,
+    ...(current.items === undefined ? {} : { items: current.items }),
+    ...(current.tokens === undefined ? {} : { tokens: current.tokens }),
+  }
+}
+
+/** True while the conversation is being organized and cannot take a new turn. */
+export function isCompacting(view: CompactionView | null): boolean {
+  return view !== null && (view.phase === 'summarizing' || view.phase === 'committing' || view.phase === 'reconciling')
+}

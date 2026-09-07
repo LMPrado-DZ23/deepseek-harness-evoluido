@@ -11,12 +11,15 @@ import {
 } from './conversationApi'
 import {
   applySnapshot,
+  compactionView,
   conversationStatus,
   dropQueuedMessage,
   emptyConversation,
+  isCompacting,
   openedConversation,
   queueMessage,
   setDraft,
+  type CompactionView,
   type ConversationState,
 } from './conversationState'
 
@@ -104,6 +107,19 @@ export function Conversation({ conversationId, port, getCsrf, pollMs = CONVERSAT
   }, [conversationId, getCsrf, port])
 
   const items = useMemo(() => state.events.filter(isRenderable), [state.events])
+  const compaction = useMemo(() => compactionView(state), [state])
+  const organizing = isCompacting(compaction)
+
+  const compactNow = useCallback(async () => {
+    if (organizing) return
+    try {
+      const accepted = await sendConversationMessage(conversationId, '/compact', port, getCsrf)
+      dispatch({ kind: 'queued', requestId: accepted.request_id, text: '/compact' })
+      setError(null)
+    } catch (reason) {
+      setError(describe(reason))
+    }
+  }, [conversationId, getCsrf, organizing, port])
 
   return <section className="conversation" aria-labelledby="conversation-title">
     <header>
@@ -128,6 +144,8 @@ export function Conversation({ conversationId, port, getCsrf, pollMs = CONVERSAT
         <p>{message.text}</p>
       </li>)}
     </ol>
+
+    {compaction === null ? null : <CompactionBand view={compaction} />}
 
     <p className="conversation-status" role="status" aria-live="polite">
       {status === 'queued'
@@ -165,7 +183,43 @@ export function Conversation({ conversationId, port, getCsrf, pollMs = CONVERSAT
             </button>
           : null}
       </div>
+      <details className="conversation-advanced">
+        <summary>{copy.advancedOptions}</summary>
+        <button type="button" className="secondary" disabled={organizing} onClick={() => { void compactNow() }}>
+          {copy.compactNow}
+        </button>
+      </details>
     </form>
+  </section>
+}
+
+/**
+ * The band. It is deliberately indeterminate: the upstream events carry no
+ * completed/total pair, so there is nothing honest to turn into a percentage.
+ * `aria-valuenow` is absent for the same reason - an indeterminate bar must not
+ * claim a value. Counts appear only once the summary really reported them.
+ */
+export function CompactionBand({ view }: { readonly view: CompactionView }) {
+  if (view.phase === 'completed') {
+    return <p className="compaction-marker" role="status">
+      <strong>{copy.compactionDone}</strong>
+      {view.items === undefined && view.tokens === undefined ? null : <span className="context-note">
+        {copy.compactionMarker}
+        {view.items === undefined ? '' : ` — ${String(view.items)} ${copy.compactionMarkerItems}`}
+        {view.tokens === undefined ? '' : ` — ${String(view.tokens)} ${copy.compactionMarkerTokens}`}
+      </span>}
+    </p>
+  }
+  if (view.phase === 'failed') {
+    return <p className="compaction-band failed" role="status">{copy.compactionFailed}</p>
+  }
+  const step = view.phase === 'summarizing' ? copy.compactionStepSummarizing
+    : view.phase === 'committing' ? copy.compactionStepCommitting
+      : copy.compactionStepReconciling
+  return <section className="compaction-band" role="status" aria-live="polite">
+    <strong>{copy.compactionTitle}</strong>
+    <span className="context-note">{step}</span>
+    <span className="compaction-bar" role="progressbar" aria-label={copy.compactionTitle} />
   </section>
 }
 
@@ -197,7 +251,7 @@ function ConversationItem({ event }: { readonly event: ConversationEvent }) {
 
 /** `turn.state` drives the status line, not the transcript. */
 function isRenderable(event: ConversationEvent): boolean {
-  return event.type !== 'turn.state'
+  return event.type !== 'turn.state' && event.type !== 'compaction.state'
 }
 
 function describe(reason: unknown): { readonly message: string; readonly retryable: boolean } {

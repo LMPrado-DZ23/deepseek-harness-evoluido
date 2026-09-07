@@ -10,6 +10,13 @@ export type ConversationEvent =
   | { readonly type: 'tool.state'; readonly seq: number; readonly at: number; readonly call_id: string; readonly label: string; readonly state: 'running' | 'succeeded' | 'failed' }
   | { readonly type: 'approval.requested'; readonly seq: number; readonly at: number; readonly request_id: string; readonly tool_label: string; readonly explanation: string }
   | { readonly type: 'approval.resolved'; readonly seq: number; readonly at: number; readonly request_id: string; readonly outcome: 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable' }
+  | { readonly type: 'compaction.state'; readonly seq: number; readonly at: number; readonly compaction_id: string; readonly state: CompactionState; readonly items?: number; readonly tokens?: number }
+
+/**
+ * The four states the server projects from the Harness journal. There is no
+ * fifth "percent done": the upstream contract carries no unit of progress.
+ */
+export type CompactionState = 'summarizing' | 'committing' | 'completed' | 'failed'
 
 export interface ConversationSnapshot {
   readonly conversation_id: string
@@ -131,6 +138,10 @@ function failure(status: number, body: unknown): ConversationRequestError {
   return new ConversationRequestError(status, message, status >= 500 || status === 429)
 }
 
+function isOptionalCount(value: unknown): boolean {
+  return value === undefined || (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0)
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -156,6 +167,11 @@ export function isConversationEvent(value: unknown): value is ConversationEvent 
   if (value.type === 'approval.resolved') {
     return typeof value.request_id === 'string'
       && ['allowed-once', 'rejected', 'cancelled', 'unavailable'].includes(value.outcome as string)
+  }
+  if (value.type === 'compaction.state') {
+    return typeof value.compaction_id === 'string' && value.compaction_id !== ''
+      && ['summarizing', 'committing', 'completed', 'failed'].includes(value.state as string)
+      && isOptionalCount(value.items) && isOptionalCount(value.tokens)
   }
   return false
 }

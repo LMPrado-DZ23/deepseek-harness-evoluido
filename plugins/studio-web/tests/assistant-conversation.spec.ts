@@ -205,6 +205,59 @@ describe('assistant transcript sanitization', () => {
     })
   })
 
+  it('projeta a compactação real do Harness sem vazar resumo, modelo, provedor ou erro', () => {
+    const values = [
+      event('compaction/start', 20, { compactionId: 'comp-1', sourceCommandId: 'cmd-1', turn: 3 }),
+      event('compaction/summary', 21, {
+        compactionId: 'comp-1',
+        sourceCommandId: 'cmd-1',
+        summary: [{ type: 'text', text: 'RESUMO INTERNO SIGILOSO' }],
+        rawOutput: [{ type: 'text', text: 'SAIDA CRUA DO MODELO' }],
+        llmStreamCall: true,
+        provider: 'provedor-secreto',
+        model: 'modelo-secreto',
+        maxTokens: 4096,
+        usage: { inputTokens: 900, outputTokens: 120 },
+        shadowedRange: { start: 2, end: 18 },
+        shadowedSeqs: [2, 3, 4, 5, 6, 7],
+        shadowedTokenCount: 12_345,
+      }),
+      event('compaction/end', 22, { compactionId: 'comp-1', sourceCommandId: 'cmd-1', turn: 3 }),
+    ]
+    const snapshot = sanitizeAssistantSnapshot('conversation-1', values)
+    expect(snapshot.events).toEqual([
+      { type: 'compaction.state', seq: 20, at: 120, compaction_id: 'comp-1', state: 'summarizing' },
+      { type: 'compaction.state', seq: 21, at: 121, compaction_id: 'comp-1', state: 'committing', items: 6, tokens: 12_345 },
+      { type: 'compaction.state', seq: 22, at: 122, compaction_id: 'comp-1', state: 'completed' },
+    ])
+    const wire = JSON.stringify(snapshot)
+    expect(wire).not.toMatch(/RESUMO INTERNO|SAIDA CRUA|provedor-secreto|modelo-secreto|rawOutput|usage|maxTokens|cmd-1/u)
+    // Nenhuma fração de progresso atravessa: o contrato upstream não tem uma.
+    expect(wire).not.toMatch(/percent|progress|"ratio"/u)
+  })
+
+  it('conta apenas o que o Harness realmente informou e nunca inventa número nem texto de erro', () => {
+    // Contagens ausentes ou impossíveis são omitidas, não chutadas.
+    expect(sanitizeAssistantEvent(event('compaction/summary', 1, {
+      compactionId: 'comp-2', shadowedTokenCount: -5, shadowedSeqs: 'nada',
+    }))).toEqual({ type: 'compaction.state', seq: 1, at: 101, compaction_id: 'comp-2', state: 'committing' })
+    expect(sanitizeAssistantEvent(event('compaction/summary', 2, {
+      compactionId: 'comp-2', shadowedTokenCount: 1.5, shadowedSeqs: [],
+    }))).toEqual({ type: 'compaction.state', seq: 2, at: 102, compaction_id: 'comp-2', state: 'committing', items: 0 })
+
+    // Fim com erro vira estado de falha; o texto do erro fica no servidor.
+    expect(sanitizeAssistantEvent(event('compaction/end', 3, {
+      compactionId: 'comp-2', error: 'ENOENT /home/pessoa/segredo.json',
+    }))).toEqual({ type: 'compaction.state', seq: 3, at: 103, compaction_id: 'comp-2', state: 'failed' })
+
+    // Sem identidade de compactação não há evento: melhor nada do que um estado órfão.
+    for (const broken of [{}, { compactionId: '' }, { compactionId: 1 }, { compactionId: 'a\u0000b' }]) {
+      expect(sanitizeAssistantEvent(event('compaction/start', 4, broken))).toBeUndefined()
+      expect(sanitizeAssistantEvent(event('compaction/end', 5, broken))).toBeUndefined()
+      expect(sanitizeAssistantEvent(event('compaction/summary', 6, broken))).toBeUndefined()
+    }
+  })
+
   it('bounds public text and transcript size while retaining the durable cursor', () => {
     const values = Array.from({ length: 505 }, (_, seq) => event('user/message', seq, {
       id: `m-${seq}`, source: { kind: 'user' }, content: [{ type: 'text', text: seq === 504 ? 'x'.repeat(64 * 1024 + 1) : 'x' }],

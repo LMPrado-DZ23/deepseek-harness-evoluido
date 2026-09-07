@@ -42,5 +42,16 @@
   "approvalRejected": "Você recusou",
   "approvalCancelled": "Cancelado",
   "approvalUnavailable": "Não foi possível confirmar",
-  "openInHarness": "Abrir no Harness (somente instalação pessoal)"
+  "openInHarness": "Abrir no Harness (somente instalação pessoal)",
+  "compactionTitle": "Organizando nossa conversa para continuarmos com segurança…",
+  "compactionStepSummarizing": "Resumindo mensagens antigas",
+  "compactionStepCommitting": "Conferindo o que precisa ser preservado",
+  "compactionStepReconciling": "Ainda organizando. Nada foi perdido.",
+  "compactionDone": "Conversa organizada. Podemos continuar.",
+  "compactionFailed": "Não foi possível organizar a conversa. Nada foi perdido.",
+  "compactionMarker": "Histórico organizado",
+  "compactionMarkerItems": "itens",
+  "compactionMarkerTokens": "tokens aproximados",
+  "compactNow": "Organizar conversa agora",
+  "advancedOptions": "Opções avançadas"
 }
