@@ -5,6 +5,7 @@
  */
 export * from './artifact.js'
 export * from './domain.js'
+export * from './approval-adapter.js'
 export * from './model.js'
 export * from './security.js'
 export * from './service.js'

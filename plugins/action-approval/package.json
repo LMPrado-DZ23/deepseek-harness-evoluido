@@ -1,5 +1,5 @@
 {
-  "name": "@dz23-studio/staging",
+  "name": "@dz23-studio/action-approval",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -14,13 +14,10 @@
   },
   "files": ["lib", "i18n"],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "test": "vitest run --config vitest.config.ts",
-    "test:coverage": "vitest run --config vitest.config.ts --coverage"
+    "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
     "@deepseek-ai/dsh-storage-domain": "workspace:*",
-    "@dz23-studio/action-approval": "workspace:*",
     "@dz23-studio/policy": "workspace:*",
     "zod": "4.4.3"
   }

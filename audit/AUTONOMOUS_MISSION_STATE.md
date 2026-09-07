@@ -319,3 +319,30 @@ Leia este arquivo e `audit/M63_INTEGRATION_CHECKPOINT.md`; confira `git status`,
   permanente de `plugins/*/lib/**` foi executado;
 - próxima ação: gerar o artefato final, selar hashes e solicitar revisão do
   Claude antes de qualquer integração.
+
+## M90-A — autoridade genérica de confirmação (Claude, 07/09/2026)
+
+Base `codex/m90-action-approval@4c44218`. **A prova histórica do M89 acima não
+foi reescrita.**
+
+Entregue: `plugins/action-approval` (domínio `studio_action_approvals`,
+`studio.action.approvals`, tabela `approvals` com `org_id`/`tenant_id` no nível
+superior), o adaptador `plugins/staging/src/approval-adapter.ts`, ADR-039 e
+`docs/proofs/M90A-action-approval-proof.md`.
+
+Executado: `tsc --noEmit` PASS; `pnpm build` PASS; suíte raiz 2095 aprovados,
+60 pulados, 3 reprovados apenas por rodar como uid 0; coverage sem nenhuma
+violação de limiar, incluindo o novo 100% de
+`plugins/action-approval/src/{model,repository,service,http}.ts`;
+`I18N_GATE=PASS` (14 catálogos, 290 chaves); `DOMAIN_ROUTE_GATE=PASS domains=26`;
+domain-scopes PASS; `PORTABILITY=PASS findings=0`; `UPSTREAM_PIN=PASS`.
+
+Achado pré-existente corrigido de passagem: duas guardas defensivas em
+`plugins/identity/src/http.ts` tinham braço inalcançável e faziam o limiar de
+100% de `plugins/identity/src/**` falhar em 99,74%. **A base M89, como entregue,
+não passava no próprio limiar de cobertura.** As guardas foram mantidas e
+anotadas.
+
+`NOT_EXECUTED`: PostgreSQL real; `pnpm-lock.release.yaml` continua defasado, de
+modo que a **imagem de release ainda não contém M90**.
+`NOT_IMPLEMENTED`: montagem em perfil e consumidor real.

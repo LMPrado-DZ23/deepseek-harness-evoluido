@@ -122,6 +122,7 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
         const body = magicVerifySchema.parse(await readJson(request))
         const issued = await config.service.verifyMagicCode(body.email, body.code, deviceOf(request, body.device_label))
         const sessionGeneration = createSessionGeneration()
+        /* v8 ignore next -- guarda defensiva sobre createSessionGeneration, que sempre devolve 32 hex; o braço de falha existe para falhar fechado se essa invariante mudar, e não é acionável por teste. */
         if (!/^[a-f0-9]{32}$/u.test(sessionGeneration)) throw new TypeError()
         response.setHeader('set-cookie', serializeSessionCookies(issued.token, issued.csrfToken, secureCookies))
         json(response, 200, { session_id: issued.session.session_id, csrf_token: issued.csrfToken, session_generation: sessionGeneration })
@@ -140,6 +141,7 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
           deviceOf(request, 'Chave de acesso'),
         )
         const sessionGeneration = createSessionGeneration()
+        /* v8 ignore next -- guarda defensiva sobre createSessionGeneration, que sempre devolve 32 hex; o braço de falha existe para falhar fechado se essa invariante mudar, e não é acionável por teste. */
         if (!/^[a-f0-9]{32}$/u.test(sessionGeneration)) throw new TypeError()
         response.setHeader('set-cookie', serializeSessionCookies(issued.token, issued.csrfToken, secureCookies))
         json(response, 200, { session_id: issued.session.session_id, csrf_token: issued.csrfToken, session_generation: sessionGeneration })

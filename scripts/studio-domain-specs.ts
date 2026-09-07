@@ -10,10 +10,12 @@ import { studioMembershipsDomainSpec, studioOrgsDomainSpec, studioWorkspacesDoma
 import { PROMPT_TO_APP_DOMAIN_SPECS } from '../plugins/prompt-to-app/src/model.ts'
 import { studioIntegrationsDomainSpec } from '../plugins/integration-hub/src/model.ts'
 import { studioStagingReleasesDomainSpec } from '../plugins/staging/src/domain.ts'
+import { studioActionApprovalsDomainSpec } from '../plugins/action-approval/src/domain.ts'
 
 /** The only units migration tools may touch. Session/event logs use another seam. */
 export const STUDIO_DOMAIN_SPECS: readonly DomainSpec[] = [
   studioHelloDomainSpec,
+  studioActionApprovalsDomainSpec,
   identityUsersDomainSpec,
   identityCredentialsDomainSpec,
   identitySessionsDomainSpec,

@@ -82,6 +82,12 @@ export const STUDIO_DOMAIN_SCOPES: readonly DomainScopeEntry[] = [
     },
   },
   {
+    source: 'plugins/action-approval/src/domain.ts', exportName: 'studioActionApprovalsDomainSpec', physicalName: 'studio_action_approvals',
+    tables: {
+      approvals: { scope: 'org-tenant', requiredFields: ['org_id', 'tenant_id'], reason: 'Uma confirmação de ação sensível pertence a uma pessoa dentro de uma organização e de um inquilino.' },
+    },
+  },
+  {
     source: 'plugins/hello/src/index.ts', exportName: 'studioHelloDomainSpec', physicalName: 'studio_hello',
     tables: { records: { scope: 'tenant-only-poc', requiredFields: ['tenant_id'], reason: 'PoC domain predates organizations.' } },
   },
