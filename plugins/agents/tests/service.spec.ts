@@ -170,6 +170,120 @@ function harness(options: {
   return { service, repository, jobs, starts, coordinatorDispose, childDispose }
 }
 
+describe('M75-B — encerramento comprovado antes de liberar a reserva', () => {
+  const external = (runId: string, provider: 'codex' | 'claude-code' = 'codex'): AgentRunRecord => ({
+    ...persistedRun(runId), provider,
+  })
+
+  it('não declara morto o que não pode provar: execução externa vira UNKNOWN e a reserva FICA', async () => {
+    const h = harness({
+      initialRuns: [external('externa-1'), persistedRun('interna-1')],
+      initialLeases: [persistedLease('lease-externa', 'externa-1'), persistedLease('lease-interna', 'interna-1')],
+    })
+    const result = await h.service.reconcileInterruptedRuns()
+    expect(result).toMatchObject({ interruptedRuns: 1, releasedLeases: 1, unresolvedRuns: 1, keptLeases: 1 })
+
+    // O que morre junto com o processo é dado como falho e libera a reserva.
+    expect(h.repository.runMap.get('interna-1')).toMatchObject({ status: 'FAILED' })
+    expect(h.repository.leaseMap.get('lease-interna')).toMatchObject({ active: false })
+
+    // O que tem vida própria no sistema operacional NÃO é dado como falho.
+    expect(h.repository.runMap.get('externa-1')).toMatchObject({
+      status: 'UNKNOWN',
+      diagnostic: expect.stringContaining('não consegue provar'),
+    })
+    expect(h.repository.leaseMap.get('lease-externa')).toMatchObject({ active: true, released_at: null })
+  })
+
+  it('a reserva preservada realmente bloqueia: nova execução nos mesmos arquivos é recusada', async () => {
+    const h = harness({
+      initialRuns: [external('externa-1')],
+      initialLeases: [persistedLease('lease-externa', 'externa-1')],
+    })
+    await h.service.reconcileInterruptedRuns()
+    // O serviço aceita trabalho de novo (não ficou travado inteiro)...
+    expect(() => h.service.start(request({ intendedPaths: ['docs'] }))).not.toThrow()
+    // ...mas não nos arquivos que continuam reservados.
+    expect(() => h.service.start(request({ intendedPaths: ['src'] })))
+      .toThrowError(expect.objectContaining({ code: 'WRITE_CONFLICT' }))
+
+    // A reserva é do espaço de trabalho e do repositório dela: os mesmos
+    // caminhos em OUTRO espaço ou em OUTRO repositório não são bloqueados.
+    // Isso vale para a reserva durável E para o conflito em memória - duas
+    // organizações que por acaso editam `src` não podem bloquear uma à outra.
+    expect(() => h.service.start(request({ intendedPaths: ['src'], workspaceId: 'workspace-2' }))).not.toThrow()
+    expect(() => h.service.start(request({ intendedPaths: ['src'], repositoryPath: '/outro-repo' }))).not.toThrow()
+  })
+
+  it('só uma pessoa tira do desconhecido, com motivo, e o motivo fica no registro', async () => {
+    const h = harness({
+      initialRuns: [external('externa-1')],
+      initialLeases: [persistedLease('lease-externa', 'externa-1')],
+    })
+    await h.service.reconcileInterruptedRuns()
+    await expect(h.service.resolveUnknownRun('externa-1', '   '))
+      .rejects.toMatchObject({ code: 'INVALID_STATE' })
+    await expect(h.service.resolveUnknownRun('inexistente', 'motivo'))
+      .rejects.toMatchObject({ code: 'INVALID_STATE' })
+
+    await h.service.resolveUnknownRun('externa-1', 'conferi na máquina, o processo não existe mais')
+    expect(h.repository.runMap.get('externa-1')).toMatchObject({
+      status: 'FAILED',
+      diagnostic: expect.stringContaining('conferi na máquina'),
+    })
+    expect(h.repository.leaseMap.get('lease-externa')).toMatchObject({ active: false })
+    // Agora os arquivos voltam a aceitar trabalho.
+    expect(() => h.service.start(request({ intendedPaths: ['src'] }))).not.toThrow()
+
+    // Sem relógio injetado, a confirmação usa a hora real em vez de falhar.
+    const realClock = harness({
+      omitClock: true,
+      initialRuns: [external('externa-2')],
+      initialLeases: [persistedLease('lease-externa-2', 'externa-2')],
+    })
+    await realClock.service.reconcileInterruptedRuns()
+    await realClock.service.resolveUnknownRun('externa-2', 'confirmado na máquina')
+    expect(realClock.repository.runMap.get('externa-2')).toMatchObject({ status: 'FAILED' })
+    // E não dá para confirmar duas vezes o mesmo encerramento.
+    await expect(h.service.resolveUnknownRun('externa-1', 'de novo'))
+      .rejects.toMatchObject({ code: 'INVALID_STATE' })
+  })
+
+  it('o encerramento ativo tem prazo e não mente sobre o que sobreviveu a ele', async () => {
+    const h = harness({ resultFactory: signal => new Promise((resolve, reject) => {
+      signal.addEventListener('abort', () => { reject(new Error('cancelado')) })
+    }) })
+    await h.service.reconcileInterruptedRuns()
+    h.service.start(request())
+    // O que não terminou dentro do prazo NÃO é contado como encerrado. Esta é a
+    // propriedade que importa: o encerramento nunca afirma ter parado algo que
+    // não viu parar - a execução fica para a reconciliação do próximo início.
+    expect(await h.service.shutdown(1)).toEqual({ stopped: 0, pending: 1 })
+    // E continua honesto quando perguntado de novo.
+    expect(await h.service.shutdown(1)).toEqual({ stopped: 0, pending: 1 })
+
+    // Sem nada em voo, encerrar é uma operação vazia e honesta.
+    const idle = harness()
+    await idle.service.reconcileInterruptedRuns()
+    await expect(idle.service.shutdown(10)).resolves.toEqual({ stopped: 0, pending: 0 })
+
+    // E quando a execução realmente termina dentro do prazo, é contada como
+    // encerrada e sai do registro de execuções em voo.
+    const quick = harness()
+    await quick.service.reconcileInterruptedRuns()
+    quick.service.start(request())
+    expect(await quick.service.shutdown(2_000)).toEqual({ stopped: 1, pending: 0 })
+    expect(await quick.service.shutdown(10)).toEqual({ stopped: 0, pending: 0 })
+
+    // Uma execução que termina em ERRO também conta como encerrada: o que o
+    // encerramento precisa saber é que ela parou, não como ela terminou.
+    const failing = harness({ subagentStartError: new Error('falhou ao iniciar') })
+    await failing.service.reconcileInterruptedRuns()
+    failing.service.start(request())
+    expect(await failing.service.shutdown(2_000)).toEqual({ stopped: 1, pending: 0 })
+  })
+})
+
 describe('StudioAgentService PoC 3A', () => {
   it('reconciles interrupted runs and leases before accepting new work, idempotently', async () => {
     const terminal = persistedRun('finished-run', 'PROPOSED')
@@ -187,7 +301,7 @@ describe('StudioAgentService PoC 3A', () => {
       h.service.reconcileInterruptedRuns(),
       h.service.reconcileInterruptedRuns(),
     ])
-    expect(first).toEqual({ interruptedRuns: 2, releasedLeases: 2, reconciledAt: '2026-09-03T00:00:00.000Z' })
+    expect(first).toEqual({ interruptedRuns: 2, releasedLeases: 2, unresolvedRuns: 0, keptLeases: 0, reconciledAt: '2026-09-03T00:00:00.000Z' })
     expect(concurrent).toEqual(first)
     expect(h.repository.runMap.get('stale-run-z')).toMatchObject({
       status: 'FAILED',
@@ -200,7 +314,7 @@ describe('StudioAgentService PoC 3A', () => {
     expect(h.repository.leaseMap.get('lease-orphan')).toMatchObject({ active: false, released_at: first.reconciledAt })
 
     await expect(h.service.reconcileInterruptedRuns()).resolves.toEqual({
-      interruptedRuns: 0, releasedLeases: 0, reconciledAt: '2026-09-03T00:00:00.000Z',
+      interruptedRuns: 0, releasedLeases: 0, unresolvedRuns: 0, keptLeases: 0, reconciledAt: '2026-09-03T00:00:00.000Z',
     })
     expect(() => h.service.start(request())).not.toThrow()
     await h.jobs.entries[0]!.done

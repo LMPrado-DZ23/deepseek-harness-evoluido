@@ -18,6 +18,8 @@ export const agentTeamTaskStatusSchema = z.enum([
   'CANCELLED',
   'BUDGET_EXCEEDED',
   'REJECTED',
+  /** Espelha o UNKNOWN da execucao: ausencia de prova, nao conclusao. */
+  'UNKNOWN',
 ])
 
 export const agentTeamRoleSchema = z.enum(['implementer', 'reviewer', 'tester', 'synthesizer'])
@@ -74,7 +76,7 @@ export const STUDIO_AGENT_TEAMS_LOGICAL_DOMAIN = 'studio.agent.teams'
 
 export const studioAgentTeamsDomainSpec = defineDomain({
   name: STUDIO_AGENT_TEAMS_PHYSICAL_DOMAIN,
-  version: 1,
+  version: 2,
   tables: {
     teams: domainTable<AgentTeamKey, AgentTeamRecord>(agentTeamSchema),
     tasks: domainTable<AgentTeamTaskKey, AgentTeamTaskRecord>(agentTeamTaskSchema),

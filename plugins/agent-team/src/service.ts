@@ -66,6 +66,9 @@ export class AgentTeamError extends Error {
 
 const FAILURE_STATUSES = new Set<AgentTeamTaskRecord['status']>([
   'FAILED', 'CANCELLED', 'BUDGET_EXCEEDED', 'REJECTED',
+  // UNKNOWN pede atencao humana: a equipe nao pode ser dada como concluida
+  // enquanto uma tarefa nao tiver encerramento comprovado.
+  'UNKNOWN',
 ])
 
 type DerivedTeamStatus = Exclude<AgentTeamRecord['status'], 'CANCELLED'>

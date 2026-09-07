@@ -6,7 +6,13 @@
     "required": "O controle de agentes ainda está reconciliando uma execução anterior.",
     "liveJobs": "Ainda existe trabalho de agente ativo neste processo; o reload foi bloqueado para não perder seu controle.",
     "interrupted": "A execução foi interrompida pelo reinício do DZ23 STUDIO; a cópia isolada foi preservada para revisão.",
-    "incomplete": "A reconciliação de agentes não conseguiu eliminar todos os estados ativos e o serviço permaneceu bloqueado."
+    "incomplete": "A reconciliação de agentes não conseguiu eliminar todos os estados ativos e o serviço permaneceu bloqueado.",
+    "unknownExternal": "O DZ23 STUDIO reiniciou enquanto um assistente externo trabalhava nesta cópia. Ele não consegue provar que aquele programa terminou, então preservou tudo e bloqueou estes arquivos até alguém confirmar.",
+    "blockedByUnknown": "Estes arquivos estão reservados por uma execução anterior que o Studio não conseguiu confirmar como encerrada. Nada foi perdido; é preciso resolver aquela execução antes de começar outra aqui.",
+    "resolveReason": "Informe o motivo ao confirmar que a execução anterior terminou.",
+    "resolveNotUnknown": "Só uma execução em estado desconhecido pode ser confirmada como encerrada.",
+    "resolved": "Encerramento confirmado por uma pessoa: ",
+    "shutdownDeadline": "O encerramento atingiu o prazo e as execuções que continuavam ativas foram deixadas para a reconciliação do próximo início."
   },
   "git": {
     "filterUnsafe": "A configuração de filtros Git não pode ser neutralizada com segurança.",
