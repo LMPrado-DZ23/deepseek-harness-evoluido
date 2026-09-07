@@ -3,14 +3,14 @@
 - mission_id: `DZ23-STUDIO-V1-20260904`
 - objetivo: concluir o DZ23 STUDIO v1.0 com runtime portátil, geração isolada, gates Windows/Linux, testes com cinco pessoas e pacote open source somente após licença escolhida
 - estado: `INTEGRATING_AND_PROVING`
-- iteração: 20
+- iteração: 21
 - início: 2026-09-04
-- último heartbeat: 2026-09-06T20:20:00-03:00
-- último progresso real: M80 implementou saída da sessão atual e fechou scan de segurança completo com zero achado
-- tarefa atual: empacotar a ponta M80 e solicitar revisão independente do Claude, sem merge na principal
-- branch: `codex/m80-secure-signout`
-- ponta funcional: `fb88dd3b3db1bd229ef8367115c7ce542113fdf3`
-- base: `d85cc87940f675d4c74d0bb2f77f809c689b0c98`
+- último heartbeat: 2026-09-06T22:53:20-03:00
+- último progresso real: M81 provou a saída em Chromium, fechou cookie obsoleto e modo pessoal e concluiu scan com zero achado
+- tarefa atual: documentar e empacotar a ponta M81 para revisão independente do Claude, sem merge na principal
+- branch: `codex/m81-signout-browser-e2e`
+- ponta funcional: `ac4860e`
+- base: `3da1aa92d6d72f0aa59e0b6eccc80e609b36e23f`
 - upstream: `deepseek-harness@6c705be1ce6774a000d061da41d1823b03a3d42c`
 - staging válido: `/home/leandro/dz23-gates/m63-integration-20260906`
 - staging inválido preservado: `/home/leandro/dz23-m61-lock-20260904a` (origem calculada incorretamente e sincronização interrompida)
@@ -45,6 +45,26 @@
 - Security Diff Scan `377b88f6-552e-446a-9f4e-cd7687c59385`: 8/8 superfícies,
   cobertura completa e zero achado;
 - Docker, PostgreSQL físico, navegador E2E e celular continuam `NOT_EXECUTED`.
+
+## Checkpoint mais recente — M81
+
+- logout de cookie ausente, expirado ou revogado agora termina a limpeza sem
+  fingir uma nova revogação;
+- qualquer candidato de sessão ativo continua exigindo o próprio CSRF e só
+  revoga a sessão corrente; 65 candidatos distintos são recusados;
+- o Caddy libera somente o caminho exato de logout do `forward_auth`; segredo
+  da borda, Host, Origin e contrato de método permanecem no handler;
+- a interface só oferece **Sair** após `mode: authenticated`; modo pessoal e
+  falha de descoberta ficam fechados;
+- a autorização de prévia foi provada como inválida logo após revogação da
+  sessão de origem ou perda de membership;
+- Chromium 3/3, aplicativo 63/63, identidade+prévia 76/76, identidade final
+  20/20 e cobertura do handler 100% passaram;
+- build oficial upstream, build do Studio, typecheck e gates estáticos passaram
+  no clone WSL2/ext4;
+- Security Diff Scan `781b183b-a00b-4c09-9e76-2be9a266b84e`: dez superfícies,
+  zero achado reportável;
+- Caddy/Docker real e celular físico continuam `NOT_EXECUTED`.
 
 ## Checkpoint preservado — M71
 
@@ -94,7 +114,7 @@
 
 ## Próxima ação
 
-1. gerar bundle, arquivos-fonte e relatório P37 do pin cumulativo M80;
+1. gerar bundle, arquivos-fonte e relatório P37 do pin cumulativo M81;
 2. pedir e tratar a revisão independente do Claude sem merge;
 3. tratar os artefatos `plugins/*/lib/**` rastreados em commit separado, somente
    com autorização explícita;

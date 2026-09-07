@@ -157,12 +157,17 @@ em Android/Chrome real e em iOS (`apple-touch-icon` presente; Safari não emite
 `NOT_EXECUTED`. O preview no celular depende da M1 (HTTPS em domínio real) e
 segue `NOT_EXECUTED` com o texto do próprio cartão de preview.
 
-A M80 foi provada por testes unitários e build em clone WSL2/ext4, não por uma
-jornada completa em navegador ou aparelho físico. A rota `/login` existe no
-Caddy; o modo pessoal direto em loopback ainda não demonstrou destino
-equivalente. Uma tentativa de sair com cookie já revogado para na autenticação
-antes de limpar o navegador, e uma prévia ativa continua sob o ticket/TTL
-próprio. Esses limites estão registrados em `docs/proofs/M80-secure-signout.md`.
+A M80 foi provada por testes unitários e build em clone WSL2/ext4. A M81
+acrescentou a jornada completa em Chromium: sucesso revoga antes de limpar,
+falha preserva tela/estado e o modo pessoal não mostra uma ação impossível. A
+rota exata de logout agora atravessa o Caddy sem `forward_auth`, mas conserva no
+handler o segredo de borda, Host, Origin e CSRF da sessão ativa; cookie ausente
+ou já revogado pode ser apagado idempotentemente. Uma prévia continua sob o
+ticket/TTL próprio, mas a autorização revalida a sessão de origem a cada pedido
+e o teste prova a recusa imediatamente após revogação. Caddy/Docker real nesta
+etapa e aparelho físico continuam `NOT_EXECUTED`. Evidência em
+`docs/proofs/M80-secure-signout.md` e
+`docs/proofs/M81-secure-signout-browser-e2e.md`.
 
 ## O que continua em aberto
 
