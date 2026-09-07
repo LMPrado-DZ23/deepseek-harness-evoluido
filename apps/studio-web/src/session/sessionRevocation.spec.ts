@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   SESSION_REVOCATION_CHANNEL,
-  SESSION_GENERATION_COOKIE,
+  SESSION_GENERATION_STORAGE_KEY,
   SESSION_REVOCATION_STORAGE_KEY,
   followRemoteSessionRevocation,
   listenForSessionRevocation,
@@ -41,11 +41,10 @@ function environmentFixture() {
 }
 
 describe('cross-tab session revocation', () => {
-  it('reads only valid login generations and normalizes cookie shadows', () => {
-    const first = '3'.repeat(32)
-    const second = '4'.repeat(32)
-    expect(browserSessionGeneration(`other=1; ${SESSION_GENERATION_COOKIE}=${second}; ${SESSION_GENERATION_COOKIE}=${first}; ${SESSION_GENERATION_COOKIE}=bad`)).toBe(`${first}.${second}`)
-    expect(browserSessionGeneration(`${SESSION_GENERATION_COOKIE}=%E0%A4%A`)).toBe('')
+  it('reads only a valid generation from origin-isolated storage', () => {
+    expect(browserSessionGeneration({ getItem: key => key === SESSION_GENERATION_STORAGE_KEY ? '3'.repeat(32) : null })).toBe('3'.repeat(32))
+    expect(browserSessionGeneration({ getItem: () => 'not-random' })).toBe('')
+    expect(browserSessionGeneration({ getItem: () => { throw new Error('storage unavailable') } })).toBe('')
   })
 
   it('accepts only the closed versioned signal', () => {

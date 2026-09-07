@@ -2,7 +2,7 @@ import type { CurrentSessionMode } from './currentSession'
 
 export const SESSION_REVOCATION_CHANNEL = 'dz23.studio.session-revocation.v1'
 export const SESSION_REVOCATION_STORAGE_KEY = 'dz23.studio.session-revocation.event.v1'
-export const SESSION_GENERATION_COOKIE = 'dz23_studio_session_generation'
+export const SESSION_GENERATION_STORAGE_KEY = 'dz23.studio.session-generation.v1'
 
 export type SessionRevocationSignal = {
   readonly schema_version: 1
@@ -33,16 +33,11 @@ export interface RemoteRevocationPort {
   redirect(path: string): void
 }
 
-export function browserSessionGeneration(cookie = document.cookie): string {
-  const values = cookie.split(';').flatMap(part => {
-    const at = part.indexOf('=')
-    if (at < 1 || part.slice(0, at).trim() !== SESSION_GENERATION_COOKIE) return []
-    try {
-      const value = decodeURIComponent(part.slice(at + 1).trim())
-      return /^[a-f0-9]{32}$/u.test(value) ? [value] : []
-    } catch { return [] }
-  })
-  return [...new Set(values)].sort().join('.')
+export function browserSessionGeneration(storage: Pick<Storage, 'getItem'> = window.localStorage): string {
+  try {
+    const value = storage.getItem(SESSION_GENERATION_STORAGE_KEY)
+    return value !== null && /^[a-f0-9]{32}$/u.test(value) ? value : ''
+  } catch { return '' }
 }
 
 function createBrowserId(): string {

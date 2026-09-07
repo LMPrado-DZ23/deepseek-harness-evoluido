@@ -57,13 +57,11 @@ export interface IdentityHttpConfig {
   readonly createSessionGeneration?: () => string
 }
 
-export function serializeSessionCookies(token: string, csrfToken: string, secure = true, generation = randomBytes(16).toString('hex')): readonly string[] {
+export function serializeSessionCookies(token: string, csrfToken: string, secure = true): readonly string[] {
   void csrfToken
-  if (!/^[a-f0-9]{32}$/u.test(generation)) throw new TypeError()
   const secureAttribute = secure ? '; Secure' : ''
   return [
     `${SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly${secureAttribute}; SameSite=Lax; Path=/`,
-    `${SESSION_GENERATION_COOKIE}=${encodeURIComponent(generation)}${secureAttribute}; SameSite=Strict; Path=/`,
     `${CSRF_COOKIE}=${secureAttribute}; SameSite=Lax; Path=/; Max-Age=0`,
   ]
 }
@@ -115,8 +113,10 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
       if (request.method === 'POST' && route === '/magic/verify') {
         const body = magicVerifySchema.parse(await readJson(request))
         const issued = await config.service.verifyMagicCode(body.email, body.code, deviceOf(request, body.device_label))
-        response.setHeader('set-cookie', serializeSessionCookies(issued.token, issued.csrfToken, secureCookies, createSessionGeneration()))
-        json(response, 200, { session_id: issued.session.session_id, csrf_token: issued.csrfToken })
+        const sessionGeneration = createSessionGeneration()
+        if (!/^[a-f0-9]{32}$/u.test(sessionGeneration)) throw new TypeError()
+        response.setHeader('set-cookie', serializeSessionCookies(issued.token, issued.csrfToken, secureCookies))
+        json(response, 200, { session_id: issued.session.session_id, csrf_token: issued.csrfToken, session_generation: sessionGeneration })
         return
       }
       if (request.method === 'POST' && route === '/passkey/login/options') {
@@ -131,8 +131,10 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
           body.response as AuthenticationResponse,
           deviceOf(request, 'Chave de acesso'),
         )
-        response.setHeader('set-cookie', serializeSessionCookies(issued.token, issued.csrfToken, secureCookies, createSessionGeneration()))
-        json(response, 200, { session_id: issued.session.session_id, csrf_token: issued.csrfToken })
+        const sessionGeneration = createSessionGeneration()
+        if (!/^[a-f0-9]{32}$/u.test(sessionGeneration)) throw new TypeError()
+        response.setHeader('set-cookie', serializeSessionCookies(issued.token, issued.csrfToken, secureCookies))
+        json(response, 200, { session_id: issued.session.session_id, csrf_token: issued.csrfToken, session_generation: sessionGeneration })
         return
       }
       if (request.method === 'GET' && route === '/session') {

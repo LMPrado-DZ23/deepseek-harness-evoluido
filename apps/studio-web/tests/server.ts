@@ -91,6 +91,7 @@ const logoutSession = { ...session, session_id: 'e2e-logout-session' }
 const failingLogoutSession = { ...session, session_id: 'e2e-logout-fail-session' }
 const crossTabLogoutSession = { ...session, session_id: 'e2e-logout-cross-tab-session' }
 const generationRaceSession = { ...session, session_id: 'e2e-logout-generation-race-session' }
+const generationAttackSession = { ...session, session_id: 'e2e-logout-generation-attack-session' }
 const revokedSessions = new Set<string>()
 const identity = {
   requestMagicCode: async () => undefined,
@@ -102,6 +103,7 @@ const identity = {
         : token === 'e2e-logout-fail' ? failingLogoutSession
           : token === 'e2e-logout-cross-tab' ? crossTabLogoutSession
             : token === 'e2e-logout-generation-race' ? generationRaceSession
+              : token === 'e2e-logout-generation-attack' ? generationAttackSession
           : undefined
     if (authenticated === undefined || revokedSessions.has(authenticated.session_id)) throw new IdentityError('invalid', 'invalid-session')
     return authenticated
@@ -225,6 +227,11 @@ const previewForward: PreviewForwardPort = {
 }
 const previewGateway = createPreviewGatewayHttpHandler({ service: previewService, forward: previewForward, studioOrigin: `http://${host}` })
 const server = createServer((request, response) => {
+  if (request.headers.host === 'preview-attacker.dz23.localhost:4179') {
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+    response.end('<!doctype html><script>document.cookie="dz23_studio_session_generation=11111111111111111111111111111111; Domain=dz23.localhost; Path=/; SameSite=Strict"</script>')
+    return
+  }
   if (/^p-[a-f0-9]{24}\.dz23\.localhost:4179$/u.test(request.headers.host ?? '')) return void previewGateway(request, response)
   if (request.url === '/healthz') return plain(response, 200, 'ok')
   if (request.url?.startsWith('/api/studio/identity') === true) return void identityHandler(request, response)

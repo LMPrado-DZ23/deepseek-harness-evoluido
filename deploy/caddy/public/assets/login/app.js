@@ -4,6 +4,7 @@ const emailInput = document.querySelector('#email')
 const codeInput = document.querySelector('#code')
 const status = document.querySelector('#status')
 const back = document.querySelector('#back')
+const sessionGenerationKey = 'dz23.studio.session-generation.v1'
 
 function message(text, kind = '') {
   status.textContent = text
@@ -46,7 +47,9 @@ codeForm.addEventListener('submit', async event => {
       device_label: navigator.userAgentData?.platform ?? navigator.platform ?? 'Navegador',
     })
     if (typeof issued.csrf_token !== 'string' || issued.csrf_token.length < 32) throw new Error('A sessão não pôde ser protegida.')
+    if (typeof issued.session_generation !== 'string' || !/^[a-f0-9]{32}$/.test(issued.session_generation)) throw new Error('A sessão não pôde ser protegida.')
     window.sessionStorage.setItem('dz23.studio.csrf.v1', issued.csrf_token)
+    window.localStorage.setItem(sessionGenerationKey, issued.session_generation)
     message('Tudo certo. Abrindo seu espaço…', 'success')
     window.location.assign('/api/studio/identity/harness/session')
   } catch (error) {

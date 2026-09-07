@@ -1,5 +1,5 @@
 export const SESSION_COOKIE = 'dz23_studio_session'
-/** Non-authoritative, script-readable nonce used only to detect a newer login. */
+/** Legacy marker expired on logout; clients no longer read cookies for login generation. */
 export const SESSION_GENERATION_COOKIE = 'dz23_studio_session_generation'
 /** Legacy name retained only so existing client cookies can be expired. */
 export const CSRF_COOKIE = 'dz23_studio_csrf'

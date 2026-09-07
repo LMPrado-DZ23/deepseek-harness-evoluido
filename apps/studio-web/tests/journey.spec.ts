@@ -13,12 +13,17 @@ test('recusa interface e API sem sessão', async () => {
 
 test('o login HTTP local grava sessão host-only sem enfraquecer o modo de servidor', async ({ context, page }) => {
   await page.goto('/login')
-  const status = await page.evaluate(async () => (await fetch('/api/studio/identity/magic/verify', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email: 'owner@example.test', code: '123456', device_label: 'Chromium local' }),
-  })).status)
-  expect(status).toBe(200)
+  const login = await page.evaluate(async () => {
+    const response = await fetch('/api/studio/identity/magic/verify', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'owner@example.test', code: '123456', device_label: 'Chromium local' }),
+    })
+    const body = await response.json() as { session_generation?: unknown }
+    if (typeof body.session_generation === 'string') window.localStorage.setItem('dz23.studio.session-generation.v1', body.session_generation)
+    return { status: response.status, generation: window.localStorage.getItem('dz23.studio.session-generation.v1') }
+  })
+  expect(login).toEqual({ status: 200, generation: expect.stringMatching(/^[a-f0-9]{32}$/u) })
   const cookies = await context.cookies('http://studio.dz23.localhost:4179')
   expect(cookies).toEqual(expect.arrayContaining([
     expect.objectContaining({ name: 'dz23_studio_session', value: 'session-token', domain: 'studio.dz23.localhost', httpOnly: true, secure: false }),

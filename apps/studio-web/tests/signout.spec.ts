@@ -1,6 +1,7 @@
 import { expect, request as apiRequest, test, type BrowserContext, type Page } from '@playwright/test'
 
 const origin = 'http://studio.dz23.localhost:4179'
+const sessionGenerationKey = 'dz23.studio.session-generation.v1'
 
 async function prepareBrowserState(context: BrowserContext, page: Page, token: string, path = '/studio/'): Promise<void> {
   await context.addCookies([{ name: 'dz23_studio_session', value: token, url: origin }])
@@ -147,10 +148,18 @@ test('preserva um login novo concluído enquanto a confirmação final antiga es
 
   await page.getByRole('button', { name: 'Sair' }).click()
   await finalProbeStarted
-  await context.addCookies([
-    { name: 'dz23_studio_session', value: 'e2e-logout-fail', url: origin },
-    { name: 'dz23_studio_session_generation', value: '88888888888888888888888888888888', url: origin, sameSite: 'Strict' },
-  ])
+  const newLogin = await sibling.evaluate(async key => {
+    const response = await fetch('/api/studio/identity/magic/verify', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'owner@example.test', code: '123456', device_label: 'Chromium local' }),
+    })
+    const body = await response.json() as { session_generation?: unknown }
+    if (!response.ok || typeof body.session_generation !== 'string') throw new Error('new login failed')
+    window.localStorage.setItem(key, body.session_generation)
+    return body.session_generation
+  }, sessionGenerationKey)
+  expect(newLogin).toMatch(/^[a-f0-9]{32}$/u)
   releaseFinalProbe?.()
 
   await expect.poll(() => probes).toBe(2)
@@ -168,6 +177,43 @@ test('preserva um login novo concluído enquanto a confirmação final antiga es
     caches: ['test-unrelated-cache'],
   })
   await cdp.detach()
+})
+
+test('ignora rotação de cookie plantado pela prévia durante a consulta final', async ({ context, page }) => {
+  const sibling = await context.newPage()
+  const attacker = await context.newPage()
+  await prepareBrowserState(context, page, 'e2e-logout-generation-attack')
+  await prepareBrowserState(context, sibling, 'e2e-logout-generation-attack', '/studio/assistente')
+  await sibling.evaluate(key => window.localStorage.setItem(key, '7'.repeat(32)), sessionGenerationKey)
+  await attacker.goto('http://preview-attacker.dz23.localhost:4179/')
+
+  let probes = 0
+  let releaseFinalProbe: (() => void) | undefined
+  let markFinalProbeStarted: (() => void) | undefined
+  const finalProbeStarted = new Promise<void>(resolve => { markFinalProbeStarted = resolve })
+  const finalProbeRelease = new Promise<void>(resolve => { releaseFinalProbe = resolve })
+  await sibling.route('**/api/studio/identity/session', async route => {
+    probes += 1
+    if (probes === 2) {
+      markFinalProbeStarted?.()
+      await finalProbeRelease
+    }
+    await route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ error: 'old-session' }) })
+  })
+
+  await page.getByRole('button', { name: 'Sair' }).click()
+  await finalProbeStarted
+  await attacker.evaluate(() => {
+    document.cookie = `dz23_studio_session_generation=${'2'.repeat(32)}; Domain=dz23.localhost; Path=/; SameSite=Strict`
+  })
+  releaseFinalProbe?.()
+
+  await expect.poll(() => probes).toBe(2)
+  await expect(sibling).toHaveURL(/\/login$/u)
+  await expect(browserState(sibling)).resolves.toMatchObject({ csrf: null })
+  expect((await context.cookies(origin)).filter(cookie => cookie.name === 'dz23_studio_session_generation')).toEqual(expect.arrayContaining([
+    expect.objectContaining({ value: '2'.repeat(32), domain: '.dz23.localhost' }),
+  ]))
 })
 
 test('não oferece sair no modo pessoal sem sessão revogável', async ({ page }) => {
