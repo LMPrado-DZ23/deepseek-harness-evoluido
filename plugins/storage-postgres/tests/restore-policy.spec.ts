@@ -81,7 +81,10 @@ describe('restore destructive boundary policy', () => {
     expect(explicit.args).toEqual(['--schema=dz23_storage', '--format=custom'])
     expect(explicit.args.join(' ')).not.toContain('secret')
     expect(explicit.environment.PGPASSWORD).toBe('secret')
+    // O alvo vai decomposto no ambiente: nome puro do banco, nunca a URI.
+    expect(explicit.environment.PGDATABASE).not.toContain('://')
     expect(explicit.environment.PGDATABASE).not.toContain('secret')
+    expect(explicit.args.join(' ')).not.toContain('secret')
     expect(implicit.environment.PGSSLMODE).toBe('disable')
   })
 })

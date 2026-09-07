@@ -57,7 +57,11 @@ describePostgres('tenant record RLS against PostgreSQL 16', () => {
     await attacker.query('ROLLBACK')
 
     const policy = await admin.query<{ relrowsecurity: boolean; relforcerowsecurity: boolean; roles: string[] }>(`
-      SELECT c.relrowsecurity, c.relforcerowsecurity, p.roles
+      -- pg_policies.roles é name[], e o driver não converte name[] em arranjo
+      -- JavaScript em toda versão. O cast para text[] fixa o tipo em algo que
+      -- ele sempre converte, para este teste falhar por política errada e
+      -- nunca por formato de tipo.
+      SELECT c.relrowsecurity, c.relforcerowsecurity, p.roles::text[] AS roles
       FROM pg_catalog.pg_class c
       JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
       JOIN pg_catalog.pg_policies p ON p.schemaname = n.nspname AND p.tablename = c.relname

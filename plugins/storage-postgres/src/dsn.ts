@@ -153,6 +153,20 @@ export interface PostgresToolConnection {
  * `PGPASSWORD` and the policy in `PGSSLMODE`, which the stripped URI can no
  * longer contradict.
  */
+/**
+ * Decompõe o alvo em variáveis padrão do libpq. Nada disso entra em `argv`:
+ * host, porta, usuário e banco ficam só no ambiente do processo filho.
+ */
+function applyTargetEnvironment(env: NodeJS.ProcessEnv, url: URL): void {
+  const host = decodeURIComponent(url.hostname)
+  if (host !== '') env.PGHOST = host
+  if (url.port !== '') env.PGPORT = url.port
+  const user = decodeURIComponent(url.username)
+  if (user !== '') env.PGUSER = user
+  const database = decodeURIComponent(url.pathname.replace(/^\//u, ''))
+  if (database !== '') env.PGDATABASE = database
+}
+
 export function postgresToolConnection(dsn: string, policy: TlsPolicy, base: NodeJS.ProcessEnv = {}): PostgresToolConnection {
   const url = parseDsn(dsn)
   const carried = stripTlsParams(url)
@@ -173,6 +187,13 @@ export function postgresToolConnection(dsn: string, policy: TlsPolicy, base: Nod
   // message, which never mentions that this tool had deleted the variable. This function sets what
   // it itself provides and leaves the operator's environment alone.
   if (password !== '') env.PGPASSWORD = decodeURIComponent(password)
+  // O ALVO também vai pelo ambiente, decomposto. libpq só expande uma URI no
+  // parâmetro `dbname` que recebe EXPLICITAMENTE; uma URI colocada em
+  // `PGDATABASE` é tratada como nome de banco, e a ferramenta cai nos padrões
+  // (socket local, usuário do sistema operacional). Numa máquina onde esse
+  // padrão por acaso conecta, o backup de segurança sairia do banco ERRADO e o
+  // restore destrutivo seguiria em frente confiando nele.
+  applyTargetEnvironment(env, url)
   for (const [key, variable] of Object.entries(TOOL_ENV_BY_KEY)) {
     // Under `off` there is no TLS to configure, and the TLS material this function strips from the
     // URI must not survive in the environment as if the URI had kept it.

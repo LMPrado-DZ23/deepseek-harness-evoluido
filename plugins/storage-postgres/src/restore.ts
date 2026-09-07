@@ -974,6 +974,21 @@ async function runTool(command: string, args: string[], environment: NodeJS.Proc
   })
 }
 
+/** Teto do diagnóstico do pg_dump: o suficiente para entender, longe de um dreno. */
+const PG_DUMP_DIAGNOSTIC_LIMIT = 2_000
+
+/**
+ * Última linha útil do erro do pg_dump, sem caminho absoluto e sem quebra de
+ * linha. É diagnóstico, não conteúdo: a mensagem do pg_dump não cita dado da
+ * base, e o que ela cita de ambiente é reduzido ao nome do arquivo.
+ */
+function pgDumpDiagnostic(raw: string): string {
+  const lines = raw.split('\n').map(line => line.trim()).filter(line => line !== '')
+  const last = lines.at(-1)
+  if (last === undefined) return ''
+  return last.replace(/(\/[^\s:]+)+/gu, match => match.slice(match.lastIndexOf('/') + 1)).slice(0, 300)
+}
+
 async function runBoundedPgDump(
   command: string,
   args: string[],
@@ -984,8 +999,18 @@ async function runBoundedPgDump(
 ): Promise<void> {
   const child = spawn(command, args, {
     env: environment,
-    stdio: ['ignore', 'pipe', 'ignore'],
+    // A saída de erro do pg_dump é lida e LIMITADA. Antes ela era descartada, e
+    // quem operava recebia "pg_dump failed with code 1" e mais nada - um beco
+    // sem saída na hora exata em que a pessoa precisa entender por que o
+    // backup de segurança não saiu.
+    stdio: ['ignore', 'pipe', 'pipe'],
     ...(signal === undefined ? {} : { signal }),
+  })
+  let diagnostic = ''
+  child.stderr?.on('data', (chunk: Buffer) => {
+    if (diagnostic.length < PG_DUMP_DIAGNOSTIC_LIMIT) {
+      diagnostic = `${diagnostic}${chunk.toString('utf8')}`.slice(0, PG_DUMP_DIAGNOSTIC_LIMIT)
+    }
   })
   const exited = new Promise<{ code: number | null; error?: Error }>(resolvePromise => {
     let settled = false
@@ -1011,7 +1036,10 @@ async function runBoundedPgDump(
     }
     const outcome = await exited
     if (outcome.error !== undefined) throw outcome.error
-    if (outcome.code !== 0) throw new Error(`pg_dump failed with code ${String(outcome.code)}`)
+    if (outcome.code !== 0) {
+      const detail = pgDumpDiagnostic(diagnostic)
+      throw new Error(`pg_dump failed with code ${String(outcome.code)}${detail === '' ? '' : `: ${detail}`}`)
+    }
   } catch (error) {
     child.kill('SIGKILL')
     await exited

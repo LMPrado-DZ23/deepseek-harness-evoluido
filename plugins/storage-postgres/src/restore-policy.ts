@@ -91,9 +91,12 @@ export function postgresDumpInvocation(
   environment: NodeJS.ProcessEnv = process.env,
 ): { command: 'pg_dump'; args: string[]; environment: NodeJS.ProcessEnv } {
   const target = postgresToolConnection(dsn, ssl, environment)
+  // Nada do alvo entra em `argv`: host, porta, usuário e banco viajam no
+  // ambiente, decompostos por `postgresToolConnection`, junto com a senha em
+  // PGPASSWORD e a política em PGSSLMODE.
   return {
     command: 'pg_dump',
     args: [`--schema=${schema}`, '--format=custom'],
-    environment: { ...target.env, PGDATABASE: target.dsn },
+    environment: target.env,
   }
 }

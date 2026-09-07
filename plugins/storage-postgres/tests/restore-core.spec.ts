@@ -109,7 +109,10 @@ describe('restore core without Docker', () => {
     expect(invocation.args.join(' ')).not.toContain('postgres://')
     expect(invocation.args.join(' ')).not.toContain(password)
     expect(invocation.args.some(value => /ssl/iu.test(value))).toBe(false)
+    // O alvo vai decomposto no ambiente: nome puro do banco, nunca a URI.
+    expect(invocation.environment.PGDATABASE).not.toContain('://')
     expect(invocation.environment.PGDATABASE).not.toContain(password)
+    expect(invocation.args.join(' ')).not.toContain(password)
     expect(invocation.environment.PGPASSWORD).toBe(password)
     expect(invocation.environment.PGSSLMODE).toBe('require')
   })

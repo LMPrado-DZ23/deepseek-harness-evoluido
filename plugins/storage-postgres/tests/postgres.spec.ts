@@ -331,7 +331,7 @@ exec docker exec -i "$DZ23_POSTGRES_TEST_CONTAINER" pg_restore --list < "$file"
       const freshSchema = schemaName('cli_fresh')
       const unusedBackup = join(temporary, 'fresh.dump')
       const fresh = JSON.parse((await invoke(freshSchema, unusedBackup)).stdout) as Record<string, unknown>
-      expect(fresh).toMatchObject({ mode: 'write', backup: null, backupStatus: 'not-needed-empty-target' })
+      expect(fresh).toMatchObject({ mode: 'write', safetyBackup: null, safetyBackupStatus: 'not-needed-empty-target' })
       await expect(access(unusedBackup)).rejects.toThrow()
 
       const targetSchema = schemaName('cli_replace')
@@ -354,7 +354,7 @@ exec docker exec -i "$DZ23_POSTGRES_TEST_CONTAINER" pg_restore --list < "$file"
       const replaced = JSON.parse((await invoke(targetSchema, backup, [
         '--force', '--allow-record-loss', '--confirm', 'REPLACE_DZ23_STORAGE',
       ])).stdout) as Record<string, unknown>
-      expect(replaced).toMatchObject({ mode: 'write', backup, backupStatus: 'created' })
+      expect(replaced).toMatchObject({ mode: 'write', safetyBackup: backup, safetyBackupStatus: 'created' })
       await access(backup)
       expect((await stat(backup)).mode & 0o777).toBe(0o600)
       const listed = postgresContainer === undefined
