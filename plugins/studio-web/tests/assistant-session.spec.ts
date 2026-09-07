@@ -47,6 +47,7 @@ async function fixture(options: {
   readonly inspect?: AssistantSessionControllerPort['inspect']
   readonly create?: AssistantSessionControllerPort['create']
   readonly sharedHarnessClientAllowed?: boolean
+  readonly releaseFails?: boolean
 } = {}) {
   const binds: string[] = []
   const releases: string[] = []
@@ -62,7 +63,10 @@ async function fixture(options: {
   const launcher = await AssistantSessionLauncher.create({
     identity: {
       bindHarnessSession: async (_session, id) => { binds.push(id) },
-      releaseHarnessSession: async (_session, id) => { releases.push(id) },
+      releaseHarnessSession: async (_session, id) => {
+        releases.push(id)
+        if (options.releaseFails === true) throw new Error('auditoria indisponível')
+      },
       isSharedHarnessClientAllowed: () => options.sharedHarnessClientAllowed !== false,
     },
     tenancy: {
@@ -114,6 +118,22 @@ describe('governed Assistant Session launcher', () => {
     // Ponteiro comprovadamente inutilizável é liberado; o que ainda serve permanece.
     expect(f.releases).toEqual(['gone', 'other'])
     expect(f.releases).not.toContain('match')
+  })
+
+  it('não perde a conversa quando o registro da liberação falha', async () => {
+    const f = await fixture({ releaseFails: true })
+    const cwd = f.repository.repositoryPath
+    f.inspect.mockImplementation(async id => {
+      if (id === 'gone') throw new ApiSessionNotFound('gone')
+      return { meta: { cwd, agentPreset: ASSISTANT_AGENT_PRESET } }
+    })
+    // Falhar ao registrar a liberação é reportado, não propagado: a pessoa
+    // continua conseguindo abrir a conversa.
+    await expect(f.launcher.launch(identitySession(['match', 'gone']))).resolves.toMatchObject({
+      session_id: 'match', reused: true,
+    })
+    expect(f.releases).toEqual(['gone'])
+    expect(f.failures.map(entry => entry.phase)).toContain('inspect')
   })
 
   it('fails closed for absent membership or repository configuration', async () => {

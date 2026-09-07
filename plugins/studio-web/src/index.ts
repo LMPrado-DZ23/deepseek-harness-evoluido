@@ -53,6 +53,7 @@ export function createStudioWebHandler(config: {
   readonly previewFrameSources?: readonly string[]
   readonly assistantSessions?: Pick<AssistantSessionLauncher, 'launch'>
   readonly assistantConversations?: AssistantConversationHttpConfig['conversations']
+  readonly assistantDeadlineMs?: number
 }) {
   const frameSources = normalizePreviewFrameSources(config.previewFrameSources ?? [])
   return async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
@@ -64,6 +65,7 @@ export function createStudioWebHandler(config: {
         const outcome = await handleAssistantConversation(request, conversationRoute, {
           identity: config.identity,
           ...(config.assistantConversations === undefined ? {} : { conversations: config.assistantConversations }),
+          ...(config.assistantDeadlineMs === undefined ? {} : { deadlineMs: config.assistantDeadlineMs }),
         })
         return sendJson(response, outcome.status, outcome.body, frameSources)
       }

@@ -19,7 +19,7 @@ afterEach(async () => {
   await Promise.all(temporary.splice(0).map(path => rm(path, { recursive: true, force: true })))
 })
 
-async function fixture() {
+async function fixture(deadlineMs?: number) {
   const root = await mkdtemp(join(tmpdir(), 'dz23-conv-'))
   temporary.push(root)
   await writeFile(join(root, 'index.html'), '<main>DZ23 STUDIO</main>')
@@ -41,6 +41,7 @@ async function fixture() {
     allowedHosts,
     allowedOrigins,
     assistantConversations: conversations,
+    ...(deadlineMs === undefined ? {} : { assistantDeadlineMs: deadlineMs }),
   }))
   servers.push(server)
   await new Promise<void>((done, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', done) })
@@ -162,6 +163,7 @@ describe('superfície HTTP da conversa do assistente', () => {
     const f = await fixture()
     const bad: Array<[string, RequestInit]> = [
       ['sem content-type', { method: 'POST', body: JSON.stringify({ text: 'oi' }) }],
+      ['content-type errado', { method: 'POST', headers: { 'content-type': 'text/plain' }, body: '{}' }],
       ['json inválido', { method: 'POST', headers: json, body: '{' }],
       ['texto ausente', { method: 'POST', headers: json, body: JSON.stringify({}) }],
       ['texto não string', { method: 'POST', headers: json, body: JSON.stringify({ text: 42 }) }],
@@ -175,6 +177,42 @@ describe('superfície HTTP da conversa do assistente', () => {
       expect(response.status, label).toBe(400)
     }
     expect(f.conversations.send).not.toHaveBeenCalled()
+  })
+
+  it('devolve 405 e 404 pelo servidor real, sem tocar no serviço', async () => {
+    const f = await fixture()
+    const notAllowed = await f.request(ASSISTANT_CONVERSATION_PREFIX, { method: 'PUT' })
+    expect(notAllowed.status).toBe(405)
+    expect(await notAllowed.json()).toEqual({ error: expect.stringContaining('não é permitida') })
+    const notFound = await f.request(`${ASSISTANT_CONVERSATION_PREFIX}/conversa-1/apagar`, { method: 'POST' })
+    expect(notFound.status).toBe(404)
+    const traversal = await f.request(`${ASSISTANT_CONVERSATION_PREFIX}/..%2F..%2Fetc/events`)
+    expect(traversal.status).toBe(404)
+    for (const call of [f.conversations.open, f.conversations.snapshot, f.conversations.send, f.conversations.cancel]) {
+      expect(call).not.toHaveBeenCalled()
+    }
+  })
+
+  it('aborta a leitura quando o prazo estoura, em vez de segurar o turno da pessoa', async () => {
+    const f = await fixture(5)
+    type Snapshot = Awaited<ReturnType<typeof f.conversations.snapshot>>
+    f.conversations.snapshot.mockImplementation(((_session: unknown, _id: unknown, signal?: AbortSignal) => (
+      new Promise<Snapshot>((_resolve, reject) => {
+        signal?.addEventListener('abort', () => {
+          reject(new AssistantConversationError('SESSION_UNAVAILABLE', 'Tempo esgotado.'))
+        })
+      })
+    )) as typeof f.conversations.snapshot)
+    const response = await f.request(`${ASSISTANT_CONVERSATION_PREFIX}/conversa-1/events`)
+    expect(response.status).toBe(503)
+    expect(await response.json()).toEqual({ error: 'Tempo esgotado.' })
+  })
+
+  it('recusa GET em cancelar e método trocado em cada ação', () => {
+    expect(routeAssistantConversation('GET', `${ASSISTANT_CONVERSATION_PREFIX}/c1/cancel`))
+      .toEqual({ kind: 'method-not-allowed' })
+    expect(routeAssistantConversation('GET', `${ASSISTANT_CONVERSATION_PREFIX}/c1/messages`))
+      .toEqual({ kind: 'method-not-allowed' })
   })
 
   it('responde 503 explicado quando a conversa não está configurada nesta instalação', async () => {

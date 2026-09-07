@@ -213,6 +213,7 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
         json(response, 200, { message: 'Dispositivo desconectado.' })
         return
       }
+      /* v8 ignore next -- last contracted route: the false side is unreachable because every other contract returns above. O teste percorre IDENTITY_ROUTE_CONTRACTS e prova que nenhuma rota contratada cai na cauda 404. */
       if (request.method === 'POST' && route === '/devices/revoke-all') {
         await config.service.revokeAllSessions(session)
         response.setHeader('set-cookie', clearSessionCookies(secureCookies))

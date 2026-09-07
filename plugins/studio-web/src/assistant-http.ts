@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { authenticatedMutation, type StudioIdentityService } from '@dz23-studio/identity'
+import { authenticatedMutation, singleHeader, type StudioIdentityService } from '@dz23-studio/identity'
 import {
   AssistantConversationError,
   type AssistantConversationService,
@@ -43,7 +43,7 @@ export function routeAssistantConversation(
   }
   const rest = pathname.slice(`${ASSISTANT_CONVERSATION_PREFIX}/`.length)
   const segments = rest.split('/')
-  const rawId = segments[0] ?? ''
+  const rawId = segments[0]!
   let conversationId: string
   try {
     conversationId = decodeURIComponent(rawId)
@@ -63,6 +63,8 @@ export function routeAssistantConversation(
 export interface AssistantConversationHttpConfig {
   readonly identity: StudioIdentityService
   readonly conversations?: Pick<AssistantConversationService, 'open' | 'snapshot' | 'send' | 'cancel'>
+  /** Deadline per request. Injectable so the abort itself is provable by test. */
+  readonly deadlineMs?: number
 }
 
 export interface AssistantConversationOutcome {
@@ -87,7 +89,7 @@ export async function handleAssistantConversation(
   const conversations = config.conversations
   if (conversations === undefined) return { status: 503, body: { error: t('assistant.serviceNotConfigured') } }
   const controller = new AbortController()
-  const timer = setTimeout(() => { controller.abort() }, REQUEST_TIMEOUT_MS)
+  const timer = setTimeout(() => { controller.abort() }, config.deadlineMs ?? REQUEST_TIMEOUT_MS)
   try {
     if (route.kind === 'open') {
       return { status: 200, body: await conversations.open(identitySession) }
@@ -126,8 +128,9 @@ function readMessageText(body: unknown): string {
 }
 
 async function readJsonBody(request: IncomingMessage): Promise<unknown> {
-  const contentType = request.headers['content-type']
-  const declared = Array.isArray(contentType) ? contentType[0] : contentType
+  // Cabeçalho repetido é ambíguo: singleHeader devolve undefined e a
+  // requisição morre aqui, em vez de escolher uma das cópias.
+  const declared = singleHeader(request.headers['content-type'])
   if (declared?.toLowerCase().startsWith('application/json') !== true) {
     throw new AssistantConversationError('INVALID_MESSAGE', t('assistant.invalidMessage'))
   }

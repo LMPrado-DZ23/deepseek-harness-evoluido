@@ -388,6 +388,13 @@ describe('StudioIdentityService', () => {
     await h.service.releaseHarnessSession(afterRelease, 'agent-0', 'de novo')
     expect(h.service.auditRecords().filter(record => record.event_type === 'harness_session_unbound')).toHaveLength(1)
     await expect(h.service.releaseHarnessSession(afterRelease, ' ', 'vazio')).rejects.toMatchObject({ code: 'invalid' })
+    // Linha de sessão que sumiu no meio do caminho falha fechado.
+    const vanished = makeHarness()
+    const gone = await login(vanished)
+    await vanished.service.bindHarnessSession(vanished.repository.sessionMap.get(gone.session.session_id)!, 'agent-x')
+    vanished.repository.sessionMap.clear()
+    await expect(vanished.service.releaseHarnessSession(gone.session, 'agent-x', 'motivo'))
+      .rejects.toMatchObject({ code: 'invalid' })
     // A vaga liberada volta a aceitar uma conversa nova.
     await h.service.bindHarnessSession(h.repository.sessionMap.get(issued.session.session_id)!, 'agent-8')
     expect(h.repository.sessionMap.get(issued.session.session_id)!.harness_session_ids).toHaveLength(8)

@@ -342,13 +342,15 @@ describe('identity HTTP boundary', () => {
     expect(f.service.bindHarnessSession).not.toHaveBeenCalled()
     const paths: readonly string[] = IDENTITY_ROUTE_CONTRACTS.map(contract => contract.path)
     expect(paths).not.toContain('/bind-agent')
-    // Nenhuma rota contratada pode alcançar o vínculo de sessão do Harness.
+    // Nenhuma rota contratada alcança o vínculo de sessão do Harness, e nenhuma
+    // rota contratada cai na cauda 404 - contrato sem handler seria um 404 mudo.
     for (const contract of IDENTITY_ROUTE_CONTRACTS) {
-      await f.request(contract.path, {
+      const response = await f.request(contract.path, {
         method: contract.method,
         headers: authHeaders,
         ...(contract.method === 'GET' ? {} : { body: JSON.stringify({ harness_session_id: 'agent-roubada' }) }),
       })
+      expect(response.status, `${contract.method} ${contract.path}`).not.toBe(404)
     }
     expect(f.service.bindHarnessSession).not.toHaveBeenCalled()
   })

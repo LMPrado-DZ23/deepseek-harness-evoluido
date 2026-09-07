@@ -51,6 +51,7 @@ export default defineConfig({
         'plugins/assistant-bridge/src/{catalog,closed-tool,service}.ts': { 100: true },
         'plugins/studio-web/src/assistant-session.ts': { 100: true },
         'plugins/studio-web/src/assistant-conversation.ts': { 100: true },
+        'plugins/studio-web/src/assistant-http.ts': { 100: true },
         'plugins/route-health/src/{model,service}.ts': { 100: true },
         'plugins/prompt-to-app/src/{model,security,state}.ts': { 100: true },
         'plugins/prompt-to-app/src/{data-generator,import-policy}.ts': { 100: true },
