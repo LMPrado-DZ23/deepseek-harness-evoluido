@@ -237,3 +237,36 @@ Leia este arquivo e `audit/M63_INTEGRATION_CHECKPOINT.md`; confira `git status`,
 - principal `codex/p30-policy-foundation@17e79aa` preservada;
 - nenhum merge, push, PR, deploy, Docker, exclusão, limpeza ou alteração de
   `plugins/*/lib/**` foi executado.
+
+## Iteração M88 — cobertura completa dos contratos Windows
+
+- estado: `CHECKPOINTING`;
+- branch: `codex/m88-windows-contract-coverage`;
+- base: M87 `0eed123a2c2d92ba85de122a843ac41fbda950c5`;
+- commit funcional: `9590ce40e1e440721aee4bec0ece0d0ea85e65a4`;
+- causa raiz: o job Windows declarava “Windows release contracts”, mas executava
+  somente um dos seis arquivos `tests/m6/windows-*.test.mjs`;
+- `tests/m6/windows-contract-matrix.json` separa contratos hospedáveis dos que
+  exigem Windows + Ubuntu/WSL2, e o gate falha se um arquivo novo não for
+  classificado exatamente uma vez;
+- `scripts/run-windows-contracts.mjs` executa os arquivos serialmente, sem
+  shell/eval e sem iniciar Docker; valida PowerShell 7 e, no perfil local, o
+  kernel `microsoft-standard-WSL2`;
+- cada filho usa relatório TAP; zero testes, resumo/plano duplicado ou
+  divergente, falha, cancelamento, pendência ou teste pulado são recusados;
+- caminhos externos, `..`, symlink e resolução física fora do checkout são
+  recusados antes de executar código;
+- o workflow verifica `$LASTEXITCODE` imediatamente, impedindo que uma segunda
+  chamada verde esconda a primeira falha;
+- perfil `hosted`: três arquivos, sete testes, zero pulado, `PASS`;
+- perfil `windows-wsl2`: três arquivos, 16 testes, zero pulado, `PASS`;
+- gate de cobertura/adversarial: 4/4 `PASS`;
+- bloco hermético complementar do workflow: 34/34 `PASS`;
+- revisão independente encontrou e levou ao fechamento de cinco classes de
+  bypass: falha nativa mascarada, WSL1 aceito, skip aceito, resumo TAP duplicado
+  e caminho por symlink; re-revisão funcional terminou `GO`;
+- lifecycle Docker Desktop real, imagem OCI, CI remoto, instalação completa,
+  cinco sessões leigas e piloto continuam `NOT_EXECUTED`;
+- principal `codex/p30-policy-foundation@17e79aa` preservada;
+- nenhum merge, push, PR, deploy, Docker, exclusão, limpeza ou alteração de
+  `plugins/*/lib/**` foi executado.
