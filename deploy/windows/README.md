@@ -45,6 +45,27 @@ Se o Compose do artefato ainda declarar um serviço apenas com `build:` ou uma i
 
 Os snapshots acima leem quatro stores do Windows (`CurrentUser/Root`, `CurrentUser/CA`, `LocalMachine/Root` e `LocalMachine/CA`) e as três raízes de certificados da distribuição WSL2. A comparação ignora somente horário e informações do host; qualquer certificado, arquivo ou link acrescentado, removido ou alterado produz `CHANGED` e código de saída 3. Os coletores não instalam, removem ou atualizam certificados e nunca sobrescrevem uma evidência anterior.
 
+## Contratos Windows sem iniciar Docker
+
+O perfil hospedado usa Windows e PowerShell 7 e é o mesmo executado pelo CI:
+
+```powershell
+node scripts/run-windows-contracts.mjs --profile hosted
+```
+
+O perfil da máquina de release é destinado ao Windows 11 e valida Windows,
+PowerShell 7 e Ubuntu em WSL2. Ele executa as provas reais de filesystem, shell
+e trust store, mas não inicia Docker:
+
+```powershell
+node scripts/run-windows-contracts.mjs --profile windows-wsl2
+```
+
+`tests/m6/windows-contract-matrix.json` é a lista autoritativa. Um novo
+`windows-*.test.mjs` não classificado, arquivo externo/symlink, teste vazio,
+falha, cancelamento, pendência ou teste pulado derruba o gate. Os perfis não
+substituem o lifecycle Docker real descrito abaixo.
+
 ## Executor da prova real M77
 
 `Invoke-Dz23LifecycleProof.ps1` prepara e, somente com confirmação literal,

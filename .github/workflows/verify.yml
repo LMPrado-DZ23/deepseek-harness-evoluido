@@ -34,14 +34,19 @@ jobs:
 
       - name: Run hermetic Windows contracts
         shell: pwsh
-        run: >-
-          node --test
-          tests/m6/studio-image-build.test.mjs
-          tests/m6/studio-runtime-proof.test.mjs
-          tests/m6/windows-preflight.test.mjs
-          tests/portability/bootstrap-upstream.test.mjs
-          tests/portability/clean-clone-readme.test.mjs
-          tests/portability/image-lock.test.mjs
+        run: |
+          node scripts/run-windows-contracts.mjs --profile hosted
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $hermeticTests = @(
+            'tests/m6/studio-image-build.test.mjs'
+            'tests/m6/studio-runtime-proof.test.mjs'
+            'tests/portability/bootstrap-upstream.test.mjs'
+            'tests/portability/clean-clone-readme.test.mjs'
+            'tests/portability/image-lock.test.mjs'
+            'tests/portability/windows-contract-coverage.test.mjs'
+          )
+          node --test @hermeticTests
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   linux-and-postgres:
     name: Linux clean clone and PostgreSQL 16
