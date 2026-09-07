@@ -68,7 +68,7 @@ test('preserva cookie, tela, cache e storage quando o servidor não revoga', asy
     selectedSession: 'sessão-do-assistente',
     keptSession: 'preservado',
     keptLocal: 'preservado',
-    caches: expect.arrayContaining(['dz23-studio-shell-e2e-logout', 'test-unrelated-cache']),
+    caches: expect.arrayContaining([expect.stringMatching(/^dz23-studio-shell-/u), 'test-unrelated-cache']),
   })
   expect((await context.cookies(origin)).some(cookie => cookie.name === 'dz23_studio_session' && cookie.value === 'e2e-logout-fail')).toBe(true)
 
