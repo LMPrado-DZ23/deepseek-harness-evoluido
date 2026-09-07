@@ -20,9 +20,17 @@ import {
   AssistantSessionLauncher,
   type AssistantRepositoryLaunchConfig,
 } from './assistant-session.js'
+import { AssistantConversationError, AssistantConversationService } from './assistant-conversation.js'
+import {
+  assistantConversationStatus,
+  handleAssistantConversation,
+  routeAssistantConversation,
+  type AssistantConversationHttpConfig,
+} from './assistant-http.js'
 
 export * from './assistant-session.js'
 export * from './assistant-conversation.js'
+export * from './assistant-http.js'
 
 export const name = 'dz23-studio-web'
 export const inject = ['sessionController', 'studioIdentity', 'studioPreview', 'studioTenancy', 'webServer']
@@ -44,12 +52,21 @@ export function createStudioWebHandler(config: {
   readonly allowedOrigins: readonly string[]
   readonly previewFrameSources?: readonly string[]
   readonly assistantSessions?: Pick<AssistantSessionLauncher, 'launch'>
+  readonly assistantConversations?: AssistantConversationHttpConfig['conversations']
 }) {
   const frameSources = normalizePreviewFrameSources(config.previewFrameSources ?? [])
   return async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     try {
       assertRequestTrust(request, { allowedHosts: config.allowedHosts, allowedOrigins: config.allowedOrigins })
       const pathname = new URL(request.url ?? '/studio', 'http://local').pathname
+      const conversationRoute = routeAssistantConversation(request.method, pathname)
+      if (conversationRoute !== undefined) {
+        const outcome = await handleAssistantConversation(request, conversationRoute, {
+          identity: config.identity,
+          ...(config.assistantConversations === undefined ? {} : { conversations: config.assistantConversations }),
+        })
+        return sendJson(response, outcome.status, outcome.body, frameSources)
+      }
       if (pathname === ASSISTANT_SESSION_PATH) {
         if (request.method !== 'POST') return send(response, 405, 'Método não permitido.', frameSources)
         const identitySession = await authenticatedMutation(request, config.identity)
@@ -69,6 +86,10 @@ export function createStudioWebHandler(config: {
       response.writeHead(200, securityHeaders(contentType(selected), frameSources))
       response.end(request.method === 'HEAD' ? undefined : body)
     } catch (error) {
+      const conversationStatus = assistantConversationStatus(error)
+      if (conversationStatus !== undefined && error instanceof AssistantConversationError) {
+        return sendJson(response, conversationStatus, { error: error.message }, frameSources)
+      }
       const status = error instanceof IdentityError ? error.code === 'locked' ? 429 : 401
         : error instanceof AssistantSessionLaunchError ? ({
           NOT_CONFIGURED: 503,
@@ -80,7 +101,11 @@ export function createStudioWebHandler(config: {
       if (error instanceof AssistantSessionLaunchError) {
         sendJson(response, status, { error: error.message }, frameSources)
       } else {
-        send(response, status, error instanceof Error ? error.message : 'Não foi possível abrir a interface.', frameSources)
+        // Só texto de catálogo chega ao cliente. A mensagem de um erro
+        // inesperado pode carregar caminho local, segredo ou detalhe de
+        // implementação, e não é ela que ajuda quem está usando o Studio.
+        const catalogued = error instanceof IdentityError || error instanceof StaticFileError
+        send(response, status, catalogued ? error.message : t('assistant.interfaceUnavailable'), frameSources)
       }
     }
   }
@@ -101,10 +126,17 @@ export async function apply(ctx: Context, config: StudioWebConfig = {}): Promise
       ctx.logger.warn(`dz23-studio-web: assistant session ${phase} failed: ${String(error)}`)
     },
   })
+  const assistantConversations = new AssistantConversationService({
+    identity: ctx.studioIdentity.service,
+    tenancy: ctx.studioTenancy.service,
+    launcher: assistantSessions,
+    sessions: ctx.sessionController,
+  })
   ctx.effect(() => ctx.webServer.register({
     kind: 'prefix', path: '/studio',
     handler: createStudioWebHandler({
       distDirectory, identity: ctx.studioIdentity.service,
+      assistantConversations,
       allowedHosts: config.allowedHosts ?? [defaultHost, `localhost:${port}`],
       allowedOrigins: config.allowedOrigins ?? defaultOrigins,
       previewFrameSources: config.previewFrameSources ?? [ctx.studioPreview.frameSource],

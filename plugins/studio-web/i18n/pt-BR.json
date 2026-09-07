@@ -27,8 +27,11 @@
     "toolApply": "Aplicar uma proposta ao projeto",
     "toolTeam": "Coordenar uma equipe de assistentes",
     "toolStudio": "Executar uma ação do DZ23 STUDIO",
-    "invalidMessage": "Escreva uma mensagem válida de até 32 KB.",
+    "invalidMessage": "Envie a mensagem em JSON, no formato {\"text\": \"sua mensagem\"}.",
     "releasedMissing": "o Harness não encontrou mais esta conversa",
-    "releasedForeign": "esta sessão não é uma conversa do assistente"
+    "releasedForeign": "esta sessão não é uma conversa do assistente",
+    "methodNotAllowed": "Esta ação não é permitida neste endereço.",
+    "messageTooLarge": "Esta mensagem é grande demais. Divida em partes menores.",
+    "interfaceUnavailable": "Não foi possível abrir a interface agora. Tente de novo em instantes; nada do seu trabalho foi perdido."
   }
 }
