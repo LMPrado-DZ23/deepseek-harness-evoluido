@@ -2,15 +2,15 @@
 
 - mission_id: `DZ23-STUDIO-V1-20260904`
 - objetivo: concluir o DZ23 STUDIO v1.0 com runtime portátil, geração isolada, gates Windows/Linux, testes com cinco pessoas e pacote open source somente após licença escolhida
-- estado: `INTEGRATING_AND_PROVING`
-- iteração: 21
+- estado: `CHECKPOINTING`
+- iteração: 29
 - início: 2026-09-04
-- último heartbeat: 2026-09-06T22:53:20-03:00
-- último progresso real: M81 provou a saída em Chromium, fechou cookie obsoleto e modo pessoal e concluiu scan com zero achado
-- tarefa atual: documentar e empacotar a ponta M81 para revisão independente do Claude, sem merge na principal
-- branch: `codex/m81-signout-browser-e2e`
-- ponta funcional: `ac4860e`
-- base: `3da1aa92d6d72f0aa59e0b6eccc80e609b36e23f`
+- último heartbeat: 2026-09-07T06:55:00-03:00
+- último progresso real: M89 concluiu o núcleo governado de staging imutável, com revisão adversarial GO e sem efeito externo
+- tarefa atual: registrar, empacotar e entregar a ponta M89 para revisão independente do Claude, sem merge na principal
+- branch: `codex/m89-immutable-staging`
+- ponta funcional: `2093dc0a524bc03671c3c0e35406cd84dd2f3c42`
+- base: `2f2a772d98d916514652e0f7797f00339c9a3877`
 - upstream: `deepseek-harness@6c705be1ce6774a000d061da41d1823b03a3d42c`
 - staging válido: `/home/leandro/dz23-gates/m63-integration-20260906`
 - staging inválido preservado: `/home/leandro/dz23-m61-lock-20260904a` (origem calculada incorretamente e sincronização interrompida)
@@ -270,3 +270,48 @@ Leia este arquivo e `audit/M63_INTEGRATION_CHECKPOINT.md`; confira `git status`,
 - principal `codex/p30-policy-foundation@17e79aa` preservada;
 - nenhum merge, push, PR, deploy, Docker, exclusão, limpeza ou alteração de
   `plugins/*/lib/**` foi executado.
+
+## Iteração M89 — núcleo governado de staging imutável
+
+- estado: `CHECKPOINTING`;
+- branch: `codex/m89-immutable-staging`;
+- base: M88 `2f2a772d98d916514652e0f7797f00339c9a3877`;
+- commit funcional: `2093dc0a524bc03671c3c0e35406cd84dd2f3c42`;
+- domínio físico `studio_staging_releases`, nome lógico
+  `studio.staging.releases`, adicionado às duas topologias de storage;
+- publicação e rollback exigem sessão, `project.publish_staging`, claim T2 de
+  uso único e artefato selado; `approved: true`, caminhos do cliente e destino
+  de produção não fazem parte do contrato;
+- reserva global por destino, geração monotônica, CAS, lease fencing,
+  quarentena cercada e ponteiro ativo transacional impedem concorrência e
+  roubo de lock por geração atrasada;
+- exceção, resposta perdida ou malformada da autoridade T2 mantém
+  `APPROVAL_PENDING / APPROVAL_STATUS_UNKNOWN`; somente negação definitiva é
+  terminal;
+- efeitos externos inconclusivos permanecem `RECONCILIATION_REQUIRED`, e o
+  provider só pode responder `READY` ou `UNKNOWN`;
+- rollback republica artefato imutável anterior e preserva o histórico;
+- 30/30 testes focados passaram; cobertura focada: 91,36% statements, 91,14%
+  branches, 97,05% functions e 95,85% lines; modelo, artefato e segurança
+  críticos atingiram 100% de linhas;
+- typecheck raiz, build oficial do Harness, build real dos pacotes Studio,
+  i18n, escopos, rotas de 25 domínios, catálogo, portabilidade e P37 passaram;
+- P37 do candidato inspecionou 890 arquivos, 23 manifests e uma licença, com
+  zero achado; self-tests positivo, negativo e vazio passaram;
+- revisão adversarial independente encontrou e levou ao fechamento de três
+  classes: quarentena sem fencing, exceção T2 terminalizada incorretamente e
+  estado iniciado sem aprovação; re-revisão terminou `GO — STAGING_CORE_BETA`;
+- suíte completa no Windows nativo: 1.740 aprovados, 358 pulados e 29 falhas em
+  dez arquivos; nenhuma falha pertence ao novo plugin. As falhas observadas são
+  contratos Unix ou limitações já conhecidas do ambiente Windows (symlink,
+  FIFO, socket Unix, sparse files, sinal POSIX e OpenSSL ausente);
+- a repetição integral da M89 em clone limpo WSL2/ext4 permanece
+  `NOT_EXECUTED`; a M87 anterior provou a base pré-M89 com 2.036 aprovados,
+  62 pulados e zero falha, mas não é evidência substituta desta iteração;
+- provider, rota HTTP, montagem no runtime, Docker, rede, credencial e staging
+  físico continuam `NOT_CONFIGURED` / `NOT_PRESENT` / `NOT_EXECUTED`;
+- principal `codex/p30-policy-foundation@17e79aa` preservada;
+- nenhum merge, push, PR, deploy, Docker, exclusão, limpeza ou alteração
+  permanente de `plugins/*/lib/**` foi executado;
+- próxima ação: gerar o artefato final, selar hashes e solicitar revisão do
+  Claude antes de qualquer integração.
