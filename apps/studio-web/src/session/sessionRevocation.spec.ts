@@ -96,7 +96,27 @@ describe('cross-tab session revocation', () => {
     expect(redirect).not.toHaveBeenCalled()
 
     cleanup.mockRejectedValueOnce(new Error('cache unavailable'))
-    await expect(followRemoteSessionRevocation({ currentMode: async () => { throw new Error('offline') }, clearOwnedState: cleanup, redirect })).resolves.toBe('redirected')
+    const unavailable = vi.fn(async () => { throw new Error('offline') })
+    await expect(followRemoteSessionRevocation({ currentMode: unavailable, clearOwnedState: cleanup, redirect })).resolves.toBe('redirected')
+    expect(unavailable).toHaveBeenCalledTimes(2)
     expect(redirect).toHaveBeenCalledWith('/login')
+  })
+
+  it('does not clear a new login when an older unauthenticated response arrives first', async () => {
+    let resolveOldRequest: ((mode: 'unavailable') => void) | undefined
+    const oldRequest = new Promise<'unavailable'>(resolve => { resolveOldRequest = resolve })
+    const currentMode = vi.fn()
+      .mockImplementationOnce(() => oldRequest)
+      .mockResolvedValueOnce('authenticated')
+    const cleanup = vi.fn(async () => undefined)
+    const redirect = vi.fn()
+
+    const following = followRemoteSessionRevocation({ currentMode, clearOwnedState: cleanup, redirect })
+    resolveOldRequest?.('unavailable')
+
+    await expect(following).resolves.toBe('kept-authenticated')
+    expect(currentMode).toHaveBeenCalledTimes(2)
+    expect(cleanup).not.toHaveBeenCalled()
+    expect(redirect).not.toHaveBeenCalled()
   })
 })

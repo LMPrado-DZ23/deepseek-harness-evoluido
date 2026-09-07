@@ -2,7 +2,7 @@ import { expect, request as apiRequest, test, type BrowserContext, type Page } f
 
 const origin = 'http://studio.dz23.localhost:4179'
 
-async function prepareBrowserState(context: BrowserContext, page: Page, token: string): Promise<void> {
+async function prepareBrowserState(context: BrowserContext, page: Page, token: string, path = '/studio/'): Promise<void> {
   await context.addCookies([{ name: 'dz23_studio_session', value: token, url: origin }])
   await page.addInitScript(() => {
     if (!window.location.pathname.startsWith('/studio/')) return
@@ -11,7 +11,7 @@ async function prepareBrowserState(context: BrowserContext, page: Page, token: s
     window.localStorage.setItem('dsh.sessions.current', 'sessão-do-assistente')
     window.localStorage.setItem('test.local.keep', 'preservado')
   })
-  await page.goto('/studio/')
+  await page.goto(path)
   await page.evaluate(async () => {
     await (await caches.open('dz23-studio-shell-e2e-logout')).put('/studio/test-shell', new Response('shell'))
     await (await caches.open('test-unrelated-cache')).put('/test-unrelated', new Response('preservado'))
@@ -85,30 +85,42 @@ test('preserva cookie, tela, cache e storage quando o servidor não revoga', asy
 })
 
 test('sincroniza a saída confirmada com outra aba sem repetir a mutação', async ({ context, page }) => {
-  const sibling = await context.newPage()
+  const hub = await context.newPage()
+  const assistant = await context.newPage()
   await prepareBrowserState(context, page, 'e2e-logout-cross-tab')
-  await prepareBrowserState(context, sibling, 'e2e-logout-cross-tab')
+  await prepareBrowserState(context, hub, 'e2e-logout-cross-tab', '/studio/hub')
+  await prepareBrowserState(context, assistant, 'e2e-logout-cross-tab', '/studio/assistente')
   await expect(page.getByRole('button', { name: 'Sair' })).toBeEnabled()
-  await expect(sibling.getByRole('button', { name: 'Sair' })).toBeEnabled()
+  await expect(hub).toHaveURL(/\/studio\/hub$/u)
+  await expect(assistant).toHaveURL(/\/studio\/assistente$/u)
 
-  const siblingIdentityRequests: Array<{ method: string; path: string }> = []
-  sibling.on('request', request => {
-    const url = new URL(request.url())
-    if (url.pathname.startsWith('/api/studio/identity/')) siblingIdentityRequests.push({ method: request.method(), path: url.pathname })
-  })
+  const siblingIdentityRequests: Array<{ screen: string; method: string; path: string }> = []
+  for (const [screen, sibling] of [['hub', hub], ['assistant', assistant]] as const) {
+    sibling.on('request', request => {
+      const url = new URL(request.url())
+      if (url.pathname.startsWith('/api/studio/identity/')) siblingIdentityRequests.push({ screen, method: request.method(), path: url.pathname })
+    })
+  }
 
   await page.getByRole('button', { name: 'Sair' }).click()
   await expect(page).toHaveURL(/\/login$/u)
-  await expect(sibling).toHaveURL(/\/login$/u)
-  await expect(browserState(sibling)).resolves.toEqual({
-    csrf: null,
-    selectedSession: null,
-    keptSession: 'preservado',
-    keptLocal: 'preservado',
-    caches: ['test-unrelated-cache'],
-  })
-  expect(siblingIdentityRequests).toContainEqual({ method: 'GET', path: '/api/studio/identity/session' })
-  expect(siblingIdentityRequests).not.toContainEqual({ method: 'POST', path: '/api/studio/identity/logout' })
+  for (const sibling of [hub, assistant]) {
+    await expect(sibling).toHaveURL(/\/login$/u)
+    await expect(browserState(sibling)).resolves.toEqual({
+      csrf: null,
+      selectedSession: null,
+      keptSession: 'preservado',
+      keptLocal: 'preservado',
+      caches: ['test-unrelated-cache'],
+    })
+  }
+  expect(siblingIdentityRequests).toEqual(expect.arrayContaining([
+    { screen: 'hub', method: 'GET', path: '/api/studio/identity/session' },
+    { screen: 'assistant', method: 'GET', path: '/api/studio/identity/session' },
+  ]))
+  expect(siblingIdentityRequests).not.toEqual(expect.arrayContaining([
+    expect.objectContaining({ method: 'POST', path: '/api/studio/identity/logout' }),
+  ]))
 })
 
 test('não oferece sair no modo pessoal sem sessão revogável', async ({ page }) => {

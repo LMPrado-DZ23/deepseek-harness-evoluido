@@ -156,8 +156,14 @@ export function listenForSessionRevocation(
 }
 
 export async function followRemoteSessionRevocation(port: RemoteRevocationPort): Promise<'kept-authenticated' | 'redirected'> {
-  const mode = await port.currentMode().catch(() => 'unavailable' as const)
-  if (mode === 'authenticated') return 'kept-authenticated'
+  const firstMode = await port.currentMode().catch(() => 'unavailable' as const)
+  if (firstMode === 'authenticated') return 'kept-authenticated'
+
+  // A response can belong to the cookie that was revoked just before another
+  // tab completed a new login. Revalidate with the cookie current at this
+  // point before touching browser state; the server remains the authority.
+  const confirmedMode = await port.currentMode().catch(() => 'unavailable' as const)
+  if (confirmedMode === 'authenticated') return 'kept-authenticated'
   await port.clearOwnedState().catch(() => undefined)
   port.redirect('/login')
   return 'redirected'
