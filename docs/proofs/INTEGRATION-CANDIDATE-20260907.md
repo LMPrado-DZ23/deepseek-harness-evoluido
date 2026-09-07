@@ -76,3 +76,24 @@ omitido.
 - `plugins/*/lib/**` foi reconstruído por `pnpm build` neste diretório e ficou
   **fora** do commit de merge: são artefatos de build. Nada foi apagado nem
   desrastreado.
+
+## P37 — inventário de licenças e proibições (07/09/2026)
+
+`check-release-licenses.mjs --self-test` → **PASS**: o gate reprova artefato
+vazio, dependência proibida (`freestyle`) e assinatura de código proibido. Um
+gate que passa com zero itens é uma falha, e este prova que não é o caso.
+
+Rodado contra a **superfície publicável** montada a partir da candidata —
+`plugins/*/{lib,i18n,package.json}`, `apps/studio-web/dist`, `package.json`,
+`LICENSE.md` e `UPSTREAM.lock`:
+
+```
+status = PASS · files_scanned = 464 · package_manifests = 19
+license_files = 1 · findings = 0
+```
+
+**O que isto não é:** não é a imagem de release. A imagem exige Docker, que
+continua `BLOCKED_EXTERNAL` sem autorização do Prado. O que foi varrido é
+exatamente o que os pacotes do Studio publicam (`files: ["lib", "i18n"]`) mais a
+interface compilada — e nada além disso. `pnpm-lock.release.yaml` continua
+defasado, então **a imagem de release ainda não contém esta candidata**.
