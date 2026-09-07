@@ -1,6 +1,7 @@
 import { CSRF_STORAGE_KEY, csrfToken } from '../api'
 import { HARNESS_SELECTION_STORAGE_KEY } from '../assistant/assistantLaunch'
 import { forgetSavedShell } from '../pwa/register'
+import { publishSessionRevocation } from './sessionRevocation'
 
 export const SIGN_OUT_ENDPOINT = '/api/studio/identity/logout'
 
@@ -14,11 +15,18 @@ export interface SignOutPort {
   forgetShell(): Promise<unknown>
   sessionStorage: BrowserStorage
   localStorage: BrowserStorage
+  notifyRevoked(): void
   redirect(path: string): void
 }
 
 function removeOwnedKey(storage: BrowserStorage, key: string): void {
   try { storage.removeItem(key) } catch { /* the server session is already revoked */ }
+}
+
+export async function clearOwnedBrowserSessionState(port: Pick<SignOutPort, 'forgetShell' | 'sessionStorage' | 'localStorage'>): Promise<void> {
+  await port.forgetShell().catch(() => undefined)
+  removeOwnedKey(port.sessionStorage, CSRF_STORAGE_KEY)
+  removeOwnedKey(port.localStorage, HARNESS_SELECTION_STORAGE_KEY)
 }
 
 export async function signOutCurrentSession(port: SignOutPort): Promise<void> {
@@ -32,12 +40,19 @@ export async function signOutCurrentSession(port: SignOutPort): Promise<void> {
     throw new Error(typeof body?.error === 'string' && body.error !== '' ? body.error : `HTTP ${response.status}`)
   }
 
-  // Server revocation is authoritative. Device cleanup is best-effort so a
-  // browser refusing local storage cannot trap a revoked user on this screen.
-  await port.forgetShell().catch(() => undefined)
-  removeOwnedKey(port.sessionStorage, CSRF_STORAGE_KEY)
-  removeOwnedKey(port.localStorage, HARNESS_SELECTION_STORAGE_KEY)
+  // Server revocation is authoritative. Notify sibling tabs only after this
+  // proof; cleanup remains best-effort and never widens server authority.
+  try { port.notifyRevoked() } catch { /* this tab still completes sign out */ }
+  await clearOwnedBrowserSessionState(port)
   port.redirect('/login')
+}
+
+export function clearOwnedBrowserSessionStateInBrowser(): Promise<void> {
+  return clearOwnedBrowserSessionState({
+    forgetShell: () => forgetSavedShell(),
+    sessionStorage: window.sessionStorage,
+    localStorage: window.localStorage,
+  })
 }
 
 export function signOutInBrowser(): Promise<void> {
@@ -47,6 +62,7 @@ export function signOutInBrowser(): Promise<void> {
     forgetShell: () => forgetSavedShell(),
     sessionStorage: window.sessionStorage,
     localStorage: window.localStorage,
+    notifyRevoked: () => publishSessionRevocation(),
     redirect: path => window.location.assign(path),
   })
 }

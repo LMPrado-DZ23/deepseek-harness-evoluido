@@ -15,6 +15,7 @@ function fixture(response: Response = Response.json({ signed_out: true })) {
     forgetShell: vi.fn(async () => { calls.push('forget-shell') }),
     sessionStorage: { removeItem: key => { removed.push(`session:${key}`) } },
     localStorage: { removeItem: key => { removed.push(`local:${key}`) } },
+    notifyRevoked: vi.fn(() => { calls.push('notify-revoked') }),
     redirect: vi.fn(path => { calls.push(`redirect:${path}`) }),
   }
   return { port, calls, removed }
@@ -28,6 +29,7 @@ describe('secure sign out', () => {
 
     expect(f.calls).toEqual([
       `POST:${SIGN_OUT_ENDPOINT}:csrf-1:same-origin`,
+      'notify-revoked',
       'forget-shell',
       'redirect:/login',
     ])
@@ -43,6 +45,7 @@ describe('secure sign out', () => {
     await expect(signOutCurrentSession(f.port)).rejects.toThrow('Sessão não revogada.')
 
     expect(f.port.forgetShell).not.toHaveBeenCalled()
+    expect(f.port.notifyRevoked).not.toHaveBeenCalled()
     expect(f.removed).toEqual([])
     expect(f.port.redirect).not.toHaveBeenCalled()
   })
@@ -63,6 +66,17 @@ describe('secure sign out', () => {
     await signOutCurrentSession(f.port)
 
     expect(f.removed).toEqual([`local:${HARNESS_SELECTION_STORAGE_KEY}`])
+    expect(f.port.notifyRevoked).toHaveBeenCalledOnce()
+    expect(f.port.redirect).toHaveBeenCalledWith('/login')
+  })
+
+  it('completes this tab when sibling notification is unavailable', async () => {
+    const f = fixture()
+    vi.mocked(f.port.notifyRevoked).mockImplementationOnce(() => { throw new Error('channel unavailable') })
+
+    await signOutCurrentSession(f.port)
+
+    expect(f.port.forgetShell).toHaveBeenCalledOnce()
     expect(f.port.redirect).toHaveBeenCalledWith('/login')
   })
 })

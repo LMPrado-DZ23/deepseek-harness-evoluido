@@ -11,8 +11,9 @@ import { apiFailureMessage, apiFailureText, type ApiCallKind } from './pwa/apiFa
 import { GENERATION_REJECTED_STATE, postGeneration, startGeneration } from './pwa/generation'
 import { NotificationOptIn } from './pwa/NotificationOptIn'
 import { dispatchGenerationFinished } from './pwa/notifications'
-import { signOutInBrowser } from './session/signOut'
+import { clearOwnedBrowserSessionStateInBrowser, signOutInBrowser } from './session/signOut'
 import { currentSessionMode } from './session/currentSession'
+import { followRemoteSessionRevocation, listenForSessionRevocation } from './session/sessionRevocation'
 
 type DesignPreset = 'modern' | 'professional' | 'colorful' | 'brand'
 type Question = { id: 'audience' | 'goal' | 'content' | 'sensitive-confirmation'; text: string }
@@ -61,6 +62,11 @@ export function App() {
     void currentSessionMode().then(mode => { if (active) setAuthenticatedSession(mode === 'authenticated') })
     return () => { active = false }
   }, [])
+  useEffect(() => listenForSessionRevocation(() => followRemoteSessionRevocation({
+    currentMode: currentSessionMode,
+    clearOwnedState: clearOwnedBrowserSessionStateInBrowser,
+    redirect: path => window.location.assign(path),
+  })), [])
   useEffect(() => { void api<HealthState>('/health').then(value => { setHealth(value); setRoute(value.route) }).catch((cause: unknown) => {
     const message = apiFailureMessage(cause, navigator.onLine, 'read')
     if (message !== undefined) setError(message)

@@ -89,6 +89,7 @@ const scratch = await mkdtemp(join(tmpdir(), 'dz23-studio-e2e-'))
 const session = { session_id: 'e2e-session', user_id: 'owner', org_id: 'org-e2e', tenant_id: 'tenant-e2e' } as SessionRecord
 const logoutSession = { ...session, session_id: 'e2e-logout-session' }
 const failingLogoutSession = { ...session, session_id: 'e2e-logout-fail-session' }
+const crossTabLogoutSession = { ...session, session_id: 'e2e-logout-cross-tab-session' }
 const revokedSessions = new Set<string>()
 const identity = {
   requestMagicCode: async () => undefined,
@@ -98,6 +99,7 @@ const identity = {
     const authenticated = token === 'e2e' ? session
       : token === 'e2e-logout' ? logoutSession
         : token === 'e2e-logout-fail' ? failingLogoutSession
+          : token === 'e2e-logout-cross-tab' ? crossTabLogoutSession
           : undefined
     if (authenticated === undefined || revokedSessions.has(authenticated.session_id)) throw new IdentityError('invalid', 'invalid-session')
     return authenticated

@@ -54,7 +54,9 @@ test('revoga a sessão atual antes de limpar somente o estado DZ23 do navegador'
 })
 
 test('preserva cookie, tela, cache e storage quando o servidor não revoga', async ({ context, page }) => {
+  const sibling = await context.newPage()
   await prepareBrowserState(context, page, 'e2e-logout-fail')
+  await prepareBrowserState(context, sibling, 'e2e-logout-fail')
 
   const logoutResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/studio/identity/logout')
   await page.getByRole('button', { name: 'Sair' }).click()
@@ -62,6 +64,8 @@ test('preserva cookie, tela, cache e storage quando o servidor não revoga', asy
   await expect(page).toHaveURL(/\/studio\/$/u)
   await expect(page.getByRole('alert')).toHaveText('Não foi possível encerrar sua sessão. Confira a conexão e tente novamente.')
   await expect(page.getByRole('button', { name: 'Sair' })).toBeEnabled()
+  await expect(sibling).toHaveURL(/\/studio\/$/u)
+  await expect(sibling.getByRole('button', { name: 'Sair' })).toBeEnabled()
 
   await expect(browserState(page)).resolves.toEqual({
     csrf: 'csrf-e2e',
@@ -78,6 +82,33 @@ test('preserva cookie, tela, cache e storage quando o servidor não revoga', asy
   })
   expect((await stillActive.get('/api/studio/identity/session')).status()).toBe(200)
   await stillActive.dispose()
+})
+
+test('sincroniza a saída confirmada com outra aba sem repetir a mutação', async ({ context, page }) => {
+  const sibling = await context.newPage()
+  await prepareBrowserState(context, page, 'e2e-logout-cross-tab')
+  await prepareBrowserState(context, sibling, 'e2e-logout-cross-tab')
+  await expect(page.getByRole('button', { name: 'Sair' })).toBeEnabled()
+  await expect(sibling.getByRole('button', { name: 'Sair' })).toBeEnabled()
+
+  const siblingIdentityRequests: Array<{ method: string; path: string }> = []
+  sibling.on('request', request => {
+    const url = new URL(request.url())
+    if (url.pathname.startsWith('/api/studio/identity/')) siblingIdentityRequests.push({ method: request.method(), path: url.pathname })
+  })
+
+  await page.getByRole('button', { name: 'Sair' }).click()
+  await expect(page).toHaveURL(/\/login$/u)
+  await expect(sibling).toHaveURL(/\/login$/u)
+  await expect(browserState(sibling)).resolves.toEqual({
+    csrf: null,
+    selectedSession: null,
+    keptSession: 'preservado',
+    keptLocal: 'preservado',
+    caches: ['test-unrelated-cache'],
+  })
+  expect(siblingIdentityRequests).toContainEqual({ method: 'GET', path: '/api/studio/identity/session' })
+  expect(siblingIdentityRequests).not.toContainEqual({ method: 'POST', path: '/api/studio/identity/logout' })
 })
 
 test('não oferece sair no modo pessoal sem sessão revogável', async ({ page }) => {
