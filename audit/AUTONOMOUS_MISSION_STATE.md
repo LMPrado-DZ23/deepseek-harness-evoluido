@@ -203,3 +203,37 @@ Leia este arquivo e `audit/M63_INTEGRATION_CHECKPOINT.md`; confira `git status`,
 - nenhum merge, push, PR, deploy, Docker, exclusão ou limpeza executado;
 - próxima ação: gerar evidência final e solicitar revisão somente leitura do
   Claude depois das prioridades M72/M73/M74-A/M75/M83/M84 já registradas.
+
+## Iteração M87 — contrato reproduzível de clone limpo
+
+- estado: `CHECKPOINTING`;
+- branch: `codex/m87-clean-clone-contract`;
+- base: `codex/m86-raw-cookie-transport@36de4543d98cde06fcd0e7aeee0b338d14fc713d`;
+- commit funcional: `ee036df2311d14afa08007d90c141d6963864822`;
+- objetivo: transformar o bootstrap realmente comprovado em contrato executável
+  do README e impedir a volta do comando de teste incorreto;
+- alteração funcional: nenhuma linha de produção foi alterada; o README usa
+  `pnpm exec vitest run --maxWorkers=1`, e
+  `tests/portability/clean-clone-readme.test.mjs` fixa a sequência canônica de
+  oito comandos;
+- workflow Windows executa o novo contrato hermético;
+- contrato hermético no Windows: 31/31 `PASS`;
+- clone descartável real no ext4 do WSL2:
+  `/home/leandro/dz23-gates/m87-clean-clone-36de454`;
+- upstream materializado no commit fixado `6c705be`, manifesto de 8.953 entradas
+  validado com SHA-256
+  `862b92782c2f5cd67f81debd1116b16150dfafd84fb4ce2602a729f9cf3d26dc`;
+- instalação congelada e `build:official` do Harness: `PASS`;
+- instalação congelada filtrada, build do Studio e `pnpm typecheck`: `PASS`;
+- suíte canônica no clone limpo: 126 arquivos aprovados, seis pulados; 2.036
+  testes aprovados, 62 pulados e zero falha;
+- depois do build, 51 mudanças rastreadas apareceram, todas em
+  `plugins/*/lib/**`; nenhuma mudança fora dessa árvore e submódulo limpo;
+- conclusão limitada: o grafo de tipos e o bootstrap limpo estão comprovados;
+  o resíduo de artefatos `lib` rastreados continua separado e não será removido
+  sem autorização do Prado;
+- imagem Docker/OCI real, Postgres físico, CI remoto, Windows instalado,
+  cinco sessões leigas e piloto continuam `NOT_EXECUTED` nesta iteração;
+- principal `codex/p30-policy-foundation@17e79aa` preservada;
+- nenhum merge, push, PR, deploy, Docker, exclusão, limpeza ou alteração de
+  `plugins/*/lib/**` foi executado.
