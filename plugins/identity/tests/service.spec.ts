@@ -346,25 +346,68 @@ describe('StudioIdentityService', () => {
     })
   })
 
-  it('bounds Harness bindings per device session and audits every dropped pointer', async () => {
+  it('refuses a ninth conversation pointer instead of silently dropping one', async () => {
     const h = makeHarness()
     const issued = await login(h)
-    for (let index = 0; index < 9; index += 1) {
+    for (let index = 0; index < 8; index += 1) {
       await h.service.bindHarnessSession(h.repository.sessionMap.get(issued.session.session_id)!, `agent-${String(index)}`)
     }
+    const full = h.repository.sessionMap.get(issued.session.session_id)!
+    expect(full.harness_session_ids).toHaveLength(8)
+    await expect(h.service.bindHarnessSession(full, 'agent-8')).rejects.toMatchObject({ code: 'invalid' })
     const stored = h.repository.sessionMap.get(issued.session.session_id)!
     expect(stored.harness_session_ids).toHaveLength(8)
-    expect(stored.harness_session_ids).not.toContain('agent-0')
-    expect(stored.harness_session_ids[0]).toBe('agent-1')
-    expect(stored.harness_session_ids.at(-1)).toBe('agent-8')
-    expect(h.service.ownsHarnessSession(stored, 'agent-0')).toBe(false)
-    expect(h.service.ownsHarnessSession(stored, 'agent-8')).toBe(true)
-    const unbound = h.service.auditRecords().filter(record => record.event_type === 'harness_session_unbound')
-    expect(unbound).toHaveLength(1)
-    expect(unbound[0]).toMatchObject({ outcome: 'success', session_id: issued.session.session_id })
-    expect(unbound[0]?.reason).toContain('agent-0')
-    expect(unbound[0]?.reason).not.toContain('undefined')
+    expect(stored.harness_session_ids[0]).toBe('agent-0')
+    expect(stored.harness_session_ids).not.toContain('agent-8')
+    expect(h.service.ownsHarnessSession(stored, 'agent-0')).toBe(true)
+    const refused = h.service.auditRecords().filter(record => (
+      record.event_type === 'harness_session_bound' && record.outcome === 'failure'
+    ))
+    expect(refused).toHaveLength(1)
+    expect(refused[0]?.reason).toContain('8')
   })
+
+  it('releases a pointer only with an audit written first, and lets the freed slot be reused', async () => {
+    const h = makeHarness()
+    const issued = await login(h)
+    for (let index = 0; index < 8; index += 1) {
+      await h.service.bindHarnessSession(h.repository.sessionMap.get(issued.session.session_id)!, `agent-${String(index)}`)
+    }
+    await h.service.releaseHarnessSession(
+      h.repository.sessionMap.get(issued.session.session_id)!, 'agent-0', 'o Harness não encontrou mais esta conversa',
+    )
+    const afterRelease = h.repository.sessionMap.get(issued.session.session_id)!
+    expect(afterRelease.harness_session_ids).toHaveLength(7)
+    expect(afterRelease.harness_session_ids).not.toContain('agent-0')
+    expect(h.service.ownsHarnessSession(afterRelease, 'agent-0')).toBe(false)
+    const released = h.service.auditRecords().filter(record => record.event_type === 'harness_session_unbound')
+    expect(released).toHaveLength(1)
+    expect(released[0]).toMatchObject({ outcome: 'success', session_id: issued.session.session_id })
+    expect(released[0]?.reason).toContain('agent-0')
+    // Liberar é idempotente e não inventa auditoria para ponteiro inexistente.
+    await h.service.releaseHarnessSession(afterRelease, 'agent-0', 'de novo')
+    expect(h.service.auditRecords().filter(record => record.event_type === 'harness_session_unbound')).toHaveLength(1)
+    await expect(h.service.releaseHarnessSession(afterRelease, ' ', 'vazio')).rejects.toMatchObject({ code: 'invalid' })
+    // A vaga liberada volta a aceitar uma conversa nova.
+    await h.service.bindHarnessSession(h.repository.sessionMap.get(issued.session.session_id)!, 'agent-8')
+    expect(h.repository.sessionMap.get(issued.session.session_id)!.harness_session_ids).toHaveLength(8)
+  })
+
+  it('does not write the session before the release audit succeeds', async () => {
+    const h = makeHarness()
+    const issued = await login(h)
+    await h.service.bindHarnessSession(h.repository.sessionMap.get(issued.session.session_id)!, 'agent-0')
+    const putAudit = h.repository.putAudit.bind(h.repository)
+    h.repository.putAudit = async record => {
+      if (record.event_type === 'harness_session_unbound') throw new Error('auditoria indisponível')
+      return putAudit(record)
+    }
+    await expect(h.service.releaseHarnessSession(
+      h.repository.sessionMap.get(issued.session.session_id)!, 'agent-0', 'motivo',
+    )).rejects.toThrow()
+    expect(h.repository.sessionMap.get(issued.session.session_id)!.harness_session_ids).toContain('agent-0')
+  })
+
 
   it('fails closed when session rows disappear or are revoked during serialized mutations', async () => {
     const missingBinding = makeHarness()

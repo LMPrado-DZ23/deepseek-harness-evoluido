@@ -335,12 +335,22 @@ describe('identity HTTP boundary', () => {
       const response = await f.request('/bind-agent', {
         method,
         headers: authHeaders,
-        body: method === 'GET' ? undefined : JSON.stringify({ harness_session_id: 'agent-roubada' }),
+        ...(method === 'GET' ? {} : { body: JSON.stringify({ harness_session_id: 'agent-roubada' }) }),
       })
       expect(response.status, method).toBe(404)
     }
     expect(f.service.bindHarnessSession).not.toHaveBeenCalled()
-    expect(IDENTITY_ROUTE_CONTRACTS.some(contract => contract.path === '/bind-agent')).toBe(false)
+    const paths: readonly string[] = IDENTITY_ROUTE_CONTRACTS.map(contract => contract.path)
+    expect(paths).not.toContain('/bind-agent')
+    // Nenhuma rota contratada pode alcançar o vínculo de sessão do Harness.
+    for (const contract of IDENTITY_ROUTE_CONTRACTS) {
+      await f.request(contract.path, {
+        method: contract.method,
+        headers: authHeaders,
+        ...(contract.method === 'GET' ? {} : { body: JSON.stringify({ harness_session_id: 'agent-roubada' }) }),
+      })
+    }
+    expect(f.service.bindHarnessSession).not.toHaveBeenCalled()
   })
 
   it('rejects absent session, missing CSRF, untrusted host and untrusted origin', async () => {

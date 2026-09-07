@@ -1,5 +1,7 @@
 {
   "assistant.bindingConflictAudit": "Sessão do agente já vinculada a outra sessão de identidade.",
   "assistant.bindingConflict": "Esta conversa já pertence a outra sessão.",
-  "assistant.bindingQuotaAudit": "Vínculo mais antigo de conversa liberado por limite de vínculos por dispositivo."
+  "assistant.bindingQuota": "Este dispositivo já tem 8 conversas abertas com o assistente. Feche ou termine uma delas para começar outra. Nenhum histórico foi apagado.",
+  "assistant.bindingQuotaAudit": "Limite de 8 conversas por dispositivo atingido; vínculo novo recusado.",
+  "assistant.bindingReleasedAudit": "Conversa liberada deste dispositivo porque o Harness não a encontrou mais."
 }

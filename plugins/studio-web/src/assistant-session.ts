@@ -41,7 +41,7 @@ export class AssistantSessionLaunchError extends Error {
 }
 
 export interface AssistantSessionLauncherOptions {
-  readonly identity: Pick<StudioIdentityService, 'bindHarnessSession' | 'isSharedHarnessClientAllowed'>
+  readonly identity: Pick<StudioIdentityService, 'bindHarnessSession' | 'isSharedHarnessClientAllowed' | 'releaseHarnessSession'>
   readonly tenancy: Pick<StudioTenancyService, 'authorizationFor'>
   readonly sessions: AssistantSessionControllerPort
   readonly repositories: readonly AssistantRepositoryLaunchConfig[]
@@ -135,6 +135,21 @@ export class AssistantSessionLauncher {
     }
   }
 
+  /**
+   * Drops a pointer the Harness itself refused to resume. Losing the pointer is
+   * never worse than keeping it: the conversation is already unreachable. A
+   * failure to record the release must not break opening a new conversation, so
+   * it is reported and swallowed.
+   */
+  async #release(identitySession: SessionRecord, harnessSessionId: string, reason: string): Promise<void> {
+    this.#activeByIdentitySession.delete(identitySession.session_id)
+    try {
+      await this.options.identity.releaseHarnessSession(identitySession, harnessSessionId, reason)
+    } catch (error) {
+      this.options.reportFailure?.('inspect', error)
+    }
+  }
+
   async #existingSession(
     identitySession: SessionRecord,
     repository: ValidatedRepositoryConfig,
@@ -150,14 +165,20 @@ export class AssistantSessionLauncher {
       try {
         inspected = await this.options.sessions.inspect(sessionId)
       } catch (error) {
-        if (error instanceof ApiSessionNotFound) continue
+        if (error instanceof ApiSessionNotFound) {
+          await this.#release(identitySession, rawId, t('assistant.releasedMissing'))
+          continue
+        }
         this.options.reportFailure?.('inspect', error)
         throw new AssistantSessionLaunchError(
           'SESSION_UNAVAILABLE',
           t('assistant.inspectUnavailable'),
         )
       }
-      if (inspected.meta.agentPreset !== ASSISTANT_AGENT_PRESET) continue
+      if (inspected.meta.agentPreset !== ASSISTANT_AGENT_PRESET) {
+        await this.#release(identitySession, rawId, t('assistant.releasedForeign'))
+        continue
+      }
       if (inspected.meta.cwd !== repository.repositoryPath) {
         throw new AssistantSessionLaunchError(
           'SESSION_CONFLICT',

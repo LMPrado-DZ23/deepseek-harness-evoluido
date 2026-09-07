@@ -23,9 +23,11 @@ const MINUTE = 60_000
 /**
  * A device session indexes the Assistant conversations opened from it. The list
  * is bounded so an authenticated caller cannot grow one session record without
- * limit; the oldest pointer is dropped, audited, and never silently. Dropping a
- * pointer does not delete the Harness conversation or its journal — it only
- * stops that device session from resuming it.
+ * limit. Reaching the ceiling refuses the new binding with an explained error;
+ * nothing is dropped to make room, because dropping a live pointer would cost
+ * the person a conversation they can still use. Pointers leave the list only
+ * through `releaseHarnessSession`, which the launcher calls after the Harness
+ * proved the conversation no longer exists.
  */
 const MAX_HARNESS_SESSION_BINDINGS = 8
 const DAY = 24 * 60 * MINUTE
@@ -401,21 +403,42 @@ export class StudioIdentityService {
         throw new IdentityError('replay', t('assistant.bindingConflict'))
       }
       if (current.harness_session_ids.includes(harnessSessionId)) return
-      const appended = [...current.harness_session_ids, harnessSessionId]
-      const evicted = appended.slice(0, Math.max(0, appended.length - MAX_HARNESS_SESSION_BINDINGS))
-      const retained = appended.slice(evicted.length)
+      if (current.harness_session_ids.length >= MAX_HARNESS_SESSION_BINDINGS) {
+        await this.#audit(
+          'harness_session_bound', current.user_id, current.session_id,
+          current.org_id, current.tenant_id, 'failure', t('assistant.bindingQuotaAudit'),
+        )
+        throw new IdentityError('invalid', t('assistant.bindingQuota'))
+      }
       await this.#repository.putSession({
         ...current,
-        harness_session_ids: retained,
+        harness_session_ids: [...current.harness_session_ids, harnessSessionId],
       })
-      for (const dropped of evicted) {
-        await this.#audit(
-          'harness_session_unbound', current.user_id, current.session_id,
-          current.org_id, current.tenant_id, 'success',
-          `${t('assistant.bindingQuotaAudit')} (${dropped})`,
-        )
-      }
       await this.#audit('harness_session_bound', current.user_id, current.session_id, current.org_id, current.tenant_id, 'success', 'Sessão do agente vinculada.')
+    }))
+  }
+
+  /**
+   * Drops one conversation pointer from a device session. Only the launcher
+   * calls this, and only after the Harness itself proved the conversation is
+   * gone or is not an Assistant conversation. The audit row is written before
+   * the session is rewritten, so a pointer never disappears unrecorded.
+   */
+  async releaseHarnessSession(session: SessionRecord, harnessSessionId: string, reason: string): Promise<void> {
+    if (harnessSessionId.trim() === '') throw new IdentityError('invalid', 'Sessão do agente inválida.')
+    await this.#mutex.run('harness-session-bindings', () => this.#mutex.run(`session:${session.session_id}`, async () => {
+      const current = this.#repository.sessions().find(candidate => candidate.session_id === session.session_id)
+      if (current === undefined) throw new IdentityError('invalid', 'Sessão inválida.')
+      if (!current.harness_session_ids.includes(harnessSessionId)) return
+      await this.#audit(
+        'harness_session_unbound', current.user_id, current.session_id,
+        current.org_id, current.tenant_id, 'success',
+        `${t('assistant.bindingReleasedAudit')} (${harnessSessionId}) ${reason}`.trim(),
+      )
+      await this.#repository.putSession({
+        ...current,
+        harness_session_ids: current.harness_session_ids.filter(candidate => candidate !== harnessSessionId),
+      })
     }))
   }
 

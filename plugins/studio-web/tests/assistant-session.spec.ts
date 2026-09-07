@@ -49,6 +49,7 @@ async function fixture(options: {
   readonly sharedHarnessClientAllowed?: boolean
 } = {}) {
   const binds: string[] = []
+  const releases: string[] = []
   const failures: Array<{ readonly phase: string; readonly error: unknown }> = []
   const create = vi.fn<AssistantSessionControllerPort['create']>(options.create ?? (async request => ({
     sessionId: (request.sessionId ?? 'assistant-new') as never,
@@ -61,6 +62,7 @@ async function fixture(options: {
   const launcher = await AssistantSessionLauncher.create({
     identity: {
       bindHarnessSession: async (_session, id) => { binds.push(id) },
+      releaseHarnessSession: async (_session, id) => { releases.push(id) },
       isSharedHarnessClientAllowed: () => options.sharedHarnessClientAllowed !== false,
     },
     tenancy: {
@@ -72,7 +74,7 @@ async function fixture(options: {
     repositories,
     reportFailure: (phase, error) => { failures.push({ phase, error }) },
   })
-  return { launcher, create, inspect, binds, failures, repository: repositories[0]! }
+  return { launcher, create, inspect, binds, releases, failures, repository: repositories[0]! }
 }
 
 describe('governed Assistant Session launcher', () => {
@@ -109,6 +111,9 @@ describe('governed Assistant Session launcher', () => {
       session_id: 'match', reused: true, preset: ASSISTANT_AGENT_PRESET,
     })
     expect(f.create).toHaveBeenCalledWith({ cwd, sessionId: 'match', agentPreset: ASSISTANT_AGENT_PRESET })
+    // Ponteiro comprovadamente inutilizável é liberado; o que ainda serve permanece.
+    expect(f.releases).toEqual(['gone', 'other'])
+    expect(f.releases).not.toContain('match')
   })
 
   it('fails closed for absent membership or repository configuration', async () => {

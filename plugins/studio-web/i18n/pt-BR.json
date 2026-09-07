@@ -27,6 +27,8 @@
     "toolApply": "Aplicar uma proposta ao projeto",
     "toolTeam": "Coordenar uma equipe de assistentes",
     "toolStudio": "Executar uma ação do DZ23 STUDIO",
-    "invalidMessage": "Escreva uma mensagem válida de até 32 KB."
+    "invalidMessage": "Escreva uma mensagem válida de até 32 KB.",
+    "releasedMissing": "o Harness não encontrou mais esta conversa",
+    "releasedForeign": "esta sessão não é uma conversa do assistente"
   }
 }
