@@ -1,4 +1,5 @@
 import { generateAuthenticationOptions, generateRegistrationOptions, verifyAuthenticationResponse, verifyRegistrationResponse, } from '@simplewebauthn/server';
+import { t } from './i18n.js';
 export class SimpleWebAuthnProvider {
     async registrationOptions(input) {
         return generateRegistrationOptions({
@@ -23,7 +24,7 @@ export class SimpleWebAuthnProvider {
             requireUserVerification: false,
         });
         if (!verification.verified || verification.registrationInfo === undefined) {
-            throw new Error('Não foi possível confirmar esta chave de acesso.');
+            throw new Error(t('passkey.notConfirmed'));
         }
         const credential = verification.registrationInfo.credential;
         return {
@@ -55,7 +56,7 @@ export class SimpleWebAuthnProvider {
             requireUserVerification: input.requireUserVerification,
         });
         if (!verification.verified)
-            throw new Error('Não foi possível confirmar esta chave de acesso.');
+            throw new Error(t('passkey.notConfirmed'));
         return {
             newCounter: verification.authenticationInfo.newCounter,
             userVerified: verification.authenticationInfo.userVerified,

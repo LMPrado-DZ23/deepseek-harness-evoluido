@@ -8,7 +8,7 @@ import { pageOfIntegrations, type IntegrationPage, type IntegrationQuery } from 
 import { ExportError, openChildDirectory, openDirectory, packagePrototype, referenceOf } from './export.js'
 import { t } from './i18n.js'
 import { canonicalJsonBytes, evaluateManifest, policyFloor, type PublisherKeys } from './manifest.js'
-import { secretRefSchema, type HubEvent, type StudioExport, type StudioIntegration } from './model.js'
+import { secretRefSchema, type HubEvent, type IntegrationManifest, type StudioExport, type StudioIntegration } from './model.js'
 import {
   DEFAULT_INTEGRATION_CALL_POLICY, IntegrationRateLimiter, integrationCostState, integrationHealth, mayRetry,
   type IntegrationCallPolicy, type IntegrationCostState, type IntegrationHealth,
@@ -277,6 +277,14 @@ export class IntegrationHubService {
    * chamou apresenta essas chamadas como não provadas em vez de canceladas.
    */
   readonly #liveCalls = new Map<string, Map<AbortController, string>>()
+  /**
+   * Quem sabe falar MCP, quando alguém sabe (X-11).
+   *
+   * Instalado depois da construção, e de propósito: o cliente MCP monta DEPOIS
+   * do Hub e é opcional no perfil. Ausente aqui significa uma coisa só, e ela é
+   * dita em voz alta na auditoria: nada foi executado.
+   */
+  #mcpDispatcher: McpDispatchPort | undefined
 
   constructor(private readonly options: HubServiceOptions) {
     this.#now = options.now ?? (() => new Date())
@@ -704,6 +712,78 @@ export class IntegrationHubService {
       abandoned.push(integrationId)
     }
     return abandoned
+  }
+
+  // ---- integração do tipo MCP (X-11) ---------------------------------------
+
+  /**
+   * Instala o despachante MCP deste Studio.
+   *
+   * Um só. Uma segunda instalação é erro e não troca nada: dois clientes MCP
+   * montados significariam dois catálogos de servidores e dois conjuntos de
+   * tetos, e a chamada acabaria decidida por qual dos dois montou por último —
+   * que é justamente a coisa que ninguém consegue depurar.
+   * @param port - quem sabe falar MCP.
+   * @returns a função que desinstala o despachante (para o `ctx.effect` de quem montou).
+   */
+  useMcpDispatcher(port: McpDispatchPort): () => void {
+    if (this.#mcpDispatcher !== undefined) throw new HubError('CONFLICT', t('errors.mcpDispatcherInstalled'))
+    this.#mcpDispatcher = port
+    return () => { if (this.#mcpDispatcher === port) this.#mcpDispatcher = undefined }
+  }
+
+  /** Se este Studio tem com quem falar MCP agora. A tela pergunta antes de oferecer o botão. */
+  get mcpAvailable(): boolean { return this.#mcpDispatcher !== undefined }
+
+  /**
+   * Chama UMA ferramenta de uma integração do tipo `mcp`.
+   *
+   * As três recusas que acontecem ANTES de qualquer processo subir, todas
+   * auditadas como `not-executed` porque nada foi executado:
+   *
+   * 1. A integração não é do tipo `mcp`.
+   * 2. O manifesto gravado não tem assinatura VÁLIDA agora. Não basta o campo
+   *    `verification` do registro: ele foi decidido no cadastro, e desde então a
+   *    linha pode ter sido alterada por qualquer outro escritor da tabela. Por
+   *    isso a assinatura é reconferida aqui, sobre os bytes que estão gravados.
+   *    Sem assinatura, com assinatura alterada, com manifesto alterado ou de um
+   *    publicador sem chave: a conexão não acontece. Uma conexão MCP executa
+   *    programa neste computador — `unverified` não é suficiente, ao contrário
+   *    do que `callIntegration` aceita para os outros tipos.
+   * 3. Não há despachante MCP montado neste perfil.
+   *
+   * Passadas as três, quem manda é `callIntegration`: parada de emergência,
+   * tempo máximo, teto por escopo, repetição única, custo e auditoria. Nenhuma
+   * dessas políticas é reescrita aqui.
+   * @param actor - quem aciona; escrever no projeto é o que se exige.
+   * @param integrationId - a integração ligada, do tipo `mcp`.
+   * @param request - a ferramenta, os argumentos, se repetir é seguro e quanto custa.
+   * @returns o desfecho da chamada, com o que o servidor real respondeu.
+   */
+  async callMcpTool(actor: HubActor, integrationId: string, request: McpToolCallRequest): Promise<IntegrationCallResult<McpCallOutcome>> {
+    this.#authorize(actor, 'project.write')
+    const record = this.#integration(actor, integrationId)
+    const operation = auditOperation(`mcp.${request.tool}`)
+    if (record.kind !== 'mcp') {
+      await this.#audit(actor, 'integration.called', integrationId, 'not-executed', `${operation} not-mcp`)
+      throw new HubError('INVALID', t('errors.integrationNotMcp'))
+    }
+    const evaluation = evaluateManifest(record.manifest, this.options.publisherKeys)
+    if (evaluation.verification !== 'verified' || evaluation.manifest === null) {
+      await this.#audit(actor, 'integration.called', integrationId, 'not-executed', `${operation} unsigned`)
+      throw new HubError('FORBIDDEN', t('errors.mcpManifestNotVerified'))
+    }
+    const dispatcher = this.#mcpDispatcher
+    if (dispatcher === undefined) {
+      await this.#audit(actor, 'integration.called', integrationId, 'not-executed', `${operation} no-dispatcher`)
+      throw new HubError('NOT_EXECUTED', t('errors.mcpDispatcherMissing'))
+    }
+    const manifest = evaluation.manifest
+    return this.callIntegration<McpCallOutcome>(
+      actor, integrationId,
+      { operation, idempotent: request.idempotent, priceUsd: request.priceUsd },
+      signal => dispatcher.call({ integrationId, manifest, tool: request.tool, arguments: request.arguments ?? {}, signal }),
+    )
   }
 
   /**
@@ -1261,6 +1341,50 @@ export class IntegrationHubService {
     if (this.options.repository.eventCount(actor) <= EVENTS_RETAINED_PER_TENANT) return
     await this.options.repository.pruneEvents(actor, EVENTS_RETAINED_PER_TENANT)
   }
+}
+
+// ---- despachante MCP (X-11) -----------------------------------------------
+//
+// O Hub não sabe falar MCP e não vai aprender: ele sabe QUEM pode ser chamado,
+// com que teto, quantas vezes e com que registro. Quem fala o protocolo é
+// `plugins/mcp-client`, e ele entra por esta porta.
+
+/** O que o Hub entrega ao despachante MCP. O corpo da chamada nunca volta para a auditoria. */
+export interface McpDispatchInput {
+  readonly integrationId: string
+  /** O manifesto ASSINADO e reconferido nesta chamada; é ele que identifica o servidor cadastrado. */
+  readonly manifest: IntegrationManifest
+  readonly tool: string
+  readonly arguments: Readonly<Record<string, unknown>>
+  /** A desistência do Hub: o tempo máximo da chamada e o botão de emergência falam por aqui. */
+  readonly signal: AbortSignal
+}
+
+/** O que voltou de um servidor MCP real. `tools` é a lista que ELE anunciou, não uma esperada. */
+export interface McpCallOutcome {
+  readonly protocolVersion: string
+  readonly serverName: string
+  readonly tools: readonly string[]
+  readonly content: readonly { readonly type: string; readonly text?: string | undefined }[]
+  /** Do protocolo: o servidor executou e a FERRAMENTA falhou. Não é o mesmo que a chamada ter falhado. */
+  readonly isError: boolean
+}
+
+/**
+ * A porta de saída para MCP.
+ *
+ * Interface estrutural, como `EmergencyStopGuard`: o Hub continua subindo — e
+ * recusando toda chamada MCP com `NOT_EXECUTED` auditado — num perfil que não
+ * monte cliente nenhum.
+ */
+export interface McpDispatchPort {
+  call(input: McpDispatchInput): Promise<McpCallOutcome>
+}
+
+/** O que uma chamada de ferramenta MCP pede. Herda de `IntegrationCallRequest` o que o teto e o custo usam. */
+export interface McpToolCallRequest extends Omit<IntegrationCallRequest, 'operation'> {
+  readonly tool: string
+  readonly arguments?: Readonly<Record<string, unknown>> | undefined
 }
 
 /** O que está sendo chamado, para o teto, para a repetição e para a auditoria. Nunca o corpo da chamada. */

@@ -35,11 +35,15 @@
     "exportTooManyEntries": "O protótipo tem arquivos demais para empacotar aqui (limite de {limit} arquivos). Nada foi gerado.",
     "exportTooManyListed": "O protótipo tem itens demais fora da lista permitida para listar um por um no pacote (limite de {limit}). Nada foi gerado.",
     "exportTimedOut": "O Studio parou de esperar o empacotamento deste protótipo: passou do tempo máximo e nada foi gerado. Tente de novo; se repetir, fale com quem administra o servidor.",
-  "exportUnavailable": "O arquivo do pacote não está mais neste computador. Gere o pacote de novo.",
+    "exportUnavailable": "O arquivo do pacote não está mais neste computador. Gere o pacote de novo.",
     "integrationNotEnabled": "Esta integração não está ligada neste espaço de trabalho, ou a assinatura dela não confere. Nada foi chamado.",
     "integrationCallTooMany": "Esta integração foi chamada vezes demais em pouco tempo. Espere um pouco e tente de novo; nada foi perdido.",
     "integrationCallTimedOut": "O Studio parou de esperar a resposta desta integração: passou do tempo máximo. Pode ser que ela tenha recebido o pedido mesmo assim.",
     "integrationCallFailed": "A integração não respondeu como esperado. Nada foi aplicado do lado do Studio; tente de novo ou confira o serviço.",
+    "integrationNotMcp": "Esta integração não é do tipo MCP. Nada foi chamado.",
+    "mcpManifestNotVerified": "Uma conexão MCP executa um programa neste computador, então ela exige manifesto com assinatura válida. O manifesto desta integração não tem assinatura reconhecida, ou foi alterado depois de assinado. Nada foi chamado.",
+    "mcpDispatcherMissing": "Este Studio não tem cliente MCP montado no perfil. Nada foi chamado.",
+    "mcpDispatcherInstalled": "Já existe um cliente MCP montado neste Studio. Dois clientes teriam catálogos e tetos diferentes; nenhum foi trocado.",
     "internal": "Algo deu errado do lado do Studio. Nada foi alterado; tente de novo."
   },
   "export": {

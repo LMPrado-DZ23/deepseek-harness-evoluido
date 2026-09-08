@@ -137,6 +137,9 @@ importers:
       '@dz23-studio/integration-hub':
         specifier: workspace:*
         version: link:../../../plugins/integration-hub
+      '@dz23-studio/mcp-client':
+        specifier: workspace:*
+        version: link:../../../plugins/mcp-client
       '@dz23-studio/policy':
         specifier: workspace:*
         version: link:../../../plugins/policy
@@ -393,6 +396,22 @@ importers:
         specifier: 8.0.1
         version: 8.0.1
 
+  plugins/mcp-client:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:*
+        version: link:../../third_party/deepseek-harness/vendor/cordis
+      '@dz23-studio/integration-hub':
+        specifier: workspace:*
+        version: link:../integration-hub
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@modelcontextprotocol/server-everything':
+        specifier: 2026.8.31
+        version: 2026.8.31
+
   plugins/policy:
     dependencies:
       '@deepseek-ai/cordis':
@@ -595,6 +614,9 @@ importers:
       '@dz23-studio/identity':
         specifier: workspace:*
         version: link:../identity
+      '@dz23-studio/integration-hub':
+        specifier: workspace:*
+        version: file:plugins/integration-hub(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)(@types/node@22.20.0)
       '@dz23-studio/policy':
         specifier: workspace:*
         version: link:../policy
@@ -13553,6 +13575,9 @@ packages:
 
   '@dz23-studio/identity@file:plugins/identity':
     resolution: {directory: plugins/identity, type: directory}
+
+  '@dz23-studio/integration-hub@file:plugins/integration-hub':
+    resolution: {directory: plugins/integration-hub, type: directory}
 
   '@dz23-studio/policy@file:plugins/policy':
     resolution: {directory: plugins/policy, type: directory}
@@ -35393,6 +35418,41 @@ snapshots:
       - '@deepseek-ai/dsh-tool-todo'
       - '@deepseek-ai/dsh-typert-protocol'
       - '@deepseek-ai/dsh-user-approval'
+      - supports-color
+
+  '@dz23-studio/integration-hub@file:plugins/integration-hub(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)(@types/node@22.20.0)':
+    dependencies:
+      '@deepseek-ai/cordis': file:third_party/deepseek-harness/vendor/cordis(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+      '@deepseek-ai/dsh-credentials': file:third_party/deepseek-harness/packages/credentials/credentials(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-brand@file:third_party/deepseek-harness/packages/util/brand(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-invariants@file:third_party/deepseek-harness/packages/runtime-diagnostics/invariants(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))(@deepseek-ai/dsh-invariants@file:third_party/deepseek-harness/packages/runtime-diagnostics/invariants(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
+      '@deepseek-ai/dsh-host-webserver': file:third_party/deepseek-harness/packages/host/webserver(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-invariants@file:third_party/deepseek-harness/packages/runtime-diagnostics/invariants(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
+      '@deepseek-ai/dsh-storage-domain': file:third_party/deepseek-harness/packages/storage/storage-domain(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-invariants@file:third_party/deepseek-harness/packages/runtime-diagnostics/invariants(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      '@dz23-studio/identity': file:plugins/identity(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      '@dz23-studio/policy': file:plugins/policy(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      '@dz23-studio/prompt-to-app': file:plugins/prompt-to-app(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)(@types/node@22.20.0)
+      '@dz23-studio/tenancy': file:plugins/tenancy(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      nodemailer: 9.0.5
+      zod: 4.4.3
+    transitivePeerDependencies:
+      - '@deepseek-ai/cordis-plugin-include'
+      - '@deepseek-ai/cordis-plugin-loader'
+      - '@deepseek-ai/dsh-agent'
+      - '@deepseek-ai/dsh-attachment'
+      - '@deepseek-ai/dsh-brand'
+      - '@deepseek-ai/dsh-code-runtime'
+      - '@deepseek-ai/dsh-commands'
+      - '@deepseek-ai/dsh-host-directory-picker'
+      - '@deepseek-ai/dsh-invariants'
+      - '@deepseek-ai/dsh-llm'
+      - '@deepseek-ai/dsh-scope'
+      - '@deepseek-ai/dsh-session'
+      - '@deepseek-ai/dsh-settings'
+      - '@deepseek-ai/dsh-storage'
+      - '@deepseek-ai/dsh-system-prompt'
+      - '@deepseek-ai/dsh-timeout'
+      - '@deepseek-ai/dsh-tool-todo'
+      - '@deepseek-ai/dsh-typert-protocol'
+      - '@deepseek-ai/dsh-user-approval'
+      - '@types/node'
       - supports-color
 
   '@dz23-studio/policy@file:plugins/policy(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)':

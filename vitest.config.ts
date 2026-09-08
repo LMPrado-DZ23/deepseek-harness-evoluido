@@ -15,6 +15,7 @@ export default defineConfig({
       '@dz23-studio/emergency-stop': fileURLToPath(new URL('./plugins/emergency-stop/src/index.ts', import.meta.url)),
       '@dz23-studio/identity': fileURLToPath(new URL('./plugins/identity/src/index.ts', import.meta.url)),
       '@dz23-studio/integration-hub': fileURLToPath(new URL('./plugins/integration-hub/src/index.ts', import.meta.url)),
+      '@dz23-studio/mcp-client': fileURLToPath(new URL('./plugins/mcp-client/src/index.ts', import.meta.url)),
       '@dz23-studio/policy': fileURLToPath(new URL('./plugins/policy/src/index.ts', import.meta.url)),
       '@dz23-studio/preview': fileURLToPath(new URL('./plugins/preview/src/index.ts', import.meta.url)),
       '@dz23-studio/preview-supervisor': fileURLToPath(new URL('./plugins/preview-supervisor/src/index.ts', import.meta.url)),
@@ -38,6 +39,11 @@ export default defineConfig({
         'plugins/agent-team/src/index.ts',
         'plugins/agents/src/git.ts',
         'plugins/prompt-to-app/src/index.ts',
+        // Composição: `apply` liga o despachante MCP ao hub e é exercida pelo
+        // perfil real, do mesmo jeito que os `index.ts` acima. O protocolo, o
+        // isolamento e os tetos deste plugin são cobertos contra um servidor MCP
+        // de verdade em `plugins/mcp-client/tests`.
+        'plugins/mcp-client/src/index.ts',
         'plugins/preview/src/index.ts',
         'plugins/route-health/src/index.ts',
       ],

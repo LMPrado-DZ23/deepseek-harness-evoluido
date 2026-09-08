@@ -74,17 +74,21 @@ export class StudioAgentService {
         return reconciliation;
     }
     start(request) {
+        // Antes da recuperação, antes da aprovação, antes da reserva de caminhos:
+        // um escopo parado não delega nada, e descobrir isso só depois de reservar
+        // arquivos deixaria a reserva presa a um trabalho que nunca começou.
+        this.dependencies.emergencyStop?.assertRunning({ orgId: request.orgId, tenantId: request.tenantId });
         if (!this.#ready) {
             throw new DelegationError('INVALID_STATE', t('recovery.required'));
         }
         const tier = requiredTier(request);
         if (!request.approval.approved || request.approval.tier !== tier) {
             throw new DelegationError('APPROVAL_REQUIRED', tier === 'T3'
-                ? 'Esta tarefa sensível precisa de confirmação reforçada antes de começar.'
-                : 'Confirme antes de o assistente trabalhar numa cópia do projeto.');
+                ? t('delegation.sensitiveNeedsStrongConfirmation')
+                : t('delegation.confirmBeforeIsolatedCopy'));
         }
         if (tier === 'T3' && !this.dependencies.identity.strongIdentityVerified(request.parent.session.id)) {
-            throw new DelegationError('APPROVAL_REQUIRED', 'Confirme com sua passkey antes de iniciar esta tarefa sensível.');
+            throw new DelegationError('APPROVAL_REQUIRED', t('delegation.confirmWithPasskey'));
         }
         const paths = request.intendedPaths.map(path => normalizeDelegationPath(path));
         if (paths.length === 0)
@@ -96,7 +100,7 @@ export class StudioAgentService {
             if (active.workspaceId !== request.workspaceId || active.repositoryPath !== request.repositoryPath)
                 continue;
             if (pathsOverlap(active.paths, paths)) {
-                throw new DelegationError('WRITE_CONFLICT', 'Outro assistente já está trabalhando nos mesmos arquivos.');
+                throw new DelegationError('WRITE_CONFLICT', t('delegation.filesAlreadyLeased'));
             }
         }
         // A reserva durável também vale. Sem esta checagem, uma reserva preservada
@@ -116,7 +120,10 @@ export class StudioAgentService {
         const controller = new AbortController();
         const done = this.#execute(runId, request, paths, controller.signal)
             .finally(() => { this.#activePaths.delete(runId); this.#inFlight.delete(runId); });
-        this.#inFlight.set(runId, { cancel: reason => { controller.abort(reason); }, done });
+        this.#inFlight.set(runId, {
+            cancel: reason => { controller.abort(reason); }, done,
+            orgId: request.orgId, tenantId: request.tenantId, provider: request.provider,
+        });
         try {
             const jobId = this.dependencies.jobs.start({
                 kind: 'studio-agent',
@@ -158,15 +165,15 @@ export class StudioAgentService {
     }
     async applyProposal(runId, approval) {
         if (!approval.approved || approval.tier !== 'T2') {
-            throw new DelegationError('APPROVAL_REQUIRED', 'Confirme antes de aplicar a proposta ao seu projeto.');
+            throw new DelegationError('APPROVAL_REQUIRED', t('delegation.confirmBeforeApply'));
         }
         const record = this.dependencies.repository.runs().find(candidate => candidate.run_id === runId);
         if (record === undefined || record.status !== 'PROPOSED') {
-            throw new DelegationError('INVALID_STATE', 'Esta proposta não está disponível para aplicação.');
+            throw new DelegationError('INVALID_STATE', t('delegation.proposalNotApplicable'));
         }
         const workspaceKey = `${record.org_id}:${record.tenant_id}:${record.workspace_id}`;
         if (this.#applyingWorkspaces.has(workspaceKey)) {
-            throw new DelegationError('WRITE_CONFLICT', 'Outra proposta está sendo aplicada neste espaço de trabalho.');
+            throw new DelegationError('WRITE_CONFLICT', t('delegation.anotherProposalApplying'));
         }
         this.#applyingWorkspaces.add(workspaceKey);
         try {
@@ -250,6 +257,33 @@ export class StudioAgentService {
         for (const lease of this.dependencies.repository.leases().filter(item => item.active && item.run_id === runId)) {
             await this.dependencies.repository.putLease({ ...lease, active: false, released_at: now });
         }
+    }
+    /**
+     * Cancela toda delegação em voo de UM escopo, para uma parada de emergência.
+     *
+     * O que o Studio consegue provar morto entra em `cancelled`; o que ele não
+     * consegue entra em `unproven` com o provedor pelo nome. A regra é a mesma de
+     * `survivesRestart`: `spawn-in-process` morre junto com o processo do Studio,
+     * enquanto `codex` e `claude-code` são processos do sistema operacional com
+     * vida própria - o pedido de parada sai, e o Studio NÃO tem como provar que
+     * eles pararam. Contá-los como cancelados seria a mentira que a tela de
+     * emergência não pode contar.
+     * @param scope - a organização e o inquilino parados.
+     * @returns o que parou e o que não pôde ser provado morto.
+     */
+    cancelScope(scope) {
+        let cancelled = 0;
+        const unproven = [];
+        for (const [runId, entry] of [...this.#inFlight.entries()]) {
+            if (entry.orgId !== scope.orgId || entry.tenantId !== scope.tenantId)
+                continue;
+            entry.cancel('emergency-stop');
+            if (survivesRestart(entry.provider))
+                unproven.push({ runId, provider: entry.provider });
+            else
+                cancelled += 1;
+        }
+        return { cancelled, unproven };
     }
     /**
      * Encerramento ativo com prazo. Pede cancelamento a tudo que esta em voo e
@@ -349,13 +383,13 @@ export class StudioAgentService {
             const tokenExceeded = request.budget?.maxTokens !== undefined
                 && measuredTokens !== undefined && measuredTokens > request.budget.maxTokens;
             if (pathViolation || diff.files.length > maxFiles || diff.bytes > maxDiffBytes || tokenExceeded) {
-                const reason = pathViolation ? 'arquivo fora dos caminhos aprovados'
+                const reason = pathViolation ? t('delegation.pathOutsideApproved')
                     : tokenExceeded ? 'limite de tokens excedido'
                         : diff.files.length > maxFiles ? 'limite de arquivos excedido' : 'limite de bytes do diff excedido';
                 return await this.#finish(runId, request, snapshot, coordinator, lease, 'BUDGET_EXCEEDED', reason, now, diff, outsideChanged);
             }
             const diagnostic = outsideChanged
-                ? 'Seu projeto mudou enquanto o assistente trabalhava; confira antes de aplicar.'
+                ? t('delegation.projectChangedDuringRun')
                 : terminalText(result);
             return await this.#finish(runId, request, snapshot, coordinator, lease, 'PROPOSED', diagnostic, now, diff, outsideChanged);
         }

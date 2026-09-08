@@ -132,10 +132,49 @@ export declare const policyAuditRecordSchema: z.ZodObject<{
         "safe-default": "safe-default";
         "invalid-rule": "invalid-rule";
     }>;
+    user_id: z.ZodOptional<z.ZodString>;
+    seq: z.ZodOptional<z.ZodNumber>;
+    previous_sha256: z.ZodOptional<z.ZodString>;
+    entry_sha256: z.ZodOptional<z.ZodString>;
 }, z.core.$strict>;
 export type PolicyAuditRecord = z.infer<typeof policyAuditRecordSchema>;
+/** Primeira entrada da corrente: nao ha anterior, e o zero diz isso. */
+export declare const POLICY_AUDIT_CHAIN_ROOT: string;
+/**
+ * O selo de uma entrada: SHA-256 do conteudo canonico dela mais o selo da
+ * anterior. Trocar qualquer campo, ou reordenar a trilha, muda o selo.
+ * @param record - a entrada, com ou sem `entry_sha256`.
+ * @returns o selo em hexadecimal.
+ */
+export declare function policyAuditEntryHash(record: Omit<PolicyAuditRecord, 'entry_sha256'>): string;
+export type PolicyAuditChainVerdict = {
+    readonly kind: 'intact';
+    readonly entries: number;
+    readonly head: string;
+} | {
+    readonly kind: 'unchained';
+    readonly entries: number;
+    readonly firstUnchainedId: string;
+} | {
+    readonly kind: 'broken';
+    readonly entries: number;
+    readonly brokenAuditId: string;
+    readonly detail: 'seal' | 'link' | 'sequence';
+};
+/**
+ * Confere a corrente inteira.
+ *
+ * `broken` distingue tres coisas diferentes: o selo nao bate com o conteudo
+ * (alguem reescreveu a linha), o elo nao aponta para a anterior (alguem
+ * removeu ou reordenou), ou a posicao pulou (alguem apagou do meio).
+ * @param records - as entradas, em qualquer ordem.
+ * @returns o veredito.
+ */
+export declare function verifyPolicyAuditChain(records: readonly PolicyAuditRecord[]): PolicyAuditChainVerdict;
 export interface StudioPolicyRuntime {
     auditRecords(): readonly PolicyAuditRecord[];
+    /** Confere a corrente da trilha de politica sem sair do processo. */
+    verifyAuditChain(): PolicyAuditChainVerdict;
     setIdentityResolver(resolver: (execution: ToolExecution) => PolicyIdentityState): () => void;
     setAuthorizationResolver(resolver: (execution: ToolExecution) => PolicyAuthorizationState | undefined): () => void;
     setDelegationGrantResolver(resolver: (execution: ToolExecution) => PolicyDelegationGrant | undefined): () => void;
@@ -176,6 +215,10 @@ export declare const studioPolicyAuditDomainSpec: {
             decision: "allow" | "ask" | "deny";
             reason: string;
             rule_source: "catalog" | "safe-default" | "invalid-rule";
+            user_id?: string | undefined;
+            seq?: number | undefined;
+            previous_sha256?: string | undefined;
+            entry_sha256?: string | undefined;
         }>;
     };
 };

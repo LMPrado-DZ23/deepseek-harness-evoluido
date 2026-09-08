@@ -18,6 +18,7 @@
     "@dz23-studio/emergency-stop": "workspace:*",
     "@dz23-studio/identity": "workspace:*",
     "@dz23-studio/integration-hub": "workspace:*",
+    "@dz23-studio/mcp-client": "workspace:*",
     "@dz23-studio/policy": "workspace:*",
     "@dz23-studio/preview": "workspace:*",
     "@dz23-studio/prompt-to-app": "workspace:*",

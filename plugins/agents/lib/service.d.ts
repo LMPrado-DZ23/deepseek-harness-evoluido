@@ -76,6 +76,29 @@ export interface UsagePort {
 export interface StrongIdentityPort {
     strongIdentityVerified(parentSessionId: SessionId): boolean;
 }
+/**
+ * A pergunta que toda delegação nova faz antes de começar.
+ *
+ * Interface estrutural de propósito: o plugin de agentes continua subindo em
+ * perfil sem botão de emergência. A recusa vem como `Error` com
+ * `code === 'STOPPED'` e uma frase já escrita para uma pessoa.
+ */
+export interface EmergencyStopGuard {
+    assertRunning(scope: {
+        readonly orgId: string;
+        readonly tenantId: string;
+    }): void;
+}
+/** Uma execução que recebeu o pedido de parada e cujo fim o Studio NÃO consegue provar. */
+export interface UnprovenAgentStop {
+    readonly runId: string;
+    readonly provider: AgentProvider;
+}
+/** O que a parada de emergência alcançou nos assistentes de um escopo. */
+export interface AgentScopeCancellation {
+    readonly cancelled: number;
+    readonly unproven: readonly UnprovenAgentStop[];
+}
 export interface AgentRepository {
     runs(): readonly AgentRunRecord[];
     leases(): readonly AgentLeaseRecord[];
@@ -142,6 +165,8 @@ export declare class StudioAgentService {
         readonly coordinators: CoordinatorPort;
         readonly subagents: SubagentPort;
         readonly identity: StrongIdentityPort;
+        /** Ausente = nenhum botão de emergência montado neste perfil, e nada a perguntar. */
+        readonly emergencyStop?: EmergencyStopGuard;
         readonly usage?: UsagePort;
         readonly jobs: JobPort;
         readonly now?: () => Date;
@@ -158,6 +183,23 @@ export declare class StudioAgentService {
      * por que, porque nenhuma prova tecnica sustentou essa conclusao.
      */
     resolveUnknownRun(runId: string, reason: string): Promise<void>;
+    /**
+     * Cancela toda delegação em voo de UM escopo, para uma parada de emergência.
+     *
+     * O que o Studio consegue provar morto entra em `cancelled`; o que ele não
+     * consegue entra em `unproven` com o provedor pelo nome. A regra é a mesma de
+     * `survivesRestart`: `spawn-in-process` morre junto com o processo do Studio,
+     * enquanto `codex` e `claude-code` são processos do sistema operacional com
+     * vida própria - o pedido de parada sai, e o Studio NÃO tem como provar que
+     * eles pararam. Contá-los como cancelados seria a mentira que a tela de
+     * emergência não pode contar.
+     * @param scope - a organização e o inquilino parados.
+     * @returns o que parou e o que não pôde ser provado morto.
+     */
+    cancelScope(scope: {
+        readonly orgId: string;
+        readonly tenantId: string;
+    }): AgentScopeCancellation;
     /**
      * Encerramento ativo com prazo. Pede cancelamento a tudo que esta em voo e
      * espera ate `SHUTDOWN_DEADLINE_MS`. O que sobreviver ao prazo NAO e

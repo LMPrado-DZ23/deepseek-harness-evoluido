@@ -1,3 +1,4 @@
+import { t } from './i18n.js';
 import nodemailer from 'nodemailer';
 import { z } from 'zod';
 /** Test/development capture. It never writes the code to console or logger. */
@@ -33,8 +34,8 @@ export class SmtpEmailSender {
         await transport.sendMail({
             from,
             to: message.to,
-            subject: 'Seu código de acesso ao DZ23 STUDIO',
-            text: `Use o código ${message.code}. Ele expira em ${message.expiresInMinutes} minutos.`,
+            subject: t('email.codeSubject'),
+            text: t('email.codeBody', { code: message.code, minutes: message.expiresInMinutes }),
         });
     }
     async sendInvitation(message) {
@@ -42,20 +43,20 @@ export class SmtpEmailSender {
         await transport.sendMail({
             from,
             to: message.to,
-            subject: `Convite para ${message.workspaceName} no DZ23 STUDIO`,
-            text: `Você recebeu um convite como ${message.role}. Use o código seguro ${message.token}. Ele expira em ${message.expiresInHours} horas.`,
+            subject: t('email.inviteSubject', { workspace: message.workspaceName }),
+            text: t('email.inviteBody', { role: message.role, token: message.token, hours: message.expiresInHours }),
         });
     }
     async #transport() {
         const resolved = await this.credentials.resolve(this.secretRef);
         if (resolved === undefined)
-            throw new Error('O envio de e-mail ainda não foi configurado.');
+            throw new Error(t('email.notConfigured'));
         let raw;
         try {
             raw = JSON.parse(resolved.value);
         }
         catch {
-            throw new Error('A configuração segura de e-mail é inválida.');
+            throw new Error(t('email.invalidConfiguration'));
         }
         const smtp = smtpSecretSchema.parse(raw);
         const transport = nodemailer.createTransport({

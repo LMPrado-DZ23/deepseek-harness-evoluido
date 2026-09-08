@@ -136,6 +136,9 @@ importers:
       '@dz23-studio/integration-hub':
         specifier: workspace:*
         version: link:../../../plugins/integration-hub
+      '@dz23-studio/mcp-client':
+        specifier: workspace:*
+        version: link:../../../plugins/mcp-client
       '@dz23-studio/policy':
         specifier: workspace:*
         version: link:../../../plugins/policy
@@ -391,6 +394,22 @@ importers:
       '@types/nodemailer':
         specifier: 8.0.1
         version: 8.0.1
+
+  plugins/mcp-client:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:*
+        version: link:../../third_party/deepseek-harness/vendor/cordis
+      '@dz23-studio/integration-hub':
+        specifier: workspace:*
+        version: link:../integration-hub
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@modelcontextprotocol/server-everything':
+        specifier: 2026.8.31
+        version: 2026.8.31
 
   plugins/policy:
     dependencies:
@@ -18926,6 +18945,7 @@ snapshots:
       '@dz23-studio/emergency-stop': link:plugins/emergency-stop
       '@dz23-studio/identity': link:plugins/identity
       '@dz23-studio/integration-hub': link:plugins/integration-hub
+      '@dz23-studio/mcp-client': link:plugins/mcp-client
       '@dz23-studio/policy': link:plugins/policy
       '@dz23-studio/preview': link:plugins/preview
       '@dz23-studio/prompt-to-app': link:plugins/prompt-to-app
