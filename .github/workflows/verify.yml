@@ -109,8 +109,20 @@ jobs:
           pnpm gate:portability
           pnpm gate:domain-scopes
           pnpm gate:domain-routes
+          pnpm gate:assistant-tools
+          # Um portão que ninguém executa não impede a regressão que ele foi
+          # escrito para impedir: o `lib/` versionado importava um arquivo que
+          # o repositório não tinha, e um clone limpo quebrava.
+          pnpm gate:tracked-lib
           pnpm test:postgres-discovery
           node scripts/test-postgres.mjs --list
+
+      - name: Studio web interface suite
+        # A tela por onde a pessoa autoriza uma ação sensível tem vitest
+        # próprio: o da raiz não alcança `apps/`, e sem esta etapa a peça
+        # central do portão humano ficava sem cobertura na CI.
+        working-directory: apps/studio-web
+        run: pnpm exec vitest run
 
       - name: Unit and contract suite
         # One worker is intentional: this suite exercises subprocesses, PTYs,

@@ -90,7 +90,10 @@
   "approvalDecidingDeny": "Registrando sua recusa…",
   "approvalDenyWarning": "Recusar é definitivo: esta ação não será executada e o assistente não pode pedir de novo exatamente o mesmo pedido.",
   "approvalExpiresAt": "Você tem até {time} para decidir. Sem decisão, nada é feito e o pedido é descartado.",
-  "approvalForbidden": "Você não tem acesso a esta confirmação. Nada foi registrado.",
   "stuckRunsUnknownTitle": "Não deu para verificar o trabalho parado",
-  "approvalDeniedDone": "Você recusou. Nada foi executado. Se mudar de ideia, peça de novo ao assistente."
+  "approvalDeniedDone": "Você recusou. Nada foi executado. Se mudar de ideia, peça de novo ao assistente.",
+  "approvalSubjectOpaque": "Onde: neste pedido específico do assistente.",
+  "approvalVanishedExpired": "O prazo daquele pedido terminou. Nada foi feito. Peça de novo ao assistente quando quiser.",
+  "approvalsWaitingOne": "1 pedido esperando sua decisão.",
+  "approvalsWaitingMany": "{count} pedidos esperando sua decisão."
 }

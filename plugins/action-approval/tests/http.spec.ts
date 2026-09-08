@@ -139,6 +139,32 @@ describe('M90-A — superfície HTTP', () => {
     await expect(service.request(descriptor())).resolves.toMatchObject({ state: 'EXPIRED' })
   })
 
+  it('lida com um pedido criado antes de a frase existir, inclusive vencido', async () => {
+    const repository = new InMemoryActionApprovalRepository()
+    let now = new Date('2026-09-07T12:00:00.000Z')
+    const service = new StudioActionApprovalService({
+      repository, identity: { strongIdentityVerified: () => true }, now: () => now,
+    })
+    const created = await service.request(descriptor())
+    await service.confirm(actor, created.approval_id)
+    // Registro antigo: sem `summary`, já confirmado. É o que existe numa
+    // instalação que rodou a revisão anterior.
+    const legacy = { ...(await service.get(actor, created.approval_id)) } as Record<string, unknown>
+    delete legacy.summary
+    repository.seed(legacy as never)
+
+    // A visão pública não inventa uma frase que não existe.
+    const read = await handleApproval(
+      fakeRequest(), routeApproval('GET', `${APPROVAL_PREFIX}/${created.approval_id}`)!,
+      { service, authenticate: async () => actor, assertCsrf: () => {} },
+    )
+    expect(read.body).not.toHaveProperty('summary')
+
+    // Vencido no estado AVAILABLE, pedir de novo tem de expirar na leitura.
+    now = new Date('2026-09-07T12:10:00.000Z')
+    await expect(service.request(descriptor())).resolves.toMatchObject({ state: 'EXPIRED' })
+  })
+
   it('método trocado nunca vira outra ação e identificador hostil morre na borda', () => {
     expect(routeApproval('GET', `${APPROVAL_PREFIX}/${ID}/confirm`)).toEqual({ kind: 'method-not-allowed' })
     expect(routeApproval('POST', `${APPROVAL_PREFIX}/${ID}`)).toEqual({ kind: 'method-not-allowed' })

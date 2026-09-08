@@ -1,5 +1,5 @@
 import { ShieldAlert, TriangleAlert } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import copy from '../i18n/assistant.pt-BR.json'
 import { ConversationRequestError, type ConversationPort } from './conversationApi'
 import { ApprovalDecisionError, decideApproval, listPendingApprovals, type PendingApproval } from './approvalsApi'
@@ -19,6 +19,11 @@ export function actionLabel(action: string): string {
     return copy.approvalHarnessTool.replace('{tool}', action.slice('harness.tool.'.length))
   }
   return action
+}
+
+/** Um sujeito que não é legível por uma pessoa: identificador interno. */
+export function isOpaqueSubject(subject: string): boolean {
+  return /^(?:call|repo):[a-f0-9]{32,}$/u.test(subject)
 }
 
 /** Prazo legível; o texto original quando a data não puder ser lida. */
@@ -52,6 +57,13 @@ export function PendingApprovals({ port, getCsrf, pollMs = APPROVALS_POLL_MS }: 
   // decide uma permissão.
   const [loaded, setLoaded] = useState(false)
   const [attempt, setAttempt] = useState(0)
+  /**
+   * Os pedidos que a tela já mostrou. Um pedido some da lista quando vence, e
+   * sumir calado apagaria a informação de que havia prazo: a pessoa foi avisada
+   * do prazo e nunca saberia que ele passou.
+   */
+  const seen = useRef(new Set<string>())
+  const decided = useRef(new Set<string>())
 
   useEffect(() => {
     let live = true
@@ -60,6 +72,13 @@ export function PendingApprovals({ port, getCsrf, pollMs = APPROVALS_POLL_MS }: 
       try {
         const rows = await listPendingApprovals(port, controller.signal)
         if (!live) return
+        const current = new Set(rows.map(row => row.approval_id))
+        for (const previous of seen.current) {
+          if (current.has(previous) || decided.current.has(previous)) continue
+          // Sumiu sem a pessoa ter decidido: o prazo terminou.
+          setOutcome(copy.approvalVanishedExpired)
+        }
+        seen.current = current
         setApprovals(rows)
         setReadError(null)
         setLoaded(true)
@@ -78,6 +97,9 @@ export function PendingApprovals({ port, getCsrf, pollMs = APPROVALS_POLL_MS }: 
 
   const decide = useCallback(async (approvalId: string, decision: 'confirm' | 'deny'): Promise<void> => {
     setDeciding({ id: approvalId, decision })
+    // Marcado antes da chamada: o que a pessoa decidiu não pode ser anunciado
+    // depois como "o prazo terminou".
+    decided.current.add(approvalId)
     setActionError(null)
     setOutcome(null)
     try {
@@ -147,20 +169,39 @@ export function PendingApprovalsList({
 
     {outcome === null ? null : <p className="approvals-outcome" role="status">{outcome}</p>}
 
+    {/* Anunciado por leitor de tela: o cartão aparece em silêncio, abaixo de
+        um log com rolagem, e sem isto ninguém sabe que chegou. */}
+    <p className="approvals-count" role="status" aria-live="polite">
+      {approvals.length === 0
+        ? ''
+        : approvals.length === 1
+          ? copy.approvalsWaitingOne
+          : copy.approvalsWaitingMany.replace('{count}', String(approvals.length))}
+    </p>
+
     <ul className="approvals-list">
       {approvals.map(approval => {
         const busy = deciding?.id === approval.approval_id
+        // Identificador curto para o DOM: o completo tem 64 hexadecimais e polui
+        // o marcador sem nenhum ganho.
+        const denyWarningId = `deny-warning-${approval.approval_id.slice(4, 14)}`
         return <li key={approval.approval_id} className="approval-item" aria-busy={busy}>
           {/* A frase vem derivada do servidor e é coberta pela impressão
               digital: o que está escrito aqui é exatamente o que a confirmação
               tranca. Sem ela, duas operações sensíveis diferentes ficariam
               indistinguíveis e confirmar viraria carimbo. */}
-          <p className="approval-summary">{approval.summary}</p>
+          {/* `dir="auto"` + isolamento bidi: mesmo com a higienização do
+              servidor, a frase não pode reordenar o resto do cartão. */}
+          <p className="approval-summary" dir="auto">{approval.summary ?? copy.approvalActionPrefix.replace('{action}', actionLabel(approval.action))}</p>
           <p className="approval-action">
             {copy.approvalActionPrefix.replace('{action}', actionLabel(approval.action))}
           </p>
           <p className="approval-subject">
-            {copy.approvalSubject.replace('{subject}', approval.subject_id)}
+            {/* Um sujeito opaco (`call:<hash>`) não diz nada a uma pessoa:
+                mostrar o hexadecimal é pior do que dizer que é interno. */}
+            {isOpaqueSubject(approval.subject_id)
+              ? copy.approvalSubjectOpaque
+              : copy.approvalSubject.replace('{subject}', approval.subject_id)}
           </p>
           <p className="approval-tier">{approval.tier === 'T3' ? copy.approvalTierT3 : copy.approvalTierT2}</p>
           <p className="approval-deadline">
@@ -169,7 +210,6 @@ export function PendingApprovalsList({
           {approval.state === 'AVAILABLE'
             ? <p className="approval-waiting">{copy.approvalConfirmedWaiting}</p>
             : <>
-                <p className="approval-deny-warning">{copy.approvalDenyWarning}</p>
                 <div className="approval-actions">
                   <button
                     type="button"
@@ -182,8 +222,14 @@ export function PendingApprovalsList({
                     className="secondary"
                     disabled={busy}
                     onClick={() => { onDecide(approval.approval_id, 'deny') }}
+                    aria-describedby={denyWarningId}
                   >{busy && deciding.decision === 'deny' ? copy.approvalDecidingDeny : copy.approvalDeny}</button>
                 </div>
+                {/* Depois dos botões e preso ao de recusar: acima, era a última
+                    frase antes do botão de autorizar e empurrava para lá. */}
+                <p className="approval-deny-warning" id={denyWarningId}>
+                  {copy.approvalDenyWarning}
+                </p>
               </>}
         </li>
       })}

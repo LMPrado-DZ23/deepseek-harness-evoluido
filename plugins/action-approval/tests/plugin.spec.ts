@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
+import { studioActionApprovalsDomainSpec } from '../src/domain.ts'
+import { approvalRecordSchema } from '../src/model.ts'
 import { DomainActionApprovalRepository, apply, inject, name } from '../src/plugin.ts'
 import { ApprovalConflictError } from '../src/repository.ts'
 import { StudioActionApprovalService } from '../src/service.ts'
@@ -24,6 +26,23 @@ function table() {
     put: (key: string, value: ApprovalRecord) => { rows.set(key, value); return Promise.resolve() },
   }
 }
+
+describe('compatibilidade do domínio', () => {
+  it('não sobe a versão do domínio, porque não existe passo de migração', () => {
+    // Subir a versão faz `open` falhar com `version-mismatch` em qualquer
+    // instalação que já rodou. Como a autoridade falha fechada, o portão T3
+    // inteiro passaria a recusar para sempre, sem log que apontasse a causa.
+    // Um campo novo entra como OPCIONAL no registro; a versão só sobe junto com
+    // um caminho de migração que hoje a API de domínio não tem.
+    expect(studioActionApprovalsDomainSpec.version).toBe(1)
+  })
+
+  it('lê um registro criado antes de o resumo existir', () => {
+    const legacy = { ...record() } as Record<string, unknown>
+    delete legacy.summary
+    expect(approvalRecordSchema.safeParse(legacy).success).toBe(true)
+  })
+})
 
 describe('persistência durável da autoridade de confirmação', () => {
   it('cria apenas o que ainda não existe', async () => {

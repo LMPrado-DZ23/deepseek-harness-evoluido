@@ -87,7 +87,8 @@
 .approval-item p{margin:0}
 .approval-summary{font-weight:600}
 .approval-action,.approval-deadline,.approval-deny-warning{font-size:14px;color:#6b573a}
-.approvals-outcome{margin:0;color:#2c3a57;font-size:14px}
+.approvals-outcome,.approvals-count{margin:0;color:#2c3a57;font-size:14px}
+.approvals-count:empty{display:none}
 .approval-actions .primary,.approval-actions .secondary{width:auto;margin:0;padding:0 18px}
 .approval-actions .secondary{border-color:#8a7a63;color:#4a3f30}
 .approval-subject,.approval-tier,.approval-waiting{color:#6b573a;font-size:14px}
@@ -97,12 +98,13 @@
    deixaria o pedido ilegível justamente na tela que decide uma permissão. */
 .approvals{background:#141a26;border-radius:10px;padding:10px 12px;color:#eef2f9}
 .approvals h2{color:#ffd7a1}
-.approvals-intro,.approvals-empty,.approvals-outcome{color:#b9c4da}
+.approvals-intro,.approvals-empty,.approvals-outcome,.approvals-count{color:#b9c4da}
 .approval-item{background:#2a1f10;border-color:#6b5326;color:#f7ecdc}
 .approval-item p,.approval-action{color:#f7ecdc}
 .approval-subject,.approval-tier,.approval-waiting,.approval-action,.approval-deadline,.approval-deny-warning{color:#d8c6a8}
-.approval-actions .secondary{border-color:#6b5326;color:#f7ecdc}
-.approval-actions .secondary{background:#0f1523;color:#eef2f9;border-color:#2b3550}
+/* Uma regra só: duas seguidas faziam a segunda vencer e o botão de recusar
+   voltava ao azul de destaque sobre o cartão escuro. */
+.approval-actions .secondary{background:#1f1810;border-color:#6b5326;color:#f7ecdc}
 }
 
 /* Trabalho parado. Menos alarmante que uma confirmação pendente - bloqueia

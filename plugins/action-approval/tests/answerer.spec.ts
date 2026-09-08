@@ -146,12 +146,23 @@ describe('respondedor do Studio para as perguntas do Harness', () => {
   })
 
   it('diz à pessoa qual ferramenta e por quê, e leva isso ao pedido', async () => {
-    expect(questionSummary(question)).toBe('O assistente quer usar a ferramenta bash. Motivo que ele deu: "precisa sair da caixa".')
-    expect(questionSummary({ toolName: 'bash' })).toBe('O assistente quer usar a ferramenta bash.')
-    // Motivo do modelo, higienizado e cortado.
-    expect(questionSummary({ toolName: 'bash', reason: 'quebra\nde\tlinha' }))
-      .toContain('quebra de linha')
-    expect(questionSummary({ toolName: 'bash', reason: 'x'.repeat(1000) })).toHaveLength(300)
+    expect(questionSummary(question)).toContain('O assistente quer usar a ferramenta bash')
+    expect(questionSummary(question)).toContain('precisa sair da caixa')
+    // Motivo do modelo, higienizado e cortado NO MOTIVO.
+    expect(questionSummary({ toolName: 'bash', reason: 'quebra\nde\tlinha' })).toContain('quebra de linha')
+    // Marcas invisíveis e de direção não sobrevivem: com elas, o modelo
+    // controlaria a ordem VISUAL da frase enquanto o texto gravado é outro.
+    for (const hostile of ['\u202e', '\u200b', '\u2066', '\u0085', '\ufeff', '\u200f']) {
+      expect(questionSummary({ toolName: 'bash', reason: `antes${hostile}depois` })).not.toContain(hostile)
+    }
+    // O código do pedido SOBREVIVE a um motivo gigante: cortar a frase inteira
+    // comeria justamente o que distingue dois cartões na tela.
+    const long = questionSummary({ toolName: 'bash', reason: 'x'.repeat(5000) })
+    expect(long.length).toBeLessThanOrEqual(300)
+    expect(long).toMatch(/Código deste pedido: [a-f0-9]{6}\.$/u)
+    // Duas perguntas diferentes nunca mostram a mesma frase.
+    expect(questionSummary({ toolName: 'bash', reason: `${'y'.repeat(400)}A` }))
+      .not.toBe(questionSummary({ toolName: 'bash', reason: `${'y'.repeat(400)}B` }))
 
     const d = deps({ authority: { request: vi.fn(() => Promise.resolve(record('AVAILABLE'))) } })
     await answerHarnessApproval(question, delegate, d)

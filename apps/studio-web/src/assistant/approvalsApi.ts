@@ -12,8 +12,11 @@ export interface PendingApproval {
   readonly subject_id: string
   readonly tier: 'T2' | 'T3'
   readonly expires_at: string
-  /** A frase que a pessoa lê antes de decidir, derivada no servidor. */
-  readonly summary: string
+  /**
+   * A frase que a pessoa lê antes de decidir, derivada no servidor. Ausente
+   * num pedido criado antes deste campo existir - a tela cai no rótulo da ação.
+   */
+  readonly summary?: string
 }
 
 /**
@@ -45,7 +48,7 @@ export function isPendingApproval(value: unknown): value is PendingApproval {
     && typeof row.subject_id === 'string' && row.subject_id !== ''
     && (row.tier === 'T2' || row.tier === 'T3')
     && typeof row.expires_at === 'string' && row.expires_at !== ''
-    && typeof row.summary === 'string' && row.summary !== ''
+    && (row.summary === undefined || (typeof row.summary === 'string' && row.summary !== ''))
 }
 
 export async function listPendingApprovals(

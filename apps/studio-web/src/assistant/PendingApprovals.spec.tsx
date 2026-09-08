@@ -1,7 +1,7 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
-import { PendingApprovals, PendingApprovalsList, actionLabel, formatDeadline } from './PendingApprovals'
+import { PendingApprovals, PendingApprovalsList, actionLabel, formatDeadline, isOpaqueSubject } from './PendingApprovals'
 import { decideApproval, isPendingApproval, listPendingApprovals, APPROVALS_ENDPOINT } from './approvalsApi'
 import { ConversationRequestError } from './conversationApi'
 
@@ -69,6 +69,10 @@ describe('cliente das confirmações', () => {
     expect(isPendingApproval(row({ subject_id: '' }))).toBe(false)
     expect(isPendingApproval(row({ expires_at: '' }))).toBe(false)
     expect(isPendingApproval(row({ summary: '' }))).toBe(false)
+    // Um pedido criado antes de a frase existir continua utilizável.
+    const legacy = { ...row() } as Record<string, unknown>
+    delete legacy.summary
+    expect(isPendingApproval(legacy)).toBe(true)
     expect(isPendingApproval(null)).toBe(false)
     expect(isPendingApproval('apv')).toBe(false)
   })
@@ -180,6 +184,43 @@ describe('cartão de decisão', () => {
     const html = list({ approvals: [{ ...row(), state: 'AVAILABLE' }] })
     expect(html).toContain('Volte à conversa e peça ao assistente para continuar')
     expect(html).not.toContain('Autorizar uma vez')
+  })
+
+  it('anuncia que há pedido esperando, em vez de aparecer em silêncio', () => {
+    const html = list()
+    expect(html).toContain('aria-live="polite"')
+    expect(html).toContain('1 pedido esperando sua decisão')
+    expect(list({ approvals: [row(), { ...row(), approval_id: OTHER }] })).toContain('2 pedidos esperando')
+  })
+
+  it('prende o aviso de recusa ao botão de recusar, depois dele', () => {
+    const html = list()
+    // Acima dos botões, o aviso sobre RECUSAR era a última frase antes do botão
+    // de autorizar, e empurrava para lá.
+    expect(html.indexOf('approval-deny-warning')).toBeGreaterThan(html.indexOf('approval-actions'))
+    expect(html).toContain('aria-describedby="deny-warning-')
+  })
+
+  it('não mostra um identificador interno no lugar de "Onde"', () => {
+    expect(isOpaqueSubject(`call:${'a'.repeat(64)}`)).toBe(true)
+    expect(isOpaqueSubject(`repo:${'a'.repeat(64)}`)).toBe(true)
+    expect(isOpaqueSubject('meu-projeto')).toBe(false)
+    const html = list({ approvals: [{ ...row(), subject_id: `call:${'a'.repeat(64)}` }] })
+    expect(html).toContain('neste pedido específico do assistente')
+    expect(html).not.toMatch(/[a-f0-9]{64}/u)
+  })
+
+  it('isola a frase do modelo do resto do cartão', () => {
+    // Mesmo com a higienização do servidor, a frase não pode reordenar o que
+    // está em volta dela.
+    expect(list()).toContain('dir="auto"')
+  })
+
+  it('cai no rótulo da ação quando um pedido antigo não tem a frase', () => {
+    const legacy = { ...row() } as Record<string, unknown>
+    delete legacy.summary
+    const html = list({ approvals: [legacy] })
+    expect(html).toContain('usar um segredo guardado')
   })
 
   it('não transforma um prazo ilegível em horário inventado', () => {

@@ -44,7 +44,6 @@ describe('@dz23-studio/agents composition', { timeout: 30_000 }, () => {
     const closes = [vi.fn(() => Promise.resolve()), vi.fn(() => Promise.resolve())]
     let runtime!: StudioAgentsRuntime
     const disposers: Array<readonly [string, () => unknown]> = []
-    const disposalOrder: string[] = []
     let hooks!: ReturnType<JobStart['run']>
     const coordinatorDispose = vi.fn(() => Promise.resolve())
     const parent = { session: { id: SessionId('person') } } as Agent
@@ -133,6 +132,5 @@ describe('@dz23-studio/agents composition', { timeout: 30_000 }, () => {
     expect(closes[1]).toHaveBeenCalledOnce()
     // Nada ficou em voo, então o encerramento não tem por que reclamar.
     expect(ctx.logger.warn).not.toHaveBeenCalled()
-    expect(disposalOrder).toEqual([])
   })
 })

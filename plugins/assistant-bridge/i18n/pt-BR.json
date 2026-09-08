@@ -43,7 +43,7 @@
     "duplicateRepository": "Existe um repositório duplicado para {scope}.",
     "promptLength": "A instrução deve ter entre 3 e 20.000 caracteres.",
     "providerForbidden": "O provedor pedido não está liberado para este espaço de trabalho.",
-    "externalProviderNotConfigured": "NOT_CONFIGURED: Codex e Claude Code não estão liberados nesta ponte até passarem a prova de confinamento no Windows e no Linux.",
+    "externalProviderNotConfigured": "O Codex e o Claude Code ainda não estão liberados no Studio: eles precisam passar por uma verificação de segurança no Windows e no Linux antes. Use o assistente local. Nada foi executado.",
     "pathCount": "Informe entre 1 e {max} caminhos permitidos.",
     "pathForbidden": "A tarefa tentou sair dos caminhos liberados pelo administrador.",
     "cancelOwner": "Somente quem iniciou esta execução pode cancelá-la.",
@@ -92,12 +92,13 @@
     "secrets": "Usar um segredo guardado.",
     "network": "Acessar a internet.",
     "deploy": "Publicar.",
-    "instruction": "Instrução ao assistente: \"{prompt}\".",
+    "instruction": "Instrução ao assistente (início): \"{prompt}\".",
     "paths": "Arquivos que ele pode mexer: {paths}.",
     "team": "Equipe \"{name}\", com {count} tarefa(s).",
     "teamContinue": "Continuar a equipe \"{name}\".",
     "resolveUnknown": "Encerrar a execução {run}, que ficou parada sem confirmação de que terminou.",
     "reason": "Seu motivo: \"{reason}\".",
-    "missing": "(sem descrição)"
+    "missing": "(sem descrição)",
+    "code": "Código deste pedido: {code}."
   }
 }

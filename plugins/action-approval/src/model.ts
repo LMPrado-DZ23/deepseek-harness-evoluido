@@ -50,6 +50,14 @@ export const approvalDescriptorSchema = z.object({
 export type ApprovalDescriptor = z.infer<typeof approvalDescriptorSchema>
 
 export const approvalRecordSchema = approvalDescriptorSchema.extend({
+  /**
+   * OPCIONAL no registro, obrigatório no descritor: um pedido criado antes de
+   * este campo existir continua legível. Subir a versão do domínio faria a
+   * abertura da unidade falhar com `version-mismatch` numa instalação que já
+   * rodou - e, como a autoridade falha fechada, o portão T3 inteiro passaria a
+   * recusar para sempre. Um pedido antigo vive no máximo o TTL de 3 minutos.
+   */
+  summary: approvalSummarySchema.optional(),
   approval_id: z.string().regex(/^apv-[a-f0-9]{64}$/u),
   state: approvalStateSchema,
   /** Quem consumiu. Preenchido apenas no consumo, e só uma vez. */

@@ -12,6 +12,8 @@ import { dirname, isAbsolute, relative, resolve } from 'node:path'
 import { t } from './i18n.js'
 import { ASSISTANT_ALLOWED_PROVIDERS, type AssistantProvider } from './catalog.js'
 import {
+  approvalCode,
+  approvalExcerpt,
   approvalFingerprint,
   approvalSubjectId,
   approvalSummary,
@@ -161,8 +163,8 @@ export class StudioAssistantBridge {
       ? principal.userId
       : await this.#tier3(principal, repository, `studio.agent.start.${sensitive}`, [input.provider, prompt, ...intendedPaths], [
         sensitive === 'secrets' ? t('summary.secrets') : t('summary.network'),
-        t('summary.instruction', { prompt }),
         t('summary.paths', { paths: intendedPaths.join(', ') }),
+        t('summary.instruction', { prompt: approvalExcerpt(prompt) }),
       ])
     const accepted = this.dependencies.studioAgents.service.start({
       orgId: principal.orgId,
@@ -208,8 +210,8 @@ export class StudioAssistantBridge {
         ...tasks.map(task => [task.taskId, task.title, task.role, task.prompt, ...task.intendedPaths].join('\u0001')),
       ], [
         sensitive === 'deploy' ? t('summary.deploy') : sensitive === 'secrets' ? t('summary.secrets') : t('summary.network'),
-        t('summary.team', { name: input.name, count: tasks.length }),
         t('summary.paths', { paths: [...new Set(tasks.flatMap(task => task.intendedPaths))].join(', ') }),
+        t('summary.team', { name: approvalExcerpt(input.name, 60), count: tasks.length }),
       ])
     const snapshot = await this.#teamsRuntime().service.start({
       orgId: principal.orgId,
@@ -252,6 +254,13 @@ export class StudioAssistantBridge {
     if (authority === undefined) {
       throw new AssistantBridgeError('NOT_CONFIGURED', t('errors.approvalNotConfigured'))
     }
+    // A impressão digital do QUE foi pedido vem primeiro, das partes cruas -
+    // duas instruções diferentes são sempre dois pedidos diferentes, mesmo que
+    // só divirjam depois do corte da frase.
+    const asked = approvalFingerprint([action, repository.workspaceId, repository.repositoryPath, ...parts])
+    // A frase carrega um código curto derivado dela: sem isso, o corte em 300
+    // caracteres devolvia dois cartões gêmeos na tela.
+    const sentence = approvalSummary([...summary, t('summary.code', { code: approvalCode(asked) })])
     const granted = await requireTier3Approval(authority, {
       principal: {
         userId: principal.userId,
@@ -261,8 +270,10 @@ export class StudioAssistantBridge {
       },
       action,
       subjectId: approvalSubjectId(repository.workspaceId, repository.repositoryPath),
-      fingerprint: approvalFingerprint([action, repository.workspaceId, repository.repositoryPath, ...parts, ...summary]),
-      summary: approvalSummary(summary),
+      // A impressão digital final cobre também a frase EXIBIDA: confirmar um
+      // texto e executar outro é impossível pelos dois lados.
+      fingerprint: approvalFingerprint([asked, sentence]),
+      summary: sentence,
     })
     return granted.approvedBy
   }
@@ -296,7 +307,7 @@ export class StudioAssistantBridge {
     }
     const approvedBy = sensitive
       ? await this.#tier3(principal, repository, 'studio.team.continue.sensitive', [teamId], [
-        t('summary.teamContinue', { name: team.name }),
+        t('summary.teamContinue', { name: approvalExcerpt(team.name, 60) }),
       ])
       : principal.userId
     return this.#summarizeTeam(await this.#teamsRuntime().service.continue(teamId, agent!, {
@@ -357,7 +368,7 @@ export class StudioAssistantBridge {
     // outra justificativa seriam duas coisas diferentes.
     await this.#tier3(principal, repository, 'studio.agent.resolve-unknown', [runId, trimmed], [
       t('summary.resolveUnknown', { run: runId }),
-      t('summary.reason', { reason: trimmed }),
+      t('summary.reason', { reason: approvalExcerpt(trimmed) }),
     ])
     await this.dependencies.studioAgents.service.resolveUnknownRun(runId, trimmed)
     // Relido pelo MESMO caminho escopado: o resumo devolvido é o que ficou

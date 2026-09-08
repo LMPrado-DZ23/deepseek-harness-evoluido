@@ -337,5 +337,10 @@ function sameDescriptor(record: ApprovalRecord, descriptor: ApprovalDescriptor):
     && record.fingerprint === descriptor.fingerprint
     && record.tier === descriptor.tier
     && record.request_id === descriptor.request_id
-    && record.summary === descriptor.summary
+    // Um registro criado antes de a frase existir é COMPATÍVEL com um
+    // descritor que agora a traz: recusar por conflito prenderia aquele pedido
+    // para sempre numa instalação que já rodou. Havendo frase nos dois lados,
+    // ela tem de bater - confirmar um texto e executar outro é o que isto
+    // impede.
+    && (record.summary === undefined || record.summary === descriptor.summary)
 }

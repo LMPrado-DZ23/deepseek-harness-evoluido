@@ -30,28 +30,57 @@ export class AssistantApprovalRequiredError extends Error {
 /** A pessoa recusou. Recusa nao roda de novo com outro identificador. */
 export class AssistantApprovalDeniedError extends Error {
 }
-/** Limite do resumo, igual ao da autoridade: a frase e cortada aqui, nao la. */
+/** Limite duro da frase inteira, igual ao da autoridade. */
 export const APPROVAL_SUMMARY_LIMIT = 300;
+/** Quanto de um texto livre (instrucao, motivo) cabe na frase. */
+export const APPROVAL_EXCERPT_LIMIT = 140;
+/** Remove o que nao deve chegar a uma frase lida por uma pessoa. */
+function sanitize(value) {
+    return value
+        // Controle, e tambem a categoria de formato: marcas de direcao (bidi),
+        // espacos de largura zero e separadores de linha invisiveis. Sem isso, o
+        // modelo controla a ORDEM VISUAL da frase que a pessoa le enquanto o texto
+        // gravado e outro.
+        .replace(/[\u0000-\u001f\u007f\u0085\u00ad\u061c\u180e\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u206f\ufeff]/gu, ' ')
+        .replace(/\s+/gu, ' ')
+        .trim();
+}
 /**
- * Uma frase unica, curta e sem caracteres de controle. Parte do conteudo vem
- * do modelo, entao ela e higienizada aqui - e e ela que a pessoa le antes de
- * decidir. Ela entra na impressao digital, logo o texto exibido e exatamente o
- * texto que a confirmacao tranca.
+ * Trecho de um texto livre, cortado no proprio texto - nunca na frase inteira.
+ *
+ * Cortar a frase montada comia a ULTIMA parte, que e justamente a lista de
+ * arquivos que a acao pode mexer: a informacao mais importante era a primeira
+ * a sumir.
+ * @param value - texto de origem livre (instrucao do modelo, motivo escrito).
+ * @param limit - quantos caracteres do texto cabem.
+ * @returns o trecho higienizado, com reticencias quando foi cortado.
+ */
+export function approvalExcerpt(value, limit = APPROVAL_EXCERPT_LIMIT) {
+    const clean = sanitize(value);
+    return clean.length <= limit ? clean : `${clean.slice(0, limit - 1)}\u2026`;
+}
+/**
+ * A frase que a pessoa le antes de decidir. Cada parte ja chega no tamanho
+ * certo; o limite duro aqui e a ultima defesa.
  * @param parts - pedacos ja em portugues, na ordem em que devem ser lidos.
  * @returns a frase pronta para o pedido de confirmacao.
  */
 export function approvalSummary(parts) {
-    const text = parts
-        .map(part => part.replace(/[\u0000-\u001f\u007f]/gu, ' ').replace(/\s+/gu, ' ').trim())
-        .filter(part => part !== '')
-        .join(' ');
+    const text = parts.map(sanitize).filter(part => part !== '').join(' ');
     if (text === '')
         return t('summary.missing');
-    if (text.length <= APPROVAL_SUMMARY_LIMIT)
-        return text;
-    return `${text.slice(0, APPROVAL_SUMMARY_LIMIT - 1)}\u2026`;
+    return text.length <= APPROVAL_SUMMARY_LIMIT ? text : `${text.slice(0, APPROVAL_SUMMARY_LIMIT - 1)}\u2026`;
 }
-/** Identidade do repositorio dentro do pedido, legivel quando o id ja e legivel. */
+/**
+ * Codigo curto que a pessoa consegue comparar a olho. Dois pedidos diferentes
+ * nunca ficam identicos na tela: mesmo com instrucoes que so divergem depois do
+ * corte, o codigo difere - e sem ele o corte devolvia dois cartoes gemeos.
+ * @param fingerprint - impressao digital do que esta sendo pedido.
+ * @returns seis caracteres estaveis daquele pedido.
+ */
+export function approvalCode(fingerprint) {
+    return fingerprint.slice(0, 6);
+}
 export function approvalSubjectId(workspaceId, repositoryPath) {
     if (SAFE_IDENTIFIER.test(workspaceId))
         return workspaceId;

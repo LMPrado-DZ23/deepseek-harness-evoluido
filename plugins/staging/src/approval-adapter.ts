@@ -34,7 +34,12 @@ export class StagingActionApprovalAdapter implements StagingApprovalPort {
         approvalId: input.approvalId,
         // A liberação de UM release é a reivindicação: uma confirmação vale
         // por um release, e repetir o mesmo release devolve o mesmo recibo.
-        claimId: input.releaseId,
+        // Determinístico DE PROPÓSITO, ao contrário do portão do assistente: uma
+    // release é singular e a repetição idempotente é o comportamento desejado -
+    // reenviar a mesma publicação não pode gerar duas. No assistente, a mesma
+    // forma permitia que uma confirmação virasse N execuções, e lá ela foi
+    // trocada por um identificador único por execução.
+    claimId: input.releaseId,
         action: input.action,
         subjectId: input.subjectId,
         fingerprint: input.fingerprint,

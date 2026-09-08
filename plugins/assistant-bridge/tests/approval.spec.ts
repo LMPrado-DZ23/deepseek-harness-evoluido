@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
+  APPROVAL_EXCERPT_LIMIT,
   APPROVAL_SUMMARY_LIMIT,
   MAX_APPROVAL_ATTEMPTS,
+  approvalExcerpt,
   approvalFingerprint,
   approvalSubjectId,
   approvalSummary,
@@ -101,13 +103,30 @@ describe('portão T3 do assistente', () => {
     expect(available.summaries).toEqual([request.summary])
   })
 
-  it('limpa caracteres de controle e corta a frase no limite', () => {
+  it('limpa caracteres de controle, invisíveis e marcas de direção', () => {
     expect(approvalSummary(['Usar um segredo.', '  Instrução:\n"pega\ttudo"  '])).toBe('Usar um segredo. Instrução: "pega tudo"')
     expect(approvalSummary([])).toBe('(sem descrição)')
     expect(approvalSummary(['   '])).toBe('(sem descrição)')
+    // Com estas marcas, o modelo controlaria a ordem VISUAL da frase que a
+    // pessoa lê enquanto o texto gravado é outro.
+    for (const hostile of ['\u202e', '\u200b', '\u2066', '\u0085', '\ufeff', '\u200f', '\u2028']) {
+      expect(approvalSummary([`antes${hostile}depois`])).not.toContain(hostile)
+    }
     const long = approvalSummary(['x'.repeat(1000)])
     expect(long).toHaveLength(APPROVAL_SUMMARY_LIMIT)
     expect(long.endsWith('\u2026')).toBe(true)
+  })
+
+  it('corta o texto livre NO TEXTO, para que o resto da frase sobreviva', () => {
+    const excerpt = approvalExcerpt('y'.repeat(1000))
+    expect(excerpt).toHaveLength(APPROVAL_EXCERPT_LIMIT)
+    expect(excerpt.endsWith('\u2026')).toBe(true)
+    expect(approvalExcerpt('curto')).toBe('curto')
+    expect(approvalExcerpt('y'.repeat(100), 20)).toHaveLength(20)
+    // A frase montada com um texto livre gigante ainda cabe inteira, então
+    // nada do que vem depois dele é comido pelo corte.
+    expect(approvalSummary(['Tipo.', `Instrução: "${approvalExcerpt('z'.repeat(9000))}".`, 'Código: abc123.']))
+      .toContain('Código: abc123.')
   })
 
   it('separa impressões digitais que só diferem no recorte das partes', () => {

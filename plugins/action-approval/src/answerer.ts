@@ -77,6 +77,8 @@ export function questionSubjectId(question: HarnessApprovalQuestion): string {
 
 /** Limite da frase mostrada, igual ao da autoridade. */
 export const QUESTION_SUMMARY_LIMIT = 300
+/** Quanto do motivo dado pelo modelo cabe na frase. */
+export const QUESTION_REASON_LIMIT = 160
 
 /**
  * A frase que a pessoa le sobre a pergunta do Harness: qual ferramenta e por
@@ -86,12 +88,21 @@ export const QUESTION_SUMMARY_LIMIT = 300
  * @returns a frase pronta, cortada no limite.
  */
 export function questionSummary(question: HarnessApprovalQuestion): string {
-  const clean = (value: string): string => value.replace(/[\u0000-\u001f\u007f]/gu, ' ').replace(/\s+/gu, ' ').trim()
+  // Controle E categoria de formato: marcas de direcao (bidi), espacos de
+  // largura zero e separadores invisiveis. Sem isso, o modelo controla a ordem
+  // VISUAL da frase que a pessoa le enquanto o texto gravado e outro.
+  const clean = (value: string): string => value
+    .replace(/[\u0000-\u001f\u007f\u0085\u00ad\u061c\u180e\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u206f\ufeff]/gu, ' ')
+    .replace(/\s+/gu, ' ').trim()
   const reason = clean(question.reason ?? '')
   const tool = clean(question.toolName)
-  const text = reason === ''
-    ? t('summary.harnessTool', { tool })
-    : t('summary.harnessToolWithReason', { tool, reason })
+  // O motivo e cortado NO MOTIVO, nunca na frase: cortar a frase comeria o
+  // codigo do pedido, que e o que distingue dois cartoes na tela.
+  const excerpt = reason.length <= QUESTION_REASON_LIMIT ? reason : `${reason.slice(0, QUESTION_REASON_LIMIT - 1)}\u2026`
+  const code = questionFingerprint(question).slice(0, 6)
+  const text = excerpt === ''
+    ? t('summary.harnessTool', { tool, code })
+    : t('summary.harnessToolWithReason', { tool, reason: excerpt, code })
   if (text.length <= QUESTION_SUMMARY_LIMIT) return text
   return `${text.slice(0, QUESTION_SUMMARY_LIMIT - 1)}\u2026`
 }
