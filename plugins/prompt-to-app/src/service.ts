@@ -7,7 +7,8 @@ import type {
   PromptToAppKey, ProjectState, StudioApproval, StudioAppSpecRecord, StudioEvidence,
   StudioDesignSpecRecord, StudioIntakeTurn, StudioPlan, StudioProject, StudioRun,
 } from './model.js'
-import { assertProjectTransition } from './state.js'
+import { assertProjectTransition, assertUndoTransition } from './state.js'
+import { latestGreenCheckpoint, noGreenReason, runCheckpoints, type CheckpointBlocker, type RunCheckpoint, NO_ATTEMPT } from './checkpoint.js'
 import { t } from './i18n.js'
 
 export interface PromptToAppActor {
@@ -209,6 +210,69 @@ export class PromptToAppService {
   async putEvidence(actor: PromptToAppActor, value: StudioEvidence): Promise<void> {
     this.#authorize(actor, 'project.write'); this.#assertOwned(actor, value); await this.#repository.putEvidence(value)
   }
+  /**
+   * Os pontos aos quais a pessoa pode voltar, e por que não há nenhum quando não há.
+   *
+   * Lê o MESMO registro de execução que a tela do relatório lê - não existe uma
+   * segunda fonte de verdade sobre o que foi conservado, que é como duas telas
+   * passariam a discordar sobre o que aconteceu.
+   * @param actor - quem pergunta.
+   * @param projectId - o projeto.
+   * @returns os pontos, qual deles é seguro, e para onde a pessoa está olhando.
+   */
+  checkpoints(actor: PromptToAppActor, projectId: string): {
+    readonly checkpoints: readonly RunCheckpoint[]
+    readonly green_run_id: string | null
+    readonly reason: CheckpointBlocker | typeof NO_ATTEMPT | null
+    readonly current_run_id: string | null
+  } {
+    const project = this.project(actor, projectId)
+    const checkpoints = runCheckpoints(this.runs(actor, projectId))
+    const green = latestGreenCheckpoint(checkpoints)
+    return {
+      checkpoints,
+      green_run_id: green?.run_id ?? null,
+      reason: noGreenReason(checkpoints),
+      current_run_id: project.current_run_id ?? null,
+    }
+  }
+
+  /**
+   * Volta o projeto para um ponto seguro, sem apagar NADA.
+   *
+   * Desfazer aqui é navegação, não destruição: nenhum diretório de execução,
+   * nenhuma evidência e nenhum registro de tentativa é removido ou reescrito. O
+   * que muda é o estado do projeto e qual tentativa é a corrente - isto é, para
+   * onde a pessoa está olhando. Um reset destrutivo é proibição explícita do
+   * produto, e por isso este método não tem sequer acesso a disco.
+   *
+   * A recusa é dupla e as duas metades importam: a tentativa precisa ser um
+   * ponto PROVADO (`checkpoint.ts`), e o estado atual precisa permitir a volta
+   * (`UNDO_TRANSITIONS`). Sem a primeira, qualquer falha viraria um verde; sem a
+   * segunda, daria para desfazer no meio de uma criação em andamento.
+   * @param actor - quem desfaz.
+   * @param projectId - o projeto.
+   * @param runId - a tentativa para a qual voltar.
+   * @returns o projeto atualizado e o ponto para onde ele voltou.
+   */
+  async undoToCheckpoint(actor: PromptToAppActor, projectId: string, runId: string): Promise<{ readonly project: StudioProject; readonly checkpoint: RunCheckpoint }> {
+    this.#authorize(actor, 'project.write')
+    const project = this.project(actor, projectId)
+    // `runs` já filtra por org e tenant: uma tentativa de OUTRO escopo não é
+    // "recusada depois", ela simplesmente não existe para quem pergunta.
+    const checkpoint = runCheckpoints(this.runs(actor, projectId)).find(candidate => candidate.run_id === runId)
+    if (checkpoint === undefined) throw new PromptToAppError('NOT_FOUND', t('errors.checkpointNotFound'))
+    if (!checkpoint.green) throw new PromptToAppError('INVALID', t('errors.checkpointNotGreen'))
+    assertUndoTransition(project.state, 'VERIFIED_PROTOTYPE')
+    const updated: StudioProject = {
+      ...project, state: 'VERIFIED_PROTOTYPE', current_run_id: checkpoint.run_id,
+      updated_at: this.#now().toISOString(),
+    }
+    await this.#repository.putProject(updated)
+    await this.#approval(actor, projectId, 'transition', `undo:${checkpoint.run_id}`, 'T1', false, project.state, 'VERIFIED_PROTOTYPE')
+    return { project: updated, checkpoint }
+  }
+
   runs(actor: PromptToAppActor, projectId: string) { this.project(actor, projectId); return this.#repository.runs().filter(value => value.project_id === projectId && this.#sameScope(actor, value)) }
   evidence(actor: PromptToAppActor, projectId: string) { this.project(actor, projectId); return this.#repository.evidence().filter(value => value.project_id === projectId && this.#sameScope(actor, value)) }
 

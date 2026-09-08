@@ -8,7 +8,7 @@ import { apiFailureMessage, apiFailureText, type ApiCallKind } from './pwa/apiFa
 import { GENERATION_REJECTED_STATE, postGeneration, startGeneration } from './pwa/generation'
 import { NotificationOptIn } from './pwa/NotificationOptIn'
 import { browserEmergencyStopPort, EmergencyStop } from './EmergencyStop'
-import { RunReport, isRunReport, type RunReportValue } from './RunReport'
+import { Checkpoints, RunReport, isCheckpointList, isRunReport, type CheckpointListValue, type RunReportValue } from './RunReport'
 import { dispatchGenerationFinished } from './pwa/notifications'
 import { signOutInBrowser } from './session/signOut'
 import { currentSessionMode } from './session/currentSession'
@@ -73,6 +73,8 @@ export function App() {
   const [signingOut, setSigningOut] = useState(false)
   const [authenticatedSession, setAuthenticatedSession] = useState(false)
   const [runReport, setRunReport] = useState<RunReportValue | null>(null)
+  const [checkpoints, setCheckpoints] = useState<CheckpointListValue | null>(null)
+  const [confirmingUndo, setConfirmingUndo] = useState<string | null>(null)
   const previewFrame = useRef<HTMLIFrameElement>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const menuButton = useRef<HTMLButtonElement>(null)
@@ -203,6 +205,8 @@ export function App() {
     }
     setResult(null)
     setRunReport(null)
+    setCheckpoints(null)
+    setConfirmingUndo(null)
     setProjectState('GENERATING')
     await safely(() => pollProject(started.runId), 'read')
   }
@@ -229,12 +233,39 @@ export function App() {
         await api<{ report: unknown }>(`/projects/${projectId}/report`)
           .then(response => { setRunReport(isRunReport(response.report) ? response.report : null) })
           .catch(() => { setRunReport(null) })
+        // Depois do relato vem a pergunta seguinte de quem acabou de ver uma
+        // falha: para onde eu volto? A resposta pode ser "não há ponto seguro",
+        // e ela vem com o motivo — inventar um verde aqui seria pior do que
+        // dizer que não há.
+        await refreshCheckpoints()
         dispatchGenerationFinished(window, { state, runId })
         return
       }
       await new Promise(resolve => setTimeout(resolve, 250))
     }
     throw new Error(t.verification.failure)
+  }
+  async function refreshCheckpoints() {
+    if (projectId === null) return
+    await api<unknown>(`/projects/${projectId}/checkpoints`)
+      .then(response => { setCheckpoints(isCheckpointList(response) ? response : null) })
+      .catch(() => { setCheckpoints(null) })
+  }
+  /**
+   * Volta para um ponto seguro. NADA é apagado: o servidor não toca em disco, e
+   * o que muda é qual tentativa o Studio mostra como atual.
+   * @param runId - a tentativa escolhida.
+   */
+  async function undoToCheckpoint(runId: string) {
+    if (projectId === null) return
+    await safely(async () => {
+      const undone = await api<{ project: { state: ProjectUiState } }>(`/projects/${projectId}/undo`, {
+        method: 'POST', body: JSON.stringify({ run_id: runId }),
+      })
+      setConfirmingUndo(null)
+      setProjectState(undone.project.state)
+      await refreshCheckpoints()
+    })
   }
   async function cancelGeneration() {
     if (projectId === null) return
@@ -282,6 +313,10 @@ export function App() {
         {projectState === 'GENERATING' || projectState === 'BUILD_OK' || projectState === 'TESTS_OK' ? <Action title={t.creation.title} detail={t.creation.working} button={t.creation.cancel} action={cancelGeneration} /> : null}
         {result !== null ? <Verification result={result} previewActive={preview?.state === 'READY'} startPreview={startPreview} retry={generate} /> : null}
         {runReport === null ? null : <RunReport report={runReport} />}
+        {checkpoints === null ? null : <Checkpoints list={checkpoints} confirmingRunId={confirmingUndo}
+          askConfirm={setConfirmingUndo} cancelConfirm={() => setConfirmingUndo(null)}
+          undo={runId => void undoToCheckpoint(runId)}
+          {...(result === null || result.state === 'VERIFIED_PROTOTYPE' ? {} : { restart: () => void generate() })} />}
         {preview?.state === 'READY' ? <section className="preview-card"><div className="preview-heading"><div><h2>{t.preview.title}</h2><p>{t.preview.localOnly}</p></div><button className="secondary compact" onClick={() => void stopPreview()}>{t.preview.stop}</button></div><p className="truth">{t.preview.notPublished}</p>{previewCodes.length === 0 ? null : <section className="preview-codes" aria-live="polite"><h3>{t.preview.accessCodes}</h3><p>{t.preview.accessCodesHelp}</p><ul>{previewCodes.map(item => <li key={`${item.email}-${item.expires_at}-${item.code}`}><strong>{item.email}</strong>: <code>{item.code}</code></li>)}</ul></section>}<iframe ref={previewFrame} title={t.preview.frameTitle} src={`${preview.url}/__dz23/admission`} sandbox="allow-scripts allow-forms allow-same-origin" referrerPolicy="no-referrer" /></section> : null}
         {preview !== null && ['FAILED', 'EXPIRED', 'STOPPED'].includes(preview.state) ? <p className="context-note">{t.preview.closed}</p> : null}
         {error === '' ? null : <p className="error" role="alert">{error}</p>}

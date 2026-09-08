@@ -94,7 +94,7 @@ async function fixture(options: { readonly emergencyStop?: { assertRunning(scope
 
 describe('prompt-to-app HTTP boundary', () => {
   it('declares every route with authorization and no client-owned scope', () => {
-    expect(PROMPT_TO_APP_ROUTE_CONTRACTS).toHaveLength(14)
+    expect(PROMPT_TO_APP_ROUTE_CONTRACTS).toHaveLength(16)
     expect(PROMPT_TO_APP_ROUTE_CONTRACTS.every(route => route.access === 'authorized' && route.permission !== null)).toBe(true)
   })
 
@@ -352,5 +352,64 @@ describe('E-11: a parada de emergência na porta de /api/studio/apps', () => {
     } finally {
       unregister()
     }
+  })
+})
+
+describe('E-08: pontos de retorno e desfazer na porta HTTP', () => {
+  /** Um projeto com uma execução gravada, do jeito que o pipeline a grava. */
+  async function projectWithRun(f: Awaited<ReturnType<typeof fixture>>, run: Partial<StudioRun>) {
+    const created = await (await f.request('/projects', { method: 'POST', body: JSON.stringify({
+      name: 'Meu site', original_brief: 'Quero apresentar meu trabalho.', category: 'landing-page', privacy: 'privado-local',
+    }) })).json() as { project: { project_id: string } }
+    const projectId = created.project.project_id
+    f.repository.runRows = [{
+      run_id: 'attempt-1', operation_id: 'attempt-1', owner_session_id: 'session', plan_id: 'plan', project_id: projectId,
+      org_id: 'org-a', tenant_id: 'tenant-a', stage: 'verify', attempt: 1, state: 'BLOCKED_EXTERNAL',
+      started_at: '2026-09-03T12:00:00.000Z', finished_at: '2026-09-03T12:01:00.000Z', sandbox: 'full',
+      route: 'ollama', model: 'qwen', input_tokens: null, output_tokens: null, estimated_cost_usd: null,
+      run_directory: '/runs/attempt-1', artifact_sha256: null, failure_code: 'ACCEPTANCE_ATTESTATION_UNAVAILABLE',
+      acceptance_checks: [], ...run,
+    } as StudioRun]
+    return projectId
+  }
+
+  it('lista os pontos e diz POR QUE não há ponto seguro, sem inventar um', async () => {
+    const f = await fixture()
+    const projectId = await projectWithRun(f, {})
+    const response = await f.request(`/projects/${projectId}/checkpoints`)
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      green_run_id: null, reason: 'ACCEPTANCE_ATTESTATION_UNAVAILABLE', current_run_id: null,
+      checkpoints: [{ run_id: 'attempt-1', green: false, blocker: 'ACCEPTANCE_ATTESTATION_UNAVAILABLE' }],
+    })
+    // E desfazer para essa tentativa é recusado: ela não é um ponto seguro.
+    const refused = await f.request(`/projects/${projectId}/undo`, { method: 'POST', body: JSON.stringify({ run_id: 'attempt-1' }) })
+    expect(refused.status).toBe(400)
+  })
+
+  it('desfazer para um ponto seguro muda o estado e a tentativa corrente, sem apagar tentativa nenhuma', async () => {
+    const f = await fixture()
+    const projectId = await projectWithRun(f, {
+      state: 'PASSED', failure_code: null, template_integrity: 'VERIFIED', artifact_sha256: 'a'.repeat(64),
+    })
+    f.repository.projectRows = f.repository.projectRows.map(project => ({ ...project, state: 'BUILD_FAILED' as const }))
+    const response = await f.request(`/projects/${projectId}/undo`, { method: 'POST', body: JSON.stringify({ run_id: 'attempt-1' }) })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      project: { state: 'VERIFIED_PROTOTYPE', current_run_id: 'attempt-1' },
+      checkpoint: { run_id: 'attempt-1', green: true },
+    })
+    // O histórico continua inteiro, e a leitura do projeto passa a mostrar a
+    // tentativa escolhida como a corrente.
+    expect(f.repository.runRows).toHaveLength(1)
+    const details = await (await f.request(`/projects/${projectId}`)).json() as { current_run: { run_id: string } }
+    expect(details.current_run.run_id).toBe('attempt-1')
+  })
+
+  it('a rota de leitura não aceita mutação, e a de desfazer não aceita leitura', async () => {
+    const f = await fixture()
+    const projectId = await projectWithRun(f, {})
+    expect((await f.request(`/projects/${projectId}/checkpoints`, { method: 'POST', body: '{}' })).status).toBe(404)
+    expect((await f.request(`/projects/${projectId}/undo`)).status).toBe(404)
   })
 })

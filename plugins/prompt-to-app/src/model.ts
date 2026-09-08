@@ -37,6 +37,16 @@ export const studioProjectSchema = z.object({
    * registro antigo tem de continuar validando; `routePrivacyProfile` traduz.
    */
   privacy: routePrivacySchema,
+  /**
+   * A tentativa para a qual a pessoa está olhando AGORA.
+   *
+   * Existe por causa do desfazer (E-08): voltar a um ponto seguro não apaga
+   * nada, ele muda para onde a pessoa está olhando - e esse "onde" precisava de
+   * um lugar para morar. É OPCIONAL e a versão do domínio NÃO sobe: todo
+   * registro gravado antes dele continua válido, e ausente significa "a mais
+   * recente", que é exatamente o que valia antes.
+   */
+  current_run_id: z.string().min(1).nullable().optional(),
   created_at: timestamp,
   updated_at: timestamp,
   archived_at: timestamp.nullable(),
@@ -85,6 +95,16 @@ export const studioRunSchema = z.object({
   input_tokens: z.number().int().nonnegative().nullable(), output_tokens: z.number().int().nonnegative().nullable(),
   estimated_cost_usd: z.number().nonnegative().nullable(), run_directory: z.string().min(1),
   artifact_sha256: sha256.nullable().optional(),
+  /**
+   * O que a conferência de integridade do template disse SOBRE ESTA tentativa.
+   *
+   * O pipeline já comparava o hash da árvore protegida antes e depois de cada
+   * tentativa e jogava o resultado fora quando ele batia. Sem gravá-lo não havia
+   * como afirmar depois que uma tentativa era um ponto seguro - só que ela não
+   * tinha reprovado, que é coisa diferente. OPCIONAL, e a versão do domínio NÃO
+   * sobe: ausente quer dizer "não registrado", nunca "conferido".
+   */
+  template_integrity: z.enum(['VERIFIED', 'FAILED']).optional(),
   failure_code: z.string().nullable(),
   acceptance_checks: z.array(z.object({
     id: z.string().min(1), label: z.string().min(1),

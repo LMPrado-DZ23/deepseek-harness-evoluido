@@ -1,7 +1,7 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { RunReport, isRunReport, type RunReportValue } from './RunReport'
+import { Checkpoints, RunReport, isCheckpointList, isRunReport, type CheckpointListValue, type CheckpointValue, type RunReportValue } from './RunReport'
 
 const report = (overrides: Partial<RunReportValue> = {}): RunReportValue => ({
   stages: [
@@ -90,5 +90,73 @@ describe('o cliente recusa um relato que não é um relato', () => {
     expect(isRunReport({ stages: [], files: [], findings: [], correction: null })).toBe(false)
     expect(isRunReport({ ...report(), stages: [{ step: 'x', label: 'x', state: 'quase', detail: '' }] })).toBe(false)
     expect(isRunReport({ ...report(), correction: 42 })).toBe(false)
+  })
+})
+
+const checkpoint = (overrides: Partial<CheckpointValue> = {}): CheckpointValue => ({
+  run_id: 'attempt-1', attempt: 1, created_at: '2026-09-03T12:01:00.000Z', run_directory: '/runs/attempt-1',
+  tree_sha256: null, acceptance_checks: [], integrity: 'VERIFIED', green: false,
+  blocker: 'ACCEPTANCE_ATTESTATION_UNAVAILABLE', ...overrides,
+})
+const list = (overrides: Partial<CheckpointListValue> = {}): CheckpointListValue => ({
+  checkpoints: [checkpoint()], green_run_id: null, reason: 'ACCEPTANCE_ATTESTATION_UNAVAILABLE', current_run_id: null, ...overrides,
+})
+const noop = () => undefined
+const render = (value: CheckpointListValue, confirmingRunId: string | null = null) => renderToStaticMarkup(createElement(Checkpoints, {
+  list: value, confirmingRunId, askConfirm: noop, cancelConfirm: noop, undo: noop,
+}))
+
+describe('E-08: a pessoa vê para onde pode voltar, e por que às vezes não pode', () => {
+  it('sem ponto seguro, diz isso e explica o motivo sem jargão — e não oferece voltar', () => {
+    const html = render(list())
+    expect(html).toContain('Não há ponto seguro para voltar')
+    expect(html).toContain('a prova de que os critérios combinados foram conferidos não foi emitida')
+    expect(html).not.toContain('Voltar para este ponto')
+    // Nada de código em inglês na cara de quem não programa.
+    expect(html).not.toContain('ACCEPTANCE_ATTESTATION_UNAVAILABLE')
+  })
+
+  it('com ponto seguro, oferece voltar e diz que nada é apagado', () => {
+    const html = render(list({
+      checkpoints: [checkpoint({ green: true, blocker: null, acceptance_checks: [{ id: 'title', label: 'Tem título', status: 'PASSED' }] })],
+      green_run_id: 'attempt-1', reason: null, current_run_id: 'attempt-1',
+    }))
+    expect(html).toContain('ponto seguro')
+    expect(html).toContain('integridade conferida')
+    expect(html).toContain('1 critérios conferidos')
+    expect(html).toContain('você está aqui')
+    expect(html).toContain('Voltar para este ponto')
+    expect(html).toContain('continua no seu computador')
+    expect(html).not.toContain('Não há ponto seguro para voltar')
+  })
+
+  it('a confirmação existe e diz o que o desfazer NÃO faz', () => {
+    const green = checkpoint({ green: true, blocker: null })
+    const value = list({ checkpoints: [green], green_run_id: green.run_id, reason: null })
+    expect(render(value)).not.toContain('Voltar para este ponto?')
+    const confirming = render(value, green.run_id)
+    expect(confirming).toContain('Voltar para este ponto?')
+    expect(confirming).toContain('Nada é apagado')
+    expect(confirming).toContain('Sim, voltar para este ponto')
+    expect(confirming).toContain('Cancelar')
+  })
+
+  it('depois de uma falha, recomeçar é oferecido e explica o que acontece com o que já foi feito', () => {
+    const html = renderToStaticMarkup(createElement(Checkpoints, {
+      list: list(), confirmingRunId: null, askConfirm: noop, cancelConfirm: noop, undo: noop, restart: noop,
+    }))
+    expect(html).toContain('Tentar de novo')
+    expect(html).toContain('continua guardada')
+    // Sem a ação de recomeçar, a tela não inventa um botão que não faz nada.
+    expect(render(list())).not.toContain('Tentar de novo')
+  })
+
+  it('o cliente recusa uma lista de pontos que o servidor não disse', () => {
+    expect(isCheckpointList(list())).toBe(true)
+    expect(isCheckpointList(null)).toBe(false)
+    expect(isCheckpointList({ ...list(), reason: 'TUDO_CERTO' })).toBe(false)
+    expect(isCheckpointList({ ...list(), green_run_id: 7 })).toBe(false)
+    expect(isCheckpointList({ ...list(), checkpoints: [{ ...checkpoint(), integrity: 'QUASE' }] })).toBe(false)
+    expect(isCheckpointList({ ...list(), checkpoints: [{ ...checkpoint(), green: 'sim' }] })).toBe(false)
   })
 })

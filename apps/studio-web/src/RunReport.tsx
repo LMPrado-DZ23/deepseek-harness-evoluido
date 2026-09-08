@@ -115,3 +115,135 @@ export function RunReport({ report }: { readonly report: RunReportValue }) {
         </li>)}</ul></>}
   </section>
 }
+
+/** Por que uma tentativa não é um ponto seguro, do jeito que o servidor responde. */
+export type CheckpointBlocker =
+  | 'ACCEPTANCE_ATTESTATION_UNAVAILABLE'
+  | 'TEMPLATE_INTEGRITY_FAILED'
+  | 'INTEGRITY_NOT_RECORDED'
+  | 'STEPS_DID_NOT_PASS'
+
+export interface CheckpointValue {
+  readonly run_id: string
+  readonly attempt: number
+  readonly created_at: string
+  readonly run_directory: string
+  readonly tree_sha256: string | null
+  readonly acceptance_checks: ReadonlyArray<{ readonly id: string; readonly label: string; readonly status: string }>
+  readonly integrity: 'VERIFIED' | 'FAILED' | 'UNKNOWN'
+  readonly green: boolean
+  readonly blocker: CheckpointBlocker | null
+}
+
+export interface CheckpointListValue {
+  readonly checkpoints: readonly CheckpointValue[]
+  readonly green_run_id: string | null
+  readonly reason: CheckpointBlocker | 'NO_ATTEMPT' | null
+  readonly current_run_id: string | null
+}
+
+const BLOCKERS = ['ACCEPTANCE_ATTESTATION_UNAVAILABLE', 'TEMPLATE_INTEGRITY_FAILED', 'INTEGRITY_NOT_RECORDED', 'STEPS_DID_NOT_PASS']
+
+/**
+ * Aceita só o formato que o servidor promete.
+ *
+ * Um ponto de retorno desenhado a partir de um corpo que o servidor não disse
+ * seria pior do que nenhum: a pessoa clicaria em "voltar" confiando em um verde
+ * que ninguém provou.
+ * @param value - o corpo devolvido pela rota.
+ * @returns se é uma lista de pontos utilizável.
+ */
+export function isCheckpointList(value: unknown): value is CheckpointListValue {
+  if (typeof value !== 'object' || value === null) return false
+  const record = value as Record<string, unknown>
+  if (!Array.isArray(record.checkpoints)) return false
+  if (record.green_run_id !== null && typeof record.green_run_id !== 'string') return false
+  if (record.current_run_id !== null && typeof record.current_run_id !== 'string') return false
+  if (record.reason !== null && !(typeof record.reason === 'string' && [...BLOCKERS, 'NO_ATTEMPT'].includes(record.reason))) return false
+  return record.checkpoints.every(entry => typeof entry === 'object' && entry !== null
+    && typeof (entry as CheckpointValue).run_id === 'string'
+    && typeof (entry as CheckpointValue).attempt === 'number'
+    && typeof (entry as CheckpointValue).green === 'boolean'
+    && ['VERIFIED', 'FAILED', 'UNKNOWN'].includes((entry as CheckpointValue).integrity)
+    && ((entry as CheckpointValue).blocker === null || BLOCKERS.includes(String((entry as CheckpointValue).blocker))))
+}
+
+/**
+ * A frase que explica por que não há ponto seguro.
+ *
+ * Cada motivo tem a sua: um "não há para onde voltar" sem o porquê devolveria a
+ * pessoa à caixa preta. Hoje o motivo real é a atestação de aceite que ainda não
+ * existe, e a frase diz isso sem jargão.
+ * @param reason - o motivo devolvido pelo servidor.
+ * @returns a frase para a pessoa.
+ */
+export function noCheckpointSentence(reason: CheckpointListValue['reason']): string {
+  if (reason === 'ACCEPTANCE_ATTESTATION_UNAVAILABLE') return t.checkpoint.reasonAttestation
+  if (reason === 'TEMPLATE_INTEGRITY_FAILED') return t.checkpoint.reasonIntegrityFailed
+  if (reason === 'INTEGRITY_NOT_RECORDED') return t.checkpoint.reasonIntegrityUnknown
+  if (reason === 'STEPS_DID_NOT_PASS') return t.checkpoint.reasonSteps
+  return t.checkpoint.reasonNoAttempt
+}
+
+function integrityWord(integrity: CheckpointValue['integrity']): string {
+  if (integrity === 'VERIFIED') return t.checkpoint.integrityVerified
+  if (integrity === 'FAILED') return t.checkpoint.integrityFailed
+  return t.checkpoint.integrityUnknown
+}
+
+/**
+ * Para onde a pessoa pode voltar, o que cada ponto significa, e o que acontece com o resto.
+ *
+ * A confirmação é CONTROLADA de fora de propósito: quem desfaz precisa ler antes
+ * o que o desfazer faz e o que ele não faz — e o que ele não faz é apagar. O
+ * botão de recomeçar fica ao lado porque, depois de uma falha, essas são as duas
+ * saídas honestas.
+ * @param props - a lista do servidor, o que está sendo confirmado e as ações.
+ * @returns a seção da tela.
+ */
+export function Checkpoints(props: {
+  readonly list: CheckpointListValue
+  readonly confirmingRunId: string | null
+  readonly askConfirm: (runId: string) => void
+  readonly cancelConfirm: () => void
+  readonly undo: (runId: string) => void
+  readonly restart?: () => void
+}) {
+  const { list } = props
+  return <section className="run-checkpoints" aria-labelledby="run-checkpoints-title">
+    <h2 id="run-checkpoints-title">{t.checkpoint.title}</h2>
+    <p className="context-note">{t.checkpoint.help}</p>
+    {list.green_run_id === null ? <section className="checkpoint-none">
+      <h3>{t.checkpoint.noneTitle}</h3>
+      <p>{noCheckpointSentence(list.reason)}</p>
+    </section> : null}
+    {list.checkpoints.length === 0 ? null : <ul className="checkpoint-list">
+      {list.checkpoints.map(checkpoint => <li key={checkpoint.run_id} className={checkpoint.green ? 'checkpoint green' : 'checkpoint'}>
+        <div className="checkpoint-head">
+          <strong>{t.checkpoint.attempt} {checkpoint.attempt}</strong>
+          <span className="checkpoint-word">{checkpoint.green ? t.checkpoint.safe : t.checkpoint.unsafe}</span>
+          {checkpoint.run_id === list.current_run_id ? <span className="checkpoint-current">{t.checkpoint.current}</span> : null}
+        </div>
+        <p className="context-note">
+          {integrityWord(checkpoint.integrity)} · {checkpoint.acceptance_checks.length} {t.checkpoint.criteria}
+        </p>
+        {checkpoint.green ? null : <p className="context-note">{noCheckpointSentence(checkpoint.blocker)}</p>}
+        <p className="context-note">{t.checkpoint.kept}</p>
+        {checkpoint.green && props.confirmingRunId !== checkpoint.run_id
+          ? <button type="button" className="secondary compact" onClick={() => props.askConfirm(checkpoint.run_id)}>{t.checkpoint.undo}</button>
+          : null}
+        {checkpoint.green && props.confirmingRunId === checkpoint.run_id ? <section className="checkpoint-confirm">
+          <h4>{t.checkpoint.confirmTitle}</h4>
+          <p>{t.checkpoint.confirmBody}</p>
+          <button type="button" className="primary" onClick={() => props.undo(checkpoint.run_id)}>{t.checkpoint.confirm}</button>
+          <button type="button" className="secondary compact" onClick={() => props.cancelConfirm()}>{t.checkpoint.cancel}</button>
+        </section> : null}
+      </li>)}
+    </ul>}
+    {props.restart === undefined ? null : <section className="checkpoint-restart">
+      <h3>{t.checkpoint.restartTitle}</h3>
+      <p>{t.checkpoint.restartBody}</p>
+      <button type="button" className="secondary" onClick={() => props.restart?.()}>{t.checkpoint.restart}</button>
+    </section>}
+  </section>
+}

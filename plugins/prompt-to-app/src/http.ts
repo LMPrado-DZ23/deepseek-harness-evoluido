@@ -22,7 +22,7 @@ import { routePrivacySchema } from '@dz23-studio/route-health'
 import { studioProjectCategorySchema } from './model.js'
 import type { LogoProcessorPort } from './logo.js'
 import { PromptToAppError, type PromptToAppActor, type PromptToAppService } from './service.js'
-import { InvalidTransitionError } from './state.js'
+import { InvalidTransitionError, UndoNotAvailableError } from './state.js'
 
 const JSON_LIMIT = 64 * 1024
 const LOGO_LIMIT = 2 * 1024 * 1024
@@ -34,6 +34,7 @@ const createProjectSchema = z.object({
 }).strict()
 const answerSchema = intakeAnswerSchema.extend({ confirm_sensitive: z.boolean().optional() }).strict()
 const changeRequestSchema = z.object({ reason: z.string().trim().min(3).max(2_000) }).strict()
+const undoSchema = z.object({ run_id: z.string().trim().min(1).max(96) }).strict()
 
 export interface PromptToAppHttpExtensionRequest {
   readonly request: IncomingMessage
@@ -121,6 +122,8 @@ export const PROMPT_TO_APP_ROUTE_CONTRACTS = [
   { method: 'POST', path: '/projects/:projectId/plan/change', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'POST', path: '/projects/:projectId/generate', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'POST', path: '/projects/:projectId/generate/cancel', access: 'authorized', permission: 'project.write', scope: 'project' },
+  { method: 'GET', path: '/projects/:projectId/checkpoints', access: 'authorized', permission: 'project.read', scope: 'project' },
+  { method: 'POST', path: '/projects/:projectId/undo', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'DELETE', path: '/projects/:projectId', access: 'authorized', permission: 'project.delete', scope: 'project' },
 ] as const satisfies readonly StudioRouteContract[]
 
@@ -188,7 +191,14 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
       if (request.method === 'GET' && matched.suffix === '') {
         const project = config.service.project(actor, projectId)
         const runs = config.service.runs(actor, projectId)
-        const currentRun = [...runs].sort((left, right) => right.started_at.localeCompare(left.started_at) || right.attempt - left.attempt)[0] ?? null
+        // A tentativa CORRENTE é a que a pessoa escolheu olhar, quando ela
+        // desfez para um ponto seguro; sem escolha, é a mais recente - que é o
+        // que sempre valeu. Ignorar a escolha aqui faria o desfazer não
+        // desfazer nada visível.
+        const chosenRun = project.current_run_id === undefined || project.current_run_id === null
+          ? null
+          : runs.find(run => run.run_id === project.current_run_id) ?? null
+        const currentRun = chosenRun ?? [...runs].sort((left, right) => right.started_at.localeCompare(left.started_at) || right.attempt - left.attempt)[0] ?? null
         const verificationCodes = project.state === 'VERIFIED_PROTOTYPE' && currentRun?.state === 'PASSED'
           ? await capturedVerificationCodes(currentRun.run_directory)
           : []
@@ -214,6 +224,21 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
           ? null
           : await readRunReport(latest.run_directory)
         return json(response, 200, { report })
+      }
+      if (request.method === 'GET' && matched.suffix === '/checkpoints') {
+        // Os pontos aos quais a pessoa pode voltar. Quando não há nenhum, o
+        // motivo viaja junto: "não há para onde voltar" sem o porquê é a mesma
+        // caixa preta que E-06 desmontou.
+        config.service.assertAuthorized(actor, 'project.read')
+        return json(response, 200, config.service.checkpoints(actor, projectId))
+      }
+      if (request.method === 'POST' && matched.suffix === '/undo') {
+        // Desfazer é NAVEGAÇÃO: nada em disco é apagado aqui, e o serviço
+        // sequer tem acesso a disco. O que muda é o estado do projeto e qual
+        // tentativa é a corrente.
+        const input = undoSchema.parse(await readJson(request))
+        const undone = await config.service.undoToCheckpoint(actor, projectId, input.run_id)
+        return json(response, 200, { project: undone.project, checkpoint: undone.checkpoint })
       }
       if (request.method === 'POST' && matched.suffix === '/intake/answer') {
         return await answerIntake(request, response, config, actor, projectId)
@@ -366,14 +391,16 @@ async function authenticatedActor(request: IncomingMessage, config: PromptToAppH
 
 function matchRoute(method: string | undefined, path: string): { readonly projectId?: string; readonly suffix: string } | undefined {
   if ((method === 'GET' && (path === '/health' || path === '/projects')) || (method === 'POST' && path === '/projects')) return { suffix: path }
-  const match = /^\/projects\/([^/]+)(\/intake\/answer|\/design\/logo|\/design|\/plan\/approve|\/plan\/change|\/plan|\/generate\/cancel|\/generate|\/report)?$/u.exec(path)
+  const match = /^\/projects\/([^/]+)(\/intake\/answer|\/design\/logo|\/design|\/plan\/approve|\/plan\/change|\/plan|\/generate\/cancel|\/generate|\/checkpoints|\/undo|\/report)?$/u.exec(path)
   if (match === null) return undefined
   const suffix = match[2] ?? ''
-  // `/report` só LÊ, então é a única leitura com sufixo. A lista continua
-  // fechada: um sufixo novo precisa entrar aqui E no contrato de rotas.
-  const allowed = (method === 'GET' && (suffix === '' || suffix === '/report'))
+  // `/report` e `/checkpoints` só LEEM, e são as únicas leituras com sufixo. A
+  // lista continua fechada: um sufixo novo precisa entrar aqui E no contrato de
+  // rotas.
+  const readOnlySuffixes = new Set(['/report', '/checkpoints'])
+  const allowed = (method === 'GET' && (suffix === '' || readOnlySuffixes.has(suffix)))
     || (method === 'DELETE' && suffix === '')
-    || (method === 'POST' && suffix !== '' && suffix !== '/report')
+    || (method === 'POST' && suffix !== '' && !readOnlySuffixes.has(suffix))
   if (!allowed) return undefined
   return { projectId: decodeURIComponent(match[1]!), suffix }
 }
@@ -388,6 +415,9 @@ function statusOf(error: unknown): number {
   if (error instanceof PromptToAppError) return error.code === 'NOT_FOUND' ? 404 : error.code === 'FORBIDDEN' ? 403 : error.code === 'CAPACITY' ? 429 : error.code === 'REPLAY' ? 409 : 400
   if (error instanceof FormCategoryCapabilityError) return 409
   if (error instanceof InvalidTransitionError) return 409
+  // Desfazer recusado pelo estado atual não é pedido malformado: é conflito com
+  // onde o projeto está agora, e a tela precisa dessa diferença para explicar.
+  if (error instanceof UndoNotAvailableError) return 409
   // A recusa do botão de emergência vem de outro plugin, então não há classe a
   // testar aqui - só o código que o contrato de `EmergencyStopGuard` promete.
   // 409 e não 403: não é falta de permissão, é o Studio parado de propósito, e

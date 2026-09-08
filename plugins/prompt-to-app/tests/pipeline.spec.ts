@@ -8,6 +8,7 @@ import type { StudioPlan, StudioRun } from '../src/model.js'
 import { PromptToAppPipeline, type CodeGeneratorPort } from '../src/pipeline.js'
 import { BuilderLifecycleError, type BuildStep, type BuilderLifecycleFinished, type BuilderLifecycleResolverPort, type BuilderLifecycleSession, type BuilderLifecycleStepResult } from '../src/builder-lifecycle.js'
 import { PromptToAppError, type PromptToAppActor, type PromptToAppService } from '../src/service.js'
+import { latestGreenCheckpoint, runCheckpoints } from '../src/checkpoint.js'
 
 const actor: PromptToAppActor = { userId: 'owner', orgId: 'org-a', tenantId: 'tenant-a', role: 'owner' }
 const spec: AppSpecV1 = {
@@ -215,6 +216,34 @@ describe('Prompt-to-App pipeline', () => {
       return { exitCode: 0, stdout: 'ok', stderr: '', timedOut: false }
     } })
     await expect(f.pipeline.run(actor, 'project', { generate: vi.fn(async () => cleanGeneration) })).resolves.toMatchObject({ state: 'BUILD_FAILED', message: 'TEMPLATE_INTEGRITY_FAILED' })
+  })
+
+  it('records the template integrity verdict on the attempt, and a tampered attempt is never a safe point', async () => {
+    // O veredito era CALCULADO e jogado fora quando batia: sem gravá-lo, E-08
+    // só saberia que a tentativa não reprovou, e não que ela foi conferida.
+    const tampered = await fixture({ execute: async (directory, command) => {
+      if (command === 'pnpm run build') { await writeRuntimeOutput(directory); await writeFile(resolve(directory, 'src/App.tsx'), 'tampered') }
+      if (command === 'pnpm run test:e2e') await passAcceptance(directory)
+      return { exitCode: 0, stdout: 'ok', stderr: '', timedOut: false }
+    } })
+    await tampered.pipeline.run(actor, 'project', { generate: vi.fn(async () => cleanGeneration) })
+    const recusada = tampered.runs.filter(run => run.failure_code === 'TEMPLATE_INTEGRITY_FAILED')
+    expect(recusada.length).toBeGreaterThan(0)
+    expect(recusada.every(run => run.template_integrity === 'FAILED')).toBe(true)
+    expect(runCheckpoints(recusada).every(checkpoint => !checkpoint.green)).toBe(true)
+    expect(latestGreenCheckpoint(runCheckpoints(tampered.runs))).toBe(null)
+
+    // E quando os passos rodam sem adulteração, a conferência que APROVOU fica
+    // registrada — é ela que um ponto seguro exige quando a atestação existir.
+    const clean = await fixture({ execute: async (directory, command) => {
+      if (command === 'pnpm run test') return { exitCode: 1, stdout: '', stderr: 'falhou', timedOut: false }
+      if (command === 'pnpm run build') await writeRuntimeOutput(directory)
+      return { exitCode: 0, stdout: 'ok', stderr: '', timedOut: false }
+    } })
+    await clean.pipeline.run(actor, 'project', { generate: vi.fn(async () => cleanGeneration) })
+    expect(clean.runs.some(run => run.template_integrity === 'VERIFIED')).toBe(true)
+    // Integridade conferida NÃO é um verde: os passos não passaram.
+    expect(latestGreenCheckpoint(runCheckpoints(clean.runs))).toBe(null)
   })
 
   it('distinguishes a test failure from a build failure after three attempts', async () => {
