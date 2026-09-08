@@ -40,6 +40,18 @@ test('abre o Integration Hub pela navegação autenticada do Studio', async ({ c
   await expect(page).toHaveURL(/\/studio\/hub$/u)
   await expect(page.getByRole('heading', { level: 1, name: 'Integrações e pacote do protótipo' })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Voltar ao Studio' })).toHaveAttribute('href', '/studio/')
+
+  // WebMCP: a seção existe, explica o que ficaria exposto, e NESTE navegador
+  // diz que o recurso não está disponível — o Chromium deste ambiente não
+  // oferece `document.modelContext` (só o Chrome 149+ sob origin trial). Esta
+  // é a prova honesta que dá para produzir aqui: a detecção de capacidade
+  // funciona em navegador de verdade, e nenhuma ferramenta é registrada.
+  await expect(page.getByRole('heading', { name: 'Deixar um agente do navegador usar o Studio' })).toBeVisible()
+  await expect(page.getByText('não oferece esse recurso')).toBeVisible()
+  await expect(page.getByRole('checkbox')).toHaveCount(0)
+  // E o que NUNCA é exposto está escrito na tela, não só no código.
+  await expect(page.getByText('parada de emergência')).toBeVisible()
+  expect(await page.evaluate(() => 'modelContext' in document)).toBe(false)
 })
 
 /**

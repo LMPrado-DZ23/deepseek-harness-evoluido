@@ -63,3 +63,7 @@
 .hub-tag.health-DEGRADED{background:#fff4e0;color:#8a5a00}
 .hub-tag.health-DOWN{background:#fdecec;color:#9c1c1c}
 .hub-tag.health-NOT_EXECUTED{background:#eef3fb;color:#1f2a5a}
+/* WebMCP: o controle chega DESLIGADO e o estado é lido, não adivinhado. */
+.webmcp-toggle{display:flex;gap:10px;align-items:center;margin-top:12px;font-weight:700}
+.webmcp-toggle input{width:20px;height:20px}
+.webmcp-state{margin:10px 0 0;color:#3d4757}

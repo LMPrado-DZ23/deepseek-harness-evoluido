@@ -37,6 +37,7 @@ class ExportRepository implements HubRepository {
   exportRows: StudioExport[] = []; eventRows: HubEvent[] = []
   integrations = (_scope: HubActor): readonly StudioIntegration[] => []
   integration = (_scope: HubActor, _id: string): StudioIntegration | undefined => undefined
+  deleteIntegration = async () => {}
   putIntegration = async (_value: StudioIntegration) => undefined
   compareAndSwapIntegration = async () => false
   exports = (scope: HubActor, projectId: string) => this.exportRows.filter(row => sameScope(scope, row) && row.project_id === projectId)

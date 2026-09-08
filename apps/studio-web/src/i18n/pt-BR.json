@@ -270,5 +270,35 @@
     "approve": "Aprovar plano",
     "menu": "Menu",
     "close": "Fechar menu"
+  },
+  "webmcp": {
+    "title": "Deixar um agente do navegador usar o Studio",
+    "what": "Alguns navegadores trazem um assistente próprio que pode agir nas páginas por você. Se você ligar isto, esse assistente passa a enxergar um punhado de ações do Studio e pode executá-las na sua sessão — como se fosse você.",
+    "toggle": "Ligar para este navegador",
+    "on": "Ligado neste navegador. O assistente do navegador enxerga as ações listadas abaixo.",
+    "off": "Desligado. Nenhuma ação do Studio é oferecida ao assistente do navegador.",
+    "unavailable": "Este navegador não oferece esse recurso, então não há nada ligado nem a ligar aqui.",
+    "exposedTitle": "O que ele passa a enxergar",
+    "neverTitle": "O que ele nunca enxerga",
+    "never": "Nunca: aprovar um plano, mandar criar o aplicativo, publicar, ligar ou remover uma integração, mexer em segredo e apertar a parada de emergência. Essas decisões são suas e continuam sendo tomadas por você, na tela. E tudo o que o assistente faz passa pelas mesmas permissões que valem para você: o que o Studio recusaria a você, recusa a ele.",
+    "tools": {
+      "listName": "dz23-listar-projetos",
+      "listDescription": "Lista os aplicativos que esta pessoa está criando no DZ23 Studio, com o nome e em que etapa cada um está. Use para saber o que já existe antes de criar algo novo.",
+      "listEmpty": "Esta pessoa ainda não tem nenhum aplicativo no DZ23 Studio.",
+      "stateName": "dz23-estado-do-projeto",
+      "stateDescription": "Conta em que etapa um aplicativo do DZ23 Studio está e, quando já existe plano, quais partes ele tem. Só leitura: não muda nada.",
+      "stateProjectId": "O identificador do aplicativo, como aparece na ferramenta que lista os projetos.",
+      "stateNoPlan": "Ainda não há plano.",
+      "statePlanTitle": "Partes do plano:",
+      "stateStage": "Etapa:",
+      "createName": "dz23-criar-projeto",
+      "createDescription": "Começa um aplicativo novo no DZ23 Studio a partir de uma descrição em palavras comuns. Cria apenas o rascunho: nada é planejado, construído nem publicado por esta ferramenta — quem aprova o plano e manda criar é a pessoa, na tela.",
+      "createNameField": "Um nome curto para o aplicativo, como a pessoa o chamaria.",
+      "createBriefField": "O que a pessoa quer que o aplicativo faça, nas palavras dela.",
+      "createDone": "Rascunho criado: {id}. Nada foi planejado nem construído — a pessoa decide isso na tela do Studio.",
+      "needProjectId": "Informe project_id: o identificador do aplicativo, como aparece na ferramenta que lista os projetos.",
+      "needName": "Informe name: um nome curto para o aplicativo, com até {max} caracteres.",
+      "needBrief": "Informe brief: o que o aplicativo deve fazer, com até {max} caracteres."
+    }
   }
 }

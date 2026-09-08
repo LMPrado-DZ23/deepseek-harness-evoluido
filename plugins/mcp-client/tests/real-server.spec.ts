@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { openMcpConnection, type McpConnection } from '../src/client.ts'
+import { createMcpDispatcher } from '../src/dispatch.ts'
 import { DEFAULT_MCP_LIMITS, type McpServerCommand } from '../src/model.ts'
 import { McpError, killAllMcpChildren, liveMcpChildCount } from '../src/transport.ts'
 
@@ -198,5 +199,36 @@ describe('conexão MCP real por stdio', () => {
     }).catch((error: unknown) => error)
     expect(failure).toBeInstanceOf(McpError)
     expect(['SPAWN_FAILED', 'CLOSED', 'HANDSHAKE_TIMEOUT']).toContain((failure as McpError).code)
+  })
+})
+
+describe('X-04 teste de conexão contra um servidor MCP de verdade', () => {
+  it('sonda: cumprimenta, lê o catálogo real, NÃO chama ferramenta e não deixa processo de pé', async () => {
+    const command = await everything()
+    const dispatcher = createMcpDispatcher({ catalog: { 'agenda-mcp': command }, limits: () => DEFAULT_MCP_LIMITS })
+    const before = liveMcpChildCount()
+    const outcome = await dispatcher.probe({
+      integrationId: 'i-1',
+      manifest: { schema_version: 1, id: 'agenda-mcp', name: 'Agenda', version: '1.0.0', kind: 'mcp', publisher: { id: 'dz23', name: 'DZ23' }, permissions: [], tier: 'T1' },
+      signal: AbortSignal.timeout(20_000),
+    })
+    // O catálogo é o que o servidor REAL anunciou, e não uma lista esperada.
+    expect(outcome.tools.length).toBeGreaterThan(0)
+    expect(outcome.serverName).toBeTruthy()
+    expect(outcome.protocolVersion).toBeTruthy()
+    // A conexão foi fechada: uma sondagem que deixasse processo de pé seria pior
+    // do que não sondar, porque ninguém aperta "testar" esperando um servidor vivo.
+    expect(liveMcpChildCount()).toBe(before)
+  })
+
+  it('sondar um servidor que não está cadastrado falha fechado, sem subir nada', async () => {
+    const dispatcher = createMcpDispatcher({ catalog: {}, limits: () => DEFAULT_MCP_LIMITS })
+    const failure = await dispatcher.probe({
+      integrationId: 'i-1',
+      manifest: { schema_version: 1, id: 'nao-cadastrado', name: 'X', version: '1.0.0', kind: 'mcp', publisher: { id: 'dz23', name: 'DZ23' }, permissions: [], tier: 'T1' },
+      signal: AbortSignal.timeout(5_000),
+    }).catch((error: unknown) => error)
+    expect(failure).toBeInstanceOf(McpError)
+    expect(liveMcpChildCount()).toBe(0)
   })
 })

@@ -43,6 +43,7 @@ class MemoryRepository implements HubRepository {
   rows: StudioIntegration[] = []; exportRows: StudioExport[] = []; eventRows: HubEvent[] = []
   integrations = (scope: HubActor) => this.rows.filter(row => sameScope(scope, row))
   integration = (scope: HubActor, integrationId: string) => this.rows.find(row => sameScope(scope, row) && row.integration_id === integrationId)
+  deleteIntegration = async (scope: HubActor, integrationId: string) => { this.rows = this.rows.filter(row => !(row.integration_id === integrationId && row.org_id === scope.orgId && row.tenant_id === scope.tenantId)) }
   putIntegration = async (value: StudioIntegration) => { this.rows = [...this.rows.filter(row => row.integration_id !== value.integration_id || row.org_id !== value.org_id || row.tenant_id !== value.tenant_id), value] }
   compareAndSwapIntegration = async (scope: HubActor, integrationId: string, expected: string, value: StudioIntegration) => {
     const current = this.integration(scope, integrationId)
@@ -245,6 +246,27 @@ describe('integration hub HTTP boundary', () => {
     // T0: no confirmation needed, and the interface is told so by the server.
     expect(await enabled.json()).toMatchObject({ integration: { enabled: true, requires_approval_tier: null } })
     expect((await (await request('/integrations')).json() as { integrations: unknown[] }).integrations).toHaveLength(1)
+
+    // X-04 pelo HTTP de verdade: testar e remover.
+    const tested = await request(`/integrations/${integration.integration_id}/test`, { method: 'POST', body: '{}' })
+    expect(tested.status).toBe(200)
+    // Uma habilidade nao tem com quem conectar, e a resposta diz isso.
+    expect(await tested.json()).toMatchObject({ result: 'NOT_APPLICABLE' })
+    // Remover algo LIGADO e 409, e nada e apagado.
+    const refused = await request(`/integrations/${integration.integration_id}`, { method: 'DELETE' })
+    expect(refused.status).toBe(409)
+    expect((await (await request('/integrations')).json() as { integrations: unknown[] }).integrations).toHaveLength(1)
+    await request(`/integrations/${integration.integration_id}/enabled`, { method: 'POST', body: '{"enabled":false}' })
+    // Sem corpo: um DELETE de integracao T0 nao precisa de cerimonia.
+    const deleted = await request(`/integrations/${integration.integration_id}`, { method: 'DELETE' })
+    expect(deleted.status).toBe(200)
+    expect(await deleted.json()).toMatchObject({ removed: { integration_id: integration.integration_id } })
+    expect((await (await request('/integrations')).json() as { integrations: unknown[] }).integrations).toHaveLength(0)
+    // E os eventos continuam la depois de remover.
+    expect(repository.eventRows.some(row => row.action === 'integration.removed')).toBe(true)
+    // Registrar de novo, para o resto do teste seguir com uma integracao viva.
+    const reregistered = await request('/integrations', { method: 'POST', body: JSON.stringify(manifest()) })
+    expect(reregistered.status).toBe(201)
 
     expect(await (await request('/smtp')).json()).toEqual({ configured: false, secret_ref: null, tier: 'T2' })
     expect((await request('/smtp', { method: 'POST', body: '{"secret_ref":"smtp://user:pass@host","approval":{"approval_id":"x"}}' })).status).toBe(400)

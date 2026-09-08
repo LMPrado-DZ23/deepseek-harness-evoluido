@@ -88,6 +88,17 @@ class DomainHubRepository implements HubRepository {
   integrations(scope: HubActor) { return [...(this.#integrations.get(scopeOf(scope))?.values() ?? [])] }
   integration(scope: HubActor, integrationId: string) { return this.#integrations.get(scopeOf(scope))?.get(integrationId) }
   putIntegration(value: StudioIntegration) { return this.#exclusiveIntegration(() => this.#putIntegration(value)) }
+  deleteIntegration(scope: HubActor, integrationId: string) {
+    return this.#exclusiveIntegration(async () => {
+      const current = this.integration(scope, integrationId)
+      if (current === undefined) return
+      const identity = recordKey(current, integrationId)
+      const key = this.#integrationKeys.get(identity) ?? physicalKey(current, integrationId)
+      await this.integrationTable.delete(key)
+      this.#integrationKeys.delete(identity)
+      mapFor(this.#integrations, scopeOf(current)).delete(integrationId)
+    })
+  }
   compareAndSwapIntegration(scope: HubActor, integrationId: string, expectedFingerprint: string, value: StudioIntegration) {
     return this.#exclusiveIntegration(async () => {
       const current = this.integration(scope, integrationId)

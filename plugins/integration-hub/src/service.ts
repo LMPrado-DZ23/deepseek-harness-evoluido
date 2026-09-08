@@ -38,6 +38,14 @@ export interface HubRepository {
   integrations(scope: HubActor): readonly StudioIntegration[]
   integration(scope: HubActor, integrationId: string): StudioIntegration | undefined
   putIntegration(value: StudioIntegration): Promise<void>
+  /**
+   * Apaga o REGISTRO da integração (X-04). Só o registro: os eventos ficam.
+   *
+   * Apagar a integração junto com o rastro dela seria transformar "remover uma
+   * integração" em "apagar a auditoria de tudo que ela fez", que é exatamente
+   * o que alguém faria de propósito depois de um incidente.
+   */
+  deleteIntegration(scope: HubActor, integrationId: string): Promise<void>
   /** Atomic within the repository writer: replace only the security state the caller read. */
   compareAndSwapIntegration(scope: HubActor, integrationId: string, expectedFingerprint: string, value: StudioIntegration): Promise<boolean>
   exports(scope: HubActor, projectId: string): readonly StudioExport[]
@@ -565,6 +573,125 @@ export class IntegrationHubService {
     await this.#recordApproval(actor, confirmed, 'integration.enabled', integrationId)
     await this.#audit(actor, enabled ? 'integration.enabled' : 'integration.disabled', integrationId, 'success', updated.effective_tier)
     return updated
+  }
+
+  /**
+   * Remove a integração (X-04). É o fim do ciclo de vida, e é destrutivo.
+   *
+   * Três regras, e nenhuma delas é conveniência:
+   *
+   * 1. só remove o que está DESLIGADO. Remover uma integração ligada é
+   *    desligá-la e apagá-la no mesmo gesto, sem que ninguém tenha decidido
+   *    desligar — e o registro que dizia o que ela podia fazer some junto;
+   * 2. exige a MESMA confirmação que ligar exigiria. Remover é a operação que
+   *    apaga a prova do que foi autorizado; pedir menos do que se pediu para
+   *    autorizar seria pedir menos para desfazer do que para fazer;
+   * 3. os EVENTOS ficam. Apagar a integração junto com o rastro dela
+   *    transformaria "remover" em "apagar a auditoria", que é justamente o que
+   *    alguém faria depois de um incidente.
+   *
+   * O segredo do cofre NÃO é apagado por aqui: este serviço nunca teve, e não
+   * passa a ter, permissão de apagar do cofre. A referência deixa de ser usada;
+   * quem cuida do cofre decide o resto.
+   * @param actor - quem remove.
+   * @param integrationId - a integração.
+   * @param approval - a confirmação, quando o nível exigir.
+   * @returns o que foi removido, para a tela poder dizer o nome.
+   */
+  async removeIntegration(actor: HubActor, integrationId: string, approval?: HubApproval): Promise<{ readonly integration_id: string; readonly name: string; readonly secret_ref: string | null }> {
+    return this.#exclusiveIntegration(this.#scope(actor), () => this.#removeIntegration(actor, integrationId, approval))
+  }
+
+  async #removeIntegration(actor: HubActor, integrationId: string, approval?: HubApproval): Promise<{ readonly integration_id: string; readonly name: string; readonly secret_ref: string | null }> {
+    this.#authorize(actor, 'integrations.manage')
+    const current = this.#integration(actor, integrationId)
+    if (current.enabled) {
+      await this.#audit(actor, 'integration.removed', integrationId, 'failure', 'still-enabled')
+      throw new HubError('CONFLICT', t('errors.integrationRemoveEnabled'))
+    }
+    const confirmed = await this.#requireTier(actor, this.#enforcedTier(current), approval, 'integration.removed', integrationId, securityFingerprint(current))
+    // Reler DEPOIS da confirmação: se alguém religou a integração enquanto a
+    // pessoa confirmava, apagar agora seria apagar algo ligado.
+    const latest = this.#integration(actor, integrationId)
+    if (securityFingerprint(latest) !== securityFingerprint(current) || latest.enabled) {
+      await this.#audit(actor, 'integration.removed', integrationId, 'failure', 'changed-during-approval')
+      throw new HubError('CONFLICT', t('errors.integrationChanged'))
+    }
+    await this.options.repository.deleteIntegration(actor, integrationId)
+    await this.#recordApproval(actor, confirmed, 'integration.removed', integrationId)
+    await this.#audit(actor, 'integration.removed', integrationId, 'success', `${latest.kind} ${latest.effective_tier}`)
+    return { integration_id: latest.integration_id, name: latest.name, secret_ref: latest.secret_ref }
+  }
+
+  /**
+   * Testa a conexão de UMA integração (X-04), pelo que ela é.
+   *
+   * O ponto deste método é NÃO inventar um "funcionando". Cada tipo tem um
+   * teste que realmente fala com alguma coisa, ou diz que não tem:
+   *
+   * - `mcp`: pede a lista de ferramentas ao servidor, que é a menor conversa
+   *   real possível com ele;
+   * - `webhook`: continua sem teste até existir uma saída de rede auditada
+   *   para ele — bater num endereço de fora sem passar pelos controles de
+   *   chamada seria uma saída de rede sem auditoria, criada para "testar";
+   * - `skill`: NÃO tem com quem conectar. Devolver "OK" aqui seria dizer que
+   *   uma conexão que não existe está boa;
+   * - `smtp`: tem porta própria (`testSmtp`), que manda uma mensagem de
+   *   verdade e por isso exige destinatário.
+   *
+   * O desfecho `NOT_APPLICABLE` existe justamente para não ter que escolher
+   * entre mentir e falhar.
+   * @param actor - quem testa.
+   * @param integrationId - a integração.
+   * @returns o desfecho e a frase que a pessoa lê.
+   */
+  async testIntegration(actor: HubActor, integrationId: string): Promise<{ readonly result: 'OK' | 'FAILED' | 'TIMEOUT' | 'NOT_EXECUTED' | 'NOT_APPLICABLE'; readonly message: string }> {
+    this.#authorize(actor, 'integrations.manage')
+    const current = this.#integration(actor, integrationId)
+    if (current.kind === 'skill') {
+      await this.#audit(actor, 'integration.tested', integrationId, 'not-executed', 'skill-has-no-connection')
+      return { result: 'NOT_APPLICABLE', message: t('test.skillNoConnection') }
+    }
+    if (current.kind === 'webhook') {
+      await this.#audit(actor, 'integration.tested', integrationId, 'not-executed', 'webhook-test-unavailable')
+      return { result: 'NOT_APPLICABLE', message: t('test.webhookUnavailable') }
+    }
+    if (current.kind === 'smtp') {
+      await this.#audit(actor, 'integration.tested', integrationId, 'not-executed', 'smtp-has-own-test')
+      return { result: 'NOT_APPLICABLE', message: t('test.smtpElsewhere') }
+    }
+    if (!current.enabled) {
+      await this.#audit(actor, 'integration.tested', integrationId, 'not-executed', 'disabled')
+      return { result: 'NOT_EXECUTED', message: t('test.disabled') }
+    }
+    if (this.#mcpDispatcher === undefined) {
+      // Sem despachante montado não há com quem falar. Dizer FAILED culparia o
+      // servidor da pessoa por uma peça que o Studio não montou.
+      await this.#audit(actor, 'integration.tested', integrationId, 'not-executed', 'no-dispatcher')
+      return { result: 'NOT_EXECUTED', message: t('test.noDispatcher') }
+    }
+    const manifest = current.manifest
+    if (manifest === null) {
+      await this.#audit(actor, 'integration.tested', integrationId, 'not-executed', 'no-manifest')
+      return { result: 'NOT_EXECUTED', message: t('test.noManifest') }
+    }
+    // Passa pelo MESMO caminho de uma chamada de verdade: parada de emergência,
+    // desligamento por alcance, teto e auditoria. Um teste com caminho próprio
+    // seria uma saída de rede que os controles não veem.
+    // `idempotent: true` porque a sondagem NÃO chama ferramenta nenhuma: repetir
+    // um aperto de mão que falhou por rede não pode ter efeito do lado de lá.
+    const outcome = await this.callIntegration<McpProbeOutcome>(actor, integrationId, { operation: 'tools/list', idempotent: true },
+      async signal => this.#mcpDispatcher!.probe({ integrationId, manifest, signal }))
+    if (outcome.state === 'OK') return { result: 'OK', message: t('test.ok', { server: outcome.value.serverName, tools: String(outcome.value.tools.length) }) }
+    // A mensagem do provedor NUNCA sai daqui: ela costuma trazer host, banner
+    // ou pedaço de credencial. Sai a CLASSE do desfecho, que é o que decide.
+    //
+    // E TIMEOUT não vira FAILED: "não respondeu a tempo" e "recusou" mandam a
+    // pessoa fazer coisas diferentes — esperar e tentar de novo, ou ir mexer na
+    // configuração do servidor. Colapsar os dois num só faz ela mexer no que
+    // estava certo.
+    if (outcome.state === 'TIMEOUT') return { result: 'TIMEOUT', message: t('test.timeout') }
+    return { result: 'FAILED', message: outcome.message }
   }
 
   async #exclusiveIntegration<T>(key: string, work: () => Promise<T>): Promise<T> {
@@ -1473,6 +1600,29 @@ export interface McpCallOutcome {
  */
 export interface McpDispatchPort {
   call(input: McpDispatchInput): Promise<McpCallOutcome>
+  /**
+   * Abre a conexão, cumprimenta, lê o catálogo e FECHA — sem chamar ferramenta
+   * nenhuma (X-04).
+   *
+   * É esta a diferença entre testar e usar: um teste de conexão que executasse
+   * uma ferramenta poderia mandar um e-mail, criar um registro ou apagar algo
+   * do lado de lá, e ninguém aperta "testar" esperando efeito.
+   */
+  probe(input: McpProbeInput): Promise<McpProbeOutcome>
+}
+
+/** O que o Hub entrega para um teste de conexão: quem é o servidor e até quando esperar. */
+export interface McpProbeInput {
+  readonly integrationId: string
+  readonly manifest: IntegrationManifest
+  readonly signal: AbortSignal
+}
+
+/** O que um servidor MCP real respondeu ao aperto de mão. `tools` é o que ELE anunciou. */
+export interface McpProbeOutcome {
+  readonly protocolVersion: string
+  readonly serverName: string
+  readonly tools: readonly string[]
 }
 
 /** O que uma chamada de ferramenta MCP pede. Herda de `IntegrationCallRequest` o que o teto e o custo usam. */

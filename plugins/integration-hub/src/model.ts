@@ -186,7 +186,7 @@ export const hubEventSchema = z.object({
   // tempo) e `not-executed` (recusada antes de sair — desligada, sem assinatura,
   // teto de chamadas). Um valor novo no enum não é um campo novo em registro
   // persistido: linha antiga continua válida, e a versão do domínio não sobe.
-  action: z.enum(['smtp.configured', 'smtp.tested', 'integration.registered', 'integration.enabled', 'integration.disabled', 'export.created', 'approval.recorded', 'approval.requested', 'export.downloadRefused', 'integration.called']),
+  action: z.enum(['smtp.configured', 'smtp.tested', 'integration.registered', 'integration.enabled', 'integration.disabled', 'export.created', 'approval.recorded', 'approval.requested', 'export.downloadRefused', 'integration.called', 'integration.removed', 'integration.tested']),
   subject_id: z.string().min(1),
   outcome: z.enum(['success', 'failure', 'not-executed']),
   detail: z.string().max(500),

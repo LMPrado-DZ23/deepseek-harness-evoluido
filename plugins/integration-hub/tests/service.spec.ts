@@ -51,6 +51,7 @@ class MemoryRepository implements HubRepository {
   pageLimits: number[] = []; pruneCalls: Array<{ tenantId: string; keep: number }> = []
   integrations = (scope: HubActor) => this.rows.filter(row => sameScope(scope, row))
   integration = (scope: HubActor, integrationId: string) => this.rows.find(row => sameScope(scope, row) && row.integration_id === integrationId)
+  deleteIntegration = async (scope: HubActor, integrationId: string) => { this.rows = this.rows.filter(row => !(row.integration_id === integrationId && row.org_id === scope.orgId && row.tenant_id === scope.tenantId)) }
   putIntegration = async (value: StudioIntegration) => { this.rows = [...this.rows.filter(row => row.integration_id !== value.integration_id || row.org_id !== value.org_id || row.tenant_id !== value.tenant_id), value] }
   compareAndSwapIntegration = async (scope: HubActor, integrationId: string, expected: string, value: StudioIntegration) => {
     const current = this.integration(scope, integrationId)

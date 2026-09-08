@@ -11,6 +11,7 @@ function repository() {
     integrations: () => [],
     integration: () => undefined,
     putIntegration: async () => {},
+    deleteIntegration: async () => {},
     compareAndSwapIntegration: async () => true,
     exports: () => [], export: () => undefined, putExport: async () => {},
     eventPage: () => [], eventCount: () => 0, putEvent: async () => {}, pruneEvents: async () => 0,

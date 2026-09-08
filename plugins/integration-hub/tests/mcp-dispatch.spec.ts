@@ -15,13 +15,14 @@ import { canonicalManifestBytes } from '../src/manifest.ts'
 import type { HubEvent, IntegrationManifest, StudioExport, StudioIntegration } from '../src/model.ts'
 import {
   HubError, IntegrationHubService, securityFingerprint,
-  type HubActor, type HubRepository, type McpCallOutcome, type McpDispatchInput, type McpDispatchPort,
+  type HubActor, type HubRepository, type McpCallOutcome, type McpDispatchInput, type McpDispatchPort, type McpProbeInput, type McpProbeOutcome,
 } from '../src/service.ts'
 
 class MemoryRepository implements HubRepository {
   rows: StudioIntegration[] = []; eventRows: HubEvent[] = []
   integrations = (scope: HubActor) => this.rows.filter(row => sameScope(scope, row))
   integration = (scope: HubActor, integrationId: string) => this.rows.find(row => sameScope(scope, row) && row.integration_id === integrationId)
+  deleteIntegration = async (scope: HubActor, integrationId: string) => { this.rows = this.rows.filter(row => !(row.integration_id === integrationId && row.org_id === scope.orgId && row.tenant_id === scope.tenantId)) }
   putIntegration = async (value: StudioIntegration) => {
     this.rows = [...this.rows.filter(row => row.integration_id !== value.integration_id), value]
   }
@@ -63,10 +64,16 @@ function manifestOf(overrides: Partial<IntegrationManifest> = {}, options: { rea
 }
 
 /** Um despachante que só ANOTA. É o que permite provar que uma recusa recusou antes de qualquer coisa sair. */
-function spy(): McpDispatchPort & { readonly calls: McpDispatchInput[] } {
+function spy(): McpDispatchPort & { readonly calls: McpDispatchInput[]; readonly probes: McpProbeInput[] } {
   const calls: McpDispatchInput[] = []
+  const probes: McpProbeInput[] = []
   return {
     calls,
+    probes,
+    async probe(input: McpProbeInput): Promise<McpProbeOutcome> {
+      probes.push(input)
+      return { protocolVersion: '2025-06-18', serverName: 'espiao', tools: ['echo'] }
+    },
     async call(input: McpDispatchInput): Promise<McpCallOutcome> {
       calls.push(input)
       return { protocolVersion: '2025-06-18', serverName: 'espiao', tools: ['echo'], content: [{ type: 'text', text: 'ok' }], isError: false }
@@ -195,6 +202,7 @@ describe('despachante MCP do Hub', () => {
     let attempts = 0
     service.useMcpDispatcher({
       async call(): Promise<McpCallOutcome> { attempts += 1; throw new Error('servidor caiu') },
+      async probe(): Promise<McpProbeOutcome> { throw new Error('servidor caiu') },
     })
     const id = await enabled(service)
     const result = await service.callMcpTool(admin, id, { tool: 'echo', idempotent: true })

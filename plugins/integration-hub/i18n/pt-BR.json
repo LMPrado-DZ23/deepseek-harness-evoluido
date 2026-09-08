@@ -46,7 +46,8 @@
     "mcpDispatcherInstalled": "Já existe um cliente MCP montado neste Studio. Dois clientes teriam catálogos e tetos diferentes; nenhum foi trocado.",
     "internal": "Algo deu errado do lado do Studio. Nada foi alterado; tente de novo.",
     "scopeDisabled": "As integrações deste projeto (ou desta organização) estão desligadas. Quem administra precisa religá-las.",
-    "scopeEnableReason": "Para religar as integrações, escreva o motivo com pelo menos 10 caracteres."
+    "scopeEnableReason": "Para religar as integrações, escreva o motivo com pelo menos 10 caracteres.",
+    "integrationRemoveEnabled": "Desligue a integração antes de removê-la. Remover uma integração ligada apagaria o registro do que ela podia fazer sem que ninguém tivesse decidido desligá-la."
   },
   "export": {
     "readmeTitle": "Seu protótipo do DZ23 STUDIO",
@@ -90,5 +91,15 @@
     "integrationDisabled": "Integração desligada.",
     "exportCreated": "Pacote do protótipo gerado.",
     "approvalRecorded": "Confirmação da pessoa registrada."
+  },
+  "test": {
+    "ok": "Conexão feita com \"{server}\". Ele anunciou {tools} ferramenta(s). Nenhuma foi executada.",
+    "disabled": "A integração está desligada. Ligue-a antes de testar.",
+    "noDispatcher": "Este Studio não tem com quem falar MCP agora, então o teste não foi executado. Isso é uma peça do Studio que falta, não um problema do seu servidor.",
+    "noManifest": "Esta integração não tem manifesto, então não há servidor para testar.",
+    "skillNoConnection": "Uma habilidade não se conecta a nada: não há conexão para testar.",
+    "webhookUnavailable": "Ainda não há teste para webhook. Bater no endereço sem passar pelos controles de chamada seria uma saída de rede sem auditoria, criada só para testar.",
+    "smtpElsewhere": "O e-mail tem teste próprio, que envia uma mensagem de verdade e por isso pede o destinatário.",
+    "timeout": "O servidor não respondeu a tempo. Isso não quer dizer que a configuração esteja errada: pode estar lento ou fora do ar agora."
   }
 }

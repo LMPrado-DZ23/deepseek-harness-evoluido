@@ -13,7 +13,7 @@
  * filho são derivados do teto do Hub em `mcpLimitsFromCallPolicy`, para que não
  * exista um segundo número capaz de discordar do primeiro.
  */
-import type { IntegrationCallPolicy, McpCallOutcome, McpDispatchInput, McpDispatchPort } from '@dz23-studio/integration-hub'
+import type { IntegrationCallPolicy, McpCallOutcome, McpDispatchInput, McpDispatchPort, McpProbeInput, McpProbeOutcome } from '@dz23-studio/integration-hub'
 import { t } from './i18n.js'
 import { openMcpConnection } from './client.js'
 import { DEFAULT_MCP_LIMITS, mcpServerCommandSchema, type McpConnectionLimits, type McpServerCommand } from './model.js'
@@ -88,6 +88,31 @@ export function createMcpDispatcher(options: {
   readonly limits: () => McpConnectionLimits
 }): McpDispatchPort {
   return {
+    /**
+     * O teste de conexão (X-04): sobe o servidor, cumprimenta, lê o catálogo e
+     * FECHA — sem chamar ferramenta nenhuma.
+     *
+     * `openMcpConnection` já faz exatamente esses três passos, e a conexão é
+     * fechada no `finally` pelo mesmo motivo do `call`: um aperto de mão que
+     * estourou o tempo ou foi abandonado é justamente o caso em que um processo
+     * de terceiro ficaria de pé no computador de alguém.
+     * @param input - qual servidor e até quando esperar.
+     * @returns quem respondeu e o que ele anunciou.
+     */
+    async probe(input: McpProbeInput): Promise<McpProbeOutcome> {
+      const command = Object.hasOwn(options.catalog, input.manifest.id) ? options.catalog[input.manifest.id] : undefined
+      if (command === undefined) throw new McpError('SPAWN_FAILED', t('errors.serverNotRegistered'))
+      const connection = await openMcpConnection(command, { limits: options.limits(), signal: input.signal })
+      try {
+        return {
+          protocolVersion: connection.identity.protocolVersion,
+          serverName: connection.identity.serverName,
+          tools: connection.tools.map(tool => tool.name),
+        }
+      } finally {
+        await connection.close()
+      }
+    },
     async call(input: McpDispatchInput): Promise<McpCallOutcome> {
       const command = Object.hasOwn(options.catalog, input.manifest.id) ? options.catalog[input.manifest.id] : undefined
       if (command === undefined) throw new McpError('SPAWN_FAILED', t('errors.serverNotRegistered'))

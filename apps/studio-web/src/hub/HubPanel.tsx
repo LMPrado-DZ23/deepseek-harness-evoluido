@@ -3,6 +3,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import t from '../i18n/hub.pt-BR.json'
 import { createHubApi, HubApiError, type ExportRecord, type HubApi, type HubEvent, type Integration, type IntegrationCatalog, type ProjectSummary, type SmtpState } from './hubApi'
 import { CATALOG_PAGE_SIZE, actionLabel, approvalNote, approvalPrompt, catalogCount, catalogEmptyMessage, confirmStep, costLabel, enableExplanation, exportable, fill, formatBytes, formatDate, healthCounts, healthLabel, kindLabel, outcomeLabel, tierLabel, verificationLabel, type ConfirmStepModel, type KindFilter, type StatusFilter } from './presentation'
+import { WebMcpPanel, useWebMcpSetting } from '../webmcp/WebMcpPanel'
+import { browserModelContext, registerStudioTools } from '../webmcp/tools'
+import { studioPort } from '../webmcp/studioPort'
 import './hub.css'
 
 type Notice = { kind: 'ok' | 'error' | 'info'; text: string } | null
@@ -33,6 +36,28 @@ function ConfirmStep({ pending, busy, onCancel, onConfirm }: { pending: Pending;
  * application stays untouched. Every server refusal is shown in words; the
  * panel never claims a state the server did not report.
  */
+/**
+ * O controle do WebMCP dentro do Hub.
+ *
+ * A porta que as ferramentas usam é a MESMA `api` do produto: nenhuma
+ * ferramenta ganha caminho próprio, e por isso a seção monta a porta a partir
+ * das chamadas que a tela já faz.
+ */
+function WebMcpSection() {
+  const storage = typeof window === 'undefined' ? undefined : window.localStorage
+  const [enabled, setEnabled] = useWebMcpSetting(storage)
+  const context = typeof document === 'undefined' ? undefined : browserModelContext(document as unknown as { modelContext?: unknown })
+  useEffect(() => {
+    if (!enabled || context === undefined) return undefined
+    const controller = new AbortController()
+    void registerStudioTools(context, studioPort, controller.signal)
+    // Desligar ABORTA, e é isto que tira as ferramentas do catálogo do agente:
+    // esconder o botão deixaria as ferramentas registradas.
+    return () => { controller.abort() }
+  }, [enabled, context])
+  return <WebMcpPanel available={context !== undefined} enabled={enabled} setEnabled={setEnabled} port={studioPort} />
+}
+
 export function HubPanel({ api = defaultHubApi, homeHref = '/studio/' }: { api?: HubApi; homeHref?: string }) {
   const [smtp, setSmtp] = useState<SmtpState | null>(null)
   const [projects, setProjects] = useState<ProjectSummary[] | null>(null)
@@ -65,6 +90,10 @@ export function HubPanel({ api = defaultHubApi, homeHref = '/studio/' }: { api?:
       <SmtpSection api={api} state={smtp} onChange={async () => { setSmtp(await api.smtp()); setEvents(await api.events()) }} notify={setNotice} report={report} />
       <IntegrationsSection api={api} onChange={async () => { setEvents(await api.events()) }} notify={setNotice} report={report} />
       <ExportsSection api={api} projects={projects} onChange={async () => { setEvents(await api.events()) }} notify={setNotice} report={report} />
+      {/* O WebMCP mora AQUI, e não numa tela de ajustes: o Hub é a tela do "o
+          que pode agir em nome deste espaço de trabalho", e o assistente do
+          navegador é exatamente mais um desses. */}
+      <WebMcpSection />
       <EventsSection events={events} />
     </main>
   </div>

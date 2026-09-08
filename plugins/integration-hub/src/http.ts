@@ -20,6 +20,11 @@ export const HUB_ROUTE_CONTRACTS = [
   { method: 'GET', path: '/integrations', access: 'authorized', permission: 'workspace.read', scope: 'workspace' },
   { method: 'POST', path: '/integrations', access: 'authorized', permission: 'integrations.manage', scope: 'workspace' },
   { method: 'POST', path: '/integrations/:integrationId/enabled', access: 'authorized', permission: 'integrations.manage', scope: 'workspace' },
+  // X-04: testar e remover fecham o ciclo de vida. `DELETE` e não um `POST
+  // /remove` porque o método já diz o que acontece: um intermediário que
+  // reenvia um POST por conta própria não pode apagar nada por engano.
+  { method: 'POST', path: '/integrations/:integrationId/test', access: 'authorized', permission: 'integrations.manage', scope: 'workspace' },
+  { method: 'DELETE', path: '/integrations/:integrationId', access: 'authorized', permission: 'integrations.manage', scope: 'workspace' },
   { method: 'GET', path: '/smtp', access: 'authorized', permission: 'workspace.read', scope: 'workspace' },
   { method: 'POST', path: '/approvals', access: 'authorized', permission: 'integrations.manage', scope: 'workspace' },
   { method: 'POST', path: '/smtp', access: 'authorized', permission: 'integrations.manage', scope: 'workspace' },
@@ -67,7 +72,7 @@ const approvalSchema = z.object({ approval_id: z.string().min(1) }).strict()
  * one target from being spent on another.
  */
 const approvalRequestSchema = z.object({
-  action: z.enum(['integration.enabled', 'smtp.configured', 'smtp.tested']),
+  action: z.enum(['integration.enabled', 'integration.removed', 'smtp.configured', 'smtp.tested']),
   subject_id: z.string().min(1),
   payload: z.string().min(1).max(320).optional(),
 }).strict()
@@ -91,6 +96,7 @@ const catalogQuerySchema = z.object({
 const enabledSchema = z.object({ enabled: z.boolean(), approval: approvalSchema.optional() }).strict()
 const smtpSchema = z.object({ secret_ref: z.string(), approval: approvalSchema.optional() }).strict()
 const smtpTestSchema = z.object({ to: z.string(), approval: approvalSchema.optional() }).strict()
+const removeSchema = z.object({ approval: approvalSchema.optional() }).strict()
 
 export function createHubHttpHandler(config: HubHttpConfig) {
   assertRouteContracts(HUB_ROUTE_CONTRACTS)
@@ -129,6 +135,17 @@ export function createHubHttpHandler(config: HubHttpConfig) {
         const body = enabledSchema.parse(await readJson(request))
         const integration = await service.setEnabled(actor, decodeURIComponent(enabledMatch[1]!), body.enabled, asApproval(body.approval))
         return json(response, 200, { integration: { ...integration, can_enable: service.canEnable(integration), requires_approval_tier: service.requiredApprovalTier(integration) } })
+      }
+      const testMatch = /^\/integrations\/([^/]+)\/test$/u.exec(route)
+      if (method === 'POST' && testMatch !== null) {
+        return json(response, 200, await service.testIntegration(actor, decodeURIComponent(testMatch[1]!)))
+      }
+      const removeMatch = /^\/integrations\/([^/]+)$/u.exec(route)
+      if (method === 'DELETE' && removeMatch !== null) {
+        // O corpo é OPCIONAL: a confirmação só existe quando o nível exige, e
+        // um DELETE sem corpo é o caso normal de uma integração T0/T1.
+        const body = removeSchema.parse(await readJsonOrEmpty(request))
+        return json(response, 200, { removed: await service.removeIntegration(actor, decodeURIComponent(removeMatch[1]!), asApproval(body.approval)) })
       }
       if (method === 'GET' && route === '/scope-switches') {
         return json(response, 200, { switches: service.scopeSwitches(actor) })
@@ -305,6 +322,33 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
     chunks.push(bytes)
   }
   return JSON.parse(Buffer.concat(chunks).toString('utf8'))
+}
+
+/**
+ * O corpo de um pedido que pode não ter corpo (X-04: `DELETE`).
+ *
+ * Sem corpo vale como `{}`, e não como erro: exigir `content-type` e um `{}`
+ * literal para apagar uma integração que não precisa de confirmação seria uma
+ * cerimônia que não protege nada. Um corpo PRESENTE continua passando pelas
+ * mesmas regras de tamanho e de tipo.
+ * @param request - o pedido.
+ * @returns o corpo lido, ou um objeto vazio quando não veio nenhum.
+ */
+async function readJsonOrEmpty(request: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = []; let size = 0
+  for await (const chunk of request) {
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+    size += bytes.length
+    if (size > JSON_LIMIT) throw new HubError('INVALID', t('errors.invalidRequest'))
+    chunks.push(bytes)
+  }
+  const body = Buffer.concat(chunks).toString('utf8').trim()
+  // Corpo vazio vale como `{}` mesmo com `content-type` declarado: um cliente
+  // que sempre manda o cabeçalho (e a maioria manda) não devia ser obrigado a
+  // inventar um `{}` literal para apagar algo que não pede confirmação.
+  if (body === '') return {}
+  if (!singleHeader(request.headers['content-type'])?.toLowerCase().startsWith('application/json')) throw new HubError('INVALID', t('errors.invalidRequest'))
+  return JSON.parse(body)
 }
 
 function json(response: ServerResponse, status: number, body: unknown): void {

@@ -26,6 +26,10 @@ export const REQUIRED_SLUGS = [
   'lovable', 'boltnew-boltdiy', 'v0', 'replit-agent-devin', 'zed', 'aider-claude-code-cline',
   // A skill entrou no repositorio: o inventario dela nao pode sumir depois.
   'ui-ux-pro-max-skill',
+  // WebMCP: nada e copiado, mas a referencia externa existe e o inventario dela
+  // e o que registra a decisao de seguranca tomada antes de escrever a primeira
+  // linha. Apagar o inventario apagaria a decisao.
+  'webmcp',
 ]
 
 /**
