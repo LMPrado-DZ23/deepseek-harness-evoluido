@@ -123,6 +123,10 @@ jobs:
           # Varredura de segredo: a CI não tinha nenhuma, e um segredo colado
           # por engano entrava no histórico sem um único sinal.
           pnpm gate:secrets
+          # P37 de referência externa. Sem este portão, um inventário pode
+          # perder o campo que decidiria a cópia - licença, marca, segredo -
+          # e o travessão passa por resposta.
+          pnpm gate:p37
           # P37 de licença. Recusa a família fonte-disponível (BSL, SSPL,
           # AGPL, Elastic, Commons Clause) e exige revisão humana registrada
           # para qualquer licença que não esteja nas duas listas.
