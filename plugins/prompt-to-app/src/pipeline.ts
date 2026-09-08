@@ -15,6 +15,7 @@ import { generateSchedulingLayer, writeSchedulingLayer } from './scheduling-gene
 import { assertGeneratedSource } from './import-policy.js'
 import { generateSaasLayer, writeSaasLayer } from './saas-generator.js'
 import { t } from './i18n.js'
+import { diffRunFiles, runReport, RUN_REPORT_FILE, type RunFileAuthor } from './run-report.js'
 import type { StudioPlan, StudioRun } from './model.js'
 import { assertCategoryCanGenerate } from './planner.js'
 import type { PromptModelPort } from './ports.js'
@@ -100,10 +101,21 @@ export class PromptToAppPipeline {
       let finalFailureState: 'BUILD_FAILED' | 'TESTS_FAILED' = 'BUILD_FAILED'
       let stopRetries = false
       let completedAttempts = 0
+    // O relato é montado com o que o pipeline JÁ sabe e hoje descarta: quem
+    // escreveu cada arquivo, o que os controles recusaram, e o que a tentativa
+    // anterior pediu para corrigir. Sem guardar isto, `kind: 'diff'` continuaria
+    // sendo um valor de esquema que nenhum código produz.
+    let attemptFiles: readonly { readonly path: string; readonly content: string; readonly author: RunFileAuthor }[] = []
+    let previousAttemptFiles: readonly { readonly path: string; readonly content: string }[] = []
+    let attemptFindings: readonly string[] = []
       for (let attempt = 1; attempt <= 3; attempt++) {
       activeAttempt = attempt
       completedAttempts = attempt
       activeStage = 'generate'
+      // O diagnóstico com que a tentativa COMEÇA é o que a anterior pediu para
+      // corrigir. Capturado aqui porque `diagnostic` é zerado assim que a
+      // geração dá certo.
+      const previousDiagnosticForReport = diagnostic ?? null
       if (isAborted(runOptions.signal)) return this.cancelled(actor, projectId, plan.plan_id, operationId, ownerSessionId, attempt - 1)
       const runId = attempt === 1 ? operationId : opaqueOperationId(`${operationId}-attempt-${attempt}`); const runDirectory = resolve(this.options.runsRoot, runId)
       activeRunId = runId; activeRunDirectory = runDirectory
@@ -117,10 +129,14 @@ export class PromptToAppPipeline {
       const dashboardLayer = generateDashboardLayer(spec, project.category)
       const saasLayer = generateSaasLayer(spec, project.category)
       const frameworkFiles = [dataLayer, authLayer, formLayer, crudLayer, ...(schedulingLayer === undefined ? [] : [schedulingLayer]), dashboardLayer, saasLayer].flatMap(layer => layer.files)
+      previousAttemptFiles = attemptFiles.map(file => ({ path: file.path, content: file.content }))
+      attemptFiles = frameworkFiles.map(file => ({ path: file.path, content: file.content, author: 'studio' as const }))
       const frameworkFindings = scanGeneratedContent(Object.fromEntries(frameworkFiles.map(file => [file.path, file.content])))
+      attemptFindings = frameworkFindings
       if (frameworkFindings.length > 0) {
         diagnostic = frameworkFindings.join('; '); finalFailureState = 'BUILD_FAILED'
         await this.recordFailure(actor, projectId, plan.plan_id, runId, runDirectory, attempt, null, diagnostic, 'verify', operationId, ownerSessionId)
+        await this.writeRunReport({ actor, projectId, runId, directory: runDirectory, stage: 'verify', runState: 'FAILED', attempt, files: attemptFiles, previousFiles: previousAttemptFiles, findings: attemptFindings, correction: previousDiagnosticForReport })
         continue
       }
       await writeDataLayer(runDirectory, dataLayer)
@@ -148,12 +164,19 @@ export class PromptToAppPipeline {
         diagnostic = error instanceof Error ? error.message : 'GENERATED_OUTPUT_REJECTED'
         finalFailureState = 'BUILD_FAILED'
         await this.recordFailure(actor, projectId, plan.plan_id, runId, runDirectory, attempt, null, diagnostic, 'generate', operationId, ownerSessionId)
+        await this.writeRunReport({ actor, projectId, runId, directory: runDirectory, stage: 'generate', runState: 'FAILED', attempt, files: attemptFiles, previousFiles: previousAttemptFiles, findings: attemptFindings, correction: previousDiagnosticForReport })
         continue
       }
+      attemptFiles = [
+        ...frameworkFiles.map(file => ({ path: file.path, content: file.content, author: 'studio' as const })),
+        ...generated.files.map(file => ({ path: file.path, content: file.content, author: 'model' as const })),
+      ]
       const findings = scanGeneratedContent(Object.fromEntries([...frameworkFiles, ...generated.files].map(file => [file.path, file.content])))
+      attemptFindings = findings
       if (findings.length > 0) {
         diagnostic = findings.join('; '); finalFailureState = 'BUILD_FAILED'
         await this.recordFailure(actor, projectId, plan.plan_id, runId, runDirectory, attempt, generated, diagnostic, 'verify', operationId, ownerSessionId)
+        await this.writeRunReport({ actor, projectId, runId, directory: runDirectory, stage: 'verify', runState: 'FAILED', attempt, files: attemptFiles, previousFiles: previousAttemptFiles, findings: attemptFindings, correction: previousDiagnosticForReport })
         continue
       }
       let buildPassed = false; let testPassed = false; let log = ''; let failedStage: StudioRun['stage'] = 'build'
@@ -210,6 +233,16 @@ export class PromptToAppPipeline {
       const lifecyclePassed = finished.finalState === 'E2E_OK' && finished.exported !== null && finished.cleaned && !finished.cleanupPending
       if (!lifecyclePassed && diagnostic === undefined) diagnostic = finished.finalState === 'CANCELLED' ? 'BUILDER_CANCELLED' : 'BUILDER_FAILED'
       if (diagnostic === undefined && lifecyclePassed) {
+        // O ciclo passou e não há atestação de aceitação: a execução termina
+        // BLOQUEADA (ver E-05). Mesmo assim os passos ROBARAM, e a pessoa tem
+        // direito de ver o que aconteceu - sair daqui sem gravar o relato era
+        // justamente o que a deixava com um código em inglês e nada mais.
+        await writeFile(resolve(runDirectory, 'pipeline.log'), log, 'utf8')
+        await this.writeRunReport({
+          actor, projectId, runId, directory: runDirectory, stage: 'verify', runState: 'BLOCKED_EXTERNAL',
+          attempt, files: attemptFiles, previousFiles: previousAttemptFiles, findings: attemptFindings,
+          correction: previousDiagnosticForReport,
+        })
         throw new BuilderLifecycleError('BLOCKED_EXTERNAL', 'ACCEPTANCE_ATTESTATION_UNAVAILABLE')
       }
       const state = diagnostic === undefined && buildPassed && testPassed && lifecyclePassed ? 'PASSED' : diagnostic === 'BUDGET_EXCEEDED' ? 'BUDGET_EXCEEDED' : 'FAILED'
@@ -219,6 +252,7 @@ export class PromptToAppPipeline {
       const artifactSha256 = state === 'PASSED' ? finished.exported!.sha256 : null
       await this.options.service.putRun(actor, this.runRecord(actor, projectId, plan.plan_id, state === 'PASSED' ? 'verify' : failedStage, attempt, state, 'full', runDirectory, generated, diagnostic ?? null, runId, operationId, ownerSessionId, verifiedAcceptanceChecks, artifactSha256))
       await this.recordEvidence(actor, projectId, runId, runDirectory, 'pipeline.log', 'build-log')
+      await this.writeRunReport({ actor, projectId, runId, directory: runDirectory, stage: state === 'PASSED' ? 'verify' : failedStage, runState: state, attempt, files: attemptFiles, previousFiles: previousAttemptFiles, findings: attemptFindings, correction: previousDiagnosticForReport })
       if (state === 'PASSED') {
         await this.options.service.transition(actor, projectId, 'BUILD_OK'); await this.options.service.transition(actor, projectId, 'TESTS_OK'); await this.options.service.transition(actor, projectId, 'VERIFIED_PROTOTYPE')
         return { state: 'VERIFIED_PROTOTYPE', runDirectory, attempts: attempt, message: t('pipeline.verified') }
@@ -249,7 +283,49 @@ export class PromptToAppPipeline {
     await this.recordEvidence(actor, projectId, runId, directory, 'pipeline.log', 'security-scan')
   }
 
-  private async recordEvidence(actor: PromptToAppActor, projectId: string, runId: string, directory: string, filename: string, kind: 'build-log' | 'security-scan' | 'test-report') {
+
+  /**
+   * Grava o relato do que aconteceu, em português, ao lado da execução.
+   *
+   * Ele vira evidência do tipo `diff` - que até agora era um valor de esquema
+   * que NENHUM código produzia. O arquivo é lido pela rota do relatório; a
+   * tela nunca lê o `pipeline.log` cru.
+   * @param input - o que o pipeline sabe sobre a tentativa.
+   */
+  private async writeRunReport(input: {
+    readonly actor: PromptToAppActor
+    readonly projectId: string
+    readonly runId: string
+    readonly directory: string
+    readonly stage: StudioRun['stage']
+    readonly runState: StudioRun['state']
+    readonly attempt: number
+    readonly files: readonly { readonly path: string; readonly content: string; readonly author: RunFileAuthor }[]
+    readonly previousFiles: readonly { readonly path: string; readonly content: string }[]
+    readonly findings: readonly string[]
+    readonly correction: string | null
+  }): Promise<void> {
+    try {
+      const log = await readFile(resolve(input.directory, 'pipeline.log'), 'utf8').catch(() => '')
+      const report = runReport({
+        stage: input.stage === 'generate' ? 'generate' : input.stage === 'build' ? 'build' : input.stage === 'test' ? 'test' : 'verify',
+        runState: input.runState,
+        attempt: input.attempt,
+        log,
+        files: diffRunFiles(input.files, input.previousFiles),
+        findings: input.findings,
+        correction: input.correction,
+      })
+      await writeFile(resolve(input.directory, RUN_REPORT_FILE), `${JSON.stringify(report, null, 2)}\n`, 'utf8')
+      await this.recordEvidence(input.actor, input.projectId, input.runId, input.directory, RUN_REPORT_FILE, 'diff')
+    } catch {
+      // O relato é para EXPLICAR o que aconteceu; falhar em explicar não pode
+      // derrubar a execução que a pessoa está esperando. A ausência do arquivo
+      // faz a rota responder que não há relato, que é a verdade.
+    }
+  }
+
+  private async recordEvidence(actor: PromptToAppActor, projectId: string, runId: string, directory: string, filename: string, kind: 'build-log' | 'security-scan' | 'test-report' | 'diff') {
     const bytes = await readFile(resolve(directory, filename)); const id = this.#createId()
     await this.options.service.putEvidence(actor, { evidence_id: id, run_id: runId, project_id: projectId, org_id: actor.orgId, tenant_id: actor.tenantId, kind, sha256: createHash('sha256').update(bytes).digest('hex'), size_bytes: bytes.byteLength, relative_path: `${runId}/${filename}`, created_at: this.#now().toISOString() })
   }

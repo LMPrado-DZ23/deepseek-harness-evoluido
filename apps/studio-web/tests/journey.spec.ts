@@ -146,11 +146,28 @@ test('percorre as cinco etapas, muda privacidade e termina sem alegar publicaç�
   // inglês e em caixa alta, para quem não programa.
   await expect(page.getByText('A criação foi interrompida antes de terminar. Nada foi publicado.')).toBeVisible({ timeout: 20_000 })
   await expect(page.getByText('ACCEPTANCE_ATTESTATION_UNAVAILABLE')).toBeHidden()
-  await page.getByText('Detalhes técnicos').click()
+  await page.locator('.result-technical > summary').click()
   await expect(page.getByText('ACCEPTANCE_ATTESTATION_UNAVAILABLE')).toBeVisible()
+  // E-06/E-07: mesmo terminando bloqueada, a execução EXPLICA o que aconteceu.
+  // Antes disto a pessoa terminava com um código em inglês e nada mais.
+  await expect(page.getByRole('heading', { name: 'O que aconteceu na criação' })).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText('Preparando as ferramentas do seu aplicativo')).toBeVisible()
+  await expect(page.getByText('Usando o aplicativo como uma pessoa usaria')).toBeVisible()
+  await expect(page.getByText('O que foi feito para você')).toBeVisible()
+  await expect(page.getByText('escrito pela IA').first()).toBeVisible()
+  // O detalhe técnico existe em cada etapa que rodou, e vem FECHADO: a pessoa
+  // lê a frase primeiro e abre o técnico se quiser.
+  const stageDetails = page.locator('.run-report .run-stage details')
+  await expect(stageDetails).toHaveCount(4)
+  expect(await stageDetails.first().evaluate(node => (node as HTMLDetailsElement).open)).toBe(false)
+  await stageDetails.first().locator('summary').click()
+  expect(await stageDetails.first().evaluate(node => (node as HTMLDetailsElement).open)).toBe(true)
+
   // O que mais importa nesta tela: mesmo terminando mal, ela não alega
   // publicação nenhuma.
   await expect(page.getByText('publicado na internet', { exact: false })).toHaveCount(0)
+  // E diz, com todas as letras, onde os arquivos estão: no computador dela.
+  await expect(page.getByText('Nada saiu do seu computador')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Ver meu protótipo' })).toHaveCount(0)
   expect(JSON.stringify(mutationBodies)).not.toMatch(/org_id|tenant_id|bootstrap_owner|"role"/u)
 

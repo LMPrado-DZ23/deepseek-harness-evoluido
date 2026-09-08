@@ -7,6 +7,7 @@ import { currentStepIndex, permanentTruthKind, privacyNotice, resultSentence, ro
 import { apiFailureMessage, apiFailureText, type ApiCallKind } from './pwa/apiFailure'
 import { GENERATION_REJECTED_STATE, postGeneration, startGeneration } from './pwa/generation'
 import { NotificationOptIn } from './pwa/NotificationOptIn'
+import { RunReport, isRunReport, type RunReportValue } from './RunReport'
 import { dispatchGenerationFinished } from './pwa/notifications'
 import { signOutInBrowser } from './session/signOut'
 import { currentSessionMode } from './session/currentSession'
@@ -54,6 +55,7 @@ export function App() {
   const [previewCodes, setPreviewCodes] = useState<VerificationCode[]>([])
   const [signingOut, setSigningOut] = useState(false)
   const [authenticatedSession, setAuthenticatedSession] = useState(false)
+  const [runReport, setRunReport] = useState<RunReportValue | null>(null)
   const previewFrame = useRef<HTMLIFrameElement>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const menuButton = useRef<HTMLButtonElement>(null)
@@ -183,6 +185,7 @@ export function App() {
       return
     }
     setResult(null)
+    setRunReport(null)
     setProjectState('GENERATING')
     await safely(() => pollProject(started.runId), 'read')
   }
@@ -204,6 +207,11 @@ export function App() {
               : current.stage === 'test' ? 'TESTS_FAILED' : 'BUILD_FAILED'
         setResult({ state, attempts: current.attempt, message: current.failure_code ?? (state === 'VERIFIED_PROTOTYPE' ? t.truth.verified : t.verification.failure), checks: current.acceptance_checks, ...(current.verification_codes === undefined ? {} : { verificationCodes: current.verification_codes }) })
         if (state === 'BLOCKED_EXTERNAL') setProjectState('PLAN_APPROVED')
+        // O relato é lido DEPOIS que a execução termina: é ele que tira a
+        // pessoa de um código em inglês e mostra o que realmente aconteceu.
+        await api<{ report: unknown }>(`/projects/${projectId}/report`)
+          .then(response => { setRunReport(isRunReport(response.report) ? response.report : null) })
+          .catch(() => { setRunReport(null) })
         dispatchGenerationFinished(window, { state, runId })
         return
       }
@@ -256,6 +264,7 @@ export function App() {
         {projectState === 'PLAN_APPROVED' ? <Action title={t.creation.title} detail={t.truth.creation} button={t.creation.start} action={generate} /> : null}
         {projectState === 'GENERATING' || projectState === 'BUILD_OK' || projectState === 'TESTS_OK' ? <Action title={t.creation.title} detail={t.creation.working} button={t.creation.cancel} action={cancelGeneration} /> : null}
         {result !== null ? <Verification result={result} previewActive={preview?.state === 'READY'} startPreview={startPreview} retry={generate} /> : null}
+        {runReport === null ? null : <RunReport report={runReport} />}
         {preview?.state === 'READY' ? <section className="preview-card"><div className="preview-heading"><div><h2>{t.preview.title}</h2><p>{t.preview.localOnly}</p></div><button className="secondary compact" onClick={() => void stopPreview()}>{t.preview.stop}</button></div><p className="truth">{t.preview.notPublished}</p>{previewCodes.length === 0 ? null : <section className="preview-codes" aria-live="polite"><h3>{t.preview.accessCodes}</h3><p>{t.preview.accessCodesHelp}</p><ul>{previewCodes.map(item => <li key={`${item.email}-${item.expires_at}-${item.code}`}><strong>{item.email}</strong>: <code>{item.code}</code></li>)}</ul></section>}<iframe ref={previewFrame} title={t.preview.frameTitle} src={`${preview.url}/__dz23/admission`} sandbox="allow-scripts allow-forms allow-same-origin" referrerPolicy="no-referrer" /></section> : null}
         {preview !== null && ['FAILED', 'EXPIRED', 'STOPPED'].includes(preview.state) ? <p className="context-note">{t.preview.closed}</p> : null}
         {error === '' ? null : <p className="error" role="alert">{error}</p>}

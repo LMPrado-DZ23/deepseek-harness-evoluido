@@ -93,7 +93,7 @@ async function fixture() {
 
 describe('prompt-to-app HTTP boundary', () => {
   it('declares every route with authorization and no client-owned scope', () => {
-    expect(PROMPT_TO_APP_ROUTE_CONTRACTS).toHaveLength(13)
+    expect(PROMPT_TO_APP_ROUTE_CONTRACTS).toHaveLength(14)
     expect(PROMPT_TO_APP_ROUTE_CONTRACTS.every(route => route.access === 'authorized' && route.permission !== null)).toBe(true)
   })
 

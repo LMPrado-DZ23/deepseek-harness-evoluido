@@ -1,6 +1,7 @@
 {
   "brand": "DZ23 STUDIO",
   "nav": { "home": "Início", "projects": "Meus projetos", "progress": "Acompanhar criação", "result": "Ver resultado", "help": "Ajuda", "settings": "Configurações", "soon": "em breve", "menuLabel": "Navegação do Studio" },
+  "report": { "title": "O que aconteceu na criação", "attempt": "Esta foi a tentativa número", "technical": "Detalhes técnicos", "statePassed": "concluído", "stateFailed": "parou aqui", "stateRunning": "em andamento", "stateNotRun": "não chegou a acontecer", "correctionTitle": "O que foi pedido para corrigir", "correctionHelp": "A tentativa anterior parou por este motivo, e ele foi enviado de volta para o assistente arrumar.", "findingsTitle": "O que foi recusado", "findingsHelp": "Os controles de segurança e privacidade recusaram estes itens antes de qualquer coisa rodar.", "filesTitle": "O que foi feito para você", "filesHelp": "Os arquivos do seu aplicativo. Nada saiu do seu computador.", "filesEmpty": "Nenhum arquivo chegou a ser escrito nesta tentativa.", "lines": "linhas", "authorModel": "escrito pela IA", "authorStudio": "escrito pelo Studio", "changeAdded": "novo", "changeChanged": "alterado", "changeUnchanged": "sem mudança" },
   "health": { "ok": "Tudo certo", "attention": "Atenção" },
   "account": { "signOut": "Sair", "signingOut": "Saindo…", "signOutFailed": "Não foi possível encerrar sua sessão. Confira a conexão e tente novamente." },
   "idea": {

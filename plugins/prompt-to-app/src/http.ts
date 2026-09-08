@@ -16,6 +16,7 @@ import { t } from './i18n.js'
 import { intakeAnswerSchema, nextIntakeQuestion, type IntakeConversation, type IntakeEngine } from './intake.js'
 import type { CodeGeneratorPort } from './pipeline.js'
 import type { PromptToAppJobService } from './jobs.js'
+import { RUN_REPORT_FILE } from './run-report.js'
 import { FormCategoryCapabilityError, type PlannerEngine } from './planner.js'
 import { studioProjectCategorySchema } from './model.js'
 import type { LogoProcessorPort } from './logo.js'
@@ -72,6 +73,7 @@ export const PROMPT_TO_APP_ROUTE_CONTRACTS = [
   { method: 'GET', path: '/projects', access: 'authorized', permission: 'project.read', scope: 'workspace' },
   { method: 'POST', path: '/projects', access: 'authorized', permission: 'project.write', scope: 'workspace' },
   { method: 'GET', path: '/projects/:projectId', access: 'authorized', permission: 'project.read', scope: 'project' },
+  { method: 'GET', path: '/projects/:projectId/report', access: 'authorized', permission: 'project.read', scope: 'project' },
   { method: 'POST', path: '/projects/:projectId/intake/answer', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'POST', path: '/projects/:projectId/design', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'POST', path: '/projects/:projectId/design/logo', access: 'authorized', permission: 'project.write', scope: 'project' },
@@ -150,6 +152,19 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
           evidence: config.service.evidence(actor, projectId),
         })
       }
+      if (request.method === 'GET' && matched.suffix === '/report') {
+        // O relato do que aconteceu, já em português. A tela NUNCA lê o
+        // `pipeline.log` cru: ele pode carregar caminho de disco e saída de
+        // ferramenta, e quem decide o que atravessa é o servidor.
+        config.service.assertAuthorized(actor, 'project.read')
+        config.service.project(actor, projectId)
+        const runs = config.service.runs(actor, projectId)
+        const latest = runs.at(-1)
+        const report = latest === undefined || latest.run_directory === 'not-created'
+          ? null
+          : await readRunReport(latest.run_directory)
+        return json(response, 200, { report })
+      }
       if (request.method === 'POST' && matched.suffix === '/intake/answer') {
         return await answerIntake(request, response, config, actor, projectId)
       }
@@ -202,6 +217,25 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
 const capturedMessageSchema = z.array(z.object({
   kind: z.enum(['code', 'invitation']), email: z.string().email(), code: z.string().regex(/^\d{6}$/u).optional(), expiresAt: z.iso.datetime(),
 }).passthrough()).max(20)
+
+/**
+ * Lê o relato gravado ao lado da execução.
+ *
+ * Ausência não é erro: uma execução antiga, ou interrompida antes de gravar,
+ * simplesmente não tem relato - e dizer isso é melhor do que inventar etapas.
+ * @param runDirectory - o diretório da execução.
+ * @returns o relato, ou `null`.
+ */
+async function readRunReport(runDirectory: string): Promise<unknown> {
+  try {
+    const raw = await readFile(resolve(runDirectory, RUN_REPORT_FILE), 'utf8')
+    if (raw.length > MAX_RUN_REPORT_BYTES) return null
+    return JSON.parse(raw)
+  } catch { return null }
+}
+
+/** Teto do relato: um log gigante não pode virar uma resposta gigante. */
+const MAX_RUN_REPORT_BYTES = 256 * 1024
 
 async function capturedVerificationCodes(runDirectory: string): Promise<readonly { email: string; code: string; expires_at: string }[]> {
   try {
@@ -277,10 +311,14 @@ async function authenticatedActor(request: IncomingMessage, config: PromptToAppH
 
 function matchRoute(method: string | undefined, path: string): { readonly projectId?: string; readonly suffix: string } | undefined {
   if ((method === 'GET' && (path === '/health' || path === '/projects')) || (method === 'POST' && path === '/projects')) return { suffix: path }
-  const match = /^\/projects\/([^/]+)(\/intake\/answer|\/design\/logo|\/design|\/plan\/approve|\/plan\/change|\/plan|\/generate\/cancel|\/generate)?$/u.exec(path)
+  const match = /^\/projects\/([^/]+)(\/intake\/answer|\/design\/logo|\/design|\/plan\/approve|\/plan\/change|\/plan|\/generate\/cancel|\/generate|\/report)?$/u.exec(path)
   if (match === null) return undefined
   const suffix = match[2] ?? ''
-  const allowed = (method === 'GET' && suffix === '') || (method === 'DELETE' && suffix === '') || (method === 'POST' && suffix !== '')
+  // `/report` só LÊ, então é a única leitura com sufixo. A lista continua
+  // fechada: um sufixo novo precisa entrar aqui E no contrato de rotas.
+  const allowed = (method === 'GET' && (suffix === '' || suffix === '/report'))
+    || (method === 'DELETE' && suffix === '')
+    || (method === 'POST' && suffix !== '' && suffix !== '/report')
   if (!allowed) return undefined
   return { projectId: decodeURIComponent(match[1]!), suffix }
 }

@@ -111,5 +111,11 @@
     "generateSpec": "AppSpec: {spec}",
     "generatePlan": "Plano: {plan}",
     "generateRepair": "A tentativa anterior falhou. Corrija somente a causa: {diagnostic}"
+  },
+  "stages": {
+    "install": "Preparando as ferramentas do seu aplicativo",
+    "build": "Montando o aplicativo",
+    "test": "Conferindo se as partes funcionam",
+    "e2e": "Usando o aplicativo como uma pessoa usaria"
   }
 }
