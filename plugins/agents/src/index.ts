@@ -11,6 +11,7 @@ import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { delimiter, extname, join, resolve } from 'node:path'
 import { accessSync, constants, existsSync } from 'node:fs'
+import { t } from './i18n.js'
 import {
   studioAgentLeasesDomainSpec,
   studioAgentRunsDomainSpec,
@@ -179,6 +180,16 @@ export async function apply(ctx: Context, config: Config = {}): Promise<void> {
   })
   const restartReconciliation = await service.reconcileInterruptedRuns()
   ctx.jobs.attachController('dz23-studio-agents')
+  // Encerramento ATIVO. Registrado depois da abertura dos domínios, então é
+  // descartado ANTES deles: o que o encerramento grava ainda encontra o
+  // armazenamento aberto. O que sobreviver ao prazo não é declarado morto -
+  // fica para a reconciliação do próximo início.
+  ctx.effect(() => async () => {
+    const outcome = await service.shutdown()
+    if (outcome.pending > 0) {
+      ctx.logger.warn(t('recovery.shutdownPending', { count: outcome.pending }))
+    }
+  }, 'studio-agents.shutdown')
   ctx.provide('studioAgents', {
     service,
     restartReconciliation,

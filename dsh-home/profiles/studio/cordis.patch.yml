@@ -118,6 +118,15 @@
             sandboxMode: workspace-write
             requiredPermission: project.write
             scope: project
+          # Encerrar uma execução parada em UNKNOWN. T3 porque nenhuma prova
+          # técnica sustenta a conclusão: quem decide é uma pessoa, com chave
+          # de acesso e um motivo escrito que fica gravado no registro.
+          studio_agent_resolve_unknown:
+            source: { kind: studio, external: false, stableChannel: true }
+            inferredTier: T3
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
           studio_team_start:
             source: { kind: studio, external: false, stableChannel: true }
             inferredTier: T2

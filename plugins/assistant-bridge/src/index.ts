@@ -125,6 +125,18 @@ export function createAssistantTools(bridge: StudioAssistantBridge): readonly To
       },
     }), ['provider', 'prompt', 'intended_paths', 'operation']),
     closedTool(defineTool({
+      name: 'studio_agent_resolve_unknown',
+      description: t('tools.resolveUnknown'),
+      parameters: {
+        run_id: { type: 'string', required: true, description: t('tools.runId') },
+        reason: { type: 'string', required: true, description: t('tools.resolveReason') },
+      },
+      output: jsonOutput,
+      async execute(args, exec) {
+        return { json: JSON.stringify(await bridge.resolveUnknownRun(asAssistantAgent(exec.agent), args.run_id, args.reason)) }
+      },
+    }), ['run_id', 'reason']),
+    closedTool(defineTool({
       name: 'studio_agent_list',
       description: t('tools.list'),
       parameters: {},

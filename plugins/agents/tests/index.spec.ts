@@ -43,6 +43,8 @@ describe('@dz23-studio/agents composition', { timeout: 30_000 }, () => {
     const leaseTables = { leases: table() }
     const closes = [vi.fn(() => Promise.resolve()), vi.fn(() => Promise.resolve())]
     let runtime!: StudioAgentsRuntime
+    const disposers: Array<readonly [string, () => unknown]> = []
+    const disposalOrder: string[] = []
     let hooks!: ReturnType<JobStart['run']>
     const coordinatorDispose = vi.fn(() => Promise.resolve())
     const parent = { session: { id: SessionId('person') } } as Agent
@@ -52,7 +54,11 @@ describe('@dz23-studio/agents composition', { timeout: 30_000 }, () => {
           ? { table: (name: 'runs') => runTables[name], close: closes[0] }
           : { table: (name: 'leases') => leaseTables[name], close: closes[1] })),
       },
-      effect: vi.fn((factory: () => unknown) => factory()),
+      effect: vi.fn((factory: () => unknown, label: string) => {
+        const disposer = factory()
+        if (typeof disposer === 'function') disposers.push([label, disposer as () => unknown])
+      }),
+      logger: { warn: vi.fn() },
       provide: vi.fn((_name: string, value: StudioAgentsRuntime) => { runtime = value }),
       on: vi.fn(() => vi.fn()),
       studioPolicy: { setDelegationGrantResolver: vi.fn(() => vi.fn()) },
@@ -102,6 +108,19 @@ describe('@dz23-studio/agents composition', { timeout: 30_000 }, () => {
     expect(ctx.subagents.start).toHaveBeenCalledWith('codex', expect.objectContaining({
       parent: expect.objectContaining({ session: expect.objectContaining({ header: expect.objectContaining({ cwd: expect.stringContaining(worktreeRoot) }) }) }),
     }))
-    await Promise.all(closes.map(close => close()))
+    // Encerramento: os descartes rodam na ordem inversa do registro, e o
+    // encerramento ativo TEM de acontecer antes de fechar o armazenamento -
+    // do contrário o que ele grava não teria onde cair.
+    for (const [label, dispose] of [...disposers].reverse()) {
+      disposalOrder.push(label)
+      await dispose()
+    }
+    expect(disposalOrder).toContain('studio-agents.shutdown')
+    expect(disposalOrder.indexOf('studio-agents.shutdown'))
+      .toBeLessThan(disposalOrder.indexOf('studio-agents.domainClose'))
+    expect(closes[0]).toHaveBeenCalledOnce()
+    expect(closes[1]).toHaveBeenCalledOnce()
+    // Nada ficou em voo, então o encerramento não tem por que reclamar.
+    expect(ctx.logger.warn).not.toHaveBeenCalled()
   })
 })

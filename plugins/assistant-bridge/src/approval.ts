@@ -26,6 +26,7 @@ export type AssistantApprovalAction =
   | 'studio.team.start.external-network'
   | 'studio.team.start.deploy'
   | 'studio.team.continue.sensitive'
+  | 'studio.agent.resolve-unknown'
 
 export interface AssistantApprovalPrincipal {
   readonly userId: string

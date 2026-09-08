@@ -82,8 +82,12 @@ async function harness(options: {
   })
   const reviewProposal = vi.fn(() => Promise.resolve({ text: 'diff', bytes: 4, files: ['src/safe/a.ts'] }))
   const applyProposal = vi.fn(() => Promise.resolve({ runId: 'run-1', status: 'APPLIED' as const, changedFiles: ['src/safe/a.ts'] }))
+  const resolveUnknownRun = vi.fn(async (runId: string, reason: string) => {
+    const index = runs.findIndex(candidate => candidate.run_id === runId)
+    if (index >= 0) runs[index] = { ...runs[index]!, status: 'FAILED', diagnostic: `encerrado: ${reason}` }
+  })
   const studioAgents = {
-    service: { start, reviewProposal, applyProposal },
+    service: { start, reviewProposal, applyProposal, resolveUnknownRun },
     runs: () => runs,
     leases: () => [],
     providerStates: () => ({ codex: 'NOT_PRESENT', 'claude-code': 'NOT_PRESENT' }),
@@ -137,7 +141,7 @@ async function harness(options: {
     await approvalAuthority.confirm(principal, approvalId)
   }
   return {
-    bridge, config, repositoryPath, runs, start, reviewProposal, applyProposal, jobs, principal,
+    bridge, config, repositoryPath, runs, start, reviewProposal, applyProposal, resolveUnknownRun, jobs, principal,
     teams, teamTasks, teamStart, teamStatus, teamContinue, teamCancel, studioAgentTeams,
     approvalAuthority, approvalRepository, strongIdentitySessions, confirm,
   }
@@ -222,6 +226,45 @@ describe('StudioAssistantBridge', () => {
     await h.approvalAuthority.confirm(h.principal, secondId)
     await expect(sensitive()).resolves.toMatchObject({ status: 'RUNNING' })
     expect(h.start).toHaveBeenCalledTimes(2)
+  })
+
+  it('only closes an UNKNOWN run after the person confirms, with a written reason', async () => {
+    const h = await harness()
+    h.runs.splice(0, h.runs.length, run({ repository_path: h.repositoryPath, status: 'UNKNOWN' }))
+    const resolve = () => h.bridge.resolveUnknownRun(agent(), 'run-1', 'Conferi no gerenciador: o processo não existe mais.')
+    // Sem confirmação humana o registro NÃO muda.
+    await expect(resolve()).rejects.toMatchObject({ approvalId: expect.any(String) })
+    expect(h.resolveUnknownRun).not.toHaveBeenCalled()
+    expect(h.runs[0]!.status).toBe('UNKNOWN')
+
+    await h.confirm(resolve)
+    await expect(resolve()).resolves.toMatchObject({ run_id: 'run-1', status: 'FAILED' })
+    expect(h.resolveUnknownRun).toHaveBeenCalledWith('run-1', 'Conferi no gerenciador: o processo não existe mais.')
+  })
+
+  it('refuses to close a run that is not UNKNOWN, and refuses an empty or oversized reason', async () => {
+    const h = await harness()
+    await expect(h.bridge.resolveUnknownRun(agent(), 'run-1', 'motivo suficiente'))
+      .rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    h.runs.splice(0, h.runs.length, run({ repository_path: h.repositoryPath, status: 'UNKNOWN' }))
+    await expect(h.bridge.resolveUnknownRun(agent(), 'run-1', '  '))
+      .rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    await expect(h.bridge.resolveUnknownRun(agent(), 'run-1', 'x'.repeat(501)))
+      .rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    await expect(h.bridge.resolveUnknownRun(agent(), 'run-2', 'motivo suficiente'))
+      .rejects.toMatchObject({ code: 'NOT_FOUND' })
+    expect(h.resolveUnknownRun).not.toHaveBeenCalled()
+  })
+
+  it('binds the confirmation to the exact reason that gets recorded', async () => {
+    const h = await harness()
+    h.runs.splice(0, h.runs.length, run({ repository_path: h.repositoryPath, status: 'UNKNOWN' }))
+    const confirmed = () => h.bridge.resolveUnknownRun(agent(), 'run-1', 'Conferi no gerenciador.')
+    await h.confirm(confirmed)
+    // Mesma confirmação, outra justificativa: a permissão não serve.
+    await expect(h.bridge.resolveUnknownRun(agent(), 'run-1', 'Outra justificativa qualquer.'))
+      .rejects.toMatchObject({ approvalId: expect.any(String) })
+    expect(h.resolveUnknownRun).not.toHaveBeenCalled()
   })
 
   it('refuses a sensitive start for good once the person denies it', async () => {

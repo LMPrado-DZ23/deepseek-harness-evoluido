@@ -27,6 +27,7 @@
           - studio_agent_review
           - studio_agent_cancel
           - studio_agent_apply
+          - studio_agent_resolve_unknown
           - studio_team_start
           - studio_team_start_sensitive
           - studio_team_list

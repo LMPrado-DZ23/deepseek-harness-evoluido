@@ -104,6 +104,17 @@ export declare class StudioAssistantBridge {
     cancelTeam(agent: AssistantAgent | undefined, teamId: string, reason?: string): Promise<AssistantTeamSummary>;
     list(agent: AssistantAgent | undefined): readonly AssistantRunSummary[];
     review(agent: AssistantAgent | undefined, runId: string): Promise<AssistantRunReview>;
+    /**
+     * A pessoa confirma que o programa externo realmente terminou - a única
+     * saída do estado UNKNOWN. Nenhuma prova técnica sustentou essa conclusão,
+     * então ela exige confirmação reforçada e um motivo escrito, e os dois ficam
+     * gravados no registro da execução.
+     * @param agent - a sessão do assistente que está pedindo.
+     * @param runId - a execução parada em UNKNOWN.
+     * @param reason - o que a pessoa verificou antes de decidir.
+     * @returns a execução já encerrada, como ela ficou gravada.
+     */
+    resolveUnknownRun(agent: AssistantAgent | undefined, runId: string, reason: string): Promise<AssistantRunSummary>;
     cancel(agent: AssistantAgent | undefined, runId: string, reason?: string): {
         run_id: string;
         outcome: "requested" | "already-finished";

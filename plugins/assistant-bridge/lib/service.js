@@ -193,6 +193,34 @@ export class StudioAssistantBridge {
         });
         return { ...summarize(run), diff_text: diff.text, main_changed_during_run: run.main_changed_during_run };
     }
+    /**
+     * A pessoa confirma que o programa externo realmente terminou - a única
+     * saída do estado UNKNOWN. Nenhuma prova técnica sustentou essa conclusão,
+     * então ela exige confirmação reforçada e um motivo escrito, e os dois ficam
+     * gravados no registro da execução.
+     * @param agent - a sessão do assistente que está pedindo.
+     * @param runId - a execução parada em UNKNOWN.
+     * @param reason - o que a pessoa verificou antes de decidir.
+     * @returns a execução já encerrada, como ela ficou gravada.
+     */
+    async resolveUnknownRun(agent, runId, reason) {
+        const principal = this.#principal(agent, 'project.write');
+        const repository = this.#repository(principal);
+        const run = this.#scopedRun(runId, principal, repository);
+        if (run.status !== 'UNKNOWN')
+            throw new AssistantBridgeError('INVALID_REQUEST', t('errors.notUnknown'));
+        const trimmed = reason.trim();
+        if (trimmed.length < 3 || trimmed.length > 500) {
+            throw new AssistantBridgeError('INVALID_REQUEST', t('errors.resolveReason'));
+        }
+        // A impressão digital cobre o motivo: confirmar um encerramento e gravar
+        // outra justificativa seriam duas coisas diferentes.
+        await this.#tier3(principal, repository, 'studio.agent.resolve-unknown', [runId, trimmed]);
+        await this.dependencies.studioAgents.service.resolveUnknownRun(runId, trimmed);
+        // Relido pelo MESMO caminho escopado: o resumo devolvido é o que ficou
+        // gravado, não o que este método achava que ia gravar.
+        return summarize(this.#scopedRun(runId, principal, repository));
+    }
     cancel(agent, runId, reason) {
         const principal = this.#principal(agent, 'project.write');
         const repository = this.#repository(principal);

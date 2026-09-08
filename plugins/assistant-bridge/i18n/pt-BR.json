@@ -31,7 +31,9 @@
     "taskId": "Identificador simples e único da tarefa.",
     "taskTitle": "Título curto da tarefa.",
     "taskRole": "Papel fechado: implementador, revisor, testador ou sintetizador.",
-    "taskDependencies": "Identificadores das tarefas que precisam estar aplicadas antes desta começar."
+    "taskDependencies": "Identificadores das tarefas que precisam estar aplicadas antes desta começar.",
+    "resolveUnknown": "Registra que uma pessoa confirmou que o programa externo de uma execução parada realmente terminou. Exige confirmação reforçada e um motivo escrito.",
+    "resolveReason": "O que você verificou para concluir que o programa terminou."
   },
   "errors": {
     "pluginObject": "A configuração do assistant-bridge precisa ser um objeto.",
@@ -76,7 +78,9 @@
     "approvalRequired": "Esta operação precisa da sua confirmação. Abra a confirmação pendente no DZ23 STUDIO, confirme com sua chave de acesso e peça de novo. Nada foi executado.",
     "approvalDenied": "Você recusou esta operação. Ela não será executada, e a recusa não pode ser desfeita por uma nova tentativa.",
     "approvalExhausted": "Houve pedidos de confirmação demais para esta mesma operação. Nada foi executado.",
-    "approvalNotConfigured": "NOT_CONFIGURED: operações sensíveis estão bloqueadas porque a autoridade de confirmação não foi montada nesta instalação."
+    "approvalNotConfigured": "NOT_CONFIGURED: operações sensíveis estão bloqueadas porque a autoridade de confirmação não foi montada nesta instalação.",
+    "notUnknown": "Esta execução não está no estado que exige a sua confirmação de encerramento.",
+    "resolveReason": "Escreva entre 3 e 500 caracteres explicando o que você verificou antes de encerrar."
   },
   "runtime": {
     "persona": "Trabalhe somente na cópia isolada e nos caminhos aprovados.",

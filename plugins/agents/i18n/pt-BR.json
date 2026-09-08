@@ -12,7 +12,8 @@
     "resolveReason": "Informe o motivo ao confirmar que a execução anterior terminou.",
     "resolveNotUnknown": "Só uma execução em estado desconhecido pode ser confirmada como encerrada.",
     "resolved": "Encerramento confirmado por uma pessoa: ",
-    "shutdownDeadline": "O encerramento atingiu o prazo e as execuções que continuavam ativas foram deixadas para a reconciliação do próximo início."
+    "shutdownDeadline": "O encerramento atingiu o prazo e as execuções que continuavam ativas foram deixadas para a reconciliação do próximo início.",
+    "shutdownPending": "studio-agents: {count} execução(ões) não terminaram dentro do prazo de encerramento e ficaram para a reconciliação do próximo início."
   },
   "git": {
     "filterUnsafe": "A configuração de filtros Git não pode ser neutralizada com segurança.",

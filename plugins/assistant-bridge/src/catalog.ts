@@ -4,6 +4,7 @@ import { t } from './i18n.js'
 export const ASSISTANT_TOOL_NAMES = [
   'studio_agent_start',
   'studio_agent_start_sensitive',
+  'studio_agent_resolve_unknown',
   'studio_agent_list',
   'studio_agent_review',
   'studio_agent_cancel',
@@ -44,6 +45,7 @@ const studioRule = (
 export const ASSISTANT_TOOL_POLICY = {
   studio_agent_start: studioRule('T2', 'project.write', 'workspace-write'),
   studio_agent_start_sensitive: studioRule('T3', 'project.write', 'workspace-write'),
+  studio_agent_resolve_unknown: studioRule('T3', 'project.write', 'workspace-write'),
   studio_agent_list: studioRule('T0', 'project.read', 'read-only'),
   studio_agent_review: studioRule('T0', 'project.read', 'read-only'),
   studio_agent_cancel: studioRule('T2', 'project.write', 'workspace-write'),
