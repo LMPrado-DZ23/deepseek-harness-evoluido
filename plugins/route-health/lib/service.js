@@ -360,7 +360,31 @@ export class StudioRouteHealthService {
             record_id: recordId(scope, route), org_id: scope.orgId, tenant_id: scope.tenantId,
             route, state, requests: 0, errors: 0, average_latency_ms: 0,
             input_tokens: 0, output_tokens: 0, estimated_cost_usd: 0,
+            ...this.capabilitiesOf(route),
             last_failure: null, updated_at: this.clock().toISOString(),
+        };
+    }
+    /**
+     * Os fatos declarados e derivados desta rota (M-03).
+     *
+     * Campo AUSENTE quando não há o que dizer: um `0` de janela seria lido como
+     * "não cabe nada" e um `false` de ferramentas seria lido como "não aceita",
+     * e as duas leituras são afirmações que ninguém fez.
+     * @param route - o nome da rota.
+     * @returns só os campos que têm resposta.
+     */
+    capabilitiesOf(route) {
+        const declared = this.config.capabilities !== undefined && Object.hasOwn(this.config.capabilities, route)
+            ? this.config.capabilities[route]
+            : undefined;
+        return {
+            ...(declared?.contextWindowTokens === undefined ? {} : { context_window_tokens: declared.contextWindowTokens }),
+            ...(declared?.supportsTools === undefined ? {} : { supports_tools: declared.supportsTools }),
+            // Derivado do MESMO fato que bloqueia em `enforceRoutePrivacy`: ser, ou
+            // não ser, a rota local. Se isto virasse configuração, alguém poderia
+            // marcar uma rota externa como local e a tela mentiria sobre para onde o
+            // texto da pessoa vai.
+            privacy: route === this.config.localRoute ? 'local' : 'externa',
         };
     }
     async record(scope, route, success, latencyMs, usage, failure) {
@@ -388,6 +412,12 @@ export class StudioRouteHealthService {
             : (consecutive >= threshold ? now : previous.circuit_opened_at ?? null);
         await this.repository.putRoute({
             ...previous, state, requests, errors,
+            // Os fatos declarados são reaplicados a cada gravação: uma linha gravada
+            // antes de a rota declarar a janela passa a carregá-la na próxima
+            // requisição, sem ninguém ter de migrar nada. E a privacidade é
+            // recalculada, para uma troca da rota local não deixar uma linha antiga
+            // dizendo `local` sobre uma rota que agora é externa.
+            ...this.capabilitiesOf(route),
             average_latency_ms: ((previous.average_latency_ms * previous.requests) + latencyMs) / requests,
             input_tokens: previous.input_tokens + input,
             output_tokens: previous.output_tokens + output,

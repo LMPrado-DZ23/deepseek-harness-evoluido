@@ -23,6 +23,12 @@ export declare const routeHealthRecordSchema: z.ZodObject<{
     input_tokens: z.ZodNumber;
     output_tokens: z.ZodNumber;
     estimated_cost_usd: z.ZodNumber;
+    context_window_tokens: z.ZodOptional<z.ZodNumber>;
+    supports_tools: z.ZodOptional<z.ZodBoolean>;
+    privacy: z.ZodOptional<z.ZodEnum<{
+        local: "local";
+        externa: "externa";
+    }>>;
     unpriced_requests: z.ZodOptional<z.ZodNumber>;
     consecutive_failures: z.ZodOptional<z.ZodNumber>;
     circuit_opened_at: z.ZodOptional<z.ZodNullable<z.ZodISODateTime>>;
@@ -86,6 +92,9 @@ export declare const studioRouteHealthDomainSpec: {
             estimated_cost_usd: number;
             last_failure: string | null;
             updated_at: string;
+            context_window_tokens?: number | undefined;
+            supports_tools?: boolean | undefined;
+            privacy?: "local" | "externa" | undefined;
             unpriced_requests?: number | undefined;
             consecutive_failures?: number | undefined;
             circuit_opened_at?: string | null | undefined;

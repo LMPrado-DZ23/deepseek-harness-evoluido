@@ -57,3 +57,43 @@ describe('Studio route-health domain', () => {
     expect(routeSwitchEventSchema.safeParse({}).success).toBe(false)
   })
 })
+
+describe('M-03 — o esquema recusa o que não é uma resposta', () => {
+  it('janela de contexto tem de ser um inteiro POSITIVO: `0` seria lido como "não cabe nada"', () => {
+    const base = routeHealthRecordSchema.parse({
+      record_id: 'r', org_id: 'o', tenant_id: 't', route: 'x', state: 'OK',
+      requests: 0, errors: 0, average_latency_ms: 0, input_tokens: 0, output_tokens: 0,
+      estimated_cost_usd: 0, last_failure: null, updated_at: '2026-09-08T00:00:00.000Z',
+    })
+    for (const value of [0, -1, 1.5, '128000']) {
+      expect(routeHealthRecordSchema.safeParse({ ...base, context_window_tokens: value }).success).toBe(false)
+    }
+    expect(routeHealthRecordSchema.safeParse({ ...base, context_window_tokens: 128_000 }).success).toBe(true)
+    // Ausente continua valendo: é o estado DESCONHECIDO.
+    expect(routeHealthRecordSchema.safeParse(base).success).toBe(true)
+  })
+
+  it('a privacidade só aceita `local` ou `externa`: texto livre viraria uma promessa qualquer', () => {
+    const base = routeHealthRecordSchema.parse({
+      record_id: 'r', org_id: 'o', tenant_id: 't', route: 'x', state: 'OK',
+      requests: 0, errors: 0, average_latency_ms: 0, input_tokens: 0, output_tokens: 0,
+      estimated_cost_usd: 0, last_failure: null, updated_at: '2026-09-08T00:00:00.000Z',
+    })
+    for (const value of ['LOCAL', 'privado-local', 'externo', '', 'sim']) {
+      expect(routeHealthRecordSchema.safeParse({ ...base, privacy: value }).success).toBe(false)
+    }
+    for (const value of ['local', 'externa']) {
+      expect(routeHealthRecordSchema.safeParse({ ...base, privacy: value }).success).toBe(true)
+    }
+  })
+
+  it('suporte a ferramentas é booleano, e ausente NÃO é `false`', () => {
+    const base = routeHealthRecordSchema.parse({
+      record_id: 'r', org_id: 'o', tenant_id: 't', route: 'x', state: 'OK',
+      requests: 0, errors: 0, average_latency_ms: 0, input_tokens: 0, output_tokens: 0,
+      estimated_cost_usd: 0, last_failure: null, updated_at: '2026-09-08T00:00:00.000Z',
+    })
+    expect(routeHealthRecordSchema.safeParse({ ...base, supports_tools: 'sim' }).success).toBe(false)
+    expect(routeHealthRecordSchema.parse(base).supports_tools).toBeUndefined()
+  })
+})

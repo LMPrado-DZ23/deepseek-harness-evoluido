@@ -755,3 +755,96 @@ describe('C-22: privado-local nunca cai para rota externa', () => {
     expect(enforceRoutePrivacy('melhor-qualidade', LOCAL_ROUTE, forbidden, 'bloqueado')).toBe(forbidden)
   })
 })
+
+function m03(capabilities?: RouteHealthConfig['capabilities']) {
+  const repository = new MemoryRepository()
+  return {
+    repository,
+    service: new StudioRouteHealthService(repository, {
+      routes: ['ollama', 'omniroute', 'deepseek-official'],
+      localRoute: 'ollama', fallbackRoute: 'deepseek-official', fallbackModel: 'deepseek-v4-flash',
+      now: () => new Date('2026-09-03T00:00:00.000Z'), createId: () => 'event-1',
+      ...(capabilities === undefined ? {} : { capabilities }),
+    }),
+  }
+}
+
+describe('M-03 — o que cada rota sabe fazer, e o que ela NÃO diz', () => {
+  it('a janela de contexto e o suporte a ferramentas são DECLARADOS, e chegam ao registro', () => {
+    const rows = m03({
+      ollama: { contextWindowTokens: 8_192, supportsTools: false },
+      'deepseek-official': { contextWindowTokens: 128_000, supportsTools: true },
+    }).service.list(scope)
+    expect(rows.find(row => row.route === 'ollama')).toMatchObject({ context_window_tokens: 8_192, supports_tools: false })
+    expect(rows.find(row => row.route === 'deepseek-official')).toMatchObject({ context_window_tokens: 128_000, supports_tools: true })
+  })
+
+  it('rota sem declaração fica DESCONHECIDA, e não com zero nem com `false`', () => {
+    // Um `0` de janela seria lido como "não cabe nada" e um `false` de
+    // ferramentas seria lido como "não aceita". As duas são afirmações que
+    // ninguém fez.
+    const row = m03().service.list(scope).find(candidate => candidate.route === 'deepseek-official')!
+    expect(row.context_window_tokens).toBeUndefined()
+    expect(row.supports_tools).toBeUndefined()
+  })
+
+  it('declaração parcial traz só o que foi declarado', () => {
+    const row = m03({ 'deepseek-official': { supportsTools: true } }).service.list(scope)
+      .find(candidate => candidate.route === 'deepseek-official')!
+    expect(row.supports_tools).toBe(true)
+    expect(row.context_window_tokens).toBeUndefined()
+  })
+
+  it('a PRIVACIDADE não é declarada: ela é derivada do mesmo fato que bloqueia', () => {
+    // Se fosse configuração, alguém marcaria uma rota externa como local e a
+    // tela mentiria sobre para onde o texto da pessoa vai.
+    const rows = m03().service.list(scope)
+    expect(rows.find(row => row.route === 'ollama')!.privacy).toBe('local')
+    expect(rows.find(row => row.route === 'deepseek-official')!.privacy).toBe('externa')
+    expect(rows.find(row => row.route === 'omniroute')!.privacy).toBe('externa')
+  })
+
+  it('uma declaração NÃO consegue marcar a rota externa como local, nem contrabandeando o campo', () => {
+    // O tipo não oferece `privacy`, e este teste passa por baixo do tipo de
+    // propósito: se um dia alguém abrir essa porta na configuração, a tela
+    // passa a mentir sobre para onde o texto da pessoa vai, e é aqui que isso
+    // tem de falhar.
+    const smuggled = { 'deepseek-official': { contextWindowTokens: 1, supportsTools: true, privacy: 'local' } } as never
+    const rows = m03(smuggled).service.list(scope)
+    expect(rows.find(row => row.route === 'deepseek-official')!.privacy).toBe('externa')
+    // E o contrário também: a rota local não vira externa por declaração.
+    const other = m03({ ollama: { privacy: 'externa' } } as never).service.list(scope)
+    expect(other.find(row => row.route === 'ollama')!.privacy).toBe('local')
+  })
+
+  it('os fatos sobrevivem a uma requisição registrada, e não somem na gravação', async () => {
+    const h = m03({ 'deepseek-official': { contextWindowTokens: 128_000, supportsTools: true } })
+    await collect(h.service.streamWithFallback(scope, options,
+      () => chunks({ type: 'text-delta', text: 'oi' } as StreamChunk), () => chunks()))
+    const stored = [...h.repository.routeMap.values()].find(row => row.route === 'omniroute')
+    expect(stored).toMatchObject({ privacy: 'externa', requests: 1 })
+    const external = h.service.list(scope).find(row => row.route === 'deepseek-official')!
+    expect(external).toMatchObject({ context_window_tokens: 128_000, supports_tools: true })
+  })
+
+  it('uma linha gravada ANTES da declaração passa a carregá-la na requisição seguinte', async () => {
+    // Sem isto, declarar a janela de uma rota exigiria migrar linhas.
+    const repository = new MemoryRepository()
+    const before = new StudioRouteHealthService(repository, {
+      routes: ['omniroute'], localRoute: 'ollama', fallbackRoute: 'omniroute', fallbackModel: 'x',
+      now: () => new Date('2026-09-03T00:00:00.000Z'), createId: () => 'event-1',
+    })
+    await collect(before.streamWithFallback(scope, options,
+      () => chunks({ type: 'text-delta', text: 'oi' } as StreamChunk), () => chunks()))
+    expect([...repository.routeMap.values()][0]!.context_window_tokens).toBeUndefined()
+
+    const after = new StudioRouteHealthService(repository, {
+      routes: ['omniroute'], localRoute: 'ollama', fallbackRoute: 'omniroute', fallbackModel: 'x',
+      capabilities: { omniroute: { contextWindowTokens: 64_000 } },
+      now: () => new Date('2026-09-03T00:00:00.000Z'), createId: () => 'event-2',
+    })
+    await collect(after.streamWithFallback(scope, options,
+      () => chunks({ type: 'text-delta', text: 'oi' } as StreamChunk), () => chunks()))
+    expect([...repository.routeMap.values()][0]!.context_window_tokens).toBe(64_000)
+  })
+})

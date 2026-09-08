@@ -8,6 +8,11 @@ export interface RoutePrice {
     readonly inputPerMillion: number;
     readonly outputPerMillion: number;
 }
+/** O que uma rota declara saber fazer (M-03). Campo ausente = DESCONHECIDO, nunca zero nem `false`. */
+export interface RouteCapability {
+    readonly contextWindowTokens?: number;
+    readonly supportsTools?: boolean;
+}
 /**
  * Os três perfis de rota, pelo nome que a pessoa lê.
  *
@@ -103,6 +108,15 @@ export interface RouteHealthConfig {
     readonly fallbackModel: string;
     readonly localRoute: string;
     readonly prices?: Readonly<Record<string, RoutePrice>>;
+    /**
+     * O que cada rota DECLARA saber fazer (M-03): janela de contexto e suporte a
+     * ferramentas.
+     *
+     * Declaração, e não medida, porque não há como medir a janela de um provedor
+     * de fora. Rota ausente daqui fica com os dois campos ausentes no registro —
+     * DESCONHECIDO — e nunca com um número inventado.
+     */
+    readonly capabilities?: Readonly<Record<string, RouteCapability>>;
     /** Ausente = padrão da casa (`DEFAULT_ROUTE_CIRCUIT`). */
     readonly circuit?: RouteCircuitConfig;
     /**
@@ -205,6 +219,16 @@ export declare class StudioRouteHealthService {
     streamWithFallback(scope: RouteScope, options: GenerateOptions, next: () => AsyncIterable<StreamChunk>, fallback: (options: GenerateOptions) => AsyncIterable<StreamChunk>, explicitRoute?: boolean, privacy?: RoutePrivacy): AsyncIterable<StreamChunk>;
     private get;
     private baseRecord;
+    /**
+     * Os fatos declarados e derivados desta rota (M-03).
+     *
+     * Campo AUSENTE quando não há o que dizer: um `0` de janela seria lido como
+     * "não cabe nada" e um `false` de ferramentas seria lido como "não aceita",
+     * e as duas leituras são afirmações que ninguém fez.
+     * @param route - o nome da rota.
+     * @returns só os campos que têm resposta.
+     */
+    private capabilitiesOf;
     private record;
     private auditSwitch;
 }

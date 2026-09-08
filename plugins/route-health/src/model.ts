@@ -27,6 +27,38 @@ export const routeHealthRecordSchema = z.object({
    * já rodou - não existe passo de migração. Registro antigo, sem o campo,
    * significa zero não precificadas.
    */
+  /**
+   * A janela de contexto desta rota, em tokens (M-03).
+   *
+   * DECLARADA por quem configurou a rota, nunca adivinhada: o Studio não tem
+   * como medir a janela de um provedor de fora, e um número inventado aqui
+   * viraria "cabe" ou "não cabe" na tela de alguém. AUSENTE quer dizer
+   * DESCONHECIDA, e a tela tem de dizer desconhecida — não zero, que seria
+   * lido como "não cabe nada".
+   *
+   * Opcional pelo mesmo motivo dos demais: a versão do domínio não pode subir,
+   * porque `open()` falha com `version-mismatch` em qualquer instalação que já
+   * rodou e não existe passo de migração neste seam.
+   */
+  context_window_tokens: z.number().int().positive().optional(),
+  /**
+   * Se esta rota aceita ferramentas (M-03).
+   *
+   * Também DECLARADA. Ausente = desconhecido. `false` e "não sei" são coisas
+   * diferentes: com `false` o Studio pode escolher outra rota para uma tarefa
+   * com ferramentas; com "não sei" ele não pode afirmar nada.
+   */
+  supports_tools: z.boolean().optional(),
+  /**
+   * A privacidade DESTA rota (M-03): `local` quando ela é a IA que roda neste
+   * computador, `externa` quando o texto sai daqui.
+   *
+   * Este NÃO é declarado: é derivado do mesmo fato que `enforceRoutePrivacy`
+   * usa para bloquear — ser, ou não ser, a rota local configurada. Deixar isto
+   * como configuração permitiria alguém marcar uma rota externa como local e a
+   * tela passaria a mentir sobre para onde o texto vai.
+   */
+  privacy: z.enum(['local', 'externa']).optional(),
   unpriced_requests: z.number().int().nonnegative().optional(),
   /**
    * Falhas seguidas desde o último sucesso desta rota, NESTE escopo.
