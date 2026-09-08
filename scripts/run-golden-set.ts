@@ -53,10 +53,25 @@ if (preflight.state !== 'BLOCKED_EXTERNAL') throw new Error('INGRESS_MUST_REMAIN
 
 const criteriaFiles = (await readdir(criteriaDir)).filter(file => file.endsWith('.yml')).sort()
 const briefFiles = (await readdir(briefsDir)).filter(file => file.endsWith('.md')).sort()
-if (criteriaFiles.length !== 18) throw new Error(`Golden set inválido: esperado exatamente 18 critérios, encontrado ${criteriaFiles.length}.`)
-if (briefFiles.length !== 18) throw new Error(`Golden set inválido: esperado exatamente 18 briefs, encontrado ${briefFiles.length}.`)
+const EXPECTED_FIXTURES = 21
+if (criteriaFiles.length !== EXPECTED_FIXTURES) throw new Error(`Golden set inválido: esperado exatamente ${EXPECTED_FIXTURES} critérios, encontrado ${criteriaFiles.length}.`)
+if (briefFiles.length !== EXPECTED_FIXTURES) throw new Error(`Golden set inválido: esperado exatamente ${EXPECTED_FIXTURES} briefs, encontrado ${briefFiles.length}.`)
 const expectedBriefFiles = criteriaFiles.map(file => `${basename(file, '.yml')}.md`)
 if (JSON.stringify(briefFiles) !== JSON.stringify(expectedBriefFiles)) throw new Error('Golden set inválido: briefs e critérios não têm correspondência exata.')
+// Cada categoria implementada precisa de pelo menos três casos. Sem esta
+// conta, `scheduling` estava declarada em UM arquivo chamado
+// `form-database-01`, e as outras duas agendas rodavam o gerador de formulário
+// - o conjunto testava o gerador errado para o pedido, e ninguém via.
+const perCategory = new Map<string, number>()
+for (const file of criteriaFiles) {
+  const criterion = parseCriterion(JSON.parse(await readFile(resolve(criteriaDir, file), 'utf8')), file)
+  perCategory.set(criterion.category, (perCategory.get(criterion.category) ?? 0) + 1)
+}
+for (const category of implemented) {
+  const total = perCategory.get(category) ?? 0
+  if (total < 3) throw new Error(`Golden set inválido: categoria ${category} tem ${total} casos; o mínimo é 3.`)
+}
+
 const scratch = await mkdtemp(join(tmpdir(), 'dz23-golden-'))
 const results: Array<{ id: string; category: string; state: GoldenState; critical: string; technical_checks_passed: number | null; declared_criteria_passed: number | null; declared_criteria_not_automated: number | null; detail: string }> = []
 const seenIds = new Set<string>()

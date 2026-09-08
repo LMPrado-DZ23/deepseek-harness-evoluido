@@ -1,1 +1,1 @@
-{"id":"form-database-03","category":"form-database","sensitive":false,"acceptance":["preencher, salvar e encontrar na lista","horários consistentes","confirmação auditável"]}
+{"id":"form-database-03","category":"form-database","sensitive":false,"acceptance":["registrar o chamado com título, descrição e prioridade","encontrar o chamado registrado na lista","acesso restrito à equipe autenticada"]}

@@ -1,0 +1,1 @@
+{"id": "scheduling-01", "category": "scheduling", "sensitive": false, "acceptance": ["criar uma reserva pendente", "evitar reserva duplicada", "confirmar ou cancelar com sessão autorizada"]}

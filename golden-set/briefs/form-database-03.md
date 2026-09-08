@@ -1,2 +1,2 @@
-# Agenda 03
-Alugo uma quadra por hora e preciso que o cliente veja os horários livres, reserve e receba a confirmação sem eu mexer em planilha.
+# Cadastro 03
+Minha equipe precisa registrar chamados internos num formulário com título, descrição e prioridade, e depois encontrar cada chamado registrado numa lista organizada.
