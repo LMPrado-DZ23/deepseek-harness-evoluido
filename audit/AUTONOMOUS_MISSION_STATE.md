@@ -347,3 +347,47 @@ anotadas.
 `NOT_EXECUTED`: PostgreSQL real; `pnpm-lock.release.yaml` continua defasado, de
 modo que a **imagem de release ainda não contém M90**.
 `NOT_IMPLEMENTED`: montagem em perfil e consumidor real.
+
+## M90-A/B/C e M75-C — a autoridade montada, respondendo e com tela (Claude, 08/09/2026)
+
+Base `claude/integration-candidate-20260907@61ba89e`. Nada anterior foi reescrito.
+
+Quatro commits: `b6d2ba2` (montagem do M90-A e fim da permissão T3 fabricada),
+`617e27d` (respondedor do seam do Harness), `56546ee` (tela de confirmação e
+correção de um portão que não podia falhar), `a70e29a` (saída do `UNKNOWN` e
+`shutdown` ligado ao ciclo de vida). HEAD `a70e29a`.
+
+**O maior achado aberto das três auditorias está fechado.** O portão que de fato
+rodava era `approval: { approved: true, tier }` fabricado no `assistant-bridge`:
+o modelo pedia uma operação sensível e o servidor se autoconcedia a permissão.
+Isso era anterior a `f1677b4` — não era regressão da candidata.
+
+O beco sem saída do `approval.requested` (auditoria C) também está fechado, e
+**sem tocar no Harness**: o seam resolve a pergunta só com respondedores
+compostos no mesmo processo, então bastava compor o respondedor — que é o papel
+de Service Provider do próprio seam. `UPSTREAM_PIN=PASS commit=6c705be1`.
+
+21 mutações derrubam os testes. Três sobreviveram à primeira rodada e forçaram
+testes melhores: identificadores fixos que viravam beco sem saída; duas perguntas
+idênticas do Harness reusando uma confirmação só; e o portão de contraste, que
+buscava `color:#` e casava dentro de `border-color:#…` — **qualquer regra com
+`border-color` passava**. Consertado, ele achou na hora um defeito real que já
+estava lá.
+
+Executado: `tsc --noEmit` PASS (raiz e `apps/studio-web`); `pnpm build` PASS;
+suíte raiz com **PostgreSQL 16.13 real** 2182 aprovados, 60 pulados, 3
+reprovados apenas por rodar como uid 0 (os mesmos três arquivos passam 103/103
+como usuário não privilegiado); `apps/studio-web` 115 testes; coverage sem
+nenhuma violação de limiar (96,11% stmts / 93,58% branches);
+`ASSISTANT_TOOL_CATALOG=PASS tools=14`; `I18N_GATE=PASS catalogs=15`;
+`DOMAIN_ROUTE_GATE=PASS domains=26`; domain-scopes PASS;
+`PORTABILITY=PASS findings=0`; `UPSTREAM_PIN=PASS`;
+**P37 PASS 471 arquivos / 19 manifests / 1 licença / 0 achados**.
+
+`BLOCKED_EXTERNAL`: Docker (imagem de release), Windows nativo, celular físico,
+domínio e SMTP reais, e a fase 0.5 com cinco pessoas leigas (E4/ADR-016).
+`NOT_EXECUTED`: `pnpm-lock.release.yaml` continua defasado — a imagem de release
+**não contém** esta candidata.
+`NOT_IMPLEMENTED`: tela dedicada para uma execução parada em `UNKNOWN`.
+
+Sem merge, sem push, sem deploy, sem Docker. Nada apagado, nada desrastreado.
