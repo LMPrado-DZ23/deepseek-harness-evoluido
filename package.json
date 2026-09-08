@@ -64,7 +64,8 @@
     "prove:backup-restore": "node scripts/prove-backup-restore.mjs",
     "i18n:baseline": "node scripts/build-i18n-baseline.mjs",
     "gate:tracked-lib": "node scripts/check-tracked-lib.mjs --self-test && node scripts/check-tracked-lib.mjs",
-    "gate:image-lock": "node scripts/check-image-lock.mjs"
+    "gate:image-lock": "node scripts/check-image-lock.mjs",
+    "gate:requirements-ledger": "node scripts/check-requirements-ledger.mjs --self-test && node scripts/check-requirements-ledger.mjs"
   },
   "devDependencies": {
     "@deepseek-ai/dsh-storage": "workspace:*",
