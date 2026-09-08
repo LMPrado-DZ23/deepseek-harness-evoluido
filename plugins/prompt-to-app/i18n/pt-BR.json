@@ -62,10 +62,10 @@
     "designNotFound": "As escolhas visuais deste projeto ainda não existem.",
     "designContrast": "A combinação de cores não atinge contraste AA.",
     "designPrimary": "Escolha a cor principal da sua marca.",
-    "invalidLogo": "Envie uma imagem PNG ou JPEG de até 2 MB."
-    ,"formDatabaseRequired": "Para criar cadastro e lista, diga quais informações precisam ser guardadas."
-    ,"formReferenceRequiresCrud": "Este cadastro depende de outro cadastro obrigatório. Essa ligação será liberada junto com o painel completo na próxima etapa."
-    ,"formEntryFileRequired": "O plano precisa incluir a tela principal de cadastro e lista."
+    "invalidLogo": "Envie uma imagem PNG ou JPEG de até 2 MB.",
+    "formDatabaseRequired": "Para criar cadastro e lista, diga quais informações precisam ser guardadas.",
+    "formReferenceRequiresCrud": "Este cadastro depende de outro cadastro obrigatório. Essa ligação será liberada junto com o painel completo na próxima etapa.",
+    "formEntryFileRequired": "O plano precisa incluir a tela principal de cadastro e lista."
   },
   "pipeline": {
     "verified": "Protótipo verificado — não está publicado nem disponível para outras pessoas",
@@ -76,7 +76,8 @@
   },
   "values": {
     "confirmed": "confirmado",
-    "notConfirmed": "não confirmado"
+    "notConfirmed": "não confirmado",
+    "dynamicImport": "<dinâmico>"
   },
   "checks": {
     "auth": "acesso: sem sessão recebe 401 e login por código funciona",
@@ -98,10 +99,10 @@
     "planFiles": "Cada fatia precisa listar planned_files. Use somente caminhos sob src/ ou content/.",
     "planFirst": "A primeira fatia deve criar content/app.json e src/GeneratedApp.tsx. Use somente classes existentes para o visual; não planeje arquivos CSS.",
     "planFormDatabase": "Para a categoria de cadastro e lista, a tela principal deve importar os componentes protegidos de @/src/components/generated/, mostrar os campos, salvar e exibir a lista. O modelo nunca cria banco, migração, repositório ou ação de gravação.",
-      "planCrudPanel": "Para o painel de gestão, a tela principal deve importar o painel protegido de @/src/components/generated/. O painel faz login, lista, cria, edita e exclui com confirmação; o modelo nunca cria autenticação, banco ou ações.",
-      "planScheduling": "Para a agenda, a tela principal deve importar SchedulingPanel de @/src/components/generated/scheduling-panel. O Studio já controla autenticação, banco, horários, conflitos e mudanças de situação; o modelo só compõe a apresentação.",
-      "planDashboard": "Para o painel, a tela principal deve importar os painéis somente leitura de @/src/components/generated/dashboards/. O Studio já controla autenticação, banco, contagens, gráficos e tabelas; o modelo só compõe a apresentação.",
-      "planSaas": "Para o aplicativo de equipe, a tela principal deve importar SaasPanel de @/src/components/generated/. O Studio já controla login, autoria, isolamento por pessoa e ações de gravação; o modelo só compõe a apresentação.",
+    "planCrudPanel": "Para o painel de gestão, a tela principal deve importar o painel protegido de @/src/components/generated/. O painel faz login, lista, cria, edita e exclui com confirmação; o modelo nunca cria autenticação, banco ou ações.",
+    "planScheduling": "Para a agenda, a tela principal deve importar SchedulingPanel de @/src/components/generated/scheduling-panel. O Studio já controla autenticação, banco, horários, conflitos e mudanças de situação; o modelo só compõe a apresentação.",
+    "planDashboard": "Para o painel, a tela principal deve importar os painéis somente leitura de @/src/components/generated/dashboards/. O Studio já controla autenticação, banco, contagens, gráficos e tabelas; o modelo só compõe a apresentação.",
+    "planSaas": "Para o aplicativo de equipe, a tela principal deve importar SaasPanel de @/src/components/generated/. O Studio já controla login, autoria, isolamento por pessoa e ações de gravação; o modelo só compõe a apresentação.",
     "changeRequest": "Pedido de mudança da pessoa: {reason}",
     "generateOnly": "Produza somente JSON com files[].path e files[].content.",
     "generateDeclarative": "A tela gerada deve usar somente JSX declarativo com elementos HTML e componentes das fachadas protegidas indicadas no plano. Não use chamadas de função, construtores, componentes locais dinâmicos, atributos espalhados nem acesso dinâmico a propriedades.",

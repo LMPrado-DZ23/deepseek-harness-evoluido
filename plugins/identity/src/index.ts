@@ -1,4 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
+import { t } from './i18n.js'
 import type {} from '@deepseek-ai/dsh-agent'
 import { isIP } from 'node:net'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
@@ -151,7 +152,7 @@ export async function apply(ctx: Context, config: IdentityPluginConfig = {}): Pr
   const rpId = config.rpId ?? 'localhost'
   assertValidRpId(rpId)
   if (ctx.webServer.host !== '127.0.0.1' && config.edge?.required === false) {
-    throw new Error('O modo servidor não permite desativar edge.required.')
+    throw new Error(t('config.serverModeRequiresEdge'))
   }
   const edgeRequired = config.edge?.required ?? ctx.webServer.host !== '127.0.0.1'
   const edgeSecretRef = config.edge?.secretRef === undefined ? undefined : credentialRef(config.edge.secretRef)
@@ -159,7 +160,7 @@ export async function apply(ctx: Context, config: IdentityPluginConfig = {}): Pr
     throw new Error('O modo servidor exige edge.secretRef para validar a borda Caddy.')
   }
   if (edgeRequired && config.enrollment === 'open') {
-    throw new Error('A borda autenticada proíbe enrollment aberto; configure bootstrap-email ou closed.')
+    throw new Error(t('config.closedEnrollmentRequired'))
   }
   const port = ctx.webServer.port
   const defaultHost = `127.0.0.1:${port}`
@@ -264,7 +265,7 @@ export function assertValidRpId(rpId: string): void {
   const domain = rpId.toLowerCase()
   const validDomain = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/u
   if (isIP(rpId) !== 0 || (domain !== 'localhost' && !validDomain.test(domain))) {
-    throw new Error('rpId deve ser localhost ou um nome de domínio, nunca um endereço IP, porta ou URL.')
+    throw new Error(t('config.invalidRpId'))
   }
 }
 
@@ -282,7 +283,7 @@ function resolveEmailSender(
     return { sender: capture, capture }
   }
   if (ctx.webServer.host !== '127.0.0.1' || edgeRequired) {
-    throw new Error('O modo servidor exige um provedor SMTP configurado por referência de segredo.')
+    throw new Error(t('config.serverModeRequiresSmtp'))
   }
   const capture = new MemoryEmailSender()
   return { sender: capture, capture }

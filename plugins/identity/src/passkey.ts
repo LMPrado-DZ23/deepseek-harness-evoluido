@@ -5,6 +5,7 @@ import {
   verifyRegistrationResponse,
 } from '@simplewebauthn/server'
 import type { AuthenticatorTransportFuture } from '@simplewebauthn/server'
+import { t } from './i18n.js'
 
 export type RegistrationResponse = Parameters<typeof verifyRegistrationResponse>[0]['response']
 export type AuthenticationResponse = Parameters<typeof verifyAuthenticationResponse>[0]['response']
@@ -84,7 +85,7 @@ export class SimpleWebAuthnProvider implements PasskeyProvider {
       requireUserVerification: false,
     })
     if (!verification.verified || verification.registrationInfo === undefined) {
-      throw new Error('Não foi possível confirmar esta chave de acesso.')
+      throw new Error(t('passkey.notConfirmed'))
     }
     const credential = verification.registrationInfo.credential
     return {
@@ -117,7 +118,7 @@ export class SimpleWebAuthnProvider implements PasskeyProvider {
       },
       requireUserVerification: input.requireUserVerification,
     })
-    if (!verification.verified) throw new Error('Não foi possível confirmar esta chave de acesso.')
+    if (!verification.verified) throw new Error(t('passkey.notConfirmed'))
     return {
       newCounter: verification.authenticationInfo.newCounter,
       userVerified: verification.authenticationInfo.userVerified,

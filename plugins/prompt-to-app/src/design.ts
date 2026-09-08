@@ -107,6 +107,10 @@ export function renderDesignTokens(spec: DesignSpecV1): string {
   const radius = { compact: '0.375rem', balanced: '0.75rem', rounded: '1.125rem' }[value.radius]
   const spacing = value.density === 'compact' ? '0.875rem' : '1rem'
   const font = value.typography.family === 'source-serif' ? 'var(--font-dz23-serif)' : 'var(--font-dz23-sans)'
+  // Este texto NÃO vai para o catálogo de propósito: ele é o cabeçalho do
+  // arquivo CSS gerado, não fala do produto para ninguém, e é comparado byte a
+  // byte pelo controle de integridade do template. Traduzi-lo quebraria a
+  // comparação sem beneficiar pessoa alguma.
   return `/* DZ23 DesignSpec v1 ${designSpecHash(value)} — arquivo protegido */
 :root {
   --background: ${token('neutral', 'value')};

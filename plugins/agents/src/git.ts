@@ -89,7 +89,7 @@ async function gitWithInputBound(
     child.once('error', reject)
     child.once('close', code => code === 0
       ? resolvePromise()
-      : reject(new Error(stderr.trim() || `git terminou com código ${String(code)}`)))
+      : reject(new Error(stderr.trim() || t('git.commandFailed', { code: String(code) }))))
     child.stdin.end(input)
   })
 }
@@ -265,10 +265,10 @@ export class GitWorktreeManager implements WorktreePort {
   async create(repositoryPath: string, runId: string): Promise<WorktreeSnapshot> {
     const root = resolve(repositoryPath)
     const repository = await verifiedRepositoryBinding(root)
-    if (!samePath(repository.workTree, root)) throw new Error('O caminho informado precisa ser a raiz exata do repositório Git.')
+    if (!samePath(repository.workTree, root)) throw new Error(t('git.repositoryRootExact'))
     const worktreePath = resolve(this.worktreeRoot, runId)
     const expectedRoot = `${resolve(this.worktreeRoot)}${sep}`
-    if (!worktreePath.startsWith(expectedRoot)) throw new Error('Destino de worktree fora da área controlada pelo Studio.')
+    if (!worktreePath.startsWith(expectedRoot)) throw new Error(t('git.worktreeOutsideStudio'))
     const baseCommit = (await gitBound(repository, ['rev-parse', 'HEAD'])).trim()
     const filterConfiguration = await disabledFilterConfiguration(repository)
     const mainFingerprint = await this.mainFingerprint(root)
@@ -320,20 +320,20 @@ export class GitWorktreeManager implements WorktreePort {
     if (currentHash !== record.diff_sha256
       || current.bytes !== record.diff_bytes
       || JSON.stringify([...current.files].sort()) !== JSON.stringify([...record.changed_files].sort())) {
-      throw new DelegationError('PROPOSAL_TAMPERED', 'A proposta mudou depois da revisão e foi bloqueada.')
+      throw new DelegationError('PROPOSAL_TAMPERED', t('git.proposalChangedAfterReview'))
     }
     const repository = await verifiedRepositoryBinding(record.repository_path)
     const filterConfiguration = await disabledFilterConfiguration(repository)
     const status = await gitBound(repository, ['status', '--porcelain=v1', '-z'], undefined, filterConfiguration)
     const occupied = status.split('\0').filter(Boolean).map(line => line.slice(3).replaceAll('\\', '/'))
     if (pathsOverlap(occupied, record.changed_files)) {
-      throw new DelegationError('WRITE_CONFLICT', 'O projeto mudou nos mesmos arquivos desde a criação da proposta.')
+      throw new DelegationError('WRITE_CONFLICT', t('git.projectChangedSameFiles'))
     }
     const committedSinceBase = (await gitBound(repository, [
       'diff', '--name-only', '-z', '--no-ext-diff', '--no-textconv', record.base_commit, 'HEAD', '--',
     ], undefined, filterConfiguration)).split('\0').filter(Boolean).map(path => path.replaceAll('\\', '/'))
     if (pathsOverlap(committedSinceBase, record.changed_files)) {
-      throw new DelegationError('WRITE_CONFLICT', 'O projeto mudou nesses arquivos desde que o assistente começou.')
+      throw new DelegationError('WRITE_CONFLICT', t('git.projectChangedTheseFiles'))
     }
     await gitWithInputBound(repository, ['apply', '--check', '--binary', '--whitespace=nowarn', '-'], current.text, filterConfiguration)
     await gitWithInputBound(repository, ['apply', '--binary', '--whitespace=nowarn', '-'], current.text, filterConfiguration)

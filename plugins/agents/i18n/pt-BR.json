@@ -1,6 +1,18 @@
 {
   "delegation": {
-    "invalidPath": "Caminho de delegação inválido: {path}"
+    "invalidPath": "Caminho de delegação inválido: {path}",
+    "coordinatorCwdLost": "O Harness não preservou o cwd isolado da sessão coordenadora.",
+    "coordinatorIsPersonSession": "A sessão coordenadora não pode ser a sessão da pessoa.",
+    "coveredByIsolatedGrant": "Ação incluída na delegação isolada já confirmada pela pessoa.",
+    "sensitiveNeedsStrongConfirmation": "Esta tarefa sensível precisa de confirmação reforçada antes de começar.",
+    "confirmBeforeIsolatedCopy": "Confirme antes de o assistente trabalhar numa cópia do projeto.",
+    "confirmWithPasskey": "Confirme com sua passkey antes de iniciar esta tarefa sensível.",
+    "filesAlreadyLeased": "Outro assistente já está trabalhando nos mesmos arquivos.",
+    "confirmBeforeApply": "Confirme antes de aplicar a proposta ao seu projeto.",
+    "proposalNotApplicable": "Esta proposta não está disponível para aplicação.",
+    "anotherProposalApplying": "Outra proposta está sendo aplicada neste espaço de trabalho.",
+    "pathOutsideApproved": "arquivo fora dos caminhos aprovados",
+    "projectChangedDuringRun": "Seu projeto mudou enquanto o assistente trabalhava; confira antes de aplicar."
   },
   "recovery": {
     "required": "O controle de agentes ainda está reconciliando uma execução anterior.",
@@ -30,6 +42,12 @@
     "worktreeOwner": "A cópia isolada não pertence ao repositório autorizado.",
     "reciprocalInvalid": "O vínculo recíproco da cópia isolada é inválido.",
     "reciprocalChanged": "O vínculo recíproco da cópia isolada mudou.",
-    "worktreeBoundary": "Git não confirmou o vínculo e a revisão esperados da cópia isolada."
+    "worktreeBoundary": "Git não confirmou o vínculo e a revisão esperados da cópia isolada.",
+    "commandFailed": "git terminou com código {code}",
+    "repositoryRootExact": "O caminho informado precisa ser a raiz exata do repositório Git.",
+    "worktreeOutsideStudio": "Destino de worktree fora da área controlada pelo Studio.",
+    "proposalChangedAfterReview": "A proposta mudou depois da revisão e foi bloqueada.",
+    "projectChangedSameFiles": "O projeto mudou nos mesmos arquivos desde a criação da proposta.",
+    "projectChangedTheseFiles": "O projeto mudou nesses arquivos desde que o assistente começou."
   }
 }

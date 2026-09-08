@@ -231,11 +231,11 @@ export class StudioAgentService {
     const tier = requiredTier(request)
     if (!request.approval.approved || request.approval.tier !== tier) {
       throw new DelegationError('APPROVAL_REQUIRED', tier === 'T3'
-        ? 'Esta tarefa sensível precisa de confirmação reforçada antes de começar.'
-        : 'Confirme antes de o assistente trabalhar numa cópia do projeto.')
+        ? t('delegation.sensitiveNeedsStrongConfirmation')
+        : t('delegation.confirmBeforeIsolatedCopy'))
     }
     if (tier === 'T3' && !this.dependencies.identity.strongIdentityVerified(request.parent.session.id)) {
-      throw new DelegationError('APPROVAL_REQUIRED', 'Confirme com sua passkey antes de iniciar esta tarefa sensível.')
+      throw new DelegationError('APPROVAL_REQUIRED', t('delegation.confirmWithPasskey'))
     }
     const paths = request.intendedPaths.map(path => normalizeDelegationPath(path))
     if (paths.length === 0) throw new DelegationError('INVALID_PATH', 'Declare ao menos um caminho que o assistente pretende alterar.')
@@ -245,7 +245,7 @@ export class StudioAgentService {
     for (const active of this.#activePaths.values()) {
       if (active.workspaceId !== request.workspaceId || active.repositoryPath !== request.repositoryPath) continue
       if (pathsOverlap(active.paths, paths)) {
-        throw new DelegationError('WRITE_CONFLICT', 'Outro assistente já está trabalhando nos mesmos arquivos.')
+        throw new DelegationError('WRITE_CONFLICT', t('delegation.filesAlreadyLeased'))
       }
     }
     // A reserva durável também vale. Sem esta checagem, uma reserva preservada
@@ -306,15 +306,15 @@ export class StudioAgentService {
 
   async applyProposal(runId: string, approval: DelegationApproval): Promise<ProposalApplied> {
     if (!approval.approved || approval.tier !== 'T2') {
-      throw new DelegationError('APPROVAL_REQUIRED', 'Confirme antes de aplicar a proposta ao seu projeto.')
+      throw new DelegationError('APPROVAL_REQUIRED', t('delegation.confirmBeforeApply'))
     }
     const record = this.dependencies.repository.runs().find(candidate => candidate.run_id === runId)
     if (record === undefined || record.status !== 'PROPOSED') {
-      throw new DelegationError('INVALID_STATE', 'Esta proposta não está disponível para aplicação.')
+      throw new DelegationError('INVALID_STATE', t('delegation.proposalNotApplicable'))
     }
     const workspaceKey = `${record.org_id}:${record.tenant_id}:${record.workspace_id}`
     if (this.#applyingWorkspaces.has(workspaceKey)) {
-      throw new DelegationError('WRITE_CONFLICT', 'Outra proposta está sendo aplicada neste espaço de trabalho.')
+      throw new DelegationError('WRITE_CONFLICT', t('delegation.anotherProposalApplying'))
     }
     this.#applyingWorkspaces.add(workspaceKey)
     try {
@@ -497,13 +497,13 @@ export class StudioAgentService {
       const tokenExceeded = request.budget?.maxTokens !== undefined
         && measuredTokens !== undefined && measuredTokens > request.budget.maxTokens
       if (pathViolation || diff.files.length > maxFiles || diff.bytes > maxDiffBytes || tokenExceeded) {
-        const reason = pathViolation ? 'arquivo fora dos caminhos aprovados'
+        const reason = pathViolation ? t('delegation.pathOutsideApproved')
             : tokenExceeded ? 'limite de tokens excedido'
               : diff.files.length > maxFiles ? 'limite de arquivos excedido' : 'limite de bytes do diff excedido'
         return await this.#finish(runId, request, snapshot, coordinator, lease, 'BUDGET_EXCEEDED', reason, now, diff, outsideChanged)
       }
       const diagnostic = outsideChanged
-        ? 'Seu projeto mudou enquanto o assistente trabalhava; confira antes de aplicar.'
+        ? t('delegation.projectChangedDuringRun')
         : terminalText(result)
       return await this.#finish(runId, request, snapshot, coordinator, lease, 'PROPOSED', diagnostic, now, diff, outsideChanged)
     } catch (error) {

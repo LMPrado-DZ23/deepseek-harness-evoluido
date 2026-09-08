@@ -220,12 +220,12 @@ export class StudioIdentityService {
       if (existing === undefined && !this.isEnrollmentOpen(normalized) && grant === undefined) {
         await this.#audit(
           'magic_code_suppressed', null, null, this.#defaultOrgId, this.#defaultTenantId,
-          'failure', 'Solicitação genérica recusada: não existe convite nem cadastro inicial aberto.',
+          'failure', t('auth.genericRequestRefused'),
         )
         return 'suppressed'
       }
       const code = this.#createMagicCode()
-      if (!/^\d{6}$/.test(code)) throw new IdentityError('invalid', 'O gerador de código retornou um valor inválido.')
+      if (!/^\d{6}$/.test(code)) throw new IdentityError('invalid', t('auth.invalidGeneratedCode'))
       const now = this.#now()
       await Promise.all(this.#repository.magicCodes()
         .filter(previous => previous.email === normalized && previous.consumed_at === null)
@@ -245,7 +245,7 @@ export class StudioIdentityService {
       }
       await this.#repository.putMagicCode(record)
       await this.#emailSender.sendMagicCode({ to: normalized, code, expiresInMinutes: 10 })
-      await this.#audit('magic_code_requested', existing?.user_id ?? null, null, orgId, tenantId, 'success', 'Código temporário solicitado.')
+      await this.#audit('magic_code_requested', existing?.user_id ?? null, null, orgId, tenantId, 'success', t('auth.codeRequested'))
       return 'sent'
     })
   }
@@ -260,30 +260,30 @@ export class StudioIdentityService {
       .filter(record => record.email === normalized && record.consumed_at === null)
       .sort((left, right) => right.created_at.localeCompare(left.created_at))[0]
     if (candidate === undefined) {
-      await this.#audit('login_failed', null, null, 'org_unknown', 'tenant_unknown', 'failure', 'Código temporário ausente.')
-      throw new IdentityError('not-found', 'Código inválido ou expirado.')
+      await this.#audit('login_failed', null, null, 'org_unknown', 'tenant_unknown', 'failure', t('auth.codeMissing'))
+      throw new IdentityError('not-found', t('auth.codeInvalidOrExpired'))
     }
     const now = this.#now()
     if (Date.parse(candidate.expires_at) <= now.getTime()) {
-      await this.#audit('login_failed', null, null, candidate.org_id, candidate.tenant_id, 'failure', 'Código temporário expirado.')
-      throw new IdentityError('expired', 'Código inválido ou expirado.')
+      await this.#audit('login_failed', null, null, candidate.org_id, candidate.tenant_id, 'failure', t('auth.codeExpired'))
+      throw new IdentityError('expired', t('auth.codeInvalidOrExpired'))
     }
     if (candidate.attempts >= MAX_MAGIC_ATTEMPTS) {
-      throw new IdentityError('locked', 'Muitas tentativas. Solicite um novo código.')
+      throw new IdentityError('locked', t('auth.tooManyAttempts'))
     }
     if (!secretMatches(code, candidate.code_hash)) {
       const attempts = candidate.attempts + 1
       await this.#repository.putMagicCode({ ...candidate, attempts })
-      await this.#audit('login_failed', null, null, candidate.org_id, candidate.tenant_id, 'failure', 'Código temporário incorreto.')
-      throw new IdentityError(attempts >= MAX_MAGIC_ATTEMPTS ? 'locked' : 'invalid', 'Código inválido ou expirado.')
+      await this.#audit('login_failed', null, null, candidate.org_id, candidate.tenant_id, 'failure', t('auth.codeIncorrect'))
+      throw new IdentityError(attempts >= MAX_MAGIC_ATTEMPTS ? 'locked' : 'invalid', t('auth.codeInvalidOrExpired'))
     }
     await this.#repository.putMagicCode({ ...candidate, consumed_at: now.toISOString() })
     const existing = this.#repository.users().find(user => user.email === normalized)
     const grant = this.#enrollmentResolver(normalized)
     const validGrant = grant !== undefined && grant.orgId === candidate.org_id && grant.tenantId === candidate.tenant_id
     if (existing === undefined && !this.isEnrollmentOpen(normalized) && !validGrant) {
-      await this.#audit('login_failed', null, null, candidate.org_id, candidate.tenant_id, 'failure', 'Cadastro inicial já encerrado.')
-      throw new IdentityError('invalid', 'Código inválido ou expirado.')
+      await this.#audit('login_failed', null, null, candidate.org_id, candidate.tenant_id, 'failure', t('auth.bootstrapClosed'))
+      throw new IdentityError('invalid', t('auth.codeInvalidOrExpired'))
     }
     const source: IdentityUserProvisioningSource = validGrant ? 'invitation' : 'bootstrap'
     const user: IdentityUser = existing ?? {
@@ -300,11 +300,11 @@ export class StudioIdentityService {
       await this.#userProvisioner(user, source)
       if (source === 'bootstrap') {
         await this.#audit('personal_mode_disabled', user.user_id, null, user.org_id, user.tenant_id, 'success', 'Primeiro acesso cadastrado.')
-        await this.#audit('enrollment_closed', user.user_id, null, user.org_id, user.tenant_id, 'success', 'Cadastro inicial encerrado após criar a pessoa proprietária.')
+        await this.#audit('enrollment_closed', user.user_id, null, user.org_id, user.tenant_id, 'success', t('auth.bootstrapClosedAfterOwner'))
       }
     }
     const issued = await this.#issueSession(user, device)
-    await this.#audit('login_succeeded', user.user_id, issued.session.session_id, user.org_id, user.tenant_id, 'success', 'Entrada por código temporário.')
+    await this.#audit('login_succeeded', user.user_id, issued.session.session_id, user.org_id, user.tenant_id, 'success', t('auth.signedInWithCode'))
     return issued
   }
 
@@ -330,20 +330,20 @@ export class StudioIdentityService {
   validateCsrf(session: SessionRecord, cookieToken: string | undefined, headerToken: string | undefined): void {
     if (cookieToken === undefined || headerToken === undefined
       || cookieToken !== headerToken || !secretMatches(headerToken, session.csrf_hash)) {
-      throw new IdentityError('csrf', 'A confirmação desta solicitação é inválida.')
+      throw new IdentityError('csrf', t('auth.invalidConfirmation'))
     }
   }
 
   validateCsrfToken(session: SessionRecord, headerToken: string | undefined): void {
     if (headerToken === undefined || !secretMatches(headerToken, session.csrf_hash)) {
-      throw new IdentityError('csrf', 'A confirmação desta solicitação é inválida.')
+      throw new IdentityError('csrf', t('auth.invalidConfirmation'))
     }
   }
 
   async csrfTokenFor(session: SessionRecord): Promise<string> {
     return this.#mutex.run(`session:${session.session_id}`, async () => {
       const current = this.#repository.sessions().find(candidate => candidate.session_id === session.session_id)
-      if (current === undefined) throw new IdentityError('invalid', 'Sessão inválida.')
+      if (current === undefined) throw new IdentityError('invalid', t('auth.invalidSession'))
       this.#assertSessionUsable(current, this.#now())
       const csrfToken = derivedCsrfToken(current.token_hash)
       const csrfHash = secretHash(csrfToken)
@@ -358,10 +358,10 @@ export class StudioIdentityService {
       .map(({ token_hash: _tokenHash, csrf_hash: _csrfHash, ...safe }) => safe)
   }
 
-  async revokeSession(actor: SessionRecord, sessionId: string, reason = 'Revogada pela pessoa usuária.'): Promise<void> {
+  async revokeSession(actor: SessionRecord, sessionId: string, reason = t('auth.revokedByUser')): Promise<void> {
     await this.#mutex.run(`session:${sessionId}`, async () => {
       const target = this.#repository.sessions().find(session => session.session_id === sessionId && session.user_id === actor.user_id)
-      if (target === undefined) throw new IdentityError('not-found', 'Dispositivo não encontrado.')
+      if (target === undefined) throw new IdentityError('not-found', t('auth.deviceNotFound'))
       if (target.revoked_at !== null) return
       const revoked = { ...target, revoked_at: this.#now().toISOString(), revoked_reason: reason }
       await this.#repository.putSession(revoked)
@@ -380,18 +380,18 @@ export class StudioIdentityService {
       await this.#repository.putSession({
         ...current,
         revoked_at: now,
-        revoked_reason: 'Saída de todos os dispositivos.',
+        revoked_reason: t('auth.signedOutAllDevices'),
       })
     })))
-    await this.#audit('all_sessions_revoked', actor.user_id, actor.session_id, actor.org_id, actor.tenant_id, 'success', 'Todas as sessões foram revogadas.')
+    await this.#audit('all_sessions_revoked', actor.user_id, actor.session_id, actor.org_id, actor.tenant_id, 'success', t('auth.allSessionsRevoked'))
   }
 
   async bindHarnessSession(session: SessionRecord, harnessSessionId: string): Promise<void> {
-    if (harnessSessionId.trim() === '') throw new IdentityError('invalid', 'Sessão do agente inválida.')
+    if (harnessSessionId.trim() === '') throw new IdentityError('invalid', t('auth.invalidAgentSession'))
     await this.#mutex.run('harness-session-bindings', () => this.#mutex.run(`session:${session.session_id}`, async () => {
       const sessions = this.#repository.sessions()
       const current = sessions.find(candidate => candidate.session_id === session.session_id)
-      if (current === undefined) throw new IdentityError('invalid', 'Sessão inválida.')
+      if (current === undefined) throw new IdentityError('invalid', t('auth.invalidSession'))
       this.#assertSessionUsable(current, this.#now())
       const existing = sessions.filter(candidate => candidate.harness_session_ids.includes(harnessSessionId))
       if (existing.some(candidate => candidate.session_id !== current.session_id)) {
@@ -414,7 +414,7 @@ export class StudioIdentityService {
         ...current,
         harness_session_ids: [...current.harness_session_ids, harnessSessionId],
       })
-      await this.#audit('harness_session_bound', current.user_id, current.session_id, current.org_id, current.tenant_id, 'success', 'Sessão do agente vinculada.')
+      await this.#audit('harness_session_bound', current.user_id, current.session_id, current.org_id, current.tenant_id, 'success', t('auth.agentSessionBound'))
     }))
   }
 
@@ -425,10 +425,10 @@ export class StudioIdentityService {
    * the session is rewritten, so a pointer never disappears unrecorded.
    */
   async releaseHarnessSession(session: SessionRecord, harnessSessionId: string, reason: string): Promise<void> {
-    if (harnessSessionId.trim() === '') throw new IdentityError('invalid', 'Sessão do agente inválida.')
+    if (harnessSessionId.trim() === '') throw new IdentityError('invalid', t('auth.invalidAgentSession'))
     await this.#mutex.run('harness-session-bindings', () => this.#mutex.run(`session:${session.session_id}`, async () => {
       const current = this.#repository.sessions().find(candidate => candidate.session_id === session.session_id)
-      if (current === undefined) throw new IdentityError('invalid', 'Sessão inválida.')
+      if (current === undefined) throw new IdentityError('invalid', t('auth.invalidSession'))
       if (!current.harness_session_ids.includes(harnessSessionId)) return
       await this.#audit(
         'harness_session_unbound', current.user_id, current.session_id,
@@ -540,7 +540,7 @@ export class StudioIdentityService {
         expectedRpId: this.#rpId,
       })
       if (this.#repository.credentials().some(credential => credential.credential_id === verified.id)) {
-        throw new IdentityError('replay', 'Esta chave de acesso já está cadastrada.')
+        throw new IdentityError('replay', t('auth.passkeyAlreadyRegistered'))
       }
       await this.#repository.putCredential({
         credential_id: verified.id,
@@ -586,7 +586,7 @@ export class StudioIdentityService {
   async beginStepUp(token: string): Promise<PasskeyCeremony<AuthenticationOptions>> {
     const session = await this.authenticate(token)
     const credentials = this.#repository.credentials().filter(credential => credential.user_id === session.user_id)
-    if (credentials.length === 0) throw new IdentityError('not-found', 'Cadastre uma chave de acesso antes de confirmar esta ação.')
+    if (credentials.length === 0) throw new IdentityError('not-found', t('auth.passkeyRequiredBeforeConfirm'))
     const options = await this.#passkeys.authenticationOptions({
       rpId: this.#rpId,
       credentialIds: credentials.map(credential => credential.credential_id),
@@ -602,11 +602,11 @@ export class StudioIdentityService {
       this.#mutex.run(`credential:${response.id}`, async () => {
         const credential = this.#credentialForResponse(response.id, session.user_id)
         const verified = await this.#verifyAuthentication(response, challenge, credential, true)
-        if (!verified.userVerified) throw new IdentityError('invalid', 'A biometria ou o PIN do dispositivo não foi confirmado.')
+        if (!verified.userVerified) throw new IdentityError('invalid', t('auth.userVerificationMissing'))
         await this.#updateCounter(credential, verified.newCounter)
         await this.#mutex.run(`session:${session.session_id}`, async () => {
           const current = this.#repository.sessions().find(candidate => candidate.session_id === session.session_id)
-          if (current === undefined) throw new IdentityError('invalid', 'Sessão inválida.')
+          if (current === undefined) throw new IdentityError('invalid', t('auth.invalidSession'))
           this.#assertSessionUsable(current, this.#now())
           await this.#repository.putSession({
             ...current,
@@ -682,28 +682,28 @@ export class StudioIdentityService {
   }
 
   #findSessionByToken(token: string): SessionRecord {
-    if (token === '') throw new IdentityError('invalid', 'Sessão inválida.')
+    if (token === '') throw new IdentityError('invalid', t('auth.invalidSession'))
     const tokenHash = secretHash(token)
     const session = this.#repository.sessions().find(candidate => candidate.token_hash === tokenHash)
-    if (session === undefined) throw new IdentityError('invalid', 'Sessão inválida.')
+    if (session === undefined) throw new IdentityError('invalid', t('auth.invalidSession'))
     return session
   }
 
   #assertSessionUsable(session: SessionRecord, now: Date): void {
-    if (session.revoked_at !== null) throw new IdentityError('revoked', 'Esta sessão foi encerrada.')
-    if (Date.parse(session.expires_absolute_at) <= now.getTime()) throw new IdentityError('expired', 'Esta sessão expirou.')
-    if (Date.parse(session.expires_sliding_at) <= now.getTime()) throw new IdentityError('expired', 'Esta sessão expirou por inatividade.')
+    if (session.revoked_at !== null) throw new IdentityError('revoked', t('auth.sessionEnded'))
+    if (Date.parse(session.expires_absolute_at) <= now.getTime()) throw new IdentityError('expired', t('auth.sessionExpired'))
+    if (Date.parse(session.expires_sliding_at) <= now.getTime()) throw new IdentityError('expired', t('auth.sessionIdleExpired'))
   }
 
   #user(userId: string): IdentityUser {
     const user = this.#repository.users().find(candidate => candidate.user_id === userId)
-    if (user === undefined) throw new IdentityError('not-found', 'Pessoa usuária não encontrada.')
+    if (user === undefined) throw new IdentityError('not-found', t('auth.userNotFound'))
     return user
   }
 
   #credentialForResponse(credentialId: string, userId: string): PasskeyCredential {
     const credential = this.#repository.credentials().find(candidate => candidate.credential_id === credentialId && candidate.user_id === userId)
-    if (credential === undefined) throw new IdentityError('not-found', 'Chave de acesso não encontrada.')
+    if (credential === undefined) throw new IdentityError('not-found', t('auth.passkeyNotFound'))
     return credential
   }
 
@@ -719,11 +719,11 @@ export class StudioIdentityService {
       if (challenge === undefined || challenge.purpose !== purpose
         || (userId !== undefined && challenge.user_id !== userId)
         || (sessionId !== undefined && challenge.session_id !== sessionId)) {
-        throw new IdentityError('not-found', 'Confirmação não encontrada.')
+        throw new IdentityError('not-found', t('auth.confirmationNotFound'))
       }
-      if (challenge.consumed_at !== null) throw new IdentityError('replay', 'Esta confirmação já foi usada.')
+      if (challenge.consumed_at !== null) throw new IdentityError('replay', t('auth.confirmationAlreadyUsed'))
       try {
-        if (Date.parse(challenge.expires_at) <= this.#now().getTime()) throw new IdentityError('expired', 'Esta confirmação expirou.')
+        if (Date.parse(challenge.expires_at) <= this.#now().getTime()) throw new IdentityError('expired', t('auth.confirmationExpired'))
         return await work(challenge)
       } finally {
         await this.#consumeChallenge(challenge)
@@ -800,7 +800,7 @@ export class StudioIdentityService {
 
 function normalizeEmail(email: string): string {
   const normalized = email.trim().toLowerCase()
-  if (!zEmail.test(normalized)) throw new IdentityError('invalid', 'Digite um e-mail válido.')
+  if (!zEmail.test(normalized)) throw new IdentityError('invalid', t('auth.invalidEmail'))
   return normalized
 }
 

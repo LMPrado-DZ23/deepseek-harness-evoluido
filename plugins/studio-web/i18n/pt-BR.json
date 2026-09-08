@@ -42,5 +42,12 @@
   "stuckRuns": {
     "methodNotAllowed": "Este endereço só responde a leitura.",
     "notConfigured": "O Studio ainda não consegue verificar se há trabalho parado nesta instalação. Peça a quem administra o Studio para ativar esse recurso."
+  },
+  "http": {
+    "methodNotAllowed": "Método não permitido.",
+    "invalidPath": "Caminho inválido.",
+    "symlinkNotServed": "Links simbólicos não são servidos.",
+    "fileNotFound": "Arquivo não encontrado.",
+    "interfaceNotBuilt": "Interface ainda não foi compilada."
   }
 }

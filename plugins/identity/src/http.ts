@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { t } from './i18n.js'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { z } from 'zod'
 import { truncateIp } from './crypto.js'
@@ -93,7 +94,7 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
       const path = new URL(request.url ?? '/', 'http://local').pathname
       const route = path.slice('/api/studio/identity'.length)
       if (!IDENTITY_ROUTE_CONTRACTS.some(contract => contract.method === request.method && contract.path === route)) {
-        json(response, 404, { error: 'Rota não encontrada.' })
+        json(response, 404, { error: t('http.routeNotFound') })
         return
       }
       const forwardedAddress = config.edgeRequired === true
@@ -113,7 +114,7 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
       if (request.method === 'POST' && route === '/magic/start') {
         const body = magicStartSchema.parse(await readJson(request))
         await config.service.requestMagicCode(body.email)
-        json(response, 202, { message: 'Se o e-mail puder receber acesso, enviaremos um código temporário.' })
+        json(response, 202, { message: t('http.magicAccepted') })
         return
       }
       if (request.method === 'POST' && route === '/magic/verify') {
@@ -169,7 +170,7 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
       if (request.method === 'GET' && route === '/harness/session') {
         const identitySession = await authenticatedMutation(request, config.service)
         if (!config.service.isSharedHarnessClientAllowed(identitySession)) {
-          json(response, 403, { error: 'A interface do Harness ainda não está disponível.' })
+          json(response, 403, { error: t('http.harnessUnavailable') })
           return
         }
         const host = singleHeader(request.headers.host)!
@@ -181,7 +182,7 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
           : config.bindHost === '127.0.0.1' ? 'http' : 'https'
         const location = config.harnessAuthenticationUrl?.(`${protocol}://${host}/`)
         if (location === undefined) {
-          json(response, 503, { error: 'A interface do Harness ainda não está disponível.' })
+          json(response, 503, { error: t('http.harnessUnavailable') })
           return
         }
         response.writeHead(303, {
@@ -231,7 +232,7 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
         await config.service.finishPasskeyRegistration(
           authentication.token, body.challenge_id, body.response as RegistrationResponse, body.device_label,
         )
-        json(response, 200, { message: 'Chave de acesso criada com segurança.' })
+        json(response, 200, { message: t('http.passkeyCreated') })
         return
       }
       if (request.method === 'POST' && route === '/passkey/step-up/options') {
@@ -241,7 +242,7 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
       if (request.method === 'POST' && route === '/passkey/step-up/verify') {
         const body = challengeSchema.parse(await readJson(request))
         await config.service.finishStepUp(authentication.token, body.challenge_id, body.response as AuthenticationResponse)
-        json(response, 200, { message: 'Ação sensível confirmada.' })
+        json(response, 200, { message: t('http.sensitiveConfirmed') })
         return
       }
       if (request.method === 'GET' && route === '/devices') {
@@ -263,7 +264,7 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
         return
       }
       /* v8 ignore next 2 -- every contracted route returns above; this is the fail-closed tail. */
-      json(response, 404, { error: 'Rota não encontrada.' })
+      json(response, 404, { error: t('http.routeNotFound') })
     } catch (error) {
       if (error instanceof CookieHeaderBudgetError) {
         json(response, 431, { error: COOKIE_HEADER_TOO_LARGE })
@@ -275,7 +276,7 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
         return
       }
       if (error instanceof z.ZodError || error instanceof IdentityHttpInputError) {
-        json(response, 400, { error: error instanceof IdentityHttpInputError ? error.message : 'Solicitação inválida.' })
+        json(response, 400, { error: error instanceof IdentityHttpInputError ? error.message : t('http.invalidRequest') })
         return
       }
       json(response, 500, { error: IDENTITY_INTERNAL_ERROR })
@@ -321,7 +322,7 @@ async function assertEdgeTrust(
     const actual = singleHeader(request.headers['x-dz23-edge'])
     const expected = await config.resolveEdgeSecret?.()
     if (actual === undefined || expected === undefined || expected === '' || !secretMatches(actual, expected)) {
-      throw new IdentityError('invalid', 'Borda de acesso não autorizada.')
+      throw new IdentityError('invalid', t('http.edgeUnauthorized'))
     }
   }
 }
@@ -332,12 +333,12 @@ export function assertRequestTrust(
 ): void {
   const host = singleHeader(request.headers.host)?.toLowerCase()
   if (host === undefined || !config.allowedHosts.map(value => value.toLowerCase()).includes(host)) {
-    throw new IdentityError('invalid', 'Host não autorizado.')
+    throw new IdentityError('invalid', t('http.hostNotAllowed'))
   }
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     const origin = singleHeader(request.headers.origin)
     if (origin === undefined || !config.allowedOrigins.includes(origin)) {
-      throw new IdentityError('invalid', 'Origem não autorizada.')
+      throw new IdentityError('invalid', t('http.originNotAllowed'))
     }
   }
 }
@@ -386,13 +387,13 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
     /* v8 ignore next -- node:http request body chunks are Buffers. */
     const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
     size += bytes.length
-    if (size > JSON_LIMIT) throw new IdentityHttpInputError('Solicitação grande demais.')
+    if (size > JSON_LIMIT) throw new IdentityHttpInputError(t('http.requestTooLarge'))
     chunks.push(bytes)
   }
   try {
     return JSON.parse(Buffer.concat(chunks).toString('utf8'))
   } catch {
-    throw new IdentityHttpInputError('JSON inválido.')
+    throw new IdentityHttpInputError(t('http.invalidJson'))
   }
 }
 

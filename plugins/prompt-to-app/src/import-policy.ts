@@ -221,7 +221,7 @@ function isPropertyLabel(node: ts.Identifier): boolean {
 }
 
 function assertAllowedModule(fromPath: string, moduleName: string | undefined, generatedPaths: ReadonlySet<string>): void {
-  if (moduleName === undefined) throw rejected(fromPath, '<dinâmico>')
+  if (moduleName === undefined) throw rejected(fromPath, t('values.dynamicImport'))
   if (ALLOWED_MODULES.has(moduleName) || ALLOWED_PREFIXES.some(prefix => moduleName.startsWith(prefix) && safeSuffix(moduleName.slice(prefix.length)))) return
   if (moduleName.startsWith('.')) {
     const target = normalizePath(posix.join(posix.dirname(fromPath), moduleName))

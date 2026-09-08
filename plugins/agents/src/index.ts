@@ -141,8 +141,8 @@ export async function apply(ctx: Context, config: Config = {}): Promise<void> {
           setup: agentCtx => presetService.mount(agentCtx, selectedPreset).then(() => undefined),
         })
         const agent = handle.agent
-        if (agent.session.header.cwd !== cwd) throw new Error('O Harness não preservou o cwd isolado da sessão coordenadora.')
-        if (String(parentSessionId) === String(coordinatorSessionId)) throw new Error('A sessão coordenadora não pode ser a sessão da pessoa.')
+        if (agent.session.header.cwd !== cwd) throw new Error(t('delegation.coordinatorCwdLost'))
+        if (String(parentSessionId) === String(coordinatorSessionId)) throw new Error(t('delegation.coordinatorIsPersonSession'))
         approvedCoordinators.set(String(coordinatorSessionId), { tier: approvedTier, worktreePath: cwd })
         return {
           sessionId: coordinatorSessionId,
@@ -235,7 +235,7 @@ export function approvedGrantFor(
       if (agent.session.header.cwd !== grant.worktreePath || current.session.header.cwd !== grant.worktreePath) return undefined
       return {
         approvedTier: grant.tier,
-        reason: 'Ação incluída na delegação isolada já confirmada pela pessoa.',
+        reason: t('delegation.coveredByIsolatedGrant'),
       }
     }
     seen.add(id)
