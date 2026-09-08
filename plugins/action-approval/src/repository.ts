@@ -5,8 +5,22 @@ import { assertValidApproval, type ApprovalRecord } from './model.js'
  * são convertidos em "aprovado" nem em "negado" - quem chama precisa distinguir
  * "a pessoa recusou" de "não deu para saber".
  */
+/**
+ * A organização e o inquilino de quem está lendo.
+ *
+ * A leitura carrega o escopo em vez de o serviço filtrar depois. Sob o
+ * armazenamento por chave-valor as duas formas dão o mesmo resultado; sob uma
+ * tabela com RLS elas são diferentes de verdade: com o escopo na leitura o
+ * BANCO recusa a linha do outro inquilino, e um descuido futuro no serviço
+ * deixa de ser a única coisa entre um pedido e a pessoa errada.
+ */
+export interface ApprovalTenantScope {
+  readonly orgId: string
+  readonly tenantId: string
+}
+
 export interface ActionApprovalRepository {
-  get(approvalId: string): Promise<ApprovalRecord | undefined>
+  get(scope: ApprovalTenantScope, approvalId: string): Promise<ApprovalRecord | undefined>
   /**
    * Todos os pedidos de um escopo exato. Filtrar é obrigação de quem
    * implementa: uma listagem que devolvesse a linha de outra pessoa seria um
@@ -61,10 +75,12 @@ export class InMemoryActionApprovalRepository implements ActionApprovalRepositor
 
   size(): number { return this.#rows.size }
 
-  get(approvalId: string): Promise<ApprovalRecord | undefined> {
+  get(scope: ApprovalTenantScope, approvalId: string): Promise<ApprovalRecord | undefined> {
     this.#throwIfArmed()
     const row = this.#rows.get(approvalId)
     if (row === undefined) return Promise.resolve(undefined)
+    // Fora do escopo é o MESMO "não existe" de um id inventado.
+    if (row.org_id !== scope.orgId || row.tenant_id !== scope.tenantId) return Promise.resolve(undefined)
     assertValidApproval(row)
     return Promise.resolve(row)
   }

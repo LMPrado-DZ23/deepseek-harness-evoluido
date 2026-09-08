@@ -9,7 +9,7 @@ import {
   type ApprovalTier,
 } from './model.js'
 import { KeyedMutex } from './mutex.js'
-import { ApprovalConflictError, type ActionApprovalRepository } from './repository.js'
+import { ApprovalConflictError, type ActionApprovalRepository, type ApprovalTenantScope } from './repository.js'
 
 /** Prazo de vida de um pedido de confirmação. */
 export const APPROVAL_TTL_MS = 3 * 60 * 1000
@@ -82,7 +82,7 @@ export class StudioActionApprovalService {
 
   async #requestLocked(descriptor: ApprovalDescriptor): Promise<ApprovalRecord> {
     const id = approvalId(descriptor)
-    const existing = await this.options.repository.get(id)
+    const existing = await this.options.repository.get(recordScope(descriptor), id)
     if (existing !== undefined) {
       if (!sameDescriptor(existing, descriptor)) {
         throw new ActionApprovalError('CONFLICT', t('errors.descriptorConflict'))
@@ -122,7 +122,7 @@ export class StudioActionApprovalService {
     } catch (error) {
       if (!(error instanceof ApprovalConflictError)) throw error
       // Alguém criou o mesmo pedido entre a leitura e a escrita: o vencedor vale.
-      const winner = await this.options.repository.get(id)
+      const winner = await this.options.repository.get(recordScope(descriptor), id)
       if (winner === undefined || !sameDescriptor(winner, descriptor)) {
         throw new ActionApprovalError('CONFLICT', t('errors.descriptorConflict'))
       }
@@ -242,7 +242,7 @@ export class StudioActionApprovalService {
       if (!(error instanceof ApprovalConflictError)) throw error
       // Dois consumos concorrentes: só um escreve. O outro lê o vencedor e só
       // recebe recibo se for exatamente a mesma reivindicação.
-      const winner = await this.options.repository.get(record.approval_id)
+      const winner = await this.options.repository.get(recordScope(record), record.approval_id)
       if (winner === undefined || winner.state !== 'CONSUMED' || winner.claim_id !== input.claimId) {
         throw new ActionApprovalError('CONSUMED', t('errors.consumed'))
       }
@@ -277,7 +277,7 @@ export class StudioActionApprovalService {
    * na resposta revela que o pedido existe para outra pessoa.
    */
   async #owned(actor: ApprovalActor, id: string): Promise<ApprovalRecord> {
-    const record = await this.options.repository.get(id)
+    const record = await this.options.repository.get({ orgId: actor.orgId, tenantId: actor.tenantId }, id)
     if (record === undefined
       || record.user_id !== actor.userId
       || record.session_id !== actor.sessionId
@@ -343,4 +343,17 @@ function sameDescriptor(record: ApprovalRecord, descriptor: ApprovalDescriptor):
     // ela tem de bater - confirmar um texto e executar outro é o que isto
     // impede.
     && (record.summary === undefined || record.summary === descriptor.summary)
+}
+
+/**
+ * O escopo de leitura tirado do próprio registro (ou do descritor).
+ *
+ * Existe para que o campo lido seja sempre o mesmo: o registro fala
+ * `org_id`/`tenant_id` e quem chama fala `orgId`/`tenantId`, e traduzir isso à
+ * mão em cada ponto é como um deles acaba trocado.
+ * @param value - registro ou descritor com organização e inquilino.
+ * @returns o escopo da leitura.
+ */
+function recordScope(value: { readonly org_id: string, readonly tenant_id: string }): ApprovalTenantScope {
+  return { orgId: value.org_id, tenantId: value.tenant_id }
 }

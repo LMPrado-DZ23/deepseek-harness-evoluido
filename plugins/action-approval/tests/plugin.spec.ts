@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { studioActionApprovalsDomainSpec } from '../src/domain.ts'
 import { approvalRecordSchema } from '../src/model.ts'
-import { DomainActionApprovalRepository, apply, inject, name } from '../src/plugin.ts'
-import { ApprovalConflictError } from '../src/repository.ts'
+import { DomainActionApprovalRepository, apply, approvalRepository, inject, name } from '../src/plugin.ts'
+import { TenantRecordActionApprovalRepository } from '../src/tenant-repository.ts'
+import { ApprovalConflictError, InMemoryActionApprovalRepository } from '../src/repository.ts'
 import { StudioActionApprovalService } from '../src/service.ts'
 import type { ApprovalRecord } from '../src/model.ts'
 
@@ -44,14 +45,39 @@ describe('compatibilidade do domínio', () => {
   })
 })
 
+/** O escopo do `record()` das provas: leitura fora dele é o mesmo "não existe". */
+const SCOPE = { orgId: 'org-1', tenantId: 'tenant-1' }
+
 describe('persistência durável da autoridade de confirmação', () => {
+  it('a leitura em memória também não atravessa o inquilino', async () => {
+    // O repositório em memória é o que as provas do serviço usam. Sem esta
+    // afirmação, um vazamento entre inquilinos NELE passaria despercebido e
+    // todas as provas do serviço continuariam verdes sobre um repositório que
+    // devolve a linha da pessoa errada.
+    const repository = new InMemoryActionApprovalRepository()
+    await repository.put(record(), 'new')
+    await expect(repository.get(SCOPE, record().approval_id)).resolves.toMatchObject({ state: 'PENDING' })
+    await expect(repository.get({ orgId: 'org-2', tenantId: 'tenant-1' }, record().approval_id)).resolves.toBeUndefined()
+    await expect(repository.get({ orgId: 'org-1', tenantId: 'tenant-2' }, record().approval_id)).resolves.toBeUndefined()
+  })
+
+  it('a leitura durável não atravessa o inquilino', async () => {
+    const rows = table()
+    const repository = new DomainActionApprovalRepository(rows as never)
+    await repository.put(record(), 'new')
+    // O mesmo id, pedido por outro inquilino, some. Sem isto o serviço seria a
+    // ÚNICA coisa entre um pedido e a pessoa errada.
+    await expect(repository.get({ orgId: 'org-2', tenantId: 'tenant-1' }, record().approval_id)).resolves.toBeUndefined()
+    await expect(repository.get({ orgId: 'org-1', tenantId: 'tenant-2' }, record().approval_id)).resolves.toBeUndefined()
+  })
+
   it('cria apenas o que ainda não existe', async () => {
     const rows = table()
     const repository = new DomainActionApprovalRepository(rows as never)
     await repository.put(record(), 'new')
     await expect(repository.put(record(), 'new')).rejects.toBeInstanceOf(ApprovalConflictError)
-    await expect(repository.get(record().approval_id)).resolves.toMatchObject({ state: 'PENDING' })
-    await expect(repository.get('apv-ausente')).resolves.toBeUndefined()
+    await expect(repository.get(SCOPE, record().approval_id)).resolves.toMatchObject({ state: 'PENDING' })
+    await expect(repository.get(SCOPE, 'apv-ausente')).resolves.toBeUndefined()
   })
 
   it('recusa a escrita quando o estado mudou por baixo dela', async () => {
@@ -73,7 +99,7 @@ describe('persistência durável da autoridade de confirmação', () => {
     const corrupt = record({ state: 'AVAILABLE', confirmed_at: null })
     await expect(repository.put(corrupt, 'new')).rejects.toThrow()
     rows.rows.set(corrupt.approval_id, corrupt)
-    await expect(repository.get(corrupt.approval_id)).rejects.toThrow()
+    await expect(repository.get(SCOPE, corrupt.approval_id)).rejects.toThrow()
   })
 
   it('a listagem durável devolve só o escopo exato e recusa uma linha corrompida', async () => {
@@ -237,5 +263,30 @@ describe('persistência durável da autoridade de confirmação', () => {
     await expect(service.confirm({ userId: 'user-1', orgId: 'org-1', tenantId: 'tenant-1', sessionId: 'session-1' }, created.approval_id))
       .rejects.toMatchObject({ code: 'STRONG_IDENTITY_REQUIRED' })
     expect(rows.rows.get(created.approval_id)).toMatchObject({ state: 'PENDING' })
+  })
+})
+
+describe('onde a autoridade guarda os pedidos', () => {
+  const domain = { table: () => table() as never } as never
+
+  it('o padrão continua sendo a chave-valor', () => {
+    // Trocar isto sozinho migraria dados de gente sem ninguém pedir.
+    expect(approvalRepository({ get: () => undefined }, {}, domain)).toBeInstanceOf(DomainActionApprovalRepository)
+    expect(approvalRepository({ get: () => undefined }, { storageAuthority: 'kv' }, domain))
+      .toBeInstanceOf(DomainActionApprovalRepository)
+  })
+
+  it('pedir RLS sem o armazenamento por inquilino FALHA ALTO', () => {
+    // Cair de volta para a chave-valor em silêncio seria o pior desfecho: quem
+    // pediu RLS acharia que tem isolamento no banco, e os dois lados
+    // divergiriam desde o primeiro pedido.
+    expect(() => approvalRepository({ get: () => undefined }, { storageAuthority: 'rls' }, domain))
+      .toThrow('APPROVAL_TENANT_STORAGE_UNAVAILABLE')
+  })
+
+  it('com o armazenamento montado, RLS é usado', () => {
+    const records = { list: async () => [], get: async () => undefined, put: async () => undefined }
+    const repository = approvalRepository({ get: (key: string) => (key === 'studioTenantStorage' ? { records } : undefined) } as never, { storageAuthority: 'rls' }, domain)
+    expect(repository).toBeInstanceOf(TenantRecordActionApprovalRepository)
   })
 })

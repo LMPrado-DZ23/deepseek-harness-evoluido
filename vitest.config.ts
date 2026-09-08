@@ -53,7 +53,7 @@ export default defineConfig({
         statements: 90,
         'plugins/identity/src/**/*.ts': { 100: true },
         'plugins/policy/src/**/*.ts': { 100: true },
-        'plugins/action-approval/src/{model,repository,service,http}.ts': { 100: true },
+        'plugins/action-approval/src/{model,repository,tenant-repository,service,http}.ts': { 100: true },
         'plugins/tenancy/src/**/*.ts': { 100: true },
         'plugins/agents/src/{model,service}.ts': { 100: true },
         'plugins/agent-team/src/{model,service}.ts': { 100: true },
