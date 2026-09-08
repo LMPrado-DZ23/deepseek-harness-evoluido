@@ -1,6 +1,6 @@
 {
   "brand": "DZ23 STUDIO",
-  "nav": { "home": "Início", "projects": "Meus projetos", "progress": "Acompanhar criação", "result": "Ver resultado", "help": "Ajuda", "settings": "Configurações" },
+  "nav": { "home": "Início", "projects": "Meus projetos", "progress": "Acompanhar criação", "result": "Ver resultado", "help": "Ajuda", "settings": "Configurações", "soon": "em breve", "menuLabel": "Navegação do Studio" },
   "health": { "ok": "Tudo certo", "attention": "Atenção" },
   "account": { "signOut": "Sair", "signingOut": "Saindo…", "signOutFailed": "Não foi possível encerrar sua sessão. Confira a conexão e tente novamente." },
   "idea": {
@@ -82,5 +82,5 @@
     "creation": "Estamos criando e testando um protótipo local. Ele ainda não foi verificado nem publicado.",
     "verified": "Protótipo verificado — não está publicado nem disponível para outras pessoas"
   },
-  "mobile": { "title": "Seu projeto está avançando", "subtitle": "Acompanhe cada etapa até a verificação do protótipo.", "review": "Revisar", "approve": "Aprovar plano", "menu": "Abrir menu" }
+  "mobile": { "title": "Seu projeto está avançando", "subtitle": "Acompanhe cada etapa até a verificação do protótipo.", "review": "Revisar", "approve": "Aprovar plano", "menu": "Abrir menu", "close": "Fechar menu" }
 }

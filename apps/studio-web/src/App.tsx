@@ -1,10 +1,7 @@
-import { Bell, CircleHelp, Eye, FolderKanban, Home, LineChart, LogOut, Menu, MessageCircle, Plug, Settings, Sparkles, UserRound } from 'lucide-react'
+import { Bell, LogOut, Menu, Sparkles, UserRound } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, apiResponse, type HealthState } from './api'
 import type { Category } from './categories'
-import { HUB_PATH } from './hub/presentation'
-import hub from './i18n/hub.pt-BR.json'
-import assistant from './i18n/assistant.pt-BR.json'
 import t from './i18n/pt-BR.json'
 import { currentStepIndex, permanentTruthKind, privacyNotice, type ProjectUiState } from './presentation'
 import { apiFailureMessage, apiFailureText, type ApiCallKind } from './pwa/apiFailure'
@@ -13,6 +10,8 @@ import { NotificationOptIn } from './pwa/NotificationOptIn'
 import { dispatchGenerationFinished } from './pwa/notifications'
 import { signOutInBrowser } from './session/signOut'
 import { currentSessionMode } from './session/currentSession'
+import { StudioSidebar } from './Navigation'
+import { NAV_MENU_ID, activeNavId } from './navigation'
 
 type DesignPreset = 'modern' | 'professional' | 'colorful' | 'brand'
 type Question = { id: 'audience' | 'goal' | 'content' | 'sensitive-confirmation'; text: string }
@@ -56,6 +55,18 @@ export function App() {
   const [signingOut, setSigningOut] = useState(false)
   const [authenticatedSession, setAuthenticatedSession] = useState(false)
   const previewFrame = useRef<HTMLIFrameElement>(null)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuButton = useRef<HTMLButtonElement>(null)
+  // Fechar devolve o foco ao botão que abriu: sem isso, quem navega por teclado
+  // ou leitor de tela é largado no começo da página depois de fechar a gaveta.
+  function closeMenu() { setMenuOpen(false); menuButton.current?.focus() }
+  useEffect(() => {
+    if (!menuOpen) return
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') { setMenuOpen(false); menuButton.current?.focus() } }
+    window.addEventListener('keydown', onKey)
+    document.body.classList.add('menu-open')
+    return () => { window.removeEventListener('keydown', onKey); document.body.classList.remove('menu-open') }
+  }, [menuOpen])
   useEffect(() => {
     let active = true
     void currentSessionMode().then(mode => { if (active) setAuthenticatedSession(mode === 'authenticated') })
@@ -230,12 +241,9 @@ export function App() {
   }
   function chooseSuggestion(value: string, selected: Category) { setBrief(value); setCategory(selected) }
   return <div className="shell">
-    <aside className="sidebar"><img src="/studio/brand/dz23-studio-logo.jpg" alt={t.brand} className="brand" /><nav aria-label={t.brand}>
-      <Nav icon={<Home />} label={t.nav.home} active /><Nav icon={<FolderKanban />} label={t.nav.projects} /><Nav icon={<LineChart />} label={t.nav.progress} /><Nav icon={<Eye />} label={t.nav.result} />
-      <a className="nav" href="/studio/assistente"><MessageCircle aria-hidden="true" /><span>{assistant.navLabel}</span></a>
-      <a className="nav" href={HUB_PATH}><Plug aria-hidden="true" /><span>{hub.navLabel}</span></a>
-    </nav><div className="sidebar-footer"><button aria-label={t.nav.help}><CircleHelp /></button><button aria-label={t.nav.settings}><Settings /></button></div></aside>
-    <section className="workspace"><header className="topbar"><button className="mobile-menu" aria-label={t.mobile.menu}><Menu /></button><Status health={health} /><div className="top-actions"><NotificationOptIn /><Bell aria-hidden="true" /><UserRound aria-hidden="true" />{authenticatedSession ? <button className="signout-button" type="button" disabled={signingOut} aria-busy={signingOut} onClick={() => void signOut()}><LogOut aria-hidden="true" /><span>{signingOut ? t.account.signingOut : t.account.signOut}</span></button> : null}</div></header>
+    <StudioSidebar active={activeNavId(window.location.pathname)} open={menuOpen} onClose={closeMenu} />
+    {menuOpen ? <button type="button" className="drawer-scrim" aria-label={t.mobile.close} onClick={closeMenu} /> : null}
+    <section className="workspace"><header className="topbar"><button ref={menuButton} type="button" className="mobile-menu" aria-label={menuOpen ? t.mobile.close : t.mobile.menu} aria-expanded={menuOpen} aria-controls={NAV_MENU_ID} onClick={() => setMenuOpen(!menuOpen)}><Menu aria-hidden="true" /></button><Status health={health} /><div className="top-actions"><NotificationOptIn /><Bell aria-hidden="true" /><UserRound aria-hidden="true" />{authenticatedSession ? <button className="signout-button" type="button" disabled={signingOut} aria-busy={signingOut} onClick={() => void signOut()}><LogOut aria-hidden="true" /><span>{signingOut ? t.account.signingOut : t.account.signOut}</span></button> : null}</div></header>
       <main className="canvas"><section className="idea-panel">
         {projectState === null ? <Idea brief={brief} setBrief={setBrief} privacy={privacy} setPrivacy={setPrivacy} route={route ?? health.route} ready={ready} chooseSuggestion={chooseSuggestion} create={create}
           designPreset={designPreset} setDesignPreset={setDesignPreset} brandColor={brandColor} setBrandColor={setBrandColor}
@@ -308,7 +316,6 @@ function refreshPreviewAdmission(previewUrl: string): void {
   document.body.append(probe)
 }
 function checkStatus(status: AcceptanceCheck['status']): string { return status === 'PASSED' ? t.verification.passed : status === 'FAILED' ? t.verification.failed : status === 'NOT_AUTOMATED' ? t.verification.notAutomated : t.verification.pending }
-function Nav({ icon, label, active = false }: { icon: React.ReactNode; label: string; active?: boolean }) { return <button className={active ? 'nav active' : 'nav'}>{icon}<span>{label}</span></button> }
 function Status({ health }: { health: HealthState }) { const ok = health.state === 'OK'; return <button className={ok ? 'status ok' : 'status attention'} aria-label={ok ? t.health.ok : t.health.attention}><span />{ok ? t.health.ok : t.health.attention}</button> }
 function Progress({ state }: { state: ProjectUiState | null }) { const current = currentStepIndex(state); const truthKind = permanentTruthKind(state); return <section className="progress-panel" aria-label={t.progress.title}><h2>{t.progress.title}</h2><p className="mobile-progress-subtitle">{t.mobile.subtitle}</p><ol>{steps.map(([title, detail], index) => <li key={title} className={index === current ? 'current' : ''}><span className="step-number">{index + 1}</span><div><strong>{index + 1}. {title}</strong><p>{detail}</p><small>{index < current ? t.progress.done : index === current ? t.progress.current : t.progress.waiting}</small></div></li>)}</ol>{truthKind === null ? null : <p className="truth">{t.truth[truthKind]}</p>}</section> }
 
