@@ -12,6 +12,8 @@ export class BuilderLifecycleError extends Error {
   }
 }
 
+import type { BuilderAttestationFacts } from './attestation.js'
+
 export interface BuilderLifecyclePreflight { readonly state: 'OK' | 'BLOCKED_EXTERNAL' }
 export interface BuilderLifecyclePrepared { readonly buildRef: string }
 export interface BuilderLifecycleStepResult { readonly state: BuildState; readonly step: BuildStep; readonly result: StepResult }
@@ -20,6 +22,19 @@ export interface BuilderLifecycleFinished {
   readonly exported: ExportedArtifact | null
   readonly cleanupPending: boolean
   readonly cleaned: boolean
+  /**
+   * Os fatos que SÓ a sessão do construtor conhece: com que imagem e sob que
+   * política este artefato foi construído.
+   *
+   * É por AQUI que a atestação de aceitação atravessa — a pergunta que deixou
+   * o caminho de sucesso do pipeline morto por várias versões. OPCIONAL de
+   * propósito: uma sessão que não consegue declarar imagem e política não pode
+   * produzir uma atestação de aprovação, e a execução continua bloqueada. Um
+   * valor padrão aqui seria a mentira mais barata do repositório: bastaria
+   * esquecer de preencher para o Studio afirmar que construiu sob uma política
+   * que ninguém conferiu.
+   */
+  readonly attestation?: BuilderAttestationFacts
 }
 export interface BuilderLifecycleManaged {
   readonly buildRef: string

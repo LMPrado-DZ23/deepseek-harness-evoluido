@@ -94,6 +94,83 @@ describe('Prompt-to-App pipeline', () => {
     expect(f.transitions).toEqual([])
   })
 
+  /**
+   * O ciclo do construtor relatando o que os testes do app gerado acharam.
+   *
+   * O relatório de aceitação é escrito pelo pipeline com todos os critérios
+   * `PENDING`; quem os resolve é a suíte do próprio app, no passo `test`. Este
+   * duplo faz exatamente isso - e nada além disso.
+   */
+  const reportingExecute = (statuses: 'PASSED' | 'FAILED') => async (directory: string, command: string) => {
+    if (command === 'pnpm run test') {
+      const path = resolve(directory, 'evidence', 'appspec-report.json')
+      const report = JSON.parse(await readFile(path, 'utf8')) as { checks: { status: string }[] }
+      for (const check of report.checks) if (check.status === 'PENDING') check.status = statuses
+      await writeFile(path, JSON.stringify(report), 'utf8')
+    }
+    return { exitCode: 0, stdout: 'ok', stderr: '', timedOut: false }
+  }
+
+  const attestingFinish: BuilderLifecycleSession['finish'] = async (): Promise<BuilderLifecycleFinished> => ({
+    finalState: 'E2E_OK',
+    exported: { relative_path: 'exports/build_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', sha256: 'a'.repeat(64), files: 1, bytes: 1 },
+    cleanupPending: false, cleaned: true,
+    attestation: { image_digest: `sha256:${'d'.repeat(64)}`, policy_sha256: 'f'.repeat(64), scope_id: 's_1' },
+  })
+
+  it('conclui a jornada quando o construtor declara imagem e política, gravando as quatro atestações', async () => {
+    // O caminho de SUCESSO estava morto: um ciclo que passava lançava
+    // ACCEPTANCE_ATTESTATION_UNAVAILABLE e levava embora VERIFIED_PROTOTYPE, a
+    // prévia e o aviso à pessoa. Este é o teste que prova que ele voltou.
+    const f = await fixture({ execute: reportingExecute('PASSED'), finish: attestingFinish })
+    const result = await f.pipeline.run(actor, 'project', { generate: vi.fn(async () => cleanGeneration) })
+    expect(result).toMatchObject({ state: 'VERIFIED_PROTOTYPE', attempts: 1 })
+    expect(f.transitions).toEqual(['GENERATING', 'BUILD_OK', 'TESTS_OK', 'VERIFIED_PROTOTYPE'])
+    const run = f.runs.at(-1)!
+    expect(run).toMatchObject({ state: 'PASSED', stage: 'verify', artifact_sha256: 'a'.repeat(64), template_integrity: 'VERIFIED' })
+    // Os RESUMOS ficam no registro; os documentos inteiros vivem em evidence/.
+    // Um manifesto completo dentro da chave-valor cresceria sem teto.
+    expect(run.attestations).toEqual({
+      acceptance_sha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      manifest_sha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      sbom_sha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      provenance_sha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      builder_image_digest: `sha256:${'d'.repeat(64)}`,
+      policy_sha256: 'f'.repeat(64),
+    })
+    const written = f.evidence.map(item => item.relative_path)
+    for (const name of ['acceptance', 'manifest', 'sbom', 'provenance']) {
+      expect(written.some(path => path.endsWith(`evidence/attestation-${name}.json`)), name).toBe(true)
+    }
+    // A atestação de aceitação diz APROVADO e mostra em quê se baseou.
+    const directory = run.run_directory
+    const acceptance = JSON.parse(await readFile(resolve(directory, 'evidence/attestation-acceptance.json'), 'utf8')) as Record<string, unknown>
+    expect(acceptance).toMatchObject({
+      kind: 'dz23.acceptance', verdict: 'PASSED', template_integrity: 'VERIFIED',
+      builder: { image_digest: `sha256:${'d'.repeat(64)}`, policy_sha256: 'f'.repeat(64), scope_id: 's_1' },
+    })
+    expect((acceptance.summary as { failed: number, pending: number })).toMatchObject({ failed: 0, pending: 0 })
+    // A proveniência não se cala sobre o que ela NÃO prova.
+    const provenance = JSON.parse(await readFile(resolve(directory, 'evidence/attestation-provenance.json'), 'utf8')) as Record<string, unknown>
+    expect(provenance).toMatchObject({ signed: false, manifest_sha256: run.attestations!.manifest_sha256 })
+    // O SBOM lista o que o app declara - aqui, um package.json sem dependência
+    // nenhuma, que é "declarado com zero" e não "indisponível".
+    const sbom = JSON.parse(await readFile(resolve(directory, 'evidence/attestation-sbom.json'), 'utf8')) as Record<string, unknown>
+    expect(sbom).toMatchObject({ source: 'declared', unavailable_reason: null, components: [] })
+  })
+
+  it('um critério REPROVADO derruba a atestação, e o ciclo verde do construtor não salva a execução', async () => {
+    // O veredito da atestação é o que a pessoa vai mostrar a alguém: ele manda
+    // sobre o "passou" do construtor.
+    const f = await fixture({ execute: reportingExecute('FAILED'), finish: attestingFinish })
+    const result = await f.pipeline.run(actor, 'project', { generate: vi.fn(async () => cleanGeneration) })
+    expect(result).toMatchObject({ state: 'TESTS_FAILED' })
+    expect(f.runs.some(run => run.state === 'PASSED')).toBe(false)
+    expect(f.runs.at(-1)).toMatchObject({ failure_code: 'ACCEPTANCE_ATTESTATION_FAILED' })
+    expect(f.runs.at(-1)?.attestations).toBeUndefined()
+    expect(f.transitions).not.toContain('VERIFIED_PROTOTYPE')
+  })
+
   it('does not promote supervisor success while the authenticated exported acceptance report is unavailable', async () => {
     const f = await fixture(); const generator = { generate: vi.fn(async () => cleanGeneration) }
     const result = await f.pipeline.run(actor, 'project', generator)

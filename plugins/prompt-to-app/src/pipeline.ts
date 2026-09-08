@@ -3,13 +3,23 @@ import { cp, lstat, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { z } from 'zod'
 import type { RoutePrivacy } from '@dz23-studio/route-health'
-import type { AppSpecV1 } from './appspec.js'
+import { appSpecHash, type AppSpecV1 } from './appspec.js'
 import { generateAuthLayer, writeAuthLayer } from './auth-generator.js'
 import { generateCrudLayer, writeCrudLayer } from './crud-generator.js'
 import { generateDataLayer, writeDataLayer } from './data-generator.js'
 import { generateDashboardLayer, writeDashboardLayer } from './dashboard-generator.js'
 import { renderDesignTokens } from './design.js'
 import { acceptanceChecks, parseAcceptanceReport, writeAcceptanceArtifacts, type AcceptanceCheck } from './acceptance.js'
+import {
+  acceptanceAttestation,
+  canonicalDocument,
+  manifestAttestation,
+  provenanceAttestation,
+  sbomAttestation,
+  type AttestationDigests,
+  type BuilderAttestationFacts,
+  type ManifestEntry,
+} from './attestation.js'
 import { generatedFileSchema, writeGeneratedFiles, type GeneratedFile } from './generator.js'
 import { generateFormLayer, writeFormLayer } from './form-generator.js'
 import { generateSchedulingLayer, writeSchedulingLayer } from './scheduling-generator.js'
@@ -53,6 +63,14 @@ export interface PipelineOptions {
   readonly service: PromptToAppService
   readonly builder: BuilderLifecycleResolverPort<PromptToAppActor>
   readonly templateDirectory: string
+  /**
+   * A versão do template, para a proveniência dizer DE ONDE o artefato veio.
+   *
+   * Ausente vira `unversioned` no documento, e não uma versão inventada: um
+   * número falso ali faria duas construções de templates diferentes parecerem
+   * a mesma.
+   */
+  readonly templateVersion?: string
   readonly runsRoot: string
   readonly logoStoreRoot?: string
   readonly now?: () => Date
@@ -252,25 +270,61 @@ export class PromptToAppPipeline {
       } catch { diagnostic = 'TEMPLATE_INTEGRITY_FAILED'; failedStage = 'verify'; templateIntegrity = 'FAILED' }
       const lifecyclePassed = finished.finalState === 'E2E_OK' && finished.exported !== null && finished.cleaned && !finished.cleanupPending
       if (!lifecyclePassed && diagnostic === undefined) diagnostic = finished.finalState === 'CANCELLED' ? 'BUILDER_CANCELLED' : 'BUILDER_FAILED'
+      // As atestações do artefato. Este é o ponto em que o caminho de SUCESSO
+      // deixou de ser um beco sem saída: antes, um ciclo que passava lançava
+      // `ACCEPTANCE_ATTESTATION_UNAVAILABLE` e levava embora
+      // `VERIFIED_PROTOTYPE`, a prévia e o aviso à pessoa.
+      //
+      // A saída NÃO foi inventar uma atestação para acender o verde: os
+      // documentos são derivados do que realmente aconteceu, e a sessão do
+      // construtor tem de declarar com que imagem e sob que política construiu.
+      // Sem essa declaração a execução continua BLOQUEADA, exatamente como
+      // antes - o que mudou é que agora existe um caminho honesto para sair
+      // dela.
+      let attestations: AttestationDigests | undefined
       if (diagnostic === undefined && lifecyclePassed) {
-        // O ciclo passou e não há atestação de aceitação: a execução termina
-        // BLOQUEADA (ver E-05). Mesmo assim os passos ROBARAM, e a pessoa tem
-        // direito de ver o que aconteceu - sair daqui sem gravar o relato era
-        // justamente o que a deixava com um código em inglês e nada mais.
-        await writeFile(resolve(runDirectory, 'pipeline.log'), log, 'utf8')
-        await this.writeRunReport({
-          actor, projectId, runId, directory: runDirectory, stage: 'verify', runState: 'BLOCKED_EXTERNAL',
-          attempt, files: attemptFiles, previousFiles: previousAttemptFiles, findings: attemptFindings,
-          correction: previousDiagnosticForReport,
+        const facts = finished.attestation
+        if (facts === undefined) {
+          // Os passos ROBARAM mesmo assim, e a pessoa tem direito de ver o que
+          // aconteceu: sair daqui sem gravar o relato era o que a deixava com
+          // um código em inglês e nada mais.
+          await writeFile(resolve(runDirectory, 'pipeline.log'), log, 'utf8')
+          await this.writeRunReport({
+            actor, projectId, runId, directory: runDirectory, stage: 'verify', runState: 'BLOCKED_EXTERNAL',
+            attempt, files: attemptFiles, previousFiles: previousAttemptFiles, findings: attemptFindings,
+            correction: previousDiagnosticForReport,
+          })
+          throw new BuilderLifecycleError('BLOCKED_EXTERNAL', 'ACCEPTANCE_ATTESTATION_UNAVAILABLE')
+        }
+        const attested = await this.attest({
+          runId, projectId, planId: plan.plan_id, directory: runDirectory, attempt,
+          artifactSha256: finished.exported!.sha256, templateIntegrity, builder: facts,
+          checks: verifiedAcceptanceChecks, appSpecSha256: appSpecHash(spec),
+          templateId: project.category, templateVersion: this.options.templateVersion ?? 'unversioned',
         })
-        throw new BuilderLifecycleError('BLOCKED_EXTERNAL', 'ACCEPTANCE_ATTESTATION_UNAVAILABLE')
+        if (attested.verdict !== 'PASSED') {
+          // A atestação reprovou o que o ciclo tinha aprovado. Isso NÃO vira
+          // sucesso: o veredito da atestação é o que a pessoa vai mostrar a
+          // alguém, e ele manda.
+          diagnostic = 'ACCEPTANCE_ATTESTATION_FAILED'
+          // `test`, e não `verify`: o que reprovou foram os CRITÉRIOS que a
+          // pessoa escreveu, conferidos pela suíte do app. Marcar `verify`
+          // levaria o projeto a BUILD_FAILED, e ela leria "não deu para
+          // construir" de um app que construiu e não fez o que ela pediu.
+          failedStage = 'test'
+        } else {
+          attestations = attested.digests
+        }
+        for (const file of attested.evidenceFiles) {
+          await this.recordEvidence(actor, projectId, runId, runDirectory, file, 'test-report')
+        }
       }
       const state = diagnostic === undefined && buildPassed && testPassed && lifecyclePassed ? 'PASSED' : diagnostic === 'BUDGET_EXCEEDED' ? 'BUDGET_EXCEEDED' : 'FAILED'
       if (state !== 'PASSED') finalFailureState = failedStage === 'test' ? 'TESTS_FAILED' : 'BUILD_FAILED'
       await writeFile(resolve(runDirectory, 'pipeline.log'), log, 'utf8')
       activeStage = 'verify'
       const artifactSha256 = state === 'PASSED' ? finished.exported!.sha256 : null
-      await this.options.service.putRun(actor, this.runRecord(actor, projectId, plan.plan_id, state === 'PASSED' ? 'verify' : failedStage, attempt, state, 'full', runDirectory, generated, diagnostic ?? null, runId, operationId, ownerSessionId, verifiedAcceptanceChecks, artifactSha256, templateIntegrity))
+      await this.options.service.putRun(actor, this.runRecord(actor, projectId, plan.plan_id, state === 'PASSED' ? 'verify' : failedStage, attempt, state, 'full', runDirectory, generated, diagnostic ?? null, runId, operationId, ownerSessionId, verifiedAcceptanceChecks, artifactSha256, templateIntegrity, attestations))
       await this.recordEvidence(actor, projectId, runId, runDirectory, 'pipeline.log', 'build-log')
       await this.writeRunReport({ actor, projectId, runId, directory: runDirectory, stage: state === 'PASSED' ? 'verify' : failedStage, runState: state, attempt, files: attemptFiles, previousFiles: previousAttemptFiles, findings: attemptFindings, correction: previousDiagnosticForReport })
       if (state === 'PASSED') {
@@ -292,9 +346,84 @@ export class PromptToAppPipeline {
     }
   }
 
-  private runRecord(actor: PromptToAppActor, projectId: string, planId: string, stage: StudioRun['stage'], attempt: number, state: StudioRun['state'], sandbox: StudioRun['sandbox'], runDirectory: string, generation: CodeGenerationResult | null, failure: string | null, runId = this.#createId(), operationId = runId, ownerSessionId = actor.sessionId ?? 'direct-execution', acceptanceChecks: readonly AcceptanceCheck[] = [], artifactSha256: string | null = null, templateIntegrity?: StudioRun['template_integrity']): StudioRun {
+  /**
+   * Escreve as quatro atestações do artefato ao lado da execução.
+   *
+   * Elas ficam em `evidence/` porque é ali que mora o que a pessoa (ou um
+   * auditor) pode abrir depois. O registro da execução guarda só os RESUMOS: um
+   * manifesto inteiro dentro do armazenamento por chave-valor cresceria sem
+   * teto.
+   * @param input - os fatos da execução verificada.
+   * @returns o veredito, os resumos e os arquivos gravados.
+   */
+  private async attest(input: {
+    readonly runId: string
+    readonly projectId: string
+    readonly planId: string
+    readonly directory: string
+    readonly attempt: number
+    readonly artifactSha256: string
+    readonly templateIntegrity: 'VERIFIED' | 'FAILED'
+    readonly builder: BuilderAttestationFacts
+    readonly checks: readonly AcceptanceCheck[]
+    readonly appSpecSha256: string
+    readonly templateId: string
+    readonly templateVersion: string
+  }): Promise<{
+    readonly verdict: 'PASSED' | 'FAILED'
+    readonly digests: AttestationDigests
+    readonly evidenceFiles: readonly string[]
+  }> {
+    const attestedAt = this.#now().toISOString()
+    const files = await manifestEntries(input.directory)
+    const manifest = manifestAttestation({
+      runId: input.runId, artifactSha256: input.artifactSha256, files, attestedAt,
+    })
+    const acceptance = acceptanceAttestation({
+      runId: input.runId, projectId: input.projectId, artifactSha256: input.artifactSha256,
+      templateIntegrity: input.templateIntegrity, builder: input.builder,
+      checks: input.checks.map(check => ({ id: check.id, kind: check.kind, status: check.status })),
+      lifecyclePassed: true, attestedAt,
+    })
+    const sbom = sbomAttestation({
+      runId: input.runId, artifactSha256: input.artifactSha256, attestedAt,
+      packageJson: await readJsonFile(resolve(input.directory, 'package.json')),
+    })
+    const provenance = provenanceAttestation({
+      runId: input.runId, projectId: input.projectId, planId: input.planId,
+      artifactSha256: input.artifactSha256, manifestSha256: manifest.sha256, builder: input.builder,
+      appSpecSha256: input.appSpecSha256, templateId: input.templateId,
+      templateVersion: input.templateVersion, templateIntegrity: input.templateIntegrity,
+      attempt: input.attempt, attestedAt,
+    })
+    const written: string[] = []
+    for (const [name, value] of [
+      ['acceptance.json', acceptance.document],
+      ['manifest.json', manifest.document],
+      ['sbom.json', sbom.document],
+      ['provenance.json', provenance.document],
+    ] as const) {
+      const relative = `evidence/attestation-${name}`
+      await writeFile(resolve(input.directory, relative), `${canonicalDocument(value)}\n`, 'utf8')
+      written.push(relative)
+    }
+    return {
+      verdict: acceptance.document.verdict,
+      digests: {
+        acceptance_sha256: acceptance.sha256,
+        manifest_sha256: manifest.sha256,
+        sbom_sha256: sbom.sha256,
+        provenance_sha256: provenance.sha256,
+        builder_image_digest: input.builder.image_digest,
+        policy_sha256: input.builder.policy_sha256,
+      },
+      evidenceFiles: written,
+    }
+  }
+
+  private runRecord(actor: PromptToAppActor, projectId: string, planId: string, stage: StudioRun['stage'], attempt: number, state: StudioRun['state'], sandbox: StudioRun['sandbox'], runDirectory: string, generation: CodeGenerationResult | null, failure: string | null, runId = this.#createId(), operationId = runId, ownerSessionId = actor.sessionId ?? 'direct-execution', acceptanceChecks: readonly AcceptanceCheck[] = [], artifactSha256: string | null = null, templateIntegrity?: StudioRun['template_integrity'], attestations?: AttestationDigests): StudioRun {
     const now = this.#now().toISOString()
-    return { run_id: runId, operation_id: operationId, owner_session_id: ownerSessionId, plan_id: planId, project_id: projectId, org_id: actor.orgId, tenant_id: actor.tenantId, stage, attempt, state, started_at: now, finished_at: state === 'RUNNING' || state === 'PENDING' ? null : now, sandbox, route: generation?.route ?? null, model: generation?.model ?? null, input_tokens: generation?.inputTokens ?? null, output_tokens: generation?.outputTokens ?? null, estimated_cost_usd: null, run_directory: runDirectory || 'not-created', artifact_sha256: artifactSha256, ...(templateIntegrity === undefined ? {} : { template_integrity: templateIntegrity }), failure_code: failure, acceptance_checks: [...acceptanceChecks] }
+    return { run_id: runId, operation_id: operationId, owner_session_id: ownerSessionId, plan_id: planId, project_id: projectId, org_id: actor.orgId, tenant_id: actor.tenantId, stage, attempt, state, started_at: now, finished_at: state === 'RUNNING' || state === 'PENDING' ? null : now, sandbox, route: generation?.route ?? null, model: generation?.model ?? null, input_tokens: generation?.inputTokens ?? null, output_tokens: generation?.outputTokens ?? null, estimated_cost_usd: null, run_directory: runDirectory || 'not-created', artifact_sha256: artifactSha256, ...(templateIntegrity === undefined ? {} : { template_integrity: templateIntegrity }), ...(attestations === undefined ? {} : { attestations }), failure_code: failure, acceptance_checks: [...acceptanceChecks] }
   }
 
   private async recordFailure(actor: PromptToAppActor, projectId: string, planId: string, runId: string, directory: string, attempt: number, generation: CodeGenerationResult | null, diagnostic: string, stage: StudioRun['stage'], operationId: string, ownerSessionId: string) {
@@ -440,4 +569,42 @@ function pipelineFailureCode(error: unknown): string {
   if (message.startsWith('APPSPEC_')) return message
   if (message.startsWith('PREVIEW_ARTIFACT_')) return 'ARTIFACT_MATERIALIZATION_FAILED'
   return 'PIPELINE_UNEXPECTED_FAILURE'
+}
+
+
+/**
+ * Os arquivos do artefato, com o conteúdo resumido.
+ *
+ * `node_modules` e `.git` ficam de fora: o manifesto descreve o que o Studio
+ * GEROU, e uma árvore de dependências instalada tornaria o documento gigante
+ * sem dizer nada que o SBOM já não diga melhor.
+ * @param root - o diretório da execução.
+ * @returns uma entrada por arquivo, em caminho relativo com barras normais.
+ */
+async function manifestEntries(root: string): Promise<readonly ManifestEntry[]> {
+  const entries: ManifestEntry[] = []
+  for (const relative of await listTreeFiles(root)) {
+    const content = await readFile(resolve(root, relative))
+    entries.push({
+      path: relative.replaceAll('\\\\', '/'),
+      sha256: createHash('sha256').update(content).digest('hex'),
+      bytes: content.byteLength,
+    })
+  }
+  return entries
+}
+
+/**
+ * Lê um JSON do disco, devolvendo `undefined` quando ele não existe ou não é
+ * legível. Quem chama decide o que a ausência significa - aqui ela nunca vira
+ * um objeto vazio que se pareça com uma resposta.
+ * @param path - o caminho do arquivo.
+ * @returns o valor lido, ou `undefined`.
+ */
+async function readJsonFile(path: string): Promise<unknown> {
+  try {
+    const info = await lstat(path)
+    if (!info.isFile() || info.isSymbolicLink() || info.size > 1024 * 1024) return undefined
+    return JSON.parse(await readFile(path, 'utf8'))
+  } catch { return undefined }
 }

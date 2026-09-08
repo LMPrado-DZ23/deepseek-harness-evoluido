@@ -1,4 +1,7 @@
 {
+  "codeBlockCopy": "Copiar",
+  "codeBlockCopied": "Copiado",
+  "codeBlockUnknownLanguage": "código",
   "navLabel": "Conversar com o DZ23",
   "title": "Converse com o DZ23",
   "subtitle": "Use a conversa completa do Harness para explicar uma tarefa, acompanhar o raciocínio e aprovar ações.",

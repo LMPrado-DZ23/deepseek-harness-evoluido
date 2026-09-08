@@ -256,7 +256,16 @@ describe('builder lifecycle resolver', () => {
     client.listManaged = vi.fn(listManaged)
     const session = await resolverFixture(actor, installationId, client).forActor(actor)
     await expect(session.cancel(buildRef, new AbortController().signal)).resolves.toBeUndefined()
-    await expect(session.finish(buildRef)).resolves.toEqual({ finalState: 'E2E_OK', exported: { relative_path: `exports/${buildRef}`, sha256: 'a'.repeat(64), files: 2, bytes: 3 }, cleanupPending: false, cleaned: true })
+    // A sessão DECLARA com que imagem e sob que política construiu. É por aqui
+    // que a atestação de aceitação atravessa: sem estes fatos o pipeline
+    // continua bloqueando a execução, e um valor padrão aqui faria o Studio
+    // afirmar uma política que ninguém conferiu.
+    await expect(session.finish(buildRef)).resolves.toEqual({
+      finalState: 'E2E_OK',
+      exported: { relative_path: `exports/${buildRef}`, sha256: 'a'.repeat(64), files: 2, bytes: 3 },
+      cleanupPending: false, cleaned: true,
+      attestation: { image_digest: expect.stringMatching(/^sha256:[a-f0-9]{64}$/u), policy_sha256: expect.stringMatching(/^[a-f0-9]{64}$/u), scope_id: scopeId },
+    })
     await expect(session.listManaged(new AbortController().signal)).resolves.toEqual([{ buildRef, buildId: 'logical-build', state: 'E2E_OK', exported: true, cleanupPending: false }])
     expect(managedBuild({ build_ref: buildRef, build_id: 'direct', state: 'FAILED', exported: false, cleanup_pending: true })).toEqual({ buildRef, buildId: 'direct', state: 'FAILED', exported: false, cleanupPending: true })
   })

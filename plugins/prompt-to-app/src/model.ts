@@ -105,6 +105,27 @@ export const studioRunSchema = z.object({
    * sobe: ausente quer dizer "não registrado", nunca "conferido".
    */
   template_integrity: z.enum(['VERIFIED', 'FAILED']).optional(),
+  /**
+   * Os resumos das quatro atestações desta execução: aceitação, manifesto,
+   * SBOM e proveniência, mais a imagem e a política do construtor.
+   *
+   * OPCIONAL, e a versão do domínio NÃO sobe: subir a versão faria `open()`
+   * falhar com `version-mismatch` para sempre numa instalação que já rodou, e
+   * não existe passo de migração neste seam. Ausente quer dizer "esta execução
+   * é anterior às atestações", nunca "foi atestada e deu certo".
+   *
+   * Guardar só os RESUMOS aqui é deliberado: os documentos inteiros vivem em
+   * `evidence/`, e um registro de execução que carregasse o manifesto completo
+   * de um app cresceria sem teto dentro do armazenamento por chave-valor.
+   */
+  attestations: z.object({
+    acceptance_sha256: sha256,
+    manifest_sha256: sha256,
+    sbom_sha256: sha256,
+    provenance_sha256: sha256,
+    builder_image_digest: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
+    policy_sha256: sha256,
+  }).strict().optional(),
   failure_code: z.string().nullable(),
   acceptance_checks: z.array(z.object({
     id: z.string().min(1), label: z.string().min(1),

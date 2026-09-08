@@ -174,6 +174,15 @@ function lifecycleSession(client: BuilderUnixClient, artifactClient: ArtifactIng
         exported: value.exported,
         cleanupPending: value.cleanup_pending,
         cleaned: value.cleaned,
+        // A imagem e a política vêm do escopo RESOLVIDO, e o `preflight` já
+        // recusou a sessão em que o supervisor respondeu outra imagem ou outra
+        // política. São, portanto, os valores sob os quais este artefato foi
+        // realmente construído - e não uma cópia da configuração pedida.
+        attestation: {
+          image_digest: config.imageDigest,
+          policy_sha256: config.policySha256,
+          scope_id: config.scopeId,
+        },
       } satisfies BuilderLifecycleFinished
     }),
     listManaged: signal => invoke(async () => (await client.listManaged({ request_id: requestId() }, { signal: callSignal(signal) })).builds.map(managedBuild)),

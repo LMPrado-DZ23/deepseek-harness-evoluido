@@ -1,6 +1,7 @@
 import { Paperclip, Send, Square, TriangleAlert, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import copy from '../i18n/assistant.pt-BR.json'
+import { Markdown } from './Markdown'
 import {
   ConversationRequestError,
   cancelConversationTurn,
@@ -369,7 +370,10 @@ export function ConversationItem({ event }: { readonly event: ConversationEvent 
   if (event.type === 'message.assistant') {
     return <>
       <span className="who">{copy.assistant}</span>
-      <p>{event.text}</p>
+      {/* A resposta do assistente é lida como Markdown; a da PESSOA continua
+          texto puro, porque ela escreveu texto e não marcação — interpretar o
+          que ela digitou faria um asterisco sumir da própria frase dela. */}
+      <Markdown text={event.text} />
       {event.interrupted ? <span className="context-note">{copy.interrupted}</span> : null}
     </>
   }
