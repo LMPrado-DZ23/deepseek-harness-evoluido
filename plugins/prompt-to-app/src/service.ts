@@ -8,6 +8,7 @@ import type {
   StudioDesignSpecRecord, StudioIntakeTurn, StudioPlan, StudioProject, StudioRun,
 } from './model.js'
 import { assertProjectTransition, assertUndoTransition } from './state.js'
+import { applyPlanEdit, PlanEditError, type PlanEdit } from './plan-edit.js'
 import { latestGreenCheckpoint, noGreenReason, runCheckpoints, type CheckpointBlocker, type RunCheckpoint, NO_ATTEMPT } from './checkpoint.js'
 import { t } from './i18n.js'
 
@@ -191,6 +192,38 @@ export class PromptToAppService {
     const value = this.plan(actor, projectId)
     if (value.status !== 'PROPOSED') throw new PromptToAppError('REPLAY', t('errors.planChangeUnavailable'))
     const updated = { ...value, status: 'CHANGE_REQUESTED' as const, change_request: reason.trim(), updated_at: this.#now().toISOString() }
+    await this.#repository.putPlan(updated)
+    return updated
+  }
+
+  /**
+   * O plano depois da edição feita pela PESSOA (E-03).
+   *
+   * A regra inteira mora em `applyPlanEdit`, que é função pura; aqui só entram
+   * as três coisas que dependem do serviço: quem pode escrever, qual plano é o
+   * corrente, e a tradução do erro do módulo para o erro do serviço.
+   *
+   * A edição NÃO gera aprovação: aprovar continua sendo um ato separado, feito
+   * depois de ver o resultado da própria edição.
+   * @param actor - quem edita.
+   * @param projectId - o projeto.
+   * @param edit - as mudanças, já validadas pelo schema.
+   * @returns o plano gravado, uma revisão à frente.
+   */
+  async editPlan(actor: PromptToAppActor, projectId: string, edit: PlanEdit): Promise<StudioPlan> {
+    this.#authorize(actor, 'project.write')
+    const value = this.plan(actor, projectId)
+    let updated: StudioPlan
+    try {
+      updated = applyPlanEdit(value, edit, this.#now().toISOString())
+    } catch (error) {
+      if (!(error instanceof PlanEditError)) throw error
+      // `STALE` e `UNAVAILABLE` viram REPLAY, que a camada HTTP responde como 409:
+      // as duas são "o mundo mudou embaixo de você", e não "seu pedido está errado".
+      const code = error.code === 'STALE' || error.code === 'UNAVAILABLE' ? 'REPLAY' as const
+        : error.code === 'NOT_FOUND' ? 'NOT_FOUND' as const : 'INVALID' as const
+      throw new PromptToAppError(code, error.message)
+    }
     await this.#repository.putPlan(updated)
     return updated
   }

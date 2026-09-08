@@ -132,9 +132,34 @@ test('percorre as cinco etapas, muda privacidade e termina sem alegar publicaç�
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(page.locator('.plan-list .task-card')).toHaveCount(2)
   const lastSlice = page.locator('.plan-list .task-card h2').last()
+  // E-03: a pessoa EDITA o plano antes de aprovar, no navegador de verdade e
+  // no tamanho de celular. Renomear e reordenar são as duas coisas que ela faz
+  // sem precisar explicar nada por escrito.
+  await expect(page.getByText('definidos pelo Studio')).toBeVisible()
+  await page.locator('.plan-list .task-card').last().getByRole('button', { name: 'Editar esta parte' }).click()
+  await page.getByLabel('Nome desta parte').fill('Fale conosco')
+  await page.getByLabel('Como vamos conferir (uma linha por item)').fill('O contato fica visível.\nO telefone aparece.')
+  const editedPromise = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith('/plan/edit'))
+  await page.getByRole('button', { name: 'Guardar minha alteração' }).click()
+  expect((await editedPromise).status()).toBe(200)
+  await expect(page.locator('.plan-list .task-card h2').last()).toContainText('Fale conosco')
+  await expect(page.getByText('O telefone aparece.')).toBeVisible()
+  await expect(page.getByText('Este plano tem alterações suas.')).toBeVisible()
+  // Subir: a parte editada passa a ser a primeira, e o plano continua com duas partes.
+  await page.locator('.plan-list .task-card').last().getByRole('button', { name: 'Subir: Fale conosco' }).click()
+  await expect(page.locator('.plan-list .task-card h2').first()).toContainText('Fale conosco')
+  await expect(page.locator('.plan-list .task-card')).toHaveCount(2)
+  // E tirar volta a ordem ao que o teste seguinte espera não é possível: em vez
+  // disso descemos de novo, porque tirar uma parte mudaria o que é gerado.
+  await page.locator('.plan-list .task-card').first().getByRole('button', { name: 'Descer: Fale conosco' }).click()
+  await expect(page.locator('.plan-list .task-card h2').last()).toContainText('Fale conosco')
+  // A tela do plano EDITÁVEL é onde a pessoa leiga toma a decisão. Se ela tem
+  // violação de acessibilidade, quem usa leitor de tela decide no escuro.
+  const planScan = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze()
+  expect(planScan.violations.map(violation => violation.id)).toEqual([])
   const approveButton = page.getByRole('button', { name: 'Aprovar este plano' })
   await expect(lastSlice).toBeVisible()
-  await expect(lastSlice).toContainText('Contato')
+  await expect(lastSlice).toContainText('Fale conosco')
   expect(await lastSlice.evaluate((node, approve) => Boolean(node.compareDocumentPosition(approve as Node) & Node.DOCUMENT_POSITION_FOLLOWING), await approveButton.elementHandle())).toBe(true)
   await approveButton.click()
   const acceptedPromise = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith('/generate'))

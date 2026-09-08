@@ -14,10 +14,12 @@ import { signOutInBrowser } from './session/signOut'
 import { currentSessionMode } from './session/currentSession'
 import { StudioSidebar } from './Navigation'
 import { NAV_MENU_ID, activeNavId } from './navigation'
+import { PlanEditor } from './plan/PlanEditor'
+import type { PlanEditRequest } from './plan/planEdit'
 
 type DesignPreset = 'modern' | 'professional' | 'colorful' | 'brand'
 type Question = { id: 'audience' | 'goal' | 'content' | 'sensitive-confirmation'; text: string }
-type Plan = { slices: Array<{ slice_id: string; title: string; description: string; acceptance_criteria: string[] }> }
+type Plan = { revision?: number; edited_by_person?: boolean; slices: Array<{ slice_id: string; title: string; description: string; acceptance_criteria: string[] }> }
 type AcceptanceCheck = { id: string; label: string; status: 'PENDING' | 'PASSED' | 'FAILED' | 'NOT_AUTOMATED' }
 type VerificationCode = { email: string; code: string; expires_at: string }
 type PipelineResult = { state: 'VERIFIED_PROTOTYPE' | 'BUILD_FAILED' | 'TESTS_FAILED' | 'BLOCKED_EXTERNAL' | 'CANCELLED' | 'INTERRUPTED'; attempts: number; message: string; checks?: AcceptanceCheck[]; verificationCodes?: VerificationCode[] }
@@ -179,6 +181,14 @@ export function App() {
     if (projectId === null) return
     await safely(async () => { const response = await api<{ plan: Plan }>(`/projects/${projectId}/plan`, { method: 'POST', body: '{}' }); setPlan(response.plan); setProjectState('PLAN_PROPOSED') })
   }
+  /** E-03: manda UMA alteração e adota o plano que voltou, com a revisão nova. */
+  async function editPlan(edit: PlanEditRequest) {
+    if (projectId === null) return
+    await safely(async () => {
+      const response = await api<{ plan: Plan }>(`/projects/${projectId}/plan/edit`, { method: 'POST', body: JSON.stringify(edit) })
+      setPlan(response.plan)
+    })
+  }
   async function approvePlan() {
     if (projectId === null) return
     await safely(async () => { await api(`/projects/${projectId}/plan/approve`, { method: 'POST', body: '{}' }); setProjectState('PLAN_APPROVED') })
@@ -307,7 +317,7 @@ export function App() {
           tone={tone} setTone={setTone} logo={logo} setLogo={setLogo} showDesignAdvanced={showDesignAdvanced} setShowDesignAdvanced={setShowDesignAdvanced} /> : null}
         {projectState === 'DRAFT' && question !== null ? <Questions question={question} answer={answer} setAnswer={setAnswer} submit={submitAnswer} /> : null}
         {projectState === 'SPEC_READY' ? <Action title={t.plan.title} detail={t.progress.planDetail} button={t.plan.prepare} action={preparePlan} /> : null}
-        {projectState === 'PLAN_PROPOSED' && plan !== null ? <PlanView plan={plan} approve={approvePlan} reason={changeReason} setReason={setChangeReason} requestChange={requestPlanChange} /> : null}
+        {projectState === 'PLAN_PROPOSED' && plan !== null ? <PlanEditor plan={plan} submit={editPlan} approve={approvePlan} reason={changeReason} setReason={setChangeReason} requestChange={requestPlanChange} /> : null}
         {projectState === 'PLAN_PROPOSED' && plan === null ? <Action title={t.plan.title} detail={t.progress.planDetail} button={t.plan.revision} action={preparePlan} /> : null}
         {projectState === 'PLAN_APPROVED' ? <Action title={t.creation.title} detail={t.truth.creation} button={t.creation.start} action={generate} /> : null}
         {projectState === 'GENERATING' || projectState === 'BUILD_OK' || projectState === 'TESTS_OK' ? <Action title={t.creation.title} detail={t.creation.working} button={t.creation.cancel} action={cancelGeneration} /> : null}
@@ -359,7 +369,6 @@ function Questions({ question, answer, setAnswer, submit }: { question: Question
   const sensitive = question.id === 'sensitive-confirmation'
   return <><div className="heading"><Sparkles/><div><h1>{t.questions.title}</h1><p>{t.questions.subtitle}</p></div></div><section className="task-card"><h2>{question.text}</h2>{sensitive ? <div className="button-row"><button className="primary" onClick={() => void submit(false, true)}>{t.questions.confirm}</button><button className="secondary" onClick={() => void submit(false, false)}>{t.questions.reject}</button></div> : <><label htmlFor="answer">{t.questions.answer}</label><textarea id="answer" value={answer} onChange={event => setAnswer(event.target.value)} placeholder={t.questions.answerPlaceholder}/><button className="primary" disabled={answer.trim() === ''} onClick={() => void submit(false)}>{t.questions.continue}</button><button className="secondary" onClick={() => void submit(true)}>{t.questions.recommend}</button></>}</section></>
 }
-function PlanView({ plan, approve, reason, setReason, requestChange }: { plan: Plan; approve(): Promise<void>; reason: string; setReason(v: string): void; requestChange(): Promise<void> }) { return <><div className="heading"><Sparkles/><div><h1>{t.plan.title}</h1><p>{t.progress.planDetail}</p></div></div><div className="plan-list">{plan.slices.map(slice => <section className="task-card" key={slice.slice_id}><h2>{slice.title}</h2><p>{slice.description}</p><strong>{t.plan.criterion}</strong><ul>{slice.acceptance_criteria.map(value => <li key={value}>{value}</li>)}</ul></section>)}</div><button className="primary" onClick={() => void approve()}>{t.plan.approve}</button><section className="task-card"><h2>{t.plan.change}</h2><label htmlFor="change-reason">{t.plan.changeLabel}</label><textarea id="change-reason" value={reason} onChange={event => setReason(event.target.value)} placeholder={t.plan.changePlaceholder}/><button className="secondary" disabled={reason.trim().length < 3} onClick={() => void requestChange()}>{t.plan.sendChange}</button></section></> }
 function Action({ title, detail, button, action }: { title: string; detail: string; button?: string; action?: () => Promise<void> }) { return <><div className="heading"><Sparkles/><div><h1>{title}</h1><p>{detail}</p></div></div>{button === undefined || action === undefined ? null : <button className="primary" onClick={() => void action()}>{button}</button>}</> }
 function Verification({ result, previewActive, startPreview, retry }: { result: PipelineResult; previewActive: boolean; startPreview(): Promise<void>; retry(): Promise<void> }) { const ok = result.state === 'VERIFIED_PROTOTYPE'; const cancelled = result.state === 'CANCELLED'; const interrupted = result.state === 'INTERRUPTED'; return <section className="task-card"><h1>{t.verification.title}</h1><p>{resultSentence(result.state, t.verification)}</p><p>{t.verification.attempts}: {result.attempts}</p>{ok && !previewActive ? <button className="primary" onClick={() => void startPreview()}>{t.preview.open}</button> : null}{interrupted ? <button className="primary" onClick={() => void retry()}>{t.creation.retry}</button> : null}{result.verificationCodes === undefined || result.verificationCodes.length === 0 ? null : <section><h2>{t.verification.testCodes}</h2><p>{t.verification.testCodesHelp}</p><ul>{result.verificationCodes.map(item => <li key={`${item.email}-${item.expires_at}-${item.code}`}><strong>{item.email}</strong>: <code>{item.code}</code></li>)}</ul></section>}{result.checks === undefined ? null : <><h2>{t.verification.checks}</h2><ul>{result.checks.map(check => <li key={check.id}>{check.label}: {checkStatus(check.status)}</li>)}</ul></>}<details className="result-technical"><summary>{t.verification.technicalTitle}</summary><p>{t.verification.technicalCode}: <code>{result.state}</code></p>{result.message === '' ? null : <p>{t.verification.technicalFailure}: <code>{result.message}</code></p>}</details></section> }
 

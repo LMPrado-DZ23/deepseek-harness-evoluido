@@ -176,3 +176,15 @@
 .md-copy { display: inline-flex; gap: 0.25rem; align-items: center; color: inherit; }
 .md-block-code pre { margin: 0; padding: 0.75rem; overflow-x: auto; }
 .md-block-code code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.875rem; }
+/* E-03 — plano editável. O botão desabilitado continua LEGÍVEL: um botão que
+   some não explica por que sumiu, e um cinza fraco demais reprova contraste. */
+.plan-list{list-style:none;padding:0;margin:0}
+.plan-note{margin-top:12px;color:#3d4757;font-size:15px}
+.plan-edited{margin-top:12px;padding:10px 12px;border-radius:8px;background:#eef3fb;color:#0b3f9b;font-weight:700}
+.plan-actions{display:grid;gap:8px;margin-top:14px}
+.plan-actions .secondary{width:100%;margin:0}
+.plan-actions .secondary:disabled{border-color:#6b7688;color:#6b7688;background:#f2f4f8}
+.plan-edit-form{display:grid;gap:6px}
+.plan-edit-form input,.plan-edit-form textarea{width:100%;min-height:44px;padding:10px;border:1px solid #8b95a6;border-radius:8px;font:inherit}
+.plan-edit-form textarea{min-height:96px}
+@media (min-width:720px){.plan-actions{grid-template-columns:repeat(4,1fr)}}

@@ -94,7 +94,7 @@ async function fixture(options: { readonly emergencyStop?: { assertRunning(scope
 
 describe('prompt-to-app HTTP boundary', () => {
   it('declares every route with authorization and no client-owned scope', () => {
-    expect(PROMPT_TO_APP_ROUTE_CONTRACTS).toHaveLength(16)
+    expect(PROMPT_TO_APP_ROUTE_CONTRACTS).toHaveLength(17)
     expect(PROMPT_TO_APP_ROUTE_CONTRACTS.every(route => route.access === 'authorized' && route.permission !== null)).toBe(true)
   })
 
@@ -140,8 +140,22 @@ describe('prompt-to-app HTTP boundary', () => {
     expect((await f.request(`/projects/${projectId}/plan`, { method: 'POST', body: '{}' })).status).toBe(201)
     expect((await f.request(`/projects/${projectId}/plan/change`, { method: 'POST', body: JSON.stringify({ reason: 'Mostrar o contato antes dos serviços.' }) })).status).toBe(200)
     expect(f.repository.planRows.some(value => value.status === 'CHANGE_REQUESTED')).toBe(true)
-    expect((await f.request(`/projects/${projectId}/plan`, { method: 'POST', body: '{}' })).status).toBe(201)
+    const second = await f.request(`/projects/${projectId}/plan`, { method: 'POST', body: '{}' })
+    expect(second.status).toBe(201)
     expect(f.repository.planRows).toHaveLength(2)
+    const proposed = await second.json() as { plan: { revision?: number, slices: { slice_id: string, planned_files: string[] }[] } }
+    // E-03: a pessoa edita o plano ANTES de aprovar, pela rota do produto.
+    const first = proposed.plan.slices[0]!
+    const edited = await f.request(`/projects/${projectId}/plan/edit`, { method: 'POST', body: JSON.stringify({
+      base_revision: proposed.plan.revision ?? 1,
+      slices: [{ slice_id: first.slice_id, title: 'Meus servicos', acceptance_criteria: ['a pessoa ve os servicos', 'a pessoa acha o telefone'] }],
+    }) })
+    expect(edited.status).toBe(200)
+    const afterEdit = await edited.json() as { plan: { revision: number, edited_by_person: boolean, slices: { slice_id: string, title: string, planned_files: string[] }[] } }
+    expect(afterEdit.plan.slices[0]).toMatchObject({ title: 'Meus servicos', planned_files: first.planned_files })
+    expect(afterEdit.plan.edited_by_person).toBe(true)
+    // Reenviar a mesma revisao e recusado com 409, e nao aceito por ser o ultimo a chegar.
+    expect((await f.request(`/projects/${projectId}/plan/edit`, { method: 'POST', body: JSON.stringify({ base_revision: proposed.plan.revision ?? 1, removed: [first.slice_id] }) })).status).toBe(409)
     expect((await f.request(`/projects/${projectId}/plan/approve`, { method: 'POST', body: '{}' })).status).toBe(200)
     const accepted = await f.request(`/projects/${projectId}/generate`, { method: 'POST', body: '{}' })
     expect(accepted.status).toBe(202)
@@ -232,6 +246,7 @@ describe('prompt-to-app HTTP boundary', () => {
     expect((await asAttacker(`/projects/${projectId}/plan`, { method: 'POST', body: JSON.stringify({ org_id: 'org-a' }) })).status).toBe(404)
     expect((await asAttacker(`/projects/${projectId}/design`, { method: 'POST', body: JSON.stringify({ preset: 'modern' }) })).status).toBe(404)
     expect((await asAttacker(`/projects/${projectId}/plan/change`, { method: 'POST', body: JSON.stringify({ reason: 'Tentar alterar o plano alheio.' }) })).status).toBe(404)
+    expect((await asAttacker(`/projects/${projectId}/plan/edit`, { method: 'POST', body: JSON.stringify({ base_revision: 1, removed: ['s1'] }) })).status).toBe(404)
     expect((await asAttacker(`/projects/${projectId}`, { method: 'DELETE', body: JSON.stringify({ org_id: 'org-a' }) })).status).toBe(404)
     expect(f.repository.projectRows).toHaveLength(1)
     expect(f.repository.projectRows[0]).toMatchObject({ org_id: 'org-a', tenant_id: 'tenant-a', archived_at: null })

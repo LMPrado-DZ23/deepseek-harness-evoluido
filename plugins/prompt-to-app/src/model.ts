@@ -82,6 +82,16 @@ export const studioPlanSchema = z.object({
   revision: z.number().int().positive().optional(),
   slices: z.array(planSliceSchema).min(1), status: z.enum(['PROPOSED', 'APPROVED', 'CHANGE_REQUESTED']),
   change_request: z.string().trim().min(3).max(2_000).nullable().optional(),
+  /**
+   * Se esta revisão saiu da mão da PESSOA e não do planejador (E-03).
+   *
+   * OPCIONAL de propósito: o descritor da unidade entra na versão do domínio,
+   * e um campo obrigatório novo faria `open()` recusar todo plano já gravado.
+   * Ele existe porque a atestação e o relatório precisam poder dizer que os
+   * critérios foram escritos por quem pediu o aplicativo — atribuir ao
+   * planejador o que a pessoa escreveu é mentir sobre a autoria do julgamento.
+   */
+  edited_by_person: z.boolean().optional(),
   created_at: timestamp, updated_at: timestamp,
 }).strict()
 
@@ -164,6 +174,7 @@ export type StudioAppSpecRecord = z.infer<typeof studioAppSpecRecordSchema>
 export type StudioDesignSpecRecord = z.infer<typeof studioDesignSpecRecordSchema>
 export type StudioIntakeTurn = z.infer<typeof studioIntakeTurnSchema>
 export type StudioPlan = z.infer<typeof studioPlanSchema>
+export type StudioPlanSlice = z.infer<typeof planSliceSchema>
 export type StudioRun = z.infer<typeof studioRunSchema>
 export type StudioEvidence = z.infer<typeof studioEvidenceSchema>
 export type StudioApproval = z.infer<typeof studioApprovalSchema>

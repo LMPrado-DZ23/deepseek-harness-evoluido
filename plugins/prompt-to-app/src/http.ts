@@ -22,6 +22,7 @@ import { routePrivacySchema } from '@dz23-studio/route-health'
 import { studioProjectCategorySchema } from './model.js'
 import type { LogoProcessorPort } from './logo.js'
 import { PromptToAppError, type PromptToAppActor, type PromptToAppService } from './service.js'
+import { planEditSchema } from './plan-edit.js'
 import { InvalidTransitionError, UndoNotAvailableError } from './state.js'
 
 const JSON_LIMIT = 64 * 1024
@@ -120,6 +121,7 @@ export const PROMPT_TO_APP_ROUTE_CONTRACTS = [
   { method: 'POST', path: '/projects/:projectId/plan', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'POST', path: '/projects/:projectId/plan/approve', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'POST', path: '/projects/:projectId/plan/change', access: 'authorized', permission: 'project.write', scope: 'project' },
+  { method: 'POST', path: '/projects/:projectId/plan/edit', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'POST', path: '/projects/:projectId/generate', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'POST', path: '/projects/:projectId/generate/cancel', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'GET', path: '/projects/:projectId/checkpoints', access: 'authorized', permission: 'project.read', scope: 'project' },
@@ -267,6 +269,9 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
         const input = changeRequestSchema.parse(await readJson(request))
         return json(response, 200, { plan: await config.service.requestPlanChange(actor, projectId, input.reason) })
       }
+      if (request.method === 'POST' && matched.suffix === '/plan/edit') {
+        return json(response, 200, { plan: await config.service.editPlan(actor, projectId, planEditSchema.parse(await readJson(request))) })
+      }
       if (request.method === 'POST' && matched.suffix === '/plan/approve') {
         return json(response, 200, { plan: await config.service.approvePlan(actor, projectId) })
       }
@@ -391,7 +396,7 @@ async function authenticatedActor(request: IncomingMessage, config: PromptToAppH
 
 function matchRoute(method: string | undefined, path: string): { readonly projectId?: string; readonly suffix: string } | undefined {
   if ((method === 'GET' && (path === '/health' || path === '/projects')) || (method === 'POST' && path === '/projects')) return { suffix: path }
-  const match = /^\/projects\/([^/]+)(\/intake\/answer|\/design\/logo|\/design|\/plan\/approve|\/plan\/change|\/plan|\/generate\/cancel|\/generate|\/checkpoints|\/undo|\/report)?$/u.exec(path)
+  const match = /^\/projects\/([^/]+)(\/intake\/answer|\/design\/logo|\/design|\/plan\/approve|\/plan\/change|\/plan\/edit|\/plan|\/generate\/cancel|\/generate|\/checkpoints|\/undo|\/report)?$/u.exec(path)
   if (match === null) return undefined
   const suffix = match[2] ?? ''
   // `/report` e `/checkpoints` só LEEM, e são as únicas leituras com sufixo. A
