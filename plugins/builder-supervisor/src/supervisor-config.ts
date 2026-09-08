@@ -4,7 +4,7 @@ import { lstat, open, realpath, type FileHandle } from 'node:fs/promises'
 import { posix } from 'node:path'
 import {
   TEMPLATE_MANIFEST_MAX_BYTES,
-  canonicalTemplateStoreManifestBytes,
+  canonicalSignedTemplateStoreManifestBytes,
   parseTemplateStoreManifest,
   type TemplateStoreManifest,
 } from './store-security.js'
@@ -200,7 +200,7 @@ async function loadResolvedConfig(
     let templateStoreManifest: TemplateStoreManifest | undefined
     if (templateStoreManifestBytes !== undefined) {
       templateStoreManifest = parseTemplateStoreManifest(JSON.parse(secureJsonText(templateStoreManifestBytes)) as unknown)
-      if (!canonicalTemplateStoreManifestBytes(templateStoreManifest).equals(templateStoreManifestBytes) || templateStoreManifest.template_store_version !== templateStoreVersion || templateStoreManifest.tree_sha256 !== templateStoreSha256) invalid()
+      if (!canonicalSignedTemplateStoreManifestBytes(templateStoreManifest).equals(templateStoreManifestBytes) || templateStoreManifest.template_store_version !== templateStoreVersion || templateStoreManifest.tree_sha256 !== templateStoreSha256) invalid()
     }
     const config: BuilderSupervisorResolvedConfig = {
       installationId,

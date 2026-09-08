@@ -37,7 +37,7 @@ import {
   TEMPLATE_STORE_MAX_ENTRIES,
   assertSafeStoreStat,
   assertSourceIdentity,
-  canonicalTemplateStoreManifestBytes,
+  canonicalSignedTemplateStoreManifestBytes,
   canonicalSourceRoot,
   computeTemplateTreeSha256,
   imageDigestValue,
@@ -174,7 +174,9 @@ export async function provisionBuilderSupervisor(
     // USTAR materializer therefore fails without leaving provisioning effects.
     const manifest = await loadPinnedManifest(manifestPath, expectedManifestSha256)
     for (const entry of manifest.entries) templateStoreUstarEntryPath(entry.path)
-    const canonicalManifestBytes = canonicalTemplateStoreManifestBytes(manifest)
+    // A forma DE DISCO, com assinatura quando houver: senão um armazenamento
+    // poderia perder a assinatura sem que o hash da autoridade mudasse.
+    const canonicalManifestBytes = canonicalSignedTemplateStoreManifestBytes(manifest)
     const canonicalManifestSha256 = createHash('sha256').update(canonicalManifestBytes).digest('hex')
     const sourceEntries = await inspectSourceTree(sourceRoot)
     assertTreeMatchesManifest(sourceEntries, manifest.entries)
@@ -306,7 +308,7 @@ async function existingProvisionResult(input: ExistingProvisionInput): Promise<B
     if (config.installationId !== input.installationId || config.tenantId !== input.tenantId || config.instanceId !== input.instanceId ||
       config.scopeId !== input.scopeId || config.imageDigest !== input.imageDigest || config.policySha256 !== input.policySha256 ||
       config.templateStoreVersion !== input.manifest.template_store_version || config.templateStoreSha256 !== input.manifest.tree_sha256 ||
-      config.templateStoreManifest === undefined || !canonicalTemplateStoreManifestBytes(config.templateStoreManifest).equals(canonicalTemplateStoreManifestBytes(input.manifest))) mismatch()
+      config.templateStoreManifest === undefined || !canonicalSignedTemplateStoreManifestBytes(config.templateStoreManifest).equals(canonicalSignedTemplateStoreManifestBytes(input.manifest))) mismatch()
     await verifyAuthoritySha256(posix.join(posix.dirname(input.configPath), 'template-manifest.sha256'), input.canonicalManifestSha256)
     return {
       state: 'CREATED', scope_id: input.scopeId,
