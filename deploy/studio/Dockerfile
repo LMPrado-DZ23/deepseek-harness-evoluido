@@ -24,6 +24,9 @@ COPY deploy/studio/Dockerfile deploy/studio/Dockerfile
 COPY pnpm-workspace.yaml pnpm-workspace.yaml
 COPY pnpm-workspace.release.yaml pnpm-workspace.release.yaml
 COPY pnpm-lock.release.yaml pnpm-lock.release.yaml
+# `check-image-lock.mjs` e COPIADO porque `fetch-verified-pnpm.mjs` importa a
+# validacao do lock dele; o que nao acontece aqui e EXECUTA-LO.
+COPY scripts/check-image-lock.mjs scripts/check-image-lock.mjs
 COPY scripts/fetch-verified-pnpm.mjs scripts/fetch-verified-pnpm.mjs
 # `check-image-lock.mjs` NAO roda aqui: ele confere, entre outras coisas, que
 # todo pacote do repositorio esta no lock de release, e este estagio copia sete
