@@ -67,6 +67,7 @@
     "gate:image-lock": "node scripts/check-image-lock.mjs",
     "gate:requirements-ledger": "node scripts/check-requirements-ledger.mjs --self-test && node scripts/check-requirements-ledger.mjs",
     "gate:secrets": "node scripts/check-secrets.mjs --self-test && node scripts/check-secrets.mjs",
+    "gate:no-caveman": "node scripts/check-no-caveman.mjs --self-test && node scripts/check-no-caveman.mjs",
     "gate:p37": "node scripts/check-p37-inventory.mjs --self-test && node scripts/check-p37-inventory.mjs",
     "gate:licenses": "node scripts/check-release-licenses.mjs --self-test && node scripts/check-release-licenses.mjs",
     "gate:licenses:release": "node scripts/check-release-licenses.mjs --release",

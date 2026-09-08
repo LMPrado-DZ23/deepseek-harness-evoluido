@@ -123,6 +123,11 @@ jobs:
           # Varredura de segredo: a CI não tinha nenhuma, e um segredo colado
           # por engano entrava no histórico sem um único sinal.
           pnpm gate:secrets
+          # C-16 e verdade por AUSÊNCIA: nenhuma compressão Caveman/RTK existe,
+          # então nada transforma código, log ou erro sem opt-in. Ausência não
+          # se defende sozinha - basta uma dependência nova para a saída passar
+          # a mentir -, e este portão a versiona.
+          pnpm gate:no-caveman
           # P37 de referência externa. Sem este portão, um inventário pode
           # perder o campo que decidiria a cópia - licença, marca, segredo -
           # e o travessão passa por resposta.

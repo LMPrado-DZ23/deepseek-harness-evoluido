@@ -28,6 +28,28 @@ export const routeHealthRecordSchema = z.object({
    * significa zero não precificadas.
    */
   unpriced_requests: z.number().int().nonnegative().optional(),
+  /**
+   * Falhas seguidas desde o último sucesso desta rota, NESTE escopo.
+   *
+   * A contagem é por registro - `org_id`/`tenant_id`/rota - e nunca global:
+   * uma contagem global fecharia a rota de um locatário por causa da chave
+   * quebrada de outro.
+   */
+  consecutive_failures: z.number().int().nonnegative().optional(),
+  /**
+   * Quando o circuito desta rota abriu, ou `null` com ele fechado.
+   *
+   * Sem isto, uma rota que falha sempre era tentada de novo a cada requisição:
+   * cada pessoa pagava a espera inteira do erro para descobrir o que a
+   * requisição anterior já sabia.
+   *
+   * Os dois campos são OPCIONAIS pelo mesmo motivo de `unpriced_requests`:
+   * torná-los obrigatórios exigiria subir a versão do domínio, e `open()`
+   * falha com `version-mismatch` em qualquer instalação que já rodou - não
+   * existe passo de migração. Registro antigo, sem os campos, significa
+   * circuito fechado, que é exatamente o estado dele antes desta mudança.
+   */
+  circuit_opened_at: z.iso.datetime().nullable().optional(),
   last_failure: z.string().nullable(),
   updated_at: z.iso.datetime(),
 }).strict()

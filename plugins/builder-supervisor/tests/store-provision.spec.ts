@@ -17,6 +17,22 @@ const run = promisify(execFile)
 const require = createRequire(import.meta.url)
 const linux = process.platform === 'linux' ? describe : describe.skip
 const roots: string[] = []
+/**
+ * Todo processo filho iniciado por um teste, para nenhum sobreviver a ele.
+ *
+ * Vários testes aqui deixam o filho PARADO de propósito, esperando um arquivo
+ * de portão. Quando o teste falha antes de abrir o portão, esse filho fica
+ * vivo para sempre - e cada um é uma inicialização inteira do `tsx`. Com
+ * dezenas deles a máquina fica sem memória e a suíte SEGUINTE trava sem motivo
+ * aparente: foi exatamente isso que aconteceu aqui, com mais de 250 processos
+ * órfãos. Um teste que falha precisa limpar a própria bagunça.
+ */
+const startedChildren: { kill(): void }[] = []
+
+afterEach(() => {
+  for (const child of startedChildren.splice(0)) child.kill()
+})
+
 afterEach(async () => {
   await Promise.all(roots.splice(0).map(async root => {
     await makeWritable(root)
@@ -676,11 +692,19 @@ linux('immutable builder template-store provisioning', () => {
     const resultPaths = Array.from({ length: 50 }, (_, index) => posix.join(fixture.root, `bootstrap-race-${index}.json`))
     const children = await Promise.all(resultPaths.map((resultPath, index) =>
       startProvisionChild(fixture, 'pause-guard-missing', readyPaths[index], gate, resultPath)))
-    await Promise.all(readyPaths.map(path => waitForPath(path, 20_000)))
-    expect(await readdir(instanceRoot)).toEqual([])
-    await writeFile(gate, 'go\n', { mode: 0o600 })
-    await Promise.all(children.map(child => expect(child.completed).resolves.toMatchObject({ code: 0, signal: null })))
-    const results = await Promise.all(resultPaths.map(path => readFile(path, 'utf8').then(value => JSON.parse(value) as Record<string, unknown>)))
+    let results: Record<string, unknown>[]
+    try {
+      // Cinquenta processos `tsx` levam o tempo que a máquina permitir. A
+      // garantia aqui é sobre CONCORRÊNCIA, não sobre velocidade: apertar o
+      // prazo só transforma máquina lenta em falha que não diz nada.
+      await Promise.all(readyPaths.map(path => waitForPath(path, 120_000)))
+      expect(await readdir(instanceRoot)).toEqual([])
+      await writeFile(gate, 'go\n', { mode: 0o600 })
+      await Promise.all(children.map(child => expect(child.completed).resolves.toMatchObject({ code: 0, signal: null })))
+      results = await Promise.all(resultPaths.map(path => readFile(path, 'utf8').then(value => JSON.parse(value) as Record<string, unknown>)))
+    } finally {
+      for (const child of children) child.kill()
+    }
     expect(results.filter(result => result.state === 'CREATED')).toHaveLength(1)
     const errors = results.filter(result => result.error !== undefined).map(result => result.error)
     expect(errors).toHaveLength(49)
@@ -690,7 +714,7 @@ linux('immutable builder template-store provisioning', () => {
     expect({ file: guard.isFile(), links: guard.nlink, mode: guard.mode & 0o777 }).toEqual({ file: true, links: 1, mode: 0o600 })
     expect(await lockArtifacts(instanceRoot)).toEqual([])
     expect(await pathExists(posix.join(instanceRoot, '3'))).toBe(false)
-  }, 90_000)
+  }, 300_000)
 
   it('serializes release against a competing reclaim process under the same crash-releasing mutex', async () => {
     const fixture = await createFixture()
@@ -1024,7 +1048,7 @@ async function startProvisionChild(
   readyPath?: string,
   gatePath?: string,
   resultPath?: string,
-): Promise<{ completed: Promise<{ code: number | null; signal: NodeJS.Signals | null }> }> {
+): Promise<{ completed: Promise<{ code: number | null; signal: NodeJS.Signals | null }>; kill(): void }> {
   provisionChildSequence += 1
   const requestPath = posix.join(fixture.root, `child-${provisionChildSequence}.request.json`)
   await writeFile(requestPath, `${JSON.stringify(fixture.request)}\n`, { mode: 0o600 })
@@ -1033,12 +1057,24 @@ async function startProvisionChild(
   const child = spawn(process.execPath, [tsx, childScript, requestPath, mode, readyPath ?? '-', gatePath ?? '-', resultPath ?? '-'], {
     stdio: ['ignore', 'ignore', 'ignore'],
   })
-  return {
-    completed: new Promise((resolve, reject) => {
+  return trackProvisionChild({
+    completed: new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
       child.once('error', reject)
       child.once('exit', (code, signal) => resolve({ code, signal }))
     }),
-  }
+    // Sem isto, um teste que estoura o prazo deixa os filhos vivos. Com
+    // cinquenta deles, a suíte INTEIRA seguinte trava: foi o que aconteceu -
+    // 126 processos órfãos de `store-provision-child` envenenando as execuções
+    // posteriores. A garantia do teste não muda; o que muda é ele limpar a
+    // própria bagunça quando falha.
+    kill: () => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL') },
+  })
+}
+
+/** Registra o filho para o encerramento automático e devolve o mesmo objeto. */
+function trackProvisionChild<T extends { kill(): void }>(child: T): T {
+  startedChildren.push(child)
+  return child
 }
 
 async function waitForPath(path: string, timeoutMs = 5_000): Promise<void> {

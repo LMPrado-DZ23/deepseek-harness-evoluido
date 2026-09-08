@@ -4,7 +4,10 @@ import type { RouteHealthRecord, RouteSwitchEvent } from '../src/model.ts'
 import {
   ROUTE_FAILURE_MESSAGE,
   StudioRouteHealthService,
+  routeBudgetUsage,
+  routeCircuitState,
   routeCostState,
+  type RouteHealthConfig,
   type RouteHealthRepository,
   type RouteScope,
 } from '../src/service.ts'
@@ -227,5 +230,223 @@ describe('custo que ninguém mediu', () => {
     expect(routeCostState({ requests: 4, unpriced_requests: 4 })).toBe('UNKNOWN')
     // Registro gravado antes de o campo existir: nenhuma não precificada.
     expect(routeCostState({ requests: 4 })).toBe('MEASURED')
+  })
+})
+
+/**
+ * Fábrica com relógio que anda: o circuito só existe no tempo, e um relógio
+ * congelado prova apenas metade dele - abrir sem nunca deixar reabrir.
+ */
+function circuitService(overrides: Partial<RouteHealthConfig> = {}) {
+  let clock = new Date('2026-09-03T00:00:00.000Z')
+  let sequence = 0
+  const repository = new MemoryRepository()
+  const subject = new StudioRouteHealthService(repository, {
+    routes: ['omniroute'],
+    localRoute: 'ollama', fallbackRoute: 'deepseek-official', fallbackModel: 'deepseek-v4-flash',
+    circuit: { failureThreshold: 3, cooldownMs: 30_000 },
+    now: () => clock,
+    createId: () => { sequence += 1; return `event-${String(sequence)}` },
+    ...overrides,
+  })
+  return {
+    repository, subject,
+    advance: (ms: number) => { clock = new Date(clock.getTime() + ms) },
+    async fail(provider: string, times = 1) {
+      for (let attempt = 0; attempt < times; attempt += 1) {
+        await collect(subject.streamWithFallback(scope, { ...options, provider },
+          () => chunks(error()), () => chunks(), true))
+      }
+    },
+    async succeed(provider: string) {
+      await collect(subject.streamWithFallback(scope, { ...options, provider },
+        () => chunks({ type: 'finish', reason: { kind: 'stop' } }), () => chunks(), true))
+    },
+  }
+}
+
+describe('circuito por rota e por escopo', () => {
+  it('abre depois de tres falhas seguidas e para de oferecer a rota enquanto durar a espera', async () => {
+    const h = circuitService()
+    await h.subject.initialize(scope, new Set(['omniroute', 'deepseek-official']))
+    await h.fail('omniroute', 2)
+    expect(h.subject.circuit(scope, 'omniroute')).toBe('CLOSED')
+    await h.fail('omniroute')
+    expect(h.subject.circuit(scope, 'omniroute')).toBe('OPEN')
+    // Com o circuito aberto a rota caída não volta a ser tentada; quem responde
+    // é a rota direta, e não a mesma espera perdida de novo.
+    await expect(h.subject.chooseRoute(scope, 'T2')).resolves.toMatchObject({ route: 'deepseek-official' })
+  })
+
+  it('nao fecha o circuito de um locatario por causa da falha de outro', async () => {
+    const h = circuitService()
+    await h.subject.initialize(scope, new Set(['omniroute']))
+    await h.fail('omniroute', 3)
+    const neighbour = { orgId: 'org-2', tenantId: 'tenant-1' }
+    expect(h.subject.circuit(scope, 'omniroute')).toBe('OPEN')
+    expect(h.subject.circuit(neighbour, 'omniroute')).toBe('CLOSED')
+  })
+
+  it('depois da espera concede UMA chamada, e a segunda ja encontra o circuito fechado de novo', async () => {
+    const h = circuitService()
+    await h.subject.initialize(scope, new Set(['omniroute']))
+    await h.fail('omniroute', 3)
+    h.advance(30_000)
+    expect(h.subject.circuit(scope, 'omniroute')).toBe('HALF_OPEN')
+    await expect(h.subject.chooseRoute(scope, 'T2')).resolves.toEqual({
+      route: 'omniroute', explicit: false,
+      reason: 'Meia-abertura: uma chamada decide se o circuito fecha ou reabre.',
+    })
+    // A chamada de prova reinicia a espera: a requisição seguinte não pode
+    // descer junto na mesma rota quebrada.
+    expect(h.subject.circuit(scope, 'omniroute')).toBe('OPEN')
+    await expect(h.subject.chooseRoute(scope, 'T2')).resolves.toMatchObject({ route: 'deepseek-official' })
+  })
+
+  it('o sucesso fecha o circuito e a falha na meia-abertura reabre a espera inteira', async () => {
+    const h = circuitService()
+    await h.subject.initialize(scope, new Set(['omniroute']))
+    await h.fail('omniroute', 3)
+    h.advance(30_000)
+    await h.fail('omniroute')
+    expect(h.subject.circuit(scope, 'omniroute')).toBe('OPEN')
+    h.advance(29_999)
+    expect(h.subject.circuit(scope, 'omniroute')).toBe('OPEN')
+    await h.succeed('omniroute')
+    expect(h.subject.circuit(scope, 'omniroute')).toBe('CLOSED')
+    expect(h.subject.list(scope).find(record => record.route === 'omniroute')).toMatchObject({
+      consecutive_failures: 0, circuit_opened_at: null,
+    })
+  })
+
+  it('recusa a escolha quando ate a rota direta esta em espera, em vez de prometer o que vai falhar', async () => {
+    const h = circuitService()
+    await h.subject.initialize(scope, new Set(['omniroute']))
+    await h.fail('deepseek-official', 3)
+    await h.fail('omniroute', 3)
+    await expect(h.subject.chooseRoute(scope, 'T2')).resolves.toEqual({
+      route: undefined, explicit: false,
+      reason: 'Circuito aberto em todas as rotas; nenhuma chamada nova enquanto durar a espera.',
+    })
+    expect(h.subject.switches(scope).at(-1)).toMatchObject({ to_route: 'blocked' })
+  })
+
+  it('registro gravado antes dos campos existirem vale como circuito fechado', () => {
+    expect(routeCircuitState({}, new Date('2026-09-03T00:00:00.000Z'))).toBe('CLOSED')
+    expect(routeCircuitState({ circuit_opened_at: null }, new Date('2026-09-03T00:00:00.000Z'))).toBe('CLOSED')
+    // Sem configuração explícita vale o padrão da casa: trinta segundos.
+    expect(routeCircuitState(
+      { circuit_opened_at: '2026-09-03T00:00:00.000Z' }, new Date('2026-09-03T00:00:29.999Z'),
+    )).toBe('OPEN')
+    expect(routeCircuitState(
+      { circuit_opened_at: '2026-09-03T00:00:00.000Z' }, new Date('2026-09-03T00:00:30.000Z'),
+    )).toBe('HALF_OPEN')
+  })
+})
+
+describe('teto de gasto por escopo', () => {
+  it('barra a rota paga pelo custo MEDIDO e mantem a IA local, que nao cobra', async () => {
+    const h = circuitService({
+      routes: ['ollama', 'omniroute', 'deepseek-official'],
+      prices: { omniroute: { inputPerMillion: 1, outputPerMillion: 1 } },
+      budget: { maxCostUsd: 0.01, maxUnpricedRequests: 1_000 },
+    })
+    await h.subject.initialize(scope, new Set(['ollama', 'omniroute', 'deepseek-official']))
+    await collect(h.subject.streamWithFallback(scope, options, () => chunks(
+      { type: 'usage', usage: { inputTokens: 10_000, outputTokens: 0 } },
+      { type: 'finish', reason: { kind: 'stop' } },
+    ), () => chunks(), true))
+    expect(h.subject.budget(scope)).toMatchObject({ measuredCostUsd: 0.01, verdict: 'COST_EXCEEDED' })
+    await expect(h.subject.chooseRoute(scope, 'T2')).resolves.toEqual({
+      route: 'ollama', explicit: false,
+      reason: 'Teto de gasto do escopo estourado; seguindo apenas com a IA local.',
+    })
+    expect(h.subject.switches(scope).at(-1)).toMatchObject({ to_route: 'ollama', explicit_route: false })
+  })
+
+  it('a escolha explicita da pessoa nao atravessa o teto', async () => {
+    const h = circuitService({
+      routes: ['omniroute'],
+      budget: { maxCostUsd: 1, maxUnpricedRequests: 2 },
+      localRoute: 'ollama',
+    })
+    await h.subject.initialize(scope, new Set(['omniroute']))
+    await h.succeed('omniroute')
+    await h.succeed('omniroute')
+    expect(h.subject.budget(scope)).toMatchObject({ unpricedRequests: 2, verdict: 'UNPRICED_EXCEEDED' })
+    // Sem IA local saudável não há para onde descer: barrar é a resposta
+    // honesta, e ela fica auditada com a rota que a pessoa tinha pedido.
+    await expect(h.subject.chooseRoute(scope, 'T2', { privacy: 'any', explicitRoute: 'omniroute' })).resolves.toEqual({
+      route: undefined, explicit: true,
+      reason: 'Teto de gasto do escopo estourado; nenhuma rota paga foi acionada.',
+    })
+    expect(h.subject.switches(scope).at(-1)).toMatchObject({
+      from_route: 'omniroute', to_route: 'blocked', explicit_route: true,
+    })
+    // A rota local pedida a dedo continua passando com o MESMO teto estourado:
+    // ela não gasta dinheiro, e barrá-la seria barrar trabalho de graça.
+    expect(h.subject.budget(scope).verdict).toBe('UNPRICED_EXCEEDED')
+    await expect(h.subject.chooseRoute(scope, 'T2', { privacy: 'any', explicitRoute: 'ollama' })).resolves.toMatchObject({
+      route: 'ollama', explicit: true,
+    })
+  })
+
+  it('nao trata "nao sei o preco" como "gastou zero": conta a requisicao sem preco', () => {
+    const priced = { estimated_cost_usd: 0.5, unpriced_requests: 0 }
+    const unpriced = { estimated_cost_usd: 0, unpriced_requests: 40 }
+    // Sem teto configurado o guarda não inventa autoridade nenhuma.
+    expect(routeBudgetUsage([priced, unpriced], undefined)).toEqual({
+      measuredCostUsd: 0.5, unpricedRequests: 40, verdict: 'WITHIN',
+    })
+    // Quarenta requisições de custo desconhecido somariam ZERO num teto que só
+    // olha dinheiro; é por isso que existe o segundo teto.
+    expect(routeBudgetUsage([unpriced], { maxCostUsd: 100, maxUnpricedRequests: 40 }).verdict).toBe('UNPRICED_EXCEEDED')
+    expect(routeBudgetUsage([unpriced], { maxCostUsd: 100, maxUnpricedRequests: 41 }).verdict).toBe('WITHIN')
+    expect(routeBudgetUsage([priced], { maxCostUsd: 0.5, maxUnpricedRequests: 1 }).verdict).toBe('COST_EXCEEDED')
+    // Registro antigo, sem o campo: nenhuma requisição sem preço.
+    expect(routeBudgetUsage([{ estimated_cost_usd: 0 }], { maxCostUsd: 1, maxUnpricedRequests: 1 }).verdict).toBe('WITHIN')
+  })
+})
+
+describe('sem cascatas duplicadas', () => {
+  it('nao desce a cascata duas vezes para a mesma requisicao', async () => {
+    const h = circuitService({ routes: ['omniroute', 'deepseek-official'] })
+    await h.subject.initialize(scope, new Set(['omniroute', 'deepseek-official']))
+    let cascades = 0
+    const request: GenerateOptions = { ...options }
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await collect(h.subject.streamWithFallback(scope, request, () => chunks(error()), () => {
+        cascades += 1
+        return chunks({ type: 'finish', reason: { kind: 'stop' } })
+      }))
+    }
+    expect(cascades).toBe(1)
+    expect(h.subject.switches(scope)).toHaveLength(1)
+  })
+
+  it('nao tenta na cascata a rota que ja falhou nesta requisicao', async () => {
+    const h = circuitService({ routes: ['omniroute'], fallbackRoute: 'omniroute' })
+    await h.subject.initialize(scope, new Set(['omniroute']))
+    let cascades = 0
+    await collect(h.subject.streamWithFallback(scope, options, () => chunks(error()), () => {
+      cascades += 1
+      return chunks()
+    }))
+    expect(cascades).toBe(0)
+    expect(h.subject.switches(scope)).toEqual([])
+  })
+
+  it('nao desce para uma rota direta com o circuito aberto', async () => {
+    const h = circuitService({ routes: ['omniroute', 'deepseek-official'] })
+    await h.subject.initialize(scope, new Set(['omniroute', 'deepseek-official']))
+    await h.fail('deepseek-official', 3)
+    let cascades = 0
+    const output = await collect(h.subject.streamWithFallback(scope, options, () => chunks(error()), () => {
+      cascades += 1
+      return chunks()
+    }))
+    expect(cascades).toBe(0)
+    expect(output.at(-1)?.type).toBe('finish')
+    expect(h.subject.switches(scope)).toEqual([])
   })
 })
