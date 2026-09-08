@@ -106,6 +106,15 @@ export declare class StudioIdentityService {
     releaseHarnessSession(session: SessionRecord, harnessSessionId: string, reason: string): Promise<void>;
     ownsHarnessSession(session: SessionRecord, harnessSessionId: string): boolean;
     strongIdentityForHarnessSession(harnessSessionId: string): boolean;
+    /**
+     * Identidade forte de uma sessão de identidade, pelo seu próprio
+     * `session_id`. É o que a autoridade de confirmação de ações usa: ela conhece
+     * a sessão do principal, não a sessão do Harness. Sessão inexistente,
+     * revogada ou vencida não é identidade forte.
+     * @param sessionId - identificador durável da sessão de identidade.
+     * @returns verdadeiro só com chave de acesso recente naquela mesma sessão.
+     */
+    strongIdentityForSession(sessionId: string): boolean;
     identityStateForHarnessSession(harnessSessionId: string, bindHost: '127.0.0.1' | '0.0.0.0'): IdentityExecutionState;
     beginPasskeyRegistration(token: string): Promise<PasskeyCeremony<RegistrationOptions>>;
     finishPasskeyRegistration(token: string, challengeId: string, response: RegistrationResponse, deviceLabel: string): Promise<void>;

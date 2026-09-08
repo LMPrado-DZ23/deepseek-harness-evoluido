@@ -136,6 +136,9 @@ describe('assistant bridge tool schemas', () => {
       },
       tools: { register: vi.fn((tool: { name: string }) => { registered.push(tool.name); return () => disposed.push(tool.name) }) },
       effect: vi.fn((setup: () => () => void) => { cleanup = setup() }),
+      // Autoridade de confirmação ausente: a montagem continua, e é o portão
+      // T3 do serviço que recusa - não a montagem que quebra.
+      get: vi.fn(() => undefined),
       provide,
     }
     await apply(ctx as never, { exposedTools: ASSISTANT_TOOL_NAMES, repositories: [] })

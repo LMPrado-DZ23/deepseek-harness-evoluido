@@ -2,6 +2,7 @@ import type { Context } from '@deepseek-ai/cordis';
 import { type ToolDefinition } from '@deepseek-ai/dsh-tools';
 import { StudioAssistantBridge, type AssistantRepositoryConfig } from './service.js';
 export * from './catalog.js';
+export * from './approval.js';
 export * from './closed-tool.js';
 export * from './service.js';
 export declare const name = "dz23-studio-assistant-bridge";

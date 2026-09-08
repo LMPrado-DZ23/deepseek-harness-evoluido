@@ -1,5 +1,9 @@
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { JobId } from '@deepseek-ai/dsh-jobs'
+import {
+  InMemoryActionApprovalRepository,
+  StudioActionApprovalService,
+} from '@dz23-studio/action-approval'
 import type { AgentTeamRecord, AgentTeamTaskRecord, StudioAgentTeamRuntime } from '@dz23-studio/agent-team'
 import type { AgentRunRecord, StudioAgentsRuntime } from '@dz23-studio/agents'
 import type { StudioIdentityRuntime } from '@dz23-studio/identity'
@@ -62,6 +66,7 @@ async function harness(options: {
   role?: 'owner' | 'admin' | 'builder' | 'viewer'
   runs?: AgentRunRecord[]
   providers?: readonly AssistantProvider[]
+  approvalAuthority?: 'absent'
 } = {}) {
   const repositoryPath = await mkdtemp(join(tmpdir(), 'dz23-assistant-repo-'))
   roots.push(repositoryPath)
@@ -104,16 +109,37 @@ async function harness(options: {
     tasks: () => teamTasks,
     automaticDependentStart: 'NOT_PRESENT',
   } as unknown as StudioAgentTeamRuntime
+  // Autoridade REAL do M90-A, nao um substituto: o que a prova exercita e o
+  // mesmo servico que roda em producao, sobre o repositorio em memoria.
+  const approvalRepository = new InMemoryActionApprovalRepository()
+  const strongIdentitySessions = new Set<string>(['identity-session'])
+  const approvalAuthority = new StudioActionApprovalService({
+    repository: approvalRepository,
+    identity: { strongIdentityVerified: (sessionId: string) => strongIdentitySessions.has(sessionId) },
+  })
   const bridge = await StudioAssistantBridge.create({
     resolvePrincipal: current => identity.service.principalForHarnessSession(current.session.id) as never,
     authorizationFor: (userId, orgId, tenantId) => tenancy.service.authorizationFor(userId, orgId, tenantId),
     studioAgents,
     studioAgentTeams,
+    ...(options.approvalAuthority === 'absent' ? {} : { approvalAuthority }),
     killJob: jobs.kill as never,
   }, [config])
+  /**
+   * Encena a pessoa confirmando: repete a chamada sensivel, captura o
+   * `approval_id` que o portao devolveu e confirma por ele. Nada aqui contorna
+   * o servico - a confirmacao passa pelo mesmo caminho da rota publica.
+   */
+  const confirm = async (pending: () => Promise<unknown>): Promise<void> => {
+    const error = await pending().then(() => undefined, (caught: unknown) => caught)
+    const approvalId = (error as { approvalId?: string } | undefined)?.approvalId
+    if (approvalId === undefined) throw new Error('a operacao sensivel nao pediu confirmacao')
+    await approvalAuthority.confirm(principal, approvalId)
+  }
   return {
     bridge, config, repositoryPath, runs, start, reviewProposal, applyProposal, jobs, principal,
     teams, teamTasks, teamStart, teamStatus, teamContinue, teamCancel, studioAgentTeams,
+    approvalAuthority, approvalRepository, strongIdentitySessions, confirm,
   }
 }
 
@@ -130,33 +156,126 @@ const invalidConfigurations: ReadonlyArray<readonly [Partial<AssistantRepository
 describe('StudioAssistantBridge', () => {
   it('derives identity and scope server-side and enforces provider and path allowlists', async () => {
     const h = await harness()
-    expect(h.bridge.start(agent(), { provider: 'spawn-in-process', prompt: 'Ajuste o arquivo.', intendedPaths: ['src/safe/a.ts'] }))
-      .toMatchObject({ run_id: 'run-1', required_tier: 'T2' })
+    await expect(h.bridge.start(agent(), { provider: 'spawn-in-process', prompt: 'Ajuste o arquivo.', intendedPaths: ['src/safe/a.ts'] }))
+      .resolves.toMatchObject({ run_id: 'run-1', required_tier: 'T2' })
     expect(h.start).toHaveBeenCalledWith(expect.objectContaining({
       orgId: 'org-1', tenantId: 'tenant-1', workspaceId: 'tenant-1', repositoryPath: h.repositoryPath,
       approval: { approved: true, tier: 'T2', approvedBy: 'user-1' },
     }))
-    expect(() => h.bridge.start(agent(), { provider: 'spawn-in-process', prompt: 'Amplie o acesso.', intendedPaths: ['src'] }))
-      .toThrowError(expect.objectContaining({ code: 'FORBIDDEN' }))
-    expect(() => h.bridge.start(agent(), { provider: 'codex' as never, prompt: 'Ajuste.', intendedPaths: ['src/safe'] }))
-      .toThrowError(expect.objectContaining({ code: 'NOT_CONFIGURED' }))
+    await expect(h.bridge.start(agent(), { provider: 'spawn-in-process', prompt: 'Amplie o acesso.', intendedPaths: ['src'] }))
+      .rejects.toThrowError(expect.objectContaining({ code: 'FORBIDDEN' }))
+    await expect(h.bridge.start(agent(), { provider: 'codex' as never, prompt: 'Ajuste.', intendedPaths: ['src/safe'] }))
+      .rejects.toThrowError(expect.objectContaining({ code: 'NOT_CONFIGURED' }))
     expect(h.start).toHaveBeenCalledTimes(1)
   })
 
   it('keeps sensitive start at T3 and never accepts approval or authority fields from args', async () => {
     const h = await harness()
-    h.bridge.start(agent(), { provider: 'spawn-in-process', prompt: 'Use a rede configurada.', intendedPaths: ['src/safe'] }, 'external-network')
+    const network = () => h.bridge.start(agent(), { provider: 'spawn-in-process', prompt: 'Use a rede configurada.', intendedPaths: ['src/safe'] }, 'external-network')
+    await h.confirm(network)
+    await network()
     expect(h.start).toHaveBeenLastCalledWith(expect.objectContaining({
       usesExternalNetwork: true,
       approval: { approved: true, tier: 'T3', approvedBy: 'user-1' },
     }))
     h.bridge.releaseJob('job-1' as JobId)
-    h.bridge.start(agent(), { provider: 'spawn-in-process', prompt: 'Use somente o segredo.', intendedPaths: ['src/safe'] }, 'secrets')
+    const secrets = () => h.bridge.start(agent(), { provider: 'spawn-in-process', prompt: 'Use somente o segredo.', intendedPaths: ['src/safe'] }, 'secrets')
+    await h.confirm(secrets)
+    await secrets()
     expect(h.start).toHaveBeenLastCalledWith(expect.objectContaining({
       touchesSecrets: true,
       approval: { approved: true, tier: 'T3', approvedBy: 'user-1' },
       inProcess: expect.objectContaining({ toolFilter: { deny: ['network'] } }),
     }))
+  })
+
+  it('refuses a sensitive start until a real person confirms, and never lets the model self-grant T3', async () => {
+    const h = await harness()
+    const sensitive = () => h.bridge.start(agent(), {
+      provider: 'spawn-in-process', prompt: 'Use somente o segredo.', intendedPaths: ['src/safe'],
+    }, 'secrets')
+    // Sem confirmacao humana o pedido nao vira execucao: o modelo so recebe o
+    // identificador da confirmacao pendente.
+    const refusal = await sensitive().then(() => undefined, (error: unknown) => error)
+    expect(refusal).toMatchObject({ approvalId: expect.stringMatching(/^apv-[a-f0-9]{64}$/u) })
+    expect(h.start).not.toHaveBeenCalled()
+    // Repetir o mesmo pedido cai no MESMO identificador: e isso que a pessoa confirma.
+    const again = await sensitive().then(() => undefined, (error: unknown) => error)
+    expect((again as { approvalId: string }).approvalId).toBe((refusal as { approvalId: string }).approvalId)
+    expect(h.start).not.toHaveBeenCalled()
+
+    await h.approvalAuthority.confirm(h.principal, (refusal as { approvalId: string }).approvalId)
+    await expect(sensitive()).resolves.toMatchObject({ status: 'RUNNING' })
+    expect(h.start).toHaveBeenCalledTimes(1)
+    expect(h.start).toHaveBeenLastCalledWith(expect.objectContaining({
+      approval: { approved: true, tier: 'T3', approvedBy: 'user-1' },
+    }))
+
+    // Uma confirmacao vale por UMA execucao: a proxima tentativa abre um pedido
+    // NOVO e utilizavel, nao um beco sem saida.
+    h.bridge.releaseJob('job-1' as JobId)
+    const third = await sensitive().then(() => undefined, (error: unknown) => error)
+    const secondId = (third as { approvalId: string }).approvalId
+    expect(secondId).toMatch(/^apv-[a-f0-9]{64}$/u)
+    expect(secondId).not.toBe((refusal as { approvalId: string }).approvalId)
+    expect(h.start).toHaveBeenCalledTimes(1)
+    await h.approvalAuthority.confirm(h.principal, secondId)
+    await expect(sensitive()).resolves.toMatchObject({ status: 'RUNNING' })
+    expect(h.start).toHaveBeenCalledTimes(2)
+  })
+
+  it('refuses a sensitive start for good once the person denies it', async () => {
+    const h = await harness()
+    const sensitive = () => h.bridge.start(agent(), {
+      provider: 'spawn-in-process', prompt: 'Publique com o segredo.', intendedPaths: ['src/safe'],
+    }, 'secrets')
+    const refusal = await sensitive().then(() => undefined, (error: unknown) => error)
+    await h.approvalAuthority.deny(h.principal, (refusal as { approvalId: string }).approvalId)
+    await expect(sensitive()).rejects.toThrowError(/recusou/u)
+    await expect(sensitive()).rejects.toThrowError(/recusou/u)
+    expect(h.start).not.toHaveBeenCalled()
+  })
+
+  it('refuses a sensitive start when the confirmation authority is not mounted', async () => {
+    const h = await harness({ approvalAuthority: 'absent' })
+    await expect(h.bridge.start(agent(), {
+      provider: 'spawn-in-process', prompt: 'Use somente o segredo.', intendedPaths: ['src/safe'],
+    }, 'secrets')).rejects.toMatchObject({ code: 'NOT_CONFIGURED' })
+    expect(h.start).not.toHaveBeenCalled()
+  })
+
+  it('refuses a sensitive start when the session has no strong identity, and never consumes the request', async () => {
+    const h = await harness()
+    h.strongIdentitySessions.clear()
+    const sensitive = () => h.bridge.start(agent(), {
+      provider: 'spawn-in-process', prompt: 'Use somente o segredo.', intendedPaths: ['src/safe'],
+    }, 'secrets')
+    const refusal = await sensitive().then(() => undefined, (error: unknown) => error)
+    const approvalId = (refusal as { approvalId: string }).approvalId
+    await expect(h.approvalAuthority.confirm(h.principal, approvalId))
+      .rejects.toMatchObject({ code: 'STRONG_IDENTITY_REQUIRED' })
+    await expect(sensitive()).rejects.toMatchObject({ approvalId })
+    expect(h.start).not.toHaveBeenCalled()
+    // O pedido continua confirmavel depois da chave de acesso: recusar por
+    // identidade fraca nao pode queimar a confirmacao.
+    h.strongIdentitySessions.add('identity-session')
+    await h.approvalAuthority.confirm(h.principal, approvalId)
+    await expect(sensitive()).resolves.toMatchObject({ status: 'RUNNING' })
+  })
+
+  it('binds a confirmation to exactly what was confirmed', async () => {
+    const h = await harness()
+    const confirmed = () => h.bridge.start(agent(), {
+      provider: 'spawn-in-process', prompt: 'Leia o segredo A.', intendedPaths: ['src/safe'],
+    }, 'secrets')
+    await h.confirm(confirmed)
+    // Mesma confirmacao, outra instrucao: a impressao digital muda e a
+    // permissao nao serve.
+    await expect(h.bridge.start(agent(), {
+      provider: 'spawn-in-process', prompt: 'Leia o segredo B.', intendedPaths: ['src/safe'],
+    }, 'secrets')).rejects.toMatchObject({ approvalId: expect.any(String) })
+    expect(h.start).not.toHaveBeenCalled()
+    await expect(confirmed()).resolves.toMatchObject({ status: 'RUNNING' })
   })
 
   it.each(['codex', 'claude-code'] as const)('refuses external provider %s in administrative configuration at boot', async provider => {
@@ -170,9 +289,9 @@ describe('StudioAssistantBridge', () => {
 
   it.each(['codex', 'claude-code'] as const)('refuses a direct %s call before the authoritative agent service', async provider => {
     const h = await harness()
-    expect(() => h.bridge.start(agent(), {
+    await expect(h.bridge.start(agent(), {
       provider: provider as never, prompt: 'Tente iniciar a CLI externa.', intendedPaths: ['src/safe'],
-    }, 'secrets')).toThrowError(expect.objectContaining({ code: 'NOT_CONFIGURED' }))
+    }, 'secrets')).rejects.toThrowError(expect.objectContaining({ code: 'NOT_CONFIGURED' }))
     expect(h.start).not.toHaveBeenCalled()
   })
 
@@ -184,9 +303,9 @@ describe('StudioAssistantBridge', () => {
     await writeFile(join(outside, 'victim.txt'), 'unchanged\n')
     await symlink(outside, join(h.repositoryPath, 'src', 'safe', 'portal'), process.platform === 'win32' ? 'junction' : 'dir')
 
-    expect(() => h.bridge.start(agent(), {
+    await expect(h.bridge.start(agent(), {
       provider: 'codex' as never, prompt: 'Altere portal/victim.txt.', intendedPaths: ['src/safe/portal/victim.txt'],
-    }, 'external-network')).toThrowError(expect.objectContaining({ code: 'NOT_CONFIGURED' }))
+    }, 'external-network')).rejects.toThrowError(expect.objectContaining({ code: 'NOT_CONFIGURED' }))
     expect(h.start).not.toHaveBeenCalled()
     await expect(readFile(join(outside, 'victim.txt'), 'utf8')).resolves.toBe('unchanged\n')
   })
@@ -218,22 +337,22 @@ describe('StudioAssistantBridge', () => {
 
   it('rejects malformed model requests before any delegation', async () => {
     const h = await harness()
-    expect(() => h.bridge.start(agent(), { provider: 'spawn-in-process', prompt: '  ', intendedPaths: ['src/safe'] }))
-      .toThrowError(expect.objectContaining({ code: 'INVALID_REQUEST' }))
-    expect(() => h.bridge.start(agent(), { provider: 'spawn-in-process', prompt: 'Ajuste.', intendedPaths: [] }))
-      .toThrowError(expect.objectContaining({ code: 'INVALID_REQUEST' }))
-    expect(() => h.bridge.start(agent(), {
+    await expect(h.bridge.start(agent(), { provider: 'spawn-in-process', prompt: '  ', intendedPaths: ['src/safe'] }))
+      .rejects.toThrowError(expect.objectContaining({ code: 'INVALID_REQUEST' }))
+    await expect(h.bridge.start(agent(), { provider: 'spawn-in-process', prompt: 'Ajuste.', intendedPaths: [] }))
+      .rejects.toThrowError(expect.objectContaining({ code: 'INVALID_REQUEST' }))
+    await expect(h.bridge.start(agent(), {
       provider: 'spawn-in-process', prompt: 'Ajuste.', intendedPaths: ['src/safe', 'src/safe/a', 'src/safe/b', 'src/safe/c', 'src/safe/d'],
-    })).toThrowError(expect.objectContaining({ code: 'INVALID_REQUEST' }))
+    })).rejects.toThrowError(expect.objectContaining({ code: 'INVALID_REQUEST' }))
     expect(h.start).not.toHaveBeenCalled()
   })
 
   it('rejects another preset and inherited subagent lineage before creating work', async () => {
     const h = await harness()
-    expect(() => h.bridge.start(agent('session-1', 'standard'), { provider: 'spawn-in-process', prompt: 'Tente.', intendedPaths: ['src/safe'] }))
-      .toThrowError(expect.objectContaining({ code: 'FORBIDDEN' }))
-    expect(() => h.bridge.start(agent('child', 'dz23-assistant', true), { provider: 'spawn-in-process', prompt: 'Recursão.', intendedPaths: ['src/safe'] }))
-      .toThrowError(expect.objectContaining({ code: 'FORBIDDEN' }))
+    await expect(h.bridge.start(agent('session-1', 'standard'), { provider: 'spawn-in-process', prompt: 'Tente.', intendedPaths: ['src/safe'] }))
+      .rejects.toThrowError(expect.objectContaining({ code: 'FORBIDDEN' }))
+    await expect(h.bridge.start(agent('child', 'dz23-assistant', true), { provider: 'spawn-in-process', prompt: 'Recursão.', intendedPaths: ['src/safe'] }))
+      .rejects.toThrowError(expect.objectContaining({ code: 'FORBIDDEN' }))
     expect(h.start).not.toHaveBeenCalled()
   })
 
@@ -264,7 +383,7 @@ describe('StudioAssistantBridge', () => {
 
   it('cancels only a run started by the same person and reports a reconciled terminal run after restart', async () => {
     const h = await harness()
-    h.bridge.start(agent(), { provider: 'spawn-in-process', prompt: 'Ajuste.', intendedPaths: ['src/safe'] })
+    await h.bridge.start(agent(), { provider: 'spawn-in-process', prompt: 'Ajuste.', intendedPaths: ['src/safe'] })
     expect(h.bridge.cancel(agent(), 'run-1')).toMatchObject({ outcome: 'requested', limitation: expect.stringContaining('BETA') })
     expect(h.jobs.kill).toHaveBeenCalledWith('job-1', expect.anything(), expect.any(String))
     const restarted = await StudioAssistantBridge.create({
@@ -305,7 +424,7 @@ describe('StudioAssistantBridge', () => {
 
   it('fails closed when an active cancellation handle disagrees with the persisted owner', async () => {
     const h = await harness()
-    h.bridge.start(agent(), { provider: 'spawn-in-process', prompt: 'Ajuste.', intendedPaths: ['src/safe'] })
+    await h.bridge.start(agent(), { provider: 'spawn-in-process', prompt: 'Ajuste.', intendedPaths: ['src/safe'] })
     h.principal.userId = 'replacement-user'
     h.runs.splice(0, h.runs.length, run({ repository_path: h.repositoryPath, approved_by: 'replacement-user' }))
     expect(() => h.bridge.cancel(agent(), 'run-1')).toThrowError(expect.objectContaining({ code: 'FORBIDDEN' }))
@@ -315,7 +434,7 @@ describe('StudioAssistantBridge', () => {
   it('releases terminal job handles and stays bounded across long conversations', async () => {
     const h = await harness()
     for (let index = 1; index <= 125; index += 1) {
-      const accepted = h.bridge.start(agent(), {
+      const accepted = await h.bridge.start(agent(), {
         provider: 'spawn-in-process', prompt: `Ajuste seguro ${index}.`, intendedPaths: ['src/safe'],
       })
       expect(h.bridge.activeJobCount()).toBe(1)
@@ -327,7 +446,7 @@ describe('StudioAssistantBridge', () => {
   it('drops a stale cancel handle when the registry reports the job already finished', async () => {
     const h = await harness()
     h.jobs.kill.mockReturnValueOnce('already-finished')
-    h.bridge.start(agent(), { provider: 'spawn-in-process', prompt: 'Ajuste.', intendedPaths: ['src/safe'] })
+    await h.bridge.start(agent(), { provider: 'spawn-in-process', prompt: 'Ajuste.', intendedPaths: ['src/safe'] })
     expect(h.bridge.cancel(agent(), 'run-1')).toMatchObject({ outcome: 'already-finished' })
     expect(h.bridge.activeJobCount()).toBe(0)
   })
@@ -370,9 +489,9 @@ describe('StudioAssistantBridge', () => {
       } as never,
       killJob: h.jobs.kill as never,
     }, [minimal])
-    expect(bridge.start(agent(), {
+    await expect(bridge.start(agent(), {
       provider: 'spawn-in-process', prompt: 'Use os limites seguros.', intendedPaths: ['src/safe'],
-    })).toMatchObject({ status: 'RUNNING' })
+    })).resolves.toMatchObject({ status: 'RUNNING' })
     expect(h.start).toHaveBeenCalledWith(expect.not.objectContaining({ budget: expect.anything() }))
 
     const bridgeWithTeams = await StudioAssistantBridge.create({
@@ -394,8 +513,8 @@ describe('StudioAssistantBridge', () => {
 
   it('denies writes to a viewer even when the model asks for them', async () => {
     const h = await harness({ role: 'viewer' })
-    expect(() => h.bridge.start(agent(), { provider: 'spawn-in-process', prompt: 'Tente.', intendedPaths: ['src/safe'] }))
-      .toThrowError(new AssistantBridgeError('FORBIDDEN', 'Seu papel não permite esta ação.'))
+    await expect(h.bridge.start(agent(), { provider: 'spawn-in-process', prompt: 'Tente.', intendedPaths: ['src/safe'] }))
+      .rejects.toThrowError(new AssistantBridgeError('FORBIDDEN', 'Seu papel não permite esta ação.'))
   })
 
   it('fails closed for missing session, identity, membership and repository scope', async () => {
@@ -657,7 +776,10 @@ describe('StudioAssistantBridge', () => {
       approval: { approved: true, tier: 'T2', approvedBy: 'user-1' },
       tasks: [expect.objectContaining({ intendedPaths: ['src/safe/a.ts'] })],
     }))
-    await h.bridge.startTeam(agent(), input, 'deploy')
+    const deploy = () => h.bridge.startTeam(agent(), input, 'deploy')
+    await expect(deploy()).rejects.toMatchObject({ approvalId: expect.any(String) })
+    await h.confirm(deploy)
+    await deploy()
     expect(h.teamStart).toHaveBeenLastCalledWith(expect.objectContaining({
       sensitive: 'deploy', approval: { approved: true, tier: 'T3', approvedBy: 'user-1' },
     }))
@@ -681,7 +803,10 @@ describe('StudioAssistantBridge', () => {
     }, h.config.budget)
     await expect(h.bridge.continueTeam(agent(), 'team-1', true)).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
     h.teams[0] = { ...h.teams[0]!, required_tier: 'T3', sensitive_operation: 'secrets' }
-    await expect(h.bridge.continueTeam(agent(), 'team-1', true)).resolves.toMatchObject({ team_id: 'team-1' })
+    const continueSensitive = () => h.bridge.continueTeam(agent(), 'team-1', true)
+    await expect(continueSensitive()).rejects.toMatchObject({ approvalId: expect.any(String) })
+    await h.confirm(continueSensitive)
+    await expect(continueSensitive()).resolves.toMatchObject({ team_id: 'team-1' })
     await expect(h.bridge.cancelTeam(agent(), 'team-1', 'pare')).resolves.toMatchObject({ status: 'CANCELLED' })
     expect(h.teamCancel).toHaveBeenCalledWith('team-1', 'user-1', 'pare')
 

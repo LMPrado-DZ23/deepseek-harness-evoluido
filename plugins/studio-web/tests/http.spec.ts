@@ -13,11 +13,15 @@ afterEach(async () => {
   await Promise.all(temporary.splice(0).map(path => rm(path, { recursive: true, force: true })))
 })
 
-async function fixture(previewFrameSources: readonly string[] = []) {
+async function fixture(previewFrameSources: readonly string[] = [], options: {
+  readonly actionApprovals?: Parameters<typeof createStudioWebHandler>[0]['actionApprovals']
+} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'dz23-web-')); temporary.push(root)
   await mkdir(join(root, 'assets')); await writeFile(join(root, 'index.html'), '<main>DZ23 STUDIO</main>'); await writeFile(join(root, 'assets/app.js'), 'ok')
   const identity = {
-    authenticate: vi.fn(() => Promise.resolve({ session_id: 'session' })),
+    authenticate: vi.fn(() => Promise.resolve({
+      session_id: 'session', user_id: 'user-1', org_id: 'org-1', tenant_id: 'tenant-1',
+    })),
     validateCsrfToken: vi.fn(),
   }
   const allowedHosts: string[] = []
@@ -26,6 +30,7 @@ async function fixture(previewFrameSources: readonly string[] = []) {
   const server = createServer(createStudioWebHandler({
     distDirectory: root, identity: identity as unknown as StudioIdentityService, allowedHosts, allowedOrigins,
     previewFrameSources, assistantSessions,
+    ...(options.actionApprovals === undefined ? {} : { actionApprovals: options.actionApprovals }),
   }))
   servers.push(server)
   await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve) })
@@ -55,6 +60,55 @@ describe('authenticated Studio web surface', () => {
     expect(policy).not.toContain('frame-src *;')
     expect(response.headers.get('x-frame-options')).toBe('DENY')
     expect(await response.text()).toBe('')
+  })
+
+  it('answers the action-confirmation route only for an authenticated person, and 503 without the authority', async () => {
+    const approvalId = `apv-${'a'.repeat(64)}`
+    const record = {
+      approval_id: approvalId, action: 'studio.agent.start.secrets', subject_id: 'workspace-1',
+      tier: 'T3', state: 'AVAILABLE', org_id: 'org-1', tenant_id: 'tenant-1', user_id: 'user-1',
+      session_id: 'session', fingerprint: 'b'.repeat(64), request_id: 'req-1', claim_id: null,
+      created_at: '2026-09-07T00:00:00.000Z', expires_at: '2026-09-07T00:03:00.000Z',
+      confirmed_at: '2026-09-07T00:01:00.000Z', consumed_at: null, denied_at: null,
+    }
+    const withoutAuthority = await fixture()
+    expect((await withoutAuthority.request(`/approvals/${approvalId}`)).status).toBe(503)
+
+    const confirm = vi.fn(async () => record)
+    const get = vi.fn(async () => record)
+    const deny = vi.fn(async () => ({ ...record, state: 'DENIED', denied_at: '2026-09-07T00:02:00.000Z' }))
+    const f = await fixture([], { actionApprovals: { confirm, deny, get } as never })
+    const read = await f.request(`/approvals/${approvalId}`)
+    expect(read.status).toBe(200)
+    // Só a visão pública atravessa: nada de impressão digital nem de pedido interno.
+    const body = await read.json() as Record<string, unknown>
+    expect(body).not.toHaveProperty('fingerprint')
+    expect(body).not.toHaveProperty('request_id')
+    expect((await f.request(`/approvals/${approvalId}/confirm`, { method: 'POST', headers: { origin: `http://${f.host}` } })).status).toBe(200)
+    expect(confirm).toHaveBeenCalledWith(
+      { userId: 'user-1', orgId: 'org-1', tenantId: 'tenant-1', sessionId: 'session' },
+      approvalId,
+    )
+    // A identidade vem do cookie, nunca do corpo enviado pelo cliente.
+    expect((await f.request(`/approvals/${approvalId}/deny`, { method: 'POST', headers: { origin: `http://${f.host}` } })).status).toBe(200)
+    expect((await f.request(`/approvals/${approvalId}`, { method: 'DELETE', headers: { origin: `http://${f.host}` } })).status).toBe(405)
+    expect((await f.request('/approvals/nao-e-um-id')).status).toBe(404)
+  })
+
+  it('reports a refused confirmation with its own status, never as a generic failure', async () => {
+    const approvalId = `apv-${'a'.repeat(64)}`
+    const { ActionApprovalError } = await import('@dz23-studio/action-approval')
+    const f = await fixture([], {
+      actionApprovals: {
+        confirm: vi.fn(() => Promise.reject(new ActionApprovalError('DENIED', 'Você recusou esta operação.'))),
+        deny: vi.fn(),
+        get: vi.fn(() => Promise.reject(new ActionApprovalError('NOT_FOUND', 'Confirmação não encontrada.'))),
+      } as never,
+    })
+    const refused = await f.request(`/approvals/${approvalId}/confirm`, { method: 'POST', headers: { origin: `http://${f.host}` } })
+    expect(refused.status).toBe(409)
+    expect(await refused.json()).toEqual({ error: 'Você recusou esta operação.' })
+    expect((await f.request(`/approvals/${approvalId}`)).status).toBe(404)
   })
 
   it('fails at startup for broad or injectable preview frame sources', () => {
@@ -178,6 +232,7 @@ describe('authenticated Studio web surface', () => {
 
   it('registers the composed web surface using secure defaults or explicit overrides', async () => {
     const registrations: Array<Record<string, unknown>> = []
+    let approvalRuntime: { readonly service: unknown } | undefined
     const effects: string[] = []
     const ctx = {
       webServer: { port: 3210, register: (value: Record<string, unknown>) => { registrations.push(value); return () => undefined } },
@@ -186,8 +241,10 @@ describe('authenticated Studio web surface', () => {
       studioTenancy: { service: {} },
       sessionController: {},
       effect: (factory: () => unknown, label: string) => { effects.push(label); factory() },
+      get: (service: string) => service === 'studioActionApproval' ? approvalRuntime : undefined,
     }
     await apply(ctx as never)
+    approvalRuntime = { service: { confirm: () => undefined, deny: () => undefined, get: () => undefined } }
     await apply(ctx as never, { distDirectory: fakedRoot(), allowedHosts: ['studio.example'], previewFrameSources: [] })
     expect(effects).toEqual(['dz23-studio-web.http', 'dz23-studio-web.http'])
     expect(registrations).toHaveLength(2)

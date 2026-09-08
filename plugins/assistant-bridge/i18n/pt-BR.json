@@ -17,8 +17,8 @@
     "cancel": "Pede o cancelamento T2 de uma execução iniciada pela mesma pessoa neste processo.",
     "reason": "Motivo curto e opcional para a auditoria.",
     "apply": "Aplica uma proposta revisada somente após esta segunda aprovação T2.",
-    "proposedRun": "Execução no estado PROPOSED."
-    ,"teamStart": "Inicia uma equipe T2 de até oito assistentes locais em cópias isoladas. Tarefas independentes podem trabalhar em paralelo.",
+    "proposedRun": "Execução no estado PROPOSED.",
+    "teamStart": "Inicia uma equipe T2 de até oito assistentes locais em cópias isoladas. Tarefas independentes podem trabalhar em paralelo.",
     "teamStartSensitive": "Inicia uma equipe T3 depois de identidade forte para uma operação sensível declarada.",
     "teamName": "Nome curto que identifica a equipe para a pessoa.",
     "teamTasks": "Plano fechado de tarefas, papéis, caminhos e dependências.",
@@ -72,7 +72,11 @@
     "maxPaths": "maxPaths precisa ser inteiro entre 1 e 50.",
     "invalidPath": "Caminho relativo inválido: {path}",
     "budget": "{field} precisa ser inteiro entre 0 e {max}.",
-    "unknownFields": "{label} contém campos desconhecidos: {fields}."
+    "unknownFields": "{label} contém campos desconhecidos: {fields}.",
+    "approvalRequired": "Esta operação precisa da sua confirmação. Abra a confirmação pendente no DZ23 STUDIO, confirme com sua chave de acesso e peça de novo. Nada foi executado.",
+    "approvalDenied": "Você recusou esta operação. Ela não será executada, e a recusa não pode ser desfeita por uma nova tentativa.",
+    "approvalExhausted": "Houve pedidos de confirmação demais para esta mesma operação. Nada foi executado.",
+    "approvalNotConfigured": "NOT_CONFIGURED: operações sensíveis estão bloqueadas porque a autoridade de confirmação não foi montada nesta instalação."
   },
   "runtime": {
     "persona": "Trabalhe somente na cópia isolada e nos caminhos aprovados.",

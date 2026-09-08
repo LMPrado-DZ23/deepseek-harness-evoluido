@@ -7,19 +7,28 @@
   "types": "./src/index.ts",
   "exports": {
     ".": {
-      "dz23-build": { "types": "./lib/index.d.ts", "default": "./lib/index.js" },
+      "dz23-build": {
+        "types": "./lib/index.d.ts",
+        "default": "./lib/index.js"
+      },
       "types": "./src/index.ts",
       "default": "./lib/index.js"
     }
   },
-  "files": ["lib", "i18n"],
-  "scripts": { "build": "tsc -p tsconfig.build.json && node ../../scripts/package-studio-web.mjs" },
+  "files": [
+    "lib",
+    "i18n"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && node ../../scripts/package-studio-web.mjs"
+  },
   "dependencies": {
     "@deepseek-ai/cordis": "workspace:*",
     "@deepseek-ai/dsh-api-session-controller": "workspace:*",
     "@deepseek-ai/dsh-host-webserver": "workspace:*",
     "@deepseek-ai/dsh-session": "workspace:*",
     "@deepseek-ai/dsh-storage-domain": "workspace:*",
+    "@dz23-studio/action-approval": "workspace:*",
     "@dz23-studio/assistant-bridge": "workspace:*",
     "@dz23-studio/identity": "workspace:*",
     "@dz23-studio/policy": "workspace:*",

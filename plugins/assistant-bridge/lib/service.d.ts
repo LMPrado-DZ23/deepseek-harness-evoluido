@@ -2,6 +2,7 @@ import { type AgentRunRecord, type DelegationAccepted, type DelegationBudget, ty
 import type { AgentTeamRecord, AgentTeamRole, AgentTeamTaskRecord, StudioAgentTeamRuntime } from '@dz23-studio/agent-team';
 import { type StudioRole } from '@dz23-studio/policy';
 import { type AssistantProvider } from './catalog.js';
+import { type AssistantApprovalPort } from './approval.js';
 export type AssistantSensitiveOperation = 'secrets' | 'external-network';
 export interface AssistantRepositoryConfig {
     readonly orgId: string;
@@ -70,6 +71,11 @@ export interface AssistantBridgeDependencies {
     } | undefined;
     readonly studioAgents: StudioAgentsRuntime;
     readonly studioAgentTeams?: StudioAgentTeamRuntime;
+    /**
+     * Autoridade de confirmação (M90-A). Ausente, toda operação T3 falha fechada:
+     * o bridge nunca se autoconcede o nível sensível.
+     */
+    readonly approvalAuthority?: AssistantApprovalPort;
     killJob(jobId: AssistantJobId, owner: AssistantAgent, reason: string): 'requested' | 'already-finished';
 }
 export declare class StudioAssistantBridge {
@@ -81,12 +87,12 @@ export declare class StudioAssistantBridge {
         readonly provider: AssistantProvider;
         readonly prompt: string;
         readonly intendedPaths: readonly string[];
-    }, sensitive?: AssistantSensitiveOperation): {
+    }, sensitive?: AssistantSensitiveOperation): Promise<{
         run_id: string;
         job_id: string;
         status: "RUNNING";
         required_tier: import("@dz23-studio/agents").ApprovalTier;
-    };
+    }>;
     startTeam(agent: AssistantAgent | undefined, input: {
         readonly provider: AssistantProvider;
         readonly name: string;

@@ -11,6 +11,13 @@ import { lstat, readFile, realpath, stat } from 'node:fs/promises'
 import { dirname, isAbsolute, relative, resolve } from 'node:path'
 import { t } from './i18n.js'
 import { ASSISTANT_ALLOWED_PROVIDERS, type AssistantProvider } from './catalog.js'
+import {
+  approvalFingerprint,
+  approvalSubjectId,
+  requireTier3Approval,
+  type AssistantApprovalAction,
+  type AssistantApprovalPort,
+} from './approval.js'
 
 export type AssistantSensitiveOperation = 'secrets' | 'external-network'
 
@@ -95,6 +102,11 @@ export interface AssistantBridgeDependencies {
   authorizationFor(userId: string, orgId: string, tenantId: string): { readonly role: StudioRole } | undefined
   readonly studioAgents: StudioAgentsRuntime
   readonly studioAgentTeams?: StudioAgentTeamRuntime
+  /**
+   * Autoridade de confirmação (M90-A). Ausente, toda operação T3 falha fechada:
+   * o bridge nunca se autoconcede o nível sensível.
+   */
+  readonly approvalAuthority?: AssistantApprovalPort
   killJob(jobId: AssistantJobId, owner: AssistantAgent, reason: string): 'requested' | 'already-finished'
 }
 
@@ -118,7 +130,7 @@ export class StudioAssistantBridge {
     return new StudioAssistantBridge(dependencies, validated)
   }
 
-  start(agent: AssistantAgent | undefined, input: {
+  async start(agent: AssistantAgent | undefined, input: {
     readonly provider: AssistantProvider
     readonly prompt: string
     readonly intendedPaths: readonly string[]
@@ -141,6 +153,9 @@ export class StudioAssistantBridge {
       throw new AssistantBridgeError('FORBIDDEN', t('errors.pathForbidden'))
     }
     const tier = sensitive === undefined ? 'T2' as const : 'T3' as const
+    const approvedBy = sensitive === undefined
+      ? principal.userId
+      : await this.#tier3(principal, repository, `studio.agent.start.${sensitive}`, [input.provider, prompt, ...intendedPaths])
     const accepted = this.dependencies.studioAgents.service.start({
       orgId: principal.orgId,
       tenantId: principal.tenantId,
@@ -150,7 +165,7 @@ export class StudioAssistantBridge {
       provider: input.provider,
       prompt,
       intendedPaths,
-      approval: { approved: true, tier, approvedBy: principal.userId },
+      approval: { approved: true, tier, approvedBy },
       ...(sensitive === 'secrets' ? { touchesSecrets: true } : {}),
       ...(sensitive === 'external-network' ? { usesExternalNetwork: true } : {}),
       ...(repository.budget === undefined ? {} : { budget: repository.budget }),
@@ -177,6 +192,13 @@ export class StudioAssistantBridge {
       ...task,
       intendedPaths: this.#validatedPaths(task.intendedPaths, repository),
     }))
+    const teamApprovedBy = sensitive === undefined
+      ? principal.userId
+      : await this.#tier3(principal, repository, `studio.team.start.${sensitive}`, [
+        input.provider,
+        input.name,
+        ...tasks.map(task => [task.taskId, task.title, task.role, task.prompt, ...task.intendedPaths].join('\u0001')),
+      ])
     const snapshot = await this.#teamsRuntime().service.start({
       orgId: principal.orgId,
       tenantId: principal.tenantId,
@@ -189,12 +211,41 @@ export class StudioAssistantBridge {
       approval: {
         approved: true,
         tier: sensitive === undefined ? 'T2' : 'T3',
-        approvedBy: principal.userId,
+        approvedBy: teamApprovedBy,
       },
       ...(sensitive === undefined ? {} : { sensitive }),
       ...(repository.budget === undefined ? {} : { budget: repository.budget }),
     })
     return this.#summarizeTeam(snapshot, principal, repository)
+  }
+
+  /**
+   * Traduz uma operação sensível em confirmação humana real. O descritor é
+   * derivado AQUI, no servidor: o modelo não escolhe nível, ação, sujeito nem
+   * impressão digital.
+   */
+  async #tier3(
+    principal: AssistantPrincipal,
+    repository: ValidatedRepositoryConfig,
+    action: AssistantApprovalAction,
+    parts: readonly string[],
+  ): Promise<string> {
+    const authority = this.dependencies.approvalAuthority
+    if (authority === undefined) {
+      throw new AssistantBridgeError('NOT_CONFIGURED', t('errors.approvalNotConfigured'))
+    }
+    const granted = await requireTier3Approval(authority, {
+      principal: {
+        userId: principal.userId,
+        orgId: principal.orgId,
+        tenantId: principal.tenantId,
+        sessionId: principal.sessionId,
+      },
+      action,
+      subjectId: approvalSubjectId(repository.workspaceId, repository.repositoryPath),
+      fingerprint: approvalFingerprint([action, repository.workspaceId, repository.repositoryPath, ...parts]),
+    })
+    return granted.approvedBy
   }
 
   listTeams(agent: AssistantAgent | undefined): readonly AssistantTeamSummary[] {
@@ -224,10 +275,13 @@ export class StudioAssistantBridge {
     if (team.required_tier !== expectedTier) {
       throw new AssistantBridgeError('INVALID_REQUEST', t('errors.teamTier'))
     }
+    const approvedBy = sensitive
+      ? await this.#tier3(principal, repository, 'studio.team.continue.sensitive', [teamId])
+      : principal.userId
     return this.#summarizeTeam(await this.#teamsRuntime().service.continue(teamId, agent!, {
       approved: true,
       tier: expectedTier,
-      approvedBy: principal.userId,
+      approvedBy,
     }, repository.budget), principal, repository)
   }
 

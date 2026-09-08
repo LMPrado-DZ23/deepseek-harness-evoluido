@@ -5,6 +5,7 @@ import { StudioAssistantBridge, } from './service.js';
 import { t } from './i18n.js';
 import { closedTool } from './closed-tool.js';
 export * from './catalog.js';
+export * from './approval.js';
 export * from './closed-tool.js';
 export * from './service.js';
 export const name = 'dz23-studio-assistant-bridge';
@@ -61,7 +62,7 @@ export function createAssistantTools(bridge) {
             },
             output: jsonOutput,
             async execute(args, exec) {
-                return { json: JSON.stringify(bridge.start(asAssistantAgent(exec.agent), {
+                return { json: JSON.stringify(await bridge.start(asAssistantAgent(exec.agent), {
                         provider: args.provider,
                         prompt: args.prompt,
                         intendedPaths: args.intended_paths,
@@ -84,7 +85,7 @@ export function createAssistantTools(bridge) {
             },
             output: jsonOutput,
             async execute(args, exec) {
-                return { json: JSON.stringify(bridge.start(asAssistantAgent(exec.agent), {
+                return { json: JSON.stringify(await bridge.start(asAssistantAgent(exec.agent), {
                         provider: args.provider,
                         prompt: args.prompt,
                         intendedPaths: args.intended_paths,
@@ -208,11 +209,15 @@ export async function apply(ctx, config) {
     const agentLookup = {
         getBySessionId: sessionId => ctx.agents.get(sessionId),
     };
+    const approvals = ctx.get('studioActionApproval');
     const bridge = await StudioAssistantBridge.create({
         resolvePrincipal: agent => principalForAgent(ctx.studioIdentity.service, agentLookup, agent),
         authorizationFor: (userId, orgId, tenantId) => ctx.studioTenancy.service.authorizationFor(userId, orgId, tenantId),
         studioAgents: ctx.studioAgents,
         studioAgentTeams: ctx.studioAgentTeams,
+        // Opcional na injeção, obrigatório no comportamento: sem a autoridade
+        // montada toda operação T3 recusa com NOT_CONFIGURED.
+        ...(approvals === undefined ? {} : { approvalAuthority: approvals.service }),
         killJob: (jobId, owner, reason) => ctx.jobs.kill(jobId, owner, reason),
     }, config.repositories ?? []);
     const tools = createAssistantTools(bridge);

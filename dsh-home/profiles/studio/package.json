@@ -1,7 +1,9 @@
 {
   "name": "dsh-profile-studio",
   "private": true,
-  "files": ["cordis.patch.yml"],
+  "files": [
+    "cordis.patch.yml"
+  ],
   "dependencies": {
     "@deepseek-ai/dsh-base": "workspace:*",
     "@deepseek-ai/dsh-llm-pi-ai": "workspace:*",
@@ -9,8 +11,9 @@
     "@deepseek-ai/dsh-subagent-codex": "workspace:*",
     "@deepseek-ai/dsh-subagent-spawn-in-process": "workspace:*",
     "@deepseek-ai/dsh-web-app": "workspace:*",
-    "@dz23-studio/agents": "workspace:*",
+    "@dz23-studio/action-approval": "workspace:*",
     "@dz23-studio/agent-team": "workspace:*",
+    "@dz23-studio/agents": "workspace:*",
     "@dz23-studio/assistant-bridge": "workspace:*",
     "@dz23-studio/identity": "workspace:*",
     "@dz23-studio/integration-hub": "workspace:*",

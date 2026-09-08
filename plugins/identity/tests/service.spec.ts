@@ -521,8 +521,19 @@ describe('StudioIdentityService', () => {
     expect(h.service.identityStateForHarnessSession('agent-strong', '0.0.0.0')).toEqual({
       authenticated: true, strongIdentityVerified: true,
     })
+    // A autoridade de confirmação de ações pergunta pela sessão de identidade,
+    // não pela sessão do Harness: as duas leituras têm de concordar.
+    const sessionId = h.repository.sessions()[0]!.session_id
+    expect(h.service.strongIdentityForSession(sessionId)).toBe(true)
+    expect(h.service.strongIdentityForSession('sessao-inexistente')).toBe(false)
     h.setNow('2026-09-02T12:05:00.000Z')
     expect(h.service.strongIdentityForHarnessSession('agent-strong')).toBe(false)
+    expect(h.service.strongIdentityForSession(sessionId)).toBe(false)
+    // Sessão revogada não é identidade forte, mesmo dentro da janela.
+    h.setNow('2026-09-02T12:00:30.000Z')
+    expect(h.service.strongIdentityForSession(sessionId)).toBe(true)
+    await h.service.revokeSession(h.repository.sessions()[0]!, sessionId)
+    expect(h.service.strongIdentityForSession(sessionId)).toBe(false)
   })
 
   it('does not recreate a session removed while a strong-identity ceremony is finishing', async () => {

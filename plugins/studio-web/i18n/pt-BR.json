@@ -34,5 +34,8 @@
     "messageTooLarge": "Esta mensagem é grande demais para uma vez só. Divida em partes menores e envie de novo.",
     "interfaceUnavailable": "Não foi possível abrir a interface agora. Tente de novo em instantes; nada do seu trabalho foi perdido.",
     "readUnavailable": "Não consegui ler esta conversa agora. Ela continua guardada; tente de novo em instantes."
+  },
+  "approvals": {
+    "notConfigured": "NOT_CONFIGURED: a autoridade de confirmação de ações não foi montada nesta instalação."
   }
 }

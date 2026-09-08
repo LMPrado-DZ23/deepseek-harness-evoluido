@@ -50,7 +50,7 @@ export default defineConfig({
         'plugins/tenancy/src/**/*.ts': { 100: true },
         'plugins/agents/src/{model,service}.ts': { 100: true },
         'plugins/agent-team/src/{model,service}.ts': { 100: true },
-        'plugins/assistant-bridge/src/{catalog,closed-tool,service}.ts': { 100: true },
+        'plugins/assistant-bridge/src/{approval,catalog,closed-tool,service}.ts': { 100: true },
         'plugins/studio-web/src/assistant-session.ts': { 100: true },
         'plugins/studio-web/src/assistant-conversation.ts': { 100: true },
         'plugins/studio-web/src/assistant-http.ts': { 100: true },

@@ -2,6 +2,14 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-api-session-controller'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-storage-domain'
+import {
+  APPROVAL_PREFIX,
+  ActionApprovalError,
+  approvalStatus,
+  handleApproval,
+  routeApproval,
+  type StudioActionApprovalService,
+} from '@dz23-studio/action-approval'
 import type {} from '@dz23-studio/preview'
 import type {} from '@dz23-studio/tenancy'
 import {
@@ -53,6 +61,8 @@ export function createStudioWebHandler(config: {
   readonly previewFrameSources?: readonly string[]
   readonly assistantSessions?: Pick<AssistantSessionLauncher, 'launch'>
   readonly assistantConversations?: AssistantConversationHttpConfig['conversations']
+  /** Autoridade de confirmação de ações sensíveis (M90-A). Ausente, a rota responde 503. */
+  readonly actionApprovals?: StudioActionApprovalService
   readonly assistantDeadlineMs?: number
 }) {
   const frameSources = normalizePreviewFrameSources(config.previewFrameSources ?? [])
@@ -67,6 +77,28 @@ export function createStudioWebHandler(config: {
           identity: config.identity,
           ...(config.assistantConversations === undefined ? {} : { conversations: config.assistantConversations }),
           ...(config.assistantDeadlineMs === undefined ? {} : { deadlineMs: config.assistantDeadlineMs }),
+        })
+        return sendJson(response, outcome.status, outcome.body, frameSources)
+      }
+      const approvalRoute = routeApproval(request.method, pathname)
+      if (approvalRoute !== undefined) {
+        if (config.actionApprovals === undefined) {
+          return sendJson(response, 503, { error: t('approvals.notConfigured') }, frameSources)
+        }
+        const approvals = config.actionApprovals
+        const outcome = await handleApproval(request, approvalRoute, {
+          service: approvals,
+          // Identidade e escopo saem do cookie de sessão; o cliente não
+          // contribui com usuário, organização nem inquilino.
+          authenticate: async current => {
+            const session = await authenticatedMutation(current, config.identity)
+            return {
+              userId: session.user_id, orgId: session.org_id,
+              tenantId: session.tenant_id, sessionId: session.session_id,
+            }
+          },
+          // `authenticatedMutation` já validou o CSRF do método mutante.
+          assertCsrf: () => {},
         })
         return sendJson(response, outcome.status, outcome.body, frameSources)
       }
@@ -89,6 +121,10 @@ export function createStudioWebHandler(config: {
       response.writeHead(200, securityHeaders(contentType(selected), frameSources))
       response.end(request.method === 'HEAD' ? undefined : body)
     } catch (error) {
+      const approvalErrorStatus = approvalStatus(error)
+      if (approvalErrorStatus !== undefined && error instanceof ActionApprovalError) {
+        return sendJson(response, approvalErrorStatus, { error: error.message }, frameSources)
+      }
       const conversationStatus = assistantConversationStatus(error)
       if (conversationStatus !== undefined && error instanceof AssistantConversationError) {
         return sendJson(response, conversationStatus, { error: error.message }, frameSources)
@@ -140,6 +176,9 @@ export async function apply(ctx: Context, config: StudioWebConfig = {}): Promise
     launcher: assistantSessions,
     sessions: ctx.sessionController,
   })
+  // Opcional de propósito: sem a autoridade montada a rota existe e responde
+  // NOT_CONFIGURED, em vez de sumir e virar 404 confuso.
+  const approvals = ctx.get('studioActionApproval')
   ctx.effect(() => ctx.webServer.register({
     kind: 'prefix', path: '/studio',
     handler: createStudioWebHandler({
@@ -148,6 +187,7 @@ export async function apply(ctx: Context, config: StudioWebConfig = {}): Promise
       allowedHosts: config.allowedHosts ?? [defaultHost, `localhost:${port}`],
       allowedOrigins: config.allowedOrigins ?? defaultOrigins,
       previewFrameSources: config.previewFrameSources ?? [ctx.studioPreview.frameSource],
+      ...(approvals === undefined ? {} : { actionApprovals: approvals.service }),
       assistantSessions,
     }),
   }), 'dz23-studio-web.http')

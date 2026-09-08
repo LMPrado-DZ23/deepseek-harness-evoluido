@@ -470,11 +470,37 @@ export class StudioIdentityService {
 
   strongIdentityForHarnessSession(harnessSessionId: string): boolean {
     const session = this.#usableHarnessSessionBinding(harnessSessionId)
+    return session !== undefined && this.#strongAuthFresh(session)
+  }
+
+  /**
+   * Identidade forte de uma sessão de identidade, pelo seu próprio
+   * `session_id`. É o que a autoridade de confirmação de ações usa: ela conhece
+   * a sessão do principal, não a sessão do Harness. Sessão inexistente,
+   * revogada ou vencida não é identidade forte.
+   * @param sessionId - identificador durável da sessão de identidade.
+   * @returns verdadeiro só com chave de acesso recente naquela mesma sessão.
+   */
+  strongIdentityForSession(sessionId: string): boolean {
+    const session = this.#repository.sessions().find(candidate => candidate.session_id === sessionId)
     if (session === undefined) return false
-    const now = this.#now()
+    try {
+      this.#assertSessionUsable(session, this.#now())
+    } catch {
+      return false
+    }
+    return this.#strongAuthFresh(session)
+  }
+
+  /**
+   * Chave de acesso recente nesta sessão, dentro da janela de identidade forte.
+   * @param session - o registro de sessão já verificado como utilizável.
+   * @returns verdadeiro enquanto a autenticação forte ainda vale.
+   */
+  #strongAuthFresh(session: SessionRecord): boolean {
     return session.last_strong_auth_method === 'passkey'
       && session.last_strong_auth_at !== null
-      && now.getTime() - Date.parse(session.last_strong_auth_at) < STRONG_AUTH_TTL
+      && this.#now().getTime() - Date.parse(session.last_strong_auth_at) < STRONG_AUTH_TTL
   }
 
   identityStateForHarnessSession(
