@@ -1,7 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { PreToolDecision, ToolExecution } from '@deepseek-ai/dsh-tools'
 import { defineDomain, domainTable, type Domain } from '@deepseek-ai/dsh-storage-domain'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import {
   roleAllows,
@@ -69,12 +69,88 @@ export const policyAuditRecordSchema = z.object({
   decision: z.enum(['allow', 'ask', 'deny']),
   reason: z.string().min(1),
   rule_source: z.enum(['catalog', 'safe-default', 'invalid-rule']),
+  /**
+   * Quem agiu. A trilha de politica nao gravava isto, entao a auditoria dizia
+   * o QUE foi decidido sem dizer para QUEM.
+   */
+  user_id: z.string().min(1).optional(),
+  /**
+   * Encadeamento. `seq` e a posicao, `previous_sha256` e o selo da entrada
+   * anterior e `entry_sha256` e o selo desta. Sem eles, a trilha era um KV
+   * comum: apagar ou reescrever uma linha nao deixava marca nenhuma.
+   *
+   * Sao OPCIONAIS de proposito. Torna-los obrigatorios exigiria subir a versao
+   * do dominio, e `open()` falha com `version-mismatch` em qualquer instalacao
+   * que ja rodou - nao existe passo de migracao. Registro antigo, sem selo,
+   * e reportado como NAO ENCADEADO, que e a verdade sobre ele.
+   */
+  seq: z.number().int().nonnegative().optional(),
+  previous_sha256: z.string().length(64).optional(),
+  entry_sha256: z.string().length(64).optional(),
 }).strict()
 
 export type PolicyAuditRecord = z.infer<typeof policyAuditRecordSchema>
 
+/** Primeira entrada da corrente: nao ha anterior, e o zero diz isso. */
+export const POLICY_AUDIT_CHAIN_ROOT = '0'.repeat(64)
+
+/**
+ * O selo de uma entrada: SHA-256 do conteudo canonico dela mais o selo da
+ * anterior. Trocar qualquer campo, ou reordenar a trilha, muda o selo.
+ * @param record - a entrada, com ou sem `entry_sha256`.
+ * @returns o selo em hexadecimal.
+ */
+export function policyAuditEntryHash(record: Omit<PolicyAuditRecord, 'entry_sha256'>): string {
+  // Chaves ordenadas: a serializacao nao pode depender da ordem em que os
+  // campos foram escritos, senao o mesmo conteudo daria selos diferentes.
+  const canonical = JSON.stringify(Object.fromEntries(
+    Object.entries(record).filter(([, value]) => value !== undefined).sort(([left], [right]) => left.localeCompare(right)),
+  ))
+  return createHash('sha256').update(canonical, 'utf8').digest('hex')
+}
+
+export type PolicyAuditChainVerdict =
+  | { readonly kind: 'intact'; readonly entries: number; readonly head: string }
+  | { readonly kind: 'unchained'; readonly entries: number; readonly firstUnchainedId: string }
+  | { readonly kind: 'broken'; readonly entries: number; readonly brokenAuditId: string; readonly detail: 'seal' | 'link' | 'sequence' }
+
+/**
+ * Confere a corrente inteira.
+ *
+ * `broken` distingue tres coisas diferentes: o selo nao bate com o conteudo
+ * (alguem reescreveu a linha), o elo nao aponta para a anterior (alguem
+ * removeu ou reordenou), ou a posicao pulou (alguem apagou do meio).
+ * @param records - as entradas, em qualquer ordem.
+ * @returns o veredito.
+ */
+export function verifyPolicyAuditChain(records: readonly PolicyAuditRecord[]): PolicyAuditChainVerdict {
+  const chained = records.filter(record => record.entry_sha256 !== undefined)
+  const unchained = records.find(record => record.entry_sha256 === undefined)
+  if (unchained !== undefined) {
+    return { kind: 'unchained', entries: records.length, firstUnchainedId: unchained.audit_id }
+  }
+  const ordered = [...chained].sort((left, right) => (left.seq ?? 0) - (right.seq ?? 0))
+  let previous = POLICY_AUDIT_CHAIN_ROOT
+  for (const [index, record] of ordered.entries()) {
+    if (record.seq !== index) {
+      return { kind: 'broken', entries: ordered.length, brokenAuditId: record.audit_id, detail: 'sequence' }
+    }
+    if (record.previous_sha256 !== previous) {
+      return { kind: 'broken', entries: ordered.length, brokenAuditId: record.audit_id, detail: 'link' }
+    }
+    const { entry_sha256: seal, ...body } = record
+    if (policyAuditEntryHash(body) !== seal) {
+      return { kind: 'broken', entries: ordered.length, brokenAuditId: record.audit_id, detail: 'seal' }
+    }
+    previous = seal
+  }
+  return { kind: 'intact', entries: ordered.length, head: previous }
+}
+
 export interface StudioPolicyRuntime {
   auditRecords(): readonly PolicyAuditRecord[]
+  /** Confere a corrente da trilha de politica sem sair do processo. */
+  verifyAuditChain(): PolicyAuditChainVerdict
   setIdentityResolver(resolver: (execution: ToolExecution) => PolicyIdentityState): () => void
   setAuthorizationResolver(resolver: (execution: ToolExecution) => PolicyAuthorizationState | undefined): () => void
   setDelegationGrantResolver(resolver: (execution: ToolExecution) => PolicyDelegationGrant | undefined): () => void
@@ -317,8 +393,42 @@ export async function apply(ctx: Context, config: PolicyPluginConfig = {}): Prom
   const domain: Domain<typeof studioPolicyAuditDomainSpec> = await ctx.storageDomain.open(studioPolicyAuditDomainSpec)
   ctx.effect(() => () => domain.close(), 'dz23-studio-policy.domainClose')
   const decisions = domain.table('decisions')
+  // A cabeca da corrente vem do que ja esta gravado. Comecar do zero a cada
+  // inicio faria a trilha antiga parecer adulterada; retomar de onde parou e o
+  // que mantem a corrente contínua entre reinicios.
+  // Falha fechado: um plugin de politica que nao consegue LER a propria trilha
+  // nao pode continuar a corrente. Comecar do zero por cima do que ja existe
+  // faria a verificacao acusar adulteracao onde nao houve, e e a mesma postura
+  // que a gravacao ja tem - se a auditoria nao pode ser registrada, a acao e
+  // bloqueada.
+  let stored: readonly PolicyAuditRecord[]
+  try {
+    stored = [...decisions.entries()].map(([, record]) => record).filter(record => record.entry_sha256 !== undefined)
+  } catch (cause) {
+    throw new Error('POLICY_AUDIT_TRAIL_UNREADABLE', { cause })
+  }
+  let head = stored.length === 0
+    ? { seq: 0, hash: POLICY_AUDIT_CHAIN_ROOT }
+    : stored.reduce((latest, record) => (record.seq ?? 0) >= latest.seq ? { seq: (record.seq ?? 0) + 1, hash: record.entry_sha256! } : latest, { seq: 0, hash: POLICY_AUDIT_CHAIN_ROOT })
+  // Uma fila: duas decisoes simultaneas nao podem pegar a mesma cabeca e gravar
+  // dois elos apontando para o mesmo anterior - isso quebraria a corrente sem
+  // ninguem ter adulterado nada.
+  let chainQueue: Promise<unknown> = Promise.resolve()
+  const appendAudit = (body: Omit<PolicyAuditRecord, 'seq' | 'previous_sha256' | 'entry_sha256'>): Promise<void> => {
+    const run = chainQueue.then(async () => {
+      const withLink = { ...body, seq: head.seq, previous_sha256: head.hash }
+      const record = policyAuditRecordSchema.parse({ ...withLink, entry_sha256: policyAuditEntryHash(withLink) })
+      await decisions.put(record.audit_id as PolicyAuditKey, record)
+      head = { seq: head.seq + 1, hash: record.entry_sha256! }
+    })
+    // A fila nao pode morrer numa falha: a proxima decisao ainda precisa ser
+    // registrada, e quem falhou ja e bloqueado por quem chamou.
+    chainQueue = run.catch(() => undefined)
+    return run
+  }
   ctx.provide('studioPolicy', {
     auditRecords: () => [...decisions.entries()].map(([, record]) => record),
+    verifyAuditChain: () => verifyPolicyAuditChain([...decisions.entries()].map(([, record]) => record)),
     setIdentityResolver: (resolver) => {
       const previous = identityResolver
       identityResolver = resolver
@@ -393,7 +503,7 @@ export async function apply(ctx: Context, config: PolicyPluginConfig = {}): Prom
     try {
       const scope = authorization ?? config.resolveScope?.(execution) ?? { orgId: 'org_local', tenantId: 'tenant_local' }
       const auditId = config.createAuditId?.() ?? randomUUID()
-      const record = policyAuditRecordSchema.parse({
+      await appendAudit({
         audit_id: auditId,
         session_id: execution.agent === undefined ? 'agentless' : String(execution.agent.session.id),
         org_id: scope.orgId,
@@ -405,8 +515,8 @@ export async function apply(ctx: Context, config: PolicyPluginConfig = {}): Prom
         decision: event.kind,
         reason: event.reason,
         rule_source: event.ruleSource,
+        ...(authorization === undefined ? {} : { user_id: authorization.userId }),
       })
-      await decisions.put(auditId as PolicyAuditKey, record)
     } catch {
       decision = {
         ...decision,

@@ -48,6 +48,7 @@ function context(host: '127.0.0.1' | '0.0.0.0' = '127.0.0.1') {
     credentials: { resolve: vi.fn(() => Promise.resolve({ value: 'edge-secret', source: 'test' })) } as unknown as CredentialProvider,
     studioPolicy: {
       auditRecords: () => [],
+    verifyAuditChain: () => ({ kind: 'intact' as const, entries: 0, head: '0'.repeat(64) }),
       setIdentityResolver: vi.fn((resolver: (execution: never) => { authenticated: boolean; strongIdentityVerified: boolean }) => {
         strongResolver = resolver
         return resolverDispose

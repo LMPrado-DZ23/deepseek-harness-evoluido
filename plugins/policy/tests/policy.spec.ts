@@ -10,6 +10,10 @@ import {
   STUDIO_POLICY_AUDIT_PHYSICAL_DOMAIN,
   apply,
   policyAuditRecordSchema,
+  type PolicyAuditRecord,
+  policyAuditEntryHash,
+  POLICY_AUDIT_CHAIN_ROOT,
+  verifyPolicyAuditChain,
   policyDecisionEventSchema,
   policyDecisionSchema,
   studioPolicyAuditDomainSpec,
@@ -255,7 +259,7 @@ describe('authoritative tools/pre-execute integration', () => {
       .resolves.toEqual({ kind: 'allow' })
     const event = policyDecisionEventSchema.parse(ctx.emit.mock.calls[0]?.[1])
     expect(event).toMatchObject({ toolName: 'safe', callId: 'call-1', effectiveTier: 'T0', kind: 'allow' })
-    expect(put).toHaveBeenCalledWith('audit-1', policyAuditRecordSchema.parse({
+    const body = {
       audit_id: 'audit-1',
       session_id: 'session-1',
       org_id: 'org-23',
@@ -267,6 +271,12 @@ describe('authoritative tools/pre-execute integration', () => {
       decision: event.kind,
       reason: event.reason,
       rule_source: event.ruleSource,
+      // Primeira entrada: nao ha anterior, e a raiz de zeros diz isso.
+      seq: 0,
+      previous_sha256: POLICY_AUDIT_CHAIN_ROOT,
+    }
+    expect(put).toHaveBeenCalledWith('audit-1', policyAuditRecordSchema.parse({
+      ...body, entry_sha256: policyAuditEntryHash(body),
     }))
     expect(STUDIO_POLICY_AUDIT_PHYSICAL_DOMAIN).toBe('studio_policy_audit')
     expect(STUDIO_POLICY_AUDIT_LOGICAL_DOMAIN).toBe('studio.policy.audit')
@@ -405,7 +415,7 @@ describe('authoritative tools/pre-execute integration', () => {
     await ctx.plugin(ToolRuntime)
     const put = vi.fn().mockResolvedValue(undefined)
     ctx.provide('storageDomain', {
-      open: vi.fn().mockResolvedValue({ table: vi.fn().mockReturnValue({ put }), close: vi.fn() }),
+      open: vi.fn().mockResolvedValue({ table: vi.fn().mockReturnValue({ put, entries: () => new Map().entries() }), close: vi.fn() }),
     } as never)
     let dispatches = 0
     const probe = defineTool({
@@ -456,5 +466,84 @@ describe('authoritative tools/pre-execute integration', () => {
     expect(put.mock.calls[1]?.[1])
       .toMatchObject({ call_id: 'real-unclassified', effective_tier: 'T2', decision: 'ask' })
     await ctx.fiber.dispose()
+  })
+})
+
+describe('S-16: a trilha de política é encadeada, e a quebra aparece', () => {
+  const entry = (index: number, overrides: Partial<PolicyAuditRecord> = {}): PolicyAuditRecord => {
+    const body = {
+      audit_id: `audit-${String(index)}`,
+      session_id: 'session-1',
+      org_id: 'org-1',
+      tenant_id: 'tenant-1',
+      user_id: 'user-1',
+      created_at: `2026-09-02T12:0${String(index)}:00.000Z`,
+      tool_name: 'studio_agent_start',
+      call_id: `call-${String(index)}`,
+      effective_tier: 'T0' as const,
+      decision: 'allow' as const,
+      reason: 'permitido',
+      rule_source: 'catalog' as const,
+      seq: index,
+      previous_sha256: POLICY_AUDIT_CHAIN_ROOT,
+      ...overrides,
+    }
+    return { ...body, entry_sha256: policyAuditEntryHash(body) }
+  }
+
+  /** Uma corrente de verdade: cada elo aponta para o selo do anterior. */
+  const chain = (total: number): PolicyAuditRecord[] => {
+    const records: PolicyAuditRecord[] = []
+    let previous = POLICY_AUDIT_CHAIN_ROOT
+    for (let index = 0; index < total; index += 1) {
+      const record = entry(index, { previous_sha256: previous })
+      records.push(record)
+      previous = record.entry_sha256!
+    }
+    return records
+  }
+
+  it('reconhece uma corrente íntegra, em qualquer ordem de leitura', () => {
+    const records = chain(4)
+    expect(verifyPolicyAuditChain(records)).toMatchObject({ kind: 'intact', entries: 4 })
+    // O KV não promete ordem: a verificação ordena pela posição gravada.
+    expect(verifyPolicyAuditChain([...records].reverse())).toMatchObject({ kind: 'intact', entries: 4 })
+  })
+
+  it('acusa quem reescreveu uma linha', () => {
+    // Era exatamente isto que não deixava marca nenhuma: um put(k,v) por cima.
+    const records = chain(4)
+    records[2] = { ...records[2]!, reason: 'inventado depois', decision: 'deny' }
+    expect(verifyPolicyAuditChain(records)).toMatchObject({ kind: 'broken', detail: 'seal', brokenAuditId: 'audit-2' })
+  })
+
+  it('acusa quem apagou uma linha do meio', () => {
+    const records = chain(4)
+    const without = records.filter(record => record.audit_id !== 'audit-2')
+    expect(verifyPolicyAuditChain(without)).toMatchObject({ kind: 'broken', detail: 'sequence' })
+  })
+
+  it('acusa quem reordenou a trilha', () => {
+    const records = chain(3)
+    // Trocar o elo sem trocar a posição: o selo continua batendo com o conteúdo,
+    // e só o encadeamento denuncia.
+    const relinked = { ...records[2]!, previous_sha256: POLICY_AUDIT_CHAIN_ROOT }
+    expect(verifyPolicyAuditChain([records[0]!, records[1]!, { ...relinked, entry_sha256: policyAuditEntryHash(({ ...relinked, entry_sha256: undefined } as unknown as Omit<PolicyAuditRecord, 'entry_sha256'>)) }]))
+      .toMatchObject({ kind: 'broken', detail: 'link', brokenAuditId: 'audit-2' })
+  })
+
+  it('não chama de íntegra uma trilha antiga que nunca teve selo', () => {
+    // Registro gravado antes do encadeamento existir. Dizer "íntegra" seria
+    // afirmar uma garantia que aquele registro nunca teve.
+    const legacy = { ...chain(1)[0]! }
+    delete (legacy as { entry_sha256?: string }).entry_sha256
+    expect(verifyPolicyAuditChain([legacy])).toMatchObject({ kind: 'unchained', firstUnchainedId: 'audit-0' })
+  })
+
+  it('o selo muda quando qualquer campo muda, e não depende da ordem das chaves', () => {
+    const { entry_sha256: _seal, ...body } = entry(0)
+    expect(policyAuditEntryHash(body)).toBe(policyAuditEntryHash(Object.fromEntries(Object.entries(body).reverse()) as typeof body))
+    expect(policyAuditEntryHash(body)).not.toBe(policyAuditEntryHash({ ...body, reason: 'outro' }))
+    expect(policyAuditEntryHash(body)).not.toBe(policyAuditEntryHash({ ...body, user_id: 'outra-pessoa' }))
   })
 })
