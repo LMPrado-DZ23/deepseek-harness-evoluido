@@ -1,13 +1,16 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Domain, KvTable } from '@deepseek-ai/dsh-storage-domain'
-import type {} from '@dz23-studio/identity'
+import type {} from '@deepseek-ai/dsh-user-approval'
+import { principalForAgent, type AgentLineageNode, type AgentLookup } from '@dz23-studio/identity'
+import { randomUUID } from 'node:crypto'
+import { answerHarnessApproval } from './answerer.js'
 import { studioActionApprovalsDomainSpec, type ApprovalKey } from './domain.js'
 import { assertValidApproval, type ApprovalRecord } from './model.js'
 import { ApprovalConflictError, type ActionApprovalRepository } from './repository.js'
-import { StudioActionApprovalService, type ApprovalStrongIdentityPort } from './service.js'
+import { APPROVAL_TTL_MS, StudioActionApprovalService, type ApprovalStrongIdentityPort } from './service.js'
 
 export const name = 'dz23-studio-action-approval'
-export const inject = ['storageDomain', 'studioIdentity']
+export const inject = ['agents', 'storageDomain', 'studioIdentity']
 
 export interface StudioActionApprovalRuntime {
   readonly service: StudioActionApprovalService
@@ -52,6 +55,33 @@ export class DomainActionApprovalRepository implements ActionApprovalRepository 
 export interface Config {
   /** Prazo de vida do pedido de confirmação, em milissegundos. */
   readonly ttlMs?: number
+  /**
+   * Responder às perguntas de permissão do Harness com a autoridade do Studio.
+   * Desligado, o seam do Harness continua caindo no `'unavailable'` fechado.
+   */
+  readonly answerHarnessApprovals?: boolean
+  /** Nível exigido para uma pergunta do Harness. Escalada de permissão é T3. */
+  readonly harnessTier?: 'T2' | 'T3'
+  /** De quanto em quanto tempo reler a decisão da pessoa. */
+  readonly harnessPollIntervalMs?: number
+  /** Quanto tempo o Harness espera antes de fechar por falta de resposta. */
+  readonly harnessMaxWaitMs?: number
+}
+
+/** Espera cancelável usada pelo respondedor; `false` quando foi interrompida. */
+function cancellableWait(ms: number, signal: AbortSignal | undefined): Promise<boolean> {
+  if (signal?.aborted === true) return Promise.resolve(false)
+  return new Promise<boolean>((resolve) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve(true)
+    }, ms)
+    const onAbort = (): void => {
+      clearTimeout(timer)
+      resolve(false)
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
 }
 
 export async function apply(ctx: Context, config: Config = {}): Promise<void> {
@@ -69,4 +99,31 @@ export async function apply(ctx: Context, config: Config = {}): Promise<void> {
     ...(config.ttlMs === undefined ? {} : { ttlMs: config.ttlMs }),
   })
   ctx.provide('studioActionApproval', { service })
+
+  if (config.answerHarnessApprovals !== true) return
+  type RegistrySessionId = Parameters<typeof ctx.agents.get>[0]
+  const agentLookup: AgentLookup = {
+    getBySessionId: sessionId => ctx.agents.get(sessionId as RegistrySessionId),
+  }
+  const tier = config.harnessTier ?? 'T3'
+  const pollIntervalMs = config.harnessPollIntervalMs ?? 1_000
+  const maxWaitMs = config.harnessMaxWaitMs ?? (config.ttlMs ?? APPROVAL_TTL_MS)
+  ctx.effect(() => ctx.on('approval/request', (req, next) => answerHarnessApproval({
+    toolName: req.toolName,
+    ...(req.callId === undefined ? {} : { callId: String(req.callId) }),
+    ...(req.reason === undefined ? {} : { reason: req.reason }),
+    ...(req.signal === undefined ? {} : { signal: req.signal }),
+  }, next, {
+    authority: service,
+    // A identidade sai da linhagem durável do agente, nunca do que o modelo diz.
+    actor: principalForAgent(ctx.studioIdentity.service, agentLookup, req.agent as unknown as AgentLineageNode),
+    tier,
+    // O Harness não dá um identificador à pergunta: cada pergunta abre o SEU
+    // pedido, e uma confirmação nunca vale para a próxima.
+    questionId: `harness-${randomUUID()}`,
+    pollIntervalMs,
+    maxWaitMs,
+    wait: ms => cancellableWait(ms, req.signal),
+    now: () => Date.now(),
+  })), 'dz23-studio-action-approval.harnessAnswerer')
 }

@@ -87,6 +87,97 @@ describe('persistência durável da autoridade de confirmação', () => {
     expect(close).toHaveBeenCalledTimes(1)
   })
 
+  it('responde a pergunta de permissão do Harness com a confirmação real da pessoa', async () => {
+    const rows = table()
+    let provided: { readonly service: StudioActionApprovalService } | undefined
+    let answerer: ((req: unknown, next: () => Promise<string>) => Promise<string>) | undefined
+    const sessionRecord = {
+      session_id: 'session-1', user_id: 'user-1', org_id: 'org-1', tenant_id: 'tenant-1',
+      harness_session_ids: ['agent-1'],
+    }
+    const ctx = {
+      agents: { get: (id: string) => id === 'agent-1' ? { session: { id: 'agent-1' } } : undefined },
+      storageDomain: { open: vi.fn(async () => ({ table: () => rows, close: vi.fn(async () => {}) })) },
+      studioIdentity: {
+        service: {
+          strongIdentityForSession: () => true,
+          principalForHarnessSession: (id: string) => id === 'agent-1'
+            ? { userId: 'user-1', orgId: 'org-1', tenantId: 'tenant-1', sessionId: 'session-1' }
+            : undefined,
+          sessionRecords: () => [sessionRecord],
+        },
+      },
+      effect: vi.fn((setup: () => unknown) => { setup() }),
+      provide: vi.fn((_key: string, value: { readonly service: StudioActionApprovalService }) => { provided = value }),
+      on: vi.fn((event: string, handler: typeof answerer) => { if (event === 'approval/request') answerer = handler; return () => {} }),
+    }
+    await apply(ctx as never, { answerHarnessApprovals: true, harnessPollIntervalMs: 1, harnessMaxWaitMs: 200 })
+    expect(answerer).toBeTypeOf('function')
+    const service = provided!.service
+    const request = { agent: { session: { id: 'agent-1' } }, toolName: 'bash', callId: 'call-1', reason: 'sair da caixa' }
+    const pending = answerer!(request, () => Promise.resolve('unavailable'))
+    // A pessoa confirma enquanto o Harness espera: nada acontece antes disso.
+    const actor = { userId: 'user-1', orgId: 'org-1', tenantId: 'tenant-1', sessionId: 'session-1' }
+    for (let attempt = 0; attempt < 50 && rows.rows.size === 0; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 2))
+    }
+    const [approvalId] = [...rows.rows.keys()]
+    expect(approvalId).toMatch(/^apv-[a-f0-9]{64}$/u)
+    await service.confirm(actor, approvalId!)
+    await expect(pending).resolves.toBe('allowed-once')
+    expect(rows.rows.get(approvalId!)).toMatchObject({ state: 'CONSUMED', action: 'harness.tool.bash' })
+  })
+
+  it('uma confirmação do Harness autoriza exatamente uma pergunta, mesmo em perguntas idênticas', async () => {
+    const rows = table()
+    let provided: { readonly service: StudioActionApprovalService } | undefined
+    let answerer: ((req: unknown, next: () => Promise<string>) => Promise<string>) | undefined
+    const ctx = {
+      agents: { get: (id: string) => id === 'agent-1' ? { session: { id: 'agent-1' } } : undefined },
+      storageDomain: { open: vi.fn(async () => ({ table: () => rows, close: vi.fn(async () => {}) })) },
+      studioIdentity: {
+        service: {
+          strongIdentityForSession: () => true,
+          principalForHarnessSession: () => ({ userId: 'user-1', orgId: 'org-1', tenantId: 'tenant-1', sessionId: 'session-1' }),
+        },
+      },
+      effect: vi.fn((setup: () => unknown) => { setup() }),
+      provide: vi.fn((_key: string, value: { readonly service: StudioActionApprovalService }) => { provided = value }),
+      on: vi.fn((event: string, handler: typeof answerer) => { if (event === 'approval/request') answerer = handler; return () => {} }),
+    }
+    await apply(ctx as never, { answerHarnessApprovals: true, harnessPollIntervalMs: 1, harnessMaxWaitMs: 120 })
+    const service = provided!.service
+    // Duas perguntas RIGOROSAMENTE iguais: mesma ferramenta, mesma chamada, mesmo motivo.
+    const request = { agent: { session: { id: 'agent-1' } }, toolName: 'bash', callId: 'call-1', reason: 'sair da caixa' }
+    const first = answerer!(request, () => Promise.resolve('unavailable'))
+    const second = answerer!(request, () => Promise.resolve('unavailable'))
+    for (let attempt = 0; attempt < 100 && rows.rows.size < 2; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 2))
+    }
+    // Cada pergunta abriu o SEU pedido: uma confirmação não serve para as duas.
+    expect(rows.rows.size).toBe(2)
+    const actor = { userId: 'user-1', orgId: 'org-1', tenantId: 'tenant-1', sessionId: 'session-1' }
+    await service.confirm(actor, [...rows.rows.keys()][0]!)
+    const outcomes = await Promise.all([first, second])
+    expect(outcomes.filter(outcome => outcome === 'allowed-once')).toHaveLength(1)
+    expect(outcomes.filter(outcome => outcome === 'unavailable')).toHaveLength(1)
+  })
+
+  it('não responde a pergunta do Harness quando o respondedor não foi ligado', async () => {
+    const rows = table()
+    const on = vi.fn()
+    const ctx = {
+      agents: { get: () => undefined },
+      storageDomain: { open: vi.fn(async () => ({ table: () => rows, close: vi.fn(async () => {}) })) },
+      studioIdentity: { service: { strongIdentityForSession: () => true } },
+      effect: vi.fn(),
+      provide: vi.fn(),
+      on,
+    }
+    await apply(ctx as never)
+    expect(on).not.toHaveBeenCalled()
+  })
+
   it('recusa a confirmação T3 de uma sessão sem chave de acesso', async () => {
     const rows = table()
     const ctx = {

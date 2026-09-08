@@ -169,6 +169,15 @@
     # do assistente recusa com NOT_CONFIGURED em vez de se autoconceder.
     - id: dz23-studio-action-approval
       name: '@dz23-studio/action-approval'
+      config:
+        # O Harness resolve `approval/request` SÓ com respondedores compostos no
+        # mesmo processo: sem este, a pergunta cai no 'unavailable' fechado e a
+        # pessoa nunca vê nada. Ligado aqui, a pergunta vira uma confirmação
+        # real na autoridade do Studio. O Harness continua com zero diff.
+        answerHarnessApprovals: true
+        # Um pedido do Harness é sempre escalada de permissão (caixa, rede,
+        # arquivo fora do escopo): exige chave de acesso recente na mesma sessão.
+        harnessTier: T3
     - id: dz23-studio-agents
       name: '@dz23-studio/agents'
       config:

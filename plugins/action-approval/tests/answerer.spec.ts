@@ -1,0 +1,152 @@
+import { describe, expect, it, vi } from 'vitest'
+import {
+  answerHarnessApproval,
+  questionFingerprint,
+  questionSubjectId,
+  type HarnessApprovalAuthority,
+  type HarnessApprovalDeps,
+} from '../src/answerer.ts'
+import { ActionApprovalError } from '../src/service.ts'
+import type { ApprovalRecord } from '../src/model.ts'
+
+const actor = { userId: 'user-1', orgId: 'org-1', tenantId: 'tenant-1', sessionId: 'session-1' }
+const question = { toolName: 'bash', callId: 'call-1', reason: 'precisa sair da caixa' }
+
+function record(state: ApprovalRecord['state']): ApprovalRecord {
+  const base = {
+    org_id: 'org-1', tenant_id: 'tenant-1', user_id: 'user-1', session_id: 'session-1',
+    action: 'harness.tool.bash', subject_id: 'call:call-1', fingerprint: 'b'.repeat(64),
+    tier: 'T3' as const, request_id: 'harness-1', approval_id: `apv-${'a'.repeat(64)}`,
+    claim_id: null, created_at: '2026-09-08T00:00:00.000Z', expires_at: '2026-09-08T00:03:00.000Z',
+    confirmed_at: null, consumed_at: null, denied_at: null,
+  }
+  if (state === 'AVAILABLE') return { ...base, state, confirmed_at: '2026-09-08T00:01:00.000Z' }
+  if (state === 'DENIED') return { ...base, state, denied_at: '2026-09-08T00:01:00.000Z' }
+  if (state === 'CONSUMED') {
+    return { ...base, state, confirmed_at: '2026-09-08T00:01:00.000Z', consumed_at: '2026-09-08T00:02:00.000Z', claim_id: 'outro' }
+  }
+  return { ...base, state }
+}
+
+function deps(overrides: {
+  readonly authority?: Partial<HarnessApprovalAuthority>
+  readonly actor?: HarnessApprovalDeps['actor']
+  readonly maxWaitMs?: number
+} = {}): HarnessApprovalDeps & { readonly clock: { value: number } } {
+  const clock = { value: 0 }
+  const authority: HarnessApprovalAuthority = {
+    request: vi.fn(() => Promise.resolve(record('PENDING'))),
+    get: vi.fn(() => Promise.resolve(record('PENDING'))),
+    consume: vi.fn(() => Promise.resolve({ approval_id: record('AVAILABLE').approval_id })),
+    ...overrides.authority,
+  }
+  return {
+    clock,
+    authority,
+    actor: 'actor' in overrides ? overrides.actor : actor,
+    tier: 'T3',
+    questionId: 'harness-1',
+    pollIntervalMs: 10,
+    maxWaitMs: overrides.maxWaitMs ?? 100,
+    wait: (ms: number) => { clock.value += ms; return Promise.resolve(true) },
+    now: () => clock.value,
+  }
+}
+
+const delegate = () => Promise.resolve('unavailable' as const)
+
+describe('respondedor do Studio para as perguntas do Harness', () => {
+  it('só devolve permissão depois que a pessoa confirma e a confirmação é consumida', async () => {
+    let reads = 0
+    const d = deps({
+      authority: {
+        get: vi.fn(() => { reads += 1; return Promise.resolve(record(reads >= 3 ? 'AVAILABLE' : 'PENDING')) }),
+      },
+    })
+    await expect(answerHarnessApproval(question, delegate, d)).resolves.toBe('allowed-once')
+    expect(d.authority.consume).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'harness.tool.bash', subjectId: 'call:call-1', tier: 'T3', claimId: 'harness-1',
+    }))
+  })
+
+  it('recusa quando a pessoa nega', async () => {
+    const d = deps({ authority: { get: vi.fn(() => Promise.resolve(record('DENIED'))) } })
+    await expect(answerHarnessApproval(question, delegate, d)).resolves.toBe('rejected')
+    expect(d.authority.consume).not.toHaveBeenCalled()
+  })
+
+  it('fecha por prazo esgotado sem inventar permissão nem recusa', async () => {
+    const d = deps({ maxWaitMs: 25 })
+    await expect(answerHarnessApproval(question, delegate, d)).resolves.toBe('unavailable')
+    expect(d.authority.consume).not.toHaveBeenCalled()
+  })
+
+  it('delega quando o agente não tem identidade do Studio', async () => {
+    const d = deps({ actor: undefined })
+    const next = vi.fn(() => Promise.resolve('unavailable' as const))
+    await expect(answerHarnessApproval(question, next, d)).resolves.toBe('unavailable')
+    expect(next).toHaveBeenCalledTimes(1)
+    expect(d.authority.request).not.toHaveBeenCalled()
+  })
+
+  it('devolve cancelado quando a pergunta foi retirada', async () => {
+    const d = deps()
+    const cancelled = { ...question, signal: { aborted: true } }
+    await expect(answerHarnessApproval(cancelled, delegate, d)).resolves.toBe('cancelled')
+    expect(d.authority.request).not.toHaveBeenCalled()
+  })
+
+  it('devolve cancelado quando a espera é interrompida no meio', async () => {
+    const d = { ...deps(), wait: () => Promise.resolve(false) }
+    await expect(answerHarnessApproval(question, delegate, d)).resolves.toBe('cancelled')
+  })
+
+  it('não transforma falha de armazenamento em permissão', async () => {
+    const failedAsk = deps({ authority: { request: vi.fn(() => Promise.reject(new Error('storage'))) } })
+    await expect(answerHarnessApproval(question, delegate, failedAsk)).resolves.toBe('unavailable')
+
+    const failedRead = deps({ authority: { get: vi.fn(() => Promise.reject(new Error('storage'))) } })
+    await expect(answerHarnessApproval(question, delegate, failedRead)).resolves.toBe('unavailable')
+
+    const failedConsume = deps({
+      authority: {
+        request: vi.fn(() => Promise.resolve(record('AVAILABLE'))),
+        consume: vi.fn(() => Promise.reject(new Error('storage'))),
+      },
+    })
+    await expect(answerHarnessApproval(question, delegate, failedConsume)).resolves.toBe('unavailable')
+  })
+
+  it('mantém a recusa explícita mesmo quando ela chega no consumo', async () => {
+    const d = deps({
+      authority: {
+        request: vi.fn(() => Promise.resolve(record('AVAILABLE'))),
+        consume: vi.fn(() => Promise.reject(new ActionApprovalError('DENIED', 'recusado'))),
+      },
+    })
+    await expect(answerHarnessApproval(question, delegate, d)).resolves.toBe('rejected')
+  })
+
+  it('fecha diante de uma confirmação já usada por outra reivindicação', async () => {
+    const d = deps({ authority: { request: vi.fn(() => Promise.resolve(record('CONSUMED'))) } })
+    await expect(answerHarnessApproval(question, delegate, d)).resolves.toBe('unavailable')
+    expect(d.authority.consume).not.toHaveBeenCalled()
+  })
+
+  it('fecha diante de um pedido vencido', async () => {
+    const d = deps({ authority: { request: vi.fn(() => Promise.resolve(record('EXPIRED'))) } })
+    await expect(answerHarnessApproval(question, delegate, d)).resolves.toBe('unavailable')
+  })
+
+  it('identifica a chamada de forma legível e resume o que não é', () => {
+    expect(questionSubjectId({ toolName: 'bash', callId: 'call-1' })).toBe('call:call-1')
+    expect(questionSubjectId({ toolName: 'bash', callId: 'chamada com espaço' })).toMatch(/^call:[a-f0-9]{64}$/u)
+    expect(questionSubjectId({ toolName: 'bash' })).toMatch(/^call:[a-f0-9]{64}$/u)
+  })
+
+  it('muda a impressão digital quando o motivo muda', () => {
+    expect(questionFingerprint(question)).not.toBe(questionFingerprint({ ...question, reason: 'outro motivo' }))
+    expect(questionFingerprint(question)).toBe(questionFingerprint({ ...question }))
+    expect(questionFingerprint({ toolName: 'bash' })).not.toBe(questionFingerprint({ toolName: 'bash', callId: 'x' }))
+  })
+})
