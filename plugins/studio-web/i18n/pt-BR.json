@@ -33,7 +33,8 @@
     "methodNotAllowed": "Esta ação não é permitida neste endereço.",
     "messageTooLarge": "Esta mensagem é grande demais para uma vez só. Divida em partes menores e envie de novo.",
     "interfaceUnavailable": "Não foi possível abrir a interface agora. Tente de novo em instantes; nada do seu trabalho foi perdido.",
-    "readUnavailable": "Não consegui ler esta conversa agora. Ela continua guardada; tente de novo em instantes."
+    "readUnavailable": "Não consegui ler esta conversa agora. Ela continua guardada; tente de novo em instantes.",
+    "compactUnavailable": "Não foi possível organizar a conversa agora. Nada foi perdido."
   },
   "approvals": {
     "notConfigured": "Confirmações de ações sensíveis ainda não foram liberadas nesta instalação do Studio. Enquanto isso, nenhuma ação sensível é executada. Peça a quem administra o Studio para ativar esse recurso."

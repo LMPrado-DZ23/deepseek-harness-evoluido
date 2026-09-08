@@ -7,6 +7,7 @@ import {
   openConversation,
   readConversation,
   sendConversationMessage,
+  organizeConversation,
   type ConversationPort,
 } from './conversationApi'
 
@@ -93,6 +94,26 @@ describe('cliente da conversa', () => {
     })
     const noId = port(Response.json({ accepted: true }, { status: 202 }))
     await expect(sendConversationMessage('conversa-1', 'oi', noId.value, csrf)).rejects.toThrow('perfil seguro')
+  })
+
+  it('organiza a conversa por rota própria, e nunca escrevendo "/compact" na conversa', async () => {
+    // O botão mandava a string "/compact" por /messages. O servidor não faz
+    // parsing de comando: virava texto estranho na conversa e nada era
+    // organizado.
+    const organizing = port(Response.json({ accepted: true, organized: true, items: 4, tokens: 900 }, { status: 202 }))
+    await expect(organizeConversation('conversa-1', organizing.value, csrf)).resolves.toEqual({ organized: true })
+    expect(organizing.calls[0]).toMatchObject({
+      path: `${CONVERSATION_ENDPOINT}/conversa-1/compact`, method: 'POST', csrf: 'csrf-1',
+    })
+    expect(organizing.calls[0]?.body ?? '').not.toContain('/compact"')
+
+    // "Não havia o que organizar" não é erro, e a tela precisa distinguir.
+    const empty = port(Response.json({ accepted: true, organized: false }, { status: 202 }))
+    await expect(organizeConversation('conversa-1', empty.value, csrf)).resolves.toEqual({ organized: false })
+
+    // Resposta que não confirma nada não vira "organizei".
+    const vague = port(Response.json({ accepted: true }, { status: 202 }))
+    await expect(organizeConversation('conversa-1', vague.value, csrf)).rejects.toThrow('perfil seguro')
   })
 
   it('cancela com CSRF e propaga a recusa do servidor', async () => {

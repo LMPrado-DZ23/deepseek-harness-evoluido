@@ -22,6 +22,7 @@ function fixture(input: {
   readonly owned?: boolean
   readonly role?: 'owner' | 'admin' | 'builder' | 'viewer'
   readonly randomRequestId?: boolean
+  readonly compaction?: 'absent' | 'empty' | 'fails' | 'organizes'
 } = {}) {
   const inspect = vi.fn<AssistantConversationControllerPort['inspect']>(async () => ({ events: [] }))
   const prompt = vi.fn<AssistantConversationControllerPort['prompt']>(async () => ({ accepted: true }))
@@ -29,6 +30,11 @@ function fixture(input: {
   const launchTenantConversation = vi.fn(async () => ({
     session_id: 'conversation-1', reused: false as const, preset: 'dz23-assistant' as const,
   }))
+  const compactNow = vi.fn(async () => {
+    if (input.compaction === 'fails') throw new Error('busy')
+    if (input.compaction === 'empty') return null
+    return { items: 4, tokens: 900 }
+  })
   const service = new AssistantConversationService({
     identity: { ownsHarnessSession: () => input.owned !== false },
     tenancy: { authorizationFor: () => input.allowed === false ? undefined : ({
@@ -36,9 +42,10 @@ function fixture(input: {
     }) },
     launcher: { launchTenantConversation },
     sessions: { inspect, prompt, cancel },
+    ...(input.compaction === 'absent' ? {} : { compaction: () => ({ compactNow }) }),
     ...(input.randomRequestId === true ? {} : { createRequestId: () => 'request-1' }),
   })
-  return { service, inspect, prompt, cancel, launchTenantConversation }
+  return { service, inspect, prompt, cancel, launchTenantConversation, compactNow }
 }
 
 const event = (type: string, seq: number, data: Record<string, unknown>, time = 100 + seq) => ({ type, seq, time, data })
@@ -275,5 +282,86 @@ describe('assistant transcript sanitization', () => {
     expect(snapshot.events[0]).toMatchObject({ id: 'm-5' })
     expect(snapshot.events.at(-1)).toMatchObject({ id: 'm-504', truncated: true })
     expect((snapshot.events.at(-1) as { text: string }).text).toHaveLength(64 * 1024)
+  })
+})
+
+describe('M91: o checkpoint da compactação chega ao navegador', () => {
+  it('deixa passar o resumo que substituiu o histórico, com tipo próprio', () => {
+    // O checkpoint é um `user/message` cujo `source` é
+    // `{ kind: 'plugin', plugin: 'compact' }` (contrato do upstream em
+    // `compactCheckpointSource`). A projeção descartava tudo que não fosse
+    // `kind: 'user'`, então a pessoa via o histórico encolher sem nunca ver o
+    // que ficou no lugar — enquanto o comentário do código afirmava o
+    // contrário.
+    const projected = sanitizeAssistantEvent(event('user/message', 11, {
+      id: 'chk-1',
+      source: { kind: 'plugin', plugin: 'compact', compactionId: 'c-1' },
+      content: [{ type: 'text', text: 'Resumo do que foi conversado até aqui.' }],
+    }))
+    expect(projected).toMatchObject({
+      type: 'compaction.checkpoint', id: 'chk-1', text: 'Resumo do que foi conversado até aqui.',
+    })
+  })
+
+  it('não afirma que a pessoa escreveu o resumo', () => {
+    const projected = sanitizeAssistantEvent(event('user/message', 12, {
+      id: 'chk-2', source: { kind: 'plugin', plugin: 'compact' },
+      content: [{ type: 'text', text: 'resumo' }],
+    }))
+    expect(projected?.type).not.toBe('message.user')
+  })
+
+  it('continua descartando mensagem de qualquer outro plugin', () => {
+    // A abertura é para UM marcador. Sem isto, qualquer plugin poderia escrever
+    // no transcrito da pessoa.
+    expect(sanitizeAssistantEvent(event('user/message', 13, {
+      id: 'x', source: { kind: 'plugin', plugin: 'secrets' }, content: [{ type: 'text', text: 'hidden' }],
+    }))).toBeUndefined()
+  })
+})
+
+describe('M91: "Organizar conversa agora" chama a compactação de verdade', () => {
+  it('organiza pela compactação do Harness, e não mandando texto ao modelo', async () => {
+    // O botão enviava a STRING "/compact" como mensagem. O controlador de
+    // sessão não faz parsing de comando, então o modelo recebia um texto
+    // estranho e nada era organizado.
+    const f = fixture({ compaction: 'organizes' })
+    await expect(f.service.compact(identitySession(), 'conversation-1', AbortSignal.timeout(1_000)))
+      .resolves.toEqual({ accepted: true, organized: true, items: 4, tokens: 900 })
+    expect(f.compactNow).toHaveBeenCalledTimes(1)
+    expect(f.prompt).not.toHaveBeenCalled()
+  })
+
+  it('diz que não havia o que organizar, em vez de anunciar um trabalho que não houve', async () => {
+    const f = fixture({ compaction: 'empty' })
+    await expect(f.service.compact(identitySession(), 'conversation-1', AbortSignal.timeout(1_000)))
+      .resolves.toEqual({ accepted: true, organized: false })
+  })
+
+  it('falha preservando o original, sem virar mensagem na conversa', async () => {
+    const f = fixture({ compaction: 'fails' })
+    await expect(f.service.compact(identitySession(), 'conversation-1', AbortSignal.timeout(1_000)))
+      .rejects.toMatchObject({ code: 'SESSION_UNAVAILABLE' })
+    expect(f.prompt).not.toHaveBeenCalled()
+  })
+
+  it('sem compactação montada, recusa em vez de fingir', async () => {
+    const f = fixture({ compaction: 'absent' })
+    await expect(f.service.compact(identitySession(), 'conversation-1', AbortSignal.timeout(1_000)))
+      .rejects.toMatchObject({ code: 'SESSION_UNAVAILABLE' })
+  })
+
+  it('não organiza conversa de outra pessoa', async () => {
+    const f = fixture({ owned: false, compaction: 'organizes' })
+    await expect(f.service.compact(identitySession(), 'conversation-1', AbortSignal.timeout(1_000)))
+      .rejects.toMatchObject({ code: 'NOT_FOUND' })
+    expect(f.compactNow).not.toHaveBeenCalled()
+  })
+
+  it('leitor não organiza a conversa', async () => {
+    const f = fixture({ role: 'viewer', compaction: 'organizes' })
+    await expect(f.service.compact(identitySession(), 'conversation-1', AbortSignal.timeout(1_000)))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' })
+    expect(f.compactNow).not.toHaveBeenCalled()
   })
 })

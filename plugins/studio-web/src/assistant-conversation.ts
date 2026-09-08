@@ -32,12 +32,37 @@ export type AssistantPublicEvent =
    * not carry one - inventing a percentage would be inventing evidence.
    */
   | { readonly type: 'compaction.state'; readonly seq: number; readonly at: number; readonly compaction_id: string; readonly state: 'summarizing' | 'committing' | 'completed' | 'failed'; readonly items?: number; readonly tokens?: number }
+  /**
+   * O checkpoint: a mensagem que SUBSTITUIU o histórico antigo, escrita pelo
+   * plugin de compactação, não pela pessoa. Ela chega como `user/message` com
+   * `source.kind === 'plugin'` e por isso era descartada pela projeção - o
+   * comentário acima já dizia que ela atravessava, e não atravessava. Sem ela,
+   * a pessoa vê o histórico encolher e não tem como auditar o que ficou no
+   * lugar. Tem tipo próprio porque afirmar que a pessoa escreveu isso seria
+   * outra mentira.
+   */
+  | { readonly type: 'compaction.checkpoint'; readonly seq: number; readonly at: number; readonly id: string; readonly text: string; readonly truncated: boolean }
 
 export interface AssistantConversationSnapshot {
   readonly conversation_id: string
   readonly cursor: number
   readonly events: readonly AssistantPublicEvent[]
   readonly truncated: boolean
+}
+
+/**
+ * A compactação de verdade do Harness. Antes disto, o botão "Organizar
+ * conversa agora" mandava a STRING `/compact` como mensagem para o modelo, e o
+ * controlador de sessão não faz parsing de comando: a conversa recebia um texto
+ * estranho e nada era organizado.
+ */
+export interface AssistantCompactionPort {
+  /**
+   * @param sessionId - a conversa a organizar.
+   * @param signal - cancelamento desta requisição.
+   * @returns quanto foi organizado, ou `null` quando não havia histórico útil.
+   */
+  compactNow(sessionId: SessionId, signal: AbortSignal): Promise<{ readonly items: number; readonly tokens: number } | null>
 }
 
 export interface AssistantConversationControllerPort {
@@ -51,6 +76,12 @@ export interface AssistantConversationServiceOptions {
   readonly tenancy: Pick<StudioTenancyService, 'authorizationFor'>
   readonly launcher: Pick<AssistantSessionLauncher, 'launchTenantConversation'>
   readonly sessions: AssistantConversationControllerPort
+  /**
+   * Resolvido preguiçosamente de propósito: se o plugin de compactação subir
+   * DEPOIS da interface, capturar o serviço no `apply` deixaria o botão morto
+   * para sempre, sem log que apontasse a causa.
+   */
+  readonly compaction?: () => AssistantCompactionPort | undefined
   readonly createRequestId?: () => string
 }
 
@@ -119,6 +150,35 @@ export class AssistantConversationService {
     }
   }
 
+  /**
+   * Organiza a conversa chamando a compactação real do Harness.
+   * @param identitySession - a sessão de quem pediu.
+   * @param conversationId - a conversa.
+   * @param signal - cancelamento da requisição.
+   * @returns `organized: false` quando não havia histórico útil - o que não é
+   * erro, e a tela precisa saber para não anunciar um trabalho que não houve.
+   */
+  async compact(
+    identitySession: SessionRecord,
+    conversationId: string,
+    signal: AbortSignal,
+  ): Promise<{ readonly accepted: true; readonly organized: boolean; readonly items?: number; readonly tokens?: number }> {
+    this.#assertOwned(identitySession, conversationId, 'project.write')
+    const compaction = this.options.compaction?.()
+    if (compaction === undefined) {
+      throw new AssistantConversationError('SESSION_UNAVAILABLE', t('assistant.compactUnavailable'))
+    }
+    let result: { readonly items: number; readonly tokens: number } | null
+    try {
+      result = await compaction.compactNow(conversationId as SessionId, signal)
+    } catch {
+      // Toda falha da compactação preserva o original; a frase diz isso.
+      throw new AssistantConversationError('SESSION_UNAVAILABLE', t('assistant.compactUnavailable'))
+    }
+    if (result === null) return { accepted: true, organized: false }
+    return { accepted: true, organized: true, items: result.items, tokens: result.tokens }
+  }
+
   cancel(identitySession: SessionRecord, conversationId: string): { readonly accepted: true } {
     this.#assertOwned(identitySession, conversationId, 'project.write')
     try {
@@ -181,6 +241,13 @@ export function sanitizeAssistantEvent(value: unknown): AssistantPublicEvent | u
 
   if (type === 'user/message') {
     const source = objectValue(data.source)
+    // O marcador do checkpoint é o contrato do upstream
+    // (`compactCheckpointSource`): kind `plugin`, plugin `compact`.
+    if (source?.kind === 'plugin' && source.plugin === 'compact') {
+      const checkpoint = publicMessage(data)
+      if (checkpoint === undefined) return undefined
+      return { type: 'compaction.checkpoint', seq, at, ...checkpoint }
+    }
     if (source?.kind !== 'user') return undefined
     const message = publicMessage(data)
     if (message === undefined) return undefined

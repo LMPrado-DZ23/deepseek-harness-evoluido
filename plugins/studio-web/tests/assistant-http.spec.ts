@@ -32,6 +32,7 @@ async function fixture(deadlineMs?: number) {
     snapshot: vi.fn(async () => ({ conversation_id: 'conversa-1', cursor: 2, events: [], truncated: false })),
     send: vi.fn(async () => ({ accepted: true as const, request_id: 'req-1' })),
     cancel: vi.fn(() => ({ accepted: true as const })),
+    compact: vi.fn(() => Promise.resolve({ accepted: true as const, organized: true, items: 4, tokens: 900 })),
   }
   const allowedHosts: string[] = []
   const allowedOrigins: string[] = []
@@ -224,6 +225,24 @@ describe('superfície HTTP da conversa do assistente', () => {
       .toEqual({ kind: 'method-not-allowed' })
     expect(routeAssistantConversation('GET', `${ASSISTANT_CONVERSATION_PREFIX}/c1/messages`))
       .toEqual({ kind: 'method-not-allowed' })
+  })
+
+  it('organizar a conversa é uma rota própria, só por POST, e passa a sessão do servidor', async () => {
+    // Antes, "Organizar conversa agora" ia por /messages como se fosse texto da
+    // pessoa. Sendo rota própria, ela é autenticada, tem CSRF e não pode ser
+    // confundida com uma mensagem.
+    expect(routeAssistantConversation('POST', `${ASSISTANT_CONVERSATION_PREFIX}/c1/compact`))
+      .toEqual({ kind: 'compact', conversationId: 'c1' })
+    expect(routeAssistantConversation('GET', `${ASSISTANT_CONVERSATION_PREFIX}/c1/compact`))
+      .toEqual({ kind: 'method-not-allowed' })
+
+    const f = await fixture()
+    const organized = await f.request(`${ASSISTANT_CONVERSATION_PREFIX}/conversa-1/compact`, { method: 'POST' })
+    expect(organized.status).toBe(202)
+    expect(await organized.json()).toEqual({ accepted: true, organized: true, items: 4, tokens: 900 })
+    const identitySession = await f.identity.authenticate.mock.results[0]!.value as { session_id: string }
+    expect((f.conversations.compact.mock.calls[0] as unknown as readonly unknown[])[0]).toEqual(identitySession)
+    expect(f.conversations.send).not.toHaveBeenCalled()
   })
 
   it('responde 503 explicado quando a conversa não está configurada nesta instalação', async () => {

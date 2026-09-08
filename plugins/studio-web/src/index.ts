@@ -205,6 +205,24 @@ export async function apply(ctx: Context, config: StudioWebConfig = {}): Promise
     tenancy: ctx.studioTenancy.service,
     launcher: assistantSessions,
     sessions: ctx.sessionController,
+    // Resolvido a cada uso, e não capturado aqui: `compaction` e `agents` podem
+    // montar depois desta interface, e uma foto tirada no `apply` deixaria o
+    // botão "Organizar conversa agora" morto para sempre. Também não entram em
+    // `inject`: a interface do Studio não pode deixar de subir porque um
+    // recurso opcional do Harness não está no perfil.
+    compaction: () => {
+      const compaction = ctx.get('compaction')
+      const agents = ctx.get('agents')
+      if (compaction === undefined || agents === undefined) return undefined
+      return {
+        async compactNow(sessionId, signal) {
+          const agent = agents.get(sessionId)
+          if (agent === undefined) return null
+          const result = await compaction.compactNow(agent, signal)
+          return result === null ? null : { items: result.shadowedSeqs.length, tokens: result.shadowedTokenCount }
+        },
+      }
+    },
   })
   ctx.effect(() => ctx.webServer.register({
     kind: 'prefix', path: '/studio',

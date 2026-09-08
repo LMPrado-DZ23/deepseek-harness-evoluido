@@ -24,6 +24,7 @@ export type AssistantConversationRoute =
   | { readonly kind: 'snapshot'; readonly conversationId: string }
   | { readonly kind: 'send'; readonly conversationId: string }
   | { readonly kind: 'cancel'; readonly conversationId: string }
+  | { readonly kind: 'compact'; readonly conversationId: string }
   | { readonly kind: 'method-not-allowed' }
   | { readonly kind: 'not-found' }
 
@@ -57,12 +58,13 @@ export function routeAssistantConversation(
   if (action === 'events') return method === 'GET' ? { kind: 'snapshot', conversationId } : { kind: 'method-not-allowed' }
   if (action === 'messages') return method === 'POST' ? { kind: 'send', conversationId } : { kind: 'method-not-allowed' }
   if (action === 'cancel') return method === 'POST' ? { kind: 'cancel', conversationId } : { kind: 'method-not-allowed' }
+  if (action === 'compact') return method === 'POST' ? { kind: 'compact', conversationId } : { kind: 'method-not-allowed' }
   return { kind: 'not-found' }
 }
 
 export interface AssistantConversationHttpConfig {
   readonly identity: StudioIdentityService
-  readonly conversations?: Pick<AssistantConversationService, 'open' | 'snapshot' | 'send' | 'cancel'>
+  readonly conversations?: Pick<AssistantConversationService, 'open' | 'snapshot' | 'send' | 'cancel' | 'compact'>
   /** Deadline per request. Injectable so the abort itself is provable by test. */
   readonly deadlineMs?: number
 }
@@ -100,6 +102,9 @@ export async function handleAssistantConversation(
     if (route.kind === 'send') {
       const text = readMessageText(await readJsonBody(request))
       return { status: 202, body: await conversations.send(identitySession, route.conversationId, text, controller.signal) }
+    }
+    if (route.kind === 'compact') {
+      return { status: 202, body: await conversations.compact(identitySession, route.conversationId, controller.signal) }
     }
     return { status: 202, body: conversations.cancel(identitySession, route.conversationId) }
   } finally {

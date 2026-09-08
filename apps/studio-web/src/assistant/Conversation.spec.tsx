@@ -2,7 +2,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
-import { Conversation, CompactionBand, conversationReducer } from './Conversation'
+import { Conversation, CompactionBand, ConversationItem, conversationReducer } from './Conversation'
 import { emptyConversation } from './conversationState'
 
 const port = { fetch: async () => Response.json({ conversation_id: 'c1', cursor: 0, events: [], truncated: false }) }
@@ -92,5 +92,34 @@ describe('tela da conversa', () => {
       },
     })
     expect(merged.events).toHaveLength(1)
+  })
+})
+
+describe('M91: o resumo que substituiu o histórico', () => {
+  const checkpoint = {
+    type: 'compaction.checkpoint' as const, seq: 9, at: 9,
+    id: 'chk-1', text: 'Resumo do que foi conversado até aqui.', truncated: false,
+  }
+
+  it('aparece no registro, identificado como resumo e não como fala da pessoa', () => {
+    // Antes ele nem chegava ao navegador: a projeção do servidor descartava a
+    // mensagem do plugin, e a pessoa via o histórico encolher sem ver o que
+    // ficou no lugar.
+    const html = renderToStaticMarkup(createElement(ConversationItem, { event: checkpoint }))
+    expect(html).toContain('Resumo do histórico organizado')
+    expect(html).toContain('Resumo do que foi conversado até aqui.')
+    expect(html).toContain('Nada foi apagado do registro da sessão')
+    // Não pode ser atribuído a quem não escreveu.
+    expect(html).not.toContain('Você')
+  })
+
+  it('vem fechado, para não roubar a leitura da conversa', () => {
+    const html = renderToStaticMarkup(createElement(ConversationItem, { event: checkpoint }))
+    expect(html).toContain('<details')
+    expect(html).not.toContain('<details open')
+  })
+
+  it('isola a direção do texto do resumo', () => {
+    expect(renderToStaticMarkup(createElement(ConversationItem, { event: checkpoint }))).toContain('dir="auto"')
   })
 })

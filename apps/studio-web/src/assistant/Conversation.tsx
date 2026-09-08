@@ -6,6 +6,7 @@ import {
   cancelConversationTurn,
   readConversation,
   sendConversationMessage,
+  organizeConversation,
   type ConversationEvent,
   type ConversationPort,
 } from './conversationApi'
@@ -63,6 +64,7 @@ export function Conversation({ conversationId, port, getCsrf, pollMs = CONVERSAT
   const error = actionError ?? readError
   const [busy, setBusy] = useState(false)
   const [attempt, setAttempt] = useState(0)
+  const [nothingToOrganize, setNothingToOrganize] = useState(false)
   const draftRef = useRef<HTMLTextAreaElement | null>(null)
 
   useEffect(() => { dispatch({ kind: 'opened', conversationId }) }, [conversationId])
@@ -123,10 +125,14 @@ export function Conversation({ conversationId, port, getCsrf, pollMs = CONVERSAT
   const compactNow = useCallback(async () => {
     if (organizing) return
     try {
-      const accepted = await sendConversationMessage(conversationId, '/compact', port, getCsrf)
-      dispatch({ kind: 'queued', requestId: accepted.request_id, text: '/compact' })
+      // A compactação de verdade, e não a string "/compact" enfiada na conversa
+      // como se a pessoa a tivesse escrito.
+      const outcome = await organizeConversation(conversationId, port, getCsrf)
+      setNothingToOrganize(!outcome.organized)
       setActionError(null)
+      setAttempt(value => value + 1)
     } catch (reason) {
+      setNothingToOrganize(false)
       setActionError(describe(reason))
     }
   }, [conversationId, getCsrf, organizing, port])
@@ -211,6 +217,9 @@ export function Conversation({ conversationId, port, getCsrf, pollMs = CONVERSAT
         <button type="button" className="secondary" disabled={organizing} onClick={() => { void compactNow() }}>
           {copy.compactNow}
         </button>
+        {nothingToOrganize
+          ? <p className="context-note" role="status">{copy.compactionNothingToOrganize}</p>
+          : null}
       </details>
     </form>
   </section>
@@ -246,7 +255,7 @@ export function CompactionBand({ view }: { readonly view: CompactionView }) {
   </section>
 }
 
-function ConversationItem({ event }: { readonly event: ConversationEvent }) {
+export function ConversationItem({ event }: { readonly event: ConversationEvent }) {
   if (event.type === 'message.user') {
     return <><span className="who">{copy.you}</span><p>{event.text}</p></>
   }
@@ -256,6 +265,15 @@ function ConversationItem({ event }: { readonly event: ConversationEvent }) {
       <p>{event.text}</p>
       {event.interrupted ? <span className="context-note">{copy.interrupted}</span> : null}
     </>
+  }
+  if (event.type === 'compaction.checkpoint') {
+    // Fechado por padrão: ele substitui muitas mensagens e roubaria a leitura
+    // da conversa. Aberto por escolha, porque auditar precisa ser possível.
+    return <details className="compaction-checkpoint">
+      <summary>{copy.compactionCheckpointTitle} — {copy.compactionCheckpointShow}</summary>
+      <p className="context-note">{copy.compactionCheckpointHelp}</p>
+      <p dir="auto">{event.text}</p>
+    </details>
   }
   if (event.type === 'tool.state') {
     const label = event.state === 'running' ? copy.toolRunning : event.state === 'succeeded' ? copy.toolSucceeded : copy.toolFailed

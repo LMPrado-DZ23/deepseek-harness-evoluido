@@ -11,6 +11,7 @@ export type ConversationEvent =
   | { readonly type: 'approval.requested'; readonly seq: number; readonly at: number; readonly request_id: string; readonly tool_label: string; readonly explanation: string }
   | { readonly type: 'approval.resolved'; readonly seq: number; readonly at: number; readonly request_id: string; readonly outcome: 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable' }
   | { readonly type: 'compaction.state'; readonly seq: number; readonly at: number; readonly compaction_id: string; readonly state: CompactionState; readonly items?: number; readonly tokens?: number }
+  | { readonly type: 'compaction.checkpoint'; readonly seq: number; readonly at: number; readonly id: string; readonly text: string; readonly truncated: boolean }
 
 /**
  * The four states the server projects from the Harness journal. There is no
@@ -99,6 +100,29 @@ export async function sendConversationMessage(
   return { request_id: body.request_id }
 }
 
+/**
+ * Pede a compactação real ao servidor.
+ *
+ * Rota própria de propósito: mandar a string `/compact` por `/messages` era
+ * escrever um texto estranho na conversa da pessoa e não organizar nada.
+ * @returns se algo foi organizado, e quanto.
+ */
+export async function organizeConversation(
+  conversationId: string,
+  port: ConversationPort = defaultPort,
+  getCsrf: () => Promise<string> = csrfToken,
+): Promise<{ readonly organized: boolean }> {
+  const body = await mutate(
+    port, getCsrf,
+    `${CONVERSATION_ENDPOINT}/${encodeURIComponent(conversationId)}/compact`,
+    undefined,
+  )
+  if (!isRecord(body) || typeof body.organized !== 'boolean') {
+    throw new ConversationRequestError(202, copy.invalidServerResponse, false)
+  }
+  return { organized: body.organized }
+}
+
 export async function cancelConversationTurn(
   conversationId: string,
   port: ConversationPort = defaultPort,
@@ -156,6 +180,7 @@ export function isConversationEvent(value: unknown): value is ConversationEvent 
   if (!isRecord(value) || typeof value.seq !== 'number' || typeof value.at !== 'number') return false
   if (value.type === 'message.user') return typeof value.id === 'string' && typeof value.text === 'string'
   if (value.type === 'message.assistant') return typeof value.id === 'string' && typeof value.text === 'string'
+  if (value.type === 'compaction.checkpoint') return typeof value.id === 'string' && typeof value.text === 'string'
   if (value.type === 'turn.state') return value.state === 'working' || value.state === 'idle'
   if (value.type === 'tool.state') {
     return typeof value.call_id === 'string' && typeof value.label === 'string'

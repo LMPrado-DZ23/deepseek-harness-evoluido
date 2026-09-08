@@ -23,6 +23,7 @@ export declare const routeHealthRecordSchema: z.ZodObject<{
     input_tokens: z.ZodNumber;
     output_tokens: z.ZodNumber;
     estimated_cost_usd: z.ZodNumber;
+    unpriced_requests: z.ZodOptional<z.ZodNumber>;
     last_failure: z.ZodNullable<z.ZodString>;
     updated_at: z.ZodISODateTime;
 }, z.core.$strict>;
@@ -66,6 +67,7 @@ export declare const studioRouteHealthDomainSpec: {
             estimated_cost_usd: number;
             last_failure: string | null;
             updated_at: string;
+            unpriced_requests?: number | undefined;
         }>;
         events: import("@deepseek-ai/dsh-storage-domain").DomainTableSpec<RouteEventKey, {
             event_id: string;

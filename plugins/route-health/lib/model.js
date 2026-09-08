@@ -13,6 +13,18 @@ export const routeHealthRecordSchema = z.object({
     input_tokens: z.number().int().nonnegative(),
     output_tokens: z.number().int().nonnegative(),
     estimated_cost_usd: z.number().nonnegative(),
+    /**
+     * Quantas requisições entraram na conta SEM preço configurado.
+     *
+     * Sem este campo, `estimated_cost_usd` somava 0 para elas e o resultado era
+     * apresentado como custo medido: "não sei o preço" virava "custou zero".
+     *
+     * É opcional de propósito. Torná-lo obrigatório exigiria subir a versão do
+     * domínio, e `open()` falha com `version-mismatch` em qualquer instalação que
+     * já rodou - não existe passo de migração. Registro antigo, sem o campo,
+     * significa zero não precificadas.
+     */
+    unpriced_requests: z.number().int().nonnegative().optional(),
     last_failure: z.string().nullable(),
     updated_at: z.iso.datetime(),
 }).strict();

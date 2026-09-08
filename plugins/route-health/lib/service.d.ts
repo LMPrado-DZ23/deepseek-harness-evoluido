@@ -49,4 +49,19 @@ export declare class StudioRouteHealthService {
     private auditSwitch;
 }
 export declare const ROUTE_FAILURE_MESSAGE = "A conex\u00E3o com a intelig\u00EAncia artificial falhou. Nada foi aplicado; tente novamente ou escolha outra rota.";
+/**
+ * O que se pode honestamente dizer sobre o custo de uma rota.
+ *
+ * `UNKNOWN`: nenhuma requisição tinha preço - o número somado é zero porque
+ * ninguém sabia, não porque nada foi gasto.
+ * `PARTIAL`: parte teve preço; o valor é um piso, não o total.
+ * `MEASURED`: toda requisição contada tinha preço configurado.
+ */
+export type RouteCostState = 'MEASURED' | 'PARTIAL' | 'UNKNOWN';
+/**
+ * Classifica o custo de uma rota pelo que realmente se sabe.
+ * @param record - o registro da rota.
+ * @returns o estado do custo, para quem for apresentar o número.
+ */
+export declare function routeCostState(record: Pick<RouteHealthRecord, 'requests' | 'unpriced_requests'>): RouteCostState;
 //# sourceMappingURL=service.d.ts.map
