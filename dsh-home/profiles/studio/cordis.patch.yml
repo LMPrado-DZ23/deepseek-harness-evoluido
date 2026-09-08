@@ -248,6 +248,24 @@
           proxySocketRoot: !!js process.env.DZ23_PREVIEW_PROXY_SOCKET_ROOT ?? '/run/dz23-preview-proxies'
           studioOrigin: !!js process.env.DZ23_PUBLIC_ORIGIN ?? 'http://studio.dz23.localhost:8080'
           edgeSecretRef: DZ23_EDGE_SECRET
+    # Staging: a pasta onde a versao de teste do aplicativo e publicada.
+    #
+    # O destino e LOCAL na v1.0, e isso e uma decisao: um destino em rede exige
+    # credencial, dominio e autorizacao que este produto nao tem, e um provedor
+    # que fingisse publicar seria pior que a ausencia dele. O que este publica e
+    # real e conferivel - os arquivos ficam la, imutaveis por geracao, com
+    # recibo, e cada arquivo e conferido contra o manifesto atestado ANTES de
+    # ser copiado.
+    #
+    # A raiz fica dentro de `$DSH_HOME`, que ja e onde o produto escreve tudo.
+    # Exigir configuracao aqui deixaria a jornada quebrada por padrao sem ganho
+    # de seguranca nenhum.
+    - id: dz23-studio-staging
+      name: '@dz23-studio/staging'
+      config:
+        root: !!js >-
+          process.env.DZ23_STUDIO_STAGING_ROOT ?? `${process.env.DSH_HOME ?? '.'}/staging`
+        targetRef: !!js process.env.DZ23_STUDIO_STAGING_TARGET ?? 'dz23-target:staging-local'
     - id: dz23-studio-integration-hub
       name: '@dz23-studio/integration-hub'
       config:

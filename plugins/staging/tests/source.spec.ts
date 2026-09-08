@@ -55,7 +55,7 @@ describe('escolher a execução', () => {
 
   it('projeto sem nenhuma execução aprovada recusa', () => {
     expect(() => selectVerifiedRun([run({ state: 'FAILED' })], 'project-1', owner))
-      .toThrow(/nenhuma execução verificada/u)
+      .toThrow(/no verified run/u)
     expect(() => selectVerifiedRun([], 'project-1', owner)).toThrow(StagingSourceError)
     expect(() => selectVerifiedRun([run()], 'outro-projeto', owner)).toThrow(StagingSourceError)
   })

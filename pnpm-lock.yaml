@@ -151,6 +151,9 @@ importers:
       '@dz23-studio/route-health':
         specifier: workspace:*
         version: link:../../../plugins/route-health
+      '@dz23-studio/staging':
+        specifier: workspace:*
+        version: link:../../../plugins/staging
       '@dz23-studio/storage-postgres':
         specifier: workspace:*
         version: link:../../../plugins/storage-postgres
@@ -543,6 +546,9 @@ importers:
 
   plugins/staging:
     dependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:*
+        version: link:../../third_party/deepseek-harness/vendor/cordis
       '@deepseek-ai/dsh-storage-domain':
         specifier: workspace:*
         version: link:../../third_party/deepseek-harness/packages/storage/storage-domain
@@ -552,6 +558,9 @@ importers:
       '@dz23-studio/policy':
         specifier: workspace:*
         version: link:../policy
+      '@dz23-studio/prompt-to-app':
+        specifier: workspace:*
+        version: link:../prompt-to-app
       zod:
         specifier: 4.4.3
         version: 4.4.3
@@ -18950,6 +18959,7 @@ snapshots:
       '@dz23-studio/preview': link:plugins/preview
       '@dz23-studio/prompt-to-app': link:plugins/prompt-to-app
       '@dz23-studio/route-health': link:plugins/route-health
+      '@dz23-studio/staging': link:plugins/staging
       '@dz23-studio/storage-postgres': link:plugins/storage-postgres
       '@dz23-studio/tenancy': link:plugins/tenancy
       '@dz23-studio/web': link:plugins/studio-web

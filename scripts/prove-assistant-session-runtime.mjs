@@ -217,6 +217,15 @@ try {
   assert.equal(anonymousTeams.status, 401, await anonymousTeams.clone().text())
   const teamPanel = { list: teamsResponse.status, foreign: foreignTeam.status, anonymous: anonymousTeams.status }
 
+  // D-02: o staging montado no perfil REAL. Sem esta afirmação o pacote pode
+  // existir inteiro, com testes verdes, e não estar ligado a lugar nenhum -
+  // que foi exatamente o estado dele por várias versões.
+  const staging = booted.ctx.get('studioStaging')
+  assert.equal(staging?.state, 'MOUNTED', 'O staging não montou no perfil.')
+  assert.match(String(staging?.targetRef), /^dz23-target:/u)
+  const stagingState = { state: staging.state, target: staging.targetRef }
+
+
   const approvals = []
   approvalOff = booted.ctx.on('approval/request', (request) => {
     approvals.push({ toolName: request.toolName, callId: String(request.callId) })
@@ -307,6 +316,7 @@ try {
     telemetrySharing,
     bundledSkill,
     teamPanel,
+    staging: stagingState,
     conversationTurn: realLocalModel ? 'PASS_WITH_REAL_LOCAL_MODEL' : 'PASS_WITH_DETERMINISTIC_PROVIDER',
     provider: realLocalModel ? `ollama/${localModel}` : 'studio-fake/studio-deterministic',
     approval: {

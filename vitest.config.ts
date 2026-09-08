@@ -23,6 +23,7 @@ export default defineConfig({
       '@dz23-studio/route-health': fileURLToPath(new URL('./plugins/route-health/src/index.ts', import.meta.url)),
       '@dz23-studio/runtime-governor': fileURLToPath(new URL('./plugins/runtime-governor/src/index.ts', import.meta.url)),
       '@dz23-studio/storage-postgres': fileURLToPath(new URL('./plugins/storage-postgres/src/index.ts', import.meta.url)),
+      '@dz23-studio/staging': fileURLToPath(new URL('./plugins/staging/src/index.ts', import.meta.url)),
       '@dz23-studio/tenancy': fileURLToPath(new URL('./plugins/tenancy/src/index.ts', import.meta.url)),
     },
   },
@@ -45,6 +46,10 @@ export default defineConfig({
         // de verdade em `plugins/mcp-client/tests`.
         'plugins/mcp-client/src/index.ts',
         'plugins/preview/src/index.ts',
+        // Composição: `apply` liga o journal, a origem e o provedor local, e é
+        // exercida pelo perfil real. A lógica está coberta em
+        // `plugins/staging/tests`.
+        'plugins/staging/src/plugin.ts',
         'plugins/route-health/src/index.ts',
       ],
       reporter: ['text', 'json-summary'],

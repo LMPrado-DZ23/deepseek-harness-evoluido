@@ -12,5 +12,19 @@
     "rollbackTarget": "A versão escolhida não é uma publicação de staging concluída.",
     "nothingToRollback": "Não existe outra publicação ativa para reverter.",
     "cancelled": "A operação de staging foi cancelada antes do efeito externo."
+  },
+  "http": {
+    "auditableSession": "Esta operação exige uma sessão auditável.",
+    "jsonRequired": "O corpo do pedido precisa ser JSON.",
+    "requestTooLarge": "O corpo do pedido é grande demais.",
+    "operationFailed": "Não foi possível concluir a operação de staging.",
+    "notConfigured": "O staging ainda não está configurado nesta instalação. Peça a quem administra o Studio para escolher a pasta de publicação."
+  },
+  "source": {
+    "noVerifiedRun": "Este projeto ainda não tem uma versão verificada para publicar. Gere e verifique o aplicativo antes.",
+    "runNotVerified": "A execução escolhida não foi aprovada na verificação.",
+    "attestationsMissing": "Esta execução é anterior às atestações do artefato. Gere de novo para publicar.",
+    "templateIntegrityFailed": "A integridade do modelo desta execução não foi verificada. Não é seguro publicar.",
+    "artifactMissing": "Esta execução não exportou um aplicativo para publicar."
   }
 }

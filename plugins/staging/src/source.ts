@@ -36,9 +36,23 @@ export interface VerifiedRunView {
 }
 
 export interface VerifiedRunSource {
-  runs(): readonly VerifiedRunView[]
+  /**
+   * As execuções de um projeto, JÁ no escopo de quem pergunta.
+   *
+   * O escopo é aplicado por quem lê, e conferido de novo aqui. As duas coisas
+   * juntas de propósito: se um dia o leitor deixar de filtrar, a ponte continua
+   * recusando; se a ponte deixar de filtrar, o leitor continua recusando.
+   */
+  runs(actor: StagingActor, projectId: string): readonly VerifiedRunView[]
 }
 
+/**
+ * As mensagens desta classe são DIAGNÓSTICO, e ficam em inglês de propósito.
+ *
+ * O que a pessoa lê vem do catálogo, pelo `code`, na camada HTTP. Duas frases
+ * para a mesma recusa - uma aqui e uma no catálogo - acabariam divergindo, e a
+ * que a pessoa lê seria a que ninguém revisou.
+ */
 export class StagingSourceError extends Error {
   constructor(readonly code:
     | 'NO_VERIFIED_RUN'
@@ -90,14 +104,14 @@ export function selectVerifiedRun(
     // Uma execução nomeada que não existe NESTE escopo é "não encontrada", e
     // não "escolho outra": publicar algo diferente do que a pessoa nomeou seria
     // o pior desfecho possível numa operação com efeito externo.
-    if (named === undefined) throw new StagingSourceError('NO_VERIFIED_RUN', `execução ${runId} não existe neste projeto`)
+    if (named === undefined) throw new StagingSourceError('NO_VERIFIED_RUN', `run ${runId} is not in this project scope`)
     return named
   }
   const passed = owned
     .filter(run => run.state === 'PASSED')
     .sort((left, right) => Date.parse(right.finished_at ?? '') - Date.parse(left.finished_at ?? ''))
   const latest = passed[0]
-  if (latest === undefined) throw new StagingSourceError('NO_VERIFIED_RUN', 'nenhuma execução verificada neste projeto')
+  if (latest === undefined) throw new StagingSourceError('NO_VERIFIED_RUN', 'no verified run in this project')
   return latest
 }
 
@@ -113,20 +127,20 @@ export function selectVerifiedRun(
  */
 export function artifactFromRun(run: VerifiedRunView): StagingArtifact {
   if (run.state !== 'PASSED') {
-    throw new StagingSourceError('RUN_NOT_VERIFIED', `a execução ${run.run_id} não está aprovada`)
+    throw new StagingSourceError('RUN_NOT_VERIFIED', `run ${run.run_id} is not approved`)
   }
   if (run.artifact_sha256 === null) {
-    throw new StagingSourceError('ARTIFACT_MISSING', `a execução ${run.run_id} não exportou artefato`)
+    throw new StagingSourceError('ARTIFACT_MISSING', `run ${run.run_id} exported no artifact`)
   }
   // A integridade do template é conferida aqui DE NOVO, e não só na execução:
   // o que vai para staging tem efeito fora do Studio, e um registro antigo -
   // gravado antes de o campo existir - não pode passar por "conferido".
   if (run.template_integrity !== 'VERIFIED') {
-    throw new StagingSourceError('TEMPLATE_INTEGRITY_FAILED', `a integridade do template da execução ${run.run_id} não foi verificada`)
+    throw new StagingSourceError('TEMPLATE_INTEGRITY_FAILED', `template integrity of run ${run.run_id} was not verified`)
   }
   const attestations = run.attestations
   if (attestations === undefined) {
-    throw new StagingSourceError('ATTESTATIONS_MISSING', `a execução ${run.run_id} é anterior às atestações`)
+    throw new StagingSourceError('ATTESTATIONS_MISSING', `run ${run.run_id} predates artifact attestations`)
   }
   return stagingArtifactSchema.parse({
     project_id: run.project_id,
@@ -150,7 +164,7 @@ export function artifactFromRun(run: VerifiedRunView): StagingArtifact {
 export function verifiedRunSourcePort(source: VerifiedRunSource): StagingSourcePort {
   return {
     async verifiedArtifact(actor: StagingActor, projectId: string, runId?: string): Promise<StagingArtifact> {
-      const run = selectVerifiedRun(source.runs(), projectId, { orgId: actor.orgId, tenantId: actor.tenantId }, runId)
+      const run = selectVerifiedRun(source.runs(actor, projectId), projectId, { orgId: actor.orgId, tenantId: actor.tenantId }, runId)
       return await Promise.resolve(artifactFromRun(run))
     },
   }

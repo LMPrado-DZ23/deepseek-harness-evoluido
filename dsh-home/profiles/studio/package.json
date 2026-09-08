@@ -23,6 +23,7 @@
     "@dz23-studio/preview": "workspace:*",
     "@dz23-studio/prompt-to-app": "workspace:*",
     "@dz23-studio/route-health": "workspace:*",
+    "@dz23-studio/staging": "workspace:*",
     "@dz23-studio/storage-postgres": "workspace:*",
     "@dz23-studio/tenancy": "workspace:*",
     "@dz23-studio/web": "workspace:*"
