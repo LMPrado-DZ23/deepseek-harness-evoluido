@@ -72,10 +72,13 @@ export interface AssistantBridgeDependencies {
     readonly studioAgents: StudioAgentsRuntime;
     readonly studioAgentTeams?: StudioAgentTeamRuntime;
     /**
-     * Autoridade de confirmação (M90-A). Ausente, toda operação T3 falha fechada:
-     * o bridge nunca se autoconcede o nível sensível.
+     * Autoridade de confirmação (M90-A), resolvida A CADA USO. Capturar o
+     * serviço na montagem criava uma corrida silenciosa: se a autoridade
+     * subisse depois deste plugin, toda operação T3 recusava com
+     * NOT_CONFIGURED para sempre, sem nenhum sinal. Ausente no momento do uso,
+     * a operação falha fechada - o bridge nunca se autoconcede o nível.
      */
-    readonly approvalAuthority?: AssistantApprovalPort;
+    approvalAuthority?(): AssistantApprovalPort | undefined;
     killJob(jobId: AssistantJobId, owner: AssistantAgent, reason: string): 'requested' | 'already-finished';
 }
 export declare class StudioAssistantBridge {

@@ -108,19 +108,31 @@ describe('@dz23-studio/agents composition', { timeout: 30_000 }, () => {
     expect(ctx.subagents.start).toHaveBeenCalledWith('codex', expect.objectContaining({
       parent: expect.objectContaining({ session: expect.objectContaining({ header: expect.objectContaining({ cwd: expect.stringContaining(worktreeRoot) }) }) }),
     }))
-    // Encerramento: os descartes rodam na ordem inversa do registro, e o
-    // encerramento ativo TEM de acontecer antes de fechar o armazenamento -
-    // do contrário o que ele grava não teria onde cair.
-    for (const [label, dispose] of [...disposers].reverse()) {
-      disposalOrder.push(label)
-      await dispose()
-    }
-    expect(disposalOrder).toContain('studio-agents.shutdown')
-    expect(disposalOrder.indexOf('studio-agents.shutdown'))
-      .toBeLessThan(disposalOrder.indexOf('studio-agents.domainClose'))
+    // Encerramento como o runtime realmente faz: o cordis dispara TODOS os
+    // disposers com `Promise.all`, concorrentemente. Sequencializar aqui
+    // provaria uma ordem que o runtime não garante - foi assim que a versão
+    // anterior deste teste passou sobre um encerramento que nunca acontecia
+    // antes do fechamento do armazenamento.
+    let closedAt: number | undefined
+    let shutdownFinishedAt: number | undefined
+    let step = 0
+    for (const close of closes) close.mockImplementation(() => { closedAt ??= step += 1; return Promise.resolve() })
+    const observedService = runtime.service
+    const realShutdown = observedService.shutdown.bind(observedService)
+    vi.spyOn(observedService, 'shutdown').mockImplementation(async (deadline?: number) => {
+      const outcome = await realShutdown(deadline)
+      shutdownFinishedAt = step += 1
+      return outcome
+    })
+    await Promise.all(disposers.map(([, dispose]) => dispose()))
+    expect(shutdownFinishedAt).toBeDefined()
+    expect(closedAt).toBeDefined()
+    // O encerramento TERMINA antes de a primeira porta do armazenamento fechar.
+    expect(shutdownFinishedAt!).toBeLessThan(closedAt!)
     expect(closes[0]).toHaveBeenCalledOnce()
     expect(closes[1]).toHaveBeenCalledOnce()
     // Nada ficou em voo, então o encerramento não tem por que reclamar.
     expect(ctx.logger.warn).not.toHaveBeenCalled()
+    expect(disposalOrder).toEqual([])
   })
 })

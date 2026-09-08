@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { t } from './i18n.js'
 
 /**
@@ -51,6 +51,7 @@ export interface AssistantApprovalPort {
     readonly fingerprint: string
     readonly tier: 'T3'
     readonly request_id: string
+    readonly summary: string
   }): Promise<{ readonly approval_id: string, readonly state: string }>
   consume(input: {
     readonly actor: AssistantApprovalPrincipal
@@ -79,6 +80,27 @@ export class AssistantApprovalRequiredError extends Error {
 
 /** A pessoa recusou. Recusa nao roda de novo com outro identificador. */
 export class AssistantApprovalDeniedError extends Error {}
+
+/** Limite do resumo, igual ao da autoridade: a frase e cortada aqui, nao la. */
+export const APPROVAL_SUMMARY_LIMIT = 300
+
+/**
+ * Uma frase unica, curta e sem caracteres de controle. Parte do conteudo vem
+ * do modelo, entao ela e higienizada aqui - e e ela que a pessoa le antes de
+ * decidir. Ela entra na impressao digital, logo o texto exibido e exatamente o
+ * texto que a confirmacao tranca.
+ * @param parts - pedacos ja em portugues, na ordem em que devem ser lidos.
+ * @returns a frase pronta para o pedido de confirmacao.
+ */
+export function approvalSummary(parts: readonly string[]): string {
+  const text = parts
+    .map(part => part.replace(/[\u0000-\u001f\u007f]/gu, ' ').replace(/\s+/gu, ' ').trim())
+    .filter(part => part !== '')
+    .join(' ')
+  if (text === '') return t('summary.missing')
+  if (text.length <= APPROVAL_SUMMARY_LIMIT) return text
+  return `${text.slice(0, APPROVAL_SUMMARY_LIMIT - 1)}\u2026`
+}
 
 /** Identidade do repositorio dentro do pedido, legivel quando o id ja e legivel. */
 export function approvalSubjectId(workspaceId: string, repositoryPath: string): string {
@@ -110,6 +132,8 @@ export async function requireTier3Approval(port: AssistantApprovalPort, input: {
   readonly action: AssistantApprovalAction
   readonly subjectId: string
   readonly fingerprint: string
+  /** A frase que a pessoa vai ler antes de decidir. */
+  readonly summary: string
 }): Promise<{ readonly approvedBy: string }> {
   for (let attempt = 0; attempt < MAX_APPROVAL_ATTEMPTS; attempt += 1) {
     const record = await port.request({
@@ -122,6 +146,7 @@ export async function requireTier3Approval(port: AssistantApprovalPort, input: {
       fingerprint: input.fingerprint,
       tier: 'T3',
       request_id: `${input.fingerprint}.${String(attempt)}`,
+      summary: input.summary,
     })
     if (record.state === 'DENIED') {
       throw new AssistantApprovalDeniedError(t('errors.approvalDenied'))
@@ -134,7 +159,12 @@ export async function requireTier3Approval(port: AssistantApprovalPort, input: {
     const receipt = await port.consume({
       actor: input.principal,
       approvalId: record.approval_id,
-      claimId: `${input.action}:${String(attempt)}`,
+      // A reivindicacao identifica ESTA execucao, nunca a posicao no laco. Com
+      // um valor deterministico, duas chamadas concorrentes apresentariam a
+      // MESMA reivindicacao, cairiam no ramo de repeticao idempotente do
+      // consumo e as duas receberiam recibo: uma confirmacao humana viraria N
+      // execucoes. Aqui a segunda reivindicacao diverge e o consumo recusa.
+      claimId: `run-${randomUUID()}`,
       action: input.action,
       subjectId: input.subjectId,
       fingerprint: input.fingerprint,

@@ -10,5 +10,7 @@
   "errors.invalidRequest": "Pedido de confirmação inválido.",
   "errors.forbidden": "Você não tem acesso a esta ação.",
   "errors.routeNotFound": "Rota não encontrada.",
-  "errors.methodNotAllowed": "Esta ação não é permitida neste endereço."
+  "errors.methodNotAllowed": "Esta ação não é permitida neste endereço.",
+  "summary.harnessTool": "O assistente quer usar a ferramenta {tool}.",
+  "summary.harnessToolWithReason": "O assistente quer usar a ferramenta {tool}. Motivo que ele deu: \"{reason}\"."
 }

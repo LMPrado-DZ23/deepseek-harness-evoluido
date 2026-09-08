@@ -87,6 +87,22 @@ export class StudioActionApprovalService {
       if (!sameDescriptor(existing, descriptor)) {
         throw new ActionApprovalError('CONFLICT', t('errors.descriptorConflict'))
       }
+      // Um pedido vencido NÃO pode voltar como se ainda estivesse aberto: quem
+      // chama apontaria a pessoa para um identificador que a tela já não
+      // mostra, e a operação ficaria presa para sempre. O vencimento é gravado
+      // aqui, do mesmo jeito que nas outras leituras.
+      if ((existing.state === 'PENDING' || existing.state === 'AVAILABLE') && this.#isExpired(existing)) {
+        const expired: ApprovalRecord = { ...existing, state: 'EXPIRED' }
+        try {
+          await this.options.repository.put(expired, existing.state)
+        } catch {
+          // Só a GRAVAÇÃO do vencimento falhou. O pedido está vencido de
+          // qualquer jeito, e devolvê-lo como aberto prenderia quem chamou
+          // apontando um identificador que a tela já não mostra. O
+          // armazenamento é reavaliado na próxima leitura.
+        }
+        return expired
+      }
       return existing
     }
     const createdAt = this.#now()
@@ -321,4 +337,5 @@ function sameDescriptor(record: ApprovalRecord, descriptor: ApprovalDescriptor):
     && record.fingerprint === descriptor.fingerprint
     && record.tier === descriptor.tier
     && record.request_id === descriptor.request_id
+    && record.summary === descriptor.summary
 }

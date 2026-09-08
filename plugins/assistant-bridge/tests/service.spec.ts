@@ -117,6 +117,7 @@ async function harness(options: {
   // mesmo servico que roda em producao, sobre o repositorio em memoria.
   const approvalRepository = new InMemoryActionApprovalRepository()
   const strongIdentitySessions = new Set<string>(['identity-session'])
+  let mounted = options.approvalAuthority !== 'absent'
   const approvalAuthority = new StudioActionApprovalService({
     repository: approvalRepository,
     identity: { strongIdentityVerified: (sessionId: string) => strongIdentitySessions.has(sessionId) },
@@ -126,7 +127,7 @@ async function harness(options: {
     authorizationFor: (userId, orgId, tenantId) => tenancy.service.authorizationFor(userId, orgId, tenantId),
     studioAgents,
     studioAgentTeams,
-    ...(options.approvalAuthority === 'absent' ? {} : { approvalAuthority }),
+    approvalAuthority: () => mounted ? approvalAuthority : undefined,
     killJob: jobs.kill as never,
   }, [config])
   /**
@@ -144,6 +145,7 @@ async function harness(options: {
     bridge, config, repositoryPath, runs, start, reviewProposal, applyProposal, resolveUnknownRun, jobs, principal,
     teams, teamTasks, teamStart, teamStatus, teamContinue, teamCancel, studioAgentTeams,
     approvalAuthority, approvalRepository, strongIdentitySessions, confirm,
+    mountAuthority: () => { mounted = true },
   }
 }
 
@@ -267,6 +269,83 @@ describe('StudioAssistantBridge', () => {
     expect(h.resolveUnknownRun).not.toHaveBeenCalled()
   })
 
+  it('one human confirmation authorizes exactly one execution, even under concurrency', async () => {
+    const h = await harness()
+    // Duas chamadas RIGOROSAMENTE iguais, em paralelo: mesma operacao, mesmo
+    // prompt, mesmos caminhos. As duas caem no MESMO pedido, e a pessoa
+    // confirma UMA vez.
+    const sensitive = () => h.bridge.start(agent(), {
+      provider: 'spawn-in-process', prompt: 'Use somente o segredo.', intendedPaths: ['src/safe'],
+    }, 'secrets')
+    const refused = await Promise.all([
+      sensitive().then(() => undefined, (error: unknown) => error),
+      sensitive().then(() => undefined, (error: unknown) => error),
+    ])
+    const approvalIds = refused.map(error => (error as { approvalId: string }).approvalId)
+    expect(new Set(approvalIds).size).toBe(1)
+    expect(h.start).not.toHaveBeenCalled()
+
+    await h.approvalAuthority.confirm(h.principal, approvalIds[0]!)
+    const outcomes = await Promise.all([
+      sensitive().then(() => 'executou', () => 'recusado'),
+      sensitive().then(() => 'executou', () => 'recusado'),
+    ])
+    // UMA confirmacao, UMA execucao. A outra chamada nao pode reusar o mesmo
+    // recibo so porque pediu a mesma coisa ao mesmo tempo.
+    expect(outcomes.filter(outcome => outcome === 'executou')).toHaveLength(1)
+    expect(h.start).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows the person what they are authorizing: the instruction and the files', async () => {
+    const h = await harness()
+    await h.bridge.start(agent(), {
+      provider: 'spawn-in-process', prompt: 'Leia a chave da API de pagamento.', intendedPaths: ['src/safe/a.ts'],
+    }, 'secrets').catch(() => undefined)
+    const [pending] = await h.approvalAuthority.listOpen(h.principal)
+    // Sem isto, duas operações sensíveis diferentes ficam indistinguíveis na
+    // tela e confirmar vira carimbo.
+    expect(pending!.summary).toContain('Usar um segredo guardado')
+    expect(pending!.summary).toContain('Leia a chave da API de pagamento.')
+    expect(pending!.summary).toContain('src/safe/a.ts')
+
+    // Outra instrução, outro pedido, outra frase.
+    await h.bridge.start(agent(), {
+      provider: 'spawn-in-process', prompt: 'Apague o banco de dados.', intendedPaths: ['src/safe/a.ts'],
+    }, 'secrets').catch(() => undefined)
+    const open = await h.approvalAuthority.listOpen(h.principal)
+    expect(open).toHaveLength(2)
+    expect(new Set(open.map(row => row.summary)).size).toBe(2)
+  })
+
+  it.each([
+    ['secrets', 'Usar um segredo guardado'],
+    ['external-network', 'Acessar a internet'],
+    ['deploy', 'Publicar'],
+  ] as const)('names the sensitive team operation %s in words the person reads', async (operation, expected) => {
+    const h = await harness()
+    await h.bridge.startTeam(agent(), {
+      provider: 'spawn-in-process',
+      name: 'Equipe núcleo',
+      tasks: [{
+        taskId: 'implementation', title: 'Implementar', role: 'implementer',
+        prompt: 'Faça a mudança.', intendedPaths: ['src/safe/a.ts'], dependsOn: [],
+      }],
+    }, operation).catch(() => undefined)
+    const [pending] = await h.approvalAuthority.listOpen(h.principal)
+    expect(pending!.summary).toContain(expected)
+    expect(pending!.summary).toContain('Equipe núcleo')
+  })
+
+  it('shows the written reason when closing a stuck run', async () => {
+    const h = await harness()
+    h.runs.splice(0, h.runs.length, run({ repository_path: h.repositoryPath, status: 'UNKNOWN' }))
+    await h.bridge.resolveUnknownRun(agent(), 'run-1', 'Conferi no gerenciador: o processo não existe mais.')
+      .catch(() => undefined)
+    const [pending] = await h.approvalAuthority.listOpen(h.principal)
+    expect(pending!.summary).toContain('run-1')
+    expect(pending!.summary).toContain('Conferi no gerenciador')
+  })
+
   it('refuses a sensitive start for good once the person denies it', async () => {
     const h = await harness()
     const sensitive = () => h.bridge.start(agent(), {
@@ -276,6 +355,19 @@ describe('StudioAssistantBridge', () => {
     await h.approvalAuthority.deny(h.principal, (refusal as { approvalId: string }).approvalId)
     await expect(sensitive()).rejects.toThrowError(/recusou/u)
     await expect(sensitive()).rejects.toThrowError(/recusou/u)
+    expect(h.start).not.toHaveBeenCalled()
+  })
+
+  it('finds an authority that only mounts after the bridge, instead of failing forever', async () => {
+    const h = await harness({ approvalAuthority: 'absent' })
+    const sensitive = () => h.bridge.start(agent(), {
+      provider: 'spawn-in-process', prompt: 'Use somente o segredo.', intendedPaths: ['src/safe'],
+    }, 'secrets')
+    await expect(sensitive()).rejects.toMatchObject({ code: 'NOT_CONFIGURED' })
+    // A autoridade sobe DEPOIS do bridge. Capturar o serviço na montagem
+    // deixaria a operação T3 recusando para sempre, sem nenhum sinal.
+    h.mountAuthority()
+    await expect(sensitive()).rejects.toMatchObject({ approvalId: expect.any(String) })
     expect(h.start).not.toHaveBeenCalled()
   })
 

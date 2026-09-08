@@ -77,8 +77,8 @@
     "unknownFields": "{label} contém campos desconhecidos: {fields}.",
     "approvalRequired": "Esta operação precisa da sua confirmação. Abra a confirmação pendente no DZ23 STUDIO, confirme com sua chave de acesso e peça de novo. Nada foi executado.",
     "approvalDenied": "Você recusou esta operação. Ela não será executada, e a recusa não pode ser desfeita por uma nova tentativa.",
-    "approvalExhausted": "Houve pedidos de confirmação demais para esta mesma operação. Nada foi executado.",
-    "approvalNotConfigured": "NOT_CONFIGURED: operações sensíveis estão bloqueadas porque a autoridade de confirmação não foi montada nesta instalação.",
+    "approvalExhausted": "O Studio pediu sua confirmação várias vezes para esta mesma operação e não conseguiu concluir. Nada foi executado. Peça a operação de novo.",
+    "approvalNotConfigured": "Operações sensíveis estão bloqueadas nesta instalação porque a confirmação por pessoa ainda não foi ativada. Nada foi executado. Peça a quem administra o Studio para ativá-la.",
     "notUnknown": "Esta execução não está no estado que exige a sua confirmação de encerramento.",
     "resolveReason": "Escreva entre 3 e 500 caracteres explicando o que você verificou antes de encerrar."
   },
@@ -87,5 +87,17 @@
     "cancelReason": "Cancelada pela pessoa no DZ23 STUDIO.",
     "cancelBeta": "BETA: o cancelamento ativo é mantido somente neste processo.",
     "cancelReconciled": "A execução já foi encerrada com segurança durante a recuperação do reinício; a cópia de trabalho foi preservada para conferência."
+  },
+  "summary": {
+    "secrets": "Usar um segredo guardado.",
+    "network": "Acessar a internet.",
+    "deploy": "Publicar.",
+    "instruction": "Instrução ao assistente: \"{prompt}\".",
+    "paths": "Arquivos que ele pode mexer: {paths}.",
+    "team": "Equipe \"{name}\", com {count} tarefa(s).",
+    "teamContinue": "Continuar a equipe \"{name}\".",
+    "resolveUnknown": "Encerrar a execução {run}, que ficou parada sem confirmação de que terminou.",
+    "reason": "Seu motivo: \"{reason}\".",
+    "missing": "(sem descrição)"
   }
 }

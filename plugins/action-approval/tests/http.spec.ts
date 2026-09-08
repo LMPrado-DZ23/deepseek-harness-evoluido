@@ -21,7 +21,7 @@ function descriptor(): ApprovalDescriptor {
   return {
     org_id: 'org-1', tenant_id: 'tenant-1', user_id: 'user-1', session_id: 'session-1',
     action: 'staging.publish', subject_id: 'project-1', fingerprint: FINGERPRINT,
-    tier: 'T2', request_id: 'req-1',
+    tier: 'T2', request_id: 'req-1', summary: 'Publicar o projeto no ambiente de teste.',
   }
 }
 
@@ -109,6 +109,36 @@ describe('M90-A — superfície HTTP', () => {
     await expect(service.listOpen(actor)).resolves.toEqual([])
   })
 
+  it('um pedido vencido nunca volta como aberto: pedir de novo abre o próximo', async () => {
+    const repository = new InMemoryActionApprovalRepository()
+    let now = new Date('2026-09-07T12:00:00.000Z')
+    const service = new StudioActionApprovalService({
+      repository, identity: { strongIdentityVerified: () => true }, now: () => now,
+    })
+    const created = await service.request(descriptor())
+    now = new Date('2026-09-07T12:10:00.000Z')
+    // Sem ninguém abrir a tela: pedir de novo tem de ver EXPIRED, e não um
+    // PENDING morto que prenderia o chamador apontando um id que a tela esconde.
+    await expect(service.request(descriptor())).resolves.toMatchObject({
+      approval_id: created.approval_id, state: 'EXPIRED',
+    })
+    await expect(service.listOpen(actor)).resolves.toEqual([])
+  })
+
+  it('grava o vencimento ao pedir de novo, e segue mesmo se a gravação falhar', async () => {
+    const repository = new InMemoryActionApprovalRepository()
+    let now = new Date('2026-09-07T12:00:00.000Z')
+    const service = new StudioActionApprovalService({
+      repository, identity: { strongIdentityVerified: () => true }, now: () => now,
+    })
+    await service.request(descriptor())
+    now = new Date('2026-09-07T12:10:00.000Z')
+    // A gravação do vencimento falha. O pedido AINDA tem de voltar como
+    // EXPIRED: devolvê-lo como aberto prenderia o chamador num id morto.
+    repository.interceptNextPut(() => { throw new Error('armazenamento indisponível') })
+    await expect(service.request(descriptor())).resolves.toMatchObject({ state: 'EXPIRED' })
+  })
+
   it('método trocado nunca vira outra ação e identificador hostil morre na borda', () => {
     expect(routeApproval('GET', `${APPROVAL_PREFIX}/${ID}/confirm`)).toEqual({ kind: 'method-not-allowed' })
     expect(routeApproval('POST', `${APPROVAL_PREFIX}/${ID}`)).toEqual({ kind: 'method-not-allowed' })
@@ -134,6 +164,7 @@ describe('M90-A — superfície HTTP', () => {
     expect(outcome.body).toEqual({
       approval_id: created.approval_id, state: 'AVAILABLE', action: 'staging.publish',
       subject_id: 'project-1', tier: 'T2', expires_at: created.expires_at,
+      summary: 'Publicar o projeto no ambiente de teste.',
     })
     expect(h.assertCsrf).toHaveBeenCalledOnce()
 

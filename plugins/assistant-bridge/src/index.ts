@@ -256,15 +256,15 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   const agentLookup: AgentLookup = {
     getBySessionId: sessionId => ctx.agents.get(sessionId as RegistrySessionId),
   }
-  const approvals = ctx.get('studioActionApproval')
   const bridge = await StudioAssistantBridge.create({
     resolvePrincipal: agent => principalForAgent(ctx.studioIdentity.service, agentLookup, agent as never),
     authorizationFor: (userId, orgId, tenantId) => ctx.studioTenancy.service.authorizationFor(userId, orgId, tenantId),
     studioAgents: ctx.studioAgents,
     studioAgentTeams: ctx.studioAgentTeams,
-    // Opcional na injeção, obrigatório no comportamento: sem a autoridade
-    // montada toda operação T3 recusa com NOT_CONFIGURED.
-    ...(approvals === undefined ? {} : { approvalAuthority: approvals.service }),
+    // Lido a cada uso, nunca capturado na montagem: a ordem de montagem entre
+    // plugins não é garantida, e uma autoridade que sobe depois deste plugin
+    // precisa ser encontrada mesmo assim. Sem ela no momento do uso, T3 recusa.
+    approvalAuthority: () => ctx.get('studioActionApproval')?.service,
     killJob: (jobId, owner, reason) => ctx.jobs.kill(jobId as never, owner as never, reason),
   }, config.repositories ?? [])
   const tools = createAssistantTools(bridge)

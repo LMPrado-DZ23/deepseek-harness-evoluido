@@ -47,6 +47,7 @@ describe('contraste da conversa', () => {
       ['faixa de compactação', '.compaction-band strong', '.compaction-band'],
       ['campo de texto', '.conversation-composer textarea', '.conversation-composer textarea'],
       ['pedido de confirmação', '.approval-item p,.approval-action', '.approval-item'],
+      ['trabalho parado', '.stuck-run-item p,.stuck-run-id', '.stuck-run-item'],
     ]
     for (const [label, foregroundSelector, backgroundSelector] of pairs) {
       const foreground = declaredValue(foregroundSelector, 'color')
@@ -68,13 +69,47 @@ describe('contraste da conversa', () => {
         // `border-color:#...` casava com `color:` e a regra passava sem nunca
         // ter declarado a cor do texto - um guarda que não podia falhar.
         if (!/(?:^|;)\s*background(?:-color)?\s*:\s*#/u.test(body)) continue
-        if (!/^\.(conversation|compaction|approval)/u.test(selector)) continue
+        if (!/^\.(conversation|compaction|approval|stuck)/u.test(selector)) continue
         // Elementos puramente decorativos não carregam texto. A lista é curta e
         // explícita de propósito: cada entrada aqui é uma promessa de que
         // ninguém vai ler nada em cima daquele fundo.
         if (DECORATIVE_SELECTORS.has(selector)) continue
         expect(body, `${selector} escurece o fundo sem declarar a cor do texto`).toMatch(/(?:^|;)\s*color\s*:\s*#/u)
       }
+    }
+  })
+
+  it('o modo escuro nunca clareia um texto de uma família que não tem superfície escura', () => {
+    // O sentido inverso do teste acima, e o que faltava: a folha NÃO tem um
+    // `:root` escuro, então uma família que só clareia a cor pinta texto claro
+    // sobre o fundo branco do tema claro - foi assim que o título e a
+    // explicação da tela de autorização ficaram invisíveis em 1,4:1.
+    //
+    // A verificação é por FAMÍLIA porque o CSS sozinho não diz quem é filho de
+    // quem: exige que cada família que clareia texto declare, em algum lugar do
+    // mesmo bloco escuro, uma superfície escura sob a qual esse texto cai.
+    const families = ['.conversation', '.compaction', '.approval', '.stuck'] as const
+    const darkBlocks = [...styles.matchAll(/@media \(prefers-color-scheme:dark\)\{([\s\S]*?)\n\}/gu)]
+      .map(match => match[1] ?? '')
+    const lightensText = new Set<string>()
+    const darkSurface = new Set<string>()
+    for (const block of darkBlocks) {
+      for (const rule of block.matchAll(/([^{}\n]+)\{([^}]*)\}/gu)) {
+        const selectors = (rule[1] ?? '').split(',').map(part => part.trim())
+        const body = rule[2] ?? ''
+        const hasColor = /(?:^|;)\s*color\s*:\s*#/u.test(body)
+        const hasBackground = /(?:^|;)\s*background(?:-color)?\s*:\s*#/u.test(body)
+        for (const selector of selectors) {
+          const family = families.find(candidate => selector.startsWith(candidate))
+          if (family === undefined) continue
+          if (hasColor) lightensText.add(family)
+          if (hasBackground) darkSurface.add(family)
+        }
+      }
+    }
+    expect(lightensText.size).toBeGreaterThan(0)
+    for (const family of lightensText) {
+      expect(darkSurface.has(family), `${family} clareia o texto sem nenhuma superfície escura declarada`).toBe(true)
     }
   })
 

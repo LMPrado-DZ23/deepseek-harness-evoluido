@@ -51,7 +51,18 @@ export async function apply(ctx, config = {}) {
     const presetService = ctx.agentPresets;
     const runsDomain = await ctx.storageDomain.open(studioAgentRunsDomainSpec);
     const leasesDomain = await ctx.storageDomain.open(studioAgentLeasesDomainSpec);
-    ctx.effect(() => async () => { await Promise.all([runsDomain.close(), leasesDomain.close()]); }, 'studio-agents.domainClose');
+    // Um disposer só, na ordem certa. O cordis dispara os disposers com
+    // `Promise.all`: dois efeitos separados rodariam CONCORRENTEMENTE, e o
+    // fechamento do domínio (que passa a recusar escritas assim que começa)
+    // corria contra o encerramento ativo, que ainda precisa gravar o desfecho
+    // das execuções em voo. Registrar dois efeitos e confiar na ordem inversa
+    // era uma suposição errada sobre o runtime.
+    let shutdownAgents;
+    ctx.effect(() => async () => {
+        if (shutdownAgents !== undefined)
+            await shutdownAgents();
+        await Promise.all([runsDomain.close(), leasesDomain.close()]);
+    }, 'studio-agents.shutdownThenClose');
     const repository = new DomainAgentRepository(runsDomain.table('runs'), leasesDomain.table('leases'));
     const coordinatorPreset = config.coordinatorPreset ?? 'dz23-coordinator';
     const inProcessCoordinatorPreset = config.inProcessCoordinatorPreset ?? 'dz23-coordinator-in-process';
@@ -140,16 +151,15 @@ export async function apply(ctx, config = {}) {
     });
     const restartReconciliation = await service.reconcileInterruptedRuns();
     ctx.jobs.attachController('dz23-studio-agents');
-    // Encerramento ATIVO. Registrado depois da abertura dos domínios, então é
-    // descartado ANTES deles: o que o encerramento grava ainda encontra o
-    // armazenamento aberto. O que sobreviver ao prazo não é declarado morto -
-    // fica para a reconciliação do próximo início.
-    ctx.effect(() => async () => {
+    // Encerramento ATIVO, ligado ao disposer único acima para que aconteça
+    // ANTES do fechamento dos domínios. O que sobreviver ao prazo não é
+    // declarado morto: fica para a reconciliação do próximo início.
+    shutdownAgents = async () => {
         const outcome = await service.shutdown();
         if (outcome.pending > 0) {
             ctx.logger.warn(t('recovery.shutdownPending', { count: outcome.pending }));
         }
-    }, 'studio-agents.shutdown');
+    };
     ctx.provide('studioAgents', {
         service,
         restartReconciliation,

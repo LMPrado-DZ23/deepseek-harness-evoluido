@@ -14,7 +14,7 @@ afterEach(async () => {
 })
 
 async function fixture(previewFrameSources: readonly string[] = [], options: {
-  readonly actionApprovals?: Parameters<typeof createStudioWebHandler>[0]['actionApprovals']
+  readonly actionApprovals?: NonNullable<ReturnType<NonNullable<Parameters<typeof createStudioWebHandler>[0]['actionApprovals']>>>
 } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'dz23-web-')); temporary.push(root)
   await mkdir(join(root, 'assets')); await writeFile(join(root, 'index.html'), '<main>DZ23 STUDIO</main>'); await writeFile(join(root, 'assets/app.js'), 'ok')
@@ -30,7 +30,7 @@ async function fixture(previewFrameSources: readonly string[] = [], options: {
   const server = createServer(createStudioWebHandler({
     distDirectory: root, identity: identity as unknown as StudioIdentityService, allowedHosts, allowedOrigins,
     previewFrameSources, assistantSessions,
-    ...(options.actionApprovals === undefined ? {} : { actionApprovals: options.actionApprovals }),
+    ...(options.actionApprovals === undefined ? {} : { actionApprovals: () => options.actionApprovals }),
   }))
   servers.push(server)
   await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve) })
@@ -107,7 +107,8 @@ describe('authenticated Studio web surface', () => {
     })
     const refused = await f.request(`/approvals/${approvalId}/confirm`, { method: 'POST', headers: { origin: `http://${f.host}` } })
     expect(refused.status).toBe(409)
-    expect(await refused.json()).toEqual({ error: 'Você recusou esta operação.' })
+    // O código viaja junto para a tela distinguir 'falta a chave' de 'sem acesso'.
+    expect(await refused.json()).toEqual({ error: 'Você recusou esta operação.', code: 'DENIED' })
     expect((await f.request(`/approvals/${approvalId}`)).status).toBe(404)
   })
 

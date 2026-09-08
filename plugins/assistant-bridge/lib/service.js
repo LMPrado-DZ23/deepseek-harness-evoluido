@@ -4,7 +4,7 @@ import { lstat, readFile, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { t } from './i18n.js';
 import { ASSISTANT_ALLOWED_PROVIDERS } from './catalog.js';
-import { approvalFingerprint, approvalSubjectId, requireTier3Approval, } from './approval.js';
+import { approvalFingerprint, approvalSubjectId, approvalSummary, requireTier3Approval, } from './approval.js';
 export class AssistantBridgeError extends Error {
     code;
     constructor(code, message) {
@@ -53,7 +53,11 @@ export class StudioAssistantBridge {
         const tier = sensitive === undefined ? 'T2' : 'T3';
         const approvedBy = sensitive === undefined
             ? principal.userId
-            : await this.#tier3(principal, repository, `studio.agent.start.${sensitive}`, [input.provider, prompt, ...intendedPaths]);
+            : await this.#tier3(principal, repository, `studio.agent.start.${sensitive}`, [input.provider, prompt, ...intendedPaths], [
+                sensitive === 'secrets' ? t('summary.secrets') : t('summary.network'),
+                t('summary.instruction', { prompt }),
+                t('summary.paths', { paths: intendedPaths.join(', ') }),
+            ]);
         const accepted = this.dependencies.studioAgents.service.start({
             orgId: principal.orgId,
             tenantId: principal.tenantId,
@@ -91,6 +95,10 @@ export class StudioAssistantBridge {
                 input.provider,
                 input.name,
                 ...tasks.map(task => [task.taskId, task.title, task.role, task.prompt, ...task.intendedPaths].join('\u0001')),
+            ], [
+                sensitive === 'deploy' ? t('summary.deploy') : sensitive === 'secrets' ? t('summary.secrets') : t('summary.network'),
+                t('summary.team', { name: input.name, count: tasks.length }),
+                t('summary.paths', { paths: [...new Set(tasks.flatMap(task => task.intendedPaths))].join(', ') }),
             ]);
         const snapshot = await this.#teamsRuntime().service.start({
             orgId: principal.orgId,
@@ -116,8 +124,14 @@ export class StudioAssistantBridge {
      * derivado AQUI, no servidor: o modelo não escolhe nível, ação, sujeito nem
      * impressão digital.
      */
-    async #tier3(principal, repository, action, parts) {
-        const authority = this.dependencies.approvalAuthority;
+    async #tier3(principal, repository, action, parts, 
+    /**
+     * A frase que a pessoa lê antes de decidir. Sem ela o pedido carregaria só
+     * o nome da categoria, e duas operações sensíveis diferentes ficariam
+     * indistinguíveis na tela - confirmar viraria um carimbo.
+     */
+    summary) {
+        const authority = this.dependencies.approvalAuthority?.();
         if (authority === undefined) {
             throw new AssistantBridgeError('NOT_CONFIGURED', t('errors.approvalNotConfigured'));
         }
@@ -130,7 +144,8 @@ export class StudioAssistantBridge {
             },
             action,
             subjectId: approvalSubjectId(repository.workspaceId, repository.repositoryPath),
-            fingerprint: approvalFingerprint([action, repository.workspaceId, repository.repositoryPath, ...parts]),
+            fingerprint: approvalFingerprint([action, repository.workspaceId, repository.repositoryPath, ...parts, ...summary]),
+            summary: approvalSummary(summary),
         });
         return granted.approvedBy;
     }
@@ -160,7 +175,9 @@ export class StudioAssistantBridge {
             throw new AssistantBridgeError('INVALID_REQUEST', t('errors.teamTier'));
         }
         const approvedBy = sensitive
-            ? await this.#tier3(principal, repository, 'studio.team.continue.sensitive', [teamId])
+            ? await this.#tier3(principal, repository, 'studio.team.continue.sensitive', [teamId], [
+                t('summary.teamContinue', { name: team.name }),
+            ])
             : principal.userId;
         return this.#summarizeTeam(await this.#teamsRuntime().service.continue(teamId, agent, {
             approved: true,
@@ -215,7 +232,10 @@ export class StudioAssistantBridge {
         }
         // A impressão digital cobre o motivo: confirmar um encerramento e gravar
         // outra justificativa seriam duas coisas diferentes.
-        await this.#tier3(principal, repository, 'studio.agent.resolve-unknown', [runId, trimmed]);
+        await this.#tier3(principal, repository, 'studio.agent.resolve-unknown', [runId, trimmed], [
+            t('summary.resolveUnknown', { run: runId }),
+            t('summary.reason', { reason: trimmed }),
+        ]);
         await this.dependencies.studioAgents.service.resolveUnknownRun(runId, trimmed);
         // Relido pelo MESMO caminho escopado: o resumo devolvido é o que ficou
         // gravado, não o que este método achava que ia gravar.

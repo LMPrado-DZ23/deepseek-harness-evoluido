@@ -10,6 +10,8 @@ export type ApprovalKey = string & { readonly [approvalKeyBrand]: true }
 
 export const studioActionApprovalsDomainSpec = defineDomain({
   name: STUDIO_ACTION_APPROVALS_PHYSICAL_DOMAIN,
-  version: 1,
+  // v2: o registro passou a carregar `summary`, a frase que a pessoa lê antes
+  // de decidir. Um registro v1 não tem esse campo e é recusado na leitura.
+  version: 2,
   tables: { approvals: domainTable<ApprovalKey, ApprovalRecord>(approvalRecordSchema) },
 })

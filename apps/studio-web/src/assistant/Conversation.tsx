@@ -10,6 +10,7 @@ import {
   type ConversationPort,
 } from './conversationApi'
 import { PendingApprovals } from './PendingApprovals'
+import { StuckRuns } from './StuckRuns'
 import {
   applySnapshot,
   compactionView,
@@ -157,6 +158,10 @@ export function Conversation({ conversationId, port, getCsrf, pollMs = CONVERSAT
     {/* Fica ACIMA do estado e do compositor: uma permissão esperando é a única
         coisa na tela que bloqueia o trabalho, então é a primeira que a pessoa vê. */}
     <PendingApprovals {...(port === undefined ? {} : { port })} {...(getCsrf === undefined ? {} : { getCsrf })} />
+
+    {/* Depois das confirmações: uma permissão esperando bloqueia o assistente
+        agora; trabalho parado bloqueia arquivos, o que é sério mas não urgente. */}
+    <StuckRuns {...(port === undefined ? {} : { port })} />
 
     {compaction === null ? null : <CompactionBand view={compaction} />}
 

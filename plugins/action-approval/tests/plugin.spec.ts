@@ -8,7 +8,7 @@ function record(overrides: Partial<ApprovalRecord> = {}): ApprovalRecord {
   return {
     org_id: 'org-1', tenant_id: 'tenant-1', user_id: 'user-1', session_id: 'session-1',
     action: 'studio.agent.start.secrets', subject_id: 'workspace-1', fingerprint: 'b'.repeat(64),
-    tier: 'T3', request_id: 'req-1', approval_id: `apv-${'a'.repeat(64)}`, state: 'PENDING',
+    tier: 'T3', request_id: 'req-1', summary: 'Usar um segredo guardado.', approval_id: `apv-${'a'.repeat(64)}`, state: 'PENDING',
     claim_id: null, created_at: '2026-09-07T00:00:00.000Z', expires_at: '2026-09-07T00:03:00.000Z',
     confirmed_at: null, consumed_at: null, denied_at: null,
     ...overrides,
@@ -96,7 +96,7 @@ describe('persistência durável da autoridade de confirmação', () => {
     const created = await service.request({
       org_id: 'org-1', tenant_id: 'tenant-1', user_id: 'user-1', session_id: 'session-1',
       action: 'studio.agent.start.secrets', subject_id: 'workspace-1', fingerprint: 'b'.repeat(64),
-      tier: 'T3', request_id: 'req-1',
+      tier: 'T3', request_id: 'req-1', summary: 'Usar um segredo guardado.',
     })
     expect(created.state).toBe('PENDING')
     await expect(service.confirm(actor, created.approval_id)).resolves.toMatchObject({ state: 'AVAILABLE' })
@@ -213,7 +213,7 @@ describe('persistência durável da autoridade de confirmação', () => {
     const created = await service.request({
       org_id: 'org-1', tenant_id: 'tenant-1', user_id: 'user-1', session_id: 'session-1',
       action: 'studio.agent.start.secrets', subject_id: 'workspace-1', fingerprint: 'b'.repeat(64),
-      tier: 'T3', request_id: 'req-1',
+      tier: 'T3', request_id: 'req-1', summary: 'Usar um segredo guardado.',
     })
     await expect(service.confirm({ userId: 'user-1', orgId: 'org-1', tenantId: 'tenant-1', sessionId: 'session-1' }, created.approval_id))
       .rejects.toMatchObject({ code: 'STRONG_IDENTITY_REQUIRED' })

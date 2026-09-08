@@ -3,6 +3,7 @@ import {
   answerHarnessApproval,
   questionFingerprint,
   questionSubjectId,
+  questionSummary,
   type HarnessApprovalAuthority,
   type HarnessApprovalDeps,
 } from '../src/answerer.ts'
@@ -16,7 +17,7 @@ function record(state: ApprovalRecord['state']): ApprovalRecord {
   const base = {
     org_id: 'org-1', tenant_id: 'tenant-1', user_id: 'user-1', session_id: 'session-1',
     action: 'harness.tool.bash', subject_id: 'call:call-1', fingerprint: 'b'.repeat(64),
-    tier: 'T3' as const, request_id: 'harness-1', approval_id: `apv-${'a'.repeat(64)}`,
+    tier: 'T3' as const, request_id: 'harness-1', summary: 'O assistente quer usar a ferramenta bash.', approval_id: `apv-${'a'.repeat(64)}`,
     claim_id: null, created_at: '2026-09-08T00:00:00.000Z', expires_at: '2026-09-08T00:03:00.000Z',
     confirmed_at: null, consumed_at: null, denied_at: null,
   }
@@ -142,6 +143,21 @@ describe('respondedor do Studio para as perguntas do Harness', () => {
     expect(questionSubjectId({ toolName: 'bash', callId: 'call-1' })).toBe('call:call-1')
     expect(questionSubjectId({ toolName: 'bash', callId: 'chamada com espaço' })).toMatch(/^call:[a-f0-9]{64}$/u)
     expect(questionSubjectId({ toolName: 'bash' })).toMatch(/^call:[a-f0-9]{64}$/u)
+  })
+
+  it('diz à pessoa qual ferramenta e por quê, e leva isso ao pedido', async () => {
+    expect(questionSummary(question)).toBe('O assistente quer usar a ferramenta bash. Motivo que ele deu: "precisa sair da caixa".')
+    expect(questionSummary({ toolName: 'bash' })).toBe('O assistente quer usar a ferramenta bash.')
+    // Motivo do modelo, higienizado e cortado.
+    expect(questionSummary({ toolName: 'bash', reason: 'quebra\nde\tlinha' }))
+      .toContain('quebra de linha')
+    expect(questionSummary({ toolName: 'bash', reason: 'x'.repeat(1000) })).toHaveLength(300)
+
+    const d = deps({ authority: { request: vi.fn(() => Promise.resolve(record('AVAILABLE'))) } })
+    await answerHarnessApproval(question, delegate, d)
+    expect(d.authority.request).toHaveBeenCalledWith(expect.objectContaining({
+      summary: expect.stringContaining('precisa sair da caixa'),
+    }))
   })
 
   it('muda a impressão digital quando o motivo muda', () => {

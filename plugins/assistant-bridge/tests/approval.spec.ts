@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  APPROVAL_SUMMARY_LIMIT,
   MAX_APPROVAL_ATTEMPTS,
   approvalFingerprint,
   approvalSubjectId,
+  approvalSummary,
   requireTier3Approval,
   AssistantApprovalDeniedError,
   AssistantApprovalRequiredError,
@@ -11,15 +13,22 @@ import {
 
 const principal = { userId: 'user-1', orgId: 'org-1', tenantId: 'tenant-1', sessionId: 'identity-session' }
 
-function port(states: readonly string[]): AssistantApprovalPort & { readonly asked: string[], readonly consumed: string[] } {
+function port(states: readonly string[]): AssistantApprovalPort & {
+  readonly asked: string[]
+  readonly consumed: string[]
+  readonly summaries: string[]
+} {
   const asked: string[] = []
   const consumed: string[] = []
+  const summaries: string[] = []
   let index = 0
   return {
     asked,
     consumed,
+    summaries,
     request: descriptor => {
       asked.push(descriptor.request_id)
+      summaries.push(descriptor.summary)
       const state = states[Math.min(index, states.length - 1)] ?? 'PENDING'
       index += 1
       return Promise.resolve({ approval_id: `apv-${'a'.repeat(64)}`, state })
@@ -31,13 +40,20 @@ function port(states: readonly string[]): AssistantApprovalPort & { readonly ask
   }
 }
 
-const request = { principal, action: 'studio.agent.start.secrets' as const, subjectId: 'workspace-1', fingerprint: 'b'.repeat(64) }
+const request = {
+  principal,
+  action: 'studio.agent.start.secrets' as const,
+  subjectId: 'workspace-1',
+  fingerprint: 'b'.repeat(64),
+  summary: 'Usar um segredo guardado. Instrução ao assistente: "leia o segredo".',
+}
 
 describe('portão T3 do assistente', () => {
   it('só consome uma confirmação que a pessoa deixou disponível', async () => {
     const available = port(['AVAILABLE'])
     await expect(requireTier3Approval(available, request)).resolves.toEqual({ approvedBy: 'user-1' })
-    expect(available.consumed).toEqual(['studio.agent.start.secrets:0'])
+    expect(available.consumed).toHaveLength(1)
+    expect(available.consumed[0]).toMatch(/^run-[0-9a-f-]{36}$/u)
   })
 
   it('recusa enquanto o pedido está pendente e nunca consome nada', async () => {
@@ -57,7 +73,7 @@ describe('portão T3 do assistente', () => {
     const used = port(['CONSUMED', 'EXPIRED', 'AVAILABLE'])
     await expect(requireTier3Approval(used, request)).resolves.toEqual({ approvedBy: 'user-1' })
     expect(used.asked).toEqual([`${request.fingerprint}.0`, `${request.fingerprint}.1`, `${request.fingerprint}.2`])
-    expect(used.consumed).toEqual(['studio.agent.start.secrets:2'])
+    expect(used.consumed).toHaveLength(1)
   })
 
   it('para de abrir pedidos em vez de girar sem fim', async () => {
@@ -77,6 +93,21 @@ describe('portão T3 do assistente', () => {
     expect(approvalSubjectId('workspace-1', '/repo')).toBe('workspace-1')
     expect(approvalSubjectId('espaço com acento', '/repo')).toMatch(/^repo:[a-f0-9]{64}$/u)
     expect(approvalSubjectId('espaço com acento', '/repo')).not.toBe(approvalSubjectId('espaço com acento', '/outro'))
+  })
+
+  it('leva ao pedido a frase que a pessoa vai ler, higienizada e cortada', async () => {
+    const available = port(['AVAILABLE'])
+    await requireTier3Approval(available, request)
+    expect(available.summaries).toEqual([request.summary])
+  })
+
+  it('limpa caracteres de controle e corta a frase no limite', () => {
+    expect(approvalSummary(['Usar um segredo.', '  Instrução:\n"pega\ttudo"  '])).toBe('Usar um segredo. Instrução: "pega tudo"')
+    expect(approvalSummary([])).toBe('(sem descrição)')
+    expect(approvalSummary(['   '])).toBe('(sem descrição)')
+    const long = approvalSummary(['x'.repeat(1000)])
+    expect(long).toHaveLength(APPROVAL_SUMMARY_LIMIT)
+    expect(long.endsWith('\u2026')).toBe(true)
   })
 
   it('separa impressões digitais que só diferem no recorte das partes', () => {

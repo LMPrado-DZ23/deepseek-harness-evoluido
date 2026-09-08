@@ -21,7 +21,7 @@ function descriptor(overrides: Partial<ApprovalDescriptor> = {}): ApprovalDescri
   return {
     org_id: 'org-1', tenant_id: 'tenant-1', user_id: 'user-1', session_id: 'session-1',
     action: 'staging.publish', subject_id: 'project-1', fingerprint: FINGERPRINT,
-    tier: 'T2', request_id: 'req-1', ...overrides,
+    tier: 'T2', request_id: 'req-1', summary: 'Publicar o projeto no ambiente de teste.', ...overrides,
   }
 }
 

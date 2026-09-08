@@ -19,8 +19,21 @@ export const approvalStateSchema = z.enum(['PENDING', 'AVAILABLE', 'CONSUMED', '
 export type ApprovalState = z.infer<typeof approvalStateSchema>
 
 /**
+ * Frase que a PESSOA lê antes de decidir, derivada no servidor. Sem ela o
+ * pedido só carrega o nome da categoria da ação, e confirmar vira um carimbo:
+ * duas operações sensíveis diferentes ficam indistinguíveis na tela.
+ *
+ * Limitada e sem caracteres de controle porque parte do conteúdo tem origem no
+ * modelo. Ela entra na impressão digital, então o texto exibido é exatamente o
+ * texto que a confirmação tranca.
+ */
+export const APPROVAL_SUMMARY_MAX = 300
+export const approvalSummarySchema = z.string().min(1).max(APPROVAL_SUMMARY_MAX)
+  .refine(value => !/[\u0000-\u001f\u007f]/u.test(value), 'summary must not carry control characters')
+
+/**
  * O descritor é derivado NO SERVIDOR por um serviço interno confiável. O cliente
- * nunca envia nível, ação, sujeito, fingerprint nem `approved: true`.
+ * nunca envia nível, ação, sujeito, resumo, fingerprint nem `approved: true`.
  */
 export const approvalDescriptorSchema = z.object({
   org_id: identifierSchema,
@@ -32,6 +45,7 @@ export const approvalDescriptorSchema = z.object({
   fingerprint: sha256Schema,
   tier: approvalTierSchema,
   request_id: identifierSchema,
+  summary: approvalSummarySchema,
 }).strict()
 export type ApprovalDescriptor = z.infer<typeof approvalDescriptorSchema>
 

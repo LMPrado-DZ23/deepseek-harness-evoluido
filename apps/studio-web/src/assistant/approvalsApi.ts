@@ -12,6 +12,19 @@ export interface PendingApproval {
   readonly subject_id: string
   readonly tier: 'T2' | 'T3'
   readonly expires_at: string
+  /** A frase que a pessoa lê antes de decidir, derivada no servidor. */
+  readonly summary: string
+}
+
+/**
+ * Erro de decisão que carrega o código do servidor. Sem ele, "falta a chave de
+ * acesso" e "isto não é seu" são o mesmo 403, e a pessoa tenta a passkey contra
+ * um erro que a passkey não resolve.
+ */
+export class ApprovalDecisionError extends ConversationRequestError {
+  constructor(status: number, message: string, retryable: boolean, readonly code: string | undefined) {
+    super(status, message, retryable)
+  }
 }
 
 const APPROVAL_ID = /^apv-[a-f0-9]{64}$/u
@@ -32,6 +45,7 @@ export function isPendingApproval(value: unknown): value is PendingApproval {
     && typeof row.subject_id === 'string' && row.subject_id !== ''
     && (row.tier === 'T2' || row.tier === 'T3')
     && typeof row.expires_at === 'string' && row.expires_at !== ''
+    && typeof row.summary === 'string' && row.summary !== ''
 }
 
 export async function listPendingApprovals(
@@ -74,10 +88,12 @@ export async function decideApproval(
  * recente", e essa é a única saída que a pessoa tem — por isso vale a pena
  * tentar de novo depois de usá-la.
  */
-function failure(status: number, body: unknown): ConversationRequestError {
-  const message = typeof body === 'object' && body !== null && typeof (body as { error?: unknown }).error === 'string'
-    && (body as { error: string }).error !== ''
-    ? (body as { error: string }).error
-    : copy.approvalsError
-  return new ConversationRequestError(status, message, status >= 500 || status === 429 || status === 403)
+function failure(status: number, body: unknown): ApprovalDecisionError {
+  const row = typeof body === 'object' && body !== null ? body as Record<string, unknown> : {}
+  const message = typeof row.error === 'string' && row.error !== '' ? row.error : copy.approvalsError
+  const code = typeof row.code === 'string' ? row.code : undefined
+  // Só faltar a chave de acesso vale tentar de novo: é a única saída que a
+  // pessoa tem. Um 403 de escopo não melhora repetindo.
+  const retryable = status >= 500 || status === 429 || code === 'STRONG_IDENTITY_REQUIRED'
+  return new ApprovalDecisionError(status, message, retryable, code)
 }

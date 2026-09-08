@@ -93,7 +93,7 @@ export function approvalStatus(error: unknown): number | undefined {
  * O que a tela pode ver. O fingerprint NÃO sai: ele é o vínculo entre a
  * confirmação e a carga exata da ação, e não tem utilidade nenhuma no cliente.
  */
-function publicView(record: { readonly approval_id: string; readonly state: string; readonly action: string; readonly subject_id: string; readonly tier: string; readonly expires_at: string }): unknown {
+function publicView(record: { readonly approval_id: string; readonly state: string; readonly action: string; readonly subject_id: string; readonly tier: string; readonly expires_at: string; readonly summary: string }): unknown {
   return {
     approval_id: record.approval_id,
     state: record.state,
@@ -101,6 +101,9 @@ function publicView(record: { readonly approval_id: string; readonly state: stri
     subject_id: record.subject_id,
     tier: record.tier,
     expires_at: record.expires_at,
+    // O resumo SAI: é o que torna a decisão informada. A impressão digital
+    // continua não saindo - ela é o vínculo, não a explicação.
+    summary: record.summary,
   }
 }
 

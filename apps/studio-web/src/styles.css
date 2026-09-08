@@ -36,7 +36,10 @@
 @media (max-width:640px){.conversation{padding:14px}.conversation-log{max-height:none}.conversation-actions .primary,.conversation-actions .secondary{flex:1 1 auto}}
 @media (prefers-reduced-motion:reduce){.conversation *{animation:none!important;transition:none!important}}
 @media (prefers-color-scheme:dark){
-.conversation{color:#eef2f9}
+/* O fundo anda com a cor. A folha nao tem `:root` escuro, entao clarear so
+   o texto pintava a conversa inteira de claro sobre branco. Os filhos com
+   fundo proprio (balao, faixa, campo) ja redefinem os dois. */
+.conversation{background:#0b0f18;color:#eef2f9}
 .conversation-log{border-color:#2b3550;background:#0c111c;color:#eef2f9}
 /* O texto TEM de ser redefinido junto com o fundo. Escurecer o balão e deixar a
    cor herdada do tema claro deixa a conversa ilegível para quem usa o celular
@@ -80,18 +83,43 @@
 .approvals h2{display:flex;align-items:center;gap:8px;margin:0;font-size:16px;color:#7a3e00}
 .approvals-intro,.approvals-empty{margin:0;color:#4a5876;font-size:14px}
 .approvals-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
-.approval-item{border:1px solid #f0c88a;background:#fff8ec;color:#3a2a12;border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:6px}
+.approval-item{border:1px solid #f0c88a;background:#fff8ec;color:#3a2a12;border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;overflow-wrap:anywhere}
 .approval-item p{margin:0}
-.approval-action{font-weight:600}
+.approval-summary{font-weight:600}
+.approval-action,.approval-deadline,.approval-deny-warning{font-size:14px;color:#6b573a}
+.approvals-outcome{margin:0;color:#2c3a57;font-size:14px}
+.approval-actions .primary,.approval-actions .secondary{width:auto;margin:0;padding:0 18px}
+.approval-actions .secondary{border-color:#8a7a63;color:#4a3f30}
 .approval-subject,.approval-tier,.approval-waiting{color:#6b573a;font-size:14px}
 .approval-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px}
 @media (prefers-color-scheme:dark){
 /* O fundo e a cor andam juntos: escurecer o cartão e herdar a cor do tema claro
    deixaria o pedido ilegível justamente na tela que decide uma permissão. */
+.approvals{background:#141a26;border-radius:10px;padding:10px 12px;color:#eef2f9}
 .approvals h2{color:#ffd7a1}
-.approvals-intro,.approvals-empty{color:#b9c4da}
+.approvals-intro,.approvals-empty,.approvals-outcome{color:#b9c4da}
 .approval-item{background:#2a1f10;border-color:#6b5326;color:#f7ecdc}
 .approval-item p,.approval-action{color:#f7ecdc}
-.approval-subject,.approval-tier,.approval-waiting{color:#d8c6a8}
+.approval-subject,.approval-tier,.approval-waiting,.approval-action,.approval-deadline,.approval-deny-warning{color:#d8c6a8}
+.approval-actions .secondary{border-color:#6b5326;color:#f7ecdc}
 .approval-actions .secondary{background:#0f1523;color:#eef2f9;border-color:#2b3550}
+}
+
+/* Trabalho parado. Menos alarmante que uma confirmação pendente - bloqueia
+   arquivos, não o assistente - mas ainda precisa ser visto. */
+.stuck-runs{display:flex;flex-direction:column;gap:8px}
+.stuck-runs h2{display:flex;align-items:center;gap:8px;margin:0;font-size:15px;color:#3d4a66}
+.stuck-runs-intro{margin:0;color:#4a5876;font-size:14px}
+.stuck-runs-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.stuck-run-item{border:1px solid #d7dfee;background:#f6f8fc;color:#2c3a57;border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:4px;overflow-wrap:anywhere}
+.stuck-run-item p{margin:0}
+.stuck-run-id{font-weight:600}
+.stuck-run-hint{font-size:14px;color:#4a5876}
+@media (prefers-color-scheme:dark){
+.stuck-runs{background:#0f1523;border-radius:10px;padding:10px 12px;color:#eef2f9}
+.stuck-runs h2{color:#cbd6ea}
+.stuck-runs-intro{color:#b9c4da}
+.stuck-run-item{background:#121a2b;border-color:#2b3550;color:#eef2f9}
+.stuck-run-item p,.stuck-run-id{color:#eef2f9}
+.stuck-run-hint{color:#b9c4da}
 }

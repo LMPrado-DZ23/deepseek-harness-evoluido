@@ -30,6 +30,13 @@ import {
 } from './assistant-session.js'
 import { AssistantConversationError, AssistantConversationService } from './assistant-conversation.js'
 import {
+  StuckRunsError,
+  handleStuckRuns,
+  routeStuckRuns,
+  stuckRunsStatus,
+  type StuckRunsSource,
+} from './stuck-runs.js'
+import {
   assistantConversationStatus,
   handleAssistantConversation,
   routeAssistantConversation,
@@ -39,6 +46,7 @@ import {
 export * from './assistant-session.js'
 export * from './assistant-conversation.js'
 export * from './assistant-http.js'
+export * from './stuck-runs.js'
 
 export const name = 'dz23-studio-web'
 export const inject = ['sessionController', 'studioIdentity', 'studioPreview', 'studioTenancy', 'webServer']
@@ -61,8 +69,14 @@ export function createStudioWebHandler(config: {
   readonly previewFrameSources?: readonly string[]
   readonly assistantSessions?: Pick<AssistantSessionLauncher, 'launch'>
   readonly assistantConversations?: AssistantConversationHttpConfig['conversations']
-  /** Autoridade de confirmação de ações sensíveis (M90-A). Ausente, a rota responde 503. */
-  readonly actionApprovals?: StudioActionApprovalService
+  /**
+   * Autoridade de confirmação (M90-A), resolvida A CADA PEDIDO. Capturar o
+   * serviço na montagem criava uma corrida silenciosa com a ordem de
+   * montagem dos plugins. Ausente no momento do pedido, a rota responde 503.
+   */
+  actionApprovals?(): StudioActionApprovalService | undefined
+  /** Runtime de agentes, resolvido a cada pedido. Ausente, a rota responde 503. */
+  agentRuns?(): StuckRunsSource | undefined
   readonly assistantDeadlineMs?: number
 }) {
   const frameSources = normalizePreviewFrameSources(config.previewFrameSources ?? [])
@@ -80,12 +94,21 @@ export function createStudioWebHandler(config: {
         })
         return sendJson(response, outcome.status, outcome.body, frameSources)
       }
+      const stuckRoute = routeStuckRuns(request.method, pathname)
+      if (stuckRoute !== undefined) {
+        const agents = config.agentRuns?.()
+        const outcome = await handleStuckRuns(request, stuckRoute, {
+          identity: config.identity,
+          ...(agents === undefined ? {} : { agents }),
+        })
+        return sendJson(response, outcome.status, outcome.body, frameSources)
+      }
       const approvalRoute = routeApproval(request.method, pathname)
       if (approvalRoute !== undefined) {
-        if (config.actionApprovals === undefined) {
+        const approvals = config.actionApprovals?.()
+        if (approvals === undefined) {
           return sendJson(response, 503, { error: t('approvals.notConfigured') }, frameSources)
         }
-        const approvals = config.actionApprovals
         const outcome = await handleApproval(request, approvalRoute, {
           service: approvals,
           // Identidade e escopo saem do cookie de sessão; o cliente não
@@ -121,9 +144,16 @@ export function createStudioWebHandler(config: {
       response.writeHead(200, securityHeaders(contentType(selected), frameSources))
       response.end(request.method === 'HEAD' ? undefined : body)
     } catch (error) {
+      const stuckStatus = stuckRunsStatus(error)
+      if (stuckStatus !== undefined && error instanceof StuckRunsError) {
+        return sendJson(response, stuckStatus, { error: error.message }, frameSources)
+      }
       const approvalErrorStatus = approvalStatus(error)
       if (approvalErrorStatus !== undefined && error instanceof ActionApprovalError) {
-        return sendJson(response, approvalErrorStatus, { error: error.message }, frameSources)
+        // O código viaja junto: sem ele a tela não distingue "falta a chave de
+        // acesso" de "isto não é seu", e mandaria a pessoa usar a passkey
+        // contra um erro que a passkey não resolve.
+        return sendJson(response, approvalErrorStatus, { error: error.message, code: error.code }, frameSources)
       }
       const conversationStatus = assistantConversationStatus(error)
       if (conversationStatus !== undefined && error instanceof AssistantConversationError) {
@@ -176,9 +206,6 @@ export async function apply(ctx: Context, config: StudioWebConfig = {}): Promise
     launcher: assistantSessions,
     sessions: ctx.sessionController,
   })
-  // Opcional de propósito: sem a autoridade montada a rota existe e responde
-  // NOT_CONFIGURED, em vez de sumir e virar 404 confuso.
-  const approvals = ctx.get('studioActionApproval')
   ctx.effect(() => ctx.webServer.register({
     kind: 'prefix', path: '/studio',
     handler: createStudioWebHandler({
@@ -187,7 +214,12 @@ export async function apply(ctx: Context, config: StudioWebConfig = {}): Promise
       allowedHosts: config.allowedHosts ?? [defaultHost, `localhost:${port}`],
       allowedOrigins: config.allowedOrigins ?? defaultOrigins,
       previewFrameSources: config.previewFrameSources ?? [ctx.studioPreview.frameSource],
-      ...(approvals === undefined ? {} : { actionApprovals: approvals.service }),
+      // Lidos a cada pedido, nunca capturados na montagem: a ordem entre
+      // plugins não é garantida, e um serviço que sobe depois deste precisa
+      // ser encontrado. Ausente no pedido, a rota responde NOT_CONFIGURED em
+      // vez de sumir num 404 confuso.
+      actionApprovals: () => ctx.get('studioActionApproval')?.service,
+      agentRuns: () => ctx.get('studioAgents'),
       assistantSessions,
     }),
   }), 'dz23-studio-web.http')
