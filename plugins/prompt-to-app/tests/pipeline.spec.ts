@@ -35,6 +35,7 @@ interface FixtureOptions {
   readonly preflight?: 'OK' | 'BLOCKED_EXTERNAL'
   readonly execute?: (directory: string, command: string) => Promise<FixtureExecutionResult>
   readonly finish?: BuilderLifecycleSession['finish']
+  readonly emergencyStop?: { assertRunning(scope: { readonly orgId: string; readonly tenantId: string }): void }
 }
 
 async function fixture(options: FixtureOptions = {}) {
@@ -76,6 +77,7 @@ async function fixture(options: FixtureOptions = {}) {
   const pipeline = new PromptToAppPipeline({
     service: service as unknown as PromptToAppService, builder: resolver,
     templateDirectory, runsRoot, now: () => new Date('2026-09-03T12:00:00.000Z'), createId: () => `id-${++id}`,
+    ...(options.emergencyStop === undefined ? {} : { emergencyStop: options.emergencyStop }),
   })
   return { pipeline, service, builder, resolver, execute, runs, transitions, evidence, templateDirectory, runsRoot }
 }
@@ -357,5 +359,40 @@ describe('E-06 e E-07: a execução deixa um relato que a pessoa consegue ler', 
     // motivo real da anterior, e não uma frase genérica.
     expect(reports.find(report => report.attempt === 1)?.correction).toBe(null)
     expect(reports.find(report => report.attempt === 2)?.correction).toBe('JSON inválido')
+  })
+})
+
+describe('E-11: a parada de emergência alcança o pipeline', () => {
+  it('escopo parado não começa execução: nada é lido, nada é gravado, nada transita', async () => {
+    const f = await fixture({
+      emergencyStop: {
+        assertRunning() {
+          const error = new Error('O Studio está parado por uma parada de emergência.') as Error & { code?: string }
+          error.code = 'STOPPED'
+          throw error
+        },
+      },
+    })
+    const generator = { generate: vi.fn(async () => cleanGeneration) }
+    await expect(f.pipeline.run(actor, 'project', generator)).rejects.toMatchObject({ code: 'STOPPED' })
+    // A recusa é a PRIMEIRA linha: nem o projeto foi lido, e por isso nenhuma
+    // execução pendente sobra para a próxima pessoa entender.
+    expect(f.service.project).not.toHaveBeenCalled()
+    expect(f.runs).toEqual([])
+    expect(f.transitions).toEqual([])
+    expect(generator.generate).not.toHaveBeenCalled()
+  })
+
+  it('a parada de OUTRO escopo não impede esta execução', async () => {
+    const f = await fixture({
+      emergencyStop: {
+        assertRunning(scope) {
+          if (scope.orgId === 'org-b') throw new Error('parado')
+        },
+      },
+    })
+    const generator = { generate: vi.fn(async () => cleanGeneration) }
+    await f.pipeline.run(actor, 'project', generator)
+    expect(generator.generate).toHaveBeenCalled()
   })
 })

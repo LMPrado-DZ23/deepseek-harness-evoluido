@@ -12,6 +12,7 @@ export default defineConfig({
       '@dz23-studio/assistant-bridge': fileURLToPath(new URL('./plugins/assistant-bridge/src/index.ts', import.meta.url)),
       '@dz23-studio/builder-supervisor': fileURLToPath(new URL('./plugins/builder-supervisor/src/index.ts', import.meta.url)),
       '@dz23-studio/storage-postgres/operator': fileURLToPath(new URL('./plugins/storage-postgres/src/operator.ts', import.meta.url)),
+      '@dz23-studio/emergency-stop': fileURLToPath(new URL('./plugins/emergency-stop/src/index.ts', import.meta.url)),
       '@dz23-studio/identity': fileURLToPath(new URL('./plugins/identity/src/index.ts', import.meta.url)),
       '@dz23-studio/integration-hub': fileURLToPath(new URL('./plugins/integration-hub/src/index.ts', import.meta.url)),
       '@dz23-studio/policy': fileURLToPath(new URL('./plugins/policy/src/index.ts', import.meta.url)),

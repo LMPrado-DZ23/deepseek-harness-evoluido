@@ -171,6 +171,15 @@ export async function apply(ctx: Context, config: Config = {}): Promise<void> {
           .strongIdentityForHarnessSession(String(parentSessionId))
       },
     },
+    // Resolvido a CADA delegação, nunca capturado aqui, e fora de `inject`: o
+    // botão de emergência é opcional no perfil, e um plugin que monte depois
+    // deste não pode encontrar um consumidor surdo.
+    emergencyStop: {
+      assertRunning(scope) {
+        const runtime = ctx.get('studioEmergencyStop')
+        if (runtime !== undefined) runtime.service.assertRunning(scope)
+      },
+    },
     jobs: {
       hasLiveJobs() {
         const seen = new Set<string>()

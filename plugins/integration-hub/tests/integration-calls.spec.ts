@@ -60,8 +60,11 @@ function manifest(overrides: Partial<IntegrationManifest> = {}): IntegrationMani
   return { ...value, signature: sign(null, canonicalManifestBytes(value), privateKey).toString('base64') }
 }
 
-async function build(options: { callPolicy?: Parameters<typeof buildService>[1] } = {}) {
-  return buildService(await scratchRoot(), options.callPolicy)
+async function build(options: {
+  callPolicy?: Parameters<typeof buildService>[1]
+  emergencyStop?: { assertRunning(scope: { readonly orgId: string; readonly tenantId: string }): void }
+} = {}) {
+  return buildService(await scratchRoot(), options.callPolicy, options.emergencyStop)
 }
 
 async function scratchRoot(): Promise<string> {
@@ -70,7 +73,11 @@ async function scratchRoot(): Promise<string> {
   return root
 }
 
-function buildService(root: string, callPolicy?: { timeoutMs?: number; maxCallsPerWindow?: number; windowMs?: number; retryOnce?: boolean }) {
+function buildService(
+  root: string,
+  callPolicy?: { timeoutMs?: number; maxCallsPerWindow?: number; windowMs?: number; retryOnce?: boolean },
+  emergencyStop?: { assertRunning(scope: { readonly orgId: string; readonly tenantId: string }): void },
+) {
   const repository = new MemoryRepository()
   let sequence = 0
   const service = new IntegrationHubService({
@@ -78,6 +85,7 @@ function buildService(root: string, callPolicy?: { timeoutMs?: number; maxCallsP
     secrets: { inspect: async () => ({ present: false, shapeOk: false }) },
     projects: { project: () => { throw Object.assign(new Error('nope'), { code: 'NOT_FOUND' }) }, runs: () => [] },
     ...(callPolicy === undefined ? {} : { callPolicy }),
+    ...(emergencyStop === undefined ? {} : { emergencyStop }),
     now: () => new Date('2026-09-04T00:00:00.000Z'), createId: () => `id-${++sequence}`,
   })
   return { service, repository }
@@ -312,5 +320,61 @@ describe('catálogo pelo serviço', () => {
     try { service.searchIntegrations(admin, { cursor: 'lixo' }) } catch (error) {
       expect(error).toMatchObject({ code: 'INVALID' })
     }
+  })
+})
+
+describe('E-11: a parada de emergência alcança as chamadas de integração', () => {
+  function stopped() {
+    const error = new Error('O Studio está parado por uma parada de emergência.') as Error & { code?: string }
+    error.code = 'STOPPED'
+    return error
+  }
+
+  it('escopo parado não chama fornecedor nenhum, e a recusa não gasta a cota de ninguém', async () => {
+    const { service } = await build({ emergencyStop: { assertRunning: () => { throw stopped() } } })
+    const running = await build()
+    const id = await enabled(running.service)
+    let called = false
+    await expect(service.callIntegration(admin, id, { operation: 'ler', idempotent: true }, async () => { called = true; return 1 }))
+      .rejects.toMatchObject({ code: 'STOPPED' })
+    expect(called).toBe(false)
+  })
+
+  it('a parada de outro escopo não impede esta chamada', async () => {
+    const { service } = await build({
+      emergencyStop: { assertRunning: scope => { if (scope.tenantId === 'ws-b') throw stopped() } },
+    })
+    const id = await enabled(service)
+    await expect(service.callIntegration(admin, id, { operation: 'ler', idempotent: true }, async () => 1))
+      .resolves.toMatchObject({ state: 'OK' })
+  })
+
+  it('cancelar por escopo abandona a chamada em voo, e NUNCA a conta como cancelada', async () => {
+    const { service } = await build()
+    const id = await enabled(service)
+    let observed: AbortSignal | undefined
+    const call = service.callIntegration(admin, id, { operation: 'lento', idempotent: true }, async signal => {
+      observed = signal
+      return new Promise<number>(resolve => { signal.addEventListener('abort', () => { resolve(0) }, { once: true }) })
+    })
+    await new Promise(resolve => { setTimeout(resolve, 0) })
+    // A lista devolvida é do que foi ABANDONADO: o Studio pediu desistência e
+    // não fala com o outro lado da rede.
+    expect(service.cancelScope({ orgId: 'org-a', tenantId: 'ws-a' })).toEqual([id])
+    expect(observed?.aborted).toBe(true)
+    await call
+    // Terminada, ela sai do registro: nada de relatar como "em voo" o que acabou.
+    expect(service.cancelScope({ orgId: 'org-a', tenantId: 'ws-a' })).toEqual([])
+  })
+
+  it('cancelar um escopo não toca chamada de outro', async () => {
+    const { service } = await build()
+    const id = await enabled(service)
+    const call = service.callIntegration(admin, id, { operation: 'lento', idempotent: true }, async signal =>
+      new Promise<number>(resolve => { signal.addEventListener('abort', () => { resolve(0) }, { once: true }) }))
+    await new Promise(resolve => { setTimeout(resolve, 0) })
+    expect(service.cancelScope({ orgId: otherTenant.orgId, tenantId: otherTenant.tenantId })).toEqual([])
+    service.cancelScope({ orgId: 'org-a', tenantId: 'ws-a' })
+    await call
   })
 })

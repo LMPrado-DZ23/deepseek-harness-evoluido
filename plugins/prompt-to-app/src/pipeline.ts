@@ -23,6 +23,7 @@ import { BUILD_STEPS, BuilderLifecycleError, type BuilderLifecycleResolverPort, 
 import { listTreeFiles } from './runner.js'
 import { scanGeneratedContent } from './security.js'
 import { PromptToAppError, type PromptToAppActor, type PromptToAppService } from './service.js'
+import type { EmergencyStopGuard } from './jobs.js'
 import { canStartGeneration } from './state.js'
 
 const generatedOutputSchema = z.object({ files: z.array(generatedFileSchema).min(1).max(80) }).strict()
@@ -55,6 +56,14 @@ export interface PipelineOptions {
   readonly logoStoreRoot?: string
   readonly now?: () => Date
   readonly createId?: () => string
+  /**
+   * O botão de emergência, quando este perfil tem um.
+   *
+   * Fica aqui além de ficar no serviço de trabalhos porque o pipeline também é
+   * chamado direto - por prova de runtime e por caminho interno - e uma parada
+   * que só valesse na porta HTTP não seria uma parada.
+   */
+  readonly emergencyStop?: EmergencyStopGuard
 }
 
 export interface PipelineResult { readonly state: 'VERIFIED_PROTOTYPE' | 'BUILD_FAILED' | 'TESTS_FAILED' | 'BLOCKED_EXTERNAL' | 'CANCELLED' | 'INTERRUPTED'; readonly runDirectory?: string; readonly attempts: number; readonly message: string }
@@ -65,6 +74,10 @@ export class PromptToAppPipeline {
   constructor(private readonly options: PipelineOptions) { this.#now = options.now ?? (() => new Date()); this.#createId = options.createId ?? randomUUID }
 
   async run(actor: PromptToAppActor, projectId: string, generator: CodeGeneratorPort, runOptions: PipelineRunOptions = {}): Promise<PipelineResult> {
+    // A primeira linha da execução, antes de ler projeto ou plano: começar a
+    // trabalhar em um escopo parado e só descobrir isso depois seria trabalho
+    // que a parada de emergência deveria ter impedido.
+    this.options.emergencyStop?.assertRunning({ orgId: actor.orgId, tenantId: actor.tenantId })
     const project = this.options.service.project(actor, projectId)
     const plan = this.options.service.plan(actor, projectId)
     if (plan.status !== 'APPROVED' || !canStartGeneration(project.state)) {

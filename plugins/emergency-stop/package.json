@@ -1,0 +1,25 @@
+{
+  "name": "@dz23-studio/emergency-stop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./lib/index.js",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "dz23-build": { "types": "./lib/index.d.ts", "default": "./lib/index.js" },
+      "types": "./src/index.ts",
+      "default": "./lib/index.js"
+    }
+  },
+  "files": ["lib"],
+  "scripts": { "build": "tsc -p tsconfig.build.json" },
+  "dependencies": {
+    "@deepseek-ai/cordis": "workspace:*",
+    "@deepseek-ai/dsh-storage-domain": "workspace:*",
+    "@dz23-studio/identity": "workspace:*",
+    "@dz23-studio/policy": "workspace:*",
+    "@dz23-studio/prompt-to-app": "workspace:*",
+    "zod": "4.4.3"
+  }
+}

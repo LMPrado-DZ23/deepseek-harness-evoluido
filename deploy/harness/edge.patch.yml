@@ -34,6 +34,7 @@
       studio_route_health: postgres
       studio_staging_releases: postgres
       studio_action_approvals: postgres
+      studio_emergency_stop: postgres
       studio_previews: postgres
       studio_preview_admissions: postgres
       studio_projects: postgres

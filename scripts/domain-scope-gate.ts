@@ -88,6 +88,12 @@ export const STUDIO_DOMAIN_SCOPES: readonly DomainScopeEntry[] = [
     },
   },
   {
+    source: 'plugins/emergency-stop/src/model.ts', exportName: 'studioEmergencyStopDomainSpec', physicalName: 'studio_emergency_stop',
+    tables: {
+      stops: { scope: 'org-tenant', requiredFields: ['org_id', 'tenant_id'], reason: 'Uma parada de emergência vale para uma organização e um inquilino; a parada de um nunca segura o trabalho de outro.' },
+    },
+  },
+  {
     source: 'plugins/hello/src/index.ts', exportName: 'studioHelloDomainSpec', physicalName: 'studio_hello',
     tables: { records: { scope: 'tenant-only-poc', requiredFields: ['tenant_id'], reason: 'PoC domain predates organizations.' } },
   },

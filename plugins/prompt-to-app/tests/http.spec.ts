@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CSRF_COOKIE, IdentityError, SESSION_COOKIE, type SessionRecord, type StudioIdentityService } from '@dz23-studio/identity'
 import type { StudioTenancyService } from '@dz23-studio/tenancy'
 import type { AppSpecV1 } from '../src/appspec.js'
-import { createPromptToAppHttpHandler, PROMPT_TO_APP_ROUTE_CONTRACTS } from '../src/http.js'
+import { createPromptToAppHttpHandler, registerPromptToAppWorkspaceHttpExtension, PROMPT_TO_APP_ROUTE_CONTRACTS } from '../src/http.js'
 import { IntakeEngine } from '../src/intake.js'
 import type { StudioApproval, StudioAppSpecRecord, StudioDesignSpecRecord, StudioEvidence, StudioIntakeTurn, StudioPlan, StudioProject, StudioRun } from '../src/model.js'
 import type { PromptToAppJobService } from '../src/jobs.js'
@@ -45,7 +45,7 @@ const servers: ReturnType<typeof createServer>[] = []
 const roots: string[] = []
 afterEach(async () => { await Promise.all(servers.splice(0).map(server => new Promise<void>(resolve => server.close(() => resolve())))); await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
 
-async function fixture() {
+async function fixture(options: { readonly emergencyStop?: { assertRunning(scope: { readonly orgId: string; readonly tenantId: string }): void } } = {}) {
   const repository = new MemoryRepository(); let id = 0
   const service = new PromptToAppService({ repository, now: () => new Date('2026-09-03T12:00:00.000Z'), createId: () => `id-${++id}` })
   const identity = { authenticate: vi.fn(() => Promise.resolve(session)), validateCsrf: vi.fn(), validateCsrfToken: vi.fn() }
@@ -78,6 +78,7 @@ async function fixture() {
     generatorFor: () => ({ generate: vi.fn() }),
     health: vi.fn(() => Promise.resolve({ state: 'OK', route: 'ollama', route_reason: 'Modelo local saudável preferido para leitura segura.', builder: 'OK', disk: 'OK' } as const)),
     allowedHosts, allowedOrigins,
+    ...(options.emergencyStop === undefined ? {} : { emergencyStop: options.emergencyStop }),
   }))
   servers.push(server)
   await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve) })
@@ -294,5 +295,62 @@ describe('prompt-to-app HTTP boundary', () => {
     expect((await f.request('/projects', { method: 'POST', body: '{invalid' })).status).toBe(400)
     expect((await f.request(`/projects/${project.project_id}`, { method: 'DELETE', body: '{}' })).status).toBe(200)
     expect(f.repository.projectRows[0]?.archived_at).not.toBeNull()
+  })
+})
+
+describe('E-11: a parada de emergência na porta de /api/studio/apps', () => {
+  function stopped() {
+    const error = new Error('O Studio está parado por uma parada de emergência.') as Error & { code?: string }
+    error.code = 'STOPPED'
+    return error
+  }
+
+  it('POST /generate responde 409 com a frase da parada, e o trabalho não é iniciado', async () => {
+    const f = await fixture({ emergencyStop: { assertRunning: () => { throw stopped() } } })
+    const created = await (await f.request('/projects', { method: 'POST', body: JSON.stringify({
+      name: 'Meu site', original_brief: 'Quero apresentar meu trabalho.', category: 'landing-page', privacy: 'local-only',
+    }) })).json() as { project: { project_id: string } }
+    const projectId = created.project.project_id
+    await f.service.saveSpec({ userId: 'owner', orgId: 'org-a', tenantId: 'tenant-a', role: 'owner' }, projectId, validSpec, 'intake')
+    await f.request(`/projects/${projectId}/plan`, { method: 'POST', body: '{}' })
+    await f.request(`/projects/${projectId}/plan/approve`, { method: 'POST', body: '{}' })
+    const refused = await f.request(`/projects/${projectId}/generate`, { method: 'POST', body: '{}' })
+    // 409, e não 500: a tela precisa distinguir "o Studio está parado de
+    // propósito" de "algo quebrou".
+    expect(refused.status).toBe(409)
+    expect(await refused.json()).toEqual({ error: expect.stringContaining('parada de emergência') })
+    expect(f.jobs.start).not.toHaveBeenCalled()
+  })
+
+  it('uma rota de espaço de trabalho não reivindicada continua sendo 404', async () => {
+    const f = await fixture()
+    expect((await f.request('/emergency-stop')).status).toBe(404)
+  })
+
+  it('uma fatia de espaço de trabalho recebe o pedido JÁ autenticado, com papel e escopo resolvidos', async () => {
+    // É assim que o botão de emergência entra sem abrir uma segunda autoridade
+    // sobre `/api/studio/apps`: quem diz quem é a pessoa continua sendo o
+    // núcleo, e a fatia só decide o que fazer.
+    const seen: unknown[] = []
+    const unregister = registerPromptToAppWorkspaceHttpExtension(async input => {
+      if (input.suffix !== '/emergency-stop') return false
+      seen.push(input.actor)
+      input.response.writeHead(200, { 'content-type': 'application/json' })
+      input.response.end('{"ok":true}')
+      return true
+    })
+    try {
+      const f = await fixture()
+      const response = await f.request('/emergency-stop')
+      expect(response.status).toBe(200)
+      expect(seen).toEqual([{ userId: 'owner', orgId: 'org-a', tenantId: 'tenant-a', role: 'owner', sessionId: 'session' }])
+      // E a mutação da fatia passa pelo MESMO CSRF das outras: o núcleo o valida
+      // antes de a fatia ver o pedido.
+      f.identity.validateCsrfToken.mockImplementationOnce(() => { throw new IdentityError('csrf', 'csrf') })
+      expect((await f.request('/emergency-stop', { method: 'POST', body: '{}' })).status).toBe(401)
+      expect(seen).toHaveLength(1)
+    } finally {
+      unregister()
+    }
   })
 })

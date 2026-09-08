@@ -127,6 +127,9 @@ importers:
       '@dz23-studio/assistant-bridge':
         specifier: workspace:*
         version: link:../../../plugins/assistant-bridge
+      '@dz23-studio/emergency-stop':
+        specifier: workspace:*
+        version: link:../../../plugins/emergency-stop
       '@dz23-studio/identity':
         specifier: workspace:*
         version: link:../../../plugins/identity
@@ -272,6 +275,27 @@ importers:
         version: link:../action-approval
 
   plugins/builder-supervisor: {}
+
+  plugins/emergency-stop:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:*
+        version: link:../../third_party/deepseek-harness/vendor/cordis
+      '@deepseek-ai/dsh-storage-domain':
+        specifier: workspace:*
+        version: link:../../third_party/deepseek-harness/packages/storage/storage-domain
+      '@dz23-studio/identity':
+        specifier: workspace:*
+        version: link:../identity
+      '@dz23-studio/policy':
+        specifier: workspace:*
+        version: link:../policy
+      '@dz23-studio/prompt-to-app':
+        specifier: workspace:*
+        version: link:../prompt-to-app
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
 
   plugins/hello:
     dependencies:
@@ -18896,6 +18920,7 @@ snapshots:
       '@dz23-studio/agent-team': link:plugins/agent-team
       '@dz23-studio/agents': link:plugins/agents
       '@dz23-studio/assistant-bridge': link:plugins/assistant-bridge
+      '@dz23-studio/emergency-stop': link:plugins/emergency-stop
       '@dz23-studio/identity': link:plugins/identity
       '@dz23-studio/integration-hub': link:plugins/integration-hub
       '@dz23-studio/policy': link:plugins/policy

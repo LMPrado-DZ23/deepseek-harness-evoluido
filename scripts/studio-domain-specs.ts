@@ -11,11 +11,13 @@ import { PROMPT_TO_APP_DOMAIN_SPECS } from '../plugins/prompt-to-app/src/model.t
 import { studioIntegrationsDomainSpec } from '../plugins/integration-hub/src/model.ts'
 import { studioStagingReleasesDomainSpec } from '../plugins/staging/src/domain.ts'
 import { studioActionApprovalsDomainSpec } from '../plugins/action-approval/src/domain.ts'
+import { studioEmergencyStopDomainSpec } from '../plugins/emergency-stop/src/model.ts'
 
 /** The only units migration tools may touch. Session/event logs use another seam. */
 export const STUDIO_DOMAIN_SPECS: readonly DomainSpec[] = [
   studioHelloDomainSpec,
   studioActionApprovalsDomainSpec,
+  studioEmergencyStopDomainSpec,
   identityUsersDomainSpec,
   identityCredentialsDomainSpec,
   identitySessionsDomainSpec,

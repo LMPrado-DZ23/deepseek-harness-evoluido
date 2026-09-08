@@ -26,6 +26,28 @@ export interface PromptToAppJobOwnerPort { create(actor: PromptToAppActor, runId
 
 export interface PromptToAppJobAccepted { readonly runId: string; readonly jobId: JobId }
 
+/**
+ * A pergunta que todo trabalho novo faz antes de começar.
+ *
+ * É uma interface estrutural, e não uma dependência do pacote de parada de
+ * emergência: assim o prompt-to-app continua subindo em qualquer perfil que não
+ * tenha aquele plugin, e a seta de dependência aponta em um sentido só.
+ *
+ * Contrato da recusa: `assertRunning` lança um `Error` com `code === 'STOPPED'`
+ * e uma mensagem já escrita para uma pessoa. É por esse código que a camada
+ * HTTP a distingue de uma falha interna - e por essa promessa que ela pode
+ * deixar a frase atravessar.
+ */
+export interface EmergencyStopGuard {
+  assertRunning(scope: { readonly orgId: string; readonly tenantId: string }): void
+}
+
+/** O que uma parada de emergência conseguiu pedir para parar neste escopo. */
+export interface PromptToAppScopeCancellation {
+  readonly requested: number
+  readonly alreadyFinished: number
+}
+
 export class PromptToAppJobService {
   readonly #active = new Map<string, {
     readonly actor: PromptToAppActor
@@ -43,9 +65,15 @@ export class PromptToAppJobService {
     readonly owners: PromptToAppJobOwnerPort
     readonly createId?: () => string
     readonly governor?: CapacityGovernor
+    /** Ausente = nenhum botão de emergência montado neste perfil, e nada a perguntar. */
+    readonly emergencyStop?: EmergencyStopGuard
   }) { this.#governor = options.governor ?? new MemoryCapacityGovernor() }
 
   async start(actor: PromptToAppActor, projectId: string, generator: CodeGeneratorPort): Promise<PromptToAppJobAccepted> {
+    // Antes de qualquer reserva de capacidade e antes de qualquer dono de
+    // trabalho ser criado: um escopo parado não pode nem chegar a segurar
+    // recurso, senão a parada de emergência seria uma fila de espera.
+    this.options.emergencyStop?.assertRunning({ orgId: actor.orgId, tenantId: actor.tenantId })
     this.options.service.assertAuthorized(actor, 'project.write')
     const project = this.options.service.project(actor, projectId)
     const plan = this.options.service.plan(actor, projectId)
@@ -112,6 +140,31 @@ export class PromptToAppJobService {
     const active = this.#active.get(scopeKey(actor, projectId))
     if (active === undefined) throw new PromptToAppError('NOT_FOUND', t('errors.generationNotActive'))
     return this.options.registry.kill(active.jobId, active.owner, t('pipeline.cancelledReason'))
+  }
+
+  /**
+   * Cancela TODA criação em voo de um escopo, sem passar por permissão.
+   *
+   * Não é uma segunda porta para o cancelamento comum: `cancel` continua sendo
+   * o caminho de uma pessoa cancelando o próprio projeto, com papel conferido e
+   * projeto existente. Este aqui é o braço da parada de emergência, que já
+   * autorizou uma vez e agora precisa alcançar projeto por projeto - inclusive
+   * os que a pessoa que apertou o botão não abriria.
+   *
+   * O recorte é `org_id:tenant_id`: a parada de uma organização nunca toca a
+   * criação de outra.
+   * @param scope - a organização e o inquilino parados.
+   * @returns quantas pararam por pedido e quantas já tinham terminado.
+   */
+  cancelScope(scope: { readonly orgId: string; readonly tenantId: string }): PromptToAppScopeCancellation {
+    let requested = 0
+    let alreadyFinished = 0
+    for (const active of [...this.#active.values()]) {
+      if (active.actor.orgId !== scope.orgId || active.actor.tenantId !== scope.tenantId) continue
+      const outcome = this.options.registry.kill(active.jobId, active.owner, t('pipeline.cancelledReason'))
+      if (outcome === 'requested') requested += 1; else alreadyFinished += 1
+    }
+    return { requested, alreadyFinished }
   }
 }
 

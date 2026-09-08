@@ -92,6 +92,29 @@ export interface StrongIdentityPort {
   strongIdentityVerified(parentSessionId: SessionId): boolean
 }
 
+/**
+ * A pergunta que toda delegação nova faz antes de começar.
+ *
+ * Interface estrutural de propósito: o plugin de agentes continua subindo em
+ * perfil sem botão de emergência. A recusa vem como `Error` com
+ * `code === 'STOPPED'` e uma frase já escrita para uma pessoa.
+ */
+export interface EmergencyStopGuard {
+  assertRunning(scope: { readonly orgId: string; readonly tenantId: string }): void
+}
+
+/** Uma execução que recebeu o pedido de parada e cujo fim o Studio NÃO consegue provar. */
+export interface UnprovenAgentStop {
+  readonly runId: string
+  readonly provider: AgentProvider
+}
+
+/** O que a parada de emergência alcançou nos assistentes de um escopo. */
+export interface AgentScopeCancellation {
+  readonly cancelled: number
+  readonly unproven: readonly UnprovenAgentStop[]
+}
+
 export interface AgentRepository {
   runs(): readonly AgentRunRecord[]
   leases(): readonly AgentLeaseRecord[]
@@ -195,7 +218,19 @@ function terminalText(result: SubagentResult): string {
 
 export class StudioAgentService {
   readonly #activePaths = new Map<string, { readonly workspaceId: string; readonly repositoryPath: string; readonly paths: readonly string[] }>()
-  readonly #inFlight = new Map<string, { cancel(reason: string): void; readonly done: Promise<JobOutcome> }>()
+  readonly #inFlight = new Map<string, {
+    cancel(reason: string): void
+    readonly done: Promise<JobOutcome>
+    /**
+     * O escopo da execução, guardado aqui porque `#activePaths` responde por
+     * espaço de trabalho e a parada de emergência recorta por
+     * `org_id:tenant_id`. Sem isto, parar uma organização cancelaria a execução
+     * de outra - ou não cancelaria nenhuma.
+     */
+    readonly orgId: string
+    readonly tenantId: string
+    readonly provider: AgentProvider
+  }>()
   readonly #applyingWorkspaces = new Set<string>()
   #ready: boolean
   #reconciliation: Promise<AgentRestartReconciliation> | undefined
@@ -206,6 +241,8 @@ export class StudioAgentService {
     readonly coordinators: CoordinatorPort
     readonly subagents: SubagentPort
     readonly identity: StrongIdentityPort
+    /** Ausente = nenhum botão de emergência montado neste perfil, e nada a perguntar. */
+    readonly emergencyStop?: EmergencyStopGuard
     readonly usage?: UsagePort
     readonly jobs: JobPort
     readonly now?: () => Date
@@ -225,6 +262,10 @@ export class StudioAgentService {
   }
 
   start(request: DelegationRequest): DelegationAccepted {
+    // Antes da recuperação, antes da aprovação, antes da reserva de caminhos:
+    // um escopo parado não delega nada, e descobrir isso só depois de reservar
+    // arquivos deixaria a reserva presa a um trabalho que nunca começou.
+    this.dependencies.emergencyStop?.assertRunning({ orgId: request.orgId, tenantId: request.tenantId })
     if (!this.#ready) {
       throw new DelegationError('INVALID_STATE', t('recovery.required'))
     }
@@ -263,7 +304,10 @@ export class StudioAgentService {
     const controller = new AbortController()
     const done = this.#execute(runId, request, paths, controller.signal)
       .finally(() => { this.#activePaths.delete(runId); this.#inFlight.delete(runId) })
-    this.#inFlight.set(runId, { cancel: reason => { controller.abort(reason) }, done })
+    this.#inFlight.set(runId, {
+      cancel: reason => { controller.abort(reason) }, done,
+      orgId: request.orgId, tenantId: request.tenantId, provider: request.provider,
+    })
     try {
       const jobId = this.dependencies.jobs.start({
         kind: 'studio-agent',
@@ -394,6 +438,31 @@ export class StudioAgentService {
     for (const lease of this.dependencies.repository.leases().filter(item => item.active && item.run_id === runId)) {
       await this.dependencies.repository.putLease({ ...lease, active: false, released_at: now })
     }
+  }
+
+  /**
+   * Cancela toda delegação em voo de UM escopo, para uma parada de emergência.
+   *
+   * O que o Studio consegue provar morto entra em `cancelled`; o que ele não
+   * consegue entra em `unproven` com o provedor pelo nome. A regra é a mesma de
+   * `survivesRestart`: `spawn-in-process` morre junto com o processo do Studio,
+   * enquanto `codex` e `claude-code` são processos do sistema operacional com
+   * vida própria - o pedido de parada sai, e o Studio NÃO tem como provar que
+   * eles pararam. Contá-los como cancelados seria a mentira que a tela de
+   * emergência não pode contar.
+   * @param scope - a organização e o inquilino parados.
+   * @returns o que parou e o que não pôde ser provado morto.
+   */
+  cancelScope(scope: { readonly orgId: string; readonly tenantId: string }): AgentScopeCancellation {
+    let cancelled = 0
+    const unproven: UnprovenAgentStop[] = []
+    for (const [runId, entry] of [...this.#inFlight.entries()]) {
+      if (entry.orgId !== scope.orgId || entry.tenantId !== scope.tenantId) continue
+      entry.cancel('emergency-stop')
+      if (survivesRestart(entry.provider)) unproven.push({ runId, provider: entry.provider })
+      else cancelled += 1
+    }
+    return { cancelled, unproven }
   }
 
   /**

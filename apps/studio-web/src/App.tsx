@@ -1,12 +1,13 @@
 import { Bell, LogOut, Menu, Sparkles, UserRound } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { api, apiResponse, type HealthState } from './api'
+import { api, apiResponse, csrfToken, type HealthState } from './api'
 import type { Category } from './categories'
 import t from './i18n/pt-BR.json'
 import { currentStepIndex, permanentTruthKind, privacyNotice, resultSentence, routeReasonNotice, type ProjectUiState } from './presentation'
 import { apiFailureMessage, apiFailureText, type ApiCallKind } from './pwa/apiFailure'
 import { GENERATION_REJECTED_STATE, postGeneration, startGeneration } from './pwa/generation'
 import { NotificationOptIn } from './pwa/NotificationOptIn'
+import { browserEmergencyStopPort, EmergencyStop } from './EmergencyStop'
 import { RunReport, isRunReport, type RunReportValue } from './RunReport'
 import { dispatchGenerationFinished } from './pwa/notifications'
 import { signOutInBrowser } from './session/signOut'
@@ -22,6 +23,12 @@ type VerificationCode = { email: string; code: string; expires_at: string }
 type PipelineResult = { state: 'VERIFIED_PROTOTYPE' | 'BUILD_FAILED' | 'TESTS_FAILED' | 'BLOCKED_EXTERNAL' | 'CANCELLED' | 'INTERRUPTED'; attempts: number; message: string; checks?: AcceptanceCheck[]; verificationCodes?: VerificationCode[] }
 type ProjectDetails = { project: { state: ProjectUiState }; current_run: null | { operation_id: string; state: 'PENDING' | 'RUNNING' | 'PASSED' | 'FAILED' | 'BLOCKED_EXTERNAL' | 'BUDGET_EXCEEDED' | 'CANCELLED'; stage: string; attempt: number; failure_code: string | null; acceptance_checks: AcceptanceCheck[]; verification_codes?: VerificationCode[] } }
 type Preview = { preview_id: string; state: 'REQUESTED' | 'STARTING' | 'READY' | 'STOPPING' | 'STOPPED' | 'FAILED' | 'EXPIRED'; health: 'PENDING' | 'OK' | 'DOWN'; url: string; expires_at: string }
+/**
+ * O acesso do botão de emergência à rota, criado UMA vez fora do componente.
+ * Recriá-lo a cada pintura faria a tela reler o estado sem parar, e a leitura
+ * roda em um efeito que depende dele.
+ */
+const emergencyPort = browserEmergencyStopPort(csrfToken)
 const steps = [
   [t.progress.idea, t.progress.ideaDetail], [t.progress.questions, t.progress.questionsDetail],
   [t.progress.plan, t.progress.planDetail], [t.progress.creation, t.progress.creationDetail],
@@ -268,6 +275,9 @@ export function App() {
         {preview?.state === 'READY' ? <section className="preview-card"><div className="preview-heading"><div><h2>{t.preview.title}</h2><p>{t.preview.localOnly}</p></div><button className="secondary compact" onClick={() => void stopPreview()}>{t.preview.stop}</button></div><p className="truth">{t.preview.notPublished}</p>{previewCodes.length === 0 ? null : <section className="preview-codes" aria-live="polite"><h3>{t.preview.accessCodes}</h3><p>{t.preview.accessCodesHelp}</p><ul>{previewCodes.map(item => <li key={`${item.email}-${item.expires_at}-${item.code}`}><strong>{item.email}</strong>: <code>{item.code}</code></li>)}</ul></section>}<iframe ref={previewFrame} title={t.preview.frameTitle} src={`${preview.url}/__dz23/admission`} sandbox="allow-scripts allow-forms allow-same-origin" referrerPolicy="no-referrer" /></section> : null}
         {preview !== null && ['FAILED', 'EXPIRED', 'STOPPED'].includes(preview.state) ? <p className="context-note">{t.preview.closed}</p> : null}
         {error === '' ? null : <p className="error" role="alert">{error}</p>}
+        {/* O botão de emergência fica VISÍVEL o tempo todo, e não escondido em
+            configurações: quem precisa dele está com pressa. */}
+        <EmergencyStop port={emergencyPort} />
       </section><Progress state={projectState} /></main>
     </section>
   </div>

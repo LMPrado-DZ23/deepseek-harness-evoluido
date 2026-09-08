@@ -1,0 +1,22 @@
+{
+  "errors": {
+    "stopped": "O Studio está parado por uma parada de emergência. Nada novo começa até alguém retomar.",
+    "forbidden": "Você não tem permissão para acionar ou retomar a parada de emergência.",
+    "strongIdentityRequired": "Retomar exige confirmação com sua chave de acesso nesta sessão. Parar não exige; retomar exige.",
+    "releaseReasonRequired": "Escreva o motivo da retomada, com pelo menos {min} caracteres. Quem religa assume a volta.",
+    "notStopped": "Este escopo não está parado.",
+    "reasonTooLong": "O motivo é longo demais.",
+    "jsonRequired": "Envie os dados em JSON.",
+    "requestTooLarge": "O pedido é grande demais.",
+    "routeNotFound": "Endereço não encontrado.",
+    "operationFailed": "Não foi possível concluir a operação."
+  },
+  "surfaces": {
+    "promptToApp": "Criações de aplicativo em andamento",
+    "agents": "Assistentes em andamento",
+    "integrations": "Chamadas de integração em andamento",
+    "failed": "O Studio não conseguiu falar com esta parte para interrompê-la; a parada continua valendo e nada novo começa aqui.",
+    "externalAgent": "Um assistente externo ({provider}) recebeu o pedido de parada, mas o Studio não consegue provar que o processo dele terminou.",
+    "integrationInFlight": "Uma chamada já saiu para o provedor; o Studio pediu desistência, mas não pode provar que o outro lado parou."
+  }
+}

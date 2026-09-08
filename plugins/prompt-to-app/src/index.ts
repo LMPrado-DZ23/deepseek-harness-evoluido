@@ -12,7 +12,7 @@ import { mkdir, statfs } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 import { createPromptToAppHttpHandler, type StudioAppsHealth } from './http.js'
-import { PromptToAppJobService, type PromptToAppJobRegistry } from './jobs.js'
+import { PromptToAppJobService, type EmergencyStopGuard, type PromptToAppJobRegistry } from './jobs.js'
 import {
   studioAppSpecsDomainSpec,
   studioApprovalsDomainSpec,
@@ -83,6 +83,12 @@ export interface PromptToAppPluginConfig {
 export interface StudioPromptToAppRuntime {
   readonly service: PromptToAppService
   readonly pipeline: PromptToAppPipeline
+  /**
+   * As criações em voo, expostas para que uma parada de emergência alcance
+   * TODAS as deste escopo. Sem isto, o botão só conseguiria barrar a próxima -
+   * e um botão que só impede o próximo não é botão de emergência.
+   */
+  readonly jobs: PromptToAppJobService
   health(): Promise<StudioAppsHealth>
 }
 
@@ -160,13 +166,24 @@ export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}):
     roots: builderRoots,
     registryReference: config.builderLifecycle?.registryReference ?? `file:${builderRuntimeRegistryPath(builderRoots)}`,
   })
-  const pipeline = new PromptToAppPipeline({ service, builder, templateDirectory, runsRoot, logoStoreRoot })
+  // Resolvido a CADA pergunta, nunca capturado aqui. O botão de emergência é
+  // opcional no perfil: se ele não subiu, não há nada a perguntar; se ele subir
+  // DEPOIS deste plugin, a próxima pergunta já o encontra. Capturar o serviço
+  // agora deixaria o botão morto exatamente na ordem de montagem que ninguém
+  // testa.
+  const emergencyStop: EmergencyStopGuard = {
+    assertRunning(scope) {
+      const runtime = ctx.get('studioEmergencyStop')
+      if (runtime !== undefined) runtime.service.assertRunning(scope)
+    },
+  }
+  const pipeline = new PromptToAppPipeline({ service, builder, templateDirectory, runsRoot, logoStoreRoot, emergencyStop })
   const registry: PromptToAppJobRegistry = {
     start: spec => ctx.jobs.start(spec as JobStart) as JobId,
     kill: (id, owner, reason) => ctx.jobs.kill(id, owner, reason),
   }
   const jobs = new PromptToAppJobService({
-    service, pipeline, registry,
+    service, pipeline, registry, emergencyStop,
     owners: {
       async create(_actor, runId) {
         const handle = await ctx.agents.create({
@@ -195,7 +212,7 @@ export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}):
     return { state, route, route_reason: route === null ? null : selected.reason, builder: builderHealth.state, disk }
   }
   const health = () => healthFor({ orgId: 'studio-system', tenantId: 'studio-system' })
-  ctx.provide('studioPromptToApp', { service, pipeline, health })
+  ctx.provide('studioPromptToApp', { service, pipeline, jobs, health })
 
   const port = ctx.webServer.port
   const defaultHost = `127.0.0.1:${port}`; const defaultOrigin = `http://localhost:${port}`
@@ -203,7 +220,7 @@ export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}):
     kind: 'prefix', path: '/api/studio/apps',
     handler: createPromptToAppHttpHandler({
       service, identity: ctx.studioIdentity.service, tenancy: ctx.studioTenancy.service,
-      intake, planner, jobs,
+      intake, planner, jobs, emergencyStop,
       logos: new SharpLogoProcessor(logoStoreRoot),
       generatorFor: (actor, projectId) => new ModelCodeGenerator(model, actor, service.project(actor, projectId).privacy),
       health: actor => healthFor({ orgId: actor.orgId, tenantId: actor.tenantId }),

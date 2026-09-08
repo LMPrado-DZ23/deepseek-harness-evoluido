@@ -197,8 +197,21 @@ export interface HubServiceOptions {
    * casa, nunca "sem limite".
    */
   callPolicy?: Partial<IntegrationCallPolicy>
+  /** Ausente = nenhum botão de emergência montado neste perfil, e nada a perguntar. */
+  emergencyStop?: EmergencyStopGuard
   now?: () => Date
   createId?: () => string
+}
+
+/**
+ * A pergunta que toda chamada de integração faz antes de sair.
+ *
+ * Interface estrutural: o Hub continua subindo em perfil sem botão de
+ * emergência. A recusa vem como `Error` com `code === 'STOPPED'` e uma frase já
+ * escrita para uma pessoa.
+ */
+export interface EmergencyStopGuard {
+  assertRunning(scope: { readonly orgId: string; readonly tenantId: string }): void
 }
 
 export class HubError extends Error {
@@ -255,6 +268,15 @@ export class IntegrationHubService {
    * that is never equal to, nor earlier than, the previous one.
    */
   #lastStamp = 0
+  /**
+   * As chamadas que JÁ saíram, por escopo, para que uma parada de emergência
+   * possa pedir desistência a cada uma.
+   *
+   * Pedir desistência não é provar que parou: o outro lado da rede não responde
+   * ao Studio. Por isso `cancelScope` devolve a lista do que abandonou, e quem
+   * chamou apresenta essas chamadas como não provadas em vez de canceladas.
+   */
+  readonly #liveCalls = new Map<string, Map<AbortController, string>>()
 
   constructor(private readonly options: HubServiceOptions) {
     this.#now = options.now ?? (() => new Date())
@@ -565,6 +587,10 @@ export class IntegrationHubService {
     invoke: (signal: AbortSignal) => Promise<T>,
   ): Promise<IntegrationCallResult<T>> {
     this.#authorize(actor, 'project.write')
+    // Um escopo parado não fala com fornecedor nenhum. A pergunta vem antes do
+    // registro e antes do teto: uma chamada barrada pela parada não pode nem
+    // gastar a cota de quem ainda vai voltar a trabalhar.
+    this.options.emergencyStop?.assertRunning({ orgId: actor.orgId, tenantId: actor.tenantId })
     const record = this.#integration(actor, integrationId)
     const operation = auditOperation(request.operation)
     // Uma integração desligada, ou cuja assinatura não confere, não é chamada por
@@ -587,7 +613,7 @@ export class IntegrationHubService {
     let outcome: { readonly state: 'OK'; readonly value: T } | { readonly state: 'FAILED' | 'TIMEOUT'; readonly failure: string }
     for (;;) {
       attempts += 1
-      outcome = await this.#attemptCall(invoke)
+      outcome = await this.#attemptCall(invoke, this.#scope(actor), integrationId)
       // Contado por TENTATIVA: duas tentativas que estouraram o tempo são dois
       // estouros, e somar um só esconderia metade da espera que a pessoa pagou.
       if (outcome.state === 'TIMEOUT') timeouts += 1
@@ -623,11 +649,14 @@ export class IntegrationHubService {
    * `catch`: uma chamada abandonada que rejeita depois não pode derrubar o
    * processo como rejeição sem dono.
    */
-  async #attemptCall<T>(invoke: (signal: AbortSignal) => Promise<T>): Promise<{ readonly state: 'OK'; readonly value: T } | { readonly state: 'FAILED' | 'TIMEOUT'; readonly failure: string }> {
+  async #attemptCall<T>(invoke: (signal: AbortSignal) => Promise<T>, scopeKey: string, integrationId: string): Promise<{ readonly state: 'OK'; readonly value: T } | { readonly state: 'FAILED' | 'TIMEOUT'; readonly failure: string }> {
     const abandon = new AbortController()
     let timer: ReturnType<typeof setTimeout> | undefined
     const running = (async () => invoke(abandon.signal))()
     running.catch(() => undefined)
+    const live = this.#liveCalls.get(scopeKey) ?? new Map<AbortController, string>()
+    live.set(abandon, integrationId)
+    this.#liveCalls.set(scopeKey, live)
     try {
       const value = await Promise.race([
         running,
@@ -647,7 +676,34 @@ export class IntegrationHubService {
       return { state: 'FAILED', failure: error instanceof Error ? error.name : 'Error' }
     } finally {
       clearTimeout(timer)
+      // A chamada saiu do registro assim que termina, de qualquer jeito que
+      // termine. Sem isto, o mapa cresceria para sempre e a parada de emergência
+      // relataria como "em voo" chamadas que acabaram há horas.
+      live.delete(abandon)
+      if (live.size === 0) this.#liveCalls.delete(scopeKey)
     }
+  }
+
+  /**
+   * Pede desistência a toda chamada de integração em voo de um escopo.
+   *
+   * O Studio abandona a espera e avisa o adaptador pelo sinal; o que o
+   * fornecedor faz do outro lado da rede ele não controla nem observa. Por isso
+   * o retorno é a LISTA do que foi abandonado, e não uma contagem de
+   * canceladas: quem chamou apresenta essas chamadas como não provadas.
+   * @param scope - a organização e o inquilino parados.
+   * @returns os identificadores das integrações cujas chamadas foram abandonadas.
+   */
+  cancelScope(scope: { readonly orgId: string; readonly tenantId: string }): readonly string[] {
+    const key = `${scope.orgId}\u0000${scope.tenantId}`
+    const live = this.#liveCalls.get(key)
+    if (live === undefined) return []
+    const abandoned: string[] = []
+    for (const [controller, integrationId] of [...live.entries()]) {
+      controller.abort()
+      abandoned.push(integrationId)
+    }
+    return abandoned
   }
 
   /**

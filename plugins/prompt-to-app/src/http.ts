@@ -15,7 +15,7 @@ import { designSelectionSchema } from './design.js'
 import { t } from './i18n.js'
 import { intakeAnswerSchema, nextIntakeQuestion, type IntakeConversation, type IntakeEngine } from './intake.js'
 import type { CodeGeneratorPort } from './pipeline.js'
-import type { PromptToAppJobService } from './jobs.js'
+import type { EmergencyStopGuard, PromptToAppJobService } from './jobs.js'
 import { RUN_REPORT_FILE } from './run-report.js'
 import { FormCategoryCapabilityError, type PlannerEngine } from './planner.js'
 import { studioProjectCategorySchema } from './model.js'
@@ -49,6 +49,34 @@ const HTTP_EXTENSIONS = new Set<PromptToAppHttpExtension>()
 export function registerPromptToAppHttpExtension(extension: PromptToAppHttpExtension): () => void {
   HTTP_EXTENSIONS.add(extension)
   return () => { HTTP_EXTENSIONS.delete(extension) }
+}
+
+/**
+ * O mesmo pedido de uma fatia, mas de uma rota que NÃO pertence a um projeto.
+ *
+ * A extensão de projeto exige `projectId` porque toda rota dela vive debaixo de
+ * um projeto. Existe fatia cujo assunto é o espaço de trabalho inteiro - a
+ * parada de emergência é o exemplo: ela vale para `org_id:tenant_id`, e forçá-la
+ * a se pendurar em um projeto qualquer inventaria um dono que ela não tem.
+ */
+export interface PromptToAppWorkspaceHttpExtensionRequest {
+  readonly request: IncomingMessage
+  readonly response: ServerResponse
+  readonly actor: PromptToAppActor
+  readonly suffix: string
+}
+
+export type PromptToAppWorkspaceHttpExtension = (input: PromptToAppWorkspaceHttpExtensionRequest) => Promise<boolean>
+const WORKSPACE_HTTP_EXTENSIONS = new Set<PromptToAppWorkspaceHttpExtension>()
+
+/**
+ * Registers a workspace-scoped slice under the same `/api/studio/apps`
+ * authority: authentication, CSRF and role resolution stay in the core, and the
+ * slice only owns its own suffix grammar.
+ */
+export function registerPromptToAppWorkspaceHttpExtension(extension: PromptToAppWorkspaceHttpExtension): () => void {
+  WORKSPACE_HTTP_EXTENSIONS.add(extension)
+  return () => { WORKSPACE_HTTP_EXTENSIONS.delete(extension) }
 }
 
 export interface StudioAppsHealth {
@@ -99,6 +127,8 @@ export interface PromptToAppHttpConfig {
   readonly health: (actor: PromptToAppActor) => Promise<StudioAppsHealth>
   readonly allowedHosts: readonly string[]
   readonly allowedOrigins: readonly string[]
+  /** Ausente = nenhum botão de emergência montado neste perfil, e nada a perguntar. */
+  readonly emergencyStop?: EmergencyStopGuard
 }
 
 export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
@@ -111,8 +141,17 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
       // The core authenticates every extension request, but each extension owns
       // its exact suffix grammar. This prevents a second route list from drifting.
       const extension = matched === undefined ? /^\/projects\/([^/]+)(\/.+)$/u.exec(route) : null
-      if (matched === undefined && extension === null) return json(response, 404, { error: t('errors.routeNotFound') })
       const actor = await authenticatedActor(request, config)
+      if (matched === undefined && extension === null) {
+        // Uma rota que não é de projeto ainda pode pertencer a uma fatia de
+        // espaço de trabalho. Ela é oferecida DEPOIS da autenticação, pelo mesmo
+        // motivo das de projeto: quem decide quem é a pessoa é o núcleo, não a
+        // fatia. Ninguém reivindicando, continua sendo 404.
+        for (const handler of WORKSPACE_HTTP_EXTENSIONS) {
+          if (await handler({ request, response, actor, suffix: route })) return
+        }
+        return json(response, 404, { error: t('errors.routeNotFound') })
+      }
       if (extension !== null) {
         const input: PromptToAppHttpExtensionRequest = {
           request, response, actor,
@@ -196,6 +235,11 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
         return json(response, 200, { plan: await config.service.approvePlan(actor, projectId) })
       }
       if (request.method === 'POST' && matched.suffix === '/generate') {
+        // A porta por onde a pessoa manda começar. O serviço de trabalhos
+        // pergunta de novo logo adiante, e a repetição é de propósito: esta
+        // recusa vira 409 com a frase da parada, em vez de um erro genérico
+        // vindo de dentro.
+        config.emergencyStop?.assertRunning({ orgId: actor.orgId, tenantId: actor.tenantId })
         const plan = config.service.plan(actor, projectId)
         if (plan.status !== 'APPROVED') throw new PromptToAppError('INVALID', t('errors.planRequired'))
         const accepted = await config.jobs.start(actor, projectId, config.generatorFor(actor, projectId))
@@ -333,8 +377,18 @@ function statusOf(error: unknown): number {
   if (error instanceof PromptToAppError) return error.code === 'NOT_FOUND' ? 404 : error.code === 'FORBIDDEN' ? 403 : error.code === 'CAPACITY' ? 429 : error.code === 'REPLAY' ? 409 : 400
   if (error instanceof FormCategoryCapabilityError) return 409
   if (error instanceof InvalidTransitionError) return 409
+  // A recusa do botão de emergência vem de outro plugin, então não há classe a
+  // testar aqui - só o código que o contrato de `EmergencyStopGuard` promete.
+  // 409 e não 403: não é falta de permissão, é o Studio parado de propósito, e
+  // a tela precisa dessa diferença para mostrar como retomar.
+  if (isEmergencyStopRefusal(error)) return 409
   if (error instanceof z.ZodError || error instanceof SyntaxError) return 400
   return 500
+}
+
+/** Uma recusa por parada de emergência, reconhecida pelo código que o contrato do guarda promete. */
+function isEmergencyStopRefusal(error: unknown): boolean {
+  return error instanceof Error && (error as { readonly code?: unknown }).code === 'STOPPED'
 }
 
 async function readJson(request: IncomingMessage): Promise<unknown> {

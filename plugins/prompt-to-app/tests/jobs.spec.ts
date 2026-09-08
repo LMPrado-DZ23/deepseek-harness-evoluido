@@ -101,3 +101,83 @@ describe('Prompt-to-App background jobs', () => {
     expect(pipeline.run).not.toHaveBeenCalled()
   })
 })
+
+describe('E-11: a parada de emergência alcança as criações', () => {
+  /** A recusa como o guarda promete: `Error` com `code === 'STOPPED'`. */
+  function stopped() {
+    const error = new Error('O Studio está parado por uma parada de emergência.') as Error & { code?: string }
+    error.code = 'STOPPED'
+    return error
+  }
+
+  it('escopo parado não começa criação, e nada é reservado antes da recusa', async () => {
+    const registry: PromptToAppJobRegistry = { start: vi.fn(), kill: vi.fn(() => 'already-finished' as const) }
+    const service = { assertAuthorized: vi.fn(), project: vi.fn(), plan: vi.fn() }
+    const owners = { create: vi.fn() }
+    const jobs = new PromptToAppJobService({
+      service: service as unknown as PromptToAppService,
+      pipeline: { run: vi.fn() } as unknown as PromptToAppPipeline,
+      registry, owners, createId: () => 'run-parado',
+      emergencyStop: { assertRunning: () => { throw stopped() } },
+    })
+
+    await expect(jobs.start(actor, 'project', { generate: vi.fn() })).rejects.toMatchObject({ code: 'STOPPED' })
+    // A recusa vem antes de tudo: nem permissão foi conferida, nem dono criado,
+    // nem trabalho registrado - senão a parada viraria uma fila de espera.
+    expect(service.assertAuthorized).not.toHaveBeenCalled()
+    expect(owners.create).not.toHaveBeenCalled()
+    expect(registry.start).not.toHaveBeenCalled()
+  })
+
+  it('cancela TODA criação em voo do escopo, e nenhuma de outro', async () => {
+    let hooks!: { cancel(reason?: string): void; done: Promise<JobOutcome> }
+    const killed: string[] = []
+    const registry: PromptToAppJobRegistry = {
+      start: vi.fn(spec => { hooks = spec.run(); return `job-${String(killed.length)}` as JobId }),
+      kill: vi.fn((id: JobId) => { killed.push(String(id)); hooks.cancel(); return 'requested' as const }),
+    }
+    const service = { assertAuthorized: vi.fn(), project: vi.fn(() => ({ state: 'PLAN_APPROVED' })), plan: vi.fn(() => ({ status: 'APPROVED' })) }
+    const pipeline = { run: vi.fn(() => new Promise(() => undefined)) }
+    let next = 0
+    // Governador que sempre admite: o assunto aqui é o ALCANCE da parada, e um
+    // teto de capacidade recusando a terceira criação esconderia justamente o
+    // caso de dois escopos convivendo.
+    const unlimited = {
+      acquireBundle: async () => ({ leaseId: `lease-${String(next)}` }),
+      heartbeat: async () => ({ leaseId: 'lease' }), release: async () => undefined,
+      reconcile: async () => ({}), snapshot: async () => ({ leases: [] }),
+    }
+    const jobs = new PromptToAppJobService({
+      service: service as unknown as PromptToAppService, pipeline: pipeline as unknown as PromptToAppPipeline, registry,
+      owners: { create: vi.fn(async () => ({ owner: {} as Agent, dispose: vi.fn(async () => undefined) })) },
+      createId: () => `run-${String((next += 1))}`,
+      governor: unlimited as unknown as MemoryCapacityGovernor,
+    })
+    await jobs.start(actor, 'projeto-1', { generate: vi.fn() })
+    await jobs.start(actor, 'projeto-2', { generate: vi.fn() })
+    await jobs.start({ ...actor, orgId: 'org-b', tenantId: 'tenant-b' }, 'projeto-3', { generate: vi.fn() })
+
+    expect(jobs.cancelScope({ orgId: 'org-a', tenantId: 'tenant-a' })).toEqual({ requested: 2, alreadyFinished: 0 })
+    expect(killed).toHaveLength(2)
+    // O trabalho da outra organização continua: uma parada nunca atravessa o
+    // recorte de quem a acionou.
+    expect(jobs.cancelScope({ orgId: 'org-b', tenantId: 'tenant-b' })).toEqual({ requested: 1, alreadyFinished: 0 })
+  })
+
+  it('um trabalho que já terminou é contado como tal, não como cancelado', async () => {
+    const registry: PromptToAppJobRegistry = {
+      start: vi.fn(spec => { spec.run(); return 'job-1' as JobId }),
+      kill: vi.fn(() => 'already-finished' as const),
+    }
+    const service = { assertAuthorized: vi.fn(), project: vi.fn(() => ({ state: 'PLAN_APPROVED' })), plan: vi.fn(() => ({ status: 'APPROVED' })) }
+    const jobs = new PromptToAppJobService({
+      service: service as unknown as PromptToAppService,
+      pipeline: { run: vi.fn(() => new Promise(() => undefined)) } as unknown as PromptToAppPipeline,
+      registry,
+      owners: { create: vi.fn(async () => ({ owner: {} as Agent, dispose: vi.fn(async () => undefined) })) },
+      createId: () => 'run-1',
+    })
+    await jobs.start(actor, 'projeto-1', { generate: vi.fn() })
+    expect(jobs.cancelScope({ orgId: 'org-a', tenantId: 'tenant-a' })).toEqual({ requested: 0, alreadyFinished: 1 })
+  })
+})

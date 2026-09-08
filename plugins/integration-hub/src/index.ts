@@ -281,6 +281,15 @@ export async function apply(ctx: Context, config: IntegrationHubConfig = {}): Pr
     },
     exportsRoot, publisherKeys, channel, runsRoot,
     emailTest: config.smtpTestEnabled === true ? smtpTestPort(ctx.credentials) : undefined,
+    // Resolvido a CADA chamada, nunca capturado aqui, e fora de `inject`: o
+    // botão de emergência é opcional no perfil, e um plugin que monte depois
+    // deste não pode encontrar um consumidor surdo.
+    emergencyStop: {
+      assertRunning(scope) {
+        const runtime = ctx.get('studioEmergencyStop')
+        if (runtime !== undefined) runtime.service.assertRunning(scope)
+      },
+    },
   })
   ctx.provide('studioIntegrationHub', { service })
   ctx.effect(() => ctx.webServer.register({

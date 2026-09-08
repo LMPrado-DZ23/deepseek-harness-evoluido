@@ -58,6 +58,9 @@ describe('@dz23-studio/agents composition', { timeout: 30_000 }, () => {
         if (typeof disposer === 'function') disposers.push([label, disposer as () => unknown])
       }),
       logger: { warn: vi.fn() },
+      // O botão de emergência é opcional no perfil: o plugin de agentes pergunta
+      // por ele a cada delegação e segue quando ninguém responde.
+      get: vi.fn(() => undefined),
       provide: vi.fn((_name: string, value: StudioAgentsRuntime) => { runtime = value }),
       on: vi.fn(() => vi.fn()),
       studioPolicy: { setDelegationGrantResolver: vi.fn(() => vi.fn()) },

@@ -119,6 +119,7 @@ function harness(options: {
   liveJobs?: boolean
   liveJobChecks?: readonly boolean[]
   discardLeaseWrites?: boolean
+  emergencyStop?: { assertRunning(scope: { readonly orgId: string; readonly tenantId: string }): void }
 } = {}) {
   const repository = new MemoryRepository(options.hideLeases, options.hideRuns, options.discardLeaseWrites)
   for (const record of options.initialRuns ?? []) repository.runMap.set(record.run_id, record)
@@ -163,6 +164,7 @@ function harness(options: {
       }),
     },
     identity: { strongIdentityVerified: vi.fn(() => options.strongIdentity ?? true) },
+    ...(options.emergencyStop === undefined ? {} : { emergencyStop: options.emergencyStop }),
     ...(options.usage === undefined ? {} : { usage: { tokensFor: () => options.usage } }),
     ...(options.omitClock ? {} : { now: () => new Date('2026-09-03T00:00:00.000Z') }),
     ...(options.omitId ? {} : { createId: options.createId ?? (() => 'run-1') }),
@@ -624,5 +626,59 @@ describe('StudioAgentService PoC 3A', () => {
     await expect(failed.service.applyProposal(proposal.runId, { approved: true, tier: 'T2', approvedBy: 'u' }))
       .rejects.toThrow('git apply failed')
     expect(failed.repository.runs()[0]?.status).toBe('PROPOSED')
+  })
+})
+
+describe('E-11: a parada de emergência alcança as delegações', () => {
+  /** Uma parada que vale para um escopo só, como a de verdade. */
+  function stoppedFor(orgId: string, tenantId: string) {
+    return {
+      assertRunning(scope: { readonly orgId: string; readonly tenantId: string }) {
+        if (scope.orgId !== orgId || scope.tenantId !== tenantId) return
+        const error = new Error('O Studio está parado por uma parada de emergência.') as Error & { code?: string }
+        error.code = 'STOPPED'
+        throw error
+      },
+    }
+  }
+
+  it('escopo parado não delega, e a recusa vem ANTES de qualquer reserva de arquivo', () => {
+    const h = harness({ emergencyStop: stoppedFor('org-1', 'tenant-1') })
+    expect(() => h.service.start(request())).toThrow('parada de emergência')
+    // Nenhuma reserva ficou presa a um trabalho que nunca começou: a próxima
+    // delegação, com a parada levantada, não encontra conflito de caminho.
+    const running = harness()
+    expect(() => running.service.start(request())).not.toThrow()
+  })
+
+  it('a parada de um escopo não segura a delegação de outro', () => {
+    const h = harness({ emergencyStop: stoppedFor('org-2', 'tenant-2') })
+    expect(() => h.service.start(request())).not.toThrow()
+  })
+
+  it('cancelar por escopo interrompe o que roda e NÃO finge que provou o processo externo morto', () => {
+    let next = 0
+    const h = harness({
+      createId: () => `run-${String((next += 1))}`,
+      resultFactory: signal => new Promise(resolve => {
+        signal.addEventListener('abort', () => { resolve(completed()) }, { once: true })
+      }),
+    })
+    h.service.start(request({ provider: 'spawn-in-process' }))
+    h.service.start(request({ provider: 'codex', intendedPaths: ['docs'] }))
+    const outcome = h.service.cancelScope({ orgId: 'org-1', tenantId: 'tenant-1' })
+    // `spawn-in-process` morre junto com o Studio: isso é prova. `codex` é
+    // processo do sistema operacional com vida própria: não é.
+    expect(outcome.cancelled).toBe(1)
+    expect(outcome.unproven.map(item => item.provider)).toEqual(['codex'])
+  })
+
+  it('cancelar por escopo não toca a execução de outra organização', () => {
+    const h = harness({ resultFactory: signal => new Promise(resolve => {
+      signal.addEventListener('abort', () => { resolve(completed()) }, { once: true })
+    }) })
+    h.service.start(request())
+    const outcome = h.service.cancelScope({ orgId: 'org-outra', tenantId: 'tenant-outro' })
+    expect(outcome).toEqual({ cancelled: 0, unproven: [] })
   })
 })
