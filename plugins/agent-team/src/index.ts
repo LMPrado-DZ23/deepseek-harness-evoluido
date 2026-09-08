@@ -16,6 +16,7 @@ import {
 } from './service.js'
 
 export * from './model.js'
+export * from './roles.js'
 export * from './service.js'
 
 export const name = 'dz23-studio-agent-team'

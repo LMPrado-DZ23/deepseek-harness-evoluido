@@ -188,6 +188,7 @@ try {
   // Descoberta não é uso: sem `tool-skill` no preset o agente vê o nome no
   // catálogo e não tem como abrir o corpo. A ferramenta é o que fecha isso.
   assert.ok(tools.includes('skill'), `O agente não recebeu a ferramenta de skill. Ferramentas: ${tools.join(', ')}`)
+  process.stdout.write(`GLOBALTOOLS=${booted.ctx.tools.schemas().map(tool => tool.name).sort().join(',')}\n`)
 
   const telemetrySharing = booted.ctx.telemetry?.sharing ?? 'no-service'
   // `no-service` significa que a linha de telemetria não montou nesta casa de

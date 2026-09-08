@@ -1,4 +1,5 @@
 import { normalizeDelegationPath } from '@dz23-studio/agents';
+import { roleToolRestriction } from '@dz23-studio/agent-team';
 import { roleAllows } from '@dz23-studio/policy';
 import { lstat, readFile, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
@@ -72,7 +73,12 @@ export class StudioAssistantBridge {
             ...(sensitive === 'external-network' ? { usesExternalNetwork: true } : {}),
             ...(repository.budget === undefined ? {} : { budget: repository.budget }),
             ...(input.provider === 'spawn-in-process' && sensitive !== 'external-network'
-                ? { inProcess: { toolFilter: { deny: ['network'] }, persona: t('runtime.persona') } }
+                // A MESMA política do papel de construtor (A-06): lista de PERMISSÃO,
+                // com nomes reais. O que havia aqui era `deny: ['network']` — um nome
+                // que não existe no Harness, ou seja, uma recusa que não removia
+                // ferramenta nenhuma. Reusar a política em vez de escrever outra lista
+                // impede as duas de divergirem sem ninguém perceber.
+                ? { inProcess: { toolFilter: roleToolRestriction('implementer', false), persona: t('runtime.persona') } }
                 : {}),
         });
         this.#jobs.set(accepted.runId, { jobId: accepted.jobId, owner: agent, userId: principal.userId });

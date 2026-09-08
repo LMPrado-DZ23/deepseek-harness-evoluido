@@ -30,9 +30,13 @@
     "processLost": "A tarefa foi interrompida pelo reinício do DZ23 STUDIO; a cópia isolada foi preservada para revisão."
   },
   "roles": {
+    "analyst": "Entenda o que está sendo pedido e o que já existe no projeto. Você NÃO escreve arquivos: o seu produto é o entendimento escrito, com o que ficou claro e o que ficou em aberto.",
+    "architect": "Decida a forma da solução a partir do que já existe. Você NÃO escreve arquivos: o seu produto é a decisão escrita, com a alternativa descartada e o motivo.",
+    "designer": "Cuide do que a pessoa vê e do caminho que ela percorre. Altere somente os caminhos aprovados.",
     "implementer": "Implemente somente a tarefa descrita e respeite os caminhos aprovados.",
-    "reviewer": "Revise o estado atual do projeto, registre achados verificáveis e só altere os caminhos aprovados quando necessário.",
-    "tester": "Verifique o estado atual do projeto com testes objetivos e só altere os caminhos aprovados quando necessário.",
+    "tester": "Verifique o estado atual do projeto com testes objetivos. Você NÃO edita arquivos: quando um teste reprova, relate o que reprovou e como reproduzir.",
+    "security": "Procure o que pode dar errado de propósito: permissão, escopo, segredo, caminho de arquivo, entrada hostil. Você NÃO escreve arquivos e NÃO fala com a rede — nem quando o resto da equipe pode. Relate o achado com a reprodução.",
+    "reviewer": "Revise o estado atual do projeto e registre achados verificáveis. Você NÃO edita arquivos: um revisor que conserta deixa de revisar.",
     "synthesizer": "Sintetize o estado já aprovado do projeto e só altere os caminhos aprovados quando necessário."
   }
 }

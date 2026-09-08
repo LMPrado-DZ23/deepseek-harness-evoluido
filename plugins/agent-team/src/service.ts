@@ -10,6 +10,7 @@ import {
 } from '@dz23-studio/agents'
 import { randomUUID } from 'node:crypto'
 import type { AgentTeamRecord, AgentTeamRole, AgentTeamTaskRecord } from './model.js'
+import { AGENT_TEAM_ROLES, roleToolRestriction } from './roles.js'
 import { t } from './i18n.js'
 
 export interface AgentTeamTaskInput {
@@ -254,7 +255,10 @@ export class StudioAgentTeamService {
           ...(sensitive === 'deploy' ? { touchesDeploy: true } : {}),
           ...(budget === undefined ? {} : { budget }),
           inProcess: {
-            toolFilter: sensitive === 'external-network' ? undefined : { deny: ['network'] },
+            // A-06: a recusa é POR PAPEL e por NOME REAL de ferramenta. O que
+            // havia aqui era `deny: ['network']` — um nome que não existe no
+            // Harness, ou seja, uma recusa que não recusava nada.
+            toolFilter: roleToolRestriction(task.role, sensitive === 'external-network'),
             persona: t(`roles.${task.role}`),
           },
         })
@@ -360,7 +364,7 @@ function validateRequest(request: AgentTeamStartRequest): { name: string; tasks:
     if (typeof task.prompt !== 'string') throw new AgentTeamError('INVALID_PLAN', t('errors.taskPrompt'))
     const prompt = task.prompt.trim()
     if (prompt.length < 3 || prompt.length > 20_000) throw new AgentTeamError('INVALID_PLAN', t('errors.taskPrompt'))
-    if (!['implementer', 'reviewer', 'tester', 'synthesizer'].includes(task.role)) throw new AgentTeamError('INVALID_PLAN', t('errors.taskRole'))
+    if (!(AGENT_TEAM_ROLES as readonly string[]).includes(task.role)) throw new AgentTeamError('INVALID_PLAN', t('errors.taskRole'))
     if (!Array.isArray(task.intendedPaths) || task.intendedPaths.length < 1 || task.intendedPaths.length > 20
       || task.intendedPaths.some((path: unknown) => typeof path !== 'string')) {
       throw new AgentTeamError('INVALID_PLAN', t('errors.taskPaths'))

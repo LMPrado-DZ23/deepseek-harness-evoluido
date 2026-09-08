@@ -160,7 +160,12 @@ describe('StudioAgentTeamService', () => {
     expect(h.start).toHaveBeenCalledTimes(2)
     expect(h.start).toHaveBeenNthCalledWith(1, expect.objectContaining({
       prompt: expect.stringContaining('Implemente somente'), intendedPaths: ['src/core'],
-      inProcess: { toolFilter: { deny: ['network'] }, persona: expect.stringContaining('Implemente somente') },
+      // A-06: o construtor ESCREVE, então só a rede é recusada — e pelos nomes
+      // REAIS. O que havia aqui era `deny: ['network']`, um nome que não existe
+      // no Harness: a recusa não recusava nada.
+      // A-06: PERMISSÃO por papel, com nomes REAIS. O construtor escreve e,
+      // sem aprovação de rede externa, não enxerga as ferramentas de rede.
+      inProcess: { toolFilter: { allow: ['edit', 'read', 'read_image', 'str_replace_editor', 'write'] }, persona: expect.stringContaining('Implemente somente') },
     }))
     expect(h.service.activeTaskCount()).toBe(2)
     expect(h.service.teams()).toHaveLength(1)
@@ -220,7 +225,10 @@ describe('StudioAgentTeamService', () => {
     expect(h.start).toHaveBeenCalledWith(expect.objectContaining({
       usesExternalNetwork: true,
       approval: { approved: true, tier: 'T3', approvedBy: 'user-1' },
-      inProcess: expect.objectContaining({ toolFilter: undefined }),
+      // Aprovada para rede externa, o construtor passa a enxergar a rede.
+      inProcess: expect.objectContaining({
+        toolFilter: { allow: ['edit', 'read', 'read_image', 'str_replace_editor', 'web_fetch', 'web_search', 'write'] },
+      }),
     }))
 
     for (const sensitive of ['secrets', 'deploy'] as const) {

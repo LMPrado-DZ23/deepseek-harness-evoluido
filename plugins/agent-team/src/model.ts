@@ -1,5 +1,6 @@
 import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 import { z } from 'zod'
+import { AGENT_TEAM_ROLES } from './roles.js'
 
 export const agentTeamStatusSchema = z.enum([
   'RUNNING',
@@ -22,7 +23,12 @@ export const agentTeamTaskStatusSchema = z.enum([
   'UNKNOWN',
 ])
 
-export const agentTeamRoleSchema = z.enum(['implementer', 'reviewer', 'tester', 'synthesizer'])
+/**
+ * Os papéis (A-06). A lista vem de `roles.ts`, onde cada um também declara o
+ * que pode tocar: um papel que existisse aqui sem linha lá seria um nome sem
+ * poder definido, que é o defeito que este requisito tinha.
+ */
+export const agentTeamRoleSchema = z.enum(AGENT_TEAM_ROLES)
 
 export const agentTeamSchema = z.object({
   team_id: z.string().min(1),

@@ -21,6 +21,7 @@
     "gate:domain-scopes": "tsx scripts/check-domain-scopes.ts",
     "gate:domain-routes": "tsx scripts/check-domain-routes.ts",
     "gate:assistant-tools": "tsx scripts/check-assistant-tool-catalog.ts",
+    "gate:team-role-tools": "tsx scripts/check-team-role-tools.ts --self-test",
     "prove:assistant-package": "pnpm --filter @dz23-studio/agents build && pnpm --filter @dz23-studio/agent-team build && pnpm --filter @dz23-studio/assistant-bridge build && node scripts/prove-assistant-package.mjs",
     "prove:assistant-session": "node scripts/prove-assistant-session-runtime.mjs",
     "storage:export-sqlite": "tsx scripts/export-sqlite-storage.ts",
