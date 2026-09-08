@@ -1,6 +1,23 @@
 # DZ23 STUDIO production profile. Deterministic/fake providers live only in
 # poc-01b.patch.yml and are never mounted by the release command.
 
+# Telemetria comercial desligada NO PERFIL, e não só na imagem.
+#
+# O bundle upstream monta `session-telemetry-otel` em FEEDBACK_ONLY apontando
+# para harness-telemetry.deepseeksvc.com, e o próprio comentário upstream diz
+# que o export é a cópia crua da sessão, sem regra de redaction. Até aqui, a
+# única coisa que impedia isso era `DSH_TELEMETRY_DISABLED=1` no Dockerfile —
+# quem rodasse o perfil fora daquela imagem (desenvolvimento, prova, WSL)
+# mandava conversa de cliente para um endpoint de terceiro sem saber.
+#
+# Um patch substitui o `config` inteiro da linha, então isto também apaga a
+# URL do exportador. Em `DISABLED` o plugin não constrói pipeline nenhum e nem
+# lê o endpoint. O `DSH_TELEMETRY_DISABLED` da imagem continua, como segunda
+# tranca: aqui não se troca uma tranca por outra.
+- id: session-telemetry-otel
+  config:
+    mode: DISABLED
+
 - id: agent-presets
   config:
     default: dz23-assistant

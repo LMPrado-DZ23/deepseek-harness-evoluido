@@ -201,13 +201,17 @@ export class StudioRouteHealthService {
     const input = usage?.inputTokens ?? 0
     const output = usage?.outputTokens ?? 0
     const price = this.config.prices?.[route]
+    // Sem preço não existe custo conhecido: a requisição é contada como não
+    // precificada em vez de somar 0 e virar "custou zero" na apresentação.
     const cost = price === undefined ? 0 : (input * price.inputPerMillion + output * price.outputPerMillion) / 1_000_000
+    const unpriced = (previous.unpriced_requests ?? 0) + (price === undefined ? 1 : 0)
     await this.repository.putRoute({
       ...previous, state, requests, errors,
       average_latency_ms: ((previous.average_latency_ms * previous.requests) + latencyMs) / requests,
       input_tokens: previous.input_tokens + input,
       output_tokens: previous.output_tokens + output,
       estimated_cost_usd: previous.estimated_cost_usd + cost,
+      unpriced_requests: unpriced,
       last_failure: failure ?? previous.last_failure,
       updated_at: (this.config.now?.() ?? new Date()).toISOString(),
     })
@@ -224,3 +228,24 @@ export class StudioRouteHealthService {
 }
 
 export const ROUTE_FAILURE_MESSAGE = 'A conexão com a inteligência artificial falhou. Nada foi aplicado; tente novamente ou escolha outra rota.'
+
+/**
+ * O que se pode honestamente dizer sobre o custo de uma rota.
+ *
+ * `UNKNOWN`: nenhuma requisição tinha preço - o número somado é zero porque
+ * ninguém sabia, não porque nada foi gasto.
+ * `PARTIAL`: parte teve preço; o valor é um piso, não o total.
+ * `MEASURED`: toda requisição contada tinha preço configurado.
+ */
+export type RouteCostState = 'MEASURED' | 'PARTIAL' | 'UNKNOWN'
+
+/**
+ * Classifica o custo de uma rota pelo que realmente se sabe.
+ * @param record - o registro da rota.
+ * @returns o estado do custo, para quem for apresentar o número.
+ */
+export function routeCostState(record: Pick<RouteHealthRecord, 'requests' | 'unpriced_requests'>): RouteCostState {
+  const unpriced = record.unpriced_requests ?? 0
+  if (record.requests === 0 || unpriced === 0) return 'MEASURED'
+  return unpriced >= record.requests ? 'UNKNOWN' : 'PARTIAL'
+}

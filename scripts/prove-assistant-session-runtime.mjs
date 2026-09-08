@@ -165,6 +165,17 @@ try {
   // passava a reprovar uma sessão correta, e o único jeito de "consertar" seria
   // mexer no número - exatamente o verde artificial que não se pode dar.
   const governed = tools.filter(name => name.startsWith('studio_agent_') || name.startsWith('studio_team_'))
+  // Telemetria: o bundle upstream sobe `session-telemetry-otel` em
+  // FEEDBACK_ONLY apontando para um coletor de terceiro, com o export sendo a
+  // cópia crua da sessão. O perfil do Studio zera isso por composição. Aqui a
+  // prova é do runtime real, não da leitura do YAML.
+  const telemetrySharing = booted.ctx.telemetry?.sharing ?? 'no-service'
+  // `no-service` significa que a linha de telemetria não montou nesta casa de
+  // prova - foi assim ANTES e DEPOIS de o perfil zerar o modo, então este
+  // ponto não fecha S-14 sozinho; quem fecha é o portão que lê o perfil
+  // (scripts/telemetry-off.spec.mjs). O que a prova de runtime garante é o que
+  // ela pode garantir de verdade: a sessão NUNCA sobe compartilhando.
+  assert.ok(['disabled', 'no-service'].includes(telemetrySharing), `A sessão subiu compartilhando telemetria: ${telemetrySharing}.`)
   assert.deepEqual(governed, [...ASSISTANT_TOOL_NAMES].sort(), 'As ferramentas expostas na sessão divergem do catálogo da ponte.')
 
   const approvals = []
@@ -254,6 +265,7 @@ try {
     repository: inspected.meta.cwd,
     tools: tools.length,
     governedTools: governed.length,
+    telemetrySharing,
     conversationTurn: realLocalModel ? 'PASS_WITH_REAL_LOCAL_MODEL' : 'PASS_WITH_DETERMINISTIC_PROVIDER',
     provider: realLocalModel ? `ollama/${localModel}` : 'studio-fake/studio-deterministic',
     approval: {

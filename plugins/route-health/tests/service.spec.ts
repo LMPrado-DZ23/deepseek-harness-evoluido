@@ -4,6 +4,7 @@ import type { RouteHealthRecord, RouteSwitchEvent } from '../src/model.ts'
 import {
   ROUTE_FAILURE_MESSAGE,
   StudioRouteHealthService,
+  routeCostState,
   type RouteHealthRepository,
   type RouteScope,
 } from '../src/service.ts'
@@ -186,5 +187,45 @@ describe('StudioRouteHealthService', () => {
       () => chunks({ type: 'finish', reason: { kind: 'stop' } }), () => chunks()))
     await collect(subject.streamWithFallback(scope, direct, () => chunks(error('one of three')), () => chunks()))
     expect(subject.list(scope).find(record => record.route === 'new-direct-route')?.state).toBe('DEGRADED')
+  })
+})
+
+describe('custo que ninguém mediu', () => {
+  it('não apresenta "não sei o preço" como custo zero', async () => {
+    // A soma tratava preço ausente como 0 e gravava um número que parece
+    // medido. Zero gasto e zero conhecimento são coisas diferentes, e só uma
+    // delas pode virar cifra na tela. `ollama` não tem preço configurado.
+    const h = service()
+    await h.service.initialize(scope, new Set(['ollama']))
+    await collect(h.service.streamWithFallback(scope, { ...options, provider: 'ollama' }, () => chunks(
+      { type: 'usage', usage: { inputTokens: 1_000, outputTokens: 500 } },
+      { type: 'finish', reason: { kind: 'stop' } },
+    ), () => chunks()))
+    const record = h.service.list(scope).find(row => row.route === 'ollama')!
+    expect(record.requests).toBe(1)
+    expect(record.estimated_cost_usd).toBe(0)
+    expect(record.unpriced_requests).toBe(1)
+    expect(routeCostState(record)).toBe('UNKNOWN')
+  })
+
+  it('a rota com preço continua medida', async () => {
+    const h = service()
+    await h.service.initialize(scope, new Set(['omniroute']))
+    await collect(h.service.streamWithFallback(scope, options, () => chunks(
+      { type: 'usage', usage: { inputTokens: 10, outputTokens: 5 } },
+      { type: 'finish', reason: { kind: 'stop' } },
+    ), () => chunks()))
+    const record = h.service.list(scope).find(row => row.route === 'omniroute')!
+    expect(record.unpriced_requests).toBe(0)
+    expect(routeCostState(record)).toBe('MEASURED')
+  })
+
+  it('distingue o piso do total quando só parte tem preço', () => {
+    expect(routeCostState({ requests: 0, unpriced_requests: 0 })).toBe('MEASURED')
+    expect(routeCostState({ requests: 4, unpriced_requests: 0 })).toBe('MEASURED')
+    expect(routeCostState({ requests: 4, unpriced_requests: 1 })).toBe('PARTIAL')
+    expect(routeCostState({ requests: 4, unpriced_requests: 4 })).toBe('UNKNOWN')
+    // Registro gravado antes de o campo existir: nenhuma não precificada.
+    expect(routeCostState({ requests: 4 })).toBe('MEASURED')
   })
 })
