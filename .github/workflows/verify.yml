@@ -120,8 +120,36 @@ jobs:
           # O ledger e a fonte unica de "o que falta". Sem este portao, um
           # requisito aceito pode sumir ou virar STABLE sem prova.
           pnpm gate:requirements-ledger
+          # Varredura de segredo: a CI não tinha nenhuma, e um segredo colado
+          # por engano entrava no histórico sem um único sinal.
+          pnpm gate:secrets
+          # P37 de licença. Recusa a família fonte-disponível (BSL, SSPL,
+          # AGPL, Elastic, Commons Clause) e exige revisão humana registrada
+          # para qualquer licença que não esteja nas duas listas.
+          pnpm gate:licenses
+          # Inventário CycloneDX, direto do lockfile pelo próprio pnpm - não
+          # se reimplementa o que a ferramenta já faz certo. Sem ele não há
+          # como responder "esta CVE me atinge?" senão relendo o repositório no
+          # pior momento possível.
+          pnpm sbom:cyclonedx
           pnpm test:postgres-discovery
           node scripts/test-postgres.mjs --list
+
+      - name: Dependency advisories
+        # Precisa de rede, então NÃO roda fora da CI e nenhuma prova local a
+        # cobre. `continue-on-error` é deliberado: um aviso novo publicado hoje
+        # não pode reprovar um commit que não mudou dependência nenhuma - o
+        # sinal aparece no log e vira tarefa, em vez de virar ruído que se
+        # aprende a ignorar.
+        continue-on-error: true
+        run: pnpm audit --audit-level high
+
+      - name: Publish the SBOM
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sbom-cyclonedx
+          path: sbom.cdx.json
+          if-no-files-found: error
 
       - name: Studio web interface suite
         # A tela por onde a pessoa autoriza uma ação sensível tem vitest

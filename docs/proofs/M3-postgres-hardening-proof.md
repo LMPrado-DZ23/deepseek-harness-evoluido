@@ -10,7 +10,7 @@ Harness (`prove:backup-restore`, `prove:storage-migration`, `prove:postgres-runt
 ## Como rodar
 
 ```
-PATH=/root/shim:$PATH DZ23_POSTGRES_TEST_DSN=postgresql://dz23_test:dz23test@127.0.0.1:5432/dz23_test \
+PATH=/root/shim:$PATH DZ23_POSTGRES_TEST_DSN=postgresql://dz23_test:***@127.0.0.1:5432/dz23_test \
   DZ23_POSTGRES_TEST_CONTAINER=shim npx vitest run plugins/storage-postgres --reporter=dot
 ```
 

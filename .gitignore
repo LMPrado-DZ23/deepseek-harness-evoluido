@@ -24,3 +24,4 @@ apps/studio-web/dist/
 apps/studio-web/test-results/
 apps/studio-web/playwright-report/
 apps/studio-web/test-results-hub/
+sbom.cdx.json

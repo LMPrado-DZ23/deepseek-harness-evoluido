@@ -1,0 +1,44 @@
+{
+  "khroma": {
+    "declared": "sem licença no package.json",
+    "verdadeira": "MIT",
+    "evidencia": "node_modules/khroma/license: \"The MIT License (MIT)\"",
+    "decisao": "allowed",
+    "motivo": "MIT confirmada no arquivo de licença; a ausência é só do campo do package.json"
+  },
+  "union": {
+    "declared": "sem licença no package.json",
+    "verdadeira": "MIT",
+    "evidencia": "node_modules/union/LICENSE: texto MIT integral",
+    "decisao": "allowed",
+    "motivo": "MIT confirmada no arquivo de licença"
+  },
+  "@modelcontextprotocol/server-everything": {
+    "declared": "SEE LICENSE IN LICENSE",
+    "verdadeira": "MIT",
+    "evidencia": "README.md: \"licensed under the MIT License\"",
+    "decisao": "allowed",
+    "motivo": "MIT declarada no README do próprio pacote"
+  },
+  "@modelcontextprotocol/server-filesystem": {
+    "declared": "SEE LICENSE IN LICENSE",
+    "verdadeira": "MIT",
+    "evidencia": "README.md: \"licensed under the MIT License\"",
+    "decisao": "allowed",
+    "motivo": "MIT declarada no README do próprio pacote"
+  },
+  "@anthropic-ai/claude-agent-sdk": {
+    "declared": "SEE LICENSE IN README.md",
+    "verdadeira": "proprietária, todos os direitos reservados",
+    "evidencia": "node_modules/@anthropic-ai/claude-agent-sdk/LICENSE.md: \"© Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance\"",
+    "decisao": "blocked-for-release",
+    "motivo": "Não é redistribuível. Chega ao perfil do Studio por @deepseek-ai/dsh-subagent-claude-code, que está em dsh-home/profiles/studio/package.json. Enquanto essa dependência existir, o artefato NÃO pode ser publicado. A saída é tirar o subagente claude-code do perfil ou manter o artefato como instalação privada. A decisão é do Prado (ver C-05)."
+  },
+  "@anthropic-ai/claude-agent-sdk-linux-x64": {
+    "declared": "SEE LICENSE IN LICENSE.md",
+    "verdadeira": "proprietária, todos os direitos reservados",
+    "evidencia": "mesmo texto do pacote principal",
+    "decisao": "blocked-for-release",
+    "motivo": "Binário do pacote acima; mesma restrição."
+  }
+}
