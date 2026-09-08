@@ -36,6 +36,13 @@ export interface DelegationRequest {
         readonly toolFilter?: unknown;
         readonly persona?: string;
     };
+    /**
+     * O trabalho interrompido cuja CÓPIA ISOLADA será reaproveitada (A-03).
+     *
+     * Preenchido só por `resume`. Presente, a execução confere e reusa a cópia em
+     * vez de criar uma nova — que é a diferença entre retomar e recomeçar.
+     */
+    readonly resumeFrom?: Pick<AgentRunRecord, 'repository_path' | 'worktree_path' | 'base_commit'>;
 }
 export interface WorktreeSnapshot {
     readonly repositoryPath: string;
@@ -50,6 +57,16 @@ export interface WorktreeDiff {
 }
 export interface WorktreePort {
     create(repositoryPath: string, runId: string): Promise<WorktreeSnapshot>;
+    /**
+     * A cópia isolada que JÁ EXISTE, conferida e devolvida sem ser tocada (A-03).
+     *
+     * É o que separa retomar de recomeçar: `create` faz `reset --hard`, que
+     * apagaria o trabalho parcial que sobreviveu ao reinício — que é exatamente o
+     * que a retomada existe para aproveitar. Aqui só se confere que a cópia ainda
+     * é do repositório certo, ainda está no lugar certo e ainda parte do mesmo
+     * commit, e devolve-se o retrato.
+     */
+    resume(record: Pick<AgentRunRecord, 'repository_path' | 'worktree_path' | 'base_commit'>): Promise<WorktreeSnapshot>;
     diff(snapshot: WorktreeSnapshot): Promise<WorktreeDiff>;
     mainFingerprint(repositoryPath: string): Promise<string>;
     applyProposal(record: AgentRunRecord): Promise<void>;
@@ -156,6 +173,38 @@ export declare class DelegationError extends Error {
     constructor(code: 'APPROVAL_REQUIRED' | 'WRITE_CONFLICT' | 'INVALID_PATH' | 'INVALID_STATE' | 'PROPOSAL_TAMPERED' | 'WORKTREE_TAMPERED', message: string);
 }
 export declare function normalizeDelegationPath(value: string, allowWildcard?: boolean, invalid?: (path: string) => Error): string;
+/** A cerca que uma reserva carrega. Reserva antiga, sem o campo, vale como 0 — a mais fraca. */
+export declare function leaseFence(lease: Pick<AgentLeaseRecord, 'fence'>): number;
+/**
+ * O próximo número de cerca para um repositório dentro de um espaço de trabalho.
+ *
+ * Derivado do MAIOR já visto ali, e não de um contador em memória: um contador
+ * em memória voltaria a zero no reinício, e a primeira reserva depois de um
+ * reinício receberia um número menor do que o da reserva que ela precisa
+ * superar — exatamente o zumbi que a cerca existe para barrar, com os papéis
+ * trocados. Reservas liberadas continuam contando: elas são liberadas, nunca
+ * apagadas.
+ * @param leases - todas as reservas conhecidas.
+ * @param scope - o espaço de trabalho e o repositório.
+ * @returns o número a gravar na reserva nova.
+ */
+export declare function nextFence(leases: readonly AgentLeaseRecord[], scope: {
+    readonly workspaceId: string;
+    readonly repositoryPath: string;
+}): number;
+/**
+ * A cerca que TORNOU VELHA a desta execução, quando existe.
+ *
+ * Só conta reserva de OUTRA execução, no mesmo repositório do mesmo espaço de
+ * trabalho, que toque algum dos mesmos caminhos e que tenha número MAIOR.
+ * Empate não supera: duas reservas com o mesmo número seriam um defeito de
+ * `nextFence`, e tratar empate como superação faria uma execução barrar a si
+ * mesma numa releitura.
+ * @param leases - todas as reservas conhecidas.
+ * @param runId - a execução que quer escrever.
+ * @returns o número que a superou, ou `undefined` quando ela ainda é a mais nova.
+ */
+export declare function supersedingFence(leases: readonly AgentLeaseRecord[], runId: string): number | undefined;
 export declare class StudioAgentService {
     #private;
     private readonly dependencies;
@@ -177,6 +226,44 @@ export declare class StudioAgentService {
     /** Recompute and verify a proposal without applying it or persisting its body. */
     reviewProposal(runId: string): Promise<WorktreeDiff>;
     applyProposal(runId: string, approval: DelegationApproval): Promise<ProposalApplied>;
+    /**
+     * Se este trabalho pode ser RETOMADO (A-03).
+     *
+     * Duas condições, e as duas são recusas de segurança, não de conveniência:
+     *
+     * - o Studio tem que ter PROVADO que ele parou. `UNKNOWN` significa
+     *   "pode estar rodando por fora agora"; retomar ali seria colocar dois
+     *   trabalhadores escrevendo na mesma cópia, e o segundo nem saberia do
+     *   primeiro. `survivesRestart` é a mesma regra que a reconciliação usa;
+     * - ele tem que ter sido interrompido por um reinício, e não ter falhado
+     *   sozinho, estourado o orçamento ou sido cancelado por alguém. Retomar um
+     *   trabalho que a pessoa CANCELOU seria desfazer o cancelamento dela.
+     * @param run - o registro.
+     * @returns se `resumeRun` aceitaria este trabalho.
+     */
+    static resumable(run: Pick<AgentRunRecord, 'status' | 'provider' | 'interrupted_by_restart'>): boolean;
+    /**
+     * Retoma um trabalho interrompido por um reinício, NA CÓPIA QUE SOBROU.
+     *
+     * O que é retomado é o trabalho, não o processo: o processo antigo morreu com
+     * o Studio (é a condição para chegar aqui). O que sobrevive e é aproveitado é
+     * a cópia isolada com o que já tinha sido escrito — e é por isso que a
+     * retomada usa `worktrees.resume`, que confere e devolve, em vez de `create`,
+     * que faria `reset --hard` e apagaria justamente aquilo.
+     *
+     * A retomada é um ato da PESSOA e pede a mesma confirmação da delegação
+     * original: ela vai fazer um assistente escrever de novo nos arquivos dela.
+     *
+     * A reserva nova recebe uma CERCA nova, maior. Se enquanto isso outro
+     * trabalho pegou os mesmos arquivos, quem perde é o mais velho — inclusive
+     * este, se ele for o mais velho na hora de aplicar.
+     * @param runId - o trabalho interrompido.
+     * @param request - o pedido, com a confirmação da pessoa.
+     * @returns o identificador do trabalho novo e o do trabalho retomado.
+     */
+    resume(runId: string, request: DelegationRequest): DelegationAccepted & {
+        readonly resumedFrom: string;
+    };
     /**
      * Uma pessoa confirma que o programa externo terminou. E a unica saida do
      * estado UNKNOWN, e exige motivo: o registro precisa dizer quem decidiu e

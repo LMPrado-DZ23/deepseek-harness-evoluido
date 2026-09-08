@@ -49,6 +49,65 @@ export function normalizeDelegationPath(value, allowWildcard = true, invalid = p
 function pathsOverlap(left, right) {
     return left.some(a => right.some(b => a === '*' || b === '*' || a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`)));
 }
+/** A cerca que uma reserva carrega. Reserva antiga, sem o campo, vale como 0 — a mais fraca. */
+export function leaseFence(lease) {
+    return lease.fence ?? 0;
+}
+/**
+ * O próximo número de cerca para um repositório dentro de um espaço de trabalho.
+ *
+ * Derivado do MAIOR já visto ali, e não de um contador em memória: um contador
+ * em memória voltaria a zero no reinício, e a primeira reserva depois de um
+ * reinício receberia um número menor do que o da reserva que ela precisa
+ * superar — exatamente o zumbi que a cerca existe para barrar, com os papéis
+ * trocados. Reservas liberadas continuam contando: elas são liberadas, nunca
+ * apagadas.
+ * @param leases - todas as reservas conhecidas.
+ * @param scope - o espaço de trabalho e o repositório.
+ * @returns o número a gravar na reserva nova.
+ */
+export function nextFence(leases, scope) {
+    let highest = 0;
+    for (const lease of leases) {
+        if (lease.workspace_id !== scope.workspaceId || lease.repository_path !== scope.repositoryPath)
+            continue;
+        if (leaseFence(lease) > highest)
+            highest = leaseFence(lease);
+    }
+    return highest + 1;
+}
+/**
+ * A cerca que TORNOU VELHA a desta execução, quando existe.
+ *
+ * Só conta reserva de OUTRA execução, no mesmo repositório do mesmo espaço de
+ * trabalho, que toque algum dos mesmos caminhos e que tenha número MAIOR.
+ * Empate não supera: duas reservas com o mesmo número seriam um defeito de
+ * `nextFence`, e tratar empate como superação faria uma execução barrar a si
+ * mesma numa releitura.
+ * @param leases - todas as reservas conhecidas.
+ * @param runId - a execução que quer escrever.
+ * @returns o número que a superou, ou `undefined` quando ela ainda é a mais nova.
+ */
+export function supersedingFence(leases, runId) {
+    const own = leases.find(lease => lease.run_id === runId);
+    if (own === undefined)
+        return undefined;
+    let superseding;
+    for (const lease of leases) {
+        // A própria reserva não precisa ser pulada: `leaseFence(own) <= leaseFence(own)`
+        // já a descarta logo abaixo. Um `continue` a mais aqui seria código que
+        // nenhuma mutação consegue matar — ou seja, código que não decide nada.
+        if (lease.workspace_id !== own.workspace_id || lease.repository_path !== own.repository_path)
+            continue;
+        if (!pathsOverlap(lease.paths, own.paths))
+            continue;
+        if (leaseFence(lease) <= leaseFence(own))
+            continue;
+        if (superseding === undefined || leaseFence(lease) > superseding)
+            superseding = leaseFence(lease);
+    }
+    return superseding;
+}
 function terminalText(result) {
     return result.output.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n').trim();
 }
@@ -176,6 +235,16 @@ export class StudioAgentService {
             throw new DelegationError('WRITE_CONFLICT', t('delegation.anotherProposalApplying'));
         }
         this.#applyingWorkspaces.add(workspaceKey);
+        // A CERCA (A-03). Uma proposta pronta de antes do reinício pode chegar aqui
+        // depois de outra execução já ter mexido nos mesmos arquivos: a reserva
+        // antiga foi liberada na reconciliação, a nova pegou os caminhos, e aplicar
+        // a antiga escreveria conteúdo velho por cima do novo sem conflito nenhum
+        // aparecer. Quem escreve apresenta o seu número; o recurso recusa o menor.
+        const superseded = supersedingFence(this.dependencies.repository.leases(), runId);
+        if (superseded !== undefined) {
+            this.#applyingWorkspaces.delete(workspaceKey);
+            throw new DelegationError('WRITE_CONFLICT', t('delegation.proposalSuperseded'));
+        }
         try {
             await this.dependencies.worktrees.applyProposal(record);
             const updatedAt = (this.dependencies.now?.() ?? new Date()).toISOString();
@@ -207,6 +276,10 @@ export class StudioAgentService {
                 ...run,
                 status: provable ? 'FAILED' : 'UNKNOWN',
                 diagnostic: provable ? t('recovery.interrupted') : t('recovery.unknownExternal'),
+                // A marca é ESTRUTURAL, e só é posta no caminho provável: `UNKNOWN`
+                // pode estar rodando por fora, e marcá-lo como interrompido abriria a
+                // retomada justamente para o caso que não pode ser retomado.
+                ...(provable ? { interrupted_by_restart: true } : {}),
                 updated_at: reconciledAt,
             });
         }
@@ -236,6 +309,69 @@ export class StudioAgentService {
             keptLeases: kept,
             reconciledAt,
         };
+    }
+    /**
+     * Se este trabalho pode ser RETOMADO (A-03).
+     *
+     * Duas condições, e as duas são recusas de segurança, não de conveniência:
+     *
+     * - o Studio tem que ter PROVADO que ele parou. `UNKNOWN` significa
+     *   "pode estar rodando por fora agora"; retomar ali seria colocar dois
+     *   trabalhadores escrevendo na mesma cópia, e o segundo nem saberia do
+     *   primeiro. `survivesRestart` é a mesma regra que a reconciliação usa;
+     * - ele tem que ter sido interrompido por um reinício, e não ter falhado
+     *   sozinho, estourado o orçamento ou sido cancelado por alguém. Retomar um
+     *   trabalho que a pessoa CANCELOU seria desfazer o cancelamento dela.
+     * @param run - o registro.
+     * @returns se `resumeRun` aceitaria este trabalho.
+     */
+    static resumable(run) {
+        if (run.status !== 'FAILED')
+            return false;
+        if (survivesRestart(run.provider))
+            return false;
+        // Ausente vale como `false`: um registro de antes desta marca não tem como
+        // provar que parou por reinício, e "não sei" tem que valer como "não retoma".
+        return run.interrupted_by_restart === true;
+    }
+    /**
+     * Retoma um trabalho interrompido por um reinício, NA CÓPIA QUE SOBROU.
+     *
+     * O que é retomado é o trabalho, não o processo: o processo antigo morreu com
+     * o Studio (é a condição para chegar aqui). O que sobrevive e é aproveitado é
+     * a cópia isolada com o que já tinha sido escrito — e é por isso que a
+     * retomada usa `worktrees.resume`, que confere e devolve, em vez de `create`,
+     * que faria `reset --hard` e apagaria justamente aquilo.
+     *
+     * A retomada é um ato da PESSOA e pede a mesma confirmação da delegação
+     * original: ela vai fazer um assistente escrever de novo nos arquivos dela.
+     *
+     * A reserva nova recebe uma CERCA nova, maior. Se enquanto isso outro
+     * trabalho pegou os mesmos arquivos, quem perde é o mais velho — inclusive
+     * este, se ele for o mais velho na hora de aplicar.
+     * @param runId - o trabalho interrompido.
+     * @param request - o pedido, com a confirmação da pessoa.
+     * @returns o identificador do trabalho novo e o do trabalho retomado.
+     */
+    resume(runId, request) {
+        const record = this.dependencies.repository.runs().find(candidate => candidate.run_id === runId);
+        if (record === undefined)
+            throw new DelegationError('INVALID_STATE', t('recovery.resumeNotInterrupted'));
+        if (record.status === 'UNKNOWN' || survivesRestart(record.provider)) {
+            throw new DelegationError('INVALID_STATE', t('recovery.resumeNotResumable'));
+        }
+        if (!StudioAgentService.resumable(record))
+            throw new DelegationError('INVALID_STATE', t('recovery.resumeNotInterrupted'));
+        // O escopo vem do REGISTRO, não do pedido: aceitar o escopo de quem chama
+        // deixaria retomar para dentro de outro espaço de trabalho o trabalho de um
+        // repositório que não é dele.
+        const accepted = this.start({
+            ...request,
+            orgId: record.org_id, tenantId: record.tenant_id, workspaceId: record.workspace_id,
+            repositoryPath: record.repository_path,
+            resumeFrom: record,
+        });
+        return { ...accepted, resumedFrom: runId };
     }
     /**
      * Uma pessoa confirma que o programa externo terminou. E a unica saida do
@@ -341,12 +477,19 @@ export class StudioAgentService {
         timeout = setTimeout(() => timed.abort('timeout'), timeoutMs);
         const createdAt = now().toISOString();
         try {
-            snapshot = await this.dependencies.worktrees.create(request.repositoryPath, runId);
+            snapshot = request.resumeFrom === undefined
+                ? await this.dependencies.worktrees.create(request.repositoryPath, runId)
+                : await this.dependencies.worktrees.resume(request.resumeFrom);
             coordinator = await this.dependencies.coordinators.create(snapshot.worktreePath, parentSessionId, request.provider, requiredTier(request));
             const lease = {
                 lease_id: `lease-${runId}`, run_id: runId,
                 org_id: request.orgId, tenant_id: request.tenantId, workspace_id: request.workspaceId,
                 repository_path: snapshot.repositoryPath, paths: [...paths], active: true,
+                // A cerca é calculada com o caminho REAL do repositório resolvido pelo
+                // worktree, e não com o que veio no pedido: dois pedidos escrevendo o
+                // mesmo repositório por caminhos diferentes receberiam cercas de séries
+                // separadas, e nenhuma superaria a outra.
+                fence: nextFence(this.dependencies.repository.leases(), { workspaceId: request.workspaceId, repositoryPath: snapshot.repositoryPath }),
                 created_at: createdAt, released_at: null,
             };
             await this.dependencies.repository.putLease(lease);

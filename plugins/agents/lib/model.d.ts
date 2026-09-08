@@ -43,6 +43,7 @@ export declare const agentRunSchema: z.ZodObject<{
     approved_by: z.ZodString;
     approved_at: z.ZodISODateTime;
     diagnostic: z.ZodNullable<z.ZodString>;
+    interrupted_by_restart: z.ZodOptional<z.ZodBoolean>;
     tokens_used: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
     created_at: z.ZodISODateTime;
     updated_at: z.ZodISODateTime;
@@ -56,6 +57,7 @@ export declare const agentLeaseSchema: z.ZodObject<{
     repository_path: z.ZodString;
     paths: z.ZodArray<z.ZodString>;
     active: z.ZodBoolean;
+    fence: z.ZodOptional<z.ZodNumber>;
     created_at: z.ZodISODateTime;
     released_at: z.ZodNullable<z.ZodISODateTime>;
 }, z.core.$strict>;
@@ -98,6 +100,7 @@ export declare const studioAgentRunsDomainSpec: {
             diagnostic: string | null;
             created_at: string;
             updated_at: string;
+            interrupted_by_restart?: boolean | undefined;
             tokens_used?: number | null | undefined;
         }>;
     };
@@ -117,6 +120,7 @@ export declare const studioAgentLeasesDomainSpec: {
             active: boolean;
             created_at: string;
             released_at: string | null;
+            fence?: number | undefined;
         }>;
     };
 };

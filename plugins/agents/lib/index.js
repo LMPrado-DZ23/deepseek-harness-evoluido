@@ -5,7 +5,7 @@ import { delimiter, extname, join, resolve } from 'node:path';
 import { accessSync, constants, existsSync } from 'node:fs';
 import { t } from './i18n.js';
 import { studioAgentLeasesDomainSpec, studioAgentRunsDomainSpec, } from './model.js';
-import { GitWorktreeManager, StudioAgentService, } from './service.js';
+import { GitWorktreeManager, StudioAgentService, nextFence, } from './service.js';
 export * from './model.js';
 export * from './service.js';
 export const name = 'dz23-studio-agents';
@@ -205,6 +205,8 @@ export async function apply(ctx, config = {}) {
         restartReconciliation,
         runs: () => repository.runs(),
         leases: () => repository.leases(),
+        resumable: run => StudioAgentService.resumable(run),
+        nextFence: scope => nextFence(repository.leases(), scope),
         providerStates: () => ({ codex: providerState(ctx, 'codex'), 'claude-code': providerState(ctx, 'claude-code') }),
     });
 }

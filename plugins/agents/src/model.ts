@@ -37,6 +37,20 @@ export const agentRunSchema = z.object({
   approved_at: z.iso.datetime(),
   diagnostic: z.string().nullable(),
   /**
+   * Se este trabalho parou por causa de um REINÍCIO do Studio, e não por
+   * falha, cancelamento ou estouro de orçamento (A-03).
+   *
+   * Marca estrutural, e não a frase do diagnóstico: decidir quem pode ser
+   * retomado lendo um texto em português faria uma troca de palavra na
+   * tradução desligar a retomada em silêncio — ou, pior, ligá-la para um
+   * trabalho que a pessoa cancelou.
+   *
+   * OPCIONAL, com a versão do domínio INTOCADA. Ausente vale como `false`: um
+   * registro escrito antes desta marca existir não tem como provar que parou
+   * por reinício, e "não sei" tem que valer como "não retoma".
+   */
+  interrupted_by_restart: z.boolean().optional(),
+  /**
    * Tokens consumidos, do jeito que o PROVEDOR relatou. OPCIONAL, e `null`
    * quando não houve como medir.
    *
@@ -65,6 +79,27 @@ export const agentLeaseSchema = z.object({
   repository_path: z.string().min(1),
   paths: z.array(z.string().min(1)).min(1),
   active: z.boolean(),
+  /**
+   * O token de cerca (A-03), monotônico por repositório dentro do espaço de
+   * trabalho.
+   *
+   * A reserva sozinha diz "estes arquivos estão comigo". Ela NÃO impede o caso
+   * que realmente machuca: uma execução antiga, que já tinha proposta pronta
+   * quando o Studio caiu, ser aplicada DEPOIS de outra execução já ter mexido
+   * nos mesmos arquivos. A reserva antiga foi liberada na reconciliação, a nova
+   * pegou os arquivos, e aplicar a antiga escreveria conteúdo velho por cima do
+   * novo — sem conflito nenhum aparecer, porque ninguém estava segurando nada.
+   *
+   * A cerca resolve isso do jeito clássico: quem escreve apresenta o seu
+   * número, e o recurso RECUSA número menor do que o maior que já viu. O
+   * zumbi tem número menor por construção.
+   *
+   * OPCIONAL, com a versão do domínio INTOCADA: um campo obrigatório novo faria
+   * `open()` recusar toda reserva já gravada, e não existe passo de migração
+   * neste seam. Reserva sem cerca vale como cerca 0 — a mais fraca possível,
+   * que é a leitura segura para uma linha escrita antes desta regra existir.
+   */
+  fence: z.number().int().positive().optional(),
   created_at: z.iso.datetime(),
   released_at: z.iso.datetime().nullable(),
 }).strict()

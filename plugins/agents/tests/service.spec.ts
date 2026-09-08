@@ -7,7 +7,10 @@ import type { AgentLeaseRecord, AgentRunRecord } from '../src/model.ts'
 import {
   DelegationError,
   StudioAgentService,
+  leaseFence,
+  nextFence,
   normalizeDelegationPath,
+  supersedingFence,
   type AgentRepository,
   type DelegationRequest,
   type JobPort,
@@ -88,6 +91,12 @@ function persistedRun(runId: string, status: AgentRunRecord['status'] = 'RUNNING
   }
 }
 
+/** Identificadores previsíveis, para o teste poder falar de "a primeira" e "a segunda". */
+function sequentialIds(): () => string {
+  let sequence = 0
+  return () => `run-${++sequence}`
+}
+
 function persistedLease(leaseId: string, runId: string, active = true): AgentLeaseRecord {
   const timestamp = '2026-09-02T00:00:00.000Z'
   return {
@@ -104,6 +113,8 @@ function harness(options: {
   usage?: number
   applyProposal?: (record: AgentRunRecord) => Promise<void>
   createError?: Error
+  resumeError?: Error
+  resumeSnapshot?: WorktreeSnapshot
   coordinatorError?: Error
   subagentStartError?: Error
   childDisposeError?: Error
@@ -138,15 +149,19 @@ function harness(options: {
     ? Promise.resolve()
     : Promise.reject(options.childDisposeError))
   const starts: unknown[] = []
+  const worktreeCalls = {
+    create: vi.fn(() => options.createError === undefined ? Promise.resolve(snapshot) : Promise.reject(options.createError)),
+    resume: vi.fn((_record: Pick<AgentRunRecord, 'repository_path' | 'worktree_path' | 'base_commit'>) => options.resumeError === undefined
+      ? Promise.resolve(options.resumeSnapshot ?? snapshot)
+      : Promise.reject(options.resumeError)),
+    diff: vi.fn(() => Promise.resolve(diff)),
+    mainFingerprint: vi.fn(() => Promise.resolve(options.mainAfter ?? 'main-before')),
+    applyProposal: vi.fn((record: AgentRunRecord) => options.applyProposal?.(record) ?? Promise.resolve()),
+  }
   const service = new StudioAgentService({
     repository,
     jobs,
-    worktrees: {
-      create: vi.fn(() => options.createError === undefined ? Promise.resolve(snapshot) : Promise.reject(options.createError)),
-      diff: vi.fn(() => Promise.resolve(diff)),
-      mainFingerprint: vi.fn(() => Promise.resolve(options.mainAfter ?? 'main-before')),
-      applyProposal: vi.fn(record => options.applyProposal?.(record) ?? Promise.resolve()),
-    },
+    worktrees: worktreeCalls,
     coordinators: {
       create: vi.fn((cwd, parentSessionId, provider) => {
         starts.push({ cwd, parentSessionId, provider })
@@ -169,7 +184,7 @@ function harness(options: {
     ...(options.omitClock ? {} : { now: () => new Date('2026-09-03T00:00:00.000Z') }),
     ...(options.omitId ? {} : { createId: options.createId ?? (() => 'run-1') }),
   })
-  return { service, repository, jobs, starts, coordinatorDispose, childDispose }
+  return { service, repository, jobs, starts, coordinatorDispose, childDispose, worktreeCalls }
 }
 
 describe('M75-B — encerramento comprovado antes de liberar a reserva', () => {
@@ -699,5 +714,214 @@ describe('E-11: a parada de emergência alcança as delegações', () => {
     h.service.start(request())
     const outcome = h.service.cancelScope({ orgId: 'org-outra', tenantId: 'tenant-outro' })
     expect(outcome).toEqual({ cancelled: 0, unproven: [] })
+  })
+})
+
+describe('A-03 — cerca (fencing token)', () => {
+  it('cada reserva nova recebe um número MAIOR, por repositório do espaço de trabalho', async () => {
+    const h = harness({ createId: sequentialIds() })
+    const first = h.service.start(request())
+    await h.jobs.entries[0]!.done
+    const second = h.service.start(request())
+    await h.jobs.entries[1]!.done
+    const a = h.repository.leaseMap.get(`lease-${first.runId}`)!
+    const b = h.repository.leaseMap.get(`lease-${second.runId}`)!
+    expect(leaseFence(b)).toBeGreaterThan(leaseFence(a))
+  })
+
+  it('o número vem do MAIOR já gravado, e não de um contador em memória', () => {
+    // Um contador em memória voltaria a zero no reinício, e a reserva nova
+    // receberia um número MENOR do que a que ela precisa superar.
+    const older = { ...persistedLease('lease-antiga', 'run-antiga', false), fence: 7 }
+    expect(nextFence([older], { workspaceId: 'workspace-1', repositoryPath: '/repo' })).toBe(8)
+    // Reserva liberada continua contando: ela é liberada, nunca apagada.
+    expect(older.active).toBe(false)
+    // Outro repositório é outra série.
+    expect(nextFence([older], { workspaceId: 'workspace-1', repositoryPath: '/outro' })).toBe(1)
+    expect(nextFence([older], { workspaceId: 'workspace-2', repositoryPath: '/repo' })).toBe(1)
+  })
+
+  it('reserva antiga SEM o campo vale como cerca 0: a mais fraca', () => {
+    const legacy = persistedLease('lease-legada', 'run-legada')
+    expect(leaseFence(legacy)).toBe(0)
+    expect(nextFence([legacy], { workspaceId: 'workspace-1', repositoryPath: '/repo' })).toBe(1)
+    // E ela é superada por qualquer reserva com cerca, que é o comportamento
+    // seguro para uma linha escrita antes desta regra existir.
+    const newer = { ...persistedLease('lease-nova', 'run-nova'), fence: 1 }
+    expect(supersedingFence([legacy, newer], 'run-legada')).toBe(1)
+    expect(supersedingFence([legacy, newer], 'run-nova')).toBeUndefined()
+  })
+
+  it('só supera quem toca os MESMOS caminhos, no mesmo repositório do mesmo espaço', () => {
+    const own = { ...persistedLease('l1', 'run-1'), fence: 1, paths: ['src'] }
+    const other = { ...persistedLease('l2', 'run-2'), fence: 9, paths: ['docs'] }
+    expect(supersedingFence([own, other], 'run-1')).toBeUndefined()
+    expect(supersedingFence([own, { ...other, paths: ['src/a'] }], 'run-1')).toBe(9)
+    expect(supersedingFence([own, { ...other, paths: ['src'], repository_path: '/outro' }], 'run-1')).toBeUndefined()
+    expect(supersedingFence([own, { ...other, paths: ['src'], workspace_id: 'workspace-2' }], 'run-1')).toBeUndefined()
+    // Empate NÃO supera: seria uma execução barrando a si mesma numa releitura.
+    expect(supersedingFence([own, { ...other, paths: ['src'], fence: 1 }], 'run-1')).toBeUndefined()
+  })
+
+  it('APLICAR uma proposta já superada é RECUSADO: escreveria versão antiga por cima da nova', async () => {
+    // Este é o buraco que a cerca fecha. A execução ficou PROPOSED antes da
+    // queda; a reconciliação liberou a reserva dela; outra execução pegou os
+    // mesmos arquivos. Sem cerca, aplicar a primeira agora passaria — sem
+    // conflito nenhum, porque ninguém estava segurando nada.
+    const h = harness({ createId: sequentialIds() })
+    const stale = h.service.start(request())
+    await h.jobs.entries[0]!.done
+    expect(h.repository.runMap.get(stale.runId)!.status).toBe('PROPOSED')
+    // Alguém depois pegou os mesmos caminhos, com cerca maior.
+    await h.repository.putLease({ ...persistedLease('lease-nova', 'run-nova'), fence: 99, paths: ['src'] })
+    await expect(h.service.applyProposal(stale.runId, { approved: true, tier: 'T2', approvedBy: 'user-1' }))
+      .rejects.toMatchObject({ code: 'WRITE_CONFLICT' })
+    // E o registro NÃO virou APLICADO.
+    expect(h.repository.runMap.get(stale.runId)!.status).toBe('PROPOSED')
+  })
+
+  it('a recusa pela cerca libera a trava de aplicação: a próxima tentativa não fica presa', async () => {
+    const h = harness({ createId: sequentialIds() })
+    const stale = h.service.start(request())
+    await h.jobs.entries[0]!.done
+    await h.repository.putLease({ ...persistedLease('lease-nova', 'run-nova'), fence: 99, paths: ['src'] })
+    await expect(h.service.applyProposal(stale.runId, { approved: true, tier: 'T2', approvedBy: 'user-1' }))
+      .rejects.toMatchObject({ code: 'WRITE_CONFLICT' })
+    // A reserva que superou some (foi liberada e apagada por quem cuida dela):
+    // a mesma proposta volta a poder ser aplicada, e não fica travada para sempre.
+    h.repository.leaseMap.delete('lease-nova')
+    await expect(h.service.applyProposal(stale.runId, { approved: true, tier: 'T2', approvedBy: 'user-1' }))
+      .resolves.toMatchObject({ status: 'APPLIED' })
+  })
+
+  it('sem ninguém depois, a proposta aplica normalmente', async () => {
+    const h = harness({ createId: sequentialIds() })
+    const accepted = h.service.start(request())
+    await h.jobs.entries[0]!.done
+    await expect(h.service.applyProposal(accepted.runId, { approved: true, tier: 'T2', approvedBy: 'user-1' }))
+      .resolves.toMatchObject({ status: 'APPLIED' })
+  })
+})
+
+describe('A-03 — retomada', () => {
+  const interrupted = (overrides: Partial<AgentRunRecord> = {}): AgentRunRecord => ({
+    ...persistedRun('run-interrompida', 'FAILED'),
+    interrupted_by_restart: true,
+    ...overrides,
+  })
+
+  it('retoma na CÓPIA que sobrou, e não em uma cópia nova', async () => {
+    // A diferença entre retomar e recomeçar: `create` faria `reset --hard` e
+    // apagaria o trabalho parcial que sobreviveu — que é o que a retomada
+    // existe para aproveitar.
+    const record = interrupted()
+    const h = harness({ createId: sequentialIds(), initialRuns: [record] })
+    const accepted = h.service.resume(record.run_id, request())
+    expect(accepted.resumedFrom).toBe(record.run_id)
+    await h.jobs.entries[0]!.done
+    expect(h.worktreeCalls.resume).toHaveBeenCalledTimes(1)
+    expect(h.worktreeCalls.create).not.toHaveBeenCalled()
+    expect(h.worktreeCalls.resume.mock.calls[0]![0]).toMatchObject({ worktree_path: record.worktree_path, base_commit: record.base_commit })
+  })
+
+  it('a retomada ganha uma cerca MAIOR que a do trabalho retomado', async () => {
+    const record = interrupted()
+    const h = harness({
+      createId: sequentialIds(), initialRuns: [record],
+      initialLeases: [{ ...persistedLease('lease-antiga', record.run_id, false), fence: 3 }],
+    })
+    const accepted = h.service.resume(record.run_id, request())
+    await h.jobs.entries[0]!.done
+    expect(h.repository.leaseMap.get(`lease-${accepted.runId}`)!.fence).toBe(4)
+  })
+
+  it('a reconciliação NÃO marca como interrompido o que ela não provou parado', async () => {
+    // A marca é uma AFIRMAÇÃO no registro. Pô-la num trabalho que pode estar
+    // rodando por fora seria gravar "parou por reinício" sobre algo que talvez
+    // esteja escrevendo agora — e é isso que alguém leria depois.
+    const external: AgentRunRecord = { ...persistedRun('run-externa'), provider: 'codex' }
+    const h = harness({ initialRuns: [external], initialLeases: [persistedLease('lease-externa', 'run-externa')] })
+    await h.service.reconcileInterruptedRuns()
+    const after = h.repository.runMap.get('run-externa')!
+    expect(after.status).toBe('UNKNOWN')
+    expect(after.interrupted_by_restart).toBeUndefined()
+    expect(StudioAgentService.resumable(after)).toBe(false)
+  })
+
+  it('a recusa DIZ qual é o caso: "pode estar rodando por fora" não é a mesma frase que "não há o que retomar"', () => {
+    // Duas situações diferentes mandam a pessoa fazer coisas diferentes: uma
+    // pede esperar e conferir do lado de fora, a outra é simplesmente um
+    // trabalho que não se retoma. Uma frase só para as duas apagaria a
+    // diferença justamente para quem precisa dela.
+    const running = interrupted({ status: 'UNKNOWN' })
+    const h1 = harness({ createId: sequentialIds(), initialRuns: [running] })
+    expect(() => h1.service.resume(running.run_id, request())).toThrow(/rodando por fora/u)
+
+    const cancelled = interrupted({ status: 'CANCELLED' })
+    const h2 = harness({ createId: sequentialIds(), initialRuns: [cancelled] })
+    expect(() => h2.service.resume(cancelled.run_id, request())).toThrow(/não foi interrompido/u)
+  })
+
+  it('NÃO retoma o que o Studio não provou morto: UNKNOWN pode estar rodando por fora', async () => {
+    // Retomar aqui colocaria dois trabalhadores escrevendo na mesma cópia, e o
+    // segundo nem saberia do primeiro.
+    for (const record of [
+      interrupted({ status: 'UNKNOWN' }),
+      interrupted({ provider: 'codex' }),
+      interrupted({ provider: 'claude-code' }),
+    ]) {
+      const h = harness({ createId: sequentialIds(), initialRuns: [record] })
+      expect(() => h.service.resume(record.run_id, request())).toThrow(DelegationError)
+    }
+  })
+
+  it('NÃO retoma o que a pessoa cancelou, nem o que estourou orçamento, nem o que falhou sozinho', async () => {
+    // Retomar um trabalho CANCELADO seria desfazer o cancelamento dela.
+    for (const record of [
+      interrupted({ status: 'CANCELLED' }),
+      interrupted({ status: 'BUDGET_EXCEEDED' }),
+      interrupted({ status: 'PROPOSED' }),
+      interrupted({ status: 'APPLIED' }),
+      { ...interrupted(), interrupted_by_restart: false },
+      // Registro de ANTES desta marca: "não sei" vale como "não retoma".
+      (() => { const { interrupted_by_restart: _mark, ...rest } = interrupted(); return rest as AgentRunRecord })(),
+    ]) {
+      const h = harness({ createId: sequentialIds(), initialRuns: [record] })
+      expect(() => h.service.resume(record.run_id, request())).toThrow(DelegationError)
+    }
+  })
+
+  it('retomar algo que não existe é recusado, e não cria trabalho do nada', () => {
+    const h = harness({ createId: sequentialIds() })
+    expect(() => h.service.resume('nunca-existiu', request())).toThrow(DelegationError)
+    expect(h.jobs.entries).toHaveLength(0)
+  })
+
+  it('o escopo vem do REGISTRO, não de quem pede', async () => {
+    // Aceitar o escopo de quem chama deixaria retomar, para dentro de outro
+    // espaço de trabalho, o trabalho de um repositório que não é dele.
+    const record = interrupted()
+    const h = harness({ createId: sequentialIds(), initialRuns: [record] })
+    const accepted = h.service.resume(record.run_id, request({
+      orgId: 'org-invasora', tenantId: 'tenant-invasor', workspaceId: 'workspace-invasor', repositoryPath: '/outro-repo',
+    }))
+    await h.jobs.entries[0]!.done
+    expect(h.repository.runMap.get(accepted.runId)).toMatchObject({
+      org_id: record.org_id, tenant_id: record.tenant_id, workspace_id: record.workspace_id,
+    })
+  })
+
+  it('a retomada continua pedindo confirmação: ela faz um assistente escrever nos arquivos da pessoa', () => {
+    const record = interrupted()
+    const h = harness({ createId: sequentialIds(), initialRuns: [record] })
+    expect(() => h.service.resume(record.run_id, request({ approval: { approved: false, tier: 'T2', approvedBy: 'user-1' } })))
+      .toThrow(DelegationError)
+  })
+
+  it('`resumable` responde a mesma coisa que `resume` faz, para a tela poder oferecer o botão só quando ele funciona', () => {
+    expect(StudioAgentService.resumable(interrupted())).toBe(true)
+    expect(StudioAgentService.resumable(interrupted({ status: 'UNKNOWN' }))).toBe(false)
+    expect(StudioAgentService.resumable(interrupted({ provider: 'codex' }))).toBe(false)
+    expect(StudioAgentService.resumable({ ...interrupted(), interrupted_by_restart: false })).toBe(false)
   })
 })

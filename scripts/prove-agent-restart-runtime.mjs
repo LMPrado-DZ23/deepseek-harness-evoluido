@@ -99,7 +99,12 @@ async function seedInterruptedState(ctx) {
   await storage.leases.put('lease-restart-proof', {
     lease_id: 'lease-restart-proof', run_id: 'run-restart-proof', org_id: 'org-proof',
     tenant_id: 'tenant-proof', workspace_id: 'workspace-proof', repository_path: repositoryPath,
-    paths: ['src/proposal.txt'], active: true, created_at: timestamp, released_at: null,
+    paths: ['src/proposal.txt'], active: true,
+    // A-03: a cerca é gravada no armazenamento do perfil e tem de atravessar o
+    // reinício. Uma cerca que voltasse a zero faria a reserva seguinte receber
+    // um número MENOR do que a que ela precisa superar.
+    fence: 4,
+    created_at: timestamp, released_at: null,
   })
   await storage.teams.put('team-restart-proof', {
     team_id: 'team-restart-proof', org_id: 'org-proof', tenant_id: 'tenant-proof',
@@ -129,6 +134,17 @@ function assertRecoveredState(ctx, expectedCounts) {
   const task = ctx.studioAgentTeams.tasks().find(candidate => candidate.task_id === 'task-one')
   assert.equal(run?.status, 'FAILED')
   assert.match(run?.diagnostic ?? '', /interrompida pelo reinício/u)
+  // A-03: a marca ESTRUTURAL de "parou por reinício" atravessou o reinício de
+  // verdade, em processo separado e com o armazenamento do perfil. Decidir a
+  // retomada pela FRASE do diagnóstico faria uma troca de palavra na tradução
+  // desligar a retomada em silêncio.
+  assert.equal(run?.interrupted_by_restart, true)
+  assert.equal(ctx.studioAgents.resumable(run), true)
+  // A cerca sobreviveu ao reinício, e a próxima é maior. Sem isso, a reserva
+  // nova depois de um reinício não superaria a antiga.
+  assert.equal(lease?.fence, 4)
+  const repositoryForFence = join(runtimeRoot, 'person-repository')
+  assert.equal(ctx.studioAgents.nextFence({ workspaceId: 'workspace-proof', repositoryPath: repositoryForFence }), 5)
   assert.equal(lease?.active, false)
   assert.ok(lease?.released_at)
   assert.equal(task?.status, 'FAILED')
@@ -139,7 +155,15 @@ function assertRecoveredState(ctx, expectedCounts) {
   assert.equal(readFileSync(join(worktreePath, 'src', 'proposal.txt'), 'utf8'), 'proposta-preservada\n')
   assert.match(git(['worktree', 'list', '--porcelain'], repositoryPath),
     new RegExp(worktreePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
-  return { runStatus: run.status, leaseActive: lease.active, taskStatus: task.status, teamStatus: team.status }
+  return {
+    runStatus: run.status, leaseActive: lease.active, taskStatus: task.status, teamStatus: team.status,
+    interruptedByRestart: run.interrupted_by_restart === true, resumable: ctx.studioAgents.resumable(run),
+    leaseFence: lease.fence ?? 0,
+    // A próxima reserva neste repositório recebe um número MAIOR do que o que
+    // sobreviveu ao reinício — conferido depois do reinício, contra o que o
+    // armazenamento do perfil realmente devolveu.
+    nextFenceAfterRestart: ctx.studioAgents.nextFence({ workspaceId: 'workspace-proof', repositoryPath: join(runtimeRoot, 'person-repository') }),
+  }
 }
 
 /**
@@ -262,7 +286,13 @@ if (phase !== undefined) {
       decision: 'GO', transport: 'three-separate-node-processes',
       persistedBackend: 'profile-storage', upstreamCommit: '6c705be1ce6774a000d061da41d1823b03a3d42c',
       seed, recovered, idempotent, worktreePreservedAcrossRestart: true,
-      processResumption: 'NOT_PRESENT', externalProviders: 'NOT_EXECUTED',
+      // A retomada existe e a elegibilidade dela atravessa o reinício de
+      // verdade (ver `resumable` acima, conferido em processo separado). O que
+      // continua NÃO EXECUTADO neste ambiente é a retomada de ponta a ponta com
+      // um assistente real escrevendo na cópia preservada — isso exige provedor
+      // de verdade, e um dublê aqui provaria o dublê.
+      processResumption: 'ELIGIBILITY_PROVEN_END_TO_END_NOT_EXECUTED',
+      externalProviders: 'NOT_EXECUTED',
     }, null, 2)}\n`)
   } finally {
     const normalizedRoot = resolve(root)

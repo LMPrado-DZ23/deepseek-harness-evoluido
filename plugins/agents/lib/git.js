@@ -266,6 +266,37 @@ export class GitWorktreeManager {
         await verifiedWorktreeBinding(root, worktreePath, baseCommit);
         return { repositoryPath: root, worktreePath, baseCommit, mainFingerprint };
     }
+    /**
+     * A cópia isolada que sobreviveu ao reinício, CONFERIDA e devolvida intacta.
+     *
+     * A diferença para `create` é o que NÃO se faz aqui: não há `worktree add` e
+     * não há `reset --hard`. O `reset` é justamente o que apagaria o trabalho
+     * parcial que a retomada existe para aproveitar.
+     *
+     * O que se faz é a mesma conferência de sempre — a cópia tem que estar dentro
+     * da raiz de worktrees do Studio, tem que estar registrada como worktree
+     * DESTE repositório, e tem que partir do mesmo commit base. Uma cópia que
+     * alguém trocou por outra coisa reprova em `verifiedWorktreeBinding` antes de
+     * qualquer assistente escrever nela.
+     * @param record - o registro do trabalho interrompido.
+     * @returns o retrato da cópia, com a impressão atual do repositório principal.
+     */
+    async resume(record) {
+        const root = resolve(record.repository_path);
+        const worktreePath = resolve(record.worktree_path);
+        const expectedRoot = `${resolve(this.worktreeRoot)}${sep}`;
+        if (!worktreePath.startsWith(expectedRoot))
+            throw new Error(t('git.worktreeOutsideStudio'));
+        const repository = await verifiedRepositoryBinding(root);
+        if (!samePath(repository.workTree, root))
+            throw new Error(t('git.repositoryRootExact'));
+        await verifiedWorktreeBinding(root, worktreePath, record.base_commit);
+        // A impressão do principal é lida AGORA, e não herdada do registro: entre a
+        // queda e a retomada o repositório pode ter mudado, e é essa mudança que o
+        // aviso de "o projeto mudou durante o trabalho" precisa enxergar.
+        const mainFingerprint = await this.mainFingerprint(root);
+        return { repositoryPath: root, worktreePath, baseCommit: record.base_commit, mainFingerprint };
+    }
     async diff(snapshot) {
         const binding = await verifiedWorktreeBinding(snapshot.repositoryPath, snapshot.worktreePath, snapshot.baseCommit);
         const filterConfiguration = await disabledFilterConfiguration(binding);
