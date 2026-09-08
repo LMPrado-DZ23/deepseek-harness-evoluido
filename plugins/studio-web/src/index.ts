@@ -38,6 +38,14 @@ import {
   type StuckRunsSource,
 } from './stuck-runs.js'
 import {
+  TeamPanelError,
+  handleTeamPanel,
+  routeTeamPanel,
+  teamPanelStatus,
+  type TeamPanelRunsSource,
+  type TeamPanelTeamsSource,
+} from './team-panel.js'
+import {
   assistantConversationStatus,
   handleAssistantConversation,
   routeAssistantConversation,
@@ -49,6 +57,7 @@ export * from './assistant-session.js'
 export * from './assistant-conversation.js'
 export * from './assistant-http.js'
 export * from './stuck-runs.js'
+export * from './team-panel.js'
 
 export const name = 'dz23-studio-web'
 export const inject = ['sessionController', 'studioIdentity', 'studioPreview', 'studioTenancy', 'webServer']
@@ -79,6 +88,12 @@ export function createStudioWebHandler(config: {
   actionApprovals?(): StudioActionApprovalService | undefined
   /** Runtime de agentes, resolvido a cada pedido. Ausente, a rota responde 503. */
   agentRuns?(): StuckRunsSource | undefined
+  /**
+   * Runtime de equipes, resolvido A CADA PEDIDO pelo mesmo motivo das
+   * confirmações: capturar na montagem cria corrida com a ordem dos plugins e
+   * deixa o painel morto em qualquer perfil que monte a equipe depois da web.
+   */
+  agentTeams?(): TeamPanelTeamsSource | undefined
   readonly assistantDeadlineMs?: number
 }) {
   const frameSources = normalizePreviewFrameSources(config.previewFrameSources ?? [])
@@ -102,6 +117,17 @@ export function createStudioWebHandler(config: {
         const outcome = await handleStuckRuns(request, stuckRoute, {
           identity: config.identity,
           ...(agents === undefined ? {} : { agents }),
+        })
+        return sendJson(response, outcome.status, outcome.body, frameSources)
+      }
+      const teamRoute = routeTeamPanel(request.method, pathname)
+      if (teamRoute !== undefined) {
+        const teams = config.agentTeams?.()
+        const runs = config.agentRuns?.() as TeamPanelRunsSource | undefined
+        const outcome = await handleTeamPanel(request, teamRoute, {
+          identity: config.identity,
+          ...(teams === undefined ? {} : { teams }),
+          ...(runs === undefined ? {} : { runs }),
         })
         return sendJson(response, outcome.status, outcome.body, frameSources)
       }
@@ -149,6 +175,13 @@ export function createStudioWebHandler(config: {
       const stuckStatus = stuckRunsStatus(error)
       if (stuckStatus !== undefined && error instanceof StuckRunsError) {
         return sendJson(response, stuckStatus, { error: error.message }, frameSources)
+      }
+      const teamStatus = teamPanelStatus(error)
+      if (teamStatus !== undefined && error instanceof TeamPanelError) {
+        // O código viaja junto: a tela precisa distinguir "não é sua equipe"
+        // de "esta equipe já terminou", e as duas recusas pedem gestos
+        // diferentes de quem está olhando.
+        return sendJson(response, teamStatus, { error: error.message, code: error.code }, frameSources)
       }
       const approvalErrorStatus = approvalStatus(error)
       if (approvalErrorStatus !== undefined && error instanceof ActionApprovalError) {
@@ -246,6 +279,7 @@ export async function apply(ctx: Context, config: StudioWebConfig = {}): Promise
       // vez de sumir num 404 confuso.
       actionApprovals: () => ctx.get('studioActionApproval')?.service,
       agentRuns: () => ctx.get('studioAgents'),
+      agentTeams: () => ctx.get('studioAgentTeams'),
       assistantSessions,
     }),
   }), 'dz23-studio-web.http')

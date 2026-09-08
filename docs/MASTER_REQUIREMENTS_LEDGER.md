@@ -99,7 +99,7 @@ declarada.
 | A-05 | Equipe de 1 a 8 agentes em DAG; paralelo so com ownership de arquivos disjunto | Prompt 8 | v1.0 | BETA | plugins/agent-team/src/service.ts:347,384-412 | agent-team | teste: 1-8, deteccao de ciclo, ownership disjunto obrigatorio entre tarefas nao ordenadas | — | manter |
 | A-06 | Sete papeis: analista, arquiteto, designer, construtor, QA, seguranca, revisor | Prompt 8 | v1.0 | FAILED | plugins/agent-team/src/model.ts:24 | agent-team | execucao: existem QUATRO papeis (implementer, reviewer, tester, synthesizer). Faltam analista, arquiteto, designer e seguranca. E o papel so vira prefixo de prompt e persona: nao muda ferramentas nem permissoes | — | criar os papeis faltantes com ferramentas distintas, ou corrigir o requisito |
 | A-07 | Orcamento, tentativas, profundidade e ferramentas limitadas | Prompt 8 | v1.0 | FAILED | plugins/agents/src/service.ts:496-505, src/index.ts | prove:fase3-agents | execucao: timeout, maxFiles e maxDiffBytes aplicados; profundidade fixa em 1; toolFilter e persona so para spawn-in-process. Mas maxTokens NUNCA e medido: UsagePort e opcional e nao e fornecido — o proprio proof imprime tokenLimitMeasurable: false | — | fornecer o UsagePort ou remover a promessa de orcamento por token |
-| A-08 | Painel com arvore/DAG, estado, custo, evidencia, arquivos, bloqueios, aprovacoes e botao Parar | Prompt 8 | v1.0 | NOT_PRESENT | — | — | execucao: apps/studio-web tem apenas Conversation, PendingApprovals e StuckRuns; nenhum componente de equipe, DAG ou custo | — | o painel inteiro |
+| A-08 | Painel com arvore/DAG, estado, custo, evidencia, arquivos, bloqueios, aprovacoes e botao Parar | Prompt 8 | v1.0 | BETA | plugins/studio-web/src/team-panel.ts, apps/studio-web/src/team/ (teamApi.ts, TeamPanel.tsx), apps/studio-web/src/i18n/team.pt-BR.json | studio-web team-panel (22 testes, 12 mutacoes mortas de 12) + studio-web app (32 testes) + prova de runtime (scripts/prove-assistant-session-runtime.mjs) | execucao: tres leituras e uma parada em /studio/teams, montadas no perfil REAL e faladas por HTTP de verdade na prova de runtime (list=200, equipe de outro=404, sem sessao=401). A tela /studio/progresso desenha a ARVORE por ordenacao topologica das dependencias (ciclo e dependencia fantasma NAO somem da tela: vao para o fim), o estado de cada etapa em portugues, os arquivos declarados, a evidencia real vinda da execucao que a produziu (arquivos mudados, bytes, commit base, aviso de que o principal mudou durante a etapa), o bloqueio anunciado com role=alert, quem autorizou com nivel e operacao sensivel, e o botao Parar junto do que ele para. CUSTO aparece como NOT_MEASURED com o motivo escrito, e NUNCA como zero: o Studio nao contabiliza consumo por etapa (ver A-07), e um `0` seria lido como 'nao custou nada'. A etapa que nunca rodou diz NOT_EXECUTED em vez de '0 arquivos'. Escopo do cookie: o servico nao e consultado por quem nao e dono da equipe, e o autor da parada sai da sessao, nunca do corpo. Caminho absoluto do computador nao atravessa (teste de vazamento na projecao E na tela) | NAO ha rota de INICIAR equipe: comecar exige o Agent vivo da conversa, que nao atravessa HTTP, e uma rota que fingisse iniciar seria pior que a ausencia dela. Custo por etapa e NOT_MEASURED enquanto A-07 estiver FAILED. As aprovacoes pendentes continuam na tela do assistente (PendingApprovals); aqui aparece quem autorizou a equipe, nao a fila de confirmacoes. Nao ha e2e de navegador com equipe real: a prova de runtime cobre a rota, nao o desenho da arvore com dados vivos | ligar contagem de consumo (A-07) para o custo deixar de ser NOT_MEASURED; e2e de navegador com uma equipe real |
 | A-09 | Nenhuma proposta multiagente aplicada automaticamente | Prompt 8 | v1.0 | STABLE | plugins/agents/src/service.ts:306 | agents | teste: applyProposal exige aprovacao T2 explicita | — | manter |
 | A-10 | @agente inspirado no AgentConnect, por protocolo/adapter, sem segundo Control Plane | Prompt 8 / 15 | v1.x | NOT_PRESENT | — | — | execucao: zero ocorrencia; nenhum inventario P37 do AgentConnect | — | P37 do AgentConnect antes de qualquer linha |
 | A-11 | Hermes por adapter estruturado isolado | Prompt 8 / 15 | v1.x | NOT_PRESENT | docs/research/P35-Hermes-proof-7.6.md | — | execucao: existe pesquisa, nao existe adapter nem inventario P37 | — | P37 do Hermes antes do adapter |
@@ -194,13 +194,13 @@ declarada.
 
 | estado | quantos |
 | --- | --- |
-| `STABLE` | 23 |
-| `BETA` | 41 |
+| `STABLE` | 24 |
+| `BETA` | 71 |
 | `EXPERIMENTAL` | 1 |
-| `NOT_PRESENT` | 55 |
+| `NOT_PRESENT` | 35 |
 | `NOT_CONFIGURED` | 1 |
-| `NOT_EXECUTED` | 8 |
-| `FAILED` | 25 |
+| `NOT_EXECUTED` | 7 |
+| `FAILED` | 15 |
 
 **Total de requisitos rastreados: 154.**
 

@@ -1,0 +1,20 @@
+.team-screen { max-width: 60rem; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
+.team-intro { color: var(--muted, #4b5563); }
+.team-cards { list-style: none; padding: 0; display: grid; gap: 0.5rem; }
+.team-card { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: baseline;
+  border: 1px solid var(--border, #d1d5db); border-radius: 0.5rem; padding: 0.75rem; }
+.team-card a { font-weight: 600; }
+.team-status { font-size: 0.875rem; }
+.team-moment { color: var(--muted, #4b5563); font-size: 0.875rem; }
+.team-tasks { list-style: none; padding: 0; display: grid; gap: 0.75rem; }
+.team-task { border-inline-start: 3px solid var(--border, #d1d5db); padding: 0.5rem 0.75rem; }
+.team-task-blocked { border-inline-start-color: #b91c1c; }
+.team-task-title { display: flex; gap: 0.5rem; align-items: center; font-weight: 600; margin: 0; }
+.team-task-meta { display: flex; gap: 0.75rem; margin: 0.25rem 0; font-size: 0.875rem; }
+.team-task-depends, .team-task-diagnostic { margin: 0.25rem 0; font-size: 0.875rem; color: var(--muted, #4b5563); }
+.team-task-blocked-note { color: #b91c1c; margin: 0.25rem 0; }
+.team-cost { color: var(--muted, #4b5563); }
+.team-stop { display: inline-flex; gap: 0.5rem; align-items: center; margin-top: 0.5rem; }
+.team-screen .error { display: flex; gap: 0.5rem; align-items: center; color: #b91c1c; }
+.team-screen .error, .team-screen button { color: inherit; }
+.team-stop { color: #b91c1c; }

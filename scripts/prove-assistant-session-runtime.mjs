@@ -198,6 +198,25 @@ try {
   assert.ok(['disabled', 'no-service'].includes(telemetrySharing), `A sessão subiu compartilhando telemetria: ${telemetrySharing}.`)
   assert.deepEqual(governed, [...ASSISTANT_TOOL_NAMES].sort(), 'As ferramentas expostas na sessão divergem do catálogo da ponte.')
 
+  // O painel do trabalho em equipe (A-08) montado no perfil REAL, falado por
+  // HTTP de verdade. Sem esta afirmação a rota pode existir no código, não ser
+  // ligada por nenhum perfil, e a tela mostrar "não foi possível ler" para
+  // sempre sem ninguém saber por quê.
+  const teamsResponse = await fetch(`${origin}/studio/teams`, { headers, redirect: 'manual' })
+  assert.equal(teamsResponse.status, 200, await teamsResponse.clone().text())
+  const teamsBody = await teamsResponse.json()
+  assert.ok(Array.isArray(teamsBody.teams), 'A lista de equipes não veio como lista.')
+  // Equipe que não é desta sessão responde NÃO ENCONTRADA. Um 403 aqui
+  // confirmaria a existência dela a quem não é dono.
+  const foreignTeam = await fetch(`${origin}/studio/teams/11111111-2222-4333-8444-555555555555`, {
+    headers, redirect: 'manual',
+  })
+  assert.equal(foreignTeam.status, 404, await foreignTeam.clone().text())
+  // Sem cookie de sessão a rota não conta nem quantas equipes existem.
+  const anonymousTeams = await fetch(`${origin}/studio/teams`, { headers: { origin }, redirect: 'manual' })
+  assert.equal(anonymousTeams.status, 401, await anonymousTeams.clone().text())
+  const teamPanel = { list: teamsResponse.status, foreign: foreignTeam.status, anonymous: anonymousTeams.status }
+
   const approvals = []
   approvalOff = booted.ctx.on('approval/request', (request) => {
     approvals.push({ toolName: request.toolName, callId: String(request.callId) })
@@ -287,6 +306,7 @@ try {
     governedTools: governed.length,
     telemetrySharing,
     bundledSkill,
+    teamPanel,
     conversationTurn: realLocalModel ? 'PASS_WITH_REAL_LOCAL_MODEL' : 'PASS_WITH_DETERMINISTIC_PROVIDER',
     provider: realLocalModel ? `ollama/${localModel}` : 'studio-fake/studio-deterministic',
     approval: {

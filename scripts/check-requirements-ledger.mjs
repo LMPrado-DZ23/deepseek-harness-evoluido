@@ -115,6 +115,65 @@ export function ledgerFindings(rows, previousIds = []) {
   return findings
 }
 
+
+/**
+ * Lê a tabela de RESUMO do fim do ledger: `| \`ESTADO\` | n |`.
+ *
+ * Ela existe porque ninguém conta 154 linhas a olho. E foi exatamente por isso
+ * que ela mentiu por muito tempo: nenhum portão a comparava com as linhas, e os
+ * números ficaram parados enquanto o ledger andava. Um resumo errado é pior que
+ * resumo nenhum - ele é o número que as pessoas citam.
+ * @param source - conteúdo do arquivo.
+ * @returns o total declarado por estado e por versão-alvo.
+ */
+export function parseSummary(source) {
+  const states = new Map()
+  const targets = new Map()
+  for (const line of source.split('\n')) {
+    const match = /^\|\s*`?([A-Za-z0-9_.]+)`?\s*\|\s*(\d+)\s*\|\s*$/u.exec(line)
+    if (match === null) continue
+    const [, name, total] = match
+    if (LEDGER_STATES.includes(name)) states.set(name, Number(total))
+    else if (TARGETS.has(name)) targets.set(name, Number(total))
+  }
+  return { states, targets }
+}
+
+/**
+ * Confere o resumo contra as linhas reais.
+ * @param rows - as linhas já interpretadas.
+ * @param summary - o resumo declarado no arquivo.
+ * @returns as mensagens de reprovação.
+ */
+export function summaryFindings(rows, summary) {
+  const findings = []
+  const count = (pick) => {
+    const totals = new Map()
+    for (const row of rows) totals.set(pick(row), (totals.get(pick(row)) ?? 0) + 1)
+    return totals
+  }
+  for (const [label, declared, real] of [
+    ['estado', summary.states, count(row => row.estado)],
+    ['versão-alvo', summary.targets, count(row => row.alvo)],
+  ]) {
+    // Um resumo VAZIO não passa calado: sem esta linha, apagar a tabela inteira
+    // faria o portão aprovar por não ter nada com que discordar.
+    if (declared.size === 0) {
+      findings.push(`resumo: a tabela de ${label} não foi lida — o ledger declara totais que ninguém confere`)
+      continue
+    }
+    for (const [name, total] of real) {
+      const said = declared.get(name)
+      if (said === undefined) findings.push(`resumo: ${label} "${name}" tem ${String(total)} requisito(s) e não aparece na tabela`)
+      else if (said !== total) findings.push(`resumo: ${label} "${name}" diz ${String(said)} e o ledger tem ${String(total)}`)
+    }
+    for (const [name] of declared) {
+      if (!real.has(name)) findings.push(`resumo: ${label} "${name}" aparece na tabela e não existe em nenhuma linha`)
+    }
+  }
+  return findings
+}
+
 function selfTest() {
   const good = [{
     id: 'X-1', requisito: 'algo', fonte: 'p', alvo: 'v1.0', estado: 'BETA',
@@ -130,6 +189,11 @@ function selfTest() {
     ['id repetido reprova', ledgerFindings([good[0], good[0]]).length > 0],
     ['sem próximo passo reprova', ledgerFindings([{ ...good[0], proximo: '—' }]).length > 0],
     ['palavra proibida reprova', ledgerFindings([{ ...good[0], requisito: 'está pronto' }]).length > 0],
+    ['resumo certo passa', summaryFindings(good, { states: new Map([['BETA', 1]]), targets: new Map([['v1.0', 1]]) }).length === 0],
+    ['resumo defasado reprova', summaryFindings(good, { states: new Map([['BETA', 9]]), targets: new Map([['v1.0', 1]]) }).length > 0],
+    ['estado ausente do resumo reprova', summaryFindings(good, { states: new Map([['STABLE', 1]]), targets: new Map([['v1.0', 1]]) }).length > 0],
+    ['resumo apagado reprova', summaryFindings(good, { states: new Map(), targets: new Map() }).length > 0],
+    ['leitura do resumo entende a tabela', parseSummary('| `BETA` | 7 |\n| v1.0 | 3 |').states.get('BETA') === 7],
   ]
   const failed = checks.filter(([, ok]) => !ok).map(([name]) => name)
   console.log(`REQUIREMENTS_LEDGER_SELF_TEST=${failed.length === 0 ? 'PASS' : 'FAIL'} checks=${String(checks.length)}${failed.length === 0 ? '' : ` falhou=${failed.join(', ')}`}`)
@@ -148,7 +212,7 @@ if (process.argv.includes('--self-test')) {
   } else {
     const baseline = await readFile('docs/baselines/requirements-ledger-ids.json', 'utf8')
       .then(text => JSON.parse(text), () => [])
-    const findings = ledgerFindings(rows, baseline)
+    const findings = [...ledgerFindings(rows, baseline), ...summaryFindings(rows, parseSummary(source))]
     for (const finding of findings) console.error(finding)
     const counts = new Map()
     for (const row of rows) counts.set(row.estado, (counts.get(row.estado) ?? 0) + 1)

@@ -1,7 +1,9 @@
 import { ASSISTANT_PATH } from './assistant/AssistantEntry'
 import { HUB_PATH } from './hub/presentation'
+import { TEAM_PATH } from './team/teamApi'
 import assistant from './i18n/assistant.pt-BR.json'
 import hub from './i18n/hub.pt-BR.json'
+import team from './i18n/team.pt-BR.json'
 import t from './i18n/pt-BR.json'
 
 /** Identificador do painel de navegação, usado por `aria-controls` no botão do menu. */
@@ -35,7 +37,10 @@ export function studioNavItems(): readonly StudioNavItem[] {
     { id: 'assistant', label: assistant.navLabel, href: ASSISTANT_PATH },
     { id: 'hub', label: hub.navLabel, href: HUB_PATH },
     { id: 'projects', label: t.nav.projects, href: null },
-    { id: 'progress', label: t.nav.progress, href: null },
+    // A tela de progresso É o painel do trabalho em equipe. Um sétimo item ao
+    // lado de um "Progresso" mudo daria à pessoa dois nomes parecidos, um
+    // deles morto.
+    { id: 'progress', label: team.navLabel, href: TEAM_PATH },
     { id: 'result', label: t.nav.result, href: null },
   ]
 }
