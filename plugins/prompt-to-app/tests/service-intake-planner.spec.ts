@@ -1,7 +1,9 @@
+import { routePrivacyProfile } from '@dz23-studio/route-health'
 import { describe, expect, it, vi } from 'vitest'
 import type { AppSpecV1 } from '../src/appspec.js'
 import { IntakeEngine, nextIntakeQuestion } from '../src/intake.js'
 import type { StudioApproval, StudioAppSpecRecord, StudioDesignSpecRecord, StudioEvidence, StudioIntakeTurn, StudioPlan, StudioProject, StudioRun } from '../src/model.js'
+import { studioProjectSchema } from '../src/model.js'
 import { PlannerEngine } from '../src/planner.js'
 import type { PromptModelPort } from '../src/ports.js'
 import { PromptToAppError, PromptToAppService, type PromptToAppActor, type PromptToAppRepository } from '../src/service.js'
@@ -189,4 +191,42 @@ describe('intake and planner', () => {
     await expect(planner.plan({ orgId: 'o', tenantId: 't' }, 'local-only', databaseSpec, 'form-database')).rejects.toMatchObject({ code: 'FORM_ENTRY_FILE_REQUIRED' })
   })
 
+})
+
+describe('M-05: o perfil de rota é do projeto', () => {
+  it('grava o nome do perfil e continua lendo o valor binário antigo', async () => {
+    const { repository, service } = fixture()
+    // Gravação nova sai com o NOME; o binário antigo entrou por uma tela que
+    // ainda existe em navegador aberto, e ele não pode ser recusado.
+    const created = await service.createProject(ownerA, {
+      name: 'Privado', original_brief: 'Quero um cadastro que fique no meu computador.',
+      category: 'landing-page', privacy: 'local-only',
+    })
+    expect(created.privacy).toBe('privado-local')
+    const best = await service.createProject(ownerA, {
+      name: 'Melhor', original_brief: 'Quero a melhor qualidade possível.',
+      category: 'landing-page', privacy: 'any',
+    })
+    expect(best.privacy).toBe('melhor-qualidade')
+    const named = await service.createProject(ownerA, {
+      name: 'Equilibrado', original_brief: 'Quero equilíbrio entre privacidade e qualidade.',
+      category: 'landing-page', privacy: 'equilibrado',
+    })
+    expect(named.privacy).toBe('equilibrado')
+
+    // E o registro JÁ gravado em disco com o valor antigo continua legível:
+    // subir a versão do domínio para renomeá-lo faria `open()` falhar com
+    // `version-mismatch` em toda instalação existente.
+    const stored: StudioProject = {
+      ...created, project_id: 'projeto-antigo', name: 'Antigo', privacy: 'local-only',
+    }
+    await repository.putProject(stored)
+    const read = service.project(ownerA, 'projeto-antigo')
+    expect(read.privacy).toBe('local-only')
+    expect(studioProjectSchema.safeParse(read).success).toBe(true)
+    expect(routePrivacyProfile(read.privacy)).toBe('privado-local')
+    // Dois projetos do mesmo espaço de trabalho, dois perfis diferentes.
+    expect(new Set(service.listProjects(ownerA).map(project => routePrivacyProfile(project.privacy))))
+      .toEqual(new Set(['privado-local', 'melhor-qualidade', 'equilibrado']))
+  })
 })

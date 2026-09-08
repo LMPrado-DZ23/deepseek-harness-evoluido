@@ -19,17 +19,68 @@ export function permanentTruthKind(state: ProjectUiState | null): PermanentTruth
   return null
 }
 
+/**
+ * Os três perfis, e os dois valores do binário anterior.
+ *
+ * A tela aceita os antigos porque um projeto gravado antes dos nomes continua
+ * abrindo: `local-only` é `privado-local` e `any` é `melhor-qualidade`.
+ */
+export type PrivacyProfile = 'privado-local' | 'equilibrado' | 'melhor-qualidade'
+export type PrivacyChoice = PrivacyProfile | 'local-only' | 'any'
+
+/** A mesma tradução que o servidor faz, para a tela nunca discordar dele. */
+export function privacyProfileOf(mode: PrivacyChoice): PrivacyProfile {
+  if (mode === 'local-only') return 'privado-local'
+  if (mode === 'any') return 'melhor-qualidade'
+  return mode
+}
+
 export interface PrivacyMessages {
   readonly localNotice: string
+  readonly localBlocked: string
+  readonly balancedNoticeStart: string
   readonly routeNoticeStart: string
   readonly routeNoticeEnd: string
   readonly routeUnavailable: string
 }
 
-export function privacyNotice(mode: 'local-only' | 'any', route: string | null, messages: PrivacyMessages): string {
-  if (mode === 'local-only') return messages.localNotice
+/**
+ * Se a criação está barrada AGORA pelo perfil escolhido.
+ *
+ * `privado-local` não cai para rota externa: sem IA local não há criação. Sem
+ * esta resposta a tela deixava a pessoa escrever a ideia inteira, apertar
+ * "continuar" e só então receber um erro - a informação existia antes e foi
+ * escondida dela.
+ *
+ * `undefined` é "o servidor não respondeu isso", e não vira bloqueio: inventar
+ * um bloqueio a partir de silêncio é tão errado quanto esconder um de verdade.
+ * @param mode - o perfil escolhido.
+ * @param localRoute - a rota local utilizável, `null` quando não há, `undefined` quando não se sabe.
+ * @returns `true` quando a criação está bloqueada.
+ */
+export function creationBlocked(mode: PrivacyChoice, localRoute: string | null | undefined): boolean {
+  return privacyProfileOf(mode) === 'privado-local' && localRoute === null
+}
+
+/**
+ * A frase que diz o que cada perfil faz com os dados da pessoa.
+ * @param mode - o perfil escolhido.
+ * @param route - a rota externa que seria usada, ou `null`.
+ * @param messages - o catálogo pt-BR.
+ * @param localRoute - a rota local utilizável, `null` quando não há.
+ * @returns a frase pronta.
+ */
+export function privacyNotice(
+  mode: PrivacyChoice,
+  route: string | null,
+  messages: PrivacyMessages,
+  localRoute?: string | null,
+): string {
+  const profile = privacyProfileOf(mode)
+  if (profile === 'privado-local') return creationBlocked(mode, localRoute) ? messages.localBlocked : messages.localNotice
   if (route === null) return messages.routeUnavailable
-  return `${messages.routeNoticeStart} ${route}. ${messages.routeNoticeEnd}`
+  const start = profile === 'equilibrado' ? messages.balancedNoticeStart : messages.routeNoticeStart
+  return `${start} ${route}. ${messages.routeNoticeEnd}`
 }
 
 /** Os estados que a criação pode terminar. */
@@ -76,9 +127,9 @@ export function resultSentence(state: PipelineResultState, messages: ResultMessa
  * @returns a frase, ou `null`.
  */
 export function routeReasonNotice(
-  mode: 'local-only' | 'any',
+  mode: PrivacyChoice,
   reason: string | null | undefined,
 ): string | null {
-  if (mode === 'local-only') return null
+  if (privacyProfileOf(mode) === 'privado-local') return null
   return typeof reason === 'string' && reason.trim() !== '' ? reason.trim() : null
 }

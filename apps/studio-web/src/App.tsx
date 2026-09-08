@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, apiResponse, csrfToken, type HealthState } from './api'
 import type { Category } from './categories'
 import t from './i18n/pt-BR.json'
-import { currentStepIndex, permanentTruthKind, privacyNotice, resultSentence, routeReasonNotice, type ProjectUiState } from './presentation'
+import { creationBlocked, currentStepIndex, permanentTruthKind, privacyNotice, resultSentence, routeReasonNotice, type PrivacyProfile, type ProjectUiState } from './presentation'
 import { apiFailureMessage, apiFailureText, type ApiCallKind } from './pwa/apiFailure'
 import { GENERATION_REJECTED_STATE, postGeneration, startGeneration } from './pwa/generation'
 import { NotificationOptIn } from './pwa/NotificationOptIn'
@@ -29,6 +29,16 @@ type Preview = { preview_id: string; state: 'REQUESTED' | 'STARTING' | 'READY' |
  * roda em um efeito que depende dele.
  */
 const emergencyPort = browserEmergencyStopPort(csrfToken)
+/**
+ * Os três perfis na ordem em que a tela os oferece, cada um com a frase que
+ * diz o que ele faz com os dados de quem escreve. O nome sozinho ("Equilibrado")
+ * não conta nada a quem não programa: o que decide a escolha é a frase.
+ */
+const PRIVACY_PROFILES: ReadonlyArray<readonly [PrivacyProfile, string, string]> = [
+  ['privado-local', t.privacy.privadoLocal, t.privacy.privadoLocalDetail],
+  ['equilibrado', t.privacy.equilibrado, t.privacy.equilibradoDetail],
+  ['melhor-qualidade', t.privacy.melhorQualidade, t.privacy.melhorQualidadeDetail],
+]
 const steps = [
   [t.progress.idea, t.progress.ideaDetail], [t.progress.questions, t.progress.questionsDetail],
   [t.progress.plan, t.progress.planDetail], [t.progress.creation, t.progress.creationDetail],
@@ -38,7 +48,7 @@ const steps = [
 export function App() {
   const [brief, setBrief] = useState('')
   const [category, setCategory] = useState<Category>('landing-page')
-  const [privacy, setPrivacy] = useState<'local-only' | 'any'>('local-only')
+  const [privacy, setPrivacy] = useState<PrivacyProfile>('privado-local')
   const [designPreset, setDesignPreset] = useState<DesignPreset>('modern')
   const [brandColor, setBrandColor] = useState('#075ee5')
   const [font, setFont] = useState<'geist-sans' | 'source-serif'>('geist-sans')
@@ -260,7 +270,7 @@ export function App() {
     {menuOpen ? <div className="drawer-scrim" aria-hidden="true" onClick={closeMenu} /> : null}
     <section className="workspace"><header className="topbar"><button ref={menuButton} type="button" className="mobile-menu" aria-label={t.mobile.menu} aria-expanded={menuOpen} aria-controls={NAV_MENU_ID} onClick={() => setMenuOpen(!menuOpen)}><Menu aria-hidden="true" /></button><Status health={health} /><div className="top-actions"><NotificationOptIn /><Bell aria-hidden="true" /><UserRound aria-hidden="true" />{authenticatedSession ? <button className="signout-button" type="button" disabled={signingOut} aria-busy={signingOut} onClick={() => void signOut()}><LogOut aria-hidden="true" /><span>{signingOut ? t.account.signingOut : t.account.signOut}</span></button> : null}</div></header>
       <main className="canvas"><section className="idea-panel">
-        {projectState === null ? <Idea brief={brief} setBrief={setBrief} privacy={privacy} setPrivacy={setPrivacy} route={route ?? health.route} routeReason={health.route_reason ?? null} ready={ready} chooseSuggestion={chooseSuggestion} create={create}
+        {projectState === null ? <Idea brief={brief} setBrief={setBrief} privacy={privacy} setPrivacy={setPrivacy} route={route ?? health.route} localRoute={health.local_route} routeReason={health.route_reason ?? null} ready={ready} chooseSuggestion={chooseSuggestion} create={create}
           designPreset={designPreset} setDesignPreset={setDesignPreset} brandColor={brandColor} setBrandColor={setBrandColor}
           font={font} setFont={setFont} radius={radius} setRadius={setRadius} density={density} setDensity={setDensity}
           tone={tone} setTone={setTone} logo={logo} setLogo={setLogo} showDesignAdvanced={showDesignAdvanced} setShowDesignAdvanced={setShowDesignAdvanced} /> : null}
@@ -284,7 +294,7 @@ export function App() {
 }
 
 function Idea(props: {
-  brief: string; setBrief(v: string): void; privacy: 'local-only' | 'any'; setPrivacy(v: 'local-only' | 'any'): void; route: string | null; routeReason: string | null; ready: boolean; chooseSuggestion(v: string, c: Category): void; create(): Promise<void>
+  brief: string; setBrief(v: string): void; privacy: PrivacyProfile; setPrivacy(v: PrivacyProfile): void; route: string | null; localRoute: string | null | undefined; routeReason: string | null; ready: boolean; chooseSuggestion(v: string, c: Category): void; create(): Promise<void>
   designPreset: DesignPreset; setDesignPreset(v: DesignPreset): void; brandColor: string; setBrandColor(v: string): void
   font: 'geist-sans' | 'source-serif'; setFont(v: 'geist-sans' | 'source-serif'): void; radius: 'compact' | 'balanced' | 'rounded'; setRadius(v: 'compact' | 'balanced' | 'rounded'): void
   density: 'compact' | 'comfortable'; setDensity(v: 'compact' | 'comfortable'): void; tone: 'friendly' | 'formal'; setTone(v: 'friendly' | 'formal'): void
@@ -307,8 +317,8 @@ function Idea(props: {
       <label>{t.design.tone}<select value={props.tone} onChange={event => props.setTone(event.target.value as typeof props.tone)}><option value="friendly">{t.design.toneFriendly}</option><option value="formal">{t.design.toneFormal}</option></select></label>
       <label>{t.design.logo}<input type="file" accept="image/png,image/jpeg" onChange={event => props.setLogo(event.target.files?.[0] ?? null)} /></label><small>{props.logo === null ? t.design.logoHelp : props.logo.name}</small>
     </section> : null}
-    <fieldset><legend>{t.privacy.title}</legend><label><input type="radio" checked={props.privacy === 'local-only'} onChange={() => props.setPrivacy('local-only')} />{t.privacy.local}</label><label><input type="radio" checked={props.privacy === 'any'} onChange={() => props.setPrivacy('any')} />{t.privacy.configured}{props.route === null ? '' : ` (${props.route})`}</label></fieldset>
-    <p className="privacy-notice">{privacyNotice(props.privacy, props.route, t.privacy)}</p>{routeReasonNotice(props.privacy, props.routeReason) === null ? null : <p className="privacy-notice">{t.privacy.routeReason} {routeReasonNotice(props.privacy, props.routeReason)}</p>}<p className="context-note">{t.truth.idea}</p><button className="primary" disabled={!props.ready} onClick={() => void props.create()}>{t.idea.continue}</button></>
+    <fieldset className="privacy-profiles"><legend>{t.privacy.title}</legend>{PRIVACY_PROFILES.map(([value, label, detail]) => <label key={value}><input type="radio" name="privacy-profile" checked={props.privacy === value} onChange={() => props.setPrivacy(value)} /><strong>{label}{value === 'privado-local' || props.route === null ? '' : ` (${props.route})`}</strong><span>{detail}</span></label>)}</fieldset>
+    <p className="privacy-notice">{privacyNotice(props.privacy, props.route, t.privacy, props.localRoute)}</p>{routeReasonNotice(props.privacy, props.routeReason) === null ? null : <p className="privacy-notice">{t.privacy.routeReason} {routeReasonNotice(props.privacy, props.routeReason)}</p>}<p className="context-note">{t.truth.idea}</p><button className="primary" disabled={!props.ready || creationBlocked(props.privacy, props.localRoute)} onClick={() => void props.create()}>{t.idea.continue}</button></>
 }
 function Questions({ question, answer, setAnswer, submit }: { question: Question; answer: string; setAnswer(v: string): void; submit(recommend: boolean, confirm?: boolean): Promise<void> }) {
   const sensitive = question.id === 'sensitive-confirmation'

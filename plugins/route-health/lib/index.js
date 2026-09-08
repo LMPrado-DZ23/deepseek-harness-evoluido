@@ -35,10 +35,12 @@ export async function apply(ctx) {
     await service.initialize({ orgId: 'studio-system', tenantId: 'studio-system' }, configured);
     const explicitRequests = new WeakSet();
     const requestScopes = new WeakMap();
+    const requestPrivacy = new WeakMap();
     ctx.provide('studioRouteHealth', {
         service,
         markExplicit(options) { explicitRequests.add(options); return options; },
         markScope(options, scope) { requestScopes.set(options, scope); return options; },
+        markPrivacy(options, privacy) { requestPrivacy.set(options, privacy); return options; },
     });
     const bypass = new WeakSet();
     ctx.on('llm/stream', (options, next) => {
@@ -48,10 +50,12 @@ export async function apply(ctx) {
             ?? scopeFor(ctx.studioIdentity.service, options.sessionId === undefined ? undefined : String(options.sessionId));
         requestScopes.delete(options);
         const explicit = explicitRequests.delete(options);
+        const privacy = requestPrivacy.get(options) ?? 'melhor-qualidade';
+        requestPrivacy.delete(options);
         return service.streamWithFallback(scope, options, next, fallbackOptions => {
             bypass.add(fallbackOptions);
             return ctx.llm.stream(fallbackOptions);
-        }, explicit);
+        }, explicit, privacy);
     });
     ctx.effect(() => ctx.webServer.register({
         kind: 'exact', path: '/api/studio/routes/health',

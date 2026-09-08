@@ -3,6 +3,7 @@ import {
   STUDIO_ROUTE_HEALTH_LOGICAL_DOMAIN,
   STUDIO_ROUTE_HEALTH_PHYSICAL_DOMAIN,
   routeHealthRecordSchema,
+  routePrivacySchema,
   routeStateSchema,
   routeSwitchEventSchema,
   studioRouteHealthDomainSpec,
@@ -34,6 +35,21 @@ describe('Studio route-health domain', () => {
     }).success).toBe(true)
     expect(routeHealthRecordSchema.safeParse({ ...legacy, circuit_opened_at: null }).success).toBe(true)
     expect(routeHealthRecordSchema.safeParse({ ...legacy, consecutive_failures: -1 }).success).toBe(false)
+    // O liga/desliga entrou pelo mesmo motivo e com a mesma regra: ausente e
+    // LIGADA, e o registro antigo continua valendo sem tocar na versao.
+    expect(studioRouteHealthDomainSpec.version).toBe(1)
+    expect(routeHealthRecordSchema.safeParse({ ...legacy, enabled: false }).success).toBe(true)
+    expect(routeHealthRecordSchema.safeParse({ ...legacy, enabled: 'nao' }).success).toBe(false)
+  })
+
+  it('aceita o perfil novo e o valor binario antigo na mesma enumeracao', () => {
+    // Subir a versao do dominio para trocar o binario pelos nomes faria
+    // `open()` falhar com `version-mismatch` em toda instalacao existente: por
+    // isso os cinco valores convivem, e a traducao acontece no codigo.
+    for (const value of ['privado-local', 'equilibrado', 'melhor-qualidade', 'local-only', 'any']) {
+      expect(routePrivacySchema.safeParse(value).success, value).toBe(true)
+    }
+    expect(routePrivacySchema.safeParse('qualquer-um').success).toBe(false)
   })
 
   it('rejects incomplete route and audit records', () => {

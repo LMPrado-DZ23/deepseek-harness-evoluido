@@ -100,11 +100,19 @@
     "heartbeatFailed": "Não foi possível manter a prévia ativa. Confira a conexão local ou abra uma nova prévia."
   },
   "privacy": {
-    "title": "Privacidade", "local": "Somente no meu computador", "configured": "Permitir IA configurada",
+    "title": "Privacidade",
     "localNotice": "Seus dados não são enviados para serviços externos. Tudo fica no seu computador.",
     "routeNoticeStart": "Sua ideia e suas respostas serão enviadas para o serviço de IA configurado:",
     "routeNoticeEnd": "Seus arquivos não saem do computador.",
-    "routeUnavailable": "Nenhum serviço externo de IA está configurado. A criação ficará bloqueada até você escolher uma opção disponível.", "routeReason": "Por que esta rota:"
+    "routeUnavailable": "Nenhum serviço externo de IA está configurado. A criação ficará bloqueada até você escolher uma opção disponível.", "routeReason": "Por que esta rota:",
+    "privadoLocal": "Privado local",
+    "privadoLocalDetail": "Só a inteligência artificial que roda no seu computador. Nada do que você escrever sai daqui, e a criação fica bloqueada se ela não estiver disponível.",
+    "equilibrado": "Equilibrado",
+    "equilibradoDetail": "Prefere a inteligência artificial do seu computador. Quando ela não der conta, avisamos e usamos o serviço configurado.",
+    "melhorQualidade": "Melhor qualidade",
+    "melhorQualidadeDetail": "Usa o melhor serviço de inteligência artificial disponível, inclusive fora do seu computador.",
+    "balancedNoticeStart": "A inteligência artificial do seu computador é usada sempre que possível. Quando ela não der conta, sua ideia e suas respostas vão para o serviço configurado:",
+    "localBlocked": "A criação está bloqueada: o perfil Privado local não usa nenhum serviço externo, e a inteligência artificial do seu computador não está disponível agora. Nada foi enviado para fora."
   },
   "progress": {
     "title": "Seu projeto em andamento", "idea": "Ideia", "ideaDetail": "Entendemos o que você precisa.",

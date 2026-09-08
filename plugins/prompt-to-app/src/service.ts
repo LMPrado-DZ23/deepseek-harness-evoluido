@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { roleAllows, type StudioRole } from '@dz23-studio/policy'
+import { routePrivacyProfile } from '@dz23-studio/route-health'
 import { appSpecHash, type AppSpecV1 } from './appspec.js'
 import { createDesignSpec, designSpecHash, designSpecV1Schema, type DesignLogo, type DesignSelection, type DesignSpecV1 } from './design.js'
 import type {
@@ -77,7 +78,12 @@ export class PromptToAppService {
     const now = this.#now().toISOString()
     const value: StudioProject = {
       project_id: this.#createId(), org_id: actor.orgId, tenant_id: actor.tenantId,
-      ...input, state: 'DRAFT', created_by: actor.userId, created_at: now, updated_at: now, archived_at: null,
+      ...input,
+      // Gravação nova sai SEMPRE com o nome do perfil, nunca com o valor
+      // binário antigo: o antigo continua sendo lido porque já está em disco,
+      // não porque ainda vale a pena escrever mais um.
+      privacy: routePrivacyProfile(input.privacy),
+      state: 'DRAFT', created_by: actor.userId, created_at: now, updated_at: now, archived_at: null,
     }
     await this.#repository.putProject(value)
     return value

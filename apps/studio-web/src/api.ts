@@ -1,4 +1,5 @@
-export type HealthState = { state: 'OK' | 'ATTENTION'; route: string | null; route_reason?: string | null; builder: 'OK' | 'BLOCKED_EXTERNAL'; disk: 'OK' | 'ATTENTION' }
+/** `local_route: null` = o perfil Privado local esta bloqueado agora; ausente = servidor antigo, que nao sabe responder. */
+export type HealthState = { state: 'OK' | 'ATTENTION'; route: string | null; route_reason?: string | null; local_route?: string | null; builder: 'OK' | 'BLOCKED_EXTERNAL'; disk: 'OK' | 'ATTENTION' }
 export type ProjectSummary = { project_id: string; name: string; state: string }
 
 export const CSRF_STORAGE_KEY = 'dz23.studio.csrf.v1'

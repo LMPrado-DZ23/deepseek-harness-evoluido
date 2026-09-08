@@ -3,12 +3,16 @@ import { describe, expect, it } from 'vitest'
 import type { RouteHealthRecord, RouteSwitchEvent } from '../src/model.ts'
 import {
   ROUTE_FAILURE_MESSAGE,
+  ROUTE_PRIVACY_PROFILES,
   StudioRouteHealthService,
+  enforceRoutePrivacy,
   routeBudgetUsage,
   routeCircuitState,
   routeCostState,
+  routePrivacyProfile,
   type RouteHealthConfig,
   type RouteHealthRepository,
+  type RoutePrivacy,
   type RouteScope,
 } from '../src/service.ts'
 
@@ -448,5 +452,306 @@ describe('sem cascatas duplicadas', () => {
     expect(cascades).toBe(0)
     expect(output.at(-1)?.type).toBe('finish')
     expect(h.subject.switches(scope)).toEqual([])
+  })
+})
+
+describe('M-05: os tres perfis nomeados', () => {
+  it('le o valor antigo gravado em disco como o perfil novo', () => {
+    // A versao do dominio nao pode subir - `open()` falha com
+    // `version-mismatch` em instalacao que ja rodou e nao ha migracao. Entao o
+    // registro gravado com o binario antigo tem de continuar significando a
+    // mesma coisa, e nao virar "perfil desconhecido".
+    expect(routePrivacyProfile('local-only')).toBe('privado-local')
+    expect(routePrivacyProfile('any')).toBe('melhor-qualidade')
+    expect(routePrivacyProfile('privado-local')).toBe('privado-local')
+    expect(routePrivacyProfile('equilibrado')).toBe('equilibrado')
+    expect(routePrivacyProfile('melhor-qualidade')).toBe('melhor-qualidade')
+    expect(ROUTE_PRIVACY_PROFILES).toEqual(['privado-local', 'equilibrado', 'melhor-qualidade'])
+  })
+
+  it('o registro antigo escolhe a MESMA rota que o perfil novo escolheria', async () => {
+    const h = service()
+    await h.service.initialize(scope, new Set(['ollama', 'omniroute', 'deepseek-official']))
+    const legacyLocal = await h.service.chooseRoute(scope, 'T2', { privacy: 'local-only' })
+    const namedLocal = await h.service.chooseRoute(scope, 'T2', { privacy: 'privado-local' })
+    expect(legacyLocal).toEqual(namedLocal)
+    const legacyBest = await h.service.chooseRoute(scope, 'T2', { privacy: 'any' })
+    const namedBest = await h.service.chooseRoute(scope, 'T2', { privacy: 'melhor-qualidade' })
+    expect(legacyBest).toEqual(namedBest)
+  })
+
+  it('equilibrado prefere a local em todo proposito, nao so na leitura segura', async () => {
+    const h = service()
+    await h.service.initialize(scope, new Set(['ollama', 'omniroute', 'deepseek-official']))
+    // `melhor-qualidade` ja preferia a local em T0; o que separa os dois perfis
+    // e o que acontece FORA de T0, e ai o equilibrado continua na local.
+    await expect(h.service.chooseRoute(scope, 'T2', { privacy: 'equilibrado' })).resolves.toEqual({
+      route: 'ollama', explicit: false,
+      reason: 'Perfil equilibrado: a IA local esta em uso e nada sai deste computador.',
+    })
+  })
+
+  it('equilibrado vai para fora quando a local nao serve, e AVISA que foi', async () => {
+    const h = service()
+    await h.service.initialize(scope, new Set(['omniroute', 'deepseek-official']))
+    const chosen = await h.service.chooseRoute(scope, 'T2', { privacy: 'equilibrado' })
+    expect(chosen).toEqual({
+      route: 'omniroute', explicit: false,
+      reason: 'Perfil equilibrado: a IA local nao esta disponivel; usando a rota externa configurada.',
+    })
+    // O aviso nao vive so na frase: a troca fica auditada como qualquer outra.
+    expect(h.service.switches(scope).at(-1)).toMatchObject({ from_route: 'ollama', to_route: 'omniroute' })
+  })
+
+  it('equilibrado tambem avisa quando so sobra a rota direta', async () => {
+    const h = service()
+    await h.service.initialize(scope, new Set())
+    const chosen = await h.service.chooseRoute(scope, 'T2', { privacy: 'equilibrado' })
+    expect(chosen).toMatchObject({
+      route: 'deepseek-official',
+      reason: 'Perfil equilibrado: a IA local nao esta disponivel; usando a rota externa configurada.',
+    })
+    expect(h.service.switches(scope).at(-1)).toMatchObject({ to_route: 'deepseek-official' })
+  })
+
+  it('melhor-qualidade continua usando a melhor rota disponivel', async () => {
+    const h = service()
+    await h.service.initialize(scope, new Set(['omniroute', 'deepseek-official']))
+    await expect(h.service.chooseRoute(scope, 'T2', { privacy: 'melhor-qualidade' })).resolves.toEqual({
+      route: 'omniroute', explicit: false, reason: 'Primeira rota saudável do perfil.',
+    })
+  })
+})
+
+describe('M-05: liga e desliga por rota', () => {
+  it('registro gravado antes do campo existir vale como LIGADA', async () => {
+    const h = service()
+    await h.service.initialize(scope, new Set(['ollama', 'omniroute']))
+    // Ler ausencia como "desligada" apagaria toda rota de toda instalacao que
+    // ja rodava antes do liga/desliga existir.
+    expect(h.repository.routeMap.get('org-1:tenant-1:ollama')?.enabled).toBeUndefined()
+    expect(h.service.enabled(scope, 'ollama')).toBe(true)
+    expect(h.service.enabled(scope, 'rota-que-nao-existe')).toBe(true)
+  })
+
+  it('rota desligada nao e escolhida, e o motivo aparece na frase', async () => {
+    const h = service()
+    await h.service.initialize(scope, new Set(['ollama', 'omniroute', 'deepseek-official']))
+    await h.service.setRouteEnabled(scope, 'ollama', false)
+    expect(h.service.enabled(scope, 'ollama')).toBe(false)
+    // A local desligada nao e mais "preferida para leitura segura".
+    await expect(h.service.chooseRoute(scope, 'T0')).resolves.toMatchObject({ route: 'omniroute' })
+    await h.service.setRouteEnabled(scope, 'omniroute', false)
+    await expect(h.service.chooseRoute(scope, 'T2')).resolves.toMatchObject({ route: 'deepseek-official' })
+    // Pedida pelo nome, uma rota desligada continua desligada: um guarda que a
+    // escolha explicita atravessa nao e guarda.
+    await expect(h.service.chooseRoute(scope, 'T2', { privacy: 'melhor-qualidade', explicitRoute: 'omniroute' })).resolves.toEqual({
+      route: undefined, explicit: true,
+      reason: 'Rota desligada neste espaco de trabalho; ela nao e escolhida enquanto continuar assim.',
+    })
+    expect(h.service.switches(scope).at(-1)).toMatchObject({ from_route: 'omniroute', to_route: 'blocked', explicit_route: true })
+    // Desligada a ultima rota, a resposta honesta e recusar - nao prometer uma
+    // rota que alguem mandou parar de usar.
+    await h.service.setRouteEnabled(scope, 'deepseek-official', false)
+    await expect(h.service.chooseRoute(scope, 'T2')).resolves.toMatchObject({
+      route: undefined,
+      reason: 'Rota desligada neste espaco de trabalho; ela nao e escolhida enquanto continuar assim.',
+    })
+  })
+
+  it('desliga uma rota que ainda nao tinha registro, sem inventar saude para ela', async () => {
+    const h = service()
+    await h.service.initialize(scope, new Set(['ollama', 'rota-extra']))
+    // Rota conhecida pelo runtime mas fora da lista monitorada: ela nasce OK.
+    await h.service.setRouteEnabled(scope, 'rota-extra', false)
+    expect(h.repository.routeMap.get('org-1:tenant-1:rota-extra')).toMatchObject({ state: 'OK', enabled: false })
+    // Rota que ninguem configurou nasce NOT_CONFIGURED: desligar nao pode
+    // promove-la a saudavel de brinde.
+    await h.service.setRouteEnabled(scope, 'rota-desconhecida', false)
+    expect(h.repository.routeMap.get('org-1:tenant-1:rota-desconhecida')).toMatchObject({
+      state: 'NOT_CONFIGURED', enabled: false, requests: 0,
+    })
+    expect(h.service.enabled(scope, 'rota-desconhecida')).toBe(false)
+  })
+
+  it('o desligamento e por escopo: o vizinho continua com a rota ligada', async () => {
+    const h = service()
+    await h.service.initialize(scope, new Set(['ollama', 'omniroute', 'deepseek-official']))
+    await h.service.setRouteEnabled(scope, 'omniroute', false)
+    const neighbour = { orgId: 'org-2', tenantId: 'tenant-1' }
+    expect(h.service.enabled(neighbour, 'omniroute')).toBe(true)
+    await expect(h.service.chooseRoute(neighbour, 'T2', { privacy: 'melhor-qualidade', explicitRoute: 'omniroute' })).resolves.toMatchObject({
+      route: 'omniroute',
+    })
+    // E religar devolve a rota sem nenhum outro efeito colateral.
+    await h.service.setRouteEnabled(scope, 'omniroute', true)
+    expect(h.service.enabled(scope, 'omniroute')).toBe(true)
+  })
+
+  it('a cascata nao desce para uma rota direta desligada', async () => {
+    const h = service()
+    await h.service.initialize(scope, new Set(['omniroute', 'deepseek-official']))
+    await h.service.setRouteEnabled(scope, 'deepseek-official', false)
+    let cascades = 0
+    await collect(h.service.streamWithFallback(scope, options, () => chunks(error()), () => {
+      cascades += 1
+      return chunks()
+    }))
+    expect(cascades).toBe(0)
+    expect(h.service.switches(scope)).toEqual([])
+  })
+
+  it('meia-abertura nao ressuscita uma rota desligada', async () => {
+    const h = circuitService({ routes: ['omniroute', 'deepseek-official'] })
+    await h.subject.initialize(scope, new Set(['omniroute', 'deepseek-official']))
+    await h.fail('omniroute', 3)
+    await h.fail('deepseek-official', 3)
+    h.advance(30_000)
+    await h.subject.setRouteEnabled(scope, 'omniroute', false)
+    // Com `omniroute` ligada seria ela a chamada de prova; desligada, a espera
+    // continua valendo e quem responde e a rota direta em meia-abertura.
+    await expect(h.subject.chooseRoute(scope, 'T2')).resolves.toMatchObject({ route: 'deepseek-official' })
+  })
+})
+
+/**
+ * A varredura do C-22.
+ *
+ * A promessa do perfil `privado-local` e uma so: nada sai deste computador.
+ * Um teste que so olhasse os caminhos que existem HOJE nao protegeria nada -
+ * quem abrir um caminho novo amanha nao vai lembrar de escrever o teste dele.
+ * Por isso esta suite varre TODAS as combinacoes relevantes (perfil x estado
+ * das rotas x liga/desliga x rota explicita x circuito x teto x proposito) e
+ * afirma a invariante UMA vez: sob `privado-local`, ou a rota e a local, ou nao
+ * ha rota nenhuma.
+ */
+const INVARIANT_NOW = new Date('2026-09-05T00:00:00.000Z')
+const LOCAL_ROUTE = 'ollama'
+const ALL_ROUTES = ['ollama', 'omniroute', 'deepseek-official'] as const
+const PRIVACY_VALUES: readonly RoutePrivacy[] = ['privado-local', 'local-only', 'equilibrado', 'melhor-qualidade', 'any']
+const STATE_VALUES = ['OK', 'DEGRADED', 'DOWN', 'NOT_CONFIGURED'] as const
+const CIRCUIT_VALUES = ['CLOSED', 'OPEN', 'HALF_OPEN'] as const
+const EXPLICIT_VALUES: readonly (string | undefined)[] = [undefined, 'ollama', 'omniroute', 'deepseek-official']
+
+function seededRecord(
+  route: string,
+  state: (typeof STATE_VALUES)[number],
+  enabled: boolean,
+  circuit: (typeof CIRCUIT_VALUES)[number],
+): RouteHealthRecord {
+  const openedAt = circuit === 'CLOSED'
+    ? null
+    : circuit === 'OPEN' ? INVARIANT_NOW.toISOString() : new Date(INVARIANT_NOW.getTime() - 60_000).toISOString()
+  return {
+    record_id: `${scope.orgId}:${scope.tenantId}:${route}`, org_id: scope.orgId, tenant_id: scope.tenantId,
+    route, state, requests: 4, errors: 2, average_latency_ms: 12,
+    input_tokens: 1_000, output_tokens: 1_000, estimated_cost_usd: 1, unpriced_requests: 4,
+    consecutive_failures: 2, circuit_opened_at: openedAt, enabled,
+    last_failure: null, updated_at: INVARIANT_NOW.toISOString(),
+  }
+}
+
+describe('C-22: privado-local nunca cai para rota externa', () => {
+  it('varre perfil x estado x liga/desliga x rota explicita x circuito x teto e mantem a invariante', async () => {
+    let privateCases = 0
+    let externalCases = 0
+    for (const privacy of PRIVACY_VALUES) {
+      for (const localState of STATE_VALUES) {
+        for (const otherState of STATE_VALUES) {
+          for (const localEnabled of [true, false]) {
+            for (const otherEnabled of [true, false]) {
+              for (const circuit of CIRCUIT_VALUES) {
+                for (const explicitRoute of EXPLICIT_VALUES) {
+                  for (const purpose of ['T0', 'T2']) {
+                    for (const budget of [undefined, { maxCostUsd: 0.5, maxUnpricedRequests: 1 }]) {
+                      const repository = new MemoryRepository()
+                      for (const route of ALL_ROUTES) {
+                        const isLocal = route === LOCAL_ROUTE
+                        await repository.putRoute(seededRecord(
+                          route, isLocal ? localState : otherState, isLocal ? localEnabled : otherEnabled, circuit,
+                        ))
+                      }
+                      const subject = new StudioRouteHealthService(repository, {
+                        routes: [...ALL_ROUTES], localRoute: LOCAL_ROUTE,
+                        fallbackRoute: 'deepseek-official', fallbackModel: 'deepseek-v4-flash',
+                        prices: { omniroute: { inputPerMillion: 1, outputPerMillion: 1 } },
+                        now: () => INVARIANT_NOW, createId: () => 'event-sweep',
+                        ...(budget === undefined ? {} : { budget }),
+                      })
+                      const selected = await subject.chooseRoute(scope, purpose, {
+                        privacy, ...(explicitRoute === undefined ? {} : { explicitRoute }),
+                      })
+                      const label = JSON.stringify({
+                        privacy, localState, otherState, localEnabled, otherEnabled, circuit, explicitRoute, purpose,
+                        budget: budget !== undefined,
+                      })
+                      if (routePrivacyProfile(privacy) === 'privado-local') {
+                        privateCases += 1
+                        // A INVARIANTE, afirmada uma unica vez para todos os caminhos.
+                        expect([undefined, LOCAL_ROUTE], label).toContain(selected.route)
+                        // E o bloqueio nunca e mudo: quem foi barrado le por que.
+                        if (selected.route === undefined) expect(selected.reason.trim(), label).not.toBe('')
+                      } else {
+                        externalCases += 1
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    // A contagem e a prova de que a varredura rodou de verdade: uma suite que
+    // deixasse de gerar casos passaria em silencio sem ela.
+    expect(privateCases).toBe(6_144)
+    expect(externalCases).toBe(9_216)
+  })
+
+  it('a cascata do stream tambem nao sai para fora sob privado-local', async () => {
+    // A escolha da rota e uma decisao; a cascata e outra, e acontece DEPOIS,
+    // quando o modelo local ja falhou. Sem o perfil carimbado na requisicao,
+    // era exatamente aqui que o dado escapava.
+    for (const privacy of ['privado-local', 'local-only'] as const) {
+      const h = service()
+      await h.service.initialize(scope, new Set(['omniroute', 'deepseek-official']))
+      let cascades = 0
+      const output = await collect(h.service.streamWithFallback(scope, options, () => chunks(error()), () => {
+        cascades += 1
+        return chunks({ type: 'finish', reason: { kind: 'stop' } })
+      }, false, privacy))
+      expect(cascades, privacy).toBe(0)
+      expect(output.at(-1)?.type).toBe('finish')
+      expect(h.service.switches(scope), privacy).toEqual([])
+    }
+    // E o mesmo fluxo, sem o perfil privado, continua descendo a cascata: o
+    // teste acima so vale porque este mostra que a cascata existe.
+    const open = service()
+    await open.service.initialize(scope, new Set(['omniroute', 'deepseek-official']))
+    let opened = 0
+    await collect(open.service.streamWithFallback(scope, options, () => chunks(error()), () => {
+      opened += 1
+      return chunks({ type: 'finish', reason: { kind: 'stop' } })
+    }, false, 'equilibrado'))
+    expect(opened).toBe(1)
+  })
+
+  it('o funil barra uma rota externa que qualquer caminho novo tentasse devolver', () => {
+    // A garantia nao pode depender de nenhum `if` la dentro estar certo: se um
+    // caminho futuro devolver `omniroute` sob `privado-local`, e AQUI que ele
+    // para. Este teste chama o funil com exatamente essa escolha proibida.
+    const forbidden = { route: 'omniroute', explicit: true, reason: 'caminho novo' }
+    expect(enforceRoutePrivacy('privado-local', LOCAL_ROUTE, forbidden, 'bloqueado')).toEqual({
+      route: undefined, explicit: true, reason: 'bloqueado',
+    })
+    // O que o perfil admite passa intacto.
+    const local = { route: LOCAL_ROUTE, explicit: false, reason: 'local' }
+    expect(enforceRoutePrivacy('privado-local', LOCAL_ROUTE, local, 'bloqueado')).toBe(local)
+    const blocked = { route: undefined, explicit: false, reason: 'ja bloqueado' }
+    expect(enforceRoutePrivacy('privado-local', LOCAL_ROUTE, blocked, 'bloqueado')).toBe(blocked)
+    // E os outros perfis nao sao tocados pelo funil.
+    expect(enforceRoutePrivacy('equilibrado', LOCAL_ROUTE, forbidden, 'bloqueado')).toBe(forbidden)
+    expect(enforceRoutePrivacy('melhor-qualidade', LOCAL_ROUTE, forbidden, 'bloqueado')).toBe(forbidden)
   })
 })

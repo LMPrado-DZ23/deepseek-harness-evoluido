@@ -26,9 +26,26 @@ export declare const routeHealthRecordSchema: z.ZodObject<{
     unpriced_requests: z.ZodOptional<z.ZodNumber>;
     consecutive_failures: z.ZodOptional<z.ZodNumber>;
     circuit_opened_at: z.ZodOptional<z.ZodNullable<z.ZodISODateTime>>;
+    enabled: z.ZodOptional<z.ZodBoolean>;
     last_failure: z.ZodNullable<z.ZodString>;
     updated_at: z.ZodISODateTime;
 }, z.core.$strict>;
+/**
+ * O perfil de rota como ele é ACEITO em disco e na borda HTTP.
+ *
+ * Os três nomes novos e os dois valores do binário anterior convivem na mesma
+ * enumeração de propósito: a versão do domínio não pode subir, então o registro
+ * gravado com `local-only` ou `any` precisa continuar validando. Quem decide
+ * comportamento usa `routePrivacyProfile`, que traduz os antigos; ninguém
+ * compara com o valor cru.
+ */
+export declare const routePrivacySchema: z.ZodEnum<{
+    "privado-local": "privado-local";
+    equilibrado: "equilibrado";
+    "melhor-qualidade": "melhor-qualidade";
+    "local-only": "local-only";
+    any: "any";
+}>;
 export declare const routeSwitchEventSchema: z.ZodObject<{
     event_id: z.ZodString;
     org_id: z.ZodString;
@@ -72,6 +89,7 @@ export declare const studioRouteHealthDomainSpec: {
             unpriced_requests?: number | undefined;
             consecutive_failures?: number | undefined;
             circuit_opened_at?: string | null | undefined;
+            enabled?: boolean | undefined;
         }>;
         events: import("@deepseek-ai/dsh-storage-domain").DomainTableSpec<RouteEventKey, {
             event_id: string;

@@ -8,7 +8,55 @@ export interface RoutePrice {
     readonly inputPerMillion: number;
     readonly outputPerMillion: number;
 }
-export type RoutePrivacy = 'local-only' | 'any';
+/**
+ * Os três perfis de rota, pelo nome que a pessoa lê.
+ *
+ * `privado-local`: só a IA local. Nunca cai para rota externa - se a local não
+ * serve, a criação fica BLOQUEADA e a pessoa é avisada. É o C-22.
+ * `equilibrado`: prefere a local; usa a rota externa configurada quando a local
+ * não serve, e avisa que vai usar.
+ * `melhor-qualidade`: usa a melhor rota disponível.
+ */
+export type RoutePrivacyProfile = 'privado-local' | 'equilibrado' | 'melhor-qualidade';
+/**
+ * Os dois valores do binário anterior, que continuam gravados em disco.
+ *
+ * Eles não são aceitos por gentileza: a versão do domínio NÃO pode subir
+ * (`open()` falha com `version-mismatch` em instalação que já rodou e não
+ * existe passo de migração), então o registro antigo tem de continuar legível
+ * exatamente como está. `local-only` lê como `privado-local` e `any` lê como
+ * `melhor-qualidade`.
+ */
+export type LegacyRoutePrivacy = 'local-only' | 'any';
+export type RoutePrivacy = RoutePrivacyProfile | LegacyRoutePrivacy;
+/** Os três perfis, na ordem em que a tela os oferece. */
+export declare const ROUTE_PRIVACY_PROFILES: readonly RoutePrivacyProfile[];
+/**
+ * O perfil nomeado de um valor gravado, novo ou antigo.
+ *
+ * Toda decisão passa por aqui antes de comparar perfil: comparar com o valor
+ * cru deixaria `local-only` escapando da regra do C-22 por não ser igual à
+ * string nova.
+ * @param value - o perfil novo ou o valor binário antigo.
+ * @returns o perfil nomeado.
+ */
+export declare function routePrivacyProfile(value: RoutePrivacy): RoutePrivacyProfile;
+/**
+ * O funil por onde TODA escolha de rota sai.
+ *
+ * `privado-local` promete uma coisa só: nada sai deste computador. Antes, essa
+ * promessa era um `if` no começo de `chooseRoute` - convenção, não garantia:
+ * qualquer caminho novo aberto depois dele (cascata, rota explícita, circuito
+ * meio-aberto, teto de gasto) devolveria uma rota externa em silêncio, e o
+ * perfil só descobriria isso pelo dado já enviado. Aqui a promessa é
+ * estrutural: quem não é a rota local vira bloqueio, venha de onde vier.
+ * @param profile - o perfil pedido.
+ * @param localRoute - a rota da IA local.
+ * @param selection - a escolha que os caminhos produziram.
+ * @param blockedReason - a frase do bloqueio.
+ * @returns a escolha, ou o bloqueio.
+ */
+export declare function enforceRoutePrivacy(profile: RoutePrivacyProfile, localRoute: string, selection: RouteSelection, blockedReason: string): RouteSelection;
 export interface RouteHealthRepository {
     routes(): readonly RouteHealthRecord[];
     events(): readonly RouteSwitchEvent[];
@@ -112,7 +160,34 @@ export declare class StudioRouteHealthService {
     initialize(scope: RouteScope, configured: ReadonlySet<string>): Promise<void[]>;
     list(scope: RouteScope): readonly RouteHealthRecord[];
     switches(scope: RouteScope): readonly RouteSwitchEvent[];
+    /**
+     * A rota escolhida para um propósito, já respeitando o perfil do escopo.
+     *
+     * A escolha inteira sai por `enforceRoutePrivacy`: o caminho que a produziu
+     * pode mudar amanhã, a promessa do `privado-local` não.
+     */
     chooseRoute(scope: RouteScope, purpose: string, options?: RouteSelectionOptions): Promise<RouteSelection>;
+    private select;
+    /**
+     * Se esta rota está ligada neste escopo, agora.
+     *
+     * Ausência do campo significa LIGADA: registro gravado antes de o
+     * desligamento existir descreve um mundo em que toda rota era usada, e lê-lo
+     * como desligada apagaria rotas que ninguém mandou apagar.
+     */
+    enabled(scope: RouteScope, route: string): boolean;
+    /**
+     * Liga ou desliga uma rota para um escopo.
+     *
+     * O desligamento é por escopo - `org_id`/`tenant_id`/rota - e nunca global:
+     * desligar a rota de um locatário por decisão de outro seria o mesmo erro que
+     * o circuito por escopo já evita.
+     * @param scope - a organização e o locatário.
+     * @param route - a rota.
+     * @param enabled - `true` liga, `false` desliga.
+     * @returns quando a decisão estiver gravada.
+     */
+    setRouteEnabled(scope: RouteScope, route: string, enabled: boolean): Promise<void>;
     /** O estado do circuito de uma rota neste escopo, agora. */
     circuit(scope: RouteScope, route: string): RouteCircuitState;
     /** O gasto do escopo somando apenas as rotas pagas, e o veredito do teto. */
@@ -127,7 +202,7 @@ export declare class StudioRouteHealthService {
     private startProbe;
     /** Um único relógio para todo o serviço: registro, auditoria e circuito têm de contar o mesmo tempo. */
     private clock;
-    streamWithFallback(scope: RouteScope, options: GenerateOptions, next: () => AsyncIterable<StreamChunk>, fallback: (options: GenerateOptions) => AsyncIterable<StreamChunk>, explicitRoute?: boolean): AsyncIterable<StreamChunk>;
+    streamWithFallback(scope: RouteScope, options: GenerateOptions, next: () => AsyncIterable<StreamChunk>, fallback: (options: GenerateOptions) => AsyncIterable<StreamChunk>, explicitRoute?: boolean, privacy?: RoutePrivacy): AsyncIterable<StreamChunk>;
     private get;
     private baseRecord;
     private record;

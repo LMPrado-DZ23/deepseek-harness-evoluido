@@ -19,6 +19,15 @@ export interface HarnessModelPortOptions {
   readonly routes: StudioRouteHealthService
   readonly modelByRoute: Readonly<Record<string, string>>
   readonly markScope?: (options: GenerateOptions, scope: RouteScope) => GenerateOptions
+  /**
+   * Carimba o perfil na requisição antes de ela subir para o runtime.
+   *
+   * A escolha da rota respeita o perfil, mas a CASCATA acontece depois, dentro
+   * do runtime, onde o perfil já não está em lugar nenhum. Sem este carimbo o
+   * `privado-local` escolheria a rota local corretamente e desceria para a
+   * externa assim que ela falhasse.
+   */
+  readonly markPrivacy?: (options: GenerateOptions, privacy: RoutePrivacy) => GenerateOptions
 }
 
 export class ModelRouteUnavailableError extends Error {
@@ -41,7 +50,8 @@ export class HarnessPromptModel implements PromptModelPort {
       temperature: 0,
     }
     const scoped = this.options.markScope?.(options, scope) ?? options
-    for await (const chunk of this.options.llm.stream(scoped)) assembler.push(chunk)
+    const marked = this.options.markPrivacy?.(scoped, privacy) ?? scoped
+    for await (const chunk of this.options.llm.stream(marked)) assembler.push(chunk)
     if (assembler.finish.kind === 'error' || assembler.finish.kind === 'aborted') {
       throw new ModelRouteUnavailableError(assembler.finish.failure.message)
     }

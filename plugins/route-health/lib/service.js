@@ -1,4 +1,44 @@
 import { randomUUID } from 'node:crypto';
+/** Os três perfis, na ordem em que a tela os oferece. */
+export const ROUTE_PRIVACY_PROFILES = ['privado-local', 'equilibrado', 'melhor-qualidade'];
+/**
+ * O perfil nomeado de um valor gravado, novo ou antigo.
+ *
+ * Toda decisão passa por aqui antes de comparar perfil: comparar com o valor
+ * cru deixaria `local-only` escapando da regra do C-22 por não ser igual à
+ * string nova.
+ * @param value - o perfil novo ou o valor binário antigo.
+ * @returns o perfil nomeado.
+ */
+export function routePrivacyProfile(value) {
+    if (value === 'local-only')
+        return 'privado-local';
+    if (value === 'any')
+        return 'melhor-qualidade';
+    return value;
+}
+/**
+ * O funil por onde TODA escolha de rota sai.
+ *
+ * `privado-local` promete uma coisa só: nada sai deste computador. Antes, essa
+ * promessa era um `if` no começo de `chooseRoute` - convenção, não garantia:
+ * qualquer caminho novo aberto depois dele (cascata, rota explícita, circuito
+ * meio-aberto, teto de gasto) devolveria uma rota externa em silêncio, e o
+ * perfil só descobriria isso pelo dado já enviado. Aqui a promessa é
+ * estrutural: quem não é a rota local vira bloqueio, venha de onde vier.
+ * @param profile - o perfil pedido.
+ * @param localRoute - a rota da IA local.
+ * @param selection - a escolha que os caminhos produziram.
+ * @param blockedReason - a frase do bloqueio.
+ * @returns a escolha, ou o bloqueio.
+ */
+export function enforceRoutePrivacy(profile, localRoute, selection, blockedReason) {
+    if (profile !== 'privado-local')
+        return selection;
+    if (selection.route === undefined || selection.route === localRoute)
+        return selection;
+    return { route: undefined, explicit: selection.explicit, reason: blockedReason };
+}
 function recordId(scope, route) {
     return `${scope.orgId}:${scope.tenantId}:${route}`;
 }
@@ -99,19 +139,41 @@ export class StudioRouteHealthService {
     switches(scope) {
         return this.repository.events().filter(event => event.org_id === scope.orgId && event.tenant_id === scope.tenantId);
     }
-    async chooseRoute(scope, purpose, options = { privacy: 'any' }) {
+    /**
+     * A rota escolhida para um propósito, já respeitando o perfil do escopo.
+     *
+     * A escolha inteira sai por `enforceRoutePrivacy`: o caminho que a produziu
+     * pode mudar amanhã, a promessa do `privado-local` não.
+     */
+    async chooseRoute(scope, purpose, options = { privacy: 'melhor-qualidade' }) {
+        const profile = routePrivacyProfile(options.privacy);
+        const selection = await this.select(scope, purpose, profile, options);
+        return enforceRoutePrivacy(profile, this.config.localRoute, selection, LOCAL_BLOCKED_REASON);
+    }
+    async select(scope, purpose, profile, options) {
         const local = this.get(scope, this.config.localRoute);
-        const localUsable = local?.state === 'OK';
-        if (options.privacy === 'local-only') {
+        // Uma rota desligada não está saudável para efeito de escolha: o desligamento
+        // é uma decisão de quem opera, e ignorá-la para a rota local seria justamente
+        // mandar trabalho para onde alguém pediu que não fosse.
+        const localUsable = local?.state === 'OK' && this.enabled(scope, this.config.localRoute);
+        if (profile === 'privado-local') {
             const localSelected = options.explicitRoute === undefined || options.explicitRoute === this.config.localRoute;
             if (localSelected && localUsable) {
                 return { route: this.config.localRoute, explicit: options.explicitRoute !== undefined, reason: 'Perfil privado restrito à IA local.' };
             }
-            const reason = 'IA local indisponível; nenhuma informação foi enviada para uma rota externa.';
+            const reason = LOCAL_BLOCKED_REASON;
             await this.auditSwitch(scope, options.explicitRoute ?? this.config.localRoute, 'blocked', reason, options.explicitRoute !== undefined);
             return { route: undefined, explicit: options.explicitRoute !== undefined, reason };
         }
         const explicit = options.explicitRoute !== undefined;
+        // O desligamento vem ANTES do teto e antes da rota escolhida a dedo: ele é a
+        // decisão mais explícita que existe sobre esta rota, e uma rota desligada que
+        // ainda pudesse ser pedida pelo nome não estaria desligada.
+        if (options.explicitRoute !== undefined && !this.enabled(scope, options.explicitRoute)) {
+            const reason = DISABLED_REASON;
+            await this.auditSwitch(scope, options.explicitRoute, 'blocked', reason, true);
+            return { route: undefined, explicit: true, reason };
+        }
         // O teto vale também para a rota escolhida a dedo: um guarda que a escolha
         // explícita atravessa não é guarda, é sugestão. A rota local fica de fora
         // porque ela não cobra - o teto existe para o dinheiro, não para o trabalho.
@@ -129,27 +191,74 @@ export class StudioRouteHealthService {
         if (options.explicitRoute !== undefined) {
             return { route: options.explicitRoute, explicit: true, reason: 'Rota escolhida pela pessoa.' };
         }
-        if (purpose === 'T0' && localUsable) {
-            return { route: this.config.localRoute, explicit: false, reason: 'Modelo local saudável preferido para leitura segura.' };
+        // `equilibrado` prefere a local em TODO propósito, não só na leitura segura:
+        // é isso que separa "prefere a local" de "usa a melhor que houver".
+        if (localUsable && (profile === 'equilibrado' || purpose === 'T0')) {
+            return {
+                route: this.config.localRoute, explicit: false,
+                reason: profile === 'equilibrado' ? BALANCED_LOCAL_REASON : 'Modelo local saudável preferido para leitura segura.',
+            };
         }
-        const known = this.config.routes.map(route => this.get(scope, route));
-        const healthy = known.find(record => record?.state === 'OK');
-        if (healthy !== undefined)
+        const known = this.config.routes.map(route => this.get(scope, route))
+            .filter((record) => record !== undefined && this.enabled(scope, record.route));
+        const healthy = known.find(record => record.state === 'OK');
+        if (healthy !== undefined) {
+            // No `equilibrado` a ida para fora não é silenciosa: a pessoa pediu a
+            // local e está recebendo outra coisa, e a frase diz isso.
+            if (profile === 'equilibrado') {
+                await this.auditSwitch(scope, this.config.localRoute, healthy.route, BALANCED_EXTERNAL_REASON, false);
+                return { route: healthy.route, explicit: false, reason: BALANCED_EXTERNAL_REASON };
+            }
             return { route: healthy.route, explicit: false, reason: 'Primeira rota saudável do perfil.' };
+        }
         // Nenhuma rota saudável. Uma rota que caiu era simplesmente abandonada até
         // um sucesso que ela nunca teria a chance de ter; cumprido o tempo de
         // espera, ela ganha UMA chamada que decide se o circuito fecha ou reabre.
-        const probe = known.find((record) => record !== undefined && this.circuit(scope, record.route) === 'HALF_OPEN');
+        const probe = known.find(record => this.circuit(scope, record.route) === 'HALF_OPEN');
         if (probe !== undefined) {
             await this.startProbe(probe);
             return { route: probe.route, explicit: false, reason: HALF_OPEN_REASON };
+        }
+        if (!this.enabled(scope, this.config.fallbackRoute)) {
+            const reason = DISABLED_REASON;
+            await this.auditSwitch(scope, this.config.fallbackRoute, 'blocked', reason, false);
+            return { route: undefined, explicit: false, reason };
         }
         if (this.circuit(scope, this.config.fallbackRoute) === 'OPEN') {
             const reason = ALL_OPEN_REASON;
             await this.auditSwitch(scope, this.config.fallbackRoute, 'blocked', reason, false);
             return { route: undefined, explicit: false, reason };
         }
+        if (profile === 'equilibrado') {
+            await this.auditSwitch(scope, this.config.localRoute, this.config.fallbackRoute, BALANCED_EXTERNAL_REASON, false);
+            return { route: this.config.fallbackRoute, explicit: false, reason: BALANCED_EXTERNAL_REASON };
+        }
         return { route: this.config.fallbackRoute, explicit: false, reason: 'Rota direta usada porque nenhuma rota monitorada está saudável.' };
+    }
+    /**
+     * Se esta rota está ligada neste escopo, agora.
+     *
+     * Ausência do campo significa LIGADA: registro gravado antes de o
+     * desligamento existir descreve um mundo em que toda rota era usada, e lê-lo
+     * como desligada apagaria rotas que ninguém mandou apagar.
+     */
+    enabled(scope, route) {
+        return this.get(scope, route)?.enabled ?? true;
+    }
+    /**
+     * Liga ou desliga uma rota para um escopo.
+     *
+     * O desligamento é por escopo - `org_id`/`tenant_id`/rota - e nunca global:
+     * desligar a rota de um locatário por decisão de outro seria o mesmo erro que
+     * o circuito por escopo já evita.
+     * @param scope - a organização e o locatário.
+     * @param route - a rota.
+     * @param enabled - `true` liga, `false` desliga.
+     * @returns quando a decisão estiver gravada.
+     */
+    setRouteEnabled(scope, route, enabled) {
+        const previous = this.get(scope, route) ?? this.baseRecord(scope, route, this.#configured.has(route) ? 'OK' : 'NOT_CONFIGURED');
+        return this.repository.putRoute({ ...previous, enabled, updated_at: this.clock().toISOString() });
     }
     /** O estado do circuito de uma rota neste escopo, agora. */
     circuit(scope, route) {
@@ -176,7 +285,7 @@ export class StudioRouteHealthService {
     clock() {
         return this.config.now?.() ?? new Date();
     }
-    async *streamWithFallback(scope, options, next, fallback, explicitRoute = false) {
+    async *streamWithFallback(scope, options, next, fallback, explicitRoute = false, privacy = 'melhor-qualidade') {
         const started = performance.now();
         const buffered = [];
         let visible = false;
@@ -210,9 +319,14 @@ export class StudioRouteHealthService {
         // mesma requisição, nunca para uma rota que JÁ falhou nesta requisição, e
         // nunca para uma rota com o circuito aberto - as três repetiriam uma espera
         // que já se sabe perdida.
-        const doomed = this.#cascaded.has(options)
+        // E nunca sob o perfil `privado-local`: a cascata leva para a rota EXTERNA
+        // de propósito, e uma escolha que o C-22 barrou na entrada não pode voltar
+        // pela porta dos fundos quando o modelo local falha no meio do fluxo.
+        const doomed = routePrivacyProfile(privacy) === 'privado-local'
+            || this.#cascaded.has(options)
             || options.provider === this.config.fallbackRoute
-            || this.circuit(scope, this.config.fallbackRoute) === 'OPEN';
+            || this.circuit(scope, this.config.fallbackRoute) === 'OPEN'
+            || !this.enabled(scope, this.config.fallbackRoute);
         if (visible || explicitRoute || options.provider !== 'omniroute' || doomed) {
             if (!visible)
                 for (const pending of buffered)
@@ -295,7 +409,7 @@ export class StudioRouteHealthService {
     }
 }
 /**
- * As quatro frases do circuito e do teto.
+ * As frases do circuito, do teto, do desligamento e do perfil equilibrado.
  *
  * Elas são escritas sem acento porque o portão de i18n reprova literal em
  * português dentro de `plugins/*\/src` que não esteja no catálogo, este plugin
@@ -307,6 +421,17 @@ const BUDGET_LOCAL_REASON = 'Teto de gasto do escopo estourado; seguindo apenas 
 const BUDGET_BLOCKED_REASON = 'Teto de gasto do escopo estourado; nenhuma rota paga foi acionada.';
 const HALF_OPEN_REASON = 'Meia-abertura: uma chamada decide se o circuito fecha ou reabre.';
 const ALL_OPEN_REASON = 'Circuito aberto em todas as rotas; nenhuma chamada nova enquanto durar a espera.';
+const DISABLED_REASON = 'Rota desligada neste espaco de trabalho; ela nao e escolhida enquanto continuar assim.';
+const BALANCED_LOCAL_REASON = 'Perfil equilibrado: a IA local esta em uso e nada sai deste computador.';
+const BALANCED_EXTERNAL_REASON = 'Perfil equilibrado: a IA local nao esta disponivel; usando a rota externa configurada.';
+/**
+ * A frase do bloqueio do `privado-local`.
+ *
+ * Ela é a MESMA em toda saída barrada - local fora do ar, local desligada, rota
+ * externa pedida pelo nome, rota que algum caminho novo tentou devolver - porque
+ * para quem lê o fato é um só: nada foi enviado para fora.
+ */
+const LOCAL_BLOCKED_REASON = 'IA local indisponível; nenhuma informação foi enviada para uma rota externa.';
 export const ROUTE_FAILURE_MESSAGE = 'A conexão com a inteligência artificial falhou. Nada foi aplicado; tente novamente ou escolha outra rota.';
 /**
  * Classifica o custo de uma rota pelo que realmente se sabe.

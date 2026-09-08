@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import type { RoutePrivacy } from '@dz23-studio/route-health'
 import type { AppSpecV1 } from './appspec.js'
 import { assertValidDataModel } from './data-generator.js'
 import { planSliceSchema, type StudioProjectCategory } from './model.js'
@@ -24,7 +25,7 @@ export function assertCategoryCanGenerate(category: StudioProjectCategory, spec:
 export class PlannerEngine {
   constructor(private readonly model: PromptModelPort) {}
 
-  async plan(scope: { orgId: string; tenantId: string }, privacy: 'local-only' | 'any', spec: AppSpecV1, category: StudioProjectCategory = 'landing-page', changeRequest?: string): Promise<PlanOutput> {
+  async plan(scope: { orgId: string; tenantId: string }, privacy: RoutePrivacy, spec: AppSpecV1, category: StudioProjectCategory = 'landing-page', changeRequest?: string): Promise<PlanOutput> {
     assertCategoryCanGenerate(category, spec)
     const result = await this.model.complete(scope, 'plan', privacy, [
       t('prompts.planOnly'),

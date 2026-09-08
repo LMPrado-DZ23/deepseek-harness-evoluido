@@ -153,6 +153,7 @@ export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}):
     llm: ctx.llm,
     routes: ctx.studioRouteHealth.service,
     markScope: (options, scope) => ctx.studioRouteHealth.markScope(options, scope),
+    markPrivacy: (options, privacy) => ctx.studioRouteHealth.markPrivacy(options, privacy),
     modelByRoute: config.modelByRoute ?? {
       ollama: 'qwen2.5-coder:7b', omniroute: 'deepseek-v3.2', 'deepseek-official': 'deepseek-chat',
     },
@@ -202,14 +203,21 @@ export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}):
     // motivo. Reimplementar aqui um "primeira saudável" ao lado dela era como o
     // motivo se perdia: a tela mostrava um nome de rota que podia nem ser a
     // escolhida, e nunca o porquê.
-    const selected = await ctx.studioRouteHealth.service.chooseRoute(scope, 'plan', { privacy: 'any' })
+    const selected = await ctx.studioRouteHealth.service.chooseRoute(scope, 'plan', { privacy: 'melhor-qualidade' })
     const route = selected.route ?? null
+    // A MESMA decisão, feita com o perfil privado: é a única resposta honesta
+    // para "a criação privada funciona agora?", e ela é a pergunta que a tela
+    // precisa responder ANTES de a pessoa escolher o perfil.
+    const localSelected = await ctx.studioRouteHealth.service.chooseRoute(scope, 'plan', { privacy: 'privado-local' })
     const [builderHealth, disk] = await Promise.all([
       builder.forActor({ userId: 'studio-health', orgId: scope.orgId, tenantId: scope.tenantId, role: 'owner' }).then(session => session.preflight()).catch(() => ({ state: 'BLOCKED_EXTERNAL' as const })),
       diskState(runsRoot),
     ])
     const state = route !== null && builderHealth.state === 'OK' && disk === 'OK' ? 'OK' : 'ATTENTION'
-    return { state, route, route_reason: route === null ? null : selected.reason, builder: builderHealth.state, disk }
+    return {
+      state, route, route_reason: route === null ? null : selected.reason,
+      local_route: localSelected.route ?? null, builder: builderHealth.state, disk,
+    }
   }
   const health = () => healthFor({ orgId: 'studio-system', tenantId: 'studio-system' })
   ctx.provide('studioPromptToApp', { service, pipeline, jobs, health })

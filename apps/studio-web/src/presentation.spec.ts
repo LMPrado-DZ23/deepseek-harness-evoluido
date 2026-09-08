@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import t from './i18n/pt-BR.json'
-import { currentStepIndex, permanentTruthKind, privacyNotice, resultSentence, routeReasonNotice, type ProjectUiState } from './presentation'
+import { creationBlocked, currentStepIndex, permanentTruthKind, privacyNotice, privacyProfileOf, resultSentence, routeReasonNotice, type ProjectUiState } from './presentation'
 
 describe('truthful presentation for nontechnical users', () => {
   it('maps the real machine states to the five visible stages', () => {
@@ -94,5 +94,65 @@ describe('M-04: por que esta rota', () => {
     const source = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8')
     expect(source).toContain('routeReasonNotice(props.privacy, props.routeReason)')
     expect(source).toContain('health.route_reason')
+  })
+})
+
+describe('M-05/C-22: os três perfis na tela', () => {
+  it('cada perfil diz o que faz com os dados de quem escreve', () => {
+    // O nome sozinho não conta nada a quem não programa: o que decide a
+    // escolha é a frase debaixo dele.
+    expect(privacyNotice('privado-local', 'openrouter', t.privacy)).toBe(t.privacy.localNotice)
+    expect(privacyNotice('privado-local', 'openrouter', t.privacy)).not.toContain('openrouter')
+    // O equilibrado NOMEIA a rota externa: prometer "às vezes vai para fora"
+    // sem dizer para onde não é aviso, é ruído.
+    const balanced = privacyNotice('equilibrado', 'openrouter', t.privacy)
+    expect(balanced).toContain('openrouter')
+    expect(balanced).toContain(t.privacy.balancedNoticeStart)
+    const best = privacyNotice('melhor-qualidade', 'openrouter', t.privacy)
+    expect(best).toContain('openrouter')
+    expect(best).toContain(t.privacy.routeNoticeStart)
+    // E as duas frases são diferentes: o equilibrado só usa a rota externa
+    // quando a local não dá conta, e isso muda o que a pessoa está aceitando.
+    expect(balanced).not.toBe(best)
+    expect(privacyNotice('equilibrado', null, t.privacy)).toBe(t.privacy.routeUnavailable)
+  })
+
+  it('o valor binário antigo continua abrindo a tela no perfil certo', () => {
+    expect(privacyProfileOf('local-only')).toBe('privado-local')
+    expect(privacyProfileOf('any')).toBe('melhor-qualidade')
+    expect(privacyProfileOf('equilibrado')).toBe('equilibrado')
+    expect(privacyNotice('local-only', 'openrouter', t.privacy)).toBe(privacyNotice('privado-local', 'openrouter', t.privacy))
+    expect(privacyNotice('any', 'openrouter', t.privacy)).toBe(privacyNotice('melhor-qualidade', 'openrouter', t.privacy))
+    expect(routeReasonNotice('local-only', 'Primeira rota saudável do perfil.')).toBe(null)
+    expect(routeReasonNotice('equilibrado', 'Primeira rota saudável do perfil.')).toBe('Primeira rota saudável do perfil.')
+  })
+
+  it('avisa ANTES que privado-local sem IA local não cria nada', () => {
+    // Sem isto a pessoa escrevia a ideia inteira, apertava "continuar" e só
+    // então descobria o bloqueio — a informação existia antes e estava sendo
+    // escondida dela.
+    expect(creationBlocked('privado-local', null)).toBe(true)
+    expect(privacyNotice('privado-local', 'openrouter', t.privacy, null)).toBe(t.privacy.localBlocked)
+    expect(t.privacy.localBlocked).not.toBe(t.privacy.localNotice)
+    // Com IA local disponível não há bloqueio nenhum.
+    expect(creationBlocked('privado-local', 'ollama')).toBe(false)
+    expect(privacyNotice('privado-local', 'openrouter', t.privacy, 'ollama')).toBe(t.privacy.localNotice)
+    // Servidor que não sabe responder não vira bloqueio inventado.
+    expect(creationBlocked('privado-local', undefined)).toBe(false)
+    // E nenhum outro perfil é barrado por causa da IA local.
+    expect(creationBlocked('equilibrado', null)).toBe(false)
+    expect(creationBlocked('melhor-qualidade', null)).toBe(false)
+    expect(creationBlocked('local-only', null)).toBe(true)
+  })
+
+  it('a tela oferece os três perfis e não deixa apertar quando está bloqueado', () => {
+    const source = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8')
+    expect(source).toContain("['privado-local', t.privacy.privadoLocal, t.privacy.privadoLocalDetail]")
+    expect(source).toContain("['equilibrado', t.privacy.equilibrado, t.privacy.equilibradoDetail]")
+    expect(source).toContain("['melhor-qualidade', t.privacy.melhorQualidade, t.privacy.melhorQualidadeDetail]")
+    // O botão desabilitado é a outra metade do aviso: dizer "bloqueado" e
+    // deixar apertar mesmo assim seria só decoração.
+    expect(source).toContain('creationBlocked(props.privacy, props.localRoute)')
+    expect(source).toContain('health.local_route')
   })
 })

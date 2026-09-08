@@ -11,7 +11,7 @@ import {
   type RouteHealthRecord,
   type RouteSwitchEvent,
 } from './model.js'
-import { StudioRouteHealthService, type RouteHealthRepository, type RouteScope } from './service.js'
+import { StudioRouteHealthService, type RoutePrivacy, type RouteHealthRepository, type RouteScope } from './service.js'
 
 export * from './model.js'
 export * from './service.js'
@@ -23,6 +23,15 @@ export interface StudioRouteHealthRuntime {
   readonly service: StudioRouteHealthService
   markExplicit(options: GenerateOptions): GenerateOptions
   markScope(options: GenerateOptions, scope: RouteScope): GenerateOptions
+  /**
+   * Diz a esta requisição qual perfil a escolheu.
+   *
+   * Sem esta marca, a cascata do `streamWithFallback` não teria como saber que
+   * a requisição nasceu de um perfil `privado-local` e desceria para a rota
+   * externa quando o modelo local falhasse - o C-22 quebrado no meio do fluxo,
+   * depois de a escolha já ter sido feita corretamente.
+   */
+  markPrivacy(options: GenerateOptions, privacy: RoutePrivacy): GenerateOptions
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -59,10 +68,12 @@ export async function apply(ctx: Context): Promise<void> {
   await service.initialize({ orgId: 'studio-system', tenantId: 'studio-system' }, configured)
   const explicitRequests = new WeakSet<GenerateOptions>()
   const requestScopes = new WeakMap<GenerateOptions, RouteScope>()
+  const requestPrivacy = new WeakMap<GenerateOptions, RoutePrivacy>()
   ctx.provide('studioRouteHealth', {
     service,
     markExplicit(options) { explicitRequests.add(options); return options },
     markScope(options, scope) { requestScopes.set(options, scope); return options },
+    markPrivacy(options, privacy) { requestPrivacy.set(options, privacy); return options },
   })
 
   const bypass = new WeakSet<GenerateOptions>()
@@ -72,10 +83,12 @@ export async function apply(ctx: Context): Promise<void> {
       ?? scopeFor(ctx.studioIdentity.service, options.sessionId === undefined ? undefined : String(options.sessionId))
     requestScopes.delete(options)
     const explicit = explicitRequests.delete(options)
+    const privacy = requestPrivacy.get(options) ?? 'melhor-qualidade'
+    requestPrivacy.delete(options)
     return service.streamWithFallback(scope, options, next, fallbackOptions => {
       bypass.add(fallbackOptions)
       return ctx.llm.stream(fallbackOptions)
-    }, explicit)
+    }, explicit, privacy)
   })
 
   ctx.effect(() => ctx.webServer.register({

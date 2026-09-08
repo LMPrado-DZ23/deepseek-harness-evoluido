@@ -47,9 +47,30 @@ export const routeHealthRecordSchema = z.object({
      * circuito fechado, que é exatamente o estado dele antes desta mudança.
      */
     circuit_opened_at: z.iso.datetime().nullable().optional(),
+    /**
+     * Se esta rota está ligada NESTE escopo.
+     *
+     * O liga/desliga é por escopo e por rota: desligar globalmente tiraria a rota
+     * de locatários que não pediram nada.
+     *
+     * Opcional pelo mesmo motivo dos campos acima - a versão do domínio não pode
+     * subir. Registro antigo, sem o campo, significa LIGADA, que é exatamente o
+     * mundo em que ele foi gravado.
+     */
+    enabled: z.boolean().optional(),
     last_failure: z.string().nullable(),
     updated_at: z.iso.datetime(),
 }).strict();
+/**
+ * O perfil de rota como ele é ACEITO em disco e na borda HTTP.
+ *
+ * Os três nomes novos e os dois valores do binário anterior convivem na mesma
+ * enumeração de propósito: a versão do domínio não pode subir, então o registro
+ * gravado com `local-only` ou `any` precisa continuar validando. Quem decide
+ * comportamento usa `routePrivacyProfile`, que traduz os antigos; ninguém
+ * compara com o valor cru.
+ */
+export const routePrivacySchema = z.enum(['privado-local', 'equilibrado', 'melhor-qualidade', 'local-only', 'any']);
 export const routeSwitchEventSchema = z.object({
     event_id: z.string().min(1),
     org_id: z.string().min(1),

@@ -1,5 +1,6 @@
 import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 import { policyTierSchema } from '@dz23-studio/policy'
+import { routePrivacySchema } from '@dz23-studio/route-health'
 import { z } from 'zod'
 import { appSpecV1Schema } from './appspec.js'
 import { designSpecV1Schema } from './design.js'
@@ -27,7 +28,15 @@ export const studioProjectSchema = z.object({
   original_brief: z.string().min(1).max(10_000),
   category: studioProjectCategorySchema,
   created_by: z.string().min(1),
-  privacy: z.enum(['local-only', 'any']),
+  /**
+   * O perfil de rota DESTE projeto.
+   *
+   * É aqui que mora o "por projeto" do M-05: dois projetos do mesmo espaço de
+   * trabalho podem ter perfis diferentes. O esquema aceita também os dois
+   * valores do binário anterior porque a versão do domínio não pode subir e o
+   * registro antigo tem de continuar validando; `routePrivacyProfile` traduz.
+   */
+  privacy: routePrivacySchema,
   created_at: timestamp,
   updated_at: timestamp,
   archived_at: timestamp.nullable(),

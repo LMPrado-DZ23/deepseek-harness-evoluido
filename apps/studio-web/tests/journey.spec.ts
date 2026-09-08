@@ -115,7 +115,9 @@ test('percorre as cinco etapas, muda privacidade e termina sem alegar publicaç�
   expect(await page.evaluate(() => (window as unknown as { __dz23PermissionRequests: () => number }).__dz23PermissionRequests())).toBe(1)
   await expect(page.getByRole('button', { name: 'Quero um painel para minha equipe criar, editar e excluir cadastros.' })).toBeVisible()
   await expect(page.getByText('Seus dados não são enviados para serviços externos.')).toBeVisible()
-  await page.getByText('Permitir IA configurada', { exact: false }).click()
+  // O seletor virou os três perfis nomeados (M-05); o segundo é o Equilibrado,
+  // o único que continua nomeando a rota externa na frase de privacidade.
+  await page.locator('.privacy-profiles label').nth(1).click()
   await expect(page.locator('.privacy-notice')).toContainText('ollama-local')
   await page.getByRole('button', { name: 'Quero uma página para apresentar meu trabalho ou negócio.' }).click()
   await page.getByRole('button', { name: 'Continuar' }).click()

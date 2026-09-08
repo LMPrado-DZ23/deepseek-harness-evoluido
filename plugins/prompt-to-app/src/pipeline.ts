@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { cp, lstat, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { z } from 'zod'
+import type { RoutePrivacy } from '@dz23-studio/route-health'
 import type { AppSpecV1 } from './appspec.js'
 import { generateAuthLayer, writeAuthLayer } from './auth-generator.js'
 import { generateCrudLayer, writeCrudLayer } from './crud-generator.js'
@@ -32,7 +33,7 @@ export interface CodeGenerationResult { readonly files: readonly GeneratedFile[]
 export interface CodeGeneratorPort { generate(spec: AppSpecV1, plan: StudioPlan, diagnostic?: string): Promise<CodeGenerationResult> }
 
 export class ModelCodeGenerator implements CodeGeneratorPort {
-  constructor(private readonly model: PromptModelPort, private readonly actor: PromptToAppActor, private readonly privacy: 'local-only' | 'any') {}
+  constructor(private readonly model: PromptModelPort, private readonly actor: PromptToAppActor, private readonly privacy: RoutePrivacy) {}
   async generate(spec: AppSpecV1, plan: StudioPlan, diagnostic?: string): Promise<CodeGenerationResult> {
     const result = await this.model.complete({ orgId: this.actor.orgId, tenantId: this.actor.tenantId }, 'generate', this.privacy, [
       t('prompts.generateOnly'),

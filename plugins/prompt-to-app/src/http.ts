@@ -18,6 +18,7 @@ import type { CodeGeneratorPort } from './pipeline.js'
 import type { EmergencyStopGuard, PromptToAppJobService } from './jobs.js'
 import { RUN_REPORT_FILE } from './run-report.js'
 import { FormCategoryCapabilityError, type PlannerEngine } from './planner.js'
+import { routePrivacySchema } from '@dz23-studio/route-health'
 import { studioProjectCategorySchema } from './model.js'
 import type { LogoProcessorPort } from './logo.js'
 import { PromptToAppError, type PromptToAppActor, type PromptToAppService } from './service.js'
@@ -29,7 +30,7 @@ const createProjectSchema = z.object({
   name: z.string().trim().min(1).max(120),
   original_brief: z.string().trim().min(10).max(10_000),
   category: studioProjectCategorySchema,
-  privacy: z.enum(['local-only', 'any']),
+  privacy: routePrivacySchema,
 }).strict()
 const answerSchema = intakeAnswerSchema.extend({ confirm_sensitive: z.boolean().optional() }).strict()
 const changeRequestSchema = z.object({ reason: z.string().trim().min(3).max(2_000) }).strict()
@@ -92,6 +93,16 @@ export interface StudioAppsHealth {
    * que explica.
    */
   readonly route_reason: string | null
+  /**
+   * A rota da IA local, quando o perfil `privado-local` consegue usá-la.
+   *
+   * `null` diz que esse perfil está BLOQUEADO agora - a tela precisa disso para
+   * avisar antes, e não deixar a pessoa apertar "continuar" para descobrir
+   * depois que nada podia ser criado. Ausente é diferente de `null`: servidor
+   * que não conhece o campo não sabe responder, e inventar um bloqueio a partir
+   * de silêncio seria tão errado quanto esconder um.
+   */
+  readonly local_route?: string | null
   readonly builder: 'OK' | 'BLOCKED_EXTERNAL'
   readonly disk: 'OK' | 'ATTENTION'
 }
