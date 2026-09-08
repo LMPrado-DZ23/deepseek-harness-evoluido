@@ -114,6 +114,9 @@ jobs:
           # escrito para impedir: o `lib/` versionado importava um arquivo que
           # o repositório não tinha, e um clone limpo quebrava.
           pnpm gate:tracked-lib
+          # O lock de release ficava defasado em silêncio: o portão só conferia
+          # topologia, e quatro plugins simplesmente não entravam na imagem.
+          pnpm gate:image-lock
           pnpm test:postgres-discovery
           node scripts/test-postgres.mjs --list
 

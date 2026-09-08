@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFile } from 'node:fs/promises'
+import { readdir, readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
@@ -255,6 +255,24 @@ export function validateDockerfileBase(dockerfile, lock) {
   return { base: `${lock.images.node.reference}@${lock.images.node.indexDigest}`, postgresBase: postgres.sourceImage, frontend: expectedSyntax.slice('# syntax='.length), fromLines }
 }
 
+/**
+ * Todo pacote do repositório aparece como importador no lock de release.
+ *
+ * Sem isto, um plugin novo simplesmente NÃO entra na imagem: o lock ficava
+ * defasado em silêncio e o portão passava, porque ele só conferia topologia.
+ * Foi assim que `action-approval`, `assistant-bridge`, `agent-team` e `staging`
+ * ficaram de fora da imagem de release.
+ * @param releaseLock - conteúdo do `pnpm-lock.release.yaml`.
+ * @param packageDirectories - diretórios do repositório que têm `package.json`.
+ * @returns os diretórios ausentes do lock.
+ */
+export function missingReleaseImporters(releaseLock, packageDirectories) {
+  const importers = new Set(
+    [...releaseLock.matchAll(/^ {2}([^\s:]+):/gmu)].map(match => match[1]),
+  )
+  return packageDirectories.filter(directory => !importers.has(directory))
+}
+
 export function validateWorkspaceTopologies(development, release, releaseLock) {
   if (!/(?:^|\n)injectWorkspacePackages:\s+false(?:\n|$)/u.test(development)) {
     throw new Error('workspace de desenvolvimento precisa preservar links canônicos')
@@ -277,7 +295,23 @@ export function validateWorkspaceTopologies(development, release, releaseLock) {
 }
 
 export async function main(argv = process.argv.slice(2)) {
-  const pathIndex = argv.indexOf('--file')
+  /** Diretórios do repositório (não os do Harness) que têm `package.json`. */
+async function ownedPackageDirectories() {
+  const roots = ['plugins', 'apps']
+  const found = []
+  for (const root of roots) {
+    const entries = await readdir(root, { withFileTypes: true }).catch(() => [])
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      const directory = `${root}/${entry.name}`
+      const exists = await readFile(resolve(directory, 'package.json'), 'utf8').then(() => true, () => false)
+      if (exists) found.push(directory)
+    }
+  }
+  return found.sort()
+}
+
+const pathIndex = argv.indexOf('--file')
   const lockPath = resolve(pathIndex >= 0 ? argv[pathIndex + 1] : 'deploy/images.lock.json')
   const dockerfileIndex = argv.indexOf('--dockerfile')
   const dockerfilePath = resolve(dockerfileIndex >= 0 ? argv[dockerfileIndex + 1] : 'deploy/studio/Dockerfile')
@@ -287,11 +321,21 @@ export async function main(argv = process.argv.slice(2)) {
   const parsed = JSON.parse(await readFile(lockPath, 'utf8'))
   const lock = validateImageLock(parsed)
   validateDockerfileBase(await readFile(dockerfilePath, 'utf8'), lock)
+  const releaseLock = await readFile(releaseLockPath, 'utf8')
   validateWorkspaceTopologies(
     await readFile(developmentWorkspacePath, 'utf8'),
     await readFile(releaseWorkspacePath, 'utf8'),
-    await readFile(releaseLockPath, 'utf8'),
+    releaseLock,
   )
+  const owned = await ownedPackageDirectories()
+  if (owned.length === 0) {
+    // Um portão que passa com zero itens é uma falha, não um portão.
+    throw new Error('nenhum pacote do repositório foi encontrado para conferir contra o lock de release')
+  }
+  const missing = missingReleaseImporters(releaseLock, owned)
+  if (missing.length > 0) {
+    throw new Error(`o lock de release não contém: ${missing.join(', ')} — a imagem sairia sem esses pacotes`)
+  }
   process.stdout.write(
     `IMAGE_LOCK=PASS node=${lock.images.node.indexDigest} platforms=${EXPECTED_PLATFORMS.length} pnpm=${lock.tools.pnpm.version}\n`,
   )

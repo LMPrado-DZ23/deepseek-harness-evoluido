@@ -116,9 +116,18 @@ importers:
       '@deepseek-ai/dsh-web-app':
         specifier: workspace:*
         version: file:third_party/deepseek-harness/packages/bundle/web-app(@deepseek-ai/dsh-storage-domain@file:third_party/deepseek-harness/packages/storage/storage-domain(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)(typescript@6.0.3)
+      '@dz23-studio/action-approval':
+        specifier: workspace:*
+        version: link:../../../plugins/action-approval
+      '@dz23-studio/agent-team':
+        specifier: workspace:*
+        version: link:../../../plugins/agent-team
       '@dz23-studio/agents':
         specifier: workspace:*
-        version: link:../../../plugins/agents
+        version: file:plugins/agents(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)(@deepseek-ai/dsh-tools@file:third_party/deepseek-harness/packages/core/tools(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))
+      '@dz23-studio/assistant-bridge':
+        specifier: workspace:*
+        version: link:../../../plugins/assistant-bridge
       '@dz23-studio/identity':
         specifier: workspace:*
         version: link:../../../plugins/identity
@@ -150,6 +159,45 @@ importers:
       '@studio/hello':
         specifier: workspace:*
         version: link:../../../plugins/hello
+
+  plugins/action-approval:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:*
+        version: link:../../third_party/deepseek-harness/vendor/cordis
+      '@deepseek-ai/dsh-storage-domain':
+        specifier: workspace:*
+        version: file:third_party/deepseek-harness/packages/storage/storage-domain(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-invariants@file:third_party/deepseek-harness/packages/runtime-diagnostics/invariants(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      '@dz23-studio/identity':
+        specifier: workspace:*
+        version: link:../identity
+      '@dz23-studio/policy':
+        specifier: workspace:*
+        version: link:../policy
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
+
+  plugins/agent-team:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:*
+        version: link:../../third_party/deepseek-harness/vendor/cordis
+      '@deepseek-ai/dsh-agent':
+        specifier: workspace:*
+        version: link:../../third_party/deepseek-harness/packages/core/agent
+      '@deepseek-ai/dsh-jobs':
+        specifier: workspace:*
+        version: file:third_party/deepseek-harness/packages/jobs/jobs(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))
+      '@deepseek-ai/dsh-storage-domain':
+        specifier: workspace:*
+        version: file:third_party/deepseek-harness/packages/storage/storage-domain(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-invariants@file:third_party/deepseek-harness/packages/runtime-diagnostics/invariants(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      '@dz23-studio/agents':
+        specifier: workspace:*
+        version: file:plugins/agents(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)(@deepseek-ai/dsh-tools@file:third_party/deepseek-harness/packages/core/tools(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
 
   plugins/agents:
     dependencies:
@@ -190,6 +238,40 @@ importers:
         specifier: 4.4.3
         version: 4.4.3
 
+  plugins/assistant-bridge:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:*
+        version: link:../../third_party/deepseek-harness/vendor/cordis
+      '@deepseek-ai/dsh-agent':
+        specifier: workspace:*
+        version: link:../../third_party/deepseek-harness/packages/core/agent
+      '@deepseek-ai/dsh-jobs':
+        specifier: workspace:*
+        version: file:third_party/deepseek-harness/packages/jobs/jobs(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))
+      '@deepseek-ai/dsh-tools':
+        specifier: workspace:*
+        version: file:third_party/deepseek-harness/packages/core/tools(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))(@deepseek-ai/dsh-system-prompt@file:third_party/deepseek-harness/packages/core/system-prompt(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))
+      '@dz23-studio/agent-team':
+        specifier: workspace:*
+        version: file:plugins/agent-team(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)(@deepseek-ai/dsh-tools@file:third_party/deepseek-harness/packages/core/tools(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))
+      '@dz23-studio/agents':
+        specifier: workspace:*
+        version: file:plugins/agents(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)(@deepseek-ai/dsh-tools@file:third_party/deepseek-harness/packages/core/tools(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))
+      '@dz23-studio/identity':
+        specifier: workspace:*
+        version: link:../identity
+      '@dz23-studio/policy':
+        specifier: workspace:*
+        version: file:plugins/policy(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      '@dz23-studio/tenancy':
+        specifier: workspace:*
+        version: link:../tenancy
+    devDependencies:
+      '@dz23-studio/action-approval':
+        specifier: workspace:*
+        version: file:plugins/action-approval(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+
   plugins/builder-supervisor: {}
 
   plugins/hello:
@@ -217,7 +299,7 @@ importers:
         version: link:../../third_party/deepseek-harness/vendor/cordis
       '@deepseek-ai/dsh-agent':
         specifier: workspace:*
-        version: file:third_party/deepseek-harness/packages/core/agent(11c3748137e808992925df02462c6976)
+        version: file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
       '@deepseek-ai/dsh-client-connection':
         specifier: workspace:*
         version: file:third_party/deepseek-harness/packages/client/connection(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-credentials@file:third_party/deepseek-harness/packages/credentials/credentials(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-host-webserver@file:third_party/deepseek-harness/packages/host/webserver(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
@@ -417,6 +499,21 @@ importers:
 
   plugins/runtime-governor: {}
 
+  plugins/staging:
+    dependencies:
+      '@deepseek-ai/dsh-storage-domain':
+        specifier: workspace:*
+        version: file:third_party/deepseek-harness/packages/storage/storage-domain(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-invariants@file:third_party/deepseek-harness/packages/runtime-diagnostics/invariants(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      '@dz23-studio/action-approval':
+        specifier: workspace:*
+        version: link:../action-approval
+      '@dz23-studio/policy':
+        specifier: workspace:*
+        version: link:../policy
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
+
   plugins/storage-postgres:
     dependencies:
       '@deepseek-ai/cordis':
@@ -453,15 +550,36 @@ importers:
       '@deepseek-ai/cordis':
         specifier: workspace:*
         version: link:../../third_party/deepseek-harness/vendor/cordis
+      '@deepseek-ai/dsh-api-session-controller':
+        specifier: workspace:*
+        version: file:third_party/deepseek-harness/packages/api/session-controller(296484e1fdba6f38f9b4138dba093fc9)
       '@deepseek-ai/dsh-host-webserver':
         specifier: workspace:*
         version: link:../../third_party/deepseek-harness/packages/host/webserver
+      '@deepseek-ai/dsh-session':
+        specifier: workspace:*
+        version: link:../../third_party/deepseek-harness/packages/core/session
+      '@deepseek-ai/dsh-storage-domain':
+        specifier: workspace:*
+        version: file:third_party/deepseek-harness/packages/storage/storage-domain(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-invariants@file:third_party/deepseek-harness/packages/runtime-diagnostics/invariants(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      '@dz23-studio/action-approval':
+        specifier: workspace:*
+        version: link:../action-approval
+      '@dz23-studio/assistant-bridge':
+        specifier: workspace:*
+        version: file:plugins/assistant-bridge(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
       '@dz23-studio/identity':
         specifier: workspace:*
         version: link:../identity
+      '@dz23-studio/policy':
+        specifier: workspace:*
+        version: link:../policy
       '@dz23-studio/preview':
         specifier: workspace:*
-        version: link:../preview
+        version: file:plugins/preview(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)(@types/node@22.20.0)
+      '@dz23-studio/tenancy':
+        specifier: workspace:*
+        version: file:plugins/tenancy(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
 
   plugins/tenancy:
     dependencies:
@@ -13394,11 +13512,35 @@ packages:
   '@deepseek-ai/schemastery@file:third_party/deepseek-harness/vendor/schemastery':
     resolution: {directory: third_party/deepseek-harness/vendor/schemastery, type: directory}
 
+  '@dz23-studio/action-approval@file:plugins/action-approval':
+    resolution: {directory: plugins/action-approval, type: directory}
+
+  '@dz23-studio/agent-team@file:plugins/agent-team':
+    resolution: {directory: plugins/agent-team, type: directory}
+
+  '@dz23-studio/agents@file:plugins/agents':
+    resolution: {directory: plugins/agents, type: directory}
+
+  '@dz23-studio/assistant-bridge@file:plugins/assistant-bridge':
+    resolution: {directory: plugins/assistant-bridge, type: directory}
+
+  '@dz23-studio/builder-supervisor@file:plugins/builder-supervisor':
+    resolution: {directory: plugins/builder-supervisor, type: directory}
+
   '@dz23-studio/identity@file:plugins/identity':
     resolution: {directory: plugins/identity, type: directory}
 
   '@dz23-studio/policy@file:plugins/policy':
     resolution: {directory: plugins/policy, type: directory}
+
+  '@dz23-studio/preview@file:plugins/preview':
+    resolution: {directory: plugins/preview, type: directory}
+
+  '@dz23-studio/prompt-to-app@file:plugins/prompt-to-app':
+    resolution: {directory: plugins/prompt-to-app, type: directory}
+
+  '@dz23-studio/route-health@file:plugins/route-health':
+    resolution: {directory: plugins/route-health, type: directory}
 
   '@dz23-studio/runtime-governor@file:plugins/runtime-governor':
     resolution: {directory: plugins/runtime-governor, type: directory}
@@ -19519,6 +19661,16 @@ snapshots:
       js-yaml: 4.3.2
       zod: 4.4.3
 
+  '@deepseek-ai/dsh-agent-presets@file:third_party/deepseek-harness/packages/preset/agent-presets(1a772bd0e24119e5f5aed01bdbbbdd43)':
+    dependencies:
+      '@deepseek-ai/cordis': file:third_party/deepseek-harness/vendor/cordis(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+      '@deepseek-ai/dsh-agent': file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
+      '@deepseek-ai/dsh-session': file:third_party/deepseek-harness/packages/core/session(990fc3b068b844a29c2e9a88158bb144)
+      '@deepseek-ai/dsh-tools': file:third_party/deepseek-harness/packages/core/tools(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-system-prompt@file:third_party/deepseek-harness/packages/core/system-prompt(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))
+      '@deepseek-ai/schemastery': file:third_party/deepseek-harness/vendor/schemastery
+      js-yaml: 4.3.2
+      zod: 4.4.3
+
   '@deepseek-ai/dsh-agent-presets@file:third_party/deepseek-harness/packages/preset/agent-presets(2b7af78457d65633817ec161f8b9755f)':
     dependencies:
       '@deepseek-ai/cordis': file:third_party/deepseek-harness/vendor/cordis(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
@@ -19614,6 +19766,16 @@ snapshots:
       '@deepseek-ai/cordis': file:third_party/deepseek-harness/vendor/cordis(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
       '@deepseek-ai/dsh-agent': file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))
       '@deepseek-ai/dsh-session': file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
+      '@deepseek-ai/schemastery': file:third_party/deepseek-harness/vendor/schemastery
+      js-yaml: 4.3.2
+      zod: 4.4.3
+
+  '@deepseek-ai/dsh-agent-presets@file:third_party/deepseek-harness/packages/preset/agent-presets(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))(@deepseek-ai/dsh-tools@file:third_party/deepseek-harness/packages/core/tools(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))':
+    dependencies:
+      '@deepseek-ai/cordis': file:third_party/deepseek-harness/vendor/cordis(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+      '@deepseek-ai/dsh-agent': file:third_party/deepseek-harness/packages/core/agent(8adbf02854b9759d89ffc5e768137828)
+      '@deepseek-ai/dsh-session': file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
+      '@deepseek-ai/dsh-tools': file:third_party/deepseek-harness/packages/core/tools(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))(@deepseek-ai/dsh-system-prompt@file:third_party/deepseek-harness/packages/core/system-prompt(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))
       '@deepseek-ai/schemastery': file:third_party/deepseek-harness/vendor/schemastery
       js-yaml: 4.3.2
       zod: 4.4.3
@@ -19950,6 +20112,12 @@ snapshots:
       '@deepseek-ai/cordis': file:third_party/deepseek-harness/vendor/cordis(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
       '@deepseek-ai/dsh-llm': file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)
       '@deepseek-ai/dsh-session': file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
+
+  '@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))':
+    dependencies:
+      '@deepseek-ai/cordis': file:third_party/deepseek-harness/vendor/cordis(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+      '@deepseek-ai/dsh-llm': file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)
+      '@deepseek-ai/dsh-session': file:third_party/deepseek-harness/packages/core/session(990fc3b068b844a29c2e9a88158bb144)
 
   '@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm)(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm))(@deepseek-ai/dsh-system-prompt@file:third_party/deepseek-harness/packages/core/system-prompt(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm))':
     dependencies:
@@ -20360,6 +20528,19 @@ snapshots:
       '@deepseek-ai/schemastery': file:third_party/deepseek-harness/vendor/schemastery
       zod: 4.4.3
 
+  '@deepseek-ai/dsh-api-session-controller@file:third_party/deepseek-harness/packages/api/session-controller(296484e1fdba6f38f9b4138dba093fc9)':
+    dependencies:
+      '@deepseek-ai/cordis': file:third_party/deepseek-harness/vendor/cordis(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+      '@deepseek-ai/dsh-agent': file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
+      '@deepseek-ai/dsh-agent-presets': file:third_party/deepseek-harness/packages/preset/agent-presets(1a772bd0e24119e5f5aed01bdbbbdd43)
+      '@deepseek-ai/dsh-llm': file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)
+      '@deepseek-ai/dsh-session': file:third_party/deepseek-harness/packages/core/session(990fc3b068b844a29c2e9a88158bb144)
+      '@deepseek-ai/dsh-subagent': file:third_party/deepseek-harness/packages/subagent/subagent(f8e914d8b6ff9ac9425652af411b6bb0)
+      '@deepseek-ai/schemastery': file:third_party/deepseek-harness/vendor/schemastery
+      zod: 4.4.3
+    optionalDependencies:
+      '@deepseek-ai/dsh-jobs': file:third_party/deepseek-harness/packages/jobs/jobs(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
+
   '@deepseek-ai/dsh-api-session-controller@file:third_party/deepseek-harness/packages/api/session-controller(3f4118619a023587e025855fb031ffb2)':
     dependencies:
       '@deepseek-ai/cordis': file:third_party/deepseek-harness/vendor/cordis(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
@@ -20398,6 +20579,19 @@ snapshots:
       '@deepseek-ai/dsh-typert-protocol': file:third_party/deepseek-harness/packages/typert/protocol(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-invariants@file:third_party/deepseek-harness/packages/runtime-diagnostics/invariants(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
       '@deepseek-ai/schemastery': file:third_party/deepseek-harness/vendor/schemastery
       zod: 4.4.3
+
+  '@deepseek-ai/dsh-api-session-controller@file:third_party/deepseek-harness/packages/api/session-controller(620b10c677edfbdec5724ff0b8b3466c)':
+    dependencies:
+      '@deepseek-ai/cordis': file:third_party/deepseek-harness/vendor/cordis(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+      '@deepseek-ai/dsh-agent': file:third_party/deepseek-harness/packages/core/agent(8adbf02854b9759d89ffc5e768137828)
+      '@deepseek-ai/dsh-agent-presets': file:third_party/deepseek-harness/packages/preset/agent-presets(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))(@deepseek-ai/dsh-tools@file:third_party/deepseek-harness/packages/core/tools(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))
+      '@deepseek-ai/dsh-llm': file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)
+      '@deepseek-ai/dsh-session': file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
+      '@deepseek-ai/dsh-subagent': file:third_party/deepseek-harness/packages/subagent/subagent(288145fae4d299a2d906387d823f320f)
+      '@deepseek-ai/schemastery': file:third_party/deepseek-harness/vendor/schemastery
+      zod: 4.4.3
+    optionalDependencies:
+      '@deepseek-ai/dsh-jobs': file:third_party/deepseek-harness/packages/jobs/jobs(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))
 
   '@deepseek-ai/dsh-api-session-controller@file:third_party/deepseek-harness/packages/api/session-controller(69f191167bacff5bc8d5a4efd5904551)':
     dependencies:
@@ -27710,6 +27904,18 @@ snapshots:
       '@deepseek-ai/dsh-agent': file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))
       '@deepseek-ai/dsh-session': file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
 
+  '@deepseek-ai/dsh-jobs@file:third_party/deepseek-harness/packages/jobs/jobs(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))':
+    dependencies:
+      '@deepseek-ai/cordis': file:third_party/deepseek-harness/vendor/cordis(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+      '@deepseek-ai/dsh-agent': file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
+      '@deepseek-ai/dsh-session': file:third_party/deepseek-harness/packages/core/session(990fc3b068b844a29c2e9a88158bb144)
+
+  '@deepseek-ai/dsh-jobs@file:third_party/deepseek-harness/packages/jobs/jobs(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))':
+    dependencies:
+      '@deepseek-ai/cordis': file:third_party/deepseek-harness/vendor/cordis(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+      '@deepseek-ai/dsh-agent': file:third_party/deepseek-harness/packages/core/agent(8adbf02854b9759d89ffc5e768137828)
+      '@deepseek-ai/dsh-session': file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
+
   '@deepseek-ai/dsh-jobs@file:third_party/deepseek-harness/packages/jobs/jobs(ed777388b46ddc19b10757f702c1497b)':
     dependencies:
       '@deepseek-ai/cordis': file:third_party/deepseek-harness/vendor/cordis(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
@@ -31101,6 +31307,18 @@ snapshots:
     optionalDependencies:
       '@deepseek-ai/dsh-session-persistence': file:third_party/deepseek-harness/packages/session/session-persistence(a35b335a9aaa1a4f1b0b7e30bda03e0e)
 
+  '@deepseek-ai/dsh-subagent@file:third_party/deepseek-harness/packages/subagent/subagent(288145fae4d299a2d906387d823f320f)':
+    dependencies:
+      '@deepseek-ai/cordis': file:third_party/deepseek-harness/vendor/cordis(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+      '@deepseek-ai/dsh-agent': file:third_party/deepseek-harness/packages/core/agent(8adbf02854b9759d89ffc5e768137828)
+      '@deepseek-ai/dsh-llm': file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)
+      '@deepseek-ai/dsh-session': file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
+      '@deepseek-ai/dsh-tools': file:third_party/deepseek-harness/packages/core/tools(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))(@deepseek-ai/dsh-system-prompt@file:third_party/deepseek-harness/packages/core/system-prompt(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))
+      zod: 4.4.3
+    optionalDependencies:
+      '@deepseek-ai/dsh-agent-presets': file:third_party/deepseek-harness/packages/preset/agent-presets(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))(@deepseek-ai/dsh-tools@file:third_party/deepseek-harness/packages/core/tools(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))
+      '@deepseek-ai/dsh-jobs': file:third_party/deepseek-harness/packages/jobs/jobs(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))
+
   '@deepseek-ai/dsh-subagent@file:third_party/deepseek-harness/packages/subagent/subagent(3249f6ad8c730b6b4d6d908712748a66)':
     dependencies:
       '@deepseek-ai/cordis': file:third_party/deepseek-harness/vendor/cordis(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
@@ -31355,6 +31573,18 @@ snapshots:
       '@deepseek-ai/dsh-session-projection-cache': file:third_party/deepseek-harness/packages/session/session-projection-cache(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-session-projection@file:third_party/deepseek-harness/packages/session/session-projection(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@4.0.1))))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-storage-domain@file:third_party/deepseek-harness/packages/storage/storage-domain(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage))
       '@deepseek-ai/dsh-session-query': file:third_party/deepseek-harness/packages/session-query/session-query(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@4.0.1))(@deepseek-ai/dsh-session-projection@file:third_party/deepseek-harness/packages/session/session-projection(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@4.0.1))))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-tool-todo@file:third_party/deepseek-harness/packages/todo/tool-todo(7c2b2c5e754dbd892df2e16eef683663))
       '@deepseek-ai/dsh-user-approval': file:third_party/deepseek-harness/packages/interaction/user-approval(c6e6c5aa27b59221062f71f7e1267089)
+
+  '@deepseek-ai/dsh-subagent@file:third_party/deepseek-harness/packages/subagent/subagent(f8e914d8b6ff9ac9425652af411b6bb0)':
+    dependencies:
+      '@deepseek-ai/cordis': file:third_party/deepseek-harness/vendor/cordis(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+      '@deepseek-ai/dsh-agent': file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
+      '@deepseek-ai/dsh-llm': file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)
+      '@deepseek-ai/dsh-session': file:third_party/deepseek-harness/packages/core/session(990fc3b068b844a29c2e9a88158bb144)
+      '@deepseek-ai/dsh-tools': file:third_party/deepseek-harness/packages/core/tools(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-system-prompt@file:third_party/deepseek-harness/packages/core/system-prompt(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))
+      zod: 4.4.3
+    optionalDependencies:
+      '@deepseek-ai/dsh-agent-presets': file:third_party/deepseek-harness/packages/preset/agent-presets(1a772bd0e24119e5f5aed01bdbbbdd43)
+      '@deepseek-ai/dsh-jobs': file:third_party/deepseek-harness/packages/jobs/jobs(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
 
   '@deepseek-ai/dsh-subprocess-local@file:third_party/deepseek-harness/packages/subprocess/subprocess-local(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@file:third_party/deepseek-harness/packages/runtime-diagnostics/invariants(@deepseek-ai/cordis@4.0.1))(@deepseek-ai/dsh-subprocess@file:third_party/deepseek-harness/packages/subprocess/subprocess(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@file:third_party/deepseek-harness/packages/runtime-diagnostics/invariants(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-timeout@file:third_party/deepseek-harness/packages/util/timeout(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@file:third_party/deepseek-harness/packages/runtime-diagnostics/invariants(@deepseek-ai/cordis@4.0.1)))':
     dependencies:
@@ -33030,7 +33260,7 @@ snapshots:
   ? '@deepseek-ai/dsh-tools@file:third_party/deepseek-harness/packages/core/tools(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-system-prompt@file:third_party/deepseek-harness/packages/core/system-prompt(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))'
   : dependencies:
       '@deepseek-ai/cordis': file:third_party/deepseek-harness/vendor/cordis(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
-      '@deepseek-ai/dsh-agent': file:third_party/deepseek-harness/packages/core/agent(11c3748137e808992925df02462c6976)
+      '@deepseek-ai/dsh-agent': file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
       '@deepseek-ai/dsh-llm': file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)
       '@deepseek-ai/dsh-session': file:third_party/deepseek-harness/packages/core/session(990fc3b068b844a29c2e9a88158bb144)
       '@deepseek-ai/dsh-system-prompt': file:third_party/deepseek-harness/packages/core/system-prompt(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
@@ -34795,6 +35025,286 @@ snapshots:
       '@deepseek-ai/cosmokit': file:third_party/deepseek-harness/vendor/cosmokit
       '@standard-schema/spec': 1.1.0
 
+  '@dz23-studio/action-approval@file:plugins/action-approval(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)':
+    dependencies:
+      '@deepseek-ai/cordis': file:third_party/deepseek-harness/vendor/cordis(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+      '@deepseek-ai/dsh-storage-domain': file:third_party/deepseek-harness/packages/storage/storage-domain(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-invariants@file:third_party/deepseek-harness/packages/runtime-diagnostics/invariants(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      '@dz23-studio/identity': file:plugins/identity(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      '@dz23-studio/policy': file:plugins/policy(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      zod: 4.4.3
+    transitivePeerDependencies:
+      - '@deepseek-ai/cordis-plugin-include'
+      - '@deepseek-ai/cordis-plugin-loader'
+      - '@deepseek-ai/dsh-agent'
+      - '@deepseek-ai/dsh-attachment'
+      - '@deepseek-ai/dsh-brand'
+      - '@deepseek-ai/dsh-code-runtime'
+      - '@deepseek-ai/dsh-commands'
+      - '@deepseek-ai/dsh-host-directory-picker'
+      - '@deepseek-ai/dsh-invariants'
+      - '@deepseek-ai/dsh-llm'
+      - '@deepseek-ai/dsh-scope'
+      - '@deepseek-ai/dsh-settings'
+      - '@deepseek-ai/dsh-storage'
+      - '@deepseek-ai/dsh-system-prompt'
+      - '@deepseek-ai/dsh-timeout'
+      - '@deepseek-ai/dsh-tool-todo'
+      - '@deepseek-ai/dsh-typert-protocol'
+      - '@deepseek-ai/dsh-user-approval'
+      - supports-color
+
+  '@dz23-studio/agent-team@file:plugins/agent-team(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)(@deepseek-ai/dsh-tools@file:third_party/deepseek-harness/packages/core/tools(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))':
+    dependencies:
+      '@deepseek-ai/cordis': file:third_party/deepseek-harness/vendor/cordis(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+      '@deepseek-ai/dsh-agent': file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
+      '@deepseek-ai/dsh-jobs': file:third_party/deepseek-harness/packages/jobs/jobs(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
+      '@deepseek-ai/dsh-storage-domain': file:third_party/deepseek-harness/packages/storage/storage-domain(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-invariants@file:third_party/deepseek-harness/packages/runtime-diagnostics/invariants(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      '@dz23-studio/agents': file:plugins/agents(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)(@deepseek-ai/dsh-tools@file:third_party/deepseek-harness/packages/core/tools(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))
+      zod: 4.4.3
+    transitivePeerDependencies:
+      - '@deepseek-ai/cordis-plugin-include'
+      - '@deepseek-ai/cordis-plugin-loader'
+      - '@deepseek-ai/dsh-agent-default-model'
+      - '@deepseek-ai/dsh-api-gateway'
+      - '@deepseek-ai/dsh-atomic-write'
+      - '@deepseek-ai/dsh-attachment'
+      - '@deepseek-ai/dsh-brand'
+      - '@deepseek-ai/dsh-client-connection'
+      - '@deepseek-ai/dsh-code-runtime'
+      - '@deepseek-ai/dsh-commands'
+      - '@deepseek-ai/dsh-file-reference'
+      - '@deepseek-ai/dsh-home-paths'
+      - '@deepseek-ai/dsh-host-directory-picker'
+      - '@deepseek-ai/dsh-invariants'
+      - '@deepseek-ai/dsh-llm'
+      - '@deepseek-ai/dsh-native-command'
+      - '@deepseek-ai/dsh-sandbox'
+      - '@deepseek-ai/dsh-sandbox-policy'
+      - '@deepseek-ai/dsh-scope'
+      - '@deepseek-ai/dsh-session'
+      - '@deepseek-ai/dsh-session-persistence'
+      - '@deepseek-ai/dsh-session-projection'
+      - '@deepseek-ai/dsh-session-projection-cache'
+      - '@deepseek-ai/dsh-session-query'
+      - '@deepseek-ai/dsh-session-title'
+      - '@deepseek-ai/dsh-settings'
+      - '@deepseek-ai/dsh-skill'
+      - '@deepseek-ai/dsh-storage'
+      - '@deepseek-ai/dsh-system-prompt'
+      - '@deepseek-ai/dsh-timeout'
+      - '@deepseek-ai/dsh-tool-todo'
+      - '@deepseek-ai/dsh-tools'
+      - '@deepseek-ai/dsh-typert-protocol'
+      - '@deepseek-ai/dsh-typert-registry'
+      - '@deepseek-ai/dsh-user-approval'
+      - '@deepseek-ai/dsh-util-workspace-path'
+      - '@deepseek-ai/dsh-workspace'
+      - supports-color
+
+  '@dz23-studio/agent-team@file:plugins/agent-team(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)(@deepseek-ai/dsh-tools@file:third_party/deepseek-harness/packages/core/tools(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))':
+    dependencies:
+      '@deepseek-ai/cordis': file:third_party/deepseek-harness/vendor/cordis(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+      '@deepseek-ai/dsh-agent': file:third_party/deepseek-harness/packages/core/agent(8adbf02854b9759d89ffc5e768137828)
+      '@deepseek-ai/dsh-jobs': file:third_party/deepseek-harness/packages/jobs/jobs(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))
+      '@deepseek-ai/dsh-storage-domain': file:third_party/deepseek-harness/packages/storage/storage-domain(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-invariants@file:third_party/deepseek-harness/packages/runtime-diagnostics/invariants(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      '@dz23-studio/agents': file:plugins/agents(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)(@deepseek-ai/dsh-tools@file:third_party/deepseek-harness/packages/core/tools(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))
+      zod: 4.4.3
+    transitivePeerDependencies:
+      - '@deepseek-ai/cordis-plugin-include'
+      - '@deepseek-ai/cordis-plugin-loader'
+      - '@deepseek-ai/dsh-agent-default-model'
+      - '@deepseek-ai/dsh-api-gateway'
+      - '@deepseek-ai/dsh-atomic-write'
+      - '@deepseek-ai/dsh-attachment'
+      - '@deepseek-ai/dsh-brand'
+      - '@deepseek-ai/dsh-client-connection'
+      - '@deepseek-ai/dsh-code-runtime'
+      - '@deepseek-ai/dsh-commands'
+      - '@deepseek-ai/dsh-file-reference'
+      - '@deepseek-ai/dsh-home-paths'
+      - '@deepseek-ai/dsh-host-directory-picker'
+      - '@deepseek-ai/dsh-invariants'
+      - '@deepseek-ai/dsh-llm'
+      - '@deepseek-ai/dsh-native-command'
+      - '@deepseek-ai/dsh-sandbox'
+      - '@deepseek-ai/dsh-sandbox-policy'
+      - '@deepseek-ai/dsh-scope'
+      - '@deepseek-ai/dsh-session'
+      - '@deepseek-ai/dsh-session-persistence'
+      - '@deepseek-ai/dsh-session-projection'
+      - '@deepseek-ai/dsh-session-projection-cache'
+      - '@deepseek-ai/dsh-session-query'
+      - '@deepseek-ai/dsh-session-title'
+      - '@deepseek-ai/dsh-settings'
+      - '@deepseek-ai/dsh-skill'
+      - '@deepseek-ai/dsh-storage'
+      - '@deepseek-ai/dsh-system-prompt'
+      - '@deepseek-ai/dsh-timeout'
+      - '@deepseek-ai/dsh-tool-todo'
+      - '@deepseek-ai/dsh-tools'
+      - '@deepseek-ai/dsh-typert-protocol'
+      - '@deepseek-ai/dsh-typert-registry'
+      - '@deepseek-ai/dsh-user-approval'
+      - '@deepseek-ai/dsh-util-workspace-path'
+      - '@deepseek-ai/dsh-workspace'
+      - supports-color
+
+  '@dz23-studio/agents@file:plugins/agents(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)(@deepseek-ai/dsh-tools@file:third_party/deepseek-harness/packages/core/tools(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))':
+    dependencies:
+      '@deepseek-ai/cordis': file:third_party/deepseek-harness/vendor/cordis(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+      '@deepseek-ai/dsh-agent': file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
+      '@deepseek-ai/dsh-agent-presets': file:third_party/deepseek-harness/packages/preset/agent-presets(1a772bd0e24119e5f5aed01bdbbbdd43)
+      '@deepseek-ai/dsh-api-session-controller': file:third_party/deepseek-harness/packages/api/session-controller(296484e1fdba6f38f9b4138dba093fc9)
+      '@deepseek-ai/dsh-jobs': file:third_party/deepseek-harness/packages/jobs/jobs(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
+      '@deepseek-ai/dsh-llm': file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)
+      '@deepseek-ai/dsh-session': file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
+      '@deepseek-ai/dsh-storage-domain': file:third_party/deepseek-harness/packages/storage/storage-domain(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-invariants@file:third_party/deepseek-harness/packages/runtime-diagnostics/invariants(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      '@deepseek-ai/dsh-subagent': file:third_party/deepseek-harness/packages/subagent/subagent(f8e914d8b6ff9ac9425652af411b6bb0)
+      '@dz23-studio/identity': file:plugins/identity(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      '@dz23-studio/policy': file:plugins/policy(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      zod: 4.4.3
+    transitivePeerDependencies:
+      - '@deepseek-ai/cordis-plugin-include'
+      - '@deepseek-ai/cordis-plugin-loader'
+      - '@deepseek-ai/dsh-agent-default-model'
+      - '@deepseek-ai/dsh-api-gateway'
+      - '@deepseek-ai/dsh-atomic-write'
+      - '@deepseek-ai/dsh-attachment'
+      - '@deepseek-ai/dsh-brand'
+      - '@deepseek-ai/dsh-client-connection'
+      - '@deepseek-ai/dsh-code-runtime'
+      - '@deepseek-ai/dsh-commands'
+      - '@deepseek-ai/dsh-file-reference'
+      - '@deepseek-ai/dsh-home-paths'
+      - '@deepseek-ai/dsh-host-directory-picker'
+      - '@deepseek-ai/dsh-invariants'
+      - '@deepseek-ai/dsh-native-command'
+      - '@deepseek-ai/dsh-sandbox'
+      - '@deepseek-ai/dsh-sandbox-policy'
+      - '@deepseek-ai/dsh-scope'
+      - '@deepseek-ai/dsh-session-persistence'
+      - '@deepseek-ai/dsh-session-projection'
+      - '@deepseek-ai/dsh-session-projection-cache'
+      - '@deepseek-ai/dsh-session-query'
+      - '@deepseek-ai/dsh-session-title'
+      - '@deepseek-ai/dsh-settings'
+      - '@deepseek-ai/dsh-skill'
+      - '@deepseek-ai/dsh-storage'
+      - '@deepseek-ai/dsh-system-prompt'
+      - '@deepseek-ai/dsh-timeout'
+      - '@deepseek-ai/dsh-tool-todo'
+      - '@deepseek-ai/dsh-tools'
+      - '@deepseek-ai/dsh-typert-protocol'
+      - '@deepseek-ai/dsh-typert-registry'
+      - '@deepseek-ai/dsh-user-approval'
+      - '@deepseek-ai/dsh-util-workspace-path'
+      - '@deepseek-ai/dsh-workspace'
+      - supports-color
+
+  '@dz23-studio/agents@file:plugins/agents(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)(@deepseek-ai/dsh-tools@file:third_party/deepseek-harness/packages/core/tools(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))':
+    dependencies:
+      '@deepseek-ai/cordis': file:third_party/deepseek-harness/vendor/cordis(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+      '@deepseek-ai/dsh-agent': file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))
+      '@deepseek-ai/dsh-agent-presets': file:third_party/deepseek-harness/packages/preset/agent-presets(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))(@deepseek-ai/dsh-tools@file:third_party/deepseek-harness/packages/core/tools(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))
+      '@deepseek-ai/dsh-api-session-controller': file:third_party/deepseek-harness/packages/api/session-controller(620b10c677edfbdec5724ff0b8b3466c)
+      '@deepseek-ai/dsh-jobs': file:third_party/deepseek-harness/packages/jobs/jobs(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))
+      '@deepseek-ai/dsh-llm': file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)
+      '@deepseek-ai/dsh-session': file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
+      '@deepseek-ai/dsh-storage-domain': file:third_party/deepseek-harness/packages/storage/storage-domain(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-invariants@file:third_party/deepseek-harness/packages/runtime-diagnostics/invariants(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      '@deepseek-ai/dsh-subagent': file:third_party/deepseek-harness/packages/subagent/subagent(288145fae4d299a2d906387d823f320f)
+      '@dz23-studio/identity': file:plugins/identity(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      '@dz23-studio/policy': file:plugins/policy(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      zod: 4.4.3
+    transitivePeerDependencies:
+      - '@deepseek-ai/cordis-plugin-include'
+      - '@deepseek-ai/cordis-plugin-loader'
+      - '@deepseek-ai/dsh-agent-default-model'
+      - '@deepseek-ai/dsh-api-gateway'
+      - '@deepseek-ai/dsh-atomic-write'
+      - '@deepseek-ai/dsh-attachment'
+      - '@deepseek-ai/dsh-brand'
+      - '@deepseek-ai/dsh-client-connection'
+      - '@deepseek-ai/dsh-code-runtime'
+      - '@deepseek-ai/dsh-commands'
+      - '@deepseek-ai/dsh-file-reference'
+      - '@deepseek-ai/dsh-home-paths'
+      - '@deepseek-ai/dsh-host-directory-picker'
+      - '@deepseek-ai/dsh-invariants'
+      - '@deepseek-ai/dsh-native-command'
+      - '@deepseek-ai/dsh-sandbox'
+      - '@deepseek-ai/dsh-sandbox-policy'
+      - '@deepseek-ai/dsh-scope'
+      - '@deepseek-ai/dsh-session-persistence'
+      - '@deepseek-ai/dsh-session-projection'
+      - '@deepseek-ai/dsh-session-projection-cache'
+      - '@deepseek-ai/dsh-session-query'
+      - '@deepseek-ai/dsh-session-title'
+      - '@deepseek-ai/dsh-settings'
+      - '@deepseek-ai/dsh-skill'
+      - '@deepseek-ai/dsh-storage'
+      - '@deepseek-ai/dsh-system-prompt'
+      - '@deepseek-ai/dsh-timeout'
+      - '@deepseek-ai/dsh-tool-todo'
+      - '@deepseek-ai/dsh-tools'
+      - '@deepseek-ai/dsh-typert-protocol'
+      - '@deepseek-ai/dsh-typert-registry'
+      - '@deepseek-ai/dsh-user-approval'
+      - '@deepseek-ai/dsh-util-workspace-path'
+      - '@deepseek-ai/dsh-workspace'
+      - supports-color
+
+  '@dz23-studio/assistant-bridge@file:plugins/assistant-bridge(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)':
+    dependencies:
+      '@deepseek-ai/cordis': file:third_party/deepseek-harness/vendor/cordis(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+      '@deepseek-ai/dsh-agent': file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
+      '@deepseek-ai/dsh-jobs': file:third_party/deepseek-harness/packages/jobs/jobs(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
+      '@deepseek-ai/dsh-tools': file:third_party/deepseek-harness/packages/core/tools(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-system-prompt@file:third_party/deepseek-harness/packages/core/system-prompt(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))
+      '@dz23-studio/agent-team': file:plugins/agent-team(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)(@deepseek-ai/dsh-tools@file:third_party/deepseek-harness/packages/core/tools(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))
+      '@dz23-studio/agents': file:plugins/agents(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)(@deepseek-ai/dsh-tools@file:third_party/deepseek-harness/packages/core/tools(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))
+      '@dz23-studio/identity': file:plugins/identity(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      '@dz23-studio/policy': file:plugins/policy(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      '@dz23-studio/tenancy': file:plugins/tenancy(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+    transitivePeerDependencies:
+      - '@deepseek-ai/cordis-plugin-include'
+      - '@deepseek-ai/cordis-plugin-loader'
+      - '@deepseek-ai/dsh-agent-default-model'
+      - '@deepseek-ai/dsh-api-gateway'
+      - '@deepseek-ai/dsh-atomic-write'
+      - '@deepseek-ai/dsh-attachment'
+      - '@deepseek-ai/dsh-brand'
+      - '@deepseek-ai/dsh-client-connection'
+      - '@deepseek-ai/dsh-code-runtime'
+      - '@deepseek-ai/dsh-commands'
+      - '@deepseek-ai/dsh-file-reference'
+      - '@deepseek-ai/dsh-home-paths'
+      - '@deepseek-ai/dsh-host-directory-picker'
+      - '@deepseek-ai/dsh-invariants'
+      - '@deepseek-ai/dsh-llm'
+      - '@deepseek-ai/dsh-native-command'
+      - '@deepseek-ai/dsh-sandbox'
+      - '@deepseek-ai/dsh-sandbox-policy'
+      - '@deepseek-ai/dsh-scope'
+      - '@deepseek-ai/dsh-session'
+      - '@deepseek-ai/dsh-session-persistence'
+      - '@deepseek-ai/dsh-session-projection'
+      - '@deepseek-ai/dsh-session-projection-cache'
+      - '@deepseek-ai/dsh-session-query'
+      - '@deepseek-ai/dsh-session-title'
+      - '@deepseek-ai/dsh-settings'
+      - '@deepseek-ai/dsh-skill'
+      - '@deepseek-ai/dsh-storage'
+      - '@deepseek-ai/dsh-system-prompt'
+      - '@deepseek-ai/dsh-timeout'
+      - '@deepseek-ai/dsh-tool-todo'
+      - '@deepseek-ai/dsh-typert-protocol'
+      - '@deepseek-ai/dsh-typert-registry'
+      - '@deepseek-ai/dsh-user-approval'
+      - '@deepseek-ai/dsh-util-workspace-path'
+      - '@deepseek-ai/dsh-workspace'
+      - supports-color
+
+  '@dz23-studio/builder-supervisor@file:plugins/builder-supervisor': {}
+
   '@dz23-studio/identity@file:plugins/identity(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)':
     dependencies:
       '@deepseek-ai/cordis': file:third_party/deepseek-harness/vendor/cordis(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
@@ -34804,7 +35314,40 @@ snapshots:
       '@deepseek-ai/dsh-host-webserver': file:third_party/deepseek-harness/packages/host/webserver(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-invariants@file:third_party/deepseek-harness/packages/runtime-diagnostics/invariants(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
       '@deepseek-ai/dsh-session': file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
       '@deepseek-ai/dsh-storage-domain': file:third_party/deepseek-harness/packages/storage/storage-domain(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-invariants@file:third_party/deepseek-harness/packages/runtime-diagnostics/invariants(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
-      '@dz23-studio/policy': file:plugins/policy(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      '@dz23-studio/policy': file:plugins/policy(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      '@simplewebauthn/server': 13.3.2
+      nodemailer: 9.0.5
+      zod: 4.4.3
+    transitivePeerDependencies:
+      - '@deepseek-ai/cordis-plugin-include'
+      - '@deepseek-ai/cordis-plugin-loader'
+      - '@deepseek-ai/dsh-attachment'
+      - '@deepseek-ai/dsh-brand'
+      - '@deepseek-ai/dsh-code-runtime'
+      - '@deepseek-ai/dsh-commands'
+      - '@deepseek-ai/dsh-host-directory-picker'
+      - '@deepseek-ai/dsh-invariants'
+      - '@deepseek-ai/dsh-llm'
+      - '@deepseek-ai/dsh-scope'
+      - '@deepseek-ai/dsh-settings'
+      - '@deepseek-ai/dsh-storage'
+      - '@deepseek-ai/dsh-system-prompt'
+      - '@deepseek-ai/dsh-timeout'
+      - '@deepseek-ai/dsh-tool-todo'
+      - '@deepseek-ai/dsh-typert-protocol'
+      - '@deepseek-ai/dsh-user-approval'
+      - supports-color
+
+  '@dz23-studio/identity@file:plugins/identity(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)':
+    dependencies:
+      '@deepseek-ai/cordis': file:third_party/deepseek-harness/vendor/cordis(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+      '@deepseek-ai/dsh-agent': file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
+      '@deepseek-ai/dsh-client-connection': file:third_party/deepseek-harness/packages/client/connection(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-credentials@file:third_party/deepseek-harness/packages/credentials/credentials(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-host-webserver@file:third_party/deepseek-harness/packages/host/webserver(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
+      '@deepseek-ai/dsh-credentials': file:third_party/deepseek-harness/packages/credentials/credentials(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-brand@file:third_party/deepseek-harness/packages/util/brand(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-invariants@file:third_party/deepseek-harness/packages/runtime-diagnostics/invariants(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))(@deepseek-ai/dsh-invariants@file:third_party/deepseek-harness/packages/runtime-diagnostics/invariants(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
+      '@deepseek-ai/dsh-host-webserver': file:third_party/deepseek-harness/packages/host/webserver(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-invariants@file:third_party/deepseek-harness/packages/runtime-diagnostics/invariants(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
+      '@deepseek-ai/dsh-session': file:third_party/deepseek-harness/packages/core/session(990fc3b068b844a29c2e9a88158bb144)
+      '@deepseek-ai/dsh-storage-domain': file:third_party/deepseek-harness/packages/storage/storage-domain(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-invariants@file:third_party/deepseek-harness/packages/runtime-diagnostics/invariants(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      '@dz23-studio/policy': file:plugins/policy(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
       '@simplewebauthn/server': 13.3.2
       nodemailer: 9.0.5
       zod: 4.4.3
@@ -34897,6 +35440,105 @@ snapshots:
       - '@deepseek-ai/dsh-typert-protocol'
       - '@deepseek-ai/dsh-user-approval'
 
+  '@dz23-studio/preview@file:plugins/preview(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)(@types/node@22.20.0)':
+    dependencies:
+      '@deepseek-ai/cordis': file:third_party/deepseek-harness/vendor/cordis(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+      '@deepseek-ai/dsh-host-webserver': file:third_party/deepseek-harness/packages/host/webserver(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-invariants@file:third_party/deepseek-harness/packages/runtime-diagnostics/invariants(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
+      '@deepseek-ai/dsh-storage-domain': file:third_party/deepseek-harness/packages/storage/storage-domain(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-invariants@file:third_party/deepseek-harness/packages/runtime-diagnostics/invariants(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      '@dz23-studio/identity': file:plugins/identity(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      '@dz23-studio/policy': file:plugins/policy(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      '@dz23-studio/prompt-to-app': file:plugins/prompt-to-app(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)(@types/node@22.20.0)
+      '@dz23-studio/runtime-governor': file:plugins/runtime-governor
+      '@dz23-studio/tenancy': file:plugins/tenancy(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      zod: 4.4.3
+    transitivePeerDependencies:
+      - '@deepseek-ai/cordis-plugin-include'
+      - '@deepseek-ai/cordis-plugin-loader'
+      - '@deepseek-ai/dsh-agent'
+      - '@deepseek-ai/dsh-attachment'
+      - '@deepseek-ai/dsh-brand'
+      - '@deepseek-ai/dsh-code-runtime'
+      - '@deepseek-ai/dsh-commands'
+      - '@deepseek-ai/dsh-host-directory-picker'
+      - '@deepseek-ai/dsh-invariants'
+      - '@deepseek-ai/dsh-llm'
+      - '@deepseek-ai/dsh-scope'
+      - '@deepseek-ai/dsh-session'
+      - '@deepseek-ai/dsh-settings'
+      - '@deepseek-ai/dsh-storage'
+      - '@deepseek-ai/dsh-system-prompt'
+      - '@deepseek-ai/dsh-timeout'
+      - '@deepseek-ai/dsh-tool-todo'
+      - '@deepseek-ai/dsh-typert-protocol'
+      - '@deepseek-ai/dsh-user-approval'
+      - '@types/node'
+      - supports-color
+
+  '@dz23-studio/prompt-to-app@file:plugins/prompt-to-app(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)(@types/node@22.20.0)':
+    dependencies:
+      '@deepseek-ai/cordis': file:third_party/deepseek-harness/vendor/cordis(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+      '@deepseek-ai/dsh-agent': file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))
+      '@deepseek-ai/dsh-host-webserver': file:third_party/deepseek-harness/packages/host/webserver(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-invariants@file:third_party/deepseek-harness/packages/runtime-diagnostics/invariants(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
+      '@deepseek-ai/dsh-jobs': file:third_party/deepseek-harness/packages/jobs/jobs(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))
+      '@deepseek-ai/dsh-llm': file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)
+      '@deepseek-ai/dsh-session': file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
+      '@deepseek-ai/dsh-storage-domain': file:third_party/deepseek-harness/packages/storage/storage-domain(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-invariants@file:third_party/deepseek-harness/packages/runtime-diagnostics/invariants(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      '@dz23-studio/builder-supervisor': file:plugins/builder-supervisor
+      '@dz23-studio/identity': file:plugins/identity(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      '@dz23-studio/policy': file:plugins/policy(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      '@dz23-studio/route-health': file:plugins/route-health(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      '@dz23-studio/runtime-governor': file:plugins/runtime-governor
+      '@dz23-studio/tenancy': file:plugins/tenancy(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      sharp: 0.35.4(@types/node@22.20.0)
+      typescript: 6.0.3
+      zod: 4.4.3
+    transitivePeerDependencies:
+      - '@deepseek-ai/cordis-plugin-include'
+      - '@deepseek-ai/cordis-plugin-loader'
+      - '@deepseek-ai/dsh-attachment'
+      - '@deepseek-ai/dsh-brand'
+      - '@deepseek-ai/dsh-code-runtime'
+      - '@deepseek-ai/dsh-commands'
+      - '@deepseek-ai/dsh-host-directory-picker'
+      - '@deepseek-ai/dsh-invariants'
+      - '@deepseek-ai/dsh-scope'
+      - '@deepseek-ai/dsh-settings'
+      - '@deepseek-ai/dsh-storage'
+      - '@deepseek-ai/dsh-system-prompt'
+      - '@deepseek-ai/dsh-timeout'
+      - '@deepseek-ai/dsh-tool-todo'
+      - '@deepseek-ai/dsh-typert-protocol'
+      - '@deepseek-ai/dsh-user-approval'
+      - '@types/node'
+      - supports-color
+
+  '@dz23-studio/route-health@file:plugins/route-health(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)':
+    dependencies:
+      '@deepseek-ai/cordis': file:third_party/deepseek-harness/vendor/cordis(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+      '@deepseek-ai/dsh-host-webserver': file:third_party/deepseek-harness/packages/host/webserver(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-invariants@file:third_party/deepseek-harness/packages/runtime-diagnostics/invariants(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
+      '@deepseek-ai/dsh-llm': file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)
+      '@deepseek-ai/dsh-storage-domain': file:third_party/deepseek-harness/packages/storage/storage-domain(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-invariants@file:third_party/deepseek-harness/packages/runtime-diagnostics/invariants(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      '@dz23-studio/identity': file:plugins/identity(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      zod: 4.4.3
+    transitivePeerDependencies:
+      - '@deepseek-ai/cordis-plugin-include'
+      - '@deepseek-ai/cordis-plugin-loader'
+      - '@deepseek-ai/dsh-attachment'
+      - '@deepseek-ai/dsh-brand'
+      - '@deepseek-ai/dsh-code-runtime'
+      - '@deepseek-ai/dsh-commands'
+      - '@deepseek-ai/dsh-host-directory-picker'
+      - '@deepseek-ai/dsh-invariants'
+      - '@deepseek-ai/dsh-scope'
+      - '@deepseek-ai/dsh-settings'
+      - '@deepseek-ai/dsh-storage'
+      - '@deepseek-ai/dsh-system-prompt'
+      - '@deepseek-ai/dsh-timeout'
+      - '@deepseek-ai/dsh-tool-todo'
+      - '@deepseek-ai/dsh-typert-protocol'
+      - '@deepseek-ai/dsh-user-approval'
+      - supports-color
+
   '@dz23-studio/runtime-governor@file:plugins/runtime-governor': {}
 
   '@dz23-studio/storage-postgres@file:plugins/storage-postgres':
@@ -34924,6 +35566,36 @@ snapshots:
       '@deepseek-ai/dsh-storage-domain': file:third_party/deepseek-harness/packages/storage/storage-domain(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-invariants@file:third_party/deepseek-harness/packages/runtime-diagnostics/invariants(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
       '@dz23-studio/identity': file:plugins/identity(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
       '@dz23-studio/policy': file:plugins/policy(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      zod: 4.4.3
+    transitivePeerDependencies:
+      - '@deepseek-ai/cordis-plugin-include'
+      - '@deepseek-ai/cordis-plugin-loader'
+      - '@deepseek-ai/dsh-attachment'
+      - '@deepseek-ai/dsh-brand'
+      - '@deepseek-ai/dsh-code-runtime'
+      - '@deepseek-ai/dsh-commands'
+      - '@deepseek-ai/dsh-host-directory-picker'
+      - '@deepseek-ai/dsh-invariants'
+      - '@deepseek-ai/dsh-llm'
+      - '@deepseek-ai/dsh-scope'
+      - '@deepseek-ai/dsh-session'
+      - '@deepseek-ai/dsh-settings'
+      - '@deepseek-ai/dsh-storage'
+      - '@deepseek-ai/dsh-system-prompt'
+      - '@deepseek-ai/dsh-timeout'
+      - '@deepseek-ai/dsh-tool-todo'
+      - '@deepseek-ai/dsh-typert-protocol'
+      - '@deepseek-ai/dsh-user-approval'
+      - supports-color
+
+  '@dz23-studio/tenancy@file:plugins/tenancy(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)':
+    dependencies:
+      '@deepseek-ai/cordis': file:third_party/deepseek-harness/vendor/cordis(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+      '@deepseek-ai/dsh-agent': file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-llm@file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
+      '@deepseek-ai/dsh-host-webserver': file:third_party/deepseek-harness/packages/host/webserver(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-invariants@file:third_party/deepseek-harness/packages/runtime-diagnostics/invariants(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))
+      '@deepseek-ai/dsh-storage-domain': file:third_party/deepseek-harness/packages/storage/storage-domain(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-invariants@file:third_party/deepseek-harness/packages/runtime-diagnostics/invariants(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      '@dz23-studio/identity': file:plugins/identity(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      '@dz23-studio/policy': file:plugins/policy(@deepseek-ai/dsh-agent@file:third_party/deepseek-harness/packages/core/agent(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-session@file:third_party/deepseek-harness/packages/core/session(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
       zod: 4.4.3
     transitivePeerDependencies:
       - '@deepseek-ai/cordis-plugin-include'
