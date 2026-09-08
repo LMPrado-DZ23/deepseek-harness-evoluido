@@ -83,7 +83,7 @@ export function emergencyStopSurfaces(ctx: Context): readonly StopSurface[] {
           // vida própria: o Studio pede que ele pare e NÃO consegue provar que
           // parou. Dizer isto na resposta é a única alternativa honesta a
           // fingir que a parada alcançou tudo.
-          unproven: outcome.unproven.map(item => ({ what: item.runId, why: t('surfaces.externalAgent', { provider: item.provider }) })),
+          unproven: outcome.unproven.map((item: { readonly runId: string; readonly provider: string }) => ({ what: item.runId, why: t('surfaces.externalAgent', { provider: item.provider }) })),
         }
       },
     },

@@ -25,7 +25,7 @@ function file(name: string, bytes: Uint8Array) {
 
 describe('envio de mensagem com anexo', () => {
   it('sem anexo o corpo continua sendo exatamente {text}', async () => {
-    const fetchMock = vi.fn(async () => Response.json({ accepted: true, request_id: 'req-1' }, { status: 202 }))
+    const fetchMock = vi.fn(async (_path: string, _init: RequestInit) => Response.json({ accepted: true, request_id: 'req-1' }, { status: 202 }))
     await sendConversationMessage('c1', 'oi', { fetch: fetchMock }, csrf)
     // A garantia do servidor é `{text}` OU `{text, attachments}`: mandar
     // `attachments: []` seria uma terceira forma, e o servidor a recusaria.
@@ -33,7 +33,7 @@ describe('envio de mensagem com anexo', () => {
   })
 
   it('com anexo o corpo carrega só as referências opacas, nunca o arquivo', async () => {
-    const fetchMock = vi.fn(async () => Response.json({ accepted: true, request_id: 'req-1' }, { status: 202 }))
+    const fetchMock = vi.fn(async (_path: string, _init: RequestInit) => Response.json({ accepted: true, request_id: 'req-1' }, { status: 202 }))
     await sendConversationMessage('c1', 'veja', { fetch: fetchMock }, csrf, ['ref-1', 'ref-2'])
     expect(JSON.parse(fetchMock.mock.calls[0]![1].body as string)).toEqual({
       text: 'veja', attachments: ['ref-1', 'ref-2'],
@@ -43,7 +43,7 @@ describe('envio de mensagem com anexo', () => {
 
 describe('subir um anexo', () => {
   it('sobe nome e bytes, com CSRF, e não informa tipo nem caminho', async () => {
-    const fetchMock = vi.fn(async () => Response.json(attachment({ name: 'passwd' }), { status: 201 }))
+    const fetchMock = vi.fn(async (_path: string, _init: RequestInit) => Response.json(attachment({ name: 'passwd' }), { status: 201 }))
     const bytes = new Uint8Array([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
     const reference = await uploadConversationAttachment(
       'c1', file('../../etc/passwd', bytes), { fetch: fetchMock }, csrf,
@@ -62,7 +62,7 @@ describe('subir um anexo', () => {
   })
 
   it('o teto de tamanho barra antes de subir, e o arquivo vazio também', async () => {
-    const fetchMock = vi.fn(async () => Response.json(attachment(), { status: 201 }))
+    const fetchMock = vi.fn(async (_path: string, _init: RequestInit) => Response.json(attachment(), { status: 201 }))
     const grande = file('grande.png', new Uint8Array(MAX_ATTACHMENT_BYTES + 1))
     await expect(uploadConversationAttachment('c1', grande, { fetch: fetchMock }, csrf))
       .rejects.toThrow(copy.attachmentTooLargeLocal)
@@ -74,7 +74,7 @@ describe('subir um anexo', () => {
 
   it('a recusa do servidor chega em português e sem virar sucesso', async () => {
     const recusa = 'Este tipo de arquivo não é aceito. Envie uma imagem (PNG, JPEG, WebP ou GIF) ou um arquivo de texto.'
-    const fetchMock = vi.fn(async () => Response.json({ error: recusa }, { status: 400 }))
+    const fetchMock = vi.fn(async (_path: string, _init: RequestInit) => Response.json({ error: recusa }, { status: 400 }))
     const erro = await uploadConversationAttachment('c1', file('a.bin', new Uint8Array([1, 2, 3])), { fetch: fetchMock }, csrf)
       .catch((reason: unknown) => reason)
     expect(erro).toBeInstanceOf(ConversationRequestError)
@@ -98,7 +98,7 @@ describe('subir um anexo', () => {
     ]) {
       expect(isConversationAttachment(quebrada), JSON.stringify(quebrada)).toBe(false)
     }
-    const fetchMock = vi.fn(async () => Response.json({ attachment_id: 'ref-1' }, { status: 201 }))
+    const fetchMock = vi.fn(async (_path: string, _init: RequestInit) => Response.json({ attachment_id: 'ref-1' }, { status: 201 }))
     await expect(uploadConversationAttachment('c1', file('a.txt', new Uint8Array([65])), { fetch: fetchMock }, csrf))
       .rejects.toThrow(copy.invalidServerResponse)
   })
