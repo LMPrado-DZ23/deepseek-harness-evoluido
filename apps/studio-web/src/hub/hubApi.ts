@@ -5,7 +5,7 @@
  * becomes a typed error so the panel can say "you are offline" in words.
  */
 import pwa from '../i18n/pwa.pt-BR.json'
-import type { Approval, ApprovalAction, HubAction, HubOutcome, IntegrationKind, PolicyTier, Verification } from './presentation'
+import type { Approval, ApprovalAction, CatalogQuery, HubAction, HubOutcome, IntegrationHealth, IntegrationKind, PolicyTier, Verification } from './presentation'
 
 export const HUB_API_PREFIX = '/api/studio/hub'
 export const APPS_API_PREFIX = '/api/studio/apps'
@@ -18,6 +18,26 @@ export type Integration = {
   can_enable: boolean
   /** Server decision (D16): the confirmation the person has to give before this can be turned on, or `null`. */
   requires_approval_tier: PolicyTier | null
+  /**
+   * Saúde desta integração, derivada pelo servidor dos contadores que ele
+   * gravou. Pode não vir: um Studio mais antigo não a publica, e nesse caso a
+   * tela não afirma nada em vez de inventar um estado.
+   */
+  health?: IntegrationHealth
+}
+
+/**
+ * Uma página do catálogo, como o SERVIDOR a devolve.
+ *
+ * `total` e `matched` chegam separados porque uma lista vazia sozinha não diz
+ * se a pessoa procurou algo que não existe ou se ela ainda não registrou nada.
+ */
+export type IntegrationCatalog = {
+  channel: 'stable' | 'dev'
+  integrations: Integration[]
+  next_cursor: string | null
+  total: number
+  matched: number
 }
 export type SmtpState = { configured: boolean; secret_ref: string | null; tier: PolicyTier }
 /** What the server issued for one action: the panel shows what it says and, on confirmation, presents its id. */
@@ -74,7 +94,9 @@ export function createHubApi(transport: HubTransport = browserTransport) {
     smtp: () => hub<SmtpState>('/smtp'),
     configureSmtp: (secretRef: string, approval?: Approval) => hub<{ configured: true; secret_ref: string; tier: PolicyTier }>('/smtp', { method: 'POST', body: JSON.stringify({ secret_ref: secretRef, approval }) }),
     testSmtp: (to: string, approval?: Approval) => hub<SmtpTest>('/smtp/test', { method: 'POST', body: JSON.stringify({ to, approval }) }),
-    integrations: () => hub<{ channel: 'stable' | 'dev'; integrations: Integration[] }>('/integrations'),
+    // A busca, o filtro e o corte acontecem no SERVIDOR: esta chamada pede uma
+    // página. Receber tudo e filtrar na tela não é paginação, é fingir que é.
+    integrations: (query: CatalogQuery = {}) => hub<IntegrationCatalog>(`/integrations${catalogSearch(query)}`),
     register: (manifest: unknown) => hub<{ integration: Integration; reasons: string[] }>('/integrations', { method: 'POST', body: JSON.stringify(manifest) }),
     setEnabled: (integrationId: string, enabled: boolean, approval?: Approval) => hub<{ integration: Integration }>(`/integrations/${encodeURIComponent(integrationId)}/enabled`, { method: 'POST', body: JSON.stringify({ enabled, approval }) }).then(value => value.integration),
     exports: (projectId: string) => hub<{ exports: ExportRecord[] }>(`/projects/${encodeURIComponent(projectId)}/exports`).then(value => value.exports),
@@ -87,3 +109,23 @@ export function createHubApi(transport: HubTransport = browserTransport) {
 }
 
 export type HubApi = ReturnType<typeof createHubApi>
+
+/**
+ * A pergunta do catálogo virando barra de endereço.
+ *
+ * Um campo vazio é OMITIDO em vez de virar `q=`: mandar um filtro vazio faria o
+ * servidor responder à pergunta errada, e o cursor de uma busca antiga
+ * misturaria duas listas diferentes na mesma tela.
+ * @param query - busca, filtros, limite e posição.
+ * @returns a parte da consulta, com `?`, ou uma cadeia vazia.
+ */
+export function catalogSearch(query: CatalogQuery): string {
+  const params = new URLSearchParams()
+  if (query.search !== undefined && query.search.trim() !== '') params.set('q', query.search.trim())
+  if (query.kind !== undefined && query.kind !== 'all') params.set('kind', query.kind)
+  if (query.status !== undefined && query.status !== 'all') params.set('status', query.status)
+  if (query.limit !== undefined) params.set('limit', String(query.limit))
+  if (query.cursor !== undefined && query.cursor !== '') params.set('cursor', query.cursor)
+  const search = params.toString()
+  return search === '' ? '' : `?${search}`
+}

@@ -8,6 +8,9 @@ import { TenancyError, type StudioTenancyService } from '@dz23-studio/tenancy'
 import { z } from 'zod'
 import { t } from './i18n.js'
 import { ExportError } from './export.js'
+import { INTEGRATIONS_PAGE_MAX, SEARCH_MAX_LENGTH, type IntegrationQuery } from './catalog.js'
+import { integrationKindSchema, verificationSchema } from './model.js'
+import { integrationHealth } from './runtime.js'
 import { EVENTS_PAGE_MAX, HubError, strongIdentityFresh, type HubActor, type IntegrationHubService } from './service.js'
 
 const JSON_LIMIT = 64 * 1024
@@ -51,6 +54,22 @@ const approvalRequestSchema = z.object({
   payload: z.string().min(1).max(320).optional(),
 }).strict()
 const eventsPageSchema = z.object({ limit: z.coerce.number().int().positive().max(EVENTS_PAGE_MAX).optional(), cursor: z.string().min(1).max(512).optional() }).strict()
+/**
+ * A pergunta que o catálogo aceita (X-01): busca, filtros e posição.
+ *
+ * Cada filtro chega como uma lista separada por vírgula, e um valor que não é
+ * um tipo (ou uma verificação) conhecido é RECUSADO em vez de ignorado: um
+ * filtro silenciosamente descartado devolve uma lista maior do que a pedida e
+ * quem lê a tela acredita que aquilo é o resultado do filtro.
+ */
+const catalogQuerySchema = z.object({
+  q: z.string().max(SEARCH_MAX_LENGTH).optional(),
+  kind: z.string().max(120).optional(),
+  status: z.enum(['all', 'enabled', 'disabled']).optional(),
+  verification: z.string().max(120).optional(),
+  limit: z.coerce.number().int().positive().max(INTEGRATIONS_PAGE_MAX).optional(),
+  cursor: z.string().min(1).max(512).optional(),
+}).strict()
 const enabledSchema = z.object({ enabled: z.boolean(), approval: approvalSchema.optional() }).strict()
 const smtpSchema = z.object({ secret_ref: z.string(), approval: approvalSchema.optional() }).strict()
 const smtpTestSchema = z.object({ to: z.string(), approval: approvalSchema.optional() }).strict()
@@ -68,8 +87,20 @@ export function createHubHttpHandler(config: HubHttpConfig) {
       const { service } = config
 
       if (method === 'GET' && route === '/integrations') {
+        // A busca, o filtro e o corte acontecem AQUI: o cliente recebe uma
+        // página, nunca o escopo inteiro para filtrar na tela.
+        const page = service.searchIntegrations(actor, catalogQuery(url.searchParams))
         // `can_enable` is the server's decision (signature + channel) so the interface never guesses policy.
-        return json(response, 200, { channel: service.channel, integrations: service.list(actor).map(item => ({ ...item, can_enable: service.canEnable(item), requires_approval_tier: service.requiredApprovalTier(item) })) })
+        // `health` é derivada dos contadores gravados: nunca `OK` sem nunca ter sido chamada.
+        return json(response, 200, {
+          channel: service.channel,
+          integrations: page.integrations.map(item => ({ ...item, can_enable: service.canEnable(item), requires_approval_tier: service.requiredApprovalTier(item), health: integrationHealth(item) })),
+          next_cursor: page.next_cursor,
+          // Os dois totais separam "nada encontrado para o que você procurou" de
+          // "você ainda não tem integração": uma lista vazia sozinha não diz qual das duas é.
+          total: page.total,
+          matched: page.matched,
+        })
       }
       if (method === 'POST' && route === '/integrations') {
         const registered = await service.register(actor, await readJson(request))
@@ -141,6 +172,29 @@ export function createHubHttpHandler(config: HubHttpConfig) {
       json(response, statusOf(error), { error: publicMessage(error) })
     }
   }
+}
+
+/**
+ * A pergunta do catálogo, lida da barra de endereço.
+ *
+ * Uma lista vazia depois de separar por vírgula (`?kind=`) é "sem filtro", não
+ * "filtro que nada satisfaz" — senão limpar a caixa na tela devolveria zero
+ * resultados em vez do catálogo inteiro.
+ */
+export function catalogQuery(params: URLSearchParams): IntegrationQuery {
+  const raw = catalogQuerySchema.parse(Object.fromEntries(params))
+  return {
+    search: raw.q,
+    kinds: raw.kind === undefined ? undefined : z.array(integrationKindSchema).parse(splitList(raw.kind)),
+    status: raw.status,
+    verifications: raw.verification === undefined ? undefined : z.array(verificationSchema).parse(splitList(raw.verification)),
+    limit: raw.limit,
+    cursor: raw.cursor,
+  }
+}
+
+function splitList(value: string): string[] {
+  return value.split(',').map(item => item.trim()).filter(item => item !== '')
 }
 
 function asApproval(value: { approval_id: string } | undefined) {

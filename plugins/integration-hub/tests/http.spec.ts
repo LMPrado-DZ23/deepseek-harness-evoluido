@@ -153,6 +153,10 @@ async function getWithInjectedFailure(error: unknown, source: 'identity' | 'tena
   const service = {
     channel: 'stable',
     list: vi.fn(() => { if (source === 'service') throw error; return [] }),
+    // A rota do catálogo passou a perguntar por PÁGINA (X-01): o dublê precisa
+    // oferecer o mesmo ponto, senão a falha que este teste injeta nunca chega a
+    // ser lançada e o 500 medido seria o do dublê, não o do limite testado.
+    searchIntegrations: vi.fn(() => { if (source === 'service') throw error; return { integrations: [], next_cursor: null, total: 0, matched: 0 } }),
   }
   const server = createServer(createHubHttpHandler({
     service: service as unknown as IntegrationHubService,

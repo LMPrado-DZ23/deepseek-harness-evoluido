@@ -18,6 +18,8 @@ import { studioIntegrationsDomainSpec, type HubEvent, type HubKey, type StudioEx
 import { IntegrationHubService, securityFingerprint, smtpSecretShape, type EmailTestPort, type HubActor, type HubRepository, type SecretInspector } from './service.js'
 
 export * from './model.js'
+export * from './catalog.js'
+export * from './runtime.js'
 export * from './manifest.js'
 export * from './zip.js'
 export * from './export.js'

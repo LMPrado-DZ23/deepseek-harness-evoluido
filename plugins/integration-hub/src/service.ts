@@ -4,10 +4,15 @@ import { access, mkdir, open, unlink, type FileHandle } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { roleAllows, type PolicyTier, type StudioPermission, type StudioRole } from '@dz23-studio/policy'
 import { z } from 'zod'
+import { pageOfIntegrations, type IntegrationPage, type IntegrationQuery } from './catalog.js'
 import { ExportError, openChildDirectory, openDirectory, packagePrototype, referenceOf } from './export.js'
 import { t } from './i18n.js'
 import { canonicalJsonBytes, evaluateManifest, policyFloor, type PublisherKeys } from './manifest.js'
 import { secretRefSchema, type HubEvent, type StudioExport, type StudioIntegration } from './model.js'
+import {
+  DEFAULT_INTEGRATION_CALL_POLICY, IntegrationRateLimiter, integrationCostState, integrationHealth, mayRetry,
+  type IntegrationCallPolicy, type IntegrationCostState, type IntegrationHealth,
+} from './runtime.js'
 
 export interface HubActor {
   readonly userId: string
@@ -186,6 +191,12 @@ export interface HubServiceOptions {
   emailTest?: EmailTestPort | undefined
   /** Only for tests: how long a packaging slot may be held before the caller is refused (default `PACKAGING_SLOT_TIMEOUT_MS`). */
   packagingTimeoutMs?: number
+  /**
+   * Os limites de UMA chamada de integração (X-08). O que não vier aqui fica
+   * com `DEFAULT_INTEGRATION_CALL_POLICY`: um limite ausente vira o padrão da
+   * casa, nunca "sem limite".
+   */
+  callPolicy?: Partial<IntegrationCallPolicy>
   now?: () => Date
   createId?: () => string
 }
@@ -226,6 +237,8 @@ export class IntegrationHubService {
   readonly #integrationMutations = new Map<string, Promise<void>>()
 
   readonly #approvals = new Map<string, Map<string, HubApprovalTicket>>()
+  /** Janela de tentativas por integração e por escopo (X-08). Em memória: um reinício só zera o teto, e zerar um teto falha para o lado seguro. */
+  readonly #callLimiter: IntegrationRateLimiter
   /**
    * One package per workspace and project at a time: a page that clicks ten
    * times, or ten tabs of the same person, join the SAME build instead of
@@ -246,7 +259,13 @@ export class IntegrationHubService {
   constructor(private readonly options: HubServiceOptions) {
     this.#now = options.now ?? (() => new Date())
     this.#createId = options.createId ?? randomUUID
+    this.#callPolicy = { ...DEFAULT_INTEGRATION_CALL_POLICY, ...options.callPolicy }
+    this.#callLimiter = new IntegrationRateLimiter(this.#callPolicy)
   }
+
+  /** Os limites em vigor para uma chamada de integração neste Studio. */
+  readonly #callPolicy: IntegrationCallPolicy
+  get callPolicy(): IntegrationCallPolicy { return this.#callPolicy }
 
   #stamp(): string {
     const now = this.#now().getTime()
@@ -262,6 +281,41 @@ export class IntegrationHubService {
   list(actor: HubActor): readonly StudioIntegration[] {
     this.#authorize(actor, 'workspace.read')
     return this.options.repository.integrations(actor)
+  }
+
+  /**
+   * Uma página do catálogo deste escopo, já buscada, filtrada e ordenada AQUI
+   * (X-01).
+   *
+   * Quem chama recebe uma página e dois totais — quantas integrações existem no
+   * escopo e quantas o filtro deixou passar — porque uma lista vazia sozinha não
+   * diz se a pessoa procurou algo que não existe ou se ela ainda não registrou
+   * nada, e essas duas telas têm de ser diferentes.
+   * @param actor - quem pergunta; a leitura do espaço de trabalho é exigida aqui.
+   * @param query - busca, filtros, limite e posição.
+   * @returns a página e os totais.
+   */
+  searchIntegrations(actor: HubActor, query: IntegrationQuery = {}): IntegrationPage {
+    this.#authorize(actor, 'workspace.read')
+    try {
+      return pageOfIntegrations(this.options.repository.integrations(actor), query)
+    } catch (error) {
+      // Um cursor que não é legível é pedido inválido, não erro interno: ele
+      // veio do cliente, e a página que ele pediu não existe.
+      if (error instanceof RangeError) throw new HubError('INVALID', t('errors.invalidRequest'))
+      throw error
+    }
+  }
+
+  /**
+   * A saúde de uma integração, derivada dos contadores gravados.
+   * @param actor - quem pergunta.
+   * @param integrationId - a integração.
+   * @returns estado, números e o que se sabe do custo.
+   */
+  health(actor: HubActor, integrationId: string): IntegrationHealth {
+    this.#authorize(actor, 'workspace.read')
+    return integrationHealth(this.#integration(actor, integrationId))
   }
 
   /** Whether the interface may offer "enable" for this record: decided here, the same place that enforces it. */
@@ -483,6 +537,164 @@ export class IntegrationHubService {
       release()
       if (this.#integrationMutations.get(key) === current) this.#integrationMutations.delete(key)
     }
+  }
+
+  // ---- chamada de integração (X-08) ----------------------------------------
+
+  /**
+   * Executa UMA chamada de uma integração ligada, com tempo máximo, teto de
+   * chamadas, repetição única e auditoria.
+   *
+   * O que sai daqui é sempre um desfecho, nunca uma exceção do provedor: a
+   * mensagem de um provedor costuma trazer host, banner ou pedaço do segredo, e
+   * ela nunca chega a quem chamou nem à auditoria — só a CLASSE do erro. As
+   * recusas que acontecem ANTES de qualquer coisa sair pela rede (integração
+   * desconhecida, desligada, sem assinatura, teto atingido) continuam sendo
+   * `HubError`, porque nesses casos nada foi executado e dizer "falhou" seria
+   * outra afirmação.
+   * @param actor - quem aciona; escrever no projeto é o que se exige.
+   * @param integrationId - a integração ligada.
+   * @param request - o que está sendo feito, se repetir é seguro e quanto custa.
+   * @param invoke - a chamada de verdade; recebe o sinal de desistência do tempo máximo.
+   * @returns o desfecho, com quantas tentativas houve e o que se sabe do custo.
+   */
+  async callIntegration<T>(
+    actor: HubActor,
+    integrationId: string,
+    request: IntegrationCallRequest,
+    invoke: (signal: AbortSignal) => Promise<T>,
+  ): Promise<IntegrationCallResult<T>> {
+    this.#authorize(actor, 'project.write')
+    const record = this.#integration(actor, integrationId)
+    const operation = auditOperation(request.operation)
+    // Uma integração desligada, ou cuja assinatura não confere, não é chamada por
+    // ninguém — nem por um aplicativo gerado que ainda guarde o identificador de
+    // quando ela estava ligada. `not-executed` é o desfecho honesto: nada saiu.
+    if (!record.enabled || record.verification === 'invalid') {
+      await this.#audit(actor, 'integration.called', integrationId, 'not-executed', `${operation} disabled`)
+      throw new HubError('FORBIDDEN', t('errors.integrationNotEnabled'))
+    }
+    const key = `${this.#scope(actor)}\u0000${integrationId}`
+    const startedAt = this.#now().getTime()
+    this.#callLimiter.sweep(startedAt)
+    if (!this.#callLimiter.admit(key, startedAt)) {
+      await this.#audit(actor, 'integration.called', integrationId, 'not-executed', `${operation} rate-limited`)
+      throw new HubError('RATE_LIMITED', t('errors.integrationCallTooMany'))
+    }
+    let attempts = 0
+    let timeouts = 0
+    let retried = false
+    let outcome: { readonly state: 'OK'; readonly value: T } | { readonly state: 'FAILED' | 'TIMEOUT'; readonly failure: string }
+    for (;;) {
+      attempts += 1
+      outcome = await this.#attemptCall(invoke)
+      // Contado por TENTATIVA: duas tentativas que estouraram o tempo são dois
+      // estouros, e somar um só esconderia metade da espera que a pessoa pagou.
+      if (outcome.state === 'TIMEOUT') timeouts += 1
+      if (outcome.state === 'OK') break
+      if (!mayRetry(this.#callPolicy, request.idempotent, attempts)) break
+      // A repetição também sai pela rede: ela conta no teto como qualquer outra
+      // tentativa. Se o teto já não a admite, ela simplesmente não acontece —
+      // dobrar a carga em cima de um provedor que está falhando é o pior momento
+      // possível para gastar a cota de todo mundo.
+      if (!this.#callLimiter.admit(key, this.#now().getTime())) break
+      retried = true
+    }
+    const latencyMs = Math.max(0, this.#now().getTime() - startedAt)
+    const cost = await this.#recordCall(actor, integrationId, {
+      attempts, retried, latencyMs, timeouts, priceUsd: request.priceUsd,
+      failure: outcome.state === 'OK' ? undefined : outcome.failure,
+    })
+    await this.#audit(actor, 'integration.called', integrationId,
+      outcome.state === 'OK' ? 'success' : 'failure',
+      `${operation} ${outcome.state} attempts=${String(attempts)} cost=${cost}`)
+    if (outcome.state === 'OK') return { state: 'OK', value: outcome.value, attempts, retried, latencyMs, cost }
+    return {
+      state: outcome.state, attempts, retried, latencyMs, cost,
+      message: outcome.state === 'TIMEOUT' ? t('errors.integrationCallTimedOut') : t('errors.integrationCallFailed'),
+    }
+  }
+
+  /**
+   * UMA tentativa, presa ao tempo máximo.
+   *
+   * O tempo máximo ABANDONA a chamada, não a mata — o Studio pede desistência
+   * pelo sinal e para de esperar. Por isso a promessa perdedora recebe um
+   * `catch`: uma chamada abandonada que rejeita depois não pode derrubar o
+   * processo como rejeição sem dono.
+   */
+  async #attemptCall<T>(invoke: (signal: AbortSignal) => Promise<T>): Promise<{ readonly state: 'OK'; readonly value: T } | { readonly state: 'FAILED' | 'TIMEOUT'; readonly failure: string }> {
+    const abandon = new AbortController()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const running = (async () => invoke(abandon.signal))()
+    running.catch(() => undefined)
+    try {
+      const value = await Promise.race([
+        running,
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => {
+            abandon.abort()
+            reject(new HubError('TIMEOUT', t('errors.integrationCallTimedOut')))
+          }, this.#callPolicy.timeoutMs)
+          timer.unref?.()
+        }),
+      ])
+      return { state: 'OK', value }
+    } catch (error) {
+      if (error instanceof HubError && error.code === 'TIMEOUT') return { state: 'TIMEOUT', failure: 'timeout' }
+      // Só a CLASSE do erro sobrevive: a mensagem do provedor não entra no
+      // registro nem viaja de volta.
+      return { state: 'FAILED', failure: error instanceof Error ? error.name : 'Error' }
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  /**
+   * Soma esta chamada aos contadores da integração.
+   *
+   * Escreve por cima do registro MAIS RECENTE, dentro da mesma exclusão que o
+   * registro e o ligar/desligar usam: um contador gravado a partir de uma cópia
+   * antiga desfaria, calado, um `enable` ou um novo manifesto que chegou no
+   * meio da chamada.
+   *
+   * Sem preço informado, o custo NÃO soma zero: a chamada entra em
+   * `unpriced_calls`, e é isso que faz o estado do custo ser `PARTIAL` ou
+   * `UNKNOWN` em vez de um "custou zero" que ninguém mediu.
+   */
+  async #recordCall(actor: HubActor, integrationId: string, call: {
+    readonly attempts: number
+    readonly retried: boolean
+    readonly latencyMs: number
+    readonly timeouts: number
+    readonly priceUsd: number | undefined
+    readonly failure: string | undefined
+  }): Promise<IntegrationCostState> {
+    return this.#exclusiveIntegration(this.#scope(actor), async () => {
+      const latest = this.options.repository.integration(actor, integrationId)
+      // A integração deixou de existir durante a chamada: não há registro para
+      // somar. A auditoria acima continua sendo a prova de que ela aconteceu.
+      if (latest === undefined) return integrationCostState({ calls: call.attempts, unpriced_calls: call.priceUsd === undefined ? call.attempts : 0 })
+      const failed = call.failure !== undefined
+      const priced = call.priceUsd !== undefined && Number.isFinite(call.priceUsd)
+      const updated: StudioIntegration = {
+        ...latest,
+        calls: (latest.calls ?? 0) + call.attempts,
+        failures: (latest.failures ?? 0) + (failed ? call.attempts : call.attempts - 1),
+        // Zera no primeiro sucesso: uma integração que voltou a responder volta a
+        // ser `OK` sem esperar nada.
+        consecutive_failures: failed ? (latest.consecutive_failures ?? 0) + call.attempts : 0,
+        timeouts: (latest.timeouts ?? 0) + call.timeouts,
+        retries: (latest.retries ?? 0) + (call.retried ? 1 : 0),
+        total_latency_ms: (latest.total_latency_ms ?? 0) + call.latencyMs,
+        last_call_at: this.#stamp(),
+        last_failure: failed ? call.failure! : latest.last_failure ?? null,
+        cost_usd: (latest.cost_usd ?? 0) + (priced ? call.priceUsd! : 0),
+        unpriced_calls: (latest.unpriced_calls ?? 0) + (priced ? 0 : call.attempts),
+      }
+      await this.options.repository.putIntegration(updated)
+      return integrationCostState(updated)
+    })
   }
 
   // ---- smtp for generated apps ---------------------------------------------
@@ -993,6 +1205,46 @@ export class IntegrationHubService {
     if (this.options.repository.eventCount(actor) <= EVENTS_RETAINED_PER_TENANT) return
     await this.options.repository.pruneEvents(actor, EVENTS_RETAINED_PER_TENANT)
   }
+}
+
+/** O que está sendo chamado, para o teto, para a repetição e para a auditoria. Nunca o corpo da chamada. */
+export interface IntegrationCallRequest {
+  /** Nome curto e técnico da operação; é o que a auditoria guarda. */
+  readonly operation: string
+  /**
+   * Se repetir é o mesmo que fazer uma vez.
+   *
+   * Quem chama declara, e declara `false` na dúvida: repetir um envio, uma
+   * cobrança ou um aviso que já pode ter chegado do outro lado faz a coisa duas
+   * vezes, e daqui isso parece uma falha só.
+   */
+  readonly idempotent: boolean
+  /**
+   * Preço desta chamada, quando alguém sabe.
+   *
+   * Ausente significa custo DESCONHECIDO e nunca zero: a chamada é contada como
+   * não precificada, e é isso que faz o estado do custo ser `PARTIAL` ou
+   * `UNKNOWN` em vez de anunciar que não custou nada.
+   */
+  readonly priceUsd?: number | undefined
+}
+
+/** O desfecho de uma chamada: o que aconteceu, quantas tentativas custou e o que se sabe do custo. */
+export type IntegrationCallResult<T> =
+  | { readonly state: 'OK'; readonly value: T; readonly attempts: number; readonly retried: boolean; readonly latencyMs: number; readonly cost: IntegrationCostState }
+  | { readonly state: 'FAILED' | 'TIMEOUT'; readonly message: string; readonly attempts: number; readonly retried: boolean; readonly latencyMs: number; readonly cost: IntegrationCostState }
+
+/**
+ * O nome da operação como ele entra na auditoria: curto, sem espaço e sem
+ * caractere de controle.
+ *
+ * Ele vem de quem chama, e uma linha de auditoria com quebra de linha dentro
+ * deixa de ser uma linha — quem lê o histórico passa a ver duas, uma delas
+ * escrita por quem fez a chamada.
+ */
+export function auditOperation(operation: string): string {
+  const cleaned = operation.replace(/[^A-Za-z0-9._:-]+/gu, '-').replace(/^-+|-+$/gu, '').slice(0, 64)
+  return cleaned === '' ? 'call' : cleaned
 }
 
 /** T2 and T3 are the tiers D16 makes the person confirm; T0/T1 are allowed and recorded. */

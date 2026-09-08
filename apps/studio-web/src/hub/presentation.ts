@@ -113,6 +113,112 @@ export function formatDate(iso: string): string {
   return date.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
 }
 
+// ---- catálogo pesquisável e progressivo (X-01) ------------------------------
+
+/** Como o catálogo é filtrado na tela. `all` é a ausência de filtro, e é o padrão. */
+export type KindFilter = IntegrationKind | 'all'
+export type StatusFilter = 'all' | 'enabled' | 'disabled'
+
+/** A pergunta que a tela faz ao servidor. Nada disto é aplicado aqui: quem busca, filtra e corta é o servidor. */
+export type CatalogQuery = {
+  readonly search?: string
+  readonly kind?: KindFilter
+  readonly status?: StatusFilter
+  readonly limit?: number
+  readonly cursor?: string
+}
+
+/** Quantas integrações a tela pede por vez. O resto vem quando a pessoa pede mais. */
+export const CATALOG_PAGE_SIZE = 20
+
+/**
+ * Qual vazio é este.
+ *
+ * `catalog`: a pessoa ainda não registrou nenhuma integração.
+ * `search`: existem integrações, mas nenhuma responde ao que ela pediu.
+ * `none`: não está vazio.
+ *
+ * Uma lista vazia sozinha não distingue as duas primeiras, e a diferença é o que
+ * diz à pessoa se ela deve registrar algo ou apenas corrigir a busca.
+ */
+export type CatalogEmptyKind = 'none' | 'catalog' | 'search'
+
+export function catalogEmptyKind(page: { readonly total: number; readonly matched: number }): CatalogEmptyKind {
+  if (page.matched > 0) return 'none'
+  return page.total === 0 ? 'catalog' : 'search'
+}
+
+/**
+ * O que a tela escreve no lugar da lista, já com o termo que a pessoa digitou.
+ * @param page - os dois totais que o servidor mandou.
+ * @param search - o que foi buscado, para a frase citar de volta.
+ * @returns a frase, ou `null` quando há resultados.
+ */
+export function catalogEmptyMessage(page: { readonly total: number; readonly matched: number }, search: string): string | null {
+  const kind = catalogEmptyKind(page)
+  if (kind === 'none') return null
+  if (kind === 'catalog') return t.integrations.empty
+  const term = search.trim()
+  return term === '' ? t.integrations.noneMatchFilters : fill(t.integrations.noneFound, { search: term })
+}
+
+/** Quantas de quantas esta tela está mostrando; some quando não há nada a contar. */
+export function catalogCount(shown: number, page: { readonly total: number; readonly matched: number }): string | null {
+  if (page.matched === 0) return null
+  return fill(t.integrations.showing, { shown: String(shown), matched: String(page.matched), total: String(page.total) })
+}
+
+// ---- saúde por integração (X-08) --------------------------------------------
+
+export type IntegrationHealthState = 'OK' | 'DEGRADED' | 'DOWN' | 'NOT_EXECUTED'
+export type IntegrationCostState = 'MEASURED' | 'PARTIAL' | 'UNKNOWN'
+
+/** A saúde como o servidor a publica. Ele deriva tudo isto dos contadores que gravou. */
+export type IntegrationHealth = {
+  readonly state: IntegrationHealthState
+  readonly calls: number
+  readonly failures: number
+  readonly timeouts: number
+  readonly retries: number
+  readonly average_latency_ms: number | null
+  readonly last_call_at: string | null
+  readonly last_failure: string | null
+  readonly cost_state: IntegrationCostState
+  readonly cost_usd: number
+}
+
+/** O estado de saúde em palavras. `NOT_EXECUTED` tem frase própria: não é "tudo bem", é "ninguém chamou". */
+export function healthLabel(state: string): string {
+  return (t.integrations.health as Record<string, string>)[state] ?? state
+}
+
+/**
+ * O custo em palavras, e nunca um número sozinho.
+ *
+ * Sem preço conhecido a tela NÃO escreve "US$ 0,00": ela diz que o custo é
+ * desconhecido. Um zero ali seria lido como "essa integração é de graça", que é
+ * exatamente o que ninguém mediu.
+ * @param health - a saúde publicada pelo servidor.
+ * @returns a frase de custo.
+ */
+export function costLabel(health: Pick<IntegrationHealth, 'cost_state' | 'cost_usd'>): string {
+  if (health.cost_state === 'UNKNOWN') return t.integrations.cost.unknown
+  const value = formatUsd(health.cost_usd)
+  return health.cost_state === 'PARTIAL'
+    ? fill(t.integrations.cost.partial, { value })
+    : fill(t.integrations.cost.measured, { value })
+}
+
+export function formatUsd(value: number): string {
+  if (!Number.isFinite(value)) return formatUsd(0)
+  return value.toLocaleString('pt-BR', { style: 'currency', currency: 'USD' })
+}
+
+/** Quantas chamadas e quantas falharam, para quem quer o número por trás do estado. */
+export function healthCounts(health: Pick<IntegrationHealth, 'calls' | 'failures'>): string {
+  return fill(t.integrations.callCounts, { calls: String(health.calls), failures: String(health.failures) })
+}
+
 /** Only verified prototypes can be exported; the option list says so instead of hiding the project. */
 export function exportable(project: { state: string }): boolean {
   return project.state === 'VERIFIED_PROTOTYPE'

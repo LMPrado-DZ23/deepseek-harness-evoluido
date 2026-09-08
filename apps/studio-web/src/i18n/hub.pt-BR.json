@@ -52,7 +52,36 @@
     "register": "Registrar",
     "registered": "Integração registrada.",
     "reasons": "Observações da verificação",
-    "needsApproval": "Ligar esta integração precisa da sua confirmação ({tier})."
+    "needsApproval": "Ligar esta integração precisa da sua confirmação ({tier}).",
+    "searchLabel": "Buscar integração",
+    "searchPlaceholder": "Nome, publicador ou descrição",
+    "searchHelp": "A busca ignora acentos e maiúsculas, e acontece no servidor: a tela recebe uma página por vez.",
+    "search": "Buscar",
+    "clearFilters": "Limpar busca e filtros",
+    "kindLabel": "Tipo",
+    "statusLabel": "Situação",
+    "anyKind": "Todos os tipos",
+    "anyStatus": "Ligadas e desligadas",
+    "onlyEnabled": "Só as ligadas",
+    "onlyDisabled": "Só as desligadas",
+    "showing": "Mostrando {shown} de {matched} (o catálogo tem {total}).",
+    "loadMore": "Carregar mais",
+    "noneFound": "Nada encontrado para \u201c{search}\u201d. O catálogo continua com as suas integrações; troque o termo ou limpe os filtros.",
+    "noneMatchFilters": "Nenhuma integração passa pelos filtros escolhidos. O catálogo continua com as suas integrações; limpe os filtros para ver todas.",
+    "healthTitle": "Saúde",
+    "health": {
+      "OK": "Respondendo",
+      "DEGRADED": "Falhando às vezes",
+      "DOWN": "Fora do ar",
+      "NOT_EXECUTED": "Nunca chamada"
+    },
+    "callCounts": "{calls} chamada(s), {failures} com falha.",
+    "costTitle": "Custo",
+    "cost": {
+      "measured": "{value} (todas as chamadas tinham preço).",
+      "partial": "Pelo menos {value}: parte das chamadas não tinha preço informado.",
+      "unknown": "Desconhecido: nenhuma chamada contada tinha preço informado. Não é zero — ninguém mediu."
+    }
   },
   "exports": {
     "title": "Baixar o protótipo",

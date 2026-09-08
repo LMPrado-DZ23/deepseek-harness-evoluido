@@ -1,8 +1,8 @@
-import { ArrowLeft, Download, Mail, Plug, ScrollText } from 'lucide-react'
+import { ArrowLeft, Download, Mail, Plug, ScrollText, Search } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import t from '../i18n/hub.pt-BR.json'
-import { createHubApi, HubApiError, type ExportRecord, type HubApi, type HubEvent, type Integration, type ProjectSummary, type SmtpState } from './hubApi'
-import { actionLabel, approvalNote, approvalPrompt, confirmStep, enableExplanation, exportable, fill, formatBytes, formatDate, kindLabel, outcomeLabel, tierLabel, verificationLabel, type ConfirmStepModel } from './presentation'
+import { createHubApi, HubApiError, type ExportRecord, type HubApi, type HubEvent, type Integration, type IntegrationCatalog, type ProjectSummary, type SmtpState } from './hubApi'
+import { CATALOG_PAGE_SIZE, actionLabel, approvalNote, approvalPrompt, catalogCount, catalogEmptyMessage, confirmStep, costLabel, enableExplanation, exportable, fill, formatBytes, formatDate, healthCounts, healthLabel, kindLabel, outcomeLabel, tierLabel, verificationLabel, type ConfirmStepModel, type KindFilter, type StatusFilter } from './presentation'
 import './hub.css'
 
 type Notice = { kind: 'ok' | 'error' | 'info'; text: string } | null
@@ -35,8 +35,6 @@ function ConfirmStep({ pending, busy, onCancel, onConfirm }: { pending: Pending;
  */
 export function HubPanel({ api = defaultHubApi, homeHref = '/studio/' }: { api?: HubApi; homeHref?: string }) {
   const [smtp, setSmtp] = useState<SmtpState | null>(null)
-  const [integrations, setIntegrations] = useState<Integration[] | null>(null)
-  const [channel, setChannel] = useState<'stable' | 'dev'>('stable')
   const [projects, setProjects] = useState<ProjectSummary[] | null>(null)
   const [events, setEvents] = useState<HubEvent[] | null>(null)
   const [notice, setNotice] = useState<Notice>(null)
@@ -48,8 +46,10 @@ export function HubPanel({ api = defaultHubApi, homeHref = '/studio/' }: { api?:
 
   const refresh = useCallback(async () => {
     try {
-      const [smtpState, list, projectList, log] = await Promise.all([api.smtp(), api.integrations(), api.projects(), api.events()])
-      setSmtp(smtpState); setIntegrations(list.integrations); setChannel(list.channel); setProjects(projectList); setEvents(log)
+      // O catálogo NÃO é lido aqui: ele tem busca, filtro e página próprios, e
+      // recarregá-lo junto com o resto apagaria o que a pessoa acabou de pedir.
+      const [smtpState, projectList, log] = await Promise.all([api.smtp(), api.projects(), api.events()])
+      setSmtp(smtpState); setProjects(projectList); setEvents(log)
     } catch (error) { report(error) }
   }, [api, report])
 
@@ -63,7 +63,7 @@ export function HubPanel({ api = defaultHubApi, homeHref = '/studio/' }: { api?:
     {notice === null ? null : <p className={`hub-notice ${notice.kind}`} role={notice.kind === 'error' ? 'alert' : 'status'}>{notice.text}</p>}
     <main className="hub-grid">
       <SmtpSection api={api} state={smtp} onChange={async () => { setSmtp(await api.smtp()); setEvents(await api.events()) }} notify={setNotice} report={report} />
-      <IntegrationsSection api={api} integrations={integrations} channel={channel} onChange={async () => { const list = await api.integrations(); setIntegrations(list.integrations); setChannel(list.channel); setEvents(await api.events()) }} notify={setNotice} report={report} />
+      <IntegrationsSection api={api} onChange={async () => { setEvents(await api.events()) }} notify={setNotice} report={report} />
       <ExportsSection api={api} projects={projects} onChange={async () => { setEvents(await api.events()) }} notify={setNotice} report={report} />
       <EventsSection events={events} />
     </main>
@@ -135,13 +135,50 @@ function SmtpSection({ api, state, onChange, notify, report }: SectionProps & { 
   </section>
 }
 
-function IntegrationsSection({ api, integrations, channel, onChange, notify, report }: SectionProps & { integrations: Integration[] | null; channel: 'stable' | 'dev' }) {
+/**
+ * O catálogo (X-01) e a saúde de cada integração (X-08).
+ *
+ * Quem busca, filtra, ordena e corta é o SERVIDOR: esta tela manda a pergunta e
+ * recebe uma página. Receber tudo e filtrar aqui não seria paginação — seria
+ * fingir que é, e o custo cresceria junto com o catálogo de quem tem muitas.
+ */
+function IntegrationsSection({ api, onChange, notify, report }: SectionProps) {
   const [manifestText, setManifestText] = useState('')
   const [reasons, setReasons] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [pending, setPending] = useState<Pending>(null)
-  const visible = useMemo(() => (integrations ?? []).filter(value => value.kind !== 'smtp'), [integrations])
-  const run = async (task: () => Promise<void>) => { setBusy(true); notify(null); try { await task(); await onChange() } catch (error) { report(error) } finally { setBusy(false) } }
+  // O que está NA CAIXA e o que já foi PERGUNTADO são coisas diferentes: a
+  // busca só vai ao servidor quando a pessoa pede, e a lista abaixo continua
+  // sendo o resultado da pergunta anterior até lá.
+  const [draft, setDraft] = useState('')
+  const [query, setQuery] = useState<{ search: string; kind: KindFilter; status: StatusFilter }>({ search: '', kind: 'all', status: 'all' })
+  const [rows, setRows] = useState<Integration[] | null>(null)
+  const [page, setPage] = useState<IntegrationCatalog | null>(null)
+  const [loadingMore, setLoadingMore] = useState(false)
+
+  const load = useCallback(async (next: { search: string; kind: KindFilter; status: StatusFilter }) => {
+    const answer = await api.integrations({ ...next, limit: CATALOG_PAGE_SIZE })
+    setRows(answer.integrations)
+    setPage(answer)
+  }, [api])
+
+  useEffect(() => { load(query).catch(report) }, [load, query, report])
+
+  const more = async () => {
+    const cursor = page?.next_cursor
+    if (cursor === undefined || cursor === null || loadingMore) return
+    setLoadingMore(true)
+    try {
+      const answer = await api.integrations({ ...query, limit: CATALOG_PAGE_SIZE, cursor })
+      // Acrescenta à lista que já está na tela: "carregar mais" continua de onde
+      // parou, e não troca o que a pessoa estava lendo por outra página.
+      setRows(current => [...(current ?? []), ...answer.integrations])
+      setPage(answer)
+    } catch (error) { report(error) } finally { setLoadingMore(false) }
+  }
+
+  const refreshCatalog = async () => { await load(query); await onChange() }
+  const run = async (task: () => Promise<void>) => { setBusy(true); notify(null); try { await task(); await refreshCatalog() } catch (error) { report(error) } finally { setBusy(false) } }
   const ask = (input: Omit<Parameters<typeof confirmStep>[0], 'requestApproval'>) => {
     // One confirmation at a time. The box is built from the level the server already published for
     // this row; the decision itself is only asked for if the person agrees.
@@ -173,20 +210,33 @@ function IntegrationsSection({ api, integrations, channel, onChange, notify, rep
   return <section className="hub-card" aria-labelledby="hub-integrations-title">
     <div className="hub-card-heading"><Plug aria-hidden="true" /><h2 id="hub-integrations-title">{t.integrations.title}</h2></div>
     <p className="hub-help">{t.integrations.help}</p>
-    {channel === 'dev' ? <p className="hub-state hub-channel" data-testid="hub-channel">{t.integrations.devChannel}</p> : null}
-    {integrations === null ? <p>{t.loading}</p> : visible.length === 0 ? <p className="hub-empty">{t.integrations.empty}</p> : <ul className="hub-list" data-testid="integration-list">
-      {visible.map(item => <li key={item.integration_id} data-testid="integration-item">
-        <div><strong>{item.name}</strong><span className="hub-meta">{kindLabel(item.kind)}</span></div>
-        <div className="hub-tags"><span className={`hub-tag ${item.verification}`}>{verificationLabel(item.verification)}</span><span className="hub-tag">{tierLabel(item.effective_tier)}</span><span className={`hub-tag ${item.enabled ? 'on' : 'off'}`}>{item.enabled ? t.integrations.enabled : t.integrations.disabled}</span></div>
-        {item.enabled
-          ? <button type="button" className="secondary" disabled={busy} onClick={() => void run(() => api.setEnabled(item.integration_id, false).then(() => undefined))}>{t.integrations.disable}</button>
-          : <>
-            {enableExplanation(item) === null ? null : <p className="hub-why" id={`why-${item.integration_id}`}>{enableExplanation(item)}</p>}
-            {enableExplanation(item) !== null || approvalNote(item) === null ? null : <p className="hub-why" data-testid="approval-note">{approvalNote(item)}</p>}
-            <button type="button" className="primary" disabled={busy || !item.can_enable} aria-describedby={enableExplanation(item) === null ? undefined : `why-${item.integration_id}`} onClick={() => enable(item)}>{t.integrations.enable}</button>
-          </>}
-      </li>)}
-    </ul>}
+    {page?.channel === 'dev' ? <p className="hub-state hub-channel" data-testid="hub-channel">{t.integrations.devChannel}</p> : null}
+    <form className="hub-search" role="search" onSubmit={event => { event.preventDefault(); setQuery(current => ({ ...current, search: draft })) }}>
+      <label htmlFor="hub-search">{t.integrations.searchLabel}</label>
+      <input id="hub-search" type="search" value={draft} onChange={event => setDraft(event.target.value)} placeholder={t.integrations.searchPlaceholder} aria-describedby="hub-search-help" autoComplete="off" />
+      <p className="hub-help" id="hub-search-help">{t.integrations.searchHelp}</p>
+      <label htmlFor="hub-filter-kind">{t.integrations.kindLabel}</label>
+      <select id="hub-filter-kind" value={query.kind} onChange={event => setQuery(current => ({ ...current, kind: event.target.value as KindFilter }))}>
+        <option value="all">{t.integrations.anyKind}</option>
+        <option value="skill">{kindLabel('skill')}</option>
+        <option value="mcp">{kindLabel('mcp')}</option>
+        <option value="webhook">{kindLabel('webhook')}</option>
+      </select>
+      <label htmlFor="hub-filter-status">{t.integrations.statusLabel}</label>
+      <select id="hub-filter-status" value={query.status} onChange={event => setQuery(current => ({ ...current, status: event.target.value as StatusFilter }))}>
+        <option value="all">{t.integrations.anyStatus}</option>
+        <option value="enabled">{t.integrations.onlyEnabled}</option>
+        <option value="disabled">{t.integrations.onlyDisabled}</option>
+      </select>
+      <button type="submit" className="secondary"><Search aria-hidden="true" />{t.integrations.search}</button>
+      <button type="button" className="secondary" onClick={() => { setDraft(''); setQuery({ search: '', kind: 'all', status: 'all' }) }}>{t.integrations.clearFilters}</button>
+    </form>
+    <IntegrationCatalogList
+      rows={rows} page={page} search={query.search} busy={busy} loadingMore={loadingMore}
+      onEnable={enable}
+      onDisable={item => void run(() => api.setEnabled(item.integration_id, false).then(() => undefined))}
+      onMore={() => void more()}
+    />
     <details className="hub-advanced">
       <summary>{t.integrations.registerTitle}</summary>
       <p className="hub-help">{t.integrations.registerHelp}</p>
@@ -204,6 +254,69 @@ function IntegrationsSection({ api, integrations, channel, onChange, notify, rep
     </details>
     <ConfirmStep pending={pending} busy={busy} onCancel={() => setPending(null)} onConfirm={confirm} />
   </section>
+}
+
+export interface IntegrationCatalogListProps {
+  readonly rows: Integration[] | null
+  readonly page: Pick<IntegrationCatalog, 'total' | 'matched' | 'next_cursor'> | null
+  /** O termo que produziu esta lista, para o vazio poder citá-lo de volta. */
+  readonly search: string
+  readonly busy: boolean
+  readonly loadingMore: boolean
+  onEnable(item: Integration): void
+  onDisable(item: Integration): void
+  onMore(): void
+}
+
+/**
+ * A parte visível do catálogo, pura.
+ *
+ * Separada para que o vazio, a contagem, a saúde e o "carregar mais" sejam
+ * prováveis sem depender de quando a leitura assíncrona termina — é aí que
+ * defeitos de rótulo e de estado vazio passam despercebidos.
+ */
+export function IntegrationCatalogList({ rows, page, search, busy, loadingMore, onEnable, onDisable, onMore }: IntegrationCatalogListProps) {
+  // Terceiro estado, antes da primeira resposta: afirmar "você não tem nenhuma"
+  // sem ter lido nada seria mentir sobre o que a pessoa registrou.
+  if (rows === null || page === null) return <p>{t.loading}</p>
+  const empty = catalogEmptyMessage(page, search)
+  if (empty !== null) return <p className="hub-empty" data-testid="catalog-empty">{empty}</p>
+  const count = catalogCount(rows.length, page)
+  return <>
+    {count === null ? null : <p className="hub-state" data-testid="catalog-count" role="status">{count}</p>}
+    <ul className="hub-list" data-testid="integration-list">
+      {rows.map(item => <li key={item.integration_id} data-testid="integration-item">
+        <div><strong>{item.name}</strong><span className="hub-meta">{kindLabel(item.kind)}</span></div>
+        <div className="hub-tags"><span className={`hub-tag ${item.verification}`}>{verificationLabel(item.verification)}</span><span className="hub-tag">{tierLabel(item.effective_tier)}</span><span className={`hub-tag ${item.enabled ? 'on' : 'off'}`}>{item.enabled ? t.integrations.enabled : t.integrations.disabled}</span></div>
+        <IntegrationHealthFacts health={item.health} />
+        {item.enabled
+          ? <button type="button" className="secondary" disabled={busy} onClick={() => onDisable(item)}>{t.integrations.disable}</button>
+          : <>
+            {enableExplanation(item) === null ? null : <p className="hub-why" id={`why-${item.integration_id}`}>{enableExplanation(item)}</p>}
+            {enableExplanation(item) !== null || approvalNote(item) === null ? null : <p className="hub-why" data-testid="approval-note">{approvalNote(item)}</p>}
+            <button type="button" className="primary" disabled={busy || !item.can_enable} aria-describedby={enableExplanation(item) === null ? undefined : `why-${item.integration_id}`} onClick={() => onEnable(item)}>{t.integrations.enable}</button>
+          </>}
+      </li>)}
+    </ul>
+    {page.next_cursor === null ? null : <button type="button" className="secondary" data-testid="catalog-more" disabled={loadingMore} onClick={onMore}>{t.integrations.loadMore}</button>}
+  </>
+}
+
+/**
+ * A saúde de uma integração em palavras.
+ *
+ * Um Studio que ainda não publica saúde não vira "OK" aqui: sem o dado a tela
+ * não escreve nada, porque afirmar que está tudo bem sem ter medido é
+ * exatamente a mentira que este bloco existe para não contar.
+ */
+function IntegrationHealthFacts({ health }: { health: Integration['health'] }) {
+  if (health === undefined) return null
+  return <dl className="hub-facts" data-testid="integration-health">
+    <dt>{t.integrations.healthTitle}</dt>
+    <dd><span className={`hub-tag health-${health.state}`}>{healthLabel(health.state)}</span> {healthCounts(health)}</dd>
+    <dt>{t.integrations.costTitle}</dt>
+    <dd>{costLabel(health)}</dd>
+  </dl>
 }
 
 function ExportsSection({ api, projects, onChange, notify, report }: SectionProps & { projects: ProjectSummary[] | null }) {

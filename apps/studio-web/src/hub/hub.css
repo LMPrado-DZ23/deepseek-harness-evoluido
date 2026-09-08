@@ -55,3 +55,11 @@
   gap: 0.5rem;
 }
 .hub-confirm p { margin: 0; }
+
+.hub-search{display:grid;gap:8px;margin:8px 0 16px}
+.hub-search .hub-help{margin:0}
+.hub-search button{width:100%;margin:0}
+.hub-tag.health-OK{background:#e8f7ee;color:#0b6b35}
+.hub-tag.health-DEGRADED{background:#fff4e0;color:#8a5a00}
+.hub-tag.health-DOWN{background:#fdecec;color:#9c1c1c}
+.hub-tag.health-NOT_EXECUTED{background:#eef3fb;color:#1f2a5a}
