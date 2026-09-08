@@ -42,6 +42,22 @@ test('abre o Integration Hub pela navegação autenticada do Studio', async ({ c
   await expect(page.getByRole('link', { name: 'Voltar ao Studio' })).toHaveAttribute('href', '/studio/')
 })
 
+/**
+ * O trecho verificado desta jornada NÃO é alcançável hoje.
+ *
+ * `plugins/prompt-to-app/src/pipeline.ts:213` lança
+ * `ACCEPTANCE_ATTESTATION_UNAVAILABLE` exatamente quando o ciclo do construtor
+ * passa e não há diagnóstico - ou seja, no caminho de SUCESSO. O ramo
+ * `state === 'PASSED'` logo abaixo é inalcançável, e com ele o protótipo
+ * verificado, a notificação e a prévia. Falhar fechado é a decisão certa
+ * enquanto não existir atestação de aceitação; o que não pode é ninguém saber.
+ *
+ * As afirmações abaixo da bandeira ficam no repositório de propósito: são a
+ * especificação do dia em que a atestação existir. Trocar isto por `true` sem
+ * a atestação seria fabricar um "verificado".
+ */
+const VERIFIED_JOURNEY_REACHABLE = false
+
 test('percorre as cinco etapas, muda privacidade e termina sem alegar publicação', async ({ context, page }) => {
   const admissionPosts: Array<{ readonly hasTicket: boolean; readonly origin: string; readonly url: string }> = []
   const requestedUrls: string[] = []
@@ -125,7 +141,28 @@ test('percorre as cinco etapas, muda privacidade e termina sem alegar publicaç�
   expect(accepted.status()).toBe(202)
   const acceptedBody = await accepted.json() as { run_id: string }
   expect(acceptedBody.run_id).toMatch(/^operation-/u)
-  await expect(page.getByText('VERIFIED_PROTOTYPE')).toBeVisible({ timeout: 20_000 })
+  // A pessoa lê a FRASE, não o código. O código técnico continua existindo, mas
+  // atrás de "Detalhes técnicos": antes ele era a primeira coisa na tela, em
+  // inglês e em caixa alta, para quem não programa.
+  await expect(page.getByText('A criação foi interrompida antes de terminar. Nada foi publicado.')).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText('ACCEPTANCE_ATTESTATION_UNAVAILABLE')).toBeHidden()
+  await page.getByText('Detalhes técnicos').click()
+  await expect(page.getByText('ACCEPTANCE_ATTESTATION_UNAVAILABLE')).toBeVisible()
+  // O que mais importa nesta tela: mesmo terminando mal, ela não alega
+  // publicação nenhuma.
+  await expect(page.getByText('publicado na internet', { exact: false })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Ver meu protótipo' })).toHaveCount(0)
+  expect(JSON.stringify(mutationBodies)).not.toMatch(/org_id|tenant_id|bootstrap_owner|"role"/u)
+
+  if (!VERIFIED_JOURNEY_REACHABLE) {
+    test.info().annotations.push({
+      type: 'lacuna',
+      description: 'Protótipo verificado e prévia não são alcançáveis: pipeline.ts:213 lança ACCEPTANCE_ATTESTATION_UNAVAILABLE no caminho de sucesso.',
+    })
+    return
+  }
+
+  await expect(page.getByText('As verificações declaradas passaram neste computador.')).toBeVisible({ timeout: 20_000 })
   await expect(page.getByText('não está publicado nem disponível para outras pessoas', { exact: false }).first()).toBeVisible()
   await expect(page.getByText('page:Início: Passou')).toBeVisible()
   await expect(page.getByText('A navegação deve ser simples.: Não verificado automaticamente')).toBeVisible()

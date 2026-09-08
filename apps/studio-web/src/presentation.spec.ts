@@ -1,6 +1,7 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import t from './i18n/pt-BR.json'
-import { currentStepIndex, permanentTruthKind, privacyNotice, type ProjectUiState } from './presentation'
+import { currentStepIndex, permanentTruthKind, privacyNotice, resultSentence, type ProjectUiState } from './presentation'
 
 describe('truthful presentation for nontechnical users', () => {
   it('maps the real machine states to the five visible stages', () => {
@@ -28,5 +29,46 @@ describe('truthful presentation for nontechnical users', () => {
     expect(privacyNotice('any', 'openrouter', t.privacy)).toContain('openrouter')
     expect(privacyNotice('any', null, t.privacy)).toBe(t.privacy.routeUnavailable)
     expect(privacyNotice('local-only', 'openrouter', t.privacy)).not.toContain('openrouter')
+  })
+})
+
+describe('C-09: o código do estado não é a explicação', () => {
+  const messages = {
+    success: 'As verificações declaradas passaram neste computador.',
+    failure: 'A criação parou porque uma verificação encontrou um problema.',
+    cancelled: 'A criação foi cancelada.',
+    interrupted: 'A criação foi interrompida antes de terminar. Nada foi publicado.',
+    blockedExternal: 'A criação parou porque falta algo fora do Studio.',
+  }
+
+  it('toda saída da criação tem frase em português', () => {
+    // A tela mostrava `VERIFIED_PROTOTYPE` e `BUILD_FAILED` crus, em inglês e
+    // em caixa alta, para quem não programa.
+    const states = ['VERIFIED_PROTOTYPE', 'BUILD_FAILED', 'TESTS_FAILED', 'BLOCKED_EXTERNAL', 'CANCELLED', 'INTERRUPTED'] as const
+    for (const state of states) {
+      const sentence = resultSentence(state, messages)
+      expect(sentence, state).not.toBe(state)
+      expect(sentence, state).not.toMatch(/[A-Z]{4,}_/u)
+    }
+  })
+
+  it('distingue o que a pessoa pode resolver do que ela não pode', () => {
+    // "Falta algo fora do Studio" e "uma verificação encontrou um problema"
+    // pedem ações diferentes; a mesma frase para os dois seria inútil.
+    expect(resultSentence('BLOCKED_EXTERNAL', messages)).toBe(messages.blockedExternal)
+    expect(resultSentence('BUILD_FAILED', messages)).toBe(messages.failure)
+    expect(resultSentence('TESTS_FAILED', messages)).toBe(messages.failure)
+    expect(resultSentence('CANCELLED', messages)).toBe(messages.cancelled)
+    expect(resultSentence('INTERRUPTED', messages)).toBe(messages.interrupted)
+    expect(resultSentence('VERIFIED_PROTOTYPE', messages)).toBe(messages.success)
+  })
+
+  it('o código técnico continua existindo, atrás de "Detalhes técnicos"', () => {
+    // Ele é o que se cola num pedido de ajuda. Some da explicação, não do app.
+    const source = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8')
+    expect(source).toContain('result-technical')
+    expect(source).toContain('{t.verification.technicalTitle}')
+    // E não pode voltar a ser a primeira coisa que a pessoa lê.
+    expect(source).not.toContain('<code>{result.state}</code><p>{result.message}</p>')
   })
 })

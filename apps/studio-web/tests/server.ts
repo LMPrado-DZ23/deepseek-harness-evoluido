@@ -1,7 +1,7 @@
 import type { JobId, JobOutcome } from '@deepseek-ai/dsh-jobs'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createIdentityHttpHandler, CSRF_COOKIE, IdentityError, SESSION_COOKIE, type SessionRecord, type StudioIdentityService } from '../../../plugins/identity/src/index.js'
@@ -16,7 +16,7 @@ import { ModelCodeGenerator, PromptToAppPipeline } from '../../../plugins/prompt
 import type { BuilderLifecycleResolverPort } from '../../../plugins/prompt-to-app/src/builder-lifecycle.js'
 import { PlannerEngine } from '../../../plugins/prompt-to-app/src/planner.js'
 import type { PromptModelPort } from '../../../plugins/prompt-to-app/src/ports.js'
-import { hashTree, PREVIEW_ARTIFACT_RELATIVE_PATH } from '../../../plugins/prompt-to-app/src/runner.js'
+import { hashTree, materializePreviewArtifact, PREVIEW_ARTIFACT_RELATIVE_PATH } from '../../../plugins/prompt-to-app/src/runner.js'
 import { PromptToAppService, type PromptToAppActor, type PromptToAppRepository } from '../../../plugins/prompt-to-app/src/service.js'
 import { createPreviewGatewayHttpHandler, type PreviewForwardPort } from '../../../plugins/preview/src/gateway.js'
 import { createPreviewProjectHttpExtension } from '../../../plugins/preview/src/http.js'
@@ -142,9 +142,63 @@ const model: PromptModelPort = {
     ] } }
   },
 }
-const unsupported = async (): Promise<never> => { throw new Error('UNSUPPORTED_INGRESS') }
+/**
+ * Construtor determinístico do teste de navegador.
+ *
+ * Ele NÃO substitui o construtor real por mock: o Docker é a costura, e esta é
+ * uma implementação dela em processo, para que o teste possa provar o que ele
+ * existe para provar - a INTERFACE das cinco etapas. Sem isto, o construtor da
+ * casa de teste respondia BLOCKED_EXTERNAL para sempre e a jornada principal
+ * nunca chegava ao fim; ela estava vermelha desde 575ccc0 e ninguém via, porque
+ * o Playwright não roda na CI.
+ */
+const prepared = new Map<string, string>()
 const builder: BuilderLifecycleResolverPort<PromptToAppActor> = {
-  forActor: async () => ({ preflight: async () => ({ state: 'BLOCKED_EXTERNAL' }), prepare: unsupported, execute: unsupported, cancel: unsupported, finish: unsupported, listManaged: async () => [] }),
+  forActor: async () => ({
+    preflight: async () => ({ state: 'OK' }),
+    prepare: async (sourceDirectory: string, buildId: string) => {
+      const buildRef = `fixture-build-${buildId}`
+      prepared.set(buildRef, sourceDirectory)
+      return { buildRef }
+    },
+    execute: async (buildRef: string, step: 'install' | 'build' | 'test' | 'e2e') => {
+      const directory = prepared.get(buildRef)
+      if (directory === undefined) throw new Error('UNKNOWN_BUILD_REF')
+      if (step === 'build') {
+        await mkdir(resolve(directory, '.next', 'standalone'), { recursive: true })
+        await mkdir(resolve(directory, '.next', 'static'), { recursive: true })
+        await writeFile(resolve(directory, '.next', 'standalone', 'server.js'), "import http from 'node:http';http.createServer((_,res)=>res.end('fixture')).listen(3000)")
+        await writeFile(resolve(directory, '.next', 'static', 'fixture.js'), 'export {}')
+      }
+      if (step === 'e2e') {
+        // Só os critérios que o gerador marcou como PENDING viram PASSED: os que
+        // ele declarou como não automatizáveis continuam assim, e a tela mostra
+        // "Não verificado automaticamente" - que é a verdade.
+        const path = resolve(directory, 'evidence', 'appspec-report.json')
+        const report = JSON.parse(await readFile(path, 'utf8')) as { checks: Array<{ status: string }> }
+        report.checks = report.checks.map(check => check.status === 'PENDING' ? { ...check, status: 'PASSED' } : check)
+        await writeFile(path, JSON.stringify(report))
+      }
+      const state = step === 'build' ? 'BUILD_OK' : step === 'e2e' ? 'E2E_OK' : 'RUNNING'
+      return {
+        state: state as never, step,
+        result: { exit_code: 0, stdout: step, stderr: '', timed_out: false, termination_reason: null, output_limit_exceeded: false },
+      }
+    },
+    cancel: async (buildRef: string) => { prepared.delete(buildRef) },
+    finish: async (buildRef: string) => {
+      const directory = prepared.get(buildRef)
+      if (directory === undefined) return { finalState: 'CANCELLED' as const, exported: null, cleanupPending: false, cleaned: true }
+      prepared.delete(buildRef)
+      const artifact = await materializePreviewArtifact(directory)
+      return {
+        finalState: 'E2E_OK' as const,
+        exported: { relative_path: PREVIEW_ARTIFACT_RELATIVE_PATH, sha256: artifact.sha256, files: 2, bytes: 0 },
+        cleanupPending: false, cleaned: true,
+      }
+    },
+    listManaged: async () => [],
+  }),
 }
 const pipeline = new PromptToAppPipeline({ service, builder, templateDirectory: resolve(root, 'templates', 'nextjs-app@1'), runsRoot: resolve(scratch, 'runs'), createId: () => `pipeline-${++id}` })
 const active = new Map<JobId, { cancel(reason?: string): void; done: Promise<JobOutcome> }>()

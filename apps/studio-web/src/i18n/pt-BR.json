@@ -48,7 +48,7 @@
     "interrupted": "A criação foi interrompida antes de terminar. Nada foi publicado.",
     "attempts": "Tentativas realizadas", "checks": "Critérios conferidos", "passed": "Passou", "failed": "Falhou",
     "pending": "Em conferência", "notAutomated": "Não verificado automaticamente",
-    "testCodes": "Códigos usados na verificação", "testCodesHelp": "Estes códigos locais já foram usados pelos testes automáticos. Quando o preview existir, novos códigos de teste aparecerão somente aqui."
+    "testCodes": "Códigos usados na verificação", "testCodesHelp": "Estes códigos locais já foram usados pelos testes automáticos. Quando o preview existir, novos códigos de teste aparecerão somente aqui.", "blockedExternal": "A criação parou porque falta algo fora do Studio — normalmente um serviço que ainda não está disponível neste computador.", "technicalTitle": "Detalhes técnicos", "technicalCode": "Código do estado", "technicalFailure": "Código da falha"
   },
   "preview": {
     "title": "Seu protótipo local",

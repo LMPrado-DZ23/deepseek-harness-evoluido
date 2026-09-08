@@ -158,6 +158,16 @@ jobs:
         working-directory: apps/studio-web
         run: pnpm exec vitest run
 
+      - name: Studio browser suite
+        # O Playwright NUNCA rodou aqui, e por isso duas provas de navegador
+        # ficaram vermelhas em silêncio: a jornada principal desde 575ccc0 e a
+        # rotação de cookie da prévia. Um teste de navegador que ninguém executa
+        # não é prova de nada.
+        working-directory: apps/studio-web
+        run: |
+          pnpm exec playwright install --with-deps chromium
+          pnpm exec playwright test
+
       - name: Unit and contract suite
         # One worker is intentional: this suite exercises subprocesses, PTYs,
         # large archive ceilings and filesystem races in the same job.
