@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import t from './i18n/pt-BR.json'
-import { currentStepIndex, permanentTruthKind, privacyNotice, resultSentence, type ProjectUiState } from './presentation'
+import { currentStepIndex, permanentTruthKind, privacyNotice, resultSentence, routeReasonNotice, type ProjectUiState } from './presentation'
 
 describe('truthful presentation for nontechnical users', () => {
   it('maps the real machine states to the five visible stages', () => {
@@ -70,5 +70,29 @@ describe('C-09: o código do estado não é a explicação', () => {
     expect(source).toContain('{t.verification.technicalTitle}')
     // E não pode voltar a ser a primeira coisa que a pessoa lê.
     expect(source).not.toContain('<code>{result.state}</code><p>{result.message}</p>')
+  })
+})
+
+describe('M-04: por que esta rota', () => {
+  it('explica a escolha quando existe rota externa, e cala quando não há o que explicar', () => {
+    // O motivo era calculado a cada escolha e jogado fora: nenhuma tela lia o
+    // endereço de saúde, e a pessoa via o NOME da rota sem saber se era a local
+    // por preferência, a direta por falta de rota saudável, ou a que ela mesma
+    // escolheu.
+    expect(routeReasonNotice('any', 'Primeira rota saudável do perfil.')).toBe('Primeira rota saudável do perfil.')
+    // No perfil local a frase de privacidade já diz tudo; repetir o motivo
+    // técnico ao lado dela só acrescenta ruído para quem não programa.
+    expect(routeReasonNotice('local-only', 'Modelo local saudável preferido para leitura segura.')).toBe(null)
+    // Sem rota não há escolha a explicar: existe um bloqueio, e quem conta isso
+    // é a frase de privacidade.
+    expect(routeReasonNotice('any', null)).toBe(null)
+    expect(routeReasonNotice('any', undefined)).toBe(null)
+    expect(routeReasonNotice('any', '   ')).toBe(null)
+  })
+
+  it('a tela mostra o motivo junto da frase de privacidade', () => {
+    const source = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8')
+    expect(source).toContain('routeReasonNotice(props.privacy, props.routeReason)')
+    expect(source).toContain('health.route_reason')
   })
 })

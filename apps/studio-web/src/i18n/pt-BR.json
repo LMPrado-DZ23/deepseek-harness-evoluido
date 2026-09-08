@@ -67,7 +67,7 @@
     "localNotice": "Seus dados não são enviados para serviços externos. Tudo fica no seu computador.",
     "routeNoticeStart": "Sua ideia e suas respostas serão enviadas para o serviço de IA configurado:",
     "routeNoticeEnd": "Seus arquivos não saem do computador.",
-    "routeUnavailable": "Nenhum serviço externo de IA está configurado. A criação ficará bloqueada até você escolher uma opção disponível."
+    "routeUnavailable": "Nenhum serviço externo de IA está configurado. A criação ficará bloqueada até você escolher uma opção disponível.", "routeReason": "Por que esta rota:"
   },
   "progress": {
     "title": "Seu projeto em andamento", "idea": "Ideia", "ideaDetail": "Entendemos o que você precisa.",

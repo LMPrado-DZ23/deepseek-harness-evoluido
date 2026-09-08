@@ -53,6 +53,16 @@ export function registerPromptToAppHttpExtension(extension: PromptToAppHttpExten
 export interface StudioAppsHealth {
   readonly state: 'OK' | 'ATTENTION'
   readonly route: string | null
+  /**
+   * POR QUE esta rota, em uma frase.
+   *
+   * O motivo era calculado a cada escolha e jogado fora: nenhuma tela lia o
+   * endereço de saúde, e a pessoa via o NOME da rota sem nunca saber se era a
+   * local por preferência, a direta por falta de rota saudável, ou a que ela
+   * mesma escolheu. `null` quando não há rota, e aí a frase de privacidade é
+   * que explica.
+   */
+  readonly route_reason: string | null
   readonly builder: 'OK' | 'BLOCKED_EXTERNAL'
   readonly disk: 'OK' | 'ATTENTION'
 }

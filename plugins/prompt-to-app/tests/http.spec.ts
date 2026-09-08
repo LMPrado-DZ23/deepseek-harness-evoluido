@@ -76,7 +76,7 @@ async function fixture() {
       size_bytes: 100, width: 10, height: 10, extracted_primary: { h: 217, s: 91, l: 50 },
     })) },
     generatorFor: () => ({ generate: vi.fn() }),
-    health: vi.fn(() => Promise.resolve({ state: 'OK', route: 'ollama', builder: 'OK', disk: 'OK' } as const)),
+    health: vi.fn(() => Promise.resolve({ state: 'OK', route: 'ollama', route_reason: 'Modelo local saudável preferido para leitura segura.', builder: 'OK', disk: 'OK' } as const)),
     allowedHosts, allowedOrigins,
   }))
   servers.push(server)
@@ -99,7 +99,10 @@ describe('prompt-to-app HTTP boundary', () => {
 
   it('serves real health and creates a scoped project without accepting scope fields', async () => {
     const f = await fixture()
-    expect(await (await f.request('/health')).json()).toEqual({ state: 'OK', route: 'ollama', builder: 'OK', disk: 'OK' })
+    // O motivo viaja junto: sem ele a pessoa via o NOME da rota e nunca o porquê.
+    expect(await (await f.request('/health')).json()).toEqual({
+      state: 'OK', route: 'ollama', route_reason: 'Modelo local saudável preferido para leitura segura.', builder: 'OK', disk: 'OK',
+    })
     const created = await f.request('/projects', { method: 'POST', body: JSON.stringify({
       name: 'Meu site', original_brief: 'Quero apresentar meu trabalho.', category: 'landing-page', privacy: 'local-only',
     }) })

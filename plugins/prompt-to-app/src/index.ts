@@ -181,14 +181,18 @@ export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}):
   ctx.jobs.attachController('dz23-studio-prompt-to-app')
   const intake = new IntakeEngine(model); const planner = new PlannerEngine(model)
   const healthFor = async (scope: { readonly orgId: string; readonly tenantId: string }): Promise<StudioAppsHealth> => {
-    const routes = ctx.studioRouteHealth.service.list(scope)
-    const route = routes.find(candidate => candidate.state === 'OK')?.route ?? null
+    // `chooseRoute` é a MESMA decisão que a geração toma, e ela devolve o
+    // motivo. Reimplementar aqui um "primeira saudável" ao lado dela era como o
+    // motivo se perdia: a tela mostrava um nome de rota que podia nem ser a
+    // escolhida, e nunca o porquê.
+    const selected = await ctx.studioRouteHealth.service.chooseRoute(scope, 'plan', { privacy: 'any' })
+    const route = selected.route ?? null
     const [builderHealth, disk] = await Promise.all([
       builder.forActor({ userId: 'studio-health', orgId: scope.orgId, tenantId: scope.tenantId, role: 'owner' }).then(session => session.preflight()).catch(() => ({ state: 'BLOCKED_EXTERNAL' as const })),
       diskState(runsRoot),
     ])
     const state = route !== null && builderHealth.state === 'OK' && disk === 'OK' ? 'OK' : 'ATTENTION'
-    return { state, route, builder: builderHealth.state, disk }
+    return { state, route, route_reason: route === null ? null : selected.reason, builder: builderHealth.state, disk }
   }
   const health = () => healthFor({ orgId: 'studio-system', tenantId: 'studio-system' })
   ctx.provide('studioPromptToApp', { service, pipeline, health })

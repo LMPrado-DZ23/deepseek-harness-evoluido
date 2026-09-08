@@ -62,3 +62,23 @@ export function resultSentence(state: PipelineResultState, messages: ResultMessa
   if (state === 'BLOCKED_EXTERNAL') return messages.blockedExternal
   return messages.failure
 }
+
+/**
+ * A frase que explica a escolha da rota, ou `null` quando não há o que
+ * explicar.
+ *
+ * No perfil local a frase de privacidade já diz tudo, e repetir o motivo
+ * técnico ao lado dela só acrescenta ruído para quem não programa. Sem rota,
+ * também não há escolha a explicar - o que existe é um bloqueio, e quem conta
+ * isso é `privacyNotice`.
+ * @param mode - o perfil de privacidade escolhido.
+ * @param reason - o motivo que o servidor calculou.
+ * @returns a frase, ou `null`.
+ */
+export function routeReasonNotice(
+  mode: 'local-only' | 'any',
+  reason: string | null | undefined,
+): string | null {
+  if (mode === 'local-only') return null
+  return typeof reason === 'string' && reason.trim() !== '' ? reason.trim() : null
+}
