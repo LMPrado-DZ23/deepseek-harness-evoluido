@@ -215,7 +215,15 @@ try {
       filteredToolUnavailable: true,
     },
     policy: { requiredTier: accepted.requiredTier, scopedPreapproval: true, inheritedIdentity: true },
-    budgets: { timeoutMs: 30_000, maxFiles: 1, maxDiffBytes: 16_384, tokenLimitMeasurable: false },
+    // A-07: o teto por tokens só é uma promessa quando alguém MEDE. Este campo
+    // sai do registro da execução, e não de um literal: enquanto ele disser
+    // `false`, o `maxTokens` do orçamento não tem como estourar e a promessa de
+    // orçamento por token é da boca para fora.
+    budgets: {
+      timeoutMs: 30_000, maxFiles: 1, maxDiffBytes: 16_384,
+      tokenLimitMeasurable: typeof record?.tokens_used === 'number',
+      tokensUsed: record?.tokens_used ?? null,
+    },
     realProviders,
   }
   process.stdout.write(`${JSON.stringify(proof, null, 2)}\n`)

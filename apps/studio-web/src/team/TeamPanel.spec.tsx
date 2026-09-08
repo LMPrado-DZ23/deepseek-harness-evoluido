@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import copy from '../i18n/team.pt-BR.json'
 import { ConversationRequestError } from '../assistant/conversationApi'
-import { TaskRow, TeamCards, TeamView, formatMoment, label, orderedTasks } from './TeamPanel'
+import { TaskRow, TeamCards, TeamCostBlock, TeamView, formatMoment, label, orderedTasks } from './TeamPanel'
 import type { TeamPanel as TeamPanelData, TeamTask } from './teamApi'
 
 const TEAM = '11111111-2222-4333-8444-555555555555'
@@ -12,7 +12,8 @@ function task(overrides: Partial<TeamTask> = {}): TeamTask {
   return {
     task_id: 'implementar', title: 'Implementar o formulário', role: 'implementer', status: 'RUNNING',
     depends_on: [], intended_paths: ['src/form.tsx'], blocked: false, diagnostic: null,
-    evidence: { state: 'NOT_EXECUTED' }, updated_at: '2026-09-08T00:00:00.000Z', ...overrides,
+    evidence: { state: 'NOT_EXECUTED' }, cost: { state: 'NOT_MEASURED' },
+    updated_at: '2026-09-08T00:00:00.000Z', ...overrides,
   }
 }
 
@@ -130,6 +131,40 @@ describe('a tela', () => {
     }))
     expect(html).toContain(`href="/studio/progresso/${TEAM}"`)
     expect(html).toContain(copy.status.RUNNING)
+  })
+})
+
+describe('o consumo na tela', () => {
+  const block = (cost: Parameters<typeof TeamCostBlock>[0]['cost']) =>
+    renderToStaticMarkup(createElement(TeamCostBlock, { cost }))
+
+  it('sem medida, a tela mostra o MOTIVO e nenhum número', () => {
+    const html = block({ state: 'NOT_MEASURED', reason: 'Nenhuma etapa trouxe medida de consumo.' })
+    expect(html).toContain('Nenhuma etapa trouxe medida')
+    expect(html).not.toMatch(/\b0\b/u)
+  })
+
+  it('medida completa mostra o número e quantas etapas entraram', () => {
+    const html = block({ state: 'MEASURED', tokens: 12345, measured: 3 })
+    expect(html).toContain('12.345')
+    expect(html).toContain('3 etapa')
+  })
+
+  it('medida PARCIAL avisa que o número é MENOR que o real', () => {
+    // Sem este aviso, a pessoa lê uma soma pela metade como se fosse o total,
+    // e uma equipe com agente externo parece mais barata do que foi.
+    const html = block({ state: 'PARTIAL', tokens: 100, measured: 1, total: 3, reason: 'motivo' })
+    expect(html).toContain('role="alert"')
+    expect(html).toContain('MENOR')
+    expect(html).toContain('1 de 3')
+  })
+
+  it('a etapa diz o consumo dela, ou diz que não foi medido', () => {
+    expect(renderToStaticMarkup(createElement(TaskRow, {
+      task: task({ cost: { state: 'MEASURED', tokens: 4200 } }), depth: 0,
+    }))).toContain('4.200 tokens')
+    expect(renderToStaticMarkup(createElement(TaskRow, { task: task(), depth: 0 })))
+      .toContain(copy.costTaskNotMeasured)
   })
 })
 

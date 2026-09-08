@@ -386,12 +386,12 @@ export class StudioAgentService {
                 const reason = pathViolation ? t('delegation.pathOutsideApproved')
                     : tokenExceeded ? 'limite de tokens excedido'
                         : diff.files.length > maxFiles ? 'limite de arquivos excedido' : 'limite de bytes do diff excedido';
-                return await this.#finish(runId, request, snapshot, coordinator, lease, 'BUDGET_EXCEEDED', reason, now, diff, outsideChanged);
+                return await this.#finish(runId, request, snapshot, coordinator, lease, 'BUDGET_EXCEEDED', reason, now, diff, outsideChanged, measuredTokens);
             }
             const diagnostic = outsideChanged
                 ? t('delegation.projectChangedDuringRun')
                 : terminalText(result);
-            return await this.#finish(runId, request, snapshot, coordinator, lease, 'PROPOSED', diagnostic, now, diff, outsideChanged);
+            return await this.#finish(runId, request, snapshot, coordinator, lease, 'PROPOSED', diagnostic, now, diff, outsideChanged, measuredTokens);
         }
         catch (error) {
             if (snapshot === undefined || coordinator === undefined) {
@@ -410,7 +410,7 @@ export class StudioAgentService {
             await coordinator?.dispose().catch(() => undefined);
         }
     }
-    async #finish(runId, request, snapshot, coordinator, lease, status, diagnostic, now, diff = { text: '', bytes: 0, files: [] }, mainChangedDuringRun = false) {
+    async #finish(runId, request, snapshot, coordinator, lease, status, diagnostic, now, diff = { text: '', bytes: 0, files: [] }, mainChangedDuringRun = false, tokensUsed = undefined) {
         const updatedAt = now().toISOString();
         await this.dependencies.repository.putRun({
             run_id: runId, org_id: request.orgId, tenant_id: request.tenantId,
@@ -420,6 +420,9 @@ export class StudioAgentService {
             status, changed_files: [...diff.files], diff_bytes: diff.bytes,
             diff_sha256: createHash('sha256').update(diff.text).digest('hex'), diagnostic,
             main_changed_during_run: mainChangedDuringRun,
+            // `null` quando não houve medição. O campo existe SEMPRE para que a
+            // ausência de medida seja visível, em vez de virar um campo que sumiu.
+            tokens_used: tokensUsed ?? null,
             approved_by: request.approval.approvedBy,
             approved_at: this.dependencies.repository.runs().find(record => record.run_id === runId)?.approved_at ?? updatedAt,
             created_at: this.dependencies.repository.runs().find(record => record.run_id === runId)?.created_at ?? updatedAt,

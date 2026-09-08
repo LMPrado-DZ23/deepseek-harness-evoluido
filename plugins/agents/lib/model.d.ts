@@ -43,6 +43,7 @@ export declare const agentRunSchema: z.ZodObject<{
     approved_by: z.ZodString;
     approved_at: z.ZodISODateTime;
     diagnostic: z.ZodNullable<z.ZodString>;
+    tokens_used: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
     created_at: z.ZodISODateTime;
     updated_at: z.ZodISODateTime;
 }, z.core.$strict>;
@@ -97,6 +98,7 @@ export declare const studioAgentRunsDomainSpec: {
             diagnostic: string | null;
             created_at: string;
             updated_at: string;
+            tokens_used?: number | null | undefined;
         }>;
     };
 };

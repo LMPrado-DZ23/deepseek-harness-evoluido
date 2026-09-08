@@ -462,6 +462,25 @@ describe('StudioAgentService PoC 3A', () => {
     tokens.service.start(request({ budget: { maxTokens: 100 } }))
     await tokens.jobs.entries[0]!.done
     expect(tokens.repository.runs()[0]?.diagnostic).toBe('limite de tokens excedido')
+    // O consumo medido fica GRAVADO na execução, e não só serve para comparar
+    // com o teto: sem isso o painel não teria de onde mostrar quanto custou.
+    expect(tokens.repository.runs()[0]?.tokens_used).toBe(101)
+  })
+
+  it('o consumo medido é gravado, e a ausência de medida é `null` e nunca zero', async () => {
+    const measured = harness({ usage: 42 })
+    measured.service.start(request())
+    await measured.jobs.entries[0]!.done
+    expect(measured.repository.runs()[0]).toMatchObject({ status: 'PROPOSED', tokens_used: 42 })
+
+    // Sem porta de medição - um provedor externo, que roda em outro programa -
+    // o campo é `null`. Um `0` afirmaria que a execução não consumiu nada, e o
+    // teto por tokens deixaria de estourar por falta de medição em vez de por
+    // estar dentro do combinado.
+    const unmeasured = harness()
+    unmeasured.service.start(request({ budget: { maxTokens: 1 } }))
+    await expect(unmeasured.jobs.entries[0]!.done).resolves.toMatchObject({ status: 'completed' })
+    expect(unmeasured.repository.runs()[0]).toMatchObject({ status: 'PROPOSED', tokens_used: null })
   })
 
   it('records child failure, process loss, user cancellation and timeout honestly', async () => {

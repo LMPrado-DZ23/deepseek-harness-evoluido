@@ -9,6 +9,7 @@ import {
   stopTeam,
   teamIdFromPath,
   type TeamCard,
+  type TeamCost as TeamCostData,
   type TeamPanel as TeamPanelData,
   type TeamTask,
 } from './teamApi'
@@ -221,9 +222,10 @@ export function TeamDetail({ panel, stopping, reason, onReason, onStop }: TeamVi
 
     <section aria-labelledby="team-cost-title">
       <h3 id="team-cost-title">{copy.costTitle}</h3>
-      {/* O custo é dito como está: NÃO MEDIDO. Um "R$ 0,00" aqui seria a
-          mentira mais cara desta tela. */}
-      <p className="team-cost">{panel.cost.reason}</p>
+      {/* O consumo é dito como está. Um total completo saído de uma soma pela
+          metade seria a mentira mais cara desta tela, então o caso PARCIAL diz,
+          com todas as letras, que o número é MENOR que o real. */}
+      <TeamCostBlock cost={panel.cost} />
     </section>
 
     <section aria-labelledby="team-tasks-title">
@@ -251,6 +253,23 @@ export function TeamDetail({ panel, stopping, reason, onReason, onStop }: TeamVi
   </article>
 }
 
+/** O consumo da equipe: medido, parcial, ou dito como não medido. */
+export function TeamCostBlock({ cost }: { readonly cost: TeamCostData }) {
+  if (cost.state === 'NOT_MEASURED') return <p className="team-cost">{cost.reason}</p>
+  if (cost.state === 'MEASURED') {
+    return <p className="team-cost">{copy.costMeasured
+      .replace('{tokens}', cost.tokens.toLocaleString('pt-BR'))
+      .replace('{measured}', String(cost.measured))}</p>
+  }
+  return <>
+    <p className="team-cost team-cost-partial" role="alert">{copy.costPartial
+      .replace('{tokens}', cost.tokens.toLocaleString('pt-BR'))
+      .replace('{measured}', String(cost.measured))
+      .replace('{total}', String(cost.total))}</p>
+    <p className="team-cost">{cost.reason}</p>
+  </>
+}
+
 /** Uma etapa, com o recuo que mostra de quem ela depende. */
 export function TaskRow({ task, depth }: { readonly task: TeamTask, readonly depth: number }) {
   const icon = task.blocked
@@ -265,6 +284,9 @@ export function TaskRow({ task, depth }: { readonly task: TeamTask, readonly dep
     <p className="team-task-meta">
       <span className={`team-status team-status-${task.status.toLowerCase()}`}>{label(copy.taskStatus, task.status)}</span>
       <span className="team-task-role">{label(copy.role, task.role)}</span>
+      <span className="team-task-cost">{task.cost.state === 'MEASURED'
+        ? copy.costTaskMeasured.replace('{tokens}', task.cost.tokens.toLocaleString('pt-BR'))
+        : copy.costTaskNotMeasured}</span>
     </p>
     <p className="team-task-depends">
       {task.depends_on.length === 0

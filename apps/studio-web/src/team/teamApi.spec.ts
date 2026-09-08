@@ -12,7 +12,8 @@ function task(overrides: Record<string, unknown> = {}) {
   return {
     task_id: 'implementar', title: 'Implementar', role: 'implementer', status: 'RUNNING',
     depends_on: [], intended_paths: ['src/a.ts'], blocked: false, diagnostic: null,
-    evidence: { state: 'NOT_EXECUTED' }, updated_at: '2026-09-08T00:00:00.000Z', ...overrides,
+    evidence: { state: 'NOT_EXECUTED' }, cost: { state: 'NOT_MEASURED' },
+    updated_at: '2026-09-08T00:00:00.000Z', ...overrides,
   }
 }
 
@@ -75,6 +76,27 @@ describe('o que a tela aceita desenhar', () => {
     expect(isTeamPanel(panel({ cost: undefined }))).toBe(false)
     expect(isTeamPanel(panel({ cost: { state: 'MEASURED', reason: 'x' } }))).toBe(false)
     expect(isTeamPanel(panel({ cost: { state: 'NOT_MEASURED', reason: '' } }))).toBe(false)
+  })
+
+  it('custo de equipe malformado é recusado', () => {
+    for (const cost of [
+      undefined, null, { state: 'NOT_MEASURED' }, { state: 'NOT_MEASURED', reason: '' },
+      { state: 'MEASURED' }, { state: 'MEASURED', tokens: -1, measured: 1 },
+      { state: 'MEASURED', tokens: 1.5, measured: 1 },
+      // PARCIAL sem os dois números seria "parcial" sem tamanho: a tela
+      // mostraria uma soma pela metade como se fosse o total.
+      { state: 'PARTIAL', tokens: 1, reason: 'x' },
+      { state: 'PARTIAL', tokens: 1, measured: 1, total: 2 },
+    ]) expect(isTeamPanel(panel({ cost })), JSON.stringify(cost)).toBe(false)
+    expect(isTeamPanel(panel({ cost: { state: 'MEASURED', tokens: 0, measured: 0 } }))).toBe(true)
+    expect(isTeamPanel(panel({ cost: { state: 'PARTIAL', tokens: 1, measured: 1, total: 2, reason: 'x' } }))).toBe(true)
+  })
+
+  it('custo de etapa malformado descarta a etapa', () => {
+    for (const cost of [undefined, { state: 'PARTIAL', tokens: 1 }, { state: 'MEASURED' }, { state: 'MEASURED', tokens: -1 }]) {
+      expect(isTeamTask(task({ cost })), JSON.stringify(cost)).toBe(false)
+    }
+    expect(isTeamTask(task({ cost: { state: 'MEASURED', tokens: 0 } }))).toBe(true)
   })
 
   it('painel com uma etapa quebrada é recusado INTEIRO', () => {

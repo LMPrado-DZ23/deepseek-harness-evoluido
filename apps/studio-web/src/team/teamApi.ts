@@ -26,6 +26,15 @@ export type TaskEvidence =
     readonly main_changed_during_run: boolean
   }
 
+export type TaskCost =
+  | { readonly state: 'NOT_MEASURED' }
+  | { readonly state: 'MEASURED', readonly tokens: number }
+
+export type TeamCost =
+  | { readonly state: 'NOT_MEASURED', readonly reason: string }
+  | { readonly state: 'PARTIAL', readonly tokens: number, readonly measured: number, readonly total: number, readonly reason: string }
+  | { readonly state: 'MEASURED', readonly tokens: number, readonly measured: number }
+
 export interface TeamTask {
   readonly task_id: string
   readonly title: string
@@ -36,6 +45,7 @@ export interface TeamTask {
   readonly blocked: boolean
   readonly diagnostic: string | null
   readonly evidence: TaskEvidence
+  readonly cost: TaskCost
   readonly updated_at: string
 }
 
@@ -48,7 +58,7 @@ export interface TeamPanel extends TeamCard {
   readonly diagnostic: string | null
   readonly created_at: string
   readonly tasks: readonly TeamTask[]
-  readonly cost: { readonly state: 'NOT_MEASURED', readonly reason: string }
+  readonly cost: TeamCost
 }
 
 /** Um cartão só é desenhado quando é inteiro: meia linha aqui vira trabalho fantasma. */
@@ -59,6 +69,38 @@ export function isTeamCard(value: unknown): value is TeamCard {
     && typeof row.name === 'string' && row.name !== ''
     && typeof row.status === 'string' && row.status !== ''
     && typeof row.updated_at === 'string' && row.updated_at !== ''
+}
+
+/**
+ * O custo de uma etapa. Um número medido tem de ser um inteiro não negativo:
+ * qualquer outra coisa é lida como ausência de medida, e não desenhada.
+ * @param value - o campo devolvido pelo servidor.
+ * @returns se é um custo de etapa que a tela pode desenhar.
+ */
+function isTaskCost(value: unknown): value is TaskCost {
+  if (typeof value !== 'object' || value === null) return false
+  const row = value as Record<string, unknown>
+  if (row.state === 'NOT_MEASURED') return true
+  return row.state === 'MEASURED' && typeof row.tokens === 'number' && Number.isInteger(row.tokens) && row.tokens >= 0
+}
+
+/**
+ * O custo da equipe.
+ *
+ * `PARTIAL` obriga a trazer quantas etapas entraram na soma E quantas
+ * executaram: sem os dois números, "parcial" seria uma palavra sem tamanho e a
+ * tela mostraria uma soma pela metade como se fosse o total.
+ * @param value - o campo devolvido pelo servidor.
+ * @returns se é um custo de equipe que a tela pode desenhar.
+ */
+function isTeamCost(value: unknown): value is TeamCost {
+  if (typeof value !== 'object' || value === null) return false
+  const row = value as Record<string, unknown>
+  const whole = (candidate: unknown): boolean => typeof candidate === 'number' && Number.isInteger(candidate) && candidate >= 0
+  if (row.state === 'NOT_MEASURED') return typeof row.reason === 'string' && row.reason !== ''
+  if (row.state === 'MEASURED') return whole(row.tokens) && whole(row.measured)
+  return row.state === 'PARTIAL' && whole(row.tokens) && whole(row.measured) && whole(row.total)
+    && typeof row.reason === 'string' && row.reason !== ''
 }
 
 function isEvidence(value: unknown): value is TaskEvidence {
@@ -86,6 +128,7 @@ export function isTeamTask(value: unknown): value is TeamTask {
     && typeof row.blocked === 'boolean'
     && (row.diagnostic === null || typeof row.diagnostic === 'string')
     && isEvidence(row.evidence)
+    && isTaskCost(row.cost)
     && typeof row.updated_at === 'string' && row.updated_at !== ''
 }
 
@@ -102,7 +145,6 @@ export function isTeamTask(value: unknown): value is TeamTask {
 export function isTeamPanel(value: unknown): value is TeamPanel {
   if (!isTeamCard(value)) return false
   const row = value as unknown as Record<string, unknown>
-  const cost = row.cost as Record<string, unknown> | undefined
   return typeof row.workspace_id === 'string' && row.workspace_id !== ''
     && typeof row.required_tier === 'string' && row.required_tier !== ''
     && (row.sensitive_operation === null || typeof row.sensitive_operation === 'string')
@@ -111,8 +153,7 @@ export function isTeamPanel(value: unknown): value is TeamPanel {
     && (row.diagnostic === null || typeof row.diagnostic === 'string')
     && typeof row.created_at === 'string'
     && Array.isArray(row.tasks) && row.tasks.every(isTeamTask)
-    && typeof cost === 'object' && cost !== null
-    && cost.state === 'NOT_MEASURED' && typeof cost.reason === 'string' && cost.reason !== ''
+    && isTeamCost(row.cost)
 }
 
 const defaultPort: ConversationPort = { fetch: (input, init) => fetch(input, init) }

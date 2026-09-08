@@ -101,6 +101,7 @@ export interface TeamPanelRunsSource {
     readonly diff_sha256: string
     readonly base_commit: string
     readonly main_changed_during_run: boolean
+    readonly tokens_used?: number | null
   }[]
 }
 
@@ -129,6 +130,10 @@ export type TaskEvidenceView =
     readonly main_changed_during_run: boolean
   }
 
+export type TaskCostView =
+  | { readonly state: 'NOT_MEASURED' }
+  | { readonly state: 'MEASURED', readonly tokens: number }
+
 export interface TaskPanelView {
   readonly task_id: string
   readonly title: string
@@ -139,6 +144,7 @@ export interface TaskPanelView {
   readonly blocked: boolean
   readonly diagnostic: string | null
   readonly evidence: TaskEvidenceView
+  readonly cost: TaskCostView
   readonly updated_at: string
 }
 
@@ -149,6 +155,19 @@ export interface TeamCardView {
   readonly updated_at: string
 }
 
+/**
+ * O custo, dito como ele está.
+ *
+ * `MEASURED` só quando TODA etapa que rodou trouxe medida. Somar as que
+ * trouxeram e mostrar o total seria o pior desfecho: a pessoa leria um número
+ * completo de uma soma pela metade, e uma equipe com um agente externo (que
+ * não publica consumo) pareceria mais barata do que foi.
+ */
+export type TeamCostView =
+  | { readonly state: 'NOT_MEASURED', readonly reason: string }
+  | { readonly state: 'PARTIAL', readonly tokens: number, readonly measured: number, readonly total: number, readonly reason: string }
+  | { readonly state: 'MEASURED', readonly tokens: number, readonly measured: number }
+
 export interface TeamPanelView extends TeamCardView {
   readonly workspace_id: string
   readonly required_tier: string
@@ -158,14 +177,7 @@ export interface TeamPanelView extends TeamCardView {
   readonly diagnostic: string | null
   readonly created_at: string
   readonly tasks: readonly TaskPanelView[]
-  /**
-   * O custo, dito como ele está: NÃO MEDIDO.
-   *
-   * O Studio não contabiliza consumo por etapa (o requisito A-07 registra
-   * isso). Mostrar `0` seria o pior desfecho possível — a pessoa leria "esta
-   * equipe não custou nada" de um número que ninguém mediu.
-   */
-  readonly cost: { readonly state: 'NOT_MEASURED', readonly reason: string }
+  readonly cost: TeamCostView
 }
 
 export class TeamPanelError extends Error {
@@ -194,8 +206,7 @@ const BLOCKING_STATUSES = new Set(['FAILED', 'CANCELLED', 'BUDGET_EXCEEDED', 'RE
  * @returns o que houver de medido, e `NOT_EXECUTED` quando não houver.
  */
 export function taskEvidence(runId: string | null, runs: TeamPanelRunsSource | undefined): TaskEvidenceView {
-  if (runId === null || runs === undefined) return { state: 'NOT_EXECUTED' }
-  const run = runs.runs().find(candidate => candidate.run_id === runId)
+  const run = findRun(runId, runs)
   if (run === undefined) return { state: 'NOT_EXECUTED' }
   return {
     state: 'MEASURED',
@@ -205,6 +216,49 @@ export function taskEvidence(runId: string | null, runs: TeamPanelRunsSource | u
     base_commit: run.base_commit,
     main_changed_during_run: run.main_changed_during_run,
   }
+}
+
+/** A execução de uma etapa, quando ela existe no runtime. */
+function findRun(runId: string | null, runs: TeamPanelRunsSource | undefined) {
+  if (runId === null || runs === undefined) return undefined
+  return runs.runs().find(candidate => candidate.run_id === runId)
+}
+
+/**
+ * O consumo de UMA etapa.
+ *
+ * `NOT_MEASURED` cobre três coisas diferentes que a tela trata igual porque
+ * para quem olha elas são a mesma: a etapa não rodou, o provedor é externo e
+ * não publica consumo, ou a execução é anterior a este campo existir. Nenhuma
+ * delas é zero.
+ * @param runId - a execução da etapa.
+ * @param runs - runtime de agentes.
+ * @returns o consumo medido, ou a ausência dele.
+ */
+export function taskCost(runId: string | null, runs: TeamPanelRunsSource | undefined): TaskCostView {
+  const tokens = findRun(runId, runs)?.tokens_used
+  return typeof tokens === 'number' ? { state: 'MEASURED', tokens } : { state: 'NOT_MEASURED' }
+}
+
+/**
+ * O consumo da equipe inteira.
+ *
+ * Só uma etapa que RODOU deve consumo. Uma etapa em fila não entra na conta de
+ * "quantas faltam medir" — ela ainda não tem o que medir, e contá-la faria o
+ * total parecer permanentemente incompleto.
+ * @param tasks - as etapas já projetadas.
+ * @param reason - a frase que explica a ausência de medida.
+ * @returns o custo da equipe.
+ */
+export function teamCost(tasks: readonly TaskPanelView[], reason: string): TeamCostView {
+  const executed = tasks.filter(task => task.evidence.state === 'MEASURED')
+  const measured = executed.filter(task => task.cost.state === 'MEASURED')
+  if (executed.length === 0 || measured.length === 0) return { state: 'NOT_MEASURED', reason }
+  const tokens = measured.reduce((total, task) => total + (task.cost.state === 'MEASURED' ? task.cost.tokens : 0), 0)
+  if (measured.length < executed.length) {
+    return { state: 'PARTIAL', tokens, measured: measured.length, total: executed.length, reason }
+  }
+  return { state: 'MEASURED', tokens, measured: measured.length }
 }
 
 /**
@@ -224,6 +278,19 @@ export function teamPanelView(
   tasks: readonly TaskRecordShape[],
   runs: TeamPanelRunsSource | undefined,
 ): TeamPanelView {
+  const projected = tasks.map(task => ({
+    task_id: task.task_id,
+    title: task.title,
+    role: task.role,
+    status: task.status,
+    depends_on: [...task.depends_on],
+    intended_paths: [...task.intended_paths],
+    blocked: BLOCKING_STATUSES.has(task.status),
+    diagnostic: task.diagnostic,
+    evidence: taskEvidence(task.run_id, runs),
+    cost: taskCost(task.run_id, runs),
+    updated_at: task.updated_at,
+  }))
   return {
     team_id: team.team_id,
     name: team.name,
@@ -236,19 +303,8 @@ export function teamPanelView(
     diagnostic: team.diagnostic,
     created_at: team.created_at,
     updated_at: team.updated_at,
-    cost: { state: 'NOT_MEASURED', reason: t('teamPanel.costNotMeasured') },
-    tasks: tasks.map(task => ({
-      task_id: task.task_id,
-      title: task.title,
-      role: task.role,
-      status: task.status,
-      depends_on: [...task.depends_on],
-      intended_paths: [...task.intended_paths],
-      blocked: BLOCKING_STATUSES.has(task.status),
-      diagnostic: task.diagnostic,
-      evidence: taskEvidence(task.run_id, runs),
-      updated_at: task.updated_at,
-    })),
+    cost: teamCost(projected, t('teamPanel.costNotMeasured')),
+    tasks: projected,
   }
 }
 

@@ -165,6 +165,38 @@ export async function apply(ctx: Context, config: Config = {}): Promise<void> {
         })
       },
     },
+    /**
+     * O consumo REAL de tokens da execução, quando ele existe.
+     *
+     * Vem da projeção `tokenUsage` do Harness, que soma o que o PROVEDOR
+     * relatou por chamada - entrada, saída e o tráfego de cache. Não é uma
+     * estimativa nossa, e não é a pressão de contexto do momento: é o que foi
+     * consumido até aqui.
+     *
+     * `undefined` quando não há como medir, e nunca `0`. Um provedor externo
+     * (`codex`, `claude-code`) roda em outro processo e não publica sessão
+     * aqui; um `0` faria o Studio afirmar que uma execução não consumiu nada,
+     * e o teto por tokens passaria a "não estourar" por falta de medição em
+     * vez de por estar dentro do combinado.
+     *
+     * Resolvido a CADA uso e fora de `inject`: a projeção é opcional no perfil.
+     */
+    usage: {
+      tokensFor(run) {
+        const session = run.localAgent?.session
+        if (session === undefined) return undefined
+        const projections = ctx.get('sessionProjections')
+        if (projections === undefined) return undefined
+        const value = projections.snapshot(session, ['tokenUsage']).values.tokenUsage as {
+          readonly uncachedInputTokens: number
+          readonly outputTokens: number
+          readonly cacheReadTokens: number
+          readonly cacheWriteTokens: number
+        } | undefined
+        if (value === undefined) return undefined
+        return value.uncachedInputTokens + value.outputTokens + value.cacheReadTokens + value.cacheWriteTokens
+      },
+    },
     identity: {
       strongIdentityVerified(parentSessionId) {
         return (ctx.studioIdentity as StudioIdentityRuntime).service

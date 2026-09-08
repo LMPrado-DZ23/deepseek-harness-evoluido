@@ -6,8 +6,10 @@ import {
   TeamPanelError,
   handleTeamPanel,
   routeTeamPanel,
+  taskCost,
   taskEvidence,
   teamCardsFor,
+  teamCost,
   teamPanelStatus,
   teamPanelView,
   type TaskRecordShape,
@@ -171,6 +173,65 @@ describe('projeção para a tela', () => {
       team({ team_id: '88888888-2222-4333-8444-555555555555', org_id: 'outra-org' }),
     ]), { org_id: 'org-1', tenant_id: 'tenant-1' })
     expect(cards.map(card => card.team_id)).toEqual([OTHER, TEAM])
+  })
+})
+
+describe('custo', () => {
+  const measured = (id: string, tokens: number | null | undefined) => ({
+    ...RUN, run_id: id, ...(tokens === undefined ? {} : { tokens_used: tokens }),
+  })
+
+  it('a etapa que trouxe medida mostra o número medido', () => {
+    expect(taskCost('run-1', runs([measured('run-1', 1234)]))).toEqual({ state: 'MEASURED', tokens: 1234 })
+    // Zero MEDIDO é um número: a etapa rodou e o provedor relatou zero.
+    expect(taskCost('run-1', runs([measured('run-1', 0)]))).toEqual({ state: 'MEASURED', tokens: 0 })
+  })
+
+  it('sem medida NÃO vira zero', () => {
+    // Três coisas diferentes que a tela trata igual porque para quem olha são
+    // a mesma: não rodou, provedor externo, ou execução anterior ao campo.
+    expect(taskCost('run-1', runs([measured('run-1', undefined)]))).toEqual({ state: 'NOT_MEASURED' })
+    expect(taskCost('run-1', runs([measured('run-1', null)]))).toEqual({ state: 'NOT_MEASURED' })
+    expect(taskCost(null, runs())).toEqual({ state: 'NOT_MEASURED' })
+    expect(taskCost('run-fantasma', runs())).toEqual({ state: 'NOT_MEASURED' })
+  })
+
+  it('a equipe inteira medida soma, e diz quantas etapas entraram', () => {
+    const view = teamPanelView(team(), [
+      task({ task_id: 'a', run_id: 'run-1' }), task({ task_id: 'b', run_id: 'run-2' }),
+    ], runs([measured('run-1', 100), measured('run-2', 50)]))
+    expect(view.cost).toEqual({ state: 'MEASURED', tokens: 150, measured: 2 })
+  })
+
+  it('uma etapa sem medida torna o total PARCIAL, e não um total completo', () => {
+    // Somar as que trouxeram e mostrar como total faria a pessoa ler um número
+    // completo de uma soma pela metade — e uma equipe com agente externo
+    // pareceria mais barata do que foi.
+    const view = teamPanelView(team(), [
+      task({ task_id: 'a', run_id: 'run-1' }), task({ task_id: 'b', run_id: 'run-2' }),
+    ], runs([measured('run-1', 100), measured('run-2', undefined)]))
+    expect(view.cost).toEqual({
+      state: 'PARTIAL', tokens: 100, measured: 1, total: 2, reason: expect.stringContaining('externo'),
+    })
+  })
+
+  it('equipe sem nenhuma medida diz NÃO MEDIDO com o motivo, e nunca zero', () => {
+    const view = teamPanelView(team(), [task({ run_id: 'run-1' })], runs([measured('run-1', undefined)]))
+    expect(view.cost.state).toBe('NOT_MEASURED')
+    expect(JSON.stringify(view.cost)).not.toContain('tokens')
+  })
+
+  it('etapa em fila NÃO entra na conta de quantas faltam medir', () => {
+    // Contá-la faria o total parecer permanentemente incompleto: ela ainda não
+    // tem o que medir.
+    const view = teamPanelView(team(), [
+      task({ task_id: 'a', run_id: 'run-1' }), task({ task_id: 'b', run_id: null, status: 'QUEUED' }),
+    ], runs([measured('run-1', 100)]))
+    expect(view.cost).toEqual({ state: 'MEASURED', tokens: 100, measured: 1 })
+  })
+
+  it('equipe sem nenhuma etapa executada é NÃO MEDIDO, e não zero medido', () => {
+    expect(teamCost([], 'motivo').state).toBe('NOT_MEASURED')
   })
 })
 

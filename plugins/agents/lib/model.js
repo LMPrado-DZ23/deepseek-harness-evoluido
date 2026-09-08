@@ -34,6 +34,22 @@ export const agentRunSchema = z.object({
     approved_by: z.string().min(1),
     approved_at: z.iso.datetime(),
     diagnostic: z.string().nullable(),
+    /**
+     * Tokens consumidos, do jeito que o PROVEDOR relatou. OPCIONAL, e `null`
+     * quando não houve como medir.
+     *
+     * Opcional de propósito, com a versão do domínio INTOCADA: subir a versão
+     * faria `open()` falhar com `version-mismatch` para sempre em qualquer
+     * instalação que já rodou, e não existe passo de migração neste seam. Uma
+     * execução gravada antes deste campo continua legível e diz `undefined` -
+     * que a tela mostra como "não medido", nunca como zero.
+     *
+     * `null`/ausente e `0` são coisas diferentes e a diferença é o requisito:
+     * um `0` afirmaria que a execução não consumiu nada, e o teto por tokens
+     * deixaria de estourar por falta de medição em vez de por estar dentro do
+     * combinado.
+     */
+    tokens_used: z.number().int().nonnegative().nullable().optional(),
     created_at: z.iso.datetime(),
     updated_at: z.iso.datetime(),
 }).strict();
