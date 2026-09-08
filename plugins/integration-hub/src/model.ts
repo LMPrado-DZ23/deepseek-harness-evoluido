@@ -120,3 +120,88 @@ export const studioIntegrationsDomainSpec = defineDomain({
     events: domainTable<HubKey, HubEvent>(hubEventSchema),
   },
 })
+
+/**
+ * O desligamento por ESCOPO — o requisito X-07.
+ *
+ * O botão por integração já existia, e o botão de emergência já parava a
+ * organização inteira junto com o inquilino. O que faltava entre os dois era o
+ * meio-termo que uma pessoa real pede: "desliga tudo NESTE projeto" e "desliga
+ * tudo NESTA organização", sem parar o Studio inteiro.
+ *
+ * Estes três alcances são hierárquicos e conferidos JUNTOS: desligar a
+ * organização desliga também os projetos dela, e religar um projeto NÃO religa
+ * a organização. Um desligamento que pudesse ser contornado por um nível mais
+ * fino não seria um desligamento.
+ *
+ * Domínio novo, e não uma tabela a mais em `studio_integrations`: acrescentar
+ * tabela muda o descritor da unidade e faria `open()` recusar toda instalação
+ * que já rodou.
+ */
+export const integrationKillSwitchSchema = z.object({
+  /** `org` ou `org:tenant:project`. É a chave da tabela e o alcance inteiro. */
+  switch_id: z.string().min(1),
+  level: z.enum(['organization', 'project']),
+  org_id: z.string().min(1),
+  /** Ausente no nível da organização: ela é do inquilino todo, por definição. */
+  tenant_id: z.string().min(1).nullable(),
+  project_id: z.string().min(1).nullable(),
+  /** `true` = integrações DESLIGADAS neste alcance. */
+  disabled: z.boolean(),
+  disabled_by: z.string().nullable(),
+  disabled_at: z.iso.datetime().nullable(),
+  reason: z.string().min(1).max(500).nullable(),
+  enabled_by: z.string().nullable(),
+  enabled_at: z.iso.datetime().nullable(),
+  updated_at: z.iso.datetime(),
+}).strict()
+
+export type IntegrationKillSwitch = z.infer<typeof integrationKillSwitchSchema>
+
+declare const killSwitchKeyBrand: unique symbol
+export type KillSwitchKey = string & { readonly [killSwitchKeyBrand]: true }
+
+export const STUDIO_INTEGRATION_SWITCHES_PHYSICAL_DOMAIN = 'studio_integration_switches'
+export const STUDIO_INTEGRATION_SWITCHES_LOGICAL_DOMAIN = 'studio.integration.switches'
+
+export const studioIntegrationSwitchesDomainSpec = defineDomain({
+  name: STUDIO_INTEGRATION_SWITCHES_PHYSICAL_DOMAIN,
+  // Nasce em 1 e fica em 1, como todo domínio deste repositório: `open()` falha
+  // com `version-mismatch` numa instalação que já rodou, e não há passo de
+  // migração nesta API. Campo novo entra OPCIONAL.
+  version: 1,
+  tables: { switches: domainTable<KillSwitchKey, IntegrationKillSwitch>(integrationKillSwitchSchema) },
+})
+
+/**
+ * A chave de um alcance. Uma função só, porque duas grafias dela seriam dois
+ * botões diferentes para o mesmo desligamento.
+ * @param scope - o alcance pedido.
+ * @returns a chave.
+ */
+export function killSwitchId(scope:
+  | { readonly level: 'organization', readonly orgId: string }
+  | { readonly level: 'project', readonly orgId: string, readonly tenantId: string, readonly projectId: string },
+): string {
+  return scope.level === 'organization' ? `org:${scope.orgId}` : `project:${scope.orgId}:${scope.tenantId}:${scope.projectId}`
+}
+
+/**
+ * Os alcances que valem para uma chamada, do mais amplo ao mais fino.
+ *
+ * Todos são conferidos: um desligamento que pudesse ser contornado por um nível
+ * mais fino não seria um desligamento.
+ * @param scope - a organização, o inquilino e o projeto da chamada.
+ * @returns as chaves a conferir.
+ */
+export function killSwitchIdsFor(scope: {
+  readonly orgId: string
+  readonly tenantId: string
+  readonly projectId?: string
+}): readonly string[] {
+  const ids = [killSwitchId({ level: 'organization', orgId: scope.orgId })]
+  if (scope.projectId !== undefined) {
+    ids.push(killSwitchId({ level: 'project', orgId: scope.orgId, tenantId: scope.tenantId, projectId: scope.projectId }))
+  }
+  return ids
+}

@@ -31,6 +31,10 @@ class MemoryRepository implements HubRepository {
   eventCount = () => this.eventRows.length
   putEvent = async (value: HubEvent) => { this.eventRows = [...this.eventRows, value] }
   pruneEvents = async () => 0
+  readonly switches = new Map<string, IntegrationKillSwitch>()
+  killSwitch = (switchId: string) => this.switches.get(switchId)
+  putKillSwitch = async (value: IntegrationKillSwitch) => { this.switches.set(value.switch_id, value) }
+  killSwitches = (orgId: string) => [...this.switches.values()].filter(record => record.org_id === orgId)
 }
 
 function sameScope(scope: HubActor, value: { org_id: string; tenant_id: string }): boolean {

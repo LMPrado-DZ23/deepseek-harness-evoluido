@@ -8,7 +8,7 @@ import { studioRouteHealthDomainSpec } from '../plugins/route-health/src/model.t
 import { studioPreviewAdmissionsDomainSpec, studioPreviewsDomainSpec } from '../plugins/preview/src/model.ts'
 import { studioMembershipsDomainSpec, studioOrgsDomainSpec, studioWorkspacesDomainSpec } from '../plugins/tenancy/src/model.ts'
 import { PROMPT_TO_APP_DOMAIN_SPECS } from '../plugins/prompt-to-app/src/model.ts'
-import { studioIntegrationsDomainSpec } from '../plugins/integration-hub/src/model.ts'
+import { studioIntegrationSwitchesDomainSpec, studioIntegrationsDomainSpec } from '../plugins/integration-hub/src/model.ts'
 import { studioStagingReleasesDomainSpec } from '../plugins/staging/src/domain.ts'
 import { studioActionApprovalsDomainSpec } from '../plugins/action-approval/src/domain.ts'
 import { studioEmergencyStopDomainSpec } from '../plugins/emergency-stop/src/model.ts'
@@ -34,5 +34,6 @@ export const STUDIO_DOMAIN_SPECS: readonly DomainSpec[] = [
   studioPreviewAdmissionsDomainSpec,
   ...PROMPT_TO_APP_DOMAIN_SPECS,
   studioIntegrationsDomainSpec,
+  studioIntegrationSwitchesDomainSpec,
   studioStagingReleasesDomainSpec,
 ]

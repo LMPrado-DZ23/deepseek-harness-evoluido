@@ -46,6 +46,10 @@ class ExportRepository implements HubRepository {
   eventCount = (scope: HubActor) => this.eventRows.filter(row => sameScope(scope, row)).length
   putEvent = async (value: HubEvent) => { this.eventRows.push(value) }
   pruneEvents = async () => 0
+  readonly switches = new Map<string, IntegrationKillSwitch>()
+  killSwitch = (switchId: string) => this.switches.get(switchId)
+  putKillSwitch = async (value: IntegrationKillSwitch) => { this.switches.set(value.switch_id, value) }
+  killSwitches = (orgId: string) => [...this.switches.values()].filter(record => record.org_id === orgId)
 }
 
 const actor: PromptToAppActor & HubActor = { userId: 'owner-a', orgId: 'org-a', tenantId: 'tenant-a', role: 'owner', sessionId: 'session-a' }

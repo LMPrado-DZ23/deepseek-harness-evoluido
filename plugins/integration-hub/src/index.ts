@@ -14,7 +14,7 @@ import { z } from 'zod'
 import { createHubHttpHandler } from './http.js'
 import { isLoopbackAuthority, isLoopbackEndpoint } from './manifest.js'
 import { t } from './i18n.js'
-import { studioIntegrationsDomainSpec, type HubEvent, type HubKey, type StudioExport, type StudioIntegration } from './model.js'
+import { studioIntegrationSwitchesDomainSpec, studioIntegrationsDomainSpec, type HubEvent, type HubKey, type IntegrationKillSwitch, type KillSwitchKey, type StudioExport, type StudioIntegration } from './model.js'
 import { IntegrationHubService, securityFingerprint, smtpSecretShape, type EmailTestPort, type HubActor, type HubRepository, type SecretInspector } from './service.js'
 
 export * from './model.js'
@@ -59,10 +59,13 @@ class DomainHubRepository implements HubRepository {
   readonly #exportKeys = new Map<string, HubKey>()
   readonly #eventKeys = new Map<string, HubKey>()
 
+  readonly #switches = new Map<string, IntegrationKillSwitch>()
+
   constructor(
     private readonly integrationTable: KvTable<HubKey, StudioIntegration>,
     private readonly exportTable: KvTable<HubKey, StudioExport>,
     private readonly eventTable: KvTable<HubKey, HubEvent>,
+    private readonly switchTable: KvTable<KillSwitchKey, IntegrationKillSwitch>,
   ) {
     // The storage-domain seam itself is memory resident. Build bounded, scoped
     // indexes once at open so requests never clone and filter all three tables.
@@ -78,6 +81,7 @@ class DomainHubRepository implements HubRepository {
       arrayFor(this.#events, scopeOf(value)).push(value)
       this.#eventKeys.set(recordKey(value, value.event_id), key)
     }
+    for (const [, value] of switchTable.entries()) this.#switches.set(value.switch_id, value)
     for (const rows of this.#events.values()) rows.sort(newestEventFirst)
   }
 
@@ -159,6 +163,26 @@ class DomainHubRepository implements HubRepository {
     this.#eventTail = result.then(() => undefined, () => undefined)
     return result
   }
+  /**
+   * Os desligamentos por alcance são lidos por CHAVE, e não pelo escopo de
+   * quem pergunta: o alcance da organização vale para todos os inquilinos
+   * dela, e filtrar pelo inquilino esconderia o desligamento mais amplo.
+   * @param switchId - a chave do alcance.
+   * @returns o registro, quando existe.
+   */
+  killSwitch(switchId: string): IntegrationKillSwitch | undefined {
+    return this.#switches.get(switchId)
+  }
+
+  async putKillSwitch(value: IntegrationKillSwitch): Promise<void> {
+    await this.switchTable.put(value.switch_id as KillSwitchKey, value)
+    this.#switches.set(value.switch_id, value)
+  }
+
+  killSwitches(orgId: string): readonly IntegrationKillSwitch[] {
+    return [...this.#switches.values()].filter(record => record.org_id === orgId)
+  }
+
 }
 
 function scopeOf(value: { readonly org_id?: string; readonly tenant_id?: string; readonly orgId?: string; readonly tenantId?: string }): string {
@@ -264,6 +288,11 @@ export async function apply(ctx: Context, config: IntegrationHubConfig = {}): Pr
   assertChannelAllowed(channel, { bindHost: ctx.webServer.host, allowedHosts, allowedOrigins })
   const domain: Domain<typeof studioIntegrationsDomainSpec> = await ctx.storageDomain.open(studioIntegrationsDomainSpec)
   ctx.effect(() => () => domain.close(), 'dz23-studio-integration-hub.domainClose')
+  // Domínio SEPARADO, e não uma tabela a mais em `studio_integrations`:
+  // acrescentar tabela muda o descritor da unidade e faria `open()` recusar
+  // toda instalação que já rodou.
+  const switchDomain: Domain<typeof studioIntegrationSwitchesDomainSpec> = await ctx.storageDomain.open(studioIntegrationSwitchesDomainSpec)
+  ctx.effect(() => () => switchDomain.close(), 'dz23-studio-integration-hub.switchDomainClose')
   const exportsRoot = resolve(config.exportsRoot ?? resolve(homedir(), '.dz23-studio', 'exports'))
   await mkdir(exportsRoot, { recursive: true, mode: 0o700 })
   // Same default as the prompt-to-app plugin: the two must name the same folder, and the export
@@ -273,7 +302,10 @@ export async function apply(ctx: Context, config: IntegrationHubConfig = {}): Pr
   const publisherKeys = z.record(z.string().regex(/^[a-z][a-z0-9-]{1,63}$/u), z.string().min(32)).parse(config.publisherKeys ?? {})
   const promptToApp = ctx.studioPromptToApp.service
   const service = new IntegrationHubService({
-    repository: new DomainHubRepository(domain.table('integrations'), domain.table('exports'), domain.table('events')),
+    repository: new DomainHubRepository(
+      domain.table('integrations'), domain.table('exports'), domain.table('events'),
+      switchDomain.table('switches'),
+    ),
     secrets: credentialInspector(ctx.credentials),
     projects: {
       project: (actor, projectId) => promptToApp.project(actor, projectId),

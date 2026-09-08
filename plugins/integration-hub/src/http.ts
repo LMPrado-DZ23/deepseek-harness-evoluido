@@ -28,7 +28,25 @@ export const HUB_ROUTE_CONTRACTS = [
   { method: 'POST', path: '/projects/:projectId/exports', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'GET', path: '/projects/:projectId/exports/:exportId/download', access: 'authorized', permission: 'project.read', scope: 'project' },
   { method: 'GET', path: '/events', access: 'authorized', permission: 'audit.read', scope: 'workspace' },
+  // O desligamento por ALCANCE (X-07). Ler exige só leitura de projeto: quem
+  // acompanha precisa saber que as integrações estão desligadas — descobrir
+  // isso por uma chamada que falha seria descobrir tarde demais.
+  { method: 'GET', path: '/scope-switches', access: 'authorized', permission: 'project.read', scope: 'workspace' },
+  { method: 'POST', path: '/scope-switches/organization', access: 'authorized', permission: 'project.write', scope: 'workspace' },
+  { method: 'POST', path: '/scope-switches/projects/:projectId', access: 'authorized', permission: 'project.write', scope: 'project' },
 ] as const satisfies readonly StudioRouteContract[]
+
+/**
+ * O corpo do desligamento por alcance.
+ *
+ * O motivo é opcional NO ESQUEMA e obrigatório para RELIGAR — a regra fica no
+ * serviço, e não aqui, porque ela vale por qualquer porta: uma chamada interna
+ * que religasse sem motivo passaria por cima de um esquema de HTTP.
+ */
+const scopeSwitchSchema = z.object({
+  disabled: z.boolean(),
+  reason: z.string().min(1).max(500).optional(),
+}).strict()
 
 export interface HubHttpConfig {
   readonly service: IntegrationHubService
@@ -111,6 +129,24 @@ export function createHubHttpHandler(config: HubHttpConfig) {
         const body = enabledSchema.parse(await readJson(request))
         const integration = await service.setEnabled(actor, decodeURIComponent(enabledMatch[1]!), body.enabled, asApproval(body.approval))
         return json(response, 200, { integration: { ...integration, can_enable: service.canEnable(integration), requires_approval_tier: service.requiredApprovalTier(integration) } })
+      }
+      if (method === 'GET' && route === '/scope-switches') {
+        return json(response, 200, { switches: service.scopeSwitches(actor) })
+      }
+      if (method === 'POST' && route === '/scope-switches/organization') {
+        const body = scopeSwitchSchema.parse(await readJson(request))
+        return json(response, 200, {
+          switch: await service.setScopeDisabled(actor, { level: 'organization' }, body.disabled, body.reason),
+        })
+      }
+      const scopeProjectMatch = /^\/scope-switches\/projects\/([^/]+)$/u.exec(route)
+      if (method === 'POST' && scopeProjectMatch !== null) {
+        const body = scopeSwitchSchema.parse(await readJson(request))
+        return json(response, 200, {
+          switch: await service.setScopeDisabled(
+            actor, { level: 'project', projectId: decodeURIComponent(scopeProjectMatch[1]!) }, body.disabled, body.reason,
+          ),
+        })
       }
       if (method === 'POST' && route === '/approvals') {
         const body = approvalRequestSchema.parse(await readJson(request))

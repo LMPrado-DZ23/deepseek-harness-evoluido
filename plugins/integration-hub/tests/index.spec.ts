@@ -92,7 +92,11 @@ describe('integration hub plugin wiring', () => {
     }
     fixture.tables.set('events', eventRows)
     await apply(fixture.ctx as never, { exportsRoot: join(root, 'exports') })
-    expect(fixture.entriesCalls()).toBe(3)
+    // Quatro tabelas percorridas UMA vez cada na abertura: integrações,
+    // exportações, eventos e os desligamentos por alcance. O número é o ponto
+    // do teste - ele reprova se alguma leitura passar a materializar a tabela
+    // a cada pedido.
+    expect(fixture.entriesCalls()).toBe(4)
     const provided = fixture.provided.mock.calls.find(call => call[0] === 'studioIntegrationHub')?.[1] as { service: {
       events(actor: unknown, page: { limit: number; cursor?: string }): { events: unknown[]; next_cursor: string | null }
     } }
@@ -104,7 +108,7 @@ describe('integration hub plugin wiring', () => {
     expect(second.events).toHaveLength(2)
     // Only the constructor snapshot touched KvTable.entries(); both pages came
     // from the scoped, retained index and asked for three rows apiece.
-    expect(fixture.entriesCalls()).toBe(3)
+    expect(fixture.entriesCalls()).toBe(4)
   })
 
   it('keeps adapter indexes scoped, CAS-safe and compatible with legacy physical keys', async () => {

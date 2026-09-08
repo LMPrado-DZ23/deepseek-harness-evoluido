@@ -22,6 +22,19 @@ export const STUDIO_DOMAIN_SCOPES: readonly DomainScopeEntry[] = [
     },
   },
   {
+    source: 'plugins/integration-hub/src/model.ts', exportName: 'studioIntegrationSwitchesDomainSpec', physicalName: 'studio_integration_switches',
+    tables: {
+      // `org-root` porque o desligamento MAIS AMPLO é o da organização inteira:
+      // ele vale para todos os inquilinos dela, e classificá-lo como
+      // `org-tenant` obrigaria um inquilino no registro — o que faria o botão
+      // da organização deixar de alcançar os outros.
+      switches: {
+        scope: 'org-root', requiredFields: ['org_id'],
+        reason: 'O desligamento por organizacao alcanca todos os inquilinos dela; o de projeto carrega inquilino e projeto nos proprios campos.',
+      },
+    },
+  },
+  {
     source: 'plugins/prompt-to-app/src/model.ts', exportName: 'studioProjectsDomainSpec', physicalName: 'studio_projects',
     tables: { projects: { scope: 'org-tenant', requiredFields: ['org_id', 'tenant_id'] } },
   },

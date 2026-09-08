@@ -8,7 +8,7 @@ import { pageOfIntegrations, type IntegrationPage, type IntegrationQuery } from 
 import { ExportError, openChildDirectory, openDirectory, packagePrototype, referenceOf } from './export.js'
 import { t } from './i18n.js'
 import { canonicalJsonBytes, evaluateManifest, policyFloor, type PublisherKeys } from './manifest.js'
-import { secretRefSchema, type HubEvent, type IntegrationManifest, type StudioExport, type StudioIntegration } from './model.js'
+import { integrationKillSwitchSchema, killSwitchId, killSwitchIdsFor, secretRefSchema, type HubEvent, type IntegrationKillSwitch, type IntegrationManifest, type StudioExport, type StudioIntegration } from './model.js'
 import {
   DEFAULT_INTEGRATION_CALL_POLICY, IntegrationRateLimiter, integrationCostState, integrationHealth, mayRetry,
   type IntegrationCallPolicy, type IntegrationCostState, type IntegrationHealth,
@@ -49,6 +49,16 @@ export interface HubRepository {
   putEvent(value: HubEvent): Promise<void>
   /** Retention happens inside the scoped repository index, not after materialising the domain. */
   pruneEvents(scope: HubActor, keep: number): Promise<number>
+  /**
+   * Os desligamentos por alcance (X-07).
+   *
+   * A leitura é por CHAVE e não por escopo do ator: o alcance da organização
+   * vale para todos os inquilinos dela, e filtrar pelo inquilino de quem
+   * pergunta esconderia justamente o desligamento mais amplo.
+   */
+  killSwitch(switchId: string): IntegrationKillSwitch | undefined
+  putKillSwitch(value: IntegrationKillSwitch): Promise<void>
+  killSwitches(orgId: string): readonly IntegrationKillSwitch[]
 }
 
 /** Existence and shape of a credential in the vault; the value never crosses this port. */
@@ -588,6 +598,87 @@ export class IntegrationHubService {
    * @param invoke - a chamada de verdade; recebe o sinal de desistência do tempo máximo.
    * @returns o desfecho, com quantas tentativas houve e o que se sabe do custo.
    */
+  /**
+   * Recusa a chamada quando um alcance está desligado.
+   *
+   * Os dois alcances são conferidos JUNTOS, do mais amplo ao mais fino:
+   * desligar a organização desliga também os projetos dela, e religar um
+   * projeto não religa a organização. Um desligamento contornável por um nível
+   * mais fino não seria um desligamento.
+   * @param actor - quem está chamando.
+   * @param projectId - o projeto da chamada, quando há um.
+   */
+  assertScopeEnabled(actor: HubActor, projectId?: string): void {
+    for (const switchId of killSwitchIdsFor({ orgId: actor.orgId, tenantId: actor.tenantId, ...(projectId === undefined ? {} : { projectId }) })) {
+      const record = this.options.repository.killSwitch(switchId)
+      if (record?.disabled === true) throw new HubError('FORBIDDEN', t('errors.scopeDisabled'))
+    }
+  }
+
+  /**
+   * Os desligamentos por alcance desta organização.
+   * @param actor - quem está perguntando.
+   * @returns os registros, do mais amplo ao mais fino.
+   */
+  scopeSwitches(actor: HubActor): readonly IntegrationKillSwitch[] {
+    this.#authorize(actor, 'project.read')
+    return this.options.repository.killSwitches(actor.orgId)
+      .filter(record => record.level === 'organization' || record.tenant_id === actor.tenantId)
+      .sort((left, right) => left.switch_id.localeCompare(right.switch_id))
+  }
+
+  /**
+   * Liga ou desliga um alcance.
+   *
+   * DESLIGAR não exige motivo escrito, e RELIGAR exige — a mesma assimetria do
+   * botão de emergência, pelo mesmo motivo: redigir enquanto algo está
+   * queimando é o pior momento para pedir texto, e voltar a falar com
+   * fornecedores é a decisão que alguém precisa assumir por escrito.
+   * @param actor - quem está mexendo no botão.
+   * @param scope - o alcance.
+   * @param disabled - `true` desliga.
+   * @param reason - o motivo; obrigatório para religar.
+   * @returns o registro gravado.
+   */
+  async setScopeDisabled(
+    actor: HubActor,
+    scope: { readonly level: 'organization' } | { readonly level: 'project', readonly projectId: string },
+    disabled: boolean,
+    reason?: string,
+  ): Promise<IntegrationKillSwitch> {
+    // Mexer no botão é escrita, não leitura: quem só acompanha não desliga o
+    // trabalho de todo mundo.
+    this.#authorize(actor, 'project.write')
+    const switchId = scope.level === 'organization'
+      ? killSwitchId({ level: 'organization', orgId: actor.orgId })
+      : killSwitchId({ level: 'project', orgId: actor.orgId, tenantId: actor.tenantId, projectId: scope.projectId })
+    const written = (reason ?? '').trim()
+    if (!disabled && written.length < 10) throw new HubError('INVALID', t('errors.scopeEnableReason'))
+    if (written.length > 500) throw new HubError('INVALID', t('errors.invalidRequest'))
+    const now = this.#now().toISOString()
+    const current = this.options.repository.killSwitch(switchId)
+    const record = integrationKillSwitchSchema.parse({
+      switch_id: switchId,
+      level: scope.level,
+      org_id: actor.orgId,
+      tenant_id: scope.level === 'organization' ? null : actor.tenantId,
+      project_id: scope.level === 'organization' ? null : scope.projectId,
+      disabled,
+      // Os DOIS lados da história ficam guardados: a pergunta depois de um
+      // incidente nunca é só "está desligado?", é "quem desligou, quando, por
+      // quê, e quem assumiu a volta".
+      disabled_by: disabled ? actor.userId : current?.disabled_by ?? null,
+      disabled_at: disabled ? now : current?.disabled_at ?? null,
+      reason: disabled ? (written === '' ? null : written) : current?.reason ?? null,
+      enabled_by: disabled ? current?.enabled_by ?? null : actor.userId,
+      enabled_at: disabled ? current?.enabled_at ?? null : now,
+      updated_at: now,
+    })
+    await this.options.repository.putKillSwitch(record)
+    await this.#audit(actor, 'integration.enabled', switchId, 'success', `scope ${scope.level} ${disabled ? 'disabled' : 'enabled'}`)
+    return record
+  }
+
   async callIntegration<T>(
     actor: HubActor,
     integrationId: string,
@@ -599,6 +690,9 @@ export class IntegrationHubService {
     // registro e antes do teto: uma chamada barrada pela parada não pode nem
     // gastar a cota de quem ainda vai voltar a trabalhar.
     this.options.emergencyStop?.assertRunning({ orgId: actor.orgId, tenantId: actor.tenantId })
+    // E o desligamento por alcance vem junto, pelo mesmo motivo: ele é a
+    // resposta a "desliga tudo neste projeto" sem parar o Studio inteiro.
+    this.assertScopeEnabled(actor, request.projectId)
     const record = this.#integration(actor, integrationId)
     const operation = auditOperation(request.operation)
     // Uma integração desligada, ou cuja assinatura não confere, não é chamada por
@@ -1407,6 +1501,14 @@ export interface IntegrationCallRequest {
    * `UNKNOWN` em vez de anunciar que não custou nada.
    */
   readonly priceUsd?: number | undefined
+  /**
+   * O projeto em nome de quem a chamada acontece, quando há um.
+   *
+   * Ele existe para o desligamento por PROJETO (X-07) poder valer. Ausente, só
+   * o alcance da organização é conferido — o que é honesto: uma chamada que não
+   * sabe de que projeto é não pode ser barrada por um botão de projeto.
+   */
+  readonly projectId?: string | undefined
 }
 
 /** O desfecho de uma chamada: o que aconteceu, quantas tentativas custou e o que se sabe do custo. */

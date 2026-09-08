@@ -34,6 +34,10 @@ class MemoryRepository implements HubRepository {
   eventCount = (scope: HubActor) => this.eventRows.filter(row => sameScope(scope, row)).length
   putEvent = async (value: HubEvent) => { this.eventRows = [...this.eventRows, value] }
   pruneEvents = async () => 0
+  readonly switches = new Map<string, IntegrationKillSwitch>()
+  killSwitch = (switchId: string) => this.switches.get(switchId)
+  putKillSwitch = async (value: IntegrationKillSwitch) => { this.switches.set(value.switch_id, value) }
+  killSwitches = (orgId: string) => [...this.switches.values()].filter(record => record.org_id === orgId)
 }
 
 function sameScope(scope: HubActor, value: { org_id: string; tenant_id: string }): boolean {
@@ -99,6 +103,36 @@ async function enabled(service: IntegrationHubService, overrides: Partial<Integr
 }
 
 describe('chamada de integração', () => {
+  it('o desligamento por ALCANCE barra a chamada antes de qualquer efeito', async () => {
+    // Este é o ponto onde X-07 vale ou não vale: sem a conferência aqui, o
+    // botão existiria na tela e a chamada sairia mesmo assim.
+    const { service, repository } = await build()
+    const id = await enabled(service)
+    let saiu = false
+    const invoke = async () => { saiu = true; return 'pronto' }
+
+    await service.setScopeDisabled(admin, { level: 'project', projectId: 'p1' }, true, 'fornecedor cobrando errado')
+    await expect(service.callIntegration(admin, id, { operation: 'ler', idempotent: true, projectId: 'p1' }, invoke))
+      .rejects.toBeInstanceOf(HubError)
+    expect(saiu).toBe(false)
+    // Barrada ANTES do teto: uma chamada recusada não pode gastar a cota de
+    // quem ainda vai voltar a trabalhar.
+    expect(service.health(admin, id).calls).toBe(0)
+
+    // Outro projeto continua trabalhando.
+    await expect(service.callIntegration(admin, id, { operation: 'ler', idempotent: true, projectId: 'p2' }, invoke))
+      .resolves.toMatchObject({ state: 'OK' })
+
+    // E o botão da ORGANIZAÇÃO alcança todos, inclusive quem não diz o projeto.
+    await service.setScopeDisabled(admin, { level: 'organization' }, true)
+    await expect(service.callIntegration(admin, id, { operation: 'ler', idempotent: true, projectId: 'p2' }, invoke))
+      .rejects.toBeInstanceOf(HubError)
+    await expect(service.callIntegration(admin, id, { operation: 'ler', idempotent: true }, invoke))
+      .rejects.toBeInstanceOf(HubError)
+    expect(repository.eventRows.some(row => row.detail.includes('scope organization disabled'))).toBe(true)
+  })
+
+
   it('uma integração ligada que responde fica OK, e o custo sem preço é UNKNOWN em vez de zero', async () => {
     const { service, repository } = await build()
     const id = await enabled(service)

@@ -46,6 +46,7 @@
       studio_evidence: postgres
       studio_approvals: postgres
       studio_integrations: postgres
+      studio_integration_switches: postgres
 
 - id: connection
   config:

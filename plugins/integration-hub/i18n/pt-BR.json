@@ -44,7 +44,9 @@
     "mcpManifestNotVerified": "Uma conexão MCP executa um programa neste computador, então ela exige manifesto com assinatura válida. O manifesto desta integração não tem assinatura reconhecida, ou foi alterado depois de assinado. Nada foi chamado.",
     "mcpDispatcherMissing": "Este Studio não tem cliente MCP montado no perfil. Nada foi chamado.",
     "mcpDispatcherInstalled": "Já existe um cliente MCP montado neste Studio. Dois clientes teriam catálogos e tetos diferentes; nenhum foi trocado.",
-    "internal": "Algo deu errado do lado do Studio. Nada foi alterado; tente de novo."
+    "internal": "Algo deu errado do lado do Studio. Nada foi alterado; tente de novo.",
+    "scopeDisabled": "As integrações deste projeto (ou desta organização) estão desligadas. Quem administra precisa religá-las.",
+    "scopeEnableReason": "Para religar as integrações, escreva o motivo com pelo menos 10 caracteres."
   },
   "export": {
     "readmeTitle": "Seu protótipo do DZ23 STUDIO",
