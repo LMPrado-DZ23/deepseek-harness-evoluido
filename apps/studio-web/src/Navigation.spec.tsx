@@ -20,13 +20,14 @@ describe('navegação do Studio', () => {
 
   it('não desenha botão mudo para tela que ainda não existe', () => {
     // Quatro botões sem ação era a queixa: a pessoa aperta e nada acontece, sem
-    // nem saber se quebrou.
+    // nem saber se quebrou. Agora o item vem DESABILITADO e dito "em breve" -
+    // `disabled` de verdade, e não `aria-disabled` num <span>, que a própria
+    // especificação proíbe e o axe reprova.
     const html = render()
-    for (const item of studioNavItems()) {
-      if (item.href !== null) continue
-      expect(html).toContain(`aria-disabled="true"`)
-      expect(html).not.toContain(`<button class="nav">`)
-    }
+    const unavailable = studioNavItems().filter(item => item.href === null)
+    expect(unavailable.length).toBeGreaterThan(0)
+    expect(html.match(/class="nav unavailable" disabled/gu) ?? []).toHaveLength(unavailable.length)
+    expect(html).not.toContain('<button class="nav">')
     expect(html).toContain('em breve')
   })
 

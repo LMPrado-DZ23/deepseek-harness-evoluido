@@ -6,6 +6,10 @@ body.pwa-offline { padding-bottom: 3.5rem; }
 
 .pwa-notify {
   font: inherit;
+  /* Botão NÃO herda cor: o padrão do navegador é preto. Na barra escura do
+     celular isso dava 1,24:1 - texto invisível. Ninguém tinha visto porque o
+     axe só rodava em tela de mesa. */
+  color: inherit;
   padding: 0.4rem 0.8rem;
   border-radius: 0.5rem;
   border: 1px solid currentColor;

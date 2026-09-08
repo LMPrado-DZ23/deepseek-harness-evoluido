@@ -37,12 +37,12 @@ export function StudioSidebar(props: StudioSidebarProps) {
     </div>
     <nav aria-label={t.nav.menuLabel}>
       {studioNavItems().map(item => item.href === null
-        ? <span key={item.id} className="nav unavailable" aria-disabled="true">{icons[item.id]}<span>{item.label}</span><small>{t.nav.soon}</small></span>
+        ? <button key={item.id} type="button" className="nav unavailable" disabled>{icons[item.id]}<span>{item.label}</span><small>{t.nav.soon}</small></button>
         : <a key={item.id} className={props.active === item.id ? 'nav active' : 'nav'} href={item.href} {...(props.active === item.id ? { 'aria-current': 'page' as const } : {})}>{icons[item.id]}<span>{item.label}</span></a>)}
     </nav>
     <div className="sidebar-footer">
-      <span className="nav-icon-unavailable" aria-disabled="true" aria-label={`${t.nav.help} (${t.nav.soon})`}><CircleHelp aria-hidden="true" /></span>
-      <span className="nav-icon-unavailable" aria-disabled="true" aria-label={`${t.nav.settings} (${t.nav.soon})`}><Settings aria-hidden="true" /></span>
+      <button type="button" className="nav-icon-unavailable" disabled aria-label={`${t.nav.help} (${t.nav.soon})`}><CircleHelp aria-hidden="true" /></button>
+      <button type="button" className="nav-icon-unavailable" disabled aria-label={`${t.nav.settings} (${t.nav.soon})`}><Settings aria-hidden="true" /></button>
     </div>
   </aside>
 }
