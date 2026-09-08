@@ -39,8 +39,22 @@ para o trabalho.
 | 405 autentica antes | sim |
 | erro desconhecido vira 400 | sim |
 
-**Tela** — `apps/studio-web/src/team/teamApi.spec.ts` (14) e `TeamPanel.spec.tsx` (18):
-238 testes na aplicação inteira, todos passando.
+**Tela** — `apps/studio-web/src/team/teamApi.spec.ts` e `TeamPanel.spec.tsx`:
+244 testes na aplicação inteira, todos passando.
+
+**Navegador de verdade** — `apps/studio-web/tests/team-panel.spec.ts`, em
+**mesa, tablet e celular**: a árvore com as três etapas e as dependências
+escritas, o bloqueio anunciado, o consumo PARCIAL avisando que o número é menor
+que o real, a evidência aberta, a parada e o botão que fica desabilitado depois
+dela, a lista ligando ao painel — e **axe sem nenhuma violação**, com todos os
+`<details>` abertos antes da análise, porque conteúdo dentro de um `<details>`
+fechado não é pintado e o axe não teria o que reprovar. Suíte e2e inteira: 36
+passando.
+
+O painel do e2e usa uma equipe determinística no servidor de prova: quem
+responde é o módulo de rota do produto, com a mesma autenticação e o mesmo
+escopo; o que é fixture são os dados. Uma equipe real exige iniciar pela
+conversa, e não há rota de iniciar.
 
 ## As decisões que o código toma, e por quê
 
@@ -82,9 +96,8 @@ vazamento na projeção do servidor **e** no HTML da tela.
 - **Custo continua `NOT_MEASURED`** enquanto A-07 estiver FAILED.
 - **As confirmações pendentes continuam na tela do assistente.** Aqui aparece
   quem autorizou a equipe, não a fila de confirmações.
-- **Não há e2e de navegador com equipe real.** A prova de runtime cobre a rota;
-  o desenho da árvore com dados vivos é coberto por teste de componente, não por
-  navegador.
+- **O e2e de navegador usa dados determinísticos.** A rota é a do produto; a
+  equipe é fixture. Uma equipe real exige iniciar pela conversa.
 
 ## Achado colateral: o resumo do ledger mentia
 

@@ -264,9 +264,72 @@ const apiHandler = createPromptToAppHttpHandler({
   generatorFor: (actor, projectId) => new ModelCodeGenerator(model, actor, service.project(actor, projectId).privacy),
   health: async () => ({ state: 'OK', route: 'ollama-local', builder: 'OK', disk: 'OK' }), allowedHosts, allowedOrigins,
 })
+/**
+ * Uma equipe determinística para a tela de progresso.
+ *
+ * O que é fixture aqui são os DADOS, e não o caminho: quem responde é o mesmo
+ * módulo de rota do produto, com a mesma autenticação e o mesmo escopo. Sem
+ * isto a tela de progresso só seria conferida em teste de componente, e a
+ * acessibilidade dela em tamanho de celular nunca rodaria num navegador de
+ * verdade - que foi exatamente como um contraste de 1,24:1 passou despercebido
+ * no aviso da PWA.
+ */
+const E2E_TEAM_ID = '11111111-2222-4333-8444-555555555555'
+const e2eTeam = {
+  team_id: E2E_TEAM_ID, org_id: 'org-e2e', tenant_id: 'tenant-e2e', workspace_id: 'meu-projeto',
+  name: 'Arrumar o formulário de cadastro', status: 'NEEDS_ATTENTION', required_tier: 'T2',
+  sensitive_operation: null, approved_by: 'voce@exemplo.com', approved_at: '2026-09-08T12:00:00.000Z',
+  diagnostic: null, created_at: '2026-09-08T12:00:00.000Z', updated_at: '2026-09-08T12:20:00.000Z',
+}
+const e2eTasks = [
+  {
+    task_id: 'implementar', team_id: E2E_TEAM_ID, title: 'Escrever o formulário', role: 'implementer',
+    status: 'APPLIED', run_id: 'run-e2e-1', depends_on: [], intended_paths: ['src/cadastro.tsx'],
+    diagnostic: null, created_at: '2026-09-08T12:00:00.000Z', updated_at: '2026-09-08T12:10:00.000Z',
+  },
+  {
+    task_id: 'revisar', team_id: E2E_TEAM_ID, title: 'Revisar o formulário', role: 'reviewer',
+    status: 'FAILED', run_id: 'run-e2e-2', depends_on: ['implementar'], intended_paths: ['src/cadastro.tsx'],
+    diagnostic: 'A revisão parou porque o projeto mudou embaixo dela.',
+    created_at: '2026-09-08T12:00:00.000Z', updated_at: '2026-09-08T12:20:00.000Z',
+  },
+  {
+    task_id: 'testar', team_id: E2E_TEAM_ID, title: 'Testar o formulário', role: 'tester',
+    status: 'QUEUED', run_id: null, depends_on: ['revisar'], intended_paths: ['tests/cadastro.spec.ts'],
+    diagnostic: null, created_at: '2026-09-08T12:00:00.000Z', updated_at: '2026-09-08T12:00:00.000Z',
+  },
+]
+const e2eRuns = [
+  {
+    run_id: 'run-e2e-1', org_id: 'org-e2e', tenant_id: 'tenant-e2e', workspace_id: 'meu-projeto',
+    status: 'APPLIED', provider: 'spawn-in-process', diagnostic: null,
+    created_at: '2026-09-08T12:00:00.000Z', updated_at: '2026-09-08T12:10:00.000Z',
+    changed_files: ['src/cadastro.tsx'], diff_bytes: 2048, diff_sha256: 'a'.repeat(64),
+    base_commit: 'abcdef1', main_changed_during_run: false, tokens_used: 4200,
+  },
+  {
+    run_id: 'run-e2e-2', org_id: 'org-e2e', tenant_id: 'tenant-e2e', workspace_id: 'meu-projeto',
+    status: 'FAILED', provider: 'codex', diagnostic: null,
+    created_at: '2026-09-08T12:00:00.000Z', updated_at: '2026-09-08T12:20:00.000Z',
+    changed_files: [], diff_bytes: 0, diff_sha256: 'b'.repeat(64),
+    base_commit: 'abcdef1', main_changed_during_run: true, tokens_used: null,
+  },
+]
+let e2eTeamCancelled = false
 const webHandler = createStudioWebHandler({
   distDirectory: resolve(root, 'apps', 'studio-web', 'dist'), identity, allowedHosts, allowedOrigins,
   previewFrameSources: ['http://*.dz23.localhost:4179'],
+  agentRuns: () => ({ runs: () => e2eRuns }),
+  agentTeams: () => ({
+    teams: () => [{ ...e2eTeam, status: e2eTeamCancelled ? 'CANCELLED' : e2eTeam.status }],
+    service: {
+      status: async () => ({ team: { ...e2eTeam, status: e2eTeamCancelled ? 'CANCELLED' : e2eTeam.status }, tasks: e2eTasks }),
+      cancel: async () => {
+        e2eTeamCancelled = true
+        return { team: { ...e2eTeam, status: 'CANCELLED' }, tasks: e2eTasks.map(task => ({ ...task, status: task.status === 'QUEUED' ? 'CANCELLED' : task.status })) }
+      },
+    },
+  }),
 })
 const previewForward: PreviewForwardPort = {
   async forward(runtimeRef, forwarded) {
@@ -288,6 +351,11 @@ const server = createServer((request, response) => {
   }
   if (/^p-[a-f0-9]{24}\.dz23\.localhost:4179$/u.test(request.headers.host ?? '')) return void previewGateway(request, response)
   if (request.url === '/healthz') return plain(response, 200, 'ok')
+  // Reinício do estado da equipe de exemplo. Existe SÓ neste servidor de
+  // prova: sem ele, o teste que para o trabalho deixaria a equipe interrompida
+  // para os tamanhos de tela seguintes, e eles reprovariam por causa da ordem
+  // em que rodaram - não por um defeito.
+  if (request.url === '/e2e/reset-team') { e2eTeamCancelled = false; return plain(response, 200, 'ok') }
   if (request.url?.startsWith('/api/studio/identity') === true) return void identityHandler(request, response)
   if (request.url?.startsWith('/api/studio/apps') === true) return void apiHandler(request, response)
   return void webHandler(request, response)
