@@ -50,6 +50,10 @@ try {
     mkdir(worktrees, { recursive: true }),
   ])
   await symlink(join(sourceHome, 'profiles', 'studio'), join(runtimeHome, 'profiles', 'studio'), 'dir')
+  // A casa de prova precisa montar o que a instalação monta. As skills
+  // empacotadas moram em `$DSH_HOME/skills`; sem ligá-las aqui, a prova
+  // afirmaria que a skill não é descoberta quando o que falta é o diretório.
+  await symlink(join(sourceHome, 'skills'), join(runtimeHome, 'skills'), 'dir')
   await execFileAsync('git', ['init', '-q'], { cwd: repository })
   await writeFile(proofPatch, [
     '- id: dz23-studio-prompt-to-app',
@@ -169,6 +173,22 @@ try {
   // FEEDBACK_ONLY apontando para um coletor de terceiro, com o export sendo a
   // cópia crua da sessão. O perfil do Studio zera isso por composição. Aqui a
   // prova é do runtime real, não da leitura do YAML.
+  // A skill empacotada com o produto tem de estar VISÍVEL para o agente. Sem
+  // esta afirmação, ela pode ser copiada para dentro do repositório, montada no
+  // perfil e mesmo assim não ser descoberta - e ninguém saberia até alguém
+  // pedir por ela e não receber nada.
+  // O escopo é o AGENTE, e não o host: nesta composição o `dsh-web-app` desliga
+  // a linha de host `skill-filesystem` e a descoberta local passa a ser do
+  // preset. Ler sem escopo devolve só a camada global - vazia por desenho - e a
+  // prova acusaria ausência onde há montagem correta.
+  const skills = await booted.ctx.skills?.list?.({ cwd: repository, scope: agent }).catch(() => undefined)
+  const skillNames = Array.isArray(skills) ? skills.map(entry => String(entry?.name ?? '')) : []
+  const bundledSkill = skillNames.includes('ui-ux-pro-max') ? 'visible' : skills === undefined ? 'no-service' : 'missing'
+  assert.notEqual(bundledSkill, 'missing', `A skill empacotada não foi descoberta. Catálogo: ${skillNames.join(', ') || '(vazio)'}`)
+  // Descoberta não é uso: sem `tool-skill` no preset o agente vê o nome no
+  // catálogo e não tem como abrir o corpo. A ferramenta é o que fecha isso.
+  assert.ok(tools.includes('skill'), `O agente não recebeu a ferramenta de skill. Ferramentas: ${tools.join(', ')}`)
+
   const telemetrySharing = booted.ctx.telemetry?.sharing ?? 'no-service'
   // `no-service` significa que a linha de telemetria não montou nesta casa de
   // prova - foi assim ANTES e DEPOIS de o perfil zerar o modo, então este
@@ -266,6 +286,7 @@ try {
     tools: tools.length,
     governedTools: governed.length,
     telemetrySharing,
+    bundledSkill,
     conversationTurn: realLocalModel ? 'PASS_WITH_REAL_LOCAL_MODEL' : 'PASS_WITH_DETERMINISTIC_PROVIDER',
     provider: realLocalModel ? `ollama/${localModel}` : 'studio-fake/studio-deterministic',
     approval: {

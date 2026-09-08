@@ -36,3 +36,29 @@
           - studio_team_continue_sensitive
           - studio_team_cancel
         repositories: !!js JSON.parse(process.env.DZ23_ASSISTANT_REPOSITORIES ?? '[]')
+
+# ── skills empacotadas com o produto ────────────────────────────────────────
+#
+# O registro de skills vive no host e e dividido em camadas por escopo; estas
+# duas linhas registram na camada DESTE preset. `skill-filesystem` descobre as
+# skills nas raizes locais e `tool-skill` e o que da ao agente o catalogo e o
+# carregador - sem ele a skill existe no catalogo e o agente nao consegue abrir.
+#
+# A raiz entra como `bundledSkillDir`, e nao como `customSkillDirs`: toda raiz
+# comum e lida pelo `ctx.fs`, o filesystem SANDBOXADO da sessao, e
+# `$DSH_HOME/skills` fica fora do workspace. `bundledSkillDir` e a raiz que o
+# upstream criou para skill empacotada com o produto - marcada `trustedHost` e
+# lida pelo Node. `includeDefaultRoots` continua verdadeiro: as skills que a
+# pessoa tem na propria instalacao nao sao apagadas por esta.
+#
+# `DZ23_STUDIO_SKILL_ROOT` existe para a imagem, que monta o diretorio em outro
+# caminho.
+- id: skill-filesystem
+  name: '@deepseek-ai/dsh-skill-filesystem'
+  config:
+    includeDefaultRoots: true
+    bundledSkillDir: !!js >-
+      process.env.DZ23_STUDIO_SKILL_ROOT ?? `${process.env.DSH_HOME ?? '.'}/skills`
+
+- id: tool-skill
+  name: '@deepseek-ai/dsh-tool-skill'

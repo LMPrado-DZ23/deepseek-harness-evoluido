@@ -18,6 +18,19 @@
   config:
     mode: DISABLED
 
+# Skills empacotadas com o produto.
+#
+# A montagem NAO fica aqui. O bundle `dsh-web-app` desliga de proposito a linha
+# de host `skill-filesystem` (e `tool-skill`) porque, nesta composicao, quem faz
+# a descoberta local de skills e o PRESET do agente. Configurar a linha de host
+# aqui nao teria efeito nenhum e ainda pareceria que teve: a linha continua
+# `disabled` e a expressao nem chega a ser avaliada.
+#
+# A montagem real esta em dsh-home/.agent-presets/dz23-assistant/agent.cordis.yml.
+# A licenca de cada skill de terceiro fica junto da copia, e as obrigacoes estao
+# em dsh-home/skills/NOTICE. Marca nao e concedida por licenca de software: o
+# nome de quem escreveu continua sendo de quem escreveu.
+
 - id: agent-presets
   config:
     default: dz23-assistant
@@ -255,6 +268,22 @@
         # the export's only boundary, and a variable must not be able to move it.
         runsRoot: /var/lib/dz23-studio/generated-runs
         exportsRoot: /var/lib/dz23-studio/exports
+    # Cliente MCP (X-11). Monta DEPOIS do hub de integrações, que é de quem ele
+    # recebe a chamada — e sem quem ele nem sobe (`inject`).
+    #
+    # `servers` está vazio de propósito: cadastrar um servidor MCP é dizer que
+    # ESTE computador concorda em executar aquele programa, e essa decisão é de
+    # quem administra o Studio. Escrito aqui e nunca lido do ambiente, pelo
+    # mesmo motivo do `channel` acima: uma variável de ambiente não pode
+    # escolher qual programa o Studio executa. Vazio significa que toda chamada
+    # MCP é recusada — e a recusa é auditada, não silenciosa.
+    #
+    # A chave de cada entrada é o `id` do manifesto ASSINADO da integração. Sem
+    # manifesto com assinatura válida a conexão não acontece, cadastro ou não.
+    - id: dz23-studio-mcp-client
+      name: '@dz23-studio/mcp-client'
+      config:
+        servers: {}
     - id: dz23-studio-web
       name: '@dz23-studio/web'
       config:

@@ -24,6 +24,8 @@ const DIRECTORY = 'docs/inventory/p37'
  */
 export const REQUIRED_SLUGS = [
   'lovable', 'boltnew-boltdiy', 'v0', 'replit-agent-devin', 'zed', 'aider-claude-code-cline',
+  // A skill entrou no repositorio: o inventario dela nao pode sumir depois.
+  'ui-ux-pro-max-skill',
 ]
 
 /**
