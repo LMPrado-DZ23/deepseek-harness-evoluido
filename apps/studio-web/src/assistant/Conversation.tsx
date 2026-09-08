@@ -1,4 +1,4 @@
-import { Send, Square, TriangleAlert } from 'lucide-react'
+import { Paperclip, Send, Square, TriangleAlert, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import copy from '../i18n/assistant.pt-BR.json'
 import {
@@ -7,6 +7,9 @@ import {
   readConversation,
   sendConversationMessage,
   organizeConversation,
+  uploadConversationAttachment,
+  MAX_ATTACHMENTS_PER_MESSAGE,
+  type ConversationAttachment,
   type ConversationEvent,
   type ConversationPort,
 } from './conversationApi'
@@ -65,7 +68,15 @@ export function Conversation({ conversationId, port, getCsrf, pollMs = CONVERSAT
   const [busy, setBusy] = useState(false)
   const [attempt, setAttempt] = useState(0)
   const [nothingToOrganize, setNothingToOrganize] = useState(false)
+  /**
+   * Os anexos desta mensagem, do jeito que o SERVIDOR os confirmou. A tela
+   * nunca guarda os bytes nem o arquivo escolhido: guardar o `File` faria a
+   * lista mostrar um anexo que o servidor talvez tenha recusado.
+   */
+  const [attachments, setAttachments] = useState<readonly ConversationAttachment[]>([])
+  const [attaching, setAttaching] = useState(false)
   const draftRef = useRef<HTMLTextAreaElement | null>(null)
+  const fileRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => { dispatch({ kind: 'opened', conversationId }) }, [conversationId])
 
@@ -96,9 +107,14 @@ export function Conversation({ conversationId, port, getCsrf, pollMs = CONVERSAT
     setBusy(true)
     let requestId: string | undefined
     try {
-      const accepted = await sendConversationMessage(conversationId, text, port, getCsrf)
+      const accepted = await sendConversationMessage(
+        conversationId, text, port, getCsrf, attachments.map(item => item.attachment_id),
+      )
       requestId = accepted.request_id
       dispatch({ kind: 'queued', requestId: accepted.request_id, text })
+      // Só depois do aceite: limpar antes faria a pessoa perder os anexos numa
+      // falha que não foi dela, e ter de escolher os arquivos de novo.
+      setAttachments([])
       setActionError(null)
     } catch (reason) {
       if (requestId !== undefined) dispatch({ kind: 'dropped', requestId })
@@ -107,7 +123,31 @@ export function Conversation({ conversationId, port, getCsrf, pollMs = CONVERSAT
       setBusy(false)
       draftRef.current?.focus()
     }
-  }, [busy, conversationId, getCsrf, port, state.draft])
+  }, [attachments, busy, conversationId, getCsrf, port, state.draft])
+
+  const attach = useCallback(async (file: File) => {
+    if (attachments.length >= MAX_ATTACHMENTS_PER_MESSAGE) {
+      setActionError({ message: copy.attachmentTooManyLocal, retryable: false })
+      return
+    }
+    setAttaching(true)
+    try {
+      const reference = await uploadConversationAttachment(conversationId, file, port, getCsrf)
+      setAttachments(current => [...current, reference])
+      setActionError(null)
+    } catch (reason) {
+      setActionError(describe(reason))
+    } finally {
+      setAttaching(false)
+      // Sem isto, escolher o MESMO arquivo de novo depois de uma recusa não
+      // dispara `change` e o botão parece morto.
+      if (fileRef.current !== null) fileRef.current.value = ''
+    }
+  }, [attachments.length, conversationId, getCsrf, port])
+
+  const removeAttachment = useCallback((attachmentId: string) => {
+    setAttachments(current => current.filter(item => item.attachment_id !== attachmentId))
+  }, [])
 
   const stop = useCallback(async () => {
     try {
@@ -202,8 +242,28 @@ export function Conversation({ conversationId, port, getCsrf, pollMs = CONVERSAT
         placeholder={copy.composerPlaceholder}
         onChange={change => { dispatch({ kind: 'draft', draft: change.target.value }) }}
       />
+      <div className="conversation-attach">
+        <label htmlFor="conversation-attachment">
+          <Paperclip aria-hidden="true" />{attaching ? copy.attaching : copy.attachLabel}
+        </label>
+        <input
+          id="conversation-attachment"
+          ref={fileRef}
+          type="file"
+          disabled={attaching || attachments.length >= MAX_ATTACHMENTS_PER_MESSAGE}
+          aria-describedby="conversation-attachment-hint"
+          onChange={change => {
+            const file = change.target.files?.[0]
+            if (file !== undefined) void attach(file)
+          }}
+        />
+        <p id="conversation-attachment-hint" className="context-note">{copy.attachHint}</p>
+      </div>
+
+      <AttachmentList items={attachments} onRemove={removeAttachment} />
+
       <div className="conversation-actions">
-        <button type="submit" className="primary" disabled={busy || state.draft.trim() === ''}>
+        <button type="submit" className="primary" disabled={busy || attaching || state.draft.trim() === ''}>
           <Send aria-hidden="true" />{busy ? copy.sending : copy.send}
         </button>
         {status === 'working'
@@ -253,6 +313,53 @@ export function CompactionBand({ view }: { readonly view: CompactionView }) {
     <span className="context-note">{step}</span>
     <span className="compaction-bar" role="progressbar" aria-label={copy.compactionTitle} />
   </section>
+}
+
+/**
+ * Os anexos já confirmados, com o que a pessoa precisa para reconhecê-los:
+ * nome exibível, tipo e tamanho. Cada um sai daqui antes do envio, sozinho -
+ * um botão "limpar tudo" obrigaria a refazer a escolha inteira por causa de um
+ * arquivo errado.
+ */
+export function AttachmentList({ items, onRemove }: {
+  readonly items: readonly ConversationAttachment[]
+  readonly onRemove: (attachmentId: string) => void
+}) {
+  if (items.length === 0) return null
+  return <section className="conversation-attachments" aria-labelledby="conversation-attachments-title">
+    <h2 id="conversation-attachments-title">{copy.attachmentsTitle}</h2>
+    <ul>
+      {items.map(item => <li key={item.attachment_id}>
+        <span className="attachment-name">{item.name}</span>
+        <span className="context-note">
+          {attachmentKind(item)} — {formatAttachmentSize(item.size)}
+        </span>
+        <button
+          type="button"
+          className="secondary"
+          aria-label={copy.attachmentRemoveLabel.replace('{name}', item.name)}
+          onClick={() => { onRemove(item.attachment_id) }}
+        >
+          <X aria-hidden="true" />{copy.attachmentRemove}
+        </button>
+      </li>)}
+    </ul>
+  </section>
+}
+
+/** Imagem ou texto, em palavra, porque `image/webp` não diz nada a ninguém. */
+export function attachmentKind(attachment: ConversationAttachment): string {
+  return attachment.media_type === 'text/plain' ? copy.attachmentKindText : copy.attachmentKindImage
+}
+
+/**
+ * O tamanho em KB, arredondado para cima.
+ *
+ * Para cima porque arredondar 512 bytes para "0 KB" mostraria um anexo que
+ * parece vazio; e a unidade é uma só para não haver duas contas na mesma tela.
+ */
+export function formatAttachmentSize(bytes: number): string {
+  return `${String(Math.max(1, Math.ceil(bytes / 1024)))} ${copy.attachmentSizeUnit}`
 }
 
 export function ConversationItem({ event }: { readonly event: ConversationEvent }) {

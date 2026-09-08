@@ -99,5 +99,17 @@
   "approvalSubjectOpaque": "Onde: neste pedido específico do assistente.",
   "approvalVanishedExpired": "O prazo daquele pedido terminou. Nada foi feito. Peça de novo ao assistente quando quiser.",
   "approvalsWaitingOne": "1 pedido esperando sua decisão.",
-  "approvalsWaitingMany": "{count} pedidos esperando sua decisão."
+  "approvalsWaitingMany": "{count} pedidos esperando sua decisão.",
+  "attachLabel": "Anexar arquivo",
+  "attachHint": "Imagens (PNG, JPEG, WebP ou GIF) ou arquivos de texto, até 512 KB cada, no máximo 5 por mensagem.",
+  "attaching": "Anexando…",
+  "attachmentsTitle": "Anexos desta mensagem",
+  "attachmentRemove": "Remover",
+  "attachmentRemoveLabel": "Remover o anexo {name}",
+  "attachmentKindImage": "imagem",
+  "attachmentKindText": "texto",
+  "attachmentSizeUnit": "KB",
+  "attachmentTooLargeLocal": "Este arquivo é grande demais para ser anexado. O limite é 512 KB por arquivo.",
+  "attachmentTooManyLocal": "Uma mensagem aceita no máximo 5 anexos. Remova um antes de anexar outro.",
+  "attachmentAttached": "Anexado: {name}."
 }

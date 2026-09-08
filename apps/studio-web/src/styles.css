@@ -62,6 +62,27 @@
 .compaction-bar::after{content:'';position:absolute;inset:0;width:38%;border-radius:2px;background:#075ee5;animation:compaction-slide 1.4s ease-in-out infinite}
 @keyframes compaction-slide{0%{transform:translateX(-100%)}100%{transform:translateX(300%)}}
 .compaction-marker{display:flex;flex-direction:column;gap:4px;margin:0;color:#2c3a57;font-size:14px}
+/* Escolher arquivo, e a lista do que ja foi anexado. A lista fica ENTRE o
+   seletor e os botoes: entre escolher e enviar, a pessoa ve o que vai junto. */
+.conversation-attach{display:flex;flex-direction:column;gap:6px}
+.conversation-attach label{display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:700}
+.conversation-attach label svg{width:18px;height:18px}
+.conversation-attach input[type=file]{font-size:14px;padding:6px 0}
+.conversation-attach input[type=file]:focus{outline:3px solid #9fc3ff;outline-offset:2px}
+.conversation-attachments{display:flex;flex-direction:column;gap:6px}
+.conversation-attachments h2{margin:0;font-size:14px;font-weight:700}
+.conversation-attachments ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.conversation-attachments li{display:flex;align-items:center;gap:10px;flex-wrap:wrap;border:1px solid #bbc5d6;border-radius:8px;padding:8px 10px;background:#fff;color:#182544}
+.conversation-attachments .attachment-name{font-weight:700;word-break:break-all}
+.conversation-attachments button{display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:0 14px;border:1px solid #bbc5d6;border-radius:8px;background:#fff;color:#182544;margin-left:auto}
+.conversation-attachments button svg{width:16px;height:16px}
+.conversation-attachments button:focus{outline:3px solid #9fc3ff;outline-offset:2px}
+@media (prefers-color-scheme:dark){
+.conversation-attach,.conversation-attach label{color:#eef2f9}
+.conversation-attachments,.conversation-attachments h2{color:#eef2f9}
+.conversation-attachments li,.conversation-attachments button{background:#0f1523;color:#eef2f9;border-color:#2b3550}
+.conversation-attachments .context-note{color:#b9c4da}
+}
 .conversation-advanced{margin-top:4px}
 .conversation-advanced summary{cursor:pointer;color:#075ee5;font-size:14px;padding:6px 0}
 .conversation-advanced button{margin-top:8px}

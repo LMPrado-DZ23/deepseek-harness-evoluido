@@ -26,6 +26,26 @@ export interface ConversationSnapshot {
   readonly truncated: boolean
 }
 
+/**
+ * A referência opaca de um anexo, do jeito que ela chega do servidor.
+ *
+ * Não há caminho, diretório, extensão original nem nada que descreva onde os
+ * bytes estão: `attachment_id` só significa alguma coisa dentro da conversa,
+ * do espaço e da pessoa que o criaram.
+ */
+export interface ConversationAttachment {
+  readonly attachment_id: string
+  /** Nome já higienizado pelo servidor. Só para ler. */
+  readonly name: string
+  readonly size: number
+  readonly media_type: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif' | 'text/plain'
+}
+
+/** Teto por arquivo, o mesmo que o servidor aplica. */
+export const MAX_ATTACHMENT_BYTES = 512 * 1024
+/** Teto por mensagem, o mesmo que o servidor aplica. */
+export const MAX_ATTACHMENTS_PER_MESSAGE = 5
+
 export interface ConversationOpened {
   readonly session_id: string
   readonly reused: boolean
@@ -83,16 +103,55 @@ export async function readConversation(
   }
 }
 
+/**
+ * Manda o arquivo e recebe de volta a referência opaca.
+ *
+ * O que sobe é o nome dado pela pessoa e os bytes em base64 - e nada mais. Não
+ * existe `content_type` neste corpo de propósito: o tipo declarado pelo cliente
+ * é um campo que o cliente escreve, e quem decide o tipo é o conteúdo, do lado
+ * do servidor. Um `path` também não existe: o navegador nunca soube o caminho e
+ * não teria por que informá-lo.
+ * @param conversationId - a conversa dona do anexo.
+ * @param file - o arquivo escolhido.
+ * @returns a referência que a tela mostra e que o envio carrega.
+ */
+export async function uploadConversationAttachment(
+  conversationId: string,
+  file: { readonly name: string; arrayBuffer(): Promise<ArrayBuffer> },
+  port: ConversationPort = defaultPort,
+  getCsrf: () => Promise<string> = csrfToken,
+): Promise<ConversationAttachment> {
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  if (bytes.length === 0 || bytes.length > MAX_ATTACHMENT_BYTES) {
+    // Recusado aqui para a pessoa saber AGORA, e recusado de novo no servidor
+    // porque este teste roda no navegador e o navegador não decide nada.
+    throw new ConversationRequestError(0, copy.attachmentTooLargeLocal, false)
+  }
+  const body = await mutate(
+    port, getCsrf,
+    `${CONVERSATION_ENDPOINT}/${encodeURIComponent(conversationId)}/attachments`,
+    JSON.stringify({ filename: file.name, content_base64: base64Of(bytes) }),
+  )
+  if (!isConversationAttachment(body)) {
+    throw new ConversationRequestError(201, copy.invalidServerResponse, false)
+  }
+  return body
+}
+
 export async function sendConversationMessage(
   conversationId: string,
   text: string,
   port: ConversationPort = defaultPort,
   getCsrf: () => Promise<string> = csrfToken,
+  attachmentIds: readonly string[] = [],
 ): Promise<{ readonly request_id: string }> {
   const body = await mutate(
     port, getCsrf,
     `${CONVERSATION_ENDPOINT}/${encodeURIComponent(conversationId)}/messages`,
-    JSON.stringify({ text }),
+    // O corpo tem a forma exata que o servidor aceita: `{text}` quando não há
+    // anexo, e `{text, attachments}` quando há. Mandar `attachments: []` seria
+    // uma terceira forma, e o servidor a recusaria - com razão.
+    JSON.stringify(attachmentIds.length === 0 ? { text } : { text, attachments: attachmentIds }),
   )
   if (!isRecord(body) || typeof body.request_id !== 'string' || body.request_id === '') {
     throw new ConversationRequestError(202, copy.invalidServerResponse, false)
@@ -168,6 +227,32 @@ function isOptionalCount(value: unknown): boolean {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/**
+ * A resposta do anexo, conferida campo a campo.
+ *
+ * Meia referência renderizada seria um anexo na tela que o servidor nunca
+ * confirmou, e a pessoa mandaria a mensagem acreditando que o arquivo foi
+ * junto.
+ */
+export function isConversationAttachment(value: unknown): value is ConversationAttachment {
+  return isRecord(value)
+    && typeof value.attachment_id === 'string' && value.attachment_id !== ''
+    && typeof value.name === 'string' && value.name !== ''
+    && typeof value.size === 'number' && Number.isSafeInteger(value.size) && value.size > 0
+    && ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'text/plain'].includes(value.media_type as string)
+}
+
+/** Base64 sem depender do que `btoa` faz sozinho: ele só fala latin1. */
+function base64Of(bytes: Uint8Array): string {
+  let binary = ''
+  // Em blocos porque `String.fromCharCode(...bytes)` com meio milhão de
+  // argumentos estoura a pilha do navegador.
+  for (let offset = 0; offset < bytes.length; offset += 8192) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 8192))
+  }
+  return btoa(binary)
 }
 
 /**

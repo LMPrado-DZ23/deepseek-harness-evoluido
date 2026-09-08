@@ -28,6 +28,7 @@ import {
   AssistantSessionLauncher,
   type AssistantRepositoryLaunchConfig,
 } from './assistant-session.js'
+import { AssistantAttachmentStore } from './assistant-attachments.js'
 import { AssistantConversationError, AssistantConversationService } from './assistant-conversation.js'
 import {
   StuckRunsError,
@@ -43,6 +44,7 @@ import {
   type AssistantConversationHttpConfig,
 } from './assistant-http.js'
 
+export * from './assistant-attachments.js'
 export * from './assistant-session.js'
 export * from './assistant-conversation.js'
 export * from './assistant-http.js'
@@ -205,6 +207,12 @@ export async function apply(ctx: Context, config: StudioWebConfig = {}): Promise
     tenancy: ctx.studioTenancy.service,
     launcher: assistantSessions,
     sessions: ctx.sessionController,
+    // Um guarda-anexos por instalação. Ele vive na memória deste processo de
+    // propósito: o anexo só precisa existir entre escolher o arquivo e apertar
+    // Enviar, e depois disso quem guarda é o Harness. Persistir aqui seria
+    // manter uma segunda cópia duradoura do arquivo de alguém - e obrigaria a
+    // um domínio novo para guardar o que ninguém pediu para guardar.
+    attachments: new AssistantAttachmentStore(),
     // Resolvido a cada uso, e não capturado aqui: `compaction` e `agents` podem
     // montar depois desta interface, e uma foto tirada no `apply` deixaria o
     // botão "Organizar conversa agora" morto para sempre. Também não entram em

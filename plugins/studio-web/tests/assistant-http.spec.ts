@@ -33,6 +33,9 @@ async function fixture(deadlineMs?: number) {
     send: vi.fn(async () => ({ accepted: true as const, request_id: 'req-1' })),
     cancel: vi.fn(() => ({ accepted: true as const })),
     compact: vi.fn(() => Promise.resolve({ accepted: true as const, organized: true, items: 4, tokens: 900 })),
+    attach: vi.fn(async (_session: unknown, _id: unknown, filename: string, bytes: Buffer) => ({
+      attachment_id: 'ref-1', name: filename, size: bytes.length, media_type: 'text/plain' as const,
+    })),
   }
   const allowedHosts: string[] = []
   const allowedOrigins: string[] = []
@@ -180,6 +183,16 @@ describe('superfície HTTP da conversa do assistente', () => {
       ['texto ausente', { method: 'POST', headers: json, body: JSON.stringify({}) }],
       ['texto não string', { method: 'POST', headers: json, body: JSON.stringify({ text: 42 }) }],
       ['campo extra', { method: 'POST', headers: json, body: JSON.stringify({ text: 'oi', tier: 'T3' }) }],
+      // A garantia continua existindo na forma NOVA: `{text}` e
+      // `{text, attachments}` passam, e absolutamente nada mais.
+      ['campo extra junto do anexo', { method: 'POST', headers: json, body: JSON.stringify({ text: 'oi', attachments: ['a'], tier: 'T3' }) }],
+      ['anexo sem texto', { method: 'POST', headers: json, body: JSON.stringify({ attachments: ['a'] }) }],
+      ['anexo que não é lista', { method: 'POST', headers: json, body: JSON.stringify({ text: 'oi', attachments: 'a' }) }],
+      ['lista de anexos vazia', { method: 'POST', headers: json, body: JSON.stringify({ text: 'oi', attachments: [] }) }],
+      ['anexo que não é string', { method: 'POST', headers: json, body: JSON.stringify({ text: 'oi', attachments: [7] }) }],
+      ['anexo com caminho dentro', { method: 'POST', headers: json, body: JSON.stringify({ text: 'oi', attachments: ['../outra/ref'] }) }],
+      ['anexos demais', { method: 'POST', headers: json, body: JSON.stringify({ text: 'oi', attachments: ['a', 'b', 'c', 'd', 'e', 'f'] }) }],
+      ['chave herdada não conta como chave própria', { method: 'POST', headers: json, body: '{"text":"oi","__proto__":{"attachments":["a"]},"x":1}' }],
       ['array', { method: 'POST', headers: json, body: JSON.stringify(['oi']) }],
       ['nulo', { method: 'POST', headers: json, body: 'null' }],
       ['grande demais', { method: 'POST', headers: json, body: JSON.stringify({ text: 'a'.repeat(70_000) }) }],
@@ -267,5 +280,154 @@ describe('superfície HTTP da conversa do assistente', () => {
     })
     expect(response.status).toBe(503)
     expect((await response.json() as { error: string }).error).toContain('não')
+  })
+})
+
+describe('anexos pela borda HTTP', () => {
+  const PNG64 = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]), Buffer.from('pixels'),
+  ]).toString('base64')
+
+  it('anexar é rota própria, só por POST, e nunca uma rota de leitura', () => {
+    expect(routeAssistantConversation('POST', `${ASSISTANT_CONVERSATION_PREFIX}/c1/attachments`))
+      .toEqual({ kind: 'attach', conversationId: 'c1' })
+    // GET devolveria o arquivo de volta e transformaria a referência opaca num
+    // endereço de download - exatamente o que ela existe para não ser.
+    expect(routeAssistantConversation('GET', `${ASSISTANT_CONVERSATION_PREFIX}/c1/attachments`))
+      .toEqual({ kind: 'method-not-allowed' })
+    expect(routeAssistantConversation('DELETE', `${ASSISTANT_CONVERSATION_PREFIX}/c1/attachments`))
+      .toEqual({ kind: 'method-not-allowed' })
+    // E não existe endereço por anexo: um segundo segmento é 404.
+    expect(routeAssistantConversation('GET', `${ASSISTANT_CONVERSATION_PREFIX}/c1/attachments/ref-1`))
+      .toEqual({ kind: 'not-found' })
+  })
+
+  it('anexa com a sessão do servidor e devolve 201 com a referência opaca', async () => {
+    const f = await fixture()
+    const response = await f.request(`${ASSISTANT_CONVERSATION_PREFIX}/conversa-1/attachments`, {
+      method: 'POST', headers: json,
+      body: JSON.stringify({ filename: 'desenho.png', content_base64: PNG64 }),
+    })
+    expect(response.status).toBe(201)
+    expect(await response.json()).toEqual({
+      attachment_id: 'ref-1', name: 'desenho.png', size: 14, media_type: 'text/plain',
+    })
+    const identitySession = await f.identity.authenticate.mock.results[0]!.value as { session_id: string }
+    const call = f.conversations.attach.mock.calls[0] as unknown as readonly unknown[]
+    expect(call[0]).toEqual(identitySession)
+    expect(call[1]).toBe('conversa-1')
+    // Os BYTES chegam ao serviço, não o base64 nem um caminho.
+    expect(Buffer.isBuffer(call[3])).toBe(true)
+  })
+
+  it('exige CSRF e sessão para anexar, como qualquer outra mutação', async () => {
+    const f = await fixture()
+    f.identity.validateCsrfToken.mockImplementationOnce(() => { throw new IdentityError('csrf', 'csrf') })
+    const response = await f.request(`${ASSISTANT_CONVERSATION_PREFIX}/conversa-1/attachments`, {
+      method: 'POST', headers: json,
+      body: JSON.stringify({ filename: 'a.txt', content_base64: 'b2k=' }),
+    })
+    expect(response.status).toBe(401)
+    expect(f.conversations.attach).not.toHaveBeenCalled()
+  })
+
+  it('recusa todo corpo de anexo que não seja exatamente {filename, content_base64}', async () => {
+    const f = await fixture()
+    const bad: Array<[string, unknown]> = [
+      ['sem nome', { content_base64: PNG64 }],
+      ['sem conteúdo', { filename: 'a.png' }],
+      ['nome vazio', { filename: '', content_base64: PNG64 }],
+      ['nome imenso', { filename: 'a'.repeat(4097), content_base64: PNG64 }],
+      ['nome não string', { filename: 7, content_base64: PNG64 }],
+      ['conteúdo não string', { filename: 'a.png', content_base64: 7 }],
+      // O tipo declarado pelo cliente NÃO existe no contrato: aceitá-lo seria
+      // deixar quem envia escolher em que gaveta o arquivo cai.
+      ['tipo declarado pelo cliente', { filename: 'a.png', content_base64: PNG64, content_type: 'image/png' }],
+      ['caminho declarado pelo cliente', { filename: 'a.png', content_base64: PNG64, path: '/tmp/a.png' }],
+      ['identificador escolhido pelo cliente', { filename: 'a.png', content_base64: PNG64, attachment_id: 'ref-9' }],
+      // `Buffer.from(..., 'base64')` engole lixo em silêncio; a borda não.
+      ['base64 inválido', { filename: 'a.png', content_base64: 'não é base64!!' }],
+      ['base64 truncado', { filename: 'a.png', content_base64: 'QQ' }],
+    ]
+    for (const [label, body] of bad) {
+      const response = await f.request(`${ASSISTANT_CONVERSATION_PREFIX}/conversa-1/attachments`, {
+        method: 'POST', headers: json, body: JSON.stringify(body),
+      })
+      expect(response.status, label).toBe(400)
+    }
+    expect(f.conversations.attach).not.toHaveBeenCalled()
+  })
+
+  it('o corpo do anexo tem teto próprio: maior que o da mensagem, e ainda assim finito', async () => {
+    const f = await fixture()
+    // 600 KB de base64 passariam pelo teto do anexo e morreriam no da mensagem
+    // se os dois fossem o mesmo número.
+    const grande = 'A'.repeat(600 * 1024)
+    const aceito = await f.request(`${ASSISTANT_CONVERSATION_PREFIX}/conversa-1/attachments`, {
+      method: 'POST', headers: json, body: JSON.stringify({ filename: 'g.bin', content_base64: grande }),
+    })
+    expect(aceito.status).toBe(201)
+    // E o teto do anexo continua sendo um teto.
+    const demais = await f.request(`${ASSISTANT_CONVERSATION_PREFIX}/conversa-1/attachments`, {
+      method: 'POST', headers: json, body: JSON.stringify({ filename: 'g.bin', content_base64: 'A'.repeat(1_100 * 1024) }),
+    })
+    expect(demais.status).toBe(400)
+  })
+
+  it('a mensagem carrega a referência, e a referência chega ao serviço como referência', async () => {
+    const f = await fixture()
+    const response = await f.request(`${ASSISTANT_CONVERSATION_PREFIX}/conversa-1/messages`, {
+      method: 'POST', headers: json,
+      body: JSON.stringify({ text: 'veja', attachments: ['ref-1', 'ref-2'] }),
+    })
+    expect(response.status).toBe(202)
+    const call = f.conversations.send.mock.calls[0] as unknown as readonly unknown[]
+    expect(call[2]).toBe('veja')
+    expect(call[4]).toEqual(['ref-1', 'ref-2'])
+  })
+
+  it('instalação sem anexos responde 503 explicado, em vez de aceitar e descartar', async () => {
+    const f = await fixture()
+    const { attach: _ignored, ...semAnexos } = f.conversations
+    const root = await mkdtemp(join(tmpdir(), 'dz23-conv-noattach-'))
+    temporary.push(root)
+    await writeFile(join(root, 'index.html'), '<main>DZ23 STUDIO</main>')
+    const identity = { authenticate: vi.fn(() => Promise.resolve({ session_id: 's' })), validateCsrfToken: vi.fn() }
+    const allowedHosts: string[] = []
+    const allowedOrigins: string[] = []
+    const server = createServer(createStudioWebHandler({
+      distDirectory: root, identity: identity as unknown as StudioIdentityService,
+      allowedHosts, allowedOrigins, assistantConversations: semAnexos,
+    }))
+    servers.push(server)
+    await new Promise<void>((done, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', done) })
+    const host = `127.0.0.1:${(server.address() as AddressInfo).port}`
+    allowedHosts.push(host)
+    allowedOrigins.push(`http://${host}`)
+    const response = await fetch(`http://${host}${ASSISTANT_CONVERSATION_PREFIX}/conversa-1/attachments`, {
+      method: 'POST',
+      headers: { host, origin: `http://${host}`, cookie: `${SESSION_COOKIE}=token`, 'x-dz23-csrf': 'csrf', ...json },
+      body: JSON.stringify({ filename: 'a.txt', content_base64: 'b2k=' }),
+    })
+    expect(response.status).toBe(503)
+  })
+
+  it('a recusa do serviço atravessa traduzida e sem vazar nada do disco', async () => {
+    const f = await fixture()
+    f.conversations.attach.mockRejectedValueOnce(
+      new AssistantConversationError('INVALID_MESSAGE', 'Este tipo de arquivo não é aceito.'),
+    )
+    const response = await f.request(`${ASSISTANT_CONVERSATION_PREFIX}/conversa-1/attachments`, {
+      method: 'POST', headers: json, body: JSON.stringify({ filename: 'a.bin', content_base64: 'b2k=' }),
+    })
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: 'Este tipo de arquivo não é aceito.' })
+
+    f.conversations.attach.mockRejectedValueOnce(new Error('EACCES /var/lib/studio/uploads'))
+    const inesperado = await f.request(`${ASSISTANT_CONVERSATION_PREFIX}/conversa-1/attachments`, {
+      method: 'POST', headers: json, body: JSON.stringify({ filename: 'a.bin', content_base64: 'b2k=' }),
+    })
+    expect(inesperado.status).toBe(500)
+    expect(await inesperado.text()).not.toContain('/var/lib/studio')
   })
 })

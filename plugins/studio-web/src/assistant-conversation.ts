@@ -9,6 +9,12 @@ import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionRecord, StudioIdentityService } from '@dz23-studio/identity'
 import { roleAllows } from '@dz23-studio/policy'
 import type { StudioTenancyService } from '@dz23-studio/tenancy'
+import type {
+  AssistantAttachmentReference,
+  AssistantAttachmentScope,
+  AssistantAttachmentStore,
+} from './assistant-attachments.js'
+import { MAX_ATTACHMENTS_PER_MESSAGE } from './assistant-attachments.js'
 import type { AssistantSessionLaunch, AssistantSessionLauncher } from './assistant-session.js'
 import { t } from './i18n.js'
 
@@ -82,6 +88,12 @@ export interface AssistantConversationServiceOptions {
    * para sempre, sem log que apontasse a causa.
    */
   readonly compaction?: () => AssistantCompactionPort | undefined
+  /**
+   * O guarda-anexos. Opcional porque uma instalação sem ele continua
+   * conversando: sem anexos a rota de envio recusa qualquer referência, em vez
+   * de aceitar e descartar em silêncio.
+   */
+  readonly attachments?: AssistantAttachmentStore
   readonly createRequestId?: () => string
 }
 
@@ -128,26 +140,84 @@ export class AssistantConversationService {
     }
   }
 
+  /**
+   * Guarda um arquivo e devolve a referência opaca que a conversa vai carregar.
+   *
+   * O CAMINHO nunca existe: os bytes chegam decodificados, o nome recebido é
+   * tratado como texto hostil e vira um nome só de exibição, e o que volta para
+   * o navegador é um identificador que não descreve lugar nenhum.
+   * @param identitySession - a sessão de quem anexou; é dela que sai o escopo.
+   * @param conversationId - a conversa dona do anexo.
+   * @param filename - o nome dado pela pessoa, sem nenhuma confiança.
+   * @param bytes - o conteúdo do arquivo.
+   * @returns a referência que a tela mostra e que o envio aceita.
+   */
+  async attach(
+    identitySession: SessionRecord,
+    conversationId: string,
+    filename: string,
+    bytes: Buffer,
+  ): Promise<AssistantAttachmentReference> {
+    this.#assertOwned(identitySession, conversationId, 'project.write')
+    const attachments = this.options.attachments
+    if (attachments === undefined) {
+      throw new AssistantConversationError('SESSION_UNAVAILABLE', t('assistant.serviceNotConfigured'))
+    }
+    return attachments.put(attachmentScope(identitySession, conversationId), filename, bytes)
+  }
+
+  /**
+   * @param identitySession - a sessão de quem enviou.
+   * @param conversationId - a conversa.
+   * @param text - o texto da mensagem.
+   * @param signal - cancelamento da requisição.
+   * @param attachmentIds - referências opacas já guardadas por `attach`. Vêm
+   * DEPOIS do sinal para não mudar a posição de nenhum argumento que já existia.
+   */
   async send(
     identitySession: SessionRecord,
     conversationId: string,
     text: string,
     signal: AbortSignal,
+    attachmentIds: readonly string[] = [],
   ): Promise<{ readonly accepted: true; readonly request_id: string }> {
     this.#assertOwned(identitySession, conversationId, 'project.write')
     assertPromptText(text)
+    if (attachmentIds.length > MAX_ATTACHMENTS_PER_MESSAGE) {
+      throw new AssistantConversationError('INVALID_MESSAGE', t('assistant.attachmentTooMany'))
+    }
+    const scope = attachmentScope(identitySession, conversationId)
+    // Resolver ANTES de falar com o Harness: uma referência de outro escopo tem
+    // de matar o envio inteiro, e não deixar meia mensagem entrar na conversa.
+    const attached = attachmentIds.length === 0 ? [] : this.#resolveAttachments(scope, attachmentIds)
     const requestId = this.#createRequestId()
     try {
       await this.options.sessions.prompt({
         requestId: requestId as SessionRequestId,
         sessionId: conversationId as SessionId,
         mode: 'queue',
-        content: [{ type: 'text', text }],
+        content: [{ type: 'text', text }, ...attached.map(item => promptPart(item))],
       }, signal)
-      return { accepted: true, request_id: requestId }
     } catch {
       throw new AssistantConversationError('SESSION_UNAVAILABLE', t('assistant.sendUnavailable'))
     }
+    // Só depois do aceite: um envio que falhou deixa a referência viva para a
+    // pessoa tentar de novo sem escolher o arquivo outra vez.
+    this.options.attachments?.consume(scope, attachmentIds)
+    return { accepted: true, request_id: requestId }
+  }
+
+  #resolveAttachments(
+    scope: AssistantAttachmentScope,
+    attachmentIds: readonly string[],
+  ): readonly { readonly reference: AssistantAttachmentReference; readonly bytes: Buffer }[] {
+    const attachments = this.options.attachments
+    if (attachments === undefined) {
+      // Sem guarda-anexos, TODA referência é desconhecida. A frase é a mesma de
+      // uma referência vencida, porque para quem enviou o efeito é o mesmo.
+      throw new AssistantConversationError('NOT_FOUND', t('assistant.attachmentMissing'))
+    }
+    return attachments.resolve(scope, attachmentIds)
   }
 
   /**
@@ -395,5 +465,40 @@ function isApprovalOutcome(value: unknown): value is 'allowed-once' | 'rejected'
 function assertPromptText(text: string): void {
   if (text.trim() === '' || text.includes('\0') || Buffer.byteLength(text, 'utf8') > MAX_PROMPT_BYTES) {
     throw new AssistantConversationError('INVALID_MESSAGE', t('assistant.invalidMessage'))
+  }
+}
+
+/** O escopo do anexo sai SEMPRE da sessão do servidor, nunca do corpo do pedido. */
+function attachmentScope(identitySession: SessionRecord, conversationId: string): AssistantAttachmentScope {
+  return {
+    userId: identitySession.user_id,
+    orgId: identitySession.org_id,
+    tenantId: identitySession.tenant_id,
+    conversationId,
+  }
+}
+
+/**
+ * O bloco que o Harness recebe.
+ *
+ * A imagem viaja como bytes (o Host os promove para uma referência durável
+ * dele); o texto viaja como texto, com o nome exibível anunciado antes do
+ * conteúdo para que o modelo saiba o que está lendo. Em nenhum dos dois casos
+ * atravessa um caminho: não existe caminho a atravessar.
+ */
+function promptPart(item: { readonly reference: AssistantAttachmentReference; readonly bytes: Buffer }): {
+  readonly type: 'text'; readonly text: string
+} | {
+  readonly type: 'image'; readonly mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif'; readonly data: string; readonly name: string
+} {
+  const { reference, bytes } = item
+  if (reference.media_type === 'text/plain') {
+    return { type: 'text', text: `${reference.name}\n${bytes.toString('utf8')}` }
+  }
+  return {
+    type: 'image',
+    mediaType: reference.media_type,
+    data: bytes.toString('base64'),
+    name: reference.name,
   }
 }

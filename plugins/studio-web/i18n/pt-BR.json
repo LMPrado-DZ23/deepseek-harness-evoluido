@@ -34,7 +34,15 @@
     "messageTooLarge": "Esta mensagem é grande demais para uma vez só. Divida em partes menores e envie de novo.",
     "interfaceUnavailable": "Não foi possível abrir a interface agora. Tente de novo em instantes; nada do seu trabalho foi perdido.",
     "readUnavailable": "Não consegui ler esta conversa agora. Ela continua guardada; tente de novo em instantes.",
-    "compactUnavailable": "Não foi possível organizar a conversa agora. Nada foi perdido."
+    "compactUnavailable": "Não foi possível organizar a conversa agora. Nada foi perdido.",
+    "attachmentDefaultName": "arquivo anexado",
+    "attachmentTooLarge": "Este arquivo é grande demais para ser anexado. O limite é 512 KB por arquivo.",
+    "attachmentTypeNotAccepted": "Este tipo de arquivo não é aceito. Envie uma imagem (PNG, JPEG, WebP ou GIF) ou um arquivo de texto.",
+    "attachmentRejectedSecret": "Este arquivo não foi anexado porque parece conter uma credencial. Nada dele foi guardado nem enviado. Retire a credencial e anexe de novo.",
+    "attachmentQuotaExceeded": "Esta conversa já tem anexos demais. Remova algum antes de anexar outro.",
+    "attachmentMissing": "Este anexo não está mais disponível. Anexe o arquivo de novo.",
+    "attachmentTooMany": "Uma mensagem aceita no máximo 5 anexos. Envie os outros em outra mensagem.",
+    "attachmentInvalidRequest": "Não consegui entender este anexo. Escolha o arquivo de novo."
   },
   "approvals": {
     "notConfigured": "Confirmações de ações sensíveis ainda não foram liberadas nesta instalação do Studio. Enquanto isso, nenhuma ação sensível é executada. Peça a quem administra o Studio para ativar esse recurso."
