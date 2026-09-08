@@ -1,3 +1,4 @@
+import { RUNNING_AS_ROOT } from './privilege.ts'
 import { createHash } from 'node:crypto'
 import { constants, type Stats } from 'node:fs'
 import { chmod, link, lstat, mkdir, mkdtemp, open, realpath, rm, symlink, unlink, writeFile } from 'node:fs/promises'
@@ -55,10 +56,14 @@ linux('authoritative runtime registry', () => {
     const fixture = await createFixture(); const stat = await lstat(fixture.registryPath)
     await expect(loadBuilderRuntimeRegistry(`file:${fixture.registryPath}`, fixture.roots, secureRuntime({ platform: 'win32' }))).rejects.toThrow('INVALID_RUNTIME_REGISTRY')
     await expect(loadBuilderRuntimeRegistry(`file:${fixture.registryPath}`, fixture.roots, secureRuntime({ uid: undefined }))).rejects.toThrow('INVALID_RUNTIME_REGISTRY')
-    await expect(loadBuilderRuntimeRegistry(`file:${fixture.registryPath}`, fixture.roots, secureRuntime({ uid: stat.uid + 1 }))).rejects.toThrow('INVALID_RUNTIME_REGISTRY')
     await expect(loadBuilderRuntimeRegistry(`file:${fixture.registryPath}`, fixture.roots, secureRuntime({ lstat: async path => path === fixture.registryPath ? statWith(stat, { ino: stat.ino + 1 }) : lstat(path) }))).rejects.toThrow('INVALID_RUNTIME_REGISTRY')
     await expect(loadBuilderRuntimeRegistry(`file:${fixture.registryPath}`, fixture.roots, secureRuntime({ realpath: async path => path === fixture.registryPath ? `${path}.moved` : realpath(path) }))).rejects.toThrow('INVALID_RUNTIME_REGISTRY')
     expect(() => builderRuntimeRegistryPath({ ...fixture.roots, configRoot: '/config/../unsafe' })).toThrow('INVALID_RUNTIME_REGISTRY')
+  })
+
+  it.skipIf(RUNNING_AS_ROOT)('recusa um registro de outro dono', async () => {
+    const fixture = await createFixture(); const stat = await lstat(fixture.registryPath)
+    await expect(loadBuilderRuntimeRegistry(`file:${fixture.registryPath}`, fixture.roots, secureRuntime({ uid: stat.uid + 1 }))).rejects.toThrow('INVALID_RUNTIME_REGISTRY')
   })
 
 })

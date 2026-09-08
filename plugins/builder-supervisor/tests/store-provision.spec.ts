@@ -1,3 +1,4 @@
+import { RUNNING_AS_ROOT } from './privilege.ts'
 import { createHash } from 'node:crypto'
 import { execFile, spawn } from 'node:child_process'
 import { chmod, link, lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, unlink, writeFile } from 'node:fs/promises'
@@ -87,11 +88,15 @@ linux('immutable builder template-store provisioning', () => {
     expect(await pathExists(posix.join(process.cwd(), '3'))).toBe(false)
   })
 
-  it('rejects an invalid flock binary, unsupported filesystems and every non-success guard outcome', async () => {
+  it.skipIf(RUNNING_AS_ROOT)('recusa um flock que não é o do sistema', async () => {
     const fixture = await createFixture()
     const fakeFlock = posix.join(fixture.root, 'fake-flock')
     await writeFile(fakeFlock, '#!/bin/sh\nexit 0\n', { mode: 0o755 })
     await expect(STORE_PROVISION_GUARD_TEST_ONLY.assertTrustedFlockBinary(fakeFlock)).rejects.toMatchObject({ code: 'PROVISION_RECOVERY_FAILED' })
+  })
+
+  it('rejects an invalid flock binary, unsupported filesystems and every non-success guard outcome', async () => {
+    const fixture = await createFixture()
     await expect(STORE_PROVISION_GUARD_TEST_ONLY.assertTrustedFlockBinary(posix.join(fixture.root, 'missing-flock'))).rejects.toMatchObject({ code: 'PROVISION_RECOVERY_FAILED' })
     await expect(STORE_PROVISION_GUARD_TEST_ONLY.assertTrustedFlockBinary('/usr/bin/flock')).resolves.toBeUndefined()
     await expect(STORE_PROVISION_GUARD_TEST_ONLY.assertProvisionGuardFilesystem('/mnt/c')).rejects.toMatchObject({ code: 'PROVISION_RECOVERY_FAILED' })

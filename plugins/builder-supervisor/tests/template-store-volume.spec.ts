@@ -1,3 +1,4 @@
+import { RUNNING_AS_ROOT } from './privilege.ts'
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, truncate, writeFile } from 'node:fs/promises'
@@ -306,6 +307,14 @@ describe('template store Docker volume materialization', () => {
     expect(() => validateTemplateStoreEntryCount(10_001)).toThrow('TEMPLATE_STORE_INVALID')
   })
 
+  it.runIf(process.platform === 'linux' && !RUNNING_AS_ROOT)('falha fechado quando a limpeza do estágio de download é impedida', async () => {
+    const fixture = manifestFixture()
+    const removeFailure = existingEngine(fixture.manifest, fixture.archive); removeFailure.blockDownloadStageRemoval = true
+    await expect(verifyTemplateStoreVolume(verifyOptions(removeFailure, fixture.manifest), AbortSignal.timeout(2_000))).rejects.toMatchObject({ code: 'TEMPLATE_STORE_CLEANUP_INCOMPLETE' })
+    expect(removeFailure.downloadStage).toBeDefined()
+    await chmod(removeFailure.downloadStage!, 0o700); await rm(removeFailure.downloadStage!, { recursive: true, force: true })
+  })
+
   it.runIf(process.platform === 'linux')('fails closed when a downloaded archive witness or host cleanup is inconsistent', async () => {
     const fixture = manifestFixture()
 
@@ -315,11 +324,6 @@ describe('template store Docker volume materialization', () => {
     const closeFailure = existingEngine(fixture.manifest, fixture.archive); closeFailure.failDownloadHandleClose = true
     await expect(verifyTemplateStoreVolume(verifyOptions(closeFailure, fixture.manifest), AbortSignal.timeout(2_000))).rejects.toMatchObject({ code: 'TEMPLATE_STORE_CLEANUP_INCOMPLETE' })
     await closeFailure.restoreDownloadHandle?.()
-
-    const removeFailure = existingEngine(fixture.manifest, fixture.archive); removeFailure.blockDownloadStageRemoval = true
-    await expect(verifyTemplateStoreVolume(verifyOptions(removeFailure, fixture.manifest), AbortSignal.timeout(2_000))).rejects.toMatchObject({ code: 'TEMPLATE_STORE_CLEANUP_INCOMPLETE' })
-    expect(removeFailure.downloadStage).toBeDefined()
-    await chmod(removeFailure.downloadStage!, 0o700); await rm(removeFailure.downloadStage!, { recursive: true, force: true })
 
     await expect(validateTemplateStoreArchive(shortReader(fixture.archive, 512) as Pick<FileHandle, 'read'>, fixture.archive.byteLength, '../bad', fixture.manifest.tree_sha256, false, AbortSignal.timeout(2_000))).rejects.toMatchObject({ code: 'TEMPLATE_STORE_INVALID' })
   })

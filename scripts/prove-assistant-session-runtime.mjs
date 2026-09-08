@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
+import { ASSISTANT_TOOL_NAMES } from '../plugins/assistant-bridge/lib/catalog.js'
 
 const execFileAsync = promisify(execFile)
 const studioRoot = resolve(process.cwd())
@@ -159,7 +160,12 @@ try {
   const agent = booted.ctx.agents.get(SessionId(first.session_id))
   assert.ok(agent, 'A sessão criada não possui Agent ativo no Harness.')
   const tools = booted.ctx.tools.schemas(agent).map(tool => tool.name).sort()
-  assert.equal(tools.filter(name => name.startsWith('studio_agent_') || name.startsWith('studio_team_')).length, 13)
+  // O número vem do catálogo, não de um literal. Ele já esteve cravado em 13 e
+  // ficou defasado no dia em que `studio_agent_resolve_unknown` entrou: a prova
+  // passava a reprovar uma sessão correta, e o único jeito de "consertar" seria
+  // mexer no número - exatamente o verde artificial que não se pode dar.
+  const governed = tools.filter(name => name.startsWith('studio_agent_') || name.startsWith('studio_team_'))
+  assert.deepEqual(governed, [...ASSISTANT_TOOL_NAMES].sort(), 'As ferramentas expostas na sessão divergem do catálogo da ponte.')
 
   const approvals = []
   approvalOff = booted.ctx.on('approval/request', (request) => {
@@ -247,7 +253,7 @@ try {
     agentPreset: inspected.meta.agentPreset,
     repository: inspected.meta.cwd,
     tools: tools.length,
-    governedTools: 13,
+    governedTools: governed.length,
     conversationTurn: realLocalModel ? 'PASS_WITH_REAL_LOCAL_MODEL' : 'PASS_WITH_DETERMINISTIC_PROVIDER',
     provider: realLocalModel ? `ollama/${localModel}` : 'studio-fake/studio-deterministic',
     approval: {
