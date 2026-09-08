@@ -24,10 +24,15 @@ COPY deploy/studio/Dockerfile deploy/studio/Dockerfile
 COPY pnpm-workspace.yaml pnpm-workspace.yaml
 COPY pnpm-workspace.release.yaml pnpm-workspace.release.yaml
 COPY pnpm-lock.release.yaml pnpm-lock.release.yaml
-COPY scripts/check-image-lock.mjs scripts/check-image-lock.mjs
 COPY scripts/fetch-verified-pnpm.mjs scripts/fetch-verified-pnpm.mjs
-RUN node scripts/check-image-lock.mjs \
- && node scripts/fetch-verified-pnpm.mjs --output /tmp/pnpm.tgz \
+# `check-image-lock.mjs` NAO roda aqui: ele confere, entre outras coisas, que
+# todo pacote do repositorio esta no lock de release, e este estagio copia sete
+# arquivos de proposito, sem `plugins/` nem `apps/`. Com zero pacotes visiveis o
+# portao falhava com "nenhum pacote do repositorio foi encontrado" — e falhava
+# CERTO: um portao que passa com zero itens nao e um portao. Ele ja roda no
+# estagio `build`, depois do `COPY . .`, onde tem o contexto inteiro, e e la que
+# ele decide. Rodar duas vezes so servia para quebrar a construcao inteira.
+RUN node scripts/fetch-verified-pnpm.mjs --output /tmp/pnpm.tgz \
  && npm install --global --ignore-scripts --no-audit --no-fund /tmp/pnpm.tgz \
  && rm /tmp/pnpm.tgz \
  && test "$(pnpm --version)" = "11.7.0"
