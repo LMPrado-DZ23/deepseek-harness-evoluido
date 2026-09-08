@@ -19,10 +19,72 @@ export const integrationPermissionSchema = z.enum([
 export type IntegrationPermission = z.infer<typeof integrationPermissionSchema>
 
 /**
- * Integration manifest v1 (D16). `signature` is an Ed25519 signature (base64)
- * over the canonical JSON of the manifest without the `signature` field.
+ * De onde a integração veio — o requisito X-02.
+ *
+ * O manifesto v1 dizia QUEM publicou e o que ela pede fazer, e não dizia DE
+ * ONDE ela veio nem SOB QUE LICENÇA. Sem isso, a assinatura provava só que
+ * aquele publicador assinou aquele texto: ela não permitia a ninguém ir até a
+ * fonte e conferir que o texto descreve o que está lá.
  */
-export const integrationManifestSchema = z.object({
+export const integrationProvenanceSchema = z.object({
+  /** O endereço público de onde ela vem. Só http(s): um `file:` seria o disco de quem hospeda. */
+  source_url: z.string().url().refine(value => /^https?:\/\//u.test(value), 'http(s) only'),
+  /** O commit exato. `null` quando a origem não é um repositório versionado, e nunca um valor inventado. */
+  commit: z.string().regex(/^[a-f0-9]{40}$/u).nullable(),
+  /** O hash do artefato publicado. É ele que liga este manifesto a bytes. */
+  artifact_sha256: z.string().regex(/^[a-f0-9]{64}$/u),
+  /** Identificador SPDX. Texto livre aqui deixaria "grátis" passar por licença. */
+  license: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9.+-]{0,63}$/u),
+  /** A faixa de versões do Studio em que ela declara funcionar. */
+  compatibility: z.object({ studio: z.string().min(1).max(64) }).strict(),
+}).strict()
+
+/**
+ * O que a integração declara que PRECISA tocar.
+ *
+ * Declarar não é receber: isto é a promessa do publicador, escrita antes de
+ * alguém ligar a integração, para que a decisão de ligar seja tomada com a
+ * lista na frente. Um manifesto que não diz que fala com a rede e depois fala
+ * com a rede é um manifesto que mentiu — e mentir por escrito é auditável,
+ * enquanto não dizer nada não é.
+ */
+export const integrationCapabilitiesSchema = z.object({
+  network: z.object({
+    /**
+     * Os endereços com quem ela fala. `*` sozinho é RECUSADO: uma integração
+     * que declara falar com a internet inteira não declarou nada, e a lista
+     * existe justamente para ser lida por quem decide.
+     */
+    egress: z.array(z.string().regex(/^(?!\*$)[a-z0-9*][a-z0-9.*-]{0,253}$/u)).max(50),
+  }).strict(),
+  filesystem: z.object({
+    /** Caminhos RELATIVOS. Um caminho absoluto seria o disco de quem hospeda. */
+    read: z.array(z.string().regex(/^(?!\/)[^\0]{1,200}$/u)).max(50),
+    write: z.array(z.string().regex(/^(?!\/)[^\0]{1,200}$/u)).max(50),
+  }).strict(),
+  /**
+   * Os segredos que ela usa, POR REFERÊNCIA.
+   *
+   * O formato é o mesmo do cofre, e nunca um valor: um manifesto é um
+   * documento público e assinado, e um segredo dentro dele estaria publicado e
+   * assinado junto.
+   */
+  secrets: z.array(secretRefSchema).max(20),
+  /** As ferramentas que ela expõe, pelo nome. */
+  tools: z.array(z.string().regex(/^[a-z][a-z0-9_.-]{0,63}$/u)).max(100),
+}).strict()
+
+/**
+ * Integration manifest v1 (D16) e v2 (X-02). `signature` is an Ed25519
+ * signature (base64) over the canonical JSON of the manifest without the
+ * `signature` field.
+ *
+ * As duas versões convivem: um manifesto v1 já assinado continua verificando
+ * exatamente como antes. Fazer v2 substituir v1 invalidaria toda assinatura já
+ * emitida — e uma migração forçada de manifesto é a forma mais rápida de fazer
+ * alguém desligar a verificação para voltar a trabalhar.
+ */
+const integrationManifestV1Schema = z.object({
   schema_version: z.literal(1),
   id: z.string().regex(/^[a-z][a-z0-9-]{1,63}$/u),
   // NOT `.trim()`: the signature is verified over the manifest as supplied, so a schema that
@@ -37,7 +99,30 @@ export const integrationManifestSchema = z.object({
   description: z.string().max(500).regex(/^(\S(.*\S)?)?$/su, 'no-padding').optional(),
   signature: z.string().base64().optional(),
 }).strict()
+
+const integrationManifestV2Schema = integrationManifestV1Schema.extend({
+  schema_version: z.literal(2),
+  provenance: integrationProvenanceSchema,
+  capabilities: integrationCapabilitiesSchema,
+}).strict()
+
+export const integrationManifestSchema = z.discriminatedUnion('schema_version', [
+  integrationManifestV1Schema,
+  integrationManifestV2Schema,
+])
 export type IntegrationManifest = z.infer<typeof integrationManifestSchema>
+export type IntegrationManifestV2 = z.infer<typeof integrationManifestV2Schema>
+export type IntegrationProvenance = z.infer<typeof integrationProvenanceSchema>
+export type IntegrationCapabilities = z.infer<typeof integrationCapabilitiesSchema>
+
+/**
+ * Quando o manifesto diz de onde veio e o que toca.
+ * @param manifest - o manifesto.
+ * @returns se ele é v2.
+ */
+export function declaresProvenance(manifest: IntegrationManifest | null): manifest is IntegrationManifestV2 {
+  return manifest?.schema_version === 2
+}
 
 export const verificationSchema = z.enum(['verified', 'unverified', 'invalid'])
 export type Verification = z.infer<typeof verificationSchema>

@@ -2,7 +2,7 @@ import { createPublicKey, verify } from 'node:crypto'
 import type { PolicyTier } from '@dz23-studio/policy'
 import { z } from 'zod'
 import { t } from './i18n.js'
-import { integrationManifestSchema, type IntegrationKind, type IntegrationManifest, type IntegrationPermission } from './model.js'
+import { declaresProvenance, integrationManifestSchema, type IntegrationKind, type IntegrationManifest, type IntegrationPermission } from './model.js'
 
 export type ManifestVerification = 'verified' | 'unverified' | 'invalid'
 
@@ -54,6 +54,64 @@ export const PERMISSION_FLOOR: Readonly<Record<IntegrationPermission, PolicyTier
   'secrets.read': 'T3',
 }
 
+/**
+ * Capacidade declarada (v2) → permissão que ela obriga a pedir, e piso.
+ *
+ * Um manifesto v2 diz DUAS coisas sobre a mesma realidade: o que ele pede
+ * (`permissions`, que é o que o Studio concede) e o que ele diz que toca
+ * (`capabilities`, que é o que a pessoa lê antes de ligar). Elas têm que
+ * fechar. Quando não fecham, o documento está errado de um dos dois lados — e
+ * o errado a fazer é NÃO escolher qual, e sim recusar tratá-lo como
+ * verificado, porque a assinatura prova que o publicador escreveu aquilo, não
+ * que aquilo é coerente.
+ */
+export const CAPABILITY_RULES = [
+  { capability: 'network.egress', permission: 'network.outbound', floor: 'T2' },
+  { capability: 'filesystem.write', permission: 'filesystem.workspace', floor: 'T2' },
+  { capability: 'secrets', permission: 'secrets.read', floor: 'T3' },
+] as const satisfies readonly { readonly capability: string, readonly permission: IntegrationPermission, readonly floor: PolicyTier }[]
+
+/** As listas declaradas, por nome de capacidade, para uma regra poder olhar qualquer uma delas. */
+function declaredLists(manifest: IntegrationManifest): Readonly<Record<string, readonly string[]>> {
+  if (!declaresProvenance(manifest)) return {}
+  return {
+    'network.egress': manifest.capabilities.network.egress,
+    'filesystem.write': manifest.capabilities.filesystem.write,
+    secrets: manifest.capabilities.secrets,
+  }
+}
+
+/**
+ * As contradições entre o que o manifesto declara tocar e o que ele pede.
+ *
+ * Vale nos dois sentidos. Declarar egress sem pedir `network.outbound` é
+ * prometer uma coisa e pedir outra; pedir `network.outbound` e não nomear
+ * ninguém é pedir a internet inteira com a lista em branco, que é exatamente o
+ * que a recusa do `*` no schema já impede escrever de forma explícita.
+ * @param manifest - o manifesto avaliado.
+ * @returns as razões, já traduzidas, ou lista vazia quando fecha.
+ */
+export function capabilityIncoherences(manifest: IntegrationManifest): readonly string[] {
+  if (!declaresProvenance(manifest)) return []
+  const lists = declaredLists(manifest)
+  const reasons: string[] = []
+  for (const rule of CAPABILITY_RULES) {
+    const declared = lists[rule.capability]!.length > 0
+    const asked = manifest.permissions.includes(rule.permission)
+    if (declared && !asked) reasons.push(t('manifest.reasonCapabilityWithoutPermission', { capability: rule.capability, permission: rule.permission }))
+    if (asked && !declared) reasons.push(t('manifest.reasonPermissionWithoutCapability', { permission: rule.permission }))
+  }
+  return reasons
+}
+
+/** O piso que as capacidades declaradas impõem sozinhas, mesmo que a permissão correspondente não tenha sido pedida. */
+export function capabilityFloor(manifest: IntegrationManifest): PolicyTier {
+  const lists = declaredLists(manifest)
+  let floor: PolicyTier = 'T0'
+  for (const rule of CAPABILITY_RULES) if ((lists[rule.capability] ?? []).length > 0) floor = maxTier(floor, rule.floor)
+  return floor
+}
+
 /** Any endpoint that is not loopback is "talks to the outside world", whatever the kind. */
 export const EXTERNAL_ENDPOINT_FLOOR: PolicyTier = 'T2'
 
@@ -68,7 +126,8 @@ export function policyFloor(kind: IntegrationKind, manifest: IntegrationManifest
   // with an endpoint) pointing anywhere was T1/T0 and turned on with no confirmation at all.
   if (manifest.endpoint !== undefined && !isLoopbackEndpoint(manifest.endpoint)) floor = maxTier(floor, EXTERNAL_ENDPOINT_FLOOR)
   for (const permission of manifest.permissions) floor = maxTier(floor, floorOf(PERMISSION_FLOOR, permission))
-  return floor
+  // Defesa em profundidade: se declarou que toca, o piso sobe mesmo que não tenha pedido a permissão.
+  return maxTier(floor, capabilityFloor(manifest))
 }
 
 /** A table lookup that cannot inherit from `Object.prototype` and never answers "no floor". */
@@ -125,9 +184,9 @@ export function evaluateManifest(input: unknown, publisherKeys: PublisherKeys): 
   }
   const manifest = parsed.data
   const declaredTier = effectiveTier(manifest.kind, manifest)
-  const unverified = (reason: string, verification: 'unverified' | 'invalid'): ManifestEvaluation => {
+  const unverified = (reason: string | readonly string[], verification: 'unverified' | 'invalid'): ManifestEvaluation => {
     const tier = maxTier(declaredTier, UNVERIFIED_FLOOR)
-    const reasons = [reason]
+    const reasons = [...(typeof reason === 'string' ? [reason] : reason)]
     if (tier !== manifest.tier) reasons.push(t('manifest.reasonUnverifiedTier', { tier, declared: manifest.tier ?? t('manifest.tierAbsent') }))
     return { manifest, verification, effectiveTier: tier, reasons }
   }
@@ -141,6 +200,10 @@ export function evaluateManifest(input: unknown, publisherKeys: PublisherKeys): 
     valid = verify(null, canonicalManifestBytes(input as Record<string, unknown>), key, Buffer.from(manifest.signature, 'base64'))
   } catch { valid = false }
   if (!valid) return unverified(t('manifest.reasonSignatureInvalid'), 'invalid')
+  // A assinatura só prova QUEM escreveu. Um documento assinado que se contradiz
+  // não vira verdade por estar assinado: ele não chega a `verified`.
+  const incoherences = capabilityIncoherences(manifest)
+  if (incoherences.length > 0) return unverified([t('manifest.reasonIncoherentManifest'), ...incoherences], 'unverified')
   const reasons: string[] = []
   if (manifest.tier !== declaredTier) reasons.push(t('manifest.reasonTier', { tier: declaredTier, declared: manifest.tier ?? t('manifest.tierAbsent') }))
   return { manifest, verification: 'verified', effectiveTier: declaredTier, reasons }

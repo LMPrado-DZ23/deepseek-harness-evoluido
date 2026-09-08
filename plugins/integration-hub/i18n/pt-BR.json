@@ -72,7 +72,10 @@
     "reasonInvalidField": "Campo do manifesto inválido ou ausente: {field}",
     "reasonTier": "Nível de confiança aplicado: {tier} (declarado: {declared}).",
     "reasonUnverifiedTier": "Sem verificação, o nível de confiança sobe para {tier} (declarado: {declared}).",
-    "tierAbsent": "nenhum"
+    "tierAbsent": "nenhum",
+    "reasonCapabilityWithoutPermission": "Declara que usa {capability} mas não pede a permissão {permission}.",
+    "reasonPermissionWithoutCapability": "Pede a permissão {permission} sem dizer com quem fala nem o que toca.",
+    "reasonIncoherentManifest": "O manifesto está assinado, mas se contradiz: o que ele diz que toca não bate com o que ele pede."
   },
   "smtp": {
     "testSubject": "Teste de envio do DZ23 STUDIO",
