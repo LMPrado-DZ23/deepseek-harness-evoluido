@@ -9,6 +9,7 @@ import {
   type ConversationEvent,
   type ConversationPort,
 } from './conversationApi'
+import { PendingApprovals } from './PendingApprovals'
 import {
   applySnapshot,
   compactionView,
@@ -152,6 +153,10 @@ export function Conversation({ conversationId, port, getCsrf, pollMs = CONVERSAT
         <p>{message.text}</p>
       </li>)}
     </ol>
+
+    {/* Fica ACIMA do estado e do compositor: uma permissão esperando é a única
+        coisa na tela que bloqueia o trabalho, então é a primeira que a pessoa vê. */}
+    <PendingApprovals {...(port === undefined ? {} : { port })} {...(getCsrf === undefined ? {} : { getCsrf })} />
 
     {compaction === null ? null : <CompactionBand view={compaction} />}
 

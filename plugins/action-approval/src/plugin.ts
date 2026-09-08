@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto'
 import { answerHarnessApproval } from './answerer.js'
 import { studioActionApprovalsDomainSpec, type ApprovalKey } from './domain.js'
 import { assertValidApproval, type ApprovalRecord } from './model.js'
-import { ApprovalConflictError, type ActionApprovalRepository } from './repository.js'
+import { ApprovalConflictError, inScope, type ActionApprovalRepository } from './repository.js'
 import { APPROVAL_TTL_MS, StudioActionApprovalService, type ApprovalStrongIdentityPort } from './service.js'
 
 export const name = 'dz23-studio-action-approval'
@@ -38,6 +38,23 @@ export class DomainActionApprovalRepository implements ActionApprovalRepository 
     // uma aprovação silenciosa.
     assertValidApproval(row)
     return row
+  }
+
+  async listForActor(scope: {
+    readonly userId: string
+    readonly orgId: string
+    readonly tenantId: string
+    readonly sessionId: string
+  }): Promise<readonly ApprovalRecord[]> {
+    const rows: ApprovalRecord[] = []
+    for (const [, row] of this.table.entries()) {
+      if (!inScope(row, scope)) continue
+      // Uma linha corrompida recusa a listagem inteira: melhor a pessoa ver um
+      // erro do que uma lista que silenciosamente esconde um pedido.
+      assertValidApproval(row)
+      rows.push(row)
+    }
+    return await Promise.resolve(rows)
   }
 
   async put(record: ApprovalRecord, expectedState: ApprovalRecord['state'] | 'new'): Promise<void> {

@@ -9,6 +9,7 @@ const MAX_BODY_BYTES = 4 * 1024
 const APPROVAL_ID = /^apv-[a-f0-9]{64}$/u
 
 export type ApprovalRoute =
+  | { readonly kind: 'list' }
   | { readonly kind: 'confirm'; readonly approvalId: string }
   | { readonly kind: 'deny'; readonly approvalId: string }
   | { readonly kind: 'read'; readonly approvalId: string }
@@ -22,7 +23,7 @@ export type ApprovalRoute =
  */
 export function routeApproval(method: string | undefined, pathname: string): ApprovalRoute | undefined {
   if (pathname !== APPROVAL_PREFIX && !pathname.startsWith(`${APPROVAL_PREFIX}/`)) return undefined
-  if (pathname === APPROVAL_PREFIX) return { kind: 'not-found' }
+  if (pathname === APPROVAL_PREFIX) return method === 'GET' ? { kind: 'list' } : { kind: 'method-not-allowed' }
   const segments = pathname.slice(`${APPROVAL_PREFIX}/`.length).split('/')
   let approvalId: string
   try {
@@ -63,6 +64,10 @@ export async function handleApproval(
   if (route.kind === 'method-not-allowed') return { status: 405, body: { error: t('errors.methodNotAllowed') } }
   if (route.kind === 'not-found') return { status: 404, body: { error: t('errors.routeNotFound') } }
   const actor = await config.authenticate(request)
+  if (route.kind === 'list') {
+    const open = await config.service.listOpen(actor)
+    return { status: 200, body: { approvals: open.map(publicView) } }
+  }
   if (route.kind !== 'read') {
     config.assertCsrf(request, actor)
     await drainBody(request)

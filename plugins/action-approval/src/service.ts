@@ -115,6 +115,30 @@ export class StudioActionApprovalService {
     return record
   }
 
+  /**
+   * Pedidos abertos deste escopo exato, do mais antigo para o mais novo. É o
+   * que a tela precisa para mostrar "confirme isto": sem uma listagem, a pessoa
+   * teria de adivinhar o identificador do pedido.
+   *
+   * O que já venceu é expirado na leitura e NÃO aparece como pendente: mostrar
+   * um pedido morto como confirmável seria mentir para quem vai clicar.
+   * @param actor - identidade e escopo de quem está perguntando.
+   * @returns os pedidos ainda abertos, em ordem de criação.
+   */
+  async listOpen(actor: ApprovalActor): Promise<readonly ApprovalRecord[]> {
+    const rows = await this.options.repository.listForActor(actor)
+    const open: ApprovalRecord[] = []
+    for (const row of rows) {
+      if (row.state !== 'PENDING' && row.state !== 'AVAILABLE') continue
+      if (this.#isExpired(row)) {
+        await this.#expire(row).catch(() => undefined)
+        continue
+      }
+      open.push(row)
+    }
+    return open.sort((left, right) => Date.parse(left.created_at) - Date.parse(right.created_at))
+  }
+
   /** A pessoa confirma. É a única coisa que o cliente pode fazer, junto com negar. */
   confirm(actor: ApprovalActor, id: string): Promise<ApprovalRecord> {
     return this.#mutex.run(id, () => this.#confirmLocked(actor, id))

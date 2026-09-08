@@ -7,6 +7,17 @@ import { assertValidApproval, type ApprovalRecord } from './model.js'
  */
 export interface ActionApprovalRepository {
   get(approvalId: string): Promise<ApprovalRecord | undefined>
+  /**
+   * Todos os pedidos de um escopo exato. Filtrar é obrigação de quem
+   * implementa: uma listagem que devolvesse a linha de outra pessoa seria um
+   * vazamento entre inquilinos, não um detalhe de desempenho.
+   */
+  listForActor(scope: {
+    readonly userId: string
+    readonly orgId: string
+    readonly tenantId: string
+    readonly sessionId: string
+  }): Promise<readonly ApprovalRecord[]>
   /** Escrita condicionada ao estado lido, para que duas confirmações concorrentes não gerem dois recibos. */
   put(record: ApprovalRecord, expectedState: ApprovalRecord['state'] | 'new'): Promise<void>
 }
@@ -72,10 +83,39 @@ export class InMemoryActionApprovalRepository implements ActionApprovalRepositor
     return Promise.resolve()
   }
 
+  listForActor(scope: {
+    readonly userId: string
+    readonly orgId: string
+    readonly tenantId: string
+    readonly sessionId: string
+  }): Promise<readonly ApprovalRecord[]> {
+    this.#throwIfArmed()
+    const rows: ApprovalRecord[] = []
+    for (const row of this.#rows.values()) {
+      if (!inScope(row, scope)) continue
+      assertValidApproval(row)
+      rows.push(row)
+    }
+    return Promise.resolve(rows)
+  }
+
   #throwIfArmed(): void {
     const failure = this.#failure
     if (failure === undefined) return
     this.#failure = undefined
     throw failure
   }
+}
+
+/** Um pedido pertence ao escopo exato: pessoa, sessão, organização e inquilino. */
+export function inScope(record: ApprovalRecord, scope: {
+  readonly userId: string
+  readonly orgId: string
+  readonly tenantId: string
+  readonly sessionId: string
+}): boolean {
+  return record.user_id === scope.userId
+    && record.session_id === scope.sessionId
+    && record.org_id === scope.orgId
+    && record.tenant_id === scope.tenantId
 }

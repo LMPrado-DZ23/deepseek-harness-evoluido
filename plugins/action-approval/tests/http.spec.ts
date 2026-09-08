@@ -44,9 +44,13 @@ describe('M90-A — superfície HTTP', () => {
   it('não existe rota pública para CRIAR uma confirmação', () => {
     // Nenhum método, em nenhuma forma do prefixo, cria coisa alguma.
     for (const method of ['POST', 'PUT', 'PATCH', 'GET', 'DELETE']) {
-      expect(routeApproval(method, APPROVAL_PREFIX)).toEqual({ kind: 'not-found' })
       expect(routeApproval(method, `${APPROVAL_PREFIX}/create`)).toEqual({ kind: 'not-found' })
       expect(routeApproval(method, `${APPROVAL_PREFIX}/${ID}/request`)).toEqual({ kind: 'not-found' })
+    }
+    // O prefixo puro LÊ a lista de pendentes; nenhum método mutante existe ali.
+    expect(routeApproval('GET', APPROVAL_PREFIX)).toEqual({ kind: 'list' })
+    for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+      expect(routeApproval(method, APPROVAL_PREFIX)).toEqual({ kind: 'method-not-allowed' })
     }
     // As únicas formas que existem.
     expect(routeApproval('POST', `${APPROVAL_PREFIX}/${ID}/confirm`)).toEqual({ kind: 'confirm', approvalId: ID })
@@ -54,6 +58,55 @@ describe('M90-A — superfície HTTP', () => {
     expect(routeApproval('GET', `${APPROVAL_PREFIX}/${ID}`)).toEqual({ kind: 'read', approvalId: ID })
     // Fora do prefixo, o roteador não opina.
     expect(routeApproval('GET', '/studio/outro')).toBeUndefined()
+  })
+
+  it('lista somente os pedidos abertos de quem está perguntando, sem fingerprint', async () => {
+    const h = harness()
+    const pending = await h.service.request(descriptor())
+    const confirmed = await h.service.request({ ...descriptor(), request_id: 'req-2', subject_id: 'project-2' })
+    await h.service.confirm(actor, confirmed.approval_id)
+    const denied = await h.service.request({ ...descriptor(), request_id: 'req-3', subject_id: 'project-3' })
+    await h.service.deny(actor, denied.approval_id)
+    // De outra pessoa, no mesmo armazenamento: nunca pode aparecer.
+    await h.service.request({ ...descriptor(), user_id: 'user-2', request_id: 'req-4', subject_id: 'project-4' })
+
+    const outcome = await handleApproval(fakeRequest(), routeApproval('GET', APPROVAL_PREFIX)!, h.config)
+    expect(outcome.status).toBe(200)
+    const body = outcome.body as { readonly approvals: readonly { readonly approval_id: string, readonly state: string }[] }
+    expect(body.approvals.map(row => row.approval_id)).toEqual([pending.approval_id, confirmed.approval_id])
+    expect(body.approvals.map(row => row.state)).toEqual(['PENDING', 'AVAILABLE'])
+    expect(JSON.stringify(body)).not.toContain(FINGERPRINT)
+    // Ler a lista não muda nada, então não exige CSRF.
+    expect(h.assertCsrf).not.toHaveBeenCalled()
+  })
+
+  it('um pedido vencido some da lista e é expirado na leitura', async () => {
+    const repository = new InMemoryActionApprovalRepository()
+    let now = new Date('2026-09-07T12:00:00.000Z')
+    const service = new StudioActionApprovalService({
+      repository, identity: { strongIdentityVerified: () => true }, now: () => now,
+    })
+    const config = { service, authenticate: async () => actor, assertCsrf: () => {} }
+    const created = await service.request(descriptor())
+    now = new Date('2026-09-07T12:10:00.000Z')
+    const outcome = await handleApproval(fakeRequest(), routeApproval('GET', APPROVAL_PREFIX)!, config)
+    expect(outcome.body).toEqual({ approvals: [] })
+    // O vencimento ficou GRAVADO: a próxima leitura já encontra EXPIRED.
+    await expect(service.get(actor, created.approval_id)).resolves.toMatchObject({ state: 'EXPIRED' })
+  })
+
+  it('um pedido vencido some da lista mesmo quando não dá para gravar o vencimento', async () => {
+    const repository = new InMemoryActionApprovalRepository()
+    let now = new Date('2026-09-07T12:00:00.000Z')
+    const service = new StudioActionApprovalService({
+      repository, identity: { strongIdentityVerified: () => true }, now: () => now,
+    })
+    await service.request(descriptor())
+    now = new Date('2026-09-07T12:10:00.000Z')
+    // A gravação do vencimento falha. A lista não pode, por causa disso,
+    // voltar a mostrar um pedido morto como confirmável.
+    repository.interceptNextPut(() => { throw new Error('armazenamento indisponível') })
+    await expect(service.listOpen(actor)).resolves.toEqual([])
   })
 
   it('método trocado nunca vira outra ação e identificador hostil morre na borda', () => {

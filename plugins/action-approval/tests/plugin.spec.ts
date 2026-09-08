@@ -19,6 +19,7 @@ function table() {
   const rows = new Map<string, ApprovalRecord>()
   return {
     rows,
+    entries: () => rows.entries(),
     get: (key: string) => Promise.resolve(rows.get(key)),
     put: (key: string, value: ApprovalRecord) => { rows.set(key, value); return Promise.resolve() },
   }
@@ -54,6 +55,25 @@ describe('persistência durável da autoridade de confirmação', () => {
     await expect(repository.put(corrupt, 'new')).rejects.toThrow()
     rows.rows.set(corrupt.approval_id, corrupt)
     await expect(repository.get(corrupt.approval_id)).rejects.toThrow()
+  })
+
+  it('a listagem durável devolve só o escopo exato e recusa uma linha corrompida', async () => {
+    const rows = table()
+    const repository = new DomainActionApprovalRepository(rows as never)
+    const scope = { userId: 'user-1', orgId: 'org-1', tenantId: 'tenant-1', sessionId: 'session-1' }
+    await repository.put(record(), 'new')
+    for (const [index, other] of [
+      { user_id: 'user-2' }, { org_id: 'org-2' }, { tenant_id: 'tenant-2' }, { session_id: 'session-2' },
+    ].entries()) {
+      await repository.put(record({ ...other, approval_id: `apv-${String(index).repeat(64)}` }), 'new')
+    }
+    const mine = await repository.listForActor(scope)
+    expect(mine.map(row => row.approval_id)).toEqual([record().approval_id])
+
+    // Uma linha corrompida recusa a listagem inteira: melhor um erro do que uma
+    // lista que esconde silenciosamente um pedido.
+    rows.rows.set('apv-corrompida', record({ state: 'AVAILABLE', confirmed_at: null }))
+    await expect(repository.listForActor(scope)).rejects.toThrow()
   })
 
   it('monta o serviço sobre o domínio e liga a identidade forte real', async () => {

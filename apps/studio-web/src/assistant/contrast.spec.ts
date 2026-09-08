@@ -46,6 +46,7 @@ describe('contraste da conversa', () => {
       ['balão da pessoa', '.conversation-item p,.conversation-item strong', '.conversation-item.message-user'],
       ['faixa de compactação', '.compaction-band strong', '.compaction-band'],
       ['campo de texto', '.conversation-composer textarea', '.conversation-composer textarea'],
+      ['pedido de confirmação', '.approval-item p,.approval-action', '.approval-item'],
     ]
     for (const [label, foregroundSelector, backgroundSelector] of pairs) {
       const foreground = declaredValue(foregroundSelector, 'color')
@@ -63,13 +64,16 @@ describe('contraste da conversa', () => {
       for (const rule of block.matchAll(/([^{}\n]+)\{([^}]*)\}/gu)) {
         const selector = (rule[1] ?? '').trim()
         const body = rule[2] ?? ''
-        if (!/background\s*:\s*#/u.test(body)) continue
-        if (!/^\.(conversation|compaction)/u.test(selector)) continue
+        // As duas buscas são ancoradas no início da declaração: sem a âncora,
+        // `border-color:#...` casava com `color:` e a regra passava sem nunca
+        // ter declarado a cor do texto - um guarda que não podia falhar.
+        if (!/(?:^|;)\s*background(?:-color)?\s*:\s*#/u.test(body)) continue
+        if (!/^\.(conversation|compaction|approval)/u.test(selector)) continue
         // Elementos puramente decorativos não carregam texto. A lista é curta e
         // explícita de propósito: cada entrada aqui é uma promessa de que
         // ninguém vai ler nada em cima daquele fundo.
         if (DECORATIVE_SELECTORS.has(selector)) continue
-        expect(body, `${selector} escurece o fundo sem declarar a cor do texto`).toMatch(/color\s*:\s*#/u)
+        expect(body, `${selector} escurece o fundo sem declarar a cor do texto`).toMatch(/(?:^|;)\s*color\s*:\s*#/u)
       }
     }
   })
