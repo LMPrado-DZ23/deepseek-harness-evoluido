@@ -53,7 +53,7 @@
     "integrityVerified": "integridade conferida",
     "integrityFailed": "integridade recusada",
     "integrityUnknown": "integridade não registrada",
-    "criteria": "critérios conferidos",
+    "criteria": "critérios",
     "kept": "O que foi guardado desta tentativa continua no seu computador: os arquivos, o registro do que aconteceu e as evidências.",
     "undo": "Voltar para este ponto",
     "confirmTitle": "Voltar para este ponto?",
@@ -63,7 +63,9 @@
     "restartTitle": "Ou recomeçar a criação",
     "restartBody": "Recomeçar cria uma tentativa nova a partir do mesmo plano. A tentativa que falhou continua guardada, com os arquivos e o registro do que aconteceu.",
     "restart": "Tentar de novo",
-    "undoFailed": "Não foi possível voltar para este ponto."
+    "undoFailed": "Não foi possível voltar para este ponto.",
+    "criteriaBreakdown": "{total} critérios ({conferidos} conferidos, {falharam} falharam, {naoAutomatizados} não conferidos automaticamente)",
+    "criteriaAllPassed": "{total} critérios, todos conferidos"
   },
   "health": {
     "ok": "Tudo certo",

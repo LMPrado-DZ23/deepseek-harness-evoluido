@@ -7,6 +7,7 @@
  *
  * Uso: node scripts/check-requirements-ledger.mjs [--self-test]
  */
+import { execFileSync } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
 
@@ -74,6 +75,63 @@ export function parseLedger(source) {
  */
 function empty(value) {
   return value === '' || value === '—' || value === '-' || /^nenhuma[.:!]?$/iu.test(value.trim())
+}
+
+/**
+ * Os caminhos de ARQUIVO citados numa célula do ledger.
+ *
+ * A célula é prosa em português com caminhos no meio, então o que se extrai
+ * precisa ser inequívoco: só entra o que termina em extensão conhecida. Isso
+ * deixa de fora, de propósito, referência a repositório de terceiro
+ * (`google/artemis`), data (`09/09`), razão (`8/8`) e par de palavras com barra
+ * (`derivar/reverter`) — nenhum deles é um arquivo desta árvore, e reprová-los
+ * transformaria o portão em ruído, que é como um portão morre.
+ * @param cell - o conteúdo da célula.
+ * @returns os caminhos citados, sem repetição.
+ */
+export function citedPaths(cell) {
+  const found = new Set()
+  for (const match of cell.matchAll(/(?:^|[\s(,;"'`])([A-Za-z0-9_.@/-]*[A-Za-z0-9_-]\.(?:ts|tsx|mjs|cjs|js|json|ya?ml|caddy|md|sql|toml|css|html))(?=$|[\s),;:"'`])/gu)) {
+    const value = match[1]
+    if (value.includes('*') || value.includes('{')) continue
+    found.add(value)
+  }
+  return [...found]
+}
+
+/**
+ * Os arquivos citados que não existem na árvore.
+ *
+ * Uma auditoria encontrou o ledger citando, como PROVA de um requisito em BETA,
+ * um componente que não existe mais (`PlanView`), e uma contagem de testes
+ * defasada em 12. O portão só conferia que a célula não estava VAZIA — ou seja,
+ * garantia que havia texto, não que o texto correspondia a alguma coisa.
+ *
+ * A conferência é por SUFIXO: o ledger cita `journey.spec.ts` e
+ * `src/Navigation.tsx` sem o prefixo do pacote, e exigir caminho completo faria
+ * o portão reprovar prosa correta.
+ * @param rows - as linhas do ledger.
+ * @param tracked - todos os caminhos versionados.
+ * @returns as reprovações, uma por arquivo citado e ausente.
+ */
+export function missingCitedPaths(rows, tracked) {
+  const files = [...tracked]
+  const findings = []
+  for (const row of rows) {
+    // Só as colunas que DECLARAM artefato. A coluna `prova` é prosa, e ela
+    // legitimamente cita arquivo que NÃO existe ("NOTICE e TRADEMARKS.md nao
+    // existem") e artefato gerado em tempo de execução (`run-report.json`);
+    // reprovar isso ensinaria a escrever prova mais vaga para escapar do portão.
+    for (const column of ['arquivos', 'testes']) {
+      for (const path of citedPaths(row[column])) {
+        const suffix = path.startsWith('/') ? path.slice(1) : path
+        if (!files.some(file => file === suffix || file.endsWith(`/${suffix}`))) {
+          findings.push(`${row.id}: a coluna ${column} cita ${path}, que não existe na árvore`)
+        }
+      }
+    }
+  }
+  return findings
 }
 
 /**
@@ -189,6 +247,14 @@ function selfTest() {
     ['id repetido reprova', ledgerFindings([good[0], good[0]]).length > 0],
     ['sem próximo passo reprova', ledgerFindings([{ ...good[0], proximo: '—' }]).length > 0],
     ['palavra proibida reprova', ledgerFindings([{ ...good[0], requisito: 'está pronto' }]).length > 0],
+    // O portão só conferia que a célula não estava VAZIA: ele garantia que havia
+    // TEXTO, não que o texto correspondia a alguma coisa. Uma auditoria achou o
+    // ledger citando, como prova de um requisito em BETA, um componente que já
+    // não existia — e uma contagem de testes defasada em 12.
+    ['arquivo citado que não existe reprova', missingCitedPaths([{ ...good[0], arquivos: 'apps/nada/fantasma.ts' }], ['a.ts']).length === 1],
+    ['arquivo citado por sufixo passa', missingCitedPaths([{ ...good[0], testes: 'journey.spec.ts' }], ['a.ts', 'apps/studio-web/tests/journey.spec.ts']).length === 0],
+    ['data, razão e repositório de terceiro não são caminho', citedPaths('09/09, 8/8, google/artemis, derivar/reverter').length === 0],
+    ['a coluna de prosa não é conferida', missingCitedPaths([{ ...good[0], prova: 'NOTICE e TRADEMARKS.md nao existem' }], ['a.ts']).length === 0],
     ['resumo certo passa', summaryFindings(good, { states: new Map([['BETA', 1]]), targets: new Map([['v1.0', 1]]) }).length === 0],
     ['resumo defasado reprova', summaryFindings(good, { states: new Map([['BETA', 9]]), targets: new Map([['v1.0', 1]]) }).length > 0],
     ['estado ausente do resumo reprova', summaryFindings(good, { states: new Map([['STABLE', 1]]), targets: new Map([['v1.0', 1]]) }).length > 0],
@@ -212,7 +278,15 @@ if (process.argv.includes('--self-test')) {
   } else {
     const baseline = await readFile('docs/baselines/requirements-ledger-ids.json', 'utf8')
       .then(text => JSON.parse(text), () => [])
-    const findings = [...ledgerFindings(rows, baseline), ...summaryFindings(rows, parseSummary(source))]
+    // O caminho citado tem de EXISTIR. Sem isto, a célula de prova só precisava
+    // não estar vazia — e foi assim que o ledger citou, como prova de um
+    // requisito em BETA, um componente que já não existia.
+    const tracked = execFileSync('git', ['ls-files'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).split('\n').filter(Boolean)
+    const findings = [
+      ...ledgerFindings(rows, baseline),
+      ...summaryFindings(rows, parseSummary(source)),
+      ...missingCitedPaths(rows, tracked),
+    ]
     for (const finding of findings) console.error(finding)
     const counts = new Map()
     for (const row of rows) counts.set(row.estado, (counts.get(row.estado) ?? 0) + 1)

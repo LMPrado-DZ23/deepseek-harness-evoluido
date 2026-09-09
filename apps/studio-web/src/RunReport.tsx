@@ -232,7 +232,7 @@ export function Checkpoints(props: {
           {checkpoint.run_id === list.current_run_id ? <span className="checkpoint-current">{t.checkpoint.current}</span> : null}
         </div>
         <p className="context-note">
-          {integrityWord(checkpoint.integrity)} · {checkpoint.acceptance_checks.length} {t.checkpoint.criteria}
+          {integrityWord(checkpoint.integrity)} · {criteriaSentence(checkpoint.acceptance_checks)}
         </p>
         {checkpoint.green ? null : <p className="context-note">{noCheckpointSentence(checkpoint.blocker)}</p>}
         <p className="context-note">{t.checkpoint.kept}</p>
@@ -272,4 +272,28 @@ export function findingSentence(finding: string): string {
   if (code === 'SECRET_PATTERN') return t.report.findingSecret.replace('{arquivo}', path)
   if (code === 'PII_PATTERN') return t.report.findingPii.replace('{arquivo}', path)
   return t.report.findingUnknown.replace('{arquivo}', path)
+}
+
+/**
+ * Quantos critérios foram MESMO conferidos.
+ *
+ * A tela dizia "12 critérios conferidos" contando a lista inteira — os que
+ * falharam e os que ninguém automatizou junto. Numa tentativa com 3 falhas e 5
+ * sem automação, o número afirmava uma conferência que não houve, e era a
+ * palavra "conferidos" que fazia a afirmação.
+ * @param checks - as conferências da tentativa.
+ * @returns a frase com o total e a repartição, quando ela não é trivial.
+ */
+export function criteriaSentence(checks: readonly { readonly status: string }[]): string {
+  const passed = checks.filter(check => check.status === 'PASSED').length
+  const failed = checks.filter(check => check.status === 'FAILED').length
+  const others = checks.length - passed - failed
+  if (checks.length > 0 && passed === checks.length) {
+    return t.checkpoint.criteriaAllPassed.replace('{total}', String(checks.length))
+  }
+  return t.checkpoint.criteriaBreakdown
+    .replace('{total}', String(checks.length))
+    .replace('{conferidos}', String(passed))
+    .replace('{falharam}', String(failed))
+    .replace('{naoAutomatizados}', String(others))
 }
