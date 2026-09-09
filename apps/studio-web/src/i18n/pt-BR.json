@@ -30,7 +30,12 @@
     "authorStudio": "escrito pelo Studio",
     "changeAdded": "novo",
     "changeChanged": "alterado",
-    "changeUnchanged": "sem mudança"
+    "changeUnchanged": "sem mudança",
+    "findingSecret": "Encontramos algo parecido com uma senha ou chave de serviço no arquivo {arquivo}. Ela não entra no seu aplicativo: guarde esse valor no cofre do servidor e use só o nome dele.",
+    "findingPii": "Encontramos um CPF escrito dentro do arquivo {arquivo}. Dado de pessoa não fica no código: ele deve ser digitado por quem usa o aplicativo e guardado no banco.",
+    "findingUnknown": "O arquivo {arquivo} foi recusado pelos controles de segurança.",
+    "findingTechnical": "Detalhes técnicos do que foi recusado",
+    "correctionTechnical": "Detalhes técnicos do motivo"
   },
   "checkpoint": {
     "title": "Pontos para onde você pode voltar",

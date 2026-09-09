@@ -94,13 +94,20 @@ export function RunReport({ report }: { readonly report: RunReportValue }) {
     {report.correction === null ? null : <section className="run-correction">
       <h3>{t.report.correctionTitle}</h3>
       <p className="context-note">{t.report.correctionHelp}</p>
-      <pre dir="ltr">{report.correction}</pre>
+      {/* O diagnóstico cru do pipeline (`build: exit 1`,
+          `TEMPLATE_INTEGRITY_FAILED`) vinha aberto, em inglês, na seção que
+          aparece justamente quando algo deu errado. Ele continua inteiro —
+          atrás do mesmo `<details>` fechado que o resto do relato usa. */}
+      <details><summary>{t.report.correctionTechnical}</summary><pre dir="ltr">{report.correction}</pre></details>
     </section>}
 
     {report.findings.length === 0 ? null : <section className="run-findings">
       <h3>{t.report.findingsTitle}</h3>
       <p className="context-note">{t.report.findingsHelp}</p>
-      <ul>{report.findings.map(finding => <li key={finding}>{finding}</li>)}</ul>
+      <ul>{report.findings.map(finding => <li key={finding}>{findingSentence(finding)}</li>)}</ul>
+      <details><summary>{t.report.findingTechnical}</summary>
+        <ul>{report.findings.map(finding => <li key={finding}><code dir="ltr">{finding}</code></li>)}</ul>
+      </details>
     </section>}
 
     <h3>{t.report.filesTitle}</h3>
@@ -246,4 +253,23 @@ export function Checkpoints(props: {
       <button type="button" className="secondary" onClick={() => props.restart?.()}>{t.checkpoint.restart}</button>
     </section>}
   </section>
+}
+
+/**
+ * O achado de segurança em português, com o que fazer.
+ *
+ * A tela mostrava `src/GeneratedApp.tsx:SECRET_PATTERN` sob o título "O que foi
+ * recusado" — inglês, caixa alta, sem próximo passo, e exatamente no momento em
+ * que algo deu errado. O código continua na tela, dentro dos detalhes técnicos,
+ * porque é ele que se cola num pedido de ajuda.
+ * @param finding - o achado como o servidor manda, `caminho:CÓDIGO`.
+ * @returns a frase para a pessoa.
+ */
+export function findingSentence(finding: string): string {
+  const separator = finding.lastIndexOf(':')
+  const path = separator === -1 ? finding : finding.slice(0, separator)
+  const code = separator === -1 ? '' : finding.slice(separator + 1)
+  if (code === 'SECRET_PATTERN') return t.report.findingSecret.replace('{arquivo}', path)
+  if (code === 'PII_PATTERN') return t.report.findingPii.replace('{arquivo}', path)
+  return t.report.findingUnknown.replace('{arquivo}', path)
 }
