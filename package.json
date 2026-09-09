@@ -41,6 +41,7 @@
     "prove:runtime": "node scripts/prove-runtime.mjs",
     "prove:studio-runtime": "node scripts/prove-studio-runtime.mjs",
     "prove:builder-isolation": "node scripts/prove-builder-isolation.mjs",
+    "prove:container-hardening": "node scripts/prove-container-hardening.mjs --self-test",
     "prove:template-pipeline": "tsx scripts/prove-template-pipeline.ts",
     "prove:generated-data": "tsx scripts/prove-generated-data.ts",
     "prove:design-spec": "tsx scripts/prove-design-spec.ts",

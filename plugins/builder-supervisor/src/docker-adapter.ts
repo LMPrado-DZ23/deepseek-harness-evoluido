@@ -252,7 +252,15 @@ export class DockerBuilderAdapter implements BuilderExecutionPort {
 function containerBody(image: string, command: readonly string[], labels: Readonly<Record<string, string>>, role: string, limits: BuilderLimits, mounts: readonly unknown[], step?: BuildStep): Readonly<Record<string, unknown>> {
   return { Image: image, Cmd: command, WorkingDir: '/workspace', User: '10001:10001', Env: ['CI=true', 'HOME=/tmp', 'XDG_CONFIG_HOME=/tmp/.config', 'NEXT_TELEMETRY_DISABLED=1'], Labels: { ...labels, 'dz23.role': role, ...(step === undefined ? {} : { 'dz23.step': step }) }, HostConfig: hardenedHost(limits, mounts), NetworkDisabled: true, LogConfig: boundedLogs() }
 }
-function hardenedHost(limits: BuilderLimits, mounts: readonly unknown[]): Readonly<Record<string, unknown>> { return { NetworkMode: 'none', ReadonlyRootfs: true, Privileged: false, CapDrop: ['ALL'], SecurityOpt: ['no-new-privileges'], PidsLimit: limits.pids, Memory: limits.memoryBytes, NanoCpus: limits.nanoCpus, OomKillDisable: false, PublishAllPorts: false, PortBindings: {}, IpcMode: 'private', Mounts: mounts, ShmSize: 268_435_456, Tmpfs: { '/tmp': 'rw,noexec,nosuid,size=268435456,uid=10001,gid=10001' }, Ulimits: [{ Name: 'nofile', Soft: 1024, Hard: 1024 }] } }
+/**
+ * O endurecimento do contêiner do construtor, em UM lugar (S-15).
+ *
+ * Exportado para a PROVA poder consumir exatamente este objeto em vez de
+ * redigitar as opções: uma prova que reescreve os argumentos prova a cópia
+ * dela, e não o que o produto manda para o Docker — foi assim que
+ * `deny: ['network']` sobreviveu no A-06.
+ */
+export function hardenedHost(limits: BuilderLimits, mounts: readonly unknown[]): Readonly<Record<string, unknown>> { return { NetworkMode: 'none', ReadonlyRootfs: true, Privileged: false, CapDrop: ['ALL'], SecurityOpt: ['no-new-privileges'], PidsLimit: limits.pids, Memory: limits.memoryBytes, NanoCpus: limits.nanoCpus, OomKillDisable: false, PublishAllPorts: false, PortBindings: {}, IpcMode: 'private', Mounts: mounts, ShmSize: 268_435_456, Tmpfs: { '/tmp': 'rw,noexec,nosuid,size=268435456,uid=10001,gid=10001' }, Ulimits: [{ Name: 'nofile', Soft: 1024, Hard: 1024 }] } }
 function boundedLogs(): Readonly<Record<string, unknown>> { return { Type: 'local', Config: { 'max-size': '1m', 'max-file': '1' } } }
 function names(scopeId: BuilderRuntimeScopeId, buildRef: string) { const slug = randomStable(scopeId, buildRef); return { volume: `dz23-build-work-${slug}`, exportVolume: `dz23-build-export-${slug}`, anchor: `dz23-build-anchor-${slug}`, exporter: `dz23-build-exporter-${slug}`, step: (value: BuildStep) => `dz23-build-${value}-${slug}` } }
 function randomStable(scopeId: BuilderRuntimeScopeId, buildRef: string): string { return createHash('sha256').update(`${scopeId}:${buildRef}`).digest('hex').slice(0, 20) }
