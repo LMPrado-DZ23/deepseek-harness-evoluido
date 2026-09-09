@@ -50,9 +50,9 @@ describe('C-N4: o palpite diz quando NÃO entendeu', () => {
     // descreve uma página quanto para quem escreve algo que este palpite não
     // reconhece. A tela, por cima, afirmava "Entendemos isto pelo seu texto" —
     // e uma afirmação falsa dessas convence a pessoa a NÃO corrigir.
-    expect(categoryGuess('uma página para divulgar meu trabalho')).toEqual({ category: 'landing-page', understood: true })
+    expect(categoryGuess('uma página para divulgar meu trabalho')).toMatchObject({ category: 'landing-page', understood: true })
     for (const vago of ['', '   ', 'asdf qwer', 'quero um negócio', 'me ajuda aí', 'preciso de uma coisa']) {
-      expect(categoryGuess(vago), vago).toEqual({ category: 'landing-page', understood: false })
+      expect(categoryGuess(vago), vago).toMatchObject({ category: 'landing-page', understood: false })
     }
   })
 })
@@ -78,7 +78,7 @@ describe('C-2 (2ª passada): o texto de quem escreve rápido e errado', () => {
     ] as const
     for (const [brief, category] of expected) {
       const guess = categoryGuess(brief)
-      expect(guess, brief).toEqual({ category, understood: true })
+      expect(guess, brief).toMatchObject({ category, understood: true, basis: 'text' })
     }
   })
 
@@ -94,7 +94,7 @@ describe('C-2 (2ª passada): o texto de quem escreve rápido e errado', () => {
       ['quero um sistema pra pizzaria', 'catalog'],
     ] as const
     for (const [brief, category] of expected) {
-      expect(categoryGuess(brief), brief).toEqual({ category, understood: false })
+      expect(categoryGuess(brief), brief).toMatchObject({ category, understood: false, basis: 'trade' })
     }
   })
 

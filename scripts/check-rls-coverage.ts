@@ -79,23 +79,44 @@ export const RLS_MIGRATED_FLOOR = 2
  * - `needs-review`: ainda não conferido no código. Está aqui como PENDÊNCIA
  *   declarada, e não como suposição travestida de classificação.
  */
-export const PENDING_CLASSIFICATION: Readonly<Record<string, { readonly category: 'ready' | 'hot-guard' | 'tenant-resolution' | 'cross-tenant-invariant' | 'startup-reconciliation' | 'needs-review'; readonly reason: string }>> = {
-  studio_projects: { category: 'startup-reconciliation', reason: 'reconcileInterruptedExecutions() (service.ts:311) le TODOS os projetos e TODAS as execucoes sem ator, no start do plugin, e ESCREVE em cima; uma credencial escopada nao enxerga essa varredura' },
-  studio_app_specs: { category: 'startup-reconciliation', reason: 'idem studio_projects, mesmo repositorio e mesma varredura de inicio' },
-  studio_design_specs: { category: 'startup-reconciliation', reason: 'idem studio_projects, mesmo repositorio e mesma varredura de inicio' },
-  studio_intake_turns: { category: 'startup-reconciliation', reason: 'idem studio_projects, mesmo repositorio e mesma varredura de inicio' },
-  studio_plans: { category: 'startup-reconciliation', reason: 'idem studio_projects, mesmo repositorio e mesma varredura de inicio' },
-  studio_runs: { category: 'startup-reconciliation', reason: 'a varredura de inicio le as execucoes PENDING e RUNNING de TODOS os inquilinos e as marca FAILED' },
-  studio_evidence: { category: 'startup-reconciliation', reason: 'idem studio_projects, mesmo repositorio e mesma varredura de inicio' },
-  studio_approvals: { category: 'startup-reconciliation', reason: 'a varredura de inicio ESCREVE aprovacao de recuperacao para projetos de qualquer inquilino' },
-  studio_policy_audit: { category: 'cross-tenant-invariant', reason: 'a trilha e UMA corrente de hash GLOBAL: seq e previous_sha256 encadeiam entradas de todos os inquilinos (policy/src/index.ts:394-425), e verifyPolicyAuditChain so fecha lendo a corrente inteira' },
-  studio_agent_runs: { category: 'startup-reconciliation', reason: '#performRestartReconciliation() (agents/src/service.ts:480) le as execucoes RUNNING de TODOS os inquilinos no reinicio; #hasPersistedWork() faz o mesmo' },
-  studio_agent_teams: { category: 'startup-reconciliation', reason: 'reconcileInterruptedTeams() (agent-team/src/service.ts:201) varre tarefas e equipes de todos os inquilinos no reinicio' },
+export interface PendingClassification {
+  readonly category: 'ready' | 'hot-guard' | 'tenant-resolution' | 'cross-tenant-invariant' | 'startup-reconciliation' | 'needs-review'
+  readonly reason: string
+  /**
+   * O arquivo e o símbolo que sustentam o motivo.
+   *
+   * Exigido para as categorias que afirmam um FATO SOBRE O CÓDIGO
+   * (`hot-guard`, `cross-tenant-invariant`, `startup-reconciliation`). Cinco
+   * motivos desta tabela já foram para o repositório dizendo que uma varredura
+   * lia tabelas que ela não lê — um auditor abriu o arquivo e mostrou. Com a
+   * citação obrigatória e CONFERIDA, um motivo não pode mais apontar para uma
+   * função que não existe.
+   *
+   * O portão confere a CITAÇÃO, não o SENTIDO: ele garante que o arquivo existe
+   * e que o símbolo está lá, não que a leitura seja mesmo sem escopo. Julgar o
+   * sentido continua sendo trabalho de gente, e dizer o contrário seria vender
+   * uma garantia que este arquivo não pode dar.
+   */
+  readonly evidence?: { readonly file: string; readonly symbol: string }
+}
 
-  studio_agent_leases: { category: 'hot-guard', reason: 'lido de forma sincrona em start() para o conflito de caminhos e para a cerca, antes de cada delegacao' },
-  studio_emergency_stop: { category: 'hot-guard', reason: 'assertRunning() e SINCRONO e roda antes de cada delegacao e de cada chamada de integracao' },
-  studio_integration_switches: { category: 'hot-guard', reason: 'assertScopeEnabled() e SINCRONO e roda em callIntegration antes de qualquer saida' },
-  studio_route_health: { category: 'hot-guard', reason: 'chooseRoute() le o registro a cada requisicao de modelo' },
+export const PENDING_CLASSIFICATION: Readonly<Record<string, PendingClassification>> = {
+  studio_projects: { category: 'startup-reconciliation', reason: 'reconcileInterruptedExecutions() (service.ts:311) le TODOS os projetos e TODAS as execucoes sem ator, no start do plugin, e ESCREVE em cima; uma credencial escopada nao enxerga essa varredura', evidence: { file: 'plugins/prompt-to-app/src/service.ts', symbol: 'reconcileInterruptedExecutions' } },
+  studio_app_specs: { category: 'startup-reconciliation', reason: 'a varredura de inicio NAO le esta tabela, mas ela vive no MESMO PromptToAppRepository, cujas leituras sao sincronas e sem escopo (projects(), specs(), ...); migrar uma sem as outras parte o repositorio em dois donos', evidence: { file: 'plugins/prompt-to-app/src/service.ts', symbol: 'reconcileInterruptedExecutions' } },
+  studio_design_specs: { category: 'startup-reconciliation', reason: 'idem studio_app_specs: fora da varredura, dentro do mesmo repositorio', evidence: { file: 'plugins/prompt-to-app/src/service.ts', symbol: 'reconcileInterruptedExecutions' } },
+  studio_intake_turns: { category: 'startup-reconciliation', reason: 'idem studio_app_specs: fora da varredura, dentro do mesmo repositorio', evidence: { file: 'plugins/prompt-to-app/src/service.ts', symbol: 'reconcileInterruptedExecutions' } },
+  studio_plans: { category: 'startup-reconciliation', reason: 'idem studio_app_specs: fora da varredura, dentro do mesmo repositorio', evidence: { file: 'plugins/prompt-to-app/src/service.ts', symbol: 'reconcileInterruptedExecutions' } },
+  studio_runs: { category: 'startup-reconciliation', reason: 'a varredura de inicio le as execucoes PENDING e RUNNING de TODOS os inquilinos e as marca FAILED', evidence: { file: 'plugins/prompt-to-app/src/service.ts', symbol: 'reconcileInterruptedExecutions' } },
+  studio_evidence: { category: 'startup-reconciliation', reason: 'idem studio_app_specs: fora da varredura, dentro do mesmo repositorio', evidence: { file: 'plugins/prompt-to-app/src/service.ts', symbol: 'reconcileInterruptedExecutions' } },
+  studio_approvals: { category: 'startup-reconciliation', reason: 'a varredura de inicio ESCREVE aprovacao de recuperacao para projetos de qualquer inquilino', evidence: { file: 'plugins/prompt-to-app/src/service.ts', symbol: 'reconcileInterruptedExecutions' } },
+  studio_policy_audit: { category: 'cross-tenant-invariant', reason: 'a trilha e UMA corrente de hash GLOBAL: seq e previous_sha256 encadeiam entradas de todos os inquilinos (policy/src/index.ts:394-425), e verifyPolicyAuditChain so fecha lendo a corrente inteira', evidence: { file: 'plugins/policy/src/index.ts', symbol: 'verifyPolicyAuditChain' } },
+  studio_agent_runs: { category: 'startup-reconciliation', reason: '#performRestartReconciliation() (agents/src/service.ts:480) le as execucoes RUNNING de TODOS os inquilinos no reinicio; #hasPersistedWork() faz o mesmo', evidence: { file: 'plugins/agents/src/service.ts', symbol: '#performRestartReconciliation' } },
+  studio_agent_teams: { category: 'startup-reconciliation', reason: 'reconcileInterruptedTeams() (agent-team/src/service.ts:201) varre tarefas e equipes de todos os inquilinos no reinicio', evidence: { file: 'plugins/agent-team/src/service.ts', symbol: 'reconcileInterruptedTeams' } },
+
+  studio_agent_leases: { category: 'hot-guard', reason: 'lido de forma sincrona em start() para o conflito de caminhos e para a cerca, antes de cada delegacao', evidence: { file: 'plugins/agents/src/service.ts', symbol: '#hasPersistedWork' } },
+  studio_emergency_stop: { category: 'hot-guard', reason: 'assertRunning() e SINCRONO e roda antes de cada delegacao e de cada chamada de integracao', evidence: { file: 'plugins/emergency-stop/src/service.ts', symbol: 'assertRunning' } },
+  studio_integration_switches: { category: 'hot-guard', reason: 'assertScopeEnabled() e SINCRONO e roda em callIntegration antes de qualquer saida', evidence: { file: 'plugins/integration-hub/src/service.ts', symbol: 'assertScopeEnabled' } },
+  studio_route_health: { category: 'hot-guard', reason: 'chooseRoute() le o registro a cada requisicao de modelo', evidence: { file: 'plugins/route-health/src/service.ts', symbol: 'chooseRoute' } },
 
   studio_identity_users: { category: 'tenant-resolution', reason: 'a identidade e o que DETERMINA a organizacao e o inquilino; filtrar por eles seria circular' },
   studio_identity_sessions: { category: 'tenant-resolution', reason: 'a sessao e resolvida ANTES de o escopo existir, e em todo pedido' },
@@ -104,7 +125,7 @@ export const PENDING_CLASSIFICATION: Readonly<Record<string, { readonly category
   studio_workspaces: { category: 'tenant-resolution', reason: 'o espaco de trabalho faz parte do proprio escopo; ele nao pode ser filtrado por si mesmo' },
   studio_memberships: { category: 'tenant-resolution', reason: 'e a tabela que decide a que escopo a pessoa pertence' },
 
-  studio_staging_releases: { category: 'cross-tenant-invariant', reason: 'reserveRelease prende o destino FISICO ao primeiro escopo que o reservou e recusa outro (active-conflict); ver essa colisao exige ler releases de OUTROS inquilinos, que a RLS impede por desenho' },
+  studio_staging_releases: { category: 'cross-tenant-invariant', reason: 'reserveRelease prende o destino FISICO ao primeiro escopo que o reservou e recusa outro (active-conflict); ver essa colisao exige ler releases de OUTROS inquilinos, que a RLS impede por desenho', evidence: { file: 'plugins/staging/src/service.ts', symbol: 'reserveRelease' } },
 
   studio_previews: { category: 'needs-review', reason: 'ha um CapacityGovernor global; falta conferir se o dominio em si tem invariante entre inquilinos ou se e so a capacidade' },
   studio_preview_admissions: { category: 'needs-review', reason: 'idem studio_previews' },
@@ -126,6 +147,7 @@ export function classificationFindings(
   scoped: readonly string[],
   migrated: readonly string[],
   table: typeof PENDING_CLASSIFICATION,
+  readSource: (path: string) => string | undefined = defaultReadSource,
 ): readonly string[] {
   const findings: string[] = []
   for (const name of scoped) {
@@ -133,12 +155,56 @@ export function classificationFindings(
     const entry = Object.hasOwn(table, name) ? table[name] : undefined
     if (entry === undefined) { findings.push(`domínio pendente sem classificação: ${name}`); continue }
     if (entry.reason.trim().length < 20) findings.push(`classificação de ${name} sem motivo escrito`)
+    findings.push(...evidenceFindings(name, entry, readSource))
   }
   for (const name of Object.keys(table)) {
     if (!scoped.includes(name)) findings.push(`classificação de um domínio que não tem escopo por linha: ${name}`)
     else if (migrated.includes(name)) findings.push(`classificação de um domínio JÁ migrado: ${name}`)
   }
   return findings
+}
+
+
+/** As categorias que AFIRMAM um fato sobre o código, e por isso precisam citá-lo. */
+const CATEGORIES_REQUIRING_EVIDENCE: readonly PendingClassification['category'][] = [
+  'hot-guard', 'cross-tenant-invariant', 'startup-reconciliation',
+]
+
+/** Lê um arquivo do repositório, ou `undefined` se ele não existir. */
+function defaultReadSource(path: string): string | undefined {
+  const absolute = resolve(root, path)
+  return existsSync(absolute) ? readFileSync(absolute, 'utf8') : undefined
+}
+
+/**
+ * Os problemas da CITAÇÃO de uma classificação.
+ *
+ * Cinco motivos desta tabela chegaram ao repositório afirmando que uma varredura
+ * de início lia tabelas que ela não lê. Ninguém percebeu porque nada conferia a
+ * afirmação contra o arquivo. Agora, categoria que afirma fato sobre o código
+ * cita arquivo e símbolo, e o portão abre o arquivo.
+ *
+ * O que ele confere é a CITAÇÃO — arquivo existe, símbolo está lá. O SENTIDO
+ * (se a leitura é mesmo sem escopo) continua sendo julgamento de gente.
+ * @param name - o domínio.
+ * @param entry - a classificação.
+ * @param readSource - como ler um arquivo do repositório (injetado para o self-test).
+ * @returns os achados.
+ */
+export function evidenceFindings(
+  name: string,
+  entry: PendingClassification,
+  readSource: (path: string) => string | undefined,
+): readonly string[] {
+  if (!CATEGORIES_REQUIRING_EVIDENCE.includes(entry.category)) return []
+  const evidence = entry.evidence
+  if (evidence === undefined) return [`classificação ${entry.category} de ${name} sem citação de arquivo e símbolo`]
+  const source = readSource(evidence.file)
+  if (source === undefined) return [`a citação de ${name} aponta para um arquivo que não existe: ${evidence.file}`]
+  if (!source.includes(evidence.symbol)) {
+    return [`a citação de ${name} aponta para ${evidence.symbol}, que não está em ${evidence.file}`]
+  }
+  return []
 }
 
 /** Os domínios cujo isolamento depende de escopo por linha. `org-root` também: ele carrega `org_id`. */
@@ -222,6 +288,22 @@ if (process.argv.includes('--self-test')) {
     throw new Error('self-test: o portão não viu um pendente sem classificação')
   }
   checks.push('pendente-sem-classificacao')
+  // Uma citação que aponta para símbolo ausente REPROVA. Este é o caso que
+  // cinco motivos falsos atravessaram sem ninguém notar.
+  if (evidenceFindings('teste', { category: 'startup-reconciliation', reason: 'motivo com mais de vinte caracteres', evidence: { file: 'package.json', symbol: 'funcaoQueNaoExiste' } }, defaultReadSource).length === 0) {
+    throw new Error('self-test: o portão não viu uma citação apontando para símbolo ausente')
+  }
+  checks.push('citacao-simbolo-ausente')
+  // E uma citação para arquivo que não existe também.
+  if (evidenceFindings('teste', { category: 'hot-guard', reason: 'motivo com mais de vinte caracteres', evidence: { file: 'nao/existe.ts', symbol: 'x' } }, defaultReadSource).length === 0) {
+    throw new Error('self-test: o portão não viu uma citação apontando para arquivo inexistente')
+  }
+  checks.push('citacao-arquivo-ausente')
+  // E a ausência da citação, numa categoria que afirma fato sobre o código.
+  if (evidenceFindings('teste', { category: 'cross-tenant-invariant', reason: 'motivo com mais de vinte caracteres' }, defaultReadSource).length === 0) {
+    throw new Error('self-test: o portão não viu uma classificação sem citação')
+  }
+  checks.push('citacao-ausente')
   // E uma classificação de domínio inexistente também reprova.
   if (classificationFindings(tenantScopedDomains(STUDIO_DOMAIN_SCOPES), RLS_MIGRATED.map(entry => entry.domain), { ...PENDING_CLASSIFICATION, nao_existe: { category: 'ready', reason: 'motivo com mais de vinte caracteres para passar do minimo' } }).length === 0) {
     throw new Error('self-test: o portão não viu uma classificação inventada')

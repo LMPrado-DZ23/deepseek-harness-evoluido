@@ -122,6 +122,28 @@ describe('o Hub na tabela por inquilino', () => {
     await expect(repository.integrations(actor)).resolves.toEqual([])
   })
 
+  it('a segunda tranca vale para exportação e evento, e não só para integração', async () => {
+    // Um auditor removeu `#inScope` de `exports()` e de `#events()`, e removeu
+    // a conferência do projeto em `export()`: os testes continuaram verdes. Uma
+    // tranca sem teste é uma tranca que some no primeiro refatoramento.
+    const rows = store([
+      { scope: actor, table: HUB_EXPORTS_TABLE, key: 'project-1/export-1', value: exported({ tenant_id: 'ws-9' }) },
+      { scope: actor, table: HUB_EXPORTS_TABLE, key: 'project-9/export-2', value: exported({ export_id: 'export-2', project_id: 'project-9' }) },
+      { scope: actor, table: HUB_EVENTS_TABLE, key: 'event-1', value: event({ tenant_id: 'ws-9' }) },
+    ])
+    const repository = new TenantRecordHubRepository(rows, noSwitches)
+
+    // Corpo com o inquilino errado: some da lista e da leitura por chave.
+    await expect(repository.exports(actor, 'project-1')).resolves.toEqual([])
+    await expect(repository.export(actor, 'project-1', 'export-1')).resolves.toBeUndefined()
+    // A chave carrega o projeto, mas o CORPO também é conferido: pedir a
+    // exportação por um projeto que não é o dela não a devolve.
+    await expect(repository.export(actor, 'project-1', 'export-2')).resolves.toBeUndefined()
+    // Evento com o inquilino errado no corpo não entra na contagem nem na página.
+    await expect(repository.eventCount(actor)).resolves.toBe(0)
+    await expect(repository.eventPage(actor, undefined, 10)).resolves.toEqual([])
+  })
+
   it('a troca condicional só passa com a impressão digital que foi lida', async () => {
     const current = integration()
     const rows = store([{ scope: actor, table: HUB_INTEGRATIONS_TABLE, key: 'agenda', value: current }])
@@ -184,6 +206,16 @@ describe('o Hub na tabela por inquilino', () => {
     await expect(repository.export(actor, 'project-2', 'export-1')).resolves.toMatchObject({ project_id: 'project-2' })
     await expect(repository.exports(actor, 'project-1')).resolves.toHaveLength(1)
     await expect(repository.export(stranger, 'project-1', 'export-1')).resolves.toBeUndefined()
+  })
+
+  it('uma barra no identificador é RECUSADA, e não vira chave ambígua', async () => {
+    // `a/b` + `c` e `a` + `b/c` dariam a MESMA chave, e uma exportação seria
+    // lida como se fosse de outro projeto. `project_id` chega da URL depois de
+    // `decodeURIComponent`: confiar que ninguém põe barra é confiar em quem
+    // manda o pedido.
+    const repository = new TenantRecordHubRepository(store(), noSwitches)
+    await expect(repository.putExport(exported({ project_id: 'project/1' }))).rejects.toThrow('HUB_EXPORT_KEY_INVALID')
+    await expect(repository.export(actor, 'project/1', 'export-1')).rejects.toThrow('HUB_EXPORT_KEY_INVALID')
   })
 
   it('a página de eventos vem do mais novo para o mais velho, e o cursor continua de onde parou', async () => {

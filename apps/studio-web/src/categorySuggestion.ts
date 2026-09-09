@@ -88,7 +88,30 @@ const TRADES: readonly (readonly [string, Category])[] = (() => {
     if (!STUDIO_CATEGORIES.includes(category)) throw new Error(`CATEGORY_TRADE_UNKNOWN:${String(entry[0])}`)
     return [String(entry[0]), category] as const
   })
+    // O mais ESPECÍFICO primeiro. Casando pela ordem do arquivo, "oficina"
+    // ganharia de "oficina mecânica" só por estar escrito antes — e o palpite
+    // passaria a depender de onde alguém colou a linha nova.
+    .sort((left, right) => right[0].length - left[0].length)
 })()
+
+/**
+ * De onde veio o palpite.
+ *
+ * São TRÊS estados, e não dois, porque a tela tem três coisas diferentes para
+ * dizer: entendi o que você quer (`text`), reconheci só o seu ramo e escolhi um
+ * começo (`trade`), e não entendi nada (`none`). Com dois estados, quem
+ * escrevia "sistema pra barbearia" via o tipo já em "Agenda de horários" E a
+ * frase "não deu para entender o tipo pelo seu texto" — duas afirmações que se
+ * contradizem na mesma tela.
+ *
+ * `understood` continua existindo e continua querendo dizer a mesma coisa: o
+ * palpite veio do TEXTO. Ele é `basis === 'text'`.
+ */
+export interface CategoryGuess {
+  readonly category: Category
+  readonly understood: boolean
+  readonly basis: 'text' | 'trade' | 'none'
+}
 
 /** A categoria usada quando o texto não diz nada que este palpite reconheça. */
 export const DEFAULT_CATEGORY: Category = 'landing-page'
@@ -105,9 +128,9 @@ export const DEFAULT_CATEGORY: Category = 'landing-page'
  * @param brief - a ideia, com as palavras da pessoa.
  * @returns a categoria e `understood`, que diz se algum sinal pontuou.
  */
-export function categoryGuess(brief: string): { readonly category: Category; readonly understood: boolean } {
+export function categoryGuess(brief: string): CategoryGuess {
   const text = normalize(brief)
-  if (text.trim() === '') return { category: DEFAULT_CATEGORY, understood: false }
+  if (text.trim() === '') return { category: DEFAULT_CATEGORY, understood: false, basis: 'none' }
   let best: Category = DEFAULT_CATEGORY
   let bestScore = 0
   // A ordem do empate é a das categorias declaradas, e não a de iteração de um
@@ -118,9 +141,9 @@ export function categoryGuess(brief: string): { readonly category: Category; rea
     for (const [signal, weight] of SIGNALS[category]) if (text.includes(signal)) score += weight
     if (score > bestScore) { best = category; bestScore = score }
   }
-  if (bestScore > 0) return { category: best, understood: true }
-  for (const [trade, category] of TRADES) if (text.includes(` ${trade}`)) return { category, understood: false }
-  return { category: DEFAULT_CATEGORY, understood: false }
+  if (bestScore > 0) return { category: best, understood: true, basis: 'text' }
+  for (const [trade, category] of TRADES) if (text.includes(` ${trade}`)) return { category, understood: false, basis: 'trade' }
+  return { category: DEFAULT_CATEGORY, understood: false, basis: 'none' }
 }
 
 /**

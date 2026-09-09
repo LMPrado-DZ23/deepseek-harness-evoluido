@@ -1575,7 +1575,11 @@ export class IntegrationHubService {
    * another's rows.
    */
   async #retainEvents(actor: HubActor): Promise<void> {
-    if (await this.options.repository.eventCount(actor) <= EVENTS_RETAINED_PER_TENANT) return
+    // A poda decide sozinha se há o que podar, e devolve zero quando não há.
+    // Perguntar a contagem ANTES custava uma leitura inteira das linhas do
+    // inquilino a cada linha de auditoria — duas leituras no caminho quente
+    // para, na esmagadora maioria das vezes, não apagar nada. Sob o
+    // repositório com RLS isso é uma consulta ao banco por evento gravado.
     await this.options.repository.pruneEvents(actor, EVENTS_RETAINED_PER_TENANT)
   }
 }

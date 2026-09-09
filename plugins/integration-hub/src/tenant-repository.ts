@@ -69,15 +69,22 @@ function newestFirst(left: Pick<HubEvent, 'created_at' | 'event_id'>, right: Pic
  *
  * O escopo do banco é a organização e o inquilino; o projeto não faz parte
  * dele. Sem o projeto na chave, duas exportações de projetos diferentes com o
- * mesmo identificador colidiriam. O separador é uma barra porque nenhum dos
- * dois identificadores a contém.
+ * mesmo identificador colidiriam.
+ *
+ * O separador é uma barra, e a barra é RECUSADA nos dois lados em vez de
+ * confiada: `project_id` é `z.string().min(1)` e chega da URL depois de
+ * `decodeURIComponent`, então "confiar que ninguém põe uma barra" é confiar em
+ * quem manda o pedido. Com uma barra no projeto, `a/b` + `c` e `a` + `b/c`
+ * viram a MESMA chave — uma exportação lida como se fosse de outro projeto.
  */
 function exportKey(projectId: string, exportId: string): string {
+  if (projectId.includes('/') || exportId.includes('/')) throw new Error('HUB_EXPORT_KEY_INVALID')
   return `${projectId}/${exportId}`
 }
 
 export class TenantRecordHubRepository implements HubRepository {
   #integrationTail: Promise<unknown> = Promise.resolve()
+  #eventTail: Promise<unknown> = Promise.resolve()
 
   constructor(
     private readonly store: HubTenantRecordStore,
@@ -159,13 +166,20 @@ export class TenantRecordHubRepository implements HubRepository {
     return (await this.#events(scope)).length
   }
 
-  async putEvent(value: HubEvent): Promise<void> {
-    await this.store.put(
+  putEvent(value: HubEvent): Promise<void> {
+    // Mesma fila das integrações, por um motivo próprio: a poda LÊ a lista e
+    // apaga a cauda. Uma gravação no meio de uma poda faria a poda devolver
+    // uma contagem que não corresponde ao que ela apagou.
+    return this.#exclusiveEvent(() => this.store.put(
       { orgId: value.org_id, tenantId: value.tenant_id }, HUB_TENANT_UNIT, HUB_EVENTS_TABLE, value.event_id, value,
-    )
+    ))
   }
 
-  async pruneEvents(scope: HubActor, keep: number): Promise<number> {
+  pruneEvents(scope: HubActor, keep: number): Promise<number> {
+    return this.#exclusiveEvent(() => this.#pruneEvents(scope, keep))
+  }
+
+  async #pruneEvents(scope: HubActor, keep: number): Promise<number> {
     const rows = await this.#events(scope)
     // Os mais novos ficam: a retenção corta a CAUDA, e nunca o que acabou de
     // acontecer. Um `keep` negativo apagaria tudo por engano de chamada.
@@ -202,6 +216,13 @@ export class TenantRecordHubRepository implements HubRepository {
   #exclusive<T>(work: () => Promise<T>): Promise<T> {
     const run = this.#integrationTail.then(work)
     this.#integrationTail = run.catch(() => undefined)
+    return run
+  }
+
+  /** A fila dos eventos, separada da das integrações: uma auditoria não espera um registro. */
+  #exclusiveEvent<T>(work: () => Promise<T>): Promise<T> {
+    const run = this.#eventTail.then(work)
+    this.#eventTail = run.catch(() => undefined)
     return run
   }
 }

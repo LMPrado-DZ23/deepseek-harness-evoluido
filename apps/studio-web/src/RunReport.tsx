@@ -1,3 +1,4 @@
+import { PendingButton } from './PendingButton'
 import { CircleAlert, CircleCheck, CircleDashed, LoaderCircle } from 'lucide-react'
 import t from './i18n/pt-BR.json'
 
@@ -242,7 +243,7 @@ export function Checkpoints(props: {
         {checkpoint.green && props.confirmingRunId === checkpoint.run_id ? <section className="checkpoint-confirm">
           <h4>{t.checkpoint.confirmTitle}</h4>
           <p>{t.checkpoint.confirmBody}</p>
-          <button type="button" className="primary" onClick={() => props.undo(checkpoint.run_id)}>{t.checkpoint.confirm}</button>
+          <PendingButton label={t.checkpoint.confirm} busyLabel={t.checkpoint.confirmBusy} action={async () => { await props.undo(checkpoint.run_id) }} />
           <button type="button" className="secondary compact" onClick={() => props.cancelConfirm()}>{t.checkpoint.cancel}</button>
         </section> : null}
       </li>)}

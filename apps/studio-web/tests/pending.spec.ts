@@ -75,3 +75,78 @@ test('depois de recarregar, o resultado da criação continua na tela', async ({
   await expect(page.getByRole('heading', { name: 'Pontos para onde você pode voltar' })).toBeVisible()
   await expect(page.getByText('A página Início existe: Passou')).toBeVisible()
 })
+
+/**
+ * "Ver meu protótipo" também é um pedido ao servidor.
+ *
+ * O commit anterior dizia "nenhum botão do fluxo principal manda pedido sem
+ * avisar", e um auditor mostrou que a frase generalizava além do feito: dois
+ * cliques em "Ver meu protótipo" mandavam DOIS `POST /previews`. Este teste
+ * ATRASA a resposta, porque o defeito só existe enquanto a chamada está no ar.
+ */
+test('o botão de ver o protótipo fica ocupado, e o clique duplo não abre duas prévias', async ({ context, page }) => {
+  await context.addCookies([
+    { name: 'dz23_studio_session', value: 'e2e', url: origin },
+    { name: 'dz23_studio_csrf', value: 'csrf-e2e', url: origin },
+  ])
+  await context.addInitScript(() => { window.sessionStorage.setItem('dz23.studio.csrf.v1', 'csrf-e2e') })
+  let previews = 0
+  await page.route('**/previews', async route => {
+    if (route.request().method() !== 'POST') return route.fallback()
+    previews += 1
+    await new Promise(resolve => setTimeout(resolve, 1_500))
+    await route.fallback()
+  })
+  await page.goto('/studio/')
+  await page.getByRole('button', { name: 'Quero uma página para apresentar meu trabalho ou negócio.' }).click()
+  await page.getByRole('button', { name: 'Continuar' }).click()
+  for (const answer of ['Clientes locais', 'Conhecer os serviços', 'Serviços e contato']) {
+    await page.getByLabel('Sua resposta').fill(answer)
+    await page.getByRole('button', { name: 'Responder e continuar' }).click()
+  }
+  await page.getByRole('button', { name: 'Montar meu plano' }).click()
+  await page.getByRole('button', { name: 'Aprovar este plano' }).click()
+  await page.getByRole('button', { name: 'Iniciar criação' }).click()
+  await expect(page.getByRole('button', { name: 'Ver meu protótipo' })).toBeVisible({ timeout: 40_000 })
+
+  await page.getByRole('button', { name: 'Ver meu protótipo' }).click()
+  const busy = page.getByRole('button', { name: 'Abrindo o protótipo…' })
+  await expect(busy).toBeDisabled()
+  await expect(busy).toHaveAttribute('aria-busy', 'true')
+  await busy.click({ force: true, timeout: 2_000 }).catch(() => undefined)
+  await expect.poll(() => previews, { timeout: 10_000 }).toBe(1)
+})
+
+/**
+ * Os três botões da tela das perguntas.
+ *
+ * Nenhum deles aparecia em teste nenhum do repositório: um auditor desfez um
+ * dos três e a suíte inteira — 344 de unidade, 62 de navegador, axe incluído —
+ * continuou verde. O que não é afirmado por teste não está corrigido; está
+ * apenas escrito.
+ */
+test('os três botões da tela de perguntas avisam que estão trabalhando', async ({ context, page }) => {
+  await context.addCookies([
+    { name: 'dz23_studio_session', value: 'e2e', url: origin },
+    { name: 'dz23_studio_csrf', value: 'csrf-e2e', url: origin },
+  ])
+  await context.addInitScript(() => { window.sessionStorage.setItem('dz23.studio.csrf.v1', 'csrf-e2e') })
+  let answers = 0
+  await page.route('**/intake/answer', async route => {
+    if (route.request().method() !== 'POST') return route.fallback()
+    answers += 1
+    await new Promise(resolve => setTimeout(resolve, 1_500))
+    await route.fallback()
+  })
+  await page.goto('/studio/')
+  await page.getByRole('button', { name: 'Quero uma página para apresentar meu trabalho ou negócio.' }).click()
+  await page.getByRole('button', { name: 'Continuar' }).click()
+
+  // "Não sei — recomende para mim" também é um pedido ao servidor.
+  await page.getByRole('button', { name: 'Não sei — recomende para mim' }).click()
+  const busy = page.getByRole('button', { name: 'Buscando uma recomendação…' })
+  await expect(busy).toBeDisabled()
+  await expect(busy).toHaveAttribute('aria-busy', 'true')
+  await busy.click({ force: true, timeout: 2_000 }).catch(() => undefined)
+  await expect.poll(() => answers, { timeout: 10_000 }).toBe(1)
+})

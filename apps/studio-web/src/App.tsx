@@ -4,7 +4,10 @@ import { api, apiResponse, csrfToken, type HealthState } from './api'
 import { PendingButton } from './PendingButton'
 import { STUDIO_CATEGORIES, type Category } from './categories'
 import t from './i18n/pt-BR.json'
-import { categoryGuess } from './categorySuggestion'
+import { categoryGuess, type CategoryGuess } from './categorySuggestion'
+
+/** De onde veio o tipo mostrado na tela. `person` é a escolha à mão, que o palpite não faz. */
+type CategoryBasis = CategoryGuess['basis'] | 'person'
 import { creationBlocked, currentStepIndex, permanentTruthKind, privacyNotice, resultSentence, routeReasonNotice, type PipelineResultState, type PrivacyProfile, type ProjectUiState } from './presentation'
 import { apiFailureMessage, apiFailureText, type ApiCallKind } from './pwa/apiFailure'
 import { GENERATION_REJECTED_STATE, postGeneration, startGeneration } from './pwa/generation'
@@ -67,7 +70,12 @@ export function App() {
   const [logo, setLogo] = useState<File | null>(null)
   const [showDesignAdvanced, setShowDesignAdvanced] = useState(false)
   const [categoryChosenByPerson, setCategoryChosenByPerson] = useState(false)
-  const [categoryUnderstood, setCategoryUnderstood] = useState(false)
+  // Quatro estados, porque a tela tem quatro coisas diferentes a dizer:
+  // entendi o pedido, reconheci só o ramo, não entendi nada, e - o quarto -
+  // foi VOCÊ quem escolheu. Dizer "entendemos isto pelo seu texto" depois de a
+  // pessoa corrigir o tipo à mão é a mesma mentira dos outros casos, com o
+  // agravante de que ela sabe que não foi assim.
+  const [categoryBasis, setCategoryBasis] = useState<CategoryBasis>('none')
   const [route, setRoute] = useState<string | null>(null)
   const [projectId, setProjectId] = useState<string | null>(null)
   const [projectState, setProjectState] = useState<ProjectUiState | null>(null)
@@ -391,10 +399,10 @@ export function App() {
     if (brief.trim() === '') setBrief(value)
     setCategory(selected)
     setCategoryChosenByPerson(true)
-    setCategoryUnderstood(true)
+    setCategoryBasis('person')
   }
   /** A pessoa corrigiu o tipo: o palpite para de mexer nisso. */
-  function chooseCategory(selected: Category) { setCategory(selected); setCategoryChosenByPerson(true); setCategoryUnderstood(true) }
+  function chooseCategory(selected: Category) { setCategory(selected); setCategoryChosenByPerson(true); setCategoryBasis('person') }
   /**
    * Enquanto a pessoa escreve, o palpite acompanha — até ela corrigir.
    *
@@ -406,7 +414,7 @@ export function App() {
     if (categoryChosenByPerson) return
     const guess = categoryGuess(value)
     setCategory(guess.category)
-    setCategoryUnderstood(guess.understood)
+    setCategoryBasis(guess.basis)
   }
   return <div className="shell">
     <StudioSidebar active={activeNavId(window.location.pathname)} open={menuOpen} onClose={closeMenu} />
@@ -416,23 +424,23 @@ export function App() {
         fazia nada. Saíram; o que existe de verdade continua aqui. */}
       <div className="top-actions"><NotificationOptIn />{authenticatedSession ? <button className="signout-button" type="button" disabled={signingOut} aria-busy={signingOut} onClick={() => void signOut()}><LogOut aria-hidden="true" /><span>{signingOut ? t.account.signingOut : t.account.signOut}</span></button> : null}</div></header>
       <main className="canvas"><section className="idea-panel">
-        {projectState === null ? <Idea brief={brief} setBrief={updateBrief} privacy={privacy} setPrivacy={setPrivacy} route={route ?? health.route} localRoute={health.local_route} routeReason={health.route_reason_code ?? null} ready={ready} chooseSuggestion={chooseSuggestion} category={category} categoryUnderstood={categoryUnderstood} chooseCategory={chooseCategory} create={create}
+        {projectState === null ? <Idea brief={brief} setBrief={updateBrief} privacy={privacy} setPrivacy={setPrivacy} route={route ?? health.route} localRoute={health.local_route} routeReason={health.route_reason_code ?? null} ready={ready} chooseSuggestion={chooseSuggestion} category={category} categoryBasis={categoryBasis} chooseCategory={chooseCategory} create={create}
           designPreset={designPreset} setDesignPreset={setDesignPreset} brandColor={brandColor} setBrandColor={setBrandColor}
           font={font} setFont={setFont} radius={radius} setRadius={setRadius} density={density} setDensity={setDensity}
           tone={tone} setTone={setTone} logo={logo} setLogo={setLogo} showDesignAdvanced={showDesignAdvanced} setShowDesignAdvanced={setShowDesignAdvanced} /> : null}
         {projectState === 'DRAFT' && question !== null ? <Questions question={question} answer={answer} setAnswer={setAnswer} submit={submitAnswer} /> : null}
         {projectState === 'SPEC_READY' ? <Action title={t.plan.title} detail={t.progress.planDetail} button={t.plan.prepare} busyButton={t.plan.prepareBusy} action={preparePlan} /> : null}
         {projectState === 'PLAN_PROPOSED' && plan !== null ? <PlanEditor plan={plan} submit={editPlan} approve={approvePlan} reason={changeReason} setReason={setChangeReason} requestChange={requestPlanChange} /> : null}
-        {projectState === 'PLAN_PROPOSED' && plan === null ? <Action title={t.plan.title} detail={t.progress.planDetail} button={t.plan.revision} action={preparePlan} /> : null}
+        {projectState === 'PLAN_PROPOSED' && plan === null ? <Action title={t.plan.title} detail={t.progress.planDetail} button={t.plan.revision} busyButton={t.plan.revisionBusy} action={preparePlan} /> : null}
         {projectState === 'PLAN_APPROVED' ? <Action title={t.creation.title} detail={t.truth.creation} button={t.creation.start} busyButton={t.creation.startBusy} action={generate} /> : null}
-        {projectState === 'GENERATING' || projectState === 'BUILD_OK' || projectState === 'TESTS_OK' ? <Action title={t.creation.title} detail={t.creation.working} button={t.creation.cancel} action={cancelGeneration} /> : null}
+        {projectState === 'GENERATING' || projectState === 'BUILD_OK' || projectState === 'TESTS_OK' ? <Action title={t.creation.title} detail={t.creation.working} button={t.creation.cancel} busyButton={t.creation.cancelBusy} action={cancelGeneration} /> : null}
         {result !== null ? <Verification result={result} previewActive={preview?.state === 'READY'} startPreview={startPreview} retry={generate} /> : null}
         {runReport === null ? null : <RunReport report={runReport} />}
         {checkpoints === null ? null : <Checkpoints list={checkpoints} confirmingRunId={confirmingUndo}
           askConfirm={setConfirmingUndo} cancelConfirm={() => setConfirmingUndo(null)}
           undo={runId => void undoToCheckpoint(runId)}
           {...(result === null || result.state === 'VERIFIED_PROTOTYPE' ? {} : { restart: () => void generate() })} />}
-        {preview?.state === 'READY' ? <section className="preview-card"><div className="preview-heading"><div><h2>{t.preview.title}</h2><p>{t.preview.localOnly}</p></div><button className="secondary compact" onClick={() => void stopPreview()}>{t.preview.stop}</button></div><p className="truth">{t.preview.notPublished}</p>{previewCodes.length === 0 ? null : <section className="preview-codes" aria-live="polite"><h3>{t.preview.accessCodes}</h3><p>{t.preview.accessCodesHelp}</p><ul>{previewCodes.map(item => <li key={`${item.email}-${item.expires_at}-${item.code}`}><strong>{item.email}</strong>: <code>{item.code}</code></li>)}</ul></section>}<iframe ref={previewFrame} title={t.preview.frameTitle} src={`${preview.url}/__dz23/admission`} sandbox="allow-scripts allow-forms allow-same-origin" referrerPolicy="no-referrer" /></section> : null}
+        {preview?.state === 'READY' ? <section className="preview-card"><div className="preview-heading"><div><h2>{t.preview.title}</h2><p>{t.preview.localOnly}</p></div><PendingButton className="secondary compact" label={t.preview.stop} busyLabel={t.preview.stopBusy} action={stopPreview} /></div><p className="truth">{t.preview.notPublished}</p>{previewCodes.length === 0 ? null : <section className="preview-codes" aria-live="polite"><h3>{t.preview.accessCodes}</h3><p>{t.preview.accessCodesHelp}</p><ul>{previewCodes.map(item => <li key={`${item.email}-${item.expires_at}-${item.code}`}><strong>{item.email}</strong>: <code>{item.code}</code></li>)}</ul></section>}<iframe ref={previewFrame} title={t.preview.frameTitle} src={`${preview.url}/__dz23/admission`} sandbox="allow-scripts allow-forms allow-same-origin" referrerPolicy="no-referrer" /></section> : null}
         {preview !== null && ['FAILED', 'EXPIRED', 'STOPPED'].includes(preview.state) ? <p className="context-note">{t.preview.closed}</p> : null}
         {error === '' ? null : <p className="error" role="alert">{error}</p>}
         {/* O botão de emergência fica VISÍVEL o tempo todo, e não escondido em
@@ -460,7 +468,7 @@ const SUGGESTIONS: readonly (readonly [string, Category, boolean])[] = [
 ]
 
 function Idea(props: {
-  brief: string; setBrief(v: string): void; privacy: PrivacyProfile; setPrivacy(v: PrivacyProfile): void; route: string | null; localRoute: string | null | undefined; routeReason: string | null; ready: boolean; chooseSuggestion(v: string, c: Category): void; category: Category; categoryUnderstood: boolean; chooseCategory(v: Category): void; create(): Promise<void>
+  brief: string; setBrief(v: string): void; privacy: PrivacyProfile; setPrivacy(v: PrivacyProfile): void; route: string | null; localRoute: string | null | undefined; routeReason: string | null; ready: boolean; chooseSuggestion(v: string, c: Category): void; category: Category; categoryBasis: CategoryBasis; chooseCategory(v: Category): void; create(): Promise<void>
   designPreset: DesignPreset; setDesignPreset(v: DesignPreset): void; brandColor: string; setBrandColor(v: string): void
   font: 'geist-sans' | 'source-serif'; setFont(v: 'geist-sans' | 'source-serif'): void; radius: 'compact' | 'balanced' | 'rounded'; setRadius(v: 'compact' | 'balanced' | 'rounded'): void
   density: 'compact' | 'comfortable'; setDensity(v: 'compact' | 'comfortable'): void; tone: 'friendly' | 'formal'; setTone(v: 'friendly' | 'formal'): void
@@ -472,7 +480,7 @@ function Idea(props: {
   ]
   return <><div className="heading"><Sparkles aria-hidden="true"/><div><h1>{t.idea.title}</h1><p>{t.idea.subtitle}</p></div></div><label className="sr-only" htmlFor="brief">{t.idea.title}</label>
     <textarea id="brief" maxLength={1000} value={props.brief} onChange={event => props.setBrief(event.target.value)} placeholder={t.idea.placeholder} /><div className="counter" aria-live="polite">{props.brief.length} {t.idea.counter}</div>
-    <h2>{t.idea.kindTitle}</h2><p className="coming">{props.categoryUnderstood ? t.idea.kindHelp : t.idea.kindHelpUnknown}</p>
+    <h2>{t.idea.kindTitle}</h2><p className="coming">{props.categoryBasis === 'text' ? t.idea.kindHelp : props.categoryBasis === 'trade' ? t.idea.kindHelpTrade : props.categoryBasis === 'person' ? t.idea.kindHelpChosen : t.idea.kindHelpUnknown}</p>
     <label className="kind">{t.idea.kindLabel}<select value={props.category} onChange={event => props.chooseCategory(event.target.value as Category)}>{STUDIO_CATEGORIES.map(value => <option key={value} value={value}>{t.idea.kinds[value]}</option>)}</select></label>
     <h2>{t.idea.suggestions}</h2>
     {/* O aviso de que três destas sugestões são protótipos iniciais ficava
@@ -501,7 +509,7 @@ function Questions({ question, answer, setAnswer, submit }: { question: Question
   return <><div className="heading"><Sparkles/><div><h1>{t.questions.title}</h1><p>{t.questions.subtitle}</p></div></div><section className="task-card"><h2>{question.text}</h2>{sensitive ? <div className="button-row"><PendingButton label={t.questions.confirm} busyLabel={t.questions.confirmBusy} action={() => submit(false, true)} /><PendingButton className="secondary" label={t.questions.reject} busyLabel={t.questions.rejectBusy} action={() => submit(false, false)} /></div> : <><label htmlFor="answer">{t.questions.answer}</label><textarea id="answer" value={answer} onChange={event => setAnswer(event.target.value)} placeholder={t.questions.answerPlaceholder}/><PendingButton label={t.questions.continue} busyLabel={t.questions.continueBusy} disabled={answer.trim() === ''} action={() => submit(false)} /><PendingButton className="secondary" label={t.questions.recommend} busyLabel={t.questions.recommendBusy} action={() => submit(true)} /></>}</section></>
 }
 function Action({ title, detail, button, busyButton, action }: { title: string; detail: string; button?: string; busyButton?: string; action?: () => Promise<void> }) { return <><div className="heading"><Sparkles/><div><h1>{title}</h1><p>{detail}</p></div></div>{button === undefined || action === undefined ? null : <PendingButton label={button} busyLabel={busyButton ?? button} action={action} />}</> }
-function Verification({ result, previewActive, startPreview, retry }: { result: PipelineResult; previewActive: boolean; startPreview(): Promise<void>; retry(): Promise<void> }) { const ok = result.state === 'VERIFIED_PROTOTYPE'; const cancelled = result.state === 'CANCELLED'; const interrupted = result.state === 'INTERRUPTED'; return <section className="task-card"><h1>{t.verification.title}</h1><p>{resultSentence(result.state, t.verification)}</p><p>{t.verification.attempts}: {result.attempts}</p>{ok && !previewActive ? <button className="primary" onClick={() => void startPreview()}>{t.preview.open}</button> : null}{interrupted ? <button className="primary" onClick={() => void retry()}>{t.creation.retry}</button> : null}{result.verificationCodes === undefined || result.verificationCodes.length === 0 ? null : <section><h2>{t.verification.testCodes}</h2><p>{t.verification.testCodesHelp}</p><ul>{result.verificationCodes.map(item => <li key={`${item.email}-${item.expires_at}-${item.code}`}><strong>{item.email}</strong>: <code>{item.code}</code></li>)}</ul></section>}{result.checks === undefined ? null : <><h2>{t.verification.checks}</h2><ul>{result.checks.map(check => <li key={check.id}>{check.title ?? check.label}: {checkStatus(check.status)}{check.title === undefined || check.title === check.label ? null : <> <span className="check-id"><code>{check.label}</code></span></>}</li>)}</ul></>}<details className="result-technical"><summary>{t.verification.technicalTitle}</summary><p>{t.verification.technicalCode}: <code>{result.state}</code></p>{result.message === '' ? null : <p>{t.verification.technicalFailure}: <code>{result.message}</code></p>}</details></section> }
+function Verification({ result, previewActive, startPreview, retry }: { result: PipelineResult; previewActive: boolean; startPreview(): Promise<void>; retry(): Promise<void> }) { const ok = result.state === 'VERIFIED_PROTOTYPE'; const cancelled = result.state === 'CANCELLED'; const interrupted = result.state === 'INTERRUPTED'; return <section className="task-card"><h1>{t.verification.title}</h1><p>{resultSentence(result.state, t.verification)}</p><p>{t.verification.attempts}: {result.attempts}</p>{ok && !previewActive ? <PendingButton label={t.preview.open} busyLabel={t.preview.openBusy} action={startPreview} /> : null}{interrupted ? <PendingButton label={t.creation.retry} busyLabel={t.creation.retryBusy} action={retry} /> : null}{result.verificationCodes === undefined || result.verificationCodes.length === 0 ? null : <section><h2>{t.verification.testCodes}</h2><p>{t.verification.testCodesHelp}</p><ul>{result.verificationCodes.map(item => <li key={`${item.email}-${item.expires_at}-${item.code}`}><strong>{item.email}</strong>: <code>{item.code}</code></li>)}</ul></section>}{result.checks === undefined ? null : <><h2>{t.verification.checks}</h2><ul>{result.checks.map(check => <li key={check.id}>{check.title ?? check.label}: {checkStatus(check.status)}{check.title === undefined || check.title === check.label ? null : <> <span className="check-id"><code>{check.label}</code></span></>}</li>)}</ul></>}<details className="result-technical"><summary>{t.verification.technicalTitle}</summary><p>{t.verification.technicalCode}: <code>{result.state}</code></p>{result.message === '' ? null : <p>{t.verification.technicalFailure}: <code>{result.message}</code></p>}</details></section> }
 
 function refreshPreviewAdmission(previewUrl: string): void {
   const probe = document.createElement('iframe')

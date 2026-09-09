@@ -27,3 +27,33 @@ test('a ajuda abre pela barra de navegação e explica o vocabulário do produto
   await page.getByRole('link', { name: 'Voltar ao início' }).click()
   await expect(page.getByRole('heading', { name: 'Vamos criar seu aplicativo' })).toBeVisible()
 })
+
+/**
+ * A tela diz de ONDE veio o tipo — e não afirma o que não sabe.
+ *
+ * Com dois estados só, quem escrevia "sistema pra barbearia" via o seletor já
+ * em "Agenda de horários" E a frase "não deu para entender o tipo pelo seu
+ * texto". Duas afirmações que se contradizem na mesma tela, e nenhuma delas
+ * explicando de onde veio a agenda. São quatro estados agora, e este teste
+ * afirma três deles no navegador.
+ */
+test('o tipo mostrado vem com a frase que explica de onde ele veio', async ({ context, page }) => {
+  await context.addCookies([{ name: 'dz23_studio_session', value: 'e2e', url: 'http://studio.dz23.localhost:4179' }])
+  await page.goto('/studio/')
+  const brief = page.getByRole('textbox').first()
+  const kind = page.getByLabel('Tipo de aplicativo')
+
+  // 1. Só o RAMO: escolhe agenda, e NÃO diz que entendeu o pedido.
+  await brief.fill('sistema pra barbearia')
+  await expect(kind).toHaveValue('scheduling')
+  await expect(page.getByText('Reconhecemos só o seu ramo')).toBeVisible()
+
+  // 2. O TEXTO diz o que o aplicativo faz.
+  await brief.fill('quero uma agenda para minha clínica marcar consultas')
+  await expect(kind).toHaveValue('scheduling')
+  await expect(page.getByText('Entendemos isto pelo seu texto')).toBeVisible()
+
+  // 3. A PESSOA escolheu: a tela para de dizer que entendeu pelo texto.
+  await kind.selectOption('catalog')
+  await expect(page.getByText('Você escolheu este tipo')).toBeVisible()
+})

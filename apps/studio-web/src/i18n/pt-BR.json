@@ -63,7 +63,8 @@
     "restartBody": "Recomeçar cria uma tentativa nova a partir do mesmo plano. A tentativa que falhou continua guardada, com os arquivos e o registro do que aconteceu.",
     "restart": "Tentar de novo",
     "criteriaBreakdown": "{total} critérios ({conferidos} conferidos, {falharam} falharam, {naoAutomatizados} não conferidos automaticamente)",
-    "criteriaAllPassed": "{total} critérios, todos conferidos"
+    "criteriaAllPassed": "{total} critérios, todos conferidos",
+    "confirmBusy": "Voltando…"
   },
   "health": {
     "ok": "Tudo certo",
@@ -115,7 +116,9 @@
     },
     "continueBusy": "Enviando sua ideia…",
     "betaBadge": "protótipo inicial",
-    "kindHelpUnknown": "Não deu para entender o tipo pelo seu texto. Escolha abaixo — é o que decide o que o Studio constrói."
+    "kindHelpUnknown": "Não deu para entender o tipo pelo seu texto. Escolha abaixo — é o que decide o que o Studio constrói.",
+    "kindHelpTrade": "Reconhecemos só o seu ramo e começamos por aqui. Não entendemos ainda o que o aplicativo precisa fazer — confira o tipo abaixo, porque é ele que decide o que o Studio constrói.",
+    "kindHelpChosen": "Você escolheu este tipo. É ele que decide o que o Studio constrói, e dá para trocar quando quiser."
   },
   "design": {
     "title": "Escolha o jeito do seu aplicativo",
@@ -189,7 +192,8 @@
     "sendChangeBusy": "Enviando seu pedido…",
     "editSaveBusy": "Guardando…",
     "removeBusy": "Tirando…",
-    "moveBusy": "Movendo…"
+    "moveBusy": "Movendo…",
+    "revisionBusy": "Preparando o plano…"
   },
   "creation": {
     "title": "Criar e testar o protótipo",
@@ -197,7 +201,9 @@
     "retry": "Tentar novamente",
     "working": "Criando e conferindo dentro do ambiente isolado…",
     "cancel": "Cancelar criação",
-    "startBusy": "Começando a criação…"
+    "startBusy": "Começando a criação…",
+    "retryBusy": "Recomeçando…",
+    "cancelBusy": "Cancelando…"
   },
   "verification": {
     "title": "Resultado da verificação",
@@ -265,7 +271,9 @@
     "closed": "A prévia foi encerrada. O protótipo continua salvo no projeto.",
     "accessCodes": "Código de acesso da prévia",
     "accessCodesHelp": "Use este código somente dentro do protótipo. Ele não foi enviado por e-mail.",
-    "heartbeatFailed": "Não foi possível manter a prévia ativa. Confira a conexão local ou abra uma nova prévia."
+    "heartbeatFailed": "Não foi possível manter a prévia ativa. Confira a conexão local ou abra uma nova prévia.",
+    "openBusy": "Abrindo o protótipo…",
+    "stopBusy": "Fechando…"
   },
   "privacy": {
     "title": "Privacidade",

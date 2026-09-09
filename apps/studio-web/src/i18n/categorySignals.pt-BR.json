@@ -115,6 +115,18 @@
     [
       " atendimento ",
       2
+    ],
+    [
+      " marcar ",
+      2
+    ],
+    [
+      " marcar batizado",
+      4
+    ],
+    [
+      " organizar os pacientes",
+      4
     ]
   ],
   "saas-authenticated": [
@@ -246,6 +258,14 @@
     ],
     [
       " acompanhar quanto",
+      4
+    ],
+    [
+      " acompanhar os numero",
+      4
+    ],
+    [
+      " acompanhar o numero",
       4
     ]
   ],
@@ -411,6 +431,18 @@
     [
       " guardar as informacoes",
       4
+    ],
+    [
+      " guardar os nome",
+      5
+    ],
+    [
+      " se inscrever",
+      4
+    ],
+    [
+      " inscrever no curso",
+      5
     ]
   ],
   "catalog": [
@@ -457,6 +489,14 @@
     [
       " minha loja",
       2
+    ],
+    [
+      " imoveis",
+      3
+    ],
+    [
+      " cardapio digital",
+      5
     ]
   ],
   "landing-page": [
@@ -491,6 +531,34 @@
     [
       "site",
       2
+    ],
+    [
+      " na internet",
+      3
+    ],
+    [
+      " aparecer no google",
+      4
+    ],
+    [
+      " cartao de visita",
+      4
+    ],
+    [
+      " contar a historia",
+      4
+    ],
+    [
+      " mostrar minha",
+      3
+    ],
+    [
+      " mostrar meu ",
+      3
+    ],
+    [
+      " quem somos",
+      3
     ]
   ],
   "ramo-de-atividade": [
@@ -571,10 +639,6 @@
       "catalog"
     ],
     [
-      "loja",
-      "catalog"
-    ],
-    [
       "oficina",
       "crud-panel"
     ],
@@ -589,6 +653,58 @@
     [
       "petshop",
       "catalog"
+    ],
+    [
+      "academia",
+      "scheduling"
+    ],
+    [
+      "hotel",
+      "scheduling"
+    ],
+    [
+      "pousada",
+      "scheduling"
+    ],
+    [
+      "autoescola",
+      "scheduling"
+    ],
+    [
+      "lava jato",
+      "scheduling"
+    ],
+    [
+      "food truck",
+      "catalog"
+    ],
+    [
+      "mercadinho",
+      "catalog"
+    ],
+    [
+      "mercearia",
+      "catalog"
+    ],
+    [
+      "ifood",
+      "catalog"
+    ],
+    [
+      "buffet",
+      "catalog"
+    ],
+    [
+      "hamburgueria",
+      "catalog"
+    ],
+    [
+      "sorveteria",
+      "catalog"
+    ],
+    [
+      "oficina mecanica",
+      "crud-panel"
     ]
   ]
 }
