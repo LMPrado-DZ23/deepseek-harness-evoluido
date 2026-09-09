@@ -98,6 +98,27 @@ describe('a tela', () => {
     expect(view()).toContain(copy.empty)
   })
 
+  it('a tela sem equipe deixou de ser um beco: ela diz COMO começar e leva lá', () => {
+    // O painel mostrava tudo sobre uma equipe — árvore, custo, evidência, o
+    // botão de parar — e nenhum caminho para começar uma. Quem chegava aqui
+    // lia "nenhum trabalho foi iniciado" e ficava com essa informação na mão.
+    const html = view()
+    expect(html).toContain(copy.emptyHow)
+    expect(html).toContain(copy.emptyAction)
+    // O destino é a CONVERSA, com o pedido escrito: é lá que existe o agente
+    // vivo do Harness que ancora uma equipe.
+    expect(html).toContain('/studio/assistente?pedido=')
+  })
+
+  it('o caminho de começar NÃO é um botão que finge iniciar', () => {
+    // Uma equipe é ancorada num agente vivo, que só existe dentro de uma
+    // chamada de ferramenta. Uma rota HTTP teria de inventar esse dono — e
+    // inventar dono é pior do que não ter botão nenhum.
+    const html = view()
+    expect(html).not.toMatch(/<button[^>]*>[^<]*Pedir um trabalho em equipe/u)
+    expect(html).toMatch(/<a[^>]+href="\/studio\/assistente\?pedido=/u)
+  })
+
   it('o painel mostra custo NÃO MEDIDO, quem autorizou e as etapas', () => {
     const html = view({ panel: panel() })
     expect(html).toContain(copy.costTitle)

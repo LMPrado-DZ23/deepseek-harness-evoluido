@@ -56,9 +56,18 @@ export interface ConversationProps {
   readonly pollMs?: number
   /** Injetável para o teste do fluxo não precisar de navegador nem de rede. */
   readonly createStream?: ConversationStreamOptions['create']
+  /**
+   * Texto que já chega escrito no campo, sem ser enviado.
+   *
+   * Serve para quem foi trazido de outra tela com um pedido preparado — hoje,
+   * o painel de trabalho em equipe, que não tem como INICIAR uma equipe por
+   * conta própria. Ele nunca envia: a pessoa lê, ajusta e manda. Enviar em nome
+   * dela um texto que ela não escreveu seria falar pela boca dela.
+   */
+  readonly initialDraft?: string
 }
 
-export function Conversation({ conversationId, port, getCsrf, pollMs = CONVERSATION_POLL_MS, createStream }: ConversationProps) {
+export function Conversation({ conversationId, port, getCsrf, pollMs = CONVERSATION_POLL_MS, createStream, initialDraft }: ConversationProps) {
   const [state, dispatch] = useReducer(conversationReducer, undefined, emptyConversation)
   /**
    * Dois avisos diferentes. O de LEITURA some sozinho quando a leitura volta a
@@ -83,6 +92,11 @@ export function Conversation({ conversationId, port, getCsrf, pollMs = CONVERSAT
   const fileRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => { dispatch({ kind: 'opened', conversationId }) }, [conversationId])
+  // O rascunho preparado entra UMA vez, ao abrir. Reescrevê-lo a cada volta
+  // apagaria o que a pessoa estivesse digitando por cima dele.
+  useEffect(() => {
+    if (initialDraft !== undefined && initialDraft !== '') dispatch({ kind: 'draft', draft: initialDraft })
+  }, [conversationId, initialDraft])
 
   /**
    * Como a conversa chega: por FLUXO, com leitura periódica de queda.

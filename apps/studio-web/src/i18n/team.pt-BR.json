@@ -57,5 +57,8 @@
     "reviewer": "Quem revisa",
     "tester": "Quem testa",
     "synthesizer": "Quem junta tudo"
-  }
+  },
+  "emptyHow": "Um trabalho em equipe é iniciado pela conversa: é lá que o assistente tem a autorização e o vínculo necessários para abrir as etapas e acompanhá-las.",
+  "emptyAction": "Pedir um trabalho em equipe",
+  "emptyRequest": "Quero dividir este projeto em um trabalho em equipe. Me ajude a montar as etapas, dizendo o que cada uma faz e quais arquivos ela pode tocar, antes de iniciar."
 }

@@ -14,6 +14,7 @@ import {
   type TeamTask,
 } from './teamApi'
 import './team.css'
+import { assistantRequestAddress } from '../assistant/assistantRequest'
 
 export { TEAM_PATH, isTeamPath } from './teamApi'
 
@@ -186,7 +187,20 @@ export function TeamView(props: TeamViewProps) {
     {!loaded && readError === null && <p className="team-loading">{copy.loading}</p>}
     {panel === null
       ? loaded && readError === null && cards.length === 0
-        ? <p className="team-empty">{copy.empty}</p>
+        ? <section className="team-empty">
+          <p>{copy.empty}</p>
+          {/* O painel mostrava TUDO sobre uma equipe e não tinha caminho
+              nenhum para começar uma: quem chegava aqui sem equipe lia
+              "nenhum trabalho foi iniciado" e ficava sem saber o que fazer
+              com essa informação.
+              O botão NÃO inicia — e isso é deliberado. Uma equipe é ancorada
+              num agente vivo do Harness, que só existe dentro de uma chamada
+              de ferramenta; uma rota HTTP teria de inventar esse dono, e
+              inventar dono é pior que não ter botão. O que ele faz é levar à
+              conversa, que tem o agente de verdade, com o pedido escrito. */}
+          <p className="context-note">{copy.emptyHow}</p>
+          <a className="primary team-empty-action" href={assistantRequestAddress(copy.emptyRequest)}>{copy.emptyAction}</a>
+        </section>
         : <TeamCards cards={cards} />
       : <TeamDetail {...props} panel={panel} />}
   </main>
