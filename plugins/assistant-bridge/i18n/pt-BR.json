@@ -50,7 +50,7 @@
     "pathForbidden": "A tarefa tentou sair dos caminhos liberados pelo administrador.",
     "cancelOwner": "Somente quem iniciou esta execução pode cancelá-la.",
     "cancelUnavailable": "O controle de cancelamento não sobreviveu ao reinício; a execução foi mantida para reconciliação segura.",
-    "sessionRequired": "A ferramenta exige uma sessão do Harness vinculada.",
+    "sessionRequired": "Esta ferramenta precisa de uma conversa aberta e vinculada a você.",
     "directPresetOnly": "Esta ferramenta só pode ser usada pela conversa principal do preset dz23-assistant.",
     "identityRequired": "A sessão não está vinculada a uma identidade do DZ23 STUDIO.",
     "roleForbidden": "Seu papel não permite esta ação.",

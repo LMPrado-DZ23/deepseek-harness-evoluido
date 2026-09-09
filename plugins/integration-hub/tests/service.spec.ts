@@ -233,7 +233,7 @@ describe('integration hub service', () => {
     // a confirmation for the WRONG tier is not a confirmation for this one
     await expect(service.setEnabled(admin, id, true, { approvalId: 'inventado' })).rejects.toThrow('confirmação')
     // right confirmation, but no recent passkey on this session
-    await expect(service.setEnabled(admin, id, true, await ok(service, admin, 'integration.enabled', id))).rejects.toThrow('passkey')
+    await expect(service.setEnabled(admin, id, true, await ok(service, admin, 'integration.enabled', id))).rejects.toThrow('chave de acesso')
     const enabled = await service.setEnabled(strongAdmin, id, true, await ok(service, strongAdmin, 'integration.enabled', id))
     expect(enabled.enabled).toBe(true)
     const actions = repository.eventRows.map(event => `${event.action}:${event.outcome}`)
@@ -245,11 +245,11 @@ describe('integration hub service', () => {
     await service.setEnabled(strongAdmin, id, false)
     expect((await service.setEnabled(strongAdmin, id, true, reused)).enabled).toBe(true)
     await service.setEnabled(strongAdmin, id, false)
-    await expect(service.setEnabled(strongAdmin, id, true, reused)).rejects.toThrow('passkey')
+    await expect(service.setEnabled(strongAdmin, id, true, reused)).rejects.toThrow('chave de acesso')
     // An approval issued for another subject, another person or another action is not this one.
     const other = await service.register(admin, signed(manifest({ id: 'outra', permissions: ['secrets.read'] })))
     const foreign = await ok(service, strongAdmin, 'integration.enabled', other.integration.integration_id)
-    await expect(service.setEnabled(strongAdmin, id, true, foreign)).rejects.toThrow('passkey')
+    await expect(service.setEnabled(strongAdmin, id, true, foreign)).rejects.toThrow('chave de acesso')
     // A T0 integration is enabled with no confirmation at all.
     const plain = await service.register(admin, signed(manifest({ id: 'agenda' })))
     expect(service.requiredApprovalTier(plain.integration)).toBeNull()
@@ -688,7 +688,7 @@ describe('integration hub service', () => {
     const weakAdmin: HubActor = { ...admin, sessionId: 's-admin' }
     const ticket = await ok(service, weakAdmin, 'integration.enabled', id)
     // First refusal is about the passkey…
-    await expect(service.setEnabled(weakAdmin, id, true, ticket)).rejects.toThrow('passkey')
+    await expect(service.setEnabled(weakAdmin, id, true, ticket)).rejects.toThrow('chave de acesso')
     // …so after confirming with the passkey, the SAME confirmation still works. Burning it here
     // would greet the person with "confirm again" for something they had just confirmed.
     expect((await service.setEnabled(strongAdmin, id, true, ticket)).enabled).toBe(true)

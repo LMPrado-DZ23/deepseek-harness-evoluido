@@ -52,7 +52,7 @@
   "http.allDevicesDisconnected": "Todos os dispositivos foram desconectados.",
   "http.deviceDisconnected": "Dispositivo desconectado.",
   "http.edgeUnauthorized": "Borda de acesso não autorizada.",
-  "http.harnessUnavailable": "A interface do Harness ainda não está disponível.",
+  "http.harnessUnavailable": "A conversa do DZ23 STUDIO ainda não está disponível neste computador.",
   "http.hostNotAllowed": "Host não autorizado.",
   "http.invalidJson": "JSON inválido.",
   "http.invalidRequest": "Solicitação inválida.",

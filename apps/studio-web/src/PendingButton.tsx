@@ -11,9 +11,9 @@ import { useEffect, useRef, useState } from 'react'
  * existir), diz o que está fazendo no gerúndio e anuncia `aria-busy` para quem
  * ouve a tela em vez de olhar.
  */
-export function PendingButton({ label, busyLabel, action, className = 'primary', disabled = false, testId }: {
+export function PendingButton({ label, busyLabel, action, className = 'primary', disabled = false, testId, ariaLabel }: {
   label: string; busyLabel: string; action: () => Promise<void>
-  className?: string; disabled?: boolean; testId?: string
+  className?: string; disabled?: boolean; testId?: string; ariaLabel?: string
 }) {
   const [pending, setPending] = useState(false)
   const mounted = useRef(true)
@@ -21,6 +21,7 @@ export function PendingButton({ label, busyLabel, action, className = 'primary',
   return <button
     className={className} disabled={disabled || pending} aria-busy={pending}
     {...(testId === undefined ? {} : { 'data-testid': testId })}
+    {...(ariaLabel === undefined ? {} : { 'aria-label': ariaLabel })}
     onClick={() => {
       if (pending) return
       setPending(true)

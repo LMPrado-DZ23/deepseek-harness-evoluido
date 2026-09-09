@@ -26,7 +26,9 @@
  * esta prova o reprove. Sem isso, uma prova que só passa não diz nada: ela
  * poderia estar passando por não olhar.
  *
- * Uso: node scripts/prove-container-hardening.mjs [--self-test]
+ * Uso: pnpm prove:container-hardening (ou `npx tsx scripts/prove-container-hardening.mjs
+ * --self-test`). Ela importa o FONTE TypeScript do produto, então `node` puro
+ * falha com ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX — é o tsx que remove os tipos.
  */
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'

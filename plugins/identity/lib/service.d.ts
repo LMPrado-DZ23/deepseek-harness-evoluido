@@ -100,7 +100,14 @@ export declare class StudioIdentityService {
         readonly allowedHosts: readonly string[];
         readonly allowedOrigins: readonly string[];
     }): void;
-    /** Se a confiança de requisição foi declarada (o portão confere que sim). */
+    /**
+     * Se a confiança de requisição foi declarada.
+     *
+     * Ela é lida pelo teste que prova o cabeamento: `authenticatedMutation` só
+     * confere Host e Origin quando a borda declarou os endereços, e uma declaração
+     * esquecida é exatamente o tipo de coisa que ninguém nota — a rota continua
+     * respondendo, só que sem a conferência.
+     */
     get requestTrustConfigured(): boolean;
     /**
      * Recusa requisição de host ou origem que a borda não aceita.

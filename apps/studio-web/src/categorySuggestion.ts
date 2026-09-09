@@ -65,13 +65,20 @@ const SIGNALS: Readonly<Record<Category, readonly (readonly [string, number])[]>
 export const DEFAULT_CATEGORY: Category = 'landing-page'
 
 /**
- * O palpite de categoria para um texto.
+ * O palpite de categoria para um texto, e SE ele entendeu alguma coisa.
+ *
+ * Devolver só a categoria era indistinguível de não entender nada: o padrão
+ * `landing-page` saía igual quando o texto falava de página e quando o texto
+ * não dizia nada que este palpite reconheça. A tela, por cima, afirmava
+ * "Entendemos isto pelo seu texto" — e afirmava isso para a maioria dos textos
+ * curtos. Uma afirmação dessas, falsa, é pior do que não afirmar nada: ela
+ * convence a pessoa a não corrigir.
  * @param brief - a ideia, com as palavras da pessoa.
- * @returns a categoria de maior pontuação; o padrão quando nada pontua.
+ * @returns a categoria e `understood`, que diz se algum sinal pontuou.
  */
-export function suggestCategory(brief: string): Category {
+export function categoryGuess(brief: string): { readonly category: Category; readonly understood: boolean } {
   const text = normalize(brief)
-  if (text.trim() === '') return DEFAULT_CATEGORY
+  if (text.trim() === '') return { category: DEFAULT_CATEGORY, understood: false }
   let best: Category = DEFAULT_CATEGORY
   let bestScore = 0
   // A ordem do empate é a das categorias declaradas, e não a de iteração de um
@@ -82,5 +89,14 @@ export function suggestCategory(brief: string): Category {
     for (const [signal, weight] of SIGNALS[category]) if (text.includes(signal)) score += weight
     if (score > bestScore) { best = category; bestScore = score }
   }
-  return best
+  return { category: best, understood: bestScore > 0 }
+}
+
+/**
+ * A categoria palpitada, sem a informação de confiança.
+ * @param brief - a ideia.
+ * @returns a categoria.
+ */
+export function suggestCategory(brief: string): Category {
+  return categoryGuess(brief).category
 }

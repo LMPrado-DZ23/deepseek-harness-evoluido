@@ -220,4 +220,12 @@ jobs:
         run: pnpm test:postgres
 
       - name: Refuse unexpected build mutations
-        run: git diff --exit-code -- . ':(exclude)plugins/*/lib/**'
+        # O `lib/` versionado DEIXOU de ser exceção aqui. Ele é o que o pacote
+        # publica e executa (`exports.default → ./lib/index.js`), nenhum teste o
+        # importa, e nada o conferia contra o `src/`: uma auditoria sabotou
+        # `identity/lib/service.js` removendo a validação de CSRF e TODOS os
+        # portões passaram. Com o `lib/` dentro do diff, o artefato versionado
+        # tem de ser exatamente o que `pnpm build` produz a partir do fonte
+        # revisado — e um `lib/` adulterado reprova aqui.
+        run: git diff --exit-code
+

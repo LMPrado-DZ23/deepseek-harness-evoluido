@@ -627,6 +627,9 @@ describe('B-M6: o token CSRF pode ser trocado, e a elevação o troca', () => {
     h.passkeys.userVerified = true
 
     const session = h.repository.sessions()[0]!
+    // Sessão NOVA nasce com semente: o ramo sem semente é só para o que foi
+    // gravado antes do campo existir.
+    expect(session.csrf_seed, 'sessão nova sem semente').toBeDefined()
     const before = await h.service.csrfTokenFor(session)
     // Estável enquanto nada acontece: é assim que a tela funciona.
     expect(await h.service.csrfTokenFor(session)).toBe(before)

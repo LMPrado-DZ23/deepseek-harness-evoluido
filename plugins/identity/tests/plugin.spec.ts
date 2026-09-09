@@ -92,6 +92,13 @@ describe('identity Cordis plugin composition', () => {
       service: expect.anything(), developmentEmailCapture: expect.anything(),
     }))
     expect(f.getRoute()).toMatchObject({ kind: 'prefix', path: '/api/studio/identity' })
+    // A borda DECLARA ao serviço os endereços que aceita. `authenticatedMutation`
+    // — a porta de entrada de seis plugins — só confere Host e Origin quando
+    // essa declaração existe, e uma declaração esquecida não quebra nada
+    // visível: a rota continua respondendo, só que sem a conferência.
+    const provided = (f.ctx.provide as unknown as { mock: { calls: [string, { service: { requestTrustConfigured: boolean } }][] } })
+      .mock.calls.find(call => call[0] === 'studioIdentity')![1]
+    expect(provided.service.requestTrustConfigured, 'a borda não declarou Host/Origin ao serviço').toBe(true)
     const runtime = f.provided.identity!
     await runtime.service.requestMagicCode('owner@example.com')
     const code = runtime.developmentEmailCapture!.messages[0]!.code

@@ -1,12 +1,12 @@
 {
   "delegation": {
     "invalidPath": "Caminho de delegação inválido: {path}",
-    "coordinatorCwdLost": "O Harness não preservou o cwd isolado da sessão coordenadora.",
+    "coordinatorCwdLost": "O assistente perdeu a pasta isolada em que estava trabalhando. Nada foi aplicado ao seu projeto.",
     "coordinatorIsPersonSession": "A sessão coordenadora não pode ser a sessão da pessoa.",
     "coveredByIsolatedGrant": "Ação incluída na delegação isolada já confirmada pela pessoa.",
     "sensitiveNeedsStrongConfirmation": "Esta tarefa sensível precisa de confirmação reforçada antes de começar.",
     "confirmBeforeIsolatedCopy": "Confirme antes de o assistente trabalhar numa cópia do projeto.",
-    "confirmWithPasskey": "Confirme com sua passkey antes de iniciar esta tarefa sensível.",
+    "confirmWithPasskey": "Confirme com sua chave de acesso antes de iniciar esta tarefa sensível.",
     "filesAlreadyLeased": "Outro assistente já está trabalhando nos mesmos arquivos.",
     "confirmBeforeApply": "Confirme antes de aplicar a proposta ao seu projeto.",
     "proposalNotApplicable": "Esta proposta não está disponível para aplicação.",

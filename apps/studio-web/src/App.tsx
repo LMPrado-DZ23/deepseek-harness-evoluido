@@ -4,7 +4,7 @@ import { api, apiResponse, csrfToken, type HealthState } from './api'
 import { PendingButton } from './PendingButton'
 import { STUDIO_CATEGORIES, type Category } from './categories'
 import t from './i18n/pt-BR.json'
-import { suggestCategory } from './categorySuggestion'
+import { categoryGuess } from './categorySuggestion'
 import { creationBlocked, currentStepIndex, permanentTruthKind, privacyNotice, resultSentence, routeReasonNotice, type PipelineResultState, type PrivacyProfile, type ProjectUiState } from './presentation'
 import { apiFailureMessage, apiFailureText, type ApiCallKind } from './pwa/apiFailure'
 import { GENERATION_REJECTED_STATE, postGeneration, startGeneration } from './pwa/generation'
@@ -67,6 +67,7 @@ export function App() {
   const [logo, setLogo] = useState<File | null>(null)
   const [showDesignAdvanced, setShowDesignAdvanced] = useState(false)
   const [categoryChosenByPerson, setCategoryChosenByPerson] = useState(false)
+  const [categoryUnderstood, setCategoryUnderstood] = useState(false)
   const [route, setRoute] = useState<string | null>(null)
   const [projectId, setProjectId] = useState<string | null>(null)
   const [projectState, setProjectState] = useState<ProjectUiState | null>(null)
@@ -390,9 +391,10 @@ export function App() {
     if (brief.trim() === '') setBrief(value)
     setCategory(selected)
     setCategoryChosenByPerson(true)
+    setCategoryUnderstood(true)
   }
   /** A pessoa corrigiu o tipo: o palpite para de mexer nisso. */
-  function chooseCategory(selected: Category) { setCategory(selected); setCategoryChosenByPerson(true) }
+  function chooseCategory(selected: Category) { setCategory(selected); setCategoryChosenByPerson(true); setCategoryUnderstood(true) }
   /**
    * Enquanto a pessoa escreve, o palpite acompanha — até ela corrigir.
    *
@@ -401,7 +403,10 @@ export function App() {
    */
   function updateBrief(value: string) {
     setBrief(value)
-    if (!categoryChosenByPerson) setCategory(suggestCategory(value))
+    if (categoryChosenByPerson) return
+    const guess = categoryGuess(value)
+    setCategory(guess.category)
+    setCategoryUnderstood(guess.understood)
   }
   return <div className="shell">
     <StudioSidebar active={activeNavId(window.location.pathname)} open={menuOpen} onClose={closeMenu} />
@@ -411,7 +416,7 @@ export function App() {
         fazia nada. Saíram; o que existe de verdade continua aqui. */}
       <div className="top-actions"><NotificationOptIn />{authenticatedSession ? <button className="signout-button" type="button" disabled={signingOut} aria-busy={signingOut} onClick={() => void signOut()}><LogOut aria-hidden="true" /><span>{signingOut ? t.account.signingOut : t.account.signOut}</span></button> : null}</div></header>
       <main className="canvas"><section className="idea-panel">
-        {projectState === null ? <Idea brief={brief} setBrief={updateBrief} privacy={privacy} setPrivacy={setPrivacy} route={route ?? health.route} localRoute={health.local_route} routeReason={health.route_reason_code ?? null} ready={ready} chooseSuggestion={chooseSuggestion} category={category} chooseCategory={chooseCategory} create={create}
+        {projectState === null ? <Idea brief={brief} setBrief={updateBrief} privacy={privacy} setPrivacy={setPrivacy} route={route ?? health.route} localRoute={health.local_route} routeReason={health.route_reason_code ?? null} ready={ready} chooseSuggestion={chooseSuggestion} category={category} categoryUnderstood={categoryUnderstood} chooseCategory={chooseCategory} create={create}
           designPreset={designPreset} setDesignPreset={setDesignPreset} brandColor={brandColor} setBrandColor={setBrandColor}
           font={font} setFont={setFont} radius={radius} setRadius={setRadius} density={density} setDensity={setDensity}
           tone={tone} setTone={setTone} logo={logo} setLogo={setLogo} showDesignAdvanced={showDesignAdvanced} setShowDesignAdvanced={setShowDesignAdvanced} /> : null}
@@ -455,7 +460,7 @@ const SUGGESTIONS: readonly (readonly [string, Category, boolean])[] = [
 ]
 
 function Idea(props: {
-  brief: string; setBrief(v: string): void; privacy: PrivacyProfile; setPrivacy(v: PrivacyProfile): void; route: string | null; localRoute: string | null | undefined; routeReason: string | null; ready: boolean; chooseSuggestion(v: string, c: Category): void; category: Category; chooseCategory(v: Category): void; create(): Promise<void>
+  brief: string; setBrief(v: string): void; privacy: PrivacyProfile; setPrivacy(v: PrivacyProfile): void; route: string | null; localRoute: string | null | undefined; routeReason: string | null; ready: boolean; chooseSuggestion(v: string, c: Category): void; category: Category; categoryUnderstood: boolean; chooseCategory(v: Category): void; create(): Promise<void>
   designPreset: DesignPreset; setDesignPreset(v: DesignPreset): void; brandColor: string; setBrandColor(v: string): void
   font: 'geist-sans' | 'source-serif'; setFont(v: 'geist-sans' | 'source-serif'): void; radius: 'compact' | 'balanced' | 'rounded'; setRadius(v: 'compact' | 'balanced' | 'rounded'): void
   density: 'compact' | 'comfortable'; setDensity(v: 'compact' | 'comfortable'): void; tone: 'friendly' | 'formal'; setTone(v: 'friendly' | 'formal'): void
@@ -467,7 +472,7 @@ function Idea(props: {
   ]
   return <><div className="heading"><Sparkles aria-hidden="true"/><div><h1>{t.idea.title}</h1><p>{t.idea.subtitle}</p></div></div><label className="sr-only" htmlFor="brief">{t.idea.title}</label>
     <textarea id="brief" maxLength={1000} value={props.brief} onChange={event => props.setBrief(event.target.value)} placeholder={t.idea.placeholder} /><div className="counter" aria-live="polite">{props.brief.length} {t.idea.counter}</div>
-    <h2>{t.idea.kindTitle}</h2><p className="coming">{t.idea.kindHelp}</p>
+    <h2>{t.idea.kindTitle}</h2><p className="coming">{props.categoryUnderstood ? t.idea.kindHelp : t.idea.kindHelpUnknown}</p>
     <label className="kind">{t.idea.kindLabel}<select value={props.category} onChange={event => props.chooseCategory(event.target.value as Category)}>{STUDIO_CATEGORIES.map(value => <option key={value} value={value}>{t.idea.kinds[value]}</option>)}</select></label>
     <h2>{t.idea.suggestions}</h2>
     {/* O aviso de que três destas sugestões são protótipos iniciais ficava

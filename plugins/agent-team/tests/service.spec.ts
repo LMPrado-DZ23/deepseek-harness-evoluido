@@ -134,7 +134,7 @@ describe('StudioAgentTeamService', () => {
       repository: live.repository, agents: live.agents, killJob: live.killJob,
       now: () => new Date(now),
     })
-    await expect(blocked.reconcileInterruptedTeams()).rejects.toThrow(/ainda informa trabalho ativo/)
+    await expect(blocked.reconcileInterruptedTeams()).rejects.toThrow(/trabalho em andamento/)
     expect(live.tasks.get('team-1:implementation')).toMatchObject({ status: 'RUNNING' })
 
     const missing = harness()

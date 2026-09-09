@@ -18,7 +18,7 @@
     "nothingReady": "Nenhuma tarefa pode começar agora. Revise e aplique as propostas anteriores antes de continuar.",
     "owner": "Somente a pessoa que iniciou a equipe pode continuá-la ou cancelá-la.",
     "persistence": "Não foi possível registrar a execução da tarefa; ela foi cancelada com segurança.",
-    "reconciliationIncomplete": "A equipe não pode reconciliar enquanto o registro do Harness ainda informa trabalho ativo."
+    "reconciliationIncomplete": "A equipe ainda tem trabalho em andamento; espere ele terminar ou pare a equipe antes de reorganizar."
   },
   "status": {
     "running": "Há assistentes trabalhando em cópias isoladas.",

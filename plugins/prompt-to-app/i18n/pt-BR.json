@@ -3,7 +3,13 @@
     "audience": "Para quem você quer criar este projeto?",
     "goal": "O que a pessoa deve conseguir fazer ou entender?",
     "content": "Quais informações ou itens precisam aparecer?",
-    "sensitive": "Sua ideia parece envolver dados sensíveis ({kinds}). Você confirma que isso é necessário?"
+    "sensitive": "Sua ideia parece envolver dados sensíveis ({kinds}). Você confirma que isso é necessário?",
+    "sensitiveKind": {
+      "cpf": "CPF",
+      "health": "informações de saúde",
+      "financial": "dados financeiros",
+      "minors": "dados de crianças ou adolescentes"
+    }
   },
   "errors": {
     "notFound": "Projeto não encontrado neste espaço de trabalho.",

@@ -28,7 +28,7 @@
     "toolTeam": "Coordenar uma equipe de assistentes",
     "toolStudio": "Executar uma ação do DZ23 STUDIO",
     "invalidMessage": "Não consegui entender esta mensagem. Escreva o texto e envie de novo.",
-    "releasedMissing": "o Harness não encontrou mais esta conversa",
+    "releasedMissing": "o DZ23 STUDIO não encontrou mais esta conversa",
     "releasedForeign": "esta sessão não é uma conversa do assistente",
     "methodNotAllowed": "Esta ação não é permitida neste endereço.",
     "messageTooLarge": "Esta mensagem é grande demais para uma vez só. Divida em partes menores e envie de novo.",

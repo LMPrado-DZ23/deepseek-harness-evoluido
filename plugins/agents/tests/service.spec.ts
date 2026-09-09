@@ -551,7 +551,7 @@ describe('StudioAgentService PoC 3A', () => {
       approval: { approved: true, tier: 'T3', approvedBy: 'user-1' },
     }))).toThrowError(new DelegationError(
       'APPROVAL_REQUIRED',
-      'Confirme com sua passkey antes de iniciar esta tarefa sensível.',
+      'Confirme com sua chave de acesso antes de iniciar esta tarefa sensível.',
     ))
     expect(h.repository.runs()).toHaveLength(0)
   })

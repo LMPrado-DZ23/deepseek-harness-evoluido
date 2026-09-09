@@ -62,7 +62,7 @@ export function PlanEditor({ plan, submit, approve, reason, setReason, requestCh
             <textarea id={`plan-description-${slice.slice_id}`} value={draft.description} onChange={event => setDraft({ ...draft, description: event.target.value })} />
             <label htmlFor={`plan-criteria-${slice.slice_id}`}>{t.plan.editCriteria}</label>
             <textarea id={`plan-criteria-${slice.slice_id}`} value={draft.criteriaText} onChange={event => setDraft({ ...draft, criteriaText: event.target.value })} />
-            <button className="primary" onClick={() => void save(slice.slice_id)}>{t.plan.editSave}</button>
+            <PendingButton label={t.plan.editSave} busyLabel={t.plan.editSaveBusy} action={() => save(slice.slice_id)} />
             <button className="secondary" onClick={() => setEditing(null)}>{t.plan.editCancel}</button>
           </div>
           : <>
@@ -72,12 +72,15 @@ export function PlanEditor({ plan, submit, approve, reason, setReason, requestCh
             <ul>{slice.acceptance_criteria.map(value => <li key={value}>{value}</li>)}</ul>
             <div className="plan-actions">
               <button className="secondary" onClick={() => open(slice.slice_id)}>{t.plan.edit}</button>
-              <button className="secondary" disabled={removeRequest(plan, slice.slice_id) === undefined}
-                onClick={() => void send(removeRequest(plan, slice.slice_id))}>{t.plan.remove}</button>
-              <button className="secondary" disabled={index === 0}
-                onClick={() => void send(moveRequest(plan, slice.slice_id, 'up'))} aria-label={`${t.plan.moveUp}: ${slice.title}`}>{t.plan.moveUp}</button>
-              <button className="secondary" disabled={index === plan.slices.length - 1}
-                onClick={() => void send(moveRequest(plan, slice.slice_id, 'down'))} aria-label={`${t.plan.moveDown}: ${slice.title}`}>{t.plan.moveDown}</button>
+              <PendingButton className="secondary" label={t.plan.remove} busyLabel={t.plan.removeBusy}
+                disabled={removeRequest(plan, slice.slice_id) === undefined}
+                action={() => send(removeRequest(plan, slice.slice_id))} />
+              <PendingButton className="secondary" label={t.plan.moveUp} busyLabel={t.plan.moveBusy}
+                disabled={index === 0} ariaLabel={`${t.plan.moveUp}: ${slice.title}`}
+                action={() => send(moveRequest(plan, slice.slice_id, 'up'))} />
+              <PendingButton className="secondary" label={t.plan.moveDown} busyLabel={t.plan.moveBusy}
+                disabled={index === plan.slices.length - 1} ariaLabel={`${t.plan.moveDown}: ${slice.title}`}
+                action={() => send(moveRequest(plan, slice.slice_id, 'down'))} />
             </div>
           </>}
       </li>)}

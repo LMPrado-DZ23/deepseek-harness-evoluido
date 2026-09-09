@@ -39,9 +39,40 @@ const MACHINE_WORDS = [
   'worktree', 'sandbox', 'backend', 'frontend', 'bytes', 'JSON',
 ]
 
+/**
+ * As chaves de plugin que NÃO são lidas pela pessoa, uma a uma, com motivo.
+ *
+ * A varredura passou a valer para todo catálogo, e não só para os da interface:
+ * frases de plugin chegam à tela ("A interface do Harness ainda não está
+ * disponível"). Mas boa parte dos catálogos de plugin é outra coisa —
+ * instrução para o modelo, erro de contrato de API, mensagem para quem opera o
+ * banco — e traduzir `JSON` ali tiraria a precisão de quem precisa dela.
+ *
+ * A dispensa é por PADRÃO DE CHAVE e traz o motivo, como a da varredura de
+ * segredos. Uma dispensa larga demais aparece aqui, escrita, em vez de sumir
+ * dentro de uma condição.
+ */
+const OPERATOR_KEYS = [
+  { plugin: 'prompt-to-app', pattern: /^prompts\./u, reason: 'instruções para o MODELO, não texto de tela' },
+  { plugin: '*', pattern: /json(?:Required|Invalid)$|^errors\.invalidJson$|^http\.invalidJson$/iu, reason: 'erro de contrato de API, lido por quem integra' },
+  { plugin: 'agents', pattern: /^git\./u, reason: 'fronteira do Git: superfície de quem opera o repositório do projeto' },
+  { plugin: 'assistant-bridge', pattern: /^errors\.(?:duplicateRepository|repositoryMissing|repositoryStrings|absoluteRepository|gitRoot)$/u, reason: 'configuração do repositório liberado, feita por quem administra' },
+  { plugin: 'assistant-bridge', pattern: /^tools\./u, reason: 'descrição de ferramenta para o assistente, não para a tela' },
+  { plugin: 'preview', pattern: /^(?:service|supervisor)\./u, reason: 'contrato com o supervisor de prévia, lido por quem opera' },
+  { plugin: 'storage-postgres', pattern: /^restore\./u, reason: 'operação de restauração de banco, feita por quem administra' },
+  { plugin: 'identity', pattern: /Audit$/u, reason: 'linha de auditoria, lida em investigação e não na tela' },
+]
+
+/** Se esta chave é de operação, e por quê. */
+function operatorKey(target, key) {
+  const plugin = /^plugins\/([^/]+)\//u.exec(target)?.[1]
+  return OPERATOR_KEYS.some(entry => (entry.plugin === '*' || entry.plugin === plugin) && entry.pattern.test(key))
+}
+
 /** Se este catálogo é lido pela pessoa que usa o produto. */
 function personFacing(target) {
   return PERSON_FACING_CATALOGUES.some(prefix => target.startsWith(prefix))
+    || /^plugins\/[^/]+\/i18n\/pt-BR\.json$/u.test(target)
 }
 
 /**
@@ -122,7 +153,7 @@ export function scanReadinessClaims(root) {
     scanned.push(target)
     for (const [path, value] of flatten(parsed)) {
       if (READY_CLAIM.test(value)) failures.push(`alegação de prontidão proibida em ${target}:${path}`)
-      if (personFacing(target)) {
+      if (personFacing(target) && !operatorKey(target, path)) {
         for (const word of machineWordsIn(value)) {
           failures.push(`palavra de máquina "${word}" no texto que a pessoa lê: ${target}:${path}`)
         }

@@ -262,7 +262,14 @@ export class StudioIdentityService {
     setRequestTrust(trust) {
         this.#requestTrust = trust;
     }
-    /** Se a confiança de requisição foi declarada (o portão confere que sim). */
+    /**
+     * Se a confiança de requisição foi declarada.
+     *
+     * Ela é lida pelo teste que prova o cabeamento: `authenticatedMutation` só
+     * confere Host e Origin quando a borda declarou os endereços, e uma declaração
+     * esquecida é exatamente o tipo de coisa que ninguém nota — a rota continua
+     * respondendo, só que sem a conferência.
+     */
     get requestTrustConfigured() { return this.#requestTrust !== undefined; }
     /**
      * Recusa requisição de host ou origem que a borda não aceita.
@@ -581,7 +588,12 @@ export class StudioIdentityService {
         const now = this.#now();
         const token = this.#createSecret();
         const tokenHash = secretHash(token);
-        const csrfToken = derivedCsrfToken(tokenHash);
+        // Toda sessão NOVA nasce com semente. Sem isto, o ramo sem semente — que
+        // existe para as sessões gravadas antes do campo — seria o padrão, e o
+        // token CSRF voltaria a ser função imutável do token de sessão em todo
+        // login novo. O legado é para o legado.
+        const csrfSeed = this.#createSecret();
+        const csrfToken = derivedCsrfToken(tokenHash, csrfSeed);
         const session = {
             session_id: this.#createId(),
             user_id: user.user_id,
@@ -589,6 +601,7 @@ export class StudioIdentityService {
             tenant_id: user.tenant_id,
             token_hash: tokenHash,
             csrf_hash: secretHash(csrfToken),
+            csrf_seed: csrfSeed,
             device_label: device.label,
             user_agent: device.userAgent,
             ip_truncated: device.ipTruncated,

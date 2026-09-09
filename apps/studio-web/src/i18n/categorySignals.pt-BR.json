@@ -63,6 +63,58 @@
     [
       "remarcar",
       3
+    ],
+    [
+      " marcar hora",
+      5
+    ],
+    [
+      " marque hora",
+      5
+    ],
+    [
+      " marcar horario",
+      5
+    ],
+    [
+      " marca hora",
+      5
+    ],
+    [
+      " dia e hora",
+      5
+    ],
+    [
+      " hora com a",
+      4
+    ],
+    [
+      " ajenda",
+      4
+    ],
+    [
+      " ajendar",
+      4
+    ],
+    [
+      " agenda ",
+      4
+    ],
+    [
+      " escolhe dia",
+      4
+    ],
+    [
+      " escolher dia",
+      4
+    ],
+    [
+      " horario com",
+      4
+    ],
+    [
+      " atendimento ",
+      2
     ]
   ],
   "saas-authenticated": [
@@ -163,6 +215,38 @@
     [
       "total por",
       3
+    ],
+    [
+      " quanto entrou",
+      5
+    ],
+    [
+      " quanto saiu",
+      5
+    ],
+    [
+      " quanto vendi",
+      5
+    ],
+    [
+      " controle financeiro",
+      5
+    ],
+    [
+      " saber quanto",
+      4
+    ],
+    [
+      " resumo do mes",
+      4
+    ],
+    [
+      " total do mes",
+      4
+    ],
+    [
+      " acompanhar quanto",
+      4
     ]
   ],
   "crud-panel": [
@@ -197,6 +281,30 @@
     [
       "equipe",
       1
+    ],
+    [
+      " ordens de servico",
+      5
+    ],
+    [
+      " ordem de servico",
+      5
+    ],
+    [
+      " mexer nos dados",
+      5
+    ],
+    [
+      " editar os dados",
+      5
+    ],
+    [
+      " corrigir os dados",
+      4
+    ],
+    [
+      " apagar um cadastro",
+      4
     ]
   ],
   "form-database": [
@@ -247,6 +355,62 @@
     [
       "registrar informacoes",
       4
+    ],
+    [
+      " guardar os nomes",
+      5
+    ],
+    [
+      " guarda os nome",
+      5
+    ],
+    [
+      " guardar nomes",
+      4
+    ],
+    [
+      " registrar as horas",
+      5
+    ],
+    [
+      " registrar ",
+      3
+    ],
+    [
+      " anotar as",
+      3
+    ],
+    [
+      " controlar quem",
+      4
+    ],
+    [
+      " controle de quem",
+      4
+    ],
+    [
+      " ponto dos funcionarios",
+      5
+    ],
+    [
+      " lista de clientes",
+      4
+    ],
+    [
+      " cadastro de clientes",
+      5
+    ],
+    [
+      " nomes dos meus clientes",
+      5
+    ],
+    [
+      " quem me deve",
+      5
+    ],
+    [
+      " guardar as informacoes",
+      4
     ]
   ],
   "catalog": [
@@ -281,6 +445,18 @@
     [
       "servicos",
       1
+    ],
+    [
+      " vender bolo",
+      3
+    ],
+    [
+      " meus bolos",
+      3
+    ],
+    [
+      " minha loja",
+      2
     ]
   ],
   "landing-page": [

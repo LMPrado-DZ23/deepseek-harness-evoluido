@@ -203,7 +203,15 @@ if (process.argv.includes('--self-test')) {
   // montando um shell, e calar sobre a ferramenta mais perigosa seria o pior caso.
   if (findings(tools, ['tool-misterio']).length === 0) throw new Error('self-test: o portão não viu uma linha desconhecida')
   // E tem de PASSAR no roster real, senão o self-test estaria escondendo uma falha.
-  if (findings(tools, unknown).length > 0) throw new Error('self-test: o roster real já reprova')
+  // Isto sai como REPROVAÇÃO legível, e não como exceção: quando o roster real
+  // muda — que é o caso que este portão existe para pegar —, a pilha de erro
+  // aparecia ANTES de a verificação real dizer qual ferramenta apareceu, e
+  // quem lia o log via um estouro em vez de um achado.
+  const real = findings(tools, unknown)
+  if (real.length > 0) {
+    process.stdout.write(`TEAM_ROLE_TOOLS_SELF_TEST=FAIL o roster real já reprova:\n${real.map(line => `- ${line}`).join('\n')}\n`)
+    process.exit(1)
+  }
   process.stdout.write(`TEAM_ROLE_TOOLS_SELF_TEST=PASS checks=5\n`)
 }
 

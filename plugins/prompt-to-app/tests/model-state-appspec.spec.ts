@@ -46,7 +46,12 @@ describe('Prompt-to-App domains, state and AppSpec', () => {
 
   it('detects sensitive data and requires the confirmation question', () => {
     expect(detectSensitiveData('Cadastro com CPF, prontuário de criança e conta bancária')).toEqual(['cpf', 'health', 'financial', 'minors'])
-    expect(sensitiveDataQuestion(['cpf', 'health'])).toContain('cpf, health')
+    // O enum CRU aparecia na primeira pergunta do produto: "dados sensíveis
+    // (health)". Agora cada tipo tem nome em português, e a lista é escrita
+    // como se escreve para gente.
+    expect(sensitiveDataQuestion(['cpf', 'health'])).toContain('CPF e informações de saúde')
+    expect(sensitiveDataQuestion(['cpf', 'health'])).not.toMatch(/\bhealth\b|\bfinancial\b|\bminors\b/u)
+    expect(sensitiveDataQuestion(['cpf', 'health', 'minors'])).toContain('CPF, informações de saúde e dados de crianças ou adolescentes')
     expect(sensitiveDataQuestion([])).toBeUndefined()
     expect(() => appSpecV1Schema.parse({ ...validSpec, sensitive_data: { detected: ['cpf'], confirmed_by_user: false } })).toThrow()
   })

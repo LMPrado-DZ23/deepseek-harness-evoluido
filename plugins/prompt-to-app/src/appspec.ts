@@ -101,9 +101,22 @@ export function detectSensitiveData(text: string): SensitiveDataKind[] {
   return sensitiveDataKindSchema.options.filter(kind => SENSITIVE_PATTERNS[kind].some(pattern => pattern.test(text)))
 }
 
+/**
+ * A pergunta sobre dado sensível, com o TIPO por extenso.
+ *
+ * Ela mostrava o enum cru — "dados sensíveis (health)" — na PRIMEIRA pergunta
+ * que o produto faz, para alguém que não programa e que precisa exatamente
+ * naquele momento entender o que está confirmando.
+ * @param kinds - os tipos detectados no texto.
+ * @returns a pergunta, ou `undefined` quando não há nada a perguntar.
+ */
 export function sensitiveDataQuestion(kinds: readonly SensitiveDataKind[]): string | undefined {
   if (kinds.length === 0) return undefined
-  return t('questions.sensitive', { kinds: kinds.join(', ') })
+  const named = kinds.map(kind => t(`questions.sensitiveKind.${kind}`))
+  const list = named.length === 1
+    ? named[0]!
+    : `${named.slice(0, -1).join(', ')} e ${named.at(-1)!}`
+  return t('questions.sensitive', { kinds: list })
 }
 
 export class AppSpecClarificationRequired extends Error {
