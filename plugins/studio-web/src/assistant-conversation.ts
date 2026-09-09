@@ -21,9 +21,21 @@ import { t } from './i18n.js'
 const MAX_PROMPT_BYTES = 32 * 1024
 const MAX_PUBLIC_EVENTS = 500
 const MAX_PUBLIC_TEXT_CHARS = 64 * 1024
+/** Teto do NOME exibível de um anexo: nome é rótulo, não conteúdo. */
+const MAX_PUBLIC_ATTACHMENT_NAME_CHARS = 120
+/** Só estes tipos atravessam. Um `mediaType` inesperado vira anexo nenhum. */
+const PUBLIC_IMAGE_TYPES: readonly string[] = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
+
+/**
+ * O anexo do jeito que a TELA o vê: um nome e um tipo, nunca os bytes.
+ */
+export interface PublicAttachment {
+  readonly name: string
+  readonly media_type: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif'
+}
 
 export type AssistantPublicEvent =
-  | { readonly type: 'message.user'; readonly seq: number; readonly at: number; readonly id: string; readonly text: string; readonly truncated: boolean }
+  | { readonly type: 'message.user'; readonly seq: number; readonly at: number; readonly id: string; readonly text: string; readonly truncated: boolean; readonly attachments?: readonly PublicAttachment[] }
   | { readonly type: 'message.assistant'; readonly seq: number; readonly at: number; readonly id: string; readonly text: string; readonly interrupted: boolean; readonly truncated: boolean }
   | { readonly type: 'turn.state'; readonly seq: number; readonly at: number; readonly state: 'working' | 'idle' }
   | { readonly type: 'tool.state'; readonly seq: number; readonly at: number; readonly call_id: string; readonly label: string; readonly state: 'running' | 'succeeded' | 'failed' }
@@ -416,18 +428,45 @@ function eventEnvelope(value: unknown): { readonly type: string; readonly seq: n
   return { type: event.type, seq: event.seq, time: event.time, data }
 }
 
-function publicMessage(value: Record<string, unknown>): { readonly id: string; readonly text: string; readonly truncated: boolean } | undefined {
+/**
+ * O que da mensagem atravessa para a tela.
+ *
+ * Os blocos de IMAGEM eram descartados aqui, e o efeito passava despercebido
+ * porque a imagem CHEGAVA ao modelo (veja `promptPart`): quem anexava uma foto
+ * com uma pergunta via a pergunta na tela e o assistente respondendo sobre algo
+ * que a conversa não mostrava. E quem anexava a foto SEM escrever nada perdia a
+ * mensagem inteira — `text === ''` a fazia desaparecer, e a pessoa ficava
+ * olhando um assistente falando sozinho sobre um anexo invisível.
+ *
+ * O que atravessa é o NOME e o tipo, nunca os bytes. Devolver a imagem para o
+ * navegador transformaria a referência opaca num endereço de arquivo — que é
+ * exatamente o que a rota de anexo se recusa a ser (só POST, sem leitura). O
+ * nome já foi higienizado pelo servidor no momento do anexo e a pessoa já o viu
+ * antes de enviar: mostrá-lo de volta não revela nada novo.
+ */
+function publicMessage(value: Record<string, unknown>): { readonly id: string; readonly text: string; readonly truncated: boolean; readonly attachments?: readonly PublicAttachment[] } | undefined {
   const id = safeIdentifier(value.id)
   if (id === undefined || !Array.isArray(value.content)) return undefined
   const text = value.content.flatMap(block => {
     const candidate = objectValue(block)
     return candidate?.type === 'text' && typeof candidate.text === 'string' ? [candidate.text] : []
   }).join('')
-  if (text === '') return undefined
+  const attachments = value.content.flatMap(block => {
+    const candidate = objectValue(block)
+    if (candidate?.type !== 'image') return []
+    const mediaType = candidate.mediaType
+    const name = typeof candidate.name === 'string' ? candidate.name : ''
+    if (name === '' || typeof mediaType !== 'string' || !PUBLIC_IMAGE_TYPES.includes(mediaType)) return []
+    return [{ name: name.slice(0, MAX_PUBLIC_ATTACHMENT_NAME_CHARS), media_type: mediaType as PublicAttachment['media_type'] }]
+  })
+  // Uma mensagem sem texto E sem anexo continua sendo descartada: ela não tem
+  // nada para mostrar. Com anexo, ela agora existe.
+  if (text === '' && attachments.length === 0) return undefined
   return {
     id,
     text: text.slice(0, MAX_PUBLIC_TEXT_CHARS),
     truncated: text.length > MAX_PUBLIC_TEXT_CHARS,
+    ...(attachments.length === 0 ? {} : { attachments }),
   }
 }
 

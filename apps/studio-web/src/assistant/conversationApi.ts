@@ -4,7 +4,7 @@ import copy from '../../src/i18n/assistant.pt-BR.json'
 export const CONVERSATION_ENDPOINT = '/studio/assistant/conversation'
 
 export type ConversationEvent =
-  | { readonly type: 'message.user'; readonly seq: number; readonly at: number; readonly id: string; readonly text: string; readonly truncated: boolean }
+  | { readonly type: 'message.user'; readonly seq: number; readonly at: number; readonly id: string; readonly text: string; readonly truncated: boolean; readonly attachments?: readonly MessageAttachment[] }
   | { readonly type: 'message.assistant'; readonly seq: number; readonly at: number; readonly id: string; readonly text: string; readonly interrupted: boolean; readonly truncated: boolean }
   | { readonly type: 'turn.state'; readonly seq: number; readonly at: number; readonly state: 'working' | 'idle' }
   | { readonly type: 'tool.state'; readonly seq: number; readonly at: number; readonly call_id: string; readonly label: string; readonly state: 'running' | 'succeeded' | 'failed' }
@@ -12,6 +12,18 @@ export type ConversationEvent =
   | { readonly type: 'approval.resolved'; readonly seq: number; readonly at: number; readonly request_id: string; readonly outcome: 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable' }
   | { readonly type: 'compaction.state'; readonly seq: number; readonly at: number; readonly compaction_id: string; readonly state: CompactionState; readonly items?: number; readonly tokens?: number }
   | { readonly type: 'compaction.checkpoint'; readonly seq: number; readonly at: number; readonly id: string; readonly text: string; readonly truncated: boolean }
+
+/**
+ * O anexo de uma mensagem JÁ ENVIADA, do jeito que a conversa o mostra.
+ *
+ * Nome e tipo, nunca os bytes: devolver a imagem para o navegador
+ * transformaria a referência opaca num endereço de arquivo, e a rota de anexo
+ * se recusa a ser isso (só POST, sem leitura).
+ */
+export interface MessageAttachment {
+  readonly name: string
+  readonly media_type: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif'
+}
 
 /**
  * The four states the server projects from the Harness journal. There is no
@@ -261,9 +273,23 @@ function base64Of(bytes: Uint8Array): string {
  * also dropped - rendering half an event would show the person something the
  * server never said.
  */
+const MESSAGE_ATTACHMENT_TYPES: readonly string[] = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
+
+/** Se o valor é um anexo de mensagem que dá para mostrar. */
+export function isMessageAttachment(value: unknown): value is MessageAttachment {
+  return isRecord(value) && typeof value.name === 'string' && value.name !== ''
+    && typeof value.media_type === 'string' && MESSAGE_ATTACHMENT_TYPES.includes(value.media_type)
+}
+
 export function isConversationEvent(value: unknown): value is ConversationEvent {
   if (!isRecord(value) || typeof value.seq !== 'number' || typeof value.at !== 'number') return false
-  if (value.type === 'message.user') return typeof value.id === 'string' && typeof value.text === 'string'
+  if (value.type === 'message.user') {
+    // `attachments` é OPCIONAL e, quando vem, precisa ser uma lista de anexos
+    // de verdade. Um campo malformado derruba o evento inteiro em vez de
+    // aparecer meio desenhado na conversa de quem não programa.
+    return typeof value.id === 'string' && typeof value.text === 'string'
+      && (value.attachments === undefined || (Array.isArray(value.attachments) && value.attachments.every(isMessageAttachment)))
+  }
   if (value.type === 'message.assistant') return typeof value.id === 'string' && typeof value.text === 'string'
   if (value.type === 'compaction.checkpoint') return typeof value.id === 'string' && typeof value.text === 'string'
   if (value.type === 'turn.state') return value.state === 'working' || value.state === 'idle'

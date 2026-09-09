@@ -7,6 +7,40 @@ import { emptyConversation } from './conversationState'
 
 const port = { fetch: async () => Response.json({ conversation_id: 'c1', cursor: 0, events: [], truncated: false }) }
 
+describe('o anexo dentro da mensagem enviada', () => {
+  const render = (event: Parameters<typeof ConversationItem>[0]['event']) =>
+    renderToStaticMarkup(createElement(ConversationItem, { event }))
+
+  it('mostra o que foi enviado junto, pelo nome', () => {
+    // A imagem chegava ao modelo e sumia da tela: a pessoa via o assistente
+    // responder sobre uma coisa que a conversa não mostrava.
+    const html = render({
+      type: 'message.user', seq: 1, at: 1, id: 'm1', text: 'o que acha desta fachada?', truncated: false,
+      attachments: [{ name: 'fachada-da-loja.png', media_type: 'image/png' }],
+    })
+    expect(html).toContain('o que acha desta fachada?')
+    expect(html).toContain('fachada-da-loja.png')
+    expect(html).toContain('Enviado junto:')
+  })
+
+  it('mensagem só com anexo não desenha parágrafo vazio', () => {
+    // Um `<p></p>` em branco é um buraco na conversa. Antes desta correção a
+    // mensagem inteira nem aparecia.
+    const html = render({
+      type: 'message.user', seq: 1, at: 1, id: 'm1', text: '', truncated: false,
+      attachments: [{ name: 'foto.jpg', media_type: 'image/jpeg' }],
+    })
+    expect(html).not.toContain('<p></p>')
+    expect(html).toContain('foto.jpg')
+  })
+
+  it('mensagem sem anexo continua igual ao que sempre foi', () => {
+    const html = render({ type: 'message.user', seq: 1, at: 1, id: 'm1', text: 'só texto', truncated: false })
+    expect(html).toContain('só texto')
+    expect(html).not.toContain('Enviado junto:')
+  })
+})
+
 describe('tela da conversa', () => {
   it('abre acessível, com registro anunciável, rótulo de campo e estado vazio explicado', () => {
     const html = renderToStaticMarkup(createElement(Conversation, { conversationId: 'c1', port }))

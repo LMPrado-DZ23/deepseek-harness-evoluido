@@ -53,6 +53,53 @@ function fixture(input: {
 
 const event = (type: string, seq: number, data: Record<string, unknown>, time = 100 + seq) => ({ type, seq, time, data })
 
+describe('a imagem anexada na conversa', () => {
+  const userMessage = (content: unknown[]) => event('user/message', 1, { source: { kind: 'user' }, id: 'msg-1', content })
+
+  it('a mensagem que era SÓ imagem deixou de sumir da conversa', () => {
+    // Este era o defeito, e ele passava despercebido porque a imagem CHEGAVA
+    // ao modelo: quem anexava uma foto sem escrever nada perdia a mensagem
+    // inteira - `text === ''` a descartava - e ficava olhando o assistente
+    // falar sozinho sobre um anexo que a tela nunca mostrou.
+    const snapshot = sanitizeAssistantSnapshot('conversation-1', [
+      userMessage([{ type: 'image', mediaType: 'image/png', data: 'AAAA', name: 'fachada-da-loja.png' }]),
+    ])
+    expect(snapshot.events).toHaveLength(1)
+    expect(snapshot.events[0]).toMatchObject({
+      type: 'message.user', text: '',
+      attachments: [{ name: 'fachada-da-loja.png', media_type: 'image/png' }],
+    })
+  })
+
+  it('os BYTES nunca voltam para o navegador', () => {
+    // Devolver a imagem transformaria a referência opaca num endereço de
+    // arquivo - exatamente o que a rota de anexo se recusa a ser (só POST, sem
+    // leitura). O que atravessa é o nome, que a pessoa já viu antes de enviar.
+    const snapshot = sanitizeAssistantSnapshot('conversation-1', [
+      userMessage([{ type: 'text', text: 'o que acha desta fachada?' }, { type: 'image', mediaType: 'image/jpeg', data: 'SEGREDOEMBASE64', name: 'foto.jpg' }]),
+    ])
+    expect(JSON.stringify(snapshot)).not.toContain('SEGREDOEMBASE64')
+    expect(snapshot.events[0]).toMatchObject({ text: 'o que acha desta fachada?', attachments: [{ name: 'foto.jpg', media_type: 'image/jpeg' }] })
+  })
+
+  it('um tipo que não é imagem conhecida não vira anexo', () => {
+    // Bloco malformado ou tipo inesperado não pode desenhar meia coisa na tela
+    // de quem não programa - e um `mediaType` livre vindo de cima é entrada
+    // não confiável como qualquer outra.
+    const snapshot = sanitizeAssistantSnapshot('conversation-1', [
+      userMessage([{ type: 'text', text: 'oi' }, { type: 'image', mediaType: 'application/x-msdownload', data: 'AA', name: 'virus.exe' }]),
+    ])
+    expect(snapshot.events[0]).toMatchObject({ text: 'oi' })
+    expect(JSON.stringify(snapshot)).not.toContain('virus.exe')
+  })
+
+  it('mensagem sem texto e sem anexo continua descartada', () => {
+    // Ela não tem nada para mostrar. Deixá-la passar desenharia uma bolha vazia
+    // na conversa.
+    expect(sanitizeAssistantSnapshot('conversation-1', [userMessage([])]).events).toHaveLength(0)
+  })
+})
+
 describe('AssistantConversationService', () => {
   it('opens only a server-authorized tenant conversation', async () => {
     const allowed = fixture()

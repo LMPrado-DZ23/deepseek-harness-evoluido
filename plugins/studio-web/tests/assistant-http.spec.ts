@@ -66,7 +66,7 @@ async function fixture(deadlineMs?: number) {
 const json = { 'content-type': 'application/json' }
 
 describe('roteamento da conversa do assistente', () => {
-  it('só reconhece as quatro formas previstas e recusa todo o resto', () => {
+  it('so reconhece as formas previstas - fluxo incluido - e recusa todo o resto', () => {
     expect(routeAssistantConversation('POST', ASSISTANT_CONVERSATION_PREFIX)).toEqual({ kind: 'open' })
     expect(routeAssistantConversation('GET', `${ASSISTANT_CONVERSATION_PREFIX}/c1/events`))
       .toEqual({ kind: 'snapshot', conversationId: 'c1' })
@@ -88,7 +88,21 @@ describe('roteamento da conversa do assistente', () => {
       expect(routeAssistantConversation('GET', `${ASSISTANT_CONVERSATION_PREFIX}/${hostile}/events`)?.kind)
         .not.toBe('snapshot')
     }
+    // O fluxo é o ÚNICO caminho de três segmentos, e ele passa pela mesma
+    // conferência de identificador que todos os outros.
+    expect(routeAssistantConversation('GET', `${ASSISTANT_CONVERSATION_PREFIX}/c1/events/stream`))
+      .toEqual({ kind: 'stream', conversationId: 'c1' })
+    expect(routeAssistantConversation('POST', `${ASSISTANT_CONVERSATION_PREFIX}/c1/events/stream`))
+      .toEqual({ kind: 'method-not-allowed' })
+    expect(routeAssistantConversation('GET', `${ASSISTANT_CONVERSATION_PREFIX}/../events/stream`)?.kind)
+      .not.toBe('stream')
+    // Profundidade extra continua morrendo na borda: abrir UM caminho de três
+    // segmentos não pode abrir todos.
     expect(routeAssistantConversation('GET', `${ASSISTANT_CONVERSATION_PREFIX}/c1/events/extra`))
+      .toEqual({ kind: 'not-found' })
+    expect(routeAssistantConversation('GET', `${ASSISTANT_CONVERSATION_PREFIX}/c1/events/stream/mais`))
+      .toEqual({ kind: 'not-found' })
+    expect(routeAssistantConversation('GET', `${ASSISTANT_CONVERSATION_PREFIX}/c1/messages/stream`))
       .toEqual({ kind: 'not-found' })
     expect(routeAssistantConversation('POST', `${ASSISTANT_CONVERSATION_PREFIX}/c1/delete`))
       .toEqual({ kind: 'not-found' })

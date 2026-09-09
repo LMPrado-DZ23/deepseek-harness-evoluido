@@ -6,6 +6,7 @@ import {
   type AssistantConversationService,
 } from './assistant-conversation.js'
 import { t } from './i18n.js'
+import { ASSISTANT_STREAM_HEADERS, streamAssistantConversation, type AssistantStreamOptions } from './assistant-stream.js'
 
 export const ASSISTANT_CONVERSATION_PREFIX = '/studio/assistant/conversation'
 
@@ -37,6 +38,7 @@ export type AssistantConversationRoute =
   | { readonly kind: 'snapshot'; readonly conversationId: string }
   | { readonly kind: 'send'; readonly conversationId: string }
   | { readonly kind: 'attach'; readonly conversationId: string }
+  | { readonly kind: 'stream'; readonly conversationId: string }
   | { readonly kind: 'cancel'; readonly conversationId: string }
   | { readonly kind: 'compact'; readonly conversationId: string }
   | { readonly kind: 'method-not-allowed' }
@@ -67,6 +69,12 @@ export function routeAssistantConversation(
   }
   if (!CONVERSATION_ID.test(conversationId)) return { kind: 'not-found' }
   if (conversationId.replaceAll('.', '') === '') return { kind: 'not-found' }
+  // `events/stream` é o único caminho de TRÊS segmentos. Ele fica aqui, e não
+  // como uma rota solta, para continuar valendo a mesma conferência de
+  // identidade do conversationId que todas as outras passam.
+  if (segments.length === 3 && segments[1] === 'events' && segments[2] === 'stream') {
+    return method === 'GET' ? { kind: 'stream', conversationId } : { kind: 'method-not-allowed' }
+  }
   if (segments.length !== 2) return { kind: 'not-found' }
   const action = segments[1]
   if (action === 'events') return method === 'GET' ? { kind: 'snapshot', conversationId } : { kind: 'method-not-allowed' }
@@ -115,7 +123,13 @@ export async function handleAssistantConversation(
     if (route.kind === 'open') {
       return { status: 200, body: await conversations.open(identitySession) }
     }
-    if (route.kind === 'snapshot') {
+    if (route.kind === 'snapshot' || route.kind === 'stream') {
+      // O `stream` NÃO é servido por aqui: quem segura a conexão é
+      // `handleAssistantConversationStream`, porque esta função devolve um
+      // corpo pronto e uma conexão que dura minutos não cabe nesse formato.
+      // Ele chega aqui só quando o chamador não tratou o caso; responder o
+      // retrato inteiro é a degradação certa - a tela recebe o que pediu,
+      // só que de uma vez em vez de aos poucos.
       return { status: 200, body: await conversations.snapshot(identitySession, route.conversationId, controller.signal) }
     }
     if (route.kind === 'send') {
@@ -244,4 +258,69 @@ async function readJsonBody(request: IncomingMessage, maxBytes: number): Promise
   } catch {
     throw new AssistantConversationError('INVALID_MESSAGE', t('assistant.invalidMessage'))
   }
+}
+
+/**
+ * Serve a conexão que fica aberta enquanto a conversa acontece.
+ *
+ * Ela é separada de `handleAssistantConversation` porque aquela função devolve
+ * um corpo PRONTO — status e objeto — e uma conexão que dura minutos não cabe
+ * nesse formato. Aqui a resposta é escrita aos poucos, e é esta função que a
+ * possui do começo ao fim.
+ *
+ * A autenticação e a posse continuam sendo as mesmas: a sessão é conferida
+ * antes de qualquer byte, e o `snapshot` do serviço é quem verifica que a
+ * conversa é de quem está pedindo. Uma conexão longa não é uma porta lateral.
+ *
+ * @param request - o pedido.
+ * @param response - a resposta, que esta função passa a possuir.
+ * @param route - a rota de fluxo já reconhecida.
+ * @param config - identidade e serviço de conversas.
+ * @returns quando a conexão termina.
+ */
+export async function handleAssistantConversationStream(
+  request: IncomingMessage,
+  response: ServerResponse,
+  route: Extract<AssistantConversationRoute, { kind: 'stream' }>,
+  config: AssistantConversationHttpConfig & { readonly stream?: Partial<AssistantStreamOptions> },
+): Promise<void> {
+  const conversations = config.conversations
+  if (conversations === undefined) {
+    response.writeHead(503, { 'content-type': 'application/json; charset=utf-8' })
+    response.end(JSON.stringify({ error: t('assistant.serviceNotConfigured') }))
+    return
+  }
+  let identitySession
+  try { identitySession = await authenticatedMutation(request, config.identity) }
+  catch {
+    // Nenhum byte de fluxo sai antes da identidade valer. Recusar em JSON, com
+    // o mesmo texto de sempre, mantém o erro legível para a tela.
+    response.writeHead(401, { 'content-type': 'application/json; charset=utf-8' })
+    response.end(JSON.stringify({ error: t('assistant.forbidden') }))
+    return
+  }
+  // A PRIMEIRA leitura acontece antes dos cabeçalhos de fluxo: se a conversa
+  // não é desta pessoa, ou o Harness não responde, o certo é um erro HTTP
+  // comum - e não um fluxo aberto que só depois confessa que não tem nada.
+  const controller = new AbortController()
+  const abort = () => { controller.abort() }
+  request.once('close', abort)
+  try { await conversations.snapshot(identitySession, route.conversationId, controller.signal) }
+  catch (error) {
+    const status = assistantConversationStatus(error) ?? 503
+    response.writeHead(status, { 'content-type': 'application/json; charset=utf-8' })
+    response.end(JSON.stringify({ error: error instanceof AssistantConversationError ? error.message : t('assistant.readUnavailable') }))
+    return
+  }
+  response.writeHead(200, { ...ASSISTANT_STREAM_HEADERS })
+  await streamAssistantConversation({
+    read: signal => conversations.snapshot(identitySession, route.conversationId, signal),
+    sink: {
+      write: chunk => { response.write(chunk) },
+      end: () => { response.end() },
+    },
+    signal: controller.signal,
+    ...config.stream,
+  })
+  request.off('close', abort)
 }

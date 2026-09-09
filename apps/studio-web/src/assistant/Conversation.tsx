@@ -2,6 +2,7 @@ import { Paperclip, Send, Square, TriangleAlert, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import copy from '../i18n/assistant.pt-BR.json'
 import { Markdown } from './Markdown'
+import { openConversationStream, streamingAvailable, type ConversationStreamOptions } from './conversationStream'
 import {
   ConversationRequestError,
   cancelConversationTurn,
@@ -53,9 +54,11 @@ export interface ConversationProps {
   readonly port?: ConversationPort
   readonly getCsrf?: () => Promise<string>
   readonly pollMs?: number
+  /** Injetável para o teste do fluxo não precisar de navegador nem de rede. */
+  readonly createStream?: ConversationStreamOptions['create']
 }
 
-export function Conversation({ conversationId, port, getCsrf, pollMs = CONVERSATION_POLL_MS }: ConversationProps) {
+export function Conversation({ conversationId, port, getCsrf, pollMs = CONVERSATION_POLL_MS, createStream }: ConversationProps) {
   const [state, dispatch] = useReducer(conversationReducer, undefined, emptyConversation)
   /**
    * Dois avisos diferentes. O de LEITURA some sozinho quando a leitura volta a
@@ -81,6 +84,20 @@ export function Conversation({ conversationId, port, getCsrf, pollMs = CONVERSAT
 
   useEffect(() => { dispatch({ kind: 'opened', conversationId }) }, [conversationId])
 
+  /**
+   * Como a conversa chega: por FLUXO, com leitura periódica de queda.
+   *
+   * O fluxo entrega assim que o servidor vê a mudança, em vez de a resposta
+   * pronta esperar até 1,5 s por alguém perguntar. E uma conversa em silêncio
+   * deixa de custar uma requisição a cada 1,5 s por aba aberta.
+   *
+   * A leitura periódica NÃO foi apagada. Navegador sem `EventSource`, rede que
+   * corta fluxo, intermediário que segura buffer — em qualquer um deles a
+   * conversa continua funcionando, mais devagar, em vez de parar de atualizar
+   * sem dizer nada. A primeira leitura acontece SEMPRE, dos dois jeitos: quem
+   * abriu a tela precisa ver o que já existe antes da próxima mudança.
+   */
+  const [streaming, setStreaming] = useState(() => streamingAvailable(createStream))
   useEffect(() => {
     let live = true
     const controller = new AbortController()
@@ -96,9 +113,20 @@ export function Conversation({ conversationId, port, getCsrf, pollMs = CONVERSAT
       }
     }
     void read()
-    const timer = setInterval(() => { void read() }, pollMs)
-    return () => { live = false; controller.abort(); clearInterval(timer) }
-  }, [conversationId, port, pollMs, attempt])
+    if (!streaming) {
+      const timer = setInterval(() => { void read() }, pollMs)
+      return () => { live = false; controller.abort(); clearInterval(timer) }
+    }
+    const close = openConversationStream(conversationId, {
+      onSnapshot: snapshot => { if (live) { dispatch({ kind: 'snapshot', snapshot }); setReadError(null) } },
+      // Cair NÃO é um erro para a pessoa: a conversa continua, mais devagar.
+      // Mostrar um aviso vermelho aqui assustaria por causa de um detalhe de
+      // transporte que ela não escolheu e não pode consertar.
+      onFallback: () => { if (live) setStreaming(false) },
+      ...(createStream === undefined ? {} : { create: createStream }),
+    })
+    return () => { live = false; controller.abort(); close() }
+  }, [conversationId, port, pollMs, attempt, streaming, createStream])
 
   const status = conversationStatus(state)
 
@@ -365,7 +393,23 @@ export function formatAttachmentSize(bytes: number): string {
 
 export function ConversationItem({ event }: { readonly event: ConversationEvent }) {
   if (event.type === 'message.user') {
-    return <><span className="who">{copy.you}</span><p>{event.text}</p></>
+    const attachments = event.attachments ?? []
+    return <>
+      <span className="who">{copy.you}</span>
+      {/* Mensagem SÓ com anexo não tem parágrafo vazio: um `<p>` em branco é
+          um buraco na conversa, e antes desta correção ela nem aparecia. */}
+      {event.text === '' ? null : <p>{event.text}</p>}
+      {/* Os anexos que foram JUNTO. Eles chegavam ao modelo e sumiam da tela:
+          quem mandava uma foto via o assistente responder sobre uma coisa que
+          a conversa não mostrava. Nome e tipo, nunca a imagem — devolver os
+          bytes transformaria a referência opaca num endereço de arquivo. */}
+      {attachments.length === 0 ? null : <ul className="message-attachments">
+        <li className="context-note">{copy.messageAttachments}</li>
+        {attachments.map(item => <li key={`${item.name}-${item.media_type}`}>
+          <Paperclip aria-hidden="true" /> {item.name} <span className="context-note">({copy.messageAttachmentImage})</span>
+        </li>)}
+      </ul>}
+    </>
   }
   if (event.type === 'message.assistant') {
     return <>

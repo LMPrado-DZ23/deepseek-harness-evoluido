@@ -48,6 +48,7 @@ import {
 import {
   assistantConversationStatus,
   handleAssistantConversation,
+  handleAssistantConversationStream,
   routeAssistantConversation,
   type AssistantConversationHttpConfig,
 } from './assistant-http.js'
@@ -56,6 +57,7 @@ export * from './assistant-attachments.js'
 export * from './assistant-session.js'
 export * from './assistant-conversation.js'
 export * from './assistant-http.js'
+export * from './assistant-stream.js'
 export * from './stuck-runs.js'
 export * from './team-panel.js'
 
@@ -103,6 +105,15 @@ export function createStudioWebHandler(config: {
       assertRequestTrust(request, { allowedHosts: config.allowedHosts, allowedOrigins: config.allowedOrigins })
       const pathname = new URL(request.url ?? '/studio', 'http://local').pathname
       conversationRoute = routeAssistantConversation(request.method, pathname)
+      // O fluxo é servido ANTES do caminho comum porque ele possui a resposta:
+      // ela é escrita aos poucos, durante minutos, em vez de sair pronta de
+      // `sendJson`.
+      if (conversationRoute?.kind === 'stream') {
+        return await handleAssistantConversationStream(request, response, conversationRoute, {
+          identity: config.identity,
+          ...(config.assistantConversations === undefined ? {} : { conversations: config.assistantConversations }),
+        })
+      }
       if (conversationRoute !== undefined) {
         const outcome = await handleAssistantConversation(request, conversationRoute, {
           identity: config.identity,
