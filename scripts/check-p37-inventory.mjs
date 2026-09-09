@@ -30,6 +30,10 @@ export const REQUIRED_SLUGS = [
   // e o que registra a decisao de seguranca tomada antes de escrever a primeira
   // linha. Apagar o inventario apagaria a decisao.
   'webmcp',
+  // ARTEMIS: ferramenta externa de QA avaliada para a prova do D-09. Nada e
+  // copiado, mas a decisao de seguranca (aparelho dedicado, capturas saindo
+  // para um modelo externo) mora neste inventario.
+  'artemis',
 ]
 
 /**
