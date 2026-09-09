@@ -11,6 +11,9 @@ import { assertProjectTransition, assertUndoTransition } from './state.js'
 import { appendPlanSlice, applyPlanEdit, planRevision, PlanEditError, type PlanEdit } from './plan-edit.js'
 import { listIntakeTurns, putIntakeTurn, type IntakeTurnRecordStore } from './intake-turn-store.js'
 import { listDesignSpecs, putDesignSpec, type DesignSpecRecordStore } from './design-spec-store.js'
+import { listAppSpecs, putAppSpec, type AppSpecRecordStore } from './app-spec-store.js'
+import { listPlans, putPlanRecord, type PlanRecordStore } from './plan-store.js'
+import { listEvidence, putEvidenceRecord, type EvidenceRecordStore } from './evidence-store.js'
 import { latestGreenCheckpoint, noGreenReason, runCheckpoints, type CheckpointBlocker, type RunCheckpoint, NO_ATTEMPT } from './checkpoint.js'
 import { t } from './i18n.js'
 
@@ -69,6 +72,12 @@ export interface PromptToAppServiceOptions {
    * padrão e significa chave-valor, e quem opera é quem decide.
    */
   readonly designSpecStore?: DesignSpecRecordStore
+  /** O mesmo, para a ESPECIFICAÇÃO do aplicativo. Ausente = chave-valor. */
+  readonly appSpecStore?: AppSpecRecordStore
+  /** O mesmo, para o PLANO aprovado. Ausente = chave-valor. */
+  readonly planStore?: PlanRecordStore
+  /** O mesmo, para as EVIDÊNCIAS da execução. Ausente = chave-valor. */
+  readonly evidenceStore?: EvidenceRecordStore
 }
 
 export class PromptToAppService {
@@ -77,12 +86,18 @@ export class PromptToAppService {
   readonly #createId: () => string
   readonly #intakeTurnStore: IntakeTurnRecordStore | undefined
   readonly #designSpecStore: DesignSpecRecordStore | undefined
+  readonly #appSpecStore: AppSpecRecordStore | undefined
+  readonly #planStore: PlanRecordStore | undefined
+  readonly #evidenceStore: EvidenceRecordStore | undefined
   constructor(options: PromptToAppServiceOptions) {
     this.#repository = options.repository
     this.#now = options.now ?? (() => new Date())
     this.#createId = options.createId ?? randomUUID
     this.#intakeTurnStore = options.intakeTurnStore
     this.#designSpecStore = options.designSpecStore
+    this.#appSpecStore = options.appSpecStore
+    this.#planStore = options.planStore
+    this.#evidenceStore = options.evidenceStore
   }
 
   assertAuthorized(actor: PromptToAppActor, permission: 'project.read' | 'project.write'): void {
@@ -159,21 +174,27 @@ export class PromptToAppService {
 
   async saveSpec(actor: PromptToAppActor, projectId: string, spec: AppSpecV1, origin: 'intake' | 'edit'): Promise<StudioAppSpecRecord> {
     this.#authorize(actor, 'project.write'); this.project(actor, projectId)
-    const previous = this.#repository.specs().filter(value => value.project_id === projectId && this.#sameScope(actor, value))
+    const rows = this.#appSpecStore === undefined
+      ? this.#repository.specs()
+      : await listAppSpecs(this.#appSpecStore, { orgId: actor.orgId, tenantId: actor.tenantId })
+    const previous = rows.filter(value => value.project_id === projectId && this.#sameScope(actor, value))
     const value: StudioAppSpecRecord = {
       spec_id: this.#createId(), project_id: projectId, org_id: actor.orgId, tenant_id: actor.tenantId,
       version: previous.length + 1, app_spec: spec, sha256: appSpecHash(spec), origin, created_at: this.#now().toISOString(),
     }
-    await this.#repository.putSpec(value)
+    if (this.#appSpecStore === undefined) await this.#repository.putSpec(value)
+    else await putAppSpec(this.#appSpecStore, value)
     const project = this.project(actor, projectId)
     if (project.state === 'DRAFT') await this.transition(actor, projectId, 'SPEC_READY')
     return value
   }
 
-  latestSpec(actor: PromptToAppActor, projectId: string): StudioAppSpecRecord {
+  async latestSpec(actor: PromptToAppActor, projectId: string): Promise<StudioAppSpecRecord> {
     this.project(actor, projectId)
-    const value = this.#repository.specs().filter(candidate => candidate.project_id === projectId && this.#sameScope(actor, candidate))
-      .sort((left, right) => right.version - left.version)[0]
+    const rows = this.#appSpecStore === undefined
+      ? [...this.#repository.specs()].sort((left, right) => right.version - left.version)
+      : await listAppSpecs(this.#appSpecStore, { orgId: actor.orgId, tenantId: actor.tenantId })
+    const value = rows.find(candidate => candidate.project_id === projectId && this.#sameScope(actor, candidate))
     if (value === undefined) throw new PromptToAppError('NOT_FOUND', t('errors.specNotFound'))
     return value
   }
@@ -209,9 +230,12 @@ export class PromptToAppService {
 
   async proposePlan(actor: PromptToAppActor, projectId: string, slices: StudioPlan['slices']): Promise<StudioPlan> {
     this.#authorize(actor, 'project.write')
-    const spec = this.latestSpec(actor, projectId); const now = this.#now().toISOString()
+    const spec = await this.latestSpec(actor, projectId); const now = this.#now().toISOString()
     const project = this.project(actor, projectId)
-    const existing = this.#repository.plans().filter(candidate => candidate.project_id === projectId && this.#sameScope(actor, candidate))
+    const allPlans = this.#planStore === undefined
+      ? this.#repository.plans()
+      : await listPlans(this.#planStore, { orgId: actor.orgId, tenantId: actor.tenantId })
+    const existing = allPlans.filter(candidate => candidate.project_id === projectId && this.#sameScope(actor, candidate))
     const previous = [...existing].sort((left, right) => (right.revision ?? 0) - (left.revision ?? 0) || right.created_at.localeCompare(left.created_at))[0]
     const revising = project.state === 'PLAN_PROPOSED' && previous?.status === 'CHANGE_REQUESTED'
     if (project.state !== 'SPEC_READY' && !revising) throw new PromptToAppError('INVALID', t('errors.planOrder'))
@@ -219,24 +243,32 @@ export class PromptToAppService {
       plan_id: this.#createId(), spec_id: spec.spec_id, project_id: projectId, org_id: actor.orgId, tenant_id: actor.tenantId,
       revision: existing.length + 1, slices, status: 'PROPOSED', created_at: now, updated_at: now,
     }
-    await this.#repository.putPlan(value)
+    await this.#putPlan(value)
     if (!revising) await this.transition(actor, projectId, 'PLAN_PROPOSED')
     return value
   }
 
-  plan(actor: PromptToAppActor, projectId: string): StudioPlan {
+  async plan(actor: PromptToAppActor, projectId: string): Promise<StudioPlan> {
     this.project(actor, projectId)
-    const value = this.#repository.plans().filter(candidate => candidate.project_id === projectId && this.#sameScope(actor, candidate))
-      .sort((left, right) => (right.revision ?? 0) - (left.revision ?? 0) || right.created_at.localeCompare(left.created_at))[0]
+    const rows = this.#planStore === undefined
+      ? [...this.#repository.plans()].sort((left, right) => (right.revision ?? 0) - (left.revision ?? 0) || right.created_at.localeCompare(left.created_at))
+      : await listPlans(this.#planStore, { orgId: actor.orgId, tenantId: actor.tenantId })
+    const value = rows.find(candidate => candidate.project_id === projectId && this.#sameScope(actor, candidate))
     if (value === undefined) throw new PromptToAppError('NOT_FOUND', t('errors.planNotFound'))
     return value
   }
 
+  /** Grava o plano onde a autoridade de armazenamento manda. */
+  async #putPlan(value: StudioPlan): Promise<void> {
+    if (this.#planStore === undefined) await this.#repository.putPlan(value)
+    else await putPlanRecord(this.#planStore, value)
+  }
+
   async approvePlan(actor: PromptToAppActor, projectId: string): Promise<StudioPlan> {
-    this.#authorize(actor, 'project.write'); const value = this.plan(actor, projectId)
+    this.#authorize(actor, 'project.write'); const value = await this.plan(actor, projectId)
     if (value.status !== 'PROPOSED') throw new PromptToAppError('REPLAY', t('errors.planUnavailable'))
     const updated = { ...value, status: 'APPROVED' as const, updated_at: this.#now().toISOString() }
-    await this.#repository.putPlan(updated)
+    await this.#putPlan(updated)
     await this.#approval(actor, projectId, 'plan', value.plan_id, 'T1', false)
     await this.transition(actor, projectId, 'PLAN_APPROVED')
     return updated
@@ -245,10 +277,10 @@ export class PromptToAppService {
   async requestPlanChange(actor: PromptToAppActor, projectId: string, reason: string): Promise<StudioPlan> {
     this.#authorize(actor, 'project.write')
     if (reason.trim().length < 3 || reason.trim().length > 2_000) throw new PromptToAppError('INVALID', t('errors.planChangeLength'))
-    const value = this.plan(actor, projectId)
+    const value = await this.plan(actor, projectId)
     if (value.status !== 'PROPOSED') throw new PromptToAppError('REPLAY', t('errors.planChangeUnavailable'))
     const updated = { ...value, status: 'CHANGE_REQUESTED' as const, change_request: reason.trim(), updated_at: this.#now().toISOString() }
-    await this.#repository.putPlan(updated)
+    await this.#putPlan(updated)
     return updated
   }
 
@@ -271,7 +303,7 @@ export class PromptToAppService {
    */
   async editPlan(actor: PromptToAppActor, projectId: string, edit: PlanEdit): Promise<StudioPlan> {
     this.#authorize(actor, 'project.write')
-    const value = this.plan(actor, projectId)
+    const value = await this.plan(actor, projectId)
     let updated: StudioPlan
     try {
       updated = applyPlanEdit(value, edit, this.#now().toISOString())
@@ -283,7 +315,7 @@ export class PromptToAppService {
         : error.code === 'NOT_FOUND' ? 'NOT_FOUND' as const : 'INVALID' as const
       throw new PromptToAppError(code, error.message)
     }
-    await this.#repository.putPlan(updated)
+    await this.#putPlan(updated)
     // O REGISTRO da edição. Não é uma aprovação — aprovar continua sendo um ato
     // separado, feito depois de ver o resultado da própria edição —, e sim a
     // mesma trilha auditável que `transition` já usa: um ato de uma pessoa,
@@ -331,8 +363,8 @@ export class PromptToAppService {
     // etapa nenhuma, e uma parede de texto vira um plano que ninguém revisa.
     if (text.length < 3 || text.length > 2_000) throw new PromptToAppError('INVALID', t('errors.sliceUnusable'))
     const project = this.project(actor, projectId)
-    const plan = this.plan(actor, projectId)
-    const spec = this.latestSpec(actor, projectId).app_spec
+    const plan = await this.plan(actor, projectId)
+    const spec = (await this.latestSpec(actor, projectId)).app_spec
     const slice = await planner.slice(
       { orgId: actor.orgId, tenantId: actor.tenantId }, privacy, spec,
       plan.slices.map(existing => ({ title: existing.title, planned_files: existing.planned_files })),
@@ -344,7 +376,7 @@ export class PromptToAppService {
       if (!(error instanceof PlanEditError)) throw error
       throw new PromptToAppError(error.code === 'UNAVAILABLE' ? 'REPLAY' : 'INVALID', error.message)
     }
-    await this.#repository.putPlan(updated)
+    await this.#putPlan(updated)
     await this.#approval(actor, projectId, 'plan', `${updated.plan_id}:r${String(planRevision(updated))}`, 'T1', false)
     return updated
   }
@@ -362,7 +394,9 @@ export class PromptToAppService {
     this.#authorize(actor, 'project.write'); this.#assertOwned(actor, value); await this.#repository.putRun(value)
   }
   async putEvidence(actor: PromptToAppActor, value: StudioEvidence): Promise<void> {
-    this.#authorize(actor, 'project.write'); this.#assertOwned(actor, value); await this.#repository.putEvidence(value)
+    this.#authorize(actor, 'project.write'); this.#assertOwned(actor, value)
+    if (this.#evidenceStore === undefined) await this.#repository.putEvidence(value)
+    else await putEvidenceRecord(this.#evidenceStore, value)
   }
   /**
    * Os pontos aos quais a pessoa pode voltar, e por que não há nenhum quando não há.
@@ -428,7 +462,13 @@ export class PromptToAppService {
   }
 
   runs(actor: PromptToAppActor, projectId: string) { this.project(actor, projectId); return this.#repository.runs().filter(value => value.project_id === projectId && this.#sameScope(actor, value)) }
-  evidence(actor: PromptToAppActor, projectId: string) { this.project(actor, projectId); return this.#repository.evidence().filter(value => value.project_id === projectId && this.#sameScope(actor, value)) }
+  async evidence(actor: PromptToAppActor, projectId: string): Promise<readonly StudioEvidence[]> {
+    this.project(actor, projectId)
+    const rows = this.#evidenceStore === undefined
+      ? this.#repository.evidence()
+      : await listEvidence(this.#evidenceStore, { orgId: actor.orgId, tenantId: actor.tenantId })
+    return rows.filter(value => value.project_id === projectId && this.#sameScope(actor, value))
+  }
 
   async reconcileInterruptedExecutions(): Promise<{ readonly runs: number; readonly projects: number }> {
     const now = this.#now().toISOString()

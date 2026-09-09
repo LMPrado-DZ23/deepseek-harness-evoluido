@@ -30,7 +30,22 @@ import {
   listDesignSpecs,
   putDesignSpec,
 } from '../../prompt-to-app/src/design-spec-store.ts'
-import type { StudioDesignSpecRecord, StudioIntakeTurn } from '../../prompt-to-app/src/model.ts'
+import {
+  APP_SPEC_UNIT,
+  listAppSpecs,
+  putAppSpec,
+} from '../../prompt-to-app/src/app-spec-store.ts'
+import {
+  PLAN_UNIT,
+  listPlans,
+  putPlanRecord,
+} from '../../prompt-to-app/src/plan-store.ts'
+import {
+  EVIDENCE_UNIT,
+  listEvidence,
+  putEvidenceRecord,
+} from '../../prompt-to-app/src/evidence-store.ts'
+import type { StudioAppSpecRecord, StudioDesignSpecRecord, StudioEvidence, StudioIntakeTurn, StudioPlan } from '../../prompt-to-app/src/model.ts'
 import { createDesignSpec } from '../../prompt-to-app/src/design.ts'
 
 const dsn = process.env.DZ23_POSTGRES_TEST_DSN
@@ -128,13 +143,50 @@ describePostgres('S-08 — respostas do intake e escolhas de visual na tabela po
 
     // A unidade é OUTRA, e ela também é filtrada: um domínio não enxerga o do
     // vizinho por acidente de estarem na mesma tabela.
+    // ── o TERCEIRO domínio: a especificação, que é o que a pessoa aprovou ──
+    // Se a versão errada atravessar, o Studio constrói uma coisa que ninguém
+    // pediu — e constrói com convicção.
+    await putAppSpec(store, spec('s2', 2))
+    await putAppSpec(store, spec('s1', 1))
+    await putAppSpec(store, spec('s7', 1, { org_id: 'org-b', tenant_id: 'tenant-b' }))
+    expect((await listAppSpecs(store, a)).map(row => row.spec_id)).toEqual(['s2', 's1'])
+    expect((await listAppSpecs(store, b)).map(row => row.spec_id)).toEqual(['s7'])
+
+    // ── o QUARTO: o plano, onde mora a autorização de escrita do gerador ───
+    // Ler a revisão errada aqui não produz um aplicativo com defeito: produz
+    // um aplicativo que escreve onde não devia.
+    await putPlanRecord(store, planOf('p1', 1))
+    await putPlanRecord(store, planOf('p3', 3))
+    await putPlanRecord(store, planOf('p2', 2))
+    await putPlanRecord(store, planOf('p8', 1, { org_id: 'org-b', tenant_id: 'tenant-b' }))
+    expect((await listPlans(store, a)).map(row => row.plan_id)).toEqual(['p3', 'p2', 'p1'])
+    expect((await listPlans(store, b)).map(row => row.plan_id)).toEqual(['p8'])
+
+    // ── o QUINTO e último: as evidências, que contam o que aconteceu ───────
+    // Uma evidência do inquilino errado atravessando não quebra a criação: ela
+    // conta a história de OUTRA pessoa a quem abrir o relato.
+    await putEvidenceRecord(store, evidenceOf('e2', '2026-09-08T00:02:00.000Z'))
+    await putEvidenceRecord(store, evidenceOf('e1', '2026-09-08T00:01:00.000Z'))
+    await putEvidenceRecord(store, evidenceOf('e5', '2026-09-08T00:05:00.000Z', { org_id: 'org-b', tenant_id: 'tenant-b' }))
+    expect((await listEvidence(store, a)).map(row => row.evidence_id)).toEqual(['e1', 'e2'])
+    expect((await listEvidence(store, b)).map(row => row.evidence_id)).toEqual(['e5'])
+
     const units = await admin.query<{ unit: string }>(
       `SELECT DISTINCT unit FROM "${schema}"."tenant_records" ORDER BY unit`,
     )
-    expect(units.rows.map(row => row.unit)).toEqual([DESIGN_SPEC_UNIT, INTAKE_TURN_UNIT].sort())
+    expect(units.rows.map(row => row.unit)).toEqual([APP_SPEC_UNIT, DESIGN_SPEC_UNIT, EVIDENCE_UNIT, INTAKE_TURN_UNIT, PLAN_UNIT].sort())
     expect((await listIntakeTurns(store, a)).length).toBe(3)
   }, 60_000)
 })
+
+function spec(id: string, version: number, overrides: Record<string, unknown> = {}): StudioAppSpecRecord {
+  return {
+    spec_id: id, project_id: 'projeto-1', org_id: 'org-a', tenant_id: 'tenant-a',
+    version, app_spec: {}, sha256: 'd'.repeat(64), origin: 'intake',
+    created_at: '2026-09-08T00:00:00.000Z',
+    ...overrides,
+  } as StudioAppSpecRecord
+}
 
 function design(id: string, version: number, overrides: Record<string, unknown> = {}): StudioDesignSpecRecord {
   return {
@@ -152,4 +204,23 @@ function runtimeConnectionString(adminDsn: string, role: string, password: strin
   url.username = role
   url.password = password
   return url.toString()
+}
+
+function planOf(id: string, revision: number, overrides: Record<string, unknown> = {}): StudioPlan {
+  return {
+    plan_id: id, spec_id: 's1', project_id: 'projeto-1', org_id: 'org-a', tenant_id: 'tenant-a',
+    revision, status: 'PROPOSED',
+    slices: [{ slice_id: 'f1', title: 'Início', description: 'Mostrar', acceptance_criteria: ['aparece'], planned_files: ['src/GeneratedApp.tsx'] }],
+    created_at: '2026-09-08T00:00:00.000Z', updated_at: '2026-09-08T00:00:00.000Z',
+    ...overrides,
+  } as StudioPlan
+}
+
+function evidenceOf(id: string, createdAt: string, overrides: Record<string, unknown> = {}): StudioEvidence {
+  return {
+    evidence_id: id, run_id: 'run-1', project_id: 'projeto-1', org_id: 'org-a', tenant_id: 'tenant-a',
+    kind: 'diff', sha256: 'e'.repeat(64), size_bytes: 10, relative_path: `run-1/${id}.json`,
+    created_at: createdAt,
+    ...overrides,
+  } as StudioEvidence
 }

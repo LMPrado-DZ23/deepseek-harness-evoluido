@@ -118,13 +118,13 @@ export class PromptToAppPipeline {
     // que a parada de emergência deveria ter impedido.
     this.options.emergencyStop?.assertRunning({ orgId: actor.orgId, tenantId: actor.tenantId })
     const project = this.options.service.project(actor, projectId)
-    const plan = this.options.service.plan(actor, projectId)
+    const plan = await this.options.service.plan(actor, projectId)
     if (plan.status !== 'APPROVED' || !canStartGeneration(project.state)) {
       throw new PromptToAppError('INVALID', t('errors.planRequired'))
     }
     const operationId = opaqueOperationId(runOptions.operationId ?? this.#createId())
     const ownerSessionId = runOptions.ownerSessionId ?? actor.sessionId ?? 'direct-execution'
-    const spec = this.options.service.latestSpec(actor, projectId).app_spec
+    const spec = (await this.options.service.latestSpec(actor, projectId)).app_spec
     assertCategoryCanGenerate(project.category, spec)
     const specFindings = scanGeneratedContent({ 'appspec.json': JSON.stringify(spec) })
     if (specFindings.length > 0) throw new PromptToAppError('INVALID', t('errors.generatedSensitiveLiteral'))

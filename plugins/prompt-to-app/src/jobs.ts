@@ -76,7 +76,7 @@ export class PromptToAppJobService {
     this.options.emergencyStop?.assertRunning({ orgId: actor.orgId, tenantId: actor.tenantId })
     this.options.service.assertAuthorized(actor, 'project.write')
     const project = this.options.service.project(actor, projectId)
-    const plan = this.options.service.plan(actor, projectId)
+    const plan = await this.options.service.plan(actor, projectId)
     if (!canStartGeneration(project.state) || plan.status !== 'APPROVED') throw new PromptToAppError('INVALID', t('errors.planRequired'))
     const key = scopeKey(actor, projectId)
     if (this.#active.has(key) || this.#reserved.has(key)) throw new PromptToAppError('REPLAY', t('errors.activeGeneration'))

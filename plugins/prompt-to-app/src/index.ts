@@ -35,6 +35,9 @@ import {
 import { IntakeEngine } from './intake.js'
 import type { IntakeTurnRecordStore } from './intake-turn-store.js'
 import type { DesignSpecRecordStore } from './design-spec-store.js'
+import type { AppSpecRecordStore } from './app-spec-store.js'
+import type { PlanRecordStore } from './plan-store.js'
+import type { EvidenceRecordStore } from './evidence-store.js'
 import { ModelCodeGenerator, PromptToAppPipeline } from './pipeline.js'
 import { PlannerEngine } from './planner.js'
 import { HarnessPromptModel } from './ports.js'
@@ -60,6 +63,9 @@ export * from './http.js'
 export * from './intake.js'
 export * from './intake-turn-store.js'
 export * from './design-spec-store.js'
+export * from './app-spec-store.js'
+export * from './plan-store.js'
+export * from './evidence-store.js'
 export * from './jobs.js'
 export * from './model.js'
 export * from './planner.js'
@@ -105,6 +111,12 @@ export interface PromptToAppPluginConfig {
   readonly intakeTurnStorage?: 'kv' | 'rls'
   /** O mesmo, para as ESCOLHAS DE VISUAL do projeto. Padrão `kv`. */
   readonly designSpecStorage?: 'kv' | 'rls'
+  /** O mesmo, para a ESPECIFICAÇÃO do aplicativo. Padrão `kv`. */
+  readonly appSpecStorage?: 'kv' | 'rls'
+  /** O mesmo, para o PLANO aprovado. Padrão `kv`. */
+  readonly planStorage?: 'kv' | 'rls'
+  /** O mesmo, para as EVIDÊNCIAS da execução. Padrão `kv`. */
+  readonly evidenceStorage?: 'kv' | 'rls'
   readonly logoStoreRoot?: string
   readonly builderLifecycle?: {
     readonly registryReference?: `file:${string}`
@@ -176,6 +188,30 @@ function intakeTurnStoreOption(ctx: Context, config: PromptToAppPluginConfig): {
   return { intakeTurnStore: records }
 }
 
+/** O mesmo, para as evidências. Falha alto pelo mesmo motivo. */
+function evidenceStoreOption(ctx: Context, config: PromptToAppPluginConfig): { readonly evidenceStore?: EvidenceRecordStore } {
+  if ((config.evidenceStorage ?? 'kv') === 'kv') return {}
+  const records = ctx.get('studioTenantStorage')?.records as EvidenceRecordStore | undefined
+  if (records === undefined) throw new Error('EVIDENCE_TENANT_STORAGE_UNAVAILABLE')
+  return { evidenceStore: records }
+}
+
+/** O mesmo, para o plano aprovado. Falha alto pelo mesmo motivo. */
+function planStoreOption(ctx: Context, config: PromptToAppPluginConfig): { readonly planStore?: PlanRecordStore } {
+  if ((config.planStorage ?? 'kv') === 'kv') return {}
+  const records = ctx.get('studioTenantStorage')?.records as PlanRecordStore | undefined
+  if (records === undefined) throw new Error('PLAN_TENANT_STORAGE_UNAVAILABLE')
+  return { planStore: records }
+}
+
+/** O mesmo, para a especificação. Falha alto pelo mesmo motivo. */
+function appSpecStoreOption(ctx: Context, config: PromptToAppPluginConfig): { readonly appSpecStore?: AppSpecRecordStore } {
+  if ((config.appSpecStorage ?? 'kv') === 'kv') return {}
+  const records = ctx.get('studioTenantStorage')?.records as AppSpecRecordStore | undefined
+  if (records === undefined) throw new Error('APP_SPEC_TENANT_STORAGE_UNAVAILABLE')
+  return { appSpecStore: records }
+}
+
 /** O mesmo, para as escolhas de visual. Falha alto pelo mesmo motivo. */
 function designSpecStoreOption(ctx: Context, config: PromptToAppPluginConfig): { readonly designSpecStore?: DesignSpecRecordStore } {
   if ((config.designSpecStorage ?? 'kv') === 'kv') return {}
@@ -204,7 +240,7 @@ export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}):
     projects.table('projects'), specs.table('specs'), designs.table('designs'), turns.table('turns'), plans.table('plans'),
     runs.table('runs'), evidence.table('evidence'), approvals.table('approvals'),
   )
-  const service = new PromptToAppService({ repository, ...intakeTurnStoreOption(ctx, config), ...designSpecStoreOption(ctx, config) })
+  const service = new PromptToAppService({ repository, ...intakeTurnStoreOption(ctx, config), ...designSpecStoreOption(ctx, config), ...appSpecStoreOption(ctx, config), ...planStoreOption(ctx, config), ...evidenceStoreOption(ctx, config) })
   await service.reconcileInterruptedExecutions()
   const model = new HarnessPromptModel({
     llm: ctx.llm,

@@ -70,7 +70,7 @@ describe('PromptToAppService', () => {
     expect(repository.approvalRows.some(row => row.subject === 'plan' && row.tier === 'T1')).toBe(true)
     expect(repository.approvalRows.filter(row => row.subject === 'transition').map(row => row.to_state)).toEqual(['SPEC_READY', 'PLAN_PROPOSED', 'PLAN_APPROVED'])
     expect(await service.intakeTurns(ownerA, project.project_id)).toHaveLength(1)
-    expect(service.latestSpec(ownerA, project.project_id).version).toBe(1)
+    expect((await service.latestSpec(ownerA, project.project_id)).version).toBe(1)
   })
 
   it('acrescenta uma etapa que a PESSOA descreveu, com os arquivos escritos pelo PLANEJADOR', async () => {

@@ -210,11 +210,11 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
         return json(response, 200, {
           project,
           turns: await config.service.intakeTurns(actor, projectId),
-          plan: optional(() => config.service.plan(actor, projectId)),
+          plan: await optionalAsync(async () => config.service.plan(actor, projectId)),
           design: await optionalAsync(async () => config.service.latestDesign(actor, projectId)),
           runs,
           current_run: currentRun === null ? null : { ...currentRun, verification_codes: verificationCodes },
-          evidence: config.service.evidence(actor, projectId),
+          evidence: await config.service.evidence(actor, projectId),
         })
       }
       if (request.method === 'GET' && matched.suffix === '/report') {
@@ -260,8 +260,8 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
       }
       if (request.method === 'POST' && matched.suffix === '/plan') {
         const project = config.service.project(actor, projectId)
-        const spec = config.service.latestSpec(actor, projectId)
-        const previous = optional(() => config.service.plan(actor, projectId))
+        const spec = await config.service.latestSpec(actor, projectId)
+        const previous = await optionalAsync(async () => config.service.plan(actor, projectId))
         const output = await config.planner.plan(
           { orgId: actor.orgId, tenantId: actor.tenantId }, project.privacy, spec.app_spec, project.category,
           previous?.status === 'CHANGE_REQUESTED' ? previous.change_request ?? undefined : undefined,
@@ -294,7 +294,7 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
         // recusa vira 409 com a frase da parada, em vez de um erro genérico
         // vindo de dentro.
         config.emergencyStop?.assertRunning({ orgId: actor.orgId, tenantId: actor.tenantId })
-        const plan = config.service.plan(actor, projectId)
+        const plan = await config.service.plan(actor, projectId)
         if (plan.status !== 'APPROVED') throw new PromptToAppError('INVALID', t('errors.planRequired'))
         const accepted = await config.jobs.start(actor, projectId, config.generatorFor(actor, projectId))
         return json(response, 202, { run_id: accepted.runId })
