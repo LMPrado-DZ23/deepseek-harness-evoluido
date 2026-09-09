@@ -25,7 +25,13 @@ import {
   listIntakeTurns,
   putIntakeTurn,
 } from '../../prompt-to-app/src/intake-turn-store.ts'
-import type { StudioIntakeTurn } from '../../prompt-to-app/src/model.ts'
+import {
+  DESIGN_SPEC_UNIT,
+  listDesignSpecs,
+  putDesignSpec,
+} from '../../prompt-to-app/src/design-spec-store.ts'
+import type { StudioDesignSpecRecord, StudioIntakeTurn } from '../../prompt-to-app/src/model.ts'
+import { createDesignSpec } from '../../prompt-to-app/src/design.ts'
 
 const dsn = process.env.DZ23_POSTGRES_TEST_DSN
 const describePostgres = dsn === undefined ? describe.skip : describe
@@ -41,7 +47,7 @@ function turn(id: string, overrides: Record<string, unknown> = {}): StudioIntake
   } as StudioIntakeTurn
 }
 
-describePostgres('S-08 — respostas do intake na tabela por inquilino', () => {
+describePostgres('S-08 — respostas do intake e escolhas de visual na tabela por inquilino', () => {
   it('isola por inquilino, mantém a ordem e VOLTA a vazar quando a política cai', async () => {
     const suffix = randomUUID().replaceAll('-', '').slice(0, 12)
     const schema = `s08_${suffix}`
@@ -106,8 +112,38 @@ describePostgres('S-08 — respostas do intake na tabela por inquilino', () => {
     // Recolocada, o isolamento volta — sem reiniciar nada.
     await admin.query(`ALTER TABLE "${schema}"."tenant_records" ENABLE ROW LEVEL SECURITY`)
     expect((await listIntakeTurns(store, a)).length).toBe(3)
+
+    // ── o SEGUNDO domínio, na mesma tabela física e sob a mesma política ────
+    // As escolhas de visual são o que o pipeline usa para pintar o aplicativo,
+    // e a versão MAIS ALTA é a que vale: numa lista fora de ordem a pessoa
+    // receberia o visual antigo depois de já ter trocado, sem saber por quê.
+    await putDesignSpec(store, design('d1', 1))
+    await putDesignSpec(store, design('d3', 3))
+    await putDesignSpec(store, design('d2', 2))
+    await putDesignSpec(store, design('d9', 1, { org_id: 'org-b', tenant_id: 'tenant-b' }))
+    const designs = await listDesignSpecs(store, a)
+    expect(designs.map(row => row.version)).toEqual([3, 2, 1])
+    expect(designs.map(row => row.design_id)).toEqual(['d3', 'd2', 'd1'])
+    expect((await listDesignSpecs(store, b)).map(row => row.design_id)).toEqual(['d9'])
+
+    // A unidade é OUTRA, e ela também é filtrada: um domínio não enxerga o do
+    // vizinho por acidente de estarem na mesma tabela.
+    const units = await admin.query<{ unit: string }>(
+      `SELECT DISTINCT unit FROM "${schema}"."tenant_records" ORDER BY unit`,
+    )
+    expect(units.rows.map(row => row.unit)).toEqual([DESIGN_SPEC_UNIT, INTAKE_TURN_UNIT].sort())
+    expect((await listIntakeTurns(store, a)).length).toBe(3)
   }, 60_000)
 })
+
+function design(id: string, version: number, overrides: Record<string, unknown> = {}): StudioDesignSpecRecord {
+  return {
+    design_id: id, project_id: 'projeto-1', org_id: 'org-a', tenant_id: 'tenant-a',
+    version, design_spec: createDesignSpec({ preset: 'modern' }), sha256: 'c'.repeat(64),
+    created_by: 'user-1', created_at: '2026-09-08T00:00:00.000Z',
+    ...overrides,
+  } as StudioDesignSpecRecord
+}
 
 afterAll(async () => { for (const step of cleanup.reverse()) await step() })
 

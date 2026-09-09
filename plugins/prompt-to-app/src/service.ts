@@ -10,6 +10,7 @@ import type {
 import { assertProjectTransition, assertUndoTransition } from './state.js'
 import { appendPlanSlice, applyPlanEdit, planRevision, PlanEditError, type PlanEdit } from './plan-edit.js'
 import { listIntakeTurns, putIntakeTurn, type IntakeTurnRecordStore } from './intake-turn-store.js'
+import { listDesignSpecs, putDesignSpec, type DesignSpecRecordStore } from './design-spec-store.js'
 import { latestGreenCheckpoint, noGreenReason, runCheckpoints, type CheckpointBlocker, type RunCheckpoint, NO_ATTEMPT } from './checkpoint.js'
 import { t } from './i18n.js'
 
@@ -61,6 +62,13 @@ export interface PromptToAppServiceOptions {
    * inteiro) e por não participar da geração.
    */
   readonly intakeTurnStore?: IntakeTurnRecordStore
+  /**
+   * O armazenamento por inquilino das ESCOLHAS DE VISUAL, quando existir.
+   *
+   * Segundo domínio do plano do `S-08`. Mesmas regras do primeiro: ausente é o
+   * padrão e significa chave-valor, e quem opera é quem decide.
+   */
+  readonly designSpecStore?: DesignSpecRecordStore
 }
 
 export class PromptToAppService {
@@ -68,11 +76,13 @@ export class PromptToAppService {
   readonly #now: () => Date
   readonly #createId: () => string
   readonly #intakeTurnStore: IntakeTurnRecordStore | undefined
+  readonly #designSpecStore: DesignSpecRecordStore | undefined
   constructor(options: PromptToAppServiceOptions) {
     this.#repository = options.repository
     this.#now = options.now ?? (() => new Date())
     this.#createId = options.createId ?? randomUUID
     this.#intakeTurnStore = options.intakeTurnStore
+    this.#designSpecStore = options.designSpecStore
   }
 
   assertAuthorized(actor: PromptToAppActor, permission: 'project.read' | 'project.write'): void {
@@ -173,21 +183,25 @@ export class PromptToAppService {
   }
 
   async attachLogo(actor: PromptToAppActor, projectId: string, logo: DesignLogo): Promise<StudioDesignSpecRecord> {
-    const current = this.designOrDefault(actor, projectId)
+    const current = await this.designOrDefault(actor, projectId)
     return this.#saveDesign(actor, projectId, designSpecV1Schema.parse({ ...current, logo }))
   }
 
-  latestDesign(actor: PromptToAppActor, projectId: string): StudioDesignSpecRecord {
+  async latestDesign(actor: PromptToAppActor, projectId: string): Promise<StudioDesignSpecRecord> {
     this.project(actor, projectId)
-    const value = this.#repository.designs().filter(candidate => candidate.project_id === projectId && this.#sameScope(actor, candidate))
-      .sort((left, right) => right.version - left.version)[0]
+    // O filtro de escopo do produto continua aqui, com ou sem RLS: as duas
+    // guardas juntas é que valem alguma coisa.
+    const rows = this.#designSpecStore === undefined
+      ? [...this.#repository.designs()].sort((left, right) => right.version - left.version)
+      : await listDesignSpecs(this.#designSpecStore, { orgId: actor.orgId, tenantId: actor.tenantId })
+    const value = rows.find(candidate => candidate.project_id === projectId && this.#sameScope(actor, candidate))
     if (value === undefined) throw new PromptToAppError('NOT_FOUND', t('errors.designNotFound'))
     return value
   }
 
-  designOrDefault(actor: PromptToAppActor, projectId: string): DesignSpecV1 {
+  async designOrDefault(actor: PromptToAppActor, projectId: string): Promise<DesignSpecV1> {
     this.project(actor, projectId)
-    try { return this.latestDesign(actor, projectId).design_spec } catch (error) {
+    try { return (await this.latestDesign(actor, projectId)).design_spec } catch (error) {
       if (!(error instanceof PromptToAppError) || error.code !== 'NOT_FOUND') throw error
       return createDesignSpec({ preset: 'modern' })
     }
@@ -467,13 +481,17 @@ export class PromptToAppService {
 
   async #saveDesign(actor: PromptToAppActor, projectId: string, designSpec: DesignSpecV1): Promise<StudioDesignSpecRecord> {
     this.#authorize(actor, 'project.write'); this.project(actor, projectId)
-    const previous = this.#repository.designs().filter(value => value.project_id === projectId && this.#sameScope(actor, value))
+    const rows = this.#designSpecStore === undefined
+      ? this.#repository.designs()
+      : await listDesignSpecs(this.#designSpecStore, { orgId: actor.orgId, tenantId: actor.tenantId })
+    const previous = rows.filter(value => value.project_id === projectId && this.#sameScope(actor, value))
     const value: StudioDesignSpecRecord = {
       design_id: this.#createId(), project_id: projectId, org_id: actor.orgId, tenant_id: actor.tenantId,
       version: previous.length + 1, design_spec: designSpecV1Schema.parse(designSpec), sha256: designSpecHash(designSpec),
       created_by: actor.userId, created_at: this.#now().toISOString(),
     }
-    await this.#repository.putDesign(value)
+    if (this.#designSpecStore === undefined) await this.#repository.putDesign(value)
+    else await putDesignSpec(this.#designSpecStore, value)
     return value
   }
 

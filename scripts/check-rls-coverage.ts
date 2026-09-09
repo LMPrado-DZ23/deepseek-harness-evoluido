@@ -39,6 +39,7 @@ export const RLS_MIGRATED: readonly { readonly domain: string; readonly reposito
   { domain: 'studio_action_approvals', repository: 'plugins/action-approval/src/tenant-repository.ts' },
   { domain: 'studio_integrations', repository: 'plugins/integration-hub/src/tenant-repository.ts' },
   { domain: 'studio_intake_turns', repository: 'plugins/prompt-to-app/src/intake-turn-store.ts' },
+  { domain: 'studio_design_specs', repository: 'plugins/prompt-to-app/src/design-spec-store.ts' },
 ]
 
 /**
@@ -49,7 +50,7 @@ export const RLS_MIGRATED: readonly { readonly domain: string; readonly reposito
  * lista consigo mesma passaria sempre, inclusive quando alguém apagasse uma
  * linha dela.
  */
-export const RLS_MIGRATED_FLOOR = 3
+export const RLS_MIGRATED_FLOOR = 4
 
 /**
  * Por que cada domínio pendente ainda NÃO migrou.
@@ -104,7 +105,6 @@ export interface PendingClassification {
 export const PENDING_CLASSIFICATION: Readonly<Record<string, PendingClassification>> = {
   studio_projects: { category: 'startup-reconciliation', reason: 'reconcileInterruptedExecutions() (service.ts:311) le TODOS os projetos e TODAS as execucoes sem ator, no start do plugin, e ESCREVE em cima; uma credencial escopada nao enxerga essa varredura', evidence: { file: 'plugins/prompt-to-app/src/service.ts', symbol: 'reconcileInterruptedExecutions' } },
   studio_app_specs: { category: 'startup-reconciliation', reason: 'a varredura de inicio NAO le esta tabela, mas ela vive no MESMO PromptToAppRepository, cujas leituras sao sincronas e sem escopo (projects(), specs(), ...); migrar uma sem as outras parte o repositorio em dois donos', evidence: { file: 'plugins/prompt-to-app/src/service.ts', symbol: 'reconcileInterruptedExecutions' } },
-  studio_design_specs: { category: 'startup-reconciliation', reason: 'idem studio_app_specs: fora da varredura, dentro do mesmo repositorio', evidence: { file: 'plugins/prompt-to-app/src/service.ts', symbol: 'reconcileInterruptedExecutions' } },
   studio_plans: { category: 'startup-reconciliation', reason: 'idem studio_app_specs: fora da varredura, dentro do mesmo repositorio', evidence: { file: 'plugins/prompt-to-app/src/service.ts', symbol: 'reconcileInterruptedExecutions' } },
   studio_runs: { category: 'startup-reconciliation', reason: 'a varredura de inicio le as execucoes PENDING e RUNNING de TODOS os inquilinos e as marca FAILED', evidence: { file: 'plugins/prompt-to-app/src/service.ts', symbol: 'reconcileInterruptedExecutions' } },
   studio_evidence: { category: 'startup-reconciliation', reason: 'idem studio_app_specs: fora da varredura, dentro do mesmo repositorio', evidence: { file: 'plugins/prompt-to-app/src/service.ts', symbol: 'reconcileInterruptedExecutions' } },

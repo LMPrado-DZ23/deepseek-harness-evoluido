@@ -128,7 +128,7 @@ export class PromptToAppPipeline {
     assertCategoryCanGenerate(project.category, spec)
     const specFindings = scanGeneratedContent({ 'appspec.json': JSON.stringify(spec) })
     if (specFindings.length > 0) throw new PromptToAppError('INVALID', t('errors.generatedSensitiveLiteral'))
-    const design = this.options.service.designOrDefault(actor, projectId)
+    const design = await this.options.service.designOrDefault(actor, projectId)
     const expectedAcceptanceChecks = acceptanceChecks(spec, project.category)
     await listTreeFiles(this.options.templateDirectory)
     await this.options.service.putRun(actor, this.runRecord(actor, projectId, plan.plan_id, 'generate', 1, 'PENDING', 'full', 'not-created', null, null, operationId, operationId, ownerSessionId))
@@ -693,7 +693,7 @@ export class PromptToAppPipeline {
   }
 }
 
-export async function writeDesignAssets(runDirectory: string, design: ReturnType<PromptToAppService['designOrDefault']>, logoStoreRoot?: string): Promise<void> {
+export async function writeDesignAssets(runDirectory: string, design: Awaited<ReturnType<PromptToAppService['designOrDefault']>>, logoStoreRoot?: string): Promise<void> {
   await mkdir(resolve(runDirectory, 'src', 'styles'), { recursive: true })
   await writeFile(resolve(runDirectory, 'src', 'styles', 'tokens.css'), renderDesignTokens(design), { encoding: 'utf8', flag: 'wx' })
   if (design.logo === null) return

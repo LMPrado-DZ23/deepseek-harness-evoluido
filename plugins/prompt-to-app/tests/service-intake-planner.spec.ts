@@ -138,8 +138,8 @@ describe('PromptToAppService', () => {
   it('versions tenant-scoped design choices and attaches a sanitized logo', async () => {
     const { service } = fixture()
     const project = await service.createProject(ownerA, { name: 'Marca', original_brief: 'Quero criar uma página para minha marca.', category: 'landing-page', privacy: 'local-only' })
-    expect(service.designOrDefault(ownerA, project.project_id).preset).toBe('modern')
-    expect(() => service.latestDesign(ownerA, project.project_id)).toThrow(PromptToAppError)
+    expect((await service.designOrDefault(ownerA, project.project_id)).preset).toBe('modern')
+    await expect(service.latestDesign(ownerA, project.project_id)).rejects.toThrow(PromptToAppError)
     const first = await service.saveDesign(ownerA, project.project_id, { preset: 'brand', primary: { h: 31, s: 92, l: 44 }, font: 'source-serif', tone: 'formal' })
     expect(first).toMatchObject({ version: 1, design_spec: { preset: 'brand', typography: { family: 'source-serif' } } })
     const logo = {
@@ -148,9 +148,9 @@ describe('PromptToAppService', () => {
     }
     const second = await service.attachLogo(ownerA, project.project_id, logo)
     expect(second).toMatchObject({ version: 2, design_spec: { logo } })
-    expect(service.latestDesign(ownerA, project.project_id).design_id).toBe(second.design_id)
+    expect((await service.latestDesign(ownerA, project.project_id)).design_id).toBe(second.design_id)
     await expect(service.saveDesign(viewerA, project.project_id, { preset: 'modern' })).rejects.toMatchObject({ code: 'FORBIDDEN' })
-    expect(() => service.latestDesign(builderB, project.project_id)).toThrow(PromptToAppError)
+    await expect(service.latestDesign(builderB, project.project_id)).rejects.toThrow(PromptToAppError)
   })
 
   it('reconciles orphaned executions once without crossing tenant boundaries', async () => {

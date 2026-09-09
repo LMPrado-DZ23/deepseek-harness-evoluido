@@ -211,7 +211,7 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
           project,
           turns: await config.service.intakeTurns(actor, projectId),
           plan: optional(() => config.service.plan(actor, projectId)),
-          design: optional(() => config.service.latestDesign(actor, projectId)),
+          design: await optionalAsync(async () => config.service.latestDesign(actor, projectId)),
           runs,
           current_run: currentRun === null ? null : { ...currentRun, verification_codes: verificationCodes },
           evidence: config.service.evidence(actor, projectId),
@@ -425,6 +425,11 @@ function matchRoute(method: string | undefined, path: string): { readonly projec
 
 function optional<T>(read: () => T): T | null {
   try { return read() } catch (error) { if (error instanceof PromptToAppError && error.code === 'NOT_FOUND') return null; throw error }
+}
+
+/** O mesmo `optional`, para leitura assíncrona: `NOT_FOUND` vira `null`. */
+async function optionalAsync<T>(read: () => Promise<T>): Promise<T | null> {
+  try { return await read() } catch (error) { if (error instanceof PromptToAppError && error.code === 'NOT_FOUND') return null; throw error }
 }
 
 function statusOf(error: unknown): number {
