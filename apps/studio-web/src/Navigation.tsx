@@ -1,6 +1,7 @@
 import { CircleHelp, Eye, FolderKanban, Home, LineChart, MessageCircle, Plug, Settings, X } from 'lucide-react'
 import type { ReactNode } from 'react'
 import t from './i18n/pt-BR.json'
+import { HELP_PATH } from './help/HelpScreen'
 import { NAV_MENU_ID, studioNavItems, type StudioNavItem } from './navigation'
 
 const icons: Readonly<Record<StudioNavItem['id'], ReactNode>> = {
@@ -41,7 +42,7 @@ export function StudioSidebar(props: StudioSidebarProps) {
         : <a key={item.id} className={props.active === item.id ? 'nav active' : 'nav'} href={item.href} {...(props.active === item.id ? { 'aria-current': 'page' as const } : {})}>{icons[item.id]}<span>{item.label}</span></a>)}
     </nav>
     <div className="sidebar-footer">
-      <button type="button" className="nav-icon-unavailable" disabled aria-label={`${t.nav.help} (${t.nav.soon})`}><CircleHelp aria-hidden="true" /></button>
+      <a className="nav-icon" href={HELP_PATH} aria-label={t.nav.help}><CircleHelp aria-hidden="true" /></a>
       <button type="button" className="nav-icon-unavailable" disabled aria-label={`${t.nav.settings} (${t.nav.soon})`}><Settings aria-hidden="true" /></button>
     </div>
   </aside>

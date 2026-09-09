@@ -189,3 +189,4 @@
 .plan-edit-form textarea{min-height:96px}
 @media (min-width:720px){.plan-actions{grid-template-columns:repeat(4,1fr)}}
 .kind{display:grid;gap:7px;margin:6px 0 16px}.kind select{width:100%;min-height:44px;border:1px solid #bbc5d6;border-radius:7px;background:#fff;padding:9px;color:#182544}
+.help{max-width:760px;margin:0 auto;padding:16px}.help dl>div{margin:0 0 12px}.help dt{font-weight:600;color:#182544}.help dd{margin:2px 0 0;color:#41506b;line-height:1.45}.help ol,.help ul{padding-left:20px;line-height:1.5;color:#41506b}.help li{margin:0 0 8px}.nav-icon{display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;border-radius:8px;color:#41506b}

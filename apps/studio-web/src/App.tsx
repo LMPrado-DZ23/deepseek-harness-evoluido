@@ -1,10 +1,11 @@
 import { Bell, LogOut, Menu, Sparkles, UserRound } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, apiResponse, csrfToken, type HealthState } from './api'
+import { PendingButton } from './PendingButton'
 import { STUDIO_CATEGORIES, type Category } from './categories'
 import t from './i18n/pt-BR.json'
 import { suggestCategory } from './categorySuggestion'
-import { creationBlocked, currentStepIndex, permanentTruthKind, privacyNotice, resultSentence, routeReasonNotice, type PrivacyProfile, type ProjectUiState } from './presentation'
+import { creationBlocked, currentStepIndex, permanentTruthKind, privacyNotice, resultSentence, routeReasonNotice, type PipelineResultState, type PrivacyProfile, type ProjectUiState } from './presentation'
 import { apiFailureMessage, apiFailureText, type ApiCallKind } from './pwa/apiFailure'
 import { GENERATION_REJECTED_STATE, postGeneration, startGeneration } from './pwa/generation'
 import { NotificationOptIn } from './pwa/NotificationOptIn'
@@ -23,7 +24,9 @@ type Question = { id: 'audience' | 'goal' | 'content' | 'sensitive-confirmation'
 type Plan = { revision?: number; edited_by_person?: boolean; slices: Array<{ slice_id: string; title: string; description: string; acceptance_criteria: string[] }> }
 type AcceptanceCheck = { id: string; label: string; status: 'PENDING' | 'PASSED' | 'FAILED' | 'NOT_AUTOMATED' }
 type VerificationCode = { email: string; code: string; expires_at: string }
-type PipelineResult = { state: 'VERIFIED_PROTOTYPE' | 'BUILD_FAILED' | 'TESTS_FAILED' | 'BLOCKED_EXTERNAL' | 'CANCELLED' | 'INTERRUPTED'; attempts: number; message: string; checks?: AcceptanceCheck[]; verificationCodes?: VerificationCode[] }
+// O estado final vem do MESMO tipo que a frase usa: duas listas separadas foi
+// como `BUDGET_EXCEEDED` acabou sem frase própria.
+type PipelineResult = { state: PipelineResultState; attempts: number; message: string; checks?: AcceptanceCheck[]; verificationCodes?: VerificationCode[] }
 type ProjectDetails = { project: { state: ProjectUiState }; plan?: Plan | null; current_run: null | { operation_id: string; state: 'PENDING' | 'RUNNING' | 'PASSED' | 'FAILED' | 'BLOCKED_EXTERNAL' | 'BUDGET_EXCEEDED' | 'CANCELLED'; stage: string; attempt: number; failure_code: string | null; acceptance_checks: AcceptanceCheck[]; verification_codes?: VerificationCode[] } }
 type Preview = { preview_id: string; state: 'REQUESTED' | 'STARTING' | 'READY' | 'STOPPING' | 'STOPPED' | 'FAILED' | 'EXPIRED'; health: 'PENDING' | 'OK' | 'DOWN'; url: string; expires_at: string }
 /**
@@ -290,7 +293,11 @@ export function App() {
           : current.state === 'PASSED' ? 'VERIFIED_PROTOTYPE'
           : current.state === 'BLOCKED_EXTERNAL' ? 'BLOCKED_EXTERNAL'
             : current.state === 'CANCELLED' ? 'CANCELLED'
-              : current.stage === 'test' ? 'TESTS_FAILED' : 'BUILD_FAILED'
+              // `BUDGET_EXCEEDED` estava na lista de estados terminais e não
+              // estava aqui: caía no último ramo e virava "verificação
+              // encontrou um problema".
+              : current.state === 'BUDGET_EXCEEDED' ? 'BUDGET_EXCEEDED'
+                : current.stage === 'test' ? 'TESTS_FAILED' : 'BUILD_FAILED'
         setResult({ state, attempts: current.attempt, message: current.failure_code ?? (state === 'VERIFIED_PROTOTYPE' ? t.truth.verified : t.verification.failure), checks: current.acceptance_checks, ...(current.verification_codes === undefined ? {} : { verificationCodes: current.verification_codes }) })
         if (state === 'BLOCKED_EXTERNAL') setProjectState('PLAN_APPROVED')
         // O relato é lido DEPOIS que a execução termina: é ele que tira a
@@ -394,10 +401,10 @@ export function App() {
           font={font} setFont={setFont} radius={radius} setRadius={setRadius} density={density} setDensity={setDensity}
           tone={tone} setTone={setTone} logo={logo} setLogo={setLogo} showDesignAdvanced={showDesignAdvanced} setShowDesignAdvanced={setShowDesignAdvanced} /> : null}
         {projectState === 'DRAFT' && question !== null ? <Questions question={question} answer={answer} setAnswer={setAnswer} submit={submitAnswer} /> : null}
-        {projectState === 'SPEC_READY' ? <Action title={t.plan.title} detail={t.progress.planDetail} button={t.plan.prepare} action={preparePlan} /> : null}
+        {projectState === 'SPEC_READY' ? <Action title={t.plan.title} detail={t.progress.planDetail} button={t.plan.prepare} busyButton={t.plan.prepareBusy} action={preparePlan} /> : null}
         {projectState === 'PLAN_PROPOSED' && plan !== null ? <PlanEditor plan={plan} submit={editPlan} approve={approvePlan} reason={changeReason} setReason={setChangeReason} requestChange={requestPlanChange} /> : null}
         {projectState === 'PLAN_PROPOSED' && plan === null ? <Action title={t.plan.title} detail={t.progress.planDetail} button={t.plan.revision} action={preparePlan} /> : null}
-        {projectState === 'PLAN_APPROVED' ? <Action title={t.creation.title} detail={t.truth.creation} button={t.creation.start} action={generate} /> : null}
+        {projectState === 'PLAN_APPROVED' ? <Action title={t.creation.title} detail={t.truth.creation} button={t.creation.start} busyButton={t.creation.startBusy} action={generate} /> : null}
         {projectState === 'GENERATING' || projectState === 'BUILD_OK' || projectState === 'TESTS_OK' ? <Action title={t.creation.title} detail={t.creation.working} button={t.creation.cancel} action={cancelGeneration} /> : null}
         {result !== null ? <Verification result={result} previewActive={preview?.state === 'READY'} startPreview={startPreview} retry={generate} /> : null}
         {runReport === null ? null : <RunReport report={runReport} />}
@@ -443,13 +450,13 @@ function Idea(props: {
       <label>{t.design.logo}<input type="file" accept="image/png,image/jpeg" onChange={event => props.setLogo(event.target.files?.[0] ?? null)} /></label><small>{props.logo === null ? t.design.logoHelp : props.logo.name}</small>
     </section> : null}
     <fieldset className="privacy-profiles"><legend>{t.privacy.title}</legend>{PRIVACY_PROFILES.map(([value, label, detail]) => <label key={value}><input type="radio" name="privacy-profile" checked={props.privacy === value} onChange={() => props.setPrivacy(value)} /><strong>{label}{value === 'privado-local' || props.route === null ? '' : ` (${props.route})`}</strong><span>{detail}</span></label>)}</fieldset>
-    <p className="privacy-notice">{privacyNotice(props.privacy, props.route, t.privacy, props.localRoute)}</p>{routeReasonNotice(props.privacy, props.routeReason) === null ? null : <p className="privacy-notice">{t.privacy.routeReason} {routeReasonNotice(props.privacy, props.routeReason)}</p>}<p className="context-note">{t.truth.idea}</p><button className="primary" disabled={!props.ready || creationBlocked(props.privacy, props.localRoute)} onClick={() => void props.create()}>{t.idea.continue}</button></>
+    <p className="privacy-notice">{privacyNotice(props.privacy, props.route, t.privacy, props.localRoute)}</p>{routeReasonNotice(props.privacy, props.routeReason) === null ? null : <p className="privacy-notice">{t.privacy.routeReason} {routeReasonNotice(props.privacy, props.routeReason)}</p>}<p className="context-note">{t.truth.idea}</p><PendingButton label={t.idea.continue} busyLabel={t.idea.continueBusy} disabled={!props.ready || creationBlocked(props.privacy, props.localRoute)} action={props.create} /></>
 }
 function Questions({ question, answer, setAnswer, submit }: { question: Question; answer: string; setAnswer(v: string): void; submit(recommend: boolean, confirm?: boolean): Promise<void> }) {
   const sensitive = question.id === 'sensitive-confirmation'
-  return <><div className="heading"><Sparkles/><div><h1>{t.questions.title}</h1><p>{t.questions.subtitle}</p></div></div><section className="task-card"><h2>{question.text}</h2>{sensitive ? <div className="button-row"><button className="primary" onClick={() => void submit(false, true)}>{t.questions.confirm}</button><button className="secondary" onClick={() => void submit(false, false)}>{t.questions.reject}</button></div> : <><label htmlFor="answer">{t.questions.answer}</label><textarea id="answer" value={answer} onChange={event => setAnswer(event.target.value)} placeholder={t.questions.answerPlaceholder}/><button className="primary" disabled={answer.trim() === ''} onClick={() => void submit(false)}>{t.questions.continue}</button><button className="secondary" onClick={() => void submit(true)}>{t.questions.recommend}</button></>}</section></>
+  return <><div className="heading"><Sparkles/><div><h1>{t.questions.title}</h1><p>{t.questions.subtitle}</p></div></div><section className="task-card"><h2>{question.text}</h2>{sensitive ? <div className="button-row"><button className="primary" onClick={() => void submit(false, true)}>{t.questions.confirm}</button><button className="secondary" onClick={() => void submit(false, false)}>{t.questions.reject}</button></div> : <><label htmlFor="answer">{t.questions.answer}</label><textarea id="answer" value={answer} onChange={event => setAnswer(event.target.value)} placeholder={t.questions.answerPlaceholder}/><PendingButton label={t.questions.continue} busyLabel={t.questions.continueBusy} disabled={answer.trim() === ''} action={() => submit(false)} /><button className="secondary" onClick={() => void submit(true)}>{t.questions.recommend}</button></>}</section></>
 }
-function Action({ title, detail, button, action }: { title: string; detail: string; button?: string; action?: () => Promise<void> }) { return <><div className="heading"><Sparkles/><div><h1>{title}</h1><p>{detail}</p></div></div>{button === undefined || action === undefined ? null : <button className="primary" onClick={() => void action()}>{button}</button>}</> }
+function Action({ title, detail, button, busyButton, action }: { title: string; detail: string; button?: string; busyButton?: string; action?: () => Promise<void> }) { return <><div className="heading"><Sparkles/><div><h1>{title}</h1><p>{detail}</p></div></div>{button === undefined || action === undefined ? null : <PendingButton label={button} busyLabel={busyButton ?? button} action={action} />}</> }
 function Verification({ result, previewActive, startPreview, retry }: { result: PipelineResult; previewActive: boolean; startPreview(): Promise<void>; retry(): Promise<void> }) { const ok = result.state === 'VERIFIED_PROTOTYPE'; const cancelled = result.state === 'CANCELLED'; const interrupted = result.state === 'INTERRUPTED'; return <section className="task-card"><h1>{t.verification.title}</h1><p>{resultSentence(result.state, t.verification)}</p><p>{t.verification.attempts}: {result.attempts}</p>{ok && !previewActive ? <button className="primary" onClick={() => void startPreview()}>{t.preview.open}</button> : null}{interrupted ? <button className="primary" onClick={() => void retry()}>{t.creation.retry}</button> : null}{result.verificationCodes === undefined || result.verificationCodes.length === 0 ? null : <section><h2>{t.verification.testCodes}</h2><p>{t.verification.testCodesHelp}</p><ul>{result.verificationCodes.map(item => <li key={`${item.email}-${item.expires_at}-${item.code}`}><strong>{item.email}</strong>: <code>{item.code}</code></li>)}</ul></section>}{result.checks === undefined ? null : <><h2>{t.verification.checks}</h2><ul>{result.checks.map(check => <li key={check.id}>{check.label}: {checkStatus(check.status)}</li>)}</ul></>}<details className="result-technical"><summary>{t.verification.technicalTitle}</summary><p>{t.verification.technicalCode}: <code>{result.state}</code></p>{result.message === '' ? null : <p>{t.verification.technicalFailure}: <code>{result.message}</code></p>}</details></section> }
 
 function refreshPreviewAdmission(previewUrl: string): void {

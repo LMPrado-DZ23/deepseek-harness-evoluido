@@ -10,6 +10,7 @@
 import { useState } from 'react'
 import t from '../i18n/pt-BR.json'
 import { criteriaToText, moveRequest, removeRequest, sliceEditRequest, viewRevision, type PlanEditRequest, type PlanView } from './planEdit'
+import { PendingButton } from '../PendingButton'
 
 export interface PlanEditorProps {
   readonly plan: PlanView
@@ -81,12 +82,12 @@ export function PlanEditor({ plan, submit, approve, reason, setReason, requestCh
           </>}
       </li>)}
     </ol>
-    <button className="primary" onClick={() => void approve()}>{t.plan.approve}</button>
+    <PendingButton label={t.plan.approve} busyLabel={t.plan.approveBusy} action={approve} />
     <section className="task-card">
       <h2>{t.plan.change}</h2>
       <label htmlFor="change-reason">{t.plan.changeLabel}</label>
       <textarea id="change-reason" value={reason} onChange={event => setReason(event.target.value)} placeholder={t.plan.changePlaceholder} />
-      <button className="secondary" disabled={reason.trim().length < 3} onClick={() => void requestChange()}>{t.plan.sendChange}</button>
+      <PendingButton className="secondary" label={t.plan.sendChange} busyLabel={t.plan.sendChangeBusy} disabled={reason.trim().length < 3} action={requestChange} />
     </section>
   </>
 }

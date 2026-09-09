@@ -53,10 +53,38 @@ export function apiFailureMessage(cause: unknown, online: boolean, call: ApiCall
   return undefined
 }
 
-/** The message above, falling back to whatever the failure itself said. Never empty. */
+/**
+ * Um texto que não é frase: `HTTP 502`, `ACCEPTANCE_ATTESTATION_UNAVAILABLE`,
+ * `INVALID_REQUEST`, ou uma palavra solta.
+ *
+ * O que a pessoa via em `<p class="error">` era um destes — ou, quando nem isso
+ * havia, a palavra `Atenção` sozinha. Sem causa, sem o que fazer, sem para onde
+ * ir. Um código de máquina não vira explicação por estar em português.
+ */
+function machineCode(text: string): boolean {
+  if (/^HTTP \d{3}$/u.test(text)) return true
+  if (/^[A-Z][A-Z0-9]*(?:[_-][A-Z0-9]+)+$/u.test(text)) return true
+  // Uma "frase" de uma palavra só não explica nada a ninguém.
+  return !text.includes(' ')
+}
+
+/** `{codigo}` trocado pelo código real. */
+function withCode(sentence: string, code: string): string {
+  return sentence.replace('{codigo}', code)
+}
+
+/**
+ * A frase para a pessoa, nunca vazia e nunca um código solto.
+ *
+ * Quando o servidor mandou uma FRASE, ela vale — é mais específica do que
+ * qualquer coisa escrita aqui. Quando o que veio é código de máquina, a pessoa
+ * recebe o que fazer, e o código vai junto no fim, para colar num pedido de
+ * ajuda em vez de virar a explicação inteira.
+ */
 export function apiFailureText(cause: unknown, online: boolean, call: ApiCallKind, fallback: string): string {
   const known = apiFailureMessage(cause, online, call)
   if (known !== undefined) return known
   const own = messageOf(cause).trim()
-  return own === '' ? fallback : own
+  if (own === '') return machineCode(fallback.trim()) ? t.offline.lastResort : fallback
+  return machineCode(own) ? withCode(t.offline.lastResortWithCode, own) : own
 }

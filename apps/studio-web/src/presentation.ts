@@ -107,6 +107,11 @@ export function privacyNotice(
 /** Os estados que a criação pode terminar. */
 export type PipelineResultState =
   | 'VERIFIED_PROTOTYPE' | 'BUILD_FAILED' | 'TESTS_FAILED' | 'BLOCKED_EXTERNAL' | 'CANCELLED' | 'INTERRUPTED'
+  // Estourar o teto de GASTO não é uma verificação que reprovou. Sem este
+  // estado aqui, ele caía no último ramo de `resultSentence` e a pessoa lia
+  // "uma verificação encontrou um problema": ia procurar defeito no aplicativo
+  // dela quando o que acabou foi o limite de gasto, que ela pode mudar.
+  | 'BUDGET_EXCEEDED'
 
 export interface ResultMessages {
   readonly success: string
@@ -114,6 +119,7 @@ export interface ResultMessages {
   readonly cancelled: string
   readonly interrupted: string
   readonly blockedExternal: string
+  readonly budgetExceeded: string
 }
 
 /**
@@ -132,6 +138,7 @@ export function resultSentence(state: PipelineResultState, messages: ResultMessa
   if (state === 'CANCELLED') return messages.cancelled
   if (state === 'INTERRUPTED') return messages.interrupted
   if (state === 'BLOCKED_EXTERNAL') return messages.blockedExternal
+  if (state === 'BUDGET_EXCEEDED') return messages.budgetExceeded
   return messages.failure
 }
 

@@ -97,7 +97,8 @@
       "scheduling": "Agenda de horários",
       "dashboard": "Painel de acompanhamento (só leitura)",
       "saas-authenticated": "Área com acesso separado por cliente"
-    }
+    },
+    "continueBusy": "Enviando sua ideia…"
   },
   "design": {
     "title": "Escolha o jeito do seu aplicativo",
@@ -137,7 +138,8 @@
     "continue": "Responder e continuar",
     "recommend": "Não sei — recomende para mim",
     "confirm": "Sim, isso é necessário",
-    "reject": "Não, retire esses dados"
+    "reject": "Não, retire esses dados",
+    "continueBusy": "Enviando sua resposta…"
   },
   "plan": {
     "title": "Confira o plano",
@@ -162,14 +164,18 @@
     "moveDown": "Descer",
     "editedByPerson": "Este plano tem alterações suas.",
     "filesFixed": "Os arquivos que serão criados são definidos pelo Studio e não mudam com a edição.",
-    "editEmpty": "O plano precisa ter pelo menos uma parte."
+    "editEmpty": "O plano precisa ter pelo menos uma parte.",
+    "prepareBusy": "Montando seu plano…",
+    "approveBusy": "Aprovando…",
+    "sendChangeBusy": "Enviando seu pedido…"
   },
   "creation": {
     "title": "Criar e testar o protótipo",
     "start": "Iniciar criação",
     "retry": "Tentar novamente",
     "working": "Criando e conferindo dentro do ambiente isolado…",
-    "cancel": "Cancelar criação"
+    "cancel": "Cancelar criação",
+    "startBusy": "Começando a criação…"
   },
   "verification": {
     "title": "Resultado da verificação",
@@ -189,7 +195,8 @@
     "technicalTitle": "Detalhes técnicos",
     "technicalCode": "Código do estado",
     "technicalFailure": "Código da falha",
-    "followLost": "Esta tela parou de acompanhar a criação. Ela pode continuar no seu computador — atualize a página para ver em que ponto está."
+    "followLost": "Esta tela parou de acompanhar a criação. Ela pode continuar no seu computador — atualize a página para ver em que ponto está.",
+    "budgetExceeded": "A criação parou porque o limite de gasto deste espaço de trabalho acabou. Não é um problema no seu aplicativo. Você pode aumentar o limite, escolher o perfil que usa a IA local ou simplificar o plano e tentar de novo."
   },
   "emergency": {
     "title": "Parada de emergência",

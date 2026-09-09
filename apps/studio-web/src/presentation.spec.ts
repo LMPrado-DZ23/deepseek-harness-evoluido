@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import t from './i18n/pt-BR.json'
-import { creationBlocked, currentStepIndex, permanentTruthKind, privacyNotice, privacyProfileOf, resultSentence, routeReasonNotice, type ProjectUiState } from './presentation'
+import { creationBlocked, currentStepIndex, permanentTruthKind, privacyNotice, privacyProfileOf, resultSentence, routeReasonNotice, type PipelineResultState, type ProjectUiState } from './presentation'
 
 describe('truthful presentation for nontechnical users', () => {
   it('maps the real machine states to the five visible stages', () => {
@@ -50,12 +50,13 @@ describe('C-09: o código do estado não é a explicação', () => {
     cancelled: 'A criação foi cancelada.',
     interrupted: 'A criação foi interrompida antes de terminar. Nada foi publicado.',
     blockedExternal: 'A criação parou porque falta algo fora do Studio.',
+    budgetExceeded: 'A criação parou porque o limite de gasto acabou.',
   }
 
   it('toda saída da criação tem frase em português', () => {
     // A tela mostrava `VERIFIED_PROTOTYPE` e `BUILD_FAILED` crus, em inglês e
     // em caixa alta, para quem não programa.
-    const states = ['VERIFIED_PROTOTYPE', 'BUILD_FAILED', 'TESTS_FAILED', 'BLOCKED_EXTERNAL', 'CANCELLED', 'INTERRUPTED'] as const
+    const states = ['VERIFIED_PROTOTYPE', 'BUILD_FAILED', 'TESTS_FAILED', 'BLOCKED_EXTERNAL', 'CANCELLED', 'INTERRUPTED', 'BUDGET_EXCEEDED'] as const
     for (const state of states) {
       const sentence = resultSentence(state, messages)
       expect(sentence, state).not.toBe(state)
@@ -168,3 +169,28 @@ describe('M-05/C-22: os três perfis na tela', () => {
   })
 })
 
+describe('H-2: o fim da criação diz o que realmente aconteceu', () => {
+  it('não chama teto de gasto de falha de verificação', () => {
+    // A pessoa procuraria defeito no aplicativo dela. O que acabou foi o
+    // limite de gasto — que ela pode mudar, e a frase diz como.
+    expect(resultSentence('BUDGET_EXCEEDED', t.verification)).toBe(t.verification.budgetExceeded)
+    expect(resultSentence('BUDGET_EXCEEDED', t.verification)).not.toBe(t.verification.failure)
+    expect(t.verification.budgetExceeded).toContain('limite de gasto')
+    expect(t.verification.budgetExceeded).toContain('Não é um problema no seu aplicativo')
+  })
+
+  it('cada estado terminal tem a frase do seu próprio caso', () => {
+    const expected: Record<PipelineResultState, string> = {
+      VERIFIED_PROTOTYPE: t.verification.success,
+      CANCELLED: t.verification.cancelled,
+      INTERRUPTED: t.verification.interrupted,
+      BLOCKED_EXTERNAL: t.verification.blockedExternal,
+      BUDGET_EXCEEDED: t.verification.budgetExceeded,
+      BUILD_FAILED: t.verification.failure,
+      TESTS_FAILED: t.verification.failure,
+    }
+    for (const [state, sentence] of Object.entries(expected)) {
+      expect(resultSentence(state as PipelineResultState, t.verification), state).toBe(sentence)
+    }
+  })
+})

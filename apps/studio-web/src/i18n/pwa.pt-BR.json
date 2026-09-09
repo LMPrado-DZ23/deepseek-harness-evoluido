@@ -9,7 +9,9 @@
       "title": "Não foi possível abrir o DZ23 STUDIO",
       "body": "Este aparelho está sem internet e a cópia do Studio que ficava guardada aqui não está mais neste aparelho.",
       "retry": "Conecte-se à internet e abra o Studio de novo."
-    }
+    },
+    "lastResort": "Não foi possível concluir agora. Nada foi alterado nesta tela. Tente de novo em alguns instantes.",
+    "lastResortWithCode": "Não foi possível concluir agora. Nada foi alterado nesta tela. Tente de novo em alguns instantes; se continuar assim, anote este código para pedir ajuda: {codigo}"
   },
   "install": {
     "prompt": "Instalar o DZ23 STUDIO neste aparelho",
