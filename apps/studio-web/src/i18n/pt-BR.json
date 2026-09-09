@@ -98,7 +98,7 @@
     "scheduling": "Quero uma agenda interna para minha equipe criar, confirmar e cancelar reservas.",
     "dashboard": "Quero um painel para acompanhar números e agrupamentos, sem alterar os dados.",
     "saas": "Quero uma área com acesso separado para cada cliente.",
-    "betaNotice": "Agenda, painel e área de clientes são protótipos iniciais. A verificação mostrará exatamente o que foi testado e o que ainda falta.",
+    "betaNotice": "Agenda, painel e área de clientes estão marcados como protótipo inicial: a verificação mostrará exatamente o que foi testado e o que ainda falta.",
     "continue": "Continuar",
     "advanced": "Opções avançadas",
     "counter": "de 1000 caracteres",
@@ -115,7 +115,8 @@
       "dashboard": "Painel de acompanhamento (só leitura)",
       "saas-authenticated": "Área com acesso separado por cliente"
     },
-    "continueBusy": "Enviando sua ideia…"
+    "continueBusy": "Enviando sua ideia…",
+    "betaBadge": "protótipo inicial"
   },
   "design": {
     "title": "Escolha o jeito do seu aplicativo",

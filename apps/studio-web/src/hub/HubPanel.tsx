@@ -141,7 +141,11 @@ function SmtpSection({ api, state, onChange, notify, report }: SectionProps & { 
       })
     }}>
       <label htmlFor="hub-smtp-ref">{t.smtp.refLabel}</label>
-      <input id="hub-smtp-ref" value={secretRef} onChange={event => setSecretRef(event.target.value)} placeholder={t.smtp.refPlaceholder} autoComplete="off" spellCheck={false} />
+      <input id="hub-smtp-ref" value={secretRef} onChange={event => setSecretRef(event.target.value)} placeholder={t.smtp.refPlaceholder} autoComplete="off" spellCheck={false} aria-describedby="hub-smtp-ref-help" />
+      {/* Enviar e-mail é a função mais banal que um aplicativo vai querer, e
+          configurá-la exigia saber o que é um segredo no cofre do servidor. A
+          ajuda diz, na hora, que ali vai um NOME e a quem pedir esse nome. */}
+      <p id="hub-smtp-ref-help" className="context-note">{t.smtp.refHelp}</p>
       <button type="submit" className="primary" disabled={busy || secretRef.trim() === ''}>{t.smtp.save}</button>
     </form>
     <form onSubmit={event => {

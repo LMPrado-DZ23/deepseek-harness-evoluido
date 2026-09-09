@@ -194,3 +194,50 @@
    #64708a sobre o fundo #eef3fb do `code` mede 4,45:1 e reprova no axe. */
 .check-id code{color:#41506b;font-size:12px;font-weight:400;letter-spacing:0}
 .status-wrap{position:relative}.status.checking{color:#41506b}.status-details{position:absolute;z-index:5;top:calc(100% + 6px);left:0;min-width:280px;background:#fff;border:1px solid #dce2ec;border-radius:10px;padding:12px 14px;box-shadow:0 8px 24px rgba(11,23,57,.12)}.status-details ul{margin:6px 0 0;padding-left:18px;color:#41506b;line-height:1.45}
+.badge-beta{display:inline-block;margin-left:8px;padding:2px 8px;border-radius:999px;background:#eef3fb;color:#41506b;font-size:12px;vertical-align:middle}
+/* MODO ESCURO DO PRODUTO INTEIRO.
+   O modo escuro existia só na tela do assistente: a conversa ficava escura e
+   agradável e, ao voltar para "Vamos criar seu aplicativo", a tela disparava
+   branco puro. Pareciam dois produtos, e o pulo de brilho à noite é
+   desconfortável justamente para quem vai usar isto no sofá.
+   Cada superfície escura declara TAMBÉM a cor do texto: escurecer fundo e
+   herdar texto claro do tema claro foi como a conversa já chegou a 1,05:1 de
+   contraste. O e2e roda o fluxo com o sistema em modo escuro e o axe mede. */
+@media (prefers-color-scheme:dark){
+  :root{color:#eef2f9;background:#0f1523}
+  body{background:#0f1523}
+  .workspace,.shell{background:#0f1523}
+  .topbar{background:#0f1523;border-color:#2a3550}
+  h1,h2,h3,strong{color:#eef2f9}
+  p,li,dd,label,legend{color:#c9d3e6}
+  .context-note,.mobile-progress-subtitle,.run-file-meta,.check-id code,.counter{color:#aab6cd}
+  .task-card,.assistant-card,.preview-card,.progress-panel,.run-report,.status-details,.design-advanced,.privacy-profiles,.plan-edit-form{background:#151d30;border-color:#2a3550;color:#eef2f9}
+  .suggestion,.design-card,.secondary,.nav-icon{background:#151d30;border-color:#2a3550;color:#eef2f9}
+  .design-card span{color:#aab6cd}
+  .design-card.selected{background:#152a4d;border-color:#4d8bff}
+  textarea,input,select{background:#101828;border-color:#2a3550;color:#eef2f9}
+  code{background:#1b2540;color:#dce4f2}
+  .check-id code{background:#1b2540;color:#c9d3e6}
+  .badge-beta{background:#1b2540;color:#c9d3e6}
+  .truth,.privacy-notice{color:#c9d3e6}
+  .status.ok{color:#7ee0a8}
+  .status.attention{color:#ffcf7a}
+  .status.checking{color:#c9d3e6}
+  .error{color:#ff9d95}
+  .help dt{color:#eef2f9}
+  .help dd,.help li{color:#c9d3e6}
+  .checkpoint,.run-stage,.run-findings,.run-correction{background:#151d30;border-color:#2a3550;color:#eef2f9}
+  .checkpoint-word,.run-stage-word,.step-number{color:#c9d3e6}
+  /* Os cinzas do tema claro, um por um: eles são legíveis sobre branco e
+     somem sobre o fundo escuro. O axe mediu cada um destes. */
+  .coming,.privacy-notice,.privacy-profiles label span,.preview-heading p{color:#aab6cd}
+  .progress-panel p,.progress-panel small,.heading p,.design-advanced small,.plan-note,.top-actions{color:#aab6cd}
+  /* Superfícies que continuavam claras dentro do tema escuro. */
+  .emergency-stop{background:#2a1720;border-color:#5e2a33;color:#f6e3e3}
+  .status{background:#151d30;border-color:#2a3550}
+  a{color:#8fb6ff}
+  /* O azul da marca não tem contraste sobre o fundo escuro: clareia para o mesmo
+     azul dos links. Vale para o botão de opções avançadas, o ícone do cabeçalho
+     e o hover das sugestões. */
+  .advanced,.heading svg,.suggestion:hover,.signout-button:hover,.conversation-advanced summary{color:#8fb6ff}
+}

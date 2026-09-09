@@ -102,3 +102,50 @@ test('o estado do Studio começa neutro e abre o que está em atenção', async 
   await expect(page.getByText(/Ambiente isolado de criação:/u)).toBeVisible()
   await expect(page.getByText(/Espaço em disco:/u)).toBeVisible()
 })
+
+/**
+ * O mesmo caminho, no MODO ESCURO.
+ *
+ * O produto tinha modo escuro só na tela do assistente: a conversa ficava
+ * escura e agradável e, ao voltar para "Vamos criar seu aplicativo", a tela
+ * disparava branco puro. Além do susto à noite, meio-tema é onde nascem os
+ * contrastes impossíveis — e é o axe que diz se algum sobrou.
+ */
+test.describe('o mesmo fluxo no modo escuro', () => {
+  test.use({ colorScheme: 'dark' })
+
+  test('as telas do fluxo passam no axe com o sistema em modo escuro', async ({ context, page }, testInfo) => {
+    await context.addCookies([
+      { name: 'dz23_studio_session', value: 'e2e', url: origin },
+      { name: 'dz23_studio_csrf', value: 'csrf-e2e', url: origin },
+    ])
+    await context.addInitScript(() => { window.sessionStorage.setItem('dz23.studio.csrf.v1', 'csrf-e2e') })
+    const violations: string[] = []
+    const check = async (screen: string) => {
+      const result = await new AxeBuilder({ page }).analyze()
+      for (const violation of result.violations) {
+        for (const node of violation.nodes) {
+          violations.push(`${testInfo.project.name}/escuro/${screen}: ${violation.id} ${node.html.slice(0, 110)} ${node.any.map(item => JSON.stringify(item.data)).join(' ')}`)
+        }
+      }
+    }
+    await page.goto('/studio/')
+    await expect(page.getByRole('heading', { name: 'Vamos criar seu aplicativo' })).toBeVisible()
+    await check('ideia')
+    await page.getByRole('button', { name: 'Quero uma página para apresentar meu trabalho ou negócio.' }).click()
+    await page.getByRole('button', { name: 'Continuar' }).click()
+    await expect(page.getByRole('heading', { name: 'Só mais alguns detalhes' })).toBeVisible({ timeout: 15_000 })
+    await check('perguntas')
+    for (const answer of ['Clientes locais', 'Conhecer os serviços', 'Serviços e contato']) {
+      await page.getByLabel('Sua resposta').fill(answer)
+      await page.getByRole('button', { name: 'Responder e continuar' }).click()
+    }
+    await page.getByRole('button', { name: 'Montar meu plano' }).click()
+    await expect(page.locator('.plan-list .task-card').first()).toBeVisible({ timeout: 15_000 })
+    await check('plano')
+    await page.goto('/studio/ajuda')
+    await expect(page.getByRole('heading', { name: 'Ajuda do DZ23 STUDIO' })).toBeVisible()
+    await check('ajuda')
+    expect(violations, violations.join('\n')).toEqual([])
+  })
+})

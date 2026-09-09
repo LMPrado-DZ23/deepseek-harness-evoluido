@@ -24,9 +24,18 @@ export function kindLabel(kind: string): string {
   return (t.integrations.kind as Record<string, string>)[kind] ?? kind
 }
 
+/**
+ * O nível de confiança pelo NOME, e não pelo código.
+ *
+ * `T0`-`T3` não significam nada para quem não programa. A tradução já existia
+ * no catálogo e era usada em toda parte MENOS na frase que pede a confirmação —
+ * ali a pessoa lia "precisa da sua confirmação (T3)".
+ * @param tier - o código do nível.
+ * @returns o nome legível; o código sozinho só quando ele é desconhecido.
+ */
 export function tierLabel(tier: string): string {
   const known = (t.integrations.tier as Record<string, string>)[tier]
-  return known === undefined ? tier : `${tier} — ${known}`
+  return known === undefined ? tier : known.toLowerCase()
 }
 
 export function verificationLabel(verification: Verification): string {

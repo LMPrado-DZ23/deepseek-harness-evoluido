@@ -429,6 +429,22 @@ export function App() {
   </div>
 }
 
+/**
+ * As sugestões prontas, e quais delas são protótipo INICIAL.
+ *
+ * O terceiro campo é a honestidade chegando na hora da escolha, e não num
+ * parágrafo embaixo dos sete botões.
+ */
+const SUGGESTIONS: readonly (readonly [string, Category, boolean])[] = [
+  [t.idea.landing, 'landing-page', false],
+  [t.idea.catalog, 'catalog', false],
+  [t.idea.formDatabase, 'form-database', false],
+  [t.idea.crudPanel, 'crud-panel', false],
+  [t.idea.scheduling, 'scheduling', true],
+  [t.idea.dashboard, 'dashboard', true],
+  [t.idea.saas, 'saas-authenticated', true],
+]
+
 function Idea(props: {
   brief: string; setBrief(v: string): void; privacy: PrivacyProfile; setPrivacy(v: PrivacyProfile): void; route: string | null; localRoute: string | null | undefined; routeReason: string | null; ready: boolean; chooseSuggestion(v: string, c: Category): void; category: Category; chooseCategory(v: Category): void; create(): Promise<void>
   designPreset: DesignPreset; setDesignPreset(v: DesignPreset): void; brandColor: string; setBrandColor(v: string): void
@@ -444,7 +460,15 @@ function Idea(props: {
     <textarea id="brief" maxLength={1000} value={props.brief} onChange={event => props.setBrief(event.target.value)} placeholder={t.idea.placeholder} /><div className="counter" aria-live="polite">{props.brief.length} {t.idea.counter}</div>
     <h2>{t.idea.kindTitle}</h2><p className="coming">{t.idea.kindHelp}</p>
     <label className="kind">{t.idea.kindLabel}<select value={props.category} onChange={event => props.chooseCategory(event.target.value as Category)}>{STUDIO_CATEGORIES.map(value => <option key={value} value={value}>{t.idea.kinds[value]}</option>)}</select></label>
-    <h2>{t.idea.suggestions}</h2><button className="suggestion" onClick={() => props.chooseSuggestion(t.idea.landing, 'landing-page')}>{t.idea.landing}</button><button className="suggestion" onClick={() => props.chooseSuggestion(t.idea.catalog, 'catalog')}>{t.idea.catalog}</button><button className="suggestion" onClick={() => props.chooseSuggestion(t.idea.formDatabase, 'form-database')}>{t.idea.formDatabase}</button><button className="suggestion" onClick={() => props.chooseSuggestion(t.idea.crudPanel, 'crud-panel')}>{t.idea.crudPanel}</button><button className="suggestion" onClick={() => props.chooseSuggestion(t.idea.scheduling, 'scheduling')}>{t.idea.scheduling}</button><button className="suggestion" onClick={() => props.chooseSuggestion(t.idea.dashboard, 'dashboard')}>{t.idea.dashboard}</button><button className="suggestion" onClick={() => props.chooseSuggestion(t.idea.saas, 'saas-authenticated')}>{t.idea.saas}</button><p className="coming">{t.idea.betaNotice}</p>
+    <h2>{t.idea.suggestions}</h2>
+    {/* O aviso de que três destas sugestões são protótipos iniciais ficava
+        SOZINHO embaixo das sete, depois do ponto de decisão, e exigia que a
+        pessoa casasse três palavras com três dos sete botões. O selo vai no
+        próprio cartão, onde ela escolhe. */}
+    {SUGGESTIONS.map(([text, category, early]) => <button key={category} className="suggestion" onClick={() => props.chooseSuggestion(text, category)}>
+      {text}{early ? <span className="badge-beta">{t.idea.betaBadge}</span> : null}
+    </button>)}
+    <p className="coming">{t.idea.betaNotice}</p>
     <h2>{t.design.title}</h2><p className="coming">{t.design.subtitle}</p><div className="design-grid">{presets.map(([value, label, detail]) => <button type="button" key={value} className={props.designPreset === value ? 'design-card selected' : 'design-card'} aria-pressed={props.designPreset === value} onClick={() => props.setDesignPreset(value)}><strong>{label}</strong><span>{detail}</span></button>)}</div>
     <button type="button" className="advanced" aria-expanded={props.showDesignAdvanced} onClick={() => props.setShowDesignAdvanced(!props.showDesignAdvanced)}>{props.showDesignAdvanced ? t.design.hideAdvanced : t.design.advanced}</button>
     {props.showDesignAdvanced ? <section className="design-advanced">

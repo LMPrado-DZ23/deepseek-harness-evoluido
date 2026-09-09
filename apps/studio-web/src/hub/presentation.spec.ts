@@ -13,7 +13,11 @@ describe('hub presentation', () => {
   it('asks for a confirmation only when the server says so, and says what T3 costs', () => {
     expect(approvalNote({ requires_approval_tier: null })).toBeNull()
     expect(approvalNote({})).toBeNull()
-    expect(approvalNote({ requires_approval_tier: 'T2' })).toContain('T2')
+    // A pessoa lê o NOME do nível, não o código: "T2" não significa nada para
+    // quem não programa, e a tradução já existia no catálogo — só não era usada
+    // justamente na frase que pede a confirmação.
+    expect(approvalNote({ requires_approval_tier: 'T2' })).toContain(t.integrations.tier.T2.toLowerCase())
+    expect(approvalNote({ requires_approval_tier: 'T2' })).not.toContain('T2')
     expect(approvalPrompt('T2')).toBe(t.confirm.T2)
     expect(approvalPrompt('T3')).toBe(t.confirm.T3)
     expect(approvalPrompt('T3')).toContain('chave de acesso')
@@ -62,7 +66,14 @@ describe('hub presentation', () => {
 
   it('translates every kind, tier, action and outcome the server can send', () => {
     for (const kind of ['smtp', 'mcp', 'skill', 'webhook']) expect(kindLabel(kind)).not.toBe(kind)
-    for (const tier of ['T0', 'T1', 'T2', 'T3']) expect(tierLabel(tier)).toMatch(new RegExp(`^${tier} — .+`, 'u'))
+    // O código do nível NÃO chega à tela: ele é vocabulário de política, e a
+    // pessoa lê o que ele significa.
+    for (const tier of ['T0', 'T1', 'T2', 'T3'] as const) {
+      expect(tierLabel(tier)).toBe(t.integrations.tier[tier].toLowerCase())
+      expect(tierLabel(tier)).not.toContain(tier)
+    }
+    // Um nível que o catálogo não conhece devolve o código: calar seria pior.
+    expect(tierLabel('T9')).toBe('T9')
     for (const action of ['smtp.configured', 'smtp.tested', 'integration.registered', 'integration.enabled', 'integration.disabled', 'export.created', 'approval.recorded']) expect(actionLabel(action)).not.toBe(action)
     for (const outcome of ['success', 'failure', 'not-executed']) expect(outcomeLabel(outcome)).not.toBe(outcome)
     expect(verificationLabel('verified')).toBe(t.integrations.verified)
