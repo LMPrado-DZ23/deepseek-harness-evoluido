@@ -38,6 +38,7 @@ const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
 export const RLS_MIGRATED: readonly { readonly domain: string; readonly repository: string }[] = [
   { domain: 'studio_action_approvals', repository: 'plugins/action-approval/src/tenant-repository.ts' },
   { domain: 'studio_integrations', repository: 'plugins/integration-hub/src/tenant-repository.ts' },
+  { domain: 'studio_intake_turns', repository: 'plugins/prompt-to-app/src/intake-turn-store.ts' },
 ]
 
 /**
@@ -48,7 +49,7 @@ export const RLS_MIGRATED: readonly { readonly domain: string; readonly reposito
  * lista consigo mesma passaria sempre, inclusive quando alguém apagasse uma
  * linha dela.
  */
-export const RLS_MIGRATED_FLOOR = 2
+export const RLS_MIGRATED_FLOOR = 3
 
 /**
  * Por que cada domínio pendente ainda NÃO migrou.
@@ -104,7 +105,6 @@ export const PENDING_CLASSIFICATION: Readonly<Record<string, PendingClassificati
   studio_projects: { category: 'startup-reconciliation', reason: 'reconcileInterruptedExecutions() (service.ts:311) le TODOS os projetos e TODAS as execucoes sem ator, no start do plugin, e ESCREVE em cima; uma credencial escopada nao enxerga essa varredura', evidence: { file: 'plugins/prompt-to-app/src/service.ts', symbol: 'reconcileInterruptedExecutions' } },
   studio_app_specs: { category: 'startup-reconciliation', reason: 'a varredura de inicio NAO le esta tabela, mas ela vive no MESMO PromptToAppRepository, cujas leituras sao sincronas e sem escopo (projects(), specs(), ...); migrar uma sem as outras parte o repositorio em dois donos', evidence: { file: 'plugins/prompt-to-app/src/service.ts', symbol: 'reconcileInterruptedExecutions' } },
   studio_design_specs: { category: 'startup-reconciliation', reason: 'idem studio_app_specs: fora da varredura, dentro do mesmo repositorio', evidence: { file: 'plugins/prompt-to-app/src/service.ts', symbol: 'reconcileInterruptedExecutions' } },
-  studio_intake_turns: { category: 'startup-reconciliation', reason: 'idem studio_app_specs: fora da varredura, dentro do mesmo repositorio', evidence: { file: 'plugins/prompt-to-app/src/service.ts', symbol: 'reconcileInterruptedExecutions' } },
   studio_plans: { category: 'startup-reconciliation', reason: 'idem studio_app_specs: fora da varredura, dentro do mesmo repositorio', evidence: { file: 'plugins/prompt-to-app/src/service.ts', symbol: 'reconcileInterruptedExecutions' } },
   studio_runs: { category: 'startup-reconciliation', reason: 'a varredura de inicio le as execucoes PENDING e RUNNING de TODOS os inquilinos e as marca FAILED', evidence: { file: 'plugins/prompt-to-app/src/service.ts', symbol: 'reconcileInterruptedExecutions' } },
   studio_evidence: { category: 'startup-reconciliation', reason: 'idem studio_app_specs: fora da varredura, dentro do mesmo repositorio', evidence: { file: 'plugins/prompt-to-app/src/service.ts', symbol: 'reconcileInterruptedExecutions' } },
@@ -127,8 +127,19 @@ export const PENDING_CLASSIFICATION: Readonly<Record<string, PendingClassificati
 
   studio_staging_releases: { category: 'cross-tenant-invariant', reason: 'reserveRelease prende o destino FISICO ao primeiro escopo que o reservou e recusa outro (active-conflict); ver essa colisao exige ler releases de OUTROS inquilinos, que a RLS impede por desenho', evidence: { file: 'plugins/staging/src/service.ts', symbol: 'reserveRelease' } },
 
-  studio_previews: { category: 'needs-review', reason: 'ha um CapacityGovernor global; falta conferir se o dominio em si tem invariante entre inquilinos ou se e so a capacidade' },
-  studio_preview_admissions: { category: 'needs-review', reason: 'idem studio_previews' },
+  // Conferido (set/2026), e a resposta NAO era a capacidade global.
+  //
+  // `authorize(hostname, cookie)` roda no portao da previa, em toda requisicao
+  // que chega em `<algo>.preview.<host>`, e procura a previa PELO NOME DE HOST,
+  // sem ator e sem escopo. E ele nao pode ter escopo: o inquilino e justamente
+  // o que essa busca esta DESCOBRINDO. Filtrar por inquilino aqui seria pedir a
+  // resposta antes da pergunta - a mesma circularidade de `studio_identity_*`.
+  //
+  // O `CapacityGovernor` global existe e nao e o motivo: ele e um limite de
+  // recursos, e um limite pode ser distribuido por fora sem que a tabela deixe
+  // de ser filtravel. Se fosse so isso, estas duas migrariam.
+  studio_previews: { category: 'tenant-resolution', reason: 'authorize() acha a previa PELO NOME DE HOST, sem ator, no portao: o inquilino e o que essa busca descobre, e filtrar por ele seria circular', evidence: { file: 'plugins/preview/src/service.ts', symbol: 'authorize' } },
+  studio_preview_admissions: { category: 'tenant-resolution', reason: 'a admissao e lida no mesmo authorize(), por preview_id e cookie, antes de qualquer escopo existir', evidence: { file: 'plugins/preview/src/service.ts', symbol: 'authorize' } },
 }
 
 /**
@@ -196,9 +207,17 @@ export function evidenceFindings(
   entry: PendingClassification,
   readSource: (path: string) => string | undefined,
 ): readonly string[] {
-  if (!CATEGORIES_REQUIRING_EVIDENCE.includes(entry.category)) return []
   const evidence = entry.evidence
-  if (evidence === undefined) return [`classificação ${entry.category} de ${name} sem citação de arquivo e símbolo`]
+  // A citação é EXIGIDA nas categorias que afirmam um fato sobre o código, e
+  // CONFERIDA sempre que existir. A regra antiga só olhava as exigidas, e isso
+  // deixava uma porta aberta: uma classificação de `tenant-resolution` podia
+  // citar um arquivo que não existe e ninguém percebia — a citação errada é
+  // pior que a ausência dela, porque parece prova.
+  if (evidence === undefined) {
+    return CATEGORIES_REQUIRING_EVIDENCE.includes(entry.category)
+      ? [`classificação ${entry.category} de ${name} sem citação de arquivo e símbolo`]
+      : []
+  }
   const source = readSource(evidence.file)
   if (source === undefined) return [`a citação de ${name} aponta para um arquivo que não existe: ${evidence.file}`]
   if (!source.includes(evidence.symbol)) {

@@ -33,6 +33,7 @@ import {
   type StudioRun,
 } from './model.js'
 import { IntakeEngine } from './intake.js'
+import type { IntakeTurnRecordStore } from './intake-turn-store.js'
 import { ModelCodeGenerator, PromptToAppPipeline } from './pipeline.js'
 import { PlannerEngine } from './planner.js'
 import { HarnessPromptModel } from './ports.js'
@@ -56,6 +57,7 @@ export * from './import-policy.js'
 export * from './acceptance.js'
 export * from './http.js'
 export * from './intake.js'
+export * from './intake-turn-store.js'
 export * from './jobs.js'
 export * from './model.js'
 export * from './planner.js'
@@ -82,6 +84,23 @@ export interface PromptToAppPluginConfig {
    * quer previsibilidade de gasto configura aqui.
    */
   readonly generationTokenBudget?: number
+  /**
+   * Onde as RESPOSTAS do intake ficam guardadas.
+   *
+   * `kv` é o padrão e é a chave-valor de sempre. `rls` põe este domínio em
+   * tabela por inquilino, com a política do banco recusando o que não é do
+   * escopo — defesa em profundidade sobre o filtro que o produto já faz.
+   *
+   * O padrão NÃO muda sozinho, e isso é deliberado: uma instalação que já roda
+   * não pode trocar de autoridade de armazenamento porque atualizou. Quem opera
+   * decide, e decide aqui.
+   *
+   * Pedir `rls` sem o armazenamento por inquilino disponível FALHA ALTO, em vez
+   * de cair calado para a chave-valor: uma instalação que pediu isolamento no
+   * banco e recebeu isolamento só por código acreditaria ter uma garantia que
+   * não tem.
+   */
+  readonly intakeTurnStorage?: 'kv' | 'rls'
   readonly logoStoreRoot?: string
   readonly builderLifecycle?: {
     readonly registryReference?: `file:${string}`
@@ -136,6 +155,23 @@ class DomainPromptToAppRepository implements PromptToAppRepository {
 
 function tableValues<T>(table: KvTable<PromptToAppKey, T>): T[] { return [...table.entries()].map(([, value]) => value) }
 
+/**
+ * O armazenamento por inquilino das respostas, quando ele foi PEDIDO e existe.
+ *
+ * Falha alto quando foi pedido e não existe: cair calado para a chave-valor
+ * daria a uma instalação a impressão de ter isolamento no banco sem tê-lo, e
+ * essa é a espécie de silêncio que só aparece num incidente.
+ * @param ctx - o contexto, de onde sai o armazenamento por inquilino.
+ * @param config - a configuração do plugin.
+ * @returns a opção pronta para o serviço, ou nada.
+ */
+function intakeTurnStoreOption(ctx: Context, config: PromptToAppPluginConfig): { readonly intakeTurnStore?: IntakeTurnRecordStore } {
+  if ((config.intakeTurnStorage ?? 'kv') === 'kv') return {}
+  const records = ctx.get('studioTenantStorage')?.records as IntakeTurnRecordStore | undefined
+  if (records === undefined) throw new Error('INTAKE_TURN_TENANT_STORAGE_UNAVAILABLE')
+  return { intakeTurnStore: records }
+}
+
 export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}): Promise<void> {
   const [projects, specs, designs, turns, plans, runs, evidence, approvals]: [
     Domain<typeof studioProjectsDomainSpec>, Domain<typeof studioAppSpecsDomainSpec>,
@@ -156,7 +192,7 @@ export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}):
     projects.table('projects'), specs.table('specs'), designs.table('designs'), turns.table('turns'), plans.table('plans'),
     runs.table('runs'), evidence.table('evidence'), approvals.table('approvals'),
   )
-  const service = new PromptToAppService({ repository })
+  const service = new PromptToAppService({ repository, ...intakeTurnStoreOption(ctx, config) })
   await service.reconcileInterruptedExecutions()
   const model = new HarnessPromptModel({
     llm: ctx.llm,

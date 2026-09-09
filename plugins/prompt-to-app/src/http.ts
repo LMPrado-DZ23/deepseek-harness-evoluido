@@ -209,7 +209,7 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
           : []
         return json(response, 200, {
           project,
-          turns: config.service.intakeTurns(actor, projectId),
+          turns: await config.service.intakeTurns(actor, projectId),
           plan: optional(() => config.service.plan(actor, projectId)),
           design: optional(() => config.service.latestDesign(actor, projectId)),
           runs,
@@ -356,7 +356,7 @@ async function answerIntake(
   projectId: string,
 ): Promise<void> {
   const input = answerSchema.parse(await readJson(request))
-  const conversation = conversationFor(config.service, actor, projectId)
+  const conversation = await conversationFor(config.service, actor, projectId)
   const question = nextIntakeQuestion(conversation)
   if (question === undefined) throw new PromptToAppError('REPLAY', t('errors.questionsAnswered'))
   if (question.id === 'sensitive-confirmation') {
@@ -381,7 +381,7 @@ async function answerIntake(
     })
   }
 
-  const updated = conversationFor(config.service, actor, projectId)
+  const updated = await conversationFor(config.service, actor, projectId)
   const next = nextIntakeQuestion(updated)
   if (next !== undefined) return json(response, 200, { next })
   const built = await config.intake.buildSpec(updated)
@@ -389,9 +389,9 @@ async function answerIntake(
   return json(response, 201, { spec, next: null })
 }
 
-function conversationFor(service: PromptToAppService, actor: PromptToAppActor, projectId: string): IntakeConversation {
+async function conversationFor(service: PromptToAppService, actor: PromptToAppActor, projectId: string): Promise<IntakeConversation> {
   const project = service.project(actor, projectId)
-  const turns = service.intakeTurns(actor, projectId)
+  const turns = await service.intakeTurns(actor, projectId)
   const answers = Object.fromEntries(turns.filter(turn => turn.question_id !== 'sensitive-confirmation').map(turn => [turn.question_id, turn.answer]))
   const sensitive = turns.find(turn => turn.question_id === 'sensitive-confirmation')
   return {

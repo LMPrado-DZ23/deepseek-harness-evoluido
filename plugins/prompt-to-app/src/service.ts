@@ -9,6 +9,7 @@ import type {
 } from './model.js'
 import { assertProjectTransition, assertUndoTransition } from './state.js'
 import { appendPlanSlice, applyPlanEdit, planRevision, PlanEditError, type PlanEdit } from './plan-edit.js'
+import { listIntakeTurns, putIntakeTurn, type IntakeTurnRecordStore } from './intake-turn-store.js'
 import { latestGreenCheckpoint, noGreenReason, runCheckpoints, type CheckpointBlocker, type RunCheckpoint, NO_ATTEMPT } from './checkpoint.js'
 import { t } from './i18n.js'
 
@@ -47,16 +48,31 @@ export interface PromptToAppServiceOptions {
   readonly repository: PromptToAppRepository
   readonly now?: () => Date
   readonly createId?: () => string
+  /**
+   * O armazenamento por inquilino das RESPOSTAS do intake, quando existir.
+   *
+   * Ausente é o padrão, e ausente quer dizer chave-valor — o mesmo caminho de
+   * sempre. Uma instalação que já roda NÃO pode mudar de autoridade de
+   * armazenamento porque atualizou: isso é decisão de quem opera, e ela é
+   * tomada na configuração do plugin.
+   *
+   * Só este domínio por enquanto, e de propósito: é o primeiro passo do plano
+   * do `S-08`, escolhido por ser o de menor superfície (dois pontos no serviço
+   * inteiro) e por não participar da geração.
+   */
+  readonly intakeTurnStore?: IntakeTurnRecordStore
 }
 
 export class PromptToAppService {
   readonly #repository: PromptToAppRepository
   readonly #now: () => Date
   readonly #createId: () => string
+  readonly #intakeTurnStore: IntakeTurnRecordStore | undefined
   constructor(options: PromptToAppServiceOptions) {
     this.#repository = options.repository
     this.#now = options.now ?? (() => new Date())
     this.#createId = options.createId ?? randomUUID
+    this.#intakeTurnStore = options.intakeTurnStore
   }
 
   assertAuthorized(actor: PromptToAppActor, permission: 'project.read' | 'project.write'): void {
@@ -91,9 +107,33 @@ export class PromptToAppService {
     return value
   }
 
-  intakeTurns(actor: PromptToAppActor, projectId: string): readonly StudioIntakeTurn[] {
+  /**
+   * As respostas do intake deste projeto.
+   *
+   * ASSÍNCRONA desde setembro/2026, e ela ainda lê a mesma chave-valor de
+   * sempre. A troca de forma veio PRIMEIRO, de propósito: é o passo do plano do
+   * `S-08` que não muda armazenamento nenhum e por isso não pode quebrar nada
+   * que os testes não apanhem na hora — o `tsc` aponta cada ponto que precisa
+   * esperar, um por um.
+   *
+   * Uma leitura com RLS é assíncrona e recebe o ator; esta já é as duas coisas.
+   * Quando o repositório por inquilino entrar, o que muda é de onde os dados
+   * vêm — e não a assinatura de quem os pede, que é o tipo de mudança que
+   * costuma arrastar meia base de código de uma vez só.
+   * @param actor - quem lê; o escopo sai daqui.
+   * @param projectId - o projeto.
+   * @returns as respostas, na ordem em que foram gravadas.
+   */
+  async intakeTurns(actor: PromptToAppActor, projectId: string): Promise<readonly StudioIntakeTurn[]> {
     this.project(actor, projectId)
-    return this.#repository.turns().filter(value => value.project_id === projectId && this.#sameScope(actor, value))
+    // O filtro de escopo do produto continua AQUI, com ou sem RLS. Trocar uma
+    // guarda pela outra seria andar de lado: a RLS protege do dia em que
+    // alguém escrever uma consulta nova e esquecer o `where`, e o filtro
+    // protege do dia em que a política do banco não estiver onde se pensava.
+    const rows = this.#intakeTurnStore === undefined
+      ? this.#repository.turns()
+      : await listIntakeTurns(this.#intakeTurnStore, { orgId: actor.orgId, tenantId: actor.tenantId })
+    return rows.filter(value => value.project_id === projectId && this.#sameScope(actor, value))
   }
 
   async recordTurn(actor: PromptToAppActor, projectId: string, input: Pick<StudioIntakeTurn, 'question_id' | 'question' | 'answer' | 'recommended' | 'route' | 'model'>): Promise<StudioIntakeTurn> {
@@ -102,7 +142,9 @@ export class PromptToAppService {
       turn_id: this.#createId(), project_id: projectId, org_id: actor.orgId, tenant_id: actor.tenantId,
       ...input, created_at: this.#now().toISOString(),
     }
-    await this.#repository.putTurn(value); return value
+    if (this.#intakeTurnStore === undefined) await this.#repository.putTurn(value)
+    else await putIntakeTurn(this.#intakeTurnStore, value)
+    return value
   }
 
   async saveSpec(actor: PromptToAppActor, projectId: string, spec: AppSpecV1, origin: 'intake' | 'edit'): Promise<StudioAppSpecRecord> {

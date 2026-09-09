@@ -69,7 +69,7 @@ describe('PromptToAppService', () => {
     expect(service.project(ownerA, project.project_id).state).toBe('PLAN_APPROVED')
     expect(repository.approvalRows.some(row => row.subject === 'plan' && row.tier === 'T1')).toBe(true)
     expect(repository.approvalRows.filter(row => row.subject === 'transition').map(row => row.to_state)).toEqual(['SPEC_READY', 'PLAN_PROPOSED', 'PLAN_APPROVED'])
-    expect(service.intakeTurns(ownerA, project.project_id)).toHaveLength(1)
+    expect(await service.intakeTurns(ownerA, project.project_id)).toHaveLength(1)
     expect(service.latestSpec(ownerA, project.project_id).version).toBe(1)
   })
 
