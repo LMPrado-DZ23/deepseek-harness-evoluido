@@ -23,7 +23,7 @@ type Plan = { revision?: number; edited_by_person?: boolean; slices: Array<{ sli
 type AcceptanceCheck = { id: string; label: string; status: 'PENDING' | 'PASSED' | 'FAILED' | 'NOT_AUTOMATED' }
 type VerificationCode = { email: string; code: string; expires_at: string }
 type PipelineResult = { state: 'VERIFIED_PROTOTYPE' | 'BUILD_FAILED' | 'TESTS_FAILED' | 'BLOCKED_EXTERNAL' | 'CANCELLED' | 'INTERRUPTED'; attempts: number; message: string; checks?: AcceptanceCheck[]; verificationCodes?: VerificationCode[] }
-type ProjectDetails = { project: { state: ProjectUiState }; current_run: null | { operation_id: string; state: 'PENDING' | 'RUNNING' | 'PASSED' | 'FAILED' | 'BLOCKED_EXTERNAL' | 'BUDGET_EXCEEDED' | 'CANCELLED'; stage: string; attempt: number; failure_code: string | null; acceptance_checks: AcceptanceCheck[]; verification_codes?: VerificationCode[] } }
+type ProjectDetails = { project: { state: ProjectUiState }; plan?: Plan | null; current_run: null | { operation_id: string; state: 'PENDING' | 'RUNNING' | 'PASSED' | 'FAILED' | 'BLOCKED_EXTERNAL' | 'BUDGET_EXCEEDED' | 'CANCELLED'; stage: string; attempt: number; failure_code: string | null; acceptance_checks: AcceptanceCheck[]; verification_codes?: VerificationCode[] } }
 type Preview = { preview_id: string; state: 'REQUESTED' | 'STARTING' | 'READY' | 'STOPPING' | 'STOPPED' | 'FAILED' | 'EXPIRED'; health: 'PENDING' | 'OK' | 'DOWN'; url: string; expires_at: string }
 /**
  * O acesso do botão de emergência à rota, criado UMA vez fora do componente.
@@ -95,6 +95,34 @@ export function App() {
     void currentSessionMode().then(mode => { if (active) setAuthenticatedSession(mode === 'authenticated') })
     return () => { active = false }
   }, [])
+  /**
+   * Um projeto sobrevive a recarregar a página.
+   *
+   * O identificador do projeto só existia na memória desta tela: recarregar,
+   * clicar em qualquer item do menu (que navega de verdade, com recarga) ou
+   * fechar a aba sem querer apagava o trabalho inteiro da vista — e não há
+   * "Meus projetos" para reencontrá-lo. Agora ele fica no endereço, e a tela o
+   * lê ao abrir.
+   *
+   * A restauração é DELIBERADAMENTE parcial: ela só assume o projeto quando
+   * existe plano ou execução, ou seja, quando há para onde a pessoa voltar.
+   * Restaurar no meio das perguntas deixaria a tela sem a próxima pergunta e a
+   * pessoa presa numa etapa sem saída - pior do que recomeçar.
+   */
+  useEffect(() => {
+    const saved = savedProjectOf(window.location.href)
+    if (saved === null) return
+    let active = true
+    void api<ProjectDetails>(`/projects/${saved}`).then(details => {
+      if (!active) return
+      const plan = details.plan ?? null
+      if (plan === null && details.current_run === null) { forgetSavedProject(); return }
+      setProjectId(saved)
+      setProjectState(details.project.state)
+      setPlan(plan)
+    }).catch(() => { if (active) forgetSavedProject() })
+    return () => { active = false }
+  }, [])
   useEffect(() => { void api<HealthState>('/health').then(value => { setHealth(value); setRoute(value.route) }).catch((cause: unknown) => {
     const message = apiFailureMessage(cause, navigator.onLine, 'read')
     if (message !== undefined) setError(message)
@@ -159,7 +187,7 @@ export function App() {
       const created = await api<{ project: { project_id: string; state: ProjectUiState }; next: Question }>('/projects', {
         method: 'POST', body: JSON.stringify({ name: brief.trim().slice(0, 60), original_brief: brief.trim(), category, privacy }),
       })
-      setProjectId(created.project.project_id); setProjectState(created.project.state); setQuestion(created.next)
+      setProjectId(created.project.project_id); rememberProject(created.project.project_id); setProjectState(created.project.state); setQuestion(created.next)
       await api(`/projects/${created.project.project_id}/design`, {
         method: 'POST', body: JSON.stringify({ preset: designPreset, ...(designPreset === 'brand' ? { primary: hexToHsl(brandColor) } : {}), font, radius, density, tone }),
       })
@@ -220,10 +248,35 @@ export function App() {
     setProjectState('GENERATING')
     await safely(() => pollProject(started.runId), 'read')
   }
+  /**
+   * Acompanha uma criação até ela terminar.
+   *
+   * Duas coisas aqui já foram erradas e viraram regra. A primeira: o limite era
+   * de 1800 voltas de 250 ms — 7 min e meio de espera para uma execução que
+   * pode levar mais de 9 (três tentativas de 180 s), e ao estourar a tela dizia
+   * `verification.failure`, isto é, culpava uma verificação que nunca reprovou.
+   * Agora o limite é de RELÓGIO, folgado, e o que ele diz é a verdade: esta
+   * tela perdeu o acompanhamento, a criação segue no computador.
+   *
+   * A segunda: uma única leitura que falhasse (rede oscilando, servidor
+   * reiniciando) encerrava o acompanhamento para sempre. Agora ela tolera
+   * falhas seguidas e só desiste quando elas param de ser exceção.
+   */
   async function pollProject(runId: string) {
     if (projectId === null) return
-    for (let poll = 0; poll < 1_800; poll++) {
-      const details = await api<ProjectDetails>(`/projects/${projectId}`)
+    const deadline = Date.now() + 30 * 60_000
+    let consecutiveFailures = 0
+    while (Date.now() < deadline) {
+      let details: ProjectDetails
+      try {
+        details = await api<ProjectDetails>(`/projects/${projectId}`)
+        consecutiveFailures = 0
+      } catch (cause) {
+        consecutiveFailures += 1
+        if (consecutiveFailures > 20) throw cause
+        await new Promise(resolve => setTimeout(resolve, 1_000))
+        continue
+      }
       const current = details.current_run
       if (current?.operation_id !== runId) {
         await new Promise(resolve => setTimeout(resolve, 250))
@@ -253,7 +306,7 @@ export function App() {
       }
       await new Promise(resolve => setTimeout(resolve, 250))
     }
-    throw new Error(t.verification.failure)
+    throw new Error(t.verification.followLost)
   }
   async function refreshCheckpoints() {
     if (projectId === null) return
@@ -399,4 +452,37 @@ function hexToHsl(hex: string): { h: number; s: number; l: number } {
   if (delta !== 0) h = max === r ? 60 * (((g - b) / delta) % 6) : max === g ? 60 * ((b - r) / delta + 2) : 60 * ((r - g) / delta + 4)
   const s = delta === 0 ? 0 : delta / (1 - Math.abs(2 * l - 1))
   return { h: Math.round((h + 360) % 360), s: Math.round(s * 100), l: Math.round(l * 100) }
+}
+
+/**
+ * O endereço com — ou sem — o projeto aberto.
+ *
+ * É função pura de propósito: o endereço é a única memória do projeto entre
+ * uma recarga e outra, e uma regra dessas tem de poder ser conferida por teste
+ * sem navegador.
+ * @param href - o endereço atual, inteiro.
+ * @param projectId - o projeto a guardar, ou `null` para tirá-lo.
+ * @returns o novo endereço, preservando o que já estava nele.
+ */
+export function projectAddress(href: string, projectId: string | null): string {
+  const url = new URL(href)
+  if (projectId === null || projectId === '') url.searchParams.delete('projeto')
+  else url.searchParams.set('projeto', projectId)
+  return url.toString()
+}
+
+/** O projeto guardado num endereço, ou `null` quando não há. */
+export function savedProjectOf(href: string): string | null {
+  const value = new URL(href).searchParams.get('projeto')
+  return value === null || value === '' ? null : value
+}
+
+/** Guarda o projeto aberto no endereço, sem empilhar história do navegador. */
+function rememberProject(projectId: string): void {
+  window.history.replaceState(null, '', projectAddress(window.location.href, projectId))
+}
+
+/** Tira o projeto do endereço quando ele não pode mais ser retomado. */
+function forgetSavedProject(): void {
+  window.history.replaceState(null, '', projectAddress(window.location.href, null))
 }

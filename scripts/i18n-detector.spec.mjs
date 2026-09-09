@@ -48,4 +48,17 @@ describe('detector de texto pt-BR do portão de i18n', () => {
       'SELECT count(*) AS total FROM auth_users',
     ]) expect(portugueseText(texto), texto).toBe(false)
   })
+
+  it('não confunde identificador de uma palavra com frase da pessoa', () => {
+    // `'projeto'` é o nome de um parâmetro de endereço e `'equilibrado'` é um
+    // perfil que o produto compara por valor. Mandá-los para o catálogo seria
+    // guardar CHAVE DE DADO num catálogo de texto — e o portão que exige isso
+    // é o portão que alguém desliga.
+    for (const identificador of ['projeto', 'equilibrado', 'melhor-qualidade', 'privado-local', 'EXCLUIDOS.txt']) {
+      expect(portugueseText(identificador), identificador).toBe(false)
+    }
+    // Mas uma palavra ACENTUADA sozinha continua sendo texto: ela não tem como
+    // ser identificador neste código.
+    expect(portugueseText('Verificação')).toBe(true)
+  })
 })

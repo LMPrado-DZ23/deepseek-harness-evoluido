@@ -43,9 +43,14 @@ const portugueseEndings = /\b(?:\w{4,}mente|\w{3,}(?:cao|coes|ncia|dade|agem|men
 
 export function portugueseText(value) {
   if (/[\u00e1\u00e9\u00ed\u00f3\u00fa\u00e0\u00e2\u00ea\u00f4\u00e3\u00f5\u00e7]/iu.test(value)) return true
+  // A lista de palavras e a de terminações só valem em literal com ESPAÇO.
+  // Palavra solta é identificador: `'projeto'` é o nome de um parâmetro de
+  // endereço, `'equilibrado'` é um perfil que o produto compara por valor, e
+  // reprová-los mandaria o código guardar chave de dado no catálogo de texto.
+  if (!/\s/u.test(value)) return false
   if (/\b(projeto|plano|cria\u00e7\u00e3o|verifica\u00e7\u00e3o|pergunta|servi\u00e7os|diret\u00f3rio|arquivo|modelo|confirma\u00e7\u00e3o|solicita\u00e7\u00e3o|produza|caminhos|gere)\b/iu.test(value)) return true
   if (strongWords.test(value)) return true
-  if (/\s/u.test(value) && portugueseEndings.test(value)) return true
+  if (portugueseEndings.test(value)) return true
   const distinct = new Set([...(value.match(weakWords) ?? [])].map(word => word.toLowerCase()))
   return distinct.size >= 2
 }

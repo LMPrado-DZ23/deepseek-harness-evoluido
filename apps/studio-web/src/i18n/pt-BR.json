@@ -176,7 +176,8 @@
     "blockedExternal": "A criação parou porque falta algo fora do Studio — normalmente um serviço que ainda não está disponível neste computador.",
     "technicalTitle": "Detalhes técnicos",
     "technicalCode": "Código do estado",
-    "technicalFailure": "Código da falha"
+    "technicalFailure": "Código da falha",
+    "followLost": "Esta tela parou de acompanhar a criação. Ela pode continuar no seu computador — atualize a página para ver em que ponto está."
   },
   "emergency": {
     "title": "Parada de emergência",
@@ -261,7 +262,8 @@
   "truth": {
     "idea": "O Studio cria um protótipo no seu computador. Ele não publica nada na internet.",
     "creation": "Estamos criando e testando um protótipo local. Ele ainda não foi verificado nem publicado.",
-    "verified": "Protótipo verificado — não está publicado nem disponível para outras pessoas"
+    "verified": "Protótipo verificado — não está publicado nem disponível para outras pessoas",
+    "unverified": "Este protótipo não foi verificado. Ele continua no seu computador e não está publicado."
   },
   "mobile": {
     "title": "Seu projeto está avançando",

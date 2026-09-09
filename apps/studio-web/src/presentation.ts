@@ -2,7 +2,7 @@ export type ProjectUiState =
   | 'DRAFT' | 'SPEC_READY' | 'PLAN_PROPOSED' | 'PLAN_APPROVED' | 'GENERATING'
   | 'BUILD_OK' | 'BUILD_FAILED' | 'TESTS_OK' | 'TESTS_FAILED' | 'CANCELLED' | 'INTERRUPTED' | 'VERIFIED_PROTOTYPE'
 
-export type PermanentTruthKind = 'creation' | 'verified' | null
+export type PermanentTruthKind = 'creation' | 'unverified' | 'verified' | null
 
 export function currentStepIndex(state: ProjectUiState | null): number {
   if (state === null) return 0
@@ -12,11 +12,32 @@ export function currentStepIndex(state: ProjectUiState | null): number {
   return 4
 }
 
+/**
+ * A frase permanente sob as etapas — e ela responde pelo ESTADO, não pela etapa.
+ *
+ * Antes ela vinha do índice da etapa, e a etapa 4 é "Verificação": chegar lá
+ * bastava para a tela escrever "Protótipo verificado". `TESTS_FAILED` e
+ * `CANCELLED` também chegam à etapa 4. Ou seja: o teste reprovou, ou a pessoa
+ * cancelou, e a tela dizia que o protótipo estava verificado. Era a única
+ * afirmação permanente da tela, e era falsa exatamente quando mais importava.
+ *
+ * Verificado é só `VERIFIED_PROTOTYPE`, que é o estado que tem atestação.
+ * `TESTS_OK` ainda está a caminho dela. O que falhou ou foi cancelado diz o que
+ * é: não verificado.
+ *
+ * A tabela é exaustiva de propósito: um estado novo no tipo não compila até
+ * alguém dizer o que ele afirma para a pessoa.
+ */
+const TRUTH_BY_STATE: Readonly<Record<ProjectUiState, PermanentTruthKind>> = {
+  DRAFT: null, SPEC_READY: null, PLAN_PROPOSED: null,
+  PLAN_APPROVED: 'creation', GENERATING: 'creation', BUILD_OK: 'creation',
+  BUILD_FAILED: 'creation', INTERRUPTED: 'creation', TESTS_OK: 'creation',
+  TESTS_FAILED: 'unverified', CANCELLED: 'unverified',
+  VERIFIED_PROTOTYPE: 'verified',
+}
+
 export function permanentTruthKind(state: ProjectUiState | null): PermanentTruthKind {
-  const step = currentStepIndex(state)
-  if (step === 3) return 'creation'
-  if (step === 4) return 'verified'
-  return null
+  return state === null ? null : TRUTH_BY_STATE[state]
 }
 
 /**

@@ -12,16 +12,27 @@ describe('truthful presentation for nontechnical users', () => {
     for (const [state, step] of Object.entries(expected)) expect(currentStepIndex(state as ProjectUiState)).toBe(step)
   })
 
-  it('shows the permanent prototype notice only during creation and verification', () => {
+  // A afirmação permanente é conferida em TODO estado, e não numa amostra: a
+  // versão anterior testava nove dos doze e os três que faltavam eram
+  // justamente `TESTS_FAILED`, `CANCELLED` e `PLAN_APPROVED` — os dois
+  // primeiros diziam "Protótipo verificado" depois de o teste reprovar ou de a
+  // pessoa cancelar.
+  it('só chama de verificado o que tem verificação, e diz o resto como é', () => {
+    const expected: Record<ProjectUiState, ReturnType<typeof permanentTruthKind>> = {
+      DRAFT: null, SPEC_READY: null, PLAN_PROPOSED: null,
+      PLAN_APPROVED: 'creation', GENERATING: 'creation', BUILD_OK: 'creation',
+      BUILD_FAILED: 'creation', INTERRUPTED: 'creation', TESTS_OK: 'creation',
+      TESTS_FAILED: 'unverified', CANCELLED: 'unverified',
+      VERIFIED_PROTOTYPE: 'verified',
+    }
     expect(permanentTruthKind(null)).toBeNull()
-    expect(permanentTruthKind('DRAFT')).toBeNull()
-    expect(permanentTruthKind('SPEC_READY')).toBeNull()
-    expect(permanentTruthKind('PLAN_PROPOSED')).toBeNull()
-    expect(permanentTruthKind('GENERATING')).toBe('creation')
-    expect(permanentTruthKind('BUILD_FAILED')).toBe('creation')
-    expect(permanentTruthKind('INTERRUPTED')).toBe('creation')
-    expect(permanentTruthKind('TESTS_OK')).toBe('verified')
-    expect(permanentTruthKind('VERIFIED_PROTOTYPE')).toBe('verified')
+    for (const [state, truth] of Object.entries(expected)) {
+      expect(permanentTruthKind(state as ProjectUiState), state).toBe(truth)
+    }
+    // E o texto de cada afirmação não pode dizer "verificado" sem ser.
+    expect(t.truth.unverified).not.toMatch(/\bverificado\b(?!\.)/u)
+    expect(t.truth.unverified.toLowerCase()).toContain('não foi verificado')
+    expect(t.truth.verified.toLowerCase()).toContain('verificado')
   })
 
   it('changes the privacy explanation with the selected route mode', () => {
@@ -156,3 +167,4 @@ describe('M-05/C-22: os três perfis na tela', () => {
     expect(source).toContain('health.local_route')
   })
 })
+
