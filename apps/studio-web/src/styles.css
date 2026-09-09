@@ -241,3 +241,90 @@
      e o hover das sugestões. */
   .advanced,.heading svg,.suggestion:hover,.signout-button:hover,.conversation-advanced summary{color:#8fb6ff}
 }
+
+/* Toda superfície CLARA deste arquivo tem aqui a sua contraparte escura.
+   O bloco foi GERADO a partir das próprias regras claras, e não escrito à mão:
+   a primeira tentativa clareou o texto do produto inteiro e escureceu só uma
+   lista fechada de superfícies, e tudo o que ficou de fora virou branco sobre
+   branco — 35 violações de contraste em telas que antes eram legíveis. */
+@media(prefers-color-scheme:dark){
+  .status{background:#151d30;color:#eef2f9;border-color:#2a3550}
+  .suggestion{background:#151d30;color:#eef2f9;border-color:#2a3550}
+  .truth{background:#152037;color:#eef2f9;border-color:#2a3550}
+  .status{background:#151d30;color:#eef2f9;border-color:#2a3550}
+  .design-card{background:#151d30;color:#eef2f9;border-color:#2a3550}
+  .design-card.selected{background:#152037;color:#eef2f9;border-color:#2a3550}
+  .design-advanced select,.design-advanced input[type=file]{background:#151d30;color:#eef2f9;border-color:#2a3550}
+  .task-card{background:#151d30;color:#eef2f9;border-color:#2a3550}
+  .secondary{background:#151d30;color:#eef2f9;border-color:#2a3550}
+  .task-card code{background:#1b2540;color:#eef2f9;border-color:#2a3550}
+  .preview-card{background:#151d30;color:#eef2f9;border-color:#2a3550}
+  .preview-card iframe{background:#151d30;color:#eef2f9;border-color:#2a3550}
+  .preview-codes{background:#151d30;color:#eef2f9;border-color:#2a3550}
+  .signout-button{background:#151d30;color:#eef2f9;border-color:#2a3550}
+  .conversation-item{background:#151d30;color:#eef2f9;border-color:#2a3550}
+  .conversation-actions .secondary{background:#151d30;color:#eef2f9;border-color:#2a3550}
+  .compaction-band{background:#152037;color:#eef2f9;border-color:#2a3550}
+  .compaction-band.failed{background:#2a1720;color:#eef2f9;border-color:#2a3550}
+  .conversation-attachments li{background:#151d30;color:#eef2f9;border-color:#2a3550}
+  .conversation-attachments button{background:#151d30;color:#eef2f9;border-color:#2a3550}
+  .approval-item{background:#2a2416;color:#eef2f9;border-color:#2a3550}
+  .stuck-run-item{background:#151d30;color:#eef2f9;border-color:#2a3550}
+  .compaction-checkpoint{background:#152037;color:#eef2f9;border-color:#2a3550}
+  .run-report{background:#151d30;color:#eef2f9;border-color:#2a3550}
+  .run-report pre{background:#131a2b;color:#eef2f9;border-color:#2a3550}
+  .emergency-stop{background:#2a1720;color:#eef2f9;border-color:#2a3550}
+  .emergency-stop input,.emergency-stop textarea{background:#151d30;color:#eef2f9;border-color:#2a3550}
+  .plan-edited{background:#1b2540;color:#eef2f9;border-color:#2a3550}
+  .kind select{background:#151d30;color:#eef2f9;border-color:#2a3550}
+  .status-details{background:#151d30;color:#eef2f9;border-color:#2a3550}
+  .badge-beta{background:#1b2540;color:#eef2f9;border-color:#2a3550}
+}
+
+/* E as cores de TEXTO que só funcionam sobre branco. Gerado das mesmas regras
+   claras, pelo mesmo motivo: a lista escrita à mão esquece. */
+@media(prefers-color-scheme:dark){
+  .top-actions{color:#aab6cd}
+  .heading svg{color:#8fb6ff}
+  .heading p{color:#aab6cd}
+  .suggestion:hover{color:#8fb6ff}
+  .coming,.privacy-notice{color:#aab6cd}
+  .privacy-profiles label span{color:#aab6cd}
+  .advanced{color:#8fb6ff}
+  .progress-panel p{color:#aab6cd}
+  .progress-panel small{color:#aab6cd}
+  .mobile-progress-subtitle{color:#aab6cd}
+  .context-note{color:#aab6cd}
+  .design-card span{color:#aab6cd}
+  .design-advanced small{color:#aab6cd}
+  .secondary{color:#8fb6ff}
+  .preview-heading p{color:#aab6cd}
+  .preview-codes p{color:#aab6cd}
+  .signout-button:hover{color:#8fb6ff}
+  .conversation .context-note{color:#aab6cd}
+  .conversation-empty{color:#aab6cd}
+  .conversation-advanced summary{color:#8fb6ff}
+  .run-stage-word{color:#aab6cd}
+  .run-stage.running svg{color:#8fb6ff}
+  .run-stage.not-run strong{color:#aab6cd}
+  .run-report details>summary{color:#8fb6ff}
+  .run-file-meta{color:#aab6cd}
+  .emergency-facts dt{color:#aab6cd}
+  .emergency-stop label{color:#aab6cd}
+  .plan-note{color:#aab6cd}
+  .help dd{color:#c9d3e6}
+  .help ol,.help ul{color:#c9d3e6}
+  .nav-icon{color:#c9d3e6}
+  /* O identificador de máquina ao lado da conferência: discreto, mas legível.    #64708a sobre o fundo #eef3fb do `code` mede 4,45:1 e reprova no axe. */ .check-id code{color:#c9d3e6}
+  .status.checking{color:#c9d3e6}
+  .status-details ul{color:#c9d3e6}
+  .badge-beta{color:#c9d3e6}
+}
+
+/* `--muted` e `--border` são a variável que várias telas usam com um cinza claro
+   como valor de reserva (`var(--muted, #4b5563)`). Redefini-las no escuro
+   alcança de uma vez tudo o que passa por elas — inclusive a tela de equipe,
+   que tem folha própria. */
+@media(prefers-color-scheme:dark){
+  :root{--muted:#aab6cd;--border:#2a3550}
+}

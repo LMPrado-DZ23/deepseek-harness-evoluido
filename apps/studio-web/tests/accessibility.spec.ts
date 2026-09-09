@@ -146,6 +146,15 @@ test.describe('o mesmo fluxo no modo escuro', () => {
     await page.goto('/studio/ajuda')
     await expect(page.getByRole('heading', { name: 'Ajuda do DZ23 STUDIO' })).toBeVisible()
     await check('ajuda')
+    // As telas que a primeira versão do tema escuro deixou brancas sobre
+    // brancas. Elas ficam AQUI, e não numa lista à parte, porque foi
+    // exatamente o "cobri o que me lembrei" que produziu a regressão.
+    await page.goto('/studio/hub')
+    await expect(page.locator('.hub-card').first()).toBeVisible({ timeout: 15_000 })
+    await check('hub')
+    await page.goto('/studio/progresso')
+    await expect(page.locator('main, .team-panel, .task-card').first()).toBeVisible({ timeout: 15_000 })
+    await check('equipe')
     expect(violations, violations.join('\n')).toEqual([])
   })
 })

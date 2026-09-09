@@ -1,0 +1,21 @@
+19/20 caem no padrao sem NENHUM sinal
+QUEDA-CEGA	landing-page    	salao de beleza, cliente escolhe dia e hora com a manicure
+QUEDA-CEGA	landing-page    	quero q as pessoa marque hora comigo pelo celular
+QUEDA-CEGA	landing-page    	sistema pra barbearia
+QUEDA-CEGA	landing-page    	controle de ordens de servico da oficina, mexer nos dados
+QUEDA-CEGA	landing-page    	saber quanto entrou e quanto saiu por semana
+QUEDA-CEGA	landing-page    	quero um sistema para minha clinica
+QUEDA-CEGA	landing-page    	um app pra minha loja
+QUEDA-CEGA	landing-page    	axo q preciso d um lugar pra guarda os nome dos meu cliente
+QUEDA-CEGA	landing-page    	AJENDA PRA MINHA CLINICA
+QUEDA-CEGA	landing-page    	quero organizar minhas coisa do trabalho
+QUEDA-CEGA	landing-page    	me ajuda a fazer um negocio pra vender bolo
+QUEDA-CEGA	landing-page    	preciso controlar quem me deve
+QUEDA-CEGA	landing-page    	app de delivery
+QUEDA-CEGA	landing-page    	sistema de ponto dos funcionarios
+QUEDA-CEGA	landing-page    	loja virtual com carrinho e pagamento
+QUEDA-CEGA	landing-page    	rede social pra minha igreja
+QUEDA-CEGA	landing-page    	quero um chat com meus clientes
+QUEDA-CEGA	landing-page    	controle financeiro do meu mei
+QUEDA-CEGA	landing-page    	quero registrar as horas que trabalhei em cada obra
+pontuou 3 	landing-page    	um lugar pra minha banda divulgar os shows

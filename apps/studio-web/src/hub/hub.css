@@ -77,3 +77,32 @@
 .hub-test.ok{background:#eaf7ef;color:#0d5c2c}
 .hub-test.error{background:#fdeceb;color:#8a1b12}
 .hub-test.info{background:#eef3fb;color:#0b3f9b}
+
+/* Toda superfície CLARA deste arquivo tem aqui a sua contraparte escura.
+   O bloco foi GERADO a partir das próprias regras claras, e não escrito à mão:
+   a primeira tentativa clareou o texto do produto inteiro e escureceu só uma
+   lista fechada de superfícies, e tudo o que ficou de fora virou branco sobre
+   branco — 35 violações de contraste em telas que antes eram legíveis. */
+@media(prefers-color-scheme:dark){
+  .hub-notice.info{background:#1b2540;color:#eef2f9;border-color:#2a3550}
+  .hub-card{background:#151d30;color:#eef2f9;border-color:#2a3550}
+  .hub-card input,.hub-card select,.hub-card textarea{background:#151d30;color:#eef2f9;border-color:#2a3550}
+  .hub-tag{background:#1b2540;color:#eef2f9;border-color:#2a3550}
+  .hub-tag.health-NOT_EXECUTED{background:#1b2540;color:#eef2f9;border-color:#2a3550}
+  .hub-test.info{background:#1b2540;color:#eef2f9;border-color:#2a3550}
+}
+
+/* E as cores de TEXTO que só funcionam sobre branco. Gerado das mesmas regras
+   claras, pelo mesmo motivo: a lista escrita à mão esquece. */
+@media(prefers-color-scheme:dark){
+  .hub-header p{color:#aab6cd}
+  .hub-back{color:#8fb6ff}
+  .hub-card-heading svg{color:#8fb6ff}
+  .hub-help{color:#aab6cd}
+  .hub-empty{color:#aab6cd}
+  .hub-meta{color:#aab6cd}
+  .hub-download{color:#8fb6ff}
+  .hub-facts dt{color:#aab6cd}
+  .hub-timeline time{color:#aab6cd}
+  .webmcp-state{color:#aab6cd}
+}

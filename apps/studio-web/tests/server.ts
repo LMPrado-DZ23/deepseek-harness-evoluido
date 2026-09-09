@@ -1,7 +1,7 @@
 import type { JobId, JobOutcome } from '@deepseek-ai/dsh-jobs'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createIdentityHttpHandler, CSRF_COOKIE, IdentityError, SESSION_COOKIE, type SessionRecord, type StudioIdentityService } from '../../../plugins/identity/src/index.js'
@@ -83,6 +83,38 @@ class DeterministicPreviewRuntime implements PreviewRuntimePort {
 }
 
 function upsert<T, K extends keyof T>(rows: T[], value: T, key: K): T[] { return [...rows.filter(row => row[key] !== value[key]), value] }
+
+
+/**
+ * A interface servida ao navegador é a COMPILADA (`dist/`), e nada a reconstrói.
+ *
+ * Uma auditoria caiu nisto: mudou o CSS, rodou o e2e, viu verde — e o verde era
+ * do `dist` antigo. Um teste de navegador que roda contra um artefato velho não
+ * prova o que está no repositório; ele prova o que estava.
+ *
+ * Aqui a comparação é de data: se qualquer fonte da interface for mais nova do
+ * que o `index.html` gerado, o servidor de teste RECUSA subir e diz o comando.
+ * @param webRoot - a pasta `apps/studio-web`.
+ */
+async function assertBuiltInterfaceIsFresh(webRoot: string): Promise<void> {
+  const index = resolve(webRoot, 'dist', 'index.html')
+  const built = await stat(index).catch(() => undefined)
+  if (built === undefined) throw new Error('A interface não foi compilada. Rode `pnpm build` na raiz antes do e2e.')
+  const newer: string[] = []
+  const walk = async (directory: string): Promise<void> => {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const path = resolve(directory, entry.name)
+      if (entry.isDirectory()) { await walk(path); continue }
+      if (!/\.(?:tsx?|css|json|html)$/u.test(entry.name)) continue
+      const info = await stat(path)
+      if (info.mtimeMs > built.mtimeMs + 1_000) newer.push(entry.name)
+    }
+  }
+  await walk(resolve(webRoot, 'src'))
+  if (newer.length > 0) {
+    throw new Error(`A interface compilada está velha (${newer.slice(0, 5).join(', ')}${newer.length > 5 ? '…' : ''}). Rode \`pnpm build\` na raiz antes do e2e.`)
+  }
+}
 
 const root = resolve(import.meta.dirname, '..', '..', '..')
 const scratch = await mkdtemp(join(tmpdir(), 'dz23-studio-e2e-'))
@@ -371,6 +403,7 @@ const server = createServer((request, response) => {
   if (request.url?.startsWith('/api/studio/apps') === true) return void apiHandler(request, response)
   return void webHandler(request, response)
 })
+await assertBuiltInterfaceIsFresh(resolve(root, 'apps', 'studio-web'))
 server.listen(4179, '127.0.0.1')
 for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => { server.close(() => { void rm(scratch, { recursive: true, force: true }).finally(() => process.exit(0)) }) })
 

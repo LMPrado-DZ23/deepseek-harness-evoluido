@@ -37,3 +37,41 @@ test('enquanto o Studio responde, o botão fica ocupado e o clique duplo não pa
   await busy.click({ force: true, timeout: 2_000 }).catch(() => undefined)
   await expect.poll(() => posts, { timeout: 10_000 }).toBe(1)
 })
+
+/**
+ * Recarregar DEPOIS que a criação termina.
+ *
+ * Guardar o projeto no endereço resolveu perder o trabalho — e criou um beco:
+ * a tela restaurava só o projeto, o estado e o plano. Quem recarregava depois
+ * da criação (e a própria tela MANDA recarregar quando perde o acompanhamento)
+ * ficava com a coluna da direita dizendo "Protótipo verificado" e a da
+ * esquerda VAZIA: sem os critérios, sem o relato, sem os pontos seguros e sem
+ * o botão de ver o protótipo.
+ */
+test('depois de recarregar, o resultado da criação continua na tela', async ({ context, page }) => {
+  await context.addCookies([
+    { name: 'dz23_studio_session', value: 'e2e', url: origin },
+    { name: 'dz23_studio_csrf', value: 'csrf-e2e', url: origin },
+  ])
+  await context.addInitScript(() => { window.sessionStorage.setItem('dz23.studio.csrf.v1', 'csrf-e2e') })
+  await page.goto('/studio/')
+  await page.getByRole('button', { name: 'Quero uma página para apresentar meu trabalho ou negócio.' }).click()
+  await page.getByRole('button', { name: 'Continuar' }).click()
+  for (const answer of ['Clientes locais', 'Conhecer os serviços', 'Serviços e contato']) {
+    await page.getByLabel('Sua resposta').fill(answer)
+    await page.getByRole('button', { name: 'Responder e continuar' }).click()
+  }
+  await page.getByRole('button', { name: 'Montar meu plano' }).click()
+  await page.getByRole('button', { name: 'Aprovar este plano' }).click()
+  await page.getByRole('button', { name: 'Iniciar criação' }).click()
+  await expect(page.getByText('As verificações declaradas passaram neste computador.')).toBeVisible({ timeout: 40_000 })
+  expect(new URL(page.url()).searchParams.get('projeto')).not.toBeNull()
+
+  await page.reload()
+
+  await expect(page.getByText('As verificações declaradas passaram neste computador.')).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByRole('button', { name: 'Ver meu protótipo' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'O que aconteceu na criação' })).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByRole('heading', { name: 'Pontos para onde você pode voltar' })).toBeVisible()
+  await expect(page.getByText('A página Início existe: Passou')).toBeVisible()
+})

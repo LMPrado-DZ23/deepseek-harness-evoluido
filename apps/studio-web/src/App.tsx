@@ -128,6 +128,18 @@ export function App() {
       setProjectId(saved)
       setProjectState(details.project.state)
       setPlan(plan)
+      // E o RESULTADO, quando a execução já terminou: sem isto, recarregar
+      // depois da criação devolvia uma coluna vazia — sem os critérios, sem o
+      // relato, sem os pontos seguros e sem o botão de ver o protótipo —
+      // enquanto a coluna ao lado dizia "Protótipo verificado".
+      const finished = resultOfRun(details)
+      if (finished !== null) {
+        setResult(finished)
+        void refreshRunReport(saved)
+        void api<unknown>(`/projects/${saved}/checkpoints`)
+          .then(response => { if (active) setCheckpoints(isCheckpointList(response) ? response : null) })
+          .catch(() => { if (active) setCheckpoints(null) })
+      }
     }).catch(() => { if (active) forgetSavedProject() })
     return () => { active = false }
   }, [])
@@ -292,22 +304,13 @@ export function App() {
       }
       setProjectState(details.project.state)
       if (current?.operation_id === runId && ['PASSED', 'FAILED', 'BLOCKED_EXTERNAL', 'BUDGET_EXCEEDED', 'CANCELLED'].includes(current.state)) {
-        const state: PipelineResult['state'] = details.project.state === 'INTERRUPTED' ? 'INTERRUPTED'
-          : current.state === 'PASSED' ? 'VERIFIED_PROTOTYPE'
-          : current.state === 'BLOCKED_EXTERNAL' ? 'BLOCKED_EXTERNAL'
-            : current.state === 'CANCELLED' ? 'CANCELLED'
-              // `BUDGET_EXCEEDED` estava na lista de estados terminais e não
-              // estava aqui: caía no último ramo e virava "verificação
-              // encontrou um problema".
-              : current.state === 'BUDGET_EXCEEDED' ? 'BUDGET_EXCEEDED'
-                : current.stage === 'test' ? 'TESTS_FAILED' : 'BUILD_FAILED'
-        setResult({ state, attempts: current.attempt, message: current.failure_code ?? (state === 'VERIFIED_PROTOTYPE' ? t.truth.verified : t.verification.failure), checks: current.acceptance_checks, ...(current.verification_codes === undefined ? {} : { verificationCodes: current.verification_codes }) })
+        const finished = resultOfRun(details)!
+        const state = finished.state
+        setResult(finished)
         if (state === 'BLOCKED_EXTERNAL') setProjectState('PLAN_APPROVED')
         // O relato é lido DEPOIS que a execução termina: é ele que tira a
         // pessoa de um código em inglês e mostra o que realmente aconteceu.
-        await api<{ report: unknown }>(`/projects/${projectId}/report`)
-          .then(response => { setRunReport(isRunReport(response.report) ? response.report : null) })
-          .catch(() => { setRunReport(null) })
+        await refreshRunReport(projectId)
         // Depois do relato vem a pergunta seguinte de quem acabou de ver uma
         // falha: para onde eu volto? A resposta pode ser "não há ponto seguro",
         // e ela vem com o motivo — inventar um verde aqui seria pior do que
@@ -319,6 +322,12 @@ export function App() {
       await new Promise(resolve => setTimeout(resolve, 250))
     }
     throw new Error(t.verification.followLost)
+  }
+  /** O relato do que aconteceu, para a tela que acabou de abrir e para a que acompanhou. */
+  async function refreshRunReport(project: string) {
+    await api<{ report: unknown }>(`/projects/${project}/report`)
+      .then(response => { setRunReport(isRunReport(response.report) ? response.report : null) })
+      .catch(() => { setRunReport(null) })
   }
   async function refreshCheckpoints() {
     if (projectId === null) return
@@ -569,6 +578,42 @@ export function projectAddress(href: string, projectId: string | null): string {
 export function savedProjectOf(href: string): string | null {
   const value = new URL(href).searchParams.get('projeto')
   return value === null || value === '' ? null : value
+}
+
+/** Os estados em que uma execução ACABOU. */
+const TERMINAL_RUN_STATES = ['PASSED', 'FAILED', 'BLOCKED_EXTERNAL', 'BUDGET_EXCEEDED', 'CANCELLED']
+
+/**
+ * O resultado da criação a partir do que o servidor conta, ou `null` enquanto
+ * ela ainda está correndo.
+ *
+ * Isto era código de dentro do laço de acompanhamento, e por isso o resultado
+ * só existia para quem tinha ficado com a tela aberta. Quem recarregava depois
+ * de a criação terminar — e a própria tela MANDA recarregar quando perde o
+ * acompanhamento — voltava para uma coluna vazia: sem o resultado, sem os
+ * critérios, sem o relato e sem o botão de ver o protótipo, enquanto a coluna
+ * ao lado dizia "Protótipo verificado".
+ * @param details - o projeto como o servidor devolve.
+ * @returns o resultado terminal, ou `null`.
+ */
+export function resultOfRun(details: ProjectDetails): PipelineResult | null {
+  const current = details.current_run
+  if (current === null || !TERMINAL_RUN_STATES.includes(current.state)) return null
+  const state: PipelineResultState = details.project.state === 'INTERRUPTED' ? 'INTERRUPTED'
+    : current.state === 'PASSED' ? 'VERIFIED_PROTOTYPE'
+      : current.state === 'BLOCKED_EXTERNAL' ? 'BLOCKED_EXTERNAL'
+        : current.state === 'CANCELLED' ? 'CANCELLED'
+          // `BUDGET_EXCEEDED` estava na lista de estados terminais e não estava
+          // aqui: caía no último ramo e virava "verificação encontrou um problema".
+          : current.state === 'BUDGET_EXCEEDED' ? 'BUDGET_EXCEEDED'
+            : current.stage === 'test' ? 'TESTS_FAILED' : 'BUILD_FAILED'
+  return {
+    state,
+    attempts: current.attempt,
+    message: current.failure_code ?? (state === 'VERIFIED_PROTOTYPE' ? t.truth.verified : t.verification.failure),
+    checks: current.acceptance_checks,
+    ...(current.verification_codes === undefined ? {} : { verificationCodes: current.verification_codes }),
+  }
 }
 
 /** Guarda o projeto aberto no endereço, sem empilhar história do navegador. */
