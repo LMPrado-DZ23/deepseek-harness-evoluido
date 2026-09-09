@@ -80,13 +80,21 @@ export function HubPanel({ api = defaultHubApi, homeHref = '/studio/' }: { api?:
 
   useEffect(() => { void refresh() }, [refresh])
 
-  return <div className="hub-page">
+  // `<main>` na RAIZ da tela, e não só em volta da grade.
+  //
+  // O cabeçalho do Hub era um `<header>` de primeiro nível e, por isso, valia
+  // como marco `banner`: o axe passava. Quando o Studio ganhou casca comum, ele
+  // passou a viver dentro de uma `<section>` e perdeu esse papel implícito — o
+  // título e o link de voltar ficaram FORA de qualquer marco, que é exatamente
+  // a violação `region`. Com o `<main>` na raiz, tudo o que a tela mostra está
+  // dentro de um marco, e o desenho fica igual ao das outras telas.
+  return <main className="hub-page">
     <header className="hub-header">
       <a className="hub-back" href={homeHref}><ArrowLeft aria-hidden="true" /><span>{t.back}</span></a>
       <div><h1>{t.title}</h1><p>{t.subtitle}</p></div>
     </header>
     {notice === null ? null : <p className={`hub-notice ${notice.kind}`} role={notice.kind === 'error' ? 'alert' : 'status'}>{notice.text}</p>}
-    <main className="hub-grid">
+    <div className="hub-grid">
       <SmtpSection api={api} state={smtp} onChange={async () => { setSmtp(await api.smtp()); setEvents(await api.events()) }} notify={setNotice} report={report} />
       <IntegrationsSection api={api} onChange={async () => { setEvents(await api.events()) }} notify={setNotice} report={report} />
       <ExportsSection api={api} projects={projects} onChange={async () => { setEvents(await api.events()) }} notify={setNotice} report={report} />
@@ -95,8 +103,8 @@ export function HubPanel({ api = defaultHubApi, homeHref = '/studio/' }: { api?:
           navegador é exatamente mais um desses. */}
       <WebMcpSection />
       <EventsSection events={events} />
-    </main>
-  </div>
+    </div>
+  </main>
 }
 
 type SectionProps = { api: HubApi; notify(notice: Notice): void; report(error: unknown): void; onChange(): Promise<void> }

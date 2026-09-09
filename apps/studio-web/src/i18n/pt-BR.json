@@ -365,5 +365,36 @@
       "needName": "Informe name: um nome curto para o aplicativo, com até {max} caracteres.",
       "needBrief": "Informe brief: o que o aplicativo deve fazer, com até {max} caracteres."
     }
+  },
+  "projects": {
+    "title": "Meus projetos",
+    "subtitle": "Tudo o que você já começou a criar neste espaço de trabalho.",
+    "loading": "Carregando seus projetos…",
+    "empty": "Você ainda não começou nenhum projeto.",
+    "emptyAction": "Criar meu primeiro aplicativo",
+    "open": "Abrir",
+    "openLabel": "Abrir o projeto {name}",
+    "columnName": "Projeto",
+    "columnState": "Situação",
+    "columnKind": "Tipo",
+    "columnUpdated": "Atualizado",
+    "failed": "Não foi possível carregar seus projetos.",
+    "retry": "Tentar de novo",
+    "count": "{count} projeto",
+    "countPlural": "{count} projetos",
+    "states": {
+      "DRAFT": "Respondendo as perguntas",
+      "SPEC_READY": "Esperando você montar o plano",
+      "PLAN_PROPOSED": "Plano esperando sua aprovação",
+      "PLAN_APPROVED": "Plano aprovado — a criação pode começar",
+      "GENERATING": "Criando agora",
+      "BUILD_OK": "Criando agora",
+      "TESTS_OK": "Criando agora",
+      "BUILD_FAILED": "A criação não passou",
+      "TESTS_FAILED": "A verificação encontrou problemas",
+      "CANCELLED": "Você cancelou esta criação",
+      "INTERRUPTED": "Interrompido — o Studio foi reiniciado no meio",
+      "VERIFIED_PROTOTYPE": "Protótipo verificado"
+    }
   }
 }

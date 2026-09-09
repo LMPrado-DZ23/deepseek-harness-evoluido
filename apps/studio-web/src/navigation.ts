@@ -1,6 +1,7 @@
 import { ASSISTANT_PATH } from './assistant/AssistantEntry'
 import { HUB_PATH } from './hub/presentation'
 import { HELP_PATH } from './help/HelpScreen'
+import { PROJECTS_PATH } from './projects/ProjectsScreen'
 import { TEAM_PATH } from './team/teamApi'
 import assistant from './i18n/assistant.pt-BR.json'
 import hub from './i18n/hub.pt-BR.json'
@@ -37,7 +38,10 @@ export function studioNavItems(): readonly StudioNavItem[] {
     { id: 'home', label: t.nav.home, href: STUDIO_HOME_PATH },
     { id: 'assistant', label: assistant.navLabel, href: ASSISTANT_PATH },
     { id: 'hub', label: hub.navLabel, href: HUB_PATH },
-    { id: 'projects', label: t.nav.projects, href: null },
+    // Este item ficou "em breve" desde o começo enquanto `GET /projects` já
+    // respondia: faltava só a tela. Quem fechava o navegador no meio de uma
+    // criação não tinha caminho de volta pela interface.
+    { id: 'projects', label: t.nav.projects, href: PROJECTS_PATH },
     // O item se chama pelo que a TELA é: trabalho em equipe. Enquanto ele se
     // chamava "Progresso", a pessoa cujo aplicativo estava sendo criado clicava
     // ali esperando acompanhar a criação e caía em "Nenhum trabalho em equipe
