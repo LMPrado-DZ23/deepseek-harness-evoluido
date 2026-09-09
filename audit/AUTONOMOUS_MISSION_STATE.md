@@ -5,10 +5,13 @@
 - estado: `FIXING` (rodada 3 fechada: os dois CRÍTICOS de regressão, o ALTO, os
   MÉDIOS e os BAIXOS das duas verificações estão fechados com prova; resta o
   blocker interno S-08 e os bloqueios externos)
-- iteração: 34
+- iteração: 35
 - início: 2026-09-04
 - último heartbeat: 2026-09-09
-- último progresso real: o portão real de PostgreSQL voltou a rodar e fechou
+- último progresso real: o `studio_integrations` saiu da chave-valor para a tabela
+  por inquilino com RLS (cobertura 1/26 → 2/26), e a classificação dos pendentes
+  foi corrigida: 11 dos 12 que se diziam mecânicos não eram. Antes disso, o
+  portão real de PostgreSQL voltou a rodar e fechou
   62/62 — a falha que restava era o atalho de teste sendo derrubado pelo próprio
   endurecimento do produto, e o `pg_restore` não dizia por quê. Antes dela, a
   rodada 3 fechou C-N1, C-N2, C-N3, C-N4, C-N5, C-N6, C-N7, C-M1, C-M10, C-2,
@@ -20,7 +23,7 @@
 ## Placar objetivo
 
 - v1.0: **112 de 120** (93,3%) em BETA ou STABLE
-- suíte raiz: 2726 aprovados, 65 pulados (172 arquivos)
+- suíte raiz: 2741 aprovados, 65 pulados (174 arquivos)
 - app: 344 aprovados (38 arquivos)
 - typecheck raiz: 0; typecheck do app: 0; build: 0
 - portões estáticos: 15/15 PASS
@@ -51,23 +54,26 @@ X-12 (WebMCP), A-03, A-06, M-03, S-15, P-09, C-24.
 
 | requisito | estado |
 | --- | --- |
-| S-08 | FAILED. Cobertura RLS 1/26, classificada e gateada: 12 `ready`, 4 `hot-guard`, 6 `tenant-resolution` (IMPOSSÍVEIS por construção), 1 `cross-tenant-invariant`, 2 `needs-review`. O texto do requisito precisa ser corrigido — decisão de produto. |
+| S-08 | FAILED, mas o mapa mudou. Cobertura RLS **2/26** (piso 2): `studio_action_approvals` e `studio_integrations`. Dos 12 que estavam marcados `ready`, **11 não eram mecânicos** — a leitura do código mostrou uma corrente de hash global (`studio_policy_audit`) e uma varredura de início sobre todos os inquilinos em 10 domínios (categoria nova `startup-reconciliation`). Mapa: `ready`=0, `startup-reconciliation`=10, `cross-tenant-invariant`=2, `hot-guard`=4, `tenant-resolution`=6 (IMPOSSÍVEIS por construção), `needs-review`=2. Não há mais trabalho MECÂNICO aqui: o que resta exige decisão de desenho, e o texto do requisito continua precisando de correção — decisão de produto. |
 
 ## Próxima ação
 
-`FIXING` → o único trabalho interno de peso que resta é o **S-08**: migrar os 12
-domínios `ready` da chave-valor opaca para tabela por inquilino com RLS, começando
-pelo `PromptToAppRepository` (8 domínios num repositório só, 14 pontos de leitura,
-todos em `plugins/prompt-to-app/src/service.ts`, todos SÍNCRONOS hoje — a migração
-é, antes de tudo, tornar a leitura escopada e assíncrona). O restante em aberto
-está tabelado em `audit/FINAL_THREE_AGENT_REVIEW.md`, seção "Em aberto, com motivo
-escrito", e cada linha tem o motivo por extenso.
+`FIXING` → **não resta trabalho interno mecânico**. O S-08 deixou de ser "migrar
+12 domínios" e virou duas decisões de produto, ambas do Prado:
+
+1. corrigir o texto do requisito para o alvo alcançável (6 domínios são o que
+   RESOLVE o inquilino e não podem ser filtrados por ele);
+2. escolher o desenho da varredura de início — enumerar inquilinos, ou uma
+   credencial de manutenção com escopo declarado — antes de migrar os 10
+   `startup-reconciliation`.
+
+O restante em aberto está tabelado em `audit/FINAL_THREE_AGENT_REVIEW.md`, seção
+"Em aberto, com motivo escrito", e cada linha tem o motivo por extenso.
 
 ## Instruções de retomada
 
 1. `git log -1` e `git status` — a árvore deve estar limpa;
 2. `node scripts/check-requirements-ledger.mjs` — o placar objetivo;
 3. `npx tsx scripts/check-rls-coverage.ts --self-test` — o estado do S-08;
-4. o trabalho interno restante é o S-08: migrar os 12 `ready`, começando pelo
-   `PromptToAppRepository` (8 domínios num repositório só, 14 pontos de leitura,
-   todos em `plugins/prompt-to-app/src/service.ts`).
+4. o S-08 não tem mais trabalho mecânico: `ready`=0. O que resta são as duas
+   decisões de desenho descritas em "Próxima ação".

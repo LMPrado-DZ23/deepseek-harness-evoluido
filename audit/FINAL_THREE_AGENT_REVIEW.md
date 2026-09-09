@@ -52,7 +52,7 @@ a lista da fonte, ou trocar a lista por uma REGRA.
 | B-M5 | MÉDIO | DELIBERADO: o portão de licenças roda em modo release na CI, com etapa própria e nomeada, mas não reprova o commit — a decisão é do Prado (`C-05`). O que ele impede é a decisão ficar invisível. |
 | B-M2 (execução) | MÉDIO | A correção está no código e tem teste; a EXECUÇÃO da prova exige a imagem OCI construída, que este ambiente não alcança (mesmo bloqueio de `S-04`/`D-10`). |
 | C-L3 | BAIXO | Só Chromium: não há rota de rede para baixar Firefox e WebKit. |
-| S-08 | — | Blocker interno: 12 domínios `ready` ainda com isolamento por código do produto, não pelo banco. O portão mede a distância e ela só pode diminuir. |
+| S-08 | — | Blocker interno, agora com o mapa certo: cobertura 2/26 (`studio_action_approvals` e `studio_integrations`), e dos 12 que se diziam `ready`, **11 não eram mecânicos** — corrente de hash global em `studio_policy_audit`, varredura de início sobre todos os inquilinos em 10 domínios. `ready`=0: o que resta exige decisão de desenho do Prado, não trabalho. |
 
 ## Placar depois desta rodada
 
