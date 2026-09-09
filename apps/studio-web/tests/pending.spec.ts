@@ -150,3 +150,59 @@ test('os três botões da tela de perguntas avisam que estão trabalhando', asyn
   await busy.click({ force: true, timeout: 2_000 }).catch(() => undefined)
   await expect.poll(() => answers, { timeout: 10_000 }).toBe(1)
 })
+
+/**
+ * A criação DIZ o que está fazendo, em vez de mostrar um texto imóvel.
+ *
+ * O servidor grava um registro a cada mudança de etapa e a tela já lia esse
+ * registro a cada 1,5 segundo — para jogar a etapa fora. Durante os minutos
+ * mais longos do produto a pessoa via a mesma frase do começo ao fim e não
+ * tinha como saber se alguma coisa estava andando.
+ *
+ * O teste FIXA a resposta do servidor em `RUNNING` na etapa de testes, em vez
+ * de tentar pegar a execução no meio: com o construtor de fixture terminando em
+ * milissegundos, esperar pelo instante certo seria uma corrida — o teste
+ * reprovaria por relógio, e não por defeito.
+ */
+test('durante a criação, a tela mostra a etapa em que está', async ({ context, page }) => {
+  await context.addCookies([
+    { name: 'dz23_studio_session', value: 'e2e', url: origin },
+    { name: 'dz23_studio_csrf', value: 'csrf-e2e', url: origin },
+  ])
+  await context.addInitScript(() => { window.sessionStorage.setItem('dz23.studio.csrf.v1', 'csrf-e2e') })
+
+  let freeze = false
+  await page.route('**/api/studio/apps/projects/*', async route => {
+    if (route.request().method() !== 'GET' || !freeze) return route.fallback()
+    // `route.fetch` corre no Node, e o Node NÃO resolve `*.localhost` como o
+    // Chromium resolve. O endereço vai para o laço local; `127.0.0.1:4179` está
+    // na lista de hosts aceitos do servidor de teste.
+    const response = await route.fetch({ url: route.request().url().replace('studio.dz23.localhost', '127.0.0.1') })
+    const body = await response.json() as { current_run: null | Record<string, unknown> }
+    if (body.current_run !== null) {
+      body.current_run = { ...body.current_run, state: 'RUNNING', stage: 'test', attempt: 2 }
+    }
+    await route.fulfill({ response, json: body })
+  })
+
+  await page.goto('/studio/')
+  await page.getByRole('button', { name: 'Quero uma página para apresentar meu trabalho ou negócio.' }).click()
+  await page.getByRole('button', { name: 'Continuar' }).click()
+  for (const answer of ['Clientes locais', 'Conhecer os serviços', 'Serviços e contato']) {
+    await page.getByLabel('Sua resposta').fill(answer)
+    await page.getByRole('button', { name: 'Responder e continuar' }).click()
+  }
+  await page.getByRole('button', { name: 'Montar meu plano' }).click()
+  await page.getByRole('button', { name: 'Aprovar este plano' }).click()
+  freeze = true
+  await page.getByRole('button', { name: 'Iniciar criação' }).click()
+
+  const stage = page.locator('.creation-stage')
+  await expect(stage).toBeVisible({ timeout: 20_000 })
+  await expect(stage).toContainText('Rodando os testes')
+  // A repetição é anunciada da SEGUNDA em diante: o tempo dobra, e o silêncio
+  // parece travamento.
+  await expect(stage).toContainText('2ª tentativa')
+  // Quem ouve a tela recebe o mesmo aviso.
+  await expect(stage).toHaveAttribute('aria-live', 'polite')
+})

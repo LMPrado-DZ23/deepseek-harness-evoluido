@@ -5,6 +5,7 @@ import { PendingButton } from './PendingButton'
 import { STUDIO_CATEGORIES, type Category } from './categories'
 import t from './i18n/pt-BR.json'
 import { categoryGuess, type CategoryGuess } from './categorySuggestion'
+import { attemptSentence, stageSentence, type RunningStage } from './creationProgress'
 
 /** De onde veio o tipo mostrado na tela. `person` é a escolha à mão, que o palpite não faz. */
 type CategoryBasis = CategoryGuess['basis'] | 'person'
@@ -76,6 +77,8 @@ export function App() {
   // pessoa corrigir o tipo à mão é a mesma mentira dos outros casos, com o
   // agravante de que ela sabe que não foi assim.
   const [categoryBasis, setCategoryBasis] = useState<CategoryBasis>('none')
+  // A etapa da execução em curso, lida do mesmo laço que já acompanha o estado.
+  const [running, setRunning] = useState<RunningStage | null>(null)
   const [route, setRoute] = useState<string | null>(null)
   const [projectId, setProjectId] = useState<string | null>(null)
   const [projectState, setProjectState] = useState<ProjectUiState | null>(null)
@@ -312,6 +315,7 @@ export function App() {
         continue
       }
       setProjectState(details.project.state)
+      setRunning(current === null ? null : { stage: current.stage, attempt: current.attempt })
       if (current?.operation_id === runId && ['PASSED', 'FAILED', 'BLOCKED_EXTERNAL', 'BUDGET_EXCEEDED', 'CANCELLED'].includes(current.state)) {
         const finished = resultOfRun(details)!
         const state = finished.state
@@ -433,7 +437,7 @@ export function App() {
         {projectState === 'PLAN_PROPOSED' && plan !== null ? <PlanEditor plan={plan} submit={editPlan} approve={approvePlan} reason={changeReason} setReason={setChangeReason} requestChange={requestPlanChange} /> : null}
         {projectState === 'PLAN_PROPOSED' && plan === null ? <Action title={t.plan.title} detail={t.progress.planDetail} button={t.plan.revision} busyButton={t.plan.revisionBusy} action={preparePlan} /> : null}
         {projectState === 'PLAN_APPROVED' ? <Action title={t.creation.title} detail={t.truth.creation} button={t.creation.start} busyButton={t.creation.startBusy} action={generate} /> : null}
-        {projectState === 'GENERATING' || projectState === 'BUILD_OK' || projectState === 'TESTS_OK' ? <Action title={t.creation.title} detail={t.creation.working} button={t.creation.cancel} busyButton={t.creation.cancelBusy} action={cancelGeneration} /> : null}
+        {projectState === 'GENERATING' || projectState === 'BUILD_OK' || projectState === 'TESTS_OK' ? <Action title={t.creation.title} detail={t.creation.working} button={t.creation.cancel} busyButton={t.creation.cancelBusy} action={cancelGeneration} progress={running} /> : null}
         {result !== null ? <Verification result={result} previewActive={preview?.state === 'READY'} startPreview={startPreview} retry={generate} /> : null}
         {runReport === null ? null : <RunReport report={runReport} />}
         {checkpoints === null ? null : <Checkpoints list={checkpoints} confirmingRunId={confirmingUndo}
@@ -508,7 +512,15 @@ function Questions({ question, answer, setAnswer, submit }: { question: Question
   const sensitive = question.id === 'sensitive-confirmation'
   return <><div className="heading"><Sparkles/><div><h1>{t.questions.title}</h1><p>{t.questions.subtitle}</p></div></div><section className="task-card"><h2>{question.text}</h2>{sensitive ? <div className="button-row"><PendingButton label={t.questions.confirm} busyLabel={t.questions.confirmBusy} action={() => submit(false, true)} /><PendingButton className="secondary" label={t.questions.reject} busyLabel={t.questions.rejectBusy} action={() => submit(false, false)} /></div> : <><label htmlFor="answer">{t.questions.answer}</label><textarea id="answer" value={answer} onChange={event => setAnswer(event.target.value)} placeholder={t.questions.answerPlaceholder}/><PendingButton label={t.questions.continue} busyLabel={t.questions.continueBusy} disabled={answer.trim() === ''} action={() => submit(false)} /><PendingButton className="secondary" label={t.questions.recommend} busyLabel={t.questions.recommendBusy} action={() => submit(true)} /></>}</section></>
 }
-function Action({ title, detail, button, busyButton, action }: { title: string; detail: string; button?: string; busyButton?: string; action?: () => Promise<void> }) { return <><div className="heading"><Sparkles/><div><h1>{title}</h1><p>{detail}</p></div></div>{button === undefined || action === undefined ? null : <PendingButton label={button} busyLabel={busyButton ?? button} action={action} />}</> }
+function Action({ title, detail, button, busyButton, action, progress }: { title: string; detail: string; button?: string; busyButton?: string; action?: () => Promise<void>; progress?: RunningStage | null }) { return <><div className="heading"><Sparkles/><div><h1>{title}</h1><p>{detail}</p></div></div>{/* O que está acontecendo AGORA. O servidor manda a etapa a cada 1,5 s e a
+        tela jogava fora: durante os minutos mais longos do produto a pessoa via
+        um texto imóvel e não tinha como saber se algo estava andando.
+        `aria-live` porque quem ouve a tela precisa do mesmo aviso. */}
+    {stageSentence(progress ?? null) === null ? null : <p className="creation-stage" aria-live="polite">
+      <span className="creation-spinner" aria-hidden="true" />{stageSentence(progress ?? null)}
+      {attemptSentence(progress ?? null) === null ? null : <small>{attemptSentence(progress ?? null)}</small>}
+    </p>}
+    {button === undefined || action === undefined ? null : <PendingButton label={button} busyLabel={busyButton ?? button} action={action} />}</> }
 function Verification({ result, previewActive, startPreview, retry }: { result: PipelineResult; previewActive: boolean; startPreview(): Promise<void>; retry(): Promise<void> }) { const ok = result.state === 'VERIFIED_PROTOTYPE'; const cancelled = result.state === 'CANCELLED'; const interrupted = result.state === 'INTERRUPTED'; return <section className="task-card"><h1>{t.verification.title}</h1><p>{resultSentence(result.state, t.verification)}</p><p>{t.verification.attempts}: {result.attempts}</p>{ok && !previewActive ? <PendingButton label={t.preview.open} busyLabel={t.preview.openBusy} action={startPreview} /> : null}{interrupted ? <PendingButton label={t.creation.retry} busyLabel={t.creation.retryBusy} action={retry} /> : null}{result.verificationCodes === undefined || result.verificationCodes.length === 0 ? null : <section><h2>{t.verification.testCodes}</h2><p>{t.verification.testCodesHelp}</p><ul>{result.verificationCodes.map(item => <li key={`${item.email}-${item.expires_at}-${item.code}`}><strong>{item.email}</strong>: <code>{item.code}</code></li>)}</ul></section>}{result.checks === undefined ? null : <><h2>{t.verification.checks}</h2><ul>{result.checks.map(check => <li key={check.id}>{check.title ?? check.label}: {checkStatus(check.status)}{check.title === undefined || check.title === check.label ? null : <> <span className="check-id"><code>{check.label}</code></span></>}</li>)}</ul></>}<details className="result-technical"><summary>{t.verification.technicalTitle}</summary><p>{t.verification.technicalCode}: <code>{result.state}</code></p>{result.message === '' ? null : <p>{t.verification.technicalFailure}: <code>{result.message}</code></p>}</details></section> }
 
 function refreshPreviewAdmission(previewUrl: string): void {

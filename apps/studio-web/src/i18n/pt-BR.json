@@ -203,7 +203,15 @@
     "cancel": "Cancelar criação",
     "startBusy": "Começando a criação…",
     "retryBusy": "Recomeçando…",
-    "cancelBusy": "Cancelando…"
+    "cancelBusy": "Cancelando…",
+    "stages": {
+      "generate": "Escrevendo os arquivos do seu aplicativo",
+      "build": "Montando o aplicativo",
+      "test": "Rodando os testes",
+      "verify": "Conferindo o resultado"
+    },
+    "attempt": "{n}ª tentativa — corrigindo o que não passou",
+    "stageUnknown": "Trabalhando no seu aplicativo"
   },
   "verification": {
     "title": "Resultado da verificação",

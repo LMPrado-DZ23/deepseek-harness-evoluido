@@ -190,6 +190,16 @@
 @media (min-width:720px){.plan-actions{grid-template-columns:repeat(4,1fr)}}
 .kind{display:grid;gap:7px;margin:6px 0 16px}.kind select{width:100%;min-height:44px;border:1px solid #bbc5d6;border-radius:7px;background:#fff;padding:9px;color:#182544}
 
+/* O que está acontecendo agora na criação. O ponto que pulsa existe para dizer
+   "isto está vivo" sem inventar porcentagem: o produto não sabe quanto falta, e
+   uma barra que fingisse saber seria a mesma família de mentira que a faixa
+   indeterminada da compactação já evitou. */
+.creation-stage{display:flex;align-items:center;gap:10px;flex-wrap:wrap;color:#41506b;font-size:15px;margin:18px 0 4px}
+.creation-stage small{flex:1 1 100%;color:#5c6881;font-size:13px;padding-left:22px}
+.creation-spinner{width:12px;height:12px;border-radius:50%;background:#075ee5;flex:none;animation:dz23-pulse 1.4s ease-in-out infinite}
+@keyframes dz23-pulse{0%,100%{opacity:.35;transform:scale(.85)}50%{opacity:1;transform:scale(1)}}
+@media(prefers-reduced-motion:reduce){.creation-spinner{animation:none;opacity:1}}
+
 /* Meus projetos. Cada item é um cartão com nome, situação, data e o jeito de
    abrir — e não uma tabela, porque tabela em celular vira rolagem lateral, que
    foi o defeito da faixa de 900px. */
@@ -347,6 +357,8 @@
    superfícies que acabaram de escurecer. Mesmo método: gerado das regras
    claras, porque a lista escrita à mão foi o que produziu a regressão. */
 @media(prefers-color-scheme:dark){
+  .creation-stage{color:#c7d2e4}
+  .creation-stage small{color:#c7d2e4}
   .project-list li{border-color:var(--border)}
   .project-line strong{color:#eef2f9}
   .project-state{color:#c7d2e4}
