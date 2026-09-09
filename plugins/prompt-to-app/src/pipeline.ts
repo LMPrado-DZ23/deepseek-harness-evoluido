@@ -72,6 +72,25 @@ export interface PipelineOptions {
    */
   readonly templateVersion?: string
   readonly runsRoot: string
+  /**
+   * O teto de tokens de UMA criação, somando as três tentativas.
+   *
+   * O requisito E-05 pede geração "limitada por orçamento", e até aqui o único
+   * teto era de TEMPO, por passo do construtor. Tempo não é o que a pessoa
+   * paga: numa instalação com chave própria, três tentativas sobre uma
+   * especificação grande gastam o que gastarem, e ninguém sabia quanto antes de
+   * a conta chegar.
+   *
+   * O teto é conferido DEPOIS de cada geração e ANTES de começar a próxima
+   * tentativa. Não dá para conferir antes da primeira: o custo de uma geração
+   * só é conhecido quando ela responde. Então a primeira tentativa sempre corre
+   * inteira, e o que o teto impede é a REPETIÇÃO cara — que é onde o gasto
+   * multiplica.
+   *
+   * Ausente, não há teto, e isso é deliberado: um limite inventado por mim
+   * cortaria a criação de quem não pediu limite nenhum.
+   */
+  readonly generationTokenBudget?: number
   readonly logoStoreRoot?: string
   readonly now?: () => Date
   readonly createId?: () => string
@@ -85,7 +104,7 @@ export interface PipelineOptions {
   readonly emergencyStop?: EmergencyStopGuard
 }
 
-export interface PipelineResult { readonly state: 'VERIFIED_PROTOTYPE' | 'BUILD_FAILED' | 'TESTS_FAILED' | 'BLOCKED_EXTERNAL' | 'CANCELLED' | 'INTERRUPTED'; readonly runDirectory?: string; readonly attempts: number; readonly message: string }
+export interface PipelineResult { readonly state: 'VERIFIED_PROTOTYPE' | 'BUILD_FAILED' | 'TESTS_FAILED' | 'BLOCKED_EXTERNAL' | 'BUDGET_EXCEEDED' | 'CANCELLED' | 'INTERRUPTED'; readonly runDirectory?: string; readonly attempts: number; readonly message: string }
 export interface PipelineRunOptions { readonly operationId?: string; readonly ownerSessionId?: string; readonly signal?: AbortSignal }
 
 export class PromptToAppPipeline {
@@ -133,6 +152,9 @@ export class PromptToAppPipeline {
       let finalFailureState: 'BUILD_FAILED' | 'TESTS_FAILED' = 'BUILD_FAILED'
       let stopRetries = false
       let completedAttempts = 0
+      // Os tokens SOMADOS da operação, e não os da última tentativa. O gasto de
+      // uma criação é o das três somadas, e é isso que o teto olha.
+      let spentTokens = 0
     // O relato é montado com o que o pipeline JÁ sabe e hoje descarta: quem
     // escreveu cada arquivo, o que os controles recusaram, e o que a tentativa
     // anterior pediu para corrigir. Sem guardar isto, `kind: 'diff'` continuaria
@@ -149,6 +171,11 @@ export class PromptToAppPipeline {
       // geração dá certo.
       const previousDiagnosticForReport = diagnostic ?? null
       if (isAborted(runOptions.signal)) return this.cancelled(actor, projectId, plan.plan_id, operationId, ownerSessionId, attempt - 1)
+      // O teto vale ANTES de começar a repetição, e não no meio dela: parar uma
+      // tentativa pela metade gastaria os tokens dela e não entregaria nada.
+      if (this.budgetExhausted(spentTokens)) {
+        return await this.budgetExceeded(actor, projectId, plan.plan_id, operationId, ownerSessionId, attempt - 1, activeRunDirectory, spentTokens)
+      }
       const runId = attempt === 1 ? operationId : opaqueOperationId(`${operationId}-attempt-${attempt}`); const runDirectory = resolve(this.options.runsRoot, runId)
       activeRunId = runId; activeRunDirectory = runDirectory
       await mkdir(this.options.runsRoot, { recursive: true }); await cp(this.options.templateDirectory, runDirectory, { recursive: true, errorOnExist: true })
@@ -185,6 +212,7 @@ export class PromptToAppPipeline {
       let generated: CodeGenerationResult
       try {
         generated = await generator.generate(spec, plan, previousDiagnostic)
+        spentTokens += (generated.inputTokens ?? 0) + (generated.outputTokens ?? 0)
         diagnostic = undefined
         assertGeneratedSource(generated.files)
         await writeGeneratedFiles(runDirectory, generated.files, {
@@ -511,6 +539,34 @@ export class PromptToAppPipeline {
       await this.options.service.transition(actor, projectId, 'INTERRUPTED')
     }
     return { state: finalState, attempts: attempt, message: finalState === 'INTERRUPTED' || finalState === 'BLOCKED_EXTERNAL' ? t('pipeline.interrupted') : t('pipeline.failed') }
+  }
+
+  /** O teto foi estourado? Sem teto configurado, nunca. */
+  private budgetExhausted(spentTokens: number): boolean {
+    const budget = this.options.generationTokenBudget
+    return budget !== undefined && spentTokens >= budget
+  }
+
+  /**
+   * A criação para porque o orçamento acabou — e a tela diz isso, não "falhou".
+   *
+   * `BUDGET_EXCEEDED` já existia como estado e já tinha frase própria na
+   * interface, mas só era produzido pelo ESTOURO DE TEMPO de um passo do
+   * construtor. Um teto de tokens que terminasse em `FAILED` mandaria a pessoa
+   * procurar defeito no aplicativo dela por causa de uma decisão de orçamento.
+   * @param spentTokens - o total somado, que vai no diagnóstico.
+   */
+  private async budgetExceeded(
+    actor: PromptToAppActor, projectId: string, planId: string, operationId: string,
+    ownerSessionId: string, attempts: number, runDirectory: string, spentTokens: number,
+  ): Promise<PipelineResult> {
+    const project = this.options.service.project(actor, projectId)
+    if (project.state === 'GENERATING') await this.options.service.transition(actor, projectId, 'BUILD_FAILED')
+    await this.options.service.putRun(actor, this.runRecord(
+      actor, projectId, planId, 'generate', Math.max(1, attempts), 'BUDGET_EXCEEDED', 'full', runDirectory, null,
+      `GENERATION_TOKEN_BUDGET_EXCEEDED tokens=${String(spentTokens)}`, operationId, operationId, ownerSessionId,
+    ))
+    return { state: 'BUDGET_EXCEEDED', attempts, message: t('pipeline.budgetExceeded') }
   }
 
   private async cancelled(actor: PromptToAppActor, projectId: string, planId: string, operationId: string, ownerSessionId: string, attempts: number, runDirectory = 'not-created'): Promise<PipelineResult> {

@@ -74,6 +74,14 @@ export interface PromptToAppPluginConfig {
   readonly allowedOrigins?: readonly string[]
   readonly modelByRoute?: Readonly<Record<string, string>>
   readonly runsRoot?: string
+  /**
+   * Teto de tokens de UMA criação, somando as três tentativas.
+   *
+   * Ausente, não há teto — e isso é deliberado: um limite inventado cortaria a
+   * criação de quem não pediu limite nenhum. Quem instala com chave própria e
+   * quer previsibilidade de gasto configura aqui.
+   */
+  readonly generationTokenBudget?: number
   readonly logoStoreRoot?: string
   readonly builderLifecycle?: {
     readonly registryReference?: `file:${string}`
@@ -179,7 +187,10 @@ export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}):
       if (runtime !== undefined) runtime.service.assertRunning(scope)
     },
   }
-  const pipeline = new PromptToAppPipeline({ service, builder, templateDirectory, runsRoot, logoStoreRoot, emergencyStop })
+  const pipeline = new PromptToAppPipeline({
+    service, builder, templateDirectory, runsRoot, logoStoreRoot, emergencyStop,
+    ...(config.generationTokenBudget === undefined ? {} : { generationTokenBudget: config.generationTokenBudget }),
+  })
   const registry: PromptToAppJobRegistry = {
     start: spec => ctx.jobs.start(spec as JobStart) as JobId,
     kill: (id, owner, reason) => ctx.jobs.kill(id, owner, reason),

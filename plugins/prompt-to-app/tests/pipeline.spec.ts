@@ -37,6 +37,7 @@ interface FixtureOptions {
   readonly execute?: (directory: string, command: string) => Promise<FixtureExecutionResult>
   readonly finish?: BuilderLifecycleSession['finish']
   readonly emergencyStop?: { assertRunning(scope: { readonly orgId: string; readonly tenantId: string }): void }
+  readonly generationTokenBudget?: number
 }
 
 async function fixture(options: FixtureOptions = {}) {
@@ -79,6 +80,7 @@ async function fixture(options: FixtureOptions = {}) {
     service: service as unknown as PromptToAppService, builder: resolver,
     templateDirectory, runsRoot, now: () => new Date('2026-09-03T12:00:00.000Z'), createId: () => `id-${++id}`,
     ...(options.emergencyStop === undefined ? {} : { emergencyStop: options.emergencyStop }),
+    ...(options.generationTokenBudget === undefined ? {} : { generationTokenBudget: options.generationTokenBudget }),
   })
   return { pipeline, service, builder, resolver, execute, runs, transitions, evidence, templateDirectory, runsRoot }
 }
@@ -345,6 +347,53 @@ describe('Prompt-to-App pipeline', () => {
     expect(failures).toHaveLength(3)
     expect(failures.every(run => run.stage === 'generate' && run.failure_code === 'JSON inválido')).toBe(true)
     expect(f.transitions).toEqual(['GENERATING', 'BUILD_FAILED'])
+  })
+
+  /**
+   * O teto de tokens de UMA criação, somando as três tentativas.
+   *
+   * Até aqui o único teto era de TEMPO, por passo do construtor — e tempo não é
+   * o que a pessoa paga. Numa instalação com chave própria, três tentativas
+   * sobre uma especificação grande gastavam o que gastassem.
+   */
+  it('para a criação quando o teto de tokens acaba, e diz que foi orçamento', async () => {
+    const f = await fixture({ generationTokenBudget: 1_000 })
+    // A cobrança acontece na geração BEM-SUCEDIDA: esta entrega os arquivos
+    // (por isso cobra) e é recusada depois, na verificação de importação, para
+    // forçar a repetição — que é onde o gasto multiplica.
+    const spending: CodeGeneratorPort = {
+      generate: vi.fn(async () => ({
+        ...cleanGeneration,
+        files: [{ path: 'src/GeneratedApp.tsx', content: "import { readFile } from 'node:fs'; export default function App(){ return null }; void readFile" }],
+        inputTokens: 400, outputTokens: 200,
+      })),
+    }
+    const result = await f.pipeline.run(actor, 'project', spending)
+
+    // 600 na primeira tentativa, 1200 na segunda: a TERCEIRA não começa.
+    expect(spending.generate).toHaveBeenCalledTimes(2)
+    expect(result.state).toBe('BUDGET_EXCEEDED')
+    const stopped = f.runs.at(-1)!
+    expect(stopped.state).toBe('BUDGET_EXCEEDED')
+    expect(stopped.failure_code).toContain('GENERATION_TOKEN_BUDGET_EXCEEDED')
+    // O gasto somado viaja no diagnóstico: sem ele, quem opera não sabe se o
+    // teto era apertado demais ou se a especificação é que é cara.
+    expect(stopped.failure_code).toContain('tokens=1200')
+  })
+
+  it('sem teto configurado, a criação usa as três tentativas', async () => {
+    // O padrão NÃO é um limite inventado por mim: sem configuração, não há teto.
+    const f = await fixture()
+    const spending: CodeGeneratorPort = {
+      generate: vi.fn(async () => ({
+        ...cleanGeneration,
+        files: [{ path: 'src/GeneratedApp.tsx', content: "import { readFile } from 'node:fs'; export default function App(){ return null }; void readFile" }],
+        inputTokens: 400_000, outputTokens: 200_000,
+      })),
+    }
+    const result = await f.pipeline.run(actor, 'project', spending)
+    expect(spending.generate).toHaveBeenCalledTimes(3)
+    expect(result.state).toBe('BUILD_FAILED')
   })
 
   it('rejects forbidden imports before writing or running builder commands', async () => {
