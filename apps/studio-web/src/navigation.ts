@@ -37,9 +37,12 @@ export function studioNavItems(): readonly StudioNavItem[] {
     { id: 'assistant', label: assistant.navLabel, href: ASSISTANT_PATH },
     { id: 'hub', label: hub.navLabel, href: HUB_PATH },
     { id: 'projects', label: t.nav.projects, href: null },
-    // A tela de progresso É o painel do trabalho em equipe. Um sétimo item ao
-    // lado de um "Progresso" mudo daria à pessoa dois nomes parecidos, um
-    // deles morto.
+    // O item se chama pelo que a TELA é: trabalho em equipe. Enquanto ele se
+    // chamava "Progresso", a pessoa cujo aplicativo estava sendo criado clicava
+    // ali esperando acompanhar a criação e caía em "Nenhum trabalho em equipe
+    // foi iniciado neste projeto" — outra coisa. O progresso da criação vive na
+    // própria tela inicial, sob "Seu projeto em andamento", que é onde ela já
+    // está quando isso importa.
     { id: 'progress', label: team.navLabel, href: TEAM_PATH },
     { id: 'result', label: t.nav.result, href: null },
   ]

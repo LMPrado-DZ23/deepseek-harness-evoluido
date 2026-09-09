@@ -123,7 +123,9 @@ describe('E-08: a pessoa vê para onde pode voltar, e por que às vezes não pod
     }))
     expect(html).toContain('ponto seguro')
     expect(html).toContain('integridade conferida')
-    expect(html).toContain('1 critérios conferidos')
+    // A contagem passou a dizer o que foi MESMO conferido: antes, "conferidos"
+    // contava a lista inteira, com falha e não automatizado dentro.
+    expect(html).toContain('1 critérios, todos conferidos')
     expect(html).toContain('você está aqui')
     expect(html).toContain('Voltar para este ponto')
     expect(html).toContain('continua no seu computador')
