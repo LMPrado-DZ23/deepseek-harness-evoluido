@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 const root = process.cwd()
 const digest = readFileSync(resolve(root, 'runtime/builder-image-digest'), 'utf8').trim()
@@ -18,17 +19,53 @@ const name = `dz23-builder-proof-${randomUUID()}`
 const uid = typeof process.getuid === 'function' ? process.getuid() : 1000
 const gid = typeof process.getgid === 'function' ? process.getgid() : 1000
 
+/**
+ * As opções de segurança vêm do PRODUTO, e não desta prova.
+ *
+ * Elas eram redigitadas aqui, à mão. Uma prova assim aprova a CÓPIA: o dia em
+ * que `hardenedHost` deixasse de mandar `--network none`, este arquivo
+ * continuaria verde dizendo que o construtor não alcança a rede. É a mesma
+ * classe de erro que a prova de endurecimento já denunciava no próprio
+ * cabeçalho — e ela mesma cometia, importando o `lib/` em vez do `src/`.
+ */
+const { hardenedHost } = await import(pathToFileURL(resolve(root, 'plugins/builder-supervisor/src/docker-adapter.ts')).href)
+const host = hardenedHost({ pids: 256, memoryBytes: 1_073_741_824, nanoCpus: 1_000_000_000 }, [])
+
 const securityArgs = [
-  '--network', 'none', '--user', `${uid}:${gid}`, '--cap-drop', 'ALL',
-  '--security-opt', 'no-new-privileges', '--read-only',
-  '--tmpfs', '/tmp:rw,noexec,nosuid,size=256m', '--pids-limit', '256',
+  ...productFlags(host),
+  // O ÚNICO desvio do produto, e ele é do ambiente da prova, não da política:
+  // em produção o contêiner roda como 10001, dono do `/tmp` que o produto cria;
+  // aqui o `/workspace` montado pertence a quem roda a prova, e um contêiner
+  // com outro dono não conseguiria escrever nele. O `/tmp` do produto é
+  // traduzido com o mesmo dono, por isso, logo abaixo.
+  '--user', `${uid}:${gid}`,
   '--env', 'HOME=/tmp', '--env', 'XDG_CONFIG_HOME=/tmp/.config', '--env', 'CI=true',
-  '--shm-size', '256m',
-  '--memory', '1g', '--cpus', '1',
   '--mount', `type=bind,src=${workspace},dst=/workspace`,
   '--mount', `type=bind,src=${templateStore},dst=/template-store,readonly`,
   '--workdir', '/workspace',
 ]
+
+/**
+ * A configuração do produto traduzida para linha de comando do Docker.
+ * @param value - o `HostConfig` que `hardenedHost` devolve.
+ * @returns as opções equivalentes.
+ */
+function productFlags(value) {
+  const flags = ['--network', value.NetworkMode]
+  if (value.ReadonlyRootfs) flags.push('--read-only')
+  for (const capability of value.CapDrop) flags.push('--cap-drop', capability)
+  for (const option of value.SecurityOpt) flags.push('--security-opt', option)
+  flags.push('--pids-limit', String(value.PidsLimit))
+  flags.push('--memory', String(value.Memory))
+  flags.push('--cpus', String(value.NanoCpus / 1_000_000_000))
+  flags.push('--shm-size', String(value.ShmSize))
+  if (value.IpcMode !== undefined && value.IpcMode !== '') flags.push('--ipc', value.IpcMode)
+  for (const [target, options] of Object.entries(value.Tmpfs ?? {})) {
+    flags.push('--tmpfs', `${target}:${options.replace(/uid=\d+/u, `uid=${uid}`).replace(/gid=\d+/u, `gid=${gid}`)}`)
+  }
+  for (const ulimit of value.Ulimits ?? []) flags.push('--ulimit', `${ulimit.Name}=${ulimit.Soft}:${ulimit.Hard}`)
+  return flags
+}
 
 let inspection
 let networkAttempt = ''

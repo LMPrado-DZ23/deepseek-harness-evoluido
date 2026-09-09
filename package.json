@@ -41,7 +41,7 @@
     "prove:storage-migration": "node scripts/prove-storage-migration.mjs",
     "prove:runtime": "node scripts/prove-runtime.mjs",
     "prove:studio-runtime": "node scripts/prove-studio-runtime.mjs",
-    "prove:builder-isolation": "node scripts/prove-builder-isolation.mjs",
+    "prove:builder-isolation": "tsx scripts/prove-builder-isolation.mjs",
     "prove:container-hardening": "tsx scripts/prove-container-hardening.mjs --self-test",
     "prove:template-pipeline": "tsx scripts/prove-template-pipeline.ts",
     "prove:generated-data": "tsx scripts/prove-generated-data.ts",

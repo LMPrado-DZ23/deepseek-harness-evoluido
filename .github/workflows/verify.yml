@@ -151,6 +151,18 @@ jobs:
           pnpm test:postgres-discovery
           node scripts/test-postgres.mjs --list
 
+      - name: Release license blockers (C-05, informativo)
+        # `gate:licenses` roda em modo REPOSITÓRIO e só AVISA sobre os pacotes
+        # não redistribuíveis; o modo release, que reprova, não era chamado em
+        # lugar nenhum. Então o único sinal de "isto não pode ser publicado"
+        # era uma linha de log dentro de um passo verde. Este passo executa o
+        # modo release e mostra o bloqueio pelo nome. Ele NÃO reprova o commit
+        # porque a decisão é do Prado (C-05): conviver com a restrição como
+        # instalação privada, ou tirar o subagente claude-code do perfil. O que
+        # ele impede é a decisão ficar invisível.
+        continue-on-error: true
+        run: pnpm gate:licenses:release
+
       - name: Dependency advisories
         # Precisa de rede, então NÃO roda fora da CI e nenhuma prova local a
         # cobre. `continue-on-error` é deliberado: um aviso novo publicado hoje

@@ -66,6 +66,10 @@
 		handle @public_identity {
 			reverse_proxy {$DZ23_HARNESS_UPSTREAM:127.0.0.1:3210} {
 				header_up X-DZ23-Edge "{$DZ23_EDGE_SECRET}"
+				# SUBSTITUI, não acrescenta: o `X-Forwarded-For` que o cliente
+				# manda viajava inteiro para a aplicação, e o limitador de taxa
+				# lia o primeiro elemento - quem tentava escolhia o próprio balde.
+				header_up X-Forwarded-For {remote_host}
 			}
 		}
 
@@ -74,11 +78,19 @@
 			forward_auth {$DZ23_HARNESS_UPSTREAM:127.0.0.1:3210} {
 				uri /api/studio/identity/session
 				header_up X-DZ23-Edge "{$DZ23_EDGE_SECRET}"
+				# SUBSTITUI, não acrescenta: o `X-Forwarded-For` que o cliente
+				# manda viajava inteiro para a aplicação, e o limitador de taxa
+				# lia o primeiro elemento - quem tentava escolhia o próprio balde.
+				header_up X-Forwarded-For {remote_host}
 				header_up -Connection
 				header_up -Upgrade
 			}
 			reverse_proxy {$DZ23_HARNESS_UPSTREAM:127.0.0.1:3210} {
 				header_up X-DZ23-Edge "{$DZ23_EDGE_SECRET}"
+				# SUBSTITUI, não acrescenta: o `X-Forwarded-For` que o cliente
+				# manda viajava inteiro para a aplicação, e o limitador de taxa
+				# lia o primeiro elemento - quem tentava escolhia o próprio balde.
+				header_up X-Forwarded-For {remote_host}
 			}
 		}
 

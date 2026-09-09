@@ -58,6 +58,28 @@ export function rateLimitBuckets(route: string): readonly IdentityRateLimitBucke
   return ['global']
 }
 
+/**
+ * O endereço que a BORDA afirmou, num `X-Forwarded-For`.
+ *
+ * O primeiro elemento do cabeçalho é o que o CLIENTE mandou: um proxy
+ * acrescenta o endereço observado ao final, não substitui o que veio. Ler o
+ * primeiro elemento era, portanto, deixar o cliente escolher o próprio balde do
+ * limitador — três valores forjados, três baldes distintos, e os limites de
+ * `magic-start`, `magic-verify` e `passkey` viravam decoração.
+ *
+ * O ÚLTIMO elemento é o que a borda confiável escreveu, e é o único que um
+ * cliente não consegue empurrar. (A borda do Studio também passou a
+ * SUBSTITUIR o cabeçalho, em vez de acrescentar; isto aqui é a defesa que
+ * sobrevive a uma borda reconfigurada.)
+ * @param header - o valor bruto do cabeçalho, ou `undefined`.
+ * @returns o endereço da borda, ou `undefined` quando não há nenhum utilizável.
+ */
+export function edgeForwardedAddress(header: string | undefined): string | undefined {
+  if (header === undefined) return undefined
+  const hops = header.split(',').map(hop => hop.trim()).filter(hop => hop !== '')
+  return hops.at(-1)
+}
+
 /** Stable pseudonymous key. Session ids must come from server-side authentication, never from an untrusted cookie. */
 export function rateLimitKey(
   request: IncomingMessage,

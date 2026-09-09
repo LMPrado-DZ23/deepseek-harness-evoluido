@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   IDENTITY_RATE_LIMITS,
   InMemoryIdentityRateLimiter,
+  edgeForwardedAddress,
   rateLimitBuckets,
   rateLimitKey,
 } from '../src/rate-limit.ts'
@@ -51,5 +52,29 @@ describe('identity application rate limits', () => {
     expect(rateLimitKey(request(undefined, '127.0.0.1')))
       .not.toBe(rateLimitKey(request(undefined, '127.0.0.2')))
     expect(rateLimitKey(request())).toHaveLength(64)
+  })
+})
+
+describe('M-3: o cliente não escolhe o próprio balde do limitador', () => {
+  // O primeiro elemento de `X-Forwarded-For` é o que o CLIENTE mandou; a borda
+  // ACRESCENTA o endereço observado ao final. Lendo o primeiro, bastava girar o
+  // cabeçalho para ter um balde novo a cada tentativa — e `magic-start` (5 a
+  // cada 15 min), `magic-verify` e `passkey` viravam decoração.
+  it('a mesma borda dá a mesma chave, por mais que o cliente invente prefixos', () => {
+    const real = '203.0.113.7'
+    const keys = [
+      edgeForwardedAddress(`1.2.3.4, ${real}`),
+      edgeForwardedAddress(`9.9.9.9, 8.8.8.8, ${real}`),
+      edgeForwardedAddress(real),
+      edgeForwardedAddress(`  , ${real}  `),
+    ]
+    expect(new Set(keys).size, JSON.stringify(keys)).toBe(1)
+    expect(keys[0]).toBe(real)
+  })
+
+  it('sem cabeçalho não há endereço forjado para usar', () => {
+    expect(edgeForwardedAddress(undefined)).toBeUndefined()
+    expect(edgeForwardedAddress('')).toBeUndefined()
+    expect(edgeForwardedAddress(' , ')).toBeUndefined()
   })
 })

@@ -17,7 +17,7 @@
  *
  * Uso: node --experimental-strip-types scripts/check-team-role-tools.ts [--self-test]
  */
-import { readFile } from 'node:fs/promises'
+import { readdir, readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
 import { AGENT_TEAM_ROLES, COORDINATOR_ROSTER, READ_TOOLS, WRITE_TOOLS, NETWORK_TOOLS, ROLE_TOOL_POLICY, roleToolRestriction, visibleTools } from '../plugins/agent-team/src/roles.js'
@@ -25,18 +25,57 @@ import { AGENT_TEAM_ROLES, COORDINATOR_ROSTER, READ_TOOLS, WRITE_TOOLS, NETWORK_
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
 
 /**
- * As ferramentas que cada extensão do Harness registra, pelo id da linha do
- * preset. É uma tabela porque o preset diz QUAL extensão monta, e não quais
- * ferramentas ela traz — e adivinhar isso pelo nome seria a mesma classe de
- * erro que `network`.
+ * Onde vive cada extensão do preset dentro do Harness fixado.
+ *
+ * Só o CAMINHO é escrito aqui; os NOMES das ferramentas são lidos do código do
+ * Harness. A versão anterior escrevia os nomes à mão — `tool-fs → read,
+ * read_image, write, edit` — e isso é exatamente o erro que este portão nasceu
+ * para impedir: uma tabela adivinhada. Se `tool-fs` passar a registrar
+ * `multi_edit`, o portão precisa VER, e não continuar afirmando um roster que
+ * não existe mais.
  */
-const TOOLS_BY_EXTENSION: Readonly<Record<string, readonly string[]>> = {
-  'tool-fs': ['read', 'read_image', 'write', 'edit'],
-  'tool-fs-search': ['glob', 'grep'],
-  'tool-bash': ['bash'],
-  'tool-pwsh': ['pwsh'],
-  'tool-web': ['web_search', 'web_fetch'],
-  'tool-skill': ['skill'],
+const EXTENSION_SOURCES: Readonly<Record<string, string>> = {
+  'tool-fs': 'third_party/deepseek-harness/packages/fs/tool-fs/src',
+  'tool-fs-search': 'third_party/deepseek-harness/packages/fs/tool-fs-search/src',
+  'tool-bash': 'third_party/deepseek-harness/packages/shell/tool-bash/src',
+  'tool-pwsh': 'third_party/deepseek-harness/packages/shell/tool-pwsh/src',
+  'tool-web': 'third_party/deepseek-harness/packages/web/tool-web/src',
+  'tool-skill': 'third_party/deepseek-harness/packages/skill/tool-skill/src',
+}
+
+/**
+ * Os nomes que uma extensão registra, lidos do código do Harness fixado.
+ * @param directory - a pasta `src` da extensão.
+ * @returns os nomes de ferramenta, em ordem.
+ */
+export async function registeredTools(directory: string): Promise<readonly string[]> {
+  const names = new Set<string>()
+  for (const file of await sources(directory)) {
+    const text = await readFile(file, 'utf8')
+    // Nem toda extensão registra em linha: `tool-fs-search` monta o objeto antes
+    // e chama `ctx.tools.register(tool)`. Por isso o que se lê é a DEFINIÇÃO —
+    // `defineTool({ ... name: '<nome>' ... })` — em arquivo que registra.
+    if (!text.includes('tools.register(')) continue
+    for (const block of text.matchAll(/defineTool\(\{/gu)) {
+      const after = text.slice(block.index ?? 0, (block.index ?? 0) + 600)
+      const named = /\bname:\s*'([a-z0-9_]+)'/u.exec(after)
+      // `name: 'tool:glob'` é o id do componente, não o nome da ferramenta que o
+      // modelo chama; o filtro de identificador simples já o deixa de fora.
+      if (named !== null) names.add(named[1]!)
+    }
+  }
+  return [...names].sort()
+}
+
+async function sources(directory: string): Promise<readonly string[]> {
+  const entries = await readdir(directory, { withFileTypes: true }).catch(() => [])
+  const found: string[] = []
+  for (const entry of entries) {
+    const path = resolve(directory, entry.name)
+    if (entry.isDirectory()) found.push(...await sources(path))
+    else if (/\.ts$/u.test(entry.name) && !/\.spec\.ts$/u.test(entry.name)) found.push(path)
+  }
+  return found
 }
 
 /** As ferramentas que ESCREVEM, olhando qualquer roster. */
@@ -47,14 +86,17 @@ const WRITERS = new Set<string>([...WRITE_TOOLS, 'bash', 'pwsh'])
  * @param source - o conteúdo do preset.
  * @returns os nomes de ferramenta, e as linhas cuja extensão este portão não conhece.
  */
-export function rosterOf(source: string): { readonly tools: readonly string[]; readonly unknown: readonly string[] } {
+export function rosterOf(
+  source: string,
+  toolsByExtension: Readonly<Record<string, readonly string[]>>,
+): { readonly tools: readonly string[]; readonly unknown: readonly string[] } {
   const ids = [...source.matchAll(/^- id: ([a-z0-9-]+)$/gmu)].map(match => match[1]!)
   const tools: string[] = []
   const unknown: string[] = []
   for (const id of ids) {
     if (id === 'persona') continue
-    if (!Object.hasOwn(TOOLS_BY_EXTENSION, id)) { unknown.push(id); continue }
-    tools.push(...TOOLS_BY_EXTENSION[id]!)
+    if (!Object.hasOwn(toolsByExtension, id)) { unknown.push(id); continue }
+    tools.push(...toolsByExtension[id]!)
   }
   return { tools: [...new Set(tools)].sort(), unknown }
 }
@@ -114,7 +156,26 @@ export function findings(
 }
 
 const preset = await readFile(resolve(root, 'dsh-home/.agent-presets/dz23-coordinator-in-process/agent.cordis.yml'), 'utf8')
-const { tools, unknown } = rosterOf(preset)
+
+// A tabela extensão→ferramentas, DERIVADA do Harness fixado. Uma extensão do
+// preset cuja pasta não existe (renomeada, movida) fica sem ferramenta nenhuma
+// e cai em `unknown`, que já reprova — em vez de sumir em silêncio.
+const derived: Record<string, readonly string[]> = {}
+const unreadable: string[] = []
+for (const [id, directory] of Object.entries(EXTENSION_SOURCES)) {
+  const names = await registeredTools(resolve(root, directory))
+  // Zero ferramenta numa extensão que existe significa que o LEITOR quebrou (a
+  // forma do registro mudou, a pasta mudou de lugar). Um leitor cego devolve um
+  // roster menor do que o real, e um roster menor faz o portão aprovar por não
+  // enxergar — que é o modo de falha que ele existe para impedir.
+  if (names.length === 0) unreadable.push(`${id} (${directory})`)
+  else derived[id] = names
+}
+if (unreadable.length > 0) {
+  process.stdout.write(`TEAM_ROLE_TOOLS=FAIL\n- extensão do Harness sem ferramenta legível: ${unreadable.join(', ')}\n`)
+  process.exit(1)
+}
+const { tools, unknown } = rosterOf(preset, derived)
 
 if (process.argv.includes('--self-test')) {
   // Acrescentar `bash` ao ROSTER tem de REPROVAR, e por um motivo preciso: a
@@ -151,4 +212,4 @@ if (problems.length > 0) {
   process.stdout.write(`TEAM_ROLE_TOOLS=FAIL\n${problems.map(line => `- ${line}`).join('\n')}\n`)
   process.exit(1)
 }
-process.stdout.write(`TEAM_ROLE_TOOLS=PASS papeis=${AGENT_TEAM_ROLES.length} roster=${tools.join(',')} leitura=${READ_TOOLS.join(',')}\n`)
+process.stdout.write(`TEAM_ROLE_TOOLS=PASS papeis=${AGENT_TEAM_ROLES.length} roster=${tools.join(',')} leitura=${READ_TOOLS.join(',')} extensoes_lidas=${Object.keys(derived).length}/${Object.keys(EXTENSION_SOURCES).length}\n`)

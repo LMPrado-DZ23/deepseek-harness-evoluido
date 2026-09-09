@@ -8,7 +8,7 @@ import type { SessionRecord } from './model.js'
 import { IdentityError, type StudioIdentityService } from './service.js'
 import { assertRouteContracts, type StudioRouteContract } from '@dz23-studio/policy'
 import { CSRF_COOKIE, parseCookies, parseCookieValues, SESSION_COOKIE, SESSION_GENERATION_COOKIE } from './cookies.js'
-import { InMemoryIdentityRateLimiter, rateLimitBuckets, rateLimitKey } from './rate-limit.js'
+import { InMemoryIdentityRateLimiter, edgeForwardedAddress, rateLimitBuckets, rateLimitKey } from './rate-limit.js'
 
 const JSON_LIMIT = 64 * 1024
 export const COOKIE_HEADER_LIMIT_BYTES = 8 * 1024
@@ -97,8 +97,9 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
         json(response, 404, { error: t('http.routeNotFound') })
         return
       }
+      // O ÚLTIMO hop, e não o primeiro: o primeiro é o que o cliente mandou.
       const forwardedAddress = config.edgeRequired === true
-        ? singleHeader(request.headers['x-forwarded-for'])?.split(',')[0]?.trim()
+        ? edgeForwardedAddress(singleHeader(request.headers['x-forwarded-for']))
         : undefined
       const key = rateLimitKey(request, forwardedAddress)
       for (const bucket of rateLimitBuckets(route)) {

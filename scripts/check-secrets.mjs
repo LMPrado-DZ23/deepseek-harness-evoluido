@@ -43,15 +43,17 @@ export const SECRET_RULES = [
  * marcador de posição. Documentação e prova precisam mostrar a FORMA da URL sem
  * carregar credencial, e recusar isso ensinaria a contornar o portão.
  */
-const PLACEHOLDER = /^(?:\*+|x+|senha|password|passwd|pass|secret|changeme|token|examplo|exemplo|example|placeholder|redacted|dummy|fake|test|teste|[A-Z][A-Z0-9_]{2,})$/u
+const PLACEHOLDER = /^(?:\*+|x+|senha|sua_senha|suasenha|password|your_password|passwd|pass|secret|changeme|token|examplo|exemplo|example|placeholder|redacted|dummy|fake|test|teste|usuario|base_de_teste)$/iu
 
 /**
- * Marcas que declaram, no próprio arquivo, que aquilo é fixture ou exemplo.
- * Um teste PRECISA conter a forma proibida para provar que o portão a pega; o
- * que não pode é um segredo de verdade se esconder atrás dessa marca, então ela
- * só vale em arquivo de teste ou de portão.
+ * O portão lê a si mesmo com as regras dentro; só ele se isenta.
+ *
+ * Antes, TODO arquivo sob `tests/`, `fixtures/` e todo `*.spec.*` era isento —
+ * e teste é justamente o lugar mais comum onde um segredo de verdade é colado
+ * por engano. A varredura que existia para impedir isso não olhava para lá. Um
+ * teste que precisa da forma proibida entra na lista NOMINAL abaixo, com
+ * arquivo, regra e motivo, como qualquer outra dispensa.
  */
-const FIXTURE_PATH = /(?:(?:^|\/)(?:tests?|__tests__|fixtures?)\/)|(?:\.(?:spec|test)\.[cm]?[jt]sx?$)/u
 const GATE_PATH = /^scripts\/check-secrets\.(?:mjs|spec\.mjs)$/u
 
 /**
@@ -63,6 +65,56 @@ const GATE_PATH = /^scripts\/check-secrets\.(?:mjs|spec\.mjs)$/u
  * dispensa esquecida é como a varredura apodrece sem ninguém notar.
  */
 export const SECRET_ALLOWLIST = [
+  {
+    path: 'apps/studio-runtime/operator.spec.mjs',
+    rule: 'postgres-dsn-with-password',
+    reason: 'DSN inventado no teste do operador; ele prova que a senha NÃO aparece no que o operador registra',
+  },
+  {
+    path: 'audit/AUDITOR_B_SECURITY.md',
+    rule: 'postgres-dsn-with-password',
+    reason: 'relatório de auditoria citando a forma que o portão detecta, para explicar o achado',
+  },
+  {
+    path: 'plugins/integration-hub/tests/export.spec.ts',
+    rule: 'aws-access-key',
+    reason: 'fixture da exportação: o teste PRECISA da forma proibida para provar que a exportação a barra',
+  },
+  {
+    path: 'plugins/integration-hub/tests/export.spec.ts',
+    rule: 'github-token',
+    reason: 'idem: forma proibida usada como isca da exportação',
+  },
+  {
+    path: 'plugins/integration-hub/tests/export.spec.ts',
+    rule: 'postgres-dsn-with-password',
+    reason: 'idem: DSN com senha usado como isca da exportação',
+  },
+  {
+    path: 'plugins/integration-hub/tests/export.spec.ts',
+    rule: 'private-key',
+    reason: 'idem: bloco de chave privada usado como isca da exportação',
+  },
+  {
+    path: 'plugins/integration-hub/tests/export.spec.ts',
+    rule: 'slack-token',
+    reason: 'idem: token de Slack usado como isca da exportação',
+  },
+  {
+    path: 'plugins/integration-hub/tests/http.spec.ts',
+    rule: 'private-key',
+    reason: 'fixture da borda HTTP do hub, para provar que a chave não atravessa',
+  },
+  {
+    path: 'plugins/storage-postgres/tests/tls.spec.ts',
+    rule: 'postgres-dsn-with-password',
+    reason: 'DSN inventado para montar a URL de TLS no teste',
+  },
+  {
+    path: 'plugins/studio-web/tests/assistant-attachments.spec.ts',
+    rule: 'private-key',
+    reason: 'anexo com chave privada, para provar que o assistente a recusa',
+  },
   {
     path: '.github/workflows/verify.yml',
     rule: 'postgres-dsn-with-password',
@@ -80,7 +132,7 @@ const SKIPPED = /\.(?:png|jpe?g|gif|webp|ico|woff2?|ttf|otf|pdf|zip|gz|tar|bundl
  * @returns achados: arquivo, linha e qual regra bateu. NUNCA o trecho casado.
  */
 export function secretFindings(path, source) {
-  if (FIXTURE_PATH.test(path) || GATE_PATH.test(path)) return []
+  if (GATE_PATH.test(path)) return []
   const findings = []
   const lines = source.split('\n')
   for (const [index, line] of lines.entries()) {
@@ -121,14 +173,21 @@ function selfTest() {
     ['nome de variável de ambiente passa', secretFindings('a.ts', "apiKeyEnv: 'DZ23_OMNIROUTE_KEY'").length === 0],
     ['DSN sem senha passa', secretFindings('a.ts', 'postgres://host:5432/db').length === 0],
     ['URL comum passa', secretFindings('a.ts', 'https://example.com/v1/logs').length === 0],
-    ['fixture de teste é isenta', secretFindings('plugins/x/tests/a.spec.ts', 'ghp_' + 'a'.repeat(36)).length === 0],
+    // O CONTRÁRIO do que valia antes, e é o ponto: teste é o lugar mais comum
+    // onde um segredo de verdade é colado por engano, e era justamente o lugar
+    // que a varredura não olhava. Isenção agora é NOMINAL, arquivo por regra.
+    ['segredo em teste REPROVA', secretFindings('plugins/x/tests/a.spec.ts', 'ghp_' + 'a'.repeat(36)).length === 1],
+    ['isenção nominal de fixture marca em vez de sumir', secretFindings('plugins/integration-hub/tests/export.spec.ts', 'ghp_' + 'a'.repeat(36))[0]?.allowed === true],
     ['"exemplo" na linha NÃO isenta', secretFindings('a.ts', '// exemplo: ghp_' + 'a'.repeat(36)).length === 1],
     // Documentação e prova mostram a FORMA da URL sem carregar credencial.
     ['senha interpolada passa', secretFindings('a.ts', 'postgres://u:${senha}@host/db').length === 0],
     ['senha mascarada passa', secretFindings('a.md', 'postgresql://dz23_test:***@127.0.0.1:5432/dz23_test').length === 0],
     ['marcador de posição em maiúsculas passa', secretFindings('a.md', 'postgresql://USUARIO:SENHA@127.0.0.1:5432/BASE').length === 0],
     ['linha minificada com duas strings não vira achado', secretFindings('a.ts', "createEmailSender({APP_SMTP_URL:'http://example.test',APP_EMAIL_FROM:'owner@example.test'})").length === 0],
-    ['arquivo .spec.mjs fora de tests/ é isento', secretFindings('apps/x/operator.spec.mjs', 'postgres://user:hunter2gato@host/db').length === 0],
+    ['arquivo .spec.mjs fora da lista REPROVA', secretFindings('apps/x/operator.spec.mjs', 'postgres://user:hunter2gato@host/db').length === 1],
+    // Uma senha inteiramente em maiúsculas passava por "marcador de posição":
+    // `postgres://u:HUNTER2GATO@h/d` era aceito. O conjunto agora é fechado.
+    ['senha em maiúsculas NÃO é marcador', secretFindings('a.md', 'postgres://u:HUNTER2GATO@h/d').length === 1],
     // A isenção marca, não apaga: o achado continua existindo, com `allowed`.
     ['isenção marca em vez de sumir', secretFindings('.github/workflows/verify.yml', 'postgresql://u:hunter2gato@h/d')[0]?.allowed === true],
     ['isenção vale só para a regra nomeada', secretFindings('.github/workflows/verify.yml', 'ghp_' + 'a'.repeat(36))[0]?.allowed !== true],
