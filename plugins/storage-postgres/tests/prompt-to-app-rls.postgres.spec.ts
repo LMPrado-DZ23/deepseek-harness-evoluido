@@ -39,6 +39,7 @@ import {
   PLAN_UNIT,
   listPlans,
   putPlanRecord,
+  PLAN_TABLE,
 } from '../../prompt-to-app/src/plan-store.ts'
 import {
   EVIDENCE_UNIT,
@@ -47,6 +48,7 @@ import {
 } from '../../prompt-to-app/src/evidence-store.ts'
 import type { StudioAppSpecRecord, StudioDesignSpecRecord, StudioEvidence, StudioIntakeTurn, StudioPlan } from '../../prompt-to-app/src/model.ts'
 import { createDesignSpec } from '../../prompt-to-app/src/design.ts'
+import { migrationPlan, scopeCounts, verifyMigration, type DomainRow } from '../../../scripts/domain-rls-migration.ts'
 
 const dsn = process.env.DZ23_POSTGRES_TEST_DSN
 const describePostgres = dsn === undefined ? describe.skip : describe
@@ -170,6 +172,37 @@ describePostgres('S-08 — respostas do intake e escolhas de visual na tabela po
     await putEvidenceRecord(store, evidenceOf('e5', '2026-09-08T00:05:00.000Z', { org_id: 'org-b', tenant_id: 'tenant-b' }))
     expect((await listEvidence(store, a)).map(row => row.evidence_id)).toEqual(['e1', 'e2'])
     expect((await listEvidence(store, b)).map(row => row.evidence_id)).toEqual(['e5'])
+
+    // ── a TRAVESSIA de dados de uma instalação que já roda ─────────────────
+    // Os cinco domínios saem do padrão `kv`, então uma instalação existente vai
+    // ter linhas na chave-valor no dia em que trocar de autoridade. O roteiro
+    // genérico do S-09 (`domain-rls-migration`) atende os cinco sem mudança —
+    // e é isso que este trecho prova, com o mais delicado deles.
+    //
+    // A verificação é registro a registro, não por contagem: contar pega o que
+    // sumiu e NÃO pega o que chegou diferente — e um plano que chega diferente
+    // é outra autorização de escrita.
+    const kv: DomainRow[] = [
+      { key: 'k1', value: planOf('k1', 1, { project_id: 'projeto-2' }) },
+      { key: 'k2', value: planOf('k2', 2, { project_id: 'projeto-2' }) },
+      { key: 'k3', value: planOf('k3', 1, { project_id: 'projeto-2', org_id: 'org-b', tenant_id: 'tenant-b' }) },
+    ]
+    const steps = migrationPlan(kv)
+    expect(scopeCounts(steps)).toEqual([
+      { scope: 'org-a/tenant-a', rows: 2 },
+      { scope: 'org-b/tenant-b', rows: 1 },
+    ])
+    for (const step of steps) await store.put(step.scope, PLAN_UNIT, PLAN_TABLE, step.key, step.value)
+
+    const migrated: DomainRow[] = []
+    for (const scope of [a, b]) {
+      for (const row of await store.list(scope, PLAN_UNIT, PLAN_TABLE)) {
+        if (kv.some(candidate => candidate.key === row.key)) migrated.push({ key: row.key, value: row.value })
+      }
+    }
+    const report = verifyMigration(kv, migrated)
+    expect(report.findings).toEqual([])
+    expect(report.sourceDigest).toBe(report.targetDigest)
 
     const units = await admin.query<{ unit: string }>(
       `SELECT DISTINCT unit FROM "${schema}"."tenant_records" ORDER BY unit`,
