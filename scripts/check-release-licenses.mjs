@@ -104,9 +104,28 @@ async function installedPackages(root) {
   return found
 }
 
+const LOCK_FIXTURE = [
+  'packages:',
+  "  '@anthropic-ai/claude-agent-sdk@0.3.241':",
+  '    resolution: {}',
+  '  zod@4.4.3:',
+  '    resolution: {}',
+  "  '@escopo/com-arroba@1.0.0-beta@2':",
+  '    resolution: {}',
+].join('\n')
+
 function selfTest() {
   const checks = [
     ['MIT passa', classifyLicense('MIT') === 'allowed'],
+    // O portão media `node_modules`, que é a árvore de DESENVOLVIMENTO, e não o
+    // que o artefato leva. Estes casos guardam a leitura do lock de release.
+    ['lock de release: acha pacote com escopo', packagesInReleaseLock(LOCK_FIXTURE).has('@anthropic-ai/claude-agent-sdk')],
+    ['lock de release: acha pacote sem escopo', packagesInReleaseLock(LOCK_FIXTURE).has('zod')],
+    // O corte é na ÚLTIMA arroba: cortando na primeira, todo pacote com escopo
+    // entraria com o nome errado e o bloqueio nunca casaria.
+    ['lock de release: corta na última arroba', packagesInReleaseLock(LOCK_FIXTURE).has('@escopo/com-arroba')],
+    ['lock de release: não inventa pacote', !packagesInReleaseLock(LOCK_FIXTURE).has('react')],
+    ['lock de release vazio não vira permissão', packagesInReleaseLock('').size === 0],
     ['AGPL reprova', classifyLicense('AGPL-3.0-only') === 'forbidden'],
     ['BUSL reprova', classifyLicense('BUSL-1.1') === 'forbidden'],
     ['Business Source por extenso reprova', classifyLicense('Business Source License 1.1') === 'forbidden'],
@@ -127,6 +146,34 @@ function selfTest() {
   const failed = checks.filter(([, ok]) => !ok).map(([name]) => name)
   console.log(`RELEASE_LICENSES_SELF_TEST=${failed.length === 0 ? 'PASS' : 'FAIL'} checks=${String(checks.length)}${failed.length === 0 ? '' : ` falhou=${failed.join(', ')}`}`)
   return failed.length === 0
+}
+
+
+/**
+ * Os pacotes que o ARTEFATO leva, lidos do lock de release.
+ *
+ * O portão media a árvore errada. `node_modules` é o ambiente de
+ * DESENVOLVIMENTO: ele contém todo pacote do workspace do Harness fixado,
+ * inclusive os que a topologia de release exclui. Com isso ele acusava
+ * `@anthropic-ai/claude-agent-sdk` como impedimento de publicação mesmo depois
+ * de o pacote ter saído do artefato — e, pior, teria continuado calado se
+ * alguém acrescentasse um pacote não redistribuível SÓ no release.
+ *
+ * O que decide a publicação é `pnpm-lock.release.yaml`, que é exatamente o que
+ * o `Dockerfile` copia por cima do lock de desenvolvimento antes de instalar.
+ * @param lock - o conteúdo do lock de release.
+ * @returns os nomes de pacote presentes nele.
+ */
+export function packagesInReleaseLock(lock) {
+  const names = new Set()
+  // As chaves de `snapshots:` e `packages:` são `nome@versao`, e o nome pode ter
+  // escopo (`@escopo/nome@versao`): o corte é na ÚLTIMA arroba, nunca na
+  // primeira, senão todo pacote com escopo entraria com o nome errado.
+  for (const line of lock.split('\n')) {
+    const match = /^ {2}'?((?:@[^@'\s]+\/)?[^@'\s]+)@[^':\s]+'?:/u.exec(line)
+    if (match !== null) names.add(match[1])
+  }
+  return names
 }
 
 if (!RUN_AS_SCRIPT) {
@@ -156,8 +203,18 @@ if (!RUN_AS_SCRIPT) {
     const verdict = classifyLicense(license)
     if (verdict === 'forbidden') forbidden.push(`${manifest.name}: ${license ?? 'sem licença'}`)
     if (verdict === 'review' && !reviewed.has(manifest.name)) unreviewed.push(`${manifest.name}: ${license ?? 'sem licença'}`)
-    if (reviewed.get(manifest.name)?.decisao === 'blocked-for-release') {
-      blockedForRelease.push(`${manifest.name}: ${String(reviewed.get(manifest.name)?.motivo ?? '')}`)
+  }
+  // O impedimento de PUBLICAÇÃO é decidido pelo lock de release, e não pela
+  // árvore de desenvolvimento: são topologias diferentes, e é a de release que
+  // vira artefato.
+  const releaseLock = await readFile('pnpm-lock.release.yaml', 'utf8').catch(() => undefined)
+  const shipped = releaseLock === undefined ? undefined : packagesInReleaseLock(releaseLock)
+  if (shipped === undefined) {
+    blockedForRelease.push('pnpm-lock.release.yaml ausente: sem ele não dá para dizer o que o artefato leva')
+  } else {
+    for (const [name, entry] of reviewed) {
+      if (entry?.decisao !== 'blocked-for-release') continue
+      if (shipped.has(name)) blockedForRelease.push(`${name}: ${String(entry?.motivo ?? '')}`)
     }
   }
   if (inspected === 0) {

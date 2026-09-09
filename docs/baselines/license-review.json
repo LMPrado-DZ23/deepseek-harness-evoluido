@@ -32,13 +32,13 @@
     "verdadeira": "proprietária, todos os direitos reservados",
     "evidencia": "node_modules/@anthropic-ai/claude-agent-sdk/LICENSE.md: \"© Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance\"",
     "decisao": "blocked-for-release",
-    "motivo": "Não é redistribuível. Chega ao perfil do Studio por @deepseek-ai/dsh-subagent-claude-code, que está em dsh-home/profiles/studio/package.json. Enquanto essa dependência existir, o artefato NÃO pode ser publicado. A saída é tirar o subagente claude-code do perfil ou manter o artefato como instalação privada. A decisão é do Prado (ver C-05)."
+    "motivo": "Nao e redistribuivel. Chegava ao artefato por @deepseek-ai/dsh-subagent-claude-code, um pacote do workspace do Harness fixado. A ADR-042 excluiu esse pacote das DUAS topologias (desenvolvimento e release), entao ele NAO esta mais no artefato — e este bloqueio agora e medido em pnpm-lock.release.yaml, nao em node_modules. Se voltar ao lock de release, a publicacao volta a ser impedida. Quem tem licenca propria do SDK recoloca o subagente pelo acrescimo em dsh-home/profiles/studio/optional/claude-code.patch.yml."
   },
   "@anthropic-ai/claude-agent-sdk-linux-x64": {
     "declared": "SEE LICENSE IN LICENSE.md",
     "verdadeira": "proprietária, todos os direitos reservados",
     "evidencia": "mesmo texto do pacote principal",
     "decisao": "blocked-for-release",
-    "motivo": "Binário do pacote acima; mesma restrição."
+    "motivo": "Nao e redistribuivel. Chegava ao artefato por @deepseek-ai/dsh-subagent-claude-code, um pacote do workspace do Harness fixado. A ADR-042 excluiu esse pacote das DUAS topologias (desenvolvimento e release), entao ele NAO esta mais no artefato — e este bloqueio agora e medido em pnpm-lock.release.yaml, nao em node_modules. Se voltar ao lock de release, a publicacao volta a ser impedida. Quem tem licenca propria do SDK recoloca o subagente pelo acrescimo em dsh-home/profiles/studio/optional/claude-code.patch.yml."
   }
 }

@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { INTAKE_ANSWERS, answerIntake } from './answering'
 
 // O Studio instala um service worker, e requisição que passa por ele NÃO é
 // interceptada por `page.route`: foi assim que a primeira versão deste teste
@@ -57,10 +58,7 @@ test('depois de recarregar, o resultado da criação continua na tela', async ({
   await page.goto('/studio/')
   await page.getByRole('button', { name: 'Quero uma página para apresentar meu trabalho ou negócio.' }).click()
   await page.getByRole('button', { name: 'Continuar' }).click()
-  for (const answer of ['Clientes locais', 'Conhecer os serviços', 'Serviços e contato']) {
-    await page.getByLabel('Sua resposta').fill(answer)
-    await page.getByRole('button', { name: 'Responder e continuar' }).click()
-  }
+  await answerIntake(page, INTAKE_ANSWERS)
   await page.getByRole('button', { name: 'Montar meu plano' }).click()
   await page.getByRole('button', { name: 'Aprovar este plano' }).click()
   await page.getByRole('button', { name: 'Iniciar criação' }).click()
@@ -100,10 +98,7 @@ test('o botão de ver o protótipo fica ocupado, e o clique duplo não abre duas
   await page.goto('/studio/')
   await page.getByRole('button', { name: 'Quero uma página para apresentar meu trabalho ou negócio.' }).click()
   await page.getByRole('button', { name: 'Continuar' }).click()
-  for (const answer of ['Clientes locais', 'Conhecer os serviços', 'Serviços e contato']) {
-    await page.getByLabel('Sua resposta').fill(answer)
-    await page.getByRole('button', { name: 'Responder e continuar' }).click()
-  }
+  await answerIntake(page, INTAKE_ANSWERS)
   await page.getByRole('button', { name: 'Montar meu plano' }).click()
   await page.getByRole('button', { name: 'Aprovar este plano' }).click()
   await page.getByRole('button', { name: 'Iniciar criação' }).click()
@@ -194,10 +189,7 @@ test('durante a criação, a tela mostra a etapa em que está', async ({ context
   await page.goto('/studio/')
   await page.getByRole('button', { name: 'Quero uma página para apresentar meu trabalho ou negócio.' }).click()
   await page.getByRole('button', { name: 'Continuar' }).click()
-  for (const answer of ['Clientes locais', 'Conhecer os serviços', 'Serviços e contato']) {
-    await page.getByLabel('Sua resposta').fill(answer)
-    await page.getByRole('button', { name: 'Responder e continuar' }).click()
-  }
+  await answerIntake(page, INTAKE_ANSWERS)
   await page.getByRole('button', { name: 'Montar meu plano' }).click()
   await page.getByRole('button', { name: 'Aprovar este plano' }).click()
   freeze = true

@@ -6,6 +6,24 @@ packages:
   - third_party/deepseek-harness/apps/*
   - third_party/deepseek-harness/vendor/*
   - third_party/deepseek-harness/packages/*/*
+  # O subagente `claude-code` sai das DUAS topologias, e não só da de release.
+  #
+  # O portão `gate:image-lock` exige que desenvolvimento e release sejam o mesmo
+  # conjunto de pacotes (fora a injeção), e ele está certo: artefato construído a
+  # partir de um conjunto diferente do que foi testado é risco de verdade. Então
+  # a exclusão vale aqui também, e o que se testa é o que se publica.
+  #
+  # Motivo: ele arrasta `@anthropic-ai/claude-agent-sdk`, proprietário e não
+  # redistribuível. Enquanto estivesse no artefato, NENHUMA publicação pública
+  # deste projeto seria possível, qualquer que fosse a licença do código.
+  #
+  # O submódulo NÃO é tocado: o arquivo continua lá e `gate:upstream-pin` segue
+  # verde. O que muda é a topologia DESTE repositório, que é nossa. Nenhum outro
+  # pacote do Harness depende dele — conferido.
+  #
+  # Quem tem licença própria do SDK recoloca pelo acréscimo documentado em
+  # `dsh-home/profiles/studio/optional/claude-code.patch.yml`. Ver ADR-042.
+  - '!third_party/deepseek-harness/packages/subagent/subagent-claude-code'
   - third_party/deepseek-harness/native/landlock-run
   - third_party/deepseek-harness/native/landlock-run/packages/*
 

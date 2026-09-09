@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, request as apiRequest, test } from '@playwright/test'
+import { INTAKE_ANSWERS, answerIntake } from './answering'
 
 test('recusa interface e API sem sessão', async () => {
   const client = await apiRequest.newContext({
@@ -137,10 +138,7 @@ test('percorre as cinco etapas, muda privacidade e termina sem alegar publicaç�
   await expect(page.locator('.privacy-notice')).toContainText('ollama-local')
   await page.getByRole('button', { name: 'Quero uma página para apresentar meu trabalho ou negócio.' }).click()
   await page.getByRole('button', { name: 'Continuar' }).click()
-  for (const answer of ['Clientes locais', 'Conhecer os serviços', 'Serviços e contato']) {
-    await page.getByLabel('Sua resposta').fill(answer)
-    await page.getByRole('button', { name: 'Responder e continuar' }).click()
-  }
+  await answerIntake(page, INTAKE_ANSWERS)
   await page.getByRole('button', { name: 'Montar meu plano' }).click()
   await page.getByLabel('O que precisa mudar?').fill('Mostrar o contato antes dos serviços.')
   await page.getByRole('button', { name: 'Enviar pedido de mudança' }).click()

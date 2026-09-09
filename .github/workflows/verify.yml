@@ -151,16 +151,20 @@ jobs:
           pnpm test:postgres-discovery
           node scripts/test-postgres.mjs --list
 
-      - name: Release license blockers (C-05, informativo)
+      - name: Release license blockers (C-05)
         # `gate:licenses` roda em modo REPOSITÓRIO e só AVISA sobre os pacotes
-        # não redistribuíveis; o modo release, que reprova, não era chamado em
-        # lugar nenhum. Então o único sinal de "isto não pode ser publicado"
-        # era uma linha de log dentro de um passo verde. Este passo executa o
-        # modo release e mostra o bloqueio pelo nome. Ele NÃO reprova o commit
-        # porque a decisão é do Prado (C-05): conviver com a restrição como
-        # instalação privada, ou tirar o subagente claude-code do perfil. O que
-        # ele impede é a decisão ficar invisível.
-        continue-on-error: true
+        # não redistribuíveis; o modo release é o que reprova. Ele mede o
+        # `pnpm-lock.release.yaml` - o que vira o artefato -, e não
+        # `node_modules`, que é o que a máquina de desenvolvimento tem.
+        #
+        # Este passo era `continue-on-error` enquanto a decisão do C-05 estava
+        # aberta: avisar sem reprovar era honesto quando ninguém tinha decidido.
+        # A ADR-042 decidiu, o bloqueio caiu para zero, e um passo que avisa e
+        # segue verde vira um passo que se aprende a ignorar. Agora reprova: se
+        # `@anthropic-ai/claude-agent-sdk` - ou qualquer outro pacote não
+        # redistribuível - voltar ao lockfile de release, a imagem deixa de
+        # poder ser publicada e a CI diz isso antes do merge, não depois da
+        # publicação.
         run: pnpm gate:licenses:release
 
       - name: Dependency advisories

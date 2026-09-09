@@ -81,12 +81,19 @@
         providerName: codex
         permissionMode: approve-for-me
         env: {}
-    - id: dz23-subagent-claude-code
-      name: '@deepseek-ai/dsh-subagent-claude-code'
-      config:
-        providerName: claude-code
-        permissionMode: acceptEdits
-        env: {}
+    # O subagente `claude-code` NAO entra no perfil publicado.
+    #
+    # Ele arrasta `@anthropic-ai/claude-agent-sdk`, que e proprietario e nao
+    # redistribuivel: enquanto estivesse aqui, NENHUM artefato publico deste
+    # projeto poderia ser gerado, qualquer que fosse a licenca do codigo
+    # (`pnpm gate:licenses:release` reprova com essa mensagem).
+    #
+    # A capacidade nao foi apagada: o tipo `claude-code` continua no produto e
+    # `providerStates()` passa a devolver NOT_CONFIGURED em vez de OK. Quem tem
+    # licenca propria do SDK recoloca o subagente pelo acrescimo documentado em
+    # `dsh-home/profiles/studio/optional/claude-code.patch.yml`.
+    #
+    # Decisao registrada na ADR-042 (pergunta 2 do requisito C-05).
     - id: dz23-subagent-spawn-in-process
       name: '@deepseek-ai/dsh-subagent-spawn-in-process'
       config:

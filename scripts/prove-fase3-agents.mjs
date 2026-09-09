@@ -87,7 +87,17 @@ try {
   for (const route of ['studio-fake', 'deepseek-official', 'omniroute', 'ollama']) assert.ok(routes.includes(route), `missing route ${route}`)
   assert.equal(routes.includes('9router'), false)
   const subagents = booted.ctx.subagents.list()
-  for (const provider of ['spawn-in-process', 'codex', 'claude-code']) assert.ok(subagents.includes(provider), `missing provider ${provider}`)
+  for (const provider of ['spawn-in-process', 'codex']) assert.ok(subagents.includes(provider), `missing provider ${provider}`)
+  // `claude-code` NAO esta no perfil publicado, e a ausencia e afirmada aqui em
+  // vez de silenciada: ele arrasta um pacote proprietario e nao redistribuivel,
+  // e enquanto estivesse no artefato nenhuma publicacao publica seria possivel
+  // (ADR-042). Quem tem licenca propria do SDK recoloca pelo acrescimo
+  // documentado em dsh-home/profiles/studio/optional/claude-code.patch.yml.
+  //
+  // Afirmar a AUSENCIA importa: sem esta linha, alguem que recolocasse o
+  // subagente sem querer voltaria a bloquear a publicacao e o portao de
+  // licencas so acusaria na hora de gerar o artefato.
+  assert.equal(subagents.includes('claude-code'), false, 'claude-code nao deve estar no perfil publicado')
 
   const parentSessionId = SessionId(`fase3-person-${runId}`)
   parentHandle = await booted.ctx.agents.create({

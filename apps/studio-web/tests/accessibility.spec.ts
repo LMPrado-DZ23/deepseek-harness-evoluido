@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
+import { INTAKE_ANSWERS, answerIntake } from './answering'
 
 const origin = 'http://studio.dz23.localhost:4179'
 
@@ -49,10 +50,7 @@ test.describe('acessibilidade do fluxo principal', () => {
     await expect(page.getByRole('heading', { name: 'Só mais alguns detalhes' })).toBeVisible({ timeout: 15_000 })
     await check('perguntas')
 
-    for (const answer of ['Clientes locais', 'Conhecer os serviços', 'Serviços e contato']) {
-      await page.getByLabel('Sua resposta').fill(answer)
-      await page.getByRole('button', { name: 'Responder e continuar' }).click()
-    }
+    await answerIntake(page, INTAKE_ANSWERS)
     await page.getByRole('button', { name: 'Montar meu plano' }).click()
     await expect(page.locator('.plan-list .task-card').first()).toBeVisible({ timeout: 15_000 })
     await check('plano')
@@ -136,10 +134,7 @@ test.describe('o mesmo fluxo no modo escuro', () => {
     await page.getByRole('button', { name: 'Continuar' }).click()
     await expect(page.getByRole('heading', { name: 'Só mais alguns detalhes' })).toBeVisible({ timeout: 15_000 })
     await check('perguntas')
-    for (const answer of ['Clientes locais', 'Conhecer os serviços', 'Serviços e contato']) {
-      await page.getByLabel('Sua resposta').fill(answer)
-      await page.getByRole('button', { name: 'Responder e continuar' }).click()
-    }
+    await answerIntake(page, INTAKE_ANSWERS)
     await page.getByRole('button', { name: 'Montar meu plano' }).click()
     await expect(page.locator('.plan-list .task-card').first()).toBeVisible({ timeout: 15_000 })
     await check('plano')

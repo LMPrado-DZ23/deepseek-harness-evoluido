@@ -95,9 +95,20 @@ try {
   await page.getByLabel('Sua resposta').waitFor()
   await shot(page, '02-perguntas')
 
+  // A mesma espera que `tests/answering.ts` explica: desabilitado E
+  // `aria-busy="false"` e o unico estado em que o campo esta vazio e nada esta
+  // no ar. Sem ela, uma resposta lenta faz o proximo `fill` escrever na
+  // pergunta velha e o texto ir embora com o redesenho - aqui o custo seria
+  // uma IMAGEM de README travada numa tela que a pessoa nunca ve.
+  const responder = page.getByRole('button', { name: 'Responder e continuar' })
   for (const answer of ['Clientes locais', 'Conhecer os serviços', 'Serviços e contato']) {
+    await responder.waitFor({ state: 'attached' })
+    await page.waitForFunction(() => {
+      const button = [...document.querySelectorAll('button')].find(candidate => candidate.textContent?.trim() === 'Responder e continuar')
+      return button !== undefined && button.disabled && button.getAttribute('aria-busy') === 'false'
+    })
     await page.getByLabel('Sua resposta').fill(answer)
-    await page.getByRole('button', { name: 'Responder e continuar' }).click()
+    await responder.click()
   }
 
   // 3. O plano, que a pessoa aprova ou muda antes de qualquer criação.
