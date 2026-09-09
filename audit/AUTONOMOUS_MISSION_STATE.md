@@ -2,11 +2,15 @@
 
 - mission_id: `DZ23-STUDIO-V1-20260904`
 - objetivo: concluir o DZ23 STUDIO v1.0 com provas verificáveis, sem verde artificial
-- estado: `FINAL_AUDIT`
-- iteração: 31
+- estado: `FIXING` (pós-auditoria: os CRITICAL e os HIGH das três auditorias fechados; MEDIUM em andamento)
+- iteração: 32
 - início: 2026-09-04
 - último heartbeat: 2026-09-09
-- último progresso real: S-15, P-09 e C-24 saíram de NOT_EXECUTED para BETA com prova contra Docker 29.4.3 e contra o runtime real; S-08 ganhou classificação gateada dos 25 pendentes
+- último progresso real: as três auditorias independentes rodaram e foram
+  consolidadas em `audit/FINAL_THREE_AGENT_REVIEW.md`; os 3 CRITICAL e os 8
+  HIGH com correção possível foram fechados com prova, mais 7 MEDIUM de
+  segurança. O typecheck do repositório ficou limpo pela primeira vez (eram 22
+  erros anteriores a esta sessão).
 - branch: `integ`
 - ponta: ver `git log -1`
 - upstream: `deepseek-harness@6c705be1ce6774a000d061da41d1823b03a3d42c`
@@ -14,9 +18,12 @@
 ## Placar objetivo
 
 - v1.0: **112 de 120** (93,3%) em BETA ou STABLE
-- suíte: 2716 aprovados, 65 pulados
+- suíte: 2724 aprovados, 65 pulados
+- typecheck: 0 erros; build: 0
 - portões estáticos: 15/15 PASS
-- e2e navegador: 36 aprovados (mesa, tablet, celular) com axe, 0 violação
+- e2e navegador: 38 aprovados (mesa, tablet, celular) com axe, 0 violação — agora
+  INCLUINDO a metade verificada da jornada, que estava desligada por um
+  diagnóstico errado
 - PostgreSQL 16.13 real: 62/62
 - provas de runtime: assistente (17 ferramentas), reinício de agente, loopback, endurecimento de contêiner
 
@@ -45,9 +52,10 @@ X-12 (WebMCP), A-03, A-06, M-03, S-15, P-09, C-24.
 
 ## Próxima ação
 
-`FINAL_AUDIT`: três auditorias independentes (arquitetura, segurança,
-produto/QA), sem que uma veja a conclusão da outra, consolidadas em
-`audit/FINAL_THREE_AGENT_REVIEW.md`.
+`FIXING`: o que ficou em aberto está tabelado em
+`audit/FINAL_THREE_AGENT_REVIEW.md`, seção "Em aberto" — B-M6 (rotação do CSRF),
+C-H3/H4/H9 (identificador de máquina e jargão na tela) e os MEDIUM de produto.
+Depois deles, `RETESTING` e nova passada dos revisores sobre as correções.
 
 ## Instruções de retomada
 
