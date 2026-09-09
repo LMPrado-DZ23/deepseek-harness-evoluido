@@ -32,6 +32,7 @@
     "storage:operator-stopped": "node scripts/run-storage-operator.mjs",
     "studio:setup-templates": "node scripts/setup-templates.mjs",
     "prove:edge": "node scripts/prove-edge.mjs",
+    "prove:loopback": "node scripts/prove-loopback-binding.mjs --self-test",
     "prove:fase3-agents": "node scripts/prove-fase3-agents.mjs",
     "prove:agent-restart": "node scripts/prove-agent-restart-runtime.mjs",
     "preflight:fase3": "node scripts/preflight-fase3.mjs",
