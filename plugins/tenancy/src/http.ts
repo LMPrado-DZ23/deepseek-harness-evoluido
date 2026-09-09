@@ -104,7 +104,7 @@ export function authorizeRoute(role: Parameters<typeof roleAllows>[0], permissio
 }
 
 async function readJson(request: IncomingMessage): Promise<unknown> {
-  if (!singleHeader(request.headers['content-type'])?.toLowerCase().startsWith('application/json')) throw new Error('Envie os dados em formato JSON.')
+  if (!singleHeader(request.headers['content-type'])?.toLowerCase().startsWith('application/json')) throw new Error(t('http.jsonBodyRequired'))
   const chunks: Buffer[] = []
   let size = 0
   for await (const chunk of request) {

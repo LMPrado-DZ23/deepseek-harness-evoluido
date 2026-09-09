@@ -82,7 +82,7 @@ export function authorizeRoute(role, permission) {
 }
 async function readJson(request) {
     if (!singleHeader(request.headers['content-type'])?.toLowerCase().startsWith('application/json'))
-        throw new Error('Envie os dados em formato JSON.');
+        throw new Error(t('http.jsonBodyRequired'));
     const chunks = [];
     let size = 0;
     for await (const chunk of request) {

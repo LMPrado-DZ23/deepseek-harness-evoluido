@@ -157,7 +157,7 @@ export async function apply(ctx: Context, config: IdentityPluginConfig = {}): Pr
   const edgeRequired = config.edge?.required ?? ctx.webServer.host !== '127.0.0.1'
   const edgeSecretRef = config.edge?.secretRef === undefined ? undefined : credentialRef(config.edge.secretRef)
   if (edgeRequired && edgeSecretRef === undefined) {
-    throw new Error('O modo servidor exige edge.secretRef para validar a borda Caddy.')
+    throw new Error(t('config.serverModeRequiresEdgeSecret'))
   }
   if (edgeRequired && config.enrollment === 'open') {
     throw new Error(t('config.closedEnrollmentRequired'))

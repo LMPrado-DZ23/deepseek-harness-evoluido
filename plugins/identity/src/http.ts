@@ -383,7 +383,7 @@ function principalOf(session: SessionRecord) {
 
 async function readJson(request: IncomingMessage): Promise<unknown> {
   if (!singleHeader(request.headers['content-type'])?.toLowerCase().startsWith('application/json')) {
-    throw new IdentityHttpInputError('Envie os dados em formato JSON.')
+    throw new IdentityHttpInputError(t('http.jsonBodyRequired'))
   }
   const chunks: Buffer[] = []
   let size = 0

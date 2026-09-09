@@ -209,7 +209,7 @@ export class StudioTenancyService {
     await this.#emailSender.sendInvitation({
       to: normalized, token, workspaceName: workspace.name, role, expiresInHours: 72,
     })
-    await this.#identity.recordAdministrationEvent('invitation_created', actor.userId, actor.orgId, workspaceId, 'Convite de membro criado.')
+    await this.#identity.recordAdministrationEvent('invitation_created', actor.userId, actor.orgId, workspaceId, t('audit.invitationCreated'))
     return { invitation, token }
   }
 
@@ -230,7 +230,7 @@ export class StudioTenancyService {
   async #acceptInvitationLocked(user: IdentityUser, tokenHash: string): Promise<Membership> {
     const invitation = this.#invitationForUser(user, tokenHash)
     if (invitation.revoked_at !== null || invitation.accepted_at !== null) throw new TenancyError('replay', t('service.esteConviteNaoEsta'))
-    if (Date.parse(invitation.expires_at) <= this.#now().getTime()) throw new TenancyError('expired', 'Este convite expirou.')
+    if (Date.parse(invitation.expires_at) <= this.#now().getTime()) throw new TenancyError('expired', t('errors.invitationExpired'))
     if (user.org_id !== invitation.org_id) throw new TenancyError('forbidden', t('service.esteConvitePertenceOutra'))
     this.#workspace(invitation.org_id, invitation.workspace_id)
     if (this.#membership(user.user_id, invitation.workspace_id) !== undefined) {
@@ -249,7 +249,7 @@ export class StudioTenancyService {
     }
     await this.#repository.putMembership(membership)
     await this.#repository.putInvitation({ ...invitation, accepted_at: now })
-    await this.#identity.recordAdministrationEvent('invitation_accepted', user.user_id, invitation.org_id, invitation.workspace_id, 'Convite aceito.')
+    await this.#identity.recordAdministrationEvent('invitation_accepted', user.user_id, invitation.org_id, invitation.workspace_id, t('audit.invitationAccepted'))
     return membership
   }
 

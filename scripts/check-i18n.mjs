@@ -5,6 +5,35 @@ import ts from 'typescript'
 import { legacyRevision, pluginBaselineRevisions, portugueseText } from './i18n-baseline-shared.mjs'
 import { scanReadinessClaims } from './i18n-readiness.mjs'
 
+/**
+ * Literal que TEM FORMA DE FRASE, num plugin que já tem catálogo.
+ *
+ * O detector de português é uma lista, e lista esquece: `"Acesso negado."`,
+ * `"Fila cheia."` e `"Chave secreta ausente."` passavam por ele. Esta regra não
+ * pergunta o IDIOMA — pergunta se aquilo é uma frase: começa em maiúscula,
+ * tem mais de uma palavra, não carrega caractere de código e termina em ponto.
+ * Num plugin que já mantém catálogo, uma frase solta no `src` é ou texto da
+ * pessoa fora do catálogo, ou diagnóstico técnico que precisa estar NOMEADO
+ * abaixo — as duas coisas merecem decisão de alguém, não silêncio.
+ */
+function sentenceShaped(raw) {
+  const text = raw.slice(1, -1).trim()
+  if (text.length < 8 || !text.includes(' ')) return false
+  if (/[{}<>=_/\\]|\$\{/u.test(text)) return false
+  if (!/^[A-ZÁÉÍÓÚÂÊÔÃÕÇ]/u.test(text)) return false
+  return /[.!?]$/u.test(text)
+}
+
+/**
+ * As frases técnicas que ficam no código, uma a uma, com motivo.
+ *
+ * Um portão sem dispensa é contornado no primeiro falso positivo; uma dispensa
+ * aberta deixa de ser portão. Cada entrada nomeia o ARQUIVO e o porquê.
+ */
+const TECHNICAL_SENTENCES = [
+  { file: 'plugins/storage-postgres/src/capacity.ts', reason: 'costura de capacidade distribuída (concessão, fencing token): mensagens em inglês para quem opera o banco, nunca exibidas' },
+]
+
 const root = process.cwd()
 const catalogPath = resolve(root, 'apps/studio-web/src/i18n/pt-BR.json')
 const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'))
@@ -129,7 +158,8 @@ function scanSource(path, strict, baselines) {
   const sourceFile = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, extname(path) === '.tsx' ? ts.ScriptKind.TSX : ts.ScriptKind.TS)
   const grandfathered = strict ? new Set() : resolveBaseline(path, 'legacy', [legacyRevision])
   const baselineLiterals = baselines === undefined ? new Set() : resolveBaseline(path, 'plugins', baselines)
-  visit(sourceFile, sourceFile, path, grandfathered, baselineLiterals)
+  // `strict` aqui significa: este plugin JÁ mantém catálogo.
+  visit(sourceFile, sourceFile, path, grandfathered, baselineLiterals, strict && path.includes(`${sep}plugins${sep}`))
 }
 
 /**
@@ -157,12 +187,20 @@ function readBaselineFile() {
   try { return JSON.parse(readFileSync(resolve(root, 'docs/inventory/i18n-legacy-literals.json'), 'utf8')) } catch { return undefined }
 }
 
-function visit(node, sourceFile, path, grandfathered, baselineLiterals) {
+function visit(node, sourceFile, path, grandfathered, baselineLiterals, strictSentences = false) {
   if (node.kind === ts.SyntaxKind.JsxText && /[\p{L}\p{N}]/u.test(node.text)) {
     const { line } = sourceFile.getLineAndCharacterOfPosition(node.getStart())
     directText.push(`${basename(path)}:${line + 1}:${node.text.trim()}`)
   }
   const raw = node.getText(sourceFile)
+  if (ts.isStringLiteral(node) && strictSentences && sentenceShaped(raw) && !portugueseText(raw)) {
+    const repoPath = relative(root, path).replaceAll('\\', '/')
+    const excused = TECHNICAL_SENTENCES.some(entry => entry.file === repoPath)
+    if (!excused) {
+      const { line } = sourceFile.getLineAndCharacterOfPosition(node.getStart())
+      directText.push(`${basename(path)}:${line + 1}:${raw.slice(0, 80)} (frase solta num plugin com catálogo)`)
+    }
+  }
   if ((ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateExpression(node)) && portugueseText(raw) && !grandfathered.has(raw)) {
     const { line } = sourceFile.getLineAndCharacterOfPosition(node.getStart())
     const hit = `${basename(path)}:${line + 1}:${node.getText(sourceFile).slice(0, 80)}`
@@ -176,7 +214,7 @@ function visit(node, sourceFile, path, grandfathered, baselineLiterals) {
     else if (generatedSource) (generatedSourceHits[repoPath] ??= []).push(hit)
     else directText.push(hit)
   }
-  ts.forEachChild(node, child => visit(child, sourceFile, path, grandfathered, baselineLiterals))
+  ts.forEachChild(node, child => visit(child, sourceFile, path, grandfathered, baselineLiterals, strictSentences))
 }
 
 function walk(directory) {

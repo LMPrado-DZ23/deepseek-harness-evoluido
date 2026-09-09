@@ -51,7 +51,26 @@ const securityArgs = [
  * @returns as opções equivalentes.
  */
 function productFlags(value) {
+  // Um campo do produto que esta função NÃO traduz é um campo que a prova não
+  // exercita — e ela continuaria verde com ele enfraquecido. Por isso a lista
+  // é conferida contra as chaves do `HostConfig`: chave nova sem tradução
+  // REPROVA a prova, em vez de sumir.
+  const translated = new Set([
+    'NetworkMode', 'ReadonlyRootfs', 'CapDrop', 'SecurityOpt', 'PidsLimit', 'Memory', 'NanoCpus',
+    'ShmSize', 'IpcMode', 'Tmpfs', 'Ulimits', 'Privileged', 'PublishAllPorts', 'PortBindings',
+    'OomKillDisable', 'Mounts',
+  ])
+  const unknown = Object.keys(value).filter(key => !translated.has(key))
+  if (unknown.length > 0) throw new Error(`hardenedHost tem campo que esta prova não traduz: ${unknown.join(', ')}`)
   const flags = ['--network', value.NetworkMode]
+  // Os campos que o produto declara FALSOS/vazios: a prova falha se algum deles
+  // vier ligado, porque o Docker não tem opção para "não privilegiado" — a
+  // ausência da flag é o padrão, e provar ausência é comparar com o produto.
+  if (value.Privileged === true) throw new Error('hardenedHost declarou Privileged: true')
+  if (value.PublishAllPorts === true) throw new Error('hardenedHost declarou PublishAllPorts: true')
+  if (value.OomKillDisable === true) throw new Error('hardenedHost declarou OomKillDisable: true')
+  if (Object.keys(value.PortBindings ?? {}).length > 0) throw new Error('hardenedHost declarou PortBindings')
+  if ((value.Mounts ?? []).length > 0) throw new Error('hardenedHost declarou Mounts próprios')
   if (value.ReadonlyRootfs) flags.push('--read-only')
   for (const capability of value.CapDrop) flags.push('--cap-drop', capability)
   for (const option of value.SecurityOpt) flags.push('--security-opt', option)

@@ -636,7 +636,7 @@ export class StudioIdentityService {
         await this.#updateCounter(credential, verified.newCounter)
         const user = this.#user(challenge.user_id)
         const issued = await this.#issueSession(user, device)
-        await this.#audit('login_succeeded', user.user_id, issued.session.session_id, user.org_id, user.tenant_id, 'success', 'Entrada por chave de acesso.')
+        await this.#audit('login_succeeded', user.user_id, issued.session.session_id, user.org_id, user.tenant_id, 'success', t('auth.signedInWithPasskey'))
         return issued
       })
     ))

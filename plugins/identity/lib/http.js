@@ -350,7 +350,7 @@ function principalOf(session) {
 }
 async function readJson(request) {
     if (!singleHeader(request.headers['content-type'])?.toLowerCase().startsWith('application/json')) {
-        throw new IdentityHttpInputError('Envie os dados em formato JSON.');
+        throw new IdentityHttpInputError(t('http.jsonBodyRequired'));
     }
     const chunks = [];
     let size = 0;

@@ -66,6 +66,16 @@ const GATE_PATH = /^scripts\/check-secrets\.(?:mjs|spec\.mjs)$/u
  */
 export const SECRET_ALLOWLIST = [
   {
+    path: 'audit/AUDITOR_B_VERIFICACAO.md',
+    rule: 'github-token',
+    reason: 'relatório da segunda auditoria citando o comando com que ele PROVOU que a varredura pega segredo em teste',
+  },
+  {
+    path: 'audit/AUDITOR_B_VERIFICACAO.md',
+    rule: 'postgres-dsn-with-password',
+    reason: 'mesmo relatório, citando a senha em maiúsculas que deixou de contar como marcador de posição',
+  },
+  {
     path: 'apps/studio-runtime/operator.spec.mjs',
     rule: 'postgres-dsn-with-password',
     reason: 'DSN inventado no teste do operador; ele prova que a senha NÃO aparece no que o operador registra',

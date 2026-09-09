@@ -1,5 +1,9 @@
 {
+  "audit.invitationAccepted": "Convite aceito.",
+  "audit.invitationCreated": "Convite de membro criado.",
   "audit.memberRoleChanged": "Papel de membro alterado.",
+  "errors.invitationExpired": "Este convite expirou.",
+  "http.jsonBodyRequired": "Envie os dados em formato JSON.",
   "http.rotaNaoEncontrada": "Rota não encontrada.",
   "http.seuPapelNaoPermite": "Seu papel não permite esta ação.",
   "http.solicitacaoGrandeDemais": "Solicitação grande demais.",

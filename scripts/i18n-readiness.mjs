@@ -54,7 +54,7 @@ const MACHINE_WORDS = [
  */
 const OPERATOR_KEYS = [
   { plugin: 'prompt-to-app', pattern: /^prompts\./u, reason: 'instruções para o MODELO, não texto de tela' },
-  { plugin: '*', pattern: /json(?:Required|Invalid)$|^errors\.invalidJson$|^http\.invalidJson$/iu, reason: 'erro de contrato de API, lido por quem integra' },
+  { plugin: '*', pattern: /json(?:Required|Invalid|BodyRequired)$|^errors\.invalidJson$|^http\.invalidJson$/iu, reason: 'erro de contrato de API, lido por quem integra' },
   { plugin: 'agents', pattern: /^git\./u, reason: 'fronteira do Git: superfície de quem opera o repositório do projeto' },
   { plugin: 'assistant-bridge', pattern: /^errors\.(?:duplicateRepository|repositoryMissing|repositoryStrings|absoluteRepository|gitRoot)$/u, reason: 'configuração do repositório liberado, feita por quem administra' },
   { plugin: 'assistant-bridge', pattern: /^tools\./u, reason: 'descrição de ferramenta para o assistente, não para a tela' },
