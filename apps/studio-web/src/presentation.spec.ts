@@ -85,27 +85,34 @@ describe('C-09: o código do estado não é a explicação', () => {
   })
 })
 
-describe('M-04: por que esta rota', () => {
-  it('explica a escolha quando existe rota externa, e cala quando não há o que explicar', () => {
-    // O motivo era calculado a cada escolha e jogado fora: nenhuma tela lia o
-    // endereço de saúde, e a pessoa via o NOME da rota sem saber se era a local
-    // por preferência, a direta por falta de rota saudável, ou a que ela mesma
-    // escolheu.
-    expect(routeReasonNotice('any', 'Primeira rota saudável do perfil.')).toBe('Primeira rota saudável do perfil.')
-    // No perfil local a frase de privacidade já diz tudo; repetir o motivo
-    // técnico ao lado dela só acrescenta ruído para quem não programa.
-    expect(routeReasonNotice('local-only', 'Modelo local saudável preferido para leitura segura.')).toBe(null)
-    // Sem rota não há escolha a explicar: existe um bloqueio, e quem conta isso
-    // é a frase de privacidade.
-    expect(routeReasonNotice('any', null)).toBe(null)
-    expect(routeReasonNotice('any', undefined)).toBe(null)
-    expect(routeReasonNotice('any', '   ')).toBe(null)
+describe('M-04 / C-H4: por que esta rota, em português de gente', () => {
+  it('traduz o CÓDIGO do motivo, e cala quando não há tradução', () => {
+    // A frase que chegava aqui era a de quem OPERA o Studio: "Meia-abertura:
+    // uma chamada decide se o circuito fecha ou reabre.", "Teto de gasto do
+    // escopo estourado", nome de provedor. Nada disso diz o que aconteceu nem o
+    // que fazer para quem não programa — e era a PRIMEIRA tela do produto.
+    expect(routeReasonNotice('any', 'FIRST_HEALTHY', t.privacy.reasons)).toBe(t.privacy.reasons.FIRST_HEALTHY)
+    expect(routeReasonNotice('any', 'HALF_OPEN', t.privacy.reasons)).toBe(t.privacy.reasons.HALF_OPEN)
+    // Todo motivo que o produto sabe produzir tem frase, e toda frase diz o
+    // efeito; as de bloqueio dizem também o próximo passo.
+    for (const [code, sentence] of Object.entries(t.privacy.reasons)) {
+      expect(sentence.length, code).toBeGreaterThan(30)
+      expect(sentence, code).not.toMatch(/circuito|meia-abertura|escopo|rota paga|OmniRoute|DeepSeek/iu)
+    }
+    // No perfil local a frase de privacidade já diz tudo.
+    expect(routeReasonNotice('local-only', 'SAFE_READ_LOCAL', t.privacy.reasons)).toBe(null)
+    // Sem motivo, nada a explicar.
+    expect(routeReasonNotice('any', null, t.privacy.reasons)).toBe(null)
+    expect(routeReasonNotice('any', undefined, t.privacy.reasons)).toBe(null)
+    expect(routeReasonNotice('any', '   ', t.privacy.reasons)).toBe(null)
+    // E um código sem tradução CALA, em vez de despejar o texto interno.
+    expect(routeReasonNotice('any', 'CODIGO_QUE_NAO_EXISTE', t.privacy.reasons)).toBe(null)
   })
 
   it('a tela mostra o motivo junto da frase de privacidade', () => {
     const source = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8')
-    expect(source).toContain('routeReasonNotice(props.privacy, props.routeReason)')
-    expect(source).toContain('health.route_reason')
+    expect(source).toContain('routeReasonNotice(props.privacy, props.routeReason, t.privacy.reasons)')
+    expect(source).toContain('health.route_reason_code')
   })
 })
 
@@ -135,8 +142,8 @@ describe('M-05/C-22: os três perfis na tela', () => {
     expect(privacyProfileOf('equilibrado')).toBe('equilibrado')
     expect(privacyNotice('local-only', 'openrouter', t.privacy)).toBe(privacyNotice('privado-local', 'openrouter', t.privacy))
     expect(privacyNotice('any', 'openrouter', t.privacy)).toBe(privacyNotice('melhor-qualidade', 'openrouter', t.privacy))
-    expect(routeReasonNotice('local-only', 'Primeira rota saudável do perfil.')).toBe(null)
-    expect(routeReasonNotice('equilibrado', 'Primeira rota saudável do perfil.')).toBe('Primeira rota saudável do perfil.')
+    expect(routeReasonNotice('local-only', 'FIRST_HEALTHY', t.privacy.reasons)).toBe(null)
+    expect(routeReasonNotice('equilibrado', 'FIRST_HEALTHY', t.privacy.reasons)).toBe(t.privacy.reasons.FIRST_HEALTHY)
   })
 
   it('avisa ANTES que privado-local sem IA local não cria nada', () => {

@@ -149,3 +149,24 @@ describe('AppSpec acceptance compiler', () => {
     expect(generated).toContain("repository.transition(String(created.id),'cancelled'")
   })
 })
+
+describe('C-H3: a lista de conferências é legível por quem não programa', () => {
+  // A tela mostrava `page:Início`, `entity:Cliente`, `field:nome`,
+  // `language=pt-BR` — com `:`, `=` e palavra em inglês — na única tela que
+  // responde "meu aplicativo faz o que eu pedi?".
+  it('toda conferência tem frase em português, e nenhuma frase é identificador', () => {
+    const clinic: AppSpecV1 = {
+      ...spec,
+      pages: [{ name: 'Início', sections: ['Serviços'] }],
+      entities: [{ kind: 'database', name: 'Cliente', fields: [{ name: 'nome', type: 'text', required: true }] }],
+      acceptance_criteria: ['A navegação deve ser simples.'],
+    } as AppSpecV1
+    for (const category of ['landing-page', 'form-database', 'crud-panel', 'dashboard', 'saas-authenticated', 'scheduling'] as const) {
+      for (const check of acceptanceChecks(clinic, category)) {
+        expect(check.title, `${category}/${check.id}`).toBeDefined()
+        // Nada de `page:`, `field:`, `language=` na frase que a pessoa lê.
+        expect(check.title!, `${category}/${check.id}`).not.toMatch(/^(?:page|section|entity|field|crud|fluxo|flow|language|document)[:=]/u)
+      }
+    }
+  })
+})

@@ -76,7 +76,7 @@ export function enforceRoutePrivacy(
 ): RouteSelection {
   if (profile !== 'privado-local') return selection
   if (selection.route === undefined || selection.route === localRoute) return selection
-  return { route: undefined, explicit: selection.explicit, reason: blockedReason }
+  return { route: undefined, explicit: selection.explicit, reason: blockedReason, reasonCode: 'LOCAL_BLOCKED' }
 }
 export interface RouteHealthRepository {
   routes(): readonly RouteHealthRecord[]
@@ -85,10 +85,28 @@ export interface RouteHealthRepository {
   putEvent(record: RouteSwitchEvent): Promise<void>
 }
 
+/**
+ * Por que esta rota foi escolhida — em duas camadas de propósito.
+ *
+ * `reason` é a frase de quem OPERA o Studio: ela fala de circuito, meia-abertura,
+ * teto de escopo e nome de provedor, porque é isso que a tela de rotas precisa
+ * dizer. Ela chegava LITERAL à primeira tela do produto, onde quem lê não
+ * programa: "Meia-abertura: uma chamada decide se o circuito fecha ou reabre."
+ * não diz o que aconteceu nem o que fazer.
+ *
+ * `reasonCode` é o mesmo fato num código estável, para a tela de quem NÃO opera
+ * traduzir em efeito e próximo passo, sem depender de casar texto.
+ */
+export type RouteReasonCode =
+  | 'PRIVATE_LOCAL' | 'LOCAL_BLOCKED' | 'EXPLICIT' | 'SAFE_READ_LOCAL' | 'FIRST_HEALTHY'
+  | 'DIRECT_FALLBACK' | 'BUDGET_LOCAL' | 'BUDGET_BLOCKED' | 'HALF_OPEN' | 'ALL_OPEN'
+  | 'DISABLED' | 'BALANCED_LOCAL' | 'BALANCED_EXTERNAL'
+
 export interface RouteSelection {
   readonly route: string | undefined
   readonly explicit: boolean
   readonly reason: string
+  readonly reasonCode: RouteReasonCode
 }
 
 export interface RouteSelectionOptions {
@@ -310,11 +328,11 @@ export class StudioRouteHealthService {
     if (profile === 'privado-local') {
       const localSelected = options.explicitRoute === undefined || options.explicitRoute === this.config.localRoute
       if (localSelected && localUsable) {
-        return { route: this.config.localRoute, explicit: options.explicitRoute !== undefined, reason: t('reasons.privateLocalOnly') }
+        return { route: this.config.localRoute, explicit: options.explicitRoute !== undefined, reason: t('reasons.privateLocalOnly'), reasonCode: 'PRIVATE_LOCAL' }
       }
       const reason = LOCAL_BLOCKED_REASON
       await this.auditSwitch(scope, options.explicitRoute ?? this.config.localRoute, 'blocked', reason, options.explicitRoute !== undefined)
-      return { route: undefined, explicit: options.explicitRoute !== undefined, reason }
+      return { route: undefined, explicit: options.explicitRoute !== undefined, reason, reasonCode: 'LOCAL_BLOCKED' }
     }
     const explicit = options.explicitRoute !== undefined
     // O desligamento vem ANTES do teto e antes da rota escolhida a dedo: ele é a
@@ -323,7 +341,7 @@ export class StudioRouteHealthService {
     if (options.explicitRoute !== undefined && !this.enabled(scope, options.explicitRoute)) {
       const reason = DISABLED_REASON
       await this.auditSwitch(scope, options.explicitRoute, 'blocked', reason, true)
-      return { route: undefined, explicit: true, reason }
+      return { route: undefined, explicit: true, reason, reasonCode: 'DISABLED' }
     }
     // O teto vale também para a rota escolhida a dedo: um guarda que a escolha
     // explícita atravessa não é guarda, é sugestão. A rota local fica de fora
@@ -333,14 +351,14 @@ export class StudioRouteHealthService {
       if (localUsable) {
         const reason = BUDGET_LOCAL_REASON
         await this.auditSwitch(scope, from, this.config.localRoute, reason, explicit)
-        return { route: this.config.localRoute, explicit, reason }
+        return { route: this.config.localRoute, explicit, reason, reasonCode: 'BUDGET_LOCAL' }
       }
       const reason = BUDGET_BLOCKED_REASON
       await this.auditSwitch(scope, from, 'blocked', reason, explicit)
-      return { route: undefined, explicit, reason }
+      return { route: undefined, explicit, reason, reasonCode: 'BUDGET_BLOCKED' }
     }
     if (options.explicitRoute !== undefined) {
-      return { route: options.explicitRoute, explicit: true, reason: t('reasons.explicitRoute') }
+      return { route: options.explicitRoute, explicit: true, reason: t('reasons.explicitRoute'), reasonCode: 'EXPLICIT' }
     }
     // `equilibrado` prefere a local em TODO propósito, não só na leitura segura:
     // é isso que separa "prefere a local" de "usa a melhor que houver".
@@ -348,6 +366,7 @@ export class StudioRouteHealthService {
       return {
         route: this.config.localRoute, explicit: false,
         reason: profile === 'equilibrado' ? BALANCED_LOCAL_REASON : t('reasons.safeReadLocal'),
+        reasonCode: profile === 'equilibrado' ? 'BALANCED_LOCAL' : 'SAFE_READ_LOCAL',
       }
     }
     const known = this.config.routes.map(route => this.get(scope, route))
@@ -358,9 +377,9 @@ export class StudioRouteHealthService {
       // local e está recebendo outra coisa, e a frase diz isso.
       if (profile === 'equilibrado') {
         await this.auditSwitch(scope, this.config.localRoute, healthy.route, BALANCED_EXTERNAL_REASON, false)
-        return { route: healthy.route, explicit: false, reason: BALANCED_EXTERNAL_REASON }
+        return { route: healthy.route, explicit: false, reason: BALANCED_EXTERNAL_REASON, reasonCode: 'BALANCED_EXTERNAL' }
       }
-      return { route: healthy.route, explicit: false, reason: t('reasons.firstHealthy') }
+      return { route: healthy.route, explicit: false, reason: t('reasons.firstHealthy'), reasonCode: 'FIRST_HEALTHY' }
     }
     // Nenhuma rota saudável. Uma rota que caiu era simplesmente abandonada até
     // um sucesso que ela nunca teria a chance de ter; cumprido o tempo de
@@ -368,23 +387,23 @@ export class StudioRouteHealthService {
     const probe = known.find(record => this.circuit(scope, record.route) === 'HALF_OPEN')
     if (probe !== undefined) {
       await this.startProbe(probe)
-      return { route: probe.route, explicit: false, reason: HALF_OPEN_REASON }
+      return { route: probe.route, explicit: false, reason: HALF_OPEN_REASON, reasonCode: 'HALF_OPEN' }
     }
     if (!this.enabled(scope, this.config.fallbackRoute)) {
       const reason = DISABLED_REASON
       await this.auditSwitch(scope, this.config.fallbackRoute, 'blocked', reason, false)
-      return { route: undefined, explicit: false, reason }
+      return { route: undefined, explicit: false, reason, reasonCode: 'DISABLED' }
     }
     if (this.circuit(scope, this.config.fallbackRoute) === 'OPEN') {
       const reason = ALL_OPEN_REASON
       await this.auditSwitch(scope, this.config.fallbackRoute, 'blocked', reason, false)
-      return { route: undefined, explicit: false, reason }
+      return { route: undefined, explicit: false, reason, reasonCode: 'ALL_OPEN' }
     }
     if (profile === 'equilibrado') {
       await this.auditSwitch(scope, this.config.localRoute, this.config.fallbackRoute, BALANCED_EXTERNAL_REASON, false)
-      return { route: this.config.fallbackRoute, explicit: false, reason: BALANCED_EXTERNAL_REASON }
+      return { route: this.config.fallbackRoute, explicit: false, reason: BALANCED_EXTERNAL_REASON, reasonCode: 'BALANCED_EXTERNAL' }
     }
-    return { route: this.config.fallbackRoute, explicit: false, reason: t('reasons.directFallback') }
+    return { route: this.config.fallbackRoute, explicit: false, reason: t('reasons.directFallback'), reasonCode: 'DIRECT_FALLBACK' }
   }
 
   /**

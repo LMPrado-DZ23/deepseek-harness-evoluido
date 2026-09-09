@@ -95,6 +95,8 @@ export interface StudioAppsHealth {
    * que explica.
    */
   readonly route_reason: string | null
+  /** O mesmo motivo em código estável, para a tela traduzir sem casar texto. */
+  readonly route_reason_code: string
   /**
    * A rota da IA local, quando o perfil `privado-local` consegue usá-la.
    *

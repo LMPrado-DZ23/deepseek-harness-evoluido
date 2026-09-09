@@ -76,7 +76,7 @@ async function fixture(options: { readonly emergencyStop?: { assertRunning(scope
       size_bytes: 100, width: 10, height: 10, extracted_primary: { h: 217, s: 91, l: 50 },
     })) },
     generatorFor: () => ({ generate: vi.fn() }),
-    health: vi.fn(() => Promise.resolve({ state: 'OK', route: 'ollama', route_reason: 'Modelo local saudável preferido para leitura segura.', builder: 'OK', disk: 'OK' } as const)),
+    health: vi.fn(() => Promise.resolve({ state: 'OK', route: 'ollama', route_reason: 'Modelo local saudável preferido para leitura segura.', route_reason_code: 'SAFE_READ_LOCAL', builder: 'OK', disk: 'OK' } as const)),
     allowedHosts, allowedOrigins,
     ...(options.emergencyStop === undefined ? {} : { emergencyStop: options.emergencyStop }),
   }))
@@ -102,7 +102,7 @@ describe('prompt-to-app HTTP boundary', () => {
     const f = await fixture()
     // O motivo viaja junto: sem ele a pessoa via o NOME da rota e nunca o porquê.
     expect(await (await f.request('/health')).json()).toEqual({
-      state: 'OK', route: 'ollama', route_reason: 'Modelo local saudável preferido para leitura segura.', builder: 'OK', disk: 'OK',
+      state: 'OK', route: 'ollama', route_reason: 'Modelo local saudável preferido para leitura segura.', route_reason_code: 'SAFE_READ_LOCAL', builder: 'OK', disk: 'OK',
     })
     const created = await f.request('/projects', { method: 'POST', body: JSON.stringify({
       name: 'Meu site', original_brief: 'Quero apresentar meu trabalho.', category: 'landing-page', privacy: 'local-only',

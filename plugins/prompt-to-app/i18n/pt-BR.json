@@ -93,7 +93,19 @@
     "auth": "acesso: sem sessão recebe 401 e login por código funciona",
     "scheduling": "agenda: o mesmo horário não pode ser reservado duas vezes",
     "dashboard": "painel: somente leitura com tabela equivalente",
-    "saas": "aplicativo de equipe: membro não acessa registro de outra pessoa"
+    "saas": "aplicativo de equipe: membro não acessa registro de outra pessoa",
+    "titleLanguage": "O aplicativo está em português do Brasil",
+    "titleDocument": "Cada página tem um título",
+    "titlePage": "A página {name} existe",
+    "titleSection": "A seção {name} aparece na página",
+    "titleEntity": "O cadastro de {name} existe",
+    "titleField": "O cadastro tem o campo {name}",
+    "titleCrud": "Dá para criar, editar e excluir um registro de {name}",
+    "titleFlow": "Dá para enviar um registro de {name} e vê-lo na lista",
+    "titleAuth": "Sem entrar, ninguém vê os dados; entrando pelo código, vê",
+    "titleScheduling": "O mesmo horário não pode ser reservado duas vezes",
+    "titleDashboard": "O painel só mostra os números: ele não altera nada",
+    "titleSaas": "Uma pessoa não enxerga o registro de outra"
   },
   "prompts": {
     "recommend": "Recomende uma resposta curta, em português comum, para a pergunta \"{question}\". Ideia: {brief}",

@@ -233,7 +233,11 @@ test('percorre as cinco etapas, muda privacidade e termina sem alegar publicaç�
   // A frase permanente sob as etapas, e não qualquer eco dela dentro de
   // "Detalhes técnicos" — o `.first()` de antes casava com um `<code>` fechado.
   await expect(page.locator('p.truth')).toContainText('não está publicado nem disponível para outras pessoas')
-  await expect(page.getByText('page:Início: Passou')).toBeVisible()
+  // A pessoa lê a CONFERÊNCIA, não o identificador. `page:Início` continua na
+  // tela, pequeno e ao lado, porque é ele que se cola num pedido de ajuda — mas
+  // a lista deixou de ser um despejo de `page:`, `entity:`, `field:` na única
+  // tela que responde "meu aplicativo faz o que eu pedi?".
+  await expect(page.getByText('A página Início existe: Passou')).toBeVisible()
   await expect(page.getByText('A navegação deve ser simples.: Não verificado automaticamente')).toBeVisible()
   await expect.poll(() => page.evaluate(() => (window as unknown as { __dz23Notifications: unknown[] }).__dz23Notifications.length)).toBe(1)
   expect(await page.evaluate(() => (window as unknown as { __dz23Notifications: Array<{ title: string; body: string; tag?: string }> }).__dz23Notifications)).toEqual([

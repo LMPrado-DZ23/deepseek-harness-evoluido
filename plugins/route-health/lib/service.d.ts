@@ -68,10 +68,24 @@ export interface RouteHealthRepository {
     putRoute(record: RouteHealthRecord): Promise<void>;
     putEvent(record: RouteSwitchEvent): Promise<void>;
 }
+/**
+ * Por que esta rota foi escolhida — em duas camadas de propósito.
+ *
+ * `reason` é a frase de quem OPERA o Studio: ela fala de circuito, meia-abertura,
+ * teto de escopo e nome de provedor, porque é isso que a tela de rotas precisa
+ * dizer. Ela chegava LITERAL à primeira tela do produto, onde quem lê não
+ * programa: "Meia-abertura: uma chamada decide se o circuito fecha ou reabre."
+ * não diz o que aconteceu nem o que fazer.
+ *
+ * `reasonCode` é o mesmo fato num código estável, para a tela de quem NÃO opera
+ * traduzir em efeito e próximo passo, sem depender de casar texto.
+ */
+export type RouteReasonCode = 'PRIVATE_LOCAL' | 'LOCAL_BLOCKED' | 'EXPLICIT' | 'SAFE_READ_LOCAL' | 'FIRST_HEALTHY' | 'DIRECT_FALLBACK' | 'BUDGET_LOCAL' | 'BUDGET_BLOCKED' | 'HALF_OPEN' | 'ALL_OPEN' | 'DISABLED' | 'BALANCED_LOCAL' | 'BALANCED_EXTERNAL';
 export interface RouteSelection {
     readonly route: string | undefined;
     readonly explicit: boolean;
     readonly reason: string;
+    readonly reasonCode: RouteReasonCode;
 }
 export interface RouteSelectionOptions {
     readonly privacy: RoutePrivacy;

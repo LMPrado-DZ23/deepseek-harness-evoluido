@@ -252,7 +252,7 @@
     "routeNoticeStart": "Sua ideia e suas respostas serão enviadas para o serviço de IA configurado:",
     "routeNoticeEnd": "Seus arquivos não saem do computador.",
     "routeUnavailable": "Nenhum serviço externo de IA está configurado. A criação ficará bloqueada até você escolher uma opção disponível.",
-    "routeReason": "Por que esta rota:",
+    "routeReason": "O que está acontecendo agora:",
     "privadoLocal": "Privado local",
     "privadoLocalDetail": "Só a inteligência artificial que roda no seu computador. Nada do que você escrever sai daqui, e a criação fica bloqueada se ela não estiver disponível.",
     "equilibrado": "Equilibrado",
@@ -260,7 +260,22 @@
     "melhorQualidade": "Melhor qualidade",
     "melhorQualidadeDetail": "Usa o melhor serviço de inteligência artificial disponível, inclusive fora do seu computador.",
     "balancedNoticeStart": "A inteligência artificial do seu computador é usada sempre que possível. Quando ela não der conta, sua ideia e suas respostas vão para o serviço configurado:",
-    "localBlocked": "A criação está bloqueada: o perfil Privado local não usa nenhum serviço externo, e a inteligência artificial do seu computador não está disponível agora. Nada foi enviado para fora."
+    "localBlocked": "A criação está bloqueada: o perfil Privado local não usa nenhum serviço externo, e a inteligência artificial do seu computador não está disponível agora. Nada foi enviado para fora.",
+    "reasons": {
+      "PRIVATE_LOCAL": "A inteligência artificial do seu computador está sendo usada. Nada do que você escrever sai daqui.",
+      "LOCAL_BLOCKED": "A inteligência artificial do seu computador não está disponível agora. Você pode esperar alguns minutos ou trocar para um perfil que usa o serviço externo.",
+      "EXPLICIT": "Você escolheu este serviço de inteligência artificial.",
+      "SAFE_READ_LOCAL": "Esta etapa é de leitura, e ela roda na inteligência artificial do seu computador.",
+      "FIRST_HEALTHY": "O serviço de inteligência artificial configurado está respondendo normalmente.",
+      "DIRECT_FALLBACK": "Os serviços que o Studio acompanha não estão respondendo; ele vai usar o serviço configurado diretamente.",
+      "BUDGET_LOCAL": "O limite de gasto deste espaço de trabalho acabou. A criação continua com a inteligência artificial do seu computador, sem custo.",
+      "BUDGET_BLOCKED": "O limite de gasto deste espaço de trabalho acabou e a inteligência artificial do seu computador não está disponível. Aumente o limite ou tente mais tarde.",
+      "HALF_OPEN": "O serviço externo tinha falhado e está sendo testado de novo agora. Se ele responder, a criação segue normalmente.",
+      "ALL_OPEN": "Os serviços de inteligência artificial falharam seguidamente e estão em espera. Tente de novo em alguns minutos ou use o perfil Privado local.",
+      "DISABLED": "Este serviço de inteligência artificial foi desligado neste espaço de trabalho. Escolha outro perfil ou peça a quem administra para ligá-lo.",
+      "BALANCED_LOCAL": "A inteligência artificial do seu computador está em uso, e nada sai daqui.",
+      "BALANCED_EXTERNAL": "A inteligência artificial do seu computador não está disponível; o serviço configurado será usado nesta criação."
+    }
   },
   "progress": {
     "title": "Seu projeto em andamento",

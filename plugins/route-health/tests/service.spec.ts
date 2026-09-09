@@ -62,7 +62,7 @@ describe('StudioRouteHealthService', () => {
       ['ollama', 'OK'], ['omniroute', 'NOT_CONFIGURED'], ['deepseek-official', 'OK'],
     ])
     await expect(h.service.chooseRoute(scope, 'T0', { privacy: 'local-only' })).resolves.toEqual({
-      route: 'ollama', explicit: false, reason: 'Perfil privado restrito à IA local.',
+      route: 'ollama', explicit: false, reason: 'Perfil privado restrito à IA local.', reasonCode: 'PRIVATE_LOCAL',
     })
     await expect(h.service.chooseRoute(scope, 'T0', {
       privacy: 'local-only', explicitRoute: 'ollama',
@@ -71,7 +71,7 @@ describe('StudioRouteHealthService', () => {
     await expect(h.service.chooseRoute({ orgId: 'org-2', tenantId: 'tenant-2' }, 'T0')).resolves.toMatchObject({ route: 'ollama' })
     expect(h.service.list({ orgId: 'org-2', tenantId: 'tenant-2' })).toHaveLength(3)
     await expect(h.service.chooseRoute(scope, 'T2', { privacy: 'any', explicitRoute: 'omniroute' })).resolves.toEqual({
-      route: 'omniroute', explicit: true, reason: 'Rota escolhida pela pessoa.',
+      route: 'omniroute', explicit: true, reason: 'Rota escolhida pela pessoa.', reasonCode: 'EXPLICIT',
     })
     await expect(h.service.chooseRoute(scope, 'T2')).resolves.toMatchObject({ route: 'ollama' })
 
@@ -87,7 +87,7 @@ describe('StudioRouteHealthService', () => {
     await expect(h.service.chooseRoute(scope, 'T0', { privacy: 'local-only' })).resolves.toEqual({
       route: undefined,
       explicit: false,
-      reason: 'IA local indisponível; nenhuma informação foi enviada para uma rota externa.',
+      reason: 'IA local indisponível; nenhuma informação foi enviada para uma rota externa.', reasonCode: 'LOCAL_BLOCKED',
     })
     expect(h.service.switches(scope)[0]).toMatchObject({
       from_route: 'ollama', to_route: 'blocked', explicit_route: false,
@@ -299,7 +299,7 @@ describe('circuito por rota e por escopo', () => {
     expect(h.subject.circuit(scope, 'omniroute')).toBe('HALF_OPEN')
     await expect(h.subject.chooseRoute(scope, 'T2')).resolves.toEqual({
       route: 'omniroute', explicit: false,
-      reason: 'Meia-abertura: uma chamada decide se o circuito fecha ou reabre.',
+      reason: 'Meia-abertura: uma chamada decide se o circuito fecha ou reabre.', reasonCode: 'HALF_OPEN',
     })
     // A chamada de prova reinicia a espera: a requisição seguinte não pode
     // descer junto na mesma rota quebrada.
@@ -330,7 +330,7 @@ describe('circuito por rota e por escopo', () => {
     await h.fail('omniroute', 3)
     await expect(h.subject.chooseRoute(scope, 'T2')).resolves.toEqual({
       route: undefined, explicit: false,
-      reason: 'Circuito aberto em todas as rotas; nenhuma chamada nova enquanto durar a espera.',
+      reason: 'Circuito aberto em todas as rotas; nenhuma chamada nova enquanto durar a espera.', reasonCode: 'ALL_OPEN',
     })
     expect(h.subject.switches(scope).at(-1)).toMatchObject({ to_route: 'blocked' })
   })
@@ -363,7 +363,7 @@ describe('teto de gasto por escopo', () => {
     expect(h.subject.budget(scope)).toMatchObject({ measuredCostUsd: 0.01, verdict: 'COST_EXCEEDED' })
     await expect(h.subject.chooseRoute(scope, 'T2')).resolves.toEqual({
       route: 'ollama', explicit: false,
-      reason: 'Teto de gasto do escopo estourado; seguindo apenas com a IA local.',
+      reason: 'Teto de gasto do escopo estourado; seguindo apenas com a IA local.', reasonCode: 'BUDGET_LOCAL',
     })
     expect(h.subject.switches(scope).at(-1)).toMatchObject({ to_route: 'ollama', explicit_route: false })
   })
@@ -382,7 +382,7 @@ describe('teto de gasto por escopo', () => {
     // honesta, e ela fica auditada com a rota que a pessoa tinha pedido.
     await expect(h.subject.chooseRoute(scope, 'T2', { privacy: 'any', explicitRoute: 'omniroute' })).resolves.toEqual({
       route: undefined, explicit: true,
-      reason: 'Teto de gasto do escopo estourado; nenhuma rota paga foi acionada.',
+      reason: 'Teto de gasto do escopo estourado; nenhuma rota paga foi acionada.', reasonCode: 'BUDGET_BLOCKED',
     })
     expect(h.subject.switches(scope).at(-1)).toMatchObject({
       from_route: 'omniroute', to_route: 'blocked', explicit_route: true,
@@ -487,7 +487,7 @@ describe('M-05: os tres perfis nomeados', () => {
     // e o que acontece FORA de T0, e ai o equilibrado continua na local.
     await expect(h.service.chooseRoute(scope, 'T2', { privacy: 'equilibrado' })).resolves.toEqual({
       route: 'ollama', explicit: false,
-      reason: 'Perfil equilibrado: a IA local está em uso e nada sai deste computador.',
+      reason: 'Perfil equilibrado: a IA local está em uso e nada sai deste computador.', reasonCode: 'BALANCED_LOCAL',
     })
   })
 
@@ -497,7 +497,7 @@ describe('M-05: os tres perfis nomeados', () => {
     const chosen = await h.service.chooseRoute(scope, 'T2', { privacy: 'equilibrado' })
     expect(chosen).toEqual({
       route: 'omniroute', explicit: false,
-      reason: 'Perfil equilibrado: a IA local não está disponível; usando a rota externa configurada.',
+      reason: 'Perfil equilibrado: a IA local não está disponível; usando a rota externa configurada.', reasonCode: 'BALANCED_EXTERNAL',
     })
     // O aviso nao vive so na frase: a troca fica auditada como qualquer outra.
     expect(h.service.switches(scope).at(-1)).toMatchObject({ from_route: 'ollama', to_route: 'omniroute' })
@@ -509,7 +509,7 @@ describe('M-05: os tres perfis nomeados', () => {
     const chosen = await h.service.chooseRoute(scope, 'T2', { privacy: 'equilibrado' })
     expect(chosen).toMatchObject({
       route: 'deepseek-official',
-      reason: 'Perfil equilibrado: a IA local não está disponível; usando a rota externa configurada.',
+      reason: 'Perfil equilibrado: a IA local não está disponível; usando a rota externa configurada.', reasonCode: 'BALANCED_EXTERNAL',
     })
     expect(h.service.switches(scope).at(-1)).toMatchObject({ to_route: 'deepseek-official' })
   })
@@ -518,7 +518,7 @@ describe('M-05: os tres perfis nomeados', () => {
     const h = service()
     await h.service.initialize(scope, new Set(['omniroute', 'deepseek-official']))
     await expect(h.service.chooseRoute(scope, 'T2', { privacy: 'melhor-qualidade' })).resolves.toEqual({
-      route: 'omniroute', explicit: false, reason: 'Primeira rota saudável do perfil.',
+      route: 'omniroute', explicit: false, reason: 'Primeira rota saudável do perfil.', reasonCode: 'FIRST_HEALTHY',
     })
   })
 })
@@ -547,7 +547,7 @@ describe('M-05: liga e desliga por rota', () => {
     // escolha explicita atravessa nao e guarda.
     await expect(h.service.chooseRoute(scope, 'T2', { privacy: 'melhor-qualidade', explicitRoute: 'omniroute' })).resolves.toEqual({
       route: undefined, explicit: true,
-      reason: 'Rota desligada neste espaço de trabalho; ela não é escolhida enquanto continuar assim.',
+      reason: 'Rota desligada neste espaço de trabalho; ela não é escolhida enquanto continuar assim.', reasonCode: 'DISABLED',
     })
     expect(h.service.switches(scope).at(-1)).toMatchObject({ from_route: 'omniroute', to_route: 'blocked', explicit_route: true })
     // Desligada a ultima rota, a resposta honesta e recusar - nao prometer uma
@@ -555,7 +555,7 @@ describe('M-05: liga e desliga por rota', () => {
     await h.service.setRouteEnabled(scope, 'deepseek-official', false)
     await expect(h.service.chooseRoute(scope, 'T2')).resolves.toMatchObject({
       route: undefined,
-      reason: 'Rota desligada neste espaço de trabalho; ela não é escolhida enquanto continuar assim.',
+      reason: 'Rota desligada neste espaço de trabalho; ela não é escolhida enquanto continuar assim.', reasonCode: 'DISABLED',
     })
   })
 
@@ -741,14 +741,14 @@ describe('C-22: privado-local nunca cai para rota externa', () => {
     // A garantia nao pode depender de nenhum `if` la dentro estar certo: se um
     // caminho futuro devolver `omniroute` sob `privado-local`, e AQUI que ele
     // para. Este teste chama o funil com exatamente essa escolha proibida.
-    const forbidden = { route: 'omniroute', explicit: true, reason: 'caminho novo' }
+    const forbidden = { route: 'omniroute', explicit: true, reason: 'caminho novo', reasonCode: 'EXPLICIT' } as const
     expect(enforceRoutePrivacy('privado-local', LOCAL_ROUTE, forbidden, 'bloqueado')).toEqual({
-      route: undefined, explicit: true, reason: 'bloqueado',
+      route: undefined, explicit: true, reason: 'bloqueado', reasonCode: 'LOCAL_BLOCKED',
     })
     // O que o perfil admite passa intacto.
-    const local = { route: LOCAL_ROUTE, explicit: false, reason: 'local' }
+    const local = { route: LOCAL_ROUTE, explicit: false, reason: 'local', reasonCode: 'SAFE_READ_LOCAL' } as const
     expect(enforceRoutePrivacy('privado-local', LOCAL_ROUTE, local, 'bloqueado')).toBe(local)
-    const blocked = { route: undefined, explicit: false, reason: 'ja bloqueado' }
+    const blocked = { route: undefined, explicit: false, reason: 'ja bloqueado', reasonCode: 'LOCAL_BLOCKED' } as const
     expect(enforceRoutePrivacy('privado-local', LOCAL_ROUTE, blocked, 'bloqueado')).toBe(blocked)
     // E os outros perfis nao sao tocados pelo funil.
     expect(enforceRoutePrivacy('equilibrado', LOCAL_ROUTE, forbidden, 'bloqueado')).toBe(forbidden)

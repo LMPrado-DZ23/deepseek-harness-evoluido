@@ -19,7 +19,17 @@ interface FlowCheck {
 }
 export interface AcceptanceCheck {
   readonly id: string
+  /**
+   * O identificador de máquina (`page:Início`, `entity:Cliente`).
+   *
+   * Ele é o que os testes gerados casam, e por isso continua existindo — mas
+   * ele NÃO é o que a pessoa lê. A tela mostrava esta lista crua, com `:` e
+   * `=` e palavra em inglês, na única tela que responde "meu aplicativo faz o
+   * que eu pedi?".
+   */
   readonly label: string
+  /** A mesma conferência em português, para quem não programa. */
+  readonly title?: string
   readonly kind: 'language' | 'title' | 'page' | 'section' | 'entity' | 'criterion' | 'flow' | 'auth' | 'crud' | 'scheduling' | 'dashboard' | 'saas'
   readonly expected?: string
   readonly flow?: FlowCheck
@@ -36,7 +46,7 @@ const flowCheckSchema = z.object({
   }).strict()),
 }).strict()
 const acceptanceCheckSchema = z.object({
-  id: z.string().min(1).max(160), label: z.string().min(1).max(2_000),
+  id: z.string().min(1).max(160), label: z.string().min(1).max(2_000), title: z.string().min(1).max(2_000).optional(),
   kind: z.enum(['language', 'title', 'page', 'section', 'entity', 'criterion', 'flow', 'auth', 'crud', 'scheduling', 'dashboard', 'saas']),
   expected: z.string().optional(), flow: flowCheckSchema.optional(), status: acceptanceStatusSchema,
 }).strict()
@@ -64,27 +74,27 @@ export function parseAcceptanceReport(value: unknown, expected: readonly Accepta
 
 export function acceptanceChecks(spec: AppSpecV1, category: StudioProjectCategory = 'landing-page'): readonly AcceptanceCheck[] {
   const checks: AcceptanceCheck[] = [
-    { id: 'language', label: `language=${spec.language}`, kind: 'language', expected: spec.language, status: 'PENDING' },
-    { id: 'document-title', label: 'document-title', kind: 'title', status: 'PENDING' },
+    { id: 'language', label: `language=${spec.language}`, title: t('checks.titleLanguage'), kind: 'language', expected: spec.language, status: 'PENDING' },
+    { id: 'document-title', label: 'document-title', title: t('checks.titleDocument'), kind: 'title', status: 'PENDING' },
   ]
   spec.pages.forEach((page, pageIndex) => {
-    checks.push({ id: `page-${pageIndex}`, label: `page:${page.name}`, kind: 'page', expected: page.name, status: 'PENDING' })
-    page.sections.forEach((section, sectionIndex) => checks.push({ id: `page-${pageIndex}-section-${sectionIndex}`, label: `section:${section}`, kind: 'section', expected: section, status: 'PENDING' }))
+    checks.push({ id: `page-${pageIndex}`, label: `page:${page.name}`, title: t('checks.titlePage', { name: page.name }), kind: 'page', expected: page.name, status: 'PENDING' })
+    page.sections.forEach((section, sectionIndex) => checks.push({ id: `page-${pageIndex}-section-${sectionIndex}`, label: `section:${section}`, title: t('checks.titleSection', { name: section }), kind: 'section', expected: section, status: 'PENDING' }))
   })
   spec.entities.forEach((entity, entityIndex) => {
-    checks.push({ id: `entity-${entityIndex}`, label: `entity:${entity.name}`, kind: 'entity', expected: entity.name, status: 'PENDING' })
-    entity.fields.forEach((field, fieldIndex) => checks.push({ id: `entity-${entityIndex}-field-${fieldIndex}`, label: `field:${typeof field === 'string' ? field : field.name}`, kind: 'entity', expected: typeof field === 'string' ? field : field.name, status: 'PENDING' }))
+    checks.push({ id: `entity-${entityIndex}`, label: `entity:${entity.name}`, title: t('checks.titleEntity', { name: entity.name }), kind: 'entity', expected: entity.name, status: 'PENDING' })
+    entity.fields.forEach((field, fieldIndex) => checks.push({ id: `entity-${entityIndex}-field-${fieldIndex}`, label: `field:${typeof field === 'string' ? field : field.name}`, title: t('checks.titleField', { name: typeof field === 'string' ? field : field.name }), kind: 'entity', expected: typeof field === 'string' ? field : field.name, status: 'PENDING' }))
   })
   spec.acceptance_criteria.forEach((criterion, index) => {
     const literal = extractLiteral(criterion)
-    checks.push({ id: `criterion-${index}`, label: criterion, kind: 'criterion', ...(literal === undefined ? {} : { expected: literal }), status: literal === undefined ? 'NOT_AUTOMATED' : 'PENDING' })
+    checks.push({ id: `criterion-${index}`, label: criterion, title: criterion, kind: 'criterion', ...(literal === undefined ? {} : { expected: literal }), status: literal === undefined ? 'NOT_AUTOMATED' : 'PENDING' })
   })
   const authRequired = requiresGeneratedAuth(spec, category)
-  if (authRequired) checks.push({ id: 'auth', label: t('checks.auth'), kind: 'auth', status: 'PENDING' })
+  if (authRequired) checks.push({ id: 'auth', label: t('checks.auth'), title: t('checks.titleAuth'), kind: 'auth', status: 'PENDING' })
   if (category === 'form-database' || category === 'crud-panel') addDataFlows(checks, spec, category)
-  if (category === 'scheduling') checks.push({ id: 'scheduling-no-overlap', label: t('checks.scheduling'), kind: 'scheduling', expected: schedulingSlot(spec), status: 'PENDING' })
+  if (category === 'scheduling') checks.push({ id: 'scheduling-no-overlap', label: t('checks.scheduling'), title: t('checks.titleScheduling'), kind: 'scheduling', expected: schedulingSlot(spec), status: 'PENDING' })
   if (category === 'dashboard') addDashboardCheck(checks, spec)
-  if (category === 'saas-authenticated') checks.push({ id: 'saas-isolation', label: t('checks.saas'), kind: 'saas', status: 'PENDING' })
+  if (category === 'saas-authenticated') checks.push({ id: 'saas-isolation', label: t('checks.saas'), title: t('checks.titleSaas'), kind: 'saas', status: 'PENDING' })
   return checks
 }
 
@@ -93,7 +103,7 @@ function addDashboardCheck(checks: AcceptanceCheck[], spec: AppSpecV1): void {
   if (entity === undefined || entity.kind !== 'database') return
   const fields = entity.fields.map(field => ({ name: dataIdentifier(field.name), type: field.type, required: field.required, ...(field.options === undefined ? {} : { options: field.options }) }))
   checks.push({
-    id: 'dashboard-read-only', label: t('checks.dashboard'), kind: 'dashboard', expected: entity.name,
+    id: 'dashboard-read-only', label: t('checks.dashboard'), title: t('checks.titleDashboard'), kind: 'dashboard', expected: entity.name,
     flow: { form_test_id: '', list_test_id: '', marker_field: fields[0]?.name ?? 'id', fields, submit_requires_auth: true, list_requires_auth: true },
     status: 'PENDING',
   })
@@ -105,7 +115,7 @@ function addDataFlows(checks: AcceptanceCheck[], spec: AppSpecV1, category: Stud
     const marker = fields.find(field => ['text', 'email', 'phone'].includes(field.type)) ?? fields[0]!
     const slug = dataIdentifier(entity.name); const crud = category === 'crud-panel'
     const hasReference = fields.some(field => field.type === 'reference')
-    checks.push({ id: `${crud ? 'crud' : 'flow'}-${index}`, label: `${crud ? 'crud' : 'fluxo'}:${entity.name}`, kind: crud ? 'crud' : 'flow', expected: entity.name, flow: { form_test_id: `${slug}-${crud ? 'create-' : ''}form`, list_test_id: `${slug}-list`, marker_field: marker.name, fields, submit_requires_auth: crud || requiresFormSubmissionAuth(spec), list_requires_auth: true }, status: hasReference ? 'NOT_AUTOMATED' : 'PENDING' })
+    checks.push({ id: `${crud ? 'crud' : 'flow'}-${index}`, label: `${crud ? 'crud' : 'fluxo'}:${entity.name}`, title: t(crud ? 'checks.titleCrud' : 'checks.titleFlow', { name: entity.name }), kind: crud ? 'crud' : 'flow', expected: entity.name, flow: { form_test_id: `${slug}-${crud ? 'create-' : ''}form`, list_test_id: `${slug}-list`, marker_field: marker.name, fields, submit_requires_auth: crud || requiresFormSubmissionAuth(spec), list_requires_auth: true }, status: hasReference ? 'NOT_AUTOMATED' : 'PENDING' })
   })
 }
 

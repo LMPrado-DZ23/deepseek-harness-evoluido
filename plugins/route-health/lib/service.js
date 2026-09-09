@@ -38,7 +38,7 @@ export function enforceRoutePrivacy(profile, localRoute, selection, blockedReaso
         return selection;
     if (selection.route === undefined || selection.route === localRoute)
         return selection;
-    return { route: undefined, explicit: selection.explicit, reason: blockedReason };
+    return { route: undefined, explicit: selection.explicit, reason: blockedReason, reasonCode: 'LOCAL_BLOCKED' };
 }
 function recordId(scope, route) {
     return `${scope.orgId}:${scope.tenantId}:${route}`;
@@ -160,11 +160,11 @@ export class StudioRouteHealthService {
         if (profile === 'privado-local') {
             const localSelected = options.explicitRoute === undefined || options.explicitRoute === this.config.localRoute;
             if (localSelected && localUsable) {
-                return { route: this.config.localRoute, explicit: options.explicitRoute !== undefined, reason: t('reasons.privateLocalOnly') };
+                return { route: this.config.localRoute, explicit: options.explicitRoute !== undefined, reason: t('reasons.privateLocalOnly'), reasonCode: 'PRIVATE_LOCAL' };
             }
             const reason = LOCAL_BLOCKED_REASON;
             await this.auditSwitch(scope, options.explicitRoute ?? this.config.localRoute, 'blocked', reason, options.explicitRoute !== undefined);
-            return { route: undefined, explicit: options.explicitRoute !== undefined, reason };
+            return { route: undefined, explicit: options.explicitRoute !== undefined, reason, reasonCode: 'LOCAL_BLOCKED' };
         }
         const explicit = options.explicitRoute !== undefined;
         // O desligamento vem ANTES do teto e antes da rota escolhida a dedo: ele é a
@@ -173,7 +173,7 @@ export class StudioRouteHealthService {
         if (options.explicitRoute !== undefined && !this.enabled(scope, options.explicitRoute)) {
             const reason = DISABLED_REASON;
             await this.auditSwitch(scope, options.explicitRoute, 'blocked', reason, true);
-            return { route: undefined, explicit: true, reason };
+            return { route: undefined, explicit: true, reason, reasonCode: 'DISABLED' };
         }
         // O teto vale também para a rota escolhida a dedo: um guarda que a escolha
         // explícita atravessa não é guarda, é sugestão. A rota local fica de fora
@@ -183,14 +183,14 @@ export class StudioRouteHealthService {
             if (localUsable) {
                 const reason = BUDGET_LOCAL_REASON;
                 await this.auditSwitch(scope, from, this.config.localRoute, reason, explicit);
-                return { route: this.config.localRoute, explicit, reason };
+                return { route: this.config.localRoute, explicit, reason, reasonCode: 'BUDGET_LOCAL' };
             }
             const reason = BUDGET_BLOCKED_REASON;
             await this.auditSwitch(scope, from, 'blocked', reason, explicit);
-            return { route: undefined, explicit, reason };
+            return { route: undefined, explicit, reason, reasonCode: 'BUDGET_BLOCKED' };
         }
         if (options.explicitRoute !== undefined) {
-            return { route: options.explicitRoute, explicit: true, reason: t('reasons.explicitRoute') };
+            return { route: options.explicitRoute, explicit: true, reason: t('reasons.explicitRoute'), reasonCode: 'EXPLICIT' };
         }
         // `equilibrado` prefere a local em TODO propósito, não só na leitura segura:
         // é isso que separa "prefere a local" de "usa a melhor que houver".
@@ -198,6 +198,7 @@ export class StudioRouteHealthService {
             return {
                 route: this.config.localRoute, explicit: false,
                 reason: profile === 'equilibrado' ? BALANCED_LOCAL_REASON : t('reasons.safeReadLocal'),
+                reasonCode: profile === 'equilibrado' ? 'BALANCED_LOCAL' : 'SAFE_READ_LOCAL',
             };
         }
         const known = this.config.routes.map(route => this.get(scope, route))
@@ -208,9 +209,9 @@ export class StudioRouteHealthService {
             // local e está recebendo outra coisa, e a frase diz isso.
             if (profile === 'equilibrado') {
                 await this.auditSwitch(scope, this.config.localRoute, healthy.route, BALANCED_EXTERNAL_REASON, false);
-                return { route: healthy.route, explicit: false, reason: BALANCED_EXTERNAL_REASON };
+                return { route: healthy.route, explicit: false, reason: BALANCED_EXTERNAL_REASON, reasonCode: 'BALANCED_EXTERNAL' };
             }
-            return { route: healthy.route, explicit: false, reason: t('reasons.firstHealthy') };
+            return { route: healthy.route, explicit: false, reason: t('reasons.firstHealthy'), reasonCode: 'FIRST_HEALTHY' };
         }
         // Nenhuma rota saudável. Uma rota que caiu era simplesmente abandonada até
         // um sucesso que ela nunca teria a chance de ter; cumprido o tempo de
@@ -218,23 +219,23 @@ export class StudioRouteHealthService {
         const probe = known.find(record => this.circuit(scope, record.route) === 'HALF_OPEN');
         if (probe !== undefined) {
             await this.startProbe(probe);
-            return { route: probe.route, explicit: false, reason: HALF_OPEN_REASON };
+            return { route: probe.route, explicit: false, reason: HALF_OPEN_REASON, reasonCode: 'HALF_OPEN' };
         }
         if (!this.enabled(scope, this.config.fallbackRoute)) {
             const reason = DISABLED_REASON;
             await this.auditSwitch(scope, this.config.fallbackRoute, 'blocked', reason, false);
-            return { route: undefined, explicit: false, reason };
+            return { route: undefined, explicit: false, reason, reasonCode: 'DISABLED' };
         }
         if (this.circuit(scope, this.config.fallbackRoute) === 'OPEN') {
             const reason = ALL_OPEN_REASON;
             await this.auditSwitch(scope, this.config.fallbackRoute, 'blocked', reason, false);
-            return { route: undefined, explicit: false, reason };
+            return { route: undefined, explicit: false, reason, reasonCode: 'ALL_OPEN' };
         }
         if (profile === 'equilibrado') {
             await this.auditSwitch(scope, this.config.localRoute, this.config.fallbackRoute, BALANCED_EXTERNAL_REASON, false);
-            return { route: this.config.fallbackRoute, explicit: false, reason: BALANCED_EXTERNAL_REASON };
+            return { route: this.config.fallbackRoute, explicit: false, reason: BALANCED_EXTERNAL_REASON, reasonCode: 'BALANCED_EXTERNAL' };
         }
-        return { route: this.config.fallbackRoute, explicit: false, reason: t('reasons.directFallback') };
+        return { route: this.config.fallbackRoute, explicit: false, reason: t('reasons.directFallback'), reasonCode: 'DIRECT_FALLBACK' };
     }
     /**
      * Se esta rota está ligada neste escopo, agora.

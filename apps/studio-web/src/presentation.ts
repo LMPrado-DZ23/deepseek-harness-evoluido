@@ -156,8 +156,15 @@ export function resultSentence(state: PipelineResultState, messages: ResultMessa
  */
 export function routeReasonNotice(
   mode: PrivacyChoice,
-  reason: string | null | undefined,
+  reasonCode: string | null | undefined,
+  reasons: Readonly<Record<string, string>>,
 ): string | null {
   if (privacyProfileOf(mode) === 'privado-local') return null
-  return typeof reason === 'string' && reason.trim() !== '' ? reason.trim() : null
+  if (typeof reasonCode !== 'string' || reasonCode.trim() === '') return null
+  // Sem frase para este código, a tela CALA. A versão anterior mostrava o texto
+  // de operação como veio — "Meia-abertura: uma chamada decide se o circuito
+  // fecha ou reabre." — na primeira tela do produto, para quem não programa.
+  // Um código que ninguém traduziu ainda é uma tradução faltando, e não um
+  // convite para despejar vocabulário interno na tela.
+  return reasons[reasonCode.trim()] ?? null
 }

@@ -217,6 +217,10 @@ export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}):
     const state = route !== null && builderHealth.state === 'OK' && disk === 'OK' ? 'OK' : 'ATTENTION'
     return {
       state, route, route_reason: route === null ? null : selected.reason,
+      // O CÓDIGO do motivo, ao lado da frase de operação: a tela de quem não
+      // opera o Studio traduz o código em efeito e próximo passo, em vez de
+      // mostrar "meia-abertura" e "teto de escopo" para quem não programa.
+      route_reason_code: selected.reasonCode,
       local_route: localSelected.route ?? null, builder: builderHealth.state, disk,
     }
   }
