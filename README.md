@@ -47,6 +47,11 @@ A jornada tem cinco etapas, e cada uma é uma tela que qualquer pessoa lê:
 </tr>
 </table>
 
+E você volta para qualquer projeto quando quiser — a situação de cada um
+aparece em português, nunca como código de máquina:
+
+![A lista de projetos, com a situação de cada um em português](./docs/images/06-projetos.png)
+
 ### Sete tipos de aplicativo
 
 Página de apresentação · Catálogo de produtos ou serviços · Cadastro com lista ·
@@ -121,8 +126,8 @@ clicando duas vezes.
 
 <table>
 <tr>
-<td width="50%"><img src="./docs/images/07-escuro.png" alt="O mesmo produto em modo escuro"></td>
-<td width="50%"><img src="./docs/images/06-ajuda.png" alt="A ajuda, com glossário e o que o Studio nunca faz"></td>
+<td width="50%"><img src="./docs/images/08-escuro.png" alt="O mesmo produto em modo escuro"></td>
+<td width="50%"><img src="./docs/images/07-ajuda.png" alt="A ajuda, com glossário e o que o Studio nunca faz"></td>
 </tr>
 </table>
 
@@ -248,7 +253,7 @@ agora usa o caminho de desenvolvimento acima.
 As decisões estão registradas em **44 ADRs** em [`docs/adr/`](./docs/adr/).
 
 <div align="center">
-<img src="./docs/images/08-celular.png" alt="A mesma jornada no celular" width="320">
+<img src="./docs/images/09-celular.png" alt="A mesma jornada no celular" width="320">
 </div>
 
 ---

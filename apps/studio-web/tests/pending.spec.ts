@@ -178,8 +178,14 @@ test('durante a criação, a tela mostra a etapa em que está', async ({ context
     // Chromium resolve. O endereço vai para o laço local; `127.0.0.1:4179` está
     // na lista de hosts aceitos do servidor de teste.
     const response = await route.fetch({ url: route.request().url().replace('studio.dz23.localhost', '127.0.0.1') })
-    const body = await response.json() as { current_run: null | Record<string, unknown> }
+    const body = await response.json() as { project: Record<string, unknown>; current_run: null | Record<string, unknown> }
     if (body.current_run !== null) {
+      // O ESTADO DO PROJETO também é fixado. Sem isso o teste dependia de o
+      // construtor de fixture ainda não ter terminado quando a primeira leitura
+      // chega — e com a máquina carregada, na suíte inteira, ele já terminou: a
+      // tela mostrava a verificação, não a criação. Era corrida, e reprovava por
+      // relógio.
+      body.project = { ...body.project, state: 'GENERATING' }
       body.current_run = { ...body.current_run, state: 'RUNNING', stage: 'test', attempt: 2 }
     }
     await route.fulfill({ response, json: body })

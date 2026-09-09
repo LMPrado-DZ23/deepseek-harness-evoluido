@@ -6,6 +6,7 @@ import { STUDIO_CATEGORIES, type Category } from './categories'
 import t from './i18n/pt-BR.json'
 import { categoryGuess, type CategoryGuess } from './categorySuggestion'
 import { attemptSentence, stageSentence, type RunningStage } from './creationProgress'
+import { projectNameFromBrief } from './projectName'
 
 /** De onde veio o tipo mostrado na tela. `person` é a escolha à mão, que o palpite não faz. */
 type CategoryBasis = CategoryGuess['basis'] | 'person'
@@ -217,7 +218,7 @@ export function App() {
     if (!ready) { setError(t.idea.empty); return }
     await safely(async () => {
       const created = await api<{ project: { project_id: string; state: ProjectUiState }; next: Question }>('/projects', {
-        method: 'POST', body: JSON.stringify({ name: brief.trim().slice(0, 60), original_brief: brief.trim(), category, privacy }),
+        method: 'POST', body: JSON.stringify({ name: projectNameFromBrief(brief), original_brief: brief.trim(), category, privacy }),
       })
       setProjectId(created.project.project_id); rememberProject(created.project.project_id); setProjectState(created.project.state); setQuestion(created.next)
       await api(`/projects/${created.project.project_id}/design`, {

@@ -122,27 +122,32 @@ try {
     shots.push('05-relato')
   }
 
-  // 6. A ajuda: as etapas, o glossário e o que o Studio nunca faz.
+  // 6. A lista de projetos: onde a pessoa volta para o que já começou.
+  await page.goto(`${origin}/studio/projetos`)
+  await page.getByRole('heading', { name: 'Meus projetos', level: 1 }).waitFor()
+  await shot(page, '06-projetos')
+
+  // 7. A ajuda: as etapas, o glossário e o que o Studio nunca faz.
   await page.goto(`${origin}/studio/ajuda`)
   await page.waitForTimeout(300)
-  await shot(page, '06-ajuda')
+  await shot(page, '07-ajuda')
 
-  // 7. O mesmo produto no escuro, porque o tema acompanha o sistema.
+  // 8. O mesmo produto no escuro, porque o tema acompanha o sistema.
   const dark = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2, colorScheme: 'dark' })
   await dark.addCookies([{ name: 'dz23_studio_session', value: 'e2e', url: origin }])
   const darkPage = await dark.newPage()
   await darkPage.goto(`${origin}/studio/`)
   await darkPage.getByRole('textbox').first().fill('quero uma página para apresentar minha clínica e receber contatos')
   await darkPage.waitForTimeout(300)
-  await shot(darkPage, '07-escuro')
+  await shot(darkPage, '08-escuro')
 
-  // 8. O celular: a mesma jornada num Pixel 5.
+  // 9. O celular: a mesma jornada num Pixel 5.
   const phone = await browser.newContext({ viewport: { width: 393, height: 851 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true })
   await phone.addCookies([{ name: 'dz23_studio_session', value: 'e2e', url: origin }])
   const phonePage = await phone.newPage()
   await phonePage.goto(`${origin}/studio/`)
   await phonePage.waitForTimeout(300)
-  await shot(phonePage, '08-celular')
+  await shot(phonePage, '09-celular')
 
   await browser.close()
   process.stdout.write(`SCREENSHOTS=PASS destino=${outDirectory} imagens=${String(shots.length)}\n${shots.join('\n')}\n`)
