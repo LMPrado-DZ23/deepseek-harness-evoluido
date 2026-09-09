@@ -1,3 +1,73 @@
+# Auditoria final de três revisores independentes — 09/09/2026 (rodada 3: verificação das correções)
+
+Objeto: `3efa588` (o que os revisores atacaram) e os cinco commits que se
+seguiram. Os revisores B e C fizeram **segunda passada por ATAQUE**, não por
+leitura: refizeram as mutações que produziam verde artificial, escreveram
+testes próprios e usaram o produto no navegador. Relatórios completos em
+`audit/AUDITOR_B_VERIFICACAO.md` e `audit/AUDITOR_C_VERIFICACAO.md`.
+
+| Revisor | Veredito da 1ª passada | Verificação | Achados novos |
+| --- | --- | --- | --- |
+| B — Security | `NEEDS_FIX` | 8 CORRIGIDOS · 5 PARCIAIS · 0 regressões | 1 MEDIUM · 2 LOW |
+| C — Produto/UX | `NEEDS_FIX` | 15 CORRIGIDOS · 7 PARCIAIS · 1 não corrigido | 2 CRÍTICOS · 1 ALTO · 2 MÉDIOS · 2 BAIXOS |
+
+**O que esta rodada mostra.** Os dois CRÍTICOS novos são **regressões das
+minhas próprias correções da rodada 2** — o endereço do projeto e o modo
+escuro. Nenhum dos dois foi apanhado pelos testes que escrevi junto com a
+correção, e os dois terminam na mesma tela. A lição está registrada no corpo
+dos commits: uma lista escrita à mão (de superfícies escuras, de palavras
+portuguesas, de campos do `HostConfig`) esquece; o que fecha a classe é gerar
+a lista da fonte, ou trocar a lista por uma REGRA.
+
+## Fechado nesta rodada, com prova
+
+| Origem | Sev | Achado | Correção | Prova |
+| --- | --- | --- | --- | --- |
+| C-N1 | CRÍTICO | Recarregar depois da criação apagava o RESULTADO: voltavam projeto, estado e plano, e mais nada. A coluna direita dizia "Protótipo verificado" com a esquerda vazia — pior do que antes, e a própria tela MANDA recarregar quando perde o acompanhamento. | A tradução de execução terminada virou função pura (`resultOfRun`), usada pelo laço de acompanhamento E pela restauração, que agora busca também relato e pontos seguros. | `aecc020`; e2e faz a jornada, recarrega e exige as quatro coisas — e reprova quando a reidratação sai |
+| C-N2 | CRÍTICO | O tema escuro clareou o texto do produto inteiro e escureceu só a lista de superfícies que eu lembrei de escrever: Hub, tela de equipe, `<code>` do relato e frase permanente viraram branco sobre branco — 35 violações de contraste em telas antes legíveis. | O bloco escuro passou a ser GERADO das regras claras; `--muted` e `--border` redefinidos no escuro. | `aecc020`; axe em modo escuro passou a incluir Hub e equipe — foi ele que achou as últimas quatro |
+| C-N3 | ALTO | A PRIMEIRA pergunta mostrava o enum cru: "dados sensíveis (health)". | Cada tipo com nome em português, escrito como se escreve para gente. | `0c1ccac` |
+| C-N4 | MÉDIO | "Entendemos isto pelo seu texto" era dito também quando nada pontuou. | `categoryGuess` devolve `understood`; a frase só aparece quando algum sinal de função pontuou. | `0c1ccac`; `categorySuggestion.spec.ts` |
+| C-N5 | MÉDIO | O e2e roda contra `dist/` e nada o reconstruía: um auditor viu verde com o CSS quebrado. | `assertBuiltInterfaceIsFresh()` no servidor de teste. | `aecc020` |
+| C-N6 | BAIXO | Cinco botões do editor do plano faziam chamada de rede sem estado de ocupado. | Os cinco viraram `PendingButton` — e a classe foi fechada: os três últimos, na tela das perguntas, também. | `aecc020`, `04128c5` |
+| C-N7 | BAIXO | "Ajuda" existia só como ícone mudo. | Item da lista, com rótulo; o ícone duplicado saiu. | `4873ce8` |
+| C-M1 | MÉDIO | A varredura escura parava no plano: criação, verificação e relato ficavam sem axe no escuro. | O fluxo escuro vai até o fim; apanhou nove regras de texto escuro sobre superfície recém-escurecida. | `4873ce8`; e2e 62 nos quatro tamanhos |
+| C-M10 | MÉDIO | O Hub dizia "o nível de confiança sobe para T2". | Diz o efeito: "ela passa a ser tratada como se falasse com serviços externos". | `4873ce8` |
+| C-2 | CRÍTICO (parcial) | Quem escrevia só o ofício — "sistema pra barbearia", "app de delivery" — caía no padrão página de apresentação. | Seção `ramo-de-atividade` no catálogo, usada só quando nenhum sinal de função pontua, e que NÃO liga `understood`. | `04128c5`; teste exige `understood: false` no ramo |
+| C-H7 | ALTO (parcial) | Botão ocupado só em parte do fluxo. | Fechado junto com C-N6: nenhum botão do fluxo principal manda pedido sem avisar. | `04128c5` |
+| B-M6 | MÉDIO | A rotação de CSRF existia, mas `#issueSession` criava TODA sessão nova sem semente: o ramo v1 (compatibilidade) era o padrão de todo login novo. | A sessão nasce com semente. | `0c1ccac`; teste exige |
+| B-N2 | MÉDIO | O `lib/` versionado é o que o pacote publica e executa, nenhum teste o importa, e o passo final da CI excluía `plugins/*/lib/**` do diff: sabotar `identity/lib/service.js` removendo a validação de CSRF passava por TODOS os portões. | A exclusão saiu: depois do build, o artefato versionado tem de ser o que o fonte revisado produz. | `0c1ccac`; `.github/workflows/verify.yml` |
+| B-L1 | BAIXO | Host/Origin falhava ABERTO se `setRequestTrust` nunca fosse chamado. | O teste de composição exige que a borda declare, e reprova quando a chamada some. | `0c1ccac` |
+| B-N1 | BAIXO | `requestTrustConfigured` era acessor morto cujo comentário afirmava um portão inexistente. | Deixou de ser morto: é ele que o teste lê. | `0c1ccac` |
+| B-N3 | BAIXO | O self-test do portão de papéis estourava com pilha antes de nomear a ferramenta nova; o cabeçalho da prova de contêiner ainda mandava rodar por `node`. | Reprova legível; cabeçalho corrigido. | `0c1ccac` |
+| B-M1 | MÉDIO (parcial) | O detector de português é lista, e lista esquece: `"Acesso negado."`, `"Fila cheia."` passavam. | Regra que não pergunta o idioma: num plugin que JÁ mantém catálogo, literal com FORMA DE FRASE é catalogado ou dispensado nominalmente. Expôs seis frases em identity e tenancy. | `ac794ab` |
+| B-M2 | MÉDIO (parcial) | `productFlags` traduzia onze campos e ignorava `Privileged`, `PublishAllPorts`, `PortBindings`, `OomKillDisable` — com `Privileged: true` no produto a prova passava. | A função confere a lista traduzida contra as chaves do `HostConfig` (campo novo sem tradução reprova) e recusa os quatro. | `ac794ab` |
+| — | — | Apanhado ao rodar o portão real de PostgreSQL: `runTool` descartava a saída de erro do `pg_restore`, e o atalho de teste lia uma variável de ambiente que o endurecimento do produto (ambiente reduzido a PATH/LANG/LC_ALL) não entrega. O teste reprovava pela própria proteção que devia exercitar. | Diagnóstico lido e limitado nas duas ferramentas; identificador do contêiner gravado no atalho. | `e877f75`; `POSTGRES_GATE=PASS` 62/62 |
+
+## Em aberto, com motivo escrito
+
+| Origem | Sev | Situação |
+| --- | --- | --- |
+| C-3 | CRÍTICO (parcial) | DELIBERADO: a restauração só acontece quando há plano ou execução. Restaurar no meio das perguntas prenderia a pessoa numa etapa sem saída. Quem para no meio das perguntas recomeça — documentado, e é o preço escolhido. |
+| C-M2 / C-M8 | MÉDIO | Vocabulário de máquina e cobertura DECLARADA de axe/e2e: o portão de prontidão cobre os catálogos da pessoa; as células do livro-razão descrevem o que roda. Redução progressiva, não fechamento. |
+| B-M5 | MÉDIO | DELIBERADO: o portão de licenças roda em modo release na CI, com etapa própria e nomeada, mas não reprova o commit — a decisão é do Prado (`C-05`). O que ele impede é a decisão ficar invisível. |
+| B-M2 (execução) | MÉDIO | A correção está no código e tem teste; a EXECUÇÃO da prova exige a imagem OCI construída, que este ambiente não alcança (mesmo bloqueio de `S-04`/`D-10`). |
+| C-L3 | BAIXO | Só Chromium: não há rota de rede para baixar Firefox e WebKit. |
+| S-08 | — | Blocker interno: 12 domínios `ready` ainda com isolamento por código do produto, não pelo banco. O portão mede a distância e ela só pode diminuir. |
+
+## Placar depois desta rodada
+
+- suíte raiz: **2726 aprovados / 65 pulados** (172 arquivos)
+- app: **344 aprovados** (38 arquivos)
+- e2e: **62 aprovados / 5 pulados** nos quatro tamanhos, com axe em claro e escuro
+- PostgreSQL 16 real: **62/62**, `POSTGRES_GATE=PASS server=compose`
+- typecheck raiz = 0; typecheck do app = 0; build = 0
+- portões estáticos: `I18N_GATE=PASS`, `SECRET_SCAN=PASS achados=0 isencoes=13`,
+  `TRACKED_LIB=PASS files=179`, `TEAM_ROLE_TOOLS=PASS extensoes_lidas=6/6`,
+  `REQUIREMENTS_LEDGER=PASS requisitos=156 achados=0`,
+  `RLS_COVERAGE=PASS migrados=1/26`
+
+---
+
 # Auditoria final de três revisores independentes — 09/09/2026 (rodada 2)
 
 Objeto: `76c6f7d` e sucessores, sobre a base do commit `98d2650`. Os três

@@ -2,15 +2,17 @@
 
 - mission_id: `DZ23-STUDIO-V1-20260904`
 - objetivo: concluir o DZ23 STUDIO v1.0 com provas verificáveis, sem verde artificial
-- estado: `FIXING` (pós-auditoria: os CRITICAL e os HIGH das três auditorias fechados; MEDIUM em andamento)
-- iteração: 32
+- estado: `FIXING` (rodada 3 fechada: os dois CRÍTICOS de regressão, o ALTO, os
+  MÉDIOS e os BAIXOS das duas verificações estão fechados com prova; resta o
+  blocker interno S-08 e os bloqueios externos)
+- iteração: 34
 - início: 2026-09-04
 - último heartbeat: 2026-09-09
-- último progresso real: as três auditorias independentes rodaram e foram
-  consolidadas em `audit/FINAL_THREE_AGENT_REVIEW.md`; os 3 CRITICAL e os 8
-  HIGH com correção possível foram fechados com prova, mais 7 MEDIUM de
-  segurança. O typecheck do repositório ficou limpo pela primeira vez (eram 22
-  erros anteriores a esta sessão).
+- último progresso real: o portão real de PostgreSQL voltou a rodar e fechou
+  62/62 — a falha que restava era o atalho de teste sendo derrubado pelo próprio
+  endurecimento do produto, e o `pg_restore` não dizia por quê. Antes dela, a
+  rodada 3 fechou C-N1, C-N2, C-N3, C-N4, C-N5, C-N6, C-N7, C-M1, C-M10, C-2,
+  C-H7, B-M1, B-M2, B-M6, B-L1, B-N1, B-N2 e B-N3.
 - branch: `integ`
 - ponta: ver `git log -1`
 - upstream: `deepseek-harness@6c705be1ce6774a000d061da41d1823b03a3d42c`
@@ -18,13 +20,14 @@
 ## Placar objetivo
 
 - v1.0: **112 de 120** (93,3%) em BETA ou STABLE
-- suíte: 2724 aprovados, 65 pulados
-- typecheck: 0 erros; build: 0
+- suíte raiz: 2726 aprovados, 65 pulados (172 arquivos)
+- app: 344 aprovados (38 arquivos)
+- typecheck raiz: 0; typecheck do app: 0; build: 0
 - portões estáticos: 15/15 PASS
-- e2e navegador: 38 aprovados (mesa, tablet, celular) com axe, 0 violação — agora
-  INCLUINDO a metade verificada da jornada, que estava desligada por um
-  diagnóstico errado
-- PostgreSQL 16.13 real: 62/62
+- e2e navegador: **62 aprovados / 5 pulados nos quatro tamanhos** (mesa, tablet,
+  celular, faixa estreita de 900px), com axe em modo claro E escuro no fluxo
+  inteiro
+- PostgreSQL 16 real: **62/62** (`POSTGRES_GATE=PASS server=compose`)
 - provas de runtime: assistente (17 ferramentas), reinício de agente, loopback, endurecimento de contêiner
 
 ## Fechados nesta rodada
@@ -52,10 +55,13 @@ X-12 (WebMCP), A-03, A-06, M-03, S-15, P-09, C-24.
 
 ## Próxima ação
 
-`FIXING`: o que ficou em aberto está tabelado em
-`audit/FINAL_THREE_AGENT_REVIEW.md`, seção "Em aberto" — B-M6 (rotação do CSRF),
-C-H3/H4/H9 (identificador de máquina e jargão na tela) e os MEDIUM de produto.
-Depois deles, `RETESTING` e nova passada dos revisores sobre as correções.
+`FIXING` → o único trabalho interno de peso que resta é o **S-08**: migrar os 12
+domínios `ready` da chave-valor opaca para tabela por inquilino com RLS, começando
+pelo `PromptToAppRepository` (8 domínios num repositório só, 14 pontos de leitura,
+todos em `plugins/prompt-to-app/src/service.ts`, todos SÍNCRONOS hoje — a migração
+é, antes de tudo, tornar a leitura escopada e assíncrona). O restante em aberto
+está tabelado em `audit/FINAL_THREE_AGENT_REVIEW.md`, seção "Em aberto, com motivo
+escrito", e cada linha tem o motivo por extenso.
 
 ## Instruções de retomada
 
