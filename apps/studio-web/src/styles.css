@@ -200,6 +200,29 @@
 @keyframes dz23-pulse{0%,100%{opacity:.35;transform:scale(.85)}50%{opacity:1;transform:scale(1)}}
 @media(prefers-reduced-motion:reduce){.creation-spinner{animation:none;opacity:1}}
 
+/* A linha do tempo da construção. Uma lista ordenada de verdade (`<ol>`), e
+   não `<div>`s: quem usa leitor de tela ouve "item 2 de 4", que é exatamente a
+   informação que a lista existe para dar.
+
+   O estado NUNCA é só cor. Cada linha traz a palavra ao lado do ponto, porque
+   verde-e-vermelho desaparece para quem não distingue as duas e some de novo
+   no modo escuro. O ponto é enfeite; a palavra é o dado. */
+.creation-attempt{color:#5c6881;font-size:13px;margin:18px 0 0}
+.build-steps{margin:16px 0 4px}
+.build-steps h2{font-size:14px;font-weight:600;color:#41506b;margin:0 0 8px}
+.build-steps ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.build-step{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:15px;color:#41506b}
+.build-step-dot{width:10px;height:10px;border-radius:50%;flex:none;background:#c3cbdb}
+.build-step-label{flex:1 1 auto;min-width:0}
+.build-step-state{font-size:13px;color:#5c6881}
+.build-step-time{font-size:13px;color:#5c6881;font-variant-numeric:tabular-nums}
+.build-step-running .build-step-dot{background:#075ee5;animation:dz23-pulse 1.4s ease-in-out infinite}
+.build-step-running .build-step-label{font-weight:600;color:#0f1b33}
+.build-step-passed .build-step-dot{background:#1c7c4a}
+.build-step-failed .build-step-dot{background:#b3261e}
+.build-step-waiting,.build-step-never{color:#5c6881}
+@media(prefers-reduced-motion:reduce){.build-step-running .build-step-dot{animation:none;opacity:1}}
+
 /* Meus projetos. Cada item é um cartão com nome, situação, data e o jeito de
    abrir — e não uma tabela, porque tabela em celular vira rolagem lateral, que
    foi o defeito da faixa de 900px. */
@@ -359,6 +382,15 @@
 @media(prefers-color-scheme:dark){
   .creation-stage{color:#c7d2e4}
   .creation-stage small{color:#c7d2e4}
+  .creation-attempt{color:#c7d2e4}
+  .build-steps h2{color:#c7d2e4}
+  .build-step{color:#c7d2e4}
+  .build-step-state,.build-step-time{color:#aebad0}
+  .build-step-dot{background:#4a5670}
+  .build-step-running .build-step-label{color:#f2f5fb}
+  .build-step-passed .build-step-dot{background:#4ec27f}
+  .build-step-failed .build-step-dot{background:#ff8a80}
+  .build-step-waiting,.build-step-never{color:#aebad0}
   .project-list li{border-color:var(--border)}
   .project-line strong{color:#eef2f9}
   .project-state{color:#c7d2e4}

@@ -38,8 +38,19 @@ test('a navegação existe e leva à conversa, em qualquer tamanho de tela', asy
   await expect(conversation).toHaveAttribute('href', '/studio/assistente')
   await expect(page.getByRole('link', { name: 'Integrações' })).toBeVisible()
 
-  // O que ainda não existe aparece como indisponível, e não como botão mudo.
-  await expect(page.getByText('em breve').first()).toBeVisible()
+  // A afirmação AQUI virou de lado, e a inversão é a correção.
+  //
+  // Este teste exigia que "em breve" estivesse VISÍVEL: era o jeito de provar
+  // que um item sem tela aparecia como indisponível em vez de virar botão mudo.
+  // Só que o Prado leu a etiqueta pelo que ela diz de verdade - "este produto
+  // não está pronto" -, e ele estava certo. Os dois últimos itens sem destino
+  // foram embora: "Meus projetos" ganhou tela, e "Ver resultado" não precisava
+  // de uma, porque o resultado é o pé da tela inicial.
+  //
+  // Agora o teste guarda o outro lado: nenhum item morto pode voltar sem
+  // alguém reprovar aqui primeiro.
+  await expect(page.getByText('em breve')).toHaveCount(0)
+  await expect(page.locator('nav button[disabled]')).toHaveCount(0)
 
   await conversation.click()
   await expect(page).toHaveURL(/\/studio\/assistente$/u)

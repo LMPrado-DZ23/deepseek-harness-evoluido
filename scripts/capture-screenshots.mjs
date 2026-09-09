@@ -76,13 +76,41 @@ try {
   await rm(outDirectory, { recursive: true, force: true })
   await mkdir(outDirectory, { recursive: true })
   const browser = await chromium.launch({ executablePath })
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 })
+  // `serviceWorkers: 'block'` NAO e detalhe de conveniencia. O Studio e uma PWA,
+  // e depois que o service worker assume o controle da aba as chamadas de rede
+  // passam por ele - `page.on('request')` continua avisando, mas `page.route`
+  // deixa de interceptar. Foi exatamente isso que fez a captura da construcao
+  // falhar em silencio: o congelamento da resposta nunca acontecia, e o
+  // roteiro esperava trinta segundos por uma tela que nunca ia aparecer.
+  // A copia salva tem prova propria em `tests/pwa.spec.ts`; aqui ela so atrapalha.
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2, serviceWorkers: 'block' })
   await context.addCookies([
     { name: 'dz23_studio_session', value: 'e2e', url: origin },
     { name: 'dz23_studio_csrf', value: 'csrf-e2e', url: origin },
   ])
   await context.addInitScript(() => { window.sessionStorage.setItem('dz23.studio.csrf.v1', 'csrf-e2e') })
   const page = await context.newPage()
+
+  let freezeBuild = false
+  await page.route(/\/api\/studio\/apps\/projects\/[^/?]+$/u, async route => {
+    if (route.request().method() !== 'GET' || !freezeBuild) return route.fallback()
+    // `route.fetch` corre no Node, que não resolve `*.localhost` como o
+    // Chromium resolve; `127.0.0.1:4179` está na lista de hosts aceitos.
+    const upstream = await route.fetch({ url: route.request().url().replace('studio.dz23.localhost', '127.0.0.1') })
+    const body = await upstream.json()
+    if (body.current_run !== null) {
+      body.project = { ...body.project, state: 'GENERATING' }
+      body.current_run = {
+        ...body.current_run, state: 'RUNNING', stage: 'build', attempt: 1,
+        steps: [
+          { step: 'install', state: 'PASSED', started_at: '2026-09-09T12:00:00.000Z', finished_at: '2026-09-09T12:00:23.000Z' },
+          { step: 'build', state: 'RUNNING', started_at: '2026-09-09T12:00:23.000Z', finished_at: null },
+        ],
+      }
+    }
+    await route.fulfill({ response: upstream, json: body })
+  })
+
 
   // 1. A primeira tela: a ideia, com as palavras da pessoa.
   await page.goto(`${origin}/studio/`)
@@ -116,49 +144,62 @@ try {
   await page.getByRole('button', { name: 'Aprovar este plano' }).waitFor()
   await shot(page, '03-plano')
 
-  // 4. O resultado: critérios conferidos, relato e pontos de retorno.
+  // 4. A CONSTRUÇÃO ACONTECENDO. Esta é a imagem que faltava: até aqui o
+  // README mostrava o antes e o depois, e nada do meio - que é justamente
+  // onde a pessoa passa os minutos mais longos do produto.
+  //
+  // A resposta é FIXADA no meio da execução, como o e2e faz e pelo mesmo
+  // motivo: o construtor de fixture termina em milissegundos, e esperar o
+  // instante certo seria uma corrida contra o relógio, não uma captura.
   await page.getByRole('button', { name: 'Aprovar este plano' }).click()
+  freezeBuild = true
   await page.getByRole('button', { name: 'Iniciar criação' }).click()
-  await page.getByRole('button', { name: 'Ver meu protótipo' }).waitFor({ timeout: 60_000 })
-  await shot(page, '04-verificacao')
+  await page.locator('.build-steps').waitFor({ timeout: 30_000 })
+  await page.waitForTimeout(300)
+  await shot(page, '04-construcao')
+  freezeBuild = false
 
-  // 5. O relato do que aconteceu — a página inteira, e não só o que cabe na
+  // 5. O resultado: critérios conferidos, relato e pontos de retorno.
+  await page.getByRole('button', { name: 'Ver meu protótipo' }).waitFor({ timeout: 60_000 })
+  await shot(page, '05-verificacao')
+
+  // 6. O relato do que aconteceu — a página inteira, e não só o que cabe na
   // dobra. `fullPage` porque o relato fica ABAIXO da verificação: uma captura
   // do viewport repetiria a imagem anterior byte a byte, que foi o que
   // aconteceu na primeira versão deste script.
   const report = page.getByRole('heading', { name: 'O que aconteceu na criação' })
   if (await report.count() > 0) {
     await report.scrollIntoViewIfNeeded()
-    await page.screenshot({ path: resolve(outDirectory, '05-relato.png'), animations: 'disabled', fullPage: true })
-    shots.push('05-relato')
+    await page.screenshot({ path: resolve(outDirectory, '06-relato.png'), animations: 'disabled', fullPage: true })
+    shots.push('06-relato')
   }
 
-  // 6. A lista de projetos: onde a pessoa volta para o que já começou.
+  // 7. A lista de projetos: onde a pessoa volta para o que já começou.
   await page.goto(`${origin}/studio/projetos`)
   await page.getByRole('heading', { name: 'Meus projetos', level: 1 }).waitFor()
-  await shot(page, '06-projetos')
+  await shot(page, '07-projetos')
 
-  // 7. A ajuda: as etapas, o glossário e o que o Studio nunca faz.
+  // 8. A ajuda: as etapas, o glossário e o que o Studio nunca faz.
   await page.goto(`${origin}/studio/ajuda`)
   await page.waitForTimeout(300)
-  await shot(page, '07-ajuda')
+  await shot(page, '08-ajuda')
 
-  // 8. O mesmo produto no escuro, porque o tema acompanha o sistema.
+  // 9. O mesmo produto no escuro, porque o tema acompanha o sistema.
   const dark = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2, colorScheme: 'dark' })
   await dark.addCookies([{ name: 'dz23_studio_session', value: 'e2e', url: origin }])
   const darkPage = await dark.newPage()
   await darkPage.goto(`${origin}/studio/`)
   await darkPage.getByRole('textbox').first().fill('quero uma página para apresentar minha clínica e receber contatos')
   await darkPage.waitForTimeout(300)
-  await shot(darkPage, '08-escuro')
+  await shot(darkPage, '09-escuro')
 
-  // 9. O celular: a mesma jornada num Pixel 5.
+  // 10. O celular: a mesma jornada num Pixel 5.
   const phone = await browser.newContext({ viewport: { width: 393, height: 851 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true })
   await phone.addCookies([{ name: 'dz23_studio_session', value: 'e2e', url: origin }])
   const phonePage = await phone.newPage()
   await phonePage.goto(`${origin}/studio/`)
   await phonePage.waitForTimeout(300)
-  await shot(phonePage, '09-celular')
+  await shot(phonePage, '10-celular')
 
   await browser.close()
   process.stdout.write(`SCREENSHOTS=PASS destino=${outDirectory} imagens=${String(shots.length)}\n${shots.join('\n')}\n`)

@@ -136,6 +136,35 @@ export const studioRunSchema = z.object({
     builder_image_digest: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
     policy_sha256: sha256,
   }).strict().optional(),
+  /**
+   * Os passos do construtor DESTA tentativa, na ordem em que aconteceram.
+   *
+   * Existe porque a criação era uma caixa preta enquanto acontecia. O registro
+   * guardava a ETAPA (`build` ou `test`), e o construtor roda quatro passos
+   * dentro dessas duas: `install`, `build`, `test` e `e2e`. Durante os minutos
+   * mais longos do produto a pessoa via a mesma frase imóvel enquanto quatro
+   * coisas diferentes aconteciam - e "parado" e "trabalhando" ficavam com a
+   * mesma aparência.
+   *
+   * Só entram passos que REALMENTE começaram. Um passo ausente nunca quer dizer
+   * "pulado com sucesso": quer dizer que não chegou a acontecer, e a tela sabe
+   * distinguir "ainda vai" de "não chegou a ser" pelo estado da execução.
+   *
+   * OPCIONAL, e a versão do domínio NÃO sobe - mesmo motivo de
+   * `template_integrity` e `attestations`: subir a versão faria `open()` falhar
+   * com `version-mismatch` para sempre numa instalação que já rodou. Ausente
+   * quer dizer "execução anterior a este registro", nunca "não teve passos".
+   */
+  steps: z.array(z.object({
+    step: z.enum(['install', 'build', 'test', 'e2e']),
+    // `PASSED`, e nao um estado absoluto de conclusao: o que o sistema sabe e
+    // que o passo rodou e saiu com codigo zero. `gate:i18n` recusa
+    // READY/DONE/PUBLISHED/DEPLOYED nesta maquina de estados exatamente porque
+    // essas palavras afirmam mais do que qualquer registro pode sustentar - e
+    // recusou a primeira versao deste campo, que dizia `DONE`.
+    state: z.enum(['RUNNING', 'PASSED', 'FAILED']),
+    started_at: timestamp, finished_at: timestamp.nullable(),
+  }).strict()).optional(),
   failure_code: z.string().nullable(),
   acceptance_checks: z.array(z.object({
     id: z.string().min(1), label: z.string().min(1),
@@ -176,6 +205,8 @@ export type StudioIntakeTurn = z.infer<typeof studioIntakeTurnSchema>
 export type StudioPlan = z.infer<typeof studioPlanSchema>
 export type StudioPlanSlice = z.infer<typeof planSliceSchema>
 export type StudioRun = z.infer<typeof studioRunSchema>
+/** Um passo do construtor dentro de uma tentativa, como o registro o guarda. */
+export type StudioRunStep = NonNullable<StudioRun['steps']>[number]
 export type StudioEvidence = z.infer<typeof studioEvidenceSchema>
 export type StudioApproval = z.infer<typeof studioApprovalSchema>
 declare const promptKeyBrand: unique symbol

@@ -18,17 +18,21 @@ describe('navegação do Studio', () => {
     expect(hrefs.get('hub')).toBe(HUB_PATH)
   })
 
-  it('não desenha botão mudo para tela que ainda não existe', () => {
-    // Quatro botões sem ação era a queixa: a pessoa aperta e nada acontece, sem
-    // nem saber se quebrou. Agora o item vem DESABILITADO e dito "em breve" -
-    // `disabled` de verdade, e não `aria-disabled` num <span>, que a própria
-    // especificação proíbe e o axe reprova.
+  it('não tem item morto: nenhum "em breve", nenhum botão desabilitado', () => {
+    // A história em três atos. (1) Quatro botões sem ação: a pessoa apertava e
+    // nada acontecia, sem nem saber se tinha quebrado. (2) Os itens viraram
+    // DESABILITADOS com a etiqueta "em breve" - melhor, porque parava de
+    // enganar. (3) O Prado leu a etiqueta pelo que ela é: "o produto não está
+    // pronto", dito toda vez que alguém abre o menu. "Meus projetos" ganhou
+    // tela; "Ver resultado" não precisava de uma, porque o resultado é o pé da
+    // tela inicial. Agora todo item leva a algum lugar.
     const html = render()
-    const unavailable = studioNavItems().filter(item => item.href === null)
-    expect(unavailable.length).toBeGreaterThan(0)
-    expect(html.match(/class="nav unavailable" disabled/gu) ?? []).toHaveLength(unavailable.length)
-    expect(html).not.toContain('<button class="nav">')
-    expect(html).toContain('em breve')
+    expect(studioNavItems().every(item => item.href.startsWith('/'))).toBe(true)
+    expect(html).not.toContain('disabled')
+    expect(html).not.toContain('em breve')
+    // Cada item vira um <a> com destino - e não um <button>, que não abre em
+    // outra aba e não anuncia navegação para quem usa leitor de tela.
+    expect(html.match(/<a class="nav/gu) ?? []).toHaveLength(studioNavItems().length)
   })
 
   it('a conversa - e portanto as confirmações - está na navegação, não só no endereço digitado', () => {

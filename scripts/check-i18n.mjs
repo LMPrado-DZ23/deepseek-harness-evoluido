@@ -43,7 +43,15 @@ const styles = readFileSync(resolve(root, 'apps/studio-web/src/styles.css'), 'ut
 const modelSource = readFileSync(resolve(root, 'plugins/prompt-to-app/src/model.ts'), 'utf8')
 
 const required = [
-  'brand', 'nav.home', 'nav.projects', 'nav.result',
+  // `nav.result` saiu da lista junto com o item: "Ver resultado" era um item
+  // de navegação sem destino, marcado "em breve", para uma tela que nunca ia
+  // existir separada - o resultado é o pé da tela inicial. Exigir a chave aqui
+  // obrigaria o catálogo a guardar a frase de um item que não existe mais.
+  'brand', 'nav.home', 'nav.projects', 'nav.help',
+  'creation.steps.title', 'creation.steps.labels.install', 'creation.steps.labels.build',
+  'creation.steps.labels.test', 'creation.steps.labels.e2e',
+  'creation.steps.running', 'creation.steps.done', 'creation.steps.failed',
+  'creation.steps.waiting', 'creation.steps.never',
   'idea.title', 'idea.subtitle', 'idea.placeholder', 'idea.continue',
   'questions.title', 'questions.recommend', 'plan.title', 'plan.approve', 'plan.change', 'plan.revision',
   'creation.title', 'creation.start', 'verification.title', 'verification.success',

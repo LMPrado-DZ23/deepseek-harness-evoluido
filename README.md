@@ -43,14 +43,27 @@ A jornada tem cinco etapas, e cada uma é uma tela que qualquer pessoa lê:
 <td width="50%"><img src="./docs/images/03-plano.png" alt="O plano, aprovável e editável antes de qualquer criação"></td>
 </tr>
 <tr>
-<td colspan="2"><img src="./docs/images/04-verificacao.png" alt="Resultado da verificação, com os critérios conferidos um a um"></td>
+<td colspan="2"><img src="./docs/images/04-construcao.png" alt="A construção acontecendo: os quatro passos do construtor, o que já terminou com o tempo que levou, o que está em andamento e o que ainda vai acontecer"></td>
+</tr>
+<tr>
+<td colspan="2"><img src="./docs/images/05-verificacao.png" alt="Resultado da verificação, com os critérios conferidos um a um"></td>
 </tr>
 </table>
+
+A imagem do meio é a que costuma faltar. Durante a criação o Studio mostra os
+**quatro passos do construtor** enquanto eles acontecem: o que já terminou, com
+o tempo que levou; o que está em andamento; e o que ainda vai acontecer. Numa
+tela onde nada muda, "trabalhando" e "travado" têm a mesma aparência — e quem
+não programa não tem como distinguir os dois.
+
+O estado nunca é só cor: a palavra fica ao lado do ponto, porque
+verde-e-vermelho desaparece para quem não distingue os dois e some de novo no
+modo escuro.
 
 E você volta para qualquer projeto quando quiser — a situação de cada um
 aparece em português, nunca como código de máquina:
 
-![A lista de projetos, com a situação de cada um em português](./docs/images/06-projetos.png)
+![A lista de projetos, com a situação de cada um em português](./docs/images/07-projetos.png)
 
 ### Sete tipos de aplicativo
 
@@ -126,8 +139,8 @@ clicando duas vezes.
 
 <table>
 <tr>
-<td width="50%"><img src="./docs/images/08-escuro.png" alt="O mesmo produto em modo escuro"></td>
-<td width="50%"><img src="./docs/images/07-ajuda.png" alt="A ajuda, com glossário e o que o Studio nunca faz"></td>
+<td width="50%"><img src="./docs/images/09-escuro.png" alt="O mesmo produto em modo escuro"></td>
+<td width="50%"><img src="./docs/images/08-ajuda.png" alt="A ajuda, com glossário e o que o Studio nunca faz"></td>
 </tr>
 </table>
 
@@ -253,7 +266,7 @@ agora usa o caminho de desenvolvimento acima.
 As decisões estão registradas em **44 ADRs** em [`docs/adr/`](./docs/adr/).
 
 <div align="center">
-<img src="./docs/images/09-celular.png" alt="A mesma jornada no celular" width="320">
+<img src="./docs/images/10-celular.png" alt="A mesma jornada no celular" width="320">
 </div>
 
 ---

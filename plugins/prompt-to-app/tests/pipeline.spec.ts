@@ -161,6 +161,58 @@ describe('Prompt-to-App pipeline', () => {
     expect(sbom).toMatchObject({ source: 'declared', unavailable_reason: null, components: [] })
   })
 
+  it('grava cada passo do construtor ENQUANTO ele acontece, e não só no fim', async () => {
+    // "A ideia desse projeto é ver a construção em tempo real." A tela mostrava
+    // uma frase por ETAPA - `build` ou `test` -, e o construtor roda quatro
+    // passos dentro dessas duas. Durante os minutos mais longos do produto a
+    // pessoa via um texto imóvel enquanto quatro coisas diferentes aconteciam,
+    // e "trabalhando" e "travado" tinham a mesma aparência.
+    //
+    // O que este teste afirma é o TEMPO REAL, não o resultado: existe um
+    // registro em que `install` já terminou e `build` está em andamento. Um
+    // registro que só ganhasse os passos no fim passaria por um teste que
+    // olhasse apenas `runs.at(-1)` - e não mostraria nada a ninguém enquanto a
+    // espera acontece, que é o defeito inteiro.
+    const f = await fixture({ execute: reportingExecute('PASSED'), finish: attestingFinish })
+    await f.pipeline.run(actor, 'project', { generate: vi.fn(async () => cleanGeneration) })
+
+    const live = f.runs.find(run => run.steps?.some(entry => entry.state === 'RUNNING'))
+    expect(live, 'nenhum registro pegou um passo em andamento').toBeDefined()
+
+    const midway = f.runs.find(run =>
+      run.steps?.[0]?.step === 'install' && run.steps[0].state === 'PASSED'
+      && run.steps[1]?.step === 'build' && run.steps[1].state === 'RUNNING')
+    expect(midway, 'nenhum registro mostra install pronto com build em andamento').toBeDefined()
+    // O passo em andamento não tem fim: inventar um seria mostrar duração para
+    // algo que ainda está acontecendo.
+    expect(midway!.steps![1]!.finished_at).toBeNull()
+    expect(midway!.steps![0]!.finished_at).not.toBeNull()
+
+    // No fim, os quatro passos estão lá, na ordem do construtor, todos fechados.
+    const final = f.runs.at(-1)!
+    expect(final.steps?.map(entry => entry.step)).toEqual(['install', 'build', 'test', 'e2e'])
+    expect(final.steps?.every(entry => entry.state === 'PASSED')).toBe(true)
+    expect(final.steps?.every(entry => entry.finished_at !== null)).toBe(true)
+  })
+
+  it('um passo que reprova é gravado como reprovado, e os seguintes não aparecem', async () => {
+    // Um passo eternamente RUNNING faria a tela girar para sempre num passo que
+    // já acabou - a aparência exata de um travamento. E um passo que nunca
+    // rodou NÃO pode aparecer: ausência aqui quer dizer "não chegou a
+    // acontecer", nunca "pulado com sucesso".
+    const f = await fixture({
+      execute: async (_directory: string, command: string) => command.includes('build')
+        ? { exitCode: 1, stdout: '', stderr: 'erro de compilação', timedOut: false }
+        : { exitCode: 0, stdout: 'ok', stderr: '', timedOut: false },
+    })
+    await f.pipeline.run(actor, 'project', { generate: vi.fn(async () => cleanGeneration) })
+    const withSteps = f.runs.filter(run => run.steps !== undefined && run.steps.length > 0)
+    expect(withSteps.length).toBeGreaterThan(0)
+    const last = withSteps.at(-1)!
+    expect(last.steps!.map(entry => [entry.step, entry.state])).toEqual([['install', 'PASSED'], ['build', 'FAILED']])
+    expect(last.steps!.every(entry => entry.state !== 'RUNNING')).toBe(true)
+  })
+
   it('um critério REPROVADO derruba a atestação, e o ciclo verde do construtor não salva a execução', async () => {
     // O veredito da atestação é o que a pessoa vai mostrar a alguém: ele manda
     // sobre o "passou" do construtor.

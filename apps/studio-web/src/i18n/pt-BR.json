@@ -3,10 +3,7 @@
   "nav": {
     "home": "Início",
     "projects": "Meus projetos",
-    "result": "Ver resultado",
     "help": "Ajuda",
-    "settings": "Configurações",
-    "soon": "em breve",
     "menuLabel": "Navegação do Studio"
   },
   "report": {
@@ -211,7 +208,22 @@
       "verify": "Conferindo o resultado"
     },
     "attempt": "{n}ª tentativa — corrigindo o que não passou",
-    "stageUnknown": "Trabalhando no seu aplicativo"
+    "stageUnknown": "Trabalhando no seu aplicativo",
+    "steps": {
+      "title": "O que está sendo feito agora",
+      "labels": {
+        "install": "Buscando as peças que o aplicativo usa",
+        "build": "Montando o aplicativo",
+        "test": "Conferindo as regras por dentro",
+        "e2e": "Usando o aplicativo como uma pessoa usaria"
+      },
+      "running": "em andamento",
+      "done": "concluído",
+      "failed": "não passou",
+      "waiting": "ainda vai acontecer",
+      "never": "não chegou a acontecer",
+      "elapsed": "{s}s"
+    }
   },
   "verification": {
     "title": "Resultado da verificação",

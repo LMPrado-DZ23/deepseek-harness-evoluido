@@ -27,7 +27,7 @@ import { assertGeneratedSource } from './import-policy.js'
 import { generateSaasLayer, writeSaasLayer } from './saas-generator.js'
 import { t } from './i18n.js'
 import { diffRunFiles, runReport, RUN_REPORT_FILE, type RunFileAuthor } from './run-report.js'
-import type { StudioPlan, StudioRun } from './model.js'
+import type { StudioPlan, StudioRun, StudioRunStep } from './model.js'
 import { assertCategoryCanGenerate } from './planner.js'
 import type { PromptModelPort } from './ports.js'
 import { BUILD_STEPS, BuilderLifecycleError, type BuilderLifecycleResolverPort, type BuilderLifecycleSession } from './builder-lifecycle.js'
@@ -240,6 +240,15 @@ export class PromptToAppPipeline {
         continue
       }
       let buildPassed = false; let testPassed = false; let log = ''; let failedStage: StudioRun['stage'] = 'build'
+      // Os passos do construtor DESTA tentativa, gravados enquanto acontecem.
+      // Sem isto a tela via `build` por vários minutos e não tinha como
+      // distinguir "instalando" de "compilando" de "travado".
+      let buildSteps: readonly StudioRunStep[] = []
+      const closeStep = (state: 'PASSED' | 'FAILED'): void => {
+        const last = buildSteps.at(-1)
+        if (last === undefined || last.state !== 'RUNNING') return
+        buildSteps = [...buildSteps.slice(0, -1), { ...last, state, finished_at: this.#now().toISOString() }]
+      }
       let buildRef: string | undefined
       let finished: Awaited<ReturnType<BuilderLifecycleSession['finish']>> | undefined
       try {
@@ -252,10 +261,27 @@ export class PromptToAppPipeline {
           }
           const stage: StudioRun['stage'] = step === 'test' || step === 'e2e' ? 'test' : 'build'
           activeStage = stage
-          await this.options.service.putRun(actor, this.runRecord(actor, projectId, plan.plan_id, stage, attempt, 'RUNNING', 'full', runDirectory, generated, null, runId, operationId, ownerSessionId, await readAcceptanceChecks(runDirectory, expectedAcceptanceChecks)))
-          const execution = await lifecycle.execute(buildRef, step, runOptions.signal)
+          // O passo entra como RUNNING ANTES de começar, e o registro é gravado
+          // já: quem está olhando a tela precisa ver o passo acender no momento
+          // em que ele começa, não quando ele termina.
+          buildSteps = [...buildSteps, { step, state: 'RUNNING', started_at: this.#now().toISOString(), finished_at: null }]
+          await this.options.service.putRun(actor, this.runRecord(actor, projectId, plan.plan_id, stage, attempt, 'RUNNING', 'full', runDirectory, generated, null, runId, operationId, ownerSessionId, await readAcceptanceChecks(runDirectory, expectedAcceptanceChecks), null, undefined, undefined, buildSteps))
+          let execution: Awaited<ReturnType<BuilderLifecycleSession['execute']>>
+          try {
+            execution = await lifecycle.execute(buildRef, step, runOptions.signal)
+          } catch (error) {
+            // Um passo que EXPLODE também terminou. Deixá-lo eternamente
+            // RUNNING faria a tela mostrar uma bolinha girando para sempre num
+            // passo que já acabou - a aparência exata de um travamento.
+            closeStep('FAILED')
+            throw error
+          }
           const result = execution.result
           log += `[${step}]\n${result.stdout}\n${result.stderr}\n`
+          const stepFailed = result.output_limit_exceeded || result.termination_reason === 'output_limit'
+            || result.timed_out || result.exit_code !== 0 || execution.state === 'FAILED'
+          closeStep(stepFailed ? 'FAILED' : 'PASSED')
+          await this.options.service.putRun(actor, this.runRecord(actor, projectId, plan.plan_id, stage, attempt, 'RUNNING', 'full', runDirectory, generated, null, runId, operationId, ownerSessionId, await readAcceptanceChecks(runDirectory, expectedAcceptanceChecks), null, undefined, undefined, buildSteps))
           if (result.output_limit_exceeded || result.termination_reason === 'output_limit') {
             diagnostic = 'PROCESS_OUTPUT_LIMIT_EXCEEDED'; failedStage = buildPassed ? 'test' : 'build'; stopRetries = true; break
           }
@@ -352,7 +378,7 @@ export class PromptToAppPipeline {
       await writeFile(resolve(runDirectory, 'pipeline.log'), log, 'utf8')
       activeStage = 'verify'
       const artifactSha256 = state === 'PASSED' ? finished.exported!.sha256 : null
-      await this.options.service.putRun(actor, this.runRecord(actor, projectId, plan.plan_id, state === 'PASSED' ? 'verify' : failedStage, attempt, state, 'full', runDirectory, generated, diagnostic ?? null, runId, operationId, ownerSessionId, verifiedAcceptanceChecks, artifactSha256, templateIntegrity, attestations))
+      await this.options.service.putRun(actor, this.runRecord(actor, projectId, plan.plan_id, state === 'PASSED' ? 'verify' : failedStage, attempt, state, 'full', runDirectory, generated, diagnostic ?? null, runId, operationId, ownerSessionId, verifiedAcceptanceChecks, artifactSha256, templateIntegrity, attestations, buildSteps))
       await this.recordEvidence(actor, projectId, runId, runDirectory, 'pipeline.log', 'build-log')
       await this.writeRunReport({ actor, projectId, runId, directory: runDirectory, stage: state === 'PASSED' ? 'verify' : failedStage, runState: state, attempt, files: attemptFiles, previousFiles: previousAttemptFiles, findings: attemptFindings, correction: previousDiagnosticForReport })
       if (state === 'PASSED') {
@@ -449,9 +475,9 @@ export class PromptToAppPipeline {
     }
   }
 
-  private runRecord(actor: PromptToAppActor, projectId: string, planId: string, stage: StudioRun['stage'], attempt: number, state: StudioRun['state'], sandbox: StudioRun['sandbox'], runDirectory: string, generation: CodeGenerationResult | null, failure: string | null, runId = this.#createId(), operationId = runId, ownerSessionId = actor.sessionId ?? 'direct-execution', acceptanceChecks: readonly AcceptanceCheck[] = [], artifactSha256: string | null = null, templateIntegrity?: StudioRun['template_integrity'], attestations?: AttestationDigests): StudioRun {
+  private runRecord(actor: PromptToAppActor, projectId: string, planId: string, stage: StudioRun['stage'], attempt: number, state: StudioRun['state'], sandbox: StudioRun['sandbox'], runDirectory: string, generation: CodeGenerationResult | null, failure: string | null, runId = this.#createId(), operationId = runId, ownerSessionId = actor.sessionId ?? 'direct-execution', acceptanceChecks: readonly AcceptanceCheck[] = [], artifactSha256: string | null = null, templateIntegrity?: StudioRun['template_integrity'], attestations?: AttestationDigests, steps: readonly StudioRunStep[] = []): StudioRun {
     const now = this.#now().toISOString()
-    return { run_id: runId, operation_id: operationId, owner_session_id: ownerSessionId, plan_id: planId, project_id: projectId, org_id: actor.orgId, tenant_id: actor.tenantId, stage, attempt, state, started_at: now, finished_at: state === 'RUNNING' || state === 'PENDING' ? null : now, sandbox, route: generation?.route ?? null, model: generation?.model ?? null, input_tokens: generation?.inputTokens ?? null, output_tokens: generation?.outputTokens ?? null, estimated_cost_usd: null, run_directory: runDirectory || 'not-created', artifact_sha256: artifactSha256, ...(templateIntegrity === undefined ? {} : { template_integrity: templateIntegrity }), ...(attestations === undefined ? {} : { attestations }), failure_code: failure, acceptance_checks: [...acceptanceChecks] }
+    return { run_id: runId, operation_id: operationId, owner_session_id: ownerSessionId, plan_id: planId, project_id: projectId, org_id: actor.orgId, tenant_id: actor.tenantId, stage, attempt, state, started_at: now, finished_at: state === 'RUNNING' || state === 'PENDING' ? null : now, sandbox, route: generation?.route ?? null, model: generation?.model ?? null, input_tokens: generation?.inputTokens ?? null, output_tokens: generation?.outputTokens ?? null, estimated_cost_usd: null, run_directory: runDirectory || 'not-created', artifact_sha256: artifactSha256, ...(templateIntegrity === undefined ? {} : { template_integrity: templateIntegrity }), ...(attestations === undefined ? {} : { attestations }), ...(steps.length === 0 ? {} : { steps: steps.map(entry => ({ ...entry })) }), failure_code: failure, acceptance_checks: [...acceptanceChecks] }
   }
 
   private async recordFailure(actor: PromptToAppActor, projectId: string, planId: string, runId: string, directory: string, attempt: number, generation: CodeGenerationResult | null, diagnostic: string, stage: StudioRun['stage'], operationId: string, ownerSessionId: string) {

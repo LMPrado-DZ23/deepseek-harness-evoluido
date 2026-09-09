@@ -1,3 +1,4 @@
+import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 import { INTAKE_ANSWERS, answerIntake } from './answering'
 
@@ -159,7 +160,7 @@ test('os três botões da tela de perguntas avisam que estão trabalhando', asyn
  * milissegundos, esperar pelo instante certo seria uma corrida — o teste
  * reprovaria por relógio, e não por defeito.
  */
-test('durante a criação, a tela mostra a etapa em que está', async ({ context, page }) => {
+test('sem passos registrados, a tela ainda mostra a etapa em que está', async ({ context, page }) => {
   await context.addCookies([
     { name: 'dz23_studio_session', value: 'e2e', url: origin },
     { name: 'dz23_studio_csrf', value: 'csrf-e2e', url: origin },
@@ -182,6 +183,17 @@ test('durante a criação, a tela mostra a etapa em que está', async ({ context
       // relógio.
       body.project = { ...body.project, state: 'GENERATING' }
       body.current_run = { ...body.current_run, state: 'RUNNING', stage: 'test', attempt: 2 }
+      // `steps` é APAGADO de propósito, e é isso que este teste passou a
+      // guardar: a execução SEM passos registrados.
+      //
+      // O campo é opcional e a versão do domínio não sobe, então toda execução
+      // gravada antes dele - e toda instalação que ainda não atualizou o
+      // servidor - chega aqui sem ele. Quando há passos, a linha do tempo
+      // substitui esta frase (mostrar as duas repetia a mesma palavra duas
+      // vezes na tela). Quando não há, a frase da etapa é a ÚNICA coisa que
+      // separa "trabalhando" de "travado" - e some-la seria deixar a tela
+      // muda justamente para quem tem o servidor mais antigo.
+      delete body.current_run.steps
     }
     await route.fulfill({ response, json: body })
   })
@@ -197,10 +209,95 @@ test('durante a criação, a tela mostra a etapa em que está', async ({ context
 
   const stage = page.locator('.creation-stage')
   await expect(stage).toBeVisible({ timeout: 20_000 })
+  // Sem passos, NÃO há linha do tempo: a frase da etapa é o que sobra.
+  await expect(page.locator('.build-steps')).toHaveCount(0)
   await expect(stage).toContainText('Rodando os testes')
   // A repetição é anunciada da SEGUNDA em diante: o tempo dobra, e o silêncio
   // parece travamento.
   await expect(stage).toContainText('2ª tentativa')
   // Quem ouve a tela recebe o mesmo aviso.
   await expect(stage).toHaveAttribute('aria-live', 'polite')
+})
+
+
+/**
+ * A linha do tempo da construção.
+ *
+ * "A ideia desse projeto é ver a construção em tempo real", disse o Prado. A
+ * tela mostrava UMA frase por etapa — `build` ou `test` — e o construtor roda
+ * quatro passos dentro dessas duas: `install`, `build`, `test`, `e2e`. Durante
+ * os minutos mais longos do produto a pessoa via um texto imóvel enquanto
+ * quatro coisas diferentes aconteciam, e "trabalhando" e "travado" tinham a
+ * mesma aparência.
+ *
+ * Mesma técnica do teste acima, e pelo mesmo motivo: a resposta é FIXADA no
+ * meio da execução, porque o construtor de fixture termina em milissegundos e
+ * esperar o instante certo seria uma corrida contra o relógio.
+ */
+test('durante a criação, a tela mostra cada passo do construtor', async ({ context, page }) => {
+  await context.addCookies([
+    { name: 'dz23_studio_session', value: 'e2e', url: origin },
+    { name: 'dz23_studio_csrf', value: 'csrf-e2e', url: origin },
+  ])
+  await context.addInitScript(() => { window.sessionStorage.setItem('dz23.studio.csrf.v1', 'csrf-e2e') })
+
+  let freeze = false
+  await page.route('**/api/studio/apps/projects/*', async route => {
+    if (route.request().method() !== 'GET' || !freeze) return route.fallback()
+    const response = await route.fetch({ url: route.request().url().replace('studio.dz23.localhost', '127.0.0.1') })
+    const body = await response.json() as { project: Record<string, unknown>; current_run: null | Record<string, unknown> }
+    if (body.current_run !== null) {
+      body.project = { ...body.project, state: 'GENERATING' }
+      body.current_run = {
+        ...body.current_run, state: 'RUNNING', stage: 'build', attempt: 1,
+        steps: [
+          { step: 'install', state: 'PASSED', started_at: '2026-09-09T12:00:00.000Z', finished_at: '2026-09-09T12:00:07.000Z' },
+          { step: 'build', state: 'RUNNING', started_at: '2026-09-09T12:00:07.000Z', finished_at: null },
+        ],
+      }
+    }
+    await route.fulfill({ response, json: body })
+  })
+
+  await page.goto('/studio/')
+  await page.getByRole('button', { name: 'Quero uma página para apresentar meu trabalho ou negócio.' }).click()
+  await page.getByRole('button', { name: 'Continuar' }).click()
+  await answerIntake(page, INTAKE_ANSWERS)
+  await page.getByRole('button', { name: 'Montar meu plano' }).click()
+  await page.getByRole('button', { name: 'Aprovar este plano' }).click()
+  freeze = true
+  await page.getByRole('button', { name: 'Iniciar criação' }).click()
+
+  const steps = page.locator('.build-steps')
+  await expect(steps).toBeVisible({ timeout: 20_000 })
+
+  // Os QUATRO passos aparecem, e não só os que já começaram: quem espera
+  // precisa saber quanto ainda falta, não só onde está.
+  const items = steps.locator('li')
+  await expect(items).toHaveCount(4)
+
+  // O passo terminado traz o tempo que levou — é isso que separa "andando" de
+  // "parado" quando a tela fica minutos na mesma etapa.
+  await expect(items.nth(0)).toContainText('Buscando as peças')
+  await expect(items.nth(0)).toContainText('concluído')
+  await expect(items.nth(0)).toContainText('7s')
+
+  await expect(items.nth(1)).toContainText('em andamento')
+  // O que ainda não começou diz que ainda vai acontecer — e não fica em branco.
+  await expect(items.nth(3)).toContainText('ainda vai acontecer')
+
+  // O estado NUNCA é só cor: quem não distingue verde de vermelho, e quem ouve
+  // a tela, recebem a mesma informação em palavras.
+  await expect(steps.getByRole('list')).toHaveAttribute('aria-live', 'polite')
+
+  // A varredura do fluxo principal NÃO passa por aqui: a linha do tempo só
+  // existe com uma execução congelada no meio, e nenhum outro teste congela
+  // uma. Sem esta chamada, a única tela que a pessoa encara por minutos seria
+  // também a única que o axe nunca vê.
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([])
+
+  // E no escuro, onde a cor sozinha desaparece de vez.
+  await page.emulateMedia({ colorScheme: 'dark' })
+  await expect(steps).toBeVisible()
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([])
 })
