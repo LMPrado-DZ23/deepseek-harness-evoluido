@@ -110,6 +110,13 @@ jobs:
           pnpm gate:domain-scopes
           pnpm gate:domain-routes
           pnpm gate:assistant-tools
+          # Estes dois existiam e a CI não os executava. O de papéis é o que
+          # apanha uma permissão que nomeia ferramenta fora do perfil — e o
+          # Harness LANÇA nesse caso, ou seja, toda delegação quebraria. O de
+          # RLS é o que impede um domínio novo entrar sem classificação de
+          # isolamento, que é como um vazamento entre organizações começa.
+          pnpm gate:team-role-tools
+          pnpm gate:rls-coverage
           # Um portão que ninguém executa não impede a regressão que ele foi
           # escrito para impedir: o `lib/` versionado importava um arquivo que
           # o repositório não tinha, e um clone limpo quebrava.
@@ -176,6 +183,14 @@ jobs:
         run: |
           pnpm exec playwright install --with-deps chromium
           pnpm exec playwright test
+
+      - name: Container hardening proof
+        # Nenhuma prova `prove:*` rodava na CI. Esta é a que responde por um
+        # fato que nenhum teste unitário alcança: o contêiner do construtor não
+        # escreve na raiz, não alcança a rede e não tem capacidade nenhuma. Ela
+        # roda o Docker do runner, executa contêineres deliberadamente
+        # enfraquecidos no `--self-test` e reprova se algum deles passar.
+        run: pnpm prove:container-hardening
 
       - name: Unit and contract suite
         # One worker is intentional: this suite exercises subprocesses, PTYs,

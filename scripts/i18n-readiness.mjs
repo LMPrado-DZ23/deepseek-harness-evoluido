@@ -20,6 +20,9 @@ const READY_CLAIM = /\bpront[oa]s?\b/iu
 export const REQUIRED_CATALOGUES = [
   'apps/studio-web/src/i18n/pwa.pt-BR.json',
   'apps/studio-web/src/i18n/hub.pt-BR.json',
+  // O vocabulário do palpite de categoria também é texto de idioma: renomeá-lo
+  // não pode encolher o portão em silêncio.
+  'apps/studio-web/src/i18n/categorySignals.pt-BR.json',
   'apps/studio-web/public/manifest.json',
 ]
 

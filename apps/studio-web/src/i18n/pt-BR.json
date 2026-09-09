@@ -85,7 +85,19 @@
     "continue": "Continuar",
     "advanced": "Opções avançadas",
     "counter": "de 1000 caracteres",
-    "empty": "Conte sua ideia para continuar."
+    "empty": "Conte sua ideia para continuar.",
+    "kindTitle": "O que vamos criar",
+    "kindHelp": "Entendemos isto pelo seu texto. Se não for isso, escolha aqui — é o que decide o que o Studio constrói.",
+    "kindLabel": "Tipo de aplicativo",
+    "kinds": {
+      "landing-page": "Página de apresentação",
+      "catalog": "Catálogo de produtos ou serviços",
+      "form-database": "Cadastro com lista",
+      "crud-panel": "Painel para criar, editar e excluir",
+      "scheduling": "Agenda de horários",
+      "dashboard": "Painel de acompanhamento (só leitura)",
+      "saas-authenticated": "Área com acesso separado por cliente"
+    }
   },
   "design": {
     "title": "Escolha o jeito do seu aplicativo",

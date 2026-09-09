@@ -195,6 +195,14 @@ const builder: BuilderLifecycleResolverPort<PromptToAppActor> = {
         finalState: 'E2E_OK' as const,
         exported: { relative_path: PREVIEW_ARTIFACT_RELATIVE_PATH, sha256: artifact.sha256, files: 2, bytes: 0 },
         cleanupPending: false, cleaned: true,
+        // Os FATOS do construtor, como o resolvedor de verdade os devolve
+        // (`builder-resolver.ts:181`): imagem, política e escopo sob os quais o
+        // artefato foi construído. Sem eles o `pipeline` fecha em
+        // `ACCEPTANCE_ATTESTATION_UNAVAILABLE` — e era isso, e não o produto,
+        // que deixava metade da jornada sem teste nenhum. O que continua sendo
+        // do PRODUTO é tudo o que vem depois: a atestação, os resumos e o
+        // veredito são calculados de verdade a partir destes fatos.
+        attestation: { image_digest: `sha256:${'b'.repeat(64)}`, policy_sha256: 'a'.repeat(64), scope_id: 'escopo-de-teste' },
       }
     },
     listManaged: async () => [],

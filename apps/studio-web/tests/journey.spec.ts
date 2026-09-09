@@ -58,20 +58,21 @@ test('abre o Integration Hub pela navegação autenticada do Studio', async ({ c
 })
 
 /**
- * O trecho verificado desta jornada NÃO é alcançável hoje.
+ * O trecho verificado desta jornada ROda.
  *
- * `plugins/prompt-to-app/src/pipeline.ts:213` lança
- * `ACCEPTANCE_ATTESTATION_UNAVAILABLE` exatamente quando o ciclo do construtor
- * passa e não há diagnóstico - ou seja, no caminho de SUCESSO. O ramo
- * `state === 'PASSED'` logo abaixo é inalcançável, e com ele o protótipo
- * verificado, a notificação e a prévia. Falhar fechado é a decisão certa
- * enquanto não existir atestação de aceitação; o que não pode é ninguém saber.
+ * Ele ficou desligado por um diagnóstico ERRADO: a bandeira dizia que
+ * `pipeline.ts` fechava no caminho de sucesso e que o produto não tinha
+ * atestação. O `throw` está dentro de `if (facts === undefined)`, e quem não
+ * devolvia `facts` era o SERVIDOR DE TESTE — o resolvedor de verdade
+ * (`builder-resolver.ts:181`) sempre devolveu imagem, política e escopo. O
+ * efeito de acreditar no diagnóstico foi caro: prévia, notificação, protótipo
+ * verificado e a ÚNICA varredura de acessibilidade da página inteira ficaram
+ * sem teste, e ninguém veria uma regressão em nenhum deles.
  *
- * As afirmações abaixo da bandeira ficam no repositório de propósito: são a
- * especificação do dia em que a atestação existir. Trocar isto por `true` sem
- * a atestação seria fabricar um "verificado".
+ * O que o teste dobra são os FATOS do construtor; a atestação, os resumos e o
+ * veredito continuam sendo calculados pelo produto.
  */
-const VERIFIED_JOURNEY_REACHABLE = false
+const VERIFIED_JOURNEY_REACHABLE = true
 
 test('percorre as cinco etapas, muda privacidade e termina sem alegar publicação', async ({ context, page }) => {
   const admissionPosts: Array<{ readonly hasTicket: boolean; readonly origin: string; readonly url: string }> = []
@@ -186,10 +187,17 @@ test('percorre as cinco etapas, muda privacidade e termina sem alegar publicaç�
   // A pessoa lê a FRASE, não o código. O código técnico continua existindo, mas
   // atrás de "Detalhes técnicos": antes ele era a primeira coisa na tela, em
   // inglês e em caixa alta, para quem não programa.
-  await expect(page.getByText('A criação foi interrompida antes de terminar. Nada foi publicado.')).toBeVisible({ timeout: 20_000 })
-  await expect(page.getByText('ACCEPTANCE_ATTESTATION_UNAVAILABLE')).toBeHidden()
-  await page.locator('.result-technical > summary').click()
-  await expect(page.getByText('ACCEPTANCE_ATTESTATION_UNAVAILABLE')).toBeVisible()
+  if (VERIFIED_JOURNEY_REACHABLE) {
+    await expect(page.getByText('As verificações declaradas passaram neste computador.')).toBeVisible({ timeout: 30_000 })
+  } else {
+    await expect(page.getByText('A criação foi interrompida antes de terminar. Nada foi publicado.')).toBeVisible({ timeout: 20_000 })
+    // O código técnico continua existindo, mas atrás de "Detalhes técnicos":
+    // antes ele era a primeira coisa na tela, em inglês e em caixa alta, para
+    // quem não programa.
+    await expect(page.getByText('ACCEPTANCE_ATTESTATION_UNAVAILABLE')).toBeHidden()
+    await page.locator('.result-technical > summary').click()
+    await expect(page.getByText('ACCEPTANCE_ATTESTATION_UNAVAILABLE')).toBeVisible()
+  }
   // E-06/E-07: mesmo terminando bloqueada, a execução EXPLICA o que aconteceu.
   // Antes disto a pessoa terminava com um código em inglês e nada mais.
   await expect(page.getByRole('heading', { name: 'O que aconteceu na criação' })).toBeVisible({ timeout: 20_000 })
@@ -210,7 +218,8 @@ test('percorre as cinco etapas, muda privacidade e termina sem alegar publicaç�
   await expect(page.getByText('publicado na internet', { exact: false })).toHaveCount(0)
   // E diz, com todas as letras, onde os arquivos estão: no computador dela.
   await expect(page.getByText('Nada saiu do seu computador')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Ver meu protótipo' })).toHaveCount(0)
+  // O botão da prévia só existe quando há protótipo para ver.
+  await expect(page.getByRole('button', { name: 'Ver meu protótipo' })).toHaveCount(VERIFIED_JOURNEY_REACHABLE ? 1 : 0)
   expect(JSON.stringify(mutationBodies)).not.toMatch(/org_id|tenant_id|bootstrap_owner|"role"/u)
 
   if (!VERIFIED_JOURNEY_REACHABLE) {
@@ -221,8 +230,9 @@ test('percorre as cinco etapas, muda privacidade e termina sem alegar publicaç�
     return
   }
 
-  await expect(page.getByText('As verificações declaradas passaram neste computador.')).toBeVisible({ timeout: 20_000 })
-  await expect(page.getByText('não está publicado nem disponível para outras pessoas', { exact: false }).first()).toBeVisible()
+  // A frase permanente sob as etapas, e não qualquer eco dela dentro de
+  // "Detalhes técnicos" — o `.first()` de antes casava com um `<code>` fechado.
+  await expect(page.locator('p.truth')).toContainText('não está publicado nem disponível para outras pessoas')
   await expect(page.getByText('page:Início: Passou')).toBeVisible()
   await expect(page.getByText('A navegação deve ser simples.: Não verificado automaticamente')).toBeVisible()
   await expect.poll(() => page.evaluate(() => (window as unknown as { __dz23Notifications: unknown[] }).__dz23Notifications.length)).toBe(1)

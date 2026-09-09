@@ -188,3 +188,4 @@
 .plan-edit-form input,.plan-edit-form textarea{width:100%;min-height:44px;padding:10px;border:1px solid #8b95a6;border-radius:8px;font:inherit}
 .plan-edit-form textarea{min-height:96px}
 @media (min-width:720px){.plan-actions{grid-template-columns:repeat(4,1fr)}}
+.kind{display:grid;gap:7px;margin:6px 0 16px}.kind select{width:100%;min-height:44px;border:1px solid #bbc5d6;border-radius:7px;background:#fff;padding:9px;color:#182544}

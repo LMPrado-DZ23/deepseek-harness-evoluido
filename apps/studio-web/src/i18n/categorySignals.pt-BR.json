@@ -1,0 +1,320 @@
+{
+  "scheduling": [
+    [
+      "agenda",
+      4
+    ],
+    [
+      "agendar",
+      4
+    ],
+    [
+      "agendamento",
+      4
+    ],
+    [
+      "agendamentos",
+      4
+    ],
+    [
+      "marcar consulta",
+      5
+    ],
+    [
+      "marcar consultas",
+      5
+    ],
+    [
+      "consulta",
+      2
+    ],
+    [
+      "consultas",
+      2
+    ],
+    [
+      "reserva",
+      3
+    ],
+    [
+      "reservas",
+      3
+    ],
+    [
+      "horario",
+      2
+    ],
+    [
+      "horarios",
+      2
+    ],
+    [
+      "compromisso",
+      3
+    ],
+    [
+      "compromissos",
+      3
+    ],
+    [
+      "confirmar e cancelar",
+      4
+    ],
+    [
+      "remarcar",
+      3
+    ]
+  ],
+  "saas-authenticated": [
+    [
+      "cada cliente",
+      5
+    ],
+    [
+      "area do cliente",
+      5
+    ],
+    [
+      "area dos clientes",
+      5
+    ],
+    [
+      "acesso separado",
+      5
+    ],
+    [
+      "conta para cada",
+      4
+    ],
+    [
+      "assinatura",
+      3
+    ],
+    [
+      "assinantes",
+      3
+    ],
+    [
+      "cada empresa",
+      4
+    ],
+    [
+      "varias empresas",
+      4
+    ],
+    [
+      "login para cada",
+      4
+    ],
+    [
+      "area restrita",
+      3
+    ]
+  ],
+  "dashboard": [
+    [
+      "acompanhar numeros",
+      5
+    ],
+    [
+      "acompanhar os numeros",
+      5
+    ],
+    [
+      "indicadores",
+      4
+    ],
+    [
+      "grafico",
+      3
+    ],
+    [
+      "graficos",
+      3
+    ],
+    [
+      "relatorio",
+      3
+    ],
+    [
+      "relatorios",
+      3
+    ],
+    [
+      "metricas",
+      4
+    ],
+    [
+      "sem alterar",
+      4
+    ],
+    [
+      "agrupamento",
+      3
+    ],
+    [
+      "agrupamentos",
+      3
+    ],
+    [
+      "visao geral",
+      3
+    ],
+    [
+      "total por",
+      3
+    ]
+  ],
+  "crud-panel": [
+    [
+      "criar editar e excluir",
+      6
+    ],
+    [
+      "editar e excluir",
+      5
+    ],
+    [
+      "excluir",
+      3
+    ],
+    [
+      "gerenciar",
+      3
+    ],
+    [
+      "administrar",
+      3
+    ],
+    [
+      "painel para minha equipe",
+      5
+    ],
+    [
+      "painel para a equipe",
+      5
+    ],
+    [
+      "equipe",
+      1
+    ]
+  ],
+  "form-database": [
+    [
+      "cadastrar",
+      4
+    ],
+    [
+      "cadastro",
+      3
+    ],
+    [
+      "cadastros",
+      3
+    ],
+    [
+      "formulario",
+      4
+    ],
+    [
+      "formularios",
+      4
+    ],
+    [
+      "ve las em uma lista",
+      5
+    ],
+    [
+      "em uma lista",
+      3
+    ],
+    [
+      "inscricao",
+      4
+    ],
+    [
+      "inscricoes",
+      4
+    ],
+    [
+      "coletar",
+      3
+    ],
+    [
+      "anotar",
+      2
+    ],
+    [
+      "registrar informacoes",
+      4
+    ]
+  ],
+  "catalog": [
+    [
+      "catalogo",
+      5
+    ],
+    [
+      "vitrine",
+      4
+    ],
+    [
+      "cardapio",
+      5
+    ],
+    [
+      "produtos",
+      3
+    ],
+    [
+      "meus produtos",
+      4
+    ],
+    [
+      "portfolio",
+      3
+    ],
+    [
+      "mostrar meus",
+      2
+    ],
+    [
+      "servicos",
+      1
+    ]
+  ],
+  "landing-page": [
+    [
+      "pagina",
+      3
+    ],
+    [
+      "apresentar",
+      3
+    ],
+    [
+      "divulgar",
+      3
+    ],
+    [
+      "institucional",
+      4
+    ],
+    [
+      "receber contatos",
+      4
+    ],
+    [
+      "fale conosco",
+      4
+    ],
+    [
+      "meu trabalho",
+      3
+    ],
+    [
+      "site",
+      2
+    ]
+  ]
+}
