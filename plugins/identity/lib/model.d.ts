@@ -61,6 +61,7 @@ export declare const sessionRecordSchema: z.ZodObject<{
     revoked_at: z.ZodNullable<z.ZodISODateTime>;
     revoked_reason: z.ZodNullable<z.ZodString>;
     harness_session_ids: z.ZodArray<z.ZodString>;
+    csrf_seed: z.ZodOptional<z.ZodString>;
 }, z.core.$strict>;
 export declare const challengeRecordSchema: z.ZodObject<{
     challenge_id: z.ZodString;
@@ -211,6 +212,7 @@ export declare const identitySessionsDomainSpec: {
             revoked_at: string | null;
             revoked_reason: string | null;
             harness_session_ids: string[];
+            csrf_seed?: string | undefined;
         }>;
     };
 };

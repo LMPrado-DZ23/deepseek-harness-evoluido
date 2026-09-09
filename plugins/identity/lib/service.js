@@ -21,7 +21,18 @@ const ABSOLUTE_TTL = 90 * DAY;
 const STRONG_AUTH_TTL = 5 * MINUTE;
 const MAX_MAGIC_ATTEMPTS = 5;
 const SESSION_TOUCH_INTERVAL = MINUTE;
-function derivedCsrfToken(tokenHash) { return secretHash(`dz23-csrf-v1:${tokenHash}`); }
+/**
+ * O token CSRF de uma sessão.
+ *
+ * Com semente, ele é `sha256(v2 : token : semente)` — trocar a semente troca o
+ * token sem derrubar a sessão. Sem semente (sessão antiga), continua o valor
+ * derivado só do token, para essas sessões seguirem funcionando até expirarem.
+ */
+function derivedCsrfToken(tokenHash, seed) {
+    return seed === undefined
+        ? secretHash(`dz23-csrf-v1:${tokenHash}`)
+        : secretHash(`dz23-csrf-v2:${tokenHash}:${seed}`);
+}
 export class IdentityError extends Error {
     code;
     constructor(code, message) {
@@ -238,7 +249,7 @@ export class StudioIdentityService {
             if (current === undefined)
                 throw new IdentityError('invalid', t('auth.invalidSession'));
             this.#assertSessionUsable(current, this.#now());
-            const csrfToken = derivedCsrfToken(current.token_hash);
+            const csrfToken = derivedCsrfToken(current.token_hash, current.csrf_seed);
             const csrfHash = secretHash(csrfToken);
             if (current.csrf_hash !== csrfHash)
                 await this.#repository.putSession({ ...current, csrf_hash: csrfHash });
@@ -488,8 +499,14 @@ export class StudioIdentityService {
                 if (current === undefined)
                     throw new IdentityError('invalid', t('auth.invalidSession'));
                 this.#assertSessionUsable(current, this.#now());
+                // A elevação TROCA o token CSRF. Sem isto, o valor que valia antes da
+                // confirmação forte continuava valendo depois dela — e é justamente
+                // depois dela que a sessão pode fazer o que é sensível.
+                const seed = this.#createSecret();
                 await this.#repository.putSession({
                     ...current,
+                    csrf_seed: seed,
+                    csrf_hash: secretHash(derivedCsrfToken(current.token_hash, seed)),
                     last_strong_auth_at: this.#now().toISOString(),
                     last_strong_auth_method: 'passkey',
                 });

@@ -610,3 +610,36 @@ describe('StudioIdentityService', () => {
   })
 
 })
+
+
+describe('B-M6: o token CSRF pode ser trocado, e a elevação o troca', () => {
+  it('a confirmação forte invalida o CSRF anterior sem derrubar a sessão', async () => {
+    // O token CSRF era função DETERMINÍSTICA e imutável do token de sessão:
+    // `GET /csrf` devolvia sempre o mesmo valor, e um vazamento pontual (log de
+    // proxy, extensão, captura de tela) valia pelo resto da vida da sessão —
+    // até 90 dias — inclusive DEPOIS da confirmação forte, que é justamente
+    // quando a sessão passa a poder fazer o que é sensível.
+    const h = makeHarness()
+    const issued = await login(h)
+    const registration = await h.service.beginPasskeyRegistration(issued.token)
+    await h.service.finishPasskeyRegistration(issued.token, registration.challengeId, registrationResponse, 'Passkey')
+    h.passkeys.counter = 2
+    h.passkeys.userVerified = true
+
+    const session = h.repository.sessions()[0]!
+    const before = await h.service.csrfTokenFor(session)
+    // Estável enquanto nada acontece: é assim que a tela funciona.
+    expect(await h.service.csrfTokenFor(session)).toBe(before)
+
+    const stepUp = await h.service.beginStepUp(issued.token)
+    await h.service.finishStepUp(issued.token, stepUp.challengeId, authResponse())
+
+    const rotated = h.repository.sessions()[0]!
+    const after = await h.service.csrfTokenFor(rotated)
+    expect(after).not.toBe(before)
+    // E a sessão continua a MESMA: trocar o CSRF não é deslogar a pessoa.
+    expect((await h.service.authenticate(issued.token)).session_id).toBe(session.session_id)
+    // O valor antigo não confere mais com o que está gravado.
+    expect(rotated.csrf_hash).not.toBe(session.csrf_hash)
+  })
+})

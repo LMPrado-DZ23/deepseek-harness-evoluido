@@ -45,6 +45,20 @@ export const sessionRecordSchema = z.object({
   revoked_at: z.iso.datetime().nullable(),
   revoked_reason: z.string().nullable(),
   harness_session_ids: z.array(z.string().min(1)),
+  /**
+   * A semente do token CSRF desta sessão.
+   *
+   * O token CSRF era função DETERMINÍSTICA e imutável do token de sessão:
+   * `GET /csrf` devolvia sempre o mesmo valor, e um vazamento pontual (log de
+   * proxy, extensão, captura de tela) valia pelo resto da vida da sessão — até
+   * 90 dias. Com a semente, ele pode ser trocado sem derrubar a sessão, e é
+   * trocado em toda elevação de identidade.
+   *
+   * OPCIONAL de propósito: sessão gravada antes deste campo continua abrindo, e
+   * o domínio não muda de versão. Ausente significa "ainda derivado do token",
+   * que é exatamente o que aquelas sessões têm.
+   */
+  csrf_seed: z.string().regex(/^[A-Za-z0-9_-]{16,200}$/).optional(),
 }).strict()
 
 export const challengeRecordSchema = z.object({
