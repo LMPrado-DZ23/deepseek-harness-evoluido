@@ -1,5 +1,6 @@
 import { ASSISTANT_PATH } from './assistant/AssistantEntry'
 import { HUB_PATH } from './hub/presentation'
+import { HELP_PATH } from './help/HelpScreen'
 import { TEAM_PATH } from './team/teamApi'
 import assistant from './i18n/assistant.pt-BR.json'
 import hub from './i18n/hub.pt-BR.json'
@@ -13,7 +14,7 @@ export const NAV_MENU_ID = 'studio-nav'
 export const STUDIO_HOME_PATH = '/studio/'
 
 export type StudioNavItem = {
-  readonly id: 'home' | 'assistant' | 'hub' | 'projects' | 'progress' | 'result'
+  readonly id: 'home' | 'assistant' | 'hub' | 'projects' | 'progress' | 'result' | 'help'
   readonly label: string
   /**
    * `null` quando a tela ainda não existe. Um item sem destino é mostrado como
@@ -45,6 +46,10 @@ export function studioNavItems(): readonly StudioNavItem[] {
     // está quando isso importa.
     { id: 'progress', label: team.navLabel, href: TEAM_PATH },
     { id: 'result', label: t.nav.result, href: null },
+    // A ajuda também vive na LISTA, e não só como ícone no rodapé da barra: um
+    // ícone sem rótulo é a última coisa que quem não programa procura quando
+    // está com dúvida.
+    { id: 'help', label: t.nav.help, href: HELP_PATH },
   ]
 }
 

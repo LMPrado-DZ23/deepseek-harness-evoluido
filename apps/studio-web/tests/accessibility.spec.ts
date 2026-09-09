@@ -143,6 +143,18 @@ test.describe('o mesmo fluxo no modo escuro', () => {
     await page.getByRole('button', { name: 'Montar meu plano' }).click()
     await expect(page.locator('.plan-list .task-card').first()).toBeVisible({ timeout: 15_000 })
     await check('plano')
+    // O fluxo escuro segue até o FIM: a primeira versão parava no plano, e a
+    // criação, a verificação e o relato — as telas do pior momento — ficavam
+    // sem varredura no escuro.
+    await page.getByRole('button', { name: 'Aprovar este plano' }).click()
+    await expect(page.getByRole('button', { name: 'Iniciar criação' })).toBeVisible()
+    await check('criacao')
+    await page.getByRole('button', { name: 'Iniciar criação' }).click()
+    await expect(page.getByText('As verificações declaradas passaram neste computador.')).toBeVisible({ timeout: 40_000 })
+    await check('verificacao')
+    await expect(page.getByRole('heading', { name: 'O que aconteceu na criação' })).toBeVisible({ timeout: 20_000 })
+    await check('relato')
+
     await page.goto('/studio/ajuda')
     await expect(page.getByRole('heading', { name: 'Ajuda do DZ23 STUDIO' })).toBeVisible()
     await check('ajuda')

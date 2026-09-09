@@ -328,3 +328,18 @@
 @media(prefers-color-scheme:dark){
   :root{--muted:#aab6cd;--border:#2a3550}
 }
+
+/* E o texto ESCURO do tema claro (#0b1739), que continuava escuro sobre as
+   superfícies que acabaram de escurecer. Mesmo método: gerado das regras
+   claras, porque a lista escrita à mão foi o que produziu a regressão. */
+@media(prefers-color-scheme:dark){
+  .status{color:#eef2f9}
+  .compaction-checkpoint{color:#eef2f9}
+  .compaction-checkpoint>summary{color:#eef2f9}
+  .run-report{color:#eef2f9}
+  .run-report pre{color:#eef2f9}
+  .run-findings li{color:#eef2f9}
+  .run-files code{color:#eef2f9}
+  .emergency-stop{color:#eef2f9}
+  .emergency-stop input,.emergency-stop textarea{color:#eef2f9}
+}

@@ -25,7 +25,7 @@
   },
   "integrations": {
     "title": "Integrações",
-    "help": "Cada integração traz um manifesto com quem a publicou e o que ela pode fazer. Sem assinatura reconhecida, o nível de confiança sobe para T2 e, na versão estável, ela não pode ser ligada.",
+    "help": "Cada integração traz um documento com quem a publicou e o que ela pode fazer. Sem assinatura reconhecida, ela passa a ser tratada como se falasse com serviços externos — e, na versão estável, não pode ser ligada.",
     "cannotEnable": "Não pode ser ligada nesta versão: falta uma assinatura reconhecida.",
     "devChannel": "Este Studio está no canal de desenvolvimento: integrações sem assinatura podem ser ligadas aqui. Isso não acontece na versão estável.",
     "empty": "Nenhuma integração registrada ainda.",
