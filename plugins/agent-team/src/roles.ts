@@ -33,6 +33,21 @@ export const AGENT_TEAM_ROLES = [
 ] as const
 export type AgentTeamRoleName = typeof AGENT_TEAM_ROLES[number]
 
+/**
+ * As ferramentas que o preset `dz23-coordinator-in-process` REALMENTE monta.
+ *
+ * Existe porque `tools.restrict()` do Harness LANÇA quando a lista nomeia uma
+ * ferramenta que não está montada — não ignora, lança. Uma permissão que
+ * nomeia `str_replace_editor` ou `web_search` num preset que só tem `tool-fs`
+ * derruba TODA delegação no nascimento, e o defeito aparece como erro interno
+ * opaco para quem pediu.
+ *
+ * O portão `gate:team-role-tools` confere esta constante contra o preset de
+ * verdade: montar uma extensão nova sem atualizar esta linha reprova, em vez de
+ * quebrar em produção.
+ */
+export const COORDINATOR_ROSTER = ['read', 'read_image', 'write', 'edit'] as const
+
 /** As ferramentas do Harness que só LEEM a cópia isolada. */
 export const READ_TOOLS = ['read', 'read_image'] as const
 
@@ -91,14 +106,26 @@ export interface RoleToolRestriction {
  * @param externalNetworkApproved - se a equipe foi aprovada para rede externa.
  * @returns a lista de permissão, em ordem estável para o teste poder compará-la.
  */
-export function roleToolRestriction(role: AgentTeamRoleName, externalNetworkApproved: boolean): RoleToolRestriction {
+export function roleToolRestriction(
+  role: AgentTeamRoleName,
+  externalNetworkApproved: boolean,
+  roster: readonly string[] = COORDINATOR_ROSTER,
+): RoleToolRestriction {
   const policy = ROLE_TOOL_POLICY[role]
-  const allow: string[] = [...READ_TOOLS]
-  if (policy.writes) allow.push(...WRITE_TOOLS)
+  const wanted: string[] = [...READ_TOOLS]
+  if (policy.writes) wanted.push(...WRITE_TOOLS)
   // A aprovação da equipe LIBERA a rede — menos para quem a tem como `never`,
   // que é onde a aprovação da equipe não alcança.
-  if (policy.network === 'when-approved' && externalNetworkApproved) allow.push(...NETWORK_TOOLS)
-  return { allow: [...allow].sort() }
+  if (policy.network === 'when-approved' && externalNetworkApproved) wanted.push(...NETWORK_TOOLS)
+  // E a permissão é INTERSECTADA com o que está montado. Sem isto ela nomearia
+  // ferramenta ausente e o `tools.restrict()` do Harness LANÇARIA, derrubando
+  // a delegação inteira — trocar uma proteção inerte por uma proteção fatal
+  // seria um defeito pior do que o que se estava consertando.
+  //
+  // Nomear a mais também não seria "defesa em profundidade": numa lista de
+  // PERMISSÃO, a ferramenta que não é nomeada já está negada. `web_search` fora
+  // desta lista não é uma recusa que falta — é a recusa acontecendo.
+  return { allow: wanted.filter(name => roster.includes(name)).sort() }
 }
 
 /**

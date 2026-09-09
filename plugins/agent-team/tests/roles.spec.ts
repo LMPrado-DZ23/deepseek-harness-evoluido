@@ -7,7 +7,7 @@
  * proteção só existia na cabeça de quem lesse o código.
  */
 import { describe, expect, it } from 'vitest'
-import { AGENT_TEAM_ROLES, NETWORK_TOOLS, READ_TOOLS, ROLE_TOOL_POLICY, WRITE_TOOLS, roleToolRestriction, visibleTools } from '../src/roles.ts'
+import { AGENT_TEAM_ROLES, COORDINATOR_ROSTER, NETWORK_TOOLS, READ_TOOLS, ROLE_TOOL_POLICY, WRITE_TOOLS, roleToolRestriction, visibleTools } from '../src/roles.ts'
 import { agentTeamRoleSchema } from '../src/model.ts'
 
 describe('A-06 os papéis existem e cada um declara o que pode', () => {
@@ -53,10 +53,31 @@ describe('A-06 o papel muda as FERRAMENTAS, não só a frase', () => {
     }
   })
 
-  it('quem escreve enxerga as ferramentas de escrita', () => {
+  it('quem escreve enxerga as ferramentas de escrita QUE ESTAO MONTADAS', () => {
     for (const role of ['implementer', 'designer'] as const) {
       const { allow } = roleToolRestriction(role, true)
-      for (const tool of WRITE_TOOLS) expect(allow).toContain(tool)
+      // Só as do roster: `str_replace_editor` não está montada, e nomeá-la faria
+      // o `tools.restrict()` do Harness LANÇAR e derrubar a delegação inteira.
+      for (const tool of WRITE_TOOLS.filter(name => (COORDINATOR_ROSTER as readonly string[]).includes(name))) {
+        expect(allow).toContain(tool)
+      }
+      expect(allow).not.toContain('str_replace_editor')
+      // Com ela montada, entra.
+      expect(roleToolRestriction(role, true, [...COORDINATOR_ROSTER, 'str_replace_editor']).allow).toContain('str_replace_editor')
+    }
+  })
+
+  it('a permissao NUNCA nomeia ferramenta fora do roster: nomear a mais LANCA no Harness', () => {
+    // `tools.restrict()` do Harness lança com nome desconhecido — não ignora.
+    // Uma permissão que nomeia ferramenta ausente derruba TODA delegação no
+    // nascimento, e a pessoa vê um erro interno opaco. Este é o teste que
+    // impede o defeito de voltar.
+    for (const role of AGENT_TEAM_ROLES) {
+      for (const approved of [false, true]) {
+        for (const name of roleToolRestriction(role, approved).allow) {
+          expect(COORDINATOR_ROSTER, `${role}: ${name}`).toContain(name)
+        }
+      }
     }
   })
 
@@ -67,13 +88,18 @@ describe('A-06 o papel muda as FERRAMENTAS, não só a frase', () => {
   it('a rede fica de fora por padrão, e a aprovação da equipe a inclui', () => {
     const closed = roleToolRestriction('implementer', false).allow
     for (const tool of NETWORK_TOOLS) expect(closed).not.toContain(tool)
-    for (const tool of NETWORK_TOOLS) expect(roleToolRestriction('implementer', true).allow).toContain(tool)
+    // E as de rede so entram quando ESTAO MONTADAS: o roster de hoje nao as
+    // tem, e nomear ferramenta ausente faria o `tools.restrict()` do Harness
+    // LANCAR e derrubar a delegacao inteira.
+    const withWeb = [...COORDINATOR_ROSTER, ...NETWORK_TOOLS]
+    for (const tool of NETWORK_TOOLS) expect(roleToolRestriction('implementer', true, withWeb).allow).toContain(tool)
+    for (const tool of NETWORK_TOOLS) expect(roleToolRestriction('implementer', true).allow).not.toContain(tool)
   })
 
   it('SEGURANÇA não fala com a rede NEM com a equipe aprovada para rede externa', () => {
     // É o último papel que deveria conseguir telefonar para fora com o código
     // na mão. A aprovação da equipe não alcança aqui.
-    const approved = roleToolRestriction('security', true).allow
+    const approved = roleToolRestriction('security', true, [...COORDINATOR_ROSTER, ...NETWORK_TOOLS]).allow
     for (const tool of NETWORK_TOOLS) expect(approved).not.toContain(tool)
     for (const tool of WRITE_TOOLS) expect(approved).not.toContain(tool)
     expect(approved).toEqual([...READ_TOOLS].sort())

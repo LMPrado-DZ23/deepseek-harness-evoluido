@@ -165,7 +165,7 @@ describe('StudioAgentTeamService', () => {
       // no Harness: a recusa não recusava nada.
       // A-06: PERMISSÃO por papel, com nomes REAIS. O construtor escreve e,
       // sem aprovação de rede externa, não enxerga as ferramentas de rede.
-      inProcess: { toolFilter: { allow: ['edit', 'read', 'read_image', 'str_replace_editor', 'write'] }, persona: expect.stringContaining('Implemente somente') },
+      inProcess: { toolFilter: { allow: ['edit', 'read', 'read_image', 'write'] }, persona: expect.stringContaining('Implemente somente') },
     }))
     expect(h.service.activeTaskCount()).toBe(2)
     expect(h.service.teams()).toHaveLength(1)
@@ -227,7 +227,7 @@ describe('StudioAgentTeamService', () => {
       approval: { approved: true, tier: 'T3', approvedBy: 'user-1' },
       // Aprovada para rede externa, o construtor passa a enxergar a rede.
       inProcess: expect.objectContaining({
-        toolFilter: { allow: ['edit', 'read', 'read_image', 'str_replace_editor', 'web_fetch', 'web_search', 'write'] },
+        toolFilter: { allow: ['edit', 'read', 'read_image', 'write'] },
       }),
     }))
 

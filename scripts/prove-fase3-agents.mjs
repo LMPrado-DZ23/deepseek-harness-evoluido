@@ -5,6 +5,10 @@ import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+// A restricao vem do PRODUTO, e nao redigitada aqui. Uma prova que reescreve a
+// lista prova a copia dela: foi assim que uma permissao nomeando ferramenta
+// ausente passou por esta prova enquanto derrubaria toda delegacao de verdade.
+import { roleToolRestriction } from '../plugins/agent-team/lib/roles.js'
 
 const studioRoot = resolve(process.cwd())
 const upstreamRoot = resolve(process.env.DSH_UPSTREAM_ROOT
@@ -109,7 +113,7 @@ try {
     prompt: 'PHASE3_WORKTREE_PROBE',
     intendedPaths: ['src/poc3a.txt'],
     approval: { approved: true, tier: 'T2', approvedBy: issued.session.user_id },
-    inProcess: { toolFilter: { allow: ['write'] } },
+    inProcess: { toolFilter: roleToolRestriction('implementer', false) },
     budget: { timeoutMs: 30_000, maxFiles: 1, maxDiffBytes: 16_384, maxTokens: 1_000 },
   })
   const settled = await booted.ctx.jobs.wait(accepted.jobId, 35_000, parentHandle.agent)
@@ -146,7 +150,7 @@ try {
       prompt,
       intendedPaths,
       approval: { approved: true, tier: 'T2', approvedBy: issued.session.user_id },
-      inProcess: { toolFilter: { allow: ['write'] } },
+      inProcess: { toolFilter: roleToolRestriction('implementer', false) },
       budget: { timeoutMs: 30_000, maxFiles: 1, maxDiffBytes: 16_384, maxTokens: 1_000 },
     })
     const job = await booted.ctx.jobs.wait(started.jobId, 35_000, parentHandle.agent)

@@ -20,7 +20,7 @@
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
-import { AGENT_TEAM_ROLES, READ_TOOLS, WRITE_TOOLS, NETWORK_TOOLS, ROLE_TOOL_POLICY, roleToolRestriction, visibleTools } from '../plugins/agent-team/src/roles.js'
+import { AGENT_TEAM_ROLES, COORDINATOR_ROSTER, READ_TOOLS, WRITE_TOOLS, NETWORK_TOOLS, ROLE_TOOL_POLICY, roleToolRestriction, visibleTools } from '../plugins/agent-team/src/roles.js'
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
 
@@ -75,10 +75,26 @@ export function findings(
   // Uma linha desconhecida NÃO passa: ela pode estar montando um shell, e o
   // portão calaria justamente sobre a ferramenta mais perigosa.
   for (const id of unknown) problems.push(`linha do preset que este portão não sabe classificar: ${id}`)
+  // A constante do produto tem de bater com o preset de VERDADE. Montar uma
+  // extensão nova sem atualizar `COORDINATOR_ROSTER` reprova aqui, em vez de
+  // quebrar em produção quando a permissão nomear o que não existe.
+  const declaredRoster = [...COORDINATOR_ROSTER].sort().join(',')
+  if (declaredRoster !== [...roster].sort().join(',')) {
+    problems.push(`COORDINATOR_ROSTER (${declaredRoster}) não bate com o preset (${[...roster].sort().join(',')})`)
+  }
   for (const role of AGENT_TEAM_ROLES) {
     const policy = ROLE_TOOL_POLICY[role]
     for (const approved of [false, true]) {
-      const seen = visibleTools(restrictionFor(role, approved), roster)
+      const restriction = restrictionFor(role, approved)
+      // O MODO DE FALHA REAL: `tools.restrict()` do Harness LANÇA com nome
+      // desconhecido. Uma permissão que nomeia ferramenta fora do roster
+      // derruba toda delegação no nascimento — e a pergunta "o que sobra?" é
+      // cega para isso, porque o excedente simplesmente não aparece na
+      // interseção. Esta é a pergunta "o que não existe?".
+      for (const name of restriction.allow) {
+        if (!roster.includes(name)) problems.push(`papel ${role} permite ferramenta FORA do roster: ${name} (o Harness lança)`)
+      }
+      const seen = visibleTools(restriction, roster)
       if (!policy.writes) {
         for (const tool of seen) {
           if (WRITERS.has(tool)) problems.push(`papel de leitura ${role} enxerga ferramenta de escrita ${tool}`)
@@ -101,11 +117,20 @@ const preset = await readFile(resolve(root, 'dsh-home/.agent-presets/dz23-coordi
 const { tools, unknown } = rosterOf(preset)
 
 if (process.argv.includes('--self-test')) {
-  // Acrescentar `bash` ao ROSTER é seguro por desenho, e o portão tem de
-  // dizer isso: com lista de permissão, a ferramenta nova não chega a papel
-  // nenhum até alguém decidir que chega. Um portão que reprovasse aqui estaria
-  // reclamando do comportamento correto.
-  if (findings([...tools, 'bash'], []).length > 0) throw new Error('self-test: o portão reprovou um roster que cresceu, que é o caso seguro')
+  // Acrescentar `bash` ao ROSTER tem de REPROVAR, e por um motivo preciso: a
+  // constante `COORDINATOR_ROSTER` do produto deixou de bater com o preset.
+  // Montar uma extensão nova e não atualizar a constante é o caminho para a
+  // permissão nomear o que não existe — e o portão para isso ANTES de virar
+  // erro em produção. O que continua seguro por desenho é a ferramenta nova
+  // não chegar a papel nenhum: numa lista de permissão, quem não é nomeado já
+  // está negado.
+  const grown = findings([...tools, 'bash'], [])
+  if (!grown.some(line => line.includes('COORDINATOR_ROSTER'))) {
+    throw new Error(`self-test: o portão não acusou a constante desatualizada: ${grown.join('; ')}`)
+  }
+  if (grown.some(line => line.includes('ferramenta de escrita'))) {
+    throw new Error('self-test: a ferramenta nova chegou a um papel de leitura')
+  }
   // O que ele TEM de reprovar é a política afrouxada: um papel de leitura que
   // passe a enxergar tudo o que o roster oferece.
   const loosened = findings([...tools, 'bash'], [], () => ({ allow: [...tools, 'bash'] }))

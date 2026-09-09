@@ -199,7 +199,7 @@ describe('StudioAssistantBridge', () => {
       // A-06: a MESMA política do papel de construtor, por PERMISSÃO e com
       // nomes reais. `deny: ['network']` recusava um nome que não existe no
       // Harness — a proteção só existia na leitura de quem passasse.
-      inProcess: expect.objectContaining({ toolFilter: { allow: ['edit', 'read', 'read_image', 'str_replace_editor', 'write'] } }),
+      inProcess: expect.objectContaining({ toolFilter: { allow: ['edit', 'read', 'read_image', 'write'] } }),
     }))
   })
 
