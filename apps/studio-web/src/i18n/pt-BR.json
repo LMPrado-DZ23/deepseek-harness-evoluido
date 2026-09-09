@@ -244,7 +244,8 @@
     "technicalCode": "Código do estado",
     "technicalFailure": "Código da falha",
     "followLost": "Esta tela parou de acompanhar a criação. Ela pode continuar no seu computador — atualize a página para ver em que ponto está.",
-    "budgetExceeded": "A criação parou porque o limite de gasto deste espaço de trabalho acabou. Não é um problema no seu aplicativo. Você pode aumentar o limite, escolher o perfil que usa a IA local ou simplificar o plano e tentar de novo."
+    "budgetExceeded": "A criação parou porque o limite de gasto deste espaço de trabalho acabou. Não é um problema no seu aplicativo. Você pode aumentar o limite, escolher o perfil que usa a IA local ou simplificar o plano e tentar de novo.",
+    "resumed": "Retomamos de onde a criação tinha parado: o aplicativo não foi gerado de novo, e é o mesmo que você mandou construir."
   },
   "emergency": {
     "title": "Parada de emergência",

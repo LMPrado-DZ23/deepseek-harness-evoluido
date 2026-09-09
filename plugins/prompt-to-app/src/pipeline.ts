@@ -27,6 +27,7 @@ import { assertGeneratedSource } from './import-policy.js'
 import { generateSaasLayer, writeSaasLayer } from './saas-generator.js'
 import { t } from './i18n.js'
 import { diffRunFiles, runReport, RUN_REPORT_FILE, type RunFileAuthor } from './run-report.js'
+import { readResumeMarker, readResumedFiles, writeResumeMarker, type ResumeMarker } from './resume.js'
 import type { StudioPlan, StudioRun, StudioRunStep } from './model.js'
 import { assertCategoryCanGenerate } from './planner.js'
 import type { PromptModelPort } from './ports.js'
@@ -162,6 +163,16 @@ export class PromptToAppPipeline {
     let attemptFiles: readonly { readonly path: string; readonly content: string; readonly author: RunFileAuthor }[] = []
     let previousAttemptFiles: readonly { readonly path: string; readonly content: string }[] = []
     let attemptFindings: readonly string[] = []
+      // De onde retomar, quando houver de onde.
+      //
+      // SÓ para execução CANCELADA ou INTERROMPIDA. Uma execução que REPROVOU
+      // ("Tentar novamente") tem de gerar de novo: o ponto da repetição é
+      // corrigir o que não passou, e reaproveitar a geração reprovada
+      // entregaria o mesmo defeito com outro nome.
+      const resumable = project.state === 'CANCELLED' || project.state === 'INTERRUPTED'
+        ? await this.findResumable(actor, projectId, plan.plan_id, appSpecHash(spec))
+        : null
+      let resumedFromRunId: string | null = null
       for (let attempt = 1; attempt <= 3; attempt++) {
       activeAttempt = attempt
       completedAttempts = attempt
@@ -176,10 +187,15 @@ export class PromptToAppPipeline {
       if (this.budgetExhausted(spentTokens)) {
         return await this.budgetExceeded(actor, projectId, plan.plan_id, operationId, ownerSessionId, attempt - 1, activeRunDirectory, spentTokens)
       }
-      const runId = attempt === 1 ? operationId : opaqueOperationId(`${operationId}-attempt-${attempt}`); const runDirectory = resolve(this.options.runsRoot, runId)
+      // Na retomada a tentativa continua NO MESMO diretório: é lá que estão os
+      // arquivos que o modelo escreveu, e é isso que estamos aproveitando.
+      const resuming = attempt === 1 && resumable !== null
+      const runId = attempt === 1 ? operationId : opaqueOperationId(`${operationId}-attempt-${attempt}`)
+      const runDirectory = resuming ? resumable.directory : resolve(this.options.runsRoot, runId)
       activeRunId = runId; activeRunDirectory = runDirectory
-      await mkdir(this.options.runsRoot, { recursive: true }); await cp(this.options.templateDirectory, runDirectory, { recursive: true, errorOnExist: true })
-      await writeDesignAssets(runDirectory, design, this.options.logoStoreRoot)
+      if (!resuming) {
+        await mkdir(this.options.runsRoot, { recursive: true }); await cp(this.options.templateDirectory, runDirectory, { recursive: true, errorOnExist: true })
+      }
       const dataLayer = project.category === 'scheduling' || project.category === 'saas-authenticated' ? { files: [], protectedPaths: [] } : generateDataLayer(spec)
       const authLayer = generateAuthLayer(spec, project.category)
       const formLayer = generateFormLayer(spec, project.category)
@@ -198,19 +214,40 @@ export class PromptToAppPipeline {
         await this.writeRunReport({ actor, projectId, runId, directory: runDirectory, stage: 'verify', runState: 'FAILED', attempt, files: attemptFiles, previousFiles: previousAttemptFiles, findings: attemptFindings, correction: previousDiagnosticForReport })
         continue
       }
-      await writeDataLayer(runDirectory, dataLayer)
-      await writeAuthLayer(runDirectory, authLayer)
-      await writeFormLayer(runDirectory, formLayer)
-      await writeCrudLayer(runDirectory, crudLayer)
-      if (schedulingLayer !== undefined) await writeSchedulingLayer(runDirectory, schedulingLayer)
-      await writeDashboardLayer(runDirectory, dashboardLayer)
-      await writeSaasLayer(runDirectory, saasLayer)
+      // Na retomada NADA disto e reescrito: os arquivos ja estao la, e
+      // `writeDesignAssets` grava com `flag: 'wx'` - reescrever explodiria.
+      if (!resuming) {
+        await writeDesignAssets(runDirectory, design, this.options.logoStoreRoot)
+        await writeDataLayer(runDirectory, dataLayer)
+        await writeAuthLayer(runDirectory, authLayer)
+        await writeFormLayer(runDirectory, formLayer)
+        await writeCrudLayer(runDirectory, crudLayer)
+        if (schedulingLayer !== undefined) await writeSchedulingLayer(runDirectory, schedulingLayer)
+        await writeDashboardLayer(runDirectory, dashboardLayer)
+        await writeSaasLayer(runDirectory, saasLayer)
+      }
       await this.options.service.putRun(actor, this.runRecord(actor, projectId, plan.plan_id, 'generate', attempt, 'RUNNING', 'full', runDirectory, null, null, runId, operationId, ownerSessionId))
-      const protectedTemplatePaths = await listTreeFiles(runDirectory)
-      const immutableBefore = await immutableHash(runDirectory, protectedTemplatePaths)
+      // Os caminhos protegidos e o hash vem do MARCO na retomada, e nao de um
+      // novo `listTreeFiles`: agora o diretorio tambem tem o codigo gerado, e
+      // recalcular aqui declararia esse codigo como parte do template
+      // protegido - a conferencia de integridade passaria a proteger
+      // justamente o que ela existe para vigiar.
+      const protectedTemplatePaths = resuming ? resumable.marker.protected_paths : await listTreeFiles(runDirectory)
+      const immutableBefore = resuming ? resumable.marker.immutable_before : await immutableHash(runDirectory, protectedTemplatePaths)
       const previousDiagnostic = diagnostic
       let generated: CodeGenerationResult
       try {
+        if (resuming) {
+          // O modelo NAO e chamado. Os tokens do marco entram no gasto porque
+          // foram gastos de verdade - na execucao que a pessoa cancelou -, e o
+          // teto por token existe para medir o custo da CRIACAO, nao o de uma
+          // tentativa isolada.
+          const marker = resumable.marker
+          generated = { files: [], route: marker.route ?? 'retomada', model: marker.model ?? 'retomada', ...(marker.input_tokens === null ? {} : { inputTokens: marker.input_tokens }), ...(marker.output_tokens === null ? {} : { outputTokens: marker.output_tokens }) }
+          spentTokens += (marker.input_tokens ?? 0) + (marker.output_tokens ?? 0)
+          diagnostic = undefined
+          resumedFromRunId = resumable.runId
+        } else {
         generated = await generator.generate(spec, plan, previousDiagnostic)
         spentTokens += (generated.inputTokens ?? 0) + (generated.outputTokens ?? 0)
         diagnostic = undefined
@@ -220,6 +257,20 @@ export class PromptToAppPipeline {
           protectedTemplatePaths,
         })
         await writeAcceptanceArtifacts(runDirectory, spec, project.category)
+        // O marco de "a geração desta tentativa está em disco". A partir daqui
+        // um cancelamento não joga mais fora o trabalho do modelo.
+        await writeResumeMarker(runDirectory, {
+          plan_id: plan.plan_id, app_spec_sha256: appSpecHash(spec), attempt,
+          route: generated.route ?? null, model: generated.model ?? null,
+          input_tokens: generated.inputTokens ?? null, output_tokens: generated.outputTokens ?? null,
+          protected_paths: [...protectedTemplatePaths], immutable_before: immutableBefore,
+          files: [
+            ...frameworkFiles.map(file => ({ path: file.path, author: 'studio' as const })),
+            ...generated.files.map(file => ({ path: file.path, author: 'model' as const })),
+          ],
+          created_at: this.#now().toISOString(),
+        })
+        }
       } catch (error) {
         diagnostic = error instanceof Error ? error.message : 'GENERATED_OUTPUT_REJECTED'
         finalFailureState = 'BUILD_FAILED'
@@ -227,11 +278,22 @@ export class PromptToAppPipeline {
         await this.writeRunReport({ actor, projectId, runId, directory: runDirectory, stage: 'generate', runState: 'FAILED', attempt, files: attemptFiles, previousFiles: previousAttemptFiles, findings: attemptFindings, correction: previousDiagnosticForReport })
         continue
       }
-      attemptFiles = [
-        ...frameworkFiles.map(file => ({ path: file.path, content: file.content, author: 'studio' as const })),
-        ...generated.files.map(file => ({ path: file.path, content: file.content, author: 'model' as const })),
-      ]
-      const findings = scanGeneratedContent(Object.fromEntries([...frameworkFiles, ...generated.files].map(file => [file.path, file.content])))
+      attemptFiles = resuming
+        // Relidos do disco: o marco guarda caminho e autor, e o conteudo fica
+        // onde o construtor vai compila-lo. Duplicar o aplicativo dentro do
+        // marco deixaria duas copias que podem divergir.
+        ? await readResumedFiles(runDirectory, resumable.marker)
+        : [
+          ...frameworkFiles.map(file => ({ path: file.path, content: file.content, author: 'studio' as const })),
+          ...generated.files.map(file => ({ path: file.path, content: file.content, author: 'model' as const })),
+        ]
+      // Os controles rodam de novo NA RETOMADA tambem, sobre o conteudo relido
+      // do disco. Confiar que "ja passou uma vez" abriria a porta para um
+      // arquivo trocado entre o cancelamento e a retomada atravessar sem
+      // conferencia - e o disco nao e um lugar mais confiavel que o modelo.
+      const findings = scanGeneratedContent(Object.fromEntries(
+        resuming ? attemptFiles.map(file => [file.path, file.content]) : [...frameworkFiles, ...generated.files].map(file => [file.path, file.content]),
+      ))
       attemptFindings = findings
       if (findings.length > 0) {
         diagnostic = findings.join('; '); finalFailureState = 'BUILD_FAILED'
@@ -378,7 +440,7 @@ export class PromptToAppPipeline {
       await writeFile(resolve(runDirectory, 'pipeline.log'), log, 'utf8')
       activeStage = 'verify'
       const artifactSha256 = state === 'PASSED' ? finished.exported!.sha256 : null
-      await this.options.service.putRun(actor, this.runRecord(actor, projectId, plan.plan_id, state === 'PASSED' ? 'verify' : failedStage, attempt, state, 'full', runDirectory, generated, diagnostic ?? null, runId, operationId, ownerSessionId, verifiedAcceptanceChecks, artifactSha256, templateIntegrity, attestations, buildSteps))
+      await this.options.service.putRun(actor, this.runRecord(actor, projectId, plan.plan_id, state === 'PASSED' ? 'verify' : failedStage, attempt, state, 'full', runDirectory, generated, diagnostic ?? null, runId, operationId, ownerSessionId, verifiedAcceptanceChecks, artifactSha256, templateIntegrity, attestations, buildSteps, attempt === 1 ? resumedFromRunId : null))
       await this.recordEvidence(actor, projectId, runId, runDirectory, 'pipeline.log', 'build-log')
       await this.writeRunReport({ actor, projectId, runId, directory: runDirectory, stage: state === 'PASSED' ? 'verify' : failedStage, runState: state, attempt, files: attemptFiles, previousFiles: previousAttemptFiles, findings: attemptFindings, correction: previousDiagnosticForReport })
       if (state === 'PASSED') {
@@ -475,9 +537,9 @@ export class PromptToAppPipeline {
     }
   }
 
-  private runRecord(actor: PromptToAppActor, projectId: string, planId: string, stage: StudioRun['stage'], attempt: number, state: StudioRun['state'], sandbox: StudioRun['sandbox'], runDirectory: string, generation: CodeGenerationResult | null, failure: string | null, runId = this.#createId(), operationId = runId, ownerSessionId = actor.sessionId ?? 'direct-execution', acceptanceChecks: readonly AcceptanceCheck[] = [], artifactSha256: string | null = null, templateIntegrity?: StudioRun['template_integrity'], attestations?: AttestationDigests, steps: readonly StudioRunStep[] = []): StudioRun {
+  private runRecord(actor: PromptToAppActor, projectId: string, planId: string, stage: StudioRun['stage'], attempt: number, state: StudioRun['state'], sandbox: StudioRun['sandbox'], runDirectory: string, generation: CodeGenerationResult | null, failure: string | null, runId = this.#createId(), operationId = runId, ownerSessionId = actor.sessionId ?? 'direct-execution', acceptanceChecks: readonly AcceptanceCheck[] = [], artifactSha256: string | null = null, templateIntegrity?: StudioRun['template_integrity'], attestations?: AttestationDigests, steps: readonly StudioRunStep[] = [], resumedFrom: string | null = null): StudioRun {
     const now = this.#now().toISOString()
-    return { run_id: runId, operation_id: operationId, owner_session_id: ownerSessionId, plan_id: planId, project_id: projectId, org_id: actor.orgId, tenant_id: actor.tenantId, stage, attempt, state, started_at: now, finished_at: state === 'RUNNING' || state === 'PENDING' ? null : now, sandbox, route: generation?.route ?? null, model: generation?.model ?? null, input_tokens: generation?.inputTokens ?? null, output_tokens: generation?.outputTokens ?? null, estimated_cost_usd: null, run_directory: runDirectory || 'not-created', artifact_sha256: artifactSha256, ...(templateIntegrity === undefined ? {} : { template_integrity: templateIntegrity }), ...(attestations === undefined ? {} : { attestations }), ...(steps.length === 0 ? {} : { steps: steps.map(entry => ({ ...entry })) }), failure_code: failure, acceptance_checks: [...acceptanceChecks] }
+    return { run_id: runId, operation_id: operationId, owner_session_id: ownerSessionId, plan_id: planId, project_id: projectId, org_id: actor.orgId, tenant_id: actor.tenantId, stage, attempt, state, started_at: now, finished_at: state === 'RUNNING' || state === 'PENDING' ? null : now, sandbox, route: generation?.route ?? null, model: generation?.model ?? null, input_tokens: generation?.inputTokens ?? null, output_tokens: generation?.outputTokens ?? null, estimated_cost_usd: null, run_directory: runDirectory || 'not-created', artifact_sha256: artifactSha256, ...(templateIntegrity === undefined ? {} : { template_integrity: templateIntegrity }), ...(attestations === undefined ? {} : { attestations }), ...(steps.length === 0 ? {} : { steps: steps.map(entry => ({ ...entry })) }), ...(resumedFrom === null ? {} : { resumed_from_run_id: resumedFrom }), failure_code: failure, acceptance_checks: [...acceptanceChecks] }
   }
 
   private async recordFailure(actor: PromptToAppActor, projectId: string, planId: string, runId: string, directory: string, attempt: number, generation: CodeGenerationResult | null, diagnostic: string, stage: StudioRun['stage'], operationId: string, ownerSessionId: string) {
@@ -593,6 +655,34 @@ export class PromptToAppPipeline {
       `GENERATION_TOKEN_BUDGET_EXCEEDED tokens=${String(spentTokens)}`, operationId, operationId, ownerSessionId,
     ))
     return { state: 'BUDGET_EXCEEDED', attempts, message: t('pipeline.budgetExceeded') }
+  }
+
+  /**
+   * A tentativa de onde dá para retomar, se houver uma.
+   *
+   * Percorre as execuções deste projeto da mais recente para a mais antiga e
+   * devolve a primeira cujo diretório tem um marco de geração VÁLIDO para este
+   * plano e esta especificação. Sem marco, sem retomada — e sem retomada a
+   * execução gera de novo, exatamente como sempre fez.
+   *
+   * A ordem importa: retomar de uma tentativa velha entregaria um aplicativo
+   * mais antigo do que o que a pessoa viu ser cancelado.
+   * @param actor - quem está executando.
+   * @param projectId - o projeto.
+   * @param planId - o plano aprovado agora.
+   * @param appSpecSha256 - o resumo da especificação de agora.
+   * @returns o diretório, a execução de origem e o marco, ou `null`.
+   */
+  private async findResumable(actor: PromptToAppActor, projectId: string, planId: string, appSpecSha256: string): Promise<{ readonly directory: string; readonly runId: string; readonly marker: ResumeMarker } | null> {
+    let runs: readonly StudioRun[]
+    try { runs = this.options.service.runs(actor, projectId) } catch { return null }
+    const ordered = [...runs].sort((left, right) => right.started_at.localeCompare(left.started_at) || right.attempt - left.attempt)
+    for (const run of ordered) {
+      if (run.run_directory === 'not-created' || run.run_directory === '') continue
+      const marker = await readResumeMarker(run.run_directory, { planId, appSpecSha256 })
+      if (marker !== null) return { directory: run.run_directory, runId: run.run_id, marker }
+    }
+    return null
   }
 
   private async cancelled(actor: PromptToAppActor, projectId: string, planId: string, operationId: string, ownerSessionId: string, attempts: number, runDirectory = 'not-created'): Promise<PipelineResult> {

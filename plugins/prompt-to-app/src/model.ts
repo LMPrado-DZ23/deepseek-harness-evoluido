@@ -165,6 +165,19 @@ export const studioRunSchema = z.object({
     state: z.enum(['RUNNING', 'PASSED', 'FAILED']),
     started_at: timestamp, finished_at: timestamp.nullable(),
   }).strict()).optional(),
+  /**
+   * A execução de onde esta retomou, quando ela retomou de alguma.
+   *
+   * Uma criação cancelada recomeçava do ZERO: o modelo era chamado outra vez,
+   * cobrado outra vez, e — porque geração não é determinística — devolvia um
+   * aplicativo DIFERENTE do que estava sendo construído. Agora a tentativa
+   * seguinte reaproveita os arquivos já gerados, e este campo diz de onde.
+   *
+   * Sem ele a retomada seria invisível: a pessoa veria uma criação terminar em
+   * segundos sem saber por quê, e ninguém conseguiria auditar depois qual
+   * geração produziu o artefato. OPCIONAL, e a versão do domínio NÃO sobe.
+   */
+  resumed_from_run_id: z.string().min(1).optional(),
   failure_code: z.string().nullable(),
   acceptance_checks: z.array(z.object({
     id: z.string().min(1), label: z.string().min(1),

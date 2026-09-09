@@ -54,6 +54,10 @@ async function fixture(options: FixtureOptions = {}) {
     designOrDefault: vi.fn(() => createDesignSpec({ preset: 'modern' })),
     transition: vi.fn(async (_actor, _projectId, to: string) => { state = to; transitions.push(to); return { state } }),
     putRun: vi.fn(async (_actor, run: StudioRun) => { runs.push(run) }),
+    // `runs` existe aqui porque a RETOMADA precisa achar a execução anterior:
+    // sem esta leitura, `findResumable` não tem onde procurar o diretório da
+    // tentativa cancelada.
+    runs: vi.fn(() => runs),
     putEvidence: vi.fn(async (_actor, item: { kind: string; relative_path: string }) => { evidence.push(item) }),
   }
   const executeImplementation: NonNullable<FixtureOptions['execute']> = options.execute ?? (async (): Promise<FixtureExecutionResult> => ({ exitCode: 0, stdout: 'ok', stderr: '', timedOut: false }))
@@ -211,6 +215,99 @@ describe('Prompt-to-App pipeline', () => {
     const last = withSteps.at(-1)!
     expect(last.steps!.map(entry => [entry.step, entry.state])).toEqual([['install', 'PASSED'], ['build', 'FAILED']])
     expect(last.steps!.every(entry => entry.state !== 'RUNNING')).toBe(true)
+  })
+
+  it('uma criação cancelada RETOMA de onde parou, sem chamar o modelo de novo', async () => {
+    // Cancelar recomeçava do ZERO. Quem apertava "Cancelar" depois de esperar
+    // — porque precisava do computador, porque fechou o navegador — perdia a
+    // geração inteira e pagava o modelo outra vez.
+    //
+    // E o custo é o MENOR dos dois problemas. Geração não é determinística:
+    // pedir de novo, com o mesmo plano, devolve um aplicativo DIFERENTE. A
+    // pessoa aprovava um plano, esperava, cancelava, mandava recomeçar — e
+    // recebia outra coisa. Retomar é o que faz a segunda tentativa entregar o
+    // que a primeira estava construindo.
+    const controller = new AbortController()
+    const f = await fixture({
+      // O cancelamento acontece DEPOIS da geração e DENTRO da construção, que
+      // é exatamente a janela em que havia trabalho para perder.
+      execute: async (_directory: string, command: string) => {
+        if (command.includes('run build')) controller.abort()
+        return { exitCode: 0, stdout: 'ok', stderr: '', timedOut: false }
+      },
+    })
+    const generator = { generate: vi.fn(async () => cleanGeneration) }
+    const cancelled = await f.pipeline.run(actor, 'project', generator, { signal: controller.signal })
+    expect(cancelled).toMatchObject({ state: 'CANCELLED' })
+    expect(generator.generate).toHaveBeenCalledTimes(1)
+    const cancelledRun = f.runs.at(-1)!
+    expect(cancelledRun.state).toBe('CANCELLED')
+
+    // O marco de geração ficou em disco: é ele que torna a retomada um FATO
+    // verificável, e não uma suposição sobre o que sobrou na pasta.
+    const marker = JSON.parse(await readFile(resolve(cancelledRun.run_directory, 'generation.json'), 'utf8')) as Record<string, unknown>
+    expect(marker).toMatchObject({ plan_id: plan.plan_id, attempt: 1, route: 'ollama', model: 'qwen' })
+
+    // Segunda execução, sem sinal de cancelamento: retoma.
+    const second = await fixture({ execute: reportingExecute('PASSED'), finish: attestingFinish })
+    // A mesma pasta e a mesma memória de execuções da primeira.
+    second.runs.push(...f.runs)
+    const resumedGenerator = { generate: vi.fn(async () => cleanGeneration) }
+    await second.service.transition(actor, 'project', 'CANCELLED')
+    second.runs.length = 0
+    second.runs.push(cancelledRun)
+    const result = await second.pipeline.run(actor, 'project', resumedGenerator)
+
+    // O MODELO NÃO FOI CHAMADO. Esta é a afirmação inteira.
+    expect(resumedGenerator.generate).not.toHaveBeenCalled()
+    expect(result.state).toBe('VERIFIED_PROTOTYPE')
+    // E a retomada não é invisível: o registro diz de onde veio, senão ninguém
+    // conseguiria auditar depois qual geração produziu o artefato.
+    expect(second.runs.at(-1)?.resumed_from_run_id).toBe(cancelledRun.run_id)
+  })
+
+  it('NÃO retoma quando o plano mudou depois do cancelamento', async () => {
+    // Os arquivos guardados respondem à pergunta ANTIGA. Reaproveitá-los depois
+    // que a pessoa mudou o plano entregaria calado o aplicativo que ela acabou
+    // de deixar de querer — que é pior do que gerar de novo.
+    const controller = new AbortController()
+    const f = await fixture({
+      execute: async (_directory: string, command: string) => {
+        if (command.includes('run build')) controller.abort()
+        return { exitCode: 0, stdout: 'ok', stderr: '', timedOut: false }
+      },
+    })
+    await f.pipeline.run(actor, 'project', { generate: vi.fn(async () => cleanGeneration) }, { signal: controller.signal })
+    const cancelledRun = f.runs.at(-1)!
+
+    const second = await fixture({ execute: reportingExecute('PASSED'), finish: attestingFinish })
+    second.runs.length = 0
+    second.runs.push(cancelledRun)
+    await second.service.transition(actor, 'project', 'CANCELLED')
+    // O plano de agora é outro.
+    second.service.plan.mockReturnValue({ ...plan, plan_id: 'plano-diferente' })
+    const generator = { generate: vi.fn(async () => cleanGeneration) }
+    await second.pipeline.run(actor, 'project', generator)
+    expect(generator.generate).toHaveBeenCalledTimes(1)
+    expect(second.runs.at(-1)?.resumed_from_run_id).toBeUndefined()
+  })
+
+  it('NÃO retoma uma execução que REPROVOU: repetir existe para corrigir', async () => {
+    // "Tentar novamente" depois de uma reprovação precisa gerar de novo, com o
+    // diagnóstico do que falhou. Reaproveitar a geração reprovada entregaria o
+    // mesmo defeito com outro nome, e a pessoa apertaria o botão para sempre.
+    const f = await fixture({
+      execute: async (_directory: string, command: string) => command.includes('run build')
+        ? { exitCode: 1, stdout: '', stderr: 'quebrou', timedOut: false }
+        : { exitCode: 0, stdout: 'ok', stderr: '', timedOut: false },
+    })
+    const generator = { generate: vi.fn(async () => cleanGeneration) }
+    const failed = await f.pipeline.run(actor, 'project', generator)
+    expect(failed.state).toBe('BUILD_FAILED')
+    // Três tentativas, três chamadas: o marco existe em disco e mesmo assim
+    // NENHUMA delas retomou.
+    expect(generator.generate).toHaveBeenCalledTimes(3)
+    expect(f.runs.every(run => run.resumed_from_run_id === undefined)).toBe(true)
   })
 
   it('um critério REPROVADO derruba a atestação, e o ciclo verde do construtor não salva a execução', async () => {
