@@ -8,7 +8,7 @@
  * garantia mais bem provada do produto.
  */
 import { describe, expect, it } from 'vitest'
-import { applyPlanEdit, planEditSchema, PlanEditError, planRevision } from '../src/plan-edit.ts'
+import { appendPlanSlice, applyPlanEdit, planEditSchema, PlanEditError, planRevision } from '../src/plan-edit.ts'
 import type { StudioPlan } from '../src/model.ts'
 
 const NOW = '2026-09-08T12:00:00.000Z'
@@ -155,5 +155,47 @@ describe('E-03 o que a pessoa NÃO pode mexer', () => {
     const { studioPlanSchema } = await import('../src/model.ts')
     const after = applyPlanEdit(plan(), edit({ removed: ['s2'], slices: [{ slice_id: 's1', title: 'Agendamento' }], order: ['s3', 's1'] }), NOW)
     expect(studioPlanSchema.safeParse(after).success).toBe(true)
+  })
+})
+
+describe('acrescentar uma etapa ao plano', () => {
+  const nova = {
+    slice_id: 's4', title: 'Depoimentos', description: 'Mostrar o que os clientes dizem',
+    acceptance_criteria: ['os depoimentos aparecem'], planned_files: ['src/depoimentos.tsx'],
+  }
+
+  it('a etapa entra NO FIM e o resto do plano fica intacto', () => {
+    // A edição não conseguia acrescentar NADA: quem queria algo fora do plano
+    // pedia mudança em texto livre e recebia uma revisão inteira, perdendo
+    // junto todos os títulos e critérios que já tinha ajustado à mão.
+    const before = plan()
+    const after = appendPlanSlice(before, nova, NOW)
+    expect(after.slices.map(slice => slice.slice_id)).toEqual(['s1', 's2', 's3', 's4'])
+    expect(after.slices.slice(0, 3)).toEqual(before.slices)
+    expect(after.revision).toBe(2)
+    // O julgamento do que faltava é da PESSOA, mesmo que quem tenha escrito a
+    // etapa seja o planejador. É isso que este campo registra.
+    expect(after.edited_by_person).toBe(true)
+  })
+
+  it('recusa etapa que planeja um arquivo que outra etapa já vai criar', () => {
+    // Conferido AQUI, em código, e não confiado à instrução que o planejador
+    // recebeu: instrução em texto é pedido, não garantia. Duas etapas
+    // planejando o mesmo arquivo fariam a segunda sobrescrever a primeira em
+    // silêncio, e o critério da primeira reprovaria sem ninguém entender.
+    expect(() => appendPlanSlice(plan(), { ...nova, planned_files: ['src/contato.tsx'] }, NOW))
+      .toThrow(PlanEditError)
+  })
+
+  it('recusa etapa com id repetido', () => {
+    // A interface inteira endereça etapa por id: um id repetido faria a etapa
+    // nova ser confundida com uma existente em toda a tela.
+    expect(() => appendPlanSlice(plan(), { ...nova, slice_id: 's2' }, NOW)).toThrow(PlanEditError)
+  })
+
+  it('não acrescenta a plano que já foi aprovado', () => {
+    // Depois de aprovado, mexer no plano faria o aplicativo construído deixar
+    // de ser o que a pessoa aprovou.
+    expect(() => appendPlanSlice(plan({ status: 'APPROVED' }), nova, NOW)).toThrow(PlanEditError)
   })
 })

@@ -73,6 +73,56 @@ describe('PromptToAppService', () => {
     expect(service.latestSpec(ownerA, project.project_id).version).toBe(1)
   })
 
+  it('acrescenta uma etapa que a PESSOA descreveu, com os arquivos escritos pelo PLANEJADOR', async () => {
+    // A edição do plano não conseguia acrescentar nada. E `planned_files` não
+    // pode vir do pedido: essa lista é a autorização de escrita do gerador, e
+    // um campo de formulário que a alimentasse viraria escrita arbitrária no
+    // espaço de trabalho. A pessoa descreve em português; o planejador escreve
+    // a etapa.
+    const { repository, service } = fixture()
+    const project = await service.createProject(ownerA, { name: 'Site', original_brief: 'Quero apresentar meus serviços.', category: 'landing-page', privacy: 'any' })
+    await service.saveSpec(ownerA, project.project_id, validSpec, 'intake')
+    await service.proposePlan(ownerA, project.project_id, [
+      { slice_id: 'slice-1', title: 'Serviços', description: 'Listar', acceptance_criteria: ['aparece'], planned_files: ['src/GeneratedApp.tsx'] },
+    ])
+    const approvalsBefore = repository.approvalRows.length
+
+    const planner = {
+      slice: vi.fn(async () => ({
+        slice_id: 'slice-2', title: 'Depoimentos', description: 'Mostrar o que dizem',
+        acceptance_criteria: ['os depoimentos aparecem'], planned_files: ['src/depoimentos.tsx'],
+      })),
+    }
+    const updated = await service.addPlanSlice(ownerA, project.project_id, 'faltou mostrar o que meus clientes dizem', planner, 'any')
+
+    expect(updated.slices.map(slice => slice.slice_id)).toEqual(['slice-1', 'slice-2'])
+    expect(updated.slices[0]).toMatchObject({ title: 'Serviços' })
+    // O planejador recebeu o plano atual, para não repetir o que já existe.
+    expect(planner.slice).toHaveBeenCalledWith(
+      { orgId: 'org-a', tenantId: 'tenant-a' }, 'any', validSpec,
+      [{ title: 'Serviços', planned_files: ['src/GeneratedApp.tsx'] }],
+      'faltou mostrar o que meus clientes dizem', 'landing-page',
+    )
+    // E a edição ficou REGISTRADA: sem isso o repositório sabia que o plano
+    // tinha mudado e nunca por quem.
+    expect(repository.approvalRows.length).toBe(approvalsBefore + 1)
+    expect(repository.approvalRows.at(-1)).toMatchObject({ subject: 'plan', approved_by: 'user-a', tier: 'T1' })
+  })
+
+  it('recusa pedido de etapa curto demais antes de gastar uma chamada de modelo', async () => {
+    // Uma palavra não descreve etapa nenhuma. Recusar aqui evita pagar o modelo
+    // para ele descobrir isso sozinho.
+    const { service } = fixture()
+    const project = await service.createProject(ownerA, { name: 'Site', original_brief: 'Quero apresentar meus serviços.', category: 'landing-page', privacy: 'any' })
+    await service.saveSpec(ownerA, project.project_id, validSpec, 'intake')
+    await service.proposePlan(ownerA, project.project_id, [
+      { slice_id: 'slice-1', title: 'Serviços', description: 'Listar', acceptance_criteria: ['aparece'], planned_files: ['src/GeneratedApp.tsx'] },
+    ])
+    const planner = { slice: vi.fn() }
+    await expect(service.addPlanSlice(ownerA, project.project_id, 'x', planner as never, 'any')).rejects.toMatchObject({ code: 'INVALID' })
+    expect(planner.slice).not.toHaveBeenCalled()
+  })
+
   it('enforces viewer and archive roles and rejects approval replay', async () => {
     const { service } = fixture()
     await expect(service.createProject(viewerA, { name: 'x', original_brief: 'brief', category: 'catalog', privacy: 'any' })).rejects.toMatchObject({ code: 'FORBIDDEN' })

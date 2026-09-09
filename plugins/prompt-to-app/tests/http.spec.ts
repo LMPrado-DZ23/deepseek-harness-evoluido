@@ -96,7 +96,10 @@ async function fixture(options: { readonly emergencyStop?: { assertRunning(scope
 
 describe('prompt-to-app HTTP boundary', () => {
   it('declares every route with authorization and no client-owned scope', () => {
-    expect(PROMPT_TO_APP_ROUTE_CONTRACTS).toHaveLength(17)
+    // A contagem sobe DE PROPÓSITO quando uma rota nasce: ela é o que impede
+    // uma rota nova de aparecer sem alguém olhar a autorização dela.
+    // 18 desde `POST /projects/:projectId/plan/slice` (E-03).
+    expect(PROMPT_TO_APP_ROUTE_CONTRACTS).toHaveLength(18)
     expect(PROMPT_TO_APP_ROUTE_CONTRACTS.every(route => route.access === 'authorized' && route.permission !== null)).toBe(true)
   })
 

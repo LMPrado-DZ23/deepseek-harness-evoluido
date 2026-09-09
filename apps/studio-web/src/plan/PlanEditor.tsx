@@ -20,12 +20,21 @@ export interface PlanEditorProps {
   reason: string
   setReason(value: string): void
   requestChange(): Promise<void>
+  /**
+   * Acrescenta uma etapa descrita em português.
+   *
+   * OPCIONAL para a tela continuar desenhando numa instalação cujo servidor
+   * ainda não tem a rota: sem ele o bloco não aparece, em vez de aparecer um
+   * botão que responde 404 na cara de quem não programa.
+   */
+  addSlice?(request: string): Promise<void>
 }
 
 interface Draft { readonly title: string; readonly description: string; readonly criteriaText: string }
 
-export function PlanEditor({ plan, submit, approve, reason, setReason, requestChange }: PlanEditorProps) {
+export function PlanEditor({ plan, submit, approve, reason, setReason, requestChange, addSlice }: PlanEditorProps) {
   const [editing, setEditing] = useState<string | null>(null)
+  const [addition, setAddition] = useState('')
   const [draft, setDraft] = useState<Draft>({ title: '', description: '', criteriaText: '' })
 
   function open(sliceId: string) {
@@ -86,6 +95,23 @@ export function PlanEditor({ plan, submit, approve, reason, setReason, requestCh
       </li>)}
     </ol>
     <PendingButton label={t.plan.approve} busyLabel={t.plan.approveBusy} action={approve} />
+    {/* Acrescentar uma etapa.
+        Antes disto o editor sabia mudar, tirar e reordenar — e não sabia
+        ACRESCENTAR. Quem quisesse algo fora do plano tinha de pedir uma
+        mudança em texto livre e recebia um plano inteiro novo, perdendo junto
+        todos os títulos e critérios que já tinha ajustado à mão.
+        Os arquivos não aparecem aqui, e a tela DIZ isso: `planned_files` é a
+        autorização de escrita do gerador, e um campo de formulário que a
+        alimentasse viraria escrita arbitrária no espaço de trabalho. */}
+    {addSlice === undefined ? null : <section className="task-card">
+      <h2>{t.plan.addTitle}</h2>
+      <label htmlFor="plan-add">{t.plan.addLabel}</label>
+      <textarea id="plan-add" value={addition} onChange={event => setAddition(event.target.value)} placeholder={t.plan.addPlaceholder} />
+      <p className="context-note">{t.plan.addNote}</p>
+      <PendingButton className="secondary" label={t.plan.addAction} busyLabel={t.plan.addBusy}
+        disabled={addition.trim().length < 3}
+        action={async () => { await addSlice(addition.trim()); setAddition('') }} />
+    </section>}
     <section className="task-card">
       <h2>{t.plan.change}</h2>
       <label htmlFor="change-reason">{t.plan.changeLabel}</label>

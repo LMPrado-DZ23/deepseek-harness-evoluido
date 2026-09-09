@@ -81,7 +81,9 @@
     "planEditConflictingSlice": "Você pediu para tirar e para alterar a mesma parte: {slice}",
     "planEditEmpty": "O plano precisa ter pelo menos uma parte. Para não criar nada, é só não aprovar.",
     "planEditOrder": "A ordem enviada não corresponde às partes que sobraram no plano.",
-    "dashboardNeedsEntity": "Um painel precisa de ao menos um cadastro para resumir."
+    "dashboardNeedsEntity": "Um painel precisa de ao menos um cadastro para resumir.",
+    "sliceDuplicatePaths": "A etapa sugerida mexeria em arquivos que outra etapa já vai criar. Descreva com outras palavras o que falta.",
+    "sliceUnusable": "Não deu para transformar esse pedido em uma etapa nova. Tente descrever em uma frase o que falta no plano."
   },
   "pipeline": {
     "verified": "Protótipo verificado — não está publicado nem disponível para outras pessoas",
@@ -139,7 +141,11 @@
     "generatePlanned": "Gere somente arquivos presentes em planned_files. Não tente alterar arquivos do template.",
     "generateSpec": "AppSpec: {spec}",
     "generatePlan": "Plano: {plan}",
-    "generateRepair": "A tentativa anterior falhou. Corrija somente a causa: {diagnostic}"
+    "generateRepair": "A tentativa anterior falhou. Corrija somente a causa: {diagnostic}",
+    "sliceOnly": "Produza somente JSON válido com UMA fatia nova, em linguagem comum, para acrescentar ao plano que já existe.",
+    "sliceExisting": "O plano atual já tem estas fatias, e elas NÃO devem ser repetidas nem reescritas: {slices}",
+    "sliceRequest": "O que a pessoa quer acrescentar: {request}",
+    "sliceFiles": "A fatia nova não pode listar em planned_files nenhum arquivo já planejado por outra fatia."
   },
   "stages": {
     "install": "Preparando as ferramentas do seu aplicativo",

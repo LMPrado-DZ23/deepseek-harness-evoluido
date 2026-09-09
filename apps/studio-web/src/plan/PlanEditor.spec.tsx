@@ -12,9 +12,9 @@ const PLAN: PlanView = {
   ],
 }
 
-function render(plan: PlanView) {
+function render(plan: PlanView, extra: Partial<Parameters<typeof PlanEditor>[0]> = {}) {
   return renderToStaticMarkup(createElement(PlanEditor, {
-    plan, submit: async () => {}, approve: async () => {}, reason: '', setReason: () => {}, requestChange: async () => {},
+    plan, submit: async () => {}, approve: async () => {}, reason: '', setReason: () => {}, requestChange: async () => {}, ...extra,
   }))
 }
 
@@ -55,5 +55,33 @@ describe('E-03 tela do plano editável', () => {
     const html = render(PLAN)
     expect(html).toContain('Aprovar este plano')
     expect(html).toContain('Pedir uma mudança')
+  })
+})
+
+describe('acrescentar uma etapa pela tela', () => {
+  it('oferece descrever o que falta, e DIZ que os arquivos não são escolha da pessoa', () => {
+    // O editor sabia mudar, tirar e reordenar — e não sabia ACRESCENTAR. Quem
+    // queria algo fora do plano pedia mudança em texto livre e recebia um
+    // plano inteiro novo, perdendo os títulos e critérios já ajustados à mão.
+    const html = render(PLAN, { addSlice: async () => {} })
+    expect(html).toContain('Falta alguma etapa?')
+    expect(html).toContain('Acrescentar esta etapa')
+    // A frase existe porque `planned_files` é a autorização de escrita do
+    // gerador: um campo de formulário que a alimentasse viraria escrita
+    // arbitrária no espaço de trabalho.
+    expect(html).toContain('quais arquivos a etapa nova pode criar')
+    expect(html).not.toContain('planned_files')
+  })
+
+  it('sem a rota no servidor, o bloco não aparece', () => {
+    // Melhor não oferecer do que oferecer um botão que responde 404 na cara de
+    // quem não programa.
+    expect(render(PLAN)).not.toContain('Falta alguma etapa?')
+  })
+
+  it('o botão nasce desabilitado: pedido vazio não vira etapa', () => {
+    const html = render(PLAN, { addSlice: async () => {} })
+    expect(html).toMatch(/Acrescentar esta etapa[\s\S]{0,80}/u)
+    expect(html).toContain('disabled')
   })
 })

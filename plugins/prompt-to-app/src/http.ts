@@ -124,6 +124,7 @@ export const PROMPT_TO_APP_ROUTE_CONTRACTS = [
   { method: 'POST', path: '/projects/:projectId/plan/approve', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'POST', path: '/projects/:projectId/plan/change', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'POST', path: '/projects/:projectId/plan/edit', access: 'authorized', permission: 'project.write', scope: 'project' },
+  { method: 'POST', path: '/projects/:projectId/plan/slice', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'POST', path: '/projects/:projectId/generate', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'POST', path: '/projects/:projectId/generate/cancel', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'GET', path: '/projects/:projectId/checkpoints', access: 'authorized', permission: 'project.read', scope: 'project' },
@@ -270,6 +271,16 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
       if (request.method === 'POST' && matched.suffix === '/plan/change') {
         const input = changeRequestSchema.parse(await readJson(request))
         return json(response, 200, { plan: await config.service.requestPlanChange(actor, projectId, input.reason) })
+      }
+      if (request.method === 'POST' && matched.suffix === '/plan/slice') {
+        // A pessoa descreve o que falta; quem escreve a etapa é o planejador.
+        // `planned_files` é a autorização de escrita do gerador, e não um
+        // campo de formulário.
+        const input = changeRequestSchema.parse(await readJson(request))
+        const project = config.service.project(actor, projectId)
+        return json(response, 200, {
+          plan: await config.service.addPlanSlice(actor, projectId, input.reason, config.planner, project.privacy),
+        })
       }
       if (request.method === 'POST' && matched.suffix === '/plan/edit') {
         return json(response, 200, { plan: await config.service.editPlan(actor, projectId, planEditSchema.parse(await readJson(request))) })

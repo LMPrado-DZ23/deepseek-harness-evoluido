@@ -190,7 +190,13 @@
     "editSaveBusy": "Guardando…",
     "removeBusy": "Tirando…",
     "moveBusy": "Movendo…",
-    "revisionBusy": "Preparando o plano…"
+    "revisionBusy": "Preparando o plano…",
+    "addTitle": "Falta alguma etapa?",
+    "addLabel": "Escreva o que falta, com suas palavras",
+    "addPlaceholder": "Ex.: quero uma página mostrando o que meus clientes dizem sobre o trabalho",
+    "addAction": "Acrescentar esta etapa",
+    "addBusy": "Montando a etapa…",
+    "addNote": "Nós é que escolhemos quais arquivos a etapa nova pode criar — assim ela não atropela nenhuma das outras. Você diz o que falta; o resto é conosco."
   },
   "creation": {
     "title": "Criar e testar o protótipo",

@@ -157,3 +157,44 @@ function reorder(slices: readonly StudioPlanSlice[], order: readonly string[]): 
   const byId = new Map(slices.map(slice => [slice.slice_id, slice]))
   return order.map(id => byId.get(id)!)
 }
+
+/**
+ * O plano com uma fatia NOVA no fim, e uma revisão à frente.
+ *
+ * A fatia vem do PLANEJADOR, nunca do pedido: `planned_files` é a autorização
+ * de escrita do gerador, e deixar a pessoa digitar caminhos seria entregar a
+ * ela a caneta que decide onde o modelo pode mexer.
+ *
+ * A colisão de arquivos é conferida AQUI, em código, e não confiada à
+ * instrução que o planejador recebeu: instrução em texto é pedido, não
+ * garantia. Duas fatias planejando o mesmo arquivo fariam a segunda sobrescrever
+ * a primeira em silêncio, e o critério de aceite da primeira reprovaria sem
+ * ninguém entender por quê.
+ *
+ * @param plan - o plano atual.
+ * @param slice - a fatia devolvida pelo planejador.
+ * @param now - o instante da gravação.
+ * @returns o plano com a fatia no fim.
+ * @throws PlanEditError quando a fatia não pode entrar como está.
+ */
+export function appendPlanSlice(plan: StudioPlan, slice: StudioPlanSlice, now: string): StudioPlan {
+  if (plan.status !== 'PROPOSED') throw new PlanEditError('UNAVAILABLE', t('errors.planEditUnavailable'))
+  // Um id repetido faria a fatia nova ser confundida com uma existente por
+  // toda a interface, que endereça fatia por id.
+  if (plan.slices.some(existing => existing.slice_id === slice.slice_id)) {
+    throw new PlanEditError('INVALID', t('errors.sliceUnusable'))
+  }
+  const planned = new Set(plan.slices.flatMap(existing => existing.planned_files))
+  if (slice.planned_files.some(path => planned.has(path))) {
+    throw new PlanEditError('INVALID', t('errors.sliceDuplicatePaths'))
+  }
+  return {
+    ...plan,
+    slices: [...plan.slices, slice],
+    revision: planRevision(plan) + 1,
+    // A fatia foi PEDIDA pela pessoa, mesmo tendo sido escrita pelo planejador:
+    // o julgamento do que faltava é dela, e é isso que este campo registra.
+    edited_by_person: true,
+    updated_at: now,
+  }
+}

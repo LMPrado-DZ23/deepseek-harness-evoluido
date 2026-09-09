@@ -1,14 +1,14 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { roleAllows, type StudioRole } from '@dz23-studio/policy'
-import { routePrivacyProfile } from '@dz23-studio/route-health'
+import { routePrivacyProfile, type RoutePrivacy } from '@dz23-studio/route-health'
 import { appSpecHash, type AppSpecV1 } from './appspec.js'
 import { createDesignSpec, designSpecHash, designSpecV1Schema, type DesignLogo, type DesignSelection, type DesignSpecV1 } from './design.js'
 import type {
   PromptToAppKey, ProjectState, StudioApproval, StudioAppSpecRecord, StudioEvidence,
-  StudioDesignSpecRecord, StudioIntakeTurn, StudioPlan, StudioProject, StudioRun,
+  StudioDesignSpecRecord, StudioIntakeTurn, StudioPlan, StudioPlanSlice, StudioProject, StudioProjectCategory, StudioRun,
 } from './model.js'
 import { assertProjectTransition, assertUndoTransition } from './state.js'
-import { applyPlanEdit, PlanEditError, type PlanEdit } from './plan-edit.js'
+import { appendPlanSlice, applyPlanEdit, planRevision, PlanEditError, type PlanEdit } from './plan-edit.js'
 import { latestGreenCheckpoint, noGreenReason, runCheckpoints, type CheckpointBlocker, type RunCheckpoint, NO_ATTEMPT } from './checkpoint.js'
 import { t } from './i18n.js'
 
@@ -203,8 +203,11 @@ export class PromptToAppService {
    * as três coisas que dependem do serviço: quem pode escrever, qual plano é o
    * corrente, e a tradução do erro do módulo para o erro do serviço.
    *
-   * A edição NÃO gera aprovação: aprovar continua sendo um ato separado, feito
-   * depois de ver o resultado da própria edição.
+   * A edição NÃO gera aprovação do plano: aprovar continua sendo um ato
+   * separado, feito depois de ver o resultado da própria edição. O que ela
+   * gera é o REGISTRO da edição, na mesma trilha auditável que as transições
+   * já usam — sem ele o repositório sabia que o plano tinha mudado
+   * (`revision`) e nunca por quem.
    * @param actor - quem edita.
    * @param projectId - o projeto.
    * @param edit - as mudanças, já validadas pelo schema.
@@ -225,6 +228,68 @@ export class PromptToAppService {
       throw new PromptToAppError(code, error.message)
     }
     await this.#repository.putPlan(updated)
+    // O REGISTRO da edição. Não é uma aprovação — aprovar continua sendo um ato
+    // separado, feito depois de ver o resultado da própria edição —, e sim a
+    // mesma trilha auditável que `transition` já usa: um ato de uma pessoa,
+    // num nível, com data e autor.
+    //
+    // Sem ele o plano podia ser reescrito e o repositório só sabia QUE tinha
+    // mudado (`revision`), nunca por QUEM. Num produto multiempresa, com papéis
+    // e organizações, "alguém com permissão de escrita mudou o que vai ser
+    // construído" não é um registro: é a ausência de um.
+    //
+    // T1 porque editar um plano ainda PROPOSTO não constrói nada nem toca
+    // dado sensível. O que constrói é aprovar, e essa aprovação já é gravada.
+    await this.#approval(actor, projectId, 'plan', `${updated.plan_id}:r${String(planRevision(updated))}`, 'T1', false)
+    return updated
+  }
+
+  /**
+   * Acrescenta ao plano uma etapa que a pessoa descreveu em português.
+   *
+   * A edição do plano não conseguia acrescentar NADA: quem quisesse algo fora
+   * do plano pedia mudança em texto livre e recebia uma revisão inteira,
+   * perdendo junto todos os títulos e critérios que já tinha ajustado à mão.
+   *
+   * Quem escreve a etapa é o PLANEJADOR, não a pessoa — `planned_files` é a
+   * autorização de escrita do gerador, e digitar caminhos à mão seria decidir
+   * onde o modelo pode mexer sem ter como saber o que isso significa.
+   *
+   * @param actor - quem pediu.
+   * @param projectId - o projeto.
+   * @param request - o que falta, nas palavras da pessoa.
+   * @param planner - quem transforma o pedido em etapa.
+   * @param privacy - o perfil de rota do projeto.
+   * @returns o plano com a etapa nova no fim.
+   */
+  async addPlanSlice(
+    actor: PromptToAppActor,
+    projectId: string,
+    request: string,
+    planner: { slice(scope: { orgId: string; tenantId: string }, privacy: RoutePrivacy, spec: AppSpecV1, existing: readonly { readonly title: string; readonly planned_files: readonly string[] }[], request: string, category: StudioProjectCategory): Promise<StudioPlanSlice> },
+    privacy: RoutePrivacy,
+  ): Promise<StudioPlan> {
+    this.#authorize(actor, 'project.write')
+    const text = request.trim()
+    // O mesmo teto do pedido de mudança: uma frase curta demais não descreve
+    // etapa nenhuma, e uma parede de texto vira um plano que ninguém revisa.
+    if (text.length < 3 || text.length > 2_000) throw new PromptToAppError('INVALID', t('errors.sliceUnusable'))
+    const project = this.project(actor, projectId)
+    const plan = this.plan(actor, projectId)
+    const spec = this.latestSpec(actor, projectId).app_spec
+    const slice = await planner.slice(
+      { orgId: actor.orgId, tenantId: actor.tenantId }, privacy, spec,
+      plan.slices.map(existing => ({ title: existing.title, planned_files: existing.planned_files })),
+      text, project.category,
+    )
+    let updated: StudioPlan
+    try { updated = appendPlanSlice(plan, slice, this.#now().toISOString()) }
+    catch (error) {
+      if (!(error instanceof PlanEditError)) throw error
+      throw new PromptToAppError(error.code === 'UNAVAILABLE' ? 'REPLAY' : 'INVALID', error.message)
+    }
+    await this.#repository.putPlan(updated)
+    await this.#approval(actor, projectId, 'plan', `${updated.plan_id}:r${String(planRevision(updated))}`, 'T1', false)
     return updated
   }
 
