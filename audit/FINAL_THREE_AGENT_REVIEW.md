@@ -1,3 +1,65 @@
+# Auditoria final — 09/09/2026 (rodada 4: as correções da rodada 3 sob ataque)
+
+Objeto: `04128c5` (produto) e `ad004c2` (RLS do Hub). Dois revisores
+independentes, por **ataque**: sete mutações no código, uma sonda contra o
+repositório real, 44 textos escritos como uma pessoa leiga brasileira escreve, e
+e2e com resposta atrasada de propósito. Relatórios completos em
+`audit/AUDITOR_A_RLS_HUB.md` e `audit/AUDITOR_C_RAMO_E_BOTOES.md`.
+
+| Revisor | Achados |
+| --- | --- |
+| A — Arquitetura/Segurança | 4 MEDIUM · 5 LOW · 1 FALSO-POSITIVO |
+| C — Produto/UX | 3 HIGH · 3 MEDIUM · 2 LOW · 1 FALSO-POSITIVO |
+
+**O que esta rodada mostra, e é o mesmo padrão pela terceira vez:** duas das
+minhas afirmações eram maiores do que o que eu tinha feito. "Nenhum botão do
+fluxo principal manda pedido sem avisar" era falso quando escrevi (sobravam
+seis), e cinco motivos da reclassificação do portão de RLS diziam que uma
+varredura lia tabelas que ela não lê. Nos dois casos bastou alguém ABRIR O
+ARQUIVO. A correção estrutural desta rodada é justamente essa: o portão passou a
+exigir e CONFERIR a citação (arquivo + símbolo) de toda categoria que afirma
+fato sobre o código, e os botões passaram a ter teste que reprova quando são
+desfeitos.
+
+## Fechado nesta rodada, com prova
+
+| Origem | Sev | Achado | Correção | Prova |
+| --- | --- | --- | --- | --- |
+| C-01 | ALTO | A tela contradizia a si mesma: "sistema pra barbearia" mostrava o seletor em "Agenda de horários" E a frase "não deu para entender o tipo pelo seu texto". | Quatro estados (`text`, `trade`, `person`, `none`), um por situação — incluindo a mentira antiga de dizer "entendemos pelo seu texto" depois de a pessoa escolher à mão. | `8f0fc74`; `help.spec.ts` afirma três deles no navegador |
+| C-02 | ALTO | Dois cliques em "Ver meu protótipo" mandavam DOIS `POST /previews`. Sem aviso também: parar prévia, "Tentar de novo", revisão do plano, cancelar criação e o "Confirmar" do desfazer, que REVERTE trabalho. | Os seis viraram `PendingButton`. | `8f0fc74`; e2e com resposta atrasada, e falsificação: desfeito, reprova |
+| C-03 | ALTO | Os três botões corrigidos na rodada 3 não apareciam em teste nenhum — o auditor desfez um e a suíte inteira ficou verde. | Três testes de navegador com resposta atrasada. | `8f0fc74` |
+| C-04 | MÉDIO | `aria-busy` num botão não é anunciado, e desabilitar o elemento com foco joga o foco no `<body>`. | Região viva invisível + devolução do foco. | `8f0fc74`; axe verde nos quatro tamanhos |
+| C-05/C-06 | MÉDIO | O ramo PIORAVA quatro casos que o padrão acertava; faltavam ofícios. | A causa era o vocabulário de FUNÇÃO, que não pontuava: 12 sinais novos. "loja" (genérico) saiu, ofícios entraram, e o casamento passou a ser pelo mais específico. | `8f0fc74`; 44/44 no corpus do auditor |
+| A-01 | MÉDIO | **Cinco motivos da reclassificação eram falsos**: a varredura de início não lê `app_specs`, `design_specs`, `intake_turns`, `plans` nem `evidence`. | Reescritos para o que é verdade. | `8f0fc74` |
+| A-02 | MÉDIO | Nada conferia a classificação contra o código — foi assim que os cinco passaram. | Citação obrigatória (arquivo + símbolo) e CONFERIDA para toda categoria que afirma fato sobre o código. | `RLS_COVERAGE_SELF_TEST=PASS checks=9`, com três casos novos |
+| A-03 | MÉDIO | `#retainEvents` lia a contagem antes de podar: duas leituras completas por linha de auditoria, e sob RLS uma consulta por evento. | A poda decide sozinha. | `8f0fc74` |
+| A-04 | MÉDIO | A "segunda tranca" só estava provada em integrações: removida de exportações e eventos, os 11 testes continuaram verdes. | Teste novo, falsificado. | `8f0fc74` |
+| A-07 | BAIXO | `exportKey` confiava num comentário; com uma barra no `project_id`, `a/b`+`c` e `a`+`b/c` viram a MESMA chave. | Barra recusada nos dois lados. | `8f0fc74` |
+| A-08 | BAIXO | Escritas de evento sem fila, enquanto a poda lê a lista e apaga a cauda. | Fila própria para eventos. | `8f0fc74` |
+| C-08 | BAIXO | `PendingButton` sem `type="button"`. | Corrigido. | `8f0fc74` |
+
+## Em aberto desta rodada, com motivo
+
+| Origem | Sev | Situação |
+| --- | --- | --- |
+| A-05 | BAIXO | Em modo `rls` o repositório de chave-valor ainda é construído inteiro, só para servir os desligamentos por alcance. Custo de memória num modo que nenhuma instalação usa ainda; fechá-lo exige separar o domínio dos desligamentos, que é o mesmo redesenho de guarda já tabelado. |
+| A-06 | BAIXO | As escritas escopam pelo CORPO do registro, não pelo ator. Todos os chamadores estão corretos hoje; é defesa em profundidade ausente, não defeito. |
+| C-07 | BAIXO | Instabilidade por carga em `journey.spec.ts:142`, do mesmo tipo do teto do `hub-binding`. |
+
+## Placar depois da rodada 4
+
+- suíte raiz: **2743 aprovados / 65 pulados** (174 arquivos)
+- app: **344 aprovados** (38 arquivos)
+- e2e: **65 aprovados / 5 pulados** nos quatro tamanhos, axe em claro e escuro
+- PostgreSQL 16 real: **62/62**, `POSTGRES_GATE=PASS server=compose`
+- typecheck raiz = 0; typecheck do app = 0; build = 0
+- `RLS_COVERAGE=PASS migrados=2/26`, self-test com 9 casos
+- `I18N_GATE=PASS keys=518`, `SECRET_SCAN=PASS achados=0`,
+  `TRACKED_LIB=PASS files=179`, `TEAM_ROLE_TOOLS=PASS`,
+  `REQUIREMENTS_LEDGER=PASS requisitos=156 achados=0`
+
+---
+
 # Auditoria final de três revisores independentes — 09/09/2026 (rodada 3: verificação das correções)
 
 Objeto: `3efa588` (o que os revisores atacaram) e os cinco commits que se

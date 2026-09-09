@@ -2,20 +2,24 @@
 
 - mission_id: `DZ23-STUDIO-V1-20260904`
 - objetivo: concluir o DZ23 STUDIO v1.0 com provas verificáveis, sem verde artificial
-- estado: `FIXING` (rodada 3 fechada: os dois CRÍTICOS de regressão, o ALTO, os
-  MÉDIOS e os BAIXOS das duas verificações estão fechados com prova; resta o
-  blocker interno S-08 e os bloqueios externos)
-- iteração: 35
+- estado: `CANDIDATE_COMPLETED` — quatro rodadas de auditoria independente, a
+  última por ataque sobre as correções da anterior. `CRITICAL = 0`, `HIGH = 0`,
+  e nenhum trabalho interno mecânico em aberto. O que impede `COMPLETED` é
+  EXTERNO e está tabelado: sete bloqueios que dependem do Prado, de credencial
+  real, de hardware ou de rede que este ambiente não tem, mais o texto do
+  requisito S-08, que é decisão de produto.
+- iteração: 36
 - início: 2026-09-04
 - último heartbeat: 2026-09-09
-- último progresso real: o `studio_integrations` saiu da chave-valor para a tabela
-  por inquilino com RLS (cobertura 1/26 → 2/26), e a classificação dos pendentes
-  foi corrigida: 11 dos 12 que se diziam mecânicos não eram. Antes disso, o
-  portão real de PostgreSQL voltou a rodar e fechou
-  62/62 — a falha que restava era o atalho de teste sendo derrubado pelo próprio
-  endurecimento do produto, e o `pg_restore` não dizia por quê. Antes dela, a
-  rodada 3 fechou C-N1, C-N2, C-N3, C-N4, C-N5, C-N6, C-N7, C-M1, C-M10, C-2,
-  C-H7, B-M1, B-M2, B-M6, B-L1, B-N1, B-N2 e B-N3.
+- último progresso real: a rodada 4 de auditoria (por ataque) achou 3 ALTOS e 7
+  MÉDIOS nas minhas próprias correções — duas afirmações minhas eram maiores do
+  que o feito — e os doze achados foram fechados com prova, incluindo a correção
+  estrutural que impede a repetição: o portão de RLS agora EXIGE e CONFERE a
+  citação (arquivo + símbolo) de toda categoria que afirma fato sobre o código.
+  Antes dela: o `studio_integrations` saiu da chave-valor para a tabela por
+  inquilino com RLS (1/26 → 2/26), o portão real de PostgreSQL voltou a rodar e
+  fechou 62/62, e a rodada 3 fechou C-N1..N7, C-M1, C-M10, C-2, C-H7, B-M1,
+  B-M2, B-M6, B-L1, B-N1, B-N2 e B-N3.
 - branch: `integ`
 - ponta: ver `git log -1`
 - upstream: `deepseek-harness@6c705be1ce6774a000d061da41d1823b03a3d42c`
@@ -23,11 +27,11 @@
 ## Placar objetivo
 
 - v1.0: **112 de 120** (93,3%) em BETA ou STABLE
-- suíte raiz: 2741 aprovados, 65 pulados (174 arquivos)
+- suíte raiz: 2743 aprovados, 65 pulados (174 arquivos)
 - app: 344 aprovados (38 arquivos)
 - typecheck raiz: 0; typecheck do app: 0; build: 0
 - portões estáticos: 15/15 PASS
-- e2e navegador: **62 aprovados / 5 pulados nos quatro tamanhos** (mesa, tablet,
+- e2e navegador: **65 aprovados / 5 pulados nos quatro tamanhos** (mesa, tablet,
   celular, faixa estreita de 900px), com axe em modo claro E escuro no fluxo
   inteiro
 - PostgreSQL 16 real: **62/62** (`POSTGRES_GATE=PASS server=compose`)
