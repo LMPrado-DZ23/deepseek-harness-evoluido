@@ -15,6 +15,8 @@ const origin = 'http://studio.dz23.localhost:4179'
  *
  * Este arquivo varre o caminho inteiro, e roda nos três tamanhos.
  */
+test.use({ serviceWorkers: 'block' })
+
 test.describe('acessibilidade do fluxo principal', () => {
   test.beforeEach(async ({ context, page }) => {
     await context.addCookies([
@@ -74,4 +76,29 @@ test.describe('acessibilidade do fluxo principal', () => {
     const result = await new AxeBuilder({ page }).analyze()
     expect(result.violations).toEqual([])
   })
+})
+
+/**
+ * O estado do Studio era um botão que não fazia nada, e a visita começava com
+ * um alarme que ninguém tinha medido.
+ */
+test('o estado do Studio começa neutro e abre o que está em atenção', async ({ context, page }) => {
+  await context.addCookies([{ name: 'dz23_studio_session', value: 'e2e', url: origin }])
+  // Antes de `/health` responder, a tela não pode acusar "Atenção".
+  await page.route('**/api/studio/apps/health', async route => {
+    await new Promise(resolve => setTimeout(resolve, 1_200))
+    await route.fallback()
+  })
+  await page.goto('/studio/')
+  await expect(page.getByRole('button', { name: /Verificando/u })).toBeVisible()
+  // Depois da resposta, o botão ABRE o detalhe dos três campos que decidem o
+  // estado — antes ele recebia foco, era anunciado como botão e não fazia nada.
+  const status = page.locator('.status-wrap button')
+  await expect(status).toHaveAttribute('aria-expanded', 'false', { timeout: 10_000 })
+  await status.click()
+  await expect(status).toHaveAttribute('aria-expanded', 'true')
+  await expect(page.getByText('O que o Studio está conferindo')).toBeVisible()
+  await expect(page.getByText(/inteligência artificial:/u)).toBeVisible()
+  await expect(page.getByText(/Ambiente isolado de criação:/u)).toBeVisible()
+  await expect(page.getByText(/Espaço em disco:/u)).toBeVisible()
 })

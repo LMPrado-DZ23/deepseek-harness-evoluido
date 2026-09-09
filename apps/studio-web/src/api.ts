@@ -1,5 +1,12 @@
 /** `local_route: null` = o perfil Privado local esta bloqueado agora; ausente = servidor antigo, que nao sabe responder. */
-export type HealthState = { state: 'OK' | 'ATTENTION'; route: string | null; route_reason?: string | null; route_reason_code?: string | null; local_route?: string | null; builder: 'OK' | 'BLOCKED_EXTERNAL'; disk: 'OK' | 'ATTENTION' }
+/**
+ * `UNKNOWN` é o estado de ANTES da primeira resposta de `/health`.
+ *
+ * A tela começava em `ATTENTION`, então toda visita abria com um alarme que
+ * ninguém tinha medido ainda. O servidor nunca devolve `UNKNOWN`: ele é da
+ * tela, e some na primeira leitura.
+ */
+export type HealthState = { state: 'OK' | 'ATTENTION' | 'UNKNOWN'; route: string | null; route_reason?: string | null; route_reason_code?: string | null; local_route?: string | null; builder: 'OK' | 'BLOCKED_EXTERNAL'; disk: 'OK' | 'ATTENTION' }
 export type ProjectSummary = { project_id: string; name: string; state: string }
 
 export const CSRF_STORAGE_KEY = 'dz23.studio.csrf.v1'

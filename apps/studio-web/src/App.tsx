@@ -1,4 +1,4 @@
-import { Bell, LogOut, Menu, Sparkles, UserRound } from 'lucide-react'
+import { LogOut, Menu, Sparkles } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, apiResponse, csrfToken, type HealthState } from './api'
 import { PendingButton } from './PendingButton'
@@ -75,7 +75,7 @@ export function App() {
   const [plan, setPlan] = useState<Plan | null>(null)
   const [changeReason, setChangeReason] = useState('')
   const [result, setResult] = useState<PipelineResult | null>(null)
-  const [health, setHealth] = useState<HealthState>({ state: 'ATTENTION', route: null, builder: 'BLOCKED_EXTERNAL', disk: 'ATTENTION' })
+  const [health, setHealth] = useState<HealthState>({ state: 'UNKNOWN', route: null, builder: 'BLOCKED_EXTERNAL', disk: 'ATTENTION' })
   const [error, setError] = useState('')
   const [preview, setPreview] = useState<Preview | null>(null)
   const [admissionTicket, setAdmissionTicket] = useState<string | null>(null)
@@ -397,7 +397,10 @@ export function App() {
   return <div className="shell">
     <StudioSidebar active={activeNavId(window.location.pathname)} open={menuOpen} onClose={closeMenu} />
     {menuOpen ? <div className="drawer-scrim" aria-hidden="true" onClick={closeMenu} /> : null}
-    <section className="workspace"><header className="topbar"><button ref={menuButton} type="button" className="mobile-menu" aria-label={t.mobile.menu} aria-expanded={menuOpen} aria-controls={NAV_MENU_ID} onClick={() => setMenuOpen(!menuOpen)}><Menu aria-hidden="true" /></button><Status health={health} /><div className="top-actions"><NotificationOptIn /><Bell aria-hidden="true" /><UserRound aria-hidden="true" />{authenticatedSession ? <button className="signout-button" type="button" disabled={signingOut} aria-busy={signingOut} onClick={() => void signOut()}><LogOut aria-hidden="true" /><span>{signingOut ? t.account.signingOut : t.account.signOut}</span></button> : null}</div></header>
+    <section className="workspace"><header className="topbar"><button ref={menuButton} type="button" className="mobile-menu" aria-label={t.mobile.menu} aria-expanded={menuOpen} aria-controls={NAV_MENU_ID} onClick={() => setMenuOpen(!menuOpen)}><Menu aria-hidden="true" /></button><Status health={health} />{/* O sino e o boneco eram ÍCONES: sem `button`, sem destino, sem ação. Para
+        quem olha, são o sino e a conta de qualquer aplicativo — e clicar não
+        fazia nada. Saíram; o que existe de verdade continua aqui. */}
+      <div className="top-actions"><NotificationOptIn />{authenticatedSession ? <button className="signout-button" type="button" disabled={signingOut} aria-busy={signingOut} onClick={() => void signOut()}><LogOut aria-hidden="true" /><span>{signingOut ? t.account.signingOut : t.account.signOut}</span></button> : null}</div></header>
       <main className="canvas"><section className="idea-panel">
         {projectState === null ? <Idea brief={brief} setBrief={updateBrief} privacy={privacy} setPrivacy={setPrivacy} route={route ?? health.route} localRoute={health.local_route} routeReason={health.route_reason_code ?? null} ready={ready} chooseSuggestion={chooseSuggestion} category={category} chooseCategory={chooseCategory} create={create}
           designPreset={designPreset} setDesignPreset={setDesignPreset} brandColor={brandColor} setBrandColor={setBrandColor}
@@ -479,7 +482,37 @@ function refreshPreviewAdmission(previewUrl: string): void {
   document.body.append(probe)
 }
 function checkStatus(status: AcceptanceCheck['status']): string { return status === 'PASSED' ? t.verification.passed : status === 'FAILED' ? t.verification.failed : status === 'NOT_AUTOMATED' ? t.verification.notAutomated : t.verification.pending }
-function Status({ health }: { health: HealthState }) { const ok = health.state === 'OK'; return <button className={ok ? 'status ok' : 'status attention'} aria-label={ok ? t.health.ok : t.health.attention}><span />{ok ? t.health.ok : t.health.attention}</button> }
+/**
+ * O estado do Studio — e o que fazer com ele.
+ *
+ * Era um `<button>` SEM `onClick`: recebia foco pelo teclado, era anunciado
+ * como botão por leitor de tela e não fazia nada. Quando dizia "Atenção", não
+ * havia como descobrir o que estava errado — e os três campos que respondem
+ * isso (rota, ambiente de criação, disco) já vinham no mesmo `/health`.
+ *
+ * Ele também começava em `ATTENTION` antes de `/health` responder: um alarme
+ * falso a cada carregamento. Agora o estado desconhecido diz "Verificando…".
+ */
+function Status({ health }: { health: HealthState }) {
+  const [open, setOpen] = useState(false)
+  const unknown = health.state === 'UNKNOWN'
+  const ok = health.state === 'OK'
+  const label = unknown ? t.health.checking : ok ? t.health.ok : t.health.attention
+  const className = unknown ? 'status checking' : ok ? 'status ok' : 'status attention'
+  return <div className="status-wrap">
+    <button type="button" className={className} aria-expanded={open} aria-controls="status-details"
+      aria-label={`${label}: ${open ? t.health.hide : t.health.show}`}
+      onClick={() => setOpen(!open)}><span />{label}</button>
+    <div id="status-details" hidden={!open} className="status-details">
+      <strong>{t.health.detailsTitle}</strong>
+      <ul>
+        <li>{health.route === null ? t.health.routeAttention : t.health.routeOk}</li>
+        <li>{health.builder === 'OK' ? t.health.builderOk : t.health.builderAttention}</li>
+        <li>{health.disk === 'OK' ? t.health.diskOk : t.health.diskAttention}</li>
+      </ul>
+    </div>
+  </div>
+}
 function Progress({ state }: { state: ProjectUiState | null }) { const current = currentStepIndex(state); const truthKind = permanentTruthKind(state); return <section className="progress-panel" aria-label={t.progress.title}><h2>{t.progress.title}</h2><p className="mobile-progress-subtitle">{t.mobile.subtitle}</p><ol>{steps.map(([title, detail], index) => <li key={title} className={index === current ? 'current' : ''}><span className="step-number">{index + 1}</span><div><strong>{index + 1}. {title}</strong><p>{detail}</p><small>{index < current ? t.progress.done : index === current ? t.progress.current : t.progress.waiting}</small></div></li>)}</ol>{truthKind === null ? null : <p className="truth">{t.truth[truthKind]}</p>}</section> }
 
 function hexToHsl(hex: string): { h: number; s: number; l: number } {

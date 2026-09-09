@@ -162,7 +162,7 @@ describe('o consumo na tela', () => {
   it('a etapa diz o consumo dela, ou diz que não foi medido', () => {
     expect(renderToStaticMarkup(createElement(TaskRow, {
       task: task({ cost: { state: 'MEASURED', tokens: 4200 } }), depth: 0,
-    }))).toContain('4.200 tokens')
+    }))).toContain('4.200 unidades de uso')
     expect(renderToStaticMarkup(createElement(TaskRow, { task: task(), depth: 0 })))
       .toContain(copy.costTaskNotMeasured)
   })
@@ -186,7 +186,7 @@ describe('uma etapa', () => {
       }),
       depth: 1,
     }))
-    expect(html).toContain('2 arquivo(s) mudado(s), 1234 bytes')
+    expect(html).toContain('2 arquivo(s) mudado(s), 1234 caracteres')
     expect(html).toContain('abcdef1')
     expect(html).toContain('src/form.css')
     // O aviso de que o projeto mudou embaixo da etapa é o que evita aplicar

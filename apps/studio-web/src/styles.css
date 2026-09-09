@@ -193,3 +193,4 @@
 /* O identificador de máquina ao lado da conferência: discreto, mas legível.
    #64708a sobre o fundo #eef3fb do `code` mede 4,45:1 e reprova no axe. */
 .check-id code{color:#41506b;font-size:12px;font-weight:400;letter-spacing:0}
+.status-wrap{position:relative}.status.checking{color:#41506b}.status-details{position:absolute;z-index:5;top:calc(100% + 6px);left:0;min-width:280px;background:#fff;border:1px solid #dce2ec;border-radius:10px;padding:12px 14px;box-shadow:0 8px 24px rgba(11,23,57,.12)}.status-details ul{margin:6px 0 0;padding-left:18px;color:#41506b;line-height:1.45}

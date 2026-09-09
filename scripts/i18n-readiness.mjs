@@ -16,8 +16,56 @@ import { resolve } from 'node:path'
 /** "pronto", "pronta", "prontos", "prontas": a claim about readiness this product does not make. */
 const READY_CLAIM = /\bpront[oa]s?\b/iu
 
+/**
+ * Palavras de máquina que a PESSOA não deveria precisar entender.
+ *
+ * A instrução do produto é explícita: quem usa não precisa saber o que é build,
+ * contêiner, rota ou token. Mesmo assim "Harness" — o nome do MOTOR, não do
+ * produto — aparecia em cinco frases da tela, o consumo do trabalho era medido
+ * "em tokens" e a tela do plano falava em `commit`, `bytes` e `repositório`.
+ *
+ * A lista é FECHADA e vale só para os catálogos que a pessoa lê. Catálogo de
+ * plugin carrega erro de configuração para quem OPERA o Studio, e traduzir
+ * `cwd` ali só tiraria a precisão de quem precisa dela.
+ */
+const PERSON_FACING_CATALOGUES = [
+  'apps/studio-web/src/i18n/',
+  'plugins/prompt-to-app/i18n/generated-app/',
+]
+
+const MACHINE_WORDS = [
+  'Harness', 'cwd', 'commit', 'token', 'tokens', 'repositório', 'repositorio',
+  'container', 'runtime', 'endpoint', 'deploy', 'rollback', 'passkey',
+  'worktree', 'sandbox', 'backend', 'frontend', 'bytes', 'JSON',
+]
+
+/** Se este catálogo é lido pela pessoa que usa o produto. */
+function personFacing(target) {
+  return PERSON_FACING_CATALOGUES.some(prefix => target.startsWith(prefix))
+}
+
+/**
+ * As palavras de máquina encontradas num texto.
+ * @param value - o texto do catálogo.
+ * @returns as palavras proibidas presentes.
+ */
+export function machineWordsIn(value) {
+  // `{bytes}` e `{commit}` são NOMES DE CAMPO, trocados por um número e por uma
+  // versão antes de a frase existir na tela. Reprová-los mandaria renomear
+  // variável para agradar um portão de texto.
+  const visible = value.replace(/\{[^}]*\}/gu, ' ')
+  return MACHINE_WORDS.filter(word => new RegExp(`\\b${word}\\b`, 'iu').test(visible))
+}
+
 /** Catalogues that must exist. Absence is a failure, never a skipped item. */
 export const REQUIRED_CATALOGUES = [
+  // O catálogo PRINCIPAL da interface não estava nesta lista: a varredura de
+  // prontidão e a de palavra de máquina passavam ao largo justamente do texto
+  // que a pessoa mais lê. O `check-i18n` lia este arquivo por conta própria,
+  // para outra conferência, e a ausência aqui não aparecia em lugar nenhum.
+  'apps/studio-web/src/i18n/pt-BR.json',
+  'apps/studio-web/src/i18n/assistant.pt-BR.json',
+  'apps/studio-web/src/i18n/team.pt-BR.json',
   'apps/studio-web/src/i18n/pwa.pt-BR.json',
   'apps/studio-web/src/i18n/hub.pt-BR.json',
   // O vocabulário do palpite de categoria também é texto de idioma: renomeá-lo
@@ -74,6 +122,11 @@ export function scanReadinessClaims(root) {
     scanned.push(target)
     for (const [path, value] of flatten(parsed)) {
       if (READY_CLAIM.test(value)) failures.push(`alegação de prontidão proibida em ${target}:${path}`)
+      if (personFacing(target)) {
+        for (const word of machineWordsIn(value)) {
+          failures.push(`palavra de máquina "${word}" no texto que a pessoa lê: ${target}:${path}`)
+        }
+      }
     }
   }
   if (scanned.length === 0) failures.push('nenhum catálogo foi lido: um portão que inspeciona zero itens é falha, não aprovação')

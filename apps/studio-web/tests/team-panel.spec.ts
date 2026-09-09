@@ -53,7 +53,7 @@ test('a tela de progresso mostra a árvore, a evidência e o que travou', async 
   // A evidência de quem rodou, e a ausência dela em quem não rodou.
   const evidencia = page.locator('.team-task-evidence').first()
   await evidencia.locator('summary').click()
-  await expect(evidencia.getByText('1 arquivo(s) mudado(s), 2048 bytes')).toBeVisible()
+  await expect(evidencia.getByText('1 arquivo(s) mudado(s), 2048 caracteres')).toBeVisible()
   await expect(evidencia.getByText('src/cadastro.tsx')).toBeVisible()
 
   // Nenhum caminho absoluto do computador de quem hospeda chega à tela.

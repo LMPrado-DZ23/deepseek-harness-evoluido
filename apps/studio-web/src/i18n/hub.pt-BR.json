@@ -131,12 +131,12 @@
   },
   "errors": {
     "generic": "Não foi possível concluir. Tente novamente.",
-    "manifestJson": "O manifesto precisa ser um texto no formato JSON."
+    "manifestJson": "O arquivo da integração não está no formato que o Studio entende. Peça a quem enviou o arquivo original."
   },
   "confirm": {
     "title": "Confirme antes de continuar",
     "T2": "Esta ação deixa o seu aplicativo falar com um serviço fora deste computador. Continue só se você reconhece o serviço.",
-    "T3": "Esta ação é sensível: dá acesso amplo, inclusive a segredos guardados no cofre. Ela só funciona se você já tiver confirmado com a sua passkey nesta sessão; se ainda não confirmou, o Studio vai recusar e nada será alterado.",
+    "T3": "Esta ação é sensível: dá acesso amplo, inclusive a segredos guardados no cofre. Ela só funciona se você já tiver confirmado com a sua chave de acesso nesta sessão; se ainda não confirmou, o Studio vai recusar e nada será alterado.",
     "confirm": "Confirmar",
     "cancel": "Cancelar",
     "smtpSave": "Guardar o nome do segredo liga o envio de e-mail do aplicativo por um serviço externo.",

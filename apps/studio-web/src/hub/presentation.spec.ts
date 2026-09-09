@@ -16,7 +16,7 @@ describe('hub presentation', () => {
     expect(approvalNote({ requires_approval_tier: 'T2' })).toContain('T2')
     expect(approvalPrompt('T2')).toBe(t.confirm.T2)
     expect(approvalPrompt('T3')).toBe(t.confirm.T3)
-    expect(approvalPrompt('T3')).toContain('passkey')
+    expect(approvalPrompt('T3')).toContain('chave de acesso')
   })
 
   it('asks the server for the decision only after the person confirms, never while the box is shown', async () => {

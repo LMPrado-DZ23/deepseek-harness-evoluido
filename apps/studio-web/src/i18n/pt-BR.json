@@ -69,7 +69,17 @@
   },
   "health": {
     "ok": "Tudo certo",
-    "attention": "Atenção"
+    "attention": "Atenção",
+    "checking": "Verificando…",
+    "detailsTitle": "O que o Studio está conferindo",
+    "routeOk": "Serviço de inteligência artificial: respondendo",
+    "routeAttention": "Serviço de inteligência artificial: nenhum disponível agora",
+    "builderOk": "Ambiente isolado de criação: disponível",
+    "builderAttention": "Ambiente isolado de criação: indisponível neste computador",
+    "diskOk": "Espaço em disco: suficiente",
+    "diskAttention": "Espaço em disco: pouco espaço livre",
+    "show": "Ver o que está em atenção",
+    "hide": "Esconder"
   },
   "account": {
     "signOut": "Sair",

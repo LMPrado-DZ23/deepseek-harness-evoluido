@@ -57,7 +57,7 @@ describe('tela da conversa', () => {
     }))
     expect(done).toContain('Conversa organizada')
     expect(done).toContain('6 itens')
-    expect(done).toContain('12345 tokens aproximados')
+    expect(done).toContain('12345 tamanho aproximado da conversa')
     expect(done).not.toContain('progressbar')
     expect(done).not.toMatch(/\d+%/u)
 
