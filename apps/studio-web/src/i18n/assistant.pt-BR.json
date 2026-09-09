@@ -113,6 +113,5 @@
   "attachmentKindText": "texto",
   "attachmentSizeUnit": "KB",
   "attachmentTooLargeLocal": "Este arquivo é grande demais para ser anexado. O limite é 512 KB por arquivo.",
-  "attachmentTooManyLocal": "Uma mensagem aceita no máximo 5 anexos. Remova um antes de anexar outro.",
-  "attachmentAttached": "Anexado: {name}."
+  "attachmentTooManyLocal": "Uma mensagem aceita no máximo 5 anexos. Remova um antes de anexar outro."
 }

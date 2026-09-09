@@ -65,12 +65,46 @@ export function brokenImports(read, tracked) {
   return findings
 }
 
+/**
+ * Os manifestos de plugin que divergem do padrão da casa.
+ *
+ * Todo plugin resolve o CÓDIGO no `lib/` e os TIPOS no `src/` — é isso que faz
+ * o monorepo compilar sem build prévio — e declara, na condição `dz23-build`,
+ * os tipos do `lib/` para quem consome o pacote construído. Dois plugins não
+ * tinham a condição `dz23-build`: consumidos pelo artefato, cairiam nos tipos
+ * do `src/`, que o pacote publicado não carrega. Ninguém via, porque no
+ * monorepo o `src/` está sempre ali.
+ * @param manifests - pares caminho/conteúdo dos `package.json` de plugin.
+ * @returns as divergências, uma por manifesto.
+ */
+export function manifestFindings(manifests) {
+  const findings = []
+  for (const [path, raw] of manifests) {
+    let parsed
+    try { parsed = JSON.parse(raw) } catch { findings.push(`${path}: package.json ilegível`); continue }
+    const entry = parsed.exports?.['.']
+    if (entry === undefined) { findings.push(`${path}: sem exports["."]`); continue }
+    if (parsed.main !== './lib/index.js') findings.push(`${path}: main deveria ser ./lib/index.js`)
+    if (parsed.types !== './src/index.ts') findings.push(`${path}: types deveria ser ./src/index.ts`)
+    if (entry.default !== './lib/index.js') findings.push(`${path}: exports["."].default deveria ser ./lib/index.js`)
+    if (entry.types !== './src/index.ts') findings.push(`${path}: exports["."].types deveria ser ./src/index.ts`)
+    if (entry['dz23-build']?.types !== './lib/index.d.ts') findings.push(`${path}: falta a condição dz23-build apontando ./lib/index.d.ts`)
+  }
+  return findings
+}
+
 function selfTest() {
   const tracked = new Set(['plugins/x/lib/index.js', 'plugins/x/lib/ok.js'])
   const good = brokenImports(() => "export * from './ok.js'\n", tracked)
   const bad = brokenImports(file => file.endsWith('index.js') ? "export * from './sumido.js'\n" : '', tracked)
-  const passed = good.length === 0 && bad.length === 1 && bad[0].resolved === 'plugins/x/lib/sumido.js'
-  console.log(`TRACKED_LIB_SELF_TEST=${passed ? 'PASS' : 'FAIL'} negative_detected=${String(bad.length)}`)
+  const goodManifest = JSON.stringify({
+    main: './lib/index.js', types: './src/index.ts',
+    exports: { '.': { 'dz23-build': { types: './lib/index.d.ts', default: './lib/index.js' }, types: './src/index.ts', default: './lib/index.js' } },
+  })
+  const manifestOk = manifestFindings([['plugins/x/package.json', goodManifest]]).length === 0
+  const manifestBad = manifestFindings([['plugins/x/package.json', goodManifest.replace('"dz23-build":{"types":"./lib/index.d.ts","default":"./lib/index.js"},', '')]]).length === 1
+  const passed = good.length === 0 && bad.length === 1 && bad[0].resolved === 'plugins/x/lib/sumido.js' && manifestOk && manifestBad
+  console.log(`TRACKED_LIB_SELF_TEST=${passed ? 'PASS' : 'FAIL'} negative_detected=${String(bad.length)} manifesto=${manifestOk && manifestBad ? 'PASS' : 'FAIL'}`)
   return passed
 }
 
@@ -83,9 +117,14 @@ if (process.argv.includes('--self-test')) {
     console.error('TRACKED_LIB=FAIL motivo=nenhum arquivo lib versionado foi encontrado')
     process.exitCode = 1
   } else {
-    const findings = brokenImports(trackedContent, tracked)
+    const manifests = execFileSync('git', ['ls-files', '-z', '--', 'plugins/*/package.json'], { encoding: 'utf8' })
+      .split('\0').filter(Boolean)
+      .map(path => [path, trackedContent(path)])
+    const findings = [...brokenImports(trackedContent, tracked), ...manifestFindings(manifests).map(message => ({ file: message, specifier: '', resolved: '' }))]
     for (const finding of findings) {
-      console.error(`${finding.file} importa '${finding.specifier}', que não está versionado (${finding.resolved})`)
+      console.error(finding.specifier === ''
+        ? finding.file
+        : `${finding.file} importa '${finding.specifier}', que não está versionado (${finding.resolved})`)
     }
     console.log(`TRACKED_LIB=${findings.length === 0 ? 'PASS' : 'FAIL'} files=${String(tracked.size)} findings=${String(findings.length)}`)
     process.exitCode = findings.length === 0 ? 0 : 1

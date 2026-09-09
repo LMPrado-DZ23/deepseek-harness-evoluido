@@ -3,7 +3,6 @@
   "nav": {
     "home": "Início",
     "projects": "Meus projetos",
-    "progress": "Acompanhar criação",
     "result": "Ver resultado",
     "help": "Ajuda",
     "settings": "Configurações",
@@ -63,7 +62,6 @@
     "restartTitle": "Ou recomeçar a criação",
     "restartBody": "Recomeçar cria uma tentativa nova a partir do mesmo plano. A tentativa que falhou continua guardada, com os arquivos e o registro do que aconteceu.",
     "restart": "Tentar de novo",
-    "undoFailed": "Não foi possível voltar para este ponto.",
     "criteriaBreakdown": "{total} critérios ({conferidos} conferidos, {falharam} falharam, {naoAutomatizados} não conferidos automaticamente)",
     "criteriaAllPassed": "{total} critérios, todos conferidos"
   },
@@ -182,7 +180,6 @@
     "moveDown": "Descer",
     "editedByPerson": "Este plano tem alterações suas.",
     "filesFixed": "Os arquivos que serão criados são definidos pelo Studio e não mudam com a edição.",
-    "editEmpty": "O plano precisa ter pelo menos uma parte.",
     "prepareBusy": "Montando seu plano…",
     "approveBusy": "Aprovando…",
     "sendChangeBusy": "Enviando seu pedido…"
@@ -234,7 +231,6 @@
     "stoppedReason": "Motivo",
     "noReason": "Motivo não informado.",
     "runningTitle": "O Studio está funcionando",
-    "runningHelp": "Nada está parado neste espaço de trabalho.",
     "releasedBy": "Última retomada por",
     "resumeTitle": "Para retomar",
     "resumeHelp": "Retomar exige confirmação com sua chave de acesso nesta sessão e um motivo escrito. Parar é fácil de propósito; voltar é que precisa de alguém responsável.",

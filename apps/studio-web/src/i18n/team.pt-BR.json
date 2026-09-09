@@ -7,7 +7,6 @@
   "readError": "Não foi possível ler o progresso agora.",
   "retry": "Tentar de novo",
   "backToList": "Ver todos os trabalhos",
-  "openTeam": "Abrir",
   "tasksTitle": "Etapas",
   "dependsOn": "Depende de: {tasks}",
   "dependsOnNone": "Não depende de nenhuma outra etapa.",

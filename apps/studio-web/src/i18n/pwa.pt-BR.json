@@ -1,7 +1,6 @@
 {
   "offline": {
     "banner": "Você está sem internet. O Studio continua aberto para você ver o que já está na tela, mas nada pode ser criado, salvo ou enviado até a conexão voltar.",
-    "backOnline": "Conexão restabelecida.",
     "blockedAction": "Esta ação precisa de conexão. O que você digitou continua aqui; tente de novo quando a internet voltar.",
     "serviceUnreachable": "Você está com internet, mas o Studio não respondeu. Ele pode estar desligado ou reiniciando; tente de novo em instantes.",
     "cachedShell": "Mostrando a tela salva neste aparelho; entre de novo quando a internet voltar.",
@@ -15,8 +14,7 @@
   },
   "install": {
     "prompt": "Instalar o DZ23 STUDIO neste aparelho",
-    "installed": "O DZ23 STUDIO foi instalado neste aparelho.",
-    "ios": "No iPhone: toque em Compartilhar e depois em \"Adicionar à Tela de Início\"."
+    "installed": "O DZ23 STUDIO foi instalado neste aparelho."
   },
   "notifications": {
     "enable": "Avisar quando a criação terminar",

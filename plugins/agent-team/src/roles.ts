@@ -106,6 +106,16 @@ export interface RoleToolRestriction {
  * @param externalNetworkApproved - se a equipe foi aprovada para rede externa.
  * @returns a lista de permissão, em ordem estável para o teste poder compará-la.
  */
+/**
+ * A restrição vale para ferramenta GLOBAL, e é isso que o Studio usa.
+ *
+ * O Harness documenta, em `core/tools`: "Restrictions intersect and do not
+ * affect scoped registrations". Ou seja, ferramenta registrada por ESCOPO não
+ * é alcançada por esta lista de permissão. O Studio não registra nada por
+ * escopo — o portão `check-team-role-tools` lê as extensões do preset e todas
+ * registram globalmente —, então a suposição vale hoje. Ela está escrita aqui
+ * porque uma suposição não escrita é a que ninguém revisa quando muda.
+ */
 export function roleToolRestriction(
   role: AgentTeamRoleName,
   externalNetworkApproved: boolean,

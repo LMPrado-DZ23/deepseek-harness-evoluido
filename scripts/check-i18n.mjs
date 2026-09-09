@@ -14,7 +14,7 @@ const styles = readFileSync(resolve(root, 'apps/studio-web/src/styles.css'), 'ut
 const modelSource = readFileSync(resolve(root, 'plugins/prompt-to-app/src/model.ts'), 'utf8')
 
 const required = [
-  'brand', 'nav.home', 'nav.projects', 'nav.progress', 'nav.result',
+  'brand', 'nav.home', 'nav.projects', 'nav.result',
   'idea.title', 'idea.subtitle', 'idea.placeholder', 'idea.continue',
   'questions.title', 'questions.recommend', 'plan.title', 'plan.approve', 'plan.change', 'plan.revision',
   'creation.title', 'creation.start', 'verification.title', 'verification.success',
