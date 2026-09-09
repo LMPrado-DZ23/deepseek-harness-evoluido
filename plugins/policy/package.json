@@ -30,5 +30,6 @@
     "@deepseek-ai/dsh-system-prompt": "workspace:*",
     "@deepseek-ai/dsh-tools": "workspace:*",
     "zod": "4.4.3"
-  }
+  },
+  "license": "Apache-2.0"
 }

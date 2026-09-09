@@ -7,13 +7,21 @@
   "types": "./src/index.ts",
   "exports": {
     ".": {
-      "dz23-build": { "types": "./lib/index.d.ts", "default": "./lib/index.js" },
+      "dz23-build": {
+        "types": "./lib/index.d.ts",
+        "default": "./lib/index.js"
+      },
       "types": "./src/index.ts",
       "default": "./lib/index.js"
     }
   },
-  "files": ["lib", "i18n"],
-  "scripts": { "build": "tsc -p tsconfig.build.json" },
+  "files": [
+    "lib",
+    "i18n"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json"
+  },
   "dependencies": {
     "@deepseek-ai/cordis": "workspace:*",
     "@deepseek-ai/dsh-credentials": "workspace:*",
@@ -26,5 +34,8 @@
     "nodemailer": "9.0.5",
     "zod": "4.4.3"
   },
-  "devDependencies": { "@types/nodemailer": "8.0.1" }
+  "devDependencies": {
+    "@types/nodemailer": "8.0.1"
+  },
+  "license": "Apache-2.0"
 }

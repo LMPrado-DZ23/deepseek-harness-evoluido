@@ -7,12 +7,18 @@
   "types": "./src/index.ts",
   "exports": {
     ".": {
-      "dz23-build": { "types": "./lib/index.d.ts", "default": "./lib/index.js" },
+      "dz23-build": {
+        "types": "./lib/index.d.ts",
+        "default": "./lib/index.js"
+      },
       "types": "./src/index.ts",
       "default": "./lib/index.js"
     }
   },
-  "files": ["lib", "i18n"],
+  "files": [
+    "lib",
+    "i18n"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json"
   },
@@ -31,5 +37,6 @@
   },
   "devDependencies": {
     "@types/nodemailer": "8.0.1"
-  }
+  },
+  "license": "Apache-2.0"
 }

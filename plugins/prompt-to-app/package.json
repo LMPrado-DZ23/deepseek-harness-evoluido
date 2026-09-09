@@ -7,12 +7,19 @@
   "types": "./src/index.ts",
   "exports": {
     ".": {
-      "dz23-build": { "types": "./lib/index.d.ts", "default": "./lib/index.js" },
+      "dz23-build": {
+        "types": "./lib/index.d.ts",
+        "default": "./lib/index.js"
+      },
       "types": "./src/index.ts",
       "default": "./lib/index.js"
     }
   },
-  "files": ["lib", "i18n", "template"],
+  "files": [
+    "lib",
+    "i18n",
+    "template"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node ../../scripts/package-prompt-template.mjs"
   },
@@ -33,5 +40,6 @@
     "sharp": "0.35.4",
     "typescript": "6.0.3",
     "zod": "4.4.3"
-  }
+  },
+  "license": "Apache-2.0"
 }

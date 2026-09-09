@@ -1,0 +1,40 @@
+name: Defeito
+description: Alguma coisa não funciona como deveria
+labels: ["defeito"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Vulnerabilidade de segurança não vem por aqui.** Use
+        Security → Report a vulnerability. Veja SECURITY.md.
+  - type: textarea
+    id: aconteceu
+    attributes:
+      label: O que aconteceu
+      description: Descreva com suas palavras. Não precisa de termo técnico.
+    validations: { required: true }
+  - type: textarea
+    id: esperado
+    attributes:
+      label: O que você esperava que acontecesse
+    validations: { required: true }
+  - type: textarea
+    id: passos
+    attributes:
+      label: Como chegar lá
+      placeholder: |
+        1. Abri o Studio
+        2. Escrevi "..." na primeira tela
+        3. Cliquei em Continuar
+    validations: { required: true }
+  - type: input
+    id: versao
+    attributes:
+      label: Versão ou commit
+      description: "`git rev-parse --short HEAD`, se você souber."
+  - type: dropdown
+    id: onde
+    attributes:
+      label: Onde
+      options: [Interface no navegador, Celular, Instalação no Windows, Servidor / linha de comando, Não sei]
+    validations: { required: true }

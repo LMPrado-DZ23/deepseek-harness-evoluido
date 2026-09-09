@@ -35,5 +35,6 @@
     "@dz23-studio/policy": "workspace:*",
     "@dz23-studio/preview": "workspace:*",
     "@dz23-studio/tenancy": "workspace:*"
-  }
+  },
+  "license": "Apache-2.0"
 }

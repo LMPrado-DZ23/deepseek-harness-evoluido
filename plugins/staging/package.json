@@ -31,5 +31,6 @@
     "@dz23-studio/policy": "workspace:*",
     "@dz23-studio/prompt-to-app": "workspace:*",
     "zod": "4.4.3"
-  }
+  },
+  "license": "Apache-2.0"
 }

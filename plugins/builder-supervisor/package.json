@@ -25,5 +25,6 @@
     "provision": "node lib/provision-cli.js",
     "test": "vitest run --config vitest.config.ts",
     "test:coverage": "vitest run --config vitest.config.ts --coverage"
-  }
+  },
+  "license": "Apache-2.0"
 }

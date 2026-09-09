@@ -7,13 +7,21 @@
   "types": "./src/index.ts",
   "exports": {
     ".": {
-      "dz23-build": { "types": "./lib/index.d.ts", "default": "./lib/index.js" },
+      "dz23-build": {
+        "types": "./lib/index.d.ts",
+        "default": "./lib/index.js"
+      },
       "types": "./src/index.ts",
       "default": "./lib/index.js"
     }
   },
-  "files": ["lib", "i18n"],
-  "scripts": { "build": "tsc -p tsconfig.build.json" },
+  "files": [
+    "lib",
+    "i18n"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json"
+  },
   "dependencies": {
     "@deepseek-ai/cordis": "workspace:*",
     "@dz23-studio/integration-hub": "workspace:*",
@@ -21,5 +29,6 @@
   },
   "devDependencies": {
     "@modelcontextprotocol/server-everything": "2026.8.31"
-  }
+  },
+  "license": "Apache-2.0"
 }

@@ -28,5 +28,6 @@
     "@dz23-studio/identity": "workspace:*",
     "@dz23-studio/policy": "workspace:*",
     "zod": "4.4.3"
-  }
+  },
+  "license": "Apache-2.0"
 }

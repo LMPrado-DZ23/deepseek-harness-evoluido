@@ -7,12 +7,17 @@
   "types": "./src/index.ts",
   "exports": {
     ".": {
-      "dz23-build": { "types": "./lib/index.d.ts", "default": "./lib/index.js" },
+      "dz23-build": {
+        "types": "./lib/index.d.ts",
+        "default": "./lib/index.js"
+      },
       "types": "./src/index.ts",
       "default": "./lib/index.js"
     }
   },
-  "files": ["lib"],
+  "files": [
+    "lib"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json"
   },
@@ -22,5 +27,6 @@
     "@deepseek-ai/dsh-storage-domain": "workspace:*",
     "@deepseek-ai/dsh-tools": "workspace:*",
     "zod": "4.4.3"
-  }
+  },
+  "license": "Apache-2.0"
 }

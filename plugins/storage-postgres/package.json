@@ -43,5 +43,6 @@
   "devDependencies": {
     "@dz23-studio/action-approval": "workspace:*",
     "@types/pg": "8.23.1"
-  }
+  },
+  "license": "Apache-2.0"
 }

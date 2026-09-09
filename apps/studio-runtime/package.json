@@ -27,5 +27,6 @@
     "dsh-profile-studio": {
       "injected": true
     }
-  }
+  },
+  "license": "Apache-2.0"
 }

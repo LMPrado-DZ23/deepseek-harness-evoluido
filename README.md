@@ -1,170 +1,292 @@
+<div align="center">
+
 # DZ23 STUDIO
 
-Produto local composto sobre os seams públicos do DeepSeek Harness sem alterar o
-upstream. O nome oficial e o logotipo foram decididos pelo proprietário em
-[ADR-003](./docs/adr/ADR-003-product-identity-dz23-studio.md).
+**Descreva o aplicativo que você precisa. Em português, com as suas palavras.**
 
-O checkout de execução continua fixado no commit
-`6c705be1ce6774a000d061da41d1823b03a3d42c`. O núcleo atual reúne policy,
-identidade, tenancy, borda Caddy e o backend PostgreSQL BETA pelos seams públicos
-do Harness; decisões de segurança não dependem da interface.
+Um produto de código aberto que transforma uma ideia escrita por quem **não programa**
+em um aplicativo real — planejado, construído e conferido no seu próprio computador.
 
-O produto será **open source e sem cobrança, assinatura, créditos ou paywall**.
-A licença OSI exata ainda precisa ser escolhida antes da publicação; enquanto
-`LICENSE.md` não for substituído, o checkout continua juridicamente privado.
+Construído **sobre** o [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness),
+sem alterar uma linha dele.
 
-## Decisão
+[![licença](https://img.shields.io/badge/licen%C3%A7a-Apache--2.0-blue)](./LICENSE)
+[![idioma](https://img.shields.io/badge/interface-portugu%C3%AAs%20do%20Brasil-green)](./docs/guides)
+[![estado](https://img.shields.io/badge/vers%C3%A3o-1.0%20candidata-orange)](./docs/MASTER_REQUIREMENTS_LEDGER.md)
 
-**O gate literal original foi encerrado com errata aceita.** O commit fixado rejeita o nome físico `studio.hello`: `defineDomain` aceita somente `/^[a-z][a-z0-9_]*$/`. A convenção geral agora usa `studio_hello` como identificador físico e `studio.hello` como nome lógico.
+![A primeira tela: a pessoa escreve a ideia com as próprias palavras](./docs/images/01-ideia.png)
 
-**Viabilidade arquitetural do núcleo aprovada.** O PoC-01b executado em WSL2 ext4 comprovou sessão live, aprovação, sandbox com negação fora do workspace e preservação após reinício.
+</div>
 
-O P29-C também comprovou a borda Caddy autenticada para HTTP, RPC e WebSocket.
-Essa capacidade está em **BETA**: não houve deploy, domínio ACME real nem teste em
-celular físico. Consulte [ADR-012](./docs/adr/ADR-012-single-caddy-edge.md), a
-[prova P29-C](./docs/pocs/P29-C-edge-proof.md), a
-[matriz de capacidades](./docs/CAPABILITY_MATRIX.md) e o
-[guia de acesso móvel](./docs/guides/mobile-secure-access.md) e o
-[guia de cópia de segurança e restauração](./docs/guides/backup-e-restauracao.md).
+---
 
-Em servidor, `DZ23_BOOTSTRAP_OWNER_EMAIL` é obrigatório: somente esse endereço
-pode criar a primeira conta proprietária. A borda autenticada também desativa o
-modo pessoal no núcleo, ainda que o Harness permaneça em loopback.
+## O que é
 
-O P31-A acrescenta PostgreSQL 16 para os domínios próprios `studio_*`, sem
-mudar o backend padrão dos domínios oficiais do Harness. O banco não publica
-porta e um segundo escritor da mesma unidade falha fechado. Isso ainda não é
-alta disponibilidade, RLS ou multi-instância ativa; consulte a
-[ADR-013](./docs/adr/ADR-013-postgres-kv-single-writer-and-migration.md) e a
-[prova P31-A](./docs/pocs/P31-A-storage-postgres-proof.md).
+A maioria das ferramentas de "IA que programa" foi feita para quem programa. Elas
+pedem um *prompt*, devolvem código, e quando algo dá errado mostram um *stack
+trace*. O DZ23 STUDIO parte de outro lugar: **a pessoa que precisa do aplicativo
+não sabe, e não precisa saber, o que é um build**.
 
-A Fase 3 compõe DeepSeek direto, OmniRoute opcional e Ollama local, com saúde
-por rota e sem 9Router. Delegações usam uma cópia Git isolada, pedem confirmação
-antes de iniciar e outra antes de aplicar. O PoC in-process passou; Codex e
-Claude Code reais continuam `NOT_EXECUTED`. Consulte
-[ADR-014](./docs/adr/ADR-014-model-routes-and-health.md),
-[ADR-015](./docs/adr/ADR-015-isolated-agents.md) e a
-[prova P35](./docs/pocs/P35-phase3-agents-routes-proof.md).
+A jornada tem cinco etapas, e cada uma é uma tela que qualquer pessoa lê:
 
-A fatia 2 gera dados, formulários, acesso e painel CRUD sobre `node:sqlite`.
-Envios comuns podem ser públicos, mas listas de cadastros nunca são públicas;
-dados sensíveis exigem acesso também no envio.
-Esquema, migrações, repositórios, auth, sessão, CSRF e ações são protegidos e
-nunca vêm do modelo. As provas executaram cadastro/lista e o ciclo completo
-login→criar→editar→excluir em contêiner sem rede. Consulte as ADRs
-[023](./docs/adr/ADR-023-generated-sqlite-data-layer.md),
-[024](./docs/adr/ADR-024-generated-passwordless-access.md),
-[026](./docs/adr/ADR-026-form-database-category.md) e
-[027](./docs/adr/ADR-027-crud-panel-category.md), além da
-[prova de acesso e CRUD](./docs/proofs/P32-auth-crud-proof.md).
+| | etapa | o que acontece |
+|---|---|---|
+| 1 | **Ideia** | Você escreve o que precisa. O Studio adivinha o tipo de aplicativo pelo texto — e **diz quando não entendeu**, em vez de fingir. |
+| 2 | **Perguntas** | Uma pergunta por vez, sem termo técnico. Dado sensível (CPF, saúde, dados de crianças) é apontado e você decide. |
+| 3 | **Plano** | O que será criado, em partes que você pode aprovar, editar, remover ou reordenar. **Nada é construído antes da sua aprovação.** |
+| 4 | **Criação** | O aplicativo é gerado e construído em um contêiner **sem rede**, sistema de arquivos somente leitura e nenhuma permissão de sistema. |
+| 5 | **Verificação** | Os critérios que você aprovou são conferidos um a um, com o resultado de cada um — e o que **não** foi verificado aparece dizendo isso. |
 
-Consulte [REPORT.md](./REPORT.md) para comandos, resultados, erros e limitações.
+<table>
+<tr>
+<td width="50%"><img src="./docs/images/02-perguntas.png" alt="Uma pergunta por vez, sem termo técnico"></td>
+<td width="50%"><img src="./docs/images/03-plano.png" alt="O plano, aprovável e editável antes de qualquer criação"></td>
+</tr>
+<tr>
+<td colspan="2"><img src="./docs/images/04-verificacao.png" alt="Resultado da verificação, com os critérios conferidos um a um"></td>
+</tr>
+</table>
 
-Decisões relacionadas:
+### Sete tipos de aplicativo
 
-- [ADR-001 — identificadores físicos e nomes lógicos](./docs/adr/ADR-001-storage-domain-naming.md)
-- [ADR-016 / E4 — usabilidade depois do produto completo](./docs/adr/ADR-016-errata-e4-phase05-order.md)
-- [Plano Mestre v2.0 consolidado](./docs/PLANO_MESTRE_v2_HARNESS_STUDIO.md)
-- [BASELINE-001 — DeepSeek Harness 6c705be](./docs/baselines/BASELINE-001-deepseek-harness-6c705be.md)
-- [PoC-01b — prova viva do núcleo no WSL2 ext4](./docs/pocs/POC-01B-runtime-proof.md)
+Página de apresentação · Catálogo de produtos ou serviços · Cadastro com lista ·
+Painel para criar, editar e excluir · Agenda de horários · Painel de acompanhamento
+(só leitura) · Área com acesso separado por cliente.
 
-## Estrutura
+O que sai é um projeto **Next.js** de verdade, com banco SQLite, acesso por código
+de e-mail, telas de cadastro e o que mais a categoria exigir — e você pode baixar
+o pacote inteiro e levar para onde quiser.
 
-- `dsh-home/profiles/studio`: profile Studio que estende os bundles oficiais `@deepseek-ai/dsh-base` e `@deepseek-ai/dsh-web-app`.
-- `plugins/hello`: plugin externo `@studio/hello`; o upstream não recebe arquivos ou alterações.
-- `plugins/policy`: motor TypeScript + Zod dos tiers T0–T3, com auditoria por sessão.
-- `plugins/identity`: passkeys, código temporário por e-mail, sessões opacas,
-  dispositivos, CSRF e revogação ligados ao motor de permissões.
-- `plugins/storage-postgres`: persistência KV PostgreSQL, lock cross-process e
-  falha fechada após perda da conexão autoritativa.
-- `plugins/route-health`: saúde, uso, custo e fallback seguro por rota.
-- `plugins/agents`: delegação aprovada em worktree, budgets, leases e propostas.
-- `apps/studio-web/public/brand`: identidade visual oficial do DZ23 STUDIO.
-- `deploy/caddy`: borda única, login simples e configurações TLS separadas para
-  servidor e uso local.
-- `UPSTREAM.lock`: identidade do repositório e commit usados.
+---
 
-## Verificação focada
+## O que este projeto acrescenta ao DeepSeek Harness
 
-No WSL Ubuntu, a partir da raiz deste repositório:
+O DeepSeek Harness é o núcleo de orquestração de agentes. Ele é excelente nisso e
+**não foi tocado**: o submódulo está fixado no commit
+`6c705be1ce6774a000d061da41d1823b03a3d42c`, e um portão de integração contínua
+reprova qualquer alteração nele. Tudo abaixo foi construído **por composição**,
+usando as costuras públicas do Harness.
 
-```sh
-pnpm typecheck
-pnpm test:coverage
-pnpm gate:domain-routes
-pnpm build
-# PostgreSQL: DZ23_POSTGRES_TEST_DSN aponta para qualquer PostgreSQL 16; sem DSN o gate sobe o Compose descartável.
-pnpm test:postgres:coverage
-pnpm test:postgres:runtime
-DZ23_POSTGRES_DSN=... pnpm prove:storage-migration
-DZ23_POSTGRES_DSN=... pnpm prove:backup-restore      # cópia → desastre → restauração → Studio religado
-DZ23_POSTGRES_DSN=... pnpm prove:postgres-soak --minutes 30
-pnpm build:edge
-pnpm prove:edge
-DZ23_CHROMIUM_PATH=/caminho/chromium pnpm prove:integration-hub   # Hub real + painel /studio/hub em Chromium
-pnpm hub:sign keygen|pubkey|sign …                                 # publicador: chaves e manifesto assinado (ADR-031)
-pnpm preflight:fase3
-pnpm prove:fase3-agents
-pnpm prove:generated-data
-pnpm prove:form-database
-pnpm prove:auth-crud
-pnpm golden
+### 1. Uma jornada para quem não programa
+O Harness fala com quem escreve código. O `prompt-to-app` acrescenta a jornada
+completa Ideia → Perguntas → Plano → Criação → Verificação, sete categorias de
+aplicativo, geração de projeto Next.js com camada de dados, autenticação sem
+senha, painéis CRUD, agenda e painéis de acompanhamento. Tudo em português do
+Brasil, com um portão que **reprova texto solto no código**.
+
+### 2. Plano de confiança: identidade, inquilinos e níveis
+Identidade com *passkey* e código por e-mail, sessões opacas e **revogáveis de
+verdade** (sair encerra a sessão no servidor, não só no navegador), organizações
+e espaços de trabalho com papéis, e uma política de níveis **T0–T3** em que ação
+sensível exige confirmação explícita e, no nível mais alto, *passkey* recente na
+mesma sessão.
+
+### 3. Autoridade de confirmação ligada à costura do Harness
+Quando o Harness pergunta "posso fazer isso?", quem responde é uma autoridade
+durável do Studio — com pedido descrito em português, impressão digital que
+impede dois pedidos diferentes de parecerem iguais, e consumo **uma única vez**
+por execução. Sem rota pública de criação, e sem ninguém fabricando `approved:
+true`.
+
+### 4. Construção isolada de verdade
+O aplicativo gerado é construído em contêiner com `NetworkMode: none`, raiz
+somente leitura, **todas** as capacidades derrubadas, sem privilégio e sem portas
+publicadas. E existe uma prova executável que **sabota o próprio produto** para
+confirmar que a proteção reprova quando enfraquecida — não basta o código dizer
+que está seguro.
+
+### 5. Armazenamento com isolamento no banco, não no código
+Backend PostgreSQL 16 para os domínios do Studio, com escritor único por unidade,
+cópia de segurança fora do processo, restauração com diário atômico que recusa
+cópia vazia, parcial ou de outra instalação. Dois domínios já saíram da
+chave-valor opaca para **tabela por inquilino com RLS forçada** — onde é o
+PostgreSQL que recusa o que não é do inquilino, e não um `if` do produto. Um
+portão mede a distância que falta e **só deixa esse número diminuir**.
+
+### 6. Prévia segura e Hub de integrações
+Prévia por host próprio, com código de admissão, sem herdar sessão. Integrações
+registradas por **manifesto assinado (Ed25519)**, com nível mínimo por natureza
+da permissão, desligamento por alcance e recusa auditada.
+
+### 7. Roteamento de modelo com perfil de privacidade
+Rotas local (Ollama), OmniRoute e provedor oficial, com um perfil
+**"privado-local"** em que a criação simplesmente não acontece se a rota local
+não estiver disponível — em vez de cair silenciosamente para um provedor externo.
+
+### 8. Interface instalável, acessível e no escuro
+PWA instalável, quatro tamanhos de tela testados (mesa, tablet, celular e a faixa
+de 900px), varredura de acessibilidade **axe em modo claro e escuro no fluxo
+inteiro**, e botões que avisam que estão trabalhando em vez de deixar a pessoa
+clicando duas vezes.
+
+<table>
+<tr>
+<td width="50%"><img src="./docs/images/07-escuro.png" alt="O mesmo produto em modo escuro"></td>
+<td width="50%"><img src="./docs/images/06-ajuda.png" alt="A ajuda, com glossário e o que o Studio nunca faz"></td>
+</tr>
+</table>
+
+### 9. Uma cultura de prova que é parte do produto
+Este é, talvez, o acréscimo mais incomum. O repositório trata **evidência** como
+código:
+
+- **`docs/MASTER_REQUIREMENTS_LEDGER.md`** — uma linha por requisito, com estado
+  verdadeiro (`STABLE`, `BETA`, `NOT_EXECUTED`, `FAILED`…). **Nenhuma linha usa
+  "pronto" ou "funciona".** Onde só existe teste sobre dado simulado, o estado é
+  `NOT_EXECUTED`, não `BETA`.
+- **38 portões e provas** (`pnpm gate:*`, `pnpm prove:*`), quase todos com
+  *self-test* que sabota o próprio portão para confirmar que ele reprova.
+- **`audit/`** — quatro rodadas de auditoria independente por agentes que
+  **atacam** o código: refazem mutações, escrevem testes próprios e usam o
+  produto no navegador. As três primeiras acharam defeitos críticos que os testes
+  do autor não pegaram, e isso está escrito lá.
+
+---
+
+## Estado, sem maquiagem
+
+**Versão 1.0 candidata.** O que está provado, está provado aqui — e o que não
+está, tem o motivo escrito.
+
+| | |
+|---|---|
+| suíte de unidade e integração | **2.743 testes** (174 arquivos) |
+| interface | **344 testes** |
+| navegador (Chromium real) | **65 testes** em 4 tamanhos, com axe claro e escuro |
+| PostgreSQL 16 real | **62/62** em contêiner descartável |
+| portões estáticos | 15/15 |
+| diff no Harness | **zero** |
+
+**O que ainda não aconteceu, e é honesto dizer:**
+
+- **Nenhuma pessoa leiga usou o produto ainda.** Ele existe para quem não
+  programa e nunca foi visto por alguém assim. É o requisito `U-04`.
+- Nenhum *deploy* de produção. O destino de publicação hoje é **local**.
+- A imagem OCI ainda não foi construída (falta rota de rede para registro de
+  pacotes no ambiente de build).
+- 89 requisitos estão em `BETA`: construídos e provados **neste ambiente**, não
+  na vida real.
+
+A lista completa, com bloqueio e próximo passo de cada um, está no
+[livro-razão de requisitos](./docs/MASTER_REQUIREMENTS_LEDGER.md) e na
+[matriz de capacidades](./docs/CAPABILITY_MATRIX.md).
+
+---
+
+## Instalação
+
+> **Não é um aplicativo de desktop.** Não há `.exe` nem `.dmg`. O DZ23 STUDIO é
+> um servidor que roda no seu computador e abre no navegador — e o navegador
+> instala a interface como aplicativo (PWA), que é o mais perto de um ícone na
+> área de trabalho.
+
+### Para desenvolver
+
+Requisitos: Node.js `22.23.1`, pnpm `11.7.0`, Git com submódulos e *symlinks*.
+No Windows, WSL2 com o clone em `ext4` (`~/...`, nunca `/mnt/c`).
+
+```bash
+git clone --recurse-submodules https://github.com/lmpradodz23-design/deepseek-harness-evoluido
+cd deepseek-harness-evoluido
 ```
 
-### Primeiro uso em um clone novo
+O procedimento completo e a ordem obrigatória estão em
+**[`docs/BOOTSTRAP.md`](./docs/BOOTSTRAP.md)** — a ordem importa: o Harness
+fixado precisa ser instalado e compilado antes do Studio.
 
-Esta é a ordem canônica. O build do Harness e o build do Studio não são
-opcionais: eles geram os módulos usados pelo typecheck e pelos testes.
+### Para usar no Windows 11
 
-```sh
-node scripts/bootstrap-upstream.mjs
-node scripts/check-upstream-content.mjs
-pnpm --dir third_party/deepseek-harness install --frozen-lockfile
-pnpm --dir third_party/deepseek-harness build:official
-pnpm install --frozen-lockfile --filter '@dz23-studio/*...'
-pnpm build
-pnpm typecheck
-pnpm exec vitest run --maxWorkers=1
+Scripts em [`deploy/windows/`](./deploy/windows/) instalam dentro do WSL2 e sobem
+o Studio e a borda Caddy como contêineres fixados por *digest*. Eles **não**
+instalam WSL, Docker ou Git, não pedem privilégio de administrador e nunca
+instalam certificado, proxy ou serviço do Windows.
+
+```powershell
+./deploy/windows/install.ps1 -SourcePath C:\caminho\studio -ExpectedCommit <sha> `
+  -Image <studio@sha256:...> -CaddyImage <caddy-dz23@sha256:...> -Start
 ```
 
-O bootstrap valida a origem e o commit antes de converter os placeholders de
-symlink criados por checkouts Windows. A conversão é transacional: se o sistema
-não permitir criar symlinks, o placeholder original permanece intacto e o
-comando orienta ativar o Modo de Desenvolvedor ou usar o WSL2. O segundo comando
-é uma verificação somente leitura do conteúdo já materializado. O bootstrap
-também migra `core.worktree` para a configuração local exigida pelo Harness,
-mas somente quando o valor aponta exatamente para o submódulo fixado e não há
-configuração ou extensão preexistente que precise de decisão manual.
+⚠️ **Hoje esse caminho não fecha:** o instalador exige imagens publicadas por
+*digest*, e a imagem OCI ainda não foi construída (`D-10`). Quem quiser rodar
+agora usa o caminho de desenvolvimento acima.
 
-O limite de dois workers é temporariamente obrigatório no gate de clone limpo:
-três testes de filesystem/multiprocesso passaram isoladamente e juntos com dois
-workers, mas falharam de forma alternada sob maior carga. A evidência completa
-está em
-[M67-clean-clone-follow-up](./docs/proofs/M67-clean-clone-follow-up.md).
-Não se deve repetir silenciosamente um teste até ele passar.
+---
 
-O repositório ainda contém 95 saídas `plugins/*/lib/**` antigas rastreadas pelo
-Git. O `pnpm build` as substitui pela saída atual, mas removê-las do índice é uma
-mudança estrutural pendente de autorização. Até essa decisão, confira o diff
-após o build e não commite essas saídas por acidente.
+## Arquitetura em uma imagem
 
-No gate puro atual, os testes unitários passam e os 18 casos que exigem PostgreSQL real
-ficam explicitamente pulados; a execução PostgreSQL do P31-A permanece
-registrada na prova própria, sem ser apresentada como reexecução desta fatia.
-Os geradores de dados, cadastro/lista, acesso, painel e o gate estrutural de imports
-são medidos separadamente, e a cobertura global permanece acima de 90%. A
-prova executável de acesso confirma 401 sem sessão, entra por código e executa
-criar, editar e excluir. O golden set possui 12 casos executáveis e 6
-`NOT_IMPLEMENTED`; LLM real continua `NOT_EXECUTED`. A prova de borda
-usa Docker e exige que as
-dependências do profile também tenham sido instaladas com
-`pnpm --dir dsh-home/profiles/studio install --frozen-lockfile`. Isso não inclui
-cerimônia de passkey com hardware, aparelho móvel físico ou deploy.
+```
+┌──────────────────────────────────────────────────────────────┐
+│  Caddy — borda única: forward_auth, rate limit, CSP, headers │
+└───────────────────────────┬──────────────────────────────────┘
+                            │
+┌───────────────────────────▼──────────────────────────────────┐
+│  DeepSeek Harness  (submódulo FIXADO, zero diff)             │
+│  ├── costuras públicas: plugins, jobs, storage, approval     │
+└───────────────────────────┬──────────────────────────────────┘
+                            │  composição, sem patch
+┌───────────────────────────▼──────────────────────────────────┐
+│  20 plugins do Studio                                        │
+│                                                              │
+│  confiança   identity · tenancy · policy · action-approval   │
+│  criação     prompt-to-app · builder-supervisor · staging    │
+│  execução    agents · agent-team · assistant-bridge          │
+│  conexão     integration-hub · mcp-client · route-health     │
+│  dados       storage-postgres · runtime-governor             │
+│  entrega     preview · preview-supervisor · studio-web       │
+│  segurança   emergency-stop                                  │
+└───────────────────────────┬──────────────────────────────────┘
+                            │
+        ┌───────────────────┴────────────────────┐
+        │                                        │
+┌───────▼─────────┐                    ┌─────────▼──────────┐
+│  apps/studio-web │                    │  contêiner de      │
+│  React + PWA     │                    │  construção        │
+│  português       │                    │  SEM REDE          │
+└──────────────────┘                    └────────────────────┘
+```
 
-## Pesquisa com pessoas leigas
+As decisões estão registradas em **44 ADRs** em [`docs/adr/`](./docs/adr/).
 
-O kit controlado da fase 0.5 está em
-[`docs/research/phase-0.5/README.md`](docs/research/phase-0.5/README.md). Ele
-será adaptado depois do gate Windows para medir o DZ23 STUDIO completo antes do
-piloto. Por E4, P32/P33/P31-B estão liberados para construção, mas a experiência
-para leigos permanece `NOT_VALIDATED` até cinco sessões `VALID` e gate `GO`.
+<div align="center">
+<img src="./docs/images/08-celular.png" alt="A mesma jornada no celular" width="320">
+</div>
+
+---
+
+## Contribuir
+
+O projeto tem um jeito próprio de trabalhar, e ele está escrito:
+
+- [`CONTRIBUTING.md`](./CONTRIBUTING.md) — como propor mudança, e a regra que
+  vale mais que todas: **um portão que passa com zero itens é uma falha**.
+- [`docs/PRODUCT_CONSTITUTION.md`](./docs/PRODUCT_CONSTITUTION.md) — o que o
+  produto nunca faz.
+- [`SECURITY.md`](./SECURITY.md) — como relatar uma vulnerabilidade.
+
+---
+
+## Licença e marcas
+
+Código sob **[Apache-2.0](./LICENSE)**. A escolha está registrada na
+[ADR-009](./docs/adr/ADR-009-open-source-without-billing.md) e no
+[estudo C-05](./docs/plans/C-05-decisao-de-licenca.md): a concessão explícita de
+patente importa porque este projeto **gera aplicativos para terceiros**.
+
+As marcas "DZ23" e "DZ23 STUDIO" e os logotipos **não** são licenciados pela
+licença do software — veja [`TRADEMARKS.md`](./TRADEMARKS.md). Versões
+modificadas devem circular com outro nome.
+
+O Studio **não tem cobrança, assinatura, créditos nem paywall**, por decisão
+registrada na ADR-009. Não há código de faturamento no repositório, e um portão
+impede que ele volte.
+
+---
+
+<div align="center">
+<sub>
+
+DZ23 STUDIO é um produto da **LEANDRO MARCOS PRADO LTDA** (DZ23), Brasília, Brasil.<br>
+DeepSeek Harness é um projeto da DeepSeek e é usado aqui **sem modificação**, pelas suas costuras públicas.
+
+</sub>
+</div>
