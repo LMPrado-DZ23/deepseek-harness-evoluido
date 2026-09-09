@@ -36,7 +36,16 @@ import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const root = resolve(process.cwd())
-const { hardenedHost } = await import(pathToFileURL(join(root, 'plugins/builder-supervisor/lib/docker-adapter.js')).href)
+// O FONTE, não o `lib/`.
+//
+// A prova importava `plugins/builder-supervisor/lib/docker-adapter.js` — a saída
+// de build, ignorada pelo Git — enquanto anunciava `src/docker-adapter.ts` como
+// origem. Uma auditoria reescreveu `hardenedHost` no FONTE para bridge, rootfs
+// gravável e nenhuma capacidade derrubada, e a prova continuou dizendo GO: ela
+// estava provando um artefato velho. Agora ela lê o mesmo arquivo que a pessoa
+// revisa, com o removedor de tipos do Node.
+const SOURCE = 'plugins/builder-supervisor/src/docker-adapter.ts'
+const { hardenedHost } = await import(pathToFileURL(join(root, SOURCE)).href)
 
 /** Os mesmos tetos que o produto usa por padrão. */
 const LIMITS = { pids: 256, memoryBytes: 1_073_741_824, nanoCpus: 1_000_000_000 }
@@ -186,7 +195,7 @@ process.stdout.write(`${JSON.stringify({
   decision: 'GO',
   engine: execFileSync('docker', ['version', '--format', '{{.Server.Version}}'], { encoding: 'utf8' }).trim(),
   image: IMAGE,
-  source: 'plugins/builder-supervisor/src/docker-adapter.ts hardenedHost()',
+  source: `${SOURCE} hardenedHost()`,
   declared: 'NetworkMode=none ReadonlyRootfs CapDrop=ALL no-new-privileges IpcMode=private PidsLimit Memory NanoCpus tmpfs(noexec,nosuid)',
   enforced: {
     uid: 10001, rootfsWrite: 'REFUSED', tmpExec: 'REFUSED', chown: 'REFUSED',

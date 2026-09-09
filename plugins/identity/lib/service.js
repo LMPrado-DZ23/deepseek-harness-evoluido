@@ -193,7 +193,7 @@ export class StudioIdentityService {
             await this.#repository.putUser(user);
             await this.#userProvisioner(user, source);
             if (source === 'bootstrap') {
-                await this.#audit('personal_mode_disabled', user.user_id, null, user.org_id, user.tenant_id, 'success', 'Primeiro acesso cadastrado.');
+                await this.#audit('personal_mode_disabled', user.user_id, null, user.org_id, user.tenant_id, 'success', t('auth.firstAccessRegistered'));
                 await this.#audit('enrollment_closed', user.user_id, null, user.org_id, user.tenant_id, 'success', t('auth.bootstrapClosedAfterOwner'));
             }
         }
@@ -437,7 +437,7 @@ export class StudioIdentityService {
                 last_used_at: null,
             });
         });
-        await this.#audit('passkey_registered', session.user_id, session.session_id, session.org_id, session.tenant_id, 'success', 'Chave de acesso cadastrada.');
+        await this.#audit('passkey_registered', session.user_id, session.session_id, session.org_id, session.tenant_id, 'success', t('auth.passkeyRegistered'));
     }
     async beginPasskeyLogin(email) {
         const user = this.#repository.users().find(candidate => candidate.email === normalizeEmail(email));
@@ -495,7 +495,7 @@ export class StudioIdentityService {
                 });
             });
         })));
-        await this.#audit('step_up_succeeded', session.user_id, session.session_id, session.org_id, session.tenant_id, 'success', 'Identidade forte confirmada por chave de acesso.');
+        await this.#audit('step_up_succeeded', session.user_id, session.session_id, session.org_id, session.tenant_id, 'success', t('auth.strongIdentityConfirmed'));
     }
     auditRecords() {
         return this.#repository.audits();

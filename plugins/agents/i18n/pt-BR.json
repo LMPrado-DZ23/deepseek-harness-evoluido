@@ -55,6 +55,8 @@
     "proposalChangedAfterReview": "A proposta mudou depois da revisão e foi bloqueada.",
     "projectChangedSameFiles": "O projeto mudou nos mesmos arquivos desde a criação da proposta.",
     "projectChangedTheseFiles": "O projeto mudou nesses arquivos desde que o assistente começou.",
-    "diffByteLimit": "limite de bytes do diff excedido"
+    "diffByteLimit": "limite de bytes do diff excedido",
+    "tokenLimit": "limite de tokens excedido",
+    "fileLimit": "limite de arquivos excedido"
   }
 }

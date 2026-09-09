@@ -2,6 +2,7 @@ import { authenticatedMutation, assertRequestTrust, singleHeader, IdentityError,
 import { assertRouteContracts, roleAllows, studioRoleSchema, } from '@dz23-studio/policy';
 import { z } from 'zod';
 import { StudioTenancyService, TenancyError } from './service.js';
+import { t } from './i18n.js';
 const JSON_LIMIT = 64 * 1024;
 const workspaceSchema = z.object({ name: z.string().min(1).max(120) }).strict();
 const invitationSchema = z.object({ workspace_id: z.string().min(1), email: z.email(), role: studioRoleSchema }).strict();
@@ -24,7 +25,7 @@ export function createTenancyHttpHandler(config) {
             const route = path.slice('/api/studio/tenancy'.length);
             const match = matchRoute(request.method, route);
             if (match === undefined)
-                return json(response, 404, { error: 'Rota não encontrada.' });
+                return json(response, 404, { error: t('http.rotaNaoEncontrada') });
             const session = await authenticatedMutation(request, config.identity);
             const actor = config.service.actorFromSession(session);
             if (request.method === 'GET' && route === '/workspaces') {
@@ -55,7 +56,7 @@ export function createTenancyHttpHandler(config) {
                 ? error.code === 'not-found' ? 404 : error.code === 'forbidden' || error.code === 'last-owner' ? 403 : 400
                 : error instanceof IdentityError ? error.code === 'locked' ? 429 : 401
                     : 400;
-            return json(response, status, { error: error instanceof Error ? error.message : 'Solicitação inválida.' });
+            return json(response, status, { error: error instanceof Error ? error.message : t('http.solicitacaoInvalida') });
         }
     };
 }
@@ -77,7 +78,7 @@ function matchRoute(method, path) {
 }
 export function authorizeRoute(role, permission) {
     if (!roleAllows(role, permission))
-        throw new TenancyError('forbidden', 'Seu papel não permite esta ação.');
+        throw new TenancyError('forbidden', t('http.seuPapelNaoPermite'));
 }
 async function readJson(request) {
     if (!singleHeader(request.headers['content-type'])?.toLowerCase().startsWith('application/json'))
@@ -88,7 +89,7 @@ async function readJson(request) {
         const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
         size += bytes.length;
         if (size > JSON_LIMIT)
-            throw new Error('Solicitação grande demais.');
+            throw new Error(t('http.solicitacaoGrandeDemais'));
         chunks.push(bytes);
     }
     return JSON.parse(Buffer.concat(chunks).toString('utf8'));

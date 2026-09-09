@@ -10,6 +10,7 @@ import {
   type StudioPermission,
   type StudioRole,
 } from './rbac.js'
+import { t } from './i18n.js'
 
 export * from './rbac.js'
 
@@ -254,20 +255,20 @@ function resolveTier(rule: ParsedToolPolicyRule): PolicyTier {
 
 function decisionForTier(toolName: string, effectiveTier: PolicyTier, strongIdentityVerified: boolean): PolicyDecision {
   if (effectiveTier === 'T0') {
-    return { toolName, effectiveTier, kind: 'allow', reason: 'Leitura segura autorizada automaticamente.', ruleSource: 'catalog' }
+    return { toolName, effectiveTier, kind: 'allow', reason: t('audit.safeReadAutoAuthorized'), ruleSource: 'catalog' }
   }
   if (effectiveTier === 'T1') {
-    return { toolName, effectiveTier, kind: 'allow', reason: 'Alteração reversível autorizada e registrada.', ruleSource: 'catalog' }
+    return { toolName, effectiveTier, kind: 'allow', reason: t('policy.alteracaoReversivelAutorizadaRegistrada'), ruleSource: 'catalog' }
   }
   if (effectiveTier === 'T2') {
-    return { toolName, effectiveTier, kind: 'ask', reason: 'Confirmação da pessoa necessária antes de continuar.', ruleSource: 'catalog' }
+    return { toolName, effectiveTier, kind: 'ask', reason: t('policy.confirmacaoPessoaNecessariaAntes'), ruleSource: 'catalog' }
   }
   if (!strongIdentityVerified) {
     return {
       toolName,
       effectiveTier,
       kind: 'deny',
-      reason: 'Ação sensível bloqueada até uma confirmação forte de identidade estar ativa.',
+      reason: t('policy.acaoSensivelBloqueadaAte'),
       ruleSource: 'catalog',
     }
   }
@@ -275,7 +276,7 @@ function decisionForTier(toolName: string, effectiveTier: PolicyTier, strongIden
     toolName,
     effectiveTier,
     kind: 'ask',
-    reason: 'Confirmação reforçada necessária antes da ação sensível.',
+    reason: t('policy.confirmacaoReforcadaNecessariaAntes'),
     ruleSource: 'catalog',
   }
 }
@@ -305,7 +306,7 @@ export class StudioPolicyEngine {
         toolName: '<invalid>',
         effectiveTier: 'T2',
         kind: 'deny',
-        reason: 'Ferramenta sem identificação foi bloqueada por segurança.',
+        reason: t('policy.ferramentaIdentificacaoFoiBloqueada'),
         ruleSource: 'invalid-rule',
       }
     }
@@ -317,8 +318,8 @@ export class StudioPolicyEngine {
         effectiveTier: 'T2',
         kind: this.#requireAuthorizationDeclarations ? 'deny' : 'ask',
         reason: this.#requireAuthorizationDeclarations
-          ? 'Ferramenta sem declaração de permissão foi bloqueada.'
-          : 'Ferramenta ainda não classificada: confirmação obrigatória.',
+          ? t('policy.ferramentaDeclaracaoPermissaoFoi')
+          : t('policy.ferramentaAindaNaoClassificada'),
         ruleSource: 'safe-default',
       }
     }
@@ -329,7 +330,7 @@ export class StudioPolicyEngine {
         toolName,
         effectiveTier: 'T2',
         kind: 'deny',
-        reason: 'Regra de segurança inválida: execução bloqueada.',
+        reason: t('policy.regraSegurancaInvalidaExecucao'),
         ruleSource: 'invalid-rule',
       }
     }
@@ -337,22 +338,22 @@ export class StudioPolicyEngine {
     const rule = parsed.data
     const effectiveTier = resolveTier(rule)
     if (this.#requireAuthorizationDeclarations && rule.requiredPermission === undefined) {
-      return { toolName, effectiveTier, kind: 'deny', reason: 'Ferramenta sem permissão declarada foi bloqueada.', ruleSource: 'invalid-rule' }
+      return { toolName, effectiveTier, kind: 'deny', reason: t('policy.ferramentaPermissaoDeclaradaFoi'), ruleSource: 'invalid-rule' }
     }
     if (rule.requiredPermission !== undefined) {
       const authorization = context.authorization
       if (authorization === undefined) {
-        return { toolName, effectiveTier, kind: 'deny', reason: 'Nenhum vínculo ativo autoriza esta ação.', ruleSource: 'catalog' }
+        return { toolName, effectiveTier, kind: 'deny', reason: t('policy.nenhumVinculoAtivoAutoriza'), ruleSource: 'catalog' }
       }
       if (!roleAllows(authorization.role, rule.requiredPermission)) {
-        return { toolName, effectiveTier, kind: 'deny', reason: 'Seu papel neste espaço não permite esta ação.', ruleSource: 'catalog' }
+        return { toolName, effectiveTier, kind: 'deny', reason: t('policy.seuPapelNesteEspaco'), ruleSource: 'catalog' }
       }
     }
     if (rule.blocked) {
-      return { toolName, effectiveTier, kind: 'deny', reason: 'Ação bloqueada pela política do DZ23 STUDIO.', ruleSource: 'catalog' }
+      return { toolName, effectiveTier, kind: 'deny', reason: t('policy.acaoBloqueadaPelaPolitica'), ruleSource: 'catalog' }
     }
     if (rule.source.kind === 'plugin' && rule.source.stableChannel && rule.source.signed !== true) {
-      return { toolName, effectiveTier, kind: 'deny', reason: 'Plugin não assinado é bloqueado no canal estável.', ruleSource: 'catalog' }
+      return { toolName, effectiveTier, kind: 'deny', reason: t('policy.pluginNaoAssinadoBloqueado'), ruleSource: 'catalog' }
     }
     return decisionForTier(toolName, effectiveTier, context.strongIdentityVerified === true)
   }
@@ -456,7 +457,7 @@ export async function apply(ctx: Context, config: PolicyPluginConfig = {}): Prom
           toolName: execution.name,
           effectiveTier: 'T2' as const,
           kind: 'deny' as const,
-          reason: 'Execução sem sessão auditável foi bloqueada.',
+          reason: t('policy.execucaoSessaoAuditavelFoi'),
           ruleSource: 'safe-default' as const,
         }
         : !identity.authenticated
@@ -464,7 +465,7 @@ export async function apply(ctx: Context, config: PolicyPluginConfig = {}): Prom
                 toolName: execution.name,
                 effectiveTier: 'T2' as const,
                 kind: 'deny' as const,
-                reason: 'Sessão de identidade ausente, expirada ou revogada.',
+                reason: t('policy.sessaoIdentidadeAusenteExpirada'),
                 ruleSource: 'safe-default' as const,
               }
             : engine.evaluate(execution.name, {
@@ -478,7 +479,7 @@ export async function apply(ctx: Context, config: PolicyPluginConfig = {}): Prom
       decision = {
         ...decision,
         kind: 'deny',
-        reason: 'A ação tentou acessar outra organização ou espaço de trabalho.',
+        reason: t('policy.acaoTentouAcessarOutra'),
       }
     }
 
@@ -521,7 +522,7 @@ export async function apply(ctx: Context, config: PolicyPluginConfig = {}): Prom
       decision = {
         ...decision,
         kind: 'deny',
-        reason: 'Não foi possível registrar a auditoria; a ação foi bloqueada.',
+        reason: t('policy.naoFoiPossivelRegistrar'),
       }
       event = policyDecisionEventSchema.parse({ ...decision, callId: String(execution.callId) })
     }

@@ -128,5 +128,9 @@
   },
   "validation": {
     "requireOneField": "Informe ao menos um campo para atualizar."
+  },
+  "fixture": {
+    "updatedValue": "Valor atualizado",
+    "initialValue": "Valor inicial"
   }
 }

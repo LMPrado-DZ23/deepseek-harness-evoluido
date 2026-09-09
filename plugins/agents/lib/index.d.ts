@@ -3,6 +3,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent';
 import type { PolicyDelegationGrant } from '@dz23-studio/policy';
 import { type AgentLeaseRecord, type AgentRunRecord } from './model.js';
 import { StudioAgentService, type AgentRestartReconciliation, type DelegationRequest } from './service.js';
+import '@deepseek-ai/dsh-token-meter';
 export * from './model.js';
 export * from './service.js';
 export declare const name = "dz23-studio-agents";

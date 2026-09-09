@@ -58,6 +58,10 @@ export interface GeneratedAppCatalog {
     readonly mailInviteSubject: string
     readonly mailInviteBody: string
   }
+  readonly fixture: {
+    readonly updatedValue: string
+    readonly initialValue: string
+  }
   readonly validation: {
     readonly requireOneField: string
   }
@@ -136,6 +140,7 @@ export interface GeneratedAppCatalog {
 const REQUIRED_KEYS = {
   common: ['loading', 'save', 'add', 'saveChanges', 'saving', 'cancel', 'close', 'edit', 'delete', 'confirmDelete', 'confirmDeleteAction', 'emptyState', 'requiredField', 'invalidValue', 'tryAgain', 'success', 'unexpectedError', 'manageEntity', 'newRecord', 'records', 'savedRecords', 'managementArea', 'managementSignIn', 'yes', 'no', 'select'],
   auth: ['title', 'codeLabel', 'codePlaceholder', 'submit', 'submitting', 'signOut', 'invalidCode', 'expiredCode', 'expiredSession', 'emailLabel', 'codeSixLabel', 'accessHeading', 'accessStatus', 'inviteByEmail', 'requestCode', 'sendInvite', 'lockedCode', 'invalidSession', 'revokedSession', 'csrfMissing', 'ownerInviteOnly', 'invitationRequired', 'invalidEmail', 'mailCodeSubject', 'mailCodeBody', 'mailInviteSubject', 'mailInviteBody'],
+  fixture: ['updatedValue', 'initialValue'],
   validation: ['requireOneField'],
   reference: ['label', 'choose', 'none', 'loading', 'required', 'invalid', 'targetMissing', 'inUse'],
   scheduling: ['title', 'dateLabel', 'timeLabel', 'statusLabel', 'statusPending', 'statusConfirmed', 'statusCancelled', 'create', 'confirm', 'emptyState', 'conflict', 'invalidDate', 'pastDate', 'invalidTransition'],

@@ -6,6 +6,11 @@ import { accessSync, constants, existsSync } from 'node:fs';
 import { t } from './i18n.js';
 import { studioAgentLeasesDomainSpec, studioAgentRunsDomainSpec, } from './model.js';
 import { GitWorktreeManager, StudioAgentService, nextFence, } from './service.js';
+// A chave `tokenUsage` da projeção de sessão é DECLARADA pelo medidor de tokens
+// do Harness (augmentação de `SessionProjectionMap`). Sem importar o pacote, o
+// tipo não existe para quem compila este plugin e `snapshot(session, ['tokenUsage'])`
+// não passa no typecheck — o consumo aparecia como se ninguém o publicasse.
+import '@deepseek-ai/dsh-token-meter';
 export * from './model.js';
 export * from './service.js';
 export const name = 'dz23-studio-agents';

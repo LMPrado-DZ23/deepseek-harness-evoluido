@@ -28,10 +28,24 @@ const strongWords = /\b(nao|voce|entao|tambem|porque|enquanto|nenhum|nenhuma|nen
 
 const weakWords = /\b(de|da|do|das|dos|para|que|uma|um|com|sem|esta|este|essa|esse|isso|pela|pelo|pelos|pelas|quando|foi|ser|seu|sua|mais|muito|todo|toda|todos|todas|aqui|nesta|neste|deste|desta|numa|num|como|onde|antes|depois|dentro|fora|em|ao|aos|nas|nos|nada|entre|sobre|cada|outra|outro|se|ou|ele|ela|eles|elas|nem|mas|ate|apos|sao|tem|foram|era|pode|podem|deve|devem|ja|so)\b/giu
 
+/**
+ * Terminações que o inglês e os identificadores praticamente não produzem.
+ *
+ * A lista de palavras nunca termina — `"Acesso negado: o token expirou. Entre
+ * novamente."` passou por ela numa auditoria. Uma frase em português, porém,
+ * quase sempre traz uma destas formas, e elas cobrem palavras que ninguém
+ * pensou em listar. O tamanho mínimo existe para não transformar `command` ou
+ * um nome próprio em texto da pessoa. A terminação só conta em literal com
+ * ESPAÇO: `'equilibrado'` e `'EXCLUIDOS.txt'` são identificador e nome de
+ * arquivo, não frase, e o produto compara essas constantes por valor.
+ */
+const portugueseEndings = /\b(?:\w{4,}mente|\w{3,}(?:cao|coes|ncia|dade|agem|mento)|\w{5,}(?:ado|ada|ados|adas|ido|ida|idos|idas|ando|endo))\b/iu
+
 export function portugueseText(value) {
   if (/[\u00e1\u00e9\u00ed\u00f3\u00fa\u00e0\u00e2\u00ea\u00f4\u00e3\u00f5\u00e7]/iu.test(value)) return true
   if (/\b(projeto|plano|cria\u00e7\u00e3o|verifica\u00e7\u00e3o|pergunta|servi\u00e7os|diret\u00f3rio|arquivo|modelo|confirma\u00e7\u00e3o|solicita\u00e7\u00e3o|produza|caminhos|gere)\b/iu.test(value)) return true
   if (strongWords.test(value)) return true
+  if (/\s/u.test(value) && portugueseEndings.test(value)) return true
   const distinct = new Set([...(value.match(weakWords) ?? [])].map(word => word.toLowerCase()))
   return distinct.size >= 2
 }

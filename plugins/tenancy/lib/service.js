@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { KeyedMutex, newOpaqueSecret, secretHash } from '@dz23-studio/identity';
 import { roleAllows, roleCanAssign } from '@dz23-studio/policy';
+import { t } from './i18n.js';
 const INVITATION_TTL = 72 * 60 * 60 * 1_000;
 export class TenancyError extends Error {
     code;
@@ -53,7 +54,7 @@ export class StudioTenancyService {
             await this.#repository.putWorkspace({
                 workspace_id: user.tenant_id,
                 org_id: user.org_id,
-                name: 'Meu espaço de trabalho',
+                name: t('service.meuEspacoTrabalho'),
                 created_by: user.user_id,
                 created_at: now,
                 archived_at: null,
@@ -97,7 +98,7 @@ export class StudioTenancyService {
         this.#authorize(actor, actor.tenantId, 'workspace.create');
         const normalizedName = name.trim();
         if (normalizedName === '')
-            throw new TenancyError('invalid', 'Digite um nome para o espaço de trabalho.');
+            throw new TenancyError('invalid', t('service.digiteNomeEspacoTrabalho'));
         const now = this.#now().toISOString();
         const workspace = {
             workspace_id: this.#createId(),
@@ -118,7 +119,7 @@ export class StudioTenancyService {
             updated_at: now,
         });
         await this.#repository.putWorkspace(workspace);
-        await this.#identity.recordAdministrationEvent('workspace_created', actor.userId, actor.orgId, workspace.workspace_id, 'Espaço de trabalho criado.');
+        await this.#identity.recordAdministrationEvent('workspace_created', actor.userId, actor.orgId, workspace.workspace_id, t('service.espacoTrabalhoCriado'));
         return workspace;
     }
     async invite(actor, workspaceId, email, role) {
@@ -127,14 +128,14 @@ export class StudioTenancyService {
     async #inviteLocked(actor, workspaceId, email, role) {
         const actorMembership = this.#authorize(actor, workspaceId, 'members.manage');
         if (!roleCanAssign(actorMembership.role, role))
-            throw new TenancyError('forbidden', 'Seu papel não pode atribuir esse nível de acesso.');
+            throw new TenancyError('forbidden', t('service.seuPapelNaoPode'));
         const normalized = normalizeEmail(email);
         const existingUser = this.#identity.userRecords().find(user => user.email === normalized);
         if (existingUser !== undefined && existingUser.org_id !== actor.orgId) {
-            throw new TenancyError('forbidden', 'Este e-mail já pertence a outra organização.');
+            throw new TenancyError('forbidden', t('service.esteMailJaPertence'));
         }
         if (this.#repository.memberships().some(member => member.workspace_id === workspaceId && member.email === normalized)) {
-            throw new TenancyError('invalid', 'Esta pessoa já participa do espaço de trabalho.');
+            throw new TenancyError('invalid', t('service.estaPessoaJaParticipa'));
         }
         const workspace = this.#workspace(actor.orgId, workspaceId);
         const now = this.#now();
@@ -173,14 +174,14 @@ export class StudioTenancyService {
     async #acceptInvitationLocked(user, tokenHash) {
         const invitation = this.#invitationForUser(user, tokenHash);
         if (invitation.revoked_at !== null || invitation.accepted_at !== null)
-            throw new TenancyError('replay', 'Este convite não está mais disponível.');
+            throw new TenancyError('replay', t('service.esteConviteNaoEsta'));
         if (Date.parse(invitation.expires_at) <= this.#now().getTime())
             throw new TenancyError('expired', 'Este convite expirou.');
         if (user.org_id !== invitation.org_id)
-            throw new TenancyError('forbidden', 'Este convite pertence a outra organização.');
+            throw new TenancyError('forbidden', t('service.esteConvitePertenceOutra'));
         this.#workspace(invitation.org_id, invitation.workspace_id);
         if (this.#membership(user.user_id, invitation.workspace_id) !== undefined) {
-            throw new TenancyError('replay', 'Esta pessoa já participa do espaço de trabalho.');
+            throw new TenancyError('replay', t('service.estaPessoaJaParticipa'));
         }
         const now = this.#now().toISOString();
         const membership = {
@@ -201,7 +202,7 @@ export class StudioTenancyService {
     #invitationForUser(user, tokenHash) {
         const invitation = this.#repository.invitations().find(candidate => candidate.token_hash === tokenHash);
         if (invitation === undefined || invitation.email !== user.email) {
-            throw new TenancyError('not-found', 'Convite inválido ou não encontrado.');
+            throw new TenancyError('not-found', t('service.conviteInvalidoNaoEncontrado'));
         }
         return invitation;
     }
@@ -211,20 +212,20 @@ export class StudioTenancyService {
     async #changeRoleLocked(actor, membershipIdValue, role) {
         const target = this.#repository.memberships().find(candidate => candidate.membership_id === membershipIdValue);
         if (target === undefined || target.org_id !== actor.orgId)
-            throw new TenancyError('not-found', 'Membro não encontrado.');
+            throw new TenancyError('not-found', t('service.membroNaoEncontrado'));
         const actorMembership = this.#authorize(actor, target.workspace_id, 'members.manage');
         if (!roleCanAssign(actorMembership.role, role))
-            throw new TenancyError('forbidden', 'Seu papel não pode atribuir esse nível de acesso.');
+            throw new TenancyError('forbidden', t('service.seuPapelNaoPode'));
         if (target.role === 'owner' && actorMembership.role !== 'owner')
-            throw new TenancyError('forbidden', 'Somente uma pessoa proprietária pode alterar outra proprietária.');
+            throw new TenancyError('forbidden', t('service.somentePessoaProprietariaPode'));
         if (target.role === 'owner' && role !== 'owner') {
             const owners = this.#repository.memberships().filter(member => member.workspace_id === target.workspace_id && member.role === 'owner');
             if (owners.length <= 1)
-                throw new TenancyError('last-owner', 'O espaço precisa manter ao menos uma pessoa proprietária.');
+                throw new TenancyError('last-owner', t('service.espacoPrecisaManterMenos'));
         }
         const updated = { ...target, role, updated_at: this.#now().toISOString() };
         await this.#repository.putMembership(updated);
-        await this.#identity.recordAdministrationEvent('role_changed', actor.userId, target.org_id, target.workspace_id, 'Papel de membro alterado.');
+        await this.#identity.recordAdministrationEvent('role_changed', actor.userId, target.org_id, target.workspace_id, t('audit.memberRoleChanged'));
         return updated;
     }
     #membership(userId, workspaceId) {
@@ -233,16 +234,16 @@ export class StudioTenancyService {
     #authorize(actor, workspaceId, permission) {
         const membership = this.#membership(actor.userId, workspaceId);
         if (membership === undefined || membership.org_id !== actor.orgId)
-            throw new TenancyError('not-found', 'Espaço de trabalho não encontrado.');
+            throw new TenancyError('not-found', t('service.espacoTrabalhoNaoEncontrado'));
         if (!roleAllows(membership.role, permission))
-            throw new TenancyError('forbidden', 'Seu papel não permite esta ação.');
+            throw new TenancyError('forbidden', t('http.seuPapelNaoPermite'));
         return membership;
     }
     #workspace(orgId, workspaceId) {
         const workspace = this.#repository.workspaces().find(candidate => candidate.workspace_id === workspaceId
             && candidate.org_id === orgId && candidate.archived_at === null);
         if (workspace === undefined)
-            throw new TenancyError('not-found', 'Espaço de trabalho não encontrado.');
+            throw new TenancyError('not-found', t('service.espacoTrabalhoNaoEncontrado'));
         return workspace;
     }
 }
@@ -252,6 +253,6 @@ function membershipId(userId, workspaceId) {
 function normalizeEmail(email) {
     const normalized = email.trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized))
-        throw new TenancyError('invalid', 'Digite um e-mail válido.');
+        throw new TenancyError('invalid', t('service.digiteMailValido'));
     return normalized;
 }

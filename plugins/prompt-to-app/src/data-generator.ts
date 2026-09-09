@@ -192,7 +192,9 @@ function fixtureValue(field: PreparedField, alternate: boolean): unknown {
   if (field.type === 'email') return alternate ? 'novo@example.test' : 'pessoa@example.test'
   if (field.type === 'date') return alternate ? '2026-09-04' : '2026-09-03'
   if (field.type === 'selection') return alternate ? field.options!.at(-1) : field.options![0]
-  return alternate ? 'Valor atualizado' : 'Valor inicial'
+  // Os valores de exemplo que o TESTE GERADO grava. Estão em português porque
+  // o aplicativo gerado está, e por isso saem do catálogo do aplicativo gerado.
+  return alternate ? tGeneratedApp('fixture.updatedValue') : tGeneratedApp('fixture.initialValue')
 }
 
 function assertNoRequiredReferenceCycle(entities: readonly PreparedEntity[]): void {

@@ -253,7 +253,7 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
         const body = revokeSchema.parse(await readJson(request))
         await config.service.revokeSession(session, body.session_id)
         if (body.session_id === session.session_id) response.setHeader('set-cookie', clearSessionCookies(secureCookies))
-        json(response, 200, { message: 'Dispositivo desconectado.' })
+        json(response, 200, { message: t('http.deviceDisconnected') })
         return
       }
       /* v8 ignore next -- last contracted route: the false side is unreachable because every other contract returns above. O teste percorre IDENTITY_ROUTE_CONTRACTS e prova que nenhuma rota contratada cai na cauda 404. */

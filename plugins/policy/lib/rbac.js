@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { t } from './i18n.js';
 export const studioRoleSchema = z.enum(['owner', 'admin', 'builder', 'viewer']);
 export const studioPermissionSchema = z.enum([
     'identity.self',
@@ -46,10 +47,10 @@ export const studioRouteContractSchema = z.object({
     scope: z.enum(['none', 'identity', 'org', 'workspace', 'project', 'invitation']),
 }).strict().superRefine((route, context) => {
     if (route.access === 'authorized' && route.permission === null) {
-        context.addIssue({ code: 'custom', message: 'Rota autorizada exige permissão.' });
+        context.addIssue({ code: 'custom', message: t('rbac.rotaAutorizadaExigePermissao') });
     }
     if (route.access !== 'authorized' && route.permission !== null) {
-        context.addIssue({ code: 'custom', message: 'Rota pública/autenticada não pode declarar permissão RBAC.' });
+        context.addIssue({ code: 'custom', message: t('rbac.rotaPublicaAutenticadaNao') });
     }
 });
 export function assertRouteContracts(contracts) {
@@ -58,7 +59,7 @@ export function assertRouteContracts(contracts) {
         studioRouteContractSchema.parse(contract);
         const key = `${contract.method} ${contract.path}`;
         if (keys.has(key))
-            throw new Error(`Contrato de rota duplicado: ${key}`);
+            throw new Error(t('rbac.duplicateRouteContract', { key }));
         keys.add(key);
     }
 }

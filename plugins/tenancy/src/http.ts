@@ -15,6 +15,7 @@ import {
 } from '@dz23-studio/policy'
 import { z } from 'zod'
 import { StudioTenancyService, TenancyError } from './service.js'
+import { t } from './i18n.js'
 
 const JSON_LIMIT = 64 * 1024
 const workspaceSchema = z.object({ name: z.string().min(1).max(120) }).strict()
@@ -47,7 +48,7 @@ export function createTenancyHttpHandler(config: TenancyHttpConfig) {
       const path = new URL(request.url ?? '/', 'http://local').pathname
       const route = path.slice('/api/studio/tenancy'.length)
       const match = matchRoute(request.method, route)
-      if (match === undefined) return json(response, 404, { error: 'Rota não encontrada.' })
+      if (match === undefined) return json(response, 404, { error: t('http.rotaNaoEncontrada') })
       const session = await authenticatedMutation(request, config.identity)
       const actor = config.service.actorFromSession(session)
 
@@ -78,7 +79,7 @@ export function createTenancyHttpHandler(config: TenancyHttpConfig) {
         ? error.code === 'not-found' ? 404 : error.code === 'forbidden' || error.code === 'last-owner' ? 403 : 400
         : error instanceof IdentityError ? error.code === 'locked' ? 429 : 401
         : 400
-      return json(response, status, { error: error instanceof Error ? error.message : 'Solicitação inválida.' })
+      return json(response, status, { error: error instanceof Error ? error.message : t('http.solicitacaoInvalida') })
     }
   }
 }
@@ -99,7 +100,7 @@ function matchRoute(method: string | undefined, path: string): { contract: Studi
 }
 
 export function authorizeRoute(role: Parameters<typeof roleAllows>[0], permission: StudioPermission): void {
-  if (!roleAllows(role, permission)) throw new TenancyError('forbidden', 'Seu papel não permite esta ação.')
+  if (!roleAllows(role, permission)) throw new TenancyError('forbidden', t('http.seuPapelNaoPermite'))
 }
 
 async function readJson(request: IncomingMessage): Promise<unknown> {
@@ -109,7 +110,7 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
   for await (const chunk of request) {
     const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
     size += bytes.length
-    if (size > JSON_LIMIT) throw new Error('Solicitação grande demais.')
+    if (size > JSON_LIMIT) throw new Error(t('http.solicitacaoGrandeDemais'))
     chunks.push(bytes)
   }
   return JSON.parse(Buffer.concat(chunks).toString('utf8'))

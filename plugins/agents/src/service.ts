@@ -746,8 +746,8 @@ export class StudioAgentService {
         && measuredTokens !== undefined && measuredTokens > request.budget.maxTokens
       if (pathViolation || diff.files.length > maxFiles || diff.bytes > maxDiffBytes || tokenExceeded) {
         const reason = pathViolation ? t('delegation.pathOutsideApproved')
-            : tokenExceeded ? 'limite de tokens excedido'
-              : diff.files.length > maxFiles ? 'limite de arquivos excedido' : t('git.diffByteLimit')
+            : tokenExceeded ? t('git.tokenLimit')
+              : diff.files.length > maxFiles ? t('git.fileLimit') : t('git.diffByteLimit')
         return await this.#finish(runId, request, snapshot, coordinator, lease, 'BUDGET_EXCEEDED', reason, now, diff, outsideChanged, measuredTokens)
       }
       const diagnostic = outsideChanged
