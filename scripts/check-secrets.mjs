@@ -123,7 +123,16 @@ export const SECRET_ALLOWLIST = [
 ]
 
 /** Arquivos binários ou gerados que não têm segredo em texto para procurar. */
-const SKIPPED = /\.(?:png|jpe?g|gif|webp|ico|woff2?|ttf|otf|pdf|zip|gz|tar|bundle|wasm|mp4|svg)$/u
+/**
+ * Extensões que a varredura pula.
+ *
+ * `.svg` e `.bundle` saíram da lista: SVG é texto e cabe segredo dentro; o
+ * `.bundle` do Git é o formato que esta casa usa para guardar repositório, e um
+ * segredo colado num commit viaja dentro dele. `.gz` continua fora só porque o
+ * conteúdo comprimido não casa com nenhuma regra de texto — quem quiser
+ * conferi-lo tem de descomprimir antes, e isso é trabalho de outra ferramenta.
+ */
+const SKIPPED = /\.(?:png|jpe?g|gif|webp|ico|woff2?|ttf|otf|pdf|zip|gz|tar|wasm|mp4)$/u
 
 /**
  * Uma linha suspeita, com o mínimo necessário para achar sem vazar o valor.

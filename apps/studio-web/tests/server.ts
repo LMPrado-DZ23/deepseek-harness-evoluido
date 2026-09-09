@@ -119,7 +119,10 @@ const identity = {
     if (sessionId === failingLogoutSession.session_id) throw new IdentityError('invalid', 'forced-logout-failure')
     revokedSessions.add(sessionId)
   },
-} as unknown as StudioIdentityService
+    // O servidor de teste não usa vitest: a conferência de Host e Origin é
+    // exercida pelo e2e contra o servidor real, não por este dublê.
+    assertRequestTrust: () => {},
+  } as unknown as StudioIdentityService
 const tenancy = { authorizationFor: (userId: string, orgId: string, tenantId: string) => ({ userId, orgId, tenantId, role: 'owner' as const }) } as unknown as StudioTenancyService
 const repository = new MemoryRepository()
 let id = 0

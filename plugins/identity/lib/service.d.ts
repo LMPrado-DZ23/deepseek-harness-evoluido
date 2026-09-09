@@ -92,6 +92,23 @@ export declare class StudioIdentityService {
     authenticate(token: string, touch?: boolean): Promise<SessionRecord>;
     validateCsrf(session: SessionRecord, cookieToken: string | undefined, headerToken: string | undefined): void;
     validateCsrfToken(session: SessionRecord, headerToken: string | undefined): void;
+    /**
+     * Declara os endereços confiáveis. O plugin chama isto ao montar a borda.
+     * @param trust - hosts e origens aceitos.
+     */
+    setRequestTrust(trust: {
+        readonly allowedHosts: readonly string[];
+        readonly allowedOrigins: readonly string[];
+    }): void;
+    /** Se a confiança de requisição foi declarada (o portão confere que sim). */
+    get requestTrustConfigured(): boolean;
+    /**
+     * Recusa requisição de host ou origem que a borda não aceita.
+     * @param host - o cabeçalho `Host`.
+     * @param origin - o cabeçalho `Origin`, quando houver.
+     * @param mutating - se o método muda estado.
+     */
+    assertRequestTrust(host: string | undefined, origin: string | undefined, mutating: boolean): void;
     csrfTokenFor(session: SessionRecord): Promise<string>;
     listDevices(userId: string): readonly Omit<SessionRecord, 'token_hash' | 'csrf_hash'>[];
     revokeSession(actor: SessionRecord, sessionId: string, reason?: string): Promise<void>;

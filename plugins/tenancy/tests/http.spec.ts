@@ -16,6 +16,7 @@ function services() {
     validateCsrf: vi.fn(),
     validateCsrfToken: vi.fn(),
     userForSession: vi.fn(() => ({ user_id: 'owner', email: 'owner@example.com' })),
+    assertRequestTrust: vi.fn(),
   }
   const tenancy = {
     actorFromSession: vi.fn(() => actor),

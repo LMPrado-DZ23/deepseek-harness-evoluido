@@ -28,8 +28,7 @@ const identity = {
   authenticate: vi.fn(() => Promise.resolve({
     session_id: 'session', user_id: 'user-1', org_id: 'org-1', tenant_id: 'tenant-1',
   })),
-  validateCsrfToken: vi.fn(),
-} as unknown as StudioIdentityService
+  validateCsrfToken: vi.fn(), assertRequestTrust: () => {} } as unknown as StudioIdentityService
 
 describe('execuções paradas', () => {
   it('só existe leitura neste endereço', () => {
@@ -73,8 +72,7 @@ describe('execuções paradas', () => {
     const runs = vi.fn(() => [])
     const refusing = {
       authenticate: vi.fn(() => Promise.reject(new Error('sem sessão'))),
-      validateCsrfToken: vi.fn(),
-    } as unknown as StudioIdentityService
+      validateCsrfToken: vi.fn(), assertRequestTrust: () => {} } as unknown as StudioIdentityService
     await expect(handleStuckRuns(request(), { kind: 'list' }, { identity: refusing, agents: { runs } }))
       .rejects.toThrow()
     expect(runs).not.toHaveBeenCalled()

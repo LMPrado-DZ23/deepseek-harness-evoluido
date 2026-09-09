@@ -81,6 +81,7 @@ async function fixture() {
   const identity = {
     authenticate: vi.fn((token: string) => token === 'session' ? Promise.resolve(session) : Promise.reject(new IdentityError('invalid', 'Sessão inválida.'))),
     validateCsrf: vi.fn((_s: unknown, cookie?: string, header?: string) => { if (cookie !== 'csrf' || header !== 'csrf') throw new IdentityError('invalid', 'CSRF ausente.') }),
+    assertRequestTrust: vi.fn(),
   }
   const tenancy = { authorizationFor: vi.fn((userId: string, orgId: string, tenantId: string) => ({ userId, orgId, tenantId, role: 'admin' })) }
   const allowedHosts: string[] = []; const allowedOrigins: string[] = []

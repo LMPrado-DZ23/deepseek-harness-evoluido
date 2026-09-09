@@ -214,6 +214,9 @@ export async function apply(ctx: Context, config: IdentityPluginConfig = {}): Pr
     ...(config.createSecret === undefined ? {} : { createSecret: config.createSecret }),
     ...(config.createMagicCode === undefined ? {} : { createMagicCode: config.createMagicCode }),
   })
+  // A borda declara ao SERVIÇO quais endereços aceita: é assim que a conferência
+  // de Host e Origin alcança as rotas autenticadas dos outros plugins.
+  service.setRequestTrust({ allowedHosts, allowedOrigins })
   ctx.provide('studioIdentity', {
     service,
     ...(email.capture === undefined ? {} : { developmentEmailCapture: email.capture }),

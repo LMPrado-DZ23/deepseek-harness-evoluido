@@ -49,6 +49,9 @@ function fakeService() {
     revokeAllSessions: vi.fn(() => Promise.resolve()),
     bindHarnessSession: vi.fn(() => Promise.resolve()),
     isSharedHarnessClientAllowed: vi.fn(() => true),
+    // A conferência de Host e Origin alcança toda rota autenticada, e não só as
+    // da identidade: o dublê precisa responder por ela.
+    assertRequestTrust: vi.fn(),
   }
 }
 

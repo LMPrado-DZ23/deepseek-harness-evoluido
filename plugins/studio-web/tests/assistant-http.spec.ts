@@ -26,6 +26,7 @@ async function fixture(deadlineMs?: number) {
   const identity = {
     authenticate: vi.fn(() => Promise.resolve({ session_id: 'session-a', user_id: 'user-a' })),
     validateCsrfToken: vi.fn(),
+    assertRequestTrust: vi.fn(),
   }
   const conversations = {
     open: vi.fn(async () => ({ session_id: 'conversa-1', reused: false, preset: 'dz23-assistant' as const })),
@@ -262,7 +263,9 @@ describe('superfície HTTP da conversa do assistente', () => {
     const root = await mkdtemp(join(tmpdir(), 'dz23-conv-off-'))
     temporary.push(root)
     await writeFile(join(root, 'index.html'), '<main>DZ23 STUDIO</main>')
-    const identity = { authenticate: vi.fn(() => Promise.resolve({ session_id: 's' })), validateCsrfToken: vi.fn() }
+    const identity = { authenticate: vi.fn(() => Promise.resolve({ session_id: 's' })), validateCsrfToken: vi.fn(),
+    assertRequestTrust: vi.fn(),
+  }
     const allowedHosts: string[] = []
     const allowedOrigins: string[] = []
     const server = createServer(createStudioWebHandler({
@@ -392,7 +395,9 @@ describe('anexos pela borda HTTP', () => {
     const root = await mkdtemp(join(tmpdir(), 'dz23-conv-noattach-'))
     temporary.push(root)
     await writeFile(join(root, 'index.html'), '<main>DZ23 STUDIO</main>')
-    const identity = { authenticate: vi.fn(() => Promise.resolve({ session_id: 's' })), validateCsrfToken: vi.fn() }
+    const identity = { authenticate: vi.fn(() => Promise.resolve({ session_id: 's' })), validateCsrfToken: vi.fn(),
+    assertRequestTrust: vi.fn(),
+  }
     const allowedHosts: string[] = []
     const allowedOrigins: string[] = []
     const server = createServer(createStudioWebHandler({

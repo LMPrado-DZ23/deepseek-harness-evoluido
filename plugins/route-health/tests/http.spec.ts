@@ -27,8 +27,7 @@ describe('route-health HTTP', () => {
       switches: vi.fn(() => [{ from_route: 'omniroute', to_route: 'deepseek-official' }]),
     } as unknown as StudioRouteHealthService
     const identity = {
-      authenticate: vi.fn(() => Promise.resolve({ org_id: 'org-1', tenant_id: 'tenant-1' })),
-    } as unknown as StudioIdentityService
+      authenticate: vi.fn(() => Promise.resolve({ org_id: 'org-1', tenant_id: 'tenant-1' })), assertRequestTrust: () => {} } as unknown as StudioIdentityService
     const target = response()
     await createRouteHealthHandler(service, identity)(request(), target.value)
     expect(target.state.status).toBe(200)
@@ -38,7 +37,7 @@ describe('route-health HTTP', () => {
 
   it('rejects non-GET requests and invalid sessions in plain language', async () => {
     const service = { list: vi.fn(), switches: vi.fn() } as unknown as StudioRouteHealthService
-    const identity = { authenticate: vi.fn(() => Promise.reject(new Error('Sessão encerrada.'))) } as unknown as StudioIdentityService
+    const identity = { authenticate: vi.fn(() => Promise.reject(new Error('Sessão encerrada.'))), assertRequestTrust: () => {} } as unknown as StudioIdentityService
     const wrongMethod = response()
     await createRouteHealthHandler(service, identity)(request('POST'), wrongMethod.value)
     expect(wrongMethod.state.status).toBe(405)
@@ -50,7 +49,7 @@ describe('route-health HTTP', () => {
 
   it('does not write twice after the response has ended', async () => {
     const service = { list: vi.fn(), switches: vi.fn() } as unknown as StudioRouteHealthService
-    const identity = { authenticate: vi.fn() } as unknown as StudioIdentityService
+    const identity = { authenticate: vi.fn(), assertRequestTrust: () => {} } as unknown as StudioIdentityService
     const ended = response()
     Object.defineProperty(ended.value, 'writableEnded', { value: true })
     await createRouteHealthHandler(service, identity)(request('POST'), ended.value)

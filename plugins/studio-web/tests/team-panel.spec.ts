@@ -78,8 +78,7 @@ const identity = {
   authenticate: vi.fn(() => Promise.resolve({
     session_id: 'session', user_id: 'user-1', org_id: 'org-1', tenant_id: 'tenant-1',
   })),
-  validateCsrfToken: vi.fn(),
-} as unknown as StudioIdentityService
+  validateCsrfToken: vi.fn(), assertRequestTrust: () => {} } as unknown as StudioIdentityService
 
 describe('roteamento do painel de equipe', () => {
   it('a lista lê, e nada mais', () => {
@@ -343,7 +342,7 @@ describe('atendimento', () => {
     const authenticate = vi.fn()
     const outcome = await handleTeamPanel(
       request('PUT'), { kind: 'method-not-allowed' },
-      { identity: { authenticate } as unknown as StudioIdentityService },
+      { identity: { authenticate, assertRequestTrust: () => {} } as unknown as StudioIdentityService },
     )
     expect(outcome.status).toBe(405)
     expect(authenticate).not.toHaveBeenCalled()

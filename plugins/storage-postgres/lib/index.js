@@ -114,7 +114,17 @@ export async function apply(ctx, config) {
                 // The child reads the DSN from its own environment, never from the command
                 // line (a command line is world-readable; a process environment is not).
                 dsnRef: BACKUP_DSN_ENV,
-                env: { ...process.env, [BACKUP_DSN_ENV]: resolved.value },
+                // O ambiente do filho é MONTADO, não herdado. A doutrina desta casa já
+                // está escrita em `plugins/mcp-client/src/environment.ts` — "herdar o
+                // ambiente do Studio é como um segredo vaza" — e aqui, justamente no
+                // processo que carrega o DSN do banco, ela não era seguida. O filho
+                // precisa do PATH (para achar o Node) e do idioma; nada mais.
+                env: {
+                    ...(process.env.PATH === undefined ? {} : { PATH: process.env.PATH }),
+                    ...(process.env.LANG === undefined ? {} : { LANG: process.env.LANG }),
+                    ...(process.env.TMPDIR === undefined ? {} : { TMPDIR: process.env.TMPDIR }),
+                    [BACKUP_DSN_ENV]: resolved.value,
+                },
                 schema,
                 ssl: sslMode,
                 maxBytes: config.backupMaxBytes ?? BACKUP_MAX_BYTES_DEFAULT,

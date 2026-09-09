@@ -287,6 +287,9 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
 
 export async function authenticatedMutation(request: IncomingMessage, service: StudioIdentityService): Promise<SessionRecord> {
   assertCookieHeaderBudget(request)
+  // Host e Origin, para TODA rota autenticada — e não só para as da identidade.
+  const mutating = request.method !== 'GET' && request.method !== 'HEAD'
+  service.assertRequestTrust(singleHeader(request.headers.host), singleHeader(request.headers.origin), mutating)
   const { session } = await authenticateCookieRequest(request, service)
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     const header = singleHeader(request.headers['x-dz23-csrf'])

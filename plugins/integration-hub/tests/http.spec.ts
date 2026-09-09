@@ -131,7 +131,9 @@ async function fixture(role: 'owner' | 'admin' | 'builder' | 'viewer' = 'owner',
     ...(options.packagingTimeoutMs === undefined ? {} : { packagingTimeoutMs: options.packagingTimeoutMs }),
     now: () => new Date('2026-09-04T00:00:00.000Z'), createId: () => `id-${++id}`,
   })
-  const identity = { authenticate: vi.fn((token: string) => { if (options.identityError !== undefined) return Promise.reject(options.identityError); return token === 'session' ? Promise.resolve(session) : Promise.reject(new IdentityError('invalid', 'Sessão inválida.')) }), validateCsrf: vi.fn((_s: unknown, cookie?: string, header?: string) => { if (cookie !== 'csrf' || header !== 'csrf') throw new IdentityError('invalid', 'CSRF ausente.') }) }
+  const identity = { authenticate: vi.fn((token: string) => { if (options.identityError !== undefined) return Promise.reject(options.identityError); return token === 'session' ? Promise.resolve(session) : Promise.reject(new IdentityError('invalid', 'Sessão inválida.')) }), validateCsrf: vi.fn((_s: unknown, cookie?: string, header?: string) => { if (cookie !== 'csrf' || header !== 'csrf') throw new IdentityError('invalid', 'CSRF ausente.') }),
+    assertRequestTrust: vi.fn(),
+  }
   const tenancy = { authorizationFor: vi.fn((userId: string, orgId: string, tenantId: string) => { if (options.tenancyError !== undefined) throw options.tenancyError; return options.noMembership === true ? undefined : { userId, orgId, tenantId, role } }) }
   const allowedHosts: string[] = []; const allowedOrigins: string[] = []
   const server = createServer(createHubHttpHandler({ service, identity: identity as unknown as StudioIdentityService, tenancy: tenancy as unknown as StudioTenancyService, allowedHosts, allowedOrigins }))
@@ -148,6 +150,7 @@ async function getWithInjectedFailure(error: unknown, source: 'identity' | 'tena
   const allowedHosts: string[] = []; const allowedOrigins: string[] = []
   const identity = {
     authenticate: vi.fn(() => source === 'identity' ? Promise.reject(error) : Promise.resolve(session)),
+    assertRequestTrust: vi.fn(),
   }
   const tenancy = {
     authorizationFor: vi.fn(() => {

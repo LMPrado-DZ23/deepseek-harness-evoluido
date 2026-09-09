@@ -48,7 +48,9 @@ afterEach(async () => { await Promise.all(servers.splice(0).map(server => new Pr
 async function fixture(options: { readonly emergencyStop?: { assertRunning(scope: { readonly orgId: string; readonly tenantId: string }): void } } = {}) {
   const repository = new MemoryRepository(); let id = 0
   const service = new PromptToAppService({ repository, now: () => new Date('2026-09-03T12:00:00.000Z'), createId: () => `id-${++id}` })
-  const identity = { authenticate: vi.fn(() => Promise.resolve(session)), validateCsrf: vi.fn(), validateCsrfToken: vi.fn() }
+  const identity = { authenticate: vi.fn(() => Promise.resolve(session)), validateCsrf: vi.fn(), validateCsrfToken: vi.fn(),
+    assertRequestTrust: vi.fn(),
+  }
   const tenancy = { authorizationFor: vi.fn((userId: string, orgId: string, tenantId: string) => ({ userId, orgId, tenantId, role: 'owner' as const })) }
   const model: PromptModelPort = {
     complete: vi.fn((_scope, purpose, _privacy, prompt) => Promise.resolve(purpose === 'plan'

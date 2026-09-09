@@ -137,6 +137,18 @@ export interface IdentityServiceOptions {
 }
 
 export class StudioIdentityService {
+  /**
+   * Os endereços que a borda aceita, para conferir Host e Origin.
+   *
+   * `authenticatedMutation` é a porta de entrada de SEIS plugins (tenancy,
+   * prompt-to-app, studio-web, route-health, stuck-runs, team-panel) e conferia
+   * só o `x-dz23-csrf`. A checagem de origem que a própria identidade faz nas
+   * rotas dela não valia para nenhuma dessas. O cabeçalho customizado exige
+   * preflight e a resposta não traz cabeçalho CORS, então a defesa não estava
+   * furada — mas ela dependia de uma propriedade do navegador, e não de uma
+   * conferência do produto.
+   */
+  #requestTrust: { readonly allowedHosts: readonly string[]; readonly allowedOrigins: readonly string[] } | undefined
   readonly #repository: IdentityRepository
   readonly #passkeys: PasskeyProvider
   readonly #emailSender: EmailSender
@@ -348,6 +360,35 @@ export class StudioIdentityService {
   validateCsrfToken(session: SessionRecord, headerToken: string | undefined): void {
     if (headerToken === undefined || !secretMatches(headerToken, session.csrf_hash)) {
       throw new IdentityError('csrf', t('auth.invalidConfirmation'))
+    }
+  }
+
+  /**
+   * Declara os endereços confiáveis. O plugin chama isto ao montar a borda.
+   * @param trust - hosts e origens aceitos.
+   */
+  setRequestTrust(trust: { readonly allowedHosts: readonly string[]; readonly allowedOrigins: readonly string[] }): void {
+    this.#requestTrust = trust
+  }
+
+  /** Se a confiança de requisição foi declarada (o portão confere que sim). */
+  get requestTrustConfigured(): boolean { return this.#requestTrust !== undefined }
+
+  /**
+   * Recusa requisição de host ou origem que a borda não aceita.
+   * @param host - o cabeçalho `Host`.
+   * @param origin - o cabeçalho `Origin`, quando houver.
+   * @param mutating - se o método muda estado.
+   */
+  assertRequestTrust(host: string | undefined, origin: string | undefined, mutating: boolean): void {
+    const trust = this.#requestTrust
+    if (trust === undefined) return
+    const normalized = host?.toLowerCase()
+    if (normalized === undefined || !trust.allowedHosts.map(value => value.toLowerCase()).includes(normalized)) {
+      throw new IdentityError('invalid', t('http.hostNotAllowed'))
+    }
+    if (mutating && (origin === undefined || !trust.allowedOrigins.includes(origin))) {
+      throw new IdentityError('invalid', t('http.originNotAllowed'))
     }
   }
 

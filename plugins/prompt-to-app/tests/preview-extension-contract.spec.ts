@@ -107,6 +107,7 @@ async function httpFixture(extension: PromptToAppHttpExtension): Promise<HttpFix
     validateCsrfToken: vi.fn((_session: SessionRecord, header: string | undefined) => {
       if (header !== 'csrf-token') throw new IdentityError('csrf', 'CSRF inválido.')
     }),
+    assertRequestTrust: vi.fn(),
   }
   const tenancy = {
     authorizationFor: vi.fn(() => ({

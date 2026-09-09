@@ -23,6 +23,7 @@ async function fixture(previewFrameSources: readonly string[] = [], options: {
       session_id: 'session', user_id: 'user-1', org_id: 'org-1', tenant_id: 'tenant-1',
     })),
     validateCsrfToken: vi.fn(),
+    assertRequestTrust: vi.fn(),
   }
   const allowedHosts: string[] = []
   const allowedOrigins: string[] = []
