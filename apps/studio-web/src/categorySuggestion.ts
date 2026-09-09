@@ -61,6 +61,35 @@ const SIGNALS: Readonly<Record<Category, readonly (readonly [string, number])[]>
   return table
 })()
 
+/** A chave do catálogo com o ramo de atividade — não é uma categoria. */
+const TRADE_KEY = 'ramo-de-atividade'
+
+/**
+ * O RAMO da pessoa, quando o texto não diz o que o aplicativo faz.
+ *
+ * "sistema pra barbearia" e "app de delivery" não descrevem função nenhuma: os
+ * sinais de cima pontuam zero e a pessoa recebia uma página de apresentação,
+ * que é o padrão. O ramo é um palpite melhor do que o padrão — quem escreve
+ * "barbearia" quer marcar horário — e é o ÚNICO lugar onde este arquivo
+ * adivinha a partir do ofício, e não do que foi escrito.
+ *
+ * Por isso ele NÃO liga `understood`. A tela só afirma "entendemos isto pelo
+ * seu texto" quando algum sinal de função pontuou; o ramo escolhe um ponto de
+ * partida melhor e continua dizendo, com honestidade, que não entendeu o
+ * pedido. Confundir as duas coisas foi o achado C-N4, e ele não volta por aqui.
+ */
+const TRADES: readonly (readonly [string, Category])[] = (() => {
+  const raw = (SIGNAL_SOURCE as Record<string, readonly (readonly (string | number)[])[]>)[TRADE_KEY]
+  if (raw === undefined || raw.length === 0) throw new Error(`CATEGORY_TRADES_MISSING`)
+  return raw.map(entry => {
+    const category = String(entry[1]) as Category
+    // Um ramo apontando para categoria que não existe mandaria a pessoa para
+    // uma tela que não existe. Erro na carga, e não na hora de usar.
+    if (!STUDIO_CATEGORIES.includes(category)) throw new Error(`CATEGORY_TRADE_UNKNOWN:${String(entry[0])}`)
+    return [String(entry[0]), category] as const
+  })
+})()
+
 /** A categoria usada quando o texto não diz nada que este palpite reconheça. */
 export const DEFAULT_CATEGORY: Category = 'landing-page'
 
@@ -89,7 +118,9 @@ export function categoryGuess(brief: string): { readonly category: Category; rea
     for (const [signal, weight] of SIGNALS[category]) if (text.includes(signal)) score += weight
     if (score > bestScore) { best = category; bestScore = score }
   }
-  return { category: best, understood: bestScore > 0 }
+  if (bestScore > 0) return { category: best, understood: true }
+  for (const [trade, category] of TRADES) if (text.includes(` ${trade}`)) return { category, understood: false }
+  return { category: DEFAULT_CATEGORY, understood: false }
 }
 
 /**

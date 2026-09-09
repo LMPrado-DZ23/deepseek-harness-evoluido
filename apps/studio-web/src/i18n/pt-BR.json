@@ -156,7 +156,10 @@
     "recommend": "Não sei — recomende para mim",
     "confirm": "Sim, isso é necessário",
     "reject": "Não, retire esses dados",
-    "continueBusy": "Enviando sua resposta…"
+    "continueBusy": "Enviando sua resposta…",
+    "recommendBusy": "Buscando uma recomendação…",
+    "confirmBusy": "Confirmando…",
+    "rejectBusy": "Retirando os dados…"
   },
   "plan": {
     "title": "Confira o plano",

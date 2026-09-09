@@ -82,6 +82,22 @@ describe('C-2 (2ª passada): o texto de quem escreve rápido e errado', () => {
     }
   })
 
+  // O RAMO é um ponto de partida, nunca uma afirmação de entendimento. Quem
+  // escreve só o ofício - "sistema pra barbearia" - não disse o que o
+  // aplicativo faz; o Studio deixa de mandar essa pessoa para uma página de
+  // apresentação, e continua dizendo que não entendeu o pedido.
+  it('usa o ramo como ponto de partida sem afirmar que entendeu', () => {
+    const expected = [
+      ['sistema pra barbearia', 'scheduling'],
+      ['app de delivery', 'catalog'],
+      ['preciso de algo pro meu consultorio', 'scheduling'],
+      ['quero um sistema pra pizzaria', 'catalog'],
+    ] as const
+    for (const [brief, category] of expected) {
+      expect(categoryGuess(brief), brief).toEqual({ category, understood: false })
+    }
+  })
+
   it('não finge entender o que o Studio não constrói', () => {
     for (const fora of ['app de delivery', 'rede social pra minha igreja', 'quero um chat com meus clientes', 'loja virtual com carrinho e pagamento']) {
       expect(categoryGuess(fora).understood, fora).toBe(false)
