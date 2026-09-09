@@ -104,3 +104,31 @@ describe('C-2 (2ª passada): o texto de quem escreve rápido e errado', () => {
     }
   })
 })
+
+describe('o que a medição do conjunto cego trouxe à tona', () => {
+  it('não entender é DIFERENTE de achar que é página de apresentação', () => {
+    // O palpite devolve `landing-page` nos dois casos, porque é o padrão. A
+    // diferença mora em `understood`/`basis` — e é ela que decide se a tela
+    // pergunta ou assume. Em 21 pedidos escritos com outras palavras, 8
+    // caíram aqui.
+    const unknown = categoryGuess('preciso de uma coisa para resolver o dia a dia da empresa')
+    expect(unknown.understood).toBe(false)
+    expect(unknown.basis).toBe('none')
+
+    const understood = categoryGuess('quero um catálogo para mostrar meus produtos')
+    expect(understood.understood).toBe(true)
+    expect(understood.basis).toBe('text')
+  })
+
+  it('texto vazio nunca afirma ter entendido', () => {
+    expect(categoryGuess('   ').understood).toBe(false)
+  })
+
+  it('o ramo sozinho não vira certeza', () => {
+    // Reconhecer "clínica" diz o ramo, não o que o aplicativo faz. Afirmar
+    // compreensão aqui convenceria a pessoa a não corrigir.
+    const guess = categoryGuess('tenho uma clínica')
+    expect(guess.basis).toBe('trade')
+    expect(guess.understood).toBe(false)
+  })
+})

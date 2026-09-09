@@ -214,7 +214,10 @@ export function App() {
     const timer = setInterval(heartbeat, 30_000)
     return () => { active = false; clearInterval(timer) }
   }, [projectId, preview?.preview_id, preview?.state])
-  const ready = useMemo(() => brief.trim().length >= 10, [brief])
+  // Pronto para continuar exige tipo DECIDIDO. Enquanto o palpite não
+  // entendeu e a pessoa não escolheu, seguir em frente construiria uma coisa
+  // que ninguém pediu — e a pessoa só descobriria no fim.
+  const ready = useMemo(() => brief.trim().length >= 10 && categoryBasis !== 'none', [brief, categoryBasis])
   async function safely(action: () => Promise<void>, call: ApiCallKind = 'mutation') {
     setError('')
     try { await action() } catch (cause) { setError(apiFailureText(cause, navigator.onLine, call, t.health.attention)) }
@@ -421,7 +424,13 @@ export function App() {
     setCategoryBasis('person')
   }
   /** A pessoa corrigiu o tipo: o palpite para de mexer nisso. */
-  function chooseCategory(selected: Category) { setCategory(selected); setCategoryChosenByPerson(true); setCategoryBasis('person') }
+  function chooseCategory(selected: Category) {
+    // O valor vazio do seletor de "não entendi" NÃO é uma escolha: ele é a
+    // ausência de uma. Tratá-lo como escolha faria a tela desbloquear o
+    // "continuar" no instante em que a pessoa abrisse e fechasse a lista.
+    if ((selected as string) === '') return
+    setCategory(selected); setCategoryChosenByPerson(true); setCategoryBasis('person')
+  }
   /**
    * Enquanto a pessoa escreve, o palpite acompanha — até ela corrigir.
    *
@@ -500,7 +509,20 @@ function Idea(props: {
   return <><div className="heading"><Sparkles aria-hidden="true"/><div><h1>{t.idea.title}</h1><p>{t.idea.subtitle}</p></div></div><label className="sr-only" htmlFor="brief">{t.idea.title}</label>
     <textarea id="brief" maxLength={1000} value={props.brief} onChange={event => props.setBrief(event.target.value)} placeholder={t.idea.placeholder} /><div className="counter" aria-live="polite">{props.brief.length} {t.idea.counter}</div>
     <h2>{t.idea.kindTitle}</h2><p className="coming">{props.categoryBasis === 'text' ? t.idea.kindHelp : props.categoryBasis === 'trade' ? t.idea.kindHelpTrade : props.categoryBasis === 'person' ? t.idea.kindHelpChosen : t.idea.kindHelpUnknown}</p>
-    <label className="kind">{t.idea.kindLabel}<select value={props.category} onChange={event => props.chooseCategory(event.target.value as Category)}>{STUDIO_CATEGORIES.map(value => <option key={value} value={value}>{t.idea.kinds[value]}</option>)}</select></label>
+    {/* Quando NÃO entendemos, o seletor não vem preenchido.
+        Ele vinha: `landing-page` é o valor padrão do palpite, e sai igual
+        quando o texto fala de página e quando o texto não diz nada que a
+        gente reconheça. Quem não lê a frase de ajuda aceita o que está na
+        tela — e recebe uma página de apresentação depois de esperar a criação
+        inteira, tendo pedido outra coisa.
+        A medição do conjunto cego é o que trouxe isto à tona: em 21 pedidos
+        escritos com outras palavras, 8 caíram em "não entendi" e todos os 8
+        mostravam "Página de apresentação" já escolhido. */}
+    <label className="kind">{t.idea.kindLabel}<select value={props.categoryBasis === 'none' && props.brief.trim() !== '' ? '' : props.category} onChange={event => props.chooseCategory(event.target.value as Category)}>
+      {props.categoryBasis === 'none' && props.brief.trim() !== '' ? <option value="">{t.idea.kindChoose}</option> : null}
+      {STUDIO_CATEGORIES.map(value => <option key={value} value={value}>{t.idea.kinds[value]}</option>)}
+    </select></label>
+    {props.categoryBasis === 'none' && props.brief.trim() !== '' ? <p className="error" role="status">{t.idea.kindRequired}</p> : null}
     <h2>{t.idea.suggestions}</h2>
     {/* O aviso de que três destas sugestões são protótipos iniciais ficava
         SOZINHO embaixo das sete, depois do ponto de decisão, e exigia que a

@@ -62,6 +62,7 @@
     "gate:portability": "node scripts/check-portability.mjs --self-test",
     "gate:i18n": "node scripts/check-i18n.mjs",
     "golden": "tsx scripts/run-golden-set.ts",
+    "gate:comprehension": "tsx scripts/golden-set-comprehension.mjs --self-test && tsx scripts/golden-set-comprehension.mjs",
     "prove:prompt-to-app": "tsx scripts/prove-prompt-to-app.ts",
     "prove:integration-hub": "node scripts/prove-integration-hub.mjs",
     "hub:sign": "node scripts/hub-sign-manifest.mjs",

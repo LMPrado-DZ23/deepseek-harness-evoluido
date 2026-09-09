@@ -143,6 +143,13 @@ jobs:
           # AGPL, Elastic, Commons Clause) e exige revisão humana registrada
           # para qualquer licença que não esteja nas duas listas.
           pnpm gate:licenses
+          # P-07: o conjunto de briefs leigos, medido no ponto que dá para medir
+          # sem LLM e sem construtor — o Studio entendeu o que a pessoa
+          # escreveu? Dois conjuntos: um onde o vocabulário foi ajustado, e um
+          # CEGO, escrito depois e nunca usado para ajustar. O portão reprova
+          # por ERRO COM CONFIANÇA no cego, e não por acerto: exigir acerto às
+          # cegas só faria alguém ampliar o vocabulário até o número subir.
+          pnpm gate:comprehension
           # Inventário CycloneDX, direto do lockfile pelo próprio pnpm - não
           # se reimplementa o que a ferramenta já faz certo. Sem ele não há
           # como responder "esta CVE me atinge?" senão relendo o repositório no
