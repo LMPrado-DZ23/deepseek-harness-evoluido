@@ -14,22 +14,22 @@ import { IntegrationHubService, securityFingerprint, type HubActor, type HubRepo
 
 class MemoryRepository implements HubRepository {
   rows: StudioIntegration[] = []; eventRows: HubEvent[] = []
-  integrations = (scope: HubActor) => this.rows.filter(row => sameScope(scope, row))
-  integration = (scope: HubActor, integrationId: string) => this.rows.find(row => sameScope(scope, row) && row.integration_id === integrationId)
+  integrations = async (scope: HubActor) => this.rows.filter(row => sameScope(scope, row))
+  integration = async (scope: HubActor, integrationId: string) => this.rows.find(row => sameScope(scope, row) && row.integration_id === integrationId)
   deleteIntegration = async (scope: HubActor, integrationId: string) => { this.rows = this.rows.filter(row => !(row.integration_id === integrationId && row.org_id === scope.orgId && row.tenant_id === scope.tenantId)) }
   putIntegration = async (value: StudioIntegration) => {
     this.rows = [...this.rows.filter(row => row.integration_id !== value.integration_id), value]
   }
   compareAndSwapIntegration = async (scope: HubActor, integrationId: string, expected: string, value: StudioIntegration) => {
-    const current = this.integration(scope, integrationId)
+    const current = await this.integration(scope, integrationId)
     if (current === undefined || securityFingerprint(current) !== expected) return false
     await this.putIntegration(value); return true
   }
-  exports = (): readonly StudioExport[] => []
-  export = () => undefined
+  exports = async (): Promise<readonly StudioExport[]> => []
+  export = async () => undefined
   putExport = async () => undefined
-  eventPage = () => []
-  eventCount = () => this.eventRows.length
+  eventPage = async () => []
+  eventCount = async () => this.eventRows.length
   putEvent = async (value: HubEvent) => { this.eventRows = [...this.eventRows, value] }
   pruneEvents = async () => 0
   readonly switches = new Map<string, IntegrationKillSwitch>()

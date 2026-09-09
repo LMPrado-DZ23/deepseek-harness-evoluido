@@ -49,31 +49,31 @@ async function eventually<T>(attempt: () => Promise<T>, tries = 400): Promise<T>
 class MemoryRepository implements HubRepository {
   rows: StudioIntegration[] = []; exportRows: StudioExport[] = []; eventRows: HubEvent[] = []
   pageLimits: number[] = []; pruneCalls: Array<{ tenantId: string; keep: number }> = []
-  integrations = (scope: HubActor) => this.rows.filter(row => sameScope(scope, row))
-  integration = (scope: HubActor, integrationId: string) => this.rows.find(row => sameScope(scope, row) && row.integration_id === integrationId)
+  integrations = async (scope: HubActor) => this.rows.filter(row => sameScope(scope, row))
+  integration = async (scope: HubActor, integrationId: string) => this.rows.find(row => sameScope(scope, row) && row.integration_id === integrationId)
   deleteIntegration = async (scope: HubActor, integrationId: string) => { this.rows = this.rows.filter(row => !(row.integration_id === integrationId && row.org_id === scope.orgId && row.tenant_id === scope.tenantId)) }
   putIntegration = async (value: StudioIntegration) => { this.rows = [...this.rows.filter(row => row.integration_id !== value.integration_id || row.org_id !== value.org_id || row.tenant_id !== value.tenant_id), value] }
   compareAndSwapIntegration = async (scope: HubActor, integrationId: string, expected: string, value: StudioIntegration) => {
-    const current = this.integration(scope, integrationId)
+    const current = await this.integration(scope, integrationId)
     if (current === undefined || securityFingerprint(current) !== expected) return false
     await this.putIntegration(value); return true
   }
-  exports = (scope: HubActor, projectId: string) => this.exportRows.filter(row => sameScope(scope, row) && row.project_id === projectId)
-  export = (scope: HubActor, projectId: string, exportId: string) => this.exportRows.find(row => sameScope(scope, row) && row.project_id === projectId && row.export_id === exportId)
+  exports = async (scope: HubActor, projectId: string) => this.exportRows.filter(row => sameScope(scope, row) && row.project_id === projectId)
+  export = async (scope: HubActor, projectId: string, exportId: string) => this.exportRows.find(row => sameScope(scope, row) && row.project_id === projectId && row.export_id === exportId)
   putExport = async (value: StudioExport) => { this.exportRows = [...this.exportRows, value] }
-  eventPage = (scope: HubActor, after: Pick<HubEvent, 'created_at' | 'event_id'> | undefined, limit: number) => {
+  eventPage = async (scope: HubActor, after: Pick<HubEvent, 'created_at' | 'event_id'> | undefined, limit: number) => {
     this.pageLimits.push(limit)
     const rows = this.eventRows.filter(row => sameScope(scope, row)).sort(newestFirst)
     const start = after === undefined ? 0 : rows.findIndex(row => newestFirst(row, after) > 0)
     return start < 0 ? [] : rows.slice(start, start + limit)
   }
-  eventCount = (scope: HubActor) => this.eventRows.filter(row => sameScope(scope, row)).length
+  eventCount = async (scope: HubActor) => this.eventRows.filter(row => sameScope(scope, row)).length
   putEvent = async (value: HubEvent) => { this.eventRows = [...this.eventRows, value] }
   pruneEvents = async (scope: HubActor, keep: number) => {
     this.pruneCalls.push({ tenantId: scope.tenantId, keep })
     const retained = this.eventRows.filter(row => sameScope(scope, row)).sort(newestFirst).slice(0, keep)
     const ids = new Set(retained.map(row => row.event_id))
-    const before = this.eventCount(scope)
+    const before = await this.eventCount(scope)
     this.eventRows = this.eventRows.filter(row => !sameScope(scope, row) || ids.has(row.event_id))
     return before - retained.length
   }
@@ -178,8 +178,8 @@ describe('integration hub service', () => {
     // re-registering the same id updates in place
     const again = await service.register(admin, signed(manifest({ version: '1.1.0' })))
     expect(again.integration.integration_id).toBe(registered.integration.integration_id)
-    expect(service.list(viewer)).toHaveLength(2)
-    expect(service.list(otherTenant)).toEqual([])
+    expect(await service.list(viewer)).toHaveLength(2)
+    expect(await service.list(otherTenant)).toEqual([])
   })
 
   it('allows unsigned integrations only on the dev channel', async () => {
@@ -296,7 +296,7 @@ describe('integration hub service', () => {
     expect(repository.eventRows.at(-1)).toMatchObject({ action: 'integration.disabled', detail: 'changed-during-write' })
 
     repository.compareAndSwapIntegration = async (scope, id, fingerprint, value) => {
-      const current = repository.integration(scope, id)
+      const current = await repository.integration(scope, id)
       if (current === undefined || securityFingerprint(current) !== fingerprint) return false
       await repository.putIntegration(value); return true
     }
@@ -526,22 +526,22 @@ describe('integration hub service', () => {
   it('pages the history newest first and keeps only what the workspace is entitled to', async () => {
     const { service, repository } = await build()
     for (let index = 0; index < 5; index += 1) await service.register(admin, signed(manifest({ id: `app-${index}` })))
-    const first = service.events(owner, { limit: 2 })
+    const first = await service.events(owner, { limit: 2 })
     expect(first.events).toHaveLength(2)
     expect(first.next_cursor).not.toBeNull()
     // Newest first, and one page never repeats a row of the previous one.
     expect(first.events[0]!.created_at >= first.events[1]!.created_at).toBe(true)
-    const second = service.events(owner, { limit: 2, cursor: first.next_cursor! })
+    const second = await service.events(owner, { limit: 2, cursor: first.next_cursor! })
     expect(second.events).toHaveLength(2)
     expect(second.events.map(event => event.event_id)).not.toEqual(expect.arrayContaining(first.events.map(event => event.event_id)))
-    const third = service.events(owner, { limit: 2, cursor: second.next_cursor! })
+    const third = await service.events(owner, { limit: 2, cursor: second.next_cursor! })
     expect(third.events).toHaveLength(1)
     expect(third.next_cursor).toBeNull()
     // The whole table is never handed over in one answer, whatever the client asks for.
-    expect(service.events(owner, { limit: 10_000 }).events).toHaveLength(5)
-    expect(() => service.events(owner, { cursor: 'não é um cursor' })).toThrow(HubError)
+    expect((await service.events(owner, { limit: 10_000 })).events).toHaveLength(5)
+    await expect(service.events(owner, { cursor: 'não é um cursor' })).rejects.toThrow(HubError)
     // Another workspace's history is not paged into this one.
-    expect(service.events({ ...owner, tenantId: 'ws-b' }).events).toEqual([])
+    expect((await service.events({ ...owner, tenantId: 'ws-b' })).events).toEqual([])
     // The service asks the repository for one bounded look-ahead row; it never
     // requests or receives the whole event table to paginate in memory.
     expect(repository.pageLimits).toEqual([3, 3, 3, 201, 51])
@@ -615,7 +615,7 @@ describe('integration hub service', () => {
     await expect(service.createExport(builder, 'p1')).rejects.toMatchObject({ code: 'RATE_LIMITED' })
     expect(repository.eventRows.at(-1)).toMatchObject({ action: 'export.created', outcome: 'failure', detail: 'rate-limited' })
     // The refusal belongs to the workspace that flooded: another one is untouched.
-    expect(service.listExports(viewer, 'p1')).toHaveLength(1)
+    expect(await service.listExports(viewer, 'p1')).toHaveLength(1)
   })
 
   it('hands the download an open handle it already checked, and never follows a link planted at the name', async () => {
@@ -738,16 +738,16 @@ describe('integration hub service', () => {
     const { service } = await build()
     await expect(service.register(builder, signed(manifest()))).rejects.toMatchObject({ code: 'FORBIDDEN' })
     await expect(service.configureSmtp(viewer, 'DZ23_APP_SMTP')).rejects.toMatchObject({ code: 'FORBIDDEN' })
-    expect(() => service.events(builder)).toThrow(HubError)
+    await expect(service.events(builder)).rejects.toThrow(HubError)
     const registered = await service.register(owner, signed(manifest()))
     await expect(service.setEnabled(otherTenant, registered.integration.integration_id, true)).rejects.toMatchObject({ code: 'NOT_FOUND' })
     await expect(service.createExport(viewer, 'p1')).rejects.toMatchObject({ code: 'FORBIDDEN' })
-    expect(service.events(owner).events).toHaveLength(1)
+    expect((await service.events(owner)).events).toHaveLength(1)
   })
 
   it('stores only the SMTP credential reference after checking presence and shape, and reports the test as NOT_EXECUTED until enabled', async () => {
     const { service, repository } = await build({ secrets: { DZ23_APP_SMTP: { present: true, shapeOk: true }, DZ23_BROKEN: { present: true, shapeOk: false } } })
-    expect(service.smtp(viewer)).toEqual({ configured: false, secret_ref: null, tier: 'T2' })
+    expect(await service.smtp(viewer)).toEqual({ configured: false, secret_ref: null, tier: 'T2' })
     await expect(service.configureSmtp(admin, 'smtp://user:pass@host', await ok(service, admin, 'smtp.configured', SMTP, 'smtp://user:pass@host'))).rejects.toThrow('identificador')
     // Configuring the app's e-mail is T2: without the confirmation the vault is never even touched.
     await expect(service.configureSmtp(admin, 'DZ23_APP_SMTP')).rejects.toThrow('confirmação')
@@ -757,7 +757,7 @@ describe('integration hub service', () => {
     const record = await service.configureSmtp(admin, '  secret://DZ23_APP_SMTP  ', await ok(service, admin, 'smtp.configured', SMTP, '  secret://DZ23_APP_SMTP  '))
     expect(record).toMatchObject({ kind: 'smtp', secret_ref: 'DZ23_APP_SMTP', enabled: true, effective_tier: 'T2' })
     expect(JSON.stringify(repository.rows)).not.toContain('pass')
-    expect(service.smtp(viewer)).toEqual({ configured: true, secret_ref: 'DZ23_APP_SMTP', tier: 'T2' })
+    expect(await service.smtp(viewer)).toEqual({ configured: true, secret_ref: 'DZ23_APP_SMTP', tier: 'T2' })
     const test = await service.testSmtp(admin, 'pessoa@example.test', await ok(service, admin, 'smtp.tested', SMTP, 'pessoa@example.test'))
     expect(test.result).toBe('NOT_EXECUTED')
     expect(repository.eventRows.at(-1)).toMatchObject({ action: 'smtp.tested', outcome: 'not-executed' })
@@ -780,7 +780,7 @@ describe('integration hub service', () => {
     // Disabling the SMTP record makes it "not configured" again; the record itself stays for the audit trail.
     const smtpRecord = repository.rows.find(row => row.kind === 'smtp')!
     await service.setEnabled(admin, smtpRecord.integration_id, false)
-    expect(service.smtp(viewer)).toMatchObject({ configured: false, secret_ref: null })
+    expect(await service.smtp(viewer)).toMatchObject({ configured: false, secret_ref: null })
     await expect(service.testSmtp(admin, 'pessoa@example.test', await ok(service, admin, 'smtp.tested', SMTP, 'pessoa@example.test'))).rejects.toMatchObject({ code: 'NOT_FOUND' })
   })
 
@@ -804,15 +804,15 @@ describe('integration hub service', () => {
     expect((await stat(join(exportsRoot, 'org-a', 'ws-a'))).mode & 0o777).toBe(0o700)
     const archive = await readFile(record.path)
     expect(readZip(archive).map(entry => entry.name)).toEqual(['.env.example', 'README.md', 'app/server.js'])
-    expect(service.listExports(viewer, 'p1')).toEqual([record])
-    expect(service.exportRecord(viewer, 'p1', record.export_id)).toEqual(record)
-    expect(() => service.exportRecord(viewer, 'p1', 'missing')).toThrow(HubError)
-    expect(() => service.listExports(otherTenant, 'p1')).toThrow()
+    expect(await service.listExports(viewer, 'p1')).toEqual([record])
+    expect(await service.exportRecord(viewer, 'p1', record.export_id)).toEqual(record)
+    await expect(service.exportRecord(viewer, 'p1', 'missing')).rejects.toThrow(HubError)
+    await expect(service.listExports(otherTenant, 'p1')).rejects.toThrow()
     expect(repository.eventRows.at(-1)).toMatchObject({ action: 'export.created', outcome: 'success', subject_id: record.export_id })
     // Same run, same bytes → the same package; no twin file per click.
     const again = await service.createExport(builder, 'p1')
     expect(again).toEqual(record)
-    expect(service.listExports(viewer, 'p1')).toHaveLength(1)
+    expect(await service.listExports(viewer, 'p1')).toHaveLength(1)
   })
 
   it('creates a package with O_EXCL so a planted export id is refused and never overwritten', async () => {

@@ -16,6 +16,7 @@ import { isLoopbackAuthority, isLoopbackEndpoint } from './manifest.js'
 import { t } from './i18n.js'
 import { studioIntegrationSwitchesDomainSpec, studioIntegrationsDomainSpec, type HubEvent, type HubKey, type IntegrationKillSwitch, type KillSwitchKey, type StudioExport, type StudioIntegration } from './model.js'
 import { IntegrationHubService, securityFingerprint, smtpSecretShape, type EmailTestPort, type HubActor, type HubRepository, type SecretInspector } from './service.js'
+import { TenantRecordHubRepository, type HubTenantRecordStore } from './tenant-repository.js'
 
 export * from './model.js'
 export * from './catalog.js'
@@ -31,6 +32,19 @@ export const name = 'dz23-studio-integration-hub'
 export const inject = ['storageDomain', 'credentials', 'webServer', 'studioIdentity', 'studioTenancy', 'studioPromptToApp']
 
 export interface IntegrationHubConfig {
+  /**
+   * Onde as integrações, exportações e eventos são guardados.
+   *
+   * `kv` (padrão) é a chave-valor de sempre: o isolamento entre inquilinos é
+   * feito por índice montado DENTRO deste processo. `rls` põe as três tabelas
+   * na tabela por inquilino do PostgreSQL, com política por linha — o banco
+   * recusa o que não é do escopo, sem depender de nenhum `filter` do produto.
+   *
+   * Ele NÃO migra o que já está gravado: trocar num Studio que já rodou deixa
+   * a tela vazia e o histórico fora de vista. A troca é para instalação nova,
+   * ou depois de exportar e importar.
+   */
+  readonly storageAuthority?: 'kv' | 'rls'
   readonly exportsRoot?: string
   /** Publisher id → Ed25519 public key (SPKI base64 or PEM). Public material only. */
   readonly publisherKeys?: Readonly<Record<string, string>>
@@ -85,12 +99,12 @@ class DomainHubRepository implements HubRepository {
     for (const rows of this.#events.values()) rows.sort(newestEventFirst)
   }
 
-  integrations(scope: HubActor) { return [...(this.#integrations.get(scopeOf(scope))?.values() ?? [])] }
-  integration(scope: HubActor, integrationId: string) { return this.#integrations.get(scopeOf(scope))?.get(integrationId) }
+  async integrations(scope: HubActor) { return [...(this.#integrations.get(scopeOf(scope))?.values() ?? [])] }
+  async integration(scope: HubActor, integrationId: string) { return this.#integrations.get(scopeOf(scope))?.get(integrationId) }
   putIntegration(value: StudioIntegration) { return this.#exclusiveIntegration(() => this.#putIntegration(value)) }
   deleteIntegration(scope: HubActor, integrationId: string) {
     return this.#exclusiveIntegration(async () => {
-      const current = this.integration(scope, integrationId)
+      const current = await this.integration(scope, integrationId)
       if (current === undefined) return
       const identity = recordKey(current, integrationId)
       const key = this.#integrationKeys.get(identity) ?? physicalKey(current, integrationId)
@@ -101,14 +115,14 @@ class DomainHubRepository implements HubRepository {
   }
   compareAndSwapIntegration(scope: HubActor, integrationId: string, expectedFingerprint: string, value: StudioIntegration) {
     return this.#exclusiveIntegration(async () => {
-      const current = this.integration(scope, integrationId)
+      const current = await this.integration(scope, integrationId)
       if (current === undefined || securityFingerprint(current) !== expectedFingerprint) return false
       await this.#putIntegration(value)
       return true
     })
   }
-  exports(scope: HubActor, projectId: string) { return [...(this.#exports.get(projectScopeOf(scope, projectId))?.values() ?? [])] }
-  export(scope: HubActor, projectId: string, exportId: string) { return this.#exports.get(projectScopeOf(scope, projectId))?.get(exportId) }
+  async exports(scope: HubActor, projectId: string) { return [...(this.#exports.get(projectScopeOf(scope, projectId))?.values() ?? [])] }
+  async export(scope: HubActor, projectId: string, exportId: string) { return this.#exports.get(projectScopeOf(scope, projectId))?.get(exportId) }
   async putExport(value: StudioExport) {
     const key = physicalKey(value, value.export_id)
     await this.exportTable.put(key, value)
@@ -118,12 +132,12 @@ class DomainHubRepository implements HubRepository {
     this.#exportKeys.set(identity, key)
     mapFor(this.#exports, projectScopeOf(value, value.project_id)).set(value.export_id, value)
   }
-  eventPage(scope: HubActor, after: Pick<HubEvent, 'created_at' | 'event_id'> | undefined, limit: number) {
+  async eventPage(scope: HubActor, after: Pick<HubEvent, 'created_at' | 'event_id'> | undefined, limit: number) {
     const rows = this.#events.get(scopeOf(scope)) ?? []
     const start = after === undefined ? 0 : rows.findIndex(value => newestEventFirst(value, after) > 0)
     return start < 0 ? [] : rows.slice(start, start + limit)
   }
-  eventCount(scope: HubActor) { return this.#events.get(scopeOf(scope))?.length ?? 0 }
+  async eventCount(scope: HubActor) { return this.#events.get(scopeOf(scope))?.length ?? 0 }
   putEvent(value: HubEvent) {
     return this.#exclusiveEvent(async () => {
       const key = physicalKey(value, value.event_id)
@@ -288,6 +302,39 @@ export function assertChannelAllowed(channel: 'stable' | 'dev', boundary: {
   if (!local) throw new Error(t('errors.devChannelNotPersonal'))
 }
 
+/**
+ * Escolhe onde as integrações, exportações e eventos são guardados.
+ *
+ * Falha ALTO quando `rls` é pedido e o armazenamento por inquilino não está
+ * montado. Cair de volta para a chave-valor em silêncio seria o pior desfecho:
+ * quem pediu RLS acharia que tem isolamento no banco, e a instalação
+ * continuaria escrevendo na unidade opaca.
+ *
+ * Os desligamentos por alcance continuam na chave-valor nos DOIS casos: são de
+ * outro domínio, lidos em guarda de caminho quente, e trocá-los por leitura de
+ * banco é mudança de desenho da guarda, não migração.
+ * @param ctx - o contexto, consultado no momento da montagem.
+ * @param config - a configuração do plugin.
+ * @param domain - o domínio chave-valor do Hub, já aberto.
+ * @param switchDomain - o domínio dos desligamentos, já aberto.
+ * @returns o repositório do Hub.
+ */
+export function hubRepository(
+  ctx: Pick<Context, 'get'>,
+  config: IntegrationHubConfig,
+  domain: Domain<typeof studioIntegrationsDomainSpec>,
+  switchDomain: Domain<typeof studioIntegrationSwitchesDomainSpec>,
+): HubRepository {
+  const kv = new DomainHubRepository(
+    domain.table('integrations'), domain.table('exports'), domain.table('events'),
+    switchDomain.table('switches'),
+  )
+  if ((config.storageAuthority ?? 'kv') === 'kv') return kv
+  const records = ctx.get('studioTenantStorage')?.records as HubTenantRecordStore | undefined
+  if (records === undefined) throw new Error('HUB_TENANT_STORAGE_UNAVAILABLE')
+  return new TenantRecordHubRepository(records, kv)
+}
+
 export async function apply(ctx: Context, config: IntegrationHubConfig = {}): Promise<void> {
   const port = ctx.webServer.port
   const defaultHost = `127.0.0.1:${port}`; const defaultOrigin = `http://localhost:${port}`
@@ -313,10 +360,7 @@ export async function apply(ctx: Context, config: IntegrationHubConfig = {}): Pr
   const publisherKeys = z.record(z.string().regex(/^[a-z][a-z0-9-]{1,63}$/u), z.string().min(32)).parse(config.publisherKeys ?? {})
   const promptToApp = ctx.studioPromptToApp.service
   const service = new IntegrationHubService({
-    repository: new DomainHubRepository(
-      domain.table('integrations'), domain.table('exports'), domain.table('events'),
-      switchDomain.table('switches'),
-    ),
+    repository: hubRepository(ctx, config, domain, switchDomain),
     secrets: credentialInspector(ctx.credentials),
     projects: {
       project: (actor, projectId) => promptToApp.project(actor, projectId),

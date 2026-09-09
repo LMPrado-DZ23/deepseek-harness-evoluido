@@ -34,9 +34,24 @@ export function strongIdentityFresh(input: { readonly last_strong_auth_method?: 
   return Number.isFinite(at) && now.getTime() - at >= 0 && now.getTime() - at < STRONG_IDENTITY_TTL_MS
 }
 
+/**
+ * O armazenamento do Hub.
+ *
+ * As LEITURAS do domínio `studio_integrations` (integrações, exportações e
+ * eventos) são assíncronas e recebem o escopo. Assíncronas porque o
+ * repositório com isolamento por linha (RLS) consulta o banco: o escopo viaja
+ * na consulta e é o PostgreSQL que recusa o que não é do inquilino, em vez de
+ * um `filter` deste processo. Escopadas porque uma leitura sem escopo não tem
+ * como ser servida por uma credencial escopada — e é exatamente essa a
+ * diferença entre "o código separa" e "o banco recusa".
+ *
+ * Os desligamentos por alcance continuam SÍNCRONOS: eles são lidos em guarda
+ * de caminho quente, antes de cada chamada de integração, e trocá-los por
+ * leitura de banco é mudança de desenho da guarda, não migração.
+ */
 export interface HubRepository {
-  integrations(scope: HubActor): readonly StudioIntegration[]
-  integration(scope: HubActor, integrationId: string): StudioIntegration | undefined
+  integrations(scope: HubActor): Promise<readonly StudioIntegration[]>
+  integration(scope: HubActor, integrationId: string): Promise<StudioIntegration | undefined>
   putIntegration(value: StudioIntegration): Promise<void>
   /**
    * Apaga o REGISTRO da integração (X-04). Só o registro: os eventos ficam.
@@ -48,12 +63,12 @@ export interface HubRepository {
   deleteIntegration(scope: HubActor, integrationId: string): Promise<void>
   /** Atomic within the repository writer: replace only the security state the caller read. */
   compareAndSwapIntegration(scope: HubActor, integrationId: string, expectedFingerprint: string, value: StudioIntegration): Promise<boolean>
-  exports(scope: HubActor, projectId: string): readonly StudioExport[]
-  export(scope: HubActor, projectId: string, exportId: string): StudioExport | undefined
+  exports(scope: HubActor, projectId: string): Promise<readonly StudioExport[]>
+  export(scope: HubActor, projectId: string, exportId: string): Promise<StudioExport | undefined>
   putExport(value: StudioExport): Promise<void>
   /** Bounded page, already scoped and ordered newest first; never a full-table snapshot. */
-  eventPage(scope: HubActor, after: Pick<HubEvent, 'created_at' | 'event_id'> | undefined, limit: number): readonly HubEvent[]
-  eventCount(scope: HubActor): number
+  eventPage(scope: HubActor, after: Pick<HubEvent, 'created_at' | 'event_id'> | undefined, limit: number): Promise<readonly HubEvent[]>
+  eventCount(scope: HubActor): Promise<number>
   putEvent(value: HubEvent): Promise<void>
   /** Retention happens inside the scoped repository index, not after materialising the domain. */
   pruneEvents(scope: HubActor, keep: number): Promise<number>
@@ -326,9 +341,9 @@ export class IntegrationHubService {
 
   // ---- registry -------------------------------------------------------------
 
-  list(actor: HubActor): readonly StudioIntegration[] {
+  async list(actor: HubActor): Promise<readonly StudioIntegration[]> {
     this.#authorize(actor, 'workspace.read')
-    return this.options.repository.integrations(actor)
+    return await this.options.repository.integrations(actor)
   }
 
   /**
@@ -343,10 +358,11 @@ export class IntegrationHubService {
    * @param query - busca, filtros, limite e posição.
    * @returns a página e os totais.
    */
-  searchIntegrations(actor: HubActor, query: IntegrationQuery = {}): IntegrationPage {
+  async searchIntegrations(actor: HubActor, query: IntegrationQuery = {}): Promise<IntegrationPage> {
     this.#authorize(actor, 'workspace.read')
+    const rows = await this.options.repository.integrations(actor)
     try {
-      return pageOfIntegrations(this.options.repository.integrations(actor), query)
+      return pageOfIntegrations(rows, query)
     } catch (error) {
       // Um cursor que não é legível é pedido inválido, não erro interno: ele
       // veio do cliente, e a página que ele pediu não existe.
@@ -361,9 +377,9 @@ export class IntegrationHubService {
    * @param integrationId - a integração.
    * @returns estado, números e o que se sabe do custo.
    */
-  health(actor: HubActor, integrationId: string): IntegrationHealth {
+  async health(actor: HubActor, integrationId: string): Promise<IntegrationHealth> {
     this.#authorize(actor, 'workspace.read')
-    return integrationHealth(this.#integration(actor, integrationId))
+    return integrationHealth(await this.#integration(actor, integrationId))
   }
 
   /** Whether the interface may offer "enable" for this record: decided here, the same place that enforces it. */
@@ -411,7 +427,7 @@ export class IntegrationHubService {
       throw new HubError('INVALID', t('errors.manifestSignatureInvalid'))
     }
     const now = this.#stamp()
-    const existing = this.list(actor).find(value => value.manifest?.id === evaluation.manifest!.id && value.kind === evaluation.manifest!.kind)
+    const existing = (await this.list(actor)).find(value => value.manifest?.id === evaluation.manifest!.id && value.kind === evaluation.manifest!.kind)
     const integration: StudioIntegration = {
       integration_id: existing?.integration_id ?? this.#createId(), org_id: actor.orgId, tenant_id: actor.tenantId,
       kind: evaluation.manifest.kind, name: evaluation.manifest.name, manifest: evaluation.manifest,
@@ -449,10 +465,10 @@ export class IntegrationHubService {
     // FINGERPRINT of the target below, not the subject.
     const subject = action === 'integration.enabled' ? subjectId : SMTP_SUBJECT
     if (action !== 'integration.enabled' && subjectId !== SMTP_SUBJECT) throw new HubError('INVALID', t('errors.invalidRequest'))
-    const tier = this.#tierForAction(actor, action, subject)
+    const tier = await this.#tierForAction(actor, action, subject)
     const ticket: HubApprovalTicket = {
       approval_id: this.#createId(), org_id: actor.orgId, tenant_id: actor.tenantId,
-      tier, action, subject_id: subject, fingerprint: this.#fingerprint(actor, action, subject, payload),
+      tier, action, subject_id: subject, fingerprint: await this.#fingerprint(actor, action, subject, payload),
       user_id: actor.userId, session_id: actor.sessionId,
       expires_at: new Date(this.#now().getTime() + APPROVAL_TTL_MS).toISOString(),
       requires_strong_identity: tier === 'T3',
@@ -480,21 +496,21 @@ export class IntegrationHubService {
    * record. Nothing readable — no alias, no e-mail — travels in the ticket or
    * reaches the history through it.
    */
-  #fingerprint(actor: HubActor, action: HubEvent['action'], subjectId: string, payload: string | undefined): string {
-    if (action === 'integration.enabled') return securityFingerprint(this.#integration(actor, subjectId))
+  async #fingerprint(actor: HubActor, action: HubEvent['action'], subjectId: string, payload: string | undefined): Promise<string> {
+    if (action === 'integration.enabled') return securityFingerprint(await this.#integration(actor, subjectId))
     if (action === 'smtp.configured' || action === 'smtp.tested') {
       // A decision with no target is a decision about nothing: refuse to issue it.
       if (payload === undefined || payload.trim() === '') throw new HubError('INVALID', t('errors.invalidRequest'))
       const target = action === 'smtp.configured' ? String(canonicalSecretRef(payload)) : payload.trim()
-      const record = this.#smtpRecord(actor)
+      const record = await this.#smtpRecord(actor)
       return digest([action, target, record === undefined ? '-' : securityFingerprint(record)])
     }
     throw new HubError('INVALID', t('errors.invalidRequest'))
   }
 
   /** The tier an action would need right now, decided by the server for the request above. */
-  #tierForAction(actor: HubActor, action: HubEvent['action'], subjectId: string): PolicyTier {
-    if (action === 'integration.enabled') return this.#enforcedTier(this.#integration(actor, subjectId))
+  async #tierForAction(actor: HubActor, action: HubEvent['action'], subjectId: string): Promise<PolicyTier> {
+    if (action === 'integration.enabled') return this.#enforcedTier(await this.#integration(actor, subjectId))
     if (action === 'smtp.configured' || action === 'smtp.tested') return SMTP_TIER
     throw new HubError('INVALID', t('errors.invalidRequest'))
   }
@@ -542,7 +558,7 @@ export class IntegrationHubService {
 
   async #setEnabled(actor: HubActor, integrationId: string, enabled: boolean, approval?: HubApproval): Promise<StudioIntegration> {
     this.#authorize(actor, 'integrations.manage')
-    const current = this.#integration(actor, integrationId)
+    const current = await this.#integration(actor, integrationId)
     let confirmed = false
     if (enabled) {
       // Turning something OFF always reduces exposure and needs no confirmation; turning it ON is the guarded direction.
@@ -560,7 +576,7 @@ export class IntegrationHubService {
     // confirmation: a concurrent re-registration that RAISED the tier would be silently undone.
     // Compared by FINGERPRINT of the security-relevant fields and not by `updated_at`: two writes
     // inside the same millisecond carried the same stamp, and the check then kept the wrong version.
-    const latest = this.#integration(actor, integrationId)
+    const latest = await this.#integration(actor, integrationId)
     if (securityFingerprint(latest) !== securityFingerprint(current)) {
       await this.#audit(actor, enabled ? 'integration.enabled' : 'integration.disabled', integrationId, 'failure', 'changed-during-approval')
       throw new HubError('CONFLICT', t('errors.integrationChanged'))
@@ -604,7 +620,7 @@ export class IntegrationHubService {
 
   async #removeIntegration(actor: HubActor, integrationId: string, approval?: HubApproval): Promise<{ readonly integration_id: string; readonly name: string; readonly secret_ref: string | null }> {
     this.#authorize(actor, 'integrations.manage')
-    const current = this.#integration(actor, integrationId)
+    const current = await this.#integration(actor, integrationId)
     if (current.enabled) {
       await this.#audit(actor, 'integration.removed', integrationId, 'failure', 'still-enabled')
       throw new HubError('CONFLICT', t('errors.integrationRemoveEnabled'))
@@ -612,7 +628,7 @@ export class IntegrationHubService {
     const confirmed = await this.#requireTier(actor, this.#enforcedTier(current), approval, 'integration.removed', integrationId, securityFingerprint(current))
     // Reler DEPOIS da confirmação: se alguém religou a integração enquanto a
     // pessoa confirmava, apagar agora seria apagar algo ligado.
-    const latest = this.#integration(actor, integrationId)
+    const latest = await this.#integration(actor, integrationId)
     if (securityFingerprint(latest) !== securityFingerprint(current) || latest.enabled) {
       await this.#audit(actor, 'integration.removed', integrationId, 'failure', 'changed-during-approval')
       throw new HubError('CONFLICT', t('errors.integrationChanged'))
@@ -647,7 +663,7 @@ export class IntegrationHubService {
    */
   async testIntegration(actor: HubActor, integrationId: string): Promise<{ readonly result: 'OK' | 'FAILED' | 'TIMEOUT' | 'NOT_EXECUTED' | 'NOT_APPLICABLE'; readonly message: string }> {
     this.#authorize(actor, 'integrations.manage')
-    const current = this.#integration(actor, integrationId)
+    const current = await this.#integration(actor, integrationId)
     if (current.kind === 'skill') {
       await this.#audit(actor, 'integration.tested', integrationId, 'not-executed', 'skill-has-no-connection')
       return { result: 'NOT_APPLICABLE', message: t('test.skillNoConnection') }
@@ -820,7 +836,7 @@ export class IntegrationHubService {
     // E o desligamento por alcance vem junto, pelo mesmo motivo: ele é a
     // resposta a "desliga tudo neste projeto" sem parar o Studio inteiro.
     this.assertScopeEnabled(actor, request.projectId)
-    const record = this.#integration(actor, integrationId)
+    const record = await this.#integration(actor, integrationId)
     const operation = auditOperation(request.operation)
     // Uma integração desligada, ou cuja assinatura não confere, não é chamada por
     // ninguém — nem por um aplicativo gerado que ainda guarde o identificador de
@@ -983,7 +999,7 @@ export class IntegrationHubService {
    */
   async callMcpTool(actor: HubActor, integrationId: string, request: McpToolCallRequest): Promise<IntegrationCallResult<McpCallOutcome>> {
     this.#authorize(actor, 'project.write')
-    const record = this.#integration(actor, integrationId)
+    const record = await this.#integration(actor, integrationId)
     const operation = auditOperation(`mcp.${request.tool}`)
     if (record.kind !== 'mcp') {
       await this.#audit(actor, 'integration.called', integrationId, 'not-executed', `${operation} not-mcp`)
@@ -1028,7 +1044,7 @@ export class IntegrationHubService {
     readonly failure: string | undefined
   }): Promise<IntegrationCostState> {
     return this.#exclusiveIntegration(this.#scope(actor), async () => {
-      const latest = this.options.repository.integration(actor, integrationId)
+      const latest = await this.options.repository.integration(actor, integrationId)
       // A integração deixou de existir durante a chamada: não há registro para
       // somar. A auditoria acima continua sendo a prova de que ela aconteceu.
       if (latest === undefined) return integrationCostState({ calls: call.attempts, unpriced_calls: call.priceUsd === undefined ? call.attempts : 0 })
@@ -1056,9 +1072,9 @@ export class IntegrationHubService {
 
   // ---- smtp for generated apps ---------------------------------------------
 
-  smtp(actor: HubActor): { configured: boolean; secret_ref: string | null; tier: PolicyTier } {
+  async smtp(actor: HubActor): Promise<{ configured: boolean; secret_ref: string | null; tier: PolicyTier }> {
     this.#authorize(actor, 'workspace.read')
-    const record = this.#smtpRecord(actor)
+    const record = await this.#smtpRecord(actor)
     const configured = record !== undefined && record.enabled && record.secret_ref !== null
     return { configured, secret_ref: configured ? record.secret_ref : null, tier: SMTP_TIER }
   }
@@ -1069,7 +1085,7 @@ export class IntegrationHubService {
     if (!parsed.success) throw new HubError('INVALID', t('errors.secretRefInvalid'))
     // The confirmation has to have been given for THIS alias: the fingerprint of the reference is
     // what separates a decision about `DZ23_APP_SMTP` from one about somebody else's credential.
-    const confirmed = await this.#requireTier(actor, SMTP_TIER, approval, 'smtp.configured', SMTP_SUBJECT, this.#fingerprint(actor, 'smtp.configured', SMTP_SUBJECT, parsed.data))
+    const confirmed = await this.#requireTier(actor, SMTP_TIER, approval, 'smtp.configured', SMTP_SUBJECT, await this.#fingerprint(actor, 'smtp.configured', SMTP_SUBJECT, parsed.data))
     const inspection = await this.options.secrets.inspect(parsed.data)
     // A refusal is part of the history too: "nothing happened" must be visible, not absent. The
     // subject is the SMTP setting itself — the alias is a name in the vault and never a subject id.
@@ -1082,7 +1098,7 @@ export class IntegrationHubService {
       throw new HubError('INVALID', t('errors.secretShapeInvalid'))
     }
     const now = this.#stamp()
-    const existing = this.#smtpRecord(actor)
+    const existing = await this.#smtpRecord(actor)
     const record: StudioIntegration = {
       integration_id: existing?.integration_id ?? this.#createId(), org_id: actor.orgId, tenant_id: actor.tenantId,
       kind: 'smtp', name: t('smtp.integrationName'), manifest: null, effective_tier: SMTP_TIER, verification: 'verified',
@@ -1098,7 +1114,7 @@ export class IntegrationHubService {
 
   async testSmtp(actor: HubActor, to: string, approval?: HubApproval): Promise<{ result: 'SENT' | 'NOT_EXECUTED'; message: string }> {
     this.#authorize(actor, 'integrations.manage')
-    const record = this.#smtpRecord(actor)
+    const record = await this.#smtpRecord(actor)
     if (record === undefined || record.secret_ref === null || !record.enabled) throw new HubError('NOT_FOUND', t('errors.smtpNotConfigured'))
     // The address is checked BEFORE the confirmation is spent: a typo must not cost the person their
     // confirmation, and the ticket is bound to this exact recipient anyway.
@@ -1108,7 +1124,7 @@ export class IntegrationHubService {
       throw new HubError('INVALID', t('errors.invalidRequest'))
     }
     // Bound to the address the person confirmed: a ticket taken for one recipient cannot send to another.
-    const confirmed = await this.#requireTier(actor, this.#enforcedTier(record), approval, 'smtp.tested', SMTP_SUBJECT, this.#fingerprint(actor, 'smtp.tested', SMTP_SUBJECT, recipient.data))
+    const confirmed = await this.#requireTier(actor, this.#enforcedTier(record), approval, 'smtp.tested', SMTP_SUBJECT, await this.#fingerprint(actor, 'smtp.tested', SMTP_SUBJECT, recipient.data))
     if (this.options.emailTest === undefined) {
       await this.#recordApproval(actor, confirmed, 'smtp.tested', record.integration_id)
       await this.#audit(actor, 'smtp.tested', record.integration_id, 'not-executed', t('errors.smtpTestDisabled'))
@@ -1129,10 +1145,10 @@ export class IntegrationHubService {
 
   // ---- exports ---------------------------------------------------------------
 
-  listExports(actor: HubActor, projectId: string): readonly StudioExport[] {
+  async listExports(actor: HubActor, projectId: string): Promise<readonly StudioExport[]> {
     this.#authorize(actor, 'project.read')
     this.options.projects.project(actor, projectId)
-    return this.options.repository.exports(actor, projectId)
+    return await this.options.repository.exports(actor, projectId)
   }
 
   /**
@@ -1330,7 +1346,7 @@ export class IntegrationHubService {
     // the Studio stopped waiting. Nothing below this line may run — no file, no row, no audit.
     if (lease.abandoned) throw abandoned()
     // Same run, same bytes: hand back the existing package instead of writing a twin file on every click.
-    const existing = this.listExports(actor, projectId).find(value => value.run_id === run.run_id && value.sha256 === built.sha256)
+    const existing = (await this.listExports(actor, projectId)).find(value => value.run_id === run.run_id && value.sha256 === built.sha256)
     // No lease is claimed here on purpose: handing back a package that was already on disk writes
     // no file, no row and no audit line, so there is nothing for the ceiling to contradict — and a
     // guard whose failure changes nothing is not a guard.
@@ -1370,10 +1386,10 @@ export class IntegrationHubService {
     return record
   }
 
-  exportRecord(actor: HubActor, projectId: string, exportId: string): StudioExport {
+  async exportRecord(actor: HubActor, projectId: string, exportId: string): Promise<StudioExport> {
     this.#authorize(actor, 'project.read')
     this.options.projects.project(actor, projectId)
-    const record = this.options.repository.export(actor, projectId, exportId)
+    const record = await this.options.repository.export(actor, projectId, exportId)
     if (record === undefined) throw new HubError('NOT_FOUND', t('errors.exportNotFound'))
     return record
   }
@@ -1385,7 +1401,7 @@ export class IntegrationHubService {
    * turn the download route into "read any file on the server".
    */
   async exportFile(actor: HubActor, projectId: string, exportId: string): Promise<{ handle: FileHandle; size: number }> {
-    const record = this.exportRecord(actor, projectId, exportId)
+    const record = await this.exportRecord(actor, projectId, exportId)
     const root = resolve(this.options.exportsRoot, safeSegment(actor.orgId), safeSegment(actor.tenantId))
     const expected = resolve(root, `${safeSegment(exportId)}.zip`)
     if (resolve(record.path) !== expected) {
@@ -1417,11 +1433,11 @@ export class IntegrationHubService {
    * runs, and a route that returned all of it was a way to make the server do
    * unbounded work on request.
    */
-  events(actor: HubActor, page: { readonly limit?: number | undefined; readonly cursor?: string | undefined } = {}): { events: readonly HubEvent[]; next_cursor: string | null } {
+  async events(actor: HubActor, page: { readonly limit?: number | undefined; readonly cursor?: string | undefined } = {}): Promise<{ events: readonly HubEvent[]; next_cursor: string | null }> {
     this.#authorize(actor, 'audit.read')
     const limit = Math.min(Math.max(Math.trunc(page.limit ?? EVENTS_PAGE_SIZE), 1), EVENTS_PAGE_MAX)
     const after = page.cursor === undefined ? undefined : decodeCursor(page.cursor)
-    const pageRows = this.options.repository.eventPage(actor, after, limit + 1)
+    const pageRows = await this.options.repository.eventPage(actor, after, limit + 1)
     const window = pageRows.slice(0, limit)
     const last = window.at(-1)
     // A cursor only exists while there is something after it: the client stops without a second empty round trip.
@@ -1431,12 +1447,12 @@ export class IntegrationHubService {
 
   // ---- internals -----------------------------------------------------------
 
-  #smtpRecord(actor: HubActor): StudioIntegration | undefined {
-    return this.options.repository.integrations(actor).find(value => value.kind === 'smtp' && value.manifest === null)
+  async #smtpRecord(actor: HubActor): Promise<StudioIntegration | undefined> {
+    return (await this.options.repository.integrations(actor)).find(value => value.kind === 'smtp' && value.manifest === null)
   }
 
-  #integration(actor: HubActor, integrationId: string): StudioIntegration {
-    const value = this.options.repository.integration(actor, integrationId)
+  async #integration(actor: HubActor, integrationId: string): Promise<StudioIntegration> {
+    const value = await this.options.repository.integration(actor, integrationId)
     if (value === undefined) throw new HubError('NOT_FOUND', t('errors.integrationNotFound'))
     return value
   }
@@ -1559,7 +1575,7 @@ export class IntegrationHubService {
    * another's rows.
    */
   async #retainEvents(actor: HubActor): Promise<void> {
-    if (this.options.repository.eventCount(actor) <= EVENTS_RETAINED_PER_TENANT) return
+    if (await this.options.repository.eventCount(actor) <= EVENTS_RETAINED_PER_TENANT) return
     await this.options.repository.pruneEvents(actor, EVENTS_RETAINED_PER_TENANT)
   }
 }

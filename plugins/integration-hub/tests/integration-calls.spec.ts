@@ -13,26 +13,26 @@ import {
 
 class MemoryRepository implements HubRepository {
   rows: StudioIntegration[] = []; exportRows: StudioExport[] = []; eventRows: HubEvent[] = []
-  integrations = (scope: HubActor) => this.rows.filter(row => sameScope(scope, row))
-  integration = (scope: HubActor, integrationId: string) => this.rows.find(row => sameScope(scope, row) && row.integration_id === integrationId)
+  integrations = async (scope: HubActor) => this.rows.filter(row => sameScope(scope, row))
+  integration = async (scope: HubActor, integrationId: string) => this.rows.find(row => sameScope(scope, row) && row.integration_id === integrationId)
   deleteIntegration = async (scope: HubActor, integrationId: string) => { this.rows = this.rows.filter(row => !(row.integration_id === integrationId && row.org_id === scope.orgId && row.tenant_id === scope.tenantId)) }
   putIntegration = async (value: StudioIntegration) => {
     this.rows = [...this.rows.filter(row => row.integration_id !== value.integration_id || row.org_id !== value.org_id || row.tenant_id !== value.tenant_id), value]
   }
   compareAndSwapIntegration = async (scope: HubActor, integrationId: string, expected: string, value: StudioIntegration) => {
-    const current = this.integration(scope, integrationId)
+    const current = await this.integration(scope, integrationId)
     if (current === undefined || securityFingerprint(current) !== expected) return false
     await this.putIntegration(value); return true
   }
-  exports = () => []
-  export = () => undefined
+  exports = async () => []
+  export = async () => undefined
   putExport = async () => undefined
-  eventPage = (scope: HubActor, after: Pick<HubEvent, 'created_at' | 'event_id'> | undefined, limit: number) => {
+  eventPage = async (scope: HubActor, after: Pick<HubEvent, 'created_at' | 'event_id'> | undefined, limit: number) => {
     const rows = this.eventRows.filter(row => sameScope(scope, row)).sort(newestFirst)
     const start = after === undefined ? 0 : rows.findIndex(row => newestFirst(row, after) > 0)
     return start < 0 ? [] : rows.slice(start, start + limit)
   }
-  eventCount = (scope: HubActor) => this.eventRows.filter(row => sameScope(scope, row)).length
+  eventCount = async (scope: HubActor) => this.eventRows.filter(row => sameScope(scope, row)).length
   putEvent = async (value: HubEvent) => { this.eventRows = [...this.eventRows, value] }
   pruneEvents = async () => 0
   readonly switches = new Map<string, IntegrationKillSwitch>()
@@ -118,7 +118,7 @@ describe('chamada de integração', () => {
     expect(saiu).toBe(false)
     // Barrada ANTES do teto: uma chamada recusada não pode gastar a cota de
     // quem ainda vai voltar a trabalhar.
-    expect(service.health(admin, id).calls).toBe(0)
+    expect((await service.health(admin, id)).calls).toBe(0)
 
     // Outro projeto continua trabalhando.
     await expect(service.callIntegration(admin, id, { operation: 'ler', idempotent: true, projectId: 'p2' }, invoke))
@@ -138,10 +138,10 @@ describe('chamada de integração', () => {
     const { service, repository } = await build()
     const id = await enabled(service)
     // Antes de qualquer chamada a saúde é NOT_EXECUTED: nunca "OK" sem ter sido chamada.
-    expect(service.health(admin, id).state).toBe('NOT_EXECUTED')
+    expect((await service.health(admin, id)).state).toBe('NOT_EXECUTED')
     const result = await service.callIntegration(admin, id, { operation: 'agenda.listar', idempotent: true }, async () => 'pronto')
     expect(result).toMatchObject({ state: 'OK', value: 'pronto', attempts: 1, retried: false, cost: 'UNKNOWN' })
-    const health = service.health(admin, id)
+    const health = await service.health(admin, id)
     expect(health.state).toBe('OK')
     expect(health.calls).toBe(1)
     expect(health.failures).toBe(0)
@@ -158,10 +158,10 @@ describe('chamada de integração', () => {
     const { service } = await build()
     const id = await enabled(service)
     await service.callIntegration(admin, id, { operation: 'c', idempotent: true, priceUsd: 0.25 }, async () => 1)
-    expect(service.health(admin, id)).toMatchObject({ cost_state: 'MEASURED', cost_usd: 0.25 })
+    expect(await service.health(admin, id)).toMatchObject({ cost_state: 'MEASURED', cost_usd: 0.25 })
     await service.callIntegration(admin, id, { operation: 'c', idempotent: true }, async () => 1)
     // O valor continua sendo um piso, e o estado diz isso em vez de anunciar um total.
-    expect(service.health(admin, id)).toMatchObject({ cost_state: 'PARTIAL', cost_usd: 0.25 })
+    expect(await service.health(admin, id)).toMatchObject({ cost_state: 'PARTIAL', cost_usd: 0.25 })
   })
 
   it('repete exatamente uma vez uma operação idempotente que falhou, e nunca uma que não é', async () => {
@@ -175,7 +175,7 @@ describe('chamada de integração', () => {
     })
     expect(attempts).toBe(2)
     expect(recovered).toMatchObject({ state: 'OK', attempts: 2, retried: true })
-    expect(service.health(admin, idempotent)).toMatchObject({ calls: 2, failures: 1, retries: 1 })
+    expect(await service.health(admin, idempotent)).toMatchObject({ calls: 2, failures: 1, retries: 1 })
 
     const unsafe = await enabled(service, { id: 'cobranca', name: 'Cobrança' })
     let sent = 0
@@ -198,7 +198,7 @@ describe('chamada de integração', () => {
     })
     expect(attempts).toBe(2)
     expect(result).toMatchObject({ state: 'FAILED', attempts: 2, retried: true })
-    const health = service.health(admin, id)
+    const health = await service.health(admin, id)
     expect(health).toMatchObject({ calls: 2, failures: 2 })
     expect(health.state).toBe('DOWN')
     // Só a CLASSE do erro sobrevive: a mensagem do provedor costuma trazer host,
@@ -219,7 +219,7 @@ describe('chamada de integração', () => {
     expect(result.state).toBe('TIMEOUT')
     // O Studio não mata a chamada — ele pede que ela desista e para de esperar.
     expect(aborted).toBe(true)
-    expect(service.health(admin, id)).toMatchObject({ calls: 1, failures: 1, timeouts: 1 })
+    expect(await service.health(admin, id)).toMatchObject({ calls: 1, failures: 1, timeouts: 1 })
     expect(repository.eventRows.at(-1)).toMatchObject({ action: 'integration.called', outcome: 'failure' })
     expect(repository.eventRows.at(-1)!.detail).toContain('TIMEOUT')
   })
@@ -234,8 +234,8 @@ describe('chamada de integração', () => {
     expect(called).toBe(false)
     expect(repository.eventRows.at(-1)).toMatchObject({ action: 'integration.called', outcome: 'not-executed' })
     // Nada saiu: os contadores continuam vazios e a saúde continua NOT_EXECUTED.
-    expect(service.health(admin, id).state).toBe('NOT_EXECUTED')
-    expect(service.health(admin, id).calls).toBe(0)
+    expect((await service.health(admin, id)).state).toBe('NOT_EXECUTED')
+    expect((await service.health(admin, id)).calls).toBe(0)
   })
 
   it('o teto é por integração e por escopo, e a repetição também gasta cota', async () => {
@@ -274,14 +274,14 @@ describe('chamada de integração', () => {
       .rejects.toMatchObject({ code: 'FORBIDDEN' })
     await expect(service.callIntegration({ ...otherTenant, role: 'admin' }, id, { operation: 'x', idempotent: true }, async () => 1))
       .rejects.toMatchObject({ code: 'NOT_FOUND' })
-    expect(service.health(admin, id).state).toBe('NOT_EXECUTED')
+    expect((await service.health(admin, id)).state).toBe('NOT_EXECUTED')
   })
 
   it('a saúde e os contadores ficam no escopo em que a chamada aconteceu', async () => {
     const { service, repository } = await build()
     const id = await enabled(service)
     await service.callIntegration(admin, id, { operation: 'ler', idempotent: true }, async () => 1)
-    expect(service.health(admin, id).calls).toBe(1)
+    expect((await service.health(admin, id)).calls).toBe(1)
     // A mesma integração noutro inquilino é outro registro: não existe aqui.
     expect(repository.rows.filter(row => row.tenant_id === 'ws-b')).toEqual([])
   })
@@ -301,7 +301,7 @@ describe('chamada de integração', () => {
     const stored = repository.rows.find(row => row.integration_id === id)!
     // Não existe campo de saúde gravado para envelhecer e passar a discordar:
     // ela sai dos contadores toda vez que alguém pergunta.
-    expect(service.health(admin, id).state).toBe(integrationHealthState(stored))
+    expect((await service.health(admin, id)).state).toBe(integrationHealthState(stored))
   })
 
   it('ligar e desligar continua funcionando depois de uma chamada ter mexido no registro', async () => {
@@ -340,19 +340,19 @@ describe('catálogo pelo serviço', () => {
     const { service } = await build()
     await service.register(admin, manifest({ id: 'agenda', name: 'Agenda' }))
     await service.register(admin, manifest({ id: 'estoque', name: 'Estoque' }))
-    const page = service.searchIntegrations(viewer, { limit: 1 })
+    const page = await service.searchIntegrations(viewer, { limit: 1 })
     expect(page.integrations.map(row => row.name)).toEqual(['Agenda'])
     expect(page.total).toBe(2)
     expect(page.matched).toBe(2)
     expect(page.next_cursor).not.toBeNull()
     // Outro inquilino não vê nada — nem os totais de quem ele não é.
-    expect(service.searchIntegrations(otherTenant)).toMatchObject({ total: 0, matched: 0 })
+    expect(await service.searchIntegrations(otherTenant)).toMatchObject({ total: 0, matched: 0 })
   })
 
   it('um cursor ilegível é pedido inválido, não erro interno', async () => {
     const { service } = await build()
-    expect(() => service.searchIntegrations(admin, { cursor: 'lixo' })).toThrow(HubError)
-    try { service.searchIntegrations(admin, { cursor: 'lixo' }) } catch (error) {
+    await expect(service.searchIntegrations(admin, { cursor: 'lixo' })).rejects.toThrow(HubError)
+    try { await service.searchIntegrations(admin, { cursor: 'lixo' }) } catch (error) {
       expect(error).toMatchObject({ code: 'INVALID' })
     }
   })

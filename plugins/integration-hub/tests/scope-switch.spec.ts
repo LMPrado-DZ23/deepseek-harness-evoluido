@@ -8,13 +8,13 @@ function repository() {
   const switches = new Map<string, IntegrationKillSwitch>()
   return {
     switches,
-    integrations: () => [],
-    integration: () => undefined,
+    integrations: async () => [],
+    integration: async () => undefined,
     putIntegration: async () => {},
     deleteIntegration: async () => {},
     compareAndSwapIntegration: async () => true,
-    exports: () => [], export: () => undefined, putExport: async () => {},
-    eventPage: () => [], eventCount: () => 0, putEvent: async () => {}, pruneEvents: async () => 0,
+    exports: async () => [], export: async () => undefined, putExport: async () => {},
+    eventPage: async () => [], eventCount: async () => 0, putEvent: async () => {}, pruneEvents: async () => 0,
     killSwitch: (switchId: string) => switches.get(switchId),
     putKillSwitch: async (value: IntegrationKillSwitch) => { switches.set(value.switch_id, value) },
     killSwitches: (orgId: string) => [...switches.values()].filter(record => record.org_id === orgId),

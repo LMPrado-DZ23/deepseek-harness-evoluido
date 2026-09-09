@@ -35,16 +35,16 @@ class PromptRepository implements PromptToAppRepository {
 
 class ExportRepository implements HubRepository {
   exportRows: StudioExport[] = []; eventRows: HubEvent[] = []
-  integrations = (_scope: HubActor): readonly StudioIntegration[] => []
-  integration = (_scope: HubActor, _id: string): StudioIntegration | undefined => undefined
+  integrations = async (_scope: HubActor): Promise<readonly StudioIntegration[]> => []
+  integration = async (_scope: HubActor, _id: string): Promise<StudioIntegration | undefined> => undefined
   deleteIntegration = async () => {}
   putIntegration = async (_value: StudioIntegration) => undefined
   compareAndSwapIntegration = async () => false
-  exports = (scope: HubActor, projectId: string) => this.exportRows.filter(row => sameScope(scope, row) && row.project_id === projectId)
-  export = (scope: HubActor, projectId: string, exportId: string) => this.exportRows.find(row => sameScope(scope, row) && row.project_id === projectId && row.export_id === exportId)
+  exports = async (scope: HubActor, projectId: string) => this.exportRows.filter(row => sameScope(scope, row) && row.project_id === projectId)
+  export = async (scope: HubActor, projectId: string, exportId: string) => this.exportRows.find(row => sameScope(scope, row) && row.project_id === projectId && row.export_id === exportId)
   putExport = async (value: StudioExport) => { this.exportRows.push(value) }
-  eventPage = (scope: HubActor, _after: Pick<HubEvent, 'created_at' | 'event_id'> | undefined, limit: number) => this.eventRows.filter(row => sameScope(scope, row)).slice(0, limit)
-  eventCount = (scope: HubActor) => this.eventRows.filter(row => sameScope(scope, row)).length
+  eventPage = async (scope: HubActor, _after: Pick<HubEvent, 'created_at' | 'event_id'> | undefined, limit: number) => this.eventRows.filter(row => sameScope(scope, row)).slice(0, limit)
+  eventCount = async (scope: HubActor) => this.eventRows.filter(row => sameScope(scope, row)).length
   putEvent = async (value: HubEvent) => { this.eventRows.push(value) }
   pruneEvents = async () => 0
   readonly switches = new Map<string, IntegrationKillSwitch>()

@@ -26,22 +26,22 @@ const EVERYTHING = createRequire(import.meta.url).resolve('@modelcontextprotocol
 
 class MemoryRepository implements HubRepository {
   rows: StudioIntegration[] = []; eventRows: HubEvent[] = []
-  integrations = (scope: HubActor) => this.rows.filter(row => sameScope(scope, row))
-  integration = (scope: HubActor, integrationId: string) => this.rows.find(row => sameScope(scope, row) && row.integration_id === integrationId)
+  integrations = async (scope: HubActor) => this.rows.filter(row => sameScope(scope, row))
+  integration = async (scope: HubActor, integrationId: string) => this.rows.find(row => sameScope(scope, row) && row.integration_id === integrationId)
   deleteIntegration = async (scope: HubActor, integrationId: string) => { this.rows = this.rows.filter(row => !(row.integration_id === integrationId && row.org_id === scope.orgId && row.tenant_id === scope.tenantId)) }
   putIntegration = async (value: StudioIntegration) => {
     this.rows = [...this.rows.filter(row => row.integration_id !== value.integration_id), value]
   }
   compareAndSwapIntegration = async (scope: HubActor, integrationId: string, expected: string, value: StudioIntegration) => {
-    const current = this.integration(scope, integrationId)
+    const current = await this.integration(scope, integrationId)
     if (current === undefined || securityFingerprint(current) !== expected) return false
     await this.putIntegration(value); return true
   }
-  exports = (): readonly StudioExport[] => []
-  export = () => undefined
+  exports = async (): Promise<readonly StudioExport[]> => []
+  export = async () => undefined
   putExport = async () => undefined
-  eventPage = () => []
-  eventCount = () => this.eventRows.length
+  eventPage = async () => []
+  eventCount = async () => this.eventRows.length
   putEvent = async (value: HubEvent) => { this.eventRows = [...this.eventRows, value] }
   pruneEvents = async () => 0
   readonly switches = new Map<string, IntegrationKillSwitch>()
@@ -131,7 +131,7 @@ describe('Hub chamando um servidor MCP real', () => {
     const id = await enabled(service)
     expect(service.mcpAvailable).toBe(true)
     // Nunca chamada ainda: NOT_EXECUTED, não "OK".
-    expect(service.health(admin, id).state).toBe('NOT_EXECUTED')
+    expect((await service.health(admin, id)).state).toBe('NOT_EXECUTED')
 
     const result = await service.callMcpTool(admin, id, { tool: 'echo', arguments: { message: 'DZ23' }, idempotent: true })
     expect(result.state).toBe('OK')
@@ -144,7 +144,7 @@ describe('Hub chamando um servidor MCP real', () => {
     expect(result.retried).toBe(false)
 
     // Os contadores e a auditoria são os do Hub — este plugin não guarda nada.
-    const health = service.health(admin, id)
+    const health = await service.health(admin, id)
     expect(health.state).toBe('OK')
     expect(health.calls).toBe(1)
     // Sem preço informado, o custo é DESCONHECIDO e não zero.
@@ -155,9 +155,17 @@ describe('Hub chamando um servidor MCP real', () => {
   })
 
   it('o tempo máximo do HUB mata o processo do servidor: um teto só, e é o do Hub', async () => {
-    const { service, repository } = await build({ timeoutMs: 700 })
+    const { service, repository } = await build({ timeoutMs: 3_000 })
     const id = await enabled(service)
-    // Ferramenta real, trinta segundos de trabalho, teto de 700 ms no Hub.
+    // O teto era 700 ms e reprovava POR CARGA, não por defeito: esta é a
+    // PRIMEIRA chamada ao servidor, então o `spawn` do processo e o aperto de
+    // mão do MCP moram dentro do orçamento. Com a máquina cheia (a suíte
+    // inteira em paralelo) o servidor não ficava de pé a tempo e o desfecho
+    // virava FAILED - "o servidor demorou a subir" lido como "a ferramenta
+    // demorou a responder". Três segundos continuam DEZ VEZES menores do que
+    // os trinta segundos de trabalho da ferramenta, então o que o teste afirma
+    // - o teto que mata é o do Hub - continua sendo exatamente o que ele mede.
+    // Ferramenta real, trinta segundos de trabalho, teto do Hub bem abaixo.
     // `idempotent: false` para que a repetição única não entre na conta e o
     // desfecho seja exatamente um estouro.
     const result = await service.callMcpTool(admin, id, {
@@ -165,7 +173,7 @@ describe('Hub chamando um servidor MCP real', () => {
     })
     expect(result.state).toBe('TIMEOUT')
     expect(result.attempts).toBe(1)
-    expect(service.health(admin, id).timeouts).toBe(1)
+    expect((await service.health(admin, id)).timeouts).toBe(1)
     expect(repository.eventRows.filter(row => row.action === 'integration.called')).toMatchObject([
       { outcome: 'failure', detail: 'mcp.trigger-long-running-operation TIMEOUT attempts=1 cost=UNKNOWN' },
     ])
@@ -179,7 +187,7 @@ describe('Hub chamando um servidor MCP real', () => {
     expect(result.state).toBe('FAILED')
     // Só a CLASSE do erro entra no registro; a mensagem do servidor nunca.
     expect(repository.eventRows.at(-1)).toMatchObject({ action: 'integration.called', outcome: 'failure' })
-    expect(service.health(admin, id).last_failure).toBe('McpError')
+    expect((await service.health(admin, id)).last_failure).toBe('McpError')
   })
 
   it('um manifesto ALTERADO depois de assinado não conecta: a assinatura é reconferida na chamada', async () => {
@@ -196,7 +204,7 @@ describe('Hub chamando um servidor MCP real', () => {
     expect((failure as HubError).code).toBe('FORBIDDEN')
     // `not-executed` é o desfecho honesto: nenhum processo subiu.
     expect(repository.eventRows.at(-1)).toMatchObject({ action: 'integration.called', outcome: 'not-executed', detail: 'mcp.echo unsigned' })
-    expect(service.health(admin, id).calls).toBe(0)
+    expect((await service.health(admin, id)).calls).toBe(0)
     expect(liveMcpChildCount()).toBe(0)
   })
 })

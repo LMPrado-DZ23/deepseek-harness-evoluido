@@ -26,22 +26,22 @@ import {
 
 class MemoryRepository implements HubRepository {
   rows: StudioIntegration[] = []; eventRows: HubEvent[] = []
-  integrations = (scope: HubActor) => this.rows.filter(row => sameScope(scope, row))
-  integration = (scope: HubActor, integrationId: string) => this.rows.find(row => sameScope(scope, row) && row.integration_id === integrationId)
+  integrations = async (scope: HubActor) => this.rows.filter(row => sameScope(scope, row))
+  integration = async (scope: HubActor, integrationId: string) => this.rows.find(row => sameScope(scope, row) && row.integration_id === integrationId)
   deleteIntegration = async (scope: HubActor, integrationId: string) => {
     this.rows = this.rows.filter(row => !(sameScope(scope, row) && row.integration_id === integrationId))
   }
   putIntegration = async (value: StudioIntegration) => { this.rows = [...this.rows.filter(row => row.integration_id !== value.integration_id), value] }
   compareAndSwapIntegration = async (scope: HubActor, integrationId: string, expected: string, value: StudioIntegration) => {
-    const current = this.integration(scope, integrationId)
+    const current = await this.integration(scope, integrationId)
     if (current === undefined || securityFingerprint(current) !== expected) return false
     await this.putIntegration(value); return true
   }
-  exports = (): readonly StudioExport[] => []
-  export = () => undefined
+  exports = async (): Promise<readonly StudioExport[]> => []
+  export = async () => undefined
   putExport = async () => undefined
-  eventPage = () => []
-  eventCount = () => this.eventRows.length
+  eventPage = async () => []
+  eventCount = async () => this.eventRows.length
   putEvent = async (value: HubEvent) => { this.eventRows = [...this.eventRows, value] }
   pruneEvents = async () => 0
   readonly switches = new Map<string, IntegrationKillSwitch>()
@@ -99,10 +99,10 @@ describe('X-04 remover', () => {
   it('remove uma integração desligada, e o registro some da lista', async () => {
     const { service, repository } = await build()
     const { integration } = await service.register(admin, manifestOf())
-    expect(service.list(admin)).toHaveLength(1)
+    expect(await service.list(admin)).toHaveLength(1)
     const removed = await service.removeIntegration(admin, integration.integration_id)
     expect(removed).toMatchObject({ integration_id: integration.integration_id, name: 'Agenda MCP' })
-    expect(service.list(admin)).toHaveLength(0)
+    expect(await service.list(admin)).toHaveLength(0)
     expect(repository.eventRows.at(-1)).toMatchObject({ action: 'integration.removed', outcome: 'success' })
   })
 
@@ -113,7 +113,7 @@ describe('X-04 remover', () => {
     const failure = await service.removeIntegration(admin, integration.integration_id).catch((error: unknown) => error)
     expect(failure).toBeInstanceOf(HubError)
     expect((failure as HubError).code).toBe('CONFLICT')
-    expect(service.list(admin)).toHaveLength(1)
+    expect(await service.list(admin)).toHaveLength(1)
     expect(repository.eventRows.at(-1)).toMatchObject({ action: 'integration.removed', outcome: 'failure', detail: 'still-enabled' })
   })
 
@@ -136,7 +136,7 @@ describe('X-04 remover', () => {
     const failure = await service.removeIntegration(stranger, integration.integration_id).catch((error: unknown) => error)
     expect(failure).toBeInstanceOf(HubError)
     expect((failure as HubError).code).toBe('NOT_FOUND')
-    expect(service.list(admin)).toHaveLength(1)
+    expect(await service.list(admin)).toHaveLength(1)
   })
 
   it('remover algo que não existe é NOT_FOUND, e não um sucesso silencioso', async () => {
@@ -152,7 +152,7 @@ describe('X-04 remover', () => {
     expect(service.requiredApprovalTier(integration)).not.toBeNull()
     const failure = await service.removeIntegration(admin, integration.integration_id).catch((error: unknown) => error)
     expect(failure).toBeInstanceOf(HubError)
-    expect(service.list(admin)).toHaveLength(1)
+    expect(await service.list(admin)).toHaveLength(1)
   })
 
   it('religada ENQUANTO a pessoa confirmava: a remoção é recusada, e não apaga algo ligado', async () => {
@@ -299,7 +299,7 @@ describe('X-04 atualizar', () => {
     const { service } = await build()
     const { integration } = await service.register(admin, manifestOf())
     await service.setEnabled(admin, integration.integration_id, true)
-    expect(service.list(admin)[0]!.enabled).toBe(true)
+    expect((await service.list(admin))[0]!.enabled).toBe(true)
 
     // A mesma integração, versão nova, agora pedindo a rede.
     const updated = await service.register(admin, manifestOf({ version: '2.0.0', permissions: ['network.outbound'], tier: 'T2' }))
@@ -308,7 +308,7 @@ describe('X-04 atualizar', () => {
     // …e DESLIGADA. Continuar ligada seria conceder por inércia uma permissão
     // que a versão anterior não tinha.
     expect(updated.integration.enabled).toBe(false)
-    expect(service.list(admin)[0]!.enabled).toBe(false)
+    expect((await service.list(admin))[0]!.enabled).toBe(false)
     expect(updated.integration.effective_tier).toBe('T2')
   })
 

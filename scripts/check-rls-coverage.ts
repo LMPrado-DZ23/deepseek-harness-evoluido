@@ -37,6 +37,7 @@ const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
  */
 export const RLS_MIGRATED: readonly { readonly domain: string; readonly repository: string }[] = [
   { domain: 'studio_action_approvals', repository: 'plugins/action-approval/src/tenant-repository.ts' },
+  { domain: 'studio_integrations', repository: 'plugins/integration-hub/src/tenant-repository.ts' },
 ]
 
 /**
@@ -47,7 +48,7 @@ export const RLS_MIGRATED: readonly { readonly domain: string; readonly reposito
  * lista consigo mesma passaria sempre, inclusive quando alguém apagasse uma
  * linha dela.
  */
-export const RLS_MIGRATED_FLOOR = 1
+export const RLS_MIGRATED_FLOOR = 2
 
 /**
  * Por que cada domínio pendente ainda NÃO migrou.
@@ -68,22 +69,28 @@ export const RLS_MIGRATED_FLOOR = 1
  *   uma contradição, e migrar isto exigiria outro desenho;
  * - `cross-tenant-invariant`: o domínio garante algo ENTRE inquilinos, e a
  *   RLS torna impossível a leitura de que a garantia depende;
+ * - `startup-reconciliation`: o domínio é varrido NO INÍCIO do processo, antes
+ *   de existir pessoa, sessão ou escopo, para fechar o que ficou pela metade
+ *   num desligamento. Uma credencial escopada por inquilino não enxerga essa
+ *   varredura, e rodá-la por inquilino exige primeiro ENUMERAR os inquilinos —
+ *   que é uma consulta de resolução de escopo, a categoria acima. Tem saída,
+ *   mas a saída é DESENHO, e não a troca mecânica de leitura que `ready`
+ *   promete;
  * - `needs-review`: ainda não conferido no código. Está aqui como PENDÊNCIA
  *   declarada, e não como suposição travestida de classificação.
  */
-export const PENDING_CLASSIFICATION: Readonly<Record<string, { readonly category: 'ready' | 'hot-guard' | 'tenant-resolution' | 'cross-tenant-invariant' | 'needs-review'; readonly reason: string }>> = {
-  studio_projects: { category: 'ready', reason: 'dado por inquilino; a leitura do PromptToAppRepository devolve a tabela inteira e o servico filtra em memoria' },
-  studio_app_specs: { category: 'ready', reason: 'idem studio_projects, mesmo repositorio' },
-  studio_design_specs: { category: 'ready', reason: 'idem studio_projects, mesmo repositorio' },
-  studio_intake_turns: { category: 'ready', reason: 'idem studio_projects, mesmo repositorio' },
-  studio_plans: { category: 'ready', reason: 'idem studio_projects, mesmo repositorio' },
-  studio_runs: { category: 'ready', reason: 'idem studio_projects, mesmo repositorio' },
-  studio_evidence: { category: 'ready', reason: 'idem studio_projects, mesmo repositorio' },
-  studio_approvals: { category: 'ready', reason: 'idem studio_projects, mesmo repositorio' },
-  studio_policy_audit: { category: 'ready', reason: 'trilha por inquilino, escrita-dominante' },
-  studio_agent_runs: { category: 'ready', reason: 'dado por inquilino; leitura do AgentRepository e sincrona mas fora de guarda' },
-  studio_agent_teams: { category: 'ready', reason: 'idem studio_agent_runs' },
-  studio_integrations: { category: 'ready', reason: 'dado por inquilino; o catalogo ja pagina no servidor' },
+export const PENDING_CLASSIFICATION: Readonly<Record<string, { readonly category: 'ready' | 'hot-guard' | 'tenant-resolution' | 'cross-tenant-invariant' | 'startup-reconciliation' | 'needs-review'; readonly reason: string }>> = {
+  studio_projects: { category: 'startup-reconciliation', reason: 'reconcileInterruptedExecutions() (service.ts:311) le TODOS os projetos e TODAS as execucoes sem ator, no start do plugin, e ESCREVE em cima; uma credencial escopada nao enxerga essa varredura' },
+  studio_app_specs: { category: 'startup-reconciliation', reason: 'idem studio_projects, mesmo repositorio e mesma varredura de inicio' },
+  studio_design_specs: { category: 'startup-reconciliation', reason: 'idem studio_projects, mesmo repositorio e mesma varredura de inicio' },
+  studio_intake_turns: { category: 'startup-reconciliation', reason: 'idem studio_projects, mesmo repositorio e mesma varredura de inicio' },
+  studio_plans: { category: 'startup-reconciliation', reason: 'idem studio_projects, mesmo repositorio e mesma varredura de inicio' },
+  studio_runs: { category: 'startup-reconciliation', reason: 'a varredura de inicio le as execucoes PENDING e RUNNING de TODOS os inquilinos e as marca FAILED' },
+  studio_evidence: { category: 'startup-reconciliation', reason: 'idem studio_projects, mesmo repositorio e mesma varredura de inicio' },
+  studio_approvals: { category: 'startup-reconciliation', reason: 'a varredura de inicio ESCREVE aprovacao de recuperacao para projetos de qualquer inquilino' },
+  studio_policy_audit: { category: 'cross-tenant-invariant', reason: 'a trilha e UMA corrente de hash GLOBAL: seq e previous_sha256 encadeiam entradas de todos os inquilinos (policy/src/index.ts:394-425), e verifyPolicyAuditChain so fecha lendo a corrente inteira' },
+  studio_agent_runs: { category: 'startup-reconciliation', reason: '#performRestartReconciliation() (agents/src/service.ts:480) le as execucoes RUNNING de TODOS os inquilinos no reinicio; #hasPersistedWork() faz o mesmo' },
+  studio_agent_teams: { category: 'startup-reconciliation', reason: 'reconcileInterruptedTeams() (agent-team/src/service.ts:201) varre tarefas e equipes de todos os inquilinos no reinicio' },
 
   studio_agent_leases: { category: 'hot-guard', reason: 'lido de forma sincrona em start() para o conflito de caminhos e para a cerca, antes de cada delegacao' },
   studio_emergency_stop: { category: 'hot-guard', reason: 'assertRunning() e SINCRONO e roda antes de cada delegacao e de cada chamada de integracao' },

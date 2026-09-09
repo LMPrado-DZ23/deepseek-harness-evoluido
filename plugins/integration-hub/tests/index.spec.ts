@@ -102,8 +102,8 @@ describe('integration hub plugin wiring', () => {
     } }
     const service = provided.service
     const actor = { userId: 'u1', orgId: 'org-a', tenantId: 'ws-a', role: 'owner' }
-    const first = service.events(actor, { limit: 2 })
-    const second = service.events(actor, { limit: 2, cursor: first.next_cursor! })
+    const first = await service.events(actor, { limit: 2 })
+    const second = await service.events(actor, { limit: 2, cursor: first.next_cursor! })
     expect(first.events).toHaveLength(2)
     expect(second.events).toHaveLength(2)
     // Only the constructor snapshot touched KvTable.entries(); both pages came
@@ -143,42 +143,42 @@ describe('integration hub plugin wiring', () => {
     const actor = { userId: 'u1', orgId: 'org-a', tenantId: 'ws-a', role: 'owner' as const }
     const stranger = { ...actor, tenantId: 'ws-b' }
 
-    expect(repository.integrations(actor)).toEqual([integration])
-    expect(repository.integrations(stranger)).toEqual([])
-    expect(repository.integration(actor, 'agenda')).toEqual(integration)
-    expect(repository.integration(actor, 'missing')).toBeUndefined()
-    expect(repository.exports(actor, 'project-1')).toEqual([exported])
-    expect(repository.exports(stranger, 'project-1')).toEqual([])
-    expect(repository.export(actor, 'project-1', 'export-1')).toEqual(exported)
-    expect(repository.export(actor, 'project-1', 'missing')).toBeUndefined()
-    expect(repository.eventCount(actor)).toBe(1)
-    expect(repository.eventCount(stranger)).toBe(0)
-    expect(repository.eventPage(actor, undefined, 2)).toEqual([event])
-    expect(repository.eventPage(actor, { created_at: '1900-01-01T00:00:00.000Z', event_id: 'missing' }, 2)).toEqual([])
+    expect(await repository.integrations(actor)).toEqual([integration])
+    expect(await repository.integrations(stranger)).toEqual([])
+    expect(await repository.integration(actor, 'agenda')).toEqual(integration)
+    expect(await repository.integration(actor, 'missing')).toBeUndefined()
+    expect(await repository.exports(actor, 'project-1')).toEqual([exported])
+    expect(await repository.exports(stranger, 'project-1')).toEqual([])
+    expect(await repository.export(actor, 'project-1', 'export-1')).toEqual(exported)
+    expect(await repository.export(actor, 'project-1', 'missing')).toBeUndefined()
+    expect(await repository.eventCount(actor)).toBe(1)
+    expect(await repository.eventCount(stranger)).toBe(0)
+    expect(await repository.eventPage(actor, undefined, 2)).toEqual([event])
+    expect(await repository.eventPage(actor, { created_at: '1900-01-01T00:00:00.000Z', event_id: 'missing' }, 2)).toEqual([])
 
     expect(await repository.compareAndSwapIntegration(actor, 'missing', 'x', integration)).toBe(false)
     expect(await repository.compareAndSwapIntegration(actor, 'agenda', 'x', integration)).toBe(false)
     const enabled = { ...integration, enabled: true, updated_at: '2026-09-04T00:00:01.000Z' }
     expect(await repository.compareAndSwapIntegration(actor, 'agenda', securityFingerprint(integration), enabled)).toBe(true)
-    expect(repository.integration(actor, 'agenda')).toEqual(enabled)
+    expect(await repository.integration(actor, 'agenda')).toEqual(enabled)
     expect(fixture.tables.get('integrations')?.has('legacy-integration')).toBe(false)
 
     const larger = { ...exported, size_bytes: 2 }
     await repository.putExport(larger)
-    expect(repository.export(actor, 'project-1', 'export-1')).toEqual(larger)
+    expect(await repository.export(actor, 'project-1', 'export-1')).toEqual(larger)
     expect(fixture.tables.get('exports')?.has('legacy-export')).toBe(false)
 
     const amended = { ...event, detail: 'amended' }
     await repository.putEvent(amended)
-    expect(repository.eventCount(actor)).toBe(1)
-    expect(repository.eventPage(actor, undefined, 2)).toEqual([amended])
+    expect(await repository.eventCount(actor)).toBe(1)
+    expect(await repository.eventPage(actor, undefined, 2)).toEqual([amended])
     expect(fixture.tables.get('events')?.has('legacy-event')).toBe(false)
     const tied = { ...event, event_id: 'event-2', detail: 'tie' }
     await repository.putEvent(tied)
-    expect(repository.eventPage(actor, undefined, 2).map(row => row.event_id)).toEqual(['event-2', 'event-1'])
+    expect((await repository.eventPage(actor, undefined, 2)).map(row => row.event_id)).toEqual(['event-2', 'event-1'])
     expect(await repository.pruneEvents(stranger, 0)).toBe(0)
     expect(await repository.pruneEvents(actor, 1)).toBe(1)
-    expect(repository.eventCount(actor)).toBe(1)
+    expect(await repository.eventCount(actor)).toBe(1)
   })
 
   it('refuses to start on the dev channel unless this is a personal, loopback-only Studio', async () => {

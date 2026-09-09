@@ -41,29 +41,29 @@ vi.mock('../src/export.ts', async importOriginal => {
 
 class MemoryRepository implements HubRepository {
   rows: StudioIntegration[] = []; exportRows: StudioExport[] = []; eventRows: HubEvent[] = []
-  integrations = (scope: HubActor) => this.rows.filter(row => sameScope(scope, row))
-  integration = (scope: HubActor, integrationId: string) => this.rows.find(row => sameScope(scope, row) && row.integration_id === integrationId)
+  integrations = async (scope: HubActor) => this.rows.filter(row => sameScope(scope, row))
+  integration = async (scope: HubActor, integrationId: string) => this.rows.find(row => sameScope(scope, row) && row.integration_id === integrationId)
   deleteIntegration = async (scope: HubActor, integrationId: string) => { this.rows = this.rows.filter(row => !(row.integration_id === integrationId && row.org_id === scope.orgId && row.tenant_id === scope.tenantId)) }
   putIntegration = async (value: StudioIntegration) => { this.rows = [...this.rows.filter(row => row.integration_id !== value.integration_id || row.org_id !== value.org_id || row.tenant_id !== value.tenant_id), value] }
   compareAndSwapIntegration = async (scope: HubActor, integrationId: string, expected: string, value: StudioIntegration) => {
-    const current = this.integration(scope, integrationId)
+    const current = await this.integration(scope, integrationId)
     if (current === undefined || securityFingerprint(current) !== expected) return false
     await this.putIntegration(value); return true
   }
-  exports = (scope: HubActor, projectId: string) => this.exportRows.filter(row => sameScope(scope, row) && row.project_id === projectId)
-  export = (scope: HubActor, projectId: string, exportId: string) => this.exportRows.find(row => sameScope(scope, row) && row.project_id === projectId && row.export_id === exportId)
+  exports = async (scope: HubActor, projectId: string) => this.exportRows.filter(row => sameScope(scope, row) && row.project_id === projectId)
+  export = async (scope: HubActor, projectId: string, exportId: string) => this.exportRows.find(row => sameScope(scope, row) && row.project_id === projectId && row.export_id === exportId)
   putExport = async (value: StudioExport) => { this.exportRows = [...this.exportRows, value] }
-  eventPage = (scope: HubActor, after: Pick<HubEvent, 'created_at' | 'event_id'> | undefined, limit: number) => {
+  eventPage = async (scope: HubActor, after: Pick<HubEvent, 'created_at' | 'event_id'> | undefined, limit: number) => {
     const rows = this.eventRows.filter(row => sameScope(scope, row)).sort(newestFirst)
     const start = after === undefined ? 0 : rows.findIndex(row => newestFirst(row, after) > 0)
     return start < 0 ? [] : rows.slice(start, start + limit)
   }
-  eventCount = (scope: HubActor) => this.eventRows.filter(row => sameScope(scope, row)).length
+  eventCount = async (scope: HubActor) => this.eventRows.filter(row => sameScope(scope, row)).length
   putEvent = async (value: HubEvent) => { this.eventRows = [...this.eventRows, value] }
   pruneEvents = async (scope: HubActor, keep: number) => {
     const retained = this.eventRows.filter(row => sameScope(scope, row)).sort(newestFirst).slice(0, keep)
     const ids = new Set(retained.map(row => row.event_id))
-    const before = this.eventCount(scope)
+    const before = await this.eventCount(scope)
     this.eventRows = this.eventRows.filter(row => !sameScope(scope, row) || ids.has(row.event_id))
     return before - retained.length
   }

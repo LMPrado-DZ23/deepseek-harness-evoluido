@@ -113,7 +113,7 @@ export function createHubHttpHandler(config: HubHttpConfig) {
       if (method === 'GET' && route === '/integrations') {
         // A busca, o filtro e o corte acontecem AQUI: o cliente recebe uma
         // página, nunca o escopo inteiro para filtrar na tela.
-        const page = service.searchIntegrations(actor, catalogQuery(url.searchParams))
+        const page = await service.searchIntegrations(actor, catalogQuery(url.searchParams))
         // `can_enable` is the server's decision (signature + channel) so the interface never guesses policy.
         // `health` é derivada dos contadores gravados: nunca `OK` sem nunca ter sido chamada.
         return json(response, 200, {
@@ -172,7 +172,7 @@ export function createHubHttpHandler(config: HubHttpConfig) {
         const { fingerprint: _fingerprint, ...ticket } = await service.requestApproval(actor, body.action, body.subject_id, body.payload)
         return json(response, 201, ticket)
       }
-      if (method === 'GET' && route === '/smtp') return json(response, 200, service.smtp(actor))
+      if (method === 'GET' && route === '/smtp') return json(response, 200, await service.smtp(actor))
       if (method === 'POST' && route === '/smtp') {
         const body = smtpSchema.parse(await readJson(request))
         const record = await service.configureSmtp(actor, body.secret_ref, asApproval(body.approval))
@@ -185,10 +185,10 @@ export function createHubHttpHandler(config: HubHttpConfig) {
       const exportsMatch = /^\/projects\/([^/]+)\/exports(?:\/([^/]+)\/download)?$/u.exec(route)
       if (exportsMatch !== null) {
         const projectId = decodeURIComponent(exportsMatch[1]!)
-        if (method === 'GET' && exportsMatch[2] === undefined) return json(response, 200, { exports: service.listExports(actor, projectId).map(publicExport) })
+        if (method === 'GET' && exportsMatch[2] === undefined) return json(response, 200, { exports: (await service.listExports(actor, projectId)).map(publicExport) })
         if (method === 'POST' && exportsMatch[2] === undefined) return json(response, 201, { export: publicExport(await service.createExport(actor, projectId)) })
         if (method === 'GET' && exportsMatch[2] !== undefined) {
-          const record = service.exportRecord(actor, projectId, decodeURIComponent(exportsMatch[2]))
+          const record = await service.exportRecord(actor, projectId, decodeURIComponent(exportsMatch[2]))
           // The path stored in the row is data: the service resolves it, confines it and hands back
           // an OPEN handle it already checked. Nothing here reopens the file by name.
           const { handle, size } = await service.exportFile(actor, projectId, decodeURIComponent(exportsMatch[2]))
@@ -218,7 +218,7 @@ export function createHubHttpHandler(config: HubHttpConfig) {
       }
       if (method === 'GET' && route === '/events') {
         const page = eventsPageSchema.parse(Object.fromEntries(url.searchParams))
-        return json(response, 200, service.events(actor, page))
+        return json(response, 200, await service.events(actor, page))
       }
       return json(response, 404, { error: t('errors.routeNotFound') })
     } catch (error) {
@@ -254,7 +254,7 @@ function asApproval(value: { approval_id: string } | undefined) {
   return value === undefined ? undefined : { approvalId: value.approval_id }
 }
 
-function publicExport(record: ReturnType<IntegrationHubService['exportRecord']>) {
+function publicExport(record: Awaited<ReturnType<IntegrationHubService['exportRecord']>>) {
   const { path: _path, ...rest } = record
   return rest
 }
