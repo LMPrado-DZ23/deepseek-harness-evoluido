@@ -968,9 +968,22 @@ async function inspectSafetyHandle(file: FileHandle, path: string, reportedPath:
 
 async function runTool(command: string, args: string[], environment: NodeJS.ProcessEnv, signal?: AbortSignal, inheritedFd?: number): Promise<void> {
   await new Promise<void>((resolvePromise, reject) => {
-    const child = spawn(command, args, { env: environment, stdio: inheritedFd === undefined ? ['ignore', 'ignore', 'ignore'] : ['ignore', 'ignore', 'ignore', inheritedFd], ...(signal === undefined ? {} : { signal }) })
+    // A saída de erro É LIDA e limitada, pela mesma razão que a do `pg_dump`:
+    // "pg_restore failed with code 1" e mais nada deixava quem opera sem a
+    // única linha que explica por que a verificação do backup não passou.
+    const child = spawn(command, args, { env: environment, stdio: inheritedFd === undefined ? ['ignore', 'ignore', 'pipe'] : ['ignore', 'ignore', 'pipe', inheritedFd], ...(signal === undefined ? {} : { signal }) })
+    let diagnostic = ''
+    child.stderr?.on('data', (chunk: Buffer) => {
+      if (diagnostic.length < PG_DUMP_DIAGNOSTIC_LIMIT) {
+        diagnostic = `${diagnostic}${chunk.toString('utf8')}`.slice(0, PG_DUMP_DIAGNOSTIC_LIMIT)
+      }
+    })
     child.once('error', reject)
-    child.once('exit', code => code === 0 ? resolvePromise() : reject(new Error(`${command} failed with code ${String(code)}`)))
+    child.once('close', code => {
+      if (code === 0) { resolvePromise(); return }
+      const detail = pgDumpDiagnostic(diagnostic)
+      reject(new Error(`${command} failed with code ${String(code)}${detail === '' ? '' : `: ${detail}`}`))
+    })
   })
 }
 

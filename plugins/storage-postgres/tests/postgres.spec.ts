@@ -298,9 +298,14 @@ describePostgres('postgres backend against PostgreSQL 16', () => {
       const pgDump = join(toolDirectory, 'pg_dump')
       const pgRestore = join(toolDirectory, 'pg_restore')
       // With a test container, pg_dump is bridged through docker exec; without one the local client tools are used as-is.
+      // O identificador do contêiner é GRAVADO no atalho, não lido do ambiente:
+      // o produto entrega às ferramentas cliente um ambiente reduzido a PATH,
+      // LANG e LC_ALL - por isso um atalho que dependesse de
+      // DZ23_POSTGRES_TEST_CONTAINER falharia por causa do endurecimento, e não
+      // por causa do backup.
       await writeFile(pgDump, `#!/usr/bin/env bash
 set -euo pipefail
-container="$DZ23_POSTGRES_TEST_CONTAINER"
+container=${JSON.stringify(postgresContainer ?? '')}
 filtered=()
 for argument in "$@"; do
   case "$argument" in
@@ -314,7 +319,7 @@ exec docker exec -i "$container" pg_dump --username dz23_test --dbname dz23_test
       await writeFile(pgRestore, `#!/usr/bin/env bash
 set -euo pipefail
 file="\${@: -1}"
-exec docker exec -i "$DZ23_POSTGRES_TEST_CONTAINER" pg_restore --list < "$file"
+exec docker exec -i ${JSON.stringify(postgresContainer ?? '')} pg_restore --list < "$file"
 `)
       await chmod(pgRestore, 0o700)
       const cliEnvironment = {
