@@ -7,17 +7,26 @@
   "types": "./src/index.ts",
   "exports": {
     ".": {
-      "dz23-build": { "types": "./lib/index.d.ts", "default": "./lib/index.js" },
+      "dz23-build": {
+        "types": "./lib/index.d.ts",
+        "default": "./lib/index.js"
+      },
       "types": "./src/index.ts",
       "default": "./lib/index.js"
     },
     "./operator": {
-      "dz23-build": { "types": "./lib/operator.d.ts", "default": "./lib/operator.js" },
+      "dz23-build": {
+        "types": "./lib/operator.d.ts",
+        "default": "./lib/operator.js"
+      },
       "types": "./src/operator.ts",
       "default": "./lib/operator.js"
     }
   },
-  "files": ["lib", "i18n"],
+  "files": [
+    "lib",
+    "i18n"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json"
   },
@@ -32,6 +41,7 @@
     "pg": "8.23.0"
   },
   "devDependencies": {
+    "@dz23-studio/action-approval": "workspace:*",
     "@types/pg": "8.23.1"
   }
 }

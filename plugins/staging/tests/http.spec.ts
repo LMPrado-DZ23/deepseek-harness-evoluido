@@ -62,8 +62,10 @@ describe('contratos de rota', () => {
     // sem ver o que já foi publicado.
     const list = STAGING_ROUTE_CONTRACTS.find(route => route.method === 'GET' && route.path.endsWith('/staging/releases'))
     expect(list).toMatchObject({ permission: 'project.read' })
-    // NÃO existe rota de apagar: apagar o registro não desfaz o efeito.
-    expect(STAGING_ROUTE_CONTRACTS.some(route => route.method === 'DELETE')).toBe(false)
+    // NÃO existe rota de apagar: apagar o registro não desfaz o efeito. O tipo
+    // hoje nem admite DELETE; a comparação é alargada de propósito para que a
+    // conferência continue existindo se alguém ampliar o tipo amanhã.
+    expect(STAGING_ROUTE_CONTRACTS.some(route => (route.method as string) === 'DELETE')).toBe(false)
   })
 })
 

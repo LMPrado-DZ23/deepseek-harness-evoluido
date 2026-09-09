@@ -112,9 +112,13 @@ describe('projeção para a tela', () => {
   it('o custo aparece como NÃO MEDIDO, e nunca como zero', () => {
     // Um `0` aqui seria lido como "esta equipe não custou nada". Ninguém mediu.
     const view = teamPanelView(team(), [task()], runs())
-    expect(view.cost.state).toBe('NOT_MEASURED')
-    expect(JSON.stringify(view.cost)).not.toContain('0')
-    expect(view.cost.reason.length).toBeGreaterThan(20)
+    const cost = view.cost
+    expect(cost.state).toBe('NOT_MEASURED')
+    expect(JSON.stringify(cost)).not.toContain('0')
+    // O estreitamento é do TESTE, não do `expect`: sem ele, ler `reason` aqui
+    // seria ler um campo que o estado medido não tem.
+    if (cost.state !== 'NOT_MEASURED') throw new Error(`estado inesperado: ${cost.state}`)
+    expect(cost.reason.length).toBeGreaterThan(20)
   })
 
   it('nenhum caminho absoluto do computador atravessa', () => {

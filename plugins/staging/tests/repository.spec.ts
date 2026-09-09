@@ -29,8 +29,11 @@ function harness(rows = table()) {
   const provider = providerPort()
   const approvals = approvalPort()
   const authorization = {
+    // `guest` não está no tipo de papel de hoje; o dublê responde por ele mesmo
+    // assim, porque o que se quer provar é a REGRA (quem não é do espaço não lê),
+    // e não o conjunto de papéis que existe nesta versão.
     allows: (role: StagingActor['role'], permission: 'project.read' | 'project.publish_staging') => permission === 'project.read'
-      ? role !== 'guest'
+      ? (role as string) !== 'guest'
       : role === 'owner' || role === 'admin' || role === 'builder',
   }
   const service = new StagingService({

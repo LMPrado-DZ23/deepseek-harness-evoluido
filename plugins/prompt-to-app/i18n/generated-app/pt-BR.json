@@ -16,16 +16,16 @@
     "invalidValue": "Confira o valor informado.",
     "tryAgain": "Tentar novamente",
     "success": "Alterações salvas.",
-    "unexpectedError": "Não foi possível concluir esta ação agora. Tente novamente."
-    ,"manageEntity": "Gerenciar {entity}"
-    ,"newRecord": "Novo cadastro"
-    ,"records": "Cadastros"
-    ,"savedRecords": "Cadastros salvos"
-    ,"managementArea": "Área de gestão"
-    ,"managementSignIn": "Entre para consultar os cadastros enviados."
-    ,"yes": "Sim"
-    ,"no": "Não"
-    ,"select": "Selecione"
+    "unexpectedError": "Não foi possível concluir esta ação agora. Tente novamente.",
+    "manageEntity": "Gerenciar {entity}",
+    "newRecord": "Novo cadastro",
+    "records": "Cadastros",
+    "savedRecords": "Cadastros salvos",
+    "managementArea": "Área de gestão",
+    "managementSignIn": "Entre para consultar os cadastros enviados.",
+    "yes": "Sim",
+    "no": "Não",
+    "select": "Selecione"
   },
   "auth": {
     "title": "Acesse seu aplicativo",
@@ -36,25 +36,25 @@
     "signOut": "Sair",
     "invalidCode": "O código informado não é válido.",
     "expiredCode": "Este código expirou. Peça um novo código.",
-    "expiredSession": "Sua sessão expirou. Entre novamente para continuar."
-    ,"emailLabel": "E-mail"
-    ,"codeSixLabel": "Código de 6 dígitos"
-    ,"accessHeading": "Acessar o aplicativo"
-    ,"accessStatus": "Acesso: {email} ({role})"
-    ,"inviteByEmail": "Convidar por e-mail"
-    ,"requestCode": "Enviar código"
-    ,"sendInvite": "Enviar convite"
-    ,"lockedCode": "Código bloqueado."
-    ,"invalidSession": "Sessão inválida."
-    ,"revokedSession": "Sessão encerrada."
-    ,"csrfMissing": "Confirmação de segurança ausente."
-    ,"ownerInviteOnly": "Somente o proprietário pode convidar pessoas."
-    ,"invitationRequired": "Convite necessário."
-    ,"invalidEmail": "E-mail inválido."
-    ,"mailCodeSubject": "Seu código de acesso"
-    ,"mailCodeBody": "Use o código {code}. Ele expira em 10 minutos."
-    ,"mailInviteSubject": "Você recebeu um convite"
-    ,"mailInviteBody": "Abra o aplicativo e peça seu código até {expiresAt}."
+    "expiredSession": "Sua sessão expirou. Entre novamente para continuar.",
+    "emailLabel": "E-mail",
+    "codeSixLabel": "Código de 6 dígitos",
+    "accessHeading": "Acessar o aplicativo",
+    "accessStatus": "Acesso: {email} ({role})",
+    "inviteByEmail": "Convidar por e-mail",
+    "requestCode": "Enviar código",
+    "sendInvite": "Enviar convite",
+    "lockedCode": "Código bloqueado.",
+    "invalidSession": "Sessão inválida.",
+    "revokedSession": "Sessão encerrada.",
+    "csrfMissing": "Confirmação de segurança ausente.",
+    "ownerInviteOnly": "Somente o proprietário pode convidar pessoas.",
+    "invitationRequired": "Convite necessário.",
+    "invalidEmail": "E-mail inválido.",
+    "mailCodeSubject": "Seu código de acesso",
+    "mailCodeBody": "Use o código {code}. Ele expira em 10 minutos.",
+    "mailInviteSubject": "Você recebeu um convite",
+    "mailInviteBody": "Abra o aplicativo e peça seu código até {expiresAt}."
   },
   "reference": {
     "label": "Relacionar com {entity}",
@@ -125,5 +125,8 @@
     "resend": "Enviar outro código",
     "sent": "Código enviado. Confira sua caixa de entrada.",
     "failure": "Não foi possível enviar o código agora. Tente novamente."
+  },
+  "validation": {
+    "requireOneField": "Informe ao menos um campo para atualizar."
   }
 }

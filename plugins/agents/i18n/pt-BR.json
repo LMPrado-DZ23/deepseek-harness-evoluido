@@ -13,7 +13,9 @@
     "anotherProposalApplying": "Outra proposta está sendo aplicada neste espaço de trabalho.",
     "pathOutsideApproved": "arquivo fora dos caminhos aprovados",
     "projectChangedDuringRun": "Seu projeto mudou enquanto o assistente trabalhava; confira antes de aplicar.",
-    "proposalSuperseded": "Outro trabalho já mexeu nestes arquivos depois deste. Aplicar agora escreveria uma versão antiga por cima da nova. Peça o trabalho de novo a partir do que está lá agora."
+    "proposalSuperseded": "Outro trabalho já mexeu nestes arquivos depois deste. Aplicar agora escreveria uma versão antiga por cima da nova. Peça o trabalho de novo a partir do que está lá agora.",
+    "pathsRequired": "Declare ao menos um caminho que o assistente pretende alterar.",
+    "onlyPendingReviewable": "Somente uma proposta pendente pode ser revisada."
   },
   "recovery": {
     "required": "O controle de agentes ainda está reconciliando uma execução anterior.",
@@ -52,6 +54,7 @@
     "worktreeOutsideStudio": "Destino de worktree fora da área controlada pelo Studio.",
     "proposalChangedAfterReview": "A proposta mudou depois da revisão e foi bloqueada.",
     "projectChangedSameFiles": "O projeto mudou nos mesmos arquivos desde a criação da proposta.",
-    "projectChangedTheseFiles": "O projeto mudou nesses arquivos desde que o assistente começou."
+    "projectChangedTheseFiles": "O projeto mudou nesses arquivos desde que o assistente começou.",
+    "diffByteLimit": "limite de bytes do diff excedido"
   }
 }

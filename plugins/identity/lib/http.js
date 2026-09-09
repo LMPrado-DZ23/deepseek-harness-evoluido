@@ -84,7 +84,7 @@ export function createIdentityHttpHandler(config) {
                     response.setHeader('retry-after', String(decision.retryAfterSeconds));
                     response.setHeader('x-ratelimit-limit', String(decision.limit));
                     response.setHeader('x-ratelimit-remaining', '0');
-                    json(response, 429, { error: 'Muitas tentativas. Aguarde um pouco e tente novamente.' });
+                    json(response, 429, { error: t('http.tooManyAttempts') });
                     return;
                 }
             }
@@ -128,7 +128,7 @@ export function createIdentityHttpHandler(config) {
                         ? undefined
                         : config.service.personalPrincipal(config.bindHost);
                     if (principal === undefined)
-                        throw new IdentityError('invalid', 'Entre para continuar.');
+                        throw new IdentityError('invalid', t('http.signInToContinue'));
                     json(response, 200, { mode: 'personal', principal });
                     return;
                 }
@@ -170,7 +170,7 @@ export function createIdentityHttpHandler(config) {
             if (request.method === 'POST' && route === '/logout') {
                 const candidates = [...new Set(parseCookieValues(request.headers.cookie, SESSION_COOKIE))];
                 if (candidates.length > 64)
-                    throw new IdentityError('invalid', 'Entre para continuar.');
+                    throw new IdentityError('invalid', t('http.signInToContinue'));
                 if (candidates.length === 0) {
                     response.setHeader('set-cookie', clearSessionCookies(secureCookies));
                     json(response, 200, { signed_out: true });
@@ -234,7 +234,7 @@ export function createIdentityHttpHandler(config) {
             if (request.method === 'POST' && route === '/devices/revoke-all') {
                 await config.service.revokeAllSessions(session);
                 response.setHeader('set-cookie', clearSessionCookies(secureCookies));
-                json(response, 200, { message: 'Todos os dispositivos foram desconectados.' });
+                json(response, 200, { message: t('http.allDevicesDisconnected') });
                 return;
             }
             /* v8 ignore next 2 -- every contracted route returns above; this is the fail-closed tail. */
@@ -271,14 +271,14 @@ export function requiredSessionToken(request) {
     assertCookieHeaderBudget(request);
     const token = parseCookieValues(request.headers.cookie, SESSION_COOKIE)[0];
     if (token === undefined || token === '')
-        throw new IdentityError('invalid', 'Entre para continuar.');
+        throw new IdentityError('invalid', t('http.signInToContinue'));
     return token;
 }
 async function authenticateCookieRequest(request, service) {
     assertCookieHeaderBudget(request);
     const candidates = [...new Set(parseCookieValues(request.headers.cookie, SESSION_COOKIE))];
     if (candidates.length === 0 || candidates.length > 64)
-        throw new IdentityError('invalid', 'Entre para continuar.');
+        throw new IdentityError('invalid', t('http.signInToContinue'));
     let lastError;
     for (const token of candidates) {
         if (token === '')
@@ -292,7 +292,7 @@ async function authenticateCookieRequest(request, service) {
             lastError = error;
         }
     }
-    throw lastError ?? new IdentityError('invalid', 'Entre para continuar.');
+    throw lastError ?? new IdentityError('invalid', t('http.signInToContinue'));
 }
 async function assertEdgeTrust(request, config) {
     if (config.edgeRequired === true) {

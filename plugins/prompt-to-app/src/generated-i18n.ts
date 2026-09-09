@@ -58,6 +58,9 @@ export interface GeneratedAppCatalog {
     readonly mailInviteSubject: string
     readonly mailInviteBody: string
   }
+  readonly validation: {
+    readonly requireOneField: string
+  }
   readonly reference: {
     readonly label: string
     readonly choose: string
@@ -133,6 +136,7 @@ export interface GeneratedAppCatalog {
 const REQUIRED_KEYS = {
   common: ['loading', 'save', 'add', 'saveChanges', 'saving', 'cancel', 'close', 'edit', 'delete', 'confirmDelete', 'confirmDeleteAction', 'emptyState', 'requiredField', 'invalidValue', 'tryAgain', 'success', 'unexpectedError', 'manageEntity', 'newRecord', 'records', 'savedRecords', 'managementArea', 'managementSignIn', 'yes', 'no', 'select'],
   auth: ['title', 'codeLabel', 'codePlaceholder', 'submit', 'submitting', 'signOut', 'invalidCode', 'expiredCode', 'expiredSession', 'emailLabel', 'codeSixLabel', 'accessHeading', 'accessStatus', 'inviteByEmail', 'requestCode', 'sendInvite', 'lockedCode', 'invalidSession', 'revokedSession', 'csrfMissing', 'ownerInviteOnly', 'invitationRequired', 'invalidEmail', 'mailCodeSubject', 'mailCodeBody', 'mailInviteSubject', 'mailInviteBody'],
+  validation: ['requireOneField'],
   reference: ['label', 'choose', 'none', 'loading', 'required', 'invalid', 'targetMissing', 'inUse'],
   scheduling: ['title', 'dateLabel', 'timeLabel', 'statusLabel', 'statusPending', 'statusConfirmed', 'statusCancelled', 'create', 'confirm', 'emptyState', 'conflict', 'invalidDate', 'pastDate', 'invalidTransition'],
   dashboard: ['title', 'summary', 'records', 'total', 'emptyState', 'refresh', 'tableLabel', 'chartLabel', 'notInformed', 'dateNotInformed', 'groupBy', 'groupCaption', 'count', 'recordSingular', 'recordPlural', 'totalSuffix', 'months', 'monthOfYear'],

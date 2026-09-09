@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { canonicalManifestBytes } from '../src/manifest.ts'
-import type { HubEvent, IntegrationManifest, StudioExport, StudioIntegration } from '../src/model.ts'
+import type { HubEvent, IntegrationKillSwitch, IntegrationManifest, StudioExport, StudioIntegration } from '../src/model.ts'
 import { canonicalSecretRef, EVENTS_RETAINED_PER_TENANT, EXPORT_WINDOW_MS, HubError, MAX_APPROVAL_SCOPES, IntegrationHubService, MAX_CONCURRENT_PACKAGING, MAX_EXPORTS_PER_WINDOW, MAX_LIVE_APPROVALS, minimizeRecipient, minimizeSecretRef, safeSegment, securityFingerprint, strongIdentityFresh, type HubActor, type HubRepository } from '../src/service.ts'
 import { readZip } from '../src/zip.ts'
 

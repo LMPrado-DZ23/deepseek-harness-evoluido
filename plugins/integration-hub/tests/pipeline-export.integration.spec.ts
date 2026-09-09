@@ -10,7 +10,7 @@ import type {
 import { PromptToAppPipeline } from '../../prompt-to-app/src/pipeline.js'
 import type { BuilderLifecycleResolverPort } from '../../prompt-to-app/src/builder-lifecycle.js'
 import { PromptToAppService, type PromptToAppActor, type PromptToAppRepository } from '../../prompt-to-app/src/service.js'
-import type { HubEvent, StudioExport, StudioIntegration } from '../src/model.js'
+import type { HubEvent, IntegrationKillSwitch, StudioExport, StudioIntegration } from '../src/model.js'
 import { IntegrationHubService, type HubActor, type HubRepository } from '../src/service.js'
 
 const roots: string[] = []

@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { canonicalManifestBytes } from '../src/manifest.ts'
-import type { HubEvent, IntegrationManifest, StudioExport, StudioIntegration } from '../src/model.ts'
+import type { HubEvent, IntegrationKillSwitch, IntegrationManifest, StudioExport, StudioIntegration } from '../src/model.ts'
 import {
   HubError, IntegrationHubService, securityFingerprint,
   type HubActor, type HubRepository, type McpCallOutcome, type McpDispatchInput, type McpDispatchPort, type McpProbeInput, type McpProbeOutcome,

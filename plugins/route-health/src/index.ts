@@ -12,6 +12,7 @@ import {
   type RouteSwitchEvent,
 } from './model.js'
 import { StudioRouteHealthService, type RoutePrivacy, type RouteHealthRepository, type RouteScope } from './service.js'
+import { t } from './i18n.js'
 
 export * from './model.js'
 export * from './service.js'
@@ -100,12 +101,12 @@ export async function apply(ctx: Context): Promise<void> {
 export function createRouteHealthHandler(service: StudioRouteHealthService, identity: StudioIdentityService) {
   return async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     try {
-      if (request.method !== 'GET') return send(response, 405, { error: 'Método não permitido.' })
+      if (request.method !== 'GET') return send(response, 405, { error: t('errors.methodNotAllowed') })
       const session = await authenticatedMutation(request, identity)
       const scope = { orgId: session.org_id, tenantId: session.tenant_id }
       return send(response, 200, { routes: service.list(scope), switches: service.switches(scope) })
     } catch (error) {
-      return send(response, 401, { error: error instanceof Error ? error.message : 'Sessão inválida.' })
+      return send(response, 401, { error: error instanceof Error ? error.message : t('errors.invalidSession') })
     }
   }
 }

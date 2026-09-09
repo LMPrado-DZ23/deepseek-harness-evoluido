@@ -35,6 +35,29 @@ function walk(directory) {
   })
 }
 
+/**
+ * Um gerador que não consegue LER uma revisão não pode escrever o arquivo.
+ *
+ * `literalsAt` devolvia `[]` tanto para "esta revisão não tem literal" quanto
+ * para "este clone não tem esta revisão". Rodar o gerador num clone raso
+ * apagava, em silêncio, todo literal herdado dessa revisão - e o portão, sem
+ * histórico para conferir, passaria a aceitar como novo o que era antigo e a
+ * reprovar o que já estava coberto. Aconteceu de verdade durante a migração do
+ * `route-health`. Agora falta de revisão é ERRO, não conjunto vazio.
+ */
+function requireRevisions(revisions) {
+  const missing = revisions.filter(revision => {
+    try { execFileSync('git', ['rev-parse', '--verify', `${revision}^{commit}`], { cwd: root, stdio: 'ignore' }); return false } catch { return true }
+  })
+  if (missing.length > 0) {
+    process.stderr.write(`I18N_BASELINE=FAIL revisões ausentes neste clone: ${missing.join(', ')}\n`)
+    process.stderr.write('Sem elas o arquivo sairia MENOR do que a verdade. Busque o histórico (`git fetch --unshallow` ou o remoto que tem essas revisões) e rode de novo.\n')
+    process.exit(1)
+  }
+}
+
+requireRevisions([legacyRevision, ...pluginBaselineRevisions()])
+
 const roots = [resolve(root, 'apps/studio-web/src')]
 for (const plugin of readdirSync(resolve(root, 'plugins'), { withFileTypes: true })) {
   const source = resolve(root, 'plugins', plugin.name, 'src')

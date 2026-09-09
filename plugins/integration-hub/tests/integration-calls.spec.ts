@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { canonicalManifestBytes } from '../src/manifest.ts'
-import { studioIntegrationSchema, studioIntegrationsDomainSpec, type HubEvent, type IntegrationManifest, type StudioExport, type StudioIntegration } from '../src/model.ts'
+import { studioIntegrationSchema, studioIntegrationsDomainSpec, type HubEvent, type IntegrationKillSwitch, type IntegrationManifest, type StudioExport, type StudioIntegration } from '../src/model.ts'
 import { integrationHealthState } from '../src/runtime.ts'
 import {
   HubError, IntegrationHubService, auditOperation, securityFingerprint,

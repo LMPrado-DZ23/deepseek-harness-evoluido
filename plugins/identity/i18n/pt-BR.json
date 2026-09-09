@@ -25,6 +25,7 @@
   "auth.invalidSession": "Sessão inválida.",
   "auth.passkeyAlreadyRegistered": "Esta chave de acesso já está cadastrada.",
   "auth.passkeyNotFound": "Chave de acesso não encontrada.",
+  "auth.passkeyPossiblyCloned": "Esta chave de acesso pode ter sido clonada e foi bloqueada.",
   "auth.passkeyRequiredBeforeConfirm": "Cadastre uma chave de acesso antes de confirmar esta ação.",
   "auth.revokedByUser": "Revogada pela pessoa usuária.",
   "auth.sessionEnded": "Esta sessão foi encerrada.",
@@ -45,6 +46,7 @@
   "email.inviteBody": "Você recebeu um convite como {role}. Use o código seguro {token}. Ele expira em {hours} horas.",
   "email.inviteSubject": "Convite para {workspace} no DZ23 STUDIO",
   "email.notConfigured": "O envio de e-mail ainda não foi configurado.",
+  "http.allDevicesDisconnected": "Todos os dispositivos foram desconectados.",
   "http.edgeUnauthorized": "Borda de acesso não autorizada.",
   "http.harnessUnavailable": "A interface do Harness ainda não está disponível.",
   "http.hostNotAllowed": "Host não autorizado.",
@@ -56,5 +58,7 @@
   "http.requestTooLarge": "Solicitação grande demais.",
   "http.routeNotFound": "Rota não encontrada.",
   "http.sensitiveConfirmed": "Ação sensível confirmada.",
+  "http.signInToContinue": "Entre para continuar.",
+  "http.tooManyAttempts": "Muitas tentativas. Aguarde um pouco e tente novamente.",
   "passkey.notConfirmed": "Não foi possível confirmar esta chave de acesso."
 }

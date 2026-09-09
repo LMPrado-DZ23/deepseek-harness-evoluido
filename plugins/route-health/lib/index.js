@@ -1,6 +1,7 @@
 import { authenticatedMutation } from '@dz23-studio/identity';
 import { studioRouteHealthDomainSpec, } from './model.js';
 import { StudioRouteHealthService } from './service.js';
+import { t } from './i18n.js';
 export * from './model.js';
 export * from './service.js';
 export const name = 'dz23-studio-route-health';
@@ -66,13 +67,13 @@ export function createRouteHealthHandler(service, identity) {
     return async (request, response) => {
         try {
             if (request.method !== 'GET')
-                return send(response, 405, { error: 'Método não permitido.' });
+                return send(response, 405, { error: t('errors.methodNotAllowed') });
             const session = await authenticatedMutation(request, identity);
             const scope = { orgId: session.org_id, tenantId: session.tenant_id };
             return send(response, 200, { routes: service.list(scope), switches: service.switches(scope) });
         }
         catch (error) {
-            return send(response, 401, { error: error instanceof Error ? error.message : 'Sessão inválida.' });
+            return send(response, 401, { error: error instanceof Error ? error.message : t('errors.invalidSession') });
         }
     };
 }

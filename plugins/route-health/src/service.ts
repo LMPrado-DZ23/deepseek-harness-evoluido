@@ -1,5 +1,6 @@
 import type { GenerateOptions, StreamChunk, TokenUsage } from '@deepseek-ai/dsh-llm'
 import { randomUUID } from 'node:crypto'
+import { t } from './i18n.js'
 import type { RouteHealthRecord, RouteState, RouteSwitchEvent } from './model.js'
 
 export interface RouteScope { readonly orgId: string; readonly tenantId: string }
@@ -309,7 +310,7 @@ export class StudioRouteHealthService {
     if (profile === 'privado-local') {
       const localSelected = options.explicitRoute === undefined || options.explicitRoute === this.config.localRoute
       if (localSelected && localUsable) {
-        return { route: this.config.localRoute, explicit: options.explicitRoute !== undefined, reason: 'Perfil privado restrito à IA local.' }
+        return { route: this.config.localRoute, explicit: options.explicitRoute !== undefined, reason: t('reasons.privateLocalOnly') }
       }
       const reason = LOCAL_BLOCKED_REASON
       await this.auditSwitch(scope, options.explicitRoute ?? this.config.localRoute, 'blocked', reason, options.explicitRoute !== undefined)
@@ -339,14 +340,14 @@ export class StudioRouteHealthService {
       return { route: undefined, explicit, reason }
     }
     if (options.explicitRoute !== undefined) {
-      return { route: options.explicitRoute, explicit: true, reason: 'Rota escolhida pela pessoa.' }
+      return { route: options.explicitRoute, explicit: true, reason: t('reasons.explicitRoute') }
     }
     // `equilibrado` prefere a local em TODO propósito, não só na leitura segura:
     // é isso que separa "prefere a local" de "usa a melhor que houver".
     if (localUsable && (profile === 'equilibrado' || purpose === 'T0')) {
       return {
         route: this.config.localRoute, explicit: false,
-        reason: profile === 'equilibrado' ? BALANCED_LOCAL_REASON : 'Modelo local saudável preferido para leitura segura.',
+        reason: profile === 'equilibrado' ? BALANCED_LOCAL_REASON : t('reasons.safeReadLocal'),
       }
     }
     const known = this.config.routes.map(route => this.get(scope, route))
@@ -359,7 +360,7 @@ export class StudioRouteHealthService {
         await this.auditSwitch(scope, this.config.localRoute, healthy.route, BALANCED_EXTERNAL_REASON, false)
         return { route: healthy.route, explicit: false, reason: BALANCED_EXTERNAL_REASON }
       }
-      return { route: healthy.route, explicit: false, reason: 'Primeira rota saudável do perfil.' }
+      return { route: healthy.route, explicit: false, reason: t('reasons.firstHealthy') }
     }
     // Nenhuma rota saudável. Uma rota que caiu era simplesmente abandonada até
     // um sucesso que ela nunca teria a chance de ter; cumprido o tempo de
@@ -383,7 +384,7 @@ export class StudioRouteHealthService {
       await this.auditSwitch(scope, this.config.localRoute, this.config.fallbackRoute, BALANCED_EXTERNAL_REASON, false)
       return { route: this.config.fallbackRoute, explicit: false, reason: BALANCED_EXTERNAL_REASON }
     }
-    return { route: this.config.fallbackRoute, explicit: false, reason: 'Rota direta usada porque nenhuma rota monitorada está saudável.' }
+    return { route: this.config.fallbackRoute, explicit: false, reason: t('reasons.directFallback') }
   }
 
   /**
@@ -494,7 +495,7 @@ export class StudioRouteHealthService {
     }
     this.#cascaded.add(options)
     await this.auditSwitch(scope, options.provider, this.config.fallbackRoute,
-      'OmniRoute falhou antes de produzir conteúdo; usando a rota DeepSeek direta.', false)
+      t('reasons.omniRouteCascade'), false)
     const fallbackOptions: GenerateOptions = {
       ...options, provider: this.config.fallbackRoute, model: this.config.fallbackModel,
     }
@@ -540,9 +541,15 @@ export class StudioRouteHealthService {
     const declared = this.config.capabilities !== undefined && Object.hasOwn(this.config.capabilities, route)
       ? this.config.capabilities[route]
       : undefined
+    // As chaves saem SEMPRE, com `undefined` quando não há declaração. Só
+    // omiti-las faria a reaplicação nunca LIMPAR: espalhadas sobre a linha
+    // anterior, as chaves ausentes deixam o valor velho de pé, e uma janela de
+    // contexto declarada por engano e depois removida continuaria sendo
+    // afirmada para sempre. "Desconhecido" é justamente o estado que este
+    // requisito insiste em preservar.
     return {
-      ...(declared?.contextWindowTokens === undefined ? {} : { context_window_tokens: declared.contextWindowTokens }),
-      ...(declared?.supportsTools === undefined ? {} : { supports_tools: declared.supportsTools }),
+      context_window_tokens: declared?.contextWindowTokens,
+      supports_tools: declared?.supportsTools,
       // Derivado do MESMO fato que bloqueia em `enforceRoutePrivacy`: ser, ou
       // não ser, a rota local. Se isto virasse configuração, alguém poderia
       // marcar uma rota externa como local e a tela mentiria sobre para onde o
@@ -614,19 +621,19 @@ export class StudioRouteHealthService {
 /**
  * As frases do circuito, do teto, do desligamento e do perfil equilibrado.
  *
- * Elas são escritas sem acento porque o portão de i18n reprova literal em
- * português dentro de `plugins/*\/src` que não esteja no catálogo, este plugin
- * não tem catálogo (criar um reprovaria de uma vez todas as frases que já
- * existem aqui) e o baseline herdado pode encolher, nunca crescer. Quando a
- * tela de rotas ler estas razões, elas mudam de lugar junto com as outras.
+ * Elas vivem no catálogo `i18n/pt-BR.json` deste plugin, como todo texto que a
+ * pessoa lê. Antes ficavam aqui, escritas SEM ACENTO para escapar do portão de
+ * i18n — o que deixava o portão verde sem que uma única frase estivesse
+ * traduzível. Com o catálogo, o plugin passou a ser `strict` no portão: nenhum
+ * literal em português volta a este diretório sem reprovar.
  */
-const BUDGET_LOCAL_REASON = 'Teto de gasto do escopo estourado; seguindo apenas com a IA local.'
-const BUDGET_BLOCKED_REASON = 'Teto de gasto do escopo estourado; nenhuma rota paga foi acionada.'
-const HALF_OPEN_REASON = 'Meia-abertura: uma chamada decide se o circuito fecha ou reabre.'
-const ALL_OPEN_REASON = 'Circuito aberto em todas as rotas; nenhuma chamada nova enquanto durar a espera.'
-const DISABLED_REASON = 'Rota desligada neste espaco de trabalho; ela nao e escolhida enquanto continuar assim.'
-const BALANCED_LOCAL_REASON = 'Perfil equilibrado: a IA local esta em uso e nada sai deste computador.'
-const BALANCED_EXTERNAL_REASON = 'Perfil equilibrado: a IA local nao esta disponivel; usando a rota externa configurada.'
+const BUDGET_LOCAL_REASON = t('reasons.budgetLocal')
+const BUDGET_BLOCKED_REASON = t('reasons.budgetBlocked')
+const HALF_OPEN_REASON = t('reasons.halfOpen')
+const ALL_OPEN_REASON = t('reasons.allOpen')
+const DISABLED_REASON = t('reasons.disabled')
+const BALANCED_LOCAL_REASON = t('reasons.balancedLocal')
+const BALANCED_EXTERNAL_REASON = t('reasons.balancedExternal')
 
 /**
  * A frase do bloqueio do `privado-local`.
@@ -635,9 +642,9 @@ const BALANCED_EXTERNAL_REASON = 'Perfil equilibrado: a IA local nao esta dispon
  * externa pedida pelo nome, rota que algum caminho novo tentou devolver - porque
  * para quem lê o fato é um só: nada foi enviado para fora.
  */
-const LOCAL_BLOCKED_REASON = 'IA local indisponível; nenhuma informação foi enviada para uma rota externa.'
+const LOCAL_BLOCKED_REASON = t('reasons.localBlocked')
 
-export const ROUTE_FAILURE_MESSAGE = 'A conexão com a inteligência artificial falhou. Nada foi aplicado; tente novamente ou escolha outra rota.'
+export const ROUTE_FAILURE_MESSAGE = t('errors.routeFailure')
 
 /**
  * O que se pode honestamente dizer sobre o custo de uma rota.

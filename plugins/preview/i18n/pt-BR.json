@@ -67,6 +67,7 @@
     "invalidTarget": "Destino inválido.",
     "invalidForwardHeaders": "Cabeçalhos de encaminhamento inválidos.",
     "cancelled": "Operação cancelada.",
-    "invalidResponse": "O supervisor retornou uma resposta inválida."
+    "invalidResponse": "O supervisor retornou uma resposta inválida.",
+    "artifactOutsideRoot": "Artefato fora da raiz permitida."
   }
 }

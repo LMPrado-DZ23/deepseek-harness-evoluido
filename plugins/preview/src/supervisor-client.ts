@@ -139,7 +139,7 @@ export class SupervisorPreviewRuntime implements PreviewRuntimePort, PreviewForw
     const normalized = posix.normalize(value)
     const relative = posix.relative(this.#artifactRoot, normalized)
     if (!posix.isAbsolute(value) || normalized === this.#artifactRoot || relative.startsWith('../') || relative === '..' || posix.isAbsolute(relative)) {
-      throw invalid('Artefato fora da raiz permitida.')
+      throw invalid(t('supervisor.artifactOutsideRoot'))
     }
     return relative
   }

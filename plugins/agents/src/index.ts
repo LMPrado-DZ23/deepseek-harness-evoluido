@@ -30,6 +30,11 @@ import {
   type DelegationRequest,
   type JobPort,
 } from './service.js'
+// A chave `tokenUsage` da projeção de sessão é DECLARADA pelo medidor de tokens
+// do Harness (augmentação de `SessionProjectionMap`). Sem importar o pacote, o
+// tipo não existe para quem compila este plugin e `snapshot(session, ['tokenUsage'])`
+// não passa no typecheck — o consumo aparecia como se ninguém o publicasse.
+import '@deepseek-ai/dsh-token-meter'
 
 export * from './model.js'
 export * from './service.js'
@@ -162,7 +167,7 @@ export async function apply(ctx: Context, config: Config = {}): Promise<void> {
         return ctx.subagents.start(provider, {
           parent: request.parent, prompt: request.prompt, signal: request.signal,
           ...(provider === 'spawn-in-process' && inProcess?.toolFilter !== undefined
-            ? { toolFilter: inProcess.toolFilter as never }
+            ? { toolFilter: { ...inProcess.toolFilter } as never }
             : {}),
           ...(provider === 'spawn-in-process' && inProcess?.persona !== undefined
             ? { persona: inProcess.persona }

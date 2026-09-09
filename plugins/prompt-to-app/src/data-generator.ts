@@ -2,6 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import type { AppSpecV1, EntityFieldType } from './appspec.js'
 import type { GeneratedFile } from './generator.js'
+import { tGeneratedApp } from './generated-i18n.js'
 
 type DatabaseEntity = Extract<AppSpecV1['entities'][number], { kind: 'database' }>
 type DatabaseField = DatabaseEntity['fields'][number]
@@ -97,7 +98,7 @@ function renderSchema(entities: readonly PreparedEntity[]): string {
   const declarations = entities.map(entity => {
     const fields = entity.fields.map(field => `  ${JSON.stringify(field.column)}: ${zodForField(field)}${field.required ? '' : '.optional()'},`).join('\n')
     const recordFields = entity.fields.map(field => `  ${JSON.stringify(field.column)}: ${zodForField(field)}${field.required ? '' : '.nullable()'},`).join('\n')
-    return `export const ${entity.symbol}InputSchema = z.object({\n${fields}\n}).strict()\nexport const ${entity.symbol}UpdateSchema = ${entity.symbol}InputSchema.partial().refine(value => Object.keys(value).length > 0, 'Informe ao menos um campo para atualizar.')\nexport const ${entity.symbol}RecordSchema = z.object({\n  id: z.string().uuid(),\n${recordFields}\n  created_at: z.string().datetime(),\n  updated_at: z.string().datetime(),\n}).strict()\nexport type ${entity.symbol}Input = z.infer<typeof ${entity.symbol}InputSchema>\nexport type ${entity.symbol}Update = z.infer<typeof ${entity.symbol}UpdateSchema>\nexport type ${entity.symbol}Record = z.infer<typeof ${entity.symbol}RecordSchema>`
+    return `export const ${entity.symbol}InputSchema = z.object({\n${fields}\n}).strict()\nexport const ${entity.symbol}UpdateSchema = ${entity.symbol}InputSchema.partial().refine(value => Object.keys(value).length > 0, ${JSON.stringify(tGeneratedApp('validation.requireOneField'))})\nexport const ${entity.symbol}RecordSchema = z.object({\n  id: z.string().uuid(),\n${recordFields}\n  created_at: z.string().datetime(),\n  updated_at: z.string().datetime(),\n}).strict()\nexport type ${entity.symbol}Input = z.infer<typeof ${entity.symbol}InputSchema>\nexport type ${entity.symbol}Update = z.infer<typeof ${entity.symbol}UpdateSchema>\nexport type ${entity.symbol}Record = z.infer<typeof ${entity.symbol}RecordSchema>`
   }).join('\n\n')
   const metadata = entities.map(entity => `  ${JSON.stringify(entity.slug)}: { table: ${JSON.stringify(entity.table)}, sensitive: ${entity.sensitive}, requires_login: true, public_list: false },`).join('\n')
   return `import { z } from 'zod'\n\n${declarations}\n\nexport const entitySecurity = {\n${metadata}\n} as const\n`

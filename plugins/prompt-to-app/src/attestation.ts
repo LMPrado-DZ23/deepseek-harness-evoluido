@@ -24,6 +24,7 @@
  * disco.
  */
 import { createHash } from 'node:crypto'
+import { t } from './i18n.js'
 
 /** O estado de um critério de aceitação, como o relatório do app o traz. */
 export type AttestationCheckStatus = 'PENDING' | 'PASSED' | 'FAILED' | 'NOT_AUTOMATED'
@@ -336,7 +337,7 @@ export function provenanceAttestation(input: {
     // ser literal antes de a promessa continuar sendo feita.
     build: { offline: true, frozen_lockfile: true, attempt: input.attempt },
     signed: false,
-    signature_note: 'HASH_NAO_E_ASSINATURA: integridade verificavel, origem nao provada',
+    signature_note: t('attestation.hashIsNotSignature'),
     attested_at: input.attestedAt,
   }
   return { document, sha256: documentSha256(document) }

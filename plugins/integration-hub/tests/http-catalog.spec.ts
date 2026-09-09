@@ -9,7 +9,7 @@ import { CSRF_COOKIE, IdentityError, SESSION_COOKIE, type SessionRecord, type St
 import type { StudioTenancyService } from '@dz23-studio/tenancy'
 import { catalogQuery, createHubHttpHandler } from '../src/http.ts'
 import { canonicalManifestBytes } from '../src/manifest.ts'
-import type { HubEvent, IntegrationManifest, StudioExport, StudioIntegration } from '../src/model.ts'
+import type { HubEvent, IntegrationKillSwitch, IntegrationManifest, StudioExport, StudioIntegration } from '../src/model.ts'
 import { IntegrationHubService, securityFingerprint, type HubActor, type HubRepository } from '../src/service.ts'
 
 class MemoryRepository implements HubRepository {

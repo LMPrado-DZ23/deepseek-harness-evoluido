@@ -12,7 +12,7 @@ import { TenancyError, type StudioTenancyService } from '@dz23-studio/tenancy'
 import { EXPORT_LIMIT_BYTES, ExportError } from '../src/export.ts'
 import { createHubHttpHandler, HUB_ROUTE_CONTRACTS, safeFileName } from '../src/http.ts'
 import { canonicalManifestBytes } from '../src/manifest.ts'
-import type { HubEvent, IntegrationManifest, StudioExport, StudioIntegration } from '../src/model.ts'
+import type { HubEvent, IntegrationKillSwitch, IntegrationManifest, StudioExport, StudioIntegration } from '../src/model.ts'
 import { HubError, IntegrationHubService, securityFingerprint, type HubActor, type HubRepository } from '../src/service.ts'
 import { readZip } from '../src/zip.ts'
 

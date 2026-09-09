@@ -1,0 +1,23 @@
+{
+  "errors": {
+    "methodNotAllowed": "Método não permitido.",
+    "invalidSession": "Sessão inválida.",
+    "routeFailure": "A conexão com a inteligência artificial falhou. Nada foi aplicado; tente novamente ou escolha outra rota."
+  },
+  "reasons": {
+    "privateLocalOnly": "Perfil privado restrito à IA local.",
+    "localBlocked": "IA local indisponível; nenhuma informação foi enviada para uma rota externa.",
+    "explicitRoute": "Rota escolhida pela pessoa.",
+    "safeReadLocal": "Modelo local saudável preferido para leitura segura.",
+    "firstHealthy": "Primeira rota saudável do perfil.",
+    "directFallback": "Rota direta usada porque nenhuma rota monitorada está saudável.",
+    "omniRouteCascade": "OmniRoute falhou antes de produzir conteúdo; usando a rota DeepSeek direta.",
+    "budgetLocal": "Teto de gasto do escopo estourado; seguindo apenas com a IA local.",
+    "budgetBlocked": "Teto de gasto do escopo estourado; nenhuma rota paga foi acionada.",
+    "halfOpen": "Meia-abertura: uma chamada decide se o circuito fecha ou reabre.",
+    "allOpen": "Circuito aberto em todas as rotas; nenhuma chamada nova enquanto durar a espera.",
+    "disabled": "Rota desligada neste espaço de trabalho; ela não é escolhida enquanto continuar assim.",
+    "balancedLocal": "Perfil equilibrado: a IA local está em uso e nada sai deste computador.",
+    "balancedExternal": "Perfil equilibrado: a IA local não está disponível; usando a rota externa configurada."
+  }
+}

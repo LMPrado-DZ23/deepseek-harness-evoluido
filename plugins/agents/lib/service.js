@@ -90,8 +90,21 @@ export function nextFence(leases, scope) {
  */
 export function supersedingFence(leases, runId) {
     const own = leases.find(lease => lease.run_id === runId);
-    if (own === undefined)
-        return undefined;
+    // Reserva AUSENTE não é caminho livre. Este é o mesmo raciocínio que faz
+    // `leaseFence` tratar cerca ausente como 0: "não sei" tem de decidir para o
+    // lado seguro. Uma reserva que sumiu — poda, migração de domínio, journal
+    // truncado, `putLease` que não durou — deixaria de haver com que comparar, e
+    // devolver `undefined` aqui significaria "não fui superado, pode escrever".
+    // Devolvemos a MAIOR cerca que existe no repositório: quem não tem reserva
+    // não escreve por cima de quem tem.
+    if (own === undefined) {
+        let highest;
+        for (const lease of leases) {
+            if (highest === undefined || leaseFence(lease) > highest)
+                highest = leaseFence(lease);
+        }
+        return highest ?? 0;
+    }
     let superseding;
     for (const lease of leases) {
         // A própria reserva não precisa ser pulada: `leaseFence(own) <= leaseFence(own)`
@@ -151,7 +164,7 @@ export class StudioAgentService {
         }
         const paths = request.intendedPaths.map(path => normalizeDelegationPath(path));
         if (paths.length === 0)
-            throw new DelegationError('INVALID_PATH', 'Declare ao menos um caminho que o assistente pretende alterar.');
+            throw new DelegationError('INVALID_PATH', t('delegation.pathsRequired'));
         // O conflito é do espaço de trabalho e do repositório. Sem esse recorte,
         // duas organizações diferentes que por acaso editam `src` bloqueariam uma
         // à outra - e cada uma saberia que a outra está trabalhando ali.
@@ -205,7 +218,7 @@ export class StudioAgentService {
     async reviewProposal(runId) {
         const record = this.dependencies.repository.runs().find(candidate => candidate.run_id === runId);
         if (record === undefined || record.status !== 'PROPOSED') {
-            throw new DelegationError('INVALID_STATE', 'Somente uma proposta pendente pode ser revisada.');
+            throw new DelegationError('INVALID_STATE', t('delegation.onlyPendingReviewable'));
         }
         const snapshot = {
             repositoryPath: record.repository_path,
@@ -528,7 +541,7 @@ export class StudioAgentService {
             if (pathViolation || diff.files.length > maxFiles || diff.bytes > maxDiffBytes || tokenExceeded) {
                 const reason = pathViolation ? t('delegation.pathOutsideApproved')
                     : tokenExceeded ? 'limite de tokens excedido'
-                        : diff.files.length > maxFiles ? 'limite de arquivos excedido' : 'limite de bytes do diff excedido';
+                        : diff.files.length > maxFiles ? 'limite de arquivos excedido' : t('git.diffByteLimit');
                 return await this.#finish(runId, request, snapshot, coordinator, lease, 'BUDGET_EXCEEDED', reason, now, diff, outsideChanged, measuredTokens);
             }
             const diagnostic = outsideChanged

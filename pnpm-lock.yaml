@@ -236,6 +236,9 @@ importers:
       '@deepseek-ai/dsh-subagent':
         specifier: workspace:*
         version: link:../../third_party/deepseek-harness/packages/subagent/subagent
+      '@deepseek-ai/dsh-token-meter':
+        specifier: workspace:*
+        version: link:../../third_party/deepseek-harness/packages/llm/token-meter
       '@dz23-studio/identity':
         specifier: workspace:*
         version: link:../identity
@@ -592,6 +595,9 @@ importers:
         specifier: 8.23.0
         version: 8.23.0
     devDependencies:
+      '@dz23-studio/action-approval':
+        specifier: workspace:*
+        version: link:../action-approval
       '@types/pg':
         specifier: 8.23.1
         version: 8.23.1

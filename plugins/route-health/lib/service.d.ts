@@ -232,7 +232,7 @@ export declare class StudioRouteHealthService {
     private record;
     private auditSwitch;
 }
-export declare const ROUTE_FAILURE_MESSAGE = "A conex\u00E3o com a intelig\u00EAncia artificial falhou. Nada foi aplicado; tente novamente ou escolha outra rota.";
+export declare const ROUTE_FAILURE_MESSAGE: string;
 /**
  * O que se pode honestamente dizer sobre o custo de uma rota.
  *

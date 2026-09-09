@@ -5,7 +5,7 @@ import {
   StudioActionApprovalService,
 } from '@dz23-studio/action-approval'
 import type { AgentTeamRecord, AgentTeamTaskRecord, StudioAgentTeamRuntime } from '@dz23-studio/agent-team'
-import type { AgentRunRecord, StudioAgentsRuntime } from '@dz23-studio/agents'
+import type { AgentRunRecord, StudioAgentService, StudioAgentsRuntime } from '@dz23-studio/agents'
 import type { StudioIdentityRuntime } from '@dz23-studio/identity'
 import type { StudioTenancyRuntime } from '@dz23-studio/tenancy'
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
@@ -87,7 +87,10 @@ async function harness(options: {
     const index = runs.findIndex(candidate => candidate.run_id === runId)
     if (index >= 0) runs[index] = { ...runs[index]!, status: 'FAILED', diagnostic: `encerrado: ${reason}` }
   })
-  const resume = vi.fn((runId: string) => {
+  // O dublê tem de aceitar o MESMO segundo argumento que o serviço real recebe:
+  // é nele que viajam os caminhos da reserva, e um dublê de um argumento só
+  // deixava o teste de `intendedPaths` sem tipo para conferir.
+  const resume = vi.fn((runId: string, _request: Parameters<StudioAgentService['resume']>[1]) => {
     sequence += 1
     return { runId: `run-${sequence}`, jobId: `job-${sequence}` as JobId, requiredTier: 'T2' as const, resumedFrom: runId }
   })

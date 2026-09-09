@@ -40,7 +40,16 @@ export interface DelegationRequest {
   readonly usesExternalNetwork?: boolean
   readonly budget?: DelegationBudget
   readonly inProcess?: {
-    readonly toolFilter?: unknown
+    /**
+     * A restrição de ferramentas do filho, TIPADA.
+     *
+     * Era `unknown`, e o `as never` do lado do adaptador completava o cano:
+     * qualquer forma atravessava o typecheck, e o único lugar do sistema que
+     * conhece a forma certa era o Harness, em tempo de execução. Foi por esse
+     * cano que uma permissão nomeando ferramenta inexistente passou até
+     * derrubar a delegação de verdade.
+     */
+    readonly toolFilter?: { readonly allow?: readonly string[]; readonly deny?: readonly string[] }
     readonly persona?: string
   }
   /**
@@ -273,7 +282,20 @@ export function nextFence(
  */
 export function supersedingFence(leases: readonly AgentLeaseRecord[], runId: string): number | undefined {
   const own = leases.find(lease => lease.run_id === runId)
-  if (own === undefined) return undefined
+  // Reserva AUSENTE não é caminho livre. Este é o mesmo raciocínio que faz
+  // `leaseFence` tratar cerca ausente como 0: "não sei" tem de decidir para o
+  // lado seguro. Uma reserva que sumiu — poda, migração de domínio, journal
+  // truncado, `putLease` que não durou — deixaria de haver com que comparar, e
+  // devolver `undefined` aqui significaria "não fui superado, pode escrever".
+  // Devolvemos a MAIOR cerca que existe no repositório: quem não tem reserva
+  // não escreve por cima de quem tem.
+  if (own === undefined) {
+    let highest: number | undefined
+    for (const lease of leases) {
+      if (highest === undefined || leaseFence(lease) > highest) highest = leaseFence(lease)
+    }
+    return highest ?? 0
+  }
   let superseding: number | undefined
   for (const lease of leases) {
     // A própria reserva não precisa ser pulada: `leaseFence(own) <= leaseFence(own)`
@@ -354,7 +376,7 @@ export class StudioAgentService {
       throw new DelegationError('APPROVAL_REQUIRED', t('delegation.confirmWithPasskey'))
     }
     const paths = request.intendedPaths.map(path => normalizeDelegationPath(path))
-    if (paths.length === 0) throw new DelegationError('INVALID_PATH', 'Declare ao menos um caminho que o assistente pretende alterar.')
+    if (paths.length === 0) throw new DelegationError('INVALID_PATH', t('delegation.pathsRequired'))
     // O conflito é do espaço de trabalho e do repositório. Sem esse recorte,
     // duas organizações diferentes que por acaso editam `src` bloqueariam uma
     // à outra - e cada uma saberia que a outra está trabalhando ali.
@@ -405,7 +427,7 @@ export class StudioAgentService {
   async reviewProposal(runId: string): Promise<WorktreeDiff> {
     const record = this.dependencies.repository.runs().find(candidate => candidate.run_id === runId)
     if (record === undefined || record.status !== 'PROPOSED') {
-      throw new DelegationError('INVALID_STATE', 'Somente uma proposta pendente pode ser revisada.')
+      throw new DelegationError('INVALID_STATE', t('delegation.onlyPendingReviewable'))
     }
     const snapshot: WorktreeSnapshot = {
       repositoryPath: record.repository_path,
@@ -725,7 +747,7 @@ export class StudioAgentService {
       if (pathViolation || diff.files.length > maxFiles || diff.bytes > maxDiffBytes || tokenExceeded) {
         const reason = pathViolation ? t('delegation.pathOutsideApproved')
             : tokenExceeded ? 'limite de tokens excedido'
-              : diff.files.length > maxFiles ? 'limite de arquivos excedido' : 'limite de bytes do diff excedido'
+              : diff.files.length > maxFiles ? 'limite de arquivos excedido' : t('git.diffByteLimit')
         return await this.#finish(runId, request, snapshot, coordinator, lease, 'BUDGET_EXCEEDED', reason, now, diff, outsideChanged, measuredTokens)
       }
       const diagnostic = outsideChanged

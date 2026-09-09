@@ -3,6 +3,7 @@ import { dirname, resolve } from 'node:path'
 import type { AppSpecV1 } from './appspec.js'
 import { dataIdentifier } from './data-generator.js'
 import { tGeneratedApp } from './generated-i18n.js'
+import { t } from './i18n.js'
 import type { GeneratedFile } from './generator.js'
 import type { StudioProjectCategory } from './model.js'
 
@@ -58,7 +59,7 @@ export function summarizeDashboardRows(
 export function generateDashboardLayer(spec: AppSpecV1, category: StudioProjectCategory): GeneratedDashboardLayer {
   if (category !== 'dashboard') return { files: [], protectedPaths: [] }
   const entities = spec.entities.filter((entity): entity is DatabaseEntity => entity.kind === 'database')
-  if (entities.length === 0) throw new DashboardCategoryError('Um painel precisa de ao menos um cadastro para resumir.')
+  if (entities.length === 0) throw new DashboardCategoryError(t('errors.dashboardNeedsEntity'))
 
   const files: GeneratedFile[] = entities.map(entity => {
     const slug = dataIdentifier(entity.name)
@@ -144,6 +145,7 @@ function renderDashboard(entity: DatabaseEntity, slug: string, symbol: string): 
 import { openDatabase } from '../../../db/client'
 import { ${symbol}Repository } from '../../../server/repositories/${slug}'
 import { AccessPanel, AccountPanel } from '../access-panel'
+import { t } from './i18n.js'
 
 type Row = Record<string, unknown>
 type Bucket = { key: string; label: string; count: number }

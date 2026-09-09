@@ -74,7 +74,8 @@
     "planEditUnknownSlice": "Esta parte não faz parte do plano: {slice}",
     "planEditConflictingSlice": "Você pediu para tirar e para alterar a mesma parte: {slice}",
     "planEditEmpty": "O plano precisa ter pelo menos uma parte. Para não criar nada, é só não aprovar.",
-    "planEditOrder": "A ordem enviada não corresponde às partes que sobraram no plano."
+    "planEditOrder": "A ordem enviada não corresponde às partes que sobraram no plano.",
+    "dashboardNeedsEntity": "Um painel precisa de ao menos um cadastro para resumir."
   },
   "pipeline": {
     "verified": "Protótipo verificado — não está publicado nem disponível para outras pessoas",
@@ -126,5 +127,8 @@
     "build": "Montando o aplicativo",
     "test": "Conferindo se as partes funcionam",
     "e2e": "Usando o aplicativo como uma pessoa usaria"
+  },
+  "attestation": {
+    "hashIsNotSignature": "HASH_NAO_E_ASSINATURA: integridade verificavel, origem nao provada"
   }
 }

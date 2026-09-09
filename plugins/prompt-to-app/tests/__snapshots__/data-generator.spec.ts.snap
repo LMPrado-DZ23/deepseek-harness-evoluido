@@ -38,7 +38,7 @@ export const ClienteInputSchema = z.object({
   "limite": z.number().finite(),
   "situacao": z.enum(["novo","cliente d'ouro"]),
 }).strict()
-export const ClienteUpdateSchema = ClienteInputSchema.partial().refine(value => Object.keys(value).length > 0, 'Informe ao menos um campo para atualizar.')
+export const ClienteUpdateSchema = ClienteInputSchema.partial().refine(value => Object.keys(value).length > 0, "Informe ao menos um campo para atualizar.")
 export const ClienteRecordSchema = z.object({
   id: z.string().uuid(),
   "nome_completo": z.string().min(1).max(2_000),
@@ -60,7 +60,7 @@ export const PedidoInputSchema = z.object({
   "descricao": z.string().min(1).max(2_000),
   "cliente": z.string().min(1).max(2_000),
 }).strict()
-export const PedidoUpdateSchema = PedidoInputSchema.partial().refine(value => Object.keys(value).length > 0, 'Informe ao menos um campo para atualizar.')
+export const PedidoUpdateSchema = PedidoInputSchema.partial().refine(value => Object.keys(value).length > 0, "Informe ao menos um campo para atualizar.")
 export const PedidoRecordSchema = z.object({
   id: z.string().uuid(),
   "descricao": z.string().min(1).max(2_000),

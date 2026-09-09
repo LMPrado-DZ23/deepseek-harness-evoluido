@@ -487,7 +487,7 @@ describe('M-05: os tres perfis nomeados', () => {
     // e o que acontece FORA de T0, e ai o equilibrado continua na local.
     await expect(h.service.chooseRoute(scope, 'T2', { privacy: 'equilibrado' })).resolves.toEqual({
       route: 'ollama', explicit: false,
-      reason: 'Perfil equilibrado: a IA local esta em uso e nada sai deste computador.',
+      reason: 'Perfil equilibrado: a IA local está em uso e nada sai deste computador.',
     })
   })
 
@@ -497,7 +497,7 @@ describe('M-05: os tres perfis nomeados', () => {
     const chosen = await h.service.chooseRoute(scope, 'T2', { privacy: 'equilibrado' })
     expect(chosen).toEqual({
       route: 'omniroute', explicit: false,
-      reason: 'Perfil equilibrado: a IA local nao esta disponivel; usando a rota externa configurada.',
+      reason: 'Perfil equilibrado: a IA local não está disponível; usando a rota externa configurada.',
     })
     // O aviso nao vive so na frase: a troca fica auditada como qualquer outra.
     expect(h.service.switches(scope).at(-1)).toMatchObject({ from_route: 'ollama', to_route: 'omniroute' })
@@ -509,7 +509,7 @@ describe('M-05: os tres perfis nomeados', () => {
     const chosen = await h.service.chooseRoute(scope, 'T2', { privacy: 'equilibrado' })
     expect(chosen).toMatchObject({
       route: 'deepseek-official',
-      reason: 'Perfil equilibrado: a IA local nao esta disponivel; usando a rota externa configurada.',
+      reason: 'Perfil equilibrado: a IA local não está disponível; usando a rota externa configurada.',
     })
     expect(h.service.switches(scope).at(-1)).toMatchObject({ to_route: 'deepseek-official' })
   })
@@ -547,7 +547,7 @@ describe('M-05: liga e desliga por rota', () => {
     // escolha explicita atravessa nao e guarda.
     await expect(h.service.chooseRoute(scope, 'T2', { privacy: 'melhor-qualidade', explicitRoute: 'omniroute' })).resolves.toEqual({
       route: undefined, explicit: true,
-      reason: 'Rota desligada neste espaco de trabalho; ela nao e escolhida enquanto continuar assim.',
+      reason: 'Rota desligada neste espaço de trabalho; ela não é escolhida enquanto continuar assim.',
     })
     expect(h.service.switches(scope).at(-1)).toMatchObject({ from_route: 'omniroute', to_route: 'blocked', explicit_route: true })
     // Desligada a ultima rota, a resposta honesta e recusar - nao prometer uma
@@ -555,7 +555,7 @@ describe('M-05: liga e desliga por rota', () => {
     await h.service.setRouteEnabled(scope, 'deepseek-official', false)
     await expect(h.service.chooseRoute(scope, 'T2')).resolves.toMatchObject({
       route: undefined,
-      reason: 'Rota desligada neste espaco de trabalho; ela nao e escolhida enquanto continuar assim.',
+      reason: 'Rota desligada neste espaço de trabalho; ela não é escolhida enquanto continuar assim.',
     })
   })
 
@@ -825,6 +825,32 @@ describe('M-03 — o que cada rota sabe fazer, e o que ela NÃO diz', () => {
     expect(stored).toMatchObject({ privacy: 'externa', requests: 1 })
     const external = h.service.list(scope).find(row => row.route === 'deepseek-official')!
     expect(external).toMatchObject({ context_window_tokens: 128_000, supports_tools: true })
+  })
+
+  it('RETIRAR a declaração LIMPA o valor gravado: desconhecido volta a ser desconhecido', async () => {
+    // Sem isto, uma janela declarada por engano continuaria sendo afirmada
+    // para sempre — e "desconhecido" é o estado que este requisito insiste em
+    // preservar. Só omitir a chave deixaria o valor velho de pé no
+    // espalhamento sobre a linha anterior.
+    const repository = new MemoryRepository()
+    const withDeclaration = new StudioRouteHealthService(repository, {
+      routes: ['omniroute'], localRoute: 'ollama', fallbackRoute: 'omniroute', fallbackModel: 'x',
+      capabilities: { omniroute: { contextWindowTokens: 64_000, supportsTools: true } },
+      now: () => new Date('2026-09-03T00:00:00.000Z'), createId: () => 'event-1',
+    })
+    await collect(withDeclaration.streamWithFallback(scope, options,
+      () => chunks({ type: 'text-delta', text: 'oi' } as StreamChunk), () => chunks()))
+    expect([...repository.routeMap.values()][0]!.context_window_tokens).toBe(64_000)
+
+    const withoutDeclaration = new StudioRouteHealthService(repository, {
+      routes: ['omniroute'], localRoute: 'ollama', fallbackRoute: 'omniroute', fallbackModel: 'x',
+      now: () => new Date('2026-09-03T00:00:00.000Z'), createId: () => 'event-2',
+    })
+    await collect(withoutDeclaration.streamWithFallback(scope, options,
+      () => chunks({ type: 'text-delta', text: 'oi' } as StreamChunk), () => chunks()))
+    const after = [...repository.routeMap.values()][0]!
+    expect(after.context_window_tokens).toBeUndefined()
+    expect(after.supports_tools).toBeUndefined()
   })
 
   it('uma linha gravada ANTES da declaração passa a carregá-la na requisição seguinte', async () => {

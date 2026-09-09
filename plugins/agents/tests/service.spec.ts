@@ -763,6 +763,16 @@ describe('A-03 — cerca (fencing token)', () => {
     expect(supersedingFence([own, { ...other, paths: ['src'], fence: 1 }], 'run-1')).toBeUndefined()
   })
 
+  it('reserva AUSENTE não é caminho livre: sem com que comparar, a escrita é RECUSADA', () => {
+    // "Não sei" tem de decidir para o lado seguro, igual à cerca ausente. Uma
+    // reserva que sumiu (poda, migração, journal truncado) deixaria de haver
+    // com que comparar, e devolver "não fui superado" seria abrir a escrita
+    // justamente quando se perdeu a informação que a protegia.
+    expect(supersedingFence([{ ...persistedLease('l1', 'outra'), fence: 5 }], 'run-sem-reserva')).toBe(5)
+    // Sem reserva nenhuma no repositório, ainda assim não é `undefined`.
+    expect(supersedingFence([], 'run-sem-reserva')).toBe(0)
+  })
+
   it('APLICAR uma proposta já superada é RECUSADO: escreveria versão antiga por cima da nova', async () => {
     // Este é o buraco que a cerca fecha. A execução ficou PROPOSED antes da
     // queda; a reconciliação liberou a reserva dela; outra execução pegou os

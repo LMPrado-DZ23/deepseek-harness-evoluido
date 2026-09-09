@@ -25,6 +25,19 @@ function run(overrides: Partial<VerifiedRunView> = {}): VerifiedRunView {
   }
 }
 
+/**
+ * Um registro ANTIGO: o campo não está `undefined`, ele NÃO EXISTE.
+ *
+ * A diferença importa aqui e não é preciosismo de tipo: passar `undefined` é
+ * dizer "o campo existe e está vazio", e é justamente isso que um registro
+ * gravado antes do campo nunca disse. `delete` reproduz o registro real.
+ */
+function runWithout(field: keyof VerifiedRunView): VerifiedRunView {
+  const record: Record<string, unknown> = { ...run() }
+  delete record[field]
+  return record as unknown as VerifiedRunView
+}
+
 describe('escolher a execução', () => {
   it('sem nome, a mais recente APROVADA', () => {
     const chosen = selectVerifiedRun([
@@ -87,8 +100,8 @@ describe('selar o artefato', () => {
       [run({ template_integrity: 'FAILED' }), 'TEMPLATE_INTEGRITY_FAILED'],
       // Registro antigo, gravado antes de o campo existir: ausente NÃO é
       // "conferido".
-      [run({ template_integrity: undefined }), 'TEMPLATE_INTEGRITY_FAILED'],
-      [run({ attestations: undefined }), 'ATTESTATIONS_MISSING'],
+      [runWithout('template_integrity'), 'TEMPLATE_INTEGRITY_FAILED'],
+      [runWithout('attestations'), 'ATTESTATIONS_MISSING'],
     ] as const
     for (const [candidate, code] of cases) {
       const error = (() => { try { artifactFromRun(candidate); return undefined } catch (caught) { return caught } })()

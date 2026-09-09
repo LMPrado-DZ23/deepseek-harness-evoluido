@@ -79,6 +79,21 @@ const PLUGIN_BASELINES = pluginBaselineRevisions()
 const baselineFile = readBaselineFile()
 const inflatedBaseline = []
 const grandfatheredHits = []
+/**
+ * O código-fonte que o Studio ESCREVE, e não o texto que a pessoa LÊ no Studio.
+ *
+ * Um gerador emite o aplicativo da pessoa: nomes de teste, comentários e
+ * mensagens que vão viver DENTRO do repositório gerado, em português porque o
+ * aplicativo é em português. Esse texto não tem para onde ser traduzido pelo
+ * catálogo do Studio - ele não é exibido pelo Studio.
+ *
+ * A permissão é por ARQUIVO e com TETO, e o número é impresso: o que ela não
+ * pode virar é a válvula de escape que o acento removido já foi. Mensagem que a
+ * pessoa lê no aplicativo gerado continua saindo do catálogo e sendo
+ * interpolada (veja `generated.requireOneField`), e crescer aqui reprova.
+ */
+const GENERATED_SOURCE_CEILING = { 'plugins/prompt-to-app/src/data-generator.ts': 1 }
+const generatedSourceHits = {}
 for (const sourceRoot of sourceRoots) for (const file of walk(sourceRoot.path)) scanSource(file, sourceRoot.strict, sourceRoot.path.includes(`${sep}plugins${sep}`) ? PLUGIN_BASELINES : undefined)
 if (directText.length > 0) failures.push(`texto pt-BR fora do catálogo: ${directText.join(' | ')}`)
 if (inflatedBaseline.length > 0) failures.push(`baseline de i18n contém literal que o histórico não confirma (rode \`pnpm i18n:baseline\`): ${inflatedBaseline.join(' | ')}`)
@@ -90,6 +105,10 @@ const baselineCeiling = baselineFile === undefined
 if (baselineCeiling !== undefined && grandfatheredHits.length > baselineCeiling) {
   failures.push(`literais herdados cresceram (${String(grandfatheredHits.length)} > ${String(baselineCeiling)}): migre para o catálogo em vez de aumentar o baseline`)
 }
+for (const [file, ceiling] of Object.entries(GENERATED_SOURCE_CEILING)) {
+  const found = generatedSourceHits[file]?.length ?? 0
+  if (found > ceiling) failures.push(`código gerado com texto pt-BR cresceu em ${file} (${String(found)} > ${String(ceiling)}): mande a frase para o catálogo e interpole`)
+}
 const cssText = [...styles.matchAll(/content\s*:\s*['"]([^'"]+)['"]/gu)].map(match => match[1].trim()).filter(Boolean)
 if (cssText.length > 0) failures.push(`texto visível no CSS fora do catálogo: ${cssText.join(' | ')}`)
 
@@ -97,7 +116,7 @@ if (failures.length > 0) {
   process.stderr.write(`I18N_GATE=FAIL\n- ${failures.join('\n- ')}\n`)
   process.exit(1)
 }
-process.stdout.write(`I18N_GATE=PASS locale=pt-BR catalogs=${readiness.scanned.length} keys=${flatten(catalog).length + flatten(serverCatalog).length + flatten(previewCatalog).length} plugin_literals_grandfathered=${grandfatheredHits.length} baseline=${baselineFile === undefined ? 'git' : 'file'}\n`)
+process.stdout.write(`I18N_GATE=PASS locale=pt-BR catalogs=${readiness.scanned.length} keys=${flatten(catalog).length + flatten(serverCatalog).length + flatten(previewCatalog).length} plugin_literals_grandfathered=${grandfatheredHits.length} generated_source_literals=${Object.values(generatedSourceHits).reduce((total, hits) => total + hits.length, 0)} baseline=${baselineFile === undefined ? 'git' : 'file'}\n`)
 if (grandfatheredHits.length > 0) process.stdout.write(`- pendentes de migração para catálogo (bases ${PLUGIN_BASELINES.join(',')}, não podem crescer):\n  ${grandfatheredHits.join('\n  ')}\n`)
 
 function flatten(value, prefix = '') {
@@ -147,7 +166,15 @@ function visit(node, sourceFile, path, grandfathered, baselineLiterals) {
   if ((ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateExpression(node)) && portugueseText(raw) && !grandfathered.has(raw)) {
     const { line } = sourceFile.getLineAndCharacterOfPosition(node.getStart())
     const hit = `${basename(path)}:${line + 1}:${node.getText(sourceFile).slice(0, 80)}`
-    if (baselineLiterals.has(raw)) grandfatheredHits.push(hit); else directText.push(hit)
+    const repoPath = relative(root, path).replaceAll('\\', '/')
+    // Só um literal de template que carrega código gerado entra na permissão: uma
+    // frase solta no mesmo arquivo continua sendo texto fora do catálogo.
+    const generatedSource = Object.hasOwn(GENERATED_SOURCE_CEILING, repoPath)
+      && (ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateExpression(node))
+      && /\b(?:import|export|describe|function)\b/u.test(raw)
+    if (baselineLiterals.has(raw)) grandfatheredHits.push(hit)
+    else if (generatedSource) (generatedSourceHits[repoPath] ??= []).push(hit)
+    else directText.push(hit)
   }
   ts.forEachChild(node, child => visit(child, sourceFile, path, grandfathered, baselineLiterals))
 }

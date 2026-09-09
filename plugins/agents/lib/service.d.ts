@@ -33,7 +33,19 @@ export interface DelegationRequest {
     readonly usesExternalNetwork?: boolean;
     readonly budget?: DelegationBudget;
     readonly inProcess?: {
-        readonly toolFilter?: unknown;
+        /**
+         * A restrição de ferramentas do filho, TIPADA.
+         *
+         * Era `unknown`, e o `as never` do lado do adaptador completava o cano:
+         * qualquer forma atravessava o typecheck, e o único lugar do sistema que
+         * conhece a forma certa era o Harness, em tempo de execução. Foi por esse
+         * cano que uma permissão nomeando ferramenta inexistente passou até
+         * derrubar a delegação de verdade.
+         */
+        readonly toolFilter?: {
+            readonly allow?: readonly string[];
+            readonly deny?: readonly string[];
+        };
         readonly persona?: string;
     };
     /**

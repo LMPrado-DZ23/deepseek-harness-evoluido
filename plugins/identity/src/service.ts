@@ -769,7 +769,7 @@ export class StudioIdentityService {
 
   async #updateCounter(credential: PasskeyCredential, newCounter: number): Promise<void> {
     if (credential.counter !== 0 && newCounter <= credential.counter) {
-      throw new IdentityError('counter', 'Esta chave de acesso pode ter sido clonada e foi bloqueada.')
+      throw new IdentityError('counter', t('auth.passkeyPossiblyCloned'))
     }
     await this.#repository.putCredential({ ...credential, counter: newCounter, last_used_at: this.#now().toISOString() })
   }

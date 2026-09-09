@@ -7,7 +7,10 @@
   "types": "./src/index.ts",
   "exports": {
     ".": {
-      "dz23-build": { "types": "./lib/index.d.ts", "default": "./lib/index.js" },
+      "dz23-build": {
+        "types": "./lib/index.d.ts",
+        "default": "./lib/index.js"
+      },
       "types": "./src/index.ts",
       "default": "./lib/index.js"
     }
@@ -21,17 +24,18 @@
     "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
-    "@dz23-studio/identity": "workspace:*",
-    "@dz23-studio/policy": "workspace:*",
     "@deepseek-ai/cordis": "workspace:*",
     "@deepseek-ai/dsh-agent": "workspace:*",
+    "@deepseek-ai/dsh-agent-presets": "workspace:*",
+    "@deepseek-ai/dsh-api-session-controller": "workspace:*",
     "@deepseek-ai/dsh-jobs": "workspace:*",
     "@deepseek-ai/dsh-llm": "workspace:*",
-    "@deepseek-ai/dsh-agent-presets": "workspace:*",
     "@deepseek-ai/dsh-session": "workspace:*",
-    "@deepseek-ai/dsh-api-session-controller": "workspace:*",
     "@deepseek-ai/dsh-storage-domain": "workspace:*",
     "@deepseek-ai/dsh-subagent": "workspace:*",
+    "@deepseek-ai/dsh-token-meter": "workspace:*",
+    "@dz23-studio/identity": "workspace:*",
+    "@dz23-studio/policy": "workspace:*",
     "zod": "4.4.3"
   }
 }

@@ -116,7 +116,7 @@ export async function apply(ctx, config = {}) {
                 return ctx.subagents.start(provider, {
                     parent: request.parent, prompt: request.prompt, signal: request.signal,
                     ...(provider === 'spawn-in-process' && inProcess?.toolFilter !== undefined
-                        ? { toolFilter: inProcess.toolFilter }
+                        ? { toolFilter: { ...inProcess.toolFilter } }
                         : {}),
                     ...(provider === 'spawn-in-process' && inProcess?.persona !== undefined
                         ? { persona: inProcess.persona }
