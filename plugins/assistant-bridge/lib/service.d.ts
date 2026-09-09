@@ -117,6 +117,28 @@ export declare class StudioAssistantBridge {
      * @param reason - o que a pessoa verificou antes de decidir.
      * @returns a execução já encerrada, como ela ficou gravada.
      */
+    /**
+     * Retoma um trabalho interrompido por um reinício (A-03), NA CÓPIA QUE SOBROU.
+     *
+     * A pessoa pede pelo assistente, e não por uma tela, porque é na conversa
+     * que os trabalhos delegados vivem: ela vê a lista, vê qual parou, e manda
+     * continuar aquele.
+     *
+     * A confirmação é a MESMA de começar um trabalho novo — porque é isso que
+     * acontece: um assistente volta a escrever nos arquivos dela. O que muda é
+     * de onde ele parte.
+     * @param agent - a sessão do assistente que está pedindo.
+     * @param runId - o trabalho interrompido.
+     * @param prompt - o que fazer a partir do que já está na cópia.
+     * @returns o trabalho novo e o que ele retomou.
+     */
+    resume(agent: AssistantAgent | undefined, runId: string, prompt: string): Promise<{
+        run_id: string;
+        job_id: string;
+        status: "RUNNING";
+        required_tier: import("@dz23-studio/agents").ApprovalTier;
+        resumed_from: string;
+    }>;
     resolveUnknownRun(agent: AssistantAgent | undefined, runId: string, reason: string): Promise<AssistantRunSummary>;
     cancel(agent: AssistantAgent | undefined, runId: string, reason?: string): {
         run_id: string;

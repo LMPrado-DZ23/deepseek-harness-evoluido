@@ -1,4 +1,4 @@
-export declare const ASSISTANT_TOOL_NAMES: readonly ["studio_agent_start", "studio_agent_start_sensitive", "studio_agent_resolve_unknown", "studio_agent_list", "studio_agent_review", "studio_agent_cancel", "studio_agent_apply", "studio_team_start", "studio_team_start_sensitive", "studio_team_list", "studio_team_status", "studio_team_continue", "studio_team_continue_sensitive", "studio_team_cancel"];
+export declare const ASSISTANT_TOOL_NAMES: readonly ["studio_agent_start", "studio_agent_start_sensitive", "studio_agent_resolve_unknown", "studio_agent_resume", "studio_agent_list", "studio_agent_review", "studio_agent_cancel", "studio_agent_apply", "studio_team_start", "studio_team_start_sensitive", "studio_team_list", "studio_team_status", "studio_team_continue", "studio_team_continue_sensitive", "studio_team_cancel"];
 export type AssistantToolName = typeof ASSISTANT_TOOL_NAMES[number];
 /**
  * P36 deliberately exposes only the provider whose filesystem boundary is
@@ -43,6 +43,22 @@ export declare const ASSISTANT_TOOL_POLICY: {
         scope?: "none" | "org" | "workspace" | "project" | undefined;
     };
     studio_agent_resolve_unknown: {
+        source: {
+            kind: "studio" | "harness" | "plugin" | "mcp";
+            external?: boolean | undefined;
+            signed?: boolean | undefined;
+            stableChannel?: boolean | undefined;
+        };
+        inferredTier?: unknown;
+        manifestTier?: unknown;
+        policyTier?: unknown;
+        allowManifestDowngrade?: boolean | undefined;
+        blocked?: boolean | undefined;
+        sandboxMode?: string | undefined;
+        requiredPermission?: "identity.self" | "workspace.read" | "workspace.create" | "workspace.manage" | "members.read" | "members.manage" | "integrations.manage" | "project.read" | "project.write" | "project.publish_staging" | "project.delete" | "audit.read" | "invitation.accept" | undefined;
+        scope?: "none" | "org" | "workspace" | "project" | undefined;
+    };
+    studio_agent_resume: {
         source: {
             kind: "studio" | "harness" | "plugin" | "mcp";
             external?: boolean | undefined;

@@ -137,6 +137,18 @@ export function createAssistantTools(bridge: StudioAssistantBridge): readonly To
       },
     }), ['run_id', 'reason']),
     closedTool(defineTool({
+      name: 'studio_agent_resume',
+      description: t('tools.resume'),
+      parameters: {
+        run_id: { type: 'string', required: true, description: t('tools.runId') },
+        prompt: { type: 'string', required: true, description: t('tools.resumePrompt') },
+      },
+      output: jsonOutput,
+      async execute(args, exec) {
+        return { json: JSON.stringify(await bridge.resume(asAssistantAgent(exec.agent), args.run_id, args.prompt)) }
+      },
+    }), ['run_id', 'prompt']),
+    closedTool(defineTool({
       name: 'studio_agent_list',
       description: t('tools.list'),
       parameters: {},

@@ -66,7 +66,7 @@
     "onlyDisabled": "Só as desligadas",
     "showing": "Mostrando {shown} de {matched} (o catálogo tem {total}).",
     "loadMore": "Carregar mais",
-    "noneFound": "Nada encontrado para \u201c{search}\u201d. O catálogo continua com as suas integrações; troque o termo ou limpe os filtros.",
+    "noneFound": "Nada encontrado para “{search}”. O catálogo continua com as suas integrações; troque o termo ou limpe os filtros.",
     "noneMatchFilters": "Nenhuma integração passa pelos filtros escolhidos. O catálogo continua com as suas integrações; limpe os filtros para ver todas.",
     "healthTitle": "Saúde",
     "health": {
@@ -81,7 +81,14 @@
       "measured": "{value} (todas as chamadas tinham preço).",
       "partial": "Pelo menos {value}: parte das chamadas não tinha preço informado.",
       "unknown": "Desconhecido: nenhuma chamada contada tinha preço informado. Não é zero — ninguém mediu."
-    }
+    },
+    "test": "Testar conexão",
+    "testing": "Testando…",
+    "remove": "Remover",
+    "removeDisabledWhileOn": "Desligue antes de remover.",
+    "removeConfirm": "Remover \"{name}\"? O registro sai da lista. O histórico do que ela fez continua guardado.",
+    "removed": "\"{name}\" foi removida. O histórico do que ela fez continua guardado.",
+    "removedSecret": "A referência de segredo \"{ref}\" deixou de ser usada por ela. O Studio não apaga nada do cofre."
   },
   "exports": {
     "title": "Baixar o protótipo",
@@ -116,7 +123,10 @@
       "export.created": "Pacote gerado",
       "approval.recorded": "Confirmação registrada",
       "approval.requested": "Confirmação pedida",
-      "export.downloadRefused": "Download recusado por segurança"
+      "export.downloadRefused": "Download recusado por segurança",
+      "integration.called": "Integração chamada",
+      "integration.removed": "Integração removida",
+      "integration.tested": "Teste de conexão"
     }
   },
   "errors": {

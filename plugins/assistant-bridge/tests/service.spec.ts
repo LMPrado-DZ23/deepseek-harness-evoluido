@@ -67,6 +67,7 @@ async function harness(options: {
   runs?: AgentRunRecord[]
   providers?: readonly AssistantProvider[]
   approvalAuthority?: 'absent'
+  leases?: readonly { readonly run_id: string; readonly org_id: string; readonly tenant_id: string; readonly paths: readonly string[] }[]
 } = {}) {
   const repositoryPath = await mkdtemp(join(tmpdir(), 'dz23-assistant-repo-'))
   roots.push(repositoryPath)
@@ -86,10 +87,14 @@ async function harness(options: {
     const index = runs.findIndex(candidate => candidate.run_id === runId)
     if (index >= 0) runs[index] = { ...runs[index]!, status: 'FAILED', diagnostic: `encerrado: ${reason}` }
   })
+  const resume = vi.fn((runId: string) => {
+    sequence += 1
+    return { runId: `run-${sequence}`, jobId: `job-${sequence}` as JobId, requiredTier: 'T2' as const, resumedFrom: runId }
+  })
   const studioAgents = {
-    service: { start, reviewProposal, applyProposal, resolveUnknownRun },
+    service: { start, reviewProposal, applyProposal, resolveUnknownRun, resume },
     runs: () => runs,
-    leases: () => [],
+    leases: () => options.leases ?? [],
     providerStates: () => ({ codex: 'NOT_PRESENT', 'claude-code': 'NOT_PRESENT' }),
   } as unknown as StudioAgentsRuntime
   const principal = { userId: 'user-1', orgId: 'org-1', tenantId: 'tenant-1', sessionId: 'identity-session' }
@@ -142,7 +147,7 @@ async function harness(options: {
     await approvalAuthority.confirm(principal, approvalId)
   }
   return {
-    bridge, config, repositoryPath, runs, start, reviewProposal, applyProposal, resolveUnknownRun, jobs, principal,
+    bridge, config, repositoryPath, runs, start, reviewProposal, applyProposal, resolveUnknownRun, resume, jobs, principal,
     teams, teamTasks, teamStart, teamStatus, teamContinue, teamCancel, studioAgentTeams,
     approvalAuthority, approvalRepository, strongIdentitySessions, confirm,
     mountAuthority: () => { mounted = true },
@@ -1005,4 +1010,63 @@ describe('StudioAssistantBridge', () => {
     await expect(h.bridge.teamStatus(agent(), 'team-1')).rejects.toMatchObject({ code: 'NOT_FOUND' })
   })
 
+})
+
+describe('A-03 — retomar pelo assistente', () => {
+  const interrupted = (repositoryPath: string) => run({
+    repository_path: repositoryPath, status: 'FAILED', interrupted_by_restart: true,
+  })
+  const lease = { run_id: 'run-1', org_id: 'org-1', tenant_id: 'tenant-1', paths: ['src/safe'] }
+
+  it('retoma e diz de onde partiu', async () => {
+    const h = await harness({ runs: [], leases: [lease] })
+    h.runs.push(interrupted(h.repositoryPath))
+    const answer = await h.bridge.resume(agent(), 'run-1', 'Continue de onde parou.')
+    expect(answer).toMatchObject({ status: 'RUNNING', resumed_from: 'run-1' })
+    expect(h.resume).toHaveBeenCalledOnce()
+  })
+
+  it('os caminhos vêm da RESERVA do trabalho retomado, nunca de quem pede', async () => {
+    // Retomar não é a hora de ampliar o que o assistente pode escrever.
+    const h = await harness({ runs: [], leases: [{ ...lease, paths: ['src/safe/um', 'src/safe/dois'] }] })
+    h.runs.push(interrupted(h.repositoryPath))
+    await h.bridge.resume(agent(), 'run-1', 'Continue.')
+    expect(h.resume.mock.calls[0]![1]).toMatchObject({ intendedPaths: ['src/safe/um', 'src/safe/dois'] })
+  })
+
+  it('sem reserva não há o que retomar', async () => {
+    const h = await harness({ runs: [], leases: [] })
+    h.runs.push(interrupted(h.repositoryPath))
+    await expect(h.bridge.resume(agent(), 'run-1', 'Continue.')).rejects.toThrow()
+    expect(h.resume).not.toHaveBeenCalled()
+  })
+
+  it('NÃO retoma o que não parou por reinício', async () => {
+    for (const overrides of [
+      { status: 'CANCELLED' as const }, { status: 'UNKNOWN' as const },
+      { status: 'PROPOSED' as const }, { interrupted_by_restart: false },
+    ]) {
+      const h = await harness({ runs: [], leases: [lease] })
+      h.runs.push({ ...interrupted(h.repositoryPath), ...overrides })
+      await expect(h.bridge.resume(agent(), 'run-1', 'Continue.')).rejects.toThrow()
+      expect(h.resume).not.toHaveBeenCalled()
+    }
+  })
+
+  it('o trabalho de outro escopo recebe o mesmo "não existe" de um id inventado', async () => {
+    const h = await harness({ runs: [], leases: [{ ...lease, org_id: 'org-invasora' }] })
+    h.runs.push({ ...interrupted(h.repositoryPath), org_id: 'org-invasora' })
+    await expect(h.bridge.resume(agent(), 'run-1', 'Continue.')).rejects.toThrow()
+    await expect(h.bridge.resume(agent(), 'nunca-existiu', 'Continue.')).rejects.toThrow()
+    expect(h.resume).not.toHaveBeenCalled()
+  })
+
+  it('a instrução tem o mesmo teto de um trabalho novo', async () => {
+    const h = await harness({ runs: [], leases: [lease] })
+    h.runs.push(interrupted(h.repositoryPath))
+    for (const prompt of ['', '  ', 'ab', 'x'.repeat(20_001)]) {
+      await expect(h.bridge.resume(agent(), 'run-1', prompt)).rejects.toThrow()
+    }
+    expect(h.resume).not.toHaveBeenCalled()
+  })
 })

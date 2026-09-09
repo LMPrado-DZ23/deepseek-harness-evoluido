@@ -1,7 +1,7 @@
 import { ArrowLeft, Download, Mail, Plug, ScrollText, Search } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import t from '../i18n/hub.pt-BR.json'
-import { createHubApi, HubApiError, type ExportRecord, type HubApi, type HubEvent, type Integration, type IntegrationCatalog, type ProjectSummary, type SmtpState } from './hubApi'
+import { createHubApi, HubApiError, type ExportRecord, type HubApi, type HubEvent, type Integration, type IntegrationCatalog, type IntegrationTestResult, type ProjectSummary, type RemovedIntegration, type SmtpState } from './hubApi'
 import { CATALOG_PAGE_SIZE, actionLabel, approvalNote, approvalPrompt, catalogCount, catalogEmptyMessage, confirmStep, costLabel, enableExplanation, exportable, fill, formatBytes, formatDate, healthCounts, healthLabel, kindLabel, outcomeLabel, tierLabel, verificationLabel, type ConfirmStepModel, type KindFilter, type StatusFilter } from './presentation'
 import { WebMcpPanel, useWebMcpSetting } from '../webmcp/WebMcpPanel'
 import { browserModelContext, registerStudioTools } from '../webmcp/tools'
@@ -184,6 +184,8 @@ function IntegrationsSection({ api, onChange, notify, report }: SectionProps) {
   const [rows, setRows] = useState<Integration[] | null>(null)
   const [page, setPage] = useState<IntegrationCatalog | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
+  /** O que o último teste de conexão disse, por integração (X-04). Vazio = ninguém testou nesta visita. */
+  const [tests, setTests] = useState<Readonly<Record<string, IntegrationTestResult | 'RUNNING'>>>({})
 
   const load = useCallback(async (next: { search: string; kind: KindFilter; status: StatusFilter }) => {
     const answer = await api.integrations({ ...next, limit: CATALOG_PAGE_SIZE })
@@ -225,6 +227,75 @@ function IntegrationsSection({ api, onChange, notify, report }: SectionProps) {
       run: approval => api.setEnabled(item.integration_id, true, approval).then(() => undefined),
     })
   }
+  /**
+   * Testa a conexão (X-04).
+   *
+   * O resultado fica NA LINHA da integração, e não numa faixa no topo: quem
+   * testou três integrações precisa saber qual delas respondeu o quê. E o
+   * estado `RUNNING` existe para o botão não parecer que não fez nada.
+   */
+  const test = (item: Integration) => {
+    if (busy || tests[item.integration_id] === 'RUNNING') return
+    setTests(current => ({ ...current, [item.integration_id]: 'RUNNING' }))
+    void (async () => {
+      try {
+        const result = await api.testIntegration(item.integration_id)
+        setTests(current => ({ ...current, [item.integration_id]: result }))
+      } catch (error) {
+        // A falha da CHAMADA não é a falha da integração. Guardar isto como
+        // `FAILED` diria que o servidor da pessoa respondeu mal, quando o que
+        // aconteceu foi o Studio não conseguir perguntar.
+        setTests(current => {
+          const { [item.integration_id]: _dropped, ...rest } = current
+          return rest
+        })
+        report(error)
+      }
+    })()
+  }
+
+  /**
+   * Remove (X-04). Destrutivo, e por isso passa pela mesma confirmação de
+   * ligar — mais uma pergunta em texto claro antes de qualquer coisa sair.
+   */
+  const remove = (item: Integration) => {
+    if (item.enabled) return
+    const tier = item.requires_approval_tier
+    notify(null)
+    if (tier === null || tier === undefined) {
+      // Sem nível a confirmar, a pergunta ainda é feita: apagar um registro é
+      // uma coisa que ninguém quer descobrir que fez sem querer.
+      if (!window.confirm(fill(t.integrations.removeConfirm, { name: item.name }))) return
+      return void run(async () => {
+        const removed = await api.removeIntegration(item.integration_id)
+        announceRemoval(removed)
+      })
+    }
+    void ask({
+      tier, action: 'integration.removed', subjectId: item.integration_id,
+      describe: decided => fill(t.integrations.needsApproval, { tier: tierLabel(decided) }),
+      run: async approval => { announceRemoval(await api.removeIntegration(item.integration_id, approval)) },
+    })
+  }
+
+  /**
+   * O que a tela diz depois de remover.
+   *
+   * Duas frases, e as duas importam: o histórico do que ela fez CONTINUA
+   * guardado (remover a integração não apaga a auditoria), e a referência de
+   * segredo deixou de ser usada mas NÃO foi apagada do cofre — o Studio nunca
+   * teve permissão de apagar de lá, e deixar isso implícito faria alguém
+   * acreditar que a credencial sumiu.
+   */
+  const announceRemoval = (removed: RemovedIntegration) => {
+    setTests(current => {
+      const { [removed.integration_id]: _dropped, ...rest } = current
+      return rest
+    })
+    const secret = removed.secret_ref === null ? '' : ` ${fill(t.integrations.removedSecret, { ref: removed.secret_ref })}`
+    notify({ kind: 'ok', text: `${fill(t.integrations.removed, { name: removed.name })}${secret}` })
+  }
+
   const confirm = () => {
     const step = pending
     if (step === null) return
@@ -264,6 +335,9 @@ function IntegrationsSection({ api, onChange, notify, report }: SectionProps) {
       rows={rows} page={page} search={query.search} busy={busy} loadingMore={loadingMore}
       onEnable={enable}
       onDisable={item => void run(() => api.setEnabled(item.integration_id, false).then(() => undefined))}
+      onTest={test}
+      onRemove={remove}
+      tests={tests}
       onMore={() => void more()}
     />
     <details className="hub-advanced">
@@ -294,7 +368,13 @@ export interface IntegrationCatalogListProps {
   readonly loadingMore: boolean
   onEnable(item: Integration): void
   onDisable(item: Integration): void
+  /** X-04: abre a conexão, lê o catálogo e fecha — sem executar ferramenta nenhuma. */
+  onTest(item: Integration): void
+  /** X-04: só oferecido com a integração DESLIGADA. */
+  onRemove(item: Integration): void
   onMore(): void
+  /** O que o último teste disse, por integração. Ausente = ninguém testou ainda. */
+  readonly tests: Readonly<Record<string, IntegrationTestResult | 'RUNNING'>>
 }
 
 /**
@@ -304,7 +384,7 @@ export interface IntegrationCatalogListProps {
  * prováveis sem depender de quando a leitura assíncrona termina — é aí que
  * defeitos de rótulo e de estado vazio passam despercebidos.
  */
-export function IntegrationCatalogList({ rows, page, search, busy, loadingMore, onEnable, onDisable, onMore }: IntegrationCatalogListProps) {
+export function IntegrationCatalogList({ rows, page, search, busy, loadingMore, onEnable, onDisable, onTest, onRemove, onMore, tests }: IntegrationCatalogListProps) {
   // Terceiro estado, antes da primeira resposta: afirmar "você não tem nenhuma"
   // sem ter lido nada seria mentir sobre o que a pessoa registrou.
   if (rows === null || page === null) return <p>{t.loading}</p>
@@ -325,10 +405,36 @@ export function IntegrationCatalogList({ rows, page, search, busy, loadingMore, 
             {enableExplanation(item) !== null || approvalNote(item) === null ? null : <p className="hub-why" data-testid="approval-note">{approvalNote(item)}</p>}
             <button type="button" className="primary" disabled={busy || !item.can_enable} aria-describedby={enableExplanation(item) === null ? undefined : `why-${item.integration_id}`} onClick={() => onEnable(item)}>{t.integrations.enable}</button>
           </>}
+        {/* X-04. Testar não executa nada do lado de lá; remover só aparece
+            habilitado com a integração DESLIGADA, e a frase diz por quê — um
+            botão apagado sem explicação vira "o produto travou". */}
+        <div className="hub-lifecycle">
+          <button type="button" className="secondary" data-testid="integration-test" disabled={busy || tests[item.integration_id] === 'RUNNING'}
+            onClick={() => onTest(item)}>{tests[item.integration_id] === 'RUNNING' ? t.integrations.testing : t.integrations.test}</button>
+          <button type="button" className="secondary" data-testid="integration-remove" disabled={busy || item.enabled}
+            onClick={() => onRemove(item)}>{t.integrations.remove}</button>
+        </div>
+        {item.enabled ? <p className="hub-why" data-testid="remove-blocked">{t.integrations.removeDisabledWhileOn}</p> : null}
+        {testMessage(tests[item.integration_id])}
       </li>)}
     </ul>
     {page.next_cursor === null ? null : <button type="button" className="secondary" data-testid="catalog-more" disabled={loadingMore} onClick={onMore}>{t.integrations.loadMore}</button>}
   </>
+}
+
+/**
+ * O que o último teste disse, na tela.
+ *
+ * `NOT_APPLICABLE` sai com o mesmo peso visual de um aviso, e não de erro: uma
+ * habilidade que não tem com quem conectar não falhou em nada. E enquanto o
+ * teste corre a tela não afirma nada sobre o resultado.
+ * @param result - o desfecho guardado, quando existe.
+ * @returns o parágrafo, ou nada quando ninguém testou.
+ */
+function testMessage(result: IntegrationTestResult | 'RUNNING' | undefined) {
+  if (result === undefined || result === 'RUNNING') return null
+  const kind = result.result === 'OK' ? 'ok' : result.result === 'FAILED' || result.result === 'TIMEOUT' ? 'error' : 'info'
+  return <p className={`hub-test ${kind}`} data-testid="integration-test-result" role="status">{result.message}</p>
 }
 
 /**

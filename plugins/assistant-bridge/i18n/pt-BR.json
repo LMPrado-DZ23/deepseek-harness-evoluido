@@ -33,7 +33,9 @@
     "taskRole": "Papel fechado: implementador, revisor, testador ou sintetizador.",
     "taskDependencies": "Identificadores das tarefas que precisam estar aplicadas antes desta começar.",
     "resolveUnknown": "Registra que uma pessoa confirmou que o programa externo de uma execução parada realmente terminou. Exige confirmação reforçada e um motivo escrito.",
-    "resolveReason": "O que você verificou para concluir que o programa terminou."
+    "resolveReason": "O que você verificou para concluir que o programa terminou.",
+    "resume": "Retoma um trabalho que parou por causa de um reinício do Studio, aproveitando a cópia isolada que sobreviveu com o que já tinha sido escrito. Não serve para trabalho cancelado, nem para trabalho que pode estar rodando por fora.",
+    "resumePrompt": "O que o assistente deve fazer a partir do que já está na cópia."
   },
   "errors": {
     "pluginObject": "A configuração do assistant-bridge precisa ser um objeto.",
@@ -80,7 +82,8 @@
     "approvalExhausted": "O Studio pediu sua confirmação várias vezes para esta mesma operação e não conseguiu concluir. Nada foi executado. Peça a operação de novo.",
     "approvalNotConfigured": "Operações sensíveis estão bloqueadas nesta instalação porque a confirmação por pessoa ainda não foi ativada. Nada foi executado. Peça a quem administra o Studio para ativá-la.",
     "notUnknown": "Esta execução não está no estado que exige a sua confirmação de encerramento.",
-    "resolveReason": "Escreva entre 3 e 500 caracteres explicando o que você verificou antes de encerrar."
+    "resolveReason": "Escreva entre 3 e 500 caracteres explicando o que você verificou antes de encerrar.",
+    "notResumable": "Só dá para retomar um trabalho que o Studio provou que parou por causa de um reinício. Este não é um deles."
   },
   "runtime": {
     "persona": "Trabalhe somente na cópia isolada e nos caminhos aprovados.",

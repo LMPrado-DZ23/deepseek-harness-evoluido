@@ -44,6 +44,16 @@ export type SmtpState = { configured: boolean; secret_ref: string | null; tier: 
 export type ApprovalTicket = { approval_id: string; tier: PolicyTier; expires_at: string; requires_strong_identity: boolean }
 export type { ApprovalAction } from './presentation'
 export type SmtpTest = { result: 'SENT' | 'NOT_EXECUTED'; message: string }
+/**
+ * O desfecho de um teste de conexão (X-04).
+ *
+ * `NOT_APPLICABLE` NÃO é falha e não é sucesso: é "este tipo não tem com quem
+ * conectar" (uma habilidade) ou "ainda não há teste para isto" (um webhook).
+ * Sem esse terceiro estado a tela teria de escolher entre mentir e reprovar.
+ */
+export type IntegrationTestResult = { result: 'OK' | 'FAILED' | 'TIMEOUT' | 'NOT_EXECUTED' | 'NOT_APPLICABLE'; message: string }
+/** O que voltou de uma remoção: o suficiente para a tela dizer o nome e a referência de segredo que deixou de ser usada. */
+export type RemovedIntegration = { integration_id: string; name: string; secret_ref: string | null }
 export type ExportRecord = { export_id: string; project_id: string; run_id: string; file_name: string; sha256: string; size_bytes: number; entries: number; created_at: string }
 export type HubEvent = { event_id: string; action: HubAction; outcome: HubOutcome; detail: string; created_at: string }
 export type ProjectSummary = { project_id: string; name: string; state: string }
@@ -99,6 +109,19 @@ export function createHubApi(transport: HubTransport = browserTransport) {
     integrations: (query: CatalogQuery = {}) => hub<IntegrationCatalog>(`/integrations${catalogSearch(query)}`),
     register: (manifest: unknown) => hub<{ integration: Integration; reasons: string[] }>('/integrations', { method: 'POST', body: JSON.stringify(manifest) }),
     setEnabled: (integrationId: string, enabled: boolean, approval?: Approval) => hub<{ integration: Integration }>(`/integrations/${encodeURIComponent(integrationId)}/enabled`, { method: 'POST', body: JSON.stringify({ enabled, approval }) }).then(value => value.integration),
+    /**
+     * Testa a conexão (X-04). NÃO executa ferramenta nenhuma do lado de lá: o
+     * servidor abre a conexão, lê o catálogo e fecha.
+     */
+    testIntegration: (integrationId: string) => hub<IntegrationTestResult>(`/integrations/${encodeURIComponent(integrationId)}/test`, { method: 'POST', body: '{}' }),
+    /**
+     * Remove a integração (X-04). Só funciona com ela DESLIGADA, e o servidor
+     * pede a mesma confirmação que ligar exigiria.
+     */
+    removeIntegration: (integrationId: string, approval?: Approval) => hub<{ removed: RemovedIntegration }>(`/integrations/${encodeURIComponent(integrationId)}`, {
+      method: 'DELETE',
+      ...(approval === undefined ? {} : { body: JSON.stringify({ approval }) }),
+    }).then(value => value.removed),
     exports: (projectId: string) => hub<{ exports: ExportRecord[] }>(`/projects/${encodeURIComponent(projectId)}/exports`).then(value => value.exports),
     createExport: (projectId: string) => hub<{ export: ExportRecord }>(`/projects/${encodeURIComponent(projectId)}/exports`, { method: 'POST', body: '{}' }).then(value => value.export),
     downloadHref: (projectId: string, exportId: string) => `${HUB_API_PREFIX}/projects/${encodeURIComponent(projectId)}/exports/${encodeURIComponent(exportId)}/download`,

@@ -46,6 +46,9 @@ test('abre o Integration Hub pela navegação autenticada do Studio', async ({ c
   // oferece `document.modelContext` (só o Chrome 149+ sob origin trial). Esta
   // é a prova honesta que dá para produzir aqui: a detecção de capacidade
   // funciona em navegador de verdade, e nenhuma ferramenta é registrada.
+  // X-04: o ciclo de vida esta na TELA, e nao so no servico. Sem integracao
+  // registrada a lista fica vazia, entao o que se prova aqui e que a secao
+  // existe e que a tela nao promete o que nao pode fazer.
   await expect(page.getByRole('heading', { name: 'Deixar um agente do navegador usar o Studio' })).toBeVisible()
   await expect(page.getByText('não oferece esse recurso')).toBeVisible()
   await expect(page.getByRole('checkbox')).toHaveCount(0)

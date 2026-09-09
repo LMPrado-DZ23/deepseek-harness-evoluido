@@ -67,3 +67,13 @@
 .webmcp-toggle{display:flex;gap:10px;align-items:center;margin-top:12px;font-weight:700}
 .webmcp-toggle input{width:20px;height:20px}
 .webmcp-state{margin:10px 0 0;color:#3d4757}
+/* X-04 — testar e remover na linha da integração. O resultado do teste fica
+   NA LINHA e não numa faixa no topo: quem testou três precisa saber qual
+   respondeu o quê. */
+.hub-lifecycle{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.hub-lifecycle .secondary{width:auto;min-width:150px;margin:0}
+.hub-lifecycle .secondary:disabled{border-color:#6b7688;color:#6b7688;background:#f2f4f8}
+.hub-test{margin:8px 0 0;padding:9px 11px;border-radius:8px;font-size:14px;line-height:1.45}
+.hub-test.ok{background:#eaf7ef;color:#0d5c2c}
+.hub-test.error{background:#fdeceb;color:#8a1b12}
+.hub-test.info{background:#eef3fb;color:#0b3f9b}

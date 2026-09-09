@@ -1,4 +1,4 @@
-import { normalizeDelegationPath, type AgentProvider, type AgentRunRecord, type DelegationAccepted, type DelegationBudget, type DelegationRequest, type StudioAgentsRuntime } from '@dz23-studio/agents'
+import { StudioAgentService, normalizeDelegationPath, type AgentProvider, type AgentRunRecord, type DelegationAccepted, type DelegationBudget, type DelegationRequest, type StudioAgentsRuntime } from '@dz23-studio/agents'
 import type {
   AgentTeamRecord,
   AgentTeamRole,
@@ -361,6 +361,63 @@ export class StudioAssistantBridge {
    * @param reason - o que a pessoa verificou antes de decidir.
    * @returns a execução já encerrada, como ela ficou gravada.
    */
+  /**
+   * Retoma um trabalho interrompido por um reinício (A-03), NA CÓPIA QUE SOBROU.
+   *
+   * A pessoa pede pelo assistente, e não por uma tela, porque é na conversa
+   * que os trabalhos delegados vivem: ela vê a lista, vê qual parou, e manda
+   * continuar aquele.
+   *
+   * A confirmação é a MESMA de começar um trabalho novo — porque é isso que
+   * acontece: um assistente volta a escrever nos arquivos dela. O que muda é
+   * de onde ele parte.
+   * @param agent - a sessão do assistente que está pedindo.
+   * @param runId - o trabalho interrompido.
+   * @param prompt - o que fazer a partir do que já está na cópia.
+   * @returns o trabalho novo e o que ele retomou.
+   */
+  async resume(agent: AssistantAgent | undefined, runId: string, prompt: string) {
+    const principal = this.#principal(agent, 'project.write')
+    const repository = this.#repository(principal)
+    // O escopo é conferido ANTES de qualquer coisa: retomar o trabalho de outro
+    // espaço recebe o mesmo "não existe" de um id inventado.
+    const run = this.#scopedRun(runId, principal, repository)
+    const trimmed = prompt.trim()
+    if (trimmed.length < 3 || trimmed.length > 20_000) {
+      throw new AssistantBridgeError('INVALID_REQUEST', t('errors.promptLength'))
+    }
+    if (!StudioAgentService.resumable(run)) throw new AssistantBridgeError('INVALID_REQUEST', t('errors.notResumable'))
+    const accepted = this.dependencies.studioAgents.service.resume(runId, {
+      orgId: principal.orgId,
+      tenantId: principal.tenantId,
+      workspaceId: repository.workspaceId,
+      repositoryPath: repository.repositoryPath,
+      parent: agent!,
+      provider: run.provider as AssistantProvider,
+      prompt: trimmed,
+      // Os caminhos vêm da RESERVA do trabalho retomado, e não de quem pede:
+      // retomar não é a hora de ampliar o que o assistente pode escrever.
+      intendedPaths: this.#resumePaths(runId, principal),
+      approval: { approved: true, tier: 'T2', approvedBy: principal.userId },
+      ...(repository.budget === undefined ? {} : { budget: repository.budget }),
+      inProcess: { toolFilter: roleToolRestriction('implementer', false), persona: t('runtime.persona') },
+    })
+    this.#jobs.set(accepted.runId, { jobId: accepted.jobId, owner: agent!, userId: principal.userId })
+    this.#runsByJob.set(String(accepted.jobId), accepted.runId)
+    return {
+      run_id: accepted.runId, job_id: String(accepted.jobId), status: 'RUNNING' as const,
+      required_tier: accepted.requiredTier, resumed_from: accepted.resumedFrom,
+    }
+  }
+
+  /** Os caminhos que o trabalho retomado já tinha reservado. Sem reserva, não há o que retomar. */
+  #resumePaths(runId: string, principal: { readonly orgId: string; readonly tenantId: string }): readonly string[] {
+    const lease = this.dependencies.studioAgents.leases()
+      .find(candidate => candidate.run_id === runId && candidate.org_id === principal.orgId && candidate.tenant_id === principal.tenantId)
+    if (lease === undefined || lease.paths.length === 0) throw new AssistantBridgeError('INVALID_REQUEST', t('errors.notResumable'))
+    return lease.paths
+  }
+
   async resolveUnknownRun(agent: AssistantAgent | undefined, runId: string, reason: string): Promise<AssistantRunSummary> {
     const principal = this.#principal(agent, 'project.write')
     const repository = this.#repository(principal)

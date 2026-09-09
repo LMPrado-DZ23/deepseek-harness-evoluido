@@ -5,6 +5,7 @@ export const ASSISTANT_TOOL_NAMES = [
   'studio_agent_start',
   'studio_agent_start_sensitive',
   'studio_agent_resolve_unknown',
+  'studio_agent_resume',
   'studio_agent_list',
   'studio_agent_review',
   'studio_agent_cancel',
@@ -46,6 +47,10 @@ export const ASSISTANT_TOOL_POLICY = {
   studio_agent_start: studioRule('T2', 'project.write', 'workspace-write'),
   studio_agent_start_sensitive: studioRule('T3', 'project.write', 'workspace-write'),
   studio_agent_resolve_unknown: studioRule('T3', 'project.write', 'workspace-write'),
+  // A-03: retomar faz um assistente voltar a ESCREVER nos arquivos da pessoa,
+  // exatamente como comecar um trabalho novo — entao pede o mesmo T2, e nao
+  // menos. Os caminhos vem da reserva do trabalho retomado, e nao de quem pede.
+  studio_agent_resume: studioRule('T2', 'project.write', 'workspace-write'),
   studio_agent_list: studioRule('T0', 'project.read', 'read-only'),
   studio_agent_review: studioRule('T0', 'project.read', 'read-only'),
   studio_agent_cancel: studioRule('T2', 'project.write', 'workspace-write'),

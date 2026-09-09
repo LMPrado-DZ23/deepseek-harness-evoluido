@@ -50,7 +50,7 @@ export function approvalNote(integration: { requires_approval_tier?: PolicyTier 
   return tier === null ? null : fill(t.integrations.needsApproval, { tier: tierLabel(tier) })
 }
 
-export type ApprovalAction = 'integration.enabled' | 'smtp.configured' | 'smtp.tested'
+export type ApprovalAction = 'integration.enabled' | 'integration.removed' | 'smtp.configured' | 'smtp.tested'
 /** What the server answers when it issues a decision. */
 export type IssuedApproval = { approval_id: string; tier: PolicyTier }
 export type GuardedOutcome = { kind: 'done' } | { kind: 'tier-changed'; step: ConfirmStepModel }

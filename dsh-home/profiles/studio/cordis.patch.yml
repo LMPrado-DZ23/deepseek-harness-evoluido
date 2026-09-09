@@ -157,6 +157,17 @@
             sandboxMode: workspace-write
             requiredPermission: project.write
             scope: project
+          # A-03: retomar um trabalho interrompido por reinicio. T2, o MESMO de
+          # comecar um trabalho novo, porque e isso que acontece: um assistente
+          # volta a escrever nos arquivos da pessoa. O que muda e de onde ele
+          # parte. Os caminhos vem da reserva do trabalho retomado, nunca de
+          # quem pede — retomar nao e a hora de ampliar o que ele pode escrever.
+          studio_agent_resume:
+            source: { kind: studio, external: false, stableChannel: true }
+            inferredTier: T2
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
           studio_team_start:
             source: { kind: studio, external: false, stableChannel: true }
             inferredTier: T2

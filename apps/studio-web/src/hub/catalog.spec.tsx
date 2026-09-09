@@ -30,6 +30,7 @@ function render(props: Partial<Parameters<typeof IntegrationCatalogList>[0]> = {
   return renderToStaticMarkup(createElement(IntegrationCatalogList, {
     rows: [integration()], page: page(), search: '', busy: false, loadingMore: false,
     onEnable: () => undefined, onDisable: () => undefined, onMore: () => undefined,
+    onTest: () => undefined, onRemove: () => undefined, tests: {},
     ...props,
   }))
 }
@@ -121,5 +122,51 @@ describe('catálogo do Hub na tela', () => {
     expect(t.integrations.searchLabel.trim()).not.toBe('')
     expect(t.integrations.kindLabel.trim()).not.toBe('')
     expect(t.integrations.statusLabel.trim()).not.toBe('')
+  })
+})
+
+describe('X-04 — testar e remover na tela', () => {
+  it('oferece testar e remover em cada integração', () => {
+    const html = render()
+    expect(html).toContain('Testar conexão')
+    expect(html).toContain('Remover')
+  })
+
+  it('remover fica DESABILITADO com a integração ligada, e a tela DIZ por quê', () => {
+    // Um botão apagado sem explicação vira "o produto travou".
+    const html = render({ rows: [integration({ enabled: true })] })
+    const remove = html.slice(0, html.indexOf('Remover'))
+    expect(remove.slice(-120)).toContain('disabled')
+    expect(html).toContain('Desligue antes de remover')
+  })
+
+  it('desligada, remover fica habilitado e o aviso some', () => {
+    const html = render({ rows: [integration({ enabled: false })] })
+    expect(html).not.toContain('Desligue antes de remover')
+  })
+
+  it('o resultado do teste aparece NA LINHA, com peso diferente para cada desfecho', () => {
+    const id = integration().integration_id
+    expect(render({ tests: { [id]: { result: 'OK', message: 'Conexão feita com "agenda".' } } }))
+      .toContain('hub-test ok')
+    expect(render({ tests: { [id]: { result: 'FAILED', message: 'não deu certo' } } }))
+      .toContain('hub-test error')
+    // NOT_APPLICABLE não é erro: uma habilidade que não tem com quem conectar
+    // não falhou em nada.
+    expect(render({ tests: { [id]: { result: 'NOT_APPLICABLE', message: 'não há conexão para testar' } } }))
+      .toContain('hub-test info')
+    expect(render({ tests: { [id]: { result: 'NOT_EXECUTED', message: 'está desligada' } } }))
+      .toContain('hub-test info')
+  })
+
+  it('enquanto o teste corre, a tela NÃO afirma nada sobre o resultado', () => {
+    const id = integration().integration_id
+    const html = render({ tests: { [id]: 'RUNNING' } })
+    expect(html).toContain('Testando…')
+    expect(html).not.toContain('integration-test-result')
+  })
+
+  it('ninguém testou: nenhuma frase de resultado', () => {
+    expect(render()).not.toContain('integration-test-result')
   })
 })
