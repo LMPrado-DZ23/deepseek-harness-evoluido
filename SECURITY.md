@@ -5,7 +5,7 @@
 **Não abra uma *issue* pública.** Use o canal privado do GitHub:
 
 > **Security** → **Report a vulnerability**
-> https://github.com/lmpradodz23-design/deepseek-harness-evoluido/security/advisories/new
+> https://github.com/LMPrado-DZ23/deepseek-harness-evoluido/security/advisories/new
 
 Responderemos o recebimento em até **5 dias úteis**. Este é um projeto mantido
 por uma equipe pequena; se o prazo passar, um *issue* público dizendo apenas

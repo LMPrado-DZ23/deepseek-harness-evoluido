@@ -45,4 +45,4 @@ usado. O mesmo vale para as demais marcas citadas na documentação.
 ## Contato
 
 Pedidos de autorização: pelo repositório, em
-https://github.com/lmpradodz23-design/deepseek-harness-evoluido/issues
+https://github.com/LMPrado-DZ23/deepseek-harness-evoluido/issues

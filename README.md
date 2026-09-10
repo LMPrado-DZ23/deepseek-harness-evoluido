@@ -204,7 +204,7 @@ Requisitos: Node.js `22.23.1`, pnpm `11.7.0`, Git com submódulos e *symlinks*.
 No Windows, WSL2 com o clone em `ext4` (`~/...`, nunca `/mnt/c`).
 
 ```bash
-git clone --recurse-submodules https://github.com/lmpradodz23-design/deepseek-harness-evoluido
+git clone --recurse-submodules https://github.com/LMPrado-DZ23/deepseek-harness-evoluido
 cd deepseek-harness-evoluido
 ```
 
