@@ -175,16 +175,23 @@ export class PlannerEngine {
     category: StudioProjectCategory = 'landing-page',
   ): Promise<PlanSliceOutput> {
     assertCategoryCanGenerate(category, spec)
-    const result = await this.model.complete(scope, 'plan', privacy, [
-      t('prompts.sliceOnly'),
-      t('prompts.planCriteria'),
-      t('prompts.planFiles'),
-      t('prompts.sliceFiles'),
-      t('prompts.sliceExisting', { slices: JSON.stringify(existing.map(slice => ({ title: slice.title, planned_files: slice.planned_files }))) }),
-      t('prompts.generateSpec', { spec: JSON.stringify(spec) }),
-      t('prompts.sliceRequest', { request }),
-      t('prompts.schema', { schema: JSON.stringify(sliceOutputSchema.toJSONSchema()) }),
-    ].join('\n'))
+    const assembled = assembleContext([
+      instruction('slice.only', t('prompts.sliceOnly')),
+      instruction('slice.criteria', t('prompts.planCriteria')),
+      instruction('slice.files', t('prompts.planFiles')),
+      instruction('slice.sliceFiles', t('prompts.sliceFiles')),
+      // O PEDIDO da pessoa e o que esta etapa existe para atender: se algo
+      // tiver de sair por falta de espaco, nao pode ser ele.
+      { id: 'slice.request', kind: 'evidence' as const, priority: 100, source: 'slice-request', text: t('prompts.sliceRequest', { request }) },
+      // O plano que ja existe evita que a etapa nova repita o que ja ha. Cair
+      // fora piora o plano, mas nao o torna invalido: a colisao de arquivos e
+      // conferida em CODIGO depois, e nao confiada a esta instrucao.
+      { id: 'slice.existing', kind: 'evidence' as const, priority: 80, source: 'existing-plan', text: t('prompts.sliceExisting', { slices: JSON.stringify(existing.map(slice => ({ title: slice.title, planned_files: slice.planned_files }))) }) },
+      { id: 'slice.spec', kind: 'evidence' as const, priority: 90, source: 'app-spec', text: t('prompts.generateSpec', { spec: JSON.stringify(spec) }) },
+      { id: 'slice.schema', kind: 'schema' as const, priority: 0, source: 'slice-output-schema', text: t('prompts.schema', { schema: JSON.stringify(sliceOutputSchema.toJSONSchema()) }) },
+    ], { budgetChars: this.budgetChars })
+    this.lastLedger = assembled.ledger
+    const result = await this.model.complete(scope, 'plan', privacy, assembled.prompt)
     const decoded = typeof result.value === 'string' ? JSON.parse(result.value) : result.value
     return sliceOutputSchema.parse(decoded).slice
   }

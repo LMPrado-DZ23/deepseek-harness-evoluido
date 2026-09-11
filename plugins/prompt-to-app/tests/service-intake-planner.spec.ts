@@ -327,3 +327,57 @@ describe('T-07: o planejador monta o prompt com TETO e com registro', () => {
     expect(prompt.length).toBeLessThanOrEqual(planner.lastLedger!.budget)
   })
 })
+
+describe('T-25: intake e etapa nova tambem passam pelo motor de contexto', () => {
+  const conversation = (brief: string, answers: Record<string, string> = {}) => ({
+    project: {
+      project_id: 'p', org_id: 'o', tenant_id: 't', name: 'Projeto', original_brief: brief,
+      category: 'landing-page' as const, privacy: 'local-only' as const,
+    },
+    answers,
+  })
+
+  it('o intake registra o que entrou, com procedencia', async () => {
+    const complete = vi.fn().mockResolvedValue({ value: JSON.stringify(validSpec), route: 'ollama', model: 'qwen' })
+    const intake = new IntakeEngine({ complete })
+    await intake.buildSpec(conversation('Quero um site para a padaria.') as never)
+    expect(intake.lastLedger).toBeDefined()
+    const ids = intake.lastLedger!.included.map(item => item.id)
+    expect(ids).toContain('spec.idea')
+    expect(ids).toContain('spec.answers')
+    expect(intake.lastLedger!.included.find(item => item.id === 'spec.idea')?.source).toBe('original-brief')
+  })
+
+  it('a deteccao de dado sensivel e INSTRUCAO: nunca cai por falta de espaco', async () => {
+    // Corta-la produziria um aplicativo que trata CPF como campo comum, e a
+    // pessoa nao teria como saber que a instrucao existiu e sumiu.
+    const complete = vi.fn().mockResolvedValue({ value: JSON.stringify(validSpec), route: 'ollama', model: 'qwen' })
+    const intake = new IntakeEngine({ complete })
+    await intake.buildSpec(conversation('Preciso guardar o CPF dos clientes.', { a: 'x'.repeat(2_000) }) as never)
+    const sensitive = intake.lastLedger!.included.find(item => item.id === 'spec.sensitive')
+    expect(sensitive).toBeDefined()
+    expect(sensitive!.kind).toBe('instruction')
+  })
+
+  it('um pedido ENORME no intake falha por tamanho, e o modelo nao e chamado', async () => {
+    const complete = vi.fn()
+    const intake = new IntakeEngine({ complete }, 400)
+    await expect(intake.buildSpec(conversation('y'.repeat(10_000)) as never))
+      .rejects.toMatchObject({ code: 'CONTEXT_BUDGET_EXCEEDED' })
+    expect(complete).not.toHaveBeenCalled()
+  })
+
+  it('na etapa nova, o PEDIDO da pessoa tem a maior prioridade', async () => {
+    const complete = vi.fn().mockResolvedValue({
+      value: { slice: { slice_id: 'nova', title: 'Etapa nova', description: 'O que faltava', acceptance_criteria: ['Aparece'], planned_files: ['content/extra.json'] } },
+      route: 'ollama', model: 'qwen',
+    })
+    const planner = new PlannerEngine({ complete })
+    await planner.slice({ orgId: 'o', tenantId: 't' }, 'local-only', validSpec, [], 'quero uma seção de contato')
+    const ledger = planner.lastLedger!
+    const request = ledger.included.find(item => item.id === 'slice.request')
+    expect(request).toBeDefined()
+    expect(request!.source).toBe('slice-request')
+    expect(ledger.dropped).toEqual([])
+  })
+})

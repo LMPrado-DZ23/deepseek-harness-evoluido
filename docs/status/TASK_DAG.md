@@ -32,7 +32,7 @@ separa este trabalho de acrescentar features.
 | T-07 | P1 | Context Engine: teto, prioridade, deduplicação, procedência, registro | — | DONE (planejador; falta intake e gerador: T-25) |
 | T-08 | P1 | Memory Engine — **memória de falha** entregue; as outras seis não existem | — | PARCIAL (T-26) |
 | T-26 | P2 | As outras seis memórias (episódica, semântica, procedimental, decisão, avaliação, trabalho) | T-08 | READY |
-| T-25 | P2 | Levar intake e gerador para o mesmo motor de contexto | T-07 | READY |
+| T-25 | P2 | Intake e etapa nova no mesmo motor de contexto | T-07 | DONE |
 | T-09 | P2 | Spec Engine: constitution → specify → clarify → plan → tasks → implement → validate → converge | T-08 | PENDING |
 | T-10 | P2 | Constitution Engine aplicado pelo planner e pelo builder | T-09 | PENDING |
 | T-11 | P2 | Skill Registry com carregamento progressivo | T-07 | PENDING |
