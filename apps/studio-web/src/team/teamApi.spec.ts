@@ -11,7 +11,7 @@ const TEAM = '11111111-2222-4333-8444-555555555555'
 function task(overrides: Record<string, unknown> = {}) {
   return {
     task_id: 'implementar', title: 'Implementar', role: 'implementer', status: 'RUNNING',
-    depends_on: [], intended_paths: ['src/a.ts'], blocked: false, diagnostic: null,
+    depends_on: [], intended_paths: ['src/a.ts'], blocked: false, dependency_block: null, diagnostic: null,
     evidence: { state: 'NOT_EXECUTED' }, cost: { state: 'NOT_MEASURED' },
     updated_at: '2026-09-08T00:00:00.000Z', ...overrides,
   }
@@ -62,6 +62,10 @@ describe('o que a tela aceita desenhar', () => {
     for (const broken of [
       task({ task_id: 'MAIÚSCULA' }), task({ title: '' }), task({ depends_on: 'implementar' }),
       task({ depends_on: [1] }), task({ blocked: 'sim' }), task({ intended_paths: null }),
+      // O bloqueio por dependencia tambem e recusado pela metade: motivo sem
+      // culpados, ou culpados que nao sao texto, nao desenham etapa nenhuma.
+      task({ dependency_block: { reason: 'MISSING_DEPENDENCY' } }), task({ dependency_block: { reason: '', dependencies: [] } }),
+      task({ dependency_block: { reason: 'DEPENDENCY_FAILED', dependencies: [7] } }), task({ dependency_block: 'bloqueada' }),
       task({ evidence: { state: 'OUTRA' } }),
       task({ evidence: { state: 'MEASURED', changed_files: ['a'], diff_bytes: -1, diff_sha256: 'x', base_commit: 'abc', main_changed_during_run: false } }),
       task({ evidence: { state: 'MEASURED', changed_files: ['a'], diff_bytes: 1, diff_sha256: 'x', base_commit: '', main_changed_during_run: false } }),

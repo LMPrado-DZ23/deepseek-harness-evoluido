@@ -57,9 +57,30 @@ export function routeTeamPanel(method: string | undefined, pathname: string): Te
 export interface TeamPanelTeamsSource {
   teams(): readonly TeamRecordShape[]
   readonly service: {
-    status(teamId: string): Promise<{ readonly team: TeamRecordShape, readonly tasks: readonly TaskRecordShape[] }>
-    cancel(teamId: string, approvedBy: string, reason?: string): Promise<{ readonly team: TeamRecordShape, readonly tasks: readonly TaskRecordShape[] }>
+    status(teamId: string): Promise<TeamSnapshotShape>
+    cancel(teamId: string, approvedBy: string, reason?: string): Promise<TeamSnapshotShape>
   }
+}
+
+/**
+ * O retrato de uma equipe, como esta rota o lê.
+ *
+ * `blocked` é DERIVADO e vem de quem define dependência — o runtime de
+ * equipes. Este painel é desacoplado de propósito e não importa aquele pacote;
+ * recalcular a regra aqui criaria uma segunda verdade, que diverge no primeiro
+ * conserto de um dos dois lados.
+ */
+export interface TeamSnapshotShape {
+  readonly team: TeamRecordShape
+  readonly tasks: readonly TaskRecordShape[]
+  readonly blocked: readonly BlockedTaskShape[]
+}
+
+export interface BlockedTaskShape {
+  readonly task_id: string
+  readonly title: string
+  readonly reason: string
+  readonly dependencies: readonly string[]
 }
 
 export interface TeamRecordShape {
@@ -142,6 +163,7 @@ export interface TaskPanelView {
   readonly depends_on: readonly string[]
   readonly intended_paths: readonly string[]
   readonly blocked: boolean
+  readonly dependency_block: { readonly reason: string; readonly dependencies: readonly string[] } | null
   readonly diagnostic: string | null
   readonly evidence: TaskEvidenceView
   readonly cost: TaskCostView
@@ -277,7 +299,9 @@ export function teamPanelView(
   team: TeamRecordShape,
   tasks: readonly TaskRecordShape[],
   runs: TeamPanelRunsSource | undefined,
+  blocked: readonly BlockedTaskShape[] = [],
 ): TeamPanelView {
+  const blockedById = new Map(blocked.map(item => [item.task_id, item]))
   const projected = tasks.map(task => ({
     task_id: task.task_id,
     title: task.title,
@@ -286,6 +310,14 @@ export function teamPanelView(
     depends_on: [...task.depends_on],
     intended_paths: [...task.intended_paths],
     blocked: BLOCKING_STATUSES.has(task.status),
+    // `blocked` acima é sobre o estado DESTA etapa. `dependency_block` é outra
+    // coisa e não se confundem: a etapa está intacta, na fila, e nunca vai
+    // andar porque uma dependência dela morreu ou não existe. Sem esta
+    // distinção as duas apareciam iguais — uma tarefa esperando para sempre
+    // tinha a mesma cara de quem só aguarda a vez.
+    dependency_block: blockedById.get(task.task_id) === undefined
+      ? null
+      : { reason: blockedById.get(task.task_id)!.reason, dependencies: [...blockedById.get(task.task_id)!.dependencies] },
     diagnostic: task.diagnostic,
     evidence: taskEvidence(task.run_id, runs),
     cost: taskCost(task.run_id, runs),
@@ -391,7 +423,7 @@ export async function handleTeamPanel(
   const snapshot = await (route.kind === 'stop'
     ? teams.service.cancel(route.teamId, session.user_id, reason)
     : teams.service.status(route.teamId)).catch((error: unknown) => { throw translateTeamError(error) })
-  return { status: 200, body: { team: teamPanelView(snapshot.team, snapshot.tasks, config.runs) } }
+  return { status: 200, body: { team: teamPanelView(snapshot.team, snapshot.tasks, config.runs, snapshot.blocked) } }
 }
 
 /**

@@ -12,6 +12,7 @@ import {
   teamCost,
   teamPanelStatus,
   teamPanelView,
+  type BlockedTaskShape,
   type TaskRecordShape,
   type TeamPanelRunsSource,
   type TeamPanelTeamsSource,
@@ -54,13 +55,14 @@ function teams(
   rows: readonly TeamRecordShape[] = [team()],
   tasks: readonly TaskRecordShape[] = [task()],
   overrides: Partial<TeamPanelTeamsSource['service']> = {},
+  blocked: readonly BlockedTaskShape[] = [],
 ): TeamPanelTeamsSource {
   return {
     teams: () => rows,
     service: {
-      status: async (teamId: string) => ({ team: rows.find(row => row.team_id === teamId)!, tasks }),
+      status: async (teamId: string) => ({ team: rows.find(row => row.team_id === teamId)!, tasks, blocked }),
       cancel: async (teamId: string) => ({
-        team: { ...rows.find(row => row.team_id === teamId)!, status: 'CANCELLED' }, tasks,
+        team: { ...rows.find(row => row.team_id === teamId)!, status: 'CANCELLED' }, tasks, blocked,
       }),
       ...overrides,
     },
@@ -258,7 +260,7 @@ describe('atendimento', () => {
   })
 
   it('o serviço não é consultado por quem não é dono da equipe', async () => {
-    const status = vi.fn(async (_teamId: string) => ({ team: team(), tasks: [task()] }))
+    const status = vi.fn(async (_teamId: string) => ({ team: team(), tasks: [task()], blocked: [] }))
     const source = teams([team({ org_id: 'outra' })], [task()], { status })
     await expect(handleTeamPanel(request('GET'), { kind: 'detail', teamId: TEAM }, { identity, teams: source }))
       .rejects.toMatchObject({ code: 'NOT_FOUND' })
@@ -277,7 +279,7 @@ describe('atendimento', () => {
 
   it('a parada usa quem a sessão diz ser, nunca um campo do corpo', async () => {
     const cancel = vi.fn(async (_teamId: string, _approvedBy: string, _reason?: string) => ({
-      team: { ...team(), status: 'CANCELLED' }, tasks: [task({ status: 'CANCELLED' })],
+      team: { ...team(), status: 'CANCELLED' }, tasks: [task({ status: 'CANCELLED' })], blocked: [],
     }))
     const outcome = await handleTeamPanel(
       request('POST', JSON.stringify({ reason: 'parei', approved_by: 'invasor' })),
@@ -290,7 +292,7 @@ describe('atendimento', () => {
 
   it('corpo vazio para sem motivo, e corpo quebrado não para nada', async () => {
     const cancel = vi.fn(async (_teamId: string, _approvedBy: string, _reason?: string) => ({
-      team: { ...team(), status: 'CANCELLED' }, tasks: [],
+      team: { ...team(), status: 'CANCELLED' }, tasks: [], blocked: [],
     }))
     const source = teams([team()], [task()], { cancel })
     await handleTeamPanel(request('POST'), { kind: 'stop', teamId: TEAM }, { identity, teams: source })

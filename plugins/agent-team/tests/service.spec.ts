@@ -389,6 +389,26 @@ describe('StudioAgentTeamService', () => {
     await expect(h.service.continue('team-1', parent(), { approved: true, tier: 'T2', approvedBy: 'user-1' }))
       .rejects.toMatchObject({ code: 'INVALID_STATE' })
   })
+
+  it('o RETRATO carrega o bloqueio derivado: a tela nao recalcula a regra', async () => {
+    // Falsificacao que expos a lacuna: eu podia trocar `blockedSummary(tasks)`
+    // por `[]` no servico e NENHUM teste reprovava. A tela e desacoplada de
+    // proposito e le este campo; sem teste aqui, a derivacao podia sumir e a
+    // pessoa voltaria a nao ver o plano travado.
+    const h = harness()
+    const snapshot = await h.service.start(h.request({ tasks: [
+      task({ taskId: 'base', title: 'Primeira etapa', intendedPaths: ['src/a.ts'] }),
+      task({ taskId: 'depois', title: 'Segunda etapa', intendedPaths: ['src/b.ts'], dependsOn: ['base'] }),
+    ] }))
+    expect(snapshot.blocked).toEqual([])
+
+    // A primeira etapa morre: a segunda deixa de estar aguardando a vez.
+    h.runs.push(run('run-1', 'FAILED', 'quebrou'))
+    const depois = await h.service.status('team-1')
+    expect(depois.blocked).toEqual([
+      { task_id: 'depois', title: 'Segunda etapa', reason: 'DEPENDENCY_FAILED', dependencies: ['base'] },
+    ])
+  })
 })
 
 describe('T-13: uma tarefa que nunca vai rodar nao pode parecer com uma que so aguarda a vez', () => {

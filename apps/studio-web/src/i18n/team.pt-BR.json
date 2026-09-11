@@ -60,5 +60,7 @@
   },
   "emptyHow": "Um trabalho em equipe é iniciado pela conversa: é lá que o assistente tem a autorização e o vínculo necessários para abrir as etapas e acompanhá-las.",
   "emptyAction": "Pedir um trabalho em equipe",
-  "emptyRequest": "Quero dividir este projeto em um trabalho em equipe. Me ajude a montar as etapas, dizendo o que cada uma faz e quais arquivos ela pode tocar, antes de iniciar."
+  "emptyRequest": "Quero dividir este projeto em um trabalho em equipe. Me ajude a montar as etapas, dizendo o que cada uma faz e quais arquivos ela pode tocar, antes de iniciar.",
+  "dependencyBlockMissing": "Esta etapa não vai andar: ela depende de {tasks}, que não existe no plano. Enquanto isso não for corrigido, ela fica parada sem erro nenhum.",
+  "dependencyBlockFailed": "Esta etapa não vai andar: ela depende de {tasks}, que não terminou bem. Ela não está aguardando a vez — está esperando alguém agir."
 }

@@ -46,7 +46,7 @@ separa este trabalho de acrescentar features.
 | T-21 | P2 | Taxonomia de sandbox por capacidade, com desconhecido falhando fechado | — | DONE |
 | T-22 | P3 | Feature Capability Registry (AVAILABLE→…→OPERATIONAL) provado por health real | T-06 | PENDING |
 | T-23 | P1 | Identidade de socket não reciclável (era "estabilizar teste"; virou defeito de segurança) | — | DONE |
-| T-24 | P3 | Mostrar `blockedTasks` no painel de equipe | T-13 | READY |
+| T-24 | P3 | Mostrar o bloqueio por dependência no painel, com o motivo | T-13 | DONE |
 
 ## Honestidade de escala
 

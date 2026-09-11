@@ -11,7 +11,7 @@ const TEAM = '11111111-2222-4333-8444-555555555555'
 function task(overrides: Partial<TeamTask> = {}): TeamTask {
   return {
     task_id: 'implementar', title: 'Implementar o formulário', role: 'implementer', status: 'RUNNING',
-    depends_on: [], intended_paths: ['src/form.tsx'], blocked: false, diagnostic: null,
+    depends_on: [], intended_paths: ['src/form.tsx'], blocked: false, dependency_block: null, diagnostic: null,
     evidence: { state: 'NOT_EXECUTED' }, cost: { state: 'NOT_MEASURED' },
     updated_at: '2026-09-08T00:00:00.000Z', ...overrides,
   }
@@ -232,5 +232,39 @@ describe('uma etapa', () => {
       task: task({ task_id: 'revisar', depends_on: ['implementar'] }), depth: 1,
     }))
     expect(comDependencia).toContain('Depende de: implementar')
+  })
+})
+
+describe('T-24: o plano travado aparece na tela, e diz o que fazer', () => {
+  it('dependencia que NAO EXISTE: diz que a etapa nao vai andar e por que', () => {
+    const html = renderToStaticMarkup(createElement(TaskRow, {
+      task: task({ status: 'QUEUED', depends_on: ['fantasma'], dependency_block: { reason: 'MISSING_DEPENDENCY', dependencies: ['fantasma'] } }),
+      depth: 0,
+    }))
+    expect(html).toContain('não existe no plano')
+    expect(html).toContain('fantasma')
+    expect(html).toContain('role="alert"')
+  })
+
+  it('dependencia que FALHOU: diz que ela espera alguem agir, e nao a vez', () => {
+    const html = renderToStaticMarkup(createElement(TaskRow, {
+      task: task({ status: 'QUEUED', depends_on: ['anterior'], dependency_block: { reason: 'DEPENDENCY_FAILED', dependencies: ['anterior'] } }),
+      depth: 0,
+    }))
+    expect(html).toContain('não terminou bem')
+    expect(html).toContain('esperando alguém agir')
+  })
+
+  it('as duas frases sao DIFERENTES: sao dois gestos diferentes', () => {
+    // Corrigir um plano e refazer um trabalho nao sao a mesma acao. Uma frase
+    // so para os dois casos deixaria metade das pessoas sem saber o que fazer.
+    const falta = renderToStaticMarkup(createElement(TaskRow, { task: task({ dependency_block: { reason: 'MISSING_DEPENDENCY', dependencies: ['x'] } }), depth: 0 }))
+    const falhou = renderToStaticMarkup(createElement(TaskRow, { task: task({ dependency_block: { reason: 'DEPENDENCY_FAILED', dependencies: ['x'] } }), depth: 0 }))
+    expect(falta).not.toBe(falhou)
+  })
+
+  it('etapa com plano inteiro nao ganha aviso nenhum', () => {
+    const html = renderToStaticMarkup(createElement(TaskRow, { task: task({ status: 'QUEUED' }), depth: 0 }))
+    expect(html).not.toContain('não vai andar')
   })
 })

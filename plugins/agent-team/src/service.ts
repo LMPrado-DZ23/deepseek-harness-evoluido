@@ -46,6 +46,25 @@ export interface AgentTeamRepository {
 export interface AgentTeamSnapshot {
   readonly team: AgentTeamRecord
   readonly tasks: readonly AgentTeamTaskRecord[]
+  /**
+   * As etapas que NUNCA vao andar sozinhas, com o motivo.
+   *
+   * Vem no retrato, e nao da tela, porque a regra e desta camada: quem sabe o
+   * que significa uma dependencia fantasma e quem define dependencia. O painel
+   * e desacoplado de proposito (le formas estruturais, sem depender deste
+   * pacote), e recalcular a regra la criaria uma segunda verdade que diverge no
+   * primeiro conserto.
+   *
+   * Campo DERIVADO: nao entra no registro gravado nem sobe versao de dominio.
+   */
+  readonly blocked: readonly AgentTeamBlockedTask[]
+}
+
+export interface AgentTeamBlockedTask {
+  readonly task_id: string
+  readonly title: string
+  readonly reason: 'MISSING_DEPENDENCY' | 'DEPENDENCY_FAILED'
+  readonly dependencies: readonly string[]
 }
 
 export interface AgentTeamRestartReconciliation {
@@ -186,7 +205,8 @@ export class StudioAgentTeamService {
       }
       const cancelled = { ...team, status: 'CANCELLED' as const, diagnostic: t('status.cancelled'), updated_at: timestamp }
       await this.dependencies.repository.putTeam(cancelled)
-      return { team: cancelled, tasks: this.#teamTasks(teamId) }
+      const cancelledTasks = this.#teamTasks(teamId)
+      return { team: cancelled, tasks: cancelledTasks, blocked: blockedSummary(cancelledTasks) }
     })
   }
 
@@ -310,7 +330,7 @@ export class StudioAgentTeamService {
         await this.dependencies.repository.putTeam(team)
       }
     }
-    return { team, tasks }
+    return { team, tasks, blocked: blockedSummary(tasks) }
   }
 
   #team(teamId: string): AgentTeamRecord {
@@ -469,6 +489,24 @@ export function taskReadiness(task: AgentTeamTaskRecord, byId: ReadonlyMap<strin
 function readyTasks(tasks: readonly AgentTeamTaskRecord[]): AgentTeamTaskRecord[] {
   const byId = new Map(tasks.map(task => [task.task_id, task]))
   return tasks.filter(task => taskReadiness(task, byId).kind === 'READY')
+}
+
+/**
+ * O resumo do que trava a equipe, pronto para atravessar a fronteira.
+ *
+ * Devolve dado simples — id, título, motivo e culpados — porque quem consome é
+ * a tela, e a tela não deve precisar do tipo `AgentTeamTaskRecord` para
+ * entender por que um plano parou.
+ * @param tasks - todas as tarefas da equipe.
+ * @returns uma linha por etapa bloqueada.
+ */
+function blockedSummary(tasks: readonly AgentTeamTaskRecord[]): readonly AgentTeamBlockedTask[] {
+  return blockedTasks(tasks).map(item => ({
+    task_id: item.task.task_id,
+    title: item.task.title,
+    reason: item.readiness.reason,
+    dependencies: item.readiness.dependencies,
+  }))
 }
 
 /**

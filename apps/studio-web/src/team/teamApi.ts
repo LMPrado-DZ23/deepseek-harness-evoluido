@@ -43,6 +43,12 @@ export interface TeamTask {
   readonly depends_on: readonly string[]
   readonly intended_paths: readonly string[]
   readonly blocked: boolean
+  /**
+   * Bloqueio por DEPENDÊNCIA, que é outra coisa de `blocked`: a etapa está
+   * intacta e na fila, e mesmo assim nunca vai andar. `null` quando o plano
+   * dela está inteiro.
+   */
+  readonly dependency_block: { readonly reason: string; readonly dependencies: readonly string[] } | null
   readonly diagnostic: string | null
   readonly evidence: TaskEvidence
   readonly cost: TaskCost
@@ -115,6 +121,19 @@ function isEvidence(value: unknown): value is TaskEvidence {
     && typeof row.main_changed_during_run === 'boolean'
 }
 
+/**
+ * O bloqueio por dependência veio inteiro do servidor?
+ * @param value - o campo cru.
+ * @returns verdadeiro para ausência declarada ou para um bloqueio completo.
+ */
+function isDependencyBlock(value: unknown): boolean {
+  if (value === null) return true
+  if (typeof value !== 'object') return false
+  const row = value as Record<string, unknown>
+  return typeof row.reason === 'string' && row.reason !== ''
+    && Array.isArray(row.dependencies) && row.dependencies.every(entry => typeof entry === 'string')
+}
+
 /** Uma etapa incompleta é DESCARTADA: desenhar meia etapa desenha uma árvore torta. */
 export function isTeamTask(value: unknown): value is TeamTask {
   if (typeof value !== 'object' || value === null) return false
@@ -126,6 +145,7 @@ export function isTeamTask(value: unknown): value is TeamTask {
     && Array.isArray(row.depends_on) && row.depends_on.every(entry => typeof entry === 'string')
     && Array.isArray(row.intended_paths) && row.intended_paths.every(entry => typeof entry === 'string')
     && typeof row.blocked === 'boolean'
+    && isDependencyBlock(row.dependency_block)
     && (row.diagnostic === null || typeof row.diagnostic === 'string')
     && isEvidence(row.evidence)
     && isTaskCost(row.cost)

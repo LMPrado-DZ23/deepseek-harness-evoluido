@@ -284,6 +284,22 @@ export function TeamCostBlock({ cost }: { readonly cost: TeamCostData }) {
   </>
 }
 
+/**
+ * Por que uma etapa parada nunca vai andar.
+ *
+ * Duas frases porque são dois gestos diferentes: dependência que não existe é
+ * erro de plano, e alguém precisa corrigir o plano; dependência que terminou
+ * mal é trabalho a refazer. Uma frase só para os dois casos deixaria a pessoa
+ * sem saber o que fazer em metade das vezes — e "não vai andar" sem próximo
+ * passo é só uma má notícia.
+ * @param block - o bloqueio vindo do servidor.
+ * @returns a frase em pt-BR, com as dependências culpadas.
+ */
+function dependencyBlockSentence(block: { readonly reason: string; readonly dependencies: readonly string[] }): string {
+  const template = block.reason === 'MISSING_DEPENDENCY' ? copy.dependencyBlockMissing : copy.dependencyBlockFailed
+  return template.replace('{tasks}', block.dependencies.join(', '))
+}
+
 /** Uma etapa, com o recuo que mostra de quem ela depende. */
 export function TaskRow({ task, depth }: { readonly task: TeamTask, readonly depth: number }) {
   const icon = task.blocked
@@ -308,6 +324,7 @@ export function TaskRow({ task, depth }: { readonly task: TeamTask, readonly dep
         : copy.dependsOn.replace('{tasks}', task.depends_on.join(', '))}
     </p>
     {task.blocked && <p className="team-task-blocked-note" role="alert">{copy.blockedTitle}</p>}
+    {task.dependency_block !== null && <p className="team-task-blocked-note" role="alert">{dependencyBlockSentence(task.dependency_block)}</p>}
     {task.diagnostic !== null && <p className="team-task-diagnostic">{task.diagnostic}</p>}
     {task.intended_paths.length > 0 && <details className="team-task-files">
       <summary><FileText aria-hidden="true" />{copy.filesTitle}</summary>

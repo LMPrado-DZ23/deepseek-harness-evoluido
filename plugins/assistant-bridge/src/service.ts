@@ -532,7 +532,7 @@ export class StudioAssistantBridge {
     return normalized
   }
 
-  #summarizeTeam(snapshot: AgentTeamSnapshot, principal: AssistantPrincipal, repository: ValidatedRepositoryConfig): AssistantTeamSummary {
+  #summarizeTeam(snapshot: TeamAndTasks, principal: AssistantPrincipal, repository: ValidatedRepositoryConfig): AssistantTeamSummary {
     if (!teamBelongsToRepository(snapshot.team, principal, repository)
       || snapshot.tasks.some(task => !taskBelongsToTeam(task, snapshot.team))) {
       throw new AssistantBridgeError('NOT_FOUND', t('errors.teamMissing'))
@@ -778,7 +778,18 @@ function taskBelongsToTeam(task: AgentTeamTaskRecord, team: AgentTeamRecord): bo
     && task.workspace_id === team.workspace_id
 }
 
-function summarizeTeam(snapshot: AgentTeamSnapshot): AssistantTeamSummary {
+/**
+ * O que um resumo de equipe precisa, e nada mais.
+ *
+ * O retrato completo (`AgentTeamSnapshot`) ganhou um campo DERIVADO — as
+ * etapas bloqueadas. Exigi-lo aqui obrigaria o chamador que monta uma lista a
+ * FABRICAR esse campo só para satisfazer o tipo, e campo derivado fabricado
+ * por quem não faz a derivação é como uma projeção começa a mentir. Estreitar
+ * o parâmetro diz a verdade: este resumo lê time e etapas.
+ */
+type TeamAndTasks = Pick<AgentTeamSnapshot, 'team' | 'tasks'>
+
+function summarizeTeam(snapshot: TeamAndTasks): AssistantTeamSummary {
   return {
     team_id: snapshot.team.team_id,
     name: snapshot.team.name,
