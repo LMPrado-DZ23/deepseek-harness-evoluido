@@ -34,6 +34,12 @@ export const REQUIRED_SLUGS = [
   // copiado, mas a decisao de seguranca (aparelho dedicado, capturas saindo
   // para um modelo externo) mora neste inventario.
   'artemis',
+  // Os tres pedidos por Prado em 2026-09-11. Sao os primeiros inventarios
+  // feitos com a arvore REAL clonada para inspecao efemera, e o do ECC e o
+  // unico ate aqui em que a licenca do repositorio (MIT) NAO cobre tudo que
+  // esta dentro dele: assets/images/sponsors/ traz marca de terceiro. Apagar
+  // esse inventario apagaria justamente esse achado.
+  'ecc', 'mattpocock-skills', 'spec-kit',
 ]
 
 /**
