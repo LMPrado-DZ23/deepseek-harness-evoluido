@@ -91,7 +91,7 @@ function renderInput(slug: string, field: DatabaseField): string {
     return `      <label htmlFor=${JSON.stringify(id)}><input id=${JSON.stringify(id)} name=${JSON.stringify(name)} type="checkbox" /> ${jsx(field.name)}</label>`
   }
   if (field.type === 'selection') {
-    const options = field.options!.map(option => `        <option value=${JSON.stringify(option)}>${jsx(option)}</option>`).join('\n')
+    const options = field.options!.map(option => `        <option value=${jsx(option)}>${jsx(option)}</option>`).join('\n')
     return `      <label htmlFor=${JSON.stringify(id)}>${jsx(field.name)}</label>\n      <select id=${JSON.stringify(id)} name=${JSON.stringify(name)}${required}>\n        <option value="">${tGeneratedApp('common.select')}</option>\n${options}\n      </select>`
   }
   if (field.type === 'reference') {

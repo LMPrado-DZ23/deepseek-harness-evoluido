@@ -203,7 +203,7 @@ function renderMigration(names: { table: string; date: string; slot: string }): 
   const table = quoteId(names.table)
   const date = quoteId(names.date)
   const slot = quoteId(names.slot)
-  return `import type { DatabaseSync } from 'node:sqlite'\nexport function migrateScheduling(database:DatabaseSync):void{database.exec(${JSON.stringify(`CREATE TABLE IF NOT EXISTS ${table} ("id" TEXT PRIMARY KEY, ${date} TEXT NOT NULL, ${slot} TEXT NOT NULL, "state" TEXT NOT NULL DEFAULT 'pending' CHECK ("state" IN ('pending','confirmed','cancelled')), "created_by" TEXT NOT NULL, "created_at" TEXT NOT NULL, "updated_at" TEXT NOT NULL) STRICT; CREATE UNIQUE INDEX IF NOT EXISTS ${quoteId(`${names.table}_active_slot`)} ON ${table} (${date}, ${slot}) WHERE "state" <> 'cancelled';`)})}\n`
+  return `import type { DatabaseSync } from 'node:sqlite'\nexport function migrateScheduling(database:DatabaseSync):void{database.exec('BEGIN IMMEDIATE');try{database.exec(${JSON.stringify(`CREATE TABLE IF NOT EXISTS ${table} ("id" TEXT PRIMARY KEY, ${date} TEXT NOT NULL, ${slot} TEXT NOT NULL, "state" TEXT NOT NULL DEFAULT 'pending' CHECK ("state" IN ('pending','confirmed','cancelled')), "created_by" TEXT NOT NULL, "created_at" TEXT NOT NULL, "updated_at" TEXT NOT NULL) STRICT; CREATE UNIQUE INDEX IF NOT EXISTS ${quoteId(`${names.table}_active_slot`)} ON ${table} (${date}, ${slot}) WHERE "state" <> 'cancelled';`)});database.exec('COMMIT')}catch(error){database.exec('ROLLBACK');throw error}}\n`
 }
 
 function renderRepository(names: { table: string; date: string; slot: string }): string {
@@ -227,7 +227,7 @@ function renderNodeCompatibleRepository(names: { table: string; date: string; sl
 }
 
 function renderPanel(names: { date: string; slot: string }, contract: SchedulingContract): string {
-  const options = contract.slots.map(slot => `<option value=${JSON.stringify(slot)}>${escapeJsx(slot)}</option>`).join('')
+  const options = contract.slots.map(slot => `<option value=${escapeJsx(slot)}>${escapeJsx(slot)}</option>`).join('')
   const statusLabels = JSON.stringify({
     pending: tGeneratedApp('scheduling.statusPending'),
     confirmed: tGeneratedApp('scheduling.statusConfirmed'),

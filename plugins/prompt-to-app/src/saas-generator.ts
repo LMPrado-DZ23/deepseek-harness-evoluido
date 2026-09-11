@@ -217,7 +217,7 @@ function jsonValue(value: unknown, path: string): SaasPayload {
 }
 
 function renderMigration(): string {
-  return `import type { DatabaseSync } from 'node:sqlite'\nexport function migrateSaas(database:DatabaseSync):void{database.exec('PRAGMA foreign_keys = ON');database.exec(${JSON.stringify(`CREATE TABLE IF NOT EXISTS saas_records (id TEXT PRIMARY KEY, entity TEXT NOT NULL, owner_user_id TEXT NOT NULL REFERENCES auth_users(id) ON UPDATE CASCADE ON DELETE RESTRICT, payload TEXT NOT NULL CHECK (json_valid(payload)), created_at TEXT NOT NULL, updated_at TEXT NOT NULL) STRICT; CREATE INDEX IF NOT EXISTS saas_records_owner_entity ON saas_records(owner_user_id,entity,created_at,id);`)})}\n`
+  return `import type { DatabaseSync } from 'node:sqlite'\nexport function migrateSaas(database:DatabaseSync):void{database.exec('PRAGMA foreign_keys = ON');database.exec('BEGIN IMMEDIATE');try{database.exec(${JSON.stringify(`CREATE TABLE IF NOT EXISTS saas_records (id TEXT PRIMARY KEY, entity TEXT NOT NULL, owner_user_id TEXT NOT NULL REFERENCES auth_users(id) ON UPDATE CASCADE ON DELETE RESTRICT, payload TEXT NOT NULL CHECK (json_valid(payload)), created_at TEXT NOT NULL, updated_at TEXT NOT NULL) STRICT; CREATE INDEX IF NOT EXISTS saas_records_owner_entity ON saas_records(owner_user_id,entity,created_at,id);`)});database.exec('COMMIT')}catch(error){database.exec('ROLLBACK');throw error}}\n`
 }
 
 function renderRepository(): string {

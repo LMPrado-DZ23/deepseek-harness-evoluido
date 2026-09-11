@@ -102,3 +102,28 @@ describe('scheduling generator', () => {
     expect(() => domain.list({ session: member.session, csrfSubmitted: 'wrong' })).toThrow('CSRF')
   })
 })
+
+describe('ACHADO: migração do app gerado nasce inteira ou não nasce', () => {
+  it('a tabela e o índice único ficam na MESMA transação', () => {
+    // `exec` com dois comandos não é atômico. Se a tabela nascesse e o índice
+    // único não, a agenda ficaria SEM a única garantia contra dupla reserva —
+    // `create` não faz SELECT de conflito, ele depende do índice. E o defeito
+    // seria silencioso: o aplicativo funcionaria, só aceitaria dois clientes
+    // no mesmo horário. `data-generator` e `auth-generator` já faziam certo;
+    // agenda e SaaS tinham ficado de fora.
+    const migracao = generateSchedulingLayer(spec)
+      .files.find(file => file.path.endsWith('scheduling-migration.ts'))!.content
+    expect(migracao).toContain("database.exec('BEGIN IMMEDIATE');try{")
+    expect(migracao).toContain("database.exec('COMMIT')}catch(error){database.exec('ROLLBACK');throw error}")
+    // A ordem importa: o COMMIT vem DEPOIS do DDL, e o ROLLBACK cobre tudo.
+    expect(migracao.indexOf('BEGIN IMMEDIATE')).toBeLessThan(migracao.indexOf('CREATE TABLE'))
+    expect(migracao.indexOf('CREATE UNIQUE INDEX')).toBeLessThan(migracao.indexOf("exec('COMMIT')"))
+  })
+
+  it('opção de horário com aspas não quebra o atributo JSX', () => {
+    const painel = generateSchedulingLayer(spec)
+      .files.find(file => file.path.endsWith('-panel.tsx'))!.content
+    expect(painel).not.toMatch(/<option value="[^"]*\\"/u)
+    expect(painel).toMatch(/<option value=\{"/u)
+  })
+})

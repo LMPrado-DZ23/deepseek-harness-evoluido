@@ -160,3 +160,23 @@ describe('authenticated SaaS generator', () => {
     expect(() => generateSaasLayer({ ...spec, entities: [] }, 'saas-authenticated')).toThrow(SaasContractError)
   })
 })
+
+describe('ACHADO: migração do SaaS gerado nasce inteira ou não nasce', () => {
+  it('tabela e índice ficam na MESMA transação', () => {
+    // Mesmo defeito da agenda: `exec` com dois comandos não é atômico, e
+    // `data-generator`/`auth-generator` já faziam certo. Aqui o que ficaria
+    // para trás é o índice por dono — a consulta que separa o que cada membro
+    // enxerga continuaria correta, mas varreria a tabela inteira, e o
+    // aplicativo ficaria lento sem ninguém saber por quê.
+    const migracao = generateSaasLayer(spec, 'saas-authenticated')
+      .files.find(file => file.path === 'src/db/saas-migrations.ts')!.content
+    expect(migracao).toContain("database.exec('BEGIN IMMEDIATE');try{")
+    expect(migracao).toContain("database.exec('COMMIT')}catch(error){database.exec('ROLLBACK');throw error}")
+    expect(migracao.indexOf('BEGIN IMMEDIATE')).toBeLessThan(migracao.indexOf('CREATE TABLE'))
+    expect(migracao.indexOf('CREATE INDEX')).toBeLessThan(migracao.indexOf("exec('COMMIT')"))
+    // `PRAGMA foreign_keys` FICA FORA da transação: o SQLite ignora esse
+    // pragma dentro de uma, e silenciosamente — a integridade referencial
+    // simplesmente não valeria.
+    expect(migracao.indexOf('PRAGMA foreign_keys')).toBeLessThan(migracao.indexOf('BEGIN IMMEDIATE'))
+  })
+})
