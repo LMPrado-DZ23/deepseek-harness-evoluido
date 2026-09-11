@@ -14,6 +14,7 @@ import {
 import { z } from 'zod'
 import { previewAdmissionSchema, previewRecordSchema, type PreviewAdmission, type PreviewRecord } from './model.js'
 import { KeyedMutex } from './mutex.js'
+import { Semaphore, SemaphoreFullError } from './semaphore.js'
 import { t } from './i18n.js'
 
 const DEFAULT_TTL_SECONDS = 30 * 60
@@ -21,6 +22,23 @@ const MAX_TTL_SECONDS = 2 * 60 * 60
 const TICKET_TTL_SECONDS = 2 * 60
 const CAPACITY_RELEASE_PENDING = 'CAPACITY_RELEASE_PENDING'
 const ACTIVE_STATES = new Set<PreviewRecord['state']>(['REQUESTED', 'STARTING', 'READY', 'STOPPING'])
+
+/**
+ * Quantas verificações de artefato podem correr ao mesmo tempo, e quantas podem
+ * esperar.
+ *
+ * A verificação lê e resume a árvore inteira do artefato — até 160 MiB — e
+ * acontece ANTES de qualquer reserva de capacidade. O mutex que serializa o
+ * início é POR PROJETO, então projetos diferentes não se seguram: sem este
+ * teto, uma conta com muitos projetos produz leituras e hashes simultâneos sem
+ * limite, e satura a máquina sem estourar cota nenhuma.
+ *
+ * Quatro é o valor padrão porque o trabalho é de disco e CPU ao mesmo tempo;
+ * a fila curta existe para recusar rápido em vez de acumular espera que já não
+ * serve a ninguém.
+ */
+const ARTIFACT_VERIFICATION_LIMIT = 4
+const ARTIFACT_VERIFICATION_QUEUE_LIMIT = 32
 
 export interface PreviewActor {
   readonly userId: string
@@ -138,6 +156,7 @@ export class StudioPreviewService {
   readonly #capacityLeases = new Map<string, LeaseReference>()
   readonly #capacityReleasePending = new Set<string>()
   readonly #mutex = new KeyedMutex()
+  readonly #artifactVerification = new Semaphore(ARTIFACT_VERIFICATION_LIMIT, ARTIFACT_VERIFICATION_QUEUE_LIMIT)
 
   constructor(private readonly options: PreviewServiceOptions) {
     this.#now = options.now ?? (() => new Date())
@@ -175,8 +194,13 @@ export class StudioPreviewService {
   async start(actor: PreviewActor, projectId: string, runId?: string): Promise<{ readonly preview: PublicPreview; readonly admissionTicket: string }> {
     this.#authorize(actor, 'project.write')
     return this.#mutex.run(`${actor.orgId}:${actor.tenantId}:${projectId}`, async () => {
-      await this.#assertQuarantineCapacity()
-      const artifact = await this.options.source.verifiedArtifact(actor, projectId, runId)
+      await this.#assertQuarantineCapacity(actor)
+      const artifact = await this.#artifactVerification.run(
+        () => this.options.source.verifiedArtifact(actor, projectId, runId),
+      ).catch((error: unknown) => {
+        if (error instanceof SemaphoreFullError) throw new PreviewError('UNAVAILABLE', t('service.verificationBusy'))
+        throw error
+      })
       if (!/^[a-f0-9]{64}$/u.test(artifact.artifactSha256)) throw new PreviewError('INVALID', t('service.invalidArtifactHash'))
       const existing = this.options.repository.previews().find(item => sameScope(item, actor)
         && item.project_id === projectId && item.run_id === artifact.runId
@@ -898,15 +922,34 @@ export class StudioPreviewService {
     }
   }
 
-  async #assertQuarantineCapacity(): Promise<void> {
+  /**
+   * Renova a capacidade retida por prévias em quarentena antes de conceder mais.
+   *
+   * A retenção é de TODAS as quarentenas, e continua sendo: capacidade é um
+   * recurso compartilhado, e uma quarentena de outro inquilino que perdesse a
+   * reserva deixaria um runtime rodando sem ninguém contabilizando.
+   *
+   * O que mudou é QUEM é reprovado quando essa renovação falha. Antes, qualquer
+   * quarentena travada — de qualquer organização ou inquilino — fazia `start`
+   * falhar para todo mundo: um inquilino com uma quarentena presa derrubava a
+   * prévia de todos os outros, sem tocar em nada que fosse deles. E não havia
+   * ganho de segurança nisso: quem impede alocar além do que existe é o próprio
+   * governador de capacidade, que já conta a reserva presa. Então agora só o
+   * dono da quarentena é reprovado.
+   * @param actor - quem está pedindo a prévia.
+   */
+  async #assertQuarantineCapacity(actor: PreviewActor): Promise<void> {
     const quarantines = this.options.repository.previews().filter(record => record.state === 'STOPPING')
+    let own: unknown
     for (const quarantine of quarantines) {
       try {
         await this.#ensureCapacity(quarantine, true)
       } catch (error) {
-        throw capacityError(error)
+        if (sameScope(quarantine, actor)) own ??= error
+        else this.options.onCleanupFailure?.(quarantine.preview_id)
       }
     }
+    if (own !== undefined) throw capacityError(own)
   }
 
   async #quarantineDetachedCapacity(

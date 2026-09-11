@@ -8,6 +8,32 @@ import type { ManagedPreviewRow, PreviewSupervisorPort, SupervisorForwardRespons
 import type { SupervisorForwardRequest, SupervisorStartRequest } from './protocol.js'
 
 interface RuntimeLimits { readonly memoryBytes: number; readonly nanoCpus: number; readonly pids: number }
+
+/**
+ * As opcoes de driver do volume de DADOS da previa.
+ *
+ * O volume e montado COM ESCRITA no container do aplicativo gerado, que e
+ * codigo nao confiavel produzido por modelo. Sem teto, um `while (true)` que
+ * escreve arquivo enche o disco do host: nao e a previa que cai, e a
+ * plataforma inteira, para todos os inquilinos — e nenhuma cota de memoria,
+ * CPU ou processos impede isso, porque nenhuma delas fala de disco.
+ *
+ * `tmpfs`, e nao disco, porque e o unico teto que o kernel realmente aplica
+ * aqui: a opcao `size` do driver `local` so vale com `tmpfs` ou com um
+ * dispositivo proprio; num diretorio comum o Docker aceita e IGNORA, e o
+ * resultado seria uma cota de mentira, que e pior que nenhuma. Dado de previa
+ * ja e efemero — a previa expira em minutos —, entao nada de valor depende de
+ * ele sobreviver a um reinicio.
+ *
+ * Consequencia aceita: as paginas do tmpfs contam na memoria do cgroup que as
+ * escreve. Um aplicativo que encher o volume morre por memoria. Uma previa cai;
+ * a maquina nao.
+ * @param bytes - o teto em bytes.
+ * @returns as opcoes para `createVolume`.
+ */
+function dataVolumeDriverOpts(bytes: number): Readonly<Record<string, string>> {
+  return { type: 'tmpfs', device: 'tmpfs', o: `size=${bytes},mode=0770,uid=10001,gid=10001` }
+}
 export interface DockerPreviewSupervisorOptions {
   readonly engine: DockerEngine
   readonly artifactRoot: string
@@ -19,6 +45,8 @@ export interface DockerPreviewSupervisorOptions {
   readonly proxyUser?: `${number}:${number}`
   readonly diagnosticSink?: (entry: { readonly role: 'runtime' | 'proxy'; readonly output: string }) => void
   readonly limits?: Partial<RuntimeLimits>
+  /** O teto do volume de dados da previa, em bytes. Padrao 64 MiB. */
+  readonly dataVolumeBytes?: number
 }
 
 interface DockerContainerRow { readonly Id?: unknown; readonly Labels?: unknown; readonly State?: unknown }
@@ -35,6 +63,7 @@ interface RuntimeResources {
 
 export class DockerPreviewSupervisor implements PreviewSupervisorPort {
   readonly #limits: RuntimeLimits
+  readonly #dataVolumeBytes: number
   readonly #events = new Map<string, Array<{ at: string; level: 'info' | 'warn' | 'error'; event: string }>>()
   readonly #tails = new Map<string, Promise<void>>()
 
@@ -50,6 +79,7 @@ export class DockerPreviewSupervisor implements PreviewSupervisorPort {
       nanoCpus: boundedInteger(options.limits?.nanoCpus ?? 1_000_000_000, 100_000_000, 4_000_000_000),
       pids: boundedInteger(options.limits?.pids ?? 256, 32, 1_024),
     }
+    this.#dataVolumeBytes = boundedInteger(options.dataVolumeBytes ?? 64 * 1024 * 1024, 8 * 1024 * 1024, 1024 * 1024 * 1024)
   }
 
   async preflight(signal: AbortSignal): Promise<void> {
@@ -110,7 +140,10 @@ export class DockerPreviewSupervisor implements PreviewSupervisorPort {
     const labels = baseLabels(this.options.instanceId, resources)
     try {
       await this.options.engine.createVolume(resources.artifactVolume, { ...labels, 'dz23.resource': 'artifact' }, signal)
-      await this.options.engine.createVolume(resources.dataVolume, { ...labels, 'dz23.resource': 'data' }, signal)
+      await this.options.engine.createVolume(
+        resources.dataVolume, { ...labels, 'dz23.resource': 'data' }, signal,
+        dataVolumeDriverOpts(this.#dataVolumeBytes),
+      )
       const stager = await this.options.engine.createContainer(resources.stagerContainer, {
         Image: this.options.proxyImageDigest, Cmd: ['node', '-e', 'process.exit(0)'], User: '10001:10001',
         Labels: { ...labels, 'dz23.role': 'stager' },

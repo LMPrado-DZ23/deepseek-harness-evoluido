@@ -3,7 +3,7 @@ import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { listenPreviewProxy, type PreviewProxyOptions } from '../src/proxy-server.js'
+import { isPlatformCookieName, listenPreviewProxy, type PreviewProxyOptions } from '../src/proxy-server.js'
 
 interface ProxyResponse {
   readonly status: number
@@ -119,7 +119,12 @@ describeUnix('preview proxy Unix-socket boundary', () => {
     const response = await sendProxy(proxy.options.socketPath, forwardEnvelope({
       headers: {
         accept: 'application/json', 'content-type': 'application/json', 'user-agent': 'dz23-preview-test',
-        host: 'attacker.example:2375', authorization: 'Bearer secret', cookie: '__Host-dz23_preview=secret; app_session=allowed',
+        // Os nomes REAIS, de `plugins/preview/src/gateway.ts` (`PREVIEW_COOKIE` e
+        // `SECURE_PREVIEW_COOKIE`). A versao anterior deste teste escrevia
+        // `__Host-dz23_preview=` — a grafia do proprio defeito — e por isso
+        // passava sem nunca exercitar a regra.
+        host: 'attacker.example:2375', authorization: 'Bearer secret',
+        cookie: '__Host-dz23_preview_admission=secret; dz23_preview_admission=secret; app_session=allowed',
         connection: 'upgrade', upgrade: 'websocket', 'x-forwarded-for': '203.0.113.9',
         'x-forwarded-host': 'attacker.example', 'x-dz23-internal': 'forged',
       },
@@ -294,6 +299,52 @@ describeUnix('preview proxy Unix-socket boundary', () => {
     await rm(capture, { recursive: true })
     await symlink(join(previewRoot, 'absent.json'), capture)
     expect(await sendProxy(proxy.options.socketPath, messagesEnvelope())).toEqual({ status: 200, body: { messages: [] } })
+  })
+
+  it('ACHADO F: remove o cookie de admissao pelo NOME, e nao por uma grafia que deixou de casar', () => {
+    // A camada anterior comparava com `__Host-dz23_preview=`; o cookie real se
+    // chama `__Host-dz23_preview_admission`, e `=` nao casa com `_`. A camada
+    // nunca removeu nada — e o teste que a cobria usava a grafia errada.
+    expect(isPlatformCookieName('__Host-dz23_preview_admission')).toBe(true)
+    expect(isPlatformCookieName('dz23_preview_admission')).toBe(true)
+    expect(isPlatformCookieName('__Secure-dz23_preview_admission')).toBe(true)
+    // Familia: um rename do sufixo nao pode reabrir o mesmo buraco.
+    expect(isPlatformCookieName('dz23_preview_qualquer_coisa_futura')).toBe(true)
+    // E nao pode comer cookie do aplicativo gerado, que e o que ele precisa ver.
+    expect(isPlatformCookieName('app_session')).toBe(false)
+    expect(isPlatformCookieName('dz23_outro')).toBe(false)
+    expect(isPlatformCookieName('x-dz23_preview')).toBe(false)
+  })
+
+  it('ACHADO G: endereco de email vindo do app gerado nao carrega metacaractere de HTML nem tamanho ilimitado', async () => {
+    // `preview-capture.json` e escrito pelo codigo GERADO, que nao e confiavel,
+    // e o que sai daqui e renderizado no Studio. A forma anterior
+    // — `[^\s@]+@[^\s@]+\.[^\s@]+` — aceitava `<`, `>`, `"`, `/` e `=`.
+    const proxy = await startProxy()
+    const previewRoot = join(proxy.options.dataRoot, proxy.options.previewId)
+    await mkdir(previewRoot)
+    const capture = join(previewRoot, 'preview-capture.json')
+    const base = { kind: 'code', code: '123456', expiresAt: '2026-09-04T12:00:00.000Z' }
+    const recusados = [
+      '<img src=x onerror=alert(1)>@example.com',
+      'a@exa<b>mple.com',
+      'a"b@example.com',
+      `${'a'.repeat(250)}@example.com`,
+      'sem-ponto@localhost',
+      'a@-example.com',
+    ]
+    for (const email of recusados) {
+      await writeFile(capture, JSON.stringify([{ ...base, email }]))
+      expect(await sendProxy(proxy.options.socketPath, messagesEnvelope())).toEqual({ status: 200, body: { messages: [] } })
+    }
+    // Enderecos legitimos continuam passando: uma regra que recusa o valido
+    // quebraria a verificacao por email, que e o motivo de isto existir.
+    for (const email of ['person@example.com', 'first.last+tag@sub.example.co.uk', "o'brien@example.com"]) {
+      await writeFile(capture, JSON.stringify([{ ...base, email }]))
+      expect(await sendProxy(proxy.options.socketPath, messagesEnvelope())).toEqual({
+        status: 200, body: { messages: [{ ...base, email }] },
+      })
+    }
   })
 
   it('rejects every invalid proxy boundary option before opening a socket', async () => {

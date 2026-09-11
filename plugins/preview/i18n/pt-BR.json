@@ -50,7 +50,8 @@
     "signInBeforeCodes": "Entre novamente no DZ23 STUDIO antes de ver os códigos de acesso.",
     "notFound": "Prévia não encontrada.",
     "roleDenied": "Seu papel neste espaço não permite esta ação.",
-    "supervisorTimeout": "O supervisor da prévia não respondeu dentro do prazo seguro."
+    "supervisorTimeout": "O supervisor da prévia não respondeu dentro do prazo seguro.",
+    "verificationBusy": "Muitas prévias estão sendo preparadas ao mesmo tempo. Tente de novo em instantes."
   },
   "supervisor": {
     "invalidEventLimit": "Limite de eventos inválido.",

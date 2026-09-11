@@ -22,8 +22,28 @@ export class DockerEngine {
   async listNetworks(filters: Readonly<Record<string, readonly string[]>>, signal: AbortSignal): Promise<readonly Record<string, unknown>[]> {
     return this.#json('GET', `/networks?filters=${encodeURIComponent(JSON.stringify(filters))}`, undefined, signal, [200])
   }
-  async createVolume(name: string, labels: Readonly<Record<string, string>>, signal: AbortSignal): Promise<void> {
-    await this.#request('POST', '/volumes/create', { Name: name, Labels: labels }, signal, [201])
+  /**
+   * Cria um volume, opcionalmente com opcoes de driver.
+   *
+   * `driverOpts` existe para o volume de DADOS da previa, que e montado com
+   * escrita no aplicativo gerado — codigo nao confiavel. Sem teto, esse
+   * aplicativo enche o disco do host e derruba a plataforma inteira, sem
+   * estourar cota nenhuma. Ver `dataVolumeDriverOpts` em `docker-manager.ts`.
+   * @param name - o nome do volume.
+   * @param labels - os rotulos de gestao.
+   * @param signal - o cancelamento.
+   * @param driverOpts - as opcoes passadas ao driver, quando houver.
+   */
+  async createVolume(
+    name: string,
+    labels: Readonly<Record<string, string>>,
+    signal: AbortSignal,
+    driverOpts?: Readonly<Record<string, string>>,
+  ): Promise<void> {
+    await this.#request('POST', '/volumes/create', {
+      Name: name, Labels: labels,
+      ...(driverOpts === undefined ? {} : { Driver: 'local', DriverOpts: driverOpts }),
+    }, signal, [201])
   }
   async removeVolume(name: string, signal: AbortSignal): Promise<void> { await this.#request('DELETE', `/volumes/${encodeURIComponent(name)}?force=1`, undefined, signal, [204, 404]) }
   async listVolumes(filters: Readonly<Record<string, readonly string[]>>, signal: AbortSignal): Promise<readonly Record<string, unknown>[]> {

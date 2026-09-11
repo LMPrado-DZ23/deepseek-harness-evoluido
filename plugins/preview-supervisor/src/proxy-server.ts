@@ -95,8 +95,52 @@ function safeRequestHeaders(headers: Readonly<Record<string, string>>): Readonly
   return result
 }
 
+/**
+ * O prefixo de TODO cookie que pertence a plataforma, e nao ao aplicativo gerado.
+ *
+ * Familia, e nao nome exato, de proposito. A versao anterior comparava com
+ * `__Host-dz23_preview=` enquanto o cookie real se chama
+ * `__Host-dz23_preview_admission` (ver `PREVIEW_COOKIE` e
+ * `SECURE_PREVIEW_COOKIE` em `plugins/preview/src/gateway.ts`): o `=` nao casa
+ * com o `_`, e a camada NUNCA removeu nada. Um nome exato volta a nao casar no
+ * proximo rename do sufixo; um prefixo sobrevive a ele.
+ *
+ * Cortar demais e o lado seguro: nenhum cookie da plataforma tem motivo para
+ * chegar ao codigo gerado, que nao e confiavel.
+ */
+const PLATFORM_COOKIE_PREFIX = 'dz23_preview'
+
+/** Os prefixos de atributo que o navegador permite em nome de cookie. */
+const COOKIE_NAME_PREFIXES = ['__Host-', '__Secure-'] as const
+
+/**
+ * Se este nome de cookie pertence a plataforma.
+ * @param name - o nome, ja sem espacos em volta.
+ * @returns `true` quando o cookie nao pode chegar ao aplicativo gerado.
+ */
+export function isPlatformCookieName(name: string): boolean {
+  let bare = name
+  for (const prefix of COOKIE_NAME_PREFIXES) {
+    if (bare.startsWith(prefix)) { bare = bare.slice(prefix.length); break }
+  }
+  return bare.startsWith(PLATFORM_COOKIE_PREFIX)
+}
+
+/**
+ * Remove do cabecalho `cookie` tudo que e da plataforma.
+ *
+ * Segunda camada: quem faz o trabalho hoje e `withoutAdmissionCookie` no
+ * gateway. Esta existe para o dia em que o gateway regredir — e por isso ela
+ * precisa funcionar de verdade, e nao so parecer que funciona.
+ * @param value - o cabecalho `cookie` recebido.
+ * @returns o cabecalho sem os cookies da plataforma.
+ */
 function stripAdmissionCookie(value: string): string {
-  return value.split(';').map(item => item.trim()).filter(item => !item.startsWith('__Host-dz23_preview=')).join('; ')
+  return value
+    .split(';')
+    .map(item => item.trim())
+    .filter(item => item !== '' && !isPlatformCookieName(item.split('=', 1)[0]!.trim()))
+    .join('; ')
 }
 
 function safeResponseHeaders(response: IncomingMessage): Readonly<Record<string, string | readonly string[]>> {
@@ -123,11 +167,40 @@ async function readMessages(options: PreviewProxyOptions): Promise<readonly unkn
   } catch { return [] }
 }
 
+/**
+ * O tamanho maximo de um endereco de email, pelo RFC 5321.
+ *
+ * Existe porque `preview-capture.json` e escrito pelo aplicativo GERADO, que
+ * nao e confiavel, e o que sai daqui aparece na tela do Studio. Sem teto, um
+ * unico endereco podia ocupar o arquivo inteiro.
+ */
+const EMAIL_MAX_LENGTH = 254
+
+/**
+ * A forma aceita de endereco de email vindo do aplicativo gerado.
+ *
+ * Deliberadamente mais estreita que o RFC: a anterior — `[^\s@]+@[^\s@]+\.[^\s@]+`
+ * — aceitava `<`, `>`, `"`, `/` e `=`, e o texto aceito aqui e renderizado no
+ * Studio. Endereco legitimo nao usa nenhum desses caracteres; recusa-los custa
+ * nada e fecha a porta de injecao antes da renderizacao, em vez de depender
+ * dela.
+ */
+const EMAIL_SHAPE = /^[A-Za-z0-9!#$%&'*+\-/=?^_`{|}~.]+@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+$/u
+
+/**
+ * Se este endereco pode ser mostrado.
+ * @param value - o endereco vindo do arquivo escrito pelo aplicativo gerado.
+ * @returns `true` quando tem tamanho e forma aceitaveis.
+ */
+function isDisplayableEmail(value: string): boolean {
+  return value.length <= EMAIL_MAX_LENGTH && !value.includes('<') && !value.includes('>') && EMAIL_SHAPE.test(value)
+}
+
 function isCapturedCode(value: unknown): value is { readonly kind: 'code'; readonly email: string; readonly code: string; readonly expiresAt: string } {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
   const row = value as Record<string, unknown>
   return Object.keys(row).sort().join(',') === 'code,email,expiresAt,kind'
-    && row.kind === 'code' && typeof row.email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(row.email)
+    && row.kind === 'code' && typeof row.email === 'string' && isDisplayableEmail(row.email)
     && typeof row.code === 'string' && /^\d{6}$/u.test(row.code)
     && typeof row.expiresAt === 'string' && !Number.isNaN(Date.parse(row.expiresAt))
 }

@@ -9,7 +9,7 @@
 - `mission_intent`: evoluir o repositório para um Engineering OS sobre o DeepSeek Harness, preservando o motor e a compatibilidade com o upstream
 - `state`: `EXECUTING`
 - `branch`: `integ` (**não é `main`** — confirmar com `git branch --show-current`)
-- `head`: ver `git log --oneline -1`; o último estado registrado aqui é `af54d75` + o trabalho desta iteração
+- `head`: ver `git log --oneline -1`; o último estado registrado aqui é `91c6aa0` + o trabalho desta iteração (T-27: revisão adversarial do portão de prévia)
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c` (zero diff, `gate:upstream-pin` prova)
 - `atualizado_em`: 2026-09-11
 
@@ -32,7 +32,7 @@ Todos reproduzíveis pelo comando ao lado.
 | --- | --- | --- |
 | typecheck | PASS | `pnpm typecheck` |
 | build | PASS | `pnpm build` |
-| suíte raiz | 2766 testes, 175 arquivos, 0 falha | `pnpm -w test` |
+| suíte raiz | 2827 testes, 178 arquivos, 0 falha (11/09, após T-27) | `pnpm -w test` |
 | suíte studio-web | 394 testes | `cd apps/studio-web && npx vitest run` |
 | e2e navegador | 72 testes, Chromium real | `cd apps/studio-web && npx playwright test` |
 | PostgreSQL real | 63 testes | `pnpm test:postgres` |

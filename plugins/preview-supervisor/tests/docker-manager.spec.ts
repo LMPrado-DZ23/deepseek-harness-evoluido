@@ -142,6 +142,67 @@ describe.skipIf(!onUnix)('Docker preview supervisor authority boundary', () => {
 
     await expect(supervisor.drain(AbortSignal.timeout(5_000))).rejects.toThrow('SUPERVISOR_DRAIN_INCOMPLETE')
   })
+
+  it('ACHADO A: o volume de dados, que o app gerado escreve, nasce COM teto', async () => {
+    // O volume e montado com escrita no container do aplicativo gerado — codigo
+    // nao confiavel produzido por modelo. Antes ele nascia sem nenhuma opcao de
+    // driver: um laco que escreve arquivo enchia o disco do HOST, e nao a
+    // previa. Nenhuma das cotas existentes (memoria, CPU, processos) fala de
+    // disco, entao nenhuma delas via isso chegar.
+    const fixture = await artifactFixture()
+    const engine = new RecordingDockerEngine({ failRuntimeStart: true })
+    const supervisor = new DockerPreviewSupervisor({
+      engine: engine as unknown as DockerEngine,
+      artifactRoot: fixture.root,
+      proxySocketRoot: '/run/dz23-preview-proxies',
+      proxySocketMount: { type: 'volume', source: 'dz23-preview-proxy-sockets' },
+      runtimeImageDigest: RUNTIME_IMAGE,
+      proxyImageDigest: PROXY_IMAGE,
+      instanceId: 'test-instance',
+      dataVolumeBytes: 32 * 1024 * 1024,
+    })
+
+    await expect(supervisor.start({
+      preview_id: 'preview-quota', artifact_relative_path: 'run',
+      artifact_sha256: await hashTree(fixture.source), owner_email: 'owner@example.test',
+    }, new AbortController().signal)).rejects.toThrow('INJECTED_RUNTIME_START_FAILURE')
+
+    const data = engine.volumes.find(row => row.labels['dz23.resource'] === 'data')
+    expect(data?.driverOpts).toEqual({
+      // `tmpfs` e obrigatorio: a opcao `size` do driver `local` so e APLICADA
+      // com tmpfs ou dispositivo proprio. Num diretorio comum o Docker aceita
+      // e ignora — e uma cota ignorada e pior que nenhuma, porque parece que
+      // existe.
+      type: 'tmpfs', device: 'tmpfs', o: 'size=33554432,mode=0770,uid=10001,gid=10001',
+    })
+
+    // O volume do ARTEFATO nao leva teto: ele e montado somente-leitura, o
+    // aplicativo gerado nao escreve nele, e um teto ali so limitaria o tamanho
+    // do proprio build legitimo.
+    expect(engine.volumes.find(row => row.labels['dz23.resource'] === 'artifact')?.driverOpts).toBeUndefined()
+  })
+
+  it('ACHADO A: teto absurdo e RECUSADO na construcao, em vez de virar cota de mentira', async () => {
+    // Recusar, e nao ajustar em silencio: um operador que pediu 1 TiB e foi
+    // atendido com 1 GiB acha que tem 1 TiB. O mesmo criterio ja valia para
+    // memoria, CPU e processos.
+    const fixture = await artifactFixture()
+    const engine = new RecordingDockerEngine()
+    const build = (dataVolumeBytes: number): DockerPreviewSupervisor => new DockerPreviewSupervisor({
+      engine: engine as unknown as DockerEngine,
+      artifactRoot: fixture.root,
+      proxySocketRoot: '/run/dz23-preview-proxies',
+      proxySocketMount: { type: 'volume', source: 'dz23-preview-proxy-sockets' },
+      runtimeImageDigest: RUNTIME_IMAGE, proxyImageDigest: PROXY_IMAGE,
+      instanceId: 'test-instance', dataVolumeBytes,
+    })
+    for (const absurdo of [1, 0, -1, 1024 ** 4, 8 * 1024 * 1024 - 1, Number.NaN]) {
+      expect(() => build(absurdo)).toThrow('INVALID_RUNTIME_LIMIT')
+    }
+    expect(() => build(8 * 1024 * 1024)).not.toThrow()
+    expect(() => build(1024 * 1024 * 1024)).not.toThrow()
+  })
+
 })
 
 class DrainDockerEngine {
@@ -168,7 +229,7 @@ class DrainDockerEngine {
 
 class RecordingDockerEngine {
   readonly imageInspections: string[] = []
-  readonly volumes: Array<{ name: string; labels: Readonly<Record<string, string>> }> = []
+  readonly volumes: Array<{ name: string; labels: Readonly<Record<string, string>>; driverOpts?: Readonly<Record<string, string>> | undefined }> = []
   readonly networks: Array<{ name: string; labels: Readonly<Record<string, string>> }> = []
   readonly containers: Array<{ name: string; body: unknown }> = []
   readonly archives: Array<{ containerId: string; destination: string; archive: Buffer }> = []
@@ -183,7 +244,7 @@ class RecordingDockerEngine {
 
   async ping(): Promise<void> {}
   async inspectImage(digest: string): Promise<{ readonly Id: string }> { this.imageInspections.push(digest); return { Id: digest } }
-  async createVolume(name: string, labels: Readonly<Record<string, string>>): Promise<void> { this.volumes.push({ name, labels }) }
+  async createVolume(name: string, labels: Readonly<Record<string, string>>, _signal?: AbortSignal, driverOpts?: Readonly<Record<string, string>>): Promise<void> { this.volumes.push({ name, labels, driverOpts }) }
   async createNetwork(name: string, labels: Readonly<Record<string, string>>): Promise<string> { this.networks.push({ name, labels }); return 'c'.repeat(64) }
   async createContainer(name: string, body: unknown): Promise<string> {
     this.containers.push({ name, body })

@@ -770,6 +770,90 @@ describe('StudioPreviewService maintenance and diagnostics', () => {
   })
 })
 
+describe('ACHADOS C e D: uma conta não derruba a prévia das outras', () => {
+  it('ACHADO D: quarentena presa de OUTRO inquilino não reprova o start de quem não tem nada a ver', async () => {
+    // Antes, `#assertQuarantineCapacity` varria TODA prévia em STOPPING, sem
+    // filtrar organização nem inquilino, e qualquer falha de renovação
+    // reprovava o chamador. Uma quarentena presa de um inquilino derrubava a
+    // prévia de todos os outros — e sem ganho de segurança nenhum: quem impede
+    // alocar além do que existe é o próprio governador, que já conta a reserva
+    // presa.
+    const base = new MemoryCapacityGovernor({ limits: limitsForPreview(10, 10, 10) })
+    const stuck = new Set<string>()
+    // `LeaseReference` não carrega o dono, então o mapa guarda quem é de quem
+    // no momento da aquisição — é isso que deixa travar UMA reserva e observar
+    // quem é reprovado por ela.
+    const ownerByLease = new Map<string, string>()
+    const capacity: CapacityGovernor = {
+      acquireBundle: async request => {
+        if (stuck.has(request.ownerId)) throw new Error('capacity backend unavailable')
+        const lease = await base.acquireBundle(request)
+        ownerByLease.set(lease.leaseId, request.ownerId)
+        return lease
+      },
+      heartbeat: async (reference, ttlMs) => {
+        if (stuck.has(ownerByLease.get(reference.leaseId) ?? '')) throw new Error('capacity backend unavailable')
+        const renewed = await base.heartbeat(reference, ttlMs)
+        ownerByLease.set(renewed.leaseId, ownerByLease.get(reference.leaseId) ?? '')
+        return renewed
+      },
+      release: reference => base.release(reference),
+      reconcile: () => base.reconcile(),
+      snapshot: () => base.snapshot(),
+    }
+    const repository = new MemoryRepository()
+    const h = createHarness({ capacity, repository })
+    const alheio: PreviewActor = { ...owner, userId: 'user-9', orgId: 'org-9', tenantId: 'tenant-9', sessionId: 'session-9' }
+
+    const outro = await h.service.start(alheio, 'project-1', 'requested-run')
+    const presa = repository.previewMap.get(outro.preview.preview_id)!
+    await repository.putPreview({ ...presa, state: 'STOPPING', stopped_at: null, health: 'DOWN' })
+    stuck.add(`preview:${presa.preview_id}`)
+
+    // Quem não é dono da quarentena presa continua conseguindo a prévia.
+    await expect(ready(h)).resolves.toMatchObject({ preview: { state: 'READY' } })
+
+    // O dono dela, não: para ele a falha é sua, e continua fechando a porta.
+    await expect(h.service.start(alheio, 'project-2', 'requested-run'))
+      .rejects.toMatchObject({ code: 'UNAVAILABLE' })
+  })
+
+  it('ACHADO C: a verificação do artefato tem teto de paralelismo, e recusa em vez de enfileirar sem fim', async () => {
+    // A verificação lê e resume a árvore inteira — até 160 MiB — e acontece
+    // ANTES de qualquer reserva de capacidade. O mutex do start é POR PROJETO,
+    // então projetos diferentes não se seguram.
+    let emVoo = 0
+    let pico = 0
+    const liberacoes: (() => void)[] = []
+    const source: Partial<PreviewSourcePort> = {
+      verifiedArtifact: vi.fn(async (_actor, projectId) => {
+        emVoo += 1
+        pico = Math.max(pico, emVoo)
+        await new Promise<void>(resolve => liberacoes.push(resolve))
+        emVoo -= 1
+        return {
+          projectId, runId: 'run-from-source', artifactPath: '/verified/artifact-only',
+          artifactSha256: sha('artifact'), ownerEmail: 'owner@example.test',
+        }
+      }),
+    }
+    const h = createHarness({ source, capacity: new MemoryCapacityGovernor({ limits: limitsForPreview(50, 50, 50) }) })
+
+    // Dez projetos distintos: o mutex por projeto não segura nenhum deles.
+    const pedidos = Array.from({ length: 10 }, (_value, index) => h.service.start(owner, `project-${index}`, 'requested-run'))
+    await vi.waitFor(() => expect(liberacoes.length).toBeGreaterThan(0))
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(pico).toBeLessThanOrEqual(4)
+
+    for (let round = 0; round < 12; round += 1) {
+      await new Promise(resolve => setTimeout(resolve, 0))
+      for (const liberar of liberacoes.splice(0)) liberar()
+    }
+    await Promise.all(pedidos)
+    expect(pico).toBeLessThanOrEqual(4)
+  })
+})
+
 function limitsForPreview(global: number, perTenant: number, perProject: number): CapacityLimits {
   return {
     ...DEFAULT_CAPACITY_LIMITS,
