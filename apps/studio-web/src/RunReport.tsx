@@ -1,6 +1,7 @@
 import { PendingButton } from './PendingButton'
 import { CircleAlert, CircleCheck, CircleDashed, LoaderCircle } from 'lucide-react'
 import t from './i18n/pt-BR.json'
+import { undoAvailable, type ProjectUiState } from './presentation'
 
 export type RunStageState = 'passed' | 'failed' | 'running' | 'not-run'
 
@@ -209,8 +210,29 @@ function integrityWord(integrity: CheckpointValue['integrity']): string {
  * @param props - a lista do servidor, o que está sendo confirmado e as ações.
  * @returns a seção da tela.
  */
+/**
+ * Por que voltar não está disponível agora.
+ *
+ * Duas razões diferentes, e elas pedem gestos diferentes: durante a criação a
+ * pessoa precisa PARAR antes; antes de qualquer tentativa não há o que fazer
+ * além de criar. Uma frase só para os dois casos mandaria metade das pessoas
+ * procurar um botão que não existe.
+ * @param state - o estado atual do projeto.
+ * @returns a frase em pt-BR.
+ */
+function unavailableSentence(state: ProjectUiState | null): string {
+  if (state === 'GENERATING' || state === 'BUILD_OK' || state === 'TESTS_OK') return t.checkpoint.undoUnavailableWhileRunning
+  return t.checkpoint.undoUnavailableBeforeAttempt
+}
+
 export function Checkpoints(props: {
   readonly list: CheckpointListValue
+  /**
+   * O estado do projeto decide se voltar é uma operação POSSÍVEL — ver
+   * `undoAvailable`. Sem isto, o botão aparecia para toda tentativa verde,
+   * inclusive durante a criação, e a recusa só chegava depois de confirmar.
+   */
+  readonly projectState: ProjectUiState | null
   readonly confirmingRunId: string | null
   readonly askConfirm: (runId: string) => void
   readonly cancelConfirm: () => void
@@ -218,6 +240,7 @@ export function Checkpoints(props: {
   readonly restart?: () => void
 }) {
   const { list } = props
+  const canUndo = undoAvailable(props.projectState)
   return <section className="run-checkpoints" aria-labelledby="run-checkpoints-title">
     <h2 id="run-checkpoints-title">{t.checkpoint.title}</h2>
     <p className="context-note">{t.checkpoint.help}</p>
@@ -237,10 +260,11 @@ export function Checkpoints(props: {
         </p>
         {checkpoint.green ? null : <p className="context-note">{noCheckpointSentence(checkpoint.blocker)}</p>}
         <p className="context-note">{t.checkpoint.kept}</p>
-        {checkpoint.green && props.confirmingRunId !== checkpoint.run_id
+        {checkpoint.green && !canUndo ? <p className="context-note">{unavailableSentence(props.projectState)}</p> : null}
+        {canUndo && checkpoint.green && props.confirmingRunId !== checkpoint.run_id
           ? <button type="button" className="secondary compact" onClick={() => props.askConfirm(checkpoint.run_id)}>{t.checkpoint.undo}</button>
           : null}
-        {checkpoint.green && props.confirmingRunId === checkpoint.run_id ? <section className="checkpoint-confirm">
+        {canUndo && checkpoint.green && props.confirmingRunId === checkpoint.run_id ? <section className="checkpoint-confirm">
           <h4>{t.checkpoint.confirmTitle}</h4>
           <p>{t.checkpoint.confirmBody}</p>
           <PendingButton label={t.checkpoint.confirm} busyLabel={t.checkpoint.confirmBusy} action={async () => { await props.undo(checkpoint.run_id) }} />

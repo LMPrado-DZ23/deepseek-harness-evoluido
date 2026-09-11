@@ -61,7 +61,9 @@
     "restart": "Tentar de novo",
     "criteriaBreakdown": "{total} critérios ({conferidos} conferidos, {falharam} falharam, {naoAutomatizados} não conferidos automaticamente)",
     "criteriaAllPassed": "{total} critérios, todos conferidos",
-    "confirmBusy": "Voltando…"
+    "confirmBusy": "Voltando…",
+    "undoUnavailableWhileRunning": "Enquanto a criação está acontecendo não dá para voltar: o Studio ainda está escrevendo o resultado desta tentativa. Pare a criação primeiro, e o botão de voltar aparece.",
+    "undoUnavailableBeforeAttempt": "Voltar passa a ser possível depois que uma tentativa de criação termina."
   },
   "health": {
     "ok": "Tudo certo",

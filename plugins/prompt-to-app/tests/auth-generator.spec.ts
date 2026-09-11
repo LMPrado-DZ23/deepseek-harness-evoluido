@@ -39,3 +39,35 @@ describe('generated passwordless access layer',()=>{
   })
   it('writes fixed paths once',async()=>{const root=await mkdtemp(join(tmpdir(),'dz23-auth-layer-'));roots.push(root);const layer=generateAuthLayer(spec,'crud-panel');await writeAuthLayer(root,layer);await expect(readFile(resolve(root,'src/auth/service.ts'),'utf8')).resolves.toContain('GeneratedAuthService');await expect(writeAuthLayer(root,layer)).rejects.toMatchObject({code:'EEXIST'})})
 })
+
+describe('o aplicativo gerado nao apaga o historico de envios quando o arquivo esta corrompido',()=>{
+  const emailSource=()=>{
+    const layer=generateAuthLayer(spec,'crud-panel')
+    const file=layer.files.find(item=>item.path==='src/auth/email.ts')
+    expect(file,'a camada gerada deixou de trazer src/auth/email.ts').toBeDefined()
+    return file!.content
+  }
+
+  it('distingue arquivo ausente de arquivo quebrado',()=>{
+    const source=emailSource()
+    // Ausente e o caso normal da primeira escrita: lista vazia.
+    expect(source).toContain("=== 'ENOENT'")
+    // Qualquer outra falha SOBE, em vez de virar lista vazia e mandar a linha
+    // seguinte sobrescrever o arquivo.
+    expect(source).toContain('throw error')
+    expect(source).toContain('STUDIO_CAPTURE_CORRUPTED')
+  })
+
+  it('nao restou nenhum bloco de captura vazio no codigo gerado',()=>{
+    // Era o unico `catch` sem tratamento do repositorio, e ele viajava para
+    // dentro de TODO aplicativo gerado com formulario.
+    expect(emailSource()).not.toContain('catch {}')
+  })
+
+  it('os dois remetentes usam a mesma leitura conferida',()=>{
+    const source=emailSource()
+    // Captura do Studio e captura da previa: duas classes, um so caminho de
+    // leitura. Duas copias divergiriam no primeiro conserto.
+    expect(source.split('await readCapture(this.path)')).toHaveLength(3)
+  })
+})

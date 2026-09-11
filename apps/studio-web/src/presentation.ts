@@ -4,6 +4,43 @@ export type ProjectUiState =
 
 export type PermanentTruthKind = 'creation' | 'unverified' | 'verified' | null
 
+/**
+ * Em quais estados voltar a um ponto seguro é uma operação POSSÍVEL.
+ *
+ * A tabela espelha `UNDO_TRANSITIONS` de `plugins/prompt-to-app/src/state.ts`,
+ * que é a autoridade — o servidor recusa com `UNDO_NOT_AVAILABLE` de qualquer
+ * jeito. O motivo de existir uma cópia na tela é outro: sem ela, o botão
+ * "Voltar para este ponto" aparecia para uma tentativa verde mesmo enquanto a
+ * criação estava RODANDO, e a pessoa só descobria pelo erro depois de
+ * confirmar. Um controle que parece funcionar e não funciona é pior que um
+ * controle ausente, porque gasta a confiança de quem clicou.
+ *
+ * É `Record` EXAUSTIVO de propósito: estado novo não compila sem uma resposta
+ * aqui, e a resposta é justamente o que decide se o botão aparece.
+ */
+export const UNDO_AVAILABLE_BY_STATE: Readonly<Record<ProjectUiState, boolean>> = {
+  // Antes de existir uma tentativa não há para onde voltar.
+  DRAFT: false, SPEC_READY: false, PLAN_PROPOSED: false, PLAN_APPROVED: false,
+  // Durante a criação o pipeline ainda escreve no estado; voltar agora
+  // disputaria o registro com quem está escrevendo nele.
+  GENERATING: false, BUILD_OK: false, TESTS_OK: false,
+  // Depois de parar — por falha, cancelamento ou interrupção — voltar é
+  // exatamente a saída honesta.
+  BUILD_FAILED: true, TESTS_FAILED: true, CANCELLED: true, INTERRUPTED: true,
+  // Trocar de um ponto provado para outro continua sendo navegação entre
+  // pontos provados.
+  VERIFIED_PROTOTYPE: true,
+}
+
+/**
+ * Voltar a um ponto seguro é possível a partir deste estado?
+ * @param state - o estado atual do projeto, ou `null` antes de haver projeto.
+ * @returns verdadeiro quando a operação existe para este estado.
+ */
+export function undoAvailable(state: ProjectUiState | null): boolean {
+  return state === null ? false : UNDO_AVAILABLE_BY_STATE[state]
+}
+
 export function currentStepIndex(state: ProjectUiState | null): number {
   if (state === null) return 0
   if (state === 'DRAFT') return 1

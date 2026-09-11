@@ -464,7 +464,7 @@ export function App() {
         {projectState === 'GENERATING' || projectState === 'BUILD_OK' || projectState === 'TESTS_OK' ? <Action title={t.creation.title} detail={t.creation.working} button={t.creation.cancel} busyButton={t.creation.cancelBusy} action={cancelGeneration} progress={running} steps={runSteps} /> : null}
         {result !== null ? <Verification result={result} previewActive={preview?.state === 'READY'} startPreview={startPreview} retry={generate} /> : null}
         {runReport === null ? null : <RunReport report={runReport} />}
-        {checkpoints === null ? null : <Checkpoints list={checkpoints} confirmingRunId={confirmingUndo}
+        {checkpoints === null ? null : <Checkpoints list={checkpoints} projectState={projectState} confirmingRunId={confirmingUndo}
           askConfirm={setConfirmingUndo} cancelConfirm={() => setConfirmingUndo(null)}
           undo={runId => void undoToCheckpoint(runId)}
           {...(result === null || result.state === 'VERIFIED_PROTOTYPE' ? {} : { restart: () => void generate() })} />}

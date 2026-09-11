@@ -2,7 +2,7 @@ import type { Context } from '@deepseek-ai/cordis';
 import type { Agent } from '@deepseek-ai/dsh-agent';
 import type { PolicyDelegationGrant } from '@dz23-studio/policy';
 import { type AgentLeaseRecord, type AgentRunRecord } from './model.js';
-import { StudioAgentService, type AgentRestartReconciliation, type DelegationRequest } from './service.js';
+import { StudioAgentService, type AgentRestartReconciliation } from './service.js';
 import '@deepseek-ai/dsh-token-meter';
 export * from './model.js';
 export * from './service.js';
@@ -36,10 +36,8 @@ declare module '@deepseek-ai/cordis' {
 }
 /** Mount the Studio-only delegation gate. Generic tool-subagent is deliberately not exposed. */
 export declare function apply(ctx: Context, config?: Config): Promise<void>;
-export declare function hasApprovedAncestor(ctx: Pick<Context, 'agents'>, agent: Agent, approved: ReadonlySet<string>): boolean;
 export declare function approvedGrantFor(ctx: Pick<Context, 'agents'>, agent: Agent, approved: ReadonlyMap<string, {
     readonly tier: 'T2' | 'T3';
     readonly worktreePath: string;
 }>): PolicyDelegationGrant | undefined;
-export declare function startDelegation(ctx: Context, request: DelegationRequest): import("./service.js").DelegationAccepted;
 //# sourceMappingURL=index.d.ts.map

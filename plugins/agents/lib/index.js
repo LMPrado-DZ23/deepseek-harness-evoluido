@@ -215,19 +215,14 @@ export async function apply(ctx, config = {}) {
         providerStates: () => ({ codex: providerState(ctx, 'codex'), 'claude-code': providerState(ctx, 'claude-code') }),
     });
 }
-export function hasApprovedAncestor(ctx, agent, approved) {
-    const seen = new Set();
-    let current = agent;
-    while (current !== undefined && !seen.has(String(current.session.id))) {
-        const id = String(current.session.id);
-        if (approved.has(id))
-            return true;
-        seen.add(id);
-        const parent = current.session.header.parentSession;
-        current = parent === undefined ? undefined : ctx.agents.get(parent);
-    }
-    return false;
-}
+// `hasApprovedAncestor` foi REMOVIDA em 11/09/2026, e a remocao e o ponto:
+// ela decidia autorizacao SO pela linhagem de sessoes, sem conferir o
+// diretorio de trabalho. `approvedGrantFor`, logo abaixo, faz a mesma busca e
+// ainda exige que o agente e o portador da concessao estejam no MESMO
+// worktree. As duas ficavam lado a lado, exportadas, com nomes igualmente
+// plausiveis - e a mais curta era a insegura. Ninguem chamava a insegura; o
+// risco era o proximo leitor escolher pelo nome. Nao ha substituicao a fazer:
+// `approvedGrantFor` ja e a versao correta e ja e a unica usada.
 export function approvedGrantFor(ctx, agent, approved) {
     const seen = new Set();
     let current = agent;
@@ -248,6 +243,8 @@ export function approvedGrantFor(ctx, agent, approved) {
     }
     return undefined;
 }
-export function startDelegation(ctx, request) {
-    return ctx.studioAgents.service.start(request);
-}
+// `startDelegation` foi REMOVIDA em 11/09/2026: era um repasse de uma linha
+// para `ctx.studioAgents.service.start(request)`, exportado, sem nenhum
+// chamador e sem nenhum teste. Quem precisa iniciar uma delegacao chama o
+// servico, que e onde as guardas moram. Uma porta de entrada publica que
+// ninguem exercita e a que apodrece primeiro.

@@ -69,6 +69,23 @@ export function migrateAuth(database: DatabaseSync): void {
 }
 `
 
+/**
+ * O arquivo `src/auth/email.ts` do aplicativo gerado.
+ *
+ * `readCapture`, lá dentro, existe por um defeito que viajava para DENTRO de
+ * todo aplicativo gerado com formulário: dois `catch {}` tratavam qualquer
+ * falha de leitura como lista vazia, e a linha seguinte sobrescrevia o
+ * arquivo — um JSON corrompido virava histórico de envios apagado em silêncio.
+ * Arquivo ausente é o caso normal da primeira escrita e continua sendo lista
+ * vazia; qualquer outra coisa sobe, porque perder registro sem ninguém saber é
+ * pior que falhar o envio.
+ *
+ * A explicação mora AQUI e não lá dentro de propósito: `gate:i18n` recusa
+ * prosa em pt-BR dentro do código gerado, e está certo — comentário em
+ * português num arquivo que vai para a máquina de outra pessoa é ruído que
+ * ninguém pediu. O código gerado fala inglês; o porquê fica com quem mantém o
+ * gerador.
+ */
 const AUTH_EMAIL = `import { randomUUID } from 'node:crypto'
 import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
@@ -100,6 +117,20 @@ export function createEmailSender(env: Readonly<Record<string, string | undefine
   }
 }
 
+/** Reads the captured list. A missing file is empty; anything else throws. */
+async function readCapture(path: string): Promise<unknown[]> {
+  let raw: string
+  try {
+    raw = await readFile(path, 'utf8')
+  } catch (error) {
+    if (typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'ENOENT') return []
+    throw error
+  }
+  const parsed: unknown = JSON.parse(raw)
+  if (!Array.isArray(parsed)) throw new Error('STUDIO_CAPTURE_CORRUPTED')
+  return parsed
+}
+
 export class StudioCaptureEmailSender implements EmailSender {
   readonly path: string
   constructor(dataDirectory: string) { this.path = resolve(dataDirectory, 'studio-capture.json') }
@@ -107,8 +138,7 @@ export class StudioCaptureEmailSender implements EmailSender {
   async sendInvitation(message: { email: string; expiresAt: string }): Promise<void> { await this.append({ kind: 'invitation', ...message }) }
   private async append(message: object): Promise<void> {
     await mkdir(dirname(this.path), { recursive: true })
-    let current: unknown[] = []
-    try { current = JSON.parse(await readFile(this.path, 'utf8')) as unknown[] } catch {}
+    const current = await readCapture(this.path)
     await writeFile(this.path, JSON.stringify([...current.slice(-19), message], null, 2) + '\\n', { encoding: 'utf8', mode: 0o600 })
     await chmod(this.path, 0o600)
   }
@@ -122,8 +152,7 @@ export class StudioPreviewEmailSender implements EmailSender {
   private async append(message: object): Promise<void> {
     await serializePreviewCapture(this.path, async () => {
       await mkdir(dirname(this.path), { recursive: true })
-      let current: unknown[] = []
-      try { current = JSON.parse(await readFile(this.path, 'utf8')) as unknown[] } catch {}
+      const current = await readCapture(this.path)
       const temporary = \`\${this.path}.\${randomUUID()}.tmp\`
       try {
         await writeFile(temporary, JSON.stringify([...current.slice(-19), message], null, 2) + '\\n', { encoding: 'utf8', mode: 0o640 })

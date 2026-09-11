@@ -2,6 +2,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { Checkpoints, RunReport, isCheckpointList, isRunReport, type CheckpointListValue, type CheckpointValue, type RunReportValue } from './RunReport'
+import { UNDO_AVAILABLE_BY_STATE, type ProjectUiState } from './presentation'
 
 const report = (overrides: Partial<RunReportValue> = {}): RunReportValue => ({
   stages: [
@@ -102,9 +103,13 @@ const list = (overrides: Partial<CheckpointListValue> = {}): CheckpointListValue
   checkpoints: [checkpoint()], green_run_id: null, reason: 'ACCEPTANCE_ATTESTATION_UNAVAILABLE', current_run_id: null, ...overrides,
 })
 const noop = () => undefined
-const render = (value: CheckpointListValue, confirmingRunId: string | null = null) => renderToStaticMarkup(createElement(Checkpoints, {
-  list: value, confirmingRunId, askConfirm: noop, cancelConfirm: noop, undo: noop,
-}))
+// O estado padrao e TESTS_FAILED porque e o caso em que voltar EXISTE: os
+// testes antigos foram escritos para esse mundo, e mante-lo preserva o que
+// eles ja provavam.
+const render = (value: CheckpointListValue, confirmingRunId: string | null = null, projectState: ProjectUiState | null = 'TESTS_FAILED') =>
+  renderToStaticMarkup(createElement(Checkpoints, {
+    list: value, projectState, confirmingRunId, askConfirm: noop, cancelConfirm: noop, undo: noop,
+  }))
 
 describe('E-08: a pessoa vê para onde pode voltar, e por que às vezes não pode', () => {
   it('sem ponto seguro, diz isso e explica o motivo sem jargão — e não oferece voltar', () => {
@@ -145,7 +150,7 @@ describe('E-08: a pessoa vê para onde pode voltar, e por que às vezes não pod
 
   it('depois de uma falha, recomeçar é oferecido e explica o que acontece com o que já foi feito', () => {
     const html = renderToStaticMarkup(createElement(Checkpoints, {
-      list: list(), confirmingRunId: null, askConfirm: noop, cancelConfirm: noop, undo: noop, restart: noop,
+      list: list(), projectState: 'TESTS_FAILED' as ProjectUiState, confirmingRunId: null, askConfirm: noop, cancelConfirm: noop, undo: noop, restart: noop,
     }))
     expect(html).toContain('Tentar de novo')
     expect(html).toContain('continua guardada')
@@ -160,5 +165,56 @@ describe('E-08: a pessoa vê para onde pode voltar, e por que às vezes não pod
     expect(isCheckpointList({ ...list(), green_run_id: 7 })).toBe(false)
     expect(isCheckpointList({ ...list(), checkpoints: [{ ...checkpoint(), integrity: 'QUASE' }] })).toBe(false)
     expect(isCheckpointList({ ...list(), checkpoints: [{ ...checkpoint(), green: 'sim' }] })).toBe(false)
+  })
+})
+
+describe('E-08: o botão de voltar só aparece quando voltar é possível', () => {
+  const green = (): CheckpointListValue => list({
+    checkpoints: [checkpoint({ run_id: 'run-1', green: true, blocker: null })],
+    green_run_id: 'run-1', reason: null,
+  })
+
+  it('durante a criação, NÃO oferece voltar — e diz que é preciso parar antes', () => {
+    for (const state of ['GENERATING', 'BUILD_OK', 'TESTS_OK'] as const) {
+      const html = render(green(), null, state)
+      expect(html, `estado ${state} ofereceu voltar durante a criação`).not.toContain('Voltar para este ponto')
+      expect(html).toContain('Pare a criação primeiro')
+    }
+  })
+
+  it('antes de qualquer tentativa, NÃO oferece voltar — e diz quando passa a ser possível', () => {
+    for (const state of ['DRAFT', 'SPEC_READY', 'PLAN_PROPOSED', 'PLAN_APPROVED'] as const) {
+      const html = render(green(), null, state)
+      expect(html, `estado ${state} ofereceu voltar sem tentativa nenhuma`).not.toContain('Voltar para este ponto')
+      expect(html).toContain('depois que uma tentativa de criação termina')
+    }
+  })
+
+  it('depois de parar, oferece voltar', () => {
+    for (const state of ['BUILD_FAILED', 'TESTS_FAILED', 'CANCELLED', 'INTERRUPTED', 'VERIFIED_PROTOTYPE'] as const) {
+      expect(render(green(), null, state), `estado ${state} escondeu o botão de voltar`).toContain('Voltar para este ponto')
+    }
+  })
+
+  it('a confirmação também some quando o estado não permite: não basta esconder o primeiro botão', () => {
+    // Sem esta regra, quem já tinha aberto a confirmação e viu a criação
+    // recomeçar continuaria com "Sim, voltar para este ponto" na tela.
+    expect(render(green(), 'run-1', 'GENERATING')).not.toContain('Sim, voltar para este ponto')
+    expect(render(green(), 'run-1', 'TESTS_FAILED')).toContain('Sim, voltar para este ponto')
+  })
+
+  it('a tabela de estados é a mesma do servidor, e é exaustiva', () => {
+    // Espelha UNDO_TRANSITIONS de plugins/prompt-to-app/src/state.ts. Se as
+    // duas divergirem, a tela volta a oferecer o que o servidor recusa.
+    expect(UNDO_AVAILABLE_BY_STATE).toEqual({
+      DRAFT: false, SPEC_READY: false, PLAN_PROPOSED: false, PLAN_APPROVED: false,
+      GENERATING: false, BUILD_OK: false, TESTS_OK: false,
+      BUILD_FAILED: true, TESTS_FAILED: true, CANCELLED: true, INTERRUPTED: true,
+      VERIFIED_PROTOTYPE: true,
+    })
+  })
+
+  it('sem projeto ainda, não oferece voltar', () => {
+    expect(render(green(), null, null)).not.toContain('Voltar para este ponto')
   })
 })

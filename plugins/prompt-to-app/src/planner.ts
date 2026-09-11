@@ -13,13 +13,44 @@ export type PlanOutput = z.infer<typeof planOutputSchema>
 const sliceOutputSchema = z.object({ slice: planSliceSchema }).strict()
 
 export class FormCategoryCapabilityError extends Error {
-  constructor(readonly code: 'FORM_DATABASE_REQUIRED' | 'FORM_REFERENCE_REQUIRES_CRUD' | 'FORM_ENTRY_FILE_REQUIRED' | 'CATEGORY_NOT_IMPLEMENTED', message: string) {
+  // `CATEGORY_NOT_IMPLEMENTED` saiu deste union em 11/09/2026: ele estava
+  // declarado e NUNCA era lancado. Quem tratasse esse codigo na tela estaria
+  // tratando um caso impossivel, e a promessa de diagnostico que ele fazia era
+  // vazia. A guarda real contra categoria nao coberta agora e a tabela
+  // exaustiva abaixo, que falha em tempo de COMPILACAO em vez de prometer um
+  // erro de execucao que ninguem emite.
+  constructor(readonly code: 'FORM_DATABASE_REQUIRED' | 'FORM_REFERENCE_REQUIRES_CRUD' | 'FORM_ENTRY_FILE_REQUIRED', message: string) {
     super(message)
   }
 }
 
+/**
+ * Quais categorias exigem um modelo de dados para poder ser geradas.
+ *
+ * Era uma lista NEGADA (`category !== 'form-database' && category !== ...`) em
+ * dois lugares diferentes, e as duas listas precisavam concordar. O problema
+ * nao era o estilo: uma categoria NOVA caia no `return` silencioso e passava
+ * sem conferencia nenhuma — geraria um aplicativo com formulario e sem banco,
+ * e o defeito so apareceria para quem usasse o aplicativo.
+ *
+ * `Record` EXAUSTIVO: categoria nova nao compila sem uma resposta aqui.
+ */
+export const CATEGORY_REQUIRES_DATA_MODEL: Readonly<Record<StudioProjectCategory, boolean>> = {
+  // Paginas de apresentacao e catalogos mostram conteudo; nao guardam registro
+  // de ninguem.
+  'landing-page': false,
+  catalog: false,
+  // Estas cinco recebem, listam ou editam dados de pessoas. Sem modelo de
+  // dados, o formulario existiria e nao guardaria nada.
+  'form-database': true,
+  'crud-panel': true,
+  scheduling: true,
+  dashboard: true,
+  'saas-authenticated': true,
+}
+
 export function assertCategoryCanGenerate(category: StudioProjectCategory, spec: AppSpecV1): void {
-  if (category !== 'form-database' && category !== 'crud-panel' && category !== 'scheduling' && category !== 'dashboard' && category !== 'saas-authenticated') return
+  if (!CATEGORY_REQUIRES_DATA_MODEL[category]) return
   const entities = spec.entities.filter(entity => entity.kind === 'database')
   if (entities.length === 0) throw new FormCategoryCapabilityError('FORM_DATABASE_REQUIRED', t('errors.formDatabaseRequired'))
   assertValidDataModel(spec)
@@ -46,7 +77,7 @@ export class PlannerEngine {
     ].join('\n'))
     const decoded = typeof result.value === 'string' ? JSON.parse(result.value) : result.value
     const output = planOutputSchema.parse(decoded)
-    if ((category === 'form-database' || category === 'crud-panel' || category === 'scheduling' || category === 'dashboard' || category === 'saas-authenticated') && !output.slices.some(slice => slice.planned_files.includes('src/GeneratedApp.tsx'))) {
+    if (CATEGORY_REQUIRES_DATA_MODEL[category] && !output.slices.some(slice => slice.planned_files.includes('src/GeneratedApp.tsx'))) {
       throw new FormCategoryCapabilityError('FORM_ENTRY_FILE_REQUIRED', t('errors.formEntryFileRequired'))
     }
     return output
