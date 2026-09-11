@@ -280,3 +280,50 @@ describe('M-05: o perfil de rota é do projeto', () => {
       .toEqual(new Set(['privado-local', 'melhor-qualidade', 'equilibrado']))
   })
 })
+
+describe('T-07: o planejador monta o prompt com TETO e com registro', () => {
+  const spec = (problem: string): AppSpecV1 => ({
+    schema_version: 1, problem, audience: 'Equipe', journeys: ['Usar'],
+    pages: [{ name: 'Início', sections: ['Topo'] }], entities: [],
+    sensitive_data: { detected: [], confirmed_by_user: false },
+    accessibility: { wcag_level: 'AA', keyboard_required: true, reduced_motion: true },
+    language: 'pt-BR', acceptance_criteria: ['Funciona para a equipe'],
+  })
+  const responder = () => vi.fn().mockResolvedValue({
+    value: { slices: [{ slice_id: 'pagina', title: 'Página', description: 'A página', acceptance_criteria: ['Aparece'], planned_files: ['content/app.json'] }] },
+    route: 'ollama', model: 'qwen',
+  })
+
+  it('registra o que entrou no prompt, com procedência', async () => {
+    // A pergunta "o que exatamente o modelo viu?" passa a ter resposta sem
+    // precisar reproduzir a execução.
+    const planner = new PlannerEngine({ complete: responder() })
+    await planner.plan({ orgId: 'o', tenantId: 't' }, 'local-only', spec('Organizar contatos.'))
+    expect(planner.lastLedger).toBeDefined()
+    expect(planner.lastLedger!.included.map(item => item.id)).toContain('plan.spec')
+    expect(planner.lastLedger!.included.find(item => item.id === 'plan.spec')?.source).toBe('app-spec')
+    expect(planner.lastLedger!.included.some(item => item.kind === 'schema')).toBe(true)
+    expect(planner.lastLedger!.dropped).toEqual([])
+  })
+
+  it('uma especificação ENORME falha dizendo que é de tamanho, e não de formato', async () => {
+    // Antes disto o prompt crescia sem teto: `JSON.stringify(spec)` entrava
+    // inteiro. Com contexto grande demais, o modelo devolve algo que o `parse`
+    // recusa, e a pessoa lia "formato inválido" sobre um problema de TAMANHO.
+    const complete = responder()
+    const planner = new PlannerEngine({ complete }, 500)
+    await expect(planner.plan({ orgId: 'o', tenantId: 't' }, 'local-only', spec('x'.repeat(5_000))))
+      .rejects.toMatchObject({ code: 'CONTEXT_BUDGET_EXCEEDED' })
+    // E o modelo NÃO foi chamado: recusar antes de gastar é parte do conserto.
+    expect(complete).not.toHaveBeenCalled()
+  })
+
+  it('o prompt continua tendo instrução e schema — o teto não come o essencial', async () => {
+    const complete = responder()
+    const planner = new PlannerEngine({ complete })
+    await planner.plan({ orgId: 'o', tenantId: 't' }, 'local-only', spec('Organizar contatos.'))
+    const prompt = complete.mock.calls[0]![3] as string
+    expect(prompt).toContain('schema_version')
+    expect(prompt.length).toBeLessThanOrEqual(planner.lastLedger!.budget)
+  })
+})

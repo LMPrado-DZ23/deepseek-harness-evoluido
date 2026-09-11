@@ -29,9 +29,10 @@ separa este trabalho de acrescentar features.
 | T-04 | P0 | Gerador de e-mail: distinguir arquivo ausente de corrompido | — | DONE |
 | T-05 | P0 | Estado persistente da missão (este arquivo, PROJECT_STATUS, blockers, journal) | — | DONE |
 | T-06 | P1 | `trace_id` correlacionando missão → tarefa → execução → ferramenta | T-05 | READY |
-| T-07 | P1 | Context Engine: orçamento, ranking, deduplicação, procedência | T-06 | PENDING |
-| T-08 | P1 | Memory Engine: as sete memórias, com procedência, confiança e supersessão | T-06 | PENDING |
-| T-09 | P2 | Spec Engine: constitution → specify → clarify → plan → tasks → implement → validate → converge | T-07, T-08 | PENDING |
+| T-07 | P1 | Context Engine: teto, prioridade, deduplicação, procedência, registro | — | DONE (planejador; falta intake e gerador: T-25) |
+| T-08 | P1 | Memory Engine: as sete memórias, com procedência, confiança e supersessão | — | READY |
+| T-25 | P2 | Levar intake e gerador para o mesmo motor de contexto | T-07 | READY |
+| T-09 | P2 | Spec Engine: constitution → specify → clarify → plan → tasks → implement → validate → converge | T-08 | PENDING |
 | T-10 | P2 | Constitution Engine aplicado pelo planner e pelo builder | T-09 | PENDING |
 | T-11 | P2 | Skill Registry com carregamento progressivo | T-07 | PENDING |
 | T-12 | P2 | Revisão independente + adversarial + convergência | T-09 | PENDING |

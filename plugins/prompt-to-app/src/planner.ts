@@ -1,3 +1,4 @@
+import { assembleContext, type ContextLedger, type ContextSection } from './context.js'
 import { z } from 'zod'
 import type { RoutePrivacy } from '@dz23-studio/route-health'
 import type { AppSpecV1 } from './appspec.js'
@@ -61,25 +62,73 @@ export function assertCategoryCanGenerate(category: StudioProjectCategory, spec:
   assertValidDataModel(spec)
 }
 
+/**
+ * Uma instrução: o que o modelo tem de fazer. Nunca é cortada.
+ * @param id - identificador estável da parte.
+ * @param text - o texto já traduzido.
+ * @returns a parte pronta para a montagem.
+ */
+function instruction(id: string, text: string): ContextSection {
+  // A procedencia e IDENTIFICADOR e nao frase: ela e comparada, agrupada e
+  // guardada em registro, nao lida em tela. Prosa aqui seria texto de interface
+  // escondido no meio de metadado - e `gate:i18n` reprova, com razao.
+  return { id, kind: 'instruction', priority: 0, text, source: 'studio-instruction' }
+}
+
+/**
+ * A instrução específica da categoria, quando existir.
+ *
+ * Tabela EXAUSTIVA em vez de cinco ternários: categoria nova não compila sem
+ * uma resposta aqui, e `null` é uma resposta legítima — landing page e
+ * catálogo não têm instrução própria.
+ * @param category - a categoria do projeto.
+ * @returns zero ou uma parte.
+ */
+function categoryInstruction(category: StudioProjectCategory): readonly ContextSection[] {
+  const key: Readonly<Record<StudioProjectCategory, string | null>> = {
+    'landing-page': null,
+    catalog: null,
+    'form-database': 'prompts.planFormDatabase',
+    'crud-panel': 'prompts.planCrudPanel',
+    scheduling: 'prompts.planScheduling',
+    dashboard: 'prompts.planDashboard',
+    'saas-authenticated': 'prompts.planSaas',
+  }
+  const chosen = key[category]
+  return chosen === null ? [] : [instruction(`plan.category.${category}`, t(chosen))]
+}
+
 export class PlannerEngine {
-  constructor(private readonly model: PromptModelPort) {}
+  /**
+   * O registro do ÚLTIMO contexto montado.
+   *
+   * Existe para que a pergunta "o que exatamente o modelo viu?" tenha resposta
+   * sem precisar reproduzir a execução. Fica no motor e não no retorno porque
+   * o retorno é o plano, e misturar o plano com a contabilidade de como ele
+   * foi pedido faria o schema do plano carregar coisa que não é plano.
+   */
+  lastLedger: ContextLedger | undefined
+
+  constructor(private readonly model: PromptModelPort, private readonly budgetChars?: number) {}
 
   async plan(scope: { orgId: string; tenantId: string }, privacy: RoutePrivacy, spec: AppSpecV1, category: StudioProjectCategory = 'landing-page', changeRequest?: string): Promise<PlanOutput> {
     assertCategoryCanGenerate(category, spec)
-    const result = await this.model.complete(scope, 'plan', privacy, [
-      t('prompts.planOnly'),
-      t('prompts.planCriteria'),
-      t('prompts.planFiles'),
-      t('prompts.planFirst'),
-      ...(category === 'form-database' ? [t('prompts.planFormDatabase')] : []),
-      ...(category === 'crud-panel' ? [t('prompts.planCrudPanel')] : []),
-      ...(category === 'scheduling' ? [t('prompts.planScheduling')] : []),
-      ...(category === 'dashboard' ? [t('prompts.planDashboard')] : []),
-      ...(category === 'saas-authenticated' ? [t('prompts.planSaas')] : []),
-      t('prompts.generateSpec', { spec: JSON.stringify(spec) }),
-      ...(changeRequest === undefined ? [] : [t('prompts.changeRequest', { reason: changeRequest })]),
-      t('prompts.schema', { schema: JSON.stringify(planOutputSchema.toJSONSchema()) }),
-    ].join('\n'))
+    const assembled = assembleContext([
+      instruction('plan.only', t('prompts.planOnly')),
+      instruction('plan.criteria', t('prompts.planCriteria')),
+      instruction('plan.files', t('prompts.planFiles')),
+      instruction('plan.first', t('prompts.planFirst')),
+      ...categoryInstruction(category),
+      // A especificação é EVIDÊNCIA: é sobre ela que o modelo raciocina, e é
+      // a única parte que cresce com o tamanho do que a pessoa descreveu.
+      { id: 'plan.spec', kind: 'evidence' as const, priority: 100, source: 'app-spec', text: t('prompts.generateSpec', { spec: JSON.stringify(spec) }) },
+      ...(changeRequest === undefined
+        ? []
+        : [{ id: 'plan.change', kind: 'evidence' as const, priority: 90, source: 'change-request', text: t('prompts.changeRequest', { reason: changeRequest }) }]),
+      { id: 'plan.schema', kind: 'schema' as const, priority: 0, source: 'planOutputSchema', text: t('prompts.schema', { schema: JSON.stringify(planOutputSchema.toJSONSchema()) }) },
+    ], { budgetChars: this.budgetChars })
+    this.lastLedger = assembled.ledger
+    const result = await this.model.complete(scope, 'plan', privacy, assembled.prompt)
     const decoded = typeof result.value === 'string' ? JSON.parse(result.value) : result.value
     const output = planOutputSchema.parse(decoded)
     if (CATEGORY_REQUIRES_DATA_MODEL[category] !== false && !output.slices.some(slice => slice.planned_files.includes('src/GeneratedApp.tsx'))) {
