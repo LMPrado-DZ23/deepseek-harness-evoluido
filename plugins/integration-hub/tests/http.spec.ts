@@ -131,7 +131,7 @@ async function fixture(role: 'owner' | 'admin' | 'builder' | 'viewer' = 'owner',
     ...(options.packagingTimeoutMs === undefined ? {} : { packagingTimeoutMs: options.packagingTimeoutMs }),
     now: () => new Date('2026-09-04T00:00:00.000Z'), createId: () => `id-${++id}`,
   })
-  const identity = { authenticate: vi.fn((token: string) => { if (options.identityError !== undefined) return Promise.reject(options.identityError); return token === 'session' ? Promise.resolve(session) : Promise.reject(new IdentityError('invalid', 'Sessão inválida.')) }), validateCsrf: vi.fn((_s: unknown, cookie?: string, header?: string) => { if (cookie !== 'csrf' || header !== 'csrf') throw new IdentityError('invalid', 'CSRF ausente.') }),
+  const identity = { authenticate: vi.fn((token: string) => { if (options.identityError !== undefined) return Promise.reject(options.identityError); return token === 'session' ? Promise.resolve(session) : Promise.reject(new IdentityError('invalid', 'Sessão inválida.')) }), validateCsrfToken: vi.fn((_s: unknown, header?: string) => { if (header !== 'csrf') throw new IdentityError('invalid', 'CSRF ausente.') }), cookiesAreSecure: false,
     assertRequestTrust: vi.fn(),
   }
   const tenancy = { authorizationFor: vi.fn((userId: string, orgId: string, tenantId: string) => { if (options.tenancyError !== undefined) throw options.tenancyError; return options.noMembership === true ? undefined : { userId, orgId, tenantId, role } }) }
@@ -198,6 +198,21 @@ describe('integration hub HTTP boundary', () => {
     })
     expect(spoofed).toBe(401)
     expect((await request('/smtp', { method: 'POST', body: '{"secret_ref":"DZ23_APP_SMTP"}', headers: { 'x-dz23-csrf': 'wrong' } })).status).toBe(401)
+    // ACHADO: a conferencia era de DUPLO ENVIO e exigia o cookie
+    // `dz23_studio_csrf`, que o Studio parou de emitir — `serializeSessionCookies`
+    // o EXPIRA. Em producao o cookie nunca chegava e TODA mutacao do hub
+    // respondia 401; o teste passava porque mandava cookie E cabecalho.
+    // Sem o cookie, e com o cabecalho certo, a mutacao TEM de funcionar.
+    expect((await request('/smtp', {
+      method: 'POST', body: '{"secret_ref":"DZ23_APP_SMTP"}',
+      headers: { cookie: `${SESSION_COOKIE}=session`, 'x-dz23-csrf': 'csrf' },
+    })).status).not.toBe(401)
+    // E sem o cabecalho continua recusando: o conserto nao pode ter sido
+    // simplesmente desligar a conferencia.
+    expect((await request('/smtp', {
+      method: 'POST', body: '{"secret_ref":"DZ23_APP_SMTP"}',
+      headers: { cookie: `${SESSION_COOKIE}=session`, 'x-dz23-csrf': '' },
+    })).status).toBe(401)
     expect((await request('/nope')).status).toBe(404)
     expect((await request('/smtp', { method: 'POST', body: 'not json' })).status).toBe(400)
     expect((await request('/smtp', { method: 'POST', body: '{}', headers: { 'content-type': 'text/plain' } })).status).toBe(400)

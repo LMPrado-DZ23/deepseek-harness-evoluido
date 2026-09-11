@@ -244,17 +244,30 @@ export class StudioIdentityService {
             return updated;
         });
     }
-    validateCsrf(session, cookieToken, headerToken) {
-        if (cookieToken === undefined || headerToken === undefined
-            || cookieToken !== headerToken || !secretMatches(headerToken, session.csrf_hash)) {
-            throw new IdentityError('csrf', t('auth.invalidConfirmation'));
-        }
-    }
     validateCsrfToken(session, headerToken) {
         if (headerToken === undefined || !secretMatches(headerToken, session.csrf_hash)) {
             throw new IdentityError('csrf', t('auth.invalidConfirmation'));
         }
     }
+    /**
+     * Se os cookies desta instalação levam `Secure` — e portanto qual NOME o
+     * cookie de sessão tem.
+     *
+     * Começa em `true` de propósito. O nome forte (`__Host-`) é o que fecha o
+     * ataque de cookie sombra, e um serviço montado sem declarar a configuração
+     * precisa cair no lado seguro: errar para o nome forte custa uma entrada
+     * recusada em desenvolvimento; errar para o fraco custa uma conta.
+     */
+    #secureCookies = true;
+    /**
+     * Declara se os cookies levam `Secure`. O plugin chama isto ao montar.
+     * @param secure - `false` somente no modo pessoal, em `http://127.0.0.1`.
+     */
+    setCookieSecurity(secure) {
+        this.#secureCookies = secure;
+    }
+    /** Se os cookies desta instalação levam `Secure`. */
+    get cookiesAreSecure() { return this.#secureCookies; }
     /**
      * Declara os endereços confiáveis. O plugin chama isto ao montar a borda.
      * @param trust - hosts e origens aceitos.

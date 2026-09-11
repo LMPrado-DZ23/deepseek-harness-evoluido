@@ -2,7 +2,8 @@ import type { CredentialProvider } from '@deepseek-ai/dsh-credentials'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import { describe, expect, it, vi } from 'vitest'
 import type { EmailSender } from '../src/email.ts'
-import { apply, SESSION_COOKIE, type StudioIdentityRuntime } from '../src/index.ts'
+import { apply, SECURE_SESSION_COOKIE,
+  SESSION_COOKIE, type StudioIdentityRuntime } from '../src/index.ts'
 import type { PasskeyProvider, RegistrationOptions, AuthenticationOptions } from '../src/passkey.ts'
 import type { StudioPolicyRuntime } from '../../policy/src/index.ts'
 
@@ -193,7 +194,10 @@ describe('identity Cordis plugin composition', () => {
       url: '/api/studio/identity/harness/session',
       headers: {
         host: 'studio.example',
-        cookie: `${SESSION_COOKIE}=${ownerIssued.token}`,
+        // Esta instalação serve em `0.0.0.0` com TLS na borda, então o cookie
+        // leva `__Host-`. Mandar o nome sem prefixo aqui é 401 de propósito:
+        // aceitá-lo reabriria o cookie sombra que o prefixo existe para fechar.
+        cookie: `${SECURE_SESSION_COOKIE}=${ownerIssued.token}`,
         'x-dz23-edge': 'edge-secret',
         'x-forwarded-proto': 'https',
       },

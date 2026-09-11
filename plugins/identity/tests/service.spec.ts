@@ -245,15 +245,14 @@ describe('StudioIdentityService', () => {
     await expect(h.service.authenticate('')).rejects.toMatchObject({ code: 'invalid' })
     await expect(h.service.authenticate(issued.token, false)).resolves.toEqual(issued.session)
     await expect(h.service.authenticate(issued.token)).resolves.toBe(issued.session)
-    expect(() => h.service.validateCsrf(issued.session, issued.csrfToken, issued.csrfToken)).not.toThrow()
     expect(() => h.service.validateCsrfToken(issued.session, issued.csrfToken)).not.toThrow()
     expect(() => h.service.validateCsrfToken(issued.session, undefined)).toThrow(IdentityError)
     h.repository.sessionMap.set(issued.session.session_id, { ...issued.session, csrf_hash: 'legacy-hash' })
     await expect(h.service.csrfTokenFor(issued.session)).resolves.toBe(issued.csrfToken)
     await expect(h.service.csrfTokenFor(issued.session)).resolves.toBe(issued.csrfToken)
     await expect(h.service.csrfTokenFor({ ...issued.session, session_id: 'missing' })).rejects.toMatchObject({ code: 'invalid' })
-    for (const [cookie, header] of [[undefined, issued.csrfToken], [issued.csrfToken, undefined], ['wrong', 'wrong']]) {
-      expect(() => h.service.validateCsrf(issued.session, cookie, header)).toThrow(IdentityError)
+    for (const header of [undefined, '', 'wrong']) {
+      expect(() => h.service.validateCsrfToken(issued.session, header)).toThrow(IdentityError)
     }
     h.setNow('2026-09-03T12:00:00.000Z')
     const touched = await h.service.authenticate(issued.token)

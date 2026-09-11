@@ -32,7 +32,7 @@ Todos reproduzíveis pelo comando ao lado.
 | --- | --- | --- |
 | typecheck | PASS | `pnpm typecheck` |
 | build | PASS | `pnpm build` |
-| suíte raiz | 2836 testes, 178 arquivos, 0 falha (11/09, após T-19) | `pnpm -w test` |
+| suíte raiz | 2837 testes, 178 arquivos, 0 falha (11/09, após T-29 parcial) | `pnpm -w test` |
 | suíte studio-web | 394 testes | `cd apps/studio-web && npx vitest run` |
 | e2e navegador | 72 testes, Chromium real | `cd apps/studio-web && npx playwright test` |
 | PostgreSQL real | 63 testes | `pnpm test:postgres` |

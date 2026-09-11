@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { pipeline } from 'node:stream/promises'
 import {
-  CSRF_COOKIE, IdentityError, assertRequestTrust, parseCookies, requiredSessionToken, singleHeader, type StudioIdentityService,
+  IdentityError, assertRequestTrust, requiredSessionToken, singleHeader, type StudioIdentityService,
 } from '@dz23-studio/identity'
 import { assertRouteContracts, type StudioRouteContract } from '@dz23-studio/policy'
 import { TenancyError, type StudioTenancyService } from '@dz23-studio/tenancy'
@@ -260,10 +260,19 @@ function publicExport(record: Awaited<ReturnType<IntegrationHubService['exportRe
 }
 
 async function authenticatedActor(request: IncomingMessage, config: HubHttpConfig): Promise<HubActor> {
-  const session = await config.identity.authenticate(requiredSessionToken(request))
+  const session = await config.identity.authenticate(requiredSessionToken(request, config.identity))
   if (request.method !== 'GET' && request.method !== 'HEAD') {
-    const cookies = parseCookies(request.headers.cookie)
-    config.identity.validateCsrf(session, cookies[CSRF_COOKIE], singleHeader(request.headers['x-dz23-csrf']))
+    // Era `validateCsrf(session, cookies[CSRF_COOKIE], header)` — a variante de
+    // duplo envio. O cookie que ela exigia deixou de ser emitido quando o
+    // Studio passou a guardar o token na sessão: `serializeSessionCookies`
+    // EXPIRA `dz23_studio_csrf`. Resultado: `cookies[CSRF_COOKIE]` era sempre
+    // `undefined` e TODA mutação do hub respondia 401. Falhava fechado, mas
+    // esse é o pior formato de código de autorização: ele não protegia nada
+    // (ninguém passava) e o conserto óbvio de quem depurasse o 401 seria
+    // afrouxar a conferência, reabrindo CSRF de verdade num plugin que exporta
+    // dados. O teste que cobria a rota mandava cookie E cabeçalho, então
+    // passava enquanto a produção estava morta.
+    config.identity.validateCsrfToken(session, singleHeader(request.headers['x-dz23-csrf']))
   }
   const authorization = config.tenancy.authorizationFor(session.user_id, session.org_id, session.tenant_id)
   if (authorization === undefined) throw new HubError('FORBIDDEN', t('errors.membershipRequired'))

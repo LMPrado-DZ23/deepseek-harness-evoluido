@@ -13,6 +13,7 @@ import {
   parseCookieValues,
   requiredSessionToken,
   serializeSessionCookies,
+  SECURE_SESSION_COOKIE,
   SESSION_COOKIE,
   SESSION_GENERATION_COOKIE,
   singleHeader,
@@ -37,8 +38,8 @@ function fakeService() {
     finishPasskeyLogin: vi.fn(() => Promise.resolve({ token: 'passkey-token', csrfToken: 'passkey-csrf', session })),
     personalPrincipal: vi.fn(() => ({ userId: 'user_local', orgId: 'org_local', tenantId: 'tenant_local', sessionId: 'session_local' })),
     authenticate: vi.fn<(token: string) => Promise<SessionRecord>>(() => Promise.resolve(session)),
-    validateCsrf: vi.fn(),
     validateCsrfToken: vi.fn(),
+    cookiesAreSecure: false,
     csrfTokenFor: vi.fn(() => Promise.resolve('csrf-token')),
     beginPasskeyRegistration: vi.fn(() => Promise.resolve({ challengeId: 'reg', options: { challenge: 'reg-c' } })),
     finishPasskeyRegistration: vi.fn(() => Promise.resolve()),
@@ -78,6 +79,10 @@ async function fixture(
     allowedHosts,
     allowedOrigins,
     edgeRequired,
+    // A fixture serve em `http://127.0.0.1`, que é o modo pessoal: ali o
+    // navegador RECUSARIA um cookie `__Host-` (não há `Secure`), então o nome
+    // é o sem prefixo. O caso com TLS tem teste próprio.
+    secureCookies: false,
     ...(edge?.secret === undefined ? {} : { resolveEdgeSecret: () => Promise.resolve(edge.secret) }),
     ...(edge?.harnessAuthenticationUrl === undefined ? {} : { harnessAuthenticationUrl: edge.harnessAuthenticationUrl }),
   }))
@@ -110,22 +115,45 @@ const authHeaders = {
 
 describe('identity HTTP boundary', () => {
   it('serializes secure cookies and parses malformed cookie values safely', () => {
+    // Com TLS o nome leva `__Host-`: o navegador recusa gravar um cookie com
+    // esse prefixo que traga `Domain`, e é isso que impede um subdomínio irmão
+    // de plantar um segundo cookie de sessão no navegador da pessoa.
     expect(serializeSessionCookies('a b', 'c d', true)).toEqual([
-      `${SESSION_COOKIE}=a%20b; HttpOnly; Secure; SameSite=Lax; Path=/`,
+      `${SECURE_SESSION_COOKIE}=a%20b; HttpOnly; Secure; SameSite=Lax; Path=/`,
       `${CSRF_COOKIE}=; Secure; SameSite=Lax; Path=/; Max-Age=0`,
     ])
     expect(serializeSessionCookies('local', 'unused', false)).toEqual([
       `${SESSION_COOKIE}=local; HttpOnly; SameSite=Lax; Path=/`,
       `${CSRF_COOKIE}=; SameSite=Lax; Path=/; Max-Age=0`,
     ])
-    expect(clearSessionCookies()).toHaveLength(3)
+    // Quatro: os dois marcadores antigos, o nome em uso E o outro nome. Quem
+    // trocou a configuração (ligou ou desligou o TLS) não pode ficar com um
+    // cookie órfão que nenhum caminho mais aceita e que ninguém consegue tirar.
+    expect(clearSessionCookies()).toHaveLength(4)
+    expect(clearSessionCookies().filter(cookie => cookie.startsWith(SECURE_SESSION_COOKIE))).toHaveLength(1)
+    expect(clearSessionCookies().filter(cookie => cookie.startsWith(`${SESSION_COOKIE}=`))).toHaveLength(1)
     expect(clearSessionCookies(false).every(cookie => !cookie.includes('Secure'))).toBe(true)
     expect(parseCookies(undefined)).toEqual({})
     expect(parseCookies('a=1; lone; bad=%E0%A4%A')).toEqual({ a: '1', lone: '', bad: '' })
     expect(parseCookieValues('a=first; a=second; a=%E0%A4%A; b=other', 'a')).toEqual(['first', 'second'])
-    expect(requiredSessionToken({ headers: { cookie: `${SESSION_COOKIE}=required` } } as never)).toBe('required')
-    expect(() => requiredSessionToken({ headers: {} } as never)).toThrow(IdentityError)
-    expect(() => requiredSessionToken({ headers: { cookie: `${SESSION_COOKIE}=` } } as never)).toThrow(IdentityError)
+    // `cookiesAreSecure: false` escolhe o nome sem prefixo, que é o do modo
+    // pessoal; com `true` o nome é `__Host-dz23_studio_session`.
+    const inseguro = { cookiesAreSecure: false } as never
+    expect(requiredSessionToken({ headers: { cookie: `${SESSION_COOKIE}=required` } } as never, inseguro)).toBe('required')
+    expect(() => requiredSessionToken({ headers: {} } as never, inseguro)).toThrow(IdentityError)
+    expect(() => requiredSessionToken({ headers: { cookie: `${SESSION_COOKIE}=` } } as never, inseguro)).toThrow(IdentityError)
+    // ACHADO: dois cookies com o MESMO nome não deixam o cabeçalho escolher a
+    // sessão — quem escreve o cabeçalho pode não ser a pessoa.
+    expect(() => requiredSessionToken(
+      { headers: { cookie: `${SESSION_COOKIE}=vitima; ${SESSION_COOKIE}=atacante` } } as never, inseguro,
+    )).toThrow(IdentityError)
+    // Com TLS, o nome sem prefixo NÃO é aceito: aceitá-lo reabriria o buraco.
+    expect(() => requiredSessionToken(
+      { headers: { cookie: `${SESSION_COOKIE}=required` } } as never, { cookiesAreSecure: true } as never,
+    )).toThrow(IdentityError)
+    expect(requiredSessionToken(
+      { headers: { cookie: `${SECURE_SESSION_COOKIE}=required` } } as never, { cookiesAreSecure: true } as never,
+    )).toBe('required')
     expect(singleHeader(undefined)).toBeUndefined()
     expect(singleHeader('one')).toBe('one')
     expect(singleHeader(['one'])).toBe('one')
@@ -186,18 +214,36 @@ describe('identity HTTP boundary', () => {
     })
   })
 
-  it('issues CSRF through an authenticated same-origin endpoint and ignores a shadow cookie before the valid session', async () => {
+  it('ACHADO: cookie sombra RECUSA a entrada, em vez de deixar o cabeçalho escolher a sessão', async () => {
+    // Esta propriedade foi INVERTIDA de propósito. A versão anterior tentava
+    // cada cookie de mesmo nome e ficava com o primeiro que autenticasse, e o
+    // teste que a cobria usava um sombra INVÁLIDO — o caso fácil. A ameaça real
+    // é o contrário: o token do atacante é uma sessão VÁLIDA dele. Aí a vítima
+    // seguia usando o Studio dentro da sessão do atacante, e
+    // `POST /passkey/register/verify` gravava a chave de acesso do dispositivo
+    // dela na conta DELE.
+    //
+    // O que se perde é disponibilidade: quem carregar um cookie velho é
+    // mandado entrar de novo. É a troca certa — a pessoa VÊ que não entrou,
+    // em vez de não ver nada.
     const f = await fixture()
-    f.service.authenticate.mockImplementation(token => token === 'session-token'
+    f.service.authenticate.mockImplementation(token => token === 'session-token' || token === 'do-atacante'
       ? Promise.resolve(session)
       : Promise.reject(new IdentityError('invalid', 'invalid')))
-    const response = await f.request('/csrf', {
-      method: 'GET', headers: { cookie: `${SESSION_COOKIE}=shadow; ${SESSION_COOKIE}=session-token` },
+    const sombraValida = await f.request('/csrf', {
+      method: 'GET', headers: { cookie: `${SESSION_COOKIE}=do-atacante; ${SESSION_COOKIE}=session-token` },
     })
-    expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ csrf_token: 'csrf-token' })
-    expect(f.service.authenticate).toHaveBeenCalledWith('shadow')
-    expect(f.service.authenticate).toHaveBeenCalledWith('session-token')
+    expect(sombraValida.status).toBe(401)
+    const sombraInvalida = await f.request('/csrf', {
+      method: 'GET', headers: { cookie: `${SESSION_COOKIE}=lixo; ${SESSION_COOKIE}=session-token` },
+    })
+    expect(sombraInvalida.status).toBe(401)
+    // Um cookie só continua funcionando, que é o caso de todo mundo.
+    const limpo = await f.request('/csrf', {
+      method: 'GET', headers: { cookie: `${SESSION_COOKIE}=session-token` },
+    })
+    expect(limpo.status).toBe(200)
+    expect(await limpo.json()).toEqual({ csrf_token: 'csrf-token' })
   })
 
   it('authenticates mutations from the valid duplicate cookie and bounds adversarial candidates', async () => {
@@ -212,13 +258,22 @@ describe('identity HTTP boundary', () => {
       headers: { cookie, 'x-dz23-csrf': 'csrf-token' },
     }) as never
 
-    await expect(authenticatedMutation(request(`${SESSION_COOKIE}=shadow; ${SESSION_COOKIE}=valid`), service as unknown as StudioIdentityService)).resolves.toBe(session)
+    await expect(authenticatedMutation(request(`${SESSION_COOKIE}=valid`), service as unknown as StudioIdentityService)).resolves.toBe(session)
     expect(service.validateCsrfToken).toHaveBeenCalledWith(session, 'csrf-token')
+    // Dois cookies de mesmo nome: recusa, e sem sequer consultar o serviço —
+    // a ambiguidade é resolvida antes de qualquer autenticação.
+    service.authenticate.mockClear()
+    await expect(authenticatedMutation(request(`${SESSION_COOKIE}=shadow; ${SESSION_COOKIE}=valid`), service as unknown as StudioIdentityService)).rejects.toMatchObject({ code: 'invalid' })
+    expect(service.authenticate).not.toHaveBeenCalled()
     await expect(authenticatedMutation(request(`${SESSION_COOKIE}=valid`, 'GET'), service as unknown as StudioIdentityService)).resolves.toBe(session)
     await expect(authenticatedMutation(request(`${SESSION_COOKIE}=`), service as unknown as StudioIdentityService)).rejects.toMatchObject({ code: 'invalid' })
     await expect(authenticatedMutation(request(`${SESSION_COOKIE}=explode`), service as unknown as StudioIdentityService)).rejects.toThrow('storage unavailable')
     const tooMany = Array.from({ length: 65 }, (_, index) => `${SESSION_COOKIE}=candidate-${index}`).join('; ')
     await expect(authenticatedMutation(request(tooMany), service as unknown as StudioIdentityService)).rejects.toMatchObject({ code: 'invalid' })
+    // O mesmo vale com TLS, e ali o nome sem prefixo não é sequer lido.
+    const seguro = { ...service, cookiesAreSecure: true } as unknown as StudioIdentityService
+    await expect(authenticatedMutation(request(`${SESSION_COOKIE}=valid`), seguro)).rejects.toMatchObject({ code: 'invalid' })
+    await expect(authenticatedMutation(request(`${SECURE_SESSION_COOKIE}=valid`), seguro)).resolves.toBe(session)
   })
 
   it('requires the rotatable edge secret and blocks the process-wide Harness client at the edge', async () => {
@@ -394,23 +449,39 @@ describe('identity HTTP boundary', () => {
     expect(f.service.revokeSession).not.toHaveBeenCalled()
   })
 
-  it('does not let a shadow cookie bypass CSRF for a later active session', async () => {
+  it('sair com cookie ambíguo LIMPA o navegador e não revoga sessão nenhuma', async () => {
+    // Sair é o único lugar onde ser permissivo é seguro: ele só REMOVE. Com
+    // dois cookies de mesmo nome não dá para saber qual sessão a pessoa quis
+    // encerrar, então o servidor não revoga nada — revogar por palpite
+    // derrubaria a sessão errada — e limpa o navegador, que é o que a pessoa
+    // consegue ver que aconteceu.
     const f = await fixture()
     f.service.authenticate.mockImplementation(token => token === 'session-token'
       ? Promise.resolve(session)
       : Promise.reject(new IdentityError('invalid', 'invalid-session')))
-    f.service.validateCsrfToken.mockImplementationOnce(() => { throw new IdentityError('csrf', 'csrf') })
 
     const response = await f.request('/logout', {
       method: 'POST',
       headers: { cookie: `${SESSION_COOKIE}=shadow; ${SESSION_COOKIE}=session-token`, 'x-dz23-csrf': 'wrong' },
     })
 
-    expect(response.status).toBe(401)
-    expect(f.service.authenticate).toHaveBeenCalledWith('shadow')
-    expect(f.service.authenticate).toHaveBeenCalledWith('session-token')
+    expect(response.status).toBe(200)
     expect(f.service.revokeSession).not.toHaveBeenCalled()
-    expect(response.headers.getSetCookie()).toEqual([])
+    expect(response.headers.getSetCookie().length).toBeGreaterThan(0)
+    expect(response.headers.getSetCookie().every(cookie => cookie.includes('Max-Age=0'))).toBe(true)
+  })
+
+  it('sair com UM cookie continua revogando a sessão de verdade', async () => {
+    const f = await fixture()
+    f.service.authenticate.mockImplementation(token => token === 'session-token'
+      ? Promise.resolve(session)
+      : Promise.reject(new IdentityError('invalid', 'invalid-session')))
+    const response = await f.request('/logout', {
+      method: 'POST',
+      headers: { cookie: `${SESSION_COOKIE}=session-token`, 'x-dz23-csrf': 'csrf-token' },
+    })
+    expect(response.status).toBe(200)
+    expect(f.service.revokeSession).toHaveBeenCalled()
   })
 
   it('rejects an unbounded logout cookie set without claiming completion', async () => {

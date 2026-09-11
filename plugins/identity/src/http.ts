@@ -7,7 +7,7 @@ import type { AuthenticationResponse, RegistrationResponse } from './passkey.js'
 import type { SessionRecord } from './model.js'
 import { IdentityError, type StudioIdentityService } from './service.js'
 import { assertRouteContracts, type StudioRouteContract } from '@dz23-studio/policy'
-import { CSRF_COOKIE, parseCookies, parseCookieValues, SESSION_COOKIE, SESSION_GENERATION_COOKIE } from './cookies.js'
+import { CSRF_COOKIE, parseCookies, parseCookieValues, SECURE_SESSION_COOKIE, SESSION_COOKIE, SESSION_GENERATION_COOKIE, sessionCookieName } from './cookies.js'
 import { InMemoryIdentityRateLimiter, edgeForwardedAddress, rateLimitBuckets, rateLimitKey } from './rate-limit.js'
 
 const JSON_LIMIT = 64 * 1024
@@ -18,7 +18,7 @@ const IDENTITY_INTERNAL_ERROR = 'IDENTITY_INTERNAL_ERROR'
 class IdentityHttpInputError extends Error {}
 class CookieHeaderBudgetError extends Error {}
 
-export { CSRF_COOKIE, parseCookies, parseCookieValues, SESSION_COOKIE, SESSION_GENERATION_COOKIE } from './cookies.js'
+export { CSRF_COOKIE, parseCookies, parseCookieValues, SECURE_SESSION_COOKIE, SESSION_COOKIE, SESSION_GENERATION_COOKIE, sessionCookieName } from './cookies.js'
 
 const emailSchema = z.object({ email: z.email() }).strict()
 const magicStartSchema = emailSchema
@@ -67,7 +67,7 @@ export function serializeSessionCookies(token: string, csrfToken: string, secure
   void csrfToken
   const secureAttribute = secure ? '; Secure' : ''
   return [
-    `${SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly${secureAttribute}; SameSite=Lax; Path=/`,
+    `${sessionCookieName(secure)}=${encodeURIComponent(token)}; HttpOnly${secureAttribute}; SameSite=Lax; Path=/`,
     `${CSRF_COOKIE}=${secureAttribute}; SameSite=Lax; Path=/; Max-Age=0`,
   ]
 }
@@ -75,7 +75,10 @@ export function serializeSessionCookies(token: string, csrfToken: string, secure
 export function clearSessionCookies(secure = true): readonly string[] {
   const secureAttribute = secure ? '; Secure' : ''
   return [
-    `${SESSION_COOKIE}=; HttpOnly${secureAttribute}; SameSite=Lax; Path=/; Max-Age=0`,
+    `${sessionCookieName(secure)}=; HttpOnly${secureAttribute}; SameSite=Lax; Path=/; Max-Age=0`,
+    // O nome antigo também é expirado: quem trocou de configuração não pode
+    // ficar com um cookie orfao que nenhum caminho mais aceita.
+    `${secure ? SESSION_COOKIE : SECURE_SESSION_COOKIE}=; HttpOnly${secureAttribute}; SameSite=Lax; Path=/; Max-Age=0`,
     `${SESSION_GENERATION_COOKIE}=${secureAttribute}; SameSite=Strict; Path=/; Max-Age=0`,
     `${CSRF_COOKIE}=${secureAttribute}; SameSite=Lax; Path=/; Max-Age=0`,
   ]
@@ -148,7 +151,7 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
         return
       }
       if (request.method === 'GET' && route === '/session') {
-        const tokens = parseCookieValues(request.headers.cookie, SESSION_COOKIE)
+        const tokens = parseCookieValues(request.headers.cookie, sessionCookieName(secureCookies))
         if (tokens.length === 0) {
           const principal = config.edgeRequired === true
             ? undefined
@@ -157,13 +160,13 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
           json(response, 200, { mode: 'personal', principal })
           return
         }
-        const { session } = await authenticateCookieRequest(request, config.service)
+        const { session } = await authenticateCookieRequest(request, config.service, secureCookies)
         json(response, 200, { mode: 'authenticated', principal: principalOf(session) })
         return
       }
 
       if (request.method === 'GET' && route === '/csrf') {
-        const { session } = await authenticateCookieRequest(request, config.service)
+        const { session } = await authenticateCookieRequest(request, config.service, secureCookies)
         json(response, 200, { csrf_token: await config.service.csrfTokenFor(session) })
         return
       }
@@ -196,7 +199,7 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
       }
 
       if (request.method === 'POST' && route === '/logout') {
-        const candidates = [...new Set(parseCookieValues(request.headers.cookie, SESSION_COOKIE))]
+        const candidates = [...new Set(parseCookieValues(request.headers.cookie, sessionCookieName(secureCookies)))]
         if (candidates.length > 64) throw new IdentityError('invalid', t('http.signInToContinue'))
         if (candidates.length === 0) {
           response.setHeader('set-cookie', clearSessionCookies(secureCookies))
@@ -205,7 +208,7 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
         }
         let authentication: { readonly token: string; readonly session: SessionRecord }
         try {
-          authentication = await authenticateCookieRequest(request, config.service)
+          authentication = await authenticateCookieRequest(request, config.service, secureCookies)
         } catch (error) {
           if (!(error instanceof IdentityError)) throw error
           response.setHeader('set-cookie', clearSessionCookies(secureCookies))
@@ -219,7 +222,7 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
         return
       }
 
-      const authentication = await authenticateCookieRequest(request, config.service)
+      const authentication = await authenticateCookieRequest(request, config.service, secureCookies)
       const session = authentication.session
       if (request.method !== 'GET' && request.method !== 'HEAD') {
         config.service.validateCsrfToken(session, singleHeader(request.headers['x-dz23-csrf']))
@@ -290,7 +293,7 @@ export async function authenticatedMutation(request: IncomingMessage, service: S
   // Host e Origin, para TODA rota autenticada — e não só para as da identidade.
   const mutating = request.method !== 'GET' && request.method !== 'HEAD'
   service.assertRequestTrust(singleHeader(request.headers.host), singleHeader(request.headers.origin), mutating)
-  const { session } = await authenticateCookieRequest(request, service)
+  const { session } = await authenticateCookieRequest(request, service, service.cookiesAreSecure)
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     const header = singleHeader(request.headers['x-dz23-csrf'])
     service.validateCsrfToken(session, header)
@@ -298,24 +301,53 @@ export async function authenticatedMutation(request: IncomingMessage, service: S
   return session
 }
 
-export function requiredSessionToken(request: IncomingMessage): string {
+export function requiredSessionToken(request: IncomingMessage, service: StudioIdentityService): string {
   assertCookieHeaderBudget(request)
-  const token = parseCookieValues(request.headers.cookie, SESSION_COOKIE)[0]
-  if (token === undefined || token === '') throw new IdentityError('invalid', t('http.signInToContinue'))
+  // Recusa a ambiguidade pelo mesmo motivo de `authenticateCookieRequest`:
+  // pegar o `[0]` de dois cookies com o mesmo nome deixa QUEM ESCREVE O
+  // CABEÇALHO escolher a sessão, e quem escreve pode não ser a pessoa.
+  const token = singleSessionToken(request.headers.cookie, service.cookiesAreSecure)
+  if (token === undefined) throw new IdentityError('invalid', t('http.signInToContinue'))
   return token
 }
 
-async function authenticateCookieRequest(request: IncomingMessage, service: StudioIdentityService): Promise<{ readonly token: string; readonly session: SessionRecord }> {
+/**
+ * O ÚNICO token de sessão do pedido, ou nenhum.
+ *
+ * "Único" é o requisito, e ele substituiu um laço que tentava até 64 candidatos
+ * e ficava com o PRIMEIRO que autenticasse. Esse laço era metade de um ataque:
+ * quem conseguisse gravar um segundo cookie com o mesmo nome — subdomínio
+ * irmão, ou injeção num HTTP em texto claro — bastava que o token DELE fosse
+ * válido para ser aceito, mesmo com o cookie legítimo presente no mesmo
+ * cabeçalho. A vítima seguia usando o Studio dentro da sessão do atacante, e
+ * `POST /passkey/register/verify` gravava a chave de acesso do dispositivo
+ * dela na conta DELE.
+ *
+ * Recusar a ambiguidade troca um roubo de conta por uma recusa de entrada: a
+ * pessoa vê que não conseguiu entrar em vez de não ver nada. O prefixo
+ * `__Host-` (ver `cookies.ts`) fecha a porta de gravar o segundo cookie; esta
+ * função garante que, mesmo que alguém a abra de novo, ninguém escolhe QUAL
+ * dos dois vale.
+ * @param header - o cabeçalho `cookie` bruto.
+ * @param secure - se os cookies desta instalação levam `Secure`.
+ * @returns o token, ou `undefined` quando não há nenhum.
+ * @throws IdentityError quando há mais de um valor distinto.
+ */
+function singleSessionToken(header: string | undefined, secure: boolean): string | undefined {
+  const values = [...new Set(parseCookieValues(header, sessionCookieName(secure)))].filter(value => value !== '')
+  if (values.length > 1) throw new IdentityError('invalid', t('http.signInToContinue'))
+  return values[0]
+}
+
+async function authenticateCookieRequest(
+  request: IncomingMessage,
+  service: StudioIdentityService,
+  secure: boolean,
+): Promise<{ readonly token: string; readonly session: SessionRecord }> {
   assertCookieHeaderBudget(request)
-  const candidates = [...new Set(parseCookieValues(request.headers.cookie, SESSION_COOKIE))]
-  if (candidates.length === 0 || candidates.length > 64) throw new IdentityError('invalid', t('http.signInToContinue'))
-  let lastError: IdentityError | undefined
-  for (const token of candidates) {
-    if (token === '') continue
-    try { return { token, session: await service.authenticate(token) } }
-    catch (error) { if (!(error instanceof IdentityError)) throw error; lastError = error }
-  }
-  throw lastError ?? new IdentityError('invalid', t('http.signInToContinue'))
+  const token = singleSessionToken(request.headers.cookie, secure)
+  if (token === undefined) throw new IdentityError('invalid', t('http.signInToContinue'))
+  return { token, session: await service.authenticate(token) }
 }
 
 async function assertEdgeTrust(

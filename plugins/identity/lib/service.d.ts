@@ -90,8 +90,14 @@ export declare class StudioIdentityService {
     requestMagicCode(email: string): Promise<MagicCodeRequestResult>;
     verifyMagicCode(email: string, code: string, device: DeviceInput): Promise<IssuedSession>;
     authenticate(token: string, touch?: boolean): Promise<SessionRecord>;
-    validateCsrf(session: SessionRecord, cookieToken: string | undefined, headerToken: string | undefined): void;
     validateCsrfToken(session: SessionRecord, headerToken: string | undefined): void;
+    /**
+     * Declara se os cookies levam `Secure`. O plugin chama isto ao montar.
+     * @param secure - `false` somente no modo pessoal, em `http://127.0.0.1`.
+     */
+    setCookieSecurity(secure: boolean): void;
+    /** Se os cookies desta instalação levam `Secure`. */
+    get cookiesAreSecure(): boolean;
     /**
      * Declara os endereços confiáveis. O plugin chama isto ao montar a borda.
      * @param trust - hosts e origens aceitos.

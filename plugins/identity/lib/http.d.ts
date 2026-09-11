@@ -3,7 +3,7 @@ import type { SessionRecord } from './model.js';
 import { type StudioIdentityService } from './service.js';
 import { InMemoryIdentityRateLimiter } from './rate-limit.js';
 export declare const COOKIE_HEADER_LIMIT_BYTES: number;
-export { CSRF_COOKIE, parseCookies, parseCookieValues, SESSION_COOKIE, SESSION_GENERATION_COOKIE } from './cookies.js';
+export { CSRF_COOKIE, parseCookies, parseCookieValues, SECURE_SESSION_COOKIE, SESSION_COOKIE, SESSION_GENERATION_COOKIE, sessionCookieName } from './cookies.js';
 export declare const IDENTITY_ROUTE_CONTRACTS: readonly [{
     readonly method: "POST";
     readonly path: "/magic/start";
@@ -111,7 +111,7 @@ export declare function serializeSessionCookies(token: string, csrfToken: string
 export declare function clearSessionCookies(secure?: boolean): readonly string[];
 export declare function createIdentityHttpHandler(config: IdentityHttpConfig): (request: IncomingMessage, response: ServerResponse) => Promise<void>;
 export declare function authenticatedMutation(request: IncomingMessage, service: StudioIdentityService): Promise<SessionRecord>;
-export declare function requiredSessionToken(request: IncomingMessage): string;
+export declare function requiredSessionToken(request: IncomingMessage, service: StudioIdentityService): string;
 export declare function assertRequestTrust(request: IncomingMessage, config: Pick<IdentityHttpConfig, 'allowedHosts' | 'allowedOrigins'>): void;
 export declare function singleHeader(value: string | string[] | undefined): string | undefined;
 export declare function deviceOf(request: IncomingMessage, label: string): {

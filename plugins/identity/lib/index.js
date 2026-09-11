@@ -132,6 +132,12 @@ export async function apply(ctx, config = {}) {
     // A borda declara ao SERVIÇO quais endereços aceita: é assim que a conferência
     // de Host e Origin alcança as rotas autenticadas dos outros plugins.
     service.setRequestTrust({ allowedHosts, allowedOrigins });
+    // O NOME do cookie de sessao depende disto (ver `sessionCookieName`), e os
+    // seis plugins que usam `authenticatedMutation`/`requiredSessionToken` nao
+    // recebem a configuracao — eles perguntam ao servico. Sem esta linha o
+    // servico fica no padrao seguro (`__Host-`) e o modo pessoal em http nao
+    // entraria: falha na direcao certa, mas falha.
+    service.setCookieSecurity(cookieSecurity === 'secure');
     ctx.provide('studioIdentity', {
         service,
         ...(email.capture === undefined ? {} : { developmentEmailCapture: email.capture }),
