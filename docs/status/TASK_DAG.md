@@ -30,7 +30,8 @@ separa este trabalho de acrescentar features.
 | T-05 | P0 | Estado persistente da missão (este arquivo, PROJECT_STATUS, blockers, journal) | — | DONE |
 | T-06 | P1 | `trace_id` correlacionando missão → tarefa → execução → ferramenta | T-05 | READY |
 | T-07 | P1 | Context Engine: teto, prioridade, deduplicação, procedência, registro | — | DONE (planejador; falta intake e gerador: T-25) |
-| T-08 | P1 | Memory Engine: as sete memórias, com procedência, confiança e supersessão | — | READY |
+| T-08 | P1 | Memory Engine — **memória de falha** entregue; as outras seis não existem | — | PARCIAL (T-26) |
+| T-26 | P2 | As outras seis memórias (episódica, semântica, procedimental, decisão, avaliação, trabalho) | T-08 | READY |
 | T-25 | P2 | Levar intake e gerador para o mesmo motor de contexto | T-07 | READY |
 | T-09 | P2 | Spec Engine: constitution → specify → clarify → plan → tasks → implement → validate → converge | T-08 | PENDING |
 | T-10 | P2 | Constitution Engine aplicado pelo planner e pelo builder | T-09 | PENDING |

@@ -146,7 +146,8 @@
     "sliceOnly": "Produza somente JSON válido com UMA fatia nova, em linguagem comum, para acrescentar ao plano que já existe.",
     "sliceExisting": "O plano atual já tem estas fatias, e elas NÃO devem ser repetidas nem reescritas: {slices}",
     "sliceRequest": "O que a pessoa quer acrescentar: {request}",
-    "sliceFiles": "A fatia nova não pode listar em planned_files nenhum arquivo já planejado por outra fatia."
+    "sliceFiles": "A fatia nova não pode listar em planned_files nenhum arquivo já planejado por outra fatia.",
+    "repeatedFailure": "ATENÇÃO: esta mesma correção já foi pedida {times} vezes e produziu exatamente o mesmo resultado. Não repita a abordagem anterior. Mude de estratégia: reescreva o trecho de outra forma, ou resolva o problema por outro caminho."
   },
   "stages": {
     "install": "Preparando as ferramentas do seu aplicativo",

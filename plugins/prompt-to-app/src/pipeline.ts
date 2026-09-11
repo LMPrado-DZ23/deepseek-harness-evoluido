@@ -1,3 +1,4 @@
+import { FailureMemory } from './failure-memory.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { cp, lstat, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
@@ -150,6 +151,9 @@ export class PromptToAppPipeline {
       }
       await this.options.service.transition(actor, projectId, 'GENERATING')
       let diagnostic: string | undefined
+      // Uma memoria POR CRIACAO: ela existe para comparar tentativas da mesma
+      // criacao entre si, e nao para carregar falhas de um projeto para outro.
+      const failureMemory = new FailureMemory()
       let finalFailureState: 'BUILD_FAILED' | 'TESTS_FAILED' = 'BUILD_FAILED'
       let stopRetries = false
       let completedAttempts = 0
@@ -181,6 +185,12 @@ export class PromptToAppPipeline {
       // corrigir. Capturado aqui porque `diagnostic` é zerado assim que a
       // geração dá certo.
       const previousDiagnosticForReport = diagnostic ?? null
+      // O registro acontece AQUI, num ponto so, e nao em cada um dos oito
+      // lugares que definem `diagnostic`. O diagnostico com que esta tentativa
+      // COMECA e exatamente a falha com que a anterior terminou - entao contar
+      // aqui cobre todos os caminhos de falha sem espalhar a contagem, e sem
+      // risco de contar a mesma falha duas vezes.
+      if (diagnostic !== undefined) failureMemory.record(diagnostic)
       if (isAborted(runOptions.signal)) return this.cancelled(actor, projectId, plan.plan_id, operationId, ownerSessionId, attempt - 1)
       // O teto vale ANTES de começar a repetição, e não no meio dela: parar uma
       // tentativa pela metade gastaria os tokens dela e não entregaria nada.
@@ -248,7 +258,12 @@ export class PromptToAppPipeline {
           diagnostic = undefined
           resumedFromRunId = resumable.runId
         } else {
-        generated = await generator.generate(spec, plan, previousDiagnostic)
+        // A correcao pedida passa pela MEMORIA DE FALHA: quando o mesmo
+        // diagnostico ja se repetiu, o gerador recebe o aviso de que aquela
+        // abordagem ja foi tentada e deu no mesmo. Sem isto, a terceira
+        // tentativa pedia exatamente a mesma correcao da segunda - mesma
+        // falha, mesma estrategia, e a unica coisa garantida era o gasto.
+        generated = await generator.generate(spec, plan, failureMemory.correctionFor(previousDiagnostic))
         spentTokens += (generated.inputTokens ?? 0) + (generated.outputTokens ?? 0)
         diagnostic = undefined
         assertGeneratedSource(generated.files)
@@ -272,7 +287,12 @@ export class PromptToAppPipeline {
         })
         }
       } catch (error) {
-        diagnostic = error instanceof Error ? error.message : 'GENERATED_OUTPUT_REJECTED'
+        // `rawOf` porque um gerador pode devolver, no erro, parte do que
+        // recebeu - e o que ele recebeu pode conter a instrucao de mudanca de
+        // estrategia. Sem tirar o proprio aviso aqui, a pessoa leria na
+        // mensagem de falha um texto escrito para o modelo, e o `failure_code`
+        // gravado carregaria a mesma coisa.
+        diagnostic = failureMemory.rawOf(error instanceof Error ? error.message : 'GENERATED_OUTPUT_REJECTED')
         finalFailureState = 'BUILD_FAILED'
         await this.recordFailure(actor, projectId, plan.plan_id, runId, runDirectory, attempt, null, diagnostic, 'generate', operationId, ownerSessionId)
         await this.writeRunReport({ actor, projectId, runId, directory: runDirectory, stage: 'generate', runState: 'FAILED', attempt, files: attemptFiles, previousFiles: previousAttemptFiles, findings: attemptFindings, correction: previousDiagnosticForReport })

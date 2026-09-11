@@ -90,6 +90,28 @@ async function fixture(options: FixtureOptions = {}) {
 }
 
 describe('Prompt-to-App pipeline', () => {
+  it('T-08: a MESMA falha repetida muda o pedido — a terceira tentativa nao pede igual a segunda', async () => {
+    // O laco tenta tres vezes e passa ao gerador o diagnostico da vez
+    // anterior. Falhando sempre pelo mesmo motivo, a terceira pedia
+    // exatamente a mesma correcao da segunda: mesma falha, mesma estrategia.
+    const f = await fixture({ execute: async () => ({ exitCode: 1, stdout: '', stderr: 'sempre a mesma falha', timedOut: false }) })
+    const generator: CodeGeneratorPort = { generate: vi.fn(async () => cleanGeneration) }
+    await f.pipeline.run(actor, 'project', generator)
+
+    expect(generator.generate).toHaveBeenCalledTimes(3)
+    const pedidos = vi.mocked(generator.generate).mock.calls.map(call => call[2])
+    // A primeira nao tem correcao nenhuma: nada falhou ainda.
+    expect(pedidos[0]).toBeUndefined()
+    // A segunda leva o diagnostico cru da primeira.
+    expect(pedidos[1]).toBeDefined()
+    expect(pedidos[1]).not.toContain('Mude de estratégia')
+    // A TERCEIRA leva o aviso: aquela correcao ja foi pedida e deu no mesmo.
+    expect(pedidos[2]).toContain('Mude de estratégia')
+    // E o diagnostico original continua la: mudar de abordagem nao e esquecer
+    // qual era o problema.
+    expect(pedidos[2]).toContain(pedidos[1]!)
+  })
+
   it.skipIf(process.platform === 'win32')('rejects a template symlink before creating a run or changing project state', async () => {
     const f = await fixture(); const outside = await mkdtemp(join(tmpdir(), 'dz23-template-outside-')); roots.push(outside)
     await symlink(outside, resolve(f.templateDirectory, 'linked'), 'dir')
