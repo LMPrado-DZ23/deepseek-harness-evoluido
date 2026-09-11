@@ -13,6 +13,65 @@ export const policySourceSchema = z.object({
     signed: z.boolean().optional(),
     stableChannel: z.boolean().default(true),
 }).strict();
+/**
+ * Os modos de sandbox conhecidos, e o que cada um AUTORIZA.
+ *
+ * `sandboxMode` continua sendo `string` no schema de propósito: o valor chega
+ * de catálogo nosso, de manifesto de integração e do Harness pinado, e recusar
+ * no `parse` quebraria a compatibilidade com um modo que o upstream introduza
+ * antes de nós.
+ *
+ * O que muda é como o desconhecido é TRATADO. Antes, três literais eram
+ * comparados soltos no meio da função. `'danger-full-access'` escrito errado —
+ * `danger_full_access`, `danger-full-acess` — simplesmente não casava, e a
+ * escalada obrigatória para T3 **não acontecia**: o portão falhava ABERTO, em
+ * silêncio, exatamente no caso mais perigoso.
+ *
+ * Agora todo modo passa por esta tabela, e o que ela não conhece é tratado
+ * como `privileged`. Um erro de digitação passa a custar uma confirmação a
+ * mais, e não uma autorização a menos.
+ */
+export const SANDBOX_MODE_CAPABILITIES = {
+    // Lê o espaço de trabalho e não escreve nada.
+    'read-only': { write: false, network: false, privileged: false },
+    // Escreve dentro do espaço de trabalho, sem rede e sem privilégio.
+    'workspace-write': { write: true, network: false, privileged: false },
+    // Acesso total: é o modo que existe para os casos em que a pessoa sabe o que
+    // está fazendo, e por isso ele SEMPRE exige T3.
+    'danger-full-access': { write: true, network: true, privileged: true },
+    // O Harness relata ausência de sandbox com este nome. Sem confinamento, ele
+    // escreve e alcança rede — então um T1 sob este modo sobe para T2.
+    //
+    // Mas NÃO é `privileged`, e a diferença importa: `danger-full-access` é
+    // alguém DECLARANDO que quer acesso total, e passkey recente é o preço
+    // proporcional a essa declaração. `unavailable` é o ambiente informando que
+    // não conseguiu confinar — condição comum em desenvolvimento. Tratar os dois
+    // igual exigiria identidade forte a cada ferramenta num sistema que está
+    // apenas sem sandbox, e a saída de quem fosse barrado seria desligar a
+    // verificação. Segurança que atrapalha demais é desligada, e aí protege
+    // zero. Esta calibragem é a que já estava provada por teste; o conserto de
+    // hoje é sobre o DESCONHECIDO, não sobre esta linha.
+    unavailable: { write: true, network: true, privileged: false },
+};
+/** O que um modo desconhecido autoriza: tudo. Falhar fechado é falhar para cá. */
+const UNKNOWN_SANDBOX = { write: true, network: true, privileged: true };
+/**
+ * O que este modo de sandbox autoriza.
+ *
+ * Modo ausente NÃO é o mesmo que modo desconhecido: ausente significa que a
+ * regra não fala de sandbox, e quem decide então é o tier declarado. Um nome
+ * que ninguém reconhece, por outro lado, é uma afirmação que não entendemos —
+ * e a resposta segura para isso é assumir o pior.
+ * @param mode - o valor cru da regra, possivelmente ausente.
+ * @returns as capacidades do modo, ou `undefined` quando não há modo.
+ */
+export function sandboxCapabilities(mode) {
+    if (mode === undefined)
+        return undefined;
+    return Object.hasOwn(SANDBOX_MODE_CAPABILITIES, mode)
+        ? SANDBOX_MODE_CAPABILITIES[mode]
+        : UNKNOWN_SANDBOX;
+}
 export const toolPolicyRuleSchema = z.object({
     source: policySourceSchema,
     inferredTier: z.unknown().optional(),
@@ -162,10 +221,12 @@ function resolveTier(rule) {
     if (rule.source.kind === 'mcp' && rule.source.external) {
         effective = mostRestrictive([effective, 'T1']);
     }
-    if (rule.sandboxMode === 'danger-full-access')
+    const sandbox = sandboxCapabilities(rule.sandboxMode);
+    // Privilegiado exige confirmacao forte, sempre. Antes isto era a comparacao
+    // literal com um unico nome, e o nome escrito errado perdia a escalada.
+    if (sandbox?.privileged === true)
         effective = 'T3';
-    if (effective === 'T1'
-        && (rule.source.external || (rule.sandboxMode !== 'read-only' && rule.sandboxMode !== 'workspace-write'))) {
+    if (effective === 'T1' && (rule.source.external || sandbox === undefined || sandbox.network || sandbox.privileged)) {
         effective = 'T2';
     }
     return effective;

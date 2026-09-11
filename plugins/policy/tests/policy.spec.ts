@@ -21,6 +21,7 @@ import {
   roleAllows,
   roleCanAssign,
   studioRouteContractSchema,
+  sandboxCapabilities,
   type PolicyPluginConfig,
   type PolicyTier,
   type ToolPolicyRule,
@@ -545,5 +546,50 @@ describe('S-16: a trilha de política é encadeada, e a quebra aparece', () => {
     expect(policyAuditEntryHash(body)).toBe(policyAuditEntryHash(Object.fromEntries(Object.entries(body).reverse()) as typeof body))
     expect(policyAuditEntryHash(body)).not.toBe(policyAuditEntryHash({ ...body, reason: 'outro' }))
     expect(policyAuditEntryHash(body)).not.toBe(policyAuditEntryHash({ ...body, user_id: 'outra-pessoa' }))
+  })
+})
+
+/** O tier efetivo de uma regra, pelo caminho REAL do motor. */
+const tierFor = (current: ToolPolicyRule): string =>
+  new StudioPolicyEngine({ rules: { tool: current } }).evaluate('tool', { strongIdentityVerified: true }).effectiveTier
+
+describe('T-21: modo de sandbox desconhecido falha FECHADO', () => {
+  it('um `danger-full-access` escrito errado continua exigindo T3', () => {
+    // Este era o defeito: a comparacao era com o literal exato, e o nome
+    // errado simplesmente nao casava. A escalada obrigatoria nao acontecia, em
+    // silencio, justamente no modo mais perigoso.
+    for (const typo of ['danger_full_access', 'danger-full-acess', 'DANGER-FULL-ACCESS', 'full-access']) {
+      const decision = tierFor(rule({ inferredTier: 'T0', sandboxMode: typo }))
+      expect(decision, `o modo "${typo}" nao foi tratado como privilegiado`).toBe('T3')
+    }
+  })
+
+  it('um modo novo que ninguem reconhece tambem e tratado como privilegiado', () => {
+    // Modo que o upstream introduza antes de nos nao pode ser lido como seguro
+    // so por nao estar na tabela.
+    expect(tierFor(rule({ inferredTier: 'T0', sandboxMode: 'modo-que-ainda-nao-existe' }))).toBe('T3')
+  })
+
+  it('os modos conhecidos continuam com a calibragem que ja estava provada', () => {
+    expect(tierFor(rule({ inferredTier: 'T1', sandboxMode: 'read-only' }))).toBe('T1')
+    expect(tierFor(rule({ inferredTier: 'T1', sandboxMode: 'workspace-write' }))).toBe('T1')
+    // `unavailable` e o ambiente dizendo que nao confinou, e nao alguem
+    // pedindo acesso total: sobe para T2, nao para T3.
+    expect(tierFor(rule({ inferredTier: 'T1', sandboxMode: 'unavailable' }))).toBe('T2')
+    expect(tierFor(rule({ inferredTier: 'T0', sandboxMode: 'danger-full-access' }))).toBe('T3')
+  })
+
+  it('modo AUSENTE nao e modo desconhecido', () => {
+    // Regra que nao fala de sandbox deixa o tier declarado decidir. Trata-la
+    // como desconhecida empurraria todo T0 sem sandbox declarada para T3.
+    expect(sandboxCapabilities(undefined)).toBeUndefined()
+    expect(tierFor(rule({ inferredTier: 'T0' }))).toBe('T0')
+  })
+
+  it('a tabela e o unico lugar que decide, e ela responde por capacidade', () => {
+    expect(sandboxCapabilities('read-only')).toEqual({ write: false, network: false, privileged: false })
+    expect(sandboxCapabilities('workspace-write')).toEqual({ write: true, network: false, privileged: false })
+    expect(sandboxCapabilities('danger-full-access')).toEqual({ write: true, network: true, privileged: true })
+    expect(sandboxCapabilities('qualquer-outra-coisa')).toEqual({ write: true, network: true, privileged: true })
   })
 })

@@ -23,6 +23,62 @@ export declare const policySourceSchema: z.ZodObject<{
     signed: z.ZodOptional<z.ZodBoolean>;
     stableChannel: z.ZodDefault<z.ZodBoolean>;
 }, z.core.$strict>;
+/**
+ * Os modos de sandbox conhecidos, e o que cada um AUTORIZA.
+ *
+ * `sandboxMode` continua sendo `string` no schema de propósito: o valor chega
+ * de catálogo nosso, de manifesto de integração e do Harness pinado, e recusar
+ * no `parse` quebraria a compatibilidade com um modo que o upstream introduza
+ * antes de nós.
+ *
+ * O que muda é como o desconhecido é TRATADO. Antes, três literais eram
+ * comparados soltos no meio da função. `'danger-full-access'` escrito errado —
+ * `danger_full_access`, `danger-full-acess` — simplesmente não casava, e a
+ * escalada obrigatória para T3 **não acontecia**: o portão falhava ABERTO, em
+ * silêncio, exatamente no caso mais perigoso.
+ *
+ * Agora todo modo passa por esta tabela, e o que ela não conhece é tratado
+ * como `privileged`. Um erro de digitação passa a custar uma confirmação a
+ * mais, e não uma autorização a menos.
+ */
+export declare const SANDBOX_MODE_CAPABILITIES: {
+    readonly 'read-only': {
+        readonly write: false;
+        readonly network: false;
+        readonly privileged: false;
+    };
+    readonly 'workspace-write': {
+        readonly write: true;
+        readonly network: false;
+        readonly privileged: false;
+    };
+    readonly 'danger-full-access': {
+        readonly write: true;
+        readonly network: true;
+        readonly privileged: true;
+    };
+    readonly unavailable: {
+        readonly write: true;
+        readonly network: true;
+        readonly privileged: false;
+    };
+};
+export type SandboxMode = keyof typeof SANDBOX_MODE_CAPABILITIES;
+/**
+ * O que este modo de sandbox autoriza.
+ *
+ * Modo ausente NÃO é o mesmo que modo desconhecido: ausente significa que a
+ * regra não fala de sandbox, e quem decide então é o tier declarado. Um nome
+ * que ninguém reconhece, por outro lado, é uma afirmação que não entendemos —
+ * e a resposta segura para isso é assumir o pior.
+ * @param mode - o valor cru da regra, possivelmente ausente.
+ * @returns as capacidades do modo, ou `undefined` quando não há modo.
+ */
+export declare function sandboxCapabilities(mode: string | undefined): {
+    readonly write: boolean;
+    readonly network: boolean;
+    readonly privileged: boolean;
+} | undefined;
 export declare const toolPolicyRuleSchema: z.ZodObject<{
     source: z.ZodObject<{
         kind: z.ZodEnum<{
