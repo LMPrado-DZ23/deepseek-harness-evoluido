@@ -201,16 +201,6 @@ function integrityWord(integrity: CheckpointValue['integrity']): string {
 }
 
 /**
- * Para onde a pessoa pode voltar, o que cada ponto significa, e o que acontece com o resto.
- *
- * A confirmação é CONTROLADA de fora de propósito: quem desfaz precisa ler antes
- * o que o desfazer faz e o que ele não faz — e o que ele não faz é apagar. O
- * botão de recomeçar fica ao lado porque, depois de uma falha, essas são as duas
- * saídas honestas.
- * @param props - a lista do servidor, o que está sendo confirmado e as ações.
- * @returns a seção da tela.
- */
-/**
  * Por que voltar não está disponível agora.
  *
  * Duas razões diferentes, e elas pedem gestos diferentes: durante a criação a
@@ -225,6 +215,16 @@ function unavailableSentence(state: ProjectUiState | null): string {
   return t.checkpoint.undoUnavailableBeforeAttempt
 }
 
+/**
+ * Para onde a pessoa pode voltar, o que cada ponto significa, e o que acontece com o resto.
+ *
+ * A confirmação é CONTROLADA de fora de propósito: quem desfaz precisa ler antes
+ * o que o desfazer faz e o que ele não faz — e o que ele não faz é apagar. O
+ * botão de recomeçar fica ao lado porque, depois de uma falha, essas são as duas
+ * saídas honestas.
+ * @param props - a lista do servidor, o que está sendo confirmado e as ações.
+ * @returns a seção da tela.
+ */
 export function Checkpoints(props: {
   readonly list: CheckpointListValue
   /**

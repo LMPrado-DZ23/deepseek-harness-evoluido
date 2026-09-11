@@ -22,6 +22,8 @@ import {
   roleCanAssign,
   studioRouteContractSchema,
   sandboxCapabilities,
+  SANDBOX_MODE_CAPABILITIES,
+  toolPolicyRuleSchema,
   type PolicyPluginConfig,
   type PolicyTier,
   type ToolPolicyRule,
@@ -591,5 +593,34 @@ describe('T-21: modo de sandbox desconhecido falha FECHADO', () => {
     expect(sandboxCapabilities('workspace-write')).toEqual({ write: true, network: false, privileged: false })
     expect(sandboxCapabilities('danger-full-access')).toEqual({ write: true, network: true, privileged: true })
     expect(sandboxCapabilities('qualquer-outra-coisa')).toEqual({ write: true, network: true, privileged: true })
+  })
+})
+
+describe('T-21 (revisao adversarial): a tabela nao pode ser desligada nem por dentro', () => {
+  it('a tabela e os valores dela estao CONGELADOS', () => {
+    // Achado A da revisao independente: `as const satisfies` e promessa de
+    // compilacao. Em execucao o objeto e exportado no indice publico, e uma
+    // linha num plugin montado no mesmo contexto desligaria a escalada
+    // obrigatoria para T3 do processo inteiro - sem nenhum teste ver.
+    expect(Object.isFrozen(SANDBOX_MODE_CAPABILITIES)).toBe(true)
+    for (const value of Object.values(SANDBOX_MODE_CAPABILITIES)) expect(Object.isFrozen(value)).toBe(true)
+  })
+
+  it('tentar desligar a escalada em execucao NAO funciona', () => {
+    const before = tierFor(rule({ inferredTier: 'T0', sandboxMode: 'danger-full-access' }))
+    expect(before).toBe('T3')
+    try {
+      // @ts-expect-error - a tentativa e o teste: em modulo ESM isto lanca.
+      SANDBOX_MODE_CAPABILITIES['danger-full-access'].privileged = false
+    } catch { /* congelado: lancar aqui e o comportamento desejado */ }
+    expect(SANDBOX_MODE_CAPABILITIES['danger-full-access'].privileged).toBe(true)
+    expect(tierFor(rule({ inferredTier: 'T0', sandboxMode: 'danger-full-access' }))).toBe('T3')
+  })
+
+  it('modo VAZIO e erro de forma, nao modo perigoso', () => {
+    // Achado B: `''` caia no tratamento de desconhecido e virava T3/deny, onde
+    // antes um T0 continuava T0. Endurecer por acidente de digitacao gasta a
+    // confianca do mesmo jeito que afrouxar.
+    expect(() => toolPolicyRuleSchema.parse({ source: { kind: 'studio' }, inferredTier: 'T0', sandboxMode: '' })).toThrow()
   })
 })

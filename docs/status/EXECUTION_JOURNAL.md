@@ -41,3 +41,33 @@ reprovando como deviam.
 **Próximo passo.** T-06: `trace_id` correlacionando missão → tarefa → execução
 de agente → chamada de ferramenta. É pré-requisito de medição para tudo que vem
 depois.
+
+## 2026-09-11 — meta-loop: revisão adversarial do próprio dia
+
+**Ação.** Um revisor com contexto novo auditou o diff `af54d75..845c018`
+tentando quebrá-lo. Regra: não confiar na autoavaliação de quem executou.
+
+**Resultado.** Oito achados, nenhum CRITICAL. Cinco corrigidos pela causa raiz,
+dois LOW fechados por decisão registrada, um LOW aberto com próximo passo.
+
+**O achado que eu não veria de dentro.** `as const satisfies` é promessa de
+compilação. A tabela de sandbox está exportada no índice público do pacote, e
+uma linha num plugin montado no mesmo contexto desligaria a escalada
+obrigatória para T3 do processo inteiro — sem nenhum teste ver. A comparação
+literal que existia antes era imutável por construção; eu troquei clareza por
+superfície nova e não paguei a conta. `Object.freeze` paga.
+
+**O achado mais instrutivo.** O remetente de captura do Studio escrevia direto
+no arquivo final — logo, era o **único capaz de produzir** o JSON truncado que
+minha leitura conferida passou a recusar. O conserto de leitura teria criado um
+beco onde antes havia auto-cura por sobrescrita. Consertar um lado sem olhar o
+outro é como se conserta pela metade.
+
+**O que o revisor fez e eu não tinha feito.** Rodou as duas versões do motor de
+política lado a lado sobre a matriz completa de modo × tier × origem: 64
+divergências, zero mais frouxas. E compilou o código gerado de verdade, com
+`tsc --strict`, em vez de confiar na leitura.
+
+**Próximo passo.** T-06 (`trace_id`) só começa com um produtor real: metade dele
+— schema e resolver sem quem preencha — seria exatamente a API morta que
+removi hoje de manhã.

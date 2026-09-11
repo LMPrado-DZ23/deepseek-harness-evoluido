@@ -64,6 +64,11 @@ export declare const SANDBOX_MODE_CAPABILITIES: {
     };
 };
 export type SandboxMode = keyof typeof SANDBOX_MODE_CAPABILITIES;
+export interface SandboxCapabilities {
+    readonly write: boolean;
+    readonly network: boolean;
+    readonly privileged: boolean;
+}
 /**
  * O que este modo de sandbox autoriza.
  *
@@ -74,11 +79,7 @@ export type SandboxMode = keyof typeof SANDBOX_MODE_CAPABILITIES;
  * @param mode - o valor cru da regra, possivelmente ausente.
  * @returns as capacidades do modo, ou `undefined` quando não há modo.
  */
-export declare function sandboxCapabilities(mode: string | undefined): {
-    readonly write: boolean;
-    readonly network: boolean;
-    readonly privileged: boolean;
-} | undefined;
+export declare function sandboxCapabilities(mode: string | undefined): SandboxCapabilities | undefined;
 export declare const toolPolicyRuleSchema: z.ZodObject<{
     source: z.ZodObject<{
         kind: z.ZodEnum<{

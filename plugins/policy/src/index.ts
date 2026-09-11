@@ -66,12 +66,25 @@ export const SANDBOX_MODE_CAPABILITIES = {
   // zero. Esta calibragem é a que já estava provada por teste; o conserto de
   // hoje é sobre o DESCONHECIDO, não sobre esta linha.
   unavailable: { write: true, network: true, privileged: false },
-} as const satisfies Readonly<Record<string, { readonly write: boolean; readonly network: boolean; readonly privileged: boolean }>>
+} as const satisfies Readonly<Record<string, SandboxCapabilities>>
 
 export type SandboxMode = keyof typeof SANDBOX_MODE_CAPABILITIES
+export interface SandboxCapabilities { readonly write: boolean; readonly network: boolean; readonly privileged: boolean }
 
 /** O que um modo desconhecido autoriza: tudo. Falhar fechado é falhar para cá. */
-const UNKNOWN_SANDBOX = { write: true, network: true, privileged: true } as const
+const UNKNOWN_SANDBOX: SandboxCapabilities = { write: true, network: true, privileged: true }
+
+// `as const satisfies` é promessa de COMPILAÇÃO e nada mais: em execução a
+// tabela é um objeto comum, exportado no índice público do pacote. Uma linha
+// num plugin montado no mesmo contexto — `SANDBOX_MODE_CAPABILITIES['danger-
+// full-access'].privileged = false` — desligaria a escalada obrigatória para
+// T3 do processo inteiro, e nenhum teste veria. Antes deste commit a
+// comparação era um literal embutido, imutável por construção; a tabela trocou
+// clareza por uma superfície nova, e congelar é o que devolve a imutabilidade.
+// `freeze` é raso, então cada valor é congelado também.
+for (const value of Object.values(SANDBOX_MODE_CAPABILITIES)) Object.freeze(value)
+Object.freeze(SANDBOX_MODE_CAPABILITIES)
+Object.freeze(UNKNOWN_SANDBOX)
 
 /**
  * O que este modo de sandbox autoriza.
@@ -83,7 +96,7 @@ const UNKNOWN_SANDBOX = { write: true, network: true, privileged: true } as cons
  * @param mode - o valor cru da regra, possivelmente ausente.
  * @returns as capacidades do modo, ou `undefined` quando não há modo.
  */
-export function sandboxCapabilities(mode: string | undefined): { readonly write: boolean; readonly network: boolean; readonly privileged: boolean } | undefined {
+export function sandboxCapabilities(mode: string | undefined): SandboxCapabilities | undefined {
   if (mode === undefined) return undefined
   return Object.hasOwn(SANDBOX_MODE_CAPABILITIES, mode)
     ? SANDBOX_MODE_CAPABILITIES[mode as SandboxMode]
@@ -97,7 +110,12 @@ export const toolPolicyRuleSchema = z.object({
   policyTier: z.unknown().optional(),
   allowManifestDowngrade: z.boolean().default(false),
   blocked: z.boolean().default(false),
-  sandboxMode: z.string().optional(),
+  // `.min(1)` porque campo vazio e erro de FORMA, e nao um modo. Sem ele, `''`
+  // caia no tratamento de desconhecido e virava T3/deny - onde antes um T0
+  // continuava T0. Um YAML com `sandboxMode:` sem valor passaria a NEGAR a
+  // ferramenta em vez de permiti-la, e endurecer por acidente de digitacao
+  // gasta a confianca do mesmo jeito que afrouxar.
+  sandboxMode: z.string().min(1).optional(),
   requiredPermission: studioPermissionSchema.optional(),
   scope: z.enum(['none', 'org', 'workspace', 'project']).default('none'),
 }).strict()

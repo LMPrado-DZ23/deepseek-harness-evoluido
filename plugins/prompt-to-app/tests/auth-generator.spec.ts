@@ -64,6 +64,19 @@ describe('o aplicativo gerado nao apaga o historico de envios quando o arquivo e
     expect(emailSource()).not.toContain('catch {}')
   })
 
+  it('a captura do Studio escreve de forma ATOMICA, como a da previa',()=>{
+    // Achado G da revisao adversarial: o remetente do Studio escrevia direto no
+    // arquivo final, entao era o UNICO capaz de PRODUZIR o JSON truncado que
+    // readCapture agora recusa. Uma queda no meio da escrita travaria o envio
+    // para sempre - o conserto de leitura teria criado um beco onde antes havia
+    // auto-cura por sobrescrita.
+    const source=emailSource()
+    // Dois `rename`: um por remetente. Antes havia so um.
+    expect(source.split('await rename(temporary, this.path)')).toHaveLength(3)
+    // E nenhuma escrita direta no caminho final.
+    expect(source).not.toContain('await writeFile(this.path,')
+  })
+
   it('os dois remetentes usam a mesma leitura conferida',()=>{
     const source=emailSource()
     // Captura do Studio e captura da previa: duas classes, um so caminho de

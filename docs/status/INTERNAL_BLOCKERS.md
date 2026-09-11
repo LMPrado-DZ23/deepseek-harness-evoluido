@@ -9,6 +9,8 @@ Meta: `CRITICAL = 0` e `HIGH = 0`.
 
 Estado em 11/09/2026: **CRITICAL = 0, HIGH = 0.**
 
+Um MEDIUM novo (IB-10) veio da execução da suíte completa, não de código novo.
+
 ## Abertos
 
 | ID | severidade | componente | causa raiz | estado |
@@ -17,6 +19,7 @@ Estado em 11/09/2026: **CRITICAL = 0, HIGH = 0.**
 | IB-02 | MEDIUM | `scripts/check-rls-coverage.ts` | 19 de 26 domínios não têm RLS no banco. **Não são pendências**: são exclusões estruturais nomeadas na ADR-044, cada uma com citação conferida. Três (`runs`, `projects`, `approvals`) voltam a ser candidatos se a varredura de reinício for redesenhada por inquilino | ABERTO POR DESENHO |
 | IB-03 | LOW | `plugins/agent-team` | O grafo de tarefas tem `depends_on` mas não tem os estados `READY`/`BLOCKED`/`REVIEW`/`DONE`; sem eles, "qual é a próxima tarefa executável" não é uma pergunta que o sistema responda sozinho | ABERTO |
 | IB-04 | LOW | observabilidade | Não existe `trace_id` costurando missão → tarefa → execução de agente → chamada de ferramenta. Cada plugin tem o seu id e ninguém consegue reconstruir uma missão inteira | ABERTO |
+| IB-10 | MEDIUM | `plugins/builder-supervisor` (teste) | `unix-server.spec.ts` > "preserves a foreign socket before close and one installed during close" reprova de forma INTERMITENTE na suíte completa (`plugins/builder-supervisor/tests/unix-server.spec.ts:409`, segunda metade — a da corrida). Isolado passa 37/37 em três execuções seguidas; sob a carga da suíte inteira reprovou uma vez com `promise resolved "undefined" instead of rejecting`. Hipótese: o `racing.listen` do teste não completa antes da verificação de identidade do `close`, e aí não há incompatibilidade a detectar. **Não foi causado pelo trabalho de 11/09** — nada foi tocado neste plugin — mas um teste que só reprova sob carga é um teste que ensina a ignorar vermelho, e a área que ele cobre é validação de identidade de socket | ABERTO |
 
 ## Fechados nesta iteração
 

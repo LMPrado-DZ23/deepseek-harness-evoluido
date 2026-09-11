@@ -50,7 +50,12 @@ export const CATEGORY_REQUIRES_DATA_MODEL: Readonly<Record<StudioProjectCategory
 }
 
 export function assertCategoryCanGenerate(category: StudioProjectCategory, spec: AppSpecV1): void {
-  if (!CATEGORY_REQUIRES_DATA_MODEL[category]) return
+  // `=== false` e nao `!`: um `Record<Union, boolean>` indexado com uma
+  // categoria vinda de FORA do union devolve `undefined`, e `!undefined` seria
+  // `true` - a conferencia seria PULADA justamente no caso desconhecido, que e
+  // o defeito que esta tabela existe para fechar. Assim, so quem esta na
+  // tabela dizendo `false` sai sem conferencia.
+  if (CATEGORY_REQUIRES_DATA_MODEL[category] === false) return
   const entities = spec.entities.filter(entity => entity.kind === 'database')
   if (entities.length === 0) throw new FormCategoryCapabilityError('FORM_DATABASE_REQUIRED', t('errors.formDatabaseRequired'))
   assertValidDataModel(spec)
@@ -77,7 +82,7 @@ export class PlannerEngine {
     ].join('\n'))
     const decoded = typeof result.value === 'string' ? JSON.parse(result.value) : result.value
     const output = planOutputSchema.parse(decoded)
-    if (CATEGORY_REQUIRES_DATA_MODEL[category] && !output.slices.some(slice => slice.planned_files.includes('src/GeneratedApp.tsx'))) {
+    if (CATEGORY_REQUIRES_DATA_MODEL[category] !== false && !output.slices.some(slice => slice.planned_files.includes('src/GeneratedApp.tsx'))) {
       throw new FormCategoryCapabilityError('FORM_ENTRY_FILE_REQUIRED', t('errors.formEntryFileRequired'))
     }
     return output

@@ -45,6 +45,7 @@ separa este trabalho de acrescentar features.
 | T-20 | P4 | Learning Engine com validação antes de virar regra | T-08, T-12 | PENDING |
 | T-21 | P2 | Taxonomia de sandbox por capacidade, com desconhecido falhando fechado | — | DONE |
 | T-22 | P3 | Feature Capability Registry (AVAILABLE→…→OPERATIONAL) provado por health real | T-06 | PENDING |
+| T-23 | P1 | Estabilizar `unix-server.spec.ts` (IB-10): teste de identidade de socket que só reprova sob carga | — | READY |
 
 ## Honestidade de escala
 

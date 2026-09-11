@@ -27,7 +27,6 @@ import {
   type AgentRestartReconciliation,
   type AgentProvider,
   type AgentRepository,
-  type DelegationRequest,
   type JobPort,
 } from './service.js'
 // A chave `tokenUsage` da projeção de sessão é DECLARADA pelo medidor de tokens

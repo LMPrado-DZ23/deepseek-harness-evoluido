@@ -80,6 +80,14 @@ export function migrateAuth(database: DatabaseSync): void {
  * vazia; qualquer outra coisa sobe, porque perder registro sem ninguém saber é
  * pior que falhar o envio.
  *
+ * A escrita é atômica — arquivo temporário e `rename` — pelo mesmo motivo, e
+ * a revisão adversarial é que pegou: o remetente de captura do Studio escrevia
+ * direto no arquivo final, então ele era o ÚNICO capaz de PRODUZIR o JSON
+ * truncado que `readCapture` agora recusa. Uma queda no meio da escrita
+ * deixaria o envio travado para sempre, e o conserto de leitura teria criado
+ * um beco onde antes havia auto-cura por sobrescrita. O remetente da prévia já
+ * escrevia assim; agora os dois escrevem.
+ *
  * A explicação mora AQUI e não lá dentro de propósito: `gate:i18n` recusa
  * prosa em pt-BR dentro do código gerado, e está certo — comentário em
  * português num arquivo que vai para a máquina de outra pessoa é ruído que
@@ -139,8 +147,12 @@ export class StudioCaptureEmailSender implements EmailSender {
   private async append(message: object): Promise<void> {
     await mkdir(dirname(this.path), { recursive: true })
     const current = await readCapture(this.path)
-    await writeFile(this.path, JSON.stringify([...current.slice(-19), message], null, 2) + '\\n', { encoding: 'utf8', mode: 0o600 })
-    await chmod(this.path, 0o600)
+    const temporary = \`\${this.path}.\${randomUUID()}.tmp\`
+    try {
+      await writeFile(temporary, JSON.stringify([...current.slice(-19), message], null, 2) + '\\n', { encoding: 'utf8', mode: 0o600 })
+      await chmod(temporary, 0o600)
+      await rename(temporary, this.path)
+    } finally { await rm(temporary, { force: true }) }
   }
 }
 
