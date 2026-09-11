@@ -65,6 +65,111 @@ const GATE_PATH = /^scripts\/check-secrets\.(?:mjs|spec\.mjs)$/u
  * dispensa esquecida é como a varredura apodrece sem ninguém notar.
  */
 export const SECRET_ALLOWLIST = [
+  // As 28 ocorrencias que vieram junto com a copia do ECC em vendor/ (ADR-045).
+  //
+  // NENHUMA foi dispensada por ser de terceiro: cada linha foi ABERTA e lida em
+  // 11/09/2026, e a razao esta em cada entrada. Isentar `vendor/` inteiro com
+  // uma regra so seria mais rapido e seria o erro - a copia entrou no
+  // repositorio publico, entao ela e nossa responsabilidade como qualquer outro
+  // arquivo, e um segredo real dentro dela vazaria com o nosso nome.
+  //
+  // A ironia util: a maioria e fixture do detector de segredo DO PROPRIO ECC.
+  // Dois projetos que procuram a mesma coisa se acusam mutuamente.
+  {
+    path: 'vendor/ecc/tests/hooks/governance-capture.test.js',
+    rule: 'aws-access-key',
+    reason: 'fixture do detector de segredo DO PROPRIO ECC: o teste alimenta a forma proibida (AKIAIOSFODNN7EXAMPLE, a chave de exemplo publicada pela AWS, e um RSA truncado em "MIIE...") para provar que o detector dele a pega. Lido linha a linha em 11/09/2026',
+  },
+  {
+    path: 'vendor/ecc/tests/hooks/governance-capture.test.js',
+    rule: 'github-token',
+    reason: 'fixture do detector de segredo DO PROPRIO ECC: o teste alimenta a forma proibida (AKIAIOSFODNN7EXAMPLE, a chave de exemplo publicada pela AWS, e um RSA truncado em "MIIE...") para provar que o detector dele a pega. Lido linha a linha em 11/09/2026',
+  },
+  {
+    path: 'vendor/ecc/tests/hooks/governance-capture.test.js',
+    rule: 'private-key',
+    reason: 'fixture do detector de segredo DO PROPRIO ECC: o teste alimenta a forma proibida (AKIAIOSFODNN7EXAMPLE, a chave de exemplo publicada pela AWS, e um RSA truncado em "MIIE...") para provar que o detector dele a pega. Lido linha a linha em 11/09/2026',
+  },
+  {
+    path: 'vendor/ecc/tests/hooks/pre-bash-commit-quality.test.js',
+    rule: 'anthropic-key',
+    reason: 'idem: quatro formas sinteticas (sk-ant-api03-AbCdEf..., ghp_abcdef..., AKIAABCDEFGHIJKLMNOP) usadas como isca do gancho de commit do ECC. Lido linha a linha em 11/09/2026',
+  },
+  {
+    path: 'vendor/ecc/tests/hooks/pre-bash-commit-quality.test.js',
+    rule: 'aws-access-key',
+    reason: 'idem: quatro formas sinteticas (sk-ant-api03-AbCdEf..., ghp_abcdef..., AKIAABCDEFGHIJKLMNOP) usadas como isca do gancho de commit do ECC. Lido linha a linha em 11/09/2026',
+  },
+  {
+    path: 'vendor/ecc/tests/hooks/pre-bash-commit-quality.test.js',
+    rule: 'github-token',
+    reason: 'idem: quatro formas sinteticas (sk-ant-api03-AbCdEf..., ghp_abcdef..., AKIAABCDEFGHIJKLMNOP) usadas como isca do gancho de commit do ECC. Lido linha a linha em 11/09/2026',
+  },
+  {
+    path: 'vendor/ecc/tests/hooks/pre-bash-commit-quality.test.js',
+    rule: 'openai-key',
+    reason: 'idem: quatro formas sinteticas (sk-ant-api03-AbCdEf..., ghp_abcdef..., AKIAABCDEFGHIJKLMNOP) usadas como isca do gancho de commit do ECC. Lido linha a linha em 11/09/2026',
+  },
+  {
+    path: 'vendor/ecc/tests/lib/mcp-inventory.test.js',
+    rule: 'anthropic-key',
+    reason: 'chave literalmente marcada como falsa no proprio texto (sk-ant-api03-FAKEFAKEFAKE...000000), usada como argumento de linha de comando no teste. Lido em 11/09/2026',
+  },
+  {
+    path: 'vendor/ecc/tests/lib/mcp-inventory.test.js',
+    rule: 'openai-key',
+    reason: 'chave literalmente marcada como falsa no proprio texto (sk-ant-api03-FAKEFAKEFAKE...000000), usada como argumento de linha de comando no teste. Lido em 11/09/2026',
+  },
+  {
+    path: 'vendor/ecc/tests/lib/memory-vault.test.js',
+    rule: 'private-key',
+    reason: 'cabecalho PEM seguido de "abc": fixture do detector do ECC, nao e chave. Lido em 11/09/2026',
+  },
+  {
+    path: 'vendor/ecc/examples/unified-memory/conformance.cjs',
+    rule: 'private-key',
+    reason: 'a propria linha se declara: "-----BEGIN PRIVATE KEY-----\nSynthetic non-key fixture." Lido em 11/09/2026',
+  },
+  {
+    path: 'vendor/ecc/skills/docker-patterns/SKILL.md',
+    rule: 'postgres-dsn-with-password',
+    reason: 'exemplo de docker-compose de desenvolvimento com postgres:postgres@db, o par usuario/senha padrao do proprio Postgres em ambiente local. Lido em 11/09/2026',
+  },
+  {
+    path: 'vendor/ecc/.kiro/skills/docker-patterns/SKILL.md',
+    rule: 'postgres-dsn-with-password',
+    reason: 'copia da mesma skill sob .kiro/ no repositorio do ECC; mesmo exemplo postgres:postgres@db',
+  },
+  {
+    path: 'vendor/ecc/docs/es/skills/docker-patterns/SKILL.md',
+    rule: 'postgres-dsn-with-password',
+    reason: 'traducao para espanhol da mesma skill; mesmo exemplo postgres:postgres@db',
+  },
+  {
+    path: 'vendor/ecc/docs/tr/skills/docker-patterns/SKILL.md',
+    rule: 'postgres-dsn-with-password',
+    reason: 'traducao para turco da mesma skill; mesmo exemplo postgres:postgres@db',
+  },
+  {
+    path: 'vendor/ecc/docs/zh-CN/skills/docker-patterns/SKILL.md',
+    rule: 'postgres-dsn-with-password',
+    reason: 'traducao para chines simplificado da mesma skill; mesmo exemplo postgres:postgres@db',
+  },
+  {
+    path: 'vendor/ecc/skills/django-verification/SKILL.md',
+    rule: 'postgres-dsn-with-password',
+    reason: 'exemplo de DSN de desenvolvimento Django na documentacao do ECC. Lido em 11/09/2026',
+  },
+  {
+    path: 'vendor/ecc/docs/ja-JP/skills/django-verification/SKILL.md',
+    rule: 'postgres-dsn-with-password',
+    reason: 'traducao para japones da mesma skill; mesmo DSN de exemplo',
+  },
+  {
+    path: 'vendor/ecc/docs/zh-CN/skills/django-verification/SKILL.md',
+    rule: 'postgres-dsn-with-password',
+    reason: 'traducao para chines simplificado da mesma skill; mesmo DSN de exemplo',
+  },
   {
     path: 'audit/AUDITOR_B_VERIFICACAO.md',
     rule: 'github-token',

@@ -74,6 +74,7 @@
     "gate:secrets": "node scripts/check-secrets.mjs --self-test && node scripts/check-secrets.mjs",
     "gate:no-caveman": "node scripts/check-no-caveman.mjs --self-test && node scripts/check-no-caveman.mjs",
     "gate:p37": "node scripts/check-p37-inventory.mjs --self-test && node scripts/check-p37-inventory.mjs",
+    "gate:vendored-references": "node scripts/check-vendored-references.mjs --self-test && node scripts/check-vendored-references.mjs",
     "gate:licenses": "node scripts/check-release-licenses.mjs --self-test && node scripts/check-release-licenses.mjs",
     "gate:licenses:release": "node scripts/check-release-licenses.mjs --release",
     "sbom:cyclonedx": "pnpm sbom --sbom-format cyclonedx --lockfile-only > sbom.cdx.json"

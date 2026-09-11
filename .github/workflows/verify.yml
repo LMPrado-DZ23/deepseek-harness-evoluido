@@ -139,6 +139,14 @@ jobs:
           # perder o campo que decidiria a cópia - licença, marca, segredo -
           # e o travessão passa por resposta.
           pnpm gate:p37
+          # As cópias em vendor/ afirmam três coisas que sem verificação são só
+          # prosa: que carregam a licença do titular, que dizem de qual commit
+          # vieram, e que NADA ali é dependência do produto. A quarta é o
+          # motivo real deste portão existir: `vendor/ecc/assets` ficou de fora
+          # porque guarda marca de terceiro que o MIT do ECC não licencia, e
+          # uma recópia distraída a traria de volta para um repositório
+          # público.
+          pnpm gate:vendored-references
           # P37 de licença. Recusa a família fonte-disponível (BSL, SSPL,
           # AGPL, Elastic, Commons Clause) e exige revisão humana registrada
           # para qualquer licença que não esteja nas duas listas.
