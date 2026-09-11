@@ -45,6 +45,23 @@ export const agentTeamSchema = z.object({
   approved_by: z.string().min(1),
   approved_at: z.iso.datetime(),
   diagnostic: z.string().nullable(),
+  /**
+   * O teto de tokens da EQUIPE INTEIRA, quando alguém declarou um.
+   *
+   * Existe por uma conta que ninguém estava fazendo: o orçamento que existia
+   * (`budget.maxTokens`) é POR TAREFA, e uma equipe tem até oito. Oito tarefas
+   * cada uma dentro do combinado gastam oito vezes o que a pessoa aprovou — e
+   * cada execução, olhada sozinha, estava certa. Teto por parte não é teto.
+   *
+   * `null` quando ninguém declarou, e aí nada muda: quem não pediu teto não
+   * passa a ter um. O teto é do PEDIDO da pessoa, não um padrão nosso.
+   *
+   * OPCIONAL com a versão do domínio INTOCADA: subir a versão faria `open()`
+   * falhar com `version-mismatch` em instalação que já rodou, e não existe
+   * passo de migração aqui. Equipe gravada antes deste campo não tem teto —
+   * que é a verdade sobre ela.
+   */
+  max_total_tokens: z.number().int().positive().nullable().optional(),
   created_at: z.iso.datetime(),
   updated_at: z.iso.datetime(),
 }).strict()

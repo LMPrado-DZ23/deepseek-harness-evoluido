@@ -34,6 +34,12 @@ export interface AgentTeamStartRequest {
   readonly approval: DelegationApproval
   readonly sensitive?: 'secrets' | 'external-network' | 'deploy'
   readonly budget?: DelegationBudget
+  /**
+   * O teto de tokens da EQUIPE inteira. `budget.maxTokens` é por TAREFA, e uma
+   * equipe tem até oito: sem este, oito execuções cada uma dentro do combinado
+   * gastam oito vezes o que a pessoa aprovou.
+   */
+  readonly maxTotalTokens?: number
 }
 
 export interface AgentTeamRepository {
@@ -136,6 +142,7 @@ export class StudioAgentTeamService {
       approved_by: request.approval.approvedBy,
       approved_at: timestamp,
       diagnostic: t('status.running'),
+      max_total_tokens: request.maxTotalTokens ?? null,
       created_at: timestamp,
       updated_at: timestamp,
     }
@@ -259,6 +266,19 @@ export class StudioAgentTeamService {
     budget: DelegationBudget | undefined,
   ): Promise<void> {
     for (const task of readyTasks(tasks)) {
+      // O teto e conferido A CADA tarefa, e nao uma vez antes do laco: as
+      // tarefas desta leva terminam DENTRO dele, e conferir so na entrada
+      // deixaria a equipe estourar o combinado sem nunca perceber.
+      const spend = teamSpend(team, this.#teamTasks(team.team_id), this.dependencies.agents.runs())
+      if (spend.kind !== 'NO_LIMIT' && spend.kind !== 'WITHIN') {
+        const diagnostic = spend.kind === 'EXCEEDED'
+          ? t('errors.teamBudgetExceeded', { spent: String(spend.spent), limit: String(spend.limit) })
+          : t('errors.teamBudgetUnmeasured', { run: spend.runId })
+        await this.dependencies.repository.putTask({
+          ...task, status: 'BUDGET_EXCEEDED', diagnostic, updated_at: this.#now(),
+        })
+        continue
+      }
       try {
         const accepted = this.dependencies.agents.service.start({
           orgId: team.org_id,
@@ -460,6 +480,52 @@ export type TaskReadiness =
   | { readonly kind: 'WAITING'; readonly pending: readonly string[] }
   | { readonly kind: 'BLOCKED'; readonly reason: 'MISSING_DEPENDENCY' | 'DEPENDENCY_FAILED'; readonly dependencies: readonly string[] }
   | { readonly kind: 'NOT_QUEUED' }
+
+/**
+ * O que a equipe já gastou, e se dá para provar.
+ *
+ * Três respostas, e a do meio é a que costuma faltar num orçamento:
+ * `WITHIN` (cabe), `EXCEEDED` (estourou) e `UNMEASURED` (uma execução da
+ * equipe terminou sem o provedor relatar consumo). `UNMEASURED` NÃO é zero:
+ * tratar não-medido como nada gasto faria o teto parar de estourar por falta
+ * de medição, em vez de por estar dentro do combinado — e um teto que só vale
+ * quando dá para medir não é um teto, é uma esperança.
+ */
+export type TeamSpendVerdict =
+  | { readonly kind: 'NO_LIMIT' }
+  | { readonly kind: 'WITHIN'; readonly spent: number; readonly limit: number }
+  | { readonly kind: 'EXCEEDED'; readonly spent: number; readonly limit: number }
+  | { readonly kind: 'UNMEASURED'; readonly runId: string; readonly limit: number }
+
+/**
+ * Soma o consumo das execuções desta equipe e decide se cabe mais trabalho.
+ *
+ * Conta as execuções TERMINADAS: uma em curso ainda não relatou consumo, e
+ * contá-la como zero seria a mesma mentira que `UNMEASURED` existe para não
+ * contar. O efeito prático é que o teto é conferido ANTES de cada disparo, com
+ * o que já se sabe — conferir depois só descobriria o estouro tendo gasto.
+ * @param team - a equipe, com o teto que ela declarou.
+ * @param tasks - as tarefas dela.
+ * @param runs - as execuções conhecidas.
+ * @returns o veredito.
+ */
+export function teamSpend(
+  team: Pick<AgentTeamRecord, 'max_total_tokens'>,
+  tasks: readonly AgentTeamTaskRecord[],
+  runs: readonly AgentRunRecord[],
+): TeamSpendVerdict {
+  const limit = team.max_total_tokens
+  if (limit === null || limit === undefined) return { kind: 'NO_LIMIT' }
+  const mine = new Set(tasks.map(task => task.run_id).filter((id): id is string => id !== null))
+  let spent = 0
+  for (const run of runs) {
+    if (!mine.has(run.run_id) || run.status === 'RUNNING') continue
+    const used = run.tokens_used
+    if (used === null || used === undefined) return { kind: 'UNMEASURED', runId: run.run_id, limit }
+    spent += used
+  }
+  return spent >= limit ? { kind: 'EXCEEDED', spent, limit } : { kind: 'WITHIN', spent, limit }
+}
 
 /**
  * O estado de execução de UMA tarefa diante das dependências dela.

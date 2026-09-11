@@ -8,6 +8,7 @@ import {
   StudioAgentTeamService,
   blockedTasks,
   taskReadiness,
+  teamSpend,
   type AgentTeamRepository,
   type AgentTeamStartRequest,
   type AgentTeamTaskInput,
@@ -482,5 +483,89 @@ describe('T-13: uma tarefa que nunca vai rodar nao pode parecer com uma que so a
     expect(blocked.map(item => item.task.task_id).sort()).toEqual(['orfa', 'parada'])
     expect(blocked.find(item => item.task.task_id === 'orfa')?.readiness.reason).toBe('MISSING_DEPENDENCY')
     expect(blocked.find(item => item.task.task_id === 'parada')?.readiness.reason).toBe('DEPENDENCY_FAILED')
+  })
+})
+
+describe('T-19: teto por PARTE não é teto', () => {
+  const equipe = (max: number | null | undefined): Pick<AgentTeamRecord, 'max_total_tokens'> =>
+    max === undefined ? {} : { max_total_tokens: max }
+  const tarefa = (id: string, runId: string | null): AgentTeamTaskRecord => ({
+    task_id: id, team_id: 'team-1', org_id: 'org-1', tenant_id: 'tenant-1', workspace_id: 'tenant-1',
+    title: 'Uma tarefa', role: 'implementer', prompt: 'Faça.', intended_paths: ['src'], depends_on: [],
+    status: 'QUEUED', run_id: runId, job_id: null, diagnostic: null, created_at: now, updated_at: now,
+  })
+  const gasto = (id: string, tokens: number | null, status: AgentRunRecord['status'] = 'PROPOSED'): AgentRunRecord =>
+    ({ ...run(id, status), tokens_used: tokens })
+
+  it('quem não declarou teto não passa a ter um', () => {
+    // O teto é do PEDIDO da pessoa, não um padrão nosso: inventar um limite
+    // faria equipes que já funcionavam pararem no meio sem ninguém ter pedido.
+    expect(teamSpend(equipe(undefined), [tarefa('a', 'run-1')], [gasto('run-1', 9_999_999)]))
+      .toEqual({ kind: 'NO_LIMIT' })
+    expect(teamSpend(equipe(null), [tarefa('a', 'run-1')], [gasto('run-1', 9_999_999)]))
+      .toEqual({ kind: 'NO_LIMIT' })
+  })
+
+  it('soma o gasto de TODAS as tarefas da equipe, que é a conta que ninguém fazia', () => {
+    // `budget.maxTokens` é por TAREFA e a equipe tem até oito: oito execuções
+    // cada uma dentro do combinado gastam oito vezes o aprovado, e cada uma,
+    // olhada sozinha, estava certa.
+    const tasks = [tarefa('a', 'run-1'), tarefa('b', 'run-2'), tarefa('c', 'run-3')]
+    const runs = [gasto('run-1', 400), gasto('run-2', 400), gasto('run-3', 400)]
+    expect(teamSpend(equipe(1_000), tasks, runs)).toEqual({ kind: 'EXCEEDED', spent: 1_200, limit: 1_000 })
+    expect(teamSpend(equipe(2_000), tasks, runs)).toEqual({ kind: 'WITHIN', spent: 1_200, limit: 2_000 })
+  })
+
+  it('execução de OUTRA equipe não entra na conta', () => {
+    // Somar por engano o gasto alheio pararia uma equipe por trabalho que não
+    // é dela — e a pessoa não teria como descobrir por quê.
+    expect(teamSpend(equipe(1_000), [tarefa('a', 'run-1')], [gasto('run-1', 100), gasto('run-alheia', 5_000)]))
+      .toEqual({ kind: 'WITHIN', spent: 100, limit: 1_000 })
+  })
+
+  it('não-medido NÃO é zero: sem medida, não dá para provar que cabe', () => {
+    // Tratar ausência de medida como nada gasto faria o teto parar de estourar
+    // por falta de MEDIÇÃO em vez de por estar dentro do combinado — e um teto
+    // que só vale quando dá para medir não é um teto, é uma esperança.
+    expect(teamSpend(equipe(1_000), [tarefa('a', 'run-1')], [gasto('run-1', null)]))
+      .toEqual({ kind: 'UNMEASURED', runId: 'run-1', limit: 1_000 })
+    // Sem o campo (execução gravada antes dele existir) vale o mesmo.
+    const semCampo = { ...run('run-1', 'PROPOSED') }
+    expect(teamSpend(equipe(1_000), [tarefa('a', 'run-1')], [semCampo]))
+      .toEqual({ kind: 'UNMEASURED', runId: 'run-1', limit: 1_000 })
+  })
+
+  it('execução EM CURSO não conta como zero nem trava a equipe', () => {
+    // Ela ainda não relatou consumo. Contá-la como zero seria a mesma mentira
+    // que `UNMEASURED` existe para não contar; chamá-la de não-medida travaria
+    // toda equipe que tem qualquer coisa rodando.
+    expect(teamSpend(equipe(1_000), [tarefa('a', 'run-1'), tarefa('b', 'run-2')],
+      [gasto('run-1', 100), gasto('run-2', null, 'RUNNING')]))
+      .toEqual({ kind: 'WITHIN', spent: 100, limit: 1_000 })
+  })
+
+  it('estourado, a tarefa seguinte NÃO é iniciada, e a frase diz a conta', async () => {
+    const h = harness()
+    await h.service.start(h.request({
+      maxTotalTokens: 500,
+      tasks: [task({ taskId: 'primeira', intendedPaths: ['src/a'] })],
+    }))
+    expect(h.start).toHaveBeenCalledTimes(1)
+
+    // A primeira terminou gastando mais que o teto inteiro.
+    h.runs.push({ ...run('run-1', 'PROPOSED'), tokens_used: 900 })
+    h.tasks.set('team-1:segunda', {
+      ...h.tasks.get('team-1:primeira')!, task_id: 'segunda', status: 'QUEUED',
+      run_id: null, job_id: null, intended_paths: ['src/b'],
+    })
+
+    await expect(h.service.continue('team-1', parent(), { approved: true, tier: 'T2', approvedBy: 'user-1' }))
+      .resolves.toBeDefined()
+    expect(h.start).toHaveBeenCalledTimes(1)
+    expect(h.tasks.get('team-1:segunda')).toMatchObject({
+      status: 'BUDGET_EXCEEDED',
+      diagnostic: expect.stringContaining('900'),
+    })
+    expect(h.tasks.get('team-1:segunda')?.diagnostic).toContain('500')
   })
 })

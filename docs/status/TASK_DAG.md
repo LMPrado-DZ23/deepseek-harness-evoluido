@@ -45,7 +45,7 @@ separa este trabalho de acrescentar features.
 | T-16 | P2 | Provider adapters reais atrás do gateway | — | BLOCKED (EB-04) |
 | T-17 | P3 | Research Engine com procedência de fonte | T-07 | PENDING |
 | T-18 | P3 | Visual QA com comparação de imagem | — | PENDING |
-| T-19 | P3 | `MAX_MISSION_COST` e orçamento por missão | T-14 | PENDING |
+| T-19 | P3 | `MAX_MISSION_COST` e orçamento por missão | T-14 | PARCIAL (teto por EQUIPE existe e é falsificado; o de MISSÃO depende de T-14, e o de CUSTO depende de tabela de preço) |
 | T-20 | P4 | Learning Engine com validação antes de virar regra | T-08, T-12 | PENDING |
 | T-21 | P2 | Taxonomia de sandbox por capacidade, com desconhecido falhando fechado | — | DONE |
 | T-22 | P3 | Feature Capability Registry (AVAILABLE→…→OPERATIONAL) provado por health real | T-06 | PENDING |

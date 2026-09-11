@@ -18,7 +18,9 @@
     "nothingReady": "Nenhuma tarefa pode começar agora. Revise e aplique as propostas anteriores antes de continuar.",
     "owner": "Somente a pessoa que iniciou a equipe pode continuá-la ou cancelá-la.",
     "persistence": "Não foi possível registrar a execução da tarefa; ela foi cancelada com segurança.",
-    "reconciliationIncomplete": "A equipe ainda tem trabalho em andamento; espere ele terminar ou pare a equipe antes de reorganizar."
+    "reconciliationIncomplete": "A equipe ainda tem trabalho em andamento; espere ele terminar ou pare a equipe antes de reorganizar.",
+    "teamBudgetExceeded": "A equipe já usou {spent} do limite de {limit} combinado para ela. As tarefas restantes não foram iniciadas.",
+    "teamBudgetUnmeasured": "Não dá para provar que a equipe está dentro do limite combinado: o trabalho {run} terminou sem informar quanto consumiu. As tarefas restantes não foram iniciadas."
   },
   "status": {
     "running": "Há assistentes trabalhando em cópias isoladas.",
