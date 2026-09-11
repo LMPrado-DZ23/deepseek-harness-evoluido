@@ -45,6 +45,7 @@ export declare const agentRunSchema: z.ZodObject<{
     diagnostic: z.ZodNullable<z.ZodString>;
     interrupted_by_restart: z.ZodOptional<z.ZodBoolean>;
     tokens_used: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+    child_session_id: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     created_at: z.ZodISODateTime;
     updated_at: z.ZodISODateTime;
 }, z.core.$strict>;
@@ -102,6 +103,7 @@ export declare const studioAgentRunsDomainSpec: {
             updated_at: string;
             interrupted_by_restart?: boolean | undefined;
             tokens_used?: number | null | undefined;
+            child_session_id?: string | null | undefined;
         }>;
     };
 };

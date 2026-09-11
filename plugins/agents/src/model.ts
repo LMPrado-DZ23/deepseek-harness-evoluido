@@ -66,6 +66,27 @@ export const agentRunSchema = z.object({
    * combinado.
    */
   tokens_used: z.number().int().nonnegative().nullable().optional(),
+  /**
+   * A sessão do FILHO — o agente delegado que de fato executa o trabalho.
+   *
+   * Existe porque sem ela a trilha de política é ININTELIGÍVEL. Toda decisão
+   * de ferramenta grava `session_id`, e para um filho em processo esse valor é
+   * a sessão do filho; nenhum registro do produto guardava esse id. O
+   * resultado prático: dava para ler que uma ferramenta foi negada, e não dava
+   * para dizer QUAL tarefa, de QUAL equipe, provocou a negação. A pergunta
+   * "por que este agente tentou escrever aqui?" não tinha caminho de resposta.
+   *
+   * `coordinator_session_id` NÃO serve: o coordenador é o pai que publica o
+   * filho, e as ferramentas que a trilha registra são chamadas pelo filho.
+   * Usar um pelo outro produziria uma correlação que casa com nada.
+   *
+   * OPCIONAL, com a versão do domínio INTOCADA, pela mesma razão de
+   * `tokens_used`: subir a versão faria `open()` falhar com `version-mismatch`
+   * para sempre em instalação que já rodou, e não existe passo de migração
+   * neste seam. Ausente é a verdade sobre uma execução gravada antes deste
+   * campo — e "não sei de quem é" nunca pode ser lido como "é de ninguém".
+   */
+  child_session_id: z.string().min(1).nullable().optional(),
   created_at: z.iso.datetime(),
   updated_at: z.iso.datetime(),
 }).strict()

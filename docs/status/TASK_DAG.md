@@ -28,10 +28,11 @@ separa este trabalho de acrescentar features.
 | T-03 | P0 | Categoria: tabela exaustiva no lugar de duas listas negadas | — | DONE |
 | T-04 | P0 | Gerador de e-mail: distinguir arquivo ausente de corrompido | — | DONE |
 | T-05 | P0 | Estado persistente da missão (este arquivo, PROJECT_STATUS, blockers, journal) | — | DONE |
-| T-06 | P1 | `trace_id` correlacionando missão → tarefa → execução → ferramenta | T-05 | READY |
+| T-06 | P1 | `trace_id` correlacionando missão → tarefa → execução → ferramenta | T-05 | PARCIAL (o elo que FALTAVA — `child_session_id` — existe e é falsificado; a consulta não tem superfície que a consuma: T-28) |
 | T-07 | P1 | Context Engine: teto, prioridade, deduplicação, procedência, registro | — | DONE (planejador; falta intake e gerador: T-25) |
 | T-08 | P1 | Memory Engine — **memória de falha** entregue; as outras seis não existem | — | PARCIAL (T-26) |
 | T-27 | P0 | Revisão adversarial do portão de prévia (superfície mais exposta) e correção dos achados | — | DONE (A, C, D, F, G corrigidos e falsificados; B e E abertos por decisão registrada em OS-14) |
+| T-28 | P3 | Superfície que leia a trilha de política e mostre a cadeia equipe → tarefa → execução → ferramenta | T-06 | PENDING |
 | T-26 | P2 | As outras seis memórias (episódica, semântica, procedimental, decisão, avaliação, trabalho) | T-08 | READY |
 | T-25 | P2 | Intake e etapa nova no mesmo motor de contexto | T-07 | DONE |
 | T-09 | P2 | Spec Engine: constitution → specify → clarify → plan → tasks → implement → validate → converge | T-08 | PENDING |

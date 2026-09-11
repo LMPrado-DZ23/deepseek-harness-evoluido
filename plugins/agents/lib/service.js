@@ -483,6 +483,7 @@ export class StudioAgentService {
         let snapshot;
         let coordinator;
         let child;
+        let childSessionId;
         let timeout;
         const timed = new AbortController();
         const forwardAbort = () => timed.abort(signal.reason);
@@ -523,13 +524,30 @@ export class StudioAgentService {
                     ? { inProcess: request.inProcess }
                     : {}),
             });
+            // T-06: a sessao do FILHO e o unico id que casa com o `session_id` que a
+            // trilha de politica grava a cada decisao de ferramenta. Gravar aqui,
+            // e nao so no fim, e o que permite atribuir uma decisao a uma tarefa
+            // ENQUANTO o agente ainda corre - que e justamente quando importa.
+            childSessionId = String(child.id);
+            try {
+                const current = this.dependencies.repository.runs().find(record => record.run_id === runId);
+                if (current !== undefined)
+                    await this.dependencies.repository.putRun({ ...current, child_session_id: childSessionId });
+            }
+            catch {
+                // Engolido DE PROPOSITO, e so aqui: perder a correlacao nao e perder
+                // trabalho, e derrubar uma execucao aprovada por causa de uma escrita
+                // de observabilidade trocaria um problema pequeno por um grande. O
+                // registro terminal recebe o id de novo em `#finish`, entao a falha
+                // desta escrita se cura sozinha quando a execucao termina.
+            }
             const result = await child.result;
             if (timed.signal.aborted) {
                 const timedOut = timed.signal.reason === 'timeout';
-                return await this.#finish(runId, request, snapshot, coordinator, lease, timedOut ? 'BUDGET_EXCEEDED' : 'CANCELLED', String(timed.signal.reason), now);
+                return await this.#finish(runId, request, snapshot, coordinator, lease, timedOut ? 'BUDGET_EXCEEDED' : 'CANCELLED', String(timed.signal.reason), now, undefined, false, undefined, childSessionId);
             }
             if (result.stopReason !== 'completed') {
-                return await this.#finish(runId, request, snapshot, coordinator, lease, 'FAILED', result.diagnostic ?? result.stopReason, now);
+                return await this.#finish(runId, request, snapshot, coordinator, lease, 'FAILED', result.diagnostic ?? result.stopReason, now, undefined, false, undefined, childSessionId);
             }
             const diff = await this.dependencies.worktrees.diff(snapshot);
             const mainAfter = await this.dependencies.worktrees.mainFingerprint(snapshot.repositoryPath);
@@ -542,12 +560,12 @@ export class StudioAgentService {
                 const reason = pathViolation ? t('delegation.pathOutsideApproved')
                     : tokenExceeded ? t('git.tokenLimit')
                         : diff.files.length > maxFiles ? t('git.fileLimit') : t('git.diffByteLimit');
-                return await this.#finish(runId, request, snapshot, coordinator, lease, 'BUDGET_EXCEEDED', reason, now, diff, outsideChanged, measuredTokens);
+                return await this.#finish(runId, request, snapshot, coordinator, lease, 'BUDGET_EXCEEDED', reason, now, diff, outsideChanged, measuredTokens, childSessionId);
             }
             const diagnostic = outsideChanged
                 ? t('delegation.projectChangedDuringRun')
                 : terminalText(result);
-            return await this.#finish(runId, request, snapshot, coordinator, lease, 'PROPOSED', diagnostic, now, diff, outsideChanged, measuredTokens);
+            return await this.#finish(runId, request, snapshot, coordinator, lease, 'PROPOSED', diagnostic, now, diff, outsideChanged, measuredTokens, childSessionId);
         }
         catch (error) {
             if (snapshot === undefined || coordinator === undefined) {
@@ -557,7 +575,7 @@ export class StudioAgentService {
             if (lease === undefined)
                 return { status: 'failed', detail: String(error) };
             const timedOut = timed.signal.reason === 'timeout';
-            return this.#finish(runId, request, snapshot, coordinator, lease, timedOut ? 'BUDGET_EXCEEDED' : signal.aborted || timed.signal.aborted ? 'CANCELLED' : 'FAILED', String(error), now);
+            return this.#finish(runId, request, snapshot, coordinator, lease, timedOut ? 'BUDGET_EXCEEDED' : signal.aborted || timed.signal.aborted ? 'CANCELLED' : 'FAILED', String(error), now, undefined, false, undefined, childSessionId);
         }
         finally {
             clearTimeout(timeout);
@@ -566,7 +584,7 @@ export class StudioAgentService {
             await coordinator?.dispose().catch(() => undefined);
         }
     }
-    async #finish(runId, request, snapshot, coordinator, lease, status, diagnostic, now, diff = { text: '', bytes: 0, files: [] }, mainChangedDuringRun = false, tokensUsed = undefined) {
+    async #finish(runId, request, snapshot, coordinator, lease, status, diagnostic, now, diff = { text: '', bytes: 0, files: [] }, mainChangedDuringRun = false, tokensUsed = undefined, childSessionId = undefined) {
         const updatedAt = now().toISOString();
         await this.dependencies.repository.putRun({
             run_id: runId, org_id: request.orgId, tenant_id: request.tenantId,
@@ -579,6 +597,12 @@ export class StudioAgentService {
             // `null` quando não houve medição. O campo existe SEMPRE para que a
             // ausência de medida seja visível, em vez de virar um campo que sumiu.
             tokens_used: tokensUsed ?? null,
+            // T-06: preservado do registro guardado. `#finish` reescreve o registro
+            // INTEIRO, entao omitir aqui apagaria a correlacao no exato momento em
+            // que ela passa a ser consultada - depois que a execucao termina.
+            child_session_id: childSessionId
+                ?? this.dependencies.repository.runs().find(record => record.run_id === runId)?.child_session_id
+                ?? null,
             approved_by: request.approval.approvedBy,
             approved_at: this.dependencies.repository.runs().find(record => record.run_id === runId)?.approved_at ?? updatedAt,
             created_at: this.dependencies.repository.runs().find(record => record.run_id === runId)?.created_at ?? updatedAt,

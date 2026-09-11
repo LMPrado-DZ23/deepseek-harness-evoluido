@@ -26,9 +26,11 @@ class MemoryRepository implements AgentRepository {
   ) {}
   readonly runMap = new Map<string, AgentRunRecord>()
   readonly leaseMap = new Map<string, AgentLeaseRecord>()
+  /** Toda escrita, na ordem. O mapa guarda o ÚLTIMO estado; a ordem importa. */
+  readonly runWrites: AgentRunRecord[] = []
   runs() { return this.hideRuns ? [] : [...this.runMap.values()] }
   leases() { return this.hideLeases ? [] : [...this.leaseMap.values()] }
-  putRun(record: AgentRunRecord) { this.runMap.set(record.run_id, record); return Promise.resolve() }
+  putRun(record: AgentRunRecord) { this.runMap.set(record.run_id, record); this.runWrites.push(record); return Promise.resolve() }
   putLease(record: AgentLeaseRecord) {
     if (!this.discardLeaseWrites) this.leaseMap.set(record.lease_id, record)
     return Promise.resolve()
@@ -933,5 +935,59 @@ describe('A-03 — retomada', () => {
     expect(StudioAgentService.resumable(interrupted({ status: 'UNKNOWN' }))).toBe(false)
     expect(StudioAgentService.resumable(interrupted({ provider: 'codex' }))).toBe(false)
     expect(StudioAgentService.resumable({ ...interrupted(), interrupted_by_restart: false })).toBe(false)
+  })
+})
+
+describe('T-06: a decisão de ferramenta passa a ter dono', () => {
+  it('a sessão do FILHO é gravada, e é ela que casa com o `session_id` da trilha de política', async () => {
+    // O que faltava não era um motor de observabilidade: era UM CAMPO. Toda
+    // decisão de ferramenta grava `session_id`, e para um filho em processo
+    // esse valor é a sessão do filho — que nenhum registro do produto guardava.
+    // Dava para ler que uma ferramenta foi negada e não dava para dizer QUAL
+    // tarefa, de QUAL equipe, provocou a negação.
+    const h = harness()
+    await h.service.reconcileInterruptedRuns()
+    h.service.start(request())
+    await h.jobs.entries[0]!.done
+
+    const run = h.repository.runMap.get('run-1')
+    expect(run).toMatchObject({ status: 'PROPOSED', child_session_id: 'child' })
+
+    // A correlação de ponta a ponta, feita com os dados como eles ficam no
+    // disco: uma entrada da trilha traz `session_id`; esse valor encontra a
+    // execução; a execução encontra a tarefa pelo `run_id`; e a tarefa traz a
+    // equipe. Sem `child_session_id` o primeiro salto é IMPOSSÍVEL — e é por
+    // isso que o campo é o requisito, e não a consulta.
+    const trilha = { session_id: 'child', tool_name: 'write', decision: 'deny' as const }
+    const execucao = [...h.repository.runMap.values()].find(record => record.child_session_id === trilha.session_id)
+    expect(execucao?.run_id).toBe('run-1')
+
+    // `coordinator_session_id` NÃO serve para isto: o coordenador é o pai que
+    // publica o filho, e quem chama a ferramenta é o filho. Usar um pelo outro
+    // produziria uma correlação que casa com nada.
+    expect(execucao?.coordinator_session_id).not.toBe(trilha.session_id)
+  })
+
+  it('execução que nunca chegou a ter filho grava `null`, e não um id de outra pessoa', async () => {
+    // "Não sei de quem é" e "é de ninguém" são coisas diferentes. Um id errado
+    // aqui apontaria a auditoria para a execução errada, que é pior do que não
+    // apontar para nenhuma.
+    const h = harness({ subagentStartError: new Error('falhou ao iniciar') })
+    await h.service.reconcileInterruptedRuns()
+    h.service.start(request())
+    await h.jobs.entries[0]!.done
+    expect(h.repository.runMap.get('run-1')).toMatchObject({ status: 'FAILED', child_session_id: null })
+  })
+
+  it('a correlação SOBREVIVE ao fim da execução: `#finish` reescreve o registro inteiro', async () => {
+    // Este é o modo de falha que o campo teria de graça: `#finish` monta o
+    // registro do zero, então omitir o campo ali apagaria a correlação no exato
+    // momento em que ela passa a ser consultada — depois que a execução acabou.
+    const h = harness()
+    await h.service.reconcileInterruptedRuns()
+    h.service.start(request())
+    await h.jobs.entries[0]!.done
+    const escritas = h.repository.runWrites.filter(record => record.run_id === 'run-1')
+    expect(escritas.at(-1)).toMatchObject({ status: 'PROPOSED', child_session_id: 'child' })
   })
 })
