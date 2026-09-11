@@ -6,6 +6,8 @@ import type { AgentTeamRecord, AgentTeamTaskRecord } from '../src/model.ts'
 import {
   AgentTeamError,
   StudioAgentTeamService,
+  blockedTasks,
+  taskReadiness,
   type AgentTeamRepository,
   type AgentTeamStartRequest,
   type AgentTeamTaskInput,
@@ -386,5 +388,79 @@ describe('StudioAgentTeamService', () => {
     await h.service.status('team-1')
     await expect(h.service.continue('team-1', parent(), { approved: true, tier: 'T2', approvedBy: 'user-1' }))
       .rejects.toMatchObject({ code: 'INVALID_STATE' })
+  })
+})
+
+describe('T-13: uma tarefa que nunca vai rodar nao pode parecer com uma que so aguarda a vez', () => {
+  const task = (overrides: Partial<AgentTeamTaskRecord> = {}): AgentTeamTaskRecord => ({
+    task_id: 'a', team_id: 't', org_id: 'o', tenant_id: 'n', workspace_id: 'w',
+    title: 'Uma tarefa', role: 'implementer', prompt: 'faca algo',
+    intended_paths: ['src/a.ts'], depends_on: [], status: 'QUEUED',
+    run_id: null, job_id: null, diagnostic: null, created_at: now, updated_at: now,
+    ...overrides,
+  })
+  const index = (...list: readonly AgentTeamTaskRecord[]) => new Map(list.map(item => [item.task_id, item]))
+
+  it('sem dependencia, esta PRONTA', () => {
+    const only = task()
+    expect(taskReadiness(only, index(only))).toEqual({ kind: 'READY' })
+  })
+
+  it('com a dependencia aplicada, esta PRONTA', () => {
+    const base = task({ task_id: 'base', status: 'APPLIED' })
+    const dependent = task({ task_id: 'dep', depends_on: ['base'] })
+    expect(taskReadiness(dependent, index(base, dependent))).toEqual({ kind: 'READY' })
+  })
+
+  it('com a dependencia ainda rodando, esta AGUARDANDO — e diz de quem', () => {
+    const base = task({ task_id: 'base', status: 'RUNNING' })
+    const dependent = task({ task_id: 'dep', depends_on: ['base'] })
+    expect(taskReadiness(dependent, index(base, dependent))).toEqual({ kind: 'WAITING', pending: ['base'] })
+  })
+
+  it('com dependencia FANTASMA, esta BLOQUEADA — antes ficava esperando para sempre', () => {
+    // Este e o defeito: `byId.get(id)?.status === 'APPLIED'` e falso para uma
+    // dependencia que nao existe, exatamente como e falso para uma que ainda
+    // roda. A tarefa ficava QUEUED sem nunca poder sair.
+    const dependent = task({ task_id: 'dep', depends_on: ['nao-existe'] })
+    expect(taskReadiness(dependent, index(dependent))).toEqual({
+      kind: 'BLOCKED', reason: 'MISSING_DEPENDENCY', dependencies: ['nao-existe'],
+    })
+  })
+
+  it('com dependencia que FALHOU, esta BLOQUEADA — e nao aguardando', () => {
+    for (const status of ['FAILED', 'CANCELLED', 'BUDGET_EXCEEDED', 'REJECTED', 'UNKNOWN'] as const) {
+      const base = task({ task_id: 'base', status })
+      const dependent = task({ task_id: 'dep', depends_on: ['base'] })
+      expect(taskReadiness(dependent, index(base, dependent)), `dependencia ${status} apareceu como espera`).toEqual({
+        kind: 'BLOCKED', reason: 'DEPENDENCY_FAILED', dependencies: ['base'],
+      })
+    }
+  })
+
+  it('bloqueio vem ANTES de espera quando ha as duas', () => {
+    // Dizer que uma tarefa aguarda, quando uma das dependencias dela morreu,
+    // seria a mentira mais cara desta funcao: manda esperar quem precisa agir.
+    const morta = task({ task_id: 'morta', status: 'FAILED' })
+    const viva = task({ task_id: 'viva', status: 'RUNNING' })
+    const dependent = task({ task_id: 'dep', depends_on: ['viva', 'morta'] })
+    expect(taskReadiness(dependent, index(morta, viva, dependent)).kind).toBe('BLOCKED')
+  })
+
+  it('tarefa que ja saiu da fila nao e prontidao nenhuma', () => {
+    for (const status of ['RUNNING', 'APPLIED', 'PROPOSED', 'FAILED'] as const) {
+      expect(taskReadiness(task({ status }), index()).kind).toBe('NOT_QUEUED')
+    }
+  })
+
+  it('blockedTasks lista o que trava o plano, com o motivo', () => {
+    const morta = task({ task_id: 'morta', status: 'FAILED' })
+    const orfa = task({ task_id: 'orfa', depends_on: ['fantasma'] })
+    const parada = task({ task_id: 'parada', depends_on: ['morta'] })
+    const boa = task({ task_id: 'boa' })
+    const blocked = blockedTasks([morta, orfa, parada, boa])
+    expect(blocked.map(item => item.task.task_id).sort()).toEqual(['orfa', 'parada'])
+    expect(blocked.find(item => item.task.task_id === 'orfa')?.readiness.reason).toBe('MISSING_DEPENDENCY')
+    expect(blocked.find(item => item.task.task_id === 'parada')?.readiness.reason).toBe('DEPENDENCY_FAILED')
   })
 })

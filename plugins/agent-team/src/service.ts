@@ -421,10 +421,72 @@ function pathsOverlap(left: readonly string[], right: readonly string[]): boolea
   return left.some(a => right.some(b => a === '*' || b === '*' || a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`)))
 }
 
+/**
+ * Por que uma tarefa na fila ainda não rodou.
+ *
+ * `READY`, `WAITING` e `BLOCKED` são coisas diferentes e o código não as
+ * distinguia: `depends_on.every(id => byId.get(id)?.status === 'APPLIED')` é
+ * falso tanto para a dependência que ainda está rodando quanto para a
+ * dependência que **não existe** ou que **falhou**. Nos três casos a tarefa
+ * ficava `QUEUED` — e as consequências são opostas.
+ *
+ * Uma dependência fantasma nunca vai virar `APPLIED`. Uma dependência que
+ * FALHOU também não, enquanto ninguém agir. As duas produziam uma tarefa que
+ * espera **para sempre**, e esperar para sempre com a mesma aparência de quem
+ * está só aguardando a vez é como um plano trava sem ninguém perceber.
+ */
+export type TaskReadiness =
+  | { readonly kind: 'READY' }
+  | { readonly kind: 'WAITING'; readonly pending: readonly string[] }
+  | { readonly kind: 'BLOCKED'; readonly reason: 'MISSING_DEPENDENCY' | 'DEPENDENCY_FAILED'; readonly dependencies: readonly string[] }
+  | { readonly kind: 'NOT_QUEUED' }
+
+/**
+ * O estado de execução de UMA tarefa diante das dependências dela.
+ *
+ * A ordem das perguntas é a que importa: bloqueio vem antes de espera, porque
+ * uma tarefa cuja dependência morreu não está esperando nada — dizer que está
+ * esperando seria a mentira mais cara desta função.
+ * @param task - a tarefa avaliada.
+ * @param byId - todas as tarefas da equipe, por id.
+ * @returns o estado, com os ids que o justificam.
+ */
+export function taskReadiness(task: AgentTeamTaskRecord, byId: ReadonlyMap<string, AgentTeamTaskRecord>): TaskReadiness {
+  if (task.status !== 'QUEUED') return { kind: 'NOT_QUEUED' }
+  const missing = task.depends_on.filter(id => !byId.has(id))
+  if (missing.length > 0) return { kind: 'BLOCKED', reason: 'MISSING_DEPENDENCY', dependencies: missing }
+  const failed = task.depends_on.filter(id => FAILURE_STATUSES.has(byId.get(id)!.status))
+  if (failed.length > 0) return { kind: 'BLOCKED', reason: 'DEPENDENCY_FAILED', dependencies: failed }
+  const pending = task.depends_on.filter(id => byId.get(id)!.status !== 'APPLIED')
+  return pending.length === 0 ? { kind: 'READY' } : { kind: 'WAITING', pending }
+}
+
+/**
+ * As tarefas que podem começar agora.
+ * @param tasks - todas as tarefas da equipe.
+ * @returns as que estão prontas, sem as bloqueadas e sem as que aguardam.
+ */
 function readyTasks(tasks: readonly AgentTeamTaskRecord[]): AgentTeamTaskRecord[] {
   const byId = new Map(tasks.map(task => [task.task_id, task]))
-  return tasks.filter(task => task.status === 'QUEUED'
-    && task.depends_on.every(id => byId.get(id)?.status === 'APPLIED'))
+  return tasks.filter(task => taskReadiness(task, byId).kind === 'READY')
+}
+
+/**
+ * As tarefas que NUNCA vão rodar sem alguém agir, com o motivo.
+ *
+ * Existe para que o bloqueio tenha nome. Sem esta lista, a única evidência de
+ * um plano travado é uma equipe que não termina.
+ * @param tasks - todas as tarefas da equipe.
+ * @returns cada tarefa bloqueada com o motivo e as dependências culpadas.
+ */
+export function blockedTasks(tasks: readonly AgentTeamTaskRecord[]): readonly { readonly task: AgentTeamTaskRecord; readonly readiness: Extract<TaskReadiness, { kind: 'BLOCKED' }> }[] {
+  const byId = new Map(tasks.map(task => [task.task_id, task]))
+  const blocked: { task: AgentTeamTaskRecord; readiness: Extract<TaskReadiness, { kind: 'BLOCKED' }> }[] = []
+  for (const task of tasks) {
+    const readiness = taskReadiness(task, byId)
+    if (readiness.kind === 'BLOCKED') blocked.push({ task, readiness })
+  }
+  return blocked
 }
 
 function taskStatus(status: AgentRunRecord['status']): AgentTeamTaskRecord['status'] {

@@ -219,9 +219,9 @@ describe.skipIf(process.platform === 'win32')('authenticated Unix builder socket
   it('fails closed and releases the lease when lock creation or owner persistence fails', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dz23-builder-runtime-lock-')); roots.push(root); const socketPath = join(root, 'builder.sock').replaceAll('\\', '/')
     const denied = new Error('denied') as NodeJS.ErrnoException; denied.code = 'EACCES'
-    await expect(listenBuilderUnix({ socketPath, bearerToken: token, methods: fakeMethods(), replayNamespace, runtime: unixRuntime({ mkdir: (async path => { if (String(path).endsWith('.lock')) throw denied; return mkdir(path) }) as typeof mkdir }) })).rejects.toThrow('denied')
+    await expect(listenBuilderUnix({ socketPath, bearerToken: token, methods: fakeMethods(), replayNamespace, runtime: unixRuntime({ mkdir: (async (path, options) => { if (String(path).endsWith('.lock')) throw denied; return mkdir(path) }) as typeof mkdir }) })).rejects.toThrow('denied')
     let removed = false
-    await expect(listenBuilderUnix({ socketPath, bearerToken: token, methods: fakeMethods(), replayNamespace, runtime: unixRuntime({ writeFile: (async path => { if (String(path).endsWith('owner.json')) throw new Error('write failed'); return writeFile(path, '') }) as typeof writeFile, remove: (async path => { removed = true; return rm(path, { recursive: true, force: true }) }) as typeof rm }) })).rejects.toThrow('write failed')
+    await expect(listenBuilderUnix({ socketPath, bearerToken: token, methods: fakeMethods(), replayNamespace, runtime: unixRuntime({ writeFile: (async (path, options) => { if (String(path).endsWith('owner.json')) throw new Error('write failed'); return writeFile(path, '') }) as typeof writeFile, remove: (async (path, options) => { removed = true; return rm(path, { recursive: true, force: true }) }) as typeof rm }) })).rejects.toThrow('write failed')
     expect(removed).toBe(true)
   })
 
@@ -233,9 +233,9 @@ describe.skipIf(process.platform === 'win32')('authenticated Unix builder socket
   })
 
   it('recovers a dead lease only when its socket identity matches and probe transport throws', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'dz23-builder-runtime-recover-')); roots.push(root); const socketPath = join(root, 'builder.sock').replaceAll('\\', '/'); const lock = `${socketPath}.lock`; const uid = process.getuid!(); await writeFile(socketPath, 'stale'); const stat = await lstat(socketPath)
-    await mkdir(lock, { mode: 0o700 }); await writeFile(join(lock, 'owner.json'), JSON.stringify({ nonce: 'a'.repeat(32), pid: 2_147_483_647, process_start_ticks: '1', uid, socket_dev: stat.dev, socket_ino: stat.ino }), { mode: 0o600 })
-    let staleRead = false; const runtime = unixRuntime({ request: (() => { throw new Error('probe failed') }) as typeof httpRequest, lstat: (async path => { if (path === socketPath && !staleRead) { staleRead = true; return { ...stat, isSocket: () => true } as never } return lstat(path) }) as typeof lstat })
+    const root = await mkdtemp(join(tmpdir(), 'dz23-builder-runtime-recover-')); roots.push(root); const socketPath = join(root, 'builder.sock').replaceAll('\\', '/'); const lock = `${socketPath}.lock`; const uid = process.getuid!(); await writeFile(socketPath, 'stale'); const stat = await lstat(socketPath); const born = await lstat(socketPath, { bigint: true })
+    await mkdir(lock, { mode: 0o700 }); await writeFile(join(lock, 'owner.json'), JSON.stringify({ nonce: 'a'.repeat(32), pid: 2_147_483_647, process_start_ticks: '1', uid, socket_dev: stat.dev, socket_ino: stat.ino, socket_birthtime_ns: born.birthtimeNs.toString() }), { mode: 0o600 })
+    let staleRead = false; const runtime = unixRuntime({ request: (() => { throw new Error('probe failed') }) as typeof httpRequest, lstat: (async (path, options) => { if (path === socketPath && !staleRead) { staleRead = true; return { ...(options === undefined ? stat : born), isSocket: () => true } as never } return lstat(path, options as never) }) as typeof lstat })
     const listener = await listenBuilderUnix({ socketPath, bearerToken: token, methods: fakeMethods(), replayNamespace, runtime }); listeners.push(listener)
     expect((await lstat(socketPath)).isSocket()).toBe(true)
   })
@@ -250,7 +250,7 @@ describe.skipIf(process.platform === 'win32')('authenticated Unix builder socket
 
   it('closes and unlinks a bound server when post-listen socket attestation fails', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dz23-builder-bound-fail-')); roots.push(root); const socketPath = join(root, 'builder.sock').replaceAll('\\', '/'); let socketReads = 0
-    const runtime = unixRuntime({ lstat: (async path => { const stat = await lstat(path); if (path === socketPath && ++socketReads === 1) return { ...stat, isSocket: () => false } as never; return stat }) as typeof lstat })
+    const runtime = unixRuntime({ lstat: (async (path, options) => { const stat = await lstat(path, options as never); if (path === socketPath && ++socketReads === 1) return { ...stat, isSocket: () => false } as never; return stat }) as typeof lstat })
     await expect(listenBuilderUnix({ socketPath, bearerToken: token, methods: fakeMethods(), replayNamespace, runtime })).rejects.toThrow('UNSAFE_SOCKET')
     await expect(lstat(`${socketPath}.lock`)).rejects.toMatchObject({ code: 'ENOENT' })
   })
@@ -258,11 +258,11 @@ describe.skipIf(process.platform === 'win32')('authenticated Unix builder socket
   it('surfaces cleanup failures without leaving a live server after setup rejection', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dz23-builder-cleanup-fail-')); roots.push(root); const socketPath = join(root, 'builder.sock').replaceAll('\\', '/'); const realCreate = createHttpServer
     const createServer = ((handler: Parameters<typeof realCreate>[0]) => { const server = realCreate(handler); const close = server.close.bind(server); server.close = ((callback?: (error?: Error) => void) => close(() => callback?.(new Error('close failed')))) as typeof server.close; return server }) as typeof realCreate
-    const runtime = unixRuntime({ createServer, lstat: (async path => { const stat = await lstat(path); return path === socketPath ? { ...stat, isSocket: () => false } as never : stat }) as typeof lstat })
+    const runtime = unixRuntime({ createServer, lstat: (async (path, options) => { const stat = await lstat(path, options as never); return path === socketPath ? { ...stat, isSocket: () => false } as never : stat }) as typeof lstat })
     const closeFailure = listenBuilderUnix({ socketPath, bearerToken: token, methods: fakeMethods(), replayNamespace, runtime })
     await expect(closeFailure).rejects.toBeInstanceOf(BuilderUnixListenerCleanupError)
     await expect(closeFailure).rejects.toMatchObject({ code: 'LISTENER_CLEANUP_INCOMPLETE', message: 'LISTENER_CLEANUP_INCOMPLETE' })
-    const lockRoot = await mkdtemp(join(tmpdir(), 'dz23-builder-release-fail-')); roots.push(lockRoot); const lockSocket = join(lockRoot, 'builder.sock').replaceAll('\\', '/'); const remove = (async path => { if (String(path).endsWith('.lock')) throw new Error('release failed'); return rm(path, { recursive: true, force: true }) }) as typeof rm
+    const lockRoot = await mkdtemp(join(tmpdir(), 'dz23-builder-release-fail-')); roots.push(lockRoot); const lockSocket = join(lockRoot, 'builder.sock').replaceAll('\\', '/'); const remove = (async (path, options) => { if (String(path).endsWith('.lock')) throw new Error('release failed'); return rm(path, { recursive: true, force: true }) }) as typeof rm
     const releaseFailure = listenBuilderUnix({ socketPath: lockSocket, bearerToken: token, methods: { ...fakeMethods(), initialize: async () => { throw new Error('init failed') } }, replayNamespace, runtime: unixRuntime({ remove }) })
     await expect(releaseFailure).rejects.toBeInstanceOf(BuilderUnixListenerCleanupError)
     await expect(releaseFailure).rejects.toMatchObject({ code: 'LISTENER_CLEANUP_INCOMPLETE', message: 'LISTENER_CLEANUP_INCOMPLETE' })
@@ -277,18 +277,18 @@ describe.skipIf(process.platform === 'win32')('authenticated Unix builder socket
 
   it('fails closed for non-ENOENT directory walks and unsafe ancestor identities', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dz23-builder-directory-runtime-')); roots.push(root); const socketPath = join(root, 'nested', 'builder.sock').replaceAll('\\', '/'); const denied = new Error('denied') as NodeJS.ErrnoException; denied.code = 'EACCES'
-    await expect(listenBuilderUnix({ socketPath, bearerToken: token, methods: fakeMethods(), replayNamespace, runtime: unixRuntime({ lstat: (async path => { if (path === join(root, 'nested')) throw denied; return lstat(path) }) as typeof lstat }) })).rejects.toThrow('denied')
+    await expect(listenBuilderUnix({ socketPath, bearerToken: token, methods: fakeMethods(), replayNamespace, runtime: unixRuntime({ lstat: (async (path, options) => { if (path === join(root, 'nested')) throw denied; return lstat(path, options as never) }) as typeof lstat }) })).rejects.toThrow('denied')
     const stat = await lstat(root)
-    await expect(listenBuilderUnix({ socketPath: join(root, 'bad-owner.sock').replaceAll('\\', '/'), bearerToken: token, methods: fakeMethods(), replayNamespace, runtime: unixRuntime({ lstat: (async path => path === root ? statWith(stat, { uid: 0, mode: 0o40777 }) : lstat(path)) as typeof lstat }) })).rejects.toThrow('UNSAFE_SOCKET_DIRECTORY')
-    await expect(listenBuilderUnix({ socketPath: join(root, 'not-dir.sock').replaceAll('\\', '/'), bearerToken: token, methods: fakeMethods(), replayNamespace, runtime: unixRuntime({ lstat: (async path => path === root ? { ...stat, isDirectory: () => false } as never : lstat(path)) as typeof lstat }) })).rejects.toThrow('UNSAFE_SOCKET_DIRECTORY')
-    await expect(listenBuilderUnix({ socketPath: join(root, 'realpath.sock').replaceAll('\\', '/'), bearerToken: token, methods: fakeMethods(), replayNamespace, runtime: unixRuntime({ realpath: (async path => path === root ? `${root}-other` : realpath(path)) as typeof realpath }) })).rejects.toThrow('UNSAFE_SOCKET_DIRECTORY')
+    await expect(listenBuilderUnix({ socketPath: join(root, 'bad-owner.sock').replaceAll('\\', '/'), bearerToken: token, methods: fakeMethods(), replayNamespace, runtime: unixRuntime({ lstat: (async (path, options) => path === root ? statWith(stat, { uid: 0, mode: 0o40777 }) : lstat(path, options as never)) as typeof lstat }) })).rejects.toThrow('UNSAFE_SOCKET_DIRECTORY')
+    await expect(listenBuilderUnix({ socketPath: join(root, 'not-dir.sock').replaceAll('\\', '/'), bearerToken: token, methods: fakeMethods(), replayNamespace, runtime: unixRuntime({ lstat: (async (path, options) => path === root ? { ...stat, isDirectory: () => false } as never : lstat(path, options as never)) as typeof lstat }) })).rejects.toThrow('UNSAFE_SOCKET_DIRECTORY')
+    await expect(listenBuilderUnix({ socketPath: join(root, 'realpath.sock').replaceAll('\\', '/'), bearerToken: token, methods: fakeMethods(), replayNamespace, runtime: unixRuntime({ realpath: (async (path, options) => path === root ? `${root}-other` : realpath(path)) as typeof realpath }) })).rejects.toThrow('UNSAFE_SOCKET_DIRECTORY')
   })
 
   it('distinguishes missing and unexpected process-probe failures for a stale lease', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dz23-builder-process-probe-')); roots.push(root); const socketPath = join(root, 'builder.sock').replaceAll('\\', '/'); const lock = `${socketPath}.lock`; const uid = process.getuid!(); const start = await processStartTicks(process.pid)
     const metadata = { nonce: 'a'.repeat(32), pid: process.pid, process_start_ticks: `${Number(start) + 1}`, uid, socket_dev: null, socket_ino: null }
     await mkdir(lock, { mode: 0o700 }); await writeFile(join(lock, 'owner.json'), JSON.stringify(metadata), { mode: 0o600 })
-    const missing = new Error('missing') as NodeJS.ErrnoException; missing.code = 'ENOENT'; let reads = 0; const runtime = unixRuntime({ readFile: (async path => ++reads === 1 ? readFile(path, 'utf8') : Promise.reject(missing)) as typeof readFile })
+    const missing = new Error('missing') as NodeJS.ErrnoException; missing.code = 'ENOENT'; let reads = 0; const runtime = unixRuntime({ readFile: (async (path, options) => ++reads === 1 ? readFile(path, 'utf8') : Promise.reject(missing)) as typeof readFile })
     const recovered = await listenBuilderUnix({ socketPath, bearerToken: token, methods: fakeMethods(), replayNamespace, runtime }); listeners.push(recovered); await recovered.close(); listeners.splice(0, 1)
     await mkdir(lock, { mode: 0o700 }); await writeFile(join(lock, 'owner.json'), JSON.stringify(metadata), { mode: 0o600 })
     const denied = new Error('denied') as NodeJS.ErrnoException; denied.code = 'EPERM'; await expect(listenBuilderUnix({ socketPath, bearerToken: token, methods: fakeMethods(), replayNamespace, runtime: unixRuntime({ kill: (() => { throw denied }) as typeof process.kill }) })).rejects.toThrow('denied')
@@ -328,7 +328,7 @@ describe.skipIf(process.platform === 'win32')('authenticated Unix builder socket
     const createServer = ((handler: HttpHandler) => { const server = createHttpServer(handler); realClose = server.close.bind(server); server.close = ((callback?: (error?: Error) => void) => (callback?.(), server)) as typeof server.close; return server }) as typeof createHttpServer
     const cleanupRuntime = unixRuntime({
       createServer,
-      lstat: (async path => { const stat = await lstat(path); if (path === cleanupPath && ++reads === 2) return { ...stat, isSocket: () => false } as never; return stat }) as typeof lstat,
+      lstat: (async (path, options) => { const stat = await lstat(path, options as never); if (path === cleanupPath && ++reads === 2) return { ...stat, isSocket: () => false } as never; return stat }) as typeof lstat,
       unlink: (async path => { if (path === cleanupPath) throw new Error('unlink failed'); return unlink(path) }) as typeof unlink,
     })
     await expect(listenBuilderUnix({ socketPath: cleanupPath, bearerToken: token, methods: fakeMethods(), replayNamespace, runtime: cleanupRuntime })).rejects.toMatchObject({ code: 'LISTENER_CLEANUP_INCOMPLETE', message: 'LISTENER_CLEANUP_INCOMPLETE' })
@@ -369,14 +369,14 @@ describe.skipIf(process.platform === 'win32')('authenticated Unix builder socket
     for (const [index, mutate] of variants.entries()) {
       const root = await mkdtemp(join(tmpdir(), `dz23-builder-unlink-${index}-`)); roots.push(root); const socketPath = join(root, 'builder.sock').replaceAll('\\', '/'); let interceptClose = false; let closeReads = 0; let realClose: typeof import('node:http').Server.prototype.close | undefined
       const createServer = ((handler: HttpHandler) => { const server = createHttpServer(handler); realClose = server.close.bind(server); server.close = ((callback?: (error?: Error) => void) => interceptClose ? (callback?.(), server) : realClose!(callback)) as typeof server.close; return server }) as typeof createHttpServer
-      const runtime = unixRuntime({ createServer, lstat: (async path => { const stat = await lstat(path); if (interceptClose && path === socketPath && ++closeReads === 2) return mutate(stat) as never; return stat }) as typeof lstat })
+      const runtime = unixRuntime({ createServer, lstat: (async (path, options) => { const stat = await lstat(path, options as never); if (interceptClose && path === socketPath && ++closeReads === 2) return mutate(stat) as never; return stat }) as typeof lstat })
       const listener = await listenBuilderUnix({ socketPath, bearerToken: token, methods: fakeMethods(), replayNamespace, runtime }); interceptClose = true
       await expect(listener.close()).rejects.toThrow('SOCKET_IDENTITY_MISMATCH'); interceptClose = false; await new Promise<void>(resolve => realClose!(() => resolve())); await unlink(socketPath).catch(() => undefined); await rm(`${socketPath}.lock`, { recursive: true, force: true })
     }
     const root = await mkdtemp(join(tmpdir(), 'dz23-builder-unlink-missing-')); roots.push(root); const socketPath = join(root, 'builder.sock').replaceAll('\\', '/'); let interceptClose = false; let closeReads = 0; let realClose: typeof import('node:http').Server.prototype.close | undefined
     const missing = new Error('missing') as NodeJS.ErrnoException; missing.code = 'ENOENT'
     const createServer = ((handler: HttpHandler) => { const server = createHttpServer(handler); realClose = server.close.bind(server); server.close = ((callback?: (error?: Error) => void) => interceptClose ? (callback?.(), server) : realClose!(callback)) as typeof server.close; return server }) as typeof createHttpServer
-    const runtime = unixRuntime({ createServer, lstat: (async path => { if (interceptClose && path === socketPath && ++closeReads === 2) throw missing; return lstat(path) }) as typeof lstat })
+    const runtime = unixRuntime({ createServer, lstat: (async (path, options) => { if (interceptClose && path === socketPath && ++closeReads === 2) throw missing; return lstat(path, options as never) }) as typeof lstat })
     const listener = await listenBuilderUnix({ socketPath, bearerToken: token, methods: fakeMethods(), replayNamespace, runtime }); interceptClose = true; await expect(listener.close()).resolves.toBeUndefined(); interceptClose = false; await new Promise<void>(resolve => realClose!(() => resolve())); await rm(`${socketPath}.lock`, { recursive: true, force: true })
   })
 
@@ -389,7 +389,7 @@ describe.skipIf(process.platform === 'win32')('authenticated Unix builder socket
 
     const deniedRoot = await mkdtemp(join(tmpdir(), 'dz23-builder-close-denied-')); roots.push(deniedRoot); const deniedPath = join(deniedRoot, 'builder.sock').replaceAll('\\', '/'); let deny = false
     const denied = new Error('denied') as NodeJS.ErrnoException; denied.code = 'EACCES'
-    const deniedListener = await listenBuilderUnix({ socketPath: deniedPath, bearerToken: token, methods: fakeMethods(), replayNamespace, runtime: unixRuntime({ lstat: (async path => deny && path === deniedPath ? Promise.reject(denied) : lstat(path)) as typeof lstat }) })
+    const deniedListener = await listenBuilderUnix({ socketPath: deniedPath, bearerToken: token, methods: fakeMethods(), replayNamespace, runtime: unixRuntime({ lstat: (async (path, options) => deny && path === deniedPath ? Promise.reject(denied) : lstat(path, options as never)) as typeof lstat }) })
     deny = true; await expect(deniedListener.close()).rejects.toThrow('denied'); deny = false
     await new Promise<void>(resolve => deniedListener.server.close(() => resolve()))
     await rm(`${deniedPath}.lock`, { recursive: true, force: true })
@@ -415,7 +415,7 @@ describe.skipIf(process.platform === 'win32')('authenticated Unix builder socket
     const root = await mkdtemp(join(tmpdir(), 'dz23-builder-stop-during-identity-')); roots.push(root); const socketPath = join(root, 'builder.sock').replaceAll('\\', '/'); let stop = false; let captured: ReturnType<typeof createHttpServer> | undefined
     const runtime = unixRuntime({
       createServer: ((handler: HttpHandler) => { captured = createHttpServer(handler); return captured }) as typeof createHttpServer,
-      lstat: (async path => { const stat = await lstat(path); if (stop && path === socketPath) { stop = false; await new Promise<void>(resolve => captured!.close(() => resolve())) } return stat }) as typeof lstat,
+      lstat: (async (path, options) => { const stat = await lstat(path, options as never); if (stop && path === socketPath) { stop = false; await new Promise<void>(resolve => captured!.close(() => resolve())) } return stat }) as typeof lstat,
     })
     const listener = await listenBuilderUnix({ socketPath, bearerToken: token, methods: fakeMethods(), replayNamespace, runtime }); stop = true
     await expect(listener.close()).resolves.toBeUndefined()
@@ -423,7 +423,7 @@ describe.skipIf(process.platform === 'win32')('authenticated Unix builder socket
 
   it('handles an already-stopped server and fail-closes unusual HTTP message shapes', async () => {
     const stoppedRoot = await mkdtemp(join(tmpdir(), 'dz23-builder-stopped-')); roots.push(stoppedRoot); const stoppedPath = join(stoppedRoot, 'builder.sock').replaceAll('\\', '/'); let stopped = false; let stoppedReads = 0; let saved: Awaited<ReturnType<typeof lstat>> | undefined
-    const stoppedRuntime = unixRuntime({ lstat: (async path => { if (path !== stoppedPath || !stopped) { const value = await lstat(path); if (path === stoppedPath) saved = value; return value } if (++stoppedReads === 1) return saved!; const error = new Error('missing') as NodeJS.ErrnoException; error.code = 'ENOENT'; throw error }) as typeof lstat })
+    const stoppedRuntime = unixRuntime({ lstat: (async (path, options) => { if (path !== stoppedPath || !stopped) { const value = await lstat(path, options as never); if (path === stoppedPath) saved = value; return value } if (++stoppedReads === 1) return saved!; const error = new Error('missing') as NodeJS.ErrnoException; error.code = 'ENOENT'; throw error }) as typeof lstat })
     const stoppedListener = await listenBuilderUnix({ socketPath: stoppedPath, bearerToken: token, methods: fakeMethods(), replayNamespace, runtime: stoppedRuntime })
     await new Promise<void>(resolve => stoppedListener.server.close(() => resolve())); stopped = true; await expect(stoppedListener.close()).resolves.toBeUndefined()
 
@@ -505,3 +505,64 @@ function unixRuntime(overrides: Partial<BuilderUnixRuntime> = {}): BuilderUnixRu
   return { platform: process.platform, pid: process.pid, getuid: process.getuid, kill: process.kill.bind(process), umask: process.umask.bind(process), lstatSync, chmod, lstat, mkdir, open, readFile, realpath, rename, remove: rm, unlink, writeFile, createServer: createHttpServer, request: httpRequest, setTimeout, clearTimeout, ...overrides }
 }
 function statWith<T extends object>(stat: T, values: Partial<Record<PropertyKey, unknown>>): T { return new Proxy(stat, { get(target, property, receiver) { return Object.prototype.hasOwnProperty.call(values, property) ? values[property] : Reflect.get(target, property, receiver) } }) }
+
+describe('T-23: (dev, ino) nao e identidade — o inode e reciclado', () => {
+  it('um socket com o MESMO inode e nascimento diferente NAO e o nosso', async () => {
+    // Esta e a causa raiz medida: o ext4 devolve o inode liberado ao proximo
+    // `bind()` no mesmo diretorio, entao o socket ESTRANGEIRO criado logo apos
+    // o nosso fechar nasce com exatamente o mesmo (dev, ino). Em 150 de 150
+    // fechamentos o inode foi reciclado, e o produto apagava socket alheio.
+    const root = await mkdtemp(join(tmpdir(), 'dz23-builder-inode-reuse-')); roots.push(root)
+    const socketPath = join(root, 'builder.sock').replaceAll('\\', '/')
+    // O duble devolve o MESMO dev/ino do socket real com o nascimento 1ns
+    // adiante: exatamente o que o alocador de inode produz, e exatamente o que
+    // a verificacao antiga aceitava como "e o meu".
+    let intercept = false
+    const runtime = unixRuntime({ lstat: (async (path, options) => {
+      const real = await lstat(path, options as never)
+      if (intercept && path === socketPath && options !== undefined) {
+        const bigintStat = real as unknown as { birthtimeNs: bigint }
+        return { ...real, birthtimeNs: bigintStat.birthtimeNs + 1n, isSocket: () => true } as never
+      }
+      return real
+    }) as typeof lstat })
+    const guarded = await listenBuilderUnix({ socketPath, bearerToken: token, methods: fakeMethods(), replayNamespace, runtime })
+    intercept = true
+    await expect(guarded.close()).rejects.toThrow('SOCKET_IDENTITY_MISMATCH')
+    intercept = false
+    await new Promise<void>(resolve => guarded.server.close(() => resolve()))
+    await unlink(socketPath).catch(() => undefined)
+    await rm(`${socketPath}.lock`, { recursive: true, force: true })
+  })
+
+  it('a metadata do lock guarda o nascimento, e sem ele a recuperacao RECUSA apagar', async () => {
+    // Aqui a janela e de minutos ou de um reinicio - o lugar em que o reuso de
+    // inode e MAIS provavel. Metadata escrita por uma versao anterior nao tem o
+    // nascimento; recusar e falhar fechado, e e melhor que apagar o socket de
+    // outro processo com base num endereco reciclado.
+    const root = await mkdtemp(join(tmpdir(), 'dz23-builder-old-metadata-')); roots.push(root)
+    const socketPath = join(root, 'builder.sock').replaceAll('\\', '/'); const lock = `${socketPath}.lock`
+    const uid = process.getuid!()
+    await writeFile(socketPath, 'stale'); const stat = await lstat(socketPath)
+    await mkdir(lock, { mode: 0o700 })
+    // Sem `socket_birthtime_ns`: e a forma ANTIGA, e ela continua sendo lida.
+    await writeFile(join(lock, 'owner.json'), JSON.stringify({ nonce: 'a'.repeat(32), pid: 2_147_483_647, process_start_ticks: '1', uid, socket_dev: stat.dev, socket_ino: stat.ino }), { mode: 0o600 })
+    // O duble faz o arquivo obsoleto PARECER socket na leitura da recuperacao.
+    // Sem isto o teste passaria pelo motivo errado - um arquivo comum ja e
+    // recusado por nao ser socket, e a regra do nascimento nunca seria
+    // exercitada. (Descoberto por falsificacao: a sabotagem da regra nao
+    // reprovava o teste.)
+    let staleRead = false
+    const runtime = unixRuntime({
+      request: (() => { throw new Error('probe failed') }) as typeof httpRequest,
+      lstat: (async (path, options) => {
+        const real = await lstat(path, options as never)
+        if (path === socketPath && !staleRead) { staleRead = true; return { ...real, isSocket: () => true } as never }
+        return real
+      }) as typeof lstat,
+    })
+    await expect(listenBuilderUnix({ socketPath, bearerToken: token, methods: fakeMethods(), replayNamespace, runtime })).rejects.toThrow('SOCKET_IDENTITY_MISMATCH')
+    // E o arquivo continua la: recusar nao e apagar.
+    await expect(readFile(socketPath, 'utf8')).resolves.toBe('stale')
+  })
+})

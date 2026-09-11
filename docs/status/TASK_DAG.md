@@ -35,7 +35,7 @@ separa este trabalho de acrescentar features.
 | T-10 | P2 | Constitution Engine aplicado pelo planner e pelo builder | T-09 | PENDING |
 | T-11 | P2 | Skill Registry com carregamento progressivo | T-07 | PENDING |
 | T-12 | P2 | Revisão independente + adversarial + convergência | T-09 | PENDING |
-| T-13 | P1 | Task DAG executável com READY/BLOCKED/REVIEW/DONE | T-06 | PENDING |
+| T-13 | P1 | Prontidão explícita: READY/WAITING/BLOCKED com motivo nomeado | — | DONE (falta levar à tela: T-24) |
 | T-14 | P1 | Mission Engine de escopo amplo (hoje o checkpoint cobre uma geração) | T-13 | PENDING |
 | T-15 | P2 | Code Intelligence: índice, símbolos, grafo de dependências | T-07 | PENDING |
 | T-16 | P2 | Provider adapters reais atrás do gateway | — | BLOCKED (EB-04) |
@@ -45,7 +45,8 @@ separa este trabalho de acrescentar features.
 | T-20 | P4 | Learning Engine com validação antes de virar regra | T-08, T-12 | PENDING |
 | T-21 | P2 | Taxonomia de sandbox por capacidade, com desconhecido falhando fechado | — | DONE |
 | T-22 | P3 | Feature Capability Registry (AVAILABLE→…→OPERATIONAL) provado por health real | T-06 | PENDING |
-| T-23 | P1 | Estabilizar `unix-server.spec.ts` (IB-10): teste de identidade de socket que só reprova sob carga | — | READY |
+| T-23 | P1 | Identidade de socket não reciclável (era "estabilizar teste"; virou defeito de segurança) | — | DONE |
+| T-24 | P3 | Mostrar `blockedTasks` no painel de equipe | T-13 | READY |
 
 ## Honestidade de escala
 

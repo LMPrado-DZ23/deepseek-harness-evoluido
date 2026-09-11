@@ -11,12 +11,34 @@ import { FileRpcReplayGuard } from './persistent-replay.js'
 import { BUILDER_UNIX_SOCKET_MAX_BYTES, isBuilderRuntimeScopeId, type BuilderRuntimeScopeId } from './runtime-scope.js'
 
 const CREDENTIAL_REFERENCE = 'file:/run/secrets/dz23-builder-supervisor-token'
-interface LockMetadata { readonly nonce: string; readonly pid: number; readonly process_start_ticks: string; readonly uid: number; readonly socket_dev: number | null; readonly socket_ino: number | null }
+interface LockMetadata { readonly nonce: string; readonly pid: number; readonly process_start_ticks: string; readonly uid: number; readonly socket_dev: number | null; readonly socket_ino: number | null; readonly socket_birthtime_ns: string | null }
 interface LifecycleMethods extends BuilderRpcMethods { initialize?(signal: AbortSignal): Promise<void> }
 export class BuilderUnixListenerCleanupError extends Error {
   readonly code = 'LISTENER_CLEANUP_INCOMPLETE'
   constructor() { super('LISTENER_CLEANUP_INCOMPLETE'); this.name = 'BuilderUnixListenerCleanupError' }
 }
+/**
+ * A identidade de um socket no disco.
+ *
+ * `(dev, ino)` NAO e identidade: e endereco, e endereco e reciclavel. O ext4
+ * devolve o inode liberado ao proximo `bind()` no mesmo diretorio, entao um
+ * socket ESTRANGEIRO criado logo depois do nosso fechar nasce com exatamente o
+ * mesmo par - passa em qualquer verificacao que so olhe dev e ino, e o
+ * supervisor apaga o socket de outra pessoa achando que apaga o seu.
+ *
+ * Medido: 150 de 150 fechamentos reciclaram o inode; com uma alocacao
+ * intercalada roubando o inode, 50 de 50 foram recusados corretamente. O que
+ * decidia o resultado nao era o tempo - era a disputa por inode no grupo de
+ * blocos, e e por isso que o defeito aparecia "sob carga".
+ *
+ * `birthtimeNs` (crtime do ext4) e o discriminador que o inode nao carrega: nos
+ * 60 casos de reuso medidos ele diferiu sempre, por milissegundos. Onde o
+ * sistema de arquivos nao oferecer crtime, o valor vem zero e a verificacao
+ * degrada para o comportamento antigo - o que nao piora nada, e deixa o ganho
+ * onde ele existe.
+ */
+export interface SocketIdentity { readonly dev: number; readonly ino: number; readonly birthtimeNs: bigint }
+
 export interface BuilderUnixRuntime {
   readonly platform: NodeJS.Platform; readonly pid: number; readonly getuid: (() => number) | undefined; readonly kill: typeof process.kill; readonly umask: typeof process.umask
   readonly lstatSync: typeof lstatSync; readonly chmod: typeof chmod; readonly lstat: typeof lstat; readonly mkdir: typeof mkdir; readonly open: typeof open
@@ -43,7 +65,7 @@ export async function listenBuilderUnix(options: BuilderUnixServerOptions): Prom
   options.signal?.throwIfAborted()
   const processStartTicks = await processStartIdentity(runtime.pid, runtime)
   await ensureSocketDirectory(parent, uid, runtime)
-  let socketIdentity: { readonly dev: number; readonly ino: number } | undefined; let server: Server | undefined; let lockHeld = false; let listenSucceeded = false
+  let socketIdentity: SocketIdentity | undefined; let server: Server | undefined; let lockHeld = false; let listenSucceeded = false
   try {
     await acquireLock(lockPath, socketPath, options.bearerToken, uid, nonce, processStartTicks, runtime); lockHeld = true
     await options.methods.initialize?.(AbortSignal.any([options.signal ?? new AbortController().signal, AbortSignal.timeout(timeoutMs)]))
@@ -58,14 +80,14 @@ export async function listenBuilderUnix(options: BuilderUnixServerOptions): Prom
     server = runtime.createServer((request, response) => { void handle(request, response, options, timeoutMs, artifactTimeoutMs, rpc, artifact).catch(() => failure(response)) })
     server.requestTimeout = Math.max(timeoutMs, artifactTimeoutMs); server.headersTimeout = Math.min(timeoutMs, 10_000); server.maxHeadersCount = 64
     const previousUmask = runtime.umask(0o117)
-    try { await new Promise<void>((resolve, reject) => { server!.once('error', reject); server!.listen(socketPath, () => { server!.off('error', reject); const bound = runtime.lstatSync(socketPath); socketIdentity = { dev: bound.dev, ino: bound.ino }; listenSucceeded = true; resolve() }) }) }
+    try { await new Promise<void>((resolve, reject) => { server!.once('error', reject); server!.listen(socketPath, () => { server!.off('error', reject); socketIdentity = readSocketIdentity(socketPath, runtime); listenSucceeded = true; resolve() }) }) }
     finally { runtime.umask(previousUmask) }
     options.signal?.throwIfAborted()
     const bound = await runtime.lstat(socketPath)
     if (!bound.isSocket() || bound.uid !== uid) throw new Error('UNSAFE_SOCKET')
     if (socketIdentity!.dev !== bound.dev || socketIdentity!.ino !== bound.ino) throw new Error('SOCKET_IDENTITY_MISMATCH')
     await runtime.chmod(socketPath, 0o660); await assertSocketIdentity(socketPath, socketIdentity!, uid, runtime)
-    await replaceMetadata(lockPath, { nonce, pid: runtime.pid, process_start_ticks: processStartTicks, uid, socket_dev: bound.dev, socket_ino: bound.ino }, runtime)
+    await replaceMetadata(lockPath, { nonce, pid: runtime.pid, process_start_ticks: processStartTicks, uid, socket_dev: bound.dev, socket_ino: bound.ino, socket_birthtime_ns: socketIdentity!.birthtimeNs.toString() }, runtime)
   } catch (error) {
     let cleanupError: unknown
     if (server !== undefined) await closeServerBounded(server, timeoutMs, runtime).catch(item => { cleanupError ??= item })
@@ -120,7 +142,7 @@ async function acquireLock(lockPath: string, socketPath: string, token: string, 
     if (await authenticatedProbe(socketPath, token, runtime)) throw new Error('SUPERVISOR_ALREADY_RUNNING')
     await recoverDeadLock(lockPath, socketPath, uid, runtime); return acquireLock(lockPath, socketPath, token, uid, nonce, processStartTicks, runtime)
   }
-  try { await runtime.writeFile(posix.join(lockPath, 'owner.json'), `${JSON.stringify({ nonce, pid: runtime.pid, process_start_ticks: processStartTicks, uid, socket_dev: null, socket_ino: null })}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' }) }
+  try { await runtime.writeFile(posix.join(lockPath, 'owner.json'), `${JSON.stringify({ nonce, pid: runtime.pid, process_start_ticks: processStartTicks, uid, socket_dev: null, socket_ino: null, socket_birthtime_ns: null })}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' }) }
   catch (error) { await runtime.remove(lockPath, { recursive: true, force: true }); throw error }
 }
 
@@ -131,8 +153,15 @@ async function recoverDeadLock(lockPath: string, socketPath: string, uid: number
   await runtime.rename(lockPath, quarantine)
   try {
     try {
-      const socket = await runtime.lstat(socketPath)
-      if (!socket.isSocket() || socket.uid !== uid || metadata.socket_dev === null || metadata.socket_ino === null || socket.dev !== metadata.socket_dev || socket.ino !== metadata.socket_ino) throw new Error('SOCKET_IDENTITY_MISMATCH')
+      const socket = await runtime.lstat(socketPath, { bigint: true })
+      // Aqui a janela e de MINUTOS ou de um reinicio, e nao de milissegundos:
+      // e o lugar em que o reuso de inode e mais provavel, nao menos. Sem o
+      // nascimento, um socket de outro processo criado depois da morte do
+      // nosso herdaria o mesmo inode e seria apagado por este caminho.
+      if (!socket.isSocket() || Number(socket.uid) !== uid
+        || metadata.socket_dev === null || metadata.socket_ino === null || metadata.socket_birthtime_ns === null
+        || Number(socket.dev) !== metadata.socket_dev || Number(socket.ino) !== metadata.socket_ino
+        || socket.birthtimeNs !== BigInt(metadata.socket_birthtime_ns)) throw new Error('SOCKET_IDENTITY_MISMATCH')
       await runtime.unlink(socketPath)
     } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
   } finally { await runtime.remove(quarantine, { recursive: true, force: true }) }
@@ -164,21 +193,50 @@ async function validateAncestors(path: string, uid: number, runtime: BuilderUnix
 }
 async function assertOwned(path: string, uid: number, forbiddenMode: number, runtime: BuilderUnixRuntime): Promise<void> { if (await runtime.realpath(path) !== path) throw new Error('UNSAFE_SOCKET_DIRECTORY'); const stat = await runtime.lstat(path); if (!stat.isDirectory() || stat.isSymbolicLink() || stat.uid !== uid || (stat.mode & forbiddenMode) !== 0) throw new Error('UNSAFE_SOCKET_DIRECTORY') }
 async function assertAbsent(path: string, runtime: BuilderUnixRuntime): Promise<void> { try { await runtime.lstat(path); throw new Error('SOCKET_PATH_OCCUPIED') } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error } }
-async function safeUnlinkSocket(path: string, identity: { readonly dev: number; readonly ino: number }, uid: number, runtime: BuilderUnixRuntime): Promise<void> { try { const stat = await runtime.lstat(path); if (!stat.isSocket() || stat.uid !== uid || stat.dev !== identity.dev || stat.ino !== identity.ino) throw new Error('SOCKET_IDENTITY_MISMATCH'); await runtime.unlink(path) } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error } }
-async function assertSocketIdentity(path: string, identity: { readonly dev: number; readonly ino: number }, uid: number, runtime: BuilderUnixRuntime): Promise<void> { const stat = await runtime.lstat(path); if (!stat.isSocket() || stat.uid !== uid || stat.dev !== identity.dev || stat.ino !== identity.ino) throw new Error('SOCKET_IDENTITY_MISMATCH') }
+/**
+ * A identidade completa do socket recem-criado.
+ * @param path - o caminho do socket.
+ * @param runtime - o runtime injetavel.
+ * @returns dev, ino e o nascimento em nanossegundos.
+ */
+function readSocketIdentity(path: string, runtime: BuilderUnixRuntime): SocketIdentity {
+  const bound = runtime.lstatSync(path, { bigint: true })
+  return { dev: Number(bound.dev), ino: Number(bound.ino), birthtimeNs: bound.birthtimeNs }
+}
+
+/**
+ * Este caminho ainda guarda o NOSSO socket?
+ * @param stat - o `lstat` com bigint do caminho.
+ * @param identity - a identidade capturada quando criamos o socket.
+ * @param uid - o dono esperado.
+ * @returns verdadeiro so quando dev, ino, nascimento e dono batem.
+ */
+function sameSocket(stat: { isSocket: () => boolean; uid: bigint; dev: bigint; ino: bigint; birthtimeNs: bigint }, identity: SocketIdentity, uid: number): boolean {
+  return stat.isSocket() && Number(stat.uid) === uid && Number(stat.dev) === identity.dev && Number(stat.ino) === identity.ino
+    && stat.birthtimeNs === identity.birthtimeNs
+}
+
+async function safeUnlinkSocket(path: string, identity: SocketIdentity, uid: number, runtime: BuilderUnixRuntime): Promise<void> { try { if (!sameSocket(await runtime.lstat(path, { bigint: true }), identity, uid)) throw new Error('SOCKET_IDENTITY_MISMATCH'); await runtime.unlink(path) } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error } }
+async function assertSocketIdentity(path: string, identity: SocketIdentity, uid: number, runtime: BuilderUnixRuntime): Promise<void> { if (!sameSocket(await runtime.lstat(path, { bigint: true }), identity, uid)) throw new Error('SOCKET_IDENTITY_MISMATCH') }
 async function replaceMetadata(lockPath: string, metadata: LockMetadata, runtime: BuilderUnixRuntime): Promise<void> { const temp = posix.join(lockPath, `.owner-${metadata.nonce}`); await runtime.writeFile(temp, `${JSON.stringify(metadata)}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' }); await runtime.rename(temp, posix.join(lockPath, 'owner.json')) }
-async function readMetadata(lockPath: string, runtime: BuilderUnixRuntime): Promise<LockMetadata> { const handle = await runtime.open(posix.join(lockPath, 'owner.json'), constants.O_RDONLY | constants.O_NOFOLLOW); try { const stat = await handle.stat(); if (!stat.isFile() || stat.nlink !== 1 || (stat.mode & 0o177) !== 0 || stat.uid !== runtime.getuid!()) throw new Error('INVALID_LOCK_METADATA'); const value = JSON.parse(await handle.readFile('utf8')) as Record<string, unknown>; if (Object.keys(value).sort().join('\0') !== ['nonce', 'pid', 'process_start_ticks', 'socket_dev', 'socket_ino', 'uid'].join('\0') || typeof value.nonce !== 'string' || !/^[a-f0-9]{32}$/u.test(value.nonce) || !Number.isSafeInteger(value.pid) || Number(value.pid) < 1 || typeof value.process_start_ticks !== 'string' || !/^[0-9]+$/u.test(value.process_start_ticks) || !Number.isSafeInteger(value.uid) || Number(value.uid) < 0 || (value.socket_dev !== null && (!Number.isSafeInteger(value.socket_dev) || Number(value.socket_dev) < 0)) || (value.socket_ino !== null && (!Number.isSafeInteger(value.socket_ino) || Number(value.socket_ino) < 0))) throw new Error('INVALID_LOCK_METADATA'); return value as unknown as LockMetadata } finally { await handle.close() } }
+async function readMetadata(lockPath: string, runtime: BuilderUnixRuntime): Promise<LockMetadata> { const handle = await runtime.open(posix.join(lockPath, 'owner.json'), constants.O_RDONLY | constants.O_NOFOLLOW); try { const stat = await handle.stat(); if (!stat.isFile() || stat.nlink !== 1 || (stat.mode & 0o177) !== 0 || stat.uid !== runtime.getuid!()) throw new Error('INVALID_LOCK_METADATA'); const parsed = JSON.parse(await handle.readFile('utf8')) as Record<string, unknown>
+      // Metadata escrita por uma versao ANTERIOR nao tem `socket_birthtime_ns`.
+      // Recusa-la transformaria toda atualizacao do supervisor num lock
+      // impossivel de recuperar; ausente vira `null`, e `null` ja significa
+      // "sem prova de identidade" no unico lugar que consome o campo.
+      const value: Record<string, unknown> = { socket_birthtime_ns: null, ...parsed }
+      if (Object.keys(value).sort().join('\0') !== ['nonce', 'pid', 'process_start_ticks', 'socket_birthtime_ns', 'socket_dev', 'socket_ino', 'uid'].join('\0') || typeof value.nonce !== 'string' || !/^[a-f0-9]{32}$/u.test(value.nonce) || !Number.isSafeInteger(value.pid) || Number(value.pid) < 1 || typeof value.process_start_ticks !== 'string' || !/^[0-9]+$/u.test(value.process_start_ticks) || !Number.isSafeInteger(value.uid) || Number(value.uid) < 0 || (value.socket_dev !== null && (!Number.isSafeInteger(value.socket_dev) || Number(value.socket_dev) < 0)) || (value.socket_ino !== null && (!Number.isSafeInteger(value.socket_ino) || Number(value.socket_ino) < 0)) || (value.socket_birthtime_ns !== null && (typeof value.socket_birthtime_ns !== 'string' || !/^[0-9]+$/u.test(value.socket_birthtime_ns)))) throw new Error('INVALID_LOCK_METADATA'); return value as unknown as LockMetadata } finally { await handle.close() } }
 async function releaseLock(lockPath: string, nonce: string, runtime: BuilderUnixRuntime): Promise<void> { try { if ((await readMetadata(lockPath, runtime)).nonce !== nonce) throw new Error('LOCK_IDENTITY_MISMATCH'); await runtime.remove(lockPath, { recursive: true }) } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error } }
 async function processStartIdentity(pid: number, runtime: BuilderUnixRuntime): Promise<string> { const stat = await runtime.readFile(`/proc/${pid}/stat`, 'utf8'); const end = stat.lastIndexOf(') '); const fields = end < 0 ? [] : stat.slice(end + 2).trim().split(/\s+/u); const start = fields[19]; if (start === undefined || !/^[0-9]+$/u.test(start)) throw new Error('PROCESS_IDENTITY_UNAVAILABLE'); return start }
 async function sameProcess(pid: number, expectedStart: string, runtime: BuilderUnixRuntime): Promise<boolean> { try { runtime.kill(pid, 0); return await processStartIdentity(pid, runtime) === expectedStart } catch (error) { const code = (error as NodeJS.ErrnoException).code; if (code === 'ESRCH' || code === 'ENOENT') return false; throw error } }
-async function closeOwnedSocket(path: string, identity: { readonly dev: number; readonly ino: number }, uid: number, server: Server, timeoutMs: number, runtime: BuilderUnixRuntime, afterStopAccepting?: () => void): Promise<void> {
+async function closeOwnedSocket(path: string, identity: SocketIdentity, uid: number, server: Server, timeoutMs: number, runtime: BuilderUnixRuntime, afterStopAccepting?: () => void): Promise<void> {
   if (!server.listening) {
     afterStopAccepting?.()
     await safeUnlinkSocket(path, identity, uid, runtime)
     return
   }
   let current
-  try { current = await runtime.lstat(path) } catch (error) {
+  try { current = await runtime.lstat(path, { bigint: true }) } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       await closeServerBounded(server, timeoutMs, runtime, afterStopAccepting)
       return
@@ -186,7 +244,7 @@ async function closeOwnedSocket(path: string, identity: { readonly dev: number; 
     detachServerWithoutPathMutation(server, afterStopAccepting)
     throw error
   }
-  const owned = current.isSocket() && current.uid === uid && current.dev === identity.dev && current.ino === identity.ino
+  const owned = sameSocket(current, identity, uid)
   if (!owned) {
     detachServerWithoutPathMutation(server, afterStopAccepting)
     throw new Error('SOCKET_IDENTITY_MISMATCH')
