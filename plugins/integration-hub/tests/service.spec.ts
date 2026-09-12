@@ -1,4 +1,5 @@
 import { createHash, generateKeyPairSync, sign } from 'node:crypto'
+import type { SkillHubShape } from '../../prompt-to-app/src/index.ts'
 import { existsSync } from 'node:fs'
 import { chmod, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -1413,5 +1414,23 @@ describe('o TEXTO de uma habilidade so entra conferido', () => {
     const gravada = (await f.service.list(admin)).find(row => row.integration_id === f.id)!
     await f.repository.putIntegration({ ...gravada, skill_body: `${'y'.repeat(TEXTO.length - 1)}.` })
     await expect(f.service.skillBody(admin, f.id)).rejects.toThrow('não é o texto que o publicador assinou')
+  })
+})
+
+describe('o servico atende a forma que o planejamento espera', () => {
+  it('`IntegrationHubService` satisfaz `SkillHubShape` EM TEMPO DE COMPILACAO', async () => {
+    // `prompt-to-app` nao pode importar `integration-hub` — o ciclo seria ao
+    // contrario —, entao a forma que ele usa e declarada la de modo estrutural.
+    // Uma forma estrutural que ninguem confronta com o servico real e uma copia
+    // que envelhece sozinha: renomear `skillBody` aqui compilaria dos dois
+    // lados e quebraria so em execucao.
+    //
+    // Este teste e principalmente uma afirmacao do COMPILADOR. O `expect` no
+    // fim existe para que a falha apareca tambem em execucao se alguem trocar
+    // o metodo por um homonimo com outra assinatura.
+    const f = await build()
+    const conforme: SkillHubShape = { service: f.service }
+    expect(typeof conforme.service.skillBody).toBe('function')
+    expect(typeof conforme.service.list).toBe('function')
   })
 })

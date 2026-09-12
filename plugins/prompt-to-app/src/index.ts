@@ -33,6 +33,7 @@ import {
   type StudioRun,
 } from './model.js'
 import { IntakeEngine } from './intake.js'
+import { skillCardsFrom } from './skill-registry.js'
 import type { IntakeTurnRecordStore } from './intake-turn-store.js'
 import type { DesignSpecRecordStore } from './design-spec-store.js'
 import type { AppSpecRecordStore } from './app-spec-store.js'
@@ -220,6 +221,51 @@ function designSpecStoreOption(ctx: Context, config: PromptToAppPluginConfig): {
   return { designSpecStore: records }
 }
 
+/**
+ * O recorte do registro de integrações que o planejamento usa.
+ *
+ * Estrutural, e não o tipo do outro pacote: `integration-hub` JÁ depende de
+ * `prompt-to-app`, e importar de volta fecharia um ciclo. Sem esta interface,
+ * `ctx.get('studioIntegrationHub')` chega aqui sem tipo — e um `skillBody`
+ * renomeado do outro lado compilaria em silêncio deste, que foi exatamente o
+ * que uma sondagem com um nome errado mostrou acontecer.
+ */
+export interface SkillHubShape {
+  readonly service: {
+    list(actor: HubActorShape): Promise<readonly {
+      readonly integration_id: string
+      readonly kind: string
+      readonly enabled: boolean
+      readonly manifest: {
+        readonly name: string
+        readonly skill?: { readonly trigger: string; readonly body_chars: number } | undefined
+        readonly provenance?: { readonly artifact_sha256: string } | undefined
+      } | null
+    }[]>
+    skillBody(actor: HubActorShape, integrationId: string): Promise<string>
+  }
+}
+
+export interface HubActorShape {
+  readonly userId: string
+  readonly orgId: string
+  readonly tenantId: string
+  readonly role: string
+}
+
+/**
+ * O ator do planejamento, na forma que o registro de integrações exige.
+ *
+ * `userId` e `role` já foram conferidos pelo planejador antes de chamar: sem
+ * eles ele nem consulta o registro. O `!` aqui é sobre essa garantia, e não
+ * sobre confiança no chamador.
+ * @param actor - quem planeja.
+ * @returns o ator do Hub.
+ */
+function hubActor(actor: { readonly orgId: string; readonly tenantId: string; readonly userId?: string | undefined; readonly role?: string | undefined }): HubActorShape {
+  return { userId: actor.userId!, orgId: actor.orgId, tenantId: actor.tenantId, role: actor.role! }
+}
+
 export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}): Promise<void> {
   const [projects, specs, designs, turns, plans, runs, evidence, approvals]: [
     Domain<typeof studioProjectsDomainSpec>, Domain<typeof studioAppSpecsDomainSpec>,
@@ -293,7 +339,32 @@ export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}):
     },
   })
   ctx.jobs.attachController('dz23-studio-prompt-to-app')
-  const intake = new IntakeEngine(model); const planner = new PlannerEngine(model)
+  const intake = new IntakeEngine(model)
+  // As habilidades vêm do REGISTRO DE INTEGRAÇÕES, resolvido a cada
+  // planejamento e nunca capturado na montagem: a ordem entre plugins não é
+  // garantida, e capturar aqui deixaria o planejamento sem habilidades em
+  // qualquer perfil que monte o Hub depois deste.
+  //
+  // Hub ausente devolve lista VAZIA, e não erro: o planejamento é o caminho
+  // central do produto, e uma instalação sem Hub tem de continuar planejando.
+  // O que ela não tem é habilidade, o que é verdade e não falha.
+  const planner = new PlannerEngine(model, undefined, {
+    cards: async actor => {
+      const hub = (ctx.get('studioIntegrationHub') as SkillHubShape | undefined)?.service
+      if (hub === undefined) return []
+      const rows = await hub.list(hubActor(actor))
+      return skillCardsFrom(rows).cards
+    },
+    // A carga passa pelo `skillBody` do Hub, e NÃO lê o campo direto: é lá que
+    // moram a reconferência da assinatura, a do tamanho, a da impressão e a
+    // recusa de habilidade desligada. Ler o campo aqui seria uma segunda porta
+    // para o mesmo texto, sem nenhuma dessas conferências.
+    load: async (actor, skillId) => {
+      const hub = (ctx.get('studioIntegrationHub') as SkillHubShape | undefined)?.service
+      if (hub === undefined) throw new Error('SKILL_REGISTRY_UNAVAILABLE')
+      return hub.skillBody(hubActor(actor), skillId)
+    },
+  })
   const healthFor = async (scope: { readonly orgId: string; readonly tenantId: string }): Promise<StudioAppsHealth> => {
     // `chooseRoute` é a MESMA decisão que a geração toma, e ela devolve o
     // motivo. Reimplementar aqui um "primeira saudável" ao lado dela era como o

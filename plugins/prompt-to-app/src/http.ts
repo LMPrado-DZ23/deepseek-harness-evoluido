@@ -263,7 +263,12 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
         const spec = await config.service.latestSpec(actor, projectId)
         const previous = await optionalAsync(async () => config.service.plan(actor, projectId))
         const output = await config.planner.plan(
-          { orgId: actor.orgId, tenantId: actor.tenantId }, project.privacy, spec.app_spec, project.category,
+          // O ATOR inteiro, e não só o escopo: é o registro de habilidades que
+          // precisa de quem pergunta, e ele confere papel. Passar meio ator
+          // faria o planejamento acontecer sem habilidade nenhuma e sem dizer
+          // por quê.
+          { orgId: actor.orgId, tenantId: actor.tenantId, userId: actor.userId, role: actor.role },
+          project.privacy, spec.app_spec, project.category,
           previous?.status === 'CHANGE_REQUESTED' ? previous.change_request ?? undefined : undefined,
         )
         return json(response, 201, { plan: await config.service.proposePlan(actor, projectId, output.slices) })

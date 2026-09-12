@@ -4,6 +4,7 @@ import type { AppSpecV1 } from '../src/appspec.js'
 import { IntakeEngine, nextIntakeQuestion } from '../src/intake.js'
 import type { StudioApproval, StudioAppSpecRecord, StudioDesignSpecRecord, StudioEvidence, StudioIntakeTurn, StudioPlan, StudioProject, StudioRun } from '../src/model.js'
 import { studioProjectSchema } from '../src/model.js'
+import { type SkillCard } from '../src/skill-registry.ts'
 import { PlannerEngine } from '../src/planner.js'
 import type { PromptModelPort } from '../src/ports.js'
 import { PromptToAppError, PromptToAppService, type PromptToAppActor, type PromptToAppRepository } from '../src/service.js'
@@ -379,5 +380,130 @@ describe('T-25: intake e etapa nova tambem passam pelo motor de contexto', () =>
     expect(request).toBeDefined()
     expect(request!.source).toBe('slice-request')
     expect(ledger.dropped).toEqual([])
+  })
+})
+
+describe('as habilidades chegam ao prompt do planejamento', () => {
+  const ATOR = { orgId: 'o', tenantId: 't', userId: 'u1', role: 'owner' }
+  const TEXTO = 'Sempre escreva o rotulo acima do campo, e nunca dentro dele.'
+
+  function ficha(over: Partial<SkillCard> = {}): SkillCard {
+    return {
+      skill_id: 'formularios', name: 'Formularios acessiveis',
+      // `validSpec.problem` fala de fotos e de salao; o gatilho precisa casar
+      // com o que a PESSOA descreveu, e nao com vocabulario tecnico.
+      trigger: 'salao fotos servicos', body_chars: TEXTO.length,
+      source: 'integration:hub-1', enabled: true, ...over,
+    }
+  }
+
+  function planejador(over: { cards?: readonly SkillCard[]; load?: (actor: unknown, id: string) => Promise<string> } = {}) {
+    const complete = vi.fn().mockResolvedValue({
+      value: { slices: [{ slice_id: 's', title: 'Pagina', description: 'Montar', acceptance_criteria: ['Compila'], planned_files: ['src/GeneratedApp.tsx', 'content/app.json'] }] },
+      route: 'ollama', model: 'qwen',
+    })
+    const planner = new PlannerEngine({ complete }, undefined, {
+      cards: async () => over.cards ?? [ficha()],
+      load: over.load ?? (async () => TEXTO),
+    })
+    return { planner, complete }
+  }
+
+  it('a habilidade que casa entra no prompt, com o texto conferido', async () => {
+    const f = planejador()
+    await f.planner.plan(ATOR, 'local-only', validSpec)
+    expect(f.complete.mock.calls[0]![3]).toContain(TEXTO)
+    expect(f.planner.lastSkills?.loaded).toEqual(['skill:formularios'])
+  })
+
+  it('SEM ator completo o registro NAO e consultado', async () => {
+    // O registro confere papel. Montar um ator aqui para conseguir ler seria
+    // contornar essa conferencia por dentro.
+    const cards = vi.fn(async () => [ficha()])
+    const planner = new PlannerEngine(
+      { complete: vi.fn().mockResolvedValue({ value: { slices: [{ slice_id: 's', title: 'P', description: 'M', acceptance_criteria: ['C'], planned_files: ['src/GeneratedApp.tsx'] }] }, route: 'ollama', model: 'qwen' }) },
+      undefined, { cards, load: async () => TEXTO },
+    )
+    await planner.plan({ orgId: 'o', tenantId: 't' }, 'local-only', validSpec)
+    expect(cards).not.toHaveBeenCalled()
+    expect(planner.lastSkills).toBeUndefined()
+  })
+
+  it('habilidade que NAO casa nao entra, e o prompt continua o mesmo', async () => {
+    const semCasar = planejador({ cards: [ficha({ trigger: 'contabilidade imposto nota' })] })
+    await semCasar.planner.plan(ATOR, 'local-only', validSpec)
+    expect(semCasar.complete.mock.calls[0]![3]).not.toContain(TEXTO)
+    expect(semCasar.planner.lastSkills?.selection.skipped).toEqual([{ skill_id: 'formularios', reason: 'NO_MATCH' }])
+  })
+
+  it('a recusa do registro NAO derruba o planejamento', async () => {
+    // Uma habilidade desligada nao pode levar junto o trabalho de quem pediu.
+    const f = planejador({ load: async () => { throw new Error('Esta habilidade esta desligada.') } })
+    await expect(f.planner.plan(ATOR, 'local-only', validSpec)).resolves.toMatchObject({ slices: [{ slice_id: 's' }] })
+    expect(f.planner.lastSkills?.refused).toEqual([
+      { skill_id: 'formularios', reason: 'LOAD_FAILED', detail: 'Esta habilidade esta desligada.' },
+    ])
+    expect(f.complete.mock.calls[0]![3]).not.toContain(TEXTO)
+  })
+
+  it('o relatorio das habilidades e ZERADO entre planejamentos', async () => {
+    // Um relatorio que sobrevive ao planejamento seguinte responde a pergunta
+    // "o que o modelo viu?" com o que ele viu da OUTRA vez.
+    const f = planejador()
+    await f.planner.plan(ATOR, 'local-only', validSpec)
+    expect(f.planner.lastSkills?.loaded).toHaveLength(1)
+    await f.planner.plan({ orgId: 'o', tenantId: 't' }, 'local-only', validSpec)
+    expect(f.planner.lastSkills).toBeUndefined()
+  })
+
+  it('a procedencia da habilidade aparece no registro do contexto', async () => {
+    const f = planejador()
+    await f.planner.plan(ATOR, 'local-only', validSpec)
+    const linha = f.planner.lastLedger?.included.find(item => item.id === 'skill:formularios')
+    expect(linha?.source).toBe('integration:hub-1')
+    expect(linha?.kind).toBe('instruction')
+  })
+
+  it('o casamento le o que a PESSOA descreveu, e nao nomes de coluna', async () => {
+    // Um gatilho que casa com `telefone` porque existe um CAMPO chamado
+    // telefone e uma habilidade escolhida por vocabulario tecnico, e nao
+    // porque o assunto e aquele — e o que ela traz e uma REGRA que o agente
+    // vai seguir.
+    const comEntidade: AppSpecV1 = { ...validSpec, entities: [{
+      name: 'Contato', kind: 'database', sensitive: false,
+      fields: [{ name: 'telefone', type: 'text', required: true }],
+    }] }
+    const f = planejador({ cards: [ficha({ trigger: 'telefone Contato' })] })
+    await f.planner.plan(ATOR, 'local-only', comEntidade, 'form-database')
+    expect(f.planner.lastSkills?.selection.skipped).toEqual([{ skill_id: 'formularios', reason: 'NO_MATCH' }])
+    expect(f.complete.mock.calls[0]![3]).not.toContain(TEXTO)
+  })
+
+  it('as habilidades so podem ocupar uma FATIA do teto, e nao o teto inteiro', async () => {
+    // O que sobra tem de caber o pedido INTEIRO: instrucao de terceiro nunca
+    // pode empurrar para fora o que a pessoa pediu. Com a fatia em trinta por
+    // cento e o limite por habilidade num quarto dela, uma habilidade de 800
+    // nao cabe num teto de 10.000 — e caberia se a fatia fosse o teto todo.
+    const complete = vi.fn().mockResolvedValue({
+      value: { slices: [{ slice_id: 's', title: 'P', description: 'M', acceptance_criteria: ['C'], planned_files: ['src/GeneratedApp.tsx'] }] },
+      route: 'ollama', model: 'qwen',
+    })
+    const planner = new PlannerEngine({ complete }, 10_000, {
+      cards: async () => [ficha({ body_chars: 800 })],
+      load: async () => 'x'.repeat(800),
+    })
+    await planner.plan(ATOR, 'local-only', validSpec)
+    expect(planner.lastSkills?.selection.skipped).toEqual([{ skill_id: 'formularios', reason: 'OVERSIZED' }])
+    expect(planner.lastSkills?.loaded).toEqual([])
+  })
+
+  it('sem registro montado, o planejamento acontece exatamente como antes', async () => {
+    const complete = vi.fn().mockResolvedValue({
+      value: { slices: [{ slice_id: 's', title: 'P', description: 'M', acceptance_criteria: ['C'], planned_files: ['src/GeneratedApp.tsx'] }] },
+      route: 'ollama', model: 'qwen',
+    })
+    const planner = new PlannerEngine({ complete })
+    await expect(planner.plan(ATOR, 'local-only', validSpec)).resolves.toMatchObject({ slices: [{ slice_id: 's' }] })
+    expect(planner.lastSkills).toBeUndefined()
   })
 })

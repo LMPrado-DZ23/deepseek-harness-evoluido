@@ -1,11 +1,67 @@
-import { assembleContext, type ContextLedger, type ContextSection } from './context.js'
+import { assembleContext, DEFAULT_CONTEXT_BUDGET_CHARS, type ContextLedger, type ContextSection } from './context.js'
 import { z } from 'zod'
 import type { RoutePrivacy } from '@dz23-studio/route-health'
 import type { AppSpecV1 } from './appspec.js'
 import { assertValidDataModel } from './data-generator.js'
 import { planSliceSchema, type StudioProjectCategory } from './model.js'
 import type { PromptModelPort } from './ports.js'
+import {
+  loadSkills, selectSkills,
+  type SkillCard, type SkillRefusal, type SkillSelection,
+} from './skill-registry.js'
 import { t } from './i18n.js'
+
+/**
+ * De onde as habilidades vêm, quando vêm.
+ *
+ * OPCIONAL no planejador inteiro, e a ausência é o padrão: uma instalação sem
+ * habilidades instaladas planeja exatamente como planejava antes. Tornar isto
+ * obrigatório faria o motor de planejamento exigir o registro de integrações
+ * para funcionar — e o planejamento é o caminho central do produto.
+ */
+export interface PlannerSkills {
+  cards(actor: PlannerActor): Promise<readonly SkillCard[]>
+  load(actor: PlannerActor, skillId: string): Promise<string>
+}
+
+/**
+ * Quem está planejando.
+ *
+ * `orgId` e `tenantId` são o que o modelo precisa. `userId` e `role` são o que
+ * o REGISTRO DE INTEGRAÇÕES precisa, e eles são opcionais porque o
+ * planejamento existia antes das habilidades e continua existindo sem elas —
+ * um chamador que passa só o escopo planeja, e não carrega habilidade nenhuma.
+ *
+ * Sem ator completo, o registro NÃO é consultado. Inventar um ator para poder
+ * ler seria contornar a própria conferência de papel.
+ */
+export interface PlannerActor {
+  readonly orgId: string
+  readonly tenantId: string
+  readonly userId?: string | undefined
+  readonly role?: string | undefined
+}
+
+/**
+ * Quanto do teto do contexto as habilidades podem ocupar ao todo.
+ *
+ * Uma fração, e não um número: o resto do contexto — a especificação que a
+ * pessoa descreveu, o schema que torna a resposta analisável — cresce com o
+ * pedido, e um número fixo de caracteres para habilidades apertaria justamente
+ * os pedidos maiores, que são os que mais precisam de espaço.
+ *
+ * Trinta por cento é uma escolha, e ela é conservadora de propósito: o que
+ * sobra tem de caber o pedido INTEIRO, porque instrução de terceiro nunca pode
+ * empurrar para fora o que a pessoa pediu.
+ */
+export const SKILL_ALLOWANCE_FRACTION = 0.3
+
+/** O que as habilidades acrescentaram a um planejamento, e o que ficou de fora. */
+export interface PlannerSkillReport {
+  readonly selection: SkillSelection
+  readonly refused: readonly SkillRefusal[]
+  readonly loaded: readonly string[]
+}
 
 const planOutputSchema = z.object({ slices: z.array(planSliceSchema).min(1).max(6) }).strict()
 export type PlanOutput = z.infer<typeof planOutputSchema>
@@ -109,16 +165,69 @@ export class PlannerEngine {
    */
   lastLedger: ContextLedger | undefined
 
-  constructor(private readonly model: PromptModelPort, private readonly budgetChars?: number) {}
+  /**
+   * O que as habilidades fizeram no ÚLTIMO planejamento.
+   *
+   * Fica ao lado de `lastLedger` pelo mesmo motivo: a pergunta depois de um
+   * plano estranho é "o que exatamente o modelo viu?", e uma habilidade de
+   * terceiro que entrou no contexto é a parte dessa resposta que ninguém
+   * adivinha sozinho.
+   */
+  lastSkills: PlannerSkillReport | undefined
 
-  async plan(scope: { orgId: string; tenantId: string }, privacy: RoutePrivacy, spec: AppSpecV1, category: StudioProjectCategory = 'landing-page', changeRequest?: string): Promise<PlanOutput> {
+  constructor(
+    private readonly model: PromptModelPort,
+    private readonly budgetChars?: number,
+    private readonly skills?: PlannerSkills,
+  ) {}
+
+  /**
+   * As partes de contexto vindas das habilidades que servem para este pedido.
+   *
+   * Devolve vazio — e NÃO lança — quando não há registro montado: uma
+   * instalação sem habilidades planeja como sempre planejou.
+   * @param request - o texto do pedido, de onde sai o casamento.
+   * @param budget - o teto total do contexto.
+   * @returns as partes já carregadas e conferidas.
+   */
+  async #skillSections(actor: PlannerActor, request: string, budget: number): Promise<readonly ContextSection[]> {
+    this.lastSkills = undefined
+    const registry = this.skills
+    if (registry === undefined) return []
+    // Sem ator completo não há leitura: o registro confere papel, e montar um
+    // ator aqui para conseguir ler seria contornar essa conferência por dentro.
+    if (actor.userId === undefined || actor.role === undefined) return []
+    const selection = selectSkills(await registry.cards(actor), request, Math.floor(budget * SKILL_ALLOWANCE_FRACTION))
+    const { sections, refused } = await loadSkills(
+      selection.chosen, { load: async skillId => registry.load(actor, skillId) },
+    )
+    this.lastSkills = { selection, refused, loaded: sections.map(section => section.id) }
+    return sections
+  }
+
+  async plan(scope: PlannerActor, privacy: RoutePrivacy, spec: AppSpecV1, category: StudioProjectCategory = 'landing-page', changeRequest?: string): Promise<PlanOutput> {
     assertCategoryCanGenerate(category, spec)
+    // As habilidades entram ANTES da montagem, e não depois: elas são
+    // `instruction`, e instrução não é cortável — descobrir que não cabem
+    // depois de montar seria descobrir com um erro de teto sobre o pedido
+    // inteiro, em vez de com uma habilidade a menos.
+    // O que a pessoa DESCREVEU é o que decide quais habilidades servem: o
+    // problema, para quem é, e os caminhos que ela quer que existam. As
+    // entidades e os campos ficam de fora de propósito — nomes de coluna
+    // casariam com gatilho por coincidência de vocabulário técnico, e não por
+    // o assunto ser aquele.
+    const skills = await this.#skillSections(
+      scope,
+      [spec.problem, spec.audience, ...spec.journeys, ...spec.pages.map(page => page.name), changeRequest ?? ''].join(' '),
+      this.budgetChars ?? DEFAULT_CONTEXT_BUDGET_CHARS,
+    )
     const assembled = assembleContext([
       instruction('plan.only', t('prompts.planOnly')),
       instruction('plan.criteria', t('prompts.planCriteria')),
       instruction('plan.files', t('prompts.planFiles')),
       instruction('plan.first', t('prompts.planFirst')),
       ...categoryInstruction(category),
+      ...skills,
       // A especificação é EVIDÊNCIA: é sobre ela que o modelo raciocina, e é
       // a única parte que cresce com o tamanho do que a pessoa descreveu.
       { id: 'plan.spec', kind: 'evidence' as const, priority: 100, source: 'app-spec', text: t('prompts.generateSpec', { spec: JSON.stringify(spec) }) },
