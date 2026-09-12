@@ -177,3 +177,38 @@ describe('respondedor do Studio para as perguntas do Harness', () => {
     expect(questionFingerprint({ toolName: 'bash' })).not.toBe(questionFingerprint({ toolName: 'bash', callId: 'x' }))
   })
 })
+
+describe('ACHADO: duas perguntas anônimas não viram o mesmo cartão', () => {
+  it('perguntas DIFERENTES sem `callId` recebem identidades diferentes', () => {
+    // Sem `callId`, a impressão digital era `[toolName, '', reason]`. Duas
+    // perguntas distintas da MESMA ferramenta com o MESMO motivo produziam a
+    // mesma impressão digital, o mesmo `subject_id` e o mesmo código de seis
+    // caracteres — que é exatamente o que distingue dois cartões na tela.
+    //
+    // A pessoa via duas confirmações visualmente IDÊNTICAS e não tinha como
+    // saber qual das duas estava aprovando. Numa tela de autorização T2/T3,
+    // isso é a diferença entre confirmar o que se leu e confirmar outra coisa.
+    const primeira = { toolName: 'bash', reason: 'listar os arquivos do projeto' }
+    const segunda = { toolName: 'bash', reason: 'listar os arquivos do projeto' }
+    expect(questionFingerprint(primeira)).not.toBe(questionFingerprint(segunda))
+    expect(questionSubjectId(primeira)).not.toBe(questionSubjectId(segunda))
+  })
+
+  it('a MESMA pergunta mantém a identidade quando perguntada de novo', () => {
+    // A impressão digital é comparada no momento de consumir a confirmação:
+    // uma identidade que mudasse a cada leitura recusaria a própria aprovação
+    // da pessoa.
+    const pergunta = { toolName: 'bash', reason: 'listar os arquivos do projeto' }
+    expect(questionFingerprint(pergunta)).toBe(questionFingerprint(pergunta))
+    expect(questionSubjectId(pergunta)).toBe(questionSubjectId(pergunta))
+  })
+
+  it('com `callId`, quem manda continua sendo ele', () => {
+    // A identidade sintética é só para a ausência: onde o Harness dá um
+    // `callId`, ele é a verdade, e duas leituras da mesma chamada precisam
+    // continuar casando.
+    expect(questionFingerprint({ toolName: 'bash', callId: 'call-1', reason: 'x' }))
+      .toBe(questionFingerprint({ toolName: 'bash', callId: 'call-1', reason: 'x' }))
+    expect(questionSubjectId({ toolName: 'bash', callId: 'call-1' })).toBe('call:call-1')
+  })
+})

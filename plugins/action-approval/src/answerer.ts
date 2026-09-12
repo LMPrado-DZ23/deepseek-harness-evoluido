@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { t } from './i18n.js'
 import type { ApprovalRecord, ApprovalTier } from './model.js'
 import { ActionApprovalError, type ApprovalActor } from './service.js'
@@ -68,11 +68,39 @@ export interface HarnessApprovalDeps {
 
 const SAFE_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,120}$/u
 
+/**
+ * Um identificador proprio para a pergunta que chegou SEM `callId`.
+ *
+ * Sem isto, duas perguntas distintas da MESMA ferramenta com o MESMO motivo
+ * produziam a mesma impressao digital, o mesmo `subject_id` e o mesmo codigo de
+ * seis caracteres — que e justamente o que distingue dois cartoes na tela. A
+ * pessoa via duas confirmacoes visualmente IDENTICAS e nao tinha como saber
+ * qual das duas estava aprovando.
+ *
+ * Chaveado pelo OBJETO da pergunta, e nao pelo conteudo: a mesma pergunta
+ * perguntada de novo (o mesmo objeto, reapresentado) mantem a identidade, e
+ * duas perguntas diferentes recebem identidades diferentes mesmo escrevendo a
+ * mesma coisa. E `WeakMap` para a identidade morrer junto com a pergunta.
+ */
+const SYNTHETIC_CALL_IDS = new WeakMap<object, string>()
+
+function callIdentity(question: HarnessApprovalQuestion): string {
+  const declared = question.callId
+  if (declared !== undefined && declared !== '') return declared
+  const existing = SYNTHETIC_CALL_IDS.get(question)
+  if (existing !== undefined) return existing
+  const minted = `anon:${randomUUID()}`
+  SYNTHETIC_CALL_IDS.set(question, minted)
+  return minted
+}
+
 /** Identidade da chamada dentro do pedido, legível quando já é legível. */
 export function questionSubjectId(question: HarnessApprovalQuestion): string {
   const callId = question.callId
   if (callId !== undefined && SAFE_SEGMENT.test(callId)) return `call:${callId}`
-  return `call:${createHash('sha256').update(callId ?? question.toolName, 'utf8').digest('hex')}`
+  // `callIdentity` e nao `question.toolName`: cair no nome da ferramenta fazia
+  // toda pergunta anonima da mesma ferramenta virar o MESMO sujeito.
+  return `call:${createHash('sha256').update(callIdentity(question), 'utf8').digest('hex')}`
 }
 
 /** Limite da frase mostrada, igual ao da autoridade. */
@@ -109,7 +137,7 @@ export function questionSummary(question: HarnessApprovalQuestion): string {
 
 /** Impressão digital do que está sendo perguntado, incluindo o motivo dado. */
 export function questionFingerprint(question: HarnessApprovalQuestion): string {
-  const parts = [question.toolName, question.callId ?? '', question.reason ?? '']
+  const parts = [question.toolName, callIdentity(question), question.reason ?? '']
   return createHash('sha256')
     .update(parts.map(part => `${String(part.length)}:${part}`).join('|'), 'utf8')
     .digest('hex')
