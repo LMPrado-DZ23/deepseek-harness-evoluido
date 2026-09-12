@@ -62,10 +62,36 @@ const DEFAULT_TARGET = 'dz23-target:staging-local'
  * @param runs - as execuções do prompt-to-app.
  * @returns a porta de bytes.
  */
-export function runArtifactBytesPort(directoryOf: (runId: string) => string | undefined): StagingArtifactBytesPort {
+/**
+ * A chave de uma autorização de leitura: projeto E execução, nunca só execução.
+ *
+ * O mapa era indexado APENAS pelo `run_id`, e a separação por organização e
+ * inquilino — feita com cuidado na leitura autorizada — era descartada na hora
+ * de guardar. Dois inquilinos com `run_id` coincidente faziam a publicação de
+ * um ler os bytes do diretório do outro.
+ *
+ * Projeto e execução são os dois identificadores que o provedor tem em mãos no
+ * momento de abrir os bytes; a organização e o inquilino não atravessam a porta
+ * do provedor, e por isso a redução de risco aqui é REAL mas PARCIAL — está
+ * dita assim em OS-27, e não como se fosse completa.
+ * @param projectId - o projeto.
+ * @param runId - a execução.
+ * @returns a chave, com separador que não aparece em identificador.
+ */
+export function authorizedArtifactKey(projectId: string, runId: string): string {
+  return `${projectId}\u0000${runId}`
+}
+
+/** Por quanto tempo uma leitura autorizada continua resolvível. */
+export const AUTHORIZED_ARTIFACT_TTL_MS = 30 * 60 * 1000
+
+/** Quantas autorizações de leitura ficam guardadas ao mesmo tempo. */
+export const AUTHORIZED_ARTIFACT_LIMIT = 256
+
+export function runArtifactBytesPort(directoryOf: (key: string) => string | undefined): StagingArtifactBytesPort {
   return {
     async open(artifact) {
-      const directory = directoryOf(artifact.run_id)
+      const directory = directoryOf(authorizedArtifactKey(artifact.project_id, artifact.run_id))
       // Só uma execução que a LEITURA AUTORIZADA acabou de aprovar é
       // resolvível. Procurar a execução aqui de novo daria ao provedor um
       // caminho para bytes que ninguém conferiu que são de quem pediu.
@@ -115,7 +141,38 @@ export async function apply(ctx: Context, config: Config = {}): Promise<void> {
   // O caminho da execução autorizada, guardado no momento em que a leitura
   // passou pelo escopo. É o único jeito de o provedor achar os bytes sem
   // procurar por conta própria.
-  const authorizedDirectories = new Map<string, string>()
+  //
+  // Três coisas mudaram aqui, e as três eram defeito:
+  //
+  // 1. A chave era SÓ o `run_id`, e a separação por organização e inquilino —
+  //    feita com cuidado logo acima, na leitura autorizada — era descartada ao
+  //    guardar. Agora a chave leva projeto E execução.
+  // 2. A entrada NUNCA saía. Um `run_id` autorizado uma vez continuava
+  //    resolvível para sempre, inclusive depois de a pessoa perder o acesso ao
+  //    projeto. Agora vence.
+  // 3. O mapa crescia sem teto: uma entrada permanente por publicação, pela
+  //    vida do processo.
+  const authorizedDirectories = new Map<string, { readonly directory: string; readonly expiresAt: number }>()
+  const rememberAuthorized = (key: string, directory: string): void => {
+    const now = Date.now()
+    for (const [candidate, entry] of authorizedDirectories) {
+      if (entry.expiresAt <= now) authorizedDirectories.delete(candidate)
+    }
+    // Cheio mesmo depois da limpeza: sai a mais antiga. `Map` itera na ordem de
+    // inserção, então a primeira é ela.
+    while (authorizedDirectories.size >= AUTHORIZED_ARTIFACT_LIMIT) {
+      const oldest = authorizedDirectories.keys().next()
+      if (oldest.done === true) break
+      authorizedDirectories.delete(oldest.value)
+    }
+    authorizedDirectories.set(key, { directory, expiresAt: now + AUTHORIZED_ARTIFACT_TTL_MS })
+  }
+  const resolveAuthorized = (key: string): string | undefined => {
+    const entry = authorizedDirectories.get(key)
+    if (entry === undefined) return undefined
+    if (entry.expiresAt <= Date.now()) { authorizedDirectories.delete(key); return undefined }
+    return entry.directory
+  }
   const service = new StagingService({
     repository: new DomainStagingRepository(domain.table('releases')),
     source: {
@@ -123,7 +180,7 @@ export async function apply(ctx: Context, config: Config = {}): Promise<void> {
         const rows = runtime.service.runs(actor as unknown as PromptToAppActor, projectId) as readonly (VerifiedRunView & { readonly run_directory: string })[]
         const run: VerifiedRunView & { readonly run_directory: string } = selectVerifiedRun(rows, projectId, { orgId: actor.orgId, tenantId: actor.tenantId }, runId) as VerifiedRunView & { readonly run_directory: string }
         const artifact = artifactFromRun(run)
-        authorizedDirectories.set(run.run_id, run.run_directory)
+        rememberAuthorized(authorizedArtifactKey(projectId, run.run_id), run.run_directory)
         return await Promise.resolve(artifact)
       },
     },
@@ -131,7 +188,7 @@ export async function apply(ctx: Context, config: Config = {}): Promise<void> {
     provider: new LocalStagingProvider({
       targetRef, root,
       ...(config.providerId === undefined ? {} : { providerId: config.providerId }),
-      artifacts: runArtifactBytesPort(runId => authorizedDirectories.get(runId)),
+      artifacts: runArtifactBytesPort(resolveAuthorized),
     }),
     authorization: { allows: roleAllows },
   })
