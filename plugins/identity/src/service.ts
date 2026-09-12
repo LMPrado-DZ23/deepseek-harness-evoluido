@@ -443,7 +443,28 @@ export class StudioIdentityService {
     })
   }
 
+  /**
+   * Encerra TODAS as sessões desta pessoa.
+   *
+   * A foto é tirada DUAS vezes, e a segunda é a que importa. A primeira versão
+   * listava as sessões ativas fora de qualquer trava e revogava só aquelas:
+   * uma sessão emitida ENTRE a foto e as escritas sobrevivia ao botão "sair de
+   * todos os dispositivos" — que é exatamente o botão que a pessoa aperta
+   * quando desconfia de invasão, e exatamente a sessão que ela quer derrubar.
+   *
+   * A segunda passada fecha a janela: ela relê depois das primeiras revogações
+   * e alcança o que nasceu no meio. Duas passadas e não um laço até convergir,
+   * porque um laço daria a quem estivesse emitindo sessões o poder de segurar
+   * esta chamada para sempre.
+   * @param actor - de quem são as sessões.
+   */
   async revokeAllSessions(actor: SessionRecord): Promise<void> {
+    await this.#revokeEverySession(actor)
+    await this.#revokeEverySession(actor)
+    await this.#audit('all_sessions_revoked', actor.user_id, actor.session_id, actor.org_id, actor.tenant_id, 'success', t('auth.allSessionsRevoked'))
+  }
+
+  async #revokeEverySession(actor: SessionRecord): Promise<void> {
     const activeIds = this.#repository.sessions()
       .filter(session => session.user_id === actor.user_id && session.revoked_at === null)
       .map(session => session.session_id)
@@ -457,7 +478,6 @@ export class StudioIdentityService {
         revoked_reason: t('auth.signedOutAllDevices'),
       })
     })))
-    await this.#audit('all_sessions_revoked', actor.user_id, actor.session_id, actor.org_id, actor.tenant_id, 'success', t('auth.allSessionsRevoked'))
   }
 
   async bindHarnessSession(session: SessionRecord, harnessSessionId: string): Promise<void> {
@@ -503,6 +523,13 @@ export class StudioIdentityService {
     await this.#mutex.run('harness-session-bindings', () => this.#mutex.run(`session:${session.session_id}`, async () => {
       const current = this.#repository.sessions().find(candidate => candidate.session_id === session.session_id)
       if (current === undefined) throw new IdentityError('invalid', t('auth.invalidSession'))
+      // A MESMA conferência que `bindHarnessSession` faz. Sem ela, uma sessão
+      // revogada ou vencida ainda desvinculava ponteiros de conversa e gravava
+      // a auditoria EM NOME DELA — trilha atribuída a uma sessão morta. A
+      // direção é "menos acesso", então não havia escalada; o que havia era
+      // assimetria entre vincular e desvincular, e um registro que mente sobre
+      // quem agiu.
+      this.#assertSessionUsable(current, this.#now())
       if (!current.harness_session_ids.includes(harnessSessionId)) return
       await this.#audit(
         'harness_session_unbound', current.user_id, current.session_id,

@@ -125,6 +125,21 @@ export declare class StudioIdentityService {
     csrfTokenFor(session: SessionRecord): Promise<string>;
     listDevices(userId: string): readonly Omit<SessionRecord, 'token_hash' | 'csrf_hash'>[];
     revokeSession(actor: SessionRecord, sessionId: string, reason?: string): Promise<void>;
+    /**
+     * Encerra TODAS as sessões desta pessoa.
+     *
+     * A foto é tirada DUAS vezes, e a segunda é a que importa. A primeira versão
+     * listava as sessões ativas fora de qualquer trava e revogava só aquelas:
+     * uma sessão emitida ENTRE a foto e as escritas sobrevivia ao botão "sair de
+     * todos os dispositivos" — que é exatamente o botão que a pessoa aperta
+     * quando desconfia de invasão, e exatamente a sessão que ela quer derrubar.
+     *
+     * A segunda passada fecha a janela: ela relê depois das primeiras revogações
+     * e alcança o que nasceu no meio. Duas passadas e não um laço até convergir,
+     * porque um laço daria a quem estivesse emitindo sessões o poder de segurar
+     * esta chamada para sempre.
+     * @param actor - de quem são as sessões.
+     */
     revokeAllSessions(actor: SessionRecord): Promise<void>;
     bindHarnessSession(session: SessionRecord, harnessSessionId: string): Promise<void>;
     /**

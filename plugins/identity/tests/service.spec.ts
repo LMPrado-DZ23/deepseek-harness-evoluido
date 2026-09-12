@@ -690,3 +690,40 @@ describe('ACHADO: a rota pública de chave de acesso não diz quem tem conta', (
     })
   })
 })
+
+describe('ACHADO: "sair de todos os dispositivos" alcança a sessão que nasceu no meio', () => {
+  it('uma sessão emitida DURANTE a revogação também cai', async () => {
+    // A versão anterior tirava a foto das sessões ativas FORA de qualquer
+    // trava e revogava só aquelas. Uma sessão emitida entre a foto e as
+    // escritas sobrevivia ao botão "sair de todos os dispositivos" — que é
+    // exatamente o botão que a pessoa aperta quando desconfia de invasão, e
+    // exatamente a sessão que ela quer derrubar.
+    const h = makeHarness()
+    const primeira = await login(h)
+    let emitidaNoMeio: Awaited<ReturnType<typeof login>> | undefined
+    const original = h.repository.putSession.bind(h.repository)
+    let interceptado = false
+    h.repository.putSession = async record => {
+      await original(record)
+      if (!interceptado && record.revoked_at !== null) {
+        interceptado = true
+        // MESMA pessoa: `revokeAllSessions` filtra por `user_id`, e uma
+        // sessão de outro usuário não exercitaria nada.
+        emitidaNoMeio = await login(h)
+      }
+    }
+    await h.service.revokeAllSessions(primeira.session)
+    h.repository.putSession = original
+
+    expect(emitidaNoMeio).toBeDefined()
+    const sobrevivente = h.repository.sessionMap.get(emitidaNoMeio!.session.session_id)
+    expect(sobrevivente?.revoked_at).not.toBeNull()
+  })
+
+  it('o caso normal continua encerrando todas', async () => {
+    const h = makeHarness()
+    const issued = await login(h)
+    await h.service.revokeAllSessions(issued.session)
+    expect([...h.repository.sessionMap.values()].every(session => session.revoked_at !== null)).toBe(true)
+  })
+})
