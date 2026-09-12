@@ -667,6 +667,73 @@ describe('E-06 e E-07: a execução deixa um relato que a pessoa consegue ler', 
     expect(f.evidence.some(item => item.kind === 'diff' && item.relative_path.endsWith('run-report.json'))).toBe(true)
   })
 
+  it('T-26: a PRIMEIRA tentativa de hoje ja sabe como terminou a de ontem', async () => {
+    // A memoria por criacao so compara tentativas de uma mesma criacao entre
+    // si. Esta e a outra metade: a criacao de ontem falhou, e a de hoje
+    // comecava sem saber disso.
+    const f = await fixture()
+    f.runs.push({
+      run_id: 'run-de-ontem', operation_id: 'run-de-ontem', owner_session_id: 'sessao',
+      plan_id: 'plan', project_id: 'project', org_id: actor.orgId, tenant_id: actor.tenantId,
+      stage: 'build', attempt: 1, state: 'FAILED',
+      // O relogio do pipeline e FIXO no fixture: usar `Date.now()` aqui poria a
+      // execucao de ontem no futuro do pipeline, e a janela deixaria de ser
+      // exercida — foi assim que a sabotagem contra a janela sobreviveu.
+      started_at: '2026-09-02T12:00:00.000Z', finished_at: null,
+      sandbox: 'full', route: null, model: null, input_tokens: null, output_tokens: null,
+      estimated_cost_usd: null, run_directory: 'nao-importa', artifact_sha256: null,
+      failure_code: 'O teste de acessibilidade reprovou em src/Form.tsx', acceptance_checks: [],
+    } as never)
+    const generator: CodeGeneratorPort = { generate: vi.fn(async () => cleanGeneration) }
+    await f.pipeline.run(actor, 'project', generator)
+    const correcao = (generator.generate as ReturnType<typeof vi.fn>).mock.calls[0]![2] as string | undefined
+    expect(correcao).toContain('O teste de acessibilidade reprovou em src/Form.tsx')
+    expect(correcao).toContain('tentativa(s) anterior(es)')
+  })
+
+  it('T-26: falha de OUTRO plano nao semeia a criacao de hoje', async () => {
+    // Plano diferente significa que a pessoa mudou o que pediu, e a falha
+    // antiga pode nao ter mais nada a ver.
+    const f = await fixture()
+    f.runs.push({
+      run_id: 'run-de-outro-plano', operation_id: 'run-de-outro-plano', owner_session_id: 'sessao',
+      plan_id: 'plano-antigo', project_id: 'project', org_id: actor.orgId, tenant_id: actor.tenantId,
+      stage: 'build', attempt: 1, state: 'FAILED',
+      started_at: '2026-09-02T12:00:00.000Z', finished_at: null,
+      sandbox: 'full', route: null, model: null, input_tokens: null, output_tokens: null,
+      estimated_cost_usd: null, run_directory: 'nao-importa', artifact_sha256: null,
+      failure_code: 'uma falha de outro plano', acceptance_checks: [],
+    } as never)
+    const generator: CodeGeneratorPort = { generate: vi.fn(async () => cleanGeneration) }
+    await f.pipeline.run(actor, 'project', generator)
+    expect((generator.generate as ReturnType<typeof vi.fn>).mock.calls[0]![2]).toBeUndefined()
+  })
+
+  it('T-26: sem execucao anterior, a primeira tentativa nao recebe correcao nenhuma', async () => {
+    const f = await fixture()
+    const generator: CodeGeneratorPort = { generate: vi.fn(async () => cleanGeneration) }
+    await f.pipeline.run(actor, 'project', generator)
+    expect((generator.generate as ReturnType<typeof vi.fn>).mock.calls[0]![2]).toBeUndefined()
+  })
+
+  it('T-26: falha VELHA demais nao semeia: ela pode ja ter sido corrigida', async () => {
+    // Continuar avisando seria mandar o gerador evitar um caminho que voltou a
+    // funcionar.
+    const f = await fixture()
+    f.runs.push({
+      run_id: 'run-antigo', operation_id: 'run-antigo', owner_session_id: 'sessao',
+      plan_id: 'plan', project_id: 'project', org_id: actor.orgId, tenant_id: actor.tenantId,
+      stage: 'build', attempt: 1, state: 'FAILED',
+      started_at: '2026-05-01T12:00:00.000Z', finished_at: null,
+      sandbox: 'full', route: null, model: null, input_tokens: null, output_tokens: null,
+      estimated_cost_usd: null, run_directory: 'nao-importa', artifact_sha256: null,
+      failure_code: 'uma falha de quatro meses atras', acceptance_checks: [],
+    } as never)
+    const generator: CodeGeneratorPort = { generate: vi.fn(async () => cleanGeneration) }
+    await f.pipeline.run(actor, 'project', generator)
+    expect((generator.generate as ReturnType<typeof vi.fn>).mock.calls[0]![2]).toBeUndefined()
+  })
+
   it('na retentativa o relato mostra o que foi pedido para corrigir', async () => {
     const f = await fixture()
     let calls = 0

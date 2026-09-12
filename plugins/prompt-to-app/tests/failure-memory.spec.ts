@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { crossRunWarning, FailureMemory, failureHistory, type PastFailure } from '../src/failure-memory.js'
+import {
+  crossRunWarning, FailureMemory, failureHistory, pastFailuresFrom, seedCorrection,
+  type FailedRunRecord, type PastFailure,
+} from '../src/failure-memory.js'
 
 describe('T-08: memória de falha — a mesma correção não é pedida três vezes igual', () => {
   it('na primeira vez, a correção é o próprio diagnóstico', () => {
@@ -193,5 +196,94 @@ describe('as falhas que ATRAVESSAM execucoes', () => {
     expect(aviso).toContain('tende a ser o mesmo')
     expect(aviso).not.toContain('não funciona')
     expect(aviso).not.toContain('impossível')
+  })
+})
+
+describe('a primeira tentativa de hoje sabe como terminou a de ontem', () => {
+  const AGORA2 = new Date('2026-09-12T12:00:00.000Z')
+  const base = { projectId: 'p1', planId: 'plano-1', currentRunId: 'run-hoje', now: AGORA2, windowDays: 30 }
+
+  function execucao(over: Partial<FailedRunRecord> = {}): FailedRunRecord {
+    return {
+      run_id: 'run-ontem', project_id: 'p1', plan_id: 'plano-1', state: 'FAILED',
+      failure_code: 'O teste de acessibilidade reprovou em src/Form.tsx',
+      started_at: '2026-09-11T12:00:00.000Z', ...over,
+    }
+  }
+
+  it('sem execucao anterior, nao ha o que semear', () => {
+    expect(seedCorrection([], base)).toBeUndefined()
+  })
+
+  it('a falha do MESMO plano vira aviso mais o diagnostico', () => {
+    const semeado = seedCorrection([execucao()], base)!
+    expect(semeado).toContain('1 tentativa(s)')
+    expect(semeado).toContain('O teste de acessibilidade reprovou em src/Form.tsx')
+  })
+
+  it('plano DIFERENTE nao semeia: a pessoa mudou o que pediu', () => {
+    // Avisar ali seria mandar o gerador evitar um caminho que ninguem esta
+    // mais percorrendo.
+    expect(seedCorrection([execucao({ plan_id: 'plano-outro' })], base)).toBeUndefined()
+  })
+
+  it('projeto DIFERENTE nao semeia: um projeto nao aprende com a falha do vizinho', () => {
+    // E tratar assim vazaria o diagnostico de um inquilino para o pedido de
+    // outro.
+    expect(seedCorrection([execucao({ project_id: 'p2' })], base)).toBeUndefined()
+  })
+
+  it('execucao que NAO falhou nao semeia nada', () => {
+    expect(seedCorrection([execucao({ state: 'PASSED' })], base)).toBeUndefined()
+    expect(seedCorrection([execucao({ state: 'CANCELLED' })], base)).toBeUndefined()
+  })
+
+  it('falha sem diagnostico nenhum nao semeia', () => {
+    expect(seedCorrection([execucao({ failure_code: null })], base)).toBeUndefined()
+    expect(seedCorrection([execucao({ failure_code: '   ' })], base)).toBeUndefined()
+  })
+
+  it('a falha MAIS RECENTE e a que interessa', () => {
+    // Avisar sobre a mais antiga contaria uma historia que tentativas
+    // posteriores ja podem ter superado.
+    const semeado = seedCorrection([
+      execucao({ run_id: 'a', failure_code: 'a falha velha', started_at: '2026-09-01T12:00:00.000Z' }),
+      execucao({ run_id: 'b', failure_code: 'a falha nova', started_at: '2026-09-11T12:00:00.000Z' }),
+    ], base)!
+    expect(semeado).toContain('a falha nova')
+    expect(semeado).not.toContain('a falha velha')
+  })
+
+  it('falha FORA da janela nao semeia', () => {
+    expect(seedCorrection([execucao({ started_at: '2026-05-01T12:00:00.000Z' })], base)).toBeUndefined()
+  })
+
+  it('a execucao ATUAL nao semeia a si mesma', () => {
+    expect(seedCorrection([execucao({ run_id: 'run-hoje' })], base)).toBeUndefined()
+  })
+
+  it('codigo de reinicio tambem conta, porque dois reinicios SAO a mesma coisa', () => {
+    const semeado = seedCorrection([execucao({ failure_code: 'STUDIO_RESTARTED_DURING_RUN' })], base)!
+    expect(semeado).toContain('STUDIO_RESTARTED_DURING_RUN')
+  })
+
+  it('duas execucoes com a MESMA falha contam duas, e o aviso diz isso', () => {
+    const semeado = seedCorrection([
+      execucao({ run_id: 'a', started_at: '2026-09-10T12:00:00.000Z' }),
+      execucao({ run_id: 'b', started_at: '2026-09-11T12:00:00.000Z' }),
+    ], base)!
+    expect(semeado).toContain('2 tentativa(s)')
+  })
+
+  it('`pastFailuresFrom` so traz o que FALHOU e tem texto', () => {
+    // O contrato e desta funcao, e ela e publica: `seedCorrection` toleraria
+    // um texto so de espacos porque a normalizacao o reduz a vazio, mas quem
+    // chamar `pastFailuresFrom` direto receberia uma falha que nao diz nada.
+    expect(pastFailuresFrom([
+      execucao({ run_id: 'a' }),
+      execucao({ run_id: 'b', state: 'PASSED' }),
+      execucao({ run_id: 'c', failure_code: null }),
+      execucao({ run_id: 'd', failure_code: '   \n  ' }),
+    ]).map(item => item.run_id)).toEqual(['a'])
   })
 })

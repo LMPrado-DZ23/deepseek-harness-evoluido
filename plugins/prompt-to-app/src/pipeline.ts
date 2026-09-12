@@ -1,4 +1,4 @@
-import { FailureMemory } from './failure-memory.js'
+import { CROSS_RUN_FAILURE_WINDOW_DAYS, FailureMemory, seedCorrection } from './failure-memory.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { cp, lstat, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
@@ -154,6 +154,15 @@ export class PromptToAppPipeline {
       // Uma memoria POR CRIACAO: ela existe para comparar tentativas da mesma
       // criacao entre si, e nao para carregar falhas de um projeto para outro.
       const failureMemory = new FailureMemory()
+      // E a OUTRA metade, que faltava: a criacao de ontem falhou e a de hoje
+      // comecava sem saber disso. So vale para o MESMO plano — plano diferente
+      // significa que a pessoa mudou o que pediu, e a falha antiga pode nao ter
+      // mais nada a ver. E so para o MESMO projeto: um projeto nao aprende com
+      // a falha do vizinho.
+      diagnostic = seedCorrection(this.options.service.runs(actor, projectId), {
+        projectId, planId: plan.plan_id, currentRunId: operationId,
+        now: this.#now(), windowDays: CROSS_RUN_FAILURE_WINDOW_DAYS,
+      })
       let finalFailureState: 'BUILD_FAILED' | 'TESTS_FAILED' = 'BUILD_FAILED'
       let stopRetries = false
       let completedAttempts = 0

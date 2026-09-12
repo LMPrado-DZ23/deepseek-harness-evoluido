@@ -222,3 +222,94 @@ export function crossRunWarning(history: FailureHistory): string | undefined {
     when: history.lastSeenAt,
   })
 }
+
+/**
+ * Quantos dias para trás a memória entre execuções olha.
+ *
+ * Trinta é uma escolha, e ela é sobre o MUNDO e não sobre armazenamento: uma
+ * dependência que quebrou há um mês provavelmente já foi corrigida por uma
+ * atualização, e avisar sobre ela mandaria o gerador evitar um caminho que
+ * voltou a funcionar. Curto demais perderia a repetição que importa; longo
+ * demais transforma história em superstição.
+ */
+export const CROSS_RUN_FAILURE_WINDOW_DAYS = 30
+
+/**
+ * A falha de uma execução anterior, como ela chega do registro.
+ *
+ * `failure_code` carrega ou um CÓDIGO (`STUDIO_RESTARTED_DURING_RUN`) ou o
+ * DIAGNÓSTICO inteiro, dependendo de quem gravou — o nome do campo promete só
+ * o primeiro. Esta memória compara o que estiver lá, e isso funciona nos dois
+ * casos: dois reinícios são a mesma coisa, e dois diagnósticos iguais também.
+ * O que ela não faz é fingir que o campo tem um significado só.
+ */
+export interface FailedRunRecord {
+  readonly run_id: string
+  readonly project_id: string
+  readonly plan_id: string
+  readonly state: string
+  readonly failure_code: string | null
+  readonly started_at: string
+}
+
+/**
+ * As falhas passadas, tiradas das execuções do projeto.
+ * @param runs - as execuções conhecidas.
+ * @returns as falhas comparáveis.
+ */
+export function pastFailuresFrom(runs: readonly FailedRunRecord[]): readonly PastFailure[] {
+  const found: PastFailure[] = []
+  for (const run of runs) {
+    if (run.state !== 'FAILED') continue
+    if (run.failure_code === null || run.failure_code.trim() === '') continue
+    found.push({
+      project_id: run.project_id, run_id: run.run_id,
+      diagnostic: run.failure_code, created_at: run.started_at,
+    })
+  }
+  return found
+}
+
+/**
+ * O que dizer ao gerador na PRIMEIRA tentativa, quando a última já falhou.
+ *
+ * A memória por criação só compara tentativas de uma mesma criação entre si —
+ * é o que ela foi escrita para fazer. Esta é a outra metade: a criação de
+ * ontem falhou, e a de hoje começa sem saber disso.
+ *
+ * A regra que decide quando avisar é o MESMO PLANO. Plano diferente significa
+ * que a pessoa mudou o que pediu, e a falha antiga pode não ter mais nada a
+ * ver — avisar ali seria mandar o gerador evitar um caminho que ninguém está
+ * mais percorrendo. Mesmo plano e mesma falha é repetição de verdade.
+ *
+ * NÃO avisa sobre falha de outro projeto: um projeto não aprende com a falha
+ * do vizinho, e tratar assim vazaria o diagnóstico de um inquilino para o
+ * pedido de outro.
+ * @param runs - as execuções do PROJETO atual.
+ * @param options - o plano de agora, a execução de agora, o relógio e a janela.
+ * @returns o aviso a prefixar, ou `undefined`.
+ */
+export function seedCorrection(
+  runs: readonly FailedRunRecord[],
+  options: {
+    readonly projectId: string
+    readonly planId: string
+    readonly currentRunId: string
+    readonly now: Date
+    readonly windowDays: number
+  },
+): string | undefined {
+  const mesmas = runs.filter(run => run.project_id === options.projectId && run.plan_id === options.planId)
+  const past = pastFailuresFrom(mesmas)
+  // A falha MAIS RECENTE é a que interessa: é ela que descreve o estado em que
+  // as coisas pararam. Avisar sobre a mais antiga contaria uma história que
+  // tentativas posteriores já podem ter superado.
+  const latest = [...past].sort((left, right) => right.created_at.localeCompare(left.created_at))[0]
+  if (latest === undefined) return undefined
+  const history = failureHistory(past, latest.diagnostic, {
+    currentRunId: options.currentRunId, now: options.now, windowDays: options.windowDays,
+  })
+  const warning = crossRunWarning(history)
+  if (warning === undefined) return undefined
+  return `${warning}\n${latest.diagnostic}`
+}
