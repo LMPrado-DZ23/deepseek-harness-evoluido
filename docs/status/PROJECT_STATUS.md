@@ -103,6 +103,13 @@ produto existe para não fazer.
     endereço que a tela consulta. Virou uma leitura só (10,6 ms). E a sondagem
     de armazenamento passou a perguntar a dois domínios, dizendo qual falhou.
 
+11. **OS-82 — T-15 fechado, e o primeiro modelo REAL.** Os apelidos de
+    caminho (`@/src/...`) viraram aresta de verdade — era assim que o template
+    gerado importa quase tudo, e o grafo ignorava. E o `qwen2.5:3b` do Ollama
+    do Prado gerou código que **passou nas guardas do Studio**: primeira vez
+    que uma guarda foi exercitada por texto de modelo, e não por texto meu.
+    O prompt real, porém, não completa em 45 s naquela máquina — está em EB-04.
+
 ## Próxima ação
 
 Ver `docs/status/TASK_DAG.md`, tarefa de maior prioridade em `READY`.

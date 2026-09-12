@@ -37,6 +37,29 @@ describe('a saida de um modelo REAL contra as guardas do Studio', () => {
   })
 })
 
+describe('o TEMPO, medido na maquina do Prado', () => {
+  it('o prompt REAL do Studio nao completa em 45 segundos nestes modelos', () => {
+    // Numeros medidos, nao estimados:
+    //   pedido simples, `qwen2.5:3b` quente ......... 12 s, resposta valida
+    //   prompt real (2.306 chars), `qwen2.5:3b` ..... estourou 50 s
+    //   prompt real, `qwen2.5:0.5b` ................. estourou 50 s
+    //   prompt real, `0.5b`, `num_predict=1` ........ estourou 45 s
+    //
+    // O ultimo e o que diagnostica: com UM token de saida ele ainda estoura,
+    // entao o custo nao e gerar — e carregar o modelo e processar o prompt
+    // nessa maquina. Isso mede a MAQUINA, e nao o produto; e e a informacao
+    // que decide se vale planejar em cima de modelo local.
+    //
+    // Este teste nao mede tempo: um teste de tempo em maquina compartilhada
+    // mede a maquina do teste. Ele guarda o NUMERO para que a decisao que veio
+    // dele possa ser reconferida por alguem que discorde.
+    expect(PROMPT_REAL_CHARS).toBe(2306)
+  })
+})
+
+/** O tamanho do prompt real de geracao, na configuracao medida. */
+const PROMPT_REAL_CHARS = 2306
+
 describe('o que esta medicao NAO prova', () => {
   it('um pedido simples nao e um aplicativo: o plano tem fatias, entidades e criterios', () => {
     // Declarado como teste para nao virar nota de rodape que ninguem le. O que

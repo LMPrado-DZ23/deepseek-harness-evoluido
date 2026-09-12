@@ -320,6 +320,8 @@ declarada.
 
 | OS-81 | A varredura das execucoes era QUADRATICA, e a sondagem de armazenamento lia um dominio so | Missao Engineering OS / T-22 12/09/2026 | v1.0 | BETA | plugins/prompt-to-app/src/service.ts (`runsInScope`), plugins/prompt-to-app/src/index.ts (`latestFinishedRun`, sondagem), plugins/prompt-to-app/src/pipeline.ts (`recoveryNote`), plugins/prompt-to-app/src/capability-registry.ts (`PROBED_STORAGE_DOMAINS`, `storageProbe`) | 21/21 portoes EXIT=0; constituicao PASS (33 vereditos); `tsc` 0; raiz 3508 passaram / 68 pulados (+13); 10 falsificacoes, 9 pegas e 1 SOBREVIVENTE DECLARADA | execucao: MEDIDO antes de consertado, e a medida mostrou algo pior do que a pendencia dizia. `runs(actor, projectId)` le o repositorio INTEIRO e filtra; quem queria o historico fazia um laco sobre os projetos chamando isso para cada um. O resultado e QUADRATICO: 50x50 = 1,7 ms, 200x50 = 17,2 ms, 500x100 = **188 ms** — de CPU pura, num endereco de saude que uma tela consulta de tempos em tempos, e dobrar os projetos QUADRUPLICA o numero. `runsInScope` le uma vez: 10,6 ms no mesmo tamanho. A visibilidade e IDENTICA (escopo e nao arquivados), porque ganhar desempenho mudando a resposta seria trocar um defeito por outro. TRES ACHADOS. (1) O `#sameScope` na execucao parecia redundante — a lista de projetos visiveis ja filtra o escopo — e a sabotagem que o removia SOBREVIVEU. Para isolamento entre inquilinos a resposta certa nao e declarar a guarda redundante: e escrever o caso em que ela decide, e agora ha teste com identificador de projeto colidindo entre inquilinos. (2) A troca quebrou o aviso do aprendizado (OS-79) em SILENCIO: o dobro do teste nao tinha `runsInScope`, o `catch` devolveu `undefined`, e o unico motivo de isso ter aparecido foi existir um teste que afirma que o aviso CHEGA. O preco daquele `catch` ficou escrito no proprio metodo. (3) A sondagem de armazenamento lia so `projects` e declarava o armazenamento INTEIRO saudavel: um dominio de execucoes quebrado apareceria como pronto na tela, e a pessoa descobriria tentando criar um aplicativo — o momento exato que o registro existe para evitar. Agora sao dois dominios, a falha PARA no primeiro e o veredito diz QUAL | O NUMERO de 188 ms nao e conferido por teste: um teste de tempo em maquina compartilhada mede a maquina. O que garante a leitura unica e a ausencia de laco, e a falsificacao que reintroduz o laco SOBREVIVE de proposito — ela devolve a mesma resposta, so mais devagar; `tsc` e que pega a sondagem perdendo um dominio. Os dominios POR PROJETO (planos, especificacoes, evidencia, aprovacoes) nao sao sondados: eleger um projeto cobaia mede aquele projeto | sondar os dominios por projeto sem eleger cobaia |
 
+| OS-82 | O grafo de dependencias ignorava o jeito como o aplicativo gerado de fato importa | Missao Engineering OS / T-15 + EB-04 12/09/2026 | v1.0 | BETA | plugins/prompt-to-app/src/code-intelligence.ts (`parsePathAliases`, `expandAlias`, `resolveSpecifier` com apelidos), plugins/prompt-to-app/tests/ollama-medicao.spec.ts | 21/21 portoes EXIT=0; constituicao PASS (33 vereditos); `tsc` 0; raiz 3518 passaram / 68 pulados (+10); 8 falsificacoes, TODAS pegas | execucao: todo `@/src/components/generated/...` devolvia `null`. Como e assim que o template gerado importa quase tudo, o grafo ficava com as arestas que menos importam — as relativas dentro da mesma pasta — e o impacto transitivo de uma mudanca era calculado sobre um grafo furado. Lido com `ts.parseConfigFileTextToJson`, e nao `JSON.parse`: `tsconfig.json` aceita comentario e virgula sobrando, e os dois aparecem em arquivo de gerador; `JSON.parse` lancaria, e um `catch` transformaria 'o arquivo tem comentario' em 'este projeto nao tem apelido'. TRES ACHADOS DA FALSIFICACAO. (1) A ORDEM importa: `@/src/*` tem de ser tentado antes de `@/*`, ou todo caminho cai no apelido curto e aponta para o lugar errado — o TypeScript resolve assim. (2) O `tsconfig.json` tem de ser o DA RAIZ: aceitar qualquer arquivo cujo nome termine nisso faria os apelidos de uma subpasta governarem o projeto inteiro, apontando para arquivos errados com a mesma confianca de quando aponta certo. (3) A guarda do padrao `x/*` parecia redundante (o filtro de alvos ja exclui o que nao termina em `/*`) e a sabotagem SOBREVIVIA — ate aparecer o caso que a faz pesar: `{'@app': ['./src/*']}` sem ela vira prefixo `@a`, que ninguem escreveu e que casaria com qualquer import comecando em `@a`. MEDICAO CONTRA MODELO REAL (EB-04): `qwen2.5:3b` no Ollama do Prado respondeu um pedido simples em 12 s e o codigo PASSOU em `assertGeneratedSource` — primeira vez que uma guarda foi exercitada por texto de modelo e nao por texto que eu escolhi | O prompt REAL do Studio (2.306 caracteres) NAO completa em 45-50 s em nenhum dos dois modelos instalados, nem com `num_predict=1` — o custo nao e gerar, e carregar o modelo e processar o prompt naquela maquina. Isso mede a MAQUINA e nao o produto, e esta escrito em EB-04. Um apelido EXATO (`@app` -> arquivo) e ignorado inteiro, de proposito, e o que nao casa continua devolvendo `null` em vez de palpite | preencher os arquivos-alvo do plano anterior; um modelo que responda ao prompt real em tempo utilizavel |
+
 <!-- O livro mestre REGISTRA achados, e o achado da OS-39 e sobre numeros de ADR
      que nomeiam mais de uma decisao: citacao-ambigua-proposital -->
 
@@ -328,16 +330,16 @@ declarada.
 | estado | quantos |
 | --- | --- |
 | `STABLE` | 64 |
-| `BETA` | 136 |
+| `BETA` | 137 |
 | `NOT_PRESENT` | 33 |
 | `NOT_CONFIGURED` | 1 |
 | `NOT_EXECUTED` | 4 |
 | `FAILED` | 2 |
 
-**Total de requisitos rastreados: 240.**
+**Total de requisitos rastreados: 241.**
 
 | versao-alvo | quantos |
 | --- | --- |
-| v1.0 | 204 |
+| v1.0 | 205 |
 | v1.x | 33 |
 | v2 | 3 |

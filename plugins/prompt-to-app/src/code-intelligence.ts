@@ -89,6 +89,9 @@ export function isReadableSource(path: string): boolean {
  */
 export function buildCodeIndex(files: readonly SourceFileInput[]): CodeIndex {
   const known = new Set(files.map(file => file.path))
+  // Os apelidos de caminho vêm do `tsconfig.json` DO APLICATIVO, que está entre
+  // os arquivos lidos. Ler o do Studio aqui seria descrever o projeto errado.
+  const aliases = parsePathAliases(files.find(file => file.path === 'tsconfig.json')?.text ?? '')
   const symbols = new Map<string, readonly ExportedSymbol[]>()
   const imports: ImportEdge[] = []
   const unreadable: { path: string; reason: string }[] = []
@@ -111,7 +114,7 @@ export function buildCodeIndex(files: readonly SourceFileInput[]): CodeIndex {
     }
     symbols.set(file.path, collectExports(parsed))
     for (const specifier of collectImports(parsed)) {
-      imports.push({ from: file.path, specifier, to: resolveSpecifier(file.path, specifier, known) })
+      imports.push({ from: file.path, specifier, to: resolveSpecifier(file.path, specifier, known, aliases) })
     }
   }
 
@@ -192,9 +195,16 @@ function collectImports(parsed: ts.SourceFile): readonly string[] {
  * @param known - os arquivos do índice.
  * @returns o arquivo apontado, ou `null`.
  */
-export function resolveSpecifier(from: string, specifier: string, known: ReadonlySet<string>): string | null {
-  if (!specifier.startsWith('.')) return null
-  const base = join(dirname(from), specifier)
+export function resolveSpecifier(
+  from: string, specifier: string, known: ReadonlySet<string>, aliases: PathAliases = [],
+): string | null {
+  // O APELIDO vira caminho antes de qualquer coisa (T-15). Sem isto, todo
+  // `@/src/components/generated/...` — que e como o template gerado importa
+  // quase tudo — devolvia `null`, e o grafo de dependencias ficava com as
+  // arestas que menos importam: as relativas dentro da mesma pasta.
+  const expanded = expandAlias(specifier, aliases)
+  if (expanded === null && !specifier.startsWith('.')) return null
+  const base = expanded ?? join(dirname(from), specifier)
   if (base === null) return null
   const candidates = [
     base,
@@ -207,6 +217,84 @@ export function resolveSpecifier(from: string, specifier: string, known: Readonl
     ...READABLE.map(extension => `${base}/index${extension}`),
   ]
   return candidates.find(candidate => known.has(candidate)) ?? null
+}
+
+/**
+ * Os apelidos de caminho do `tsconfig.json`, ja normalizados.
+ *
+ * `prefix` sem o `*`, `targets` sem o `*`, na ordem em que o TypeScript os
+ * tentaria. A resolucao do TypeScript e mais rica do que isto (ha `baseUrl`,
+ * `rootDirs`, `exports` de pacote); o que esta aqui cobre a forma que o
+ * template gerado usa, e o que nao casar continua devolvendo `null` em vez de
+ * um palpite.
+ */
+export type PathAliases = readonly { readonly prefix: string; readonly targets: readonly string[] }[]
+
+/**
+ * Le os apelidos de caminho do `tsconfig.json` DO APLICATIVO GERADO (T-15).
+ *
+ * Usa o leitor do proprio TypeScript, e nao `JSON.parse`: um `tsconfig.json`
+ * aceita comentario e virgula sobrando, e os dois aparecem em arquivo escrito
+ * por gerador. `JSON.parse` lancaria, e um `catch` transformaria "o arquivo tem
+ * comentario" em "este projeto nao tem apelido", que e uma conclusao errada
+ * sobre um arquivo perfeitamente valido.
+ *
+ * `baseUrl` entra quando existe: `paths` sao relativos a ele. Ausente, os alvos
+ * ja sao relativos a raiz — que e como o template gerado escreve.
+ * @param text - o conteudo do `tsconfig.json`.
+ * @returns os apelidos, ou uma lista vazia quando nao ha nenhum legivel.
+ */
+export function parsePathAliases(text: string): PathAliases {
+  const parsed = ts.parseConfigFileTextToJson('tsconfig.json', text)
+  if (parsed.error !== undefined) return []
+  const options: unknown = (parsed.config as { compilerOptions?: unknown } | undefined)?.compilerOptions
+  const paths: unknown = (options as { paths?: unknown } | undefined)?.paths
+  if (paths === null || typeof paths !== 'object') return []
+  const baseUrl = (options as { baseUrl?: unknown } | undefined)?.baseUrl
+  const base = typeof baseUrl === 'string' ? normalizeBase(baseUrl) : ''
+  const aliases: { prefix: string; targets: string[] }[] = []
+  for (const [pattern, value] of Object.entries(paths as Record<string, unknown>)) {
+    if (!Array.isArray(value)) continue
+    // So a forma `x/*`. Um apelido EXATO (`@app` -> `src/app.ts`) existe no
+    // TypeScript e nao aparece no template gerado; aceita-lo aqui pela metade
+    // seria pior do que nao aceitar.
+    if (!pattern.endsWith('/*')) continue
+    const targets = value
+      .filter((entry): entry is string => typeof entry === 'string' && entry.endsWith('/*'))
+      // Tira o `*` e MANTEM a barra: o prefixo perde a barra (`@/src`) e o alvo
+      // a conserva (`src/`), para que juntar os dois com o resto do caminho
+      // produza `src/components/...` e nao `srccomponents/...`.
+      .map(entry => `${base}${entry.slice(0, -1).replace(/^\.\//u, '')}`)
+    if (targets.length > 0) aliases.push({ prefix: pattern.slice(0, -2), targets })
+  }
+  // Os mais ESPECIFICOS primeiro: `@/src/*` tem de ser tentado antes de `@/*`,
+  // ou todo caminho cairia no apelido mais curto e apontaria para o lugar
+  // errado. E o TypeScript resolve assim tambem.
+  return aliases.sort((a, b) => b.prefix.length - a.prefix.length)
+}
+
+/** A raiz de `baseUrl`, sempre terminada em barra (ou vazia). */
+function normalizeBase(baseUrl: string): string {
+  const clean = baseUrl.replace(/^\.\//u, '').replace(/\/+$/u, '')
+  return clean === '' || clean === '.' ? '' : `${clean}/`
+}
+
+/**
+ * O primeiro caminho que um apelido produz, ou `null`.
+ *
+ * Devolve UM alvo — o primeiro — e nao todos. Os demais sao alternativas de
+ * fallback do TypeScript, e tentar todas aqui criaria mais de uma aresta para
+ * um import que aponta para um arquivo so.
+ */
+function expandAlias(specifier: string, aliases: PathAliases): string | null {
+  for (const alias of aliases) {
+    if (!specifier.startsWith(`${alias.prefix}/`)) continue
+    const rest = specifier.slice(alias.prefix.length + 1)
+    const first = alias.targets[0]
+    if (first === undefined) continue
+    return `${first}${rest}`
+  }
+  return null
 }
 
 /** O diretório de um caminho, com barras normais. */

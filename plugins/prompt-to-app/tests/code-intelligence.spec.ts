@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   APP_SOURCE_LIMITS, appCodeContext, buildCodeIndex, codeIndexSummary, dependents, findSymbol, impactOf,
-  importCycles, isReadableSource, readAppSources, resolveSpecifier, unimported,
+  importCycles, isReadableSource, parsePathAliases, readAppSources, resolveSpecifier, unimported,
   type SourceFileInput,
 } from '../src/code-intelligence.ts'
 
@@ -445,5 +445,107 @@ describe('de qual execucao o inventario e lido', () => {
     )
     expect(saida?.index.symbols.get('src/a.ts')?.map(item => item.name)).toEqual(['a'])
     expect(saida?.skipped).toEqual([{ path: 'src/enorme.ts', reason: 'TOO_LARGE' }])
+  })
+})
+
+describe('apelidos de caminho do tsconfig do aplicativo gerado (T-15)', () => {
+  const tsconfig = JSON.stringify({
+    compilerOptions: { baseUrl: '.', paths: { '@/src/*': ['./src/*'], '@/*': ['./src/*'] } },
+  })
+
+  it('lê os apelidos, e os mais ESPECÍFICOS vêm primeiro', () => {
+    // `@/src/*` tem de ser tentado antes de `@/*`: se o curto vencesse, todo
+    // caminho apontaria para o lugar errado, e o TypeScript resolve na mesma
+    // ordem.
+    const aliases = parsePathAliases(tsconfig)
+    expect(aliases.map(alias => alias.prefix)).toEqual(['@/src', '@/'.slice(0, 1)])
+  })
+
+  it('um import por apelido vira ARESTA de verdade no índice', () => {
+    // É como o template gerado importa quase tudo. Sem isto, o grafo ficava
+    // só com as arestas que menos importam: as relativas dentro da mesma pasta.
+    const index = buildCodeIndex([
+      { path: 'tsconfig.json', text: tsconfig },
+      { path: 'src/GeneratedApp.tsx', text: "import { Campo } from '@/src/components/generated/Campo'\nexport default function App(){ return <Campo /> }" },
+      { path: 'src/components/generated/Campo.tsx', text: 'export function Campo(){ return null }' },
+    ])
+    const aresta = index.imports.find(edge => edge.specifier === '@/src/components/generated/Campo')
+    expect(aresta?.to).toBe('src/components/generated/Campo.tsx')
+  })
+
+  it('SEM tsconfig, o apelido continua devolvendo `null` — e não um palpite', () => {
+    const index = buildCodeIndex([
+      { path: 'src/GeneratedApp.tsx', text: "import { Campo } from '@/src/components/generated/Campo'\nexport default function App(){ return <Campo /> }" },
+      { path: 'src/components/generated/Campo.tsx', text: 'export function Campo(){ return null }' },
+    ])
+    expect(index.imports.find(edge => edge.specifier.startsWith('@/'))?.to).toBeNull()
+  })
+
+  it('um `tsconfig.json` com COMENTÁRIO ainda é lido', () => {
+    // JSON.parse lançaria, e um `catch` transformaria "o arquivo tem
+    // comentário" em "este projeto não tem apelido" — conclusão errada sobre um
+    // arquivo perfeitamente válido.
+    const comComentario = `{
+      // o que o Next.js gera
+      "compilerOptions": { "paths": { "@/*": ["./src/*"] } },
+    }`
+    expect(parsePathAliases(comComentario).map(alias => alias.prefix)).toEqual(['@'])
+  })
+
+  it('`baseUrl` entra no alvo, porque `paths` é relativo a ele', () => {
+    const comBase = JSON.stringify({ compilerOptions: { baseUrl: 'app', paths: { '@/*': ['./lib/*'] } } })
+    expect(parsePathAliases(comBase)[0]?.targets).toEqual(['app/lib/'])
+  })
+
+  it('o que NÃO é apelido de prefixo fica de fora, em vez de entrar pela metade', () => {
+    // Um apelido EXATO existe no TypeScript e não aparece no template gerado.
+    // Aceitá-lo pela metade seria pior que não aceitar.
+    expect(parsePathAliases(JSON.stringify({ compilerOptions: { paths: { '@app': ['./src/app.ts'] } } }))).toEqual([])
+    expect(parsePathAliases('{ nao é json nem jsonc ')).toEqual([])
+    expect(parsePathAliases('{}')).toEqual([])
+    expect(parsePathAliases('')).toEqual([])
+  })
+
+  it('o tsconfig de uma SUBPASTA não governa a raiz do aplicativo', () => {
+    // Um `tsconfig.json` dentro de `src/` ou de uma pasta de testes descreve
+    // AQUELA parte. Aceitar qualquer arquivo cujo nome termine em
+    // `tsconfig.json` faria os apelidos de um canto do projeto resolverem os
+    // imports do projeto inteiro — e o grafo apontaria para arquivos errados,
+    // com a mesma confiança de quando aponta certo.
+    const index = buildCodeIndex([
+      { path: 'src/outro/tsconfig.json', text: JSON.stringify({ compilerOptions: { paths: { '@/*': ['./src/*'] } } }) },
+      { path: 'src/GeneratedApp.tsx', text: "import { Campo } from '@/components/generated/Campo'\nexport default function App(){ return <Campo /> }" },
+      { path: 'src/components/generated/Campo.tsx', text: 'export function Campo(){ return null }' },
+    ])
+    expect(index.imports[0]?.to).toBeNull()
+  })
+
+  it('apelido EXATO é ignorado INTEIRO, e não resolvido pela metade', () => {
+    // `@app` -> `src/app.ts` existe no TypeScript. Aqui, um prefixo sem `/*`
+    // que entrasse na lista casaria com `@app/qualquer/coisa` e produziria
+    // `src/app.tsqualquer/coisa` — uma aresta inventada.
+    const aliases = parsePathAliases(JSON.stringify({
+      compilerOptions: { paths: { '@app': ['./src/app.ts'], '@/*': ['./src/*'] } },
+    }))
+    expect(aliases.map(alias => alias.prefix)).toEqual(['@'])
+    // E o caso que de fato faz a guarda do PADRÃO pesar: um apelido exato cujo
+    // ALVO é de prefixo. Sem a conferência do padrão, `'@app'.slice(0, -2)`
+    // vira `@a` — um prefixo que ninguém escreveu, e que passaria a casar com
+    // qualquer import começando em `@a`.
+    expect(parsePathAliases(JSON.stringify({ compilerOptions: { paths: { '@app': ['./src/*'] } } }))).toEqual([])
+    const index = buildCodeIndex([
+      { path: 'tsconfig.json', text: JSON.stringify({ compilerOptions: { paths: { '@app': ['./src/app.ts'] } } }) },
+      { path: 'src/GeneratedApp.tsx', text: "import { X } from '@app'\nexport default function App(){ return <X /> }" },
+      { path: 'src/app.ts', text: 'export const X = 1' },
+    ])
+    expect(index.imports[0]?.to).toBeNull()
+  })
+
+  it('o apelido NÃO inventa arquivo: sem alvo no índice, continua `null`', () => {
+    const index = buildCodeIndex([
+      { path: 'tsconfig.json', text: tsconfig },
+      { path: 'src/GeneratedApp.tsx', text: "import { X } from '@/src/nao-existe'\nexport default function App(){ return <X /> }" },
+    ])
+    expect(index.imports[0]?.to).toBeNull()
   })
 })
