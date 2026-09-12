@@ -22,7 +22,7 @@ hoje. `PARCIAL` significa que existe e não atravessa a fronteira declarada.
 | avaliação | o que "pronto" significa aqui, e se foi atingido | EXISTE | `plugins/prompt-to-app/src/acceptance.ts`, `plugins/prompt-to-app/src/model.ts` (`acceptance_criteria`) |
 | trabalho | o que está em jogo AGORA, com teto e procedência | EXISTE | `plugins/prompt-to-app/src/context.ts` |
 | falha | o que já deu errado, para não repetir a mesma estratégia | PARCIAL | `plugins/prompt-to-app/src/failure-memory.ts` |
-| procedimental | como fazer algo NESTE projeto, aprendido do que funcionou | AUSENTE | — |
+| procedimental | como fazer algo NESTE projeto, aprendido do que funcionou | PARCIAL | `plugins/prompt-to-app/src/learning.ts` |
 
 ## O que `PARCIAL` quer dizer na memória de falha
 
@@ -31,14 +31,23 @@ para o qual foi escrita — o laço de três tentativas repetindo a mesma corre�
 —, e não resolve o de fora: se a tentativa de ontem falhou por um motivo, e a
 pessoa pede uma mudança hoje, nada lembra.
 
-## O que `AUSENTE` quer dizer na memória procedimental
+## O que `PARCIAL` quer dizer na memória procedimental
 
-Não existe nada que guarde "isto funcionou aqui". Ela é a única das sete que
-não tem casa, e é deliberadamente a última: uma memória que conclui o que
-FUNCIONA é a que mais facilmente vira superstição — duas coincidências viram
-regra, e a regra passa a ser seguida por um agente. O `T-20` (Learning Engine
-com validação antes de virar regra) é o lugar dela, e o pré-requisito é ter
-validação, não ter armazenamento.
+Ela era a única das sete sem casa, e foi deliberadamente a última: uma memória
+que conclui o que FUNCIONA é a que mais facilmente vira superstição — duas
+coincidências viram regra, e a regra passa a ser seguida por um agente. O
+pré-requisito nunca foi armazenamento; era VALIDAÇÃO.
+
+A validação chegou na OS-68 (`learning.ts`, `T-20`), e é ela que está aqui, não
+a memória inteira. Quatro portões decidem se uma observação vira regra:
+repetição em ocasiões INDEPENDENTES, contraprova EXAMINADA (um padrão nunca
+contestado fica candidato para sempre, por mais evidência a favor que tenha),
+taxa de erro abaixo do teto, e validade — regra validada sobre dado velho volta
+a ser candidata.
+
+O que falta para deixar de ser `PARCIAL`: ninguém GRAVA observações ainda. O
+motor sabe julgar e não tem o que julgar — o mesmo padrão da OS-54 e da OS-60,
+e pela mesma razão, que é ter as condições antes do que elas governam.
 
 ## Por que este documento existe como portão
 
