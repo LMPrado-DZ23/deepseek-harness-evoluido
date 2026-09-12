@@ -12,6 +12,8 @@ import {
   type AgentTeamRepository,
   type AgentTeamStartRequest,
   type AgentTeamTaskInput,
+  type MissionBudgetPort,
+  type MissionBudgetVerdict,
 } from '../src/service.ts'
 
 const now = '2026-09-06T12:00:00.000Z'
@@ -46,6 +48,8 @@ function harness(options: {
   start?: ReturnType<typeof vi.fn>
   putTask?: (record: AgentTeamTaskRecord) => Promise<void>
   afterPutTeam?: (record: AgentTeamRecord) => Promise<void>
+  /** A porta do teto da missão; ausente imita instalação sem motor de missão. */
+  missions?: MissionBudgetPort
 } = {}) {
   const teams = new Map<string, AgentTeamRecord>()
   const tasks = new Map<string, AgentTeamTaskRecord>()
@@ -71,7 +75,10 @@ function harness(options: {
     leases: () => [],
     providerStates: () => ({ codex: 'NOT_PRESENT', 'claude-code': 'NOT_PRESENT' }),
   } as unknown as StudioAgentsRuntime
-  const service = new StudioAgentTeamService({ repository, agents, killJob, now: () => new Date(now), createId: () => 'team-1' })
+  const service = new StudioAgentTeamService({
+    repository, agents, killJob, now: () => new Date(now), createId: () => 'team-1',
+    ...(options.missions === undefined ? {} : { missions: options.missions }),
+  })
   const request = (overrides: Partial<AgentTeamStartRequest> = {}): AgentTeamStartRequest => ({
     orgId: 'org-1', tenantId: 'tenant-1', workspaceId: 'tenant-1', repositoryPath: '/repo',
     parent: parent(), provider: 'spawn-in-process', name: 'Equipe segura', tasks: [task()],
@@ -567,5 +574,82 @@ describe('T-19: teto por PARTE não é teto', () => {
       diagnostic: expect.stringContaining('900'),
     })
     expect(h.tasks.get('team-1:segunda')?.diagnostic).toContain('500')
+  })
+})
+
+
+describe('ACHADO: tres equipes dentro do proprio teto estouram o teto da MISSAO', () => {
+  // O teto por equipe e por parte, um nivel acima do teto por tarefa — e o
+  // argumento que o criou vale de novo: tres equipes, cada uma dentro do
+  // combinado, gastam tres vezes o que foi combinado para a missao, e cada
+  // uma, olhada sozinha, esta certa.
+  const porta = (verdict: MissionBudgetVerdict) => {
+    const noteRun = vi.fn(async () => undefined)
+    const verdictFor = vi.fn(() => verdict)
+    return { port: { verdictFor, noteRun } satisfies MissionBudgetPort, verdictFor, noteRun }
+  }
+
+  it('teto da missao estourado impede a tarefa de comecar, com a frase que diz por que', async () => {
+    const m = porta({ kind: 'EXCEEDED', spent: 900, limit: 800 })
+    const h = harness({ missions: m.port })
+    await h.service.start(h.request({ missionId: 'missao-1' }))
+    expect(h.tasks.get('team-1:implementation')).toMatchObject({ status: 'BUDGET_EXCEEDED' })
+    expect(h.tasks.get('team-1:implementation')!.diagnostic).toContain('800')
+    expect(h.start).not.toHaveBeenCalled()
+    expect(m.verdictFor).toHaveBeenCalledWith('missao-1')
+  })
+
+  it('missao que sumiu RECUSA, e nao passa a valer como "sem teto"', async () => {
+    // Perder o registro da missao e exatamente quando o teto mais importa;
+    // devolver "nao sei" como se fosse "pode" e como um teto some sem ninguem
+    // desliga-lo.
+    const m = porta({ kind: 'MISSION_MISSING', missionId: 'missao-1' })
+    const h = harness({ missions: m.port })
+    await h.service.start(h.request({ missionId: 'missao-1' }))
+    expect(h.tasks.get('team-1:implementation')).toMatchObject({ status: 'BUDGET_EXCEEDED' })
+    expect(h.start).not.toHaveBeenCalled()
+  })
+
+  it('teto da missao sem medicao tambem recusa', async () => {
+    const m = porta({ kind: 'UNMEASURED', runId: 'run-7', limit: 800 })
+    const h = harness({ missions: m.port })
+    await h.service.start(h.request({ missionId: 'missao-1' }))
+    expect(h.tasks.get('team-1:implementation')!.diagnostic).toContain('run-7')
+    expect(h.start).not.toHaveBeenCalled()
+  })
+
+  it('equipe que declara missao numa instalacao SEM motor de missao nao corre', async () => {
+    // Ela foi aprovada sob um teto, e aqui nao ha como conferir esse teto.
+    const h = harness()
+    await h.service.start(h.request({ missionId: 'missao-1' }))
+    expect(h.tasks.get('team-1:implementation')).toMatchObject({ status: 'BUDGET_EXCEEDED' })
+    expect(h.start).not.toHaveBeenCalled()
+  })
+
+  it('dentro do teto, a tarefa comeca E a execucao entra na missao', async () => {
+    // Sem registrar a execucao, `missionSpend` olharia para uma lista vazia e o
+    // teto da missao nunca apertaria: seria um teto que so aparece no codigo.
+    const m = porta({ kind: 'WITHIN', spent: 100, limit: 800 })
+    const h = harness({ missions: m.port })
+    await h.service.start(h.request({ missionId: 'missao-1' }))
+    expect(h.tasks.get('team-1:implementation')).toMatchObject({ status: 'RUNNING', run_id: 'run-1' })
+    expect(m.noteRun).toHaveBeenCalledWith('missao-1', 'run-1')
+  })
+
+  it('equipe SEM missao nao consulta a porta, e corre como sempre correu', async () => {
+    // Quem nao pediu teto de missao nao passa a ter um.
+    const m = porta({ kind: 'EXCEEDED', spent: 900, limit: 800 })
+    const h = harness({ missions: m.port })
+    await h.service.start(h.request())
+    expect(h.tasks.get('team-1:implementation')).toMatchObject({ status: 'RUNNING' })
+    expect(m.verdictFor).not.toHaveBeenCalled()
+    expect(m.noteRun).not.toHaveBeenCalled()
+  })
+
+  it('sem teto declarado para a missao, a tarefa corre', async () => {
+    const m = porta({ kind: 'NO_LIMIT' })
+    const h = harness({ missions: m.port })
+    await h.service.start(h.request({ missionId: 'missao-1' }))
+    expect(h.tasks.get('team-1:implementation')).toMatchObject({ status: 'RUNNING' })
   })
 })

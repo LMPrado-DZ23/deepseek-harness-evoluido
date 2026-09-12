@@ -62,6 +62,21 @@ export const agentTeamSchema = z.object({
    * que é a verdade sobre ela.
    */
   max_total_tokens: z.number().int().positive().nullable().optional(),
+  /**
+   * A missão a que esta equipe pertence, quando pertence a alguma.
+   *
+   * Existe porque o teto por equipe não alcança o que a MISSÃO gasta: três
+   * equipes, cada uma dentro do próprio teto, gastam três vezes o que foi
+   * combinado para a missão — e cada equipe, olhada sozinha, está certa. É a
+   * mesma conta que `max_total_tokens` existe para fazer, um nível acima.
+   *
+   * `null` quando a equipe não pertence a missão nenhuma, e aí nada muda.
+   *
+   * OPCIONAL com a versão do domínio INTOCADA, pela mesma razão do campo acima:
+   * subir a versão faria `open()` falhar com `version-mismatch` em instalação
+   * que já rodou, e não existe passo de migração aqui.
+   */
+  mission_id: z.string().min(1).nullable().optional(),
   created_at: z.iso.datetime(),
   updated_at: z.iso.datetime(),
 }).strict()

@@ -40,6 +40,48 @@ export interface AgentTeamStartRequest {
    * gastam oito vezes o que a pessoa aprovou.
    */
   readonly maxTotalTokens?: number
+  /**
+   * A missão a que esta equipe pertence, quando pertence a alguma.
+   *
+   * Declarar uma missão sujeita a equipe ao teto DELA, além do próprio — e numa
+   * instalação sem motor de missão a equipe é recusada, em vez de correr com um
+   * teto que ninguém consegue conferir.
+   */
+  readonly missionId?: string
+}
+
+/**
+ * O teto da MISSÃO, visto de fora do plugin de missão.
+ *
+ * Estrutural de propósito: `agent-team` não depende de `@dz23-studio/mission`,
+ * do mesmo jeito que não depende de `storage-postgres`. Quem compõe liga os
+ * dois; aqui só existe a forma.
+ *
+ * `MISSION_MISSING` é um veredito, e não um `undefined`. Uma equipe que aponta
+ * para uma missão que sumiu NÃO pode passar a gastar sem teto: perder o
+ * registro da missão é exatamente quando o teto mais importa, e devolver
+ * "não sei" como se fosse "pode" é como um teto some sem ninguém desligá-lo.
+ */
+export type MissionBudgetVerdict =
+  | { readonly kind: 'NO_LIMIT' }
+  | { readonly kind: 'WITHIN'; readonly spent: number; readonly limit: number }
+  | { readonly kind: 'EXCEEDED'; readonly spent: number; readonly limit: number }
+  | { readonly kind: 'UNMEASURED'; readonly runId: string; readonly limit: number }
+  | { readonly kind: 'MISSION_MISSING'; readonly missionId: string }
+
+export interface MissionBudgetPort {
+  /**
+   * O veredito do teto desta missão agora.
+   * @param missionId - a missão.
+   * @returns o veredito.
+   */
+  verdictFor(missionId: string): MissionBudgetVerdict
+  /**
+   * Registra na missão uma execução que acabou de começar.
+   * @param missionId - a missão.
+   * @param runId - a execução.
+   */
+  noteRun(missionId: string, runId: string): Promise<void>
 }
 
 export interface AgentTeamRepository {
@@ -116,6 +158,15 @@ export class StudioAgentTeamService {
     killJob(jobId: JobId, owner: Agent, reason: string): 'requested' | 'already-finished'
     readonly now?: () => Date
     readonly createId?: () => string
+    /**
+     * O teto da missão, quando há composição que o forneça.
+     *
+     * Ausente quer dizer que esta instalação não tem motor de missão — e não
+     * que a missão não tem teto. A diferença aparece em `#missionVerdict`: sem
+     * a porta, uma equipe que declara `mission_id` é RECUSADA, em vez de correr
+     * com um teto que ninguém consegue conferir.
+     */
+    readonly missions?: MissionBudgetPort
   }) {}
 
   teams(): readonly AgentTeamRecord[] { return this.dependencies.repository.teams() }
@@ -143,6 +194,7 @@ export class StudioAgentTeamService {
       approved_at: timestamp,
       diagnostic: t('status.running'),
       max_total_tokens: request.maxTotalTokens ?? null,
+      mission_id: request.missionId ?? null,
       created_at: timestamp,
       updated_at: timestamp,
     }
@@ -279,6 +331,16 @@ export class StudioAgentTeamService {
         })
         continue
       }
+      // E o teto da MISSAO, tambem a cada tarefa e pela mesma razao: tres
+      // equipes dentro do proprio teto estouram o da missao sem que nenhuma
+      // delas esteja errada.
+      const missionDiagnostic = this.#missionRefusal(team)
+      if (missionDiagnostic !== undefined) {
+        await this.dependencies.repository.putTask({
+          ...task, status: 'BUDGET_EXCEEDED', diagnostic: missionDiagnostic, updated_at: this.#now(),
+        })
+        continue
+      }
       try {
         const accepted = this.dependencies.agents.service.start({
           orgId: team.org_id,
@@ -312,6 +374,12 @@ export class StudioAgentTeamService {
         }
         try {
           await this.dependencies.repository.putTask(running)
+          // A execucao entra na missao DEPOIS de gravada e antes de a proxima
+          // tarefa conferir o teto: sem isso `missionSpend` olharia para uma
+          // lista vazia e o teto da missao nunca apertaria.
+          if (team.mission_id !== null && team.mission_id !== undefined && this.dependencies.missions !== undefined) {
+            await this.dependencies.missions.noteRun(team.mission_id, accepted.runId)
+          }
           this.#active.set(taskKey(team.team_id, task.task_id), { jobId: accepted.jobId, owner: parent })
         } catch (error) {
           this.dependencies.killJob(accepted.jobId, parent, t('errors.persistence'))
@@ -325,6 +393,28 @@ export class StudioAgentTeamService {
           updated_at: this.#now(),
         })
       }
+    }
+  }
+
+  /**
+   * A frase que impede esta equipe de gastar mais pela missão, se houver.
+   * @param team - a equipe.
+   * @returns a frase, ou `undefined` quando pode seguir.
+   */
+  #missionRefusal(team: AgentTeamRecord): string | undefined {
+    const missionId = team.mission_id
+    if (missionId === null || missionId === undefined) return undefined
+    const port = this.dependencies.missions
+    // Equipe que declara missao numa instalacao SEM motor de missao nao corre:
+    // ela foi aprovada sob um teto, e aqui nao ha como conferir esse teto.
+    if (port === undefined) return t('errors.missionUnavailable')
+    const verdict = port.verdictFor(missionId)
+    switch (verdict.kind) {
+      case 'NO_LIMIT':
+      case 'WITHIN': return undefined
+      case 'EXCEEDED': return t('errors.missionBudgetExceeded', { spent: String(verdict.spent), limit: String(verdict.limit) })
+      case 'UNMEASURED': return t('errors.missionBudgetUnmeasured', { run: verdict.runId })
+      case 'MISSION_MISSING': return t('errors.missionMissing')
     }
   }
 

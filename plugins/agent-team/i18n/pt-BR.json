@@ -20,7 +20,11 @@
     "persistence": "Não foi possível registrar a execução da tarefa; ela foi cancelada com segurança.",
     "reconciliationIncomplete": "A equipe ainda tem trabalho em andamento; espere ele terminar ou pare a equipe antes de reorganizar.",
     "teamBudgetExceeded": "A equipe já usou {spent} do limite de {limit} combinado para ela. As tarefas restantes não foram iniciadas.",
-    "teamBudgetUnmeasured": "Não dá para provar que a equipe está dentro do limite combinado: o trabalho {run} terminou sem informar quanto consumiu. As tarefas restantes não foram iniciadas."
+    "teamBudgetUnmeasured": "Não dá para provar que a equipe está dentro do limite combinado: o trabalho {run} terminou sem informar quanto consumiu. As tarefas restantes não foram iniciadas.",
+    "missionBudgetExceeded": "O conjunto de trabalhos a que esta equipe pertence já usou {spent} do limite de {limit} combinado para ele. As tarefas restantes não foram iniciadas.",
+    "missionBudgetUnmeasured": "Não dá para provar que o conjunto de trabalhos a que esta equipe pertence está dentro do limite combinado: o trabalho {run} terminou sem informar quanto consumiu. As tarefas restantes não foram iniciadas.",
+    "missionMissing": "O conjunto de trabalhos a que esta equipe pertence não foi encontrado, então o limite combinado para ele não pode ser conferido. As tarefas restantes não foram iniciadas.",
+    "missionUnavailable": "Esta equipe foi aprovada dentro de um conjunto de trabalhos, e esta instalação não consegue conferir o limite desse conjunto. As tarefas restantes não foram iniciadas."
   },
   "status": {
     "running": "Há assistentes trabalhando em cópias isoladas.",
