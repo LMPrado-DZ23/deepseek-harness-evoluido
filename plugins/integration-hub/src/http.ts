@@ -24,6 +24,13 @@ export const HUB_ROUTE_CONTRACTS = [
   // /remove` porque o método já diz o que acontece: um intermediário que
   // reenvia um POST por conta própria não pode apagar nada por engano.
   { method: 'POST', path: '/integrations/:integrationId/test', access: 'authorized', permission: 'integrations.manage', scope: 'workspace' },
+  // O TEXTO da habilidade (T-11). Ele exige `integrations.manage` como o resto
+  // do ciclo de vida: o corpo de uma habilidade é instrução que vai entrar no
+  // contexto de um agente, e quem pode instalá-la é quem pode instalar
+  // integração. `POST` e não `PUT` porque a gravação faz TRÊS conferências —
+  // assinatura, tamanho e impressão — e recusa; ela não é uma substituição
+  // idempotente de um valor.
+  { method: 'POST', path: '/integrations/:integrationId/skill-body', access: 'authorized', permission: 'integrations.manage', scope: 'workspace' },
   { method: 'DELETE', path: '/integrations/:integrationId', access: 'authorized', permission: 'integrations.manage', scope: 'workspace' },
   { method: 'GET', path: '/smtp', access: 'authorized', permission: 'workspace.read', scope: 'workspace' },
   { method: 'POST', path: '/approvals', access: 'authorized', permission: 'integrations.manage', scope: 'workspace' },
@@ -97,6 +104,28 @@ const enabledSchema = z.object({ enabled: z.boolean(), approval: approvalSchema.
 const smtpSchema = z.object({ secret_ref: z.string(), approval: approvalSchema.optional() }).strict()
 const smtpTestSchema = z.object({ to: z.string(), approval: approvalSchema.optional() }).strict()
 const removeSchema = z.object({ approval: approvalSchema.optional() }).strict()
+/**
+ * O corpo da habilidade.
+ *
+ * SEM teto e SEM mínimo próprios, e as duas ausências são deliberadas — as duas
+ * foram descobertas por falsificação, sobrevivendo à sabotagem que as removia.
+ *
+ * O mínimo é desnecessário porque um texto vazio já não bate com
+ * `skill.body_chars`, e a recusa mora no serviço, que é onde vive a relação
+ * entre o texto e o manifesto que o autoriza.
+ *
+ * O teto é INALCANÇÁVEL: `readJson` corta o corpo em `JSON_LIMIT`, e um texto
+ * maior que isso nunca chega até aqui. Um `max(200_000)` seria uma guarda que
+ * nenhuma entrada consegue exercitar — e pior, ela DISFARÇARIA o limite real.
+ *
+ * LIMITAÇÃO DITA, e não escondida: por esta rota só passa habilidade cujo texto
+ * caiba em {@link JSON_LIMIT}. O manifesto aceita até duzentos mil caracteres, e
+ * um texto entre os dois tamanhos é instalável pelo serviço e NÃO por aqui.
+ * Levantar o limite de corpo de TODAS as rotas por causa desta seria pagar com
+ * a superfície inteira; a saída certa é um envio próprio para texto grande, e
+ * ele ainda não existe.
+ */
+const skillBodySchema = z.object({ body: z.string() }).strict()
 
 export function createHubHttpHandler(config: HubHttpConfig) {
   assertRouteContracts(HUB_ROUTE_CONTRACTS)
@@ -153,6 +182,15 @@ export function createHubHttpHandler(config: HubHttpConfig) {
       const testMatch = /^\/integrations\/([^/]+)\/test$/u.exec(route)
       if (method === 'POST' && testMatch !== null) {
         return json(response, 200, await service.testIntegration(actor, decodeURIComponent(testMatch[1]!)))
+      }
+      const skillBodyMatch = /^\/integrations\/([^/]+)\/skill-body$/u.exec(route)
+      if (method === 'POST' && skillBodyMatch !== null) {
+        const body = skillBodySchema.parse(await readJson(request))
+        const integration = await service.installSkillBody(actor, decodeURIComponent(skillBodyMatch[1]!), body.body)
+        // A resposta NÃO devolve o texto. Ele pode ter duzentos mil caracteres,
+        // e devolvê-lo faria toda instalação trafegar duas vezes o que já
+        // subiu — e deixaria uma cópia dele no registro de rede de quem opera.
+        return json(response, 200, { integration: { ...integration, skill_body: undefined } })
       }
       const removeMatch = /^\/integrations\/([^/]+)$/u.exec(route)
       if (method === 'DELETE' && removeMatch !== null) {

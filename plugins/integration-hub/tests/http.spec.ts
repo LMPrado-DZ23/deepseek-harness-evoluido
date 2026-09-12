@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { generateKeyPairSync, randomBytes, sign } from 'node:crypto'
+import { createHash, generateKeyPairSync, randomBytes, sign } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { chmod, mkdir, mkdtemp, open, readdir, rm, writeFile } from 'node:fs/promises'
 import { createServer, request as httpRequest } from 'node:http'
@@ -181,6 +181,11 @@ async function getWithInjectedFailure(error: unknown, source: 'identity' | 'tena
 
 describe('integration hub HTTP boundary', () => {
   it('declares every route authorized with a permission and a server-owned scope', () => {
+    // A CONTAGEM sobe DE PROPOSITO quando uma rota nasce: sem ela, um laco
+    // sobre a lista aprova uma lista vazia, e uma rota que some do contrato —
+    // ou que nasce fora dele — passa sem ninguem olhar a autorizacao.
+    // 17 desde `POST /integrations/:integrationId/skill-body` (T-11).
+    expect(HUB_ROUTE_CONTRACTS).toHaveLength(17)
     for (const contract of HUB_ROUTE_CONTRACTS) {
       expect(contract.access).toBe('authorized')
       expect(contract.permission).not.toBeNull()
@@ -649,5 +654,86 @@ describe('ACHADO: a listagem de integracoes nao entrega o mapa de nomes do cofre
     expect(plantada).toMatchObject({ name: 'Agenda', kind: 'skill', enabled: true })
     expect(plantada).toHaveProperty('health')
     expect(plantada).toHaveProperty('can_enable')
+  })
+})
+
+describe('o TEXTO da habilidade pela rota (T-11)', () => {
+  const TEXTO = 'Ao criar um formulario, pergunte sempre qual campo e obrigatorio.'
+  const IMPRESSAO = createHash('sha256').update(TEXTO, 'utf8').digest('hex')
+
+  function habilidade(): IntegrationManifest {
+    const value = {
+      schema_version: 2, id: 'formularios', name: 'Formulários', version: '1.0.0', kind: 'skill',
+      publisher: { id: 'dz23', name: 'DZ23' }, permissions: [], tier: 'T0',
+      provenance: {
+        source_url: 'https://exemplo.test/habilidade', commit: null,
+        artifact_sha256: IMPRESSAO, license: 'MIT', compatibility: { studio: '1.x' },
+      },
+      capabilities: { network: { egress: [] }, filesystem: { read: [], write: [] }, secrets: [], tools: [] },
+      skill: { trigger: 'formulario cadastro campos', body_chars: TEXTO.length },
+    } as unknown as IntegrationManifest
+    return { ...value, signature: sign(null, canonicalManifestBytes(value), privateKey).toString('base64') }
+  }
+
+  async function instalada(role: 'admin' | 'viewer' = 'admin') {
+    return fixture(role)
+  }
+
+  async function registrar(f: Awaited<ReturnType<typeof fixture>>) {
+    const response = await f.request('/integrations', { method: 'POST', body: JSON.stringify(habilidade()) })
+    expect(response.status, await response.clone().text()).toBe(201)
+    const { integration } = await response.json() as { integration: { integration_id: string } }
+    return integration.integration_id
+  }
+
+  it('a rota instala o texto, e a resposta NAO devolve o texto', async () => {
+    // Duzentos mil caracteres de volta fariam toda instalacao trafegar duas
+    // vezes o que acabou de subir, e deixariam uma copia no registro de rede de
+    // quem opera.
+    const f = await instalada()
+    const id = await registrar(f)
+    const response = await f.request(`/integrations/${id}/skill-body`, { method: 'POST', body: JSON.stringify({ body: TEXTO }) })
+    expect(response.status, await response.clone().text()).toBe(200)
+    expect(await response.text()).not.toContain(TEXTO)
+  })
+
+  it('texto de tamanho DIFERENTE do declarado e recusado pela rota', async () => {
+    // A rota nao pode ser uma segunda porta para o mesmo texto, sem as tres
+    // conferencias que a gravacao faz.
+    const f = await instalada()
+    const id = await registrar(f)
+    const response = await f.request(`/integrations/${id}/skill-body`, { method: 'POST', body: JSON.stringify({ body: `${TEXTO} sobrou` }) })
+    expect(response.status).toBeGreaterThanOrEqual(400)
+  })
+
+  it('quem NAO pode instalar integracao nao instala texto de habilidade', async () => {
+    const f = await instalada('viewer')
+    const response = await f.request('/integrations/qualquer/skill-body', { method: 'POST', body: JSON.stringify({ body: TEXTO }) })
+    expect(response.status).toBeGreaterThanOrEqual(400)
+  })
+
+  it('corpo VAZIO e recusado — pelo SERVICO, que e quem conhece o tamanho declarado', async () => {
+    // Nao ha minimo no esquema da rota de proposito: um texto vazio nao bate
+    // com `body_chars`, e a recusa mora onde vive a relacao entre o texto e o
+    // manifesto que o autoriza.
+    const f = await instalada()
+    const id = await registrar(f)
+    const response = await f.request(`/integrations/${id}/skill-body`, { method: 'POST', body: JSON.stringify({ body: '' }) })
+    expect(response.status).toBeGreaterThanOrEqual(400)
+  })
+
+  it('texto maior que o corpo aceito pela rota e recusado ANTES do servico', async () => {
+    // LIMITACAO DITA: por esta rota so passa habilidade cujo texto caiba no
+    // limite de corpo do HTTP (64 KB), embora o manifesto aceite ate duzentos
+    // mil caracteres. O endereco aponta para uma integracao que NAO EXISTE: se
+    // o corte nao acontecesse antes, a recusa viria do servico dizendo
+    // "nao encontrada", e o texto inteiro teria viajado para isso.
+    const f = await instalada()
+    const response = await f.request('/integrations/inexistente/skill-body', {
+      method: 'POST', body: JSON.stringify({ body: 'x'.repeat(70_000) }),
+    })
+    expect(response.status).toBeGreaterThanOrEqual(400)
+    const { error } = await response.json() as { error: string }
+    expect(error).not.toContain('não encontrada')
   })
 })
