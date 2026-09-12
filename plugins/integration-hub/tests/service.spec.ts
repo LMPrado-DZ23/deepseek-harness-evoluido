@@ -1,4 +1,4 @@
-import { generateKeyPairSync, sign } from 'node:crypto'
+import { createHash, generateKeyPairSync, sign } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { chmod, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -1305,5 +1305,113 @@ describe('ACHADO: o endereco de uma integracao nao pode apontar para dentro', ()
     const { service } = await build()
     const registered = await service.register(admin, signed(manifest({ id: 'local', kind: 'mcp', endpoint: 'http://127.0.0.1:8080/mcp' })))
     expect(registered.integration.verification).toBe('verified')
+  })
+})
+
+describe('o TEXTO de uma habilidade so entra conferido', () => {
+  const TEXTO = 'Sempre escreva rotulo acima do campo, e nunca dentro dele.'
+  const IMPRESSAO = createHash('sha256').update(TEXTO, 'utf8').digest('hex')
+
+  /** Um manifesto v2 de habilidade que declara o tamanho e a impressao do texto. */
+  function skillManifest(overrides: Record<string, unknown> = {}): IntegrationManifest {
+    return manifest({
+      schema_version: 2, kind: 'skill',
+      provenance: {
+        source_url: 'https://exemplo.test/habilidade', commit: null,
+        artifact_sha256: IMPRESSAO, license: 'MIT', compatibility: { studio: '1.x' },
+      },
+      capabilities: { network: { egress: [] }, filesystem: { read: [], write: [] }, secrets: [], tools: [] },
+      skill: { trigger: 'formulario cadastro campos', body_chars: TEXTO.length },
+      ...overrides,
+    } as Partial<IntegrationManifest>)
+  }
+
+  async function comHabilidade(overrides: Record<string, unknown> = {}) {
+    const f = await build()
+    const { integration } = await f.service.register(admin, signed(skillManifest(overrides)))
+    return { ...f, id: integration.integration_id }
+  }
+
+  it('texto assinado, do tamanho declarado, entra — e volta na leitura', async () => {
+    const f = await comHabilidade()
+    await f.service.installSkillBody(admin, f.id, TEXTO)
+    await f.service.setEnabled(admin, f.id, true, await ok(f.service, admin, 'integration.enabled', f.id))
+    await expect(f.service.skillBody(admin, f.id)).resolves.toBe(TEXTO)
+  })
+
+  it('texto de tamanho DIFERENTE do declarado e recusado', async () => {
+    // E esse numero que o motor de contexto usa para escolher sem carregar; um
+    // texto que nao bate com ele fura o teto que a escolha respeitou.
+    const f = await comHabilidade()
+    await expect(f.service.installSkillBody(admin, f.id, `${TEXTO} sobrou`)).rejects.toThrow('tamanho diferente')
+  })
+
+  it('texto do tamanho certo mas com CONTEUDO outro e recusado pela impressao', async () => {
+    // Sem esta conferencia, a assinatura provaria so que alguem assinou uma
+    // DESCRICAO — e o texto entregue poderia ser outro.
+    const f = await comHabilidade()
+    const trocado = `${'x'.repeat(TEXTO.length - 1)}.`
+    expect(trocado.length).toBe(TEXTO.length)
+    await expect(f.service.installSkillBody(admin, f.id, trocado)).rejects.toThrow('não é o texto que o publicador assinou')
+  })
+
+  it('manifesto sem assinatura valida AGORA nao aceita texto', async () => {
+    // Nao basta o campo `verification` do registro: ele foi decidido no
+    // cadastro, e a linha pode ter sido alterada por outro escritor desde
+    // entao.
+    const f = await comHabilidade()
+    const atual = (await f.service.list(admin)).find(row => row.integration_id === f.id)!
+    await f.repository.putIntegration({ ...atual, manifest: { ...skillManifest(), signature: undefined } as never })
+    await expect(f.service.installSkillBody(admin, f.id, TEXTO)).rejects.toThrow('assinatura')
+  })
+
+  it('habilidade que nao declarou tamanho nao aceita texto', async () => {
+    const f = await build()
+    const { integration } = await f.service.register(admin, signed(manifest({ kind: 'skill', id: 'sem-declaracao' })))
+    await expect(f.service.installSkillBody(admin, integration.integration_id, TEXTO)).rejects.toThrow('não declarou o tamanho')
+  })
+
+  it('integracao que nao e habilidade nao aceita texto', async () => {
+    const f = await build()
+    const { integration } = await f.service.register(admin, signed(manifest({ kind: 'mcp', id: 'servidor', endpoint: 'https://exemplo.test/mcp' })))
+    await expect(f.service.installSkillBody(admin, integration.integration_id, TEXTO)).rejects.toThrow('Só uma habilidade')
+  })
+
+  it('a trilha guarda a IMPRESSAO, e nunca o texto', async () => {
+    // Um texto pode ter duzentos mil caracteres, e uma trilha que o copia deixa
+    // de ser trilha e vira uma segunda copia do que deveria estar vigiando.
+    const f = await comHabilidade()
+    await f.service.installSkillBody(admin, f.id, TEXTO)
+    const eventos = await f.service.events(admin)
+    const linha = eventos.events.find(item => item.action === 'skill.bodyInstalled')
+    expect(linha?.detail).toContain(IMPRESSAO)
+    expect(JSON.stringify(eventos)).not.toContain('rotulo acima do campo')
+  })
+
+  it('habilidade DESLIGADA nao devolve texto', async () => {
+    // Desligar uma integracao e continuar seguindo as instrucoes dela seria
+    // desligar o rotulo e nao a coisa.
+    const f = await comHabilidade()
+    await f.service.installSkillBody(admin, f.id, TEXTO)
+    await expect(f.service.skillBody(admin, f.id)).rejects.toThrow('desligada')
+  })
+
+  it('instalada SEM texto nao devolve vazio: devolve a recusa propria', async () => {
+    // Devolver `''` faria uma habilidade sem instrucao nenhuma parecer uma
+    // habilidade cujas instrucoes sao nao fazer nada.
+    const f = await comHabilidade()
+    await f.service.setEnabled(admin, f.id, true, await ok(f.service, admin, 'integration.enabled', f.id))
+    await expect(f.service.skillBody(admin, f.id)).rejects.toThrow('instalada sem texto')
+  })
+
+  it('texto TROCADO na tabela depois de instalado e pego NA LEITURA', async () => {
+    // Esta e a conferencia que a gravacao nao alcanca por definicao, e o que
+    // ela entrega vai direto para o contexto de um agente.
+    const f = await comHabilidade()
+    await f.service.installSkillBody(admin, f.id, TEXTO)
+    await f.service.setEnabled(admin, f.id, true, await ok(f.service, admin, 'integration.enabled', f.id))
+    const gravada = (await f.service.list(admin)).find(row => row.integration_id === f.id)!
+    await f.repository.putIntegration({ ...gravada, skill_body: `${'y'.repeat(TEXTO.length - 1)}.` })
+    await expect(f.service.skillBody(admin, f.id)).rejects.toThrow('não é o texto que o publicador assinou')
   })
 })

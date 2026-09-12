@@ -716,6 +716,113 @@ export class IntegrationHubService {
   }
 
   /**
+   * Grava o TEXTO de uma habilidade — as instruções que um agente vai seguir.
+   *
+   * Este é o único caminho por onde prosa de terceiro entra no registro, e ele
+   * é fechado por três conferências que acontecem NA MESMA gravação:
+   *
+   * 1. **A assinatura do manifesto, conferida AGORA.** Não basta o campo
+   *    `verification` do registro: ele foi decidido no cadastro, e desde então
+   *    a linha pode ter sido alterada por qualquer outro escritor da tabela.
+   *    É a mesma regra da `OS-29`, aplicada ao caminho novo em vez de deixada
+   *    para depois.
+   * 2. **O tamanho, contra `skill.body_chars`.** É esse número que o motor de
+   *    contexto usa para escolher sem carregar; um texto que não bate com ele
+   *    fura o teto que a escolha respeitou.
+   * 3. **A impressão, contra `provenance.artifact_sha256`.** É ela que liga o
+   *    texto ao manifesto ASSINADO. Sem esta conferência, a assinatura provaria
+   *    só que alguém assinou uma descrição — e o texto entregue poderia ser
+   *    outro.
+   *
+   * As três juntas dizem uma coisa só: o texto gravado é o texto que o
+   * publicador assinou. Qualquer uma sozinha não diz isso.
+   * @param actor - quem instala; gerir integrações é o que se exige.
+   * @param integrationId - a habilidade registrada.
+   * @param body - o texto das instruções.
+   * @returns o registro atualizado.
+   */
+  async installSkillBody(actor: HubActor, integrationId: string, body: string): Promise<StudioIntegration> {
+    this.#authorize(actor, 'integrations.manage')
+    const current = await this.#integration(actor, integrationId)
+    if (current.kind !== 'skill') {
+      await this.#audit(actor, 'skill.bodyInstalled', integrationId, 'failure', 'skill-body not-skill')
+      throw new HubError('INVALID', t('errors.skillBodyNotSkill'))
+    }
+    const evaluation = evaluateManifest(current.manifest, this.options.publisherKeys)
+    if (evaluation.verification !== 'verified' || evaluation.manifest === null) {
+      await this.#audit(actor, 'skill.bodyInstalled', integrationId, 'failure', 'skill-body unsigned')
+      throw new HubError('FORBIDDEN', t('errors.skillBodyNotVerified'))
+    }
+    const manifest = evaluation.manifest
+    const declared = manifest.schema_version === 2 ? manifest.skill : undefined
+    if (declared === undefined) {
+      await this.#audit(actor, 'skill.bodyInstalled', integrationId, 'failure', 'skill-body undeclared')
+      throw new HubError('INVALID', t('errors.skillBodyUndeclared'))
+    }
+    if (body.length !== declared.body_chars) {
+      await this.#audit(actor, 'skill.bodyInstalled', integrationId, 'failure', 'skill-body size-mismatch')
+      throw new HubError('INVALID', t('errors.skillBodySize'))
+    }
+    const digest = createHash('sha256').update(body, 'utf8').digest('hex')
+    if (manifest.schema_version === 2 && digest !== manifest.provenance.artifact_sha256) {
+      await this.#audit(actor, 'skill.bodyInstalled', integrationId, 'failure', 'skill-body digest-mismatch')
+      throw new HubError('INVALID', t('errors.skillBodyDigest'))
+    }
+    const updated: StudioIntegration = {
+      ...current, skill_body: body, updated_at: this.#now().toISOString(),
+    }
+    await this.options.repository.putIntegration(updated)
+    // A auditoria guarda a IMPRESSÃO, e nunca o texto: o texto pode ter até
+    // duzentos mil caracteres, e uma trilha que o copia deixa de ser trilha e
+    // vira uma segunda cópia do que ela deveria estar vigiando.
+    await this.#audit(actor, 'skill.bodyInstalled', integrationId, 'success', `skill-body ${digest}`)
+    return updated
+  }
+
+  /**
+   * Lê o texto de uma habilidade, reconferindo tudo outra vez.
+   *
+   * Reconferir na LEITURA não é paranoia repetida: entre a gravação e agora, a
+   * linha pode ter sido alterada por qualquer outro escritor da tabela — e o
+   * que esta leitura entrega vai direto para o contexto de um agente. A
+   * conferência da impressão aqui é a que pega um texto TROCADO depois de
+   * instalado, que a da gravação não alcança por definição.
+   *
+   * DESLIGADA não devolve texto. Desligar uma integração e continuar seguindo
+   * as instruções dela seria desligar o rótulo e não a coisa.
+   * @param actor - quem lê; escrever no projeto é o que se exige, porque isto
+   *   muda o comportamento do agente que vai trabalhar.
+   * @param integrationId - a habilidade.
+   * @returns o texto, ou a recusa com o motivo.
+   */
+  async skillBody(actor: HubActor, integrationId: string): Promise<string> {
+    this.#authorize(actor, 'project.write')
+    const current = await this.#integration(actor, integrationId)
+    if (current.kind !== 'skill') throw new HubError('INVALID', t('errors.skillBodyNotSkill'))
+    if (!current.enabled) throw new HubError('FORBIDDEN', t('errors.skillBodyDisabled'))
+    const evaluation = evaluateManifest(current.manifest, this.options.publisherKeys)
+    if (evaluation.verification !== 'verified' || evaluation.manifest === null) {
+      throw new HubError('FORBIDDEN', t('errors.skillBodyNotVerified'))
+    }
+    const body = current.skill_body
+    // Ausente é "instalada, sem texto" — e NÃO texto vazio. Devolver `''` faria
+    // uma habilidade sem instrução nenhuma parecer uma habilidade cujas
+    // instruções são não fazer nada.
+    if (body === undefined || body === null) throw new HubError('NOT_FOUND', t('errors.skillBodyMissing'))
+    const manifest = evaluation.manifest
+    if (manifest.schema_version === 2) {
+      if (manifest.skill !== undefined && body.length !== manifest.skill.body_chars) {
+        throw new HubError('INVALID', t('errors.skillBodySize'))
+      }
+      const digest = createHash('sha256').update(body, 'utf8').digest('hex')
+      if (digest !== manifest.provenance.artifact_sha256) {
+        throw new HubError('INVALID', t('errors.skillBodyDigest'))
+      }
+    }
+    return body
+  }
+
+  /**
    * Testa a conexão de UMA integração (X-04), pelo que ela é.
    *
    * O ponto deste método é NÃO inventar um "funcionando". Cada tipo tem um

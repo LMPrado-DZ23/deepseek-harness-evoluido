@@ -167,6 +167,19 @@ export function selectSkills(
   return { chosen, skipped, declared_chars: usado }
 }
 
+/**
+ * Por que uma habilidade escolhida não virou parte do contexto.
+ *
+ * Os dois casos são diferentes, e juntá-los apagaria o que importa:
+ * `SIZE_MISMATCH` é o registro tendo descrito uma coisa e entregue outra — a
+ * forma de um pacote passar instrução que ninguém aprovou —, e `LOAD_FAILED` é
+ * o registro tendo RECUSADO entregar, o que pode ser desde "está desligada"
+ * até "o texto foi trocado depois de instalado".
+ */
+export type SkillRefusal =
+  | { readonly skill_id: string; readonly reason: 'SIZE_MISMATCH'; readonly declared: number; readonly actual: number }
+  | { readonly skill_id: string; readonly reason: 'LOAD_FAILED'; readonly detail: string }
+
 /** Um corpo que chegou diferente do que a ficha prometia. */
 export class SkillBodyMismatchError extends Error {
   readonly code = 'SKILL_BODY_MISMATCH'
@@ -195,14 +208,27 @@ export async function loadSkills(
   chosen: readonly SkillCard[], loader: SkillBodyLoader,
 ): Promise<{
   readonly sections: readonly ContextSection[]
-  readonly refused: readonly { readonly skill_id: string; readonly declared: number; readonly actual: number }[]
+  readonly refused: readonly SkillRefusal[]
 }> {
   const sections: ContextSection[] = []
-  const refused: { skill_id: string; declared: number; actual: number }[] = []
+  const refused: SkillRefusal[] = []
   for (const card of chosen) {
-    const body = await loader.load(card.skill_id)
+    let body: string
+    try {
+      body = await loader.load(card.skill_id)
+    } catch (error) {
+      // A recusa do registro NÃO derruba o pedido da pessoa. Ela é uma
+      // habilidade a menos, com o motivo guardado — e o motivo importa: o
+      // registro distingue "desligada", "sem texto" e "texto trocado depois de
+      // instalado", e essa última é um incidente que alguém precisa ver.
+      refused.push({
+        skill_id: card.skill_id, reason: 'LOAD_FAILED',
+        detail: error instanceof Error ? error.message : t('errors.skillBodyMismatch'),
+      })
+      continue
+    }
     if (body.length !== card.body_chars) {
-      refused.push({ skill_id: card.skill_id, declared: card.body_chars, actual: body.length })
+      refused.push({ skill_id: card.skill_id, reason: 'SIZE_MISMATCH', declared: card.body_chars, actual: body.length })
       continue
     }
     sections.push({
@@ -283,4 +309,31 @@ export function skillCardsFrom(integrations: readonly SkillIntegrationShape[]): 
     })
   }
   return { cards, gaps }
+}
+
+/**
+ * O recorte do registro de integrações de onde os corpos vêm.
+ *
+ * Estrutural, como `SkillIntegrationShape`, e pela mesma razão. O que importa
+ * do outro lado é que `skillBody` RECUSA — desligada, sem assinatura válida
+ * agora, texto trocado depois de instalado — em vez de devolver o que estiver
+ * gravado. Esta porta não repete nenhuma dessas conferências: repeti-las aqui
+ * criaria uma segunda verdade que diverge no primeiro conserto de um dos lados.
+ */
+export interface SkillBodySource {
+  skillBody(integrationId: string): Promise<string>
+}
+
+/**
+ * O carregador que busca corpos no registro de integrações.
+ *
+ * Uma recusa do registro SOBE. Ela não vira string vazia nem texto ausente:
+ * "esta habilidade está desligada" e "esta habilidade não tem texto" mandam
+ * fazer coisas diferentes, e as duas são diferentes de "o texto foi trocado
+ * depois de instalado", que é um incidente.
+ * @param source - o registro.
+ * @returns o carregador.
+ */
+export function hubSkillLoader(source: SkillBodySource): SkillBodyLoader {
+  return { load: async skillId => source.skillBody(skillId) }
 }

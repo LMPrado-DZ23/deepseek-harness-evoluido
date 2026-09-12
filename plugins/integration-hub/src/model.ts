@@ -189,6 +189,24 @@ export const studioIntegrationSchema = z.object({
   cost_usd: z.number().nonnegative().optional(),
   /** Chamadas cujo preço ninguém informou. É isto que faz o custo ser `PARTIAL`/`UNKNOWN` em vez de `0`. */
   unpriced_calls: z.number().int().nonnegative().optional(),
+  /**
+   * O TEXTO de uma habilidade — as instruções que um agente vai seguir.
+   *
+   * Mora aqui, e não numa tabela nova, porque ele é parte da integração e
+   * nunca é lido sem ela: toda leitura reconfere a assinatura do manifesto ao
+   * lado, e separá-los criaria um caminho em que o texto existe sem o
+   * documento que o autoriza.
+   *
+   * OPCIONAL, e a versão do domínio continua 1, como todo campo acima. Ausente
+   * significa "instalada, sem texto" — que é o estado de toda habilidade
+   * registrada antes de este campo existir, e ele é DITO em vez de confundido
+   * com texto vazio.
+   *
+   * O teto de 200.000 é o mesmo do `body_chars` do manifesto: um esquema que
+   * aceitasse mais do que o manifesto pode declarar guardaria um texto que
+   * nunca passaria na conferência de tamanho.
+   */
+  skill_body: z.string().max(200_000).nullable().optional(),
 }).strict()
 export type StudioIntegration = z.infer<typeof studioIntegrationSchema>
 
@@ -209,7 +227,7 @@ export const hubEventSchema = z.object({
   // tempo) e `not-executed` (recusada antes de sair — desligada, sem assinatura,
   // teto de chamadas). Um valor novo no enum não é um campo novo em registro
   // persistido: linha antiga continua válida, e a versão do domínio não sobe.
-  action: z.enum(['smtp.configured', 'smtp.tested', 'integration.registered', 'integration.enabled', 'integration.disabled', 'export.created', 'approval.recorded', 'approval.requested', 'export.downloadRefused', 'integration.called', 'integration.removed', 'integration.tested']),
+  action: z.enum(['smtp.configured', 'smtp.tested', 'integration.registered', 'integration.enabled', 'integration.disabled', 'export.created', 'approval.recorded', 'approval.requested', 'export.downloadRefused', 'integration.called', 'integration.removed', 'integration.tested', 'skill.bodyInstalled']),
   subject_id: z.string().min(1),
   outcome: z.enum(['success', 'failure', 'not-executed']),
   detail: z.string().max(500),

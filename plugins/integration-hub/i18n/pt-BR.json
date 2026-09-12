@@ -48,7 +48,14 @@
     "scopeDisabled": "As integrações deste projeto (ou desta organização) estão desligadas. Quem administra precisa religá-las.",
     "scopeEnableReason": "Para religar as integrações, escreva o motivo com pelo menos 10 caracteres.",
     "integrationRemoveEnabled": "Desligue a integração antes de removê-la. Remover uma integração ligada apagaria o registro do que ela podia fazer sem que ninguém tivesse decidido desligá-la.",
-    "approvalTooMany": "Muitos pedidos de confirmação neste espaço em pouco tempo. Espere alguns minutos e tente de novo."
+    "approvalTooMany": "Muitos pedidos de confirmação neste espaço em pouco tempo. Espere alguns minutos e tente de novo.",
+    "skillBodyNotSkill": "Só uma habilidade tem texto de instruções.",
+    "skillBodyNotVerified": "O documento desta habilidade não está com assinatura válida, então o texto dela não pode ser usado.",
+    "skillBodyUndeclared": "Esta habilidade não declarou o tamanho do texto dela, então não dá para conferir o que foi entregue.",
+    "skillBodySize": "O texto entregue tem um tamanho diferente do que esta habilidade declarou.",
+    "skillBodyDigest": "O texto entregue não é o texto que o publicador assinou.",
+    "skillBodyDisabled": "Esta habilidade está desligada, então as instruções dela não são usadas.",
+    "skillBodyMissing": "Esta habilidade foi instalada sem texto de instruções."
   },
   "export": {
     "readmeTitle": "Seu protótipo do DZ23 STUDIO",

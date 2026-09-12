@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { assembleContext } from '../src/context.ts'
 import {
-  MAX_SKILL_FRACTION, loadSkills, matchesRequest, selectSkills, skillCardsFrom,
+  MAX_SKILL_FRACTION, hubSkillLoader, loadSkills, matchesRequest, selectSkills, skillCardsFrom,
   type SkillCard, type SkillIntegrationShape,
 } from '../src/skill-registry.ts'
 
@@ -136,7 +136,7 @@ describe('o corpo e CONFERIDO contra o que a ficha prometeu', () => {
     const load = vi.fn(async () => 'x'.repeat(500))
     return loadSkills([card({ body_chars: 100 })], { load }).then(saida => {
       expect(saida.sections).toEqual([])
-      expect(saida.refused).toEqual([{ skill_id: 'formularios', declared: 100, actual: 500 }])
+      expect(saida.refused).toEqual([{ skill_id: 'formularios', reason: 'SIZE_MISMATCH', declared: 100, actual: 500 }])
     })
   })
 
@@ -238,5 +238,42 @@ describe('as fichas saem do registro de integracoes', () => {
     const { cards } = skillCardsFrom([integracao({ enabled: false })])
     expect(selectSkills(cards, 'preciso de um formulario', 10_000).skipped)
       .toEqual([{ skill_id: 'hub-1', reason: 'DISABLED' }])
+  })
+})
+
+describe('o carregador ligado ao registro de integracoes', () => {
+  it('passa o identificador adiante sem mexer', async () => {
+    const skillBody = vi.fn(async () => 'x'.repeat(100))
+    await hubSkillLoader({ skillBody }).load('hub-1')
+    expect(skillBody).toHaveBeenCalledWith('hub-1')
+  })
+
+  it('a recusa do registro SOBE, e nao vira texto vazio', async () => {
+    // "Desligada", "sem texto" e "texto trocado depois de instalado" mandam
+    // fazer coisas diferentes, e a ultima e um incidente.
+    const skillBody = vi.fn(async () => { throw new Error('Esta habilidade esta desligada.') })
+    await expect(hubSkillLoader({ skillBody }).load('hub-1')).rejects.toThrow('desligada')
+  })
+
+  it('a recusa derruba SO aquela habilidade, e nao o pedido da pessoa', async () => {
+    // Uma habilidade desligada nao pode levar junto o trabalho de quem pediu.
+    const loader = hubSkillLoader({
+      skillBody: async id => { if (id === 'quebrada') throw new Error('Esta habilidade esta desligada.'); return 'y'.repeat(100) },
+    })
+    const saida = await loadSkills([card({ skill_id: 'quebrada' }), card({ skill_id: 'boa' })], loader)
+    expect(saida.sections.map(section => section.id)).toEqual(['skill:boa'])
+    expect(saida.refused).toEqual([{ skill_id: 'quebrada', reason: 'LOAD_FAILED', detail: 'Esta habilidade esta desligada.' }])
+  })
+
+  it('o MOTIVO da recusa distingue tamanho de recusa do registro', async () => {
+    // Juntar os dois apagaria o que importa: um e o registro tendo entregue
+    // outra coisa, o outro e o registro tendo recusado entregar.
+    const saida = await loadSkills([
+      card({ skill_id: 'mentiu', body_chars: 10 }),
+      card({ skill_id: 'recusou', body_chars: 100 }),
+    ], hubSkillLoader({
+      skillBody: async id => { if (id === 'recusou') throw new Error('Esta habilidade esta desligada.'); return 'z'.repeat(100) },
+    }))
+    expect(saida.refused.map(item => item.reason)).toEqual(['SIZE_MISMATCH', 'LOAD_FAILED'])
   })
 })
