@@ -9,6 +9,7 @@ import {
   VALIDATION_WINDOW_DAYS,
   applicableRules,
   deriveRules,
+  recoveryNoteFor,
   ruleEvidence,
 } from '../src/learning.js'
 
@@ -309,5 +310,80 @@ describe('observationsFrom — o que o registro sabe responder sozinho', () => {
     const { observations, challenged } = ler([run(), run({ run_id: 'r2', state: 'PASSED', failure_code: null })])
     const rules = deriveRules(observations, { now: NOW, challengedPatterns: challenged })
     expect(rules[0]).toMatchObject({ status: 'CANDIDATE', reason: 'TOO_FEW_OCCASIONS' })
+  })
+})
+
+describe('recoveryNoteFor — o aprendizado finalmente FALA com alguem (T-20)', () => {
+  const agora = new Date('2026-09-12T12:00:00.000Z')
+  /** Uma operacao: uma tentativa que falhou com `falha`, e o desfecho dela. */
+  const operacao = (id: string, falha: string, passou: boolean, dia = 1): ObservedRun[] => [
+    { project_id: 'p', run_id: `${id}-1`, operation_id: id, attempt: 1, state: 'FAILED', failure_code: falha,
+      finished_at: `2026-09-0${String(dia)}T10:00:00.000Z`, started_at: `2026-09-0${String(dia)}T09:00:00.000Z` },
+    ...(passou ? [{ project_id: 'p', run_id: `${id}-2`, operation_id: id, attempt: 2, state: 'PASSED', failure_code: null,
+      finished_at: `2026-09-0${String(dia)}T11:00:00.000Z`, started_at: `2026-09-0${String(dia)}T10:30:00.000Z` }] : []),
+  ]
+
+  it('tres ocasioes superadas viram uma frase, COM os dois numeros', () => {
+    // O numero vai junto sempre: uma regra sem evidencia pede obediencia, com
+    // evidencia pede julgamento — e quem le pode discordar dela.
+    const runs = [...operacao('o1', 'build: exit 1', true, 1), ...operacao('o2', 'build: exit 1', true, 2), ...operacao('o3', 'build: exit 1', true, 3)]
+    const nota = recoveryNoteFor('build: exit 1', runs, { now: agora })
+    expect(nota).toBeDefined()
+    expect(nota).toContain('3 de 3')
+    // E NAO manda a pessoa obedecer.
+    expect(nota).toContain('a decisão é sua')
+    expect(nota).toContain('não é garantia')
+  })
+
+  it('DUAS ocasioes nao dizem nada: candidata nao e regra', () => {
+    // Uma candidata dita em voz de regra e supersticao com aparencia de
+    // conhecimento.
+    const runs = [...operacao('o1', 'build: exit 1', true, 1), ...operacao('o2', 'build: exit 1', true, 2)]
+    expect(recoveryNoteFor('build: exit 1', runs, { now: agora })).toBeUndefined()
+  })
+
+  it('a falha que acabou de acontecer CONTA no total, e ela e uma contradicao', () => {
+    // Mostrar so os acertos contaria a noticia boa e esconderia a que a pessoa
+    // acabou de viver, na propria tela em que ela a viveu.
+    const runs = [
+      ...operacao('o1', 'build: exit 1', true, 1), ...operacao('o2', 'build: exit 1', true, 2),
+      ...operacao('o3', 'build: exit 1', true, 3), ...operacao('o4', 'build: exit 1', true, 4),
+      ...operacao('agora', 'build: exit 1', false, 5),
+    ]
+    const nota = recoveryNoteFor('build: exit 1', runs, { now: agora })
+    expect(nota).toContain('4 de 5')
+  })
+
+  it('a falha que quase nunca e superada NAO vira conselho', () => {
+    // Taxa de erro acima do teto: a regra nao passa na validacao, e o silencio
+    // e a resposta certa. Dizer "ja foi superada em 1 de 4" com voz de regra
+    // mandaria alguem gastar tentativa atras de uma coisa que nao costuma dar.
+    const runs = [
+      ...operacao('o1', 'oom', true, 1), ...operacao('o2', 'oom', false, 2),
+      ...operacao('o3', 'oom', false, 3), ...operacao('o4', 'oom', false, 4),
+    ]
+    expect(recoveryNoteFor('oom', runs, { now: agora })).toBeUndefined()
+  })
+
+  it('a nota e da FALHA desta execucao, e nao de outra qualquer', () => {
+    const runs = [...operacao('o1', 'build: exit 1', true, 1), ...operacao('o2', 'build: exit 1', true, 2), ...operacao('o3', 'build: exit 1', true, 3)]
+    expect(recoveryNoteFor('tests: 3 failed', runs, { now: agora })).toBeUndefined()
+  })
+
+  it('sem falha nomeada nao ha o que procurar', () => {
+    const runs = [...operacao('o1', 'build: exit 1', true, 1), ...operacao('o2', 'build: exit 1', true, 2), ...operacao('o3', 'build: exit 1', true, 3)]
+    expect(recoveryNoteFor(undefined, runs, { now: agora })).toBeUndefined()
+    expect(recoveryNoteFor('', runs, { now: agora })).toBeUndefined()
+  })
+
+  it('registro VAZIO nao inventa conselho', () => {
+    expect(recoveryNoteFor('build: exit 1', [], { now: agora })).toBeUndefined()
+  })
+
+  it('o que envelheceu fora da janela para de aconselhar', () => {
+    // Uma falha de meses atras ja pode ter sido corrigida, e um conselho velho
+    // e pior do que nenhum: ele parece atual.
+    const runs = [...operacao('o1', 'build: exit 1', true, 1), ...operacao('o2', 'build: exit 1', true, 2), ...operacao('o3', 'build: exit 1', true, 3)]
+    expect(recoveryNoteFor('build: exit 1', runs, { now: agora, windowDays: 1 })).toBeUndefined()
   })
 })

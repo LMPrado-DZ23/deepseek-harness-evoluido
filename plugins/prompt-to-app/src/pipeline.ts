@@ -28,6 +28,7 @@ import { generatedFileSchema, writeGeneratedFiles, type GeneratedFile } from './
 import { generateFormLayer, writeFormLayer } from './form-generator.js'
 import { generateSchedulingLayer, writeSchedulingLayer } from './scheduling-generator.js'
 import { assertGeneratedSource, generationRules } from './import-policy.js'
+import { recoveryNoteFor, type ObservedRun } from './learning.js'
 import { generateSaasLayer, writeSaasLayer } from './saas-generator.js'
 import { t } from './i18n.js'
 import { diffRunFiles, runReport, RUN_REPORT_FILE, type RunFileAuthor } from './run-report.js'
@@ -642,15 +643,62 @@ export class PromptToAppPipeline {
           await this.options.service.transition(actor, projectId, 'TESTS_FAILED')
         } else await this.options.service.transition(actor, projectId, 'BUILD_FAILED')
       }
+      // O que o APRENDIZADO tem a dizer a quem acabou de ver isto falhar (T-20).
+      //
+      // A execucao que acabou de falhar JA ESTA no registro quando esta leitura
+      // acontece — nao por causa do lugar desta linha, mas porque cada tentativa
+      // grava o proprio `putRun` dentro do laco. Ela conta como CONTRADICAO, que
+      // e o que ela e: o conselho so aparece quando o historico e forte o
+      // bastante para sobreviver ao contra-exemplo que a pessoa acabou de viver.
+      // (Uma versao anterior deste comentario dizia que a ordem em relacao as
+      // transicoes e que garantia isso. Nao garante: as transicoes mexem no
+      // estado do PROJETO, e nao no registro de execucoes. A sabotagem que moveu
+      // esta linha sobreviveu, e foi assim que a mentira apareceu.)
+      const learned = this.recoveryNote(actor, diagnostic)
       return {
         state: finalFailureState, attempts: completedAttempts,
         message: diagnostic ?? t('pipeline.failed'),
         // A precedencia importa: `a ?? b === undefined` seria `a ?? (b === undefined)`.
-        ...((repeatingMessage ?? reviewNotice) === undefined ? {} : { notice: (repeatingMessage ?? reviewNotice)! }),
+        // E a ORDEM tambem: repeticao e revisao sao sobre ESTA execucao, e o que
+        // o historico diz vem por ultimo — util, e menos urgente do que "voce
+        // esta repetindo o mesmo codigo".
+        ...((repeatingMessage ?? reviewNotice ?? learned) === undefined ? {} : { notice: (repeatingMessage ?? reviewNotice ?? learned)! }),
       }
     } catch (error) {
       return this.unexpectedFailure(actor, projectId, plan.plan_id, operationId, ownerSessionId, activeAttempt, activeRunId, activeRunDirectory, activeStage, error)
     }
+  }
+
+  /**
+   * Junta o que este espaço de trabalho já viu e pergunta ao aprendizado.
+   *
+   * Uma leitura que custa: percorre os projetos e as execuções de cada um. Ela
+   * acontece UMA vez, e só no caminho de FALHA — nunca no de sucesso, e nunca
+   * dentro do laço de tentativas. Falhar já é o momento lento; e é o único em
+   * que a resposta muda alguma decisão.
+   *
+   * Sem porta de leitura configurada, ou com qualquer erro nela, o resultado é
+   * `undefined`: um aviso é um extra, e derrubar a resposta de uma criação
+   * porque a estatística não pôde ser lida seria trocar uma falha explicada por
+   * uma falha sem explicação nenhuma.
+   * @param actor - quem está criando.
+   * @param diagnostic - o código da falha desta execução.
+   * @returns a frase para a pessoa, ou `undefined`.
+   */
+  private recoveryNote(actor: PromptToAppActor, diagnostic: string | undefined): string | undefined {
+    try {
+      const runs: ObservedRun[] = []
+      for (const project of this.options.service.listProjects(actor)) {
+        for (const run of this.options.service.runs(actor, project.project_id)) {
+          runs.push({
+            project_id: project.project_id, run_id: run.run_id, operation_id: run.operation_id,
+            attempt: run.attempt, state: run.state, failure_code: run.failure_code ?? null,
+            finished_at: run.finished_at ?? null, started_at: run.started_at,
+          })
+        }
+      }
+      return recoveryNoteFor(diagnostic, runs, { now: this.#now() })
+    } catch { return undefined }
   }
 
   /**

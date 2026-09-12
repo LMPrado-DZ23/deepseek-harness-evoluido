@@ -104,6 +104,25 @@ interface FixtureOptions {
    * que ela precisa ler nao esta la.
    */
   readonly forgetRuns?: boolean
+  /** Execucoes ANTERIORES que este espaco de trabalho ja viu (T-20). */
+  readonly history?: StudioRun[]
+}
+
+/**
+ * Uma OPERACAO anterior: uma tentativa que falhou, e a seguinte que passou.
+ *
+ * O relogio do dobro esta parado em 03/09, entao as datas ficam ANTES dele: uma
+ * observacao do futuro e descartada de proposito pelo motor, e usa-la aqui
+ * faria o teste passar por acidente.
+ */
+function historico(id: string, dia: number, falha = 'install: exit 1'): StudioRun[] {
+  const base = { project_id: 'project', plan_id: 'plan', attempt: 1, steps: [] } as unknown as StudioRun
+  return [
+    { ...base, run_id: `${id}-1`, operation_id: id, attempt: 1, state: 'FAILED', failure_code: falha,
+      started_at: `2026-09-0${String(dia)}T09:00:00.000Z`, finished_at: `2026-09-0${String(dia)}T10:00:00.000Z` },
+    { ...base, run_id: `${id}-2`, operation_id: id, attempt: 2, state: 'PASSED', failure_code: null,
+      started_at: `2026-09-0${String(dia)}T10:30:00.000Z`, finished_at: `2026-09-0${String(dia)}T11:00:00.000Z` },
+  ] as StudioRun[]
 }
 
 async function fixture(options: FixtureOptions = {}) {
@@ -123,7 +142,12 @@ async function fixture(options: FixtureOptions = {}) {
     // `runs` existe aqui porque a RETOMADA precisa achar a execução anterior:
     // sem esta leitura, `findResumable` não tem onde procurar o diretório da
     // tentativa cancelada.
-    runs: vi.fn(() => (options.forgetRuns === true ? [] : runs)),
+    runs: vi.fn(() => (options.forgetRuns === true ? [] : [...runs, ...(options.history ?? [])])),
+    // O aprendizado (T-20) le o HISTORICO deste espaco de trabalho, e para
+    // chegar nele precisa passar pelos projetos. Sem esta porta no dobro a
+    // leitura lancaria, o `catch` devolveria `undefined`, e o aviso nunca
+    // seria exercitado por teste nenhum.
+    listProjects: vi.fn(() => [{ project_id: 'project' }]),
     putEvidence: vi.fn(async (_actor, item: { kind: string; relative_path: string }) => { evidence.push(item) }),
   }
   const executeImplementation: NonNullable<FixtureOptions['execute']> = options.execute ?? (async (): Promise<FixtureExecutionResult> => ({ exitCode: 0, stdout: 'ok', stderr: '', timedOut: false }))
@@ -779,6 +803,67 @@ describe('Prompt-to-App pipeline', () => {
     expect(result.notice).not.toMatch(/vai falhar|não funciona|impossível/iu)
     // E ela NAO afirma que a proxima falharia: o gerador nao e deterministico.
     expect(result.message).not.toMatch(/vai falhar|não funciona|impossível/iu)
+  })
+
+  it('o APRENDIZADO fala com quem acabou de ver a criação falhar (T-20)', async () => {
+    // Ate aqui o motor derivava regras que ninguem lia. A pessoa que acabou de
+    // ver uma falha esta diante de uma pergunta real — "tento de novo ou
+    // desisto?" — e saber que esta mesma falha ja foi superada antes muda a
+    // resposta dela.
+    const antes = (id: string, dia: number) => historico(id, dia)
+    const f = await fixture({
+      execute: async () => ({ exitCode: 1, stdout: '', stderr: 'build: exit 1', timedOut: false }),
+      // CINCO ocasioes, e nao tres: a execucao que acabou de falhar conta
+      // CONTRA a regra, e com tres o resultado seria 3 acertos em 4 — 25% de
+      // erro, acima do teto de 20%, e a regra nao validaria. Ou seja: o
+      // conselho so aparece quando o historico e forte o bastante para
+      // sobreviver ao contra-exemplo que a pessoa acabou de viver.
+      history: [...antes('a', 1), ...antes('b', 2), ...antes('c', 3), ...antes('d', 1), ...antes('e', 2)],
+    })
+    const result = await f.pipeline.run(actor, 'project', { generate: varying() })
+
+    expect(result.state).toBe('BUILD_FAILED')
+    expect(result.notice).toBeDefined()
+    // Os DOIS numeros, sempre: uma regra sem evidencia pede obediencia.
+    expect(result.notice).toContain('5 de 6')
+    // E ela NAO manda a pessoa obedecer, e nao promete que a proxima passa.
+    expect(result.notice).toContain('a decisão é sua')
+    expect(result.notice).not.toMatch(/vai funcionar|garantido/iu)
+  })
+
+  it('o histórico que NÃO sobrevive ao contra-exemplo de agora não vira conselho (T-20)', async () => {
+    // Tres superadas mais a que acabou de falhar sao 3 de 4: 25% de erro,
+    // acima do teto. A pessoa que acabou de viver o contra-exemplo e justamente
+    // quem menos deveria ouvir "isto costuma dar certo".
+    const f = await fixture({
+      execute: async () => ({ exitCode: 1, stdout: '', stderr: 'install: exit 1', timedOut: false }),
+      history: [...historico('a', 1), ...historico('b', 2), ...historico('c', 3)],
+    })
+    const result = await f.pipeline.run(actor, 'project', { generate: varying() })
+    expect(result.state).toBe('BUILD_FAILED')
+    expect(result.notice ?? '').not.toContain('já foi superada')
+  })
+
+  it('sem histórico que sustente, a criação falha SEM conselho inventado (T-20)', async () => {
+    // O silencio e a resposta certa quando nao ha o que dizer. Um aviso que
+    // aparece sempre vira decoracao, e a pessoa aprende a nao le-lo.
+    const f = await fixture({ execute: async () => ({ exitCode: 1, stdout: '', stderr: 'build: exit 1', timedOut: false }) })
+    const result = await f.pipeline.run(actor, 'project', { generate: varying() })
+    expect(result.state).toBe('BUILD_FAILED')
+    expect(result.notice ?? '').not.toContain('já foi superada')
+  })
+
+  it('a REPETIÇÃO desta execução vem ANTES do que o histórico diz (T-20)', async () => {
+    // Repeticao e sobre o que esta acontecendo agora — "voce esta repetindo o
+    // mesmo codigo" — e e mais urgente do que uma media de outras vezes.
+    const antes = (id: string, dia: number) => historico(id, dia)
+    const f = await fixture({
+      execute: async () => ({ exitCode: 1, stdout: '', stderr: 'build: exit 1', timedOut: false }),
+      history: [...antes('a', 1), ...antes('b', 2), ...antes('c', 3), ...antes('d', 1), ...antes('e', 2)],
+    })
+    // Gerador CONSTANTE: a convergencia para por repeticao.
+    const result = await f.pipeline.run(actor, 'project', { generate: vi.fn(async () => cleanGeneration) })
+    expect(result.notice).toContain('mesmo código')
   })
 
   it('código DIFERENTE com a mesma falha NÃO para a criação: o gerador está tentando', async () => {

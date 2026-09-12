@@ -89,6 +89,7 @@
   },
   "pipeline": {
     "verified": "Protótipo verificado — não está publicado nem disponível para outras pessoas",
+    "recoveredBefore": "Esta mesma falha já foi superada antes neste espaço de trabalho, em {supporting} de {total} vezes. Tentar de novo costuma resolver — mas não é garantia, e a decisão é sua.",
     "failed": "A verificação não foi concluída.",
     "interrupted": "A criação foi interrompida antes de terminar. Nada foi publicado.",
     "cancelled": "A criação foi cancelada pela pessoa.",
@@ -158,6 +159,8 @@
     "codeIncomplete": "Esta lista está INCOMPLETA: não foi possível ler {files}. Não conclua que algo não existe só porque não está acima.",
     "failureAcrossRuns": "Esta mesma falha já apareceu em {runs} tentativa(s) anterior(es) deste projeto, a última em {when}. Se a abordagem for a mesma de antes, o resultado tende a ser o mesmo.",
     "researchNote": "{claim}\nTrecho da fonte, palavra por palavra: \"{excerpt}\"\nFonte: {url}",
+    "planNoNetwork": "O aplicativo gerado NÃO tem acesso à rede: {apis} são recusados antes de o código chegar ao disco. NÃO planeje etapa que dependa de serviço externo, API de terceiro, envio de e-mail, pagamento, mapa, login social ou consulta a endereço por CEP. Se a pessoa pediu algo assim, planeje a parte que funciona sem rede e diga no critério de aceite o que ficou de fora.",
+    "planLocalOnly": "Tudo que o aplicativo guarda fica no banco local dele. Pode planejar cadastro, lista, busca, filtro, edição, remoção, relatório e exportação a partir desses dados.",
     "ruleModules": "Importe SOMENTE destes módulos: {modules}. E destes prefixos de caminho: {prefixes}. Qualquer outro import é recusado antes de o código chegar ao disco.",
     "ruleTags": "NÃO use estas tags: {tags}. Elas são recusadas antes de o código chegar ao disco.",
     "ruleAttributes": "NÃO use estes atributos: {attributes}. Eles são recusados antes de o código chegar ao disco.",

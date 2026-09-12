@@ -223,6 +223,38 @@ describe('intake and planner', () => {
     expect(complete.mock.calls[2]?.[3]).toContain('não planeje arquivos CSS')
   })
 
+  it('os LIMITES do construtor chegam ao prompt do planejador (T-10)', async () => {
+    // Nada impedia o plano de prometer "busca o endereco pelo CEP" ou "manda um
+    // e-mail de confirmacao". A pessoa lia, APROVAVA, e so na criacao o
+    // construtor recusava `fetch` — tentativa atras de tentativa num plano que
+    // ele nunca poderia satisfazer.
+    const complete = vi.fn().mockResolvedValue({
+      value: { slices: [{ slice_id: 's', title: 'Pagina', description: 'Montar', acceptance_criteria: ['Compila'], planned_files: ['src/GeneratedApp.tsx'] }] },
+      route: 'ollama', model: 'qwen',
+    })
+    const planner = new PlannerEngine({ complete })
+    await planner.plan({ orgId: 'o', tenantId: 't' }, 'local-only', validSpec)
+    const prompt = String(complete.mock.calls[0]![3])
+    for (const trecho of ['fetch', 'serviço externo', 'e-mail', 'CEP']) expect(prompt, trecho).toContain(trecho)
+    // E o que AINDA da para planejar, porque uma regra que so proibe faz o
+    // planejador entregar menos do que o produto consegue.
+    expect(prompt).toContain('cadastro')
+  })
+
+  it('os limites chegam TAMBEM a etapa acrescentada a mao (T-10)', async () => {
+    // E o caminho mais provavel de todos para uma promessa impossivel: e onde a
+    // pessoa escreve, em texto livre, o que ficou faltando — e "mandar por
+    // e-mail" e exatamente o que ela escreve.
+    const complete = vi.fn().mockResolvedValue({
+      value: { slice: { slice_id: 'nova', title: 'Aviso', description: 'Avisar', acceptance_criteria: ['Aparece'], planned_files: ['src/GeneratedApp.tsx'] } },
+      route: 'ollama', model: 'qwen',
+    })
+    const planner = new PlannerEngine({ complete })
+    await planner.slice({ orgId: 'o', tenantId: 't' }, 'local-only', validSpec, [], 'Mandar um e-mail quando alguem se cadastrar')
+    const prompt = String(complete.mock.calls[0]![3])
+    for (const trecho of ['fetch', 'e-mail', 'critério de aceite']) expect(prompt, trecho).toContain(trecho)
+  })
+
   it('plans the public form category and refuses sensitive or incomplete forms until login exists', async () => {
     const databaseSpec: AppSpecV1 = { ...validSpec, entities: [{
       name: 'Contato', kind: 'database', sensitive: false,

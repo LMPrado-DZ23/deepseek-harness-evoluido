@@ -84,6 +84,13 @@ produto existe para não fazer.
    E as três rotas do perfil (ADR-014) entraram no doctor, com os limites do
    OmniRoute presos por teste. 18 falsificações, todas pegas.
 
+8. **OS-79 — T-10 e T-20 fechados.** As regras do construtor chegaram ao
+   PLANEJADOR (um plano não pode mais prometer o que o construtor vai
+   recusar), e o Learning Engine falou com alguém pela primeira vez: quando
+   uma criação falha, a pessoa lê se aquela falha já foi superada antes — com
+   os dois números junto. 13 falsificações, todas pegas; uma delas pegou um
+   **comentário meu que mentia** sobre por que a ordem das linhas importava.
+
 ## Próxima ação
 
 Ver `docs/status/TASK_DAG.md`, tarefa de maior prioridade em `READY`.

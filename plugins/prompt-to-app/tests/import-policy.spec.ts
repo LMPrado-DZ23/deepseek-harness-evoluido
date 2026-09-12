@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { GeneratedFileRejectedError } from '../src/generator.js'
-import { generationRules, assertGeneratedImports, assertGeneratedSource } from '../src/import-policy.js'
+import { generationRules, planningRules, assertGeneratedImports, assertGeneratedSource } from '../src/import-policy.js'
 
 describe('generated import policy', () => {
   it('accepts only public UI utilities, repositories and other generated files', () => {
@@ -425,5 +425,54 @@ describe('as regras DITAS ao gerador saem da mesma lista que as aplica', () => {
       { path: 'src/GeneratedApp.tsx', content: "import { readFile } from 'node:fs'; export default function App(){ return null }; void readFile" },
     ])).toThrow()
     expect(rules).toContain('Importe SOMENTE')
+  })
+})
+
+describe('as regras DITAS a quem PLANEJA saem da mesma lista que as aplica', () => {
+  const regras = planningRules().join('\n')
+
+  it('toda API de rede recusada pelo construtor aparece na regra do planejador', () => {
+    // O plano nao pode prometer o que o construtor vai recusar. Se `fetch` some
+    // desta frase, volta a ser possivel planejar "busca o endereco pelo CEP" —
+    // a pessoa aprova, e a recusa so aparece na criacao.
+    for (const api of ['fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource']) expect(regras, api).toContain(api)
+  })
+
+  it('a regra que o gerador RECUSA e a regra que o planejador LE: a mesma lista', () => {
+    // Este e o teste que liga as duas pontas. O que o construtor recusa como
+    // `fetch` tem de estar escrito no que o planejador leu.
+    expect(() => assertGeneratedSource([
+      { path: 'src/GeneratedApp.tsx', content: 'export default function App(){ void fetch("https://x"); return null }' },
+    ])).toThrow('fetch')
+    expect(regras).toContain('fetch')
+  })
+
+  it('diz o que NAO planejar em palavras de quem nao programa', () => {
+    // "Nao use `fetch`" nao significa nada para quem escreve titulo e criterio
+    // de aceite. O planejador precisa da CONSEQUENCIA, com os exemplos que ele
+    // de fato encontraria num pedido de verdade.
+    for (const exemplo of ['serviço externo', 'e-mail', 'pagamento', 'CEP']) expect(regras, exemplo).toContain(exemplo)
+  })
+
+  it('diz o que AINDA da para planejar: uma regra que so proibe empobrece o plano', () => {
+    // Um planejador que so ouve "nao" entrega menos do que o produto consegue.
+    for (const permitido of ['cadastro', 'busca', 'relatório']) expect(regras, permitido).toContain(permitido)
+  })
+
+  it('manda DIZER no criterio o que ficou de fora, em vez de calar', () => {
+    // Cortar em silencio a parte que a pessoa pediu e a falha mais cara aqui:
+    // ela aprova um plano achando que pediu uma coisa e recebe outra.
+    expect(regras).toContain('critério de aceite')
+  })
+
+  it('NAO repete as regras de escrita do gerador: elas empurrariam a evidencia para fora do teto', () => {
+    // Quem escreve titulo e criterio nao importa modulo nenhum. Repetir a lista
+    // de imports aqui gastaria teto de contexto com ruido.
+    expect(regras).not.toContain('Importe SOMENTE')
+    expect(regras).not.toContain('@hookform/resolvers/zod')
+  })
+
+  it('as regras sao ESTAVEIS entre chamadas', () => {
+    expect(planningRules()).toEqual(planningRules())
   })
 })

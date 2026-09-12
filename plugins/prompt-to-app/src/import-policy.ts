@@ -278,6 +278,37 @@ function scriptKind(path: string): ts.ScriptKind {
  * A prosa continua no catalogo (o portao de i18n exige), mas ela recebe A LISTA
  * como parametro. Existe UMA lista, e ela e a que recusa.
  */
+/**
+ * AS MESMAS REGRAS, DITAS A QUEM PLANEJA (T-10, segunda metade).
+ *
+ * O gerador precisa saber COMO escrever; o planejador precisa saber O QUE
+ * PODE PROMETER. São duas frases diferentes sobre a mesma lista, e por isso
+ * elas saem da mesma lista.
+ *
+ * O buraco era concreto e caro: nada impedia o plano de prometer "busca o
+ * endereço pelo CEP" ou "manda um e-mail de confirmação". A pessoa lia isso,
+ * APROVAVA, e só na criação o construtor recusava `fetch` — gastando tentativa
+ * atrás de tentativa num plano que ele nunca poderia satisfazer. Quem pagava
+ * era quem não programa: ela aprovou uma promessa que o sistema já sabia ser
+ * impossível quando a mostrou.
+ *
+ * NÃO é uma cópia amigável das regras do gerador: repetir "importe somente
+ * destes módulos" para quem escreve título e critério de aceite seria ruído
+ * que empurra a evidência para fora do teto. O que o planejador recebe é a
+ * CONSEQUÊNCIA — o que o aplicativo gerado consegue e não consegue fazer.
+ * @returns as regras de planejamento, em português.
+ */
+export function planningRules(): readonly string[] {
+  // Derivada da MESMA constante que RECUSA no gerador. Escrever "sem rede" à
+  // mão aqui recriaria a segunda verdade que a `generationRules` acabou de
+  // fechar: no dia em que a lista mudar, esta frase muda junto.
+  const network = [...FORBIDDEN_NETWORK_APIS].sort()
+  return [
+    t('prompts.planNoNetwork', { apis: network.join(', ') }),
+    t('prompts.planLocalOnly'),
+  ]
+}
+
 export function generationRules(): readonly string[] {
   const modules = [...ALLOWED_MODULES].sort()
   const prefixes = [...ALLOWED_PREFIXES].sort()

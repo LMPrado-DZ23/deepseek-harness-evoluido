@@ -1,3 +1,4 @@
+import { t } from './i18n.js'
 /**
  * LEARNING ENGINE — com validacao ANTES de virar regra (T-20).
  *
@@ -271,4 +272,52 @@ export function observationsFrom(
   // quer dizer — e um leitor futuro que consultasse so os sucessos
   // simplesmente nao poderia declarar nada aqui.
   return { observations, challenged: [...patterns] }
+}
+
+/**
+ * O QUE O APRENDIZADO DIZ A QUEM ACABOU DE VER UMA CRIACAO FALHAR (T-20).
+ *
+ * Ate aqui o motor derivava regras que ninguem lia. Esta e a ligacao — e ela
+ * foi escolhida com cuidado, porque havia duas saidas possiveis e uma delas era
+ * ruim.
+ *
+ * A RUIM: deixar a estatistica DECIDIR — parar de tentar quando o historico diz
+ * que esta falha costuma persistir. Isso negaria a alguem a tentativa que
+ * talvez funcionasse, por causa do que aconteceu com outra pessoa em outro
+ * projeto. E quem ja decide quando parar e a convergencia, por EVIDENCIA desta
+ * execucao (o mesmo codigo, a mesma falha), e nao por media.
+ *
+ * A ESCOLHIDA: dizer a PESSOA. Ela esta diante de uma pergunta real — "tento de
+ * novo ou desisto?" — e saber que esta mesma falha ja foi superada em N de M
+ * ocasioes muda a resposta dela. O numero vai JUNTO, sempre: uma regra sem a
+ * evidencia pede obediencia, com a evidencia pede julgamento.
+ *
+ * So regra VALIDADA sai por aqui. Uma candidata dita em voz de regra e
+ * superticao com aparencia de conhecimento.
+ * @param failure - o codigo da falha desta execucao.
+ * @param runs - as execucoes terminadas que este espaco de trabalho conhece.
+ * @param options - o instante de agora e a janela de validade.
+ * @returns a frase para a pessoa, ou `undefined` quando nao ha o que dizer.
+ */
+export function recoveryNoteFor(
+  failure: string | undefined,
+  runs: readonly ObservedRun[],
+  options: { readonly now: Date; readonly windowDays?: number },
+): string | undefined {
+  // Saida antecipada por CUSTO, e nao por correcao: sem falha nomeada nenhuma
+  // regra `recuperou:<falha>` casaria de qualquer jeito, e a resposta seria a
+  // mesma. O que esta linha evita e derivar as regras do espaco inteiro para
+  // chegar a `undefined`. DECLARADO em vez de fingido: uma sabotagem que a
+  // remove sobrevive, porque o comportamento observavel nao muda.
+  if (failure === undefined || failure.length === 0) return undefined
+  const { observations, challenged } = observationsFrom(runs, options)
+  const rules = applicableRules(deriveRules(observations, { now: options.now, challengedPatterns: challenged, ...(options.windowDays === undefined ? {} : { windowDays: options.windowDays }) }))
+  const rule = rules.find(candidate => candidate.pattern === `recuperou:${failure}`)
+  if (rule === undefined) return undefined
+  const total = rule.supporting + rule.contradicting
+  // O TOTAL, e nao so os acertos. A ocasiao que acabou de falhar esta dentro
+  // dele — o registro ja gravou esta execucao quando esta leitura acontece —, e
+  // ela entra como CONTRADICAO, que e o que ela e. Mostrar so `supporting`
+  // contaria a noticia boa e esconderia a que a pessoa acabou de viver.
+  return t('pipeline.recoveredBefore', { supporting: String(rule.supporting), total: String(total) })
 }

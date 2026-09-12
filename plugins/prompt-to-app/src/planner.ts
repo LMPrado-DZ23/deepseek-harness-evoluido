@@ -3,6 +3,7 @@ import { z } from 'zod'
 import type { RoutePrivacy } from '@dz23-studio/route-health'
 import type { AppSpecV1 } from './appspec.js'
 import { assertValidDataModel } from './data-generator.js'
+import { planningRules } from './import-policy.js'
 import { planSliceSchema, type StudioProjectCategory } from './model.js'
 import type { PromptModelPort } from './ports.js'
 import { codeIndexSummary, type AppSourcesRead, type CodeIndex } from './code-intelligence.js'
@@ -269,6 +270,15 @@ export class PlannerEngine {
       instruction('plan.criteria', t('prompts.planCriteria')),
       instruction('plan.files', t('prompts.planFiles')),
       instruction('plan.first', t('prompts.planFirst')),
+      // Os LIMITES do que o aplicativo gerado consegue fazer, vindos da mesma
+      // lista que o construtor usa para RECUSAR. Sem eles nada impedia o plano
+      // de prometer "busca o endereço pelo CEP": a pessoa aprovava, e só na
+      // criação o construtor recusava `fetch` — tentativa atrás de tentativa
+      // num plano que ele nunca poderia satisfazer.
+      //
+      // INSTRUÇÃO e não evidência: uma evidência cortada pelo teto empobrece o
+      // plano, uma regra cortada muda o que é permitido prometer.
+      ...planningRules().map((text, index) => instruction(`plan.limit${String(index)}`, text)),
       ...categoryInstruction(category),
       ...skills.sections,
       // O que JÁ existe entra como EVIDÊNCIA e não como instrução: é material
@@ -347,6 +357,10 @@ export class PlannerEngine {
       instruction('slice.criteria', t('prompts.planCriteria')),
       instruction('slice.files', t('prompts.planFiles')),
       instruction('slice.sliceFiles', t('prompts.sliceFiles')),
+      // A etapa ACRESCENTADA à mão é o caminho mais provável de todos para uma
+      // promessa impossível: é onde a pessoa escreve, em texto livre, o que
+      // ficou faltando — e "mandar por e-mail" é exatamente o que ela escreve.
+      ...planningRules().map((text, index) => instruction(`slice.limit${String(index)}`, text)),
       // O PEDIDO da pessoa e o que esta etapa existe para atender: se algo
       // tiver de sair por falta de espaco, nao pode ser ele.
       { id: 'slice.request', kind: 'evidence' as const, priority: 100, source: 'slice-request', text: t('prompts.sliceRequest', { request }) },
