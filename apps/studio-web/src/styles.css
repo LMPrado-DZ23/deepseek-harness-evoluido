@@ -409,3 +409,9 @@
   .emergency-stop{color:#eef2f9}
   .emergency-stop input,.emergency-stop textarea{color:#eef2f9}
 }
+.plan-consulted{margin:12px 0;border:1px solid #dce2ec;border-radius:9px;padding:10px 16px}
+.plan-consulted summary{cursor:pointer;font-weight:600;padding:4px 0}
+.plan-consulted>p{color:#5c6881;font-size:14px;margin:8px 0}
+.plan-consulted ul{margin:8px 0;padding-left:22px;color:#41506b}
+.plan-consulted h3{font-size:15px;margin:14px 0 4px}
+.plan-consulted-gap{color:#8a1c1c;font-weight:600}

@@ -1,7 +1,8 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { PlanEditor } from './PlanEditor'
+import t from '../i18n/pt-BR.json'
+import { ConsultedPanel, PlanEditor, type ConsultedView } from './PlanEditor'
 import type { PlanView } from './planEdit'
 
 const PLAN: PlanView = {
@@ -83,5 +84,62 @@ describe('acrescentar uma etapa pela tela', () => {
     const html = render(PLAN, { addSlice: async () => {} })
     expect(html).toMatch(/Acrescentar esta etapa[\s\S]{0,80}/u)
     expect(html).toContain('disabled')
+  })
+})
+
+describe('o painel do que o Studio consultou', () => {
+  function consultado(over: Partial<ConsultedView> = {}): ConsultedView {
+    return { used: [{ label: 'O que você descreveu', source: 'app-spec' }], dropped: [], refusedSkills: [], incompleteCode: false, ...over }
+  }
+
+  it('lista o que entrou, em portugues', () => {
+    const html = renderToStaticMarkup(createElement(ConsultedPanel, { consulted: consultado() }))
+    expect(html).toContain('O que você descreveu')
+    expect(html).toContain(t.plan.consultedTitle)
+  })
+
+  it('coube tudo: NAO aparece aviso nenhum', () => {
+    // Um aviso repetido em toda tela ensina a pessoa a nao olhar para ele.
+    const html = renderToStaticMarkup(createElement(ConsultedPanel, { consulted: consultado() }))
+    expect(html).not.toContain('role="alert"')
+    expect(html).not.toContain(t.plan.consultedSkillsTitle)
+  })
+
+  it('o que NAO COUBE vira aviso, e ele vem ANTES da lista', () => {
+    // Quem le precisa saber que a lista tem consequencia antes de ler os itens.
+    const html = renderToStaticMarkup(createElement(ConsultedPanel, {
+      consulted: consultado({ dropped: [{ label: 'O que você descreveu', source: 'app-spec' }] }),
+    }))
+    expect(html).toContain('role="alert"')
+    expect(html.indexOf(t.plan.consultedIncomplete)).toBeLessThan(html.indexOf('plan-consulted-dropped'))
+  })
+
+  it('inventario incompleto tambem levanta o aviso, mesmo sem nada cortado', () => {
+    const html = renderToStaticMarkup(createElement(ConsultedPanel, { consulted: consultado({ incompleteCode: true }) }))
+    expect(html).toContain(t.plan.consultedIncomplete)
+  })
+
+  it('habilidade recusada aparece com titulo proprio', () => {
+    const html = renderToStaticMarkup(createElement(ConsultedPanel, {
+      consulted: consultado({ refusedSkills: [{ label: 'Uma habilidade não foi usada porque está desligada', source: 'hub-1' }] }),
+    }))
+    expect(html).toContain(t.plan.consultedSkillsTitle)
+    expect(html).toContain('está desligada')
+  })
+
+  it('o identificador da habilidade NAO e desenhado: ele e chave, nao explicacao', () => {
+    const html = renderToStaticMarkup(createElement(ConsultedPanel, {
+      consulted: consultado({ refusedSkills: [{ label: 'Uma habilidade não foi usada', source: 'hub-1' }] }),
+    }))
+    expect(html).not.toContain('hub-1')
+  })
+
+  it('sem o bloco, o painel NAO aparece — em vez de aparecer vazio', () => {
+    // Vazio sugeriria que o Studio nao consultou nada.
+    const html = renderToStaticMarkup(createElement(PlanEditor, {
+      plan: PLAN, submit: async () => undefined, approve: async () => undefined,
+      reason: '', setReason: () => undefined, requestChange: async () => undefined,
+    }))
+    expect(html).not.toContain(t.plan.consultedTitle)
   })
 })

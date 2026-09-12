@@ -200,7 +200,11 @@
     "addPlaceholder": "Ex.: quero uma página mostrando o que meus clientes dizem sobre o trabalho",
     "addAction": "Acrescentar esta etapa",
     "addBusy": "Montando a etapa…",
-    "addNote": "Nós é que escolhemos quais arquivos a etapa nova pode criar — assim ela não atropela nenhuma das outras. Você diz o que falta; o resto é conosco."
+    "addNote": "Nós é que escolhemos quais arquivos a etapa nova pode criar — assim ela não atropela nenhuma das outras. Você diz o que falta; o resto é conosco.",
+    "consultedTitle": "O que o Studio consultou para montar este plano",
+    "consultedHelp": "Isto é tudo o que o Studio leu antes de escrever o plano abaixo.",
+    "consultedIncomplete": "Nem tudo coube: o plano abaixo foi montado sem uma parte do que existia. Vale conferir com mais atenção.",
+    "consultedSkillsTitle": "Habilidades instaladas que não foram usadas"
   },
   "creation": {
     "title": "Criar e testar o protótipo",

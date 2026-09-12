@@ -166,5 +166,21 @@
   },
   "attestation": {
     "hashIsNotSignature": "HASH_NAO_E_ASSINATURA: integridade verificavel, origem nao provada"
+  },
+  "consulted": {
+    "skill": "Uma habilidade instalada ({source})",
+    "research": "Uma informação pesquisada ({source})",
+    "code": "O código que o aplicativo já tem",
+    "spec": "O que você descreveu",
+    "change": "A mudança que você pediu",
+    "schema": "O formato da resposta",
+    "rule": "Uma regra do Studio",
+    "other": "Outra informação ({source})",
+    "skillDisabled": "Uma habilidade não foi usada porque está desligada",
+    "skillTooBig": "Uma habilidade não foi usada porque é grande demais para caber junto do seu pedido",
+    "skillNoRoom": "Uma habilidade não foi usada porque não sobrou espaço",
+    "skillMismatch": "Uma habilidade não foi usada porque o texto dela não é o que ela declarou",
+    "skillUnreadable": "Uma habilidade não foi usada porque o texto dela não pôde ser lido",
+    "skillOther": "Uma habilidade não foi usada"
   }
 }

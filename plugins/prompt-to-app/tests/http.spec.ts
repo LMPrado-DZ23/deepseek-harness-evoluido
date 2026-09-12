@@ -500,3 +500,48 @@ describe('o inventario do codigo no planejamento de mudanca', () => {
     expect(f.planner.lastCode).toBeUndefined()
   })
 })
+
+describe('o plano diz o que o Studio consultou', () => {
+  async function ate(f: Awaited<ReturnType<typeof fixture>>) {
+    const created = await (await f.request('/projects', { method: 'POST', body: JSON.stringify({
+      name: 'Site', original_brief: 'Quero apresentar meus serviços.', category: 'landing-page', privacy: 'local-only',
+    }) })).json() as { project: { project_id: string } }
+    const projectId = created.project.project_id
+    for (const answer of ['Clientes locais', 'Conhecer os serviços', 'Serviços e contato']) {
+      await f.request(`/projects/${projectId}/intake/answer`, { method: 'POST', body: JSON.stringify({ answer, recommend: false }) })
+    }
+    return projectId
+  }
+
+  it('a resposta do plano carrega o que entrou, em portugues', async () => {
+    // Tres motores guardavam a resposta para "o que exatamente o modelo viu?" e
+    // nenhum deles chegava a lugar nenhum.
+    const f = await fixture()
+    const projectId = await ate(f)
+    const resposta = await (await f.request(`/projects/${projectId}/plan`, { method: 'POST', body: '{}' })).json() as {
+      consulted: { used: { label: string }[]; dropped: unknown[]; refusedSkills: unknown[]; incompleteCode: boolean }
+    }
+    expect(resposta.consulted.used.length).toBeGreaterThan(0)
+    expect(resposta.consulted.used.map(item => item.label)).toContain('O que você descreveu')
+    expect(resposta.consulted.incompleteCode).toBe(false)
+  })
+
+  it('o que o Studio consultou sai JUNTO do plano, e nao numa rota separada', async () => {
+    // Uma segunda chamada leria o estado do planejador DEPOIS de outro pedido
+    // ja ter passado por ele, e a resposta seria sobre o plano errado.
+    const f = await fixture()
+    const projectId = await ate(f)
+    const corpo = await (await f.request(`/projects/${projectId}/plan`, { method: 'POST', body: '{}' })).json() as Record<string, unknown>
+    expect(Object.keys(corpo).sort()).toEqual(['consulted', 'plan'])
+  })
+
+  it('nenhum identificador interno atravessa para a resposta', async () => {
+    const f = await fixture()
+    const projectId = await ate(f)
+    const corpo = await (await f.request(`/projects/${projectId}/plan`, { method: 'POST', body: '{}' })).text()
+    const consulted = JSON.parse(corpo) as { consulted: { used: { label: string }[] } }
+    for (const item of consulted.consulted.used) {
+      expect(item.label).not.toContain('plan.')
+    }
+  })
+})

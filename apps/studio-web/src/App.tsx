@@ -23,7 +23,7 @@ import { signOutInBrowser } from './session/signOut'
 import { currentSessionMode } from './session/currentSession'
 import { StudioSidebar } from './Navigation'
 import { NAV_MENU_ID, activeNavId } from './navigation'
-import { PlanEditor } from './plan/PlanEditor'
+import { PlanEditor, type ConsultedView } from './plan/PlanEditor'
 import type { PlanEditRequest } from './plan/planEdit'
 
 type DesignPreset = 'modern' | 'professional' | 'colorful' | 'brand'
@@ -91,6 +91,7 @@ export function App() {
   const [question, setQuestion] = useState<Question | null>(null)
   const [answer, setAnswer] = useState('')
   const [plan, setPlan] = useState<Plan | null>(null)
+  const [consulted, setConsulted] = useState<ConsultedView | undefined>(undefined)
   const [changeReason, setChangeReason] = useState('')
   const [result, setResult] = useState<PipelineResult | null>(null)
   const [health, setHealth] = useState<HealthState>({ state: 'UNKNOWN', route: null, builder: 'BLOCKED_EXTERNAL', disk: 'ATTENTION' })
@@ -248,7 +249,14 @@ export function App() {
   }
   async function preparePlan() {
     if (projectId === null) return
-    await safely(async () => { const response = await api<{ plan: Plan }>(`/projects/${projectId}/plan`, { method: 'POST', body: '{}' }); setPlan(response.plan); setProjectState('PLAN_PROPOSED') })
+    await safely(async () => {
+      const response = await api<{ plan: Plan; consulted?: ConsultedView }>(`/projects/${projectId}/plan`, { method: 'POST', body: '{}' })
+      setPlan(response.plan)
+      // O que foi consultado vem JUNTO do plano e é guardado com ele: buscá-lo
+      // depois leria o estado do planejador já usado por outro pedido.
+      setConsulted(response.consulted)
+      setProjectState('PLAN_PROPOSED')
+    })
   }
   /** E-03: manda UMA alteração e adota o plano que voltou, com a revisão nova. */
   async function editPlan(edit: PlanEditRequest) {
@@ -458,7 +466,7 @@ export function App() {
           tone={tone} setTone={setTone} logo={logo} setLogo={setLogo} showDesignAdvanced={showDesignAdvanced} setShowDesignAdvanced={setShowDesignAdvanced} /> : null}
         {projectState === 'DRAFT' && question !== null ? <Questions question={question} answer={answer} setAnswer={setAnswer} submit={submitAnswer} /> : null}
         {projectState === 'SPEC_READY' ? <Action title={t.plan.title} detail={t.progress.planDetail} button={t.plan.prepare} busyButton={t.plan.prepareBusy} action={preparePlan} /> : null}
-        {projectState === 'PLAN_PROPOSED' && plan !== null ? <PlanEditor plan={plan} submit={editPlan} approve={approvePlan} reason={changeReason} setReason={setChangeReason} requestChange={requestPlanChange} addSlice={addPlanSlice} /> : null}
+        {projectState === 'PLAN_PROPOSED' && plan !== null ? <PlanEditor plan={plan} submit={editPlan} approve={approvePlan} reason={changeReason} setReason={setChangeReason} requestChange={requestPlanChange} addSlice={addPlanSlice} {...(consulted === undefined ? {} : { consulted })} /> : null}
         {projectState === 'PLAN_PROPOSED' && plan === null ? <Action title={t.plan.title} detail={t.progress.planDetail} button={t.plan.revision} busyButton={t.plan.revisionBusy} action={preparePlan} /> : null}
         {projectState === 'PLAN_APPROVED' ? <Action title={t.creation.title} detail={t.truth.creation} button={t.creation.start} busyButton={t.creation.startBusy} action={generate} /> : null}
         {projectState === 'GENERATING' || projectState === 'BUILD_OK' || projectState === 'TESTS_OK' ? <Action title={t.creation.title} detail={t.creation.working} button={t.creation.cancel} busyButton={t.creation.cancelBusy} action={cancelGeneration} progress={running} steps={runSteps} /> : null}

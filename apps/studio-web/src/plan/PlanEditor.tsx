@@ -28,11 +28,63 @@ export interface PlanEditorProps {
    * botão que responde 404 na cara de quem não programa.
    */
   addSlice?(request: string): Promise<void>
+  /**
+   * O que o Studio consultou para montar este plano.
+   *
+   * OPCIONAL pelo mesmo motivo de `addSlice`: numa instalação cujo servidor
+   * ainda não devolve o bloco, o painel não aparece — em vez de aparecer vazio
+   * e sugerir que o Studio não consultou nada.
+   */
+  readonly consulted?: ConsultedView
+}
+
+/** O que o servidor conta sobre o que entrou no pedido. */
+export interface ConsultedView {
+  readonly used: readonly { readonly label: string; readonly source: string }[]
+  readonly dropped: readonly { readonly label: string; readonly source: string }[]
+  readonly refusedSkills: readonly { readonly label: string; readonly source: string }[]
+  readonly incompleteCode: boolean
+}
+
+/**
+ * O painel do que o Studio consultou.
+ *
+ * A ordem das seções é deliberada e não é estética: primeiro o que ENTROU
+ * (para a pessoa reconhecer o próprio pedido), depois o que NÃO COUBE (que é a
+ * informação que muda o julgamento dela sobre o plano), e por último as
+ * habilidades recusadas (que são sobre a instalação, não sobre o plano).
+ *
+ * As duas últimas só aparecem quando têm conteúdo: uma seção vazia repetida em
+ * toda tela ensina a pessoa a não olhar para ela.
+ * @param props - o que o servidor contou.
+ * @returns o painel.
+ */
+export function ConsultedPanel({ consulted }: { readonly consulted: ConsultedView }) {
+  const algoFaltou = consulted.dropped.length > 0 || consulted.incompleteCode
+  return <details className="plan-consulted">
+    <summary>{t.plan.consultedTitle}</summary>
+    <p>{t.plan.consultedHelp}</p>
+    <ul className="plan-consulted-used">
+      {consulted.used.map((item, index) => <li key={`${item.label}-${String(index)}`}>{item.label}</li>)}
+    </ul>
+    {/* O aviso vem ANTES da lista do que faltou: quem lê precisa saber que a
+        lista tem consequência antes de ler os itens dela. */}
+    {algoFaltou ? <p role="alert" className="plan-consulted-gap">{t.plan.consultedIncomplete}</p> : null}
+    {consulted.dropped.length > 0 ? <ul className="plan-consulted-dropped">
+      {consulted.dropped.map((item, index) => <li key={`${item.label}-${String(index)}`}>{item.label}</li>)}
+    </ul> : null}
+    {consulted.refusedSkills.length > 0 ? <>
+      <h3>{t.plan.consultedSkillsTitle}</h3>
+      <ul className="plan-consulted-skills">
+        {consulted.refusedSkills.map((item, index) => <li key={`${item.source}-${String(index)}`}>{item.label}</li>)}
+      </ul>
+    </> : null}
+  </details>
 }
 
 interface Draft { readonly title: string; readonly description: string; readonly criteriaText: string }
 
-export function PlanEditor({ plan, submit, approve, reason, setReason, requestChange, addSlice }: PlanEditorProps) {
+export function PlanEditor({ plan, submit, approve, reason, setReason, requestChange, addSlice, consulted }: PlanEditorProps) {
   const [editing, setEditing] = useState<string | null>(null)
   const [addition, setAddition] = useState('')
   const [draft, setDraft] = useState<Draft>({ title: '', description: '', criteriaText: '' })
@@ -60,6 +112,7 @@ export function PlanEditor({ plan, submit, approve, reason, setReason, requestCh
     <div className="heading"><div><h1>{t.plan.title}</h1><p>{t.progress.planDetail}</p></div></div>
     {plan.edited_by_person === true ? <p className="plan-edited">{t.plan.editedByPerson}</p> : null}
     <p className="plan-note">{t.plan.filesFixed}</p>
+    {consulted === undefined ? null : <ConsultedPanel consulted={consulted} />}
     <ol className="plan-list" aria-label={t.plan.title}>
       {plan.slices.map((slice, index) => <li className="task-card" key={slice.slice_id}>
         {editing === slice.slice_id

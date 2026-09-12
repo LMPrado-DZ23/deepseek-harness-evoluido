@@ -18,6 +18,7 @@ import type { CodeGeneratorPort } from './pipeline.js'
 import type { EmergencyStopGuard, PromptToAppJobService } from './jobs.js'
 import { RUN_REPORT_FILE } from './run-report.js'
 import { FormCategoryCapabilityError, type PlannerCodeContext, type PlannerEngine } from './planner.js'
+import { consultedView } from './plan-consulted.js'
 import { routePrivacySchema } from '@dz23-studio/route-health'
 import { studioProjectCategorySchema } from './model.js'
 import type { LogoProcessorPort } from './logo.js'
@@ -287,7 +288,14 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
           { orgId: actor.orgId, tenantId: actor.tenantId, userId: actor.userId, role: actor.role },
           project.privacy, spec.app_spec, project.category, change, code,
         )
-        return json(response, 201, { plan: await config.service.proposePlan(actor, projectId, output.slices) })
+        // O que o Studio CONSULTOU sai JUNTO do plano, e não numa rota
+        // separada: uma segunda chamada leria o estado do planejador DEPOIS de
+        // outro pedido já ter passado por ele, e a resposta seria sobre o plano
+        // errado.
+        return json(response, 201, {
+          plan: await config.service.proposePlan(actor, projectId, output.slices),
+          consulted: consultedView(config.planner.lastLedger, config.planner.lastSkills, config.planner.lastCode),
+        })
       }
       if (request.method === 'POST' && matched.suffix === '/plan/change') {
         const input = changeRequestSchema.parse(await readJson(request))
