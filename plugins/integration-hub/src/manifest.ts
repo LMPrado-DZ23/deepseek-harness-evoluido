@@ -137,6 +137,62 @@ function floorOf(table: Readonly<Record<string, PolicyTier>>, key: string): Poli
 
 function maxTier(left: PolicyTier, right: PolicyTier): PolicyTier { return TIER_RANK[left] >= TIER_RANK[right] ? left : right }
 
+/**
+ * As faixas de endereço que NUNCA podem ser o destino de uma integração.
+ *
+ * Não são "endereços privados" no sentido de rede doméstica: são os endereços
+ * que, de dentro de um servidor, dão acesso a coisas que ninguém publicou.
+ * `169.254.169.254` é o caso clássico — o serviço de metadados de nuvem, que
+ * entrega credencial da máquina para quem perguntar. As faixas RFC 1918 e a
+ * loopback alcançam bancos, painéis internos e o próprio Studio.
+ *
+ * O LOOPBACK DE VERDADE não está bloqueado, e isso é decisão, não esquecimento:
+ * um servidor MCP rodando na própria máquina é caso suportado — é o modo
+ * pessoal —, tem nível próprio em `isLoopbackEndpoint` e quebrá-lo aqui
+ * tiraria uma função que existe de propósito. O que sai da lista de loopback é
+ * `*.localhost`: aquilo é um NOME, e quem controla o resolvedor decide para
+ * onde ele aponta — `attacker.example.localhost` não é a própria máquina.
+ */
+const BLOCKED_HOST_PATTERNS: readonly RegExp[] = [
+  /^0\./u, /^10\./u, /^192\.168\./u, /^169\.254\./u,
+  /^172\.(1[6-9]|2[0-9]|3[01])\./u,
+  // `*.localhost` NAO e loopback de verdade: e um NOME, e quem controla o
+  // resolvedor decide para onde ele aponta. `localhost` exato e `127.x` sim, e
+  // por isso ficam de FORA desta lista — ver o comentario abaixo.
+  /\.localhost$/u, /\.internal$/u, /\.local$/u,
+  /^fe80:/iu, /^fc[0-9a-f]{2}:/iu, /^fd[0-9a-f]{2}:/iu,
+]
+
+/**
+ * Se este endereço pode ser o destino de uma integração.
+ *
+ * Duas recusas, e as duas existem por um caminho concreto:
+ *
+ * 1. **Esquema.** `endpoint` era `z.string().url()` e nada mais — `file:`,
+ *    `gopher:` e qualquer outro esquema passavam. A DUAS LINHAS de distância,
+ *    no mesmo arquivo de modelo, `source_url` já era restrito a http(s) com a
+ *    justificativa escrita ("um `file:` seria o disco de quem hospeda"). O
+ *    endereço com quem a integração de fato FALA não tinha essa restrição.
+ * 2. **Host.** Nada confrontava o endereço com faixa interna, então um
+ *    manifesto assinado apontando para `http://169.254.169.254/` era aceito
+ *    como coerente e entregue inteiro ao despachante.
+ *
+ * O que isto NÃO resolve está dito em OS-30: a recusa é pelo NOME que o
+ * manifesto escreveu, e um nome público que RESOLVE para endereço interno passa
+ * por aqui. Fechar isso exige decidir no momento da conexão, dentro de quem
+ * fala o protocolo, e não na leitura do manifesto.
+ * @param endpoint - o endereço declarado no manifesto.
+ * @returns `true` quando serve como destino.
+ */
+export function isAllowedEndpoint(endpoint: string): boolean {
+  let url: URL
+  try { url = new URL(endpoint) } catch { return false }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return false
+  const host = url.hostname.replace(/^\[|\]$/gu, '').toLowerCase()
+  if (host === '') return false
+  return !BLOCKED_HOST_PATTERNS.some(pattern => pattern.test(host))
+}
+
 /** `new URL('http://[::1]/').hostname` keeps the brackets, so the bare form never matched. */
 export function isLoopbackHostname(host: string): boolean {
   const bare = host.replace(/^\[|\]$/gu, '')
@@ -184,6 +240,16 @@ export function evaluateManifest(input: unknown, publisherKeys: PublisherKeys): 
   }
   const manifest = parsed.data
   const declaredTier = effectiveTier(manifest.kind, manifest)
+  // O ENDERECO e recusado ANTES da assinatura, e a ordem importa: assinar nao
+  // torna um destino aceitavel. Um manifesto assinado apontando para
+  // `169.254.169.254` — o servico de metadados de nuvem, que entrega credencial
+  // da maquina para quem perguntar — chegava a `verified` e era entregue
+  // inteiro ao despachante. `capabilities.network.egress` nunca foi confrontado
+  // com o `endpoint` real: um manifesto podia declarar `api.fornecedor.com` e
+  // apontar para dentro.
+  if (manifest.endpoint !== undefined && !isAllowedEndpoint(manifest.endpoint)) {
+    return { manifest, verification: 'invalid', effectiveTier: maxTier(declaredTier, UNVERIFIED_FLOOR), reasons: [t('manifest.reasonEndpointRefused')] }
+  }
   const unverified = (reason: string | readonly string[], verification: 'unverified' | 'invalid'): ManifestEvaluation => {
     const tier = maxTier(declaredTier, UNVERIFIED_FLOOR)
     const reasons = [...(typeof reason === 'string' ? [reason] : reason)]

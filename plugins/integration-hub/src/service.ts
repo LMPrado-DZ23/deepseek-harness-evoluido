@@ -453,8 +453,16 @@ export class IntegrationHubService {
       throw new HubError('INVALID', t('errors.smtpKindReserved'))
     }
     if (evaluation.verification === 'invalid') {
-      await this.#audit(actor, 'integration.registered', subject, 'failure', 'signature-invalid')
-      throw new HubError('INVALID', t('errors.manifestSignatureInvalid'))
+      // A FRASE e a do motivo, e nao 'assinatura invalida' para tudo.
+      //
+      // `invalid` passou a ter mais de uma causa: alem da assinatura que nao
+      // confere, um ENDERECO recusado (esquema errado, ou apontando para dentro
+      // da maquina ou da rede). Dizer 'assinatura invalida' de um manifesto
+      // perfeitamente assinado manda o operador procurar no lugar errado, e ele
+      // vai achar que a chave e que esta errada.
+      const reason = evaluation.reasons[0] ?? t('errors.manifestSignatureInvalid')
+      await this.#audit(actor, 'integration.registered', subject, 'failure', 'manifest-refused')
+      throw new HubError('INVALID', reason)
     }
     const now = this.#stamp()
     const existing = (await this.list(actor)).find(value => value.manifest?.id === evaluation.manifest!.id && value.kind === evaluation.manifest!.kind)
@@ -494,8 +502,18 @@ export class IntegrationHubService {
     // The SMTP actions have exactly one subject; accepting a free string there made the number of
     // possible tickets unbounded for no reason. What tells two SMTP decisions apart is the
     // FINGERPRINT of the target below, not the subject.
-    const subject = action === 'integration.enabled' ? subjectId : SMTP_SUBJECT
-    if (action !== 'integration.enabled' && subjectId !== SMTP_SUBJECT) throw new HubError('INVALID', t('errors.invalidRequest'))
+    // `integration.removed` entra aqui junto com `integration.enabled`, e ela
+    // FALTAVA. `removeIntegration` exige um tiquete dessa acao no nivel da
+    // integracao, e nao havia caminho para emitir um: o sujeito era forcado
+    // para SMTP e `#tierForAction` lancava. Resultado: toda integracao T2 ou
+    // T3 — o caso NORMAL, porque endpoint externo e saida de rede ja sao T2 —
+    // respondia 403 'confirmacao necessaria' para sempre. Falhava fechado, mas
+    // e uma TRAVA: a unica forma de tirar do registro uma integracao perigosa
+    // ficava indisponivel, e quem mais precisa dela e justamente quem acabou de
+    // descobrir que ligou a coisa errada.
+    const aboutIntegration = action === 'integration.enabled' || action === 'integration.removed'
+    const subject = aboutIntegration ? subjectId : SMTP_SUBJECT
+    if (!aboutIntegration && subjectId !== SMTP_SUBJECT) throw new HubError('INVALID', t('errors.invalidRequest'))
     const tier = await this.#tierForAction(actor, action, subject)
     const ticket: HubApprovalTicket = {
       approval_id: this.#createId(), org_id: actor.orgId, tenant_id: actor.tenantId,
@@ -528,7 +546,7 @@ export class IntegrationHubService {
    * reaches the history through it.
    */
   async #fingerprint(actor: HubActor, action: HubEvent['action'], subjectId: string, payload: string | undefined): Promise<string> {
-    if (action === 'integration.enabled') return securityFingerprint(await this.#integration(actor, subjectId))
+    if (action === 'integration.enabled' || action === 'integration.removed') return securityFingerprint(await this.#integration(actor, subjectId))
     if (action === 'smtp.configured' || action === 'smtp.tested') {
       // A decision with no target is a decision about nothing: refuse to issue it.
       if (payload === undefined || payload.trim() === '') throw new HubError('INVALID', t('errors.invalidRequest'))
@@ -541,7 +559,7 @@ export class IntegrationHubService {
 
   /** The tier an action would need right now, decided by the server for the request above. */
   async #tierForAction(actor: HubActor, action: HubEvent['action'], subjectId: string): Promise<PolicyTier> {
-    if (action === 'integration.enabled') return this.#enforcedTier(await this.#integration(actor, subjectId))
+    if (action === 'integration.enabled' || action === 'integration.removed') return this.#enforcedTier(await this.#integration(actor, subjectId))
     if (action === 'smtp.configured' || action === 'smtp.tested') return SMTP_TIER
     throw new HubError('INVALID', t('errors.invalidRequest'))
   }
@@ -752,6 +770,17 @@ export class IntegrationHubService {
     // Passa pelo MESMO caminho de uma chamada de verdade: parada de emergência,
     // desligamento por alcance, teto e auditoria. Um teste com caminho próprio
     // seria uma saída de rede que os controles não veem.
+    //
+    // UM ALCANCE FICA DE FORA, e a frase acima escondia isso: o desligamento
+    // por PROJETO. Não é descuido — testar é uma operação do ESPAÇO, a rota não
+    // recebe projeto (ver `TENANCY`/`HUB_ROUTE_CONTRACTS`, escopo `workspace`) e
+    // não existe projeto a conferir. Os desligamentos de organização e de
+    // inquilino valem, porque `callIntegration` os confere sem projeto.
+    //
+    // Quem desligar as integrações de UM projeto e depois apertar "testar" na
+    // tela do espaço vai ver a conexão acontecer. Isso é correto — o teste não é
+    // trabalho daquele projeto — mas alguém precisava ter escrito, em vez de
+    // deixar a frase de cima prometer um alcance que não existe.
     // `idempotent: true` porque a sondagem NÃO chama ferramenta nenhuma: repetir
     // um aperto de mão que falhou por rede não pode ter efeito do lado de lá.
     const outcome = await this.callIntegration<McpProbeOutcome>(actor, integrationId, { operation: 'tools/list', idempotent: true },
@@ -899,6 +928,27 @@ export class IntegrationHubService {
     // Uma integração desligada, ou cuja assinatura não confere, não é chamada por
     // ninguém — nem por um aplicativo gerado que ainda guarde o identificador de
     // quando ela estava ligada. `not-executed` é o desfecho honesto: nada saiu.
+    // A ASSINATURA E RECONFERIDA AQUI, e nao lida do campo gravado.
+    //
+    // `callMcpTool` ja fazia isso, com o motivo escrito: nao basta o campo
+    // `verification` do registro, porque ele foi decidido no CADASTRO e desde
+    // entao a linha pode ter sido alterada por qualquer outro escritor da
+    // tabela. O mesmo raciocinio vale para `webhook`, `skill` e para o teste de
+    // conexao — e neles a conferencia NAO acontecia: quem gravasse
+    // `verification: 'verified'` com um manifesto trocado, inclusive com outro
+    // `endpoint`, fazia a chamada sair, com auditoria dizendo `success`. A
+    // defesa estava montada em UM dos dois caminhos, e o proprio arquivo ja
+    // declarava a ameaca como real.
+    //
+    // Registro sem manifesto nao tem o que reconferir: para ele vale o campo,
+    // que e o unico fato que existe.
+    const signed = record.manifest === null
+      ? undefined
+      : evaluateManifest(record.manifest, this.options.publisherKeys)
+    if (signed !== undefined && signed.verification !== 'verified') {
+      await this.#audit(actor, 'integration.called', integrationId, 'not-executed', `${operation} unsigned`)
+      throw new HubError('FORBIDDEN', t('errors.integrationNotEnabled'))
+    }
     if (!record.enabled || record.verification === 'invalid') {
       await this.#audit(actor, 'integration.called', integrationId, 'not-executed', `${operation} disabled`)
       throw new HubError('FORBIDDEN', t('errors.integrationNotEnabled'))

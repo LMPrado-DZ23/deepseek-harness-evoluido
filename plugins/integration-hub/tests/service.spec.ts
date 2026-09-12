@@ -1207,3 +1207,103 @@ describe('ACHADO: a trilha de auditoria não pode ser esvaziada por quem tem ace
     await expect(service.requestApproval(otherTenant, 'smtp.tested', SMTP, 'd@example.test')).resolves.toBeDefined()
   })
 })
+
+describe('ACHADO: a assinatura e reconferida em TODA chamada, e a remocao tem caminho', () => {
+  it('manifesto trocado na tabela nao sai por `callIntegration`, mesmo com `verification: verified` gravado', async () => {
+    // `callMcpTool` ja reconferia, com o motivo escrito no arquivo: nao basta o
+    // campo `verification` do registro, porque ele foi decidido no CADASTRO e
+    // desde entao a linha pode ter sido alterada por qualquer outro escritor da
+    // tabela. O mesmo raciocinio vale para `webhook`, `skill` e para o teste de
+    // conexao — e neles a conferencia NAO acontecia. Quem gravasse
+    // `verification: 'verified'` com um manifesto trocado, inclusive com outro
+    // `endpoint`, fazia a chamada sair com auditoria dizendo `success`.
+    const { service, repository } = await build()
+    const registered = await service.register(admin, signed(manifest({ id: 'agenda', tier: 'T0', kind: 'skill' })))
+    const id = registered.integration.integration_id
+    // Troca o manifesto por um NAO assinado, mantendo o campo gravado dizendo
+    // que esta verificado — que e exatamente o que um escritor malicioso faria.
+    repository.rows = repository.rows.map(row => row.integration_id === id
+      ? { ...row, enabled: true, verification: 'verified' as const, manifest: manifest({ id: 'agenda', tier: 'T0', kind: 'skill', version: '9.9.9' }) }
+      : row)
+
+    await expect(service.callIntegration(owner, id, { operation: 'x', idempotent: true }, async () => 'nao pode sair'))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' })
+    // E a recusa fica registrada como NAO EXECUTADA: nada saiu.
+    expect(repository.eventRows.filter(event => event.action === 'integration.called').at(-1))
+      .toMatchObject({ outcome: 'not-executed' })
+  })
+
+  it('uma integracao T2/T3 PODE ser removida: o tiquete de remocao passou a ser emissivel', async () => {
+    // `removeIntegration` exige um tiquete de `integration.removed` no nivel da
+    // integracao, e NAO havia caminho para emitir um: `requestApproval` forcava
+    // o sujeito para SMTP e `#tierForAction` lancava. Toda integracao T2 ou T3 —
+    // o caso NORMAL, porque endpoint externo e saida de rede ja sao T2 —
+    // respondia 403 'confirmacao necessaria' para sempre. Falhava fechado, mas
+    // era uma TRAVA: a unica forma de tirar do registro uma integracao perigosa
+    // ficava indisponivel, e quem mais precisa dela e quem acabou de descobrir
+    // que ligou a coisa errada.
+    const { service, repository } = await build()
+    const registered = await service.register(admin, signed(manifest({ id: 'externa', tier: 'T0', kind: 'webhook', endpoint: 'https://fornecedor.example/hook' })))
+    const id = registered.integration.integration_id
+    expect(registered.integration.effective_tier).not.toBe('T0')
+
+    const ticket = await service.requestApproval(admin, 'integration.removed', id)
+    expect(ticket).toMatchObject({ action: 'integration.removed', subject_id: id })
+    await expect(service.removeIntegration(admin, id, { approvalId: ticket.approval_id })).resolves.toMatchObject({ integration_id: id })
+    expect(repository.rows.some(row => row.integration_id === id)).toBe(false)
+  })
+
+  it('remover sem confirmacao continua recusado', async () => {
+    // O caminho passou a existir; ele nao passou a ser livre.
+    const { service } = await build()
+    const registered = await service.register(admin, signed(manifest({ id: 'externa2', tier: 'T0', kind: 'webhook', endpoint: 'https://fornecedor.example/hook' })))
+    await expect(service.removeIntegration(admin, registered.integration.integration_id)).rejects.toThrow()
+  })
+})
+
+describe('ACHADO: o endereco de uma integracao nao pode apontar para dentro', () => {
+  it('manifesto ASSINADO apontando para o servico de metadados e RECUSADO', async () => {
+    // `endpoint` era `z.string().url()` e nada mais, e nada confrontava o
+    // endereco com faixa interna. Um manifesto assinado apontando para
+    // `169.254.169.254` — o servico de metadados de nuvem, que entrega
+    // credencial da maquina para quem perguntar — chegava a `verified` e era
+    // entregue inteiro ao despachante. A duas linhas de distancia, no mesmo
+    // arquivo de modelo, `source_url` ja era restrito a http(s) com a
+    // justificativa escrita; o endereco com quem a integracao FALA nao tinha.
+    //
+    // A recusa vem ANTES da assinatura de proposito: assinar nao torna um
+    // destino aceitavel.
+    const { service } = await build()
+    for (const endpoint of [
+      'http://169.254.169.254/latest/meta-data/',
+      'http://10.0.0.1/mcp',
+      'http://192.168.1.1/mcp',
+      'http://172.20.0.5/mcp',
+      'http://db.internal/mcp',
+      'http://alvo.attacker.example.localhost/mcp',
+      'file:///etc/passwd',
+      'gopher://alvo/',
+    ]) {
+      // `register` recusa `invalid` de saida: a integracao nem entra no
+      // registro, e por isso nao ha `verification` a conferir depois.
+      await expect(service.register(admin, signed(manifest({ id: `alvo-${endpoint.length}`, kind: 'mcp', endpoint }))))
+        .rejects.toMatchObject({ code: 'INVALID' })
+    }
+  })
+
+  it('endereco publico normal continua sendo aceito', async () => {
+    // Uma regra que recusa o legitimo quebra o produto em vez de protege-lo.
+    const { service } = await build()
+    const registered = await service.register(admin, signed(manifest({ id: 'fornecedor', kind: 'mcp', endpoint: 'https://api.fornecedor.example/mcp' })))
+    expect(registered.integration.verification).toBe('verified')
+  })
+
+  it('LOOPBACK de verdade continua aceito: e o modo pessoal, e tem nivel proprio', async () => {
+    // Bloquear `127.0.0.1` aqui tiraria uma funcao que existe de proposito —
+    // um servidor MCP rodando na propria maquina e caso suportado. O que saiu
+    // da familia loopback foi `*.localhost`, que e um NOME e nao a maquina.
+    const { service } = await build()
+    const registered = await service.register(admin, signed(manifest({ id: 'local', kind: 'mcp', endpoint: 'http://127.0.0.1:8080/mcp' })))
+    expect(registered.integration.verification).toBe('verified')
+  })
+})
