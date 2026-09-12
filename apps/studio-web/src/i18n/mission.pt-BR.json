@@ -1,0 +1,49 @@
+{
+  "navLabel": "Objetivos",
+  "title": "Objetivos",
+  "subtitle": "Cada objetivo reúne trabalhos diferentes sob a mesma meta, com a lista do que precisa estar comprovado antes de dar por encerrado.",
+  "loading": "Carregando os objetivos…",
+  "failed": "Não foi possível carregar seus objetivos agora.",
+  "retry": "Tentar de novo",
+  "empty": "Você ainda não tem nenhum objetivo.",
+  "emptyHelp": "Um objetivo é criado junto com o trabalho que ele reúne.",
+  "readError": "Não foi possível ler os objetivos.",
+  "invalidServerResponse": "A resposta do servidor não foi entendida.",
+  "candidateError": "Não foi possível marcar este objetivo como terminado.",
+  "completeError": "Não foi possível encerrar este objetivo.",
+  "declareCandidate": "Marcar como terminado",
+  "complete": "Encerrar objetivo",
+  "candidateHelp": "Marcar como terminado não encerra nada: o encerramento confere um por um os itens combinados.",
+  "checklist": "O que precisa estar comprovado",
+  "evidenceLabel": "Onde está a prova",
+  "blockedLabel": "Depende de",
+  "status": {
+    "RUNNING": "Em andamento",
+    "CANDIDATE_COMPLETED": "Marcado como terminado, aguardando conferência",
+    "COMPLETED": "Encerrado",
+    "ABANDONED": "Abandonado"
+  },
+  "criterion": {
+    "UNPROVEN": "Ainda sem prova",
+    "PROVEN": "Comprovado",
+    "REFUTED": "Conferido e reprovado",
+    "BLOCKED_EXTERNAL": "Parado por alguém de fora"
+  },
+  "completion": {
+    "PROVEN": "Todos os itens combinados estão comprovados.",
+    "REFUTED": "A conferência de algum item foi feita e reprovou.",
+    "UNPROVEN": "Ainda falta comprovar algum item.",
+    "BLOCKED_EXTERNAL": "Falta algo que depende de alguém de fora."
+  },
+  "spend": {
+    "NO_LIMIT": "Sem limite combinado para este objetivo.",
+    "WITHIN": "Já usou {spent} do limite de {limit} combinado.",
+    "EXCEEDED": "Já usou {spent} e passou do limite de {limit} combinado.",
+    "UNMEASURED": "Não dá para conferir o limite combinado: o trabalho {run} terminou sem informar quanto consumiu."
+  },
+  "runCount": {
+    "zero": "Nenhum trabalho ligado a este objetivo ainda.",
+    "one": "1 trabalho ligado a este objetivo.",
+    "many": "{count} trabalhos ligados a este objetivo."
+  }
+}

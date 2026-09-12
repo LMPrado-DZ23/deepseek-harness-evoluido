@@ -6,6 +6,9 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createIdentityHttpHandler, CSRF_COOKIE, IdentityError, SESSION_COOKIE, type SessionRecord, type StudioIdentityService } from '../../../plugins/identity/src/index.js'
 import { createStudioWebHandler } from '../../../plugins/studio-web/src/index.js'
+import { createMissionHttpHandler } from '../../../plugins/mission/src/http.js'
+import { StudioMissionService, type MissionRepository } from '../../../plugins/mission/src/service.js'
+import type { MissionRecord } from '../../../plugins/mission/src/model.js'
 import type { StudioTenancyService } from '../../../plugins/tenancy/src/index.js'
 import { createPromptToAppHttpHandler } from '../../../plugins/prompt-to-app/src/http.js'
 import { registerPromptToAppHttpExtension } from '../../../plugins/prompt-to-app/src/http.js'
@@ -308,6 +311,40 @@ const apiHandler = createPromptToAppHttpHandler({
   health: async () => ({ state: 'OK', route: 'ollama-local', builder: 'OK', disk: 'OK' }), allowedHosts, allowedOrigins,
 })
 /**
+ * Um objetivo determinístico para a tela de objetivos.
+ *
+ * O que é fixture são os DADOS, e não o caminho: quem responde é o módulo de
+ * rota do produto, com a mesma autenticação, o mesmo escopo e a mesma
+ * conferência de papel. O objetivo nasce com um item comprovado e outro parado
+ * por alguém de fora, que é o par que faz a tela mostrar as duas frases
+ * diferentes — e é justamente a distinção que se perde quando alguém junta os
+ * dois num "pendente".
+ */
+function e2eMissionSeed(): MissionRecord[] { return [{
+  mission_id: 'lancar-o-site', org_id: 'org-e2e', tenant_id: 'tenant-e2e',
+  objective: 'Colocar o site no ar para os clientes',
+  status: 'RUNNING', max_total_tokens: 1_000, run_ids: [],
+  criteria: [
+    { criterion_id: 'formulario', statement: 'O formulário de contato envia mensagem de verdade', state: 'PROVEN', evidence: 'Teste de envio gravado em 08/09', blocked_reason: null },
+    { criterion_id: 'dominio', statement: 'O endereço do site aponta para a hospedagem', state: 'BLOCKED_EXTERNAL', evidence: null, blocked_reason: 'a empresa que registra o endereço' },
+  ],
+  created_at: '2026-09-08T12:00:00.000Z', updated_at: '2026-09-08T12:00:00.000Z',
+  candidate_at: null, completed_at: null,
+}] }
+let e2eMissions = e2eMissionSeed()
+const missionRepository: MissionRepository = {
+  missions: () => e2eMissions,
+  putMission: async record => {
+    const index = e2eMissions.findIndex(row => row.mission_id === record.mission_id)
+    if (index < 0) e2eMissions.push(record); else e2eMissions[index] = record
+  },
+}
+const missionHandler = createMissionHttpHandler({
+  service: new StudioMissionService({ repository: missionRepository }),
+  identity, tenancy, allowedHosts, allowedOrigins, runs: () => [],
+})
+
+/**
  * Uma equipe determinística para a tela de progresso.
  *
  * O que é fixture aqui são os DADOS, e não o caminho: quem responde é o mesmo
@@ -399,7 +436,12 @@ const server = createServer((request, response) => {
   // para os tamanhos de tela seguintes, e eles reprovariam por causa da ordem
   // em que rodaram - não por um defeito.
   if (request.url === '/e2e/reset-team') { e2eTeamCancelled = false; return plain(response, 200, 'ok') }
+  // Mesmo motivo do reinicio da equipe: o teste que marca o objetivo como
+  // terminado deixaria os tamanhos de tela seguintes sem o botao, e eles
+  // reprovariam pela ORDEM em que rodaram, e nao por um defeito.
+  if (request.url === '/e2e/reset-mission') { e2eMissions = e2eMissionSeed(); return plain(response, 200, 'ok') }
   if (request.url?.startsWith('/api/studio/identity') === true) return void identityHandler(request, response)
+  if (request.url?.startsWith('/api/studio/missions') === true) return void missionHandler(request, response)
   if (request.url?.startsWith('/api/studio/apps') === true) return void apiHandler(request, response)
   return void webHandler(request, response)
 })

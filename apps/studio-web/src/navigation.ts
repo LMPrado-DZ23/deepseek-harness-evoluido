@@ -1,10 +1,12 @@
 import { ASSISTANT_PATH } from './assistant/AssistantEntry'
 import { HUB_PATH } from './hub/presentation'
 import { HELP_PATH } from './help/HelpScreen'
+import { MISSION_PATH } from './mission/missionApi'
 import { PROJECTS_PATH } from './projects/ProjectsScreen'
 import { TEAM_PATH } from './team/teamApi'
 import assistant from './i18n/assistant.pt-BR.json'
 import hub from './i18n/hub.pt-BR.json'
+import mission from './i18n/mission.pt-BR.json'
 import team from './i18n/team.pt-BR.json'
 import t from './i18n/pt-BR.json'
 
@@ -15,7 +17,7 @@ export const NAV_MENU_ID = 'studio-nav'
 export const STUDIO_HOME_PATH = '/studio/'
 
 export type StudioNavItem = {
-  readonly id: 'home' | 'assistant' | 'hub' | 'projects' | 'progress' | 'help'
+  readonly id: 'home' | 'assistant' | 'hub' | 'projects' | 'progress' | 'mission' | 'help'
   readonly label: string
   /**
    * O destino, SEMPRE real.
@@ -59,6 +61,10 @@ export function studioNavItems(): readonly StudioNavItem[] {
     // própria tela inicial, sob "Seu projeto em andamento", que é onde ela já
     // está quando isso importa.
     { id: 'progress', label: team.navLabel, href: TEAM_PATH },
+    // Vem depois de "Trabalho em equipe" porque é o nível acima dele: um
+    // objetivo reúne vários desses trabalhos sob a mesma meta, e a pessoa
+    // chega aqui querendo saber se o conjunto já pode ser dado por encerrado.
+    { id: 'mission', label: mission.navLabel, href: MISSION_PATH },
     // "Ver resultado" MORREU aqui, e isso é a correção, não uma perda.
     //
     // Ele era um item mudo marcado "em breve" desde o começo, e o Prado leu

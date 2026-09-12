@@ -1,0 +1,35 @@
+/* A tela de objetivos.
+   As cores são as mesmas do resto do produto, e as medidas de contraste seguem
+   o que o axe já cobra nas outras telas: #5c6881 e #41506b sobre branco passam,
+   e um cinza mais claro não passa. */
+.missions{max-width:860px;margin:0 auto;padding:16px}
+.mission-card{margin:0 0 16px}
+.mission-line{display:flex;flex-wrap:wrap;gap:10px;align-items:baseline;justify-content:space-between}
+.mission-line strong{font-size:17px;color:#0b1739}
+.mission-status{color:#41506b;font-size:14px}
+.mission-verdict{margin:10px 0 0;color:#182544;font-weight:600}
+.mission-spend,.mission-runs{margin:4px 0 0;color:#5c6881;font-size:14px}
+.mission-checklist-title{margin:16px 0 8px;font-size:15px;color:#182544}
+.mission-checklist{list-style:none;padding:0;margin:0;display:grid;gap:10px}
+.mission-checklist li{border:1px solid #dce2ec;border-radius:10px;padding:12px 14px;display:grid;gap:4px}
+.mission-criterion-state{color:#41506b;font-size:14px}
+.mission-evidence,.mission-blocked{margin:0;color:#5c6881;font-size:13px}
+.mission-help{margin:8px 0 0;color:#5c6881;font-size:13px}
+.mission-problem{color:#8a1c1c;margin:0 0 12px}
+.missions button{margin:12px 8px 0 0;width:auto;min-height:44px;padding:10px 18px}
+
+/* MODO ESCURO.
+   Ele não é opcional aqui: a varredura do axe no escuro REPROVOU esta tela na
+   primeira vez, com contraste insuficiente em `.mission-blocked`. Os cinzas
+   claros do modo claro (#5c6881, #41506b) medem abaixo de 4,5:1 sobre o fundo
+   #151d30 do cartão. Os tons abaixo são os mesmos que o resto do produto já
+   usa no escuro e que o axe já aprova. */
+@media (prefers-color-scheme: dark){
+  .mission-line strong{color:#eef2f9}
+  .mission-verdict{color:#eef2f9}
+  .mission-status,.mission-criterion-state{color:#c7d2e4}
+  .mission-spend,.mission-runs,.mission-evidence,.mission-blocked,.mission-help{color:#c7d2e4}
+  .mission-checklist-title{color:#eef2f9}
+  .mission-checklist li{border-color:#2a3550}
+  .mission-problem{color:#ffb4ab}
+}

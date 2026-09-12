@@ -244,6 +244,8 @@ declarada.
 
 | OS-43 | A missao ganhou rota HTTP com contrato, e o papel passou a ser conferido NO SERVICO | Missao Engineering OS / T-14 12/09/2026 | v1.0 | BETA | plugins/mission/src/http.ts (MISSION_ROUTE_CONTRACTS, createMissionHttpHandler, view, statusOf), plugins/mission/src/service.ts (#authorize, missions, attachRunForApprovedTeam, #inScope), plugins/mission/src/index.ts (registro no webServer), plugins/mission/i18n/pt-BR.json | plugins/mission/tests/http.spec.ts (22 testes), plugins/mission/tests/service.spec.ts (6 novos); cobertura 100% em model.ts, service.ts e budget-port.ts | execucao: seis rotas sob `/api/studio/missions`, todas `authorized`, com permissao e escopo declarados e conferidos por `assertRouteContracts` no carregamento do modulo. Ler exige `project.read`, mexer exige `project.write` — permissoes que JA EXISTEM: inventar `mission.*` obrigaria a redistribui-la entre os quatro papeis, e essa e decisao de produto. A conferencia mora no SERVICO e nao na rota, pela razao ja registrada em tenancy mais uma propria daqui: o motor tambem e chamado pela COMPOSICAO quando uma equipe aprovada liga uma execucao a missao, e conferencia na rota nao alcanca esse caminho. UMA DECISAO QUE EVITOU CONCESSAO SILENCIOSA: o caminho da composicao NAO compoe um ator falso. `attachRunForApprovedTeam(scope, ...)` nao pede papel porque ali nao ha pessoa pedindo — a autorizacao aconteceu quando a equipe foi aprovada com T2 ou T3 — mas continua exigindo ESCOPO. Inventar um `owner` para passar pela propria conferencia seria pior que nao conferir. `spend` e `completion` sao DERIVADOS e calculados na resposta: grava-los criaria uma segunda verdade que diverge no primeiro conserto, como o retrato de equipe ja decidiu para `blocked`. So texto de catalogo chega ao cliente — `ZodError` carrega o JSON das issues e erro de armazenamento carrega caminho de arquivo do servidor | NAO HA TELA: a rota existe e nenhuma parte da aplicacao web a chama. Nenhuma missao foi criada contra PostgreSQL real. `statusOf` tem um ramo (`BUDGET_EXCEEDED`) que nenhuma rota alcanca hoje, porque nao ha rota que ligue execucao — ele esta la para a exaustividade do `switch`, e por isso `http.ts` nao esta em 100% de ramos | a tela de missao em `apps/studio-web`, com item de navegacao, teste unitario, e2e e varredura axe |
 
+| OS-44 | A tela de objetivos existe, separa falta de TRABALHO de falta de GENTE, e passa no axe nos quatro tamanhos | Missao Engineering OS / T-14 12/09/2026 | v1.0 | BETA | apps/studio-web/src/mission/MissionScreen.tsx, apps/studio-web/src/mission/missionApi.ts, apps/studio-web/src/mission/mission.css, apps/studio-web/src/i18n/mission.pt-BR.json, apps/studio-web/src/navigation.ts, apps/studio-web/src/Navigation.tsx, apps/studio-web/src/main.tsx, apps/studio-web/tests/server.ts, apps/studio-web/playwright.config.ts | apps/studio-web/src/mission (24 testes de unidade), apps/studio-web/tests/mission.spec.ts (5 testes e2e em navegador real, nos quatro tamanhos, com axe em claro E escuro) | execucao: a rota de missao existia e NADA a chamava. Agora ha item de navegacao ('Objetivos'), tela e cliente proprio. A distincao que a tela protege e a que mais se perde: 'ainda sem prova' e 'parado por alguem de fora' sao COISAS DIFERENTES — uma pede trabalho, a outra pede outra pessoa —, e o e2e reprova se alguma das duas sumir ou se um codigo de maquina como `BLOCKED_EXTERNAL` vazar para a tela. Os dois gestos aparecem SEPARADOS: marcar como terminado e encerrar. O botao de encerrar NAO some quando falta prova — esconde-lo trocaria uma recusa que diz QUAL item falta por um botao que sumiu sem motivo visivel —, e o e2e confere que a recusa do servidor chega inteira a tela. Uma missao pela metade NAO e desenhada, e um item com estado desconhecido derruba a missao inteira em vez de sumir da lista: descartar so o item diria, em silencio, que aquele item nao faz parte do combinado. A VARREDURA DO AXE NO ESCURO REPROVOU NA PRIMEIRA VEZ, com contraste insuficiente em `.mission-blocked` — o bloco de modo escuro foi escrito por causa da reprovacao, e nao por precaucao | A fixture do e2e e deterministica: nenhum objetivo real foi criado por uma pessoa. A tela LE e faz dois gestos; criar um objetivo e registrar prova de um item so acontecem por codigo — nao ha formulario. O servidor de prova reinicia o objetivo entre testes (`/e2e/reset-mission`), como ja faz com a equipe | formulario de criacao e de registro de prova; uma pessoa leiga de verdade olhando a tela |
+
 <!-- O livro mestre REGISTRA achados, e o achado da OS-39 e sobre numeros de ADR
      que nomeiam mais de uma decisao: citacao-ambigua-proposital -->
 
@@ -252,16 +254,16 @@ declarada.
 | estado | quantos |
 | --- | --- |
 | `STABLE` | 61 |
-| `BETA` | 101 |
+| `BETA` | 102 |
 | `NOT_PRESENT` | 33 |
 | `NOT_CONFIGURED` | 1 |
 | `NOT_EXECUTED` | 4 |
 | `FAILED` | 2 |
 
-**Total de requisitos rastreados: 202.**
+**Total de requisitos rastreados: 203.**
 
 | versao-alvo | quantos |
 | --- | --- |
-| v1.0 | 166 |
+| v1.0 | 167 |
 | v1.x | 33 |
 | v2 | 3 |

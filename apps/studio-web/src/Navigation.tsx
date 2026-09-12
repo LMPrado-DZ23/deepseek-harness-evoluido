@@ -1,4 +1,4 @@
-import { CircleHelp, FolderKanban, Home, LineChart, MessageCircle, Plug, X } from 'lucide-react'
+import { CircleHelp, FolderKanban, Home, LineChart, MessageCircle, Plug, Target, X } from 'lucide-react'
 import type { ReactNode } from 'react'
 import t from './i18n/pt-BR.json'
 import { NAV_MENU_ID, studioNavItems, type StudioNavItem } from './navigation'
@@ -9,6 +9,7 @@ const icons: Readonly<Record<StudioNavItem['id'], ReactNode>> = {
   hub: <Plug aria-hidden="true" />,
   projects: <FolderKanban aria-hidden="true" />,
   progress: <LineChart aria-hidden="true" />,
+  mission: <Target aria-hidden="true" />,
   help: <CircleHelp aria-hidden="true" />,
 }
 
