@@ -291,7 +291,7 @@ export async function handleAssistantConversationStream(
     return
   }
   let identitySession
-  try { identitySession = await authenticatedMutation(request, config.identity) }
+  try { identitySession = await authenticatedMutation(request, config.identity, response) }
   catch {
     // Nenhum byte de fluxo sai antes da identidade valer. Recusar em JSON, com
     // o mesmo texto de sempre, mantém o erro legível para a tela.

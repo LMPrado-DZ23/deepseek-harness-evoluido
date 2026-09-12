@@ -111,7 +111,18 @@ export function serializeSessionCookies(token: string, csrfToken: string, secure
   ]
 }
 
-export function clearSessionCookies(secure = true): readonly string[] {
+/**
+ * Os cookies a expirar quando a pessoa sai — e os do VIZINHO junto.
+ *
+ * `host` entra porque "sair" é o único gesto explícito de recuperação que a
+ * pessoa tem, e ele não pode dizer "pronto, saiu" deixando de pé um cookie de
+ * sessão que um subdomínio irmão plantou no domínio-pai. Sem isso, quem estava
+ * trancada por um plantio continuava trancada depois de sair.
+ * @param secure - se a instalação tem TLS.
+ * @param host - o `Host` do pedido, para alcançar os domínios-pai.
+ * @returns os valores de `Set-Cookie`.
+ */
+export function clearSessionCookies(secure = true, host?: string): readonly string[] {
   const secureAttribute = secure ? '; Secure' : ''
   return [
     // OS DOIS NOMES, sempre. Em modo http a sessão é emitida nos dois (ver
@@ -121,6 +132,7 @@ export function clearSessionCookies(secure = true): readonly string[] {
     `${SESSION_COOKIE}=; HttpOnly${secureAttribute}; SameSite=Lax; Path=/; Max-Age=0`,
     `${SESSION_GENERATION_COOKIE}=${secureAttribute}; SameSite=Strict; Path=/; Max-Age=0`,
     `${CSRF_COOKIE}=${secureAttribute}; SameSite=Lax; Path=/; Max-Age=0`,
+    ...shadowCookieDeletions(host, SESSION_COOKIE),
   ]
 }
 
@@ -218,19 +230,19 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
           json(response, 200, { mode: 'personal', principal })
           return
         }
-        const { session } = await authenticateCookieRequest(request, config.service, secureCookies)
+        const { session } = await authenticateCookieRequest(request, config.service, secureCookies, response)
         json(response, 200, { mode: 'authenticated', principal: principalOf(session) })
         return
       }
 
       if (request.method === 'GET' && route === '/csrf') {
-        const { session } = await authenticateCookieRequest(request, config.service, secureCookies)
+        const { session } = await authenticateCookieRequest(request, config.service, secureCookies, response)
         json(response, 200, { csrf_token: await config.service.csrfTokenFor(session) })
         return
       }
 
       if (request.method === 'GET' && route === '/harness/session') {
-        const identitySession = await authenticatedMutation(request, config.service)
+        const identitySession = await authenticatedMutation(request, config.service, response)
         if (!config.service.isSharedHarnessClientAllowed(identitySession)) {
           json(response, 403, { error: t('http.harnessUnavailable') })
           return
@@ -260,27 +272,27 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
         const candidates = [...new Set(parseCookieValues(request.headers.cookie, sessionCookieName(secureCookies)))]
         if (candidates.length > 64) throw new IdentityError('invalid', t('http.signInToContinue'))
         if (candidates.length === 0) {
-          response.setHeader('set-cookie', clearSessionCookies(secureCookies))
+          response.setHeader('set-cookie', clearSessionCookies(secureCookies, singleHeader(request.headers.host)))
           json(response, 200, { signed_out: true })
           return
         }
         let authentication: { readonly token: string; readonly session: SessionRecord }
         try {
-          authentication = await authenticateCookieRequest(request, config.service, secureCookies)
+          authentication = await authenticateCookieRequest(request, config.service, secureCookies, response)
         } catch (error) {
           if (!(error instanceof IdentityError)) throw error
-          response.setHeader('set-cookie', clearSessionCookies(secureCookies))
+          response.setHeader('set-cookie', clearSessionCookies(secureCookies, singleHeader(request.headers.host)))
           json(response, 200, { signed_out: true })
           return
         }
         config.service.validateCsrfToken(authentication.session, singleHeader(request.headers['x-dz23-csrf']))
         await config.service.revokeSession(authentication.session, authentication.session.session_id)
-        response.setHeader('set-cookie', clearSessionCookies(secureCookies))
+        response.setHeader('set-cookie', clearSessionCookies(secureCookies, singleHeader(request.headers.host)))
         json(response, 200, { signed_out: true })
         return
       }
 
-      const authentication = await authenticateCookieRequest(request, config.service, secureCookies)
+      const authentication = await authenticateCookieRequest(request, config.service, secureCookies, response)
       const session = authentication.session
       if (request.method !== 'GET' && request.method !== 'HEAD') {
         config.service.validateCsrfToken(session, singleHeader(request.headers['x-dz23-csrf']))
@@ -314,14 +326,14 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
       if (request.method === 'POST' && route === '/devices/revoke') {
         const body = revokeSchema.parse(await readJson(request))
         await config.service.revokeSession(session, body.session_id)
-        if (body.session_id === session.session_id) response.setHeader('set-cookie', clearSessionCookies(secureCookies))
+        if (body.session_id === session.session_id) response.setHeader('set-cookie', clearSessionCookies(secureCookies, singleHeader(request.headers.host)))
         json(response, 200, { message: t('http.deviceDisconnected') })
         return
       }
       /* v8 ignore next -- last contracted route: the false side is unreachable because every other contract returns above. O teste percorre IDENTITY_ROUTE_CONTRACTS e prova que nenhuma rota contratada cai na cauda 404. */
       if (request.method === 'POST' && route === '/devices/revoke-all') {
         await config.service.revokeAllSessions(session)
-        response.setHeader('set-cookie', clearSessionCookies(secureCookies))
+        response.setHeader('set-cookie', clearSessionCookies(secureCookies, singleHeader(request.headers.host)))
         json(response, 200, { message: t('http.allDevicesDisconnected') })
         return
       }

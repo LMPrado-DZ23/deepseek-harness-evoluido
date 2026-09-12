@@ -68,7 +68,7 @@ export function createRouteHealthHandler(service, identity) {
         try {
             if (request.method !== 'GET')
                 return send(response, 405, { error: t('errors.methodNotAllowed') });
-            const session = await authenticatedMutation(request, identity);
+            const session = await authenticatedMutation(request, identity, response);
             const scope = { orgId: session.org_id, tenantId: session.tenant_id };
             return send(response, 200, { routes: service.list(scope), switches: service.switches(scope) });
         }

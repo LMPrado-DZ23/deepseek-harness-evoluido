@@ -16,6 +16,7 @@ import {
   SECURE_SESSION_COOKIE,
   SESSION_COOKIE,
   SESSION_GENERATION_COOKIE,
+  shadowCookieDeletions,
   singleHeader,
 } from '../src/http.ts'
 import type { SessionRecord } from '../src/model.ts'
@@ -686,7 +687,21 @@ describe('ACHADO: recusar a ambiguidade sozinho virava TRANCA, e nao defesa', ()
     }
   })
 
-  it('dois cookies do nome FORTE recusam, e NAO emitem remocao', async () => {
+  it('dois cookies do nome FORTE recusam MESMO havendo um nome simples valido', async () => {
+    // A afirmacao que importa: a ambiguidade no nome forte nao pode fazer a
+    // leitura CAIR para o nome simples, que e justamente o que o vizinho
+    // consegue escrever. Sem ela, o teste passava com a recusa desligada,
+    // porque o resultado final era o mesmo erro por outro caminho.
+    const response = resposta()
+    await expect(authenticatedMutation(
+      pedido(`${SECURE_SESSION_COOKIE}=a; ${SECURE_SESSION_COOKIE}=b; ${SESSION_COOKIE}=plantado`),
+      service as unknown as StudioIdentityService,
+      response as never,
+    )).rejects.toMatchObject({ code: 'invalid' })
+    expect(service.authenticate).not.toHaveBeenCalledWith('plantado')
+  })
+
+  it('dois cookies do nome FORTE nao emitem remocao', async () => {
     // Uma remocao de `__Host-` com `Domain` e recusada inteira pelo navegador:
     // emiti-la seria um cabecalho que nao faz nada, dando a impressao de que o
     // caso esta tratado. E o caso nao e o do vizinho — o navegador impede que
@@ -716,5 +731,40 @@ describe('ACHADO: recusar a ambiguidade sozinho virava TRANCA, e nao defesa', ()
     expect(sessao).toBeDefined()
     expect(service.authenticate).toHaveBeenCalledWith('legitimo')
     expect(response.cookies()).toEqual([])
+  })
+})
+
+describe('sair tambem tira o cookie do vizinho', () => {
+  it('`clearSessionCookies` alcanca os dois nomes E o dominio-pai', () => {
+    // "Sair" e o unico gesto explicito de recuperacao que a pessoa tem. Dizer
+    // "pronto, saiu" deixando de pe um cookie de sessao que um subdominio irmao
+    // plantou no dominio-pai e mentira: quem estava trancada continuava
+    // trancada depois de sair.
+    const limpezas = clearSessionCookies(false, 'studio.dz23.localhost:4179')
+    expect(limpezas.filter(cookie => cookie.startsWith(`${SESSION_COOKIE}=`))).toHaveLength(2)
+    expect(limpezas.some(cookie => cookie.includes('Domain=dz23.localhost'))).toBe(true)
+    expect(limpezas.some(cookie => cookie.startsWith(SECURE_SESSION_COOKIE))).toBe(true)
+  })
+
+  it('sem endereco, nao inventa dominio-pai nenhum', () => {
+    expect(clearSessionCookies(false).some(cookie => cookie.includes('Domain='))).toBe(false)
+  })
+
+  it('endereco de forma estranha NAO vira atributo injetado no cabecalho', () => {
+    // A forma e conferida DENTRO da funcao que escreve o cabecalho, e nao so
+    // por quem chama: um `;` no meio viraria atributo do proprio `Set-Cookie`.
+    // A garantia de quem chama mora em outro modulo e tem um ramo que nao
+    // confere nada quando a lista de enderecos nao foi declarada.
+    // Os enderecos tem TRES rotulos de proposito: com dois, o laco nao produz
+    // remocao nenhuma e o teste passaria mesmo sem a conferencia de forma —
+    // foi assim que a primeira versao dele passou pelo motivo errado.
+    for (const host of ['a.b.c;Max-Age=99999999', 'a.b.c d', 'a.b.c"x', 'a.b.c\nSet-Cookie: x=1']) {
+      expect(shadowCookieDeletions(host, SESSION_COOKIE), host).toEqual([])
+    }
+    // E o endereco de forma normal, com tres rotulos, PRODUZ remocao: uma
+    // conferencia que recusa tudo nao e conferencia.
+    expect(shadowCookieDeletions('a.b.c', SESSION_COOKIE)).toEqual([
+      `${SESSION_COOKIE}=; Domain=b.c; Path=/; Max-Age=0; SameSite=Lax`,
+    ])
   })
 })

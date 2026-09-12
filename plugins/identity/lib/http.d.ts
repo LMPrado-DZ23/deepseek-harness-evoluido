@@ -137,7 +137,18 @@ export interface IdentityHttpConfig {
  * @returns os valores de `Set-Cookie`.
  */
 export declare function serializeSessionCookies(token: string, csrfToken: string, secure?: boolean): readonly string[];
-export declare function clearSessionCookies(secure?: boolean): readonly string[];
+/**
+ * Os cookies a expirar quando a pessoa sai — e os do VIZINHO junto.
+ *
+ * `host` entra porque "sair" é o único gesto explícito de recuperação que a
+ * pessoa tem, e ele não pode dizer "pronto, saiu" deixando de pé um cookie de
+ * sessão que um subdomínio irmão plantou no domínio-pai. Sem isso, quem estava
+ * trancada por um plantio continuava trancada depois de sair.
+ * @param secure - se a instalação tem TLS.
+ * @param host - o `Host` do pedido, para alcançar os domínios-pai.
+ * @returns os valores de `Set-Cookie`.
+ */
+export declare function clearSessionCookies(secure?: boolean, host?: string): readonly string[];
 export declare function createIdentityHttpHandler(config: IdentityHttpConfig): (request: IncomingMessage, response: ServerResponse) => Promise<void>;
 export declare function authenticatedMutation(request: IncomingMessage, service: StudioIdentityService, response?: ServerResponse): Promise<SessionRecord>;
 export declare function requiredSessionToken(request: IncomingMessage, service: StudioIdentityService, response?: ServerResponse): string;
