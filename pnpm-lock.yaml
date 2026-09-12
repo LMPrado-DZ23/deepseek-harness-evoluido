@@ -414,6 +414,12 @@ importers:
         specifier: 2026.8.31
         version: 2026.8.31
 
+  plugins/mission:
+    dependencies:
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
+
   plugins/policy:
     dependencies:
       '@deepseek-ai/cordis':

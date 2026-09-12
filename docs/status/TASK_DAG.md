@@ -44,12 +44,12 @@ separa este trabalho de acrescentar features.
 | T-11 | P2 | Skill Registry com carregamento progressivo | T-07 | PENDING |
 | T-12 | P2 | Revisão independente + adversarial + convergência | T-09 | PENDING |
 | T-13 | P1 | Prontidão explícita: READY/WAITING/BLOCKED com motivo nomeado | — | DONE (falta levar à tela: T-24) |
-| T-14 | P1 | Mission Engine de escopo amplo (hoje o checkpoint cobre uma geração) | T-13 | PENDING |
+| T-14 | P1 | Mission Engine de escopo amplo (hoje o checkpoint cobre uma geração) | T-13 | PARCIAL (o motor existe e é falsificado — `plugins/mission`, OS-40: candidatura antes de conclusão, prova obrigatória, teto que atravessa execuções. NADA o consome ainda: sem rota, sem tela, sem domínio físico) |
 | T-15 | P2 | Code Intelligence: índice, símbolos, grafo de dependências | T-07 | PENDING |
 | T-16 | P2 | Provider adapters reais atrás do gateway | — | BLOCKED (EB-04) |
 | T-17 | P3 | Research Engine com procedência de fonte | T-07 | PENDING |
 | T-18 | P3 | Visual QA com comparação de imagem | — | PENDING |
-| T-19 | P3 | `MAX_MISSION_COST` e orçamento por missão | T-14 | PARCIAL (teto por EQUIPE existe e é falsificado; o de MISSÃO depende de T-14, e o de CUSTO depende de tabela de preço) |
+| T-19 | P3 | `MAX_MISSION_COST` e orçamento por missão | T-14 | PARCIAL (teto por EQUIPE e teto por MISSÃO existem e são falsificados — `teamSpend` e `missionSpend`. Falta LIGAR o de missão ao disparo, e o de CUSTO em dinheiro depende de tabela de preço) |
 | T-20 | P4 | Learning Engine com validação antes de virar regra | T-08, T-12 | PENDING |
 | T-21 | P2 | Taxonomia de sandbox por capacidade, com desconhecido falhando fechado | — | DONE |
 | T-22 | P3 | Feature Capability Registry (AVAILABLE→…→OPERATIONAL) provado por health real | T-06 | PENDING |

@@ -1,0 +1,311 @@
+import { t } from './i18n.js'
+import { missionRecordSchema, type MissionCriterion, type MissionRecord, type MissionRunUsage } from './model.js'
+
+export class MissionError extends Error {
+  constructor(readonly code: 'INVALID' | 'NOT_FOUND' | 'INVALID_STATE' | 'BUDGET_EXCEEDED' | 'FORBIDDEN', message: string) {
+    super(message)
+  }
+}
+
+/**
+ * Quanto a missão já gastou, e se dá para provar.
+ *
+ * É o irmão de escopo amplo do teto por equipe: aqui a soma atravessa
+ * execuções de projetos e equipes diferentes, que é o que faltava para o teto
+ * de MISSÃO existir.
+ *
+ * `UNMEASURED` NÃO é zero, pela mesma razão que vale no teto por equipe: tratar
+ * não-medido como nada gasto faz o teto parar de estourar por falta de medição
+ * em vez de por estar dentro do combinado, e um teto que só vale quando dá para
+ * medir não é um teto.
+ */
+export type MissionSpendVerdict =
+  | { readonly kind: 'NO_LIMIT' }
+  | { readonly kind: 'WITHIN'; readonly spent: number; readonly limit: number }
+  | { readonly kind: 'EXCEEDED'; readonly spent: number; readonly limit: number }
+  | { readonly kind: 'UNMEASURED'; readonly runId: string; readonly limit: number }
+
+/** As execuções que ainda não relataram consumo porque não terminaram. */
+const RUNNING_STATUSES = new Set(['RUNNING', 'PENDING_APPROVAL'])
+
+/**
+ * Soma o consumo das execuções desta missão e decide se cabe mais trabalho.
+ *
+ * Conta as TERMINADAS: uma em curso ainda não relatou consumo, e contá-la como
+ * zero seria a mesma mentira que `UNMEASURED` existe para não contar.
+ *
+ * Uma execução declarada pela missão que não aparece na lista de execuções
+ * conhecidas devolve `UNMEASURED`, e não é ignorada. Ignorá-la faria a missão
+ * gastar sem teto justamente quando o registro está incompleto — e registro
+ * incompleto é o caso em que um teto mais importa.
+ * @param mission - a missão, com o teto que ela declarou.
+ * @param runs - as execuções conhecidas.
+ * @returns o veredito.
+ */
+export function missionSpend(
+  mission: Pick<MissionRecord, 'max_total_tokens' | 'run_ids'>,
+  runs: readonly MissionRunUsage[],
+): MissionSpendVerdict {
+  const limit = mission.max_total_tokens
+  if (limit === null) return { kind: 'NO_LIMIT' }
+  const byId = new Map(runs.map(run => [run.run_id, run]))
+  let spent = 0
+  for (const runId of mission.run_ids) {
+    const run = byId.get(runId)
+    if (run === undefined) return { kind: 'UNMEASURED', runId, limit }
+    if (RUNNING_STATUSES.has(run.status)) continue
+    const used = run.tokens_used
+    if (used === null || used === undefined) return { kind: 'UNMEASURED', runId, limit }
+    spent += used
+  }
+  return spent >= limit ? { kind: 'EXCEEDED', spent, limit } : { kind: 'WITHIN', spent, limit }
+}
+
+/**
+ * O que falta para a missão poder ser dada como concluída.
+ *
+ * `PROVEN` é o único estado que conta como feito. `BLOCKED_EXTERNAL` aparece
+ * separado de `UNPROVEN` porque a ação é outra — um pede trabalho, o outro pede
+ * outra pessoa — e `REFUTED` aparece primeiro porque uma missão com critério
+ * refutado não está no meio do caminho, está no caminho errado.
+ */
+export type MissionCompletion =
+  | { readonly kind: 'PROVEN' }
+  | { readonly kind: 'REFUTED'; readonly criteria: readonly string[] }
+  | { readonly kind: 'UNPROVEN'; readonly criteria: readonly string[] }
+  | { readonly kind: 'BLOCKED_EXTERNAL'; readonly criteria: readonly string[]; readonly reasons: readonly string[] }
+
+/**
+ * Confere os critérios de aceite e diz se a missão pode ser dada como concluída.
+ *
+ * A ordem das perguntas é a que importa, e é a mesma razão de `taskReadiness`:
+ * refutado vem antes de não-provado, e não-provado vem antes de bloqueado por
+ * fora. Uma missão com um critério REFUTADO e outro bloqueado por falta de
+ * credencial não está esperando credencial — dizer que está manda a pessoa
+ * atrás da credencial em vez de atrás do erro.
+ * @param criteria - os critérios de aceite da missão.
+ * @returns o veredito, com os identificadores que o justificam.
+ */
+export function missionCompletion(criteria: readonly MissionCriterion[]): MissionCompletion {
+  const refuted = criteria.filter(item => item.state === 'REFUTED')
+  if (refuted.length > 0) return { kind: 'REFUTED', criteria: refuted.map(item => item.criterion_id) }
+  const unproven = criteria.filter(item => item.state === 'UNPROVEN')
+  if (unproven.length > 0) return { kind: 'UNPROVEN', criteria: unproven.map(item => item.criterion_id) }
+  const blocked = criteria.filter(item => item.state === 'BLOCKED_EXTERNAL')
+  if (blocked.length > 0) {
+    return {
+      kind: 'BLOCKED_EXTERNAL',
+      criteria: blocked.map(item => item.criterion_id),
+      reasons: blocked.map(item => item.blocked_reason ?? ''),
+    }
+  }
+  return { kind: 'PROVEN' }
+}
+
+/** A frase que explica o veredito a quem não escreveu a missão. */
+export function completionDiagnostic(verdict: MissionCompletion): string {
+  switch (verdict.kind) {
+    case 'PROVEN': return t('completion.provada')
+    case 'REFUTED': return t('completion.refutada', { criterios: verdict.criteria.join(', ') })
+    case 'UNPROVEN': return t('completion.semProva', { criterios: verdict.criteria.join(', ') })
+    case 'BLOCKED_EXTERNAL': return t('completion.bloqueada', { criterios: verdict.criteria.join(', ') })
+  }
+}
+
+export interface MissionRepository {
+  missions(): readonly MissionRecord[]
+  putMission(record: MissionRecord): Promise<void>
+}
+
+export interface MissionActor {
+  readonly userId: string
+  readonly orgId: string
+  readonly tenantId: string
+}
+
+/**
+ * O motor de missão: escopo amplo, prova antes de conclusão.
+ *
+ * O que ele acrescenta ao que já existia não é guardar mais um registro. É que
+ * o checkpoint do Studio cobria UMA geração de UM projeto: nada dizia o que se
+ * está tentando alcançar ao longo de várias execuções, quanto isso já custou no
+ * total, nem o que impede de dar por encerrado. O estado da missão vivia num
+ * markdown escrito à mão.
+ */
+export class StudioMissionService {
+  readonly #repository: MissionRepository
+  readonly #now: () => Date
+
+  constructor(dependencies: { readonly repository: MissionRepository; readonly now?: () => Date }) {
+    this.#repository = dependencies.repository
+    this.#now = dependencies.now ?? (() => new Date())
+  }
+
+  /**
+   * A missão daquele identificador, dentro do escopo de quem pede.
+   *
+   * O escopo entra na BUSCA e não numa conferência depois: procurar primeiro e
+   * conferir depois responde "existe, mas não é sua", que já conta que existe.
+   * @param actor - quem pede.
+   * @param missionId - o identificador.
+   * @returns a missão.
+   */
+  mission(actor: MissionActor, missionId: string): MissionRecord {
+    const found = this.#repository.missions().find(record => record.mission_id === missionId
+      && record.org_id === actor.orgId && record.tenant_id === actor.tenantId)
+    if (found === undefined) throw new MissionError('NOT_FOUND', t('errors.naoEncontrada'))
+    return found
+  }
+
+  /**
+   * Registra uma missão nova.
+   * @param actor - quem cria.
+   * @param input - objetivo, teto e critérios de aceite.
+   * @returns a missão registrada.
+   */
+  async create(actor: MissionActor, input: {
+    readonly missionId: string
+    readonly objective: string
+    readonly maxTotalTokens: number | null
+    readonly criteria: readonly Pick<MissionCriterion, 'criterion_id' | 'statement'>[]
+  }): Promise<MissionRecord> {
+    const now = this.#now().toISOString()
+    // Todo critério nasce SEM PROVA. Deixar o chamador escolher o estado inicial
+    // permitiria criar uma missão já concluída, que é a fraude mais barata
+    // contra este motor inteiro.
+    const parsed = missionRecordSchema.safeParse({
+      mission_id: input.missionId, org_id: actor.orgId, tenant_id: actor.tenantId,
+      objective: input.objective, status: 'RUNNING', max_total_tokens: input.maxTotalTokens,
+      // Campo a campo, e nao por espalhamento: com `{ ...item, state: 'UNPROVEN' }`
+      // a garantia depende da ORDEM das chaves, e inverter a ordem num conserto
+      // futuro reabriria o buraco sem que nada parecesse ter mudado. Aqui nada
+      // que o chamador mande alem de `criterion_id` e `statement` chega ao
+      // registro — e o chamador que atravessa HTTP nao e conferido pelo tipo.
+      run_ids: [],
+      criteria: input.criteria.map(item => ({
+        criterion_id: item.criterion_id, statement: item.statement,
+        state: 'UNPROVEN', evidence: null, blocked_reason: null,
+      })),
+      created_at: now, updated_at: now, candidate_at: null, completed_at: null,
+    })
+    if (!parsed.success) throw new MissionError('INVALID', issueMessage(parsed.error))
+    if (this.#repository.missions().some(record => record.mission_id === input.missionId
+      && record.org_id === actor.orgId && record.tenant_id === actor.tenantId)) {
+      throw new MissionError('INVALID', t('errors.jaExiste'))
+    }
+    await this.#repository.putMission(parsed.data)
+    return parsed.data
+  }
+
+  /**
+   * Liga uma execução à missão, conferindo o teto ANTES de deixar entrar.
+   *
+   * Conferir depois só descobriria o estouro tendo gasto. E `UNMEASURED` recusa
+   * junto com `EXCEEDED`: seguir gastando sem conseguir medir é como o teto
+   * deixa de existir sem ninguém desligá-lo.
+   * @param actor - quem pede.
+   * @param missionId - a missão.
+   * @param runId - a execução.
+   * @param runs - as execuções conhecidas, para o teto.
+   * @returns a missão atualizada.
+   */
+  async attachRun(actor: MissionActor, missionId: string, runId: string, runs: readonly MissionRunUsage[]): Promise<MissionRecord> {
+    const mission = this.mission(actor, missionId)
+    if (mission.status !== 'RUNNING') throw new MissionError('INVALID_STATE', t('errors.estadoNaoAceitaTrabalho'))
+    if (mission.run_ids.includes(runId)) return mission
+    const verdict = missionSpend(mission, runs)
+    if (verdict.kind === 'EXCEEDED') {
+      throw new MissionError('BUDGET_EXCEEDED', t('errors.tetoEstourado', { gasto: String(verdict.spent), teto: String(verdict.limit) }))
+    }
+    if (verdict.kind === 'UNMEASURED') {
+      throw new MissionError('BUDGET_EXCEEDED', t('errors.semMedicao', { execucao: verdict.runId }))
+    }
+    return this.#save({ ...mission, run_ids: [...mission.run_ids, runId] })
+  }
+
+  /**
+   * Registra o resultado de um critério de aceite.
+   * @param actor - quem pede.
+   * @param missionId - a missão.
+   * @param criterionId - o critério.
+   * @param outcome - o novo estado, com a prova ou o motivo do bloqueio.
+   * @returns a missão atualizada.
+   */
+  async recordCriterion(actor: MissionActor, missionId: string, criterionId: string, outcome: {
+    readonly state: MissionCriterion['state']
+    readonly evidence?: string | null
+    readonly blockedReason?: string | null
+  }): Promise<MissionRecord> {
+    const mission = this.mission(actor, missionId)
+    if (mission.status === 'COMPLETED' || mission.status === 'ABANDONED') {
+      throw new MissionError('INVALID_STATE', t('errors.estadoNaoAceitaTrabalho'))
+    }
+    if (!mission.criteria.some(item => item.criterion_id === criterionId)) {
+      throw new MissionError('NOT_FOUND', t('errors.criterioNaoEncontrado'))
+    }
+    const criteria = mission.criteria.map(item => item.criterion_id === criterionId
+      ? { ...item, state: outcome.state, evidence: outcome.evidence ?? null, blocked_reason: outcome.blockedReason ?? null }
+      : item)
+    // A missão VOLTA a andar, sempre. Manter `CANDIDATE_COMPLETED` de pé seria
+    // mentira depois de um critério mudar: quem declarou candidatura declarou
+    // sobre OUTRO conjunto de provas, e `complete` decidiria sobre uma
+    // declaração que nunca foi feita sobre estes critérios. Os dois estados que
+    // não voltam — concluída e abandonada — já foram recusados acima.
+    return this.#save({ ...mission, criteria, status: 'RUNNING', candidate_at: null })
+  }
+
+  /**
+   * O executor declara que acredita ter terminado.
+   *
+   * Não conclui nada: é o degrau que separa "terminei" de "está provado".
+   * @param actor - quem declara.
+   * @param missionId - a missão.
+   * @returns a missão em candidatura.
+   */
+  async declareCandidate(actor: MissionActor, missionId: string): Promise<MissionRecord> {
+    const mission = this.mission(actor, missionId)
+    if (mission.status !== 'RUNNING') throw new MissionError('INVALID_STATE', t('errors.estadoNaoAceitaCandidatura'))
+    return this.#save({ ...mission, status: 'CANDIDATE_COMPLETED', candidate_at: this.#now().toISOString() })
+  }
+
+  /**
+   * Conclui a missão — e recusa quando a prova não está lá.
+   *
+   * A recusa é o ponto inteiro deste método. Um motor que aceitasse `COMPLETED`
+   * porque quem executou disse que terminou não estaria verificando nada; ele
+   * estaria copiando a autoavaliação do executor para um campo de banco e
+   * dando a ela a aparência de fato conferido.
+   * @param actor - quem conclui.
+   * @param missionId - a missão.
+   * @returns a missão concluída.
+   */
+  async complete(actor: MissionActor, missionId: string): Promise<MissionRecord> {
+    const mission = this.mission(actor, missionId)
+    if (mission.status !== 'CANDIDATE_COMPLETED') throw new MissionError('INVALID_STATE', t('errors.concluirExigeCandidatura'))
+    const verdict = missionCompletion(mission.criteria)
+    if (verdict.kind !== 'PROVEN') throw new MissionError('INVALID_STATE', completionDiagnostic(verdict))
+    const now = this.#now().toISOString()
+    return this.#save({ ...mission, status: 'COMPLETED', completed_at: now })
+  }
+
+  async #save(record: MissionRecord): Promise<MissionRecord> {
+    const parsed = missionRecordSchema.safeParse({ ...record, updated_at: this.#now().toISOString() })
+    if (!parsed.success) throw new MissionError('INVALID', issueMessage(parsed.error))
+    await this.#repository.putMission(parsed.data)
+    return parsed.data
+  }
+}
+
+/**
+ * Todas as frases de uma recusa do esquema, e não só a primeira.
+ *
+ * Devolver só a primeira faz quem consertar descobrir o segundo problema
+ * depois de arrumar o primeiro, uma rodada por vez. E a alternativa comum —
+ * `issues[0]?.message ?? 'algo deu errado'` — carrega um caminho que nunca
+ * executa, porque uma recusa do esquema sempre traz pelo menos uma frase.
+ * @param error - a recusa do esquema.
+ * @returns as frases juntas.
+ */
+function issueMessage(error: { readonly issues: readonly { readonly message: string }[] }): string {
+  return error.issues.map(issue => issue.message).join(' ')
+}

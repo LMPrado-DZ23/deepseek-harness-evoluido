@@ -15,6 +15,7 @@ export default defineConfig({
       '@dz23-studio/emergency-stop': fileURLToPath(new URL('./plugins/emergency-stop/src/index.ts', import.meta.url)),
       '@dz23-studio/identity': fileURLToPath(new URL('./plugins/identity/src/index.ts', import.meta.url)),
       '@dz23-studio/integration-hub': fileURLToPath(new URL('./plugins/integration-hub/src/index.ts', import.meta.url)),
+      '@dz23-studio/mission': fileURLToPath(new URL('./plugins/mission/src/index.ts', import.meta.url)),
       '@dz23-studio/mcp-client': fileURLToPath(new URL('./plugins/mcp-client/src/index.ts', import.meta.url)),
       '@dz23-studio/policy': fileURLToPath(new URL('./plugins/policy/src/index.ts', import.meta.url)),
       '@dz23-studio/preview': fileURLToPath(new URL('./plugins/preview/src/index.ts', import.meta.url)),
@@ -38,6 +39,7 @@ export default defineConfig({
         ...(postgresEnabled ? [] : ['plugins/storage-postgres/src/**/*.ts']),
         'plugins/agents/src/index.ts',
         'plugins/agent-team/src/index.ts',
+        'plugins/mission/src/index.ts',
         'plugins/agents/src/git.ts',
         'plugins/prompt-to-app/src/index.ts',
         // Composição: `apply` liga o despachante MCP ao hub e é exercida pelo
@@ -62,6 +64,7 @@ export default defineConfig({
         'plugins/tenancy/src/**/*.ts': { 100: true },
         'plugins/agents/src/{model,service}.ts': { 100: true },
         'plugins/agent-team/src/{model,service}.ts': { 100: true },
+        'plugins/mission/src/{model,service}.ts': { 100: true },
         'plugins/assistant-bridge/src/{approval,catalog,closed-tool,service}.ts': { 100: true },
         'plugins/studio-web/src/assistant-session.ts': { 100: true },
         'plugins/studio-web/src/assistant-conversation.ts': { 100: true },
