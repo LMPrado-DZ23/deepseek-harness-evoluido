@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { newMagicCode, newOpaqueSecret, secretHash, secretMatches } from './crypto.js';
 import { KeyedMutex } from './mutex.js';
 import { t } from './i18n.js';
@@ -509,13 +509,49 @@ export class StudioIdentityService {
         });
         await this.#audit('passkey_registered', session.user_id, session.session_id, session.org_id, session.tenant_id, 'success', t('auth.passkeyRegistered'));
     }
+    /**
+     * Identificadores de chave de acesso FALSOS para um endereço que não tem
+     * nenhuma — estáveis por processo e indistinguíveis dos reais.
+     *
+     * Existe porque `POST /passkey/login/options` é rota PÚBLICA e respondia com
+     * `allowCredentials` cheio para quem tem chave e VAZIO para quem não tem.
+     * Isso é enumeração de usuário a olho nu: o atacante anônimo descobre quem
+     * tem conta, e de quebra recebe os `credential_id` reais, que são
+     * identificadores estáveis do dispositivo. O caminho do código mágico foi
+     * construído com esse cuidado — responde 202 idêntico nos dois casos —, e
+     * aqui a propriedade tinha sido perdida.
+     *
+     * O tempero é sorteado UMA vez por processo, e é isso que impede o atacante
+     * de calcular os falsos por conta própria: derivá-los só do endereço os
+     * tornaria previsíveis, e comparar a resposta com o cálculo devolveria o
+     * mesmo oráculo com mais passos.
+     *
+     * O LIMITE, dito em OS-33: eles mudam quando o processo reinicia, e um
+     * identificador REAL não muda. Quem gravar respostas antes e depois de um
+     * reinício ainda distingue os dois casos. Fechar isso exige um tempero
+     * PERSISTIDO, que é custódia de segredo e decisão de operação.
+     */
+    #passkeyDecoySeed = randomBytes(32);
+    #decoyCredentialIds(email) {
+        // Duas: a quantidade mais comum entre quem registrou uma chave no celular
+        // e outra no computador. Uma quantidade fixa não conta nada sobre ninguém,
+        // e variá-la pelo endereço criaria um segundo canal.
+        return [0, 1].map(index => createHash('sha256')
+            .update(this.#passkeyDecoySeed)
+            .update(`${email}\u0000${String(index)}`, 'utf8')
+            .digest('base64url'));
+    }
     async beginPasskeyLogin(email) {
-        const user = this.#repository.users().find(candidate => candidate.email === normalizeEmail(email));
+        const normalized = normalizeEmail(email);
+        const user = this.#repository.users().find(candidate => candidate.email === normalized);
         const userId = user?.user_id ?? `unknown-${this.#createId()}`;
         const credentials = this.#repository.credentials().filter(credential => credential.user_id === userId);
+        const credentialIds = credentials.length > 0
+            ? credentials.map(credential => credential.credential_id)
+            : this.#decoyCredentialIds(normalized);
         const options = await this.#passkeys.authenticationOptions({
             rpId: this.#rpId,
-            credentialIds: credentials.map(credential => credential.credential_id),
+            credentialIds,
             requireUserVerification: false,
         });
         const challengeId = await this.#storeChallenge('authentication', userId, null, options.challenge);

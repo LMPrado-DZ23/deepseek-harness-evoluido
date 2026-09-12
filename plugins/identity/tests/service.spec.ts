@@ -68,7 +68,15 @@ class FakePasskeys implements PasskeyProvider {
     })
   }
   authenticationOptions(input: Parameters<PasskeyProvider['authenticationOptions']>[0]): Promise<AuthenticationOptions> {
-    return Promise.resolve({ challenge: this.challenge, userVerification: input.requireUserVerification ? 'required' : 'preferred' } as AuthenticationOptions)
+    // `allowCredentials` ECOADO, como o provedor de verdade faz
+    // (`passkey.ts:102`). O dublê antes descartava a lista, e por isso nenhum
+    // teste conseguia enxergar o que a rota pública devolve — que é exatamente
+    // onde estava a enumeração de usuário.
+    return Promise.resolve({
+      challenge: this.challenge,
+      allowCredentials: input.credentialIds.map(id => ({ id })),
+      userVerification: input.requireUserVerification ? 'required' : 'preferred',
+    } as AuthenticationOptions)
   }
   verifyAuthentication(input: Parameters<PasskeyProvider['verifyAuthentication']>[0]) {
     if (!input.challengeMatches(this.challenge)) return Promise.reject(new Error('challenge'))
@@ -643,5 +651,42 @@ describe('B-M6: o token CSRF pode ser trocado, e a elevação o troca', () => {
     expect((await h.service.authenticate(issued.token)).session_id).toBe(session.session_id)
     // O valor antigo não confere mais com o que está gravado.
     expect(rotated.csrf_hash).not.toBe(session.csrf_hash)
+  })
+})
+
+describe('ACHADO: a rota pública de chave de acesso não diz quem tem conta', () => {
+  it('endereço DESCONHECIDO recebe uma resposta com a mesma forma de quem tem chave', async () => {
+    // `POST /passkey/login/options` é rota PÚBLICA e respondia com
+    // `allowCredentials` cheio para quem tem chave e VAZIO para quem não tem.
+    // Enumeração de usuário a olho nu: o atacante anônimo descobre quem tem
+    // conta — e, de quebra, recebia os `credential_id` REAIS, que são
+    // identificadores estáveis do dispositivo. O caminho do código mágico foi
+    // construído com esse cuidado (responde 202 idêntico nos dois casos); aqui
+    // a propriedade tinha sido perdida.
+    const h = makeHarness()
+    const desconhecido = await h.service.beginPasskeyLogin('ninguem@example.com')
+    expect(desconhecido.options.allowCredentials?.length ?? 0).toBeGreaterThan(0)
+    expect(desconhecido.challengeId).toBeTruthy()
+  })
+
+  it('a resposta para o MESMO endereço desconhecido é estável', async () => {
+    // Identificadores que mudassem a cada pergunta seriam o oráculo de volta:
+    // um identificador real não muda.
+    const h = makeHarness()
+    const primeira = await h.service.beginPasskeyLogin('ninguem@example.com')
+    const segunda = await h.service.beginPasskeyLogin(' Ninguem@Example.com ')
+    expect(segunda.options.allowCredentials).toEqual(primeira.options.allowCredentials)
+  })
+
+  it('endereços desconhecidos DIFERENTES recebem identificadores diferentes', () => {
+    // Um mesmo conjunto para todo endereço desconhecido seria reconhecível
+    // depois de duas perguntas.
+    const h = makeHarness()
+    return Promise.all([
+      h.service.beginPasskeyLogin('a@example.com'),
+      h.service.beginPasskeyLogin('b@example.com'),
+    ]).then(([a, b]) => {
+      expect(a.options.allowCredentials).not.toEqual(b.options.allowCredentials)
+    })
   })
 })
