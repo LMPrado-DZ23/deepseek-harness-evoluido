@@ -40,6 +40,28 @@ export declare class StudioTenancyService {
     #private;
     constructor(options: TenancyServiceOptions);
     ensureBootstrap(user: IdentityUser): Promise<void>;
+    /**
+     * A qual organização um e-mail AINDA SEM CONTA pertence, pelo convite aberto.
+     *
+     * Quem vence é o convite MAIS ANTIGO, e essa inversão é o conserto de um
+     * sequestro de matrícula entre organizações. Antes vencia o mais RECENTE:
+     * a organização A convidava `vitima@corp.com`; qualquer dono de outra
+     * organização B que soubesse o e-mail emitia um convite para o mesmo
+     * endereço — e passava, porque a recusa por e-mail que já pertence a outra
+     * organização só olha usuário EXISTENTE, e a vítima ainda não existia. No
+     * primeiro acesso, o convite de B era o mais novo e ganhava: a pessoa
+     * nascia dentro do inquilino do ATACANTE, e tudo o que ela criasse depois —
+     * projetos, conversas, anexos — nascia legível para os donos de B. A
+     * organização A perdia a pessoa de forma permanente, porque o convite dela
+     * passava a ser recusado.
+     *
+     * Duas defesas, e as duas precisam existir: `#inviteLocked` recusa criar um
+     * convite para um e-mail que já tem convite aberto em OUTRA organização, e
+     * aqui o mais antigo vence — para que nenhum convite gravado antes desta
+     * regra possa ser ultrapassado por recência.
+     * @param email - o endereço, na forma que a pessoa digitou.
+     * @returns a organização, o inquilino e o papel do convite, ou `undefined`.
+     */
     enrollmentGrantFor(email: string): {
         orgId: string;
         tenantId: string;

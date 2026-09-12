@@ -103,10 +103,16 @@ describe('StudioTenancyService', () => {
     expect(h.service.enrollmentGrantFor('new@example.com')).toEqual({ orgId: 'org-a', tenantId: 'workspace-a', role: 'builder' })
     const second = await h.service.invite(actor, 'workspace-a', 'new@example.com', 'viewer')
     expect(h.repository.invitationMap.get(first.invitation.invitation_id)?.revoked_at).not.toBeNull()
+    // Propriedade INVERTIDA de propósito: quem vence é o convite MAIS ANTIGO.
+    // A versão anterior fazia o mais RECENTE vencer, e isso era metade de um
+    // sequestro de matrícula entre organizações — ver o teste dedicado abaixo.
+    // Dentro da MESMA organização a mudança não muda nada, porque `invite`
+    // revoga o convite anterior: só existe um ativo. O desempate por recência
+    // só decidia alguma coisa para linhas que não passaram por `invite`.
     h.repository.invitationMap.set('newer-active', {
       ...second.invitation, invitation_id: 'newer-active', created_at: '2026-09-02T12:01:00.000Z', role: 'admin',
     })
-    expect(h.service.enrollmentGrantFor('new@example.com')).toMatchObject({ role: 'admin' })
+    expect(h.service.enrollmentGrantFor('new@example.com')).toMatchObject({ role: 'viewer' })
     h.repository.invitationMap.delete('newer-active')
     const invitedUser = { ...owner, user_id: 'new-user', email: 'new@example.com', bootstrap_owner: false }
     await expect(h.service.acceptInvitation({ ...invitedUser, email: 'wrong@example.com' }, second.token)).rejects.toMatchObject({ code: 'not-found' })
@@ -295,5 +301,64 @@ describe('StudioTenancyService', () => {
     expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1)
     expect(results.filter(result => result.status === 'rejected')).toHaveLength(1)
     expect(h.repository.memberships().filter(member => member.user_id === 'same')).toHaveLength(1)
+  })
+})
+
+describe('ACHADO: uma organização não rouba a matrícula de quem outra convidou', () => {
+  it('convidar para um e-mail com convite ABERTO em outra organização é RECUSADO', async () => {
+    // O caminho inteiro do ataque: a organização A convida `vitima@corp.com`.
+    // Qualquer dono de outra organização B que soubesse o e-mail emitia um
+    // convite para o mesmo endereço — e passava, porque a recusa por "este
+    // e-mail já pertence a outra organização" só olhava usuário EXISTENTE, e a
+    // vítima ainda não existia. No primeiro acesso o convite de B era o mais
+    // RECENTE e vencia: a pessoa nascia dentro do inquilino do ATACANTE, e
+    // tudo o que ela criasse depois nascia legível para os donos de B. A
+    // organização A perdia a pessoa de forma permanente.
+    const h = harness()
+    await boot(h)
+    await h.service.invite(actor, 'workspace-a', 'vitima@corp.com', 'builder')
+
+    // Agora a organização B tenta o mesmo e-mail.
+    const atacante = { ...actor, userId: 'u-b', orgId: 'org-b', tenantId: 'workspace-b' }
+    h.repository.workspaceMap.set('workspace-b', {
+      workspace_id: 'workspace-b', org_id: 'org-b', name: 'Espaço do atacante',
+      created_by: 'u-b', created_at: '2026-09-02T12:00:00.000Z', archived_at: null,
+    })
+    h.repository.membershipMap.set('m-b', {
+      membership_id: 'm-b', org_id: 'org-b', workspace_id: 'workspace-b',
+      user_id: 'u-b', email: 'b@example.com', role: 'owner',
+      created_at: '2026-09-02T12:00:00.000Z', updated_at: '2026-09-02T12:00:00.000Z',
+    })
+    await expect(h.service.invite(atacante, 'workspace-b', 'vitima@corp.com', 'owner'))
+      .rejects.toMatchObject({ code: 'forbidden' })
+
+    // E a matrícula continua sendo da organização que convidou primeiro.
+    expect(h.service.enrollmentGrantFor('vitima@corp.com'))
+      .toEqual({ orgId: 'org-a', tenantId: 'workspace-a', role: 'builder' })
+  })
+
+  it('mesmo com dois convites abertos, o MAIS ANTIGO vence', async () => {
+    // Segunda camada, e ela precisa existir: um convite gravado ANTES desta
+    // regra — ou por qualquer caminho que não passe por `invite` — não pode ser
+    // ultrapassado por recência. Recência é exatamente a alavanca do ataque.
+    const h = harness()
+    await boot(h)
+    const primeiro = await h.service.invite(actor, 'workspace-a', 'vitima@corp.com', 'builder')
+    h.repository.invitationMap.set('de-outra-org', {
+      ...primeiro.invitation, invitation_id: 'de-outra-org', org_id: 'org-b', workspace_id: 'workspace-b',
+      role: 'owner', created_at: '2026-09-02T12:05:00.000Z',
+    })
+    expect(h.service.enrollmentGrantFor('vitima@corp.com'))
+      .toEqual({ orgId: 'org-a', tenantId: 'workspace-a', role: 'builder' })
+  })
+
+  it('convidar de novo DENTRO da mesma organização continua funcionando', async () => {
+    // A trava não pode pegar o caso normal: trocar o papel de um convite ainda
+    // não aceito é coisa de todo dia, e `invite` revoga o anterior.
+    const h = harness()
+    await boot(h)
+    await h.service.invite(actor, 'workspace-a', 'nova@corp.com', 'viewer')
+    await expect(h.service.invite(actor, 'workspace-a', 'nova@corp.com', 'builder')).resolves.toBeDefined()
+    expect(h.service.enrollmentGrantFor('nova@corp.com')).toMatchObject({ role: 'builder' })
   })
 })

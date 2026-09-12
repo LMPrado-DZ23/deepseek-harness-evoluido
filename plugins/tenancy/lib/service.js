@@ -61,12 +61,34 @@ export class StudioTenancyService {
             });
         }
     }
+    /**
+     * A qual organização um e-mail AINDA SEM CONTA pertence, pelo convite aberto.
+     *
+     * Quem vence é o convite MAIS ANTIGO, e essa inversão é o conserto de um
+     * sequestro de matrícula entre organizações. Antes vencia o mais RECENTE:
+     * a organização A convidava `vitima@corp.com`; qualquer dono de outra
+     * organização B que soubesse o e-mail emitia um convite para o mesmo
+     * endereço — e passava, porque a recusa por e-mail que já pertence a outra
+     * organização só olha usuário EXISTENTE, e a vítima ainda não existia. No
+     * primeiro acesso, o convite de B era o mais novo e ganhava: a pessoa
+     * nascia dentro do inquilino do ATACANTE, e tudo o que ela criasse depois —
+     * projetos, conversas, anexos — nascia legível para os donos de B. A
+     * organização A perdia a pessoa de forma permanente, porque o convite dela
+     * passava a ser recusado.
+     *
+     * Duas defesas, e as duas precisam existir: `#inviteLocked` recusa criar um
+     * convite para um e-mail que já tem convite aberto em OUTRA organização, e
+     * aqui o mais antigo vence — para que nenhum convite gravado antes desta
+     * regra possa ser ultrapassado por recência.
+     * @param email - o endereço, na forma que a pessoa digitou.
+     * @returns a organização, o inquilino e o papel do convite, ou `undefined`.
+     */
     enrollmentGrantFor(email) {
         const normalized = normalizeEmail(email);
         const invitation = this.#repository.invitations()
             .filter(candidate => candidate.email === normalized && candidate.accepted_at === null
             && candidate.revoked_at === null && Date.parse(candidate.expires_at) > this.#now().getTime())
-            .sort((left, right) => right.created_at.localeCompare(left.created_at))[0];
+            .sort((left, right) => left.created_at.localeCompare(right.created_at) || left.invitation_id.localeCompare(right.invitation_id))[0];
         return invitation === undefined ? undefined : {
             orgId: invitation.org_id,
             tenantId: invitation.workspace_id,
@@ -134,6 +156,15 @@ export class StudioTenancyService {
         if (existingUser !== undefined && existingUser.org_id !== actor.orgId) {
             throw new TenancyError('forbidden', t('service.esteMailJaPertence'));
         }
+        // A mesma regra, para quem AINDA NÃO TEM CONTA. Sem ela, a recusa acima
+        // não alcançava justamente o caso perigoso: a pessoa convidada por outra
+        // organização e que ainda não entrou. Qualquer dono que soubesse o e-mail
+        // emitia um convite concorrente e sequestrava a matrícula dela.
+        const pendingElsewhere = this.#repository.invitations().some(candidate => candidate.email === normalized
+            && candidate.org_id !== actor.orgId && candidate.accepted_at === null && candidate.revoked_at === null
+            && Date.parse(candidate.expires_at) > this.#now().getTime());
+        if (pendingElsewhere)
+            throw new TenancyError('forbidden', t('service.esteMailJaPertence'));
         if (this.#repository.memberships().some(member => member.workspace_id === workspaceId && member.email === normalized)) {
             throw new TenancyError('invalid', t('service.estaPessoaJaParticipa'));
         }
