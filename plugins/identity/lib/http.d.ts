@@ -107,6 +107,35 @@ export interface IdentityHttpConfig {
     readonly secureCookies?: boolean;
     readonly createSessionGeneration?: () => string;
 }
+/**
+ * Os cookies de uma sessão recém-emitida.
+ *
+ * EM MODO HTTP O COOKIE VAI DUAS VEZES, e é assim de propósito.
+ *
+ * O modo `loopback-http` só é aceito quando todo endereço permitido é
+ * `localhost`, `*.localhost` ou `127.0.0.1` (ver `assertLoopbackHttpCookies`) —
+ * exatamente os endereços que o navegador trata como CONTEXTO SEGURO. Ali ele
+ * aceita `Secure` sobre http, e aceita o prefixo `__Host-`. Foi medido num
+ * Chromium de verdade em `studio.dz23.localhost` sem TLS: `__Host-` sem
+ * `Domain` é aceito, `__Host-` COM `Domain` é recusado, e o nome simples com
+ * `Domain` é aceito.
+ *
+ * Essa última linha é o buraco: em `p-<hex>.dz23.localhost` roda o aplicativo
+ * GERADO, que ninguém leu, e uma linha de `document.cookie` dele planta
+ * `dz23_studio_session=<qualquer coisa>; Domain=dz23.localhost`. O nome com
+ * prefixo é o único que ele NÃO consegue escrever.
+ *
+ * Emitir os dois, em vez de trocar de nome, é o que torna isto seguro de
+ * aplicar: onde o navegador aceitar o `__Host-`, ele passa a ser o que vale e o
+ * plantio do vizinho deixa de alcançar qualquer coisa; onde não aceitar — um
+ * navegador que recuse `Secure` sobre http —, a sessão continua entrando pelo
+ * nome simples, como antes. Ninguém fica sem conseguir entrar por causa desta
+ * mudança.
+ * @param token - o token da sessão.
+ * @param csrfToken - mantido na assinatura por compatibilidade; não é emitido.
+ * @param secure - se a instalação tem TLS.
+ * @returns os valores de `Set-Cookie`.
+ */
 export declare function serializeSessionCookies(token: string, csrfToken: string, secure?: boolean): readonly string[];
 export declare function clearSessionCookies(secure?: boolean): readonly string[];
 export declare function createIdentityHttpHandler(config: IdentityHttpConfig): (request: IncomingMessage, response: ServerResponse) => Promise<void>;

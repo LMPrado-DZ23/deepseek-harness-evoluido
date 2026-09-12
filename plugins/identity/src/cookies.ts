@@ -60,16 +60,32 @@ export const CSRF_COOKIE = 'dz23_studio_csrf'
  * Emite uma remoção por domínio-pai possível: quem planta pode estar num irmão
  * (`p-x.dz23.localhost` → `dz23.localhost`) ou num primo mais acima. Domínio
  * que o navegador recusar é simplesmente ignorado por ele.
+ *
+ * O QUE ELA NÃO ALCANÇA, e por isso não é a defesa principal: remoção de cookie
+ * casa por (nome, domínio, CAMINHO), e o caminho aqui é `/`. Quem planta
+ * escolhe o caminho — `Path=/api` produz um cookie que viaja em todo pedido de
+ * API e que esta remoção nunca apaga. A defesa que de fato fecha o plantio é o
+ * nome com prefixo `__Host-`, que o navegador recusa gravar com `Domain`; ver
+ * `serializeSessionCookies`. Esta função é a rede para a instalação cujo
+ * navegador não aceitou o nome forte.
  * @param host - o cabeçalho `Host` do pedido, com porta ou sem.
  * @param name - o nome do cookie de sessão desta instalação.
  * @returns os valores de `Set-Cookie`, vazio quando não há domínio-pai.
  */
 export function shadowCookieDeletions(host: string | undefined, name: string): readonly string[] {
   const bare = (host ?? '').split(':')[0]!.trim().toLowerCase()
-  // Endereço numérico e IPv6 não têm domínio-pai: `Domain=0.0.1` seria recusado
-  // pelo navegador, e pedir isso só encheria o cabeçalho de lixo.
-  if (bare === '' || bare.includes('[') || /^[0-9.]+$/u.test(bare)) return []
-  const labels = bare.split('.')
+  // A FORMA do endereço é conferida AQUI, e não só por quem chama.
+  //
+  // Os chamadores de hoje validam o `Host` contra uma lista fechada antes, mas
+  // essa garantia mora em outro módulo e tem um ramo que não confere nada
+  // quando a lista não foi declarada. O valor entra num `Set-Cookie`: um `;`
+  // no meio dele viraria atributo injetado no próprio cabeçalho. Uma função
+  // que escreve cabeçalho não confia na ordem das chamadas.
+  if (!/^[a-z0-9.-]+$/u.test(bare)) return []
+  // Endereço numérico não tem domínio-pai: `Domain=0.0.1` seria recusado pelo
+  // navegador, e pedir isso só encheria o cabeçalho de lixo.
+  if (/^[0-9.]+$/u.test(bare)) return []
+  const labels = bare.split('.').filter(label => label !== '')
   const deletions: string[] = []
   for (let index = 1; index + 1 < labels.length; index += 1) {
     deletions.push(`${name}=; Domain=${labels.slice(index).join('.')}; Path=/; Max-Age=0; SameSite=Lax`)

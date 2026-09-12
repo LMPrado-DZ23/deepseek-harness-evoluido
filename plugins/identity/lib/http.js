@@ -42,21 +42,61 @@ export const IDENTITY_ROUTE_CONTRACTS = [
     { method: 'POST', path: '/devices/revoke-all', access: 'authorized', permission: 'identity.self', scope: 'identity' },
 ];
 assertRouteContracts(IDENTITY_ROUTE_CONTRACTS);
+/**
+ * Os cookies de uma sessão recém-emitida.
+ *
+ * EM MODO HTTP O COOKIE VAI DUAS VEZES, e é assim de propósito.
+ *
+ * O modo `loopback-http` só é aceito quando todo endereço permitido é
+ * `localhost`, `*.localhost` ou `127.0.0.1` (ver `assertLoopbackHttpCookies`) —
+ * exatamente os endereços que o navegador trata como CONTEXTO SEGURO. Ali ele
+ * aceita `Secure` sobre http, e aceita o prefixo `__Host-`. Foi medido num
+ * Chromium de verdade em `studio.dz23.localhost` sem TLS: `__Host-` sem
+ * `Domain` é aceito, `__Host-` COM `Domain` é recusado, e o nome simples com
+ * `Domain` é aceito.
+ *
+ * Essa última linha é o buraco: em `p-<hex>.dz23.localhost` roda o aplicativo
+ * GERADO, que ninguém leu, e uma linha de `document.cookie` dele planta
+ * `dz23_studio_session=<qualquer coisa>; Domain=dz23.localhost`. O nome com
+ * prefixo é o único que ele NÃO consegue escrever.
+ *
+ * Emitir os dois, em vez de trocar de nome, é o que torna isto seguro de
+ * aplicar: onde o navegador aceitar o `__Host-`, ele passa a ser o que vale e o
+ * plantio do vizinho deixa de alcançar qualquer coisa; onde não aceitar — um
+ * navegador que recuse `Secure` sobre http —, a sessão continua entrando pelo
+ * nome simples, como antes. Ninguém fica sem conseguir entrar por causa desta
+ * mudança.
+ * @param token - o token da sessão.
+ * @param csrfToken - mantido na assinatura por compatibilidade; não é emitido.
+ * @param secure - se a instalação tem TLS.
+ * @returns os valores de `Set-Cookie`.
+ */
 export function serializeSessionCookies(token, csrfToken, secure = true) {
     void csrfToken;
-    const secureAttribute = secure ? '; Secure' : '';
+    const value = encodeURIComponent(token);
+    if (secure) {
+        return [
+            `${SECURE_SESSION_COOKIE}=${value}; HttpOnly; Secure; SameSite=Lax; Path=/`,
+            `${CSRF_COOKIE}=; Secure; SameSite=Lax; Path=/; Max-Age=0`,
+        ];
+    }
     return [
-        `${sessionCookieName(secure)}=${encodeURIComponent(token)}; HttpOnly${secureAttribute}; SameSite=Lax; Path=/`,
-        `${CSRF_COOKIE}=${secureAttribute}; SameSite=Lax; Path=/; Max-Age=0`,
+        // O forte primeiro. `Secure` sem TLS é aceito nos endereços de contexto
+        // seguro, que são os únicos que este modo permite.
+        `${SECURE_SESSION_COOKIE}=${value}; HttpOnly; Secure; SameSite=Lax; Path=/`,
+        // E o simples, como rede para o navegador que recusar o de cima.
+        `${SESSION_COOKIE}=${value}; HttpOnly; SameSite=Lax; Path=/`,
+        `${CSRF_COOKIE}=; SameSite=Lax; Path=/; Max-Age=0`,
     ];
 }
 export function clearSessionCookies(secure = true) {
     const secureAttribute = secure ? '; Secure' : '';
     return [
-        `${sessionCookieName(secure)}=; HttpOnly${secureAttribute}; SameSite=Lax; Path=/; Max-Age=0`,
-        // O nome antigo também é expirado: quem trocou de configuração não pode
-        // ficar com um cookie orfao que nenhum caminho mais aceita.
-        `${secure ? SESSION_COOKIE : SECURE_SESSION_COOKIE}=; HttpOnly${secureAttribute}; SameSite=Lax; Path=/; Max-Age=0`,
+        // OS DOIS NOMES, sempre. Em modo http a sessão é emitida nos dois (ver
+        // `serializeSessionCookies`), e limpar só um deixaria a pessoa "saída" com
+        // uma sessão ainda válida no outro.
+        `${SECURE_SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`,
+        `${SESSION_COOKIE}=; HttpOnly${secureAttribute}; SameSite=Lax; Path=/; Max-Age=0`,
         `${SESSION_GENERATION_COOKIE}=${secureAttribute}; SameSite=Strict; Path=/; Max-Age=0`,
         `${CSRF_COOKIE}=${secureAttribute}; SameSite=Lax; Path=/; Max-Age=0`,
     ];
@@ -335,7 +375,25 @@ export function requiredSessionToken(request, service, response) {
  * @throws IdentityError quando há mais de um valor distinto.
  */
 function singleSessionToken(header, secure, request, response) {
-    const name = sessionCookieName(secure);
+    // O NOME COM PREFIXO TEM PRECEDÊNCIA, e quando ele está presente o simples
+    // não é sequer olhado.
+    //
+    // É isto que fecha o plantio do vizinho, e não a remoção lá embaixo: o
+    // navegador RECUSA gravar um `__Host-` com `Domain`, então o aplicativo
+    // gerado numa prévia irmã não consegue produzir um valor deste nome. Quem
+    // consegue é só o próprio host — e aí a ambiguidade voltou a ser o caso que
+    // ela sempre foi: alguém com escrita no host, que já tem tudo.
+    //
+    // A remoção continua existindo para a instalação cujo navegador recusou o
+    // `__Host-` e está autenticada pelo nome simples. Ela é rede, não a defesa.
+    const strong = [...new Set(parseCookieValues(header, SECURE_SESSION_COOKIE))].filter(value => value !== '');
+    if (strong.length > 1)
+        throw new IdentityError('invalid', t('http.signInToContinue'));
+    if (strong.length === 1)
+        return strong[0];
+    if (secure)
+        return undefined;
+    const name = SESSION_COOKIE;
     const values = [...new Set(parseCookieValues(header, name))].filter(value => value !== '');
     if (values.length > 1) {
         if (request !== undefined && response !== undefined && !response.headersSent) {

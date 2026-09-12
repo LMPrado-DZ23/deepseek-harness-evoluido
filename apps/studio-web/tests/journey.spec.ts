@@ -30,6 +30,60 @@ test('o login HTTP local grava sessão host-only sem enfraquecer o modo de servi
     expect.objectContaining({ name: 'dz23_studio_session', value: 'session-token', domain: 'studio.dz23.localhost', httpOnly: true, secure: false }),
   ]))
   expect(cookies.some(cookie => cookie.name === 'dz23_studio_csrf')).toBe(false)
+
+  // O NOME FORTE TAMBÉM FOI GRAVADO, sem TLS. É ele que fecha o plantio do
+  // vizinho, e este teste existe porque a garantia é do NAVEGADOR e não do
+  // servidor: `*.localhost` é contexto seguro, então o Chromium aceita `Secure`
+  // sobre http — e recusa `__Host-` que traga `Domain`.
+  //
+  // A afirmação é sobre o que o navegador ENVIA, e não sobre
+  // `context.cookies(url)`: essa consulta filtra por URL e não devolve cookie
+  // `Secure` para um endereço `http://`, mesmo estando gravado.
+  const enviados = await page.evaluate(async () => (await fetch('/e2e/echo-cookie', { credentials: 'same-origin' })).text())
+  expect(enviados).toContain('__Host-dz23_studio_session=session-token')
+})
+
+test('o vizinho NAO consegue plantar o nome forte, e por isso nao tranca ninguem', async ({ context, page }) => {
+  // O aplicativo GERADO roda numa prévia irmã em HTTP claro, e planta o nome
+  // simples à vontade. Plantar num CAMINHO que a remoção não alcança —
+  // `Path=/api`, que é onde vive toda a API — deixava a dona do Studio trancada
+  // para fora PARA SEMPRE, sem gesto de recuperação e sem custo nenhum para
+  // quem plantou.
+  //
+  // O que fecha isso não é a remoção: é o nome com prefixo. O navegador RECUSA
+  // gravar um `__Host-` que traga `Domain`, e este teste prova a recusa no
+  // navegador de verdade, não no papel.
+  await context.addCookies([
+    { name: '__Host-dz23_studio_session', value: 'e2e', domain: 'studio.dz23.localhost', path: '/', secure: true },
+    { name: 'dz23_studio_session', value: 'e2e', domain: 'studio.dz23.localhost', path: '/' },
+  ])
+  await page.goto('/studio/')
+
+  const plantio = await page.evaluate(() => {
+    // Exatamente o que o vizinho tenta, nos dois caminhos e nos dois nomes.
+    document.cookie = 'dz23_studio_session=plantado; Domain=dz23.localhost; Path=/'
+    document.cookie = 'dz23_studio_session=plantado; Domain=dz23.localhost; Path=/api'
+    document.cookie = '__Host-dz23_studio_session=plantado; Domain=dz23.localhost; Path=/; Secure'
+    return document.cookie
+  })
+  expect(plantio).toContain('dz23_studio_session=plantado')
+
+  // A afirmação é sobre o que o navegador ENVIA: `context.cookies(url)` filtra
+  // por URL e não devolve cookie `Secure` para um endereço `http://`, mesmo
+  // estando gravado — o que quase virou a conclusão errada de que o navegador
+  // tinha recusado o cookie do servidor.
+  const enviados = await page.evaluate(async () => (await fetch('/e2e/echo-cookie', { credentials: 'same-origin' })).text())
+  // O nome forte chega UMA vez, e com o valor do servidor.
+  expect([...enviados.matchAll(/__Host-dz23_studio_session=([^;]*)/gu)].map(match => match[1])).toEqual(['e2e'])
+  // O nome simples chega plantado — é o que antes trancava.
+  expect(enviados).toContain('dz23_studio_session=plantado')
+
+  // E o Studio continua respondendo à dona, com o plantio no meio do cabeçalho.
+  const status = await page.evaluate(async () => {
+    const response = await fetch('/api/studio/identity/session', { credentials: 'same-origin' })
+    return response.status
+  })
+  expect(status).toBe(200)
 })
 
 test('abre o Integration Hub pela navegação autenticada do Studio', async ({ context, page }) => {

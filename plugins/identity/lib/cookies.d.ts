@@ -55,6 +55,14 @@ export declare const CSRF_COOKIE = "dz23_studio_csrf";
  * Emite uma remoção por domínio-pai possível: quem planta pode estar num irmão
  * (`p-x.dz23.localhost` → `dz23.localhost`) ou num primo mais acima. Domínio
  * que o navegador recusar é simplesmente ignorado por ele.
+ *
+ * O QUE ELA NÃO ALCANÇA, e por isso não é a defesa principal: remoção de cookie
+ * casa por (nome, domínio, CAMINHO), e o caminho aqui é `/`. Quem planta
+ * escolhe o caminho — `Path=/api` produz um cookie que viaja em todo pedido de
+ * API e que esta remoção nunca apaga. A defesa que de fato fecha o plantio é o
+ * nome com prefixo `__Host-`, que o navegador recusa gravar com `Domain`; ver
+ * `serializeSessionCookies`. Esta função é a rede para a instalação cujo
+ * navegador não aceitou o nome forte.
  * @param host - o cabeçalho `Host` do pedido, com porta ou sem.
  * @param name - o nome do cookie de sessão desta instalação.
  * @returns os valores de `Set-Cookie`, vazio quando não há domínio-pai.

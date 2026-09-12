@@ -439,6 +439,12 @@ const server = createServer((request, response) => {
   // Mesmo motivo do reinicio da equipe: o teste que marca o objetivo como
   // terminado deixaria os tamanhos de tela seguintes sem o botao, e eles
   // reprovariam pela ORDEM em que rodaram, e nao por um defeito.
+  // Devolve o cabeçalho `Cookie` como o NAVEGADOR o montou. Existe só aqui, e
+  // existe porque `context.cookies(url)` do Playwright filtra por URL: um
+  // cookie `Secure` não aparece numa consulta `http://`, mesmo estando gravado
+  // e sendo enviado. Foi assim que a prova do nome forte quase virou uma
+  // conclusão errada — "o navegador recusou" — sobre um cookie que ele aceitou.
+  if (request.url === '/e2e/echo-cookie') return plain(response, 200, request.headers.cookie ?? '')
   if (request.url === '/e2e/reset-mission') { e2eMissions = e2eMissionSeed(); return plain(response, 200, 'ok') }
   if (request.url?.startsWith('/api/studio/identity') === true) return void identityHandler(request, response)
   if (request.url?.startsWith('/api/studio/missions') === true) return void missionHandler(request, response)

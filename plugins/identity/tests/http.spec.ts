@@ -122,17 +122,31 @@ describe('identity HTTP boundary', () => {
       `${SECURE_SESSION_COOKIE}=a%20b; HttpOnly; Secure; SameSite=Lax; Path=/`,
       `${CSRF_COOKIE}=; Secure; SameSite=Lax; Path=/; Max-Age=0`,
     ])
+    // EM HTTP O COOKIE VAI DUAS VEZES, e o forte vem primeiro.
+    //
+    // O modo http só é aceito em endereços de contexto seguro (`localhost`,
+    // `*.localhost`, `127.0.0.1`), e num Chromium de verdade sobre
+    // `studio.dz23.localhost` sem TLS o `__Host-` É aceito — e recusado quando
+    // traz `Domain`. É o único nome que o aplicativo gerado numa prévia irmã
+    // não consegue plantar. O nome simples continua indo como rede para um
+    // navegador que recuse `Secure` sobre http: ninguém deixa de entrar por
+    // causa desta mudança.
     expect(serializeSessionCookies('local', 'unused', false)).toEqual([
+      `${SECURE_SESSION_COOKIE}=local; HttpOnly; Secure; SameSite=Lax; Path=/`,
       `${SESSION_COOKIE}=local; HttpOnly; SameSite=Lax; Path=/`,
       `${CSRF_COOKIE}=; SameSite=Lax; Path=/; Max-Age=0`,
     ])
-    // Quatro: os dois marcadores antigos, o nome em uso E o outro nome. Quem
-    // trocou a configuração (ligou ou desligou o TLS) não pode ficar com um
-    // cookie órfão que nenhum caminho mais aceita e que ninguém consegue tirar.
+    // Quatro: os dois marcadores antigos e OS DOIS nomes. Limpar só um deixaria
+    // a pessoa "saída" com uma sessão ainda válida no outro.
     expect(clearSessionCookies()).toHaveLength(4)
     expect(clearSessionCookies().filter(cookie => cookie.startsWith(SECURE_SESSION_COOKIE))).toHaveLength(1)
     expect(clearSessionCookies().filter(cookie => cookie.startsWith(`${SESSION_COOKIE}=`))).toHaveLength(1)
-    expect(clearSessionCookies(false).every(cookie => !cookie.includes('Secure'))).toBe(true)
+    // O nome forte é expirado COM `Secure` mesmo em modo http: sem o atributo o
+    // navegador não casa o cookie que foi gravado com ele, e a sessão sobrevive
+    // a um "sair".
+    expect(clearSessionCookies(false).filter(cookie => cookie.includes('Secure'))).toEqual([
+      `${SECURE_SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`,
+    ])
     expect(parseCookies(undefined)).toEqual({})
     expect(parseCookies('a=1; lone; bad=%E0%A4%A')).toEqual({ a: '1', lone: '', bad: '' })
     expect(parseCookieValues('a=first; a=second; a=%E0%A4%A; b=other', 'a')).toEqual(['first', 'second'])
@@ -672,13 +686,35 @@ describe('ACHADO: recusar a ambiguidade sozinho virava TRANCA, e nao defesa', ()
     }
   })
 
-  it('com TLS a remocao usa o nome com prefixo, que e o unico aceito ali', async () => {
+  it('dois cookies do nome FORTE recusam, e NAO emitem remocao', async () => {
+    // Uma remocao de `__Host-` com `Domain` e recusada inteira pelo navegador:
+    // emiti-la seria um cabecalho que nao faz nada, dando a impressao de que o
+    // caso esta tratado. E o caso nao e o do vizinho — o navegador impede que
+    // ele grave este nome —, e sim alguem com escrita no proprio host, que ja
+    // tem tudo.
+    for (const secure of [true, false]) {
+      const response = resposta()
+      await expect(authenticatedMutation(
+        pedido(`${SECURE_SESSION_COOKIE}=a; ${SECURE_SESSION_COOKIE}=b`),
+        { ...service, cookiesAreSecure: secure } as unknown as StudioIdentityService,
+        response as never,
+      )).rejects.toMatchObject({ code: 'invalid' })
+      expect(response.cookies(), String(secure)).toEqual([])
+    }
+  })
+
+  it('o nome FORTE tem precedencia: o plantio do vizinho deixa de ser olhado', async () => {
+    // E isto, e nao a remocao, que fecha o buraco. O navegador recusa gravar um
+    // `__Host-` com `Domain`, entao o aplicativo gerado na previa irma nao
+    // consegue produzir um valor deste nome.
     const response = resposta()
-    await expect(authenticatedMutation(
-      pedido(`${SECURE_SESSION_COOKIE}=a; ${SECURE_SESSION_COOKIE}=b`),
-      { ...service, cookiesAreSecure: true } as unknown as StudioIdentityService,
+    const sessao = await authenticatedMutation(
+      pedido(`${SESSION_COOKIE}=plantado; ${SESSION_COOKIE}=outro; ${SECURE_SESSION_COOKIE}=legitimo`),
+      service as unknown as StudioIdentityService,
       response as never,
-    )).rejects.toMatchObject({ code: 'invalid' })
-    expect(response.cookies()[0]).toContain(SECURE_SESSION_COOKIE)
+    )
+    expect(sessao).toBeDefined()
+    expect(service.authenticate).toHaveBeenCalledWith('legitimo')
+    expect(response.cookies()).toEqual([])
   })
 })
