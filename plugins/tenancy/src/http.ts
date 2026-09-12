@@ -23,6 +23,25 @@ const invitationSchema = z.object({ workspace_id: z.string().min(1), email: z.em
 const acceptSchema = z.object({ token: z.string().min(20) }).strict()
 const roleSchema = z.object({ role: studioRoleSchema }).strict()
 
+/**
+ * O que cada rota declara — e ONDE a permissão é de fato conferida.
+ *
+ * O campo `permission` é DOCUMENTO, e não porta. A porta é o serviço, em
+ * `#authorize(actor, workspaceId, permission)`, e tem de ser lá por uma razão
+ * de modelo: papel neste produto é POR ESPAÇO DE TRABALHO, não por pessoa.
+ * A mesma pessoa é dona de um espaço e leitora de outro, e a rota não sabe de
+ * qual espaço se trata antes de ler o corpo (`/invitations`) ou de resolver a
+ * matrícula (`/memberships/:membershipId`) — e em `/workspaces` não há espaço
+ * nenhum, porque a resposta é justamente a lista deles.
+ *
+ * Isto está escrito porque havia uma função `authorizeRoute(role, permission)`
+ * aqui, exportada, testada e NUNCA chamada em produção: uma revisão adversarial
+ * apontou, com razão, que ela era código de autorização morto. Ela foi
+ * REMOVIDA em vez de ligada — ligá-la exigiria um papel por pessoa, que este
+ * produto não tem, e produziria uma conferência contra o papel errado. Função
+ * de autorização que não roda é pior que nenhuma: ela faz quem lê o arquivo
+ * acreditar que a rota confere algo que só o serviço confere.
+ */
 export const TENANCY_ROUTE_CONTRACTS = [
   { method: 'GET', path: '/workspaces', access: 'authorized', permission: 'workspace.read', scope: 'org' },
   { method: 'POST', path: '/workspaces', access: 'authorized', permission: 'workspace.create', scope: 'org' },
@@ -105,14 +124,19 @@ function matchRoute(method: string | undefined, path: string): { contract: Studi
     }
     const [before, after] = contract.path.split(/:[^/]+/u)
     if (path.startsWith(before!) && path.endsWith(after!) && path.length > before!.length + after!.length) {
-      return { contract, template: contract.path, parameter: path.slice(before!.length, after === '' ? undefined : -after!.length) }
+      const parameter = path.slice(before!.length, after === '' ? undefined : -after!.length)
+      // Um parâmetro NÃO atravessa barra. Sem isto,
+      // `PATCH /memberships/a/b/c` casava com `/memberships/:membershipId` e
+      // entregava `a/b/c` como identificador, e `GET /workspaces/a/b/members`
+      // entregava `a/b`. Hoje as buscas são por igualdade exata e nada passa —
+      // mas a rota aceitava, calada, caminhos que o contrato não descreve, e
+      // essa folga vira problema no dia em que um identificador virar prefixo
+      // de busca, chave de arquivo ou parte de caminho.
+      if (parameter.includes('/')) continue
+      return { contract, template: contract.path, parameter }
     }
   }
   return undefined
-}
-
-export function authorizeRoute(role: Parameters<typeof roleAllows>[0], permission: StudioPermission): void {
-  if (!roleAllows(role, permission)) throw new TenancyError('forbidden', t('http.seuPapelNaoPermite'))
 }
 
 async function readJson(request: IncomingMessage): Promise<unknown> {

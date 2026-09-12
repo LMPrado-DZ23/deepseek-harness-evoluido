@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import type { AddressInfo } from 'node:net'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CSRF_COOKIE, IdentityError, SESSION_COOKIE, type SessionRecord, type StudioIdentityService } from '@dz23-studio/identity'
-import { authorizeRoute, createTenancyHttpHandler, TENANCY_ROUTE_CONTRACTS } from '../src/http.ts'
+import { createTenancyHttpHandler, TENANCY_ROUTE_CONTRACTS } from '../src/http.ts'
 import { TenancyError, type StudioTenancyService } from '../src/service.ts'
 
 const session = {
@@ -68,10 +68,25 @@ async function fixture() {
 }
 
 describe('tenancy HTTP boundary', () => {
-  it('declares every route and enforces role permissions independently', () => {
+  it('declara toda rota, e a permissão é conferida no SERVIÇO, não na rota', async () => {
     expect(TENANCY_ROUTE_CONTRACTS).toHaveLength(6)
-    expect(() => authorizeRoute('owner', 'members.manage')).not.toThrow()
-    expect(() => authorizeRoute('viewer', 'members.manage')).toThrow(/não permite/)
+    // `authorizeRoute` foi REMOVIDA: era código de autorização morto —
+    // exportado, testado e NUNCA chamado em produção. Papel aqui é POR ESPAÇO
+    // DE TRABALHO, e a rota não sabe de qual espaço se trata antes de ler o
+    // corpo; a conferência mora no serviço, que sabe. Ligar a função exigiria
+    // um papel por PESSOA, que este produto não tem, e produziria uma
+    // conferência contra o papel errado.
+    //
+    // O que este teste afirma agora é que a recusa por papel CONTINUA
+    // acontecendo, pelo caminho de verdade: o serviço recusa, e a rota traduz
+    // em 403.
+    const f = await fixture()
+    f.tenancy.invite.mockRejectedValueOnce(new TenancyError('forbidden', 'Seu papel não pode convidar.'))
+    const negado = await f.request('/invitations', {
+      method: 'POST', body: JSON.stringify({ workspace_id: 'workspace-a', email: 'x@example.com', role: 'viewer' }),
+    })
+    expect(negado.status).toBe(403)
+    expect(await negado.json()).toEqual({ error: 'Seu papel não pode convidar.' })
   })
 
   it('serves workspace and member reads', async () => {
@@ -210,5 +225,21 @@ describe('ACHADO: erro inesperado não devolve a mensagem interna ao navegador',
     const response = await f.request('/workspaces', { method: 'POST', body: JSON.stringify({ name: 'Produto' }) })
     expect(response.status).toBe(403)
     expect(await response.json()).toEqual({ error: 'Seu papel não pode criar espaços.' })
+  })
+})
+
+describe('ACHADO: parâmetro de rota não atravessa barra', () => {
+  it('um caminho com segmentos a mais não casa com o contrato', async () => {
+    // `PATCH /memberships/a/b/c` casava com `/memberships/:membershipId` e
+    // entregava `a/b/c` como identificador; `GET /workspaces/a/b/members`
+    // entregava `a/b`. Hoje nada passa porque as buscas são por igualdade
+    // exata — mas a rota ACEITAVA, calada, caminhos que o contrato não
+    // descreve, e essa folga vira problema no dia em que um identificador
+    // virar prefixo de busca ou parte de caminho.
+    const f = await fixture()
+    expect((await f.request('/memberships/a/b/c', { method: 'PATCH', body: JSON.stringify({ role: 'viewer' }) })).status).toBe(404)
+    expect((await f.request('/workspaces/a/b/members')).status).toBe(404)
+    // E o caminho legítimo continua funcionando.
+    expect((await f.request('/workspaces/workspace-a/members')).status).toBe(200)
   })
 })
