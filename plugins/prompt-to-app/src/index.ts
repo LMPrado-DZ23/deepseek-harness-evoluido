@@ -11,7 +11,7 @@ import { PRODUCTION_BUILDER_ROOT_POLICY, builderRuntimeRegistryPath, type Builde
 import { mkdir, readFile, statfs } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
-import { healthCapabilities } from './capability-registry.js'
+import { healthCapabilities, storageProbe } from './capability-registry.js'
 import { createPromptToAppHttpHandler, type StudioAppsHealth } from './http.js'
 import { PromptToAppJobService, type EmergencyStopGuard, type PromptToAppJobRegistry } from './jobs.js'
 import {
@@ -405,10 +405,14 @@ export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}):
     // constante montada uma vez no arranque, e lê-la não exercita nada — a
     // revisão adversarial cobrou exatamente isso. Perguntar pelos projetos
     // agora, e ele responder, é o que vale como sondagem.
-    const storage = await (async () => {
-      try { service.listProjects(healthActor(scope)); return { ok: true, at: observedAt } }
-      catch { return { ok: false, at: observedAt } }
-    })()
+    // DOIS domínios, e não um. Ler só `projects` declarava o armazenamento
+    // inteiro saudável com o domínio de execuções quebrado — e a pessoa
+    // descobriria isso tentando criar um aplicativo, que é exatamente o momento
+    // em que este registro existe para avisar ANTES.
+    const storage = storageProbe({
+      projects: () => service.listProjects(healthActor(scope)),
+      runs: () => service.runsInScope(healthActor(scope)),
+    }, observedAt)
     // A criação mais recente que TERMINOU, em qualquer projeto deste espaço.
     // Sem ela `criar-aplicativo` fica em "ninguém conferiu" para sempre, mesmo
     // depois de cem criações — e essa era a resposta permanente da tela.
@@ -513,13 +517,14 @@ function latestFinishedRun(
   service: PromptToAppService, actor: PromptToAppActor,
 ): { readonly passed: boolean; readonly at: Date } | undefined {
   let best: { readonly passed: boolean; readonly at: Date } | undefined
-  for (const project of service.listProjects(actor)) {
-    for (const run of service.runs(actor, project.project_id)) {
-      if (run.state !== 'PASSED' && run.state !== 'FAILED') continue
-      const at = readInstant(run.finished_at ?? run.started_at)
-      if (at === undefined) continue
-      if (best === undefined || at.getTime() > best.at.getTime()) best = { passed: run.state === 'PASSED', at }
-    }
+  // UMA leitura. O laço sobre os projetos chamando `runs` para cada um era
+  // quadrático — `runs` lê o repositório inteiro — e media 188 ms com quinhentos
+  // projetos, num endereço que a tela consulta de tempos em tempos.
+  for (const run of service.runsInScope(actor)) {
+    if (run.state !== 'PASSED' && run.state !== 'FAILED') continue
+    const at = readInstant(run.finished_at ?? run.started_at)
+    if (at === undefined) continue
+    if (best === undefined || at.getTime() > best.at.getTime()) best = { passed: run.state === 'PASSED', at }
   }
   return best
 }

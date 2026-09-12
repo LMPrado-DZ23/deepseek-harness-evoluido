@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest'
 import {
   CAPABILITY_REASONS,
   PROBE_FRESHNESS_MS,
+  PROBED_STORAGE_DOMAINS,
+  storageProbe,
   STUDIO_CAPABILITY_IDS,
   type StudioSignals,
   studioCapabilities,
@@ -432,5 +434,53 @@ describe('healthCapabilities — a ponte com o endereco de saude', () => {
     // saudavel justamente quando ela nao esta.
     const result = bridge({ routes: [], builderState: 'BLOCKED_EXTERNAL', storage: { ok: false, at: NOW }, categories: [] })
     expect(result.map(item => item.id).sort()).toEqual([...STUDIO_CAPABILITY_IDS].sort())
+  })
+})
+
+describe('storageProbe — mais de um domínio (T-22)', () => {
+  const at = new Date('2026-09-12T12:00:00.000Z')
+  const ok = () => undefined
+
+  it('pergunta a TODOS os domínios sondáveis, e não a um só', () => {
+    // Ler apenas `projects` declarava o armazenamento inteiro saudável: um
+    // domínio de execuções quebrado apareceria como pronto na tela, e a pessoa
+    // descobriria o problema tentando criar um aplicativo.
+    const perguntados: string[] = []
+    const readers = Object.fromEntries(PROBED_STORAGE_DOMAINS.map(domain => [domain, () => { perguntados.push(domain) }]))
+    expect(storageProbe(readers as never, at)).toEqual({ ok: true, at })
+    expect(perguntados).toEqual([...PROBED_STORAGE_DOMAINS])
+    expect(perguntados.length).toBeGreaterThan(1)
+  })
+
+  it('qualquer domínio que falhe reprova o armazenamento, e o veredito DIZ qual', () => {
+    // "Armazenamento com problema" sem nome não ajuda ninguém a consertar.
+    for (const quebrado of PROBED_STORAGE_DOMAINS) {
+      const readers = Object.fromEntries(PROBED_STORAGE_DOMAINS.map(domain => [
+        domain, domain === quebrado ? () => { throw new Error('sem resposta') } : ok,
+      ]))
+      expect(storageProbe(readers as never, at), quebrado).toEqual({ ok: false, at, failed: quebrado })
+    }
+  })
+
+  it('PARA no primeiro que falha: perguntar de novo responde a mesma coisa', () => {
+    const depois: string[] = []
+    const readers = {
+      projects: () => { throw new Error('sem resposta') },
+      runs: () => { depois.push('runs') },
+    }
+    expect(storageProbe(readers, at).failed).toBe('projects')
+    expect(depois).toEqual([])
+  })
+
+  it('sucesso NÃO carrega o campo do que falhou', () => {
+    // Um `failed: undefined` grudado no sucesso faria um leitor futuro
+    // perguntar qual domínio falhou numa sondagem em que nenhum falhou.
+    expect(storageProbe({ projects: ok, runs: ok }, at)).not.toHaveProperty('failed')
+  })
+
+  it('o instante é o da SONDAGEM, e vai junto mesmo quando falha', () => {
+    // Sem `at` na falha, a janela de validade não teria contra o que contar, e
+    // uma falha de ontem pareceria de agora.
+    expect(storageProbe({ projects: () => { throw new Error('x') }, runs: ok }, at).at).toBe(at)
   })
 })

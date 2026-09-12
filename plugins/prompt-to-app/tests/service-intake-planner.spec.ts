@@ -695,3 +695,76 @@ describe('dois inquilinos planejando ao mesmo tempo', () => {
     expect(textoDeA).not.toContain('change')
   })
 })
+
+describe('runsInScope — UMA leitura do histórico (T-22)', () => {
+  /** Um espaço com vários projetos, cada um com execuções. */
+  async function comHistorico(projetos: number, porProjeto: number) {
+    const { repository, service } = fixture()
+    const ids: string[] = []
+    for (let p = 0; p < projetos; p++) {
+      const created = await service.createProject(ownerA, {
+        name: `Projeto ${String(p)}`, original_brief: 'Quero um cadastro simples de clientes para a minha loja.',
+        category: 'landing-page', privacy: 'melhor-qualidade',
+      })
+      ids.push(created.project_id)
+      for (let r = 0; r < porProjeto; r++) {
+        await repository.putRun({
+          project_id: created.project_id, org_id: ownerA.orgId, tenant_id: ownerA.tenantId,
+          run_id: `${created.project_id}-r${String(r)}`, plan_id: 'plan', operation_id: `op-${String(p)}-${String(r)}`,
+          stage: 'build', attempt: 1, state: r % 2 === 0 ? 'PASSED' : 'FAILED',
+          artifact_sha256: null, failure_code: null,
+          started_at: '2026-09-01T00:00:00.000Z', finished_at: '2026-09-01T00:01:00.000Z',
+        } as never)
+      }
+    }
+    return { repository, service, ids }
+  }
+
+  it('devolve o mesmo conjunto que o laço projeto a projeto devolvia', () => {
+    // Uma leitura mais rápida que enxerga OUTRA coisa não é otimização, é
+    // defeito com outro nome.
+    return comHistorico(4, 3).then(({ service, ids }) => {
+      const pelaVarredura = ids.flatMap(id => service.runs(ownerA, id)).map(run => run.run_id).sort()
+      const deUmaVez = service.runsInScope(ownerA).map(run => run.run_id).sort()
+      expect(deUmaVez).toEqual(pelaVarredura)
+      expect(deUmaVez).toHaveLength(12)
+    })
+  })
+
+  it('NÃO enxerga o projeto arquivado, que o laço sobre `listProjects` também não enxergava', async () => {
+    // Ganhar desempenho mudando a resposta seria trocar um defeito por outro.
+    const { service, ids } = await comHistorico(2, 2)
+    await service.archive(ownerA, ids[0]!)
+    const vistos = service.runsInScope(ownerA).map(run => run.run_id)
+    expect(vistos).toHaveLength(2)
+    expect(vistos.every(id => id.startsWith(ids[1]!))).toBe(true)
+  })
+
+  it('NÃO enxerga o histórico de outro inquilino', async () => {
+    const { service } = await comHistorico(2, 2)
+    expect(service.runsInScope(builderB)).toEqual([])
+  })
+
+  it('uma execução de OUTRO inquilino com o MESMO identificador de projeto não entra', async () => {
+    // A lista de projetos visíveis já filtra por escopo, então conferir o
+    // escopo de novo na execução parece redundante — e é, ENQUANTO nenhum
+    // identificador colidir. A falsificação que remove essa segunda conferência
+    // sobrevivia, e a resposta certa para isolamento entre inquilinos não é
+    // declarar a guarda redundante: é dar peso a ela.
+    const { repository, service, ids } = await comHistorico(1, 1)
+    await repository.putRun({
+      project_id: ids[0]!, org_id: 'org-invasora', tenant_id: 'ws-invasor',
+      run_id: 'execucao-de-outro-inquilino', plan_id: 'plan', operation_id: 'op-x',
+      stage: 'build', attempt: 1, state: 'PASSED', artifact_sha256: null, failure_code: null,
+      started_at: '2026-09-01T00:00:00.000Z', finished_at: '2026-09-01T00:01:00.000Z',
+    } as never)
+    const vistos = service.runsInScope(ownerA).map(run => run.run_id)
+    expect(vistos).not.toContain('execucao-de-outro-inquilino')
+    expect(vistos).toHaveLength(1)
+  })
+
+  it('exige `project.read`, como toda leitura de projeto', async () => {
+    const { service } = await comHistorico(1, 1)
+    expect(() => service.runsInScope({ ...ownerA, role: 'nenhum' } as never)).toThrow()
+  })
+})

@@ -97,6 +97,12 @@ produto existe para não fazer.
    descobrir isso por tentativa e erro numa recusa de servidor é o oposto do
    que este produto promete. 11 falsificações, todas pegas.
 
+10. **OS-81 — T-22 fechado.** A varredura das execuções era **quadrática**:
+    `runs(projectId)` lê o repositório inteiro, e o laço sobre os projetos
+    fazia isso uma vez por projeto — **188 ms** com quinhentos projetos, num
+    endereço que a tela consulta. Virou uma leitura só (10,6 ms). E a sondagem
+    de armazenamento passou a perguntar a dois domínios, dizendo qual falhou.
+
 ## Próxima ação
 
 Ver `docs/status/TASK_DAG.md`, tarefa de maior prioridade em `READY`.

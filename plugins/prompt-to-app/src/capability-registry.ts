@@ -383,3 +383,53 @@ export function healthCapabilities(input: {
     ...(status.blockedBy === undefined ? {} : { blocked_by: status.blockedBy }),
   }))
 }
+
+/**
+ * Os domínios que a SONDAGEM de armazenamento pergunta (T-22).
+ *
+ * Um só não bastava. A sondagem lia `projects` e declarava o armazenamento
+ * inteiro saudável: um domínio de execuções quebrado apareceria como
+ * `OPERATIONAL` na tela, e a pessoa descobriria o problema tentando criar um
+ * aplicativo — que é exatamente o momento em que o registro de capacidades
+ * existe para avisar ANTES.
+ *
+ * São os dois que dá para perguntar sem escolher um projeto. Os outros —
+ * planos, especificações, evidência, aprovações — são por projeto, e sondá-los
+ * exigiria eleger um projeto qualquer como cobaia, o que mede aquele projeto e
+ * não o armazenamento. LIMITAÇÃO DECLARADA, e não ausência disfarçada.
+ */
+export const PROBED_STORAGE_DOMAINS = ['projects', 'runs'] as const
+export type ProbedStorageDomain = typeof PROBED_STORAGE_DOMAINS[number]
+
+/** O que a sondagem descobriu, e de QUAL domínio, quando deu errado. */
+export interface StorageProbe {
+  readonly ok: boolean
+  readonly at: Date
+  /** O primeiro domínio que não respondeu. Ausente quando todos responderam. */
+  readonly failed?: ProbedStorageDomain
+}
+
+/**
+ * Pergunta a cada domínio, de verdade.
+ *
+ * PARA no primeiro que falhar, e diz QUAL: continuar perguntando depois que o
+ * armazenamento já se mostrou indisponível gasta leituras para responder a
+ * mesma coisa, e um "armazenamento com problema" sem nome não ajuda ninguém a
+ * consertar.
+ *
+ * Qualquer erro conta como indisponível — inclusive o de autorização. Aqui o
+ * ator é o do próprio Studio, então uma recusa não é "esta pessoa não pode": é
+ * o armazenamento não respondendo como deveria.
+ * @param readers - uma leitura barata por domínio.
+ * @param at - o instante da sondagem.
+ * @returns o veredito, com o domínio que falhou quando falhou.
+ */
+export function storageProbe(
+  readers: Readonly<Record<ProbedStorageDomain, () => unknown>>,
+  at: Date,
+): StorageProbe {
+  for (const domain of PROBED_STORAGE_DOMAINS) {
+    try { readers[domain]() } catch { return { ok: false, at, failed: domain } }
+  }
+  return { ok: true, at }
+}

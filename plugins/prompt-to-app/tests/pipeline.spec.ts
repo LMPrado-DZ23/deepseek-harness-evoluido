@@ -148,6 +148,12 @@ async function fixture(options: FixtureOptions = {}) {
     // leitura lancaria, o `catch` devolveria `undefined`, e o aviso nunca
     // seria exercitado por teste nenhum.
     listProjects: vi.fn(() => [{ project_id: 'project' }]),
+    // UMA leitura do historico (T-22). Sem esta porta no dobro, `recoveryNote`
+    // lanca, o `catch` devolve `undefined`, e o aviso some SEM barulho nenhum —
+    // foi exatamente o que aconteceu quando a leitura passou a usar
+    // `runsInScope`, e o unico motivo de isso ter aparecido e existir um teste
+    // que afirma que o aviso CHEGA.
+    runsInScope: vi.fn(() => (options.forgetRuns === true ? [] : [...runs, ...(options.history ?? [])])),
     putEvidence: vi.fn(async (_actor, item: { kind: string; relative_path: string }) => { evidence.push(item) }),
   }
   const executeImplementation: NonNullable<FixtureOptions['execute']> = options.execute ?? (async (): Promise<FixtureExecutionResult> => ({ exitCode: 0, stdout: 'ok', stderr: '', timedOut: false }))

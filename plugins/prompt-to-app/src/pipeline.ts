@@ -681,22 +681,25 @@ export class PromptToAppPipeline {
    * `undefined`: um aviso é um extra, e derrubar a resposta de uma criação
    * porque a estatística não pôde ser lida seria trocar uma falha explicada por
    * uma falha sem explicação nenhuma.
+   *
+   * O PREÇO desse `catch` é que uma porta que sumiu fica indistinguível de "não
+   * havia o que dizer" — e isso não é hipótese: aconteceu quando esta leitura
+   * passou a usar `runsInScope` e o dobro do teste não tinha o método. O que
+   * pegou foi o teste que afirma que o aviso CHEGA, e é ele o guarda desta
+   * ligação; sem ele, a funcionalidade teria parado em silêncio.
    * @param actor - quem está criando.
    * @param diagnostic - o código da falha desta execução.
    * @returns a frase para a pessoa, ou `undefined`.
    */
   private recoveryNote(actor: PromptToAppActor, diagnostic: string | undefined): string | undefined {
     try {
-      const runs: ObservedRun[] = []
-      for (const project of this.options.service.listProjects(actor)) {
-        for (const run of this.options.service.runs(actor, project.project_id)) {
-          runs.push({
-            project_id: project.project_id, run_id: run.run_id, operation_id: run.operation_id,
-            attempt: run.attempt, state: run.state, failure_code: run.failure_code ?? null,
-            finished_at: run.finished_at ?? null, started_at: run.started_at,
-          })
-        }
-      }
+      // UMA leitura, pelo mesmo motivo medido em `runsInScope`: o laço sobre os
+      // projetos era quadrático, e este caminho lê o histórico inteiro.
+      const runs: ObservedRun[] = this.options.service.runsInScope(actor).map(run => ({
+        project_id: run.project_id, run_id: run.run_id, operation_id: run.operation_id,
+        attempt: run.attempt, state: run.state, failure_code: run.failure_code ?? null,
+        finished_at: run.finished_at ?? null, started_at: run.started_at,
+      }))
       return recoveryNoteFor(diagnostic, runs, { now: this.#now() })
     } catch { return undefined }
   }
