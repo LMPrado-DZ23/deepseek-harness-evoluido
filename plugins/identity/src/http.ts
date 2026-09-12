@@ -7,7 +7,7 @@ import type { AuthenticationResponse, RegistrationResponse } from './passkey.js'
 import type { SessionRecord } from './model.js'
 import { IdentityError, type StudioIdentityService } from './service.js'
 import { assertRouteContracts, type StudioRouteContract } from '@dz23-studio/policy'
-import { CSRF_COOKIE, parseCookies, parseCookieValues, SECURE_SESSION_COOKIE, SESSION_COOKIE, SESSION_GENERATION_COOKIE, sessionCookieName } from './cookies.js'
+import { CSRF_COOKIE, parseCookies, parseCookieValues, SECURE_SESSION_COOKIE, SESSION_COOKIE, SESSION_GENERATION_COOKIE, sessionCookieName, shadowCookieDeletions } from './cookies.js'
 import { InMemoryIdentityRateLimiter, edgeForwardedAddress, rateLimitBuckets, rateLimitKey } from './rate-limit.js'
 
 const JSON_LIMIT = 64 * 1024
@@ -18,7 +18,7 @@ const IDENTITY_INTERNAL_ERROR = 'IDENTITY_INTERNAL_ERROR'
 class IdentityHttpInputError extends Error {}
 class CookieHeaderBudgetError extends Error {}
 
-export { CSRF_COOKIE, parseCookies, parseCookieValues, SECURE_SESSION_COOKIE, SESSION_COOKIE, SESSION_GENERATION_COOKIE, sessionCookieName } from './cookies.js'
+export { CSRF_COOKIE, parseCookies, parseCookieValues, SECURE_SESSION_COOKIE, SESSION_COOKIE, SESSION_GENERATION_COOKIE, sessionCookieName, shadowCookieDeletions } from './cookies.js'
 
 const emailSchema = z.object({ email: z.email() }).strict()
 const magicStartSchema = emailSchema
@@ -306,12 +306,14 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
   }
 }
 
-export async function authenticatedMutation(request: IncomingMessage, service: StudioIdentityService): Promise<SessionRecord> {
+export async function authenticatedMutation(
+  request: IncomingMessage, service: StudioIdentityService, response?: ServerResponse,
+): Promise<SessionRecord> {
   assertCookieHeaderBudget(request)
   // Host e Origin, para TODA rota autenticada — e não só para as da identidade.
   const mutating = request.method !== 'GET' && request.method !== 'HEAD'
   service.assertRequestTrust(singleHeader(request.headers.host), singleHeader(request.headers.origin), mutating)
-  const { session } = await authenticateCookieRequest(request, service, service.cookiesAreSecure)
+  const { session } = await authenticateCookieRequest(request, service, service.cookiesAreSecure, response)
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     const header = singleHeader(request.headers['x-dz23-csrf'])
     service.validateCsrfToken(session, header)
@@ -319,12 +321,14 @@ export async function authenticatedMutation(request: IncomingMessage, service: S
   return session
 }
 
-export function requiredSessionToken(request: IncomingMessage, service: StudioIdentityService): string {
+export function requiredSessionToken(
+  request: IncomingMessage, service: StudioIdentityService, response?: ServerResponse,
+): string {
   assertCookieHeaderBudget(request)
   // Recusa a ambiguidade pelo mesmo motivo de `authenticateCookieRequest`:
   // pegar o `[0]` de dois cookies com o mesmo nome deixa QUEM ESCREVE O
   // CABEÇALHO escolher a sessão, e quem escreve pode não ser a pessoa.
-  const token = singleSessionToken(request.headers.cookie, service.cookiesAreSecure)
+  const token = singleSessionToken(request.headers.cookie, service.cookiesAreSecure, request, response)
   if (token === undefined) throw new IdentityError('invalid', t('http.signInToContinue'))
   return token
 }
@@ -346,14 +350,38 @@ export function requiredSessionToken(request: IncomingMessage, service: StudioId
  * `__Host-` (ver `cookies.ts`) fecha a porta de gravar o segundo cookie; esta
  * função garante que, mesmo que alguém a abra de novo, ninguém escolhe QUAL
  * dos dois vale.
+ *
+ * RECUSAR SOZINHO NÃO BASTAVA, e a jornada em navegador real provou: em HTTP
+ * claro, com prévias em subdomínio irmão, o aplicativo GERADO grava o cookie
+ * sombra e a dona do Studio fica trancada para fora — sem gesto nenhum de
+ * recuperação. Quando há `response`, a recusa vem ACOMPANHADA da remoção do
+ * cookie do vizinho: o próximo pedido tem um valor só e volta a funcionar. Sem
+ * `response` a função só recusa, que é o comportamento antigo e continua
+ * seguro — só não se cura.
  * @param header - o cabeçalho `cookie` bruto.
  * @param secure - se os cookies desta instalação levam `Secure`.
+ * @param request - o pedido, para descobrir os domínios-pai a limpar.
+ * @param response - a resposta, quando dá para emitir a remoção.
  * @returns o token, ou `undefined` quando não há nenhum.
  * @throws IdentityError quando há mais de um valor distinto.
  */
-function singleSessionToken(header: string | undefined, secure: boolean): string | undefined {
-  const values = [...new Set(parseCookieValues(header, sessionCookieName(secure)))].filter(value => value !== '')
-  if (values.length > 1) throw new IdentityError('invalid', t('http.signInToContinue'))
+function singleSessionToken(
+  header: string | undefined, secure: boolean,
+  request?: IncomingMessage, response?: ServerResponse,
+): string | undefined {
+  const name = sessionCookieName(secure)
+  const values = [...new Set(parseCookieValues(header, name))].filter(value => value !== '')
+  if (values.length > 1) {
+    if (request !== undefined && response !== undefined && !response.headersSent) {
+      const deletions = shadowCookieDeletions(singleHeader(request.headers.host), name)
+      if (deletions.length > 0) {
+        const existing = response.getHeader('set-cookie')
+        const current = existing === undefined ? [] : Array.isArray(existing) ? existing.map(String) : [String(existing)]
+        response.setHeader('set-cookie', [...current, ...deletions])
+      }
+    }
+    throw new IdentityError('invalid', t('http.signInToContinue'))
+  }
   return values[0]
 }
 
@@ -361,9 +389,10 @@ async function authenticateCookieRequest(
   request: IncomingMessage,
   service: StudioIdentityService,
   secure: boolean,
+  response?: ServerResponse,
 ): Promise<{ readonly token: string; readonly session: SessionRecord }> {
   assertCookieHeaderBudget(request)
-  const token = singleSessionToken(request.headers.cookie, secure)
+  const token = singleSessionToken(request.headers.cookie, secure, request, response)
   if (token === undefined) throw new IdentityError('invalid', t('http.signInToContinue'))
   return { token, session: await service.authenticate(token) }
 }

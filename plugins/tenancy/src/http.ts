@@ -68,7 +68,7 @@ export function createTenancyHttpHandler(config: TenancyHttpConfig) {
       const route = path.slice('/api/studio/tenancy'.length)
       const match = matchRoute(request.method, route)
       if (match === undefined) return json(response, 404, { error: t('http.rotaNaoEncontrada') })
-      const session = await authenticatedMutation(request, config.identity)
+      const session = await authenticatedMutation(request, config.identity, response)
       const actor = config.service.actorFromSession(session)
 
       if (request.method === 'GET' && route === '/workspaces') {

@@ -589,3 +589,96 @@ describe('identity HTTP boundary', () => {
     expect(head.status).toBe(404)
   })
 })
+
+describe('ACHADO: recusar a ambiguidade sozinho virava TRANCA, e nao defesa', () => {
+  // A jornada em navegador real pegou isto: em HTTP claro, com previas em
+  // subdominio irmao (`p-<hex>.dz23.localhost`), o aplicativo GERADO grava
+  // `dz23_studio_session=shadow; Domain=dz23.localhost`. O navegador passa a
+  // mandar DOIS cookies, o servidor recusa por ambiguidade — corretamente — e a
+  // dona do Studio fica trancada para fora, sem gesto nenhum de recuperacao.
+  // Trocar roubo de conta por tranca permanente nao e fechar o buraco.
+  const service = {
+    authenticate: vi.fn(() => Promise.resolve({ session_id: 's' } as never)),
+    validateCsrfToken: vi.fn(),
+    assertRequestTrust: vi.fn(),
+    cookiesAreSecure: false,
+  }
+  const pedido = (cookie: string, host = 'studio.dz23.localhost:4179') => ({
+    method: 'GET', headers: { cookie, host },
+  }) as never
+  const resposta = () => {
+    const headers = new Map<string, string | readonly string[]>()
+    return {
+      headersSent: false,
+      getHeader: (name: string) => headers.get(name),
+      setHeader: (name: string, value: string | readonly string[]) => { headers.set(name, value) },
+      cookies: () => (headers.get('set-cookie') ?? []) as readonly string[],
+    }
+  }
+
+  it('a recusa vem ACOMPANHADA da remocao do cookie do vizinho', async () => {
+    const response = resposta()
+    await expect(authenticatedMutation(
+      pedido(`${SESSION_COOKIE}=shadow; ${SESSION_COOKIE}=valida`),
+      service as unknown as StudioIdentityService,
+      response as never,
+    )).rejects.toMatchObject({ code: 'invalid' })
+    // A remocao leva `Domain`, e por isso casa SO o cookie de dominio: o
+    // host-only, que e o legitimo, nao e alcancado por ela.
+    expect(response.cookies()).toEqual([
+      `${SESSION_COOKIE}=; Domain=dz23.localhost; Path=/; Max-Age=0; SameSite=Lax`,
+    ])
+    // `Domain=localhost` NAO e emitido: dominio de rotulo unico o navegador
+    // recusa, e pedir a remocao dele so encheria o cabecalho.
+  })
+
+  it('sem ambiguidade, nada e removido', async () => {
+    // Uma remocao emitida em pedido normal apagaria cookie de quem nao fez nada.
+    const response = resposta()
+    await authenticatedMutation(pedido(`${SESSION_COOKIE}=valida`), service as unknown as StudioIdentityService, response as never)
+    expect(response.cookies()).toEqual([])
+  })
+
+  it('a remocao nao apaga o que a resposta ja tinha escrito', async () => {
+    const response = resposta()
+    response.setHeader('set-cookie', ['outro=1'])
+    await expect(authenticatedMutation(
+      pedido(`${SESSION_COOKIE}=a; ${SESSION_COOKIE}=b`),
+      service as unknown as StudioIdentityService,
+      response as never,
+    )).rejects.toMatchObject({ code: 'invalid' })
+    expect(response.cookies()[0]).toBe('outro=1')
+    expect(response.cookies()).toHaveLength(2)
+  })
+
+  it('sem `response`, a recusa continua acontecendo — so nao se cura', () => {
+    // O comportamento antigo permanece seguro para quem nao passa a resposta.
+    expect(() => requiredSessionToken(
+      pedido(`${SESSION_COOKIE}=a; ${SESSION_COOKIE}=b`), service as unknown as StudioIdentityService,
+    )).toThrow(IdentityError)
+  })
+
+  it('endereco sem dominio-pai nao gera remocao nenhuma', async () => {
+    // `Domain=0.0.1` seria recusado pelo navegador; pedir isso so encheria o
+    // cabecalho de lixo.
+    for (const host of ['127.0.0.1:4179', 'localhost:4179', '[::1]:4179']) {
+      const response = resposta()
+      await expect(authenticatedMutation(
+        pedido(`${SESSION_COOKIE}=a; ${SESSION_COOKIE}=b`, host),
+        service as unknown as StudioIdentityService,
+        response as never,
+      )).rejects.toMatchObject({ code: 'invalid' })
+      expect(response.cookies(), host).toEqual([])
+    }
+  })
+
+  it('com TLS a remocao usa o nome com prefixo, que e o unico aceito ali', async () => {
+    const response = resposta()
+    await expect(authenticatedMutation(
+      pedido(`${SECURE_SESSION_COOKIE}=a; ${SECURE_SESSION_COOKIE}=b`),
+      { ...service, cookiesAreSecure: true } as unknown as StudioIdentityService,
+      response as never,
+    )).rejects.toMatchObject({ code: 'invalid' })
+    expect(response.cookies()[0]).toContain(SECURE_SESSION_COOKIE)
+  })
+})

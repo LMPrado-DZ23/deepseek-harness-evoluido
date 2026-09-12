@@ -106,7 +106,7 @@ export function createHubHttpHandler(config: HubHttpConfig) {
       assertRequestTrust(request, { allowedHosts: config.allowedHosts, allowedOrigins: config.allowedOrigins })
       const url = new URL(request.url ?? '/', 'http://local')
       const route = url.pathname.startsWith(prefix) ? url.pathname.slice(prefix.length) || '/' : url.pathname
-      const actor = await authenticatedActor(request, config)
+      const actor = await authenticatedActor(request, config, response)
       const method = request.method ?? 'GET'
       const { service } = config
 
@@ -273,8 +273,8 @@ function publicExport(record: Awaited<ReturnType<IntegrationHubService['exportRe
   return rest
 }
 
-async function authenticatedActor(request: IncomingMessage, config: HubHttpConfig): Promise<HubActor> {
-  const session = await config.identity.authenticate(requiredSessionToken(request, config.identity))
+async function authenticatedActor(request: IncomingMessage, config: HubHttpConfig, response: ServerResponse): Promise<HubActor> {
+  const session = await config.identity.authenticate(requiredSessionToken(request, config.identity, response))
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     // Era `validateCsrf(session, cookies[CSRF_COOKIE], header)` — a variante de
     // duplo envio. O cookie que ela exigia deixou de ser emitido quando o

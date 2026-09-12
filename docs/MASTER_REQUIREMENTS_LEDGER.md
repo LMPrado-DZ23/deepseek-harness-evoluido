@@ -246,6 +246,8 @@ declarada.
 
 | OS-44 | A tela de objetivos existe, separa falta de TRABALHO de falta de GENTE, e passa no axe nos quatro tamanhos | Missao Engineering OS / T-14 12/09/2026 | v1.0 | BETA | apps/studio-web/src/mission/MissionScreen.tsx, apps/studio-web/src/mission/missionApi.ts, apps/studio-web/src/mission/mission.css, apps/studio-web/src/i18n/mission.pt-BR.json, apps/studio-web/src/navigation.ts, apps/studio-web/src/Navigation.tsx, apps/studio-web/src/main.tsx, apps/studio-web/tests/server.ts, apps/studio-web/playwright.config.ts | apps/studio-web/src/mission (24 testes de unidade), apps/studio-web/tests/mission.spec.ts (5 testes e2e em navegador real, nos quatro tamanhos, com axe em claro E escuro) | execucao: a rota de missao existia e NADA a chamava. Agora ha item de navegacao ('Objetivos'), tela e cliente proprio. A distincao que a tela protege e a que mais se perde: 'ainda sem prova' e 'parado por alguem de fora' sao COISAS DIFERENTES — uma pede trabalho, a outra pede outra pessoa —, e o e2e reprova se alguma das duas sumir ou se um codigo de maquina como `BLOCKED_EXTERNAL` vazar para a tela. Os dois gestos aparecem SEPARADOS: marcar como terminado e encerrar. O botao de encerrar NAO some quando falta prova — esconde-lo trocaria uma recusa que diz QUAL item falta por um botao que sumiu sem motivo visivel —, e o e2e confere que a recusa do servidor chega inteira a tela. Uma missao pela metade NAO e desenhada, e um item com estado desconhecido derruba a missao inteira em vez de sumir da lista: descartar so o item diria, em silencio, que aquele item nao faz parte do combinado. A VARREDURA DO AXE NO ESCURO REPROVOU NA PRIMEIRA VEZ, com contraste insuficiente em `.mission-blocked` — o bloco de modo escuro foi escrito por causa da reprovacao, e nao por precaucao | A fixture do e2e e deterministica: nenhum objetivo real foi criado por uma pessoa. A tela LE e faz dois gestos; criar um objetivo e registrar prova de um item so acontecem por codigo — nao ha formulario. O servidor de prova reinicia o objetivo entre testes (`/e2e/reset-mission`), como ja faz com a equipe | formulario de criacao e de registro de prova; uma pessoa leiga de verdade olhando a tela |
 
+| OS-45 | Recusar o cookie sombra virava TRANCA: a recusa passou a APAGAR o cookie do vizinho, e a jornada voltou ao verde | Missao Engineering OS / T-32 12/09/2026 | v1.0 | STABLE | plugins/identity/src/cookies.ts (shadowCookieDeletions), plugins/identity/src/http.ts (singleSessionToken, authenticatedMutation, requiredSessionToken com resposta), plugins/integration-hub/src/http.ts, plugins/tenancy/src/http.ts, plugins/prompt-to-app/src/http.ts, plugins/mission/src/http.ts, plugins/studio-web/src/index.ts, apps/studio-web/tests/journey.spec.ts | plugins/identity/tests/http.spec.ts 84 testes (6 novos), 5 falsificacoes, e a jornada em NAVEGADOR REAL de volta ao verde (92 aprovados, 0 reprovados) | execucao: REGRESSAO MINHA, desta mesma sessao, encontrada pela jornada em navegador real. A OS-18 fechou um roubo de conta — o laco que tentava ate 64 cookies de mesmo nome e ficava com o primeiro que autenticasse deixava QUEM ESCREVE O CABECALHO escolher a sessao — recusando a ambiguidade. Recusar estava certo; PARAR AI estava errado. Na topologia local da ADR-012 o Studio e as previas sao subdominios irmaos em HTTP claro, e o aplicativo GERADO, que ninguem leu, grava `dz23_studio_session=shadow; Domain=dz23.localhost` de dentro da previa. A partir dai TODO pedido da dona do Studio trazia dois cookies, era recusado com 401, e ela nao tinha gesto nenhum de recuperacao: trocamos roubo de conta por tranca permanente, acionavel por qualquer aplicativo gerado. Agora a recusa vem ACOMPANHADA da remocao do cookie do vizinho. A remocao leva `Domain` e por isso casa SO o cookie de dominio — o host-only, que e o legitimo, nao e alcancado por ela —, o pedido seguinte tem um valor so e volta a funcionar sozinho. O atacante pode plantar de novo e paga outro pedido recusado; o que ele nao consegue e nem entrar na conta, nem manter a pessoa de fora. E UM COMENTARIO QUE AFIRMAVA ALGO FALSO FOI CORRIGIDO: `cookies.ts` dizia que 'nesse modo nao existe subdominio irmao de onde atacar'. Existe, e o navegador provou | A remocao e por DOMINIO-PAI, um por rotulo: um atacante em `a.b.c.d` e alcancado, um em dominio registravel diferente nao planta cookie nenhum ali de qualquer forma. Endereco numerico e IPv6 nao geram remocao, porque `Domain` numerico o navegador recusa. O FECHAMENTO DE VERDADE continua sendo servir previa em dominio registravel DIFERENTE do Studio, o que muda a topologia da ADR-012 e e decisao do Prado — enquanto for o mesmo dominio, o ataque custa um pedido recusado por tentativa | Prado decidir se a previa passa a ter dominio proprio; em HTTPS o `__Host-` ja fecha a gravacao e esta remocao vira rede de seguranca |
+
 <!-- O livro mestre REGISTRA achados, e o achado da OS-39 e sobre numeros de ADR
      que nomeiam mais de uma decisao: citacao-ambigua-proposital -->
 
@@ -253,17 +255,17 @@ declarada.
 
 | estado | quantos |
 | --- | --- |
-| `STABLE` | 61 |
+| `STABLE` | 62 |
 | `BETA` | 102 |
 | `NOT_PRESENT` | 33 |
 | `NOT_CONFIGURED` | 1 |
 | `NOT_EXECUTED` | 4 |
 | `FAILED` | 2 |
 
-**Total de requisitos rastreados: 203.**
+**Total de requisitos rastreados: 204.**
 
 | versao-alvo | quantos |
 | --- | --- |
-| v1.0 | 167 |
+| v1.0 | 168 |
 | v1.x | 33 |
 | v2 | 3 |

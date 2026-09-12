@@ -153,7 +153,7 @@ export function createStudioWebHandler(config: {
           // Identidade e escopo saem do cookie de sessão; o cliente não
           // contribui com usuário, organização nem inquilino.
           authenticate: async current => {
-            const session = await authenticatedMutation(current, config.identity)
+            const session = await authenticatedMutation(current, config.identity, response)
             return {
               userId: session.user_id, orgId: session.org_id,
               tenantId: session.tenant_id, sessionId: session.session_id,
@@ -166,7 +166,7 @@ export function createStudioWebHandler(config: {
       }
       if (pathname === ASSISTANT_SESSION_PATH) {
         if (request.method !== 'POST') return send(response, 405, t('http.methodNotAllowed'), frameSources)
-        const identitySession = await authenticatedMutation(request, config.identity)
+        const identitySession = await authenticatedMutation(request, config.identity, response)
         if (config.assistantSessions === undefined) {
           return sendJson(response, 503, { error: t('assistant.serviceNotConfigured') }, frameSources)
         }
@@ -174,7 +174,7 @@ export function createStudioWebHandler(config: {
         return sendJson(response, 200, launched, frameSources)
       }
       if (request.method !== 'GET' && request.method !== 'HEAD') return send(response, 405, t('http.methodNotAllowed'), frameSources)
-      await authenticatedMutation(request, config.identity)
+      await authenticatedMutation(request, config.identity, response)
       const root = await realpath(config.distDirectory)
       const requested = pathname === '/studio' || pathname === '/studio/' ? 'index.html' : decodeURIComponent(pathname.slice('/studio/'.length))
       const candidate = safeTarget(root, requested)

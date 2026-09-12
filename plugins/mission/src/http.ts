@@ -80,7 +80,7 @@ export function createMissionHttpHandler(config: MissionHttpConfig) {
       const path = new URL(request.url ?? '/', 'http://local').pathname
       const route = path.slice(PREFIX.length)
       const method = request.method ?? 'GET'
-      const session = await authenticatedMutation(request, config.identity)
+      const session = await authenticatedMutation(request, config.identity, response)
       const authorization = config.tenancy.authorizationFor(session.user_id, session.org_id, session.tenant_id)
       // Sem matrícula não há papel, e sem papel não há o que conferir. Recusar
       // aqui é o mesmo que o hub faz, e é o lado seguro: seguir sem papel

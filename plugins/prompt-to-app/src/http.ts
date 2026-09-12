@@ -160,7 +160,7 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
       // The core authenticates every extension request, but each extension owns
       // its exact suffix grammar. This prevents a second route list from drifting.
       const extension = matched === undefined ? /^\/projects\/([^/]+)(\/.+)$/u.exec(route) : null
-      const actor = await authenticatedActor(request, config)
+      const actor = await authenticatedActor(request, config, response)
       if (matched === undefined && extension === null) {
         // Uma rota que não é de projeto ainda pode pertencer a uma fatia de
         // espaço de trabalho. Ela é oferecida DEPOIS da autenticação, pelo mesmo
@@ -400,8 +400,8 @@ async function conversationFor(service: PromptToAppService, actor: PromptToAppAc
   }
 }
 
-async function authenticatedActor(request: IncomingMessage, config: PromptToAppHttpConfig): Promise<PromptToAppActor> {
-  const session = await authenticatedMutation(request, config.identity)
+async function authenticatedActor(request: IncomingMessage, config: PromptToAppHttpConfig, response: ServerResponse): Promise<PromptToAppActor> {
+  const session = await authenticatedMutation(request, config.identity, response)
   const authorization = config.tenancy.authorizationFor(session.user_id, session.org_id, session.tenant_id)
   if (authorization === undefined) throw new PromptToAppError('FORBIDDEN', t('errors.membershipRequired'))
   return { ...authorization, sessionId: session.session_id }

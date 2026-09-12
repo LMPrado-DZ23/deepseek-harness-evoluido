@@ -257,13 +257,27 @@ test('percorre as cinco etapas, muda privacidade e termina sem alegar publicaç�
   await expect(page.getByText('cliente@preview.local')).toBeVisible()
   await expect(page.getByText('482901')).toBeVisible()
 
+  // O COOKIE SOMBRA FOI EMBORA, e esta afirmação virou de lado de propósito.
+  //
+  // O aplicativo GERADO da prévia grava `dz23_studio_session=shadow;
+  // Domain=dz23.localhost` — está no HTML do protótipo de prova, e é o ataque
+  // real: prévia e Studio são subdomínios irmãos em HTTP claro.
+  //
+  // Este teste exigia que os DOIS cookies sobrevivessem, porque o servidor
+  // tolerava a ambiguidade tentando os candidatos um a um. Esse laço era metade
+  // de um roubo de conta e foi removido; recusar a ambiguidade, porém, trocou o
+  // roubo por uma TRANCA: a dona do Studio parava de conseguir ler qualquer
+  // coisa, e foi assim que esta linha ficou vermelha.
+  //
+  // Agora a recusa vem acompanhada da remoção do cookie do vizinho — que leva
+  // `Domain` e por isso não alcança o host-only legítimo. Sobra UM, e o pedido
+  // seguinte volta a funcionar sozinho: as duas linhas acima, que leem o código
+  // de verificação, são a prova de que voltou.
   const studioSessionCookies = (await context.cookies('http://studio.dz23.localhost:4179'))
     .filter(cookie => cookie.name === 'dz23_studio_session')
-  expect(studioSessionCookies).toEqual(expect.arrayContaining([
+  expect(studioSessionCookies).toEqual([
     expect.objectContaining({ value: 'e2e', domain: 'studio.dz23.localhost' }),
-    expect.objectContaining({ value: 'shadow', domain: '.dz23.localhost' }),
-  ]))
-  expect(studioSessionCookies).toHaveLength(2)
+  ])
 
   const frameUrl = await previewFrameElement.getAttribute('src').then(src => new URL(src!, page.url()))
   const loadedPreviewFrame = page.frames().find(frame => frame !== page.mainFrame() && frame.url().includes('.dz23.localhost:4179/'))
