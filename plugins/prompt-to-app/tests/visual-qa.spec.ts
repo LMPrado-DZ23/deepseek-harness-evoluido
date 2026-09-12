@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest'
 
 import {
   COLOR_COUNT_CEILING,
+  HOME_SCREENSHOT,
+  homeScreenVerdict,
   MIN_INK_COVERAGE,
   type RgbaImage,
   compareImages,
@@ -313,5 +315,39 @@ describe('entrada nao confiavel nao derruba o leitor', () => {
     expect(stats.distinctColors).toBeLessThanOrEqual(COLOR_COUNT_CEILING)
     // E uma imagem de uma cor so continua sendo uma cor so.
     expect(imageStats(image(4, 4, solid(4, 4, [1, 2, 3, 255]))).distinctColors).toBe(1)
+  })
+})
+
+describe('homeScreenVerdict — o elo com a execucao', () => {
+  const semLer = async () => undefined
+
+  it('captura AUSENTE nao e tela em branco', () => {
+    // Reprovar aqui seria reprovar a criacao por um defeito do observador.
+    return expect(homeScreenVerdict('/run', semLer)).resolves.toEqual({ state: 'NOT_OBSERVED', reason: 'ABSENT' })
+  })
+
+  it('captura ILEGIVEL diz POR QUE, e continua nao sendo tela em branco', async () => {
+    const verdict = await homeScreenVerdict('/run', async () => Buffer.from('nao sou uma imagem'))
+    expect(verdict).toEqual({ state: 'NOT_OBSERVED', reason: 'NOT_PNG' })
+  })
+
+  it('tela de uma cor so e EM BRANCO, com os problemas nomeados', async () => {
+    const branca = png(20, 20, solid(20, 20, [255, 255, 255, 255]))
+    const verdict = await homeScreenVerdict('/run', async () => branca)
+    expect(verdict).toMatchObject({ state: 'BLANK' })
+    if (verdict.state !== 'BLANK') return
+    expect(verdict.problems).toContain('BLANK')
+  })
+
+  it('tela com conteudo DESENHOU', async () => {
+    const pixels = [...solid(20, 20, [255, 255, 255, 255] as const)]
+    for (let i = 0; i < 80; i += 1) pixels[i] = [20, 20, 20, 255]
+    await expect(homeScreenVerdict('/run', async () => png(20, 20, pixels))).resolves.toEqual({ state: 'DREW' })
+  })
+
+  it('o caminho lido e o que a suite gerada escreve', async () => {
+    let pedido = ''
+    await homeScreenVerdict('/run', async path => { pedido = path; return undefined })
+    expect(pedido).toBe(`/run/${HOME_SCREENSHOT}`)
   })
 })

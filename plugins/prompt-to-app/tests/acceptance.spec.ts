@@ -170,3 +170,17 @@ describe('C-H3: a lista de conferências é legível por quem não programa', ()
     }
   })
 })
+
+describe('a suite gerada TIRA a foto da tela inicial', () => {
+  it('a captura esta na suite, e ela escreve onde o pipeline le', async () => {
+    // Sem esta linha na suite gerada, ninguem fotografa o aplicativo — e o
+    // motor de Visual QA fica sem imagem para analisar, que e exatamente a
+    // limitacao que a OS-68 declarou.
+    const directory = await mkdtemp(join(tmpdir(), 'dz23-acceptance-'))
+    await writeAcceptanceArtifacts(directory, spec)
+    const suite = await readFile(resolve(directory, 'tests', 'e2e', 'appspec.spec.ts'), 'utf8')
+    expect(suite).toContain('page.screenshot')
+    expect(suite).toContain('evidence/screenshot-home.png')
+    await rm(directory, { recursive: true, force: true })
+  })
+})

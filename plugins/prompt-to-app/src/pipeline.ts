@@ -1,5 +1,6 @@
 import { type AttemptOutcome, convergenceOf, repeatingReason, shouldStopEarly } from './convergence.js'
 import { blocksVerification, reviewMessage, reviewRun } from './independent-review.js'
+import { homeScreenVerdict } from './visual-qa.js'
 import { CROSS_RUN_FAILURE_WINDOW_DAYS, FailureMemory, seedCorrection } from './failure-memory.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { cp, lstat, mkdir, readFile, writeFile } from 'node:fs/promises'
@@ -483,6 +484,22 @@ export class PromptToAppPipeline {
         throw new BuilderLifecycleError('BLOCKED_EXTERNAL', 'FINISH_INCONCLUSIVE')
       }
       const verifiedAcceptanceChecks = await readAcceptanceChecks(runDirectory, expectedAcceptanceChecks)
+      // O VISUAL QA (T-18). A suite gerada tirou uma foto da tela inicial dentro
+      // do ambiente isolado; aqui alguem finalmente OLHA para ela.
+      //
+      // So `BLANK` reprova, e so ele: uma tela de uma cor so, ou praticamente
+      // vazia, e o unico defeito que a ausencia de conteudo tem de
+      // inconfundivel. NAO OBSERVADO — foto ausente, ilegivel ou num formato
+      // que o leitor nao conhece — nao reprova nada: reprovar ali seria reprovar
+      // a criacao por um defeito do observador, e e o mesmo principio do arquivo
+      // ilegivel da OS-57.
+      const screen = await homeScreenVerdict(runDirectory, async path => {
+        try { return await readFile(path) } catch { return undefined }
+      })
+      if (screen.state === 'BLANK' && diagnostic === undefined) {
+        diagnostic = `BLANK_SCREEN:${screen.problems.join(',')}`
+        failedStage = 'test'
+      }
       // O resultado desta conferência era CALCULADO e jogado fora quando batia:
       // o registro guardava só a reprovação. Sem gravar a aprovação também, não
       // dava para afirmar depois que a tentativa era um ponto seguro (E-08) -

@@ -131,8 +131,26 @@ function extractLiteral(criterion: string): string | undefined { const match=/["
 function generatedPlaywright(checks: readonly AcceptanceCheck[]): string {
   const authRequired = checks.some(check => check.kind === 'auth' || check.kind === 'crud' || check.flow?.submit_requires_auth === true || check.flow?.list_requires_auth === true)
   const tests = checks.filter(check => check.status === 'PENDING').map(check => renderCheck(check, authRequired)).join('\n')
-  return `import { expect, test } from '@playwright/test'\nimport { readFile, writeFile } from 'node:fs/promises'\nimport { resolve } from 'node:path'\nconst reportPath=resolve(process.cwd(),'evidence/appspec-report.json')\nasync function record(id:string,status:'PASSED'|'FAILED'){const report=JSON.parse(await readFile(reportPath,'utf8'));report.checks=report.checks.map((check:{id:string})=>check.id===id?{...check,status}:check);await writeFile(reportPath,JSON.stringify(report,null,2)+'\\n')}\nasync function checked(id:string,assertion:()=>Promise<void>){try{await assertion();await record(id,'PASSED')}catch(error){await record(id,'FAILED');throw error}}\n${authRequired ? LOGIN_HELPER : ''}\n${tests}\n`
+  return `import { expect, test } from '@playwright/test'\nimport { readFile, writeFile } from 'node:fs/promises'\nimport { resolve } from 'node:path'\nconst reportPath=resolve(process.cwd(),'evidence/appspec-report.json')\nasync function record(id:string,status:'PASSED'|'FAILED'){const report=JSON.parse(await readFile(reportPath,'utf8'));report.checks=report.checks.map((check:{id:string})=>check.id===id?{...check,status}:check);await writeFile(reportPath,JSON.stringify(report,null,2)+'\\n')}\nasync function checked(id:string,assertion:()=>Promise<void>){try{await assertion();await record(id,'PASSED')}catch(error){await record(id,'FAILED');throw error}}\n${authRequired ? LOGIN_HELPER : ''}\n${SCREENSHOT_TEST}\n${tests}\n`
 }
+
+/**
+ * A CAPTURA da tela inicial, tirada dentro do ambiente isolado.
+ *
+ * Ela e o unico jeito de alguem olhar para o que a PESSOA ve: todo o resto do
+ * pipeline olha para o que o computador conseguiu executar, e o defeito mais
+ * constrangedor deste produto e a compilacao passar, os testes passarem, e a
+ * pagina abrir BRANCA.
+ *
+ * Ela NAO afirma nada e NAO reprova nada: e so uma foto. Quem julga e o
+ * `visual-qa`, depois, e ele so sabe dizer aquilo que a ausencia de conteudo
+ * tem de inconfundivel.
+ *
+ * `fullPage: false` de proposito: o que importa e o que abre, e uma captura de
+ * pagina inteira de um aplicativo longo viraria uma imagem enorme para
+ * responder a pergunta "desenhou alguma coisa?".
+ */
+const SCREENSHOT_TEST = `test('captura da tela inicial',async({page})=>{await page.goto('/');await page.screenshot({path:resolve(process.cwd(),'evidence/screenshot-home.png'),fullPage:false})})`
 
 const LOGIN_HELPER = `const authStatePath=resolve(process.cwd(),'data/studio-auth-state.json')
 async function captured(){try{return JSON.parse(await readFile(resolve(process.cwd(),'data/studio-capture.json'),'utf8')) as Array<{kind:string;email:string;code?:string}>}catch{return []}}

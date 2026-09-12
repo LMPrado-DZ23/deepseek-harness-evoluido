@@ -294,3 +294,39 @@ export function compareImages(before: RgbaImage, after: RgbaImage): VisualCompar
   }
   return different === 0 ? { state: 'IDENTICAL' } : { state: 'CHANGED', differentFraction: different / total }
 }
+
+/** Onde a suite gerada deixa a captura da tela inicial. */
+export const HOME_SCREENSHOT = 'evidence/screenshot-home.png'
+
+export type ScreenVerdict =
+  /** A tela desenhou alguma coisa. */
+  | { readonly state: 'DREW' }
+  /** A tela abriu praticamente vazia. */
+  | { readonly state: 'BLANK'; readonly problems: readonly VisualProblem[] }
+  /**
+   * NAO FOI POSSIVEL OLHAR.
+   *
+   * Captura ausente, ilegivel ou num formato que o leitor nao conhece. Ela e
+   * uma resposta propria e nunca colapsa em `BLANK`: uma foto que ninguem
+   * conseguiu revelar nao e uma foto de uma tela vazia, e reprovar uma criacao
+   * por isso seria reprova-la por um defeito do observador.
+   */
+  | { readonly state: 'NOT_OBSERVED'; readonly reason: PngUnsupported | 'ABSENT' }
+
+/**
+ * O veredito sobre a captura da tela inicial.
+ *
+ * `read` devolve `undefined` quando o arquivo nao existe — e isso e diferente
+ * de ele existir e nao ser legivel, tanto que os dois motivos saem nomeados.
+ */
+export async function homeScreenVerdict(
+  runDirectory: string,
+  read: (path: string) => Promise<Buffer | undefined>,
+): Promise<ScreenVerdict> {
+  const buffer = await read(`${runDirectory}/${HOME_SCREENSHOT}`)
+  if (buffer === undefined) return { state: 'NOT_OBSERVED', reason: 'ABSENT' }
+  const decoded = decodePng(buffer)
+  if (!decoded.ok) return { state: 'NOT_OBSERVED', reason: decoded.reason }
+  const problems = visualProblems(imageStats(decoded.image))
+  return problems.length === 0 ? { state: 'DREW' } : { state: 'BLANK', problems }
+}

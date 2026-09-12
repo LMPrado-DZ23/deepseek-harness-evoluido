@@ -1,3 +1,5 @@
+import { deflateSync } from 'node:zlib'
+
 import { lstat, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -51,6 +53,35 @@ function varying<T extends CodeGenerationResult>(base: T = cleanGeneration as un
         : { ...file, content: `${file.content}\n// tentativa ${call}` }),
     }
   })
+}
+
+/**
+ * Um PNG REAL, montado aqui, para o teste exercitar o leitor de verdade.
+ *
+ * Uma foto falsificada por duble provaria que o duble sabe devolver bytes.
+ * `tinta` diz quantos pixels sao escuros: zero e uma tela de uma cor so.
+ */
+function pngSolido(width: number, height: number, fundo: readonly [number, number, number, number], tinta = 0): Buffer {
+  const raw = Buffer.alloc(height * (width * 4 + 1))
+  for (let y = 0; y < height; y += 1) {
+    raw[y * (width * 4 + 1)] = 0
+    for (let x = 0; x < width; x += 1) {
+      const at = y * (width * 4 + 1) + 1 + x * 4
+      const escuro = y * width + x < tinta
+      raw[at] = escuro ? 20 : fundo[0]; raw[at + 1] = escuro ? 20 : fundo[1]
+      raw[at + 2] = escuro ? 20 : fundo[2]; raw[at + 3] = fundo[3]
+    }
+  }
+  const header = Buffer.alloc(13)
+  header.writeUInt32BE(width, 0); header.writeUInt32BE(height, 4); header[8] = 8; header[9] = 6
+  const chunk = (type: string, data: Buffer) => {
+    const length = Buffer.alloc(4); length.writeUInt32BE(data.length)
+    return Buffer.concat([length, Buffer.from(type, 'ascii'), data, Buffer.alloc(4)])
+  }
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', header), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0)),
+  ])
 }
 
 const roots: string[] = []
@@ -197,6 +228,61 @@ describe('Prompt-to-App pipeline', () => {
 
     expect(result.state).not.toBe('VERIFIED_PROTOTYPE')
     expect(f.transitions).not.toContain('VERIFIED_PROTOTYPE')
+  })
+
+  /**
+   * T-18 — a tela que abre EM BRANCO. Contra o pipeline, e nao contra a funcao
+   * pura: e a fiacao que decide se alguem olha para a foto.
+   */
+  it('uma criação que compila, testa e abre EM BRANCO NÃO é protótipo verificado', async () => {
+    // Este e o defeito mais constrangedor do produto: tudo verde, e a pagina
+    // branca. Todo o resto do pipeline olha para o que o computador executou.
+    const branca = pngSolido(40, 40, [255, 255, 255, 255])
+    const f = await fixture({
+      execute: async (directory, command) => {
+        if (command === 'pnpm run test') {
+          const path = resolve(directory, 'evidence', 'appspec-report.json')
+          const report = JSON.parse(await readFile(path, 'utf8')) as { checks: { status: string }[] }
+          for (const check of report.checks) if (check.status === 'PENDING') check.status = 'PASSED'
+          await writeFile(path, JSON.stringify(report), 'utf8')
+          await writeFile(resolve(directory, 'evidence', 'screenshot-home.png'), branca)
+        }
+        return { exitCode: 0, stdout: 'ok', stderr: '', timedOut: false }
+      },
+      finish: attestingFinish,
+    })
+    const result = await f.pipeline.run(actor, 'project', { generate: varying() })
+
+    expect(result.state).not.toBe('VERIFIED_PROTOTYPE')
+    expect(f.transitions).not.toContain('VERIFIED_PROTOTYPE')
+    expect(result.message).toContain('BLANK_SCREEN')
+  })
+
+  it('captura AUSENTE não reprova: reprovar seria reprovar por defeito do observador', async () => {
+    // A suite gerada pode nao ter tirado a foto — template antigo, passo que
+    // nao chegou a rodar. Isso nao e uma tela em branco.
+    const f = await fixture({ execute: reportingExecute('PASSED'), finish: attestingFinish })
+    const result = await f.pipeline.run(actor, 'project', { generate: vi.fn(async () => cleanGeneration) })
+    expect(result.state).toBe('VERIFIED_PROTOTYPE')
+  })
+
+  it('uma tela COM conteúdo passa', async () => {
+    const comConteudo = pngSolido(40, 40, [255, 255, 255, 255], 400)
+    const f = await fixture({
+      execute: async (directory, command) => {
+        if (command === 'pnpm run test') {
+          const path = resolve(directory, 'evidence', 'appspec-report.json')
+          const report = JSON.parse(await readFile(path, 'utf8')) as { checks: { status: string }[] }
+          for (const check of report.checks) if (check.status === 'PENDING') check.status = 'PASSED'
+          await writeFile(path, JSON.stringify(report), 'utf8')
+          await writeFile(resolve(directory, 'evidence', 'screenshot-home.png'), comConteudo)
+        }
+        return { exitCode: 0, stdout: 'ok', stderr: '', timedOut: false }
+      },
+      finish: attestingFinish,
+    })
+    await expect(f.pipeline.run(actor, 'project', { generate: vi.fn(async () => cleanGeneration) }))
+      .resolves.toMatchObject({ state: 'VERIFIED_PROTOTYPE' })
   })
 
   it('registro que sumiu entre gravar e ler NÃO é aprovação', async () => {
