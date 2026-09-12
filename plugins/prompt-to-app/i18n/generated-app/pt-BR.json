@@ -127,7 +127,8 @@
     "failure": "Não foi possível enviar o código agora. Tente novamente."
   },
   "validation": {
-    "requireOneField": "Informe ao menos um campo para atualizar."
+    "requireOneField": "Informe ao menos um campo para atualizar.",
+    "publicFormBusy": "Este formulário recebeu muitos envios nos últimos minutos e está pausado por pouco tempo. Tente de novo em instantes."
   },
   "fixture": {
     "updatedValue": "Valor atualizado",

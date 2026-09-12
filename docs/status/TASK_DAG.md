@@ -34,7 +34,8 @@ separa este trabalho de acrescentar features.
 | T-27 | P0 | Revisão adversarial do portão de prévia (superfície mais exposta) e correção dos achados | — | DONE (A, C, D, F, G corrigidos e falsificados; B e E abertos por decisão registrada em OS-14) |
 | T-28 | P3 | Superfície que leia a trilha de política e mostre a cadeia equipe → tarefa → execução → ferramenta | T-06 | PENDING |
 | T-29 | P0 | Revisão adversarial de identidade/sessão, staging/integration-hub e do APLICATIVO GERADO, e correção dos achados | — | RUNNING (identidade 2/8, app gerado 3/8, staging+hub 0/12 — os abertos estão nomeados em OS-20 e no relatório) |
-| T-30 | P1 | Formulário público do app gerado sem limite de taxa: qualquer pessoa enche o banco do dono | T-29 | READY |
+| T-30 | P1 | Formulário público do app gerado sem limite de taxa: qualquer pessoa enche o banco do dono | T-29 | DONE |
+| T-31 | P2 | Ligar a conferência de ORIGEM do armazenamento de template (assinatura do manifesto) | — | BLOCKED (EB-08: custódia de chave, decisão do Prado) |
 | T-26 | P2 | As outras seis memórias (episódica, semântica, procedimental, decisão, avaliação, trabalho) | T-08 | READY |
 | T-25 | P2 | Intake e etapa nova no mesmo motor de contexto | T-07 | DONE |
 | T-09 | P2 | Spec Engine: constitution → specify → clarify → plan → tasks → implement → validate → converge | T-08 | PENDING |

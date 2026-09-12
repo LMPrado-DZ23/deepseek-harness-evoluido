@@ -15,15 +15,26 @@ export interface EmergencyActor {
 
 export class EmergencyStopError extends Error {
   constructor(
-    readonly code: 'STOPPED' | 'FORBIDDEN' | 'STRONG_IDENTITY_REQUIRED' | 'REASON_REQUIRED' | 'INVALID',
+    readonly code: 'STOPPED' | 'FORBIDDEN' | 'STRONG_IDENTITY_REQUIRED' | 'REASON_REQUIRED' | 'INVALID' | 'STOP_CHANGED',
     message: string,
   ) { super(message) }
 }
 
 export interface EmergencyStopRepository {
   stops(): readonly EmergencyStopRecord[]
-  putStop(record: EmergencyStopRecord): Promise<void>
+  /**
+   * Grava o estado da parada.
+   *
+   * `expectedUpdatedAt` e a versao que quem escreve LEU: `null` quando nao
+   * havia registro nenhum. Escrita sem ele sobrescreve, e e assim que uma
+   * retomada apaga uma parada que ela nunca viu.
+   * @param record - o estado novo.
+   * @param expectedUpdatedAt - o `updated_at` lido antes de decidir.
+   */
+  putStop(record: EmergencyStopRecord, expectedUpdatedAt: string | null): Promise<void>
 }
+
+
 
 /** Identidade forte lida do SERVIDOR, pela sessão que ele mesmo autenticou - nunca do que o cliente afirma. */
 export interface StrongIdentityPort {
@@ -161,7 +172,7 @@ export class StudioEmergencyStopService {
       reason: alreadyStopped ? existing.reason : trimmed,
       released_by: null, released_at: null, release_reason: null,
       updated_at: now,
-    })
+    }, existing?.updated_at ?? null)
     // A gravação vem ANTES do cancelamento, e a ordem é a garantia: se o
     // processo morrer no meio da varredura, o Studio volta parado. Cancelar
     // primeiro e gravar depois deixaria a janela em que tudo foi interrompido
@@ -194,11 +205,20 @@ export class StudioEmergencyStopService {
       throw new EmergencyStopError('REASON_REQUIRED', t('errors.releaseReasonRequired', { min: MIN_RELEASE_REASON_LENGTH }))
     }
     const now = this.#now().toISOString()
+    // Condicionada ao que foi LIDO no comeco desta retomada.
+    //
+    // Sem isso: Alice aperta o botao pelo incidente A; Bob comeca a retomar e
+    // le esse estado; Carol aperta o botao de novo pelo incidente B; a escrita
+    // de Bob completa com o retrato ANTIGO. O escopo volta a rodar, e a
+    // autoria de Carol e sobrescrita pela de Alice — Bob autorizou religar o
+    // incidente A e religou o B, e a auditoria mente sobre quem parou. Botao de
+    // emergencia e o ultimo lugar do produto onde uma escrita pode apagar um
+    // estado que ela nunca viu.
     await this.options.repository.putStop({
       ...existing, stopped: false,
       released_by: actor.userId, released_at: now, release_reason: written,
       updated_at: now,
-    })
+    }, existing.updated_at)
     return this.state(scope)
   }
 

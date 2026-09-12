@@ -175,7 +175,16 @@ function updateExpression(field: PreparedField): string {
   return `${next} === undefined ? ${current} : ${next}`
 }
 function decodeExpression(field: PreparedField, expression: string): string { return field.type === 'boolean' ? `${expression} === null ? null : ${expression} === 1` : expression }
-function quoteId(value: string): string { return `"${value.replaceAll('"', '""')}"` }
+/**
+ * Um identificador SQL entre aspas, com aspa interna duplicada.
+ *
+ * Exportado porque o gerador de formulário precisa contar linhas na tabela da
+ * entidade para o teto do formulário público, e redigitar a regra de aspas ali
+ * criaria uma segunda verdade — livre para divergir desta no primeiro conserto.
+ * @param value - o identificador já normalizado por `dataIdentifier`.
+ * @returns o identificador citado.
+ */
+export function quoteId(value: string): string { return `"${value.replaceAll('"', '""')}"` }
 function sqlString(value: string): string { return `'${value.replaceAll("'", "''")}'` }
 function comparable(value: string): string { return value.normalize('NFKC').trim().toLocaleLowerCase('pt-BR') }
 export function dataIdentifier(value: string): string {

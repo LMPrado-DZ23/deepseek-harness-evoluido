@@ -9,7 +9,7 @@ import {
   type EmergencyStopKey,
   type EmergencyStopRecord,
 } from './model.js'
-import {
+import { EmergencyStopError,
   StudioEmergencyStopService,
   type EmergencyScope,
   type EmergencyStopRepository,
@@ -43,10 +43,31 @@ declare module '@deepseek-ai/cordis' {
   interface Context { studioEmergencyStop: StudioEmergencyStopRuntime }
 }
 
-class DomainEmergencyStopRepository implements EmergencyStopRepository {
+/**
+ * O armazenamento de verdade da parada.
+ *
+ * Exportado para que a escrita CONDICIONADA possa ser provada contra ESTA
+ * implementação, e não contra um dublê. A falsificação que motivou o export foi
+ * clara: com os testes do serviço usando um repositório de memória próprio,
+ * remover a condição daqui não quebrava teste nenhum — a produção ficava
+ * descoberta atrás de uma prova que parecia cobri-la.
+ */
+export class DomainEmergencyStopRepository implements EmergencyStopRepository {
   constructor(private readonly table: KvTable<EmergencyStopKey, EmergencyStopRecord>) {}
   stops(): readonly EmergencyStopRecord[] { return [...this.table.entries()].map(([, value]) => value) }
-  putStop(record: EmergencyStopRecord): Promise<void> { return this.table.put(record.scope_id as EmergencyStopKey, record) }
+  async putStop(record: EmergencyStopRecord, expectedUpdatedAt: string | null): Promise<void> {
+    // Leitura e escrita em duas idas ao armazenamento. Isto fecha a corrida
+    // DENTRO do processo, que e onde o botao vive (uma tela, um Studio). Duas
+    // instancias do Studio escrevendo o mesmo escopo no mesmo instante ainda
+    // podem se intercalar — esta limitacao esta registrada, nao escondida, e e
+    // a mesma que o `action-approval` declara na escrita condicionada dele.
+    const current = this.table.get(record.scope_id as EmergencyStopKey)
+    const seen = current?.updated_at ?? null
+    if (seen !== expectedUpdatedAt) {
+      throw new EmergencyStopError('STOP_CHANGED', t('errors.stopChanged'))
+    }
+    await this.table.put(record.scope_id as EmergencyStopKey, record)
+  }
 }
 
 /**

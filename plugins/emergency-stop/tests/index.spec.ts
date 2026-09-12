@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
-import { apply, emergencyStopSurfaces, inject, type StudioEmergencyStopRuntime } from '../src/index.ts'
+import { DomainEmergencyStopRepository, apply, emergencyStopSurfaces, inject, type StudioEmergencyStopRuntime } from '../src/index.ts'
 import type { Context } from '@deepseek-ai/cordis'
 
 function table() {
   const records = new Map<string, unknown>()
   return {
+    get: (key: string) => records.get(key),
     entries: () => records.entries(),
     put: (key: string, value: unknown) => { records.set(key, value); return Promise.resolve() },
   }
@@ -72,5 +73,40 @@ describe('as partes interrompidas pelo botão', () => {
     // Uma chamada que já saiu para o provedor NUNCA é contada como cancelada.
     expect(integrations?.cancelled).toBe(0)
     expect(integrations?.unproven.map(item => item.what)).toEqual(['int-1', 'int-2'])
+  })
+})
+
+describe('ACHADO: o armazenamento REAL recusa escrita pinada em versão velha', () => {
+  it('o repositório de produção confere a versão, e não só o dublê do teste', async () => {
+    // Esta prova existe porque a falsificação anterior NÃO reprovou: os testes
+    // do serviço usam um repositório de memória PRÓPRIO, então remover a
+    // condição do repositório de VERDADE não quebrava nada. Um teste que cobre
+    // o dublê e deixa a produção descoberta é pior que nenhum, porque ocupa o
+    // lugar do que faria falta.
+    const stops = table()
+    const repository = new DomainEmergencyStopRepository(stops as never)
+    const registro = {
+      scope_id: 'org-a:tenant-a', org_id: 'org-a', tenant_id: 'tenant-a', stopped: true,
+      engaged_by: 'u-1', engaged_at: '2026-09-08T12:00:00.000Z', reason: 'incidente A',
+      released_by: null, released_at: null, release_reason: null,
+      updated_at: '2026-09-08T12:00:00.000Z',
+    }
+    // Primeira escrita: não havia registro, e a versão esperada é `null`.
+    await repository.putStop(registro, null)
+    expect(repository.stops()).toHaveLength(1)
+
+    // Outro processo apertou o botão: a versão gravada mudou.
+    await repository.putStop({ ...registro, reason: 'incidente B', updated_at: '2026-09-08T13:00:00.000Z' }, registro.updated_at)
+
+    // A escrita que ainda carrega a versão VELHA é recusada.
+    await expect(repository.putStop({ ...registro, stopped: false }, registro.updated_at))
+      .rejects.toMatchObject({ code: 'STOP_CHANGED' })
+    expect(repository.stops()[0]).toMatchObject({ stopped: true, reason: 'incidente B' })
+
+    // E a escrita com a versão CERTA passa: a condição não pode travar tudo.
+    await expect(repository.putStop(
+      { ...registro, stopped: false, updated_at: '2026-09-08T14:00:00.000Z' },
+      '2026-09-08T13:00:00.000Z',
+    )).resolves.toBeUndefined()
   })
 })

@@ -9,7 +9,8 @@
     "jsonRequired": "Envie os dados em JSON.",
     "requestTooLarge": "O pedido é grande demais.",
     "routeNotFound": "Endereço não encontrado.",
-    "operationFailed": "Não foi possível concluir a operação."
+    "operationFailed": "Não foi possível concluir a operação.",
+    "stopChanged": "A parada mudou enquanto você decidia. Veja o estado atual antes de retomar — você pode estar religando um incidente diferente do que leu."
   },
   "surfaces": {
     "promptToApp": "Criações de aplicativo em andamento",

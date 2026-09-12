@@ -2,7 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import type { AppSpecV1 } from './appspec.js'
 import { requiresFormSubmissionAuth } from './auth-generator.js'
-import { dataIdentifier } from './data-generator.js'
+import { dataIdentifier, quoteId } from './data-generator.js'
 import { tGeneratedApp } from './generated-i18n.js'
 import type { GeneratedFile } from './generator.js'
 import type { StudioProjectCategory } from './model.js'
@@ -42,6 +42,7 @@ export async function writeFormLayer(root: string, layer: GeneratedFormLayer): P
 }
 
 function renderAction(entity: DatabaseEntity, entities: readonly DatabaseEntity[], slug: string, symbol: string, authRequired: boolean): string {
+  const table = `entity_${slug}`
   const values = entity.fields.map(field => `    ${JSON.stringify(dataIdentifier(field.name))}: ${formValue(field)},`).join('\n')
   const authImport = authRequired ? "import { requireFormSession } from '../../auth/runtime'\n" : ''
   const guard = authRequired ? '  await requireFormSession(formData)\n' : ''
@@ -51,7 +52,27 @@ function renderAction(entity: DatabaseEntity, entities: readonly DatabaseEntity[
     const required = field.required ? `  if (${referenceVariable(field)} === '') throw new Error(${JSON.stringify(tGeneratedApp('reference.required'))})\n` : ''
     return `  const ${referenceVariable(field)} = text(formData, ${JSON.stringify(name)})\n${required}  if (${referenceVariable(field)} !== '' && new ${pascal(dataIdentifier(target.name))}Repository(database).get(${referenceVariable(field)}) === undefined) throw new Error(${JSON.stringify(tGeneratedApp('reference.invalid'))})`
   }).join('\n')
-  return `'use server'\n\nimport { revalidatePath } from 'next/cache'\n${authImport}import { openDatabase } from '../../db/client'\n${repositoryImports(entity, entities)}\n\nfunction text(formData: FormData, name: string): string {\n  const value = formData.get(name)\n  return typeof value === 'string' ? value.trim() : ''\n}\n\nexport async function create${symbol}(formData: FormData): Promise<void> {\n${guard}  const database = openDatabase()\n  try {\n${referenceSetup === '' ? '' : `${referenceSetup}\n`}    new ${symbol}Repository(database).create({\n${values}\n    })\n  } finally {\n    database.close()\n  }\n  revalidatePath('/')\n}\n`
+  // Teto de envios do formulário PÚBLICO, e ele só existe no caminho anônimo.
+  //
+  // Sem login não há nada que segure quem envia: qualquer pessoa na internet
+  // faz POST na Server Action sem cookie nenhum e insere linhas até o disco do
+  // dono acabar. Nenhuma cota do formulário falava de VOLUME — só de tamanho
+  // por campo.
+  //
+  // A contagem é GLOBAL, e não por endereço, de propósito: atrás de proxy o
+  // endereço que chega é o do proxy, e um teto baseado numa chave que o
+  // atacante controla não é teto. Um teto global tem o custo de um atacante
+  // conseguir atrasar envios legítimos durante a janela — e essa é a troca
+  // certa, porque disco cheio mata o aplicativo para sempre e a janela passa
+  // sozinha.
+  //
+  // A janela é contada na PRÓPRIA tabela, por `created_at`, que toda tabela
+  // gerada já tem: uma tabela nova de registro seria mais um lugar para
+  // divergir do que ela deveria estar contando.
+  const throttle = authRequired ? '' : `const PUBLIC_WINDOW_MS = 10 * 60 * 1000\nconst PUBLIC_WINDOW_LIMIT = 60\n\nfunction assertPublicFormOpen(database: DatabaseSync): void {\n  const since = new Date(Date.now() - PUBLIC_WINDOW_MS).toISOString()\n  const row = database.prepare(${JSON.stringify(`SELECT count(*) AS total FROM ${quoteId(table)} WHERE "created_at" > ?`)}).get(since) as { total?: unknown } | undefined\n  if (Number(row?.total ?? 0) >= PUBLIC_WINDOW_LIMIT) throw new Error(${JSON.stringify(tGeneratedApp('validation.publicFormBusy'))})\n}\n\n`
+  const throttleImport = authRequired ? '' : "import type { DatabaseSync } from 'node:sqlite'\n"
+  const throttleCall = authRequired ? '' : '    assertPublicFormOpen(database)\n'
+  return `'use server'\n\nimport { revalidatePath } from 'next/cache'\n${throttleImport}${authImport}import { openDatabase } from '../../db/client'\n${repositoryImports(entity, entities)}\n\nfunction text(formData: FormData, name: string): string {\n  const value = formData.get(name)\n  return typeof value === 'string' ? value.trim() : ''\n}\n\n${throttle}export async function create${symbol}(formData: FormData): Promise<void> {\n${guard}  const database = openDatabase()\n  try {\n${throttleCall}${referenceSetup === '' ? '' : `${referenceSetup}\n`}    new ${symbol}Repository(database).create({\n${values}\n    })\n  } finally {\n    database.close()\n  }\n  revalidatePath('/')\n}\n`
 }
 
 function formValue(field: DatabaseField): string {

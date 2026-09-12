@@ -16,8 +16,18 @@ import {
  */
 class MemoryRepository implements EmergencyStopRepository {
   readonly rows = new Map<string, EmergencyStopRecord>()
+  /** A versão que cada escrita declarou ter lido. */
+  readonly pinned: (string | null)[] = []
   stops() { return [...this.rows.values()] }
-  putStop(record: EmergencyStopRecord) { this.rows.set(record.scope_id, record); return Promise.resolve() }
+  putStop(record: EmergencyStopRecord, expectedUpdatedAt: string | null) {
+    this.pinned.push(expectedUpdatedAt)
+    const current = this.rows.get(record.scope_id)
+    if ((current?.updated_at ?? null) !== expectedUpdatedAt) {
+      return Promise.reject(new EmergencyStopError('STOP_CHANGED', 'a parada mudou'))
+    }
+    this.rows.set(record.scope_id, record)
+    return Promise.resolve()
+  }
 }
 
 const owner: EmergencyActor = { userId: 'u-1', orgId: 'org-a', tenantId: 'tenant-a', role: 'owner', sessionId: 's-1' }
@@ -211,5 +221,67 @@ describe('E-11: parar cancela o que já está rodando', () => {
     })
     await h.service.engage(owner)
     expect(repository.rows.get('org-a:tenant-a')?.stopped).toBe(true)
+  })
+})
+
+describe('ACHADO: escrita da parada é pinada à versão que ela leu', () => {
+  it('a escrita carrega o `updated_at` LIDO, e uma versão velha é RECUSADA', async () => {
+    // Correção de escopo do achado, e ela importa: dentro de um processo NÃO
+    // existe janela — `release` lê e escreve sem nenhum `await` no meio, e
+    // JavaScript não interrompe isso. O relatório adversarial descreveu a
+    // corrida como se existisse aí; não existe.
+    //
+    // Onde ela existe é ENTRE PROCESSOS, e essa configuração é suportada
+    // (`capacityMode: 'team' | 'edge'`). Aí o cenário é real: Alice para pelo
+    // incidente A; o Studio B lê esse estado; Carol, no Studio A, para de novo
+    // pelo incidente B; a escrita do Studio B completa com o retrato ANTIGO —
+    // o escopo volta a rodar e a autoria de Carol some. Bob autorizou religar
+    // o A e religou o B, e a auditoria passa a mentir sobre quem parou.
+    //
+    // A defesa é a escrita PINADA: ela leva a versão que quem decidiu leu.
+    const repository = new MemoryRepository()
+    const h = service({ repository })
+    await h.service.engage(owner, 'incidente A')
+    const lidoPeloOutroProcesso = repository.rows.get('org-a:tenant-a')!
+
+    // O outro processo aperta o botão de novo: a versão muda.
+    const outro = new StudioEmergencyStopService({
+      repository,
+      identity: { strongIdentityVerified: () => true },
+      now: () => new Date('2026-09-08T13:00:00.000Z'),
+    })
+    await outro.engage({ ...owner, userId: 'u-carol', sessionId: 's-carol' }, 'incidente B')
+    expect(repository.rows.get('org-a:tenant-a')!.updated_at).not.toBe(lidoPeloOutroProcesso.updated_at)
+
+    // A escrita que ainda carrega a versão velha é recusada — e é ESTA a
+    // escrita que o processo atrasado faria.
+    await expect(repository.putStop(
+      { ...lidoPeloOutroProcesso, stopped: false, released_by: 'u-bob', updated_at: '2026-09-08T13:30:00.000Z' },
+      lidoPeloOutroProcesso.updated_at,
+    )).rejects.toMatchObject({ code: 'STOP_CHANGED' })
+
+    // E o escopo continua PARADO, com o motivo de quem parou primeiro
+    // preservado — `engage` não reescreve autoria.
+    expect(() => h.service.assertRunning({ orgId: 'org-a', tenantId: 'tenant-a' })).toThrow(EmergencyStopError)
+    expect(repository.rows.get('org-a:tenant-a')).toMatchObject({ stopped: true, reason: 'incidente A' })
+  })
+
+  it('`release` passa a versão que leu, e não `null`', async () => {
+    // `null` significaria "não havia registro", e o armazenamento aceitaria a
+    // escrita por cima de qualquer coisa — a condição viraria enfeite.
+    const repository = new MemoryRepository()
+    const h = service({ repository })
+    await h.service.engage(owner, 'incidente')
+    repository.pinned.length = 0
+    await h.service.release(owner, 'conferi com a equipe, pode voltar')
+    expect(repository.pinned).toEqual([repository.rows.get('org-a:tenant-a')!.engaged_at])
+  })
+
+  it('a retomada normal, sem ninguém no meio, continua funcionando', async () => {
+    // Uma trava que trava tudo não é uma trava, é um produto quebrado.
+    const h = service()
+    await h.service.engage(owner, 'incidente')
+    await expect(h.service.release(owner, 'conferi com a equipe, pode voltar')).resolves.toMatchObject({ stopped: false })
+    expect(() => h.service.assertRunning({ orgId: 'org-a', tenantId: 'tenant-a' })).not.toThrow()
   })
 })

@@ -74,3 +74,64 @@ describe('deterministic form and list layer', () => {
     expect(taskManager).toContain('contatoOptions.map')
   })
 })
+
+describe('T-30: formulário PÚBLICO tem teto de volume', () => {
+  const publico: AppSpecV1 = {
+    schema_version: 1, problem: 'Receber contatos do site.', audience: 'Público',
+    journeys: ['Enviar contato'], pages: [{ name: 'Contato', sections: ['Formulário'] }],
+    entities: [{ name: 'Contato', kind: 'database', sensitive: false, fields: [
+      { name: 'Nome', type: 'text', required: true },
+      { name: 'E-mail', type: 'email', required: true },
+    ] }],
+    sensitive_data: { detected: [], confirmed_by_user: false },
+    accessibility: { wcag_level: 'AA', keyboard_required: true, reduced_motion: true },
+    language: 'pt-BR', acceptance_criteria: ['Recebe contatos.'],
+  }
+  const comLogin: AppSpecV1 = { ...publico, sensitive_data: { detected: ['cpf'], confirmed_by_user: true } }
+  const acao = (spec: AppSpecV1): string =>
+    generateFormLayer(spec, 'form-database').files.find(file => file.path.includes('server/actions'))!.content
+
+  it('sem login, o envio passa por um teto por janela ANTES de gravar', () => {
+    // Um formulário de contato com nome, e-mail e telefone não dispara
+    // `requiresFormSubmissionAuth`, e então a Server Action aceitava POST de
+    // qualquer pessoa na internet, sem cookie, sem limite. Nenhuma cota falava
+    // de VOLUME — só de tamanho por campo. O disco do dono acabava.
+    const gerado = acao(publico)
+    expect(gerado).toContain('function assertPublicFormOpen(database: DatabaseSync): void')
+    expect(gerado).toContain('const PUBLIC_WINDOW_LIMIT = 60')
+    // ANTES de gravar: conferir depois só descobriria o estouro tendo gravado.
+    //
+    // A chamada tem de EXISTIR, e não só vir antes. A primeira versão deste
+    // teste comparava só as posições — e `indexOf` devolve -1 para o que não
+    // existe, que é menor que qualquer índice. Removendo a chamada e deixando
+    // só a função, o teste passava: ele afirmava que um teto nunca executado
+    // estava protegendo o formulário.
+    const chamada = gerado.indexOf('assertPublicFormOpen(database)')
+    expect(chamada).toBeGreaterThanOrEqual(0)
+    expect(chamada).toBeLessThan(gerado.indexOf('.create({'))
+  })
+
+  it('a contagem é GLOBAL e sai da própria tabela, não de uma chave que o atacante escolhe', () => {
+    // Atrás de proxy, o endereço que chega é o do proxy: um teto por endereço
+    // seria um teto sobre um valor que o atacante controla. E a janela é
+    // contada em `created_at`, que toda tabela gerada já tem — uma tabela nova
+    // de registro seria mais um lugar para divergir do que ela deveria contar.
+    const gerado = acao(publico)
+    expect(gerado).toContain('SELECT count(*) AS total FROM \\"entity_contato\\" WHERE \\"created_at\\" > ?')
+    expect(gerado).not.toContain('x-forwarded-for')
+    expect(gerado).not.toContain('headers()')
+  })
+
+  it('com login exigido, o teto NÃO aparece', () => {
+    // Quem entrou já é contido pelo próprio login e pelos limites de sessão.
+    // Um teto global ali deixaria um usuário legítimo travar os outros.
+    const gerado = acao(comLogin)
+    expect(gerado).toContain('requireFormSession')
+    expect(gerado).not.toContain('assertPublicFormOpen')
+    expect(gerado).not.toContain('PUBLIC_WINDOW_LIMIT')
+  })
+
+  it('a frase que a pessoa lê diz que é temporário, e não que ela errou', () => {
+    expect(acao(publico)).toContain('está pausado por pouco tempo')
+  })
+})

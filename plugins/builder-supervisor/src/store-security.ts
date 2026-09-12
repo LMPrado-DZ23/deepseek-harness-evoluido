@@ -24,6 +24,21 @@ export interface TemplateStoreManifest {
    * byte a byte em três lugares — subi-la recusaria toda instalação existente.
    * Ausente significa NÃO ASSINADO, e nunca "assinado por alguém que não
    * conferimos": o veredito viaja em `templateStoreSignatureVerdict`.
+   *
+   * **HOJE NINGUÉM CONSULTA ESSE VEREDITO.** Uma revisão adversarial apontou,
+   * com razão, que `templateStoreSignatureVerdict` não tem chamador em
+   * produção: nenhuma chave de publicador é configurada em lugar nenhum, e
+   * `supervisor-config.ts` confere bytes canônicos, versão e `tree_sha256` —
+   * integridade, não ORIGEM. Na prática, um manifesto sem assinatura e um
+   * assinado por qualquer pessoa são aceitos do mesmo jeito, e a única barreira
+   * de origem que sobra é o `--manifest-sha256` digitado à mão na CLI.
+   *
+   * Isto está escrito aqui porque quem ler este arquivo precisa saber o que ele
+   * AINDA NÃO protege. Ligar a conferência exige custódia de uma chave privada
+   * de publicação — decisão do Prado, a mesma dependência do P-02 — e uma
+   * versão nova do envelope de configuração; está registrado em EB-08 e T-31,
+   * e o veredito NÃO foi removido porque a capacidade é desenhada e correta,
+   * só não tem chave.
    */
   readonly signature?: string
 }
