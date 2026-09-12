@@ -29,12 +29,16 @@ describe('reviewRun — o caminho confirmado', () => {
     expect(reviewRun(approved())).toEqual({ verdict: 'CONFIRMED', problems: [], notAutomated: 0, passed: 1 })
   })
 
-  it('execucao que NAO afirmou aprovacao nao e contestada', () => {
-    // Revisar uma execucao ja reprovada produziria uma lista de problemas que a
-    // pessoa leria como um SEGUNDO defeito, onde nao ha discordancia nenhuma.
+  it('execucao que NAO afirmou aprovacao sai como NAO REVISADA, e nunca confirmada', () => {
+    // `CONFIRMED` quer dizer "as provas sustentam o que foi afirmado". Aqui o
+    // significado e "nao olhei", e usar a mesma palavra faria um segundo
+    // chamador ler "confirmado" sobre uma execucao reprovada.
     const result = reviewRun(approved({ state: 'FAILED', artifact_sha256: null, template_integrity: undefined }))
-    expect(result.verdict).toBe('CONFIRMED')
+    expect(result.verdict).toBe('NOT_REVIEWED')
     expect(result.problems).toEqual([])
+    // E ela nao bloqueia: nao ha aprovacao a bloquear.
+    expect(blocksVerification(result)).toBe(false)
+    expect(reviewMessage(result)).toBeUndefined()
   })
 })
 

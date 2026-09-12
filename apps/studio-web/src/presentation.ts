@@ -229,8 +229,14 @@ export type CapabilityLine = {
  * com tudo configurado que nunca criou nada esta em `CONFIGURED` com
  * `NEVER_PROBED`: dizer "nao da agora" ali e uma negativa FALSA, e uma negativa
  * falsa impede a pessoa de tentar exatamente aquilo que teria dado certo.
+ *
+ * `PROBE_STALE` esta aqui pelo mesmo argumento, e a revisao adversarial pegou a
+ * omissao: a frase do registro e "funcionou, mas faz tempo demais para afirmar
+ * que continua funcionando" — isso e um NAO SEI. Sem ele nesta lista, alguem
+ * que criou um aplicativo as 9h voltava as 10h30 e lia "nao da agora" sobre uma
+ * instalacao que acabara de funcionar.
  */
-const UNMEASURED_REASONS = new Set(['NEVER_PROBED', 'NO_PROBE'])
+const UNMEASURED_REASONS = new Set(['NEVER_PROBED', 'NO_PROBE', 'PROBE_STALE'])
 
 /**
  * Traduz as capacidades em tres tons, e o terceiro e o que impede a tela de
@@ -265,3 +271,19 @@ export function capabilityLines(capabilities: readonly CapabilityReport[] | unde
  * ficar escondida entre as causas dela.
  */
 export const HEADLINE_CAPABILITY = 'criar-aplicativo'
+
+/**
+ * O nome de cada peca COMO A TELA JA A CHAMA.
+ *
+ * O identificador interno (`construtor`, `modelo`) era interpolado cru na frase
+ * "O que esta segurando: construtor." — a oito pixels de uma lista que chama a
+ * mesma coisa de "Ambiente isolado de criacao". Duas palavras para a mesma
+ * coisa, na mesma tela, no mesmo instante, sem nada ligando uma a outra.
+ *
+ * Um identificador que a lista nao conhece devolve `undefined`, e quem chama
+ * decide o que fazer — inventar um nome a partir do id seria mostrar o id com
+ * outra roupa.
+ */
+export function capabilityName(id: string, names: Readonly<Record<string, string>>): string | undefined {
+  return Object.prototype.hasOwnProperty.call(names, id) ? names[id] : undefined
+}

@@ -108,7 +108,24 @@ export interface PipelineOptions {
   readonly emergencyStop?: EmergencyStopGuard
 }
 
-export interface PipelineResult { readonly state: 'VERIFIED_PROTOTYPE' | 'BUILD_FAILED' | 'TESTS_FAILED' | 'BLOCKED_EXTERNAL' | 'BUDGET_EXCEEDED' | 'CANCELLED' | 'INTERRUPTED'; readonly runDirectory?: string; readonly attempts: number; readonly message: string }
+export interface PipelineResult {
+  readonly state: 'VERIFIED_PROTOTYPE' | 'BUILD_FAILED' | 'TESTS_FAILED' | 'BLOCKED_EXTERNAL' | 'BUDGET_EXCEEDED' | 'CANCELLED' | 'INTERRUPTED'
+  readonly runDirectory?: string
+  readonly attempts: number
+  /** O DIAGNOSTICO tecnico. A tela o mostra sob "detalhes tecnicos", em fonte de codigo. */
+  readonly message: string
+  /**
+   * O recado PARA A PESSOA, em portugues comum.
+   *
+   * Campo proprio porque `message` e renderizado como `Codigo da falha` dentro
+   * de `<code>`, debaixo de um painel chamado `Detalhes tecnicos` — que e
+   * exatamente o lugar que o produto ensina a pessoa a ignorar. A revisao
+   * adversarial pegou a ressalva de criterio nao conferido escondida ali: a
+   * frase que impede a tela de afirmar mais do que foi provado estava sob um
+   * rotulo dizendo que ela e irrelevante.
+   */
+  readonly notice?: string
+}
 export interface PipelineRunOptions { readonly operationId?: string; readonly ownerSessionId?: string; readonly signal?: AbortSignal }
 
 export class PromptToAppPipeline {
@@ -172,6 +189,9 @@ export class PromptToAppPipeline {
       // byte a byte o mesmo codigo da primeira e falhou byte a byte igual.
       const outcomes: AttemptOutcome[] = []
       let repeatingMessage: string | undefined
+      let reviewNotice: string | undefined
+      /** Onde a tentativa ANTERIOR terminou. Guardado antes de `activeStage` ser reposto. */
+      let previousStage: string = 'generate'
       let completedAttempts = 0
       // Os tokens SOMADOS da operação, e não os da última tentativa. O gasto de
       // uma criação é o das três somadas, e é isso que o teto olha.
@@ -204,6 +224,7 @@ export class PromptToAppPipeline {
       for (let attempt = 1; attempt <= 3; attempt++) {
       activeAttempt = attempt
       completedAttempts = attempt
+      previousStage = activeStage
       activeStage = 'generate'
       // O diagnóstico com que a tentativa COMEÇA é o que a anterior pediu para
       // corrigir. Capturado aqui porque `diagnostic` é zerado assim que a
@@ -560,16 +581,33 @@ export class PromptToAppPipeline {
           : reviewRun(persisted)
         if (blocksVerification(review)) {
           finalFailureState = 'TESTS_FAILED'
-          diagnostic = reviewMessage(review) ?? t('pipeline.failed')
+          reviewNotice = reviewMessage(review)
+          diagnostic = 'INDEPENDENT_REVIEW_BLOCKED'
+          // O REGISTRO tem de ser REESCRITO. Ele acabou de ser gravado como
+          // `PASSED`, com artefato e atestacoes; sem esta regravacao, o projeto
+          // ia para reprovado enquanto a linha da execucao continuava aprovada
+          // no armazenamento — e qualquer leitor posterior (a lista da tela, a
+          // retomada, uma auditoria) veria uma execucao aprovada de um projeto
+          // reprovado. Seria a propria revisao criando a contradicao em dois
+          // campos do mesmo registro que ela existe para denunciar.
+          await this.options.service.putRun(actor, this.runRecord(
+            actor, projectId, plan.plan_id, 'verify', attempt, 'FAILED', 'full', runDirectory, generated,
+            diagnostic, runId, operationId, ownerSessionId, verifiedAcceptanceChecks,
+            // Sem impressao de artefato: o que a revisao recusou foi justamente
+            // a afirmacao de que existe um artefato conferido.
+            null, templateIntegrity, attestations, buildSteps, attempt === 1 ? resumedFromRunId : null,
+          ))
           break
         }
         await this.options.service.transition(actor, projectId, 'BUILD_OK'); await this.options.service.transition(actor, projectId, 'TESTS_OK'); await this.options.service.transition(actor, projectId, 'VERIFIED_PROTOTYPE')
         return {
           state: 'VERIFIED_PROTOTYPE', runDirectory, attempts: attempt,
+          message: t('pipeline.verified'),
           // O aviso de criterio nao conferido por maquina viaja JUNTO da
-          // aprovacao: ele nao a desmente, e a pessoa precisa dele antes de
-          // tratar o resultado como conferido.
-          message: reviewMessage(review) === undefined ? t('pipeline.verified') : `${t('pipeline.verified')} ${reviewMessage(review)!}`,
+          // aprovacao, em campo PROPRIO: ele nao a desmente, e a pessoa precisa
+          // dele antes de tratar o resultado como conferido — em portugues
+          // comum, e nao sob "detalhes tecnicos".
+          ...(reviewMessage(review) === undefined ? {} : { notice: reviewMessage(review)! }),
         }
       }
       if (stopRetries) break
@@ -581,7 +619,12 @@ export class PromptToAppPipeline {
           await this.options.service.transition(actor, projectId, 'TESTS_FAILED')
         } else await this.options.service.transition(actor, projectId, 'BUILD_FAILED')
       }
-      return { state: finalFailureState, attempts: completedAttempts, message: repeatingMessage ?? diagnostic ?? t('pipeline.failed') }
+      return {
+        state: finalFailureState, attempts: completedAttempts,
+        message: diagnostic ?? t('pipeline.failed'),
+        // A precedencia importa: `a ?? b === undefined` seria `a ?? (b === undefined)`.
+        ...((repeatingMessage ?? reviewNotice) === undefined ? {} : { notice: (repeatingMessage ?? reviewNotice)! }),
+      }
     } catch (error) {
       return this.unexpectedFailure(actor, projectId, plan.plan_id, operationId, ownerSessionId, activeAttempt, activeRunId, activeRunDirectory, activeStage, error)
     }

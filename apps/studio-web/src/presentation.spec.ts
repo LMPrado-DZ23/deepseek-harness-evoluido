@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import t from './i18n/pt-BR.json'
-import { capabilityLines, creationBlocked, currentStepIndex, permanentTruthKind, privacyNotice, privacyProfileOf, resultSentence, routeReasonNotice, type PipelineResultState, type ProjectUiState } from './presentation'
+import { capabilityName, capabilityLines, creationBlocked, currentStepIndex, permanentTruthKind, privacyNotice, privacyProfileOf, resultSentence, routeReasonNotice, type PipelineResultState, type ProjectUiState } from './presentation'
 
 describe('truthful presentation for nontechnical users', () => {
   it('maps the real machine states to the five visible stages', () => {
@@ -256,5 +256,33 @@ describe('capabilityLines — T-22 na tela', () => {
   it('a ordem do servidor e mantida', () => {
     const lines = capabilityLines([{ id: 'z', state: 'OPERATIONAL' }, { id: 'a', state: 'ABSENT' }])
     expect(lines.map(line => line.id)).toEqual(['z', 'a'])
+  })
+})
+
+describe('capabilityName — o nome que a TELA usa', () => {
+  const nomes = { modelo: 'o serviço de inteligência artificial', construtor: 'o ambiente isolado de criação' }
+
+  it('o identificador interno nunca aparece: ele vira o nome da lista de cima', () => {
+    // "O que esta segurando: construtor." aparecia a oito pixels de "Ambiente
+    // isolado de criacao" — duas palavras para a mesma coisa, na mesma tela.
+    expect(capabilityName('construtor', nomes)).toBe('o ambiente isolado de criação')
+  })
+
+  it('identificador desconhecido devolve NADA, e nao o proprio identificador', () => {
+    // Inventar um nome a partir do id seria mostrar o id com outra roupa.
+    expect(capabilityName('coisa-nova', nomes)).toBeUndefined()
+  })
+
+  it('nome herdado do prototipo do objeto nao conta como nome', () => {
+    expect(capabilityName('toString', nomes)).toBeUndefined()
+    expect(capabilityName('constructor', nomes)).toBeUndefined()
+  })
+})
+
+describe('sondagem VENCIDA e `nao sei`, e nao `nao`', () => {
+  it('funcionou faz mais de uma hora nao e `nao da agora`', () => {
+    // Quem criou um aplicativo as 9h e voltou as 10h30 lia "nao da agora" sobre
+    // uma instalacao que acabara de funcionar.
+    expect(capabilityLines([{ id: 'a', state: 'CONFIGURED', reason: 'PROBE_STALE' }])[0]!.tone).toBe('nao-sei')
   })
 })

@@ -41,7 +41,21 @@ export interface ReviewedRun {
   readonly failure_code?: string | null | undefined
 }
 
-export type ReviewVerdict = 'CONFIRMED' | 'CONTRADICTED' | 'INCONCLUSIVE'
+export type ReviewVerdict =
+  | 'CONFIRMED'
+  | 'CONTRADICTED'
+  | 'INCONCLUSIVE'
+  /**
+   * A execucao nao AFIRMOU aprovacao, entao nao ha o que contestar.
+   *
+   * Valor proprio porque `CONFIRMED` quer dizer "as provas sustentam o que foi
+   * afirmado", e aqui o significado e "nao olhei". A revisao adversarial pegou
+   * isso: `blocksVerification(reviewRun(execucaoReprovada))` devolvia `false`,
+   * que lido literalmente e "esta execucao falhada nao bloqueia a verificacao".
+   * Sobrevivia so porque o pipeline nunca chamava nesse estado — e um segundo
+   * chamador leria "confirmado" sobre um `FAILED`.
+   */
+  | 'NOT_REVIEWED'
 
 export interface ReviewProblem {
   /** Por que a prova nao sustenta a afirmacao. */
@@ -86,7 +100,7 @@ export function reviewRun(run: ReviewedRun): ReviewResult {
   const notAutomated = run.acceptance_checks.filter(check => check.status === 'NOT_AUTOMATED').length
   const passed = run.acceptance_checks.filter(check => check.status === 'PASSED').length
 
-  if (run.state !== 'PASSED') return { verdict: 'CONFIRMED', problems: [], notAutomated, passed }
+  if (run.state !== 'PASSED') return { verdict: 'NOT_REVIEWED', problems: [], notAutomated, passed }
 
   // CONTRADICOES: o registro diz o contrario do que a execucao afirmou.
   for (const check of run.acceptance_checks) {
@@ -139,6 +153,7 @@ export function reviewRun(run: ReviewedRun): ReviewResult {
  * saber ANTES de tratar o resultado como pronto.
  */
 export function reviewMessage(result: ReviewResult): string | undefined {
+  if (result.verdict === 'NOT_REVIEWED') return undefined
   if (result.verdict === 'CONTRADICTED') {
     return t('review.contradicted', { count: String(result.problems.length) })
   }
@@ -159,5 +174,8 @@ export function reviewMessage(result: ReviewResult): string | undefined {
  * bloqueio reprovaria toda criacao cujo criterio a pessoa escreveu em prosa.
  */
 export function blocksVerification(result: ReviewResult): boolean {
-  return result.verdict !== 'CONFIRMED'
+  // `NOT_REVIEWED` nao bloqueia: uma execucao que nao afirmou aprovacao nao tem
+  // aprovacao a ser bloqueada, e devolver `true` aqui faria a revisao "reprovar"
+  // o que ja estava reprovado.
+  return result.verdict === 'CONTRADICTED' || result.verdict === 'INCONCLUSIVE'
 }

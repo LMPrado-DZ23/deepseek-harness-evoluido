@@ -169,36 +169,44 @@ function categoryInstruction(category: StudioProjectCategory): readonly ContextS
   return chosen === null ? [] : [instruction(`plan.category.${category}`, t(chosen))]
 }
 
+/**
+ * O plano MAIS a contabilidade de como ele foi pedido.
+ *
+ * Isto era estado de INSTANCIA — `lastLedger`, `lastSkills`, `lastCode` —, e o
+ * motor e criado UMA VEZ por processo e servido a todos os inquilinos. A rota
+ * de plano lia esses campos DEPOIS de um `await`, e nessa janela outro pedido,
+ * de outra organizacao, ja tinha sobrescrito os tres. A resposta de um
+ * inquilino saía com o contexto de outro: quais habilidades de terceiro a outra
+ * organizacao tem instaladas, o que foi recusado e por que, se o pedido dela
+ * era mudanca ou criacao nova.
+ *
+ * A revisao adversarial reproduziu a corrida. Nao foi inferida.
+ *
+ * O comentario que justificava guardar no motor dizia que "misturar o plano com
+ * a contabilidade faria o schema do plano carregar coisa que nao e plano" — e
+ * isso continua verdade, e e por isso que a contabilidade viaja num campo
+ * IRMAO do plano, e nao dentro dele. Um valor devolvido nao tem janela: ele
+ * pertence a chamada que o produziu, e a nenhuma outra.
+ */
+export interface PlanWithContext {
+  readonly output: PlanOutput
+  readonly ledger: ContextLedger
+  readonly skills: PlannerSkillReport | undefined
+  readonly code: readonly string[] | undefined
+  /**
+   * O inventario de codigo ficou INCOMPLETO?
+   *
+   * Um booleano, e nao uma busca por palavra dentro do resumo. A primeira
+   * versao procurava a substring `INCOMPLETA` no texto — e esse texto vem do
+   * CATALOGO DE TRADUCAO. Traduzir o produto, ou so reescrever a frase, apagava
+   * o aviso em silencio: a pessoa aprovaria um plano montado sobre codigo que
+   * ninguem conseguiu ler inteiro, sem nada na tela dizendo isso. Falha do lado
+   * errado, e achada pela revisao adversarial.
+   */
+  readonly codeIncomplete: boolean
+}
+
 export class PlannerEngine {
-  /**
-   * O registro do ÚLTIMO contexto montado.
-   *
-   * Existe para que a pergunta "o que exatamente o modelo viu?" tenha resposta
-   * sem precisar reproduzir a execução. Fica no motor e não no retorno porque
-   * o retorno é o plano, e misturar o plano com a contabilidade de como ele
-   * foi pedido faria o schema do plano carregar coisa que não é plano.
-   */
-  lastLedger: ContextLedger | undefined
-
-  /**
-   * O que as habilidades fizeram no ÚLTIMO planejamento.
-   *
-   * Fica ao lado de `lastLedger` pelo mesmo motivo: a pergunta depois de um
-   * plano estranho é "o que exatamente o modelo viu?", e uma habilidade de
-   * terceiro que entrou no contexto é a parte dessa resposta que ninguém
-   * adivinha sozinho.
-   */
-  lastSkills: PlannerSkillReport | undefined
-
-  /**
-   * O inventário do código que entrou no ÚLTIMO planejamento.
-   *
-   * Mesmo motivo dos outros dois: a pergunta depois de um plano estranho é "o
-   * que exatamente o modelo viu?", e um inventário incompleto que entrou como
-   * se fosse completo é a resposta que ninguém adivinha.
-   */
-  lastCode: readonly string[] | undefined
-
   constructor(
     private readonly model: PromptModelPort,
     private readonly budgetChars?: number,
@@ -214,26 +222,27 @@ export class PlannerEngine {
    * @param budget - o teto total do contexto.
    * @returns as partes já carregadas e conferidas.
    */
-  async #skillSections(actor: PlannerActor, request: string, budget: number): Promise<readonly ContextSection[]> {
-    this.lastSkills = undefined
+  async #skillSections(actor: PlannerActor, request: string, budget: number): Promise<{
+    readonly sections: readonly ContextSection[]
+    readonly report: PlannerSkillReport | undefined
+  }> {
     const registry = this.skills
-    if (registry === undefined) return []
+    if (registry === undefined) return { sections: [], report: undefined }
     // Sem ator completo não há leitura: o registro confere papel, e montar um
     // ator aqui para conseguir ler seria contornar essa conferência por dentro.
-    if (actor.userId === undefined || actor.role === undefined) return []
+    if (actor.userId === undefined || actor.role === undefined) return { sections: [], report: undefined }
     const selection = selectSkills(await registry.cards(actor), request, Math.floor(budget * SKILL_ALLOWANCE_FRACTION))
     const { sections, refused } = await loadSkills(
       selection.chosen, { load: async skillId => registry.load(actor, skillId) },
     )
-    this.lastSkills = { selection, refused, loaded: sections.map(section => section.id) }
-    return sections
+    return { sections, report: { selection, refused, loaded: sections.map(section => section.id) } }
   }
 
   async plan(
     scope: PlannerActor, privacy: RoutePrivacy, spec: AppSpecV1,
     category: StudioProjectCategory = 'landing-page', changeRequest?: string,
     code?: PlannerCodeContext,
-  ): Promise<PlanOutput> {
+  ): Promise<PlanWithContext> {
     assertCategoryCanGenerate(category, spec)
     // As habilidades entram ANTES da montagem, e não depois: elas são
     // `instruction`, e instrução não é cortável — descobrir que não cabem
@@ -255,14 +264,13 @@ export class PlannerEngine {
     const codeLines = code === undefined || changeRequest === undefined
       ? []
       : codeIndexSummary(code.index, code.changed ?? [], code.skipped ?? [])
-    this.lastCode = codeLines.length === 0 ? undefined : codeLines
     const assembled = assembleContext([
       instruction('plan.only', t('prompts.planOnly')),
       instruction('plan.criteria', t('prompts.planCriteria')),
       instruction('plan.files', t('prompts.planFiles')),
       instruction('plan.first', t('prompts.planFirst')),
       ...categoryInstruction(category),
-      ...skills,
+      ...skills.sections,
       // O que JÁ existe entra como EVIDÊNCIA e não como instrução: é material
       // sobre o qual o modelo raciocina, e ele pode ser cortado pelo teto sem
       // mudar nenhuma regra. Uma instrução cortada muda a regra; um inventário
@@ -283,14 +291,17 @@ export class PlannerEngine {
         : [{ id: 'plan.change', kind: 'evidence' as const, priority: 90, source: 'change-request', text: t('prompts.changeRequest', { reason: changeRequest }) }]),
       { id: 'plan.schema', kind: 'schema' as const, priority: 0, source: 'planOutputSchema', text: t('prompts.schema', { schema: JSON.stringify(planOutputSchema.toJSONSchema()) }) },
     ], { budgetChars: this.budgetChars })
-    this.lastLedger = assembled.ledger
     const result = await this.model.complete(scope, 'plan', privacy, assembled.prompt)
     const decoded = typeof result.value === 'string' ? JSON.parse(result.value) : result.value
     const output = planOutputSchema.parse(decoded)
     if (CATEGORY_REQUIRES_DATA_MODEL[category] !== false && !output.slices.some(slice => slice.planned_files.includes('src/GeneratedApp.tsx'))) {
       throw new FormCategoryCapabilityError('FORM_ENTRY_FILE_REQUIRED', t('errors.formEntryFileRequired'))
     }
-    return output
+    return {
+      output, ledger: assembled.ledger, skills: skills.report,
+      code: codeLines.length === 0 ? undefined : codeLines,
+      codeIncomplete: (code?.skipped ?? []).length > 0,
+    }
   }
 
   /**
@@ -329,7 +340,7 @@ export class PlannerEngine {
     existing: readonly { readonly title: string; readonly planned_files: readonly string[] }[],
     request: string,
     category: StudioProjectCategory = 'landing-page',
-  ): Promise<PlanSliceOutput> {
+  ): Promise<{ readonly slice: PlanSliceOutput; readonly ledger: ContextLedger }> {
     assertCategoryCanGenerate(category, spec)
     const assembled = assembleContext([
       instruction('slice.only', t('prompts.sliceOnly')),
@@ -346,10 +357,11 @@ export class PlannerEngine {
       { id: 'slice.spec', kind: 'evidence' as const, priority: 90, source: 'app-spec', text: t('prompts.generateSpec', { spec: JSON.stringify(spec) }) },
       { id: 'slice.schema', kind: 'schema' as const, priority: 0, source: 'slice-output-schema', text: t('prompts.schema', { schema: JSON.stringify(sliceOutputSchema.toJSONSchema()) }) },
     ], { budgetChars: this.budgetChars })
-    this.lastLedger = assembled.ledger
     const result = await this.model.complete(scope, 'plan', privacy, assembled.prompt)
     const decoded = typeof result.value === 'string' ? JSON.parse(result.value) : result.value
-    return sliceOutputSchema.parse(decoded).slice
+    // O registro sai DEVOLVIDO, pelo mesmo motivo de `plan`: guardado no motor,
+    // ele pertenceria ao ultimo pedido que passou por aqui, e nao a este.
+    return { slice: sliceOutputSchema.parse(decoded).slice, ledger: assembled.ledger }
   }
 }
 

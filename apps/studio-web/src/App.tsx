@@ -12,7 +12,7 @@ import { projectNameFromBrief } from './projectName'
 
 /** De onde veio o tipo mostrado na tela. `person` é a escolha à mão, que o palpite não faz. */
 type CategoryBasis = CategoryGuess['basis'] | 'person'
-import { HEADLINE_CAPABILITY, capabilityLines, creationBlocked, currentStepIndex, permanentTruthKind, privacyNotice, resultSentence, routeReasonNotice, type PipelineResultState, type PrivacyProfile, type ProjectUiState } from './presentation'
+import { HEADLINE_CAPABILITY, capabilityLines, capabilityName, creationBlocked, currentStepIndex, permanentTruthKind, privacyNotice, resultSentence, routeReasonNotice, type PipelineResultState, type PrivacyProfile, type ProjectUiState } from './presentation'
 import { apiFailureMessage, apiFailureText, type ApiCallKind } from './pwa/apiFailure'
 import { GENERATION_REJECTED_STATE, postGeneration, startGeneration } from './pwa/generation'
 import { NotificationOptIn } from './pwa/NotificationOptIn'
@@ -36,7 +36,7 @@ type AcceptanceCheck = { id: string; label: string; title?: string; status: 'PEN
 type VerificationCode = { email: string; code: string; expires_at: string }
 // O estado final vem do MESMO tipo que a frase usa: duas listas separadas foi
 // como `BUDGET_EXCEEDED` acabou sem frase própria.
-type PipelineResult = { state: PipelineResultState; attempts: number; message: string; checks?: AcceptanceCheck[]; verificationCodes?: VerificationCode[]; resumed?: boolean }
+type PipelineResult = { state: PipelineResultState; attempts: number; message: string; notice?: string; checks?: AcceptanceCheck[]; verificationCodes?: VerificationCode[]; resumed?: boolean }
 type ProjectDetails = { project: { state: ProjectUiState }; plan?: Plan | null; current_run: null | { operation_id: string; state: 'PENDING' | 'RUNNING' | 'PASSED' | 'FAILED' | 'BLOCKED_EXTERNAL' | 'BUDGET_EXCEEDED' | 'CANCELLED'; stage: string; attempt: number; steps?: RunStepRecord[]; resumed_from_run_id?: string; failure_code: string | null; acceptance_checks: AcceptanceCheck[]; verification_codes?: VerificationCode[] } }
 type Preview = { preview_id: string; state: 'REQUESTED' | 'STARTING' | 'READY' | 'STOPPING' | 'STOPPED' | 'FAILED' | 'EXPIRED'; health: 'PENDING' | 'OK' | 'DOWN'; url: string; expires_at: string }
 /**
@@ -581,7 +581,7 @@ function Action({ title, detail, button, busyButton, action, progress, steps }: 
         no celular. */}
     {hasSteps ? <BuildSteps steps={steps!} finished={false} /> : null}
     {button === undefined || action === undefined ? null : <PendingButton label={button} busyLabel={busyButton ?? button} action={action} />}</> }
-function Verification({ result, previewActive, startPreview, retry }: { result: PipelineResult; previewActive: boolean; startPreview(): Promise<void>; retry(): Promise<void> }) { const ok = result.state === 'VERIFIED_PROTOTYPE'; const cancelled = result.state === 'CANCELLED'; const interrupted = result.state === 'INTERRUPTED'; return <section className="task-card"><h1>{t.verification.title}</h1><p>{resultSentence(result.state, t.verification)}</p><p>{t.verification.attempts}: {result.attempts}</p>{result.resumed === true ? <p className="truth">{t.verification.resumed}</p> : null}{ok && !previewActive ? <PendingButton label={t.preview.open} busyLabel={t.preview.openBusy} action={startPreview} /> : null}{interrupted ? <PendingButton label={t.creation.retry} busyLabel={t.creation.retryBusy} action={retry} /> : null}{result.verificationCodes === undefined || result.verificationCodes.length === 0 ? null : <section><h2>{t.verification.testCodes}</h2><p>{t.verification.testCodesHelp}</p><ul>{result.verificationCodes.map(item => <li key={`${item.email}-${item.expires_at}-${item.code}`}><strong>{item.email}</strong>: <code>{item.code}</code></li>)}</ul></section>}{result.checks === undefined ? null : <><h2>{t.verification.checks}</h2><ul>{result.checks.map(check => <li key={check.id}>{check.title ?? check.label}: {checkStatus(check.status)}{check.title === undefined || check.title === check.label ? null : <> <span className="check-id"><code>{check.label}</code></span></>}</li>)}</ul></>}<details className="result-technical"><summary>{t.verification.technicalTitle}</summary><p>{t.verification.technicalCode}: <code>{result.state}</code></p>{result.message === '' ? null : <p>{t.verification.technicalFailure}: <code>{result.message}</code></p>}</details></section> }
+function Verification({ result, previewActive, startPreview, retry }: { result: PipelineResult; previewActive: boolean; startPreview(): Promise<void>; retry(): Promise<void> }) { const ok = result.state === 'VERIFIED_PROTOTYPE'; const cancelled = result.state === 'CANCELLED'; const interrupted = result.state === 'INTERRUPTED'; return <section className="task-card"><h1>{t.verification.title}</h1><p>{resultSentence(result.state, t.verification)}</p>{result.notice === undefined || result.notice === '' ? null : <p className="truth">{result.notice}</p>}<p>{t.verification.attempts}: {result.attempts}</p>{result.resumed === true ? <p className="truth">{t.verification.resumed}</p> : null}{ok && !previewActive ? <PendingButton label={t.preview.open} busyLabel={t.preview.openBusy} action={startPreview} /> : null}{interrupted ? <PendingButton label={t.creation.retry} busyLabel={t.creation.retryBusy} action={retry} /> : null}{result.verificationCodes === undefined || result.verificationCodes.length === 0 ? null : <section><h2>{t.verification.testCodes}</h2><p>{t.verification.testCodesHelp}</p><ul>{result.verificationCodes.map(item => <li key={`${item.email}-${item.expires_at}-${item.code}`}><strong>{item.email}</strong>: <code>{item.code}</code></li>)}</ul></section>}{result.checks === undefined ? null : <><h2>{t.verification.checks}</h2><ul>{result.checks.map(check => <li key={check.id}>{check.title ?? check.label}: {checkStatus(check.status)}{check.title === undefined || check.title === check.label ? null : <> <span className="check-id"><code>{check.label}</code></span></>}</li>)}</ul></>}<details className="result-technical"><summary>{t.verification.technicalTitle}</summary><p>{t.verification.technicalCode}: <code>{result.state}</code></p>{result.message === '' ? null : <p>{t.verification.technicalFailure}: <code>{result.message}</code></p>}</details></section> }
 
 function refreshPreviewAdmission(previewUrl: string): void {
   const probe = document.createElement('iframe')
@@ -642,14 +642,23 @@ function Capabilities({ health }: { health: HealthState }) {
   const lines = capabilityLines(health.capabilities)
   const headline = lines.find(line => line.id === HEADLINE_CAPABILITY)
   if (headline === undefined) return null
+  // `PROBE_STALE` tem frase propria: "funcionou da ultima vez, mas faz mais de
+  // uma hora" e diferente de "ninguem conferiu ainda", e as duas sao diferentes
+  // de "nao da".
   const sentence = headline.tone === 'sim' ? t.health.capabilityYes
+    : headline.reason === 'PROBE_STALE' ? t.health.capabilityStale
     : headline.tone === 'nao-sei' ? t.health.capabilityUnknown
     : t.health.capabilityNo
+  // O nome que a LISTA ACIMA ja usa, e nunca o identificador interno: "O que
+  // esta segurando: construtor." aparecia a oito pixels de "Ambiente isolado de
+  // criacao", duas palavras para a mesma coisa na mesma tela.
+  const seguraNome = headline.blockedBy === undefined ? undefined
+    : capabilityName(headline.blockedBy, t.health.capabilityNames)
   return <div className="status-capabilities">
     <strong>{t.health.capabilitiesTitle}</strong>
     <p className={`capability capability-${headline.tone}`}>{sentence}</p>
-    {headline.blockedBy === undefined ? null
-      : <p className="capability-detail">{t.health.capabilityBlockedBy.replace('{blockedBy}', headline.blockedBy)}</p>}
+    {seguraNome === undefined ? null
+      : <p className="capability-detail">{t.health.capabilityBlockedBy.replace('{blockedBy}', seguraNome)}</p>}
     {headline.blockedBy === undefined && headline.reason === 'NEVER_PROBED'
       ? <p className="capability-detail">{t.health.capabilityNeverProbed}</p> : null}
   </div>

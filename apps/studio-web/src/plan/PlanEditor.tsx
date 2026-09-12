@@ -41,7 +41,7 @@ export interface PlanEditorProps {
 /** O que o servidor conta sobre o que entrou no pedido. */
 export interface ConsultedView {
   readonly used: readonly { readonly label: string; readonly source: string }[]
-  readonly dropped: readonly { readonly label: string; readonly source: string }[]
+  readonly dropped: readonly { readonly label: string; readonly source: string; readonly reason?: 'BUDGET' | 'DUPLICATE' }[]
   readonly refusedSkills: readonly { readonly label: string; readonly source: string }[]
   readonly incompleteCode: boolean
 }
@@ -60,19 +60,39 @@ export interface ConsultedView {
  * @returns o painel.
  */
 export function ConsultedPanel({ consulted }: { readonly consulted: ConsultedView }) {
-  const algoFaltou = consulted.dropped.length > 0 || consulted.incompleteCode
-  return <details className="plan-consulted">
-    <summary>{t.plan.consultedTitle}</summary>
+  // Duas causas DIFERENTES, e por isso duas frases. "Não coube" manda a pessoa
+  // encurtar o que ela escreveu; "não deu para ler o aplicativo inteiro" não
+  // tem nada a ver com o tamanho do texto dela, e mandar encurtar ali seria
+  // mandar fazer a coisa errada.
+  const naoCoube = consulted.dropped.some(item => item.reason !== 'DUPLICATE')
+  const algoFaltou = naoCoube || consulted.incompleteCode
+  return <details className="plan-consulted" open={algoFaltou}>
+    {/* O painel ABRE sozinho quando faltou alguma coisa, e o título diz isso.
+        Fechado e com o mesmo título, não existia motivo nenhum para alguém
+        clicar — e a informação que mais importa aqui é justamente a que só
+        aparece depois do clique. */}
+    <summary>{algoFaltou ? t.plan.consultedTitleGap : t.plan.consultedTitle}</summary>
     <p>{t.plan.consultedHelp}</p>
-    <ul className="plan-consulted-used">
-      {consulted.used.map((item, index) => <li key={`${item.label}-${String(index)}`}>{item.label}</li>)}
-    </ul>
+    {consulted.used.length === 0
+      // Lista vazia é indistinguível de painel quebrado. "Não registrou" é uma
+      // frase, e "nada" é outra.
+      ? <p>{t.plan.consultedNothing}</p>
+      : <ul className="plan-consulted-used">
+        {consulted.used.map((item, index) => <li key={`${item.label}-${String(index)}`}>{item.label}</li>)}
+      </ul>}
     {/* O aviso vem ANTES da lista do que faltou: quem lê precisa saber que a
-        lista tem consequência antes de ler os itens dela. */}
-    {algoFaltou ? <p role="alert" className="plan-consulted-gap">{t.plan.consultedIncomplete}</p> : null}
-    {consulted.dropped.length > 0 ? <ul className="plan-consulted-dropped">
-      {consulted.dropped.map((item, index) => <li key={`${item.label}-${String(index)}`}>{item.label}</li>)}
-    </ul> : null}
+        lista tem consequência antes de ler os itens dela. E ele não depende de
+        cor para ser visto — a palavra "Atenção" faz o trabalho sozinha. */}
+    {naoCoube ? <p className="plan-consulted-gap"><strong>{t.plan.consultedAttention}</strong> {t.plan.consultedIncomplete}</p> : null}
+    {consulted.incompleteCode ? <p className="plan-consulted-gap"><strong>{t.plan.consultedAttention}</strong> {t.plan.consultedUnreadCode}</p> : null}
+    {consulted.dropped.length > 0 ? <>
+      <h3>{t.plan.consultedDroppedTitle}</h3>
+      <ul className="plan-consulted-dropped">
+        {consulted.dropped.map((item, index) => <li key={`${item.label}-${String(index)}`}>
+          {item.label}{item.reason === 'DUPLICATE' ? ` — ${t.plan.consultedDuplicate}` : ''}
+        </li>)}
+      </ul>
+    </> : null}
     {consulted.refusedSkills.length > 0 ? <>
       <h3>{t.plan.consultedSkillsTitle}</h3>
       <ul className="plan-consulted-skills">

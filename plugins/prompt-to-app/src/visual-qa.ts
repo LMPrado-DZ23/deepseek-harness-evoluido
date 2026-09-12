@@ -46,8 +46,34 @@ export type PngUnsupported =
   | 'UNSUPPORTED_BIT_DEPTH'
   | 'NO_IMAGE_DATA'
   | 'CORRUPT'
+  /** Grande demais para ser lido com seguranca. NAO e corrupcao. */
+  | 'TOO_LARGE'
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+
+/**
+ * O maior numero de pixels que este leitor aceita decodificar.
+ *
+ * Quarenta megapixels cobre com folga qualquer captura de tela, inclusive de
+ * pagina inteira em telona. Ele NAO e sobre desempenho: `width` e `height` sao
+ * dois inteiros de 32 bits que vem DO ARQUIVO, e um PNG de sessenta mil bytes
+ * pode declarar quatro bilhoes de pixels. Sem teto, a linha que aloca os pixels
+ * ou consome a memoria toda ou lanca `RangeError` — e um `RangeError` ESCAPA da
+ * funcao como excecao em vez de sair como recusa, que e o contrato dela.
+ *
+ * A revisao adversarial mediu 62 KB virando 128 MB, com fator de 1028 vezes.
+ */
+export const MAX_PIXELS = 40_000_000
+
+/**
+ * O maior tamanho DESCOMPRIMIDO que o leitor aceita.
+ *
+ * `inflateSync` sem teto aceita ate ~2 GB por padrao, e e assim que uma bomba
+ * de descompressao funciona: poucos bytes comprimidos, gigabytes na saida. O
+ * teto e derivado do teto de pixels — nao ha razao para aceitar mais dados do
+ * que o cabecalho declarou precisar.
+ */
+const MAX_INFLATED_BYTES = MAX_PIXELS * 4 + MAX_PIXELS
 
 /**
  * Le o subconjunto de PNG que um navegador headless produz: 8 bits por canal,
@@ -81,6 +107,9 @@ export function decodePng(buffer: Buffer): PngDecodeResult {
       if (bitDepth !== 8) return { ok: false, reason: 'UNSUPPORTED_BIT_DEPTH' }
       if (colorType !== 2 && colorType !== 6) return { ok: false, reason: 'UNSUPPORTED_COLOR_TYPE' }
       if (width === 0 || height === 0) return { ok: false, reason: 'CORRUPT' }
+      // O teto vem ANTES de qualquer alocacao, e antes ate de descomprimir:
+      // depois ja seria tarde.
+      if (width * height > MAX_PIXELS) return { ok: false, reason: 'TOO_LARGE' }
     } else if (type === 'IDAT') {
       idat.push(buffer.subarray(dataStart, dataStart + length))
     } else if (type === 'IEND') { ended = true; break }
@@ -95,7 +124,12 @@ export function decodePng(buffer: Buffer): PngDecodeResult {
 
   const channels = colorType === 6 ? 4 : 3
   let raw: Buffer
-  try { raw = inflateSync(Buffer.concat(idat)) } catch { return { ok: false, reason: 'CORRUPT' } }
+  try { raw = inflateSync(Buffer.concat(idat), { maxOutputLength: MAX_INFLATED_BYTES }) } catch (error) {
+    // O `zlib` lanca quando estoura o teto, e esse caso NAO e corrupcao: o
+    // arquivo pode estar perfeito e ser grande demais. Dizer `CORRUPT` mandaria
+    // alguem procurar defeito onde houve recusa por tamanho.
+    return { ok: false, reason: (error as { code?: string }).code === 'ERR_BUFFER_TOO_LARGE' ? 'TOO_LARGE' : 'CORRUPT' }
+  }
   const stride = width * channels
   if (raw.length < height * (stride + 1)) return { ok: false, reason: 'TRUNCATED' }
 
@@ -104,6 +138,13 @@ export function decodePng(buffer: Buffer): PngDecodeResult {
   const previous = new Uint8Array(stride)
   for (let y = 0; y < height; y += 1) {
     const filter = raw[y * (stride + 1)]!
+    // A conferencia do filtro acontece AQUI, e nao dentro do laco dos bytes.
+    // La ela era codigo morto: `line` e `Uint8Array`, entao atribuir `-1` guarda
+    // `255`, e `line[i] === -1` nunca era verdadeiro — um filtro invalido
+    // decodificava como `ok: true` com pixels de lixo, que e exatamente o
+    // "pixels errados viram 'a pagina esta branca'" que este arquivo diz
+    // impedir. A revisao adversarial reproduziu com filtro 99.
+    if (filter > 4) return { ok: false, reason: 'CORRUPT' }
     const source = raw.subarray(y * (stride + 1) + 1, y * (stride + 1) + 1 + stride)
     for (let i = 0; i < stride; i += 1) {
       const left = i >= channels ? line[i - channels]! : 0
@@ -114,9 +155,7 @@ export function decodePng(buffer: Buffer): PngDecodeResult {
         : filter === 1 ? (value + left) & 0xff
         : filter === 2 ? (value + up) & 0xff
         : filter === 3 ? (value + ((left + up) >> 1)) & 0xff
-        : filter === 4 ? (value + paeth(left, up, upLeft)) & 0xff
-        : -1
-      if (line[i] === -1) return { ok: false, reason: 'CORRUPT' }
+        : (value + paeth(left, up, upLeft)) & 0xff
     }
     for (let x = 0; x < width; x += 1) {
       const to = (y * width + x) * 4
@@ -141,8 +180,20 @@ function paeth(left: number, up: number, upLeft: number): number {
   return dLeft <= dUp && dLeft <= dUpLeft ? left : dUp <= dUpLeft ? up : upLeft
 }
 
+/**
+ * O maior numero de cores distintas que a contagem acompanha.
+ *
+ * O documento dizia "ate o teto de contagem" e teto nenhum existia: o mapa
+ * crescia ate 16 milhoes de entradas, e uma imagem grande com muitas cores
+ * travava o laco de eventos por segundos, sincrono. Passado o teto a contagem
+ * PARA de acrescentar cores novas — o que ela ainda responde com verdade e
+ * `distinctColors >= COLOR_COUNT_CEILING`, e isso ja basta para a unica
+ * pergunta que ela serve: a tela tem UMA cor so?
+ */
+export const COLOR_COUNT_CEILING = 4_096
+
 export interface ImageStats {
-  /** Quantas cores distintas a imagem tem, ate o teto de contagem. */
+  /** Quantas cores distintas a imagem tem, ate `COLOR_COUNT_CEILING`. */
   readonly distinctColors: number
   /** A fracao de pixels que NAO sao a cor mais comum. */
   readonly inkCoverage: number
@@ -163,10 +214,16 @@ export interface ImageStats {
 export function imageStats(image: RgbaImage): ImageStats {
   const counts = new Map<number, number>()
   const total = image.width * image.height
+  // Os pixels alem do teto ainda sao CONTADOS na cor que ja conhecemos; o que
+  // para de crescer e o numero de cores DISTINTAS acompanhadas. A cor de fundo
+  // e a mais comum, e uma cor de fundo tem milhoes de pixels — ela entra muito
+  // antes de qualquer teto.
   for (let i = 0; i < total; i += 1) {
     const alpha = image.pixels[i * 4 + 3]!
     const key = alpha === 0 ? -1 : (image.pixels[i * 4]! << 16) | (image.pixels[i * 4 + 1]! << 8) | image.pixels[i * 4 + 2]!
-    counts.set(key, (counts.get(key) ?? 0) + 1)
+    const known = counts.get(key)
+    if (known === undefined && counts.size >= COLOR_COUNT_CEILING) continue
+    counts.set(key, (known ?? 0) + 1)
   }
   let background = -1; let most = 0
   for (const [key, count] of counts) if (count > most) { most = count; background = key }

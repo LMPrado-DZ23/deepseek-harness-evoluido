@@ -91,8 +91,10 @@ describe('PromptToAppService', () => {
 
     const planner = {
       slice: vi.fn(async () => ({
-        slice_id: 'slice-2', title: 'Depoimentos', description: 'Mostrar o que dizem',
-        acceptance_criteria: ['os depoimentos aparecem'], planned_files: ['src/depoimentos.tsx'],
+        slice: {
+          slice_id: 'slice-2', title: 'Depoimentos', description: 'Mostrar o que dizem',
+          acceptance_criteria: ['os depoimentos aparecem'], planned_files: ['src/depoimentos.tsx'],
+        },
       })),
     }
     const updated = await service.addPlanSlice(ownerA, project.project_id, 'faltou mostrar o que meus clientes dizem', planner, 'any')
@@ -216,7 +218,7 @@ describe('intake and planner', () => {
     await expect(intake.recommend({ project, answers: {} }, { id: 'audience', text: 'Para quem?' })).resolves.toMatchObject({ value: 'Clientes locais' })
     const built = await intake.buildSpec({ project, answers: { audience: 'Clientes', goal: 'Ver', content: 'Fotos' } })
     expect(built.spec).toEqual(validSpec)
-    await expect(new PlannerEngine(model).plan({ orgId: 'o', tenantId: 't' }, 'local-only', validSpec)).resolves.toMatchObject({ slices: [{ title: 'Página' }] })
+    await expect(new PlannerEngine(model).plan({ orgId: 'o', tenantId: 't' }, 'local-only', validSpec)).resolves.toMatchObject({ output: { slices: [{ title: 'Página' }] }})
     expect(complete.mock.calls.every(call => call[2] === 'local-only')).toBe(true)
     expect(complete.mock.calls[2]?.[3]).toContain('não planeje arquivos CSS')
   })
@@ -231,13 +233,13 @@ describe('intake and planner', () => {
       route: 'ollama', model: 'qwen',
     })
     const planner = new PlannerEngine({ complete })
-    await expect(planner.plan({ orgId: 'o', tenantId: 't' }, 'local-only', databaseSpec, 'form-database')).resolves.toMatchObject({ slices: [{ slice_id: 'form' }] })
+    await expect(planner.plan({ orgId: 'o', tenantId: 't' }, 'local-only', databaseSpec, 'form-database')).resolves.toMatchObject({ output: { slices: [{ slice_id: 'form' }] }})
     expect(complete.mock.calls[0]![3]).toContain('@/src/components/generated/')
     await expect(planner.plan({ orgId: 'o', tenantId: 't' }, 'local-only', validSpec, 'form-database')).rejects.toMatchObject({ code: 'FORM_DATABASE_REQUIRED' })
     await expect(planner.plan({ orgId: 'o', tenantId: 't' }, 'local-only', {
       ...databaseSpec, sensitive_data: { detected: ['financial'], confirmed_by_user: true },
-    }, 'form-database')).resolves.toMatchObject({ slices: [{ slice_id: 'form' }] })
-    await expect(planner.plan({ orgId: 'o', tenantId: 't' }, 'local-only', databaseSpec, 'crud-panel')).resolves.toMatchObject({ slices: [{ slice_id: 'form' }] })
+    }, 'form-database')).resolves.toMatchObject({ output: { slices: [{ slice_id: 'form' }] }})
+    await expect(planner.plan({ orgId: 'o', tenantId: 't' }, 'local-only', databaseSpec, 'crud-panel')).resolves.toMatchObject({ output: { slices: [{ slice_id: 'form' }] }})
     expect(complete.mock.calls.at(-1)?.[3]).toContain('login')
     complete.mockResolvedValueOnce({ value: { slices: [{ slice_id: 'bad', title: 'Incompleto', description: 'Sem entrada', acceptance_criteria: ['Visível'], planned_files: ['content/app.json'] }] }, route: 'ollama', model: 'qwen' })
     await expect(planner.plan({ orgId: 'o', tenantId: 't' }, 'local-only', databaseSpec, 'form-database')).rejects.toMatchObject({ code: 'FORM_ENTRY_FILE_REQUIRED' })
@@ -300,12 +302,12 @@ describe('T-07: o planejador monta o prompt com TETO e com registro', () => {
     // A pergunta "o que exatamente o modelo viu?" passa a ter resposta sem
     // precisar reproduzir a execução.
     const planner = new PlannerEngine({ complete: responder() })
-    await planner.plan({ orgId: 'o', tenantId: 't' }, 'local-only', spec('Organizar contatos.'))
-    expect(planner.lastLedger).toBeDefined()
-    expect(planner.lastLedger!.included.map(item => item.id)).toContain('plan.spec')
-    expect(planner.lastLedger!.included.find(item => item.id === 'plan.spec')?.source).toBe('app-spec')
-    expect(planner.lastLedger!.included.some(item => item.kind === 'schema')).toBe(true)
-    expect(planner.lastLedger!.dropped).toEqual([])
+    const planned = await planner.plan({ orgId: 'o', tenantId: 't' }, 'local-only', spec('Organizar contatos.'))
+    expect(planned.ledger).toBeDefined()
+    expect(planned.ledger!.included.map(item => item.id)).toContain('plan.spec')
+    expect(planned.ledger!.included.find(item => item.id === 'plan.spec')?.source).toBe('app-spec')
+    expect(planned.ledger!.included.some(item => item.kind === 'schema')).toBe(true)
+    expect(planned.ledger!.dropped).toEqual([])
   })
 
   it('uma especificação ENORME falha dizendo que é de tamanho, e não de formato', async () => {
@@ -323,10 +325,10 @@ describe('T-07: o planejador monta o prompt com TETO e com registro', () => {
   it('o prompt continua tendo instrução e schema — o teto não come o essencial', async () => {
     const complete = responder()
     const planner = new PlannerEngine({ complete })
-    await planner.plan({ orgId: 'o', tenantId: 't' }, 'local-only', spec('Organizar contatos.'))
+    const planned = await planner.plan({ orgId: 'o', tenantId: 't' }, 'local-only', spec('Organizar contatos.'))
     const prompt = complete.mock.calls[0]![3] as string
     expect(prompt).toContain('schema_version')
-    expect(prompt.length).toBeLessThanOrEqual(planner.lastLedger!.budget)
+    expect(prompt.length).toBeLessThanOrEqual(planned.ledger!.budget)
   })
 })
 
@@ -375,8 +377,8 @@ describe('T-25: intake e etapa nova tambem passam pelo motor de contexto', () =>
       route: 'ollama', model: 'qwen',
     })
     const planner = new PlannerEngine({ complete })
-    await planner.slice({ orgId: 'o', tenantId: 't' }, 'local-only', validSpec, [], 'quero uma seção de contato')
-    const ledger = planner.lastLedger!
+    const sliced = await planner.slice({ orgId: 'o', tenantId: 't' }, 'local-only', validSpec, [], 'quero uma seção de contato')
+    const ledger = sliced.ledger
     const request = ledger.included.find(item => item.id === 'slice.request')
     expect(request).toBeDefined()
     expect(request!.source).toBe('slice-request')
@@ -412,9 +414,9 @@ describe('as habilidades chegam ao prompt do planejamento', () => {
 
   it('a habilidade que casa entra no prompt, com o texto conferido', async () => {
     const f = planejador()
-    await f.planner.plan(ATOR, 'local-only', validSpec)
+    const planned = await f.planner.plan(ATOR, 'local-only', validSpec)
     expect(f.complete.mock.calls[0]![3]).toContain(TEXTO)
-    expect(f.planner.lastSkills?.loaded).toEqual(['skill:formularios'])
+    expect(planned.skills?.loaded).toEqual(['skill:formularios'])
   })
 
   it('SEM ator completo o registro NAO e consultado', async () => {
@@ -425,42 +427,48 @@ describe('as habilidades chegam ao prompt do planejamento', () => {
       { complete: vi.fn().mockResolvedValue({ value: { slices: [{ slice_id: 's', title: 'P', description: 'M', acceptance_criteria: ['C'], planned_files: ['src/GeneratedApp.tsx'] }] }, route: 'ollama', model: 'qwen' }) },
       undefined, { cards, load: async () => TEXTO },
     )
-    await planner.plan({ orgId: 'o', tenantId: 't' }, 'local-only', validSpec)
+    const planned = await planner.plan({ orgId: 'o', tenantId: 't' }, 'local-only', validSpec)
     expect(cards).not.toHaveBeenCalled()
-    expect(planner.lastSkills).toBeUndefined()
+    expect(planned.skills).toBeUndefined()
   })
 
   it('habilidade que NAO casa nao entra, e o prompt continua o mesmo', async () => {
     const semCasar = planejador({ cards: [ficha({ trigger: 'contabilidade imposto nota' })] })
-    await semCasar.planner.plan(ATOR, 'local-only', validSpec)
+    const planned = await semCasar.planner.plan(ATOR, 'local-only', validSpec)
     expect(semCasar.complete.mock.calls[0]![3]).not.toContain(TEXTO)
-    expect(semCasar.planner.lastSkills?.selection.skipped).toEqual([{ skill_id: 'formularios', reason: 'NO_MATCH' }])
+    expect(planned.skills?.selection.skipped).toEqual([{ skill_id: 'formularios', reason: 'NO_MATCH' }])
   })
 
   it('a recusa do registro NAO derruba o planejamento', async () => {
     // Uma habilidade desligada nao pode levar junto o trabalho de quem pediu.
     const f = planejador({ load: async () => { throw new Error('Esta habilidade esta desligada.') } })
-    await expect(f.planner.plan(ATOR, 'local-only', validSpec)).resolves.toMatchObject({ slices: [{ slice_id: 's' }] })
-    expect(f.planner.lastSkills?.refused).toEqual([
+    const planned = await f.planner.plan(ATOR, 'local-only', validSpec)
+    expect(planned.output).toMatchObject({ slices: [{ slice_id: 's' }] })
+    expect(planned.skills?.refused).toEqual([
       { skill_id: 'formularios', reason: 'LOAD_FAILED', detail: 'Esta habilidade esta desligada.' },
     ])
     expect(f.complete.mock.calls[0]![3]).not.toContain(TEXTO)
   })
 
-  it('o relatorio das habilidades e ZERADO entre planejamentos', async () => {
-    // Um relatorio que sobrevive ao planejamento seguinte responde a pergunta
-    // "o que o modelo viu?" com o que ele viu da OUTRA vez.
+  it('o relatorio das habilidades pertence a CHAMADA, e nao ao motor', async () => {
+    // Era estado de instancia num motor compartilhado por todos os inquilinos,
+    // e a rota o lia DEPOIS de um `await`. A revisao adversarial reproduziu a
+    // corrida: a resposta de um inquilino saia com o contexto de outro.
     const f = planejador()
-    await f.planner.plan(ATOR, 'local-only', validSpec)
-    expect(f.planner.lastSkills?.loaded).toHaveLength(1)
-    await f.planner.plan({ orgId: 'o', tenantId: 't' }, 'local-only', validSpec)
-    expect(f.planner.lastSkills).toBeUndefined()
+    const comAtor = await f.planner.plan(ATOR, 'local-only', validSpec)
+    expect(comAtor.skills?.loaded).toHaveLength(1)
+    // Mesmo motor, chamada seguinte sem ator: o resultado desta NAO herda nada
+    // da anterior, porque nao ha nada guardado entre elas.
+    const semAtor = await f.planner.plan({ orgId: 'o', tenantId: 't' }, 'local-only', validSpec)
+    expect(semAtor.skills).toBeUndefined()
+    // E a primeira resposta continua intacta depois da segunda.
+    expect(comAtor.skills?.loaded).toHaveLength(1)
   })
 
   it('a procedencia da habilidade aparece no registro do contexto', async () => {
     const f = planejador()
-    await f.planner.plan(ATOR, 'local-only', validSpec)
-    const linha = f.planner.lastLedger?.included.find(item => item.id === 'skill:formularios')
+    const planned = await f.planner.plan(ATOR, 'local-only', validSpec)
+    const linha = planned.ledger?.included.find(item => item.id === 'skill:formularios')
     expect(linha?.source).toBe('integration:hub-1')
     expect(linha?.kind).toBe('instruction')
   })
@@ -475,8 +483,8 @@ describe('as habilidades chegam ao prompt do planejamento', () => {
       fields: [{ name: 'telefone', type: 'text', required: true }],
     }] }
     const f = planejador({ cards: [ficha({ trigger: 'telefone Contato' })] })
-    await f.planner.plan(ATOR, 'local-only', comEntidade, 'form-database')
-    expect(f.planner.lastSkills?.selection.skipped).toEqual([{ skill_id: 'formularios', reason: 'NO_MATCH' }])
+    const planned = await f.planner.plan(ATOR, 'local-only', comEntidade, 'form-database')
+    expect(planned.skills?.selection.skipped).toEqual([{ skill_id: 'formularios', reason: 'NO_MATCH' }])
     expect(f.complete.mock.calls[0]![3]).not.toContain(TEXTO)
   })
 
@@ -493,9 +501,9 @@ describe('as habilidades chegam ao prompt do planejamento', () => {
       cards: async () => [ficha({ body_chars: 800 })],
       load: async () => 'x'.repeat(800),
     })
-    await planner.plan(ATOR, 'local-only', validSpec)
-    expect(planner.lastSkills?.selection.skipped).toEqual([{ skill_id: 'formularios', reason: 'OVERSIZED' }])
-    expect(planner.lastSkills?.loaded).toEqual([])
+    const planned = await planner.plan(ATOR, 'local-only', validSpec)
+    expect(planned.skills?.selection.skipped).toEqual([{ skill_id: 'formularios', reason: 'OVERSIZED' }])
+    expect(planned.skills?.loaded).toEqual([])
   })
 
   it('sem registro montado, o planejamento acontece exatamente como antes', async () => {
@@ -504,8 +512,9 @@ describe('as habilidades chegam ao prompt do planejamento', () => {
       route: 'ollama', model: 'qwen',
     })
     const planner = new PlannerEngine({ complete })
-    await expect(planner.plan(ATOR, 'local-only', validSpec)).resolves.toMatchObject({ slices: [{ slice_id: 's' }] })
-    expect(planner.lastSkills).toBeUndefined()
+    const planned = await planner.plan(ATOR, 'local-only', validSpec)
+    expect(planned.output).toMatchObject({ slices: [{ slice_id: 's' }] })
+    expect(planned.skills).toBeUndefined()
   })
 })
 
@@ -539,17 +548,17 @@ describe('o que JA existe chega ao planejamento de uma MUDANCA', () => {
     // Num plano novo nao existe codigo ainda, e um resumo dizendo "o
     // aplicativo ja tem estes arquivos" seria falso.
     const f = planejador()
-    await f.planner.plan(ATOR2, 'local-only', validSpec, 'landing-page', undefined, { index: buildCodeIndex(APP) })
+    const planned = await f.planner.plan(ATOR2, 'local-only', validSpec, 'landing-page', undefined, { index: buildCodeIndex(APP) })
     expect(f.complete.mock.calls[0]![3]).not.toContain('src/lib/validacao.ts')
-    expect(f.planner.lastCode).toBeUndefined()
+    expect(planned.code).toBeUndefined()
   })
 
   it('o inventario entra como EVIDENCIA, e nao como instrucao', async () => {
     // Instrucao cortada pelo teto muda a regra; inventario cortado so
     // empobrece o plano — e a ultima linha dele ja avisa que pode faltar coisa.
     const f = planejador()
-    await f.planner.plan(ATOR2, 'local-only', validSpec, 'landing-page', 'trocar o botao', { index: buildCodeIndex(APP) })
-    const linha = f.planner.lastLedger?.included.find(item => item.id === 'plan.code')
+    const planned = await f.planner.plan(ATOR2, 'local-only', validSpec, 'landing-page', 'trocar o botao', { index: buildCodeIndex(APP) })
+    const linha = planned.ledger?.included.find(item => item.id === 'plan.code')
     expect(linha?.kind).toBe('evidence')
     expect(linha?.source).toBe('code-index')
   })
@@ -572,15 +581,15 @@ describe('o que JA existe chega ao planejamento de uma MUDANCA', () => {
     // para caber os dois e nao a especificacao. Um numero chutado aqui faria o
     // teste passar por coincidencia de tamanhos.
     const folgado = new PlannerEngine({ complete }, 100_000)
-    await folgado.plan(ATOR2, 'local-only', validSpec, 'landing-page', 'trocar o botao', { index: buildCodeIndex([...APP, ...gordo]) })
-    const tudo = folgado.lastLedger!
+    const solto = await folgado.plan(ATOR2, 'local-only', validSpec, 'landing-page', 'trocar o botao', { index: buildCodeIndex([...APP, ...gordo]) })
+    const tudo = solto.ledger
     const spec = tudo.included.find(item => item.id === 'plan.spec')!
     const apertado = tudo.chars - spec.chars
 
     const planner = new PlannerEngine({ complete }, apertado)
-    await planner.plan(ATOR2, 'local-only', validSpec, 'landing-page', 'trocar o botao', { index: buildCodeIndex([...APP, ...gordo]) })
-    const cortados = planner.lastLedger?.dropped.map(item => item.id) ?? []
-    const entraram = planner.lastLedger?.included.map(item => item.id) ?? []
+    const planned = await planner.plan(ATOR2, 'local-only', validSpec, 'landing-page', 'trocar o botao', { index: buildCodeIndex([...APP, ...gordo]) })
+    const cortados = planned.ledger?.dropped.map(item => item.id) ?? []
+    const entraram = planned.ledger?.included.map(item => item.id) ?? []
     expect(cortados, 'a especificacao devia ter sido cortada').toContain('plan.spec')
     expect(entraram, 'o inventario devia ter sobrevivido').toContain('plan.code')
   })
@@ -596,21 +605,61 @@ describe('o que JA existe chega ao planejamento de uma MUDANCA', () => {
     expect(f.complete.mock.calls[0]![3]).toContain('src/enorme.ts')
   })
 
-  it('o relatorio do inventario e ZERADO entre planejamentos', async () => {
-    // Um relatorio que sobrevive ao planejamento seguinte responde "o que o
-    // modelo viu?" com o que ele viu da OUTRA vez — e aqui a resposta errada
-    // e sobre um inventario de codigo que nem entrou.
+  it('o inventario pertence a CHAMADA, e nao ao motor', async () => {
+    // Guardado no motor, ele responderia "o que o modelo viu?" com o que o
+    // modelo viu da OUTRA vez — e num motor compartilhado por inquilinos, com o
+    // que o modelo viu de OUTRA organizacao.
     const f = planejador()
-    await f.planner.plan(ATOR2, 'local-only', validSpec, 'landing-page', 'trocar o botao', { index: buildCodeIndex(APP) })
-    expect(f.planner.lastCode).toBeDefined()
-    await f.planner.plan(ATOR2, 'local-only', validSpec)
-    expect(f.planner.lastCode).toBeUndefined()
+    const comMudanca = await f.planner.plan(ATOR2, 'local-only', validSpec, 'landing-page', 'trocar o botao', { index: buildCodeIndex(APP) })
+    expect(comMudanca.code).toBeDefined()
+    const semMudanca = await f.planner.plan(ATOR2, 'local-only', validSpec)
+    expect(semMudanca.code).toBeUndefined()
+    expect(comMudanca.code).toBeDefined()
   })
 
   it('sem inventario, o planejamento de mudanca acontece como antes', async () => {
     const f = planejador()
-    await f.planner.plan(ATOR2, 'local-only', validSpec, 'landing-page', 'trocar o botao')
-    expect(f.planner.lastCode).toBeUndefined()
+    const planned = await f.planner.plan(ATOR2, 'local-only', validSpec, 'landing-page', 'trocar o botao')
+    expect(planned.code).toBeUndefined()
     expect(f.complete.mock.calls[0]![3]).toContain('trocar o botao')
+  })
+})
+
+/**
+ * O VAZAMENTO ENTRE INQUILINOS que a revisao adversarial reproduziu.
+ *
+ * O planejador e criado UMA VEZ por processo e servido a todos. Enquanto o
+ * registro do contexto morava em campo de instancia, dois planejamentos
+ * concorrentes de organizacoes diferentes se intercalavam e a resposta de um
+ * saia com o contexto do outro — quais habilidades de terceiro a outra empresa
+ * tem instaladas, o que foi recusado, se o pedido dela era mudanca ou criacao.
+ *
+ * O teste faz o pedido do inquilino A DEMORAR de proposito e o de B terminar no
+ * meio dele. Se algo for guardado no motor de novo, A recebe o de B.
+ */
+describe('dois inquilinos planejando ao mesmo tempo', () => {
+  it('a resposta de um NUNCA carrega o contexto do outro', async () => {
+    const saida = { slices: [{ slice_id: 's', title: 'P', description: 'M', acceptance_criteria: ['C'], planned_files: ['src/GeneratedApp.tsx'] }] }
+    // O modelo do inquilino A demora; o de B responde na hora e termina DENTRO
+    // da janela em que A esta esperando.
+    const complete = vi.fn(async (scope: { orgId: string }) => {
+      if (scope.orgId === 'empresa-a') await new Promise(resolve => setTimeout(resolve, 40))
+      return { value: saida, route: 'ollama', model: 'qwen' }
+    })
+    const planner = new PlannerEngine({ complete } as never)
+
+    const [a, b] = await Promise.all([
+      planner.plan({ orgId: 'empresa-a', tenantId: 't' }, 'local-only', validSpec),
+      new Promise(resolve => setTimeout(resolve, 5)).then(async () =>
+        planner.plan({ orgId: 'empresa-b', tenantId: 't' }, 'local-only', validSpec, 'landing-page', 'o pedido secreto da empresa B')),
+    ])
+
+    // O pedido de mudanca de B e a marca: ele so existe no contexto de B.
+    const idsDeA = a.ledger.included.map(item => item.id)
+    const idsDeB = b.ledger.included.map(item => item.id)
+    expect(idsDeB).toContain('plan.change')
+    expect(idsDeA).not.toContain('plan.change')
+    const textoDeA = a.ledger.included.map(item => item.id).join(' ')
+    expect(textoDeA).not.toContain('change')
   })
 })

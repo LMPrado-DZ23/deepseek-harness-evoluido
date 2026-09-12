@@ -52,7 +52,15 @@ async function fixture(options: {
 } = {}) {
   const repository = new MemoryRepository(); let id = 0
   const service = new PromptToAppService({ repository, now: () => new Date('2026-09-03T12:00:00.000Z'), createId: () => `id-${++id}` })
-  const identity = { authenticate: vi.fn(() => Promise.resolve(session)), validateCsrf: vi.fn(), validateCsrfToken: vi.fn(),
+  const identity = {
+    // A organizacao vem do TOKEN DE SESSAO, e nao de uma variavel do teste: dois
+    // pedidos concorrentes precisam ser de inquilinos DIFERENTES para exercitar
+    // o vazamento que a revisao adversarial encontrou, e uma variavel
+    // compartilhada seria ela propria uma corrida.
+    authenticate: vi.fn((token: string) => Promise.resolve(
+      token.startsWith('session:') ? { ...session, org_id: token.slice(8), tenant_id: token.slice(8) } : session,
+    )),
+    validateCsrf: vi.fn(), validateCsrfToken: vi.fn(),
     assertRequestTrust: vi.fn(),
   }
   const tenancy = { authorizationFor: vi.fn((userId: string, orgId: string, tenantId: string) => ({ userId, orgId, tenantId, role: 'owner' as const })) }
@@ -73,6 +81,15 @@ async function fixture(options: {
   }
   const allowedHosts: string[] = []; const allowedOrigins: string[] = []
   const planner = new PlannerEngine(model)
+  // O que a ULTIMA chamada devolveu. Isto e estado do TESTE, e nao do motor:
+  // e essa diferenca que o achado da revisao adversarial cobra — o motor e um
+  // so para todos os inquilinos, o espiao aqui e um por fixture.
+  let planned: Awaited<ReturnType<PlannerEngine['plan']>> | undefined
+  const originalPlan = planner.plan.bind(planner)
+  planner.plan = async (...args: Parameters<PlannerEngine['plan']>) => {
+    planned = await originalPlan(...args)
+    return planned
+  }
   const server = createServer(createPromptToAppHttpHandler({
     service, identity: identity as unknown as StudioIdentityService,
     tenancy: tenancy as unknown as StudioTenancyService,
@@ -97,7 +114,11 @@ async function fixture(options: {
     cookie: `${SESSION_COOKIE}=session; ${CSRF_COOKIE}=csrf`, 'x-dz23-csrf': 'csrf',
   }
   const request = (path: string, init: RequestInit = {}) => fetch(`${origin}/api/studio/apps${path}`, { ...init, headers: { ...headers, ...(init.headers ?? {}) } })
-  return { request, service, repository, identity, tenancy, jobs, planner, allowedHosts, host }
+  /** O mesmo pedido, assinado como OUTRA organizacao. */
+  const requestAs = (org: string, path: string, init: RequestInit = {}) => request(path, {
+    ...init, headers: { ...(init.headers ?? {}), cookie: `${SESSION_COOKIE}=session:${org}; ${CSRF_COOKIE}=csrf` },
+  })
+  return { request, requestAs, service, repository, identity, tenancy, jobs, planner, allowedHosts, host, lastPlanned: () => planned }
 }
 
 describe('prompt-to-app HTTP boundary', () => {
@@ -441,13 +462,14 @@ describe('E-08: pontos de retorno e desfazer na porta HTTP', () => {
 })
 
 describe('o inventario do codigo no planejamento de mudanca', () => {
-  async function ate(f: Awaited<ReturnType<typeof fixture>>) {
-    const created = await (await f.request('/projects', { method: 'POST', body: JSON.stringify({
+  async function ate(f: Awaited<ReturnType<typeof fixture>>, org?: string) {
+    const pedir = (path: string, init: RequestInit) => (org === undefined ? f.request(path, init) : f.requestAs(org, path, init))
+    const created = await (await pedir('/projects', { method: 'POST', body: JSON.stringify({
       name: 'Site', original_brief: 'Quero apresentar meus serviços.', category: 'landing-page', privacy: 'local-only',
     }) })).json() as { project: { project_id: string } }
     const projectId = created.project.project_id
     for (const answer of ['Clientes locais', 'Conhecer os serviços', 'Serviços e contato']) {
-      await f.request(`/projects/${projectId}/intake/answer`, { method: 'POST', body: JSON.stringify({ answer, recommend: false }) })
+      await pedir(`/projects/${projectId}/intake/answer`, { method: 'POST', body: JSON.stringify({ answer, recommend: false }) })
     }
     return projectId
   }
@@ -474,7 +496,7 @@ describe('o inventario do codigo no planejamento de mudanca', () => {
     await f.request(`/projects/${projectId}/plan/change`, { method: 'POST', body: JSON.stringify({ reason: 'Mostrar o contato antes.' }) })
     expect((await f.request(`/projects/${projectId}/plan`, { method: 'POST', body: '{}' })).status).toBe(201)
     expect(codeContext).toHaveBeenCalledTimes(1)
-    expect(f.planner.lastCode?.join('\n')).toContain('src/lib/validacao.ts exporta: validar')
+    expect(f.lastPlanned()!.code?.join('\n')).toContain('src/lib/validacao.ts exporta: validar')
   })
 
   it('sem leitor montado, o planejamento de mudanca continua acontecendo', async () => {
@@ -486,7 +508,7 @@ describe('o inventario do codigo no planejamento de mudanca', () => {
     await f.request(`/projects/${projectId}/plan`, { method: 'POST', body: '{}' })
     await f.request(`/projects/${projectId}/plan/change`, { method: 'POST', body: JSON.stringify({ reason: 'Mostrar o contato antes.' }) })
     expect((await f.request(`/projects/${projectId}/plan`, { method: 'POST', body: '{}' })).status).toBe(201)
-    expect(f.planner.lastCode).toBeUndefined()
+    expect(f.lastPlanned()!.code).toBeUndefined()
   })
 
   it('leitor que devolve `undefined` NAO vira inventario vazio', async () => {
@@ -497,21 +519,60 @@ describe('o inventario do codigo no planejamento de mudanca', () => {
     await f.request(`/projects/${projectId}/plan`, { method: 'POST', body: '{}' })
     await f.request(`/projects/${projectId}/plan/change`, { method: 'POST', body: JSON.stringify({ reason: 'Mostrar o contato antes.' }) })
     expect((await f.request(`/projects/${projectId}/plan`, { method: 'POST', body: '{}' })).status).toBe(201)
-    expect(f.planner.lastCode).toBeUndefined()
+    expect(f.lastPlanned()!.code).toBeUndefined()
   })
 })
 
 describe('o plano diz o que o Studio consultou', () => {
-  async function ate(f: Awaited<ReturnType<typeof fixture>>) {
-    const created = await (await f.request('/projects', { method: 'POST', body: JSON.stringify({
+  async function ate(f: Awaited<ReturnType<typeof fixture>>, org?: string) {
+    const pedir = (path: string, init: RequestInit) => (org === undefined ? f.request(path, init) : f.requestAs(org, path, init))
+    const created = await (await pedir('/projects', { method: 'POST', body: JSON.stringify({
       name: 'Site', original_brief: 'Quero apresentar meus serviços.', category: 'landing-page', privacy: 'local-only',
     }) })).json() as { project: { project_id: string } }
     const projectId = created.project.project_id
     for (const answer of ['Clientes locais', 'Conhecer os serviços', 'Serviços e contato']) {
-      await f.request(`/projects/${projectId}/intake/answer`, { method: 'POST', body: JSON.stringify({ answer, recommend: false }) })
+      await pedir(`/projects/${projectId}/intake/answer`, { method: 'POST', body: JSON.stringify({ answer, recommend: false }) })
     }
     return projectId
   }
+
+  /**
+   * O VAZAMENTO ENTRE INQUILINOS que a revisao adversarial reproduziu.
+   *
+   * O planejador e criado UMA VEZ por processo e servido a todos. Enquanto o
+   * registro do contexto morava em campo de instancia, a rota o lia DEPOIS do
+   * `await` de `proposePlan` — e nessa janela outro pedido, de outra
+   * organizacao, ja tinha sobrescrito os tres campos. A resposta de um
+   * inquilino saia com o contexto do outro.
+   *
+   * O teste faz o modelo da organizacao A DEMORAR e o de B terminar dentro da
+   * janela. So o pedido de B tem mudanca, entao a marca e inconfundivel.
+   */
+  it('dois inquilinos planejando ao mesmo tempo: nenhum recebe o contexto do outro', async () => {
+    const f = await fixture()
+    const lento = f.service as unknown as { proposePlan: (...args: never[]) => Promise<unknown> }
+    const original = lento.proposePlan.bind(lento)
+    lento.proposePlan = async (...args: never[]) => {
+      // O atraso e NA ROTA, depois do planejamento: e exatamente onde a leitura
+      // do estado compartilhado acontecia.
+      await new Promise(resolve => setTimeout(resolve, 60))
+      return original(...args)
+    }
+    const projetoA = await ate(f, 'org-a')
+    const projetoB = await ate(f, 'org-b')
+    // B pede MUDANCA; A nao. `plan.change` so existe no contexto de B.
+    await f.requestAs('org-b', `/projects/${projetoB}/plan`, { method: 'POST', body: '{}' })
+    await f.requestAs('org-b', `/projects/${projetoB}/plan/change`, { method: 'POST', body: JSON.stringify({ reason: 'o pedido secreto da organizacao B' }) })
+
+    const [respostaA] = await Promise.all([
+      f.requestAs('org-a', `/projects/${projetoA}/plan`, { method: 'POST', body: '{}' }),
+      new Promise(resolve => setTimeout(resolve, 10)).then(async () =>
+        f.requestAs('org-b', `/projects/${projetoB}/plan`, { method: 'POST', body: '{}' })),
+    ])
+    const corpoA = await respostaA.json() as { consulted: { used: { label: string; source: string }[] } }
+    const fontesDeA = corpoA.consulted.used.map(item => item.source)
+    expect(fontesDeA).not.toContain('change-request')
+  })
 
   it('a resposta do plano carrega o que entrou, em portugues', async () => {
     // Tres motores guardavam a resposta para "o que exatamente o modelo viu?" e

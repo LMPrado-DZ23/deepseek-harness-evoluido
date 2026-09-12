@@ -354,7 +354,7 @@ export class PromptToAppService {
     actor: PromptToAppActor,
     projectId: string,
     request: string,
-    planner: { slice(scope: { orgId: string; tenantId: string }, privacy: RoutePrivacy, spec: AppSpecV1, existing: readonly { readonly title: string; readonly planned_files: readonly string[] }[], request: string, category: StudioProjectCategory): Promise<StudioPlanSlice> },
+    planner: { slice(scope: { orgId: string; tenantId: string }, privacy: RoutePrivacy, spec: AppSpecV1, existing: readonly { readonly title: string; readonly planned_files: readonly string[] }[], request: string, category: StudioProjectCategory): Promise<{ readonly slice: StudioPlanSlice }> },
     privacy: RoutePrivacy,
   ): Promise<StudioPlan> {
     this.#authorize(actor, 'project.write')
@@ -365,7 +365,7 @@ export class PromptToAppService {
     const project = this.project(actor, projectId)
     const plan = await this.plan(actor, projectId)
     const spec = (await this.latestSpec(actor, projectId)).app_spec
-    const slice = await planner.slice(
+    const { slice } = await planner.slice(
       { orgId: actor.orgId, tenantId: actor.tenantId }, privacy, spec,
       plan.slices.map(existing => ({ title: existing.title, planned_files: existing.planned_files })),
       text, project.category,

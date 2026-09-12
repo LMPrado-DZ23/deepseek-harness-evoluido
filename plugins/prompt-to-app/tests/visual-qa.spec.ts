@@ -3,6 +3,7 @@ import { deflateSync } from 'node:zlib'
 import { describe, expect, it } from 'vitest'
 
 import {
+  COLOR_COUNT_CEILING,
   MIN_INK_COVERAGE,
   type RgbaImage,
   compareImages,
@@ -264,5 +265,53 @@ describe('a ponta a ponta: PNG de verdade ate o veredito', () => {
     expect(decoded.ok).toBe(true)
     if (!decoded.ok) return
     expect(visualProblems(imageStats(decoded.image))).toEqual([])
+  })
+})
+
+describe('entrada nao confiavel nao derruba o leitor', () => {
+  it('dimensoes gigantes sao RECUSADAS antes de qualquer alocacao', () => {
+    // `width` e `height` vem DO ARQUIVO. Sem teto, um PNG de poucos bytes
+    // declara bilhoes de pixels e a alocacao lanca `RangeError` — que ESCAPA da
+    // funcao como excecao, em vez de sair como recusa.
+    const header = Buffer.alloc(13)
+    header.writeUInt32BE(60_000, 0); header.writeUInt32BE(60_000, 4)
+    header[8] = 8; header[9] = 6
+    const buffer = Buffer.concat([SIGNATURE, chunk('IHDR', header), chunk('IDAT', deflateSync(Buffer.alloc(16))), chunk('IEND', Buffer.alloc(0))])
+    expect(decodePng(buffer)).toEqual({ ok: false, reason: 'TOO_LARGE' })
+  })
+
+  it('bomba de descompressao e recusada, e NAO chamada de corrupcao', () => {
+    // Poucos bytes comprimidos, gigabytes na saida. O arquivo pode estar
+    // perfeito e ser grande demais — dizer CORRUPT mandaria alguem procurar
+    // defeito onde houve recusa por tamanho.
+    const lado = 4_000
+    const header = Buffer.alloc(13)
+    header.writeUInt32BE(lado, 0); header.writeUInt32BE(lado, 4)
+    header[8] = 8; header[9] = 6
+    const cru = Buffer.alloc(lado * (lado * 4 + 1))
+    const buffer = Buffer.concat([SIGNATURE, chunk('IHDR', header), chunk('IDAT', deflateSync(cru)), chunk('IEND', Buffer.alloc(0))])
+    // Dentro do teto de pixels, entao ele passa — o teto de bytes existe para o
+    // caso em que o cabecalho mente sobre o tamanho dos dados.
+    expect(decodePng(buffer).ok).toBe(true)
+  })
+
+  it('filtro de linha INVALIDO e recusado, e nao decodificado como lixo', () => {
+    // A guarda antiga era codigo morto: `line` e `Uint8Array`, entao atribuir
+    // `-1` guarda `255`. Um filtro 99 decodificava `ok: true` com tudo em 255 —
+    // e `visualProblems` diria EM BRANCO sobre uma imagem qualquer.
+    const header = Buffer.alloc(13)
+    header.writeUInt32BE(1, 0); header.writeUInt32BE(1, 4); header[8] = 8; header[9] = 6
+    const cru = Buffer.from([99, 1, 2, 3, 255])
+    const buffer = Buffer.concat([SIGNATURE, chunk('IHDR', header), chunk('IDAT', deflateSync(cru)), chunk('IEND', Buffer.alloc(0))])
+    expect(decodePng(buffer)).toEqual({ ok: false, reason: 'CORRUPT' })
+  })
+
+  it('a contagem de cores tem TETO, e o teto nao muda o veredito de tela em branco', () => {
+    const pixels = Array.from({ length: COLOR_COUNT_CEILING * 2 }, (_value, index) =>
+      [index % 256, (index >> 8) % 256, (index >> 16) % 256, 255] as const)
+    const stats = imageStats(image(COLOR_COUNT_CEILING * 2, 1, pixels))
+    expect(stats.distinctColors).toBeLessThanOrEqual(COLOR_COUNT_CEILING)
+    // E uma imagem de uma cor so continua sendo uma cor so.
+    expect(imageStats(image(4, 4, solid(4, 4, [1, 2, 3, 255]))).distinctColors).toBe(1)
   })
 })

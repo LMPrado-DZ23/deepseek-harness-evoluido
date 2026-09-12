@@ -209,6 +209,15 @@ describe('Prompt-to-App pipeline', () => {
 
     expect(result.state).not.toBe('VERIFIED_PROTOTYPE')
     expect(f.transitions).not.toContain('VERIFIED_PROTOTYPE')
+    // E o REGISTRO nao fica dizendo `PASSED`. Ele foi gravado como aprovado um
+    // instante antes da revisao rodar; sem a regravacao, o armazenamento
+    // guardaria uma execucao aprovada de um projeto reprovado — a propria
+    // revisao criando a contradicao que ela existe para denunciar.
+    // A ULTIMA gravacao desta execucao. O duble ACUMULA as chamadas; o
+    // armazenamento de verdade grava por chave, entao a ultima e a que fica.
+    const ultimo = f.runs.at(-1)!
+    expect(ultimo.state).toBe('FAILED')
+    expect(ultimo.artifact_sha256).toBeNull()
   })
 
   it('a aprovação CARREGA o aviso sobre critérios que ninguém conferiu por máquina', async () => {
@@ -220,7 +229,11 @@ describe('Prompt-to-App pipeline', () => {
     const result = await f.pipeline.run(actor, 'project', { generate: vi.fn(async () => cleanGeneration) })
 
     expect(result.state).toBe('VERIFIED_PROTOTYPE')
-    expect(result.message).toContain('Confira você mesmo')
+    // Em campo PROPRIO, e nao dentro de `message`: `message` e renderizado como
+    // "Codigo da falha" em fonte de codigo, debaixo de "Detalhes tecnicos" — o
+    // lugar que o produto ensina a pessoa a ignorar.
+    expect(result.notice).toContain('Confira você mesmo')
+    expect(result.message).not.toContain('Confira você mesmo')
   })
 
   it('conclui a jornada quando o construtor declara imagem e política, gravando as quatro atestações', async () => {
@@ -651,14 +664,15 @@ describe('Prompt-to-App pipeline', () => {
     expect(generator.generate).toHaveBeenCalledTimes(2)
     expect(result.attempts).toBe(2)
     expect(result.state).toBe('BUILD_FAILED')
-    // A frase da REPETICAO chega a pessoa, e nao o diagnostico cru: sem ela,
-    // uma criacao que parou na segunda tentativa pareceria ter simplesmente
-    // falhado, e a pessoa apertaria "tentar de novo" sem saber de nada.
-    expect(result.message).toContain('mesmo código')
+    // A frase da REPETICAO chega a pessoa em campo PROPRIO, e nao misturada ao
+    // diagnostico cru: sem ela, uma criacao que parou na segunda tentativa
+    // pareceria ter simplesmente falhado, e a pessoa apertaria "tentar de novo"
+    // sem saber de nada.
+    expect(result.notice).toContain('mesmo código')
     // E ela diz QUAL tentativa se repetiu.
-    expect(result.message).toContain('tentativa 1')
+    expect(result.notice).toContain('tentativa 1')
     // Mas NAO afirma que a proxima falharia: o gerador nao e deterministico.
-    expect(result.message).not.toMatch(/vai falhar|não funciona|impossível/iu)
+    expect(result.notice).not.toMatch(/vai falhar|não funciona|impossível/iu)
     // E ela NAO afirma que a proxima falharia: o gerador nao e deterministico.
     expect(result.message).not.toMatch(/vai falhar|não funciona|impossível/iu)
   })

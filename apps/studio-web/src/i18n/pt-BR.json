@@ -83,7 +83,14 @@
     "capabilityNo": "Criar um aplicativo: não dá agora.",
     "capabilityUnknown": "Criar um aplicativo: ninguém conferiu ainda.",
     "capabilityBlockedBy": "O que está segurando: {blockedBy}.",
-    "capabilityNeverProbed": "Nada foi criado ainda nesta instalação, então ninguém exercitou o caminho inteiro."
+    "capabilityNeverProbed": "Nada foi criado ainda nesta instalação, então ninguém exercitou o caminho inteiro.",
+    "capabilityNames": {
+      "modelo": "o serviço de inteligência artificial",
+      "construtor": "o ambiente isolado de criação",
+      "armazenamento": "onde o Studio guarda seus projetos",
+      "criar-aplicativo": "criar um aplicativo"
+    },
+    "capabilityStale": "Criar um aplicativo: funcionou da última vez, mas faz mais de uma hora — dá para tentar."
   },
   "account": {
     "signOut": "Sair",
@@ -208,9 +215,15 @@
     "addBusy": "Montando a etapa…",
     "addNote": "Nós é que escolhemos quais arquivos a etapa nova pode criar — assim ela não atropela nenhuma das outras. Você diz o que falta; o resto é conosco.",
     "consultedTitle": "O que o Studio consultou para montar este plano",
-    "consultedHelp": "Isto é tudo o que o Studio leu antes de escrever o plano abaixo.",
-    "consultedIncomplete": "Nem tudo coube: o plano abaixo foi montado sem uma parte do que existia. Vale conferir com mais atenção.",
-    "consultedSkillsTitle": "Habilidades instaladas que não foram usadas"
+    "consultedHelp": "O que o Studio leu antes de escrever o plano abaixo.",
+    "consultedIncomplete": "nem tudo coube: o plano abaixo foi montado sem uma parte do que existia. Se faltar algo no plano, descreva em pedidos menores.",
+    "consultedSkillsTitle": "Habilidades instaladas que não foram usadas",
+    "consultedTitleGap": "O que o Studio consultou — e o que ficou de fora",
+    "consultedNothing": "O Studio não registrou o que consultou desta vez.",
+    "consultedAttention": "Atenção —",
+    "consultedUnreadCode": "o Studio não conseguiu ler o aplicativo inteiro; o plano abaixo foi montado sem uma parte dele. Confira com atenção o que ele propõe mexer.",
+    "consultedDroppedTitle": "O que ficou de fora",
+    "consultedDuplicate": "já estava no pedido com outro nome, nada se perdeu"
   },
   "creation": {
     "title": "Criar e testar o protótipo",

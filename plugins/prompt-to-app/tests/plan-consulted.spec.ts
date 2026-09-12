@@ -17,7 +17,7 @@ function ledger(over: Partial<ContextLedger> = {}): ContextLedger {
 describe('o que a pessoa LE sobre o que o Studio consultou', () => {
   it('o identificador interno NUNCA aparece', () => {
     // Ele e nome de variavel, e mostra-lo troca uma explicacao por um enigma.
-    const view = consultedView(ledger(), undefined, undefined)
+    const view = consultedView(ledger(), undefined, false)
     const texto = JSON.stringify(view.used.map(item => item.label))
     for (const id of ['plan.spec', 'plan.only', 'skill:', 'research:']) {
       expect(texto, id).not.toContain(id)
@@ -27,7 +27,7 @@ describe('o que a pessoa LE sobre o que o Studio consultou', () => {
   it('o formato da resposta NAO entra na lista', () => {
     // O esquema e mecanica interna: mostra-lo encheria a lista com linhas que
     // nao dizem nada a quem le.
-    const view = consultedView(ledger(), undefined, undefined)
+    const view = consultedView(ledger(), undefined, false)
     expect(view.used).toHaveLength(2)
   })
 
@@ -45,13 +45,13 @@ describe('o que a pessoa LE sobre o que o Studio consultou', () => {
     // montado sobre tudo.
     const view = consultedView(ledger({
       dropped: [{ id: 'plan.spec', source: 'app-spec', chars: 100, reason: 'BUDGET' }],
-    }), undefined, undefined)
+    }), undefined, false)
     expect(view.dropped).toHaveLength(1)
     expect(view.dropped[0]!.label).toBe(labelFor('plan.spec', 'app-spec'))
   })
 
   it('coube tudo devolve lista de descartados VAZIA', () => {
-    expect(consultedView(ledger(), undefined, undefined).dropped).toEqual([])
+    expect(consultedView(ledger(), undefined, false).dropped).toEqual([])
   })
 })
 
@@ -68,48 +68,55 @@ describe('as habilidades recusadas, e as que simplesmente nao tinham a ver', () 
     // problema nenhum.
     const view = consultedView(ledger(), relatorio({
       selection: { chosen: [], skipped: [{ skill_id: 'x', reason: 'NO_MATCH' }, { skill_id: 'y', reason: 'DUPLICATE' }], declared_chars: 0 },
-    }), undefined)
+    }), false)
     expect(view.refusedSkills).toEqual([])
   })
 
   it('desligada, grande demais e sem espaco sao TRES frases diferentes', () => {
     // As tres mandam a pessoa fazer coisas diferentes: uma pede ligar, outra
     // pede uma habilidade menor, a terceira pede um pedido menor.
-    const frases = ['DISABLED', 'OVERSIZED', 'BUDGET'].map(skillRefusalLabel)
+    const frases = ['DISABLED', 'OVERSIZED', 'BUDGET'].map(reason => skillRefusalLabel(reason, 'formularios'))
     expect(new Set(frases).size).toBe(3)
+    // E as tres dizem QUAL habilidade: sem o nome, tres recusas viram tres
+    // linhas identicas e a pessoa nao tem como saber qual ligar.
+    for (const frase of frases) expect(frase).toContain('formularios')
   })
 
   it('texto que nao bate com o declarado tem frase propria, e ela e sobre a HABILIDADE', () => {
-    const frase = skillRefusalLabel('SIZE_MISMATCH')
-    expect(frase).toContain('não é o que ela declarou')
+    const frase = skillRefusalLabel('SIZE_MISMATCH', 'formularios')
+    // A frase antiga soava como incompatibilidade de versao. `SIZE_MISMATCH` e
+    // o registro ter descrito uma coisa e entregue outra — a forma de um pacote
+    // passar instrucao que ninguem aprovou.
+    expect(frase).toContain('pode ter sido alterada depois de instalada')
   })
 
   it('recusa de ESCOLHA e recusa de CARGA aparecem juntas', () => {
     const view = consultedView(ledger(), relatorio({
       selection: { chosen: [], skipped: [{ skill_id: 'desligada', reason: 'DISABLED' }], declared_chars: 0 },
       refused: [{ skill_id: 'mentiu', reason: 'SIZE_MISMATCH', declared: 10, actual: 20 }],
-    }), undefined)
+    }), false)
     expect(view.refusedSkills.map(item => item.source)).toEqual(['desligada', 'mentiu'])
   })
 
   it('sem habilidades, nao ha recusa nenhuma', () => {
-    expect(consultedView(ledger(), undefined, undefined).refusedSkills).toEqual([])
+    expect(consultedView(ledger(), undefined, false).refusedSkills).toEqual([])
   })
 })
 
 describe('o inventario incompleto e DITO', () => {
-  it('a frase de incompletude do proprio inventario e o que decide', () => {
-    // Reconstruir a condicao aqui criaria uma segunda verdade que diverge no
-    // primeiro conserto de um dos lados.
-    expect(consultedView(ledger(), undefined, ['Esta lista está INCOMPLETA: ...']).incompleteCode).toBe(true)
-    expect(consultedView(ledger(), undefined, ['O aplicativo já tem estes arquivos:']).incompleteCode).toBe(false)
-    expect(consultedView(ledger(), undefined, undefined).incompleteCode).toBe(false)
+  it('a incompletude chega como FATO, e nao como palavra dentro de um texto', () => {
+    // A primeira versao procurava a substring `INCOMPLETA` no resumo — e esse
+    // texto vem do CATALOGO DE TRADUCAO. Traduzir o produto apagaria o aviso em
+    // silencio, e a pessoa aprovaria um plano montado sobre codigo que ninguem
+    // leu inteiro. Falha do lado errado, achada pela revisao adversarial.
+    expect(consultedView(ledger(), undefined, true).incompleteCode).toBe(true)
+    expect(consultedView(ledger(), undefined, false).incompleteCode).toBe(false)
   })
 })
 
 describe('sem registro de contexto, nao ha o que contar', () => {
   it('devolve tudo vazio, e nao inventa uma lista', () => {
-    expect(consultedView(undefined, undefined, undefined))
+    expect(consultedView(undefined, undefined, false))
       .toEqual({ used: [], dropped: [], refusedSkills: [], incompleteCode: false })
   })
 })

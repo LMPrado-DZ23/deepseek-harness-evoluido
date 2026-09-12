@@ -108,15 +108,53 @@ describe('o painel do que o Studio consultou', () => {
   it('o que NAO COUBE vira aviso, e ele vem ANTES da lista', () => {
     // Quem le precisa saber que a lista tem consequencia antes de ler os itens.
     const html = renderToStaticMarkup(createElement(ConsultedPanel, {
-      consulted: consultado({ dropped: [{ label: 'O que você descreveu', source: 'app-spec' }] }),
+      consulted: consultado({ dropped: [{ label: 'O que você descreveu', source: 'app-spec', reason: 'BUDGET' }] }),
     }))
-    expect(html).toContain('role="alert"')
+    expect(html).toContain(t.plan.consultedIncomplete)
     expect(html.indexOf(t.plan.consultedIncomplete)).toBeLessThan(html.indexOf('plan-consulted-dropped'))
   })
 
-  it('inventario incompleto tambem levanta o aviso, mesmo sem nada cortado', () => {
+  it('o painel ABRE sozinho quando faltou alguma coisa, e o titulo diz isso', () => {
+    // Fechado e com o mesmo titulo, nao existia motivo nenhum para alguem
+    // clicar — e a informacao que mais importa e a que so aparece depois.
+    const comFalta = renderToStaticMarkup(createElement(ConsultedPanel, {
+      consulted: consultado({ dropped: [{ label: 'O que você descreveu', source: 'app-spec', reason: 'BUDGET' }] }),
+    }))
+    expect(comFalta).toContain('open=""')
+    expect(comFalta).toContain(t.plan.consultedTitleGap)
+    const semFalta = renderToStaticMarkup(createElement(ConsultedPanel, { consulted: consultado() }))
+    expect(semFalta).not.toContain('open=""')
+    expect(semFalta).toContain(t.plan.consultedTitle)
+  })
+
+  it('o aviso NAO depende de cor: a palavra Atencao faz o trabalho sozinha', () => {
     const html = renderToStaticMarkup(createElement(ConsultedPanel, { consulted: consultado({ incompleteCode: true }) }))
-    expect(html).toContain(t.plan.consultedIncomplete)
+    expect(html).toContain(t.plan.consultedAttention)
+  })
+
+  it('DUPLICADA nao levanta aviso: nada se perdeu', () => {
+    // Alarme falso sobre duplicata desgasta a linha que precisa ser levada a
+    // serio, que e a do que NAO COUBE.
+    const html = renderToStaticMarkup(createElement(ConsultedPanel, {
+      consulted: consultado({ dropped: [{ label: 'Uma regra do Studio', source: 'x', reason: 'DUPLICATE' }] }),
+    }))
+    expect(html).not.toContain(t.plan.consultedIncomplete)
+    // Mas ela ainda aparece na lista, DITA como duplicada.
+    expect(html).toContain(t.plan.consultedDuplicate)
+  })
+
+  it('inventario que nao pode ser lido tem frase PROPRIA, e nao a de nao caber', () => {
+    // "Nao coube" manda encurtar o texto; nao ter conseguido ler o aplicativo
+    // nao tem nada a ver com o tamanho do que a pessoa escreveu.
+    const html = renderToStaticMarkup(createElement(ConsultedPanel, { consulted: consultado({ incompleteCode: true }) }))
+    expect(html).toContain(t.plan.consultedUnreadCode)
+    expect(html).not.toContain(t.plan.consultedIncomplete)
+  })
+
+  it('lista vazia do que foi consultado DIZ que esta vazia', () => {
+    // Um `ul` vazio e indistinguivel de painel quebrado.
+    const html = renderToStaticMarkup(createElement(ConsultedPanel, { consulted: consultado({ used: [] }) }))
+    expect(html).toContain(t.plan.consultedNothing)
   })
 
   it('habilidade recusada aparece com titulo proprio', () => {

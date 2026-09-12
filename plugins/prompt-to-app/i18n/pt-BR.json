@@ -169,20 +169,20 @@
     "hashIsNotSignature": "HASH_NAO_E_ASSINATURA: integridade verificavel, origem nao provada"
   },
   "consulted": {
-    "skill": "Uma habilidade instalada ({source})",
+    "skill": "Uma habilidade instalada",
     "research": "Uma informação pesquisada ({source})",
     "code": "O código que o aplicativo já tem",
     "spec": "O que você descreveu",
     "change": "A mudança que você pediu",
     "schema": "O formato da resposta",
     "rule": "Uma regra do Studio",
-    "other": "Outra informação ({source})",
-    "skillDisabled": "Uma habilidade não foi usada porque está desligada",
-    "skillTooBig": "Uma habilidade não foi usada porque é grande demais para caber junto do seu pedido",
-    "skillNoRoom": "Uma habilidade não foi usada porque não sobrou espaço",
-    "skillMismatch": "Uma habilidade não foi usada porque o texto dela não é o que ela declarou",
-    "skillUnreadable": "Uma habilidade não foi usada porque o texto dela não pôde ser lido",
-    "skillOther": "Uma habilidade não foi usada"
+    "other": "Outra informação",
+    "skillDisabled": "A habilidade {skill} não foi usada porque está desligada",
+    "skillTooBig": "A habilidade {skill} não foi usada porque é grande demais para caber junto do seu pedido",
+    "skillNoRoom": "A habilidade {skill} não foi usada porque não sobrou espaço",
+    "skillMismatch": "A habilidade {skill} não foi usada porque o conteúdo dela não confere com o que ela diz ser — pode ter sido alterada depois de instalada. Vale avisar quem cuida do servidor.",
+    "skillUnreadable": "A habilidade {skill} não foi usada porque o texto dela não pôde ser lido",
+    "skillOther": "A habilidade {skill} não foi usada"
   },
   "review": {
     "contradicted": "A conferência independente encontrou {count} ponto(s) em que o registro desta criação diz o contrário do que ela afirmou. Ela não pode ser tratada como protótipo verificado.",

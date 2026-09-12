@@ -297,7 +297,7 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
         // descartado logo em seguida pelo próprio planejador.
         const change = previous?.status === 'CHANGE_REQUESTED' ? previous.change_request ?? undefined : undefined
         const code = change === undefined ? undefined : await config.codeContext?.(actor, projectId)
-        const output = await config.planner.plan(
+        const planned = await config.planner.plan(
           // O ATOR inteiro, e não só o escopo: é o registro de habilidades que
           // precisa de quem pergunta, e ele confere papel. Passar meio ator
           // faria o planejamento acontecer sem habilidade nenhuma e sem dizer
@@ -305,13 +305,20 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
           { orgId: actor.orgId, tenantId: actor.tenantId, userId: actor.userId, role: actor.role },
           project.privacy, spec.app_spec, project.category, change, code,
         )
-        // O que o Studio CONSULTOU sai JUNTO do plano, e não numa rota
-        // separada: uma segunda chamada leria o estado do planejador DEPOIS de
-        // outro pedido já ter passado por ele, e a resposta seria sobre o plano
-        // errado.
+        // O que o Studio CONSULTOU sai JUNTO do plano, e vem do RETORNO da
+        // chamada — nunca de campo do planejador.
+        //
+        // A primeira versao lia `config.planner.lastLedger` aqui. O planejador
+        // e criado UMA VEZ por processo e servido a todos os inquilinos, e esta
+        // leitura acontecia DEPOIS do `await` de `proposePlan`: nessa janela
+        // outro pedido, de outra organizacao, ja tinha sobrescrito os campos, e
+        // a resposta saia com o contexto dela. A revisao adversarial REPRODUZIU
+        // a corrida. O valor devolvido pela chamada nao tem essa janela: ele
+        // pertence a quem o pediu, e a mais ninguem.
+        const consulted = consultedView(planned.ledger, planned.skills, planned.codeIncomplete)
         return json(response, 201, {
-          plan: await config.service.proposePlan(actor, projectId, output.slices),
-          consulted: consultedView(config.planner.lastLedger, config.planner.lastSkills, config.planner.lastCode),
+          plan: await config.service.proposePlan(actor, projectId, planned.output.slices),
+          consulted,
         })
       }
       if (request.method === 'POST' && matched.suffix === '/plan/change') {
