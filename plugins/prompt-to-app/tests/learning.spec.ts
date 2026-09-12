@@ -4,6 +4,8 @@ import {
   MAX_ERROR_RATE,
   MIN_OCCASIONS,
   type Observation,
+  type ObservedRun,
+  observationsFrom,
   VALIDATION_WINDOW_DAYS,
   applicableRules,
   deriveRules,
@@ -203,5 +205,109 @@ describe('varios padroes juntos', () => {
 
   it('lista vazia nao inventa regra nenhuma', () => {
     expect(derive([], ['x'])).toEqual([])
+  })
+})
+
+describe('observationsFrom — o que o registro sabe responder sozinho', () => {
+  function run(overrides: Partial<ObservedRun> = {}): ObservedRun {
+    return {
+      project_id: 'p', run_id: 'r', operation_id: 'op', attempt: 1,
+      state: 'FAILED', failure_code: 'build: exit 1',
+      finished_at: recently.toISOString(), started_at: recently.toISOString(),
+      ...overrides,
+    }
+  }
+
+  function ler(runs: readonly ObservedRun[]) {
+    return observationsFrom(runs, { now: NOW })
+  }
+
+  it('falhou e depois PASSOU na mesma operacao: a recuperacao valeu', () => {
+    const { observations } = ler([run(), run({ run_id: 'r2', attempt: 2, state: 'PASSED', failure_code: null })])
+    expect(observations).toEqual([{ pattern: 'recuperou:build: exit 1', occasion: 'p/op', held: true, at: recently }])
+  })
+
+  it('falhou e NUNCA passou: a recuperacao nao valeu', () => {
+    const { observations } = ler([run(), run({ run_id: 'r2', attempt: 2 })])
+    expect(observations).toEqual([{ pattern: 'recuperou:build: exit 1', occasion: 'p/op', held: false, at: recently }])
+  })
+
+  it('tres tentativas da MESMA criacao sao UMA ocasiao', () => {
+    // Tres tentativas de um laco nao sao tres evidencias independentes.
+    const { observations } = ler([run(), run({ run_id: 'r2', attempt: 2 }), run({ run_id: 'r3', attempt: 3 })])
+    expect(observations).toHaveLength(1)
+  })
+
+  it('a tentativa que falhou NAO conta contra a criacao que a seguinte salvou', () => {
+    // O desfecho e por OPERACAO. Marcar cada tentativa separadamente faria a
+    // tentativa 2 contar contra uma criacao que a 3 salvou.
+    const { observations } = ler([
+      run({ attempt: 1 }), run({ run_id: 'r2', attempt: 2 }),
+      run({ run_id: 'r3', attempt: 3, state: 'PASSED', failure_code: null }),
+    ])
+    expect(observations[0]!.held).toBe(true)
+  })
+
+  it('operacoes DIFERENTES sao ocasioes diferentes', () => {
+    const { observations } = ler([run(), run({ operation_id: 'op2', run_id: 'r2' })])
+    expect(observations).toHaveLength(2)
+    expect(new Set(observations.map(item => item.occasion)).size).toBe(2)
+  })
+
+  it('a ocasiao carrega o PROJETO: um projeto nao aprende com o vizinho', () => {
+    const { observations } = ler([run({ project_id: 'outro' })])
+    expect(observations[0]!.occasion).toBe('outro/op')
+  })
+
+  it('execucao que nao TERMINOU nao observa nada', () => {
+    expect(ler([run({ state: 'RUNNING' })]).observations).toEqual([])
+    expect(ler([run({ state: 'CANCELLED' })]).observations).toEqual([])
+  })
+
+  it('falha SEM assinatura nao vira padrao', () => {
+    // Um padrao chamado `recuperou:` nao diz nada e juntaria falhas distintas.
+    expect(ler([run({ failure_code: null })]).observations).toEqual([])
+    expect(ler([run({ failure_code: '' })]).observations).toEqual([])
+  })
+
+  it('fora da janela nao entra, e do FUTURO tambem nao', () => {
+    const velha = new Date(NOW.getTime() - (VALIDATION_WINDOW_DAYS + 1) * 86_400_000).toISOString()
+    const futura = new Date(NOW.getTime() + 60_000).toISOString()
+    expect(ler([run({ finished_at: velha, started_at: velha })]).observations).toEqual([])
+    expect(ler([run({ finished_at: futura, started_at: futura })]).observations).toEqual([])
+  })
+
+  it('data ilegivel e DESCARTADA, e nao tratada como agora', () => {
+    expect(ler([run({ finished_at: 'ontem', started_at: 'ontem' })]).observations).toEqual([])
+  })
+
+  it('sem `finished_at`, vale quando ela COMECOU', () => {
+    expect(ler([run({ finished_at: null })]).observations).toHaveLength(1)
+  })
+
+  it('a leitura DECLARA a contraprova porque percorreu a janela inteira', () => {
+    // Ela nao filtra por desfecho: toda ocasiao em que a condicao apareceu
+    // entrou, tenha dado certo ou errado. E isso que `challengedPatterns`
+    // significa — e um leitor que consultasse so os sucessos nao poderia
+    // declarar nada.
+    const { challenged } = ler([run(), run({ operation_id: 'op2', run_id: 'r2', failure_code: 'test: exit 1' })])
+    expect([...challenged].sort()).toEqual(['recuperou:build: exit 1', 'recuperou:test: exit 1'])
+  })
+
+  it('de ponta a ponta: tres ocasioes contestadas viram REGRA', () => {
+    const runs = [0, 1, 2].flatMap(index => [
+      run({ operation_id: `op${String(index)}`, run_id: `a${String(index)}` }),
+      run({ operation_id: `op${String(index)}`, run_id: `b${String(index)}`, state: 'PASSED', failure_code: null }),
+    ])
+    const { observations, challenged } = ler(runs)
+    const rules = deriveRules(observations, { now: NOW, challengedPatterns: challenged })
+    expect(rules).toHaveLength(1)
+    expect(rules[0]).toMatchObject({ status: 'VALIDATED', supporting: 3, contradicting: 0 })
+  })
+
+  it('de ponta a ponta: sem ocasioes bastantes ela fica CANDIDATA', () => {
+    const { observations, challenged } = ler([run(), run({ run_id: 'r2', state: 'PASSED', failure_code: null })])
+    const rules = deriveRules(observations, { now: NOW, challengedPatterns: challenged })
+    expect(rules[0]).toMatchObject({ status: 'CANDIDATE', reason: 'TOO_FEW_OCCASIONS' })
   })
 })

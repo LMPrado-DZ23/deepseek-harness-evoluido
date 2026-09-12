@@ -195,3 +195,80 @@ export function applicableRules(rules: readonly Rule[]): readonly Rule[] {
 export function ruleEvidence(rule: Rule): string {
   return `${rule.pattern} (${rule.supporting}/${rule.supporting + rule.contradicting})`
 }
+
+/**
+ * Uma execucao terminada, como o registro a guarda.
+ *
+ * So o que o aprendizado precisa: quando, de que projeto, em que tentativa, se
+ * passou, e o que falhou quando nao passou.
+ */
+export interface ObservedRun {
+  readonly project_id: string
+  readonly run_id: string
+  readonly operation_id: string
+  readonly attempt: number
+  readonly state: string
+  readonly failure_code: string | null
+  readonly finished_at: string | null
+  readonly started_at: string
+}
+
+/**
+ * O que o pipeline consegue observar sem inventar nada.
+ *
+ * O padrao e `recuperou:<falha>`: a condicao e uma tentativa ter falhado com
+ * aquela assinatura, e o desfecho e a criacao ter CHEGADO a passar depois. E a
+ * unica coisa util que o registro sabe responder sozinho — e ela e util de
+ * verdade, porque a pergunta "vale a pena tentar de novo depois desta falha?"
+ * e a que decide gastar ou nao a proxima tentativa.
+ *
+ * A OCASIAO e a operacao inteira, e nao a tentativa: tres tentativas da mesma
+ * criacao sao um laco de repeticao, e conta-las como tres diria que a evidencia
+ * e mais forte do que e — a mesma regra da memoria de falha na OS-60.
+ *
+ * O DESFECHO e por operacao: se ALGUMA tentativa daquela operacao passou depois
+ * da falha, a recuperacao valeu ali. Marcar cada tentativa separadamente faria
+ * a tentativa 2 que falhou contar contra uma criacao que a 3 salvou.
+ */
+export function observationsFrom(
+  runs: readonly ObservedRun[],
+  options: { readonly now: Date; readonly windowDays?: number },
+): { readonly observations: readonly Observation[]; readonly challenged: readonly string[] } {
+  const windowMs = (options.windowDays ?? VALIDATION_WINDOW_DAYS) * 24 * 60 * 60 * 1000
+  // Por OPERACAO: qual falha apareceu nela, e se ela chegou a passar.
+  const byOperation = new Map<string, { failures: Set<string>; passed: boolean; at: Date; project: string }>()
+  for (const run of runs) {
+    if (run.state !== 'PASSED' && run.state !== 'FAILED') continue
+    const at = new Date(run.finished_at ?? run.started_at)
+    if (Number.isNaN(at.getTime())) continue
+    const age = options.now.getTime() - at.getTime()
+    // Fora da janela, ou do FUTURO: um relogio adiantado sustentaria uma regra
+    // para sempre, e uma falha de meses atras ja pode ter sido corrigida.
+    if (age < 0 || age > windowMs) continue
+    const known = byOperation.get(run.operation_id)
+      ?? { failures: new Set<string>(), passed: false, at, project: run.project_id }
+    if (run.state === 'PASSED') known.passed = true
+    else if (run.failure_code !== null && run.failure_code.length > 0) known.failures.add(run.failure_code)
+    if (at.getTime() > known.at.getTime()) known.at = at
+    byOperation.set(run.operation_id, known)
+  }
+
+  const observations: Observation[] = []
+  const patterns = new Set<string>()
+  for (const [operation, info] of byOperation) {
+    for (const failure of info.failures) {
+      const pattern = `recuperou:${failure}`
+      patterns.add(pattern)
+      // A ocasiao carrega o PROJETO: um projeto nao aprende com a operacao do
+      // vizinho, e o identificador da operacao ja e unico — o projeto entra
+      // para que quem ler a ocasiao saiba de onde ela veio.
+      observations.push({ pattern, occasion: `${info.project}/${operation}`, held: info.passed, at: info.at })
+    }
+  }
+  // A CONTRAPROVA foi PROCURADA porque esta leitura percorreu a janela INTEIRA,
+  // sem filtrar por desfecho: toda ocasiao em que a condicao apareceu entrou,
+  // tenha ela dado certo ou errado. E isso, e so isso, que `challengedPatterns`
+  // quer dizer — e um leitor futuro que consultasse so os sucessos
+  // simplesmente nao poderia declarar nada aqui.
+  return { observations, challenged: [...patterns] }
+}
