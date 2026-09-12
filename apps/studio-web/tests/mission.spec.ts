@@ -40,8 +40,12 @@ test('a tela mostra o que falta, e separa falta de trabalho de falta de gente', 
 
   // As duas situações aparecem EM PORTUGUÊS, e são frases distintas. Um código
   // de máquina aqui mandaria a pessoa perguntar a alguém o que significa.
-  await expect(page.getByText('Comprovado', { exact: true })).toBeVisible()
-  await expect(page.getByText('Parado por alguém de fora')).toBeVisible()
+  // O estado do ITEM, e não qualquer texto igual na página: as opções do
+  // seletor de registro repetem essas mesmas frases, que é o certo — elas são a
+  // mesma coisa dita nos dois lugares.
+  const estados = page.locator('.mission-criterion-state')
+  await expect(estados.filter({ hasText: 'Comprovado' })).toHaveCount(1)
+  await expect(estados.filter({ hasText: 'Parado por alguém de fora' })).toHaveCount(1)
   await expect(page.locator('body')).not.toContainText('BLOCKED_EXTERNAL')
   await expect(page.locator('body')).not.toContainText('UNPROVEN')
 
@@ -181,4 +185,64 @@ test('a recusa do formulário diz o que falta, e a do servidor chega como veio',
   // A frase é a do SERVIDOR, e não uma genérica da tela: é ela que sabe o que
   // aconteceu, e trocá-la apagaria justamente isso.
   await expect(page.getByRole('alert')).toContainText('Já existe um objetivo com esta mesma meta')
+})
+
+/**
+ * Registrar a prova PELA TELA fecha o último pedaço do `T-14`: a rota existia,
+ * era testada, e nada na interface a chamava — então na prática ninguém podia
+ * comprovar um item sem chamar a API na mão.
+ *
+ * O que este teste protege é o ciclo INTEIRO, e em especial a recusa: encerrar
+ * com um item parado por alguém de fora não é encerrar.
+ */
+test('dá para registrar a prova de um item e só então encerrar o objetivo', async ({ context, page }) => {
+  await signedIn(context)
+  await reset(page)
+  await page.goto('/studio/objetivos')
+  await expect(page.getByText('Colocar o site no ar para os clientes')).toBeVisible()
+
+  // O item parado por alguém de fora: o editor dele nasce no estado ATUAL, com
+  // o motivo já preenchido. Nascer em "ainda sem prova" faria um clique
+  // distraído apagar o que já estava registrado.
+  const parado = page.locator('li', { hasText: 'O endereço do site aponta para a hospedagem' })
+  await expect(parado.getByLabel('De quem ou de quê depende'))
+    .toHaveValue('a empresa que registra o endereço')
+
+  // Marcar como terminado e tentar encerrar: recusa, porque o item está parado.
+  await page.getByRole('button', { name: 'Marcar como terminado' }).click()
+  await page.getByRole('button', { name: 'Encerrar objetivo' }).click()
+  await expect(page.getByRole('alert').first()).toContainText('depende de alguém de fora')
+
+  // Agora a prova chega. O campo TROCA junto com o estado: escolher
+  // "Comprovado" tira o campo de motivo e põe o de prova.
+  await parado.getByLabel('Em que pé está').selectOption('PROVEN')
+  await expect(parado.getByLabel('De quem ou de quê depende')).toHaveCount(0)
+  await parado.getByLabel('Onde está a prova').fill('Apontamento conferido em 09/09')
+  await parado.getByRole('button', { name: 'Registrar' }).click()
+
+  // A prova aparece na lista, e o motivo antigo SOME: um item comprovado que
+  // ainda mostra de quem dependia conta duas histórias ao mesmo tempo.
+  await expect(page.getByText('Onde está a prova: Apontamento conferido em 09/09')).toBeVisible()
+  await expect(page.getByText('Depende de: a empresa que registra o endereço')).toHaveCount(0)
+
+  // Mexer no item desfez a candidatura, então é preciso marcar de novo — e aí
+  // o encerramento passa.
+  await page.getByRole('button', { name: 'Marcar como terminado' }).click()
+  await page.getByRole('button', { name: 'Encerrar objetivo' }).click()
+  await expect(page.locator('.mission-status')).toHaveText('Encerrado')
+
+  // Encerrado, não há mais o que registrar: o servidor recusaria, e um campo
+  // que existe para ser recusado é pior do que um campo que não existe.
+  await expect(page.getByRole('button', { name: 'Registrar' })).toHaveCount(0)
+})
+
+test('comprovar sem dizer onde está a prova é recusado, com a frase do campo certo', async ({ context, page }) => {
+  await signedIn(context)
+  await reset(page)
+  await page.goto('/studio/objetivos')
+  const item = page.locator('li', { hasText: 'O endereço do site aponta para a hospedagem' })
+  await item.getByLabel('Em que pé está').selectOption('PROVEN')
+  await item.getByLabel('Onde está a prova').fill('   ')
+  await item.getByRole('button', { name: 'Registrar' }).click()
+  await expect(item.getByRole('alert')).toContainText('onde está a prova')
 })

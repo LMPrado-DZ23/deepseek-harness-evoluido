@@ -2,8 +2,23 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import copy from '../i18n/mission.pt-BR.json'
-import { availableActions, buildDraft, completionLabel, MissionCard, MissionForm, MissionScreen, runCountLabel, spendLabel } from './MissionScreen'
+import {
+  availableActions, buildDraft, buildPatch, completionLabel, CriterionEditor, fieldFor,
+  MissionCard, MissionForm, MissionScreen, runCountLabel, spendLabel,
+} from './MissionScreen'
 import type { MissionView } from './missionApi'
+
+/** Os codigos de maquina que nunca podem ser LIDOS pela pessoa. */
+const CODIGOS = ['UNPROVEN', 'REFUTED', 'BLOCKED_EXTERNAL', 'CANDIDATE_COMPLETED', 'NO_LIMIT']
+
+/**
+ * So o texto que a pessoa LE, sem marcacao e sem atributo.
+ * @param markup - o HTML desenhado.
+ * @returns o texto visivel.
+ */
+function visibleText(markup: string): string {
+  return markup.replace(/<[^>]*>/gu, ' ')
+}
 
 function mission(over: Partial<MissionView> = {}): MissionView {
   return {
@@ -86,7 +101,7 @@ describe('a tela desenhada', () => {
 
 describe('o cartao desenhado — o corpo que nenhum teste alcancava', () => {
   const html = (over: Partial<MissionView> = {}) => renderToStaticMarkup(createElement(MissionCard, {
-    mission: mission(over), busy: false, onCandidate: () => undefined, onComplete: () => undefined,
+    mission: mission(over), busy: false, onCandidate: () => undefined, onComplete: () => undefined, onRecord: async () => undefined,
   }))
 
   it('o item comprovado mostra ONDE esta a prova', () => {
@@ -118,9 +133,25 @@ describe('o cartao desenhado — o corpo que nenhum teste alcancava', () => {
       ],
       completion: { kind: 'REFUTED', criteria: ['b'] },
     })
-    for (const codigo of ['UNPROVEN', 'REFUTED', 'BLOCKED_EXTERNAL', 'CANDIDATE_COMPLETED', 'NO_LIMIT']) {
-      expect(desenhado, codigo).not.toContain(codigo)
+    // A afirmacao e sobre o que a pessoa LE, e nao sobre o HTML cru: o seletor
+    // de estado carrega os codigos em `value`, que e como um `<select>`
+    // funciona e nunca aparece na tela. Comparar o HTML inteiro reprovaria o
+    // seletor por existir — e afrouxar para o HTML inteiro deixaria passar um
+    // codigo escrito como texto, que e o defeito de verdade.
+    for (const codigo of CODIGOS) {
+      expect(visibleText(desenhado), codigo).not.toContain(codigo)
     }
+  })
+
+  it('o codigo so aparece em `value`, e em lugar NENHUM alem disso', () => {
+    // A afirmacao acima olha o texto visivel. Esta olha o resto do HTML: se um
+    // codigo aparecer num `title`, num `aria-label` ou num `placeholder`, ele
+    // chega a pessoa sem ser texto — e o teste de cima nao veria.
+    const desenhado = html({
+      criteria: [{ criterion_id: 'a', statement: 'um', state: 'UNPROVEN', evidence: null, blocked_reason: null }],
+    })
+    const semValues = desenhado.replace(/value="[A-Z_]+"/gu, 'value=""')
+    for (const codigo of CODIGOS) expect(semValues, codigo).not.toContain(codigo)
   })
 
   it('em andamento aparece marcar como terminado — e a explicacao do que isso NAO faz', () => {
@@ -144,7 +175,7 @@ describe('o cartao desenhado — o corpo que nenhum teste alcancava', () => {
 
   it('ocupado desabilita o botao, para o gesto nao sair duas vezes', () => {
     const ocupado = renderToStaticMarkup(createElement(MissionCard, {
-      mission: mission(), busy: true, onCandidate: () => undefined, onComplete: () => undefined,
+      mission: mission(), busy: true, onCandidate: () => undefined, onComplete: () => undefined, onRecord: async () => undefined,
     }))
     expect(ocupado).toContain('disabled')
   })
@@ -244,5 +275,90 @@ describe('o formulario de criacao', () => {
   it('com um item so, NAO oferece tirar: tirar deixaria um estado que o envio recusa', () => {
     const html = renderToStaticMarkup(createElement(MissionForm, { taken: [], onCreate: async () => undefined }))
     expect(html).not.toContain(copy.removeCriterion)
+  })
+})
+
+describe('registrar em que pe esta um item', () => {
+  it('o campo TROCA com o estado: prova para comprovado, motivo para parado', () => {
+    // O servidor recusa nos DOIS sentidos — prova num item nao comprovado e
+    // recusada igual. Mostrar os dois campos convidaria a preencher o errado.
+    expect(fieldFor('PROVEN')).toBe('evidence')
+    expect(fieldFor('BLOCKED_EXTERNAL')).toBe('blocked')
+    expect(fieldFor('UNPROVEN')).toBe('none')
+    expect(fieldFor('REFUTED')).toBe('none')
+  })
+
+  it('comprovado SEM prova e recusado antes da ida de rede, com a frase certa', () => {
+    expect(buildPatch('PROVEN', '   ')).toEqual({ ok: false, problem: copy.evidenceRequired })
+    expect(buildPatch('BLOCKED_EXTERNAL', '')).toEqual({ ok: false, problem: copy.blockedRequired })
+    // E as duas frases sao DIFERENTES: uma so mandaria a pessoa adivinhar qual
+    // dos dois campos e o dela.
+    expect(copy.evidenceRequired).not.toBe(copy.blockedRequired)
+  })
+
+  it('estado que nao exige texto manda os dois campos como `null` EXPLICITO', () => {
+    // Omitir deixaria na tela um item "ainda sem prova" com "Onde esta a prova:
+    // ..." logo abaixo — o mesmo verde artificial, pela outra metade do par.
+    expect(buildPatch('UNPROVEN', 'sobrou daqui')).toEqual({
+      ok: true, patch: { state: 'UNPROVEN', evidence: null, blocked_reason: null },
+    })
+    expect(buildPatch('REFUTED', '')).toEqual({
+      ok: true, patch: { state: 'REFUTED', evidence: null, blocked_reason: null },
+    })
+  })
+
+  it('comprovado limpa o motivo, e parado limpa a prova', () => {
+    expect(buildPatch('PROVEN', ' o relatorio de 09/09 ')).toEqual({
+      ok: true, patch: { state: 'PROVEN', evidence: 'o relatorio de 09/09', blocked_reason: null },
+    })
+    expect(buildPatch('BLOCKED_EXTERNAL', 'a empresa do endereco')).toEqual({
+      ok: true, patch: { state: 'BLOCKED_EXTERNAL', blocked_reason: 'a empresa do endereco', evidence: null },
+    })
+  })
+
+  it('o editor nasce no estado ATUAL do item, e nao num padrao', () => {
+    // Nascer em "ainda sem prova" faria um clique distraido APAGAR a prova de
+    // um item que ja estava comprovado.
+    const html = renderToStaticMarkup(createElement(CriterionEditor, {
+      missionId: 'm1',
+      criterion: { criterion_id: 'c1', statement: 'algo', state: 'PROVEN', evidence: 'a prova de ontem', blocked_reason: null },
+      onRecord: async () => undefined,
+    }))
+    expect(html).toContain('value="a prova de ontem"')
+    expect(html).toMatch(/<option[^>]*selected[^>]*value="PROVEN"|value="PROVEN"[^>]*selected/u)
+  })
+
+  it('cada campo do editor tem rotulo ligado, e os identificadores nao colidem entre itens', () => {
+    const um = renderToStaticMarkup(createElement(CriterionEditor, {
+      missionId: 'm1',
+      criterion: { criterion_id: 'c1', statement: 'algo', state: 'PROVEN', evidence: 'x', blocked_reason: null },
+      onRecord: async () => undefined,
+    }))
+    const outro = renderToStaticMarkup(createElement(CriterionEditor, {
+      missionId: 'm1',
+      criterion: { criterion_id: 'c2', statement: 'algo', state: 'PROVEN', evidence: 'x', blocked_reason: null },
+      onRecord: async () => undefined,
+    }))
+    for (const html of [um, outro]) {
+      expect(html).toContain('-state"')
+      expect(html).toContain('-text"')
+    }
+    // Dois itens na mesma tela com o mesmo `id` fazem o rotulo de um apontar
+    // para o campo do outro, e o leitor de tela le a coisa errada.
+    expect(um).toContain('criterion-m1-c1-state')
+    expect(outro).toContain('criterion-m1-c2-state')
+  })
+
+  it('objetivo ENCERRADO nao oferece registrar: o servidor recusaria', () => {
+    const encerrado = renderToStaticMarkup(createElement(MissionCard, {
+      mission: mission({ status: 'COMPLETED' }), busy: false,
+      onCandidate: () => undefined, onComplete: () => undefined, onRecord: async () => undefined,
+    }))
+    const andando = renderToStaticMarkup(createElement(MissionCard, {
+      mission: mission({ status: 'RUNNING' }), busy: false,
+      onCandidate: () => undefined, onComplete: () => undefined, onRecord: async () => undefined,
+    }))
+    expect(encerrado).not.toContain(copy.recordSubmit)
+    expect(andando).toContain(copy.recordSubmit)
   })
 })

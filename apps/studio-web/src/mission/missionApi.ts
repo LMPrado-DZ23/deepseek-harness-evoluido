@@ -285,3 +285,26 @@ export async function createMission(
     criteria: draft.criteria,
   }, port, getCsrf, copy.createError)
 }
+
+export interface CriterionPatch {
+  readonly state: CriterionState
+  readonly evidence?: string | null
+  readonly blocked_reason?: string | null
+}
+
+/**
+ * Registra em que pé está um item, e onde está a prova disso.
+ * @param missionId - o objetivo.
+ * @param criterionId - o item.
+ * @param patch - o estado novo, e o texto que ele exige.
+ * @param port - a porta de rede, injetável no teste.
+ * @param getCsrf - de onde sai o token de CSRF.
+ * @returns o objetivo atualizado.
+ */
+export async function recordCriterion(
+  missionId: string, criterionId: string, patch: CriterionPatch,
+  port: MissionPort = defaultPort, getCsrf: () => Promise<string> = csrfToken,
+): Promise<MissionView> {
+  const url = `${MISSION_API_PREFIX}/missions/${encodeURIComponent(missionId)}/criteria/${encodeURIComponent(criterionId)}`
+  return write(url, 'PATCH', patch, port, getCsrf, copy.criterionError)
+}

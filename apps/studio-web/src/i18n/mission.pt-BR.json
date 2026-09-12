@@ -62,5 +62,15 @@
   "noCriteria": "Escreva pelo menos um item a comprovar.",
   "slugImpossible": "A meta precisa ter letras ou números para virar um objetivo.",
   "limitNotWhole": "O limite precisa ser um número inteiro maior que zero.",
-  "created": "Objetivo criado."
+  "created": "Objetivo criado.",
+  "criterionError": "Não foi possível registrar este item.",
+  "recordTitle": "Registrar este item",
+  "recordState": "Em que pé está",
+  "evidenceField": "Onde está a prova",
+  "evidencePlaceholder": "O relatório do teste de 09/09, ou o link da gravação",
+  "blockedField": "De quem ou de quê depende",
+  "blockedPlaceholder": "A empresa que registra o endereço do site",
+  "recordSubmit": "Registrar",
+  "evidenceRequired": "Um item comprovado precisa dizer onde está a prova.",
+  "blockedRequired": "Um item parado por alguém de fora precisa dizer de quem ou de quê depende."
 }

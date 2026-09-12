@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import copy from '../i18n/mission.pt-BR.json'
 import {
-  completeMission, createMission, declareCandidate, listMissions, slugify, uniqueSlug,
-  type MissionCompletion, type MissionDraft, type MissionSpend, type MissionView,
+  completeMission, createMission, declareCandidate, listMissions, recordCriterion, slugify, uniqueSlug,
+  type CriterionPatch, type CriterionState, type MissionCompletion, type MissionCriterion,
+  type MissionDraft, type MissionSpend, type MissionView,
 } from './missionApi'
 import './mission.css'
 
@@ -55,6 +56,52 @@ export function availableActions(mission: MissionView): { readonly candidate: bo
     candidate: mission.status === 'RUNNING',
     complete: mission.status === 'CANDIDATE_COMPLETED',
   }
+}
+
+/**
+ * Qual campo de texto o estado escolhido EXIGE, se algum.
+ *
+ * `PROVEN` exige a prova e `BLOCKED_EXTERNAL` exige o motivo — e o servidor
+ * recusa nos DOIS sentidos: prova sem estar comprovado também é recusada. Então
+ * a tela troca o campo junto com o estado, em vez de mostrar os dois e deixar a
+ * pessoa preencher o errado.
+ * @param state - o estado escolhido.
+ * @returns qual campo, ou nenhum.
+ */
+export function fieldFor(state: CriterionState): 'evidence' | 'blocked' | 'none' {
+  if (state === 'PROVEN') return 'evidence'
+  if (state === 'BLOCKED_EXTERNAL') return 'blocked'
+  return 'none'
+}
+
+export type PatchResult =
+  | { readonly ok: true; readonly patch: CriterionPatch }
+  | { readonly ok: false; readonly problem: string }
+
+/**
+ * Monta o registro de um item, ou diz o que falta.
+ *
+ * Quando o estado não exige texto, o campo correspondente vai como `null`
+ * EXPLÍCITO, e não omitido: registrar "ainda sem prova" precisa LIMPAR a prova
+ * anterior. Omitir o campo deixaria na tela um item sem prova com "Onde está a
+ * prova: …" logo abaixo — o mesmo verde artificial, entrando pela outra metade
+ * do par.
+ * @param state - o estado escolhido.
+ * @param text - o que foi escrito no campo.
+ * @returns o registro, ou o problema.
+ */
+export function buildPatch(state: CriterionState, text: string): PatchResult {
+  const escrito = text.trim()
+  const campo = fieldFor(state)
+  if (campo === 'evidence') {
+    if (escrito === '') return { ok: false, problem: copy.evidenceRequired }
+    return { ok: true, patch: { state, evidence: escrito, blocked_reason: null } }
+  }
+  if (campo === 'blocked') {
+    if (escrito === '') return { ok: false, problem: copy.blockedRequired }
+    return { ok: true, patch: { state, blocked_reason: escrito, evidence: null } }
+  }
+  return { ok: true, patch: { state, evidence: null, blocked_reason: null } }
 }
 
 export type DraftResult =
@@ -188,6 +235,10 @@ export function MissionScreen() {
       busy={busy === mission.mission_id}
       onCandidate={() => { act(mission.mission_id, async () => declareCandidate(mission.mission_id)) }}
       onComplete={() => { act(mission.mission_id, async () => completeMission(mission.mission_id)) }}
+      onRecord={async (criterionId, patch) => {
+        const atualizada = await recordCriterion(mission.mission_id, criterionId, patch)
+        setRows(current => (current ?? []).map(row => row.mission_id === atualizada.mission_id ? atualizada : row))
+      }}
     />)}
   </main>
 }
@@ -273,11 +324,70 @@ export function MissionForm(props: MissionFormProps) {
   </form>
 }
 
+export type CriterionEditorProps = {
+  readonly missionId: string
+  readonly criterion: MissionCriterion
+  readonly onRecord: (patch: CriterionPatch) => Promise<void>
+}
+
+/**
+ * O registro de UM item, embaixo do próprio item.
+ *
+ * O campo de texto TROCA com o estado escolhido, porque o servidor recusa nos
+ * dois sentidos: prova num item que não está comprovado é recusada do mesmo
+ * jeito que um item comprovado sem prova. Mostrar os dois campos convidaria a
+ * pessoa a preencher aquele que vai ser recusado.
+ * @param props - o objetivo, o item e o que fazer com o registro.
+ * @returns o editor.
+ */
+export function CriterionEditor(props: CriterionEditorProps) {
+  const { criterion } = props
+  const [state, setState] = useState<CriterionState>(criterion.state)
+  const [text, setText] = useState(criterion.evidence ?? criterion.blocked_reason ?? '')
+  const [problem, setProblem] = useState<string | null>(null)
+  const [sending, setSending] = useState(false)
+  const campo = fieldFor(state)
+  const idBase = `criterion-${props.missionId}-${criterion.criterion_id}`
+
+  const submit = (event: { preventDefault: () => void }) => {
+    event.preventDefault()
+    const result = buildPatch(state, text)
+    if (!result.ok) { setProblem(result.problem); return }
+    setProblem(null)
+    setSending(true)
+    void props.onRecord(result.patch)
+      .catch((error: unknown) => { setProblem(error instanceof Error ? error.message : copy.criterionError) })
+      .finally(() => { setSending(false) })
+  }
+
+  return <form className="mission-record" onSubmit={submit}>
+    <label htmlFor={`${idBase}-state`}>{copy.recordState}</label>
+    <select id={`${idBase}-state`} value={state}
+      onChange={event => { setState(event.target.value as CriterionState) }}>
+      {(['UNPROVEN', 'PROVEN', 'BLOCKED_EXTERNAL', 'REFUTED'] as const).map(option =>
+        <option key={option} value={option}>{copy.criterion[option]}</option>)}
+    </select>
+
+    {campo !== 'none' ? <>
+      <label htmlFor={`${idBase}-text`}>
+        {campo === 'evidence' ? copy.evidenceField : copy.blockedField}
+      </label>
+      <input id={`${idBase}-text`} type="text" value={text}
+        placeholder={campo === 'evidence' ? copy.evidencePlaceholder : copy.blockedPlaceholder}
+        onChange={event => { setText(event.target.value) }} />
+    </> : null}
+
+    {problem !== null ? <p role="alert" className="mission-problem">{problem}</p> : null}
+    <button type="submit" className="secondary" disabled={sending}>{copy.recordSubmit}</button>
+  </form>
+}
+
 export type MissionCardProps = {
   readonly mission: MissionView
   readonly busy: boolean
   readonly onCandidate: () => void
   readonly onComplete: () => void
+  readonly onRecord: (criterionId: string, patch: CriterionPatch) => Promise<void>
 }
 
 /**
@@ -315,6 +425,14 @@ export function MissionCard(props: MissionCardProps) {
             servidor já recusa gravar assim, nos dois sentidos. */}
         {criterion.evidence !== null ? <p className="mission-evidence">{copy.evidenceLabel}: {criterion.evidence}</p> : null}
         {criterion.blocked_reason !== null ? <p className="mission-blocked">{copy.blockedLabel}: {criterion.blocked_reason}</p> : null}
+        {/* Registrar só aparece enquanto o objetivo não foi encerrado: o
+            servidor recusa mexer num objetivo encerrado, e um campo que existe
+            para ser recusado é pior do que um campo que não existe. */}
+        {mission.status === 'COMPLETED' ? null : <CriterionEditor
+          missionId={mission.mission_id}
+          criterion={criterion}
+          onRecord={async patch => props.onRecord(criterion.criterion_id, patch)}
+        />}
       </li>)}
     </ul>
 

@@ -52,3 +52,19 @@
   .mission-form label,.mission-criteria-fields legend{color:#eef2f9}
   .mission-form input[type=text]{background:#0f172b;color:#eef2f9;border-color:#2a3550}
 }
+
+/* REGISTRAR um item, embaixo do próprio item.
+   Recuado para não competir com a lista do que falta: quem lê a tela está
+   olhando o que falta, e o registro é o que ela faz DEPOIS de olhar. */
+.mission-record{margin:10px 0 4px;padding:10px 0 0;border-top:1px dashed #dde3ed;display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center}
+.mission-record label{font-size:13px;color:#41506b}
+.mission-record select,.mission-record input[type=text]{min-height:40px;border:1px solid #bbc5d6;border-radius:8px;padding:8px 12px;background:#fff;color:#0b1739}
+.mission-record input[type=text]{flex:1 1 220px;min-width:0}
+.mission-record select:focus,.mission-record input[type=text]:focus{outline:3px solid #9fc3ff;outline-offset:2px}
+.mission-record .mission-problem{flex:1 1 100%;margin:0}
+.mission-record button{margin-top:0}
+@media (prefers-color-scheme: dark){
+  .mission-record{border-top-color:#2a3550}
+  .mission-record label{color:#c7d2e4}
+  .mission-record select,.mission-record input[type=text]{background:#0f172b;color:#eef2f9;border-color:#2a3550}
+}

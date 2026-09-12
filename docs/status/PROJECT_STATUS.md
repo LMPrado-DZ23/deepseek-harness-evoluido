@@ -33,15 +33,15 @@ Todos reproduzíveis pelo comando ao lado.
 | typecheck | PASS | `pnpm typecheck` |
 | build | PASS | `pnpm build` |
 | suíte raiz | 3010 testes, 187 arquivos, 0 falha (12/09, após OS-49) | `pnpm -w test` |
-| suíte studio-web | 456 testes | `cd apps/studio-web && npx vitest run` |
-| e2e navegador | 101 aprovados, 0 reprovados, 5 pulados (12/09, quatro tamanhos) | `cd apps/studio-web && npx playwright test` |
+| suíte studio-web | 464 testes | `cd apps/studio-web && npx vitest run` |
+| e2e navegador | 109 aprovados, 0 reprovados, 5 pulados (12/09, quatro tamanhos) | `cd apps/studio-web && npx playwright test` |
 | PostgreSQL real | **65 testes, `POSTGRES_GATE=PASS`** (12/09, PostgreSQL 16.13 local) | `pnpm test:postgres` |
 | portões | **19/19 PASS** | ver abaixo |
 
 Portões, todos `EXIT=0` em 12/09/2026: `domain-scopes`, `domain-routes`,
 `assistant-tools`, `team-role-tools`, `rls-coverage` (8/27), `upstream-pin`,
-`portability`, `i18n` (25 catálogos, 575 chaves), `comprehension`,
-`tracked-lib`, `image-lock`, `decision-record` (52 decisões), `requirements-ledger` (210 requisitos),
+`portability`, `i18n` (25 catálogos, 575 chaves), `comprehension`, `vocabulary` (26 catálogos),
+`tracked-lib`, `image-lock`, `decision-record` (52 decisões), `requirements-ledger` (211 requisitos),
 `secrets` (5.735 arquivos), `no-caveman`, `p37` (12/12),
 `vendored-references` (3/3), `licenses` (848 pacotes), `licenses:release`.
 
