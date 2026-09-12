@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AppSpecV1 } from '../src/appspec.js'
 import { createDesignSpec } from '../src/design.js'
 import type { StudioPlan, StudioRun } from '../src/model.js'
-import { PromptToAppPipeline, type CodeGeneratorPort } from '../src/pipeline.js'
+import { PromptToAppPipeline, type CodeGenerationResult, type CodeGeneratorPort } from '../src/pipeline.js'
 import { BuilderLifecycleError, type BuildStep, type BuilderLifecycleFinished, type BuilderLifecycleResolverPort, type BuilderLifecycleSession, type BuilderLifecycleStepResult } from '../src/builder-lifecycle.js'
 import { PromptToAppError, type PromptToAppActor, type PromptToAppService } from '../src/service.js'
 import { latestGreenCheckpoint, runCheckpoints } from '../src/checkpoint.js'
@@ -28,6 +28,31 @@ const cleanGeneration = {
     { path: 'src/GeneratedApp.tsx', content: 'export default function GeneratedApp(){ return <main><h1>Início</h1><h2>Serviços</h2></main> }' },
   ], route: 'ollama', model: 'qwen', inputTokens: 10, outputTokens: 20,
 } as const
+/**
+ * Um gerador que escreve ALGO DIFERENTE a cada chamada — que e o que um modelo
+ * faz ao receber uma correcao.
+ *
+ * Um duble que devolve o mesmo arquivo tres vezes e repeticao POR CONSTRUCAO, e
+ * desde a OS-65 o laco para nela. Um teste sobre as tres tentativas precisa de
+ * um gerador que ao menos TENTE outra coisa; se ele nao tentar, o que o teste
+ * mede deixa de ser o laco e passa a ser o duble.
+ *
+ * So o codigo varia: `content/app.json` e JSON, e sujar o JSON trocaria o
+ * defeito que o teste quer exercer por um erro de sintaxe.
+ */
+function varying<T extends CodeGenerationResult>(base: T = cleanGeneration as unknown as T) {
+  let call = 0
+  return vi.fn(async (): Promise<T> => {
+    call += 1
+    return {
+      ...base,
+      files: base.files.map(file => file.path.endsWith('.json')
+        ? { ...file }
+        : { ...file, content: `${file.content}\n// tentativa ${call}` }),
+    }
+  })
+}
+
 const roots: string[] = []
 afterEach(async () => Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))))
 
@@ -95,7 +120,7 @@ describe('Prompt-to-App pipeline', () => {
     // anterior. Falhando sempre pelo mesmo motivo, a terceira pedia
     // exatamente a mesma correcao da segunda: mesma falha, mesma estrategia.
     const f = await fixture({ execute: async () => ({ exitCode: 1, stdout: '', stderr: 'sempre a mesma falha', timedOut: false }) })
-    const generator: CodeGeneratorPort = { generate: vi.fn(async () => cleanGeneration) }
+    const generator: CodeGeneratorPort = { generate: varying() }
     await f.pipeline.run(actor, 'project', generator)
 
     expect(generator.generate).toHaveBeenCalledTimes(3)
@@ -323,7 +348,7 @@ describe('Prompt-to-App pipeline', () => {
         ? { exitCode: 1, stdout: '', stderr: 'quebrou', timedOut: false }
         : { exitCode: 0, stdout: 'ok', stderr: '', timedOut: false },
     })
-    const generator = { generate: vi.fn(async () => cleanGeneration) }
+    const generator = { generate: varying() }
     const failed = await f.pipeline.run(actor, 'project', generator)
     expect(failed.state).toBe('BUILD_FAILED')
     // Três tentativas, três chamadas: o marco existe em disco e mesmo assim
@@ -465,7 +490,7 @@ describe('Prompt-to-App pipeline', () => {
       if (command === 'pnpm run test:e2e') await passAcceptance(directory)
       return { exitCode: 0, stdout: 'ok', stderr: '', timedOut: false }
     } })
-    await expect(f.pipeline.run(actor, 'project', { generate: vi.fn(async () => cleanGeneration) })).resolves.toMatchObject({ state: 'BUILD_FAILED', message: 'TEMPLATE_INTEGRITY_FAILED' })
+    await expect(f.pipeline.run(actor, 'project', { generate: varying() })).resolves.toMatchObject({ state: 'BUILD_FAILED', message: 'TEMPLATE_INTEGRITY_FAILED' })
   })
 
   it('records the template integrity verdict on the attempt, and a tampered attempt is never a safe point', async () => {
@@ -498,7 +523,7 @@ describe('Prompt-to-App pipeline', () => {
 
   it('distinguishes a test failure from a build failure after three attempts', async () => {
     const f = await fixture({ execute: async (_directory, command) => ({ exitCode: command === 'pnpm run test' ? 1 : 0, stdout: '', stderr: '', timedOut: false }) })
-    const result = await f.pipeline.run(actor, 'project', { generate: vi.fn(async () => cleanGeneration) })
+    const result = await f.pipeline.run(actor, 'project', { generate: varying() })
     expect(result).toMatchObject({ state: 'TESTS_FAILED', attempts: 3 })
     expect(f.transitions).toEqual(['GENERATING', 'BUILD_OK', 'TESTS_FAILED'])
     const failures = f.runs.filter(run => run.state === 'FAILED')
@@ -542,6 +567,12 @@ describe('Prompt-to-App pipeline', () => {
     const result = await f.pipeline.run(actor, 'project', spending)
 
     // 600 na primeira tentativa, 1200 na segunda: a TERCEIRA não começa.
+    //
+    // E este teste É a prova da ORDEM entre orçamento e convergência: o duble
+    // devolve o mesmo arquivo toda vez, então a repetição também acontece aqui.
+    // Se a convergência fosse conferida antes do teto, o estado sairia
+    // BUILD_FAILED e a pessoa leria "repetiu" no lugar de "acabou o limite" —
+    // escondendo dela o único motivo que ela consegue resolver.
     expect(spending.generate).toHaveBeenCalledTimes(2)
     expect(result.state).toBe('BUDGET_EXCEEDED')
     const stopped = f.runs.at(-1)!
@@ -552,15 +583,80 @@ describe('Prompt-to-App pipeline', () => {
     expect(stopped.failure_code).toContain('tokens=1200')
   })
 
+  /**
+   * T-09 — CONVERGENCIA. Estes testes rodam contra o PIPELINE, e nao contra a
+   * funcao pura: a licao da OS-61 foi que uma sabotagem na fiacao sobrevive a
+   * qualquer teste que so exercite a funcao.
+   */
+  it('a criação PARA antes do limite quando a tentativa repete código e falha', async () => {
+    // Duas tentativas com a mesma entrada escreveram byte a byte o mesmo
+    // codigo e falharam byte a byte igual. A terceira gastaria o resto do teto
+    // na mesma aposta.
+    const f = await fixture({ execute: async () => ({ exitCode: 1, stdout: '', stderr: 'sempre a mesma falha', timedOut: false }) })
+    const generator: CodeGeneratorPort = { generate: vi.fn(async () => cleanGeneration) }
+    const result = await f.pipeline.run(actor, 'project', generator)
+
+    expect(generator.generate).toHaveBeenCalledTimes(2)
+    expect(result.attempts).toBe(2)
+    expect(result.state).toBe('BUILD_FAILED')
+    // A frase da REPETICAO chega a pessoa, e nao o diagnostico cru: sem ela,
+    // uma criacao que parou na segunda tentativa pareceria ter simplesmente
+    // falhado, e a pessoa apertaria "tentar de novo" sem saber de nada.
+    expect(result.message).toContain('mesmo código')
+    // E ela diz QUAL tentativa se repetiu.
+    expect(result.message).toContain('tentativa 1')
+    // Mas NAO afirma que a proxima falharia: o gerador nao e deterministico.
+    expect(result.message).not.toMatch(/vai falhar|não funciona|impossível/iu)
+    // E ela NAO afirma que a proxima falharia: o gerador nao e deterministico.
+    expect(result.message).not.toMatch(/vai falhar|não funciona|impossível/iu)
+  })
+
+  it('código DIFERENTE com a mesma falha NÃO para a criação: o gerador está tentando', async () => {
+    const f = await fixture({ execute: async () => ({ exitCode: 1, stdout: '', stderr: 'sempre a mesma falha', timedOut: false }) })
+    const generator: CodeGeneratorPort = { generate: varying() }
+    const result = await f.pipeline.run(actor, 'project', generator)
+
+    expect(generator.generate).toHaveBeenCalledTimes(3)
+    expect(result.attempts).toBe(3)
+  })
+
+  it('saída RECUSADA duas vezes IGUAL é repetição: o modelo escreveu a mesma coisa', async () => {
+    // A saida foi recusada antes de chegar ao disco, entao ela nunca aparece em
+    // `attemptFiles`. Se a convergencia olhasse so o que sobreviveu a
+    // conferencia, duas recusas de textos DIFERENTES pareceriam iguais — e duas
+    // recusas do MESMO texto pareceriam tentativas distintas.
+    const f = await fixture()
+    const generator = { generate: vi.fn(async () => ({
+      ...cleanGeneration,
+      files: [{ path: 'src/GeneratedApp.tsx', content: "import { readFile } from 'node:fs'; export default function App(){ return null }; void readFile" }],
+    })) }
+    const result = await f.pipeline.run(actor, 'project', generator)
+
+    expect(generator.generate).toHaveBeenCalledTimes(2)
+    expect(result.attempts).toBe(2)
+  })
+
+  it('geração que LANÇA não conta como repetição: não houve saída para comparar', async () => {
+    // Duas recusas do gerador nao dizem se ele tentou a mesma coisa ou outra.
+    // Tratar "nao observado" como "igual" pararia a criacao afirmando uma
+    // repeticao que ninguem viu.
+    const f = await fixture()
+    const generator: CodeGeneratorPort = { generate: vi.fn(async () => { throw new Error('JSON inválido') }) }
+    const result = await f.pipeline.run(actor, 'project', generator)
+
+    expect(generator.generate).toHaveBeenCalledTimes(3)
+    expect(result.attempts).toBe(3)
+  })
+
   it('sem teto configurado, a criação usa as três tentativas', async () => {
     // O padrão NÃO é um limite inventado por mim: sem configuração, não há teto.
     const f = await fixture()
     const spending: CodeGeneratorPort = {
-      generate: vi.fn(async () => ({
+      generate: varying({
         ...cleanGeneration,
         files: [{ path: 'src/GeneratedApp.tsx', content: "import { readFile } from 'node:fs'; export default function App(){ return null }; void readFile" }],
         inputTokens: 400_000, outputTokens: 200_000,
-      })),
+      }),
     }
     const result = await f.pipeline.run(actor, 'project', spending)
     expect(spending.generate).toHaveBeenCalledTimes(3)
@@ -569,10 +665,10 @@ describe('Prompt-to-App pipeline', () => {
 
   it('rejects forbidden imports before writing or running builder commands', async () => {
     const f = await fixture()
-    const generator = { generate: vi.fn(async () => ({
+    const generator = { generate: varying({
       ...cleanGeneration,
       files: [{ path: 'src/GeneratedApp.tsx', content: "import { readFile } from 'node:fs'; export default function App(){ return null }; void readFile" }],
-    })) }
+    }) }
     const result = await f.pipeline.run(actor, 'project', generator)
     expect(result).toMatchObject({ state: 'BUILD_FAILED', attempts: 3 })
     expect(result.message).toContain('node:fs')

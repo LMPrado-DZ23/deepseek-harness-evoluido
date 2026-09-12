@@ -93,7 +93,8 @@
     "interrupted": "A criação foi interrompida antes de terminar. Nada foi publicado.",
     "cancelled": "A criação foi cancelada pela pessoa.",
     "cancelledReason": "cancelado pela pessoa",
-    "budgetExceeded": "A criação parou porque o limite de uso desta conta foi alcançado. O que já foi feito está guardado; para continuar, aumente o limite ou fale com quem instalou o Studio."
+    "budgetExceeded": "A criação parou porque o limite de uso desta conta foi alcançado. O que já foi feito está guardado; para continuar, aumente o limite ou fale com quem instalou o Studio.",
+    "repeating": "A criação parou antes do limite: a última tentativa escreveu exatamente o mesmo código e falhou exatamente como a tentativa {attempt}. Continuar gastaria o resto do limite na mesma aposta."
   },
   "values": {
     "confirmed": "confirmado",

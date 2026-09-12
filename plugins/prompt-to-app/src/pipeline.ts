@@ -1,3 +1,4 @@
+import { type AttemptOutcome, convergenceOf, repeatingReason, shouldStopEarly } from './convergence.js'
 import { CROSS_RUN_FAILURE_WINDOW_DAYS, FailureMemory, seedCorrection } from './failure-memory.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { cp, lstat, mkdir, readFile, writeFile } from 'node:fs/promises'
@@ -165,6 +166,11 @@ export class PromptToAppPipeline {
       })
       let finalFailureState: 'BUILD_FAILED' | 'TESTS_FAILED' = 'BUILD_FAILED'
       let stopRetries = false
+      // O que cada tentativa ESCREVEU e como ela FALHOU, para a convergencia.
+      // Sem isto o laco roda as tres tentativas mesmo quando a segunda escreveu
+      // byte a byte o mesmo codigo da primeira e falhou byte a byte igual.
+      const outcomes: AttemptOutcome[] = []
+      let repeatingMessage: string | undefined
       let completedAttempts = 0
       // Os tokens SOMADOS da operação, e não os da última tentativa. O gasto de
       // uma criação é o das três somadas, e é isso que o teto olha.
@@ -176,6 +182,14 @@ export class PromptToAppPipeline {
     let attemptFiles: readonly { readonly path: string; readonly content: string; readonly author: RunFileAuthor }[] = []
     let previousAttemptFiles: readonly { readonly path: string; readonly content: string }[] = []
     let attemptFindings: readonly string[] = []
+    // O que a tentativa PRODUZIU, para a convergencia — e nao o que ela
+    // gravou. A diferenca so aparece num caso, e e justamente o caso que
+    // importa: quando a saida do modelo e RECUSADA, ela nunca chega ao disco
+    // nem a `attemptFiles`, e duas recusas de textos DIFERENTES pareceriam a
+    // mesma tentativa repetida. Comparar o que o modelo escreveu, e nao o que
+    // sobreviveu a conferencia, e o que separa "o modelo repetiu" de "o modelo
+    // tentou outra coisa e foi recusado de novo".
+    let attemptOutput: readonly { readonly path: string; readonly content: string }[] | undefined
       // De onde retomar, quando houver de onde.
       //
       // SÓ para execução CANCELADA ou INTERROMPIDA. Uma execução que REPROVOU
@@ -208,6 +222,38 @@ export class PromptToAppPipeline {
       }
       // Na retomada a tentativa continua NO MESMO diretório: é lá que estão os
       // arquivos que o modelo escreveu, e é isso que estamos aproveitando.
+      // A CONVERGENCIA vem DEPOIS do cancelamento e DEPOIS do teto, e a ordem
+      // e o proprio significado: cancelamento e teto sao razoes DA PESSOA e DA
+      // CONTA para parar, e a repeticao e uma inferencia nossa. Uma criacao que
+      // estourou o teto E repetiu tem de ser relatada como orcamento — dizer
+      // "parou porque repetiu" esconderia da pessoa o motivo que ela precisa
+      // resolver para continuar.
+      //
+      // A semente que atravessa execucoes (`seedCorrection`) chega com
+      // `attempt === 1` e NAO e tentativa desta criacao: registra-la aqui faria
+      // a tentativa 2 ser comparada com uma execucao de outro dia.
+      //
+      // DITO COM HONESTIDADE: a sabotagem que tira o `attempt > 1` SOBREVIVE
+      // hoje, e nao por falta de teste. Ela sobrevive porque `attemptOutput`
+      // comeca `undefined`, e uma tentativa sem saida observada nunca casa com
+      // nenhuma — a semente entraria como uma linha que nao muda resposta
+      // nenhuma. A condicao fica porque ela DIZ a regra em vez de depender
+      // desse acidente: bastaria alguem iniciar `attemptOutput` com `[]` para a
+      // protecao sumir sem nenhum teste reprovar.
+      if (diagnostic !== undefined && attempt > 1) {
+        // Aqui `attemptOutput` ainda guarda o que a tentativa ANTERIOR produziu
+        // (a atribuicao nova vem mais abaixo), e `diagnostic` e como ela
+        // terminou. Um ponto so cobre todos os caminhos de falha.
+        outcomes.push({ attempt: attempt - 1, stage: activeStage, diagnostic, files: attemptOutput })
+        const verdict = convergenceOf(outcomes)
+        if (shouldStopEarly(verdict)) {
+          // Parar ANTES de gerar: a repeticao ja esta provada, e o que a
+          // tentativa seguinte gastaria e justamente o que sobrou do teto.
+          repeatingMessage = repeatingReason(verdict)
+          completedAttempts = attempt - 1
+          break
+        }
+      }
       const resuming = attempt === 1 && resumable !== null
       const runId = attempt === 1 ? operationId : opaqueOperationId(`${operationId}-attempt-${attempt}`)
       const runDirectory = resuming ? resumable.directory : resolve(this.options.runsRoot, runId)
@@ -225,6 +271,7 @@ export class PromptToAppPipeline {
       const frameworkFiles = [dataLayer, authLayer, formLayer, crudLayer, ...(schedulingLayer === undefined ? [] : [schedulingLayer]), dashboardLayer, saasLayer].flatMap(layer => layer.files)
       previousAttemptFiles = attemptFiles.map(file => ({ path: file.path, content: file.content }))
       attemptFiles = frameworkFiles.map(file => ({ path: file.path, content: file.content, author: 'studio' as const }))
+      attemptOutput = frameworkFiles.map(file => ({ path: file.path, content: file.content }))
       const frameworkFindings = scanGeneratedContent(Object.fromEntries(frameworkFiles.map(file => [file.path, file.content])))
       attemptFindings = frameworkFindings
       if (frameworkFindings.length > 0) {
@@ -255,6 +302,7 @@ export class PromptToAppPipeline {
       const immutableBefore = resuming ? resumable.marker.immutable_before : await immutableHash(runDirectory, protectedTemplatePaths)
       const previousDiagnostic = diagnostic
       let generated: CodeGenerationResult
+      let generatedFiles: readonly { readonly path: string; readonly content: string }[] | undefined
       try {
         if (resuming) {
           // O modelo NAO e chamado. Os tokens do marco entram no gasto porque
@@ -275,6 +323,10 @@ export class PromptToAppPipeline {
         generated = await generator.generate(spec, plan, failureMemory.correctionFor(previousDiagnostic))
         spentTokens += (generated.inputTokens ?? 0) + (generated.outputTokens ?? 0)
         diagnostic = undefined
+        // ANTES da conferencia, de proposito: o que o modelo escreveu e o que a
+        // convergencia compara, mesmo quando a conferencia recusa em seguida.
+        generatedFiles = generated.files.map(file => ({ path: file.path, content: file.content }))
+        attemptOutput = [...(attemptOutput ?? []), ...generatedFiles]
         assertGeneratedSource(generated.files)
         await writeGeneratedFiles(runDirectory, generated.files, {
           plannedPaths: plan.slices.flatMap(slice => slice.planned_files),
@@ -303,6 +355,11 @@ export class PromptToAppPipeline {
         // gravado carregaria a mesma coisa.
         diagnostic = failureMemory.rawOf(error instanceof Error ? error.message : 'GENERATED_OUTPUT_REJECTED')
         finalFailureState = 'BUILD_FAILED'
+        // Se o gerador LANCOU antes de entregar os arquivos, esta tentativa nao
+        // tem saida observada — e `undefined` diz isso, em vez de deixar os
+        // arquivos do arcabouco fazerem duas falhas diferentes parecerem a
+        // mesma tentativa repetida.
+        if (generatedFiles === undefined) attemptOutput = undefined
         await this.recordFailure(actor, projectId, plan.plan_id, runId, runDirectory, attempt, null, diagnostic, 'generate', operationId, ownerSessionId)
         await this.writeRunReport({ actor, projectId, runId, directory: runDirectory, stage: 'generate', runState: 'FAILED', attempt, files: attemptFiles, previousFiles: previousAttemptFiles, findings: attemptFindings, correction: previousDiagnosticForReport })
         continue
@@ -316,6 +373,7 @@ export class PromptToAppPipeline {
           ...frameworkFiles.map(file => ({ path: file.path, content: file.content, author: 'studio' as const })),
           ...generated.files.map(file => ({ path: file.path, content: file.content, author: 'model' as const })),
         ]
+      attemptOutput = attemptFiles.map(file => ({ path: file.path, content: file.content }))
       // Os controles rodam de novo NA RETOMADA tambem, sobre o conteudo relido
       // do disco. Confiar que "ja passou uma vez" abriria a porta para um
       // arquivo trocado entre o cancelamento e a retomada atravessar sem
@@ -485,7 +543,7 @@ export class PromptToAppPipeline {
           await this.options.service.transition(actor, projectId, 'TESTS_FAILED')
         } else await this.options.service.transition(actor, projectId, 'BUILD_FAILED')
       }
-      return { state: finalFailureState, attempts: completedAttempts, message: diagnostic ?? t('pipeline.failed') }
+      return { state: finalFailureState, attempts: completedAttempts, message: repeatingMessage ?? diagnostic ?? t('pipeline.failed') }
     } catch (error) {
       return this.unexpectedFailure(actor, projectId, plan.plan_id, operationId, ownerSessionId, activeAttempt, activeRunId, activeRunDirectory, activeStage, error)
     }
