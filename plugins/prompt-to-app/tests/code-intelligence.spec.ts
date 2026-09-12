@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  APP_SOURCE_LIMITS, buildCodeIndex, codeIndexSummary, dependents, findSymbol, impactOf,
+  APP_SOURCE_LIMITS, appCodeContext, buildCodeIndex, codeIndexSummary, dependents, findSymbol, impactOf,
   importCycles, isReadableSource, readAppSources, resolveSpecifier, unimported,
   type SourceFileInput,
 } from '../src/code-intelligence.ts'
@@ -404,5 +404,46 @@ describe('o resumo que o planejamento le', () => {
     // Uma frase dizendo "o aplicativo tem estes arquivos:" seguida de nada
     // gastaria teto de contexto para nao dizer coisa alguma.
     expect(codeIndexSummary(buildCodeIndex([file('content/app.json', '{}')]))).toEqual([])
+  })
+})
+
+describe('de qual execucao o inventario e lido', () => {
+  const runs = [
+    { started_at: '2026-09-01T00:00:00.000Z', run_directory: '/runs/antiga' },
+    { started_at: '2026-09-03T00:00:00.000Z', run_directory: '/runs/recente' },
+    { started_at: '2026-09-02T00:00:00.000Z', run_directory: '/runs/meio' },
+  ]
+
+  it('a MAIS RECENTE, e nao a primeira da lista', async () => {
+    // Um pedido de mudanca quase sempre vem depois de uma tentativa que a
+    // pessoa nao gostou, e e o codigo DELA que esta no disco.
+    const lidos: string[] = []
+    await appCodeContext(runs, async path => { lidos.push(path); return 'export const a = 1\n' }, async root => {
+      lidos.push(`lista:${root}`)
+      return ['src/a.ts']
+    })
+    expect(lidos[0]).toBe('lista:/runs/recente')
+  })
+
+  it('sem execucao nenhuma devolve `undefined`, e nao um indice vazio', async () => {
+    // Projeto que nunca gerou nada nao tem codigo, e isso nao e leitura falhada.
+    await expect(appCodeContext([], async () => '', async () => [])).resolves.toBeUndefined()
+  })
+
+  it('falha ao LISTAR devolve `undefined`, e nao indice vazio', async () => {
+    // Vazio diria ao planejador que o aplicativo nao tem codigo, e ele mandaria
+    // criar tudo de novo por cima do que esta la.
+    await expect(appCodeContext(runs, async () => '', async () => { throw new Error('sumiu') }))
+      .resolves.toBeUndefined()
+  })
+
+  it('aplicativo lido devolve indice E o que ficou de fora', async () => {
+    const saida = await appCodeContext(
+      runs,
+      async path => path.endsWith('a.ts') ? 'export const a = 1\n' : 'x'.repeat(APP_SOURCE_LIMITS.bytesPerFile + 1),
+      async () => ['src/a.ts', 'src/enorme.ts'],
+    )
+    expect(saida?.index.symbols.get('src/a.ts')?.map(item => item.name)).toEqual(['a'])
+    expect(saida?.skipped).toEqual([{ path: 'src/enorme.ts', reason: 'TOO_LARGE' }])
   })
 })

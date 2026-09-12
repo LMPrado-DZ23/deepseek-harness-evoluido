@@ -7,7 +7,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CSRF_COOKIE, IdentityError, SESSION_COOKIE, type SessionRecord, type StudioIdentityService } from '@dz23-studio/identity'
 import type { StudioTenancyService } from '@dz23-studio/tenancy'
 import type { AppSpecV1 } from '../src/appspec.js'
-import { createPromptToAppHttpHandler, registerPromptToAppWorkspaceHttpExtension, PROMPT_TO_APP_ROUTE_CONTRACTS } from '../src/http.js'
+import { buildCodeIndex } from '../src/code-intelligence.js'
+import { createPromptToAppHttpHandler, type PromptToAppHttpConfig, registerPromptToAppWorkspaceHttpExtension, PROMPT_TO_APP_ROUTE_CONTRACTS } from '../src/http.js'
 import { IntakeEngine } from '../src/intake.js'
 import type { StudioApproval, StudioAppSpecRecord, StudioDesignSpecRecord, StudioEvidence, StudioIntakeTurn, StudioPlan, StudioProject, StudioRun } from '../src/model.js'
 import type { PromptToAppJobService } from '../src/jobs.js'
@@ -45,7 +46,10 @@ const servers: ReturnType<typeof createServer>[] = []
 const roots: string[] = []
 afterEach(async () => { await Promise.all(servers.splice(0).map(server => new Promise<void>(resolve => server.close(() => resolve())))); await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
 
-async function fixture(options: { readonly emergencyStop?: { assertRunning(scope: { readonly orgId: string; readonly tenantId: string }): void } } = {}) {
+async function fixture(options: {
+  readonly emergencyStop?: { assertRunning(scope: { readonly orgId: string; readonly tenantId: string }): void }
+  readonly codeContext?: PromptToAppHttpConfig['codeContext']
+} = {}) {
   const repository = new MemoryRepository(); let id = 0
   const service = new PromptToAppService({ repository, now: () => new Date('2026-09-03T12:00:00.000Z'), createId: () => `id-${++id}` })
   const identity = { authenticate: vi.fn(() => Promise.resolve(session)), validateCsrf: vi.fn(), validateCsrfToken: vi.fn(),
@@ -68,10 +72,12 @@ async function fixture(options: { readonly emergencyStop?: { assertRunning(scope
     }),
   }
   const allowedHosts: string[] = []; const allowedOrigins: string[] = []
+  const planner = new PlannerEngine(model)
   const server = createServer(createPromptToAppHttpHandler({
     service, identity: identity as unknown as StudioIdentityService,
     tenancy: tenancy as unknown as StudioTenancyService,
-    intake: new IntakeEngine(model), planner: new PlannerEngine(model),
+    intake: new IntakeEngine(model), planner,
+    ...(options.codeContext === undefined ? {} : { codeContext: options.codeContext }),
     jobs: jobs as unknown as PromptToAppJobService,
     logos: { process: vi.fn(async () => ({
       sha256: 'a'.repeat(64), relative_path: `logos/${'b'.repeat(64)}/${'a'.repeat(64)}.png`, mime: 'image/png' as const,
@@ -91,7 +97,7 @@ async function fixture(options: { readonly emergencyStop?: { assertRunning(scope
     cookie: `${SESSION_COOKIE}=session; ${CSRF_COOKIE}=csrf`, 'x-dz23-csrf': 'csrf',
   }
   const request = (path: string, init: RequestInit = {}) => fetch(`${origin}/api/studio/apps${path}`, { ...init, headers: { ...headers, ...(init.headers ?? {}) } })
-  return { request, service, repository, identity, tenancy, jobs, allowedHosts, host }
+  return { request, service, repository, identity, tenancy, jobs, planner, allowedHosts, host }
 }
 
 describe('prompt-to-app HTTP boundary', () => {
@@ -431,5 +437,66 @@ describe('E-08: pontos de retorno e desfazer na porta HTTP', () => {
     const projectId = await projectWithRun(f, {})
     expect((await f.request(`/projects/${projectId}/checkpoints`, { method: 'POST', body: '{}' })).status).toBe(404)
     expect((await f.request(`/projects/${projectId}/undo`)).status).toBe(404)
+  })
+})
+
+describe('o inventario do codigo no planejamento de mudanca', () => {
+  async function ate(f: Awaited<ReturnType<typeof fixture>>) {
+    const created = await (await f.request('/projects', { method: 'POST', body: JSON.stringify({
+      name: 'Site', original_brief: 'Quero apresentar meus serviços.', category: 'landing-page', privacy: 'local-only',
+    }) })).json() as { project: { project_id: string } }
+    const projectId = created.project.project_id
+    for (const answer of ['Clientes locais', 'Conhecer os serviços', 'Serviços e contato']) {
+      await f.request(`/projects/${projectId}/intake/answer`, { method: 'POST', body: JSON.stringify({ answer, recommend: false }) })
+    }
+    return projectId
+  }
+
+  const INVENTARIO = {
+    index: buildCodeIndex([{ path: 'src/lib/validacao.ts', text: 'export function validar() { return true }\n' }]),
+  }
+
+  it('o primeiro plano NAO le o inventario: nao ha codigo ainda', async () => {
+    // Ler o disco para um plano novo e trabalho por nada, e o resultado seria
+    // descartado pelo proprio planejador.
+    const codeContext = vi.fn(async () => INVENTARIO)
+    const f = await fixture({ codeContext })
+    const projectId = await ate(f)
+    expect((await f.request(`/projects/${projectId}/plan`, { method: 'POST', body: '{}' })).status).toBe(201)
+    expect(codeContext).not.toHaveBeenCalled()
+  })
+
+  it('depois de um pedido de MUDANCA, o inventario e lido e chega ao planejamento', async () => {
+    const codeContext = vi.fn(async () => INVENTARIO)
+    const f = await fixture({ codeContext })
+    const projectId = await ate(f)
+    await f.request(`/projects/${projectId}/plan`, { method: 'POST', body: '{}' })
+    await f.request(`/projects/${projectId}/plan/change`, { method: 'POST', body: JSON.stringify({ reason: 'Mostrar o contato antes.' }) })
+    expect((await f.request(`/projects/${projectId}/plan`, { method: 'POST', body: '{}' })).status).toBe(201)
+    expect(codeContext).toHaveBeenCalledTimes(1)
+    expect(f.planner.lastCode?.join('\n')).toContain('src/lib/validacao.ts exporta: validar')
+  })
+
+  it('sem leitor montado, o planejamento de mudanca continua acontecendo', async () => {
+    // Um perfil que nao monta isto planeja mudanca sem inventario, como antes.
+    // O que ele NAO faz e planejar com inventario vazio, que seria afirmar que
+    // o aplicativo nao tem nada.
+    const f = await fixture()
+    const projectId = await ate(f)
+    await f.request(`/projects/${projectId}/plan`, { method: 'POST', body: '{}' })
+    await f.request(`/projects/${projectId}/plan/change`, { method: 'POST', body: JSON.stringify({ reason: 'Mostrar o contato antes.' }) })
+    expect((await f.request(`/projects/${projectId}/plan`, { method: 'POST', body: '{}' })).status).toBe(201)
+    expect(f.planner.lastCode).toBeUndefined()
+  })
+
+  it('leitor que devolve `undefined` NAO vira inventario vazio', async () => {
+    // Vazio diria ao planejador que o aplicativo nao tem codigo, e ele mandaria
+    // criar tudo de novo por cima do que esta la.
+    const f = await fixture({ codeContext: async () => undefined })
+    const projectId = await ate(f)
+    await f.request(`/projects/${projectId}/plan`, { method: 'POST', body: '{}' })
+    await f.request(`/projects/${projectId}/plan/change`, { method: 'POST', body: JSON.stringify({ reason: 'Mostrar o contato antes.' }) })
+    expect((await f.request(`/projects/${projectId}/plan`, { method: 'POST', body: '{}' })).status).toBe(201)
+    expect(f.planner.lastCode).toBeUndefined()
   })
 })

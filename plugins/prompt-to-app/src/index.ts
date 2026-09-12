@@ -8,7 +8,7 @@ import type {} from '@dz23-studio/identity'
 import type {} from '@dz23-studio/route-health'
 import type {} from '@dz23-studio/tenancy'
 import { PRODUCTION_BUILDER_ROOT_POLICY, builderRuntimeRegistryPath, type BuilderSupervisorRootPolicy } from '@dz23-studio/builder-supervisor'
-import { mkdir, statfs } from 'node:fs/promises'
+import { mkdir, readFile, statfs } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 import { createPromptToAppHttpHandler, type StudioAppsHealth } from './http.js'
@@ -33,6 +33,8 @@ import {
   type StudioRun,
 } from './model.js'
 import { IntakeEngine } from './intake.js'
+import { appCodeContext } from './code-intelligence.js'
+import { listTreeFiles } from './runner.js'
 import { skillCardsFrom } from './skill-registry.js'
 import type { IntakeTurnRecordStore } from './intake-turn-store.js'
 import type { DesignSpecRecordStore } from './design-spec-store.js'
@@ -403,6 +405,21 @@ export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}):
       logos: new SharpLogoProcessor(logoStoreRoot),
       generatorFor: (actor, projectId) => new ModelCodeGenerator(model, actor, service.project(actor, projectId).privacy),
       health: actor => healthFor({ orgId: actor.orgId, tenantId: actor.tenantId }),
+      // O inventário do código que JÁ existe, lido do diretório da execução
+      // mais recente que produziu alguma coisa.
+      //
+      // A execução mais recente, e não a mais recente APROVADA: um pedido de
+      // mudança quase sempre vem depois de uma tentativa que a pessoa não
+      // gostou, e é o código DELA que está no disco. Escolher a última
+      // aprovada mostraria ao planejador um aplicativo que não é o que existe.
+      //
+      // `undefined` quando não há execução: projeto que nunca gerou nada não
+      // tem código, e isso não é uma leitura falhada.
+      codeContext: async (actor, projectId) => appCodeContext(
+        service.runs(actor, projectId),
+        async path => readFile(path, 'utf8'),
+        listTreeFiles,
+      ),
       allowedHosts: config.allowedHosts ?? [defaultHost, `localhost:${port}`],
       allowedOrigins: config.allowedOrigins ?? [defaultOrigin, `http://${defaultHost}`],
     }),

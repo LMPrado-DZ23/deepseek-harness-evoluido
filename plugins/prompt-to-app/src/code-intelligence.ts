@@ -520,3 +520,41 @@ export function codeIndexSummary(
   }
   return lines
 }
+
+/** O recorte de uma execução de onde o inventário é lido. */
+export interface CodeContextRun {
+  readonly started_at: string
+  readonly run_directory: string
+}
+
+/**
+ * O inventário do código que já existe, a partir das execuções de um projeto.
+ *
+ * Está AQUI, e não dentro da montagem do plugin, pela razão que já custou uma
+ * guarda morta antes: código que só roda montando o plugin inteiro não é
+ * exercido por teste nenhum, e duas falsificações sobreviveram exatamente
+ * enquanto isto morava lá.
+ *
+ * A execução escolhida é a mais RECENTE, e não a mais recente aprovada: um
+ * pedido de mudança quase sempre vem depois de uma tentativa que a pessoa não
+ * gostou, e é o código dela que está no disco. Escolher a última aprovada
+ * mostraria ao planejador um aplicativo que não é o que existe.
+ * @param runs - as execuções do projeto.
+ * @param read - como ler um arquivo.
+ * @param list - como listar a árvore de um diretório.
+ * @returns o inventário, ou `undefined` quando não há o que ler.
+ */
+export async function appCodeContext(
+  runs: readonly CodeContextRun[],
+  read: (path: string) => Promise<string>,
+  list: (root: string) => Promise<readonly string[]>,
+): Promise<{ readonly index: CodeIndex; readonly skipped: AppSourcesRead['skipped'] } | undefined> {
+  const latest = [...runs].sort((left, right) => left.started_at.localeCompare(right.started_at)).at(-1)
+  if (latest === undefined) return undefined
+  const sources = await readAppSources(latest.run_directory, read, list).catch(() => undefined)
+  // Falha de LEITURA devolve `undefined`, e não um índice vazio: vazio diria ao
+  // planejador que o aplicativo não tem código, e ele mandaria criar tudo de
+  // novo por cima do que está lá.
+  if (sources === undefined) return undefined
+  return { index: buildCodeIndex(sources.files), skipped: sources.skipped }
+}

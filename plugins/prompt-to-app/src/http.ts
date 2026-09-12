@@ -17,7 +17,7 @@ import { intakeAnswerSchema, nextIntakeQuestion, type IntakeConversation, type I
 import type { CodeGeneratorPort } from './pipeline.js'
 import type { EmergencyStopGuard, PromptToAppJobService } from './jobs.js'
 import { RUN_REPORT_FILE } from './run-report.js'
-import { FormCategoryCapabilityError, type PlannerEngine } from './planner.js'
+import { FormCategoryCapabilityError, type PlannerCodeContext, type PlannerEngine } from './planner.js'
 import { routePrivacySchema } from '@dz23-studio/route-health'
 import { studioProjectCategorySchema } from './model.js'
 import type { LogoProcessorPort } from './logo.js'
@@ -148,6 +148,18 @@ export interface PromptToAppHttpConfig {
   readonly allowedOrigins: readonly string[]
   /** Ausente = nenhum botão de emergência montado neste perfil, e nada a perguntar. */
   readonly emergencyStop?: EmergencyStopGuard
+  /**
+   * Lê o código que JÁ existe, para planejar uma MUDANÇA sabendo o que há.
+   *
+   * OPCIONAL, e a ausência é honesta: um perfil que não monta isto planeja
+   * mudança sem inventário, exatamente como antes. O que ele NÃO faz é
+   * planejar com um inventário vazio, que seria afirmar que o aplicativo não
+   * tem nada.
+   *
+   * Devolve `undefined` quando não há execução da qual ler — projeto que nunca
+   * gerou nada não tem código, e isso não é uma leitura falhada.
+   */
+  readonly codeContext?: (actor: PromptToAppActor, projectId: string) => Promise<PlannerCodeContext | undefined>
 }
 
 export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
@@ -262,14 +274,18 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
         const project = config.service.project(actor, projectId)
         const spec = await config.service.latestSpec(actor, projectId)
         const previous = await optionalAsync(async () => config.service.plan(actor, projectId))
+        // O inventário só é buscado quando há mudança a planejar: ler o disco
+        // para um plano novo seria trabalho por nada, e o resultado seria
+        // descartado logo em seguida pelo próprio planejador.
+        const change = previous?.status === 'CHANGE_REQUESTED' ? previous.change_request ?? undefined : undefined
+        const code = change === undefined ? undefined : await config.codeContext?.(actor, projectId)
         const output = await config.planner.plan(
           // O ATOR inteiro, e não só o escopo: é o registro de habilidades que
           // precisa de quem pergunta, e ele confere papel. Passar meio ator
           // faria o planejamento acontecer sem habilidade nenhuma e sem dizer
           // por quê.
           { orgId: actor.orgId, tenantId: actor.tenantId, userId: actor.userId, role: actor.role },
-          project.privacy, spec.app_spec, project.category,
-          previous?.status === 'CHANGE_REQUESTED' ? previous.change_request ?? undefined : undefined,
+          project.privacy, spec.app_spec, project.category, change, code,
         )
         return json(response, 201, { plan: await config.service.proposePlan(actor, projectId, output.slices) })
       }
