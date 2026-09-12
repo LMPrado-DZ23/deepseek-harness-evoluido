@@ -118,7 +118,7 @@ function manifest(overrides: Partial<IntegrationManifest> = {}): IntegrationMani
 }
 function signed(value: IntegrationManifest): IntegrationManifest { return { ...value, signature: sign(null, canonicalManifestBytes(value), privateKey).toString('base64') } }
 
-async function build(options: { channel?: 'stable' | 'dev'; emailTest?: boolean; secrets?: Record<string, { present: boolean; shapeOk: boolean }>; runDirectory?: string; projectState?: string; runsRoot?: string; now?: () => Date } = {}) {
+async function build(options: { channel?: 'stable' | 'dev'; emailTest?: boolean; secrets?: Record<string, { present: boolean; shapeOk: boolean }>; runDirectory?: string; projectState?: string; runsRoot?: string; now?: () => Date; approvalRequestsPerWindow?: number } = {}) {
   const exportsRoot = await mkdtemp(join(tmpdir(), 'dz23-hub-exports-'))
   scratch.push(exportsRoot)
   const repository = new MemoryRepository()
@@ -141,6 +141,7 @@ async function build(options: { channel?: 'stable' | 'dev'; emailTest?: boolean;
     },
     emailTest: options.emailTest === true ? { sendTest: async (ref, to) => { sent.push([ref, to]) } } : undefined,
     now: options.now ?? (() => new Date('2026-09-04T00:00:00.000Z')), createId: () => `id-${++sequence}`,
+    ...(options.approvalRequestsPerWindow === undefined ? {} : { approvalRequestsPerWindow: options.approvalRequestsPerWindow }),
   })
   return { service, repository, sent, exportsRoot }
 }
@@ -363,7 +364,10 @@ describe('integration hub service', () => {
   })
 
   it('keeps the approvals bounded and pins the subject the SMTP actions can be issued for', async () => {
-    const { service, repository } = await build()
+    // Teto de pedidos por janela erguido de propósito: esta prova é sobre o
+    // TETO DO BALDE de confirmações vivas, outro invariante. Amarrar uma à
+    // outra faria esta reprovar por um motivo que ela não está afirmando.
+    const { service, repository } = await build({ approvalRequestsPerWindow: 10_000 })
     // The SMTP actions have one subject; a free string there made the number of live tickets unbounded.
     await expect(service.requestApproval(admin, 'smtp.configured', 'qualquer-coisa', 'DZ23_APP_SMTP')).rejects.toMatchObject({ code: 'INVALID' })
     // A decision about nothing is not issued at all: the SMTP actions must name what they are for.
@@ -420,7 +424,7 @@ describe('integration hub service', () => {
   })
 
   it('a flood of confirmations in one workspace never throws away another workspace\'s', async () => {
-    const { service } = await build({ secrets: { DZ23_APP_SMTP: { present: true, shapeOk: true } } })
+    const { service } = await build({ secrets: { DZ23_APP_SMTP: { present: true, shapeOk: true } }, approvalRequestsPerWindow: 10_000 })
     // Somebody in ws-b is in the middle of confirming…
     const theirs = await service.requestApproval(otherTenant, 'smtp.configured', SMTP, 'DZ23_APP_SMTP')
     // …while ws-a asks for far more confirmations than the ceiling. The map used to be GLOBAL, so
@@ -1155,5 +1159,51 @@ describe('integration hub service', () => {
     const gone = await build({ runDirectory: '/definitely/not/here' })
     await expect(gone.service.createExport(owner, 'p1')).rejects.toMatchObject({ code: 'CONFLICT', message: expect.stringContaining('não estão mais neste computador') })
     for (const built of [draft, noRun, gone]) expect(built.repository.eventRows.at(-1)).toMatchObject({ action: 'export.created', outcome: 'failure' })
+  })
+})
+
+describe('ACHADO: a trilha de auditoria não pode ser esvaziada por quem tem acesso', () => {
+  it('pedir confirmação tem teto por janela — era o caminho livre para rolar a cauda', async () => {
+    // `#audit` grava uma linha por pedido de confirmação e a retenção corta a
+    // cauda em `EVENTS_RETAINED_PER_TENANT`. Esta rota — `POST /approvals`,
+    // que só exige `integrations.manage` — não tinha teto nenhum: mil
+    // requisições em laço, segundos, expulsavam TODO o histórico anterior
+    // daquele espaço. Quem acabasse de ligar uma integração indevida apagava a
+    // prova disso com um `for`.
+    //
+    // A trilha é lida por pessoas COMO PROVA. Uma trilha que qualquer pessoa
+    // autorizada esvazia não é prova de nada.
+    const { service } = await build({ approvalRequestsPerWindow: 5 })
+    for (let index = 0; index < 5; index += 1) {
+      await service.requestApproval(admin, 'smtp.tested', SMTP, `pessoa${String(index)}@example.test`)
+    }
+    await expect(service.requestApproval(admin, 'smtp.tested', SMTP, 'demais@example.test'))
+      .rejects.toMatchObject({ code: 'RATE_LIMITED' })
+  })
+
+  it('o teto recusa o PEDIDO, e nunca silencia a linha de auditoria', async () => {
+    // A saída errada seria continuar aceitando o pedido e parar de gravar para
+    // caber no teto: aí a ação aconteceria sem registro, que é exatamente o
+    // que este teto existe para impedir. O que se perde é o pedido; o que não
+    // se perde nunca é o registro do que foi feito.
+    const { service, repository } = await build({ approvalRequestsPerWindow: 2 })
+    await service.requestApproval(admin, 'smtp.tested', SMTP, 'a@example.test')
+    await service.requestApproval(admin, 'smtp.tested', SMTP, 'b@example.test')
+    const antes = repository.eventRows.filter(event => event.action === 'approval.requested').length
+    await expect(service.requestApproval(admin, 'smtp.tested', SMTP, 'c@example.test')).rejects.toMatchObject({ code: 'RATE_LIMITED' })
+    const depois = repository.eventRows.filter(event => event.action === 'approval.requested')
+    // Duas linhas gravadas, duas linhas ainda lá: a recusa não apagou nada e
+    // não acrescentou ruído.
+    expect(depois).toHaveLength(antes)
+    expect(antes).toBe(2)
+  })
+
+  it('o teto é por ESPAÇO: um inquilino não trava o outro', async () => {
+    const { service } = await build({ approvalRequestsPerWindow: 2 })
+    await service.requestApproval(admin, 'smtp.tested', SMTP, 'a@example.test')
+    await service.requestApproval(admin, 'smtp.tested', SMTP, 'b@example.test')
+    await expect(service.requestApproval(admin, 'smtp.tested', SMTP, 'c@example.test')).rejects.toMatchObject({ code: 'RATE_LIMITED' })
+    // O vizinho continua conseguindo confirmar as coisas dele.
+    await expect(service.requestApproval(otherTenant, 'smtp.tested', SMTP, 'd@example.test')).resolves.toBeDefined()
   })
 })

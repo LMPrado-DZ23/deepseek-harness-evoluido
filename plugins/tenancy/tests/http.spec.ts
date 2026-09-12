@@ -13,8 +13,8 @@ function services() {
   const actor = { userId: 'owner', email: 'owner@example.com', orgId: 'org-a', tenantId: 'workspace-a' }
   const identity = {
     authenticate: vi.fn(() => Promise.resolve(session)),
-    validateCsrf: vi.fn(),
     validateCsrfToken: vi.fn(),
+    cookiesAreSecure: false,
     userForSession: vi.fn(() => ({ user_id: 'owner', email: 'owner@example.com' })),
     assertRequestTrust: vi.fn(),
   }
@@ -80,7 +80,9 @@ describe('tenancy HTTP boundary', () => {
     const members = await f.request('/workspaces/workspace-a/members')
     expect(members.status).toBe(200)
     expect(f.tenancy.listMembers).toHaveBeenCalledWith(expect.anything(), 'workspace-a')
-    expect(f.identity.validateCsrf).not.toHaveBeenCalled()
+    // `validateCsrf` (duplo envio) foi REMOVIDA do serviço de identidade: o
+    // cookie que ela exigia não é mais emitido. Leitura continua sem CSRF.
+    expect(f.identity.validateCsrfToken).not.toHaveBeenCalled()
   })
 
   it('creates workspaces and invitations without accepting scope from headers', async () => {
@@ -177,5 +179,36 @@ describe('tenancy HTTP boundary', () => {
     const ended = { writableEnded: true, writeHead: vi.fn(), end: vi.fn() } as unknown as ServerResponse
     await handler({ ...request, url: undefined, method: 'GET' } as unknown as IncomingMessage, ended)
     expect(ended.writeHead).not.toHaveBeenCalled()
+  })
+})
+
+describe('ACHADO: erro inesperado não devolve a mensagem interna ao navegador', () => {
+  it('falha do armazenamento vira frase de catálogo, e o caminho do servidor não sai', async () => {
+    // Qualquer erro não previsto caía no ramo `400` com `error.message`
+    // repassado ao cliente. Uma falha de `putMembership` vinda do disco carrega
+    // CAMINHO DE ARQUIVO do servidor; um `ZodError` carrega o JSON das issues.
+    // O plugin vizinho já defendia isso de propósito; esta rota tinha ficado
+    // de fora.
+    const f = await fixture()
+    f.tenancy.createWorkspace.mockRejectedValueOnce(
+      new Error('ENOENT: no such file or directory, open \'/var/lib/dz23/instances/org-a/memberships.json\''),
+    )
+    const response = await f.request('/workspaces', { method: 'POST', body: JSON.stringify({ name: 'Produto' }) })
+    expect(response.status).toBe(400)
+    const body = await response.json() as { error: string }
+    expect(body.error).not.toContain('/var/lib/dz23')
+    expect(body.error).not.toContain('ENOENT')
+    expect(body.error).toBe('Solicitação inválida.')
+  })
+
+  it('erro NOSSO continua chegando inteiro: ele é que ajuda a pessoa', async () => {
+    // Filtrar demais seria trocar um vazamento por uma tela que não explica
+    // nada. `TenancyError` e `IdentityError` já falam a língua da pessoa.
+    const f = await fixture()
+    const { TenancyError } = await import('../src/service.ts')
+    f.tenancy.createWorkspace.mockRejectedValueOnce(new TenancyError('forbidden', 'Seu papel não pode criar espaços.'))
+    const response = await f.request('/workspaces', { method: 'POST', body: JSON.stringify({ name: 'Produto' }) })
+    expect(response.status).toBe(403)
+    expect(await response.json()).toEqual({ error: 'Seu papel não pode criar espaços.' })
   })
 })

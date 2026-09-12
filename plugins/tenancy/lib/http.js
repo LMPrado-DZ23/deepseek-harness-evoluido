@@ -56,7 +56,19 @@ export function createTenancyHttpHandler(config) {
                 ? error.code === 'not-found' ? 404 : error.code === 'forbidden' || error.code === 'last-owner' ? 403 : 400
                 : error instanceof IdentityError ? error.code === 'locked' ? 429 : 401
                     : 400;
-            return json(response, status, { error: error instanceof Error ? error.message : t('http.solicitacaoInvalida') });
+            // Só texto de CATÁLOGO chega ao cliente.
+            //
+            // Antes qualquer erro não previsto — `ZodError`, falha do armazenamento,
+            // `TypeError` interno — caía no `400` e tinha a mensagem repassada ao
+            // navegador. Uma falha de `putMembership` vinda do disco carrega caminho
+            // de arquivo do servidor; um `ZodError` carrega o JSON das issues. O
+            // plugin vizinho já defendia exatamente isso, e esta rota tinha ficado
+            // de fora.
+            //
+            // Os dois erros ABAIXO são nossos e já falam a língua da pessoa; o resto
+            // vira uma frase que não conta nada sobre o servidor.
+            const catalogued = error instanceof TenancyError || error instanceof IdentityError;
+            return json(response, status, { error: catalogued ? error.message : t('http.solicitacaoInvalida') });
         }
     };
 }

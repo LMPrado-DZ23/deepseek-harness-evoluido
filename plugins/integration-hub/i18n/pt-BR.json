@@ -47,7 +47,8 @@
     "internal": "Algo deu errado do lado do Studio. Nada foi alterado; tente de novo.",
     "scopeDisabled": "As integrações deste projeto (ou desta organização) estão desligadas. Quem administra precisa religá-las.",
     "scopeEnableReason": "Para religar as integrações, escreva o motivo com pelo menos 10 caracteres.",
-    "integrationRemoveEnabled": "Desligue a integração antes de removê-la. Remover uma integração ligada apagaria o registro do que ela podia fazer sem que ninguém tivesse decidido desligá-la."
+    "integrationRemoveEnabled": "Desligue a integração antes de removê-la. Remover uma integração ligada apagaria o registro do que ela podia fazer sem que ninguém tivesse decidido desligá-la.",
+    "approvalTooMany": "Muitos pedidos de confirmação neste espaço em pouco tempo. Espere alguns minutos e tente de novo."
   },
   "export": {
     "readmeTitle": "Seu protótipo do DZ23 STUDIO",

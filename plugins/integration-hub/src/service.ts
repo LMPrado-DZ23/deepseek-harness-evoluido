@@ -154,6 +154,25 @@ export const MAX_EXPORTS_PER_WINDOW = 12
 export const EXPORT_WINDOW_MS = 10 * 60 * 1000
 
 /**
+ * Pedidos de confirmação que um espaço pode fazer dentro da janela.
+ *
+ * Existe porque a trilha de auditoria podia ser APAGADA por quem tivesse
+ * `integrations.manage`. Cada pedido de confirmação grava uma linha, a
+ * retenção corta a cauda em `EVENTS_RETAINED_PER_TENANT`, e esta rota não
+ * tinha teto nenhum: mil requisições em laço — segundos — expulsavam todo o
+ * histórico anterior daquele espaço. Quem acabasse de ligar uma integração
+ * indevida apagava a prova disso com um `for`.
+ *
+ * A trilha é lida por pessoas COMO PROVA. Uma trilha que qualquer pessoa
+ * autorizada consegue esvaziar não é prova de nada.
+ *
+ * O número é folgado para o uso real — ninguém confirma sessenta decisões em
+ * dez minutos — e apertado o bastante para que a cauda não role.
+ */
+export const MAX_APPROVAL_REQUESTS_PER_WINDOW = 60
+export const APPROVAL_REQUEST_WINDOW_MS = 10 * 60 * 1000
+
+/**
  * How many prototypes this Studio packages at the same time, across every workspace. Packaging
  * walks a whole build, reads every allowed file and hashes it, on Node's single thread: letting
  * four workspaces do that at once makes the Studio unresponsive for all four. Waiting a turn is
@@ -225,6 +244,16 @@ export interface HubServiceOptions {
   /** Only for tests: how long a packaging slot may be held before the caller is refused (default `PACKAGING_SLOT_TIMEOUT_MS`). */
   packagingTimeoutMs?: number
   /**
+   * Só para testes: quantos pedidos de confirmação um espaço pode fazer dentro
+   * da janela (padrão `MAX_APPROVAL_REQUESTS_PER_WINDOW`).
+   *
+   * Existe porque dois testes exercitam o TETO DO BALDE de confirmações vivas,
+   * que é outro invariante, e para chegar lá precisam emitir centenas de
+   * pedidos. Acoplar uma prova à outra faria a primeira reprovar por um motivo
+   * que ela não está afirmando.
+   */
+  approvalRequestsPerWindow?: number
+  /**
    * Os limites de UMA chamada de integração (X-08). O que não vier aqui fica
    * com `DEFAULT_INTEGRATION_CALL_POLICY`: um limite ausente vira o padrão da
    * casa, nunca "sem limite".
@@ -284,6 +313,7 @@ export class IntegrationHubService {
 
   readonly #approvals = new Map<string, Map<string, HubApprovalTicket>>()
   /** Janela de tentativas por integração e por escopo (X-08). Em memória: um reinício só zera o teto, e zerar um teto falha para o lado seguro. */
+  readonly #approvalRequests = new Map<string, number[]>()
   readonly #callLimiter: IntegrationRateLimiter
   /**
    * One package per workspace and project at a time: a page that clicks ten
@@ -460,6 +490,7 @@ export class IntegrationHubService {
    */
   async requestApproval(actor: HubActor, action: HubEvent['action'], subjectId: string, payload?: string): Promise<HubApprovalTicket> {
     this.#authorize(actor, 'integrations.manage')
+    this.#throttleApprovalRequest(actor)
     // The SMTP actions have exactly one subject; accepting a free string there made the number of
     // possible tickets unbounded for no reason. What tells two SMTP decisions apart is the
     // FINGERPRINT of the target below, not the subject.
@@ -520,6 +551,33 @@ export class IntegrationHubService {
    * one TTL), so the sweep only has to look at the FRONT — walking the whole map on every request
    * made each confirmation slower than the last, and Node has one thread for every tenant.
    */
+  /**
+   * Teto de pedidos de confirmação por espaço, dentro da janela.
+   *
+   * Recusa o PEDIDO, e não a linha de auditoria: nunca executar a ação e calar
+   * sobre ela. Silenciar a trilha para caber no teto seria trocar um problema
+   * pequeno — alguém esperar dez minutos — pelo problema que este teto existe
+   * para impedir.
+   * @param actor - quem está pedindo.
+   * @throws HubError RATE_LIMITED quando o espaço já gastou a janela.
+   */
+  #throttleApprovalRequest(actor: HubActor): void {
+    const now = this.#now().getTime()
+    const key = this.#scope(actor)
+    const ceiling = this.options.approvalRequestsPerWindow ?? MAX_APPROVAL_REQUESTS_PER_WINDOW
+    const recent = (this.#approvalRequests.get(key) ?? []).filter(at => now - at < APPROVAL_REQUEST_WINDOW_MS)
+    if (recent.length >= ceiling) {
+      this.#approvalRequests.set(key, recent)
+      throw new HubError('RATE_LIMITED', t('errors.approvalTooMany'))
+    }
+    this.#approvalRequests.set(key, [...recent, now])
+    if (this.#approvalRequests.size > MAX_APPROVAL_SCOPES) {
+      for (const [scope, attempts] of this.#approvalRequests) {
+        if (scope !== key && attempts.every(at => now - at >= APPROVAL_REQUEST_WINDOW_MS)) this.#approvalRequests.delete(scope)
+      }
+    }
+  }
+
   #sweepApprovals(actor: HubActor): Map<string, HubApprovalTicket> {
     const now = this.#now().getTime()
     const key = this.#scope(actor)
