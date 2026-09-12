@@ -118,3 +118,107 @@ export class FailureMemory {
       .sort((left, right) => right.times - left.times || left.diagnostic.localeCompare(right.diagnostic))
   }
 }
+
+/**
+ * As falhas que ATRAVESSAM execuções.
+ *
+ * `FailureMemory` vive em memória e morre com a execução. Ela resolve o defeito
+ * para o qual foi escrita — o laço de três tentativas repetindo a mesma
+ * correção — e não resolve o de fora: se a tentativa de ontem falhou por um
+ * motivo, e a pessoa pede uma mudança hoje, nada lembra.
+ *
+ * Isto é o de fora. E ele é MAIS perigoso que o de dentro, por dois motivos
+ * que o desenho abaixo trata um a um:
+ *
+ * 1. **O tempo passa.** Uma falha de três semanas atrás pode já ter sido
+ *    corrigida por outra coisa, e continuar avisando sobre ela seria mandar o
+ *    gerador evitar um caminho que voltou a funcionar. Por isso a leitura é
+ *    por JANELA, e a janela é de quem pergunta.
+ * 2. **A conclusão é tentadora.** É fácil transformar "isto falhou três vezes"
+ *    em "isto não funciona", e a segunda frase é uma REGRA. Esta memória não
+ *    conclui: ela conta o que aconteceu e quantas vezes, e quem lê decide.
+ */
+
+/** Uma falha já vista neste projeto, antes desta execução. */
+export interface PastFailure {
+  readonly project_id: string
+  readonly run_id: string
+  /** O diagnóstico NORMALIZADO, que é como ele é comparado. */
+  readonly diagnostic: string
+  readonly created_at: string
+}
+
+/** O que a memória de falhas responde sobre uma falha. */
+export interface FailureHistory {
+  readonly times: number
+  /** Quando ela foi vista pela última vez antes desta execução. */
+  readonly lastSeenAt: string | null
+  /** As execuções em que ela apareceu, da mais recente para a mais antiga. */
+  readonly runs: readonly string[]
+}
+
+/**
+ * Quantas vezes esta falha já apareceu ANTES, dentro da janela.
+ *
+ * A comparação usa a MESMA normalização de `FailureMemory`: espaço e quebra de
+ * linha variam entre execuções sem que o problema mude, e nome de arquivo e
+ * número NÃO são mexidos, porque dois erros que diferem só no arquivo são
+ * erros diferentes.
+ *
+ * A execução ATUAL é excluída por identificador, e não por data: relógio de
+ * máquina anda para trás, e uma falha da própria execução contada como
+ * histórico faria a primeira tentativa parecer uma repetição.
+ * @param past - as falhas conhecidas do projeto.
+ * @param diagnostic - o diagnóstico desta tentativa.
+ * @param options - a execução atual e a janela em dias.
+ * @returns o histórico.
+ */
+export function failureHistory(
+  past: readonly PastFailure[],
+  diagnostic: string,
+  options: { readonly currentRunId: string; readonly now: Date; readonly windowDays: number },
+): FailureHistory {
+  const key = FailureMemory.normalize(diagnostic)
+  if (key === '') return { times: 0, lastSeenAt: null, runs: [] }
+  const limit = options.now.getTime() - options.windowDays * 24 * 60 * 60 * 1000
+  const matching = past
+    .filter(row => row.run_id !== options.currentRunId)
+    .filter(row => FailureMemory.normalize(row.diagnostic) === key)
+    .filter(row => {
+      const at = Date.parse(row.created_at)
+      // Data ilegível é DESCARTADA e não tratada como recente: uma linha
+      // corrompida virando "aconteceu agora" faria o aviso aparecer por causa
+      // de um defeito de gravação.
+      return Number.isFinite(at) && at >= limit
+    })
+    .sort((left, right) => right.created_at.localeCompare(left.created_at))
+  if (matching.length === 0) return { times: 0, lastSeenAt: null, runs: [] }
+  return {
+    times: matching.length,
+    lastSeenAt: matching[0]!.created_at,
+    // Execuções DISTINTAS: a mesma falha três vezes na mesma tentativa é um
+    // laço de repetição, não três ocasiões — e contar como três faria a tela
+    // dizer que o problema é mais persistente do que é.
+    runs: [...new Set(matching.map(row => row.run_id))],
+  }
+}
+
+/**
+ * O aviso a acrescentar ao pedido, quando a falha já é velha conhecida.
+ *
+ * `undefined` quando ela é nova: um aviso que aparece sempre deixa de ser
+ * aviso, e gastaria teto de contexto para não dizer nada.
+ *
+ * A frase diz QUANTAS execuções e QUANDO foi a última. Nenhuma das duas é
+ * enfeite: sem a contagem, "já aconteceu" não distingue uma vez de dez; sem a
+ * data, quem lê não consegue julgar se o mundo mudou desde então.
+ * @param history - o histórico desta falha.
+ * @returns a frase, ou `undefined`.
+ */
+export function crossRunWarning(history: FailureHistory): string | undefined {
+  if (history.runs.length === 0 || history.lastSeenAt === null) return undefined
+  return t('prompts.failureAcrossRuns', {
+    runs: String(history.runs.length),
+    when: history.lastSeenAt,
+  })
+}

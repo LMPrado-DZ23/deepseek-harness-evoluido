@@ -62,6 +62,7 @@
     "gate:portability": "node scripts/check-portability.mjs --self-test",
     "gate:i18n": "node scripts/check-i18n.mjs",
     "gate:vocabulary": "node scripts/check-vocabulary.mjs --self-test && node scripts/check-vocabulary.mjs",
+    "gate:memory-map": "node scripts/check-memory-map.mjs --self-test && node scripts/check-memory-map.mjs",
     "golden": "tsx scripts/run-golden-set.ts",
     "gate:comprehension": "tsx scripts/golden-set-comprehension.mjs --self-test && tsx scripts/golden-set-comprehension.mjs",
     "prove:prompt-to-app": "tsx scripts/prove-prompt-to-app.ts",

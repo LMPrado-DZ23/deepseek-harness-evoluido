@@ -154,7 +154,8 @@
     "codeNoExports": "- {path} (não exporta nada)",
     "codeImpact": "Se estes arquivos mudarem, também dependem deles: {files}.",
     "codeCycles": "Atenção: já existe importação em círculo entre {cycles}.",
-    "codeIncomplete": "Esta lista está INCOMPLETA: não foi possível ler {files}. Não conclua que algo não existe só porque não está acima."
+    "codeIncomplete": "Esta lista está INCOMPLETA: não foi possível ler {files}. Não conclua que algo não existe só porque não está acima.",
+    "failureAcrossRuns": "Esta mesma falha já apareceu em {runs} tentativa(s) anterior(es) deste projeto, a última em {when}. Se a abordagem for a mesma de antes, o resultado tende a ser o mesmo."
   },
   "stages": {
     "install": "Preparando as ferramentas do seu aplicativo",
