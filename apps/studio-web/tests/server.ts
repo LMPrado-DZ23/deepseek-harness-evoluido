@@ -308,7 +308,11 @@ const apiHandler = createPromptToAppHttpHandler({
     size_bytes: 100, width: 10, height: 10, extracted_primary: { h: 217, s: 91, l: 50 },
   }) },
   generatorFor: (actor, projectId) => new ModelCodeGenerator(model, actor, service.project(actor, projectId).privacy),
-  health: async () => ({ state: 'OK', route: 'ollama-local', builder: 'OK', disk: 'OK' }), allowedHosts, allowedOrigins,
+  health: async () => ({
+    state: 'OK', route: 'ollama-local', builder: 'OK', disk: 'OK',
+    route_reason: 'A rota local foi escolhida por preferência, e ela está saudável.',
+    route_reason_code: 'LOCAL_PREFERIDA',
+  }), allowedHosts, allowedOrigins,
 })
 /**
  * Um objetivo determinístico para a tela de objetivos.
@@ -419,10 +423,10 @@ const webHandler = createStudioWebHandler({
   agentTeams: () => ({
     teams: () => [{ ...e2eTeam, status: e2eTeamCancelled ? 'CANCELLED' : e2eTeam.status }],
     service: {
-      status: async () => ({ team: { ...e2eTeam, status: e2eTeamCancelled ? 'CANCELLED' : e2eTeam.status }, tasks: e2eTasks }),
+      status: async () => ({ team: { ...e2eTeam, status: e2eTeamCancelled ? 'CANCELLED' : e2eTeam.status }, tasks: e2eTasks, blocked: [] }),
       cancel: async () => {
         e2eTeamCancelled = true
-        return { team: { ...e2eTeam, status: 'CANCELLED' }, tasks: e2eTasks.map(task => ({ ...task, status: task.status === 'QUEUED' ? 'CANCELLED' : task.status })) }
+        return { team: { ...e2eTeam, status: 'CANCELLED' }, tasks: e2eTasks.map(task => ({ ...task, status: task.status === 'QUEUED' ? 'CANCELLED' : task.status })), blocked: [] }
       },
     },
   }),

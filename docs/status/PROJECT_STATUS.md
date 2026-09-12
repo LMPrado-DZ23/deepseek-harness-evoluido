@@ -41,7 +41,7 @@ Todos reproduzíveis pelo comando ao lado.
 Portões, todos `EXIT=0` em 12/09/2026: `domain-scopes`, `domain-routes`,
 `assistant-tools`, `team-role-tools`, `rls-coverage` (8/27), `upstream-pin`,
 `portability`, `i18n` (25 catálogos, 575 chaves), `comprehension`,
-`tracked-lib`, `image-lock`, `decision-record` (52 decisões), `requirements-ledger` (208 requisitos),
+`tracked-lib`, `image-lock`, `decision-record` (52 decisões), `requirements-ledger` (209 requisitos),
 `secrets` (5.735 arquivos), `no-caveman`, `p37` (12/12),
 `vendored-references` (3/3), `licenses` (848 pacotes), `licenses:release`.
 
