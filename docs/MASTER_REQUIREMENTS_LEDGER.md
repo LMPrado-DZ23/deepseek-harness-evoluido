@@ -242,6 +242,8 @@ declarada.
 
 | OS-42 | A missao ganhou dominio fisico, repositorio e composicao — e a busca do teto leva ESCOPO | Missao Engineering OS / T-14 12/09/2026 | v1.0 | BETA | plugins/mission/src/model.ts (studioMissionsDomainSpec, studio_missions v1), plugins/mission/src/budget-port.ts (missionBudgetPort, inScope), plugins/mission/src/index.ts (apply, DomainMissionRepository), plugins/agent-team/src/service.ts (MissionScope, setMissionBudget), dsh-home/profiles/studio/cordis.patch.yml, deploy/harness/edge.patch.yml, deploy/harness/postgres-proof.patch.yml, scripts/studio-domain-specs.ts, scripts/domain-scope-gate.ts, scripts/check-rls-coverage.ts | plugins/mission/tests (41 testes, 3 arquivos), plugins/agent-team/tests/service.spec.ts, 1 falsificacao do escopo | execucao: o motor de missao passou a ter onde morar — dominio `studio_missions` v1, uma tabela, repositorio sobre a `KvTable` como o de equipes, e composicao no perfil `studio`. A DEPENDENCIA E INVERTIDA: e o plugin de missao que injeta `studioAgentTeams` e se apresenta ao servico de equipes com `setMissionBudget`, porque esta versao do cordis NAO tem injecao opcional e o caminho oposto faria toda instalacao sem motor de missao deixar de carregar equipes. UM ACHADO MEU, encontrado ao classificar o dominio para RLS: a busca da missao no adaptador nao levava ESCOPO. `mission_id` e escolhido por quem cria a missao, e nada impede duas organizacoes de escolherem o mesmo — sem escopo, a equipe da organizacao A seria medida contra a missao da B, saberia pelo veredito se a missao alheia estourou, e a execucao dela ENTRARIA na missao alheia. O escopo passou a viajar na porta inteira (`verdictFor` e `noteRun`), e a falsificacao que o remove reprova dois testes. O dominio e `ready` na classificacao de RLS — o PRIMEIRO com essa categoria: toda leitura e por (organizacao, inquilino, identificador), nao ha varredura de inicio, guarda sincrona nem invariante entre inquilinos | Nenhuma missao real foi criada em PostgreSQL: o dominio esta roteado para `postgres` nos dois arquivos de borda, mas a prova real de banco (`pnpm test:postgres`) nao foi rodada neste ambiente para ele. Nao ha rota HTTP nem tela: uma missao so pode ser criada por codigo. `attachRun` que falhe ENCERRA o trabalho recem-iniciado — e a escolha fail-closed, e o custo e baixo porque o trabalho acabou de comecar, mas nao foi exercitado contra um Harness de verdade | rota HTTP e tela de missao; rodar o portao real de PostgreSQL com o dominio novo; migrar `studio_missions` para RLS, que agora e a unica pendencia `ready` do S-08 |
 
+| OS-43 | A missao ganhou rota HTTP com contrato, e o papel passou a ser conferido NO SERVICO | Missao Engineering OS / T-14 12/09/2026 | v1.0 | BETA | plugins/mission/src/http.ts (MISSION_ROUTE_CONTRACTS, createMissionHttpHandler, view, statusOf), plugins/mission/src/service.ts (#authorize, missions, attachRunForApprovedTeam, #inScope), plugins/mission/src/index.ts (registro no webServer), plugins/mission/i18n/pt-BR.json | plugins/mission/tests/http.spec.ts (22 testes), plugins/mission/tests/service.spec.ts (6 novos); cobertura 100% em model.ts, service.ts e budget-port.ts | execucao: seis rotas sob `/api/studio/missions`, todas `authorized`, com permissao e escopo declarados e conferidos por `assertRouteContracts` no carregamento do modulo. Ler exige `project.read`, mexer exige `project.write` — permissoes que JA EXISTEM: inventar `mission.*` obrigaria a redistribui-la entre os quatro papeis, e essa e decisao de produto. A conferencia mora no SERVICO e nao na rota, pela razao ja registrada em tenancy mais uma propria daqui: o motor tambem e chamado pela COMPOSICAO quando uma equipe aprovada liga uma execucao a missao, e conferencia na rota nao alcanca esse caminho. UMA DECISAO QUE EVITOU CONCESSAO SILENCIOSA: o caminho da composicao NAO compoe um ator falso. `attachRunForApprovedTeam(scope, ...)` nao pede papel porque ali nao ha pessoa pedindo — a autorizacao aconteceu quando a equipe foi aprovada com T2 ou T3 — mas continua exigindo ESCOPO. Inventar um `owner` para passar pela propria conferencia seria pior que nao conferir. `spend` e `completion` sao DERIVADOS e calculados na resposta: grava-los criaria uma segunda verdade que diverge no primeiro conserto, como o retrato de equipe ja decidiu para `blocked`. So texto de catalogo chega ao cliente — `ZodError` carrega o JSON das issues e erro de armazenamento carrega caminho de arquivo do servidor | NAO HA TELA: a rota existe e nenhuma parte da aplicacao web a chama. Nenhuma missao foi criada contra PostgreSQL real. `statusOf` tem um ramo (`BUDGET_EXCEEDED`) que nenhuma rota alcanca hoje, porque nao ha rota que ligue execucao — ele esta la para a exaustividade do `switch`, e por isso `http.ts` nao esta em 100% de ramos | a tela de missao em `apps/studio-web`, com item de navegacao, teste unitario, e2e e varredura axe |
+
 <!-- O livro mestre REGISTRA achados, e o achado da OS-39 e sobre numeros de ADR
      que nomeiam mais de uma decisao: citacao-ambigua-proposital -->
 
@@ -250,16 +252,16 @@ declarada.
 | estado | quantos |
 | --- | --- |
 | `STABLE` | 61 |
-| `BETA` | 100 |
+| `BETA` | 101 |
 | `NOT_PRESENT` | 33 |
 | `NOT_CONFIGURED` | 1 |
 | `NOT_EXECUTED` | 4 |
 | `FAILED` | 2 |
 
-**Total de requisitos rastreados: 201.**
+**Total de requisitos rastreados: 202.**
 
 | versao-alvo | quantos |
 | --- | --- |
-| v1.0 | 165 |
+| v1.0 | 166 |
 | v1.x | 33 |
 | v2 | 3 |

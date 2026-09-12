@@ -18,8 +18,16 @@
     "jaExiste": "Já existe uma missão com este identificador.",
     "motivoSemBloqueio": "Só um item bloqueado por alguém de fora pode registrar o motivo do bloqueio.",
     "naoEncontrada": "A missão não foi encontrada.",
+    "papelNaoPode": "Seu papel neste espaço de trabalho não permite esta ação.",
     "provenSemEvidencia": "Um item só pode ser dado como comprovado se disser onde está a prova.",
+    "semMatricula": "Você não participa deste espaço de trabalho.",
     "semMedicao": "Não foi possível medir o quanto a execução {execucao} consumiu, então o limite combinado não pode ser conferido.",
     "tetoEstourado": "A missão já usou {gasto} do limite de {teto} combinado para ela."
+  },
+  "http": {
+    "jsonBodyRequired": "Este pedido precisa ser enviado como JSON.",
+    "rotaNaoEncontrada": "Este endereço não existe.",
+    "solicitacaoGrandeDemais": "Este pedido é grande demais.",
+    "solicitacaoInvalida": "Não foi possível entender este pedido."
   }
 }

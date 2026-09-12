@@ -422,12 +422,24 @@ importers:
       '@deepseek-ai/cordis':
         specifier: workspace:*
         version: link:../../third_party/deepseek-harness/vendor/cordis
+      '@deepseek-ai/dsh-host-webserver':
+        specifier: workspace:*
+        version: link:../../third_party/deepseek-harness/packages/host/webserver
       '@deepseek-ai/dsh-storage-domain':
         specifier: workspace:*
         version: link:../../third_party/deepseek-harness/packages/storage/storage-domain
       '@dz23-studio/agent-team':
         specifier: workspace:*
         version: link:../agent-team
+      '@dz23-studio/identity':
+        specifier: workspace:*
+        version: link:../identity
+      '@dz23-studio/policy':
+        specifier: workspace:*
+        version: link:../policy
+      '@dz23-studio/tenancy':
+        specifier: workspace:*
+        version: link:../tenancy
       zod:
         specifier: 4.4.3
         version: 4.4.3

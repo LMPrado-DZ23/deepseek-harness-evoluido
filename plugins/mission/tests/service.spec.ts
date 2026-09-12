@@ -5,8 +5,10 @@ import {
   type MissionActor, type MissionRepository,
 } from '../src/service.ts'
 
-const ACTOR: MissionActor = { userId: 'u1', orgId: 'org-a', tenantId: 'ws-a' }
-const OUTRO: MissionActor = { userId: 'u2', orgId: 'org-b', tenantId: 'ws-b' }
+const ACTOR: MissionActor = { userId: 'u1', orgId: 'org-a', tenantId: 'ws-a', role: 'owner' }
+const OUTRO: MissionActor = { userId: 'u2', orgId: 'org-b', tenantId: 'ws-b', role: 'owner' }
+/** Leitor: le tudo, nao escreve nada. E o papel que separa ler de mexer. */
+const LEITOR: MissionActor = { ...ACTOR, userId: 'u3', role: 'viewer' }
 
 class MemoryRepository implements MissionRepository {
   rows: MissionRecord[] = []
@@ -342,5 +344,48 @@ describe('os caminhos defensivos que faltavam', () => {
       missionId: '', objective: 'a', maxTotalTokens: null,
       criteria: [{ criterion_id: '', statement: 'x' }],
     })).rejects.toThrow(/.+ .+/u)
+  })
+})
+
+
+describe('o papel confere NO SERVICO, e nao na rota', () => {
+  it('leitor le a missao e a lista, e nao cria nem registra prova', async () => {
+    // A conferencia mora aqui porque quem sabe o que cada operacao significa e
+    // esta camada — e uma conferencia que mora na rota deixa de valer assim que
+    // alguem chama o servico por outro caminho, que e exatamente o que a
+    // composicao do motor de missao faz.
+    const f = await comMissao()
+    expect(f.service.mission(LEITOR, 'm1').mission_id).toBe('m1')
+    expect(f.service.missions(LEITOR)).toHaveLength(1)
+    await expect(f.service.create(LEITOR, {
+      missionId: 'm2', objective: 'algo novo', maxTotalTokens: null,
+      criteria: [{ criterion_id: 'x', statement: 'algo' }],
+    })).rejects.toBeInstanceOf(MissionError)
+    await expect(f.service.recordCriterion(LEITOR, 'm1', 'suite', { state: 'PROVEN', evidence: 'x' }))
+      .rejects.toBeInstanceOf(MissionError)
+    await expect(f.service.declareCandidate(LEITOR, 'm1')).rejects.toBeInstanceOf(MissionError)
+    await expect(f.service.complete(LEITOR, 'm1')).rejects.toBeInstanceOf(MissionError)
+    await expect(f.service.attachRun(LEITOR, 'm1', 'r1', [])).rejects.toBeInstanceOf(MissionError)
+  })
+
+  it('a lista so traz as missoes do proprio escopo, da mais recente para a mais antiga', async () => {
+    const f = await comMissao()
+    await f.service.create(OUTRO, {
+      missionId: 'm-alheia', objective: 'a da outra organizacao', maxTotalTokens: null,
+      criteria: [{ criterion_id: 'x', statement: 'algo' }],
+    })
+    expect(f.service.missions(ACTOR).map(record => record.mission_id)).toEqual(['m1'])
+    expect(f.service.missions(OUTRO).map(record => record.mission_id)).toEqual(['m-alheia'])
+  })
+
+  it('a ligacao vinda de uma EQUIPE APROVADA nao pede papel, mas exige escopo', async () => {
+    // Aqui nao ha pessoa pedindo: a autorizacao aconteceu quando a equipe foi
+    // aprovada. Exigir papel obrigaria a compor um ator falso — um `owner`
+    // inventado para contornar a propria conferencia.
+    const f = await comMissao(500)
+    const ligada = await f.service.attachRunForApprovedTeam({ orgId: 'org-a', tenantId: 'ws-a' }, 'm1', 'r1', [])
+    expect(ligada.run_ids).toEqual(['r1'])
+    await expect(f.service.attachRunForApprovedTeam({ orgId: 'org-b', tenantId: 'ws-b' }, 'm1', 'r2', []))
+      .rejects.toBeInstanceOf(MissionError)
   })
 })

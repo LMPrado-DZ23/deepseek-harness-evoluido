@@ -1,10 +1,15 @@
 import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { Domain, KvTable } from '@deepseek-ai/dsh-storage-domain'
+import type {} from '@dz23-studio/identity'
+import type {} from '@dz23-studio/tenancy'
 import { inScope, missionBudgetPort } from './budget-port.js'
+import { createMissionHttpHandler } from './http.js'
 import { studioMissionsDomainSpec, type MissionKey, type MissionRecord } from './model.js'
 import { StudioMissionService, type MissionRepository } from './service.js'
 
 export * from './budget-port.js'
+export * from './http.js'
 export * from './model.js'
 export * from './service.js'
 
@@ -17,7 +22,7 @@ export const name = 'dz23-studio-mission'
  * faria toda instalação sem motor de missão deixar de carregar equipes, que é
  * o oposto do que se quer.
  */
-export const inject = ['storageDomain', 'studioAgentTeams', 'studioAgents']
+export const inject = ['storageDomain', 'studioAgentTeams', 'studioAgents', 'studioIdentity', 'studioTenancy', 'webServer']
 
 export interface StudioMissionRuntime {
   readonly service: StudioMissionService
@@ -53,12 +58,24 @@ export async function apply(ctx: Context): Promise<void> {
     // desligá-lo. O custo é baixo de propósito: o trabalho acabou de começar.
     async (scope, missionId, runId) => {
       if (inScope(repository, scope, missionId) === undefined) throw new Error(`MISSION_MISSING:${missionId}`)
-      await service.attachRun(
-        { userId: missionId, orgId: scope.orgId, tenantId: scope.tenantId },
-        missionId, runId, ctx.studioAgents.runs(),
-      )
+      await service.attachRunForApprovedTeam(scope, missionId, runId, ctx.studioAgents.runs())
     },
   ))
 
   ctx.provide('studioMission', { service, missions: () => repository.missions() })
+
+  const port = ctx.webServer.port
+  const defaultHost = `127.0.0.1:${String(port)}`
+  ctx.effect(() => ctx.webServer.register({
+    kind: 'prefix',
+    path: '/api/studio/missions',
+    handler: createMissionHttpHandler({
+      service,
+      identity: ctx.studioIdentity.service,
+      tenancy: ctx.studioTenancy.service,
+      allowedHosts: [defaultHost, `localhost:${String(port)}`],
+      allowedOrigins: [`http://localhost:${String(port)}`, `http://${defaultHost}`],
+      runs: () => ctx.studioAgents.runs(),
+    }),
+  }), 'dz23-studio-mission.http')
 }

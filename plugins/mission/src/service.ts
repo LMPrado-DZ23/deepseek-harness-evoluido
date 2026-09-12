@@ -1,3 +1,4 @@
+import { roleAllows, type StudioPermission, type StudioRole } from '@dz23-studio/policy'
 import { t } from './i18n.js'
 import { missionRecordSchema, type MissionCriterion, type MissionRecord, type MissionRunUsage } from './model.js'
 
@@ -121,6 +122,15 @@ export interface MissionActor {
   readonly userId: string
   readonly orgId: string
   readonly tenantId: string
+  /**
+   * O papel de quem pede, resolvido pelo SERVIDOR.
+   *
+   * A permissão é conferida aqui, e não na rota: quem sabe o que cada operação
+   * significa é esta camada, e uma conferência que mora na rota deixa de valer
+   * assim que alguém chama o serviço por outro caminho — que é exatamente o que
+   * a composição do motor de missão faz.
+   */
+  readonly role: StudioRole
 }
 
 /**
@@ -151,8 +161,13 @@ export class StudioMissionService {
    * @returns a missão.
    */
   mission(actor: MissionActor, missionId: string): MissionRecord {
+    this.#authorize(actor, 'project.read')
+    return this.#inScope({ orgId: actor.orgId, tenantId: actor.tenantId }, missionId)
+  }
+
+  #inScope(scope: { readonly orgId: string; readonly tenantId: string }, missionId: string): MissionRecord {
     const found = this.#repository.missions().find(record => record.mission_id === missionId
-      && record.org_id === actor.orgId && record.tenant_id === actor.tenantId)
+      && record.org_id === scope.orgId && record.tenant_id === scope.tenantId)
     if (found === undefined) throw new MissionError('NOT_FOUND', t('errors.naoEncontrada'))
     return found
   }
@@ -169,6 +184,7 @@ export class StudioMissionService {
     readonly maxTotalTokens: number | null
     readonly criteria: readonly Pick<MissionCriterion, 'criterion_id' | 'statement'>[]
   }): Promise<MissionRecord> {
+    this.#authorize(actor, 'project.write')
     const now = this.#now().toISOString()
     // Todo critério nasce SEM PROVA. Deixar o chamador escolher o estado inicial
     // permitiria criar uma missão já concluída, que é a fraude mais barata
@@ -210,7 +226,40 @@ export class StudioMissionService {
    * @returns a missão atualizada.
    */
   async attachRun(actor: MissionActor, missionId: string, runId: string, runs: readonly MissionRunUsage[]): Promise<MissionRecord> {
-    const mission = this.mission(actor, missionId)
+    this.#authorize(actor, 'project.write')
+    return this.#attach({ orgId: actor.orgId, tenantId: actor.tenantId }, missionId, runId, runs)
+  }
+
+  /**
+   * Liga à missão uma execução que uma EQUIPE JÁ APROVADA acabou de iniciar.
+   *
+   * Não confere permissão, e isso é deliberado: aqui não há pessoa pedindo. A
+   * autorização aconteceu quando a equipe foi aprovada — com nível T2 ou T3 e
+   * confirmação humana — e exigir de novo um papel aqui obrigaria a compor um
+   * ator falso, que é pior: um `owner` inventado para contornar a própria
+   * conferência é uma concessão silenciosa de privilégio.
+   *
+   * O ESCOPO continua obrigatório, e é o da equipe: sem ele a execução de uma
+   * organização entraria na missão de outra que tenha escolhido o mesmo
+   * identificador.
+   * @param scope - a organização e o inquilino da equipe.
+   * @param missionId - a missão.
+   * @param runId - a execução.
+   * @param runs - as execuções conhecidas, para o teto.
+   * @returns a missão atualizada.
+   */
+  async attachRunForApprovedTeam(
+    scope: { readonly orgId: string; readonly tenantId: string },
+    missionId: string, runId: string, runs: readonly MissionRunUsage[],
+  ): Promise<MissionRecord> {
+    return this.#attach(scope, missionId, runId, runs)
+  }
+
+  async #attach(
+    scope: { readonly orgId: string; readonly tenantId: string },
+    missionId: string, runId: string, runs: readonly MissionRunUsage[],
+  ): Promise<MissionRecord> {
+    const mission = this.#inScope(scope, missionId)
     if (mission.status !== 'RUNNING') throw new MissionError('INVALID_STATE', t('errors.estadoNaoAceitaTrabalho'))
     if (mission.run_ids.includes(runId)) return mission
     const verdict = missionSpend(mission, runs)
@@ -236,6 +285,7 @@ export class StudioMissionService {
     readonly evidence?: string | null
     readonly blockedReason?: string | null
   }): Promise<MissionRecord> {
+    this.#authorize(actor, 'project.write')
     const mission = this.mission(actor, missionId)
     if (mission.status === 'COMPLETED' || mission.status === 'ABANDONED') {
       throw new MissionError('INVALID_STATE', t('errors.estadoNaoAceitaTrabalho'))
@@ -263,6 +313,7 @@ export class StudioMissionService {
    * @returns a missão em candidatura.
    */
   async declareCandidate(actor: MissionActor, missionId: string): Promise<MissionRecord> {
+    this.#authorize(actor, 'project.write')
     const mission = this.mission(actor, missionId)
     if (mission.status !== 'RUNNING') throw new MissionError('INVALID_STATE', t('errors.estadoNaoAceitaCandidatura'))
     return this.#save({ ...mission, status: 'CANDIDATE_COMPLETED', candidate_at: this.#now().toISOString() })
@@ -280,12 +331,36 @@ export class StudioMissionService {
    * @returns a missão concluída.
    */
   async complete(actor: MissionActor, missionId: string): Promise<MissionRecord> {
+    this.#authorize(actor, 'project.write')
     const mission = this.mission(actor, missionId)
     if (mission.status !== 'CANDIDATE_COMPLETED') throw new MissionError('INVALID_STATE', t('errors.concluirExigeCandidatura'))
     const verdict = missionCompletion(mission.criteria)
     if (verdict.kind !== 'PROVEN') throw new MissionError('INVALID_STATE', completionDiagnostic(verdict))
     const now = this.#now().toISOString()
     return this.#save({ ...mission, status: 'COMPLETED', completed_at: now })
+  }
+
+  /**
+   * Confere a permissão do papel, ou recusa.
+   * @param actor - quem pede.
+   * @param permission - a permissão exigida.
+   */
+  #authorize(actor: MissionActor, permission: StudioPermission): void {
+    if (!roleAllows(actor.role, permission)) throw new MissionError('FORBIDDEN', t('errors.papelNaoPode'))
+  }
+
+  /** As missões deste escopo, da mais recente para a mais antiga. */
+  missions(actor: MissionActor): readonly MissionRecord[] {
+    this.#authorize(actor, 'project.read')
+    return this.#repository.missions()
+      .filter(record => record.org_id === actor.orgId && record.tenant_id === actor.tenantId)
+      // Desempate pelo identificador, que e unico dentro do escopo: sem ele a
+      // ordem de duas missoes do mesmo instante dependeria da ordem de leitura
+      // do armazenamento, e a tela mudaria de ordem sozinha entre dois
+      // carregamentos. Nao ha terceiro ramo porque nao ha dois registros com o
+      // mesmo identificador aqui — `create` recusa o repetido.
+      .sort((left, right) => right.created_at.localeCompare(left.created_at)
+        || (left.mission_id < right.mission_id ? -1 : 1))
   }
 
   async #save(record: MissionRecord): Promise<MissionRecord> {
