@@ -44,10 +44,12 @@ describe('observar — a pasta vazia', () => {
     expect(observar(base).nodeEsperado).toBe('22.23.1')
   })
 
-  it('o que NÃO foi perguntado sai indefinido, e nunca como zero', () => {
-    // `rotasConfiguradas` só é sabido depois que o Studio sobe. Zero aqui diria
-    // "nenhuma configurada" sobre algo que ninguém olhou.
-    expect(observar(base).rotasConfiguradas).toBeUndefined()
+  it('as rotas vêm do AMBIENTE, e uma lista vazia é uma resposta', () => {
+    // Perguntar ao Studio quais rotas ele tem exigiria que ele já estivesse no
+    // ar — e esta conferência existe exatamente para o caso em que ele não
+    // está. O ambiente responde sem abrir conexão nenhuma.
+    expect(observar(base, { versions: process.versions, env: {} }).rotasConfiguradas).toEqual([])
+    expect(observar(base, { versions: process.versions, env: { DZ23_OMNIROUTE_KEY: 'k' } }).rotasConfiguradas).toEqual(['omniroute'])
   })
 })
 

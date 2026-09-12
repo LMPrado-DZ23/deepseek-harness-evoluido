@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CSRF_COOKIE, IdentityError, SESSION_COOKIE, type SessionRecord, type StudioIdentityService } from '@dz23-studio/identity'
 import { TenancyError, type StudioTenancyService } from '@dz23-studio/tenancy'
 import { EXPORT_LIMIT_BYTES, ExportError } from '../src/export.ts'
-import { createHubHttpHandler, HUB_ROUTE_CONTRACTS, safeFileName } from '../src/http.ts'
+import { createHubHttpHandler, HUB_ROUTE_CONTRACTS, publicIntegration, safeFileName } from '../src/http.ts'
 import { canonicalManifestBytes } from '../src/manifest.ts'
 import type { HubEvent, IntegrationKillSwitch, IntegrationManifest, StudioExport, StudioIntegration } from '../src/model.ts'
 import { HubError, IntegrationHubService, securityFingerprint, type HubActor, type HubRepository } from '../src/service.ts'
@@ -654,6 +654,82 @@ describe('ACHADO: a listagem de integracoes nao entrega o mapa de nomes do cofre
     expect(plantada).toMatchObject({ name: 'Agenda', kind: 'skill', enabled: true })
     expect(plantada).toHaveProperty('health')
     expect(plantada).toHaveProperty('can_enable')
+  })
+})
+
+describe('ACHADO: a listagem nao entrega o TEXTO da habilidade', () => {
+  it('`skill_body` nao sai na listagem, que so exige `workspace.read`', async () => {
+    // A rota que INSTALA o texto exige `integrations.manage` e nao devolve o
+    // texto na resposta. A rota que LE reconfere assinatura, tamanho e
+    // impressao, recusa habilidade desligada, e exige `project.write`.
+    //
+    // E a LISTAGEM devolvia o registro inteiro. Ou seja: o texto que so um
+    // administrador pode instalar, e que so um construtor pode ler, chegava a
+    // qualquer leitor do espaco, em TODA carga de pagina, sem nenhuma das
+    // conferencias — inclusive com a habilidade DESLIGADA.
+    const f = await fixture('viewer')
+    const registro: StudioIntegration = {
+      integration_id: 'int-com-texto', org_id: session.org_id, tenant_id: session.tenant_id,
+      kind: 'skill', name: 'Agenda', manifest: null,
+      effective_tier: 'T0', verification: 'unverified',
+      enabled: false, secret_ref: null,
+      skill_body: 'INSTRUCAO-SECRETA-DA-HABILIDADE',
+      created_by: session.user_id, created_at: '2026-09-01T00:00:00.000Z', updated_at: '2026-09-01T00:00:00.000Z',
+    }
+    await f.repository.putIntegration(registro)
+
+    const body = await (await f.request('/integrations')).json() as { integrations: readonly Record<string, unknown>[] }
+    expect(body.integrations.map(item => item['integration_id'])).toContain('int-com-texto')
+    expect(JSON.stringify(body)).not.toContain('INSTRUCAO-SECRETA-DA-HABILIDADE')
+    for (const item of body.integrations) expect(item).not.toHaveProperty('skill_body')
+    // E o que a tela precisa saber sobre o texto CONTINUA vindo: se ela nao
+    // souber que ja ha texto instalado, ela oferece instalar de novo o que ja
+    // esta la, e quem le nao tem como saber que nao precisa.
+    expect(body.integrations.find(item => item['integration_id'] === 'int-com-texto')).toMatchObject({ skill_body_installed: true })
+  })
+
+  it('a rota de LIGAR tambem passa pelo recorte', async () => {
+    // Uma das tres rotas consertada e as outras nao seria o mesmo defeito com
+    // outro nome: quem liga uma habilidade recebe o registro de volta, e a
+    // resposta de ligar nao tem por que carregar o texto que a de instalar
+    // deliberadamente omite.
+    const f = await fixture('admin')
+    // Registrada pelo HTTP de verdade, para nascer ASSINADA e poder ser ligada;
+    // o texto e o alias sao plantados depois, porque nenhuma rota os coloca la.
+    const { integration } = await (await f.request('/integrations', { method: 'POST', body: JSON.stringify(manifest()) })).json() as { integration: StudioIntegration }
+    await f.repository.putIntegration({ ...integration, secret_ref: 'DZ23_APP_SMTP', skill_body: 'INSTRUCAO-SECRETA-DA-HABILIDADE' })
+
+    const response = await f.request(`/integrations/${integration.integration_id}/enabled`, { method: 'POST', body: '{"enabled":true}' })
+    expect(response.status).toBe(200)
+    const body = await response.json() as { integration: Record<string, unknown> }
+    // A integracao VOLTOU: sem isto as guardas abaixo falariam sobre um erro.
+    expect(body.integration['integration_id']).toBe(integration.integration_id)
+    expect(JSON.stringify(body)).not.toContain('INSTRUCAO-SECRETA-DA-HABILIDADE')
+    expect(JSON.stringify(body)).not.toContain('DZ23_APP_SMTP')
+    expect(body.integration).not.toHaveProperty('skill_body')
+    expect(body.integration).not.toHaveProperty('secret_ref')
+    expect(body.integration).toMatchObject({ enabled: true, skill_body_installed: true })
+  })
+})
+
+describe('publicIntegration — o recorte que TODA rota usa', () => {
+  it('tira o alias do cofre e o texto, e diz que ha texto instalado', () => {
+    const registro = { integration_id: 'i', secret_ref: 'DZ23_APP_SMTP', skill_body: 'texto' }
+    expect(publicIntegration(registro)).toEqual({ integration_id: 'i', skill_body_installed: true })
+  })
+
+  it('AUSENTE, NULO e VAZIO sao todos "sem texto instalado"', () => {
+    // Para quem olha a tela os tres sao a mesma coisa, e o dominio ja trata
+    // ausente e nulo como "instalada, sem texto".
+    for (const skill_body of [undefined, null, '']) {
+      const registro = { integration_id: 'i', skill_body }
+      expect(publicIntegration(registro).skill_body_installed, String(skill_body)).toBe(false)
+    }
+  })
+
+  it('nao come o resto da resposta: minimizar nao e esvaziar', () => {
+    const registro = { integration_id: 'i', name: 'Agenda', kind: 'skill', enabled: true, secret_ref: null }
+    expect(publicIntegration(registro)).toMatchObject({ integration_id: 'i', name: 'Agenda', kind: 'skill', enabled: true })
   })
 })
 

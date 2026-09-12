@@ -5,7 +5,7 @@ import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { bloqueios, conferencias, relatorio, versaoEsperada } from './studio-doctor.mjs'
+import { bloqueios, conferencias, relatorio, rotasConfiguradas, versaoEsperada } from './studio-doctor.mjs'
 
 /**
  * `pnpm studio` — o comando que faltava.
@@ -46,7 +46,10 @@ export function observar(base = raiz, ambiente = process) {
     studioCompilado: existsSync(resolve(base, 'plugins', 'prompt-to-app', 'lib')),
     perfilPresente: existsSync(resolve(base, 'dsh-home', 'profiles', 'studio', 'package.json')),
     docker: docker(),
-    rotasConfiguradas: undefined,
+    // Lida do AMBIENTE, e não do Studio: perguntar ao Studio exigiria que ele
+    // já estivesse no ar, e esta conferência existe para o caso em que ele
+    // ainda não está.
+    rotasConfiguradas: rotasConfiguradas(ambiente.env),
   }
 }
 

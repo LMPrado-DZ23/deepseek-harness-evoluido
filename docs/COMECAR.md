@@ -106,9 +106,34 @@ de um contêiner sem rede, com o sistema de arquivos somente leitura e nenhuma
 permissão de sistema. Sem Docker rodando, o Studio planeja e não constrói. Abra
 o Docker Desktop, ou instale o Docker.
 
-**A inteligência artificial.** É ela que escreve o plano e o código. Configure
-uma na tela de ajuste do Studio depois que ele abrir. Nenhuma chave é escrita em
-arquivo gerado, log, pacote ou tela — só a referência ao cofre.
+**A inteligência artificial.** É ela que escreve o plano e o código. São três
+rotas, e o conferidor diz **quais** estão configuradas pelo nome — e não quantas,
+porque "duas configuradas" não conta a ninguém se o texto dele sai do
+computador:
+
+| rota | variável | o que ela é |
+|---|---|---|
+| **Ollama, no seu computador** | `DZ23_OLLAMA_BASE_URL` | Não manda o seu texto para fora. Precisa do Ollama rodando. É a primeira da lista de propósito. |
+| **DeepSeek oficial** | `DEEPSEEK_API_KEY` | A rota padrão, e a única para a qual o Studio volta sozinho quando outra falha **antes** de escrever qualquer coisa. |
+| **OmniRoute (externo, opcional, avançado)** | `DZ23_OMNIROUTE_KEY`, `DZ23_OMNIROUTE_BASE_URL` | **Desligada por padrão.** Só entra quando você configura a chave. |
+
+Sobre o **OmniRoute**, o que vale é `ADR-014` e não preferência:
+
+- ele é **externo e opcional**, e só passa a existir para o Studio quando você
+  configura a chave — estar declarado no perfil não é estar configurado;
+- o Studio consome dele **somente `/v1`**, um endpoint compatível com OpenAI;
+- **`maxRetries: 0`**: quando há gateway, o gateway é a única autoridade de
+  repetição e de troca de rota. Não existe repetição no meio do texto;
+- ele **nunca fica ativo junto com o 9Router**, que não integra o perfil;
+- só existe volta automática de OmniRoute para DeepSeek oficial quando a falha
+  acontece **antes** de qualquer conteúdo visível. Depois disso o Studio não
+  repete nem troca: ele devolve o erro, e o erro fica auditado;
+- em modo `local-only`, só o Ollama saudável pode ser escolhido — se ele não
+  estiver disponível o Studio **recusa**, e não cai silenciosamente para uma
+  rota externa.
+
+Nenhuma chave é escrita em arquivo gerado, log, pacote ou tela — só a referência
+ao cofre. As variáveis acima são **nomes**, nunca valores no perfil.
 
 ## 6. O primeiro aplicativo
 

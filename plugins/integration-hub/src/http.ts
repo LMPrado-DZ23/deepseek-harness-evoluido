@@ -156,11 +156,10 @@ export function createHubHttpHandler(config: HubHttpConfig) {
           // propria auditoria digere o alias (`minimizeSecretRef`) para nao
           // registra-lo.
           integrations: page.integrations.map(item => {
-            const { secret_ref: _secretRef, ...visible } = item
             // As duas derivadas continuam sendo calculadas sobre o registro
             // COMPLETO: recalcular sobre o recorte mudaria a resposta para uma
             // que o servidor nao decidiu.
-            return { ...visible, can_enable: service.canEnable(item), requires_approval_tier: service.requiredApprovalTier(item), health: integrationHealth(item) }
+            return { ...publicIntegration(item), can_enable: service.canEnable(item), requires_approval_tier: service.requiredApprovalTier(item), health: integrationHealth(item) }
           }),
           next_cursor: page.next_cursor,
           // Os dois totais separam "nada encontrado para o que você procurou" de
@@ -177,7 +176,7 @@ export function createHubHttpHandler(config: HubHttpConfig) {
       if (method === 'POST' && enabledMatch !== null) {
         const body = enabledSchema.parse(await readJson(request))
         const integration = await service.setEnabled(actor, decodeURIComponent(enabledMatch[1]!), body.enabled, asApproval(body.approval))
-        return json(response, 200, { integration: { ...integration, can_enable: service.canEnable(integration), requires_approval_tier: service.requiredApprovalTier(integration) } })
+        return json(response, 200, { integration: { ...publicIntegration(integration), can_enable: service.canEnable(integration), requires_approval_tier: service.requiredApprovalTier(integration) } })
       }
       const testMatch = /^\/integrations\/([^/]+)\/test$/u.exec(route)
       if (method === 'POST' && testMatch !== null) {
@@ -190,7 +189,7 @@ export function createHubHttpHandler(config: HubHttpConfig) {
         // A resposta NÃO devolve o texto. Ele pode ter duzentos mil caracteres,
         // e devolvê-lo faria toda instalação trafegar duas vezes o que já
         // subiu — e deixaria uma cópia dele no registro de rede de quem opera.
-        return json(response, 200, { integration: { ...integration, skill_body: undefined } })
+        return json(response, 200, { integration: publicIntegration(integration) })
       }
       const removeMatch = /^\/integrations\/([^/]+)$/u.exec(route)
       if (method === 'DELETE' && removeMatch !== null) {
@@ -304,6 +303,34 @@ function splitList(value: string): string[] {
 
 function asApproval(value: { approval_id: string } | undefined) {
   return value === undefined ? undefined : { approvalId: value.approval_id }
+}
+
+/**
+ * A forma PÚBLICA de uma integração. Uma só, para as três rotas que a devolvem.
+ *
+ * ACHADO: a listagem devolvia o registro INTEIRO. `secret_ref` já saía dela por
+ * um recorte escrito na própria rota — e `skill_body` não. Ou seja: o texto que
+ * só `integrations.manage` pode instalar, que a rota de instalação
+ * deliberadamente NÃO devolve, e que `skillBody()` só entrega depois de
+ * reconferir assinatura, tamanho e impressão e de recusar habilidade desligada,
+ * chegava a qualquer `workspace.read` em TODA carga de página — desligada
+ * inclusive, e sem nenhuma dessas conferências.
+ *
+ * A causa é a de sempre nesta missão: o recorte morava na MONTAGEM da rota, e
+ * por isso valia para uma rota e não para as outras duas. Aqui ele é uma função
+ * exportada, com teste próprio, e cada campo novo do registro tem de passar por
+ * ela para chegar à rede.
+ *
+ * `skill_body_installed` entra no lugar do texto: a tela precisa saber se já há
+ * texto instalado — e essa é a única coisa que ela precisa saber sobre ele.
+ * @param record - o registro guardado.
+ * @returns o que pode sair na rede.
+ */
+export function publicIntegration<T extends { secret_ref?: string | null | undefined; skill_body?: string | null | undefined }>(record: T) {
+  const { secret_ref: _secretRef, skill_body: skillBody, ...visible } = record
+  // `undefined` é "instalada, sem texto" e `null` também — os dois são a mesma
+  // coisa para quem olha a tela, e o domínio já trata os dois assim.
+  return { ...visible, skill_body_installed: typeof skillBody === 'string' && skillBody.length > 0 }
 }
 
 function publicExport(record: Awaited<ReturnType<IntegrationHubService['exportRecord']>>) {

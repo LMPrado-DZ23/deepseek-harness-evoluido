@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-import { avisos, bloqueios, conferencias, primeiroPasso, relatorio, versaoEsperada } from './studio-doctor.mjs'
+import { ROTAS, avisos, bloqueios, conferencias, primeiroPasso, relatorio, rotasConfiguradas, versaoEsperada } from './studio-doctor.mjs'
 
 /**
  * O doctor da primeira execução.
@@ -27,7 +27,7 @@ function tudoPronto(overrides = {}) {
     studioCompilado: true,
     perfilPresente: true,
     docker: true,
-    rotasConfiguradas: 1,
+    rotasConfiguradas: ['ollama'],
     ...overrides,
   }
 }
@@ -93,7 +93,7 @@ describe('conferencias — o que bloqueia e o que nao bloqueia', () => {
   it('construtor e modelo NAO bloqueiam: o Studio abre e diz na tela o que falta', () => {
     // Bloquear aqui impediria a pessoa de ver o produto por causa de algo que
     // ela conserta depois, de dentro dele.
-    const lista = conferencias(tudoPronto({ docker: false, rotasConfiguradas: 0 }))
+    const lista = conferencias(tudoPronto({ docker: false, rotasConfiguradas: [] }))
     expect(bloqueios(lista)).toEqual([])
     expect(avisos(lista).map(item => item.id)).toEqual(['construtor', 'modelo'])
   })
@@ -119,6 +119,12 @@ describe('conferencias — NAO_SEI nunca vira FALTA', () => {
   it('nao ter conseguido ler as rotas nao afirma que nenhuma foi configurada', () => {
     const lista = conferencias(tudoPronto({ rotasConfiguradas: undefined }))
     expect(de(lista, 'modelo').estado).toBe('NAO_SEI')
+  })
+
+  it('lista VAZIA e uma resposta, e diferente de nao ter perguntado', () => {
+    // Perguntei e nao ha nenhuma, contra nao perguntei. A primeira manda a
+    // pessoa configurar; a segunda nao manda fazer nada.
+    expect(de(conferencias(tudoPronto({ rotasConfiguradas: [] })), 'modelo').estado).toBe('FALTA')
   })
 
   it('versao do Node ilegivel e NAO_SEI, e nao impede o arranque', () => {
@@ -189,7 +195,7 @@ describe('relatorio', () => {
       '  ok O Studio compilado: compilado',
       '  ok O perfil do Studio: no lugar',
       '  ok O ambiente isolado de criação: respondendo',
-      '  ok A inteligência artificial: 1 configurada(s)',
+      '  ok A inteligência artificial: Ollama, no seu computador',
     ].join('\n'))
   })
 
@@ -303,9 +309,103 @@ describe('docs/COMECAR.md — a pagina e o codigo dizem a mesma coisa', () => {
     for (const marca of marcas) expect(pagina, marca).toContain(`\`${marca}\``)
   })
 
+  it('as tres rotas, e as variaveis de cada uma, estao na pagina', () => {
+    // Uma rota que o doctor sabe conferir e que a pagina nao menciona e uma
+    // opcao que so quem leu o codigo descobre — inclusive a que nao manda o
+    // texto de ninguem para fora.
+    for (const rota of ROTAS) {
+      expect(pagina, rota.id).toContain(rota.nome)
+      for (const variavel of [rota.chave, rota.endereco]) {
+        if (variavel !== undefined) expect(pagina, variavel).toContain(variavel)
+      }
+    }
+  })
+
+  it('a pagina diz que o OmniRoute e opcional e desligado por padrao', () => {
+    // Nao e gosto: e ADR-014. Uma pagina que apresentasse o OmniRoute como mais
+    // uma opcao igual as outras convidaria alguem a liga-lo sem saber que o
+    // texto dele passa a sair por um servico externo.
+    const bloco = pagina.slice(pagina.indexOf('OmniRoute')).toLowerCase()
+    expect(bloco).toContain('desligada por padrão')
+    expect(bloco).toContain('somente `/v1`')
+    expect(bloco).toContain('9router')
+  })
+
   it('a pagina nao promete um endereco fixo que o Harness nao garante', () => {
     // Quem escolhe a porta e o Harness, e ele a imprime. Escrever um
     // `localhost:3000` aqui seria um numero que ninguem prometeu.
     expect(pagina).not.toMatch(/localhost:\d+/u)
+  })
+})
+
+describe('rotasConfiguradas — as tres rotas do perfil (ADR-014)', () => {
+  it('ambiente vazio nao configura nenhuma', () => {
+    // As tres estao SEMPRE declaradas no perfil. Contar declaracao como
+    // configuracao diria "tres prontas" para quem nao tem nenhuma.
+    expect(rotasConfiguradas({})).toEqual([])
+  })
+
+  it('o OmniRoute so existe quando alguem o configura — desligado por padrao', () => {
+    expect(rotasConfiguradas({ DZ23_OMNIROUTE_KEY: 'k' })).toEqual(['omniroute'])
+    expect(rotasConfiguradas({ DZ23_OMNIROUTE_BASE_URL: 'http://127.0.0.1:20128/v1' })).toEqual(['omniroute'])
+  })
+
+  it('o DeepSeek oficial vem da chave que o proprio Harness fixado le', () => {
+    expect(rotasConfiguradas({ DEEPSEEK_API_KEY: 'k' })).toEqual(['deepseek-official'])
+  })
+
+  it('o Ollama e o unico sem chave: ele nao tem segredo nenhum', () => {
+    expect(ROTAS.find(rota => rota.id === 'ollama').chave).toBeUndefined()
+    expect(rotasConfiguradas({ DZ23_OLLAMA_BASE_URL: 'http://127.0.0.1:11434/v1' })).toEqual(['ollama'])
+  })
+
+  it('variavel VAZIA ou so com espaco nao configura rota nenhuma', () => {
+    // Uma variavel exportada em branco e o que sobra de uma configuracao que
+    // alguem desfez pela metade. Conta-la faria o doctor dizer "pronta" sobre
+    // uma rota que vai responder 401.
+    expect(rotasConfiguradas({ DEEPSEEK_API_KEY: '', DZ23_OMNIROUTE_KEY: '   ' })).toEqual([])
+  })
+
+  it('a ordem e a da PRIVACIDADE: a rota local vem primeiro', () => {
+    // A rota que nao manda o texto de ninguem para lugar nenhum e a primeira
+    // que a pessoa ve. Quem quiser as outras escolhe de olho aberto.
+    expect(ROTAS.map(rota => rota.id)).toEqual(['ollama', 'deepseek-official', 'omniroute'])
+    expect(rotasConfiguradas({ DZ23_OMNIROUTE_KEY: 'k', DZ23_OLLAMA_BASE_URL: 'u', DEEPSEEK_API_KEY: 'k' }))
+      .toEqual(['ollama', 'deepseek-official', 'omniroute'])
+  })
+
+  it('nenhuma rota carrega VALOR de segredo: `chave` e o NOME da variavel', () => {
+    for (const rota of ROTAS) {
+      if (rota.chave === undefined) continue
+      expect(rota.chave, rota.id).toMatch(/^[A-Z][A-Z0-9_]*$/u)
+    }
+  })
+
+  it('sem ambiente, nao ha resposta — e nao ha lista vazia', () => {
+    expect(rotasConfiguradas(undefined)).toBeUndefined()
+  })
+})
+
+describe('a conferencia da inteligencia artificial NOMEIA as rotas', () => {
+  it('dizer "duas configuradas" nao conta a ninguem se o texto sai do computador', () => {
+    const lista = conferencias(tudoPronto({ rotasConfiguradas: ['ollama', 'omniroute'] }))
+    expect(de(lista, 'modelo').estado).toBe('OK')
+    expect(de(lista, 'modelo').viu).toContain('Ollama')
+    expect(de(lista, 'modelo').viu).toContain('OmniRoute')
+    expect(de(lista, 'modelo').viu).not.toMatch(/\b2\b/u)
+  })
+
+  it('uma rota que o doctor nao conhece nao vira nome inventado', () => {
+    // Um id vindo de um perfil mais novo nao tem nome em portugues aqui. Ele e
+    // omitido, e nao ecoado cru na tela de quem nao programa.
+    const lista = conferencias(tudoPronto({ rotasConfiguradas: ['rota-do-futuro'] }))
+    expect(de(lista, 'modelo').estado).toBe('FALTA')
+    expect(de(lista, 'modelo').viu).not.toContain('rota-do-futuro')
+  })
+
+  it('o OmniRoute NUNCA bloqueia o arranque, configurado ou nao', () => {
+    for (const rotas of [[], ['omniroute'], ['ollama', 'deepseek-official', 'omniroute']]) {
+      expect(bloqueios(conferencias(tudoPronto({ rotasConfiguradas: rotas }))), String(rotas)).toEqual([])
+    }
   })
 })

@@ -78,6 +78,12 @@ produto existe para não fazer.
    partida completa **não** é provada daqui: este contêiner está ele mesmo no
    estado "pacote de arranque não encontrado".
 
+7. **OS-78 — vazamento do texto da habilidade, e o OmniRoute na primeira
+   execução.** A listagem devolvia `skill_body` a qualquer `workspace.read`,
+   desligada inclusive; agora há uma `publicIntegration` única nas três rotas.
+   E as três rotas do perfil (ADR-014) entraram no doctor, com os limites do
+   OmniRoute presos por teste. 18 falsificações, todas pegas.
+
 ## Próxima ação
 
 Ver `docs/status/TASK_DAG.md`, tarefa de maior prioridade em `READY`.

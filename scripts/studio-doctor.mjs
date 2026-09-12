@@ -227,9 +227,80 @@ function avaliarConstrutor(docker) {
   }
 }
 
+/**
+ * As TRES rotas do perfil (ADR-014), pela ordem em que alguem deveria pensar
+ * nelas.
+ *
+ * A ordem e a da PRIVACIDADE, e nao a da qualidade: a rota local nao manda o
+ * texto de ninguem para lugar nenhum, e por isso ela e a primeira que a pessoa
+ * ve. Quem quiser as outras escolhe de olho aberto.
+ *
+ * `chave` e o NOME da variavel de ambiente, nunca o valor — que e a mesma regra
+ * do perfil: chaves sao referencias, e nenhum segredo entra em arquivo gerado,
+ * log, pacote ou tela.
+ */
+export const ROTAS = [
+  {
+    id: 'ollama',
+    nome: 'Ollama, no seu computador',
+    chave: undefined,
+    endereco: 'DZ23_OLLAMA_BASE_URL',
+    nota: 'Não manda o seu texto para fora. Precisa do Ollama rodando.',
+  },
+  {
+    id: 'deepseek-official',
+    nome: 'DeepSeek oficial',
+    chave: 'DEEPSEEK_API_KEY',
+    endereco: undefined,
+    nota: 'A rota padrão, e a única para a qual o Studio volta sozinho quando outra falha antes de escrever qualquer coisa.',
+  },
+  {
+    id: 'omniroute',
+    nome: 'OmniRoute (externo, opcional, avançado)',
+    chave: 'DZ23_OMNIROUTE_KEY',
+    endereco: 'DZ23_OMNIROUTE_BASE_URL',
+    // Os limites do OmniRoute são de ADR, e não de gosto: ele é EXTERNO,
+    // OPCIONAL, AVANÇADO e DESLIGADO por padrão; consome somente `/v1`; e
+    // nunca fica ativo ao mesmo tempo que o 9Router, que não integra o perfil.
+    // Sem chave configurada ele simplesmente não existe para o Studio — e é
+    // por isso que esta conferência olha a variável, e não a declaração no
+    // perfil, que está sempre lá.
+    nota: 'Desligada por padrão. Só entra quando você configura a chave, e nunca junto com o 9Router.',
+  },
+]
+
+/**
+ * Quais rotas estao configuradas, a partir do AMBIENTE.
+ *
+ * Estar declarada no perfil nao e estar configurada: as tres estao sempre
+ * declaradas, e dizer "tres configuradas" com o ambiente vazio seria a mesma
+ * mentira confortavel que o registro de capacidades existe para nao contar.
+ *
+ * O Ollama e o unico sem chave: ele nao tem segredo nenhum, e por isso conta
+ * como configurado quando o endereco dele foi apontado. Sem endereco apontado o
+ * perfil usa `127.0.0.1:11434`, e se ha um Ollama ali o Studio o encontra — mas
+ * quem ESCREVE esse endereco esta dizendo que sabe onde ele esta, e e isso que
+ * esta conferencia consegue afirmar sem abrir uma conexao.
+ * @param ambiente - as variaveis de ambiente.
+ * @returns a lista das rotas configuradas, por id.
+ */
+export function rotasConfiguradas(ambiente) {
+  if (ambiente === undefined) return undefined
+  const posta = nome => nome !== undefined && typeof ambiente[nome] === 'string' && ambiente[nome].trim() !== ''
+  return ROTAS.filter(rota => posta(rota.chave) || posta(rota.endereco)).map(rota => rota.id)
+}
+
+/**
+ * A inteligencia artificial.
+ *
+ * NOMEIA as rotas em vez de contar quantas: "duas configuradas" nao diz a
+ * ninguem se o texto dele vai sair do computador, e essa e a unica coisa que
+ * alguem realmente quer saber aqui.
+ */
 function avaliarModelo(rotas) {
   if (rotas === undefined) return { estado: 'NAO_SEI', viu: 'não foi possível perguntar' }
-  if (rotas > 0) return { estado: 'OK', viu: `${String(rotas)} configurada(s)` }
+  const nomes = ROTAS.filter(rota => rotas.includes(rota.id)).map(rota => rota.nome)
+  if (nomes.length > 0) return { estado: 'OK', viu: nomes.join('; ') }
   return {
     estado: 'FALTA',
     viu: 'nenhuma configurada',
