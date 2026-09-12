@@ -225,25 +225,40 @@ export function capabilitySummary(statuses: readonly CapabilityStatus[]): {
  * duas medidas do mesmo fato divergem no primeiro conserto de uma delas.
  */
 export interface StudioSignals {
-  /** A saude das rotas de modelo, como o `route-health` a registrou. */
-  readonly routes: readonly { readonly route: string; readonly state: 'OK' | 'DEGRADED' | 'DOWN' | 'NOT_CONFIGURED'; readonly at?: Date }[]
+  /**
+   * As rotas de modelo, como o `route-health` as registrou.
+   *
+   * `exercised` e o campo que separa uma rota EXERCITADA de uma rota apenas
+   * CONFIGURADA, e ele existe porque a revisao adversarial mostrou que o
+   * estado sozinho mente: `initialize` grava `OK` para toda rota que aparece na
+   * configuracao, sem ninguem ter chamado nada. Uma instalacao recem-subida com
+   * uma chave invalida reportava `modelo: OPERACIONAL`.
+   *
+   * `at` e o instante que o REGISTRO guarda, e nao a hora da leitura. Carimbar
+   * a leitura fazia a idade ser sempre zero, e com isso a janela de validade
+   * nunca expirava nada — a guarda de relogio adiantado e a de sondagem sem
+   * instante viravam codigo morto no unico chamador de producao.
+   */
+  readonly routes: readonly {
+    readonly route: string
+    readonly state: 'OK' | 'DEGRADED' | 'DOWN' | 'NOT_CONFIGURED'
+    readonly exercised: boolean
+    readonly at?: Date
+  }[]
   /** O ambiente isolado de construcao respondeu? `undefined` = ninguem perguntou. */
   readonly builder?: { readonly available: boolean; readonly at: Date }
-  /** As criacoes que terminaram, para provar a cadeia inteira de ponta a ponta. */
+  /** A criacao mais recente que TERMINOU, quando existe uma. */
   readonly lastRun?: { readonly passed: boolean; readonly at: Date }
-  /** Os dominios de armazenamento que abriram nesta instalacao. */
-  readonly openDomains: readonly string[]
+  /**
+   * Uma LEITURA de verdade do armazenamento, com o instante em que ela ocorreu.
+   *
+   * Nao e a lista de dominios abertos no arranque: essa lista e uma constante
+   * montada uma vez, e le-la nao exercita nada. O que vale como sondagem e ter
+   * PERGUNTADO ao armazenamento agora e ele ter respondido.
+   */
+  readonly storage: { readonly ok: boolean; readonly at: Date }
   /** As categorias de aplicativo que esta instalacao sabe gerar. */
   readonly categories: readonly string[]
-  /**
-   * O instante em que estes sinais foram colhidos.
-   *
-   * Ele e a data da sondagem do ARMAZENAMENTO, e isso nao e um atalho: para
-   * saber quais dominios abriram foi preciso perguntar ao armazenamento, agora.
-   * A leitura E o exercicio. Inventar uma sondagem separada para ele faria duas
-   * perguntas ao mesmo componente para responder a mesma coisa.
-   */
-  readonly observedAt: Date
 }
 
 /** As capacidades do Studio e de que cada uma depende. */
@@ -267,18 +282,23 @@ export function studioCapabilities(signals: StudioSignals): {
   readonly probes: readonly ProbeResult[]
 } {
   const probes: ProbeResult[] = [
-    // Ter conseguido listar os dominios E a sondagem do armazenamento. Lista
-    // vazia nao e falha de sondagem: e falta de configuracao, e quem diz isso e
-    // o `configured` da declaracao, com a frase certa para a pessoa.
-    { capability: 'armazenamento', ok: true, at: signals.observedAt, detail: signals.openDomains.join(',') },
+    { capability: 'armazenamento', ok: signals.storage.ok, at: signals.storage.at },
   ]
 
   const usable = signals.routes.filter(route => route.state !== 'NOT_CONFIGURED')
-  for (const route of usable) {
-    // Sem data a observacao existe e nao tem quando: ela nao entra como
-    // sondagem, porque uma sondagem sem instante nao sustenta nem vence.
-    if (route.at === undefined) continue
-    probes.push({ capability: 'modelo', ok: route.state === 'OK' || route.state === 'DEGRADED', at: route.at, detail: route.route })
+  // EXERCITADA e com instante: rota configurada e nunca chamada nao e sondagem
+  // nenhuma, e sondagem sem instante nao sustenta nem vence.
+  const exercised = usable.filter(route => route.exercised && route.at !== undefined)
+  if (exercised.length > 0) {
+    // As rotas sao ALTERNATIVAS, e nao partes: se ALGUMA responde, a pessoa
+    // consegue criar. Eleger "a sondagem mais recente" entre elas fazia a
+    // resposta depender de qual linha o armazenamento devolveu primeiro — com
+    // quatro rotas e uma caida, a tela dizia "nao da agora" sobre um Studio que
+    // criaria o aplicativo sem problema, se a caida viesse na frente.
+    const responding = exercised.filter(route => route.state === 'OK' || route.state === 'DEGRADED')
+    const base = responding.length > 0 ? responding : exercised
+    const newest = base.reduce((latest, route) => (route.at!.getTime() > latest.at!.getTime() ? route : latest))
+    probes.push({ capability: 'modelo', ok: responding.length > 0, at: newest.at!, detail: newest.route })
   }
   if (signals.builder !== undefined) {
     probes.push({ capability: 'construtor', ok: signals.builder.available, at: signals.builder.at })
@@ -288,7 +308,7 @@ export function studioCapabilities(signals: StudioSignals): {
   }
 
   const declarations: CapabilityDeclaration[] = [
-    { id: 'armazenamento', present: true, probed: true, configured: signals.openDomains.length > 0 },
+    { id: 'armazenamento', present: true, probed: true, configured: true },
     { id: 'modelo', present: true, probed: true, configured: usable.length > 0 },
     { id: 'construtor', present: true, probed: true, configured: true },
     {
@@ -316,9 +336,19 @@ export function studioCapabilities(signals: StudioSignals): {
  * respondeu assim" — que e exatamente o que uma sondagem pode afirmar.
  */
 export function healthCapabilities(input: {
-  readonly routes: readonly { readonly route: string; readonly state: 'OK' | 'DEGRADED' | 'DOWN' | 'NOT_CONFIGURED' }[]
+  /**
+   * As rotas como o `route-health` as guarda: com o estado, se ja foram
+   * EXERCITADAS, e o instante do registro.
+   */
+  readonly routes: readonly {
+    readonly route: string
+    readonly state: 'OK' | 'DEGRADED' | 'DOWN' | 'NOT_CONFIGURED'
+    readonly exercised: boolean
+    readonly at?: Date
+  }[]
   readonly builderState: 'OK' | 'BLOCKED_EXTERNAL'
-  readonly openDomains: readonly string[]
+  /** Uma leitura DE VERDADE do armazenamento, com quando ela ocorreu. */
+  readonly storage: { readonly ok: boolean; readonly at: Date }
   readonly categories: readonly string[]
   /**
    * A criacao mais recente que TERMINOU, quando existe uma.
@@ -326,9 +356,9 @@ export function healthCapabilities(input: {
    * Sem ela, `criar-aplicativo` NUNCA chega a `OPERATIONAL` — e isso esta
    * certo, nao e uma lacuna. Rota boa e construtor respondendo sao as
    * dependencias da criacao, e dependencia operacional NAO prova a cadeia: o
-   * endereco de saude nao cria aplicativo nenhum para descobrir. Afirmar que
-   * ela funciona a partir das pecas seria exatamente o salto que este registro
-   * existe para impedir.
+   * endereco de saude nao cria aplicativo nenhum para descobrir. Afirmar o todo
+   * a partir das pecas e exatamente o salto que este registro existe para
+   * impedir.
    */
   readonly lastRun?: { readonly passed: boolean; readonly at: Date }
   readonly now: Date
@@ -339,16 +369,13 @@ export function healthCapabilities(input: {
   readonly blocked_by?: string
 }[] {
   const { declarations, probes } = studioCapabilities({
-    // `DEGRADED` conta como respondendo: uma rota lenta ou com erro
-    // intermitente ainda cria aplicativo, e trata-la como caida diria a pessoa
-    // que ela nao pode fazer o que ela consegue fazer.
-    routes: input.routes.map(route => ({ ...route, at: input.now })),
+    routes: input.routes,
     builder: { available: input.builderState === 'OK', at: input.now },
-    openDomains: input.openDomains,
+    storage: input.storage,
     categories: input.categories,
     ...(input.lastRun === undefined ? {} : { lastRun: input.lastRun }),
-    observedAt: input.now,
   })
+
   return capabilityStatuses(declarations, probes, { now: input.now }).map(status => ({
     id: status.id,
     state: status.state,

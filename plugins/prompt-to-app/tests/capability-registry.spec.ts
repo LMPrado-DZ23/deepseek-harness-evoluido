@@ -237,12 +237,11 @@ describe('capabilityMessage', () => {
 describe('studioCapabilities — os sinais REAIS viram declaracao', () => {
   function signals(overrides: Partial<StudioSignals> = {}): StudioSignals {
     return {
-      routes: [{ route: 'ollama', state: 'OK', at: recently }],
+      routes: [{ route: 'ollama', state: 'OK', exercised: true, at: recently }],
       builder: { available: true, at: recently },
       lastRun: { passed: true, at: recently },
-      openDomains: ['studio_projects'],
+      storage: { ok: true, at: NOW },
       categories: ['landing-page'],
-      observedAt: NOW,
       ...overrides,
     }
   }
@@ -264,27 +263,27 @@ describe('studioCapabilities — os sinais REAIS viram declaracao', () => {
   it('esta funcao NAO decide estado: ela so relata o que existe e o que se viu', () => {
     // Se ela decidisse, a regra de "sondagem velha nao sustenta operacional"
     // teria de ser repetida aqui — e regra repetida em dois lugares diverge.
-    const { declarations } = studioCapabilities(signals({ routes: [{ route: 'ollama', state: 'DOWN', at: recently }] }))
+    const { declarations } = studioCapabilities(signals({ routes: [{ route: 'ollama', state: 'DOWN', exercised: true, at: recently }] }))
     expect(declarations.find(item => item.id === 'modelo')).toMatchObject({ configured: true, probed: true })
   })
 
   it('rota NAO CONFIGURADA nao vira sondagem que falhou', () => {
     // Registra-la como falha diria que algo quebrou onde o que houve foi
     // ninguem ter configurado.
-    const { probes } = studioCapabilities(signals({ routes: [{ route: 'ollama', state: 'NOT_CONFIGURED', at: recently }] }))
+    const { probes } = studioCapabilities(signals({ routes: [{ route: 'ollama', state: 'NOT_CONFIGURED', exercised: true, at: recently }] }))
     expect(probes.filter(probe => probe.capability === 'modelo')).toHaveLength(0)
-    const result = run({ routes: [{ route: 'ollama', state: 'NOT_CONFIGURED', at: recently }] })
+    const result = run({ routes: [{ route: 'ollama', state: 'NOT_CONFIGURED', exercised: true, at: recently }] })
     expect(stateOf(result, 'modelo')).toBe('PRESENT')
   })
 
   it('rota sem data nao entra como sondagem', () => {
     // Uma sondagem sem instante nao sustenta nem vence.
-    const { probes } = studioCapabilities(signals({ routes: [{ route: 'ollama', state: 'OK' }] }))
+    const { probes } = studioCapabilities(signals({ routes: [{ route: 'ollama', state: 'OK', exercised: true }] }))
     expect(probes.filter(probe => probe.capability === 'modelo')).toHaveLength(0)
   })
 
   it('o modelo caido segura a criacao de aplicativo, e diz que e ele', () => {
-    const result = run({ routes: [{ route: 'ollama', state: 'DOWN', at: recently }] })
+    const result = run({ routes: [{ route: 'ollama', state: 'DOWN', exercised: true, at: recently }] })
     expect(stateOf(result, 'criar-aplicativo')).not.toBe('OPERATIONAL')
     expect(result.find(item => item.id === 'criar-aplicativo')).toMatchObject({ blockedBy: 'modelo' })
   })
@@ -294,14 +293,46 @@ describe('studioCapabilities — os sinais REAIS viram declaracao', () => {
     expect(result.find(item => item.id === 'criar-aplicativo')).toMatchObject({ blockedBy: 'construtor' })
   })
 
-  it('nenhum dominio aberto para o armazenamento em PRESENTE, e nao em falha', () => {
-    const result = run({ openDomains: [] })
-    expect(result.find(item => item.id === 'armazenamento')).toMatchObject({ state: 'PRESENT', reason: 'NOT_CONFIGURED' })
+  it('armazenamento que NAO respondeu e sondagem REPROVADA', () => {
+    const result = run({ storage: { ok: false, at: NOW } })
+    expect(result.find(item => item.id === 'armazenamento')).toMatchObject({ state: 'CONFIGURED', reason: 'PROBE_FAILED' })
   })
 
-  it('ler os dominios E a sondagem do armazenamento', () => {
-    const { probes } = studioCapabilities(signals())
-    expect(probes.find(probe => probe.capability === 'armazenamento')).toMatchObject({ ok: true, at: NOW })
+  it('rota CONFIGURADA mas NUNCA EXERCITADA nao e sondagem', () => {
+    // `initialize` grava `OK` para toda rota que aparece na configuracao, sem
+    // ninguem ter chamado nada. Uma instalacao recem-subida com chave invalida
+    // reportava `modelo: OPERACIONAL`.
+    const result = run({ routes: [{ route: 'ollama', state: 'OK', exercised: false, at: recently }] })
+    expect(result.find(item => item.id === 'modelo')).toMatchObject({ state: 'CONFIGURED', reason: 'NEVER_PROBED' })
+  })
+
+  it('as rotas sao ALTERNATIVAS: uma caida entre boas nao derruba o modelo', () => {
+    // Eleger "a mais recente" entre elas fazia a resposta depender de qual linha
+    // o armazenamento devolveu primeiro — com uma caida na frente, a tela dizia
+    // "nao da agora" sobre um Studio que criaria o aplicativo sem problema.
+    const mesmoInstante = [
+      { route: 'caida', state: 'DOWN' as const, exercised: true, at: recently },
+      { route: 'boa', state: 'OK' as const, exercised: true, at: recently },
+    ]
+    expect(run({ routes: mesmoInstante }).find(item => item.id === 'modelo')!.state).toBe('OPERATIONAL')
+    // E a ordem nao muda nada.
+    expect(run({ routes: [...mesmoInstante].reverse() }).find(item => item.id === 'modelo')!.state).toBe('OPERATIONAL')
+  })
+
+  it('TODAS caidas derrubam o modelo, com a falha mais recente', () => {
+    const result = run({ routes: [
+      { route: 'a', state: 'DOWN', exercised: true, at: new Date(NOW.getTime() - 600_000) },
+      { route: 'b', state: 'DOWN', exercised: true, at: recently },
+    ] })
+    expect(result.find(item => item.id === 'modelo')).toMatchObject({ state: 'CONFIGURED', reason: 'PROBE_FAILED' })
+  })
+
+  it('o instante vem do REGISTRO, e nao da leitura: sondagem velha VENCE', () => {
+    // Carimbar a leitura fazia a idade ser sempre zero, e a janela de validade
+    // nunca expirava nada — a guarda de relogio adiantado virava codigo morto.
+    const velha = new Date(NOW.getTime() - PROBE_FRESHNESS_MS - 1)
+    const result = run({ routes: [{ route: 'ollama', state: 'OK', exercised: true, at: velha }] })
+    expect(result.find(item => item.id === 'modelo')).toMatchObject({ state: 'CONFIGURED', reason: 'PROBE_STALE' })
   })
 
   it('construtor nunca perguntado nao e construtor indisponivel', () => {
@@ -325,8 +356,8 @@ describe('studioCapabilities — os sinais REAIS viram declaracao', () => {
     // A sondagem mais recente vale, e uma rota que responde e o bastante para
     // a pessoa conseguir criar alguma coisa.
     const result = run({ routes: [
-      { route: 'ruim', state: 'DOWN', at: new Date(NOW.getTime() - 600_000) },
-      { route: 'boa', state: 'OK', at: recently },
+      { route: 'ruim', state: 'DOWN', exercised: true, at: new Date(NOW.getTime() - 600_000) },
+      { route: 'boa', state: 'OK', exercised: true, at: recently },
     ] })
     expect(stateOf(result, 'modelo')).toBe('OPERATIONAL')
   })
@@ -335,9 +366,9 @@ describe('studioCapabilities — os sinais REAIS viram declaracao', () => {
 describe('healthCapabilities — a ponte com o endereco de saude', () => {
   function bridge(overrides: Partial<Parameters<typeof healthCapabilities>[0]> = {}) {
     return healthCapabilities({
-      routes: [{ route: 'ollama', state: 'OK' }],
+      routes: [{ route: 'ollama', state: 'OK', exercised: true, at: recently }],
       builderState: 'OK',
-      openDomains: ['studio_projects'],
+      storage: { ok: true, at: NOW },
       categories: ['landing-page'],
       now: NOW,
       ...overrides,
@@ -366,11 +397,11 @@ describe('healthCapabilities — a ponte com o endereco de saude', () => {
   it('rota DEGRADADA ainda deixa o modelo operacional', () => {
     // Uma rota lenta ou com erro intermitente ainda cria; trata-la como caida
     // diria a pessoa que ela nao pode fazer o que ela consegue fazer.
-    expect(stateOf(bridge({ routes: [{ route: 'ollama', state: 'DEGRADED' }] }), 'modelo')).toBe('OPERATIONAL')
+    expect(stateOf(bridge({ routes: [{ route: 'ollama', state: 'DEGRADED', exercised: true, at: recently }] }), 'modelo')).toBe('OPERATIONAL')
   })
 
   it('rota CAIDA segura, e diz que foi o modelo', () => {
-    const result = bridge({ routes: [{ route: 'ollama', state: 'DOWN' }] })
+    const result = bridge({ routes: [{ route: 'ollama', state: 'DOWN', exercised: true, at: recently }] })
     expect(result.find(item => item.id === 'criar-aplicativo')).toMatchObject({ blocked_by: 'modelo' })
   })
 
@@ -386,7 +417,7 @@ describe('healthCapabilities — a ponte com o endereco de saude', () => {
 
   it('o formato de saida usa nomes de campo do contrato, e nao os internos', () => {
     // `blockedBy` e nome de codigo; `blocked_by` e o que a rota publica promete.
-    const result = bridge({ routes: [{ route: 'ollama', state: 'DOWN' }] })
+    const result = bridge({ routes: [{ route: 'ollama', state: 'DOWN', exercised: true, at: recently }] })
     const blocked = result.find(item => item.id === 'criar-aplicativo')!
     expect(Object.keys(blocked).sort()).toEqual(['blocked_by', 'id', 'reason', 'state'])
   })
@@ -399,7 +430,7 @@ describe('healthCapabilities — a ponte com o endereco de saude', () => {
   it('as quatro capacidades saem sempre, mesmo quando nada funciona', () => {
     // Uma capacidade que some da lista quando esta ruim faria a lista parecer
     // saudavel justamente quando ela nao esta.
-    const result = bridge({ routes: [], builderState: 'BLOCKED_EXTERNAL', openDomains: [], categories: [] })
+    const result = bridge({ routes: [], builderState: 'BLOCKED_EXTERNAL', storage: { ok: false, at: NOW }, categories: [] })
     expect(result.map(item => item.id).sort()).toEqual([...STUDIO_CAPABILITY_IDS].sort())
   })
 })

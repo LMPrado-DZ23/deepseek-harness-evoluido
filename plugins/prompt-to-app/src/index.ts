@@ -47,7 +47,7 @@ import { ModelCodeGenerator, PromptToAppPipeline } from './pipeline.js'
 import { PlannerEngine } from './planner.js'
 import { HarnessPromptModel } from './ports.js'
 import { ManagedBuilderLifecycleResolver } from './builder-resolver.js'
-import { PromptToAppService, type PromptToAppRepository } from './service.js'
+import { PromptToAppService, type PromptToAppActor, type PromptToAppRepository } from './service.js'
 import { SharpLogoProcessor } from './logo.js'
 import { productionTemplateDirectory } from './template-policy.js'
 
@@ -400,12 +400,35 @@ export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}):
     // Os sinais sao os mesmos que ja foram medidos logo acima e os dominios que
     // este plugin abriu. Medi-los de novo criaria uma segunda verdade sobre o
     // mesmo fato, e duas medidas do mesmo fato divergem no primeiro conserto.
+    const observedAt = new Date()
+    // A LEITURA DE VERDADE do armazenamento. A lista de domínios abertos é uma
+    // constante montada uma vez no arranque, e lê-la não exercita nada — a
+    // revisão adversarial cobrou exatamente isso. Perguntar pelos projetos
+    // agora, e ele responder, é o que vale como sondagem.
+    const storage = await (async () => {
+      try { service.listProjects(healthActor(scope)); return { ok: true, at: observedAt } }
+      catch { return { ok: false, at: observedAt } }
+    })()
+    // A criação mais recente que TERMINOU, em qualquer projeto deste espaço.
+    // Sem ela `criar-aplicativo` fica em "ninguém conferiu" para sempre, mesmo
+    // depois de cem criações — e essa era a resposta permanente da tela.
+    const lastRun = latestFinishedRun(service, healthActor(scope))
     const capabilities = healthCapabilities({
-      routes: ctx.studioRouteHealth.service.list(scope).map(record => ({ route: record.route, state: record.state })),
+      // `exercised`: uma rota apenas CONFIGURADA não é sondagem nenhuma —
+      // `initialize` grava `OK` para toda rota que aparece na configuração, sem
+      // ninguém ter chamado nada. E `at` é o instante DO REGISTRO, não o da
+      // leitura: carimbar a leitura fazia a idade ser sempre zero, e a janela
+      // de validade nunca expirava nada.
+      routes: ctx.studioRouteHealth.service.list(scope).map(record => ({
+        route: record.route, state: record.state,
+        exercised: record.requests > 0,
+        ...(readInstant(record.updated_at) === undefined ? {} : { at: readInstant(record.updated_at)! }),
+      })),
       builderState: builderHealth.state,
-      openDomains: OPEN_DOMAIN_NAMES,
+      storage,
       categories: studioProjectCategorySchema.options,
-      now: new Date(),
+      ...(lastRun === undefined ? {} : { lastRun }),
+      now: observedAt,
     })
     return {
       state, route, route_reason: route === null ? null : selected.reason, capabilities,
@@ -455,4 +478,48 @@ async function diskState(path: string): Promise<'OK' | 'ATTENTION'> {
     const info = await statfs(path)
     return Number(info.bavail) * Number(info.bsize) >= 512 * 1024 * 1024 ? 'OK' : 'ATTENTION'
   } catch { return 'ATTENTION' }
+}
+
+/**
+ * O ator de leitura do endereço de saúde, no escopo de quem perguntou.
+ *
+ * `owner` porque a conferência é uma LEITURA e precisa alcançar o espaço
+ * inteiro; o escopo continua sendo o de quem chamou, então ela nunca enxerga
+ * outra organização.
+ */
+function healthActor(scope: { readonly orgId: string; readonly tenantId: string }): PromptToAppActor {
+  return { userId: 'studio-health', orgId: scope.orgId, tenantId: scope.tenantId, role: 'owner' }
+}
+
+/**
+ * Uma data que o registro guardou, ou `undefined` quando ela não é legível.
+ *
+ * Data ilegível é DESCARTADA, e nunca tratada como agora: uma linha corrompida
+ * sustentaria `OPERACIONAL` para sempre.
+ */
+function readInstant(value: string): Date | undefined {
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed
+}
+
+/**
+ * A criação mais recente que TERMINOU neste espaço de trabalho.
+ *
+ * Só estados terminais contam: uma execução `RUNNING` não provou nada ainda, e
+ * tratá-la como prova diria que a cadeia inteira funciona no instante em que
+ * ela mal começou.
+ */
+function latestFinishedRun(
+  service: PromptToAppService, actor: PromptToAppActor,
+): { readonly passed: boolean; readonly at: Date } | undefined {
+  let best: { readonly passed: boolean; readonly at: Date } | undefined
+  for (const project of service.listProjects(actor)) {
+    for (const run of service.runs(actor, project.project_id)) {
+      if (run.state !== 'PASSED' && run.state !== 'FAILED') continue
+      const at = readInstant(run.finished_at ?? run.started_at)
+      if (at === undefined) continue
+      if (best === undefined || at.getTime() > best.at.getTime()) best = { passed: run.state === 'PASSED', at }
+    }
+  }
+  return best
 }
