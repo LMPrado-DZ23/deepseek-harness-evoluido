@@ -53,7 +53,8 @@
     "notFound": "Este trabalho em equipe não existe, ou não é seu.",
     "invalidBody": "O pedido de parada não foi entendido.",
     "reasonTooLong": "O motivo da parada é longo demais.",
-    "costNotMeasured": "Nenhuma etapa desta equipe trouxe medida de consumo. Um agente externo roda em outro programa e não informa quanto gastou, e uma etapa que ainda não rodou não gastou nada para informar."
+    "costNotMeasured": "Nenhuma etapa desta equipe trouxe medida de consumo. Um agente externo roda em outro programa e não informa quanto gastou, e uma etapa que ainda não rodou não gastou nada para informar.",
+    "traceNotConfigured": "Este Studio não está guardando a trilha de decisões, então não há o que mostrar sobre as ferramentas usadas."
   },
   "stuckRuns": {
     "methodNotAllowed": "Este endereço só responde a leitura.",

@@ -18,3 +18,32 @@
 .team-screen .error { display: flex; gap: 0.5rem; align-items: center; color: #b91c1c; }
 .team-screen .error, .team-screen button { color: inherit; }
 .team-stop { color: #b91c1c; }
+
+/* A CADEIA: que ferramentas cada etapa usou.
+   O aviso de etapa sem ligação usa a cor de alerta porque ele não é um detalhe
+   — ele diz que o que está abaixo NÃO é o relato completo. */
+.team-trace-section{margin-top:8px}
+.team-trace-section summary{cursor:pointer;padding:8px 0}
+.team-trace-gap{color:#8a1c1c;font-weight:600;margin:8px 0}
+.team-trace-complete{color:#41506b;margin:8px 0}
+.team-trace{list-style:none;padding:0;margin:12px 0 0}
+.team-trace-task{padding:10px 0;border-top:1px solid #e5e9f0}
+.team-trace-title{margin:0 0 6px;font-weight:600}
+.team-trace-calls{list-style:none;padding:0;margin:0}
+.team-trace-calls li{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:baseline;padding:6px 0}
+.team-trace-tool{font-weight:600}
+.team-trace-decision{border-radius:12px;padding:2px 10px;font-size:13px}
+.team-trace-allow{background:#e6f4ec;color:#0e5c31}
+.team-trace-ask{background:#fdf1dd;color:#7a4b06}
+.team-trace-deny{background:#fbe6e6;color:#8a1c1c}
+.team-trace-when,.team-trace-reason{color:#41506b;font-size:13px}
+.team-trace-unsealed{color:#7a4b06;font-size:13px}
+@media (prefers-color-scheme: dark){
+  .team-trace-complete,.team-trace-when,.team-trace-reason{color:#c7d2e4}
+  .team-trace-task{border-top-color:#2a3550}
+  .team-trace-gap{color:#ffb4ab}
+  .team-trace-allow{background:#11301f;color:#8fe0b0}
+  .team-trace-ask{background:#33260c;color:#f2cd8a}
+  .team-trace-deny{background:#3a1414;color:#ffb4ab}
+  .team-trace-unsealed{color:#f2cd8a}
+}

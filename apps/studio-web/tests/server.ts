@@ -399,6 +399,27 @@ const e2eTasks = [
     diagnostic: null, created_at: '2026-09-08T12:00:00.000Z', updated_at: '2026-09-08T12:00:00.000Z',
   },
 ]
+const e2eAudit = [
+  {
+    audit_id: 'aud-1', session_id: 'sessao-da-primeira-etapa', org_id: 'org-e2e', tenant_id: 'tenant-e2e',
+    created_at: '2026-09-08T12:05:00.000Z', tool_name: 'escrever_arquivo', call_id: 'chamada-1',
+    effective_tier: 'T2', decision: 'allow' as const, reason: 'Previsto no catálogo desta equipe.',
+    rule_source: 'catalog', seq: 0, entry_sha256: 'a'.repeat(64),
+  },
+  {
+    audit_id: 'aud-2', session_id: 'sessao-da-primeira-etapa', org_id: 'org-e2e', tenant_id: 'tenant-e2e',
+    created_at: '2026-09-08T12:06:00.000Z', tool_name: 'apagar_pasta', call_id: 'chamada-2',
+    effective_tier: 'T3', decision: 'deny' as const, reason: 'Fora do que esta equipe pode fazer.',
+    rule_source: 'safe-default', seq: 1, entry_sha256: 'b'.repeat(64),
+  },
+  // Entrada ANTIGA, sem selo: ela existe em instalações que rodavam antes da
+  // corrente existir, e a tela tem de dizer que ela não é auditável.
+  {
+    audit_id: 'aud-3', session_id: 'sessao-da-primeira-etapa', org_id: 'org-e2e', tenant_id: 'tenant-e2e',
+    created_at: '2026-09-08T12:07:00.000Z', tool_name: 'ler_arquivo', call_id: 'chamada-3',
+    effective_tier: 'T1', decision: 'allow' as const, reason: 'Leitura simples.', rule_source: 'catalog',
+  },
+]
 const e2eRuns = [
   {
     run_id: 'run-e2e-1', org_id: 'org-e2e', tenant_id: 'tenant-e2e', workspace_id: 'meu-projeto',
@@ -420,6 +441,17 @@ const webHandler = createStudioWebHandler({
   distDirectory: resolve(root, 'apps', 'studio-web', 'dist'), identity, allowedHosts, allowedOrigins,
   previewFrameSources: ['http://*.dz23.localhost:4179'],
   agentRuns: () => ({ runs: () => e2eRuns }),
+  // A cadeia de ponta a ponta, com os TRES casos numa tela so: a primeira
+  // etapa tem elo e chamadas, a segunda rodou sem deixar elo, e a terceira nao
+  // rodou. Uma prova que so tivesse o caso feliz nao diria nada sobre a unica
+  // coisa que esta tela existe para gritar.
+  toolTrace: () => ({
+    auditRecords: () => e2eAudit,
+    traceRuns: () => e2eRuns.map(run => ({
+      run_id: run.run_id, org_id: run.org_id, tenant_id: run.tenant_id,
+      child_session_id: run.run_id === 'run-e2e-1' ? 'sessao-da-primeira-etapa' : null,
+    })),
+  }),
   agentTeams: () => ({
     teams: () => [{ ...e2eTeam, status: e2eTeamCancelled ? 'CANCELLED' : e2eTeam.status }],
     service: {

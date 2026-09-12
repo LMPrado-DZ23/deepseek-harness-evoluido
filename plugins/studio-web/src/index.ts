@@ -43,6 +43,7 @@ import {
   routeTeamPanel,
   teamPanelStatus,
   type TeamPanelRunsSource,
+  type TeamPanelTraceSource,
   type TeamPanelTeamsSource,
 } from './team-panel.js'
 import {
@@ -96,6 +97,15 @@ export function createStudioWebHandler(config: {
    * deixa o painel morto em qualquer perfil que monte a equipe depois da web.
    */
   agentTeams?(): TeamPanelTeamsSource | undefined
+  /**
+   * A trilha de política e o elo da execução com a sessão da ferramenta,
+   * resolvidos A CADA PEDIDO pelo mesmo motivo dos outros.
+   *
+   * Ausente, a rota da cadeia RECUSA em vez de devolver cadeia vazia: vazio
+   * diria "nenhuma ferramenta foi chamada" numa instalação onde ninguém está
+   * guardando o registro.
+   */
+  toolTrace?(): TeamPanelTraceSource | undefined
   readonly assistantDeadlineMs?: number
 }) {
   const frameSources = normalizePreviewFrameSources(config.previewFrameSources ?? [])
@@ -135,10 +145,12 @@ export function createStudioWebHandler(config: {
       if (teamRoute !== undefined) {
         const teams = config.agentTeams?.()
         const runs = config.agentRuns?.() as TeamPanelRunsSource | undefined
+        const trace = config.toolTrace?.()
         const outcome = await handleTeamPanel(request, teamRoute, {
           identity: config.identity,
           ...(teams === undefined ? {} : { teams }),
           ...(runs === undefined ? {} : { runs }),
+          ...(trace === undefined ? {} : { trace }),
         })
         return sendJson(response, outcome.status, outcome.body, frameSources)
       }
@@ -291,6 +303,15 @@ export async function apply(ctx: Context, config: StudioWebConfig = {}): Promise
       actionApprovals: () => ctx.get('studioActionApproval')?.service,
       agentRuns: () => ctx.get('studioAgents'),
       agentTeams: () => ctx.get('studioAgentTeams'),
+      // Os DOIS lados da cadeia precisam existir: a trilha (política) e o elo
+      // (execuções). Faltando um, a rota recusa — meia cadeia desenhada como
+      // cadeia inteira seria pior que nenhuma.
+      toolTrace: () => {
+        const policy = ctx.get('studioPolicy')
+        const agents = ctx.get('studioAgents')
+        if (policy === undefined || agents === undefined) return undefined
+        return { auditRecords: () => policy.auditRecords(), traceRuns: () => agents.runs() }
+      },
       assistantSessions,
     }),
   }), 'dz23-studio-web.http')

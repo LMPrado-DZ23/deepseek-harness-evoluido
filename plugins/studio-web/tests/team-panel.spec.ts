@@ -354,3 +354,88 @@ describe('atendimento', () => {
     expect(teamPanelStatus(new Error('outro'))).toBeUndefined()
   })
 })
+
+describe('a rota da cadeia equipe -> etapa -> execucao -> ferramenta', () => {
+  const trilha = {
+    auditRecords: () => [{
+      audit_id: 'a1', session_id: 'sessao-filha', org_id: 'org-1', tenant_id: 'tenant-1',
+      created_at: '2026-09-08T00:03:00.000Z', tool_name: 'shell', call_id: 'c1',
+      effective_tier: 'T2', decision: 'allow' as const, reason: 'catalogo', rule_source: 'catalog',
+      seq: 0, entry_sha256: 'f'.repeat(64),
+    }],
+    traceRuns: () => [{ run_id: 'run-1', org_id: 'org-1', tenant_id: 'tenant-1', child_session_id: 'sessao-filha' }],
+  }
+
+  it('a cadeia e LEITURA: `GET` responde, e os outros metodos nao', () => {
+    expect(routeTeamPanel('GET', `${TEAM_PANEL_PREFIX}/${TEAM}/trace`)).toEqual({ kind: 'trace', teamId: TEAM })
+    for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+      expect(routeTeamPanel(method, `${TEAM_PANEL_PREFIX}/${TEAM}/trace`)).toEqual({ kind: 'method-not-allowed' })
+    }
+  })
+
+  it('devolve as ferramentas que cada etapa chamou, com a decisao da politica', async () => {
+    const outcome = await handleTeamPanel(
+      request('GET'), { kind: 'trace', teamId: TEAM },
+      { identity, teams: teams(), trace: trilha },
+    )
+    expect(outcome.status).toBe(200)
+    const body = outcome.body as { trace: { tasks: { trace: { link: string, calls: { tool_name: string }[] } }[], unlinked_count: number } }
+    expect(body.trace.tasks[0]!.trace.link).toBe('LINKED')
+    expect(body.trace.tasks[0]!.trace.calls.map(call => call.tool_name)).toEqual(['shell'])
+    expect(body.trace.unlinked_count).toBe(0)
+  })
+
+  it('sem trilha montada, RECUSA — e nao devolve cadeia vazia', async () => {
+    // Cadeia vazia diria "nenhuma ferramenta foi chamada" para uma instalacao
+    // onde ninguem esta olhando. E a mentira mais cara desta rota.
+    const falha = await handleTeamPanel(
+      request('GET'), { kind: 'trace', teamId: TEAM },
+      { identity, teams: teams() },
+    ).catch((error: unknown) => error)
+    expect(teamPanelStatus(falha)).toBe(503)
+  })
+
+  it('equipe de OUTRO escopo nao conta nem que existe', async () => {
+    const falha = await handleTeamPanel(
+      request('GET'), { kind: 'trace', teamId: OTHER },
+      { identity, teams: teams(), trace: trilha },
+    ).catch((error: unknown) => error)
+    expect(teamPanelStatus(falha)).toBe(404)
+  })
+
+  it('o escopo vem da SESSAO, e nao de nada que o pedido carregue', async () => {
+    // A trilha de outro inquilino esta no armazenamento, e a sessao e de
+    // `tenant-1`: se o escopo viesse de outro lugar, ela apareceria.
+    const misturada = {
+      auditRecords: () => [
+        ...trilha.auditRecords(),
+        {
+          audit_id: 'alheio', session_id: 'sessao-filha', org_id: 'org-2', tenant_id: 'tenant-2',
+          created_at: '2026-09-08T00:04:00.000Z', tool_name: 'SEGREDO', call_id: 'c9',
+          effective_tier: 'T3', decision: 'allow' as const, reason: 'x', rule_source: 'catalog',
+          seq: 1, entry_sha256: 'e'.repeat(64),
+        },
+      ],
+      traceRuns: trilha.traceRuns,
+    }
+    const outcome = await handleTeamPanel(
+      request('GET'), { kind: 'trace', teamId: TEAM },
+      { identity, teams: teams(), trace: misturada },
+    )
+    expect(JSON.stringify(outcome.body)).not.toContain('SEGREDO')
+  })
+
+  it('etapa sem elo aparece como SEM ELO, e a contagem sobe', async () => {
+    const semElo = {
+      auditRecords: trilha.auditRecords,
+      traceRuns: () => [{ run_id: 'run-1', org_id: 'org-1', tenant_id: 'tenant-1', child_session_id: null }],
+    }
+    const outcome = await handleTeamPanel(
+      request('GET'), { kind: 'trace', teamId: TEAM },
+      { identity, teams: teams(), trace: semElo },
+    )
+    const body = outcome.body as { trace: { tasks: { trace: { link: string } }[], unlinked_count: number } }
+    expect(body.trace.tasks[0]!.trace.link).toBe('UNLINKED')
+    expect(body.trace.unlinked_count).toBe(1)
+  })
+})

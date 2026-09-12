@@ -6,12 +6,14 @@ import {
   TEAM_POLL_MS,
   listTeams,
   readTeam,
+  readTeamTrace,
   stopTeam,
   teamIdFromPath,
   type TeamCard,
   type TeamCost as TeamCostData,
   type TeamPanel as TeamPanelData,
   type TeamTask,
+  type TeamTrace as TeamTraceData,
 } from './teamApi'
 import './team.css'
 import { assistantRequestAddress } from '../assistant/assistantRequest'
@@ -249,6 +251,11 @@ export function TeamDetail({ panel, stopping, reason, onReason, onStop }: TeamVi
       </ol>
     </section>
 
+    <section aria-labelledby="team-trace-title">
+      <h3 id="team-trace-title">{copy.traceTitle}</h3>
+      <TeamTraceSection teamId={panel.team_id} />
+    </section>
+
     <section aria-labelledby="team-stop-title">
       <h3 id="team-stop-title">{copy.stop}</h3>
       <p>{copy.stopConfirm}</p>
@@ -265,6 +272,110 @@ export function TeamDetail({ panel, stopping, reason, onReason, onStop }: TeamVi
 
     <p><a href="/studio/progresso">{copy.backToList}</a></p>
   </article>
+}
+
+/**
+ * Se abrir a seção deve mesmo disparar uma leitura.
+ *
+ * Função separada porque `<details>` dispara `toggle` ao ABRIR e ao FECHAR, e
+ * porque quem já leu não precisa ler de novo. Sem esta conferência, cada abrir
+ * e fechar da seção era uma ida à trilha inteira — que é o custo que a leitura
+ * sob demanda existe para evitar.
+ * @param jaTem - se a cadeia já foi lida.
+ * @param lendo - se uma leitura está em andamento.
+ * @returns se deve ler.
+ */
+export function shouldLoadTrace(jaTem: boolean, lendo: boolean): boolean {
+  return !jaTem && !lendo
+}
+
+export type TeamTraceSectionProps = {
+  readonly teamId: string
+  readonly load?: (teamId: string) => Promise<TeamTraceData>
+}
+
+/**
+ * A seção que lê a cadeia, e só quando alguém pede.
+ *
+ * A leitura é SOB DEMANDA de propósito: a trilha de política cresce com o uso,
+ * e trazê-la em toda volta do laço de atualização faria o painel ficar mais
+ * lento exatamente nas instalações que mais têm o que mostrar.
+ *
+ * A recusa do servidor é MOSTRADA. Uma instalação sem trilha montada recusa com
+ * uma frase que diz isso — e trocá-la por uma lista vazia faria a tela afirmar
+ * que nenhuma ferramenta foi usada.
+ * @param props - o trabalho e de onde a cadeia vem.
+ * @returns a seção.
+ */
+export function TeamTraceSection({ teamId, load = readTeamTrace }: TeamTraceSectionProps) {
+  const [trace, setTrace] = useState<TeamTraceData | null>(null)
+  const [problem, setProblem] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  const abrir = useCallback(() => {
+    if (!shouldLoadTrace(trace !== null, loading)) return
+    setLoading(true)
+    setProblem(null)
+    void load(teamId)
+      .then(setTrace)
+      .catch((error: unknown) => { setProblem(error instanceof Error ? error.message : copy.traceReadError) })
+      .finally(() => { setLoading(false) })
+  }, [load, teamId, trace, loading])
+
+  return <details className="team-trace-section" onToggle={abrir}>
+    <summary>{copy.traceOpen}</summary>
+    {loading ? <p role="status">{copy.traceLoading}</p> : null}
+    {problem !== null ? <p role="alert" className="error">{problem}</p> : null}
+    {trace !== null ? <TeamTraceBlock trace={trace} /> : null}
+  </details>
+}
+
+/**
+ * Que ferramentas cada etapa usou, e o que a política decidiu em cada uma.
+ *
+ * A regra que atravessa este bloco: AUSÊNCIA DE ELO NÃO É AUSÊNCIA DE CHAMADA.
+ * Uma etapa que rodou sem deixar a ligação com o registro fez chamadas que
+ * ninguém consegue atribuir — e desenhar isso como "não usou ferramenta
+ * nenhuma" descreveria como limpo justamente o caso em que a vigilância
+ * falhou.
+ *
+ * O resumo de cima existe pelo mesmo motivo: quem percorre dez etapas não soma
+ * de cabeça quantas ficaram sem ligação, e sem esse número a pessoa sai da tela
+ * achando que leu o relato inteiro.
+ * @param props - a cadeia já lida.
+ * @returns o bloco.
+ */
+export function TeamTraceBlock({ trace }: { readonly trace: TeamTraceData }) {
+  const rodaram = trace.tasks.filter(row => row.trace.link !== 'NOT_EXECUTED').length
+  return <>
+    {trace.unlinked_count > 0
+      ? <p className="team-trace-gap" role="alert">{copy.traceUnlinkedSummary
+        .replace('{count}', String(trace.unlinked_count))
+        .replace('{total}', String(rodaram))}</p>
+      : <p className="team-trace-complete">{copy.traceComplete}</p>}
+    <p>{copy.traceHelp}</p>
+    <ol className="team-trace">
+      {trace.tasks.map(row => <li key={row.task_id} className="team-trace-task">
+        <p className="team-trace-title">{row.title}</p>
+        {row.trace.link === 'NOT_EXECUTED' ? <p>{copy.traceNotExecuted}</p> : null}
+        {row.trace.link === 'UNLINKED' ? <p role="alert" className="team-trace-gap">{copy.traceUnlinked}</p> : null}
+        {row.trace.link === 'LINKED' && row.trace.calls.length === 0 ? <p>{copy.traceEmpty}</p> : null}
+        {row.trace.calls.length > 0 ? <ul className="team-trace-calls">
+          {row.trace.calls.map(call => <li key={call.call_id}>
+            <span className="team-trace-tool">{call.tool_name}</span>
+            <span className={`team-trace-decision team-trace-${call.decision}`}>
+              {label(copy.traceDecision, call.decision)}
+            </span>
+            <span className="team-trace-when">{formatMoment(call.at)}</span>
+            <span className="team-trace-reason">{call.reason}</span>
+            {/* Uma entrada sem selo é dita como tal. Omitir a distinção faria
+                uma linha inauditável parecer auditada. */}
+            {call.sealed ? null : <span className="team-trace-unsealed">{copy.traceUnsealed}</span>}
+          </li>)}
+        </ul> : null}
+      </li>)}
+    </ol>
+  </>
 }
 
 /** O consumo da equipe: medido, parcial, ou dito como não medido. */

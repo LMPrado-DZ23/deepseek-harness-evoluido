@@ -90,3 +90,53 @@ test('a lista leva ao painel, e a navegação leva à lista', async ({ page }) =
   await page.getByRole('link', { name: 'Ver todos os trabalhos' }).click()
   await expect(page).toHaveURL(/\/studio\/progresso$/u)
 })
+
+/**
+ * A cadeia equipe → etapa → execução → ferramenta, olhada como gente olha.
+ *
+ * O `T-06` deixou o elo (`child_session_id`) e parou ali: nada lia a trilha de
+ * política para dizer QUE FERRAMENTAS uma etapa chamou. Correlação que ninguém
+ * consulta é correlação que ninguém confere.
+ *
+ * Os três casos aparecem na MESMA tela de propósito: etapa com elo, etapa que
+ * rodou sem deixar elo, e etapa que não rodou. Uma prova que só tivesse o caso
+ * feliz não diria nada sobre a única coisa que esta tela existe para gritar.
+ */
+test('a cadeia mostra que ferramentas cada etapa usou, e grita quando não sabe', async ({ page }) => {
+  await page.goto(`/studio/progresso/${TEAM}`)
+  await expect(page.getByRole('heading', { name: 'Que ferramentas cada etapa usou' })).toBeVisible()
+
+  // Nada é lido antes de alguém abrir: a trilha cresce com o uso.
+  await expect(page.getByText('escrever_arquivo')).toHaveCount(0)
+  await page.getByText('Ver as ferramentas usadas').click()
+
+  // A etapa com elo mostra as chamadas, e a decisão aparece EM PORTUGUÊS.
+  await expect(page.getByText('escrever_arquivo')).toBeVisible()
+  await expect(page.getByText('apagar_pasta')).toBeVisible()
+  await expect(page.getByText('Liberado').first()).toBeVisible()
+  await expect(page.getByText('Recusado')).toBeVisible()
+  await expect(page.getByText('Fora do que esta equipe pode fazer.')).toBeVisible()
+
+  // A entrada antiga, sem selo, é DITA como tal.
+  await expect(page.getByText('Sem selo de auditoria')).toBeVisible()
+
+  // A etapa que rodou sem deixar o elo GRITA — e não vira "não usou nada".
+  await expect(page.getByText('não guardou a ligação com o registro de ferramentas')).toBeVisible()
+  await expect(page.getByText('1 de 2 etapas rodaram sem deixar essa ligação')).toBeVisible()
+
+  // A etapa que não rodou tem a frase dela, que é outra coisa.
+  await expect(page.getByText('ainda não rodou, então não usou ferramenta nenhuma')).toBeVisible()
+
+  // E nenhum código de máquina chega à pessoa.
+  for (const codigo of ['allow', 'deny', 'UNLINKED', 'NOT_EXECUTED', 'LINKED']) {
+    await expect(page.locator('body')).not.toContainText(codigo)
+  }
+})
+
+test('a cadeia não tem violação de acessibilidade, aberta', async ({ page }) => {
+  await page.goto(`/studio/progresso/${TEAM}`)
+  await page.getByText('Ver as ferramentas usadas').click()
+  await expect(page.getByText('escrever_arquivo')).toBeVisible()
+  const scan = await new AxeBuilder({ page }).analyze()
+  expect(scan.violations).toEqual([])
+})

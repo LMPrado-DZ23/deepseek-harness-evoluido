@@ -1,6 +1,7 @@
 import type { IncomingMessage } from 'node:http'
 import { authenticatedMutation, type StudioIdentityService } from '@dz23-studio/identity'
 import { t } from './i18n.js'
+import { teamTrace, type PolicyAuditShape, type TraceRunShape } from './tool-trace.js'
 
 /**
  * O painel do trabalho em equipe.
@@ -30,6 +31,7 @@ export type TeamPanelRoute =
   | { readonly kind: 'list' }
   | { readonly kind: 'detail', readonly teamId: string }
   | { readonly kind: 'stop', readonly teamId: string }
+  | { readonly kind: 'trace', readonly teamId: string }
   | { readonly kind: 'method-not-allowed' }
 
 /**
@@ -49,6 +51,9 @@ export function routeTeamPanel(method: string | undefined, pathname: string): Te
   // pertence a este painel, e responder 404 aqui esconderia uma rota vizinha.
   if (teamId === undefined || !TEAM_ID_RE.test(teamId) || extra !== undefined) return undefined
   if (suffix === undefined) return method === 'GET' ? { kind: 'detail', teamId } : { kind: 'method-not-allowed' }
+  // A cadeia é LEITURA, e por isso `GET`. Ela não muda nada, e um `POST` aqui
+  // faria uma consulta parecer uma ação.
+  if (suffix === 'trace') return method === 'GET' ? { kind: 'trace', teamId } : { kind: 'method-not-allowed' }
   if (suffix !== 'stop') return undefined
   return method === 'POST' ? { kind: 'stop', teamId } : { kind: 'method-not-allowed' }
 }
@@ -126,10 +131,23 @@ export interface TeamPanelRunsSource {
   }[]
 }
 
+/**
+ * De onde saem a trilha de política e o elo da execução com a sessão filha.
+ *
+ * Opcional de propósito, e a ausência é VISÍVEL: uma instalação sem plugin de
+ * política não tem trilha para mostrar, e a rota diz isso em vez de desenhar
+ * uma cadeia vazia — que seria indistinguível de "nada foi chamado".
+ */
+export interface TeamPanelTraceSource {
+  auditRecords(): readonly PolicyAuditShape[]
+  traceRuns(): readonly TraceRunShape[]
+}
+
 export interface TeamPanelConfig {
   readonly identity: StudioIdentityService
   readonly teams?: TeamPanelTeamsSource
   readonly runs?: TeamPanelRunsSource
+  readonly trace?: TeamPanelTraceSource
 }
 
 /**
@@ -423,6 +441,22 @@ export async function handleTeamPanel(
   const snapshot = await (route.kind === 'stop'
     ? teams.service.cancel(route.teamId, session.user_id, reason)
     : teams.service.status(route.teamId)).catch((error: unknown) => { throw translateTeamError(error) })
+  if (route.kind === 'trace') {
+    const trace = config.trace
+    // Sem trilha montada, RECUSA. Devolver uma cadeia vazia diria "nenhuma
+    // ferramenta foi chamada" para uma instalação onde ninguém está olhando —
+    // que é a mentira mais cara que esta rota poderia contar.
+    if (trace === undefined) throw new TeamPanelError('NOT_CONFIGURED', t('teamPanel.traceNotConfigured'))
+    return {
+      status: 200,
+      body: {
+        trace: teamTrace(
+          route.teamId, snapshot.tasks, trace.traceRuns(), trace.auditRecords(),
+          { orgId: session.org_id, tenantId: session.tenant_id },
+        ),
+      },
+    }
+  }
   return { status: 200, body: { team: teamPanelView(snapshot.team, snapshot.tasks, config.runs, snapshot.blocked) } }
 }
 

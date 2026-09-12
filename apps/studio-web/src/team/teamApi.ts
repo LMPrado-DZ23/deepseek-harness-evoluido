@@ -279,3 +279,97 @@ export const TEAM_PATH = '/studio/progresso'
 export function isTeamPath(pathname: string): boolean {
   return pathname === TEAM_PATH || pathname.startsWith(`${TEAM_PATH}/`)
 }
+
+export type ToolCall = {
+  readonly call_id: string
+  readonly tool_name: string
+  readonly decision: 'allow' | 'ask' | 'deny'
+  readonly effective_tier: string
+  readonly reason: string
+  readonly at: string
+  readonly sealed: boolean
+}
+
+export type TaskTrace =
+  | { readonly link: 'NOT_EXECUTED'; readonly calls: readonly ToolCall[] }
+  | { readonly link: 'UNLINKED'; readonly run_id: string; readonly calls: readonly ToolCall[] }
+  | { readonly link: 'LINKED'; readonly run_id: string; readonly session_id: string; readonly calls: readonly ToolCall[] }
+
+export interface TaskTraceRow {
+  readonly task_id: string
+  readonly title: string
+  readonly role: string
+  readonly status: string
+  readonly trace: TaskTrace
+}
+
+export interface TeamTrace {
+  readonly team_id: string
+  readonly tasks: readonly TaskTraceRow[]
+  readonly unlinked_count: number
+}
+
+const DECISIONS: readonly ToolCall['decision'][] = ['allow', 'ask', 'deny']
+const LINKS: readonly TaskTrace['link'][] = ['NOT_EXECUTED', 'UNLINKED', 'LINKED']
+
+/** Uma chamada só é desenhada inteira. */
+export function isToolCall(value: unknown): value is ToolCall {
+  if (typeof value !== 'object' || value === null) return false
+  const row = value as Record<string, unknown>
+  return typeof row.call_id === 'string' && row.call_id !== ''
+    && typeof row.tool_name === 'string' && row.tool_name !== ''
+    && DECISIONS.includes(row.decision as ToolCall['decision'])
+    && typeof row.effective_tier === 'string' && row.effective_tier !== ''
+    && typeof row.reason === 'string'
+    && typeof row.at === 'string' && row.at !== ''
+    && typeof row.sealed === 'boolean'
+}
+
+/**
+ * Uma etapa da cadeia, conferida.
+ *
+ * Uma etapa com `link` que a tela não conhece é DESCARTADA, e não desenhada
+ * como `LINKED`: um estado desconhecido virando "tem elo" transformaria uma
+ * versão nova do servidor num relato falsamente completo.
+ */
+export function isTaskTraceRow(value: unknown): value is TaskTraceRow {
+  if (typeof value !== 'object' || value === null) return false
+  const row = value as Record<string, unknown>
+  if (typeof row.task_id !== 'string' || row.task_id === '') return false
+  if (typeof row.title !== 'string' || typeof row.role !== 'string' || typeof row.status !== 'string') return false
+  const trace = row.trace as Record<string, unknown> | undefined
+  if (trace === undefined || typeof trace !== 'object' || trace === null) return false
+  if (!LINKS.includes(trace.link as TaskTrace['link'])) return false
+  if (!Array.isArray(trace.calls) || !trace.calls.every(isToolCall)) return false
+  if (trace.link === 'LINKED' && (typeof trace.session_id !== 'string' || trace.session_id === '')) return false
+  if (trace.link !== 'NOT_EXECUTED' && (typeof trace.run_id !== 'string' || trace.run_id === '')) return false
+  return true
+}
+
+/**
+ * A cadeia de um trabalho: que ferramentas cada etapa chamou, e o que a
+ * política decidiu em cada chamada.
+ * @param teamId - o trabalho.
+ * @param port - a porta de rede, injetável no teste.
+ * @param signal - cancelamento da leitura.
+ * @returns a cadeia.
+ */
+export async function readTeamTrace(
+  teamId: string, port: ConversationPort = defaultPort, signal?: AbortSignal,
+): Promise<TeamTrace> {
+  const response = await port.fetch(`${TEAMS_ENDPOINT}/${encodeURIComponent(teamId)}/trace`, {
+    method: 'GET', credentials: 'same-origin', ...(signal === undefined ? {} : { signal }),
+  })
+  const body = await readBody(response)
+  if (!response.ok) throw failure(response, body, copy.traceReadError)
+  const trace = body?.trace as Record<string, unknown> | undefined
+  if (trace === undefined || !Array.isArray(trace.tasks) || typeof trace.unlinked_count !== 'number') {
+    throw new ConversationRequestError(response.status, copy.invalidServerResponse, false)
+  }
+  const tasks = trace.tasks.filter(isTaskTraceRow)
+  // A contagem vem do SERVIDOR, e não é recontada aqui a partir das linhas que
+  // sobreviveram à conferência: uma linha descartada pela tela continua sendo
+  // uma etapa sem elo do lado de lá, e recontar aqui faria o descarte da tela
+  // esconder exatamente o que este número existe para gritar.
+  return { team_id: teamId, tasks, unlinked_count: trace.unlinked_count }
+}

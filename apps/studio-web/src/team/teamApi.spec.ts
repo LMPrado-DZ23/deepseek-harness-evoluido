@@ -3,7 +3,7 @@ import copy from '../i18n/team.pt-BR.json'
 import { ConversationRequestError } from '../assistant/conversationApi'
 import {
   TEAMS_ENDPOINT, isTeamCard, isTeamPanel, isTeamPath, isTeamTask,
-  listTeams, readTeam, stopTeam, teamIdFromPath,
+  listTeams, readTeam, readTeamTrace, stopTeam, teamIdFromPath,
 } from './teamApi'
 
 const TEAM = '11111111-2222-4333-8444-555555555555'
@@ -180,5 +180,100 @@ describe('parada', () => {
   it('resposta sem painel não conta como parada feita', async () => {
     const fetchMock = vi.fn(async (_path: string, _init: RequestInit) => Response.json({ team: { team_id: TEAM } }))
     await expect(stopTeam(TEAM, '', { fetch: fetchMock }, csrf)).rejects.toThrow(copy.invalidServerResponse)
+  })
+})
+
+describe('a leitura da cadeia de ferramentas', () => {
+  function chamada(over: Record<string, unknown> = {}) {
+    return {
+      call_id: 'c1', tool_name: 'shell', decision: 'allow', effective_tier: 'T2',
+      reason: 'catalogo', at: '2026-09-08T00:03:00.000Z', sealed: true, ...over,
+    }
+  }
+
+  function linha(over: Record<string, unknown> = {}) {
+    return {
+      task_id: 't1', title: 'Uma etapa', role: 'implementer', status: 'APPLIED',
+      trace: { link: 'LINKED', run_id: 'r1', session_id: 's1', calls: [chamada()] }, ...over,
+    }
+  }
+
+  it('bate no endereco da cadeia, e le sem corpo', async () => {
+    const fetchMock = vi.fn(async (_path: string, _init: RequestInit) =>
+      Response.json({ trace: { team_id: TEAM, tasks: [linha()], unlinked_count: 0 } }))
+    const cadeia = await readTeamTrace(TEAM, { fetch: fetchMock })
+    expect(fetchMock.mock.calls[0]![0]).toBe(`${TEAMS_ENDPOINT}/${TEAM}/trace`)
+    expect(cadeia.tasks).toHaveLength(1)
+    expect(cadeia.tasks[0]!.trace.calls[0]!.tool_name).toBe('shell')
+  })
+
+  it('linha com `link` DESCONHECIDO e descartada, e nao vira "tem elo"', async () => {
+    // Uma versao nova do servidor virando relato falsamente completo e pior do
+    // que uma linha a menos.
+    const fetchMock = vi.fn(async () => Response.json({ trace: {
+      team_id: TEAM, tasks: [linha(), linha({ task_id: 'novo', trace: { link: 'FUTURO', run_id: 'r2', calls: [] } })],
+      unlinked_count: 0,
+    } }))
+    const cadeia = await readTeamTrace(TEAM, { fetch: fetchMock })
+    expect(cadeia.tasks.map(row => row.task_id)).toEqual(['t1'])
+  })
+
+  it('chamada pela metade e descartada, e a linha inteira cai junto', async () => {
+    const fetchMock = vi.fn(async () => Response.json({ trace: {
+      team_id: TEAM, tasks: [linha({ trace: { link: 'LINKED', run_id: 'r1', session_id: 's1', calls: [{ call_id: 'c1' }] } })],
+      unlinked_count: 0,
+    } }))
+    await expect(readTeamTrace(TEAM, { fetch: fetchMock })).resolves.toMatchObject({ tasks: [] })
+  })
+
+  it('`LINKED` sem sessao e descartado: o elo e a sessao', async () => {
+    const fetchMock = vi.fn(async () => Response.json({ trace: {
+      team_id: TEAM, tasks: [linha({ trace: { link: 'LINKED', run_id: 'r1', calls: [] } })], unlinked_count: 0,
+    } }))
+    await expect(readTeamTrace(TEAM, { fetch: fetchMock })).resolves.toMatchObject({ tasks: [] })
+  })
+
+  it('a contagem de sem-elo vem do SERVIDOR, e nao e recontada do que sobrou', async () => {
+    // Recontar aqui faria o descarte da tela esconder exatamente o que este
+    // numero existe para gritar.
+    const fetchMock = vi.fn(async () => Response.json({ trace: {
+      team_id: TEAM,
+      tasks: [linha({ task_id: 'ruim', trace: { link: 'FUTURO', run_id: 'r9', calls: [] } })],
+      unlinked_count: 3,
+    } }))
+    const cadeia = await readTeamTrace(TEAM, { fetch: fetchMock })
+    expect(cadeia.tasks).toEqual([])
+    expect(cadeia.unlinked_count).toBe(3)
+  })
+
+  it('resposta sem `unlinked_count` NAO passa como cadeia sem falhas', async () => {
+    const fetchMock = vi.fn(async () => Response.json({ trace: { team_id: TEAM, tasks: [] } }))
+    await expect(readTeamTrace(TEAM, { fetch: fetchMock })).rejects.toThrow(copy.invalidServerResponse)
+  })
+
+  it('a recusa do servidor chega como veio', async () => {
+    const fetchMock = vi.fn(async () => Response.json(
+      { error: 'Este Studio nao esta guardando a trilha de decisoes.' }, { status: 503 },
+    ))
+    await expect(readTeamTrace(TEAM, { fetch: fetchMock }))
+      .rejects.toThrow('Este Studio nao esta guardando a trilha de decisoes.')
+  })
+
+  it('decisao fora das tres conhecidas derruba a chamada', async () => {
+    const fetchMock = vi.fn(async () => Response.json({ trace: {
+      team_id: TEAM,
+      tasks: [linha({ trace: { link: 'LINKED', run_id: 'r1', session_id: 's1', calls: [chamada({ decision: 'talvez' })] } })],
+      unlinked_count: 0,
+    } }))
+    await expect(readTeamTrace(TEAM, { fetch: fetchMock })).resolves.toMatchObject({ tasks: [] })
+  })
+
+  it('`sealed` precisa ser booleano: ausente nao vira selado', async () => {
+    const fetchMock = vi.fn(async () => Response.json({ trace: {
+      team_id: TEAM,
+      tasks: [linha({ trace: { link: 'LINKED', run_id: 'r1', session_id: 's1', calls: [{ ...chamada(), sealed: undefined }] } })],
+      unlinked_count: 0,
+    } }))
+    await expect(readTeamTrace(TEAM, { fetch: fetchMock })).resolves.toMatchObject({ tasks: [] })
   })
 })

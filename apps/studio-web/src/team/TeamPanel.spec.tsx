@@ -1,10 +1,13 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import copy from '../i18n/team.pt-BR.json'
 import { ConversationRequestError } from '../assistant/conversationApi'
-import { TaskRow, TeamCards, TeamCostBlock, TeamView, formatMoment, label, orderedTasks } from './TeamPanel'
-import type { TeamPanel as TeamPanelData, TeamTask } from './teamApi'
+import {
+  TaskRow, TeamCards, TeamCostBlock, TeamTraceBlock, TeamTraceSection, TeamView,
+  formatMoment, label, orderedTasks, shouldLoadTrace,
+} from './TeamPanel'
+import type { TeamPanel as TeamPanelData, TeamTask, TeamTrace as TeamTraceData, ToolCall } from './teamApi'
 
 const TEAM = '11111111-2222-4333-8444-555555555555'
 
@@ -266,5 +269,133 @@ describe('T-24: o plano travado aparece na tela, e diz o que fazer', () => {
   it('etapa com plano inteiro nao ganha aviso nenhum', () => {
     const html = renderToStaticMarkup(createElement(TaskRow, { task: task({ status: 'QUEUED' }), depth: 0 }))
     expect(html).not.toContain('não vai andar')
+  })
+})
+
+describe('a cadeia: que ferramentas cada etapa usou', () => {
+  function chamada(over: Partial<ToolCall> = {}): ToolCall {
+    return {
+      call_id: 'c1', tool_name: 'shell', decision: 'allow', effective_tier: 'T2',
+      reason: 'previsto no catalogo', at: '2026-09-08T00:03:00.000Z', sealed: true, ...over,
+    }
+  }
+
+  function cadeia(over: Partial<TeamTraceData> = {}): TeamTraceData {
+    return {
+      team_id: 'eq-1', unlinked_count: 0,
+      tasks: [{
+        task_id: 't1', title: 'Escrever o formulario', role: 'implementer', status: 'APPLIED',
+        trace: { link: 'LINKED', run_id: 'r1', session_id: 's1', calls: [chamada()] },
+      }],
+      ...over,
+    }
+  }
+
+  it('a decisao aparece EM PORTUGUES, e as tres sao frases diferentes', () => {
+    // Colapsar `ask` em `deny` faria a tela dizer que algo foi recusado quando
+    // na verdade estava esperando alguem responder.
+    const desenhado = renderToStaticMarkup(createElement(TeamTraceBlock, { trace: cadeia({
+      tasks: [{
+        task_id: 't1', title: 'Uma etapa', role: 'implementer', status: 'APPLIED',
+        trace: { link: 'LINKED', run_id: 'r1', session_id: 's1', calls: [
+          chamada({ call_id: 'a', decision: 'allow' }),
+          chamada({ call_id: 'b', decision: 'ask' }),
+          chamada({ call_id: 'c', decision: 'deny' }),
+        ] },
+      }],
+    }) }))
+    for (const frase of Object.values(copy.traceDecision)) expect(desenhado).toContain(frase)
+    for (const codigo of ['allow', 'ask', 'deny']) {
+      expect(desenhado.replace(/class="[^"]*"/gu, ''), codigo).not.toContain(codigo)
+    }
+  })
+
+  it('etapa SEM ELO grita, e nao e desenhada como "nao usou ferramenta"', () => {
+    // Descrever como limpo o caso em que a vigilancia falhou e a mentira mais
+    // cara que esta tela poderia contar.
+    const desenhado = renderToStaticMarkup(createElement(TeamTraceBlock, { trace: cadeia({
+      unlinked_count: 1,
+      tasks: [{
+        task_id: 't1', title: 'Uma etapa', role: 'implementer', status: 'APPLIED',
+        trace: { link: 'UNLINKED', run_id: 'r1', calls: [] },
+      }],
+    }) }))
+    expect(desenhado).toContain(copy.traceUnlinked)
+    expect(desenhado).not.toContain(copy.traceEmpty)
+    expect(desenhado).not.toContain(copy.traceNotExecuted)
+    expect(desenhado).toContain('role="alert"')
+  })
+
+  it('etapa que NAO rodou tem frase propria, diferente da de sem elo', () => {
+    const desenhado = renderToStaticMarkup(createElement(TeamTraceBlock, { trace: cadeia({
+      tasks: [{
+        task_id: 't1', title: 'Uma etapa', role: 'implementer', status: 'QUEUED',
+        trace: { link: 'NOT_EXECUTED', calls: [] },
+      }],
+    }) }))
+    expect(desenhado).toContain(copy.traceNotExecuted)
+    expect(desenhado).not.toContain(copy.traceUnlinked)
+  })
+
+  it('elo com zero chamadas diz que rodou e nao pediu nada — que e outra coisa', () => {
+    const desenhado = renderToStaticMarkup(createElement(TeamTraceBlock, { trace: cadeia({
+      tasks: [{
+        task_id: 't1', title: 'Uma etapa', role: 'implementer', status: 'APPLIED',
+        trace: { link: 'LINKED', run_id: 'r1', session_id: 's1', calls: [] },
+      }],
+    }) }))
+    expect(desenhado).toContain(copy.traceEmpty)
+    expect(desenhado).not.toContain(copy.traceUnlinked)
+  })
+
+  it('o resumo de cima conta quantas etapas RODARAM, e nao quantas existem', () => {
+    // Uma etapa em fila nao tinha como deixar ligacao, e conta-la no total
+    // faria o relato parecer permanentemente furado.
+    const desenhado = renderToStaticMarkup(createElement(TeamTraceBlock, { trace: cadeia({
+      unlinked_count: 1,
+      tasks: [
+        { task_id: 'a', title: 'Rodou', role: 'implementer', status: 'APPLIED', trace: { link: 'UNLINKED', run_id: 'r1', calls: [] } },
+        { task_id: 'b', title: 'Rodou tambem', role: 'implementer', status: 'APPLIED', trace: { link: 'LINKED', run_id: 'r2', session_id: 's2', calls: [] } },
+        { task_id: 'c', title: 'Em fila', role: 'implementer', status: 'QUEUED', trace: { link: 'NOT_EXECUTED', calls: [] } },
+      ],
+    }) }))
+    expect(desenhado).toContain(copy.traceUnlinkedSummary.replace('{count}', '1').replace('{total}', '2'))
+  })
+
+  it('sem nenhuma etapa sem elo, diz que o relato E completo', () => {
+    const desenhado = renderToStaticMarkup(createElement(TeamTraceBlock, { trace: cadeia() }))
+    expect(desenhado).toContain(copy.traceComplete)
+    expect(desenhado).not.toContain('role="alert"')
+  })
+
+  it('chamada sem selo e DITA como sem selo', () => {
+    // Omitir a distincao faria uma linha inauditavel parecer auditada.
+    const com = renderToStaticMarkup(createElement(TeamTraceBlock, { trace: cadeia() }))
+    const sem = renderToStaticMarkup(createElement(TeamTraceBlock, { trace: cadeia({
+      tasks: [{
+        task_id: 't1', title: 'Uma etapa', role: 'implementer', status: 'APPLIED',
+        trace: { link: 'LINKED', run_id: 'r1', session_id: 's1', calls: [chamada({ sealed: false })] },
+      }],
+    }) }))
+    expect(com).not.toContain(copy.traceUnsealed)
+    expect(sem).toContain(copy.traceUnsealed)
+  })
+
+  it('abrir de novo NAO le de novo, e fechar tambem nao', () => {
+    // `<details>` dispara ao abrir E ao fechar. Sem a conferencia, cada clique
+    // era uma ida a trilha inteira — o custo que a leitura sob demanda existe
+    // para evitar.
+    expect(shouldLoadTrace(false, false)).toBe(true)
+    expect(shouldLoadTrace(true, false)).toBe(false)
+    expect(shouldLoadTrace(false, true)).toBe(false)
+    expect(shouldLoadTrace(true, true)).toBe(false)
+  })
+
+  it('a secao NAO le nada antes de alguem abrir', () => {
+    // A trilha cresce com o uso: le-la em toda volta do laco deixaria o painel
+    // mais lento justamente onde ha mais o que mostrar.
+    const load = vi.fn(async () => cadeia())
+    renderToStaticMarkup(createElement(TeamTraceSection, { teamId: 'eq-1', load }))
+    expect(load).not.toHaveBeenCalled()
   })
 })
