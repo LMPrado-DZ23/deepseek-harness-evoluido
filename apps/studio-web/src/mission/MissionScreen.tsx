@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import copy from '../i18n/mission.pt-BR.json'
 import {
-  completeMission, declareCandidate, listMissions,
-  type MissionCompletion, type MissionSpend, type MissionView,
+  completeMission, createMission, declareCandidate, listMissions, slugify, uniqueSlug,
+  type MissionCompletion, type MissionDraft, type MissionSpend, type MissionView,
 } from './missionApi'
 import './mission.css'
 
@@ -55,6 +55,65 @@ export function availableActions(mission: MissionView): { readonly candidate: bo
     candidate: mission.status === 'RUNNING',
     complete: mission.status === 'CANDIDATE_COMPLETED',
   }
+}
+
+export type DraftResult =
+  | { readonly ok: true; readonly draft: MissionDraft }
+  | { readonly ok: false; readonly problem: string }
+
+/**
+ * Transforma o que a pessoa escreveu num rascunho, ou diz o que falta.
+ *
+ * Função PURA, fora do componente, porque é aqui que moram as decisões que
+ * podem errar em silêncio: o identificador derivado da frase, o limite que
+ * precisa ser inteiro, e o item vazio que o servidor recusaria depois de uma
+ * ida de rede.
+ *
+ * O que ela NÃO faz é repetir a validação do servidor. Ela impede o envio
+ * obviamente vazio; tudo o mais é recusado lá e a frase de lá é mostrada.
+ * @param objective - a meta escrita.
+ * @param statements - os itens a comprovar, como foram escritos.
+ * @param limit - o limite escrito, ou string vazia.
+ * @param taken - os identificadores que a tela já conhece.
+ * @returns o rascunho, ou o problema.
+ */
+export function buildDraft(
+  objective: string, statements: readonly string[], limit: string, taken: readonly string[],
+): DraftResult {
+  const meta = objective.trim()
+  if (meta.length < 3) return { ok: false, problem: copy.objectiveTooShort }
+  const escritos = statements.map(item => item.trim()).filter(item => item !== '')
+  if (escritos.length === 0) return { ok: false, problem: copy.noCriteria }
+  if (escritos.some(item => item.length < 3)) return { ok: false, problem: copy.criterionTooShort }
+
+  const missionId = uniqueSlug(slugify(meta), taken)
+  // Frase sem letra nem número nenhum — só emoji, só pontuação — não vira
+  // identificador. Inventar um aleatório aqui esconderia o caso: a pessoa
+  // veria um objetivo com um nome que ela não escreveu.
+  if (missionId === '') return { ok: false, problem: copy.slugImpossible }
+
+  const cru = limit.trim()
+  let maxTotalTokens: number | null = null
+  if (cru !== '') {
+    const numero = Number(cru)
+    // `Number('')` é 0 e `Number(' 12 ')` é 12: a string vazia já saiu acima, e
+    // o resto tem de ser inteiro positivo. Um limite de zero seria um objetivo
+    // que nasce estourado.
+    if (!Number.isInteger(numero) || numero <= 0) return { ok: false, problem: copy.limitNotWhole }
+    maxTotalTokens = numero
+  }
+
+  // Os identificadores dos ITENS também são derivados, e precisam ser distintos
+  // entre si: o esquema do servidor recusa item repetido, e dois itens escritos
+  // com a mesma frase produziriam a mesma chave.
+  const usados: string[] = []
+  const criteria = escritos.map((statement, index) => {
+    const base = slugify(statement)
+    const id = uniqueSlug(base === '' ? `item-${String(index + 1)}` : base, usados)
+    usados.push(id)
+    return { criterion_id: id, statement }
+  })
+  return { ok: true, draft: { missionId, objective: meta, maxTotalTokens, criteria } }
 }
 
 /**
@@ -111,6 +170,18 @@ export function MissionScreen() {
 
     {problem !== null ? <p role="alert" className="mission-problem">{problem}</p> : null}
 
+    {/* O formulário fica ACIMA da lista e aparece assim que a leitura volta,
+        inclusive quando ela volta vazia: numa conta nova, a primeira coisa a
+        fazer é criar, e um formulário escondido atrás de um botão faria a tela
+        vazia não oferecer nada. */}
+    {rows !== null ? <MissionForm
+      taken={rows.map(row => row.mission_id)}
+      onCreate={async draft => {
+        const criada = await createMission(draft)
+        setRows(current => [criada, ...(current ?? [])])
+      }}
+    /> : null}
+
     {rows !== null && rows.map(mission => <MissionCard
       key={mission.mission_id}
       mission={mission}
@@ -119,6 +190,87 @@ export function MissionScreen() {
       onComplete={() => { act(mission.mission_id, async () => completeMission(mission.mission_id)) }}
     />)}
   </main>
+}
+
+export type MissionFormProps = {
+  readonly taken: readonly string[]
+  readonly onCreate: (draft: MissionDraft) => Promise<void>
+}
+
+/**
+ * O formulário que cria um objetivo.
+ *
+ * A lista de itens a comprovar nasce com UM campo, e não com zero: um
+ * formulário que abre vazio faz a pessoa descobrir sozinha que precisa
+ * acrescentar algo antes de poder enviar.
+ *
+ * O identificador técnico NÃO aparece: ele é derivado da meta. Pedir uma chave
+ * a quem está escrevendo uma meta é pedir que ela conheça o banco de dados.
+ * @param props - os identificadores já em uso e o que fazer com o rascunho.
+ * @returns o formulário.
+ */
+export function MissionForm(props: MissionFormProps) {
+  const [objective, setObjective] = useState('')
+  const [statements, setStatements] = useState<readonly string[]>([''])
+  const [limit, setLimit] = useState('')
+  const [problem, setProblem] = useState<string | null>(null)
+  const [sending, setSending] = useState(false)
+
+  const submit = (event: { preventDefault: () => void }) => {
+    event.preventDefault()
+    const result = buildDraft(objective, statements, limit, props.taken)
+    if (!result.ok) { setProblem(result.problem); return }
+    setProblem(null)
+    setSending(true)
+    void props.onCreate(result.draft)
+      .then(() => { setObjective(''); setStatements(['']); setLimit('') })
+      // A recusa do SERVIDOR é mostrada como veio. Ela sabe coisas que a tela
+      // não sabe — um objetivo com o mesmo nome criado por outra pessoa, por
+      // exemplo — e trocá-la por uma frase genérica apagaria justamente isso.
+      .catch((error: unknown) => { setProblem(error instanceof Error ? error.message : copy.createError) })
+      .finally(() => { setSending(false) })
+  }
+
+  return <form className="task-card mission-form" onSubmit={submit}>
+    <h2>{copy.createTitle}</h2>
+    <p>{copy.createHelp}</p>
+
+    <label htmlFor="mission-objective">{copy.objectiveLabel}</label>
+    <input id="mission-objective" type="text" value={objective} placeholder={copy.objectivePlaceholder}
+      onChange={event => { setObjective(event.target.value) }} />
+
+    <fieldset className="mission-criteria-fields">
+      <legend>{copy.criteriaLabel}</legend>
+      {statements.map((statement, index) => <div key={index} className="mission-criterion-field">
+        <label htmlFor={`mission-criterion-${String(index)}`} className="sr-only">
+          {copy.criteriaLabel} {index + 1}
+        </label>
+        <input id={`mission-criterion-${String(index)}`} type="text" value={statement}
+          placeholder={copy.criterionPlaceholder}
+          onChange={event => {
+            const valor = event.target.value
+            setStatements(current => current.map((item, position) => position === index ? valor : item))
+          }} />
+        {/* O botão de tirar só aparece quando há mais de um: com um só, tirar
+            deixaria o formulário num estado que o envio recusa. */}
+        {statements.length > 1 ? <button type="button" className="secondary"
+          onClick={() => { setStatements(current => current.filter((_, position) => position !== index)) }}>
+          {copy.removeCriterion}
+        </button> : null}
+      </div>)}
+      <button type="button" className="secondary"
+        onClick={() => { setStatements(current => [...current, '']) }}>{copy.addCriterion}</button>
+    </fieldset>
+
+    <label htmlFor="mission-limit">{copy.limitLabel}</label>
+    <input id="mission-limit" type="text" inputMode="numeric" value={limit}
+      aria-describedby="mission-limit-help"
+      onChange={event => { setLimit(event.target.value) }} />
+    <p id="mission-limit-help" className="mission-help">{copy.limitHelp}</p>
+
+    {problem !== null ? <p role="alert" className="mission-problem">{problem}</p> : null}
+    <button type="submit" className="primary" disabled={sending}>{copy.submit}</button>
+  </form>
 }
 
 export type MissionCardProps = {

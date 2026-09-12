@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  completeMission, declareCandidate, isMissionCompletion, isMissionSpend, isMissionPath, isMissionView,
-  listMissions, MISSION_PATH, MissionRequestError, type MissionPort, type MissionView,
+  completeMission, createMission, declareCandidate, isMissionCompletion, isMissionSpend, isMissionPath, isMissionView,
+  listMissions, MISSION_PATH, MissionRequestError, slugify, uniqueSlug, type MissionPort, type MissionView,
 } from './missionApi'
 
 function mission(over: Partial<MissionView> = {}): MissionView {
@@ -123,5 +123,79 @@ describe('os dois gestos sao pedidos diferentes', () => {
   it('resposta que nao e uma missao inteira e recusada', async () => {
     const f = port(200, { mission: { mission_id: 'm1' } })
     await expect(declareCandidate('m1', f.port, csrf)).rejects.toBeInstanceOf(MissionRequestError)
+  })
+})
+
+describe('o identificador derivado da frase', () => {
+  it('tira acento, baixa a caixa e junta o resto com traco', () => {
+    expect(slugify('Colocar o SITE no ar, ja!')).toBe('colocar-o-site-no-ar-ja')
+    expect(slugify('Ação & Reação')).toBe('acao-reacao')
+  })
+
+  it('nao comeca nem termina com traco, nem em nenhum tamanho', () => {
+    expect(slugify('  --- oi ---  ')).toBe('oi')
+    // O corte em 120 nao pode deixar um traco na ponta: `algo-` nao e um
+    // identificador, e o esquema do servidor aceitaria sem reclamar.
+    const longo = slugify(`${'a'.repeat(119)} fim`)
+    expect(longo.length).toBeLessThanOrEqual(120)
+    expect(longo.endsWith('-')).toBe(false)
+  })
+
+  it('frase sem letra nem numero devolve VAZIO, e nao um identificador inventado', () => {
+    expect(slugify('🎯 !!! ???')).toBe('')
+    expect(uniqueSlug('', ['x'])).toBe('')
+  })
+
+  it('sufixo so entra quando ha colisao, e pula ate achar livre', () => {
+    expect(uniqueSlug('meta', [])).toBe('meta')
+    expect(uniqueSlug('meta', ['meta'])).toBe('meta-2')
+    expect(uniqueSlug('meta', ['meta', 'meta-2', 'meta-3'])).toBe('meta-4')
+  })
+})
+
+describe('criar um objetivo', () => {
+  it('manda o corpo no formato do servidor, com o token de CSRF', () => {
+    const criada = mission({ mission_id: 'nova' })
+    const { port: p, fetch } = port(200, { mission: criada })
+    return createMission(
+      { missionId: 'nova', objective: 'Uma meta', maxTotalTokens: 1_200, criteria: [{ criterion_id: 'c1', statement: 'algo' }] },
+      p, csrf,
+    ).then(devolvida => {
+      expect(devolvida.mission_id).toBe('nova')
+      const [url, init] = fetch.mock.calls[0] as [string, RequestInit]
+      expect(url).toBe('/api/studio/missions/missions')
+      expect(init.method).toBe('POST')
+      expect((init.headers as Record<string, string>)['x-dz23-csrf']).toBe('csrf-token')
+      // Os nomes sao os do SERVIDOR, e nao os da tela: mandar `missionId` faria
+      // o esquema estrito recusar, e a recusa chegaria como erro generico.
+      expect(JSON.parse(init.body as string)).toEqual({
+        mission_id: 'nova', objective: 'Uma meta', max_total_tokens: 1_200,
+        criteria: [{ criterion_id: 'c1', statement: 'algo' }],
+      })
+    })
+  })
+
+  it('sem limite manda `null`, e nao omite o campo', async () => {
+    const { port: p, fetch } = port(200, { mission: mission() })
+    await createMission({ missionId: 'x', objective: 'Uma meta', maxTotalTokens: null, criteria: [{ criterion_id: 'c', statement: 'algo' }] }, p, csrf)
+    const body = JSON.parse((fetch.mock.calls[0] as [string, RequestInit])[1].body as string) as Record<string, unknown>
+    expect('max_total_tokens' in body).toBe(true)
+    expect(body.max_total_tokens).toBe(null)
+  })
+
+  it('a recusa do servidor chega COMO VEIO, e nao virou frase generica', async () => {
+    // E nela que esta escrito, por exemplo, que ja existe um objetivo com esse
+    // nome — coisa que a tela nao tem como saber sozinha.
+    const { port: p } = port(400, { error: 'Ja existe um objetivo com esse nome.' })
+    await expect(createMission(
+      { missionId: 'x', objective: 'Uma meta', maxTotalTokens: null, criteria: [{ criterion_id: 'c', statement: 'algo' }] }, p, csrf,
+    )).rejects.toMatchObject({ status: 400, message: 'Ja existe um objetivo com esse nome.' })
+  })
+
+  it('resposta 200 com missao incompleta NAO passa como missao criada', async () => {
+    const { port: p } = port(200, { mission: { mission_id: 'x' } })
+    await expect(createMission(
+      { missionId: 'x', objective: 'Uma meta', maxTotalTokens: null, criteria: [{ criterion_id: 'c', statement: 'algo' }] }, p, csrf,
+    )).rejects.toBeInstanceOf(MissionRequestError)
   })
 })

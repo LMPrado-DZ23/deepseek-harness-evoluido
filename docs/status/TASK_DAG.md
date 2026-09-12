@@ -44,7 +44,7 @@ separa este trabalho de acrescentar features.
 | T-11 | P2 | Skill Registry com carregamento progressivo | T-07 | PENDING |
 | T-12 | P2 | Revisão independente + adversarial + convergência | T-09 | PENDING |
 | T-13 | P1 | Prontidão explícita: READY/WAITING/BLOCKED com motivo nomeado | — | DONE (falta levar à tela: T-24) |
-| T-14 | P1 | Mission Engine de escopo amplo (hoje o checkpoint cobre uma geração) | T-13 | PARCIAL (o motor existe e é falsificado — `plugins/mission`, OS-40: candidatura antes de conclusão, prova obrigatória, teto que atravessa execuções. já tem domínio físico, repositório e composição no perfil, e o teto aperta no disparo de equipe (OS-42). tem rota HTTP com contrato (OS-43) e TELA com e2e e axe (OS-44). Falta formulário de criação e prova real em PostgreSQL) |
+| T-14 | P1 | Mission Engine de escopo amplo (hoje o checkpoint cobre uma geração) | T-13 | PARCIAL (o motor existe e é falsificado — `plugins/mission`, OS-40: candidatura antes de conclusão, prova obrigatória, teto que atravessa execuções. já tem domínio físico, repositório e composição no perfil, e o teto aperta no disparo de equipe (OS-42). tem rota HTTP com contrato (OS-43) e TELA com e2e e axe (OS-44). tem TELA COM FORMULÁRIO DE CRIAÇÃO e PROVA REAL em PostgreSQL 16 (OS-51). Falta registrar prova e motivo de bloqueio PELA TELA: a rota `PATCH` existe e é testada, mas nada na interface a chama) |
 | T-15 | P2 | Code Intelligence: índice, símbolos, grafo de dependências | T-07 | PENDING |
 | T-16 | P2 | Provider adapters reais atrás do gateway | — | BLOCKED (EB-04) |
 | T-17 | P3 | Research Engine com procedência de fonte | T-07 | PENDING |

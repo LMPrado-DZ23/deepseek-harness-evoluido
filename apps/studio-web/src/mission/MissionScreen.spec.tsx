@@ -2,7 +2,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import copy from '../i18n/mission.pt-BR.json'
-import { availableActions, completionLabel, MissionCard, MissionScreen, runCountLabel, spendLabel } from './MissionScreen'
+import { availableActions, buildDraft, completionLabel, MissionCard, MissionForm, MissionScreen, runCountLabel, spendLabel } from './MissionScreen'
 import type { MissionView } from './missionApi'
 
 function mission(over: Partial<MissionView> = {}): MissionView {
@@ -147,5 +147,102 @@ describe('o cartao desenhado — o corpo que nenhum teste alcancava', () => {
       mission: mission(), busy: true, onCandidate: () => undefined, onComplete: () => undefined,
     }))
     expect(ocupado).toContain('disabled')
+  })
+})
+
+describe('o rascunho de criacao', () => {
+  it('a meta vira o identificador, sem acento e sem pontuacao', () => {
+    // Pedir a chave tecnica a quem esta escrevendo uma meta e pedir que ela
+    // conheca o banco de dados.
+    const feito = buildDraft('Colocar o site NO AR, para os clientes!', ['O formulario envia de verdade'], '', [])
+    expect(feito.ok).toBe(true)
+    if (!feito.ok) return
+    expect(feito.draft.missionId).toBe('colocar-o-site-no-ar-para-os-clientes')
+    expect(feito.draft.objective).toBe('Colocar o site NO AR, para os clientes!')
+  })
+
+  it('meta que nao sobra NADA depois de virar identificador e recusada, e nao inventa um', () => {
+    // Inventar um identificador aleatorio aqui esconderia o caso: a pessoa
+    // veria um objetivo com um nome que ela nao escreveu.
+    const feito = buildDraft('🎯🎯🎯', ['algo a comprovar'], '', [])
+    expect(feito).toEqual({ ok: false, problem: copy.slugImpossible })
+  })
+
+  it('identificador ja em uso NA TELA ganha sufixo, e nao colide', () => {
+    const feito = buildDraft('Lancar o site', ['algo a comprovar'], '', ['lancar-o-site'])
+    expect(feito.ok && feito.draft.missionId).toBe('lancar-o-site-2')
+  })
+
+  it('itens com a MESMA frase recebem identificadores distintos', () => {
+    // O esquema do servidor recusa item repetido, e duas frases iguais
+    // produziriam a mesma chave.
+    const feito = buildDraft('Uma meta qualquer', ['O mesmo item', 'O mesmo item'], '', [])
+    expect(feito.ok).toBe(true)
+    if (!feito.ok) return
+    expect(feito.draft.criteria.map(item => item.criterion_id)).toEqual(['o-mesmo-item', 'o-mesmo-item-2'])
+    expect(feito.draft.criteria.map(item => item.statement)).toEqual(['O mesmo item', 'O mesmo item'])
+  })
+
+  it('item que nao sobra identificador nenhum ainda assim ganha um, pela posicao', () => {
+    const feito = buildDraft('Uma meta qualquer', ['algo comprovavel', '🎯🎯🎯'], '', [])
+    expect(feito.ok && feito.draft.criteria.map(item => item.criterion_id)).toEqual(['algo-comprovavel', 'item-2'])
+  })
+
+  it('meta curta, lista vazia e item curto tem frases DIFERENTES', () => {
+    // Uma frase unica para tres problemas diferentes manda a pessoa procurar
+    // sozinha qual deles e o dela.
+    const curta = buildDraft('ab', ['algo a comprovar'], '', [])
+    const semItem = buildDraft('Uma meta qualquer', ['  '], '', [])
+    const itemCurto = buildDraft('Uma meta qualquer', ['ab'], '', [])
+    expect([curta, semItem, itemCurto].every(item => !item.ok)).toBe(true)
+    const frases = [curta, semItem, itemCurto].map(item => item.ok ? '' : item.problem)
+    expect(new Set(frases).size).toBe(3)
+  })
+
+  it('limite em branco e SEM LIMITE, e nao zero', () => {
+    // `Number('')` e 0: um limite de zero seria um objetivo que nasce estourado.
+    const feito = buildDraft('Uma meta qualquer', ['algo a comprovar'], '   ', [])
+    expect(feito.ok && feito.draft.maxTotalTokens).toBe(null)
+  })
+
+  it('limite quebrado, negativo ou zero e recusado antes da ida de rede', () => {
+    for (const cru of ['0', '-5', '1,5', '1.5', 'mil', '1e3x']) {
+      const feito = buildDraft('Uma meta qualquer', ['algo a comprovar'], cru, [])
+      expect(feito, `aceitou "${cru}" como limite`).toEqual({ ok: false, problem: copy.limitNotWhole })
+    }
+    expect(buildDraft('Uma meta qualquer', ['algo a comprovar'], ' 1200 ', []).ok).toBe(true)
+  })
+
+  it('itens em branco no meio da lista SOMEM, e nao viram item vazio', () => {
+    const feito = buildDraft('Uma meta qualquer', ['primeiro item', '   ', 'segundo item'], '', [])
+    expect(feito.ok && feito.draft.criteria.map(item => item.statement)).toEqual(['primeiro item', 'segundo item'])
+  })
+})
+
+describe('o formulario de criacao', () => {
+  it('nasce com UM campo de item, e nao com zero', () => {
+    // Um formulario que abre vazio faz a pessoa descobrir sozinha que precisa
+    // acrescentar algo antes de poder enviar.
+    const html = renderToStaticMarkup(createElement(MissionForm, { taken: [], onCreate: async () => undefined }))
+    expect(html.match(/id="mission-criterion-\d+"/gu)).toHaveLength(1)
+  })
+
+  it('todo campo tem rotulo ligado por `for`, inclusive o do item', () => {
+    const html = renderToStaticMarkup(createElement(MissionForm, { taken: [], onCreate: async () => undefined }))
+    for (const id of ['mission-objective', 'mission-criterion-0', 'mission-limit']) {
+      expect(html, `campo ${id} sem rotulo ligado`).toContain(`for="${id}"`)
+      expect(html).toContain(`id="${id}"`)
+    }
+  })
+
+  it('nao mostra o identificador tecnico em lugar nenhum', () => {
+    const html = renderToStaticMarkup(createElement(MissionForm, { taken: [], onCreate: async () => undefined }))
+    expect(html).not.toContain('mission_id')
+    expect(html.toLowerCase()).not.toContain('identificador')
+  })
+
+  it('com um item so, NAO oferece tirar: tirar deixaria um estado que o envio recusa', () => {
+    const html = renderToStaticMarkup(createElement(MissionForm, { taken: [], onCreate: async () => undefined }))
+    expect(html).not.toContain(copy.removeCriterion)
   })
 })

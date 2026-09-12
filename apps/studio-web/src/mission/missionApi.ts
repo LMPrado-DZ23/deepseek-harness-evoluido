@@ -209,3 +209,79 @@ async function write(
   if (!isMissionView(body?.mission)) throw new MissionRequestError(response.status, copy.invalidServerResponse)
   return body.mission
 }
+
+/**
+ * O identificador técnico derivado de uma frase escrita por gente.
+ *
+ * O servidor exige `mission_id`, e pedir isso à pessoa seria pedir que ela
+ * inventasse uma chave de banco de dados para poder escrever um objetivo. Então
+ * a frase vira o identificador: minúsculas, sem acento, espaços viram traço, e
+ * o que não é letra nem número cai fora.
+ *
+ * Frase que não sobra NADA depois disso — só emoji, só pontuação, um idioma
+ * sem alfabeto latino — devolve string vazia, e quem chama trata. Inventar um
+ * identificador aleatório aqui esconderia o caso em vez de resolvê-lo.
+ * @param phrase - a frase escrita pela pessoa.
+ * @returns o identificador, ou string vazia quando não sobra nada.
+ */
+export function slugify(phrase: string): string {
+  return phrase
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, '-')
+    .replace(/^-+|-+$/gu, '')
+    .slice(0, 120)
+    .replace(/-+$/gu, '')
+}
+
+/**
+ * O identificador que ainda não está em uso entre os que a tela conhece.
+ *
+ * É uma cortesia, e NÃO a garantia: a tela vê só os objetivos que carregou, e
+ * quem decide de verdade é o servidor, que recusa o repetido. Tratar isto como
+ * garantia seria repetir a conferência no lugar errado — e o lugar errado é
+ * qualquer lugar onde outra pessoa pode ter criado no meio.
+ * @param base - o identificador derivado da frase.
+ * @param taken - os identificadores já vistos.
+ * @returns o identificador livre.
+ */
+export function uniqueSlug(base: string, taken: readonly string[]): string {
+  if (base === '') return ''
+  const usados = new Set(taken)
+  if (!usados.has(base)) return base
+  for (let suffix = 2; suffix < 1_000; suffix += 1) {
+    const candidate = `${base.slice(0, 115)}-${String(suffix)}`
+    if (!usados.has(candidate)) return candidate
+  }
+  return ''
+}
+
+export interface MissionDraft {
+  readonly missionId: string
+  readonly objective: string
+  readonly maxTotalTokens: number | null
+  readonly criteria: readonly { readonly criterion_id: string; readonly statement: string }[]
+}
+
+/**
+ * Cria um objetivo.
+ *
+ * A validação do servidor NÃO é repetida aqui: a tela impede o envio vazio para
+ * não gastar uma ida de rede à toa, e tudo o mais que for recusado chega como a
+ * frase do servidor e é mostrada.
+ * @param draft - o rascunho montado pela tela.
+ * @param port - a porta de rede, injetável no teste.
+ * @param getCsrf - de onde sai o token de CSRF.
+ * @returns o objetivo criado.
+ */
+export async function createMission(
+  draft: MissionDraft, port: MissionPort = defaultPort, getCsrf: () => Promise<string> = csrfToken,
+): Promise<MissionView> {
+  return write(`${MISSION_API_PREFIX}/missions`, 'POST', {
+    mission_id: draft.missionId,
+    objective: draft.objective,
+    max_total_tokens: draft.maxTotalTokens,
+    criteria: draft.criteria,
+  }, port, getCsrf, copy.createError)
+}

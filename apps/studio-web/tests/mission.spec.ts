@@ -115,3 +115,70 @@ test('no escuro, a tela de objetivos continua legível', async ({ browser }) => 
   expect(results.violations).toEqual([])
   await context.close()
 })
+
+/**
+ * Criar um objetivo é a porta de entrada da tela — e até aqui ela não existia:
+ * a mensagem de lista vazia dizia que "um objetivo é criado junto com o
+ * trabalho que ele reúne", o que era uma forma educada de dizer que a pessoa
+ * não podia criar nenhum.
+ *
+ * O que este teste protege é o gesto INTEIRO, incluindo a recusa: quem escolhe
+ * o identificador técnico é a tela, derivando da frase, e o servidor é quem diz
+ * a última palavra sobre repetido.
+ */
+test('dá para criar um objetivo escrevendo a meta e o que precisa estar comprovado', async ({ context, page }) => {
+  await signedIn(context)
+  await reset(page)
+  await page.goto('/studio/objetivos')
+  await expect(page.getByRole('heading', { name: 'Criar um objetivo' })).toBeVisible()
+
+  // O identificador técnico não é pedido: quem escreve uma meta não deve
+  // precisar inventar uma chave de banco de dados.
+  await expect(page.getByLabel('Qual é a meta')).toBeVisible()
+  await page.getByLabel('Qual é a meta').fill('Aceitar pagamento no site')
+  await page.getByLabel('O que precisa estar comprovado 1').fill('O pagamento de teste cai na conta')
+  await page.getByRole('button', { name: 'Adicionar mais um item' }).click()
+  await page.getByLabel('O que precisa estar comprovado 2').fill('O recibo chega por e-mail')
+  await page.getByLabel('Limite de consumo (opcional)').fill('2000')
+  await page.getByRole('button', { name: 'Criar objetivo' }).click()
+
+  // O objetivo novo aparece na lista, com os dois itens e ainda sem prova.
+  await expect(page.getByText('Aceitar pagamento no site')).toBeVisible()
+  await expect(page.getByText('O pagamento de teste cai na conta')).toBeVisible()
+  await expect(page.getByText('O recibo chega por e-mail')).toBeVisible()
+  // E o objetivo que já existia continua lá: criar não substitui a lista.
+  await expect(page.getByText('Colocar o site no ar para os clientes')).toBeVisible()
+
+  // O formulário se esvazia depois de criar: deixar o texto lá convida a pessoa
+  // a clicar de novo achando que não funcionou.
+  await expect(page.getByLabel('Qual é a meta')).toHaveValue('')
+})
+
+test('a recusa do formulário diz o que falta, e a do servidor chega como veio', async ({ context, page }) => {
+  await signedIn(context)
+  await reset(page)
+  await page.goto('/studio/objetivos')
+  await expect(page.getByRole('heading', { name: 'Criar um objetivo' })).toBeVisible()
+
+  // Meta curta: recusado ANTES da ida de rede, com a frase do problema certo.
+  await page.getByLabel('Qual é a meta').fill('ab')
+  await page.getByRole('button', { name: 'Criar objetivo' }).click()
+  await expect(page.getByRole('alert')).toContainText('pelo menos três letras')
+
+  // Meta boa, mas sem nenhum item: outra frase, e não a mesma.
+  await page.getByLabel('Qual é a meta').fill('Uma meta bem escrita')
+  await page.getByRole('button', { name: 'Criar objetivo' }).click()
+  await expect(page.getByRole('alert')).toContainText('pelo menos um item')
+
+  // Agora a recusa do SERVIDOR. Ela só é alcançável quando o objetivo existe
+  // SEM a tela saber — outra pessoa, ou outra aba, criando a mesma coisa. É por
+  // isso que o desempate do lado da tela é cortesia e não garantia: aqui ele
+  // não tem como ajudar, porque não há nada na lista carregada com que colidir.
+  await page.request.get('http://127.0.0.1:4179/e2e/plant-mission?id=uma-meta-criada-por-outra-pessoa')
+  await page.getByLabel('Qual é a meta').fill('Uma meta criada por outra pessoa')
+  await page.getByLabel('O que precisa estar comprovado 1').fill('Algo que precisa ser comprovado')
+  await page.getByRole('button', { name: 'Criar objetivo' }).click()
+  // A frase é a do SERVIDOR, e não uma genérica da tela: é ela que sabe o que
+  // aconteceu, e trocá-la apagaria justamente isso.
+  await expect(page.getByRole('alert')).toContainText('Já existe um objetivo com esta mesma meta')
+})

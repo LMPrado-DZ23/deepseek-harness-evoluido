@@ -33,3 +33,22 @@
   .mission-checklist li{border-color:#2a3550}
   .mission-problem{color:#ffb4ab}
 }
+
+/* O FORMULÁRIO de criação.
+   Os campos ocupam a largura porque uma meta e um item a comprovar são frases,
+   não palavras: um campo estreito faz a pessoa escrever olhando o final. */
+.mission-form h2{font-size:18px;margin:0 0 6px}
+.mission-form>p{margin:0 0 16px;color:#5c6881;font-size:14px}
+.mission-form label{display:block;margin:14px 0 6px;font-weight:600}
+.mission-form input[type=text]{width:100%;min-height:44px;border:1px solid #bbc5d6;border-radius:8px;padding:10px 14px}
+.mission-form input[type=text]:focus{outline:3px solid #9fc3ff;outline-offset:2px}
+.mission-criteria-fields{border:0;padding:0;margin:18px 0 0}
+.mission-criteria-fields legend{font-weight:600;padding:0}
+.mission-criterion-field{display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap}
+.mission-criterion-field input[type=text]{flex:1 1 240px;min-width:0}
+.mission-form button{margin-top:12px}
+@media (prefers-color-scheme: dark){
+  .mission-form>p{color:#c7d2e4}
+  .mission-form label,.mission-criteria-fields legend{color:#eef2f9}
+  .mission-form input[type=text]{background:#0f172b;color:#eef2f9;border-color:#2a3550}
+}

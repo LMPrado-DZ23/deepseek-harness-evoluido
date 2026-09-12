@@ -44,5 +44,23 @@
     "zero": "Nenhum trabalho ligado a este objetivo ainda.",
     "one": "1 trabalho ligado a este objetivo.",
     "many": "{count} trabalhos ligados a este objetivo."
-  }
+  },
+  "createTitle": "Criar um objetivo",
+  "createHelp": "Escreva a meta e, abaixo, o que precisa estar comprovado antes de você dar por encerrado.",
+  "objectiveLabel": "Qual é a meta",
+  "objectivePlaceholder": "Colocar o site no ar para os clientes",
+  "criteriaLabel": "O que precisa estar comprovado",
+  "criterionPlaceholder": "O formulário de contato envia mensagem de verdade",
+  "addCriterion": "Adicionar mais um item",
+  "removeCriterion": "Tirar este item",
+  "limitLabel": "Limite de consumo (opcional)",
+  "limitHelp": "Em branco significa sem limite combinado.",
+  "submit": "Criar objetivo",
+  "createError": "Não foi possível criar este objetivo.",
+  "objectiveTooShort": "Escreva a meta com pelo menos três letras.",
+  "criterionTooShort": "Cada item precisa de pelo menos três letras.",
+  "noCriteria": "Escreva pelo menos um item a comprovar.",
+  "slugImpossible": "A meta precisa ter letras ou números para virar um objetivo.",
+  "limitNotWhole": "O limite precisa ser um número inteiro maior que zero.",
+  "created": "Objetivo criado."
 }

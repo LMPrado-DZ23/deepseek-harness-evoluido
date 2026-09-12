@@ -466,6 +466,15 @@ const server = createServer((request, response) => {
   // conclusão errada — "o navegador recusou" — sobre um cookie que ele aceitou.
   if (request.url === '/e2e/echo-cookie') return plain(response, 200, request.headers.cookie ?? '')
   if (request.url === '/e2e/reset-mission') { e2eMissions = e2eMissionSeed(); return plain(response, 200, 'ok') }
+  // Planta um objetivo SEM a tela saber — é o que outra pessoa (ou outra aba)
+  // fazendo a mesma coisa produz. A tela só conhece o que carregou, então é
+  // por este caminho que a recusa de repetido do SERVIDOR é alcançável.
+  if (request.url?.startsWith('/e2e/plant-mission?') === true) {
+    const id = new URL(request.url, 'http://127.0.0.1:4179').searchParams.get('id') ?? ''
+    if (id === '') return plain(response, 400, 'sem id')
+    e2eMissions.push({ ...e2eMissionSeed()[0]!, mission_id: id, objective: `plantado ${id}` })
+    return plain(response, 200, 'ok')
+  }
   if (request.url?.startsWith('/api/studio/identity') === true) return void identityHandler(request, response)
   if (request.url?.startsWith('/api/studio/missions') === true) return void missionHandler(request, response)
   if (request.url?.startsWith('/api/studio/apps') === true) return void apiHandler(request, response)

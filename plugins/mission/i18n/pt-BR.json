@@ -19,7 +19,7 @@
     "evidenciaSemProva": "Só um item comprovado pode registrar onde está a prova.",
     "execucaoRepetida": "A mesma execução foi registrada duas vezes na missão.",
     "execucoesDemais": "Este objetivo já reúne {teto} trabalhos, que é o máximo.",
-    "jaExiste": "Já existe uma missão com este identificador.",
+    "jaExiste": "Já existe um objetivo com esta mesma meta. Mude a frase, ou abra o que já existe.",
     "motivoSemBloqueio": "Só um item bloqueado por alguém de fora pode registrar o motivo do bloqueio.",
     "mudouEnquantoGravava": "Este objetivo mudou enquanto a alteração era gravada. Abra de novo e tente outra vez.",
     "naoEncontrada": "A missão não foi encontrada.",
