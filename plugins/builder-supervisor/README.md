@@ -133,7 +133,7 @@ para testes.
 
 O manager é fundação e não é ativado automaticamente, não cria os arquivos de
 autoridade e não concede isolamento de processo. O contrato e as restrições de
-rollout estão em `ADR-034`.
+rollout estão em `ADR-034-builder-multi-runtime-manager`.
 
 O JSON é um contrato fechado, sem chaves extras:
 

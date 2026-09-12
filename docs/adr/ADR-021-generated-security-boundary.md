@@ -1,6 +1,8 @@
 # ADR-021 — Segurança determinística do aplicativo gerado
 
-Status: aceita; implementação incremental na fatia 2.
+- Estado: Aceita
+- Data: 2026-09-03
+- Ressalva: implementacao incremental na fatia 2
 
 Autenticação, autorização, sessão, CSRF, esquema de dados, migrações,
 repositórios, validações e cabeçalhos do aplicativo gerado pertencem ao

@@ -1,6 +1,6 @@
 # ADR-007 — Sessões opacas, revogáveis e ligadas ao dispositivo
 
-- Status: Aceito
+- Estado: Aceita
 - Data: 2026-09-02
 
 ## Decisão

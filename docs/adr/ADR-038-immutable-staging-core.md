@@ -1,6 +1,9 @@
 # ADR-038 — Núcleo de staging imutável e reconciliável
 
-Status: aceito para `STAGING_CORE_BETA` em M89.
+- Estado: Aceita
+- Data: 2026-09-07
+- Ressalva: para `STAGING_CORE_BETA` em M89
+- Numero compartilhado com: ADR-038-agent-restart-reconciliation, ADR-038-assistant-multiuser-boundary
 
 ## Contexto
 

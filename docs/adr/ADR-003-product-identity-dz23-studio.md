@@ -1,7 +1,8 @@
 # ADR-003 — Identidade do produto DZ23 STUDIO
 
-- Status: Aceito pelo proprietário
+- Estado: Aceita
 - Data: 2026-09-02
+- Ressalva: aceita pelo proprietario
 - Decisor: Leandro Marcos Prado
 
 ## Decisão

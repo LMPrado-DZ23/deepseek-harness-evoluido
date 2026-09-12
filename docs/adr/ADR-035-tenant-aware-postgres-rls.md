@@ -1,7 +1,8 @@
 # ADR-035 — Repositório PostgreSQL tenant-aware e RLS
 
-Status: fundação BETA, ainda não ligada aos domínios de produto  
-Data: 2026-09-06
+- Estado: Aceita
+- Data: 2026-09-06
+- Ressalva: fundacao BETA, ainda nao ligada aos dominios de produto
 
 ## Problema
 

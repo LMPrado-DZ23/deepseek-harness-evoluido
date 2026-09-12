@@ -1,6 +1,8 @@
 # ADR-017 — Fluxo Prompt-to-App e linguagem versionada
 
-Status: aceito para a fatia 1.
+- Estado: Aceita
+- Data: 2026-09-03
+- Ressalva: para a fatia 1
 
 O fluxo inicial é Ideia → Perguntas → Plano → Criação → Verificação. Ele usa o
 OmniSeek P40 somente como referência de jornada; nenhum código foi incorporado.

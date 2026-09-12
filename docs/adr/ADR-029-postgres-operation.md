@@ -1,7 +1,8 @@
 # ADR-029 — Operação do Studio sobre PostgreSQL (P31-B)
 
-Status: aceita e implementada na etapa M3, com o operador W3 consolidado em
-`apps/studio-runtime/operator.mjs`.
+- Estado: Aceita
+- Data: 2026-09-03
+- Ressalva: implementada na etapa M3, com o operador W3 consolidado em `apps/studio-runtime/operator.mjs`
 
 ## Decisões
 

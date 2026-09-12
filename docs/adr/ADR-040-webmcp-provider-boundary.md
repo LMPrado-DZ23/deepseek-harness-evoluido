@@ -1,7 +1,9 @@
 # ADR-040 — WebMCP: o Studio como provedor, e a linha que ele não cruza
 
-Data: 08/09/2026. Estado: aceito. Autor: Claude (Opus 5), a pedido de Prado.
-P37 correspondente: `docs/inventory/p37/webmcp.md`.
+- Estado: Aceita
+- Data: 2026-09-08
+- Autor: Claude (Opus 5), a pedido de Prado
+- P37 correspondente: `docs/inventory/p37/webmcp.md`
 
 ## Contexto
 
@@ -20,7 +22,7 @@ enfeite.
 
 O produto inteiro é construído sobre uma ideia oposta: ações sensíveis exigem
 confirmação humana explícita, emitida pelo servidor, com nível, sujeito e
-prazo (ADR-039). Registrar uma ferramenta "aprovar plano" entregaria a um
+prazo (ADR-039-generic-action-approval-authority). Registrar uma ferramenta "aprovar plano" entregaria a um
 agente exatamente a decisão que essa arquitetura existe para reservar à pessoa.
 
 ## Decisão

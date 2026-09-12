@@ -1,6 +1,8 @@
 # ADR-036 — Equipes de agentes governadas
 
-Status: aceito para BETA em M70.
+- Estado: Aceita
+- Data: 2026-09-06
+- Ressalva: para BETA em M70
 
 ## Contexto
 

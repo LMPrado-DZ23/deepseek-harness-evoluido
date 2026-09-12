@@ -1,9 +1,10 @@
 # ADR-044 — O alvo de RLS corrigido para o que é alcançável
 
-Data: 09/09/2026. Estado: aceito, **reversível enquanto ninguém tiver instalado**.
-Autor: Claude (Opus 5), dentro da autonomia delegada por Prado
-("faça tudo até não restar nada que você possa fazer").
-Requisito correspondente: `S-08`.
+- Estado: Aceita
+- Data: 2026-09-09
+- Ressalva: **reversivel enquanto ninguem tiver instalado**
+- Autor: Claude (Opus 5), dentro da autonomia delegada por Prado ("faça tudo até não restar nada que você possa fazer")
+- Requisito correspondente: `S-08`
 
 ## Contexto
 

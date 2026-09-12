@@ -221,7 +221,8 @@
       name: '@dz23-studio/identity'
     - id: dz23-studio-tenancy
       name: '@dz23-studio/tenancy'
-    # Autoridade genérica de confirmação de ações sensíveis (ADR-039). Precisa
+    # Autoridade genérica de confirmação de ações sensíveis
+    # (ADR-039-generic-action-approval-authority). Precisa
     # vir ANTES de quem depende dela: sem este plugin montado, toda operação T3
     # do assistente recusa com NOT_CONFIGURED em vez de se autoconceder.
     - id: dz23-studio-action-approval

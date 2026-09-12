@@ -1,6 +1,9 @@
 # ADR-019 — Template estático v1 como desvio temporário
 
-Status: substituído pelo ADR-022; preservado como fallback explícito de manutenção.
+- Estado: Substituída
+- Data: 2026-09-03
+- Ressalva: preservada como fallback explicito de manutencao
+- Substituida por: ADR-022-nextjs-template-v1
 
 A fatia 1 usa `templates/static-site@1`: Vite, React 18, TypeScript estrito,
 Tailwind, Vitest, Playwright e axe, com versões e lockfile fixados. O objetivo é

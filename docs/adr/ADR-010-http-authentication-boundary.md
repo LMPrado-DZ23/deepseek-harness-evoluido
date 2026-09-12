@@ -1,7 +1,8 @@
 # ADR-010 — Limite HTTP de autenticação e seam ausente no upstream
 
-- Status: Aceito com limitação explícita
+- Estado: Aceita
 - Data: 2026-09-02
+- Ressalva: aceita com limitacao explicita, descrita no corpo
 
 ## Contexto
 

@@ -1,6 +1,6 @@
 # ADR-002 / Errata E2 — OmniRoute externo e opcional
 
-- Status: Aceito
+- Estado: Aceita
 - Data: 2026-09-02
 - Escopo: Harness Studio v1.0 e fase 0.5
 - Evidência: `docs/pocs/POC-03-omniroute-3.8.51.md`

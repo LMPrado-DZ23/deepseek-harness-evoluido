@@ -1,6 +1,8 @@
 # ADR-014 — Rotas de modelos e saúde por rota
 
-Status: aceito na branch de revisão da Fase 3.
+- Estado: Aceita
+- Data: 2026-09-02
+- Ressalva: na branch de revisao da Fase 3
 
 ## Decisão
 

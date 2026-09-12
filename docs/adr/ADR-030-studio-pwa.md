@@ -1,7 +1,9 @@
 # ADR-030 — Interface do Studio como PWA (M4)
 
-Status: aceita e implementada na etapa M4 (Claude), com saída segura integrada
-na M80 (Codex). Numeração: a ADR-028 está reservada à M1 (preview) do Codex.
+- Estado: Aceita
+- Data: 2026-09-04
+- Ressalva: implementada na etapa M4 (Claude), com saida segura integrada na M80 (Codex)
+- Nota de numeracao: a ADR-028 esta reservada a M1 (preview) do Codex
 
 ## Decisões
 

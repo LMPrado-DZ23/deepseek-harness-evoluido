@@ -1,7 +1,8 @@
 # ADR-037 — Sessão governada do Assistente no Harness
 
-Status: aceito para BETA pessoal/dispositivo em M71; perfil servidor fechado
-pela ADR-038.
+- Estado: Aceita
+- Data: 2026-09-06
+- Ressalva: para BETA pessoal/dispositivo em M71; perfil servidor fechado pela ADR-038-assistant-multiuser-boundary
 
 ## Contexto
 

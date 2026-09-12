@@ -1,9 +1,11 @@
 # ADR-041 — A licença Apache-2.0 aplicada, e o que ela ainda não resolve
 
-Data: 09/09/2026. Estado: aceito, **pendente de confirmação jurídica do Prado**.
-Autor: Claude (Opus 5), a pedido de Prado ("prepare esse repositório para ser
-open source, deixe tudo pronto").
-Requisito correspondente: `C-05`. Estudo prévio: `docs/plans/C-05-decisao-de-licenca.md`.
+- Estado: Aceita
+- Data: 2026-09-09
+- Ressalva: **pendente de confirmacao juridica do Prado**
+- Autor: Claude (Opus 5), a pedido de Prado ("prepare esse repositório para ser open source, deixe tudo pronto")
+- Requisito correspondente: `C-05`
+- Estudo prévio: `docs/plans/C-05-decisao-de-licenca.md`
 
 ## Contexto
 

@@ -1,6 +1,8 @@
 # ADR-027 — Categoria painel CRUD
 
-Status: aceita e implementada como BETA no bloco 6 da fatia 2.
+- Estado: Aceita
+- Data: 2026-09-03
+- Ressalva: implementada como BETA no bloco 6 da fatia 2
 
 O identificador físico é `crud-panel`. Na interface, a pessoa escolhe “um
 painel para minha equipe criar, editar e excluir cadastros”. O painel sempre

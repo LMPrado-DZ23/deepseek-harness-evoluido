@@ -1,9 +1,10 @@
 # ADR-046 — As cópias entraram: a ADR-045 foi revertida por Prado
 
-Data: 11/09/2026. Estado: aceito. **Substitui a decisão da ADR-045**; o
-inventário e o achado dela continuam válidos e são a razão das condições abaixo.
-Autor: Claude (Opus 5), executando decisão de Prado.
-Requisitos correspondentes: `REF-ecc`, `REF-mattpocock-skills`, `REF-spec-kit`.
+- Estado: Aceita
+- Data: 2026-09-11
+- Substitui: ADR-045-tres-referencias-externas-ferramenta-nao-produto
+- Autor: Claude (Opus 5), executando decisão de Prado
+- Requisitos correspondentes: `REF-ecc`, `REF-mattpocock-skills`, `REF-spec-kit`
 
 ## O que aconteceu
 

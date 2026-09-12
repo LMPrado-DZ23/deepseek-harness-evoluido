@@ -1,7 +1,8 @@
 # ADR-012 — Caddy como borda única autenticada
 
-- Status: Aceito e provado em ambiente efêmero
+- Estado: Aceita
 - Data: 2026-09-02
+- Ressalva: provada em ambiente efemero
 
 ## Contexto
 
@@ -44,7 +45,8 @@ esteja em loopback atrás do sidecar.
 Depois do login DZ23, o navegador segue para `/studio/`. No perfil servidor,
 `/api/studio/identity/harness/session` responde 403 e nunca emite o cookie nativo
 do Harness. A troca nativa permanece disponível apenas na instalação pessoal em
-loopback, com uma única pessoa cadastrada. A razão e a evidência estão na ADR-038.
+loopback, com uma única pessoa cadastrada. A razão e a evidência estão na
+ADR-038-assistant-multiuser-boundary.
 
 O primeiro proprietário nunca é escolhido por corrida pública. Em instalação de
 servidor, `DZ23_BOOTSTRAP_OWNER_EMAIL` é obrigatório e o enrollment usa o modo

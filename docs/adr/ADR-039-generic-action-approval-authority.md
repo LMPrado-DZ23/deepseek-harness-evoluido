@@ -1,7 +1,9 @@
 # ADR-039 — Autoridade genérica de confirmação de ações sensíveis
 
-Data: 07/09/2026. Estado: aceito. Autor: Claude (Opus 5), a partir do contrato
-M90-A em `outputs/M90_HANDOFF_CLAUDE_20260907.md`.
+- Estado: Aceita
+- Data: 2026-09-07
+- Numero compartilhado com: ADR-039-tenant-aware-assistant-transport
+- Autor: Claude (Opus 5), a partir do contrato M90-A em `outputs/M90_HANDOFF_CLAUDE_20260907.md`
 
 ## Contexto
 

@@ -1,7 +1,8 @@
 # ADR-004 — Tiers e aplicação da política no executor
 
-- Status: Aceito e implementado na primeira fatia
+- Estado: Aceita
 - Data: 2026-09-02
+- Ressalva: implementada na primeira fatia
 - Escopo: DZ23 STUDIO P30
 
 ## Decisão

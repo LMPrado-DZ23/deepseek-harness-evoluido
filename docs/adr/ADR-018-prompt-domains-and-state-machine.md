@@ -1,6 +1,8 @@
 # ADR-018 — Domínios tenant-aware e máquina de estados
 
-Status: aceito para a fatia 1.
+- Estado: Aceita
+- Data: 2026-09-03
+- Ressalva: para a fatia 1
 
 Os sete domínios físicos são `studio_projects`, `studio_app_specs`,
 `studio_intake_turns`, `studio_plans`, `studio_runs`, `studio_evidence` e

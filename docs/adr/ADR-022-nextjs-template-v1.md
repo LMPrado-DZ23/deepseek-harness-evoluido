@@ -1,6 +1,9 @@
 # ADR-022 — Template Next.js v1 fixado e offline
 
-Status: aceito na fatia 2.
+- Estado: Aceita
+- Data: 2026-09-03
+- Ressalva: na fatia 2
+- Substitui: ADR-019-static-template-v1
 
 O template principal do Prompt-to-App é `templates/nextjs-app@1`, com Next.js
 16.3.4 App Router, React 19.2.8, TypeScript estrito, Tailwind CSS 4.3.3, Zod,

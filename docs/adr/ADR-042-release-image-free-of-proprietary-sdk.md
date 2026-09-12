@@ -1,9 +1,10 @@
 # ADR-042 — A imagem distribuível deixou de arrastar SDK proprietário
 
-Data: 09/09/2026. Estado: aceito.
-Autor: Claude (Opus 5), dentro da autonomia delegada por Prado
-("quero atacar os dois, você decide a ordem").
-Requisito correspondente: `C-05`. Antecede: [ADR-041](./ADR-041-apache-2-license-applied.md).
+- Estado: Aceita
+- Data: 2026-09-09
+- Autor: Claude (Opus 5), dentro da autonomia delegada por Prado ("quero atacar os dois, você decide a ordem")
+- Requisito correspondente: `C-05`
+- Antecede: [ADR-041](./ADR-041-apache-2-license-applied.md)
 
 ## Contexto
 

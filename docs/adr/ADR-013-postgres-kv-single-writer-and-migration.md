@@ -1,7 +1,8 @@
 # ADR-013 — PostgreSQL para domínios Studio, escritor único e migração verificável
 
-Status: aceito para P31-A BETA
-Data: 2026-09-02
+- Estado: Aceita
+- Data: 2026-09-02
+- Ressalva: para P31-A BETA
 
 ## Decisão
 

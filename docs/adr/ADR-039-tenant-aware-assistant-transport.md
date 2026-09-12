@@ -1,7 +1,9 @@
 # ADR-039 — Transporte próprio e tenant-aware do Assistente
 
-Status: aceito para implementação incremental; M74-A conclui somente o serviço
-interno, sem rota HTTP, SSE ou interface.
+- Estado: Aceita
+- Data: 2026-09-06
+- Ressalva: para implementacao incremental; M74-A conclui somente o servico interno, sem rota HTTP, SSE ou interface
+- Numero compartilhado com: ADR-039-generic-action-approval-authority
 
 ## Contexto
 

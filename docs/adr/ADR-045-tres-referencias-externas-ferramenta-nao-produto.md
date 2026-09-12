@@ -1,15 +1,21 @@
 # ADR-045 — ECC, mattpocock/skills e Spec Kit entram como ferramenta, não como produto
 
-> **SUPERADA em 11/09/2026 pela [ADR-046](ADR-046-as-copias-entraram-decisao-do-prado.md).**
+- Estado: Substituída
+- Data: 2026-09-11
+- Ressalva: o INVENTARIO e o ACHADO desta ADR continuam validos e sao a razao de `vendor/ecc/assets/` nao existir
+- Substituida por: ADR-046-as-copias-entraram-decisao-do-prado
+- Autor: Claude (Opus 5), dentro da autonomia delegada por Prado
+- Requisitos correspondentes: `REF-ecc`, `REF-mattpocock-skills`, `REF-spec-kit`
+
+> **SUPERADA em 11/09/2026 pela
+> [ADR-046](ADR-046-as-copias-entraram-decisao-do-prado.md).**
 > A decisão de NÃO copiar registrada abaixo era minha, não do Prado — ele tinha
 > pedido para colocar, e eu entreguei a análise no lugar do pedido. As três
 > cópias estão em `vendor/`. O INVENTÁRIO e o ACHADO desta ADR continuam
 > válidos e são a razão de `vendor/ecc/assets/` não existir.
-
-Data: 11/09/2026. Estado: aceito, **reversível**: nada foi copiado, então
-desfazer é apagar três documentos.
-Autor: Claude (Opus 5), dentro da autonomia delegada por Prado.
-Requisitos correspondentes: `REF-ecc`, `REF-mattpocock-skills`, `REF-spec-kit`.
+>
+> A decisão original, enquanto valeu, era **reversível**: nada tinha sido
+> copiado, e desfazê-la era apagar três documentos.
 
 ## Contexto
 

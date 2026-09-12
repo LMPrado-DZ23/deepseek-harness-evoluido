@@ -1,6 +1,8 @@
 # ADR-026 — Categoria de cadastro e lista
 
-Status: aceita e implementada no bloco 5 da fatia 2.
+- Estado: Aceita
+- Data: 2026-09-03
+- Ressalva: implementada no bloco 5 da fatia 2
 
 O identificador físico é `form-database` e aparece na interface pt-BR como
 “cadastrar informações e vê-las em uma lista”. A pessoa não precisa conhecer

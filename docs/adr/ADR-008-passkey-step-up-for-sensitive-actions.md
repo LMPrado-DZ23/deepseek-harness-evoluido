@@ -1,6 +1,6 @@
 # ADR-008 — Step-up com passkey para ações sensíveis
 
-- Status: Aceito
+- Estado: Aceita
 - Data: 2026-09-02
 
 ## Decisão

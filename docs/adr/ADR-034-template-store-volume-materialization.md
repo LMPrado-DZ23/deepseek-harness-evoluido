@@ -1,10 +1,9 @@
 # ADR-034 — Materialização verificável do template store em volume Docker
 
-## Status
-
-Aceita para a fundação M6.3. Docker real continua `NOT_EXECUTED` neste
-checkpoint; os testes usam uma implementação adversarial da porta Docker e
-arquivos reais no `/tmp` ext4 do WSL2.
+- Estado: Aceita
+- Data: 2026-09-05
+- Ressalva: para a fundacao M6.3. Docker real continua `NOT_EXECUTED` neste checkpoint; os testes usam uma implementacao adversarial da porta Docker e arquivos reais no `/tmp` ext4 do WSL2
+- Numero compartilhado com: ADR-034-builder-multi-runtime-manager
 
 ## Contexto
 

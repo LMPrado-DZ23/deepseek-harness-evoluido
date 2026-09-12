@@ -1,6 +1,6 @@
 # ADR-005 / Errata E3 — Estados verdadeiros de capacidade
 
-- Status: Aceito
+- Estado: Aceita
 - Data: 2026-09-02
 
 ## Decisão

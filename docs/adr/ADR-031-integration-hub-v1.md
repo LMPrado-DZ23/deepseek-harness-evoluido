@@ -1,7 +1,9 @@
 # ADR-031 — Integration Hub v1: registro D16, SMTP por referência e pacote do protótipo (M5)
 
-Status: aceita e implementada na etapa M5 (Claude). Numeração: a ADR-028 está
-reservada à M1 (preview) do Codex.
+- Estado: Aceita
+- Data: 2026-09-04
+- Ressalva: implementada na etapa M5 (Claude)
+- Nota de numeracao: a ADR-028 esta reservada a M1 (preview) do Codex
 
 ## Contexto
 

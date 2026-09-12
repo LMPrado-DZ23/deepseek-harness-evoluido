@@ -1,6 +1,6 @@
 # ADR-016 / Errata E4 — usabilidade depois do produto completo
 
-- Status: aceito
+- Estado: Aceita
 - Data: 2026-09-03
 - Decisor: Prado
 

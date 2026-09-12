@@ -1,7 +1,9 @@
 # ADR-034 — Manager multi-runtime do Builder Supervisor
 
-**Status:** Aceito para a fundação M6.3
-**Data:** 2026-09-05
+- Estado: Aceita
+- Data: 2026-09-05
+- Ressalva: para a fundacao M6.3
+- Numero compartilhado com: ADR-034-template-store-volume-materialization
 
 ## Contexto
 

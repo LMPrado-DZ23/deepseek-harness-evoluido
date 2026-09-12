@@ -1,6 +1,9 @@
 # ADR-038 — Fronteira multiusuário do Assistente
 
-Status: aceito como bloqueio fail-closed em M73.
+- Estado: Aceita
+- Data: 2026-09-06
+- Ressalva: como bloqueio fail-closed em M73
+- Numero compartilhado com: ADR-038-agent-restart-reconciliation, ADR-038-immutable-staging-core
 
 ## Problema
 

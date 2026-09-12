@@ -1,6 +1,8 @@
 # ADR-020 — Aprovações, tentativas e isolamento do pipeline
 
-Status: aceito para a fatia 1.
+- Estado: Aceita
+- Data: 2026-09-03
+- Ressalva: para a fatia 1
 
 Aprovar o plano e iniciar a geração offline são T1. Preparar dependências com
 rede é T2. Segredos, rede externa e qualquer deploy são T3 com identidade forte

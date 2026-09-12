@@ -1,7 +1,8 @@
 # ADR-009 — Produto open source sem cobrança
 
-- Status: Decisão de produto aceita; licença jurídica exata pendente
+- Estado: Aceita
 - Data: 2026-09-02
+- Ressalva: decisao de produto aceita; licenca juridica exata pendente
 - Decisor: proprietário do DZ23 STUDIO
 
 ## Decisão

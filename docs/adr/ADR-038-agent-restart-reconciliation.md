@@ -1,6 +1,9 @@
 # ADR-038 — Reconciliação de agentes após reinício
 
-Status: aceito para BETA single-process em M75.
+- Estado: Aceita
+- Data: 2026-09-06
+- Ressalva: para BETA single-process em M75
+- Numero compartilhado com: ADR-038-assistant-multiuser-boundary, ADR-038-immutable-staging-core
 
 ## Contexto
 

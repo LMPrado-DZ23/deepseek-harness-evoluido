@@ -1,6 +1,8 @@
 # ADR-023 — Camada de dados SQLite gerada pelo Studio
 
-Status: aceita e implementada no bloco 4 da fatia 2.
+- Estado: Aceita
+- Data: 2026-09-03
+- Ressalva: implementada no bloco 4 da fatia 2
 
 Aplicativos gerados que possuem entidades de banco usam `node:sqlite` do Node
 22, sem ORM e sem módulo nativo adicional. O arquivo fica em `DATA_DIR` (ou

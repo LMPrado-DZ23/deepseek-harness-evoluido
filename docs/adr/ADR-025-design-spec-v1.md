@@ -1,6 +1,8 @@
 # ADR-025 — DesignSpec v1 e logotipos sanitizados
 
-Status: aceito e implementado como BETA na fatia 2.
+- Estado: Aceita
+- Data: 2026-09-03
+- Ressalva: implementada como BETA na fatia 2
 
 Cada projeto pode ter versões imutáveis de um `DesignSpec` no domínio físico
 `studio_design_specs`. O registro recebe `org_id`, `tenant_id`, `project_id`,

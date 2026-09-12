@@ -1,6 +1,8 @@
 # ADR-024 — Acesso sem senha no aplicativo gerado
 
-Status: aceito e implementado como BETA no bloco 6 da fatia 2.
+- Estado: Aceita
+- Data: 2026-09-03
+- Ressalva: implementada como BETA no bloco 6 da fatia 2
 
 Painéis CRUD e a consulta de qualquer lista de cadastros sempre exigem acesso.
 Formulários comuns continuam aceitando envio anônimo; formulários com

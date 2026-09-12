@@ -1,7 +1,8 @@
 # ADR-033 — Escopo físico do builder e replay RPC persistente
 
-**Status:** Aceito para a fundação M6.2
-**Data:** 2026-09-05
+- Estado: Aceita
+- Data: 2026-09-05
+- Ressalva: para a fundacao M6.2
 
 ## Contexto
 

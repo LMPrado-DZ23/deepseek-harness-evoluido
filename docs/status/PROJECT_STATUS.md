@@ -36,12 +36,12 @@ Todos reproduzíveis pelo comando ao lado.
 | suíte studio-web | 394 testes | `cd apps/studio-web && npx vitest run` |
 | e2e navegador | 72 testes, Chromium real | `cd apps/studio-web && npx playwright test` |
 | PostgreSQL real | 63 testes | `pnpm test:postgres` |
-| portões | **18/18 PASS** | ver abaixo |
+| portões | **19/19 PASS** | ver abaixo |
 
 Portões, todos `EXIT=0` em 12/09/2026: `domain-scopes`, `domain-routes`,
 `assistant-tools`, `team-role-tools`, `rls-coverage` (7/26), `upstream-pin`,
 `portability`, `i18n` (25 catálogos, 575 chaves), `comprehension`,
-`tracked-lib`, `image-lock`, `requirements-ledger` (197 requisitos),
+`tracked-lib`, `image-lock`, `decision-record` (51 decisões), `requirements-ledger` (198 requisitos),
 `secrets` (5.735 arquivos), `no-caveman`, `p37` (12/12),
 `vendored-references` (3/3), `licenses` (848 pacotes), `licenses:release`.
 

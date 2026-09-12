@@ -1,9 +1,9 @@
 # ADR-043 — A construção passou a ser acompanhada ao vivo
 
-Data: 09/09/2026. Estado: aceito.
-Autor: Claude (Opus 5), dentro da autonomia delegada por Prado
-("quero atacar os dois, você decide a ordem").
-Requisitos correspondentes: `E-06`, `U-01`.
+- Estado: Aceita
+- Data: 2026-09-09
+- Autor: Claude (Opus 5), dentro da autonomia delegada por Prado ("quero atacar os dois, você decide a ordem")
+- Requisitos correspondentes: `E-06`, `U-01`
 
 ## Contexto
 

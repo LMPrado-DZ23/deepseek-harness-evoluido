@@ -1,9 +1,8 @@
 # ADR-032 — Prompt-to-App fatia 3
 
-## Estado
-
-Aceito para checkpoint técnico BETA; não validado com pessoas leigas e sem
-autorização de publicação.
+- Estado: Aceita
+- Data: 2026-09-04
+- Ressalva: para checkpoint tecnico BETA; nao validada com pessoas leigas e sem autorizacao de publicacao
 
 ## Decisão
 

@@ -11,8 +11,8 @@ import type { StagingActor, StagingRepository } from './service.js'
  * lease; comparar o release ativo antes de um rollback; finalizar o recibo e
  * trocar o ponteiro ativo na mesma transação; colocar o destino em quarentena
  * sem substituir o dono de uma geração mais nova). Até aqui só existia a
- * implementação em memória das provas — e a ADR-038 registra que era isso que
- * faltava antes de qualquer montagem.
+ * implementação em memória das provas — e a ADR-038-immutable-staging-core
+ * registra que era isso que faltava antes de qualquer montagem.
  *
  * ## Onde mora o estado do DESTINO
  *

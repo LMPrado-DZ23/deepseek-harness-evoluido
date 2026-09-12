@@ -1,7 +1,8 @@
 # ADR-028 — Preview local seguro e temporário
 
-Status: aceito e implementado em M1/P34; capacidade local classificada como
-`BETA` até operação prolongada e revisão independente do checkpoint.
+- Estado: Aceita
+- Data: 2026-09-03
+- Ressalva: implementada em M1/P34; capacidade local classificada como `BETA` ate operacao prolongada e revisao independente do checkpoint
 
 ## Contexto
 

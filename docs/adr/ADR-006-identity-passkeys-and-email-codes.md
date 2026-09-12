@@ -1,6 +1,6 @@
 # ADR-006 — Identidade fina com passkeys e código temporário
 
-- Status: Aceito
+- Estado: Aceita
 - Data: 2026-09-02
 - Escopo: P29-A do DZ23 STUDIO
 

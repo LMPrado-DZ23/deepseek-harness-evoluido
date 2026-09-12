@@ -1,6 +1,6 @@
 # ADR-011 — Organizações, espaços de trabalho, papéis e contratos de rota
 
-- Status: Aceito
+- Estado: Aceita
 - Data: 2026-09-02
 
 ## Contexto

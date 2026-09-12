@@ -1,6 +1,6 @@
 # ADR-001 — Identificadores físicos e nomes lógicos de domínios
 
-- Status: Aceito
+- Estado: Aceita
 - Data: 2026-09-01
 - Escopo: todos os domínios persistentes e serviços que os referenciam no Harness Studio
 
