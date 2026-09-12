@@ -16,6 +16,8 @@
     "third_party/deepseek-harness/native/landlock-run/packages/*"
   ],
   "scripts": {
+    "studio": "node scripts/studio-start.mjs",
+    "studio:doctor": "node scripts/studio-start.mjs --conferir",
     "build:edge": "docker build -f deploy/caddy/Dockerfile -t dz23-studio-caddy:p29c .",
     "build:studio-image": "node scripts/build-studio-image.mjs",
     "gate:domain-scopes": "tsx scripts/check-domain-scopes.ts",

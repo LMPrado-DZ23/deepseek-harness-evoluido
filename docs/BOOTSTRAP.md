@@ -2,6 +2,8 @@
 
 Este é o procedimento de instalação e verificação de uma árvore limpa. Execute na raiz do repositório. Ele não inicia serviços, não cria contêineres e não faz deploy.
 
+> Para **abrir o produto**, e não para provar a árvore, o caminho curto é [`COMECAR.md`](./COMECAR.md): `pnpm studio:doctor` confere estes mesmos pré-requisitos e devolve um comando por vez, e `pnpm studio` dá a partida.
+
 ## Pré-requisitos fixados
 
 - Git com suporte a submódulos e symlinks;

@@ -198,6 +198,11 @@ A lista completa, com bloqueio e próximo passo de cada um, está no
 > instala a interface como aplicativo (PWA), que é o mais perto de um ícone na
 > área de trabalho.
 
+> **Com pressa?** [`docs/COMECAR.md`](./docs/COMECAR.md) é o caminho curto: do
+> zero ao primeiro aplicativo, em uma página. Se algo faltar, `pnpm studio:doctor`
+> diz em português o que é e o comando exato que resolve — um de cada vez, e
+> nunca um *stack trace*.
+
 ### Para desenvolver
 
 Requisitos: Node.js `22.23.1`, pnpm `11.7.0`, Git com submódulos e *symlinks*.
@@ -206,6 +211,11 @@ No Windows, WSL2 com o clone em `ext4` (`~/...`, nunca `/mnt/c`).
 ```bash
 git clone --recurse-submodules https://github.com/LMPrado-DZ23/deepseek-harness-evoluido
 cd deepseek-harness-evoluido
+```
+
+```bash
+pnpm studio:doctor   # confere o ambiente e diz o que falta, um passo por vez
+pnpm studio          # sobe o Studio; o endereço aparece no terminal
 ```
 
 O procedimento completo e a ordem obrigatória estão em

@@ -11,7 +11,7 @@
 - `branch`: `integ` (**não é `main`** — confirmar com `git branch --show-current`)
 - `head`: ver `git log --oneline -1`; o último estado registrado aqui é `91c6aa0` + o trabalho desta iteração (T-27: revisão adversarial do portão de prévia)
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c` (zero diff, `gate:upstream-pin` prova)
-- `atualizado_em`: 2026-09-11
+- `atualizado_em`: 2026-09-12
 
 ## O que este repositório É hoje
 
@@ -45,6 +45,16 @@ Portões, todos `EXIT=0` em 12/09/2026: `domain-scopes`, `domain-routes`,
 `secrets` (5.735 arquivos), `no-caveman`, `p37` (12/12),
 `vendored-references` (3/3), `licenses` (848 pacotes), `licenses:release`.
 
+## Como abrir o produto
+
+`pnpm studio:doctor` confere o ambiente e devolve **um** comando por vez.
+`pnpm studio` dá a partida. A página de uma folha é `docs/COMECAR.md`.
+
+Isto não existia até a OS-77, e a ausência era o defeito mais grave da missão:
+quarenta scripts `prove:*`, nenhum `start`, e a primeira execução respondendo
+com oito linhas de pilha do Node — exatamente o que o README diz que este
+produto existe para não fazer.
+
 ## Trabalho desta iteração
 
 1. Remoção de `hasApprovedAncestor` — autorização por linhagem SEM conferir o
@@ -61,6 +71,12 @@ Portões, todos `EXIT=0` em 12/09/2026: `domain-scopes`, `domain-routes`,
 5. Os dois `catch {}` do gerador de e-mail — que viajavam para dentro de todo
    aplicativo gerado com formulário — passaram a distinguir arquivo ausente de
    arquivo corrompido.
+
+6. **OS-77 — o produto ganhou porta de entrada.** `pnpm studio` e
+   `pnpm studio:doctor`, o doctor puro em `scripts/studio-doctor.mjs`, o
+   `.nvmrc` que faltava e `docs/COMECAR.md`. 31 falsificações, todas pegas. A
+   partida completa **não** é provada daqui: este contêiner está ele mesmo no
+   estado "pacote de arranque não encontrado".
 
 ## Próxima ação
 
