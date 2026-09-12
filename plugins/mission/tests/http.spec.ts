@@ -5,19 +5,25 @@ import { CSRF_COOKIE, IdentityError, SESSION_COOKIE, type SessionRecord, type St
 import type { StudioTenancyService } from '@dz23-studio/tenancy'
 import { createMissionHttpHandler, MISSION_ROUTE_CONTRACTS } from '../src/http.ts'
 import { missionKey, type MissionRecord, type MissionRunUsage } from '../src/model.ts'
-import { StudioMissionService, type MissionRepository } from '../src/service.ts'
+import { StudioMissionService, type MissionRepository, type MissionScope } from '../src/service.ts'
 
 const session = { session_id: 's1', user_id: 'u1', org_id: 'org-a', tenant_id: 'ws-a' } as SessionRecord
 
 const servers: ReturnType<typeof createServer>[] = []
 afterEach(async () => Promise.all(servers.splice(0).map(server => new Promise<void>(resolve => server.close(() => resolve())))))
 
-/** Chaveado como a produção: escopo mais identificador. */
+/** Chaveado como a produção: escopo mais identificador, e com a revisão. */
 class MemoryRepository implements MissionRepository {
   readonly rows = new Map<string, MissionRecord>()
-  missions = () => [...this.rows.values()]
-  putMission = async (record: MissionRecord) => {
-    this.rows.set(missionKey(record.org_id, record.tenant_id, record.mission_id), record)
+  missions = async (scope: MissionScope) => [...this.rows.values()]
+    .filter(row => row.org_id === scope.orgId && row.tenant_id === scope.tenantId)
+
+  putMission = async (record: MissionRecord, expected: 'new' | number) => {
+    const key = missionKey(record.org_id, record.tenant_id, record.mission_id)
+    const current = this.rows.get(key)
+    if (expected === 'new' ? current !== undefined : current?.revision !== expected) return false
+    this.rows.set(key, record)
+    return true
   }
 }
 

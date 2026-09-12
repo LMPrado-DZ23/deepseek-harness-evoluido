@@ -329,14 +329,30 @@ function e2eMissionSeed(): MissionRecord[] { return [{
     { criterion_id: 'dominio', statement: 'O endereço do site aponta para a hospedagem', state: 'BLOCKED_EXTERNAL', evidence: null, blocked_reason: 'a empresa que registra o endereço' },
   ],
   created_at: '2026-09-08T12:00:00.000Z', updated_at: '2026-09-08T12:00:00.000Z',
-  candidate_at: null, completed_at: null,
+  candidate_at: null, completed_at: null, revision: 0,
 }] }
 let e2eMissions = e2eMissionSeed()
+/**
+ * O armazenamento da prova de ponta a ponta, com a MESMA condicao da producao.
+ *
+ * Gravar sempre, devolvendo `undefined`, faria o serviço ler uma recusa em toda
+ * gravação — e foi assim que o encerramento parou de responder aqui sem que
+ * nenhum teste de unidade reclamasse.
+ */
 const missionRepository: MissionRepository = {
-  missions: () => e2eMissions,
-  putMission: async record => {
-    const index = e2eMissions.findIndex(row => row.mission_id === record.mission_id)
-    if (index < 0) e2eMissions.push(record); else e2eMissions[index] = record
+  missions: async scope => e2eMissions
+    .filter(row => row.org_id === scope.orgId && row.tenant_id === scope.tenantId),
+  putMission: async (record, expected) => {
+    const index = e2eMissions.findIndex(row => row.mission_id === record.mission_id
+      && row.org_id === record.org_id && row.tenant_id === record.tenant_id)
+    if (expected === 'new') {
+      if (index >= 0) return false
+      e2eMissions.push(record)
+      return true
+    }
+    if (index < 0 || e2eMissions[index]!.revision !== expected) return false
+    e2eMissions[index] = record
+    return true
   },
 }
 const missionHandler = createMissionHttpHandler({

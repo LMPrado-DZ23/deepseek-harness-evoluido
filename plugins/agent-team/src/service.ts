@@ -88,7 +88,7 @@ export interface MissionBudgetPort {
    * @param missionId - a missão.
    * @returns o veredito.
    */
-  verdictFor(scope: MissionScope, missionId: string): MissionBudgetVerdict
+  verdictFor(scope: MissionScope, missionId: string): Promise<MissionBudgetVerdict>
   /**
    * Registra na missão uma execução que acabou de começar.
    * @param scope - a organização e o inquilino da equipe.
@@ -369,7 +369,7 @@ export class StudioAgentTeamService {
       // E o teto da MISSAO, tambem a cada tarefa e pela mesma razao: tres
       // equipes dentro do proprio teto estouram o da missao sem que nenhuma
       // delas esteja errada.
-      const missionDiagnostic = this.#missionRefusal(team)
+      const missionDiagnostic = await this.#missionRefusal(team)
       if (missionDiagnostic !== undefined) {
         await this.dependencies.repository.putTask({
           ...task, status: 'BUDGET_EXCEEDED', diagnostic: missionDiagnostic, updated_at: this.#now(),
@@ -433,17 +433,21 @@ export class StudioAgentTeamService {
 
   /**
    * A frase que impede esta equipe de gastar mais pela missão, se houver.
+   *
+   * Assíncrona porque o teto mora no armazenamento, e ler o armazenamento é
+   * `await` — inclusive quando ele é um banco com isolamento por linha, que é
+   * onde a missão passou a morar.
    * @param team - a equipe.
    * @returns a frase, ou `undefined` quando pode seguir.
    */
-  #missionRefusal(team: AgentTeamRecord): string | undefined {
+  async #missionRefusal(team: AgentTeamRecord): Promise<string | undefined> {
     const missionId = team.mission_id
     if (missionId === null || missionId === undefined) return undefined
     const port = this.#missions
     // Equipe que declara missao numa instalacao SEM motor de missao nao corre:
     // ela foi aprovada sob um teto, e aqui nao ha como conferir esse teto.
     if (port === undefined) return t('errors.missionUnavailable')
-    const verdict = port.verdictFor({ orgId: team.org_id, tenantId: team.tenant_id }, missionId)
+    const verdict = await port.verdictFor({ orgId: team.org_id, tenantId: team.tenant_id }, missionId)
     switch (verdict.kind) {
       case 'NO_LIMIT':
       case 'WITHIN': return undefined

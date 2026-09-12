@@ -113,9 +113,34 @@ export function completionDiagnostic(verdict: MissionCompletion): string {
   }
 }
 
+/** Organização e inquilino, do jeito que o armazenamento por inquilino recebe. */
+export interface MissionScope {
+  readonly orgId: string
+  readonly tenantId: string
+}
+
 export interface MissionRepository {
-  missions(): readonly MissionRecord[]
-  putMission(record: MissionRecord): Promise<void>
+  /**
+   * As missões DESTE escopo.
+   *
+   * O escopo entra na consulta, e não num filtro depois: sob armazenamento com
+   * isolamento por linha é o banco que separa os inquilinos, e não um `if`
+   * deste processo.
+   * @param scope - organização e inquilino.
+   * @returns as missões.
+   */
+  missions(scope: MissionScope): Promise<readonly MissionRecord[]>
+  /**
+   * Grava, SE o registro ainda estiver na revisão que quem escreve leu.
+   *
+   * `'new'` exige que ele não exista. Um número exige que a revisão atual seja
+   * exatamente aquela. Falhar devolve `false` — e não lança —, porque perder a
+   * corrida é um desfecho normal e quem chamou decide o que dizer.
+   * @param record - o registro a gravar, já com a revisão NOVA.
+   * @param expected - `'new'`, ou a revisão lida.
+   * @returns se gravou.
+   */
+  putMission(record: MissionRecord, expected: 'new' | number): Promise<boolean>
 }
 
 export interface MissionActor {
@@ -185,13 +210,16 @@ export class StudioMissionService {
    * @param missionId - o identificador.
    * @returns a missão.
    */
-  mission(actor: MissionActor, missionId: string): MissionRecord {
+  async mission(actor: MissionActor, missionId: string): Promise<MissionRecord> {
     this.#authorize(actor, 'project.read')
     return this.#inScope({ orgId: actor.orgId, tenantId: actor.tenantId }, missionId)
   }
 
-  #inScope(scope: { readonly orgId: string; readonly tenantId: string }, missionId: string): MissionRecord {
-    const found = this.#repository.missions().find(record => record.mission_id === missionId
+  async #inScope(scope: MissionScope, missionId: string): Promise<MissionRecord> {
+    // A conferência de escopo continua aqui MESMO com o banco separando por
+    // linha: se um dia uma linha for gravada com o escopo errado no corpo, ela
+    // some da leitura em vez de aparecer como se fosse de quem perguntou.
+    const found = (await this.#repository.missions(scope)).find(record => record.mission_id === missionId
       && record.org_id === scope.orgId && record.tenant_id === scope.tenantId)
     if (found === undefined) throw new MissionError('NOT_FOUND', t('errors.naoEncontrada'))
     return found
@@ -227,17 +255,16 @@ export class StudioMissionService {
         criterion_id: item.criterion_id, statement: item.statement,
         state: 'UNPROVEN', evidence: null, blocked_reason: null,
       })),
-      created_at: now, updated_at: now, candidate_at: null, completed_at: null,
+      created_at: now, updated_at: now, candidate_at: null, completed_at: null, revision: 0,
     })
     if (!parsed.success) throw new MissionError('INVALID', issueMessage(parsed.error))
     return this.#serialize(actor, input.missionId, async () => {
-      // A conferencia de repetido e a gravacao andam juntas: sem a fila, duas
-      // criacoes concorrentes do mesmo nome passavam as duas pela conferencia.
-      if (this.#repository.missions().some(record => record.mission_id === input.missionId
-        && record.org_id === actor.orgId && record.tenant_id === actor.tenantId)) {
+      // A conferência de repetido é do ARMAZENAMENTO, e não deste processo: a
+      // fila serializa aqui dentro, e a condição `'new'` fecha o caso de outra
+      // réplica criando o mesmo nome ao mesmo tempo.
+      if (!await this.#repository.putMission(parsed.data, 'new')) {
         throw new MissionError('INVALID', t('errors.jaExiste'))
       }
-      await this.#repository.putMission(parsed.data)
       return parsed.data
     })
   }
@@ -288,7 +315,7 @@ export class StudioMissionService {
     scope: { readonly orgId: string; readonly tenantId: string },
     missionId: string, runId: string, runs: readonly MissionRunUsage[],
   ): Promise<MissionRecord> {
-    const mission = this.#inScope(scope, missionId)
+    const mission = await this.#inScope(scope, missionId)
     if (mission.status !== 'RUNNING') throw new MissionError('INVALID_STATE', t('errors.estadoNaoAceitaTrabalho'))
     // O teto de execuções é conferido AQUI, com frase de catálogo. Deixar o
     // esquema recusar depois produzia a frase crua do Zod, em inglês, dentro de
@@ -330,7 +357,7 @@ export class StudioMissionService {
     readonly evidence?: string | null
     readonly blockedReason?: string | null
   }): Promise<MissionRecord> {
-    const mission = this.mission(actor, missionId)
+    const mission = await this.mission(actor, missionId)
     if (mission.status === 'COMPLETED') {
       throw new MissionError('INVALID_STATE', t('errors.estadoNaoAceitaTrabalho'))
     }
@@ -359,7 +386,7 @@ export class StudioMissionService {
   async declareCandidate(actor: MissionActor, missionId: string): Promise<MissionRecord> {
     this.#authorize(actor, 'project.write')
     return this.#serialize(actor, missionId, async () => {
-      const mission = this.mission(actor, missionId)
+      const mission = await this.mission(actor, missionId)
       if (mission.status !== 'RUNNING') throw new MissionError('INVALID_STATE', t('errors.estadoNaoAceitaCandidatura'))
       return this.#save({ ...mission, status: 'CANDIDATE_COMPLETED', candidate_at: this.#now().toISOString() })
     })
@@ -379,7 +406,7 @@ export class StudioMissionService {
   async complete(actor: MissionActor, missionId: string): Promise<MissionRecord> {
     this.#authorize(actor, 'project.write')
     return this.#serialize(actor, missionId, async () => {
-      const mission = this.mission(actor, missionId)
+      const mission = await this.mission(actor, missionId)
       if (mission.status !== 'CANDIDATE_COMPLETED') throw new MissionError('INVALID_STATE', t('errors.concluirExigeCandidatura'))
       const verdict = missionCompletion(mission.criteria)
       if (verdict.kind !== 'PROVEN') throw new MissionError('INVALID_STATE', completionDiagnostic(verdict))
@@ -397,9 +424,9 @@ export class StudioMissionService {
   }
 
   /** As missões deste escopo, da mais recente para a mais antiga. */
-  missions(actor: MissionActor): readonly MissionRecord[] {
+  async missions(actor: MissionActor): Promise<readonly MissionRecord[]> {
     this.#authorize(actor, 'project.read')
-    return this.#repository.missions()
+    return (await this.#repository.missions({ orgId: actor.orgId, tenantId: actor.tenantId }))
       .filter(record => record.org_id === actor.orgId && record.tenant_id === actor.tenantId)
       // Desempate pelo identificador, que e unico dentro do escopo: sem ele a
       // ordem de duas missoes do mesmo instante dependeria da ordem de leitura
@@ -449,10 +476,24 @@ export class StudioMissionService {
     }
   }
 
+  /**
+   * Grava a mudança, pinada na revisão que foi lida.
+   *
+   * `record` é o registro LIDO, já com as alterações; a revisão nova é a dele
+   * mais um, e a condição é a dele. Se outra réplica gravou nesse meio-tempo, a
+   * escrita não acontece e o chamador recebe uma recusa em vez de passar por
+   * cima do trabalho alheio.
+   * @param record - o registro lido, já alterado.
+   * @returns o registro gravado.
+   */
   async #save(record: MissionRecord): Promise<MissionRecord> {
-    const parsed = missionRecordSchema.safeParse({ ...record, updated_at: this.#now().toISOString() })
+    const parsed = missionRecordSchema.safeParse({
+      ...record, updated_at: this.#now().toISOString(), revision: record.revision + 1,
+    })
     if (!parsed.success) throw new MissionError('INVALID', issueMessage(parsed.error))
-    await this.#repository.putMission(parsed.data)
+    if (!await this.#repository.putMission(parsed.data, record.revision)) {
+      throw new MissionError('INVALID_STATE', t('errors.mudouEnquantoGravava'))
+    }
     return parsed.data
   }
 }

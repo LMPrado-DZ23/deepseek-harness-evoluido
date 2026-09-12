@@ -95,7 +95,7 @@ export function createMissionHttpHandler(config: MissionHttpConfig) {
         // copia a tabela inteira de execuções do host, e chamá-la dentro do
         // `map` refazia essa cópia por linha da lista.
         const runs = config.runs()
-        return json(response, 200, { missions: config.service.missions(actor).map(record => view(record, runs)) })
+        return json(response, 200, { missions: (await config.service.missions(actor)).map(record => view(record, runs)) })
       }
       if (method === 'POST' && route === '/missions') {
         const body = createSchema.parse(await readJson(request))
@@ -130,7 +130,7 @@ export function createMissionHttpHandler(config: MissionHttpConfig) {
       }
       const single = MISSION_ID.exec(route)
       if (method === 'GET' && single !== null) {
-        return json(response, 200, { mission: view(config.service.mission(actor, decodeURIComponent(single[1]!)), config.runs()) })
+        return json(response, 200, { mission: view(await config.service.mission(actor, decodeURIComponent(single[1]!)), config.runs()) })
       }
       return json(response, 404, { error: t('http.rotaNaoEncontrada') })
     } catch (error) {

@@ -585,7 +585,7 @@ describe('ACHADO: tres equipes dentro do proprio teto estouram o teto da MISSAO'
   // uma, olhada sozinha, esta certa.
   const porta = (verdict: MissionBudgetVerdict) => {
     const noteRun = vi.fn(async () => undefined)
-    const verdictFor = vi.fn(() => verdict)
+    const verdictFor = vi.fn(async () => verdict)
     return { port: { verdictFor, noteRun } satisfies MissionBudgetPort, verdictFor, noteRun }
   }
 

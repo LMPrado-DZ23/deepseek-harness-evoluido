@@ -111,6 +111,17 @@ export const missionRecordSchema = z.object({
   criteria: z.array(missionCriterionSchema).min(1).max(200),
   created_at: z.string().min(1),
   updated_at: z.string().min(1),
+  /**
+   * Quantas vezes este registro foi gravado.
+   *
+   * É o testemunho de versão da gravação condicional. `updated_at` não serve:
+   * duas gravações no mesmo milissegundo produzem o mesmo carimbo, e uma
+   * condição que passa por empate de relógio não é condição.
+   *
+   * Começa em 0 e sobe de um a cada gravação. Quem grava declara a revisão que
+   * LEU; se o registro andou nesse meio-tempo, a escrita não acontece.
+   */
+  revision: z.number().int().nonnegative(),
   /** Quando o executor declarou que acredita ter terminado. */
   candidate_at: z.string().min(1).nullable(),
   completed_at: z.string().min(1).nullable(),
