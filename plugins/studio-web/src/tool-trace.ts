@@ -124,11 +124,56 @@ export interface TeamTraceView {
 }
 
 /**
+ * A trilha agrupada por sessão, já no escopo e já em ordem.
+ *
+ * Feito UMA vez por leitura, e não uma vez por etapa. Antes, cada etapa varria
+ * a trilha inteira: com dez etapas e uma trilha de cem mil entradas, isso é um
+ * milhão de comparações para desenhar uma tela — e a trilha é justamente a
+ * coisa que cresce com o uso. O índice troca isso por uma passada só.
+ *
+ * O escopo entra AQUI, na construção do índice, e não depois: uma entrada de
+ * outro inquilino nunca chega a existir num balde.
+ * @param audit - a trilha inteira.
+ * @param scope - a organização e o inquilino de quem pergunta.
+ * @returns as chamadas de cada sessão, da mais antiga para a mais nova.
+ */
+export function indexBySession(
+  audit: readonly PolicyAuditShape[], scope: TraceScope,
+): ReadonlyMap<string, readonly ToolCallView[]> {
+  const buckets = new Map<string, PolicyAuditShape[]>()
+  for (const entry of audit) {
+    if (entry.org_id !== scope.orgId || entry.tenant_id !== scope.tenantId) continue
+    const bucket = buckets.get(entry.session_id)
+    if (bucket === undefined) buckets.set(entry.session_id, [entry]); else bucket.push(entry)
+  }
+  const indexed = new Map<string, readonly ToolCallView[]>()
+  for (const [sessionId, bucket] of buckets) {
+    // A ordem é NOSSA e não da tabela: a trilha é um mapa, e ler fora de ordem
+    // contaria a história ao contrário — uma recusa apareceria antes do pedido
+    // que a provocou.
+    indexed.set(sessionId, bucket.sort(byOrder).map(toCall))
+  }
+  return indexed
+}
+
+/** Uma entrada da trilha, no formato que a tela lê. */
+function toCall(entry: PolicyAuditShape): ToolCallView {
+  return {
+    call_id: entry.call_id,
+    tool_name: entry.tool_name,
+    decision: entry.decision,
+    effective_tier: entry.effective_tier,
+    reason: entry.reason,
+    at: entry.created_at,
+    sealed: entry.entry_sha256 !== undefined,
+  }
+}
+
+/**
  * As chamadas de uma sessão, dentro do escopo, da mais antiga para a mais nova.
  *
- * A ordem é NOSSA e não da tabela: a trilha é um mapa, e ler fora de ordem
- * contaria a história ao contrário — uma recusa apareceria antes do pedido que
- * a provocou.
+ * Continua existindo para quem quer UMA sessão só e não vai olhar outras — aí
+ * construir o índice inteiro seria o desperdício ao contrário.
  * @param audit - a trilha inteira.
  * @param scope - a organização e o inquilino de quem pergunta.
  * @param sessionId - a sessão da execução.
@@ -142,15 +187,7 @@ export function callsForSession(
       && entry.org_id === scope.orgId && entry.tenant_id === scope.tenantId)
     .slice()
     .sort(byOrder)
-    .map(entry => ({
-      call_id: entry.call_id,
-      tool_name: entry.tool_name,
-      decision: entry.decision,
-      effective_tier: entry.effective_tier,
-      reason: entry.reason,
-      at: entry.created_at,
-      sealed: entry.entry_sha256 !== undefined,
-    }))
+    .map(toCall)
 }
 
 /**
@@ -197,6 +234,9 @@ export function teamTrace(
     byRun.set(run.run_id, run)
   }
 
+  // Uma passada pela trilha, e não uma por etapa.
+  const porSessao = indexBySession(audit, scope)
+
   let unlinked = 0
   const rows = tasks.map((task): TaskTraceRow => {
     const base = { task_id: task.task_id, title: task.title, role: task.role, status: task.status }
@@ -209,7 +249,7 @@ export function teamTrace(
     }
     return {
       ...base,
-      trace: { link: 'LINKED', run_id: task.run_id, session_id: sessionId, calls: callsForSession(audit, scope, sessionId) },
+      trace: { link: 'LINKED', run_id: task.run_id, session_id: sessionId, calls: porSessao.get(sessionId) ?? [] },
     }
   })
   return { team_id: teamId, tasks: rows, unlinked_count: unlinked }

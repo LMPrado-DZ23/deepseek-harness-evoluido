@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  callsForSession, teamTrace,
+  callsForSession, indexBySession, teamTrace,
   type PolicyAuditShape, type TraceRunShape, type TraceTaskShape,
 } from '../src/tool-trace.ts'
 
@@ -147,5 +147,52 @@ describe('a decisao da politica chega inteira', () => {
     ], ESCOPO, 'sessao-filha')
     expect(calls.map(call => call.decision)).toEqual(['allow', 'ask', 'deny'])
     expect(calls.map(call => call.reason)).toEqual(['catalogo T1', 'exige confirmacao', 'fora do catalogo'])
+  })
+})
+
+describe('a trilha e varrida UMA vez por leitura, e nao uma por etapa', () => {
+  it('dez etapas nao viram dez varreduras', () => {
+    // Com dez etapas e uma trilha de cem mil entradas, uma varredura por etapa
+    // e um milhao de comparacoes para desenhar uma tela — e a trilha e
+    // justamente a coisa que cresce com o uso.
+    let lidas = 0
+    // O contador pega QUALQUER travessia, e nao so `for...of`: `filter`,
+    // `map`, `slice` e `some` tambem percorrem, e um contador que so visse o
+    // laco deixaria passar exatamente a volta ao filtro por etapa.
+    const TRAVESSIAS = new Set<string | symbol>([
+      Symbol.iterator, 'filter', 'map', 'slice', 'forEach', 'some', 'every', 'reduce', 'find',
+    ])
+    const trilha = new Proxy([entry()] as PolicyAuditShape[], {
+      get(alvo, chave, receptor) {
+        if (TRAVESSIAS.has(chave)) lidas += 1
+        return Reflect.get(alvo, chave, receptor) as unknown
+      },
+    })
+    const etapas = Array.from({ length: 10 }, (_, index) => task({ task_id: `t${String(index)}`, run_id: `r${String(index)}` }))
+    const execucoes = etapas.map((_, index) => run({ run_id: `r${String(index)}`, child_session_id: 'sessao-filha' }))
+    const chain = teamTrace('eq-1', etapas, execucoes, trilha, ESCOPO)
+    expect(chain.tasks.every(row => row.trace.calls.length === 1)).toBe(true)
+    expect(lidas, 'a trilha foi percorrida mais de uma vez').toBe(1)
+  })
+
+  it('o indice ja sai no escopo e ja sai em ordem', () => {
+    const indice = indexBySession([
+      entry({ audit_id: 'b', call_id: 'segunda', seq: 20 }),
+      entry({ audit_id: 'a', call_id: 'primeira', seq: 10 }),
+      entry({ audit_id: 'x', session_id: 'outra-sessao', call_id: 'de-outra', seq: 5 }),
+      entry({ audit_id: 'z', org_id: 'org-b', tenant_id: 'ws-b', call_id: 'alheia', seq: 1 }),
+    ], ESCOPO)
+    expect(indice.get('sessao-filha')?.map(call => call.call_id)).toEqual(['primeira', 'segunda'])
+    expect(indice.get('outra-sessao')?.map(call => call.call_id)).toEqual(['de-outra'])
+    // A entrada do outro inquilino nao chega a existir num balde.
+    expect([...indice.values()].flat().map(call => call.call_id)).not.toContain('alheia')
+  })
+
+  it('sessao sem nenhuma entrada nao aparece no indice, e a etapa recebe lista vazia', () => {
+    const indice = indexBySession([entry()], ESCOPO)
+    expect(indice.has('sessao-que-nunca-chamou-nada')).toBe(false)
+    const chain = teamTrace('eq-1', [task()], [run({ child_session_id: 'sessao-que-nunca-chamou-nada' })], [entry()], ESCOPO)
+    expect(chain.tasks[0]!.trace.link).toBe('LINKED')
+    expect(chain.tasks[0]!.trace.calls).toEqual([])
   })
 })
