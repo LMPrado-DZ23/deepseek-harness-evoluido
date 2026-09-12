@@ -212,6 +212,30 @@ export class LocalStagingProvider implements StagingProviderPort {
     await mkdir(folder, { recursive: true })
     await rm(pending, { recursive: true, force: true })
     await cp(source.directory, pending, { recursive: true, errorOnExist: true, dereference: false })
+    // A CONFERÊNCIA QUE VALE é esta, sobre a CÓPIA — e não a de cima, sobre a
+    // origem.
+    //
+    // `verifyArtifactFiles` lia a árvore e `cp` a lia DE NOVO: duas leituras
+    // diferentes do mesmo diretório, com uma janela entre elas. Nessa janela um
+    // arquivo podia ser trocado por outro conteúdo (e a cópia publicaria bytes
+    // que nunca foram conferidos contra o manifesto atestado) ou por um LINK
+    // SIMBÓLICO — e como `cp` usa `dereference: false`, o link ia para dentro
+    // da geração publicada. A recusa de link da primeira leitura não alcançava
+    // o que fosse plantado depois dela.
+    //
+    // `pending` é NOSSO: ninguém mais escreve nele, e conferir ali fecha a
+    // janela em vez de encurtá-la. A conferência de cima continua por ser
+    // barata e recusar cedo o caso comum, mas a decisão de publicar é desta.
+    //
+    // Ainda é `definitive-no-effect`: a publicação é o `rename` lá embaixo, e
+    // até ele nada está servindo. O que foi copiado é apagado.
+    let copied: string | undefined
+    try { copied = await verifyArtifactFiles(pending, source.files) }
+    catch (error) { copied = error instanceof Error ? error.message : 'ARTIFACT_UNREADABLE' }
+    if (copied !== undefined) {
+      await rm(pending, { recursive: true, force: true })
+      return { kind: 'definitive-no-effect', failureCode: definitiveCode(copied) }
+    }
     const receipt = stagingProviderReceiptSchema.parse({
       provider_id: this.providerId,
       environment: 'staging',
