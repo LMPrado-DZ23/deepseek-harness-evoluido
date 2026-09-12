@@ -121,14 +121,22 @@ export class MemoryStagingRepository implements StagingRepository {
     return this.#exclusive(async () => {
       const current = this.release(actor, projectId, releaseId)
       const target = current === undefined ? undefined : this.#targets.get(current.target_key)
+      // A MESMA regra de `DomainStagingRepository.finalizeAccepted`: a
+      // reconciliação que traz o recibo do provedor tira o destino da
+      // quarentena. Este dublê é uma SEGUNDA implementação do repositório, e
+      // divergir dela é como uma prova passa a cobrir um comportamento que a
+      // produção não tem — foi exatamente o que aconteceu aqui antes.
+      const resolvingQuarantine = target?.quarantined === true
+        && target.busyReleaseId === releaseId && record.reconciled_at !== null
       if (current === undefined || current.version !== expectedVersion || target?.busyReleaseId !== releaseId
-        || target.quarantined || target.lastGeneration !== current.target_generation || record.target_generation !== current.target_generation
+        || (target.quarantined && !resolvingQuarantine) || target.lastGeneration !== current.target_generation || record.target_generation !== current.target_generation
         || record.effect_lease_id !== current.effect_lease_id
         || (record.state !== 'STAGING_OK' && record.state !== 'ROLLED_BACK')) return false
       this.#records.set(releaseId, structuredClone(record))
       const { busyReleaseId: _busyReleaseId, ...idleTarget } = target
       this.#targets.set(record.target_key, {
         ...idleTarget,
+        quarantined: false,
         activeReleaseId: releaseId,
         activeGeneration: record.target_generation,
       })

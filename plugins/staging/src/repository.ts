@@ -188,8 +188,28 @@ export class DomainStagingRepository implements StagingRepository {
     return this.#exclusive(async () => {
       const current = this.release(actor, projectId, releaseId)
       const target = current === undefined ? undefined : this.#targets.get(current.target_key)
+      // A QUARENTENA TEM SAÍDA, e ela é esta.
+      //
+      // A regra anterior recusava toda finalização com o destino em
+      // quarentena — inclusive a RECONCILIAÇÃO, que é o único trabalho que
+      // existe para tirá-lo de lá. O efeito era um beco sem volta: `reconcile`
+      // tentava três vezes, era recusado nas três, e terminava chamando
+      // `quarantineTarget` de novo. E como o destino é um só para o Studio
+      // inteiro (`stagingTargetKey` não leva organização, inquilino nem
+      // projeto — decisão registrada), uma única release travada inutilizava o
+      // staging de TODOS, para sempre, sem rota de recuperação.
+      //
+      // Quarentena que ninguém consegue sair não é quarentena, é lápide.
+      //
+      // O que continua fechado: só a release que É a dona do destino
+      // (`busyReleaseId`) sai, e só com um registro de RECONCILIAÇÃO
+      // (`reconciled_at`), na mesma geração e sob o mesmo arrendamento. Trabalho
+      // NOVO segue recusado enquanto a quarentena durar — que é o que ela existe
+      // para fazer.
+      const resolvingQuarantine = target?.quarantined === true
+        && target.busyReleaseId === releaseId && record.reconciled_at !== null
       if (current === undefined || current.version !== expectedVersion || target?.busyReleaseId !== releaseId
-        || target.quarantined || target.lastGeneration !== current.target_generation
+        || (target.quarantined && !resolvingQuarantine) || target.lastGeneration !== current.target_generation
         || record.target_generation !== current.target_generation
         || record.effect_lease_id !== current.effect_lease_id
         || (record.state !== 'STAGING_OK' && record.state !== 'ROLLED_BACK')) return false
@@ -198,7 +218,12 @@ export class DomainStagingRepository implements StagingRepository {
       await this.#persist(record)
       const { busyReleaseId: _released, ...idle } = target
       this.#targets.set(record.target_key, {
-        ...idle, activeReleaseId: releaseId, activeGeneration: record.target_generation,
+        ...idle,
+        // A reconciliação que chegou até aqui trouxe o recibo do provedor: o
+        // efeito externo deixou de ser desconhecido, e é isso — e só isso — que
+        // a quarentena estava esperando.
+        quarantined: false,
+        activeReleaseId: releaseId, activeGeneration: record.target_generation,
       })
       return true
     })

@@ -5,7 +5,7 @@ import {
   type StagingActor,
   type StagingProviderResult,
 } from '../src/service.js'
-import { stagingReleaseSchema, type StagingArtifact } from '../src/model.js'
+import { stagingReleaseSchema, type StagingArtifact, type StagingRelease } from '../src/model.js'
 import { stagingRequestFingerprint, stagingReleaseId } from '../src/artifact.js'
 import { approvalPort, artifact, digest, fixedNow, MemoryStagingRepository, owner, providerPort } from './helpers.js'
 
@@ -456,5 +456,58 @@ describe('staging reconciliation and logical rollback', () => {
     const h = harness({ provider })
     const failed = await h.service.publish(owner, request)
     await expect(h.service.rollback(owner, { projectId: 'project-1', operationId: 'op-rollback-failed', approvalId: 'approval-2', targetReleaseId: failed.release_id })).rejects.toMatchObject({ code: 'NOT_FOUND' })
+  })
+})
+
+describe('ACHADO: a quarentena do destino TEM saída', () => {
+  it('a reconciliação tira o destino da quarentena, e o staging volta a servir', async () => {
+    // Era um beco sem volta. Toda finalização era recusada com o destino em
+    // quarentena — INCLUSIVE a reconciliação, que é o único trabalho que existe
+    // para tirá-lo de lá. `reconcile` tentava três vezes, era recusado nas três
+    // e terminava chamando `quarantineTarget` de novo.
+    //
+    // E o destino é UM SÓ para o Studio inteiro (`stagingTargetKey` não leva
+    // organização, inquilino nem projeto — decisão registrada em ADR-044).
+    // Então uma única release travada inutilizava o staging de TODOS, para
+    // sempre, sem rota de recuperação.
+    //
+    // Quarentena que ninguém consegue sair não é quarentena, é lápide.
+    const repository = new MemoryStagingRepository()
+    // O provedor volta a responder de forma DEFINIDA só depois da quarentena:
+    // é essa mudança — o efeito externo deixar de ser desconhecido — que a
+    // quarentena está esperando. O estado vive numa variável porque o retrato
+    // só existe depois da publicação.
+    let definido: StagingRelease | undefined
+    const provider = providerPort({
+      status: vi.fn(async () => definido === undefined ? { state: 'UNKNOWN' as const } : { state: 'READY' as const, receipt: {
+        provider_id: definido.provider_id, environment: 'staging' as const, target_ref: definido.target_ref,
+        operation_id: definido.operation_id, kind: definido.kind, target_generation: definido.target_generation,
+        artifact_sha256: definido.artifact.artifact_sha256, receipt_ref: 'dz23-receipt:reconciliado', observed_at: fixedNow,
+      } }),
+    })
+    vi.spyOn(repository, 'finalizeAccepted').mockImplementationOnce(async (actor, projectId, releaseId, expectedVersion) => {
+      const current = repository.release(actor, projectId, releaseId)!
+      expect(await repository.compareAndSwapRelease(actor, projectId, releaseId, expectedVersion, stagingReleaseSchema.parse({
+        ...current, state: 'FAILED', version: current.version + 1,
+        last_transition_at: fixedNow, finished_at: fixedNow, failure_code: 'RACING_TERMINAL_STATE',
+      }))).toBe(true)
+      return false
+    })
+    const h = harness({ repository, provider })
+    const quarantined = await h.service.publish(owner, request)
+    expect(quarantined).toMatchObject({ state: 'RECONCILIATION_REQUIRED', failure_code: 'CONFLICTING_EXTERNAL_EFFECT' })
+    // Enquanto a quarentena dura, trabalho NOVO continua recusado — que é o que
+    // ela existe para fazer.
+    await expect(h.service.publish(owner, { ...request, operationId: 'op-novo', approvalId: 'approval-novo' }))
+      .rejects.toMatchObject({ code: 'CONFLICT' })
+
+    definido = quarantined
+    const reconciled = await h.service.reconcile(owner, 'project-1', quarantined.release_id)
+    expect(reconciled).toMatchObject({ state: 'STAGING_OK', failure_code: null })
+    expect(reconciled.reconciled_at).not.toBeNull()
+
+    // E o destino volta a aceitar trabalho: é isto que faltava.
+    await expect(h.service.publish(owner, { ...request, operationId: 'op-depois', approvalId: 'approval-depois' }))
+      .resolves.toMatchObject({ state: 'STAGING_OK' })
   })
 })

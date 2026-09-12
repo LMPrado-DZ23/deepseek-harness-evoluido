@@ -135,6 +135,55 @@ describe('journal durável de staging', () => {
     await expect(restarted.service.publish(owner, { ...request, operationId: 'op-2' })).rejects.toThrow()
   })
 
+  it('ACHADO: a quarentena tem SAÍDA no repositório de PRODUÇÃO, não só no dublê', async () => {
+    // Esta prova está aqui, e não no `service.spec.ts`, por um motivo que a
+    // falsificação mostrou: os testes de serviço usam `MemoryStagingRepository`,
+    // uma SEGUNDA implementação inteira do repositório que mora em
+    // `tests/helpers.ts`. Consertar `DomainStagingRepository` não movia um
+    // teste sequer — a prova cobria o dublê e deixava a produção descoberta.
+    //
+    // O defeito: toda finalização era recusada com o destino em quarentena,
+    // INCLUSIVE a reconciliação, que é o único trabalho que existe para tirá-lo
+    // de lá. `reconcile` tentava três vezes, era recusado nas três, e terminava
+    // chamando `quarantineTarget` de novo. E como o destino é UM SÓ para o
+    // Studio inteiro, uma release travada inutilizava o staging de todos, para
+    // sempre, sem rota de recuperação.
+    const rows = table()
+    const h = harness(rows)
+    const published = await h.service.publish(owner, request)
+    const quarentena = stagingReleaseSchema.parse({
+      ...published, state: 'RECONCILIATION_REQUIRED', finished_at: null,
+      failure_code: 'CONFLICTING_EXTERNAL_EFFECT', version: published.version + 1,
+    })
+    await h.repository.quarantineTarget(
+      owner, 'project-1', published.release_id, published.version,
+      published.target_generation, published.effect_lease_id, quarentena,
+    )
+    const emQuarentena = h.repository.release(owner, 'project-1', published.release_id)!
+    expect(emQuarentena.state).toBe('RECONCILIATION_REQUIRED')
+
+    // Sem `reconciled_at`, a finalização continua recusada: trabalho comum não
+    // sai da quarentena, e essa é a metade que não podia ser afrouxada.
+    const semReconciliacao = stagingReleaseSchema.parse({
+      ...emQuarentena, state: 'STAGING_OK', finished_at: fixedNow, failure_code: null,
+      version: emQuarentena.version + 1,
+    })
+    expect(await h.repository.finalizeAccepted(
+      owner, 'project-1', published.release_id, emQuarentena.version, semReconciliacao,
+    )).toBe(false)
+
+    // COM `reconciled_at` — o recibo do provedor chegou, o efeito externo
+    // deixou de ser desconhecido — a finalização passa e o destino é liberado.
+    const comReconciliacao = stagingReleaseSchema.parse({ ...semReconciliacao, reconciled_at: fixedNow })
+    expect(await h.repository.finalizeAccepted(
+      owner, 'project-1', published.release_id, emQuarentena.version, comReconciliacao,
+    )).toBe(true)
+
+    // E o destino volta a aceitar trabalho: é isto que faltava.
+    await expect(h.service.publish(owner, { ...request, operationId: 'op-depois', approvalId: 'approval-depois' }))
+      .resolves.toMatchObject({ state: 'STAGING_OK' })
+  })
+
   it('rollback republica um artefato anterior numa geração NOVA, sem apagar nada', async () => {
     const rows = table()
     const h = harness(rows)
