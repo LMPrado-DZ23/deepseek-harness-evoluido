@@ -31,8 +31,33 @@ export async function createVerifiedBuildArchive(
   if (!inside(root, source)) throw new BuilderSupervisorError('ARTIFACT_OUTSIDE_ROOT')
   const sourceBefore = await lstat(source)
   if (!sourceBefore.isDirectory() || sourceBefore.isSymbolicLink()) throw new BuilderSupervisorError('ARTIFACT_UNSAFE_ENTRY')
-  const paths = await walk(source, '', signal)
+  // A ORDEM e a do VALIDADOR, e nao a do idioma de quem roda o build.
+  //
+  // `walk` ordenava com `localeCompare`, por diretorio; `artifact-ingress`
+  // exige que o caminho COMPLETO seja estritamente crescente em unidades
+  // UTF-16, e recusa com `ARTIFACT_INVALID` o que chegar fora de ordem. As duas
+  // regras discordam para nomes comuns:
+  //
+  // - `a.js` e `B.js` no mesmo diretorio: `localeCompare` emite `a.js` antes de
+  //   `B.js`, e o validador compara `'B.js' <= 'a.js'` (0x42 < 0x61) e recusa;
+  // - um diretorio `a/` irmao de um arquivo `a.txt`: a caminhada emite `a/x`
+  //   antes de `a.txt`, e `'a.txt' <= 'a/x'` (0x2E < 0x2F) tambem recusa.
+  //
+  // Falha FECHADA, entao nao e brecha — mas e o caminho de ingestao inteiro
+  // recusando artefatos LEGITIMOS, com um erro (`ARTIFACT_INVALID`) que aponta
+  // para 'artefato malicioso' e nao para 'ordenacao divergente'. Quem visse
+  // isso iria procurar um ataque que nao existe.
+  //
+  // A ordenacao final e sobre o caminho COMPLETO, e nao por diretorio: so assim
+  // o caso `a/` contra `a.txt` sai na ordem que o validador exige.
+  const paths = (await walk(source, '', signal)).sort((left, right) => (left < right ? -1 : left > right ? 1 : 0))
   if (paths.length === 0 || paths.length > MAX_FILES) throw new BuilderSupervisorError('ARTIFACT_UNSAFE_ENTRY')
+  // NFC tambem e exigencia do validador, e um nome criado no macOS costuma
+  // chegar em NFD. Recusar AQUI, na producao do artefato, diz onde o problema
+  // esta; deixar passar faria o mesmo nome ser recusado la na frente como
+  // 'artefato invalido'.
+  const denormalized = paths.find(name => name.normalize('NFC') !== name)
+  if (denormalized !== undefined) throw new BuilderSupervisorError('ARTIFACT_UNSAFE_ENTRY')
   const folded = new Set<string>()
   const hash = createHash('sha256')
   const wireHash = createHash('sha256')
