@@ -69,19 +69,33 @@ export type MissionBudgetVerdict =
   | { readonly kind: 'UNMEASURED'; readonly runId: string; readonly limit: number }
   | { readonly kind: 'MISSION_MISSING'; readonly missionId: string }
 
+/** A organização e o inquilino da EQUIPE, que é de quem a missão precisa ser. */
+export interface MissionScope {
+  readonly orgId: string
+  readonly tenantId: string
+}
+
 export interface MissionBudgetPort {
   /**
    * O veredito do teto desta missão agora.
+   *
+   * O escopo NÃO é opcional e não é decoração. `mission_id` é um identificador
+   * escolhido por quem cria a missão, e nada impede que duas organizações
+   * escolham o mesmo. Sem o escopo, uma equipe da organização A seria medida
+   * contra a missão da organização B — e saberia, pelo veredito, se a missão
+   * alheia estourou.
+   * @param scope - a organização e o inquilino da equipe.
    * @param missionId - a missão.
    * @returns o veredito.
    */
-  verdictFor(missionId: string): MissionBudgetVerdict
+  verdictFor(scope: MissionScope, missionId: string): MissionBudgetVerdict
   /**
    * Registra na missão uma execução que acabou de começar.
+   * @param scope - a organização e o inquilino da equipe.
    * @param missionId - a missão.
    * @param runId - a execução.
    */
-  noteRun(missionId: string, runId: string): Promise<void>
+  noteRun(scope: MissionScope, missionId: string, runId: string): Promise<void>
 }
 
 export interface AgentTeamRepository {
@@ -167,7 +181,28 @@ export class StudioAgentTeamService {
      * com um teto que ninguém consegue conferir.
      */
     readonly missions?: MissionBudgetPort
-  }) {}
+  }) {
+    this.#missions = dependencies.missions
+  }
+
+  #missions: MissionBudgetPort | undefined
+
+  /**
+   * Instala a porta do teto de missão depois da construção.
+   *
+   * A dependência é INVERTIDA de propósito: quem sabe o que é uma missão é o
+   * plugin de missão, e é ele que se apresenta aqui. `agent-team` não injeta
+   * `studioMission` porque esta versão do cordis não tem injeção opcional — e
+   * torná-la obrigatória faria toda instalação sem motor de missão deixar de
+   * carregar equipes, que é o oposto do que se quer.
+   *
+   * Sem a porta instalada, uma equipe que declare missão é RECUSADA. O padrão
+   * seguro aqui é recusar, e não seguir sem teto.
+   * @param port - a porta.
+   */
+  setMissionBudget(port: MissionBudgetPort): void {
+    this.#missions = port
+  }
 
   teams(): readonly AgentTeamRecord[] { return this.dependencies.repository.teams() }
   tasks(): readonly AgentTeamTaskRecord[] { return this.dependencies.repository.tasks() }
@@ -377,8 +412,8 @@ export class StudioAgentTeamService {
           // A execucao entra na missao DEPOIS de gravada e antes de a proxima
           // tarefa conferir o teto: sem isso `missionSpend` olharia para uma
           // lista vazia e o teto da missao nunca apertaria.
-          if (team.mission_id !== null && team.mission_id !== undefined && this.dependencies.missions !== undefined) {
-            await this.dependencies.missions.noteRun(team.mission_id, accepted.runId)
+          if (team.mission_id !== null && team.mission_id !== undefined && this.#missions !== undefined) {
+            await this.#missions.noteRun({ orgId: team.org_id, tenantId: team.tenant_id }, team.mission_id, accepted.runId)
           }
           this.#active.set(taskKey(team.team_id, task.task_id), { jobId: accepted.jobId, owner: parent })
         } catch (error) {
@@ -404,11 +439,11 @@ export class StudioAgentTeamService {
   #missionRefusal(team: AgentTeamRecord): string | undefined {
     const missionId = team.mission_id
     if (missionId === null || missionId === undefined) return undefined
-    const port = this.dependencies.missions
+    const port = this.#missions
     // Equipe que declara missao numa instalacao SEM motor de missao nao corre:
     // ela foi aprovada sob um teto, e aqui nao ha como conferir esse teto.
     if (port === undefined) return t('errors.missionUnavailable')
-    const verdict = port.verdictFor(missionId)
+    const verdict = port.verdictFor({ orgId: team.org_id, tenantId: team.tenant_id }, missionId)
     switch (verdict.kind) {
       case 'NO_LIMIT':
       case 'WITHIN': return undefined

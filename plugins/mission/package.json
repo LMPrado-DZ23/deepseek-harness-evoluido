@@ -24,6 +24,9 @@
     "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
+    "@deepseek-ai/cordis": "workspace:*",
+    "@deepseek-ai/dsh-storage-domain": "workspace:*",
+    "@dz23-studio/agent-team": "workspace:*",
     "zod": "4.4.3"
   },
   "license": "Apache-2.0"

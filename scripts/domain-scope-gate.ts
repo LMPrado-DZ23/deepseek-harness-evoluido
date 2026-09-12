@@ -82,6 +82,18 @@ export const STUDIO_DOMAIN_SCOPES: readonly DomainScopeEntry[] = [
     },
   },
   {
+    source: 'plugins/mission/src/model.ts', exportName: 'studioMissionsDomainSpec', physicalName: 'studio_missions',
+    tables: {
+      // `org-tenant` e nao `workspace-tenant`: uma missao atravessa execucoes de
+      // projetos e de equipes diferentes, e amarra-la a um espaco de trabalho
+      // faria o escopo AMPLO — que e a razao de ela existir — deixar de caber.
+      missions: {
+        scope: 'org-tenant', requiredFields: ['org_id', 'tenant_id'],
+        reason: 'Uma missao atravessa execucoes de projetos e equipes diferentes dentro do mesmo inquilino.',
+      },
+    },
+  },
+  {
     source: 'plugins/route-health/src/model.ts', exportName: 'studioRouteHealthDomainSpec', physicalName: 'studio_route_health',
     tables: {
       routes: { scope: 'org-tenant', requiredFields: ['org_id', 'tenant_id'] },

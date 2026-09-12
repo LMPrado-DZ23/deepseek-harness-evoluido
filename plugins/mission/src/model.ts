@@ -1,3 +1,4 @@
+import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 import { z } from 'zod'
 import { t } from './i18n.js'
 
@@ -115,5 +116,19 @@ export type MissionRecord = z.infer<typeof missionRecordSchema>
 export interface MissionRunUsage {
   readonly run_id: string
   readonly status: string
-  readonly tokens_used?: number | null
+  readonly tokens_used?: number | null | undefined
 }
+
+declare const missionKeyBrand: unique symbol
+export type MissionKey = string & { readonly [missionKeyBrand]: true }
+
+export const STUDIO_MISSIONS_PHYSICAL_DOMAIN = 'studio_missions'
+export const STUDIO_MISSIONS_LOGICAL_DOMAIN = 'studio.missions'
+
+export const studioMissionsDomainSpec = defineDomain({
+  name: STUDIO_MISSIONS_PHYSICAL_DOMAIN,
+  version: 1,
+  tables: {
+    missions: domainTable<MissionKey, MissionRecord>(missionRecordSchema),
+  },
+})

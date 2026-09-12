@@ -12,6 +12,7 @@
     "@deepseek-ai/dsh-web-app": "workspace:*",
     "@dz23-studio/action-approval": "workspace:*",
     "@dz23-studio/agent-team": "workspace:*",
+    "@dz23-studio/mission": "workspace:*",
     "@dz23-studio/agents": "workspace:*",
     "@dz23-studio/assistant-bridge": "workspace:*",
     "@dz23-studio/emergency-stop": "workspace:*",

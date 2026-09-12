@@ -111,6 +111,12 @@ export const PENDING_CLASSIFICATION: Readonly<Record<string, PendingClassificati
   studio_approvals: { category: 'startup-reconciliation', reason: 'a varredura de inicio ESCREVE aprovacao de recuperacao para projetos de qualquer inquilino', evidence: { file: 'plugins/prompt-to-app/src/service.ts', symbol: 'reconcileInterruptedExecutions' } },
   studio_policy_audit: { category: 'cross-tenant-invariant', reason: 'a trilha e UMA corrente de hash GLOBAL: seq e previous_sha256 encadeiam entradas de todos os inquilinos (policy/src/index.ts:394-425), e verifyPolicyAuditChain so fecha lendo a corrente inteira', evidence: { file: 'plugins/policy/src/index.ts', symbol: 'verifyPolicyAuditChain' } },
   studio_agent_runs: { category: 'startup-reconciliation', reason: '#performRestartReconciliation() (agents/src/service.ts:480) le as execucoes RUNNING de TODOS os inquilinos no reinicio; #hasPersistedWork() faz o mesmo', evidence: { file: 'plugins/agents/src/service.ts', symbol: '#performRestartReconciliation' } },
+  // `ready` porque nada varre este dominio sem escopo: toda leitura passa por
+  // (organizacao, inquilino, identificador), inclusive a do teto, que ganhou o
+  // escopo justamente porque `mission_id` e escolhido por quem cria a missao e
+  // duas organizacoes podem escolher o mesmo. Nao ha varredura de inicio, nao
+  // ha guarda sincrona e nao ha invariante entre inquilinos aqui.
+  studio_missions: { category: 'ready', reason: 'toda leitura e por organizacao, inquilino e identificador; nenhuma varredura sem escopo toca este dominio' },
   studio_agent_teams: { category: 'startup-reconciliation', reason: 'reconcileInterruptedTeams() (agent-team/src/service.ts:201) varre tarefas e equipes de todos os inquilinos no reinicio', evidence: { file: 'plugins/agent-team/src/service.ts', symbol: 'reconcileInterruptedTeams' } },
 
   studio_agent_leases: { category: 'hot-guard', reason: 'lido de forma sincrona em start() para o conflito de caminhos e para a cerca, antes de cada delegacao', evidence: { file: 'plugins/agents/src/service.ts', symbol: '#hasPersistedWork' } },

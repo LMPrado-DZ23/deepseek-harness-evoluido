@@ -240,6 +240,8 @@ declarada.
 
 | OS-41 | O teto da missao passou a APERTAR: tres equipes dentro do proprio teto nao estouram mais o da missao em silencio | Missao Engineering OS / T-19 12/09/2026 | v1.0 | BETA | plugins/agent-team/src/service.ts (MissionBudgetPort, MissionBudgetVerdict, #missionRefusal, noteRun no disparo, missionId em AgentTeamStartRequest), plugins/agent-team/src/model.ts (mission_id opcional, versao do dominio INTOCADA), plugins/agent-team/i18n/pt-BR.json (4 frases novas) | plugins/agent-team/tests/service.spec.ts 81 testes (7 novos), 6 falsificacoes | execucao: o teto por EQUIPE nasceu de uma conta que ninguem estava fazendo — `budget.maxTokens` e por TAREFA, e oito tarefas dentro do combinado gastam oito vezes o aprovado. O MESMO argumento vale um nivel acima e continuava sem resposta: tres equipes, cada uma dentro do proprio teto, gastam tres vezes o que foi combinado para a missao, e cada uma, olhada sozinha, esta certa. Agora a equipe pode declarar `mission_id` e o teto da missao e conferido A CADA tarefa, pela mesma razao que o da equipe e: as tarefas da leva terminam DENTRO do laco. Tres recusas que um desenho descuidado teria deixado passar como permissao: (1) `MISSION_MISSING` e um VEREDITO, e nao `undefined` — perder o registro da missao e exatamente quando o teto mais importa, e devolver 'nao sei' como se fosse 'pode' e como um teto some sem ninguem desliga-lo; (2) instalacao SEM motor de missao RECUSA a equipe que declara missao, em vez de correr com um teto que ninguem consegue conferir; (3) `UNMEASURED` recusa igual. E a execucao e REGISTRADA na missao logo depois de gravada a tarefa: sem isso `missionSpend` olharia para uma lista vazia e o teto nunca apertaria — seria um teto que so aparece no codigo. Equipe SEM missao nao consulta a porta e corre como sempre correu: quem nao pediu teto de missao nao passa a ter um | A porta e ESTRUTURAL e `agent-team` nao depende de `@dz23-studio/mission`: quem compoe liga os dois, e NINGUEM compoe ainda — nao ha perfil que forneca a porta, entao em producao `missions` e sempre `undefined` e o unico efeito vivo e recusar equipe que declare missao. As provas sao de unidade com duble. `mission_id` e opcional e a versao do dominio ficou intocada de proposito: subir faria `open()` falhar com `version-mismatch` em instalacao que ja rodou, e nao ha passo de migracao aqui — equipe gravada antes deste campo nao pertence a missao nenhuma, que e a verdade sobre ela | ligar a porta ao `StudioMissionService` no perfil `studio`, o que exige o dominio fisico e o repositorio persistente de missao (OS-40) |
 
+| OS-42 | A missao ganhou dominio fisico, repositorio e composicao — e a busca do teto leva ESCOPO | Missao Engineering OS / T-14 12/09/2026 | v1.0 | BETA | plugins/mission/src/model.ts (studioMissionsDomainSpec, studio_missions v1), plugins/mission/src/budget-port.ts (missionBudgetPort, inScope), plugins/mission/src/index.ts (apply, DomainMissionRepository), plugins/agent-team/src/service.ts (MissionScope, setMissionBudget), dsh-home/profiles/studio/cordis.patch.yml, deploy/harness/edge.patch.yml, deploy/harness/postgres-proof.patch.yml, scripts/studio-domain-specs.ts, scripts/domain-scope-gate.ts, scripts/check-rls-coverage.ts | plugins/mission/tests (41 testes, 3 arquivos), plugins/agent-team/tests/service.spec.ts, 1 falsificacao do escopo | execucao: o motor de missao passou a ter onde morar — dominio `studio_missions` v1, uma tabela, repositorio sobre a `KvTable` como o de equipes, e composicao no perfil `studio`. A DEPENDENCIA E INVERTIDA: e o plugin de missao que injeta `studioAgentTeams` e se apresenta ao servico de equipes com `setMissionBudget`, porque esta versao do cordis NAO tem injecao opcional e o caminho oposto faria toda instalacao sem motor de missao deixar de carregar equipes. UM ACHADO MEU, encontrado ao classificar o dominio para RLS: a busca da missao no adaptador nao levava ESCOPO. `mission_id` e escolhido por quem cria a missao, e nada impede duas organizacoes de escolherem o mesmo — sem escopo, a equipe da organizacao A seria medida contra a missao da B, saberia pelo veredito se a missao alheia estourou, e a execucao dela ENTRARIA na missao alheia. O escopo passou a viajar na porta inteira (`verdictFor` e `noteRun`), e a falsificacao que o remove reprova dois testes. O dominio e `ready` na classificacao de RLS — o PRIMEIRO com essa categoria: toda leitura e por (organizacao, inquilino, identificador), nao ha varredura de inicio, guarda sincrona nem invariante entre inquilinos | Nenhuma missao real foi criada em PostgreSQL: o dominio esta roteado para `postgres` nos dois arquivos de borda, mas a prova real de banco (`pnpm test:postgres`) nao foi rodada neste ambiente para ele. Nao ha rota HTTP nem tela: uma missao so pode ser criada por codigo. `attachRun` que falhe ENCERRA o trabalho recem-iniciado — e a escolha fail-closed, e o custo e baixo porque o trabalho acabou de comecar, mas nao foi exercitado contra um Harness de verdade | rota HTTP e tela de missao; rodar o portao real de PostgreSQL com o dominio novo; migrar `studio_missions` para RLS, que agora e a unica pendencia `ready` do S-08 |
+
 <!-- O livro mestre REGISTRA achados, e o achado da OS-39 e sobre numeros de ADR
      que nomeiam mais de uma decisao: citacao-ambigua-proposital -->
 
@@ -248,16 +250,16 @@ declarada.
 | estado | quantos |
 | --- | --- |
 | `STABLE` | 61 |
-| `BETA` | 99 |
+| `BETA` | 100 |
 | `NOT_PRESENT` | 33 |
 | `NOT_CONFIGURED` | 1 |
 | `NOT_EXECUTED` | 4 |
 | `FAILED` | 2 |
 
-**Total de requisitos rastreados: 200.**
+**Total de requisitos rastreados: 201.**
 
 | versao-alvo | quantos |
 | --- | --- |
-| v1.0 | 164 |
+| v1.0 | 165 |
 | v1.x | 33 |
 | v2 | 3 |

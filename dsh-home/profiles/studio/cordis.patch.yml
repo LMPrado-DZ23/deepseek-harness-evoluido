@@ -244,6 +244,12 @@
         worktreeRoot: !!js process.env.DZ23_AGENT_WORKTREE_ROOT
     - id: dz23-studio-agent-team
       name: '@dz23-studio/agent-team'
+    # Motor de missão. Vem DEPOIS de `agent-team` porque a dependência é
+    # invertida: é este plugin que se apresenta ao serviço de equipes e instala
+    # o teto da missão. Sem ele montado, uma equipe que declare missão é
+    # RECUSADA — o padrão seguro é recusar, e não correr sem teto.
+    - id: dz23-studio-mission
+      name: '@dz23-studio/mission'
     - id: dz23-studio-route-health
       name: '@dz23-studio/route-health'
     - id: dz23-studio-prompt-to-app

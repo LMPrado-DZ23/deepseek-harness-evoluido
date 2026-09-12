@@ -4,6 +4,7 @@ import { identityAuditDomainSpec, identityCredentialsDomainSpec, identitySession
 import { studioPolicyAuditDomainSpec } from '../plugins/policy/src/index.ts'
 import { studioAgentLeasesDomainSpec, studioAgentRunsDomainSpec } from '../plugins/agents/src/model.ts'
 import { studioAgentTeamsDomainSpec } from '../plugins/agent-team/src/model.ts'
+import { studioMissionsDomainSpec } from '../plugins/mission/src/model.ts'
 import { studioRouteHealthDomainSpec } from '../plugins/route-health/src/model.ts'
 import { studioPreviewAdmissionsDomainSpec, studioPreviewsDomainSpec } from '../plugins/preview/src/model.ts'
 import { studioMembershipsDomainSpec, studioOrgsDomainSpec, studioWorkspacesDomainSpec } from '../plugins/tenancy/src/model.ts'
@@ -29,6 +30,7 @@ export const STUDIO_DOMAIN_SPECS: readonly DomainSpec[] = [
   studioAgentRunsDomainSpec,
   studioAgentLeasesDomainSpec,
   studioAgentTeamsDomainSpec,
+  studioMissionsDomainSpec,
   studioRouteHealthDomainSpec,
   studioPreviewsDomainSpec,
   studioPreviewAdmissionsDomainSpec,

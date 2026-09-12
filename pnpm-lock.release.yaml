@@ -137,6 +137,9 @@ importers:
       '@dz23-studio/mcp-client':
         specifier: workspace:*
         version: link:../../../plugins/mcp-client
+      '@dz23-studio/mission':
+        specifier: workspace:*
+        version: link:../../../plugins/mission
       '@dz23-studio/policy':
         specifier: workspace:*
         version: link:../../../plugins/policy
@@ -417,6 +420,15 @@ importers:
 
   plugins/mission:
     dependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:*
+        version: link:../../third_party/deepseek-harness/vendor/cordis
+      '@deepseek-ai/dsh-storage-domain':
+        specifier: workspace:*
+        version: file:third_party/deepseek-harness/packages/storage/storage-domain(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)(@deepseek-ai/dsh-invariants@file:third_party/deepseek-harness/packages/runtime-diagnostics/invariants(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis))(@deepseek-ai/dsh-storage@file:third_party/deepseek-harness/packages/storage/storage)
+      '@dz23-studio/agent-team':
+        specifier: workspace:*
+        version: link:../agent-team
       zod:
         specifier: 4.4.3
         version: 4.4.3

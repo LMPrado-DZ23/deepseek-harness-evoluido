@@ -596,7 +596,7 @@ describe('ACHADO: tres equipes dentro do proprio teto estouram o teto da MISSAO'
     expect(h.tasks.get('team-1:implementation')).toMatchObject({ status: 'BUDGET_EXCEEDED' })
     expect(h.tasks.get('team-1:implementation')!.diagnostic).toContain('800')
     expect(h.start).not.toHaveBeenCalled()
-    expect(m.verdictFor).toHaveBeenCalledWith('missao-1')
+    expect(m.verdictFor).toHaveBeenCalledWith({ orgId: 'org-1', tenantId: 'tenant-1' }, 'missao-1')
   })
 
   it('missao que sumiu RECUSA, e nao passa a valer como "sem teto"', async () => {
@@ -633,7 +633,9 @@ describe('ACHADO: tres equipes dentro do proprio teto estouram o teto da MISSAO'
     const h = harness({ missions: m.port })
     await h.service.start(h.request({ missionId: 'missao-1' }))
     expect(h.tasks.get('team-1:implementation')).toMatchObject({ status: 'RUNNING', run_id: 'run-1' })
-    expect(m.noteRun).toHaveBeenCalledWith('missao-1', 'run-1')
+    // O escopo vai junto: sem ele a execucao desta equipe poderia entrar na
+    // missao de OUTRA organizacao que tivesse escolhido o mesmo identificador.
+    expect(m.noteRun).toHaveBeenCalledWith({ orgId: 'org-1', tenantId: 'tenant-1' }, 'missao-1', 'run-1')
   })
 
   it('equipe SEM missao nao consulta a porta, e corre como sempre correu', async () => {
