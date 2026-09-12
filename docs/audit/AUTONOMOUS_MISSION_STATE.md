@@ -3,12 +3,12 @@
 - `mission_id`: `M1-M6-finalizacao-2026-09-04`
 - `objective`: integrar e provar M1-M6 com segurança, sem push, PR, deploy ou exclusões não autorizadas
 - `state`: `INTEGRATING_AND_PROVING`
-- `iteration`: `2026-09-07.22`
+- `iteration`: `2026-09-12.76`
 - `started_at`: `2026-09-04 America/Sao_Paulo`
-- `heartbeat_at`: `2026-09-07T01:24:00-03:00`
-- `last_progress_at`: `2026-09-07T01:24:00-03:00`
-- `branch`: `codex/m82-cross-tab-signout`
-- `head`: `2056fb0` (ponta funcional; documentação posterior não altera a implementação)
+- `heartbeat_at`: `2026-09-12T17:10:00-03:00`
+- `last_progress_at`: `2026-09-12T17:10:00-03:00`
+- `branch`: `integ`
+- `head`: `280d067` (OS-76; a ponta de `integ` com os blocos OS-49 a OS-76)
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c`
 
 ## Critérios de aceite
@@ -19,6 +19,36 @@
 - gates de tipo, build, testes, i18n, domínios, licenças e artefatos aprovados em base limpa;
 - estados externos continuam honestos: celular físico, cinco leigos, piloto, SMTP real e release público não são simulados;
 - upstream preservado e nenhum push, PR, deploy, segredo ou exclusão não autorizada.
+
+## Engineering OS — OS-49 a OS-76 (12/09/2026)
+
+Os catorze motores do `TASK_DAG` têm implementação e falsificação. Medidas da
+ponta: **21/21 portões** `EXIT=0` · `tsc` 0 na raiz e no aplicativo web · suíte
+raiz **3412** aprovados / 68 pulados · studio-web **507** · e2e **117** em
+quatro tamanhos de tela · PostgreSQL **65/65** · livro mestre **235 requisitos**.
+
+**A revisão de três auditores independentes (§19-20) rodou** e está em
+`docs/audit/REVISAO_TRES_AUDITORES_OS64_OS70.md`. Ela achou um **vazamento de
+contexto entre inquilinos** — reproduzido com prova de conceito, não inferido —
+corrigido na OS-71, com teste de concorrência pela rota que reprova se ele
+voltar. Dezenove achados corrigidos; quatro aceitos e **não** corrigidos, com o
+motivo escrito.
+
+O padrão que os três encontraram cada um do seu lado, e que vale mais que
+qualquer item isolado: **os comentários longos justificavam decisões que a
+composição desfez.**
+
+### Estados externos que continuam NÃO PROVADOS
+
+Nada abaixo foi simulado, e nenhum deles pode ser declarado desta máquina:
+celular físico, cinco leigos, piloto, SMTP real, release público.
+
+### Bloqueado em decisão do Prado
+
+- **EB-08** custódia de chave (T-31)
+- **EB-04** provider real atrás do gateway (T-16)
+- por onde a rede sai, com auditoria — a busca do Research Engine (T-17)
+- o contrato de `edgeRequired` — um achado adversarial aberto (T-32)
 
 ## Progresso comprovado
 
