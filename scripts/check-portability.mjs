@@ -176,6 +176,11 @@ function scanKind(path) {
 
 export async function scanPortableSources(root, suppliedFiles) {
   const files = (suppliedFiles ?? gitFiles(root)).filter((file) => scanKind(file))
+  // Quantos arquivos ESTE portão de fato abriu. Sem este número o veredito
+  // dizia só `findings=0`, que é indistinguível de um portão que deixou de
+  // achar o que procurar — e a cláusula 5.1 da constituição chama isso de
+  // falha, não de aprovação. Foi `gate:constitution` que pegou.
+  scanPortableSources.lastScanned = files.length
   const findings = []
   for (const file of files) {
     const absolute = resolve(root, file)
@@ -283,7 +288,7 @@ export async function main(argv = process.argv.slice(2)) {
     }
     throw new Error(`${findings.length} referência(s) não portáteis`)
   }
-  process.stdout.write(`PORTABILITY=PASS source=${suppliedFiles === undefined ? 'git' : 'filesystem'} findings=0\n`)
+  process.stdout.write(`PORTABILITY=PASS source=${suppliedFiles === undefined ? 'git' : 'filesystem'} arquivos=${String(scanPortableSources.lastScanned ?? 0)} findings=0\n`)
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
