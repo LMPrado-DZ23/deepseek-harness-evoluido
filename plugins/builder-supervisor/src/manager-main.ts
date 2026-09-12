@@ -47,6 +47,37 @@ const DEFAULT_LISTENER_INITIALIZATION_TIMEOUT_MS = 30_000
 // Covers store materialization (10m), adapter verification (8m), bounded overhead, and the
 // listener's complete independent deadline. Registry reload never truncates either phase.
 const DEFAULT_SLOT_STARTUP_TIMEOUT_MS = 21 * 60_000
+
+/**
+ * Por quanto tempo uma vaga global reservada por `prepare` continua valendo
+ * sem nenhum sinal de vida daquele build.
+ *
+ * Uma hora, e e generoso de proposito: este prazo NAO existe para disciplinar
+ * build lento — existe para que trabalho ABANDONADO nao segure a vaga para
+ * sempre. Um build vivo renova o prazo a cada chamada; um cliente que sumiu
+ * nao renova nada.
+ */
+const HELD_SLOT_TTL_MS = 60 * 60_000
+
+/** Uma vaga global reservada e ainda nao devolvida. */
+interface HeldSlot { readonly release: () => void; expiresAt: number; readonly forget: () => void }
+
+/**
+ * O registro de vagas seguradas, COMPARTILHADO por quem divide a capacidade.
+ *
+ * `WeakMap` para o registro morrer junto com a capacidade: um mapa global por
+ * nome vazaria entre instalacoes dentro do mesmo processo, que e justamente o
+ * tipo de acoplamento que este arquivo evita em todo o resto.
+ */
+const HELD_SLOTS = new WeakMap<object, Set<HeldSlot>>()
+
+function heldSlotsFor(capacity: GlobalBuilderCapacityPort): Set<HeldSlot> {
+  const existing = HELD_SLOTS.get(capacity)
+  if (existing !== undefined) return existing
+  const created = new Set<HeldSlot>()
+  HELD_SLOTS.set(capacity, created)
+  return created
+}
 type ManagerSignal = 'SIGHUP' | 'SIGINT' | 'SIGTERM'
 
 export interface BuilderManagedRuntime {
@@ -481,25 +512,77 @@ export function createBuilderRuntimeSlotStarter(runtime: BuilderRuntimeSlotStart
   }
 }
 
-export function wrapBuilderSupervisorWithGlobalCapacity(scopeId: BuilderRuntimeScopeId, composition: BuilderSupervisorComposition, capacity: GlobalBuilderCapacityPort): BuilderSupervisorComposition & { releaseAll(): void } {
-  const releases = new Map<string, () => void>()
-  const release = (buildRef: string) => { const current = releases.get(buildRef); if (current !== undefined) { releases.delete(buildRef); current() } }
+export function wrapBuilderSupervisorWithGlobalCapacity(
+  scopeId: BuilderRuntimeScopeId,
+  composition: BuilderSupervisorComposition,
+  capacity: GlobalBuilderCapacityPort,
+  /** Só para teste: o relógio que decide o vencimento de uma vaga reservada. */
+  now: () => number = () => Date.now(),
+): BuilderSupervisorComposition & { releaseAll(): void } {
+  // A vaga global tem PRAZO, e antes nao tinha.
+  //
+  // `prepare` adquire a vaga; a liberacao so acontecia em `execute` com estado
+  // terminal, `cancel` ou `finish`. Um cliente que chamasse `prepare` e sumisse
+  // — conexao morta, processo do Studio derrubado, `execute` lancando sem
+  // estado terminal — deixava a vaga pendurada no mapa para sempre, sem TTL,
+  // sem varredura e sem limite de tempo. Com o padrao de quatro vagas globais,
+  // QUATRO preparacoes abandonadas travavam os builds da instalacao inteira ate
+  // alguem reiniciar o supervisor.
+  //
+  // O prazo e generoso de proposito: ele nao existe para disciplinar build
+  // lento, existe para que trabalho abandonado nao seja eterno. Toda atividade
+  // sobre aquele build renova.
+  // As vagas seguradas ficam num registro COMPARTILHADO por quem divide a mesma
+  // capacidade, e nao num mapa por embrulho.
+  //
+  // Cada escopo tem o proprio embrulho, e um mapa por embrulho so seria varrido
+  // quando AQUELE escopo voltasse a preparar — que e exatamente o que um escopo
+  // abandonado nunca faz. A vaga presa por quem sumiu ficaria presa ate ele
+  // voltar, e ele nao volta. Com o registro compartilhado, a proxima preparacao
+  // de QUALQUER escopo devolve a vaga vencida.
+  const held = heldSlotsFor(capacity)
+  const releases = new Map<string, HeldSlot>()
+  const release = (buildRef: string) => {
+    const current = releases.get(buildRef)
+    if (current !== undefined) { releases.delete(buildRef); held.delete(current); current.release() }
+  }
+  // Renova o prazo de quem deu sinal de vida. Sem isto, um build legitimo e
+  // demorado perderia a vaga no meio — trocando um problema raro por um comum.
+  const touch = (buildRef: string) => { const current = releases.get(buildRef); if (current !== undefined) current.expiresAt = now() + HELD_SLOT_TTL_MS }
+  // Varre na ENTRADA de `prepare`, e nao por temporizador: sem relogio de fundo
+  // nao ha trabalho periodico para testar, e a unica hora em que a vaga vencida
+  // importa e quando alguem precisa de uma.
+  const sweep = () => {
+    const at = now()
+    for (const slot of [...held]) {
+      if (slot.expiresAt > at) continue
+      held.delete(slot)
+      slot.forget()
+      slot.release()
+    }
+  }
   const methods = composition.methods
   return { ...(composition.artifactIngress === undefined ? {} : { artifactIngress: composition.artifactIngress }), methods: {
     initialize: methods.initialize.bind(methods),
     preflight: methods.preflight.bind(methods),
     prepare: async (body, signal) => {
+      sweep()
       const acquired = await capacity.acquire(scopeId, signal)
       try {
         const result = await methods.prepare(body, signal)
         const previous = releases.get(result.build_ref)
-        if (previous === undefined) releases.set(result.build_ref, acquired); else acquired()
+        if (previous === undefined) {
+          const slot = { release: acquired, expiresAt: now() + HELD_SLOT_TTL_MS, forget: () => { releases.delete(result.build_ref) } }
+          releases.set(result.build_ref, slot)
+          held.add(slot)
+        } else { acquired(); previous.expiresAt = now() + HELD_SLOT_TTL_MS }
         return result
       } catch (error) { acquired(); throw error }
     },
     execute: async (body, signal) => {
+      touch(body.build_ref)
       const result = await methods.execute(body, signal)
-      if (isTerminalState(result.state)) release(result.build_ref)
+      if (isTerminalState(result.state)) release(result.build_ref); else touch(result.build_ref)
       return result
     },
     cancel: async (body, signal) => {
@@ -513,7 +596,7 @@ export function wrapBuilderSupervisorWithGlobalCapacity(scopeId: BuilderRuntimeS
       return result
     },
     listManaged: methods.listManaged.bind(methods),
-  }, releaseAll: () => { for (const current of releases.values()) current(); releases.clear() } }
+  }, releaseAll: () => { for (const current of releases.values()) { held.delete(current); current.release() } releases.clear() } }
 }
 
 async function listenManagedRuntime(config: BuilderSupervisorResolvedConfig, composition: BuilderSupervisorComposition & { releaseAll(): void }, drainTimeoutMs: number, listenerInitializationTimeoutMs: number, managerSignal: AbortSignal, runtime: BuilderRuntimeSlotStartRuntime): Promise<BuilderManagedRuntime> {

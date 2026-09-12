@@ -285,3 +285,21 @@ describe('ACHADO: escrita da parada é pinada à versão que ela leu', () => {
     expect(() => h.service.assertRunning({ orgId: 'org-a', tenantId: 'tenant-a' })).not.toThrow()
   })
 })
+
+describe('ACHADO: a chave do escopo é injetiva', () => {
+  it('identificador com o separador é RECUSADO, em vez de colidir com outro escopo', async () => {
+    // `${orgId}:${tenantId}` sobre campos declarados apenas como `min(1)`:
+    // `{org: 'a:b', tenant: 'c'}` e `{org: 'a', tenant: 'b:c'}` produziam a
+    // MESMA chave. A parada de um escopo valeria para o outro — e a retomada de
+    // um destravaria o outro, que é a direção perigosa.
+    const h = service()
+    const colide = { ...owner, orgId: 'a:b', tenantId: 'c' }
+    await expect(h.service.engage(colide, 'incidente')).rejects.toThrow('INVALID_EMERGENCY_SCOPE')
+    expect(() => h.service.assertRunning({ orgId: 'a', tenantId: 'b:c' })).toThrow('INVALID_EMERGENCY_SCOPE')
+  })
+
+  it('escopo normal continua funcionando', async () => {
+    const h = service()
+    await expect(h.service.engage(owner, 'incidente')).resolves.toBeDefined()
+  })
+})

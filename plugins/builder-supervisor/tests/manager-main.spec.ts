@@ -784,6 +784,80 @@ describe('global capacity wiring', () => {
     second.releaseAll(); expect(capacity.active).toBe(0); expect(next.build_ref).toBe(`build_${'2'.repeat(32)}`)
   })
 
+  it('ACHADO: uma preparação ABANDONADA não segura a vaga global para sempre', async () => {
+    // `prepare` adquiria a vaga; a liberação só acontecia em `execute` com
+    // estado terminal, `cancel` ou `finish`. Um cliente que chamasse `prepare`
+    // e sumisse — conexão morta, processo do Studio derrubado, `execute`
+    // lançando sem estado terminal — deixava a vaga pendurada no mapa para
+    // sempre, sem prazo, sem varredura e sem limite de tempo. Com o padrão de
+    // QUATRO vagas globais, quatro preparações abandonadas travavam os builds
+    // da instalação inteira até alguém reiniciar o supervisor.
+    let agora = 1_000_000
+    const capacity = new FairGlobalBuilderCapacity(1)
+    const first = wrapBuilderSupervisorWithGlobalCapacity(scope('1'), { methods: methods('1') }, capacity, () => agora)
+    const second = wrapBuilderSupervisorWithGlobalCapacity(scope('2'), { methods: methods('2') }, capacity, () => agora)
+
+    // Alguém prepara e some. Ninguém cancela, ninguém termina.
+    await first.methods.prepare(prepareBody('1', 'one'), new AbortController().signal)
+    expect(capacity.active).toBe(1)
+
+    // Antes do prazo, a vaga continua sendo dele: o build pode estar só lento.
+    agora += 59 * 60_000
+    let admitido = false
+    const cedo = second.methods.prepare(prepareBody('2', 'two'), new AbortController().signal).then(value => { admitido = true; return value })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(admitido).toBe(false)
+
+    // Passado o prazo, a próxima preparação VARRE na entrada e a vaga volta.
+    // Sem `await`: a varredura acontece de forma síncrona na entrada de
+    // `prepare`, e esta chamada fica na fila ATRÁS de quem já esperava —
+    // esperá-la aqui seria esperar por ela mesma.
+    agora += 2 * 60_000
+    void first.methods.prepare(prepareBody('1', 'outro'), new AbortController().signal).catch(() => undefined)
+    const proximo = await cedo
+    expect(admitido).toBe(true)
+    expect(proximo.build_ref).toBe(`build_${'2'.repeat(32)}`)
+    // A varredura devolveu a vaga abandonada; a preparação sem `await` acima
+    // pode ter pego uma nova, então o que se afirma aqui é que a vaga do
+    // trabalho ABANDONADO saiu do mapa do primeiro.
+    first.releaseAll(); second.releaseAll()
+    expect(capacity.pending).toBe(0)
+  })
+
+  it('ACHADO: build VIVO renova o prazo e não perde a vaga quando a varredura passa', async () => {
+    // O prazo não existe para disciplinar build lento. Se ele derrubasse um
+    // build que está trabalhando, teria trocado um problema raro — vaga
+    // abandonada — por um comum: build longo morrendo sozinho.
+    //
+    // A prova precisa FAZER A VARREDURA ACONTECER. A primeira versão deste
+    // teste só avançava o relógio e conferia `capacity.active`, e passava
+    // mesmo com a renovação removida: sem ninguém varrendo, nada expira de
+    // qualquer jeito. Ela afirmava uma propriedade que nunca era exercida.
+    let agora = 1_000_000
+    const capacity = new FairGlobalBuilderCapacity(2)
+    const vivos = methods('1')
+    const wrapped = wrapBuilderSupervisorWithGlobalCapacity(scope('1'), { methods: {
+      ...vivos,
+      execute: async body => ({ build_ref: body.build_ref, state: 'INSTALL_OK', step: body.step, result: { exit_code: 0, stdout: '', stderr: '', timed_out: false, termination_reason: null, output_limit_exceeded: false } }),
+    } }, capacity, () => agora)
+    const outro = wrapBuilderSupervisorWithGlobalCapacity(scope('2'), { methods: methods('2') }, capacity, () => agora)
+    const prepared = await wrapped.methods.prepare(prepareBody('1', 'one'), new AbortController().signal)
+    expect(capacity.active).toBe(1)
+
+    // Quase no prazo, o build dá sinal de vida e o prazo recomeça.
+    agora += 59 * 60_000
+    await wrapped.methods.execute({ request_id: `req_${'4'.repeat(32)}`, build_ref: prepared.build_ref, step: 'install' } as never, new AbortController().signal)
+
+    // Passa do prazo ORIGINAL, e alguém varre. Sem a renovação, a vaga deste
+    // build seria recolhida aqui — com ele vivo.
+    agora += 2 * 60_000
+    await outro.methods.prepare(prepareBody('2', 'two'), new AbortController().signal)
+    expect(capacity.active).toBe(2)
+
+    wrapped.releaseAll(); outro.releaseAll()
+    expect(capacity.active).toBe(0)
+  })
+
   it('releases leases on terminal execute, prepare failure, finish failure, and explicit cleanup', async () => {
     const capacity = new FairGlobalBuilderCapacity(2)
     const baseFailing = methods('1'); const failing = { ...baseFailing, prepare: async () => { throw new Error('prepare-failed') } } satisfies typeof baseFailing

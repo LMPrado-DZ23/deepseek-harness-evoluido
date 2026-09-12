@@ -55,7 +55,25 @@ export const studioEmergencyStopDomainSpec = defineDomain({
   tables: { stops: domainTable<EmergencyStopKey, EmergencyStopRecord>(emergencyStopRecordSchema) },
 })
 
-/** A chave do escopo. Uma função só, porque duas grafias diferentes dela seriam dois botões. */
+/**
+ * A chave do escopo. Uma função só, porque duas grafias diferentes dela seriam
+ * dois botões.
+ *
+ * O `:` é o separador, e por isso ele NÃO pode aparecer dentro dos
+ * identificadores: `{org: 'a:b', tenant: 'c'}` e `{org: 'a', tenant: 'b:c'}`
+ * produziriam a MESMA chave, e a parada de um escopo valeria para o outro — ou,
+ * pior, a retomada de um destravaria o outro. A concatenação era feita sobre
+ * campos declarados apenas como `min(1)`.
+ *
+ * A recusa é aqui, e não uma troca do formato da chave, de propósito: mudar o
+ * formato mudaria a chave de toda parada JÁ GRAVADA, e um escopo parado
+ * passaria a ser lido como não parado — falha ABERTA, no botão de emergência,
+ * que é o pior lugar possível para ela.
+ * @param scope - a organização e o inquilino.
+ * @returns a chave.
+ * @throws Error quando um identificador contém o separador.
+ */
 export function emergencyScopeId(scope: { readonly orgId: string; readonly tenantId: string }): string {
+  if (scope.orgId.includes(':') || scope.tenantId.includes(':')) throw new Error('INVALID_EMERGENCY_SCOPE')
   return `${scope.orgId}:${scope.tenantId}`
 }
