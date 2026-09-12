@@ -543,7 +543,16 @@ export class PromptToAppPipeline {
         // vezes — `generate/RUNNING` primeiro, `verify/PASSED` por ultimo.
         // `find` devolveria a mais VELHA, que ainda nao tem criterio conferido
         // nenhum, e a revisao leria um registro que nao e o que foi afirmado.
-        const persisted = this.options.service.runs(actor, projectId).findLast(record => record.run_id === runId)
+        // Percorrido DE TRAS PARA A FRENTE, e nao com `findLast`: este arquivo
+        // tambem e compilado sob o `tsconfig` do aplicativo web, cujo alvo nao
+        // alcanca `findLast` — e elevar o alvo do pacote do NAVEGADOR por causa
+        // de uma conveniencia de codigo de servidor seria pagar em
+        // compatibilidade por uma linha mais curta.
+        const persistedRuns = this.options.service.runs(actor, projectId)
+        let persisted: typeof persistedRuns[number] | undefined
+        for (let index = persistedRuns.length - 1; index >= 0; index -= 1) {
+          if (persistedRuns[index]!.run_id === runId) { persisted = persistedRuns[index]; break }
+        }
         const review = persisted === undefined
           // O registro que acabou de ser gravado nao foi encontrado. Isso nao e
           // "sem problemas": e a propria prova sumindo entre escrever e ler.

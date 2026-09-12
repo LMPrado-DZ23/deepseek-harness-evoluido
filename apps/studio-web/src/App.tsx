@@ -12,7 +12,7 @@ import { projectNameFromBrief } from './projectName'
 
 /** De onde veio o tipo mostrado na tela. `person` é a escolha à mão, que o palpite não faz. */
 type CategoryBasis = CategoryGuess['basis'] | 'person'
-import { creationBlocked, currentStepIndex, permanentTruthKind, privacyNotice, resultSentence, routeReasonNotice, type PipelineResultState, type PrivacyProfile, type ProjectUiState } from './presentation'
+import { HEADLINE_CAPABILITY, capabilityLines, creationBlocked, currentStepIndex, permanentTruthKind, privacyNotice, resultSentence, routeReasonNotice, type PipelineResultState, type PrivacyProfile, type ProjectUiState } from './presentation'
 import { apiFailureMessage, apiFailureText, type ApiCallKind } from './pwa/apiFailure'
 import { GENERATION_REJECTED_STATE, postGeneration, startGeneration } from './pwa/generation'
 import { NotificationOptIn } from './pwa/NotificationOptIn'
@@ -628,9 +628,33 @@ function Status({ health }: { health: HealthState }) {
         <li>{health.builder === 'OK' ? t.health.builderOk : t.health.builderAttention}</li>
         <li>{health.disk === 'OK' ? t.health.diskOk : t.health.diskAttention}</li>
       </ul>
+      <Capabilities health={health} />
     </div>
   </div>
 }
+/**
+ * O que esta instalacao consegue fazer (T-22).
+ *
+ * AUSENTE, e nao vazio, quando o servidor nao manda o bloco: um servidor mais
+ * velho nao sabe responder, e uma lista vazia afirmaria que nada funciona.
+ */
+function Capabilities({ health }: { health: HealthState }) {
+  const lines = capabilityLines(health.capabilities)
+  const headline = lines.find(line => line.id === HEADLINE_CAPABILITY)
+  if (headline === undefined) return null
+  const sentence = headline.tone === 'sim' ? t.health.capabilityYes
+    : headline.tone === 'nao-sei' ? t.health.capabilityUnknown
+    : t.health.capabilityNo
+  return <div className="status-capabilities">
+    <strong>{t.health.capabilitiesTitle}</strong>
+    <p className={`capability capability-${headline.tone}`}>{sentence}</p>
+    {headline.blockedBy === undefined ? null
+      : <p className="capability-detail">{t.health.capabilityBlockedBy.replace('{blockedBy}', headline.blockedBy)}</p>}
+    {headline.blockedBy === undefined && headline.reason === 'NEVER_PROBED'
+      ? <p className="capability-detail">{t.health.capabilityNeverProbed}</p> : null}
+  </div>
+}
+
 function Progress({ state }: { state: ProjectUiState | null }) { const current = currentStepIndex(state); const truthKind = permanentTruthKind(state); return <section className="progress-panel" aria-label={t.progress.title}><h2>{t.progress.title}</h2><p className="mobile-progress-subtitle">{t.mobile.subtitle}</p><ol>{steps.map(([title, detail], index) => <li key={title} className={index === current ? 'current' : ''}><span className="step-number">{index + 1}</span><div><strong>{index + 1}. {title}</strong><p>{detail}</p><small>{index < current ? t.progress.done : index === current ? t.progress.current : t.progress.waiting}</small></div></li>)}</ol>{truthKind === null ? null : <p className="truth">{t.truth[truthKind]}</p>}</section> }
 
 function hexToHsl(hex: string): { h: number; s: number; l: number } {

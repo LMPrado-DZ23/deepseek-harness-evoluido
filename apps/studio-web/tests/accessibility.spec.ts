@@ -99,6 +99,13 @@ test('o estado do Studio começa neutro e abre o que está em atenção', async 
   await expect(page.getByText(/inteligência artificial:/u)).toBeVisible()
   await expect(page.getByText(/Ambiente isolado de criação:/u)).toBeVisible()
   await expect(page.getByText(/Espaço em disco:/u)).toBeVisible()
+  // T-22: o mesmo painel responde a pergunta que a pessoa realmente faz — e ele
+  // responde "ninguém conferiu ainda", porque o endereço de saúde confere as
+  // PEÇAS e não cria aplicativo nenhum para descobrir. Um verde aqui seria a
+  // tela afirmando a cadeia inteira a partir das partes dela.
+  await expect(page.getByText('O que dá para fazer agora')).toBeVisible()
+  await expect(page.getByText('Criar um aplicativo: ninguém conferiu ainda.')).toBeVisible()
+  await expect(page.getByText(/Nada foi criado ainda nesta instalação/u)).toBeVisible()
 })
 
 /**

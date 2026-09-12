@@ -77,7 +77,13 @@
     "diskOk": "Espaço em disco: suficiente",
     "diskAttention": "Espaço em disco: pouco espaço livre",
     "show": "Ver o que está em atenção",
-    "hide": "Esconder"
+    "hide": "Esconder",
+    "capabilitiesTitle": "O que dá para fazer agora",
+    "capabilityYes": "Criar um aplicativo: funcionando.",
+    "capabilityNo": "Criar um aplicativo: não dá agora.",
+    "capabilityUnknown": "Criar um aplicativo: ninguém conferiu ainda.",
+    "capabilityBlockedBy": "O que está segurando: {blockedBy}.",
+    "capabilityNeverProbed": "Nada foi criado ainda nesta instalação, então ninguém exercitou o caminho inteiro."
   },
   "account": {
     "signOut": "Sair",

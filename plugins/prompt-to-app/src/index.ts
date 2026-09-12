@@ -11,6 +11,7 @@ import { PRODUCTION_BUILDER_ROOT_POLICY, builderRuntimeRegistryPath, type Builde
 import { mkdir, readFile, statfs } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
+import { healthCapabilities } from './capability-registry.js'
 import { createPromptToAppHttpHandler, type StudioAppsHealth } from './http.js'
 import { PromptToAppJobService, type EmergencyStopGuard, type PromptToAppJobRegistry } from './jobs.js'
 import {
@@ -24,6 +25,7 @@ import {
   studioRunsDomainSpec,
   type PromptToAppKey,
   type StudioApproval,
+  studioProjectCategorySchema,
   type StudioAppSpecRecord,
   type StudioDesignSpecRecord,
   type StudioEvidence,
@@ -283,6 +285,14 @@ export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}):
     ctx.storageDomain.open(studioApprovalsDomainSpec),
   ])
   ctx.effect(() => async () => { await Promise.all([projects.close(), specs.close(), designs.close(), turns.close(), plans.close(), runs.close(), evidence.close(), approvals.close()]) }, 'studio-prompt-to-app.domainClose')
+  // Os dominios que ABRIRAM. A lista e montada DEPOIS do `await` de cima, entao
+  // ela so existe se todos abriram — e e por isso que ela serve de sinal: uma
+  // abertura que falhasse teria derrubado o `apply()` antes desta linha.
+  const OPEN_DOMAIN_NAMES = [
+    studioProjectsDomainSpec.name, studioAppSpecsDomainSpec.name, studioDesignSpecsDomainSpec.name,
+    studioIntakeTurnsDomainSpec.name, studioPlansDomainSpec.name, studioRunsDomainSpec.name,
+    studioEvidenceDomainSpec.name, studioApprovalsDomainSpec.name,
+  ]
 
   const repository = new DomainPromptToAppRepository(
     projects.table('projects'), specs.table('specs'), designs.table('designs'), turns.table('turns'), plans.table('plans'),
@@ -383,8 +393,22 @@ export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}):
       diskState(runsRoot),
     ])
     const state = route !== null && builderHealth.state === 'OK' && disk === 'OK' ? 'OK' : 'ATTENTION'
+    // O QUE ESTA INSTALACAO CONSEGUE FAZER (T-22). Os campos acima respondem
+    // "a rota esta boa?" e "o construtor respondeu?"; nenhum deles responde a
+    // pergunta que a pessoa faz, que e se ela consegue CRIAR UM APLICATIVO.
+    //
+    // Os sinais sao os mesmos que ja foram medidos logo acima e os dominios que
+    // este plugin abriu. Medi-los de novo criaria uma segunda verdade sobre o
+    // mesmo fato, e duas medidas do mesmo fato divergem no primeiro conserto.
+    const capabilities = healthCapabilities({
+      routes: ctx.studioRouteHealth.service.list(scope).map(record => ({ route: record.route, state: record.state })),
+      builderState: builderHealth.state,
+      openDomains: OPEN_DOMAIN_NAMES,
+      categories: studioProjectCategorySchema.options,
+      now: new Date(),
+    })
     return {
-      state, route, route_reason: route === null ? null : selected.reason,
+      state, route, route_reason: route === null ? null : selected.reason, capabilities,
       // O CÓDIGO do motivo, ao lado da frase de operação: a tela de quem não
       // opera o Studio traduz o código em efeito e próximo passo, em vez de
       // mostrar "meia-abertura" e "teto de escopo" para quem não programa.

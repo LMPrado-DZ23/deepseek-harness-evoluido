@@ -108,6 +108,23 @@ export interface StudioAppsHealth {
    * de silêncio seria tão errado quanto esconder um.
    */
   readonly local_route?: string | null
+  /**
+   * O que esta instalacao consegue de fato fazer AGORA (T-22).
+   *
+   * Os tres campos acima respondem "a rota esta boa?", "o construtor
+   * respondeu?", "tem disco?" — e nenhum deles responde a pergunta que a pessoa
+   * realmente faz, que e se ela consegue CRIAR UM APLICATIVO. Este bloco
+   * responde essa, e responde DERIVANDO de sinais medidos, nunca declarando.
+   *
+   * OPCIONAL: um servidor que nao conhece o campo nao sabe responder, e a tela
+   * tem de saber a diferenca entre "nao consegue" e "nao perguntei".
+   */
+  readonly capabilities?: readonly {
+    readonly id: string
+    readonly state: 'UNKNOWN' | 'ABSENT' | 'PRESENT' | 'CONFIGURED' | 'OPERATIONAL'
+    readonly reason?: string
+    readonly blocked_by?: string
+  }[]
   readonly builder: 'OK' | 'BLOCKED_EXTERNAL'
   readonly disk: 'OK' | 'ATTENTION'
 }

@@ -278,7 +278,7 @@ export function studioCapabilities(signals: StudioSignals): {
     // Sem data a observacao existe e nao tem quando: ela nao entra como
     // sondagem, porque uma sondagem sem instante nao sustenta nem vence.
     if (route.at === undefined) continue
-    probes.push({ capability: 'modelo', ok: route.state === 'OK', at: route.at, detail: route.route })
+    probes.push({ capability: 'modelo', ok: route.state === 'OK' || route.state === 'DEGRADED', at: route.at, detail: route.route })
   }
   if (signals.builder !== undefined) {
     probes.push({ capability: 'construtor', ok: signals.builder.available, at: signals.builder.at })
@@ -300,4 +300,59 @@ export function studioCapabilities(signals: StudioSignals): {
     },
   ]
   return { declarations, probes }
+}
+
+/**
+ * A ponte entre o endereco de saude e este registro.
+ *
+ * Ela mora AQUI, exportada e com teste proprio, e nao dentro do `apply()` do
+ * plugin: codigo que so roda montando o sistema inteiro nao e exercitado por
+ * teste nenhum, e esta missao ja aprendeu isso cinco vezes (OS-49, OS-53,
+ * OS-59, OS-62, OS-65). Se a decisao importa, ela nao mora na montagem.
+ *
+ * O INSTANTE de todas as sondagens e `now`, e isso e literal e nao um atalho:
+ * ler o estado das rotas, perguntar ao construtor e listar os dominios sao
+ * coisas que acabaram de acontecer. O que a sondagem afirma e "agora, isto
+ * respondeu assim" — que e exatamente o que uma sondagem pode afirmar.
+ */
+export function healthCapabilities(input: {
+  readonly routes: readonly { readonly route: string; readonly state: 'OK' | 'DEGRADED' | 'DOWN' | 'NOT_CONFIGURED' }[]
+  readonly builderState: 'OK' | 'BLOCKED_EXTERNAL'
+  readonly openDomains: readonly string[]
+  readonly categories: readonly string[]
+  /**
+   * A criacao mais recente que TERMINOU, quando existe uma.
+   *
+   * Sem ela, `criar-aplicativo` NUNCA chega a `OPERATIONAL` — e isso esta
+   * certo, nao e uma lacuna. Rota boa e construtor respondendo sao as
+   * dependencias da criacao, e dependencia operacional NAO prova a cadeia: o
+   * endereco de saude nao cria aplicativo nenhum para descobrir. Afirmar que
+   * ela funciona a partir das pecas seria exatamente o salto que este registro
+   * existe para impedir.
+   */
+  readonly lastRun?: { readonly passed: boolean; readonly at: Date }
+  readonly now: Date
+}): readonly {
+  readonly id: string
+  readonly state: CapabilityState
+  readonly reason?: CapabilityReason
+  readonly blocked_by?: string
+}[] {
+  const { declarations, probes } = studioCapabilities({
+    // `DEGRADED` conta como respondendo: uma rota lenta ou com erro
+    // intermitente ainda cria aplicativo, e trata-la como caida diria a pessoa
+    // que ela nao pode fazer o que ela consegue fazer.
+    routes: input.routes.map(route => ({ ...route, at: input.now })),
+    builder: { available: input.builderState === 'OK', at: input.now },
+    openDomains: input.openDomains,
+    categories: input.categories,
+    ...(input.lastRun === undefined ? {} : { lastRun: input.lastRun }),
+    observedAt: input.now,
+  })
+  return capabilityStatuses(declarations, probes, { now: input.now }).map(status => ({
+    id: status.id,
+    state: status.state,
+    ...(status.reason === undefined ? {} : { reason: status.reason }),
+    ...(status.blockedBy === undefined ? {} : { blocked_by: status.blockedBy }),
+  }))
 }

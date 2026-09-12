@@ -312,6 +312,16 @@ const apiHandler = createPromptToAppHttpHandler({
     state: 'OK', route: 'ollama-local', builder: 'OK', disk: 'OK',
     route_reason: 'A rota local foi escolhida por preferência, e ela está saudável.',
     route_reason_code: 'LOCAL_PREFERIDA',
+    // O bloco de capacidades (T-22). `criar-aplicativo` sai CONFIGURADA com
+    // `NEVER_PROBED` de proposito: e o que o endereco de saude REALMENTE sabe
+    // dizer sobre uma instalacao que nunca criou nada, e a tela precisa ser
+    // exercitada contra a verdade, e nao contra um verde de fixture.
+    capabilities: [
+      { id: 'armazenamento', state: 'OPERATIONAL' as const },
+      { id: 'modelo', state: 'OPERATIONAL' as const },
+      { id: 'construtor', state: 'OPERATIONAL' as const },
+      { id: 'criar-aplicativo', state: 'CONFIGURED' as const, reason: 'NEVER_PROBED' },
+    ],
   }), allowedHosts, allowedOrigins,
 })
 /**

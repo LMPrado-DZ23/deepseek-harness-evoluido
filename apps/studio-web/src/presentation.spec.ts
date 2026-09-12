@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import t from './i18n/pt-BR.json'
-import { creationBlocked, currentStepIndex, permanentTruthKind, privacyNotice, privacyProfileOf, resultSentence, routeReasonNotice, type PipelineResultState, type ProjectUiState } from './presentation'
+import { capabilityLines, creationBlocked, currentStepIndex, permanentTruthKind, privacyNotice, privacyProfileOf, resultSentence, routeReasonNotice, type PipelineResultState, type ProjectUiState } from './presentation'
 
 describe('truthful presentation for nontechnical users', () => {
   it('maps the real machine states to the five visible stages', () => {
@@ -199,5 +199,62 @@ describe('H-2: o fim da criação diz o que realmente aconteceu', () => {
     for (const [state, sentence] of Object.entries(expected)) {
       expect(resultSentence(state as PipelineResultState, t.verification), state).toBe(sentence)
     }
+  })
+})
+
+describe('capabilityLines — T-22 na tela', () => {
+  it('bloco AUSENTE devolve lista vazia: servidor velho nao sabe responder', () => {
+    expect(capabilityLines(undefined)).toEqual([])
+  })
+
+  it('operacional e o UNICO tom verde', () => {
+    const lines = capabilityLines([
+      { id: 'a', state: 'OPERATIONAL' },
+      { id: 'b', state: 'CONFIGURED' },
+      { id: 'c', state: 'PRESENT' },
+      { id: 'd', state: 'ABSENT' },
+    ])
+    expect(lines.map(line => line.tone)).toEqual(['sim', 'nao', 'nao', 'nao'])
+  })
+
+  it('DESCONHECIDA tem tom proprio, e nunca vira verde', () => {
+    // Com dois tons a tela teria de escolher um, e escolheria o verde — a
+    // pessoa leria como funcionando aquilo que ninguem conferiu.
+    expect(capabilityLines([{ id: 'a', state: 'UNKNOWN' }])[0]!.tone).toBe('nao-sei')
+  })
+
+  it('AUSENTE e `nao`, e nao `nao-sei`: e resposta certa, nao duvida', () => {
+    expect(capabilityLines([{ id: 'a', state: 'ABSENT' }])[0]!.tone).toBe('nao')
+  })
+
+  it('tudo configurado e NUNCA exercitado e `nao-sei`, e nunca `nao`', () => {
+    // Dizer "nao da agora" aqui e uma negativa FALSA — e uma negativa falsa
+    // impede a pessoa de tentar exatamente aquilo que funcionaria.
+    expect(capabilityLines([{ id: 'a', state: 'CONFIGURED', reason: 'NEVER_PROBED' }])[0]!.tone).toBe('nao-sei')
+    expect(capabilityLines([{ id: 'a', state: 'CONFIGURED', reason: 'NO_PROBE' }])[0]!.tone).toBe('nao-sei')
+  })
+
+  it('sondagem que REPROVOU e `nao`: alguem olhou e nao funcionou', () => {
+    expect(capabilityLines([{ id: 'a', state: 'CONFIGURED', reason: 'PROBE_FAILED' }])[0]!.tone).toBe('nao')
+  })
+
+  it('dependencia quebrada e `nao`, mesmo sem ninguem ter sondado esta', () => {
+    // O modelo caido e uma resposta certa sobre esta capacidade: ela nao vai
+    // funcionar enquanto a base nao voltar.
+    expect(capabilityLines([{ id: 'a', state: 'CONFIGURED', reason: 'DEPENDENCY', blocked_by: 'modelo' }])[0]!.tone).toBe('nao')
+  })
+
+  it('o motivo e quem segura atravessam', () => {
+    const [line] = capabilityLines([{ id: 'a', state: 'CONFIGURED', reason: 'DEPENDENCY', blocked_by: 'modelo' }])
+    expect(line).toEqual({ id: 'a', tone: 'nao', reason: 'DEPENDENCY', blockedBy: 'modelo' })
+  })
+
+  it('capacidade operacional nao carrega motivo', () => {
+    expect(capabilityLines([{ id: 'a', state: 'OPERATIONAL' }])[0]).toEqual({ id: 'a', tone: 'sim' })
+  })
+
+  it('a ordem do servidor e mantida', () => {
+    const lines = capabilityLines([{ id: 'z', state: 'OPERATIONAL' }, { id: 'a', state: 'ABSENT' }])
+    expect(lines.map(line => line.id)).toEqual(['z', 'a'])
   })
 })

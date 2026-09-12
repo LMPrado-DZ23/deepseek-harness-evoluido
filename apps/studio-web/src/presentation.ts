@@ -205,3 +205,63 @@ export function routeReasonNotice(
   // convite para despejar vocabulário interno na tela.
   return reasons[reasonCode.trim()] ?? null
 }
+
+/** Uma capacidade como o servidor a manda (T-22). */
+export type CapabilityReport = {
+  id: string
+  state: 'UNKNOWN' | 'ABSENT' | 'PRESENT' | 'CONFIGURED' | 'OPERATIONAL'
+  reason?: string
+  blocked_by?: string
+}
+
+export type CapabilityLine = {
+  id: string
+  /** `sim` so quando foi EXERCITADO; `nao-sei` nunca vira `sim`. */
+  tone: 'sim' | 'nao' | 'nao-sei'
+  reason?: string
+  blockedBy?: string
+}
+
+/**
+ * Os motivos que dizem NINGUEM OLHOU, e nao NAO FUNCIONOU.
+ *
+ * A distincao decide o que a pessoa le, e ela NAO e cosmetica. Uma instalacao
+ * com tudo configurado que nunca criou nada esta em `CONFIGURED` com
+ * `NEVER_PROBED`: dizer "nao da agora" ali e uma negativa FALSA, e uma negativa
+ * falsa impede a pessoa de tentar exatamente aquilo que teria dado certo.
+ */
+const UNMEASURED_REASONS = new Set(['NEVER_PROBED', 'NO_PROBE'])
+
+/**
+ * Traduz as capacidades em tres tons, e o terceiro e o que impede a tela de
+ * mentir — nos DOIS sentidos.
+ *
+ * `nao-sei` existe porque o servidor distingue "nao deu certo" de "ninguem
+ * exercitou". Com dois tons a tela teria de escolher um: escolher verde faria a
+ * pessoa ler como operante o que ninguem conferiu, e escolher vermelho a
+ * impediria de tentar o que teria dado certo. Os dois erros sao ruins, e e por
+ * isso que o terceiro tom nao e enfeite.
+ *
+ * `AUSENTE` e dependencia quebrada saem como `nao`: nao ter o codigo instalado
+ * ou ter o modelo caido sao respostas certas e definitivas, e nao duvidas.
+ */
+export function capabilityLines(capabilities: readonly CapabilityReport[] | undefined): readonly CapabilityLine[] {
+  if (capabilities === undefined) return []
+  return capabilities.map(capability => ({
+    id: capability.id,
+    tone: capability.state === 'OPERATIONAL' ? 'sim'
+      : capability.state === 'UNKNOWN' || (capability.reason !== undefined && UNMEASURED_REASONS.has(capability.reason)) ? 'nao-sei'
+      : 'nao',
+    ...(capability.reason === undefined ? {} : { reason: capability.reason }),
+    ...(capability.blocked_by === undefined ? {} : { blockedBy: capability.blocked_by }),
+  }))
+}
+
+/**
+ * A capacidade que a pessoa veio perguntar.
+ *
+ * Das quatro, tres sao pecas — modelo, armazenamento, construtor — e so uma e
+ * o que ela quer fazer. Mostrar as quatro com o mesmo peso faria a resposta
+ * ficar escondida entre as causas dela.
+ */
+export const HEADLINE_CAPABILITY = 'criar-aplicativo'

@@ -415,3 +415,11 @@
 .plan-consulted ul{margin:8px 0;padding-left:22px;color:#41506b}
 .plan-consulted h3{font-size:15px;margin:14px 0 4px}
 .plan-consulted-gap{color:#8a1c1c;font-weight:600}
+
+.status-capabilities { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--line); }
+.status-capabilities strong { display: block; margin-bottom: 0.35rem; }
+.status-capabilities .capability { margin: 0.2rem 0; font-weight: 600; }
+.status-capabilities .capability-sim { color: var(--ok, #14713d); }
+.status-capabilities .capability-nao { color: var(--danger, #a4262c); }
+.status-capabilities .capability-nao-sei { color: var(--muted, #5b5b5b); }
+.status-capabilities .capability-detail { margin: 0.2rem 0 0; font-size: 0.9em; color: var(--muted, #5b5b5b); }

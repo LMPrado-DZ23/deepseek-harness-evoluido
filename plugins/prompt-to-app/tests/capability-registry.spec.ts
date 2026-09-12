@@ -11,6 +11,7 @@ import {
   capabilityMessage,
   capabilityStatuses,
   capabilitySummary,
+  healthCapabilities,
 } from '../src/capability-registry.js'
 
 const NOW = new Date('2026-09-12T12:00:00.000Z')
@@ -328,5 +329,77 @@ describe('studioCapabilities — os sinais REAIS viram declaracao', () => {
       { route: 'boa', state: 'OK', at: recently },
     ] })
     expect(stateOf(result, 'modelo')).toBe('OPERATIONAL')
+  })
+})
+
+describe('healthCapabilities — a ponte com o endereco de saude', () => {
+  function bridge(overrides: Partial<Parameters<typeof healthCapabilities>[0]> = {}) {
+    return healthCapabilities({
+      routes: [{ route: 'ollama', state: 'OK' }],
+      builderState: 'OK',
+      openDomains: ['studio_projects'],
+      categories: ['landing-page'],
+      now: NOW,
+      ...overrides,
+    })
+  }
+
+  function stateOf(result: ReturnType<typeof bridge>, id: string) {
+    return result.find(item => item.id === id)!.state
+  }
+
+  it('dependencias boas NAO provam que criar um aplicativo funciona', () => {
+    // Este e o salto que o registro existe para impedir. O endereco de saude
+    // nao cria aplicativo nenhum para descobrir: ele confere as PECAS. Dizer
+    // OPERACIONAL a partir delas seria afirmar a cadeia inteira por inducao.
+    const result = bridge()
+    expect(stateOf(result, 'modelo')).toBe('OPERATIONAL')
+    expect(stateOf(result, 'construtor')).toBe('OPERATIONAL')
+    expect(result.find(item => item.id === 'criar-aplicativo')).toMatchObject({ state: 'CONFIGURED', reason: 'NEVER_PROBED' })
+  })
+
+  it('uma criacao que TERMINOU BEM e o que prova a cadeia', () => {
+    const result = bridge({ lastRun: { passed: true, at: new Date(NOW.getTime() - 60_000) } })
+    expect(stateOf(result, 'criar-aplicativo')).toBe('OPERATIONAL')
+  })
+
+  it('rota DEGRADADA ainda deixa o modelo operacional', () => {
+    // Uma rota lenta ou com erro intermitente ainda cria; trata-la como caida
+    // diria a pessoa que ela nao pode fazer o que ela consegue fazer.
+    expect(stateOf(bridge({ routes: [{ route: 'ollama', state: 'DEGRADED' }] }), 'modelo')).toBe('OPERATIONAL')
+  })
+
+  it('rota CAIDA segura, e diz que foi o modelo', () => {
+    const result = bridge({ routes: [{ route: 'ollama', state: 'DOWN' }] })
+    expect(result.find(item => item.id === 'criar-aplicativo')).toMatchObject({ blocked_by: 'modelo' })
+  })
+
+  it('construtor bloqueado segura, e diz que foi o construtor', () => {
+    const result = bridge({ builderState: 'BLOCKED_EXTERNAL' })
+    expect(result.find(item => item.id === 'criar-aplicativo')).toMatchObject({ blocked_by: 'construtor' })
+  })
+
+  it('nenhuma rota configurada nao vira rota quebrada', () => {
+    const result = bridge({ routes: [] })
+    expect(result.find(item => item.id === 'modelo')).toMatchObject({ state: 'PRESENT', reason: 'NOT_CONFIGURED' })
+  })
+
+  it('o formato de saida usa nomes de campo do contrato, e nao os internos', () => {
+    // `blockedBy` e nome de codigo; `blocked_by` e o que a rota publica promete.
+    const result = bridge({ routes: [{ route: 'ollama', state: 'DOWN' }] })
+    const blocked = result.find(item => item.id === 'criar-aplicativo')!
+    expect(Object.keys(blocked).sort()).toEqual(['blocked_by', 'id', 'reason', 'state'])
+  })
+
+  it('capacidade operacional nao carrega motivo nenhum', () => {
+    const operational = bridge().find(item => item.id === 'modelo')!
+    expect(Object.keys(operational).sort()).toEqual(['id', 'state'])
+  })
+
+  it('as quatro capacidades saem sempre, mesmo quando nada funciona', () => {
+    // Uma capacidade que some da lista quando esta ruim faria a lista parecer
+    // saudavel justamente quando ela nao esta.
+    const result = bridge({ routes: [], builderState: 'BLOCKED_EXTERNAL', openDomains: [], categories: [] })
+    expect(result.map(item => item.id).sort()).toEqual([...STUDIO_CAPABILITY_IDS].sort())
   })
 })
