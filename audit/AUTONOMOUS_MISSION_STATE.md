@@ -1,83 +1,87 @@
-# Estado da missão autônoma — DZ23 STUDIO v1.0
+# Estado da missão autônoma — DZ23 ENGINEERING OS
 
-- mission_id: `DZ23-STUDIO-V1-20260904`
-- objetivo: concluir o DZ23 STUDIO v1.0 com provas verificáveis, sem verde artificial
-- estado: `CANDIDATE_COMPLETED` — quatro rodadas de auditoria independente, a
-  última por ataque sobre as correções da anterior. `CRITICAL = 0`, `HIGH = 0`,
-  e nenhum trabalho interno mecânico em aberto. O que impede `COMPLETED` é
-  EXTERNO e está tabelado: sete bloqueios que dependem do Prado, de credencial
-  real, de hardware ou de rede que este ambiente não tem, mais o texto do
-  requisito S-08, que é decisão de produto.
-- iteração: 36
-- início: 2026-09-04
-- último heartbeat: 2026-09-09
-- último progresso real: a rodada 4 de auditoria (por ataque) achou 3 ALTOS e 7
-  MÉDIOS nas minhas próprias correções — duas afirmações minhas eram maiores do
-  que o feito — e os doze achados foram fechados com prova, incluindo a correção
-  estrutural que impede a repetição: o portão de RLS agora EXIGE e CONFERE a
-  citação (arquivo + símbolo) de toda categoria que afirma fato sobre o código.
-  Antes dela: o `studio_integrations` saiu da chave-valor para a tabela por
-  inquilino com RLS (1/26 → 2/26), o portão real de PostgreSQL voltou a rodar e
-  fechou 62/62, e a rodada 3 fechou C-N1..N7, C-M1, C-M10, C-2, C-H7, B-M1,
-  B-M2, B-M6, B-L1, B-N1, B-N2 e B-N3.
-- branch: `integ`
+> Este arquivo é o ponto de retomada. Quem continuar o trabalho lê ele PRIMEIRO,
+> e depois confere contra a árvore — nunca ao contrário. O projeto é a fonte de
+> verdade; este arquivo é o índice dela.
+
+- mission_id: `DZ23-ENGINEERING-OS-20260911`
+- objetivo: evoluir o repositório para o "DZ23 DEEPSEEK ENGINEERING OS" descrito
+  no prompt mestre, com prova verificável em cada passo
+- estado: `EXECUTING`
+- branch: **`integ`** (nunca `main`)
+- upstream: `deepseek-harness@6c705be1ce6774a000d061da41d1823b03a3d42c`, zero diff
 - ponta: ver `git log -1`
-- upstream: `deepseek-harness@6c705be1ce6774a000d061da41d1823b03a3d42c`
 
-## Placar objetivo
+## Onde está a verdade de cada coisa
 
-- v1.0: **112 de 120** (93,3%) em BETA ou STABLE
-- suíte raiz: 2743 aprovados, 65 pulados (174 arquivos)
-- app: 344 aprovados (38 arquivos)
-- typecheck raiz: 0; typecheck do app: 0; build: 0
-- portões estáticos: 15/15 PASS
-- e2e navegador: **65 aprovados / 5 pulados nos quatro tamanhos** (mesa, tablet,
-  celular, faixa estreita de 900px), com axe em modo claro E escuro no fluxo
-  inteiro
-- PostgreSQL 16 real: **62/62** (`POSTGRES_GATE=PASS server=compose`)
-- provas de runtime: assistente (17 ferramentas), reinício de agente, loopback, endurecimento de contêiner
-
-## Fechados nesta rodada
-
-X-11, A-08, S-09, D-02, A-07, H-01, E-05, E-01, P-02, X-07, X-02, E-03, X-04,
-X-12 (WebMCP), A-03, A-06, M-03, S-15, P-09, C-24.
-
-## Blockers com dependência externa REAL
-
-| requisito | falta |
+| pergunta | arquivo |
 | --- | --- |
-| C-05 | decisão jurídica do Prado (duas perguntas em `docs/plans/C-05-decisao-de-licenca.md`) |
-| P-07 | chave de LLM real |
-| S-04 | imagem do Caddy exige `xcaddy build` (módulos Go); contêineres deste ambiente não têm rota para registro de pacote |
-| D-10 | mesmo bloqueio de rede do S-04 |
-| D-09 | aparelho Android físico (caminho definido: P37 de ARTEMIS pronto) |
-| H-11 | conversa longa real que ultrapasse o limiar do Harness — precisa de modelo real |
-| U-04 | uma pessoa leiga de verdade |
+| o que falta, por requisito, com prova e próximo passo | `docs/MASTER_REQUIREMENTS_LEDGER.md` |
+| qual tarefa está pronta para começar | `docs/status/TASK_DAG.md` |
+| quais números valem hoje | `docs/status/PROJECT_STATUS.md` |
+| o que foi decidido e por quê | `docs/adr/`, lido por `pnpm gate:decision-record` |
 
-## Blocker interno
+## Placar objetivo (12/09/2026)
 
-| requisito | estado |
+- portões estáticos: **18/18 EXIT=0**
+- typecheck raiz: 0
+- suíte raiz: **2.988 aprovados, 66 pulados** (185 arquivos)
+- suíte da interface: **435 aprovados**
+- e2e em navegador real: **93 aprovados, 0 reprovados, 5 pulados**, nos quatro
+  tamanhos (mesa, tablet, celular, faixa estreita de 900px), com axe em modo
+  claro e escuro
+- livro mestre: **206 requisitos** — STABLE 63, BETA 103, NOT_PRESENT 33,
+  NOT_EXECUTED 4, NOT_CONFIGURED 1, FAILED 2
+
+## Como este laço anda
+
+Uma tarefa `READY` por vez, e cada correção passa por **falsificação**: o
+conserto é revertido e o teste correspondente TEM de reprovar. Sem isso, um
+teste que passa pelo motivo errado ocupa o lugar de um que funcionaria.
+
+Nesta sessão a falsificação pegou **nove** testes meus que passavam pelo motivo
+errado, e duas revisões adversariais independentes derrubaram trabalho meu do
+mesmo dia:
+
+1. um duble de teste chaveado com mais cuidado que a produção escondia que uma
+   organização apagava a missão de outra (OS-46);
+2. a correção do cookie sombra (OS-45) não curava nada, porque remoção de cookie
+   casa por caminho e quem planta escolhe o caminho (OS-47).
+
+A lição que ficou escrita no código: **um duble mais cuidadoso que o produto não
+testa o produto**, e **uma correção sem revisão de terceiro é uma hipótese**.
+
+## O que depende do Prado, e não de mais trabalho
+
+| assunto | decisão pedida |
 | --- | --- |
-| S-08 | FAILED, mas o mapa mudou. Cobertura RLS **2/26** (piso 2): `studio_action_approvals` e `studio_integrations`. Dos 12 que estavam marcados `ready`, **11 não eram mecânicos** — a leitura do código mostrou uma corrente de hash global (`studio_policy_audit`) e uma varredura de início sobre todos os inquilinos em 10 domínios (categoria nova `startup-reconciliation`). Mapa: `ready`=0, `startup-reconciliation`=10, `cross-tenant-invariant`=2, `hot-guard`=4, `tenant-resolution`=6 (IMPOSSÍVEIS por construção), `needs-review`=2. Não há mais trabalho MECÂNICO aqui: o que resta exige decisão de desenho, e o texto do requisito continua precisando de correção — decisão de produto. |
+| `ADR-034`, `ADR-038`, `ADR-039` | renumerar, ou manter os números compartilhados declarados (ADR-047) |
+| domínio das prévias | servir prévia em domínio registrável DIFERENTE do Studio fecha a família inteira do cookie sombra; enquanto for o mesmo, o `__Host-` cobre o navegador que o aceita |
+| `edgeRequired` sem `X-Forwarded-For` | exigir o cabeçalho (recusa alta e barulhenta) ou manter e documentar na instalação (OS-38) |
+| C-05 | confirmação jurídica da Apache-2.0 e revisão de advogado do TRADEMARKS.md |
+| S-08 | texto do requisito e desenho da varredura de início (ADR-044) |
+
+## Bloqueios externos reais
+
+`P-07` chave de LLM real · `S-04` e `D-10` rede para registro de pacote ·
+`D-09` aparelho Android físico · `H-11` conversa longa com modelo real ·
+`U-04` uma pessoa leiga de verdade.
+
+Um bloqueio externo **não encerra a missão**: as tarefas independentes seguem.
 
 ## Próxima ação
 
-`FIXING` → **não resta trabalho interno mecânico**. O S-08 deixou de ser "migrar
-12 domínios" e virou duas decisões de produto, ambas do Prado:
-
-1. corrigir o texto do requisito para o alvo alcançável (6 domínios são o que
-   RESOLVE o inquilino e não podem ser filtrados por ele);
-2. escolher o desenho da varredura de início — enumerar inquilinos, ou uma
-   credencial de manutenção com escopo declarado — antes de migrar os 10
-   `startup-reconciliation`.
-
-O restante em aberto está tabelado em `audit/FINAL_THREE_AGENT_REVIEW.md`, seção
-"Em aberto, com motivo escrito", e cada linha tem o motivo por extenso.
+Ler `docs/status/TASK_DAG.md` e pegar a tarefa `READY` de maior prioridade. Hoje
+as candidatas são T-26 (as cinco memórias restantes), T-11 (registro de
+habilidades), T-15 (inteligência de código), T-17 (pesquisa com procedência),
+T-18 (QA visual) e T-28 (superfície da trilha).
 
 ## Instruções de retomada
 
-1. `git log -1` e `git status` — a árvore deve estar limpa;
+1. `git log -1` e `git status` — a árvore deve estar limpa e em `integ`;
 2. `node scripts/check-requirements-ledger.mjs` — o placar objetivo;
-3. `npx tsx scripts/check-rls-coverage.ts --self-test` — o estado do S-08;
-4. o S-08 não tem mais trabalho mecânico: `ready`=0. O que resta são as duas
-   decisões de desenho descritas em "Próxima ação".
+3. `npx vitest run` na raiz e `npx playwright test` em `apps/studio-web`;
+4. só então escolher tarefa, e atualizar este arquivo ao terminar.
+
+**Entrega:** o bundle vai para `C:\Users\zodyp\Downloads\` e o Prado aplica com
+`git pull <bundle> integ`. Nunca há push daqui.
