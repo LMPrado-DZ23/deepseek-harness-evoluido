@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { GeneratedFileRejectedError } from '../src/generator.js'
-import { assertGeneratedImports, assertGeneratedSource } from '../src/import-policy.js'
+import { generationRules, assertGeneratedImports, assertGeneratedSource } from '../src/import-policy.js'
 
 describe('generated import policy', () => {
   it('accepts only public UI utilities, repositories and other generated files', () => {
@@ -383,5 +383,47 @@ describe('generated import policy', () => {
     "const key='a'; const box={}; export const value=box['x'+key]",
   ])('rejects both non-static sides of a computed property', content => {
     expect(() => assertGeneratedSource([{ path: 'src/app.ts', content }])).toThrow('dynamic property access')
+  })
+})
+
+describe('as regras DITAS ao gerador saem da mesma lista que as aplica', () => {
+  const rules = generationRules().join('\n')
+
+  it('todo modulo permitido aparece na regra', () => {
+    // Um modulo acrescentado a lista e nao dito ao gerador faz ele continuar
+    // chutando, e cada chute custa uma tentativa inteira.
+    for (const modulo of ['react', 'zod', 'next/link']) expect(rules).toContain(modulo)
+  })
+
+  it('toda tag proibida aparece na regra', () => {
+    for (const tag of ['script', 'iframe', 'object']) expect(rules).toContain(tag)
+  })
+
+  it('todo atributo proibido aparece na regra', () => {
+    expect(rules).toContain('dangerouslysetinnerhtml')
+    expect(rules).toContain('srcdoc')
+  })
+
+  it('todo global proibido aparece na regra', () => {
+    for (const nome of ['process', 'eval', 'fetch', 'localStorage']) expect(rules).toContain(nome)
+  })
+
+  it('a regra de endereco esta la', () => {
+    expect(rules).toContain('https://')
+  })
+
+  it('as regras sao ESTAVEIS entre chamadas: a ordem nao balanca o prompt', () => {
+    // Um prompt que muda de ordem a cada chamada estraga o cache do modelo e
+    // torna duas execucoes iguais indistinguiveis de duas diferentes.
+    expect(generationRules()).toEqual(generationRules())
+  })
+
+  it('uma construcao RECUSADA pela politica esta DITA na regra', () => {
+    // Este e o teste que liga as duas pontas: o que a politica recusa tem de
+    // estar escrito no que o gerador leu.
+    expect(() => assertGeneratedSource([
+      { path: 'src/GeneratedApp.tsx', content: "import { readFile } from 'node:fs'; export default function App(){ return null }; void readFile" },
+    ])).toThrow()
+    expect(rules).toContain('Importe SOMENTE')
   })
 })

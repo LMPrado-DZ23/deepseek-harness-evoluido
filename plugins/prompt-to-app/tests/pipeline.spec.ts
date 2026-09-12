@@ -7,7 +7,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AppSpecV1 } from '../src/appspec.js'
 import { createDesignSpec } from '../src/design.js'
 import type { StudioPlan, StudioRun } from '../src/model.js'
-import { PromptToAppPipeline, type CodeGenerationResult, type CodeGeneratorPort } from '../src/pipeline.js'
+import { ModelCodeGenerator, PromptToAppPipeline, type CodeGenerationResult, type CodeGeneratorPort } from '../src/pipeline.js'
+import { generationRules } from '../src/import-policy.js'
 import { BuilderLifecycleError, type BuildStep, type BuilderLifecycleFinished, type BuilderLifecycleResolverPort, type BuilderLifecycleSession, type BuilderLifecycleStepResult } from '../src/builder-lifecycle.js'
 import { PromptToAppError, type PromptToAppActor, type PromptToAppService } from '../src/service.js'
 import { latestGreenCheckpoint, runCheckpoints } from '../src/checkpoint.js'
@@ -739,6 +740,23 @@ describe('Prompt-to-App pipeline', () => {
    * funcao pura: a licao da OS-61 foi que uma sabotagem na fiacao sobrevive a
    * qualquer teste que so exercite a funcao.
    */
+  it('o gerador RECEBE as regras que vão ser aplicadas nele', async () => {
+    // Elas eram escritas duas vezes — prosa no catalogo, constante na politica —
+    // e as duas nao conversavam. O gerador continuava chutando um modulo que a
+    // politica ja recusava, e cada chute custava uma tentativa inteira.
+    // O prompt e montado DENTRO de `ModelCodeGenerator`, entao o teste usa o
+    // gerador de verdade com um modelo duble, e le o que chegou ao modelo.
+    const prompts: string[] = []
+    const complete = vi.fn(async (..._args: unknown[]) => {
+      prompts.push(String(_args[3] ?? ''))
+      return { value: { files: cleanGeneration.files }, route: "ollama", model: "qwen" }
+    })
+    const real = new ModelCodeGenerator({ complete } as never, actor, 'local-only')
+    await real.generate(spec, plan)
+    const prompt = prompts[0] ?? ''
+    for (const regra of generationRules()) expect(prompt).toContain(regra)
+  })
+
   it('a criação PARA antes do limite quando a tentativa repete código e falha', async () => {
     // Duas tentativas com a mesma entrada escreveram byte a byte o mesmo
     // codigo e falharam byte a byte igual. A terceira gastaria o resto do teto

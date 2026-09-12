@@ -27,7 +27,7 @@ import {
 import { generatedFileSchema, writeGeneratedFiles, type GeneratedFile } from './generator.js'
 import { generateFormLayer, writeFormLayer } from './form-generator.js'
 import { generateSchedulingLayer, writeSchedulingLayer } from './scheduling-generator.js'
-import { assertGeneratedSource } from './import-policy.js'
+import { assertGeneratedSource, generationRules } from './import-policy.js'
 import { generateSaasLayer, writeSaasLayer } from './saas-generator.js'
 import { t } from './i18n.js'
 import { diffRunFiles, runReport, RUN_REPORT_FILE, type RunFileAuthor } from './run-report.js'
@@ -55,6 +55,12 @@ export class ModelCodeGenerator implements CodeGeneratorPort {
       t('prompts.generateDeclarative'),
       t('prompts.generatePaths'),
       t('prompts.generatePlanned'),
+      // As regras que SERAO aplicadas, ditas a partir da MESMA lista que as
+      // aplica. Elas eram escritas duas vezes — prosa no catalogo, constante na
+      // politica —, e as duas nao conversavam: um modulo novo na lista de
+      // permitidos nunca chegava ao prompt, e o gerador continuava chutando e
+      // sendo recusado, gastando uma tentativa inteira por chute.
+      ...generationRules(),
       t('prompts.generateSpec', { spec: JSON.stringify(spec) }), t('prompts.generatePlan', { plan: JSON.stringify(plan.slices) }),
       ...(diagnostic === undefined ? [] : [t('prompts.generateRepair', { diagnostic })]),
     ].join('\n'))

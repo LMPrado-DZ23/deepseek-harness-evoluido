@@ -261,3 +261,34 @@ function scriptKind(path: string): ts.ScriptKind {
   if (/\.[cm]?js$/u.test(normalizedPath)) return ts.ScriptKind.JS
   return ts.ScriptKind.TS
 }
+
+/**
+ * AS REGRAS QUE SERAO APLICADAS, DITAS AO GERADOR (T-10).
+ *
+ * Elas eram escritas DUAS VEZES: uma como prosa no catalogo de prompts, outra
+ * como constante aqui. As duas listas nao conversavam — um modulo acrescentado
+ * a `ALLOWED_MODULES` nunca chegava ao prompt, e uma tag acrescentada a
+ * `FORBIDDEN_JSX_TAGS` tambem nao. O gerador continuava chutando e sendo
+ * recusado, e cada chute custava uma tentativa inteira.
+ *
+ * Segunda verdade classica: duas descricoes do mesmo fato, que divergem no
+ * primeiro conserto de uma delas — e aqui a que diverge em silencio e
+ * justamente a que o modelo le.
+ *
+ * A prosa continua no catalogo (o portao de i18n exige), mas ela recebe A LISTA
+ * como parametro. Existe UMA lista, e ela e a que recusa.
+ */
+export function generationRules(): readonly string[] {
+  const modules = [...ALLOWED_MODULES].sort()
+  const prefixes = [...ALLOWED_PREFIXES].sort()
+  const tags = [...FORBIDDEN_JSX_TAGS].sort()
+  const attributes = [...FORBIDDEN_JSX_ATTRIBUTES].sort()
+  const globals = [...FORBIDDEN_GLOBALS, ...FORBIDDEN_NETWORK_APIS].sort()
+  return [
+    t('prompts.ruleModules', { modules: modules.join(', '), prefixes: prefixes.join(', ') }),
+    t('prompts.ruleTags', { tags: tags.join(', ') }),
+    t('prompts.ruleAttributes', { attributes: attributes.join(', ') }),
+    t('prompts.ruleGlobals', { globals: globals.join(', ') }),
+    t('prompts.ruleUrls'),
+  ]
+}

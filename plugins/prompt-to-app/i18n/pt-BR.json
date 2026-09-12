@@ -157,7 +157,12 @@
     "codeCycles": "Atenção: já existe importação em círculo entre {cycles}.",
     "codeIncomplete": "Esta lista está INCOMPLETA: não foi possível ler {files}. Não conclua que algo não existe só porque não está acima.",
     "failureAcrossRuns": "Esta mesma falha já apareceu em {runs} tentativa(s) anterior(es) deste projeto, a última em {when}. Se a abordagem for a mesma de antes, o resultado tende a ser o mesmo.",
-    "researchNote": "{claim}\nTrecho da fonte, palavra por palavra: \"{excerpt}\"\nFonte: {url}"
+    "researchNote": "{claim}\nTrecho da fonte, palavra por palavra: \"{excerpt}\"\nFonte: {url}",
+    "ruleModules": "Importe SOMENTE destes módulos: {modules}. E destes prefixos de caminho: {prefixes}. Qualquer outro import é recusado antes de o código chegar ao disco.",
+    "ruleTags": "NÃO use estas tags: {tags}. Elas são recusadas antes de o código chegar ao disco.",
+    "ruleAttributes": "NÃO use estes atributos: {attributes}. Eles são recusados antes de o código chegar ao disco.",
+    "ruleGlobals": "NÃO use estes nomes globais nem estas APIs: {globals}. Eles são recusados antes de o código chegar ao disco.",
+    "ruleUrls": "Todo endereço em href, src, action e semelhantes precisa começar com https://, ou ser um caminho interno começando com /."
   },
   "stages": {
     "install": "Preparando as ferramentas do seu aplicativo",
