@@ -118,7 +118,21 @@ export function createHubHttpHandler(config: HubHttpConfig) {
         // `health` é derivada dos contadores gravados: nunca `OK` sem nunca ter sido chamada.
         return json(response, 200, {
           channel: service.channel,
-          integrations: page.integrations.map(item => ({ ...item, can_enable: service.canEnable(item), requires_approval_tier: service.requiredApprovalTier(item), health: integrationHealth(item) })),
+          // `secret_ref` NAO sai na listagem. O catalogo ja documenta que um
+          // acerto de busca nele 'contaria a quem procurasse quais nomes
+          // existem la dentro' do cofre — e a listagem, que exige apenas
+          // `workspace.read`, devolvia o registro INTEIRO, com o alias. E
+          // referencia e nao valor, entao nao e vazamento de segredo; e o mapa
+          // de nomes do cofre chegando a quem so tem permissao de olhar. A
+          // propria auditoria digere o alias (`minimizeSecretRef`) para nao
+          // registra-lo.
+          integrations: page.integrations.map(item => {
+            const { secret_ref: _secretRef, ...visible } = item
+            // As duas derivadas continuam sendo calculadas sobre o registro
+            // COMPLETO: recalcular sobre o recorte mudaria a resposta para uma
+            // que o servidor nao decidiu.
+            return { ...visible, can_enable: service.canEnable(item), requires_approval_tier: service.requiredApprovalTier(item), health: integrationHealth(item) }
+          }),
           next_cursor: page.next_cursor,
           // Os dois totais separam "nada encontrado para o que você procurou" de
           // "você ainda não tem integração": uma lista vazia sozinha não diz qual das duas é.

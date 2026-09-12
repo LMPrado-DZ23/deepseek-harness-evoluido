@@ -32,16 +32,16 @@ Todos reproduzíveis pelo comando ao lado.
 | --- | --- | --- |
 | typecheck | PASS | `pnpm typecheck` |
 | build | PASS | `pnpm build` |
-| suíte raiz | 2892 testes, 181 arquivos, 0 falha (12/09, após OS-37) | `pnpm -w test` |
+| suíte raiz | 2895 testes, 181 arquivos, 0 falha (12/09, após OS-38) | `pnpm -w test` |
 | suíte studio-web | 394 testes | `cd apps/studio-web && npx vitest run` |
 | e2e navegador | 72 testes, Chromium real | `cd apps/studio-web && npx playwright test` |
 | PostgreSQL real | 63 testes | `pnpm test:postgres` |
 | portões | **18/18 PASS** | ver abaixo |
 
-Portões, todos `EXIT=0` em 11/09/2026: `domain-scopes`, `domain-routes`,
+Portões, todos `EXIT=0` em 12/09/2026: `domain-scopes`, `domain-routes`,
 `assistant-tools`, `team-role-tools`, `rls-coverage` (7/26), `upstream-pin`,
 `portability`, `i18n` (25 catálogos, 575 chaves), `comprehension`,
-`tracked-lib`, `image-lock`, `requirements-ledger` (159 requisitos),
+`tracked-lib`, `image-lock`, `requirements-ledger` (197 requisitos),
 `secrets` (5.735 arquivos), `no-caveman`, `p37` (12/12),
 `vendored-references` (3/3), `licenses` (848 pacotes), `licenses:release`.
 

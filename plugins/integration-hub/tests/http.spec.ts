@@ -610,3 +610,44 @@ describe('integration hub HTTP boundary', () => {
     expect((await builder.request('/projects/p1/exports', { method: 'POST', body: '{}' })).status).toBe(201)
   })
 })
+
+describe('ACHADO: a listagem de integracoes nao entrega o mapa de nomes do cofre', () => {
+  it('`secret_ref` nao sai na listagem, que so exige `workspace.read`', async () => {
+    // O catalogo ja documenta que um acerto de busca no `secret_ref` 'contaria
+    // a quem procurasse quais nomes existem la dentro' do cofre. A listagem
+    // devolvia o registro INTEIRO, com o alias, para qualquer papel que possa
+    // ler o espaco. E referencia e nao valor — nao e vazamento de segredo —,
+    // mas e o mapa de nomes do cofre chegando a quem so pode olhar, e a
+    // propria auditoria digere o alias para nao registra-lo.
+    //
+    // O alias e PLANTADO no armazenamento de proposito: registrar um manifesto
+    // pelo HTTP nasce com `secret_ref: null`, e uma lista onde o campo e nulo
+    // nao consegue provar que o campo nao sai. A primeira versao deste teste
+    // afirmava sobre uma lista VAZIA e passava com o defeito de volta no lugar.
+    const f = await fixture('viewer')
+    const registro: StudioIntegration = {
+      integration_id: 'int-plantada', org_id: session.org_id, tenant_id: session.tenant_id,
+      kind: 'skill', name: 'Agenda', manifest: null,
+      effective_tier: 'T0', verification: 'unverified',
+      enabled: true, secret_ref: 'DZ23_APP_SMTP',
+      created_by: session.user_id, created_at: '2026-09-01T00:00:00.000Z', updated_at: '2026-09-01T00:00:00.000Z',
+    }
+    await f.repository.putIntegration(registro)
+
+    const response = await f.request('/integrations')
+    expect(response.status).toBe(200)
+    const body = await response.json() as { integrations: readonly Record<string, unknown>[] }
+    // A integracao plantada ESTA na resposta: sem isso as duas guardas abaixo
+    // seriam afirmacoes sobre uma lista vazia.
+    expect(body.integrations.map(item => item['integration_id'])).toContain('int-plantada')
+    for (const item of body.integrations) expect(item).not.toHaveProperty('secret_ref')
+    expect(JSON.stringify(body)).not.toContain('DZ23_APP_SMTP')
+    expect(JSON.stringify(body)).not.toContain('secret_ref')
+    // E o que a tela PRECISA continua vindo: um recorte que come a resposta
+    // inteira nao e minimizacao, e produto quebrado.
+    const plantada = body.integrations.find(item => item['integration_id'] === 'int-plantada')!
+    expect(plantada).toMatchObject({ name: 'Agenda', kind: 'skill', enabled: true })
+    expect(plantada).toHaveProperty('health')
+    expect(plantada).toHaveProperty('can_enable')
+  })
+})

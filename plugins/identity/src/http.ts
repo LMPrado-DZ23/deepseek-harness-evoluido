@@ -104,6 +104,24 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
       const forwardedAddress = config.edgeRequired === true
         ? edgeForwardedAddress(singleHeader(request.headers['x-forwarded-for']))
         : undefined
+      // LIMITE CONHECIDO, e ele NÃO foi consertado aqui de propósito.
+      //
+      // Com borda obrigatória e sem `X-Forwarded-For`, `forwardedAddress` é
+      // `undefined` e a chave cai em `request.socket.remoteAddress` — que
+      // atrás de uma borda é o endereço DA BORDA. Todos os clientes caem no
+      // MESMO balde, e o teto global de 300 por minuto vira o teto da
+      // instalação inteira: um visitante qualquer tranca todo mundo para fora
+      // sem fazer nada de errado.
+      //
+      // Não é brecha (a direção é mais restrição, não menos), e o cliente não
+      // consegue apagar um cabeçalho que a borda escreve. É indisponibilidade
+      // por configuração errada da borda.
+      //
+      // Recusar o pedido seria a falha alta e barulhenta que este repositório
+      // prefere — mas mudaria o contrato de `edgeRequired` (passaria a EXIGIR
+      // o cabeçalho), e há caminho coberto por teste que depende de subir sem
+      // ele. Trocar contrato de configuração é decisão do Prado, não minha:
+      // está registrado em OS-38 com o próximo passo.
       const key = rateLimitKey(request, forwardedAddress)
       for (const bucket of rateLimitBuckets(route)) {
         const decision = limiter.consume(bucket, key)

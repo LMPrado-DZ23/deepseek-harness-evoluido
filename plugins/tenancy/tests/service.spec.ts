@@ -362,3 +362,33 @@ describe('ACHADO: uma organização não rouba a matrícula de quem outra convid
     expect(h.service.enrollmentGrantFor('nova@corp.com')).toMatchObject({ role: 'builder' })
   })
 })
+
+describe('ACHADO: a lista de participantes leva só o que a tela usa', () => {
+  it('`membership_id` e as datas NÃO chegam a quem só tem permissão de ler', async () => {
+    // `members.read` pertence também ao papel de leitor, e a lista devolvia o
+    // registro INTEIRO: `membership_id`, `org_id`, `created_at`, `updated_at`.
+    // O `membership_id` é o identificador que `PATCH /memberships/:id` usa — a
+    // mutação continua protegida, então não é escalada, mas entregar o
+    // identificador da operação a quem não pode fazê-la é dar meio caminho de
+    // graça.
+    const h = harness()
+    await boot(h)
+    const membros = h.service.listMembers(actor, 'workspace-a')
+    expect(membros.length).toBeGreaterThan(0)
+    for (const membro of membros) {
+      expect(Object.keys(membro).sort()).toEqual(['email', 'role', 'user_id', 'workspace_id'])
+    }
+  })
+
+  it('o que a tela PRECISA continua chegando', () => {
+    // Cortar demais quebra a tela: `email` e `role` são o que ela mostra, e
+    // `user_id` é como a pessoa se reconhece na lista.
+    const h = harness()
+    return boot(h).then(() => {
+      const primeiro = h.service.listMembers(actor, 'workspace-a')[0]!
+      expect(primeiro.email).toBeTruthy()
+      expect(primeiro.role).toBeTruthy()
+      expect(primeiro.user_id).toBeTruthy()
+    })
+  })
+})
