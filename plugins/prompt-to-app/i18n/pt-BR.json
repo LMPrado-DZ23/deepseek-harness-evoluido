@@ -84,7 +84,8 @@
     "dashboardNeedsEntity": "Um painel precisa de ao menos um cadastro para resumir.",
     "sliceDuplicatePaths": "A etapa sugerida mexeria em arquivos que outra etapa já vai criar. Descreva com outras palavras o que falta.",
     "sliceUnusable": "Não deu para transformar esse pedido em uma etapa nova. Tente descrever em uma frase o que falta no plano.",
-    "contextBudget": "O que você descreveu ficou grande demais para caber em um pedido só. Isso não é erro seu: o Studio precisa dividir o trabalho em partes menores, e ainda não sabe fazer isso sozinho para um projeto deste tamanho."
+    "contextBudget": "O que você descreveu ficou grande demais para caber em um pedido só. Isso não é erro seu: o Studio precisa dividir o trabalho em partes menores, e ainda não sabe fazer isso sozinho para um projeto deste tamanho.",
+    "skillBodyMismatch": "Uma habilidade entregou um texto diferente do que tinha declarado, então ela não foi usada."
   },
   "pipeline": {
     "verified": "Protótipo verificado — não está publicado nem disponível para outras pessoas",

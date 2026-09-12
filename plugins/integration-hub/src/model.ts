@@ -100,10 +100,33 @@ const integrationManifestV1Schema = z.object({
   signature: z.string().base64().optional(),
 }).strict()
 
+/**
+ * O que uma HABILIDADE precisa declarar para poder ser carregada aos poucos.
+ *
+ * `body_chars` não é contabilidade: sem ele não existe carregamento
+ * progressivo, só carregar e torcer. A escolha de quais habilidades entram no
+ * contexto é feita ANTES de buscar o texto de qualquer uma, e ela precisa saber
+ * quanto cada uma pesa — senão a única forma de descobrir seria carregar todas,
+ * que é exatamente o que se quer evitar.
+ *
+ * `trigger` é a linha que decide a escolha. Ela é separada de `description`
+ * porque as duas têm leitores diferentes: a descrição é para a pessoa que
+ * decide ligar, e o gatilho é para a máquina que decide usar.
+ *
+ * OPCIONAL, e um manifesto de habilidade sem ele simplesmente não produz ficha
+ * — a habilidade fica registrada e nunca é escolhida, o que é dito em vez de
+ * silencioso. Torná-lo obrigatório invalidaria toda assinatura já emitida.
+ */
+export const integrationSkillSchema = z.object({
+  trigger: z.string().min(3).max(300).regex(/^\S(.*\S)?$/su, 'no-padding'),
+  body_chars: z.number().int().positive().max(200_000),
+}).strict()
+
 const integrationManifestV2Schema = integrationManifestV1Schema.extend({
   schema_version: z.literal(2),
   provenance: integrationProvenanceSchema,
   capabilities: integrationCapabilitiesSchema,
+  skill: integrationSkillSchema.optional(),
 }).strict()
 
 export const integrationManifestSchema = z.discriminatedUnion('schema_version', [

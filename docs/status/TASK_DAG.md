@@ -41,7 +41,7 @@ separa este trabalho de acrescentar features.
 | T-25 | P2 | Intake e etapa nova no mesmo motor de contexto | T-07 | DONE |
 | T-09 | P2 | Spec Engine: constitution → specify → clarify → plan → tasks → implement → validate → converge | T-08 | PENDING |
 | T-10 | P2 | Constitution Engine aplicado pelo planner e pelo builder | T-09 | PENDING |
-| T-11 | P2 | Skill Registry com carregamento progressivo | T-07 | PENDING |
+| T-11 | P2 | Skill Registry com carregamento progressivo | T-07 | PARCIAL (OS-54: o motor existe e é falsificado — escolha sobre a ficha, teto por habilidade, conferência do corpo contra o tamanho declarado, procedência até o registro de contexto. Falta o ARMAZENAMENTO do corpo: `SkillBodyLoader` é uma porta sem implementação de produção, e nada no pipeline chama `selectSkills` ainda) |
 | T-12 | P2 | Revisão independente + adversarial + convergência | T-09 | PENDING |
 | T-13 | P1 | Prontidão explícita: READY/WAITING/BLOCKED com motivo nomeado | — | DONE (falta levar à tela: T-24) |
 | T-14 | P1 | Mission Engine de escopo amplo (hoje o checkpoint cobre uma geração) | T-13 | PARCIAL (o motor existe e é falsificado — `plugins/mission`, OS-40: candidatura antes de conclusão, prova obrigatória, teto que atravessa execuções. já tem domínio físico, repositório e composição no perfil, e o teto aperta no disparo de equipe (OS-42). tem rota HTTP com contrato (OS-43) e TELA com e2e e axe (OS-44). tem TELA COM FORMULÁRIO DE CRIAÇÃO e PROVA REAL em PostgreSQL 16 (OS-51). registrar prova e motivo de bloqueio PELA TELA chegou na OS-52. O motor está completo de ponta a ponta: criar, registrar, marcar, encerrar — com prova contra PostgreSQL real e e2e em quatro tamanhos) |
