@@ -5,6 +5,7 @@ import type { AppSpecV1 } from './appspec.js'
 import { assertValidDataModel } from './data-generator.js'
 import { planSliceSchema, type StudioProjectCategory } from './model.js'
 import type { PromptModelPort } from './ports.js'
+import { codeIndexSummary, type AppSourcesRead, type CodeIndex } from './code-intelligence.js'
 import {
   loadSkills, selectSkills,
   type SkillCard, type SkillRefusal, type SkillSelection,
@@ -55,6 +56,20 @@ export interface PlannerActor {
  * empurrar para fora o que a pessoa pediu.
  */
 export const SKILL_ALLOWANCE_FRACTION = 0.3
+
+/**
+ * O que JÁ existe no aplicativo, para o planejamento de uma MUDANÇA.
+ *
+ * Opcional, e só faz sentido quando há mudança: num plano NOVO não existe
+ * código ainda, e um resumo dizendo "o aplicativo já tem estes arquivos" seria
+ * falso. É por isso que ele não é lido no primeiro planejamento.
+ */
+export interface PlannerCodeContext {
+  readonly index: CodeIndex
+  readonly skipped?: AppSourcesRead['skipped'] | undefined
+  /** Os arquivos que a mudança deve tocar, quando já se sabe. */
+  readonly changed?: readonly string[] | undefined
+}
 
 /** O que as habilidades acrescentaram a um planejamento, e o que ficou de fora. */
 export interface PlannerSkillReport {
@@ -175,6 +190,15 @@ export class PlannerEngine {
    */
   lastSkills: PlannerSkillReport | undefined
 
+  /**
+   * O inventário do código que entrou no ÚLTIMO planejamento.
+   *
+   * Mesmo motivo dos outros dois: a pergunta depois de um plano estranho é "o
+   * que exatamente o modelo viu?", e um inventário incompleto que entrou como
+   * se fosse completo é a resposta que ninguém adivinha.
+   */
+  lastCode: readonly string[] | undefined
+
   constructor(
     private readonly model: PromptModelPort,
     private readonly budgetChars?: number,
@@ -205,7 +229,11 @@ export class PlannerEngine {
     return sections
   }
 
-  async plan(scope: PlannerActor, privacy: RoutePrivacy, spec: AppSpecV1, category: StudioProjectCategory = 'landing-page', changeRequest?: string): Promise<PlanOutput> {
+  async plan(
+    scope: PlannerActor, privacy: RoutePrivacy, spec: AppSpecV1,
+    category: StudioProjectCategory = 'landing-page', changeRequest?: string,
+    code?: PlannerCodeContext,
+  ): Promise<PlanOutput> {
     assertCategoryCanGenerate(category, spec)
     // As habilidades entram ANTES da montagem, e não depois: elas são
     // `instruction`, e instrução não é cortável — descobrir que não cabem
@@ -221,6 +249,13 @@ export class PlannerEngine {
       [spec.problem, spec.audience, ...spec.journeys, ...spec.pages.map(page => page.name), changeRequest ?? ''].join(' '),
       this.budgetChars ?? DEFAULT_CONTEXT_BUDGET_CHARS,
     )
+    // O inventário só é montado quando há mudança a planejar: num plano novo
+    // não existe código ainda, e um resumo dizendo "o aplicativo já tem estes
+    // arquivos" seria falso.
+    const codeLines = code === undefined || changeRequest === undefined
+      ? []
+      : codeIndexSummary(code.index, code.changed ?? [], code.skipped ?? [])
+    this.lastCode = codeLines.length === 0 ? undefined : codeLines
     const assembled = assembleContext([
       instruction('plan.only', t('prompts.planOnly')),
       instruction('plan.criteria', t('prompts.planCriteria')),
@@ -228,6 +263,18 @@ export class PlannerEngine {
       instruction('plan.first', t('prompts.planFirst')),
       ...categoryInstruction(category),
       ...skills,
+      // O que JÁ existe entra como EVIDÊNCIA e não como instrução: é material
+      // sobre o qual o modelo raciocina, e ele pode ser cortado pelo teto sem
+      // mudar nenhuma regra. Uma instrução cortada muda a regra; um inventário
+      // cortado deixa o plano mais pobre, e é por isso que a última linha do
+      // resumo já avisa que ele pode estar incompleto.
+      //
+      // Prioridade ACIMA da especificação: num pedido de mudança, o que já
+      // está escrito importa mais do que a descrição original — é justamente a
+      // diferença entre os dois que o pedido pede para resolver.
+      ...(codeLines.length === 0
+        ? []
+        : [{ id: 'plan.code', kind: 'evidence' as const, priority: 110, source: 'code-index', text: codeLines.join('\n') }]),
       // A especificação é EVIDÊNCIA: é sobre ela que o modelo raciocina, e é
       // a única parte que cresce com o tamanho do que a pessoa descreveu.
       { id: 'plan.spec', kind: 'evidence' as const, priority: 100, source: 'app-spec', text: t('prompts.generateSpec', { spec: JSON.stringify(spec) }) },

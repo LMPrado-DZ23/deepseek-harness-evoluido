@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
-  buildCodeIndex, dependents, findSymbol, impactOf, importCycles, isReadableSource,
-  resolveSpecifier, unimported, type SourceFileInput,
+  APP_SOURCE_LIMITS, buildCodeIndex, codeIndexSummary, dependents, findSymbol, impactOf,
+  importCycles, isReadableSource, readAppSources, resolveSpecifier, unimported,
+  type SourceFileInput,
 } from '../src/code-intelligence.ts'
 
 function file(path: string, text: string): SourceFileInput { return { path, text } }
@@ -277,5 +278,131 @@ describe('arquivos que ninguem importa', () => {
   it('arquivo que este indice nao le nao entra na lista', () => {
     const index = buildCodeIndex([file('content/app.json', '{}'), file('src/a.ts', 'export const a = 1\n')])
     expect(unimported(index)).toEqual(['src/a.ts'])
+  })
+})
+
+describe('a leitura dos arquivos do aplicativo tem teto, e o que sobra e DITO', () => {
+  function leitor(conteudo: Record<string, string>) {
+    return async (path: string) => {
+      const relativo = path.replace(/^app\//u, '')
+      const texto = conteudo[relativo]
+      if (texto === undefined) throw new Error('nao existe')
+      return texto
+    }
+  }
+
+  it('le so o que e codigo, e ignora as pastas de build e de dependencia', async () => {
+    const arvore = [
+      'src/a.ts', 'src/estilo.css', 'content/app.json',
+      'node_modules/pacote/index.ts', '.next/server/x.js', 'dist/bundle.js',
+      'src/node_modules/aninhado.ts',
+    ]
+    const saida = await readAppSources('app', leitor({ 'src/a.ts': 'export const a = 1\n' }), async () => arvore)
+    expect(saida.files.map(item => item.path)).toEqual(['src/a.ts'])
+    expect(saida.skipped).toEqual([])
+  })
+
+  it('arquivo grande demais e PULADO, e o pulo e devolvido', async () => {
+    // Um indice construido sobre metade do aplicativo responde "este simbolo
+    // nao existe" com a mesma confianca que responderia se ele nao existisse.
+    const grande = 'x'.repeat(APP_SOURCE_LIMITS.bytesPerFile + 1)
+    const saida = await readAppSources('app', leitor({ 'src/grande.ts': grande, 'src/a.ts': 'export const a = 1\n' }), async () => ['src/grande.ts', 'src/a.ts'])
+    expect(saida.files.map(item => item.path)).toEqual(['src/a.ts'])
+    expect(saida.skipped).toEqual([{ path: 'src/grande.ts', reason: 'TOO_LARGE' }])
+  })
+
+  it('o teto de tamanho e em BYTES, e nao em caracteres', async () => {
+    // Um arquivo com acento tem mais bytes do que caracteres: medir o menor
+    // dos dois deixaria passar um arquivo maior do que o teto diz.
+    const acentuado = 'á'.repeat(APP_SOURCE_LIMITS.bytesPerFile - 10)
+    expect(acentuado.length).toBeLessThan(APP_SOURCE_LIMITS.bytesPerFile)
+    expect(Buffer.byteLength(acentuado, 'utf8')).toBeGreaterThan(APP_SOURCE_LIMITS.bytesPerFile)
+    const saida = await readAppSources('app', leitor({ 'src/a.ts': acentuado }), async () => ['src/a.ts'])
+    expect(saida.skipped).toEqual([{ path: 'src/a.ts', reason: 'TOO_LARGE' }])
+  })
+
+  it('arquivo que nao da para ler entra como UNREADABLE, e nao some', async () => {
+    const saida = await readAppSources('app', leitor({}), async () => ['src/sumiu.ts'])
+    expect(saida.files).toEqual([])
+    expect(saida.skipped).toEqual([{ path: 'src/sumiu.ts', reason: 'UNREADABLE' }])
+  })
+
+  it('estourar o teto total NAO interrompe: o arquivo pequeno depois do grande ainda cabe', async () => {
+    // Vinte e um arquivos de 200 KB somam mais que o teto total de 4 MB, e os
+    // vinte primeiros nao: e a folga que sobra depois do estouro que deixa o
+    // arquivo pequeno do fim caber.
+    const meio = 'y'.repeat(200 * 1024)
+    const conteudo: Record<string, string> = {}
+    const arvore: string[] = []
+    for (let i = 0; i < 21; i += 1) { conteudo[`src/g${String(i).padStart(2, '0')}.ts`] = meio; arvore.push(`src/g${String(i).padStart(2, '0')}.ts`) }
+    conteudo['src/zz-pequeno.ts'] = 'export const z = 1\n'
+    arvore.push('src/zz-pequeno.ts')
+    const saida = await readAppSources('app', leitor(conteudo), async () => arvore)
+    expect(saida.files.map(item => item.path)).toContain('src/zz-pequeno.ts')
+    expect(saida.skipped.some(item => item.reason === 'TOTAL_LIMIT')).toBe(true)
+  })
+})
+
+describe('o resumo que o planejamento le', () => {
+  const app = [
+    file('src/GeneratedApp.tsx', "import { Form } from './Form'\nexport default function App() { return null }\n"),
+    file('src/Form.tsx', "import { validar } from './lib/validacao'\nexport function Form() { return null }\n"),
+    file('src/lib/validacao.ts', 'export function validar() { return true }\n'),
+  ]
+
+  it('diz que arquivos existem e o que cada um exporta', () => {
+    const linhas = codeIndexSummary(buildCodeIndex(app))
+    expect(linhas.join('\n')).toContain('src/lib/validacao.ts exporta: validar')
+    expect(linhas.join('\n')).toContain('src/GeneratedApp.tsx exporta: default')
+  })
+
+  it('arquivo sem exportacao e DITO como tal, e nao omitido', () => {
+    // Omiti-lo faria o planejador achar que o arquivo nao existe.
+    const linhas = codeIndexSummary(buildCodeIndex([file('src/efeito.ts', 'console.log(1)\n')]))
+    expect(linhas.join('\n')).toContain('src/efeito.ts (não exporta nada)')
+  })
+
+  it('diz o que QUEBRA se os arquivos alvo mudarem', () => {
+    // A afirmacao e sobre a FRASE de impacto, e nao sobre os nomes aparecerem
+    // em algum lugar: eles ja aparecem na lista de arquivos logo acima, e
+    // procurar so por eles passaria mesmo sem a frase existir.
+    const linha = codeIndexSummary(buildCodeIndex(app), ['src/lib/validacao.ts'])
+      .find(item => item.startsWith('Se estes arquivos mudarem'))
+    expect(linha).toBe('Se estes arquivos mudarem, também dependem deles: src/Form.tsx, src/GeneratedApp.tsx.')
+  })
+
+  it('sem alvo, nao inventa uma linha de impacto', () => {
+    expect(codeIndexSummary(buildCodeIndex(app)).join('\n')).not.toContain('dependem deles')
+  })
+
+  it('a INCOMPLETUDE vem por ultimo, e sempre que houver', () => {
+    // E a linha que impede o resto de ser lido como um retrato completo.
+    const linhas = codeIndexSummary(
+      buildCodeIndex([...app, file('src/quebrado.ts', 'export function ( { <<<\n')]),
+      [], [{ path: 'src/enorme.ts', reason: 'TOO_LARGE' }],
+    )
+    expect(linhas.at(-1)).toContain('INCOMPLETA')
+    expect(linhas.at(-1)).toContain('src/enorme.ts')
+    expect(linhas.at(-1)).toContain('src/quebrado.ts')
+    expect(linhas.at(-1)).toContain('Não conclua que algo não existe')
+  })
+
+  it('sem nada incompleto, NAO avisa de incompletude', () => {
+    // Um aviso que aparece sempre deixa de ser aviso.
+    expect(codeIndexSummary(buildCodeIndex(app)).join('\n')).not.toContain('INCOMPLETA')
+  })
+
+  it('ciclo existente e avisado', () => {
+    const linhas = codeIndexSummary(buildCodeIndex([
+      file('src/a.ts', "import { b } from './b'\nexport const a = 1\n"),
+      file('src/b.ts', "import { a } from './a'\nexport const b = 1\n"),
+    ]))
+    expect(linhas.join('\n')).toContain('importação em círculo')
+  })
+
+  it('aplicativo sem nenhum arquivo de codigo devolve resumo VAZIO', () => {
+    // Uma frase dizendo "o aplicativo tem estes arquivos:" seguida de nada
+    // gastaria teto de contexto para nao dizer coisa alguma.
+    expect(codeIndexSummary(buildCodeIndex([file('content/app.json', '{}')]))).toEqual([])
   })
 })

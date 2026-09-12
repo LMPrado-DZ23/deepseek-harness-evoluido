@@ -148,7 +148,13 @@
     "sliceExisting": "O plano atual já tem estas fatias, e elas NÃO devem ser repetidas nem reescritas: {slices}",
     "sliceRequest": "O que a pessoa quer acrescentar: {request}",
     "sliceFiles": "A fatia nova não pode listar em planned_files nenhum arquivo já planejado por outra fatia.",
-    "repeatedFailure": "ATENÇÃO: esta mesma correção já foi pedida {times} vezes e produziu exatamente o mesmo resultado. Não repita a abordagem anterior. Mude de estratégia: reescreva o trecho de outra forma, ou resolva o problema por outro caminho."
+    "repeatedFailure": "ATENÇÃO: esta mesma correção já foi pedida {times} vezes e produziu exatamente o mesmo resultado. Não repita a abordagem anterior. Mude de estratégia: reescreva o trecho de outra forma, ou resolva o problema por outro caminho.",
+    "codeHeader": "O aplicativo já tem estes arquivos de código:",
+    "codeExports": "- {path} exporta: {names}",
+    "codeNoExports": "- {path} (não exporta nada)",
+    "codeImpact": "Se estes arquivos mudarem, também dependem deles: {files}.",
+    "codeCycles": "Atenção: já existe importação em círculo entre {cycles}.",
+    "codeIncomplete": "Esta lista está INCOMPLETA: não foi possível ler {files}. Não conclua que algo não existe só porque não está acima."
   },
   "stages": {
     "install": "Preparando as ferramentas do seu aplicativo",

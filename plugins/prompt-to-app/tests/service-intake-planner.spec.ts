@@ -4,6 +4,7 @@ import type { AppSpecV1 } from '../src/appspec.js'
 import { IntakeEngine, nextIntakeQuestion } from '../src/intake.js'
 import type { StudioApproval, StudioAppSpecRecord, StudioDesignSpecRecord, StudioEvidence, StudioIntakeTurn, StudioPlan, StudioProject, StudioRun } from '../src/model.js'
 import { studioProjectSchema } from '../src/model.js'
+import { buildCodeIndex } from '../src/code-intelligence.ts'
 import { type SkillCard } from '../src/skill-registry.ts'
 import { PlannerEngine } from '../src/planner.js'
 import type { PromptModelPort } from '../src/ports.js'
@@ -505,5 +506,111 @@ describe('as habilidades chegam ao prompt do planejamento', () => {
     const planner = new PlannerEngine({ complete })
     await expect(planner.plan(ATOR, 'local-only', validSpec)).resolves.toMatchObject({ slices: [{ slice_id: 's' }] })
     expect(planner.lastSkills).toBeUndefined()
+  })
+})
+
+describe('o que JA existe chega ao planejamento de uma MUDANCA', () => {
+  const ATOR2 = { orgId: 'o', tenantId: 't' }
+  const APP = [
+    { path: 'src/GeneratedApp.tsx', text: "import { Form } from './Form'\nexport default function App() { return null }\n" },
+    { path: 'src/Form.tsx', text: "import { validar } from './lib/validacao'\nexport function Form() { return null }\n" },
+    { path: 'src/lib/validacao.ts', text: 'export function validar() { return true }\n' },
+  ]
+
+  function planejador() {
+    const complete = vi.fn().mockResolvedValue({
+      value: { slices: [{ slice_id: 's', title: 'P', description: 'M', acceptance_criteria: ['C'], planned_files: ['src/GeneratedApp.tsx'] }] },
+      route: 'ollama', model: 'qwen',
+    })
+    return { complete, planner: new PlannerEngine({ complete }) }
+  }
+
+  it('o inventario entra no prompt quando ha pedido de mudanca', async () => {
+    const f = planejador()
+    await f.planner.plan(ATOR2, 'local-only', validSpec, 'landing-page', 'trocar o botao', {
+      index: buildCodeIndex(APP), changed: ['src/lib/validacao.ts'],
+    })
+    const prompt = f.complete.mock.calls[0]![3] as string
+    expect(prompt).toContain('src/lib/validacao.ts exporta: validar')
+    expect(prompt).toContain('Se estes arquivos mudarem')
+  })
+
+  it('num plano NOVO o inventario NAO entra, mesmo se alguem passar um', async () => {
+    // Num plano novo nao existe codigo ainda, e um resumo dizendo "o
+    // aplicativo ja tem estes arquivos" seria falso.
+    const f = planejador()
+    await f.planner.plan(ATOR2, 'local-only', validSpec, 'landing-page', undefined, { index: buildCodeIndex(APP) })
+    expect(f.complete.mock.calls[0]![3]).not.toContain('src/lib/validacao.ts')
+    expect(f.planner.lastCode).toBeUndefined()
+  })
+
+  it('o inventario entra como EVIDENCIA, e nao como instrucao', async () => {
+    // Instrucao cortada pelo teto muda a regra; inventario cortado so
+    // empobrece o plano — e a ultima linha dele ja avisa que pode faltar coisa.
+    const f = planejador()
+    await f.planner.plan(ATOR2, 'local-only', validSpec, 'landing-page', 'trocar o botao', { index: buildCodeIndex(APP) })
+    const linha = f.planner.lastLedger?.included.find(item => item.id === 'plan.code')
+    expect(linha?.kind).toBe('evidence')
+    expect(linha?.source).toBe('code-index')
+  })
+
+  it('o inventario tem prioridade ACIMA da especificacao', async () => {
+    // Num pedido de mudanca, o que ja esta escrito importa mais que a
+    // descricao original: e a diferenca entre os dois que o pedido resolve.
+    // Com teto apertado, quem sobrevive e o inventario.
+    const complete = vi.fn().mockResolvedValue({
+      value: { slices: [{ slice_id: 's', title: 'P', description: 'M', acceptance_criteria: ['C'], planned_files: ['src/GeneratedApp.tsx'] }] },
+      route: 'ollama', model: 'qwen',
+    })
+    // O teto e apertado ate caber so UMA das duas evidencias. O inventario e
+    // engordado de proposito para que a escolha entre ele e a especificacao
+    // seja forcada, e nao uma coincidencia de tamanhos.
+    const gordo = Array.from({ length: 60 }, (_, index) =>
+      ({ path: `src/arquivo${String(index)}.ts`, text: `export const constante${String(index)} = ${String(index)}\n` }))
+    // O teto e descoberto MEDINDO, e nao chutado: monta-se uma vez com folga
+    // para saber quanto o obrigatorio e o inventario ocupam, e so entao aperta
+    // para caber os dois e nao a especificacao. Um numero chutado aqui faria o
+    // teste passar por coincidencia de tamanhos.
+    const folgado = new PlannerEngine({ complete }, 100_000)
+    await folgado.plan(ATOR2, 'local-only', validSpec, 'landing-page', 'trocar o botao', { index: buildCodeIndex([...APP, ...gordo]) })
+    const tudo = folgado.lastLedger!
+    const spec = tudo.included.find(item => item.id === 'plan.spec')!
+    const apertado = tudo.chars - spec.chars
+
+    const planner = new PlannerEngine({ complete }, apertado)
+    await planner.plan(ATOR2, 'local-only', validSpec, 'landing-page', 'trocar o botao', { index: buildCodeIndex([...APP, ...gordo]) })
+    const cortados = planner.lastLedger?.dropped.map(item => item.id) ?? []
+    const entraram = planner.lastLedger?.included.map(item => item.id) ?? []
+    expect(cortados, 'a especificacao devia ter sido cortada').toContain('plan.spec')
+    expect(entraram, 'o inventario devia ter sobrevivido').toContain('plan.code')
+  })
+
+  it('a INCOMPLETUDE da leitura atravessa ate o prompt', async () => {
+    // Um inventario parcial que se apresenta como completo faz o planejador
+    // concluir que algo nao existe — e mandar criar de novo.
+    const f = planejador()
+    await f.planner.plan(ATOR2, 'local-only', validSpec, 'landing-page', 'trocar o botao', {
+      index: buildCodeIndex(APP), skipped: [{ path: 'src/enorme.ts', reason: 'TOO_LARGE' }],
+    })
+    expect(f.complete.mock.calls[0]![3]).toContain('INCOMPLETA')
+    expect(f.complete.mock.calls[0]![3]).toContain('src/enorme.ts')
+  })
+
+  it('o relatorio do inventario e ZERADO entre planejamentos', async () => {
+    // Um relatorio que sobrevive ao planejamento seguinte responde "o que o
+    // modelo viu?" com o que ele viu da OUTRA vez — e aqui a resposta errada
+    // e sobre um inventario de codigo que nem entrou.
+    const f = planejador()
+    await f.planner.plan(ATOR2, 'local-only', validSpec, 'landing-page', 'trocar o botao', { index: buildCodeIndex(APP) })
+    expect(f.planner.lastCode).toBeDefined()
+    await f.planner.plan(ATOR2, 'local-only', validSpec)
+    expect(f.planner.lastCode).toBeUndefined()
+  })
+
+  it('sem inventario, o planejamento de mudanca acontece como antes', async () => {
+    const f = planejador()
+    await f.planner.plan(ATOR2, 'local-only', validSpec, 'landing-page', 'trocar o botao')
+    expect(f.planner.lastCode).toBeUndefined()
+    expect(f.complete.mock.calls[0]![3]).toContain('trocar o botao')
   })
 })

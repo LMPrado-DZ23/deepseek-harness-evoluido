@@ -1,4 +1,5 @@
 import ts from 'typescript'
+import { t } from './i18n.js'
 
 /**
  * O que já EXISTE no aplicativo gerado: arquivos, símbolos e quem depende de quem.
@@ -377,4 +378,145 @@ export function importCycles(index: CodeIndex): readonly ImportCycle[] {
   // e código que nada alcança é código que ninguém pode conferir.
   for (const file of [...index.files].sort()) if (!vistos.has(file) && forward.has(file)) descer(file)
   return cycles
+}
+
+/** Diretórios que nunca entram no índice do aplicativo. */
+const IGNORED_ROOTS = ['node_modules/', '.next/', '.git/', '.dz23/', 'dist/', 'build/', 'coverage/']
+
+/**
+ * Os tetos da leitura, e por que cada um existe.
+ *
+ * Nenhum deles é performance: os três protegem contra um aplicativo gerado —
+ * ou um diretório de execução mexido por fora — que faça a montagem do
+ * contexto consumir memória sem fim no meio de um pedido de mudança.
+ */
+export const APP_SOURCE_LIMITS = {
+  /** Quantos arquivos de código o índice lê. */
+  files: 400,
+  /** Tamanho de UM arquivo. Acima disso ele é pulado, e o pulo é DITO. */
+  bytesPerFile: 256 * 1024,
+  /** Soma de tudo que foi lido. */
+  totalBytes: 4 * 1024 * 1024,
+} as const
+
+export interface AppSourcesRead {
+  readonly files: readonly SourceFileInput[]
+  /**
+   * O que ficou de fora, com o motivo.
+   *
+   * Sai junto com os arquivos, e não num log: um índice construído sobre
+   * metade do aplicativo responde "este símbolo não existe" com a mesma
+   * confiança que responderia se ele realmente não existisse.
+   */
+  readonly skipped: readonly { readonly path: string; readonly reason: 'TOO_LARGE' | 'FILE_LIMIT' | 'TOTAL_LIMIT' | 'UNREADABLE' }[]
+}
+
+/**
+ * Lê os arquivos de código de um diretório de execução.
+ *
+ * `listTreeFiles` já recusa raiz que seja link simbólico, e é dele que vem a
+ * lista. Aqui só se filtra o que é código e se aplicam os tetos.
+ * @param runDirectory - a raiz do aplicativo gerado.
+ * @param read - como ler um arquivo; injetável para o teste não precisar de disco.
+ * @param list - como listar a árvore; injetável pelo mesmo motivo.
+ * @returns os arquivos lidos e os que ficaram de fora.
+ */
+export async function readAppSources(
+  runDirectory: string,
+  read: (path: string) => Promise<string>,
+  list: (root: string) => Promise<readonly string[]>,
+): Promise<AppSourcesRead> {
+  const all = await list(runDirectory)
+  const candidates = all
+    .filter(path => isReadableSource(path))
+    .filter(path => !IGNORED_ROOTS.some(prefix => path === prefix.slice(0, -1) || path.startsWith(prefix) || path.includes(`/${prefix}`)))
+    .sort()
+
+  const files: SourceFileInput[] = []
+  const skipped: { path: string; reason: 'TOO_LARGE' | 'FILE_LIMIT' | 'TOTAL_LIMIT' | 'UNREADABLE' }[] = []
+  let total = 0
+  for (const path of candidates) {
+    if (files.length >= APP_SOURCE_LIMITS.files) { skipped.push({ path, reason: 'FILE_LIMIT' }); continue }
+    let text: string
+    try {
+      text = await read(`${runDirectory}/${path}`)
+    } catch {
+      skipped.push({ path, reason: 'UNREADABLE' })
+      continue
+    }
+    // O teto é sobre BYTES e não sobre caracteres: um arquivo com acento tem
+    // mais bytes do que caracteres, e medir o menor dos dois deixaria passar
+    // um arquivo maior do que o teto diz.
+    const bytes = Buffer.byteLength(text, 'utf8')
+    if (bytes > APP_SOURCE_LIMITS.bytesPerFile) { skipped.push({ path, reason: 'TOO_LARGE' }); continue }
+    if (total + bytes > APP_SOURCE_LIMITS.totalBytes) {
+      // NÃO interrompe: um arquivo pequeno depois de um grande ainda cabe, e
+      // parar aqui deixaria de fora por POSIÇÃO o que deveria ficar por
+      // tamanho.
+      skipped.push({ path, reason: 'TOTAL_LIMIT' })
+      continue
+    }
+    total += bytes
+    files.push({ path, text })
+  }
+  return { files, skipped }
+}
+
+/**
+ * O que o planejador precisa saber sobre o que JÁ existe, em português.
+ *
+ * Frase e não JSON: o destinatário é um modelo de linguagem lendo um prompt, e
+ * despejar a estrutura inteira gastaria o teto de contexto com pontuação.
+ *
+ * O que entra, e por quê:
+ *
+ * - os arquivos que existem, para que o plano não mande criar o que já está lá;
+ * - onde cada símbolo exportado mora, que é a resposta a "isso já existe?";
+ * - o que QUEBRA se os arquivos alvo mudarem, que é o que ninguém calcula de
+ *   cabeça;
+ * - o que NÃO pôde ser lido, porque um índice parcial que se apresenta como
+ *   completo é pior que índice nenhum.
+ * @param index - o índice do aplicativo.
+ * @param changed - os arquivos que o pedido de mudança deve tocar, se sabidos.
+ * @param skipped - o que a leitura deixou de fora.
+ * @returns as linhas do resumo, ou vazio quando não há o que dizer.
+ */
+export function codeIndexSummary(
+  index: CodeIndex,
+  changed: readonly string[] = [],
+  skipped: AppSourcesRead['skipped'] = [],
+): readonly string[] {
+  const lines: string[] = []
+  const lidos = [...index.symbols.keys()].sort()
+  // NÃO há uma saída antecipada para "nada a dizer": cada bloco abaixo já se
+  // cala sozinho quando não tem o que dizer, e um `return []` aqui em cima
+  // seria uma segunda guarda que nenhum caso alcança. Aplicativo sem código
+  // nenhum sai daqui com lista vazia porque todos os blocos ficam calados.
+  if (lidos.length > 0) {
+    lines.push(t('prompts.codeHeader'))
+    for (const path of lidos) {
+      const nomes = (index.symbols.get(path) ?? []).map(symbol => symbol.name)
+      lines.push(nomes.length === 0
+        ? t('prompts.codeNoExports', { path })
+        : t('prompts.codeExports', { path, names: nomes.join(', ') }))
+    }
+  }
+
+  const impacto = changed.length === 0 ? [] : impactOf(index, changed)
+  if (impacto.length > 0) {
+    lines.push(t('prompts.codeImpact', { files: impacto.join(', ') }))
+  }
+
+  const ciclos = importCycles(index)
+  if (ciclos.length > 0) {
+    lines.push(t('prompts.codeCycles', { cycles: ciclos.map(cycle => cycle.files.join(' -> ')).join('; ') }))
+  }
+
+  // A honestidade sobre o que falta vem POR ÚLTIMO e sempre: é a linha que
+  // impede o resto de ser lido como um retrato completo.
+  const faltando = [...index.unreadable.map(item => item.path), ...skipped.map(item => item.path)].sort()
+  if (faltando.length > 0) {
+    lines.push(t('prompts.codeIncomplete', { files: faltando.join(', ') }))
+  }
+  return lines
 }
