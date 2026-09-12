@@ -93,6 +93,7 @@ export declare const identityAuditRecordSchema: z.ZodObject<{
     event_type: z.ZodEnum<{
         magic_code_requested: "magic_code_requested";
         magic_code_suppressed: "magic_code_suppressed";
+        magic_code_send_failed: "magic_code_send_failed";
         login_succeeded: "login_succeeded";
         login_failed: "login_failed";
         passkey_registered: "passkey_registered";
@@ -222,7 +223,7 @@ export declare const identityAuditDomainSpec: {
     tables: {
         events: import("@deepseek-ai/dsh-storage-domain").DomainTableSpec<IdentityKey, {
             audit_id: string;
-            event_type: "magic_code_requested" | "magic_code_suppressed" | "login_succeeded" | "login_failed" | "passkey_registered" | "step_up_succeeded" | "session_revoked" | "all_sessions_revoked" | "harness_session_bound" | "harness_session_unbound" | "personal_mode_disabled" | "enrollment_closed" | "invitation_created" | "invitation_accepted" | "role_changed" | "workspace_created";
+            event_type: "magic_code_requested" | "magic_code_suppressed" | "magic_code_send_failed" | "login_succeeded" | "login_failed" | "passkey_registered" | "step_up_succeeded" | "session_revoked" | "all_sessions_revoked" | "harness_session_bound" | "harness_session_unbound" | "personal_mode_disabled" | "enrollment_closed" | "invitation_created" | "invitation_accepted" | "role_changed" | "workspace_created";
             user_id: string | null;
             session_id: string | null;
             org_id: string;

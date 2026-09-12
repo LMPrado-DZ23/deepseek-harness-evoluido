@@ -80,7 +80,7 @@ export const magicCodeRecordSchema = z.object({
 export const identityAuditRecordSchema = z.object({
     audit_id: z.string().min(1),
     event_type: z.enum([
-        'magic_code_requested', 'magic_code_suppressed', 'login_succeeded', 'login_failed', 'passkey_registered',
+        'magic_code_requested', 'magic_code_suppressed', 'magic_code_send_failed', 'login_succeeded', 'login_failed', 'passkey_registered',
         'step_up_succeeded', 'session_revoked', 'all_sessions_revoked',
         'harness_session_bound', 'harness_session_unbound', 'personal_mode_disabled', 'enrollment_closed',
         'invitation_created', 'invitation_accepted', 'role_changed', 'workspace_created',

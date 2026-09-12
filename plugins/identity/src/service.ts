@@ -267,7 +267,24 @@ export class StudioIdentityService {
         consumed_at: null,
       }
       await this.#repository.putMagicCode(record)
-      await this.#emailSender.sendMagicCode({ to: normalized, code, expiresInMinutes: 10 })
+      // O ENVIO NAO SEGURA A RESPOSTA, e isso fecha um oraculo de TEMPO.
+      //
+      // O corpo da resposta ja era identico nos dois casos — 202 tanto para
+      // quem tem conta quanto para quem nao tem, com o resultado descartado de
+      // proposito na rota. Mas o RELOGIO entregava a mesma informacao: o ramo
+      // suprimido fazia UMA escrita de auditoria e voltava, enquanto este aqui
+      // esperava o SMTP, que em producao e sincrono e custa dezenas a centenas
+      // de milissegundos. Medir o tempo respondia 'essa pessoa tem conta aqui?'
+      // com folga.
+      //
+      // E uma falha de envio era um segundo oraculo, pior: ela SUBIA, e a rota
+      // respondia com um status diferente de 202 — so para quem tem conta.
+      // Agora ela e registrada e nao sobe: quem pediu o codigo nao tem o que
+      // fazer com a excecao, e a trilha tem.
+      void this.#emailSender.sendMagicCode({ to: normalized, code, expiresInMinutes: 10 })
+        .catch(async () => {
+          await this.#audit('magic_code_send_failed', existing?.user_id ?? null, null, orgId, tenantId, 'failure', t('auth.codeSendFailed'))
+        })
       await this.#audit('magic_code_requested', existing?.user_id ?? null, null, orgId, tenantId, 'success', t('auth.codeRequested'))
       return 'sent'
     })

@@ -13,6 +13,7 @@
   "auth.codeInvalidOrExpired": "Código inválido ou expirado.",
   "auth.codeMissing": "Código temporário ausente.",
   "auth.codeRequested": "Código temporário solicitado.",
+  "auth.codeSendFailed": "Não foi possível enviar o código de acesso por e-mail.",
   "auth.confirmationAlreadyUsed": "Esta confirmação já foi usada.",
   "auth.confirmationExpired": "Esta confirmação expirou.",
   "auth.confirmationNotFound": "Confirmação não encontrada.",

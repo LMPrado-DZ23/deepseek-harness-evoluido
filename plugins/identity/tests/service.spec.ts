@@ -727,3 +727,33 @@ describe('ACHADO: "sair de todos os dispositivos" alcança a sessão que nasceu 
     expect([...h.repository.sessionMap.values()].every(session => session.revoked_at !== null)).toBe(true)
   })
 })
+
+describe('ACHADO: pedir código não conta pelo RELÓGIO quem tem conta', () => {
+  it('uma falha de envio NÃO sobe: ela é registrada, e a resposta continua igual', async () => {
+    // Dois oráculos na mesma linha. O corpo da resposta já era idêntico nos
+    // dois casos — 202 para quem tem conta e para quem não tem, com o
+    // resultado descartado de propósito na rota. Mas o RELÓGIO entregava a
+    // mesma informação: o ramo suprimido faz UMA escrita e volta, e este
+    // esperava o SMTP, que em produção é síncrono e custa dezenas a centenas
+    // de milissegundos.
+    //
+    // E uma falha de envio era o segundo, pior: ela SUBIA, e a rota respondia
+    // com um status diferente de 202 — só para quem tem conta.
+    const h = makeHarness()
+    h.email.sendMagicCode = () => Promise.reject(new Error('smtp fora do ar'))
+    await expect(h.service.requestMagicCode('owner@example.com')).resolves.toBe('sent')
+    // O registro chega depois do envio falhar; esperar o laço de microtarefas
+    // é o suficiente porque o dublê rejeita de imediato.
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(h.service.auditRecords().map(record => record.event_type)).toContain('magic_code_send_failed')
+  })
+
+  it('o envio não segura o retorno de quem pediu', async () => {
+    // Se o retorno esperasse o envio, o tempo voltaria a contar quem tem conta.
+    const h = makeHarness()
+    let liberar!: () => void
+    h.email.sendMagicCode = () => new Promise<void>(resolve => { liberar = resolve })
+    await expect(h.service.requestMagicCode('owner@example.com')).resolves.toBe('sent')
+    liberar()
+  })
+})
