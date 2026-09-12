@@ -49,3 +49,36 @@ describe('hub api client', () => {
     expect(fake.calls[0]!.input).toBe('/api/studio/apps/projects')
   })
 })
+
+describe('installSkillBody — a rota que nenhuma tela chamava (T-11)', () => {
+  it('bate no endereço certo, com POST, CSRF e o texto no corpo', async () => {
+    const fake = transport(() => json(200, { integration: { integration_id: 'i-1', skill_body_installed: true } }))
+    const api = createHubApi(fake)
+    const devolvida = await api.installSkillBody('i-1', 'INSTRUÇÃO DA HABILIDADE')
+
+    expect(fake.calls).toHaveLength(1)
+    expect(fake.calls[0]!.input).toBe('/api/studio/hub/integrations/i-1/skill-body')
+    expect(fake.calls[0]!.init.method).toBe('POST')
+    // Escrita: o cabeçalho de CSRF vai junto, como em toda mutação do hub.
+    expect((fake.calls[0]!.init.headers as Record<string, string>)['x-dz23-csrf']).toBe('tok=1')
+    expect(JSON.parse(String(fake.calls[0]!.init.body))).toEqual({ body: 'INSTRUÇÃO DA HABILIDADE' })
+    // E a tela recebe o que precisa para parar de oferecer instalar de novo.
+    expect(devolvida).toMatchObject({ skill_body_installed: true })
+  })
+
+  it('escapa o identificador no endereço', async () => {
+    // Um id com barra montaria outro caminho e bateria noutra rota.
+    const fake = transport(() => json(200, { integration: {} }))
+    await createHubApi(fake).installSkillBody('a/b', 'x')
+    expect(fake.calls[0]!.input).toBe('/api/studio/hub/integrations/a%2Fb/skill-body')
+  })
+
+  it('a recusa do servidor chega como erro, e não como sucesso silencioso', async () => {
+    // O servidor confere assinatura, tamanho e impressão. Engolir a recusa faria
+    // a tela dizer "texto instalado" sobre uma habilidade que continua vazia.
+    const api = createHubApi(transport(() => json(400, { error: 'O texto não bate com o tamanho declarado no manifesto.' })))
+    const erro = await api.installSkillBody('i-1', 'x').catch((value: unknown) => value)
+    expect(erro).toBeInstanceOf(HubApiError)
+    expect((erro as HubApiError).message).toContain('tamanho declarado')
+  })
+})

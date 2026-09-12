@@ -13,7 +13,7 @@ import { integrationKindSchema, verificationSchema } from './model.js'
 import { integrationHealth } from './runtime.js'
 import { EVENTS_PAGE_MAX, HubError, strongIdentityFresh, type HubActor, type IntegrationHubService } from './service.js'
 
-const JSON_LIMIT = 64 * 1024
+export const JSON_LIMIT = 64 * 1024
 
 /** Declared once, checked at startup: every route carries its access, permission and scope. */
 export const HUB_ROUTE_CONTRACTS = [

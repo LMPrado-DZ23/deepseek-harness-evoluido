@@ -24,6 +24,26 @@ export type Integration = {
    * tela não afirma nada em vez de inventar um estado.
    */
   health?: IntegrationHealth
+  /**
+   * JA HA texto de habilidade instalado?
+   *
+   * O texto em si NUNCA vem (OS-78): ele pode ter duzentos mil caracteres, e a
+   * listagem so exige `workspace.read`. Este booleano e a unica coisa que a
+   * tela precisa saber sobre ele — sem ele, ela ofereceria instalar de novo o
+   * que ja esta la, e quem le nao teria como saber que nao precisa.
+   *
+   * OPCIONAL: um Studio mais antigo nao o publica, e nesse caso a tela diz que
+   * nao sabe em vez de afirmar que nao ha.
+   */
+  skill_body_installed?: boolean
+  /**
+   * O manifesto assinado, como o servidor o guarda.
+   *
+   * A tela le dele UMA coisa: `skill.body_chars`, o tamanho EXATO que o
+   * servidor vai exigir. Sem isso a pessoa descobriria o numero por tentativa e
+   * erro, numa recusa escrita em linguagem de servidor.
+   */
+  manifest?: { readonly skill?: { readonly body_chars?: number } | undefined } | null
 }
 
 /**
@@ -114,6 +134,21 @@ export function createHubApi(transport: HubTransport = browserTransport) {
      * servidor abre a conexão, lê o catálogo e fecha.
      */
     testIntegration: (integrationId: string) => hub<IntegrationTestResult>(`/integrations/${encodeURIComponent(integrationId)}/test`, { method: 'POST', body: '{}' }),
+    /**
+     * Instala o TEXTO de uma habilidade (T-11).
+     *
+     * A rota existia desde a OS-76 e nenhuma tela a chamava: quem quisesse
+     * instalar o texto tinha de falar HTTP. Exige `integrations.manage` — o
+     * corpo de uma habilidade e INSTRUCAO que entra no contexto de um agente, e
+     * quem pode instala-la e quem pode instalar integracao.
+     *
+     * A resposta NAO devolve o texto: ela devolve a integracao recortada, com
+     * `skill_body_installed`. Devolve-lo faria toda instalacao trafegar duas
+     * vezes o que acabou de subir.
+     */
+    installSkillBody: (integrationId: string, body: string) => hub<{ integration: Integration }>(`/integrations/${encodeURIComponent(integrationId)}/skill-body`, {
+      method: 'POST', body: JSON.stringify({ body }),
+    }).then(value => value.integration),
     /**
      * Remove a integração (X-04). Só funciona com ela DESLIGADA, e o servidor
      * pede a mesma confirmação que ligar exigiria.

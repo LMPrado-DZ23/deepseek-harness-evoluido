@@ -91,6 +91,12 @@ produto existe para não fazer.
    os dois números junto. 13 falsificações, todas pegas; uma delas pegou um
    **comentário meu que mentia** sobre por que a ordem das linhas importava.
 
+9. **OS-80 — T-11 fechado.** A rota do texto de habilidade existia desde a
+   OS-76 e **nenhuma tela a chamava**. Agora há tela, e ela confere o tamanho
+   enquanto a pessoa cola — o servidor exige o número exato de caracteres, e
+   descobrir isso por tentativa e erro numa recusa de servidor é o oposto do
+   que este produto promete. 11 falsificações, todas pegas.
+
 ## Próxima ação
 
 Ver `docs/status/TASK_DAG.md`, tarefa de maior prioridade em `READY`.

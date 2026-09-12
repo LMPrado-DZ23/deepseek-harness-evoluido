@@ -1,8 +1,9 @@
 import { ArrowLeft, Download, Mail, Plug, ScrollText, Search } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import t from '../i18n/hub.pt-BR.json'
+import { PendingButton } from '../PendingButton'
 import { createHubApi, HubApiError, type ExportRecord, type HubApi, type HubEvent, type Integration, type IntegrationCatalog, type IntegrationTestResult, type ProjectSummary, type RemovedIntegration, type SmtpState } from './hubApi'
-import { CATALOG_PAGE_SIZE, actionLabel, approvalNote, approvalPrompt, catalogCount, catalogEmptyMessage, confirmStep, costLabel, enableExplanation, exportable, fill, formatBytes, formatDate, healthCounts, healthLabel, kindLabel, outcomeLabel, tierLabel, verificationLabel, type ConfirmStepModel, type KindFilter, type StatusFilter } from './presentation'
+import { CATALOG_PAGE_SIZE, actionLabel, approvalNote, approvalPrompt, catalogCount, canInstallSkillBody, catalogEmptyMessage, confirmStep, costLabel, enableExplanation, exportable, fill, formatBytes, formatDate, healthCounts, healthLabel, kindLabel, outcomeLabel, skillBodyMessages, skillBodyState, tierLabel, verificationLabel, type ConfirmStepModel, type KindFilter, type StatusFilter } from './presentation'
 import { WebMcpPanel, useWebMcpSetting } from '../webmcp/WebMcpPanel'
 import { browserModelContext, registerStudioTools } from '../webmcp/tools'
 import { studioPort } from '../webmcp/studioPort'
@@ -267,6 +268,26 @@ function IntegrationsSection({ api, onChange, notify, report }: SectionProps) {
   }
 
   /**
+   * Instala o TEXTO de uma habilidade (T-11).
+   *
+   * NÃO passa por confirmação de nível, e a razão é que o servidor já decide
+   * quem pode: a rota exige `integrations.manage`, o mesmo que registrar. E o
+   * texto só entra numa habilidade ASSINADA, com tamanho e impressão conferidos
+   * — não há aqui a irreversibilidade que a remoção tem.
+   *
+   * Depois de instalar, a lista é RELIDA: sem isso a tela continuaria dizendo
+   * "ainda não há texto instalado" sobre uma habilidade que acabou de receber
+   * um, e a pessoa instalaria de novo.
+   */
+  const installSkillBody = async (item: Integration, body: string) => {
+    notify(null)
+    await run(async () => {
+      await api.installSkillBody(item.integration_id, body)
+      notify({ kind: 'ok', text: t.integrations.skillBodyOk })
+    })
+  }
+
+  /**
    * Remove (X-04). Destrutivo, e por isso passa pela mesma confirmação de
    * ligar — mais uma pergunta em texto claro antes de qualquer coisa sair.
    */
@@ -349,6 +370,7 @@ function IntegrationsSection({ api, onChange, notify, report }: SectionProps) {
       onDisable={item => void run(() => api.setEnabled(item.integration_id, false).then(() => undefined))}
       onTest={test}
       onRemove={remove}
+      onInstallSkillBody={installSkillBody}
       tests={tests}
       onMore={() => void more()}
     />
@@ -384,6 +406,15 @@ export interface IntegrationCatalogListProps {
   onTest(item: Integration): void
   /** X-04: só oferecido com a integração DESLIGADA. */
   onRemove(item: Integration): void
+  /**
+   * T-11: instala o TEXTO de uma habilidade.
+   *
+   * OPCIONAL para a tela continuar desenhando numa instalação cujo servidor
+   * ainda não tem a rota: sem ele o bloco não aparece, em vez de aparecer um
+   * botão que responde 404 na cara de quem não programa. Mesma regra do
+   * `addSlice` na tela do plano.
+   */
+  onInstallSkillBody?(item: Integration, body: string): Promise<void>
   onMore(): void
   /** O que o último teste disse, por integração. Ausente = ninguém testou ainda. */
   readonly tests: Readonly<Record<string, IntegrationTestResult | 'RUNNING'>>
@@ -396,7 +427,7 @@ export interface IntegrationCatalogListProps {
  * prováveis sem depender de quando a leitura assíncrona termina — é aí que
  * defeitos de rótulo e de estado vazio passam despercebidos.
  */
-export function IntegrationCatalogList({ rows, page, search, busy, loadingMore, onEnable, onDisable, onTest, onRemove, onMore, tests }: IntegrationCatalogListProps) {
+export function IntegrationCatalogList({ rows, page, search, busy, loadingMore, onEnable, onDisable, onTest, onRemove, onInstallSkillBody, onMore, tests }: IntegrationCatalogListProps) {
   // Terceiro estado, antes da primeira resposta: afirmar "você não tem nenhuma"
   // sem ter lido nada seria mentir sobre o que a pessoa registrou.
   if (rows === null || page === null) return <p>{t.loading}</p>
@@ -428,10 +459,58 @@ export function IntegrationCatalogList({ rows, page, search, busy, loadingMore, 
         </div>
         {item.enabled ? <p className="hub-why" data-testid="remove-blocked">{t.integrations.removeDisabledWhileOn}</p> : null}
         {testMessage(tests[item.integration_id])}
+        {onInstallSkillBody === undefined ? null : <SkillBodyForm item={item} busy={busy} onInstall={onInstallSkillBody} />}
       </li>)}
     </ul>
     {page.next_cursor === null ? null : <button type="button" className="secondary" data-testid="catalog-more" disabled={loadingMore} onClick={onMore}>{t.integrations.loadMore}</button>}
   </>
+}
+
+/**
+ * O texto de uma habilidade, instalável PELA TELA (T-11).
+ *
+ * A rota existia desde a OS-76 e ninguém a chamava: quem quisesse instalar o
+ * texto de uma habilidade tinha de falar HTTP. Para um produto cuja premissa é
+ * que a pessoa não precisa saber o que é um build, isso é o mesmo que a função
+ * não existir.
+ *
+ * O bloco só aparece para habilidade — e, dentro delas, ele DIZ por que não dá
+ * quando não dá, em vez de mostrar um campo que o servidor vai recusar. O
+ * tamanho é conferido enquanto a pessoa cola: o servidor exige o número EXATO
+ * de caracteres declarado no manifesto, e descobrir isso por tentativa e erro
+ * numa recusa de servidor é o oposto do que este produto promete.
+ * @param props - a integração, se a tela está ocupada, e quem instala.
+ * @returns o bloco, ou nada quando não é habilidade.
+ */
+export function SkillBodyForm({ item, busy, onInstall }: {
+  readonly item: Integration
+  readonly busy: boolean
+  onInstall(item: Integration, body: string): Promise<void>
+}) {
+  const [text, setText] = useState('')
+  const state = skillBodyState(item, text)
+  if (state.kind === 'NOT_SKILL') return null
+  const messages = skillBodyMessages(state)
+  const id = `skill-body-${item.integration_id}`
+  return <details className="hub-advanced" data-testid="skill-body">
+    <summary>{t.integrations.skillBodyTitle}</summary>
+    <p className="hub-help">{t.integrations.skillBodyHelp}</p>
+    {messages.map(message => <p className="hub-why" key={message} data-testid="skill-body-note">{message}</p>)}
+    {state.kind !== 'READY' ? null : <>
+      <label htmlFor={id}>{t.integrations.skillBodyLabel}</label>
+      <textarea id={id} value={text} onChange={event => setText(event.target.value)} rows={8} spellCheck={false}
+        placeholder={t.integrations.skillBodyPlaceholder} data-testid="skill-body-input" />
+      <PendingButton className="secondary" label={t.integrations.skillBodyInstall} busyLabel={t.integrations.skillBodyInstalling}
+        disabled={busy || !canInstallSkillBody(state)} testId="skill-body-install"
+        // O texto NAO e limpo depois de mandar, e isso e escolha. O caminho de
+        // erro do painel ENGOLE a falha (ela vira um aviso no topo) e esta
+        // promessa resolve do mesmo jeito — entao limpar aqui apagaria sessenta
+        // mil caracteres que a pessoa acabou de colar, numa instalacao que
+        // falhou. Deixar o texto no lugar nao custa nada quando deu certo: a
+        // linha acima passa a dizer que ja ha texto instalado.
+        action={async () => { await onInstall(item, text) }} />
+    </>}
+  </details>
 }
 
 /**

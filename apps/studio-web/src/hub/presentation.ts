@@ -236,3 +236,118 @@ export function exportable(project: { state: string }): boolean {
 export function fill(template: string, values: Record<string, string>): string {
   return template.replace(/\{(\w+)\}/gu, (_match, key: string) => values[key] ?? `{${key}}`)
 }
+
+/**
+ * O TETO REAL de um envio de texto de habilidade, em BYTES.
+ *
+ * Ele é do CORPO da requisição inteira, e não do texto: o servidor corta o
+ * corpo JSON em 64 KB antes de qualquer conferência. Mora aqui como número
+ * porque a tela precisa dizê-lo ANTES de a pessoa colar duzentos mil
+ * caracteres e receber uma recusa que ela não tem como interpretar.
+ *
+ * O manifesto aceita até duzentos mil caracteres; por ESTA rota passa o que
+ * couber em 64 KB. A diferença é limitação declarada, e não defeito escondido.
+ */
+export const SKILL_BODY_BYTE_LIMIT = 64 * 1024
+
+/** O que a tela pode oferecer sobre o texto de uma habilidade. */
+export type SkillBodyState =
+  /** Não é habilidade: não há texto a instalar. */
+  | { readonly kind: 'NOT_SKILL' }
+  /** O servidor recusaria por assinatura — dizer isso é melhor que um 403. */
+  | { readonly kind: 'NOT_VERIFIED' }
+  /** O manifesto não declara tamanho nem impressão do texto. */
+  | { readonly kind: 'NOT_DECLARED' }
+  | {
+    readonly kind: 'READY'
+    /** Quantos caracteres o manifesto DECLARA. O servidor exige exatidão. */
+    readonly expected: number
+    readonly typed: number
+    readonly installed: boolean
+    /** O corpo JSON que sairia, em bytes. */
+    readonly bytes: number
+    readonly tooLarge: boolean
+    readonly matches: boolean
+  }
+
+/**
+ * O que fazer com o texto desta habilidade, decidido FORA da tela.
+ *
+ * A conferência de tamanho acontece aqui, antes do envio, porque o servidor
+ * exige o número EXATO de caracteres declarado no manifesto — e descobrir isso
+ * por tentativa e erro, numa recusa em linguagem de servidor, é o oposto do que
+ * este produto promete a quem não programa.
+ *
+ * Os bytes são os do CORPO JSON que de fato sairia, e não os do texto: é o
+ * corpo que o servidor corta. Um texto em português tem acento, e acento ocupa
+ * mais de um byte — estimar por caractere erraria para baixo justamente nos
+ * textos maiores.
+ * @param item - a integração, como o servidor a devolve.
+ * @param text - o que a pessoa colou até agora.
+ * @returns o estado, para a tela apenas desenhar.
+ */
+export function skillBodyState(item: SkillBodyIntegration, text: string): SkillBodyState {
+  if (item.kind !== 'skill') return { kind: 'NOT_SKILL' }
+  if (item.verification !== 'verified') return { kind: 'NOT_VERIFIED' }
+  const declared = item.manifest?.skill?.body_chars
+  if (typeof declared !== 'number') return { kind: 'NOT_DECLARED' }
+  const bytes = new TextEncoder().encode(JSON.stringify({ body: text })).length
+  return {
+    kind: 'READY',
+    expected: declared,
+    // `length` conta unidades UTF-16, que e o que o servidor compara com
+    // `body_chars` (`body.length` la tambem). Contar "caracteres visiveis"
+    // aqui daria um numero DIFERENTE do que decide a recusa.
+    typed: text.length,
+    installed: item.skill_body_installed === true,
+    bytes,
+    tooLarge: bytes > SKILL_BODY_BYTE_LIMIT,
+    matches: text.length === declared,
+  }
+}
+
+/** O mínimo que `skillBodyState` precisa saber de uma integração. */
+export interface SkillBodyIntegration {
+  readonly kind: string
+  readonly verification: string
+  readonly skill_body_installed?: boolean
+  readonly manifest?: { readonly skill?: { readonly body_chars?: number } | undefined } | null
+}
+
+/**
+ * O que a tela ESCREVE sobre o texto desta habilidade.
+ *
+ * Puro, e separado do estado: a frase que a pessoa lê é a parte que mais
+ * importa aqui — ela é o que substitui uma recusa de servidor — e uma frase que
+ * só existe dentro do JSX não é conferida por teste nenhum.
+ * @param state - o que `skillBodyState` decidiu.
+ * @returns as linhas a mostrar, na ordem, ou uma lista vazia.
+ */
+export function skillBodyMessages(state: SkillBodyState): readonly string[] {
+  if (state.kind === 'NOT_SKILL') return []
+  if (state.kind === 'NOT_VERIFIED') return [t.integrations.skillBodyNotVerified]
+  if (state.kind === 'NOT_DECLARED') return [t.integrations.skillBodyNotDeclared]
+  const lines = [state.installed ? t.integrations.skillBodyInstalled : t.integrations.skillBodyNotInstalled]
+  // Antes de qualquer coisa sobre tamanho: um texto que nao passa pela rota nao
+  // vai passar por mais preciso que fique o numero de caracteres.
+  if (state.tooLarge) {
+    lines.push(fill(t.integrations.skillBodyTooLarge, {
+      limit: String(Math.floor(SKILL_BODY_BYTE_LIMIT / 1024)),
+      size: String(Math.ceil(state.bytes / 1024)),
+    }))
+    return lines
+  }
+  // Nada colado ainda: contar "0 de 4000" antes de a pessoa comecar seria
+  // apontar um erro que ela ainda nao teve chance de cometer.
+  if (state.typed === 0) return lines
+  lines.push(fill(t.integrations.skillBodyExpected, { expected: String(state.expected), typed: String(state.typed) }))
+  if (state.matches) lines.push(t.integrations.skillBodyMatches)
+  else if (state.typed < state.expected) lines.push(fill(t.integrations.skillBodyShort, { missing: String(state.expected - state.typed) }))
+  else lines.push(fill(t.integrations.skillBodyLong, { extra: String(state.typed - state.expected) }))
+  return lines
+}
+
+/** Da para MANDAR? So com tamanho exato e dentro do teto do corpo. */
+export function canInstallSkillBody(state: SkillBodyState): boolean {
+  return state.kind === 'READY' && state.matches && !state.tooLarge
+}

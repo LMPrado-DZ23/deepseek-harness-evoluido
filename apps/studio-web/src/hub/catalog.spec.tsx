@@ -170,3 +170,49 @@ describe('X-04 — testar e remover na tela', () => {
     expect(render()).not.toContain('integration-test-result')
   })
 })
+
+describe('o texto da habilidade, NA TELA (T-11)', () => {
+  const assinada = integration({ manifest: { skill: { body_chars: 12 } } })
+
+  it('o bloco NÃO aparece num servidor que ainda não tem a rota', () => {
+    // Mesma regra do `addSlice` na tela do plano: sem a porta, o bloco some —
+    // em vez de aparecer um botão que responde 404 na cara de quem não programa.
+    expect(render({ rows: [assinada] })).not.toContain('data-testid="skill-body"')
+  })
+
+  it('com a rota, o bloco aparece para HABILIDADE', () => {
+    const html = render({ rows: [assinada], onInstallSkillBody: async () => undefined })
+    expect(html).toContain('data-testid="skill-body"')
+    expect(html).toContain(t.integrations.skillBodyTitle)
+    expect(html).toContain('data-testid="skill-body-input"')
+  })
+
+  it('e NÃO aparece para o que não é habilidade', () => {
+    const mcp = integration({ kind: 'mcp', manifest: { skill: { body_chars: 12 } } })
+    expect(render({ rows: [mcp], onInstallSkillBody: async () => undefined })).not.toContain('data-testid="skill-body"')
+  })
+
+  it('habilidade NÃO assinada mostra o motivo, e NENHUM campo', () => {
+    // Um campo que o servidor vai recusar é pior que campo nenhum: a pessoa
+    // cola sessenta mil caracteres e recebe um 403.
+    const html = render({ rows: [integration({ verification: 'unverified', manifest: { skill: { body_chars: 12 } } })], onInstallSkillBody: async () => undefined })
+    expect(html).toContain('data-testid="skill-body"')
+    expect(html).toContain(t.integrations.skillBodyNotVerified)
+    expect(html).not.toContain('data-testid="skill-body-input"')
+  })
+
+  it('o botão nasce DESLIGADO: campo vazio nunca tem o tamanho exato', () => {
+    const html = render({ rows: [assinada], onInstallSkillBody: async () => undefined })
+    // A fatia comeca no `<button` que contem o testid, e nao no testid: os
+    // atributos vem ANTES dele, e cortar ali esconderia justamente o `disabled`.
+    const fim = html.indexOf('skill-body-install')
+    const botao = html.slice(html.lastIndexOf('<button', fim), fim)
+    expect(botao).toContain('disabled')
+  })
+
+  it('a tela diz se JÁ há texto instalado', () => {
+    const comTexto = integration({ skill_body_installed: true, manifest: { skill: { body_chars: 12 } } })
+    expect(render({ rows: [comTexto], onInstallSkillBody: async () => undefined })).toContain(t.integrations.skillBodyInstalled)
+    expect(render({ rows: [assinada], onInstallSkillBody: async () => undefined })).toContain(t.integrations.skillBodyNotInstalled)
+  })
+})
