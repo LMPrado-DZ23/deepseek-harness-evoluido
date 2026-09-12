@@ -1,4 +1,5 @@
 import { type AttemptOutcome, convergenceOf, repeatingReason, shouldStopEarly } from './convergence.js'
+import { blocksVerification, reviewMessage, reviewRun } from './independent-review.js'
 import { CROSS_RUN_FAILURE_WINDOW_DAYS, FailureMemory, seedCorrection } from './failure-memory.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { cp, lstat, mkdir, readFile, writeFile } from 'node:fs/promises'
@@ -531,8 +532,36 @@ export class PromptToAppPipeline {
       await this.recordEvidence(actor, projectId, runId, runDirectory, 'pipeline.log', 'build-log')
       await this.writeRunReport({ actor, projectId, runId, directory: runDirectory, stage: state === 'PASSED' ? 'verify' : failedStage, runState: state, attempt, files: attemptFiles, previousFiles: previousAttemptFiles, findings: attemptFindings, correction: previousDiagnosticForReport })
       if (state === 'PASSED') {
+        // A REVISAO INDEPENDENTE (T-12). Ela le o registro COMO ELE FOI
+        // GRAVADO, e nao os booleanos que este metodo acabou de calcular: e
+        // essa releitura que a torna independente. Um defeito na propria
+        // contabilidade do pipeline — um criterio que sumiu do relatorio, uma
+        // atestacao que nao foi escrita — sai como aprovacao enquanto quem
+        // afirma for quem executa.
+        // A ULTIMA gravacao desta tentativa, e nao a primeira: o registro de
+        // execucoes e um log que cresce, e a mesma tentativa e gravada varias
+        // vezes — `generate/RUNNING` primeiro, `verify/PASSED` por ultimo.
+        // `find` devolveria a mais VELHA, que ainda nao tem criterio conferido
+        // nenhum, e a revisao leria um registro que nao e o que foi afirmado.
+        const persisted = this.options.service.runs(actor, projectId).findLast(record => record.run_id === runId)
+        const review = persisted === undefined
+          // O registro que acabou de ser gravado nao foi encontrado. Isso nao e
+          // "sem problemas": e a propria prova sumindo entre escrever e ler.
+          ? { verdict: 'INCONCLUSIVE' as const, problems: [{ code: 'NO_CHECKS' as const, subject: 'run' }], notAutomated: 0, passed: 0 }
+          : reviewRun(persisted)
+        if (blocksVerification(review)) {
+          finalFailureState = 'TESTS_FAILED'
+          diagnostic = reviewMessage(review) ?? t('pipeline.failed')
+          break
+        }
         await this.options.service.transition(actor, projectId, 'BUILD_OK'); await this.options.service.transition(actor, projectId, 'TESTS_OK'); await this.options.service.transition(actor, projectId, 'VERIFIED_PROTOTYPE')
-        return { state: 'VERIFIED_PROTOTYPE', runDirectory, attempts: attempt, message: t('pipeline.verified') }
+        return {
+          state: 'VERIFIED_PROTOTYPE', runDirectory, attempts: attempt,
+          // O aviso de criterio nao conferido por maquina viaja JUNTO da
+          // aprovacao: ele nao a desmente, e a pessoa precisa dele antes de
+          // tratar o resultado como conferido.
+          message: reviewMessage(review) === undefined ? t('pipeline.verified') : `${t('pipeline.verified')} ${reviewMessage(review)!}`,
+        }
       }
       if (stopRetries) break
     }

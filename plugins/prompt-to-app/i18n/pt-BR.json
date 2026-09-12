@@ -183,5 +183,10 @@
     "skillMismatch": "Uma habilidade não foi usada porque o texto dela não é o que ela declarou",
     "skillUnreadable": "Uma habilidade não foi usada porque o texto dela não pôde ser lido",
     "skillOther": "Uma habilidade não foi usada"
+  },
+  "review": {
+    "contradicted": "A conferência independente encontrou {count} ponto(s) em que o registro desta criação diz o contrário do que ela afirmou. Ela não pode ser tratada como protótipo verificado.",
+    "inconclusive": "A conferência independente não encontrou prova suficiente para sustentar o resultado: faltam {count} registro(s). Isso não quer dizer que algo deu errado — quer dizer que não dá para afirmar que deu certo.",
+    "notAutomated": "{count} critério(s) que você escreveu não puderam ser conferidos por máquina. Confira você mesmo: ninguém verificou esses."
   }
 }

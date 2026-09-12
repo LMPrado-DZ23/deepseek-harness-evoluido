@@ -63,6 +63,15 @@ interface FixtureOptions {
   readonly finish?: BuilderLifecycleSession['finish']
   readonly emergencyStop?: { assertRunning(scope: { readonly orgId: string; readonly tenantId: string }): void }
   readonly generationTokenBudget?: number
+  /**
+   * O armazenamento PERDE a gravacao: `putRun` aceita e `runs()` nao devolve.
+   *
+   * Nao e cenario inventado — e o que um armazenamento com escrita assincrona,
+   * uma transacao revertida ou uma leitura em replica atrasada produzem. E e o
+   * unico jeito de exercitar o que a revisao independente faz quando o registro
+   * que ela precisa ler nao esta la.
+   */
+  readonly forgetRuns?: boolean
 }
 
 async function fixture(options: FixtureOptions = {}) {
@@ -82,7 +91,7 @@ async function fixture(options: FixtureOptions = {}) {
     // `runs` existe aqui porque a RETOMADA precisa achar a execução anterior:
     // sem esta leitura, `findResumable` não tem onde procurar o diretório da
     // tentativa cancelada.
-    runs: vi.fn(() => runs),
+    runs: vi.fn(() => (options.forgetRuns === true ? [] : runs)),
     putEvidence: vi.fn(async (_actor, item: { kind: string; relative_path: string }) => { evidence.push(item) }),
   }
   const executeImplementation: NonNullable<FixtureOptions['execute']> = options.execute ?? (async (): Promise<FixtureExecutionResult> => ({ exitCode: 0, stdout: 'ok', stderr: '', timedOut: false }))
@@ -154,7 +163,7 @@ describe('Prompt-to-App pipeline', () => {
    * `PENDING`; quem os resolve é a suíte do próprio app, no passo `test`. Este
    * duplo faz exatamente isso - e nada além disso.
    */
-  const reportingExecute = (statuses: 'PASSED' | 'FAILED') => async (directory: string, command: string) => {
+  const reportingExecute = (statuses: 'PASSED' | 'FAILED' | 'PENDING') => async (directory: string, command: string) => {
     if (command === 'pnpm run test') {
       const path = resolve(directory, 'evidence', 'appspec-report.json')
       const report = JSON.parse(await readFile(path, 'utf8')) as { checks: { status: string }[] }
@@ -169,6 +178,49 @@ describe('Prompt-to-App pipeline', () => {
     exported: { relative_path: 'exports/build_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', sha256: 'a'.repeat(64), files: 1, bytes: 1 },
     cleanupPending: false, cleaned: true,
     attestation: { image_digest: `sha256:${'d'.repeat(64)}`, policy_sha256: 'f'.repeat(64), scope_id: 's_1' },
+  })
+
+  /**
+   * T-12 — REVISAO INDEPENDENTE. Contra o PIPELINE, e nao contra a funcao pura:
+   * a licao da OS-61 e da OS-65 e que a sabotagem na fiacao sobrevive a
+   * qualquer teste que so exercite o motor.
+   */
+  it('um critério deixado por conferir NUNCA chega a protótipo verificado', async () => {
+    // Fui procurar o buraco que a revisao independente pegaria: uma suite que
+    // sai zero sem exercitar um criterio deixa a linha dele PENDENTE. O buraco
+    // NAO EXISTE — quem o fecha e a atestacao de aceitacao, antes da revisao.
+    // Este teste fica porque prova a propriedade, e nao porque prova quem a
+    // garante: se um dia a atestacao parar de conferir, a revisao e o segundo
+    // muro, e este teste continua valendo sem ser reescrito.
+    const f = await fixture({ execute: reportingExecute('PENDING'), finish: attestingFinish })
+    const result = await f.pipeline.run(actor, 'project', { generate: varying() })
+
+    expect(result.state).not.toBe('VERIFIED_PROTOTYPE')
+    expect(f.transitions).not.toContain('VERIFIED_PROTOTYPE')
+  })
+
+  it('registro que sumiu entre gravar e ler NÃO é aprovação', async () => {
+    // A revisao pede o registro que o pipeline acabou de gravar. Se ele nao
+    // esta la, isso nao e "sem problemas": e a propria prova sumindo. Tratar
+    // ausencia como confirmacao seria aprovar justamente quando o sistema
+    // acabou de demonstrar que nao consegue guardar o que afirma.
+    const f = await fixture({ execute: reportingExecute('PASSED'), finish: attestingFinish, forgetRuns: true })
+    const result = await f.pipeline.run(actor, 'project', { generate: varying() })
+
+    expect(result.state).not.toBe('VERIFIED_PROTOTYPE')
+    expect(f.transitions).not.toContain('VERIFIED_PROTOTYPE')
+  })
+
+  it('a aprovação CARREGA o aviso sobre critérios que ninguém conferiu por máquina', async () => {
+    // O aviso nao desmente a aprovacao; ele viaja junto dela. Sem isso a pessoa
+    // le "verificado" sobre um criterio que ninguem conferiu.
+    // O criterio do fixture — "A página tem um título." — e prosa sem literal
+    // extraivel, entao ele nasce NOT_AUTOMATED e nenhuma maquina o confere.
+    const f = await fixture({ execute: reportingExecute('PASSED'), finish: attestingFinish })
+    const result = await f.pipeline.run(actor, 'project', { generate: vi.fn(async () => cleanGeneration) })
+
+    expect(result.state).toBe('VERIFIED_PROTOTYPE')
+    expect(result.message).toContain('Confira você mesmo')
   })
 
   it('conclui a jornada quando o construtor declara imagem e política, gravando as quatro atestações', async () => {
