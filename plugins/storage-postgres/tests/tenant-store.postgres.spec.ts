@@ -71,6 +71,77 @@ describePostgres('tenant record RLS against PostgreSQL 16', () => {
       relrowsecurity: true, relforcerowsecurity: true, roles: [role],
     })])
   }, 30_000)
+
+  it('a escrita condicional acontece no BANCO: duas confirmacoes concorrentes, uma so passa', async () => {
+    // O buraco que isto fecha: a autoridade de confirmacao marcava o consumo
+    // lendo e escrevendo em duas idas, serializadas por um mutex EM MEMORIA.
+    // Com duas replicas, as duas leem `AVAILABLE`, as duas escrevem `CONSUMED`
+    // com reivindicacoes DIFERENTES, e a segunda passa por cima da primeira:
+    // uma confirmacao humana autorizando duas execucoes distintas.
+    //
+    // O teste usa DOIS armazenamentos separados — conexoes diferentes, sem
+    // mutex compartilhado — porque e exatamente isso que duas replicas sao. Com
+    // um so, o defeito nao aparece.
+    const suffix = randomUUID().replaceAll('-', '').slice(0, 12)
+    const schema = `cas_${suffix}`
+    const role = `cas_runtime_${suffix}`
+    const password = randomBytes(24).toString('hex')
+    const runtimeDsn = runtimeConnectionString(dsn!, role, password)
+    const admin = new Client({ connectionString: dsn, ssl: false })
+    await admin.connect()
+    let um: PostgresTenantRecordStore | undefined
+    let dois: PostgresTenantRecordStore | undefined
+    cleanup.push(async () => {
+      await um?.close().catch(() => undefined)
+      await dois?.close().catch(() => undefined)
+      await admin.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`).catch(() => undefined)
+      await admin.query(`DROP ROLE IF EXISTS "${role}"`).catch(() => undefined)
+      await admin.end().catch(() => undefined)
+    })
+    await admin.query(`CREATE SCHEMA "${schema}"`)
+    await admin.query(`CREATE ROLE "${role}" LOGIN PASSWORD '${password}' NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT`)
+    const config = { adminConnectionString: dsn!, runtimeConnectionString: runtimeDsn, schema, ssl: false as const, poolMax: 2 }
+    um = await PostgresTenantRecordStore.create(config)
+    dois = await PostgresTenantRecordStore.create(config)
+
+    const scope = { orgId: 'org-a', tenantId: 'tenant-a' }
+    const unit = 'studio_action_approvals'
+    const table = 'approvals'
+    // Nasce disponivel, e so UMA criacao passa: `absent` tambem e condicao.
+    const criacoes = await Promise.all([
+      um.putIf(scope, unit, table, 'ap-1', { state: 'AVAILABLE', claim_id: null }, 'absent'),
+      dois.putIf(scope, unit, table, 'ap-1', { state: 'AVAILABLE', claim_id: null }, 'absent'),
+    ])
+    expect(criacoes.filter(Boolean)).toHaveLength(1)
+
+    // Duas reivindicacoes DIFERENTES, ao mesmo tempo, sobre a mesma confirmacao.
+    const consumos = await Promise.all([
+      um.putIf(scope, unit, table, 'ap-1', { state: 'CONSUMED', claim_id: 'run-a' }, { field: 'state', value: 'AVAILABLE' }),
+      dois.putIf(scope, unit, table, 'ap-1', { state: 'CONSUMED', claim_id: 'run-b' }, { field: 'state', value: 'AVAILABLE' }),
+    ])
+    expect(consumos.filter(Boolean)).toHaveLength(1)
+
+    // E o registro final tem UMA reivindicacao — a de quem ganhou —, e nao a
+    // ultima que escreveu.
+    const final = await um.get<{ state: string; claim_id: string }>(scope, unit, table, 'ap-1')
+    expect(final?.state).toBe('CONSUMED')
+    expect(['run-a', 'run-b']).toContain(final?.claim_id)
+
+    // Depois de consumida, a condicao `AVAILABLE` nao vale mais para ninguem.
+    await expect(um.putIf(scope, unit, table, 'ap-1', { state: 'CONSUMED', claim_id: 'run-c' }, { field: 'state', value: 'AVAILABLE' }))
+      .resolves.toBe(false)
+
+    // Linha que NAO existe nao e criada por uma condicao de estado anterior:
+    // exigir um estado anterior so faz sentido sobre uma linha que existe, e
+    // criar aqui aceitaria a escrita justamente quando o registro sumiu.
+    await expect(um.putIf(scope, unit, table, 'sumiu', { state: 'CONSUMED' }, { field: 'state', value: 'AVAILABLE' }))
+      .resolves.toBe(false)
+    await expect(um.get(scope, unit, table, 'sumiu')).resolves.toBeUndefined()
+
+    // E o escopo continua valendo: a condicao nao atravessa inquilino.
+    await expect(dois.putIf({ orgId: 'org-b', tenantId: 'tenant-b' }, unit, table, 'ap-1', { state: 'CONSUMED' }, { field: 'state', value: 'CONSUMED' }))
+      .resolves.toBe(false)
+  }, 30_000)
 })
 
 afterAll(async () => {

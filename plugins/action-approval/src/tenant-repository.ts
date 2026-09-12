@@ -17,12 +17,18 @@ import {
  * inquilino viajam na própria consulta, e o banco recusa o que não é do escopo
  * — sem depender de nenhum `if` deste repositório estar correto.
  *
- * O que isto NÃO conserta, e está dito porque a diferença é fácil de confundir
- * com segurança que não existe: a escrita condicional continua sendo lida e
- * escrita em duas idas ao banco, sob o mutex do serviço, exatamente como na
- * chave-valor. RLS separa inquilinos; ela não cria transação. Duas confirmações
- * concorrentes DO MESMO pedido continuam serializadas pelo processo, e não pelo
- * banco — e por isso o Studio continua sendo escritor único.
+ * A ESCRITA CONDICIONAL DEIXOU DE SER LIDA E ESCRITA EM DUAS IDAS quando o
+ * armazenamento oferece `putIf`. Antes, o mutex do serviço serializava dentro
+ * do processo e mais nada: com duas réplicas — ou um segundo processo
+ * qualquer — as duas liam `AVAILABLE`, as duas escreviam `CONSUMED` com
+ * reivindicações DIFERENTES, e a segunda passava por cima da primeira. Uma
+ * confirmação humana autorizava duas execuções distintas, que é o oposto exato
+ * do que uso único significa.
+ *
+ * Agora a condição viaja DENTRO da instrução e quem perde a corrida escreve
+ * zero linhas. Onde o armazenamento não oferecer `putIf`, o caminho antigo
+ * continua — seguro em instância única, insuficiente com réplicas — e essa
+ * diferença está declarada no tipo em vez de escondida.
  */
 
 /** A unidade e a tabela onde os pedidos moram na tabela por inquilino. */
@@ -40,6 +46,18 @@ export interface ApprovalTenantRecordStore {
   list<T>(scope: ApprovalTenantScope, unit: string, table: string): Promise<readonly { readonly key: string, readonly value: T }[]>
   get<T>(scope: ApprovalTenantScope, unit: string, table: string, key: string): Promise<T | undefined>
   put(scope: ApprovalTenantScope, unit: string, table: string, key: string, value: unknown): Promise<void>
+  /**
+   * Grava SE a linha ainda estiver como quem escreve viu, numa instrução só.
+   *
+   * OPCIONAL porque nem todo armazenamento oferece isso, e a ausência tem de
+   * ser VISÍVEL em vez de silenciosa: sem ele o repositório volta a ler e
+   * escrever em duas idas, que é seguro em instância única e insuficiente com
+   * réplicas. Ver `put`.
+   */
+  putIf?(
+    scope: ApprovalTenantScope, unit: string, table: string, key: string, value: unknown,
+    expected: 'absent' | { readonly field: string; readonly value: string },
+  ): Promise<boolean>
 }
 
 export class TenantRecordActionApprovalRepository implements ActionApprovalRepository {
@@ -80,6 +98,24 @@ export class TenantRecordActionApprovalRepository implements ActionApprovalRepos
   async put(record: ApprovalRecord, expectedState: ApprovalRecord['state'] | 'new'): Promise<void> {
     assertValidApproval(record)
     const scope: ApprovalTenantScope = { orgId: record.org_id, tenantId: record.tenant_id }
+    const conditional = this.store.putIf?.bind(this.store)
+    if (conditional !== undefined) {
+      // UMA instrução: a condição é avaliada contra a linha travada, e não
+      // contra o que foi lido antes. Quem perde a corrida grava zero linhas.
+      const written = await conditional(
+        scope, APPROVAL_TENANT_UNIT, APPROVAL_TENANT_TABLE, record.approval_id, record,
+        expectedState === 'new' ? 'absent' : { field: 'state', value: expectedState },
+      )
+      if (!written) {
+        throw new ApprovalConflictError(expectedState === 'new'
+          ? 'approval already exists'
+          : 'approval state moved under the write')
+      }
+      return
+    }
+    // Caminho sem escrita condicional durável: ler, conferir, escrever. Vale em
+    // instância única, sob o mutex do serviço; com réplicas, duas leituras
+    // concorrentes veem o mesmo estado e as duas escrevem.
     const current = await this.get(scope, record.approval_id)
     if (expectedState === 'new') {
       if (current !== undefined) throw new ApprovalConflictError('approval already exists')

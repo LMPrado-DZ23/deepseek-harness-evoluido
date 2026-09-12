@@ -121,6 +121,66 @@ export class PostgresTenantRecordStore {
     })
   }
 
+  /**
+   * Grava SE a linha ainda estiver como quem escreve viu — no banco, e não no
+   * processo.
+   *
+   * Existe por um buraco concreto e nomeado: a autoridade de confirmação de
+   * ações sensíveis marcava uma confirmação como consumida lendo e escrevendo
+   * em duas idas ao banco, serializadas por um mutex EM MEMÓRIA. Instância
+   * única, tudo bem. Com duas réplicas — ou um segundo processo qualquer —, as
+   * duas leem `AVAILABLE`, as duas escrevem `CONSUMED` com reivindicações
+   * DIFERENTES, e a segunda escrita passa por cima da primeira: UMA
+   * confirmação humana autorizando DUAS execuções distintas. É o oposto exato
+   * do que uma confirmação de uso único significa.
+   *
+   * Aqui a condição vai DENTRO da instrução. `ON CONFLICT DO UPDATE` toma a
+   * trava da linha antes de avaliar o `WHERE`, então a comparação é contra o
+   * estado atual e não contra o que foi lido antes. Quem perde escreve zero
+   * linhas e descobre pelo retorno.
+   *
+   * O campo comparado viaja como PARÂMETRO (`value ->> $n`), e não interpolado:
+   * nome de campo vindo de quem chama nunca entra no texto da consulta.
+   * @param scope - organização e inquilino.
+   * @param unit - a unidade lógica.
+   * @param table - a tabela lógica.
+   * @param key - a chave do registro.
+   * @param value - o valor a gravar.
+   * @param expected - `'absent'` para exigir que a linha não exista, ou o campo
+   *   e o valor que a linha atual precisa ter.
+   * @returns verdadeiro quando gravou; falso quando a condição não valia.
+   */
+  putIf(
+    scope: TenantScope, unit: string, table: string, key: string, value: unknown,
+    expected: 'absent' | { readonly field: string; readonly value: string },
+  ): Promise<boolean> {
+    assertLogicalName(unit, 'tenant unit')
+    assertLogicalName(table, 'tenant table')
+    assertKey(key)
+    const encoded = encodeJson(value)
+    return this.withScope(scope, false, async client => {
+      if (expected === 'absent') {
+        const inserted = await client.query(`
+          INSERT INTO ${tenantRecordsTable(this.schemaName)}
+            (org_id, tenant_id, unit, table_name, key, value)
+          VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+          ON CONFLICT (org_id, tenant_id, unit, table_name, key) DO NOTHING
+        `, [scope.orgId, scope.tenantId, unit, table, key, encoded])
+        return inserted.rowCount === 1
+      }
+      // Atualização pura, e não `INSERT ... ON CONFLICT`: exigir um estado
+      // ANTERIOR só faz sentido sobre uma linha que existe. Um `INSERT` que
+      // criasse a linha aqui aceitaria a escrita justamente no caso em que o
+      // registro sumiu — que é quando a condição mais importa.
+      const updated = await client.query(`
+        UPDATE ${tenantRecordsTable(this.schemaName)}
+        SET value = $4::jsonb
+        WHERE unit = $1 AND table_name = $2 AND key = $3 AND value ->> $5 = $6
+      `, [unit, table, key, encoded, expected.field, expected.value])
+      return updated.rowCount === 1
+    })
+  }
+
   delete(scope: TenantScope, unit: string, table: string, key: string): Promise<boolean> {
     assertLogicalName(unit, 'tenant unit')
     assertLogicalName(table, 'tenant table')
