@@ -188,5 +188,15 @@
     "contradicted": "A conferência independente encontrou {count} ponto(s) em que o registro desta criação diz o contrário do que ela afirmou. Ela não pode ser tratada como protótipo verificado.",
     "inconclusive": "A conferência independente não encontrou prova suficiente para sustentar o resultado: faltam {count} registro(s). Isso não quer dizer que algo deu errado — quer dizer que não dá para afirmar que deu certo.",
     "notAutomated": "{count} critério(s) que você escreveu não puderam ser conferidos por máquina. Confira você mesmo: ninguém verificou esses."
+  },
+  "capability": {
+    "CODE_ABSENT": "{id}: esta parte do Studio não está instalada aqui.",
+    "NOT_CONFIGURED": "{id}: falta configurar do que ela depende.",
+    "NO_PROBE": "{id}: não existe jeito automático de exercitar esta parte, então ninguém pode afirmar que ela funciona agora.",
+    "NEVER_PROBED": "{id}: nunca foi exercitada nesta instalação.",
+    "PROBE_FAILED": "{id}: a última vez que foi exercitada, não funcionou.",
+    "PROBE_STALE": "{id}: funcionou, mas faz tempo demais para afirmar que continua funcionando.",
+    "DEPENDENCY": "{id}: depende de {blockedBy}, que não está funcionando.",
+    "DEPENDENCY_UNDECLARED": "{id}: depende de algo que ninguém declarou neste registro."
   }
 }
