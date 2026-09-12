@@ -7,6 +7,7 @@
   },
   "errors": {
     "bloqueioSemMotivo": "Um item bloqueado por alguém de fora precisa dizer de quem ou de quê depende.",
+    "candidaturaSemEstado": "Um objetivo em andamento não pode ter data de \"marcado como terminado\".",
     "concluidaSemData": "Uma missão concluída precisa registrar quando foi concluída.",
     "concluirExigeCandidatura": "Conclua somente depois de declarar que a missão parece terminada.",
     "criterioNaoEncontrado": "Este item não pertence à missão.",
@@ -14,7 +15,10 @@
     "dataSemConclusao": "Só uma missão concluída pode ter data de conclusão.",
     "estadoNaoAceitaCandidatura": "Só uma missão em andamento pode ser declarada terminada.",
     "estadoNaoAceitaTrabalho": "Esta missão não aceita mais trabalho no estado atual.",
+    "estadoSemCandidatura": "Este estado exige registrar quando o objetivo foi marcado como terminado.",
+    "evidenciaSemProva": "Só um item comprovado pode registrar onde está a prova.",
     "execucaoRepetida": "A mesma execução foi registrada duas vezes na missão.",
+    "execucoesDemais": "Este objetivo já reúne {teto} trabalhos, que é o máximo.",
     "jaExiste": "Já existe uma missão com este identificador.",
     "motivoSemBloqueio": "Só um item bloqueado por alguém de fora pode registrar o motivo do bloqueio.",
     "naoEncontrada": "A missão não foi encontrada.",

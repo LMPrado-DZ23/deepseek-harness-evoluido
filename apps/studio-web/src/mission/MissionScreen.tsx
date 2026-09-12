@@ -111,38 +111,65 @@ export function MissionScreen() {
 
     {problem !== null ? <p role="alert" className="mission-problem">{problem}</p> : null}
 
-    {rows !== null && rows.map(mission => {
-      const actions = availableActions(mission)
-      return <section className="task-card mission-card" key={mission.mission_id}>
-        <div className="mission-line">
-          <strong>{mission.objective}</strong>
-          <span className="mission-status">{copy.status[mission.status]}</span>
-        </div>
-        <p className="mission-verdict">{completionLabel(mission.completion)}</p>
-        <p className="mission-spend">{spendLabel(mission.spend)}</p>
-        <p className="mission-runs">{runCountLabel(mission.run_ids.length)}</p>
-
-        <h2 className="mission-checklist-title">{copy.checklist}</h2>
-        <ul className="mission-checklist">
-          {mission.criteria.map(criterion => <li key={criterion.criterion_id}>
-            <div className="mission-line">
-              <span>{criterion.statement}</span>
-              <span className="mission-criterion-state">{copy.criterion[criterion.state]}</span>
-            </div>
-            {/* A prova aparece na tela. Um item que se diz comprovado sem
-                mostrar ONDE está a prova é a mesma coisa que não estar
-                comprovado — e o servidor já recusa gravar assim. */}
-            {criterion.evidence !== null ? <p className="mission-evidence">{copy.evidenceLabel}: {criterion.evidence}</p> : null}
-            {criterion.blocked_reason !== null ? <p className="mission-blocked">{copy.blockedLabel}: {criterion.blocked_reason}</p> : null}
-          </li>)}
-        </ul>
-
-        {actions.candidate ? <button type="button" className="secondary" disabled={busy === mission.mission_id}
-          onClick={() => { act(mission.mission_id, async () => declareCandidate(mission.mission_id)) }}>{copy.declareCandidate}</button> : null}
-        {actions.complete ? <button type="button" className="primary" disabled={busy === mission.mission_id}
-          onClick={() => { act(mission.mission_id, async () => completeMission(mission.mission_id)) }}>{copy.complete}</button> : null}
-        {actions.candidate ? <p className="mission-help">{copy.candidateHelp}</p> : null}
-      </section>
-    })}
+    {rows !== null && rows.map(mission => <MissionCard
+      key={mission.mission_id}
+      mission={mission}
+      busy={busy === mission.mission_id}
+      onCandidate={() => { act(mission.mission_id, async () => declareCandidate(mission.mission_id)) }}
+      onComplete={() => { act(mission.mission_id, async () => completeMission(mission.mission_id)) }}
+    />)}
   </main>
+}
+
+export type MissionCardProps = {
+  readonly mission: MissionView
+  readonly busy: boolean
+  readonly onCandidate: () => void
+  readonly onComplete: () => void
+}
+
+/**
+ * Um objetivo desenhado.
+ *
+ * Separado do componente de tela por uma razão de PROVA: a tela busca dados num
+ * efeito, e `renderToStaticMarkup` não roda efeitos — enquanto o corpo da lista
+ * morava lá dentro, o único ramo que algum teste alcançava era o de
+ * carregamento. Tudo o que importa aqui (a prova, o motivo do bloqueio, quais
+ * botões aparecem) não era exercido por teste nenhum.
+ * @param props - o objetivo e os dois gestos.
+ * @returns o cartão.
+ */
+export function MissionCard(props: MissionCardProps) {
+  const { mission } = props
+  const actions = availableActions(mission)
+  return <section className="task-card mission-card">
+    <div className="mission-line">
+      <strong>{mission.objective}</strong>
+      <span className="mission-status">{copy.status[mission.status]}</span>
+    </div>
+    <p className="mission-verdict">{completionLabel(mission.completion)}</p>
+    <p className="mission-spend">{spendLabel(mission.spend)}</p>
+    <p className="mission-runs">{runCountLabel(mission.run_count)}</p>
+
+    <h2 className="mission-checklist-title">{copy.checklist}</h2>
+    <ul className="mission-checklist">
+      {mission.criteria.map(criterion => <li key={criterion.criterion_id}>
+        <div className="mission-line">
+          <span>{criterion.statement}</span>
+          <span className="mission-criterion-state">{copy.criterion[criterion.state]}</span>
+        </div>
+        {/* A prova aparece na tela. Um item que se diz comprovado sem mostrar
+            ONDE está a prova é a mesma coisa que não estar comprovado — e o
+            servidor já recusa gravar assim, nos dois sentidos. */}
+        {criterion.evidence !== null ? <p className="mission-evidence">{copy.evidenceLabel}: {criterion.evidence}</p> : null}
+        {criterion.blocked_reason !== null ? <p className="mission-blocked">{copy.blockedLabel}: {criterion.blocked_reason}</p> : null}
+      </li>)}
+    </ul>
+
+    {actions.candidate ? <button type="button" className="secondary" disabled={props.busy}
+      onClick={props.onCandidate}>{copy.declareCandidate}</button> : null}
+    {actions.complete ? <button type="button" className="primary" disabled={props.busy}
+      onClick={props.onComplete}>{copy.complete}</button> : null}
+    {actions.candidate ? <p className="mission-help">{copy.candidateHelp}</p> : null}
+  </section>
 }

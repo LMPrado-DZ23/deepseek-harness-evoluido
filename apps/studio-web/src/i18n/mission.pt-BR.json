@@ -20,8 +20,7 @@
   "status": {
     "RUNNING": "Em andamento",
     "CANDIDATE_COMPLETED": "Marcado como terminado, aguardando conferência",
-    "COMPLETED": "Encerrado",
-    "ABANDONED": "Abandonado"
+    "COMPLETED": "Encerrado"
   },
   "criterion": {
     "UNPROVEN": "Ainda sem prova",

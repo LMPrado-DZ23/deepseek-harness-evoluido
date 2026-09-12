@@ -5,7 +5,7 @@ import type {} from '@dz23-studio/identity'
 import type {} from '@dz23-studio/tenancy'
 import { inScope, missionBudgetPort } from './budget-port.js'
 import { createMissionHttpHandler } from './http.js'
-import { studioMissionsDomainSpec, type MissionKey, type MissionRecord } from './model.js'
+import { missionKey, studioMissionsDomainSpec, type MissionKey, type MissionRecord } from './model.js'
 import { StudioMissionService, type MissionRepository } from './service.js'
 
 export * from './budget-port.js'
@@ -38,7 +38,11 @@ declare module '@deepseek-ai/cordis' {
 class DomainMissionRepository implements MissionRepository {
   constructor(private readonly table: KvTable<MissionKey, MissionRecord>) {}
   missions() { return [...this.table.entries()].map(([, value]) => value) }
-  putMission(record: MissionRecord) { return this.table.put(record.mission_id as MissionKey, record) }
+  // A chave leva o ESCOPO. Ver `missionKey`: a tabela e um mapa plano, e
+  // chavear so pelo `mission_id` deixava uma organizacao apagar a de outra.
+  putMission(record: MissionRecord) {
+    return this.table.put(missionKey(record.org_id, record.tenant_id, record.mission_id), record)
+  }
 }
 
 export async function apply(ctx: Context): Promise<void> {

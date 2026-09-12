@@ -25,11 +25,26 @@ export type CriterionState = (typeof CRITERION_STATES)[number]
  * conferida contra os critérios, e recusa quando algum não está provado. Sem
  * esse degrau, "terminei" é autoavaliação — que é exatamente a prova que não
  * vale.
+ *
+ * `ABANDONED` ESTEVE AQUI e saiu. Nenhum método o produzia, e duas
+ * conferências o tratavam como terminal: era um estado que a tela precisava
+ * saber desenhar e que nada podia alcançar. Um contrato com estado morto faz
+ * quem lê acreditar que existe um caminho que não existe — e, quando alguém
+ * finalmente escrever a transição, ela chega sem as conferências revisadas.
  */
-export const MISSION_STATUSES = ['RUNNING', 'CANDIDATE_COMPLETED', 'COMPLETED', 'ABANDONED'] as const
+export const MISSION_STATUSES = ['RUNNING', 'CANDIDATE_COMPLETED', 'COMPLETED'] as const
 export type MissionStatus = (typeof MISSION_STATUSES)[number]
 
 const identifier = z.string().min(1).max(120)
+
+/**
+ * Quantas execuções cabem numa missão.
+ *
+ * O número não foi medido contra nada; é um teto para o registro não crescer
+ * sem limite, e está escrito assim em vez de fingir que veio de uma medição.
+ * Quem chega nele recebe uma frase de catálogo, e não o texto do esquema.
+ */
+export const MAX_RUNS_PER_MISSION = 10_000
 
 export const missionCriterionSchema = z.object({
   criterion_id: identifier,
@@ -59,6 +74,14 @@ export const missionCriterionSchema = z.object({
   if (value.state !== 'BLOCKED_EXTERNAL' && value.blocked_reason !== null) {
     context.addIssue({ code: 'custom', message: t('errors.motivoSemBloqueio'), path: ['blocked_reason'] })
   }
+  // E o PAR SIMÉTRICO da evidência, que faltava. Sem ele um critério
+  // `UNPROVEN` podia carregar prova de um estado anterior, e a tela desenhava
+  // "ainda sem prova" com "Onde está a prova: …" logo abaixo — o mesmo verde
+  // artificial que este esquema existe para recusar, entrando pela outra
+  // metade do par.
+  if (value.state !== 'PROVEN' && value.evidence !== null) {
+    context.addIssue({ code: 'custom', message: t('errors.evidenciaSemProva'), path: ['evidence'] })
+  }
 })
 
 export type MissionCriterion = z.infer<typeof missionCriterionSchema>
@@ -84,7 +107,7 @@ export const missionRecordSchema = z.object({
    * É o que dá escopo AMPLO: uma missão atravessa execuções de projetos e
    * equipes diferentes, e é sobre este conjunto que o teto e a prova valem.
    */
-  run_ids: z.array(identifier).max(10_000),
+  run_ids: z.array(identifier).max(MAX_RUNS_PER_MISSION),
   criteria: z.array(missionCriterionSchema).min(1).max(200),
   created_at: z.string().min(1),
   updated_at: z.string().min(1),
@@ -108,6 +131,16 @@ export const missionRecordSchema = z.object({
   if (value.status !== 'COMPLETED' && value.completed_at !== null) {
     context.addIssue({ code: 'custom', message: t('errors.dataSemConclusao'), path: ['completed_at'] })
   }
+  // A candidatura tem o MESMO par, que faltava. Pelo serviço não era
+  // alcançável, mas o esquema é a fronteira que a gravação usa contra
+  // registros recompostos por outro caminho — e a assimetria contradizia a
+  // regra que este arquivo documenta duas linhas acima.
+  if (value.status === 'RUNNING' && value.candidate_at !== null) {
+    context.addIssue({ code: 'custom', message: t('errors.candidaturaSemEstado'), path: ['candidate_at'] })
+  }
+  if (value.status !== 'RUNNING' && value.candidate_at === null) {
+    context.addIssue({ code: 'custom', message: t('errors.estadoSemCandidatura'), path: ['candidate_at'] })
+  }
 })
 
 export type MissionRecord = z.infer<typeof missionRecordSchema>
@@ -121,6 +154,37 @@ export interface MissionRunUsage {
 
 declare const missionKeyBrand: unique symbol
 export type MissionKey = string & { readonly [missionKeyBrand]: true }
+
+/**
+ * A chave de armazenamento de uma missão.
+ *
+ * COMPOSTA, e não o `mission_id` sozinho. A tabela do seam de armazenamento é
+ * um mapa PLANO: `put(chave, valor)` grava sem partição por escopo. E o
+ * `mission_id` é escolhido por quem cria — nada impede duas organizações de
+ * escolherem `entrega-q4`.
+ *
+ * Com a chave simples, a criação da segunda organização SOBRESCREVIA o registro
+ * da primeira: objetivo, critérios, evidências e execuções ligadas, tudo
+ * destruído em silêncio, com 201 devolvido a quem apagou. A primeira passava a
+ * receber 404, e toda equipe dela apontando para aquela missão recebia
+ * `MISSION_MISSING` e tinha as tarefas marcadas como estouro de teto. Era
+ * destruição entre inquilinos, disparável por qualquer pessoa autenticada de
+ * qualquer outra organização, bastando repetir um nome plausível.
+ *
+ * O separador é um byte nulo, que não aparece em identificador: sem ele,
+ * dois pares diferentes de organização e inquilino poderiam produzir a mesma
+ * chave por concatenação, e a separação voltaria a ser ilusão de string.
+ * @param orgId - a organização.
+ * @param tenantId - o inquilino.
+ * @param missionId - o identificador escolhido por quem criou.
+ * @returns a chave.
+ */
+export function missionKey(orgId: string, tenantId: string, missionId: string): MissionKey {
+  return [orgId, tenantId, missionId].join(SEPARATOR) as MissionKey
+}
+
+/** Byte nulo: não aparece em identificador, então não dá para forjar colisão. */
+const SEPARATOR = String.fromCharCode(0)
 
 export const STUDIO_MISSIONS_PHYSICAL_DOMAIN = 'studio_missions'
 export const STUDIO_MISSIONS_LOGICAL_DOMAIN = 'studio.missions'

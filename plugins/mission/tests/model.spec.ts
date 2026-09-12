@@ -22,6 +22,9 @@ describe('o dominio fisico da missao', () => {
 
   it('as listas de estado sao fechadas', () => {
     expect([...CRITERION_STATES]).toEqual(['UNPROVEN', 'PROVEN', 'REFUTED', 'BLOCKED_EXTERNAL'])
-    expect([...MISSION_STATUSES]).toEqual(['RUNNING', 'CANDIDATE_COMPLETED', 'COMPLETED', 'ABANDONED'])
+    // `ABANDONED` saiu: nenhum metodo o produzia e duas conferencias o tratavam
+    // como terminal — um estado que a tela precisava saber desenhar e que nada
+    // podia alcancar.
+    expect([...MISSION_STATUSES]).toEqual(['RUNNING', 'CANDIDATE_COMPLETED', 'COMPLETED'])
   })
 })

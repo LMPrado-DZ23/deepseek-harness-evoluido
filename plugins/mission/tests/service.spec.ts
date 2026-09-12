@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { missionRecordSchema, type MissionCriterion, type MissionRecord, type MissionRunUsage } from '../src/model.ts'
+import { MAX_RUNS_PER_MISSION, missionKey, missionRecordSchema, type MissionCriterion, type MissionRecord, type MissionRunUsage } from '../src/model.ts'
 import {
   completionDiagnostic, MissionError, missionCompletion, missionSpend, StudioMissionService,
   type MissionActor, type MissionRepository,
@@ -10,12 +10,20 @@ const OUTRO: MissionActor = { userId: 'u2', orgId: 'org-b', tenantId: 'ws-b', ro
 /** Leitor: le tudo, nao escreve nada. E o papel que separa ler de mexer. */
 const LEITOR: MissionActor = { ...ACTOR, userId: 'u3', role: 'viewer' }
 
+/**
+ * O armazenamento de prova, chaveado COMO A PRODUÇÃO.
+ *
+ * Ele chaveava por `(mission_id, org_id, tenant_id)` enquanto a produção
+ * chaveava só por `mission_id` — e essa diferença escondeu um defeito grave: o
+ * teste "o mesmo identificador em OUTRA organização não colide" passava por
+ * causa do duble, e na produção a segunda criação APAGAVA a primeira. Um duble
+ * mais cuidadoso que o produto não testa o produto.
+ */
 class MemoryRepository implements MissionRepository {
-  rows: MissionRecord[] = []
-  missions = () => this.rows
+  readonly rows = new Map<string, MissionRecord>()
+  missions = () => [...this.rows.values()]
   putMission = async (record: MissionRecord) => {
-    this.rows = [...this.rows.filter(row => row.mission_id !== record.mission_id
-      || row.org_id !== record.org_id || row.tenant_id !== record.tenant_id), record]
+    this.rows.set(missionKey(record.org_id, record.tenant_id, record.mission_id), record)
   }
 }
 
@@ -274,15 +282,21 @@ describe('as recusas que faltavam, e a frase que cada veredito produz', () => {
     })).rejects.toBeInstanceOf(MissionError)
   })
 
-  it('o mesmo identificador em OUTRA organizacao nao colide', async () => {
+  it('o mesmo identificador em OUTRA organizacao nao colide NEM APAGA a primeira', async () => {
     // Sem o escopo na conferencia, um inquilino impediria o outro de criar uma
-    // missao so por ter escolhido o mesmo nome.
+    // missao so por ter escolhido o mesmo nome. E sem o escopo na CHAVE DE
+    // ARMAZENAMENTO — que era o caso — a criacao da segunda organizacao
+    // sobrescrevia o registro da primeira: objetivo, criterios, evidencias e
+    // execucoes ligadas, tudo destruido em silencio, com 201 devolvido a quem
+    // apagou. A afirmacao que faltava e a ultima linha.
     const f = await comMissao()
     const outra = await f.service.create(OUTRO, {
       missionId: 'm1', objective: 'a missao da outra organizacao', maxTotalTokens: null,
       criteria: [{ criterion_id: 'x', statement: 'algo' }],
     })
     expect(outra.org_id).toBe('org-b')
+    expect(f.service.mission(ACTOR, 'm1').objective).toBe('Terminar o Studio com prova')
+    expect(f.service.mission(ACTOR, 'm1').criteria.map(item => item.criterion_id)).toEqual(['suite', 'leiga'])
   })
 
   it('criar com objetivo curto demais e recusado pelo esquema, com a frase do esquema', async () => {
@@ -333,7 +347,10 @@ describe('os caminhos defensivos que faltavam', () => {
       missionId: 'm9', objective: 'usar o relogio de verdade', maxTotalTokens: null,
       criteria: [{ criterion_id: 'x', statement: 'algo' }],
     })
+    // Os DOIS lados. So o piso deixaria passar um relogio que devolvesse o ano
+    // 275760 — qualquer data do futuro satisfaz `toBeGreaterThanOrEqual`.
     expect(Date.parse(criada.created_at)).toBeGreaterThanOrEqual(antes)
+    expect(Date.parse(criada.created_at)).toBeLessThanOrEqual(Date.now())
   })
 
   it('a recusa do esquema traz TODAS as frases, e nao so a primeira', async () => {
@@ -387,5 +404,170 @@ describe('o papel confere NO SERVICO, e nao na rota', () => {
     expect(ligada.run_ids).toEqual(['r1'])
     await expect(f.service.attachRunForApprovedTeam({ orgId: 'org-b', tenantId: 'ws-b' }, 'm1', 'r2', []))
       .rejects.toBeInstanceOf(MissionError)
+  })
+})
+
+describe('ACHADO: leitura-alteracao-gravacao concorrente perdia prova e furava o teto', () => {
+  // A gravacao do armazenamento e ENFILEIRADA: o registro em memoria so muda
+  // depois de o disco responder. Entre a leitura de uma chamada e a
+  // visibilidade da gravacao dela, o laco de eventos roda outras chamadas, que
+  // leem o registro VELHO — e a ultima gravacao vence, apagando a outra em
+  // silencio, com 200 devolvido aos dois lados.
+  //
+  // O duble abaixo imita esse atraso de proposito. Sem ele, os testes rodam
+  // sobre um `put` que e visivel na hora, e a janela desaparece do teste sem
+  // desaparecer do produto.
+  class RepositorioLento implements MissionRepository {
+    readonly rows = new Map<string, MissionRecord>()
+    missions = () => [...this.rows.values()]
+    putMission = async (record: MissionRecord) => {
+      await new Promise(resolve => setTimeout(resolve, 0))
+      this.rows.set(missionKey(record.org_id, record.tenant_id, record.mission_id), record)
+    }
+  }
+
+  async function lenta(max: number | null = null) {
+    const repository = new RepositorioLento()
+    const service = new StudioMissionService({ repository, now: () => new Date('2026-09-12T00:00:00.000Z') })
+    await service.create(ACTOR, {
+      missionId: 'm1', objective: 'Terminar com prova', maxTotalTokens: max,
+      criteria: [
+        { criterion_id: 'c1', statement: 'A primeira coisa' },
+        { criterion_id: 'c2', statement: 'A segunda coisa' },
+      ],
+    })
+    return { service, repository }
+  }
+
+  it('concluir e refutar ao mesmo tempo NAO produz missao concluida com item refutado', async () => {
+    const f = await lenta()
+    await f.service.recordCriterion(ACTOR, 'm1', 'c1', { state: 'PROVEN', evidence: 'a' })
+    await f.service.recordCriterion(ACTOR, 'm1', 'c2', { state: 'PROVEN', evidence: 'b' })
+    await f.service.declareCandidate(ACTOR, 'm1')
+
+    const resultados = await Promise.allSettled([
+      f.service.recordCriterion(ACTOR, 'm1', 'c2', { state: 'REFUTED' }),
+      f.service.complete(ACTOR, 'm1'),
+    ])
+    const final = f.service.mission(ACTOR, 'm1')
+    // O que NAO pode acontecer, em nenhuma das duas ordens: ficar concluida com
+    // um criterio refutado dentro.
+    const refutado = final.criteria.find(item => item.criterion_id === 'c2')!.state === 'REFUTED'
+    expect(final.status === 'COMPLETED' && refutado).toBe(false)
+    // E o registro final tem de ser consistente com o que cada chamada disse:
+    // se `complete` venceu, o PATCH reprovou; se o PATCH venceu, a missao voltou
+    // a andar.
+    if (final.status === 'COMPLETED') expect(resultados[0]!.status).toBe('rejected')
+    else expect(final.status).toBe('RUNNING')
+  })
+
+  it('duas equipes ligando execucao ao mesmo tempo NAO perdem uma delas', async () => {
+    // Perder uma faz o gasto dela nunca mais ser somado: o teto fica
+    // permanentemente subestimado, e sem sinal nenhum.
+    // Sem teto: este teste e sobre NAO PERDER execucao, e nao sobre o teto —
+    // com teto, a segunda ligacao recusaria por falta de medicao da primeira.
+    const f = await lenta()
+    await Promise.all([
+      f.service.attachRunForApprovedTeam({ orgId: 'org-a', tenantId: 'ws-a' }, 'm1', 'r1', []),
+      f.service.attachRunForApprovedTeam({ orgId: 'org-a', tenantId: 'ws-a' }, 'm1', 'r2', []),
+      f.service.attachRunForApprovedTeam({ orgId: 'org-a', tenantId: 'ws-a' }, 'm1', 'r3', []),
+    ])
+    expect([...f.service.mission(ACTOR, 'm1').run_ids].sort()).toEqual(['r1', 'r2', 'r3'])
+  })
+
+  it('duas provas em criterios diferentes ao mesmo tempo NAO descartam uma', async () => {
+    const f = await lenta()
+    await Promise.all([
+      f.service.recordCriterion(ACTOR, 'm1', 'c1', { state: 'PROVEN', evidence: 'prova um' }),
+      f.service.recordCriterion(ACTOR, 'm1', 'c2', { state: 'PROVEN', evidence: 'prova dois' }),
+    ])
+    expect(f.service.mission(ACTOR, 'm1').criteria.map(item => item.state)).toEqual(['PROVEN', 'PROVEN'])
+  })
+
+  it('duas criacoes concorrentes do mesmo nome: uma so passa', async () => {
+    const repository = new RepositorioLento()
+    const service = new StudioMissionService({ repository })
+    const pedido = async () => service.create(ACTOR, {
+      missionId: 'igual', objective: 'a mesma missao', maxTotalTokens: null,
+      criteria: [{ criterion_id: 'x', statement: 'algo' }],
+    })
+    const resultados = await Promise.allSettled([pedido(), pedido()])
+    expect(resultados.filter(item => item.status === 'fulfilled')).toHaveLength(1)
+  })
+
+  it('missoes diferentes nao esperam uma pela outra', async () => {
+    // Uma fila global serializaria o inquilino inteiro por causa de uma missao.
+    const f = await lenta()
+    await f.service.create(ACTOR, {
+      missionId: 'm2', objective: 'outra missao', maxTotalTokens: null,
+      criteria: [{ criterion_id: 'x', statement: 'algo' }],
+    })
+    await Promise.all([
+      f.service.recordCriterion(ACTOR, 'm1', 'c1', { state: 'PROVEN', evidence: 'a' }),
+      f.service.recordCriterion(ACTOR, 'm2', 'x', { state: 'PROVEN', evidence: 'b' }),
+    ])
+    expect(f.service.mission(ACTOR, 'm1').criteria[0]!.state).toBe('PROVEN')
+    expect(f.service.mission(ACTOR, 'm2').criteria[0]!.state).toBe('PROVEN')
+  })
+})
+
+describe('ACHADO: a evidencia nao tinha o par simetrico que o bloqueio tinha', () => {
+  it('prova num item que NAO esta comprovado e recusada', async () => {
+    // Sem isto a tela desenhava "ainda sem prova" com "Onde esta a prova: …"
+    // logo abaixo: o mesmo verde artificial, entrando pela outra metade do par.
+    const f = await comMissao()
+    await expect(f.service.recordCriterion(ACTOR, 'm1', 'suite', {
+      state: 'UNPROVEN', evidence: 'passou na semana passada',
+    })).rejects.toBeInstanceOf(MissionError)
+  })
+
+  it('registrar item como nao provado LIMPA a prova anterior', async () => {
+    const f = await comMissao()
+    await f.service.recordCriterion(ACTOR, 'm1', 'suite', { state: 'PROVEN', evidence: 'a saida' })
+    const depois = await f.service.recordCriterion(ACTOR, 'm1', 'suite', { state: 'UNPROVEN' })
+    expect(depois.criteria.find(item => item.criterion_id === 'suite')!.evidence).toBeNull()
+  })
+
+  it('candidatura e estado andam juntos nos dois sentidos', () => {
+    const base = {
+      mission_id: 'm', org_id: 'o', tenant_id: 'w', objective: 'algo', status: 'RUNNING' as const,
+      max_total_tokens: null, run_ids: [], criteria: [criterio()],
+      created_at: 'x', updated_at: 'x', candidate_at: null as string | null, completed_at: null,
+    }
+    expect(missionRecordSchema.safeParse(base).success).toBe(true)
+    expect(missionRecordSchema.safeParse({ ...base, candidate_at: 'x' }).success).toBe(false)
+    expect(missionRecordSchema.safeParse({ ...base, status: 'CANDIDATE_COMPLETED' }).success).toBe(false)
+    expect(missionRecordSchema.safeParse({ ...base, status: 'CANDIDATE_COMPLETED', candidate_at: 'x' }).success).toBe(true)
+  })
+
+  it('o teto de execucoes recusa com frase de catalogo, e nao com o texto do esquema', async () => {
+    const f = await comMissao()
+    const cheia = { ...f.service.mission(ACTOR, 'm1'), run_ids: Array.from({ length: MAX_RUNS_PER_MISSION }, (_, i) => `r${String(i)}`) }
+    await f.repository.putMission(cheia)
+    // A afirmacao e sobre a LINGUA e sobre a origem da frase, e nao sobre o
+    // numero: o texto cru do esquema tambem contem o numero, entao procurar so
+    // por ele deixaria a recusa em ingles passar como se fosse a do catalogo.
+    // A falsificacao que desliga a guarda pegou exatamente isso.
+    await expect(f.service.attachRunForApprovedTeam({ orgId: 'org-a', tenantId: 'ws-a' }, 'm1', 'demais', []))
+      .rejects.toThrow(/trabalhos, que e o maximo|trabalhos, que é o máximo/u)
+  })
+})
+
+describe('ACHADO: a fila por missao nao podia crescer para sempre', () => {
+  it('o mapa de filas esvazia depois que as chamadas terminam', async () => {
+    // A limpeza comparava com `undefined`, que nunca era verdade: o mapa
+    // ganhava uma entrada por missao tocada e nunca perdia nenhuma. Num
+    // processo longo isso e memoria que so sobe.
+    const f = await comMissao()
+    await f.service.recordCriterion(ACTOR, 'm1', 'suite', { state: 'PROVEN', evidence: 'a' })
+    await f.service.recordCriterion(ACTOR, 'm1', 'leiga', { state: 'PROVEN', evidence: 'b' })
+    expect(f.service.pendingLocks).toBe(0)
+  })
+
+  it('durante uma chamada a fila existe, e some no fim — inclusive quando a chamada FALHA', async () => {
+    const f = await comMissao()
+    await expect(f.service.recordCriterion(ACTOR, 'm1', 'inexistente', { state: 'REFUTED' }))
+      .rejects.toBeInstanceOf(MissionError)
+    expect(f.service.pendingLocks).toBe(0)
   })
 })

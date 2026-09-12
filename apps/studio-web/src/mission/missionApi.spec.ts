@@ -7,7 +7,7 @@ import {
 function mission(over: Partial<MissionView> = {}): MissionView {
   return {
     mission_id: 'm1', objective: 'Terminar com prova', status: 'RUNNING', max_total_tokens: 1_000,
-    run_ids: ['r1'],
+    run_count: 1,
     criteria: [{ criterion_id: 'suite', statement: 'A suite passa', state: 'UNPROVEN', evidence: null, blocked_reason: null }],
     created_at: '2026-09-12T00:00:00.000Z', updated_at: '2026-09-12T00:00:00.000Z',
     spend: { kind: 'WITHIN', spent: 300, limit: 1_000 },

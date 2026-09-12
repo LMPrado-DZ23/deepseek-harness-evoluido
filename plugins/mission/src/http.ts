@@ -91,7 +91,11 @@ export function createMissionHttpHandler(config: MissionHttpConfig) {
       }
 
       if (method === 'GET' && route === '/missions') {
-        return json(response, 200, { missions: config.service.missions(actor).map(record => view(record, config.runs())) })
+        // As execuções são lidas UMA VEZ, e não por missão: `config.runs()`
+        // copia a tabela inteira de execuções do host, e chamá-la dentro do
+        // `map` refazia essa cópia por linha da lista.
+        const runs = config.runs()
+        return json(response, 200, { missions: config.service.missions(actor).map(record => view(record, runs)) })
       }
       if (method === 'POST' && route === '/missions') {
         const body = createSchema.parse(await readJson(request))
@@ -160,12 +164,29 @@ function statusOf(error: unknown): number {
  * atual das execuções, e gravá-las criaria uma segunda verdade que diverge no
  * primeiro conserto. É a mesma decisão que o retrato de equipe já tomou para
  * `blocked`.
+ *
+ * É um RECORTE, e não `{ ...record }`. O registro inteiro levava `org_id`,
+ * `tenant_id` e a lista COMPLETA de `run_ids` — identificadores internos e as
+ * execuções de equipes e projetos diferentes do inquilino — a qualquer pessoa
+ * com `project.read`, inclusive quem só pode ler. A tela precisa de QUANTAS
+ * execuções existem, e não de quais.
  * @param record - a missão gravada.
  * @param runs - as execuções conhecidas.
  * @returns o recorte.
  */
 export function view(record: MissionRecord, runs: readonly MissionRunUsage[]) {
-  return { ...record, spend: missionSpend(record, runs), completion: missionCompletion(record.criteria) }
+  return {
+    mission_id: record.mission_id,
+    objective: record.objective,
+    status: record.status,
+    max_total_tokens: record.max_total_tokens,
+    run_count: record.run_ids.length,
+    criteria: record.criteria,
+    created_at: record.created_at,
+    updated_at: record.updated_at,
+    spend: missionSpend(record, runs),
+    completion: missionCompletion(record.criteria),
+  }
 }
 
 async function readJson(request: IncomingMessage): Promise<unknown> {

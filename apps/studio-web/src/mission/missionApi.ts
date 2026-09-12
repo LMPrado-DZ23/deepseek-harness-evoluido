@@ -17,7 +17,7 @@ export function isMissionPath(pathname: string): boolean {
 }
 
 export type CriterionState = 'UNPROVEN' | 'PROVEN' | 'REFUTED' | 'BLOCKED_EXTERNAL'
-export type MissionStatus = 'RUNNING' | 'CANDIDATE_COMPLETED' | 'COMPLETED' | 'ABANDONED'
+export type MissionStatus = 'RUNNING' | 'CANDIDATE_COMPLETED' | 'COMPLETED'
 
 export interface MissionCriterion {
   readonly criterion_id: string
@@ -44,7 +44,7 @@ export interface MissionView {
   readonly objective: string
   readonly status: MissionStatus
   readonly max_total_tokens: number | null
-  readonly run_ids: readonly string[]
+  readonly run_count: number
   readonly criteria: readonly MissionCriterion[]
   readonly created_at: string
   readonly updated_at: string
@@ -53,7 +53,7 @@ export interface MissionView {
 }
 
 const CRITERION_STATES: readonly CriterionState[] = ['UNPROVEN', 'PROVEN', 'REFUTED', 'BLOCKED_EXTERNAL']
-const MISSION_STATUSES: readonly MissionStatus[] = ['RUNNING', 'CANDIDATE_COMPLETED', 'COMPLETED', 'ABANDONED']
+const MISSION_STATUSES: readonly MissionStatus[] = ['RUNNING', 'CANDIDATE_COMPLETED', 'COMPLETED']
 
 function whole(value: unknown): boolean {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0
@@ -120,7 +120,7 @@ export function isMissionView(value: unknown): value is MissionView {
     && typeof row.objective === 'string' && row.objective !== ''
     && MISSION_STATUSES.includes(row.status as MissionStatus)
     && (row.max_total_tokens === null || whole(row.max_total_tokens))
-    && Array.isArray(row.run_ids) && row.run_ids.every(item => typeof item === 'string')
+    && whole(row.run_count)
     && Array.isArray(row.criteria) && row.criteria.length > 0 && row.criteria.every(isCriterion)
     && typeof row.created_at === 'string' && row.created_at !== ''
     && typeof row.updated_at === 'string' && row.updated_at !== ''

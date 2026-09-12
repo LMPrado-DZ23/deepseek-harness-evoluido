@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CSRF_COOKIE, IdentityError, SESSION_COOKIE, type SessionRecord, type StudioIdentityService } from '@dz23-studio/identity'
 import type { StudioTenancyService } from '@dz23-studio/tenancy'
 import { createMissionHttpHandler, MISSION_ROUTE_CONTRACTS } from '../src/http.ts'
-import type { MissionRecord, MissionRunUsage } from '../src/model.ts'
+import { missionKey, type MissionRecord, type MissionRunUsage } from '../src/model.ts'
 import { StudioMissionService, type MissionRepository } from '../src/service.ts'
 
 const session = { session_id: 's1', user_id: 'u1', org_id: 'org-a', tenant_id: 'ws-a' } as SessionRecord
@@ -12,11 +12,12 @@ const session = { session_id: 's1', user_id: 'u1', org_id: 'org-a', tenant_id: '
 const servers: ReturnType<typeof createServer>[] = []
 afterEach(async () => Promise.all(servers.splice(0).map(server => new Promise<void>(resolve => server.close(() => resolve())))))
 
+/** Chaveado como a produção: escopo mais identificador. */
 class MemoryRepository implements MissionRepository {
-  rows: MissionRecord[] = []
-  missions = () => this.rows
+  readonly rows = new Map<string, MissionRecord>()
+  missions = () => [...this.rows.values()]
   putMission = async (record: MissionRecord) => {
-    this.rows = [...this.rows.filter(row => row.mission_id !== record.mission_id), record]
+    this.rows.set(missionKey(record.org_id, record.tenant_id, record.mission_id), record)
   }
 }
 
@@ -133,7 +134,7 @@ describe('a jornada inteira pela rota', () => {
     await f.request('/missions/m1/criteria/suite', { method: 'PATCH', body: JSON.stringify({ state: 'UNPROVEN' }) })
     const lista = await (await f.request('/missions')).json() as { missions: readonly { spend: unknown }[] }
     expect(lista.missions[0]!.spend).toEqual({ kind: 'WITHIN', spent: 0, limit: 1_000 })
-    expect(f.repository.rows[0]).not.toHaveProperty('spend')
+    expect([...f.repository.rows.values()][0]).not.toHaveProperty('spend')
   })
 
   it('um item comprovado SEM prova e recusado com 400, e a frase e do catalogo', async () => {
@@ -267,5 +268,31 @@ describe('os caminhos que faltavam cobrir', () => {
     const f = await fixture()
     const grande = await f.request('/missions', { method: 'POST', body: `{"objective":"${'a'.repeat(80 * 1024)}"}` })
     expect(grande.status).toBe(400)
+  })
+})
+
+describe('ACHADO: a resposta levava o registro INTEIRO', () => {
+  it('a missao devolvida tem exatamente os campos que a tela usa', async () => {
+    // `{ ...record }` mandava `org_id`, `tenant_id` e a lista COMPLETA de
+    // `run_ids` — identificadores internos e as execucoes de equipes e projetos
+    // diferentes do inquilino — a qualquer pessoa com `project.read`, inclusive
+    // quem so pode ler. A tela precisa de QUANTAS execucoes existem, nao de
+    // quais.
+    const f = await fixture()
+    const corpo = await (await f.criar()).json() as { mission: Record<string, unknown> }
+    expect(Object.keys(corpo.mission).sort()).toEqual([
+      'completion', 'created_at', 'criteria', 'max_total_tokens',
+      'mission_id', 'objective', 'run_count', 'spend', 'status', 'updated_at',
+    ])
+    expect(JSON.stringify(corpo.mission)).not.toContain('org-a')
+    expect(JSON.stringify(corpo.mission)).not.toContain('ws-a')
+  })
+
+  it('a listagem tambem, e a contagem de trabalhos vem no lugar da lista', async () => {
+    const f = await fixture()
+    await f.criar()
+    const lista = await (await f.request('/missions')).json() as { missions: readonly Record<string, unknown>[] }
+    expect(lista.missions[0]).not.toHaveProperty('run_ids')
+    expect(lista.missions[0]!.run_count).toBe(0)
   })
 })
