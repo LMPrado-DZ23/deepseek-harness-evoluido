@@ -94,6 +94,21 @@ export function migrateAuth(database: DatabaseSync): void {
  * ninguém pediu. O código gerado fala inglês; o porquê fica com quem mantém o
  * gerador.
  */
+/**
+ * A camada de entrega de e-mail do aplicativo gerado.
+ *
+ * A captura da PRÉVIA é `0o640` de propósito, e não por descuido: quem lê o
+ * arquivo é o supervisor de prévia, que roda fora do processo do aplicativo
+ * gerado — tirar o grupo tiraria a entrega do código na prévia junto.
+ *
+ * O que faltava era a PASTA. `mkdir` usa a máscara do processo, que na maioria
+ * das instalações produz `0o755`: o arquivo não era legível por terceiros, mas
+ * a pasta era listável por qualquer um, e listar já conta quantas prévias
+ * existem e com que identificador. `0o710` é o par certo do `0o640` — o dono
+ * entra e lista, o grupo atravessa para chegar ao arquivo que pode ler, e mais
+ * ninguém. O `chmod` vem DEPOIS do `mkdir` porque o modo do `mkdir` é
+ * mascarado, e uma pasta que já existia com outro modo continuaria com ele.
+ */
 const AUTH_EMAIL = `import { randomUUID } from 'node:crypto'
 import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
@@ -164,6 +179,7 @@ export class StudioPreviewEmailSender implements EmailSender {
   private async append(message: object): Promise<void> {
     await serializePreviewCapture(this.path, async () => {
       await mkdir(dirname(this.path), { recursive: true })
+      await chmod(dirname(this.path), 0o710)
       const current = await readCapture(this.path)
       const temporary = \`\${this.path}.\${randomUUID()}.tmp\`
       try {
@@ -305,17 +321,20 @@ function matchesCode(value: string, encoded: string): boolean { const [saltHex,d
  */
 const AUTH_RUNTIME = `import { cookies } from 'next/headers'
 import { openDatabase } from '../db/client'
+import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { createEmailSender } from './email'
-import { GeneratedAuthService, type AppRole, type AuthSession } from './service'
+import { AppAuthError, GeneratedAuthService, type AppRole, type AuthSession } from './service'
 
 export const SESSION_COOKIE = 'dz23_app_session'
 export const CSRF_COOKIE = 'dz23_app_csrf'
 export const CODE_REQUEST_COOKIE = 'dz23_app_code_request'
+export const LOGIN_FORM_COOKIE = 'dz23_app_login_form'
 
 function ownerEmail(): string { const value=process.env.APP_OWNER_EMAIL; if (value===undefined || value==='') throw new Error('APP_OWNER_EMAIL_REQUIRED'); return value }
 async function useService<T>(work: (service: GeneratedAuthService) => Promise<T> | T): Promise<T> { const database=openDatabase(); try { return await work(new GeneratedAuthService({ database, sender:createEmailSender(), ownerEmail:ownerEmail() })) } finally { database.close() } }
-export async function requestAccessCode(email: string): Promise<void> { const result=await useService(service => service.requestCode(email));const jar=await cookies();jar.set(CODE_REQUEST_COOKIE,result.requestId,{secure:true,httpOnly:true,sameSite:'lax',path:'/',maxAge:10*60}) }
-export async function verifyAccessCode(email: string, code: string): Promise<{ token:string; csrf:string }> { const jar=await cookies(); const requestId=jar.get(CODE_REQUEST_COOKIE)?.value; if(requestId===undefined)throw new Error('CODE_REQUEST_REQUIRED'); const issued=await useService(service => service.verifyCode(email,requestId,code)); jar.delete(CODE_REQUEST_COOKIE); return issued }
+export async function requestAccessCode(email: string): Promise<void> { const result=await useService(service => service.requestCode(email));const jar=await cookies();const common={secure:true,httpOnly:true,sameSite:'lax' as const,path:'/',maxAge:10*60};jar.set(CODE_REQUEST_COOKIE,result.requestId,common);jar.set(LOGIN_FORM_COOKIE,randomBytes(32).toString('hex'),common) }
+export async function loginFormToken(): Promise<string> { const jar=await cookies(); return jar.get(LOGIN_FORM_COOKIE)?.value ?? '' }
+export async function verifyAccessCode(email: string, code: string, formToken: string): Promise<{ token:string; csrf:string }> { const jar=await cookies(); const expected=jar.get(LOGIN_FORM_COOKIE)?.value; if(expected===undefined||expected==='')throw new AppAuthError('CSRF', ${JSON.stringify(tGeneratedApp('auth.csrfMissing'))}); const sent=Buffer.from(formToken); const wanted=Buffer.from(expected); if(sent.length!==wanted.length||!timingSafeEqual(sent,wanted))throw new AppAuthError('CSRF', ${JSON.stringify(tGeneratedApp('auth.csrfMissing'))}); const requestId=jar.get(CODE_REQUEST_COOKIE)?.value; if(requestId===undefined)throw new Error('CODE_REQUEST_REQUIRED'); const issued=await useService(service => service.verifyCode(email,requestId,code)); jar.delete(CODE_REQUEST_COOKIE); jar.delete(LOGIN_FORM_COOKIE); return issued }
 export async function currentSession(): Promise<AuthSession | null> { const jar=await cookies(); const token=jar.get(SESSION_COOKIE)?.value; if (token===undefined) return null; try { return await useService(service => service.authenticate(token)) } catch (error) { if (error instanceof AppAuthError) return null; throw error } }
 export async function requireFormSession(formData: FormData, roles: readonly AppRole[]=['owner','member']): Promise<AuthSession> { const jar=await cookies(); const token=jar.get(SESSION_COOKIE)?.value; if (token===undefined) throw new Error('AUTH_REQUIRED'); return useService(service => { const session=service.authenticate(token); service.validateCsrf(session,jar.get(CSRF_COOKIE)?.value,String(formData.get('_csrf')??'')); if (!roles.includes(session.role)) throw new Error('ROLE_FORBIDDEN'); return session }) }
 export async function setSessionCookies(issued: { token:string; csrf:string }): Promise<void> { const jar=await cookies(); const common={ secure:true, sameSite:'lax' as const, path:'/', maxAge:14*24*60*60 }; jar.set(SESSION_COOKIE,issued.token,{...common,httpOnly:true}); jar.set(CSRF_COOKIE,issued.csrf,{...common,httpOnly:false}) }
@@ -328,7 +347,7 @@ const AUTH_ACTIONS = `'use server'
 import { redirect } from 'next/navigation'
 import { inviteFromForm, requestAccessCode, revokeCurrentSession, setSessionCookies, verifyAccessCode } from './runtime'
 export async function requestCodeAction(formData: FormData): Promise<void> { await requestAccessCode(String(formData.get('email')??'')) }
-export async function verifyCodeAction(formData: FormData): Promise<void> { const issued=await verifyAccessCode(String(formData.get('email')??''),String(formData.get('code')??'')); await setSessionCookies(issued); redirect('/') }
+export async function verifyCodeAction(formData: FormData): Promise<void> { const issued=await verifyAccessCode(String(formData.get('email')??''),String(formData.get('code')??''),String(formData.get('_csrf')??'')); await setSessionCookies(issued); redirect('/') }
 export async function logoutAction(formData: FormData): Promise<void> { await revokeCurrentSession(formData); redirect('/') }
 export async function inviteAction(formData: FormData): Promise<void> { await inviteFromForm(formData) }
 `
@@ -348,9 +367,9 @@ const ACCESS_PANEL_COPY = {
 }
 
 const ACCESS_PANEL = `import { inviteAction, logoutAction, requestCodeAction, verifyCodeAction } from '../../auth/actions'
-import { csrfForCurrentSession, currentSession } from '../../auth/runtime'
+import { csrfForCurrentSession, currentSession, loginFormToken } from '../../auth/runtime'
 const copy=${JSON.stringify(ACCESS_PANEL_COPY)} as const
-export async function AccessPanel() { return <section aria-labelledby="access-title"><h2 id="access-title">{copy.accessHeading}</h2><form action={requestCodeAction} data-testid="request-code-form"><label htmlFor="access-email">{copy.emailLabel}</label><input id="access-email" name="email" type="email" required/><button type="submit">{copy.requestCode}</button></form><form action={verifyCodeAction} data-testid="verify-code-form"><label htmlFor="verify-email">{copy.emailLabel}</label><input id="verify-email" name="email" type="email" required/><label htmlFor="access-code">{copy.codeSixLabel}</label><input id="access-code" name="code" inputMode="numeric" pattern="[0-9]{6}" required/><button type="submit">{copy.submit}</button></form></section> }
+export async function AccessPanel() { return <section aria-labelledby="access-title"><h2 id="access-title">{copy.accessHeading}</h2><form action={requestCodeAction} data-testid="request-code-form"><label htmlFor="access-email">{copy.emailLabel}</label><input id="access-email" name="email" type="email" required/><button type="submit">{copy.requestCode}</button></form><form action={verifyCodeAction} data-testid="verify-code-form"><input type="hidden" name="_csrf" value={await loginFormToken()}/><label htmlFor="verify-email">{copy.emailLabel}</label><input id="verify-email" name="email" type="email" required/><label htmlFor="access-code">{copy.codeSixLabel}</label><input id="access-code" name="code" inputMode="numeric" pattern="[0-9]{6}" required/><button type="submit">{copy.submit}</button></form></section> }
 export async function AccountPanel() { const session=await currentSession(); if(session===null) return null; const csrf=await csrfForCurrentSession(); const role=session.role==='owner'?copy.roleOwner:copy.roleMember; return <aside><p data-testid="signed-in-user">{copy.accessStatus.replace('__EMAIL__',session.email).replace('__ROLE__',role)}</p>{session.role==='owner'?<form action={inviteAction}><input type="hidden" name="_csrf" value={csrf}/><label htmlFor="invite-email">{copy.inviteByEmail}</label><input id="invite-email" name="email" type="email" required/><button type="submit">{copy.sendInvite}</button></form>:null}<form action={logoutAction}><input type="hidden" name="_csrf" value={csrf}/><button type="submit">{copy.signOut}</button></form></aside> }
 `
 
@@ -377,6 +396,6 @@ describe('generated Studio authentication',()=>{
   it('isolates browser attempts and expires the session',async()=>{const f=fixture();try{const first=await f.service.requestCode('owner@example.test');f.advance(61_000);const second=await f.service.requestCode('owner@example.test');for(let attempt=1;attempt<=5;attempt++)expectCode(()=>f.service.verifyCode('owner@example.test',first.requestId,'000000'),attempt===5?'LOCKED':'INVALID');const issued=f.service.verifyCode('owner@example.test',second.requestId,'123456');f.advance(15*24*60*60*1000);expectCode(()=>f.service.authenticate(issued.token),'EXPIRED')}finally{f.close()}})
   it('lets the owner invite a member without elevating the role',async()=>{const f=fixture();try{const ownerRequest=await f.service.requestCode('owner@example.test');const owner=f.service.verifyCode('owner@example.test',ownerRequest.requestId,'123456');await f.service.invite(owner.token,owner.csrf,owner.csrf,'member@example.test');const memberRequest=await f.service.requestCode('member@example.test');expect(memberRequest.status).toBe('sent');const member=f.service.verifyCode('member@example.test',memberRequest.requestId,'123456');expect(f.service.authenticate(member.token)).toMatchObject({email:'member@example.test',role:'member'});await expect(f.service.invite(member.token,member.csrf,member.csrf,'other@example.test')).rejects.toMatchObject({code:'FORBIDDEN'})}finally{f.close()}})
   it('limits delivery and restricts capture to Studio-controlled modes',async()=>{const f=fixture();try{expect((await f.service.requestCode('other@example.test')).status).toBe('suppressed');expect((await f.service.requestCode('owner@example.test')).status).toBe('sent');f.advance(61_000);expect((await f.service.requestCode('owner@example.test')).status).toBe('sent');f.advance(61_000);expect((await f.service.requestCode('owner@example.test')).status).toBe('sent');f.advance(61_000);expect((await f.service.requestCode('owner@example.test')).status).toBe('suppressed');expect(()=>createEmailSender({NODE_ENV:'production',APP_EMAIL_MODE:'studio-capture'})).toThrow('STUDIO_CAPTURE_FORBIDDEN_OUTSIDE_VERIFICATION');expect(()=>createEmailSender({NODE_ENV:'development',APP_EMAIL_MODE:'studio-capture'})).toThrow('STUDIO_CAPTURE_FORBIDDEN_OUTSIDE_VERIFICATION');expect(createEmailSender({NODE_ENV:'production',APP_EMAIL_MODE:'studio-capture',DZ23_STUDIO_VERIFICATION:'1'})).toBeInstanceOf(Object);expect(()=>createEmailSender({APP_EMAIL_MODE:'studio-preview',DZ23_PREVIEW_ID:'preview-1'})).toThrow('DATA_DIR_REQUIRED');expect(()=>createEmailSender({APP_EMAIL_MODE:'studio-preview',DZ23_PREVIEW_ID:'../escape',DATA_DIR:'./data'})).toThrow('DZ23_PREVIEW_ID_INVALID');expect(createEmailSender({APP_EMAIL_MODE:'studio-preview',DZ23_PREVIEW_ID:'preview-1',DATA_DIR:'./data'})).toBeInstanceOf(Object);expect(()=>createEmailSender({APP_EMAIL_MODE:'invalid'})).toThrow('APP_EMAIL_MODE_INVALID');expect(()=>createEmailSender({APP_EMAIL_MODE:'smtp',APP_SMTP_URL:'http://example.test',APP_EMAIL_FROM:'owner@example.test'})).toThrow('APP_SMTP_URL_INVALID')}finally{f.close()}})
-  it('separates previews and preserves concurrent messages',async()=>{const directory=mkdtempSync(join(tmpdir(),'dz23-preview-mail-'));try{const first=createEmailSender({APP_EMAIL_MODE:'studio-preview',DZ23_PREVIEW_ID:'preview-1',DATA_DIR:directory});const second=createEmailSender({APP_EMAIL_MODE:'studio-preview',DZ23_PREVIEW_ID:'preview-2',DATA_DIR:directory});await Promise.all([first.sendCode({email:'one@example.test',code:'111111',expiresAt:'2026-09-03T12:10:00.000Z'}),first.sendCode({email:'two@example.test',code:'222222',expiresAt:'2026-09-03T12:10:00.000Z'}),second.sendCode({email:'other@example.test',code:'333333',expiresAt:'2026-09-03T12:10:00.000Z'})]);const firstPath=join(directory,'preview-1','preview-capture.json');const one=JSON.parse(readFileSync(firstPath,'utf8')) as Array<{code:string}>;const two=JSON.parse(readFileSync(join(directory,'preview-2','preview-capture.json'),'utf8')) as Array<{code:string}>;expect(one.map(message=>message.code).sort()).toEqual(['111111','222222']);expect(two.map(message=>message.code)).toEqual(['333333']);if(process.platform!=='win32')expect(statSync(firstPath).mode&0o777).toBe(0o640)}finally{rmSync(directory,{recursive:true,force:true})}})
+  it('separates previews and preserves concurrent messages',async()=>{const directory=mkdtempSync(join(tmpdir(),'dz23-preview-mail-'));try{const first=createEmailSender({APP_EMAIL_MODE:'studio-preview',DZ23_PREVIEW_ID:'preview-1',DATA_DIR:directory});const second=createEmailSender({APP_EMAIL_MODE:'studio-preview',DZ23_PREVIEW_ID:'preview-2',DATA_DIR:directory});await Promise.all([first.sendCode({email:'one@example.test',code:'111111',expiresAt:'2026-09-03T12:10:00.000Z'}),first.sendCode({email:'two@example.test',code:'222222',expiresAt:'2026-09-03T12:10:00.000Z'}),second.sendCode({email:'other@example.test',code:'333333',expiresAt:'2026-09-03T12:10:00.000Z'})]);const firstPath=join(directory,'preview-1','preview-capture.json');const one=JSON.parse(readFileSync(firstPath,'utf8')) as Array<{code:string}>;const two=JSON.parse(readFileSync(join(directory,'preview-2','preview-capture.json'),'utf8')) as Array<{code:string}>;expect(one.map(message=>message.code).sort()).toEqual(['111111','222222']);expect(two.map(message=>message.code)).toEqual(['333333']);if(process.platform!=='win32'){expect(statSync(firstPath).mode&0o777).toBe(0o640);expect(statSync(join(directory,'preview-1')).mode&0o777).toBe(0o710)}}finally{rmSync(directory,{recursive:true,force:true})}})
 })
 `

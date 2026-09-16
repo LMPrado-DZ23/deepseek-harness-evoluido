@@ -49,6 +49,51 @@ describe('generated passwordless access layer',()=>{
     expect(linha).not.toContain('catch { return null }')
   })
 
+  it('OS-91: o formulario de ENTRAR tem CSRF proprio, e nao depende so do Origin do Next',()=>{
+    // O quarto achado aberto da OS-20. Sem token proprio, a unica defesa das
+    // acoes de LOGIN era a conferencia de Origin que o Next faz — e e
+    // exatamente a propriedade de navegador em que o plugin de identidade do
+    // Studio se recusa a confiar sozinho.
+    //
+    // O que isto fecha e LOGIN CSRF: a pagina de um atacante faz o navegador da
+    // vitima ENTRAR na conta DELE, e dai em diante tudo que a vitima escrever
+    // vai para a conta do atacante. Os dados dela, guardados onde ele le.
+    //
+    // O token nasce no `requestAccessCode`, que e Server Action e pode gravar
+    // cookie — um componente de servidor nao pode. O atacante consegue disparar
+    // o pedido de codigo no navegador da vitima, mas NAO consegue ler o cookie
+    // resultante para por no campo escondido: e a mesma origem que o impede.
+    const arquivos=Object.fromEntries(generateAuthLayer(spec,'crud-panel').files.map(file=>[file.path,file.content]))
+    const runtime=arquivos['src/auth/runtime.ts']!
+    const panel=arquivos['src/components/generated/access-panel.tsx']!
+    const actions=arquivos['src/auth/actions.ts']!
+    expect(runtime).toContain("LOGIN_FORM_COOKIE = 'dz23_app_login_form'")
+    // O cookie e httpOnly: o campo escondido e preenchido NO SERVIDOR, e nao
+    // por script no navegador.
+    expect(runtime).toContain('jar.set(LOGIN_FORM_COOKIE,randomBytes(32).toString(\'hex\'),common)')
+    // A comparacao e de tempo constante, como a do CSRF de sessao ao lado.
+    expect(runtime).toContain('timingSafeEqual(sent,wanted)')
+    // Sem cookie nao ha entrada: um `undefined` dos dois lados nao pode casar.
+    expect(runtime).toContain("if(expected===undefined||expected==='')throw new AppAuthError('CSRF'")
+    // E o token e QUEIMADO na entrada, junto com o pedido.
+    expect(runtime).toContain('jar.delete(LOGIN_FORM_COOKIE)')
+    expect(actions).toContain("verifyAccessCode(String(formData.get('email')??''),String(formData.get('code')??''),String(formData.get('_csrf')??''))")
+    expect(panel).toContain('<form action={verifyCodeAction} data-testid="verify-code-form"><input type="hidden" name="_csrf" value={await loginFormToken()}/>')
+  })
+
+  it('OS-91: a pasta da captura de previa nao e listavel por terceiros',()=>{
+    // O terceiro achado aberto da OS-20. O ARQUIVO ja era `0o640`, e isso e
+    // decisao: quem o le e o supervisor de previa, que roda fora do processo do
+    // aplicativo gerado. A PASTA nascia com a mascara do processo — `0o755` na
+    // maioria das instalacoes —, e listar a pasta ja conta quantas previas
+    // existem e com que identificador.
+    const email=Object.fromEntries(generateAuthLayer(spec,'crud-panel').files.map(file=>[file.path,file.content]))['src/auth/email.ts']!
+    expect(email).toContain('await chmod(dirname(this.path), 0o710)')
+    // O `chmod` vem DEPOIS do `mkdir`: o modo do `mkdir` e mascarado, e uma
+    // pasta que ja existia com outro modo continuaria com ele.
+    expect(email.indexOf('await mkdir(dirname(this.path), { recursive: true })\n      await chmod')).toBeGreaterThan(0)
+  })
+
   it('writes fixed paths once',async()=>{const root=await mkdtemp(join(tmpdir(),'dz23-auth-layer-'));roots.push(root);const layer=generateAuthLayer(spec,'crud-panel');await writeAuthLayer(root,layer);await expect(readFile(resolve(root,'src/auth/service.ts'),'utf8')).resolves.toContain('GeneratedAuthService');await expect(writeAuthLayer(root,layer)).rejects.toMatchObject({code:'EEXIST'})})
 })
 

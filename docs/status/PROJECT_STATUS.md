@@ -200,6 +200,19 @@ produto existe para não fazer.
     - No aplicativo gerado, fechou o quinto achado aberto da OS-20: banco
       travado virava **"faça login de novo" para sempre**.
 
+20. **OS-91 — LOGIN CSRF no aplicativo gerado (T-29).** Fecha o quarto e o
+    terceiro achados que a OS-20 deixou abertos. As ações de login não tinham
+    token próprio e dependiam só da conferência de Origin do Next — a mesma
+    propriedade de navegador em que o plugin de identidade do Studio se recusa a
+    confiar sozinho. O ataque é pior do que parece: a página de um atacante faz
+    o navegador da vítima **entrar na conta dele**, e daí em diante tudo que ela
+    escrever fica guardado onde ele lê. E a pasta da captura de prévia nascia
+    com a máscara do processo, listável por qualquer um — o arquivo já era
+    `0o640` de propósito, a pasta é que faltava.
+    **Sobra um achado aberto da OS-20**, e ele foi aceito: o painel de
+    indicadores mostra agregados a qualquer sessão, pela mesma razão de o painel
+    CRUD ser compartilhado.
+
 ## Próxima ação
 
 Ver `docs/status/TASK_DAG.md`, tarefa de maior prioridade em `READY`.
