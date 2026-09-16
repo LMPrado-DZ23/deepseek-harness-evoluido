@@ -12,6 +12,13 @@ export interface TenancyRepository {
     invitations(): readonly Invitation[];
     putInvitation(record: Invitation): Promise<void>;
 }
+/** O recorte de uma matrícula que a tela de participantes precisa. */
+export interface MemberView {
+    readonly user_id: string;
+    readonly email: string;
+    readonly role: StudioRole;
+    readonly workspace_id: string;
+}
 export interface TenancyActor {
     readonly userId: string;
     readonly email: string;
@@ -70,7 +77,23 @@ export declare class StudioTenancyService {
     authorizationFor(userId: string, orgId: string, tenantId: string): TenancyAuthorization | undefined;
     actorFromSession(session: SessionRecord): TenancyActor;
     listWorkspaces(actor: TenancyActor): readonly Workspace[];
-    listMembers(actor: TenancyActor, workspaceId: string): readonly Membership[];
+    /**
+     * Quem participa deste espaço, no recorte que a tela precisa.
+     *
+     * O registro INTEIRO não sai: `members.read` pertence também ao papel de
+     * leitor, e ele recebia `membership_id`, `org_id`, `created_at` e
+     * `updated_at` de todo mundo. O `membership_id` é o identificador que
+     * `PATCH /memberships/:membershipId` usa — a mutação em si continua
+     * protegida, então não é escalada, mas entregar o identificador da operação
+     * a quem não pode fazê-la é dar meio caminho de graça.
+     *
+     * `email` e `role` ficam porque são o que a tela mostra; `user_id` fica
+     * porque é como a tela reconhece a própria pessoa na lista.
+     * @param actor - quem está pedindo.
+     * @param workspaceId - o espaço.
+     * @returns os participantes, sem o que a tela não usa.
+     */
+    listMembers(actor: TenancyActor, workspaceId: string): readonly MemberView[];
     createWorkspace(actor: TenancyActor, name: string): Promise<Workspace>;
     invite(actor: TenancyActor, workspaceId: string, email: string, role: StudioRole): Promise<{
         invitation: Invitation;

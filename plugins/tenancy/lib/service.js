@@ -111,10 +111,27 @@ export class StudioTenancyService {
         return this.#repository.workspaces().filter(workspace => allowed.has(workspace.workspace_id)
             && workspace.archived_at === null);
     }
+    /**
+     * Quem participa deste espaço, no recorte que a tela precisa.
+     *
+     * O registro INTEIRO não sai: `members.read` pertence também ao papel de
+     * leitor, e ele recebia `membership_id`, `org_id`, `created_at` e
+     * `updated_at` de todo mundo. O `membership_id` é o identificador que
+     * `PATCH /memberships/:membershipId` usa — a mutação em si continua
+     * protegida, então não é escalada, mas entregar o identificador da operação
+     * a quem não pode fazê-la é dar meio caminho de graça.
+     *
+     * `email` e `role` ficam porque são o que a tela mostra; `user_id` fica
+     * porque é como a tela reconhece a própria pessoa na lista.
+     * @param actor - quem está pedindo.
+     * @param workspaceId - o espaço.
+     * @returns os participantes, sem o que a tela não usa.
+     */
     listMembers(actor, workspaceId) {
         this.#authorize(actor, workspaceId, 'members.read');
-        return this.#repository.memberships().filter(membership => membership.workspace_id === workspaceId
-            && membership.org_id === actor.orgId);
+        return this.#repository.memberships()
+            .filter(membership => membership.workspace_id === workspaceId && membership.org_id === actor.orgId)
+            .map(({ user_id, email, role, workspace_id }) => ({ user_id, email, role, workspace_id }));
     }
     async createWorkspace(actor, name) {
         this.#authorize(actor, actor.tenantId, 'workspace.create');
