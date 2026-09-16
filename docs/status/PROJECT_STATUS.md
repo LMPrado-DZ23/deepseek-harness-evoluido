@@ -128,6 +128,10 @@ produto existe para não fazer.
     defeito de desenho: o marcador dentro do artefato estava em português, e
     teria quebrado a conferência de travessia no dia da tradução.
 
+14. **OS-85 — pacote V6, fatia E2 (EVO-06/07/08).** Perfis por capacidade **sem
+    queda para o host**, alvos com as cinco etapas separadas, e atestação que
+    compara por igualdade em vez de "compatível". 14 falsificações, todas pegas.
+
 ## Próxima ação
 
 Ver `docs/status/TASK_DAG.md`, tarefa de maior prioridade em `READY`.
