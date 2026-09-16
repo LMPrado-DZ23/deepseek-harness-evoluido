@@ -37,6 +37,18 @@ describe('generated passwordless access layer',()=>{
     expect(source['app/api/auth/session/route.ts']).toContain('status:401')
     expect(generateAuthLayer(spec,'catalog')).toEqual({required:false,files:[],protectedPaths:[]})
   })
+  it('OS-90: banco travado no aplicativo gerado NAO vira "faca login de novo" para sempre',()=>{
+    // O `catch` de `currentSession` engolia TUDO. Banco travado, disco cheio ou
+    // migracao ausente viravam 'nao esta logado', e a pessoa ficava presa num
+    // laco de login que nunca ia funcionar — sem nada na tela dizendo que o
+    // problema era do servidor. So FALHA DE AUTENTICACAO pode virar `null`.
+    const runtime=Object.fromEntries(generateAuthLayer(spec,'crud-panel').files.map(file=>[file.path,file.content]))['src/auth/runtime.ts']!
+    const linha=runtime.split('\n').find(value=>value.includes('export async function currentSession'))!
+    expect(linha).toContain('error instanceof AppAuthError')
+    expect(linha).toContain('throw error')
+    expect(linha).not.toContain('catch { return null }')
+  })
+
   it('writes fixed paths once',async()=>{const root=await mkdtemp(join(tmpdir(),'dz23-auth-layer-'));roots.push(root);const layer=generateAuthLayer(spec,'crud-panel');await writeAuthLayer(root,layer);await expect(readFile(resolve(root,'src/auth/service.ts'),'utf8')).resolves.toContain('GeneratedAuthService');await expect(writeAuthLayer(root,layer)).rejects.toMatchObject({code:'EEXIST'})})
 })
 

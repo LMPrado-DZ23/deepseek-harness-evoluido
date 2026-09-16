@@ -16,6 +16,7 @@ import type {
   RegistrationResponse,
 } from '../src/passkey.ts'
 import {
+  CAMPOS_PRIVADOS_DA_SESSAO,
   IdentityError,
   StudioIdentityService,
   type EnrollmentMode,
@@ -218,7 +219,10 @@ describe('StudioIdentityService', () => {
     }
     await expect(h.service.verifyMagicCode('a@b.com', '000000', device)).rejects.toMatchObject({ code: 'locked' })
     await expect(h.service.verifyMagicCode('a@b.com', '123456', device)).rejects.toMatchObject({ code: 'locked' })
-    await expect(h.service.verifyMagicCode('none@example.com', '123456', device)).rejects.toMatchObject({ code: 'not-found' })
+    // `invalid`, e nao `not-found`: quem nao tem conta e quem errou o codigo
+    // recebem a MESMA recusa. Enquanto eram duas, o par de chamadas
+    // start+verify respondia 'essa pessoa tem conta aqui?' com um status HTTP.
+    await expect(h.service.verifyMagicCode('none@example.com', '123456', device)).rejects.toMatchObject({ code: 'invalid' })
   })
 
   it('expires and consumes magic codes exactly once', async () => {
@@ -229,7 +233,7 @@ describe('StudioIdentityService', () => {
     h.setNow('2026-09-02T12:00:00.000Z')
     await h.service.requestMagicCode('a@b.com')
     await h.service.verifyMagicCode('a@b.com', '123456', device)
-    await expect(h.service.verifyMagicCode('a@b.com', '123456', device)).rejects.toMatchObject({ code: 'not-found' })
+    await expect(h.service.verifyMagicCode('a@b.com', '123456', device)).rejects.toMatchObject({ code: 'invalid' })
   })
 
   it('chooses the newest eligible code when imported storage contains more than one', async () => {
@@ -506,7 +510,11 @@ describe('StudioIdentityService', () => {
     const replay = await h.service.beginPasskeyLogin('owner@example.com')
     await expect(h.service.finishPasskeyLogin(replay.challengeId, authResponse(), device)).rejects.toMatchObject({ code: 'counter' })
     const unknown = await h.service.beginPasskeyLogin('unknown@example.com')
-    await expect(h.service.finishPasskeyLogin(unknown.challengeId, authResponse(), device)).rejects.toMatchObject({ code: 'not-found' })
+    // `invalid`, e nao `not-found`: apresentar a ISCA que `/passkey/login/options`
+    // devolve para quem nao tem chave dava 404, e apresentar um identificador
+    // REAL dava 500 — as iscas disfarcavam uma rota e a rota irma desfazia o
+    // disfarce, no mesmo processo.
+    await expect(h.service.finishPasskeyLogin(unknown.challengeId, authResponse(), device)).rejects.toMatchObject({ code: 'invalid' })
   })
 
   it('requires a UV passkey step-up and grants strong identity for five minutes only', async () => {
@@ -755,5 +763,105 @@ describe('ACHADO: pedir código não conta pelo RELÓGIO quem tem conta', () => 
     h.email.sendMagicCode = () => new Promise<void>(resolve => { liberar = resolve })
     await expect(h.service.requestMagicCode('owner@example.com')).resolves.toBe('sent')
     liberar()
+  })
+})
+
+/**
+ * OS-90 — o par `/magic/start` + `/magic/verify` não responde "essa pessoa tem
+ * conta aqui?".
+ *
+ * A OS-33 igualou o CORPO e o RELÓGIO de `/magic/start`. O pedido seguinte
+ * desfazia isso com um status HTTP, e o teste que existia **congelava** a
+ * diferença em vez de pegá-la.
+ */
+describe('ACHADO: a conferência do código não conta quem tem conta', () => {
+  const desconhecido = 'ninguem@example.com'
+  const conhecido = 'a@b.com'
+
+  it('quem NÃO existe e quem ERROU o código recebem a mesma recusa', async () => {
+    const h = makeHarness('closed')
+    // Com o cadastro fechado, pedir código para quem não existe é suprimido e
+    // NENHUM registro é gravado — que era exatamente a origem do 404.
+    expect(await h.service.requestMagicCode(desconhecido)).toBe('suppressed')
+    const semConta = await h.service.verifyMagicCode(desconhecido, '000000', device).catch((error: unknown) => error)
+    expect(semConta).toMatchObject({ code: 'invalid' })
+  })
+
+  it('a TRAVA também não conta: quem não existe percorre a mesma escada e trava igual', async () => {
+    const h = makeHarness('closed')
+    // Enquanto o teto era por REGISTRO, quem não tem registro nunca travava —
+    // e aí bastava errar seis vezes para separar quem existe de quem não.
+    for (let tentativa = 1; tentativa <= 5; tentativa += 1) {
+      await expect(h.service.verifyMagicCode(desconhecido, '000000', device)).rejects.toMatchObject({ code: 'invalid' })
+    }
+    await expect(h.service.verifyMagicCode(desconhecido, '000000', device)).rejects.toMatchObject({ code: 'locked' })
+  })
+
+  it('pedir um código NOVO não zera o teto: cinco palpites não viram vinte e cinco', async () => {
+    const h = makeHarness()
+    await h.service.requestMagicCode(conhecido)
+    for (let tentativa = 1; tentativa <= 5; tentativa += 1) {
+      await h.service.verifyMagicCode(conhecido, '000000', device).catch(() => undefined)
+    }
+    // O registro novo nasce com `attempts: 0`; a escada por E-MAIL não nasce.
+    await h.service.requestMagicCode(conhecido)
+    await expect(h.service.verifyMagicCode(conhecido, '000000', device)).rejects.toMatchObject({ code: 'locked' })
+  })
+
+  it('a trava PASSA sozinha: uma trava que não passa é um jeito de manter alguém de fora', async () => {
+    const h = makeHarness()
+    await h.service.requestMagicCode(conhecido)
+    for (let tentativa = 1; tentativa <= 5; tentativa += 1) {
+      await h.service.verifyMagicCode(conhecido, '000000', device).catch(() => undefined)
+    }
+    await expect(h.service.verifyMagicCode(conhecido, '123456', device)).rejects.toMatchObject({ code: 'locked' })
+    h.setNow('2026-09-02T12:16:00.000Z')
+    await h.service.requestMagicCode(conhecido)
+    await expect(h.service.verifyMagicCode(conhecido, '123456', device)).resolves.toMatchObject({ session: expect.anything() as unknown })
+  })
+
+  it('entrar zera a escada: quem acabou de provar quem é não fica travado pelos erros de antes', async () => {
+    const h = makeHarness()
+    await h.service.requestMagicCode(conhecido)
+    for (let tentativa = 1; tentativa <= 4; tentativa += 1) {
+      await h.service.verifyMagicCode(conhecido, '000000', device).catch(() => undefined)
+    }
+    await h.service.verifyMagicCode(conhecido, '123456', device)
+    await h.service.requestMagicCode(conhecido)
+    // Mais UM erro depois da entrada. Sem zerar, ele seria o quinto da escada
+    // antiga e a tentativa seguinte estaria travada; zerando, ele é o primeiro.
+    await expect(h.service.verifyMagicCode(conhecido, '000000', device)).rejects.toMatchObject({ code: 'invalid' })
+    await expect(h.service.verifyMagicCode(conhecido, '000000', device)).rejects.toMatchObject({ code: 'invalid' })
+  })
+
+  it('sem confiança declarada, MUDAR estado é recusado — e LER continua passando', () => {
+    // Esta é a única conferência de `Host`/`Origin` das mutações autenticadas de
+    // TODOS os outros plugins. Ela devolvia `void` quando a borda não tinha
+    // declarado nada, deixando o cabeçalho `x-dz23-csrf` como única defesa — a
+    // propriedade de navegador que este mesmo arquivo diz não querer sozinha.
+    // O critério não é novo: `#secureCookies` já começa no lado seguro, dez
+    // linhas acima, com a razão escrita.
+    const h = makeHarness()
+    expect(h.service.requestTrustConfigured).toBe(false)
+    expect(() => h.service.assertRequestTrust('studio.example', 'https://studio.example', true)).toThrow(IdentityError)
+    // Recusar LEITURA numa montagem não declarada derruba o produto inteiro
+    // para consertar uma folga de escrita.
+    expect(() => h.service.assertRequestTrust('studio.example', undefined, false)).not.toThrow()
+    h.service.setRequestTrust({ allowedHosts: ['studio.example'], allowedOrigins: ['https://studio.example'] })
+    expect(() => h.service.assertRequestTrust('studio.example', 'https://studio.example', true)).not.toThrow()
+  })
+
+  it('a lista de dispositivos não entrega nada que ajude a forjar a sessão', async () => {
+    const h = makeHarness()
+    await h.service.requestMagicCode(conhecido)
+    const issued = await h.service.verifyMagicCode(conhecido, '123456', device)
+    const dispositivos = h.service.listDevices(issued.session.user_id)
+    expect(dispositivos.length).toBe(1)
+    // A lista de campos privados é a autoridade: um campo novo do registro tem
+    // de ser acrescentado A ELA para sair, e não ficar de fora dela para sair.
+    for (const campo of CAMPOS_PRIVADOS_DA_SESSAO) expect(dispositivos[0]).not.toHaveProperty(campo)
+    expect(CAMPOS_PRIVADOS_DA_SESSAO).toContain('csrf_seed')
+    // …e o que a tela precisa continua vindo.
+    expect(dispositivos[0]).toMatchObject({ session_id: issued.session.session_id })
   })
 })

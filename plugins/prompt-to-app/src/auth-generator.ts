@@ -289,6 +289,20 @@ function hashCode(value: string): string { const salt=randomBytes(16); return \`
 function matchesCode(value: string, encoded: string): boolean { const [saltHex,digestHex]=encoded.split(':'); if(saltHex===undefined||digestHex===undefined)return false;const salt=Buffer.from(saltHex,'hex');const actual=scryptSync(value,salt,32);const wanted=Buffer.from(digestHex,'hex');return actual.length===wanted.length&&timingSafeEqual(actual,wanted) }
 `
 
+/**
+ * O runtime de autenticação do aplicativo gerado.
+ *
+ * `currentSession` distingue FALHA DE AUTENTICAÇÃO de falha do servidor, e a
+ * explicação mora aqui porque um comentário dentro do texto gerado é texto em
+ * português dentro de um literal — o portão de i18n o lê como frase da pessoa,
+ * e está certo em ler assim.
+ *
+ * O `catch` engolia tudo. Banco travado, disco cheio ou migração ausente viram
+ * `null`, que a tela lê como "não está logado": a pessoa entrava de novo, o
+ * login funcionava, a sessão seguinte falhava igual, e ela ficava presa num
+ * laço que nunca ia funcionar — sem nada dizendo que o problema era do
+ * servidor. Só `AppAuthError` vira `null`; o resto sobe e aparece como erro.
+ */
 const AUTH_RUNTIME = `import { cookies } from 'next/headers'
 import { openDatabase } from '../db/client'
 import { createEmailSender } from './email'
@@ -302,7 +316,7 @@ function ownerEmail(): string { const value=process.env.APP_OWNER_EMAIL; if (val
 async function useService<T>(work: (service: GeneratedAuthService) => Promise<T> | T): Promise<T> { const database=openDatabase(); try { return await work(new GeneratedAuthService({ database, sender:createEmailSender(), ownerEmail:ownerEmail() })) } finally { database.close() } }
 export async function requestAccessCode(email: string): Promise<void> { const result=await useService(service => service.requestCode(email));const jar=await cookies();jar.set(CODE_REQUEST_COOKIE,result.requestId,{secure:true,httpOnly:true,sameSite:'lax',path:'/',maxAge:10*60}) }
 export async function verifyAccessCode(email: string, code: string): Promise<{ token:string; csrf:string }> { const jar=await cookies(); const requestId=jar.get(CODE_REQUEST_COOKIE)?.value; if(requestId===undefined)throw new Error('CODE_REQUEST_REQUIRED'); const issued=await useService(service => service.verifyCode(email,requestId,code)); jar.delete(CODE_REQUEST_COOKIE); return issued }
-export async function currentSession(): Promise<AuthSession | null> { const jar=await cookies(); const token=jar.get(SESSION_COOKIE)?.value; if (token===undefined) return null; try { return await useService(service => service.authenticate(token)) } catch { return null } }
+export async function currentSession(): Promise<AuthSession | null> { const jar=await cookies(); const token=jar.get(SESSION_COOKIE)?.value; if (token===undefined) return null; try { return await useService(service => service.authenticate(token)) } catch (error) { if (error instanceof AppAuthError) return null; throw error } }
 export async function requireFormSession(formData: FormData, roles: readonly AppRole[]=['owner','member']): Promise<AuthSession> { const jar=await cookies(); const token=jar.get(SESSION_COOKIE)?.value; if (token===undefined) throw new Error('AUTH_REQUIRED'); return useService(service => { const session=service.authenticate(token); service.validateCsrf(session,jar.get(CSRF_COOKIE)?.value,String(formData.get('_csrf')??'')); if (!roles.includes(session.role)) throw new Error('ROLE_FORBIDDEN'); return session }) }
 export async function setSessionCookies(issued: { token:string; csrf:string }): Promise<void> { const jar=await cookies(); const common={ secure:true, sameSite:'lax' as const, path:'/', maxAge:14*24*60*60 }; jar.set(SESSION_COOKIE,issued.token,{...common,httpOnly:true}); jar.set(CSRF_COOKIE,issued.csrf,{...common,httpOnly:false}) }
 export async function csrfForCurrentSession(): Promise<string> { const jar=await cookies(); return jar.get(CSRF_COOKIE)?.value ?? '' }

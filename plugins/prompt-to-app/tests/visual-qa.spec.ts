@@ -432,7 +432,7 @@ describe('T-18 — a tela inicial em TRES tamanhos', () => {
 
 describe('T-18 — a tentativa seguinte mudou o que a pessoa ve?', () => {
   function imagem(largura: number, tinta: number): RgbaImage {
-    const pixels = new Uint8ClampedArray(largura * 4 * 4)
+    const pixels = new Uint8Array(largura * 4 * 4)
     for (let indice = 0; indice < largura * 4; indice += 1) {
       const at = indice * 4
       const escuro = indice < tinta

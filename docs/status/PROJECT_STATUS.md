@@ -181,6 +181,25 @@ produto existe para não fazer.
     captura de celular com a largura do computador é o tamanho que nunca foi
     aplicado, e ela aprovaria o celular descrevendo outra coisa.
 
+19. **OS-90 — revisão adversarial de identidade e sessão (T-29).** Sete achados,
+    e o pior deles **desfazia um conserto anterior**. A OS-33 igualou o corpo e
+    o relógio de `/magic/start`; o pedido **seguinte** respondia a mesma
+    pergunta — "essa pessoa tem conta aqui?" — com um status HTTP, porque quem
+    não tem conta não ganha registro de código e recebia 404 onde quem tem
+    recebia 401. O teto de tentativas era por registro, e um teto por registro
+    não é um teto de conta: cada reenvio nascia zerado, e quem não tem registro
+    **nunca travava**, o que separava os dois casos de novo. Agora o teto é por
+    e-mail e é conferido **antes** de olhar o registro.
+    - O mesmo oráculo existia na chave de acesso: os identificadores-isca
+      disfarçavam `/passkey/login/options`, e a rota irmã desfazia o disfarce
+      com 404 contra 500.
+    - `assertRequestTrust` — a única conferência de `Host`/`Origin` das mutações
+      autenticadas de **todos** os plugins — falhava **aberta**. O critério já
+      estava escrito dez linhas acima, sobre os cookies: um serviço montado sem
+      declarar a configuração cai no lado seguro.
+    - No aplicativo gerado, fechou o quinto achado aberto da OS-20: banco
+      travado virava **"faça login de novo" para sempre**.
+
 ## Próxima ação
 
 Ver `docs/status/TASK_DAG.md`, tarefa de maior prioridade em `READY`.

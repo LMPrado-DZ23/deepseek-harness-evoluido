@@ -18,6 +18,7 @@ import type {
 } from './model.js'
 import { KeyedMutex } from './mutex.js'
 import { t } from './i18n.js'
+import { contarFalha, podar, travado, type TentativasDeConferencia } from './verify-attempts.js'
 
 const MINUTE = 60_000
 /**
@@ -110,6 +111,14 @@ export interface PasskeyCeremony<TOptions> {
   readonly options: TOptions
 }
 
+/**
+ * Campos do registro de sessão que NUNCA atravessam para a rede.
+ *
+ * Constante exportada e não um recorte na montagem: `csrf_seed` ficou de fora
+ * do recorte por ter nascido depois dele.
+ */
+export const CAMPOS_PRIVADOS_DA_SESSAO = ['token_hash', 'csrf_hash', 'csrf_seed'] as const
+
 export class IdentityError extends Error {
   constructor(
     readonly code: 'invalid' | 'expired' | 'revoked' | 'locked' | 'not-found' | 'csrf' | 'replay' | 'counter',
@@ -163,6 +172,9 @@ export class StudioIdentityService {
   readonly #createId: () => string
   readonly #createSecret: () => string
   readonly #createMagicCode: () => string
+  /** Falhas de conferência de código POR E-MAIL, para o teto não ser um oráculo de existência. */
+  readonly #falhasDeConferencia = new Map<string, TentativasDeConferencia>()
+
   readonly #mutex = new KeyedMutex()
   #enrollmentResolver: (email: string) => EnrollmentGrant | undefined = () => undefined
   #userProvisioner: (user: IdentityUser, source: IdentityUserProvisioningSource) => Promise<void> = () => Promise.resolve()
@@ -285,6 +297,12 @@ export class StudioIdentityService {
         .catch(async () => {
           await this.#audit('magic_code_send_failed', existing?.user_id ?? null, null, orgId, tenantId, 'failure', t('auth.codeSendFailed'))
         })
+        // O `catch` é `async`, e ninguém observa a promessa que ele devolve: se
+        // a escrita da trilha também falhar — banco travado, disco cheio — o
+        // resultado é `unhandledRejection`, cujo padrão do Node é derrubar o
+        // processo. É preciso que o envio E o armazenamento falhem juntos, que
+        // é exatamente o estado em que o Studio menos pode reiniciar em laço.
+        .catch(() => undefined)
       await this.#audit('magic_code_requested', existing?.user_id ?? null, null, orgId, tenantId, 'success', t('auth.codeRequested'))
       return 'sent'
     })
@@ -296,15 +314,38 @@ export class StudioIdentityService {
   }
 
   async #verifyMagicCodeLocked(normalized: string, code: string, device: DeviceInput): Promise<IssuedSession> {
+    const now = this.#now()
+    const agora = now.getTime()
+    // A TRAVA É CONFERIDA ANTES DE OLHAR O REGISTRO, e a ordem é o conserto.
+    //
+    // Quem não tem conta não ganha registro nenhum, e a conferência respondia
+    // `not-found` (404) para esse caso e `invalid` (401) ou `locked` (429) para
+    // quem tem. O corpo era idêntico nos três; o STATUS não — e todo o trabalho
+    // da OS-33 para igualar corpo e relógio em `/magic/start` era desfeito pelo
+    // pedido seguinte, com um par de chamadas por e-mail.
+    //
+    // Contando por E-MAIL, e travando antes de saber se existe registro, quem
+    // não existe percorre exatamente a mesma escada: erra, erra, e trava.
+    if (travado(this.#falhasDeConferencia.get(normalized), agora)) {
+      throw new IdentityError('locked', t('auth.tooManyAttempts'))
+    }
+    const contar = async (): Promise<void> => {
+      podar(this.#falhasDeConferencia, agora)
+      this.#falhasDeConferencia.set(normalized, contarFalha(this.#falhasDeConferencia.get(normalized), agora))
+    }
     const candidate = this.#repository.magicCodes()
       .filter(record => record.email === normalized && record.consumed_at === null)
       .sort((left, right) => right.created_at.localeCompare(left.created_at))[0]
     if (candidate === undefined) {
+      await contar()
       await this.#audit('login_failed', null, null, 'org_unknown', 'tenant_unknown', 'failure', t('auth.codeMissing'))
-      throw new IdentityError('not-found', t('auth.codeInvalidOrExpired'))
+      // `invalid` e não `not-found`: 'não existe código' e 'o código está
+      // errado' são a mesma frase para quem pergunta, e tinham status
+      // diferentes.
+      throw new IdentityError('invalid', t('auth.codeInvalidOrExpired'))
     }
-    const now = this.#now()
     if (Date.parse(candidate.expires_at) <= now.getTime()) {
+      await contar()
       await this.#audit('login_failed', null, null, candidate.org_id, candidate.tenant_id, 'failure', t('auth.codeExpired'))
       throw new IdentityError('expired', t('auth.codeInvalidOrExpired'))
     }
@@ -313,10 +354,14 @@ export class StudioIdentityService {
     }
     if (!secretMatches(code, candidate.code_hash)) {
       const attempts = candidate.attempts + 1
+      await contar()
       await this.#repository.putMagicCode({ ...candidate, attempts })
       await this.#audit('login_failed', null, null, candidate.org_id, candidate.tenant_id, 'failure', t('auth.codeIncorrect'))
       throw new IdentityError(attempts >= MAX_MAGIC_ATTEMPTS ? 'locked' : 'invalid', t('auth.codeInvalidOrExpired'))
     }
+    // Entrou: a escada zera. Manter a contagem depois de uma entrada legítima
+    // travaria quem acabou de provar quem é.
+    this.#falhasDeConferencia.delete(normalized)
     await this.#repository.putMagicCode({ ...candidate, consumed_at: now.toISOString() })
     const existing = this.#repository.users().find(user => user.email === normalized)
     const grant = this.#enrollmentResolver(normalized)
@@ -421,7 +466,26 @@ export class StudioIdentityService {
    */
   assertRequestTrust(host: string | undefined, origin: string | undefined, mutating: boolean): void {
     const trust = this.#requestTrust
-    if (trust === undefined) return
+    if (trust === undefined) {
+      // FALHA FECHADA para quem MUDA estado, e o motivo está escrito dez linhas
+      // acima, sobre `#secureCookies`: "um serviço montado sem declarar a
+      // configuração precisa cair no lado seguro". `#secureCookies` começa em
+      // `true`; este começava em "não confere nada" — a mesma decisão, tomada
+      // para os dois lados, no mesmo arquivo.
+      //
+      // Esta função é o ÚNICO ponto em que `Host` e `Origin` são conferidos
+      // para as mutações autenticadas de todos os outros plugins, via
+      // `authenticatedMutation`. Uma montagem que esqueça `setRequestTrust` —
+      // um plugin novo, um harness alternativo, outra ordem de inicialização —
+      // deixava todas elas com o cabeçalho `x-dz23-csrf` como única defesa, que
+      // é exatamente a propriedade de navegador que este arquivo diz não querer
+      // sozinha.
+      //
+      // Leitura continua passando: recusar leitura numa montagem não declarada
+      // derruba o produto inteiro para consertar uma folga de escrita.
+      if (mutating) throw new IdentityError('invalid', t('http.originNotAllowed'))
+      return
+    }
     const normalized = host?.toLowerCase()
     if (normalized === undefined || !trust.allowedHosts.map(value => value.toLowerCase()).includes(normalized)) {
       throw new IdentityError('invalid', t('http.hostNotAllowed'))
@@ -443,10 +507,25 @@ export class StudioIdentityService {
     })
   }
 
-  listDevices(userId: string): readonly Omit<SessionRecord, 'token_hash' | 'csrf_hash'>[] {
+  /**
+   * Os dispositivos da pessoa, sem NADA que ajude a forjar a sessão.
+   *
+   * A lista nomeava dois campos, e `csrf_seed` entrou no registro depois e ficou
+   * de fora dela — saindo, por todas as sessões, em toda abertura da tela de
+   * dispositivos, para cache de navegador, registro de proxy e captura de tela.
+   * A semente sozinha não deriva o token (falta o `token_hash`), mas ela existe
+   * justamente para que um vazamento pontual não valha os noventa dias da
+   * sessão. Por isso a lista virou constante: um campo novo do registro tem de
+   * ser acrescentado A ELA para sair, e não ficar de fora dela para sair.
+   */
+  listDevices(userId: string): readonly Omit<SessionRecord, (typeof CAMPOS_PRIVADOS_DA_SESSAO)[number]>[] {
     return this.#repository.sessions()
       .filter(session => session.user_id === userId)
-      .map(({ token_hash: _tokenHash, csrf_hash: _csrfHash, ...safe }) => safe)
+      .map(session => {
+        const visivel = { ...session } as Record<string, unknown>
+        for (const campo of CAMPOS_PRIVADOS_DA_SESSAO) delete visivel[campo]
+        return visivel as Omit<SessionRecord, (typeof CAMPOS_PRIVADOS_DA_SESSAO)[number]>
+      })
   }
 
   async revokeSession(actor: SessionRecord, sessionId: string, reason = t('auth.revokedByUser')): Promise<void> {
@@ -869,9 +948,20 @@ export class StudioIdentityService {
     return user
   }
 
+  /**
+   * A credencial daquela resposta, DESTE usuário.
+   *
+   * A recusa é `invalid` e não `not-found`, e a diferença é um oráculo inteiro:
+   * `/passkey/login/options` é rota PÚBLICA e devolve identificadores-isca para
+   * quem não tem chave registrada. Apresentar a isca de volta aqui dava 404
+   * (a isca não existe na tabela), e apresentar um identificador REAL dava 500
+   * (a verificação criptográfica falhava). 404 = não tem chave; 500 = tem. As
+   * iscas disfarçavam uma rota e a rota irmã desfazia o disfarce, no mesmo
+   * processo, sem o reinício que a OS-33 declarou como único limite.
+   */
   #credentialForResponse(credentialId: string, userId: string): PasskeyCredential {
     const credential = this.#repository.credentials().find(candidate => candidate.credential_id === credentialId && candidate.user_id === userId)
-    if (credential === undefined) throw new IdentityError('not-found', t('auth.passkeyNotFound'))
+    if (credential === undefined) throw new IdentityError('invalid', t('auth.passkeyNotFound'))
     return credential
   }
 
@@ -920,6 +1010,20 @@ export class StudioIdentityService {
   }
 
   async #verifyAuthentication(response: AuthenticationResponse, challenge: ChallengeRecord, credential: PasskeyCredential, requireUserVerification: boolean) {
+    // Uma assinatura que não confere é pedido RECUSADO, e não erro do servidor.
+    // O verificador lança `Error` puro, que a porta traduz em 500 — e 500 para
+    // quem tem chave, contra 401 para quem não tem, é a outra metade do mesmo
+    // oráculo. A tradução acontece AQUI, no ponto que conhece o significado, e
+    // não na porta, que só veria um erro qualquer.
+    try {
+      return await this.#rawVerifyAuthentication(response, challenge, credential, requireUserVerification)
+    } catch (error) {
+      if (error instanceof IdentityError) throw error
+      throw new IdentityError('invalid', t('passkey.notConfirmed'))
+    }
+  }
+
+  async #rawVerifyAuthentication(response: AuthenticationResponse, challenge: ChallengeRecord, credential: PasskeyCredential, requireUserVerification: boolean) {
     return this.#passkeys.verifyAuthentication({
       response,
       challengeMatches: value => secretMatches(value, challenge.challenge_hash),
