@@ -132,6 +132,11 @@ produto existe para não fazer.
     queda para o host**, alvos com as cinco etapas separadas, e atestação que
     compara por igualdade em vez de "compatível". 14 falsificações, todas pegas.
 
+15. **OS-86 — pacote V6, fatia E3 (EVO-04/05/09/10/11).** Mapa de origem com
+    **três** estados (parcial recusa editar), as quatro qualificações que **não
+    se promovem**, handoff que não amplia escopo, e rollback que não promete
+    desfazer cobrança. 16 falsificações, todas pegas.
+
 ## Próxima ação
 
 Ver `docs/status/TASK_DAG.md`, tarefa de maior prioridade em `READY`.
