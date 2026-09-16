@@ -9,6 +9,7 @@ import { missionKey, studioMissionsDomainSpec, type MissionKey, type MissionReco
 import { TenantRecordMissionRepository, type MissionTenantRecordStore } from './tenant-repository.js'
 import { StudioMissionService, type MissionRepository, type MissionScope } from './service.js'
 
+export * from './price-table.js'
 export * from './budget-port.js'
 export * from './tenant-repository.js'
 export * from './http.js'

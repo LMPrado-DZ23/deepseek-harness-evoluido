@@ -223,6 +223,15 @@ produto existe para não fazer.
     execução, contra o meu próprio trabalho**: as correções de segurança da
     OS-90 não estavam no artefato versionado da identidade.
 
+22. **OS-93 — o teto em dinheiro (T-19).** O que estava parado era o **número**,
+    não o mecanismo. A tabela de preço é decisão do Prado; o motor que a usa não
+    é, e ele foi construído para o estado de hoje — tabela **vazia**. Modelo sem
+    preço nunca vale zero, preço tem validade obrigatória, e `SEM_TABELA` é um
+    desfecho próprio em vez de "sem limite": um campo não preenchido não pode
+    virar autorização de gasto ilimitado.
+    **O que falta aqui não é engenharia** — é o Prado preencher a tabela e
+    decidir se `NAO_MEDIDO` bloqueia ou apenas avisa.
+
 ## Próxima ação
 
 Ver `docs/status/TASK_DAG.md`, tarefa de maior prioridade em `READY`.
