@@ -191,6 +191,13 @@ A lista completa, com bloqueio e próximo passo de cada um, está no
 
 ---
 
+## Para quem vai mexer no código
+
+[`CLAUDE.md`](./CLAUDE.md) é o ponto de entrada de qualquer agente de IA neste
+repositório — ordem de leitura, regras que não se negociam e a disciplina que
+produziu o que está aqui. [`docs/OPERACAO.md`](./docs/OPERACAO.md) tem os
+comandos: cada portão, cada suíte, e o roteiro de falsificação.
+
 ## Instalação
 
 > **Não é um aplicativo de desktop.** Não há `.exe` nem `.dmg`. O DZ23 STUDIO é

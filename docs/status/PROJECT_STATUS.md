@@ -4,6 +4,11 @@
 > compactado, sessão nova, máquina reiniciada — leia ESTE arquivo primeiro,
 > depois `EXECUTION_JOURNAL.md`, depois `git status`. Não peça ao Prado para
 > explicar o projeto de novo.
+>
+> No **Claude Code**, quem manda ler isto é o [`CLAUDE.md`](../../CLAUDE.md) da
+> raiz, carregado sozinho em toda sessão. Ele tem a ordem de leitura, as regras
+> que não se negociam e a disciplina de falsificação; os comandos estão em
+> [`docs/OPERACAO.md`](../OPERACAO.md).
 
 - `mission_id`: `ENGINEERING-OS-2026-09-11`
 - `mission_intent`: evoluir o repositório para um Engineering OS sobre o DeepSeek Harness, preservando o motor e a compatibilidade com o upstream
