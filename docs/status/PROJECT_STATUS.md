@@ -137,6 +137,11 @@ produto existe para não fazer.
     se promovem**, handoff que não amplia escopo, e rollback que não promete
     desfazer cobrança. 16 falsificações, todas pegas.
 
+16. **OS-87 — pacote V6, fatia E4 (EVO-12).** Retirada de componente sem perder
+    ativo, sem exportar segredo e **sem fingir que cancelou contrato externo**;
+    e ganho medido, com `NAO_MEDIDO` como resultado de primeira classe.
+    **As cinco fatias E0–E4 do pacote V6 estão entregues.**
+
 ## Próxima ação
 
 Ver `docs/status/TASK_DAG.md`, tarefa de maior prioridade em `READY`.

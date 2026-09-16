@@ -330,6 +330,8 @@ declarada.
 
 | EVO-04 EVO-05 EVO-09 EVO-10 EVO-11 | Selecao visual que so edita o que sabe onde fica, handoff que nao concede acesso, e rollback que nao promete desfazer cobranca | Pacote MASTER V6 / fatia E3 16/09/2026 | v1.0 | BETA | plugins/prompt-to-app/src/visual-edit.ts (`selecao`, `impacto`, `exigeConfirmacao`, `qualificacoesValidas`, `autorizadoPara`, `MAPAS`, `QUALIFICACOES`), plugins/prompt-to-app/src/handoff.ts (`avaliarHandoff`, `planoDeRollback`, `restauravel`, `NAO_RESSUSCITA`) | 22/22 portoes EXIT=0; constituicao PASS (35 vereditos); `tsc` 0; raiz 3633 passaram / 68 pulados (+35); 16 falsificacoes, TODAS pegas; AT-119, AT-120, AT-121, AT-122, AT-129, AT-130, AT-131, AT-132, AT-133 e AT-134 EXECUTADOS | execucao: o §48 abre com a frase que decide a primeira metade — 'identidade do DOM isoladamente nao prova uma linha no repositorio'. Clicar num botao da previa e escrever no arquivo que o Studio ACHA que corresponde e a forma mais facil de editar o arquivo errado com confianca total, e quem nao programa nao tem como perceber. Por isso o mapa tem TRES estados e nao dois: EXATO, PARCIAL e AUSENTE pedem coisas diferentes, e colapsa-los transforma o parcial em exato. **PARCIAL RECUSA A EDICAO**, e essa e a decisao central: a tentacao e editar assim mesmo avisando que 'pode nao ser exatamente aqui', mas quem le esse aviso e quem nao programa, e ela nao tem como julgar — inspecionar e oferecido, editar nao. AS QUATRO QUALIFICACOES nao se promovem (§52 palavra por palavra): commit nao vira testado, teste nao vira revisado, revisao nao vira aprovado — cada salto parece pequeno. E AUTORIZADO e sobre UMA acao: a diferenca entre 'ele deixou enviar aquele e-mail' e 'ele deixou enviar e-mails'. HANDOFF: o escopo do destinatario e o TETO. Um handoff que ampliasse escopo seria escalada de privilegio escrita em portugues. Acao vedada tem motivo PROPRIO porque dizer 'fora do escopo' mandaria alguem pedir permissao que ja tem. ROLLBACK: Git nao desfaz e-mail, cobranca, contrato, pedido entregue nem publicacao. Arquivo restaura; dado exige migracao explicita porque a volta nem sempre existe; cobranca/mensagem/publicacao/entrega geram COMPENSACAO NOVA com recibo proprio. E efeito com desfecho DESCONHECIDO e IRREVERSIVEL de proposito: sem saber se a cobranca passou, compensar pode devolver dinheiro nunca cobrado e repetir pode cobrar duas vezes | Restaurar NAO ressuscita segredo revogado, aprovacao consumida, saldo gasto nem rotina pausada — um rollback que reativasse credencial revogada desfaria uma decisao de seguranca usando uma ferramenta de arquivos. Estas sao decisoes puras: ligar `selecao` a previa real e ao mapa de origem do build e trabalho que depende do Docker (EB-07) | fatia E4: soberania, saida de candidato e ganho por jornada |
 
+| EVO-12 | Retirar um componente sem perder ativo, e medir ganho sem presumi-lo | Pacote MASTER V6 / fatia E4 16/09/2026 | v1.0 | BETA | plugins/prompt-to-app/src/component-exit.ts (`problemasDaSaida`, `capacidadeSobrevive`, `ganho`, `ETAPAS_DE_SAIDA`, `DECLARACAO_DE_LIMITE`) | 22/22 portoes EXIT=0; constituicao PASS (35 vereditos); `tsc` 0; raiz 3648 passaram / 68 pulados (+15); 12 falsificacoes, TODAS pegas; AT-135 e AT-136 EXECUTADOS | execucao: a E0 ja recusava promover candidato sem estrategia de saida; isto e o que acontece quando a saida e EXECUTADA. Os tres riscos da AT-135 sao formas de a saida custar mais que a entrada: perder ativo (transforma qualquer experimento numa decisao so de ida), exportar segredo (a saida e o momento em que tudo e empacotado, e e onde uma credencial vai junto sem ninguem olhar) e FINGIR QUE CANCELOU CONTRATO EXTERNO — desligar a integracao nao encerra a assinatura, e dizer que sim faz alguem parar de prestar atencao numa cobranca que continua chegando. A CAPACIDADE sobreviver e a mesma pergunta da AT-114 do outro lado, e e mais provavel falhar aqui: sair da trabalho, e 'a gente nao faz mais isso' e a forma mais barata de terminar. MEDICAO: `NAO_MEDIDO` e resultado de primeira classe, e o mais comum. As tres razoes sao as tres formas de uma comparacao enganar — uma execucao a mais rapida nao e uma ferramenta mais rapida; comparar a criacao de um cadastro com a de um painel mede o TRABALHO e nao a ferramenta; e se o total de criterios mudou, a taxa de um nao e a do outro. O desempate e por INTERVENCAO HUMANA e nao por custo: custo depende de preco, que muda por fora, e intervencao e trabalho de gente — e o que a pessoa de fato sente. O veredito sai GRUDADO na declaracao do que ele nao cobre, como a evidencia e grudada numa regra validada: um numero sozinho pede obediencia, um numero com o limite dele pede julgamento. ACHADO: o portao de i18n pegou a declaracao de limite escrita direto no codigo — ela e texto que a PESSOA le, e foi para o catalogo | Contrato externo aberto SEM declarar credencial retirada nao e fingimento: e fato pendente, e sai como etapa pendente. Estas sao decisoes puras: executar uma retirada de verdade exige um candidato de verdade adotado, e nenhum foi (E0) | as cinco fatias E0-E4 do pacote V6 estao entregues |
+
 <!-- O livro mestre REGISTRA achados, e o achado da OS-39 e sobre numeros de ADR
      que nomeiam mais de uma decisao: citacao-ambigua-proposital -->
 
@@ -338,16 +340,16 @@ declarada.
 | estado | quantos |
 | --- | --- |
 | `STABLE` | 64 |
-| `BETA` | 141 |
+| `BETA` | 142 |
 | `NOT_PRESENT` | 33 |
 | `NOT_CONFIGURED` | 1 |
 | `NOT_EXECUTED` | 4 |
 | `FAILED` | 2 |
 
-**Total de requisitos rastreados: 245.**
+**Total de requisitos rastreados: 246.**
 
 | versao-alvo | quantos |
 | --- | --- |
-| v1.0 | 209 |
+| v1.0 | 210 |
 | v1.x | 33 |
 | v2 | 3 |

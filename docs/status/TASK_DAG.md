@@ -59,6 +59,7 @@ separa este trabalho de acrescentar features.
 | E1 | P1 | **V6 / EVO-02 EVO-03** — marca da empresa em dois formatos, e pacote de marca que nao vira instrucao | E0 | DONE (OS-84: `brand-package.ts` le sem executar e declara perdas; `brand-apply.ts` aplica em dois formatos e recusa travessia entre empresas. AT-115/116/117/118 EXECUTADOS, 23 falsificacoes todas pegas) |
 | E2 | P1 | **V6 / EVO-06 EVO-07 EVO-08** — perfis por capacidade, alvos com etapas separadas, atestacao que expira | E1 | DONE (OS-85: sem queda para o host; cinco etapas por alvo; atestacao por igualdade. AT-123 a AT-128 EXECUTADOS, 14 falsificacoes todas pegas) |
 | E3 | P1 | **V6 / EVO-04 05 09 10 11** — selecao visual com mapa de tres estados, handoff que nao amplia escopo, rollback que nao promete desfazer efeito externo | E2 | DONE (OS-86: PARCIAL recusa edicao; as quatro qualificacoes nao se promovem; compensacao e operacao NOVA. AT-119 a AT-122 e AT-129 a AT-134 EXECUTADOS, 16 falsificacoes todas pegas) |
+| E4 | P1 | **V6 / EVO-12** — retirada sem perder ativo, e ganho medido em vez de presumido | E3 | DONE (OS-87: cinco etapas de saida; segredo no pacote recusado; contrato externo nao e fingido encerrado; `NAO_MEDIDO` de primeira classe. AT-135 e AT-136 EXECUTADOS, 12 falsificacoes todas pegas) |
 
 ## Honestidade de escala
 

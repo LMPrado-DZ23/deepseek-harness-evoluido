@@ -214,5 +214,8 @@
     "supportAlias": "Uma cor pode apontar para outra, e o pacote é resolvido até {limite} níveis. Referência que dá voltas e referência que não existe são recusadas, cada uma com o próprio motivo.",
     "supportLossAlias": "A referência NÃO sobrevive à exportação: o que volta é o valor já resolvido. Isto é uma perda declarada do formato, e não um defeito.",
     "supportAssets": "Imagem citada no pacote é conferida contra a lista da empresa. Ela nunca é aberta, baixada nem tratada como caminho de arquivo."
+  },
+  "exit": {
+    "measureLimit": "Comparação de uma jornada medida neste perfil e neste ambiente. Não mede liderança de mercado, não prevê lucro e não vale para jornadas que não foram executadas."
   }
 }
