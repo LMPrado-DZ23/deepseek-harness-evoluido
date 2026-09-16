@@ -1,3 +1,9 @@
+/*
+  O tema grafite é o PADRÃO (ADR-050). Os 3 blocos escuros deste arquivo foram
+  DESEMBRULHADOS do `@media (prefers-color-scheme: dark)` — mesma posição, mesma
+  ordem, mesma especificidade —, e por isso valem sempre. As regras claras
+  continuam acima de cada um deles: elas não foram apagadas, foram vencidas.
+*/
 /* A tela de objetivos.
    As cores são as mesmas do resto do produto, e as medidas de contraste seguem
    o que o axe já cobra nas outras telas: #5c6881 e #41506b sobre branco passam,
@@ -24,7 +30,7 @@
    claros do modo claro (#5c6881, #41506b) medem abaixo de 4,5:1 sobre o fundo
    #151d30 do cartão. Os tons abaixo são os mesmos que o resto do produto já
    usa no escuro e que o axe já aprova. */
-@media (prefers-color-scheme: dark){
+
   .mission-line strong{color:#eef2f9}
   .mission-verdict{color:#eef2f9}
   .mission-status,.mission-criterion-state{color:#c7d2e4}
@@ -32,7 +38,7 @@
   .mission-checklist-title{color:#eef2f9}
   .mission-checklist li{border-color:#2a3550}
   .mission-problem{color:#ffb4ab}
-}
+
 
 /* O FORMULÁRIO de criação.
    Os campos ocupam a largura porque uma meta e um item a comprovar são frases,
@@ -47,11 +53,11 @@
 .mission-criterion-field{display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap}
 .mission-criterion-field input[type=text]{flex:1 1 240px;min-width:0}
 .mission-form button{margin-top:12px}
-@media (prefers-color-scheme: dark){
+
   .mission-form>p{color:#c7d2e4}
   .mission-form label,.mission-criteria-fields legend{color:#eef2f9}
   .mission-form input[type=text]{background:#0f172b;color:#eef2f9;border-color:#2a3550}
-}
+
 
 /* REGISTRAR um item, embaixo do próprio item.
    Recuado para não competir com a lista do que falta: quem lê a tela está
@@ -63,8 +69,8 @@
 .mission-record select:focus,.mission-record input[type=text]:focus{outline:3px solid #9fc3ff;outline-offset:2px}
 .mission-record .mission-problem{flex:1 1 100%;margin:0}
 .mission-record button{margin-top:0}
-@media (prefers-color-scheme: dark){
+
   .mission-record{border-top-color:#2a3550}
   .mission-record label{color:#c7d2e4}
   .mission-record select,.mission-record input[type=text]{background:#0f172b;color:#eef2f9;border-color:#2a3550}
-}
+

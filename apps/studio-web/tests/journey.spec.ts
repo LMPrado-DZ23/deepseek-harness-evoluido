@@ -184,13 +184,17 @@ test('percorre as cinco etapas, muda privacidade e termina sem alegar publicaç�
   await notificationOptIn.click()
   await expect(page.getByText('Este aparelho vai avisar quando a criação terminar.')).toBeVisible()
   expect(await page.evaluate(() => (window as unknown as { __dz23PermissionRequests: () => number }).__dz23PermissionRequests())).toBe(1)
-  await expect(page.getByRole('button', { name: 'Quero um painel para minha equipe criar, editar e excluir cadastros.' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Painel para criar, editar e excluir' })).toBeVisible()
+  // Privacidade vive em "Ajustes desta tarefa" desde a migração para o
+  // workspace aprovado. Continua inteira: os três perfis, a frase de cada um e
+  // o aviso que nomeia a rota.
+  await page.getByText('Ajustes desta tarefa', { exact: true }).click()
   await expect(page.getByText('Seus dados não são enviados para serviços externos.')).toBeVisible()
   // O seletor virou os três perfis nomeados (M-05); o segundo é o Equilibrado,
   // o único que continua nomeando a rota externa na frase de privacidade.
   await page.locator('.privacy-profiles label').nth(1).click()
   await expect(page.locator('.privacy-notice')).toContainText('ollama-local')
-  await page.getByRole('button', { name: 'Quero uma página para apresentar meu trabalho ou negócio.' }).click()
+  await page.getByRole('button', { name: 'Página de apresentação' }).click()
   await page.getByRole('button', { name: 'Continuar' }).click()
   await answerIntake(page, INTAKE_ANSWERS)
   await page.getByRole('button', { name: 'Montar meu plano' }).click()

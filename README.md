@@ -27,7 +27,13 @@ pedem um *prompt*, devolvem código, e quando algo dá errado mostram um *stack
 trace*. O DZ23 STUDIO parte de outro lugar: **a pessoa que precisa do aplicativo
 não sabe, e não precisa saber, o que é um build**.
 
-A jornada tem cinco etapas, e cada uma é uma tela que qualquer pessoa lê:
+Você entra e há **uma coisa a fazer**: dizer o que precisa. O tipo, a aparência
+e a privacidade ficam à mão, um nível abaixo, em "Ajustes desta tarefa" — porque
+a home que cobra sete decisões antes da primeira palavra não é uma home, é um
+formulário.
+
+A partir daí a tarefa tem cinco etapas, e cada uma é uma tela que qualquer
+pessoa lê:
 
 | | etapa | o que acontece |
 |---|---|---|
@@ -57,8 +63,7 @@ tela onde nada muda, "trabalhando" e "travado" têm a mesma aparência — e que
 não programa não tem como distinguir os dois.
 
 O estado nunca é só cor: a palavra fica ao lado do ponto, porque
-verde-e-vermelho desaparece para quem não distingue os dois e some de novo no
-modo escuro.
+verde-e-vermelho desaparece para quem não distingue os dois.
 
 E você volta para qualquer projeto quando quiser — a situação de cada um
 aparece em português, nunca como código de máquina:
@@ -131,15 +136,19 @@ Rotas local (Ollama), OmniRoute e provedor oficial, com um perfil
 **"privado-local"** em que a criação simplesmente não acontece se a rota local
 não estiver disponível — em vez de cair silenciosamente para um provedor externo.
 
-### 8. Interface instalável, acessível e no escuro
+### 8. Interface instalável e acessível, no tema grafite
 PWA instalável, quatro tamanhos de tela testados (mesa, tablet, celular e a faixa
-de 900px), varredura de acessibilidade **axe em modo claro e escuro no fluxo
-inteiro**, e botões que avisam que estão trabalhando em vez de deixar a pessoa
-clicando duas vezes.
+de 900px), varredura de acessibilidade **axe no fluxo inteiro**, e botões que
+avisam que estão trabalhando em vez de deixar a pessoa clicando duas vezes.
+
+O tema grafite é o **padrão** do produto, e não uma preferência do sistema: é a
+direção visual aprovada pelo proprietário (ADR-050). Abaixo de 1024px a
+navegação vira gaveta — com botão de fechar visível, `Escape`, toque fora e o
+foco devolvido ao botão que a abriu.
 
 <table>
 <tr>
-<td width="50%"><img src="./docs/images/09-escuro.png" alt="O mesmo produto em modo escuro"></td>
+<td width="50%"><img src="./docs/images/09-gaveta.png" alt="A navegação no celular, aberta como gaveta"></td>
 <td width="50%"><img src="./docs/images/08-ajuda.png" alt="A ajuda, com glossário e o que o Studio nunca faz"></td>
 </tr>
 </table>
@@ -168,12 +177,17 @@ está, tem o motivo escrito.
 
 | | |
 |---|---|
-| suíte de unidade e integração | **2.743 testes** (174 arquivos) |
-| interface | **344 testes** |
-| navegador (Chromium real) | **65 testes** em 4 tamanhos, com axe claro e escuro |
-| PostgreSQL 16 real | **62/62** em contêiner descartável |
-| portões estáticos | 15/15 |
+| suíte de unidade e integração | **3.751 testes** (213 arquivos) |
+| interface | **525 testes** |
+| navegador (Chromium real) | **119 testes** em 4 tamanhos, com varredura axe |
+| PostgreSQL 16 real | **65/65** em banco de verdade |
+| portões estáticos | **24/24** |
 | diff no Harness | **zero** |
+
+Os números acima são de uma execução completa das quatro suítes, e não de uma
+estimativa. `docs/OPERACAO.md` tem o comando de cada uma; `gate:typecheck` e
+`gate:lib-freshness` existem porque os dois passos que dava para pular foram
+pulados.
 
 **O que ainda não aconteceu, e é honesto dizer:**
 
@@ -182,8 +196,13 @@ está, tem o motivo escrito.
 - Nenhum *deploy* de produção. O destino de publicação hoje é **local**.
 - A imagem OCI ainda não foi construída (falta rota de rede para registro de
   pacotes no ambiente de build).
-- 89 requisitos estão em `BETA`: construídos e provados **neste ambiente**, não
-  na vida real.
+- **Nenhum modelo de verdade escreveu um aplicativo aqui.** O caminho inteiro é
+  provado contra dobro. Há uma medição com Ollama real registrada em `EB-04`: o
+  código que um modelo pequeno devolveu **passa** nas guardas, mas o prompt real
+  não completa em tempo utilizável em CPU.
+- **147 dos 256 requisitos estão em `BETA`**: construídos e provados **neste
+  ambiente**, não na vida real. 69 estão em `STABLE`, e o resto tem o motivo
+  escrito, um por um.
 
 A lista completa, com bloqueio e próximo passo de cada um, está no
 [livro-razão de requisitos](./docs/MASTER_REQUIREMENTS_LEDGER.md) e na

@@ -1,0 +1,99 @@
+/*
+  Os tokens do tema grafite DZ23 — a direção visual aprovada no pacote V6
+  (`docs/01_DIRECAO_VISUAL_E_LOGO.md`, seção 3).
+
+  Os valores vêm da especificação, e não de um olhômetro sobre as imagens: ela
+  os declara como "escolhas de design propostas nesta V3, não medidas exatas de
+  CSS do Manus", e manda reconciliar com o sistema de estilos atual e validar
+  contraste DEPOIS de renderizar. É o que se faz aqui — os nomes são os da
+  especificação para que a comparação com ela seja direta, sem tradução no meio.
+
+  ESTE ARQUIVO VEM ANTES de `styles.css` no `main.tsx`, de propósito: a folha
+  antiga tem tokens claros no `:root` e um bloco escuro só para a conversa. Os
+  dois convivem enquanto a migração acontece, e quem vence é quem vem depois —
+  por isso a folha antiga é que sobrescreve o que ainda não migrou, e não o
+  contrário. Quando a migração terminar, este comentário é o que fica obsoleto.
+*/
+
+:root {
+  /* Superfícies, do fundo para a frente. */
+  --dz-canvas: #111418;
+  --dz-sidebar: #171b21;
+  --dz-surface: #1d2229;
+  --dz-surface-active: #242c37;
+  --dz-border: #35404d;
+
+  /* Texto. O secundário é legível de verdade: 7,1:1 sobre o canvas. */
+  --dz-text: #f3f5f7;
+  --dz-text-secondary: #b8c1cd;
+
+  /* A marca. `accent` é para texto e destaque; `action` é preenchimento. */
+  --dz-accent: #6da7ff;
+  --dz-action: #235cce;
+  --dz-focus: #91beff;
+
+  /* Estado. Nunca sozinho: sempre acompanhado de palavra ou ícone. */
+  --dz-success: #8fd36a;
+  --dz-warning: #ebc47a;
+  --dz-danger: #f38d91;
+
+  /* A escala de espaçamento da especificação: 4/8/12/16/24/32/48/64. */
+  --dz-1: 4px;
+  --dz-2: 8px;
+  --dz-3: 12px;
+  --dz-4: 16px;
+  --dz-5: 24px;
+  --dz-6: 32px;
+  --dz-7: 48px;
+  --dz-8: 64px;
+
+  /*
+    A LARGURA DA LATERAL É UM TOKEN SÓ, e isso é a especificação falando:
+    "as larguras de sidebar dos conceitos variam ligeiramente. Normalizar o
+    shell em um único token: navegar entre home e tarefa não deve deslocar todo
+    o conteúdo lateralmente."
+  */
+  --dz-rail: clamp(260px, 20vw, 320px);
+  --dz-topbar: 64px;
+  --dz-content-max: 1040px;
+
+  --dz-radius: 12px;
+  --dz-radius-lg: 20px;
+  --dz-radius-pill: 999px;
+}
+
+/*
+  O tema grafite é o PADRÃO deste produto, e não uma preferência do sistema.
+  A referência aprovada é escura; deixá-la atrás de `prefers-color-scheme`
+  entregaria a interface clara para a maioria das pessoas e faria a captura de
+  aceite não bater com o que elas veem.
+
+  O tema claro continua existindo para quem o pede — está no fim deste arquivo.
+*/
+html.dz23 body,
+body.dz23 {
+  background: var(--dz-canvas);
+  color: var(--dz-text);
+}
+
+/*
+  O FOCO é visível em tudo, e com a cor própria: um contorno que herda a cor do
+  texto desaparece sobre a superfície ativa, que é exatamente onde a pessoa que
+  navega por teclado está quando precisa dele.
+*/
+.dz23 :focus-visible {
+  outline: 3px solid var(--dz-focus);
+  outline-offset: 2px;
+  border-radius: var(--dz-radius);
+}
+
+/*
+  NÃO HÁ VARIANTE CLARA NESTA ENTREGA, e dizer isso é mais honesto que deixar
+  meia. Ela existia aqui, derivada; só que `styles.css` — a folha das telas que
+  ainda não migraram — teve o tema escuro desembrulhado e agora vale sempre.
+  Duas metades discordando pela preferência do sistema dariam um produto com
+  trilho claro e tarefa escura, que é pior que um produto escuro.
+
+  A especificação pede a variante clara "quando necessário". Quando for, ela
+  volta inteira: aqui e lá, no mesmo gesto.
+*/

@@ -1,0 +1,200 @@
+/*
+  O shell do workspace aprovado: trilho persistente à esquerda, área de trabalho
+  ampla à direita. É a "duas zonas" da especificação (seção 2), e a largura do
+  trilho é um token só — `--dz-rail` — para que navegar entre a home e uma
+  tarefa não desloque o conteúdo lateralmente.
+*/
+
+.dz-shell {
+  display: grid;
+  grid-template-columns: var(--dz-rail) minmax(0, 1fr);
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: var(--dz-canvas);
+  color: var(--dz-text);
+}
+
+/* ---- trilho ---------------------------------------------------------- */
+
+.dz-rail {
+  background: var(--dz-sidebar);
+  border-right: 1px solid var(--dz-border);
+  padding: var(--dz-4) var(--dz-3) var(--dz-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--dz-5);
+  /*
+    O trilho rola SOZINHO. Na referência a lista de tarefas cresce até encher a
+    lateral, e sem rolagem própria ela empurraria a conta para fora da tela —
+    a especificação avisa: "conta/controles não são sobrepostos pela lista".
+  */
+  overflow-y: auto;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  height: 100dvh;
+}
+
+.dz-rail-topo { display: flex; align-items: center; justify-content: space-between; gap: var(--dz-2); }
+
+/* Fora da gaveta não há o que fechar: o trilho é permanente. */
+.dz-rail-fechar { display: none; }
+
+.dz-marca {
+  display: flex;
+  align-items: center;
+  gap: var(--dz-3);
+  min-height: 44px;
+  padding: var(--dz-2);
+  border-radius: var(--dz-radius);
+  color: var(--dz-text);
+  text-decoration: none;
+  font-weight: 650;
+  font-size: 16px;
+}
+
+.dz-marca img {
+  border-radius: 9px;
+  display: block;
+  flex: none;
+}
+
+.dz-rail-secao { display: grid; gap: var(--dz-1); }
+
+.dz-rail-secao h2 {
+  margin: var(--dz-2) var(--dz-2) var(--dz-1);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--dz-text-secondary);
+}
+
+.dz-rail-secao ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+
+.dz-rail-secao a {
+  /* 44px é o alvo confortável que a especificação pede para desktop. */
+  display: flex;
+  align-items: center;
+  gap: var(--dz-3);
+  min-height: 44px;
+  padding: 0 var(--dz-3);
+  border-radius: var(--dz-radius);
+  color: var(--dz-text-secondary);
+  text-decoration: none;
+  font-size: 15px;
+}
+
+.dz-rail-secao a svg { width: 19px; height: 19px; flex: none; }
+
+.dz-rail-secao a:hover { background: var(--dz-surface-active); color: var(--dz-text); }
+
+/*
+  O item ativo tem FUNDO e TEXTO próprios, e não só uma borda: numa lista de
+  nove linhas, uma borda de 2px é a diferença que alguém com baixa visão não
+  encontra.
+*/
+.dz-rail-secao a.ativo {
+  background: var(--dz-surface-active);
+  color: var(--dz-text);
+  font-weight: 600;
+}
+
+/* ---- área de trabalho ------------------------------------------------ */
+
+.dz-workspace { min-width: 0; display: flex; flex-direction: column; }
+
+.dz-topbar {
+  min-height: var(--dz-topbar);
+  display: flex;
+  align-items: center;
+  gap: var(--dz-3);
+  padding: 0 var(--dz-5);
+  border-bottom: 1px solid var(--dz-border);
+}
+
+.dz-topbar-titulo {
+  display: flex;
+  align-items: center;
+  gap: var(--dz-2);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--dz-text);
+  margin: 0;
+}
+
+.dz-topbar-titulo span { color: var(--dz-text-secondary); font-weight: 400; }
+
+.dz-topbar-acoes { margin-left: auto; display: flex; align-items: center; gap: var(--dz-2); }
+
+.dz-menu {
+  display: none;
+  border: 1px solid var(--dz-border);
+  border-radius: var(--dz-radius);
+  background: var(--dz-surface);
+  color: var(--dz-text);
+  min-width: 44px;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.dz-scrim { display: none; }
+
+/* ---- celular e tablet ------------------------------------------------ */
+
+/*
+  A referência é só de desktop, e a especificação diz isso: "referências de
+  desktop não definem breakpoint móvel". O corte é pelo CONTEÚDO — abaixo de
+  1024px o trilho de 260px come a coluna de leitura —, e não pelo nome de um
+  aparelho.
+*/
+@media (max-width: 1024px) {
+  .dz-shell { grid-template-columns: minmax(0, 1fr); }
+
+  .dz-rail {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: min(320px, 86vw);
+    z-index: 30;
+    transform: translateX(-102%);
+    /*
+      FECHADA quer dizer fechada. Só deslocar a gaveta para fora da tela a
+      mantém no foco do teclado e na árvore do leitor de tela: a pessoa aperta
+      Tab na home e cai dentro de uma navegação que não está vendo. A
+      `visibility` tira a gaveta de circulação e volta junto com ela.
+    */
+    visibility: hidden;
+    transition: transform 160ms ease, visibility 160ms ease;
+  }
+
+  .dz-rail.aberto { transform: translateX(0); visibility: visible; }
+
+  .dz-menu { display: inline-flex; }
+
+  .dz-rail-fechar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
+    border: 1px solid var(--dz-border);
+    border-radius: var(--dz-radius);
+    background: var(--dz-surface);
+    color: var(--dz-text);
+    cursor: pointer;
+  }
+
+  .dz-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    background: rgb(0 0 0 / 55%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dz-rail { transition: none; }
+}

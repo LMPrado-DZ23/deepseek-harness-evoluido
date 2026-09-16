@@ -10,10 +10,18 @@ import { MissionScreen } from './mission/MissionScreen'
 import { isMissionPath } from './mission/missionApi'
 import { ProjectsScreen, isProjectsPath } from './projects/ProjectsScreen'
 import { isTeamPath } from './team/teamApi'
+/*
+  O TEMA VEM ANTES da folha antiga, de propósito: `styles.css` ainda tem tokens
+  claros no `:root`, e quem vier depois vence. Enquanto a migração acontece, é a
+  folha antiga que sobrescreve o que ainda não migrou — e não o contrário.
+*/
+import './theme.css'
+import './shell/shell.css'
+import './home/home.css'
 import './styles.css'
 import { registerStudioPwa } from './pwa/register'
 import { SessionRevocationBoundary } from './session/SessionRevocationBoundary'
-import { StudioShell } from './StudioShell'
+import { WorkspaceShell } from './shell/WorkspaceShell'
 
 const Screen = window.location.pathname === ASSISTANT_PATH
   ? AssistantEntry
@@ -30,8 +38,14 @@ const Screen = window.location.pathname === ASSISTANT_PATH
  */
 const rendered = Screen === App
   ? <Screen />
-  : <StudioShell><Screen /></StudioShell>
+  : <WorkspaceShell><Screen /></WorkspaceShell>
 
+/*
+  O tema grafite é o PADRÃO deste produto. A classe entra no `<html>` aqui, e
+  não no HTML estático, porque é daqui que ela sai quando alguém escolher o
+  claro — e ter os dois lugares seria a segunda verdade de sempre.
+*/
+document.documentElement.classList.add('dz23')
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode><SessionRevocationBoundary>{rendered}</SessionRevocationBoundary></React.StrictMode>,
 )

@@ -25,7 +25,7 @@ test('a ajuda abre pela barra de navegação e explica o vocabulário do produto
   const accessibility = await new AxeBuilder({ page }).analyze()
   expect(accessibility.violations).toEqual([])
   await page.getByRole('link', { name: 'Voltar ao início' }).click()
-  await expect(page.getByRole('heading', { name: 'Vamos criar seu aplicativo' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'O que posso fazer por você?' })).toBeVisible()
 })
 
 /**
@@ -41,6 +41,11 @@ test('o tipo mostrado vem com a frase que explica de onde ele veio', async ({ co
   await context.addCookies([{ name: 'dz23_studio_session', value: 'e2e', url: 'http://studio.dz23.localhost:4179' }])
   await page.goto('/studio/')
   const brief = page.getByRole('textbox').first()
+  // O tipo e a frase que o explica moram em "Ajustes desta tarefa", um nível
+  // abaixo do compositor: a home pergunta UMA coisa, e o resto fica à mão sem
+  // ficar no caminho. O que se afirma aqui é o mesmo de antes — a frase muda
+  // conforme a ORIGEM do tipo —, só que depois de abrir a seção.
+  await page.getByText('Ajustes desta tarefa', { exact: true }).click()
   const kind = page.getByLabel('Tipo de aplicativo')
 
   // 1. Só o RAMO: escolhe agenda, e NÃO diz que entendeu o pedido.

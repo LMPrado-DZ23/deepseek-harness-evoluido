@@ -86,10 +86,10 @@ test('marcar como terminado não encerra: o encerramento confere e recusa, dizen
 test('"Objetivos" é um link de verdade na navegação, e leva à tela', async ({ context, page }) => {
   await signedIn(context)
   await page.goto('/studio/')
-  // Abaixo de 820px a barra vira gaveta e o botão do menu é a ÚNICA porta —
+  // Abaixo de 1024px o trilho vira gaveta e o botão do menu é a ÚNICA porta —
   // é por isso que este teste roda nos quatro tamanhos, e não só no de mesa.
-  if ((page.viewportSize()?.width ?? 1280) <= 820) {
-    await page.getByRole('button', { name: 'Menu', exact: true }).click()
+  if ((page.viewportSize()?.width ?? 1280) <= 1024) {
+    await page.getByRole('button', { name: 'Abrir o menu', exact: true }).click()
   }
   const item = page.getByRole('navigation').getByRole('link', { name: 'Objetivos' })
   await expect(item).toBeVisible()

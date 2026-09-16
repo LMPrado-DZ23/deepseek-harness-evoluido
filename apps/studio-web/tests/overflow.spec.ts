@@ -23,9 +23,9 @@ test('nenhuma tela do fluxo rola para os lados', async ({ context, page }) => {
     expect(measured.scroll, `${screen}: ${measured.scroll}px de conteúdo em ${measured.inner}px de tela`).toBeLessThanOrEqual(measured.inner)
   }
   await page.goto('/studio/')
-  await expect(page.getByRole('heading', { name: 'Vamos criar seu aplicativo' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'O que posso fazer por você?' })).toBeVisible()
   await overflow('ideia')
-  await page.getByRole('button', { name: 'Quero uma página para apresentar meu trabalho ou negócio.' }).click()
+  await page.getByRole('button', { name: 'Página de apresentação' }).click()
   await page.getByRole('button', { name: 'Continuar' }).click()
   await expect(page.getByRole('heading', { name: 'Só mais alguns detalhes' })).toBeVisible({ timeout: 15_000 })
   await overflow('perguntas')

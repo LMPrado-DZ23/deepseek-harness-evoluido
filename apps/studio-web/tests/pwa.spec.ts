@@ -92,7 +92,7 @@ test('publica manifesto instalável com ícones reais, escopo /studio/ e worker 
     expect(response.status(), icon.src).toBe(200)
     expect(response.headers()['content-type']).toContain('image/png')
   }
-  expect(await page.locator('meta[name="theme-color"]').getAttribute('content')).toBe('#1f2a5a')
+  expect(await page.locator('meta[name="theme-color"]').getAttribute('content')).toBe('#111418')
   // The browser's own manifest fetch (no session cookie unless use-credentials) must succeed for installability.
   const cdp = await context.newCDPSession(page)
   const appManifest = await cdp.send('Page.getAppManifest') as { url: string; errors: unknown[]; data?: string }
@@ -112,7 +112,11 @@ test('serve a casca com o servidor fora do ar, sem nunca ter dados de projeto no
   await expect.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker?.controller)), { timeout: 15_000 }).toBe(true)
   expect(await page.evaluate(async () => (await navigator.serviceWorker.ready).scope)).toBe(`${origin}/studio/`)
   await page.reload()
-  await expect(page.getByRole('img', { name: 'DZ23 STUDIO' })).toBeVisible()
+  // A marca do proprietário, derivada do original (ADR-050). Ela é procurada
+  // pelo ELEMENTO e não pelo texto alternativo: o alternativo virou vazio de
+  // propósito, porque o nome "DZ23 Studio" está escrito ao lado dela em texto
+  // real, e um leitor de tela que anuncia os dois diz a marca duas vezes.
+  await expect(page.locator('.dz-marca img')).toBeVisible()
   await expect(page.locator('.pwa-offline-banner')).toBeHidden()
 
   // Network really gone for page and worker: proxy closed, sockets destroyed. The browser still reports
@@ -120,7 +124,7 @@ test('serve a casca com o servidor fora do ar, sem nunca ter dados de projeto no
   // itself is the evidence.
   await killProxy()
   await page.reload()
-  await expect(page.getByRole('img', { name: 'DZ23 STUDIO' })).toBeVisible({ timeout: 20_000 })
+  await expect(page.locator('.dz-marca img')).toBeVisible({ timeout: 20_000 })
   const offlineApi = await page.evaluate(async () => {
     const response = await fetch('/api/studio/apps/projects')
     return { status: response.status, body: await response.json() as unknown }
@@ -262,7 +266,7 @@ test('a casca servida do cache se identifica como copia salva, e some quando a s
   await context.clearCookies()
   await killProxy()
   await page.reload()
-  await expect(page.getByRole('img', { name: 'DZ23 STUDIO' })).toBeVisible({ timeout: 20_000 })
+  await expect(page.locator('.dz-marca img')).toBeVisible({ timeout: 20_000 })
   await expect(page.locator('.pwa-cached-shell')).toBeVisible()
   await expect(page.locator('.pwa-cached-shell')).toHaveText(pwa.offline.cachedShell)
   expect(await shellSourceSeenByPage(page)).toBe('cache')
@@ -305,7 +309,7 @@ test('uma recarga que passa por cima do worker nao herda o aviso de tela salva d
   await page.reload()
   await killProxy()
   await page.reload()
-  await expect(page.getByRole('img', { name: 'DZ23 STUDIO' })).toBeVisible({ timeout: 20_000 })
+  await expect(page.locator('.dz-marca img')).toBeVisible({ timeout: 20_000 })
   await expect(page.locator('.pwa-cached-shell')).toBeVisible()
   expect(await shellSourceSeenByPage(page)).toBe('cache')
 
@@ -315,7 +319,7 @@ test('uma recarga que passa por cima do worker nao herda o aviso de tela salva d
   await cdp.send('Network.enable')
   await cdp.send('Network.setBypassServiceWorker', { bypass: true })
   await page.reload()
-  await expect(page.getByRole('img', { name: 'DZ23 STUDIO' })).toBeVisible({ timeout: 20_000 })
+  await expect(page.locator('.dz-marca img')).toBeVisible({ timeout: 20_000 })
 
   // The session is alive: this screen came from the Studio, not from the device.
   const live = await page.evaluate(async () => (await fetch('/api/studio/apps/projects')).status)

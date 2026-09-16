@@ -57,7 +57,7 @@ test('depois de recarregar, o resultado da criação continua na tela', async ({
   ])
   await context.addInitScript(() => { window.sessionStorage.setItem('dz23.studio.csrf.v1', 'csrf-e2e') })
   await page.goto('/studio/')
-  await page.getByRole('button', { name: 'Quero uma página para apresentar meu trabalho ou negócio.' }).click()
+  await page.getByRole('button', { name: 'Página de apresentação' }).click()
   await page.getByRole('button', { name: 'Continuar' }).click()
   await answerIntake(page, INTAKE_ANSWERS)
   await page.getByRole('button', { name: 'Montar meu plano' }).click()
@@ -97,7 +97,7 @@ test('o botão de ver o protótipo fica ocupado, e o clique duplo não abre duas
     await route.fallback()
   })
   await page.goto('/studio/')
-  await page.getByRole('button', { name: 'Quero uma página para apresentar meu trabalho ou negócio.' }).click()
+  await page.getByRole('button', { name: 'Página de apresentação' }).click()
   await page.getByRole('button', { name: 'Continuar' }).click()
   await answerIntake(page, INTAKE_ANSWERS)
   await page.getByRole('button', { name: 'Montar meu plano' }).click()
@@ -135,7 +135,7 @@ test('os três botões da tela de perguntas avisam que estão trabalhando', asyn
     await route.fallback()
   })
   await page.goto('/studio/')
-  await page.getByRole('button', { name: 'Quero uma página para apresentar meu trabalho ou negócio.' }).click()
+  await page.getByRole('button', { name: 'Página de apresentação' }).click()
   await page.getByRole('button', { name: 'Continuar' }).click()
 
   // "Não sei — recomende para mim" também é um pedido ao servidor.
@@ -199,7 +199,7 @@ test('sem passos registrados, a tela ainda mostra a etapa em que está', async (
   })
 
   await page.goto('/studio/')
-  await page.getByRole('button', { name: 'Quero uma página para apresentar meu trabalho ou negócio.' }).click()
+  await page.getByRole('button', { name: 'Página de apresentação' }).click()
   await page.getByRole('button', { name: 'Continuar' }).click()
   await answerIntake(page, INTAKE_ANSWERS)
   await page.getByRole('button', { name: 'Montar meu plano' }).click()
@@ -260,7 +260,7 @@ test('durante a criação, a tela mostra cada passo do construtor', async ({ con
   })
 
   await page.goto('/studio/')
-  await page.getByRole('button', { name: 'Quero uma página para apresentar meu trabalho ou negócio.' }).click()
+  await page.getByRole('button', { name: 'Página de apresentação' }).click()
   await page.getByRole('button', { name: 'Continuar' }).click()
   await answerIntake(page, INTAKE_ANSWERS)
   await page.getByRole('button', { name: 'Montar meu plano' }).click()

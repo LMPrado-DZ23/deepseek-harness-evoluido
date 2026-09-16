@@ -16,7 +16,7 @@
 - `branch`: `integ` (**não é `main`** — confirmar com `git branch --show-current`)
 - `head`: ver `git log --oneline -1`; o último estado registrado aqui é `91c6aa0` + o trabalho desta iteração (T-27: revisão adversarial do portão de prévia)
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c` (zero diff, `gate:upstream-pin` prova)
-- `atualizado_em`: 2026-09-12
+- `atualizado_em`: 2026-09-16
 
 ## O que este repositório É hoje
 
@@ -37,11 +37,11 @@ Todos reproduzíveis pelo comando ao lado.
 | --- | --- | --- |
 | typecheck | PASS | `pnpm typecheck` |
 | build | PASS | `pnpm build` |
-| suíte raiz | 3412 testes, 197 arquivos, 0 falha (12/09, após OS-76) | `pnpm -w test` |
-| suíte studio-web | 507 testes | `cd apps/studio-web && npx vitest run` |
-| e2e navegador | 117 aprovados, 0 reprovados, 5 pulados (12/09, quatro tamanhos) | `cd apps/studio-web && npx playwright test` |
+| suíte raiz | 3751 testes, 213 arquivos, 0 falha (16/09, após OS-98) | `pnpm -w test` |
+| suíte studio-web | 525 testes (16/09, após OS-98) | `cd apps/studio-web && npx vitest run` |
+| e2e navegador | 119 aprovados, 0 reprovados, 3 pulados (16/09, quatro tamanhos) | `cd apps/studio-web && npx playwright test` |
 | PostgreSQL real | **65 testes, `POSTGRES_GATE=PASS`** (12/09, PostgreSQL 16.13 local) | `pnpm test:postgres` |
-| portões | **21/21 PASS** | ver abaixo |
+| portões | **24/24 PASS** | ver abaixo |
 
 Portões, todos `EXIT=0` em 12/09/2026: `domain-scopes`, `domain-routes`,
 `assistant-tools`, `team-role-tools`, `rls-coverage` (8/27), `upstream-pin`,
@@ -272,6 +272,31 @@ produto existe para não fazer.
     seja silenciosa.
     E o `gate:lib-freshness`, de **um dia de idade**, pegou o artefato de
     identidade desatualizado outra vez.
+
+27. **OS-98 — a interface principal virou o WORKSPACE da referência (ADR-050).**
+    Esta é a entrega que corrige a falha mais cara desta missão, e ela é minha:
+    o pacote V6 trazia **duas imagens de referência e uma especificação
+    visual**, e nove entregas seguidas não mudaram um pixel. O Prado perguntou
+    duas vezes por que o sistema não tinha mudado. A resposta honesta era que o
+    trabalho visual nunca tinha sido feito.
+    O que mudou agora é **estrutura**, e não pintura: a casca virou uma só
+    (`WorkspaceShell`) em toda tela; a home virou título centrado, compositor
+    amplo e atalhos; e a jornada de cinco etapas deixou de ser a home
+    obrigatória e virou painel de contexto **dentro** da tarefa. Tipo, aparência
+    e privacidade continuam inteiros, com os mesmos controles e as mesmas
+    frases, em "Ajustes desta tarefa" — nenhuma função sumiu por ter mudado de
+    lugar. A marca é o **PNG do proprietário**, cortado na margem externa e
+    reduzido: sem remoção de fundo, sem revetorização, sem filtro de inversão.
+    A migração encontrou **três defeitos reais** que só existiam porque o tema
+    claro era o padrão: as telas de objetivos e de equipe nunca tiveram bloco
+    escuro (o axe mediu 2,85:1 no vermelho delas); a gaveta fechada só era
+    deslocada para fora da tela, continuando no foco do teclado e na árvore do
+    leitor de tela; e o cabeçalho ficava fora de qualquer marco.
+    `Navigation.spec.tsx` foi **substituído** por `shell/Rail.spec.tsx`, que
+    carrega a tabela ligando cada comportamento coberto antes ao teste que o
+    cobre agora. As quatro suítes rodaram: raiz **3.751**, studio-web **525**,
+    **e2e 119 em quatro tamanhos** (era 117), **PostgreSQL 16 real 65/65**, 24
+    portões `EXIT=0`, e **10 capturas reais** do produto em `docs/images`.
 
 ## Estado do DAG
 

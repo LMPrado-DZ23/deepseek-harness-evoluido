@@ -110,8 +110,12 @@ describe('M-04 / C-H4: por que esta rota, em português de gente', () => {
   })
 
   it('a tela mostra o motivo junto da frase de privacidade', () => {
+    // A home mudou de arquivo na migração para o workspace aprovado: quem
+    // DESENHA a frase é `home/HomeScreen.tsx`, quem passa o código do motivo
+    // continua sendo `App.tsx`. As duas pontas seguem conferidas.
+    const home = readFileSync(new URL('./home/HomeScreen.tsx', import.meta.url), 'utf8')
+    expect(home).toContain('routeReasonNotice(props.privacy, props.routeReason, t.privacy.reasons)')
     const source = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8')
-    expect(source).toContain('routeReasonNotice(props.privacy, props.routeReason, t.privacy.reasons)')
     expect(source).toContain('health.route_reason_code')
   })
 })
@@ -165,13 +169,18 @@ describe('M-05/C-22: os três perfis na tela', () => {
   })
 
   it('a tela oferece os três perfis e não deixa apertar quando está bloqueado', () => {
-    const source = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8')
-    expect(source).toContain("['privado-local', t.privacy.privadoLocal, t.privacy.privadoLocalDetail]")
-    expect(source).toContain("['equilibrado', t.privacy.equilibrado, t.privacy.equilibradoDetail]")
-    expect(source).toContain("['melhor-qualidade', t.privacy.melhorQualidade, t.privacy.melhorQualidadeDetail]")
+    // A lista dos perfis saiu da montagem e virou `home/opcoes.ts`, que é onde
+    // o repositório manda uma decisão morar: dentro do JSX ela não era
+    // exercitada por teste nenhum a não ser por leitura de arquivo, como esta.
+    const opcoes = readFileSync(new URL('./home/opcoes.ts', import.meta.url), 'utf8')
+    expect(opcoes).toContain("['privado-local', t.privacy.privadoLocal, t.privacy.privadoLocalDetail]")
+    expect(opcoes).toContain("['equilibrado', t.privacy.equilibrado, t.privacy.equilibradoDetail]")
+    expect(opcoes).toContain("['melhor-qualidade', t.privacy.melhorQualidade, t.privacy.melhorQualidadeDetail]")
     // O botão desabilitado é a outra metade do aviso: dizer "bloqueado" e
     // deixar apertar mesmo assim seria só decoração.
-    expect(source).toContain('creationBlocked(props.privacy, props.localRoute)')
+    const home = readFileSync(new URL('./home/HomeScreen.tsx', import.meta.url), 'utf8')
+    expect(home).toContain('creationBlocked(props.privacy, props.localRoute)')
+    const source = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8')
     expect(source).toContain('health.local_route')
   })
 })

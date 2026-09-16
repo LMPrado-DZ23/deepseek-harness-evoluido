@@ -83,5 +83,5 @@ T-18 (QA visual) e T-28 (superfície da trilha).
 3. `npx vitest run` na raiz e `npx playwright test` em `apps/studio-web`;
 4. só então escolher tarefa, e atualizar este arquivo ao terminar.
 
-**Entrega:** o bundle vai para `C:\Users\zodyp\Downloads\` e o Prado aplica com
+**Entrega:** o bundle vai para a pasta de downloads da máquina de quem opera e o Prado aplica com
 `git pull <bundle> integ`. Nunca há push daqui.

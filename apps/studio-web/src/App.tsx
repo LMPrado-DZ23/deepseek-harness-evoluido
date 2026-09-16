@@ -1,4 +1,4 @@
-import { LogOut, Menu, Sparkles } from 'lucide-react'
+import { LogOut, Sparkles } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, apiResponse, csrfToken, type HealthState } from './api'
 import { PendingButton } from './PendingButton'
@@ -10,8 +10,6 @@ import { BuildSteps } from './BuildSteps'
 import type { RunStepRecord } from './buildSteps'
 import { projectNameFromBrief } from './projectName'
 
-/** De onde veio o tipo mostrado na tela. `person` é a escolha à mão, que o palpite não faz. */
-type CategoryBasis = CategoryGuess['basis'] | 'person'
 import { HEADLINE_CAPABILITY, capabilityLines, capabilityName, creationBlocked, currentStepIndex, permanentTruthKind, privacyNotice, resultSentence, routeReasonNotice, type PipelineResultState, type PrivacyProfile, type ProjectUiState } from './presentation'
 import { apiFailureMessage, apiFailureText, type ApiCallKind } from './pwa/apiFailure'
 import { GENERATION_REJECTED_STATE, postGeneration, startGeneration } from './pwa/generation'
@@ -21,12 +19,12 @@ import { Checkpoints, RunReport, isCheckpointList, isRunReport, type CheckpointL
 import { dispatchGenerationFinished } from './pwa/notifications'
 import { signOutInBrowser } from './session/signOut'
 import { currentSessionMode } from './session/currentSession'
-import { StudioSidebar } from './Navigation'
-import { NAV_MENU_ID, activeNavId } from './navigation'
 import { PlanEditor, type ConsultedView } from './plan/PlanEditor'
+import { WorkspaceShell } from './shell/WorkspaceShell'
+import { HomeScreen } from './home/HomeScreen'
+import type { CategoryBasis, DesignPreset } from './home/opcoes'
 import type { PlanEditRequest } from './plan/planEdit'
 
-type DesignPreset = 'modern' | 'professional' | 'colorful' | 'brand'
 type Question = { id: 'audience' | 'goal' | 'content' | 'sensitive-confirmation'; text: string }
 type Plan = { revision?: number; edited_by_person?: boolean; slices: Array<{ slice_id: string; title: string; description: string; acceptance_criteria: string[] }> }
 // `label` é o identificador de máquina (`page:Início`); `title` é a mesma
@@ -45,16 +43,6 @@ type Preview = { preview_id: string; state: 'REQUESTED' | 'STARTING' | 'READY' |
  * roda em um efeito que depende dele.
  */
 const emergencyPort = browserEmergencyStopPort(csrfToken)
-/**
- * Os três perfis na ordem em que a tela os oferece, cada um com a frase que
- * diz o que ele faz com os dados de quem escreve. O nome sozinho ("Equilibrado")
- * não conta nada a quem não programa: o que decide a escolha é a frase.
- */
-const PRIVACY_PROFILES: ReadonlyArray<readonly [PrivacyProfile, string, string]> = [
-  ['privado-local', t.privacy.privadoLocal, t.privacy.privadoLocalDetail],
-  ['equilibrado', t.privacy.equilibrado, t.privacy.equilibradoDetail],
-  ['melhor-qualidade', t.privacy.melhorQualidade, t.privacy.melhorQualidadeDetail],
-]
 const steps = [
   [t.progress.idea, t.progress.ideaDetail], [t.progress.questions, t.progress.questionsDetail],
   [t.progress.plan, t.progress.planDetail], [t.progress.creation, t.progress.creationDetail],
@@ -105,18 +93,9 @@ export function App() {
   const [checkpoints, setCheckpoints] = useState<CheckpointListValue | null>(null)
   const [confirmingUndo, setConfirmingUndo] = useState<string | null>(null)
   const previewFrame = useRef<HTMLIFrameElement>(null)
-  const [menuOpen, setMenuOpen] = useState(false)
-  const menuButton = useRef<HTMLButtonElement>(null)
-  // Fechar devolve o foco ao botão que abriu: sem isso, quem navega por teclado
-  // ou leitor de tela é largado no começo da página depois de fechar a gaveta.
-  function closeMenu() { setMenuOpen(false); menuButton.current?.focus() }
-  useEffect(() => {
-    if (!menuOpen) return
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') { setMenuOpen(false); menuButton.current?.focus() } }
-    window.addEventListener('keydown', onKey)
-    document.body.classList.add('menu-open')
-    return () => { window.removeEventListener('keydown', onKey); document.body.classList.remove('menu-open') }
-  }, [menuOpen])
+  // A gaveta do celular mora na `WorkspaceShell` — foco, `Escape` e trava de
+  // rolagem junto com ela, em vez de repetidos em cada tela.
+  const [atalhosAbertos, setAtalhosAbertos] = useState(false)
   useEffect(() => {
     let active = true
     void currentSessionMode().then(mode => { if (active) setAuthenticatedSession(mode === 'authenticated') })
@@ -452,18 +431,41 @@ export function App() {
     setCategory(guess.category)
     setCategoryBasis(guess.basis)
   }
-  return <div className="shell">
-    <StudioSidebar active={activeNavId(window.location.pathname)} open={menuOpen} onClose={closeMenu} />
-    {menuOpen ? <div className="drawer-scrim" aria-hidden="true" onClick={closeMenu} /> : null}
-    <section className="workspace"><header className="topbar"><button ref={menuButton} type="button" className="mobile-menu" aria-label={t.mobile.menu} aria-expanded={menuOpen} aria-controls={NAV_MENU_ID} onClick={() => setMenuOpen(!menuOpen)}><Menu aria-hidden="true" /></button><Status health={health} />{/* O sino e o boneco eram ÍCONES: sem `button`, sem destino, sem ação. Para
+  /*
+    A casca é a mesma em TODA tela do produto (`WorkspaceShell`): trilho à
+    esquerda, cabeçalho com o contexto, área de trabalho à direita. Antes esta
+    tela montava a própria casca e as outras montavam a delas, e as duas
+    divergiram — a decisão do Prado chama isso de "não criar uma terceira
+    linguagem visual ao entrar numa tarefa".
+
+    A home e a TAREFA são dois conteúdos dentro dessa mesma casca. A jornada de
+    cinco etapas (`Progress`) deixou de ser a home obrigatória: ela aparece
+    como painel de contexto quando existe uma tarefa, que é onde ela informa
+    alguma coisa.
+  */
+  const emTarefa = projectState !== null
+  return <WorkspaceShell {...(emTarefa ? { titulo: t.progress.title } : {})} acoes={<>
+    <Status health={health} />
+    {/* O sino e o boneco eram ÍCONES: sem `button`, sem destino, sem ação. Para
         quem olha, são o sino e a conta de qualquer aplicativo — e clicar não
         fazia nada. Saíram; o que existe de verdade continua aqui. */}
-      <div className="top-actions"><NotificationOptIn />{authenticatedSession ? <button className="signout-button" type="button" disabled={signingOut} aria-busy={signingOut} onClick={() => void signOut()}><LogOut aria-hidden="true" /><span>{signingOut ? t.account.signingOut : t.account.signOut}</span></button> : null}</div></header>
-      <main className="canvas"><section className="idea-panel">
-        {projectState === null ? <Idea brief={brief} setBrief={updateBrief} privacy={privacy} setPrivacy={setPrivacy} route={route ?? health.route} localRoute={health.local_route} routeReason={health.route_reason_code ?? null} ready={ready} chooseSuggestion={chooseSuggestion} category={category} categoryBasis={categoryBasis} chooseCategory={chooseCategory} create={create}
+    <NotificationOptIn />
+    {authenticatedSession ? <button className="signout-button" type="button" disabled={signingOut} aria-busy={signingOut} onClick={() => void signOut()}><LogOut aria-hidden="true" /><span>{signingOut ? t.account.signingOut : t.account.signOut}</span></button> : null}
+  </>}>
+    {/*
+      A home NÃO usa `canvas` nem `idea-panel`. As duas classes vêm da folha
+      antiga e trazem junto a moldura arredondada, a grade de duas colunas e a
+      caixa de texto com borda própria — foi assim que o compositor apareceu com
+      DUAS bordas na primeira captura. Dentro da tarefa elas continuam valendo,
+      porque a tarefa ainda é aquela tela.
+    */}
+    <main className={emTarefa ? 'canvas' : 'dz-canvas-home'}>
+      <section className={emTarefa ? 'idea-panel' : 'dz-home-conteudo'}>
+        {emTarefa ? null : <HomeScreen brief={brief} setBrief={updateBrief} privacy={privacy} setPrivacy={setPrivacy} route={route ?? health.route} localRoute={health.local_route} routeReason={health.route_reason_code ?? null} ready={ready} chooseSuggestion={chooseSuggestion} category={category} categoryBasis={categoryBasis} chooseCategory={chooseCategory} create={create}
           designPreset={designPreset} setDesignPreset={setDesignPreset} brandColor={brandColor} setBrandColor={setBrandColor}
           font={font} setFont={setFont} radius={radius} setRadius={setRadius} density={density} setDensity={setDensity}
-          tone={tone} setTone={setTone} logo={logo} setLogo={setLogo} showDesignAdvanced={showDesignAdvanced} setShowDesignAdvanced={setShowDesignAdvanced} /> : null}
+          tone={tone} setTone={setTone} logo={logo} setLogo={setLogo} showDesignAdvanced={showDesignAdvanced} setShowDesignAdvanced={setShowDesignAdvanced}
+          atalhosAbertos={atalhosAbertos} setAtalhosAbertos={setAtalhosAbertos} />}
         {projectState === 'DRAFT' && question !== null ? <Questions question={question} answer={answer} setAnswer={setAnswer} submit={submitAnswer} /> : null}
         {projectState === 'SPEC_READY' ? <Action title={t.plan.title} detail={t.progress.planDetail} button={t.plan.prepare} busyButton={t.plan.prepareBusy} action={preparePlan} /> : null}
         {projectState === 'PLAN_PROPOSED' && plan !== null ? <PlanEditor plan={plan} submit={editPlan} approve={approvePlan} reason={changeReason} setReason={setChangeReason} requestChange={requestPlanChange} addSlice={addPlanSlice} {...(consulted === undefined ? {} : { consulted })} /> : null}
@@ -482,77 +484,12 @@ export function App() {
         {/* O botão de emergência fica VISÍVEL o tempo todo, e não escondido em
             configurações: quem precisa dele está com pressa. */}
         <EmergencyStop port={emergencyPort} />
-      </section><Progress state={projectState} /></main>
-    </section>
-  </div>
+      </section>
+      {emTarefa ? <Progress state={projectState} /> : null}
+    </main>
+  </WorkspaceShell>
 }
 
-/**
- * As sugestões prontas, e quais delas são protótipo INICIAL.
- *
- * O terceiro campo é a honestidade chegando na hora da escolha, e não num
- * parágrafo embaixo dos sete botões.
- */
-const SUGGESTIONS: readonly (readonly [string, Category, boolean])[] = [
-  [t.idea.landing, 'landing-page', false],
-  [t.idea.catalog, 'catalog', false],
-  [t.idea.formDatabase, 'form-database', false],
-  [t.idea.crudPanel, 'crud-panel', false],
-  [t.idea.scheduling, 'scheduling', true],
-  [t.idea.dashboard, 'dashboard', true],
-  [t.idea.saas, 'saas-authenticated', true],
-]
-
-function Idea(props: {
-  brief: string; setBrief(v: string): void; privacy: PrivacyProfile; setPrivacy(v: PrivacyProfile): void; route: string | null; localRoute: string | null | undefined; routeReason: string | null; ready: boolean; chooseSuggestion(v: string, c: Category): void; category: Category; categoryBasis: CategoryBasis; chooseCategory(v: Category): void; create(): Promise<void>
-  designPreset: DesignPreset; setDesignPreset(v: DesignPreset): void; brandColor: string; setBrandColor(v: string): void
-  font: 'geist-sans' | 'source-serif'; setFont(v: 'geist-sans' | 'source-serif'): void; radius: 'compact' | 'balanced' | 'rounded'; setRadius(v: 'compact' | 'balanced' | 'rounded'): void
-  density: 'compact' | 'comfortable'; setDensity(v: 'compact' | 'comfortable'): void; tone: 'friendly' | 'formal'; setTone(v: 'friendly' | 'formal'): void
-  logo: File | null; setLogo(v: File | null): void; showDesignAdvanced: boolean; setShowDesignAdvanced(v: boolean): void
-}) {
-  const presets: Array<[DesignPreset, string, string]> = [
-    ['modern', t.design.modern, t.design.modernDetail], ['professional', t.design.professional, t.design.professionalDetail],
-    ['colorful', t.design.colorful, t.design.colorfulDetail], ['brand', t.design.brand, t.design.brandDetail],
-  ]
-  return <><div className="heading"><Sparkles aria-hidden="true"/><div><h1>{t.idea.title}</h1><p>{t.idea.subtitle}</p></div></div><label className="sr-only" htmlFor="brief">{t.idea.title}</label>
-    <textarea id="brief" maxLength={1000} value={props.brief} onChange={event => props.setBrief(event.target.value)} placeholder={t.idea.placeholder} /><div className="counter" aria-live="polite">{props.brief.length} {t.idea.counter}</div>
-    <h2>{t.idea.kindTitle}</h2><p className="coming">{props.categoryBasis === 'text' ? t.idea.kindHelp : props.categoryBasis === 'trade' ? t.idea.kindHelpTrade : props.categoryBasis === 'person' ? t.idea.kindHelpChosen : t.idea.kindHelpUnknown}</p>
-    {/* Quando NÃO entendemos, o seletor não vem preenchido.
-        Ele vinha: `landing-page` é o valor padrão do palpite, e sai igual
-        quando o texto fala de página e quando o texto não diz nada que a
-        gente reconheça. Quem não lê a frase de ajuda aceita o que está na
-        tela — e recebe uma página de apresentação depois de esperar a criação
-        inteira, tendo pedido outra coisa.
-        A medição do conjunto cego é o que trouxe isto à tona: em 21 pedidos
-        escritos com outras palavras, 8 caíram em "não entendi" e todos os 8
-        mostravam "Página de apresentação" já escolhido. */}
-    <label className="kind">{t.idea.kindLabel}<select value={props.categoryBasis === 'none' && props.brief.trim() !== '' ? '' : props.category} onChange={event => props.chooseCategory(event.target.value as Category)}>
-      {props.categoryBasis === 'none' && props.brief.trim() !== '' ? <option value="">{t.idea.kindChoose}</option> : null}
-      {STUDIO_CATEGORIES.map(value => <option key={value} value={value}>{t.idea.kinds[value]}</option>)}
-    </select></label>
-    {props.categoryBasis === 'none' && props.brief.trim() !== '' ? <p className="error" role="status">{t.idea.kindRequired}</p> : null}
-    <h2>{t.idea.suggestions}</h2>
-    {/* O aviso de que três destas sugestões são protótipos iniciais ficava
-        SOZINHO embaixo das sete, depois do ponto de decisão, e exigia que a
-        pessoa casasse três palavras com três dos sete botões. O selo vai no
-        próprio cartão, onde ela escolhe. */}
-    {SUGGESTIONS.map(([text, category, early]) => <button key={category} className="suggestion" onClick={() => props.chooseSuggestion(text, category)}>
-      {text}{early ? <span className="badge-beta">{t.idea.betaBadge}</span> : null}
-    </button>)}
-    <p className="coming">{t.idea.betaNotice}</p>
-    <h2>{t.design.title}</h2><p className="coming">{t.design.subtitle}</p><div className="design-grid">{presets.map(([value, label, detail]) => <button type="button" key={value} className={props.designPreset === value ? 'design-card selected' : 'design-card'} aria-pressed={props.designPreset === value} onClick={() => props.setDesignPreset(value)}><strong>{label}</strong><span>{detail}</span></button>)}</div>
-    <button type="button" className="advanced" aria-expanded={props.showDesignAdvanced} onClick={() => props.setShowDesignAdvanced(!props.showDesignAdvanced)}>{props.showDesignAdvanced ? t.design.hideAdvanced : t.design.advanced}</button>
-    {props.showDesignAdvanced ? <section className="design-advanced">
-      {props.designPreset === 'brand' ? <label>{t.design.primaryColor}<input type="color" value={props.brandColor} onChange={event => props.setBrandColor(event.target.value)} /></label> : null}
-      <label>{t.design.font}<select value={props.font} onChange={event => props.setFont(event.target.value as typeof props.font)}><option value="geist-sans">{t.design.fontSans}</option><option value="source-serif">{t.design.fontSerif}</option></select></label>
-      <label>{t.design.radius}<select value={props.radius} onChange={event => props.setRadius(event.target.value as typeof props.radius)}><option value="compact">{t.design.radiusCompact}</option><option value="balanced">{t.design.radiusBalanced}</option><option value="rounded">{t.design.radiusRounded}</option></select></label>
-      <label>{t.design.density}<select value={props.density} onChange={event => props.setDensity(event.target.value as typeof props.density)}><option value="compact">{t.design.densityCompact}</option><option value="comfortable">{t.design.densityComfortable}</option></select></label>
-      <label>{t.design.tone}<select value={props.tone} onChange={event => props.setTone(event.target.value as typeof props.tone)}><option value="friendly">{t.design.toneFriendly}</option><option value="formal">{t.design.toneFormal}</option></select></label>
-      <label>{t.design.logo}<input type="file" accept="image/png,image/jpeg" onChange={event => props.setLogo(event.target.files?.[0] ?? null)} /></label><small>{props.logo === null ? t.design.logoHelp : props.logo.name}</small>
-    </section> : null}
-    <fieldset className="privacy-profiles"><legend>{t.privacy.title}</legend>{PRIVACY_PROFILES.map(([value, label, detail]) => <label key={value}><input type="radio" name="privacy-profile" checked={props.privacy === value} onChange={() => props.setPrivacy(value)} /><strong>{label}</strong><span>{detail}</span></label>)}</fieldset>
-    <p className="privacy-notice">{privacyNotice(props.privacy, props.route, t.privacy, props.localRoute)}</p>{routeReasonNotice(props.privacy, props.routeReason, t.privacy.reasons) === null ? null : <p className="privacy-notice">{t.privacy.routeReason} {routeReasonNotice(props.privacy, props.routeReason, t.privacy.reasons)}</p>}<p className="context-note">{t.truth.idea}</p><PendingButton label={t.idea.continue} busyLabel={t.idea.continueBusy} disabled={!props.ready || creationBlocked(props.privacy, props.localRoute)} action={props.create} /></>
-}
 function Questions({ question, answer, setAnswer, submit }: { question: Question; answer: string; setAnswer(v: string): void; submit(recommend: boolean, confirm?: boolean): Promise<void> }) {
   const sensitive = question.id === 'sensitive-confirmation'
   return <><div className="heading"><Sparkles/><div><h1>{t.questions.title}</h1><p>{t.questions.subtitle}</p></div></div><section className="task-card"><h2>{question.text}</h2>{sensitive ? <div className="button-row"><PendingButton label={t.questions.confirm} busyLabel={t.questions.confirmBusy} action={() => submit(false, true)} /><PendingButton className="secondary" label={t.questions.reject} busyLabel={t.questions.rejectBusy} action={() => submit(false, false)} /></div> : <><label htmlFor="answer">{t.questions.answer}</label><textarea id="answer" value={answer} onChange={event => setAnswer(event.target.value)} placeholder={t.questions.answerPlaceholder}/><PendingButton label={t.questions.continue} busyLabel={t.questions.continueBusy} disabled={answer.trim() === ''} action={() => submit(false)} /><PendingButton className="secondary" label={t.questions.recommend} busyLabel={t.questions.recommendBusy} action={() => submit(true)} /></>}</section></>

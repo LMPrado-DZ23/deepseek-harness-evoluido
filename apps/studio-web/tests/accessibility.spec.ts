@@ -7,7 +7,7 @@ const origin = 'http://studio.dz23.localhost:4179'
 /**
  * O axe varria TRÊS telas do produto.
  *
- * A gaveta de navegação (só abaixo de 820px), o painel de equipe e a tela do
+ * A gaveta de navegação (só abaixo de 1024px), o painel de equipe e a tela do
  * plano — esta última só no tamanho de mesa e com o viewport forçado a 390px.
  * Ficavam de fora, em todo tamanho: a tela da Ideia (campo de texto, sete
  * sugestões, quatro cartões de aparência, o `fieldset` de privacidade e agora o
@@ -37,13 +37,13 @@ test.describe('acessibilidade do fluxo principal', () => {
     }
 
     await page.goto('/studio/')
-    await expect(page.getByRole('heading', { name: 'Vamos criar seu aplicativo' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'O que posso fazer por você?' })).toBeVisible()
     await check('ideia')
 
     // O seletor de tipo é novo nesta tela e nunca tinha sido varrido. O texto é
     // o da sugestão porque o servidor de teste responde a este caminho — o que
     // está sob varredura aqui é a TELA, não o que o gerador faz com o texto.
-    await page.getByRole('button', { name: 'Quero uma página para apresentar meu trabalho ou negócio.' }).click()
+    await page.getByRole('button', { name: 'Página de apresentação' }).click()
     await check('ideia-preenchida')
 
     await page.getByRole('button', { name: 'Continuar' }).click()
@@ -112,7 +112,7 @@ test('o estado do Studio começa neutro e abre o que está em atenção', async 
  * O mesmo caminho, no MODO ESCURO.
  *
  * O produto tinha modo escuro só na tela do assistente: a conversa ficava
- * escura e agradável e, ao voltar para "Vamos criar seu aplicativo", a tela
+ * escura e agradável e, ao voltar para a home, a tela
  * disparava branco puro. Além do susto à noite, meio-tema é onde nascem os
  * contrastes impossíveis — e é o axe que diz se algum sobrou.
  */
@@ -135,9 +135,9 @@ test.describe('o mesmo fluxo no modo escuro', () => {
       }
     }
     await page.goto('/studio/')
-    await expect(page.getByRole('heading', { name: 'Vamos criar seu aplicativo' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'O que posso fazer por você?' })).toBeVisible()
     await check('ideia')
-    await page.getByRole('button', { name: 'Quero uma página para apresentar meu trabalho ou negócio.' }).click()
+    await page.getByRole('button', { name: 'Página de apresentação' }).click()
     await page.getByRole('button', { name: 'Continuar' }).click()
     await expect(page.getByRole('heading', { name: 'Só mais alguns detalhes' })).toBeVisible({ timeout: 15_000 })
     await check('perguntas')

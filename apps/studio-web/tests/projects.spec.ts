@@ -18,7 +18,7 @@ test('a lista mostra o projeto criado e leva de volta para ele', async ({ contex
 
   // Um projeto de verdade, criado pela jornada — e não uma linha injetada.
   await page.goto('/studio/')
-  await page.getByRole('button', { name: 'Quero uma página para apresentar meu trabalho ou negócio.' }).click()
+  await page.getByRole('button', { name: 'Página de apresentação' }).click()
   await page.getByRole('button', { name: 'Continuar' }).click()
   await page.getByLabel('Sua resposta').waitFor()
 
@@ -57,12 +57,12 @@ test('as telas secundárias têm navegação, e ela leva de volta ao início', a
     await page.goto(path)
     const nav = page.getByRole('navigation')
     await expect(nav, path).toBeVisible()
-    await expect(nav.getByRole('link', { name: 'Início' }), path).toBeVisible()
+    await expect(nav.getByRole('link', { name: 'Nova tarefa' }), path).toBeVisible()
   }
 
-  await page.getByRole('navigation').getByRole('link', { name: 'Início' }).click()
+  await page.getByRole('navigation').getByRole('link', { name: 'Nova tarefa' }).click()
   await expect(page).toHaveURL(/\/studio\/$/u)
-  await expect(page.getByRole('heading', { name: 'Vamos criar seu aplicativo' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'O que posso fazer por você?' })).toBeVisible()
 })
 
 test('"Meus projetos" deixou de ser um item mudo na navegação', async ({ context, page }) => {

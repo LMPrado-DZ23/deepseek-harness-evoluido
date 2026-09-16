@@ -23,8 +23,13 @@ export function contrastRatio(foreground: string, background: string): number {
 
 const styles = readFileSync(new URL('../styles.css', import.meta.url), 'utf8')
 
-/** Sem texto dentro: a barra indeterminada é só a animação. */
-const DECORATIVE_SELECTORS = new Set(['.compaction-bar'])
+/**
+ * Sem texto dentro: a barra indeterminada é só a animação — e o `::after` que a
+ * desenha é ainda menos que isso, um pedaço de cor que se move. A lista é curta
+ * e explícita de propósito: cada entrada aqui é a promessa de que ninguém vai
+ * ler nada em cima daquele fundo.
+ */
+const DECORATIVE_SELECTORS = new Set(['.compaction-bar', '.compaction-bar::after'])
 
 /** Lê a cor declarada de uma regra, para o teste falhar quando a folha muda. */
 function declaredValue(selector: string, property: 'color' | 'background'): string {
@@ -57,60 +62,40 @@ describe('contraste da conversa', () => {
     }
   })
 
-  it('o modo escuro nunca escurece um fundo da conversa sem redefinir o texto', () => {
-    const darkBlocks = [...styles.matchAll(/@media \(prefers-color-scheme:dark\)\{([\s\S]*?)\n\}/gu)]
-      .map(match => match[1] ?? '')
-    expect(darkBlocks.length).toBeGreaterThan(0)
-    for (const block of darkBlocks) {
-      for (const rule of block.matchAll(/([^{}\n]+)\{([^}]*)\}/gu)) {
-        const selector = (rule[1] ?? '').trim()
-        const body = rule[2] ?? ''
-        // As duas buscas são ancoradas no início da declaração: sem a âncora,
-        // `border-color:#...` casava com `color:` e a regra passava sem nunca
-        // ter declarado a cor do texto - um guarda que não podia falhar.
-        if (!/(?:^|;)\s*background(?:-color)?\s*:\s*#/u.test(body)) continue
-        if (!/^\.(conversation|compaction|approval|stuck)/u.test(selector)) continue
-        // Elementos puramente decorativos não carregam texto. A lista é curta e
-        // explícita de propósito: cada entrada aqui é uma promessa de que
-        // ninguém vai ler nada em cima daquele fundo.
-        if (DECORATIVE_SELECTORS.has(selector)) continue
-        expect(body, `${selector} escurece o fundo sem declarar a cor do texto`).toMatch(/(?:^|;)\s*color\s*:\s*#/u)
-      }
-    }
-  })
+  /*
+    OS DOIS TESTES QUE ESTAVAM AQUI VARRIAM `@media (prefers-color-scheme:dark)`.
+    Esses blocos não existem mais: o tema grafite virou o padrão (ADR-050) e as
+    regras escuras foram desembrulhadas, valendo sempre.
 
-  it('o modo escuro nunca clareia um texto de uma família que não tem superfície escura', () => {
-    // O sentido inverso do teste acima, e o que faltava: a folha NÃO tem um
-    // `:root` escuro, então uma família que só clareia a cor pinta texto claro
-    // sobre o fundo branco do tema claro - foi assim que o título e a
-    // explicação da tela de autorização ficaram invisíveis em 1,4:1.
-    //
-    // A verificação é por FAMÍLIA porque o CSS sozinho não diz quem é filho de
-    // quem: exige que cada família que clareia texto declare, em algum lugar do
-    // mesmo bloco escuro, uma superfície escura sob a qual esse texto cai.
-    const families = ['.conversation', '.compaction', '.approval', '.stuck'] as const
-    const darkBlocks = [...styles.matchAll(/@media \(prefers-color-scheme:dark\)\{([\s\S]*?)\n\}/gu)]
-      .map(match => match[1] ?? '')
-    const lightensText = new Set<string>()
-    const darkSurface = new Set<string>()
-    for (const block of darkBlocks) {
-      for (const rule of block.matchAll(/([^{}\n]+)\{([^}]*)\}/gu)) {
-        const selectors = (rule[1] ?? '').split(',').map(part => part.trim())
-        const body = rule[2] ?? ''
-        const hasColor = /(?:^|;)\s*color\s*:\s*#/u.test(body)
-        const hasBackground = /(?:^|;)\s*background(?:-color)?\s*:\s*#/u.test(body)
-        for (const selector of selectors) {
-          const family = families.find(candidate => selector.startsWith(candidate))
-          if (family === undefined) continue
-          if (hasColor) lightensText.add(family)
-          if (hasBackground) darkSurface.add(family)
-        }
-      }
+    A garantia não foi afrouxada; ela ficou mais direta. Antes o teste perguntava
+    "quem escurece o fundo declara a cor do texto?" e, do outro lado, "quem
+    clareia o texto tem alguma superfície escura?" — duas metades de uma mesma
+    pergunta, separadas porque o CSS não diz quem é filho de quem. Agora a folha
+    tem um só tema, então dá para perguntar a coisa inteira de uma vez: toda
+    superfície ESCURA declara a cor do próprio texto, e o par passa em AA.
+  */
+  it('toda superfície escura da conversa declara a cor do texto, e o par passa em AA', () => {
+    const familias = ['.conversation', '.compaction', '.approval', '.stuck']
+    let conferidas = 0
+    for (const regra of styles.matchAll(/([^{}\n]+)\{([^}]*)\}/gu)) {
+      const seletor = (regra[1] ?? '').trim()
+      const corpo = regra[2] ?? ''
+      if (!familias.some(familia => seletor.startsWith(familia))) continue
+      if (DECORATIVE_SELECTORS.has(seletor)) continue
+      const fundo = /(?:^|;)\s*background(?:-color)?\s*:\s*(#[0-9a-fA-F]{6})/u.exec(corpo)?.[1]
+      if (fundo === undefined) continue
+      // Escuro aqui é medido, não adivinhado pelo nome da cor.
+      if (relativeLuminance(fundo) > 0.2) continue
+      conferidas += 1
+      const texto = /(?:^|;)\s*color\s*:\s*(#[0-9a-fA-F]{6})/u.exec(corpo)?.[1]
+      expect(texto, `${seletor} escurece o fundo sem declarar a cor do texto`).toBeDefined()
+      expect(contrastRatio(texto ?? '#000000', fundo), `${seletor} (${String(texto)} sobre ${fundo})`)
+        .toBeGreaterThanOrEqual(AA_NORMAL)
     }
-    expect(lightensText.size).toBeGreaterThan(0)
-    for (const family of lightensText) {
-      expect(darkSurface.has(family), `${family} clareia o texto sem nenhuma superfície escura declarada`).toBe(true)
-    }
+    // Se a varredura não encontrou nada, o guarda não pode falhar — e um guarda
+    // que não pode falhar é o defeito que este arquivo inteiro existe para não
+    // repetir.
+    expect(conferidas, 'nenhuma superfície escura encontrada: a varredura parou de ver a folha').toBeGreaterThan(0)
   })
 
   it('respeita movimento reduzido sem depender de uma busca por string solta', () => {

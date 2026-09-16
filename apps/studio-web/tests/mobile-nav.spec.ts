@@ -9,7 +9,7 @@ test.beforeEach(async ({ context, page }) => {
 })
 
 /**
- * Abaixo de 820px a barra lateral é `display:none` e o botão de menu era mudo:
+ * Abaixo de 1024px o trilho sai do fluxo e o botão de menu era mudo:
  * no telefone o produto ficava SEM NAVEGAÇÃO, e a tela onde a pessoa autoriza
  * uma ação sensível só era alcançável digitando o endereço.
  *
@@ -18,15 +18,15 @@ test.beforeEach(async ({ context, page }) => {
  * único Chromium de mesa e nada mais.
  */
 test('a navegação existe e leva à conversa, em qualquer tamanho de tela', async ({ page }, testInfo) => {
-  const narrow = (page.viewportSize()?.width ?? 1280) <= 820
-  const menu = page.getByRole('button', { name: 'Menu', exact: true })
+  const narrow = (page.viewportSize()?.width ?? 1280) <= 1024
+  const menu = page.getByRole('button', { name: 'Abrir o menu', exact: true })
 
   if (narrow) {
     // A barra some, então o botão do menu é a ÚNICA porta.
-    await expect(page.locator('aside#studio-nav')).toBeHidden()
+    await expect(page.locator('nav#dz-rail')).toBeHidden()
     await expect(menu).toBeVisible()
     await expect(menu).toHaveAttribute('aria-expanded', 'false')
-    await expect(menu).toHaveAttribute('aria-controls', 'studio-nav')
+    await expect(menu).toHaveAttribute('aria-controls', 'dz-rail')
     await menu.click()
     await expect(menu).toHaveAttribute('aria-expanded', 'true')
   } else {
@@ -36,7 +36,7 @@ test('a navegação existe e leva à conversa, em qualquer tamanho de tela', asy
   const conversation = page.getByRole('link', { name: 'Conversar com o DZ23' })
   await expect(conversation).toBeVisible()
   await expect(conversation).toHaveAttribute('href', '/studio/assistente')
-  await expect(page.getByRole('link', { name: 'Integrações' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Habilidades e integrações' })).toBeVisible()
 
   // A afirmação AQUI virou de lado, e a inversão é a correção.
   //
@@ -58,8 +58,8 @@ test('a navegação existe e leva à conversa, em qualquer tamanho de tela', asy
 })
 
 test('a gaveta fecha pelo Escape, pelo fundo e pelo botão, devolvendo o foco', async ({ page }) => {
-  test.skip((page.viewportSize()?.width ?? 1280) > 820, 'A gaveta só existe abaixo de 820px.')
-  const menu = page.getByRole('button', { name: 'Menu', exact: true })
+  test.skip((page.viewportSize()?.width ?? 1280) > 1024, 'A gaveta só existe abaixo de 1024px.')
+  const menu = page.getByRole('button', { name: 'Abrir o menu', exact: true })
 
   await menu.click()
   await page.keyboard.press('Escape')
@@ -73,16 +73,16 @@ test('a gaveta fecha pelo Escape, pelo fundo e pelo botão, devolvendo o foco', 
 
   await menu.click()
   // Tocar FORA da gaveta, como a pessoa faz: no centro da tela o toque cai
-  // sobre a própria gaveta, que ocupa min(84vw, 300px) a partir da esquerda.
+  // sobre a própria gaveta, que ocupa min(320px, 86vw) a partir da esquerda.
   const width = page.viewportSize()?.width ?? 0
-  await expect(page.locator('.drawer-scrim')).toBeVisible()
+  await expect(page.locator('.dz-scrim')).toBeVisible()
   await page.mouse.click(width - 8, 12)
   await expect(menu).toHaveAttribute('aria-expanded', 'false')
 })
 
 test('a gaveta aberta não tem violação de acessibilidade', async ({ page }) => {
-  test.skip((page.viewportSize()?.width ?? 1280) > 820, 'A gaveta só existe abaixo de 820px.')
-  await page.getByRole('button', { name: 'Menu', exact: true }).click()
+  test.skip((page.viewportSize()?.width ?? 1280) > 1024, 'A gaveta só existe abaixo de 1024px.')
+  await page.getByRole('button', { name: 'Abrir o menu', exact: true }).click()
   const scan = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze()
   expect(scan.violations.map(violation => violation.id)).toEqual([])
 })

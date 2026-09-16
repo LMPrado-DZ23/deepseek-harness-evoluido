@@ -184,15 +184,11 @@ try {
   await page.waitForTimeout(300)
   await shot(page, '08-ajuda')
 
-  // 9. O mesmo produto no escuro, porque o tema acompanha o sistema.
-  const dark = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2, colorScheme: 'dark' })
-  await dark.addCookies([{ name: 'dz23_studio_session', value: 'e2e', url: origin }])
-  const darkPage = await dark.newPage()
-  await darkPage.goto(`${origin}/studio/`)
-  await darkPage.getByRole('textbox').first().fill('quero uma página para apresentar minha clínica e receber contatos')
-  await darkPage.waitForTimeout(300)
-  await shot(darkPage, '09-escuro')
-
+  // 9. A GAVETA no celular, aberta: a marca do proprietário e a navegação
+  // inteira. Aqui havia uma captura "no escuro", e ela deixou de fazer sentido
+  // quando o grafite virou o tema padrão (ADR-050): a imagem saía idêntica à
+  // primeira. O que faltava mesmo era a navegação do telefone, onde o trilho
+  // sai do fluxo e o botão de menu é a única porta.
   // 10. O celular: a mesma jornada num Pixel 5.
   const phone = await browser.newContext({ viewport: { width: 393, height: 851 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true })
   await phone.addCookies([{ name: 'dz23_studio_session', value: 'e2e', url: origin }])
@@ -200,6 +196,10 @@ try {
   await phonePage.goto(`${origin}/studio/`)
   await phonePage.waitForTimeout(300)
   await shot(phonePage, '10-celular')
+
+  await phonePage.getByRole('button', { name: 'Abrir o menu' }).click()
+  await phonePage.waitForTimeout(400)
+  await shot(phonePage, '09-gaveta')
 
   await browser.close()
   process.stdout.write(`SCREENSHOTS=PASS destino=${outDirectory} imagens=${String(shots.length)}\n${shots.join('\n')}\n`)

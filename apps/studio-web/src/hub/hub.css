@@ -1,3 +1,9 @@
+/*
+  O tema grafite é o PADRÃO (ADR-050). Os 2 blocos escuros deste arquivo foram
+  DESEMBRULHADOS do `@media (prefers-color-scheme: dark)` — mesma posição, mesma
+  ordem, mesma especificidade —, e por isso valem sempre. As regras claras
+  continuam acima de cada um deles: elas não foram apagadas, foram vencidas.
+*/
 .hub-page{max-width:1180px;margin:0 auto;padding:28px 24px 48px}
 .hub-header{display:flex;align-items:flex-start;gap:18px;margin-bottom:18px}
 .hub-header h1{margin:0 0 6px;font-size:28px}
@@ -83,18 +89,18 @@
    a primeira tentativa clareou o texto do produto inteiro e escureceu só uma
    lista fechada de superfícies, e tudo o que ficou de fora virou branco sobre
    branco — 35 violações de contraste em telas que antes eram legíveis. */
-@media(prefers-color-scheme:dark){
+
   .hub-notice.info{background:#1b2540;color:#eef2f9;border-color:#2a3550}
   .hub-card{background:#151d30;color:#eef2f9;border-color:#2a3550}
   .hub-card input,.hub-card select,.hub-card textarea{background:#151d30;color:#eef2f9;border-color:#2a3550}
   .hub-tag{background:#1b2540;color:#eef2f9;border-color:#2a3550}
   .hub-tag.health-NOT_EXECUTED{background:#1b2540;color:#eef2f9;border-color:#2a3550}
   .hub-test.info{background:#1b2540;color:#eef2f9;border-color:#2a3550}
-}
+
 
 /* E as cores de TEXTO que só funcionam sobre branco. Gerado das mesmas regras
    claras, pelo mesmo motivo: a lista escrita à mão esquece. */
-@media(prefers-color-scheme:dark){
+
   .hub-header p{color:#aab6cd}
   .hub-back{color:#8fb6ff}
   .hub-card-heading svg{color:#8fb6ff}
@@ -105,4 +111,4 @@
   .hub-facts dt{color:#aab6cd}
   .hub-timeline time{color:#aab6cd}
   .webmcp-state{color:#aab6cd}
-}
+
