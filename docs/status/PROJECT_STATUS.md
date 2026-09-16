@@ -122,6 +122,12 @@ produto existe para não fazer.
     isso todo candidato nomeia a autoridade que já a possui. 
     é o 22º portão. 14 falsificações, todas pegas.
 
+13. **OS-84 — pacote V6, fatia E1 (EVO-02/03).** A marca da empresa aplicada em
+    **dois formatos** a partir da mesma `DesignSpecV1`, e um leitor de pacote de
+    marca que **não executa nada**. Quatro achados, e o portão de i18n expôs um
+    defeito de desenho: o marcador dentro do artefato estava em português, e
+    teria quebrado a conferência de travessia no dia da tradução.
+
 ## Próxima ação
 
 Ver `docs/status/TASK_DAG.md`, tarefa de maior prioridade em `READY`.

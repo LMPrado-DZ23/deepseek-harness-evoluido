@@ -206,5 +206,13 @@
     "PROBE_STALE": "{id}: funcionou, mas faz tempo demais para afirmar que continua funcionando.",
     "DEPENDENCY": "{id}: depende de {blockedBy}, que não está funcionando.",
     "DEPENDENCY_UNDECLARED": "{id}: depende de algo que ninguém declarou neste registro."
+  },
+  "brand": {
+    "tooLarge": "O pacote de marca passou do tamanho que esta tela aceita.",
+    "aliasTooDeep": "encadeamento de referências longo demais",
+    "supportTypes": "Tipos de valor de marca suportados: {tipos}. Qualquer outro tipo é lido, declarado como perda e NÃO entra — em vez de entrar e ser descartado em silêncio.",
+    "supportAlias": "Uma cor pode apontar para outra, e o pacote é resolvido até {limite} níveis. Referência que dá voltas e referência que não existe são recusadas, cada uma com o próprio motivo.",
+    "supportLossAlias": "A referência NÃO sobrevive à exportação: o que volta é o valor já resolvido. Isto é uma perda declarada do formato, e não um defeito.",
+    "supportAssets": "Imagem citada no pacote é conferida contra a lista da empresa. Ela nunca é aberta, baixada nem tratada como caminho de arquivo."
   }
 }

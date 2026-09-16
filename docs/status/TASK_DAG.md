@@ -56,6 +56,7 @@ separa este trabalho de acrescentar features.
 | T-23 | P1 | Identidade de socket não reciclável (era "estabilizar teste"; virou defeito de segurança) | — | DONE |
 | T-24 | P3 | Mostrar o bloqueio por dependência no painel, com o motivo | T-13 | DONE |
 | E0 | P1 | **V6 / EVO-01** — decidir sobre os quinze candidatos ANTES de instalar | T-32 | DONE (OS-83: registro em `docs/inventory/candidatos-v6.json`, motor em `scripts/candidate-registry.mjs`, `gate:candidates` e ADR-049. 15 decididos, ZERO instalados, ZERO capacidades perdidas. AT-113 e AT-114 EXECUTADOS, 14 falsificacoes todas pegas) |
+| E1 | P1 | **V6 / EVO-02 EVO-03** — marca da empresa em dois formatos, e pacote de marca que nao vira instrucao | E0 | DONE (OS-84: `brand-package.ts` le sem executar e declara perdas; `brand-apply.ts` aplica em dois formatos e recusa travessia entre empresas. AT-115/116/117/118 EXECUTADOS, 23 falsificacoes todas pegas) |
 
 ## Honestidade de escala
 
