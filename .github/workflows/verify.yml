@@ -117,6 +117,12 @@ jobs:
           # `tenancy/lib/` vinte e tantos commits atras com uma correcao de
           # autorizacao parada dentro.
           pnpm gate:lib-freshness
+          # Todo plugin declarado como dependencia do perfil esta MONTADO em
+          # algum perfil? A parada de emergencia passou a existencia inteira
+          # deste repositorio sem ser montada: codigo completo, tela na
+          # interface, rotas que nunca subiram. Nada acusava, porque nenhum
+          # portao olhava a montagem.
+          pnpm gate:profile-mounts
           pnpm gate:i18n
           pnpm gate:portability
           pnpm gate:domain-scopes

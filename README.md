@@ -181,7 +181,7 @@ está, tem o motivo escrito.
 | interface | **525 testes** |
 | navegador (Chromium real) | **119 testes** em 4 tamanhos, com varredura axe |
 | PostgreSQL 16 real | **65/65** em banco de verdade |
-| portões estáticos | **24/24** |
+| portões estáticos | **25/25** |
 | diff no Harness | **zero** |
 
 Os números acima são de uma execução completa das quatro suítes, e não de uma

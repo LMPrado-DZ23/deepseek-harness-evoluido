@@ -75,6 +75,7 @@
     "i18n:baseline": "node scripts/build-i18n-baseline.mjs",
     "gate:tracked-lib": "node scripts/check-tracked-lib.mjs --self-test && node scripts/check-tracked-lib.mjs",
     "gate:typecheck": "node scripts/check-typecheck.mjs",
+    "gate:profile-mounts": "node scripts/check-profile-mounts.mjs --self-test && node scripts/check-profile-mounts.mjs",
     "gate:lib-freshness": "node scripts/check-lib-freshness.mjs --self-test && node scripts/check-lib-freshness.mjs",
     "gate:image-lock": "node scripts/check-image-lock.mjs",
     "gate:decision-record": "node scripts/check-decision-record.mjs --self-test && node scripts/check-decision-record.mjs",

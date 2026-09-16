@@ -120,6 +120,14 @@ Uma sabotagem que sobrevive tem três destinos, e só três:
 - **Medir antes de consertar.** O buraco mais grave da missão (não havia como
   abrir o produto) e o defeito quadrático da varredura só apareceram porque
   alguém mediu em vez de supor.
+- **Existir no código não é existir em execução.** A parada de emergência
+  atravessou a missão inteira completa — domínio, serviço, rotas, tela, testes,
+  dependência declarada no perfil — e **sem ser montada em perfil nenhum**. Os
+  consumidores resolvem o serviço opcional com `ctx.get(...)` e seguem quando
+  ele falta, o que está certo; o efeito combinado é que a tela mostrava o botão,
+  as rotas não existiam e nada era bloqueado. Nenhum teste podia pegar: os
+  testes do plugin testam o plugin, o e2e usa servidor de teste próprio e
+  nenhum portão olhava montagem. `gate:profile-mounts` passou a olhar.
 - **O artefato versionado é um segundo lugar onde a verdade mora.** `src/` está
   certo e `plugins/*/lib/` executa: quando os dois divergem, o conserto que
   todo mundo lê não é o código que roda. `gate:lib-freshness` compila e compara;
@@ -128,7 +136,7 @@ Uma sabotagem que sobrevive tem três destinos, e só três:
 
 ### Como uma entrega termina
 
-1. os 24 portões, `EXIT=0` — `gate:typecheck` já cobre os DOIS projetos, e ele
+1. os 25 portões, `EXIT=0` — `gate:typecheck` já cobre os DOIS projetos, e ele
    existe porque o passo manual que dava para pular foi pulado nove vezes numa
    sessão só, e a nona entrega quebrou o dublê de e2e sem que nada acusasse;
 2. `node scripts/check-constitution.mjs --verdicts /tmp/verdicts.txt`;

@@ -257,9 +257,37 @@
       config:
         runsRoot: /var/lib/dz23-studio/generated-runs
         logoStoreRoot: /var/lib/dz23-studio/assets
-        builder:
-          imageDigestFile: /var/lib/dz23-studio/builder-image-digest
-          templateStore: /var/lib/dz23-studio/template-store-v2
+        # Havia aqui um bloco `builder:` com `imageDigestFile` e
+        # `templateStore`. Nenhuma das três chaves existe em
+        # `PromptToAppPluginConfig` — a configuração real do construtor é
+        # `builderLifecycle`, e digest e template store são lidos do arquivo
+        # próprio do supervisor, não daqui. Era configuração que PARECIA ter
+        # efeito e não tinha, que é a pior espécie: quem operasse este perfil
+        # leria três caminhos e acreditaria que mandou neles.
+        #
+        # Nada foi posto no lugar de propósito: inventar um `builderLifecycle`
+        # aqui mudaria o comportamento do construtor sem que ninguém tenha
+        # decidido isso.
+
+    # A PARADA DE EMERGÊNCIA, que até 16/09/2026 não era montada em lugar
+    # nenhum.
+    #
+    # O plugin existia inteiro — domínio, serviço, rotas, tela, testes — e era
+    # dependência declarada deste perfil. Só que ninguém o montava, e os três
+    # consumidores (`agents`, `integration-hub`, `prompt-to-app`) resolvem o
+    # serviço com `ctx.get('studioEmergencyStop')` e SEGUEM EM FRENTE quando ele
+    # é `undefined`. Isso é deliberado e está certo — um plugin opcional não
+    # pode derrubar o Studio inteiro —, mas o efeito combinado era o pior dos
+    # dois mundos: a tela mostrava o botão, as rotas não existiam e nenhuma
+    # execução era bloqueada.
+    #
+    # Vem DEPOIS de `prompt-to-app` porque registra a própria extensão HTTP no
+    # manipulador de workspace dele.
+    #
+    # `gate:profile-mounts` passa a reprovar qualquer dependência declarada e
+    # não montada, para que isto não volte em silêncio.
+    - id: dz23-studio-emergency-stop
+      name: '@dz23-studio/emergency-stop'
     - id: dz23-studio-preview
       name: '@dz23-studio/preview'
       config:

@@ -41,7 +41,7 @@ Todos reproduzíveis pelo comando ao lado.
 | suíte studio-web | 525 testes (16/09, após OS-98) | `cd apps/studio-web && npx vitest run` |
 | e2e navegador | 119 aprovados, 0 reprovados, 3 pulados (16/09, quatro tamanhos) | `cd apps/studio-web && npx playwright test` |
 | PostgreSQL real | **65 testes, `POSTGRES_GATE=PASS`** (12/09, PostgreSQL 16.13 local) | `pnpm test:postgres` |
-| portões | **24/24 PASS** | ver abaixo |
+| portões | **25/25 PASS** | ver abaixo |
 
 Portões, todos `EXIT=0` em 12/09/2026: `domain-scopes`, `domain-routes`,
 `assistant-tools`, `team-role-tools`, `rls-coverage` (8/27), `upstream-pin`,
@@ -297,6 +297,31 @@ produto existe para não fazer.
     cobre agora. As quatro suítes rodaram: raiz **3.751**, studio-web **525**,
     **e2e 119 em quatro tamanhos** (era 117), **PostgreSQL 16 real 65/65**, 24
     portões `EXIT=0`, e **10 capturas reais** do produto em `docs/images`.
+
+28. **Conferência do MASTER V6, e o que ela encontrou.** O Prado pediu para
+    conferir se a execução cobriu o MASTER inteiro ou só parte dele. A resposta
+    medida está em `audit/V6_CONFERENCIA_2026-09-16/`: dos **110 requisitos** da
+    matriz V6, **25 IMPLEMENTADA, 52 PARCIAL, 32 AUSENTE e 1 AUSENTE_EM_RUNTIME**.
+    O achado que governa: antes desta conferência **apenas 12 dos 110 IDs**
+    (`EVO-01`…`EVO-12`) apareciam em algum lugar deste repositório — não havia
+    rastreabilidade entre a matriz do MASTER e este código, e por isso ninguém
+    podia dizer quanto estava coberto.
+    Três fatos que precisam ficar escritos: (1) o **Modo Empresa não existe** —
+    22 dos 24 `BUS` são AUSENTE, e os dois PARCIAL são mecanismos genéricos que
+    não são de negócio; (2) das 12 entregas `EVO` registradas como feitas,
+    **onze não têm chamador de produção** — são funções puras com suíte, dentro
+    de um plugin que não as exporta nem as importa; (3) a **parada de emergência
+    não existia em execução** (ver OS-99).
+
+29. **OS-99 — a parada de emergência passa a existir em execução.** O plugin
+    estava completo e não era montado em perfil nenhum. O conserto é uma linha
+    no perfil; a guarda é `gate:profile-mounts`, que reprova qualquer dependência
+    `@dz23-studio/*` declarada e não montada. No mesmo passo saiu um bloco
+    `builder:` do perfil com três chaves que não existem na configuração real —
+    configuração que parecia ter efeito e não tinha.
+    Limitação declarada: a montagem é provada pelo **portão**, não por subir o
+    runtime — este ambiente não tem Docker e nenhum teste inicializa o perfil
+    Cordis real.
 
 ## Estado do DAG
 
