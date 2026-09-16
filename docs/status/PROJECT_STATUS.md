@@ -261,6 +261,31 @@ produto existe para não fazer.
     Nesta entrega as quatro suítes rodaram: raiz 3.749, studio-web 527, **e2e
     117 em quatro tamanhos**, **PostgreSQL 16 real 65/65**.
 
+26. **OS-97 — a borda muda deixa de ser silenciosa (T-32).** Um dos dois
+    achados que a T-32 tinha em aberto, e o motivo registrado era bom: fechar
+    exigiria **recusar** o pedido, o que troca o contrato de `edgeRequired`, e
+    isso é decisão do Prado. Mas havia um terceiro caminho que não toca o
+    contrato — tornar a falha **visível**. Com borda obrigatória e sem
+    `X-Forwarded-For`, todos os clientes caem no mesmo balde e um visitante
+    qualquer tranca todo mundo para fora sem fazer nada de errado. Não é brecha;
+    é indisponibilidade por configuração, e o que esta casa não aceita é que
+    seja silenciosa.
+    E o `gate:lib-freshness`, de **um dia de idade**, pegou o artefato de
+    identidade desatualizado outra vez.
+
+## Estado do DAG
+
+**32 DONE, 3 PARCIAL, 2 BLOCKED.** As cinco que restam **não têm engenharia
+pendente** — cada uma espera uma decisão do Prado ou um provedor real:
+
+| tarefa | o que falta, e de quem é |
+| --- | --- |
+| T-17 | a porta de saída existe e está fechada (OS-94). Falta o Prado dizer **quais domínios** |
+| T-19 | o teto em dinheiro existe e está ligado (OS-93, OS-95). Falta o Prado **preencher a tabela** e decidir se `NAO_MEDIDO` bloqueia ou avisa |
+| T-32 | dois achados: um depende do **upstream**, o outro é a decisão de `edgeRequired` (OS-97 fechou a metade visível) |
+| T-31 | `EB-08`: custódia de chave, decisão do Prado |
+| T-16 | `EB-04`: provedor real, ou um modelo que responda ao prompt real em tempo utilizável |
+
 ## Próxima ação
 
 Ver `docs/status/TASK_DAG.md`, tarefa de maior prioridade em `READY`.

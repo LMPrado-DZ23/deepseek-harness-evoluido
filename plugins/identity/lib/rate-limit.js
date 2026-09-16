@@ -63,6 +63,33 @@ export function edgeForwardedAddress(header) {
     const hops = header.split(',').map(hop => hop.trim()).filter(hop => hop !== '');
     return hops.at(-1);
 }
+/** O que se sabe sobre a borda num pedido. Nenhum destes colapsa em outro. */
+export const ESTADOS_DA_BORDA = ['SEM_BORDA', 'BORDA_IDENTIFICOU', 'BORDA_MUDA'];
+/**
+ * O que a borda disse — ou não disse — sobre quem está do outro lado.
+ *
+ * `BORDA_MUDA` é o estado que ESTAVA INVISÍVEL, e ele é o mais caro dos três:
+ * com borda obrigatória e sem `X-Forwarded-For`, a chave do limitador cai no
+ * endereço do SOCKET, que atrás de uma borda é o endereço DA BORDA. Todos os
+ * clientes caem no MESMO balde, e o teto global vira o teto da instalação
+ * inteira — um visitante qualquer tranca todo mundo para fora sem fazer nada
+ * de errado, e ninguém consegue descobrir por quê olhando os registros.
+ *
+ * Não é brecha: a direção é mais restrição, não menos, e o cliente não apaga um
+ * cabeçalho que a borda escreve. É INDISPONIBILIDADE POR CONFIGURAÇÃO, e o que
+ * este repositório não aceita é que ela seja silenciosa. Recusar o pedido seria
+ * a falha alta e barulhenta que a casa prefere, mas isso mudaria o contrato de
+ * `edgeRequired` — trocar contrato de configuração é decisão do Prado. Tornar a
+ * falha VISÍVEL não é.
+ * @param edgeRequired - se a montagem declara que há borda obrigatória.
+ * @param enderecoDaBorda - o que `edgeForwardedAddress` devolveu.
+ * @returns o estado.
+ */
+export function estadoDaBorda(edgeRequired, enderecoDaBorda) {
+    if (!edgeRequired)
+        return 'SEM_BORDA';
+    return enderecoDaBorda === undefined || enderecoDaBorda === '' ? 'BORDA_MUDA' : 'BORDA_IDENTIFICOU';
+}
 /** Stable pseudonymous key. Session ids must come from server-side authentication, never from an untrusted cookie. */
 export function rateLimitKey(request, forwardedAddress, authenticatedSessionId) {
     if (authenticatedSessionId !== undefined && authenticatedSessionId !== '')

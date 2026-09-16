@@ -55,6 +55,7 @@
   "http.allDevicesDisconnected": "Todos os dispositivos foram desconectados.",
   "http.deviceDisconnected": "Dispositivo desconectado.",
   "http.edgeUnauthorized": "Borda de acesso não autorizada.",
+  "http.edgeSilent": "A borda de acesso está configurada como obrigatória e não está informando o endereço de quem acessa. Enquanto isso, todas as pessoas dividem o mesmo limite de uso, e uma sozinha pode trancar as outras para fora.",
   "http.harnessUnavailable": "A conversa do DZ23 STUDIO ainda não está disponível neste computador.",
   "http.hostNotAllowed": "Host não autorizado.",
   "http.invalidJson": "JSON inválido.",

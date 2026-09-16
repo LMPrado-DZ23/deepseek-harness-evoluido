@@ -8,7 +8,7 @@ import type { SessionRecord } from './model.js'
 import { IdentityError, type StudioIdentityService } from './service.js'
 import { assertRouteContracts, type StudioRouteContract } from '@dz23-studio/policy'
 import { CSRF_COOKIE, parseCookies, parseCookieValues, SECURE_SESSION_COOKIE, SESSION_COOKIE, SESSION_GENERATION_COOKIE, sessionCookieName, shadowCookieDeletions } from './cookies.js'
-import { InMemoryIdentityRateLimiter, edgeForwardedAddress, rateLimitBuckets, rateLimitKey } from './rate-limit.js'
+import { InMemoryIdentityRateLimiter, edgeForwardedAddress, estadoDaBorda, rateLimitBuckets, rateLimitKey } from './rate-limit.js'
 
 const JSON_LIMIT = 64 * 1024
 export const COOKIE_HEADER_LIMIT_BYTES = 8 * 1024
@@ -138,6 +138,9 @@ export function clearSessionCookies(secure = true, host?: string): readonly stri
 
 export function createIdentityHttpHandler(config: IdentityHttpConfig) {
   const limiter = config.rateLimiter ?? new InMemoryIdentityRateLimiter()
+  // Por HANDLER e não por módulo: dois Studios montados no mesmo processo são
+  // duas instalações, e a borda muda de uma não diz nada sobre a outra.
+  let bordaMudaJaAvisada = false
   const secureCookies = config.secureCookies !== false
   const createSessionGeneration = config.createSessionGeneration ?? (() => randomBytes(16).toString('hex'))
   return async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
@@ -174,6 +177,20 @@ export function createIdentityHttpHandler(config: IdentityHttpConfig) {
       // o cabeçalho), e há caminho coberto por teste que depende de subir sem
       // ele. Trocar contrato de configuração é decisão do Prado, não minha:
       // está registrado em OS-38 com o próximo passo.
+      // A FALHA DE CONFIGURAÇÃO deixa de ser silenciosa.
+      //
+      // O contrato de `edgeRequired` continua o mesmo — o pedido não é recusado,
+      // porque recusar mudaria o contrato e isso é decisão do Prado. O que muda
+      // é que a instalação com borda obrigatória e borda MUDA passa a DIZER
+      // isso, uma vez, em vez de todo mundo descobrir por um bloqueio que não
+      // se explica. "Não esconda falha ambiental" é regra da casa.
+      //
+      // Uma vez por processo, e não por pedido: um aviso por requisição num
+      // limitador é o próprio aviso virando o problema.
+      if (estadoDaBorda(config.edgeRequired === true, forwardedAddress) === 'BORDA_MUDA' && !bordaMudaJaAvisada) {
+        bordaMudaJaAvisada = true
+        console.warn(t('http.edgeSilent'))
+      }
       const key = rateLimitKey(request, forwardedAddress)
       for (const bucket of rateLimitBuckets(route)) {
         const decision = limiter.consume(bucket, key)

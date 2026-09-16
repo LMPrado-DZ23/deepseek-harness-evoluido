@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   IDENTITY_RATE_LIMITS,
   InMemoryIdentityRateLimiter,
+  ESTADOS_DA_BORDA,
   edgeForwardedAddress,
+  estadoDaBorda,
   rateLimitBuckets,
   rateLimitKey,
 } from '../src/rate-limit.ts'
@@ -76,5 +78,23 @@ describe('M-3: o cliente não escolhe o próprio balde do limitador', () => {
     expect(edgeForwardedAddress(undefined)).toBeUndefined()
     expect(edgeForwardedAddress('')).toBeUndefined()
     expect(edgeForwardedAddress(' , ')).toBeUndefined()
+  })
+})
+
+describe('OS-97 — a borda MUDA deixa de ser silenciosa', () => {
+  it('os três estados são respostas diferentes, e nenhum colapsa no outro', () => {
+    // Sem borda declarada, a chave é o socket e isso está certo — é o modo
+    // pessoal. Com borda declarada e cabeçalho, a borda identificou. Com borda
+    // declarada e SEM cabeçalho, todo mundo cai no mesmo balde, e é esse o
+    // estado que estava invisível.
+    expect(estadoDaBorda(false, undefined)).toBe('SEM_BORDA')
+    expect(estadoDaBorda(false, '203.0.113.7')).toBe('SEM_BORDA')
+    expect(estadoDaBorda(true, '203.0.113.7')).toBe('BORDA_IDENTIFICOU')
+    expect(estadoDaBorda(true, undefined)).toBe('BORDA_MUDA')
+    expect(estadoDaBorda(true, '')).toBe('BORDA_MUDA')
+  })
+
+  it('o vocabulário é fechado: um estado inventado não passaria pelo tipo nem pela lista', () => {
+    expect([...ESTADOS_DA_BORDA].sort()).toEqual(['BORDA_IDENTIFICOU', 'BORDA_MUDA', 'SEM_BORDA'])
   })
 })
