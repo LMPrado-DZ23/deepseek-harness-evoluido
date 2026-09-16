@@ -102,6 +102,18 @@ export const missionRecordSchema = z.object({
    */
   max_total_tokens: z.number().int().positive().nullable(),
   /**
+   * O teto em DINHEIRO, em centavos inteiros da moeda da tabela de preço.
+   *
+   * `null` é o mesmo que no teto de tokens: sem teto DECLARADO, e não teto
+   * infinito conferido. E declarar um teto de dinheiro não garante que ele
+   * possa ser conferido — sem tabela de preço, `gastoEmDinheiro` devolve
+   * `SEM_TABELA`, que é diferente de "cabe".
+   *
+   * Centavos INTEIROS, e nunca reais com vírgula: ponto flutuante soma errado,
+   * e um teto que erra centavos ao longo de mil execuções erra o teto.
+   */
+  max_total_centavos: z.number().int().positive().nullable().default(null),
+  /**
    * As execuções que pertencem a esta missão.
    *
    * É o que dá escopo AMPLO: uma missão atravessa execuções de projetos e
@@ -156,11 +168,27 @@ export const missionRecordSchema = z.object({
 
 export type MissionRecord = z.infer<typeof missionRecordSchema>
 
-/** O consumo de uma execução, no recorte mínimo de que a missão precisa. */
+/**
+ * O consumo de uma execução, no recorte mínimo de que a missão precisa.
+ *
+ * Os campos de DINHEIRO são opcionais, e a ausência deles não é zero: sem
+ * provedor e modelo não dá para achar o preço, e sem a separação entre entrada
+ * e saída não dá para aplicar os dois preços — que são diferentes, e em geral
+ * por um fator de cinco. `custoDaExecucao` responde `SEM_PRECO` ou
+ * `SEM_CONSUMO` nesses casos, e nunca soma zero.
+ *
+ * `tokens_used` continua sendo o total, e continua sendo o que o teto de TOKENS
+ * usa: ele já existia, já é falsificado, e trocá-lo pela soma das duas metades
+ * criaria uma segunda verdade sobre o mesmo número.
+ */
 export interface MissionRunUsage {
   readonly run_id: string
   readonly status: string
   readonly tokens_used?: number | null | undefined
+  readonly provider?: string | null | undefined
+  readonly model?: string | null | undefined
+  readonly tokens_input?: number | null | undefined
+  readonly tokens_output?: number | null | undefined
 }
 
 declare const missionKeyBrand: unique symbol

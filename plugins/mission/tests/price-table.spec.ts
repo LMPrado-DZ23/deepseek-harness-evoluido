@@ -17,6 +17,7 @@ import {
   type ConsumoDeExecucao,
   type TabelaDePreco,
 } from '../src/price-table.js'
+import { consumosDaMissao } from '../src/http.js'
 
 const AGORA = '2026-09-16T12:00:00.000Z'
 
@@ -137,5 +138,38 @@ describe('avisar ANTES do vencimento', () => {
     // trabalhando descobre pelo bloqueio.
     expect(precosVencendo(cheia, AGORA, 30).map(item => item.modelo)).toEqual(['ja-venceu', 'vence-perto'])
     expect(precosVencendo(cheia, AGORA, 1).map(item => item.modelo)).toEqual(['ja-venceu'])
+  })
+})
+
+describe('OS-95 — a ligação com a missão', () => {
+  const missao = { run_ids: ['run-1', 'run-2'] }
+
+  it('execução DECLARADA pela missão e desconhecida entra como SEM_PRECO, e não some', () => {
+    // Omiti-la faria o total ignorar justamente a execução sobre a qual nada se
+    // sabe — a mesma decisão que `missionSpend` toma com `UNMEASURED`.
+    const consumos = consumosDaMissao(missao, [
+      { run_id: 'run-1', status: 'DONE', provider: 'fornecedor', model: 'modelo-a', tokens_input: 1_000_000, tokens_output: 0 },
+    ])
+    expect(consumos.length).toBe(2)
+    expect(consumos[1]).toMatchObject({ run_id: 'run-2', provedor: '', modelo: '' })
+    expect(gastoEmDinheiro(10_000, consumos, tabela(preco()), AGORA)).toMatchObject({ kind: 'NAO_MEDIDO' })
+  })
+
+  it('com provedor, modelo e as duas metades, o total é calculado de verdade', () => {
+    const consumos = consumosDaMissao({ run_ids: ['run-1'] }, [
+      { run_id: 'run-1', status: 'DONE', provider: 'fornecedor', model: 'modelo-a', tokens_input: 2_000_000, tokens_output: 1_000_000 },
+    ])
+    // 2M de entrada a 300 + 1M de saída a 1500 = 2100 centavos.
+    expect(gastoEmDinheiro(3_000, consumos, tabela(preco()), AGORA)).toEqual({ kind: 'DENTRO', centavos: 2_100, teto: 3_000 })
+  })
+
+  it('execução conhecida SEM a separação entrada/saída é SEM_CONSUMO, e nunca zero', () => {
+    // `tokens_used` sozinho serve ao teto de TOKENS e não ao de dinheiro: os
+    // dois preços são diferentes, em geral por um fator de cinco.
+    const consumos = consumosDaMissao({ run_ids: ['run-1'] }, [
+      { run_id: 'run-1', status: 'DONE', provider: 'fornecedor', model: 'modelo-a', tokens_used: 3_000_000 },
+    ])
+    expect(gastoEmDinheiro(null, consumos, tabela(preco()), AGORA))
+      .toMatchObject({ kind: 'NAO_MEDIDO', motivo: { kind: 'SEM_CONSUMO', runId: 'run-1' } })
   })
 })

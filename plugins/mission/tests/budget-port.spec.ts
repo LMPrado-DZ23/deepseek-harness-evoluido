@@ -6,7 +6,7 @@ import type { MissionRepository } from '../src/service.ts'
 function mission(over: Partial<MissionRecord> = {}): MissionRecord {
   return {
     mission_id: 'missao-1', org_id: 'org-a', tenant_id: 'ws-a',
-    objective: 'terminar com prova', status: 'RUNNING', max_total_tokens: 1_000,
+    objective: 'terminar com prova', status: 'RUNNING', max_total_tokens: 1_000, max_total_centavos: null,
     run_ids: ['r1'], criteria: [{ criterion_id: 'c1', statement: 'algo', state: 'UNPROVEN', evidence: null, blocked_reason: null }],
     created_at: 'x', updated_at: 'x', candidate_at: null, completed_at: null, revision: 0, ...over,
   }

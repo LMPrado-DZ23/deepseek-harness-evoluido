@@ -241,6 +241,16 @@ produto existe para não fazer.
     precisa dele e não pode depender do hub — duplicar a normalização seria
     segunda verdade na guarda de SSRF, que é onde ela custa mais caro.
 
+24. **OS-95 — o teto em dinheiro ligado à missão (T-19).** A OS-93 declarou o
+    que faltava para ligar, e isso era engenharia: `MissionRunUsage` não
+    carregava provedor, modelo nem a separação entrada/saída — e os dois preços
+    são diferentes, em geral por um fator de cinco. O `gasto` agora sai
+    **sempre** na resposta, inclusive hoje, como `SEM_TABELA`: esconder o campo
+    enquanto a tabela não existir deixaria a **ausência invisível**, e quem abre
+    o painel veria um total zerado que pareceria medido.
+    O teto em dinheiro é **mostrado, e ainda não aperta** — impor exige decidir
+    o que acontece quando o veredito é `NAO_MEDIDO` no meio de uma execução.
+
 ## Próxima ação
 
 Ver `docs/status/TASK_DAG.md`, tarefa de maior prioridade em `READY`.

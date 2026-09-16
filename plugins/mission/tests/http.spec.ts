@@ -287,9 +287,13 @@ describe('ACHADO: a resposta levava o registro INTEIRO', () => {
     const f = await fixture()
     const corpo = await (await f.criar()).json() as { mission: Record<string, unknown> }
     expect(Object.keys(corpo.mission).sort()).toEqual([
-      'completion', 'created_at', 'criteria', 'max_total_tokens',
+      'completion', 'created_at', 'criteria', 'gasto', 'max_total_centavos', 'max_total_tokens',
       'mission_id', 'objective', 'run_count', 'spend', 'status', 'updated_at',
     ])
+    // O gasto em DINHEIRO sai SEMPRE, e hoje ele sai `SEM_TABELA`. Esconder o
+    // campo enquanto a tabela nao existir deixaria a ausencia invisivel, e quem
+    // abre o painel veria um total zerado que pareceria medido.
+    expect(corpo.mission['gasto']).toEqual({ kind: 'SEM_TABELA' })
     expect(JSON.stringify(corpo.mission)).not.toContain('org-a')
     expect(JSON.stringify(corpo.mission)).not.toContain('ws-a')
   })

@@ -12,6 +12,7 @@ import { z } from 'zod'
 import { t } from './i18n.js'
 import { CRITERION_STATES, type MissionRecord, type MissionRunUsage } from './model.js'
 import { MissionError, missionCompletion, missionSpend, type MissionActor, type StudioMissionService } from './service.js'
+import { gastoEmDinheiro, type ConsumoDeExecucao, type TabelaDePreco } from './price-table.js'
 
 const JSON_LIMIT = 64 * 1024
 const PREFIX = '/api/studio/missions'
@@ -66,7 +67,18 @@ export interface MissionHttpConfig {
   readonly allowedOrigins: readonly string[]
   /** As execuções conhecidas, para o painel poder mostrar quanto já custou. */
   runs(): readonly MissionRunUsage[]
+  /**
+   * A tabela de preço vigente, quando existir.
+   *
+   * Opcional porque hoje ela NÃO existe: o painel mostra `SEM_TABELA`, que é a
+   * resposta honesta. Ela é uma função e não um valor para a montagem não
+   * congelar uma tabela que vai ser trocada por fora sem reiniciar o Studio.
+   */
+  precos?(): TabelaDePreco | undefined
 }
+
+/** O instante da conferência, num único lugar: duas chamadas a `new Date()` na mesma resposta podem discordar. */
+const agora = (): string => new Date().toISOString()
 
 const MISSION_ID = /^\/missions\/([^/]+)$/u
 const CANDIDATE = /^\/missions\/([^/]+)\/candidate$/u
@@ -95,7 +107,7 @@ export function createMissionHttpHandler(config: MissionHttpConfig) {
         // copia a tabela inteira de execuções do host, e chamá-la dentro do
         // `map` refazia essa cópia por linha da lista.
         const runs = config.runs()
-        return json(response, 200, { missions: (await config.service.missions(actor)).map(record => view(record, runs)) })
+        return json(response, 200, { missions: (await config.service.missions(actor)).map(record => view(record, runs, config.precos?.(), agora())) })
       }
       if (method === 'POST' && route === '/missions') {
         const body = createSchema.parse(await readJson(request))
@@ -103,17 +115,17 @@ export function createMissionHttpHandler(config: MissionHttpConfig) {
           missionId: body.mission_id, objective: body.objective, maxTotalTokens: body.max_total_tokens,
           criteria: body.criteria,
         })
-        return json(response, 201, { mission: view(created, config.runs()) })
+        return json(response, 201, { mission: view(created, config.runs(), config.precos?.(), agora()) })
       }
       const candidate = CANDIDATE.exec(route)
       if (method === 'POST' && candidate !== null) {
         const updated = await config.service.declareCandidate(actor, decodeURIComponent(candidate[1]!))
-        return json(response, 200, { mission: view(updated, config.runs()) })
+        return json(response, 200, { mission: view(updated, config.runs(), config.precos?.(), agora()) })
       }
       const complete = COMPLETE.exec(route)
       if (method === 'POST' && complete !== null) {
         const updated = await config.service.complete(actor, decodeURIComponent(complete[1]!))
-        return json(response, 200, { mission: view(updated, config.runs()) })
+        return json(response, 200, { mission: view(updated, config.runs(), config.precos?.(), agora()) })
       }
       const criterion = CRITERION.exec(route)
       if (method === 'PATCH' && criterion !== null) {
@@ -126,11 +138,11 @@ export function createMissionHttpHandler(config: MissionHttpConfig) {
             ...(body.blocked_reason === undefined ? {} : { blockedReason: body.blocked_reason }),
           },
         )
-        return json(response, 200, { mission: view(updated, config.runs()) })
+        return json(response, 200, { mission: view(updated, config.runs(), config.precos?.(), agora()) })
       }
       const single = MISSION_ID.exec(route)
       if (method === 'GET' && single !== null) {
-        return json(response, 200, { mission: view(await config.service.mission(actor, decodeURIComponent(single[1]!)), config.runs()) })
+        return json(response, 200, { mission: view(await config.service.mission(actor, decodeURIComponent(single[1]!)), config.runs(), config.precos?.(), agora()) })
       }
       return json(response, 404, { error: t('http.rotaNaoEncontrada') })
     } catch (error) {
@@ -174,19 +186,59 @@ function statusOf(error: unknown): number {
  * @param runs - as execuções conhecidas.
  * @returns o recorte.
  */
-export function view(record: MissionRecord, runs: readonly MissionRunUsage[]) {
+export function view(
+  record: MissionRecord,
+  runs: readonly MissionRunUsage[],
+  tabela: TabelaDePreco | undefined,
+  agora: string,
+) {
   return {
     mission_id: record.mission_id,
     objective: record.objective,
     status: record.status,
     max_total_tokens: record.max_total_tokens,
+    max_total_centavos: record.max_total_centavos,
     run_count: record.run_ids.length,
     criteria: record.criteria,
     created_at: record.created_at,
     updated_at: record.updated_at,
     spend: missionSpend(record, runs),
+    // O gasto em DINHEIRO sai SEMPRE, e hoje ele sai `SEM_TABELA` — que é a
+    // resposta honesta e a mais útil: quem abre o painel descobre que o número
+    // não existe, em vez de ver um total zerado que pareceria medido. Esconder
+    // o campo enquanto a tabela não existir deixaria a ausência invisível.
+    gasto: gastoEmDinheiro(record.max_total_centavos, consumosDaMissao(record, runs), tabela, agora),
     completion: missionCompletion(record.criteria),
   }
+}
+
+/**
+ * O consumo das execuções desta missão, no recorte que o custo exige.
+ *
+ * Uma execução declarada pela missão que NÃO aparece na lista conhecida entra
+ * com provedor e modelo vazios de propósito: ela vira `SEM_PRECO`, e o gasto
+ * inteiro vira `NAO_MEDIDO`. Omiti-la faria o total ignorar justamente a
+ * execução sobre a qual nada se sabe — a mesma decisão que `missionSpend` toma
+ * com `UNMEASURED`.
+ * @param record - a missão.
+ * @param runs - as execuções conhecidas.
+ * @returns o consumo de cada execução declarada pela missão.
+ */
+export function consumosDaMissao(
+  record: Pick<MissionRecord, 'run_ids'>,
+  runs: readonly MissionRunUsage[],
+): readonly ConsumoDeExecucao[] {
+  const porId = new Map(runs.map(run => [run.run_id, run]))
+  return record.run_ids.map(runId => {
+    const run = porId.get(runId)
+    return {
+      run_id: runId,
+      provedor: run?.provider ?? '',
+      modelo: run?.model ?? '',
+      tokens_entrada: run?.tokens_input,
+      tokens_saida: run?.tokens_output,
+    }
+  })
 }
 
 async function readJson(request: IncomingMessage): Promise<unknown> {

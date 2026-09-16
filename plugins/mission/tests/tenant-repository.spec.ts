@@ -10,7 +10,7 @@ import {
 function record(overrides: Partial<MissionRecord> = {}): MissionRecord {
   return {
     mission_id: 'm1', org_id: 'org-a', tenant_id: 'ws-a', objective: 'Terminar com prova',
-    status: 'RUNNING', max_total_tokens: null, run_ids: [],
+    status: 'RUNNING', max_total_tokens: null, max_total_centavos: null, run_ids: [],
     criteria: [{ criterion_id: 'c1', statement: 'A primeira coisa', state: 'UNPROVEN', evidence: null, blocked_reason: null }],
     created_at: '2026-09-12T00:00:00.000Z', updated_at: '2026-09-12T00:00:00.000Z',
     candidate_at: null, completed_at: null, revision: 0,
