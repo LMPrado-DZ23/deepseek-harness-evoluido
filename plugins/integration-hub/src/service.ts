@@ -741,8 +741,28 @@ export class IntegrationHubService {
    * @param body - o texto das instruções.
    * @returns o registro atualizado.
    */
+  /**
+   * Instala o texto de uma habilidade, DENTRO da mesma exclusão que o registro,
+   * o ligar/desligar e o contador de chamadas usam.
+   *
+   * Ela ficava de fora, e `putIntegration` grava o snapshot INTEIRO: entre a
+   * leitura da linha 1 e a gravação do fim havia quatro `await`, e um `disable`
+   * que chegasse no meio era desfeito calado — a integração voltava a ligar sem
+   * nenhuma linha de auditoria dizendo que voltou, e `skillBody` voltava a
+   * entregar o texto ao contexto do agente. A razão já estava escrita em
+   * `#recordCall`, no mesmo arquivo, para o caso do contador; faltava aplicá-la
+   * aqui. A lição de sempre: a defesa montada num caminho não é a defesa.
+   * @param actor - quem instala.
+   * @param integrationId - a integração.
+   * @param body - o texto, conferido contra o tamanho e a impressão declarados.
+   * @returns o registro gravado.
+   */
   async installSkillBody(actor: HubActor, integrationId: string, body: string): Promise<StudioIntegration> {
     this.#authorize(actor, 'integrations.manage')
+    return this.#exclusiveIntegration(this.#scope(actor), () => this.#installSkillBody(actor, integrationId, body))
+  }
+
+  async #installSkillBody(actor: HubActor, integrationId: string, body: string): Promise<StudioIntegration> {
     const current = await this.#integration(actor, integrationId)
     if (current.kind !== 'skill') {
       await this.#audit(actor, 'skill.bodyInstalled', integrationId, 'failure', 'skill-body not-skill')
@@ -768,8 +788,11 @@ export class IntegrationHubService {
       await this.#audit(actor, 'skill.bodyInstalled', integrationId, 'failure', 'skill-body digest-mismatch')
       throw new HubError('INVALID', t('errors.skillBodyDigest'))
     }
+    // `#stamp()` e não `#now()`: todo registro que este serviço grava recebe um
+    // carimbo que nunca é igual nem anterior ao anterior, e este era o único
+    // caminho que escapava dessa invariante.
     const updated: StudioIntegration = {
-      ...current, skill_body: body, updated_at: this.#now().toISOString(),
+      ...current, skill_body: body, updated_at: this.#stamp(),
     }
     await this.options.repository.putIntegration(updated)
     // A auditoria guarda a IMPRESSÃO, e nunca o texto: o texto pode ter até
@@ -985,7 +1008,15 @@ export class IntegrationHubService {
   ): Promise<IntegrationKillSwitch> {
     // Mexer no botão é escrita, não leitura: quem só acompanha não desliga o
     // trabalho de todo mundo.
-    this.#authorize(actor, 'project.write')
+    //
+    // O alcance decide QUAL escrita. A chave de organização não carrega
+    // inquilino — é o desenho, ela vale para a organização inteira —, e por
+    // isso `project.write`, que o `builder` tem, deixava alguém de um inquilino
+    // desligar as integrações de TODOS os outros com um POST. O comentário
+    // acima falava do `viewer` e o código liberava o `builder`. Alcance de
+    // organização exige `integrations.manage`; o de projeto continua em
+    // `project.write`, que é o alcance de quem constrói aquele projeto.
+    this.#authorize(actor, scope.level === 'organization' ? 'integrations.manage' : 'project.write')
     const switchId = scope.level === 'organization'
       ? killSwitchId({ level: 'organization', orgId: actor.orgId })
       : killSwitchId({ level: 'project', orgId: actor.orgId, tenantId: actor.tenantId, projectId: scope.projectId })
@@ -1287,15 +1318,47 @@ export class IntegrationHubService {
 
   // ---- smtp for generated apps ---------------------------------------------
 
+  /**
+   * O estado do SMTP: SE está configurado, e o alias só para quem administra.
+   *
+   * O alias saía para `workspace.read`, que é a permissão do papel MAIS BAIXO —
+   * quem só acompanha lia o nome de um segredo do cofre. O plugin já tinha
+   * escrito duas vezes por que isso não pode: `catalog.ts` recusa procurar por
+   * `secret_ref` ("um acerto ali contaria a quem procurasse quais nomes existem
+   * lá dentro") e `publicIntegration` recorta o campo da listagem pela mesma
+   * razão. A defesa tinha sido montada em DOIS caminhos e esta rota ficou fora
+   * — a lição de sempre desta missão, e da terceira vez no mesmo arquivo.
+   *
+   * `configured` continua visível a `workspace.read` de propósito: saber que o
+   * envio de e-mail está de pé é o que a tela precisa, e não é o nome do
+   * segredo. A trilha já digere o alias por `minimizeSecretRef`; seria estranho
+   * a auditoria se recusar a escrevê-lo e o HTTP entregá-lo inteiro.
+   * @param actor - quem pergunta.
+   * @returns o estado; `secret_ref` é `null` para quem não administra integrações.
+   */
   async smtp(actor: HubActor): Promise<{ configured: boolean; secret_ref: string | null; tier: PolicyTier }> {
     this.#authorize(actor, 'workspace.read')
     const record = await this.#smtpRecord(actor)
     const configured = record !== undefined && record.enabled && record.secret_ref !== null
-    return { configured, secret_ref: configured ? record.secret_ref : null, tier: SMTP_TIER }
+    const administra = roleAllows(actor.role, 'integrations.manage')
+    return { configured, secret_ref: configured && administra ? record.secret_ref : null, tier: SMTP_TIER }
   }
 
   async configureSmtp(actor: HubActor, secretRefInput: unknown, approval?: HubApproval): Promise<StudioIntegration> {
     this.#authorize(actor, 'integrations.manage')
+    // SABOTAGEM QUE SOBREVIVE DE PROPÓSITO, e está declarada em vez de
+    // fingida: tirar esta exclusão não faz nenhum teste falhar, e eu procurei.
+    // A razão é que a confirmação já serializa este caminho — a impressão do
+    // tíquete cobre o registro como ele estava quando a pessoa confirmou, então
+    // uma segunda configuração concorrente é recusada pela própria confirmação,
+    // e não pela exclusão. Ela fica porque é defesa em profundidade para o
+    // segundo escritor que ainda não existe (uma remoção ou um desligamento da
+    // linha de SMTP chegando no meio), e porque `installSkillBody` — o gêmeo
+    // deste caminho, que NÃO tem confirmação — provou o custo de não tê-la.
+    return this.#exclusiveIntegration(this.#scope(actor), () => this.#configureSmtp(actor, secretRefInput, approval))
+  }
+
+  async #configureSmtp(actor: HubActor, secretRefInput: unknown, approval?: HubApproval): Promise<StudioIntegration> {
     const parsed = secretRefSchema.safeParse(canonicalSecretRef(secretRefInput))
     if (!parsed.success) throw new HubError('INVALID', t('errors.secretRefInvalid'))
     // The confirmation has to have been given for THIS alias: the fingerprint of the reference is

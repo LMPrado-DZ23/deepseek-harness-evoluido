@@ -2,9 +2,11 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { Readable } from 'node:stream'
 import { describe, expect, it, vi } from 'vitest'
 import {
+  CAMPOS_INTERNOS_DO_RELEASE,
   STAGING_ROUTE_CONTRACTS,
   codeOf,
   createStagingHttpExtension,
+  releasePublico,
   statusOf,
 } from '../src/http.js'
 import { StagingError, type StagingService } from '../src/service.js'
@@ -98,7 +100,7 @@ describe('roteamento', () => {
 describe('recusas', () => {
   it('sem staging configurado, 503 com o motivo — e não um 404 que pareça inexistente', async () => {
     const outcome = await call('/staging/releases', 'GET')
-    expect(outcome.status).toBe(400)
+    expect(outcome.status).toBe(503)
     expect(String(outcome.body?.error)).toContain('pasta de publicação')
   })
 
@@ -163,5 +165,31 @@ describe('recusas', () => {
     expect(outcome.status).toBe(500)
     expect(String(outcome.body?.error)).not.toContain('/home/')
     expect(String(outcome.body?.error)).toContain('staging')
+  })
+})
+
+describe('OS-88 — o journal não atravessa inteiro para a rede', () => {
+  it('a projeção tira a sessão, a cerca e a impressão, e deixa o resto', () => {
+    const release = {
+      release_id: `stg-${'a'.repeat(64)}`, operation_id: 'op-1', request_fingerprint: 'b'.repeat(64),
+      target_key: 'c'.repeat(64), target_generation: 1, effect_lease_id: 'lease-secreto',
+      effect_lease_expires_at: '2026-09-08T12:00:00.000Z', kind: 'PUBLISH', org_id: 'org-a',
+      tenant_id: 'ws-a', project_id: 'p1', run_id: 'run-1', provider_id: 'local', environment: 'staging',
+      target_ref: 'dz23-target:x', state: 'STAGING_OK', version: 1, created_by: 'u-1',
+      source_session_id: 'sessao-de-quem-publicou', requested_approval_id: 'ap-1', approval_id: 'ap-1',
+    } as unknown as Parameters<typeof releasePublico>[0]
+    const visivel = releasePublico(release) as Record<string, unknown>
+    for (const campo of CAMPOS_INTERNOS_DO_RELEASE) expect(visivel).not.toHaveProperty(campo)
+    expect(JSON.stringify(visivel)).not.toContain('sessao-de-quem-publicou')
+    expect(JSON.stringify(visivel)).not.toContain('lease-secreto')
+    // …e o que a tela precisa continua vindo: um recorte que come a resposta
+    // inteira não é minimização, é produto quebrado.
+    expect(visivel).toMatchObject({ release_id: release.release_id, state: 'STAGING_OK', created_by: 'u-1', target_generation: 1 })
+  })
+
+  it('a lista de campos internos não fica vazia por acidente', () => {
+    // Uma projeção que não tira nada passaria em todas as asserções de forma se
+    // esta linha não existisse.
+    expect(CAMPOS_INTERNOS_DO_RELEASE.length).toBeGreaterThanOrEqual(4)
   })
 })

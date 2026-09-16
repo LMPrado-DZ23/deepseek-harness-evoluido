@@ -44,7 +44,7 @@ export const HUB_ROUTE_CONTRACTS = [
   // acompanha precisa saber que as integrações estão desligadas — descobrir
   // isso por uma chamada que falha seria descobrir tarde demais.
   { method: 'GET', path: '/scope-switches', access: 'authorized', permission: 'project.read', scope: 'workspace' },
-  { method: 'POST', path: '/scope-switches/organization', access: 'authorized', permission: 'project.write', scope: 'workspace' },
+  { method: 'POST', path: '/scope-switches/organization', access: 'authorized', permission: 'integrations.manage', scope: 'workspace' },
   { method: 'POST', path: '/scope-switches/projects/:projectId', access: 'authorized', permission: 'project.write', scope: 'project' },
 ] as const satisfies readonly StudioRouteContract[]
 
@@ -170,7 +170,12 @@ export function createHubHttpHandler(config: HubHttpConfig) {
       }
       if (method === 'POST' && route === '/integrations') {
         const registered = await service.register(actor, await readJson(request))
-        return json(response, 201, registered)
+        // O recorte vale para as QUATRO rotas que devolvem registro, e esta era
+        // a que faltava — o comentário de `publicIntegration` afirmava que cada
+        // campo novo tem de passar por ela para chegar à rede, e havia uma
+        // saída em volta. Não é vazamento hoje, porque `register` monta um
+        // objeto novo; é a porta pela qual o PRÓXIMO campo sensível sairia.
+        return json(response, 201, { ...registered, integration: publicIntegration(registered.integration) })
       }
       const enabledMatch = /^\/integrations\/([^/]+)\/enabled$/u.exec(route)
       if (method === 'POST' && enabledMatch !== null) {

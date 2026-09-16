@@ -3,6 +3,7 @@ import { z } from 'zod'
 import type { PromptToAppHttpExtension, PromptToAppHttpExtensionRequest } from '@dz23-studio/prompt-to-app'
 import { assertRouteContracts, type StudioRouteContract } from '@dz23-studio/policy'
 import { StagingError, type StagingService } from './service.js'
+import type { StagingRelease } from './model.js'
 import { StagingSourceError } from './source.js'
 import { t } from './i18n.js'
 
@@ -40,6 +41,36 @@ export const STAGING_ROUTE_CONTRACTS = [
 assertRouteContracts(STAGING_ROUTE_CONTRACTS)
 
 /**
+ * Campos do journal que NÃO atravessam para a rede.
+ *
+ * O registro inteiro saía cru nas cinco respostas, e ele carrega três coisas
+ * que não são do leitor: `source_session_id` — o identificador da sessão de
+ * quem publicou —, `effect_lease_id` com o seu vencimento, que é o token de
+ * cerca que decide quem pode mexer no destino, e `request_fingerprint`, que é a
+ * impressão usada para casar recibo. Qualquer pessoa do inquilino com
+ * `project.read` lia os três.
+ *
+ * Não é sequestro de sessão: quem autentica é o token, e não o identificador.
+ * É identificador interno vazando entre pessoas — e o mesmo repositório já
+ * decidiu duas vezes que isso não sai: o adaptador de aprovação projeta campo a
+ * campo, e a identidade tira `token_hash` antes de listar dispositivos.
+ */
+export const CAMPOS_INTERNOS_DO_RELEASE = ['source_session_id', 'effect_lease_id', 'effect_lease_expires_at', 'request_fingerprint'] as const
+
+/**
+ * O release como ele chega a quem lê.
+ *
+ * Função exportada, e não um recorte dentro do `return` de cada rota: eram
+ * CINCO respostas, e um recorte na montagem valeria para as que alguém lembrou.
+ * @param release - o registro do journal.
+ * @returns o mesmo registro sem os campos internos.
+ */
+export function releasePublico(release: StagingRelease): Omit<StagingRelease, (typeof CAMPOS_INTERNOS_DO_RELEASE)[number]> {
+  const { source_session_id: _sessao, effect_lease_id: _cerca, effect_lease_expires_at: _vence, request_fingerprint: _impressao, ...visivel } = release
+  return visivel
+}
+
+/**
  * Liga o serviço de staging à porta HTTP do prompt-to-app.
  * @param service - o serviço, ou `undefined` quando o staging não está configurado.
  * @returns a extensão.
@@ -51,13 +82,20 @@ export function createStagingHttpExtension(service: () => StagingService | undef
       const current = service()
       // Ausente é 503 com o motivo, e não 404: a rota EXISTE, o que falta é a
       // pasta de publicação escolhida por quem administra.
-      if (current === undefined) throw new StagingError('INVALID', t('http.notConfigured'))
+      //
+      // O código era `INVALID`, que a tabela abaixo traduz em 400 — o comentário
+      // dizia 503, o código dizia 400, e o TESTE tinha o 503 no nome e o 400 na
+      // asserção. Ele DOCUMENTAVA a divergência em vez de pegá-la. E 400 diz à
+      // pessoa "seu pedido está errado" quando o pedido está certo e quem não
+      // está configurado é o servidor: exatamente a confusão que o comentário
+      // dizia estar evitando.
+      if (current === undefined) throw new StagingError('NOT_CONFIGURED', t('http.notConfigured'))
       const actor = { ...input.actor, sessionId: input.actor.sessionId ?? '' }
       // Sem sessão auditável não há quem responda pela publicação depois.
       if (actor.sessionId === '') throw new StagingError('FORBIDDEN', t('http.auditableSession'))
       if (input.suffix === '/staging/releases') {
         if (input.request.method === 'GET') {
-          return respond(input.response, 200, { releases: current.list(actor, input.projectId) })
+          return respond(input.response, 200, { releases: current.list(actor, input.projectId).map(releasePublico) })
         }
         if (input.request.method === 'POST') {
           const body = publishSchema.parse(await readJson(input))
@@ -65,7 +103,7 @@ export function createStagingHttpExtension(service: () => StagingService | undef
             projectId: input.projectId, operationId: body.operation_id, approvalId: body.approval_id,
             ...(body.run_id === undefined ? {} : { runId: body.run_id }),
           })
-          return respond(input.response, 200, { release })
+          return respond(input.response, 200, { release: releasePublico(release) })
         }
         return false
       }
@@ -73,7 +111,7 @@ export function createStagingHttpExtension(service: () => StagingService | undef
       if (match === null) return false
       const releaseId = decodeURIComponent(match[1]!)
       if (input.request.method === 'GET' && match[2] === undefined) {
-        return respond(input.response, 200, { release: current.get(actor, input.projectId, releaseId) })
+        return respond(input.response, 200, { release: releasePublico(current.get(actor, input.projectId, releaseId)) })
       }
       if (input.request.method === 'POST' && match[2] === '/rollback') {
         const body = rollbackSchema.parse(await readJson(input))
@@ -81,10 +119,10 @@ export function createStagingHttpExtension(service: () => StagingService | undef
           projectId: input.projectId, operationId: body.operation_id,
           approvalId: body.approval_id, targetReleaseId: releaseId,
         })
-        return respond(input.response, 200, { release })
+        return respond(input.response, 200, { release: releasePublico(release) })
       }
       if (input.request.method === 'POST' && match[2] === '/reconcile') {
-        return respond(input.response, 200, { release: await current.reconcile(actor, input.projectId, releaseId) })
+        return respond(input.response, 200, { release: releasePublico(await current.reconcile(actor, input.projectId, releaseId)) })
       }
       return false
     } catch (error) {
@@ -133,7 +171,7 @@ function respond(response: ServerResponse, status: number, body: unknown): true 
  */
 export function statusOf(error: unknown): number {
   if (error instanceof StagingError) {
-    return { NOT_FOUND: 404, FORBIDDEN: 403, CONFLICT: 409, INVALID: 400 }[error.code]
+    return { NOT_FOUND: 404, FORBIDDEN: 403, CONFLICT: 409, INVALID: 400, NOT_CONFIGURED: 503 }[error.code]
   }
   if (error instanceof StagingSourceError) return 409
   if (error instanceof z.ZodError || error instanceof SyntaxError) return 400

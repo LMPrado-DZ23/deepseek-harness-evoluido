@@ -762,7 +762,9 @@ describe('integration hub service', () => {
     const record = await service.configureSmtp(admin, '  secret://DZ23_APP_SMTP  ', await ok(service, admin, 'smtp.configured', SMTP, '  secret://DZ23_APP_SMTP  '))
     expect(record).toMatchObject({ kind: 'smtp', secret_ref: 'DZ23_APP_SMTP', enabled: true, effective_tier: 'T2' })
     expect(JSON.stringify(repository.rows)).not.toContain('pass')
-    expect(await service.smtp(viewer)).toEqual({ configured: true, secret_ref: 'DZ23_APP_SMTP', tier: 'T2' })
+    // Quem só acompanha vê QUE está configurado, e nunca o alias do cofre.
+    expect(await service.smtp(viewer)).toEqual({ configured: true, secret_ref: null, tier: 'T2' })
+    expect(await service.smtp(admin)).toEqual({ configured: true, secret_ref: 'DZ23_APP_SMTP', tier: 'T2' })
     const test = await service.testSmtp(admin, 'pessoa@example.test', await ok(service, admin, 'smtp.tested', SMTP, 'pessoa@example.test'))
     expect(test.result).toBe('NOT_EXECUTED')
     expect(repository.eventRows.at(-1)).toMatchObject({ action: 'smtp.tested', outcome: 'not-executed' })
@@ -1338,6 +1340,41 @@ describe('o TEXTO de uma habilidade so entra conferido', () => {
     await f.service.installSkillBody(admin, f.id, TEXTO)
     await f.service.setEnabled(admin, f.id, true, await ok(f.service, admin, 'integration.enabled', f.id))
     await expect(f.service.skillBody(admin, f.id)).resolves.toBe(TEXTO)
+  })
+
+  it('instalar o texto NAO desfaz um desligamento que chegou no meio', async () => {
+    // `putIntegration` grava o snapshot INTEIRO. `installSkillBody` lia a linha,
+    // passava por quatro `await` e gravava — fora da exclusao que o registro, o
+    // ligar/desligar e o contador de chamadas usam. Um `disable` que chegasse
+    // nessa janela era desfeito CALADO: a integracao voltava a ligar sem uma
+    // linha de auditoria dizendo que voltou, e `skillBody` voltava a entregar o
+    // texto ao contexto do agente. A razao ja estava escrita em `#recordCall`,
+    // no mesmo arquivo; faltava aplica-la aqui.
+    //
+    // A janela e ABERTA A MAO, e nao torcida: dois `await` concorrentes numa
+    // repositorio de memoria quase nunca intercalam sozinhos, e um teste que
+    // depende do escalonador afirma sobre a sorte do dia.
+    const f = await comHabilidade()
+    await f.service.installSkillBody(admin, f.id, TEXTO)
+    await f.service.setEnabled(admin, f.id, true, await ok(f.service, admin, 'integration.enabled', f.id))
+    let soltar = (): void => undefined
+    const pausa = new Promise<void>(resolve => { soltar = resolve })
+    const original = f.repository.putIntegration.bind(f.repository)
+    let pausou = false
+    f.repository.putIntegration = async (value: StudioIntegration) => {
+      if (value.skill_body !== undefined && !pausou) { pausou = true; await pausa }
+      await original(value)
+    }
+    const instalar = f.service.installSkillBody(admin, f.id, TEXTO)
+    await new Promise<void>(resolve => { setTimeout(resolve, 20) })
+    // O desligamento comeca DEPOIS que a instalacao ja leu a linha. Sob a
+    // exclusao ele espera a vez; sem ela, ele grava no meio.
+    const desligar = f.service.setEnabled(admin, f.id, false, await ok(f.service, admin, 'integration.enabled', f.id))
+    await new Promise<void>(resolve => { setTimeout(resolve, 50) })
+    soltar()
+    await Promise.all([instalar, desligar])
+    expect((await f.repository.integration(admin, f.id))?.enabled).toBe(false)
+    await expect(f.service.skillBody(admin, f.id)).rejects.toThrow()
   })
 
   it('texto de tamanho DIFERENTE do declarado e recusado', async () => {

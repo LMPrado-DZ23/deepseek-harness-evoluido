@@ -141,6 +141,34 @@ produto existe para não fazer.
     ativo, sem exportar segredo e **sem fingir que cancelou contrato externo**;
     e ganho medido, com `NAO_MEDIDO` como resultado de primeira classe.
     **As cinco fatias E0–E4 do pacote V6 estão entregues.**
+17. **OS-88 — revisão adversarial de `staging` e `integration-hub` (T-29).** Os
+    dois plugins menos olhados da missão estavam em **0/12**, e a superfície
+    menos olhada é onde mora o próximo achado. Duas revisões independentes
+    leram os dois por inteiro e trouxeram **onze achados ancorados em arquivo e
+    linha**; os três piores tinham **teste passando ao lado**, e um deles tinha
+    o defeito escrito na própria asserção. Todos corrigidos com teste próprio.
+    - **SSRF (crítico).** A decisão sobre o destino de uma integração morava
+      numa lista de expressões regulares comparada com o TEXTO do host — e o
+      texto de um endereço não é único. `http://[::ffff:169.254.169.254]/` (o
+      serviço de metadados de nuvem, que entrega credencial da máquina para
+      quem perguntar) chega ao `URL` do Node como `::ffff:a9fe:a9fe`;
+      `metadata.google.internal.`, com o ponto final do nome absoluto, resolve
+      igual e não casa com `\.internal$`; e `100.64.0.0/10` não estava em lista
+      nenhuma. A correção não foi mais uma regex: `host.ts` **normaliza** o host
+      e decide por **faixa numérica**, então uma forma nova de escrever o mesmo
+      endereço cai na mesma decisão em vez de precisar de mais uma linha.
+    - **Autoridade dividida na assinatura.** Um manifesto v1 legítimo que
+      omitisse `permissions` era gravado como `verified` e reprovado como
+      `invalid` em toda reconferência — porque o `.default([])` do schema
+      injetava um campo que o publicador nunca escreveu, uma linha abaixo do
+      comentário que ensina exatamente isso sobre o `.trim()`.
+    - **Quarentena global por falha SEM efeito.** No staging, `artifacts.open`
+      era a única chamada fora de um `try`; ela lança para condições
+      definitivamente sem efeito, e a exceção virava "efeito desconhecido". Como
+      o destino físico é um só para a instalação inteira e a saída da quarentena
+      exige um recibo que nunca existiria, um manifesto torto de um projeto
+      parava o staging de todo mundo. **Prova de ausência não pode virar
+      ausência de prova.**
 
 ## Próxima ação
 

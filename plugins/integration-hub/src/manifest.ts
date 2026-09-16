@@ -1,6 +1,7 @@
 import { createPublicKey, verify } from 'node:crypto'
 import type { PolicyTier } from '@dz23-studio/policy'
 import { z } from 'zod'
+import { hostBloqueado, hostCanonico, hostLoopback } from './host.js'
 import { t } from './i18n.js'
 import { declaresProvenance, integrationManifestSchema, type IntegrationKind, type IntegrationManifest, type IntegrationPermission } from './model.js'
 
@@ -82,6 +83,56 @@ function declaredLists(manifest: IntegrationManifest): Readonly<Record<string, r
 }
 
 /**
+ * Se o host do `endpoint` está coberto por uma das entradas da lista de egress.
+ *
+ * `*` casa UM rótulo e não atravessa ponto: `*.fornecedor.example` cobre
+ * `api.fornecedor.example` e não cobre `a.b.fornecedor.example`. A leitura
+ * apertada é de propósito — quem quis o segundo nível escreve as duas linhas, e
+ * uma lista que cobre mais do que quem a leu imaginou não serve para decidir.
+ * @param host - o host canônico do endereço, já em minúsculas.
+ * @param padrao - uma entrada da lista `capabilities.network.egress`.
+ * @returns `true` quando a entrada cobre o host.
+ */
+export function egressCobre(host: string, padrao: string): boolean {
+  const partes = padrao.toLowerCase().split('*')
+  const expressao = new RegExp(`^${partes.map(parte => parte.replace(/[.*+?^${}()|[\]\\]/gu, String.raw`\$&`)).join('[a-z0-9-]*')}$`, 'u')
+  return expressao.test(host)
+}
+
+/**
+ * A contradição que a revisão adversarial achou aberta: a lista de egress nunca
+ * foi confrontada com o `endpoint`.
+ *
+ * O comentário de `evaluateManifest` dizia que ela era — descrevia o defeito
+ * como corrigido logo acima da guarda que NÃO o corrige. É o achado das três
+ * auditorias de novo: um comentário que afirma uma razão que o código não tem é
+ * pior que nenhum, porque impede o próximo leitor de procurar.
+ *
+ * O ataque que isto fecha é curto: declarar `egress: ['api.fornecedor.example']`
+ * — a lista limpa, que é o que a pessoa lê antes de ligar — e apontar o
+ * `endpoint` para `exfil.atacante.example`. As duas metades passavam: a lista
+ * fechava com a permissão pedida, e o endereço era público.
+ *
+ * Endereço de LOOPBACK fica fora: ele não sai da máquina, tem piso próprio, e
+ * exigir que o modo pessoal se declare na lista de egress trocaria o
+ * significado da lista.
+ * @param manifest - o manifesto avaliado.
+ * @returns as razões, já traduzidas, ou lista vazia quando fecha.
+ */
+export function endpointForaDoEgress(manifest: IntegrationManifest): readonly string[] {
+  if (!declaresProvenance(manifest)) return []
+  if (manifest.endpoint === undefined || isLoopbackEndpoint(manifest.endpoint)) return []
+  let host: string
+  try { host = hostCanonico(new URL(manifest.endpoint).hostname).texto } catch { return [] }
+  const lista = manifest.capabilities.network.egress
+  // Endereço externo sem NENHUM egress declarado é a mesma contradição na forma
+  // mais clara: ela fala com a rede e o documento diz que não.
+  if (lista.length === 0) return [t('manifest.reasonEndpointWithoutEgress', { host })]
+  if (lista.some(padrao => egressCobre(host, padrao))) return []
+  return [t('manifest.reasonEndpointOutsideEgress', { host })]
+}
+
+/**
  * As contradições entre o que o manifesto declara tocar e o que ele pede.
  *
  * Vale nos dois sentidos. Declarar egress sem pedir `network.outbound` é
@@ -101,7 +152,7 @@ export function capabilityIncoherences(manifest: IntegrationManifest): readonly 
     if (declared && !asked) reasons.push(t('manifest.reasonCapabilityWithoutPermission', { capability: rule.capability, permission: rule.permission }))
     if (asked && !declared) reasons.push(t('manifest.reasonPermissionWithoutCapability', { permission: rule.permission }))
   }
-  return reasons
+  return [...reasons, ...endpointForaDoEgress(manifest)]
 }
 
 /** O piso que as capacidades declaradas impõem sozinhas, mesmo que a permissão correspondente não tenha sido pedida. */
@@ -138,32 +189,6 @@ function floorOf(table: Readonly<Record<string, PolicyTier>>, key: string): Poli
 function maxTier(left: PolicyTier, right: PolicyTier): PolicyTier { return TIER_RANK[left] >= TIER_RANK[right] ? left : right }
 
 /**
- * As faixas de endereço que NUNCA podem ser o destino de uma integração.
- *
- * Não são "endereços privados" no sentido de rede doméstica: são os endereços
- * que, de dentro de um servidor, dão acesso a coisas que ninguém publicou.
- * `169.254.169.254` é o caso clássico — o serviço de metadados de nuvem, que
- * entrega credencial da máquina para quem perguntar. As faixas RFC 1918 e a
- * loopback alcançam bancos, painéis internos e o próprio Studio.
- *
- * O LOOPBACK DE VERDADE não está bloqueado, e isso é decisão, não esquecimento:
- * um servidor MCP rodando na própria máquina é caso suportado — é o modo
- * pessoal —, tem nível próprio em `isLoopbackEndpoint` e quebrá-lo aqui
- * tiraria uma função que existe de propósito. O que sai da lista de loopback é
- * `*.localhost`: aquilo é um NOME, e quem controla o resolvedor decide para
- * onde ele aponta — `attacker.example.localhost` não é a própria máquina.
- */
-const BLOCKED_HOST_PATTERNS: readonly RegExp[] = [
-  /^0\./u, /^10\./u, /^192\.168\./u, /^169\.254\./u,
-  /^172\.(1[6-9]|2[0-9]|3[01])\./u,
-  // `*.localhost` NAO e loopback de verdade: e um NOME, e quem controla o
-  // resolvedor decide para onde ele aponta. `localhost` exato e `127.x` sim, e
-  // por isso ficam de FORA desta lista — ver o comentario abaixo.
-  /\.localhost$/u, /\.internal$/u, /\.local$/u,
-  /^fe80:/iu, /^fc[0-9a-f]{2}:/iu, /^fd[0-9a-f]{2}:/iu,
-]
-
-/**
  * Se este endereço pode ser o destino de uma integração.
  *
  * Duas recusas, e as duas existem por um caminho concreto:
@@ -177,6 +202,16 @@ const BLOCKED_HOST_PATTERNS: readonly RegExp[] = [
  *    manifesto assinado apontando para `http://169.254.169.254/` era aceito
  *    como coerente e entregue inteiro ao despachante.
  *
+ * A DECISÃO não mora mais aqui: ela é `hostBloqueado`, sobre a forma CANÔNICA
+ * do host, em `host.ts`. Enquanto ela morou numa lista de regex comparada com o
+ * texto, três escritas do mesmo endereço interno passavam — o IPv4 mapeado em
+ * IPv6, o nome absoluto com ponto final, e a faixa 100.64/10 que ninguém tinha
+ * listado. Ver o comentário de abertura de `host.ts`.
+ *
+ * O LOOPBACK DE VERDADE continua permitido, e isso é decisão, não esquecimento:
+ * um servidor MCP rodando na própria máquina é caso suportado — é o modo
+ * pessoal — e tem nível próprio em `isLoopbackEndpoint`.
+ *
  * O que isto NÃO resolve está dito em OS-30: a recusa é pelo NOME que o
  * manifesto escreveu, e um nome público que RESOLVE para endereço interno passa
  * por aqui. Fechar isso exige decidir no momento da conexão, dentro de quem
@@ -188,15 +223,20 @@ export function isAllowedEndpoint(endpoint: string): boolean {
   let url: URL
   try { url = new URL(endpoint) } catch { return false }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return false
-  const host = url.hostname.replace(/^\[|\]$/gu, '').toLowerCase()
-  if (host === '') return false
-  return !BLOCKED_HOST_PATTERNS.some(pattern => pattern.test(host))
+  if (url.hostname === '') return false
+  return !hostBloqueado(hostCanonico(url.hostname))
 }
 
-/** `new URL('http://[::1]/').hostname` keeps the brackets, so the bare form never matched. */
+/**
+ * `new URL('http://[::1]/').hostname` keeps the brackets, so the bare form never matched.
+ *
+ * `*.localhost` é loopback aqui e NÃO é em `hostBloqueado`, e a diferença é de
+ * propósito: esta função decide o PISO de política, onde reconhecer de menos
+ * aperta; aquela decide o destino permitido, onde reconhecer de mais abre.
+ */
 export function isLoopbackHostname(host: string): boolean {
-  const bare = host.replace(/^\[|\]$/gu, '')
-  return bare === '127.0.0.1' || bare === '::1' || bare === 'localhost' || bare.endsWith('.localhost')
+  const canonico = hostCanonico(host)
+  return hostLoopback(canonico) || (canonico.forma === 'NOME' && canonico.texto.endsWith('.localhost'))
 }
 
 /** Whether a full URL points back at this very machine. Anything unparseable is NOT loopback (fail closed). */
@@ -221,9 +261,36 @@ export function effectiveTier(kind: IntegrationKind, manifest: IntegrationManife
  * by code point at every level, JSON without whitespace, UTF-8. A signer that
  * follows these five rules with any JSON library produces the same bytes.
  */
+/**
+ * Campos que o SCHEMA preenche quando o publicador não os escreveu, e que por
+ * isso não podem entrar nos bytes assinados enquanto estiverem vazios.
+ *
+ * O arquivo de modelo já ensinava esta lição uma linha acima do defeito: o
+ * `name` é declarado sem `.trim()` com a justificativa escrita de que "a
+ * assinatura é conferida sobre o manifesto COMO ELE VEIO, e um schema que apara
+ * em silêncio produz um registro cujos bytes não são os bytes assinados". E aí
+ * `permissions` vinha com `.default([])`, que faz exatamente isso.
+ *
+ * O efeito era uma AUTORIDADE DIVIDIDA, que é o defeito mais caro deste
+ * repositório: um v1 legítimo que omitisse `permissions` era gravado como
+ * `verified` — e toda reconferência posterior, que lê o registro GRAVADO, via
+ * `invalid`. A integração ficava ligada, marcada como verificada na tela, e
+ * nunca executava. Falhava fechado, então não era brecha; era o produto
+ * afirmando duas coisas diferentes sobre o mesmo documento, para sempre.
+ *
+ * Omitir uma lista VAZIA é canonicalização, não folga: `permissions: []` e
+ * `permissions` ausente concedem exatamente a mesma coisa — nada.
+ */
+const OMISSOES_CANONICAS = ['permissions'] as const
+
 export function canonicalManifestBytes(manifest: Readonly<Record<string, unknown>>): Buffer {
   const { signature: _signature, ...rest } = manifest
-  return canonicalJsonBytes(rest)
+  const canonico: Record<string, unknown> = { ...rest }
+  for (const campo of OMISSOES_CANONICAS) {
+    const valor = canonico[campo]
+    if (Array.isArray(valor) && valor.length === 0) delete canonico[campo]
+  }
+  return canonicalJsonBytes(canonico)
 }
 
 /** The same five rules, for anything that has to hash the same way twice (see `securityFingerprint`). */
@@ -244,9 +311,12 @@ export function evaluateManifest(input: unknown, publisherKeys: PublisherKeys): 
   // torna um destino aceitavel. Um manifesto assinado apontando para
   // `169.254.169.254` — o servico de metadados de nuvem, que entrega credencial
   // da maquina para quem perguntar — chegava a `verified` e era entregue
-  // inteiro ao despachante. `capabilities.network.egress` nunca foi confrontado
-  // com o `endpoint` real: um manifesto podia declarar `api.fornecedor.com` e
-  // apontar para dentro.
+  // inteiro ao despachante.
+  //
+  // O confronto entre `capabilities.network.egress` e o `endpoint` real — que
+  // este comentario AFIRMAVA existir sem que existisse — mora em
+  // `endpointForaDoEgress`, dentro de `capabilityIncoherences`, e por isso cai
+  // na mesma recusa das outras contradicoes: assinado, porem `unverified`.
   if (manifest.endpoint !== undefined && !isAllowedEndpoint(manifest.endpoint)) {
     return { manifest, verification: 'invalid', effectiveTier: maxTier(declaredTier, UNVERIFIED_FLOOR), reasons: [t('manifest.reasonEndpointRefused')] }
   }

@@ -163,7 +163,11 @@ export class LocalStagingProvider implements StagingProviderPort {
 
   async status(input: Parameters<StagingProviderPort['status']>[0], _signal: AbortSignal): Promise<StagingProviderStatus> {
     const receipt = await this.#readReceipt(input.targetGeneration)
-    if (receipt === undefined) return { state: 'UNKNOWN' }
+    // Ausente e ilegível respondem o mesmo AQUI, e por razões diferentes: de um
+    // lado não há nada para adotar, do outro não dá para afirmar o que há.
+    // `UNKNOWN` é a resposta honesta para os dois, e é a reconciliação que
+    // decide — diferente de `#publish`, onde os dois mandam para lados opostos.
+    if (receipt === 'AUSENTE' || receipt === 'ILEGIVEL') return { state: 'UNKNOWN' }
     // O recibo só serve se for DESTE pedido. Um recibo de outra operação na
     // mesma geração significa que alguém mais mexeu no destino, e responder
     // READY ali faria o Studio adotar um efeito que não é dele.
@@ -188,7 +192,11 @@ export class LocalStagingProvider implements StagingProviderPort {
     }
     // Repetição: o mesmo pedido devolve o MESMO recibo, sem copiar de novo.
     const existing = await this.#readReceipt(input.targetGeneration)
-    if (existing !== undefined) {
+    // Um recibo que ESTÁ LÁ e não dá para ler não libera a geração: publicar em
+    // cima seria escrever sobre um efeito que talvez já exista, e o `rename`
+    // falharia de qualquer forma — só que como exceção, virando quarentena.
+    if (existing === 'ILEGIVEL') return { kind: 'definitive-no-effect', failureCode: 'TARGET_RECEIPT_UNREADABLE' }
+    if (existing !== 'AUSENTE') {
       if (existing.operation_id === input.operationId && existing.artifact_sha256 === input.artifact.artifact_sha256) {
         return { kind: 'accepted', receipt: existing }
       }
@@ -196,7 +204,22 @@ export class LocalStagingProvider implements StagingProviderPort {
       // que outro release considera seu.
       return { kind: 'definitive-no-effect', failureCode: 'TARGET_GENERATION_TAKEN' }
     }
-    const source = await this.options.artifacts.open(input.artifact)
+    // ABRIR O ARTEFATO era a ÚNICA chamada deste método fora de um `try`, e a
+    // revisão adversarial mostrou o que isso custava. `artifacts.open` lança
+    // para condições que são DEFINITIVAMENTE sem efeito — manifesto ausente,
+    // vazio, ou com impressão que não bate —, e a exceção subia até o `catch`
+    // do serviço, que a traduz em `PROVIDER_EFFECT_UNKNOWN`. O código SABIA que
+    // nada tinha acontecido e afirmava não saber; e como o destino físico é um
+    // só para a instalação inteira, um manifesto torto de um projeto deixava o
+    // staging de todo mundo em quarentena, sem saída — a saída da quarentena
+    // exige um recibo do provedor, e recibo de uma publicação que nunca começou
+    // não existe.
+    //
+    // Ausência de prova nunca vira prova, e aqui o inverso também vale: PROVA
+    // de ausência não pode virar ausência de prova.
+    let source: Awaited<ReturnType<StagingArtifactBytesPort['open']>>
+    try { source = await this.options.artifacts.open(input.artifact) }
+    catch (error) { return { kind: 'definitive-no-effect', failureCode: definitiveCode(error instanceof Error ? error.message : 'ARTIFACT_UNREADABLE') } }
     let problem: string | undefined
     try { problem = await verifyArtifactFiles(source.directory, source.files) }
     catch (error) { problem = error instanceof Error ? error.message : 'ARTIFACT_UNREADABLE' }
@@ -209,9 +232,17 @@ export class LocalStagingProvider implements StagingProviderPort {
     const folder = join(this.#root, targetFolder(this.targetRef))
     const destination = join(folder, String(input.targetGeneration))
     const pending = `${destination}.pending-${input.idempotencyKey.slice(0, 16)}`
-    await mkdir(folder, { recursive: true })
-    await rm(pending, { recursive: true, force: true })
-    await cp(source.directory, pending, { recursive: true, errorOnExist: true, dereference: false })
+    // `pending` é NOSSO e nada nele está servindo: um erro de disco daqui até
+    // o `rename` é sem efeito, e dizê-lo é o que impede a quarentena global.
+    // Do `rename` em diante, e SÓ dali, o efeito é de fato desconhecido.
+    try {
+      await mkdir(folder, { recursive: true })
+      await rm(pending, { recursive: true, force: true })
+      await cp(source.directory, pending, { recursive: true, errorOnExist: true, dereference: false })
+    } catch (error) {
+      await rm(pending, { recursive: true, force: true }).catch(() => undefined)
+      return { kind: 'definitive-no-effect', failureCode: definitiveCode(error instanceof Error ? error.message : 'COPY_FAILED') }
+    }
     // A CONFERÊNCIA QUE VALE é esta, sobre a CÓPIA — e não a de cima, sobre a
     // origem.
     //
@@ -256,14 +287,38 @@ export class LocalStagingProvider implements StagingProviderPort {
     return { kind: 'accepted', receipt }
   }
 
-  async #readReceipt(generation: number): Promise<StagingProviderReceipt | undefined> {
+  /**
+   * O recibo de uma geração, em TRÊS respostas e não em duas.
+   *
+   * `catch { return undefined }` colapsava "não existe" com "existe e não deu
+   * para ler", e as duas mandam o provedor para lados opostos: ausente é uma
+   * geração LIVRE, e ilegível é uma geração que pode já estar publicada. Com o
+   * colapso, um `receipt.json` truncado, sem permissão de leitura, ou que não
+   * valida no esquema fazia `#publish` copiar tudo de novo por cima de um
+   * destino ocupado — e o `rename` falhava com `ENOTEMPTY`, exceção que subia
+   * ao serviço como efeito desconhecido e punha o destino global em quarentena.
+   *
+   * Ausência de prova nunca vira prova: aqui ela vira `ILEGIVEL`, que é
+   * recusa definitiva e sem efeito, e não uma afirmação de que está livre.
+   * @param generation - a geração do destino.
+   * @returns `AUSENTE`, `ILEGIVEL`, ou o recibo lido.
+   */
+  async #readReceipt(generation: number): Promise<StagingProviderReceipt | 'AUSENTE' | 'ILEGIVEL'> {
     const path = join(this.#root, targetFolder(this.targetRef), String(generation), RECEIPT_FILE)
-    if (!usableGeneration(generation)) return undefined
-    if (relative(this.#root, path).startsWith(`..${sep}`)) return undefined
+    if (!usableGeneration(generation)) return 'AUSENTE'
+    if (relative(this.#root, path).startsWith(`..${sep}`)) return 'AUSENTE'
+    let texto: string
     try {
-      const parsed = stagingProviderReceiptSchema.safeParse(JSON.parse(await readFile(path, 'utf8')))
-      return parsed.success ? parsed.data : undefined
-    } catch { return undefined }
+      texto = await readFile(path, 'utf8')
+    } catch (error) {
+      // SÓ o arquivo que não está lá é ausência. Permissão negada, erro de
+      // entrada e saída, ou diretório no lugar do arquivo são falhas de leitura.
+      return (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'AUSENTE' : 'ILEGIVEL'
+    }
+    try {
+      const parsed = stagingProviderReceiptSchema.safeParse(JSON.parse(texto))
+      return parsed.success ? parsed.data : 'ILEGIVEL'
+    } catch { return 'ILEGIVEL' }
   }
 }
 

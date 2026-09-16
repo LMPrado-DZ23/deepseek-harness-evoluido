@@ -122,6 +122,21 @@ describe('desligar por alcance', () => {
     expect(() => f.service.scopeSwitches(viewer)).not.toThrow()
   })
 
+  it('o botão da ORGANIZAÇÃO exige quem administra integrações, e não quem constrói um projeto', async () => {
+    const f = service()
+    const builder: HubActor = { ...owner, role: 'builder' }
+    // A chave de organização NÃO carrega inquilino: é o desenho, ela vale para
+    // a organização inteira. Com `project.write`, que o `builder` tem, alguém
+    // do inquilino A desligava as integrações de TODOS os outros com um POST.
+    // O teste anterior exercitava um papel só — o `viewer` — e por isso o
+    // `builder` atravessava a guarda que o comentário dizia existir.
+    await expect(f.service.setScopeDisabled(builder, { level: 'organization' }, true)).rejects.toBeInstanceOf(HubError)
+    // …e o alcance do PROJETO continua sendo de quem constrói aquele projeto.
+    await expect(f.service.setScopeDisabled(builder, { level: 'project', projectId: 'p1' }, true)).resolves.toMatchObject({ disabled: true })
+    const admin: HubActor = { ...owner, role: 'admin' }
+    await expect(f.service.setScopeDisabled(admin, { level: 'organization' }, true)).resolves.toMatchObject({ disabled: true })
+  })
+
   it('motivo grande demais é recusado', async () => {
     const f = service()
     await expect(f.service.setScopeDisabled(owner, { level: 'organization' }, true, 'x'.repeat(501)))

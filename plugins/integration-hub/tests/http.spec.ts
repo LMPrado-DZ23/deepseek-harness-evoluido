@@ -657,6 +657,36 @@ describe('ACHADO: a listagem de integracoes nao entrega o mapa de nomes do cofre
   })
 })
 
+describe('ACHADO: o cadastro devolve o registro pelo MESMO recorte da listagem', () => {
+  it('a resposta 201 de POST /integrations passa por `publicIntegration`', async () => {
+    // Eram QUATRO rotas que devolvem registro e o recorte valia para tres: o
+    // comentario de `publicIntegration` afirma que cada campo novo tem de
+    // passar por ela para chegar a rede, e havia uma saida em volta. Nao era
+    // vazamento hoje — `register` monta um objeto novo —, era a porta pela qual
+    // o PROXIMO campo sensivel sairia. Plantar o alias no armazenamento antes
+    // do cadastro faz o registro existente ser reaproveitado, que e o unico
+    // caminho pelo qual `secret_ref` chega a essa resposta.
+    const f = await fixture('admin')
+    const assinado = manifest()
+    const existente: StudioIntegration = {
+      integration_id: 'int-existente', org_id: session.org_id, tenant_id: session.tenant_id,
+      kind: assinado.kind, name: assinado.name, manifest: assinado,
+      effective_tier: 'T0', verification: 'verified',
+      enabled: false, secret_ref: 'DZ23_APP_SMTP',
+      created_by: session.user_id, created_at: '2026-09-01T00:00:00.000Z', updated_at: '2026-09-01T00:00:00.000Z',
+    }
+    await f.repository.putIntegration(existente)
+    const response = await f.request('/integrations', { method: 'POST', body: JSON.stringify(assinado) })
+    expect(response.status).toBe(201)
+    const body = await response.json() as { integration: Record<string, unknown> }
+    // O registro ESTA na resposta: sem isto a guarda abaixo seria uma afirmacao
+    // sobre um corpo vazio.
+    expect(body.integration['integration_id']).toBe('int-existente')
+    expect(body.integration).not.toHaveProperty('secret_ref')
+    expect(JSON.stringify(body)).not.toContain('DZ23_APP_SMTP')
+  })
+})
+
 describe('ACHADO: a listagem nao entrega o TEXTO da habilidade', () => {
   it('`skill_body` nao sai na listagem, que so exige `workspace.read`', async () => {
     // A rota que INSTALA o texto exige `integrations.manage` e nao devolve o

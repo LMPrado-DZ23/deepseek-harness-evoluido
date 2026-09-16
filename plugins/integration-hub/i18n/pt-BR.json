@@ -85,6 +85,8 @@
     "reasonCapabilityWithoutPermission": "Declara que usa {capability} mas não pede a permissão {permission}.",
     "reasonPermissionWithoutCapability": "Pede a permissão {permission} sem dizer com quem fala nem o que toca.",
     "reasonIncoherentManifest": "O manifesto está assinado, mas se contradiz: o que ele diz que toca não bate com o que ele pede.",
+    "reasonEndpointWithoutEgress": "Fala com {host}, que está fora desta máquina, e não declara nenhum endereço de saída.",
+    "reasonEndpointOutsideEgress": "Fala com {host}, que não está na lista de endereços que ele declarou.",
     "reasonEndpointRefused": "O endereço declarado por esta integração não pode ser usado: só http e https, e nunca um endereço interno da máquina ou da rede."
   },
   "smtp": {

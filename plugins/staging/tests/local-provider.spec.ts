@@ -218,3 +218,92 @@ describe('o destino como pasta', () => {
     })).toThrow('STAGING_ROOT_MUST_BE_ABSOLUTE')
   })
 })
+
+describe('OS-88 — falha sem efeito não pode virar efeito desconhecido', () => {
+  it('abrir o artefato que lança vira recusa DEFINITIVA, e não uma exceção que o serviço traduz em quarentena', async () => {
+    // `artifacts.open` era a ÚNICA chamada de `#publish` fora de um `try`. Ele
+    // lança para condições que são definitivamente sem efeito — manifesto
+    // ausente, vazio, ou com impressão que não bate — e a exceção subia ao
+    // serviço, que só sabe traduzi-la em `PROVIDER_EFFECT_UNKNOWN`. Como o
+    // destino físico é um só para a instalação inteira, e a saída da quarentena
+    // exige um recibo do provedor que nunca vai existir, um manifesto torto de
+    // um projeto deixava o staging de TODO MUNDO parado.
+    //
+    // Prova de ausência não pode virar ausência de prova.
+    const f = await provider()
+    f.open.mockRejectedValueOnce(new Error('ARTIFACT_MANIFEST_EMPTY'))
+    const result = await f.provider.stage(publishInput(), signal)
+    expect(result).toEqual({ kind: 'definitive-no-effect', failureCode: 'ARTIFACT_MANIFEST_EMPTY' })
+    // E nada foi escrito no destino: a recusa aconteceu antes de qualquer cópia.
+    await expect(readdir(f.root)).resolves.toEqual([])
+  })
+
+  it('falha de CÓPIA também é sem efeito: até o `rename` nada está servindo', async () => {
+    // A primeira versão deste teste apagava a ÁRVORE DE ORIGEM, e com isso a
+    // conferência de cima já recusava — o `cp` nunca era alcançado, e a
+    // sabotagem do `catch` da cópia sobrevivia sem ninguém notar. A segunda
+    // tirava a permissão de escrita da raiz, o que não funciona porque a suíte
+    // roda como root.
+    //
+    // A janela certa é a pasta do destino ser um LINK QUEBRADO: `mkdir`
+    // recursivo sobre um link pendente falha com `EEXIST` para qualquer
+    // usuário, a origem continua inteira, e a leitura do recibo vê `ENOENT` —
+    // ou seja, geração livre — e deixa o caminho seguir até a escrita.
+    const f = await provider()
+    await symlink(join(f.root, 'lugar-nenhum'), join(f.root, targetFolder(TARGET)))
+    const result = await f.provider.stage(publishInput(), signal)
+    expect(result.kind).toBe('definitive-no-effect')
+  })
+
+  it('recibo que NÃO DÁ PARA LER por causa do disco também não libera a geração', async () => {
+    // Um DIRETÓRIO no lugar do arquivo dá `EISDIR`, que não é `ENOENT`: é a
+    // metade da distinção que o JSON quebrado não exercita.
+    const f = await provider()
+    expect((await f.provider.stage(publishInput(), signal)).kind).toBe('accepted')
+    const recibo = join(f.root, targetFolder(TARGET), '1', 'receipt.json')
+    await rm(recibo, { force: true })
+    await mkdir(recibo, { recursive: true })
+    expect(await f.provider.stage(publishInput(1, 'op-2'), signal)).toEqual({ kind: 'definitive-no-effect', failureCode: 'TARGET_RECEIPT_UNREADABLE' })
+  })
+
+  it('recibo que é JSON válido mas não é um recibo também não libera a geração', async () => {
+    // A outra metade: `JSON.parse` passa e o ESQUEMA reprova. Colapsar isto em
+    // ausência diria que a geração está livre por causa de um arquivo que está
+    // lá e diz outra coisa.
+    const f = await provider()
+    expect((await f.provider.stage(publishInput(), signal)).kind).toBe('accepted')
+    await writeFile(join(f.root, targetFolder(TARGET), '1', 'receipt.json'), '{"nao":"e um recibo"}', 'utf8')
+    expect(await f.provider.stage(publishInput(1, 'op-2'), signal)).toEqual({ kind: 'definitive-no-effect', failureCode: 'TARGET_RECEIPT_UNREADABLE' })
+  })
+
+  it('recibo que ESTÁ lá e não dá para ler não libera a geração', async () => {
+    // `catch { return undefined }` colapsava "não existe" com "não deu para
+    // ler", e as duas mandam para lados opostos: ausente é geração livre. Com o
+    // colapso, o provedor copiava tudo de novo por cima de um destino ocupado e
+    // o `rename` falhava com `ENOTEMPTY` — exceção, quarentena, destino global.
+    const f = await provider()
+    expect((await f.provider.stage(publishInput(), signal)).kind).toBe('accepted')
+    const recibo = join(f.root, targetFolder(TARGET), '1', 'receipt.json')
+    await writeFile(recibo, '{ isto não é json', 'utf8')
+    const result = await f.provider.stage(publishInput(1, 'op-2'), signal)
+    expect(result).toEqual({ kind: 'definitive-no-effect', failureCode: 'TARGET_RECEIPT_UNREADABLE' })
+    // E a repetição do MESMO pedido também não finge que a geração está livre.
+    expect((await f.provider.stage(publishInput(), signal)).kind).toBe('definitive-no-effect')
+  })
+
+  it('recibo AUSENTE continua sendo geração livre: a distinção é entre os dois, não um bloqueio novo', async () => {
+    const f = await provider()
+    expect((await f.provider.stage(publishInput(), signal)).kind).toBe('accepted')
+    // Outra geração, sem recibo nenhum: publica normalmente.
+    expect((await f.provider.stage(publishInput(2), signal)).kind).toBe('accepted')
+  })
+
+  it('o estado de um recibo ilegível é DESCONHECIDO, e não pronto', async () => {
+    const f = await provider()
+    const aceito = await f.provider.stage(publishInput(), signal)
+    expect(aceito.kind).toBe('accepted')
+    await writeFile(join(f.root, targetFolder(TARGET), '1', 'receipt.json'), '{}', 'utf8')
+    const estado = await f.provider.status({ environment: 'staging', operationId: 'op-1', idempotencyKey: 'f'.repeat(64), targetGeneration: 1, artifactSha256: artifact().artifact_sha256 }, signal)
+    expect(estado.state).toBe('UNKNOWN')
+  })
+})

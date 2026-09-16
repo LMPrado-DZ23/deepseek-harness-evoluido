@@ -138,7 +138,7 @@ export interface StagingRepository {
 }
 
 export class StagingError extends Error {
-  constructor(readonly code: 'FORBIDDEN' | 'INVALID' | 'CONFLICT' | 'NOT_FOUND', message: string) { super(message) }
+  constructor(readonly code: 'FORBIDDEN' | 'INVALID' | 'CONFLICT' | 'NOT_FOUND' | 'NOT_CONFIGURED', message: string) { super(message) }
 }
 
 export interface StagingServiceOptions {
