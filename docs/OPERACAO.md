@@ -87,7 +87,11 @@ Sem a variável, a suíte de PostgreSQL é **pulada** — e uma suíte pulada n�
 uma suíte que passou:
 
 ```bash
-DZ23_POSTGRES_TEST_DSN="postgresql://dz23:senhaDeTeste123@127.0.0.1:55432/dz23_test" \
+# A senha NÃO fica escrita aqui. `gate:secrets` recusa uma DSN com senha em
+# arquivo versionado — e recusou a primeira versão deste próprio documento.
+# Um exemplo de teste hoje é o que alguém copia para produção amanhã.
+export PGPASSWORD='<a senha do seu PostgreSQL de teste>'
+DZ23_POSTGRES_TEST_DSN="postgresql://dz23:${PGPASSWORD}@127.0.0.1:55432/dz23_test" \
 DZ23_OPERATOR_STATE_DIR=/tmp/dz23-operator-state \
 pnpm -w test:postgres
 ```

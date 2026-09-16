@@ -55,6 +55,7 @@ separa este trabalho de acrescentar features.
 | T-22 | P3 | Feature Capability Registry (AVAILABLE→…→OPERATIONAL) provado por health real | T-06 | DONE (OS-67 o motor, OS-70 a ligacao ao endereco de saude que ja existia, OS-72 os achados A2/A3/A4, e **OS-81 o que faltava**: a varredura foi MEDIDA (188 ms com quinhentos projetos, porque `runs(projectId)` lia o repositorio inteiro uma vez por projeto) e virou UMA leitura, e a sondagem de armazenamento passou a perguntar a DOIS dominios, dizendo QUAL falhou. Limitacao dita: os dominios por projeto nao sao sondados, porque eleger um projeto cobaia mede o projeto e nao o armazenamento) |
 | T-23 | P1 | Identidade de socket não reciclável (era "estabilizar teste"; virou defeito de segurança) | — | DONE |
 | T-24 | P3 | Mostrar o bloqueio por dependência no painel, com o motivo | T-13 | DONE |
+| E0 | P1 | **V6 / EVO-01** — decidir sobre os quinze candidatos ANTES de instalar | T-32 | DONE (OS-83: registro em `docs/inventory/candidatos-v6.json`, motor em `scripts/candidate-registry.mjs`, `gate:candidates` e ADR-049. 15 decididos, ZERO instalados, ZERO capacidades perdidas. AT-113 e AT-114 EXECUTADOS, 14 falsificacoes todas pegas) |
 
 ## Honestidade de escala
 

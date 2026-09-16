@@ -115,6 +115,13 @@ produto existe para não fazer.
     que uma guarda foi exercitada por texto de modelo, e não por texto meu.
     O prompt real, porém, não completa em 45 s naquela máquina — está em EB-04.
 
+12. **OS-83 — pacote V6, fatia E0 (EVO-01).** Os quinze candidatos do pacote
+    foram **decididos antes de qualquer instalação**: 15 decididos, **zero
+    instalados, zero capacidades perdidas**. O risco que a AT-114 cobra não é
+    adotar demais — é a capacidade sumir junto com o candidato recusado, e por
+    isso todo candidato nomeia a autoridade que já a possui. 
+    é o 22º portão. 14 falsificações, todas pegas.
+
 ## Próxima ação
 
 Ver `docs/status/TASK_DAG.md`, tarefa de maior prioridade em `READY`.
