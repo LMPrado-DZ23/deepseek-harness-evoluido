@@ -213,6 +213,16 @@ produto existe para não fazer.
     indicadores mostra agregados a qualquer sessão, pela mesma razão de o painel
     CRUD ser compartilhado.
 
+21. **OS-92 — `gate:lib-freshness` (lacuna declarada no `CLAUDE.md`).**
+    `gate:tracked-lib` confere se o `lib/` versionado está **completo**, e nunca
+    conferiu se ele corresponde ao `src/`. É a forma mais silenciosa de segunda
+    verdade que este repositório já produziu: certo no lugar que todo mundo lê,
+    errado no lugar que de fato executa — `tenancy/lib/` ficou vinte e tantos
+    commits atrás com uma correção de **autorização** parada dentro. O portão
+    novo compila e compara byte a byte, e **achou um defeito na primeira
+    execução, contra o meu próprio trabalho**: as correções de segurança da
+    OS-90 não estavam no artefato versionado da identidade.
+
 ## Próxima ação
 
 Ver `docs/status/TASK_DAG.md`, tarefa de maior prioridade em `READY`.

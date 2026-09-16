@@ -9,26 +9,26 @@ arquivo é para quem vai **mexer no código**.
 
 ---
 
-## Os 21 portões
+## Os 23 portões
 
 Rodam em qualquer ordem, e todos precisam sair com `EXIT=0`:
 
 ```
 domain-scopes  domain-routes  assistant-tools  team-role-tools  rls-coverage
 upstream-pin   portability    i18n             comprehension    vocabulary
-memory-map     constitution   tracked-lib      image-lock       decision-record
-requirements-ledger  secrets   no-caveman      p37
-vendored-references  licenses
+memory-map     constitution   tracked-lib      lib-freshness    image-lock
+decision-record  requirements-ledger  secrets   no-caveman      p37
+candidates     vendored-references  licenses
 ```
 
 Um de cada vez é `pnpm gate:<nome>`. Todos de uma vez, guardando os vereditos
 que a constituição depois confere:
 
 ```bash
-G=(domain-scopes domain-routes assistant-tools team-role-tools rls-coverage
-   upstream-pin portability i18n comprehension vocabulary memory-map
+G=(lib-freshness domain-scopes domain-routes assistant-tools team-role-tools
+   rls-coverage upstream-pin portability i18n comprehension vocabulary memory-map
    constitution tracked-lib image-lock decision-record requirements-ledger
-   secrets no-caveman p37 vendored-references licenses)
+   secrets no-caveman p37 candidates vendored-references licenses)
 FAIL=0
 : > /tmp/verdicts.txt
 for g in "${G[@]}"; do
@@ -209,4 +209,29 @@ anuncia sucesso sem conferir já mentiu uma vez:
 $a = (git rev-parse integ).Trim()
 $b = ((git ls-remote origin refs/heads/integ) -split '\s+')[0]
 if ($a -ne $b) { "O ENVIO NAO CHEGOU: local=$a github=$b" } else { "OK $a" }
+```
+
+## `gate:lib-freshness` — quanto ele custa, e por que custa
+
+Ele compila o `src/` dos nove plugins que têm `lib/` versionado e compara com o
+que o git tem. São **cerca de trinta segundos**, e é o portão mais caro da casa.
+
+O custo é o preço de fechar a lacuna que `gate:tracked-lib` declarava:
+`tracked-lib` confere se o artefato está COMPLETO, nunca se ele está EM DIA. Um
+artefato desatualizado é a forma mais silenciosa de segunda verdade que este
+repositório já produziu — `plugins/tenancy/lib/` ficou parado na OS-23 enquanto
+o `src/` chegava à OS-38, e uma correção de autorização nunca esteve em vigor
+para quem executasse o pacote.
+
+A compilação sai num diretório temporário **dentro** do pacote
+(`plugins/<x>/.lib-freshness-*`, ignorado pelo git) e não em `/tmp`: os
+`.d.ts.map` guardam o caminho da fonte relativo ao `outDir`, e compilar para
+fora do pacote produziria sessenta falsos positivos — que é como um portão
+barulhento deixa de ser lido.
+
+Quando ele reprovar, o conserto é reconstruir o artefato do plugin acusado:
+
+```bash
+cd plugins/<plugin> && npx tsc -p tsconfig.build.json
+cd - && git add -f plugins/<plugin>/lib
 ```

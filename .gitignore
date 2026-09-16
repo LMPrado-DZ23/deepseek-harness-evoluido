@@ -17,6 +17,7 @@ dsh-home/profiles/studio/cordis.yml
 runtime/
 
 # Build outputs: every plugin is compiled by `pnpm build`; committed copies drifted from src (route-health lacked markScope since b44ffe4).
+plugins/*/.lib-freshness-*/
 plugins/*/lib/
 plugins/prompt-to-app/template/
 apps/studio-web/dist/

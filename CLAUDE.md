@@ -120,10 +120,15 @@ Uma sabotagem que sobrevive tem três destinos, e só três:
 - **Medir antes de consertar.** O buraco mais grave da missão (não havia como
   abrir o produto) e o defeito quadrático da varredura só apareceram porque
   alguém mediu em vez de supor.
+- **O artefato versionado é um segundo lugar onde a verdade mora.** `src/` está
+  certo e `plugins/*/lib/` executa: quando os dois divergem, o conserto que
+  todo mundo lê não é o código que roda. `gate:lib-freshness` compila e compara;
+  antes dele, `tenancy/lib/` ficou vinte e tantos commits atrás do `src/` com
+  uma correção de autorização parada dentro.
 
 ### Como uma entrega termina
 
-1. os 21 portões, `EXIT=0`;
+1. os 23 portões, `EXIT=0`;
 2. `node scripts/check-constitution.mjs --verdicts /tmp/verdicts.txt`;
 3. `tsc` na raiz **e** em `apps/studio-web`;
 4. a suíte da raiz, a de `studio-web`, o e2e e o PostgreSQL;

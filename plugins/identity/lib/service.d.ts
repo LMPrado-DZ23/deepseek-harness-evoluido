@@ -50,6 +50,13 @@ export interface PasskeyCeremony<TOptions> {
     readonly challengeId: string;
     readonly options: TOptions;
 }
+/**
+ * Campos do registro de sessão que NUNCA atravessam para a rede.
+ *
+ * Constante exportada e não um recorte na montagem: `csrf_seed` ficou de fora
+ * do recorte por ter nascido depois dele.
+ */
+export declare const CAMPOS_PRIVADOS_DA_SESSAO: readonly ["token_hash", "csrf_hash", "csrf_seed"];
 export declare class IdentityError extends Error {
     readonly code: 'invalid' | 'expired' | 'revoked' | 'locked' | 'not-found' | 'csrf' | 'replay' | 'counter';
     constructor(code: 'invalid' | 'expired' | 'revoked' | 'locked' | 'not-found' | 'csrf' | 'replay' | 'counter', message: string);
@@ -123,7 +130,18 @@ export declare class StudioIdentityService {
      */
     assertRequestTrust(host: string | undefined, origin: string | undefined, mutating: boolean): void;
     csrfTokenFor(session: SessionRecord): Promise<string>;
-    listDevices(userId: string): readonly Omit<SessionRecord, 'token_hash' | 'csrf_hash'>[];
+    /**
+     * Os dispositivos da pessoa, sem NADA que ajude a forjar a sessão.
+     *
+     * A lista nomeava dois campos, e `csrf_seed` entrou no registro depois e ficou
+     * de fora dela — saindo, por todas as sessões, em toda abertura da tela de
+     * dispositivos, para cache de navegador, registro de proxy e captura de tela.
+     * A semente sozinha não deriva o token (falta o `token_hash`), mas ela existe
+     * justamente para que um vazamento pontual não valha os noventa dias da
+     * sessão. Por isso a lista virou constante: um campo novo do registro tem de
+     * ser acrescentado A ELA para sair, e não ficar de fora dela para sair.
+     */
+    listDevices(userId: string): readonly Omit<SessionRecord, (typeof CAMPOS_PRIVADOS_DA_SESSAO)[number]>[];
     revokeSession(actor: SessionRecord, sessionId: string, reason?: string): Promise<void>;
     /**
      * Encerra TODAS as sessões desta pessoa.
