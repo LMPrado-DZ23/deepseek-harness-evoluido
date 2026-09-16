@@ -9,14 +9,15 @@ arquivo é para quem vai **mexer no código**.
 
 ---
 
-## Os 23 portões
+## Os 24 portões
 
 Rodam em qualquer ordem, e todos precisam sair com `EXIT=0`:
 
 ```
+typecheck      lib-freshness
 domain-scopes  domain-routes  assistant-tools  team-role-tools  rls-coverage
 upstream-pin   portability    i18n             comprehension    vocabulary
-memory-map     constitution   tracked-lib      lib-freshness    image-lock
+memory-map     constitution   tracked-lib      image-lock
 decision-record  requirements-ledger  secrets   no-caveman      p37
 candidates     vendored-references  licenses
 ```
@@ -25,7 +26,7 @@ Um de cada vez é `pnpm gate:<nome>`. Todos de uma vez, guardando os vereditos
 que a constituição depois confere:
 
 ```bash
-G=(lib-freshness domain-scopes domain-routes assistant-tools team-role-tools
+G=(typecheck lib-freshness domain-scopes domain-routes assistant-tools team-role-tools
    rls-coverage upstream-pin portability i18n comprehension vocabulary memory-map
    constitution tracked-lib image-lock decision-record requirements-ledger
    secrets no-caveman p37 candidates vendored-references licenses)

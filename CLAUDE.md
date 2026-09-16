@@ -128,15 +128,18 @@ Uma sabotagem que sobrevive tem três destinos, e só três:
 
 ### Como uma entrega termina
 
-1. os 23 portões, `EXIT=0`;
+1. os 24 portões, `EXIT=0` — `gate:typecheck` já cobre os DOIS projetos, e ele
+   existe porque o passo manual que dava para pular foi pulado nove vezes numa
+   sessão só, e a nona entrega quebrou o dublê de e2e sem que nada acusasse;
 2. `node scripts/check-constitution.mjs --verdicts /tmp/verdicts.txt`;
-3. `tsc` na raiz **e** em `apps/studio-web`;
-4. a suíte da raiz, a de `studio-web`, o e2e e o PostgreSQL;
-5. a falsificação, com o resultado de cada sabotagem;
-6. uma linha nova em `docs/MASTER_REQUIREMENTS_LEDGER.md`, com **prova** e
+3. a suíte da raiz, a de `studio-web`, o **e2e** e o **PostgreSQL** — as quatro,
+   e não as duas mais baratas: o e2e é o único passo que roda o produto montado,
+   e foi ele que pegou o dublê quebrado;
+4. a falsificação, com o resultado de cada sabotagem;
+5. uma linha nova em `docs/MASTER_REQUIREMENTS_LEDGER.md`, com **prova** e
    **limitação declarada**;
-7. `docs/status/PROJECT_STATUS.md` e `docs/status/TASK_DAG.md` atualizados;
-8. commit cujo corpo explica **por quê**, e não o quê.
+6. `docs/status/PROJECT_STATUS.md` e `docs/status/TASK_DAG.md` atualizados;
+7. commit cujo corpo explica **por quê**, e não o quê.
 
 O livro mestre tem portão (`gate:requirements-ledger`) e ele confere a
 contagem: uma linha nova exige atualizar os totais no fim do arquivo.

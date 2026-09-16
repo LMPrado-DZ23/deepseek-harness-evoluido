@@ -251,6 +251,16 @@ produto existe para não fazer.
     O teto em dinheiro é **mostrado, e ainda não aperta** — impor exige decidir
     o que acontece quando o veredito é `NAO_MEDIDO` no meio de uma execução.
 
+25. **OS-96 — `gate:typecheck`, e as quatro suítes rodadas de verdade.** Achado
+    **contra a minha própria disciplina**. O `CLAUDE.md` já mandava rodar o
+    `tsc` nos dois projetos, e a regra estava certa; o que falhou foi a
+    execução — numa sessão de nove entregas o segundo foi rodado uma vez, no
+    começo, e a OS-95 quebrou o dublê de e2e sem que a suíte da raiz, os 23
+    portões nem o `tsc` da raiz acusassem. Só apareceu quando o Playwright não
+    subiu. **Um passo manual que dá para pular é um passo que vai ser pulado.**
+    Nesta entrega as quatro suítes rodaram: raiz 3.749, studio-web 527, **e2e
+    117 em quatro tamanhos**, **PostgreSQL 16 real 65/65**.
+
 ## Próxima ação
 
 Ver `docs/status/TASK_DAG.md`, tarefa de maior prioridade em `READY`.

@@ -337,7 +337,9 @@ const apiHandler = createPromptToAppHttpHandler({
 function e2eMissionSeed(): MissionRecord[] { return [{
   mission_id: 'lancar-o-site', org_id: 'org-e2e', tenant_id: 'tenant-e2e',
   objective: 'Colocar o site no ar para os clientes',
-  status: 'RUNNING', max_total_tokens: 1_000, run_ids: [],
+  // `max_total_centavos: null` é sem teto DECLARADO, e não teto infinito: a
+  // tela mostra `SEM_TABELA` para o gasto, que é o estado real do produto hoje.
+  status: 'RUNNING', max_total_tokens: 1_000, max_total_centavos: null, run_ids: [],
   criteria: [
     { criterion_id: 'formulario', statement: 'O formulário de contato envia mensagem de verdade', state: 'PROVEN', evidence: 'Teste de envio gravado em 08/09', blocked_reason: null },
     { criterion_id: 'dominio', statement: 'O endereço do site aponta para a hospedagem', state: 'BLOCKED_EXTERNAL', evidence: null, blocked_reason: 'a empresa que registra o endereço' },
