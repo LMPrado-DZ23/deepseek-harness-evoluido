@@ -55,7 +55,7 @@ cumulativa havia passado 2.027 testes raiz.
 - faixa: `d85cc87940f675d4c74d0bb2f77f809c689b0c98..fb88dd3b3db1bd229ef8367115c7ce542113fdf3`
 - cobertura: completa no diff, 8/8 superfícies revisadas;
 - resultado: **0 candidatos reportáveis e 0 achados confirmados**;
-- relatório: `C:/Users/zodyp/.codex/security-scans/m80-secure-signout/fb88dd3b3db1bd229ef8367115c7ce542113fdf3_20260906T230149Z_sx3b6gd3/report.md`.
+- relatório: `C:/Users/<voce>/.codex/security-scans/m80-secure-signout/fb88dd3b3db1bd229ef8367115c7ce542113fdf3_20260906T230149Z_sx3b6gd3/report.md`.
 
 A revisão independente confirmou os controles e registrou limitações sem
 demonstrar ganho de privilégio: persistência da revogação e auditoria são duas

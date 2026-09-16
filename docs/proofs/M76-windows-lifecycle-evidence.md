@@ -91,7 +91,7 @@ Evidência retida em
   sequencialmente pelo agente principal.
 
 Relatório final do segundo scan:
-`C:/Users/zodyp/.codex/security-scans/m76-windows-lifecycle-evidence/098720641e37ac15e122fd58aecab03855c7c9b0_20260906T195855Z_2xeb5d0m/report.md`.
+`C:/Users/<voce>/.codex/security-scans/m76-windows-lifecycle-evidence/098720641e37ac15e122fd58aecab03855c7c9b0_20260906T195855Z_2xeb5d0m/report.md`.
 
 ## Limites honestos
 

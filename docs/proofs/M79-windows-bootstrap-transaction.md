@@ -83,7 +83,7 @@ Codex Security Diff Scan
   integralmente o diff.
 
 Relatório selado:
-`C:/Users/zodyp/.codex/security-scans/m79-windows-bootstrap-transaction/0199f13f7ee428f482da65c95674777a913f6367_20260906T220137Z_6mmzelaq/report.md`.
+`C:/Users/<voce>/.codex/security-scans/m79-windows-bootstrap-transaction/0199f13f7ee428f482da65c95674777a913f6367_20260906T220137Z_6mmzelaq/report.md`.
 
 ## Limites honestos
 

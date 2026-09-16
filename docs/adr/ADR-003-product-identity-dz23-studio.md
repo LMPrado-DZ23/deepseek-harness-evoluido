@@ -23,7 +23,7 @@ arquivo fornecido pelo proprietário. Seu SHA-256 é
   `@dz23-studio/*`, conforme a gramática do mecanismo.
 - DeepSeek, Claude, Codex, OmniRoute e demais nomes de terceiros só podem ser
   usados de forma nominativa para explicar integrações compatíveis.
-- O arquivo original em `C:/Users/zodyp/Downloads/LOGO.jpg` não será alterado
+- O arquivo original em `C:/Users/<voce>/Downloads/LOGO.jpg` não será alterado
   nem removido pelo projeto.
 - Variações do logo para favicon, PWA e fundos escuros devem ser derivadas em
   arquivos novos e passar por revisão visual; nunca sobrescrever o original.

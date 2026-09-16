@@ -65,7 +65,7 @@ Scan de diff Codex Security:
 - achados reportáveis: **0**.
 
 Relatório canônico local:
-`C:\Users\zodyp\.codex\security-scans\m83-identity-http-boundary\4fddc1236241f7a5b99984eefc203e7ab41e0a5a_20260907T050121Z_j_crqv_9\report.md`.
+`C:\Users\<voce>\.codex\security-scans\m83-identity-http-boundary\4fddc1236241f7a5b99984eefc203e7ab41e0a5a_20260907T050121Z_j_crqv_9\report.md`.
 
 O conector TAC ficou indisponível durante a varredura; portanto não foi usado
 como evidência e nenhum resultado depende dele.

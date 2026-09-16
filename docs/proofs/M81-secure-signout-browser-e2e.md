@@ -65,7 +65,7 @@ versões compatíveis. Esse erro não é apresentado como defeito do produto.
 - cobertura sem lacuna de fonte; a prova física Caddy/Docker permanece
   `NOT_EXECUTED`;
 - relatório:
-  `C:/Users/zodyp/.codex/security-scans/m81-signout-browser-e2e/dd55d6d2150e188fa1f8e302d988a4665f8ba655_20260907T013616Z_a765w7cs/report.md`.
+  `C:/Users/<voce>/.codex/security-scans/m81-signout-browser-e2e/dd55d6d2150e188fa1f8e302d988a4665f8ba655_20260907T013616Z_a765w7cs/report.md`.
 
 O TAC consultivo não pôde ser verificado porque o conector não estava ligado.
 

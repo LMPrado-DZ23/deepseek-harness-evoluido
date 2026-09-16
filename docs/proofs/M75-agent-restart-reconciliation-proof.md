@@ -66,7 +66,7 @@ contenção/intermitência fora da M75; não chama a suíte completa de verde.
 
 O Security Diff Scan formal cobriu os oito itens de produção da fatia e
 terminou com cobertura completa e zero achados. O relatório está em
-`C:\Users\zodyp\.codex\security-scans\m75-agent-restart-reconciliation-v2\646c47b53ad7c76c0ca3010e6abdd7001aec0ae0_20260906T174042Z_cxm0kdos\report.md`.
+`C:\Users\<voce>\.codex\security-scans\m75-agent-restart-reconciliation-v2\646c47b53ad7c76c0ca3010e6abdd7001aec0ae0_20260906T174042Z_cxm0kdos\report.md`.
 O conector TAC não estava configurado, portanto esse sinal ficou `unknown` e
 não foi tratado como aprovação.
 

@@ -96,7 +96,7 @@ e essa limitação não foi convertida em resultado verde.
   sequencialmente pelo agente principal.
 
 Relatório de verificação:
-`C:/Users/zodyp/.codex/security-scans/m77-windows-lifecycle-runner/78e80451af4b93df855b961f765b2273e01734fa_20260906T202859Z_jjz25gvk/report.md`.
+`C:/Users/<voce>/.codex/security-scans/m77-windows-lifecycle-runner/78e80451af4b93df855b961f765b2273e01734fa_20260906T202859Z_jjz25gvk/report.md`.
 
 ## Limites honestos
 

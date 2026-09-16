@@ -3,7 +3,10 @@ name: Verify DZ23 STUDIO
 on:
   pull_request:
   push:
-    branches: [main, master]
+    # `integ` e a linha principal deste repositorio e o ramo padrao no GitHub.
+    # Enquanto aqui dizia `main, master`, NENHUM push disparava a verificacao:
+    # a CI so rodava em pull request, e um push direto entrava sem prova.
+    branches: [integ, main, master]
   workflow_dispatch:
 
 permissions:
@@ -104,7 +107,16 @@ jobs:
 
       - name: Static and policy gates
         run: |
-          pnpm typecheck
+          # `gate:typecheck` cobre a raiz E `apps/studio-web`, que sao dois
+          # projetos de verdade: `pnpm typecheck` sozinho deixava a tela e os
+          # dubles de e2e sem tipo conferido.
+          pnpm gate:typecheck
+          # O `lib/` versionado tem de ser o que `pnpm build` produz do `src/`
+          # de hoje. `gate:tracked-lib` confere se ele esta COMPLETO; este
+          # confere se ele esta EM DIA, que e outra pergunta — e a que deixou
+          # `tenancy/lib/` vinte e tantos commits atras com uma correcao de
+          # autorizacao parada dentro.
+          pnpm gate:lib-freshness
           pnpm gate:i18n
           pnpm gate:portability
           pnpm gate:domain-scopes
@@ -151,6 +163,22 @@ jobs:
           # AGPL, Elastic, Commons Clause) e exige revisão humana registrada
           # para qualquer licença que não esteja nas duas listas.
           pnpm gate:licenses
+          # Os cinco que faltavam. Sem eles a CI executava dezessete dos vinte
+          # e quatro portoes enquanto o README dizia 24/24 — e um numero que a
+          # CI nao sustenta e segunda verdade na primeira coisa que um visitante
+          # le. `constitution` confere os vereditos que os outros gravaram;
+          # `candidates` recusa promover um candidato externo sem licenca,
+          # telemetria e plano de saida resolvidos; `memory-map` e `vocabulary`
+          # guardam o vocabulario fechado que impede um estado inventado.
+          pnpm gate:candidates
+          pnpm gate:memory-map
+          pnpm gate:vocabulary
+          pnpm gate:decision-record
+          pnpm gate:upstream-pin
+          # A constituicao vem POR ULTIMO e le os vereditos que os outros
+          # gravaram. Rodando antes deles, ela conferiria um arquivo vazio e
+          # passaria — que e o modo de falhar que ela existe para impedir.
+          pnpm gate:constitution
           # P-07: o conjunto de briefs leigos, medido no ponto que dá para medir
           # sem LLM e sem construtor — o Studio entendeu o que a pessoa
           # escreveu? Dois conjuntos: um onde o vocabulário foi ajustado, e um

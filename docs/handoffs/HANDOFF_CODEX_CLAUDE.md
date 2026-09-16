@@ -47,7 +47,7 @@ landing, catálogo, formulário+banco e painel CRUD; SaaS autenticado e dashboar
 `NOT_IMPLEMENTED`; preview/publicação `NOT_PRESENT`; LLM real e SMTP real
 `NOT_EXECUTED`; passkeys no app gerado `NOT_PRESENT`; experiência leiga
 `NOT_VALIDATED`. O prompt vinculante para iniciar o núcleo do próximo build está
-em `P34_CLAUDE_PROMPT.md`. P34 core pode começar em paralelo com a conclusão da
+em `docs/handoffs/P34_CLAUDE_PROMPT.md`. P34 core pode começar em paralelo com a conclusão da
 fase 5, mas o gate da fase 6 só fecha depois das seis categorias do Prompt-to-App.
 
 ## P32/P33 fatia 2 — correções do parecer `16ea5ec` prontas para revisão

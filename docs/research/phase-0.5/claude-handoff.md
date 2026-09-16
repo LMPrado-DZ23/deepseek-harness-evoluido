@@ -4,7 +4,7 @@
 
 - base: `codex/p30-policy-foundation@dc1b0f82438db76555d9daa880f748f557d59128`;
 - branch do kit: `codex/p05-usability-kit`;
-- worktree: `C:\Users\zodyp\Documents\Codex\2026-09-01\com\work\p05-usability-kit`;
+- worktree: `C:\Users\<voce>\Documents\Codex\2026-09-01\com\work\p05-usability-kit`;
 - OmniSeek P40 separado: `codex/p40-prototype-hardening@d9a8109528839a9f6c691cab9d71f3fce7e91e02`;
 - fase humana: `SCHEDULED_AFTER_PHASE_9`;
 - preflight atual: `BLOCKED_LOCAL_AI` — a porta 8000 responde com uma página de

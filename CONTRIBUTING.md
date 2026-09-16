@@ -19,14 +19,19 @@ isso.
 ## Antes de abrir um *pull request*
 
 ```bash
-pnpm typecheck          # tsc --noEmit na raiz: enxerga o grafo inteiro
+pnpm gate:typecheck     # a raiz E apps/studio-web: são dois projetos de verdade
 pnpm build
 pnpm exec vitest run --maxWorkers=1
 pnpm gate:i18n          # nenhum texto de pessoa solto no código
 pnpm gate:secrets
-pnpm gate:tracked-lib
+pnpm gate:tracked-lib   # o lib/ versionado importa só o que o repositório tem
+pnpm gate:lib-freshness # …e é o que `pnpm build` produz do src/ de hoje
 pnpm gate:requirements-ledger
 ```
+
+Se puder rodar tudo, `docs/OPERACAO.md` tem o laço dos **24 portões** e o
+comando das quatro suítes — raiz, interface, navegador e PostgreSQL. A CI roda
+os 24; rodar só os sete acima é o mínimo para não desperdiçar uma rodada.
 
 Se você mexeu em domínio de dados, `pnpm gate:domain-scopes` e
 `pnpm gate:rls-coverage`. Se mexeu na interface, `pnpm --dir apps/studio-web

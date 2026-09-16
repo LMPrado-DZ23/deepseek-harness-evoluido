@@ -69,7 +69,7 @@ não é apresentada como execução da suíte canônica.
 - faixa imutável: `d5ff3b3c83585e93d4b7ddee210ed8bc0106ef5c..2056fb03de1b89042a220711cef6d614aa8676fe`;
 - nove superfícies de produção contabilizadas e fechadas;
 - resultado: **0 candidatos reportáveis e 0 achados confirmados**;
-- relatório: `C:/Users/zodyp/.codex/security-scans/m82-cross-tab-signout/2056fb03de1b89042a220711cef6d614aa8676fe_20260907T041943Z_8spga1jz/report.md`.
+- relatório: `C:/Users/<voce>/.codex/security-scans/m82-cross-tab-signout/2056fb03de1b89042a220711cef6d614aa8676fe_20260907T041943Z_8spga1jz/report.md`.
 
 O TAC consultivo não estava conectado e não bloqueou a varredura.
 

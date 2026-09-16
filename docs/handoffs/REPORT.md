@@ -42,7 +42,7 @@ Viabilidade arquitetural: **PARCIALMENTE VIÁVEL, condicionada à errata do dom�
 
 ## Escopo e identidade
 
-O Studio foi implementado em repositório separado em `C:\Users\zodyp\Documents\Codex\2026-09-01\com\work\poc-01-studio`. O upstream foi usado no checkout WSL ext4 `/home/leandro/harness-studio-poc02/deepseek-harness`, exatamente no commit:
+O Studio foi implementado em repositório separado em `C:\Users\<voce>\Documents\Codex\2026-09-01\com\work\poc-01-studio`. O upstream foi usado no checkout WSL ext4 `/home/leandro/harness-studio-poc02/deepseek-harness`, exatamente no commit:
 
 ```text
 6c705be1ce6774a000d061da41d1823b03a3d42c
@@ -83,7 +83,7 @@ Não foram usadas chaves reais. O boot de diagnóstico gerou uma credencial efê
 Comando executado:
 
 ```sh
-DSH_HOME=/mnt/c/Users/zodyp/Documents/Codex/2026-09-01/com/work/poc-01-studio/dsh-home \
+DSH_HOME=/mnt/c/Users/<voce>/Documents/Codex/2026-09-01/com/work/poc-01-studio/dsh-home \
 DSH_TELEMETRY_DISABLED=1 \
 node /home/leandro/harness-studio-poc02/deepseek-harness/apps/cli/lib/bin.js \
   --profile studio --dump-config

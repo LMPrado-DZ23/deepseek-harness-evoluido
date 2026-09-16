@@ -2,7 +2,7 @@
 
 ## Identidade obrigatória
 
-- Repositório de execução: `C:\Users\zodyp\Documents\Codex\2026-09-01\com\work\missao-m1-preview`
+- Repositório de execução: `C:\Users\<voce>\Documents\Codex\2026-09-01\com\work\missao-m1-preview`
 - Base canônica da missão: `codex/p30-policy-foundation@ec92f29f7398d1ac69dc6201e5fb8e6bccfa60b9`.
 - Branch empilhada da missão: `codex/missao-m1-preview`.
 - Não reutilizar worktrees históricos; não editar o Harness upstream.

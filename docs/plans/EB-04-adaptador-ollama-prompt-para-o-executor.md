@@ -26,7 +26,7 @@ O que falta é **um adaptador real** registrado para o provedor `ollama`.
 ## Prompt para o executor (Claude Code / Codex)
 
 ```
-Repositório: C:\Users\zodyp\deepseek-harness-evoluido  (branch `integ`)
+Repositório: C:\Users\<voce>\deepseek-harness-evoluido  (branch `integ`)
 
 OBJETIVO
 Escrever um adaptador de LLM real para o Ollama local e registrá-lo no provedor

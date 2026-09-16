@@ -53,7 +53,7 @@ Scans:
 - revisão delegada não estava disponível; o agente principal cobriu o diff.
 
 Relatório final de verificação:
-`C:/Users/zodyp/.codex/security-scans/m78-windows-release-evidence-gate/56fd26f7fb40964f44094c43165f54fdda1f3efa_20260906T205902Z_mq2qste8/report.md`.
+`C:/Users/<voce>/.codex/security-scans/m78-windows-release-evidence-gate/56fd26f7fb40964f44094c43165f54fdda1f3efa_20260906T205902Z_mq2qste8/report.md`.
 
 ## Provas executadas
 
