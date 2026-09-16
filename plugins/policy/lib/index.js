@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { roleAllows, studioPermissionSchema, studioRoleSchema, } from './rbac.js';
 import { t } from './i18n.js';
 export * from './rbac.js';
+export * from './host.js';
 export const name = 'dz23-studio-policy';
 export const inject = ['tools', 'storageDomain'];
 export const policyTierSchema = z.enum(['T0', 'T1', 'T2', 'T3']);

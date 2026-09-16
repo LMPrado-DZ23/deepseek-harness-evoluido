@@ -232,6 +232,15 @@ produto existe para não fazer.
     **O que falta aqui não é engenharia** — é o Prado preencher a tabela e
     decidir se `NAO_MEDIDO` bloqueia ou apenas avisa.
 
+23. **OS-94 — a porta de saída da pesquisa (T-17).** Mesmo padrão da OS-93: o
+    que estava parado era a **autorização**, não o mecanismo. A porta existe e
+    está **fechada** — lista vazia recusa, só `https:`, cada redirecionamento
+    passa pela mesma porta, e não há valor padrão que autorize. Nenhuma saída
+    existe: não há cliente HTTP nem busca, e nenhum teste toca a rede.
+    `host.ts` mudou de `integration-hub` para `policy`, porque `prompt-to-app`
+    precisa dele e não pode depender do hub — duplicar a normalização seria
+    segunda verdade na guarda de SSRF, que é onde ela custa mais caro.
+
 ## Próxima ação
 
 Ver `docs/status/TASK_DAG.md`, tarefa de maior prioridade em `READY`.

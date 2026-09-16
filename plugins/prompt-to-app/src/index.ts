@@ -79,6 +79,7 @@ export * from './ports.js'
 export * from './runner.js'
 export * from './service.js'
 export * from './state.js'
+export * from './research-egress.js'
 export * from './template-policy.js'
 
 export const name = 'dz23-studio-prompt-to-app'

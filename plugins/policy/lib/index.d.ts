@@ -3,6 +3,7 @@ import type { ToolExecution } from '@deepseek-ai/dsh-tools';
 import { z } from 'zod';
 import { type StudioRole } from './rbac.js';
 export * from './rbac.js';
+export * from './host.js';
 export declare const name = "dz23-studio-policy";
 export declare const inject: string[];
 export declare const policyTierSchema: z.ZodEnum<{

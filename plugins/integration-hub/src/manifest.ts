@@ -1,7 +1,7 @@
 import { createPublicKey, verify } from 'node:crypto'
-import type { PolicyTier } from '@dz23-studio/policy'
+import { hostBloqueado, hostCanonico, hostLoopback, type PolicyTier } from '@dz23-studio/policy'
 import { z } from 'zod'
-import { hostBloqueado, hostCanonico, hostLoopback } from './host.js'
+
 import { t } from './i18n.js'
 import { declaresProvenance, integrationManifestSchema, type IntegrationKind, type IntegrationManifest, type IntegrationPermission } from './model.js'
 
