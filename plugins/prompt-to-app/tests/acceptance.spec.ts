@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { acceptanceChecks, parseAcceptanceReport, writeAcceptanceArtifacts } from '../src/acceptance.js'
+import { screenshotPath, VIEWPORTS } from '../src/visual-qa.js'
 import type { AppSpecV1 } from '../src/appspec.js'
 
 const roots: string[] = []
@@ -181,6 +182,24 @@ describe('a suite gerada TIRA a foto da tela inicial', () => {
     const suite = await readFile(resolve(directory, 'tests', 'e2e', 'appspec.spec.ts'), 'utf8')
     expect(suite).toContain('page.screenshot')
     expect(suite).toContain('evidence/screenshot-home.png')
+    await rm(directory, { recursive: true, force: true })
+  })
+
+  it('a suite fotografa os TRES tamanhos, e cada um APLICA o seu antes de abrir', async () => {
+    // O veredito de tres tamanhos só vale se as tres fotos existirem. E o
+    // `setViewportSize` tem de vir ANTES do `goto`: aplicar o tamanho depois de
+    // a pagina abrir fotografa o reflow e nao a abertura — e o leitor confere a
+    // largura, entao uma foto sem o tamanho aplicado sai NAO OBSERVADA, que e
+    // silencio onde deveria haver prova.
+    const directory = await mkdtemp(join(tmpdir(), 'dz23-acceptance-'))
+    await writeAcceptanceArtifacts(directory, spec)
+    const suite = await readFile(resolve(directory, 'tests', 'e2e', 'appspec.spec.ts'), 'utf8')
+    for (const viewport of VIEWPORTS) {
+      expect(suite, viewport.nome).toContain(screenshotPath(viewport))
+      const linha = suite.split('\n').find(value => value.includes(screenshotPath(viewport)))!
+      expect(linha).toContain(`width:${String(viewport.largura)}`)
+      expect(linha.indexOf('setViewportSize')).toBeLessThan(linha.indexOf("goto('/')"))
+    }
     await rm(directory, { recursive: true, force: true })
   })
 })

@@ -1,6 +1,6 @@
 import { type AttemptOutcome, convergenceOf, repeatingReason, shouldStopEarly } from './convergence.js'
 import { blocksVerification, reviewMessage, reviewRun } from './independent-review.js'
-import { homeScreenVerdict } from './visual-qa.js'
+import { telasIniciaisVerdict } from './visual-qa.js'
 import { CROSS_RUN_FAILURE_WINDOW_DAYS, FailureMemory, seedCorrection } from './failure-memory.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { cp, lstat, mkdir, readFile, writeFile } from 'node:fs/promises'
@@ -500,11 +500,15 @@ export class PromptToAppPipeline {
       // que o leitor nao conhece — nao reprova nada: reprovar ali seria reprovar
       // a criacao por um defeito do observador, e e o mesmo principio do arquivo
       // ilegivel da OS-57.
-      const screen = await homeScreenVerdict(runDirectory, async path => {
+      const screen = await telasIniciaisVerdict(runDirectory, async path => {
         try { return await readFile(path) } catch { return undefined }
       })
       if (screen.state === 'BLANK' && diagnostic === undefined) {
-        diagnostic = `BLANK_SCREEN:${screen.problems.join(',')}`
+        // O TAMANHO sai no diagnostico. 'BLANK_SCREEN' sozinho mandava alguem
+        // abrir o aplicativo no computador, ver a tela desenhada e concluir que
+        // o portao mentiu — quando o que estava vazio era o celular.
+        const problemas = screen.porTamanho.flatMap(item => (item.state === 'BLANK' ? item.problems : []))
+        diagnostic = `BLANK_SCREEN:${screen.vazios.join('+')}:${[...new Set(problemas)].join(',')}`
         failedStage = 'test'
       }
       // O resultado desta conferência era CALCULADO e jogado fora quando batia:

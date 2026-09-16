@@ -12,6 +12,7 @@ import { generationRules } from '../src/import-policy.js'
 import { BuilderLifecycleError, type BuildStep, type BuilderLifecycleFinished, type BuilderLifecycleResolverPort, type BuilderLifecycleSession, type BuilderLifecycleStepResult } from '../src/builder-lifecycle.js'
 import { PromptToAppError, type PromptToAppActor, type PromptToAppService } from '../src/service.js'
 import { latestGreenCheckpoint, runCheckpoints } from '../src/checkpoint.js'
+import { screenshotPath, VIEWPORTS } from '../src/visual-qa.js'
 
 const actor: PromptToAppActor = { userId: 'owner', orgId: 'org-a', tenantId: 'tenant-a', role: 'owner' }
 const spec: AppSpecV1 = {
@@ -83,6 +84,23 @@ function pngSolido(width: number, height: number, fundo: readonly [number, numbe
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     chunk('IHDR', header), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0)),
   ])
+}
+
+/**
+ * Escreve as capturas dos TRES tamanhos, cada uma com a LARGURA do seu tamanho.
+ *
+ * A largura certa nao e detalhe do teste: o leitor confere a largura da imagem
+ * contra o nome do arquivo, e uma foto do tamanho errado sai `NAO OBSERVADO` em
+ * vez de responder pelo tamanho que ela diz ser.
+ * @param directory - o diretorio da execucao.
+ * @param tinta - quantos pixels de conteudo cada captura tem; `0` e tela vazia.
+ * @param apenas - quando informado, escreve so estes tamanhos.
+ */
+async function escreverCapturas(directory: string, tinta: number, apenas?: readonly string[]): Promise<void> {
+  for (const viewport of VIEWPORTS) {
+    if (apenas !== undefined && !apenas.includes(viewport.nome)) continue
+    await writeFile(resolve(directory, screenshotPath(viewport)), pngSolido(viewport.largura, 40, [255, 255, 255, 255], tinta))
+  }
 }
 
 const roots: string[] = []
@@ -268,7 +286,6 @@ describe('Prompt-to-App pipeline', () => {
   it('uma criação que compila, testa e abre EM BRANCO NÃO é protótipo verificado', async () => {
     // Este e o defeito mais constrangedor do produto: tudo verde, e a pagina
     // branca. Todo o resto do pipeline olha para o que o computador executou.
-    const branca = pngSolido(40, 40, [255, 255, 255, 255])
     const f = await fixture({
       execute: async (directory, command) => {
         if (command === 'pnpm run test') {
@@ -276,7 +293,7 @@ describe('Prompt-to-App pipeline', () => {
           const report = JSON.parse(await readFile(path, 'utf8')) as { checks: { status: string }[] }
           for (const check of report.checks) if (check.status === 'PENDING') check.status = 'PASSED'
           await writeFile(path, JSON.stringify(report), 'utf8')
-          await writeFile(resolve(directory, 'evidence', 'screenshot-home.png'), branca)
+          await escreverCapturas(directory, 0)
         }
         return { exitCode: 0, stdout: 'ok', stderr: '', timedOut: false }
       },
@@ -298,7 +315,6 @@ describe('Prompt-to-App pipeline', () => {
   })
 
   it('uma tela COM conteúdo passa', async () => {
-    const comConteudo = pngSolido(40, 40, [255, 255, 255, 255], 400)
     const f = await fixture({
       execute: async (directory, command) => {
         if (command === 'pnpm run test') {
@@ -306,12 +322,59 @@ describe('Prompt-to-App pipeline', () => {
           const report = JSON.parse(await readFile(path, 'utf8')) as { checks: { status: string }[] }
           for (const check of report.checks) if (check.status === 'PENDING') check.status = 'PASSED'
           await writeFile(path, JSON.stringify(report), 'utf8')
-          await writeFile(resolve(directory, 'evidence', 'screenshot-home.png'), comConteudo)
+          await escreverCapturas(directory, 400)
         }
         return { exitCode: 0, stdout: 'ok', stderr: '', timedOut: false }
       },
       finish: attestingFinish,
     })
+    await expect(f.pipeline.run(actor, 'project', { generate: vi.fn(async () => cleanGeneration) }))
+      .resolves.toMatchObject({ state: 'VERIFIED_PROTOTYPE' })
+  })
+
+  it('a tela que desenha no COMPUTADOR e abre vazia no CELULAR não é protótipo verificado', async () => {
+    // Esta é a metade que a OS-73 deixou declarada em aberto, e é a que mais
+    // dói: quem não programa abre no telefone. Uma média entre tamanhos
+    // esconderia exatamente a pessoa que mais sofre — por isso um tamanho vazio
+    // reprova mesmo com os outros dois desenhados.
+    const f = await fixture({
+      execute: async (directory, command) => {
+        if (command === 'pnpm run test') {
+          const path = resolve(directory, 'evidence', 'appspec-report.json')
+          const report = JSON.parse(await readFile(path, 'utf8')) as { checks: { status: string }[] }
+          for (const check of report.checks) if (check.status === 'PENDING') check.status = 'PASSED'
+          await writeFile(path, JSON.stringify(report), 'utf8')
+          await escreverCapturas(directory, 400, ['tablet', 'computador'])
+          await escreverCapturas(directory, 0, ['celular'])
+        }
+        return { exitCode: 0, stdout: 'ok', stderr: '', timedOut: false }
+      },
+      finish: attestingFinish,
+    })
+    const result = await f.pipeline.run(actor, 'project', { generate: varying() })
+    expect(result.state).not.toBe('VERIFIED_PROTOTYPE')
+    // O TAMANHO sai no diagnóstico: sem ele, quem for conferir abre o
+    // aplicativo no computador, vê a tela desenhada, e conclui que o portão
+    // mentiu.
+    expect(result.message).toContain('BLANK_SCREEN:celular')
+  })
+
+  it('captura de UM tamanho só não aprova os outros dois, e também não os reprova', async () => {
+    const f = await fixture({
+      execute: async (directory, command) => {
+        if (command === 'pnpm run test') {
+          const path = resolve(directory, 'evidence', 'appspec-report.json')
+          const report = JSON.parse(await readFile(path, 'utf8')) as { checks: { status: string }[] }
+          for (const check of report.checks) if (check.status === 'PENDING') check.status = 'PASSED'
+          await writeFile(path, JSON.stringify(report), 'utf8')
+          await escreverCapturas(directory, 400, ['computador'])
+        }
+        return { exitCode: 0, stdout: 'ok', stderr: '', timedOut: false }
+      },
+      finish: attestingFinish,
+    })
+    // Não reprova — reprovar seria reprovar por defeito do observador —, e o
+    // que não foi olhado fica NOMEADO no veredito, não some.
     await expect(f.pipeline.run(actor, 'project', { generate: vi.fn(async () => cleanGeneration) }))
       .resolves.toMatchObject({ state: 'VERIFIED_PROTOTYPE' })
   })

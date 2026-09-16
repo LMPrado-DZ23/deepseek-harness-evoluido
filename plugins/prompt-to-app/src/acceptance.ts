@@ -6,6 +6,7 @@ import type { AppSpecV1 } from './appspec.js'
 import { dataIdentifier } from './data-generator.js'
 import { tGeneratedApp } from './generated-i18n.js'
 import { t } from './i18n.js'
+import { screenshotPath, VIEWPORTS } from './visual-qa.js'
 import type { StudioProjectCategory } from './model.js'
 
 export type AcceptanceStatus = 'PENDING' | 'PASSED' | 'FAILED' | 'NOT_AUTOMATED'
@@ -149,8 +150,22 @@ function generatedPlaywright(checks: readonly AcceptanceCheck[]): string {
  * `fullPage: false` de proposito: o que importa e o que abre, e uma captura de
  * pagina inteira de um aplicativo longo viraria uma imagem enorme para
  * responder a pergunta "desenhou alguma coisa?".
+ *
+ * TRES TAMANHOS (T-18). A limitacao declarada da OS-73 era que so existia uma
+ * foto, do tamanho de quem programou. O defeito que este produto de fato
+ * produz nao e a pagina branca no computador: e a que abre no CELULAR de quem
+ * nao programa e nao mostra nada. Cada tamanho vira uma foto propria, com o
+ * nome dizendo qual e — e o leitor confere a LARGURA da imagem contra o nome,
+ * porque uma foto do computador chamada de celular e pior que foto nenhuma.
+ *
+ * A captura do nome antigo continua sendo tirada: ela e o que o restante do
+ * produto ja le, e trocar o nome de um artefato de evidencia num passo que
+ * tambem muda o que ele mede juntaria duas mudancas num lugar so.
  */
-const SCREENSHOT_TEST = `test('captura da tela inicial',async({page})=>{await page.goto('/');await page.screenshot({path:resolve(process.cwd(),'evidence/screenshot-home.png'),fullPage:false})})`
+const SCREENSHOT_TEST = [
+  `test('captura da tela inicial',async({page})=>{await page.goto('/');await page.screenshot({path:resolve(process.cwd(),'evidence/screenshot-home.png'),fullPage:false})})`,
+  ...VIEWPORTS.map(viewport => `test(${JSON.stringify(`captura da tela inicial — ${viewport.nome}`)},async({page})=>{await page.setViewportSize({width:${String(viewport.largura)},height:${String(viewport.altura)}});await page.goto('/');await page.screenshot({path:resolve(process.cwd(),${JSON.stringify(screenshotPath(viewport))}),fullPage:false})})`),
+].join('\n')
 
 const LOGIN_HELPER = `const authStatePath=resolve(process.cwd(),'data/studio-auth-state.json')
 async function captured(){try{return JSON.parse(await readFile(resolve(process.cwd(),'data/studio-capture.json'),'utf8')) as Array<{kind:string;email:string;code?:string}>}catch{return []}}

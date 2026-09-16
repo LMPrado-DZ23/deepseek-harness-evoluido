@@ -170,6 +170,17 @@ produto existe para não fazer.
       parava o staging de todo mundo. **Prova de ausência não pode virar
       ausência de prova.**
 
+18. **OS-89 — Visual QA em três tamanhos de tela (T-18).** A OS-73 declarou o
+    que faltava: só a tela inicial, e sem comparar entre tamanhos. A metade que
+    uma foto consegue fechar é a que mais dói — o defeito que este produto de
+    fato produz não é a página branca no computador de quem programou, é a que
+    abre no **celular** de quem não programa e não mostra nada. A suíte gerada
+    fotografa em três larguras, **um tamanho vazio reprova mesmo com os outros
+    dois desenhados**, e o que não pôde ser olhado sai nomeado em vez de sumir.
+    O leitor confere a **largura da imagem contra o nome do arquivo**: uma
+    captura de celular com a largura do computador é o tamanho que nunca foi
+    aplicado, e ela aprovaria o celular descrevendo outra coisa.
+
 ## Próxima ação
 
 Ver `docs/status/TASK_DAG.md`, tarefa de maior prioridade em `READY`.

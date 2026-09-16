@@ -295,8 +295,38 @@ export function compareImages(before: RgbaImage, after: RgbaImage): VisualCompar
   return different === 0 ? { state: 'IDENTICAL' } : { state: 'CHANGED', differentFraction: different / total }
 }
 
-/** Onde a suite gerada deixa a captura da tela inicial. */
+/** Onde a suite gerada deixa a captura da tela inicial (o tamanho de sempre). */
 export const HOME_SCREENSHOT = 'evidence/screenshot-home.png'
+
+/**
+ * Os tamanhos de tela em que a inicial e fotografada.
+ *
+ * A limitacao DECLARADA da OS-73 era esta: so a tela inicial, e sem comparar
+ * entre tamanhos. Fotografar em tres larguras fecha a metade que da para
+ * fechar com uma foto, e ela e a metade que mais dói — o defeito que o produto
+ * de fato produz nao e a pagina branca no computador de quem programou, e sim
+ * a pagina que abre no CELULAR de quem nao programa e nao mostra nada.
+ *
+ * Tres, e nao dez: cada tamanho e uma execucao a mais da suite, e a pergunta
+ * que uma foto responde — "desenhou alguma coisa?" — nao fica mais respondida
+ * com mais pontos. As larguras sao as tres familias de aparelho, e nao as de um
+ * aparelho especifico, porque nomear um modelo envelheceria a prova.
+ */
+export const VIEWPORTS = [
+  { nome: 'celular', largura: 390, altura: 844 },
+  { nome: 'tablet', largura: 820, altura: 1180 },
+  { nome: 'computador', largura: 1440, altura: 900 },
+] as const
+export type Viewport = (typeof VIEWPORTS)[number]
+
+/**
+ * O caminho da captura de um tamanho.
+ * @param viewport - o tamanho de tela.
+ * @returns o caminho, relativo ao diretorio da execucao.
+ */
+export function screenshotPath(viewport: Viewport): string {
+  return `evidence/screenshot-home-${viewport.nome}.png`
+}
 
 export type ScreenVerdict =
   /** A tela desenhou alguma coisa. */
@@ -329,4 +359,127 @@ export async function homeScreenVerdict(
   if (!decoded.ok) return { state: 'NOT_OBSERVED', reason: decoded.reason }
   const problems = visualProblems(imageStats(decoded.image))
   return problems.length === 0 ? { state: 'DREW' } : { state: 'BLANK', problems }
+}
+
+
+/**
+ * Motivo pelo qual uma captura nao pode ser CONSIDERADA, alem de ausente ou
+ * ilegivel: ela foi revelada, e contradiz o que o proprio nome dela afirma.
+ *
+ * `LARGURA_NAO_CONFERE` nao e pedantismo sobre um pixel. A captura de celular
+ * com a largura do computador significa que o tamanho de tela nunca foi
+ * aplicado — e aí a prova de que "abre no celular" é uma foto do computador com
+ * outro nome. Uma prova que descreve outra coisa é pior que prova nenhuma,
+ * porque ela é lida como se descrevesse esta.
+ */
+export type ProblemaDeEvidencia = 'LARGURA_NAO_CONFERE'
+
+export type VeredictoDeTamanho =
+  | { readonly viewport: Viewport; readonly state: 'DREW' }
+  | { readonly viewport: Viewport; readonly state: 'BLANK'; readonly problems: readonly VisualProblem[] }
+  | { readonly viewport: Viewport; readonly state: 'NOT_OBSERVED'; readonly reason: PngUnsupported | 'ABSENT' | ProblemaDeEvidencia }
+
+/**
+ * O veredito de UM tamanho, com a conferencia de que a foto e daquele tamanho.
+ * @param viewport - o tamanho pedido.
+ * @param buffer - os bytes da captura, ou `undefined` quando ela nao existe.
+ * @returns o veredito.
+ */
+export function tamanhoVerdict(viewport: Viewport, buffer: Buffer | undefined): VeredictoDeTamanho {
+  if (buffer === undefined) return { viewport, state: 'NOT_OBSERVED', reason: 'ABSENT' }
+  const decoded = decodePng(buffer)
+  if (!decoded.ok) return { viewport, state: 'NOT_OBSERVED', reason: decoded.reason }
+  // A conferencia acontece ANTES de julgar o conteudo: uma foto do tamanho
+  // errado que desenhou alguma coisa nao prova que ESTE tamanho desenhou.
+  if (decoded.image.width !== viewport.largura) return { viewport, state: 'NOT_OBSERVED', reason: 'LARGURA_NAO_CONFERE' }
+  const problems = visualProblems(imageStats(decoded.image))
+  return problems.length === 0 ? { viewport, state: 'DREW' } : { viewport, state: 'BLANK', problems }
+}
+
+export type VeredictoDasTelas = {
+  /**
+   * `DREW` quando TODO tamanho observado desenhou; `BLANK` quando algum
+   * desenhou nada; `NOT_OBSERVED` quando nenhum pode ser olhado.
+   */
+  readonly state: 'DREW' | 'BLANK' | 'NOT_OBSERVED'
+  readonly porTamanho: readonly VeredictoDeTamanho[]
+  /** Os tamanhos que abriram vazios, pelo nome. */
+  readonly vazios: readonly string[]
+  /** Os tamanhos que nao puderam ser olhados, pelo nome. */
+  readonly naoObservados: readonly string[]
+}
+
+/**
+ * O veredito sobre a tela inicial em TODOS os tamanhos.
+ *
+ * Tres regras, e as tres sao a mesma disciplina:
+ *
+ * 1. um tamanho vazio REPROVA, mesmo que os outros dois tenham desenhado — o
+ *    aplicativo que abre branco no celular esta quebrado para quem usa celular,
+ *    e uma media entre tamanhos esconderia exatamente a pessoa que mais sofre;
+ * 2. um tamanho NAO OBSERVADO nao reprova nem aprova, e nunca some do
+ *    resultado: ele sai NOMEADO, porque "dois de tres desenharam" e uma frase
+ *    diferente de "os tres desenharam";
+ * 3. quando nenhum pode ser olhado, o veredito inteiro e `NOT_OBSERVED` — e
+ *    nao `DREW` por ausencia de reprovacao. Ausencia de prova nunca vira prova.
+ * @param runDirectory - o diretorio da execucao.
+ * @param read - le um arquivo, devolvendo `undefined` quando ele nao existe.
+ * @returns o veredito combinado, com o de cada tamanho dentro.
+ */
+export async function telasIniciaisVerdict(
+  runDirectory: string,
+  read: (path: string) => Promise<Buffer | undefined>,
+): Promise<VeredictoDasTelas> {
+  const porTamanho: VeredictoDeTamanho[] = []
+  for (const viewport of VIEWPORTS) {
+    porTamanho.push(tamanhoVerdict(viewport, await read(`${runDirectory}/${screenshotPath(viewport)}`)))
+  }
+  const vazios = porTamanho.filter(item => item.state === 'BLANK').map(item => item.viewport.nome)
+  const naoObservados = porTamanho.filter(item => item.state === 'NOT_OBSERVED').map(item => item.viewport.nome)
+  const state = vazios.length > 0 ? 'BLANK' : naoObservados.length === VIEWPORTS.length ? 'NOT_OBSERVED' : 'DREW'
+  return { state, porTamanho, vazios, naoObservados }
+}
+
+export type ProgressoVisual =
+  /** A tentativa seguinte mudou o que a pessoa ve, naqueles tamanhos. */
+  | { readonly state: 'MUDOU'; readonly tamanhos: readonly string[] }
+  /** Nenhum tamanho mudou um pixel: a tentativa nova entrega a mesma tela. */
+  | { readonly state: 'IGUAL' }
+  /** Nao deu para comparar nenhum tamanho, e por isso NAO SE SABE. */
+  | { readonly state: 'NAO_COMPARAVEL'; readonly motivo: 'SEM_PAR' | 'SIZE_MISMATCH' }
+
+/**
+ * Se a tentativa seguinte mudou alguma coisa do que a PESSOA ve.
+ *
+ * `compareImages` existia e nao tinha nenhum chamador — a convergencia do
+ * produto ja parava quando uma tentativa escrevia o mesmo CODIGO e falhava
+ * igual, mas ninguem perguntava se a tela tinha mudado. As duas coisas nao sao
+ * a mesma: um gerador pode reescrever meio aplicativo e entregar exatamente a
+ * mesma pagina, e e justamente ai que insistir custa caro.
+ *
+ * Isto INFORMA e nao reprova. `IGUAL` e um sinal de que a proxima tentativa
+ * provavelmente nao vale a pena, e nao uma afirmacao de que ela falharia —
+ * afirmar isso seria decidir o futuro a partir de duas fotos.
+ * @param antes - as capturas da tentativa anterior, por nome de tamanho.
+ * @param depois - as capturas da tentativa atual, por nome de tamanho.
+ * @returns o que mudou, ou por que nao deu para saber.
+ */
+export function progressoVisual(
+  antes: ReadonlyMap<string, RgbaImage>,
+  depois: ReadonlyMap<string, RgbaImage>,
+): ProgressoVisual {
+  const mudaram: string[] = []
+  let comparou = 0
+  let tamanhoDiferente = false
+  for (const viewport of VIEWPORTS) {
+    const um = antes.get(viewport.nome)
+    const dois = depois.get(viewport.nome)
+    if (um === undefined || dois === undefined) continue
+    const comparacao = compareImages(um, dois)
+    if (comparacao.state === 'INCOMPARABLE') { tamanhoDiferente = true; continue }
+    comparou += 1
+    if (comparacao.state === 'CHANGED') mudaram.push(viewport.nome)
+  }
+  if (comparou === 0) return { state: 'NAO_COMPARAVEL', motivo: tamanhoDiferente ? 'SIZE_MISMATCH' : 'SEM_PAR' }
+  return mudaram.length > 0 ? { state: 'MUDOU', tamanhos: mudaram } : { state: 'IGUAL' }
 }

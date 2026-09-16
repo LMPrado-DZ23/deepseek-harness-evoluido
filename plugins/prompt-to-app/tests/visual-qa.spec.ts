@@ -11,6 +11,11 @@ import {
   compareImages,
   decodePng,
   imageStats,
+  progressoVisual,
+  screenshotPath,
+  tamanhoVerdict,
+  telasIniciaisVerdict,
+  VIEWPORTS,
   visualProblems,
 } from '../src/visual-qa.js'
 
@@ -349,5 +354,111 @@ describe('homeScreenVerdict — o elo com a execucao', () => {
     let pedido = ''
     await homeScreenVerdict('/run', async path => { pedido = path; return undefined })
     expect(pedido).toBe(`/run/${HOME_SCREENSHOT}`)
+  })
+})
+
+
+describe('T-18 — a tela inicial em TRES tamanhos', () => {
+  const CELULAR = VIEWPORTS[0]
+  const COMPUTADOR = VIEWPORTS[2]
+
+  /** Uma captura da largura pedida, com `tinta` pixels de conteudo. */
+  function captura(largura: number, tinta: number): Buffer {
+    const total = largura * 8
+    const pixels = Array.from({ length: total }, (_value, indice): readonly [number, number, number, number] =>
+      (indice < tinta ? [10, 20, 30, 255] : [255, 255, 255, 255]))
+    return png(largura, 8, pixels)
+  }
+
+  function leitor(arquivos: Readonly<Record<string, Buffer>>): (path: string) => Promise<Buffer | undefined> {
+    return async path => arquivos[path]
+  }
+
+  it('cada tamanho tem caminho proprio, e os tres sao diferentes', () => {
+    const caminhos = VIEWPORTS.map(screenshotPath)
+    expect(new Set(caminhos).size).toBe(VIEWPORTS.length)
+    for (const viewport of VIEWPORTS) expect(screenshotPath(viewport)).toContain(viewport.nome)
+  })
+
+  it('uma foto do tamanho ERRADO nao responde pelo tamanho que ela diz ser', () => {
+    // O caso concreto: o `setViewportSize` nao foi aplicado, e a captura de
+    // celular e a do computador com outro nome. Ela DESENHOU — e por isso
+    // aprovaria o celular — descrevendo outra coisa. Prova que descreve outra
+    // coisa e pior que prova nenhuma, porque e lida como se descrevesse esta.
+    const veredicto = tamanhoVerdict(CELULAR, captura(COMPUTADOR.largura, 400))
+    expect(veredicto).toEqual({ viewport: CELULAR, state: 'NOT_OBSERVED', reason: 'LARGURA_NAO_CONFERE' })
+  })
+
+  it('a foto da largura certa e julgada pelo conteudo, como sempre', () => {
+    expect(tamanhoVerdict(CELULAR, captura(CELULAR.largura, 400)).state).toBe('DREW')
+    expect(tamanhoVerdict(CELULAR, captura(CELULAR.largura, 0)).state).toBe('BLANK')
+    expect(tamanhoVerdict(CELULAR, undefined)).toEqual({ viewport: CELULAR, state: 'NOT_OBSERVED', reason: 'ABSENT' })
+  })
+
+  it('UM tamanho vazio reprova, mesmo com os outros dois desenhados', async () => {
+    const arquivos: Record<string, Buffer> = {}
+    for (const viewport of VIEWPORTS) {
+      arquivos[`/r/${screenshotPath(viewport)}`] = captura(viewport.largura, viewport.nome === 'celular' ? 0 : 400)
+    }
+    const veredicto = await telasIniciaisVerdict('/r', leitor(arquivos))
+    expect(veredicto.state).toBe('BLANK')
+    // O NOME do tamanho sai: uma media entre tamanhos esconderia exatamente
+    // quem mais sofre, e um 'BLANK' sem tamanho manda conferir no lugar errado.
+    expect(veredicto.vazios).toEqual(['celular'])
+  })
+
+  it('os tres desenhados aprovam, e nada fica de fora do resultado', async () => {
+    const arquivos: Record<string, Buffer> = {}
+    for (const viewport of VIEWPORTS) arquivos[`/r/${screenshotPath(viewport)}`] = captura(viewport.largura, 400)
+    const veredicto = await telasIniciaisVerdict('/r', leitor(arquivos))
+    expect(veredicto.state).toBe('DREW')
+    expect(veredicto.porTamanho.length).toBe(VIEWPORTS.length)
+    expect(veredicto.naoObservados).toEqual([])
+  })
+
+  it('o que nao pode ser olhado sai NOMEADO, e nao some nem reprova', async () => {
+    const veredicto = await telasIniciaisVerdict('/r', leitor({ [`/r/${screenshotPath(COMPUTADOR)}`]: captura(COMPUTADOR.largura, 400) }))
+    expect(veredicto.state).toBe('DREW')
+    // 'dois de tres desenharam' e uma frase DIFERENTE de 'os tres desenharam'.
+    expect([...veredicto.naoObservados].sort()).toEqual(['celular', 'tablet'])
+  })
+
+  it('nenhum tamanho observado e NAO OBSERVADO, e nunca aprovacao por ausencia de reprovacao', async () => {
+    const veredicto = await telasIniciaisVerdict('/r', leitor({}))
+    expect(veredicto.state).toBe('NOT_OBSERVED')
+    expect(veredicto.naoObservados.length).toBe(VIEWPORTS.length)
+  })
+})
+
+describe('T-18 — a tentativa seguinte mudou o que a pessoa ve?', () => {
+  function imagem(largura: number, tinta: number): RgbaImage {
+    const pixels = new Uint8ClampedArray(largura * 4 * 4)
+    for (let indice = 0; indice < largura * 4; indice += 1) {
+      const at = indice * 4
+      const escuro = indice < tinta
+      pixels[at] = escuro ? 10 : 255; pixels[at + 1] = escuro ? 20 : 255
+      pixels[at + 2] = escuro ? 30 : 255; pixels[at + 3] = 255
+    }
+    return { width: largura, height: 4, pixels }
+  }
+
+  it('diz QUAIS tamanhos mudaram, e nao so que algo mudou', () => {
+    const antes = new Map(VIEWPORTS.map(v => [v.nome, imagem(v.largura, 10)]))
+    const depois = new Map(VIEWPORTS.map(v => [v.nome, imagem(v.largura, v.nome === 'celular' ? 40 : 10)]))
+    expect(progressoVisual(antes, depois)).toEqual({ state: 'MUDOU', tamanhos: ['celular'] })
+  })
+
+  it('nenhum pixel diferente e IGUAL: a tentativa nova entrega a mesma tela', () => {
+    const antes = new Map(VIEWPORTS.map(v => [v.nome, imagem(v.largura, 10)]))
+    expect(progressoVisual(antes, new Map(antes))).toEqual({ state: 'IGUAL' })
+  })
+
+  it('sem par para comparar NAO e igual: e nao saber', () => {
+    // Colapsar 'nao deu para comparar' em 'nao mudou' faria a convergencia
+    // parar por falta de foto, e nao por falta de progresso.
+    expect(progressoVisual(new Map(), new Map())).toEqual({ state: 'NAO_COMPARAVEL', motivo: 'SEM_PAR' })
+    const antes = new Map([['celular', imagem(VIEWPORTS[0].largura, 10)]])
+    const depois = new Map([['celular', imagem(VIEWPORTS[0].largura + 1, 10)]])
+    expect(progressoVisual(antes, depois)).toEqual({ state: 'NAO_COMPARAVEL', motivo: 'SIZE_MISMATCH' })
   })
 })
