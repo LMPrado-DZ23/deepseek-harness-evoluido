@@ -47,8 +47,17 @@ const createProjectSchema = z.object({
 }).strict()
 const answerSchema = intakeAnswerSchema.extend({ confirm_sensitive: z.boolean().optional() }).strict()
 const changeRequestSchema = z.object({ reason: z.string().trim().min(3).max(2_000) }).strict()
-const reviseSchema = z.object({ request: z.string().min(1).max(2_000) }).strict()
-const perguntaSchema = z.object({ question: z.string().min(1).max(2_000) }).strict()
+/*
+  `request_key` e OPCIONAL nos dois envios, e e a identidade da INTENCAO.
+
+  Ela nao e credencial: o escopo de quem pede entra na chave de armazenamento e
+  a reserva e reconferida contra o ator. O que ela faz e impedir que a mesma
+  intencao — reenviada depois de a resposta se perder, ou mandada de duas abas
+  ao mesmo tempo — produza dois efeitos.
+*/
+const chaveDeEnvio = z.string().min(16).max(128).optional()
+const reviseSchema = z.object({ request: z.string().min(1).max(2_000), request_key: chaveDeEnvio }).strict()
+const perguntaSchema = z.object({ question: z.string().min(1).max(2_000), request_key: chaveDeEnvio }).strict()
 const undoSchema = z.object({ run_id: z.string().trim().min(1).max(96) }).strict()
 
 export interface PromptToAppHttpExtensionRequest {
@@ -374,7 +383,7 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
         // e a por texto vêm do serviço com os mesmos códigos das outras rotas,
         // e não de uma validação repetida aqui.
         const input = reviseSchema.parse(await readJson(request))
-        const revised = await config.service.reviseProject(actor, projectId, input.request)
+        const revised = await config.service.reviseProject(actor, projectId, input.request, input.request_key)
         return json(response, 200, { project: revised.project, spec_id: revised.spec.spec_id })
       }
       if (request.method === 'POST' && matched.suffix === '/ask') {
@@ -388,7 +397,7 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
           um plano para aprovar, o outro não muda nada.
         */
         const input = perguntaSchema.parse(await readJson(request))
-        const turn = await config.service.askAboutProject(actor, projectId, input.question)
+        const turn = await config.service.askAboutProject(actor, projectId, input.question, input.request_key)
         return json(response, 201, { turn })
       }
       if (request.method === 'POST' && matched.suffix === '/intake/answer') {

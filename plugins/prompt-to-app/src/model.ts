@@ -231,6 +231,29 @@ export const studioCreationKeySchema = z.object({
   request_key: z.string().min(16).max(128),
   org_id: z.string().min(1), tenant_id: z.string().min(1), user_id: z.string().min(1),
   fingerprint: z.string().min(1), project_id: z.string().min(1), created_at: timestamp,
+  /*
+    QUAL ENVIO esta reserva identifica.
+
+    A reserva nasceu para a CRIAÇÃO de tarefa, e ela continua sendo isso quando
+    o campo está ausente — registro antigo não muda de significado. Os outros
+    valores são os envios que acontecem DENTRO de uma tarefa já aberta e que
+    também não podem duplicar quando a resposta se perde: a pergunta e o pedido
+    de alteração.
+
+    Os dois campos são OPCIONAIS e a versão do domínio NÃO sobe, pelo mesmo
+    motivo de sempre neste esquema: `open()` falha com `version-mismatch` em
+    instalação que já rodou, e não existe passo de migração neste seam.
+  */
+  kind: z.enum(['criacao', 'pergunta', 'revisao']).optional(),
+  /*
+    O que o envio PRODUZIU — o turno da pergunta, a especificação da revisão.
+
+    Na criação o resultado é a própria tarefa, e por isso `project_id` bastava.
+    Num envio dentro da tarefa, `project_id` diz ONDE e este campo diz O QUÊ:
+    sem ele, reenviar depois de perder a resposta não teria como devolver a
+    mesma mensagem, só a mesma tarefa.
+  */
+  result_id: z.string().min(1).optional(),
 }).strict()
 
 export type StudioProject = z.infer<typeof studioProjectSchema>

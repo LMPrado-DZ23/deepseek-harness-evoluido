@@ -283,6 +283,37 @@ describe('prompt-to-app HTTP boundary', () => {
     expect(lido.next).toBeNull()
   })
 
+  it('o REENVIO com a mesma chave devolve a mesma mensagem, e nao cria outra', async () => {
+    // A resposta se perdeu e a pessoa apertou de novo: e o mesmo envio.
+    const f = await fixture()
+    const criada = await tarefaComResultado(f)
+    const corpo = JSON.stringify({ question: 'por que a montagem demorou?', request_key: 'chave-de-envio-0001' })
+    const primeira = await (await f.request(`/projects/${criada}/ask`, { method: 'POST', body: corpo })).json() as { turn: { turn_id: string } }
+    const segunda = await (await f.request(`/projects/${criada}/ask`, { method: 'POST', body: corpo })).json() as { turn: { turn_id: string } }
+    expect(segunda.turn.turn_id).toBe(primeira.turn.turn_id)
+    const lido = await (await f.request(`/projects/${criada}`)).json() as { turns: { question_id: string }[] }
+    expect(lido.turns.filter(turno => turno.question_id === 'pergunta-da-pessoa')).toHaveLength(1)
+  })
+
+  it('a mesma chave com texto diferente responde 409, e nao a mensagem antiga', async () => {
+    const f = await fixture()
+    const criada = await tarefaComResultado(f)
+    await f.request(`/projects/${criada}/ask`, { method: 'POST', body: JSON.stringify({ question: 'primeira pergunta', request_key: 'chave-de-envio-0001' }) })
+    const recusada = await f.request(`/projects/${criada}/ask`, { method: 'POST', body: JSON.stringify({ question: 'outra pergunta', request_key: 'chave-de-envio-0001' }) })
+    expect(recusada.status).toBe(409)
+  })
+
+  it('o REENVIO de um pedido de alteracao nao cria uma segunda revisao', async () => {
+    const f = await fixture()
+    const criada = await tarefaComResultado(f)
+    const corpo = JSON.stringify({ request: 'o botão de enviar precisa ficar verde', request_key: 'chave-de-envio-0002' })
+    const primeira = await (await f.request(`/projects/${criada}/revise`, { method: 'POST', body: corpo })).json() as { spec_id: string }
+    const segunda = await (await f.request(`/projects/${criada}/revise`, { method: 'POST', body: corpo })).json() as { spec_id: string }
+    expect(segunda.spec_id).toBe(primeira.spec_id)
+    const lido = await (await f.request(`/projects/${criada}`)).json() as { revisions: unknown[] }
+    expect(lido.revisions).toHaveLength(1)
+  })
+
   it('a rota de pergunta exige ESCRITA, porque ela escreve na conversa da tarefa', () => {
     const perguntar = PROMPT_TO_APP_ROUTE_CONTRACTS.find(route => route.path === '/projects/:projectId/ask')
     expect(perguntar).toMatchObject({ method: 'POST', access: 'authorized', permission: 'project.write', scope: 'project' })

@@ -366,6 +366,8 @@ declarada.
 
 | OS-111 | Regiao que rola sem foco: o painel reprovou na CI e passava aqui, porque a regra do axe depende do TAMANHO da janela | CI do commit 819b595, passo "Studio browser suite" (`scrollable-region-focusable`) | v1.0 | BETA | apps/studio-web/src/tarefa/TaskScreen.tsx, TaskScreen.spec.tsx | TaskScreen.spec.tsx 21, com um teste NOVO que confere o atributo sem depender de tamanho de janela; e2e do painel de uso nos QUATRO tamanhos; 1 sabotagem, PEGA | execucao: o axe cobra `scrollable-region-focusable` so quando a regiao REALMENTE rola, e isso depende do tamanho da janela. O painel de uso passou na maquina local, onde o conteudo cabia, e reprovou na CI, onde nao coube. A correcao e o `tabIndex={0}` que a conversa ja tinha — uma regiao que rola e nao recebe foco e inalcancavel por quem nao usa mouse. E o teste novo nao depende de tamanho nenhum: ele confere o atributo, porque descobrir isso pelo tamanho da janela de quem rodou e sorte, nao guarda | Esta e a SEXTA causa de CI da sequencia e a QUARTA da mesma familia: o resultado dependia do ambiente de quem roda. A diferenca e que desta vez a guarda nova nao depende mais dele | V7-B; T-35 fatias C e D |
 
+| OS-112 | Identidade de intencao dos ENVIOS dentro da tarefa: reenviar depois de perder a resposta nao duplica mensagem, revisao, plano nem aprovacao | Retomada do Prado 17/09/2026 item 2 ("diferencie a idempotencia da criacao da identidade dos envios posteriores") + D7-005 | v1.0 | BETA | plugins/prompt-to-app/src/creation-key.ts (`impressaoDoEnvio`, `desfechoDoEnvio`), model.ts (`kind` e `result_id` opcionais, versao do dominio NAO sobe), service.ts (`#comChaveDeEnvio`, `#perguntar`, `#revisar`, `recordTurn` e `saveSpec` com id reservado), http.ts (`request_key` nas duas rotas), apps/studio-web/src/creationIntent.ts (`impressaoDoEnvioLocal`, `intencaoPorImpressao`), App.tsx (um `ref` por tipo), tests/journey.spec.ts | identidade-do-envio.spec.ts 14; http.spec.ts 39 com 3 novos; creationIntent.spec.ts 10 com 5 novos; suite do plugin 1114; e2e: reenvio do proprio navegador com a mesma chave e UMA mensagem depois do RELOAD; 3 sabotagens, as tres PEGAS | execucao: a criacao ja tinha identidade de intencao desde UX-02; os envios seguintes nao. Quem perguntava, perdia a resposta e apertava de novo ficava com DUAS mensagens; quem pedia alteracao ficava com DUAS revisoes, cada uma com plano para aprovar e tentativa para gastar. Nao ha segunda contabilidade: e o MESMO mecanismo — reserva duravel gravada ANTES do efeito, mesmo mutex, mesmos tres desfechos. O TIPO entra na impressao porque perguntar e pedir alteracao sao gestos diferentes: sem ele, a mesma frase nos dois devolveria a resposta da pergunta no lugar da revisao. Provado: mesmo envio devolve o mesmo efeito, texto diferente na mesma chave e 409, dois envios concorrentes produzem um, a chave NAO e credencial, a queda entre as duas escritas termina o efeito com o MESMO identificador, e o reenvio NAO grava uma segunda aprovacao | `/plan/change` e `/intake/answer` ainda NAO tem identidade de envio: eles nao duplicam efeito visivel hoje, mas isso e argumento e nao prova, e fica como pendencia de V7-C. PERGUNTAR nao chama modelo nenhum — a resposta vem do estado persistido e o turno grava `route: null` e `model: null` para nao afirmar uma chamada que nao houve; no dia em que chamar, o registro de uso passa a ser obrigatorio nesse caminho, e isso esta anotado em T-35 | V7-C (`/plan/change` e `/intake/answer`); T-35 fatias C e D; V7-B |
+
 <!-- O livro mestre REGISTRA achados, e o achado da OS-39 e sobre numeros de ADR
      que nomeiam mais de uma decisao: citacao-ambigua-proposital -->
 
@@ -374,16 +376,16 @@ declarada.
 | estado | quantos |
 | --- | --- |
 | `STABLE` | 69 |
-| `BETA` | 161 |
+| `BETA` | 162 |
 | `NOT_PRESENT` | 33 |
 | `NOT_CONFIGURED` | 1 |
 | `NOT_EXECUTED` | 4 |
 | `FAILED` | 2 |
 
-**Total de requisitos rastreados: 270.**
+**Total de requisitos rastreados: 271.**
 
 | versao-alvo | quantos |
 | --- | --- |
-| v1.0 | 234 |
+| v1.0 | 235 |
 | v1.x | 33 |
 | v2 | 3 |

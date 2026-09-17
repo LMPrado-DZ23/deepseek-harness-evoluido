@@ -462,3 +462,50 @@ test('percorre as cinco etapas, muda privacidade e termina sem alegar publicaç�
   const accessibility = await new AxeBuilder({ page }).analyze()
   expect(accessibility.violations).toEqual([])
 })
+
+test('a resposta se perde, a pessoa reenvia, e a conversa continua com UMA mensagem', async ({ context, page }) => {
+  /*
+    A jornada que o defeito produzia: a pessoa pergunta, o servidor ACEITA, a
+    resposta se perde no caminho, ela aperta de novo — e ficava com duas
+    mensagens iguais na conversa.
+
+    Aqui o reenvio é feito do próprio navegador, com a chave de intenção que a
+    tela usa, e a conferência é depois de um RELOAD: o que importa não é o que a
+    tela desenhou, é o que ficou guardado.
+  */
+  const origin = 'http://studio.dz23.localhost:4179'
+  await context.addCookies([
+    { name: 'dz23_studio_session', value: 'e2e', url: origin },
+    { name: 'dz23_studio_csrf', value: 'csrf-e2e', url: origin },
+  ])
+  await context.addInitScript(() => { window.sessionStorage.setItem('dz23.studio.csrf.v1', 'csrf-e2e') })
+  await page.goto('/studio/')
+  await page.getByRole('button', { name: 'Página de apresentação' }).click()
+  await page.getByRole('button', { name: 'Continuar' }).click()
+  await answerIntake(page, INTAKE_ANSWERS)
+  await page.getByRole('button', { name: 'Montar meu plano' }).click()
+  await expect(page.getByText('Plano proposto', { exact: false })).toBeVisible({ timeout: 20_000 })
+  await page.getByRole('button', { name: 'Aprovar este plano' }).click()
+  await page.getByRole('button', { name: 'Iniciar criação' }).click()
+  await esperarResultado(page)
+
+  const projeto = new URL(page.url()).searchParams.get('projeto')!
+  const enviar = async () => page.evaluate(async ([id, chave]) => {
+    const resposta = await fetch(`/api/studio/apps/projects/${id}/ask`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json', 'x-dz23-csrf': 'csrf-e2e' },
+      body: JSON.stringify({ question: 'por que a montagem demorou?', request_key: chave }),
+    })
+    return resposta.status
+  }, [projeto, 'chave-de-envio-e2e-01'] as const)
+
+  expect(await enviar()).toBe(201)
+  // O reenvio: mesma intenção, mesma chave.
+  expect(await enviar()).toBe(201)
+
+  await page.reload()
+  await expect(page.getByLabel('Conversa desta tarefa')).toBeVisible({ timeout: 20_000 })
+  // UMA mensagem, e não duas. E a ordem do histórico continua a mesma.
+  await expect(page.getByText('por que a montagem demorou?')).toHaveCount(1)
+})

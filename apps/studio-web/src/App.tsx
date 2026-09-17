@@ -7,7 +7,7 @@ import t from './i18n/pt-BR.json'
 import { categoryGuess, type CategoryGuess } from './categorySuggestion'
 import type { RunStepRecord } from './buildSteps'
 import { projectNameFromBrief } from './projectName'
-import { intencaoDeEnvio, type IntencaoDeCriacao } from './creationIntent'
+import { impressaoDoEnvioLocal, intencaoDeEnvio, intencaoPorImpressao, type IntencaoDeCriacao } from './creationIntent'
 
 import { HEADLINE_CAPABILITY, capabilityLines, capabilityName, creationBlocked, currentStepIndex, permanentTruthKind, privacyNotice, resultSentence, routeReasonNotice, type PipelineResultState, type PrivacyProfile, type ProjectUiState } from './presentation'
 import { apiFailureMessage, apiFailureText, type ApiCallKind } from './pwa/apiFailure'
@@ -280,6 +280,19 @@ export function App() {
    * segunda.
    */
   const intencao = useRef<IntencaoDeCriacao | null>(null)
+  /*
+    A intenção dos envios DENTRO da tarefa — perguntar e pedir alteração.
+
+    Um `ref` por tipo, e não um só: a pessoa pode ter uma pergunta que falhou e
+    depois pedir uma alteração, e uma chave compartilhada faria a segunda ser
+    recusada por conflito com a primeira.
+
+    Pelo mesmo motivo da criação, eles SOBREVIVEM à falha: é isso que faz o
+    reenvio depois de um tempo esgotado chegar com a mesma chave e receber a
+    mesma mensagem, em vez da segunda.
+  */
+  const intencaoDaPergunta = useRef<IntencaoDeCriacao | null>(null)
+  const intencaoDaRevisao = useRef<IntencaoDeCriacao | null>(null)
   async function create() {
     if (!ready) { setError(t.idea.empty); return }
     await safely(async () => {
@@ -374,8 +387,13 @@ export function App() {
    */
   async function ajustar(texto: string) {
     if (projectId === null) return
+    const envio = intencaoPorImpressao(intencaoDaRevisao.current, impressaoDoEnvioLocal('revisao', projectId, texto))
+    intencaoDaRevisao.current = envio
     await safely(async () => {
-      await api(`/projects/${projectId}/revise`, { method: 'POST', body: JSON.stringify({ request: texto }) })
+      await api(`/projects/${projectId}/revise`, {
+        method: 'POST', body: JSON.stringify({ request: texto, request_key: envio.chave }),
+      })
+      intencaoDaRevisao.current = null
       setResult(null); setRunReport(null); setCheckpoints(null)
       await refreshDetalhes()
     })
@@ -391,8 +409,15 @@ export function App() {
    */
   async function perguntar(texto: string) {
     if (projectId === null) return
+    const envio = intencaoPorImpressao(intencaoDaPergunta.current, impressaoDoEnvioLocal('pergunta', projectId, texto))
+    intencaoDaPergunta.current = envio
     await safely(async () => {
-      await api(`/projects/${projectId}/ask`, { method: 'POST', body: JSON.stringify({ question: texto }) })
+      await api(`/projects/${projectId}/ask`, {
+        method: 'POST', body: JSON.stringify({ question: texto, request_key: envio.chave }),
+      })
+      // A mensagem existe: a intenção terminou. A próxima pergunta leva chave
+      // nova — senão a segunda seria recusada por conflito com a primeira.
+      intencaoDaPergunta.current = null
       await refreshDetalhes()
     })
   }

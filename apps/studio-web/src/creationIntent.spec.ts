@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { impressaoLocal, intencaoDeEnvio, novaChave } from './creationIntent'
+import { impressaoDoEnvioLocal, impressaoLocal, intencaoDeEnvio, intencaoPorImpressao, novaChave } from './creationIntent'
 
 const PEDIDO = { name: 'Clínica', original_brief: 'quero uma página', category: 'landing-page', privacy: 'privado-local' }
 
@@ -39,5 +39,39 @@ describe('a identidade da intenção de envio', () => {
     expect(app).toContain('request_key: envio.chave')
     expect(app).toContain('intencao.current = envio')
     expect(app).toContain('intencao.current = null')
+  })
+})
+
+describe('a intenção de um envio DENTRO da tarefa', () => {
+  it('reenviar o MESMO texto reaproveita a chave — é a mesma intenção', () => {
+    // O reenvio depois de um tempo esgotado é o mesmo envio. Chave nova ali é
+    // o defeito que isto conserta, com um passo a mais.
+    const impressao = impressaoDoEnvioLocal('pergunta', 'proj-1', 'por que falhou?')
+    const primeira = intencaoPorImpressao(null, impressao, () => 'chave-um-aaaaaaaaaaaa')
+    const segunda = intencaoPorImpressao(primeira, impressao, () => 'chave-dois-bbbbbbbbb')
+    expect(segunda.chave).toBe(primeira.chave)
+  })
+
+  it('corrigir o texto gera chave NOVA — é outro envio', () => {
+    const primeira = intencaoPorImpressao(null, impressaoDoEnvioLocal('pergunta', 'proj-1', 'por que falou?'), () => 'chave-um-aaaaaaaaaaaa')
+    const segunda = intencaoPorImpressao(primeira, impressaoDoEnvioLocal('pergunta', 'proj-1', 'por que falhou?'), () => 'chave-dois-bbbbbbbbb')
+    expect(segunda.chave).not.toBe(primeira.chave)
+  })
+
+  it('espaço a mais NÃO é outro envio', () => {
+    expect(impressaoDoEnvioLocal('pergunta', 'p', '  por que   falhou?  '))
+      .toBe(impressaoDoEnvioLocal('pergunta', 'p', 'por que falhou?'))
+  })
+
+  it('a MESMA frase como pergunta e como alteração são intenções diferentes', () => {
+    // Senão, quem perguntasse e depois pedisse a mesma coisa receberia a
+    // resposta da pergunta no lugar da revisão.
+    expect(impressaoDoEnvioLocal('pergunta', 'p', 'trocar o cabeçalho'))
+      .not.toBe(impressaoDoEnvioLocal('revisao', 'p', 'trocar o cabeçalho'))
+  })
+
+  it('a mesma frase em tarefas diferentes são intenções diferentes', () => {
+    expect(impressaoDoEnvioLocal('pergunta', 'p1', 'por quê?'))
+      .not.toBe(impressaoDoEnvioLocal('pergunta', 'p2', 'por quê?'))
   })
 })

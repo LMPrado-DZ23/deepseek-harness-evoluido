@@ -17,7 +17,8 @@ import { listAppSpecs, putAppSpec, type AppSpecRecordStore } from './app-spec-st
 import { listPlans, putPlanRecord, type PlanRecordStore } from './plan-store.js'
 import { listEvidence, putEvidenceRecord, type EvidenceRecordStore } from './evidence-store.js'
 import {
-  chaveAceitavel, chaveArmazenada, desfechoDaChave, impressaoDaCriacao, reservaDoEscopo,
+  chaveAceitavel, chaveArmazenada, desfechoDaChave, desfechoDoEnvio, impressaoDaCriacao,
+  impressaoDoEnvio, reservaDoEscopo, type TipoDeEnvio,
 } from './creation-key.js'
 import { latestGreenCheckpoint, noGreenReason, runCheckpoints, type CheckpointBlocker, type RunCheckpoint, NO_ATTEMPT } from './checkpoint.js'
 import { PERGUNTA_QUESTION_ID, MAX_PERGUNTA, MIN_PERGUNTA, perguntaNormalizada, respostaEmTexto, respostaSobreATarefa } from './pergunta.js'
@@ -228,6 +229,74 @@ export class PromptToAppService {
     })
   }
 
+  /**
+   * A identidade de UM ENVIO dentro de uma tarefa já aberta.
+   *
+   * É o mesmo mecanismo da criação — reserva DURÁVEL gravada ANTES do efeito,
+   * serializada pelo mutex, com três desfechos — e não um segundo mecanismo.
+   * Duas contabilidades de intenção discordariam no primeiro conserto de uma
+   * delas, e a que diverge em silêncio é sempre a que alguém lê.
+   *
+   * O que ele garante, e o teste confere um por um:
+   *
+   * - mesma chave e mesmo texto devolvem o MESMO efeito, sem produzir outro;
+   * - mesma chave e texto diferente é `CONFLITO`, e não o efeito antigo
+   *   devolvido para um pedido que ninguém fez;
+   * - a reserva é do ESCOPO de quem pede: chave não é credencial;
+   * - se o processo cair entre a reserva e o efeito, o envio seguinte termina
+   *   o efeito com o MESMO identificador, em vez de criar um segundo.
+   *
+   * Sem `requestKey` o comportamento é o de sempre — envia. Isso é para a
+   * pessoa que usa a API direto, e não uma porta de fuga da tela.
+   * @param actor - quem envia.
+   * @param projectId - a tarefa.
+   * @param tipo - pergunta ou pedido de alteração.
+   * @param texto - o texto JÁ normalizado, que é o que entra na impressão.
+   * @param requestKey - o identificador da intenção, quando houver.
+   * @param executar - produz o efeito e devolve o identificador dele.
+   * @param reler - devolve o efeito já produzido, ou `undefined` se ele sumiu.
+   * @returns o efeito.
+   */
+  async #comChaveDeEnvio<T>(
+    actor: PromptToAppActor,
+    projectId: string,
+    tipo: TipoDeEnvio,
+    texto: string,
+    requestKey: string | undefined,
+    executar: (idReservado: string | undefined) => Promise<{ readonly id: string, readonly valor: T }>,
+    reler: (resultId: string) => Promise<T | undefined>,
+  ): Promise<T> {
+    if (requestKey === undefined || this.#repository.creationKeys === undefined || this.#repository.putCreationKey === undefined) {
+      return (await executar(undefined)).valor
+    }
+    if (!chaveAceitavel(requestKey)) throw new PromptToAppError('INVALID', t('errors.creationKeyFormat'))
+    const escopo = { orgId: actor.orgId, tenantId: actor.tenantId, userId: actor.userId }
+    const fingerprint = impressaoDoEnvio({ tipo, projectId, texto })
+    return this.#creationMutex.run(chaveArmazenada(escopo, requestKey), async () => {
+      const reserva = this.#repository.creationKeys!().find(
+        registro => registro.request_key === requestKey && reservaDoEscopo(registro, escopo),
+      )
+      const desfecho = desfechoDoEnvio(reserva, fingerprint)
+      if (desfecho.kind === 'CONFLITO') throw new PromptToAppError('CONFLICT', t('errors.creationKeyConflict'))
+      if (desfecho.kind === 'REUSAR' && desfecho.resultId !== undefined) {
+        // A releitura passa pela MESMA autorização: recuperar a resposta não
+        // pode virar atalho para ler o que é de outra pessoa.
+        const existente = await reler(desfecho.resultId)
+        if (existente !== undefined) return existente
+        // A reserva ficou e o efeito não: o processo caiu entre as duas
+        // escritas. Termina com o MESMO identificador.
+        return (await executar(desfecho.resultId)).valor
+      }
+      const idReservado = this.#createId()
+      await this.#repository.putCreationKey!({
+        request_key: requestKey, org_id: actor.orgId, tenant_id: actor.tenantId, user_id: actor.userId,
+        fingerprint, project_id: projectId, kind: tipo, result_id: idReservado,
+        created_at: this.#now().toISOString(),
+      })
+      return (await executar(idReservado)).valor
+    })
+  }
+
   async #insertProject(actor: PromptToAppActor, input: Pick<StudioProject, 'name' | 'original_brief' | 'category' | 'privacy'>, projectId: string): Promise<StudioProject> {
     const now = this.#now().toISOString()
     const value: StudioProject = {
@@ -272,10 +341,23 @@ export class PromptToAppService {
     return rows.filter(value => value.project_id === projectId && this.#sameScope(actor, value))
   }
 
-  async recordTurn(actor: PromptToAppActor, projectId: string, input: Pick<StudioIntakeTurn, 'question_id' | 'question' | 'answer' | 'recommended' | 'route' | 'model'>): Promise<StudioIntakeTurn> {
+  async recordTurn(
+    actor: PromptToAppActor,
+    projectId: string,
+    input: Pick<StudioIntakeTurn, 'question_id' | 'question' | 'answer' | 'recommended' | 'route' | 'model'>,
+    /*
+      O identificador JÁ RESERVADO, quando o envio tem chave de intenção.
+
+      Ele existe para o caso em que o processo cai entre gravar a reserva e
+      gravar o turno: o reenvio termina o efeito com o MESMO identificador, em
+      vez de deixar a reserva apontando para um turno que nunca existiu e criar
+      um segundo. Ausente, o identificador nasce aqui, como sempre.
+    */
+    turnId?: string,
+  ): Promise<StudioIntakeTurn> {
     this.#authorize(actor, 'project.write'); this.project(actor, projectId)
     const value: StudioIntakeTurn = {
-      turn_id: this.#createId(), project_id: projectId, org_id: actor.orgId, tenant_id: actor.tenantId,
+      turn_id: turnId ?? this.#createId(), project_id: projectId, org_id: actor.orgId, tenant_id: actor.tenantId,
       ...input, created_at: this.#now().toISOString(),
     }
     if (this.#intakeTurnStore === undefined) await this.#repository.putTurn(value)
@@ -303,11 +385,33 @@ export class PromptToAppService {
    * @param pergunta - o texto, como a pessoa escreveu.
    * @returns o lance gravado, com a resposta já dentro.
    */
-  async askAboutProject(actor: PromptToAppActor, projectId: string, pergunta: string): Promise<StudioIntakeTurn> {
+  async askAboutProject(actor: PromptToAppActor, projectId: string, pergunta: string, requestKey?: string): Promise<StudioIntakeTurn> {
     this.#authorize(actor, 'project.write')
     const project = this.project(actor, projectId)
     const texto = perguntaNormalizada(pergunta)
     if (texto === null) throw new PromptToAppError('INVALID', t('errors.perguntaInvalida', { min: MIN_PERGUNTA, max: MAX_PERGUNTA }))
+    return this.#comChaveDeEnvio(
+      actor, projectId, 'pergunta', texto, requestKey,
+      async idReservado => {
+        const turno = await this.#perguntar(actor, project, projectId, texto, idReservado)
+        return { id: turno.turn_id, valor: turno }
+      },
+      async resultId => (await this.intakeTurns(actor, projectId)).find(turno => turno.turn_id === resultId),
+    )
+  }
+
+  /**
+   * A gravação da pergunta, já sem nenhuma decisão de identidade dentro.
+   * @param actor - quem pergunta.
+   * @param project - a tarefa, já autorizada.
+   * @param projectId - o identificador dela.
+   * @param texto - a pergunta normalizada.
+   * @param turnId - o identificador reservado, quando há chave de envio.
+   * @returns o lance gravado.
+   */
+  async #perguntar(
+    actor: PromptToAppActor, project: StudioProject, projectId: string, texto: string, turnId: string | undefined,
+  ): Promise<StudioIntakeTurn> {
     const execucoes = this.runs(actor, projectId)
     const corrente = [...execucoes].sort((esquerda, direita) =>
       direita.started_at.localeCompare(esquerda.started_at) || direita.attempt - esquerda.attempt)[0] ?? null
@@ -341,17 +445,21 @@ export class PromptToAppService {
       // dono trata exatamente disso.
       route: null,
       model: null,
-    })
+    }, turnId)
   }
 
-  async saveSpec(actor: PromptToAppActor, projectId: string, spec: AppSpecV1, origin: 'intake' | 'edit'): Promise<StudioAppSpecRecord> {
+  async saveSpec(
+    actor: PromptToAppActor, projectId: string, spec: AppSpecV1, origin: 'intake' | 'edit',
+    /** O identificador JÁ RESERVADO, quando o envio tem chave. Ver `recordTurn`. */
+    specId?: string,
+  ): Promise<StudioAppSpecRecord> {
     this.#authorize(actor, 'project.write'); this.project(actor, projectId)
     const rows = this.#appSpecStore === undefined
       ? this.#repository.specs()
       : await listAppSpecs(this.#appSpecStore, { orgId: actor.orgId, tenantId: actor.tenantId })
     const previous = rows.filter(value => value.project_id === projectId && this.#sameScope(actor, value))
     const value: StudioAppSpecRecord = {
-      spec_id: this.#createId(), project_id: projectId, org_id: actor.orgId, tenant_id: actor.tenantId,
+      spec_id: specId ?? this.#createId(), project_id: projectId, org_id: actor.orgId, tenant_id: actor.tenantId,
       version: previous.length + 1, app_spec: spec, sha256: appSpecHash(spec), origin, created_at: this.#now().toISOString(),
     }
     if (this.#appSpecStore === undefined) await this.#repository.putSpec(value)
@@ -590,8 +698,37 @@ export class PromptToAppService {
    * @param pedido - o texto escrito no compositor da conversa.
    * @returns o projeto de volta em `SPEC_READY` e a especificação nova.
    */
-  async reviseProject(actor: PromptToAppActor, projectId: string, pedido: string): Promise<{ readonly project: StudioProject; readonly spec: StudioAppSpecRecord }> {
+  async reviseProject(
+    actor: PromptToAppActor, projectId: string, pedido: string, requestKey?: string,
+  ): Promise<{ readonly project: StudioProject; readonly spec: StudioAppSpecRecord }> {
     this.#authorize(actor, 'project.write')
+    this.project(actor, projectId)
+    return this.#comChaveDeEnvio(
+      actor, projectId, 'revisao', pedido.trim().replace(/\s+/gu, ' '), requestKey,
+      async idReservado => {
+        const feito = await this.#revisar(actor, projectId, pedido, idReservado)
+        return { id: feito.spec.spec_id, valor: feito }
+      },
+      async resultId => {
+        // A releitura devolve a MESMA revisão, reautorizada: a especificação
+        // gravada com aquele identificador, e o estado da tarefa agora.
+        const spec = (await this.specs(actor, projectId)).find(registro => registro.spec_id === resultId)
+        return spec === undefined ? undefined : { project: this.project(actor, projectId), spec }
+      },
+    )
+  }
+
+  /**
+   * A revisão em si, já sem nenhuma decisão de identidade dentro.
+   * @param actor - quem pede.
+   * @param projectId - a tarefa.
+   * @param pedido - o que a pessoa escreveu.
+   * @param specId - o identificador reservado, quando há chave de envio.
+   * @returns a tarefa e a especificação nova.
+   */
+  async #revisar(
+    actor: PromptToAppActor, projectId: string, pedido: string, specId?: string,
+  ): Promise<{ readonly project: StudioProject; readonly spec: StudioAppSpecRecord }> {
     const project = this.project(actor, projectId)
     // Os dois erros do módulo viram erro DESTE serviço aqui, e não na camada
     // HTTP: quem chama o serviço direto — o assistente, um teste de domínio —
@@ -611,7 +748,7 @@ export class PromptToAppService {
     // A especificação é gravada ANTES da transição, e a ordem é a mesma lição
     // da reserva de criação: com o estado mudado primeiro, uma queda no meio
     // deixaria a tarefa aberta para planejar sem que o pedido tivesse entrado.
-    const spec = await this.saveSpec(actor, projectId, revisada, 'edit')
+    const spec = await this.saveSpec(actor, projectId, revisada, 'edit', specId)
     const atual = this.project(actor, projectId)
     const updated: StudioProject = { ...atual, state: 'SPEC_READY', updated_at: this.#now().toISOString() }
     await this.#repository.putProject(updated)
