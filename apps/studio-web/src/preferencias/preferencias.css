@@ -119,3 +119,26 @@
   .dz-preferencias { grid-template-columns: 1fr; grid-template-rows: auto 1fr; height: 90vh; }
   .dz-preferencias-lista { border-right: 0; border-bottom: 1px solid var(--dz-border); max-height: 34vh; }
 }
+
+.dz-preferencias-conta-topo {
+  display: flex;
+  align-items: center;
+  gap: var(--dz-2);
+  margin: 0 0 var(--dz-4);
+  padding: 0 var(--dz-2);
+  color: var(--dz-text);
+  font-weight: 600;
+}
+
+.dz-preferencias-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid var(--dz-border);
+  border-radius: 999px;
+  background: var(--dz-surface-active);
+  color: var(--dz-accent);
+  font-size: 0.8125rem;
+}

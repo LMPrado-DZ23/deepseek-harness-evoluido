@@ -88,6 +88,11 @@ test.describe('acessibilidade do fluxo principal', () => {
       não há controle interativo dentro de uma seção indisponível.
     */
     await page.goto('/studio/')
+    // Abaixo de 1024px o trilho sai do fluxo, e a conta mora no rodapé DELE: a
+    // porta é o botão de menu. Sem isto, este teste provava as Preferências só
+    // na mesa — e a referência é a mesma experiência adaptada, não outra.
+    const menu = page.getByRole('button', { name: 'Abrir o menu', exact: true })
+    if (await menu.isVisible()) await menu.click()
     await page.getByRole('button', { name: 'Preferências', exact: true }).click()
     const modal = page.getByRole('dialog', { name: 'Preferências' })
     await expect(modal).toBeVisible()

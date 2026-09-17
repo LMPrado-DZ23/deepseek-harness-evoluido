@@ -85,7 +85,22 @@ Para MEDIR de propósito a diferença entre navegadores, declare junto
 `DZ23_CHROMIUM_OUTRA_COMPILACAO=sim` — aí está dito em voz alta que o que se
 está medindo é outra coisa.
 
-São 120 testes em quatro tamanhos de tela. Se um servidor de teste ficar
+São 121 testes em quatro tamanhos de tela.
+
+### As capturas da entrega
+
+A jornada capturada roda sempre; o que muda é ONDE o PNG cai. Só com a variável
+abaixo ele vai para `apps/studio-web/capturas/`, que é versionado:
+
+```bash
+cd apps/studio-web
+DZ23_CAPTURAS=sim npx playwright test --project=gravacao
+```
+
+Sem ela — o caso da CI —, a captura sai na pasta de resultados do Playwright.
+Isso existe porque um PNG é diferente a cada execução, e o passo final da CI
+("Refuse unexpected build mutations") reprova, com razão, quando a árvore muda
+sozinha. Se um servidor de teste ficar
 pendurado, mate-o com a forma em colchete — sem ela o `pkill` casa com o
 próprio comando e mata a si mesmo:
 

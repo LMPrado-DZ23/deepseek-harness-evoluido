@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { X } from 'lucide-react'
 import preferencias from '../i18n/preferencias.pt-BR.json'
+import { iniciaisDaConta } from '../shell/tarefasDoTrilho'
 import { podeOperar, secaoInicial, secoesDePreferencias, type ContextoDasPreferencias, type GrupoDePreferencias, type SecaoDePreferencias } from './preferencias'
 
 /**
@@ -47,6 +48,15 @@ export function Preferencias({ contexto, aoFechar, conta, notificacao }: {
   return <div className="dz-preferencias-fundo" onClick={evento => { if (evento.target === evento.currentTarget) aoFechar() }}>
     <div className="dz-preferencias" role="dialog" aria-modal="true" aria-label={preferencias.titulo} tabIndex={-1} ref={dialogo}>
       <nav className="dz-preferencias-lista" aria-label={preferencias.navegacao}>
+        {/*
+          O CABEÇALHO DA CONTA, como F04 o mostra no alto da coluna. O que NÃO
+          vem junto é o campo de busca da referência: não há serviço de busca, e
+          um campo que não busca é o botão mudo que a decisão proíbe.
+        */}
+        <p className="dz-preferencias-conta-topo">
+          <span className="dz-preferencias-avatar" aria-hidden="true">{iniciaisDaConta(conta ?? null) ?? preferencias.avatarSemNome}</span>
+          <span>{conta === null || conta === undefined || conta.trim() === '' ? preferencias.contaSemNome : conta}</span>
+        </p>
         {grupos.map(grupo => <div key={grupo} className="dz-preferencias-grupo">
           <p className="dz-preferencias-grupo-titulo">{preferencias.grupos[grupo]}</p>
           <ul>

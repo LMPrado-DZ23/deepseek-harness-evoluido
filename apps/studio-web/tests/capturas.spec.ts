@@ -18,12 +18,29 @@ import { abrirDetalhamento, esperarResultado, fecharDetalhamento } from './resul
  * de teste; NÃO é prova de geração com IA real nem do perfil Cordis, que
  * continuam em colunas próprias e bloqueadas neste ambiente.
  */
-const PASTA = 'capturas'
+/*
+  ONDE A CAPTURA CAI — e por que isso virou um defeito de CI.
+
+  As capturas são ENTREGA: elas acompanham o commit e são a prova da versão
+  nova. Por isso `capturas/` é versionado. Só que a CI roda esta mesma suíte, e
+  o passo final dela — "Refuse unexpected build mutations" — reprova quando a
+  árvore muda sozinha. Um PNG é diferente a cada execução (antialiasing,
+  cursor, um pixel de fonte), então rodar o teste na CI reescrevia arquivos
+  versionados e a CI reprovava com razão.
+
+  A saída não é parar de capturar nem desligar o passo que protege a árvore. É
+  dizer QUANDO a captura é entrega: com `DZ23_CAPTURAS=sim`, que é o que se usa
+  ao preparar a entrega. Sem a variável — que é o caso da CI —, a jornada roda
+  inteira e a captura cai na pasta de resultados do Playwright, que não é
+  versionada. A prova de percurso continua; a mutação da árvore acaba.
+*/
+const ENTREGA = process.env.DZ23_CAPTURAS === 'sim'
+const PASTA = ENTREGA ? 'capturas' : undefined
 const VIEWPORT = { width: 1280, height: 800 }
 
 test('captura a jornada: home → tarefa → resultado → continuação', async ({ context, page }, testInfo) => {
   test.setTimeout(180_000)
-  await mkdir(PASTA, { recursive: true })
+  if (PASTA !== undefined) await mkdir(PASTA, { recursive: true })
   await page.setViewportSize(VIEWPORT)
   const origin = 'http://studio.dz23.localhost:4179'
   await context.addCookies([
@@ -33,7 +50,10 @@ test('captura a jornada: home → tarefa → resultado → continuação', async
   await context.addInitScript(() => { window.sessionStorage.setItem('dz23.studio.csrf.v1', 'csrf-e2e') })
 
   const tirar = async (nome: string) => {
-    await page.screenshot({ path: `${PASTA}/${nome}.png` })
+    // `testInfo.outputPath` é a pasta de resultados DESTA execução, e ela não é
+    // versionada: sem `DZ23_CAPTURAS=sim` a captura sai de lá e a árvore fica
+    // como estava.
+    await page.screenshot({ path: PASTA === undefined ? testInfo.outputPath(`${nome}.png`) : `${PASTA}/${nome}.png` })
     testInfo.annotations.push({ type: 'captura', description: `${nome}.png` })
   }
 
@@ -89,6 +109,18 @@ test('captura a jornada: home → tarefa → resultado → continuação', async
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible({ timeout: 20_000 })
     await tirar(nome)
   }
+
+  // As PREFERÊNCIAS (F04/F05), que a decisão visual pede na gravação. Duas
+  // capturas de propósito: uma seção que funciona e uma que declara pendência —
+  // a segunda é a que prova que não há botão mudo.
+  await page.goto('/studio/')
+  await page.getByRole('button', { name: 'Preferências', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: 'Preferências' })).toBeVisible()
+  await tirar('13-preferencias-conta')
+  await page.getByRole('dialog', { name: 'Preferências' }).getByRole('button', { name: 'Tema', exact: true }).click()
+  await expect(page.getByText('Ainda não disponível')).toBeVisible()
+  await tirar('14-preferencias-pendencia')
+  await page.keyboard.press('Escape')
 
   // O celular é ADAPTAÇÃO DZ23, e não uma imagem fornecida pela referência:
   // o vídeo não demonstra versão móvel.

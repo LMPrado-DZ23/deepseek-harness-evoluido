@@ -36,5 +36,6 @@
   "verDestino": "Abrir",
   "contaNome": "Nome",
   "contaSemNome": "Sua sessão não tem nome registrado.",
-  "pendenciaRotulo": "Ainda não disponível"
+  "pendenciaRotulo": "Ainda não disponível",
+  "avatarSemNome": "—"
 }
