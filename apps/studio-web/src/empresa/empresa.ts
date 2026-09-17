@@ -187,3 +187,42 @@ export function versoesAnteriores<T extends { readonly version: number }>(versoe
   return versoes.filter(versao => versao.version !== vigente.version)
     .sort((esquerda, direita) => direita.version - esquerda.version)
 }
+
+/** O pedido de uma tarefa criada a partir da empresa. */
+export interface RascunhoDaTarefa {
+  readonly pedido: string
+  readonly category: string
+}
+
+export const TAREFA_VAZIA: RascunhoDaTarefa = { pedido: '', category: 'landing-page' }
+
+/**
+ * Por que esta tarefa ainda não pode ser criada, ou `null`.
+ *
+ * A tela recusa ANTES do envio pelo mesmo motivo de sempre: um botão ligado que
+ * recusa depois ensina a pessoa a desconfiar do produto.
+ * @param rascunho - o pedido em edição.
+ * @returns a chave do texto da recusa, ou `null`.
+ */
+export function recusaDaTarefa(rascunho: RascunhoDaTarefa): 'erroPedido' | null {
+  return textoNormalizado(rascunho.pedido).length < 3 ? 'erroPedido' : null
+}
+
+/**
+ * O nome de cada tarefa vinculada, pelo identificador dela.
+ *
+ * Uma tarefa que o vínculo aponta e que a lista de tarefas não traz NÃO some da
+ * tela e não ganha um nome inventado: ela vira `null`, e quem desenha diz que o
+ * nome não está disponível. As duas alternativas são piores — esconder a linha
+ * apagaria um vínculo que existe, e inventar um nome mentiria sobre ele.
+ * @param vinculos - os vínculos da empresa.
+ * @param projetos - as tarefas do espaço de trabalho.
+ * @returns o nome de cada vínculo, na ordem em que eles vieram.
+ */
+export function nomesDasTarefas<V extends { readonly project_id: string }>(
+  vinculos: readonly V[],
+  projetos: readonly { readonly project_id: string; readonly name: string }[],
+): readonly (string | null)[] {
+  const porId = new Map(projetos.map(projeto => [projeto.project_id, projeto.name]))
+  return vinculos.map(vinculo => porId.get(vinculo.project_id) ?? null)
+}

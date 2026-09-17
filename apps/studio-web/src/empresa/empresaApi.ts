@@ -43,6 +43,21 @@ export interface RegistroDePlano {
   readonly created_at: string
 }
 
+export interface VinculoDeTarefa {
+  readonly link_id: string
+  readonly business_id: string
+  readonly project_id: string
+  readonly plan_version: number
+  readonly created_by: string
+  readonly created_at: string
+}
+
+export interface TarefaCriada {
+  readonly project_id: string
+  readonly name: string
+  readonly state: string
+}
+
 export interface NovaEmpresa {
   readonly nome: string
   readonly origem: 'criada' | 'vinculada'
@@ -74,11 +89,24 @@ export function createEmpresaApi(transport: HubTransport = transporteDoNavegador
     return body as T
   }
   return {
+    /**
+     * As tarefas do espaço de trabalho, pelo NOME atual delas.
+     *
+     * O vínculo guarda só o identificador, e isso é deliberado: gravar o nome
+     * junto criaria uma cópia que envelhece na primeira vez que alguém
+     * renomeasse a tarefa, e a empresa passaria a listar um nome que não existe
+     * mais em lugar nenhum. O nome é lido de quem é dono dele.
+     */
+    projetos: () => call<{ projects: { project_id: string; name: string; state: string }[] }>('/projects').then(valor => valor.projects),
     empresas: () => call<{ businesses: Empresa[] }>('/businesses').then(valor => valor.businesses),
     empresa: (businessId: string) => call<{ business: Empresa; plans: RegistroDePlano[] }>(`/businesses/${encodeURIComponent(businessId)}`),
     criar: (entrada: NovaEmpresa) => call<{ business: Empresa; plan: RegistroDePlano }>('/businesses', { method: 'POST', body: JSON.stringify(entrada) }),
     revisarPlano: (businessId: string, plano: PlanoDeNegocio) =>
       call<{ plan: RegistroDePlano }>(`/businesses/${encodeURIComponent(businessId)}/plan`, { method: 'POST', body: JSON.stringify({ plano }) }).then(valor => valor.plan),
+    tarefas: (businessId: string) =>
+      call<{ tasks: VinculoDeTarefa[] }>(`/businesses/${encodeURIComponent(businessId)}/tasks`).then(valor => valor.tasks),
+    criarTarefa: (businessId: string, entrada: { readonly pedido: string; readonly category: string; readonly privacy: string; readonly request_key: string }) =>
+      call<{ task: TarefaCriada; link: VinculoDeTarefa }>(`/businesses/${encodeURIComponent(businessId)}/tasks`, { method: 'POST', body: JSON.stringify(entrada) }),
     arquivar: (businessId: string) =>
       call<{ business: Empresa }>(`/businesses/${encodeURIComponent(businessId)}/archive`, { method: 'POST', body: '{}' }).then(valor => valor.business),
   }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { planoNormalizado, planoVigente, planosIguais, proximaVersao, recusaDePlano, textoNormalizado } from '../src/regras.js'
+import { briefingDaEmpresa, nomeDaTarefa, planoNormalizado, planoVigente, planosIguais, proximaVersao, recusaDePlano, textoNormalizado } from '../src/regras.js'
 import type { Empresa, PlanoDeNegocio, RegistroDePlano } from '../src/model.js'
 
 const AGORA = '2026-09-17T12:00:00.000Z'
@@ -94,5 +94,58 @@ describe('a normalização do que a pessoa escreveu', () => {
   it('a ORDEM dos limites que sobraram é a que a pessoa escreveu', () => {
     const normalizado = planoNormalizado({ ...PLANO, limites: ['zebra', 'abacate'] })
     expect(normalizado.limites).toEqual(['zebra', 'abacate'])
+  })
+})
+
+describe('o briefing de uma tarefa da empresa', () => {
+  it('o PEDIDO da pessoa vem primeiro, e o plano é o contexto', () => {
+    // A ordem não é estética: é o pedido dela que decide o que construir.
+    const texto = briefingDaEmpresa(empresa(), PLANO, 'uma página para receber encomendas')
+    expect(texto.startsWith('uma página para receber encomendas')).toBe(true)
+  })
+
+  it('leva objetivo, público, oferta e o nome da empresa', () => {
+    const texto = briefingDaEmpresa(empresa(), PLANO, 'uma página')
+    expect(texto).toContain('Bolos da Ana')
+    expect(texto).toContain('vender bolos caseiros por encomenda no bairro')
+    expect(texto).toContain('moradores do bairro')
+    expect(texto).toContain('bolo de 1kg por encomenda com 2 dias de antecedência')
+  })
+
+  it('cada limite entra como LIMITE, e não como enfeite', () => {
+    const texto = briefingDaEmpresa(empresa(), PLANO, 'uma página')
+    expect(texto).toContain('O que a empresa NÃO faz, e o aplicativo não pode prometer:')
+    expect(texto).toContain('- não entrega fora do bairro')
+    expect(texto).toContain('- não aceita encomenda para o mesmo dia')
+  })
+
+  it('oferta VAZIA não vira um rótulo com nada depois', () => {
+    // "Ainda não decidi" é honesto; "O que ela entrega:" seguido de nada
+    // mandaria o gerador inventar uma oferta que ninguém decidiu.
+    const texto = briefingDaEmpresa(empresa(), { ...PLANO, oferta: '' }, 'uma página')
+    expect(texto).not.toContain('O que ela entrega')
+  })
+
+  it('sem limite nenhum, não escreve o cabeçalho dos limites', () => {
+    const texto = briefingDaEmpresa(empresa(), { ...PLANO, limites: [] }, 'uma página')
+    expect(texto).not.toContain('NÃO faz')
+  })
+})
+
+describe('o nome da tarefa', () => {
+  it('é o pedido, quando ele serve', () => {
+    expect(nomeDaTarefa('uma página para encomendas', 'Bolos da Ana')).toBe('uma página para encomendas')
+  })
+
+  it('CORTA em 120, porque o domínio da tarefa recusa mais que isso', () => {
+    // Sem o corte, a recusa viria do servidor depois de tudo montado, e a
+    // pessoa leria como defeito o que é só um teto.
+    const nome = nomeDaTarefa('a'.repeat(400), 'Bolos da Ana')
+    expect(nome.length).toBeLessThanOrEqual(120)
+    expect(nome.endsWith('…')).toBe(true)
+  })
+
+  it('pedido curto demais cai no nome da EMPRESA, e não numa string vazia', () => {
+    expect(nomeDaTarefa('  ', 'Bolos da Ana')).toBe('Tarefa de Bolos da Ana')
   })
 })

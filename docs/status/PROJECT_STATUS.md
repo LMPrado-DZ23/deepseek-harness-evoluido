@@ -37,9 +37,9 @@ Todos reproduzíveis pelo comando ao lado.
 | --- | --- | --- |
 | typecheck | PASS | `pnpm typecheck` |
 | build | PASS | `pnpm build` |
-| suíte raiz | 3916 testes, 226 arquivos, 0 falha (17/09, após BUS-01) | `pnpm -w test` |
-| suíte studio-web | 701 testes (17/09, após BUS-01) | `cd apps/studio-web && npx vitest run` |
-| e2e navegador | 142 aprovados, 0 reprovados, 3 pulados (17/09, quatro tamanhos) | `cd apps/studio-web && npx playwright test` |
+| suíte raiz | 3941 testes, 226 arquivos, 0 falha (17/09, após BUS-02) | `pnpm -w test` |
+| suíte studio-web | 708 testes (17/09, após BUS-02) | `cd apps/studio-web && npx vitest run` |
+| e2e navegador | 147 aprovados, 0 reprovados, 3 pulados (17/09, quatro tamanhos) | `cd apps/studio-web && npx playwright test` |
 | PostgreSQL real | **65 testes, `POSTGRES_GATE=PASS`** (12/09, PostgreSQL 16.13 local) | `pnpm test:postgres` |
 | portões | **26/26 PASS** | ver abaixo |
 
@@ -573,6 +573,27 @@ produto existe para não fazer.
     execução e ficariam de fora do backup.
 
     Os outros **vinte e três** requisitos do bloco BUS continuam ausentes.
+
+42. **BUS-02 — a tarefa nasce da empresa, com o plano dela dentro.**
+
+    A jornada `empresa → objetivo → plano → tarefa` fecha: da tela da empresa,
+    a pessoa escreve o que quer, escolhe o tipo e cria — e a tarefa que nasce é
+    uma tarefa **de verdade**, criada pelo serviço de produção do prompt-to-app,
+    com o plano da empresa dentro do briefing e o vínculo guardando **a versão
+    do plano** que valia.
+
+    Nenhuma segunda contabilidade de criação: a criação usa uma PORTA, e
+    `request_key` atravessa inteira para quem já sabe tratá-la.
+
+43. **A SÉTIMA causa de CI, e a QUINTA da mesma família.**
+
+    O caso novo afirmava "você ainda não cadastrou nenhuma empresa" e passava
+    aqui, rodado sozinho com `-g`, e reprovava lá, onde outro caso já havia
+    cadastrado uma. A pré-condição era **acidental**; virou explícita.
+
+    E a lição de processo, que custou uma entrega: rodar o caso novo sozinho
+    prova que ele passa sozinho, e nada mais. **A suíte inteira é que prova que
+    ele passa junto.**
 
 
 ## Estado do DAG

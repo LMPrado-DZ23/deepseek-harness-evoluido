@@ -527,6 +527,10 @@ test('cadastra a empresa, revisa o plano sem perder a versão anterior, e arquiv
     { name: 'dz23_studio_session', value: 'e2e', url: 'http://studio.dz23.localhost:4179' },
     { name: 'dz23_studio_csrf', value: 'csrf-e2e', url: 'http://studio.dz23.localhost:4179' },
   ])
+  // A pré-condição é EXPLÍCITA: o armazenamento deste servidor é um só para a
+  // execução inteira, e afirmar "nenhuma empresa" sem zerar é depender da ordem
+  // em que os casos rodaram — que foi a causa de CI número sete.
+  await page.request.get('http://127.0.0.1:4179/e2e/reset-business')
   await page.goto('/studio/empresas')
   await expect(page.getByRole('heading', { level: 1, name: 'Empresas' })).toBeVisible()
   // A tela diz que não há nenhuma — que é diferente de não ter conseguido ler.
@@ -581,4 +585,69 @@ test('cadastra a empresa, revisa o plano sem perder a versão anterior, e arquiv
   await page.getByRole('button', { name: 'Arquivar a empresa' }).click()
   await expect(page.getByText('Empresa arquivada.')).toBeVisible()
   await expect(page.getByText('Você ainda não cadastrou nenhuma empresa.')).toBeVisible()
+})
+
+/**
+ * `BUS-02` — a tarefa criada PARA a empresa, com o plano dela dentro.
+ *
+ * Esta é a fatia que fecha `empresa → objetivo → plano → tarefa`. O que ela
+ * prova, e que nenhum teste de unidade alcança: a tarefa que nasce daqui é uma
+ * tarefa DE VERDADE — criada pelo serviço de produção do prompt-to-app, com a
+ * mesma identidade de envio e a mesma contagem de tentativas — e o plano da
+ * empresa entra no briefing dela.
+ */
+test('cria uma tarefa para a empresa, com o plano dentro, e ela aparece na empresa', async ({ context, page }) => {
+  await context.addCookies([
+    { name: 'dz23_studio_session', value: 'e2e', url: 'http://studio.dz23.localhost:4179' },
+    { name: 'dz23_studio_csrf', value: 'csrf-e2e', url: 'http://studio.dz23.localhost:4179' },
+  ])
+  await page.request.get('http://127.0.0.1:4179/e2e/reset-business')
+  await page.goto('/studio/empresas')
+  await page.getByRole('button', { name: 'Cadastrar empresa' }).click()
+  await page.getByLabel('Nome da empresa').fill('Bolos da Ana')
+  await page.getByLabel('O que a empresa se propõe a fazer').fill('vender bolos caseiros por encomenda no bairro')
+  await page.getByLabel('Para quem').fill('moradores do bairro')
+  await page.getByLabel('O que ela não faz').fill('não entrega fora do bairro')
+  await page.getByRole('button', { name: 'Salvar empresa' }).click()
+  await expect(page.getByRole('heading', { level: 3, name: 'Versão 1 do plano' })).toBeVisible()
+
+  // A empresa DIZ que não tem tarefa, que é diferente de não mostrar nada.
+  await expect(page.getByText('Nenhuma tarefa foi criada para esta empresa ainda.')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Criar uma tarefa para esta empresa' }).click()
+  const criar = page.getByRole('button', { name: 'Criar a tarefa' })
+  await expect(criar).toBeDisabled()
+  await expect(page.getByText('Escreva o que você quer que seja criado')).toBeVisible()
+  await page.getByLabel('O que você quer que seja criado').fill('uma página para receber encomendas')
+  await page.getByLabel('Tipo de aplicativo').selectOption('landing-page')
+  await expect(criar).toBeEnabled()
+  await criar.click()
+
+  await expect(page.getByText('Tarefa criada com o plano da empresa dentro.')).toBeVisible()
+  // O vínculo guarda a VERSÃO do plano: sem ela, a pergunta "com base em quê
+  // esta tarefa foi feita?" perde a resposta na primeira revisão.
+  await expect(page.getByText('Criada com a versão 1 do plano')).toBeVisible()
+  // O rótulo do link é o NOME da tarefa, e não a palavra "Abrir": com três
+  // tarefas, três linhas iguais não dizem qual é qual.
+  //
+  // A busca é ESCOPADA à seção porque o mesmo nome aparece no trilho de tarefas
+  // do produto — e isso é, por si só, uma prova: a tarefa criada a partir da
+  // empresa é uma tarefa de verdade, e não um registro paralelo.
+  const secao = page.getByLabel('Tarefas desta empresa')
+  await expect(page.getByLabel('Navegação principal').getByRole('link', { name: 'uma página para receber' })).toBeVisible()
+  const abrir = secao.getByRole('link', { name: 'uma página para receber encomendas' })
+  await expect(abrir).toHaveAttribute('href', /\/studio\/\?projeto=/u)
+
+  // E a tarefa é uma tarefa DE VERDADE: ela abre na conversa do produto, e o
+  // briefing dela carrega o plano da empresa — o que faz o vínculo valer algo.
+  await abrir.click()
+  await expect(page.getByLabel('Conversa desta tarefa')).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText('moradores do bairro').first()).toBeVisible()
+  await expect(page.getByText('não entrega fora do bairro').first()).toBeVisible()
+
+  // Depois de RECARREGAR a tela da empresa, a tarefa continua lá: ela veio do
+  // servidor, e não do estado da tela.
+  await page.goto('/studio/empresas')
+  await page.getByRole('button', { name: 'Abrir', exact: true }).click()
+  await expect(page.getByLabel('Tarefas desta empresa').getByRole('link', { name: 'uma página para receber encomendas' })).toHaveCount(1)
 })

@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { Readable } from 'node:stream'
 import { describe, expect, it } from 'vitest'
 import { BUSINESS_ROUTE_CONTRACTS, createBusinessHttpExtension } from '../src/http.ts'
-import type { Empresa, RegistroDePlano } from '../src/model.ts'
+import type { Empresa, RegistroDePlano, VinculoDeTarefa } from '../src/model.ts'
 import { BusinessService, type BusinessRepository } from '../src/service.ts'
 
 /**
@@ -20,6 +20,11 @@ class MemoryRepository implements BusinessRepository {
     this.businessRows = [...this.businessRows.filter(linha => linha.business_id !== value.business_id), value]
   }
   putPlan = async (value: RegistroDePlano) => { this.planRows = [...this.planRows, value] }
+  linkRows: VinculoDeTarefa[] = []
+  links = () => this.linkRows
+  putLink = async (value: VinculoDeTarefa) => {
+    this.linkRows = [...this.linkRows.filter(linha => linha.project_id !== value.project_id), value]
+  }
 }
 
 const ana = { userId: 'user-a', orgId: 'org-a', tenantId: 'tenant-a', role: 'owner' as const }
@@ -98,6 +103,8 @@ describe('os contratos das rotas de empresa', () => {
       'GET /businesses/:businessId project.read',
       'POST /businesses/:businessId/plan project.write',
       'POST /businesses/:businessId/archive project.write',
+      'GET /businesses/:businessId/tasks project.read',
+      'POST /businesses/:businessId/tasks project.write',
     ])
   })
 })
@@ -188,5 +195,91 @@ describe('a extensão HTTP', () => {
   it('método que a rota não tem responde 404', async () => {
     const f = fixture()
     expect((await call(f, '/businesses/emp-1/plan', 'GET')).status).toBe(404)
+  })
+})
+
+describe('as rotas de tarefa da empresa', () => {
+  function comTarefas() {
+    const repository = new MemoryRepository()
+    let id = 0
+    let projeto = 0
+    const chaves: Array<string | undefined> = []
+    const service = new BusinessService({
+      repository,
+      now: () => new Date('2026-09-17T12:00:00.000Z'),
+      createId: () => `novo-${++id}`,
+      tarefas: {
+        criar: async (_actor, input, requestKey) => {
+          chaves.push(requestKey)
+          return { project_id: `proj-${++projeto}`, name: input.name, state: 'INTAKE' }
+        },
+      },
+    })
+    return { repository, service, chaves, extension: createBusinessHttpExtension(service) }
+  }
+
+  async function empresaCriada(f: ReturnType<typeof comTarefas>) {
+    const criada = await call(f as never, '/businesses', 'POST', { nome: 'Bolos da Ana', origem: 'criada', plano: PLANO })
+    return (criada.body['business'] as Empresa).business_id
+  }
+
+  it('criar tarefa devolve 201 com a tarefa E o vínculo', async () => {
+    const f = comTarefas()
+    const id = await empresaCriada(f)
+    const resposta = await call(f as never, `/businesses/${id}/tasks`, 'POST', {
+      pedido: 'uma página para receber encomendas', category: 'landing-page', privacy: 'local-only',
+    })
+    expect(resposta.status).toBe(201)
+    expect(resposta.body['task']).toMatchObject({ project_id: 'proj-1' })
+    expect(resposta.body['link']).toMatchObject({ project_id: 'proj-1', plan_version: 1 })
+  })
+
+  it('`request_key` ATRAVESSA inteira para quem já sabe tratá-la', async () => {
+    // Não há segunda contabilidade de criação aqui: a identidade de intenção
+    // continua sendo a do serviço de tarefas.
+    const f = comTarefas()
+    const id = await empresaCriada(f)
+    await call(f as never, `/businesses/${id}/tasks`, 'POST', {
+      pedido: 'uma página', category: 'landing-page', privacy: 'local-only', request_key: 'k-1',
+    })
+    expect(f.chaves).toEqual(['k-1'])
+  })
+
+  it('categoria que a TAREFA não conhece é recusada com 400, e nada é criado', async () => {
+    const f = comTarefas()
+    const id = await empresaCriada(f)
+    const resposta = await call(f as never, `/businesses/${id}/tasks`, 'POST', {
+      pedido: 'uma página', category: 'jogo-de-tiro', privacy: 'local-only',
+    })
+    expect(resposta.status).toBe(400)
+    expect(f.repository.linkRows).toHaveLength(0)
+  })
+
+  it('listar as tarefas da empresa devolve os vínculos', async () => {
+    const f = comTarefas()
+    const id = await empresaCriada(f)
+    await call(f as never, `/businesses/${id}/tasks`, 'POST', {
+      pedido: 'uma página', category: 'landing-page', privacy: 'local-only',
+    })
+    const resposta = await call(f as never, `/businesses/${id}/tasks`, 'GET')
+    expect(resposta.status).toBe(200)
+    expect(resposta.body['tasks']).toHaveLength(1)
+  })
+
+  it('a empresa de OUTRO inquilino responde 404 também aqui', async () => {
+    const f = comTarefas()
+    const id = await empresaCriada(f)
+    expect((await call(f as never, `/businesses/${id}/tasks`, 'GET', undefined, deOutraEmpresa)).status).toBe(404)
+  })
+
+  it('sem serviço de tarefas montado, a rota recusa com 409 e uma frase', async () => {
+    const f = fixture()
+    const criada = await call(f, '/businesses', 'POST', { nome: 'Bolos da Ana', origem: 'criada', plano: PLANO })
+    const id = (criada.body['business'] as Empresa).business_id
+    const resposta = await call(f, `/businesses/${id}/tasks`, 'POST', {
+      pedido: 'uma página', category: 'landing-page', privacy: 'local-only',
+    })
+    expect(resposta.status).toBe(409)
+    expect(String(resposta.body['error'])).toContain('serviço de tarefas')
   })
 })

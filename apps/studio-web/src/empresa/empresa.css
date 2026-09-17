@@ -139,3 +139,24 @@
 @media (max-width: 640px) {
   .dz-empresa { padding: var(--dz-4) var(--dz-3) var(--dz-6); }
 }
+
+.dz-empresa-tarefas {
+  margin-top: var(--dz-5);
+  padding-top: var(--dz-4);
+  border-top: 1px solid var(--dz-border);
+}
+
+.dz-empresa-tarefas h4 { margin: 0 0 var(--dz-3); font-size: 0.875rem; color: var(--dz-text-secondary); }
+.dz-empresa-tarefas-lista { margin: 0; padding: 0; list-style: none; }
+.dz-empresa-tarefas-lista li + li { margin-top: var(--dz-2); }
+.dz-empresa-tarefas-lista a { color: var(--dz-accent); }
+.dz-empresa-nova-tarefa { margin-top: var(--dz-4); }
+
+.dz-empresa-campo select {
+  padding: var(--dz-2) var(--dz-3);
+  border-radius: var(--dz-radius);
+  border: 1px solid var(--dz-border);
+  background: var(--dz-canvas);
+  color: var(--dz-text);
+  font: inherit;
+}

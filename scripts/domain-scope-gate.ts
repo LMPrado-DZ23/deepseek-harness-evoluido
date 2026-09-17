@@ -133,6 +133,12 @@ export const STUDIO_DOMAIN_SCOPES: readonly DomainScopeEntry[] = [
     },
   },
   {
+    source: 'plugins/business/src/model.ts', exportName: 'studioBusinessTasksDomainSpec', physicalName: 'studio_business_tasks',
+    tables: {
+      links: { scope: 'org-tenant', requiredFields: ['org_id', 'tenant_id'], reason: 'O vinculo entre uma tarefa e a empresa dela pertence ao mesmo inquilino das duas pontas; sem o escopo, a lista de tarefas de uma empresa poderia trazer a tarefa de outro.' },
+    },
+  },
+  {
     source: 'plugins/emergency-stop/src/model.ts', exportName: 'studioEmergencyStopDomainSpec', physicalName: 'studio_emergency_stop',
     tables: {
       stops: { scope: 'org-tenant', requiredFields: ['org_id', 'tenant_id'], reason: 'Uma parada de emergência vale para uma organização e um inquilino; a parada de um nunca segura o trabalho de outro.' },

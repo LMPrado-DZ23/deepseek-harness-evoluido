@@ -24,7 +24,7 @@ import { PromptToAppService, type PromptToAppActor, type PromptToAppRepository }
 import { createZip, listZip } from '../../../plugins/integration-hub/src/zip.js'
 import { createBusinessHttpExtension } from '../../../plugins/business/src/http.js'
 import { BusinessService, type BusinessRepository } from '../../../plugins/business/src/service.js'
-import type { Empresa, RegistroDePlano } from '../../../plugins/business/src/model.js'
+import type { Empresa, RegistroDePlano, VinculoDeTarefa } from '../../../plugins/business/src/model.js'
 import { createPreviewGatewayHttpHandler, type PreviewForwardPort } from '../../../plugins/preview/src/gateway.js'
 import { createPreviewProjectHttpExtension } from '../../../plugins/preview/src/http.js'
 import type { PreviewAdmission, PreviewRecord } from '../../../plugins/preview/src/model.js'
@@ -333,12 +333,20 @@ class MemoryBusinessRepository implements BusinessRepository {
     this.businessRows = [...this.businessRows.filter(linha => linha.business_id !== value.business_id), value]
   }
   putPlan = async (value: RegistroDePlano) => { this.planRows = [...this.planRows, value] }
+  linkRows: VinculoDeTarefa[] = []
+  links = () => this.linkRows
+  putLink = async (value: VinculoDeTarefa) => {
+    this.linkRows = [...this.linkRows.filter(linha => linha.project_id !== value.project_id), value]
+  }
 }
 const businessRepository = new MemoryBusinessRepository()
 let businessSequence = 0
 registerPromptToAppWorkspaceHttpExtension(createBusinessHttpExtension(new BusinessService({
   repository: businessRepository,
   createId: () => `empresa-e2e-${++businessSequence}`,
+  // A criação de tarefa usa o serviço de PRODUÇÃO do prompt-to-app, o mesmo que
+  // a home usa: o que se prova aqui é a jornada inteira, e não um dublê de rota.
+  tarefas: { criar: (actor, input, requestKey) => service.createProject(actor, input, requestKey) },
 })))
 const apiHandler = createPromptToAppHttpHandler({
   service, identity, tenancy, intake: new IntakeEngine(model), planner: new PlannerEngine(model), jobs,
@@ -549,6 +557,26 @@ const server = createServer((request, response) => {
   // conclusão errada — "o navegador recusou" — sobre um cookie que ele aceitou.
   if (request.url === '/e2e/echo-cookie') return plain(response, 200, request.headers.cookie ?? '')
   if (request.url === '/e2e/reset-mission') { e2eMissions = e2eMissionSeed(); return plain(response, 200, 'ok') }
+  /*
+    Zera as empresas e os vínculos.
+
+    Ele existe porque o armazenamento deste servidor é UM para a execução
+    inteira do Playwright, e a CI reprovou por causa disso: o caso da jornada
+    afirmava "você ainda não cadastrou nenhuma empresa" e passava aqui, onde eu
+    o rodava sozinho, e reprovava lá, onde a varredura de acessibilidade já
+    havia cadastrado uma. Esta é a QUINTA vez que um teste deste repositório
+    dependeu do ambiente de quem o rodou; a resposta é a mesma das outras
+    quatro: tornar a pré-condição EXPLÍCITA em vez de acidental.
+  */
+  // `GET`, e não `POST`, pela mesma razão que `reset-mission`: ele é chamado
+  // pelo cliente de API do Playwright, que roda em Node e por 127.0.0.1 —
+  // `studio.dz23.localhost` só resolve dentro do Chromium.
+  if (request.url === '/e2e/reset-business') {
+    businessRepository.businessRows = []
+    businessRepository.planRows = []
+    businessRepository.linkRows = []
+    return plain(response, 200, 'ok')
+  }
   // Planta um objetivo SEM a tela saber — é o que outra pessoa (ou outra aba)
   // fazendo a mesma coisa produz. A tela só conhece o que carregou, então é
   // por este caminho que a recusa de repetido do SERVIDOR é alcançável.

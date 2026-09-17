@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { BusinessError, BusinessService, type BusinessActor, type BusinessRepository } from '../src/service.js'
-import type { Empresa, PlanoDeNegocio, RegistroDePlano } from '../src/model.js'
+import type { Empresa, PlanoDeNegocio, RegistroDePlano, VinculoDeTarefa } from '../src/model.js'
 
 /**
  * O serviço de empresas — `BUS-01`, a porta do Modo Empresa.
@@ -18,6 +18,11 @@ class MemoryRepository implements BusinessRepository {
     this.businessRows = [...this.businessRows.filter(row => row.business_id !== value.business_id), value]
   }
   putPlan = async (value: RegistroDePlano) => { this.planRows = [...this.planRows, value] }
+  linkRows: VinculoDeTarefa[] = []
+  links = () => this.linkRows
+  putLink = async (value: VinculoDeTarefa) => {
+    this.linkRows = [...this.linkRows.filter(linha => linha.project_id !== value.project_id), value]
+  }
 }
 
 const ana: BusinessActor = { userId: 'user-a', orgId: 'org-a', tenantId: 'tenant-a', role: 'owner' }
@@ -177,5 +182,151 @@ describe('arquivar', () => {
     const primeira = await service.arquivar(ana, criada.empresa.business_id)
     const segunda = await service.arquivar(ana, criada.empresa.business_id)
     expect(segunda.archived_at).toBe(primeira.archived_at)
+  })
+})
+
+describe('criar tarefa PARA a empresa', () => {
+  function comTarefas() {
+    const repository = new MemoryRepository()
+    let id = 0
+    let projeto = 0
+    const criadas: Array<{ name: string; original_brief: string }> = []
+    const service = new BusinessService({
+      repository,
+      now: () => new Date('2026-09-17T12:00:00.000Z'),
+      createId: () => `novo-${++id}`,
+      tarefas: {
+        criar: async (_actor, input) => {
+          criadas.push({ name: input.name, original_brief: input.original_brief })
+          return { project_id: `proj-${++projeto}`, name: input.name, state: 'INTAKE' }
+        },
+      },
+    })
+    return { repository, service, criadas }
+  }
+
+  it('grava a tarefa E o vínculo, e o vínculo guarda a VERSÃO do plano', async () => {
+    // Sem a versão, a pergunta "com base em quê esta tarefa foi feita?" perde a
+    // resposta na primeira revisão do plano.
+    const { service, repository } = comTarefas()
+    const criada = await service.create(ana, { nome: 'Bolos da Ana', origem: 'criada', plano: PLANO })
+    const feita = await service.criarTarefa(ana, criada.empresa.business_id, {
+      pedido: 'uma página para receber encomendas', category: 'landing-page', privacy: 'local-only',
+    })
+    expect(repository.linkRows).toHaveLength(1)
+    expect(feita.vinculo.plan_version).toBe(1)
+    expect(feita.vinculo.project_id).toBe(feita.tarefa.project_id)
+  })
+
+  it('o PLANO entra no briefing da tarefa', async () => {
+    // É isto que faz o vínculo valer alguma coisa: sem o plano dentro do
+    // pedido, "tarefa da empresa X" seria só um rótulo.
+    const { service, criadas } = comTarefas()
+    const criada = await service.create(ana, { nome: 'Bolos da Ana', origem: 'criada', plano: PLANO })
+    await service.criarTarefa(ana, criada.empresa.business_id, {
+      pedido: 'uma página', category: 'landing-page', privacy: 'local-only',
+    })
+    expect(criadas[0]!.original_brief).toContain('moradores do bairro')
+    expect(criadas[0]!.original_brief).toContain('- não entrega fora do bairro')
+  })
+
+  it('a tarefa é criada ANTES do vínculo: a queda no meio não deixa vínculo órfão', async () => {
+    // Na ordem invertida, a empresa listaria uma tarefa que ninguém abre.
+    const repository = new MemoryRepository()
+    const service = new BusinessService({
+      repository, createId: () => 'novo', now: () => new Date('2026-09-17T12:00:00.000Z'),
+      tarefas: { criar: async () => { throw new Error('caiu') } },
+    })
+    const criada = await service.create(ana, { nome: 'Bolos da Ana', origem: 'criada', plano: PLANO })
+    await expect(service.criarTarefa(ana, criada.empresa.business_id, {
+      pedido: 'uma página', category: 'landing-page', privacy: 'local-only',
+    })).rejects.toThrow('caiu')
+    expect(repository.linkRows).toHaveLength(0)
+  })
+
+  it('a MESMA tarefa devolvida de novo NÃO grava um segundo vínculo', async () => {
+    // É o que o reenvio com a mesma chave de intenção produz: a tarefa é a
+    // mesma, e um segundo vínculo faria a empresa listá-la duas vezes.
+    const repository = new MemoryRepository()
+    let id = 0
+    const service = new BusinessService({
+      // `createId` INCREMENTA de propósito: com um id fixo, dois vínculos
+      // diferentes nasceriam iguais e o teste passaria sem provar nada.
+      repository, createId: () => `novo-${++id}`, now: () => new Date('2026-09-17T12:00:00.000Z'),
+      tarefas: { criar: async () => ({ project_id: 'proj-1', name: 'x', state: 'INTAKE' }) },
+    })
+    const criada = await service.create(ana, { nome: 'Bolos da Ana', origem: 'criada', plano: PLANO })
+    const pedido = { pedido: 'uma página', category: 'landing-page', privacy: 'local-only' } as const
+    const primeira = await service.criarTarefa(ana, criada.empresa.business_id, pedido, 'chave')
+    const segunda = await service.criarTarefa(ana, criada.empresa.business_id, pedido, 'chave')
+    expect(repository.linkRows).toHaveLength(1)
+    expect(segunda.vinculo.link_id).toBe(primeira.vinculo.link_id)
+  })
+
+  it('o vínculo guarda a versão que VALE no momento, e não sempre a 1', async () => {
+    // Fixar 1 aqui apagaria justamente a informação pela qual o vínculo existe.
+    const { service } = comTarefas()
+    const criada = await service.create(ana, { nome: 'Bolos da Ana', origem: 'criada', plano: PLANO })
+    await service.revisarPlano(ana, criada.empresa.business_id, { ...PLANO, oferta: 'bolo de 2kg' })
+    const feita = await service.criarTarefa(ana, criada.empresa.business_id, {
+      pedido: 'uma página', category: 'landing-page', privacy: 'local-only',
+    })
+    expect(feita.vinculo.plan_version).toBe(2)
+  })
+
+  it('o vínculo de OUTRO inquilino não entra na lista, mesmo com o mesmo `business_id`', async () => {
+    // A reautorização da empresa já barra quem vem de fora; o filtro de escopo
+    // barra o registro PLANTADO — que é o que outra pessoa gravando ao mesmo
+    // tempo, ou uma leitura sem escopo, produziria.
+    const { service, repository } = comTarefas()
+    const criada = await service.create(ana, { nome: 'Bolos da Ana', origem: 'criada', plano: PLANO })
+    const feita = await service.criarTarefa(ana, criada.empresa.business_id, {
+      pedido: 'uma página', category: 'landing-page', privacy: 'local-only',
+    })
+    repository.linkRows.push({
+      ...feita.vinculo, link_id: 'plantado', project_id: 'proj-de-outro',
+      org_id: 'org-b', tenant_id: 'tenant-b',
+    })
+    expect(service.tarefas(ana, criada.empresa.business_id).map(vinculo => vinculo.project_id))
+      .toEqual([feita.tarefa.project_id])
+  })
+
+  it('empresa ARQUIVADA não recebe tarefa nova', async () => {
+    const { service, repository } = comTarefas()
+    const criada = await service.create(ana, { nome: 'Bolos da Ana', origem: 'criada', plano: PLANO })
+    await service.arquivar(ana, criada.empresa.business_id)
+    await expect(service.criarTarefa(ana, criada.empresa.business_id, {
+      pedido: 'uma página', category: 'landing-page', privacy: 'local-only',
+    })).rejects.toThrow(BusinessError)
+    expect(repository.linkRows).toHaveLength(0)
+  })
+
+  it('sem serviço de tarefas montado, RECUSA em palavras — e não quebra', async () => {
+    // Um perfil que monte o Modo Empresa sem o prompt-to-app continua listando
+    // e revisando empresas.
+    const { service } = fixture()
+    const criada = await service.create(ana, { nome: 'Bolos da Ana', origem: 'criada', plano: PLANO })
+    await expect(service.criarTarefa(ana, criada.empresa.business_id, {
+      pedido: 'uma página', category: 'landing-page', privacy: 'local-only',
+    })).rejects.toThrow(BusinessError)
+  })
+
+  it('quem só pode LER não cria tarefa', async () => {
+    const { service, repository } = comTarefas()
+    const criada = await service.create(ana, { nome: 'Bolos da Ana', origem: 'criada', plano: PLANO })
+    await expect(service.criarTarefa(leitor, criada.empresa.business_id, {
+      pedido: 'uma página', category: 'landing-page', privacy: 'local-only',
+    })).rejects.toThrow(BusinessError)
+    expect(repository.linkRows).toHaveLength(0)
+  })
+
+  it('a tarefa de um inquilino NÃO aparece na lista do outro', async () => {
+    const { service } = comTarefas()
+    const criada = await service.create(ana, { nome: 'Bolos da Ana', origem: 'criada', plano: PLANO })
+    await service.criarTarefa(ana, criada.empresa.business_id, {
+      pedido: 'uma página', category: 'landing-page', privacy: 'local-only',
+    })
+    expect(service.tarefas(ana, criada.empresa.business_id)).toHaveLength(1)
+    expect(() => service.tarefas(deOutraEmpresa, criada.empresa.business_id)).toThrow(BusinessError)
   })
 })

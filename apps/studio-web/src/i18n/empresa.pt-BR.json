@@ -40,5 +40,18 @@
   "revisada": "Versão nova do plano gravada.",
   "semLimites": "Nenhum limite declarado.",
   "erroLeitura": "Não foi possível ler as suas empresas.",
-  "tentarDeNovo": "Tentar de novo"
+  "tentarDeNovo": "Tentar de novo",
+  "tarefas": "Tarefas desta empresa",
+  "tarefasVazio": "Nenhuma tarefa foi criada para esta empresa ainda.",
+  "criarTarefa": "Criar uma tarefa para esta empresa",
+  "pedido": "O que você quer que seja criado",
+  "pedidoAjuda": "O plano da empresa entra no pedido junto: o Studio vai saber para quem é e o que ela não faz.",
+  "tipo": "Tipo de aplicativo",
+  "criando": "Criando…",
+  "criarAgora": "Criar a tarefa",
+  "tarefaCriada": "Tarefa criada com o plano da empresa dentro.",
+  "abrirTarefa": "Abrir",
+  "tarefaVersao": "Criada com a versão {n} do plano",
+  "erroPedido": "Escreva o que você quer que seja criado, com pelo menos 3 letras.",
+  "tarefaSemNome": "Tarefa sem nome disponível"
 }

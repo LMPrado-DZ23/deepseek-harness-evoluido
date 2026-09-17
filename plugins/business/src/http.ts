@@ -5,6 +5,7 @@ import type {
   PromptToAppWorkspaceHttpExtensionRequest,
 } from '@dz23-studio/prompt-to-app'
 import { assertRouteContracts, type StudioRouteContract } from '@dz23-studio/policy'
+import { studioProjectSchema } from '@dz23-studio/prompt-to-app'
 import { t } from './i18n.js'
 import { BusinessError, type BusinessService } from './service.js'
 
@@ -25,6 +26,26 @@ const criarSchema = z.object({
 const revisarSchema = z.object({ plano: planoSchema }).strict()
 
 /**
+ * O pedido de uma tarefa criada a partir da empresa.
+ *
+ * `request_key` atravessa INTEIRA para o serviço de tarefas, que já sabe tratá-la
+ * — é a mesma identidade de intenção de envio da criação normal, e não uma
+ * segunda. Opcional no contrato porque um cliente antigo não pode deixar de
+ * criar tarefa de um dia para o outro.
+ */
+const criarTarefaSchema = z.object({
+  pedido: z.string().min(3).max(10_000),
+  // Os dois esquemas saem do esquema da TAREFA, que é o dono deles — e não de
+  // uma lista de literais copiada, que seria a segunda verdade de sempre:
+  // ela diverge no primeiro valor novo, e a rota da empresa passaria a recusar
+  // uma categoria que o produto aceita. Sair do esquema do projeto também evita
+  // uma dependência nova só para alcançar o enum de privacidade.
+  category: studioProjectSchema.shape.category,
+  privacy: studioProjectSchema.shape.privacy,
+  request_key: z.string().min(1).max(200).optional(),
+}).strict()
+
+/**
  * As rotas do Modo Empresa.
  *
  * Todas pedem escopo `workspace` e permissão do papel, como as demais: a
@@ -40,12 +61,14 @@ export const BUSINESS_ROUTE_CONTRACTS = [
   { method: 'GET', path: '/businesses/:businessId', access: 'authorized', permission: 'project.read', scope: 'workspace' },
   { method: 'POST', path: '/businesses/:businessId/plan', access: 'authorized', permission: 'project.write', scope: 'workspace' },
   { method: 'POST', path: '/businesses/:businessId/archive', access: 'authorized', permission: 'project.write', scope: 'workspace' },
+  { method: 'GET', path: '/businesses/:businessId/tasks', access: 'authorized', permission: 'project.read', scope: 'workspace' },
+  { method: 'POST', path: '/businesses/:businessId/tasks', access: 'authorized', permission: 'project.write', scope: 'workspace' },
 ] as const satisfies readonly StudioRouteContract[]
 
 assertRouteContracts(BUSINESS_ROUTE_CONTRACTS)
 
 /** O sufixo de uma rota de empresa, quando é uma. */
-const ROTA = /^\/businesses(?:\/([^/]+)(?:\/(plan|archive))?)?$/u
+const ROTA = /^\/businesses(?:\/([^/]+)(?:\/(plan|archive|tasks))?)?$/u
 
 /**
  * As rotas do Modo Empresa, registradas como fatia do Studio.
@@ -87,6 +110,14 @@ export function createBusinessHttpExtension(service: BusinessService): PromptToA
       }
       if (input.request.method === 'POST' && businessId !== undefined && acao === 'archive') {
         return responder(input.response, 200, { business: await service.arquivar(input.actor, businessId) })
+      }
+      if (input.request.method === 'GET' && businessId !== undefined && acao === 'tasks') {
+        return responder(input.response, 200, { tasks: service.tarefas(input.actor, businessId) })
+      }
+      if (input.request.method === 'POST' && businessId !== undefined && acao === 'tasks') {
+        const { request_key: requestKey, ...corpo } = criarTarefaSchema.parse(await lerJson(input))
+        const criada = await service.criarTarefa(input.actor, businessId, corpo, requestKey)
+        return responder(input.response, 201, { task: criada.tarefa, link: criada.vinculo })
       }
       return responder(input.response, 404, { error: t('errors.routeNotFound') })
     } catch (erro) {

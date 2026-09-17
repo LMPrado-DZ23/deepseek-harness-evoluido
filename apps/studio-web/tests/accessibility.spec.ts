@@ -252,7 +252,7 @@ test.describe('acessibilidade do fluxo principal', () => {
     expect(leituras).toBeLessThan(40)
   })
 
-  test('as Empresas passam no axe — vazia, com formulário aberto e com a empresa gravada', async ({ page }) => {
+  test('as Empresas passam no axe — vazia, formulário aberto, empresa gravada e tarefa criada', async ({ page }) => {
     /*
       As TRÊS formas da tela, e não só a que abre primeiro.
 
@@ -261,6 +261,7 @@ test.describe('acessibilidade do fluxo principal', () => {
       cabeçalho. O defeito que esta varredura procura não aparece numa tela sem
       conteúdo.
     */
+    await page.request.get('http://127.0.0.1:4179/e2e/reset-business')
     await page.goto('/studio/empresas')
     await expect(page.getByRole('heading', { level: 1, name: 'Empresas' })).toBeVisible()
     const vazia = await new AxeBuilder({ page }).analyze()
@@ -277,6 +278,15 @@ test.describe('acessibilidade do fluxo principal', () => {
     await expect(page.getByRole('heading', { level: 3, name: 'Versão 1 do plano' })).toBeVisible()
     const comEmpresa = await new AxeBuilder({ page }).analyze()
     expect(comEmpresa.violations.map(violation => violation.id)).toEqual([])
+
+    // `BUS-02`: o formulário de tarefa e a lista dela, que trazem um `select` e
+    // uma seção com título próprio — nenhum dos dois existe nos estados acima.
+    await page.getByRole('button', { name: 'Criar uma tarefa para esta empresa' }).click()
+    await page.getByLabel('O que você quer que seja criado').fill('uma página para receber encomendas')
+    await page.getByRole('button', { name: 'Criar a tarefa' }).click()
+    await expect(page.getByLabel('Tarefas desta empresa').getByRole('link', { name: 'uma página para receber encomendas' })).toBeVisible()
+    const comTarefa = await new AxeBuilder({ page }).analyze()
+    expect(comTarefa.violations.map(violation => violation.id)).toEqual([])
   })
 
   test('a ajuda passa no axe em qualquer tamanho', async ({ page }) => {

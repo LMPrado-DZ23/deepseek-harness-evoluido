@@ -1,7 +1,8 @@
 import { roleAllows, type StudioRole } from '@dz23-studio/policy'
+import type { StudioProject } from '@dz23-studio/prompt-to-app'
 import { t } from './i18n.js'
-import type { Empresa, PlanoDeNegocio, RegistroDePlano } from './model.js'
-import { planoNormalizado, planoVigente, proximaVersao, recusaDePlano, textoNormalizado } from './regras.js'
+import type { Empresa, PlanoDeNegocio, RegistroDePlano, VinculoDeTarefa } from './model.js'
+import { briefingDaEmpresa, nomeDaTarefa, planoNormalizado, planoVigente, proximaVersao, recusaDePlano, textoNormalizado } from './regras.js'
 
 /** Quem age. O escopo vem daqui, e nunca do corpo do pedido. */
 export interface BusinessActor {
@@ -23,12 +24,49 @@ export interface BusinessRepository {
   putBusiness(value: Empresa): Promise<void>
   plans(): readonly RegistroDePlano[]
   putPlan(value: RegistroDePlano): Promise<void>
+  links(): readonly VinculoDeTarefa[]
+  putLink(value: VinculoDeTarefa): Promise<void>
 }
+
+/** Uma tarefa, no pouco que o Modo Empresa precisa saber sobre ela. */
+export interface TarefaCriada {
+  readonly project_id: string
+  readonly name: string
+  readonly state: string
+}
+
+/**
+ * Quem sabe criar tarefa.
+ *
+ * É uma PORTA, e não uma importação do serviço de tarefas, por duas razões que
+ * já custaram caro aqui. A primeira é de autoridade: a tarefa continua sendo do
+ * `prompt-to-app`, com a identidade de envio, a reserva durável e a contagem de
+ * tentativas que ele já tem — este serviço não abre uma segunda contabilidade
+ * de criação. A segunda é de prova: com a porta, a ordem das duas escritas é
+ * exercitável por teste sem montar o produto inteiro.
+ */
+export interface TarefasPort {
+  criar(
+    actor: BusinessActor,
+    input: Pick<StudioProject, 'name' | 'original_brief' | 'category' | 'privacy'>,
+    requestKey: string | undefined,
+  ): Promise<TarefaCriada>
+}
+
+/** A categoria e a privacidade da tarefa, como o domínio dela as declara. */
+export type CategoriaDaTarefa = StudioProject['category']
+export type PrivacidadeDaTarefa = StudioProject['privacy']
 
 export interface BusinessServiceOptions {
   readonly repository: BusinessRepository
   readonly now?: () => Date
   readonly createId?: () => string
+  /**
+   * OPCIONAL de propósito: um perfil que monte o Modo Empresa sem o
+   * `prompt-to-app` continua listando e revisando empresas, e a rota de criar
+   * tarefa recusa em palavras em vez de o Studio inteiro deixar de subir.
+   */
+  readonly tarefas?: TarefasPort
 }
 
 /**
@@ -54,11 +92,13 @@ export class BusinessService {
   readonly #repository: BusinessRepository
   readonly #now: () => Date
   readonly #createId: () => string
+  readonly #tarefas: TarefasPort | undefined
 
   constructor(options: BusinessServiceOptions) {
     this.#repository = options.repository
     this.#now = options.now ?? (() => new Date())
     this.#createId = options.createId ?? (() => globalThis.crypto.randomUUID())
+    this.#tarefas = options.tarefas
   }
 
   #autorizar(actor: BusinessActor, permission: 'project.read' | 'project.write'): void {
@@ -185,6 +225,78 @@ export class BusinessService {
     const arquivada: Empresa = { ...empresa, archived_at: agora, updated_at: agora }
     await this.#repository.putBusiness(arquivada)
     return arquivada
+  }
+
+  /**
+   * As tarefas criadas para esta empresa, da mais recente para a mais antiga.
+   * @param actor - quem lê.
+   * @param businessId - a empresa.
+   * @returns os vínculos.
+   */
+  tarefas(actor: BusinessActor, businessId: string): readonly VinculoDeTarefa[] {
+    this.get(actor, businessId)
+    return this.#repository.links()
+      .filter(vinculo => vinculo.business_id === businessId && this.#noEscopo(actor, vinculo))
+      .sort((esquerda, direita) => direita.created_at.localeCompare(esquerda.created_at))
+  }
+
+  /**
+   * Cria uma tarefa PARA esta empresa, com o plano dela dentro do briefing.
+   *
+   * Esta é a operação que fecha `empresa → objetivo → plano → tarefa`: sem ela,
+   * o vínculo seria um rótulo e o gerador receberia o mesmo pedido genérico de
+   * sempre, sem saber para quem é nem o que a empresa não faz.
+   *
+   * A TAREFA PRIMEIRO, e o vínculo depois. A ordem é a mesma das outras
+   * gravações em par deste repositório: com o vínculo gravado antes, uma queda
+   * no meio deixaria um vínculo apontando para uma tarefa que não existe — e a
+   * empresa listaria uma tarefa que ninguém consegue abrir. Na ordem certa, a
+   * queda deixa uma tarefa sem vínculo, que é visível, reversível e honesta.
+   *
+   * A identidade de envio NÃO é refeita aqui: `requestKey` atravessa inteiro
+   * para quem já sabe tratá-la. Uma segunda contabilidade de criação seria a
+   * segunda verdade mais cara que este plugin poderia produzir.
+   * @param actor - quem cria.
+   * @param businessId - a empresa.
+   * @param entrada - o pedido da pessoa e as escolhas de categoria e privacidade.
+   * @param requestKey - a identidade da intenção de envio, repassada inteira.
+   * @returns a tarefa criada e o vínculo gravado.
+   */
+  async criarTarefa(
+    actor: BusinessActor,
+    businessId: string,
+    entrada: { readonly pedido: string; readonly category: CategoriaDaTarefa; readonly privacy: PrivacidadeDaTarefa },
+    requestKey?: string,
+  ): Promise<{ readonly tarefa: TarefaCriada; readonly vinculo: VinculoDeTarefa }> {
+    this.#autorizar(actor, 'project.write')
+    const empresa = this.get(actor, businessId)
+    // Uma empresa arquivada não recebe plano novo; criar tarefa nova para ela
+    // seria a mesma contradição por outra porta.
+    if (empresa.archived_at !== null) throw new BusinessError('CONFLICT', t('errors.businessArchived'))
+    if (this.#tarefas === undefined) throw new BusinessError('CONFLICT', t('errors.tasksUnavailable'))
+    const vigente = planoVigente(this.#repository.plans()
+      .filter(registro => registro.business_id === businessId && this.#noEscopo(actor, registro)))
+    if (vigente === undefined) throw new BusinessError('CONFLICT', t('errors.planMissing'))
+    const pedido = textoNormalizado(entrada.pedido)
+    if (pedido.length < 3) throw new BusinessError('INVALID', t('errors.requestRequired'))
+    const tarefa = await this.#tarefas.criar(actor, {
+      name: nomeDaTarefa(pedido, empresa.nome),
+      original_brief: briefingDaEmpresa(empresa, vigente.plano, pedido),
+      category: entrada.category,
+      privacy: entrada.privacy,
+    }, requestKey)
+    const jaVinculada = this.#repository.links().find(vinculo => vinculo.project_id === tarefa.project_id)
+    // Reenvio com a MESMA chave devolve a MESMA tarefa: gravar um segundo
+    // vínculo para ela faria a empresa listar a mesma tarefa duas vezes.
+    if (jaVinculada !== undefined) return { tarefa, vinculo: jaVinculada }
+    const vinculo: VinculoDeTarefa = {
+      link_id: this.#createId(), business_id: businessId, project_id: tarefa.project_id,
+      org_id: actor.orgId, tenant_id: actor.tenantId,
+      plan_version: vigente.version, created_by: actor.userId,
+      created_at: this.#now().toISOString(),
+    }
+    await this.#repository.putLink(vinculo)
+    return { tarefa, vinculo }
   }
 
   async #gravarPlano(actor: BusinessActor, empresa: Empresa, proposto: PlanoDeNegocio): Promise<RegistroDePlano> {

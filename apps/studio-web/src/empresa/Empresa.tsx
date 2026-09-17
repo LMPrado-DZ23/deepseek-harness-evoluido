@@ -1,18 +1,24 @@
 import { ArrowLeft, Building2 } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import copy from '../i18n/empresa.pt-BR.json'
 import { STUDIO_HOME_PATH } from '../navigation'
-import { createEmpresaApi, type Empresa, type EmpresaApi, type RegistroDePlano } from './empresaApi'
+import { createEmpresaApi, type Empresa, type EmpresaApi, type RegistroDePlano, type VinculoDeTarefa } from './empresaApi'
+import { STUDIO_CATEGORIES } from '../categories'
+import copyGeral from '../i18n/pt-BR.json'
 import {
   RASCUNHO_VAZIO,
+  TAREFA_VAZIA,
   planoDoRascunho,
   rascunhoDoPlano,
   recusaDaEmpresa,
   recusaDaRevisao,
+  nomesDasTarefas,
+  recusaDaTarefa,
   textoNormalizado,
   versaoVigente,
   versoesAnteriores,
   type RascunhoDaEmpresa,
+  type RascunhoDaTarefa,
   type RascunhoDoPlano,
 } from './empresa'
 import './empresa.css'
@@ -26,6 +32,19 @@ import './empresa.css'
   Biblioteca, numa tela parada.
 */
 const cliente = createEmpresaApi()
+
+/**
+ * Uma chave de intenção de envio, nova a cada envio que COMEÇA.
+ *
+ * `randomUUID` existe em todo navegador que este produto suporta; o outro ramo
+ * é para o desenho no servidor, onde ele pode não existir — e um `throw` ali
+ * derrubaria a tela inteira por causa de um valor que nem chega a ser usado.
+ * @returns a chave.
+ */
+function novaChaveDeEnvio(): string {
+  const cripto = globalThis.crypto as { randomUUID?: () => string } | undefined
+  return cripto?.randomUUID === undefined ? `envio-${String(Date.now())}` : cripto.randomUUID()
+}
 
 /** Uma frase de recusa da tela, pela chave. */
 function frase(chave: keyof typeof copy | null): string | null {
@@ -106,6 +125,15 @@ export function EmpresaScreen({ api = cliente }: { readonly api?: EmpresaApi } =
   const [aviso, setAviso] = useState<string | null>(null)
   const [aberta, setAberta] = useState<{ readonly empresa: Empresa; readonly planos: readonly RegistroDePlano[] } | null>(null)
   const [revisao, setRevisao] = useState<RascunhoDoPlano | null>(null)
+  const [tarefas, setTarefas] = useState<readonly VinculoDeTarefa[]>([])
+  const [projetos, setProjetos] = useState<readonly { readonly project_id: string; readonly name: string }[]>([])
+  const [novaTarefa, setNovaTarefa] = useState<RascunhoDaTarefa | null>(null)
+  /*
+    A chave de intenção vive num `ref`, e não no estado: ela precisa sobreviver
+    ao render sem causar outro, e precisa ser a MESMA em cada tentativa do mesmo
+    envio. Ela só é trocada quando um envio completa.
+  */
+  const chaveDoEnvio = useRef<string | null>(null)
 
   const ler = useCallback(async () => {
     try {
@@ -126,7 +154,11 @@ export function EmpresaScreen({ api = cliente }: { readonly api?: EmpresaApi } =
     try {
       const lida = await api.empresa(businessId)
       setAberta({ empresa: lida.business, planos: lida.plans })
+      const [vinculos, lista] = await Promise.all([api.tarefas(businessId), api.projetos()])
+      setTarefas(vinculos)
+      setProjetos(lista)
       setRevisao(null)
+      setNovaTarefa(null)
     } catch (causa) {
       setErro(causa instanceof Error ? causa.message : copy.erroLeitura)
     }
@@ -170,6 +202,41 @@ export function EmpresaScreen({ api = cliente }: { readonly api?: EmpresaApi } =
       await abrir(aberta.empresa.business_id)
     } catch (causa) {
       setErro(causa instanceof Error ? causa.message : copy.erroLeitura)
+    } finally {
+      setEnviando(false)
+    }
+  }
+
+  const recusaDoPedido = novaTarefa === null ? null : recusaDaTarefa(novaTarefa)
+
+  async function criarTarefa() {
+    if (aberta === null || novaTarefa === null || recusaDoPedido !== null) return
+    setEnviando(true)
+    try {
+      /*
+        A chave de intenção do envio.
+
+        Ela atravessa inteira até o serviço de tarefas, que já sabe tratá-la: é
+        a MESMA identidade da criação normal, e não uma segunda. Sem ela, quem
+        aperta duas vezes — ou reenvia depois de perder a resposta — fica com
+        duas tarefas para a mesma empresa.
+      */
+      const criada = await api.criarTarefa(aberta.empresa.business_id, {
+        pedido: novaTarefa.pedido,
+        category: novaTarefa.category,
+        privacy: 'privado-local',
+        request_key: chaveDoEnvio.current ?? (chaveDoEnvio.current = novaChaveDeEnvio()),
+      })
+      chaveDoEnvio.current = null
+      setNovaTarefa(null)
+      setAviso(copy.tarefaCriada)
+      const [vinculos, lista] = await Promise.all([api.tarefas(aberta.empresa.business_id), api.projetos()])
+      setTarefas(vinculos)
+      setProjetos(lista)
+      return criada
+    } catch (causa) {
+      setErro(causa instanceof Error ? causa.message : copy.erroLeitura)
+      return undefined
     } finally {
       setEnviando(false)
     }
@@ -280,6 +347,54 @@ export function EmpresaScreen({ api = cliente }: { readonly api?: EmpresaApi } =
                   <PlanoLido registro={registro} />
                 </section>)}
               </details>}
+              <section className="dz-empresa-tarefas" aria-labelledby={`dz-empresa-tarefas-${empresa.business_id}`}>
+                <h4 id={`dz-empresa-tarefas-${empresa.business_id}`}>{copy.tarefas}</h4>
+                {tarefas.length === 0
+                  ? <p className="dz-destino-vazio">{copy.tarefasVazio}</p>
+                  : <ul className="dz-empresa-tarefas-lista">
+                    {tarefas.map((vinculo, indice) => <li key={vinculo.link_id}>
+                      {/*
+                        O NOME da tarefa é o rótulo do link, e não a palavra
+                        "Abrir": com três tarefas, três linhas iguais não dizem
+                        qual é qual — nem para quem vê, nem para quem ouve.
+                      */}
+                      <a href={`${STUDIO_HOME_PATH}?projeto=${encodeURIComponent(vinculo.project_id)}`}>
+                        {nomesDasTarefas(tarefas, projetos)[indice] ?? copy.tarefaSemNome}
+                      </a>
+                      {' '}
+                      <span className="dz-empresa-ajuda">
+                        {copy.tarefaVersao.replace('{n}', String(vinculo.plan_version))}
+                      </span>
+                    </li>)}
+                  </ul>}
+                {novaTarefa === null
+                  ? <p className="dz-empresa-acoes">
+                    <button type="button" onClick={() => setNovaTarefa(TAREFA_VAZIA)}>{copy.criarTarefa}</button>
+                  </p>
+                  : <div className="dz-empresa-nova-tarefa">
+                    <p className="dz-empresa-campo">
+                      <label htmlFor="dz-empresa-pedido">{copy.pedido}</label>
+                      <textarea id="dz-empresa-pedido" rows={3} value={novaTarefa.pedido}
+                        onChange={evento => setNovaTarefa({ ...novaTarefa, pedido: evento.target.value })} />
+                      <span className="dz-empresa-ajuda">{copy.pedidoAjuda}</span>
+                    </p>
+                    <p className="dz-empresa-campo">
+                      <label htmlFor="dz-empresa-tipo">{copy.tipo}</label>
+                      <select id="dz-empresa-tipo" value={novaTarefa.category}
+                        onChange={evento => setNovaTarefa({ ...novaTarefa, category: evento.target.value })}>
+                        {STUDIO_CATEGORIES.map(categoria => <option key={categoria} value={categoria}>
+                          {copyGeral.idea.kinds[categoria]}
+                        </option>)}
+                      </select>
+                    </p>
+                    {recusaDoPedido !== null && <p className="dz-empresa-recusa" role="status">{frase(recusaDoPedido)}</p>}
+                    <p className="dz-empresa-acoes">
+                      <button type="button" className="dz-empresa-primario" disabled={recusaDoPedido !== null || enviando}
+                        onClick={() => void criarTarefa()}>{enviando ? copy.criando : copy.criarAgora}</button>
+                      <button type="button" onClick={() => setNovaTarefa(null)}>{copy.cancelar}</button>
+                    </p>
+                  </div>}
+              </section>
               <p className="dz-empresa-acoes">
                 <button type="button" className="dz-empresa-arquivar" disabled={enviando}
                   onClick={() => void arquivar()}>{copy.arquivar}</button>

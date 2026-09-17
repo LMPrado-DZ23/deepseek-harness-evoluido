@@ -126,6 +126,9 @@ test('captura a jornada: home → tarefa → resultado → continuação', async
   // gravada com a versão do plano — a segunda é a que mostra que a jornada
   // FECHA, e não só que o formulário desenha.
   await page.setViewportSize(VIEWPORT)
+  // A captura é ENTREGA: ela tem de mostrar a tela da empresa recém-cadastrada,
+  // e não uma lista com o que outros casos deixaram para trás.
+  await page.request.get('http://127.0.0.1:4179/e2e/reset-business')
   await page.goto('/studio/empresas')
   await page.getByRole('button', { name: 'Cadastrar empresa' }).click()
   await expect(page.getByRole('button', { name: 'Salvar empresa' })).toBeDisabled()
@@ -138,6 +141,13 @@ test('captura a jornada: home → tarefa → resultado → continuação', async
   await page.getByRole('button', { name: 'Salvar empresa' }).click()
   await expect(page.getByRole('heading', { level: 3, name: 'Versão 1 do plano' })).toBeVisible()
   await tirar('16-empresa-plano')
+  // A TAREFA que nasce da empresa (BUS-02): a captura mostra o vínculo com a
+  // versão do plano, que é o que faz a tarefa saber de onde veio.
+  await page.getByRole('button', { name: 'Criar uma tarefa para esta empresa' }).click()
+  await page.getByLabel('O que você quer que seja criado').fill('uma página para receber encomendas do bairro')
+  await page.getByRole('button', { name: 'Criar a tarefa' }).click()
+  await expect(page.getByLabel('Tarefas desta empresa').getByRole('link', { name: 'uma página para receber encomendas do bairro' })).toBeVisible()
+  await tirar('17-empresa-tarefa')
 
   // O celular é ADAPTAÇÃO DZ23, e não uma imagem fornecida pela referência:
   // o vídeo não demonstra versão móvel.

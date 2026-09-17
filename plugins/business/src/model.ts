@@ -96,8 +96,37 @@ export type Empresa = z.infer<typeof empresaSchema>
 declare const businessKeyBrand: unique symbol
 export type BusinessKey = string & { readonly [businessKeyBrand]: true }
 
+/**
+ * O VÍNCULO entre uma tarefa e a empresa para a qual ela foi criada.
+ *
+ * Ele é um registro próprio, e não um campo dentro da tarefa, por uma razão de
+ * autoridade: a tarefa é do `prompt-to-app`, que não conhece — e não deve
+ * conhecer — o Modo Empresa. Um campo lá dentro faria o dono do projeto passar
+ * a carregar um conceito que não é dele, e faria a versão daquele domínio
+ * depender deste.
+ *
+ * `plan_version` é gravado JUNTO de propósito: a tarefa foi criada com o plano
+ * de HOJE, e quando ele virar a versão 5 a pergunta "com base em quê esta
+ * tarefa foi feita?" ainda tem resposta. Guardar só o `business_id` apagaria
+ * essa pergunta na primeira revisão do plano.
+ */
+export const vinculoDeTarefaSchema = z.object({
+  link_id: z.string().min(1),
+  business_id: z.string().min(1),
+  project_id: z.string().min(1),
+  org_id: z.string().min(1),
+  tenant_id: z.string().min(1),
+  /** A versão do plano que valia quando a tarefa nasceu. */
+  plan_version: z.number().int().positive(),
+  created_by: z.string().min(1),
+  created_at: z.iso.datetime(),
+}).strict()
+
+export type VinculoDeTarefa = z.infer<typeof vinculoDeTarefaSchema>
+
 export const STUDIO_BUSINESS_DOMAIN = 'studio_businesses'
 export const STUDIO_BUSINESS_PLANS_DOMAIN = 'studio_business_plans'
+export const STUDIO_BUSINESS_TASKS_DOMAIN = 'studio_business_tasks'
 
 export const studioBusinessDomainSpec = defineDomain({
   name: STUDIO_BUSINESS_DOMAIN,
@@ -114,4 +143,14 @@ export const studioBusinessPlansDomainSpec = defineDomain({
   tables: { plans: domainTable<BusinessKey, RegistroDePlano>(registroDePlanoSchema) },
 })
 
-export const BUSINESS_DOMAIN_SPECS = [studioBusinessDomainSpec, studioBusinessPlansDomainSpec] as const
+export const studioBusinessTasksDomainSpec = defineDomain({
+  name: STUDIO_BUSINESS_TASKS_DOMAIN,
+  version: 1,
+  tables: { links: domainTable<BusinessKey, VinculoDeTarefa>(vinculoDeTarefaSchema) },
+})
+
+export const BUSINESS_DOMAIN_SPECS = [
+  studioBusinessDomainSpec,
+  studioBusinessPlansDomainSpec,
+  studioBusinessTasksDomainSpec,
+] as const

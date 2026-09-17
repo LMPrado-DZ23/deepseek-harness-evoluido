@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest'
+import { STUDIO_CATEGORIES } from '../categories'
 import {
   RASCUNHO_VAZIO,
+  TAREFA_VAZIA,
   limitesDoTexto,
+  nomesDasTarefas,
   planoDoRascunho,
   planosIguais,
   rascunhoDoPlano,
   recusaDaEmpresa,
   recusaDaRevisao,
+  recusaDaTarefa,
   recusaDoPlano,
   textoDosLimites,
   textoNormalizado,
@@ -152,5 +156,47 @@ describe('a versão vigente do plano', () => {
 
   it('com uma versão só, não há histórico anterior', () => {
     expect(versoesAnteriores([v(1)])).toEqual([])
+  })
+})
+
+describe('por que a tarefa da empresa ainda não pode ser criada', () => {
+  it('pedido vazio é recusado ANTES do envio', () => {
+    // Um botão ligado que recusa depois ensina a pessoa a desconfiar do produto.
+    expect(recusaDaTarefa(TAREFA_VAZIA)).toBe('erroPedido')
+  })
+
+  it('pedido só com espaço é o mesmo que vazio', () => {
+    expect(recusaDaTarefa({ ...TAREFA_VAZIA, pedido: '   ' })).toBe('erroPedido')
+  })
+
+  it('um pedido de verdade não tem recusa', () => {
+    expect(recusaDaTarefa({ ...TAREFA_VAZIA, pedido: 'uma página para encomendas' })).toBeNull()
+  })
+
+  it('o tipo padrão é uma das categorias que a TAREFA conhece', () => {
+    // Um valor que o domínio da tarefa não conhece faria o primeiro envio
+    // voltar 400 sem que ninguém tivesse escolhido nada errado.
+    expect(STUDIO_CATEGORIES).toContain(TAREFA_VAZIA.category)
+  })
+})
+
+describe('o nome de cada tarefa vinculada', () => {
+  const projetos = [{ project_id: 'p-1', name: 'Página de encomendas' }, { project_id: 'p-2', name: 'Catálogo' }]
+
+  it('vem de quem é DONO do nome, e na ordem dos vínculos', () => {
+    // Gravar o nome dentro do vínculo criaria uma cópia que envelhece na
+    // primeira vez que alguém renomeasse a tarefa.
+    expect(nomesDasTarefas([{ project_id: 'p-2' }, { project_id: 'p-1' }], projetos))
+      .toEqual(['Catálogo', 'Página de encomendas'])
+  })
+
+  it('tarefa que a lista não traz vira `null`, e NÃO some nem ganha nome inventado', () => {
+    // Esconder a linha apagaria um vínculo que existe; inventar um nome
+    // mentiria sobre ele. `null` é a terceira resposta, e é a honesta.
+    expect(nomesDasTarefas([{ project_id: 'p-9' }], projetos)).toEqual([null])
+  })
+
+  it('sem vínculo nenhum, não há nome nenhum', () => {
+    expect(nomesDasTarefas([], projetos)).toEqual([])
   })
 })

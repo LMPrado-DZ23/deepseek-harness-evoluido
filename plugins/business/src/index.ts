@@ -6,8 +6,10 @@ import {
   studioBusinessDomainSpec,
   studioBusinessPlansDomainSpec,
   type BusinessKey,
+  studioBusinessTasksDomainSpec,
   type Empresa,
   type RegistroDePlano,
+  type VinculoDeTarefa,
 } from './model.js'
 import { BusinessService, type BusinessRepository } from './service.js'
 
@@ -52,6 +54,7 @@ export class DomainBusinessRepository implements BusinessRepository {
   constructor(
     private readonly businessTable: KvTable<BusinessKey, Empresa>,
     private readonly planTable: KvTable<BusinessKey, RegistroDePlano>,
+    private readonly linkTable: KvTable<BusinessKey, VinculoDeTarefa>,
   ) {}
 
   businesses = (): readonly Empresa[] => [...this.businessTable.entries()].map(([, valor]) => valor)
@@ -64,6 +67,19 @@ export class DomainBusinessRepository implements BusinessRepository {
   putPlan = async (value: RegistroDePlano): Promise<void> => {
     await this.planTable.put(value.plan_id as BusinessKey, value)
   }
+
+  links = (): readonly VinculoDeTarefa[] => [...this.linkTable.entries()].map(([, valor]) => valor)
+
+  /*
+    A chave é o PROJECT_ID, e não o `link_id`.
+
+    Uma tarefa pertence a no máximo uma empresa, e é a tabela que garante isso:
+    com o `link_id` na chave, dois vínculos para o mesmo projeto conviveriam, e
+    a pergunta "de quem é esta tarefa?" teria duas respostas.
+  */
+  putLink = async (value: VinculoDeTarefa): Promise<void> => {
+    await this.linkTable.put(value.project_id as BusinessKey, value)
+  }
 }
 
 export async function apply(ctx: Context): Promise<void> {
@@ -71,8 +87,27 @@ export async function apply(ctx: Context): Promise<void> {
   ctx.effect(() => () => businesses.close(), 'studio-business.domainClose')
   const plans: Domain<typeof studioBusinessPlansDomainSpec> = await ctx.storageDomain.open(studioBusinessPlansDomainSpec)
   ctx.effect(() => () => plans.close(), 'studio-business.plansDomainClose')
-  const repository = new DomainBusinessRepository(businesses.table('businesses'), plans.table('plans'))
-  const service = new BusinessService({ repository })
+  const tasks: Domain<typeof studioBusinessTasksDomainSpec> = await ctx.storageDomain.open(studioBusinessTasksDomainSpec)
+  ctx.effect(() => () => tasks.close(), 'studio-business.tasksDomainClose')
+  const repository = new DomainBusinessRepository(businesses.table('businesses'), plans.table('plans'), tasks.table('links'))
+  /*
+    A porta de tarefas é resolvida NO MOMENTO DO USO, e não guardada aqui.
+
+    Guardar a referência no `apply` deixaria a criação de tarefa morta para
+    qualquer perfil que montasse o `prompt-to-app` depois deste — o mesmo erro
+    que já matou o portão T3 uma vez neste repositório. E o serviço trata a
+    ausência em palavras, em vez de o Studio inteiro deixar de subir.
+  */
+  const service = new BusinessService({
+    repository,
+    tarefas: {
+      criar: async (actor, input, requestKey) => {
+        const promptToApp = ctx.get('studioPromptToApp')
+        if (promptToApp === undefined) throw new Error('studioPromptToApp ausente')
+        return promptToApp.service.createProject(actor, input, requestKey)
+      },
+    },
+  })
   const unregister = registerPromptToAppWorkspaceHttpExtension(createBusinessHttpExtension(service))
   ctx.effect(() => unregister, 'studio-business.httpExtension')
   ctx.provide('studioBusiness', { service })

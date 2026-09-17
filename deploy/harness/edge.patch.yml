@@ -38,6 +38,7 @@
       studio_emergency_stop: postgres
       studio_businesses: postgres
       studio_business_plans: postgres
+      studio_business_tasks: postgres
       studio_previews: postgres
       studio_preview_admissions: postgres
       studio_projects: postgres
