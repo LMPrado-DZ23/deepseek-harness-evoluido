@@ -382,6 +382,8 @@ declarada.
 
 | V7-C-2 | Os DOIS ultimos envios sem identidade de intencao fecharam: responder o questionario e pedir alteracao no plano | Retomada do Prado 17/09/2026 item 2 ("diferencie a idempotencia da criacao da identidade dos envios posteriores") + a pendencia que a propria OS-112 deixou escrita | v1.0 | BETA | plugins/prompt-to-app/src/creation-key.ts (`TipoDeEnvio` com `resposta` e `mudanca`; `ReservaDeCriacao.kind` idem), model.ts (o enum de `kind` acompanha, versao do dominio NAO sobe), service.ts (`answerIntakeTurn` novo, `requestPlanChange` com chave, `#pedirAlteracao` extraido), http.ts (`request_key` nos dois corpos; a chamada ao modelo passou para DENTRO da chave), apps/studio-web/src/App.tsx (dois `ref` novos), creationIntent.ts, tests/identidade-do-envio.spec.ts, tests/journey.spec.ts | identidade-do-envio.spec.ts 28 (11 novos); prompt-to-app 1130; raiz 3955; studio-web 722; e2e 148 passaram / 3 pulados na suite INTEIRA; PostgreSQL 65; 6 sabotagens, DUAS sobreviveram e viraram teste | execucao: nenhum dos dois duplicava efeito VISIVEL, e era por isso que tinham ficado por ultimo — so que "nao duplica" era argumento, e nao prova. O que a RESPOSTA duplicava era CUSTO: com `recomendar` ela CHAMA modelo, e o reenvio depois de a resposta se perder chamava de novo e gravava um segundo turno com um texto que a pessoa nao escolheu. A chamada ao modelo passou para DENTRO da funcao que so roda quando o envio e novo, e o contador de chamadas e a prova. O PEDIDO DE ALTERACAO nao duplicava porque a guarda de estado barrava o segundo — mas devolvia um ERRO de repeticao para quem so tinha reenviado a mesma intencao, o que e uma mentira sobre o que aconteceu; agora devolve o MESMO plano, e a guarda continua intacta para quem manda outra intencao. Nenhuma segunda contabilidade: e a MESMA reserva duravel, o mesmo mutex e os mesmos tres desfechos. ACHADO DO E2E, e a razao ficou escrita no codigo: a primeira versao punha a PERGUNTA na impressao da resposta, e isso quebrava exatamente o caso para o qual a chave existe — a pergunta corrente e calculada pelo servidor a partir do que ja foi respondido, entao o proprio primeiro envio a muda, e o reenvio virava CONFLITO. Foi tirada, e o que se perde esta declarado | `/plan/slice` e `/plan/edit` continuam SEM identidade de envio, e isto agora e a pendencia inteira que resta de V7-C: estende-la sem medir o efeito de cada um seria trocar prova por suposicao. Duas perguntas respondidas com o mesmo texto e a MESMA chave sao tratadas como a mesma intencao — a chave nasce por envio no cliente, e reusa-la entre perguntas e defeito de cliente | V7-C (`/plan/slice` e `/plan/edit`); T-35 fatias C e D; V7-B |
 
+| T-35-ALCANCE | O alcance REAL do ADENDO de uso e custos, MEDIDO criterio a criterio — e um defeito central do proprio adendo consertado no caminho | Retomada do Prado 17/09/2026 item 3 ("conclua o alcance real de T-35; informe quais criterios ja passaram; verifique eventos duplicados, tentativas distintas, uso desconhecido, precificacao, isolamento, reservas, concorrencia e recuperacao") | v1.0 | BETA | plugins/route-health/tests/alcance-do-adendo.spec.ts (novo), plugins/route-health/src/service.ts (`record`: uso NAO DECLARADO passa a contar como nao precificada; a condicao morta no calculo do custo REMOVIDA), docs/status/T35_ALCANCE.md (novo) | alcance-do-adendo.spec.ts 13, um caso por criterio contra o servico de PRODUCAO; route-health 71; raiz 3970; studio-web 722; e2e 148 passaram / 3 pulados; PostgreSQL 65; 3 sabotagens, DUAS pegas e UMA revelou codigo morto, que foi removido | execucao: ONZE criterios PASSARAM com teste verde — uso desconhecido, parcial, precificacao, rota sem preco, isolamento, os tres vereditos do teto, tentativas distintas, evento de troca e recuperacao. E a medicao achou um defeito no criterio CENTRAL do adendo, dentro do codigo escrito para cumpri-lo: `unpriced_requests` contava so chamada a rota SEM PRECO, e nao a chamada em que o provedor NAO DECLAROU uso — nesse caso os tokens somavam 0, o custo somava 0, e o registro afirmava "medido, custou zero" sobre uma chamada de custo inteiramente desconhecido. Um provedor que nunca declara uso parecia de graca, e o teto de dinheiro nunca disparava por ele. Consertado: as DUAS ausencias contam. A terceira sabotagem SOBREVIVEU porque a mesma condicao repetida no calculo do custo era codigo morto (sem uso, os tokens ja sao zero); ela foi REMOVIDA em vez de ganhar teste que fingisse cobri-la. Sobre CONCORRENCIA eu esperava medir perda de escrita e MEDI O CONTRARIO: as duas contaram, porque o duble resolve de imediato e as gravacoes nao se intercalam — fica registrado como NAO OBSERVADO, que nao e aprovacao | NAO OBSERVADO nao e PASSOU: a corrida entre PROCESSOS continua aberta, e a escrita condicionada que a fecharia NAO existe neste plugin (um caso confere essa ausencia pela assinatura de `putRoute`). AUSENTES, sem codigo em lugar nenhum: reserva de orcamento antes da chamada, conciliacao com o provedor, alertas, cota de assinatura, custo INFORMADO pelo provedor e os demais provedores (fatia D). Nenhuma medicao foi feita contra provedor real — EB-04 segue aberto | T-35 fatias C e D; EB-04 |
+
 <!-- O livro mestre REGISTRA achados, e o achado da OS-39 e sobre numeros de ADR
      que nomeiam mais de uma decisao: citacao-ambigua-proposital -->
 
@@ -390,16 +392,16 @@ declarada.
 | estado | quantos |
 | --- | --- |
 | `STABLE` | 69 |
-| `BETA` | 169 |
+| `BETA` | 170 |
 | `NOT_PRESENT` | 33 |
 | `NOT_CONFIGURED` | 1 |
 | `NOT_EXECUTED` | 4 |
 | `FAILED` | 2 |
 
-**Total de requisitos rastreados: 278.**
+**Total de requisitos rastreados: 279.**
 
 | versao-alvo | quantos |
 | --- | --- |
-| v1.0 | 242 |
+| v1.0 | 243 |
 | v1.x | 33 |
 | v2 | 3 |

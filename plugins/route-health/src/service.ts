@@ -594,10 +594,33 @@ export class StudioRouteHealthService {
     const input = usage?.inputTokens ?? 0
     const output = usage?.outputTokens ?? 0
     const price = this.config.prices?.[route]
-    // Sem preço não existe custo conhecido: a requisição é contada como não
-    // precificada em vez de somar 0 e virar "custou zero" na apresentação.
+    /*
+      DUAS ausências diferentes tornam o custo desconhecido, e a segunda estava
+      faltando — MEDIDA em `alcance-do-adendo.spec.ts`:
+
+      1. não há PREÇO para a rota. Já era contada.
+      2. o provedor não DECLAROU uso nenhum. Não era — e este é o furo, porque
+         é o mais comum: a chamada acontecia, `usage` chegava `undefined`, os
+         tokens somavam 0, o custo somava 0, e o registro ficava dizendo
+         "medido, custou zero" sobre uma chamada de custo inteiramente
+         desconhecido. Um provedor que nunca declara uso parecia de graça, e o
+         teto de dinheiro nunca disparava por ele.
+
+      A regra do adendo é uma frase só — ausência de prova não vira prova — e
+      ela vale para as duas ausências.
+    */
+    const semUsoDeclarado = usage === undefined
+    /*
+      O CUSTO não repete a condição de propósito: sem uso declarado os tokens
+      já são zero, e zero vezes preço é zero. A primeira versão repetia, a
+      sabotagem que a removia SOBREVIVEU — porque era código morto —, e ela
+      saiu em vez de ganhar um teste que fingisse cobri-la.
+
+      Quem carrega a ausência é `unpriced`, logo abaixo: é ELE que faz o
+      registro dizer "não sei", em vez de o custo zero dizer "foi de graça".
+    */
     const cost = price === undefined ? 0 : (input * price.inputPerMillion + output * price.outputPerMillion) / 1_000_000
-    const unpriced = (previous.unpriced_requests ?? 0) + (price === undefined ? 1 : 0)
+    const unpriced = (previous.unpriced_requests ?? 0) + (price === undefined || semUsoDeclarado ? 1 : 0)
     // O circuito conta falha SEGUIDA e zera no primeiro sucesso: uma rota que
     // volta a responder volta a ser escolhida sem esperar nada. Falhar de novo
     // no limite - inclusive na chamada de meia-abertura - reabre a espera do

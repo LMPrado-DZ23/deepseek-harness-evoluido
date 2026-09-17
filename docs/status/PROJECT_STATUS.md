@@ -37,7 +37,7 @@ Todos reproduzíveis pelo comando ao lado.
 | --- | --- | --- |
 | typecheck | PASS | `pnpm typecheck` |
 | build | PASS | `pnpm build` |
-| suíte raiz | 3955 testes, 226 arquivos, 0 falha (17/09, após V7-C-2) | `pnpm -w test` |
+| suíte raiz | 3970 testes, 227 arquivos, 0 falha (17/09, após T-35-ALCANCE) | `pnpm -w test` |
 | suíte studio-web | 722 testes (17/09, após V7-C-2) | `cd apps/studio-web && npx vitest run` |
 | e2e navegador | 148 aprovados, 0 reprovados, 3 pulados (17/09, quatro tamanhos) | `cd apps/studio-web && npx playwright test` |
 | PostgreSQL real | **65 testes, `POSTGRES_GATE=PASS`** (12/09, PostgreSQL 16.13 local) | `pnpm test:postgres` |
@@ -622,6 +622,21 @@ produto existe para não fazer.
     o servidor calcula a pergunta a partir do que já foi respondido, então o
     primeiro envio a muda e o reenvio virava conflito. A razão ficou escrita no
     código, junto do que se perde ao tirá-la.
+
+46. **T-35-ALCANCE — o alcance do ADENDO de uso e custos, medido critério a critério.**
+
+    Onze critérios passaram com teste verde. E a medição achou um defeito no
+    critério **central** do adendo, dentro do código escrito para cumpri-lo:
+    `unpriced_requests` contava só chamada a rota sem preço, e não a chamada em
+    que o provedor **não declarou uso** — nesse caso o registro afirmava
+    "medido, custou zero" sobre custo inteiramente desconhecido. Um provedor que
+    nunca declara uso parecia de graça. Consertado.
+
+    Sobre concorrência eu esperava medir perda de escrita e **medi o
+    contrário**. Ficou registrado como `NÃO OBSERVADO`, que não é aprovação: a
+    corrida entre processos segue aberta.
+
+    Quadro completo: [`docs/status/T35_ALCANCE.md`](T35_ALCANCE.md).
 
 
 ## Estado do DAG
