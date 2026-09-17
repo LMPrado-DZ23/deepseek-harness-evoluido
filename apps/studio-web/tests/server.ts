@@ -14,7 +14,7 @@ import { createPromptToAppHttpHandler } from '../../../plugins/prompt-to-app/src
 import { registerPromptToAppHttpExtension } from '../../../plugins/prompt-to-app/src/http.js'
 import { IntakeEngine } from '../../../plugins/prompt-to-app/src/intake.js'
 import { PromptToAppJobService, type PromptToAppJobRegistry } from '../../../plugins/prompt-to-app/src/jobs.js'
-import type { StudioApproval, StudioAppSpecRecord, StudioDesignSpecRecord, StudioEvidence, StudioIntakeTurn, StudioPlan, StudioProject, StudioRun } from '../../../plugins/prompt-to-app/src/model.js'
+import type { StudioCreationKey, StudioApproval, StudioAppSpecRecord, StudioDesignSpecRecord, StudioEvidence, StudioIntakeTurn, StudioPlan, StudioProject, StudioRun } from '../../../plugins/prompt-to-app/src/model.js'
 import { ModelCodeGenerator, PromptToAppPipeline } from '../../../plugins/prompt-to-app/src/pipeline.js'
 import type { BuilderLifecycleResolverPort } from '../../../plugins/prompt-to-app/src/builder-lifecycle.js'
 import { PlannerEngine } from '../../../plugins/prompt-to-app/src/planner.js'
@@ -44,6 +44,16 @@ class MemoryRepository implements PromptToAppRepository {
   putRun = async (value: StudioRun) => { this.runRows = upsert(this.runRows, value, 'run_id') }
   putEvidence = async (value: StudioEvidence) => { this.evidenceRows = upsert(this.evidenceRows, value, 'evidence_id') }
   putApproval = async (value: StudioApproval) => { this.approvalRows = upsert(this.approvalRows, value, 'approval_id') }
+  // A reserva de criacao tambem existe no duble: sem ela o e2e exercitaria um
+  // servidor que NAO tem o guarda que a tela passou a usar, e o teste de
+  // interface aprovaria um caminho que a producao nao tem.
+  keyRows: StudioCreationKey[] = []
+  creationKeys = () => this.keyRows
+  putCreationKey = async (value: StudioCreationKey) => {
+    const mesma = (row: StudioCreationKey) => row.request_key === value.request_key
+      && row.org_id === value.org_id && row.tenant_id === value.tenant_id && row.user_id === value.user_id
+    this.keyRows = [...this.keyRows.filter(row => !mesma(row)), value]
+  }
 }
 
 class MemoryPreviewRepository implements PreviewRepository {

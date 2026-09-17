@@ -9,6 +9,7 @@ import { attemptSentence, stageSentence, type RunningStage } from './creationPro
 import { BuildSteps } from './BuildSteps'
 import type { RunStepRecord } from './buildSteps'
 import { projectNameFromBrief } from './projectName'
+import { intencaoDeEnvio, type IntencaoDeCriacao } from './creationIntent'
 
 import { HEADLINE_CAPABILITY, capabilityLines, capabilityName, creationBlocked, currentStepIndex, permanentTruthKind, privacyNotice, resultSentence, routeReasonNotice, type PipelineResultState, type PrivacyProfile, type ProjectUiState } from './presentation'
 import { apiFailureMessage, apiFailureText, type ApiCallKind } from './pwa/apiFailure'
@@ -202,12 +203,29 @@ export function App() {
     setError('')
     try { await action() } catch (cause) { setError(apiFailureText(cause, navigator.onLine, call, t.health.attention)) }
   }
+  /**
+   * A intenção do envio em curso.
+   *
+   * Vive num `ref` e não no estado: ela não desenha nada, e guardá-la no estado
+   * redesenharia a tela a cada tentativa sem nenhum ganho. Ela SOBREVIVE à
+   * falha de propósito — é isso que faz o reenvio depois de um tempo esgotado
+   * chegar com a mesma chave e receber a mesma tarefa, em vez de criar a
+   * segunda.
+   */
+  const intencao = useRef<IntencaoDeCriacao | null>(null)
   async function create() {
     if (!ready) { setError(t.idea.empty); return }
     await safely(async () => {
+      const pedido = { name: projectNameFromBrief(brief), original_brief: brief.trim(), category, privacy }
+      const envio = intencaoDeEnvio(intencao.current, pedido)
+      intencao.current = envio
       const created = await api<{ project: { project_id: string; state: ProjectUiState }; next: Question }>('/projects', {
-        method: 'POST', body: JSON.stringify({ name: projectNameFromBrief(brief), original_brief: brief.trim(), category, privacy }),
+        method: 'POST', body: JSON.stringify({ ...pedido, request_key: envio.chave }),
       })
+      // A tarefa existe: a intenção terminou. A próxima é outra, e leva chave
+      // nova — senão o segundo aplicativo da pessoa seria recusado por conflito
+      // com o primeiro.
+      intencao.current = null
       setProjectId(created.project.project_id); rememberProject(created.project.project_id); setProjectState(created.project.state); setQuestion(created.next)
       await api(`/projects/${created.project.project_id}/design`, {
         method: 'POST', body: JSON.stringify({ preset: designPreset, ...(designPreset === 'brand' ? { primary: hexToHsl(brandColor) } : {}), font, radius, density, tone }),

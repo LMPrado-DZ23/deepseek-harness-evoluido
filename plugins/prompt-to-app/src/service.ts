@@ -5,6 +5,7 @@ import { appSpecHash, type AppSpecV1 } from './appspec.js'
 import { createDesignSpec, designSpecHash, designSpecV1Schema, type DesignLogo, type DesignSelection, type DesignSpecV1 } from './design.js'
 import type {
   PromptToAppKey, ProjectState, StudioApproval, StudioAppSpecRecord, StudioEvidence,
+  StudioCreationKey,
   StudioDesignSpecRecord, StudioIntakeTurn, StudioPlan, StudioPlanSlice, StudioProject, StudioProjectCategory, StudioRun,
 } from './model.js'
 import { assertProjectTransition, assertUndoTransition } from './state.js'
@@ -14,6 +15,9 @@ import { listDesignSpecs, putDesignSpec, type DesignSpecRecordStore } from './de
 import { listAppSpecs, putAppSpec, type AppSpecRecordStore } from './app-spec-store.js'
 import { listPlans, putPlanRecord, type PlanRecordStore } from './plan-store.js'
 import { listEvidence, putEvidenceRecord, type EvidenceRecordStore } from './evidence-store.js'
+import {
+  chaveAceitavel, chaveArmazenada, desfechoDaChave, impressaoDaCriacao, reservaDoEscopo,
+} from './creation-key.js'
 import { latestGreenCheckpoint, noGreenReason, runCheckpoints, type CheckpointBlocker, type RunCheckpoint, NO_ATTEMPT } from './checkpoint.js'
 import { t } from './i18n.js'
 
@@ -42,10 +46,18 @@ export interface PromptToAppRepository {
   putEvidence(value: StudioEvidence): Promise<void>
   approvals(): readonly StudioApproval[]
   putApproval(value: StudioApproval): Promise<void>
+  /**
+   * As reservas de criacao. Opcionais no seam por uma razao pratica: uma
+   * instalacao antiga que ainda nao abriu este dominio continua lendo e
+   * escrevendo tudo o mais, e a criacao cai no caminho SEM reserva — que e o
+   * comportamento de antes, nao um comportamento novo e pior.
+   */
+  creationKeys?(): readonly StudioCreationKey[]
+  putCreationKey?(value: StudioCreationKey): Promise<void>
 }
 
 export class PromptToAppError extends Error {
-  constructor(readonly code: 'NOT_FOUND' | 'FORBIDDEN' | 'INVALID' | 'REPLAY' | 'CAPACITY', message: string) { super(message) }
+  constructor(readonly code: 'NOT_FOUND' | 'FORBIDDEN' | 'INVALID' | 'REPLAY' | 'CAPACITY' | 'CONFLICT', message: string) { super(message) }
 }
 
 export interface PromptToAppServiceOptions {
@@ -80,10 +92,40 @@ export interface PromptToAppServiceOptions {
   readonly evidenceStore?: EvidenceRecordStore
 }
 
+/**
+ * Serialização por chave dentro do processo, do mesmo feitio da que o portão de
+ * aprovações usa: o seam de domínio deste projeto expõe `put(chave, valor)`,
+ * sem "grave só se ainda for X".
+ */
+class CreationMutex {
+  readonly #tails = new Map<string, Promise<void>>()
+  async run<T>(key: string, work: () => Promise<T>): Promise<T> {
+    const previous = this.#tails.get(key) ?? Promise.resolve()
+    let release!: () => void
+    const current = new Promise<void>(resolve => { release = resolve })
+    const tail = previous.then(() => current)
+    this.#tails.set(key, tail)
+    await previous
+    try { return await work() } finally {
+      release()
+      if (this.#tails.get(key) === tail) this.#tails.delete(key)
+    }
+  }
+}
+
 export class PromptToAppService {
   readonly #repository: PromptToAppRepository
   readonly #now: () => Date
   readonly #createId: () => string
+  /**
+   * Serializa por chave de criação DENTRO do processo.
+   *
+   * Não protege contra dois processos — para isso seria preciso trava durável,
+   * e isso está declarado como limitação, não como resolvido. O que sobrevive
+   * ao reinício é a RESERVA, e é ela que impede a tarefa duplicada; o mutex
+   * fecha a janela curta entre ler "não há reserva" e gravá-la.
+   */
+  readonly #creationMutex = new CreationMutex()
   readonly #intakeTurnStore: IntakeTurnRecordStore | undefined
   readonly #designSpecStore: DesignSpecRecordStore | undefined
   readonly #appSpecStore: AppSpecRecordStore | undefined
@@ -116,11 +158,78 @@ export class PromptToAppService {
     return value
   }
 
-  async createProject(actor: PromptToAppActor, input: Pick<StudioProject, 'name' | 'original_brief' | 'category' | 'privacy'>): Promise<StudioProject> {
+  /**
+   * Cria a tarefa — UMA vez por intenção, mesmo que o pedido chegue várias.
+   *
+   * O caminho com `requestKey` é uma máquina de três desfechos, e cada um
+   * existe por um cenário medido:
+   *
+   * - **CRIAR**: não há reserva. Grava a RESERVA primeiro, com o `project_id`
+   *   já escolhido, e só depois a tarefa. A ordem é o requisito: gravar a
+   *   tarefa antes deixaria uma janela em que uma queda perde a chave e o
+   *   reenvio cria a segunda tarefa.
+   * - **REUSAR**: a reserva existe com a mesma impressão. Devolve a tarefa
+   *   daquele `project_id` — e se ela não existir (queda entre as duas
+   *   escritas), TERMINA a criação com o mesmo identificador. É isso que
+   *   impede tanto a tarefa duplicada quanto a tarefa impossível de retomar.
+   * - **CONFLITO**: a reserva existe com impressão diferente. Recusa, e recusa
+   *   alto. Devolver a tarefa antiga para um pedido novo seria ignorar o que a
+   *   pessoa escreveu sem ela nunca saber.
+   *
+   * O mutex serializa a janela DENTRO do processo; a reserva é o que sobrevive
+   * ao reinício. Um sozinho não resolve: o mutex morre com o processo, e a
+   * reserva sem serialização deixa duas chamadas simultâneas lerem "não há
+   * reserva" ao mesmo tempo.
+   *
+   * Sem `requestKey` o comportamento é o de sempre — cria. Isso é para a
+   * instalação que ainda não abriu o domínio das reservas, e não uma porta de
+   * fuga: o cliente do produto manda a chave sempre.
+   * @param actor - quem pede; o escopo sai daqui, nunca do corpo do pedido.
+   * @param input - o pedido validado.
+   * @param requestKey - o identificador da INTENÇÃO de envio.
+   * @returns a tarefa criada, ou a mesma tarefa de uma tentativa anterior.
+   */
+  async createProject(
+    actor: PromptToAppActor,
+    input: Pick<StudioProject, 'name' | 'original_brief' | 'category' | 'privacy'>,
+    requestKey?: string,
+  ): Promise<StudioProject> {
     this.#authorize(actor, 'project.write')
+    if (requestKey === undefined || this.#repository.creationKeys === undefined || this.#repository.putCreationKey === undefined) {
+      return this.#insertProject(actor, input, this.#createId())
+    }
+    if (!chaveAceitavel(requestKey)) throw new PromptToAppError('INVALID', t('errors.creationKeyFormat'))
+    const escopo = { orgId: actor.orgId, tenantId: actor.tenantId, userId: actor.userId }
+    const fingerprint = impressaoDaCriacao({ ...input })
+    return this.#creationMutex.run(chaveArmazenada(escopo, requestKey), async () => {
+      const reserva = this.#repository.creationKeys!().find(
+        registro => registro.request_key === requestKey && reservaDoEscopo(registro, escopo),
+      )
+      const desfecho = desfechoDaChave(reserva, fingerprint)
+      if (desfecho.kind === 'CONFLITO') throw new PromptToAppError('CONFLICT', t('errors.creationKeyConflict'))
+      if (desfecho.kind === 'REUSAR') {
+        // A releitura passa pelo MESMO `project()`, que reautoriza: uma chave
+        // não é credencial, e recuperar a resposta não pode virar um atalho
+        // para ler tarefa de outra pessoa.
+        const existente = this.#repository.projects().find(value => value.project_id === desfecho.projectId)
+        if (existente !== undefined) return this.project(actor, desfecho.projectId)
+        // A reserva ficou e a tarefa não: o processo caiu entre as duas
+        // escritas. Termina a criação com o MESMO identificador.
+        return this.#insertProject(actor, input, desfecho.projectId)
+      }
+      const projectId = this.#createId()
+      await this.#repository.putCreationKey!({
+        request_key: requestKey, org_id: actor.orgId, tenant_id: actor.tenantId, user_id: actor.userId,
+        fingerprint, project_id: projectId, created_at: this.#now().toISOString(),
+      })
+      return this.#insertProject(actor, input, projectId)
+    })
+  }
+
+  async #insertProject(actor: PromptToAppActor, input: Pick<StudioProject, 'name' | 'original_brief' | 'category' | 'privacy'>, projectId: string): Promise<StudioProject> {
     const now = this.#now().toISOString()
     const value: StudioProject = {
-      project_id: this.#createId(), org_id: actor.orgId, tenant_id: actor.tenantId,
+      project_id: projectId, org_id: actor.orgId, tenant_id: actor.tenantId,
       ...input,
       // Gravação nova sai SEMPRE com o nome do perfil, nunca com o valor
       // binário antigo: o antigo continua sendo lido porque já está em disco,

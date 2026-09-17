@@ -10,7 +10,7 @@ import type { AppSpecV1 } from '../src/appspec.js'
 import { buildCodeIndex } from '../src/code-intelligence.js'
 import { createPromptToAppHttpHandler, type PromptToAppHttpConfig, registerPromptToAppWorkspaceHttpExtension, PROMPT_TO_APP_ROUTE_CONTRACTS } from '../src/http.js'
 import { IntakeEngine } from '../src/intake.js'
-import type { StudioApproval, StudioAppSpecRecord, StudioDesignSpecRecord, StudioEvidence, StudioIntakeTurn, StudioPlan, StudioProject, StudioRun } from '../src/model.js'
+import type { StudioCreationKey, StudioApproval, StudioAppSpecRecord, StudioDesignSpecRecord, StudioEvidence, StudioIntakeTurn, StudioPlan, StudioProject, StudioRun } from '../src/model.js'
 import type { PromptToAppJobService } from '../src/jobs.js'
 import type { CodeGeneratorPort } from '../src/pipeline.js'
 import { PlannerEngine } from '../src/planner.js'
@@ -30,6 +30,12 @@ class MemoryRepository implements PromptToAppRepository {
   putRun = async (v: StudioRun) => { this.runRows = upsert(this.runRows, v, 'run_id') }
   putEvidence = async (v: StudioEvidence) => { this.evidenceRows = upsert(this.evidenceRows, v, 'evidence_id') }
   putApproval = async (v: StudioApproval) => { this.approvalRows = upsert(this.approvalRows, v, 'approval_id') }
+  keyRows: StudioCreationKey[] = []
+  creationKeys = () => this.keyRows
+  putCreationKey = async (v: StudioCreationKey) => {
+    const mesma = (row: StudioCreationKey) => row.request_key === v.request_key && row.org_id === v.org_id && row.tenant_id === v.tenant_id && row.user_id === v.user_id
+    this.keyRows = [...this.keyRows.filter(row => !mesma(row)), v]
+  }
 }
 
 function upsert<T, K extends keyof T>(rows: T[], value: T, key: K): T[] { return [...rows.filter(row => row[key] !== value[key]), value] }
@@ -128,6 +134,30 @@ describe('prompt-to-app HTTP boundary', () => {
     // 18 desde `POST /projects/:projectId/plan/slice` (E-03).
     expect(PROMPT_TO_APP_ROUTE_CONTRACTS).toHaveLength(18)
     expect(PROMPT_TO_APP_ROUTE_CONTRACTS.every(route => route.access === 'authorized' && route.permission !== null)).toBe(true)
+  })
+
+
+  it('UX-02: o mesmo pedido com a mesma chave devolve a MESMA tarefa; pedido diferente e 409', async () => {
+    const f = await fixture()
+    const corpo = { name: 'Meu site', original_brief: 'Quero apresentar meu trabalho.', category: 'landing-page', privacy: 'local-only', request_key: 'abcdefghijklmnop' }
+    const primeira = await f.request('/projects', { method: 'POST', body: JSON.stringify(corpo) })
+    expect(primeira.status).toBe(201)
+    const criada = (await primeira.json()) as { project: { project_id: string } }
+
+    // O reenvio depois do tempo esgotado: mesma chave, mesmo pedido.
+    const reenvio = await f.request('/projects', { method: 'POST', body: JSON.stringify(corpo) })
+    expect(reenvio.status).toBe(201)
+    expect(((await reenvio.json()) as { project: { project_id: string } }).project.project_id).toBe(criada.project.project_id)
+    expect(f.repository.projectRows).toHaveLength(1)
+
+    // A mesma chave com outro pedido nao pode devolver a tarefa de antes.
+    const conflito = await f.request('/projects', { method: 'POST', body: JSON.stringify({ ...corpo, category: 'catalog' }) })
+    expect(conflito.status).toBe(409)
+    expect(f.repository.projectRows).toHaveLength(1)
+
+    // Chave malformada e recusada como pedido invalido, antes de gravar.
+    expect((await f.request('/projects', { method: 'POST', body: JSON.stringify({ ...corpo, request_key: 'curta' }) })).status).toBe(400)
+    expect(f.repository.keyRows).toHaveLength(1)
   })
 
   it('serves real health and creates a scoped project without accepting scope fields', async () => {

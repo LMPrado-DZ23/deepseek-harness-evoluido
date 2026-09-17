@@ -33,6 +33,15 @@ const createProjectSchema = z.object({
   original_brief: z.string().trim().min(10).max(10_000),
   category: studioProjectCategorySchema,
   privacy: routePrivacySchema,
+  /**
+   * O identificador da INTENÇÃO de envio.
+   *
+   * Opcional no contrato porque um cliente antigo não pode deixar de criar
+   * tarefa de um dia para o outro; a interface deste produto manda sempre. Sem
+   * ele, o reenvio depois de um tempo esgotado cria a segunda tarefa — que é o
+   * defeito que ele existe para fechar.
+   */
+  request_key: z.string().trim().min(16).max(128).optional(),
 }).strict()
 const answerSchema = intakeAnswerSchema.extend({ confirm_sensitive: z.boolean().optional() }).strict()
 const changeRequestSchema = z.object({ reason: z.string().trim().min(3).max(2_000) }).strict()
@@ -216,8 +225,8 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
       if (request.method === 'GET' && route === '/health') return json(response, 200, await config.health(actor))
       if (request.method === 'GET' && route === '/projects') return json(response, 200, { projects: config.service.listProjects(actor) })
       if (request.method === 'POST' && route === '/projects') {
-        const input = createProjectSchema.parse(await readJson(request))
-        const project = await config.service.createProject(actor, input)
+        const { request_key: requestKey, ...input } = createProjectSchema.parse(await readJson(request))
+        const project = await config.service.createProject(actor, input, requestKey)
         return json(response, 201, { project, next: nextIntakeQuestion({ project, answers: {} }) })
       }
 
@@ -488,7 +497,7 @@ async function optionalAsync<T>(read: () => Promise<T>): Promise<T | null> {
 function statusOf(error: unknown): number {
   if (error instanceof IdentityError) return error.code === 'locked' ? 429 : 401
   if (error instanceof TenancyError) return error.code === 'not-found' ? 404 : error.code === 'forbidden' ? 403 : 400
-  if (error instanceof PromptToAppError) return error.code === 'NOT_FOUND' ? 404 : error.code === 'FORBIDDEN' ? 403 : error.code === 'CAPACITY' ? 429 : error.code === 'REPLAY' ? 409 : 400
+  if (error instanceof PromptToAppError) return error.code === 'NOT_FOUND' ? 404 : error.code === 'FORBIDDEN' ? 403 : error.code === 'CAPACITY' ? 429 : error.code === 'REPLAY' || error.code === 'CONFLICT' ? 409 : 400
   if (error instanceof FormCategoryCapabilityError) return 409
   if (error instanceof InvalidTransitionError) return 409
   // Desfazer recusado pelo estado atual não é pedido malformado: é conflito com

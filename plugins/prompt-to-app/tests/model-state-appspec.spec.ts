@@ -17,10 +17,14 @@ const validSpec = {
 }
 
 describe('Prompt-to-App domains, state and AppSpec', () => {
-  it('declares the eight physical domains with tenant fields in every record', () => {
+  it('declara os nove dominios fisicos, com os campos de inquilino em todo registro', () => {
+    // A LISTA, e nao a contagem: um dominio novo tem de aparecer aqui de
+    // proposito, porque e esta lista que as ferramentas de migracao, o roteamento
+    // para postgres e o portao de escopo consultam. `studio_creation_keys`
+    // entrou com a reserva de criacao do UX-02.
     expect(PROMPT_TO_APP_DOMAIN_SPECS.map(spec => spec.name)).toEqual([
       'studio_projects', 'studio_app_specs', 'studio_design_specs', 'studio_intake_turns', 'studio_plans',
-      'studio_runs', 'studio_evidence', 'studio_approvals',
+      'studio_runs', 'studio_evidence', 'studio_approvals', 'studio_creation_keys',
     ])
     const records = [
       { ...validSpec },

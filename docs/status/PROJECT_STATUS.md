@@ -323,6 +323,26 @@ produto existe para não fazer.
     runtime — este ambiente não tem Docker e nenhum teste inicializa o perfil
     Cordis real.
 
+30. **Reconciliação com o pacote COERENTE, e OS-100 (UX-02).** O Prado apontou
+    que existem **dois pacotes chamados V6** com definições diferentes para os
+    mesmos IDs, e fixou o `COERENTE` como referência. Os três hashes conferem.
+    A comparação mostrou o tamanho real da divergência: as **98 obrigações
+    não-EVO são idênticas** nos dois pacotes, texto por texto — para essas o
+    veredito segue valendo, não por igualdade de ID, mas porque a obrigação é a
+    mesma. Os **12 EVO colidem**: mesmo ID, obrigação diferente, e foram
+    reavaliados contra o aceite do pacote novo, com a origem da evidência
+    registrada. Quatro (`EVO-13`…`EVO-16`) são novos.
+    A matriz passou a separar **três dimensões**: implementação (24/54/36),
+    integração (58 ligadas ao perfil, 11 **sem chamador**, 9 fora do runtime) e
+    tipo de prova. **Nenhum requisito tem prova de tipo `RUNTIME_CORDIS` ou
+    `PROVIDER_REAL`** — essa linha está inteira em aberto.
+    `OS-100` fechou a primeira lacuna autorizada: uma intenção de envio cria
+    **uma** tarefa. Reserva durável gravada antes da tarefa, impressão
+    versionada, conflito explícito em 409 e escopo dentro da chave. Seis
+    sabotagens, todas pegas — e uma delas mostrou que o dublê do próprio teste
+    gravava de forma síncrona e por isso aprovava um serviço **sem
+    serialização**.
+
 ## Estado do DAG
 
 **32 DONE, 3 PARCIAL, 2 BLOCKED.** As cinco que restam **não têm engenharia

@@ -67,6 +67,14 @@ export const STUDIO_DOMAIN_SCOPES: readonly DomainScopeEntry[] = [
     tables: { approvals: { scope: 'org-tenant', requiredFields: ['org_id', 'tenant_id'] } },
   },
   {
+    source: 'plugins/prompt-to-app/src/model.ts', exportName: 'studioCreationKeysDomainSpec', physicalName: 'studio_creation_keys',
+    // A reserva de criacao carrega org, inquilino E pessoa, e os tres entram na
+    // chave de armazenamento. Sem o escopo aqui, duas pessoas que escolhessem a
+    // mesma chave de pedido — ela vem do cliente — se atropelariam, e a segunda
+    // receberia a tarefa da primeira.
+    tables: { keys: { scope: 'org-tenant', requiredFields: ['org_id', 'tenant_id'] } },
+  },
+  {
     source: 'plugins/agents/src/model.ts', exportName: 'studioAgentRunsDomainSpec', physicalName: 'studio_agent_runs',
     tables: { runs: { scope: 'workspace-tenant', requiredFields: ['org_id', 'tenant_id', 'workspace_id'], reason: 'An agent run belongs to one approved workspace.' } },
   },

@@ -211,6 +211,21 @@ export const studioApprovalSchema = z.object({
   strong_identity: z.boolean(), from_state: projectStateSchema.nullable(), to_state: projectStateSchema.nullable(),
 }).strict()
 
+/**
+ * A RESERVA de uma intencao de criacao, gravada ANTES da tarefa.
+ *
+ * A ordem importa e e o coracao do requisito: gravar a tarefa primeiro e a
+ * reserva depois deixa uma janela em que um reinicio perde a chave e o reenvio
+ * cria a segunda tarefa. Gravando a reserva primeiro, com o `project_id` ja
+ * escolhido, um reenvio depois da queda encontra a reserva e TERMINA a criacao
+ * com o mesmo identificador, em vez de comecar outra.
+ */
+export const studioCreationKeySchema = z.object({
+  request_key: z.string().min(16).max(128),
+  org_id: z.string().min(1), tenant_id: z.string().min(1), user_id: z.string().min(1),
+  fingerprint: z.string().min(1), project_id: z.string().min(1), created_at: timestamp,
+}).strict()
+
 export type StudioProject = z.infer<typeof studioProjectSchema>
 export type StudioAppSpecRecord = z.infer<typeof studioAppSpecRecordSchema>
 export type StudioDesignSpecRecord = z.infer<typeof studioDesignSpecRecordSchema>
@@ -222,6 +237,7 @@ export type StudioRun = z.infer<typeof studioRunSchema>
 export type StudioRunStep = NonNullable<StudioRun['steps']>[number]
 export type StudioEvidence = z.infer<typeof studioEvidenceSchema>
 export type StudioApproval = z.infer<typeof studioApprovalSchema>
+export type StudioCreationKey = z.infer<typeof studioCreationKeySchema>
 declare const promptKeyBrand: unique symbol
 export type PromptToAppKey = string & { readonly [promptKeyBrand]: true }
 
@@ -233,8 +249,9 @@ export const studioPlansDomainSpec = defineDomain({ name: 'studio_plans', versio
 export const studioRunsDomainSpec = defineDomain({ name: 'studio_runs', version: 5, tables: { runs: domainTable<PromptToAppKey, StudioRun>(studioRunSchema) } })
 export const studioEvidenceDomainSpec = defineDomain({ name: 'studio_evidence', version: 1, tables: { evidence: domainTable<PromptToAppKey, StudioEvidence>(studioEvidenceSchema) } })
 export const studioApprovalsDomainSpec = defineDomain({ name: 'studio_approvals', version: 2, tables: { approvals: domainTable<PromptToAppKey, StudioApproval>(studioApprovalSchema) } })
+export const studioCreationKeysDomainSpec = defineDomain({ name: 'studio_creation_keys', version: 1, tables: { keys: domainTable<PromptToAppKey, StudioCreationKey>(studioCreationKeySchema) } })
 
 export const PROMPT_TO_APP_DOMAIN_SPECS = [
   studioProjectsDomainSpec, studioAppSpecsDomainSpec, studioDesignSpecsDomainSpec, studioIntakeTurnsDomainSpec,
-  studioPlansDomainSpec, studioRunsDomainSpec, studioEvidenceDomainSpec, studioApprovalsDomainSpec,
+  studioPlansDomainSpec, studioRunsDomainSpec, studioEvidenceDomainSpec, studioApprovalsDomainSpec, studioCreationKeysDomainSpec,
 ] as const

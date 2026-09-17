@@ -11,6 +11,7 @@ import { PRODUCTION_BUILDER_ROOT_POLICY, builderRuntimeRegistryPath, type Builde
 import { mkdir, readFile, statfs } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
+import { chaveArmazenada } from './creation-key.js'
 import { healthCapabilities, storageProbe } from './capability-registry.js'
 import { createPromptToAppHttpHandler, type StudioAppsHealth } from './http.js'
 import { PromptToAppJobService, type EmergencyStopGuard, type PromptToAppJobRegistry } from './jobs.js'
@@ -21,6 +22,8 @@ import {
   studioEvidenceDomainSpec,
   studioIntakeTurnsDomainSpec,
   studioPlansDomainSpec,
+  studioCreationKeysDomainSpec,
+  type StudioCreationKey,
   studioProjectsDomainSpec,
   studioRunsDomainSpec,
   type PromptToAppKey,
@@ -156,6 +159,7 @@ class DomainPromptToAppRepository implements PromptToAppRepository {
     private readonly runTable: KvTable<PromptToAppKey, StudioRun>,
     private readonly evidenceTable: KvTable<PromptToAppKey, StudioEvidence>,
     private readonly approvalTable: KvTable<PromptToAppKey, StudioApproval>,
+    private readonly creationKeyTable: KvTable<PromptToAppKey, StudioCreationKey>,
   ) {}
   projects() { return tableValues(this.projectTable) }
   putProject(value: StudioProject) { return this.projectTable.put(value.project_id as PromptToAppKey, value) }
@@ -173,6 +177,13 @@ class DomainPromptToAppRepository implements PromptToAppRepository {
   putEvidence(value: StudioEvidence) { return this.evidenceTable.put(value.evidence_id as PromptToAppKey, value) }
   approvals() { return tableValues(this.approvalTable) }
   putApproval(value: StudioApproval) { return this.approvalTable.put(value.approval_id as PromptToAppKey, value) }
+  creationKeys() { return tableValues(this.creationKeyTable) }
+  putCreationKey(value: StudioCreationKey) {
+    // A chave de armazenamento leva o escopo junto, e nao so a chave do
+    // cliente: duas pessoas podem escolher a mesma, e a segunda nao pode
+    // sobrescrever a reserva da primeira.
+    return this.creationKeyTable.put(chaveArmazenada({ orgId: value.org_id, tenantId: value.tenant_id, userId: value.user_id }, value.request_key) as PromptToAppKey, value)
+  }
 }
 
 function tableValues<T>(table: KvTable<PromptToAppKey, T>): T[] { return [...table.entries()].map(([, value]) => value) }
@@ -272,32 +283,32 @@ function hubActor(actor: { readonly orgId: string; readonly tenantId: string; re
 }
 
 export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}): Promise<void> {
-  const [projects, specs, designs, turns, plans, runs, evidence, approvals]: [
+  const [projects, specs, designs, turns, plans, runs, evidence, approvals, creationKeys]: [
     Domain<typeof studioProjectsDomainSpec>, Domain<typeof studioAppSpecsDomainSpec>,
     Domain<typeof studioDesignSpecsDomainSpec>,
     Domain<typeof studioIntakeTurnsDomainSpec>, Domain<typeof studioPlansDomainSpec>,
     Domain<typeof studioRunsDomainSpec>, Domain<typeof studioEvidenceDomainSpec>,
-    Domain<typeof studioApprovalsDomainSpec>,
+    Domain<typeof studioApprovalsDomainSpec>, Domain<typeof studioCreationKeysDomainSpec>,
   ] = await Promise.all([
     ctx.storageDomain.open(studioProjectsDomainSpec), ctx.storageDomain.open(studioAppSpecsDomainSpec),
     ctx.storageDomain.open(studioDesignSpecsDomainSpec),
     ctx.storageDomain.open(studioIntakeTurnsDomainSpec), ctx.storageDomain.open(studioPlansDomainSpec),
     ctx.storageDomain.open(studioRunsDomainSpec), ctx.storageDomain.open(studioEvidenceDomainSpec),
-    ctx.storageDomain.open(studioApprovalsDomainSpec),
+    ctx.storageDomain.open(studioApprovalsDomainSpec), ctx.storageDomain.open(studioCreationKeysDomainSpec),
   ])
-  ctx.effect(() => async () => { await Promise.all([projects.close(), specs.close(), designs.close(), turns.close(), plans.close(), runs.close(), evidence.close(), approvals.close()]) }, 'studio-prompt-to-app.domainClose')
+  ctx.effect(() => async () => { await Promise.all([projects.close(), specs.close(), designs.close(), turns.close(), plans.close(), runs.close(), evidence.close(), approvals.close(), creationKeys.close()]) }, 'studio-prompt-to-app.domainClose')
   // Os dominios que ABRIRAM. A lista e montada DEPOIS do `await` de cima, entao
   // ela so existe se todos abriram — e e por isso que ela serve de sinal: uma
   // abertura que falhasse teria derrubado o `apply()` antes desta linha.
   const OPEN_DOMAIN_NAMES = [
     studioProjectsDomainSpec.name, studioAppSpecsDomainSpec.name, studioDesignSpecsDomainSpec.name,
     studioIntakeTurnsDomainSpec.name, studioPlansDomainSpec.name, studioRunsDomainSpec.name,
-    studioEvidenceDomainSpec.name, studioApprovalsDomainSpec.name,
+    studioEvidenceDomainSpec.name, studioApprovalsDomainSpec.name, studioCreationKeysDomainSpec.name,
   ]
 
   const repository = new DomainPromptToAppRepository(
     projects.table('projects'), specs.table('specs'), designs.table('designs'), turns.table('turns'), plans.table('plans'),
-    runs.table('runs'), evidence.table('evidence'), approvals.table('approvals'),
+    runs.table('runs'), evidence.table('evidence'), approvals.table('approvals'), creationKeys.table('keys'),
   )
   const service = new PromptToAppService({ repository, ...intakeTurnStoreOption(ctx, config), ...designSpecStoreOption(ctx, config), ...appSpecStoreOption(ctx, config), ...planStoreOption(ctx, config), ...evidenceStoreOption(ctx, config) })
   await service.reconcileInterruptedExecutions()
