@@ -1,0 +1,121 @@
+/*
+  As Preferências em modal, como F04/F05: navegação à esquerda, seção à
+  direita, e o fundo escurecido que devolve o foco à janela.
+*/
+.dz-preferencias-fundo {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--dz-4);
+  background: rgb(0 0 0 / 60%);
+}
+
+.dz-preferencias {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  width: min(980px, 100%);
+  height: min(640px, 90vh);
+  overflow: hidden;
+  border: 1px solid var(--dz-border);
+  border-radius: var(--dz-radius);
+  background: var(--dz-surface);
+}
+
+.dz-preferencias-lista {
+  overflow-y: auto;
+  padding: var(--dz-4) var(--dz-3);
+  border-right: 1px solid var(--dz-border);
+  background: var(--dz-sidebar);
+}
+
+.dz-preferencias-grupo + .dz-preferencias-grupo { margin-top: var(--dz-4); }
+
+.dz-preferencias-grupo-titulo {
+  margin: 0 0 var(--dz-2);
+  padding: 0 var(--dz-2);
+  font-size: 0.75rem;
+  color: var(--dz-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.dz-preferencias-lista ul { margin: 0; padding: 0; list-style: none; }
+
+.dz-preferencias-item {
+  display: block;
+  width: 100%;
+  padding: 0.4rem var(--dz-2);
+  border: 0;
+  border-radius: var(--dz-radius);
+  background: none;
+  color: var(--dz-text-secondary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dz-preferencias-item-aberto { background: var(--dz-surface-active); color: var(--dz-text); }
+
+.dz-preferencias-corpo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dz-3);
+  overflow-y: auto;
+  padding: var(--dz-4);
+}
+
+.dz-preferencias-topo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dz-3);
+  padding-bottom: var(--dz-3);
+  border-bottom: 1px solid var(--dz-border);
+}
+
+.dz-preferencias-topo h2 { margin: 0; font-size: 1.25rem; }
+
+.dz-preferencias-fechar {
+  display: inline-flex;
+  padding: var(--dz-1);
+  border: 0;
+  border-radius: var(--dz-radius);
+  background: none;
+  color: var(--dz-text-secondary);
+  cursor: pointer;
+}
+
+.dz-preferencias-fechar svg { width: 1.125rem; height: 1.125rem; }
+
+/* A pendência é TEXTO, e nunca um controle apagado. */
+.dz-preferencias-pendencia {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dz-1);
+  max-width: 60ch;
+  margin: 0;
+  color: var(--dz-text-secondary);
+}
+
+.dz-preferencias-pendencia strong { color: var(--dz-text); font-size: 0.875rem; }
+
+.dz-preferencias-conta { margin: 0; }
+.dz-preferencias-conta dt { color: var(--dz-text-secondary); font-size: 0.875rem; }
+.dz-preferencias-conta dd { margin: var(--dz-1) 0 0; }
+
+.dz-preferencias-destino {
+  display: inline-flex;
+  padding: 0.35rem 0.9rem;
+  border: 1px solid var(--dz-border);
+  border-radius: 999px;
+  color: var(--dz-text);
+  text-decoration: none;
+}
+
+@media (max-width: 860px) {
+  .dz-preferencias { grid-template-columns: 1fr; grid-template-rows: auto 1fr; height: 90vh; }
+  .dz-preferencias-lista { border-right: 0; border-bottom: 1px solid var(--dz-border); max-height: 34vh; }
+}

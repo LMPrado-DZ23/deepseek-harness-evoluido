@@ -1,4 +1,4 @@
-import { LogOut, Sparkles } from 'lucide-react'
+import { LogOut, Settings, Sparkles } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, apiResponse, csrfToken, type HealthState } from './api'
 import { PendingButton } from './PendingButton'
@@ -22,6 +22,8 @@ import { PlanEditor, type ConsultedView } from './plan/PlanEditor'
 import { TAREFAS_MUDARAM, WorkspaceShell } from './shell/WorkspaceShell'
 import { HomeScreen } from './home/HomeScreen'
 import { TaskScreen, type PainelAberto } from './tarefa/TaskScreen'
+import { Preferencias } from './preferencias/Preferencias'
+import preferenciasTexto from './i18n/preferencias.pt-BR.json'
 import { iniciaisDaConta } from './shell/tarefasDoTrilho'
 import tarefaCopy from './i18n/tarefa.pt-BR.json'
 import type { CategoryBasis, DesignPreset } from './home/opcoes'
@@ -121,6 +123,7 @@ export function App() {
   const [detalhes, setDetalhes] = useState<ProjectDetails | null>(null)
   /* O rascunho do compositor mora AQUI para sobreviver a abrir e fechar painel. */
   const [rascunho, setRascunho] = useState('')
+  const [preferenciasAbertas, setPreferenciasAbertas] = useState(false)
   const [painel, setPainel] = useState<PainelAberto | null>(null)
   useEffect(() => {
     let active = true
@@ -714,9 +717,17 @@ export function App() {
     conta={authenticatedSession ? sessionName : null}
     acoesDaConta={<>
       <NotificationOptIn compacto />
+      <button className="dz-rail-icone" type="button" aria-label={preferenciasTexto.abrir} onClick={() => setPreferenciasAbertas(true)}><Settings aria-hidden="true" /></button>
       {authenticatedSession ? <button className="dz-rail-icone" type="button" disabled={signingOut} aria-busy={signingOut} aria-label={t.account.signOut} onClick={() => void signOut()}><LogOut aria-hidden="true" /></button> : null}
     </>}
     acoes={<Status health={health} />}>
+    {preferenciasAbertas
+      ? <Preferencias
+        contexto={{ autenticado: authenticatedSession, notificacoesSuportadas: typeof window !== 'undefined' && 'Notification' in window }}
+        conta={sessionName}
+        notificacao={<NotificationOptIn />}
+        aoFechar={() => setPreferenciasAbertas(false)} />
+      : null}
     {emTarefa
       ? <TaskScreen detalhes={detalhes} rascunho={rascunho} setRascunho={setRascunho}
         responder={async texto => submitAnswer(false, undefined, texto)}

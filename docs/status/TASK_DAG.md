@@ -80,7 +80,7 @@ segunda verdade que o próprio pacote proíbe.
 
 | tarefa | prio | o que é | depende de | estado |
 | --- | --- | --- | --- | --- |
-| V7-A | P1 | **D7-006** — menus do compositor (F08–F10), preferências (F04/F05) e os destinos completos | T-33 | READY (é a fatia visual seguinte que a decisão do titular já mandava; agora com contrato de aceite escrito) |
+| V7-A | P1 | **D7-006** — menus do compositor (F08–F10), preferências (F04/F05) e os destinos completos | T-33 | PARCIAL (OS-106 entregou as PREFERÊNCIAS (F04/F05): modal com navegação à esquerda e seção à direita, os três grupos da referência e os treze itens — cada um com a VERDADE ao lado. Conta, Notificações, Habilidades, Plugins e Biblioteca funcionam; Tema, Idioma, Atalhos, Uso e custos, Meu computador, Controles de dados e Implantações declaram a pendência em TEXTO, sem controle nenhum, e o e2e confere isso no navegador. FALTAM os menus ancorados no compositor (F08–F10): o de conectores e o de habilidades podem sair dos destinos que já existem; o seletor de computador continua AUSENTE e desenhá-lo seria botão mudo) |
 | V7-B | P1 | **D7-007** — Biblioteca por objeto: upload, artefato produzido, origem, versão, prévia, download e permissão | T-33 | READY (hoje a Biblioteca exporta; o contrato exige RECEBER e identificar artefato, tarefa e revisão que o geraram) |
 | V7-C | P1 | **D7-005** — identidade de intenção do envio entre instâncias, com garantia no servidor e no armazenamento concorrente | T-34 | READY (a idempotência de criação existe, `UX-02`; o contrato a estende a TODO envio) |
 | V7-D | P2 | **D7-033** — agendamento durável e observabilidade (fecha o PARCIAL do destino "Agendado") | T-35 | READY (a tela já declara a pendência com honestidade; o contrato pede o motor) |
@@ -90,6 +90,7 @@ segunda verdade que o próprio pacote proíbe.
 | V7-H | P2 | **D7-027** — Hub, canais e habilidades por escopo | T-33 | PARCIAL (Habilidades e Plugins existem como destinos; o escopo por canal não foi conferido) |
 | V7-I | P1 | **D7-032** — parada, prova e recuperação corretas, inclusive efeito incerto | — | PARCIAL (a parada de emergência existe e está montada desde a OS-97; o contrato acrescenta a conciliação de efeito incerto) |
 | V7-J | P3 | **D7-002 D7-034 D7-035 D7-036** — seleção de componentes por lacuna, qualidade para leigos, loop retomável e release integral | V7-A | READY (o registro de candidatos e o `gate:candidates` já cobrem parte de `D7-002`; o restante é medição, não motor novo) |
+| V7-K | P2 | **Tema claro** — migrar as cores fixas de `styles.css` para os tokens, e só então oferecer Claro/Escuro/Automático | V7-A | READY (MEDIDO na OS-106: 506 cores em hexadecimal fixo fora dos tokens em `apps/studio-web/src/styles.css`, contra 106 usos de token em `tarefa.css` e 71 em `shell.css`. Um seletor de tema hoje pintaria as telas novas e deixaria as antigas escuras — pior que nenhum tema claro. Por isso a seção Tema das Preferências declara a pendência em vez de mostrar o seletor da referência) |
 
 ## Honestidade de escala
 

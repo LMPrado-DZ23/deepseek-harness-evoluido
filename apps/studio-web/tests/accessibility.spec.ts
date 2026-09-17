@@ -80,6 +80,37 @@ test.describe('acessibilidade do fluxo principal', () => {
     expect(violations, violations.join('\n')).toEqual([])
   })
 
+  test('as Preferências abrem, passam no axe e NÃO oferecem controle do que não existe', async ({ page }) => {
+    /*
+      A decisão do proprietário proíbe botão mudo por escrito. O quadro F04 da
+      referência mostra treze itens; aqui os que ainda não existem aparecem
+      como TEXTO dizendo o que falta — e este teste confere no navegador que
+      não há controle interativo dentro de uma seção indisponível.
+    */
+    await page.goto('/studio/')
+    await page.getByRole('button', { name: 'Preferências', exact: true }).click()
+    const modal = page.getByRole('dialog', { name: 'Preferências' })
+    await expect(modal).toBeVisible()
+
+    const semViolacao = await new AxeBuilder({ page }).analyze()
+    expect(semViolacao.violations.map(violation => violation.id)).toEqual([])
+
+    // Uma seção que não existe: só a frase, nenhum controle.
+    await modal.getByRole('button', { name: 'Tema', exact: true }).click()
+    await expect(modal.getByText('Ainda não disponível')).toBeVisible()
+    const corpo = modal.locator('.dz-preferencias-corpo')
+    // O botão de fechar é o único controle do corpo nessa seção.
+    await expect(corpo.locator('button, a, input, select, textarea')).toHaveCount(1)
+
+    // Uma capacidade que EXISTE leva ao destino real, e não a "#".
+    await modal.getByRole('button', { name: 'Habilidades', exact: true }).click()
+    await expect(corpo.getByRole('link', { name: 'Abrir' })).toHaveAttribute('href', '/studio/habilidades')
+
+    // Esc fecha, e a tarefa e o rascunho continuam onde estavam.
+    await page.keyboard.press('Escape')
+    await expect(modal).toBeHidden()
+  })
+
   test('a ajuda passa no axe em qualquer tamanho', async ({ page }) => {
     await page.goto('/studio/ajuda')
     await expect(page.getByRole('heading', { name: 'Ajuda do DZ23 STUDIO' })).toBeVisible()

@@ -1,0 +1,104 @@
+import { BIBLIOTECA_PATH, HABILIDADES_PATH, PLUGINS_PATH } from '../destinos/destinos'
+
+/**
+ * O que existe dentro das Preferências, e o que ainda NÃO existe.
+ *
+ * O quadro F04 da referência mostra treze itens em três grupos. Desenhá-los
+ * todos seria o botão mudo que a decisão do proprietário proíbe por escrito:
+ * um seletor de idioma com um idioma só, um seletor de tema que não troca tema
+ * e uma página de uso e faturamento sem medição nenhuma.
+ *
+ * Então esta função devolve os treze — com a VERDADE de cada um ao lado. Quem
+ * desenha não decide: item indisponível vira frase que diz o que falta, nunca
+ * um controle que a pessoa aperta e nada acontece.
+ *
+ * É função pura porque a regra que importa é essa correspondência, e uma
+ * decisão dentro de um JSX não é exercitada por teste nenhum — a lição que
+ * este repositório já pagou mais de dez vezes.
+ */
+
+/** Os grupos, na ordem em que a referência os mostra. */
+export type GrupoDePreferencias = 'configuracoes' | 'capacidades' | 'dados'
+
+export interface SecaoDePreferencias {
+  readonly id: string
+  readonly grupo: GrupoDePreferencias
+  /**
+   * Se a seção tem alguma coisa que FUNCIONA. Quando é `false`, quem desenha
+   * mostra o motivo e NENHUM controle.
+   */
+  readonly disponivel: boolean
+  /** O que falta, quando falta. Sempre presente quando `disponivel` é `false`. */
+  readonly pendencia?: string
+  /** O destino que já existe para esta capacidade, quando existe. */
+  readonly href?: string
+}
+
+/** O que a tela sabe sobre o ambiente na hora de montar as preferências. */
+export interface ContextoDasPreferencias {
+  /** Se há sessão — sem ela não há conta para mostrar. */
+  readonly autenticado: boolean
+  /** Se o navegador oferece a API de notificação. */
+  readonly notificacoesSuportadas: boolean
+}
+
+/**
+ * As seções das Preferências, na ordem da referência.
+ *
+ * As pendências não são desculpa: cada uma nomeia o trabalho que falta, e esse
+ * trabalho está no DAG. "Ainda não existe" é resposta diferente de "não vai
+ * existir" e de "está pronto".
+ * @param contexto - o que a tela sabe do ambiente.
+ * @returns as seções, com a verdade de cada uma.
+ */
+export function secoesDePreferencias(contexto: ContextoDasPreferencias): readonly SecaoDePreferencias[] {
+  return [
+    {
+      id: 'conta', grupo: 'configuracoes', disponivel: contexto.autenticado,
+      ...(contexto.autenticado ? {} : { pendencia: 'semSessao' }),
+    },
+    {
+      id: 'notificacoes', grupo: 'configuracoes', disponivel: contexto.notificacoesSuportadas,
+      ...(contexto.notificacoesSuportadas ? {} : { pendencia: 'semNotificacao' }),
+    },
+    // O tema NÃO entra como controle, e a medida está no comentário do módulo:
+    // 506 cores fixas fora dos tokens em `styles.css`. Um tema claro que só
+    // pinta metade da tela é pior que um tema claro que ainda não existe.
+    { id: 'tema', grupo: 'configuracoes', disponivel: false, pendencia: 'temaUnico' },
+    { id: 'idioma', grupo: 'configuracoes', disponivel: false, pendencia: 'idiomaUnico' },
+    { id: 'atalhos', grupo: 'configuracoes', disponivel: false, pendencia: 'semAtalhos' },
+    { id: 'uso', grupo: 'configuracoes', disponivel: false, pendencia: 'semMedicaoDeUso' },
+    { id: 'habilidades', grupo: 'capacidades', disponivel: true, href: HABILIDADES_PATH },
+    { id: 'plugins', grupo: 'capacidades', disponivel: true, href: PLUGINS_PATH },
+    { id: 'computador', grupo: 'capacidades', disponivel: false, pendencia: 'semComputador' },
+    { id: 'biblioteca', grupo: 'dados', disponivel: true, href: BIBLIOTECA_PATH },
+    { id: 'privacidade', grupo: 'dados', disponivel: false, pendencia: 'semControleDeDados' },
+    { id: 'implantacoes', grupo: 'dados', disponivel: false, pendencia: 'semImplantacao' },
+  ]
+}
+
+/**
+ * A seção que abre quando as Preferências abrem.
+ *
+ * A primeira DISPONÍVEL, e não a primeira da lista: abrir numa página que só
+ * diz "ainda não existe" faria as Preferências parecerem vazias para quem tem
+ * conta, notificação e três destinos funcionando.
+ * @param secoes - as seções montadas.
+ * @returns o identificador da seção inicial, ou `null` quando nenhuma serve.
+ */
+export function secaoInicial(secoes: readonly SecaoDePreferencias[]): string | null {
+  return secoes.find(secao => secao.disponivel)?.id ?? null
+}
+
+/**
+ * Se esta seção pode desenhar controle.
+ *
+ * Existe como função, e não como `secao.disponivel` espalhado pelo JSX, para
+ * que a regra tenha UM lugar e um teste. Botão mudo entrou neste produto
+ * exatamente assim: um `disabled` escrito à mão numa tela, longe da decisão.
+ * @param secao - a seção.
+ * @returns `true` quando há o que operar.
+ */
+export function podeOperar(secao: SecaoDePreferencias): boolean {
+  return secao.disponivel
+}

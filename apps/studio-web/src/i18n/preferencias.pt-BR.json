@@ -1,0 +1,40 @@
+{
+  "titulo": "Preferências",
+  "abrir": "Preferências",
+  "fechar": "Fechar as preferências",
+  "navegacao": "Seções das preferências",
+  "grupos": {
+    "configuracoes": "Configurações",
+    "capacidades": "Capacidades",
+    "dados": "Dados e integrações"
+  },
+  "secoes": {
+    "conta": "Conta",
+    "notificacoes": "Notificações",
+    "tema": "Tema",
+    "idioma": "Idioma",
+    "atalhos": "Atalhos de teclado",
+    "uso": "Uso e custos",
+    "habilidades": "Habilidades",
+    "plugins": "Plugins",
+    "computador": "Meu computador",
+    "biblioteca": "Biblioteca",
+    "privacidade": "Controles de dados",
+    "implantacoes": "Implantações"
+  },
+  "pendencias": {
+    "semSessao": "Entre na sua conta para ver estes dados.",
+    "semNotificacao": "Este navegador não oferece notificações. Em um que ofereça, o aviso aparece aqui.",
+    "temaUnico": "Só existe o tema escuro. Ainda há 506 cores fixas fora dos tokens na folha antiga, e um tema claro que pinta metade da tela seria pior do que nenhum. A migração está no plano como V7-K.",
+    "idiomaUnico": "O Studio fala português do Brasil, e só ele. Um seletor com um idioma só seria um botão que não faz nada.",
+    "semAtalhos": "Ainda não há atalhos de teclado configuráveis. O que existe hoje é a tecla Esc, que fecha painéis e menus.",
+    "semMedicaoDeUso": "A medição de uso, cotas e custos ainda não foi construída. Um número aqui seria inventado. Está no plano como T-35.",
+    "semComputador": "Ligar o Studio a uma pasta do seu computador ainda não existe. Está no plano como V7-F.",
+    "semControleDeDados": "Exportar e apagar seus dados por aqui ainda não existe. A exportação por projeto está na Biblioteca.",
+    "semImplantacao": "Publicar o aplicativo criado ainda não existe neste produto."
+  },
+  "verDestino": "Abrir",
+  "contaNome": "Nome",
+  "contaSemNome": "Sua sessão não tem nome registrado.",
+  "pendenciaRotulo": "Ainda não disponível"
+}
