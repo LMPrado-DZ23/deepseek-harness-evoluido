@@ -122,6 +122,16 @@ interface FixtureOptions {
    * que ela precisa ler nao esta la.
    */
   readonly forgetRuns?: boolean
+  /**
+   * O registro PERDE uma etapa que o construtor diz ter executado.
+   *
+   * É o desacordo entre a afirmação e a prova, que é exatamente o que a revisão
+   * independente existe para pegar: o construtor termina em `E2E_OK` — logo
+   * afirma que rodou o e2e — e o registro gravado não tem a etapa. Sem contrato
+   * de etapas, a revisão percorria as presentes, não achava problema e
+   * confirmava.
+   */
+  readonly stripStep?: 'install' | 'build' | 'test' | 'e2e'
   /** Execucoes ANTERIORES que este espaco de trabalho ja viu (T-20). */
   readonly history?: StudioRun[]
 }
@@ -160,7 +170,13 @@ async function fixture(options: FixtureOptions = {}) {
     // `runs` existe aqui porque a RETOMADA precisa achar a execução anterior:
     // sem esta leitura, `findResumable` não tem onde procurar o diretório da
     // tentativa cancelada.
-    runs: vi.fn(() => (options.forgetRuns === true ? [] : [...runs, ...(options.history ?? [])])),
+    runs: vi.fn(() => {
+      if (options.forgetRuns === true) return []
+      const visiveis = options.stripStep === undefined
+        ? runs
+        : runs.map(run => (run.steps === undefined ? run : { ...run, steps: run.steps.filter(step => step.step !== options.stripStep) }))
+      return [...visiveis, ...(options.history ?? [])]
+    }),
     // O aprendizado (T-20) le o HISTORICO deste espaco de trabalho, e para
     // chegar nele precisa passar pelos projetos. Sem esta porta no dobro a
     // leitura lancaria, o `catch` devolveria `undefined`, e o aviso nunca
@@ -258,6 +274,18 @@ describe('Prompt-to-App pipeline', () => {
     exported: { relative_path: 'exports/build_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', sha256: 'a'.repeat(64), files: 1, bytes: 1 },
     cleanupPending: false, cleaned: true,
     attestation: { image_digest: `sha256:${'d'.repeat(64)}`, policy_sha256: 'f'.repeat(64), scope_id: 's_1' },
+  })
+
+  it('o pipeline reprova quando o REGISTRO perde uma etapa que o construtor afirma ter rodado', async () => {
+    // O construtor termina em `E2E_OK` — ele AFIRMA que rodou o e2e — e o
+    // registro gravado não tem a etapa. Sem o contrato de etapas no
+    // `pipeline.ts`, a revisão percorreria as três presentes, não acharia
+    // problema e confirmaria a entrega. É este teste que dá peso à ligação
+    // entre a correção e quem decide a entrega.
+    const f = await fixture({ execute: reportingExecute('PASSED'), finish: attestingFinish, stripStep: 'e2e' })
+    const result = await f.pipeline.run(actor, 'project', { generate: vi.fn(async () => cleanGeneration) })
+    expect(result.state).not.toBe('VERIFIED_PROTOTYPE')
+    expect(result.message).toContain('INDEPENDENT_REVIEW_BLOCKED')
   })
 
   /**

@@ -1,8 +1,9 @@
 # Matriz reconciliada — pacote COERENTE × código atual
 
-- **Referência fixada:** `DZ23_PACOTE_ATUALIZADO_V6_EVOLUCAO_COERENTE.zip` — ZIP `96ccc14bc4aaaec3…`, matriz `16d94cb130cac163…`, cenários `b10d111cf1ffa4b8…`. Os três conferem com os hashes que o Prado enviou.
-- **Snapshot do código:** `22d7abe` na branch `integ`.
-- **Pacote conferido antes (Filtrada):** matriz `6294921de34df166…`. 110 requisitos. As 98 obrigacoes nao-EVO sao IDENTICAS em texto de aceite nos dois pacotes; os 12 EVO colidem em ID com obrigacoes diferentes.
+- **Referência fixada:** `DZ23_PACOTE_ATUALIZADO_V6_EVOLUCAO_COERENTE.zip` — ZIP `96ccc14bc4aaaec3…`, matriz `16d94cb130cac163…`, cenários `b10d111cf1ffa4b8…`.
+- **Snapshot do código:** `integ`, atualizado após a revisão independente de 17/09.
+- **Revisão independente aplicada:** R01 AGT-04, R02 OPS-02, R03 AGT-05, R04 gate:profile-mounts, R07 correcao factual research.ts.
+- **Reconhecidos, sem correção nesta fatia:** R05 rotulagem de prova, R06 workspace completo, R08 Modo Empresa, R09 RLS nao ativada.
 
 ## Como os vereditos vieram
 
@@ -16,13 +17,11 @@ Nenhum veredito foi transferido por igualdade de ID. As 98 obrigacoes identicas 
 
 ## Três dimensões separadas
 
-A retomada pede implementação, integração e verificação em colunas distintas. São estas:
-
 | implementação | quantos |
 | --- | --- |
 | `AUSENTE` | 36 |
-| `IMPLEMENTADA` | 24 |
-| `PARCIAL` | 54 |
+| `IMPLEMENTADA` | 23 |
+| `PARCIAL` | 55 |
 
 | integração (como o código alcança o runtime) | quantos |
 | --- | --- |
@@ -42,13 +41,15 @@ A retomada pede implementação, integração e verificação em colunas distint
 
 **Total de requisitos do pacote Coerente: 114.**
 
-`SEM_CHAMADOR` é a coluna que importa: é código de produção que nenhum caminho de produção alcança. `LIGADA_FORA_DO_RUNTIME` é portão de CI — vale como controle, não como capacidade do produto em execução. **Nenhum requisito tem prova de tipo `RUNTIME_CORDIS` ou `PROVIDER_REAL`.**
+`SEM_CHAMADOR` é código de produção que nenhum caminho de produção alcança. `LIGADA_FORA_DO_RUNTIME` é portão de CI. **Nenhum requisito tem prova de tipo `RUNTIME_CORDIS` ou `PROVIDER_REAL`.**
+
+Estas contagens não são percentual de produto pronto, e vinte e três linhas classificadas não são vinte e três aceites independentes.
 
 ## Requisito por requisito
 
 | ID | capacidade | impl. | integração | verif. | tipo de prova | procedência | arquivos | lacuna |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| UX-01 | Home e shell | `IMPLEMENTADA` | `LIGADA_AO_PERFIL` | `PASS` | `UI_SERVIDOR_TESTE` | idêntica | apps/studio-web/src/shell/WorkspaceShell.tsx; shell/rail.ts; theme.css; home/HomeScreen.tsx | nada — trilho com destinos reais e casca unica em todas as telas |
+| UX-01 | Home e shell | `IMPLEMENTADA` | `LIGADA_AO_PERFIL` | `PASS` | `UI_SERVIDOR_TESTE` | idêntica | apps/studio-web/src/shell/WorkspaceShell.tsx; shell/rail.ts; theme.css; home/HomeScreen.tsx | a casca unica, o trilho e a marca estao no produto e provados por e2e nos quatro tamanhos. NAO encerra o workspace aprovado: Agendado e Biblioteca ausentes, Habilidades e Plugins agrupados num destino so, tela de tarefa sem compositor inferior e sem conversa persistente, e nao ha area de preferencias/configuracoes |
 | UX-02 | Compositor universal | `PARCIAL` | `LIGADA_AO_PERFIL` | `PASS_PARCIAL` | `UI_SERVIDOR_TESTE` | idêntica | apps/studio-web/src/App.tsx:create; assistant/Conversation.tsx:submit; plugins/studio-web/src/assistant-conversation.ts:send | sem chave de idempotencia do cliente: reenvio apos timeout cria segunda tarefa; compositor da home nao aceita anexos |
 | UX-03 | Busca e histórico | `PARCIAL` | `LIGADA_AO_PERFIL` | `PASS_PARCIAL` | `INTEGRACAO_DOMINIO` | idêntica | apps/studio-web/src/hub/hubApi.ts:catalogSearch; plugins/integration-hub/src/http.ts | a unica busca e o catalogo do Hub; nao ha busca de projetos/conversas/execucoes nem historico unificado |
 | UX-04 | Modelo, rota e uso | `PARCIAL` | `LIGADA_AO_PERFIL` | `PASS_PARCIAL` | `INTEGRACAO_DOMINIO` | idêntica | apps/studio-web/src/App.tsx:Status; presentation.ts:capabilityLines; api.ts:HealthState | nao ha superficie de configuracao efetiva de modelo/rota; uso/estimativa so no painel de equipe |
@@ -76,8 +77,8 @@ A retomada pede implementação, integração e verificação em colunas distint
 | AGT-01 | Agentes e especialidades | `IMPLEMENTADA` | `LIGADA_AO_PERFIL` | `PASS` | `INTEGRACAO_DOMINIO` | idêntica | plugins/agent-team/src/roles.ts:ROLE_TOOL_POLICY; service.ts:398 | nada: a lista de permissao e intersectada com o roster e aplicada no toolFilter |
 | AGT-02 | Equipes e delegação | `IMPLEMENTADA` | `LIGADA_AO_PERFIL` | `PASS` | `INTEGRACAO_DOMINIO` | idêntica | plugins/agent-team/src/service.ts:taskReadiness/teamSpend; studio-web/src/team-panel.ts | handoff.ts esta sem chamador; o handoff real e proposta aplicada + continue manual |
 | AGT-03 | Missões amplas | `PARCIAL` | `LIGADA_AO_PERFIL` | `PASS_PARCIAL` | `INTEGRACAO_DOMINIO` | idêntica | plugins/mission/src/model.ts:missionCriterionSchema; service.ts | a evidencia e texto livre, sem referencia resolvivel a execucao, artefato ou relatorio |
-| AGT-04 | Revisão independente | `IMPLEMENTADA` | `LIGADA_AO_PERFIL` | `PASS` | `INTEGRACAO_DOMINIO` | idêntica | plugins/prompt-to-app/src/independent-review.ts:reviewRun/blocksVerification | e separacao de MODULO no mesmo pipeline, nao um revisor-agente distinto |
-| AGT-05 | Pausa, cancelamento e intervenção | `PARCIAL` | `LIGADA_AO_PERFIL` | `PASS_PARCIAL` | `PORTAO_ESTATICO` | idêntica | dsh-home/profiles/studio/cordis.patch.yml (monta dz23-studio-emergency-stop, OS-99); plugins/emergency-stop/**; apps/studio-web/src/EmergencyStop.tsx | OS-99 montou o plugin e gate:profile-mounts impede que ele saia em silencio, mas a montagem e provada por PORTAO ESTATICO, nao por runtime: falta carregar o perfil Cordis real, acionar a parada, comprovar bloqueio de novos disparos e tratar cancelamento em voo, reservas e estado desconhecido. Nao existe PAUSA, so cancelamento |
+| AGT-04 | Revisão independente | `PARCIAL` | `LIGADA_AO_PERFIL` | `PASS_PARCIAL` | `INTEGRACAO_DOMINIO` | idêntica | plugins/prompt-to-app/src/independent-review.ts:reviewRun/DEFAULT_STEP_CONTRACT/attestationWellFormed; pipeline.ts:609 (passa RUN_STEPS) | REBAIXADO de IMPLEMENTADA por revisao independente: a funcao percorria as etapas PRESENTES, entao steps vazio ou so build saia CONFIRMED, e as atestacoes eram conferidas por PRESENCA de string. Corrigido (contrato de etapas por perfil + forma do resumo conferida), mas continua PARCIAL: a separacao e de MODULO dentro do mesmo pipeline, e a validacao e da FORMA do registro, nao dos artefatos em si |
+| AGT-05 | Pausa, cancelamento e intervenção | `PARCIAL` | `LIGADA_AO_PERFIL` | `PASS_PARCIAL` | `PORTAO_ESTATICO` | idêntica | dsh-home/profiles/studio/cordis.patch.yml (monta o plugin, OS-99); plugins/emergency-stop/src/index.ts:emergencyStopSurfaces; plugins/prompt-to-app/src/jobs.ts:cancelScope | PEDIR nao e mais anunciado como CANCELAR: a superficie das criacoes devolvia `cancelled: outcome.requested` com `unproven: []`, e o registro de trabalhos responde literalmente `requested|already-finished`. Agora o pedido vira pendencia NOMEADA. Continua PARCIAL: falta apertar o botao no perfil Cordis real com tarefa em voo, restart e nova tentativa de disparo, e nao existe PAUSA — so cancelamento. A escrita da parada e get+put, nao CAS: coordenacao entre instancias nao esta provada |
 | INT-01 | DeepSeek e rotas adicionais por API | `IMPLEMENTADA` | `LIGADA_AO_PERFIL` | `PASS_DUBLE` | `UNIDADE_COM_DUBLE` | idêntica | plugins/route-health/src/index.ts:apply; service.ts:streamWithFallback/enforceRoutePrivacy | prova de contrato majoritariamente contra duble; fim-a-fim com modelo real continua bloqueado (EB-04) |
 | INT-02 | Agentes via CLI/protocolos de agente | `PARCIAL` | `LIGADA_AO_PERFIL` | `PASS_PARCIAL` | `INTEGRACAO_DOMINIO` | idêntica | plugins/agents/src/service.ts:AgentProvider; assistant-bridge/src/catalog.ts:ASSISTANT_ALLOWED_PROVIDERS | ASSISTANT_ALLOWED_PROVIDERS fecha em spawn-in-process: nenhum chamador de producao inicia sessao CLI |
 | INT-03 | MCP e catálogo de ferramentas | `IMPLEMENTADA` | `LIGADA_AO_PERFIL` | `PASS` | `INTEGRACAO_DOMINIO` | idêntica | plugins/mcp-client/src/dispatch.ts:createMcpDispatcher; integration-hub/src/service.ts:callIntegration | servers: {} no perfil recusa tudo por padrao: decisao de configuracao, nao buraco |
@@ -90,7 +91,7 @@ A retomada pede implementação, integração e verificação em colunas distint
 | DAT-02 | Biblioteca e artefatos | `PARCIAL` | `LIGADA_AO_PERFIL` | `PASS_PARCIAL` | `INTEGRACAO_DOMINIO` | idêntica | plugins/integration-hub/src/model.ts:studioExportSchema; export.ts:findSecret | sem upload de artefato pelo usuario, sem previa e sem versao da biblioteca |
 | DAT-03 | Compartilhamento privado por snapshot | `AUSENTE` | `NAO_APLICAVEL` | `NOT_RUN` | `NENHUMA` | idêntica | NENHUM | nao existe compartilhamento por snapshot: nenhuma rota com previa, escopo, expiracao ou revogacao |
 | OPS-01 | Agendamento durável | `PARCIAL` | `LIGADA_AO_PERFIL` | `PASS_PARCIAL` | `INTEGRACAO_DOMINIO` | idêntica | plugins/storage-postgres/src/backup.ts:StorageBackupScheduler; backup-worker.ts | o unico agendador e o de backup, so com intervalMs: sem timezone, recorrencia nem agendamento pelo usuario |
-| OPS-02 | Budget preventivo por missão/run | `PARCIAL` | `LIGADA_AO_PERFIL` | `PASS_PARCIAL` | `INTEGRACAO_DOMINIO` | idêntica | plugins/mission/src/service.ts:missionSpend; budget-port.ts; agent-team/src/service.ts:#launchReady | sem RESERVA ATOMICA antes do disparo: missionSpend pula execucoes RUNNING, entao disparos concorrentes passam pelo mesmo teto |
+| OPS-02 | Budget preventivo por missão/run | `PARCIAL` | `LIGADA_AO_PERFIL` | `PASS_PARCIAL` | `INTEGRACAO_DOMINIO` | idêntica | plugins/mission/src/service.ts:missionSpend (spent + committed + unknownInFlight); budget-port.ts; agent-team/src/service.ts:#launchReady | a execucao EM VOO que ja relatou consumo passou a contar contra o teto — antes era pulada, e teto 1.000 com 1.200 relatados respondia WITHIN spent 0. Continua PARCIAL: nao ha RESERVA com estimativa antes do disparo, porque a estimativa depende da tabela de precos, que e decisao do Prado (T-19) |
 | OPS-03 | RunContract e eventos | `PARCIAL` | `LIGADA_AO_PERFIL` | `PASS_PARCIAL` | `INTEGRACAO_DOMINIO` | idêntica | plugins/prompt-to-app/src/service.ts:transition; studio-web/src/assistant-stream.ts | nao existe RunContract versionado: nenhum contract_version no run |
 | OPS-04 | Idempotência, recibos e efeito desconhecido | `IMPLEMENTADA` | `LIGADA_AO_PERFIL` | `PASS` | `INTEGRACAO_DOMINIO` | idêntica | plugins/staging/src/artifact.ts:stagingRequestFingerprint; service.ts:#ensureReconciliation | nada relevante |
 | OPS-05 | Retomada, snapshots e rollback | `IMPLEMENTADA` | `LIGADA_AO_PERFIL` | `PASS` | `INTEGRACAO_DOMINIO` | idêntica | plugins/prompt-to-app/src/checkpoint.ts:runCheckpoints; service.ts:undoToCheckpoint; resume.ts | nada relevante: undo emite NOVA aprovacao em vez de reusar a consumida |
@@ -103,12 +104,12 @@ A retomada pede implementação, integração e verificação em colunas distint
 | SEC-04 | Prompt injection e dados sensíveis | `PARCIAL` | `LIGADA_AO_PERFIL` | `PASS_PARCIAL` | `INTEGRACAO_DOMINIO` | idêntica | plugins/policy/src/index.ts:resolveTier; prompt-to-app/src/context.ts:ContextKind; appspec.ts:detectSensitiveData | research.ts sem chamador; a separacao instruction/schema/evidence governa corte por orcamento, nao privilegio |
 | SEC-05 | LOCAL_ONLY e roteamento único | `IMPLEMENTADA` | `LIGADA_AO_PERFIL` | `PASS` | `INTEGRACAO_DOMINIO` | idêntica | dsh-home/profiles/studio/cordis.patch.yml:session-telemetry-otel DISABLED; route-health/src/service.ts:routePrivacyProfile | nada no aceite minimo |
 | SEC-06 | Renderização segura de conversa e previews | `IMPLEMENTADA` | `LIGADA_AO_PERFIL` | `PASS` | `UI_SERVIDOR_TESTE` | idêntica | apps/studio-web/src/assistant/Markdown.tsx; App.tsx:152 (origin/source); preview/src/gateway.ts:222 | nada no aceite minimo |
-| QA-01 | Testes completos e QA visual | `IMPLEMENTADA` | `LIGADA_FORA_DO_RUNTIME` | `PASS` | `PORTAO_ESTATICO` | idêntica | vitest.config.ts; apps/studio-web/playwright.config.ts; scripts/test-postgres.mjs; prompt-to-app/src/visual-qa.ts | nao ha portao que detecte enfraquecimento de assert |
+| QA-01 | Testes completos e QA visual | `IMPLEMENTADA` | `LIGADA_FORA_DO_RUNTIME` | `PASS` | `PORTAO_ESTATICO` | idêntica | vitest.config.ts; apps/studio-web/playwright.config.ts; scripts/test-postgres.mjs; prompt-to-app/src/visual-qa.ts | as quatro suites existem e rodam, e a separacao unidade/integracao/e2e/postgres e real. NAO ha portao que detecte enfraquecimento de assert, e o e2e roda a suite principal no desktop com um SUBCONJUNTO nos outros tres tamanhos — "119 em quatro tamanhos" nao e a suite inteira replicada |
 | QA-02 | Golden set e benchmarks | `PARCIAL` | `LIGADA_FORA_DO_RUNTIME` | `NOT_EXECUTED` | `PORTAO_ESTATICO` | idêntica | golden-set/; scripts/golden-set-comprehension.mjs; scripts/run-golden-set.ts | a execucao com modelo real e NOT_EXECUTED; sem medicao de custo, regressao e incerteza |
 | QA-03 | Acessibilidade, i18n e mobile | `PARCIAL` | `LIGADA_AO_PERFIL` | `PASS_PARCIAL` | `UI_SERVIDOR_TESTE` | idêntica | apps/studio-web/playwright.config.ts (4 tamanhos); theme.css; scripts/check-i18n.mjs | nao existe catalogo em ingles: so pt-BR |
 | REL-01 | Release open source | `IMPLEMENTADA` | `LIGADA_FORA_DO_RUNTIME` | `PASS` | `PORTAO_ESTATICO` | idêntica | scripts/check-release-licenses.mjs; release-provenance.mjs; build-studio-image.mjs; staging/src/http.ts | release-provenance.mjs nao e executado por nenhum passo do verify.yml |
 | REL-02 | Preservação upstream e núcleo único | `IMPLEMENTADA` | `LIGADA_FORA_DO_RUNTIME` | `PASS` | `PORTAO_ESTATICO` | idêntica | UPSTREAM.lock; scripts/check-upstream-content.mjs; check-upstream-pin.mjs | nada no aceite minimo |
-| REL-03 | Conclusão por prova, não por aparência | `IMPLEMENTADA` | `LIGADA_FORA_DO_RUNTIME` | `PASS` | `PORTAO_ESTATICO` | idêntica | scripts/check-requirements-ledger.mjs; check-constitution.mjs; docs/MASTER_REQUIREMENTS_LEDGER.md | nada no aceite minimo |
+| REL-03 | Conclusão por prova, não por aparência | `IMPLEMENTADA` | `LIGADA_FORA_DO_RUNTIME` | `PASS` | `PORTAO_ESTATICO` | idêntica | scripts/check-requirements-ledger.mjs; check-constitution.mjs; docs/MASTER_REQUIREMENTS_LEDGER.md | o portao recusa estado sem prova e exige limitacao declarada. A conclusao ampla continua nao provada: os portoes conferem a CITACAO e a forma, nao o sentido, e nenhum deles observa runtime |
 | REL-04 | Separação de mockup, dados e distribuição | `IMPLEMENTADA` | `LIGADA_FORA_DO_RUNTIME` | `PASS` | `PORTAO_ESTATICO` | idêntica | scripts/check-image-lock.mjs; capture-screenshots.mjs | nao ha portao que impeca reintroducao de dado encenado (ledger registra em C-03) |
 | INT-09 | Central de IA com testes de capacidade | `PARCIAL` | `LIGADA_AO_PERFIL` | `PASS_PARCIAL` | `INTEGRACAO_DOMINIO` | idêntica | plugins/route-health/src/service.ts:capabilitiesOf; index.ts:createRouteHealthHandler | cadastro e YAML de perfil, sem fluxo guiado; nao ha teste POR CAPACIDADE e trocar endpoint/credencial nao invalida prova |
 | INT-10 | Modelos auxiliares por finalidade | `PARCIAL` | `LIGADA_AO_PERFIL` | `PASS_PARCIAL` | `INTEGRACAO_DOMINIO` | idêntica | plugins/prompt-to-app/src/ports.ts:HarnessPromptModel; route-health/src/service.ts:chooseRoute/routeBudgetUsage | finalidades sao so intake|plan|generate e o orcamento e contabilidade posterior, sem RESERVA antes da chamada |

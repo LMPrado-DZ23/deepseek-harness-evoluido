@@ -80,9 +80,17 @@ dentro de um plugin que está montado mas que **não as exporta nem as importa**
 | `plugins/prompt-to-app/src/visual-edit.ts` | `tests/visual-edit.spec.ts` |
 | `plugins/prompt-to-app/src/handoff.ts` | `tests/handoff.spec.ts` |
 | `plugins/prompt-to-app/src/component-exit.ts` | `tests/component-exit.spec.ts` |
-| `plugins/prompt-to-app/src/research.ts` | **ninguém**, nem teste |
+| `plugins/prompt-to-app/src/research.ts` | `tests/research.spec.ts` |
 
-Teste passando ali é evidência sobre a função, **não sobre o produto**. As
+Teste passando ali é evidência sobre a função, **não sobre o produto**.
+
+> **Correção factual (17/09/2026).** A versão anterior desta tabela dizia que
+> `research.ts` não era importado por ninguém, "nem teste". Estava errado:
+> `plugins/prompt-to-app/tests/research.spec.ts:6` o importa. A revisão
+> independente apontou, e a correção entra aqui em vez de num documento novo,
+> porque a linha errada é a que alguém vai ler. O que continua verdadeiro é o
+> que importa: **não há chamador de produção**, e a existência do teste não
+> torna a pesquisa uma capacidade operacional. As
 entregas OS-83 a OS-87 são reais como decisão e como lógica; elas não são
 capacidade operacional, e o livro mestre não dizia isso com esta clareza.
 

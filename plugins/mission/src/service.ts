@@ -22,8 +22,30 @@ export class MissionError extends Error {
  */
 export type MissionSpendVerdict =
   | { readonly kind: 'NO_LIMIT' }
-  | { readonly kind: 'WITHIN'; readonly spent: number; readonly limit: number }
-  | { readonly kind: 'EXCEEDED'; readonly spent: number; readonly limit: number }
+  | {
+    readonly kind: 'WITHIN' | 'EXCEEDED'
+    /** O consumo LIQUIDADO: execuções que terminaram e relataram. */
+    readonly spent: number
+    /**
+     * O consumo JÁ RELATADO por execuções ainda em voo.
+     *
+     * Existia e era jogado fora. Uma execução em curso que já relatou 1.200
+     * tokens contava ZERO, e uma missão com teto de 1.000 respondia `WITHIN`,
+     * `spent: 0` — o teto parava de valer exatamente enquanto o dinheiro estava
+     * sendo gasto. Contar é o conserto; contar SEPARADO é o que impede a dupla
+     * contagem quando a execução terminar e o mesmo consumo virar liquidado.
+     */
+    readonly committed: number
+    /**
+     * Quantas execuções em voo ainda NÃO relataram consumo nenhum.
+     *
+     * Não é zero e não é bloqueio: uma execução que acabou de começar não tem o
+     * que relatar. É dito para que quem decide admitir trabalho saiba que a
+     * soma é um PISO, e não o total.
+     */
+    readonly unknownInFlight: number
+    readonly limit: number
+  }
   | { readonly kind: 'UNMEASURED'; readonly runId: string; readonly limit: number }
 
 /** As execuções que ainda não relataram consumo porque não terminaram. */
@@ -32,8 +54,15 @@ const RUNNING_STATUSES = new Set(['RUNNING', 'PENDING_APPROVAL'])
 /**
  * Soma o consumo das execuções desta missão e decide se cabe mais trabalho.
  *
- * Conta as TERMINADAS: uma em curso ainda não relatou consumo, e contá-la como
- * zero seria a mesma mentira que `UNMEASURED` existe para não contar.
+ * Conta as TERMINADAS como consumo liquidado e as EM VOO que já relataram como
+ * consumo comprometido — as duas somam contra o teto, e as duas aparecem
+ * separadas para que o consumo não seja contado duas vezes quando a execução em
+ * voo terminar.
+ *
+ * Pular a execução em voo era o defeito: uma revisão independente mediu teto de
+ * 1.000 com 1.200 relatados numa execução `RUNNING` e recebeu `WITHIN`,
+ * `spent: 0`. O mesmo consumo, depois de terminado, dava `EXCEEDED`. Ou seja: o
+ * teto valia depois do gasto, e não antes — que é o contrário de preventivo.
  *
  * Uma execução declarada pela missão que não aparece na lista de execuções
  * conhecidas devolve `UNMEASURED`, e não é ignorada. Ignorá-la faria a missão
@@ -51,15 +80,26 @@ export function missionSpend(
   if (limit === null) return { kind: 'NO_LIMIT' }
   const byId = new Map(runs.map(run => [run.run_id, run]))
   let spent = 0
+  let committed = 0
+  let unknownInFlight = 0
   for (const runId of mission.run_ids) {
     const run = byId.get(runId)
     if (run === undefined) return { kind: 'UNMEASURED', runId, limit }
-    if (RUNNING_STATUSES.has(run.status)) continue
     const used = run.tokens_used
+    if (RUNNING_STATUSES.has(run.status)) {
+      // Em voo SEM medição não é zero: é desconhecido, e é dito.
+      if (used === null || used === undefined) unknownInFlight += 1
+      else committed += used
+      continue
+    }
+    // Terminada e sem medição continua sendo fatal: aqui o consumo já existe e
+    // não foi relatado, que é registro incompleto — não trabalho recém-começado.
     if (used === null || used === undefined) return { kind: 'UNMEASURED', runId, limit }
     spent += used
   }
-  return spent >= limit ? { kind: 'EXCEEDED', spent, limit } : { kind: 'WITHIN', spent, limit }
+  const total = spent + committed
+  const kind = total >= limit ? 'EXCEEDED' : 'WITHIN'
+  return { kind, spent, committed, unknownInFlight, limit }
 }
 
 /**

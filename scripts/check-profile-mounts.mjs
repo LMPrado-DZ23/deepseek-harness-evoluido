@@ -57,19 +57,51 @@ export function idConvencional(pacote) {
 }
 
 /**
- * Procura a montagem de um pacote nos arquivos de perfil.
+ * Tira os comentários de um YAML, linha a linha.
  *
- * A busca é pelo NOME DO PACOTE e pelo id convencional: um perfil pode montar
- * com id próprio, e exigir o id convencional transformaria este portão numa
- * regra de nomenclatura disfarçada de regra de segurança.
+ * Existe por um achado de revisão independente: a busca era `includes()` sobre
+ * o arquivo inteiro, então **uma menção em comentário passava por montagem**.
+ * Um perfil que dissesse "# o emergency-stop NÃO é montado aqui" aprovaria o
+ * portão — o texto que explica a ausência valendo como presença.
+ *
+ * O corte é conservador: só descarta o que vem depois de `#` quando ele começa
+ * a linha ou vem depois de espaço, para não cortar `#` dentro de um valor.
+ * @param conteudo - o texto do arquivo.
+ * @returns o mesmo texto sem os comentários.
+ */
+export function semComentarios(conteudo) {
+  return conteudo.split('\n').map(linha => {
+    const semAspas = linha.replace(/'[^']*'|"[^"]*"/gu, aspas => ' '.repeat(aspas.length))
+    const corte = semAspas.search(/(?:^|\s)#/u)
+    return corte === -1 ? linha : linha.slice(0, corte)
+  }).join('\n')
+}
+
+/**
+ * Procura a montagem ESTRUTURAL de um pacote nos arquivos de perfil.
+ *
+ * Duas formas contam, e só elas: uma linha `name: '<pacote>'`, que é como o
+ * perfil nomeia o pacote a montar, e um item de lista `- id: <id>`, que é como
+ * ele nomeia a linha montada. Qualquer outra aparição — comentário, prosa,
+ * dependência no `package.json` — deixou de contar.
+ *
+ * Isto continua sendo análise de TEXTO, e não composição resolvida: o portão
+ * prova que a entrada está escrita no perfil, não que o serviço subiu. Essa
+ * segunda prova exige carregar o runtime, está declarada como pendente e não é
+ * substituída por este portão.
  * @param pacote - nome do pacote npm.
  * @param textos - pares [rótulo, conteúdo] dos arquivos de montagem.
  * @returns o rótulo do arquivo onde está montado, ou `null`.
  */
 export function ondeMontado(pacote, textos) {
+  // Em modo `u`, escapar um caractere que nao precisa e erro de sintaxe: a
+  // lista e exatamente a dos metacaracteres, e `-`, `@` e `/` ficam de fora.
+  const escapaRegex = texto => texto.replace(/[.*+?^${}()|[\]\\]/gu, carater => `\\${carater}`)
+  const porNome = new RegExp(`(?:^|\\n)\\s*(?:-\\s*)?name:\\s*['"]?${escapaRegex(pacote)}['"]?\\s*$`, 'mu')
+  const porId = new RegExp(`(?:^|\\n)\\s*-\\s*id:\\s*${idConvencional(pacote)}\\s*$`, 'mu')
   for (const [rotulo, conteudo] of textos) {
-    if (conteudo.includes(`'${pacote}'`) || conteudo.includes(`"${pacote}"`)) return rotulo
-    if (conteudo.includes(`id: ${idConvencional(pacote)}\n`) || conteudo.includes(`id: ${idConvencional(pacote)}`)) return rotulo
+    const limpo = semComentarios(conteudo)
+    if (porNome.test(limpo) || porId.test(limpo)) return rotulo
   }
   return null
 }
@@ -106,12 +138,20 @@ if (process.argv.includes('--self-test')) {
   if (semMontagem.length !== 1) { process.stderr.write('self-test: nao pegou a dependencia nao montada\n'); process.exit(1) }
   const comMontagem = achados({ '@dz23-studio/emergency-stop': 'workspace:*' }, [['perfil', "name: '@dz23-studio/emergency-stop'"]])
   if (comMontagem.length !== 0) { process.stderr.write('self-test: reprovou uma montagem valida\n'); process.exit(1) }
-  const porId = achados({ '@dz23-studio/mission': 'workspace:*' }, [['perfil', '- id: dz23-studio-mission']])
+  const porId = achados({ '@dz23-studio/mission': 'workspace:*' }, [['perfil', '    - id: dz23-studio-mission']])
   if (porId.length !== 0) { process.stderr.write('self-test: nao reconheceu montagem pelo id convencional\n'); process.exit(1) }
+  // O achado da revisao independente: menção em COMENTÁRIO nao e montagem.
+  const soComentario = achados({ '@dz23-studio/emergency-stop': 'workspace:*' },
+    [['perfil', "    # o name: '@dz23-studio/emergency-stop' sai daqui na proxima versao"]])
+  if (soComentario.length !== 1) { process.stderr.write('self-test: aceitou comentario como montagem\n'); process.exit(1) }
+  // E prosa solta tambem nao.
+  const soProsa = achados({ '@dz23-studio/emergency-stop': 'workspace:*' },
+    [['perfil', 'este perfil usa @dz23-studio/emergency-stop quando alguem montar']])
+  if (soProsa.length !== 1) { process.stderr.write('self-test: aceitou prosa como montagem\n'); process.exit(1) }
   // Uma dependência que não é nossa não é problema deste portão.
   const alheia = achados({ '@deepseek-ai/dsh-base': 'workspace:*' }, [['perfil', '']])
   if (alheia.length !== 0) { process.stderr.write('self-test: reclamou de pacote de terceiro\n'); process.exit(1) }
-  process.stdout.write('PROFILE_MOUNTS_SELF_TEST=PASS checks=4\n')
+  process.stdout.write('PROFILE_MOUNTS_SELF_TEST=PASS checks=6\n')
   process.exit(0)
 }
 

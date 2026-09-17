@@ -56,7 +56,7 @@ describe('o adaptador acrescenta o veredito que o motor de missao nao tem', () =
   it('missao existente devolve o veredito do motor, sem reinterpretar', async () => {
     const port = missionBudgetPort(repositorio(mission()), () => [run('r1', 300)], async () => undefined)
     await expect(port.verdictFor({ orgId: 'org-a', tenantId: 'ws-a' }, 'missao-1'))
-      .resolves.toEqual({ kind: 'WITHIN', spent: 300, limit: 1_000 })
+      .resolves.toEqual({ kind: 'WITHIN', spent: 300, committed: 0, unknownInFlight: 0, limit: 1_000 })
   })
 
   it('missao sem teto declarado continua NO_LIMIT, e nao vira "cabe"', async () => {

@@ -46,6 +46,15 @@ export interface EmergencyStopGuard {
 export interface PromptToAppScopeCancellation {
   readonly requested: number
   readonly alreadyFinished: number
+  /**
+   * Os projetos para os quais o pedido de parada SAIU, um a um.
+   *
+   * Existe porque a contagem sozinha não permite dizer a verdade na tela. O
+   * registro de trabalhos responde `requested` — a palavra é essa —, e quem
+   * chama precisa poder NOMEAR o que foi pedido para relatar como pendência,
+   * em vez de somar tudo num número chamado "cancelado".
+   */
+  readonly requestedProjects: readonly string[]
 }
 
 export class PromptToAppJobService {
@@ -157,14 +166,15 @@ export class PromptToAppJobService {
    * @returns quantas pararam por pedido e quantas já tinham terminado.
    */
   cancelScope(scope: { readonly orgId: string; readonly tenantId: string }): PromptToAppScopeCancellation {
-    let requested = 0
     let alreadyFinished = 0
-    for (const active of [...this.#active.values()]) {
+    const requestedProjects: string[] = []
+    for (const [key, active] of [...this.#active.entries()]) {
       if (active.actor.orgId !== scope.orgId || active.actor.tenantId !== scope.tenantId) continue
       const outcome = this.options.registry.kill(active.jobId, active.owner, t('pipeline.cancelledReason'))
-      if (outcome === 'requested') requested += 1; else alreadyFinished += 1
+      if (outcome === 'requested') requestedProjects.push(key.slice(`${scope.orgId}:${scope.tenantId}:`.length))
+      else alreadyFinished += 1
     }
-    return { requested, alreadyFinished }
+    return { requested: requestedProjects.length, alreadyFinished, requestedProjects }
   }
 }
 

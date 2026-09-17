@@ -177,8 +177,8 @@ describe('o teto e da MISSAO, e ele atravessa execucoes de equipes diferentes', 
   const mission = { max_total_tokens: 1_000, run_ids: ['r1', 'r2'] }
 
   it('soma o consumo de execucoes que nao pertencem a mesma equipe', () => {
-    expect(missionSpend(mission, [run('r1', 300), run('r2', 400)])).toEqual({ kind: 'WITHIN', spent: 700, limit: 1_000 })
-    expect(missionSpend(mission, [run('r1', 600), run('r2', 400)])).toEqual({ kind: 'EXCEEDED', spent: 1_000, limit: 1_000 })
+    expect(missionSpend(mission, [run('r1', 300), run('r2', 400)])).toEqual({ kind: 'WITHIN', spent: 700, committed: 0, unknownInFlight: 0, limit: 1_000 })
+    expect(missionSpend(mission, [run('r1', 600), run('r2', 400)])).toEqual({ kind: 'EXCEEDED', spent: 1_000, committed: 0, unknownInFlight: 0, limit: 1_000 })
   })
 
   it('execucao sem consumo relatado e UNMEASURED, e nunca zero', () => {
@@ -194,9 +194,26 @@ describe('o teto e da MISSAO, e ele atravessa execucoes de equipes diferentes', 
     expect(missionSpend(mission, [run('r1', 10)])).toEqual({ kind: 'UNMEASURED', runId: 'r2', limit: 1_000 })
   })
 
-  it('execucao em curso nao conta, porque ainda nao relatou nada', () => {
-    expect(missionSpend(mission, [run('r1', 300), run('r2', null, 'RUNNING')])).toEqual({ kind: 'WITHIN', spent: 300, limit: 1_000 })
-    expect(missionSpend(mission, [run('r1', 300), run('r2', null, 'PENDING_APPROVAL')])).toEqual({ kind: 'WITHIN', spent: 300, limit: 1_000 })
+  it('execucao em curso SEM relato nao vira zero: ela e contada como DESCONHECIDA', () => {
+    // O teste dizia "nao conta, porque ainda nao relatou nada", e a primeira
+    // metade da frase estava certa pelo motivo errado: nao contar e diferente
+    // de somar zero em silencio. Agora o desconhecido aparece no veredito, e
+    // quem admite trabalho sabe que a soma e um PISO.
+    expect(missionSpend(mission, [run('r1', 300), run('r2', null, 'RUNNING')]))
+      .toEqual({ kind: 'WITHIN', spent: 300, committed: 0, unknownInFlight: 1, limit: 1_000 })
+    expect(missionSpend(mission, [run('r1', 300), run('r2', null, 'PENDING_APPROVAL')]))
+      .toEqual({ kind: 'WITHIN', spent: 300, committed: 0, unknownInFlight: 1, limit: 1_000 })
+  })
+
+  it('execucao em voo QUE JA RELATOU conta contra o teto — o achado da revisao independente', () => {
+    // Medido de fora: teto 1.000, uma execucao RUNNING com 1.200 relatados
+    // devolvia WITHIN, spent 0. O teto so valia depois do gasto.
+    expect(missionSpend({ max_total_tokens: 1_000, run_ids: ['r1'] }, [run('r1', 1_200, 'RUNNING')]))
+      .toEqual({ kind: 'EXCEEDED', spent: 0, committed: 1_200, unknownInFlight: 0, limit: 1_000 })
+    // E o consumo em voo soma COM o liquidado, sem virar a mesma parcela duas
+    // vezes: os dois campos existem separados por isso.
+    expect(missionSpend(mission, [run('r1', 600), run('r2', 500, 'RUNNING')]))
+      .toEqual({ kind: 'EXCEEDED', spent: 600, committed: 500, unknownInFlight: 0, limit: 1_000 })
   })
 
   it('sem teto declarado o veredito e NO_LIMIT, e nao "cabe"', () => {

@@ -54,7 +54,7 @@ describe('as partes interrompidas pelo botão', () => {
 
   it('conta o que parou e nomeia o que não pôde ser provado morto', async () => {
     const cancelScope = {
-      promptToApp: vi.fn(() => ({ requested: 2, alreadyFinished: 1 })),
+      promptToApp: vi.fn(() => ({ requested: 2, alreadyFinished: 1, requestedProjects: ['projeto-1', 'projeto-2'] })),
       agents: vi.fn(() => ({ cancelled: 1, unproven: [{ runId: 'run-7', provider: 'codex' }] })),
       hub: vi.fn(() => ['int-1', 'int-2']),
     }
@@ -64,7 +64,14 @@ describe('as partes interrompidas pelo botão', () => {
           : { service: { cancelScope: cancelScope.hub } },
     } as unknown as Context
     const [creations, agents, integrations] = await Promise.all(emergencyStopSurfaces(ctx).map(surface => surface.cancel(scope)))
-    expect(creations?.cancelled).toBe(2)
+    // ESTA ASSERÇÃO VIROU DE LADO, e a inversão é a correção. Ela exigia
+    // `cancelled: 2` para duas criações cujo pedido de parada apenas SAIU — o
+    // registro de trabalhos responde `'requested' | 'already-finished'`, e
+    // `requested` quer dizer que o pedido foi feito, não que a criação parou.
+    // A superfície de integrações, três linhas abaixo, já se recusava a contar
+    // assim; agora as três são coerentes.
+    expect(creations?.cancelled).toBe(0)
+    expect(creations?.unproven.map(item => item.what)).toEqual(['projeto-1', 'projeto-2'])
     expect(cancelScope.promptToApp).toHaveBeenCalledWith(scope)
     // Um assistente externo recebeu o pedido; o Studio não consegue provar que
     // o processo dele terminou, e a tela precisa saber disso.

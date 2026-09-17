@@ -157,11 +157,15 @@ describe('E-11: a parada de emergência alcança as criações', () => {
     await jobs.start(actor, 'projeto-2', { generate: vi.fn() })
     await jobs.start({ ...actor, orgId: 'org-b', tenantId: 'tenant-b' }, 'projeto-3', { generate: vi.fn() })
 
-    expect(jobs.cancelScope({ orgId: 'org-a', tenantId: 'tenant-a' })).toEqual({ requested: 2, alreadyFinished: 0 })
+    // Os projetos vêm NOMEADOS, e não só contados: a parada de emergência
+    // precisa poder dizer na tela o que foi pedido e ainda não terminou.
+    expect(jobs.cancelScope({ orgId: 'org-a', tenantId: 'tenant-a' }))
+      .toEqual({ requested: 2, alreadyFinished: 0, requestedProjects: ['projeto-1', 'projeto-2'] })
     expect(killed).toHaveLength(2)
     // O trabalho da outra organização continua: uma parada nunca atravessa o
     // recorte de quem a acionou.
-    expect(jobs.cancelScope({ orgId: 'org-b', tenantId: 'tenant-b' })).toEqual({ requested: 1, alreadyFinished: 0 })
+    expect(jobs.cancelScope({ orgId: 'org-b', tenantId: 'tenant-b' }))
+      .toEqual({ requested: 1, alreadyFinished: 0, requestedProjects: ['projeto-3'] })
   })
 
   it('um trabalho que já terminou é contado como tal, não como cancelado', async () => {
@@ -178,6 +182,7 @@ describe('E-11: a parada de emergência alcança as criações', () => {
       createId: () => 'run-1',
     })
     await jobs.start(actor, 'projeto-1', { generate: vi.fn() })
-    expect(jobs.cancelScope({ orgId: 'org-a', tenantId: 'tenant-a' })).toEqual({ requested: 0, alreadyFinished: 1 })
+    expect(jobs.cancelScope({ orgId: 'org-a', tenantId: 'tenant-a' }))
+      .toEqual({ requested: 0, alreadyFinished: 1, requestedProjects: [] })
   })
 })

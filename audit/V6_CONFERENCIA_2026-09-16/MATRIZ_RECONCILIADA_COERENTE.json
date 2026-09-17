@@ -21,8 +21,8 @@
  "regra_de_transferencia": "Nenhum veredito foi transferido por igualdade de ID. As 98 obrigacoes identicas mantiveram o veredito porque a OBRIGACAO e o ACEITE sao literalmente os mesmos nos dois pacotes (conferido por comparacao de texto). Os 16 EVO de B foram reavaliados; onde a obrigacao de B corresponde a de algum EVO da Filtrada, o campo ids_de_origem_no_pacote_filtrada diz de onde veio a EVIDENCIA, e o veredito foi reescrito contra o aceite de B.",
  "total": 114,
  "contagem_implementacao": {
-  "IMPLEMENTADA": 24,
-  "PARCIAL": 54,
+  "IMPLEMENTADA": 23,
+  "PARCIAL": 55,
   "AUSENTE": 36
  },
  "contagem_integracao": {
@@ -73,7 +73,7 @@
    "causa_do_nao_executado": "NAO_APLICAVEL",
    "arquivos": "apps/studio-web/src/shell/WorkspaceShell.tsx; shell/rail.ts; theme.css; home/HomeScreen.tsx",
    "testes": "src/shell/Rail.spec.tsx; tests/mobile-nav.spec.ts; tests/accessibility.spec.ts",
-   "lacuna": "nada — trilho com destinos reais e casca unica em todas as telas",
+   "lacuna": "a casca unica, o trilho e a marca estao no produto e provados por e2e nos quatro tamanhos. NAO encerra o workspace aprovado: Agendado e Biblioteca ausentes, Habilidades e Plugins agrupados num destino so, tela de tarefa sem compositor inferior e sem conversa persistente, e nao ha area de preferencias/configuracoes",
    "origem_do_codigo": "ALTERADO_NESTA_EXECUCAO"
   },
   {
@@ -847,15 +847,15 @@
    "ids_de_origem_no_pacote_filtrada": [
     "AGT-04"
    ],
-   "implementacao": "IMPLEMENTADA",
+   "implementacao": "PARCIAL",
    "integracao": "LIGADA_AO_PERFIL",
-   "verificacao": "PASS",
+   "verificacao": "PASS_PARCIAL",
    "tipo_de_prova": "INTEGRACAO_DOMINIO",
    "causa_do_nao_executado": "NAO_APLICAVEL",
-   "arquivos": "plugins/prompt-to-app/src/independent-review.ts:reviewRun/blocksVerification",
-   "testes": "prompt-to-app/tests/independent-review.spec.ts",
-   "lacuna": "e separacao de MODULO no mesmo pipeline, nao um revisor-agente distinto",
-   "origem_do_codigo": "PREEXISTENTE"
+   "arquivos": "plugins/prompt-to-app/src/independent-review.ts:reviewRun/DEFAULT_STEP_CONTRACT/attestationWellFormed; pipeline.ts:609 (passa RUN_STEPS)",
+   "testes": "prompt-to-app/tests/independent-review.spec.ts (27); pipeline.spec.ts (registro que perde etapa e bloqueado)",
+   "lacuna": "REBAIXADO de IMPLEMENTADA por revisao independente: a funcao percorria as etapas PRESENTES, entao steps vazio ou so build saia CONFIRMED, e as atestacoes eram conferidas por PRESENCA de string. Corrigido (contrato de etapas por perfil + forma do resumo conferida), mas continua PARCIAL: a separacao e de MODULO dentro do mesmo pipeline, e a validacao e da FORMA do registro, nao dos artefatos em si",
+   "origem_do_codigo": "ALTERADO_NESTA_EXECUCAO"
   },
   {
    "id": "AGT-05",
@@ -878,9 +878,9 @@
    "verificacao": "PASS_PARCIAL",
    "tipo_de_prova": "PORTAO_ESTATICO",
    "causa_do_nao_executado": "DEPENDENCIA_EXTERNA",
-   "arquivos": "dsh-home/profiles/studio/cordis.patch.yml (monta dz23-studio-emergency-stop, OS-99); plugins/emergency-stop/**; apps/studio-web/src/EmergencyStop.tsx",
-   "testes": "scripts/check-profile-mounts.mjs --self-test; emergency-stop/tests/http.spec.ts",
-   "lacuna": "OS-99 montou o plugin e gate:profile-mounts impede que ele saia em silencio, mas a montagem e provada por PORTAO ESTATICO, nao por runtime: falta carregar o perfil Cordis real, acionar a parada, comprovar bloqueio de novos disparos e tratar cancelamento em voo, reservas e estado desconhecido. Nao existe PAUSA, so cancelamento",
+   "arquivos": "dsh-home/profiles/studio/cordis.patch.yml (monta o plugin, OS-99); plugins/emergency-stop/src/index.ts:emergencyStopSurfaces; plugins/prompt-to-app/src/jobs.ts:cancelScope",
+   "testes": "emergency-stop/tests/surfaces.spec.ts (5); scripts/check-profile-mounts.mjs --self-test (6)",
+   "lacuna": "PEDIR nao e mais anunciado como CANCELAR: a superficie das criacoes devolvia `cancelled: outcome.requested` com `unproven: []`, e o registro de trabalhos responde literalmente `requested|already-finished`. Agora o pedido vira pendencia NOMEADA. Continua PARCIAL: falta apertar o botao no perfil Cordis real com tarefa em voo, restart e nova tentativa de disparo, e nao existe PAUSA — so cancelamento. A escrita da parada e get+put, nao CAS: coordenacao entre instancias nao esta provada",
    "origem_do_codigo": "ALTERADO_NESTA_EXECUCAO"
   },
   {
@@ -1265,10 +1265,10 @@
    "verificacao": "PASS_PARCIAL",
    "tipo_de_prova": "INTEGRACAO_DOMINIO",
    "causa_do_nao_executado": "NAO_APLICAVEL",
-   "arquivos": "plugins/mission/src/service.ts:missionSpend; budget-port.ts; agent-team/src/service.ts:#launchReady",
-   "testes": "mission/tests/budget-port.spec.ts",
-   "lacuna": "sem RESERVA ATOMICA antes do disparo: missionSpend pula execucoes RUNNING, entao disparos concorrentes passam pelo mesmo teto",
-   "origem_do_codigo": "PREEXISTENTE"
+   "arquivos": "plugins/mission/src/service.ts:missionSpend (spent + committed + unknownInFlight); budget-port.ts; agent-team/src/service.ts:#launchReady",
+   "testes": "mission/tests/service.spec.ts (execucao em voo que ja relatou conta contra o teto)",
+   "lacuna": "a execucao EM VOO que ja relatou consumo passou a contar contra o teto — antes era pulada, e teto 1.000 com 1.200 relatados respondia WITHIN spent 0. Continua PARCIAL: nao ha RESERVA com estimativa antes do disparo, porque a estimativa depende da tabela de precos, que e decisao do Prado (T-19)",
+   "origem_do_codigo": "ALTERADO_NESTA_EXECUCAO"
   },
   {
    "id": "OPS-03",
@@ -1750,7 +1750,7 @@
    "causa_do_nao_executado": "NAO_APLICAVEL",
    "arquivos": "vitest.config.ts; apps/studio-web/playwright.config.ts; scripts/test-postgres.mjs; prompt-to-app/src/visual-qa.ts",
    "testes": "prompt-to-app/tests/visual-qa.spec.ts; tests/accessibility.spec.ts",
-   "lacuna": "nao ha portao que detecte enfraquecimento de assert",
+   "lacuna": "as quatro suites existem e rodam, e a separacao unidade/integracao/e2e/postgres e real. NAO ha portao que detecte enfraquecimento de assert, e o e2e roda a suite principal no desktop com um SUBCONJUNTO nos outros tres tamanhos — \"119 em quatro tamanhos\" nao e a suite inteira replicada",
    "origem_do_codigo": "PREEXISTENTE"
   },
   {
@@ -1923,7 +1923,7 @@
    "causa_do_nao_executado": "NAO_APLICAVEL",
    "arquivos": "scripts/check-requirements-ledger.mjs; check-constitution.mjs; docs/MASTER_REQUIREMENTS_LEDGER.md",
    "testes": "--self-test dos dois portoes",
-   "lacuna": "nada no aceite minimo",
+   "lacuna": "o portao recusa estado sem prova e exige limitacao declarada. A conclusao ampla continua nao provada: os portoes conferem a CITACAO e a forma, nao o sentido, e nenhum deles observa runtime",
    "origem_do_codigo": "ALTERADO_NESTA_EXECUCAO"
   },
   {
@@ -3478,5 +3478,22 @@
    "lacuna": "OBRIGACAO NOVA: nao existe empresa-piloto, logo nao ha jornada empresarial compartilhando evidencia com correcao do produto",
    "origem_do_codigo": "PREEXISTENTE"
   }
- ]
+ ],
+ "revisao_independente": {
+  "data": "2026-09-17",
+  "documento": "DZ23_PARECER_INDEPENDENTE_OS99.md",
+  "achados_aplicados": [
+   "R01 AGT-04",
+   "R02 OPS-02",
+   "R03 AGT-05",
+   "R04 gate:profile-mounts",
+   "R07 correcao factual research.ts"
+  ],
+  "achados_reconhecidos_sem_correcao_nesta_fatia": [
+   "R05 rotulagem de prova",
+   "R06 workspace completo",
+   "R08 Modo Empresa",
+   "R09 RLS nao ativada"
+  ]
+ }
 }

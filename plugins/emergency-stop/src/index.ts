@@ -88,7 +88,24 @@ export function emergencyStopSurfaces(ctx: Context): readonly StopSurface[] {
         const runtime = ctx.get('studioPromptToApp')
         if (runtime?.jobs === undefined) return { surface: t('surfaces.promptToApp'), cancelled: 0, unproven: [] }
         const outcome = runtime.jobs.cancelScope(scope)
-        return { surface: t('surfaces.promptToApp'), cancelled: outcome.requested, unproven: [] }
+        return {
+          surface: t('surfaces.promptToApp'),
+          // ZERO, e não `outcome.requested`. O registro de trabalhos responde
+          // literalmente `'requested' | 'already-finished'`: ele diz que o
+          // pedido SAIU, não que a criação terminou. Contar pedido como
+          // cancelamento era anunciar término antes do recibo — a mesma mentira
+          // que a superfície de integrações já se recusava a contar, no mesmo
+          // arquivo, quinze linhas abaixo.
+          //
+          // As já terminadas também não entram: elas não pararam por causa do
+          // botão, e somá-las inflaria o número que a pessoa lê na hora em que
+          // ela mais precisa que ele seja exato.
+          cancelled: 0,
+          unproven: outcome.requestedProjects.map(projeto => ({
+            what: projeto,
+            why: t('surfaces.creationRequested', { projeto }),
+          })),
+        }
       },
     },
     {

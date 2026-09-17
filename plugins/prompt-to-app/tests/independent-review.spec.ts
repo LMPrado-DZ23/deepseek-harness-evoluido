@@ -8,9 +8,27 @@ import {
   reviewRun,
 } from '../src/independent-review.js'
 
-const attestations = Object.fromEntries(REQUIRED_ATTESTATIONS.map(name => [name, 'x'.repeat(64)]))
+/**
+ * As atestacoes com a FORMA de prova.
+ *
+ * Eram `'x'.repeat(64)` — sessenta e quatro letras que nao sao hexadecimal, e
+ * que passavam porque a revisao so conferia se a string existia. A revisao
+ * independente apanhou isto: conferir presenca aprova `acceptance_sha256: "sim"`.
+ */
+const attestations = Object.fromEntries(REQUIRED_ATTESTATIONS.map(name => [
+  name, name === 'builder_image_digest' ? `sha256:${'a'.repeat(64)}` : 'a'.repeat(64),
+]))
 
-/** Uma execucao aprovada com TODA a prova no lugar. */
+/**
+ * Uma execucao aprovada com TODA a prova no lugar.
+ *
+ * As QUATRO etapas do construtor, e nao duas: o contrato padrao e
+ * `install/build/test/e2e`, e uma execucao que nao registrou `install` e `e2e`
+ * nao tem como sustentar que o aplicativo foi instalado e exercitado no
+ * navegador. A fixture antiga trazia so `build` e `test` e mesmo assim saia
+ * CONFIRMED — porque a revisao olhava as etapas PRESENTES e nunca perguntava
+ * quais deviam estar la.
+ */
 function approved(overrides: Partial<ReviewedRun> = {}): ReviewedRun {
   return {
     state: 'PASSED', stage: 'verify',
@@ -18,15 +36,21 @@ function approved(overrides: Partial<ReviewedRun> = {}): ReviewedRun {
     artifact_sha256: 'a'.repeat(64),
     template_integrity: 'VERIFIED',
     attestations,
-    steps: [{ step: 'build', state: 'PASSED' }, { step: 'test', state: 'PASSED' }],
+    steps: [
+      { step: 'install', state: 'PASSED' }, { step: 'build', state: 'PASSED' },
+      { step: 'test', state: 'PASSED' }, { step: 'e2e', state: 'PASSED' },
+    ],
     failure_code: null,
     ...overrides,
   }
 }
 
 describe('reviewRun — o caminho confirmado', () => {
-  it('prova completa sustenta a afirmacao', () => {
-    expect(reviewRun(approved())).toEqual({ verdict: 'CONFIRMED', problems: [], notAutomated: 0, passed: 1 })
+  it('prova completa sustenta a afirmacao, e o veredito DIZ contra qual contrato', () => {
+    const result = reviewRun(approved())
+    expect(result).toMatchObject({ verdict: 'CONFIRMED', problems: [], notAutomated: 0, passed: 1 })
+    // Um `CONFIRMED` que nao diga contra o que foi conferido e opiniao.
+    expect(result.contract).toEqual(['install', 'build', 'test', 'e2e'])
   })
 
   it('execucao que NAO afirmou aprovacao sai como NAO REVISADA, e nunca confirmada', () => {
@@ -139,10 +163,49 @@ describe('reviewRun — prova ausente nunca vira prova', () => {
     expect(result.problems).toContainEqual({ code: 'STEP_NOT_PASSED', subject: 'e2e' })
   })
 
-  it('lista de passos AUSENTE nao e acusada: ela e anterior ao registro de passos', () => {
-    // Execucoes antigas nao tem passos. Acusa-las diria que algo falta onde o
-    // que existe e so uma versao mais velha do registro.
-    expect(reviewRun(approved({ steps: undefined })).verdict).toBe('CONFIRMED')
+  it('lista de passos AUSENTE deixa de confirmar: sem ela nao ha o que conferir contra o perfil', () => {
+    // ESTE TESTE VIROU DE LADO, e a inversao e a correcao. Ele afirmava que a
+    // ausencia da lista "nao e acusada", porque execucoes antigas nao tem
+    // passos. Era verdade sobre o REGISTRO e falso sobre a REVISAO: ser antiga
+    // explica por que a prova falta, nao autoriza confirmar sem ela. Uma
+    // revisao independente que confirma o que nao pode conferir e a
+    // autoavaliacao de volta, com outro nome.
+    const result = reviewRun(approved({ steps: undefined }))
+    expect(result.verdict).toBe('INCONCLUSIVE')
+    expect(result.problems).toEqual([{ code: 'STEPS_NOT_RECORDED', subject: 'steps' }])
+  })
+
+  it('etapa EXIGIDA e ausente do registro nao confirma — o achado que motivou o contrato', () => {
+    // Estes dois registros saiam CONFIRMED: lista vazia, e so `build`.
+    expect(reviewRun(approved({ steps: [] })).verdict).toBe('INCONCLUSIVE')
+    const soBuild = reviewRun(approved({ steps: [{ step: 'build', state: 'PASSED' }] }))
+    expect(soBuild.verdict).toBe('INCONCLUSIVE')
+    expect(soBuild.problems.map(problem => problem.subject).sort()).toEqual(['e2e', 'install', 'test'])
+  })
+
+  it('o contrato do PERFIL manda, e um perfil menor confirma o que ele exige', () => {
+    // Um perfil sem navegador nao tem e2e, e exigi-lo reprovaria uma execucao
+    // completa para aquele perfil. O contrato vem de quem chama; o que a
+    // revisao nao pode e descobri-lo a partir do que foi gravado.
+    const semE2e = reviewRun(approved({ steps: [
+      { step: 'install', state: 'PASSED' }, { step: 'build', state: 'PASSED' }, { step: 'test', state: 'PASSED' },
+    ] }), ['install', 'build', 'test'])
+    expect(semE2e.verdict).toBe('CONFIRMED')
+    expect(semE2e.contract).toEqual(['install', 'build', 'test'])
+  })
+
+  it('atestacao com a forma errada nao sustenta nada', () => {
+    // `acceptance_sha256: 'sim'` passava: a revisao conferia se a string
+    // existia, nao se ela era um resumo.
+    const torta = reviewRun(approved({ attestations: { ...attestations, acceptance_sha256: 'sim' } }))
+    expect(torta.verdict).toBe('INCONCLUSIVE')
+    expect(torta.problems).toContainEqual({ code: 'ATTESTATION_MALFORMED', subject: 'acceptance_sha256' })
+    // O digest da imagem tem forma PROPRIA: um sha256 solto nao serve.
+    const semPrefixo = reviewRun(approved({ attestations: { ...attestations, builder_image_digest: 'a'.repeat(64) } }))
+    expect(semPrefixo.problems).toContainEqual({ code: 'ATTESTATION_MALFORMED', subject: 'builder_image_digest' })
+    // E a impressao do artefato tambem e conferida na forma.
+    expect(reviewRun(approved({ artifact_sha256: 'nao-e-um-resumo' })).problems)
+      .toContainEqual({ code: 'ATTESTATION_MALFORMED', subject: 'artifact_sha256' })
   })
 })
 

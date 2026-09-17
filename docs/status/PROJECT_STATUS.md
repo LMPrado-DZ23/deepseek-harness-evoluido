@@ -343,6 +343,26 @@ produto existe para não fazer.
     gravava de forma síncrona e por isso aprovava um serviço **sem
     serialização**.
 
+31. **OS-101 — quatro achados do parecer independente, corrigidos na causa.**
+    Uma revisão externa confrontou os arquivos enviados com as alegações da
+    matriz e mediu o comportamento. Não apontou opinião: apontou defeito, com o
+    número junto.
+    (R01) A revisão independente percorria as etapas **presentes**, então
+    `steps: []` ou só `build/PASSED` saía `CONFIRMED`, e as atestações eram
+    conferidas por **presença de string**. Agora há contrato de etapas por
+    perfil e a forma do resumo é conferida. **`AGT-04` foi rebaixado de
+    `IMPLEMENTADA` para `PARCIAL`** — e continua `PARCIAL` depois da correção.
+    (R02) O teto da missão pulava execução em voo: 1.200 relatados contra teto
+    de 1.000 respondia `WITHIN, spent: 0`. O teto valia **depois** do gasto.
+    (R03) A parada anunciava `cancelled` o que o registro de trabalhos chama de
+    `requested`. Pedir não é provar.
+    (R04) O portão de montagem aceitava **menção em comentário** como montagem.
+    E a lição veio da falsificação: a sabotagem que tirava o contrato do
+    `pipeline.ts` **sobreviveu** na primeira tentativa. A correção estava certa
+    e a ligação com quem decide a entrega não estava sendo exercitada.
+    Seguem abertos, do mesmo parecer: rotulagem de prova, workspace completo,
+    Modo Empresa e RLS não ativada.
+
 ## Estado do DAG
 
 **32 DONE, 3 PARCIAL, 2 BLOCKED.** As cinco que restam **não têm engenharia

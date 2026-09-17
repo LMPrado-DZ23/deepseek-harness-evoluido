@@ -139,7 +139,7 @@ describe('a jornada inteira pela rota', () => {
     await f.criar()
     await f.request('/missions/m1/criteria/suite', { method: 'PATCH', body: JSON.stringify({ state: 'UNPROVEN' }) })
     const lista = await (await f.request('/missions')).json() as { missions: readonly { spend: unknown }[] }
-    expect(lista.missions[0]!.spend).toEqual({ kind: 'WITHIN', spent: 0, limit: 1_000 })
+    expect(lista.missions[0]!.spend).toEqual({ kind: 'WITHIN', spent: 0, committed: 0, unknownInFlight: 0, limit: 1_000 })
     expect([...f.repository.rows.values()][0]).not.toHaveProperty('spend')
   })
 

@@ -1,5 +1,6 @@
 import { type AttemptOutcome, convergenceOf, repeatingReason, shouldStopEarly } from './convergence.js'
 import { blocksVerification, reviewMessage, reviewRun } from './independent-review.js'
+import { RUN_STEPS } from './run-report.js'
 import { telasIniciaisVerdict } from './visual-qa.js'
 import { CROSS_RUN_FAILURE_WINDOW_DAYS, FailureMemory, seedCorrection } from './failure-memory.js'
 import { createHash, randomUUID } from 'node:crypto'
@@ -605,8 +606,12 @@ export class PromptToAppPipeline {
         const review = persisted === undefined
           // O registro que acabou de ser gravado nao foi encontrado. Isso nao e
           // "sem problemas": e a propria prova sumindo entre escrever e ler.
-          ? { verdict: 'INCONCLUSIVE' as const, problems: [{ code: 'NO_CHECKS' as const, subject: 'run' }], notAutomated: 0, passed: 0 }
-          : reviewRun(persisted)
+          ? { verdict: 'INCONCLUSIVE' as const, problems: [{ code: 'NO_CHECKS' as const, subject: 'run' }], notAutomated: 0, passed: 0, contract: RUN_STEPS }
+          // O CONTRATO vem de `RUN_STEPS`, que e a mesma lista que o relatorio
+          // usa para desenhar os quatro passos do construtor. A revisao passa a
+          // perguntar quais etapas DEVIAM estar la, e nao so olhar as que
+          // vieram: com `steps: []` ou so `build`, o veredito era CONFIRMED.
+          : reviewRun(persisted, RUN_STEPS)
         if (blocksVerification(review)) {
           finalFailureState = 'TESTS_FAILED'
           reviewNotice = reviewMessage(review)

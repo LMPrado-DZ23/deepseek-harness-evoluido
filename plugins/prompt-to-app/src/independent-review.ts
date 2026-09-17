@@ -69,6 +69,26 @@ export interface ReviewProblem {
     | 'ATTESTATION_MISSING'
     | 'STEP_NOT_PASSED'
     | 'FAILURE_CODE_ON_PASS'
+    /**
+     * O perfil exige esta etapa e ela NAO ESTA no registro.
+     *
+     * Este codigo existe por causa de um achado de revisao independente: o laco
+     * percorria `run.steps ?? []`, entao um registro com `steps: []` — ou com
+     * `build` sozinho — nao produzia problema nenhum e saia CONFIRMED. A
+     * revisao conferia as etapas PRESENTES e nunca perguntava quais deviam
+     * estar la. Ausencia de etapa virava aprovacao, que e a forma mais cara de
+     * "ausencia de prova vira prova".
+     */
+    | 'STEP_MISSING'
+    /** Nem a LISTA de etapas foi gravada: nao ha o que conferir contra o perfil. */
+    | 'STEPS_NOT_RECORDED'
+    /**
+     * A atestacao existe, mas nao TEM A FORMA de uma prova.
+     *
+     * Conferir presenca de string aprova `acceptance_sha256: "sim"`. O resumo
+     * ou e um sha256 de 64 digitos, ou nao e resumo de coisa nenhuma.
+     */
+    | 'ATTESTATION_MALFORMED'
   /** O que exatamente esta faltando ou contradizendo, para quem for conferir. */
   readonly subject: string
 }
@@ -76,9 +96,42 @@ export interface ReviewProblem {
 export interface ReviewResult {
   readonly verdict: ReviewVerdict
   readonly problems: readonly ReviewProblem[]
+  /**
+   * As etapas que o PERFIL exigia desta execucao.
+   *
+   * Sai no resultado para que o veredito possa ser lido sem abrir o codigo: um
+   * `CONFIRMED` que nao diga contra qual contrato foi conferido e uma opiniao,
+   * nao uma revisao.
+   */
+  readonly contract?: readonly string[]
   /** Quantos criterios ninguem automatizou. DITO, e nunca somado aos aprovados. */
   readonly notAutomated: number
   readonly passed: number
+}
+
+/**
+ * As etapas que uma execucao completa do construtor TEM de registrar.
+ *
+ * O contrato e passado pelo chamador porque um perfil pode exigir menos — uma
+ * execucao sem e2e, por exemplo, num perfil que nao tenha navegador. O que NAO
+ * pode e a revisao descobrir o contrato a partir do que foi gravado: seria
+ * perguntar ao revisado quais provas ele devia ter trazido.
+ */
+export const DEFAULT_STEP_CONTRACT = ['install', 'build', 'test', 'e2e'] as const
+
+/** A forma de um resumo sha256, conferida e nao presumida. */
+const SHA256 = /^[a-f0-9]{64}$/u
+/** A forma do digest da imagem do construtor. */
+const IMAGE_DIGEST = /^sha256:[a-f0-9]{64}$/u
+
+/**
+ * A atestacao tem a FORMA de uma prova?
+ * @param name - o nome da atestacao.
+ * @param value - o valor gravado.
+ * @returns `true` quando o valor tem a forma que aquele nome exige.
+ */
+export function attestationWellFormed(name: string, value: string): boolean {
+  return name === 'builder_image_digest' ? IMAGE_DIGEST.test(value) : SHA256.test(value)
 }
 
 /** As quatro atestacoes mais a imagem e a politica: a lista e fixa de proposito. */
@@ -95,12 +148,12 @@ export const REQUIRED_ATTESTATIONS = [
  * gastaria atencao onde nao ha discordancia possivel, e ainda produziria uma
  * lista de problemas que a pessoa leria como um SEGUNDO defeito.
  */
-export function reviewRun(run: ReviewedRun): ReviewResult {
+export function reviewRun(run: ReviewedRun, contract: readonly string[] = DEFAULT_STEP_CONTRACT): ReviewResult {
   const problems: ReviewProblem[] = []
   const notAutomated = run.acceptance_checks.filter(check => check.status === 'NOT_AUTOMATED').length
   const passed = run.acceptance_checks.filter(check => check.status === 'PASSED').length
 
-  if (run.state !== 'PASSED') return { verdict: 'NOT_REVIEWED', problems: [], notAutomated, passed }
+  if (run.state !== 'PASSED') return { verdict: 'NOT_REVIEWED', problems: [], notAutomated, passed, contract }
 
   // CONTRADICOES: o registro diz o contrario do que a execucao afirmou.
   for (const check of run.acceptance_checks) {
@@ -134,15 +187,25 @@ export function reviewRun(run: ReviewedRun): ReviewResult {
   if (run.template_integrity === undefined) missing.push({ code: 'INTEGRITY_NOT_RECORDED', subject: 'template' })
   for (const name of REQUIRED_ATTESTATIONS) {
     const value = run.attestations?.[name]
-    if (value === undefined || value.length === 0) missing.push({ code: 'ATTESTATION_MISSING', subject: name })
+    if (value === undefined || value.length === 0) { missing.push({ code: 'ATTESTATION_MISSING', subject: name }); continue }
+    if (!attestationWellFormed(name, value)) missing.push({ code: 'ATTESTATION_MALFORMED', subject: name })
   }
-  for (const step of run.steps ?? []) {
-    if (step.state === 'RUNNING') missing.push({ code: 'STEP_NOT_PASSED', subject: step.step })
+  if (run.artifact_sha256 != null && run.artifact_sha256.length > 0 && !SHA256.test(run.artifact_sha256)) {
+    missing.push({ code: 'ATTESTATION_MALFORMED', subject: 'artifact_sha256' })
+  }
+  // AS ETAPAS QUE O PERFIL EXIGE, e nao as que o registro trouxe.
+  if (run.steps === undefined) missing.push({ code: 'STEPS_NOT_RECORDED', subject: 'steps' })
+  else {
+    for (const exigida of contract) {
+      const registrada = run.steps.find(step => step.step === exigida)
+      if (registrada === undefined) missing.push({ code: 'STEP_MISSING', subject: exigida })
+      else if (registrada.state === 'RUNNING') missing.push({ code: 'STEP_NOT_PASSED', subject: exigida })
+    }
   }
 
-  if (contradicted) return { verdict: 'CONTRADICTED', problems: [...problems, ...missing], notAutomated, passed }
-  if (missing.length > 0) return { verdict: 'INCONCLUSIVE', problems: missing, notAutomated, passed }
-  return { verdict: 'CONFIRMED', problems: [], notAutomated, passed }
+  if (contradicted) return { verdict: 'CONTRADICTED', problems: [...problems, ...missing], notAutomated, passed, contract }
+  if (missing.length > 0) return { verdict: 'INCONCLUSIVE', problems: missing, notAutomated, passed, contract }
+  return { verdict: 'CONFIRMED', problems: [], notAutomated, passed, contract }
 }
 
 /**
