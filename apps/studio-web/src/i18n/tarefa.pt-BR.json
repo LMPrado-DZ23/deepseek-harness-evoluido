@@ -47,5 +47,11 @@
   "voltarParaConversa": "Voltar para a conversa",
   "voce": "Você",
   "marca": "DZ",
-  "avisoAjuste": "Isto vira um pedido de alteração do aplicativo: um plano novo, para você aprovar."
+  "avisoAjuste": "Isto vira um pedido de alteração do aplicativo: um plano novo, para você aprovar.",
+  "intencaoRotulo": "O que este envio faz",
+  "intencaoPerguntar": "Perguntar",
+  "acaoResponder": "Responder",
+  "acaoMudarPlano": "Pedir mudança no plano",
+  "acaoAjustar": "Pedir alteração",
+  "avisoPergunta": "Perguntar não muda o aplicativo: nada vira critério de aceite e nenhuma tentativa é gasta."
 }

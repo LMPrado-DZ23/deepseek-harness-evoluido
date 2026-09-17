@@ -15,6 +15,7 @@ import { designSelectionSchema } from './design.js'
 import { t } from './i18n.js'
 import { pedidosDeRevisao } from './revision.js'
 import { intakeAnswerSchema, nextIntakeQuestion, type IntakeConversation, type IntakeEngine } from './intake.js'
+import { respostasDoQuestionario } from './pergunta.js'
 import type { CodeGeneratorPort } from './pipeline.js'
 import type { EmergencyStopGuard, PromptToAppJobService } from './jobs.js'
 import { RUN_REPORT_FILE } from './run-report.js'
@@ -47,6 +48,7 @@ const createProjectSchema = z.object({
 const answerSchema = intakeAnswerSchema.extend({ confirm_sensitive: z.boolean().optional() }).strict()
 const changeRequestSchema = z.object({ reason: z.string().trim().min(3).max(2_000) }).strict()
 const reviseSchema = z.object({ request: z.string().min(1).max(2_000) }).strict()
+const perguntaSchema = z.object({ question: z.string().min(1).max(2_000) }).strict()
 const undoSchema = z.object({ run_id: z.string().trim().min(1).max(96) }).strict()
 
 export interface PromptToAppHttpExtensionRequest {
@@ -153,6 +155,7 @@ export const PROMPT_TO_APP_ROUTE_CONTRACTS = [
   { method: 'POST', path: '/projects/:projectId/plan/approve', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'POST', path: '/projects/:projectId/plan/change', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'POST', path: '/projects/:projectId/revise', access: 'authorized', permission: 'project.write', scope: 'project' },
+  { method: 'POST', path: '/projects/:projectId/ask', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'POST', path: '/projects/:projectId/plan/edit', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'POST', path: '/projects/:projectId/plan/slice', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'POST', path: '/projects/:projectId/generate', access: 'authorized', permission: 'project.write', scope: 'project' },
@@ -374,6 +377,20 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
         const revised = await config.service.reviseProject(actor, projectId, input.request)
         return json(response, 200, { project: revised.project, spec_id: revised.spec.spec_id })
       }
+      if (request.method === 'POST' && matched.suffix === '/ask') {
+        /*
+          PERGUNTAR não é pedir alteração, e por isso é outra rota.
+
+          Uma rota só, com um campo dizendo qual dos dois é, colocaria a
+          escolha num `if` que nenhum contrato de rota vigia — e a permissão, o
+          escopo e o efeito dos dois gestos passariam a depender do corpo do
+          pedido. São gestos diferentes: um escreve na especificação e devolve
+          um plano para aprovar, o outro não muda nada.
+        */
+        const input = perguntaSchema.parse(await readJson(request))
+        const turn = await config.service.askAboutProject(actor, projectId, input.question)
+        return json(response, 201, { turn })
+      }
       if (request.method === 'POST' && matched.suffix === '/intake/answer') {
         return await answerIntake(request, response, config, actor, projectId)
       }
@@ -544,7 +561,9 @@ async function answerIntake(
 async function conversationFor(service: PromptToAppService, actor: PromptToAppActor, projectId: string): Promise<IntakeConversation> {
   const project = service.project(actor, projectId)
   const turns = await service.intakeTurns(actor, projectId)
-  const answers = Object.fromEntries(turns.filter(turn => turn.question_id !== 'sensitive-confirmation').map(turn => [turn.question_id, turn.answer]))
+  // A escolha do que é resposta do questionário mora em `pergunta.ts`, com
+  // teste próprio: aqui dentro ela sobreviveu à sabotagem.
+  const answers = respostasDoQuestionario(turns)
   const sensitive = turns.find(turn => turn.question_id === 'sensitive-confirmation')
   return {
     project, answers,

@@ -155,9 +155,9 @@ describe('prompt-to-app HTTP boundary', () => {
   it('declares every route with authorization and no client-owned scope', () => {
     // A contagem sobe DE PROPÓSITO quando uma rota nasce: ela é o que impede
     // uma rota nova de aparecer sem alguém olhar a autorização dela.
-    // 19 desde `POST /projects/:projectId/revise` (continuar a mesma tarefa
-    // depois de um resultado, decisão `DZ23-VISUAL-VIDEO-20260916-R1`).
-    expect(PROMPT_TO_APP_ROUTE_CONTRACTS).toHaveLength(19)
+    // 20 desde `POST /projects/:projectId/ask` — PERGUNTAR sobre a tarefa, que
+    // é gesto diferente de pedir alteração e por isso tem rota própria.
+    expect(PROMPT_TO_APP_ROUTE_CONTRACTS).toHaveLength(20)
     expect(PROMPT_TO_APP_ROUTE_CONTRACTS.every(route => route.access === 'authorized' && route.permission !== null)).toBe(true)
   })
 
@@ -240,6 +240,52 @@ describe('prompt-to-app HTTP boundary', () => {
     const criada = await tarefaComResultado(f)
     const lido = await (await f.request(`/projects/${criada}`)).json() as { revisions: unknown[] }
     expect(lido.revisions).toEqual([])
+  })
+
+  it('PERGUNTAR não grava especificação nova, e por isso não vira critério de aceite', async () => {
+    // O defeito que o dono apontou, travado na fronteira: depois de um
+    // resultado, toda mensagem virava critério permanente.
+    const f = await fixture()
+    const criada = await tarefaComResultado(f)
+    const antes = f.repository.specRows.length
+    const resposta = await f.request(`/projects/${criada}/ask`, {
+      method: 'POST', body: JSON.stringify({ question: 'por que a montagem demorou?' }),
+    })
+    expect(resposta.status).toBe(201)
+    expect(f.repository.specRows).toHaveLength(antes)
+    const projeto = f.repository.projectRows.find(row => row.project_id === criada)!
+    expect(projeto.state).toBe('VERIFIED_PROTOTYPE')
+  })
+
+  it('a pergunta aparece na conversa lida da tarefa, com o texto da pessoa', async () => {
+    const f = await fixture()
+    const criada = await tarefaComResultado(f)
+    await f.request(`/projects/${criada}/ask`, { method: 'POST', body: JSON.stringify({ question: 'por que a montagem demorou?' }) })
+    const lido = await (await f.request(`/projects/${criada}`)).json() as { turns: { question_id: string, question: string }[] }
+    const pergunta = lido.turns.find(turn => turn.question_id === 'pergunta-da-pessoa')
+    expect(pergunta?.question).toBe('por que a montagem demorou?')
+  })
+
+  it('a pergunta NÃO entra nas respostas do questionário nem faz nascer pergunta nova', async () => {
+    /*
+      Isto era uma LISTA NEGADA: `question_id !== 'sensitive-confirmation'`.
+      Com a pergunta guardada na mesma conversa, a frase da pessoa entrava em
+      `answers` — onde `nextIntakeQuestion` a lia para escolher a próxima
+      pergunta E para detectar dado sensível. Um `question_id` novo não pode
+      entrar no questionário só por não estar numa lista de exclusão.
+    */
+    const f = await fixture()
+    const criada = await tarefaComResultado(f)
+    await f.request(`/projects/${criada}/ask`, {
+      method: 'POST', body: JSON.stringify({ question: 'meu CPF aparece em algum lugar do aplicativo?' }),
+    })
+    const lido = await (await f.request(`/projects/${criada}`)).json() as { next: unknown }
+    expect(lido.next).toBeNull()
+  })
+
+  it('a rota de pergunta exige ESCRITA, porque ela escreve na conversa da tarefa', () => {
+    const perguntar = PROMPT_TO_APP_ROUTE_CONTRACTS.find(route => route.path === '/projects/:projectId/ask')
+    expect(perguntar).toMatchObject({ method: 'POST', access: 'authorized', permission: 'project.write', scope: 'project' })
   })
 
   it('a rota de revisão exige ESCRITA no projeto, como as outras que mudam estado', () => {

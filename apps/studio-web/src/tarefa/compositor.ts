@@ -28,8 +28,26 @@ export type Destino =
   | { readonly tipo: 'ajustar' }
   /** Há trabalho em curso: o texto fica guardado e o envio espera. */
   | { readonly tipo: 'aguardar'; readonly motivo: 'execucao' | 'aprovacao' }
+  /**
+   * PERGUNTAR sobre a tarefa. Não muda nada: não escreve critério de aceite,
+   * não propõe plano e não gasta tentativa.
+   */
+  | { readonly tipo: 'perguntar' }
   /** Não há tarefa aberta: é a home, e o envio cria ou recupera uma. */
   | { readonly tipo: 'abrir-tarefa' }
+
+/**
+ * O que a pessoa QUER fazer com o que escreveu.
+ *
+ * Ela escolhe, e o produto não adivinha. Classificar a frase por palavra-chave
+ * — "isso parece uma pergunta" — seria a mesma automação que produziu o
+ * defeito que isto conserta, só que mais difícil de ver quando errasse.
+ */
+export type Intencao =
+  /** Só perguntar. */
+  | 'perguntar'
+  /** Fazer o que este momento da tarefa espera: responder, mudar o plano, ajustar. */
+  | 'agir'
 
 export interface SituacaoDaTarefa {
   /** O estado do projeto, ou `null` quando nenhuma tarefa está aberta. */
@@ -48,11 +66,24 @@ const EM_EXECUCAO = new Set(['GENERATING', 'BUILD_OK', 'TESTS_OK'])
 /**
  * O destino do envio, dada a situação da tarefa.
  *
+ * A intenção é OBRIGATÓRIA. Um padrão silencioso aqui devolveria o defeito
+ * que este arquivo conserta: quem esquecesse de passá-la voltaria a escrever
+ * critério de aceite sem ninguém ter escolhido isso.
  * @param situacao - o estado da tarefa e a pergunta aberta, se houver.
+ * @param intencao - o que a pessoa escolheu fazer.
  * @returns o destino; `abrir-tarefa` SOMENTE quando não há tarefa aberta.
  */
-export function destinoDoEnvio(situacao: SituacaoDaTarefa): Destino {
+export function destinoDoEnvio(situacao: SituacaoDaTarefa, intencao: Intencao): Destino {
   if (situacao.estado === null) return { tipo: 'abrir-tarefa' }
+  /*
+    PERGUNTAR VENCE TUDO — inclusive a execução em curso.
+
+    Uma pergunta não escreve na especificação, não propõe plano e não dispara
+    tentativa; ela não tem com o que concorrer. Fazer a pessoa esperar o
+    construtor terminar para poder perguntar "o que está acontecendo?" seria
+    silêncio justamente na hora em que ela mais quer saber.
+  */
+  if (intencao === 'perguntar') return { tipo: 'perguntar' }
   // A pergunta aberta vence o estado: ela é o que está esperando resposta, e
   // ignorá-la faria o texto da pessoa virar pedido de mudança num plano que
   // ainda não existe.
@@ -61,6 +92,28 @@ export function destinoDoEnvio(situacao: SituacaoDaTarefa): Destino {
   if (situacao.estado === 'PLAN_PROPOSED') return { tipo: 'mudar-plano' }
   if (situacao.estado === 'PLAN_APPROVED') return { tipo: 'aguardar', motivo: 'aprovacao' }
   return { tipo: 'ajustar' }
+}
+
+/**
+ * A intenção já marcada quando a pessoa chega ao compositor.
+ * @param situacao - o estado da tarefa e a pergunta aberta, se houver.
+ * @returns a intenção padrão deste momento.
+ */
+export function intencaoPadrao(situacao: SituacaoDaTarefa): Intencao {
+  /*
+    O PADRÃO É PERGUNTAR onde o defeito morava.
+
+    Depois de um resultado, todo envio virava critério de aceite permanente —
+    inclusive uma pergunta. Quem não reparasse na escolha pagava por isso. O
+    contrário não tem custo: quem queria pedir alteração e mandou uma pergunta
+    aperta mais uma vez, e nada foi gravado no meio.
+
+    Onde a tarefa ESPERA um gesto — uma pergunta de admissão sem resposta, um
+    plano proposto —, o padrão é esse gesto: ali não há defeito a evitar, e
+    fazer a pessoa escolher toda vez atrapalharia o caminho normal.
+  */
+  const agindo = destinoDoEnvio(situacao, 'agir')
+  return agindo.tipo === 'ajustar' || agindo.tipo === 'aguardar' ? 'perguntar' : 'agir'
 }
 
 /**

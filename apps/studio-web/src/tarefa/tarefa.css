@@ -493,3 +493,50 @@
   alerta. Amarelo aqui faria "vai virar um pedido de alteração" parecer erro.
 */
 .dz-compositor-aviso-neutro { color: var(--dz-text-secondary); }
+
+/*
+  A ESCOLHA DO ENVIO — perguntar ou fazer o que o momento espera.
+
+  Dois rádios de verdade, desenhados como pílulas. O `<input>` continua no
+  documento e visível para o leitor de tela: escondê-lo com `display: none`
+  tiraria o grupo do teclado, que é o oposto do que um grupo de escolha
+  exclusiva precisa. Ele é encolhido e posicionado atrás do rótulo, que é
+  grande o bastante para ser o alvo do toque.
+*/
+.dz-compositor-intencao {
+  display: flex;
+  gap: var(--dz-2);
+  margin: 0 0 var(--dz-2);
+  padding: 0;
+  border: 0;
+}
+
+.dz-intencao-opcao {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dz-1);
+  padding: 0.25rem 0.75rem;
+  border: 1px solid var(--dz-border);
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  color: var(--dz-text-secondary);
+  cursor: pointer;
+}
+
+.dz-intencao-opcao input {
+  /* Pequeno, e ainda assim focalizável: o anel de foco precisa aparecer. */
+  width: 0.75rem;
+  height: 0.75rem;
+  margin: 0;
+  accent-color: var(--dz-accent);
+}
+
+.dz-intencao-marcada {
+  border-color: var(--dz-accent);
+  color: var(--dz-text);
+  background: var(--dz-surface-active);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .dz-intencao-opcao { transition: border-color 120ms ease, color 120ms ease; }
+}

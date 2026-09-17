@@ -93,7 +93,8 @@
     "revisionLong": "O pedido de mudança ficou longo demais; resuma em uma frase.",
     "revisionDuplicate": "Esta mudança já foi pedida nesta tarefa.",
     "revisionFull": "Esta tarefa já acumulou mudanças demais; conclua as atuais antes de pedir outra.",
-    "revisionUnavailable": "Só dá para pedir mudança depois que a tarefa produz um resultado."
+    "revisionUnavailable": "Só dá para pedir mudança depois que a tarefa produz um resultado.",
+    "perguntaInvalida": "A pergunta precisa ter entre {min} e {max} caracteres."
   },
   "pipeline": {
     "verified": "Protótipo verificado — não está publicado nem disponível para outras pessoas",
@@ -225,5 +226,47 @@
   },
   "exit": {
     "measureLimit": "Comparação de uma jornada medida neste perfil e neste ambiente. Não mede liderança de mercado, não prevê lucro e não vale para jornadas que não foram executadas."
+  },
+  "pergunta": {
+    "rotuloEstado": "Onde esta tarefa está",
+    "rotuloTentativas": "Tentativas de criação já feitas",
+    "rotuloUltimaTentativa": "A última tentativa",
+    "valorUltimaTentativa": "tentativa {tentativa}, na etapa \"{etapa}\", que {estado}",
+    "rotuloCriterios": "Critérios de aceite combinados",
+    "rotuloProvas": "Provas guardadas",
+    "rotuloCusto": "Custo estimado desta tentativa",
+    "valorCusto": "US$ {valor}",
+    "naoRegistrado": "não registrado (e isto não quer dizer zero)",
+    "rotuloLimite": "O que esta resposta é",
+    "valorLimite": "Só o que o Studio já registrou sobre a tarefa. Ela não passa por nenhum modelo, então não interpreta a sua pergunta — a pergunta fica guardada na conversa do jeito que você escreveu.",
+    "estado": {
+      "DRAFT": "o pedido foi aberto e ainda está sendo descrito",
+      "SPEC_READY": "a descrição foi fechada e falta propor o plano",
+      "PLAN_PROPOSED": "há um plano esperando a sua aprovação",
+      "PLAN_APPROVED": "o plano foi aprovado e a criação ainda não começou",
+      "GENERATING": "a criação está em andamento",
+      "BUILD_OK": "a montagem passou e a conferência continua",
+      "BUILD_FAILED": "a montagem não passou",
+      "TESTS_OK": "os testes passaram e a conferência continua",
+      "TESTS_FAILED": "os testes não passaram",
+      "CANCELLED": "a criação foi cancelada",
+      "INTERRUPTED": "a criação foi interrompida antes de terminar",
+      "VERIFIED_PROTOTYPE": "há um protótipo conferido para você abrir"
+    },
+    "etapa": {
+      "generate": "escrevendo o código",
+      "build": "montando",
+      "test": "testando",
+      "verify": "conferindo"
+    },
+    "tentativa": {
+      "PENDING": "ainda não começou",
+      "RUNNING": "está em andamento",
+      "PASSED": "passou",
+      "FAILED": "não passou",
+      "BLOCKED_EXTERNAL": "parou por falta de algo fora daqui",
+      "BUDGET_EXCEEDED": "parou no limite de gasto",
+      "CANCELLED": "foi cancelada"
+    }
   }
 }

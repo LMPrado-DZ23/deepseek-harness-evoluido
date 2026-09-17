@@ -352,6 +352,22 @@ export function App() {
       await refreshDetalhes()
     })
   }
+  /**
+   * PERGUNTA sobre a tarefa, sem mexer em nada.
+   *
+   * O que ela NÃO faz é o ponto: não limpa o resultado, não apaga o relatório
+   * nem os pontos seguros, porque nada disso mudou. `ajustar`, logo acima,
+   * limpa os três — e limpar aqui faria a pessoa achar que perguntar tinha
+   * desfeito o trabalho dela.
+   * @param texto - a pergunta, como a pessoa escreveu.
+   */
+  async function perguntar(texto: string) {
+    if (projectId === null) return
+    await safely(async () => {
+      await api(`/projects/${projectId}/ask`, { method: 'POST', body: JSON.stringify({ question: texto }) })
+      await refreshDetalhes()
+    })
+  }
   /** Pede mudança no plano proposto, com o texto do compositor. */
   async function mudarPlanoPelaConversa(texto: string) {
     if (projectId === null) return
@@ -706,6 +722,7 @@ export function App() {
         responder={async texto => submitAnswer(false, undefined, texto)}
         mudarPlano={mudarPlanoPelaConversa}
         ajustar={ajustar}
+        perguntar={perguntar}
         iniciais={iniciaisDaConta(sessionName)}
         painel={painel} abrirPainel={setPainel} fecharPainel={() => setPainel(null)}
         conteudoDoPainel={conteudoDoPainel} acoesDoEstado={acoesDoEstado} />

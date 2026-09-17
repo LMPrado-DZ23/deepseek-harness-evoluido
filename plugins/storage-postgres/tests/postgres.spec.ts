@@ -325,6 +325,10 @@ exec docker exec -i ${JSON.stringify(postgresContainer ?? '')} pg_restore --list
       const cliEnvironment = {
         ...process.env,
         PATH: postgresContainer === undefined ? (process.env.PATH ?? '') : `${toolDirectory}${delimiter}${process.env.PATH ?? ''}`,
+        // O teste dá à CLI o estado de operador de que ela precisa, em vez de
+        // herdá-lo do shell de quem roda. Ver o comentário gêmeo em
+        // `import-hardening.spec.ts`: era isto que passava aqui e reprovava na CI.
+        DZ23_OPERATOR_STATE_DIR: await mkdtemp(join(tmpdir(), 'dz23-operator-state-')),
         DZ23_IMPORT_TEST_DSN: dsn!,
       }
       const cli = resolve('scripts/import-postgres-storage.ts')
@@ -400,10 +404,12 @@ exec docker exec -i ${JSON.stringify(postgresContainer ?? '')} pg_restore --list
       await writeFile(input, serialized, { flag: 'wx', mode: 0o600 })
       await writeFile(`${input}.sha256`, `${createHash('sha256').update(serialized).digest('hex')}  input.json\n`, { flag: 'wx', mode: 0o600 })
       const cli = resolve('scripts/import-postgres-storage.ts')
+      // O estado de operador vem do teste, e não do shell de quem roda.
+      const estadoDoOperador = await mkdtemp(join(tmpdir(), 'dz23-operator-state-'))
       const attempt = (schema: string, extra: string[] = []) => run(process.execPath, [
         '--import', 'tsx', cli, '--input', input, '--dsn-ref', 'DZ23_IMPORT_TEST_DSN',
         '--schema', schema, '--ssl', 'off', '--write', '--attempt-id', `attempt-${schema}`, '--backup', join(temporary, `${schema}.dump`), ...extra,
-      ], { env: { ...process.env, DZ23_IMPORT_TEST_DSN: dsn! } })
+      ], { env: { ...process.env, DZ23_OPERATOR_STATE_DIR: estadoDoOperador, DZ23_IMPORT_TEST_DSN: dsn! } })
 
       // 3) A schema that holds NO relation at all — only a type, a domain and a function. `pg_class`
       //    does not list those, so it looked empty, skipped the layout check and the confirmation,

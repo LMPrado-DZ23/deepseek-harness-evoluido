@@ -20,6 +20,7 @@ import {
   chaveAceitavel, chaveArmazenada, desfechoDaChave, impressaoDaCriacao, reservaDoEscopo,
 } from './creation-key.js'
 import { latestGreenCheckpoint, noGreenReason, runCheckpoints, type CheckpointBlocker, type RunCheckpoint, NO_ATTEMPT } from './checkpoint.js'
+import { PERGUNTA_QUESTION_ID, MAX_PERGUNTA, MIN_PERGUNTA, perguntaNormalizada, respostaEmTexto, respostaSobreATarefa } from './pergunta.js'
 import { t } from './i18n.js'
 
 export interface PromptToAppActor {
@@ -280,6 +281,67 @@ export class PromptToAppService {
     if (this.#intakeTurnStore === undefined) await this.#repository.putTurn(value)
     else await putIntakeTurn(this.#intakeTurnStore, value)
     return value
+  }
+
+  /**
+   * A PERGUNTA da pessoa sobre a tarefa — que não mexe em nada.
+   *
+   * O dono do produto apontou o defeito e ele era real: depois de um
+   * resultado, todo envio virava critério de aceite permanente na
+   * especificação, e uma pergunta custava uma tentativa. Aqui a pergunta é um
+   * lance da conversa e mais nada.
+   *
+   * O QUE ESTE MÉTODO NÃO PODE FAZER, e o teste confere um por um: não grava
+   * especificação, não propõe nem aprova plano, não muda o estado do projeto e
+   * não inicia execução. É uma escrita só, no mesmo lugar onde a conversa já
+   * mora — sem conversa nova, sem journal paralelo, sem segundo armazenamento.
+   *
+   * A permissão é `project.write` e não `project.read` de propósito: isto
+   * ESCREVE na conversa da tarefa, e quem só pode ler não escreve nela.
+   * @param actor - quem pergunta.
+   * @param projectId - a tarefa.
+   * @param pergunta - o texto, como a pessoa escreveu.
+   * @returns o lance gravado, com a resposta já dentro.
+   */
+  async askAboutProject(actor: PromptToAppActor, projectId: string, pergunta: string): Promise<StudioIntakeTurn> {
+    this.#authorize(actor, 'project.write')
+    const project = this.project(actor, projectId)
+    const texto = perguntaNormalizada(pergunta)
+    if (texto === null) throw new PromptToAppError('INVALID', t('errors.perguntaInvalida', { min: MIN_PERGUNTA, max: MAX_PERGUNTA }))
+    const execucoes = this.runs(actor, projectId)
+    const corrente = [...execucoes].sort((esquerda, direita) =>
+      direita.started_at.localeCompare(esquerda.started_at) || direita.attempt - esquerda.attempt)[0] ?? null
+    // Tarefa sem plano ainda é tarefa, e perguntar sobre ela tem de funcionar:
+    // `NOT_FOUND` aqui quer dizer "ainda não há plano", e não erro.
+    let criterios = 0
+    try {
+      const plano = await this.plan(actor, projectId)
+      criterios = plano.slices.reduce((soma, fatia) => soma + fatia.acceptance_criteria.length, 0)
+    } catch (erro) {
+      if (!(erro instanceof PromptToAppError) || erro.code !== 'NOT_FOUND') throw erro
+    }
+    const resposta = respostaSobreATarefa({
+      estado: project.state,
+      tentativasFeitas: execucoes.length,
+      tentativa: corrente?.attempt ?? null,
+      etapa: corrente?.stage ?? null,
+      estadoDaTentativa: corrente?.state ?? null,
+      criterios,
+      provas: (await this.evidence(actor, projectId)).length,
+      // Ausente é ausente: `?? null` e nunca `?? 0`.
+      custoEstimadoUsd: corrente?.estimated_cost_usd ?? null,
+    })
+    return this.recordTurn(actor, projectId, {
+      question_id: PERGUNTA_QUESTION_ID,
+      question: texto,
+      answer: respostaEmTexto(resposta),
+      recommended: false,
+      // Nenhum modelo foi chamado. Preencher rota ou modelo aqui seria dizer
+      // que houve uma chamada que não houve — e o adendo de uso e custos do
+      // dono trata exatamente disso.
+      route: null,
+      model: null,
+    })
   }
 
   async saveSpec(actor: PromptToAppActor, projectId: string, spec: AppSpecV1, origin: 'intake' | 'edit'): Promise<StudioAppSpecRecord> {

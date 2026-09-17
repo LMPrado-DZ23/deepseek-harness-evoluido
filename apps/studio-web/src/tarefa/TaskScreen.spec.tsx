@@ -41,7 +41,7 @@ const DETALHES: DetalhesDaTarefa = {
 function montar(extra: Partial<TaskScreenProps> = {}): string {
   const props: TaskScreenProps = {
     detalhes: DETALHES, rascunho: '', setRascunho: () => {},
-    responder: async () => {}, mudarPlano: async () => {}, ajustar: async () => {},
+    responder: async () => {}, mudarPlano: async () => {}, ajustar: async () => {}, perguntar: async () => {},
     painel: null, abrirPainel: () => {}, fecharPainel: () => {},
     ...extra,
   }
@@ -110,7 +110,19 @@ describe('VIS-03: continuar a tarefa', () => {
     expect(html).toContain('dz-compositor-inferior')
   })
 
-  it('durante uma tentativa, o compositor AVISA e segura o envio', () => {
+  it('durante uma tentativa, o compositor AVISA — e deixa PERGUNTAR', () => {
+    /*
+      A regra mudou de propósito, e o teste conta a mudança.
+
+      Antes, o envio ficava desabilitado enquanto o construtor rodava. Segurar
+      um PEDIDO DE ALTERAÇÃO ali continua certo: ele concorreria com a
+      execução e gastaria orçamento duas vezes pela mesma intenção. Segurar uma
+      PERGUNTA era silêncio na hora em que a pessoa mais quer saber o que está
+      acontecendo — e perguntar não escreve nada nem dispara tentativa.
+
+      Por isso, aqui: o aviso do trabalho em curso continua, a opção marcada é
+      "Perguntar", e o envio está disponível.
+    */
     const correndo: DetalhesDaTarefa = {
       ...DETALHES,
       project: { ...DETALHES.project, state: 'GENERATING' },
@@ -118,9 +130,31 @@ describe('VIS-03: continuar a tarefa', () => {
     }
     const html = montar({ detalhes: correndo, rascunho: 'muda o botão' })
     expect(html).toContain(tarefa.aguardandoTrabalho)
-    expect(html).toContain('disabled=""')
+    expect(html).toContain(tarefa.avisoPergunta)
+    expect(html).toContain('value="perguntar"/>')
+    expect(html).not.toContain('disabled=""')
     // O texto NÃO é descartado enquanto espera.
     expect(html).toContain('muda o botão')
+  })
+
+  it('depois de um resultado, a opção marcada é PERGUNTAR — o defeito ao contrário', () => {
+    // Era aqui que toda mensagem virava critério de aceite permanente. Quem
+    // não reparasse na escolha pagava por isso; agora o padrão não cobra nada.
+    const html = montar({ rascunho: 'por que ficou assim?' })
+    const marcada = html.slice(html.indexOf('dz-intencao-marcada'), html.indexOf('dz-intencao-marcada') + 200)
+    expect(marcada).toContain('value="perguntar"')
+    expect(html).toContain(tarefa.avisoPergunta)
+    expect(html).not.toContain(tarefa.avisoAjuste)
+  })
+
+  it('a segunda opção DIZ o que ela faz neste momento, em vez de "Enviar"', () => {
+    const perguntando: DetalhesDaTarefa = {
+      ...DETALHES,
+      project: { ...DETALHES.project, state: 'DRAFT' },
+      next: { id: 'audience', text: 'Quem vai usar?' },
+    }
+    expect(montar({ detalhes: perguntando })).toContain(tarefa.acaoResponder)
+    expect(montar()).toContain(tarefa.acaoAjustar)
   })
 
   it('a pergunta aberta vira o último lance da conversa', () => {

@@ -66,7 +66,14 @@ export const studioDesignSpecRecordSchema = z.object({
 
 export const studioIntakeTurnSchema = z.object({
   turn_id: z.string().min(1), project_id: z.string().min(1), ...scope,
-  question_id: z.enum(['audience', 'goal', 'content', 'sensitive-confirmation']),
+  /*
+    O `pergunta-da-pessoa` não é uma pergunta do questionário: é a PERGUNTA que
+    a pessoa faz sobre a tarefa, guardada na MESMA conversa (ver `pergunta.ts`).
+    Acrescentar um valor ao conjunto não invalida registro nenhum já gravado, e
+    por isso a versão do domínio NÃO sobe — subir faria `open()` recusar toda
+    instalação que já rodou, sem passo de migração neste seam.
+  */
+  question_id: z.enum(['audience', 'goal', 'content', 'sensitive-confirmation', 'pergunta-da-pessoa']),
   question: z.string().min(1), answer: z.string(), recommended: z.boolean(),
   route: z.string().nullable(), model: z.string().nullable(), created_at: timestamp,
 }).strict()

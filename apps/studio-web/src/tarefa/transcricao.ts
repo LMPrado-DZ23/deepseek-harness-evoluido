@@ -22,6 +22,16 @@
  *   não tem como dizer mais do que isso.
  */
 
+/**
+ * O `question_id` de uma pergunta feita PELA PESSOA sobre a tarefa.
+ *
+ * O servidor é a autoridade deste valor (`plugins/prompt-to-app/src/pergunta.ts`);
+ * aqui ele é comparado, e não decidido. A tela não tem como importar o plugin
+ * do servidor — o teste de contrato entre os dois é o que impede que os dois
+ * lados discordem em silêncio.
+ */
+export const PERGUNTA_DA_PESSOA = 'pergunta-da-pessoa'
+
 /** O que o servidor devolve em `GET /projects/:projectId`, no que interessa aqui. */
 export interface DetalhesDaTarefa {
   readonly project: {
@@ -169,8 +179,17 @@ export function transcricaoDaTarefa(detalhes: DetalhesDaTarefa): readonly Lance[
   } })
 
   for (const turno of detalhes.turns ?? []) {
+    /*
+      QUEM FALOU DEPENDE DE QUEM PERGUNTOU, e inverter isso seria mentir sobre
+      a autoria — o que este arquivo recusa em qualquer outra linha.
+
+      No questionário, quem pergunta é o estúdio e quem responde é a pessoa.
+      Numa pergunta DA PESSOA sobre a tarefa, é o contrário. O mesmo registro
+      guarda os dois porque a conversa é uma só; a autoria é que vira.
+    */
+    const daPessoa = turno.question_id === PERGUNTA_DA_PESSOA
     lances.push({ ancora: 'instante', lance: {
-      tipo: 'pergunta', id: `pergunta:${turno.turn_id}`, autor: 'estudio',
+      tipo: 'pergunta', id: `pergunta:${turno.turn_id}`, autor: daPessoa ? 'pessoa' : 'estudio',
       quando: turno.created_at, texto: turno.question, perguntaId: turno.question_id, respondida: true,
     } })
     // A resposta vazia é ausência de resposta, não uma mensagem em branco: o
@@ -178,7 +197,7 @@ export function transcricaoDaTarefa(detalhes: DetalhesDaTarefa): readonly Lance[
     // não falou é exatamente a mensagem inventada que este arquivo recusa.
     if (turno.answer.trim() !== '') {
       lances.push({ ancora: 'instante', lance: {
-        tipo: 'resposta', id: `resposta:${turno.turn_id}`, autor: 'pessoa',
+        tipo: 'resposta', id: `resposta:${turno.turn_id}`, autor: daPessoa ? 'estudio' : 'pessoa',
         quando: turno.created_at, texto: turno.answer, recomendada: turno.recommended,
       } })
     }

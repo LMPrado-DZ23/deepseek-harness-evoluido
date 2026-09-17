@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { execucaoTerminou, transcricaoDaTarefa, type DetalhesDaTarefa } from './transcricao'
+import { PERGUNTA_DA_PESSOA, execucaoTerminou, transcricaoDaTarefa, type DetalhesDaTarefa } from './transcricao'
 
 const PROJETO = {
   project_id: 'proj-1', name: 'Clínica', state: 'VERIFIED_PROTOTYPE',
@@ -174,3 +174,45 @@ function turno(id: string, pergunta: string, resposta: string, quando = '2026-09
 function fatia() {
   return { slice_id: 's1', title: 'Página', description: 'a página inicial', acceptance_criteria: ['abre'] }
 }
+
+describe('a pergunta DA PESSOA na conversa', () => {
+  it('a pergunta é dela e a resposta é do estúdio — a autoria vira', () => {
+    // Sem isto, a pergunta da pessoa apareceria como fala do DZ23 Studio. Este
+    // arquivo recusa mensagem inventada; atribuir a fala de alguém a outro é a
+    // mesma mentira, com outro nome.
+    const lances = transcricaoDaTarefa(detalhes({
+      turns: [{
+        turn_id: 't-1', question_id: PERGUNTA_DA_PESSOA, question: 'por que falhou?',
+        answer: 'Onde esta tarefa está: não passou', recommended: false,
+        created_at: '2026-09-17T12:00:00.000Z',
+      }],
+    }))
+    const pergunta = lances.find(lance => lance.id === 'pergunta:t-1')!
+    const resposta = lances.find(lance => lance.id === 'resposta:t-1')!
+    expect(pergunta.autor).toBe('pessoa')
+    expect(resposta.autor).toBe('estudio')
+  })
+
+  it('a pergunta do QUESTIONÁRIO continua sendo do estúdio', () => {
+    const lances = transcricaoDaTarefa(detalhes({
+      turns: [{
+        turn_id: 't-2', question_id: 'audience', question: 'Quem vai usar?',
+        answer: 'clientes locais', recommended: false, created_at: '2026-09-17T12:00:00.000Z',
+      }],
+    }))
+    expect(lances.find(lance => lance.id === 'pergunta:t-2')!.autor).toBe('estudio')
+    expect(lances.find(lance => lance.id === 'resposta:t-2')!.autor).toBe('pessoa')
+  })
+
+  it('a ORDEM da conversa preserva a ordem das perguntas, mesmo iguais', () => {
+    const lances = transcricaoDaTarefa(detalhes({
+      turns: [
+        { turn_id: 't-a', question_id: PERGUNTA_DA_PESSOA, question: 'primeira', answer: 'r1', recommended: false, created_at: '2026-09-17T12:00:00.000Z' },
+        { turn_id: 't-b', question_id: PERGUNTA_DA_PESSOA, question: 'segunda', answer: 'r2', recommended: false, created_at: '2026-09-17T12:01:00.000Z' },
+        { turn_id: 't-c', question_id: PERGUNTA_DA_PESSOA, question: 'primeira', answer: 'r3', recommended: false, created_at: '2026-09-17T12:02:00.000Z' },
+      ],
+    }))
+    const perguntas = lances.filter(lance => lance.id.startsWith('pergunta:')) as { texto: string }[]
+    expect(perguntas.map(lance => lance.texto)).toEqual(['primeira', 'segunda', 'primeira'])
+  })
+})

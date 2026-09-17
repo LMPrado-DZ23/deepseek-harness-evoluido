@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
+import { mkdtempSync } from 'node:fs'
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { delimiter, join, resolve } from 'node:path'
@@ -39,12 +40,26 @@ async function writeBundleFile(directory: string): Promise<string> {
   return input
 }
 
+/**
+ * Onde a CLI de importação guarda o estado do operador, DURANTE O TESTE.
+ *
+ * A CLI exige `DZ23_OPERATOR_STATE_DIR` para escrever, e a guarda que a
+ * exige tem teste próprio em `apps/studio-runtime/operator.spec.mjs`. O que
+ * este arquivo NÃO pode fazer é depender de a variável estar no ambiente de
+ * quem roda: a máquina local a exportava, a CI não, e cinco testes passavam
+ * aqui e reprovavam lá — a mesma classe do navegador da OS-104.
+ *
+ * Um diretório temporário por execução também isola os testes do estado real
+ * de um operador de verdade, que é onde ninguém quer que um teste escreva.
+ */
+const estadoDoOperador = mkdtempSync(join(tmpdir(), 'dz23-operator-state-'))
+
 function invoke(input: string, schema: string, backup: string, extra: string[] = [], environment: NodeJS.ProcessEnv = {}) {
   return run(process.execPath, [
     '--import', 'tsx', resolve('scripts/import-postgres-storage.ts'),
     '--input', input, '--dsn-ref', 'DZ23_IMPORT_TEST_DSN', '--schema', schema,
     '--ssl', 'off', '--write', '--attempt-id', `attempt-${schema}`, '--backup', backup, ...extra,
-  ], { env: { ...process.env, DZ23_IMPORT_TEST_DSN: dsn!, ...environment } })
+  ], { env: { ...process.env, DZ23_OPERATOR_STATE_DIR: estadoDoOperador, DZ23_IMPORT_TEST_DSN: dsn!, ...environment } })
 }
 
 describePostgres('restore CLI hardening', () => {

@@ -4,7 +4,7 @@ import { hasBuildSteps } from '../buildSteps'
 import { attemptSentence, stageSentence } from '../creationProgress'
 import { useEffect, useRef, useState } from 'react'
 import tarefa from '../i18n/tarefa.pt-BR.json'
-import { destinoDoEnvio, envioDisponivel, type Destino } from './compositor'
+import { destinoDoEnvio, envioDisponivel, intencaoPadrao, type Destino, type Intencao } from './compositor'
 import { transcricaoDaTarefa, type DetalhesDaTarefa, type Lance } from './transcricao'
 
 /**
@@ -40,6 +40,8 @@ export interface TaskScreenProps {
   mudarPlano(texto: string): Promise<void>
   /** Pede um ajuste depois de um resultado. Continua na MESMA tarefa. */
   ajustar(texto: string): Promise<void>
+  /** PERGUNTA sobre a tarefa. Não escreve critério de aceite nem gasta tentativa. */
+  perguntar(texto: string): Promise<void>
   /** O painel contextual aberto, ou `null` quando a conversa está sozinha. */
   readonly painel: PainelAberto | null
   abrirPainel(painel: PainelAberto): void
@@ -68,10 +70,23 @@ export function perguntaAbertaDe(detalhes: DetalhesDaTarefa): string | null {
 
 export function TaskScreen(props: TaskScreenProps) {
   const lances = transcricaoDaTarefa(props.detalhes)
-  const destino = destinoDoEnvio({
+  const situacao = {
     estado: props.detalhes.project.state,
     perguntaAberta: perguntaAbertaDe(props.detalhes),
-  })
+  }
+  const padrao = intencaoPadrao(situacao)
+  const [intencao, setIntencao] = useState<Intencao>(padrao)
+  /*
+    O PADRÃO VOLTA A VALER quando o momento da tarefa muda.
+
+    Sem isto, alguém que escolheu "pedir alteração" e depois viu o construtor
+    rodar ficaria com a escolha antiga marcada por tempo indeterminado — e a
+    escolha antiga é justamente a que grava critério de aceite. O padrão só
+    caminha na direção segura: onde o defeito morava, ele é "perguntar".
+  */
+  useEffect(() => { setIntencao(padrao) }, [padrao, props.detalhes.project.project_id])
+  const destino = destinoDoEnvio(situacao, intencao)
+  const acaoDoEstado = destinoDoEnvio(situacao, 'agir')
   const [enviando, setEnviando] = useState(false)
   const fim = useRef<HTMLLIElement | null>(null)
   const podeEnviar = envioDisponivel(destino, props.rascunho) && !enviando
@@ -111,8 +126,19 @@ export function TaskScreen(props: TaskScreenProps) {
     já existe, para perguntar não custar tentativa nenhuma. Isso é a fatia
     seguinte; até lá, o que o envio faz está escrito na tela.
   */
-  const aviso = destino.tipo === 'aguardar'
-    ? destino.motivo === 'execucao' ? tarefa.aguardandoTrabalho : tarefa.aguardandoAprovacao
+  /*
+    DOIS AVISOS, e não um.
+
+    O primeiro é FATO DA TAREFA — há trabalho correndo, o plano está aprovado
+    e a criação não começou — e ele não depende do que a pessoa escolheu
+    fazer: some-lo porque ela marcou "perguntar" esconderia o que está
+    acontecendo justamente de quem perguntou. O segundo é sobre o ENVIO: o que
+    aquele botão vai fazer com o texto dela.
+  */
+  const avisoDaTarefa = acaoDoEstado.tipo === 'aguardar'
+    ? acaoDoEstado.motivo === 'execucao' ? tarefa.aguardandoTrabalho : tarefa.aguardandoAprovacao
+    : null
+  const avisoDoEnvio = destino.tipo === 'perguntar' ? tarefa.avisoPergunta
     : destino.tipo === 'ajustar' ? tarefa.avisoAjuste
       : null
 
@@ -177,7 +203,30 @@ export function TaskScreen(props: TaskScreenProps) {
         mensagem, que é a que interessa.
       */}
       <form className="dz-compositor dz-compositor-inferior" onSubmit={event => void enviar(event)}>
-        {aviso === null ? null : <p className={destino.tipo === 'aguardar' ? 'dz-compositor-aviso' : 'dz-compositor-aviso dz-compositor-aviso-neutro'} role="status">{aviso}</p>}
+        {avisoDaTarefa === null ? null : <p className="dz-compositor-aviso" role="status">{avisoDaTarefa}</p>}
+        {avisoDoEnvio === null ? null : <p className="dz-compositor-aviso dz-compositor-aviso-neutro" role="status">{avisoDoEnvio}</p>}
+        {/*
+          A ESCOLHA, e não a adivinhação.
+
+          Classificar a frase — "isso parece uma pergunta" — seria a mesma
+          automação que produziu o defeito, e erraria em silêncio. São dois
+          botões de rádio de verdade, e não abas nem um interruptor: o leitor
+          de tela anuncia "2 de 2 selecionado" e o teclado navega com as setas,
+          que é o que um grupo de escolha exclusiva precisa fazer.
+        */}
+        <fieldset className="dz-compositor-intencao">
+          <legend className="sr-only">{tarefa.intencaoRotulo}</legend>
+          <label className={classes('dz-intencao-opcao', intencao === 'perguntar' ? 'dz-intencao-marcada' : null)}>
+            <input type="radio" name="dz-intencao" value="perguntar" checked={intencao === 'perguntar'}
+              onChange={() => setIntencao('perguntar')} />
+            <span>{tarefa.intencaoPerguntar}</span>
+          </label>
+          <label className={classes('dz-intencao-opcao', intencao === 'agir' ? 'dz-intencao-marcada' : null)}>
+            <input type="radio" name="dz-intencao" value="agir" checked={intencao === 'agir'}
+              onChange={() => setIntencao('agir')} />
+            <span>{rotuloDaAcao(acaoDoEstado)}</span>
+          </label>
+        </fieldset>
         <label className="sr-only" htmlFor="dz-continuar">{tarefa.compositorRotulo}</label>
         <textarea id="dz-continuar" rows={2} value={props.rascunho} maxLength={2000}
           placeholder={tarefa.compositorPlaceholder}
@@ -217,12 +266,31 @@ export function TaskScreen(props: TaskScreenProps) {
  * @param props - as ações da tela.
  */
 async function despachar(destino: Destino, texto: string, props: TaskScreenProps): Promise<void> {
+  if (destino.tipo === 'perguntar') return props.perguntar(texto)
   if (destino.tipo === 'responder') return props.responder(texto)
   if (destino.tipo === 'mudar-plano') return props.mudarPlano(texto)
   if (destino.tipo === 'ajustar') return props.ajustar(texto)
   // `aguardar` e `abrir-tarefa` não chegam aqui: o primeiro é barrado por
   // `envioDisponivel` e o segundo só existe quando não há tarefa — e sem tarefa
   // esta tela não é montada.
+}
+
+/**
+ * O nome do gesto que ESTE momento da tarefa espera.
+ *
+ * Ele é o rótulo da segunda opção, e muda com o momento: responder a pergunta
+ * aberta, pedir mudança no plano proposto, pedir alteração do aplicativo. Um
+ * rótulo fixo — "Enviar" — devolveria o silêncio que causou o defeito: a
+ * pessoa não saberia que aquele envio escreve critério de aceite.
+ * @param destino - o destino que valeria sem escolher perguntar.
+ * @returns o rótulo, já em português.
+ */
+export function rotuloDaAcao(destino: Destino): string {
+  if (destino.tipo === 'responder') return tarefa.acaoResponder
+  if (destino.tipo === 'mudar-plano') return tarefa.acaoMudarPlano
+  // `aguardar` mostra o mesmo rótulo de `ajustar` porque é o que a pessoa vai
+  // poder fazer quando a espera acabar — e o envio fica desabilitado até lá.
+  return tarefa.acaoAjustar
 }
 
 /**
