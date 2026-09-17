@@ -59,6 +59,13 @@
   margin: 0;
   padding: 0;
   display: grid;
+  /*
+    GRADE, como F14 — cartões lado a lado em vez de uma coluna de linhas altas.
+    `auto-fill` com mínimo de 320px: em telas estreitas vira uma coluna sozinho,
+    sem media query e sem três colunas comprimidas.
+  */
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  align-items: start;
   gap: var(--dz-4);
 }
 
@@ -181,3 +188,25 @@
 }
 .dz-previa-nome { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8125rem; word-break: break-all; }
 .dz-previa-tamanho { color: var(--dz-text-secondary); font-size: 0.75rem; font-variant-numeric: tabular-nums; }
+
+/* O ACERVO EM GRUPOS, como F14: uma seção por tarefa, com o instante à direita. */
+.dz-acervo-grupos { display: flex; flex-direction: column; gap: var(--dz-6); }
+
+.dz-acervo-grupo-topo {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--dz-3);
+  margin-bottom: var(--dz-3);
+}
+
+.dz-acervo-grupo-topo h2 { margin: 0; font-size: 1.05rem; }
+.dz-acervo-grupo-instante { color: var(--dz-text-secondary); font-size: 0.8125rem; }
+.dz-acervo-restantes { margin: var(--dz-2) 0 0; color: var(--dz-text-secondary); font-size: 0.8125rem; }
+
+/* A DECLARAÇÃO recolhida: presente, e não mais a manchete da tela. */
+.dz-biblioteca-declaracao > summary {
+  cursor: pointer;
+  font-weight: 600;
+  list-style-position: inside;
+}

@@ -4,7 +4,9 @@ import copy from '../i18n/destinos.pt-BR.json'
 import hubCopy from '../i18n/hub.pt-BR.json'
 import { HubPanel } from '../hub/HubPanel'
 import { operacoesDaBiblioteca, tiposDaBiblioteca } from './biblioteca'
+import { acervoPorTarefa } from './acervo'
 import { previaDoPacote, type EntradaDoPacote } from './previa'
+import type { ItemDoAcervo } from './acervo'
 
 /*
   O cliente do Hub, criado UMA VEZ.
@@ -123,8 +125,22 @@ export function BibliotecaScreen({ api = clienteDoHub }: { readonly api?: HubApi
       `biblioteca.ts`, que tem teste — um parágrafo escrito à mão aqui
       envelheceria sem ninguém notar, e a promessa passaria a ser falsa.
     */}
-    <section className="dz-biblioteca-declaracao" aria-labelledby="dz-biblioteca-declaracao-titulo">
-      <h2 id="dz-biblioteca-declaracao-titulo">{copy.bibliotecaDeclaracao}</h2>
+    {/*
+      RECOLHIDA por padrão. No quadro F14 o acervo começa logo abaixo do título;
+      a declaração aberta empurrava os pacotes para fora da primeira tela, e a
+      primeira coisa que a pessoa via era uma lista do que o produto NÃO faz.
+      Ela continua a um clique, e continua obrigatória — só deixou de ser a
+      manchete.
+    */}
+    <details className="dz-biblioteca-declaracao">
+      <summary id="dz-biblioteca-declaracao-titulo">{copy.bibliotecaDeclaracao}</summary>
+      {/*
+        O `<summary>` é o título VISÍVEL, mas não é um título para quem navega
+        por cabeçalhos: sem este `<h2>`, a hierarquia pulava de `h1` para os
+        `h3` de dentro, e o axe reprovava com `heading-order`. Ele é `sr-only`
+        porque a frase já está no `<summary>`, logo acima.
+      */}
+      <h2 className="sr-only">{copy.bibliotecaDeclaracao}</h2>
       <p><strong>{copy.bibliotecaTiposRotulo}:</strong> {tiposDaBiblioteca().map(tipo => copy.bibliotecaTipos[tipo as keyof typeof copy.bibliotecaTipos]).join('; ')}</p>
       <div className="dz-biblioteca-colunas">
         <div>
@@ -144,7 +160,7 @@ export function BibliotecaScreen({ api = clienteDoHub }: { readonly api?: HubApi
           </ul>
         </div>
       </div>
-    </section>
+    </details>
 
     {projetos !== null && projetos.length > 1 ? <label className="dz-destino-filtro">
       {copy.bibliotecaFiltroRotulo}
@@ -159,10 +175,29 @@ export function BibliotecaScreen({ api = clienteDoHub }: { readonly api?: HubApi
     {mostrados === null ? <p>{copy.bibliotecaCarregando}</p>
       : projetos !== null && projetos.length === 0 ? <p className="dz-destino-vazio">{copy.bibliotecaSemTarefa}</p>
         : mostrados.length === 0 ? <p className="dz-destino-vazio">{copy.bibliotecaVazia}</p>
-          : <ul className="dz-acervo">
-            {mostrados.map(item => <li key={item.registro.export_id} className="dz-acervo-item">
+          : <div className="dz-acervo-grupos">
+            {/*
+              `<div>`, e NÃO `<section aria-label>`.
+
+              Uma `section` com rótulo vira um marco de página, e duas tarefas
+              com o mesmo nome — que é o caso comum, porque o nome sai do
+              pedido — produzem dois marcos com o mesmo rótulo. O axe reprova
+              com `landmark-unique`, e ele está certo: quem navega por marcos
+              recebe dois destinos indistinguíveis. O `<h2>` do cabeçalho já dá
+              a navegação por títulos, que é a certa para uma lista de grupos.
+            */}
+            {acervoPorTarefa(mostrados).map(grupo => <div key={grupo.projectId} className="dz-acervo-grupo">
+              {/*
+                O CABEÇALHO DO GRUPO, como F14: o nome da tarefa à esquerda e o
+                instante do pacote mais recente dela à direita.
+              */}
+              <header className="dz-acervo-grupo-topo">
+                <h2>{grupo.nome}</h2>
+                <span className="dz-acervo-grupo-instante">{formatDate(grupo.maisRecente)}</span>
+              </header>
+              <ul className="dz-acervo">
+                {grupo.itens.map(item => <li key={item.registro.export_id} className="dz-acervo-item">
               <strong>{item.registro.file_name}</strong>
-              <p className="dz-acervo-tarefa">{copy.bibliotecaDaTarefa}: {item.projeto.name}</p>
               <dl className="dz-acervo-fatos">
                 <div><dt>{hubCopy.exports.size}</dt><dd>{formatBytes(item.registro.size_bytes)}</dd></div>
                 <div><dt>{hubCopy.exports.entries}</dt><dd>{item.registro.entries}</dd></div>
@@ -188,17 +223,26 @@ export function BibliotecaScreen({ api = clienteDoHub }: { readonly api?: HubApi
                   */}
                   {copy.previaAbrir}
                 </button>
-                <a className="dz-acervo-baixar" href={api.downloadHref(item.projeto.project_id, item.registro.export_id)}>{hubCopy.exports.download}</a>
+                {/*
+                  O RÓTULO tem marcador `{file}` e precisa ser preenchido. Ele
+                  chegou à tela como "Baixar {file}" e ficou assim numa captura
+                  de entrega — a frase estava no catálogo, o valor não entrava, e
+                  nenhum teste olhava para o texto do link.
+                */}
+                <a className="dz-acervo-baixar" download={item.registro.file_name}
+                  href={api.downloadHref(item.projeto.project_id, item.registro.export_id)}>
+                  {hubCopy.exports.download.replace('{file}', item.registro.file_name)}
+                </a>
               </p>
               {previa?.exportId !== item.registro.export_id ? null : <PreviaDoPacote previa={previa} />}
-            </li>)}
-          </ul>}
+                </li>)}
+              </ul>
+              {grupo.restantes > 0
+                ? <p className="dz-acervo-restantes">{copy.acervoRestantes.replace('{quantos}', String(grupo.restantes))}</p>
+                : null}
+            </div>)}
+          </div>}
   </main>
-}
-
-interface ItemDoAcervo {
-  readonly registro: ExportRecord
-  readonly projeto: ProjectSummary
 }
 
 /**

@@ -51,5 +51,6 @@
   "previaVazio": "Este pacote não tem nenhum arquivo dentro.",
   "previaTotal": "{quantos} arquivo(s) neste pacote",
   "previaRestantes": "e mais {quantos} — baixe o pacote para ver a lista inteira.",
-  "previaFalhou": "Não deu para ler o conteúdo deste pacote agora."
+  "previaFalhou": "Não deu para ler o conteúdo deste pacote agora.",
+  "acervoRestantes": "e mais {quantos} pacote(s) desta tarefa"
 }

@@ -370,6 +370,8 @@ declarada.
 
 | OS-113 | A Biblioteca ABRE o pacote e mostra o que tem dentro, sem baixar; e um laco de 621 requisicoes por 3s caiu junto | Retomada do Prado 17/09/2026 item 4 ("selecione a proxima operacao obrigatoria cujos pre-requisitos estejam disponiveis e implemente o caminho completo") + D7-007 | v1.0 | BETA | plugins/integration-hub/src/zip.ts (`zipHeaders` extraido, `listZip` novo), service.ts (`exportPreview` com teto), http.ts (rota de previa), i18n/pt-BR.json, tests/previa-do-pacote.spec.ts (novo), apps/studio-web/src/destinos/previa.ts e previa.spec.ts (novos), Destinos.tsx (previa + cliente do Hub criado UMA vez), biblioteca.ts (previa passa a SUPORTADA), destinos.css, i18n/destinos.pt-BR.json, hub/hubApi.ts, tests/server.ts (hub minimo com zip de produção), tests/accessibility.spec.ts | previa-do-pacote.spec.ts 6; previa.spec.ts 5; integration-hub 297; studio-web 663; e2e nos quatro tamanhos com axe: o pacote abre, lista tres arquivos, fecha no mesmo botao, ZERO violacoes, contagem de leituras em ordem de grandeza unitaria; 4 sabotagens, UMA sobreviveu e virou teste | execucao: a escolha da operacao foi por PRE-REQUISITO — a previa era a unica das seis ausentes cujo caminho ja existia (`exportFile` confinado e o leitor de zip). Um leitor leve ao lado seria um SEGUNDO leitor de formato hostil, onde a conferencia estrutural diverge em silencio: a conferencia foi extraida para `zipHeaders`, e `readZip` e `listZip` passam a usar a mesma. As 296 provas do plugin continuaram passando depois da extracao. A previa usa o MESMO caminho confinado do download, com teto proprio de 32 MiB recusado em palavras. NO CAMINHO, medindo por que o botao sumia entre duas assercoes, apareceu um defeito que nao era desta fatia: `api = createHubApi()` no valor padrao do parametro criava um cliente NOVO a cada render, e o efeito disparava outra leitura — 621 chamadas a `/exports` em 3 segundos numa tela parada. Depois: 1. E o rotulo do botao deixou de trocar para "Fechar": nome estavel e estado em `aria-expanded` e o padrao ARIA de divulgacao | O armazenamento do acervo no servidor de teste e DUBLE; o FORMATO nao e — o `.zip` e montado pelo `createZip` de producao e lido pelo `listZip` de producao. Enviar, versoes, compartilhamento, retencao e apagar continuam AUSENTES, e a declaracao da tela continua dizendo isso. Apagar exige autorizacao do dono e ela NAO foi concedida | V7-B (enviar arquivos); V7-C (`/plan/change` e `/intake/answer`); T-35 fatias C e D |
 
+| OS-114 | Conferencia visual da Biblioteca contra o quadro F14, com as divergencias que estavam sob meu controle CORRIGIDAS | Retomada do Prado 17/09/2026 item 6 ("compare cada tela alterada com o frame correspondente e corrija as que estiverem sob seu controle antes de pedir meu aceite") | v1.0 | BETA | apps/studio-web/src/destinos/acervo.ts e acervo.spec.ts (novos), Destinos.tsx, destinos.css, i18n/destinos.pt-BR.json, tests/accessibility.spec.ts | acervo.spec.ts 7; studio-web 670; e2e 141 passaram / 3 pulados nos quatro tamanhos com axe; capturas do build conferidas contra F14 | execucao: a comparacao com F14 achou seis divergencias, e TRES estavam sob meu controle. (1) A declaracao da OS-110 virou a manchete da tela e empurrava o acervo para fora da primeira dobra — na referencia o acervo comeca logo abaixo do titulo; ela ficou RECOLHIDA, obrigatoria e a um clique. (2) O acervo era uma lista com seletor de tarefa; virou GRUPO POR TAREFA com o nome a esquerda e o instante do pacote mais recente a direita, como F14. (3) Os cartoes eram uma coluna de linhas altas; viraram GRADE com minimo de 320px, que em tela estreita cai para uma coluna sem media query. A captura de entrega ainda revelou um defeito: o rotulo do download chegava a tela como "Baixar {file}" — o marcador nao era preenchido, a frase estava certa no catalogo e nenhum teste olhava o texto do link. Corrigido, com teste. E dois acertos de acessibilidade no caminho: o `<h2>` sr-only que a hierarquia de titulos exigia depois de a declaracao virar `<details>`, e a troca de `<section aria-label>` por `<div>` nos grupos — duas tarefas com o mesmo nome produziam dois MARCOS indistinguiveis, e o axe reprovava com `landmark-unique` | As divergencias que NAO estao sob meu controle continuam declaradas: busca de arquivos (nao ha servico de busca), abas por tipo (a Biblioteca guarda UM tipo), favoritar e alternador grade/lista (nao existem). O aceite visual e do titular e NAO esta declarado | V7-B (enviar arquivos); V7-C; T-35 fatias C e D |
+
 <!-- O livro mestre REGISTRA achados, e o achado da OS-39 e sobre numeros de ADR
      que nomeiam mais de uma decisao: citacao-ambigua-proposital -->
 
@@ -378,16 +380,16 @@ declarada.
 | estado | quantos |
 | --- | --- |
 | `STABLE` | 69 |
-| `BETA` | 163 |
+| `BETA` | 164 |
 | `NOT_PRESENT` | 33 |
 | `NOT_CONFIGURED` | 1 |
 | `NOT_EXECUTED` | 4 |
 | `FAILED` | 2 |
 
-**Total de requisitos rastreados: 272.**
+**Total de requisitos rastreados: 273.**
 
 | versao-alvo | quantos |
 | --- | --- |
-| v1.0 | 236 |
+| v1.0 | 237 |
 | v1.x | 33 |
 | v2 | 3 |

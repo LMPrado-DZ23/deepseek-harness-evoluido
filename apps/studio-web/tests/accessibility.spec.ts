@@ -170,8 +170,12 @@ test.describe('acessibilidade do fluxo principal', () => {
     // diz o que ela é deixa quem usa supondo que dá para subir arquivo,
     // versionar e compartilhar — e a pessoa só descobre quando precisa.
     await page.goto('/studio/biblioteca')
-    const declaracao = page.getByRole('region', { name: 'O que esta Biblioteca guarda e o que ela faz' })
-    await expect(declaracao).toBeVisible()
+    // Ela é RECOLHIDA: no quadro F14 o acervo começa logo abaixo do título, e a
+    // primeira coisa que a pessoa via era a lista do que o produto NÃO faz.
+    // Continua obrigatória e a um clique — e este teste é o clique.
+    const abrirDeclaracao = page.locator('#dz-biblioteca-declaracao-titulo')
+    await abrirDeclaracao.click()
+    const declaracao = page.locator('.dz-biblioteca-declaracao')
     await expect(declaracao).toContainText('.zip')
     // As duas respostas, e não só a boa.
     await expect(declaracao.getByRole('heading', { name: 'Ela faz', exact: true })).toBeVisible()
@@ -225,7 +229,10 @@ test.describe('acessibilidade do fluxo principal', () => {
     await expect(page.getByText('LEIA-ME.md').first()).toBeVisible()
     // O download continua ali do lado: a prévia não substituiu a operação que
     // já existia.
-    await expect(page.getByRole('link', { name: 'Baixar' }).first()).toBeVisible()
+    // O nome do arquivo ENTRA no rótulo: ele já vazou como "Baixar {file}"
+    // numa captura de entrega, porque nenhum teste olhava o texto do link.
+    await expect(page.getByRole('link', { name: 'Baixar prototipo.zip' }).first()).toBeVisible()
+    await expect(page.getByText('{file}')).toHaveCount(0)
 
     const semViolacao = await new AxeBuilder({ page }).analyze()
     expect(semViolacao.violations.map(violation => violation.id)).toEqual([])
