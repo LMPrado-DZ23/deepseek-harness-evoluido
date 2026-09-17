@@ -107,6 +107,16 @@ export interface RunDaTarefa {
   readonly finished_at?: string | null
   readonly steps?: readonly PassoDaTarefa[]
   readonly acceptance_checks?: readonly { readonly id: string; readonly label: string; readonly title?: string; readonly status: string }[]
+  /*
+    O CONSUMO desta tentativa, como o pipeline o gravou. Opcionais porque
+    ausência é ausência: uma tentativa sem estes campos rodou sem o provedor
+    informar consumo, e isso é diferente de ter consumido zero. Ver `uso.ts`.
+  */
+  readonly input_tokens?: number | null
+  readonly output_tokens?: number | null
+  readonly estimated_cost_usd?: number | null
+  readonly route?: string | null
+  readonly model?: string | null
 }
 
 export type Autor = 'pessoa' | 'estudio'

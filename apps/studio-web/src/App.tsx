@@ -24,6 +24,7 @@ import { HomeScreen } from './home/HomeScreen'
 import { TaskScreen, type PainelAberto } from './tarefa/TaskScreen'
 import { createHubApi } from './hub/hubApi'
 import type { IntegracaoDoMenu } from './tarefa/menusDoCompositor'
+import { UsoDaTarefa } from './tarefa/UsoDaTarefa'
 import { Preferencias } from './preferencias/Preferencias'
 import preferenciasTexto from './i18n/preferencias.pt-BR.json'
 import { iniciaisDaConta } from './shell/tarefasDoTrilho'
@@ -671,7 +672,8 @@ export function App() {
 
   const conteudoDoPainel = painel === null ? null
     : painel.tipo === 'preview' ? blocoDaPrevia
-      : blocoDiagnostico
+      : painel.tipo === 'uso' ? <UsoDaTarefa tentativas={detalhes?.runs ?? []} />
+        : blocoDiagnostico
 
   /*
     As AÇÕES DE ESTADO — aprovar plano, criar, cancelar, abrir a prévia.
@@ -714,6 +716,7 @@ export function App() {
           procurar qual dos dois é o de verdade. */}
       {result?.state === 'INTERRUPTED' ? <PendingButton className="dz-acao-botao-secundario" label={t.creation.retry} busyLabel={t.creation.retryBusy} action={generate} /> : null}
       {preview === null ? null : <button type="button" className="dz-acao-botao-secundario" onClick={() => setPainel({ tipo: 'preview' })}>{t.preview.title}</button>}
+      <button type="button" className="dz-acao-botao-secundario" onClick={() => setPainel({ tipo: 'uso' })}>{tarefaCopy.verUso}</button>
       <button type="button" className="dz-acao-botao-secundario" onClick={() => setPainel({ tipo: 'diagnostico' })}>{tarefaCopy.verDiagnostico}</button>
     </div>
     {error === '' ? null : <p className="error" role="alert">{error}</p>}

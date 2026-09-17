@@ -595,3 +595,18 @@
 .dz-menu-ligada { color: var(--dz-accent); }
 .dz-menu-vazio, .dz-menu-restantes { margin: 0 0 var(--dz-2); color: var(--dz-text-secondary); font-size: 0.8125rem; }
 .dz-menu-gerenciar { color: var(--dz-accent); font-size: 0.8125rem; }
+
+/* USO E CUSTOS da tarefa, no painel contextual. */
+.dz-uso-linhas { margin: 0; }
+.dz-uso-linhas > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--dz-3);
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--dz-border);
+}
+.dz-uso-linhas dt { color: var(--dz-text-secondary); font-size: 0.875rem; }
+.dz-uso-linhas dd { margin: 0; font-variant-numeric: tabular-nums; }
+.dz-uso-aviso { margin: var(--dz-3) 0 0; color: var(--dz-warning); font-size: 0.875rem; }
+.dz-uso-limite { margin: var(--dz-3) 0 0; color: var(--dz-text-secondary); font-size: 0.8125rem; }

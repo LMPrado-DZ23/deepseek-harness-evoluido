@@ -62,6 +62,7 @@ export type PainelAberto =
   | { readonly tipo: 'artefato'; readonly runId: string }
   | { readonly tipo: 'preview' }
   | { readonly tipo: 'diagnostico' }
+  | { readonly tipo: 'uso' }
 
 /**
  * A pergunta de admissão ainda sem resposta, se houver.
@@ -325,6 +326,7 @@ function classes(...nomes: readonly (string | null)[]): string {
 
 function tituloDoPainel(painel: PainelAberto): string {
   if (painel.tipo === 'preview') return tarefa.painelPreview
+  if (painel.tipo === 'uso') return tarefa.painelUso
   if (painel.tipo === 'diagnostico') return tarefa.painelDiagnostico
   return tarefa.painelResultado
 }

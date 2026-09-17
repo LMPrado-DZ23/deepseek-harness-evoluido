@@ -62,5 +62,16 @@
   "menuLigada": "ligada",
   "menuDesligada": "desligada",
   "menuRestantes": "e mais {quantas} — a lista inteira está no destino.",
-  "menuGerenciar": "Gerenciar"
+  "menuGerenciar": "Gerenciar",
+  "painelUso": "Uso e custos",
+  "verUso": "Ver uso e custos",
+  "usoTentativas": "Tentativas",
+  "usoTokensEntrada": "Tokens de entrada",
+  "usoTokensSaida": "Tokens de saída",
+  "usoCustoEstimado": "Custo estimado",
+  "usoRotas": "Rotas usadas",
+  "usoModelos": "Modelos usados",
+  "usoNaoRegistrado": "não registrado",
+  "usoSemRegistro": "{quantas} tentativa(s) rodaram sem consumo registrado. Os números acima são parciais.",
+  "usoLimite": "Custo ESTIMADO pelo preço configurado aqui. Não é a fatura do provedor, e não há cota de assinatura medida neste produto ainda."
 }

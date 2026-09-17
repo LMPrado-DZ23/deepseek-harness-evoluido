@@ -139,6 +139,32 @@ test.describe('acessibilidade do fluxo principal', () => {
     await expect(caixa).toBeHidden()
   })
 
+  test('o painel de uso e custos diz o que NÃO foi registrado', async ({ page }) => {
+    /*
+      O adendo do proprietário proíbe por escrito que uso desconhecido vire
+      zero. A tarefa deste servidor de teste roda com construtor dublê, que não
+      grava consumo: é exatamente o caso em que um painel mal feito mostraria
+      "US$ 0,00" e a pessoa acreditaria.
+    */
+    await page.goto('/studio/')
+    await page.getByRole('button', { name: 'Página de apresentação' }).click()
+    await page.getByRole('button', { name: 'Continuar' }).click()
+    await answerIntake(page, INTAKE_ANSWERS)
+    await page.getByRole('button', { name: 'Montar meu plano' }).click()
+    await expect(page.getByText('Plano proposto', { exact: false })).toBeVisible({ timeout: 20_000 })
+    await page.getByRole('button', { name: 'Aprovar este plano' }).click()
+    await page.getByRole('button', { name: 'Iniciar criação' }).click()
+    await esperarResultado(page)
+
+    await page.getByRole('button', { name: 'Ver uso e custos' }).click()
+    const painel = page.getByLabel('Painel desta tarefa')
+    await expect(painel.getByText('não registrado').first()).toBeVisible()
+    await expect(painel.getByText('US$ 0.0000')).toHaveCount(0)
+
+    const semViolacao = await new AxeBuilder({ page }).analyze()
+    expect(semViolacao.violations.map(violation => violation.id)).toEqual([])
+  })
+
   test('a ajuda passa no axe em qualquer tamanho', async ({ page }) => {
     await page.goto('/studio/ajuda')
     await expect(page.getByRole('heading', { name: 'Ajuda do DZ23 STUDIO' })).toBeVisible()
