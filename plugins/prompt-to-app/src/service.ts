@@ -32,6 +32,24 @@ export interface PromptToAppActor {
   readonly sessionId?: string
 }
 
+/** O espaço de trabalho inteiro, como a exportação o devolve. */
+export interface StudioWorkspaceExport {
+  readonly exported_at: string
+  readonly org_id: string
+  readonly tenant_id: string
+  readonly exported_by: string
+  readonly projects: readonly {
+    readonly project: StudioProject
+    readonly intake_turns: readonly StudioIntakeTurn[]
+    /** `null` quando a tarefa não chegou a ter este registro. */
+    readonly spec: StudioAppSpecRecord | null
+    readonly design: StudioDesignSpecRecord | null
+    readonly plan: StudioPlan | null
+    readonly runs: readonly StudioRun[]
+    readonly evidence: readonly StudioEvidence[]
+  }[]
+}
+
 export interface PromptToAppRepository {
   projects(): readonly StudioProject[]
   putProject(value: StudioProject): Promise<void>
@@ -425,6 +443,67 @@ export class PromptToAppService {
    * @param requestKey - a identidade da intenção.
    * @returns o turno gravado.
    */
+  /**
+   * TUDO o que este espaço de trabalho guardou, para a pessoa levar consigo.
+   *
+   * É a operação de "Controles de dados" que as Preferências declaravam faltar,
+   * e ela é uma LEITURA: nada é apagado, nada é movido, nada sai do escopo de
+   * quem pediu.
+   *
+   * ## O escopo é o do ATOR, tarefa por tarefa
+   *
+   * A exportação não abre um caminho privilegiado de leitura. Ela percorre as
+   * tarefas que `listProjects` já devolve — que já filtra por organização e
+   * inquilino — e, para cada uma, chama os MESMOS leitores autorizados que as
+   * telas usam. Um leitor novo que varresse o repositório inteiro seria a porta
+   * pela qual o vizinho apareceria, e ela não existe aqui.
+   *
+   * ## O que NÃO vai junto
+   *
+   * Segredo nenhum: este serviço não guarda credencial, e o que ele guarda de
+   * integração é referência de cofre, que mora em outro plugin e não é lido
+   * aqui. O código gerado também fica de fora — ele é arquivo em disco, e a
+   * Biblioteca é a porta dele, com resumo criptográfico e download próprio.
+   * Enfiá-lo num JSON faria uma segunda cópia sem recibo.
+   * @param actor - quem leva.
+   * @returns o espaço inteiro que este serviço conhece.
+   */
+  async exportWorkspace(actor: PromptToAppActor): Promise<StudioWorkspaceExport> {
+    /*
+      SABOTAGEM QUE SOBREVIVE, DE PROPÓSITO: remover esta linha não quebra teste
+      nenhum, e não quebra porque não PODE — `listProjects`, logo abaixo, faz a
+      mesma conferência, e os quatro papéis deste produto (`owner`, `admin`,
+      `builder`, `viewer`) têm `project.read`. Não existe ator que a linha
+      recusasse e o resto deixasse passar, então um teste que a "cobrisse"
+      precisaria de um papel que o produto não tem — cobertura fingida.
+
+      Ela fica porque é o contrato escrito no alto do método: quem lê daqui a
+      um ano vê em uma linha que a exportação é autorizada, em vez de ter de
+      descer até a chamada que a carrega.
+    */
+    this.#authorize(actor, 'project.read')
+    const projetos = this.listProjects(actor)
+    const tarefas = await Promise.all(projetos.map(async projeto => ({
+      project: projeto,
+      intake_turns: await this.intakeTurns(actor, projeto.project_id),
+      // Cada leitura que pode não existir vira AUSÊNCIA explícita, e não um
+      // objeto vazio: "esta tarefa não tem plano" é diferente de "o plano dela
+      // é vazio", e quem receber o arquivo precisa dessa diferença.
+      spec: await this.latestSpec(actor, projeto.project_id).catch(() => null),
+      design: await this.latestDesign(actor, projeto.project_id).catch(() => null),
+      plan: await this.plan(actor, projeto.project_id).catch(() => null),
+      runs: this.runs(actor, projeto.project_id),
+      evidence: await this.evidence(actor, projeto.project_id),
+    })))
+    return {
+      exported_at: this.#now().toISOString(),
+      org_id: actor.orgId,
+      tenant_id: actor.tenantId,
+      exported_by: actor.userId,
+      projects: tarefas,
+    }
+  }
+
   async answerIntakeTurn(
     actor: PromptToAppActor,
     projectId: string,

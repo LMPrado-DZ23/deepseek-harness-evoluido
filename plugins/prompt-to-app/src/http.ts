@@ -175,6 +175,14 @@ export const PROMPT_TO_APP_ROUTE_CONTRACTS = [
     contador, e não há nenhum aqui.
   */
   { method: 'GET', path: '/usage', access: 'authorized', permission: 'project.read', scope: 'workspace' },
+  /*
+    TUDO o que este espaço guardou, para a pessoa levar consigo.
+
+    `project.read`, e não uma permissão nova: ela devolve exatamente o que quem
+    já pode ler as tarefas consegue ver abrindo uma por uma. O que ela poupa é o
+    trabalho, e não a autorização.
+  */
+  { method: 'GET', path: '/export', access: 'authorized', permission: 'project.read', scope: 'workspace' },
   { method: 'GET', path: '/projects', access: 'authorized', permission: 'project.read', scope: 'workspace' },
   { method: 'POST', path: '/projects', access: 'authorized', permission: 'project.write', scope: 'workspace' },
   { method: 'GET', path: '/projects/:projectId', access: 'authorized', permission: 'project.read', scope: 'project' },
@@ -337,6 +345,25 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
       if (matched === undefined) return json(response, 404, { error: t('errors.routeNotFound') })
 
       if (request.method === 'GET' && route === '/health') return json(response, 200, await config.health(actor))
+      if (request.method === 'GET' && route === '/export') {
+        /*
+          O cabeçalho de ANEXO faz o navegador salvar em vez de desenhar.
+
+          Sem ele, um JSON de espaço inteiro abriria dentro da aba e a pessoa
+          teria de salvar à mão — e o nome do arquivo carrega a data, para duas
+          exportações não se sobrescreverem na pasta de downloads.
+        */
+        const conteudo = await config.service.exportWorkspace(actor)
+        const nome = `dz23-studio-${conteudo.exported_at.slice(0, 10)}.json`
+        response.writeHead(200, {
+          'content-type': 'application/json; charset=utf-8',
+          'content-disposition': `attachment; filename="${nome}"`,
+          'cache-control': 'no-store',
+          'x-content-type-options': 'nosniff',
+        })
+        response.end(JSON.stringify(conteudo, null, 2))
+        return
+      }
       if (request.method === 'GET' && route === '/usage') {
         config.service.assertAuthorized(actor, 'project.read')
         // Um Studio montado sem `route-health` responde a AUSÊNCIA, e não um
@@ -683,7 +710,7 @@ export function matchRoute(method: string | undefined, path: string): { readonly
     Fica como está: uma lista fechada que o teste de ponta a ponta confere é
     melhor que uma aberta que aceita qualquer coisa em silêncio.
   */
-  if ((method === 'GET' && (path === '/health' || path === '/usage' || path === '/projects')) || (method === 'POST' && path === '/projects')) return { suffix: path }
+  if ((method === 'GET' && (path === '/health' || path === '/usage' || path === '/export' || path === '/projects')) || (method === 'POST' && path === '/projects')) return { suffix: path }
   const match = ROTA_DE_PROJETO.exec(path)
   if (match === null) return undefined
   const suffix = match[2] ?? ''

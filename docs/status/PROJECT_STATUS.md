@@ -37,9 +37,9 @@ Todos reproduzíveis pelo comando ao lado.
 | --- | --- | --- |
 | typecheck | PASS | `pnpm typecheck` |
 | build | PASS | `pnpm build` |
-| suíte raiz | 3970 testes, 227 arquivos, 0 falha (17/09, após T-35-ALCANCE) | `pnpm -w test` |
-| suíte studio-web | 784 testes (17/09, após V7-A-3) | `cd apps/studio-web && npx vitest run` |
-| e2e navegador | 157 aprovados, 0 reprovados, 3 pulados (17/09, quatro tamanhos) | `cd apps/studio-web && npx playwright test` |
+| suíte raiz | 3978 testes, 227 arquivos, 0 falha (17/09, após V7-A-4) | `pnpm -w test` |
+| suíte studio-web | 788 testes (17/09, após V7-A-4) | `cd apps/studio-web && npx vitest run` |
+| e2e navegador | 158 aprovados, 0 reprovados, 3 pulados (17/09, quatro tamanhos) | `cd apps/studio-web && npx playwright test` |
 | PostgreSQL real | **65 testes, `POSTGRES_GATE=PASS`** (12/09, PostgreSQL 16.13 local) | `pnpm test:postgres` |
 | portões | **26/26 PASS** | ver abaixo |
 
@@ -676,6 +676,18 @@ produto existe para não fazer.
 
     O atalho **não é uma segunda porta**: passa pela mesma condição do botão,
     inclusive o bloqueio de privacidade.
+
+50. **V7-A-4 — levar consigo tudo o que é seu.**
+
+    A pessoa baixa um arquivo com as tarefas, as conversas, as descrições, os
+    planos, as tentativas e as provas — tudo do escopo dela, e nada de fora.
+
+    A exportação **não abre caminho privilegiado de leitura**: ela percorre o
+    mesmo `listProjects` que as telas usam. E o que a tarefa não tem vira
+    `null`, não objeto vazio — quem receber o arquivo precisa da diferença.
+
+    **Apagar continua fora**, e a tela diz por quê: é destrutivo e depende da
+    sua decisão.
 
 
 ## Estado do DAG

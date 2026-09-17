@@ -1,7 +1,7 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { TabelaDeUso } from './Preferencias'
+import { ControlesDeDados, TabelaDeUso } from './Preferencias'
 import { contagemEmTexto, custoEmTexto, linhasDeUso, type RotaDeUso } from './uso'
 
 /** O que a seção de uso DESENHA. */
@@ -88,5 +88,35 @@ describe('os números na língua de quem lê', () => {
 
   it('a contagem grande usa o separador de milhar de quem lê', () => {
     expect(contagemEmTexto(1_200)).toBe('1.200')
+  })
+})
+
+describe('os controles de dados', () => {
+  const html = () => renderToStaticMarkup(createElement(ControlesDeDados))
+
+  it('o link BAIXA, e não abre: o ATRIBUTO `download` é o que faz isso', () => {
+    /*
+      A primeira versão procurava a PALAVRA "download", e a sabotagem que
+      removia o atributo SOBREVIVEU — porque o texto da limitação diz "com
+      resumo criptográfico e download próprio". Procurar a palavra num HTML que
+      também contém prosa é uma asserção que passa por acidente.
+    */
+    expect(html()).toContain('<a class="dz-preferencias-destino" href="/api/studio/apps/export" download="">')
+  })
+
+  it('DIZ que o código gerado não vai junto', () => {
+    // Sem esta frase, quem baixa supõe que levou o aplicativo, e não levou.
+    expect(html()).toContain('NÃO vai neste arquivo')
+  })
+
+  it('DIZ que apagar não existe, e por quê', () => {
+    // "Controles de dados" sem essa frase promete um botão de apagar que a
+    // pessoa vai procurar e não encontrar.
+    expect(html()).toContain('Apagar dados por aqui não existe')
+    expect(html()).toContain('decisão do dono do produto')
+  })
+
+  it('DIZ que nenhum segredo entra no arquivo', () => {
+    expect(html()).toContain('Nenhuma senha, chave ou segredo')
   })
 })

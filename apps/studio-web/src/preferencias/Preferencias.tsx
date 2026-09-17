@@ -121,6 +121,31 @@ export function UsoDoEspacoDeTrabalho({ ler = () => api<UsoDoEspaco>('/usage') }
 }
 
 /**
+ * Os CONTROLES DE DADOS: levar consigo o que o espaço guardou.
+ *
+ * O link é um `<a download>` para a rota, e não um botão que busca e monta o
+ * arquivo em memória: o navegador já sabe salvar uma resposta com
+ * `content-disposition`, e fazer isso à mão gastaria a memória da aba com um
+ * arquivo que pode ter o espaço inteiro dentro.
+ *
+ * As DUAS limitações estão escritas, e não subentendidas: o código gerado não
+ * vai junto (ele é da Biblioteca, com recibo próprio), e apagar não existe —
+ * é ação destrutiva e depende de decisão do dono do produto.
+ */
+export function ControlesDeDados() {
+  return <div className="dz-preferencias-uso">
+    <p>{preferencias.dadosExplicacao}</p>
+    <p className="dz-preferencias-controle">
+      <a className="dz-preferencias-destino" href="/api/studio/apps/export" download>
+        {preferencias.dadosBaixar}
+      </a>
+    </p>
+    <p className="dz-preferencias-uso-limite">{preferencias.dadosSemSegredo}</p>
+    <p className="dz-preferencias-uso-limite">{preferencias.dadosLimitacao}</p>
+  </div>
+}
+
+/**
  * Os atalhos de teclado que o produto TEM.
  *
  * A lista vem de `atalhosDoStudio`, e a tela não escreve nenhum à mão: um
@@ -219,6 +244,7 @@ function Conteudo({ secao, conta, notificacao }: {
   if (secao.id === 'notificacoes') return <div className="dz-preferencias-controle">{notificacao}</div>
   if (secao.id === 'uso') return <UsoDoEspacoDeTrabalho />
   if (secao.id === 'atalhos') return <ListaDeAtalhos />
+  if (secao.id === 'privacidade') return <ControlesDeDados />
   // As capacidades que existem são DESTINOS: o link leva ao lugar onde elas já
   // funcionam, em vez de uma segunda cópia da mesma tela dentro do modal.
   return <p className="dz-preferencias-controle">

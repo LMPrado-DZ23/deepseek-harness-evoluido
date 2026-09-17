@@ -390,6 +390,8 @@ declarada.
 
 | V7-A-3 | ATALHOS DE TECLADO: a secao deixou de ser pendencia porque o produto passou a TER um atalho — enviar sem tirar a mao do teclado | Retomada do Prado 17/09/2026 item 1 ("informar a pendencia e obrigatorio, mas nao substitui implementar a capacidade") | v1.0 | BETA | apps/studio-web/src/preferencias/atalhos.ts e atalhos.spec.ts (novos), Preferencias.tsx (`ListaDeAtalhos`), preferencias.ts (a secao passou a DISPONIVEL) e preferencias.spec.ts, i18n/preferencias.pt-BR.json, home/HomeScreen.tsx, tarefa/TaskScreen.tsx, tests/journey.spec.ts | atalhos.spec.ts 10; preferencias 47; studio-web 784; raiz 3970; e2e 157 passaram / 3 pulados na suite INTEIRA; PostgreSQL 65; 7 sabotagens, as sete PEGAS | execucao: a pendencia dizia que nao havia atalho nenhum, e a medicao achou `Esc` em TRES lugares — e nenhum lugar que o dissesse a quem usa. Um atalho que ninguem sabe que existe nao e um atalho. So que listar os tres tambem NAO fecharia o requisito, e a diretriz e explicita: informar a pendencia nao substitui implementar a capacidade. Entao a fatia acrescentou o que faltava de verdade — `Ctrl+Enter` (e `Cmd+Enter`) envia do compositor, nos DOIS compositores. `Enter` sozinho continua quebrando linha de proposito: sequestra-lo faria quem escreve dois paragrafos enviar o primeiro sem querer, e nao ha desfazer para uma tarefa criada. `Shift+Ctrl+Enter` e `Alt+Ctrl+Enter` NAO enviam — combinacoes com modificador a mais pertencem a outras ferramentas e ao sistema. E o atalho NAO e uma segunda porta: ele passa pela MESMA condicao do botao, inclusive o bloqueio de privacidade, entao o teclado nunca envia o que o botao recusa. O e2e prova as duas metades: a tarefa NASCE do atalho, e o Enter sozinho escreve a segunda linha sem criar nada | Nao da para TROCAR as teclas, e a tela diz isso — um painel de configuracao de atalhos seria outra fatia. Restam SEIS pendencias nas Preferencias: tema, idioma, computador (F10), controles de dados e implantacoes. O aceite visual e do titular e NAO esta declarado | Preferencias (tema, idioma, F10, dados, implantacoes); V7-B (enviar arquivos); T-35 fatias C e D |
 
+| V7-A-4 | CONTROLES DE DADOS: a pessoa passou a poder LEVAR CONSIGO tudo o que o Studio guardou sobre o espaco dela | Retomada do Prado 17/09/2026 item 1 ("informar a pendencia nao substitui implementar a capacidade") | v1.0 | BETA | plugins/prompt-to-app/src/service.ts (`exportWorkspace`, tipo `StudioWorkspaceExport`), http.ts (rota `GET /export`, contrato, `matchRoute`), tests/http.spec.ts e identidade-do-envio.spec.ts, apps/studio-web/src/preferencias/Preferencias.tsx (`ControlesDeDados`), preferencias.ts (a secao passou a DISPONIVEL), i18n/preferencias.pt-BR.json, tests/journey.spec.ts | identidade-do-envio.spec.ts 34 (6 novos); http.spec.ts 41 (2 novos); preferencias 51; studio-web 788; raiz 3978; e2e 158 passaram / 3 pulados na suite INTEIRA; PostgreSQL 65; 8 sabotagens, SETE pegas e UMA declarada | execucao: a operacao escolhida foi a NAO DESTRUTIVA — levar consigo. Apagar continua fora, e a tela diz por que: e acao destrutiva e depende de decisao do dono do produto, que NAO foi concedida. A exportacao nao abre caminho privilegiado de leitura: ela percorre `listProjects`, que ja filtra por organizacao e inquilino, e chama os MESMOS leitores autorizados que as telas usam — a sabotagem que troca isso por uma varredura do repositorio inteiro e a primeira das oito, e ela e pega pelo caso que planta a tarefa do vizinho. O que a tarefa NAO tem vira `null`, e nao objeto vazio: "esta tarefa nao tem plano" e diferente de "o plano dela e vazio", e quem receber o arquivo precisa da diferenca. O codigo gerado NAO vai junto — ele e da Biblioteca, com resumo criptografico e download proprio, e uma copia dele num JSON seria uma segunda copia sem recibo. DUAS sabotagens sobreviveram e viraram correcao: a assercao do atributo `download` procurava a PALAVRA, que tambem aparece no texto da limitacao (passava por acidente), e o cabecalho de anexo so era coberto pelo e2e — uma guarda que depende de cinco minutos de navegador e uma guarda que alguem deixa de rodar. A TERCEIRA sobrevive de proposito e esta DECLARADA: a autorizacao explicita no alto do metodo e inalcancavel como recusa, porque `listProjects` ja a faz e os quatro papeis deste produto tem `project.read` | APAGAR dados nao existe e NAO sera implementado sem decisao explicita do dono. O codigo gerado fica de fora do arquivo, e a tela diz isso. A exportacao cobre o que o `prompt-to-app` guarda: empresas, integracoes e pacotes tem donos proprios e ficam de fora desta fatia. Restam CINCO pendencias nas Preferencias: tema, idioma, computador (F10) e implantacoes. O aceite visual e do titular e NAO esta declarado | Preferencias (tema, idioma, F10, implantacoes); V7-B (enviar arquivos); T-35 fatias C e D |
+
 <!-- O livro mestre REGISTRA achados, e o achado da OS-39 e sobre numeros de ADR
      que nomeiam mais de uma decisao: citacao-ambigua-proposital -->
 
@@ -398,16 +400,16 @@ declarada.
 | estado | quantos |
 | --- | --- |
 | `STABLE` | 69 |
-| `BETA` | 173 |
+| `BETA` | 174 |
 | `NOT_PRESENT` | 33 |
 | `NOT_CONFIGURED` | 1 |
 | `NOT_EXECUTED` | 4 |
 | `FAILED` | 2 |
 
-**Total de requisitos rastreados: 282.**
+**Total de requisitos rastreados: 283.**
 
 | versao-alvo | quantos |
 | --- | --- |
-| v1.0 | 246 |
+| v1.0 | 247 |
 | v1.x | 33 |
 | v2 | 3 |

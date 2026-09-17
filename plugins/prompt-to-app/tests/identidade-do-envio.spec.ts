@@ -51,6 +51,7 @@ class MemoryRepository implements PromptToAppRepository {
 
 const ana: PromptToAppActor = { userId: 'user-a', orgId: 'org-a', tenantId: 'tenant-a', role: 'owner' }
 const bruno: PromptToAppActor = { userId: 'user-b', orgId: 'org-a', tenantId: 'tenant-a', role: 'owner' }
+const deOutroEspaco: PromptToAppActor = { userId: 'user-z', orgId: 'org-z', tenantId: 'tenant-z', role: 'owner' }
 const CHAVE = 'chave-de-envio-0001'
 const AGORA = '2026-09-17T12:00:00.000Z'
 
@@ -397,5 +398,68 @@ describe('pedir ALTERAÇÃO NO PLANO com identidade de envio', () => {
     const { service, repository } = comPlano()
     await expect(service.requestPlanChange(ana, 'proj-1', 'x', CHAVE)).rejects.toThrow(PromptToAppError)
     expect(repository.keyRows).toHaveLength(0)
+  })
+})
+
+describe('levar consigo o que o espaço guardou', () => {
+  it('leva as TAREFAS do ator, e só elas', async () => {
+    /*
+      A exportação não abre caminho privilegiado: ela percorre `listProjects`,
+      que já filtra por organização e inquilino. Este caso planta a tarefa de
+      outro inquilino e confere que ela não vem junto — porque o defeito que
+      importa aqui é exatamente esse, e ele é silencioso.
+    */
+    const { service, repository } = fixture()
+    repository.projectRows = [...repository.projectRows, {
+      ...repository.projectRows[0]!, project_id: 'proj-vizinho',
+      org_id: 'org-b', tenant_id: 'tenant-b', name: 'Do vizinho',
+    }]
+    const levado = await service.exportWorkspace(ana)
+    expect(levado.projects.map(linha => linha.project.project_id)).toEqual(['proj-1'])
+  })
+
+  it('carimba QUEM levou, QUANDO e de que escopo', async () => {
+    // Sem isso, o arquivo é um monte de dados sem procedência — e quem o
+    // receber depois não sabe de qual espaço ele saiu.
+    const { service } = fixture()
+    const levado = await service.exportWorkspace(ana)
+    expect(levado).toMatchObject({ org_id: 'org-a', tenant_id: 'tenant-a', exported_by: 'user-a' })
+    expect(levado.exported_at).toBe(AGORA)
+  })
+
+  it('o que a tarefa NÃO tem vira `null`, e não objeto vazio', async () => {
+    /*
+      "Esta tarefa não tem plano" é diferente de "o plano dela é vazio", e quem
+      receber o arquivo precisa da diferença — um objeto vazio faria uma
+      ferramenta de leitura afirmar que houve plano.
+    */
+    const { service } = fixture()
+    const [tarefa] = (await service.exportWorkspace(ana)).projects
+    expect(tarefa!.plan).toBeNull()
+    expect(tarefa!.design).toBeNull()
+    // A especificação existe nesta fixação, então ela NÃO é nula.
+    expect(tarefa!.spec).not.toBeNull()
+  })
+
+  it('leva a conversa da tarefa junto', async () => {
+    const { service } = fixture()
+    await service.askAboutProject(ana, 'proj-1', 'por que falhou?')
+    const [tarefa] = (await service.exportWorkspace(ana)).projects
+    expect(tarefa!.intake_turns.some(turno => turno.answer.length > 0)).toBe(true)
+  })
+
+  it('quem só pode LER consegue levar o que lê', async () => {
+    // A exportação não pede permissão nova: ela devolve o que a pessoa já veria
+    // abrindo tarefa por tarefa.
+    const { service } = fixture()
+    const leitor: PromptToAppActor = { ...ana, userId: 'user-c', role: 'viewer' }
+    await expect(service.exportWorkspace(leitor)).resolves.toBeDefined()
+  })
+
+  it('um espaço SEM tarefa nenhuma devolve a lista vazia, e não um erro', async () => {
+    const { service } = fixture()
+    const levado = await service.exportWorkspace(deOutroEspaco)
+    expect(levado.projects).toEqual([])
+    expect(levado.org_id).toBe('org-z')
   })
 })

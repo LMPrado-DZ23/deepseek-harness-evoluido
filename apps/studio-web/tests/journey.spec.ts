@@ -775,3 +775,47 @@ test('Ctrl+Enter envia do compositor, e Enter sozinho continua quebrando linha',
   await expect(page.getByLabel('Conversa desta tarefa')).toBeVisible({ timeout: 20_000 })
   await expect(page).toHaveURL(/\?projeto=/u)
 })
+
+
+/**
+ * LEVAR CONSIGO o que o espaço guardou — a operação de "Controles de dados".
+ *
+ * O que este caso prova é o que só existe no produto montado: a rota responde
+ * como ANEXO, o arquivo tem a tarefa que acabou de nascer dentro, e ele carrega
+ * o carimbo de quem levou e de qual escopo.
+ */
+test('dá para baixar tudo o que é meu, e o arquivo tem a tarefa dentro', async ({ context, page }) => {
+  const origin = 'http://studio.dz23.localhost:4179'
+  await context.addCookies([
+    { name: 'dz23_studio_session', value: 'e2e', url: origin },
+    { name: 'dz23_studio_csrf', value: 'csrf-e2e', url: origin },
+  ])
+  await context.addInitScript(() => { window.sessionStorage.setItem('dz23.studio.csrf.v1', 'csrf-e2e') })
+  await page.goto('/studio/')
+  await page.getByRole('button', { name: 'Página de apresentação' }).click()
+  await page.getByRole('button', { name: 'Continuar' }).click()
+  await expect(page.getByLabel('Conversa desta tarefa')).toBeVisible({ timeout: 20_000 })
+
+  // O link das Preferências aponta para a rota, e baixa em vez de abrir.
+  const menu = page.getByRole('button', { name: 'Abrir o menu', exact: true })
+  if (await menu.isVisible()) await menu.click()
+  await page.getByRole('button', { name: 'Preferências', exact: true }).click()
+  const modal = page.getByRole('dialog', { name: 'Preferências' })
+  await modal.getByRole('button', { name: 'Controles de dados', exact: true }).click()
+  const baixar = modal.getByRole('link', { name: 'Baixar tudo o que é meu' })
+  await expect(baixar).toHaveAttribute('href', '/api/studio/apps/export')
+  await expect(baixar).toHaveAttribute('download', '')
+
+  // E o que a rota devolve é o espaço inteiro, como ANEXO.
+  const resposta = await page.evaluate(async () => {
+    const r = await fetch('/api/studio/apps/export', { credentials: 'same-origin' })
+    return { tipo: r.headers.get('content-disposition'), corpo: await r.json() as Record<string, unknown> }
+  })
+  expect(resposta.tipo).toContain('attachment')
+  expect(resposta.tipo).toContain('.json')
+  const corpo = resposta.corpo as { org_id: string; exported_by: string; projects: { project: { name: string } }[] }
+  expect(corpo.org_id).toBeTruthy()
+  expect(corpo.exported_by).toBeTruthy()
+  // A tarefa que acabou de nascer está lá dentro.
+  expect(corpo.projects.length).toBeGreaterThan(0)
+})

@@ -155,11 +155,11 @@ describe('prompt-to-app HTTP boundary', () => {
   it('declares every route with authorization and no client-owned scope', () => {
     // A contagem sobe DE PROPÓSITO quando uma rota nasce: ela é o que impede
     // uma rota nova de aparecer sem alguém olhar a autorização dela.
-    // 21 desde `GET /usage` — o consumo do ESPAÇO DE TRABALHO, que a seção de
-    // Preferências passou a mostrar. Ela é `project.read` e de escopo
-    // `workspace`: quem já vê as tarefas do espaço vê o que elas consumiram, e
-    // nenhuma permissão nova foi inventada para isso.
-    expect(PROMPT_TO_APP_ROUTE_CONTRACTS).toHaveLength(21)
+    // 22 desde `GET /export` — levar consigo tudo o que o espaço guardou. Como
+    // `/usage`, ela é `project.read` e de escopo `workspace`: devolve o que
+    // quem já pode ler as tarefas veria abrindo uma por uma, e o que ela poupa
+    // é o trabalho, não a autorização.
+    expect(PROMPT_TO_APP_ROUTE_CONTRACTS).toHaveLength(22)
     expect(PROMPT_TO_APP_ROUTE_CONTRACTS.every(route => route.access === 'authorized' && route.permission !== null)).toBe(true)
   })
 
@@ -851,5 +851,32 @@ describe('o plano diz o que o Studio consultou', () => {
     for (const item of consulted.consulted.used) {
       expect(item.label).not.toContain('plan.')
     }
+  })
+})
+
+describe('levar consigo o espaço de trabalho', () => {
+  it('a rota responde como ANEXO, com nome de arquivo datado', async () => {
+    /*
+      Sem `content-disposition`, o JSON abre DENTRO da aba e a pessoa tem de
+      salvar à mão. E o nome carrega a data para duas exportações não se
+      sobrescreverem na pasta de downloads.
+
+      Este caso existe porque a sabotagem que removia o cabeçalho sobrevivia às
+      suítes baratas — só o e2e a pegava, e uma guarda que depende de cinco
+      minutos de navegador é uma guarda que alguém vai deixar de rodar.
+    */
+    const f = await fixture()
+    const resposta = await f.request('/export')
+    expect(resposta.status).toBe(200)
+    const anexo = resposta.headers.get('content-disposition') ?? ''
+    expect(anexo).toContain('attachment')
+    expect(anexo).toMatch(/filename="dz23-studio-\d{4}-\d{2}-\d{2}\.json"/u)
+  })
+
+  it('o corpo carrega o escopo de QUEM pediu', async () => {
+    const f = await fixture()
+    const corpo = await (await f.request('/export')).json() as { org_id: string; exported_by: string }
+    expect(corpo.org_id).toBeTruthy()
+    expect(corpo.exported_by).toBeTruthy()
   })
 })

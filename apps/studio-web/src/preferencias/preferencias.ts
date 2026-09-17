@@ -93,7 +93,12 @@ export function secoesDePreferencias(contexto: ContextoDasPreferencias): readonl
     { id: 'plugins', grupo: 'capacidades', disponivel: true, href: PLUGINS_PATH },
     { id: 'computador', grupo: 'capacidades', disponivel: false, pendencia: 'semComputador' },
     { id: 'biblioteca', grupo: 'dados', disponivel: true, href: BIBLIOTECA_PATH },
-    { id: 'privacidade', grupo: 'dados', disponivel: false, pendencia: 'semControleDeDados' },
+    /*
+      CONTROLES DE DADOS passou a ser disponível com a operação que NÃO é
+      destrutiva: levar consigo. Apagar continua fora, e a tela diz isso — é
+      ação destrutiva e depende de decisão do dono do produto.
+    */
+    { id: 'privacidade', grupo: 'dados', disponivel: true },
     { id: 'implantacoes', grupo: 'dados', disponivel: false, pendencia: 'semImplantacao' },
   ]
 }
