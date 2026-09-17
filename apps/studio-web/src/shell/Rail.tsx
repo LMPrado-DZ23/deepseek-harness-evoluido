@@ -1,4 +1,4 @@
-import { Blocks, Bot, CircleHelp, Clock, FolderOpen, FolderPlus, Library, ListChecks, MessageSquare, Plus, Settings, SquarePen, Target, X, Zap, type LucideIcon } from 'lucide-react'
+import { Blocks, Bot, Building2, CircleHelp, Clock, FolderOpen, FolderPlus, Library, ListChecks, MessageSquare, Plus, Settings, SquarePen, Target, X, Zap, type LucideIcon } from 'lucide-react'
 import { RAIL_ID, railSecoes, type RailIcone } from './rail'
 import { NOVA_TAREFA_HREF, iniciaisDaConta, type TarefaDoTrilho } from './tarefasDoTrilho'
 import { PROJECTS_PATH } from '../projects/ProjectsScreen'
@@ -20,7 +20,7 @@ import type { ReactNode } from 'react'
  * borrado é o que "extração ruim" parece para quem olha.
  */
 const ICONES: Readonly<Record<RailIcone, LucideIcon>> = {
-  SquarePen, Bot, Zap, Blocks, FolderOpen, ListChecks, Target, CircleHelp, Clock, Library,
+  SquarePen, Bot, Zap, Blocks, FolderOpen, ListChecks, Target, CircleHelp, Clock, Library, Building2,
 }
 
 export function Rail({ ativo, aberto, aoFechar, tarefas, conta, acoesDaConta }: {

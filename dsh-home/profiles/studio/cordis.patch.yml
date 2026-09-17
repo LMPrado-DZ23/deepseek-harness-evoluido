@@ -288,6 +288,16 @@
     # não montada, para que isto não volte em silêncio.
     - id: dz23-studio-emergency-stop
       name: '@dz23-studio/emergency-stop'
+    # O MODO EMPRESA — `BUS-01`, a porta do bloco inteiro.
+    #
+    # Vem DEPOIS de `prompt-to-app` pela mesma razão da parada de emergência:
+    # as rotas da empresa são registradas no manipulador de workspace dele, e
+    # montado antes ele não teria onde se pendurar.
+    #
+    # Ele NÃO abre inquilino novo: a empresa mora dentro do escopo que
+    # `tenancy` já isola, e toda leitura filtra por `org_id`/`tenant_id` do ator.
+    - id: dz23-studio-business
+      name: '@dz23-studio/business'
     - id: dz23-studio-preview
       name: '@dz23-studio/preview'
       config:

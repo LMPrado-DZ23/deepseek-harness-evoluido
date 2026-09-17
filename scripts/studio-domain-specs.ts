@@ -13,6 +13,7 @@ import { studioIntegrationSwitchesDomainSpec, studioIntegrationsDomainSpec } fro
 import { studioStagingReleasesDomainSpec } from '../plugins/staging/src/domain.ts'
 import { studioActionApprovalsDomainSpec } from '../plugins/action-approval/src/domain.ts'
 import { studioEmergencyStopDomainSpec } from '../plugins/emergency-stop/src/model.ts'
+import { BUSINESS_DOMAIN_SPECS } from '../plugins/business/src/model.ts'
 
 /** The only units migration tools may touch. Session/event logs use another seam. */
 export const STUDIO_DOMAIN_SPECS: readonly DomainSpec[] = [
@@ -38,4 +39,8 @@ export const STUDIO_DOMAIN_SPECS: readonly DomainSpec[] = [
   studioIntegrationsDomainSpec,
   studioIntegrationSwitchesDomainSpec,
   studioStagingReleasesDomainSpec,
+  // O Modo Empresa. Sem esta linha, as duas tabelas existiriam no produto e
+  // ficariam de fora da migração, do backup e da exportação — presentes em
+  // execução e ausentes de tudo que salva o que a pessoa gravou.
+  ...BUSINESS_DOMAIN_SPECS,
 ]

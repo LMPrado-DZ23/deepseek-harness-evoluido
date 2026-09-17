@@ -509,3 +509,76 @@ test('a resposta se perde, a pessoa reenvia, e a conversa continua com UMA mensa
   // UMA mensagem, e não duas. E a ordem do histórico continua a mesma.
   await expect(page.getByText('por que a montagem demorou?')).toHaveCount(1)
 })
+
+/**
+ * O MODO EMPRESA, ponta a ponta — `BUS-01`.
+ *
+ * A ação nova que uma pessoa passa a conseguir completar: cadastrar a empresa
+ * com objetivo, público e limites, ver o plano gravado com a versão dele,
+ * gravar uma versão NOVA sem apagar a anterior, e arquivar.
+ *
+ * O que este caso exercita não é a tela sozinha: as regras de versão, a recusa
+ * de plano repetido e o isolamento são o serviço de produção, montado no
+ * manipulador de workspace que autentica e confere o CSRF de verdade. O dublê
+ * é só onde as linhas ficam guardadas.
+ */
+test('cadastra a empresa, revisa o plano sem perder a versão anterior, e arquiva', async ({ context, page }) => {
+  await context.addCookies([
+    { name: 'dz23_studio_session', value: 'e2e', url: 'http://studio.dz23.localhost:4179' },
+    { name: 'dz23_studio_csrf', value: 'csrf-e2e', url: 'http://studio.dz23.localhost:4179' },
+  ])
+  await page.goto('/studio/empresas')
+  await expect(page.getByRole('heading', { level: 1, name: 'Empresas' })).toBeVisible()
+  // A tela diz que não há nenhuma — que é diferente de não ter conseguido ler.
+  await expect(page.getByText('Você ainda não cadastrou nenhuma empresa.')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Cadastrar empresa' }).click()
+  // O botão de salvar nasce DESLIGADO, e a tela diz o que falta: quem clica num
+  // botão ligado que recusa depois aprende a desconfiar do produto.
+  const salvar = page.getByRole('button', { name: 'Salvar empresa' })
+  await expect(salvar).toBeDisabled()
+  await expect(page.getByText('Escreva o nome da empresa, com pelo menos 2 letras.')).toBeVisible()
+
+  await page.getByLabel('Nome da empresa').fill('Bolos da Ana')
+  await expect(page.getByText('Descreva o objetivo com pelo menos 10 letras.')).toBeVisible()
+  await page.getByLabel('O que a empresa se propõe a fazer').fill('vender bolos caseiros por encomenda no bairro')
+  await page.getByLabel('Para quem').fill('moradores do bairro')
+  await page.getByLabel('O que ela entrega').fill('bolo de 1kg com 2 dias de antecedência')
+  await page.getByLabel('O que ela não faz').fill('não entrega fora do bairro\nsó aceita encomenda com 2 dias')
+  await expect(salvar).toBeEnabled()
+  await salvar.click()
+
+  await expect(page.getByText('Empresa cadastrada, com a primeira versão do plano.')).toBeVisible()
+  await expect(page.getByRole('heading', { level: 2, name: 'Bolos da Ana' })).toBeVisible()
+  await expect(page.getByRole('heading', { level: 3, name: 'Versão 1 do plano' })).toBeVisible()
+  // Cada limite é um item conferível sozinho, e não um parágrafo com os dois.
+  await expect(page.locator('.dz-empresa-plano').getByRole('listitem')).toHaveText([
+    'não entrega fora do bairro', 'só aceita encomenda com 2 dias',
+  ])
+
+  // A revisão abre COM o plano vigente dentro, e recusa gravar o que não mudou.
+  await page.getByRole('button', { name: 'Salvar uma versão nova do plano' }).first().click()
+  const gravar = page.getByRole('button', { name: 'Salvar uma versão nova do plano' }).last()
+  await expect(page.getByText('Este plano é igual ao que já está gravado.')).toBeVisible()
+  await expect(gravar).toBeDisabled()
+  await page.getByLabel('O que ela entrega').fill('bolo de 2kg com 3 dias de antecedência')
+  await expect(gravar).toBeEnabled()
+  await gravar.click()
+
+  await expect(page.getByText('Versão nova do plano gravada.')).toBeVisible()
+  await expect(page.getByRole('heading', { level: 3, name: 'Versão 2 do plano' })).toBeVisible()
+  // A versão 1 NÃO sumiu: revisar cria versão nova, e não edita no lugar.
+  await page.getByText('Versões anteriores').click()
+  await expect(page.getByRole('heading', { level: 4, name: 'Versão 1 do plano' })).toBeVisible()
+  await expect(page.getByText('bolo de 1kg com 2 dias de antecedência')).toBeVisible()
+
+  // O que foi gravado sobrevive a um RECARREGAMENTO: veio do servidor, e não
+  // do estado da tela.
+  await page.reload()
+  await page.getByRole('button', { name: 'Abrir' }).click()
+  await expect(page.getByRole('heading', { level: 3, name: 'Versão 2 do plano' })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Arquivar a empresa' }).click()
+  await expect(page.getByText('Empresa arquivada.')).toBeVisible()
+  await expect(page.getByText('Você ainda não cadastrou nenhuma empresa.')).toBeVisible()
+})

@@ -121,6 +121,18 @@ export const STUDIO_DOMAIN_SCOPES: readonly DomainScopeEntry[] = [
     },
   },
   {
+    source: 'plugins/business/src/model.ts', exportName: 'studioBusinessDomainSpec', physicalName: 'studio_businesses',
+    tables: {
+      businesses: { scope: 'org-tenant', requiredFields: ['org_id', 'tenant_id'], reason: 'Uma empresa mora DENTRO do inquilino que o Studio já isola; ela não é um inquilino novo, e a empresa de um nunca aparece para outro.' },
+    },
+  },
+  {
+    source: 'plugins/business/src/model.ts', exportName: 'studioBusinessPlansDomainSpec', physicalName: 'studio_business_plans',
+    tables: {
+      plans: { scope: 'org-tenant', requiredFields: ['org_id', 'tenant_id'], reason: 'Cada versão do plano carrega o escopo da empresa a que pertence: sem ele, a contagem de versões de um inquilino contaria as do outro.' },
+    },
+  },
+  {
     source: 'plugins/emergency-stop/src/model.ts', exportName: 'studioEmergencyStopDomainSpec', physicalName: 'studio_emergency_stop',
     tables: {
       stops: { scope: 'org-tenant', requiredFields: ['org_id', 'tenant_id'], reason: 'Uma parada de emergência vale para uma organização e um inquilino; a parada de um nunca segura o trabalho de outro.' },

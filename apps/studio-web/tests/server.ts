@@ -11,7 +11,7 @@ import { StudioMissionService, type MissionRepository } from '../../../plugins/m
 import type { MissionRecord } from '../../../plugins/mission/src/model.js'
 import type { StudioTenancyService } from '../../../plugins/tenancy/src/index.js'
 import { createPromptToAppHttpHandler } from '../../../plugins/prompt-to-app/src/http.js'
-import { registerPromptToAppHttpExtension } from '../../../plugins/prompt-to-app/src/http.js'
+import { registerPromptToAppHttpExtension, registerPromptToAppWorkspaceHttpExtension } from '../../../plugins/prompt-to-app/src/http.js'
 import { IntakeEngine } from '../../../plugins/prompt-to-app/src/intake.js'
 import { PromptToAppJobService, type PromptToAppJobRegistry } from '../../../plugins/prompt-to-app/src/jobs.js'
 import type { StudioCreationKey, StudioApproval, StudioAppSpecRecord, StudioDesignSpecRecord, StudioEvidence, StudioIntakeTurn, StudioPlan, StudioProject, StudioRun } from '../../../plugins/prompt-to-app/src/model.js'
@@ -22,6 +22,9 @@ import type { PromptModelPort } from '../../../plugins/prompt-to-app/src/ports.j
 import { hashTree, materializePreviewArtifact, PREVIEW_ARTIFACT_RELATIVE_PATH } from '../../../plugins/prompt-to-app/src/runner.js'
 import { PromptToAppService, type PromptToAppActor, type PromptToAppRepository } from '../../../plugins/prompt-to-app/src/service.js'
 import { createZip, listZip } from '../../../plugins/integration-hub/src/zip.js'
+import { createBusinessHttpExtension } from '../../../plugins/business/src/http.js'
+import { BusinessService, type BusinessRepository } from '../../../plugins/business/src/service.js'
+import type { Empresa, RegistroDePlano } from '../../../plugins/business/src/model.js'
 import { createPreviewGatewayHttpHandler, type PreviewForwardPort } from '../../../plugins/preview/src/gateway.js'
 import { createPreviewProjectHttpExtension } from '../../../plugins/preview/src/http.js'
 import type { PreviewAdmission, PreviewRecord } from '../../../plugins/preview/src/model.js'
@@ -312,6 +315,31 @@ const previewService = new StudioPreviewService({
   publicPort: 4179,
 })
 registerPromptToAppHttpExtension(createPreviewProjectHttpExtension(previewService))
+/*
+  O MODO EMPRESA no e2e.
+
+  O dublê aqui é SÓ o armazenamento. O serviço, as regras de versão do plano, o
+  isolamento por inquilino e a extensão HTTP são o código de produção, montados
+  no mesmo manipulador de workspace que autentica e confere o CSRF de verdade —
+  como a Biblioteca faz com `createZip`/`listZip`. Um dublê da rota provaria que
+  a tela desenha, e não que a jornada fecha.
+*/
+class MemoryBusinessRepository implements BusinessRepository {
+  businessRows: Empresa[] = []
+  planRows: RegistroDePlano[] = []
+  businesses = () => this.businessRows
+  plans = () => this.planRows
+  putBusiness = async (value: Empresa) => {
+    this.businessRows = [...this.businessRows.filter(linha => linha.business_id !== value.business_id), value]
+  }
+  putPlan = async (value: RegistroDePlano) => { this.planRows = [...this.planRows, value] }
+}
+const businessRepository = new MemoryBusinessRepository()
+let businessSequence = 0
+registerPromptToAppWorkspaceHttpExtension(createBusinessHttpExtension(new BusinessService({
+  repository: businessRepository,
+  createId: () => `empresa-e2e-${++businessSequence}`,
+})))
 const apiHandler = createPromptToAppHttpHandler({
   service, identity, tenancy, intake: new IntakeEngine(model), planner: new PlannerEngine(model), jobs,
   logos: { process: async () => ({

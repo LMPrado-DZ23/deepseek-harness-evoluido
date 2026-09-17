@@ -130,6 +130,9 @@ importers:
       '@dz23-studio/assistant-bridge':
         specifier: workspace:*
         version: link:../../../plugins/assistant-bridge
+      '@dz23-studio/business':
+        specifier: workspace:*
+        version: link:../../../plugins/business
       '@dz23-studio/emergency-stop':
         specifier: workspace:*
         version: link:../../../plugins/emergency-stop
@@ -293,6 +296,24 @@ importers:
         version: link:../action-approval
 
   plugins/builder-supervisor: {}
+
+  plugins/business:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:*
+        version: link:../../third_party/deepseek-harness/vendor/cordis
+      '@deepseek-ai/dsh-storage-domain':
+        specifier: workspace:*
+        version: link:../../third_party/deepseek-harness/packages/storage/storage-domain
+      '@dz23-studio/policy':
+        specifier: workspace:*
+        version: link:../policy
+      '@dz23-studio/prompt-to-app':
+        specifier: workspace:*
+        version: link:../prompt-to-app
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
 
   plugins/emergency-stop:
     dependencies:

@@ -1,0 +1,128 @@
+import { describe, expect, it, vi } from 'vitest'
+import { DomainBusinessRepository, apply, inject, type StudioBusinessRuntime } from '../src/index.ts'
+import type { BusinessKey, Empresa, RegistroDePlano } from '../src/model.ts'
+
+/**
+ * A MONTAGEM do Modo Empresa.
+ *
+ * Existir no código não é existir em execução: este arquivo prova que o plugin
+ * abre os dois domínios, lê o que já estava gravado e registra a extensão HTTP
+ * — e que o repositório de verdade, e não só o dublê do serviço, devolve o que
+ * está nas tabelas.
+ */
+function tabela<V>() {
+  const registros = new Map<string, V>()
+  return {
+    registros,
+    get: (chave: string) => registros.get(chave),
+    entries: () => registros.entries(),
+    keys: () => registros.keys(),
+    get size() { return registros.size },
+    put: (chave: string, valor: V) => { registros.set(chave, valor); return Promise.resolve() },
+    delete: (chave: string) => Promise.resolve(registros.delete(chave)),
+    update: (chave: string, fn: (atual: V) => V) => {
+      const proximo = fn(registros.get(chave)!)
+      registros.set(chave, proximo)
+      return Promise.resolve(proximo)
+    },
+  }
+}
+
+const PLANO = {
+  objetivo: 'vender bolos caseiros por encomenda no bairro',
+  publico: 'moradores do bairro',
+  oferta: 'bolo de 1kg com 2 dias de antecedência',
+  limites: ['não entrega fora do bairro'],
+}
+
+const ana = { userId: 'user-a', orgId: 'org-a', tenantId: 'tenant-a', role: 'owner' } as const
+
+function contexto() {
+  const empresas = tabela<Empresa>()
+  const planos = tabela<RegistroDePlano>()
+  const close = vi.fn(() => Promise.resolve())
+  let runtime!: StudioBusinessRuntime
+  const ctx = {
+    storageDomain: {
+      open: vi.fn((spec: { name: string }) => Promise.resolve({
+        table: () => (spec.name === 'studio_businesses' ? empresas : planos),
+        close,
+      })),
+    },
+    effect: vi.fn((factory: () => unknown) => factory()),
+    provide: vi.fn((_nome: string, valor: StudioBusinessRuntime) => { runtime = valor }),
+  }
+  return { ctx, empresas, planos, close, runtime: () => runtime }
+}
+
+describe('a montagem do Modo Empresa', () => {
+  it('`inject` pede SÓ o que o plugin não sabe viver sem', () => {
+    // `promptToApp` entra porque as rotas da empresa são registradas no
+    // manipulador de workspace dele: sem ele, elas não existem em lugar nenhum.
+    expect(inject).toEqual(['storageDomain', 'promptToApp'])
+  })
+
+  it('abre os DOIS domínios e entrega um serviço que grava nas duas tabelas', async () => {
+    const { ctx, empresas, planos, runtime } = contexto()
+    await apply(ctx as never)
+    expect(ctx.storageDomain.open).toHaveBeenCalledTimes(2)
+    await runtime().service.create(ana, { nome: 'Bolos da Ana', origem: 'criada', plano: PLANO })
+    expect(empresas.registros.size).toBe(1)
+    expect(planos.registros.size).toBe(1)
+  })
+
+  it('LÊ o que já estava gravado antes de o plugin subir', async () => {
+    // Sem esta leitura, a primeira tela depois de um reinício mostraria zero
+    // empresas para quem tem empresa gravada.
+    const { ctx, empresas, runtime } = contexto()
+    empresas.registros.set('emp-1', {
+      business_id: 'emp-1', org_id: 'org-a', tenant_id: 'tenant-a', nome: 'Bolos da Ana',
+      origem: 'criada', identidade_juridica_declarada: null, created_by: 'user-a',
+      created_at: '2026-09-17T12:00:00.000Z', updated_at: '2026-09-17T12:00:00.000Z', archived_at: null,
+    })
+    await apply(ctx as never)
+    expect(runtime().service.list(ana).map(empresa => empresa.nome)).toEqual(['Bolos da Ana'])
+  })
+})
+
+describe('o repositório sobre as tabelas', () => {
+  it('a empresa gravada é lida de volta pela CHAVE dela', async () => {
+    const empresas = tabela<Empresa>()
+    const planos = tabela<RegistroDePlano>()
+    const repositorio = new DomainBusinessRepository(empresas as never, planos as never)
+    const empresa: Empresa = {
+      business_id: 'emp-1', org_id: 'org-a', tenant_id: 'tenant-a', nome: 'Bolos da Ana',
+      origem: 'criada', identidade_juridica_declarada: null, created_by: 'user-a',
+      created_at: '2026-09-17T12:00:00.000Z', updated_at: '2026-09-17T12:00:00.000Z', archived_at: null,
+    }
+    await repositorio.putBusiness(empresa)
+    expect(empresas.get('emp-1' as BusinessKey)).toBe(empresa)
+    expect(repositorio.businesses()).toEqual([empresa])
+  })
+
+  it('o plano é gravado pelo `plan_id`, e NÃO pelo `business_id`', async () => {
+    // Com a chave errada, a segunda versão do plano sobrescreveria a primeira —
+    // e o histórico que o produto promete guardar sumiria em silêncio.
+    const empresas = tabela<Empresa>()
+    const planos = tabela<RegistroDePlano>()
+    const repositorio = new DomainBusinessRepository(empresas as never, planos as never)
+    const base = {
+      business_id: 'emp-1', org_id: 'org-a', tenant_id: 'tenant-a', plano: PLANO,
+      created_by: 'user-a', created_at: '2026-09-17T12:00:00.000Z',
+    }
+    await repositorio.putPlan({ ...base, plan_id: 'plan-1', version: 1 })
+    await repositorio.putPlan({ ...base, plan_id: 'plan-2', version: 2 })
+    expect([...planos.registros.keys()]).toEqual(['plan-1', 'plan-2'])
+    expect(repositorio.plans().map(registro => registro.version)).toEqual([1, 2])
+  })
+
+  it('a leitura NÃO é um retrato tirado na montagem: o que outra escrita gravou aparece', async () => {
+    // Uma cópia em memória ao lado da tabela seria uma segunda verdade, e
+    // divergiria na primeira escrita que não passasse por este repositório.
+    const empresas = tabela<Empresa>()
+    const repositorio = new DomainBusinessRepository(empresas as never, tabela<RegistroDePlano>() as never)
+    expect(repositorio.businesses()).toHaveLength(0)
+    empresas.registros.set('emp-9', { business_id: 'emp-9' } as Empresa)
+    expect(repositorio.businesses()).toHaveLength(1)
+  })
+})

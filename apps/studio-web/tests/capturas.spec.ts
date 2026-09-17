@@ -122,6 +122,23 @@ test('captura a jornada: home → tarefa → resultado → continuação', async
   await tirar('14-preferencias-pendencia')
   await page.keyboard.press('Escape')
 
+  // O MODO EMPRESA (BUS-01). Duas capturas: o cadastro em branco e a empresa
+  // gravada com a versão do plano — a segunda é a que mostra que a jornada
+  // FECHA, e não só que o formulário desenha.
+  await page.setViewportSize(VIEWPORT)
+  await page.goto('/studio/empresas')
+  await page.getByRole('button', { name: 'Cadastrar empresa' }).click()
+  await expect(page.getByRole('button', { name: 'Salvar empresa' })).toBeDisabled()
+  await tirar('15-empresa-cadastro')
+  await page.getByLabel('Nome da empresa').fill('Bolos da Ana')
+  await page.getByLabel('O que a empresa se propõe a fazer').fill('vender bolos caseiros por encomenda no bairro')
+  await page.getByLabel('Para quem').fill('moradores do bairro')
+  await page.getByLabel('O que ela entrega').fill('bolo de 1kg com 2 dias de antecedência')
+  await page.getByLabel('O que ela não faz').fill('não entrega fora do bairro')
+  await page.getByRole('button', { name: 'Salvar empresa' }).click()
+  await expect(page.getByRole('heading', { level: 3, name: 'Versão 1 do plano' })).toBeVisible()
+  await tirar('16-empresa-plano')
+
   // O celular é ADAPTAÇÃO DZ23, e não uma imagem fornecida pela referência:
   // o vídeo não demonstra versão móvel.
   await page.setViewportSize({ width: 390, height: 844 })

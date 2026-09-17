@@ -12,6 +12,8 @@ import { ProjectsScreen, isProjectsPath } from './projects/ProjectsScreen'
 import { isTeamPath } from './team/teamApi'
 import { AgendadoScreen, BibliotecaScreen, HabilidadesScreen, PluginsScreen } from './destinos/Destinos'
 import { destinoDoCaminho } from './destinos/destinos'
+import { EmpresaScreen } from './empresa/Empresa'
+import { isEmpresaPath } from './empresa/empresaApi'
 /*
   O TEMA VEM ANTES da folha antiga, de propósito: `styles.css` ainda tem tokens
   claros no `:root`, e quem vier depois vence. Enquanto a migração acontece, é a
@@ -22,6 +24,7 @@ import './shell/shell.css'
 import './home/home.css'
 import './tarefa/tarefa.css'
 import './preferencias/preferencias.css'
+import './empresa/empresa.css'
 import './styles.css'
 import { registerStudioPwa } from './pwa/register'
 import { SessionRevocationBoundary } from './session/SessionRevocationBoundary'
@@ -38,13 +41,13 @@ const Screen = destino === 'habilidades' ? HabilidadesScreen
   : destino === 'plugins' ? PluginsScreen
     : destino === 'biblioteca' ? BibliotecaScreen
       : destino === 'agendado' ? AgendadoScreen
-        : window.location.pathname === ASSISTANT_PATH
-          ? AssistantEntry
-          : isHubPath(window.location.pathname) ? HubPanel
-            : isTeamPath(window.location.pathname) ? TeamScreen
-              : isHelpPath(window.location.pathname) ? HelpScreen
-                : isProjectsPath(window.location.pathname) ? ProjectsScreen
-                  : isMissionPath(window.location.pathname) ? MissionScreen : App
+        : isEmpresaPath(window.location.pathname) ? EmpresaScreen
+          : window.location.pathname === ASSISTANT_PATH ? AssistantEntry
+            : isHubPath(window.location.pathname) ? HubPanel
+              : isTeamPath(window.location.pathname) ? TeamScreen
+                : isHelpPath(window.location.pathname) ? HelpScreen
+                  : isProjectsPath(window.location.pathname) ? ProjectsScreen
+                    : isMissionPath(window.location.pathname) ? MissionScreen : App
 /**
  * A tela inicial já traz a própria casca (ela precisa do estado de saúde, da
  * conta e do aviso de notificação no topo). As demais recebem a casca AQUI —

@@ -16,7 +16,7 @@
 - `branch`: `integ` (**não é `main`** — confirmar com `git branch --show-current`)
 - `head`: ver `git log --oneline -1`; o último estado registrado aqui é `91c6aa0` + o trabalho desta iteração (T-27: revisão adversarial do portão de prévia)
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c` (zero diff, `gate:upstream-pin` prova)
-- `atualizado_em`: 2026-09-16
+- `atualizado_em`: 2026-09-17
 
 ## O que este repositório É hoje
 
@@ -37,11 +37,11 @@ Todos reproduzíveis pelo comando ao lado.
 | --- | --- | --- |
 | typecheck | PASS | `pnpm typecheck` |
 | build | PASS | `pnpm build` |
-| suíte raiz | 3751 testes, 213 arquivos, 0 falha (16/09, após OS-98) | `pnpm -w test` |
-| suíte studio-web | 525 testes (16/09, após OS-98) | `cd apps/studio-web && npx vitest run` |
-| e2e navegador | 119 aprovados, 0 reprovados, 3 pulados (16/09, quatro tamanhos) | `cd apps/studio-web && npx playwright test` |
+| suíte raiz | 3916 testes, 226 arquivos, 0 falha (17/09, após BUS-01) | `pnpm -w test` |
+| suíte studio-web | 701 testes (17/09, após BUS-01) | `cd apps/studio-web && npx vitest run` |
+| e2e navegador | 142 aprovados, 0 reprovados, 3 pulados (17/09, quatro tamanhos) | `cd apps/studio-web && npx playwright test` |
 | PostgreSQL real | **65 testes, `POSTGRES_GATE=PASS`** (12/09, PostgreSQL 16.13 local) | `pnpm test:postgres` |
-| portões | **25/25 PASS** | ver abaixo |
+| portões | **26/26 PASS** | ver abaixo |
 
 Portões, todos `EXIT=0` em 12/09/2026: `domain-scopes`, `domain-routes`,
 `assistant-tools`, `team-role-tools`, `rls-coverage` (8/27), `upstream-pin`,
@@ -556,6 +556,23 @@ produto existe para não fazer.
     **A CI fechou VERDE em `969482f` e `33245fe`** — as duas primeiras desde a
     OS-97, depois de seis causas, quatro delas da mesma família: o resultado
     dependia do ambiente de quem roda.
+
+41. **OS-115 / BUS-01 — o MODO EMPRESA ganhou a primeira jornada completa.**
+
+    A ação nova que uma pessoa passa a conseguir concluir: cadastrar a empresa
+    com objetivo, público e limites, ver o plano **com a versão dele**, gravar
+    uma versão nova sem apagar a anterior, e arquivar. Plugin novo
+    (`plugins/business`), tela nova (`/studio/empresas`), montado no perfil —
+    porque **existir no código não é existir em execução**.
+
+    Nenhuma autoridade nova: a empresa mora dentro do escopo que `tenancy` já
+    isola, e as rotas se penduram no manipulador de workspace do prompt-to-app.
+    Três portões acharam buraco real no caminho (`domain-scopes`,
+    `rls-coverage`, `image-lock`), e o teste de `storage-postgres` cobrou o
+    registro nas rotas de domínio — sem ele as duas tabelas existiriam em
+    execução e ficariam de fora do backup.
+
+    Os outros **vinte e três** requisitos do bloco BUS continuam ausentes.
 
 
 ## Estado do DAG

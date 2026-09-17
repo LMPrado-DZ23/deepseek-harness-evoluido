@@ -22,6 +22,7 @@
  */
 import { ASSISTANT_PATH } from '../assistant/AssistantEntry'
 import { AGENDADO_PATH, BIBLIOTECA_PATH, HABILIDADES_PATH, PLUGINS_PATH } from '../destinos/destinos'
+import { EMPRESA_PATH } from '../empresa/empresaApi'
 import { MISSION_PATH } from '../mission/missionApi'
 import { PROJECTS_PATH } from '../projects/ProjectsScreen'
 import { TEAM_PATH } from '../team/teamApi'
@@ -39,7 +40,7 @@ export const RAIL_ID = 'dz-rail'
 /** Os ícones vêm do conjunto que o produto já usa; o nome é o do `lucide-react`. */
 export type RailIcone =
   | 'SquarePen' | 'Bot' | 'Zap' | 'Blocks' | 'FolderOpen'
-  | 'ListChecks' | 'Target' | 'CircleHelp' | 'Clock' | 'Library'
+  | 'ListChecks' | 'Target' | 'CircleHelp' | 'Clock' | 'Library' | 'Building2'
 
 export interface RailItem {
   readonly id: string
@@ -75,6 +76,9 @@ export function railSecoes(): readonly RailSecao[] {
         // pendência onde um teste alcança.
         { id: 'agendado', label: rail.agendado, href: AGENDADO_PATH, icone: 'Clock' },
         { id: 'biblioteca', label: rail.biblioteca, href: BIBLIOTECA_PATH, icone: 'Library' },
+        // O Modo Empresa. Ele NÃO é um destino pendente: a tela cadastra,
+        // grava versão nova do plano e arquiva, tudo persistido no servidor.
+        { id: 'empresas', label: rail.empresas, href: EMPRESA_PATH, icone: 'Building2' },
         // Estes três moraram na seção "Tarefas" e não são tarefas: são
         // destinos. Com a lista de tarefas REAIS ocupando aquela seção, eles
         // voltaram para onde pertencem — junto dos outros destinos.

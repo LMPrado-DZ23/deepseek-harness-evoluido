@@ -252,6 +252,33 @@ test.describe('acessibilidade do fluxo principal', () => {
     expect(leituras).toBeLessThan(40)
   })
 
+  test('as Empresas passam no axe — vazia, com formulário aberto e com a empresa gravada', async ({ page }) => {
+    /*
+      As TRÊS formas da tela, e não só a que abre primeiro.
+
+      Uma varredura só no estado vazio não veria nenhum campo de formulário nem
+      o detalhe da empresa — que é justamente onde moram rótulo, foco e ordem de
+      cabeçalho. O defeito que esta varredura procura não aparece numa tela sem
+      conteúdo.
+    */
+    await page.goto('/studio/empresas')
+    await expect(page.getByRole('heading', { level: 1, name: 'Empresas' })).toBeVisible()
+    const vazia = await new AxeBuilder({ page }).analyze()
+    expect(vazia.violations.map(violation => violation.id)).toEqual([])
+
+    await page.getByRole('button', { name: 'Cadastrar empresa' }).click()
+    const comFormulario = await new AxeBuilder({ page }).analyze()
+    expect(comFormulario.violations.map(violation => violation.id)).toEqual([])
+
+    await page.getByLabel('Nome da empresa').fill('Bolos da Ana')
+    await page.getByLabel('O que a empresa se propõe a fazer').fill('vender bolos caseiros por encomenda no bairro')
+    await page.getByLabel('Para quem').fill('moradores do bairro')
+    await page.getByRole('button', { name: 'Salvar empresa' }).click()
+    await expect(page.getByRole('heading', { level: 3, name: 'Versão 1 do plano' })).toBeVisible()
+    const comEmpresa = await new AxeBuilder({ page }).analyze()
+    expect(comEmpresa.violations.map(violation => violation.id)).toEqual([])
+  })
+
   test('a ajuda passa no axe em qualquer tamanho', async ({ page }) => {
     await page.goto('/studio/ajuda')
     await expect(page.getByRole('heading', { name: 'Ajuda do DZ23 STUDIO' })).toBeVisible()

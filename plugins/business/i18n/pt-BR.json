@@ -1,0 +1,13 @@
+{
+  "errors": {
+    "forbidden": "Seu papel não permite esta ação.",
+    "businessNotFound": "Empresa não encontrada neste espaço de trabalho.",
+    "nameRequired": "A empresa precisa de um nome com pelo menos dois caracteres.",
+    "businessArchived": "Esta empresa está arquivada e não recebe plano novo.",
+    "planUnchanged": "Este plano é igual ao que já vale. Mude alguma coisa antes de gravar uma versão nova.",
+    "routeNotFound": "Rota não encontrada.",
+    "jsonRequired": "O pedido precisa ser JSON.",
+    "requestTooLarge": "O pedido é grande demais.",
+    "operationFailed": "Não deu para concluir esta operação agora."
+  }
+}
