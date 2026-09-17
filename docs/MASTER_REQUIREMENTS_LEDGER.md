@@ -358,6 +358,8 @@ declarada.
 
 | OS-107 | A QUINTA causa da CI: a propria suite de capturas mudava a arvore versionada; e o cabecalho de conta das Preferencias | CI do commit 9c301e0, passo "Refuse unexpected build mutations" + MASTER V7 secao 06 (F04) | v1.0 | BETA | apps/studio-web/tests/capturas.spec.ts, src/preferencias/Preferencias.tsx, preferencias.css, src/i18n/preferencias.pt-BR.json, docs/OPERACAO.md, apps/studio-web/capturas/ (14 PNG do build deste commit) | reproduzido e conferido: `git status` limpo depois de rodar o projeto `gravacao` SEM `DZ23_CAPTURAS=sim`; com a variavel, as 14 capturas saem em `capturas/`; 26 portoes EXIT=0; e2e 121 passaram / 3 pulados | execucao: `capturas/` e versionado de proposito — a decisao do proprietario proibe reaproveitar captura antiga como prova da versao nova. So que a CI roda a mesma suite, e PNG e diferente a cada execucao (antialiasing, cursor, um pixel de fonte): a arvore mudava sozinha e o passo que a protege reprovava, com razao. A correcao nao desliga nem a captura nem a guarda: `DZ23_CAPTURAS=sim` diz que aquela execucao e ENTREGA. Sem a variavel a jornada roda inteira e o PNG cai na pasta de resultados do Playwright, que nao e versionada. QUINTA causa de CI da sequencia e TERCEIRA da mesma familia: o que passava aqui e reprovava la era sempre o ambiente de quem roda — o navegador, a variavel do operador e agora a pasta de saida | O construtor das capturas e DUBLE: elas provam interface e integracao com o servidor de teste, NAO geracao com IA real (EB-04) nem o perfil Cordis. O campo de busca que F04 mostra no alto da coluna NAO entrou — nao ha servico de busca, e um campo que nao busca e botao mudo | V7-A (menus do compositor); V7-K (tema claro) |
 
+| OS-108 | Os MENUS ancorados no compositor (F08/F09), com o que ESTE Studio tem ligado | MASTER V7 secao 06 + D7-006 + retomada do Prado item 4 | v1.0 | BETA | apps/studio-web/src/tarefa/menusDoCompositor.ts (novo), MenuDoCompositor.tsx (novo), menusDoCompositor.spec.ts (novo), tarefa.css, i18n/tarefa.pt-BR.json, home/HomeScreen.tsx, tarefa/TaskScreen.tsx, App.tsx, tests/accessibility.spec.ts, docs/status/TASK_DAG.md (V7-A) | menusDoCompositor.spec.ts 9; studio-web 640; e2e com axe no Chromium da CI: menu abre, `aria-expanded` muda, Gerenciar aponta para o destino real, Esc fecha, ZERO violacoes; 2 sabotagens, as duas PEGAS | execucao: a referencia mostra os icones das contas dela; copia-los seria dado encenado. O que entrou e o que existe — as integracoes registradas no Hub, com o estado verdadeiro, em dois menus que sao os mesmos dois destinos da lateral. As regras que quebram primeiro viraram funcoes com teste: ligadas primeiro (e o que vale naquele envio), corte em seis, e a CONTAGEM sobre a lista inteira — mostrar seis e escrever "6" para quem tem nove ligadas seria mentir sobre o envio. O escopo vem de `ESCOPO`, a autoridade dos destinos, e nao de uma segunda lista que discordaria no primeiro tipo novo. Lista vazia DIZ que esta vazia, e enquanto a leitura nao voltou nao ha numero nenhum: escrever "0" antes de perguntar e afirmar sem ter olhado | O F10 — seletor de computador — NAO entrou: `AT-07` e `GEN-06` sao AUSENTE, e desenha-lo seria o botao mudo que as duas ultimas fatias recusaram. O trabalho real e V7-F. V7-A segue PARCIAL | V7-F (computador); V7-K (tema claro) |
+
 <!-- O livro mestre REGISTRA achados, e o achado da OS-39 e sobre numeros de ADR
      que nomeiam mais de uma decisao: citacao-ambigua-proposital -->
 
@@ -366,16 +368,16 @@ declarada.
 | estado | quantos |
 | --- | --- |
 | `STABLE` | 69 |
-| `BETA` | 157 |
+| `BETA` | 158 |
 | `NOT_PRESENT` | 33 |
 | `NOT_CONFIGURED` | 1 |
 | `NOT_EXECUTED` | 4 |
 | `FAILED` | 2 |
 
-**Total de requisitos rastreados: 266.**
+**Total de requisitos rastreados: 267.**
 
 | versao-alvo | quantos |
 | --- | --- |
-| v1.0 | 230 |
+| v1.0 | 231 |
 | v1.x | 33 |
 | v2 | 3 |

@@ -540,3 +540,58 @@
 @media (prefers-reduced-motion: no-preference) {
   .dz-intencao-opcao { transition: border-color 120ms ease, color 120ms ease; }
 }
+
+/*
+  OS MENUS DO COMPOSITOR (F08/F09).
+
+  Ancorados no rodapé do compositor e abertos para CIMA, porque o compositor
+  mora embaixo: abrir para baixo jogaria a lista para fora da janela.
+*/
+.dz-menu-compositor { position: relative; display: inline-flex; }
+
+.dz-menu-botao {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: none;
+  color: var(--dz-text-secondary);
+  font: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.dz-menu-botao:hover { border-color: var(--dz-border); }
+.dz-menu-botao svg { width: 1rem; height: 1rem; }
+.dz-menu-conta { font-variant-numeric: tabular-nums; }
+
+.dz-menu-caixa {
+  position: absolute;
+  bottom: calc(100% + var(--dz-2));
+  left: 0;
+  z-index: 20;
+  min-width: 17rem;
+  padding: var(--dz-3);
+  border: 1px solid var(--dz-border);
+  border-radius: var(--dz-radius);
+  background: var(--dz-surface-active);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 45%);
+}
+
+.dz-menu-itens { margin: 0 0 var(--dz-2); padding: 0; list-style: none; }
+
+.dz-menu-itens li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--dz-3);
+  padding: 0.2rem 0;
+}
+
+.dz-menu-nome { color: var(--dz-text); }
+.dz-menu-estado { color: var(--dz-text-secondary); font-size: 0.75rem; }
+.dz-menu-ligada { color: var(--dz-accent); }
+.dz-menu-vazio, .dz-menu-restantes { margin: 0 0 var(--dz-2); color: var(--dz-text-secondary); font-size: 0.8125rem; }
+.dz-menu-gerenciar { color: var(--dz-accent); font-size: 0.8125rem; }

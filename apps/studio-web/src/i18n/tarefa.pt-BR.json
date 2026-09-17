@@ -53,5 +53,14 @@
   "acaoResponder": "Responder",
   "acaoMudarPlano": "Pedir mudança no plano",
   "acaoAjustar": "Pedir alteração",
-  "avisoPergunta": "Perguntar não muda o aplicativo: nada vira critério de aceite e nenhuma tentativa é gasta."
+  "avisoPergunta": "Perguntar não muda o aplicativo: nada vira critério de aceite e nenhuma tentativa é gasta.",
+  "menuHabilidades": "Habilidades deste envio",
+  "menuPlugins": "Plugins deste envio",
+  "menuLendo": "Lendo o que está ligado…",
+  "menuSemHabilidade": "Nenhuma habilidade registrada ainda.",
+  "menuSemPlugin": "Nenhum plugin registrado ainda.",
+  "menuLigada": "ligada",
+  "menuDesligada": "desligada",
+  "menuRestantes": "e mais {quantas} — a lista inteira está no destino.",
+  "menuGerenciar": "Gerenciar"
 }

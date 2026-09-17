@@ -116,6 +116,29 @@ test.describe('acessibilidade do fluxo principal', () => {
     await expect(modal).toBeHidden()
   })
 
+  test('os menus do compositor abrem com o que ESTE Studio tem ligado', async ({ page }) => {
+    /*
+      F08/F09 mostram os menus ancorados no compositor. O da referência lista as
+      contas dela; aqui a lista é a do Hub deste Studio — e quando não há
+      nenhuma, o menu DIZ isso em vez de mostrar serviços que ninguém conectou.
+    */
+    await page.goto('/studio/')
+    const botao = page.getByRole('button', { name: 'Habilidades deste envio' })
+    await expect(botao).toHaveAttribute('aria-expanded', 'false')
+    await botao.click()
+    await expect(botao).toHaveAttribute('aria-expanded', 'true')
+    const caixa = page.getByRole('group', { name: 'Habilidades deste envio' })
+    await expect(caixa).toBeVisible()
+    // Administrar é no destino real, e não numa segunda cópia da tela aqui.
+    await expect(caixa.getByRole('link', { name: 'Gerenciar' })).toHaveAttribute('href', '/studio/habilidades')
+
+    const semViolacao = await new AxeBuilder({ page }).analyze()
+    expect(semViolacao.violations.map(violation => violation.id)).toEqual([])
+
+    await page.keyboard.press('Escape')
+    await expect(caixa).toBeHidden()
+  })
+
   test('a ajuda passa no axe em qualquer tamanho', async ({ page }) => {
     await page.goto('/studio/ajuda')
     await expect(page.getByRole('heading', { name: 'Ajuda do DZ23 STUDIO' })).toBeVisible()

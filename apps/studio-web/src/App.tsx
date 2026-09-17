@@ -22,12 +22,17 @@ import { PlanEditor, type ConsultedView } from './plan/PlanEditor'
 import { TAREFAS_MUDARAM, WorkspaceShell } from './shell/WorkspaceShell'
 import { HomeScreen } from './home/HomeScreen'
 import { TaskScreen, type PainelAberto } from './tarefa/TaskScreen'
+import { createHubApi } from './hub/hubApi'
+import type { IntegracaoDoMenu } from './tarefa/menusDoCompositor'
 import { Preferencias } from './preferencias/Preferencias'
 import preferenciasTexto from './i18n/preferencias.pt-BR.json'
 import { iniciaisDaConta } from './shell/tarefasDoTrilho'
 import tarefaCopy from './i18n/tarefa.pt-BR.json'
 import type { CategoryBasis, DesignPreset } from './home/opcoes'
 import type { PlanEditRequest } from './plan/planEdit'
+
+/** O cliente do Hub, criado UMA vez: um por render refaria a leitura a cada estado novo. */
+const hubApi = createHubApi()
 
 type Question = { id: 'audience' | 'goal' | 'content' | 'sensitive-confirmation'; text: string }
 type Plan = { plan_id: string; status: string; updated_at: string; revision?: number; edited_by_person?: boolean; slices: Array<{ slice_id: string; title: string; description: string; acceptance_criteria: string[] }> }
@@ -124,6 +129,25 @@ export function App() {
   /* O rascunho do compositor mora AQUI para sobreviver a abrir e fechar painel. */
   const [rascunho, setRascunho] = useState('')
   const [preferenciasAbertas, setPreferenciasAbertas] = useState(false)
+  /*
+    O que está LIGADO, para os menus do compositor (F08/F09).
+
+    `null` é "ainda não li", e é diferente de lista vazia: o botão não mostra
+    número nenhum antes da resposta, porque escrever "0" antes de perguntar é
+    afirmar que não há nenhuma sem ter olhado. Uma falha de leitura mantém o
+    `null` — o menu diz que está lendo, e não que não existe nada.
+  */
+  const [integracoes, setIntegracoes] = useState<readonly IntegracaoDoMenu[] | null>(null)
+  useEffect(() => {
+    let vivo = true
+    void (async () => {
+      try {
+        const catalogo = await hubApi.integrations({})
+        if (vivo) setIntegracoes(catalogo.integrations)
+      } catch { /* sem leitura, o menu continua dizendo que está lendo. */ }
+    })()
+    return () => { vivo = false }
+  }, [])
   const [painel, setPainel] = useState<PainelAberto | null>(null)
   useEffect(() => {
     let active = true
@@ -734,12 +758,13 @@ export function App() {
         mudarPlano={mudarPlanoPelaConversa}
         ajustar={ajustar}
         perguntar={perguntar}
+        integracoes={integracoes}
         iniciais={iniciaisDaConta(sessionName)}
         painel={painel} abrirPainel={setPainel} fecharPainel={() => setPainel(null)}
         conteudoDoPainel={conteudoDoPainel} acoesDoEstado={acoesDoEstado} />
       : <main className="dz-canvas-home">
         <section className="dz-home-conteudo">
-          <HomeScreen brief={brief} setBrief={updateBrief} privacy={privacy} setPrivacy={setPrivacy} route={route ?? health.route} localRoute={health.local_route} routeReason={health.route_reason_code ?? null} ready={ready} chooseSuggestion={chooseSuggestion} category={category} categoryBasis={categoryBasis} chooseCategory={chooseCategory} create={create}
+          <HomeScreen integracoes={integracoes} brief={brief} setBrief={updateBrief} privacy={privacy} setPrivacy={setPrivacy} route={route ?? health.route} localRoute={health.local_route} routeReason={health.route_reason_code ?? null} ready={ready} chooseSuggestion={chooseSuggestion} category={category} categoryBasis={categoryBasis} chooseCategory={chooseCategory} create={create}
             designPreset={designPreset} setDesignPreset={setDesignPreset} brandColor={brandColor} setBrandColor={setBrandColor}
             font={font} setFont={setFont} radius={radius} setRadius={setRadius} density={density} setDensity={setDensity}
             tone={tone} setTone={setTone} logo={logo} setLogo={setLogo} showDesignAdvanced={showDesignAdvanced} setShowDesignAdvanced={setShowDesignAdvanced}

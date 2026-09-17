@@ -1,3 +1,5 @@
+import { MenuDoCompositor } from '../tarefa/MenuDoCompositor'
+import type { IntegracaoDoMenu } from '../tarefa/menusDoCompositor'
 import { ArrowUp, Cpu } from 'lucide-react'
 import { STUDIO_CATEGORIES, type Category } from '../categories'
 import { PendingButton } from '../PendingButton'
@@ -12,6 +14,8 @@ export interface HomeScreenProps {
   readonly privacy: PrivacyProfile
   setPrivacy(v: PrivacyProfile): void
   readonly route: string | null
+  /** O que o Hub devolveu. `null` e "ainda nao li", e nao lista vazia. */
+  readonly integracoes?: readonly IntegracaoDoMenu[] | null
   readonly localRoute: string | null | undefined
   readonly routeReason: string | null
   readonly ready: boolean
@@ -86,6 +90,9 @@ export function HomeScreen(props: HomeScreenProps) {
           <Cpu aria-hidden="true" />
           <span>{props.route ?? t.privacy.routeUnavailable}</span>
         </span>
+        {/* Os MENUS do compositor (F08/F09), com o que este Studio tem ligado. */}
+        <MenuDoCompositor qual="habilidades" integracoes={props.integracoes ?? null} />
+        <MenuDoCompositor qual="plugins" integracoes={props.integracoes ?? null} />
         <span className="dz-contador" aria-live="polite">{props.brief.length} {t.idea.counter}</span>
         {/* O nome acessível continua sendo o texto aprovado: trocá-lo por
             "Enviar" mudaria o rótulo que oito testes e a documentação citam,

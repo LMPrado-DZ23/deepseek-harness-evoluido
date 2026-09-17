@@ -4,6 +4,8 @@ import { hasBuildSteps } from '../buildSteps'
 import { attemptSentence, stageSentence } from '../creationProgress'
 import { useEffect, useRef, useState } from 'react'
 import tarefa from '../i18n/tarefa.pt-BR.json'
+import { MenuDoCompositor } from './MenuDoCompositor'
+import type { IntegracaoDoMenu } from './menusDoCompositor'
 import { destinoDoEnvio, envioDisponivel, intencaoPadrao, type Destino, type Intencao } from './compositor'
 import { transcricaoDaTarefa, type DetalhesDaTarefa, type Lance } from './transcricao'
 
@@ -50,6 +52,8 @@ export interface TaskScreenProps {
   readonly conteudoDoPainel?: React.ReactNode
   /** As ações que só existem em certos estados: aprovar plano, criar, cancelar. */
   readonly acoesDoEstado?: React.ReactNode
+  /** O que o Hub devolveu, para os menus do compositor. `null` é "ainda não li". */
+  readonly integracoes?: readonly IntegracaoDoMenu[] | null
   /** As iniciais de quem está na sessão, para o avatar. `null` sem sessão. */
   readonly iniciais?: string | null
 }
@@ -235,6 +239,8 @@ export function TaskScreen(props: TaskScreenProps) {
           {/* O PROJETO da tarefa, como o vídeo mostra no compositor: ele diz a
               que trabalho o texto vai se juntar. É o nome real da tarefa. */}
           <span className="dz-compositor-projeto"><FolderOpen aria-hidden="true" /><span>{props.detalhes.project.name}</span></span>
+          <MenuDoCompositor qual="habilidades" integracoes={props.integracoes ?? null} />
+          <MenuDoCompositor qual="plugins" integracoes={props.integracoes ?? null} />
           <span className="dz-contador" aria-live="polite">{props.rascunho.length}</span>
           <button type="submit" className="dz-enviar-redondo" disabled={!podeEnviar} aria-busy={enviando}
             aria-label={enviando ? tarefa.enviando : tarefa.enviar}>
