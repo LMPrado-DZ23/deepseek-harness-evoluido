@@ -388,6 +388,8 @@ declarada.
 
 | V7-A-2 / T-35-B2 | A secao USO E CUSTOS das Preferencias deixou de ser pendencia — e a pendencia que estava escrita ali estava ERRADA | Retomada do Prado 17/09/2026 item 1 ("Preferencias com cinco funcoes e oito explicacoes continuam parciais; informar a pendencia nao substitui implementar a capacidade") + item 3 | v1.0 | BETA | plugins/prompt-to-app/src/http.ts (rota `GET /usage`, contrato, `matchRoute`, tipo `StudioWorkspaceUsage`), index.ts (a porta `usage` lendo `route-health`), tests/http.spec.ts, apps/studio-web/src/preferencias/uso.ts e uso.spec.ts (novos), Uso.spec.tsx (novo), Preferencias.tsx (`UsoDoEspacoDeTrabalho`, `TabelaDeUso`), preferencias.ts (a secao passou a DISPONIVEL) e preferencias.spec.ts, preferencias.css, i18n/preferencias.pt-BR.json, tests/server.ts, tests/accessibility.spec.ts, tests/capturas.spec.ts | uso.spec.ts 18; Uso.spec.tsx 11; preferencias 37; studio-web 771; raiz 3970; e2e 153 passaram / 3 pulados na suite INTEIRA, com o caso novo nos QUATRO tamanhos e axe ZERO; PostgreSQL 65; 9 sabotagens, as nove PEGAS | execucao: a escolha foi por PRE-REQUISITO — das oito pendencias das Preferencias, USO foi a unica cujo motor ja estava inteiro, e a verificacao do T-35 tinha acabado de prova-lo. A pendencia escrita na tela dizia "a medicao de uso ainda nao foi construida", e isso estava ERRADO: uma pendencia que descreve errado o produto e uma segunda verdade com outra roupa — quem a le constroi de novo o que ja existe. Nenhum contador novo: a rota repassa `list` e `budget` do `route-health`, que sao o que ele ja grava e ja usa para decidir rota. As regras do adendo valem na camada que a pessoa le: custo DESCONHECIDO sai em palavras e nunca como US$ 0,0000; zero MEDIDO continua zero (o erro simetrico tambem e erro); o total soma so o medido e DIZ quantas chamadas ficaram de fora; e "dentro do teto" nao e afirmado quando nao houve consumo nenhum. A LIMITACAO esta escrita na propria tela: cota de assinatura e custo informado pelo provedor nao existem. DOIS achados no caminho: `matchRoute` tem lista fechada e eu registrei a rota so no contrato — o e2e cobrou com 404, e a lista fechada ficou como esta porque uma aberta aceitaria qualquer coisa em silencio; e a conferencia da captura achou o que nenhum teste pegava — os numeros saiam em formato ingles (`US$ 0.0042`) num produto inteiro em portugues | COTA de assinatura e CUSTO INFORMADO pelo provedor continuam AUSENTES — nao existem em lugar nenhum do codigo. Os numeros do e2e sao DUBLE; o formato e o caminho sao de producao. Reserva, conciliacao e alertas (fatia C) continuam abertos, e a corrida entre processos segue NAO OBSERVADA. Restam SETE pendencias nas Preferencias: tema, idioma, atalhos, computador (F10), controles de dados e implantacoes. O aceite visual e do titular e NAO esta declarado | Preferencias (tema, idioma, atalhos, F10, dados, implantacoes); T-35 fatias C e D; V7-B (enviar arquivos) |
 
+| V7-A-3 | ATALHOS DE TECLADO: a secao deixou de ser pendencia porque o produto passou a TER um atalho — enviar sem tirar a mao do teclado | Retomada do Prado 17/09/2026 item 1 ("informar a pendencia e obrigatorio, mas nao substitui implementar a capacidade") | v1.0 | BETA | apps/studio-web/src/preferencias/atalhos.ts e atalhos.spec.ts (novos), Preferencias.tsx (`ListaDeAtalhos`), preferencias.ts (a secao passou a DISPONIVEL) e preferencias.spec.ts, i18n/preferencias.pt-BR.json, home/HomeScreen.tsx, tarefa/TaskScreen.tsx, tests/journey.spec.ts | atalhos.spec.ts 10; preferencias 47; studio-web 784; raiz 3970; e2e 157 passaram / 3 pulados na suite INTEIRA; PostgreSQL 65; 7 sabotagens, as sete PEGAS | execucao: a pendencia dizia que nao havia atalho nenhum, e a medicao achou `Esc` em TRES lugares — e nenhum lugar que o dissesse a quem usa. Um atalho que ninguem sabe que existe nao e um atalho. So que listar os tres tambem NAO fecharia o requisito, e a diretriz e explicita: informar a pendencia nao substitui implementar a capacidade. Entao a fatia acrescentou o que faltava de verdade — `Ctrl+Enter` (e `Cmd+Enter`) envia do compositor, nos DOIS compositores. `Enter` sozinho continua quebrando linha de proposito: sequestra-lo faria quem escreve dois paragrafos enviar o primeiro sem querer, e nao ha desfazer para uma tarefa criada. `Shift+Ctrl+Enter` e `Alt+Ctrl+Enter` NAO enviam — combinacoes com modificador a mais pertencem a outras ferramentas e ao sistema. E o atalho NAO e uma segunda porta: ele passa pela MESMA condicao do botao, inclusive o bloqueio de privacidade, entao o teclado nunca envia o que o botao recusa. O e2e prova as duas metades: a tarefa NASCE do atalho, e o Enter sozinho escreve a segunda linha sem criar nada | Nao da para TROCAR as teclas, e a tela diz isso — um painel de configuracao de atalhos seria outra fatia. Restam SEIS pendencias nas Preferencias: tema, idioma, computador (F10), controles de dados e implantacoes. O aceite visual e do titular e NAO esta declarado | Preferencias (tema, idioma, F10, dados, implantacoes); V7-B (enviar arquivos); T-35 fatias C e D |
+
 <!-- O livro mestre REGISTRA achados, e o achado da OS-39 e sobre numeros de ADR
      que nomeiam mais de uma decisao: citacao-ambigua-proposital -->
 
@@ -396,16 +398,16 @@ declarada.
 | estado | quantos |
 | --- | --- |
 | `STABLE` | 69 |
-| `BETA` | 172 |
+| `BETA` | 173 |
 | `NOT_PRESENT` | 33 |
 | `NOT_CONFIGURED` | 1 |
 | `NOT_EXECUTED` | 4 |
 | `FAILED` | 2 |
 
-**Total de requisitos rastreados: 281.**
+**Total de requisitos rastreados: 282.**
 
 | versao-alvo | quantos |
 | --- | --- |
-| v1.0 | 245 |
+| v1.0 | 246 |
 | v1.x | 33 |
 | v2 | 3 |

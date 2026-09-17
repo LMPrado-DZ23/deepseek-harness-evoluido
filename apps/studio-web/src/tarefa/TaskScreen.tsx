@@ -4,6 +4,7 @@ import { hasBuildSteps } from '../buildSteps'
 import { attemptSentence, stageSentence } from '../creationProgress'
 import { useEffect, useRef, useState } from 'react'
 import tarefa from '../i18n/tarefa.pt-BR.json'
+import { atalhoEnvia } from '../preferencias/atalhos'
 import { MenuDoCompositor } from './MenuDoCompositor'
 import type { IntegracaoDoMenu } from './menusDoCompositor'
 import { destinoDoEnvio, envioDisponivel, intencaoPadrao, type Destino, type Intencao } from './compositor'
@@ -235,7 +236,17 @@ export function TaskScreen(props: TaskScreenProps) {
         <label className="sr-only" htmlFor="dz-continuar">{tarefa.compositorRotulo}</label>
         <textarea id="dz-continuar" rows={2} value={props.rascunho} maxLength={2000}
           placeholder={tarefa.compositorPlaceholder}
-          onChange={evento => props.setRascunho(evento.target.value)} />
+          onChange={evento => props.setRascunho(evento.target.value)}
+          /*
+            ENVIAR pelo teclado. A condição é a MESMA do botão (`podeEnviar`):
+            o atalho não é uma segunda porta, e quem decide se dá para enviar
+            continua sendo um lugar só.
+          */
+          onKeyDown={evento => {
+            if (!atalhoEnvia(evento, podeEnviar)) return
+            evento.preventDefault()
+            evento.currentTarget.form?.requestSubmit()
+          }} />
         <div className="dz-compositor-rodape">
           {/* O PROJETO da tarefa, como o vídeo mostra no compositor: ele diz a
               que trabalho o texto vai se juntar. É o nome real da tarefa. */}

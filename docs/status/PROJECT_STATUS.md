@@ -38,8 +38,8 @@ Todos reproduzíveis pelo comando ao lado.
 | typecheck | PASS | `pnpm typecheck` |
 | build | PASS | `pnpm build` |
 | suíte raiz | 3970 testes, 227 arquivos, 0 falha (17/09, após T-35-ALCANCE) | `pnpm -w test` |
-| suíte studio-web | 771 testes (17/09, após V7-A-2) | `cd apps/studio-web && npx vitest run` |
-| e2e navegador | 153 aprovados, 0 reprovados, 3 pulados (17/09, quatro tamanhos) | `cd apps/studio-web && npx playwright test` |
+| suíte studio-web | 784 testes (17/09, após V7-A-3) | `cd apps/studio-web && npx vitest run` |
+| e2e navegador | 157 aprovados, 0 reprovados, 3 pulados (17/09, quatro tamanhos) | `cd apps/studio-web && npx playwright test` |
 | PostgreSQL real | **65 testes, `POSTGRES_GATE=PASS`** (12/09, PostgreSQL 16.13 local) | `pnpm test:postgres` |
 | portões | **26/26 PASS** | ver abaixo |
 
@@ -664,6 +664,18 @@ produto existe para não fazer.
     regras do adendo valem na camada que a pessoa lê: custo desconhecido sai em
     palavras, zero medido continua zero, e o total diz quantas chamadas ficaram
     de fora dele.
+
+49. **V7-A-3 — atalhos de teclado, com um atalho de verdade.**
+
+    A pendência dizia que não havia nenhum. Havia `Esc` em três lugares, e
+    nenhum lugar que o dissesse — e listar os três não fecharia o requisito.
+
+    A fatia acrescentou o que faltava: **`Ctrl+Enter` envia do compositor**, nos
+    dois. `Enter` sozinho continua quebrando linha, e o e2e prova as duas
+    metades — porque sequestrar o Enter é o defeito perigoso aqui.
+
+    O atalho **não é uma segunda porta**: passa pela mesma condição do botão,
+    inclusive o bloqueio de privacidade.
 
 
 ## Estado do DAG

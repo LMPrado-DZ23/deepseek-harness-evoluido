@@ -53,14 +53,15 @@ describe('as seções das preferências', () => {
     expect(secaoInicial(secoesDePreferencias(TUDO))).toBe('conta')
     /*
       Sem sessão e sem notificação, as duas primeiras caem — e a primeira que
-      sobra é USO, que passou a ser disponível quando a apresentação do consumo
-      foi construída. Antes desta fatia a resposta era Habilidades, porque tudo
-      entre uma e outra estava pendente.
+      sobra é ATALHOS, que vem antes de Uso na ordem da referência e passou a
+      ser disponível quando o produto passou a ter um atalho de verdade.
 
-      O teste muda porque o PRODUTO mudou, e não porque a regra mudou: a regra
-      continua "abre na primeira disponível".
+      Esta expectativa já mudou duas vezes, e as duas por FATIA ENTREGUE: era
+      Habilidades quando tudo entre uma e outra estava pendente, virou Uso, e
+      agora é Atalhos. A regra nunca mudou — "abre na primeira disponível" —, e
+      é por isso que o teste é sobre ela, e não sobre um identificador fixo.
     */
-    expect(secaoInicial(secoesDePreferencias({ autenticado: false, notificacoesSuportadas: false }))).toBe('uso')
+    expect(secaoInicial(secoesDePreferencias({ autenticado: false, notificacoesSuportadas: false }))).toBe('atalhos')
   })
 
   it('sem nenhuma seção disponível, devolve `null` em vez de inventar uma', () => {

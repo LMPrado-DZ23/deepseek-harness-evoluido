@@ -6,6 +6,7 @@ import { PendingButton } from '../PendingButton'
 import { creationBlocked, privacyNotice, routeReasonNotice, type PrivacyProfile } from '../presentation'
 import { APARENCIAS, PERFIS_PRIVACIDADE, atalhosDaHome, temMaisAtalhos, type CategoryBasis, type DesignPreset } from './opcoes'
 import t from '../i18n/pt-BR.json'
+import { atalhoEnvia } from '../preferencias/atalhos'
 import home from '../i18n/home.pt-BR.json'
 
 export interface HomeScreenProps {
@@ -84,7 +85,17 @@ export function HomeScreen(props: HomeScreenProps) {
     <div className="dz-compositor">
       <label className="sr-only" htmlFor="brief">{home.compositorRotulo}</label>
       <textarea id="brief" maxLength={1000} value={props.brief} rows={3}
-        onChange={event => props.setBrief(event.target.value)} placeholder={home.compositorPlaceholder} />
+        onChange={event => props.setBrief(event.target.value)} placeholder={home.compositorPlaceholder}
+        /*
+          ENVIAR pelo teclado, com a MESMA condição do botão — inclusive o
+          bloqueio de privacidade, que é o que impede uma ideia de sair para
+          uma rota que a pessoa não autorizou.
+        */
+        onKeyDown={event => {
+          if (!atalhoEnvia(event, props.ready && !creationBlocked(props.privacy, props.localRoute))) return
+          event.preventDefault()
+          void props.create()
+        }} />
       <div className="dz-compositor-rodape">
         <span className="dz-compositor-rota" title={home.rota}>
           <Cpu aria-hidden="true" />

@@ -4,6 +4,7 @@ import preferencias from '../i18n/preferencias.pt-BR.json'
 import { iniciaisDaConta } from '../shell/tarefasDoTrilho'
 import { podeOperar, secaoInicial, secoesDePreferencias, type ContextoDasPreferencias, type GrupoDePreferencias, type SecaoDePreferencias } from './preferencias'
 import { chaveDoVeredito, contagemEmTexto, custoEmTexto, linhasDeUso, totalDeUso, type LinhaDeUso, type UsoDoEspaco } from './uso'
+import { atalhosDoStudio } from './atalhos'
 import { api } from '../api'
 
 /**
@@ -119,6 +120,40 @@ export function UsoDoEspacoDeTrabalho({ ler = () => api<UsoDoEspaco>('/usage') }
   return <TabelaDeUso linhas={linhasDeUso(uso.routes ?? [])} veredito={uso.budget?.verdict} />
 }
 
+/**
+ * Os atalhos de teclado que o produto TEM.
+ *
+ * A lista vem de `atalhosDoStudio`, e a tela não escreve nenhum à mão: um
+ * atalho listado e não implementado é o botão mudo da decisão do proprietário
+ * com outra forma. A LIMITAÇÃO também está escrita — não dá para trocar as
+ * teclas —, porque uma lista sem essa frase parece um painel de configuração.
+ */
+export function ListaDeAtalhos() {
+  return <div className="dz-preferencias-uso">
+    <table className="dz-preferencias-uso-tabela">
+      <thead>
+        <tr>
+          <th scope="col">{preferencias.atalhosTecla}</th>
+          <th scope="col">{preferencias.atalhosAcao}</th>
+          <th scope="col">{preferencias.atalhosOnde}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {atalhosDoStudio().map(atalho => <tr key={atalho.id}>
+          <th scope="row">
+            {atalho.teclas.map((tecla, indice) => <span key={tecla}>
+              {indice > 0 && ' + '}<kbd>{tecla}</kbd>
+            </span>)}
+          </th>
+          <td>{preferencias.atalhosNomes[atalho.id as keyof typeof preferencias.atalhosNomes]}</td>
+          <td>{preferencias.atalhosEscopo[atalho.escopo]}</td>
+        </tr>)}
+      </tbody>
+    </table>
+    <p className="dz-preferencias-uso-limite">{preferencias.atalhosLimitacao}</p>
+  </div>
+}
+
 /** O consumo já lido, desenhado. Separado para ter teste sem rede. */
 export function TabelaDeUso({ linhas, veredito }: {
   readonly linhas: readonly LinhaDeUso[]
@@ -183,6 +218,7 @@ function Conteudo({ secao, conta, notificacao }: {
   }
   if (secao.id === 'notificacoes') return <div className="dz-preferencias-controle">{notificacao}</div>
   if (secao.id === 'uso') return <UsoDoEspacoDeTrabalho />
+  if (secao.id === 'atalhos') return <ListaDeAtalhos />
   // As capacidades que existem são DESTINOS: o link leva ao lugar onde elas já
   // funcionam, em vez de uma segunda cópia da mesma tela dentro do modal.
   return <p className="dz-preferencias-controle">

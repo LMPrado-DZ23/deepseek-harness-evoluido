@@ -66,7 +66,16 @@ export function secoesDePreferencias(contexto: ContextoDasPreferencias): readonl
     // pinta metade da tela é pior que um tema claro que ainda não existe.
     { id: 'tema', grupo: 'configuracoes', disponivel: false, pendencia: 'temaUnico' },
     { id: 'idioma', grupo: 'configuracoes', disponivel: false, pendencia: 'idiomaUnico' },
-    { id: 'atalhos', grupo: 'configuracoes', disponivel: false, pendencia: 'semAtalhos' },
+    /*
+      ATALHOS passou a ser disponível quando o produto passou a TER um.
+
+      A pendência anterior dizia que não havia atalho nenhum, e a medição achou
+      `Esc` em três lugares — nenhum deles escrito em parte alguma. Um atalho
+      que ninguém sabe que existe não é um atalho, e listar só os três também
+      não fecharia o requisito. A fatia acrescentou o que faltava de verdade:
+      enviar sem tirar a mão do teclado.
+    */
+    { id: 'atalhos', grupo: 'configuracoes', disponivel: true },
     /*
       USO passou a ser DISPONÍVEL, e a pendência que estava aqui estava ERRADA.
 

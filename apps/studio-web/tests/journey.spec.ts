@@ -733,3 +733,45 @@ test('responder e pedir alteração no plano: o reenvio não duplica nem devolve
   expect(guardado.plan?.status).toBe('CHANGE_REQUESTED')
   expect(guardado.plan?.change_request).toBe('o botão precisa ficar verde')
 })
+
+
+/**
+ * O ATALHO DE ENVIO — a ação nova que esta fatia entrega.
+ *
+ * A seção "Atalhos de teclado" das Preferências era uma pendência que dizia não
+ * haver atalho nenhum. Havia `Esc` em três lugares, e nenhum lugar que o
+ * dissesse — mas listar os três não fecharia o requisito. O que faltava de
+ * verdade era enviar sem tirar a mão do teclado, e é isto que este caso prova:
+ * a tarefa NASCE do atalho, e não do clique.
+ */
+test('Ctrl+Enter envia do compositor, e Enter sozinho continua quebrando linha', async ({ context, page }) => {
+  const origin = 'http://studio.dz23.localhost:4179'
+  await context.addCookies([
+    { name: 'dz23_studio_session', value: 'e2e', url: origin },
+    { name: 'dz23_studio_csrf', value: 'csrf-e2e', url: origin },
+  ])
+  await context.addInitScript(() => { window.sessionStorage.setItem('dz23.studio.csrf.v1', 'csrf-e2e') })
+  await page.goto('/studio/')
+  await page.getByRole('button', { name: 'Página de apresentação' }).click()
+
+  const compositor = page.getByLabel('Descreva o aplicativo que você quer')
+  await compositor.fill('uma página para a clínica receber contatos')
+
+  /*
+    ENTER SOZINHO não envia: ele quebra linha.
+
+    Esta metade do caso é a que protege quem escreve dois parágrafos. Sem ela, a
+    prova do atalho seria só "o atalho funciona", e o defeito perigoso —
+    sequestrar o Enter — passaria sem ninguém ver.
+  */
+  await compositor.press('Enter')
+  await compositor.type('e mostrar os horários')
+  await expect(compositor).toHaveValue(/contatos\n?e mostrar os horários/u)
+  // Nenhuma tarefa nasceu: continuamos na home, com o compositor aberto.
+  await expect(page.getByRole('button', { name: 'Continuar' })).toBeVisible()
+
+  // E o atalho ENVIA: a tarefa nasce daqui.
+  await compositor.press('Control+Enter')
+  await expect(page.getByLabel('Conversa desta tarefa')).toBeVisible({ timeout: 20_000 })
+  await expect(page).toHaveURL(/\?projeto=/u)
+})
