@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react'
 import copy from '../i18n/destinos.pt-BR.json'
 import hubCopy from '../i18n/hub.pt-BR.json'
 import { HubPanel } from '../hub/HubPanel'
+import { operacoesDaBiblioteca, tiposDaBiblioteca } from './biblioteca'
 import { createHubApi, type ExportRecord, type HubApi, type ProjectSummary } from '../hub/hubApi'
 import { formatBytes, formatDate } from '../hub/presentation'
 import { STUDIO_HOME_PATH } from '../navigation'
@@ -76,6 +77,35 @@ export function BibliotecaScreen({ api = createHubApi() }: { readonly api?: HubA
     </header>
 
     {falhou ? <p className="error" role="alert">{copy.bibliotecaFalhou}</p> : null}
+
+    {/*
+      A DECLARAÇÃO, exigida pelo proprietário: "a Biblioteca precisa declarar
+      exatamente quais arquivos e operações ela suporta". Ela vem de
+      `biblioteca.ts`, que tem teste — um parágrafo escrito à mão aqui
+      envelheceria sem ninguém notar, e a promessa passaria a ser falsa.
+    */}
+    <section className="dz-biblioteca-declaracao" aria-labelledby="dz-biblioteca-declaracao-titulo">
+      <h2 id="dz-biblioteca-declaracao-titulo">{copy.bibliotecaDeclaracao}</h2>
+      <p><strong>{copy.bibliotecaTiposRotulo}:</strong> {tiposDaBiblioteca().map(tipo => copy.bibliotecaTipos[tipo as keyof typeof copy.bibliotecaTipos]).join('; ')}</p>
+      <div className="dz-biblioteca-colunas">
+        <div>
+          <h3>{copy.bibliotecaFazRotulo}</h3>
+          <ul>
+            {operacoesDaBiblioteca().filter(operacao => operacao.suportada).map(operacao =>
+              <li key={operacao.id}>{copy.bibliotecaOperacoes[operacao.id as keyof typeof copy.bibliotecaOperacoes]}</li>)}
+          </ul>
+        </div>
+        <div>
+          <h3>{copy.bibliotecaNaoFazRotulo}</h3>
+          <ul>
+            {operacoesDaBiblioteca().filter(operacao => !operacao.suportada).map(operacao => <li key={operacao.id}>
+              <span>{copy.bibliotecaOperacoes[operacao.id as keyof typeof copy.bibliotecaOperacoes]}</span>
+              <span className="dz-biblioteca-motivo">{copy.bibliotecaMotivos[operacao.motivo as keyof typeof copy.bibliotecaMotivos]}</span>
+            </li>)}
+          </ul>
+        </div>
+      </div>
+    </section>
 
     {projetos !== null && projetos.length > 1 ? <label className="dz-destino-filtro">
       {copy.bibliotecaFiltroRotulo}

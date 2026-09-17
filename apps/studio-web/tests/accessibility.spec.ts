@@ -165,6 +165,24 @@ test.describe('acessibilidade do fluxo principal', () => {
     expect(semViolacao.violations.map(violation => violation.id)).toEqual([])
   })
 
+  test('a Biblioteca DECLARA o que guarda e o que faz', async ({ page }) => {
+    // Exigência do proprietário, por escrito. Uma tela que lista pacotes e não
+    // diz o que ela é deixa quem usa supondo que dá para subir arquivo,
+    // versionar e compartilhar — e a pessoa só descobre quando precisa.
+    await page.goto('/studio/biblioteca')
+    const declaracao = page.getByRole('region', { name: 'O que esta Biblioteca guarda e o que ela faz' })
+    await expect(declaracao).toBeVisible()
+    await expect(declaracao).toContainText('.zip')
+    // As duas respostas, e não só a boa.
+    await expect(declaracao.getByRole('heading', { name: 'Ela faz', exact: true })).toBeVisible()
+    await expect(declaracao.getByRole('heading', { name: 'Ela ainda NÃO faz' })).toBeVisible()
+    // E cada "não" com o motivo.
+    await expect(declaracao).toContainText('Não existe envio de arquivo neste produto')
+
+    const semViolacao = await new AxeBuilder({ page }).analyze()
+    expect(semViolacao.violations.map(violation => violation.id)).toEqual([])
+  })
+
   test('a ajuda passa no axe em qualquer tamanho', async ({ page }) => {
     await page.goto('/studio/ajuda')
     await expect(page.getByRole('heading', { name: 'Ajuda do DZ23 STUDIO' })).toBeVisible()

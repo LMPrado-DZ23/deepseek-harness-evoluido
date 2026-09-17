@@ -125,3 +125,26 @@
 .dz-destino-pendente h2 { margin: 0 0 var(--dz-3); font-size: 1rem; }
 .dz-destino-pendente ul { margin: 0 0 var(--dz-5); padding-left: var(--dz-5); color: var(--dz-text-secondary); }
 .dz-destino-pendente li + li { margin-top: var(--dz-2); }
+
+/* A DECLARAÇÃO da Biblioteca: o que ela guarda e o que ela faz. */
+.dz-biblioteca-declaracao {
+  margin: var(--dz-4) 0;
+  padding: var(--dz-4);
+  border: 1px solid var(--dz-border);
+  border-radius: var(--dz-radius);
+  background: var(--dz-surface);
+}
+
+.dz-biblioteca-declaracao h2 { margin: 0 0 var(--dz-2); font-size: 1rem; }
+.dz-biblioteca-declaracao h3 { margin: 0 0 var(--dz-2); font-size: 0.875rem; color: var(--dz-text-secondary); }
+.dz-biblioteca-declaracao > p { margin: 0 0 var(--dz-3); color: var(--dz-text-secondary); }
+
+.dz-biblioteca-colunas {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--dz-4);
+}
+
+.dz-biblioteca-colunas ul { margin: 0; padding-left: var(--dz-4); }
+.dz-biblioteca-colunas li { margin-bottom: var(--dz-2); }
+.dz-biblioteca-motivo { display: block; color: var(--dz-text-secondary); font-size: 0.8125rem; }

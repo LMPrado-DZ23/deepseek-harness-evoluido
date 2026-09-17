@@ -362,6 +362,8 @@ declarada.
 
 | OS-109 | ADENDO DZ23-USO-CUSTOS-API: o consumo por tentativa, que ja era gravado, passou a ser MOSTRADO — e uso desconhecido nao vira zero | ADENDO `USO_COTAS_CUSTOS_APIS_V1_ORIGINAL.txt` + MASTER V7 secao 20 + retomada do Prado item 5 | v1.0 | BETA | apps/studio-web/src/tarefa/uso.ts (novo), UsoDaTarefa.tsx (novo), uso.spec.ts (novo), transcricao.ts (campos de consumo), TaskScreen.tsx (painel `uso`), App.tsx, tarefa.css, i18n/tarefa.pt-BR.json, tests/accessibility.spec.ts | uso.spec.ts 6; studio-web 646; e2e com axe: o painel abre depois de uma criacao real no servidor de teste, mostra "nao registrado" e NAO mostra US$ 0.0000; 2 sabotagens, as duas PEGAS | execucao: MEDI antes de construir. A autoridade de consumo e custo JA EXISTIA — `route-health` grava tokens, custo estimado e `unpriced_requests` (que ja impede "nao sei o preco" virar "custou zero") e tem teto com veredito; `studio_runs` grava o consumo por tentativa. Nenhum contador novo foi criado, e o adendo proibe um segundo gateway ou ledger. O que faltava era APRESENTACAO: o consumo por tentativa era gravado e nunca mostrado. As tres regras do adendo viraram funcao com teste — ausencia preservada como ausencia, zero registrado continuando zero, e soma por identificador, porque o corpo da tarefa traz a tentativa corrente em `runs` E em `current_run` e soma-la duas vezes dobraria o custo. A linha que impede o resto de mentir e quantas tentativas rodaram SEM registro | E a fatia B do adendo, e so em parte: faltam reserva concorrente, conciliacao e alertas (fatia C) e os demais provedores (fatia D). COTA de assinatura e CUSTO INFORMADO pelo provedor nao existem em lugar nenhum do codigo e por isso NAO tem linha na tela — inventa-los seria o que o adendo proibe. A jornada com provedor real continua em EB-04 | T-35 fatias C e D; V7-F; V7-K |
 
+| OS-110 | A Biblioteca DECLARA o que guarda e o que faz, com o motivo de cada "ainda nao" | Retomada do Prado 17/09/2026 item 4 ("a Biblioteca precisa declarar exatamente quais arquivos e operacoes ela suporta") + D7-007 | v1.0 | BETA | apps/studio-web/src/destinos/biblioteca.ts (novo), biblioteca.spec.ts (novo), Destinos.tsx, destinos.css, i18n/destinos.pt-BR.json, tests/accessibility.spec.ts | biblioteca.spec.ts 6, inclusive a conferencia de que TODA operacao nao suportada tem motivo e TODA frase existe no catalogo; e2e com axe: a regiao existe, contem `.zip`, mostra as DUAS colunas e o motivo do "nao", ZERO violacoes; 2 sabotagens, as duas PEGAS | execucao: a tela listava pacotes e nao dizia o que ela e. Quem chega supoe que da para subir arquivo, versionar, compartilhar e apagar, e descobre que nao da na hora em que precisa — uma lista sem declaracao e uma promessa implicita. A declaracao virou MODULO e nao paragrafo, porque um paragrafo escrito a mao no JSX envelhece sem ninguem notar e a promessa passa a ser falsa em silencio. Ela guarda UM tipo, no singular de proposito, e declara seis operacoes que NAO faz, cada uma com o motivo — inclusive apagar, que e acao destrutiva e exige decisao explicita do dono | Declarar o que falta NAO e implementa-lo: receber arquivos, previa, versoes, compartilhamento e retencao continuam AUSENTES, e a tarefa que os constroi e V7-B | V7-B (Biblioteca por objeto); T-35 fatias C e D |
+
 <!-- O livro mestre REGISTRA achados, e o achado da OS-39 e sobre numeros de ADR
      que nomeiam mais de uma decisao: citacao-ambigua-proposital -->
 
@@ -370,16 +372,16 @@ declarada.
 | estado | quantos |
 | --- | --- |
 | `STABLE` | 69 |
-| `BETA` | 159 |
+| `BETA` | 160 |
 | `NOT_PRESENT` | 33 |
 | `NOT_CONFIGURED` | 1 |
 | `NOT_EXECUTED` | 4 |
 | `FAILED` | 2 |
 
-**Total de requisitos rastreados: 268.**
+**Total de requisitos rastreados: 269.**
 
 | versao-alvo | quantos |
 | --- | --- |
-| v1.0 | 232 |
+| v1.0 | 233 |
 | v1.x | 33 |
 | v2 | 3 |
