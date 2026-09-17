@@ -226,3 +226,72 @@ export function nomesDasTarefas<V extends { readonly project_id: string }>(
   const porId = new Map(projetos.map(projeto => [projeto.project_id, projeto.name]))
   return vinculos.map(vinculo => porId.get(vinculo.project_id) ?? null)
 }
+
+/** Um pacote que uma tarefa da empresa produziu. */
+export interface PacoteDaTarefa {
+  readonly export_id: string
+  readonly project_id: string
+  readonly file_name: string
+  readonly size_bytes: number
+  readonly created_at: string
+}
+
+/** A evidência de UMA tarefa: o que ela produziu, do mais recente ao mais antigo. */
+export interface EvidenciaDaTarefa {
+  readonly projectId: string
+  readonly pacotes: readonly PacoteDaTarefa[]
+}
+
+/**
+ * O que cada tarefa da empresa PRODUZIU — `BUS-03`.
+ *
+ * Este é o último elo de `empresa → objetivo → plano → tarefa → evidência`, e
+ * ele é uma JUNÇÃO, e não um registro novo: os pacotes já são guardados pelo
+ * `integration-hub`, com recibo e resumo criptográfico, e a Biblioteca já os
+ * lista. Gravar uma cópia deles no Modo Empresa seria a segunda contabilidade
+ * de evidência — e a que divergisse em silêncio seria justamente a que alguém
+ * lê para decidir se o trabalho foi entregue.
+ *
+ * Uma tarefa SEM pacote continua na lista, com a lista vazia: ela existe, ela
+ * simplesmente ainda não produziu nada, e esconder a linha faria a empresa
+ * parecer ter menos tarefas do que tem.
+ * @param vinculos - as tarefas da empresa.
+ * @param pacotes - os pacotes lidos, de qualquer tarefa e em qualquer ordem.
+ * @returns a evidência de cada tarefa, na ordem dos vínculos.
+ */
+export function evidenciaDasTarefas<V extends { readonly project_id: string }>(
+  vinculos: readonly V[],
+  pacotes: readonly PacoteDaTarefa[],
+): readonly EvidenciaDaTarefa[] {
+  return vinculos.map(vinculo => ({
+    projectId: vinculo.project_id,
+    pacotes: pacotes
+      .filter(pacote => pacote.project_id === vinculo.project_id)
+      .sort((esquerda, direita) => direita.created_at.localeCompare(esquerda.created_at)),
+  }))
+}
+
+/**
+ * Quantos pacotes a empresa INTEIRA já produziu.
+ *
+ * O número é do conjunto, e não a soma das listas: o mesmo pacote lido duas
+ * vezes — por duas leituras que se cruzaram — contaria duas.
+ * @param evidencias - a evidência de cada tarefa.
+ * @returns a contagem de pacotes distintos.
+ */
+export function totalDePacotes(evidencias: readonly EvidenciaDaTarefa[]): number {
+  return new Set(evidencias.flatMap(evidencia => evidencia.pacotes.map(pacote => pacote.export_id))).size
+}
+
+/**
+ * A chave do texto do total, pelo NÚMERO.
+ *
+ * "1 pacote(s)" é o que sai quando ninguém decide o plural; a decisão mora aqui
+ * porque dentro do JSX ela não seria exercitada por teste nenhum.
+ * @param total - quantos pacotes.
+ * @returns a chave do catálogo, ou `null` quando não há nada a dizer.
+ */
+export function chaveDoTotal(total: number): 'evidenciaTotalUm' | 'evidenciaTotal' | null {
+  if (total === 0) return null
+  return total === 1 ? 'evidenciaTotalUm' : 'evidenciaTotal'
+}

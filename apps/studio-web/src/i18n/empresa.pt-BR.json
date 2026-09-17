@@ -53,5 +53,11 @@
   "abrirTarefa": "Abrir",
   "tarefaVersao": "Criada com a versão {n} do plano",
   "erroPedido": "Escreva o que você quer que seja criado, com pelo menos 3 letras.",
-  "tarefaSemNome": "Tarefa sem nome disponível"
+  "tarefaSemNome": "Tarefa sem nome disponível",
+  "evidencia": "O que esta tarefa produziu",
+  "evidenciaVazia": "Nada ainda.",
+  "evidenciaLendo": "Lendo o que as tarefas produziram…",
+  "evidenciaTotal": "{n} pacotes produzidos por esta empresa.",
+  "baixar": "Baixar {file}",
+  "evidenciaTotalUm": "1 pacote produzido por esta empresa."
 }

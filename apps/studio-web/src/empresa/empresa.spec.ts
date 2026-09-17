@@ -3,6 +3,8 @@ import { STUDIO_CATEGORIES } from '../categories'
 import {
   RASCUNHO_VAZIO,
   TAREFA_VAZIA,
+  chaveDoTotal,
+  evidenciaDasTarefas,
   limitesDoTexto,
   nomesDasTarefas,
   planoDoRascunho,
@@ -13,6 +15,7 @@ import {
   recusaDaTarefa,
   recusaDoPlano,
   textoDosLimites,
+  totalDePacotes,
   textoNormalizado,
   versaoVigente,
   versoesAnteriores,
@@ -198,5 +201,67 @@ describe('o nome de cada tarefa vinculada', () => {
 
   it('sem vínculo nenhum, não há nome nenhum', () => {
     expect(nomesDasTarefas([], projetos)).toEqual([])
+  })
+})
+
+describe('o que cada tarefa da empresa produziu', () => {
+  const pacote = (id: string, projectId: string, created_at: string) => ({
+    export_id: id, project_id: projectId, file_name: `${id}.zip`, size_bytes: 10, created_at,
+  })
+
+  it('cada pacote fica com a tarefa dele, e não com a lista toda', () => {
+    const evidencias = evidenciaDasTarefas(
+      [{ project_id: 'p-1' }, { project_id: 'p-2' }],
+      [pacote('e-1', 'p-1', '2026-09-17T10:00:00.000Z'), pacote('e-2', 'p-2', '2026-09-17T11:00:00.000Z')],
+    )
+    expect(evidencias.map(evidencia => evidencia.pacotes.map(p => p.export_id))).toEqual([['e-1'], ['e-2']])
+  })
+
+  it('os pacotes vêm do mais RECENTE para o mais antigo', () => {
+    const evidencias = evidenciaDasTarefas([{ project_id: 'p-1' }], [
+      pacote('antigo', 'p-1', '2026-09-16T10:00:00.000Z'),
+      pacote('novo', 'p-1', '2026-09-17T10:00:00.000Z'),
+    ])
+    expect(evidencias[0]!.pacotes.map(p => p.export_id)).toEqual(['novo', 'antigo'])
+  })
+
+  it('tarefa SEM pacote continua na lista, com a lista vazia', () => {
+    // Esconder a linha faria a empresa parecer ter menos tarefas do que tem.
+    const evidencias = evidenciaDasTarefas([{ project_id: 'p-1' }], [])
+    expect(evidencias).toHaveLength(1)
+    expect(evidencias[0]!.pacotes).toEqual([])
+  })
+
+  it('pacote de uma tarefa que NÃO é da empresa não entra', () => {
+    const evidencias = evidenciaDasTarefas([{ project_id: 'p-1' }], [pacote('e-9', 'p-outra', '2026-09-17T10:00:00.000Z')])
+    expect(evidencias[0]!.pacotes).toEqual([])
+  })
+
+  it('o total conta pacotes DISTINTOS, e não a soma das listas', () => {
+    // O mesmo pacote lido duas vezes — por duas leituras que se cruzaram —
+    // contaria duas na soma.
+    const repetido = pacote('e-1', 'p-1', '2026-09-17T10:00:00.000Z')
+    expect(totalDePacotes([
+      { projectId: 'p-1', pacotes: [repetido] },
+      { projectId: 'p-2', pacotes: [repetido] },
+    ])).toBe(1)
+  })
+
+  it('sem evidência nenhuma, o total é zero', () => {
+    expect(totalDePacotes([])).toBe(0)
+  })
+})
+
+describe('o plural do total de pacotes', () => {
+  it('zero NÃO vira frase: cada tarefa já diz que não produziu nada', () => {
+    expect(chaveDoTotal(0)).toBeNull()
+  })
+
+  it('um é singular, e não "1 pacote(s)"', () => {
+    expect(chaveDoTotal(1)).toBe('evidenciaTotalUm')
+  })
+
+  it('dois ou mais é plural', () => {
+    expect(chaveDoTotal(2)).toBe('evidenciaTotal')
   })
 })

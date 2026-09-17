@@ -599,7 +599,15 @@ const server = createServer((request, response) => {
   if (request.url?.startsWith('/api/studio/hub/') === true) {
     const caminho = new URL(request.url, 'http://127.0.0.1:4179').pathname.replace('/api/studio/hub', '')
     const listagem = /^\/projects\/([^/]+)\/exports$/u.exec(caminho)
-    if (listagem !== null) return json(response, 200, { exports: [E2E_PACOTE] })
+    /*
+      O `project_id` do pacote é o da TAREFA PEDIDA, e não um fixo.
+
+      Um servidor de verdade lista os pacotes daquele projeto; devolver sempre o
+      mesmo `project_id` fazia o dublê responder uma coisa que o produto nunca
+      responde, e a junção do Modo Empresa — que filtra por tarefa — ficava sem
+      nada para mostrar por um defeito do dublê, e não do produto.
+    */
+    if (listagem !== null) return json(response, 200, { exports: [{ ...E2E_PACOTE, project_id: decodeURIComponent(listagem[1]!) }] })
     const previa = /^\/projects\/([^/]+)\/exports\/([^/]+)\/preview$/u.exec(caminho)
     if (previa !== null) {
       if (previa[2] !== E2E_PACOTE.export_id) return json(response, 404, { error: 'pacote não encontrado' })

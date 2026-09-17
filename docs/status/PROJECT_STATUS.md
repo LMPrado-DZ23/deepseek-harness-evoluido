@@ -37,8 +37,8 @@ Todos reproduzíveis pelo comando ao lado.
 | --- | --- | --- |
 | typecheck | PASS | `pnpm typecheck` |
 | build | PASS | `pnpm build` |
-| suíte raiz | 3941 testes, 226 arquivos, 0 falha (17/09, após BUS-02) | `pnpm -w test` |
-| suíte studio-web | 708 testes (17/09, após BUS-02) | `cd apps/studio-web && npx vitest run` |
+| suíte raiz | 3941 testes, 226 arquivos, 0 falha (17/09, após BUS-03) | `pnpm -w test` |
+| suíte studio-web | 719 testes (17/09, após BUS-03) | `cd apps/studio-web && npx vitest run` |
 | e2e navegador | 147 aprovados, 0 reprovados, 3 pulados (17/09, quatro tamanhos) | `cd apps/studio-web && npx playwright test` |
 | PostgreSQL real | **65 testes, `POSTGRES_GATE=PASS`** (12/09, PostgreSQL 16.13 local) | `pnpm test:postgres` |
 | portões | **26/26 PASS** | ver abaixo |
@@ -594,6 +594,16 @@ produto existe para não fazer.
     E a lição de processo, que custou uma entrega: rodar o caso novo sozinho
     prova que ele passa sozinho, e nada mais. **A suíte inteira é que prova que
     ele passa junto.**
+
+44. **BUS-03 — a evidência volta para a empresa.**
+
+    Cada tarefa da empresa mostra os pacotes que produziu, com tamanho, data e
+    link de download. `empresa → objetivo → plano → tarefa → evidência` fecha.
+
+    É uma **junção**, e não um registro novo: os pacotes já são guardados pelo
+    `integration-hub`, com recibo e resumo criptográfico. Uma cópia deles aqui
+    seria a segunda contabilidade de evidência — e a que divergisse em silêncio
+    seria justamente a que alguém lê para decidir se o trabalho foi entregue.
 
 
 ## Estado do DAG

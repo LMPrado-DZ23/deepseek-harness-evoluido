@@ -630,13 +630,21 @@ test('cria uma tarefa para a empresa, com o plano dentro, e ela aparece na empre
   // O rótulo do link é o NOME da tarefa, e não a palavra "Abrir": com três
   // tarefas, três linhas iguais não dizem qual é qual.
   //
-  // A busca é ESCOPADA à seção porque o mesmo nome aparece no trilho de tarefas
-  // do produto — e isso é, por si só, uma prova: a tarefa criada a partir da
-  // empresa é uma tarefa de verdade, e não um registro paralelo.
+  // A busca é ESCOPADA à seção porque o mesmo nome também aparece no trilho de
+  // tarefas do produto. NÃO se afirma nada sobre o trilho aqui: ele mostra as
+  // tarefas mais recentes com um teto, e quantas cabem depende de quantas os
+  // outros casos criaram — seria a mesma dependência de ordem que já custou uma
+  // CI. A prova de que a tarefa é de verdade está abaixo: ela abre na conversa
+  // do produto, com o briefing dentro.
   const secao = page.getByLabel('Tarefas desta empresa')
-  await expect(page.getByLabel('Navegação principal').getByRole('link', { name: 'uma página para receber' })).toBeVisible()
   const abrir = secao.getByRole('link', { name: 'uma página para receber encomendas' })
   await expect(abrir).toHaveAttribute('href', /\/studio\/\?projeto=/u)
+
+  // `BUS-03`: a EVIDÊNCIA da tarefa volta para a empresa — lida de quem já a
+  // guarda, e não de uma cópia gravada aqui.
+  await expect(secao.getByRole('link', { name: 'Baixar prototipo.zip' })).toBeVisible()
+  await expect(page.getByText('1 pacote produzido por esta empresa.')).toBeVisible()
+
 
   // E a tarefa é uma tarefa DE VERDADE: ela abre na conversa do produto, e o
   // briefing dela carrega o plano da empresa — o que faz o vínculo valer algo.

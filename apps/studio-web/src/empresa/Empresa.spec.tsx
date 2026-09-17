@@ -1,7 +1,7 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { CamposDoPlano, PlanoLido } from './Empresa'
+import { CamposDoPlano, EvidenciaDaTarefaLida, PlanoLido } from './Empresa'
 import type { RegistroDePlano } from './empresaApi'
 
 /**
@@ -81,5 +81,43 @@ describe('os campos do plano', () => {
     }))
     expect(html).toContain('vender bolos')
     expect(html).toContain('só à vista')
+  })
+})
+
+describe('o que uma tarefa produziu', () => {
+  const pacote = {
+    export_id: 'exp-1', project_id: 'p-1', file_name: 'prototipo.zip',
+    size_bytes: 2048, created_at: '2026-09-17T12:00:00.000Z',
+  }
+
+  it('ainda LENDO é um estado próprio, e não "não produziu nada"', () => {
+    // Colapsar os dois seria afirmar sem ter olhado.
+    const html = renderToStaticMarkup(createElement(EvidenciaDaTarefaLida, { pacotes: null }))
+    expect(html).toContain('Lendo o que as tarefas produziram')
+    expect(html).not.toContain('Nada ainda')
+  })
+
+  it('leu e não há nada DIZ isso', () => {
+    const html = renderToStaticMarkup(createElement(EvidenciaDaTarefaLida, { pacotes: [] }))
+    expect(html).toContain('Nada ainda.')
+  })
+
+  it('cada pacote vira um link de download com o NOME do arquivo', () => {
+    const html = renderToStaticMarkup(createElement(EvidenciaDaTarefaLida, { pacotes: [pacote] }))
+    expect(html).toContain('Baixar prototipo.zip')
+    expect(html).toContain('/api/studio/hub/projects/p-1/exports/exp-1/download')
+  })
+
+  it('o marcador `{file}` NUNCA chega à tela', () => {
+    // Já aconteceu na Biblioteca: a frase estava certa no catálogo, o marcador
+    // não era preenchido, e nenhum teste olhava o texto do link.
+    const html = renderToStaticMarkup(createElement(EvidenciaDaTarefaLida, { pacotes: [pacote] }))
+    expect(html).not.toContain('{file}')
+  })
+
+  it('mostra o tamanho e a data, para a pessoa saber o que vai baixar', () => {
+    const html = renderToStaticMarkup(createElement(EvidenciaDaTarefaLida, { pacotes: [pacote] }))
+    expect(html).toContain('2')
+    expect(html).toContain('KB')
   })
 })

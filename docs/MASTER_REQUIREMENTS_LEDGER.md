@@ -378,6 +378,8 @@ declarada.
 
 | BUS-03-CI | A SETIMA causa de CI, e a QUINTA da mesma familia: o teste dependia da ORDEM em que os casos rodaram | CI do commit a77800f, passo "Studio browser suite" | v1.0 | BETA | apps/studio-web/tests/server.ts (`/e2e/reset-business`), journey.spec.ts, accessibility.spec.ts, capturas.spec.ts | suite e2e INTEIRA, 147 passaram / 3 pulados (duas execucoes completas) — e nao so o caso rodado sozinho com `-g`, que foi exatamente o erro | execucao: o caso da jornada afirmava "voce ainda nao cadastrou nenhuma empresa" e passava aqui, onde eu o rodava sozinho, e reprovava na CI, onde a varredura de acessibilidade ja havia cadastrado uma. O armazenamento do servidor de teste e UM para a execucao inteira do Playwright, e a pre-condicao do caso era ACIDENTAL. A correcao nao e tornar a assercao mais fraca: e tornar a pre-condicao EXPLICITA, com um endereco de reinicio como o que `reset-mission` ja tinha. E a licao de processo, que custou uma entrega: rodar o caso novo sozinho com `-g` PROVA que ele passa sozinho, e nada mais; a suite inteira e que prova que ele passa junto | O endereco de reinicio existe SO no servidor de teste, e nao no produto. Ele e `GET` porque o cliente de API do Playwright roda em Node, e `studio.dz23.localhost` so resolve dentro do Chromium | BUS-03..BUS-24; V7-C; T-35 fatias C e D |
 
+| BUS-03 | A EVIDENCIA volta para a empresa: cada tarefa mostra os pacotes que produziu, lidos de quem ja os guarda | Retomada do Prado 17/09/2026 item 5 ("empresa → objetivo → oferta/plano → tarefa → evidencia persistida") | v1.0 | BETA | apps/studio-web/src/empresa/empresa.ts (`evidenciaDasTarefas`, `totalDePacotes`, `chaveDoTotal`), Empresa.tsx (`EvidenciaDaTarefaLida`, `TotalDePacotes`, `lerPacotes`), empresa.css, i18n/empresa.pt-BR.json, tests/server.ts (o pacote passa a carregar o `project_id` PEDIDO), tests/journey.spec.ts, tests/capturas.spec.ts | empresa.spec.ts 52 e Empresa.spec.tsx 11 na interface; studio-web 719; raiz 3941; e2e 147 passaram / 3 pulados na suite INTEIRA; PostgreSQL 65; 6 sabotagens, as seis PEGAS | execucao: este e o ultimo elo de `empresa → objetivo → plano → tarefa → evidencia`, e ele e uma JUNCAO, e nao um registro novo. Os pacotes ja sao guardados pelo `integration-hub`, com recibo e resumo criptografico, e a Biblioteca ja os lista; gravar uma copia deles no Modo Empresa seria a segunda contabilidade de evidencia — e a que divergisse em silencio seria justamente a que alguem le para decidir se o trabalho foi entregue. Nenhuma rota nova, nenhum dominio novo: so leitura da autoridade que ja existe. TRES estados por tarefa, e nao dois: ainda lendo, leu e nao ha nada, leu e tem coisas — colapsar o primeiro no segundo diria "esta tarefa nao produziu nada" enquanto a leitura ainda estava em voo. A leitura que falha nao derruba a secao nem apaga o que as outras tarefas produziram. O total conta pacotes DISTINTOS, e nao a soma das listas: o mesmo pacote lido por duas leituras que se cruzaram contaria duas. E o plural foi decidido em funcao propria, porque "1 pacote(s)" e o que sai quando ninguem decide — e dentro do JSX a decisao nao seria exercitada por teste nenhum. NO CAMINHO, um defeito do DUBLE apareceu: o servidor de teste devolvia sempre o mesmo `project_id` no pacote, que e uma coisa que servidor nenhum responde; corrigido para o `project_id` pedido | A evidencia mostrada e a dos PACOTES exportados. Execucoes, tentativas e relatorios de verificacao NAO aparecem aqui ainda — eles existem e tem tela propria, e junta-los e trabalho de outra fatia. O armazenamento do acervo no servidor de teste e DUBLE; o formato do pacote nao e. Os outros VINTE E UM requisitos BUS continuam AUSENTES. Ninguem que nao programa usou a tela (EB-02). O aceite visual e do titular e NAO esta declarado | BUS-04..BUS-24; V7-B (enviar arquivos); V7-C; T-35 fatias C e D |
+
 <!-- O livro mestre REGISTRA achados, e o achado da OS-39 e sobre numeros de ADR
      que nomeiam mais de uma decisao: citacao-ambigua-proposital -->
 
@@ -386,16 +388,16 @@ declarada.
 | estado | quantos |
 | --- | --- |
 | `STABLE` | 69 |
-| `BETA` | 167 |
+| `BETA` | 168 |
 | `NOT_PRESENT` | 33 |
 | `NOT_CONFIGURED` | 1 |
 | `NOT_EXECUTED` | 4 |
 | `FAILED` | 2 |
 
-**Total de requisitos rastreados: 276.**
+**Total de requisitos rastreados: 277.**
 
 | versao-alvo | quantos |
 | --- | --- |
-| v1.0 | 240 |
+| v1.0 | 241 |
 | v1.x | 33 |
 | v2 | 3 |

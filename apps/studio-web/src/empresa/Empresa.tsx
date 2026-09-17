@@ -4,6 +4,8 @@ import copy from '../i18n/empresa.pt-BR.json'
 import { STUDIO_HOME_PATH } from '../navigation'
 import { createEmpresaApi, type Empresa, type EmpresaApi, type RegistroDePlano, type VinculoDeTarefa } from './empresaApi'
 import { STUDIO_CATEGORIES } from '../categories'
+import { createHubApi, HUB_API_PREFIX } from '../hub/hubApi'
+import { formatBytes, formatDate } from '../hub/presentation'
 import copyGeral from '../i18n/pt-BR.json'
 import {
   RASCUNHO_VAZIO,
@@ -12,7 +14,11 @@ import {
   rascunhoDoPlano,
   recusaDaEmpresa,
   recusaDaRevisao,
+  chaveDoTotal,
+  evidenciaDasTarefas,
   nomesDasTarefas,
+  totalDePacotes,
+  type PacoteDaTarefa,
   recusaDaTarefa,
   textoNormalizado,
   versaoVigente,
@@ -32,6 +38,17 @@ import './empresa.css'
   Biblioteca, numa tela parada.
 */
 const cliente = createEmpresaApi()
+/*
+  O cliente do Hub, criado UMA VEZ — pela mesma razão que o de empresas: um
+  objeto novo a cada render faria o efeito que depende dele disparar outra
+  leitura, e foi assim que a Biblioteca chegou a 621 chamadas em 3 segundos.
+
+  A evidência é LIDA de quem já a guarda. O Modo Empresa não grava uma cópia dos
+  pacotes: o `integration-hub` já os tem, com recibo e resumo criptográfico, e
+  uma segunda contabilidade de evidência divergiria justamente no ponto em que
+  alguém a lê para decidir se o trabalho foi entregue.
+*/
+const clienteDoHub = createHubApi()
 
 /**
  * Uma chave de intenção de envio, nova a cada envio que COMEÇA.
@@ -44,6 +61,22 @@ const cliente = createEmpresaApi()
 function novaChaveDeEnvio(): string {
   const cripto = globalThis.crypto as { randomUUID?: () => string } | undefined
   return cripto?.randomUUID === undefined ? `envio-${String(Date.now())}` : cripto.randomUUID()
+}
+
+/**
+ * Os pacotes das tarefas desta empresa, lidos de quem já os guarda.
+ *
+ * Uma leitura por tarefa, porque é assim que o Hub guarda. A leitura que falha
+ * NÃO derruba a seção inteira e não apaga o que as outras tarefas produziram:
+ * ela devolve nada, e a tela deixa de mostrar o que não conseguiu ler — em vez
+ * de afirmar que aquela tarefa não produziu.
+ * @param vinculos - as tarefas da empresa.
+ * @returns os pacotes de todas elas.
+ */
+async function lerPacotes(vinculos: readonly VinculoDeTarefa[]): Promise<readonly PacoteDaTarefa[]> {
+  return (await Promise.all(vinculos.map(async vinculo => {
+    try { return await clienteDoHub.exports(vinculo.project_id) } catch { return [] }
+  }))).flat()
 }
 
 /** Uma frase de recusa da tela, pela chave. */
@@ -105,6 +138,36 @@ export function PlanoLido({ registro }: { readonly registro: RegistroDePlano }) 
 }
 
 /**
+ * O que UMA tarefa produziu — `BUS-03`.
+ *
+ * TRÊS estados, e não dois: ainda lendo, leu e não há nada, leu e tem coisas.
+ * Colapsar o primeiro no segundo diria "esta tarefa não produziu nada" enquanto
+ * a leitura ainda estava em voo — que é afirmar sem ter olhado.
+ */
+export function EvidenciaDaTarefaLida({ pacotes }: { readonly pacotes: readonly PacoteDaTarefa[] | null }) {
+  if (pacotes === null) return <p className="dz-empresa-ajuda">{copy.evidenciaLendo}</p>
+  if (pacotes.length === 0) return <p className="dz-empresa-ajuda">{copy.evidencia}: {copy.evidenciaVazia}</p>
+  return <ul className="dz-empresa-evidencia">
+    {pacotes.map(pacote => <li key={pacote.export_id}>
+      <a href={`${HUB_API_PREFIX}/projects/${encodeURIComponent(pacote.project_id)}/exports/${encodeURIComponent(pacote.export_id)}/download`}>
+        {copy.baixar.replace('{file}', pacote.file_name)}
+      </a>
+      {' '}
+      <span className="dz-empresa-ajuda">{formatBytes(pacote.size_bytes)} · {formatDate(pacote.created_at)}</span>
+    </li>)}
+  </ul>
+}
+
+/** Quantos pacotes a empresa já produziu, em português de gente. */
+export function TotalDePacotes({ total }: { readonly total: number }) {
+  const chave = chaveDoTotal(total)
+  // Zero não vira uma frase: cada tarefa já diz que não produziu nada, e uma
+  // linha repetindo isso no rodapé seria ruído.
+  if (chave === null) return null
+  return <p className="dz-empresa-ajuda">{copy[chave].replace('{n}', String(total))}</p>
+}
+
+/**
  * A tela das empresas — `BUS-01`, a porta do Modo Empresa.
  *
  * A ação NOVA que ela entrega, inteira: cadastrar uma empresa com objetivo,
@@ -127,6 +190,8 @@ export function EmpresaScreen({ api = cliente }: { readonly api?: EmpresaApi } =
   const [revisao, setRevisao] = useState<RascunhoDoPlano | null>(null)
   const [tarefas, setTarefas] = useState<readonly VinculoDeTarefa[]>([])
   const [projetos, setProjetos] = useState<readonly { readonly project_id: string; readonly name: string }[]>([])
+  /* `null` é "ainda lendo", que é diferente de "não produziu nada". */
+  const [pacotes, setPacotes] = useState<readonly PacoteDaTarefa[] | null>(null)
   const [novaTarefa, setNovaTarefa] = useState<RascunhoDaTarefa | null>(null)
   /*
     A chave de intenção vive num `ref`, e não no estado: ela precisa sobreviver
@@ -158,6 +223,8 @@ export function EmpresaScreen({ api = cliente }: { readonly api?: EmpresaApi } =
       setTarefas(vinculos)
       setProjetos(lista)
       setRevisao(null)
+      setPacotes(null)
+      setPacotes(await lerPacotes(vinculos))
       setNovaTarefa(null)
     } catch (causa) {
       setErro(causa instanceof Error ? causa.message : copy.erroLeitura)
@@ -233,6 +300,9 @@ export function EmpresaScreen({ api = cliente }: { readonly api?: EmpresaApi } =
       const [vinculos, lista] = await Promise.all([api.tarefas(aberta.empresa.business_id), api.projetos()])
       setTarefas(vinculos)
       setProjetos(lista)
+      // A tarefa recém-criada entra na seção de evidência junto, e não só na
+      // próxima vez que alguém abrir a empresa.
+      setPacotes(await lerPacotes(vinculos))
       return criada
     } catch (causa) {
       setErro(causa instanceof Error ? causa.message : copy.erroLeitura)
@@ -365,8 +435,10 @@ export function EmpresaScreen({ api = cliente }: { readonly api?: EmpresaApi } =
                       <span className="dz-empresa-ajuda">
                         {copy.tarefaVersao.replace('{n}', String(vinculo.plan_version))}
                       </span>
+                      <EvidenciaDaTarefaLida pacotes={pacotes === null ? null : evidenciaDasTarefas([vinculo], pacotes)[0]!.pacotes} />
                     </li>)}
                   </ul>}
+                {pacotes !== null && <TotalDePacotes total={totalDePacotes(evidenciaDasTarefas(tarefas, pacotes))} />}
                 {novaTarefa === null
                   ? <p className="dz-empresa-acoes">
                     <button type="button" onClick={() => setNovaTarefa(TAREFA_VAZIA)}>{copy.criarTarefa}</button>

@@ -160,3 +160,7 @@
   color: var(--dz-text);
   font: inherit;
 }
+
+.dz-empresa-evidencia { margin: var(--dz-2) 0 0; padding-left: var(--dz-5); }
+.dz-empresa-evidencia li + li { margin-top: var(--dz-1); }
+.dz-empresa-evidencia a { color: var(--dz-accent); }
