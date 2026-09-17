@@ -228,3 +228,20 @@ describe('perguntaAbertaDe', () => {
     expect(perguntaAbertaDe(DETALHES)).toBeNull()
   })
 })
+
+describe('as regiões que rolam são alcançáveis por teclado', () => {
+  it('a conversa E o corpo do painel têm foco', () => {
+    /*
+      O axe cobra `scrollable-region-focusable` só quando a região REALMENTE
+      rola — e isso depende do tamanho da janela. O painel de uso passou na
+      máquina local, onde o conteúdo cabia, e reprovou na CI, onde não coube.
+
+      Este teste não depende de tamanho nenhum: ele confere o atributo. Uma
+      região que rola sem foco é inalcançável por quem não usa mouse, e
+      descobrir isso pelo tamanho da janela de quem rodou é sorte, não guarda.
+    */
+    const html = montar({ painel: { tipo: 'diagnostico' }, conteudoDoPainel: 'qualquer conteúdo' })
+    expect(html).toContain('<ol class="dz-conversa" tabindex="0"')
+    expect(html).toContain('<div class="dz-painel-corpo" tabindex="0"')
+  })
+})

@@ -364,6 +364,8 @@ declarada.
 
 | OS-110 | A Biblioteca DECLARA o que guarda e o que faz, com o motivo de cada "ainda nao" | Retomada do Prado 17/09/2026 item 4 ("a Biblioteca precisa declarar exatamente quais arquivos e operacoes ela suporta") + D7-007 | v1.0 | BETA | apps/studio-web/src/destinos/biblioteca.ts (novo), biblioteca.spec.ts (novo), Destinos.tsx, destinos.css, i18n/destinos.pt-BR.json, tests/accessibility.spec.ts | biblioteca.spec.ts 6, inclusive a conferencia de que TODA operacao nao suportada tem motivo e TODA frase existe no catalogo; e2e com axe: a regiao existe, contem `.zip`, mostra as DUAS colunas e o motivo do "nao", ZERO violacoes; 2 sabotagens, as duas PEGAS | execucao: a tela listava pacotes e nao dizia o que ela e. Quem chega supoe que da para subir arquivo, versionar, compartilhar e apagar, e descobre que nao da na hora em que precisa — uma lista sem declaracao e uma promessa implicita. A declaracao virou MODULO e nao paragrafo, porque um paragrafo escrito a mao no JSX envelhece sem ninguem notar e a promessa passa a ser falsa em silencio. Ela guarda UM tipo, no singular de proposito, e declara seis operacoes que NAO faz, cada uma com o motivo — inclusive apagar, que e acao destrutiva e exige decisao explicita do dono | Declarar o que falta NAO e implementa-lo: receber arquivos, previa, versoes, compartilhamento e retencao continuam AUSENTES, e a tarefa que os constroi e V7-B | V7-B (Biblioteca por objeto); T-35 fatias C e D |
 
+| OS-111 | Regiao que rola sem foco: o painel reprovou na CI e passava aqui, porque a regra do axe depende do TAMANHO da janela | CI do commit 819b595, passo "Studio browser suite" (`scrollable-region-focusable`) | v1.0 | BETA | apps/studio-web/src/tarefa/TaskScreen.tsx, TaskScreen.spec.tsx | TaskScreen.spec.tsx 21, com um teste NOVO que confere o atributo sem depender de tamanho de janela; e2e do painel de uso nos QUATRO tamanhos; 1 sabotagem, PEGA | execucao: o axe cobra `scrollable-region-focusable` so quando a regiao REALMENTE rola, e isso depende do tamanho da janela. O painel de uso passou na maquina local, onde o conteudo cabia, e reprovou na CI, onde nao coube. A correcao e o `tabIndex={0}` que a conversa ja tinha — uma regiao que rola e nao recebe foco e inalcancavel por quem nao usa mouse. E o teste novo nao depende de tamanho nenhum: ele confere o atributo, porque descobrir isso pelo tamanho da janela de quem rodou e sorte, nao guarda | Esta e a SEXTA causa de CI da sequencia e a QUARTA da mesma familia: o resultado dependia do ambiente de quem roda. A diferenca e que desta vez a guarda nova nao depende mais dele | V7-B; T-35 fatias C e D |
+
 <!-- O livro mestre REGISTRA achados, e o achado da OS-39 e sobre numeros de ADR
      que nomeiam mais de uma decisao: citacao-ambigua-proposital -->
 
@@ -372,16 +374,16 @@ declarada.
 | estado | quantos |
 | --- | --- |
 | `STABLE` | 69 |
-| `BETA` | 160 |
+| `BETA` | 161 |
 | `NOT_PRESENT` | 33 |
 | `NOT_CONFIGURED` | 1 |
 | `NOT_EXECUTED` | 4 |
 | `FAILED` | 2 |
 
-**Total de requisitos rastreados: 269.**
+**Total de requisitos rastreados: 270.**
 
 | versao-alvo | quantos |
 | --- | --- |
-| v1.0 | 233 |
+| v1.0 | 234 |
 | v1.x | 33 |
 | v2 | 3 |

@@ -258,7 +258,14 @@ export function TaskScreen(props: TaskScreenProps) {
         <button type="button" className="dz-painel-fechar" onClick={props.fecharPainel}
           aria-label={tarefa.painelFechar}><X aria-hidden="true" /></button>
       </header>
-      <div className="dz-painel-corpo">{props.conteudoDoPainel}</div>
+      {/*
+        `tabIndex={0}` porque o CORPO DO PAINEL rola. Uma região que rola e não
+        recebe foco é inalcançável por teclado — é a mesma regra que já valia
+        para a conversa (`scrollable-region-focusable`), e o axe só a cobrou
+        aqui quando o painel passou a ter conteúdo mais alto que a janela: na
+        máquina local o conteúdo cabia e a regra não valia; na CI, não coube.
+      */}
+      <div className="dz-painel-corpo" tabIndex={0}>{props.conteudoDoPainel}</div>
     </aside>}
   </div>
 }
