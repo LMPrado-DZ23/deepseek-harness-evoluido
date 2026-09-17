@@ -139,7 +139,40 @@ function findEndOfCentralDirectory(archive: Buffer): number {
  * be trusted. Nothing here is on a production route today — no ZIP is imported anywhere — and this
  * hardening is what has to exist before one is.
  */
-export function readZip(archive: Buffer): ZipEntry[] {
+/** O cabeçalho de UMA entrada, já conferido contra os bytes que estão lá. */
+export interface ZipHeader {
+  readonly name: string
+  /** O tamanho descompactado, já conferido contra os tetos do leitor. */
+  readonly size: number
+  readonly compressedSize: number
+  readonly method: number
+  readonly crc: number
+  readonly mode: number
+  /** Onde o payload começa, já conferido para caber antes do diretório central. */
+  readonly start: number
+}
+
+/**
+ * Percorre o diretório central e devolve os CABEÇALHOS, sem descompactar nada.
+ *
+ * Toda a conferência estrutural mora aqui — e por isso ela existe uma vez só.
+ * Duplicar este laço para um "leitor leve" produziria duas descrições do mesmo
+ * formato, e a que divergisse em silêncio seria justamente a que decide se um
+ * arquivo hostil é aceito. Quem quer os BYTES chama `readZip`, que inflaciona
+ * em cima daqui; quem quer só a LISTA chama `listZip`, e não materializa nada.
+ *
+ * Escrito para um arquivo HOSTIL: todo campo é uma alegação a conferir contra
+ * os bytes que realmente estão lá, nunca um número em que confiar.
+ *
+ * ISTO MUDOU, e o comentário antigo dizia o contrário: ele afirmava que nada
+ * daqui estava numa rota de produção. Desde a prévia da Biblioteca, `listZip`
+ * está — ela lê o pacote que o próprio produto escreveu, mas lê um ARQUIVO, e
+ * um arquivo em disco é editável por quem alcançar o disco. A dureza que já
+ * existia deixou de ser preparação e passou a ser a defesa em uso.
+ * @param archive - o arquivo inteiro.
+ * @returns os cabeçalhos, na ordem do diretório central.
+ */
+export function zipHeaders(archive: Buffer): ZipHeader[] {
   const eocd = findEndOfCentralDirectory(archive)
   if (archive.readUInt16LE(eocd + 4) !== 0 || archive.readUInt16LE(eocd + 6) !== 0) throw new Error('multi-disk zip archives are not supported')
   const count = archive.readUInt16LE(eocd + 10)
@@ -148,7 +181,7 @@ export function readZip(archive: Buffer): ZipEntry[] {
   const centralSize = archive.readUInt32LE(eocd + 12)
   if (centralStart > eocd || centralStart + centralSize !== eocd) throw new Error('corrupt central directory')
   let position = centralStart
-  const entries: ZipEntry[] = []
+  const headers: ZipHeader[] = []
   const seen = new Set<string>()
   let total = 0
   for (let index = 0; index < count; index++) {
@@ -204,14 +237,39 @@ export function readZip(archive: Buffer): ZipEntry[] {
     // The payload must live BEFORE the central directory, not merely inside the buffer: an entry
     // whose data overlaps the directory it is described by is not an archive this reader accepts.
     if (start > centralStart || start + compressedSize > centralStart) throw new Error(`corrupt entry: ${name}`)
-    const payload = archive.subarray(start, start + compressedSize)
-    // `maxOutputLength` is what turns a zip bomb into an error instead of a heap that keeps growing.
-    const data = method === 8 ? inflateRawSync(payload, { maxOutputLength: size + 1 }) : Buffer.from(payload)
-    if (data.length !== size || crc32(data) !== crc) throw new Error(`corrupt entry: ${name}`)
-    entries.push({ name, data, mode })
+    headers.push({ name, size, compressedSize, method, crc, mode, start })
     position += 46 + nameLength + extraLength + commentLength
   }
   if (position !== eocd) throw new Error('corrupt central directory')
+  return headers
+}
+
+/**
+ * A LISTA do que há dentro, sem materializar byte nenhum de conteúdo.
+ *
+ * É o que a prévia da Biblioteca usa: nome e tamanho. Descompactar um pacote
+ * inteiro para mostrar uma lista gastaria até meio gigabyte de memória para
+ * responder a uma pergunta que o diretório central já responde.
+ * @param archive - o arquivo inteiro.
+ * @returns o nome e o tamanho de cada entrada.
+ */
+export function listZip(archive: Buffer): readonly { readonly name: string, readonly size: number }[] {
+  return zipHeaders(archive).map(header => ({ name: header.name, size: header.size }))
+}
+
+/**
+ * Read every entry back (used by tests and by the export self-check). A conferência estrutural é a
+ * de `zipHeaders`; o que este acrescenta é descompactar e conferir CRC.
+ */
+export function readZip(archive: Buffer): ZipEntry[] {
+  const entries: ZipEntry[] = []
+  for (const header of zipHeaders(archive)) {
+    const payload = archive.subarray(header.start, header.start + header.compressedSize)
+    // `maxOutputLength` is what turns a zip bomb into an error instead of a heap that keeps growing.
+    const data = header.method === 8 ? inflateRawSync(payload, { maxOutputLength: header.size + 1 }) : Buffer.from(payload)
+    if (data.length !== header.size || crc32(data) !== header.crc) throw new Error(`corrupt entry: ${header.name}`)
+    entries.push({ name: header.name, data, mode: header.mode })
+  }
   return entries
 }
 

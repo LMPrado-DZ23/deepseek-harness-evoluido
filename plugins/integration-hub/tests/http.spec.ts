@@ -184,8 +184,9 @@ describe('integration hub HTTP boundary', () => {
     // A CONTAGEM sobe DE PROPOSITO quando uma rota nasce: sem ela, um laco
     // sobre a lista aprova uma lista vazia, e uma rota que some do contrato —
     // ou que nasce fora dele — passa sem ninguem olhar a autorizacao.
-    // 17 desde `POST /integrations/:integrationId/skill-body` (T-11).
-    expect(HUB_ROUTE_CONTRACTS).toHaveLength(17)
+    // 18 desde `GET /projects/:projectId/exports/:exportId/preview` — a prévia
+    // do pacote da Biblioteca, com a MESMA permissão de leitura do download.
+    expect(HUB_ROUTE_CONTRACTS).toHaveLength(18)
     for (const contract of HUB_ROUTE_CONTRACTS) {
       expect(contract.access).toBe('authorized')
       expect(contract.permission).not.toBeNull()
@@ -841,5 +842,12 @@ describe('o TEXTO da habilidade pela rota (T-11)', () => {
     expect(response.status).toBeGreaterThanOrEqual(400)
     const { error } = await response.json() as { error: string }
     expect(error).not.toContain('não encontrada')
+  })
+})
+
+describe('a prévia de um pacote', () => {
+  it('a rota de prévia exige LEITURA do projeto, como o download', () => {
+    const preview = HUB_ROUTE_CONTRACTS.find(contrato => contrato.path === '/projects/:projectId/exports/:exportId/preview')
+    expect(preview).toMatchObject({ method: 'GET', access: 'authorized', permission: 'project.read', scope: 'project' })
   })
 })

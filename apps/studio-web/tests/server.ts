@@ -21,6 +21,7 @@ import { PlannerEngine } from '../../../plugins/prompt-to-app/src/planner.js'
 import type { PromptModelPort } from '../../../plugins/prompt-to-app/src/ports.js'
 import { hashTree, materializePreviewArtifact, PREVIEW_ARTIFACT_RELATIVE_PATH } from '../../../plugins/prompt-to-app/src/runner.js'
 import { PromptToAppService, type PromptToAppActor, type PromptToAppRepository } from '../../../plugins/prompt-to-app/src/service.js'
+import { createZip, listZip } from '../../../plugins/integration-hub/src/zip.js'
 import { createPreviewGatewayHttpHandler, type PreviewForwardPort } from '../../../plugins/preview/src/gateway.js'
 import { createPreviewProjectHttpExtension } from '../../../plugins/preview/src/http.js'
 import type { PreviewAdmission, PreviewRecord } from '../../../plugins/preview/src/model.js'
@@ -529,6 +530,27 @@ const server = createServer((request, response) => {
     e2eMissions.push({ ...e2eMissionSeed()[0]!, mission_id: id, objective: `plantado ${id}` })
     return plain(response, 200, 'ok')
   }
+  /*
+    O HUB, só no que a BIBLIOTECA usa: listar os pacotes de uma tarefa e abrir a
+    prévia de um deles.
+
+    O armazenamento é dublê, como todo o resto deste servidor. O que NÃO é dublê
+    é a leitura do pacote: o `.zip` é montado por `createZip` e lido por
+    `listZip`, que são o código de produção. Sem isto, a Biblioteca nunca
+    mostrava um pacote no navegador, e a prévia não tinha como ser exercitada
+    onde a pessoa a usa.
+  */
+  if (request.url?.startsWith('/api/studio/hub/') === true) {
+    const caminho = new URL(request.url, 'http://127.0.0.1:4179').pathname.replace('/api/studio/hub', '')
+    const listagem = /^\/projects\/([^/]+)\/exports$/u.exec(caminho)
+    if (listagem !== null) return json(response, 200, { exports: [E2E_PACOTE] })
+    const previa = /^\/projects\/([^/]+)\/exports\/([^/]+)\/preview$/u.exec(caminho)
+    if (previa !== null) {
+      if (previa[2] !== E2E_PACOTE.export_id) return json(response, 404, { error: 'pacote não encontrado' })
+      return json(response, 200, { entries: listZip(E2E_ZIP) })
+    }
+    return json(response, 404, { error: 'rota não encontrada' })
+  }
   if (request.url?.startsWith('/api/studio/identity') === true) return void identityHandler(request, response)
   if (request.url?.startsWith('/api/studio/missions') === true) return void missionHandler(request, response)
   if (request.url?.startsWith('/api/studio/apps') === true) return void apiHandler(request, response)
@@ -539,3 +561,23 @@ server.listen(4179, '127.0.0.1')
 for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => { server.close(() => { void rm(scratch, { recursive: true, force: true }).finally(() => process.exit(0)) }) })
 
 function plain(response: ServerResponse<IncomingMessage>, status: number, body: string) { response.writeHead(status, { 'content-type': 'text/plain' }); response.end(body) }
+function json(response: ServerResponse<IncomingMessage>, status: number, body: unknown) {
+  response.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+  response.end(JSON.stringify(body))
+}
+
+/*
+  O pacote de exemplo da Biblioteca. O `.zip` é montado pelo `createZip` de
+  produção, e é ele que `listZip` lê na prévia — o dublê aqui é só o
+  armazenamento, não o formato.
+*/
+const E2E_ZIP = createZip([
+  { name: 'app/index.html', data: Buffer.from('<!doctype html><title>Protótipo</title>') },
+  { name: 'app/estilo.css', data: Buffer.from('body{font-family:system-ui}') },
+  { name: 'LEIA-ME.md', data: Buffer.from('# Protótipo exportado') },
+])
+const E2E_PACOTE = {
+  export_id: 'exp-e2e-0001', project_id: 'proj-e2e', run_id: 'run-e2e',
+  file_name: 'prototipo.zip', sha256: 'a'.repeat(64),
+  size_bytes: E2E_ZIP.length, entries: 3, created_at: '2026-09-17T12:00:00.000Z',
+}

@@ -33,7 +33,7 @@
     "baixar": "baixar o pacote",
     "conferir": "conferir tamanho, número de itens, data e resumo SHA-256 de cada pacote",
     "enviar": "receber arquivos que você envie",
-    "preview": "abrir uma prévia do conteúdo sem baixar",
+    "preview": "abrir a lista do que há dentro, sem baixar",
     "versoes": "guardar versões do mesmo pacote",
     "compartilhar": "compartilhar um pacote com outra pessoa",
     "apagar": "apagar um pacote por aqui",
@@ -41,10 +41,15 @@
   },
   "bibliotecaMotivos": {
     "semUpload": "Não existe envio de arquivo neste produto. O acervo nasce do que as suas tarefas produzem.",
-    "semPreview": "Não existe leitor de pacote. Para ver o conteúdo, baixe o .zip.",
     "semVersao": "Cada exportação é um pacote novo, com data e resumo próprios. Não há histórico de versões do mesmo pacote.",
     "semCompartilhar": "Compartilhar é operação de acesso — destinatário, escopo, expiração e revogação — e nada disso existe ainda.",
     "semApagar": "Apagar dado é ação destrutiva e exige decisão explícita do dono do produto. Não foi autorizada.",
     "semRetencao": "Não há política de retenção. O pacote fica enquanto a tarefa existir."
-  }
+  },
+  "previaAbrir": "Ver o que tem dentro",
+  "previaLendo": "Lendo o conteúdo…",
+  "previaVazio": "Este pacote não tem nenhum arquivo dentro.",
+  "previaTotal": "{quantos} arquivo(s) neste pacote",
+  "previaRestantes": "e mais {quantos} — baixe o pacote para ver a lista inteira.",
+  "previaFalhou": "Não deu para ler o conteúdo deste pacote agora."
 }

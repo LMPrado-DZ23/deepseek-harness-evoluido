@@ -368,6 +368,8 @@ declarada.
 
 | OS-112 | Identidade de intencao dos ENVIOS dentro da tarefa: reenviar depois de perder a resposta nao duplica mensagem, revisao, plano nem aprovacao | Retomada do Prado 17/09/2026 item 2 ("diferencie a idempotencia da criacao da identidade dos envios posteriores") + D7-005 | v1.0 | BETA | plugins/prompt-to-app/src/creation-key.ts (`impressaoDoEnvio`, `desfechoDoEnvio`), model.ts (`kind` e `result_id` opcionais, versao do dominio NAO sobe), service.ts (`#comChaveDeEnvio`, `#perguntar`, `#revisar`, `recordTurn` e `saveSpec` com id reservado), http.ts (`request_key` nas duas rotas), apps/studio-web/src/creationIntent.ts (`impressaoDoEnvioLocal`, `intencaoPorImpressao`), App.tsx (um `ref` por tipo), tests/journey.spec.ts | identidade-do-envio.spec.ts 14; http.spec.ts 39 com 3 novos; creationIntent.spec.ts 10 com 5 novos; suite do plugin 1114; e2e: reenvio do proprio navegador com a mesma chave e UMA mensagem depois do RELOAD; 3 sabotagens, as tres PEGAS | execucao: a criacao ja tinha identidade de intencao desde UX-02; os envios seguintes nao. Quem perguntava, perdia a resposta e apertava de novo ficava com DUAS mensagens; quem pedia alteracao ficava com DUAS revisoes, cada uma com plano para aprovar e tentativa para gastar. Nao ha segunda contabilidade: e o MESMO mecanismo — reserva duravel gravada ANTES do efeito, mesmo mutex, mesmos tres desfechos. O TIPO entra na impressao porque perguntar e pedir alteracao sao gestos diferentes: sem ele, a mesma frase nos dois devolveria a resposta da pergunta no lugar da revisao. Provado: mesmo envio devolve o mesmo efeito, texto diferente na mesma chave e 409, dois envios concorrentes produzem um, a chave NAO e credencial, a queda entre as duas escritas termina o efeito com o MESMO identificador, e o reenvio NAO grava uma segunda aprovacao | `/plan/change` e `/intake/answer` ainda NAO tem identidade de envio: eles nao duplicam efeito visivel hoje, mas isso e argumento e nao prova, e fica como pendencia de V7-C. PERGUNTAR nao chama modelo nenhum — a resposta vem do estado persistido e o turno grava `route: null` e `model: null` para nao afirmar uma chamada que nao houve; no dia em que chamar, o registro de uso passa a ser obrigatorio nesse caminho, e isso esta anotado em T-35 | V7-C (`/plan/change` e `/intake/answer`); T-35 fatias C e D; V7-B |
 
+| OS-113 | A Biblioteca ABRE o pacote e mostra o que tem dentro, sem baixar; e um laco de 621 requisicoes por 3s caiu junto | Retomada do Prado 17/09/2026 item 4 ("selecione a proxima operacao obrigatoria cujos pre-requisitos estejam disponiveis e implemente o caminho completo") + D7-007 | v1.0 | BETA | plugins/integration-hub/src/zip.ts (`zipHeaders` extraido, `listZip` novo), service.ts (`exportPreview` com teto), http.ts (rota de previa), i18n/pt-BR.json, tests/previa-do-pacote.spec.ts (novo), apps/studio-web/src/destinos/previa.ts e previa.spec.ts (novos), Destinos.tsx (previa + cliente do Hub criado UMA vez), biblioteca.ts (previa passa a SUPORTADA), destinos.css, i18n/destinos.pt-BR.json, hub/hubApi.ts, tests/server.ts (hub minimo com zip de produção), tests/accessibility.spec.ts | previa-do-pacote.spec.ts 6; previa.spec.ts 5; integration-hub 297; studio-web 663; e2e nos quatro tamanhos com axe: o pacote abre, lista tres arquivos, fecha no mesmo botao, ZERO violacoes, contagem de leituras em ordem de grandeza unitaria; 4 sabotagens, UMA sobreviveu e virou teste | execucao: a escolha da operacao foi por PRE-REQUISITO — a previa era a unica das seis ausentes cujo caminho ja existia (`exportFile` confinado e o leitor de zip). Um leitor leve ao lado seria um SEGUNDO leitor de formato hostil, onde a conferencia estrutural diverge em silencio: a conferencia foi extraida para `zipHeaders`, e `readZip` e `listZip` passam a usar a mesma. As 296 provas do plugin continuaram passando depois da extracao. A previa usa o MESMO caminho confinado do download, com teto proprio de 32 MiB recusado em palavras. NO CAMINHO, medindo por que o botao sumia entre duas assercoes, apareceu um defeito que nao era desta fatia: `api = createHubApi()` no valor padrao do parametro criava um cliente NOVO a cada render, e o efeito disparava outra leitura — 621 chamadas a `/exports` em 3 segundos numa tela parada. Depois: 1. E o rotulo do botao deixou de trocar para "Fechar": nome estavel e estado em `aria-expanded` e o padrao ARIA de divulgacao | O armazenamento do acervo no servidor de teste e DUBLE; o FORMATO nao e — o `.zip` e montado pelo `createZip` de producao e lido pelo `listZip` de producao. Enviar, versoes, compartilhamento, retencao e apagar continuam AUSENTES, e a declaracao da tela continua dizendo isso. Apagar exige autorizacao do dono e ela NAO foi concedida | V7-B (enviar arquivos); V7-C (`/plan/change` e `/intake/answer`); T-35 fatias C e D |
+
 <!-- O livro mestre REGISTRA achados, e o achado da OS-39 e sobre numeros de ADR
      que nomeiam mais de uma decisao: citacao-ambigua-proposital -->
 
@@ -376,16 +378,16 @@ declarada.
 | estado | quantos |
 | --- | --- |
 | `STABLE` | 69 |
-| `BETA` | 162 |
+| `BETA` | 163 |
 | `NOT_PRESENT` | 33 |
 | `NOT_CONFIGURED` | 1 |
 | `NOT_EXECUTED` | 4 |
 | `FAILED` | 2 |
 
-**Total de requisitos rastreados: 271.**
+**Total de requisitos rastreados: 272.**
 
 | versao-alvo | quantos |
 | --- | --- |
-| v1.0 | 235 |
+| v1.0 | 236 |
 | v1.x | 33 |
 | v2 | 3 |

@@ -55,7 +55,9 @@
     "skillBodySize": "O texto entregue tem um tamanho diferente do que esta habilidade declarou.",
     "skillBodyDigest": "O texto entregue não é o texto que o publicador assinou.",
     "skillBodyDisabled": "Esta habilidade está desligada, então as instruções dela não são usadas.",
-    "skillBodyMissing": "Esta habilidade foi instalada sem texto de instruções."
+    "skillBodyMissing": "Esta habilidade foi instalada sem texto de instruções.",
+    "previewTooLarge": "Este pacote é grande demais para abrir aqui. Baixe o arquivo para ver o conteúdo.",
+    "previewUnreadable": "Não deu para ler o conteúdo deste pacote. O download continua disponível."
   },
   "export": {
     "readmeTitle": "Seu protótipo do DZ23 STUDIO",

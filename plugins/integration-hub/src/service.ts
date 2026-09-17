@@ -5,6 +5,7 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { roleAllows, type PolicyTier, type StudioPermission, type StudioRole } from '@dz23-studio/policy'
 import { z } from 'zod'
 import { pageOfIntegrations, type IntegrationPage, type IntegrationQuery } from './catalog.js'
+import { listZip } from './zip.js'
 import { ExportError, openChildDirectory, openDirectory, packagePrototype, referenceOf } from './export.js'
 import { t } from './i18n.js'
 import { canonicalJsonBytes, evaluateManifest, policyFloor, type PublisherKeys } from './manifest.js'
@@ -1678,6 +1679,52 @@ export class IntegrationHubService {
    * that was tampered with (or written by an older build) must not be able to
    * turn the download route into "read any file on the server".
    */
+  /**
+   * O TETO para ler um pacote inteiro na memória só para listá-lo.
+   *
+   * O download transmite em fluxo e não tem teto nenhum — ele nunca segura o
+   * arquivo todo. A prévia precisa do diretório central, que fica no FIM do
+   * arquivo, e lê o arquivo inteiro para chegar lá. Um pacote maior que isto é
+   * RECUSADO em palavras, e a tela diz para baixar — em vez de o servidor
+   * tentar segurar meio gigabyte por causa de uma lista.
+   */
+  static readonly PREVIEW_MAX_BYTES = 32 * 1024 * 1024
+
+  /**
+   * A LISTA do que há dentro de um pacote, sem baixá-lo.
+   *
+   * Ela usa o MESMO caminho confinado do download — `exportFile`, que resolve
+   * por caminho real, recusa o que estiver fora da pasta de exportação, abre
+   * sem seguir link e confere que é arquivo regular no próprio descritor. Uma
+   * segunda resolução de caminho aqui seria exatamente a janela que aquele
+   * cuidado fecha.
+   *
+   * O conteúdo NÃO é descompactado: `listZip` lê só o diretório central.
+   * @param actor - quem pede.
+   * @param projectId - a tarefa dona do pacote.
+   * @param exportId - o pacote.
+   * @returns as entradas, com nome e tamanho.
+   */
+  async exportPreview(
+    actor: HubActor, projectId: string, exportId: string,
+  ): Promise<{ readonly entries: readonly { readonly name: string, readonly size: number }[] }> {
+    const { handle, size } = await this.exportFile(actor, projectId, exportId)
+    try {
+      if (size > IntegrationHubService.PREVIEW_MAX_BYTES) throw new HubError('INVALID', t('errors.previewTooLarge'))
+      const buffer = Buffer.alloc(size)
+      await handle.read(buffer, 0, size, 0)
+      try {
+        return { entries: listZip(buffer) }
+      } catch {
+        // Um pacote ilegível é um fato sobre o pacote, e não um erro de quem
+        // pediu: a mensagem diz isso, e o download continua disponível.
+        throw new HubError('INVALID', t('errors.previewUnreadable'))
+      }
+    } finally {
+      await handle.close().catch(() => undefined)
+    }
+  }
+
   async exportFile(actor: HubActor, projectId: string, exportId: string): Promise<{ handle: FileHandle; size: number }> {
     const record = await this.exportRecord(actor, projectId, exportId)
     const root = resolve(this.options.exportsRoot, safeSegment(actor.orgId), safeSegment(actor.tenantId))

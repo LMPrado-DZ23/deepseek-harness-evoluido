@@ -39,6 +39,7 @@ export const HUB_ROUTE_CONTRACTS = [
   { method: 'GET', path: '/projects/:projectId/exports', access: 'authorized', permission: 'project.read', scope: 'project' },
   { method: 'POST', path: '/projects/:projectId/exports', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'GET', path: '/projects/:projectId/exports/:exportId/download', access: 'authorized', permission: 'project.read', scope: 'project' },
+  { method: 'GET', path: '/projects/:projectId/exports/:exportId/preview', access: 'authorized', permission: 'project.read', scope: 'project' },
   { method: 'GET', path: '/events', access: 'authorized', permission: 'audit.read', scope: 'workspace' },
   // O desligamento por ALCANCE (X-07). Ler exige só leitura de projeto: quem
   // acompanha precisa saber que as integrações estão desligadas — descobrir
@@ -237,6 +238,13 @@ export function createHubHttpHandler(config: HubHttpConfig) {
       if (method === 'POST' && route === '/smtp/test') {
         const body = smtpTestSchema.parse(await readJson(request))
         return json(response, 200, await service.testSmtp(actor, body.to, asApproval(body.approval)))
+      }
+      const previewMatch = /^\/projects\/([^/]+)\/exports\/([^/]+)\/preview$/u.exec(route)
+      if (previewMatch !== null && method === 'GET') {
+        // A PRÉVIA: o que há dentro do pacote, sem baixar. Mesma permissão de
+        // leitura do download, e o mesmo caminho confinado — ver `exportPreview`.
+        const preview = await service.exportPreview(actor, decodeURIComponent(previewMatch[1]!), decodeURIComponent(previewMatch[2]!))
+        return json(response, 200, preview)
       }
       const exportsMatch = /^\/projects\/([^/]+)\/exports(?:\/([^/]+)\/download)?$/u.exec(route)
       if (exportsMatch !== null) {

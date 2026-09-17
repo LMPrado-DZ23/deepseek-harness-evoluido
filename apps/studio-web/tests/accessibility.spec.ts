@@ -183,6 +183,68 @@ test.describe('acessibilidade do fluxo principal', () => {
     expect(semViolacao.violations.map(violation => violation.id)).toEqual([])
   })
 
+  test('a Biblioteca abre o pacote e mostra o que tem dentro, sem baixar', async ({ page }) => {
+    /*
+      A operação que a declaração dizia que faltava. O `.zip` deste servidor de
+      teste é montado pelo `createZip` de produção e lido pelo `listZip` de
+      produção: o dublê é o armazenamento, e não o formato.
+    */
+    // A Biblioteca lista o acervo POR TAREFA: sem tarefa não há acervo, e a
+    // tela diz isso. Então a tarefa vem primeiro — é o caminho do produto.
+    await page.goto('/studio/')
+    await page.getByRole('button', { name: 'Página de apresentação' }).click()
+    await page.getByRole('button', { name: 'Continuar' }).click()
+    await expect(page.getByLabel('Conversa desta tarefa')).toBeVisible({ timeout: 20_000 })
+
+    /*
+      O CONTADOR existe porque este trabalho encontrou um laço de requisições
+      aqui. `api = createHubApi()` no valor padrão do parâmetro produzia um
+      objeto novo a cada render; o efeito dependia dele e chamava `setAcervo`, e
+      cada render disparava outra leitura. MEDIDO antes do conserto: 621
+      chamadas a `/exports` em 3 segundos, numa tela parada. Depois: 1.
+
+      A tela desenhava certo o tempo todo — o defeito só cobrava a conta do
+      servidor, da bateria e da rede de quem deixasse a Biblioteca aberta. Por
+      isso a guarda é uma CONTAGEM, e não uma captura.
+    */
+    let leituras = 0
+    page.on('request', pedido => { if (pedido.url().includes('/exports')) leituras += 1 })
+
+    await page.goto('/studio/biblioteca')
+    // `.first()`: as tarefas criadas pelos tamanhos de tela anteriores
+    // continuam no servidor de teste, e cada uma tem o pacote de exemplo. O
+    // que este teste prova é a operação, e ela é a mesma em qualquer pacote.
+    const abrir = page.getByRole('button', { name: 'Ver o que tem dentro' }).first()
+    await expect(abrir).toBeVisible()
+    await expect(abrir).toHaveAttribute('aria-expanded', 'false')
+    await abrir.click()
+    await expect(abrir).toHaveAttribute('aria-expanded', 'true')
+
+    await expect(page.getByText('3 arquivo(s) neste pacote').first()).toBeVisible()
+    await expect(page.getByText('app/index.html').first()).toBeVisible()
+    await expect(page.getByText('LEIA-ME.md').first()).toBeVisible()
+    // O download continua ali do lado: a prévia não substituiu a operação que
+    // já existia.
+    await expect(page.getByRole('link', { name: 'Baixar' }).first()).toBeVisible()
+
+    const semViolacao = await new AxeBuilder({ page }).analyze()
+    expect(semViolacao.violations.map(violation => violation.id)).toEqual([])
+
+    // E fecha — no MESMO botão, cujo nome não muda: o estado mora em
+    // `aria-expanded`, que é o padrão ARIA de divulgação.
+    await abrir.click()
+    await expect(abrir).toHaveAttribute('aria-expanded', 'false')
+    await expect(page.getByText('3 arquivo(s) neste pacote')).toHaveCount(0)
+
+    // Uma leitura do acervo por tarefa, mais uma da prévia. Um número que
+    // cresce com o tempo é o laço de volta.
+    await page.waitForTimeout(1_000)
+    // Uma leitura por tarefa existente, mais a prévia. O teto é generoso de
+    // propósito: o que ele pega é a ORDEM DE GRANDEZA do laço, que media 621
+    // em três segundos, e não o número exato de tarefas do servidor de teste.
+    expect(leituras).toBeLessThan(40)
+  })
+
   test('a ajuda passa no axe em qualquer tamanho', async ({ page }) => {
     await page.goto('/studio/ajuda')
     await expect(page.getByRole('heading', { name: 'Ajuda do DZ23 STUDIO' })).toBeVisible()

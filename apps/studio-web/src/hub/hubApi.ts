@@ -160,6 +160,9 @@ export function createHubApi(transport: HubTransport = browserTransport) {
     }).then(value => value.removed),
     exports: (projectId: string) => hub<{ exports: ExportRecord[] }>(`/projects/${encodeURIComponent(projectId)}/exports`).then(value => value.exports),
     createExport: (projectId: string) => hub<{ export: ExportRecord }>(`/projects/${encodeURIComponent(projectId)}/exports`, { method: 'POST', body: '{}' }).then(value => value.export),
+    /** O que há dentro do pacote, sem baixá-lo. */
+    exportPreview: (projectId: string, exportId: string) =>
+      hub<{ entries: { name: string, size: number }[] }>(`/projects/${encodeURIComponent(projectId)}/exports/${encodeURIComponent(exportId)}/preview`).then(value => value.entries),
     downloadHref: (projectId: string, exportId: string) => `${HUB_API_PREFIX}/projects/${encodeURIComponent(projectId)}/exports/${encodeURIComponent(exportId)}/download`,
     // One page, newest first: the history grows for as long as the Studio runs.
     events: (limit = 50) => hub<{ events: HubEvent[]; next_cursor: string | null }>(`/events?limit=${encodeURIComponent(String(limit))}`).then(value => value.events),

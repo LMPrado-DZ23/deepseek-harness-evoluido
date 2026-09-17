@@ -148,3 +148,36 @@
 .dz-biblioteca-colunas ul { margin: 0; padding-left: var(--dz-4); }
 .dz-biblioteca-colunas li { margin-bottom: var(--dz-2); }
 .dz-biblioteca-motivo { display: block; color: var(--dz-text-secondary); font-size: 0.8125rem; }
+
+/* A PRÉVIA: o que há dentro do pacote, sem baixar. */
+.dz-acervo-acoes { display: flex; align-items: center; gap: var(--dz-3); margin: var(--dz-2) 0 0; }
+
+.dz-acervo-abrir {
+  padding: 0.3rem 0.8rem;
+  border: 1px solid var(--dz-border);
+  border-radius: 999px;
+  background: none;
+  color: var(--dz-text);
+  font: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.dz-previa { margin-top: var(--dz-3); }
+.dz-previa-total, .dz-previa-restantes, .dz-previa-lendo, .dz-previa-vazio, .dz-previa-erro {
+  margin: 0 0 var(--dz-2);
+  color: var(--dz-text-secondary);
+  font-size: 0.8125rem;
+}
+.dz-previa-erro { color: var(--dz-warning); }
+.dz-previa-itens { margin: 0; padding: 0; list-style: none; }
+.dz-previa-itens li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--dz-3);
+  padding: 0.2rem 0;
+  border-bottom: 1px solid var(--dz-border);
+}
+.dz-previa-nome { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8125rem; word-break: break-all; }
+.dz-previa-tamanho { color: var(--dz-text-secondary); font-size: 0.75rem; font-variant-numeric: tabular-nums; }

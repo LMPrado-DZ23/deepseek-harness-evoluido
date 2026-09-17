@@ -4,6 +4,21 @@ import copy from '../i18n/destinos.pt-BR.json'
 import hubCopy from '../i18n/hub.pt-BR.json'
 import { HubPanel } from '../hub/HubPanel'
 import { operacoesDaBiblioteca, tiposDaBiblioteca } from './biblioteca'
+import { previaDoPacote, type EntradaDoPacote } from './previa'
+
+/*
+  O cliente do Hub, criado UMA VEZ.
+
+  Ele era `api = createHubApi()` no valor padrão do parâmetro, e isso produzia
+  um objeto NOVO a cada render. `ler` depende dele, o efeito depende de `ler`, e
+  o efeito chama `setAcervo` — então cada render disparava outra leitura, que
+  disparava outro render. MEDIDO no navegador antes do conserto: 621 chamadas a
+  `/exports` em 3 segundos, numa tela parada.
+
+  O defeito não aparecia porque a tela desenhava certo. Ele só cobrava a conta
+  do servidor, da bateria e da rede de quem estivesse com a Biblioteca aberta.
+*/
+const clienteDoHub = createHubApi()
 import { createHubApi, type ExportRecord, type HubApi, type ProjectSummary } from '../hub/hubApi'
 import { formatBytes, formatDate } from '../hub/presentation'
 import { STUDIO_HOME_PATH } from '../navigation'
@@ -43,10 +58,15 @@ export function PluginsScreen({ api }: { readonly api?: HubApi } = {}) {
  * A leitura é por tarefa porque é assim que o serviço guarda. Quando não há
  * tarefa nenhuma, a tela diz isso — que é diferente de "nenhum pacote".
  */
-export function BibliotecaScreen({ api = createHubApi() }: { readonly api?: HubApi } = {}) {
+export function BibliotecaScreen({ api = clienteDoHub }: { readonly api?: HubApi } = {}) {
   const [projetos, setProjetos] = useState<ProjectSummary[] | null>(null)
   const [acervo, setAcervo] = useState<readonly ItemDoAcervo[] | null>(null)
   const [filtro, setFiltro] = useState<string>('todas')
+  /*
+    A prévia ABERTA, por pacote. `null` é nenhuma aberta; dentro dela, `null` em
+    `entradas` é "ainda lendo", que é diferente de "não tem nada".
+  */
+  const [previa, setPrevia] = useState<{ readonly exportId: string, readonly entradas: readonly EntradaDoPacote[] | null, readonly erro: string | null } | null>(null)
   const [falhou, setFalhou] = useState(false)
 
   const ler = useCallback(async () => {
@@ -66,6 +86,25 @@ export function BibliotecaScreen({ api = createHubApi() }: { readonly api?: HubA
   }, [api])
 
   useEffect(() => { void ler() }, [ler])
+
+  /**
+   * Abre — ou fecha — a prévia de um pacote.
+   * @param projectId - a tarefa dona do pacote.
+   * @param exportId - o pacote.
+   */
+  async function abrirPrevia(projectId: string, exportId: string) {
+    if (previa?.exportId === exportId) { setPrevia(null); return }
+    setPrevia({ exportId, entradas: null, erro: null })
+    try {
+      const entradas = await api.exportPreview(projectId, exportId)
+      setPrevia({ exportId, entradas, erro: null })
+    } catch (erro) {
+      // A recusa do servidor é uma frase pronta em português — pacote grande
+      // demais, pacote ilegível. Ela é mostrada como veio, e o download
+      // continua ali do lado.
+      setPrevia({ exportId, entradas: null, erro: erro instanceof Error ? erro.message : copy.previaFalhou })
+    }
+  }
 
   const mostrados = acervo === null ? null
     : filtro === 'todas' ? acervo : acervo.filter(item => item.projeto.project_id === filtro)
@@ -130,7 +169,28 @@ export function BibliotecaScreen({ api = createHubApi() }: { readonly api?: HubA
                 <div><dt>{hubCopy.exports.createdAt}</dt><dd>{formatDate(item.registro.created_at)}</dd></div>
                 <div><dt>{hubCopy.exports.digest}</dt><dd><code>{item.registro.sha256}</code></dd></div>
               </dl>
-              <a className="dz-acervo-baixar" href={api.downloadHref(item.projeto.project_id, item.registro.export_id)}>{hubCopy.exports.download}</a>
+              <p className="dz-acervo-acoes">
+                {/*
+                  VER O QUE TEM DENTRO — sem baixar. É a operação que a
+                  declaração acima dizia que faltava, e que agora existe.
+                */}
+                <button type="button" className="dz-acervo-abrir"
+                  aria-expanded={previa?.exportId === item.registro.export_id}
+                  onClick={() => { void abrirPrevia(item.projeto.project_id, item.registro.export_id) }}>
+                  {/*
+                    O RÓTULO NÃO MUDA, e o estado vai em `aria-expanded`.
+
+                    Trocar o texto para "Fechar" quando abre parece natural e é
+                    pior: quem ouve a tela recebe a mesma informação duas vezes
+                    e perde a referência do que aquele botão controla. O padrão
+                    ARIA de divulgação é exatamente este — nome estável, estado
+                    no atributo.
+                  */}
+                  {copy.previaAbrir}
+                </button>
+                <a className="dz-acervo-baixar" href={api.downloadHref(item.projeto.project_id, item.registro.export_id)}>{hubCopy.exports.download}</a>
+              </p>
+              {previa?.exportId !== item.registro.export_id ? null : <PreviaDoPacote previa={previa} />}
             </li>)}
           </ul>}
   </main>
@@ -173,3 +233,24 @@ export function AgendadoScreen() {
 
 /** A pendência declarada em `destinos.ts`, reafirmada onde a tela a usa. */
 export const AGENDADO_PENDENTE = DISPONIBILIDADE.agendado === 'pendente'
+
+/** A lista do que há dentro de um pacote. */
+function PreviaDoPacote({ previa }: {
+  readonly previa: { readonly entradas: readonly EntradaDoPacote[] | null, readonly erro: string | null }
+}) {
+  if (previa.erro !== null) return <p className="dz-previa-erro" role="status">{previa.erro}</p>
+  // Três estados, e não dois: ainda lendo, leu e está vazio, leu e tem coisas.
+  if (previa.entradas === null) return <p className="dz-previa-lendo" role="status">{copy.previaLendo}</p>
+  const montada = previaDoPacote(previa.entradas)
+  if (montada.total === 0) return <p className="dz-previa-vazio">{copy.previaVazio}</p>
+  return <div className="dz-previa">
+    <p className="dz-previa-total">{copy.previaTotal.replace('{quantos}', String(montada.total))}</p>
+    <ul className="dz-previa-itens">
+      {montada.entradas.map(entrada => <li key={entrada.name}>
+        <span className="dz-previa-nome">{entrada.name}</span>
+        <span className="dz-previa-tamanho">{formatBytes(entrada.size)}</span>
+      </li>)}
+    </ul>
+    {montada.restantes > 0 ? <p className="dz-previa-restantes">{copy.previaRestantes.replace('{quantos}', String(montada.restantes))}</p> : null}
+  </div>
+}
