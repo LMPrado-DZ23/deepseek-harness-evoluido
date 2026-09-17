@@ -17,11 +17,12 @@ import { browserEmergencyStopPort, EmergencyStop } from './EmergencyStop'
 import { Checkpoints, RunReport, isCheckpointList, isRunReport, type CheckpointListValue, type RunReportValue } from './RunReport'
 import { dispatchGenerationFinished } from './pwa/notifications'
 import { signOutInBrowser } from './session/signOut'
-import { currentSessionMode } from './session/currentSession'
+import { currentSessionMode, currentSessionPrincipal } from './session/currentSession'
 import { PlanEditor, type ConsultedView } from './plan/PlanEditor'
-import { WorkspaceShell } from './shell/WorkspaceShell'
+import { TAREFAS_MUDARAM, WorkspaceShell } from './shell/WorkspaceShell'
 import { HomeScreen } from './home/HomeScreen'
 import { TaskScreen, type PainelAberto } from './tarefa/TaskScreen'
+import { iniciaisDaConta } from './shell/tarefasDoTrilho'
 import tarefaCopy from './i18n/tarefa.pt-BR.json'
 import type { CategoryBasis, DesignPreset } from './home/opcoes'
 import type { PlanEditRequest } from './plan/planEdit'
@@ -102,6 +103,8 @@ export function App() {
   const [previewCodes, setPreviewCodes] = useState<VerificationCode[]>([])
   const [signingOut, setSigningOut] = useState(false)
   const [authenticatedSession, setAuthenticatedSession] = useState(false)
+  /* O nome de quem está na sessão, para o avatar do rodapé. Sem sessão, `null`. */
+  const [sessionName, setSessionName] = useState<string | null>(null)
   const [runReport, setRunReport] = useState<RunReportValue | null>(null)
   const [checkpoints, setCheckpoints] = useState<CheckpointListValue | null>(null)
   const [confirmingUndo, setConfirmingUndo] = useState<string | null>(null)
@@ -122,6 +125,7 @@ export function App() {
   useEffect(() => {
     let active = true
     void currentSessionMode().then(mode => { if (active) setAuthenticatedSession(mode === 'authenticated') })
+    void currentSessionPrincipal().then(principal => { if (active) setSessionName(principal) })
     return () => { active = false }
   }, [])
   /**
@@ -278,6 +282,9 @@ export function App() {
         current_run: null, next: created.next,
       })
       setRascunho(''); setPainel(null)
+      // A lateral precisa saber que nasceu uma tarefa: o endereço muda por
+      // `replaceState` e a casca não remonta.
+      window.dispatchEvent(new Event(TAREFAS_MUDARAM))
       await api(`/projects/${created.project.project_id}/design`, {
         method: 'POST', body: JSON.stringify({ preset: designPreset, ...(designPreset === 'brand' ? { primary: hexToHsl(brandColor) } : {}), font, radius, density, tone }),
       })
@@ -682,16 +689,24 @@ export function App() {
     de cinco etapas deixou de ser a estrutura; ele virou lógica interna, lida
     pela conversa e visível por inteiro no painel de diagnóstico.
   */
-  return <WorkspaceShell {...(emTarefa ? { titulo: detalhes.project.name } : {})} acoes={<>
-    <Status health={health} />
-    <NotificationOptIn />
-    {authenticatedSession ? <button className="signout-button" type="button" disabled={signingOut} aria-busy={signingOut} onClick={() => void signOut()}><LogOut aria-hidden="true" /><span>{signingOut ? t.account.signingOut : t.account.signOut}</span></button> : null}
-  </>}>
+  /*
+    A CONTA foi para o RODAPÉ do trilho, que é onde a referência a põe — e não
+    um botão "Sair" competindo com o título no alto da tela. O que sobe para o
+    topo é o contexto da tarefa e o estado do Studio, como na referência.
+  */
+  return <WorkspaceShell {...(emTarefa ? { titulo: detalhes.project.name } : {})}
+    conta={authenticatedSession ? sessionName : null}
+    acoesDaConta={<>
+      <NotificationOptIn compacto />
+      {authenticatedSession ? <button className="dz-rail-icone" type="button" disabled={signingOut} aria-busy={signingOut} aria-label={t.account.signOut} onClick={() => void signOut()}><LogOut aria-hidden="true" /></button> : null}
+    </>}
+    acoes={<Status health={health} />}>
     {emTarefa
       ? <TaskScreen detalhes={detalhes} rascunho={rascunho} setRascunho={setRascunho}
         responder={async texto => submitAnswer(false, undefined, texto)}
         mudarPlano={mudarPlanoPelaConversa}
         ajustar={ajustar}
+        iniciais={iniciaisDaConta(sessionName)}
         painel={painel} abrirPainel={setPainel} fecharPainel={() => setPainel(null)}
         conteudoDoPainel={conteudoDoPainel} acoesDoEstado={acoesDoEstado} />
       : <main className="dz-canvas-home">

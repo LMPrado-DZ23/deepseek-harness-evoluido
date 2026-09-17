@@ -424,6 +424,61 @@ produto existe para não fazer.
     compositor, o modal de preferências, compartilhar, uso e arquivos da tarefa
     ficam para a etapa seguinte, na ordem que a própria decisão manda.
 
+33. **OS-103 — a CI estava vermelha há cinco entregas, e eu não tinha olhado.**
+    O Prado mandou conferir a CI do `8de60fd`. Ela reprovou — e as quatro
+    anteriores também, desde a OS-98. Eu vinha reportando "25 portões EXIT=0"
+    entrega após entrega. Os portões locais passavam de verdade; **o verde era o
+    da máquina errada**, e eu nunca abri a outra.
+
+    **Primeira causa efetiva:** quatro erros de tipo com UMA origem.
+    `plugins/action-approval` importava `@deepseek-ai/dsh-user-approval` sem
+    declará-lo. O `import type` que amplia `Events` falhava, a chave do evento
+    deixava de pertencer a `keyof Events`, e os dois parâmetros do ouvinte
+    viravam `any` implícito. Passa aqui porque a árvore de links do pnpm alcança
+    o que outro pacote declarou; reprova lá porque o clone limpo instala só o
+    declarado. A correção é a declaração mais **três linhas** do lockfile — um
+    `pnpm install` cheio reescrevia 43 linhas com churn de `supports-color` sem
+    relação nenhuma com o defeito, e mexer em dependência por tentativa cega é
+    o que o Prado proibiu em palavras.
+
+    **A guarda é `gate:declared-imports`**, e ela fecha a classe, não o caso:
+    lê o que está ESCRITO nos `src` e compara com o `package.json`. Não resolve
+    módulo de propósito — resolver usaria justamente a árvore que esconde o
+    defeito. Entrou nos portões **e no workflow da CI**.
+
+    **Segunda causa:** o README não tinha a seção de clone novo que
+    `clean-clone-readme.test.mjs` exige, e o job do Windows reprovava por isso.
+
+    **Fidelidade visual.** Comparei a captura do build com F01 e F16 no mesmo
+    viewport e escrevi as divergências uma a uma. Nove fecharam: a lateral
+    mostra **tarefas reais** (de `GET /projects`, não uma lista de destinos com
+    o nome errado), "Projetos" ganhou a ação de criar, a conta desceu para o
+    rodapé com avatar de iniciais da sessão, o compositor virou pílula com envio
+    redondo e a rota à esquerda, a conversa ganhou avatares e bolha, o
+    compositor da tarefa ganhou o chip do projeto, e o alto da tela deixou de
+    ser uma faixa vazia. **Onze continuam abertas e nomeadas** em
+    `audit/fatias/2026-09-17-OS-103-fidelidade-visual.md` — busca, badge,
+    pílula de créditos, ícones de provedor, anexo, microfone, estrelas,
+    sugestões, menus do compositor, preferências e arquivos da tarefa. Cada uma
+    com o motivo: quase todas são serviço que não existe, e desenhá-las seria o
+    botão mudo que a decisão proíbe.
+
+    **O defeito que o Prado apontou é real, e eu confirmei lendo o código:**
+    depois de um resultado, todo envio virava critério de aceite permanente —
+    inclusive uma pergunta. Nesta fatia o silêncio acabou (o compositor diz o
+    que o envio vai fazer antes de a pessoa apertar), mas a correção completa é
+    **T-34**: ligar a mensagem simples à conversa que já existe, para perguntar
+    não custar tentativa. Não há atalho honesto, porque a decisão proíbe criar
+    uma segunda conversa.
+
+    **Registrado e NÃO implementado:** o ADENDO de uso, cotas e custos (**T-35**,
+    nas quatro fatias do próprio adendo) e o DZ23 Studio Android via Capacitor
+    (**T-36**, na ordem do próprio prompt). Registrar não é entregar.
+
+    **A CI verde ainda não está comprovada.** O que confirmei localmente é que o
+    erro de tipo sumiu e que `--frozen-lockfile` aceita o lockfile; a execução
+    deste commit só existe depois do push.
+
 ## Estado do DAG
 
 **32 DONE, 3 PARCIAL, 2 BLOCKED.** As cinco que restam **não têm engenharia

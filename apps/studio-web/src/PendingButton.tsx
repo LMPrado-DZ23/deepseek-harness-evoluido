@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { useEffect, useRef, useState } from 'react'
 
 /**
@@ -23,9 +24,18 @@ import { useEffect, useRef, useState } from 'react'
  *    recomeçava do topo da página. Se o foco caiu no corpo por causa DESTE
  *    botão, ele volta para cá quando a chamada termina.
  */
-export function PendingButton({ label, busyLabel, action, className = 'primary', disabled = false, testId, ariaLabel }: {
+/**
+ * `icone` desenha um BOTÃO REDONDO com símbolo no lugar do texto.
+ *
+ * O texto continua existindo — ele vira o nome acessível, e o `role="status"`
+ * abaixo continua anunciando o gerúndio enquanto a chamada corre. Esse anúncio
+ * é a razão de este componente existir, e ele não foi perdido: o que muda é
+ * que na referência o envio é uma seta redonda, e um rótulo longo dentro dela
+ * não caberia.
+ */
+export function PendingButton({ label, busyLabel, action, className = 'primary', disabled = false, testId, ariaLabel, icone }: {
   label: string; busyLabel: string; action: () => Promise<void>
-  className?: string; disabled?: boolean; testId?: string; ariaLabel?: string
+  className?: string; disabled?: boolean; testId?: string; ariaLabel?: string; icone?: ReactNode
 }) {
   const [pending, setPending] = useState(false)
   const mounted = useRef(true)
@@ -40,19 +50,26 @@ export function PendingButton({ label, busyLabel, action, className = 'primary',
     hadFocus.current = false
     if (document.activeElement === document.body) button.current?.focus()
   }, [pending])
+  /*
+    O nome acessível SEGUE o estado: enquanto a chamada corre ele é o gerúndio,
+    e não o rótulo parado. Com o botão redondo isso deixou de acontecer sozinho
+    — o texto saiu de dentro do botão — e quem ouve a tela voltava a ouvir
+    "Continuar" com a chamada em voo. É a garantia que fez este componente
+    existir, e ela não pode sair junto com o texto.
+  */
   return <>
     <button
       ref={button} type="button"
       className={className} disabled={disabled || pending} aria-busy={pending}
       {...(testId === undefined ? {} : { 'data-testid': testId })}
-      {...(ariaLabel === undefined ? {} : { 'aria-label': ariaLabel })}
+      {...(ariaLabel === undefined ? {} : { 'aria-label': pending ? busyLabel : ariaLabel })}
       onClick={() => {
         if (pending) return
         hadFocus.current = document.activeElement === button.current
         setPending(true)
         void action().finally(() => { if (mounted.current) setPending(false) })
       }}
-    >{pending ? busyLabel : label}</button>
+    >{icone === undefined ? (pending ? busyLabel : label) : icone}</button>
     <span className="sr-only" role="status">{pending ? busyLabel : ''}</span>
   </>
 }

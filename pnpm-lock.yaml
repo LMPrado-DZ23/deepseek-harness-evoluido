@@ -182,6 +182,9 @@ importers:
       '@deepseek-ai/dsh-storage-domain':
         specifier: workspace:*
         version: link:../../third_party/deepseek-harness/packages/storage/storage-domain
+      '@deepseek-ai/dsh-user-approval':
+        specifier: workspace:*
+        version: link:../../third_party/deepseek-harness/packages/interaction/user-approval
       '@dz23-studio/identity':
         specifier: workspace:*
         version: link:../identity

@@ -213,3 +213,82 @@
 .dz-home { padding: var(--dz-5) var(--dz-4) var(--dz-7); }
   .dz-home-titulo { margin-top: var(--dz-3); }
 }
+
+
+/*
+  O COMPOSITOR da referência: pílula alta, borda fina, e a linha de ações
+  embaixo — rota à esquerda, contador, e o envio como botão redondo à direita.
+
+  O que estava aqui era uma caixa retangular com um botão largo atravessado, e
+  era a diferença mais visível entre a captura e o vídeo.
+*/
+.dz-compositor {
+  width: 100%;
+  border: 1px solid var(--dz-border);
+  border-radius: var(--dz-radius-lg);
+  background: var(--dz-surface);
+  padding: var(--dz-4) var(--dz-4) var(--dz-3);
+}
+
+.dz-compositor textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: none;
+  border: none;
+  color: var(--dz-text);
+  font: inherit;
+  font-size: 1rem;
+  line-height: 1.6;
+  resize: none;
+  padding: 0;
+}
+
+.dz-compositor textarea:focus { outline: none; }
+.dz-compositor:focus-within { border-color: var(--dz-focus); }
+.dz-compositor textarea::placeholder { color: var(--dz-text-secondary); }
+
+.dz-compositor .dz-compositor-rodape {
+  display: flex;
+  align-items: center;
+  gap: var(--dz-3);
+  margin-top: var(--dz-3);
+}
+
+/*
+  A ROTA é a única coisa desta linha que existe de verdade neste produto. O
+  vídeo mostra anexo, microfone e seletor de computador; nenhum dos três existe
+  aqui, e desenhá-los apagados seria o botão mudo que a decisão proíbe.
+*/
+.dz-compositor-rota {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dz-2);
+  color: var(--dz-text-secondary);
+  font-size: 0.8125rem;
+  min-width: 0;
+}
+
+.dz-compositor-rota svg { width: 16px; height: 16px; flex: none; }
+.dz-compositor-rota > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.dz-compositor .dz-contador { margin-left: auto; color: var(--dz-text-secondary); font-size: 0.8125rem; }
+
+/* O envio: círculo, como no vídeo. O nome acessível continua sendo o texto. */
+.dz-enviar-redondo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex: none;
+  border: none;
+  border-radius: 50%;
+  background: var(--dz-action);
+  color: #fff;
+  cursor: pointer;
+  padding: 0;
+}
+
+.dz-enviar-redondo svg { width: 20px; height: 20px; }
+.dz-enviar-redondo:disabled { opacity: 0.45; cursor: not-allowed; }
+.dz-enviar-redondo[aria-busy="true"] { opacity: 0.7; }

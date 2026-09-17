@@ -22,7 +22,6 @@
  */
 import { ASSISTANT_PATH } from '../assistant/AssistantEntry'
 import { AGENDADO_PATH, BIBLIOTECA_PATH, HABILIDADES_PATH, PLUGINS_PATH } from '../destinos/destinos'
-import { HELP_PATH } from '../help/HelpScreen'
 import { MISSION_PATH } from '../mission/missionApi'
 import { PROJECTS_PATH } from '../projects/ProjectsScreen'
 import { TEAM_PATH } from '../team/teamApi'
@@ -76,6 +75,11 @@ export function railSecoes(): readonly RailSecao[] {
         // pendência onde um teste alcança.
         { id: 'agendado', label: rail.agendado, href: AGENDADO_PATH, icone: 'Clock' },
         { id: 'biblioteca', label: rail.biblioteca, href: BIBLIOTECA_PATH, icone: 'Library' },
+        // Estes três moraram na seção "Tarefas" e não são tarefas: são
+        // destinos. Com a lista de tarefas REAIS ocupando aquela seção, eles
+        // voltaram para onde pertencem — junto dos outros destinos.
+        { id: 'progresso', label: rail.trabalhoEmEquipe, href: TEAM_PATH, icone: 'ListChecks' },
+        { id: 'objetivos', label: rail.objetivos, href: MISSION_PATH, icone: 'Target' },
       ],
     },
     {
@@ -88,11 +92,12 @@ export function railSecoes(): readonly RailSecao[] {
     {
       id: 'tarefas',
       titulo: rail.tarefas,
-      itens: [
-        { id: 'progresso', label: rail.trabalhoEmEquipe, href: TEAM_PATH, icone: 'ListChecks' },
-        { id: 'objetivos', label: rail.objetivos, href: MISSION_PATH, icone: 'Target' },
-        { id: 'ajuda', label: rail.ajuda, href: HELP_PATH, icone: 'CircleHelp' },
-      ],
+      /*
+        VAZIA de propósito: esta seção é preenchida pelas tarefas REAIS, lidas
+        de `GET /projects` pelo trilho. Ela deixou de ser uma lista de destinos
+        com o nome errado — "Tarefas" que não continha tarefa nenhuma.
+      */
+      itens: [],
     },
   ]
 }

@@ -190,7 +190,17 @@ test('percorre as cinco etapas, muda privacidade e termina sem alegar publicaç�
   const notificationOptIn = page.getByRole('button', { name: 'Avisar quando a criação terminar' })
   await expect(notificationOptIn).toBeVisible()
   await notificationOptIn.click()
-  await expect(page.getByText('Este aparelho vai avisar quando a criação terminar.')).toBeVisible()
+  /*
+    MAPA DE EQUIVALÊNCIA: o aviso de notificação virou um SINO no rodapé do
+    trilho, como na referência, e o estado concedido é o nome acessível dele —
+    com `role="status"`, que é como um controle compacto entrega uma frase.
+
+    A frase exigida é a MESMA, palavra por palavra. O que mudou é onde ela é
+    lida: no nome acessível e no título, em vez de ocupar uma linha de texto ao
+    lado da conta. A conferência ficou mais estrita, e não menos: antes bastava
+    o texto existir em algum lugar da página.
+  */
+  await expect(page.getByRole('status', { name: 'Este aparelho vai avisar quando a criação terminar.' })).toBeVisible()
   expect(await page.evaluate(() => (window as unknown as { __dz23PermissionRequests: () => number }).__dz23PermissionRequests())).toBe(1)
   await expect(page.getByRole('button', { name: 'Painel para criar, editar e excluir' })).toBeVisible()
   // Privacidade vive em "Ajustes desta tarefa" desde a migração para o

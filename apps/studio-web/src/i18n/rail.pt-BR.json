@@ -18,5 +18,11 @@
   "habilidades": "Habilidades",
   "plugins": "Plugins",
   "agendado": "Agendado",
-  "biblioteca": "Biblioteca"
+  "biblioteca": "Biblioteca",
+  "novoProjeto": "Novo projeto",
+  "criarProjeto": "Criar um projeto",
+  "tarefasVazio": "Suas tarefas aparecem aqui.",
+  "verTodas": "Ver todas",
+  "preferencias": "Preferências",
+  "semNome": "Sua conta"
 }

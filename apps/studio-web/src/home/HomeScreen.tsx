@@ -1,3 +1,4 @@
+import { ArrowUp, Cpu } from 'lucide-react'
 import { STUDIO_CATEGORIES, type Category } from '../categories'
 import { PendingButton } from '../PendingButton'
 import { creationBlocked, privacyNotice, routeReasonNotice, type PrivacyProfile } from '../presentation'
@@ -65,13 +66,32 @@ export function HomeScreen(props: HomeScreenProps) {
   return <div className="dz-home">
     <h1 className="dz-home-titulo">{home.tituloInicio} <span>{home.tituloAcento}</span></h1>
 
+    {/*
+      O COMPOSITOR da referência: uma pílula, com a linha de ações embaixo e o
+      envio como botão circular à direita.
+
+      O que ele NÃO tem, e a ausência é deliberada: anexo, microfone e seletor
+      de computador aparecem no vídeo e NÃO existem neste produto. Desenhá-los
+      apagados seria o botão mudo que a decisão proíbe; desenhá-los funcionando
+      seria mentira. O que existe de verdade — onde o texto é processado — está
+      lá, porque é uma informação que muda o que acontece com o que a pessoa
+      escreve.
+    */}
     <div className="dz-compositor">
       <label className="sr-only" htmlFor="brief">{home.compositorRotulo}</label>
-      <textarea id="brief" maxLength={1000} value={props.brief} rows={4}
-        onChange={event => props.setBrief(event.target.value)} placeholder={t.idea.placeholder} />
+      <textarea id="brief" maxLength={1000} value={props.brief} rows={3}
+        onChange={event => props.setBrief(event.target.value)} placeholder={home.compositorPlaceholder} />
       <div className="dz-compositor-rodape">
+        <span className="dz-compositor-rota" title={home.rota}>
+          <Cpu aria-hidden="true" />
+          <span>{props.route ?? t.privacy.routeUnavailable}</span>
+        </span>
         <span className="dz-contador" aria-live="polite">{props.brief.length} {t.idea.counter}</span>
-        <PendingButton label={t.idea.continue} busyLabel={t.idea.continueBusy}
+        {/* O nome acessível continua sendo o texto aprovado: trocá-lo por
+            "Enviar" mudaria o rótulo que oito testes e a documentação citam,
+            sem ganho nenhum para quem usa. */}
+        <PendingButton className="dz-enviar-redondo" label={t.idea.continue} busyLabel={t.idea.continueBusy}
+          ariaLabel={t.idea.continue} icone={<ArrowUp aria-hidden="true" />}
           disabled={!props.ready || creationBlocked(props.privacy, props.localRoute)} action={props.create} />
       </div>
     </div>

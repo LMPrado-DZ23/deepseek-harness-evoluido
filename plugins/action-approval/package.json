@@ -25,6 +25,7 @@
   "dependencies": {
     "@deepseek-ai/cordis": "workspace:*",
     "@deepseek-ai/dsh-storage-domain": "workspace:*",
+    "@deepseek-ai/dsh-user-approval": "workspace:*",
     "@dz23-studio/identity": "workspace:*",
     "@dz23-studio/policy": "workspace:*",
     "zod": "4.4.3"

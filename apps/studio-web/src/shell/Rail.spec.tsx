@@ -91,9 +91,20 @@ describe('o trilho do workspace', () => {
     expect(railItens().every(item => item.href.startsWith('/'))).toBe(true)
     expect(html).not.toContain('disabled')
     expect(html).not.toContain('em breve')
-    // Cada item é um <a> com destino — e não um <button>, que não abre em outra
-    // aba e não anuncia navegação para quem usa leitor de tela.
-    expect(html.match(/<a href="\//gu) ?? []).toHaveLength(railItens().length)
+    /*
+      Cada item é um <a> com DESTINO — e não um <button>, que não abre em outra
+      aba e não anuncia navegação para quem usa leitor de tela.
+
+      A afirmação era uma CONTAGEM (`<a href="/` tantas vezes quantos itens), e
+      ela quebrou quando o trilho ganhou links legítimos que não são itens de
+      navegação: o "+" de Projetos, "Ver todas", "Novo projeto" e a ajuda no
+      rodapé. Contar âncoras media a coisa errada. Agora a conferência é
+      direta: o destino de CADA item está no documento, e nenhuma âncora do
+      trilho aponta para lugar nenhum.
+    */
+    for (const item of railItens()) expect(html).toContain(`href="${item.href}"`)
+    expect(html).not.toContain('href="#"')
+    expect(html).not.toMatch(/<a(?![^>]*href=)/u)
     // E a marca também é link para a home, como na referência.
     expect(html).toContain('class="dz-marca" href="/studio/"')
   })

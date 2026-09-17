@@ -127,6 +127,13 @@ jobs:
           pnpm gate:portability
           pnpm gate:domain-scopes
           pnpm gate:domain-routes
+          # Todo pacote de workspace IMPORTADO esta DECLARADO por quem importa?
+          # A arvore de links do pnpm deixa um pacote nao declarado alcancavel
+          # na maquina de quem desenvolve; o clone limpo daqui nao instala. Foi
+          # assim que `action-approval` importou `dsh-user-approval` sem
+          # declara-lo e a CI reprovou por CINCO entregas seguidas enquanto o
+          # typecheck local passava.
+          pnpm gate:declared-imports
           pnpm gate:assistant-tools
           # Estes dois existiam e a CI não os executava. O de papéis é o que
           # apanha uma permissão que nomeia ferramenta fora do perfil — e o

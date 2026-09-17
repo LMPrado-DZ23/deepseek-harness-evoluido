@@ -22,6 +22,7 @@
     "build:studio-image": "node scripts/build-studio-image.mjs",
     "gate:domain-scopes": "tsx scripts/check-domain-scopes.ts",
     "gate:domain-routes": "tsx scripts/check-domain-routes.ts",
+    "gate:declared-imports": "node scripts/check-declared-imports.mjs --self-test && node scripts/check-declared-imports.mjs",
     "gate:assistant-tools": "tsx scripts/check-assistant-tool-catalog.ts",
     "gate:team-role-tools": "tsx scripts/check-team-role-tools.ts --self-test",
     "gate:rls-coverage": "tsx scripts/check-rls-coverage.ts --self-test",

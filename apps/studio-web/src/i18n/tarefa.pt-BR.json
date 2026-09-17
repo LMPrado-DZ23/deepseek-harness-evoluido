@@ -44,5 +44,8 @@
   "painelPreview": "Prévia",
   "verDiagnostico": "Ver o detalhamento técnico",
   "semTitulo": "Tarefa sem nome",
-  "voltarParaConversa": "Voltar para a conversa"
+  "voltarParaConversa": "Voltar para a conversa",
+  "voce": "Você",
+  "marca": "DZ",
+  "avisoAjuste": "Isto vira um pedido de alteração do aplicativo: um plano novo, para você aprovar."
 }

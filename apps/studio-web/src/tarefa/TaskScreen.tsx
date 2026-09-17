@@ -1,4 +1,4 @@
-import { ArrowUp, CircleCheck, CircleSlash, FileText, Loader, TriangleAlert, X } from 'lucide-react'
+import { ArrowUp, CircleCheck, CircleSlash, FileText, FolderOpen, Loader, TriangleAlert, X } from 'lucide-react'
 import { BuildSteps } from '../BuildSteps'
 import { hasBuildSteps } from '../buildSteps'
 import { attemptSentence, stageSentence } from '../creationProgress'
@@ -48,6 +48,8 @@ export interface TaskScreenProps {
   readonly conteudoDoPainel?: React.ReactNode
   /** As ações que só existem em certos estados: aprovar plano, criar, cancelar. */
   readonly acoesDoEstado?: React.ReactNode
+  /** As iniciais de quem está na sessão, para o avatar. `null` sem sessão. */
+  readonly iniciais?: string | null
 }
 
 export type PainelAberto =
@@ -95,9 +97,24 @@ export function TaskScreen(props: TaskScreenProps) {
     } finally { setEnviando(false) }
   }
 
+  /*
+    O compositor DIZ o que o envio vai fazer, antes de a pessoa apertar.
+
+    Depois de um resultado, o texto vira um pedido de alteração do aplicativo:
+    ele entra na especificação como critério de aceite e custa um plano novo e
+    uma tentativa. Fazer isso em silêncio transformava toda mensagem — inclusive
+    uma pergunta — em critério permanente, que foi exatamente o defeito
+    apontado. O aviso não é decoração: é o que separa "perguntei" de "mandei
+    mudar o aplicativo".
+
+    A correção COMPLETA é ligar a mensagem simples à autoridade de conversa que
+    já existe, para perguntar não custar tentativa nenhuma. Isso é a fatia
+    seguinte; até lá, o que o envio faz está escrito na tela.
+  */
   const aviso = destino.tipo === 'aguardar'
     ? destino.motivo === 'execucao' ? tarefa.aguardandoTrabalho : tarefa.aguardandoAprovacao
-    : null
+    : destino.tipo === 'ajustar' ? tarefa.avisoAjuste
+      : null
 
   return <div className={props.painel === null ? 'dz-tarefa' : 'dz-tarefa dz-tarefa-com-painel'}>
     {/*
@@ -130,7 +147,18 @@ export function TaskScreen(props: TaskScreenProps) {
       */}
       <ol className="dz-conversa" tabIndex={0} aria-label={tarefa.conversaRotulo}>
         {lances.map(lance => <li key={lance.id} className={`dz-lance dz-lance-${lance.autor}`}>
-          <LanceView lance={lance} abrir={props.abrirPainel} />
+          {/*
+            O AVATAR, como na referência: as iniciais de quem está na sessão
+            para a pessoa, a marca para o estúdio. Ele é `aria-hidden` porque
+            quem ouve a tela já recebe o autor em palavras, logo abaixo — o
+            avatar repetiria a mesma informação em voz.
+          */}
+          <span className="dz-lance-avatar" aria-hidden="true">
+            {lance.autor === 'pessoa' ? (props.iniciais ?? tarefa.voce.slice(0, 1)) : tarefa.marca}
+          </span>
+          <div className="dz-lance-corpo">
+            <LanceView lance={lance} abrir={props.abrirPainel} />
+          </div>
         </li>)}
         {/*
           A marca do fim mora DENTRO da lista que rola, e isso não é detalhe:
@@ -149,17 +177,21 @@ export function TaskScreen(props: TaskScreenProps) {
         mensagem, que é a que interessa.
       */}
       <form className="dz-compositor dz-compositor-inferior" onSubmit={event => void enviar(event)}>
-        {aviso === null ? null : <p className="dz-compositor-aviso" role="status">{aviso}</p>}
+        {aviso === null ? null : <p className={destino.tipo === 'aguardar' ? 'dz-compositor-aviso' : 'dz-compositor-aviso dz-compositor-aviso-neutro'} role="status">{aviso}</p>}
         <label className="sr-only" htmlFor="dz-continuar">{tarefa.compositorRotulo}</label>
         <textarea id="dz-continuar" rows={2} value={props.rascunho} maxLength={2000}
           placeholder={tarefa.compositorPlaceholder}
           onChange={evento => props.setRascunho(evento.target.value)} />
         <div className="dz-compositor-rodape">
+          {/* O PROJETO da tarefa, como o vídeo mostra no compositor: ele diz a
+              que trabalho o texto vai se juntar. É o nome real da tarefa. */}
+          <span className="dz-compositor-projeto"><FolderOpen aria-hidden="true" /><span>{props.detalhes.project.name}</span></span>
           <span className="dz-contador" aria-live="polite">{props.rascunho.length}</span>
-          <button type="submit" className="dz-enviar" disabled={!podeEnviar} aria-busy={enviando}>
-            <span>{enviando ? tarefa.enviando : tarefa.enviar}</span>
+          <button type="submit" className="dz-enviar-redondo" disabled={!podeEnviar} aria-busy={enviando}
+            aria-label={enviando ? tarefa.enviando : tarefa.enviar}>
             <ArrowUp aria-hidden="true" />
           </button>
+          <span className="sr-only" role="status">{enviando ? tarefa.enviando : ''}</span>
         </div>
       </form>
     </main>
@@ -250,7 +282,7 @@ export function rotuloDoEstado(estado: string): string {
 function LanceView({ lance, abrir }: { lance: Lance; abrir(painel: PainelAberto): void }) {
   if (lance.tipo === 'pedido' || lance.tipo === 'resposta') {
     return <>
-      <p className="dz-lance-autor">{tarefa.vocePediu}</p>
+      <p className="dz-lance-autor">{tarefa.voce}</p>
       <p className="dz-lance-texto">{lance.texto}</p>
       {lance.tipo === 'resposta' && lance.recomendada ? <p className="dz-lance-nota">{tarefa.recomendada}</p> : null}
     </>

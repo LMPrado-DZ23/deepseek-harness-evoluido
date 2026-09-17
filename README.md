@@ -239,6 +239,29 @@ git clone --recurse-submodules https://github.com/LMPrado-DZ23/deepseek-harness-
 cd deepseek-harness-evoluido
 ```
 
+### Primeiro uso em um clone novo
+
+Esta é a sequência EXATA que a CI executa num clone limpo, na ordem em que ela
+executa. A ordem não é preferência: o Harness fixado precisa ser instalado e
+compilado antes do Studio, e o filtro `'@dz23-studio/*...'` instala só o que o
+workspace declara — por isso um pacote importado e não declarado passa na
+máquina de quem desenvolve e reprova aqui.
+
+```sh
+node scripts/bootstrap-upstream.mjs
+node scripts/check-upstream-content.mjs
+pnpm --dir third_party/deepseek-harness install --frozen-lockfile
+pnpm --dir third_party/deepseek-harness build:official
+pnpm install --frozen-lockfile --filter '@dz23-studio/*...'
+pnpm build
+pnpm typecheck
+pnpm exec vitest run --maxWorkers=1
+```
+
+`tests/portability/clean-clone-readme.test.mjs` compara este bloco com a
+sequência da CI. Se um dos dois mudar sem o outro, ele reprova — que é o ponto:
+um README que descreve uma instalação que ninguém executa é pior que nenhum.
+
 ```bash
 pnpm studio:doctor   # confere o ambiente e diz o que falta, um passo por vez
 pnpm studio          # sobe o Studio; o endereço aparece no terminal

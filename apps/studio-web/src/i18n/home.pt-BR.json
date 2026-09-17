@@ -6,5 +6,11 @@
   "mais": "Mais",
   "menos": "Menos",
   "ajustes": "Ajustes desta tarefa",
-  "ajustesDetalhe": "Tipo, aparência e privacidade. O Studio já preencheu o que deu para entender do seu texto."
+  "ajustesDetalhe": "Tipo, aparência e privacidade. O Studio já preencheu o que deu para entender do seu texto.",
+  "compositorPlaceholder": "Descreva a tarefa, ou escolha um atalho abaixo",
+  "enviar": "Enviar",
+  "enviando": "Enviando…",
+  "anexar": "Anexar arquivo",
+  "anexarIndisponivel": "Anexar arquivo ainda não existe neste produto.",
+  "rota": "Onde o texto é processado"
 }
