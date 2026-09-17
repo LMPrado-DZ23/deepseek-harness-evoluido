@@ -507,6 +507,57 @@ produto existe para não fazer.
     comprovação até a execução deste commit.
 
 
+35. **OS-105 — perguntar deixou de custar uma tentativa, e a V7 entrou uma vez.**
+
+    O defeito que o Prado apontou era real: depois de um resultado, TODO envio
+    virava critério de aceite permanente. Agora a tela **pede a escolha** — não
+    adivinha —, e onde o defeito morava o padrão é "Perguntar". A pergunta é um
+    lance da MESMA conversa, sem armazenamento novo. Achado do caminho: uma
+    sabotagem SOBREVIVEU (a escolha morava num `return` de rota) e virou
+    função exportada com teste.
+
+    A **consolidação V7** foi registrada uma única vez, com o SHA-256 do MASTER
+    conferido: `docs/inventory/master-v7.json` e `docs/status/CONSOLIDACAO_V7.md`.
+    33 dos 36 contratos D7 estão `A_REVALIDAR_PELO_EXECUTOR` — **não conferido**,
+    que é resposta diferente de ausente e de pronto.
+
+36. **OS-106 e OS-107 — as Preferências, com a verdade ao lado de cada item.**
+
+    Os treze itens de F04, cada um com o que ele É. Cinco funcionam; os outros
+    declaram a pendência **sem controle nenhum**. O tema claro foi MEDIDO antes
+    de construído: 506 cores fixas fora dos tokens — um seletor hoje pintaria
+    metade da tela. Virou `V7-K`.
+
+    E a **quinta causa da CI**: a própria suíte de capturas reescrevia PNGs
+    versionados. `DZ23_CAPTURAS=sim` separa entrega de execução.
+
+37. **OS-108 — os menus do compositor (F08/F09).**
+
+    Com o que ESTE Studio tem ligado, e não os ícones das contas da referência.
+    O F10 (seletor de computador) não entrou: seria botão mudo.
+
+38. **OS-109 — o ADENDO de uso e custos, medido antes de construído.**
+
+    A autoridade JÁ EXISTIA (`route-health` e `studio_runs`). Nenhum contador
+    novo. O que faltava era apresentação: o painel "Uso e custos" da tarefa,
+    onde **uso desconhecido não vira zero** e evento repetido não duplica custo.
+
+39. **OS-110 — a Biblioteca declara o que guarda e o que faz.**
+
+    Um tipo de arquivo, quatro operações que ela faz e **seis que ela não faz**,
+    cada uma com o motivo. Módulo com teste, não parágrafo no JSX.
+
+40. **OS-111 — a sexta causa da CI: região que rola sem foco.**
+
+    O axe só cobra `scrollable-region-focusable` quando a região realmente
+    rola, e isso depende do tamanho da janela. Passava aqui, reprovava lá. A
+    guarda nova confere o atributo, sem depender de tamanho nenhum.
+
+    **A CI fechou VERDE em `969482f` e `33245fe`** — as duas primeiras desde a
+    OS-97, depois de seis causas, quatro delas da mesma família: o resultado
+    dependia do ambiente de quem roda.
+
+
 ## Estado do DAG
 
 **32 DONE, 3 PARCIAL, 2 BLOCKED.** As cinco que restam **não têm engenharia
