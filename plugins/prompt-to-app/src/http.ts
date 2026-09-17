@@ -45,8 +45,20 @@ const createProjectSchema = z.object({
    */
   request_key: z.string().trim().min(16).max(128).optional(),
 }).strict()
-const answerSchema = intakeAnswerSchema.extend({ confirm_sensitive: z.boolean().optional() }).strict()
+const answerSchema = intakeAnswerSchema.extend({
+  confirm_sensitive: z.boolean().optional(),
+  request_key: z.string().min(1).max(200).optional(),
+}).strict()
 const changeRequestSchema = z.object({ reason: z.string().trim().min(3).max(2_000) }).strict()
+/*
+  `/plan/slice` e `/plan/edit` continuam com o esquema SEM chave, de propósito:
+  esta fatia fechou os dois envios nomeados como pendência, e estender a
+  identidade aos outros sem medir o efeito de cada um seria trocar prova por
+  suposição. A pendência deles fica escrita no livro mestre, e não some.
+*/
+const changeRequestComChaveSchema = changeRequestSchema.extend({
+  request_key: z.string().min(1).max(200).optional(),
+}).strict()
 /*
   `request_key` e OPCIONAL nos dois envios, e e a identidade da INTENCAO.
 
@@ -447,8 +459,8 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
         })
       }
       if (request.method === 'POST' && matched.suffix === '/plan/change') {
-        const input = changeRequestSchema.parse(await readJson(request))
-        return json(response, 200, { plan: await config.service.requestPlanChange(actor, projectId, input.reason) })
+        const input = changeRequestComChaveSchema.parse(await readJson(request))
+        return json(response, 200, { plan: await config.service.requestPlanChange(actor, projectId, input.reason, input.request_key) })
       }
       if (request.method === 'POST' && matched.suffix === '/plan/slice') {
         // A pessoa descreve o que falta; quem escreve a etapa é o planejador.
@@ -539,24 +551,37 @@ async function answerIntake(
   if (question === undefined) throw new PromptToAppError('REPLAY', t('errors.questionsAnswered'))
   if (question.id === 'sensitive-confirmation') {
     if (input.confirm_sensitive === undefined) throw new PromptToAppError('INVALID', t('errors.sensitiveConfirmation'))
-    await config.service.recordTurn(actor, projectId, {
-      question_id: question.id, question: question.text,
-      answer: input.confirm_sensitive ? t('values.confirmed') : t('values.notConfirmed'), recommended: false, route: null, model: null,
-    })
+    const resposta = input.confirm_sensitive ? t('values.confirmed') : t('values.notConfirmed')
+    await config.service.answerIntakeTurn(
+      actor, projectId,
+      { questionId: question.id, question: question.text, recommended: false, digitada: resposta },
+      async () => ({ answer: resposta, route: null, model: null }),
+      input.request_key,
+    )
     if (!input.confirm_sensitive) {
       return json(response, 200, { blocked: true, message: t('errors.sensitiveBlocked') })
     }
   } else {
-    let answer = input.answer.trim(); let route: string | null = null; let model: string | null = null
-    if (input.recommend) {
-      const result = await config.intake.recommend(conversation, question)
-      answer = z.string().trim().min(1).max(2_000).parse(result.value)
-      route = result.route; model = result.model
-    }
-    if (answer === '') throw new PromptToAppError('INVALID', t('errors.answerRequired'))
-    await config.service.recordTurn(actor, projectId, {
-      question_id: question.id, question: question.text, answer, recommended: input.recommend, route, model,
-    })
+    const digitada = input.answer.trim()
+    if (!input.recommend && digitada === '') throw new PromptToAppError('INVALID', t('errors.answerRequired'))
+    /*
+      A CHAMADA AO MODELO mora dentro da função que só roda quando o envio é
+      novo. Fora dela, o reenvio depois de a resposta se perder chamaria o
+      modelo de novo — e o custo dessa chamada é real, mesmo quando o turno
+      acabasse descartado.
+    */
+    await config.service.answerIntakeTurn(
+      actor, projectId,
+      { questionId: question.id, question: question.text, recommended: input.recommend, digitada },
+      async () => {
+        if (!input.recommend) return { answer: digitada, route: null, model: null }
+        const result = await config.intake.recommend(conversation, question)
+        const answer = z.string().trim().min(1).max(2_000).parse(result.value)
+        if (answer === '') throw new PromptToAppError('INVALID', t('errors.answerRequired'))
+        return { answer, route: result.route, model: result.model }
+      },
+      input.request_key,
+    )
   }
 
   const updated = await conversationFor(config.service, actor, projectId)

@@ -380,6 +380,8 @@ declarada.
 
 | BUS-03 | A EVIDENCIA volta para a empresa: cada tarefa mostra os pacotes que produziu, lidos de quem ja os guarda | Retomada do Prado 17/09/2026 item 5 ("empresa → objetivo → oferta/plano → tarefa → evidencia persistida") | v1.0 | BETA | apps/studio-web/src/empresa/empresa.ts (`evidenciaDasTarefas`, `totalDePacotes`, `chaveDoTotal`), Empresa.tsx (`EvidenciaDaTarefaLida`, `TotalDePacotes`, `lerPacotes`), empresa.css, i18n/empresa.pt-BR.json, tests/server.ts (o pacote passa a carregar o `project_id` PEDIDO), tests/journey.spec.ts, tests/capturas.spec.ts | empresa.spec.ts 52 e Empresa.spec.tsx 11 na interface; studio-web 719; raiz 3941; e2e 147 passaram / 3 pulados na suite INTEIRA; PostgreSQL 65; 6 sabotagens, as seis PEGAS | execucao: este e o ultimo elo de `empresa → objetivo → plano → tarefa → evidencia`, e ele e uma JUNCAO, e nao um registro novo. Os pacotes ja sao guardados pelo `integration-hub`, com recibo e resumo criptografico, e a Biblioteca ja os lista; gravar uma copia deles no Modo Empresa seria a segunda contabilidade de evidencia — e a que divergisse em silencio seria justamente a que alguem le para decidir se o trabalho foi entregue. Nenhuma rota nova, nenhum dominio novo: so leitura da autoridade que ja existe. TRES estados por tarefa, e nao dois: ainda lendo, leu e nao ha nada, leu e tem coisas — colapsar o primeiro no segundo diria "esta tarefa nao produziu nada" enquanto a leitura ainda estava em voo. A leitura que falha nao derruba a secao nem apaga o que as outras tarefas produziram. O total conta pacotes DISTINTOS, e nao a soma das listas: o mesmo pacote lido por duas leituras que se cruzaram contaria duas. E o plural foi decidido em funcao propria, porque "1 pacote(s)" e o que sai quando ninguem decide — e dentro do JSX a decisao nao seria exercitada por teste nenhum. NO CAMINHO, um defeito do DUBLE apareceu: o servidor de teste devolvia sempre o mesmo `project_id` no pacote, que e uma coisa que servidor nenhum responde; corrigido para o `project_id` pedido | A evidencia mostrada e a dos PACOTES exportados. Execucoes, tentativas e relatorios de verificacao NAO aparecem aqui ainda — eles existem e tem tela propria, e junta-los e trabalho de outra fatia. O armazenamento do acervo no servidor de teste e DUBLE; o formato do pacote nao e. Os outros VINTE E UM requisitos BUS continuam AUSENTES. Ninguem que nao programa usou a tela (EB-02). O aceite visual e do titular e NAO esta declarado | BUS-04..BUS-24; V7-B (enviar arquivos); V7-C; T-35 fatias C e D |
 
+| V7-C-2 | Os DOIS ultimos envios sem identidade de intencao fecharam: responder o questionario e pedir alteracao no plano | Retomada do Prado 17/09/2026 item 2 ("diferencie a idempotencia da criacao da identidade dos envios posteriores") + a pendencia que a propria OS-112 deixou escrita | v1.0 | BETA | plugins/prompt-to-app/src/creation-key.ts (`TipoDeEnvio` com `resposta` e `mudanca`; `ReservaDeCriacao.kind` idem), model.ts (o enum de `kind` acompanha, versao do dominio NAO sobe), service.ts (`answerIntakeTurn` novo, `requestPlanChange` com chave, `#pedirAlteracao` extraido), http.ts (`request_key` nos dois corpos; a chamada ao modelo passou para DENTRO da chave), apps/studio-web/src/App.tsx (dois `ref` novos), creationIntent.ts, tests/identidade-do-envio.spec.ts, tests/journey.spec.ts | identidade-do-envio.spec.ts 28 (11 novos); prompt-to-app 1130; raiz 3955; studio-web 722; e2e 148 passaram / 3 pulados na suite INTEIRA; PostgreSQL 65; 6 sabotagens, DUAS sobreviveram e viraram teste | execucao: nenhum dos dois duplicava efeito VISIVEL, e era por isso que tinham ficado por ultimo — so que "nao duplica" era argumento, e nao prova. O que a RESPOSTA duplicava era CUSTO: com `recomendar` ela CHAMA modelo, e o reenvio depois de a resposta se perder chamava de novo e gravava um segundo turno com um texto que a pessoa nao escolheu. A chamada ao modelo passou para DENTRO da funcao que so roda quando o envio e novo, e o contador de chamadas e a prova. O PEDIDO DE ALTERACAO nao duplicava porque a guarda de estado barrava o segundo — mas devolvia um ERRO de repeticao para quem so tinha reenviado a mesma intencao, o que e uma mentira sobre o que aconteceu; agora devolve o MESMO plano, e a guarda continua intacta para quem manda outra intencao. Nenhuma segunda contabilidade: e a MESMA reserva duravel, o mesmo mutex e os mesmos tres desfechos. ACHADO DO E2E, e a razao ficou escrita no codigo: a primeira versao punha a PERGUNTA na impressao da resposta, e isso quebrava exatamente o caso para o qual a chave existe — a pergunta corrente e calculada pelo servidor a partir do que ja foi respondido, entao o proprio primeiro envio a muda, e o reenvio virava CONFLITO. Foi tirada, e o que se perde esta declarado | `/plan/slice` e `/plan/edit` continuam SEM identidade de envio, e isto agora e a pendencia inteira que resta de V7-C: estende-la sem medir o efeito de cada um seria trocar prova por suposicao. Duas perguntas respondidas com o mesmo texto e a MESMA chave sao tratadas como a mesma intencao — a chave nasce por envio no cliente, e reusa-la entre perguntas e defeito de cliente | V7-C (`/plan/slice` e `/plan/edit`); T-35 fatias C e D; V7-B |
+
 <!-- O livro mestre REGISTRA achados, e o achado da OS-39 e sobre numeros de ADR
      que nomeiam mais de uma decisao: citacao-ambigua-proposital -->
 
@@ -388,16 +390,16 @@ declarada.
 | estado | quantos |
 | --- | --- |
 | `STABLE` | 69 |
-| `BETA` | 168 |
+| `BETA` | 169 |
 | `NOT_PRESENT` | 33 |
 | `NOT_CONFIGURED` | 1 |
 | `NOT_EXECUTED` | 4 |
 | `FAILED` | 2 |
 
-**Total de requisitos rastreados: 277.**
+**Total de requisitos rastreados: 278.**
 
 | versao-alvo | quantos |
 | --- | --- |
-| v1.0 | 241 |
+| v1.0 | 242 |
 | v1.x | 33 |
 | v2 | 3 |

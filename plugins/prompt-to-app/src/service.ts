@@ -385,6 +385,69 @@ export class PromptToAppService {
    * @param pergunta - o texto, como a pessoa escreveu.
    * @returns o lance gravado, com a resposta já dentro.
    */
+  /**
+   * Grava UMA resposta do intake, com identidade de intenção de envio.
+   *
+   * Esta é a rota que mais precisava disto, e a que menos parecia precisar: ela
+   * não duplicava efeito VISÍVEL, porque a próxima pergunta já teria mudado
+   * quando o reenvio chegasse. O que ela duplicava era CUSTO — responder com
+   * `recomendar` CHAMA modelo, e o reenvio depois de a resposta se perder
+   * chamava de novo, cobrava de novo, e gravava um segundo turno com um texto
+   * que a pessoa não escolheu.
+   *
+   * `produzir` é passado de fora porque quem sabe falar com o modelo é o
+   * motor de intake, e ele não mora aqui. O importante é a ORDEM: com chave,
+   * `produzir` só é chamado quando o envio é novo.
+   *
+   * A impressão é feita SÓ do que o cliente mandou: a resposta digitada, ou a
+   * marca de recomendação quando é o modelo que vai escrever.
+   *
+   * A PERGUNTA ficou de fora, e a primeira versão desta função a incluía — o
+   * e2e provou que estava errado, e a razão vale ser escrita. A pergunta é
+   * calculada pelo SERVIDOR a partir do que já foi respondido, então o próprio
+   * primeiro envio a muda: quando o reenvio chega, a pergunta corrente já é
+   * outra, a impressão dá diferente e a reserva vira CONFLITO. Ou seja,
+   * incluí-la quebrava exatamente o caso para o qual a chave existe.
+   *
+   * O que se perde com isso é estreito e conhecido: duas perguntas respondidas
+   * com o MESMO texto e a MESMA chave seriam a mesma intenção. Só que a chave
+   * nasce por envio no cliente, e reusá-la entre duas perguntas é defeito de
+   * cliente — enquanto o reenvio depois de perder a resposta é o caminho
+   * normal de quem tem rede ruim.
+   *
+   * A marca de recomendação continua entrando: sem ela a impressão dependeria
+   * do que o modelo fosse devolver, e dois modelos diferentes fariam a mesma
+   * intenção ter duas impressões.
+   * @param actor - quem responde.
+   * @param projectId - a tarefa.
+   * @param entrada - a pergunta, se a resposta é recomendada, e a digitada.
+   * @param produzir - o que produz a resposta final (chama o modelo, ou não).
+   * @param requestKey - a identidade da intenção.
+   * @returns o turno gravado.
+   */
+  async answerIntakeTurn(
+    actor: PromptToAppActor,
+    projectId: string,
+    entrada: { readonly questionId: StudioIntakeTurn['question_id']; readonly question: string; readonly recommended: boolean; readonly digitada: string },
+    produzir: () => Promise<Pick<StudioIntakeTurn, 'answer' | 'route' | 'model'>>,
+    requestKey?: string,
+  ): Promise<StudioIntakeTurn> {
+    this.#authorize(actor, 'project.write'); this.project(actor, projectId)
+    const marca = entrada.recommended ? '@recomendado' : entrada.digitada
+    return this.#comChaveDeEnvio(
+      actor, projectId, 'resposta', marca, requestKey,
+      async idReservado => {
+        const produzida = await produzir()
+        const turno = await this.recordTurn(actor, projectId, {
+          question_id: entrada.questionId, question: entrada.question,
+          recommended: entrada.recommended, ...produzida,
+        }, idReservado)
+        return { id: turno.turn_id, valor: turno }
+      },
+      async resultId => (await this.intakeTurns(actor, projectId)).find(turno => turno.turn_id === resultId),
+    )
+  }
+
   async askAboutProject(actor: PromptToAppActor, projectId: string, pergunta: string, requestKey?: string): Promise<StudioIntakeTurn> {
     this.#authorize(actor, 'project.write')
     const project = this.project(actor, projectId)
@@ -574,12 +637,38 @@ export class PromptToAppService {
     return updated
   }
 
-  async requestPlanChange(actor: PromptToAppActor, projectId: string, reason: string): Promise<StudioPlan> {
+  async requestPlanChange(actor: PromptToAppActor, projectId: string, reason: string, requestKey?: string): Promise<StudioPlan> {
     this.#authorize(actor, 'project.write')
-    if (reason.trim().length < 3 || reason.trim().length > 2_000) throw new PromptToAppError('INVALID', t('errors.planChangeLength'))
+    const texto = reason.trim()
+    if (texto.length < 3 || texto.length > 2_000) throw new PromptToAppError('INVALID', t('errors.planChangeLength'))
+    /*
+      O pedido de alteração NÃO duplicava efeito antes disto: a guarda de estado
+      já barrava o segundo. O que ele fazia era pior de explicar para quem usa —
+      devolvia um ERRO de repetição para quem só tinha reenviado o mesmo pedido
+      depois de perder a resposta, e a pessoa via "não dá mais" para um pedido
+      que tinha dado certo.
+
+      Não há segunda contabilidade: é a MESMA reserva durável dos outros envios.
+      A releitura não tem identificador próprio porque o plano é um por tarefa —
+      ela confere o ESTADO: o plano ainda está em alteração pedida, e o pedido
+      gravado é este. Se outra pessoa mudou o plano no meio, a releitura não
+      reconhece, e o envio segue para a guarda de estado, que recusa com a
+      verdade de agora.
+    */
+    return this.#comChaveDeEnvio(
+      actor, projectId, 'mudanca', texto, requestKey,
+      async () => ({ id: projectId, valor: await this.#pedirAlteracao(actor, projectId, texto) }),
+      async () => {
+        const atual = await this.plan(actor, projectId).catch(() => undefined)
+        return atual !== undefined && atual.status === 'CHANGE_REQUESTED' && atual.change_request === texto ? atual : undefined
+      },
+    )
+  }
+
+  async #pedirAlteracao(actor: PromptToAppActor, projectId: string, texto: string): Promise<StudioPlan> {
     const value = await this.plan(actor, projectId)
     if (value.status !== 'PROPOSED') throw new PromptToAppError('REPLAY', t('errors.planChangeUnavailable'))
-    const updated = { ...value, status: 'CHANGE_REQUESTED' as const, change_request: reason.trim(), updated_at: this.#now().toISOString() }
+    const updated = { ...value, status: 'CHANGE_REQUESTED' as const, change_request: texto, updated_at: this.#now().toISOString() }
     await this.#putPlan(updated)
     return updated
   }

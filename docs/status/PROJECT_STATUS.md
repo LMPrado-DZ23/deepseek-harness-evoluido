@@ -37,9 +37,9 @@ Todos reproduzíveis pelo comando ao lado.
 | --- | --- | --- |
 | typecheck | PASS | `pnpm typecheck` |
 | build | PASS | `pnpm build` |
-| suíte raiz | 3941 testes, 226 arquivos, 0 falha (17/09, após BUS-03) | `pnpm -w test` |
-| suíte studio-web | 719 testes (17/09, após BUS-03) | `cd apps/studio-web && npx vitest run` |
-| e2e navegador | 147 aprovados, 0 reprovados, 3 pulados (17/09, quatro tamanhos) | `cd apps/studio-web && npx playwright test` |
+| suíte raiz | 3955 testes, 226 arquivos, 0 falha (17/09, após V7-C-2) | `pnpm -w test` |
+| suíte studio-web | 722 testes (17/09, após V7-C-2) | `cd apps/studio-web && npx vitest run` |
+| e2e navegador | 148 aprovados, 0 reprovados, 3 pulados (17/09, quatro tamanhos) | `cd apps/studio-web && npx playwright test` |
 | PostgreSQL real | **65 testes, `POSTGRES_GATE=PASS`** (12/09, PostgreSQL 16.13 local) | `pnpm test:postgres` |
 | portões | **26/26 PASS** | ver abaixo |
 
@@ -604,6 +604,24 @@ produto existe para não fazer.
     `integration-hub`, com recibo e resumo criptográfico. Uma cópia deles aqui
     seria a segunda contabilidade de evidência — e a que divergisse em silêncio
     seria justamente a que alguém lê para decidir se o trabalho foi entregue.
+
+45. **V7-C-2 — os dois últimos envios sem identidade de intenção fecharam.**
+
+    Responder o questionário e pedir alteração no plano. Nenhum dos dois
+    duplicava efeito **visível**, e era por isso que tinham ficado por último —
+    só que "não duplica" era argumento, e não prova.
+
+    O que a resposta duplicava era **custo**: com "recomendar" ela chama modelo.
+    A chamada passou para dentro da chave; o contador de chamadas é a prova. O
+    pedido de alteração devolvia um erro de repetição para quem só reenviou a
+    mesma intenção — agora devolve o mesmo plano, e a guarda de estado continua
+    intacta para quem manda outra.
+
+    **Achado do e2e:** a primeira versão punha a pergunta corrente na impressão
+    da resposta, e isso quebrava exatamente o caso para o qual a chave existe —
+    o servidor calcula a pergunta a partir do que já foi respondido, então o
+    primeiro envio a muda e o reenvio virava conflito. A razão ficou escrita no
+    código, junto do que se perde ao tirá-la.
 
 
 ## Estado do DAG

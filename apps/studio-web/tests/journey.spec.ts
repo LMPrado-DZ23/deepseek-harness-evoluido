@@ -659,3 +659,68 @@ test('cria uma tarefa para a empresa, com o plano dentro, e ela aparece na empre
   await page.getByRole('button', { name: 'Abrir', exact: true }).click()
   await expect(page.getByLabel('Tarefas desta empresa').getByRole('link', { name: 'uma página para receber encomendas' })).toHaveCount(1)
 })
+
+/**
+ * `V7-C` — os dois últimos envios que faltavam ter identidade de intenção.
+ *
+ * Eles não duplicavam efeito VISÍVEL, e é por isso que ficaram por último — e
+ * também por que era preciso fechá-los: "não duplica" era argumento, não prova.
+ * O que a RESPOSTA do questionário duplicava era CUSTO, porque com "recomendar"
+ * ela chama modelo; o que o PEDIDO DE ALTERAÇÃO devolvia era um erro de
+ * repetição para quem só tinha reenviado a mesma intenção.
+ */
+test('responder e pedir alteração no plano: o reenvio não duplica nem devolve erro', async ({ context, page }) => {
+  const origin = 'http://studio.dz23.localhost:4179'
+  await context.addCookies([
+    { name: 'dz23_studio_session', value: 'e2e', url: origin },
+    { name: 'dz23_studio_csrf', value: 'csrf-e2e', url: origin },
+  ])
+  await context.addInitScript(() => { window.sessionStorage.setItem('dz23.studio.csrf.v1', 'csrf-e2e') })
+  await page.goto('/studio/')
+  await page.getByRole('button', { name: 'Página de apresentação' }).click()
+  await page.getByRole('button', { name: 'Continuar' }).click()
+
+  const projeto = await page.evaluate(() => new URL(window.location.href).searchParams.get('projeto'))
+  const postar = async (rota: string, corpo: Record<string, unknown>) => page.evaluate(async ([id, caminho, body]) => {
+    const resposta = await fetch(`/api/studio/apps/projects/${String(id)}/${String(caminho)}`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json', 'x-dz23-csrf': 'csrf-e2e' },
+      body: JSON.stringify(body),
+    })
+    return resposta.status
+  }, [projeto, rota, corpo] as const)
+
+  // A RESPOSTA do questionário, mandada duas vezes com a mesma intenção.
+  const resposta = { answer: 'moradores do bairro', recommend: false, request_key: 'chave-resposta-e2e-01' }
+  expect(await postar('intake/answer', resposta)).toBe(200)
+  expect(await postar('intake/answer', resposta)).toBe(200)
+
+  await answerIntake(page, INTAKE_ANSWERS)
+  await page.getByRole('button', { name: 'Montar meu plano' }).click()
+  await expect(page.getByText('Plano proposto', { exact: false })).toBeVisible({ timeout: 20_000 })
+
+  // O PEDIDO DE ALTERAÇÃO. O segundo devolvia 409 de repetição antes desta
+  // fatia; agora devolve o MESMO plano, que é o que aconteceu de verdade.
+  const mudanca = { reason: 'o botão precisa ficar verde', request_key: 'chave-mudanca-e2e-01' }
+  expect(await postar('plan/change', mudanca)).toBe(200)
+  expect(await postar('plan/change', mudanca)).toBe(200)
+
+  // E a guarda de estado NÃO foi enfraquecida: outra intenção, no mesmo estado,
+  // continua sendo recusada pelo que o plano é agora.
+  expect(await postar('plan/change', { reason: 'outra coisa qualquer', request_key: 'chave-mudanca-e2e-02' })).toBe(409)
+
+  /*
+    E o que ficou GUARDADO é uma alteração pedida, com este texto.
+
+    A conferência é no servidor, e não no que a tela desenhou: o que importa
+    depois de a resposta se perder é o estado que sobreviveu, e uma asserção
+    sobre pixels responderia outra pergunta.
+  */
+  const guardado = await page.evaluate(async id => {
+    const resposta = await fetch(`/api/studio/apps/projects/${String(id)}`, { credentials: 'same-origin' })
+    return await resposta.json() as { plan?: { status?: string; change_request?: string; revision?: number } }
+  }, projeto)
+  expect(guardado.plan?.status).toBe('CHANGE_REQUESTED')
+  expect(guardado.plan?.change_request).toBe('o botão precisa ficar verde')
+})

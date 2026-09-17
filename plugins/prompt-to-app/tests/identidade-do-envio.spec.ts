@@ -28,7 +28,8 @@ class MemoryRepository implements PromptToAppRepository {
   specs = () => this.specRows
   designs = () => [] as StudioDesignSpecRecord[]
   turns = () => this.turnRows
-  plans = () => [] as StudioPlan[]
+  planRowsInternos: StudioPlan[] = []
+  plans = () => this.planRowsInternos
   runs = () => [] as StudioRun[]
   evidence = () => [] as StudioEvidence[]
   approvals = () => this.approvalRows
@@ -41,7 +42,9 @@ class MemoryRepository implements PromptToAppRepository {
   putApproval = async (value: StudioApproval) => { this.approvalRows = [...this.approvalRows, value] }
   putCreationKey = async (value: StudioCreationKey) => { this.keyRows = [...this.keyRows, value] }
   putDesign = async () => {}
-  putPlan = async () => {}
+  putPlan = async (value: StudioPlan) => {
+    this.planRowsInternos = [...this.planRowsInternos.filter(row => row.plan_id !== value.plan_id), value]
+  }
   putRun = async () => {}
   putEvidence = async () => {}
 }
@@ -207,5 +210,192 @@ describe('pedir alteração com identidade de envio', () => {
     const antes = repository.approvalRows.length
     await service.reviseProject(ana, 'proj-1', 'o botão precisa ficar verde', CHAVE)
     expect(repository.approvalRows).toHaveLength(antes)
+  })
+})
+
+
+describe('responder o intake com identidade de envio', () => {
+  /** Um contador de chamadas ao modelo: o custo é o que esta parte protege. */
+  function comModelo() {
+    const f = fixture('DRAFT')
+    let chamadas = 0
+    const produzir = async () => {
+      chamadas += 1
+      return { answer: 'pacientes da clínica', route: 'ollama-local', model: 'q4' }
+    }
+    return { ...f, produzir, chamadas: () => chamadas }
+  }
+
+  const pergunta = { questionId: 'audience' as const, question: 'Para quem é?', recommended: false, digitada: 'pacientes da clínica' }
+
+  it('o mesmo envio duas vezes grava UM turno, e devolve o mesmo', async () => {
+    const { service, repository, produzir } = comModelo()
+    const primeira = await service.answerIntakeTurn(ana, 'proj-1', pergunta, produzir, CHAVE)
+    const segunda = await service.answerIntakeTurn(ana, 'proj-1', pergunta, produzir, CHAVE)
+    expect(repository.turnRows).toHaveLength(1)
+    expect(segunda.turn_id).toBe(primeira.turn_id)
+  })
+
+  it('reenviar com RECOMENDAR não chama o modelo de novo — e não cobra de novo', async () => {
+    // Este é o defeito que esta fatia fecha, e ele era de CUSTO, não de tela:
+    // a próxima pergunta já teria mudado, então ninguém veria dois turnos; a
+    // conta do provedor via duas chamadas.
+    const { service, produzir, chamadas } = comModelo()
+    const recomendada = { ...pergunta, recommended: true, digitada: '' }
+    await service.answerIntakeTurn(ana, 'proj-1', recomendada, produzir, CHAVE)
+    await service.answerIntakeTurn(ana, 'proj-1', recomendada, produzir, CHAVE)
+    expect(chamadas()).toBe(1)
+  })
+
+  it('SEM chave, cada envio é um envio: a rota antiga continua funcionando', async () => {
+    // Um cliente antigo não pode deixar de responder de um dia para o outro.
+    const { service, repository, produzir } = comModelo()
+    await service.answerIntakeTurn(ana, 'proj-1', pergunta, produzir)
+    await service.answerIntakeTurn(ana, 'proj-1', pergunta, produzir)
+    expect(repository.turnRows).toHaveLength(2)
+  })
+
+  it('a resposta DIGITADA entra na impressão: outra resposta na mesma chave é conflito', async () => {
+    const { service, produzir } = comModelo()
+    await service.answerIntakeTurn(ana, 'proj-1', pergunta, produzir, CHAVE)
+    await expect(service.answerIntakeTurn(
+      ana, 'proj-1', { ...pergunta, digitada: 'outra coisa' }, produzir, CHAVE,
+    )).rejects.toThrow(PromptToAppError)
+  })
+
+  it('digitar e RECOMENDAR não têm a mesma impressão — nem com o MESMO texto no campo', async () => {
+    /*
+      O texto do campo é o mesmo nos dois envios de propósito.
+
+      Com `digitada` diferente, a impressão já diferia pelo texto, e a marca de
+      recomendação não estava sendo exercitada por teste nenhum: a sabotagem
+      que a removia SOBREVIVIA. O caso real é este — a pessoa escreve algo,
+      manda, e depois pede recomendação sem limpar o campo. Sem a marca, ela
+      receberia de volta o que digitou, apresentado como recomendação do modelo.
+    */
+    const { service, produzir } = comModelo()
+    await service.answerIntakeTurn(ana, 'proj-1', pergunta, produzir, CHAVE)
+    await expect(service.answerIntakeTurn(
+      ana, 'proj-1', { ...pergunta, recommended: true }, produzir, CHAVE,
+    )).rejects.toThrow(PromptToAppError)
+  })
+
+  it('a PERGUNTA NÃO entra na impressão — e isto é uma decisão, não um esquecimento', async () => {
+    /*
+      A primeira versão desta função incluía a pergunta, e o e2e mostrou que
+      estava errado: a pergunta corrente é calculada pelo SERVIDOR a partir do
+      que já foi respondido, então o primeiro envio a muda. Quando o reenvio
+      chega, a pergunta já é outra, a impressão dá diferente, e a reserva vira
+      conflito — quebrando exatamente o caso para o qual a chave existe.
+
+      O que se perde é estreito: duas perguntas respondidas com o mesmo texto e
+      a MESMA chave são a mesma intenção. A chave nasce por envio no cliente, e
+      reusá-la entre duas perguntas é defeito de cliente; o reenvio depois de
+      perder a resposta é o caminho normal de quem tem rede ruim.
+    */
+    const { service, repository, produzir } = comModelo()
+    await service.answerIntakeTurn(ana, 'proj-1', pergunta, produzir, CHAVE)
+    const segunda = await service.answerIntakeTurn(
+      ana, 'proj-1', { ...pergunta, questionId: 'goal', question: 'Qual o objetivo?' }, produzir, CHAVE,
+    )
+    expect(repository.turnRows).toHaveLength(1)
+    expect(segunda.question_id).toBe('audience')
+  })
+
+  it('o MODELO só é chamado quando o envio é novo — a chamada mora dentro da chave', async () => {
+    // Chamar antes de conferir a chave cobraria a chamada mesmo no reenvio, e
+    // o valor devolvido seria jogado fora. O contador é a prova.
+    const { service, produzir, chamadas } = comModelo()
+    const recomendada = { ...pergunta, recommended: true }
+    await service.answerIntakeTurn(ana, 'proj-1', recomendada, produzir, CHAVE)
+    expect(chamadas()).toBe(1)
+    await service.answerIntakeTurn(ana, 'proj-1', recomendada, produzir, CHAVE)
+    await service.answerIntakeTurn(ana, 'proj-1', recomendada, produzir, CHAVE)
+    expect(chamadas()).toBe(1)
+  })
+
+  it('a chave de OUTRA pessoa não devolve o turno desta', async () => {
+    // A chave não é credencial: o escopo de quem pede entra no armazenamento.
+    const { service, repository, produzir } = comModelo()
+    await service.answerIntakeTurn(ana, 'proj-1', pergunta, produzir, CHAVE)
+    await service.answerIntakeTurn(bruno, 'proj-1', pergunta, produzir, CHAVE)
+    expect(repository.turnRows).toHaveLength(2)
+  })
+
+  it('a queda entre a reserva e o turno termina o efeito com o MESMO identificador', async () => {
+    const { service, repository, produzir } = comModelo()
+    // A reserva ficou; o turno, não — é o que uma queda no meio deixa.
+    repository.keyRows = [{
+      request_key: CHAVE, org_id: ana.orgId, tenant_id: ana.tenantId, user_id: ana.userId,
+      fingerprint: impressaoDoEnvio({ tipo: 'resposta', projectId: 'proj-1', texto: 'pacientes da clínica' }),
+      project_id: 'proj-1', kind: 'resposta', result_id: 'turno-reservado', created_at: AGORA,
+    }]
+    const turno = await service.answerIntakeTurn(ana, 'proj-1', pergunta, produzir, CHAVE)
+    expect(turno.turn_id).toBe('turno-reservado')
+    expect(repository.turnRows).toHaveLength(1)
+  })
+})
+
+
+describe('pedir ALTERAÇÃO NO PLANO com identidade de envio', () => {
+  /**
+   * Um plano PROPOSTO, que é o único estado em que o pedido de alteração vale.
+   *
+   * O repositório de memória deste arquivo não guardava plano nenhum — ele não
+   * precisava. Agora precisa, e guarda.
+   */
+  function comPlano() {
+    const f = fixture()
+    f.repository.planRowsInternos = [{
+      plan_id: 'plan-1', project_id: 'proj-1', org_id: ana.orgId, tenant_id: ana.tenantId,
+      spec_id: 'spec-1', revision: 1, status: 'PROPOSED', change_request: null,
+      steps: [{ id: 'passo-1', title: 'a página', detail: 'montar a página', planned_files: ['index.html'] }],
+      created_at: AGORA, updated_at: AGORA,
+    } as unknown as StudioPlan]
+    return f
+  }
+
+  const PEDIDO = 'o botão precisa ficar verde'
+
+  it('o mesmo pedido duas vezes devolve o MESMO plano, em vez de um erro de repetição', async () => {
+    // Antes disto, o reenvio depois de a resposta se perder recebia "não dá
+    // mais" para um pedido que tinha dado certo. Não era duplicação de efeito —
+    // era uma mentira sobre o que aconteceu.
+    const { service } = comPlano()
+    const primeiro = await service.requestPlanChange(ana, 'proj-1', PEDIDO, CHAVE)
+    const segundo = await service.requestPlanChange(ana, 'proj-1', PEDIDO, CHAVE)
+    expect(segundo.status).toBe('CHANGE_REQUESTED')
+    expect(segundo.change_request).toBe(primeiro.change_request)
+    expect(segundo.revision).toBe(primeiro.revision)
+  })
+
+  it('SEM chave, o segundo pedido continua recusado pela guarda de estado', async () => {
+    // A guarda não foi enfraquecida: ela continua sendo a verdade sobre o
+    // estado. A chave só evita que quem reenviou a MESMA intenção a encontre.
+    const { service } = comPlano()
+    await service.requestPlanChange(ana, 'proj-1', PEDIDO)
+    await expect(service.requestPlanChange(ana, 'proj-1', PEDIDO)).rejects.toThrow(PromptToAppError)
+  })
+
+  it('a mesma chave com OUTRO pedido é conflito', async () => {
+    const { service } = comPlano()
+    await service.requestPlanChange(ana, 'proj-1', PEDIDO, CHAVE)
+    await expect(service.requestPlanChange(ana, 'proj-1', 'outra coisa', CHAVE)).rejects.toThrow(PromptToAppError)
+  })
+
+  it('dois pedidos CONCORRENTES com a mesma chave produzem UM pedido', async () => {
+    const { service } = comPlano()
+    const [esquerda, direita] = await Promise.all([
+      service.requestPlanChange(ana, 'proj-1', PEDIDO, CHAVE),
+      service.requestPlanChange(ana, 'proj-1', PEDIDO, CHAVE),
+    ])
+    expect(esquerda.change_request).toBe(direita.change_request)
+    expect(esquerda.status).toBe('CHANGE_REQUESTED')
+  })
+
+  it('pedido curto demais é recusado ANTES de qualquer reserva', async () => {
+    const { service, repository } = comPlano()
+    await expect(service.requestPlanChange(ana, 'proj-1', 'x', CHAVE)).rejects.toThrow(PromptToAppError)
+    expect(repository.keyRows).toHaveLength(0)
   })
 })

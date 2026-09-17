@@ -244,7 +244,7 @@ export const studioCreationKeySchema = z.object({
     motivo de sempre neste esquema: `open()` falha com `version-mismatch` em
     instalação que já rodou, e não existe passo de migração neste seam.
   */
-  kind: z.enum(['criacao', 'pergunta', 'revisao']).optional(),
+  kind: z.enum(['criacao', 'pergunta', 'revisao', 'resposta', 'mudanca']).optional(),
   /*
     O que o envio PRODUZIU — o turno da pergunta, a especificação da revisão.
 

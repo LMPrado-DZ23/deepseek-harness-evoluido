@@ -293,6 +293,17 @@ export function App() {
   */
   const intencaoDaPergunta = useRef<IntencaoDeCriacao | null>(null)
   const intencaoDaRevisao = useRef<IntencaoDeCriacao | null>(null)
+  /*
+    Os dois últimos envios que faltavam ter identidade de intenção.
+
+    A RESPOSTA do questionário é o caso que mais custava: com "recomendar", ela
+    CHAMA modelo, e o reenvio depois de a resposta se perder chamava de novo e
+    cobrava de novo. A MUDANÇA no plano não duplicava efeito — a guarda de
+    estado barrava a segunda —, mas devolvia um erro de repetição para quem só
+    tinha reenviado a mesma intenção.
+  */
+  const intencaoDaResposta = useRef<IntencaoDeCriacao | null>(null)
+  const intencaoDaMudanca = useRef<IntencaoDeCriacao | null>(null)
   async function create() {
     if (!ready) { setError(t.idea.empty); return }
     await safely(async () => {
@@ -348,10 +359,24 @@ export function App() {
    */
   async function submitAnswer(recommend: boolean, confirmSensitive?: boolean, texto?: string) {
     if (projectId === null) return
+    /*
+      A impressão local carrega o que a PESSOA mandou, e não a pergunta aberta:
+      o servidor calcula a pergunta a partir do que já foi respondido, então o
+      próprio primeiro envio a muda — e incluí-la faria o reenvio virar conflito
+      justamente no caso para o qual a chave existe.
+
+      A marca de recomendação entra: sem ela, escrever algo, mandar, e depois
+      pedir recomendação sem limpar o campo devolveria o que a pessoa digitou
+      apresentado como recomendação do modelo.
+    */
+    const material = [recommend ? '@recomendado' : (texto ?? ''), String(confirmSensitive ?? '')].join('|')
+    const envio = intencaoPorImpressao(intencaoDaResposta.current, impressaoDoEnvioLocal('resposta', projectId, material))
+    intencaoDaResposta.current = envio
     await safely(async () => {
       const response = await api<{ next?: Question | null; spec?: unknown; blocked?: boolean; message?: string }>(`/projects/${projectId}/intake/answer`, {
-        method: 'POST', body: JSON.stringify({ answer: texto ?? '', recommend, ...(confirmSensitive === undefined ? {} : { confirm_sensitive: confirmSensitive }) }),
+        method: 'POST', body: JSON.stringify({ answer: texto ?? '', recommend, request_key: envio.chave, ...(confirmSensitive === undefined ? {} : { confirm_sensitive: confirmSensitive }) }),
       })
+      intencaoDaResposta.current = null
       if (response.blocked === true) { setError(response.message ?? t.health.attention); return }
       setQuestion(response.next ?? null)
       if (response.next == null) setProjectState('SPEC_READY')
@@ -424,8 +449,11 @@ export function App() {
   /** Pede mudança no plano proposto, com o texto do compositor. */
   async function mudarPlanoPelaConversa(texto: string) {
     if (projectId === null) return
+    const envio = intencaoPorImpressao(intencaoDaMudanca.current, impressaoDoEnvioLocal('mudanca', projectId, texto.trim()))
+    intencaoDaMudanca.current = envio
     await safely(async () => {
-      await api(`/projects/${projectId}/plan/change`, { method: 'POST', body: JSON.stringify({ reason: texto.trim() }) })
+      await api(`/projects/${projectId}/plan/change`, { method: 'POST', body: JSON.stringify({ reason: texto.trim(), request_key: envio.chave }) })
+      intencaoDaMudanca.current = null
       setPlan(null)
       await refreshDetalhes()
     })
@@ -466,8 +494,11 @@ export function App() {
   }
   async function requestPlanChange() {
     if (projectId === null || changeReason.trim().length < 3) return
+    const envio = intencaoPorImpressao(intencaoDaMudanca.current, impressaoDoEnvioLocal('mudanca', projectId, changeReason.trim()))
+    intencaoDaMudanca.current = envio
     await safely(async () => {
-      await api(`/projects/${projectId}/plan/change`, { method: 'POST', body: JSON.stringify({ reason: changeReason.trim() }) })
+      await api(`/projects/${projectId}/plan/change`, { method: 'POST', body: JSON.stringify({ reason: changeReason.trim(), request_key: envio.chave }) })
+      intencaoDaMudanca.current = null
       setPlan(null); setChangeReason('')
       await refreshDetalhes()
     })
