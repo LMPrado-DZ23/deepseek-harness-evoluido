@@ -88,7 +88,12 @@
     "skillBodyMismatch": "Uma habilidade entregou um texto diferente do que tinha declarado, então ela não foi usada.",
     "creationKeyFormat": "Não foi possível reconhecer este envio. Recarregue a página e tente de novo.",
     "creationKeyConflict": "Este pedido já foi usado para criar outra tarefa, com um texto diferente. Recarregue a página e envie de novo.",
-    "creationKeyScope": "Este pedido não pertence a você."
+    "creationKeyScope": "Este pedido não pertence a você.",
+    "revisionShort": "Escreva com um pouco mais de detalhe o que você quer mudar.",
+    "revisionLong": "O pedido de mudança ficou longo demais; resuma em uma frase.",
+    "revisionDuplicate": "Esta mudança já foi pedida nesta tarefa.",
+    "revisionFull": "Esta tarefa já acumulou mudanças demais; conclua as atuais antes de pedir outra.",
+    "revisionUnavailable": "Só dá para pedir mudança depois que a tarefa produz um resultado."
   },
   "pipeline": {
     "verified": "Protótipo verificado — não está publicado nem disponível para outras pessoas",

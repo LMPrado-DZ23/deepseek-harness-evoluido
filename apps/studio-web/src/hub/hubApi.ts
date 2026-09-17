@@ -5,6 +5,7 @@
  * becomes a typed error so the panel can say "you are offline" in words.
  */
 import pwa from '../i18n/pwa.pt-BR.json'
+import { tiposDaConsulta } from './presentation'
 import type { Approval, ApprovalAction, CatalogQuery, HubAction, HubOutcome, IntegrationHealth, IntegrationKind, PolicyTier, Verification } from './presentation'
 
 export const HUB_API_PREFIX = '/api/studio/hub'
@@ -180,7 +181,8 @@ export type HubApi = ReturnType<typeof createHubApi>
 export function catalogSearch(query: CatalogQuery): string {
   const params = new URLSearchParams()
   if (query.search !== undefined && query.search.trim() !== '') params.set('q', query.search.trim())
-  if (query.kind !== undefined && query.kind !== 'all') params.set('kind', query.kind)
+  const tipos = tiposDaConsulta(query.escopo, query.kind)
+  if (tipos !== undefined) params.set('kind', tipos.join(','))
   if (query.status !== undefined && query.status !== 'all') params.set('status', query.status)
   if (query.limit !== undefined) params.set('limit', String(query.limit))
   if (query.cursor !== undefined && query.cursor !== '') params.set('cursor', query.cursor)

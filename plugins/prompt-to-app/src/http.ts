@@ -13,6 +13,7 @@ import { TenancyError, type StudioTenancyService } from '@dz23-studio/tenancy'
 import { z } from 'zod'
 import { designSelectionSchema } from './design.js'
 import { t } from './i18n.js'
+import { pedidosDeRevisao } from './revision.js'
 import { intakeAnswerSchema, nextIntakeQuestion, type IntakeConversation, type IntakeEngine } from './intake.js'
 import type { CodeGeneratorPort } from './pipeline.js'
 import type { EmergencyStopGuard, PromptToAppJobService } from './jobs.js'
@@ -45,6 +46,7 @@ const createProjectSchema = z.object({
 }).strict()
 const answerSchema = intakeAnswerSchema.extend({ confirm_sensitive: z.boolean().optional() }).strict()
 const changeRequestSchema = z.object({ reason: z.string().trim().min(3).max(2_000) }).strict()
+const reviseSchema = z.object({ request: z.string().min(1).max(2_000) }).strict()
 const undoSchema = z.object({ run_id: z.string().trim().min(1).max(96) }).strict()
 
 export interface PromptToAppHttpExtensionRequest {
@@ -150,6 +152,7 @@ export const PROMPT_TO_APP_ROUTE_CONTRACTS = [
   { method: 'POST', path: '/projects/:projectId/plan', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'POST', path: '/projects/:projectId/plan/approve', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'POST', path: '/projects/:projectId/plan/change', access: 'authorized', permission: 'project.write', scope: 'project' },
+  { method: 'POST', path: '/projects/:projectId/revise', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'POST', path: '/projects/:projectId/plan/edit', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'POST', path: '/projects/:projectId/plan/slice', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'POST', path: '/projects/:projectId/generate', access: 'authorized', permission: 'project.write', scope: 'project' },
@@ -160,6 +163,58 @@ export const PROMPT_TO_APP_ROUTE_CONTRACTS = [
 ] as const satisfies readonly StudioRouteContract[]
 
 assertRouteContracts(PROMPT_TO_APP_ROUTE_CONTRACTS)
+
+/**
+ * A expressão que reconhece um caminho de projeto, DERIVADA do contrato.
+ *
+ * Ela era escrita à mão, com os sufixos repetidos um a um, e as duas listas
+ * discordaram em silêncio: `POST /projects/:projectId/revise` entrou no
+ * contrato, ganhou tratamento no despachante e respondeu 404 porque o sufixo
+ * não fora copiado para cá. Um teste que conferisse as duas listas ainda
+ * deixaria duas listas; derivar uma da outra deixa UMA.
+ *
+ * Os sufixos vão do mais longo para o mais curto porque a alternância do regex
+ * para no primeiro que casa: com `/plan` antes de `/plan/approve`, aprovar
+ * plano viraria "sufixo /plan com lixo depois" e deixaria de casar.
+ */
+/**
+ * Monta a expressão que reconhece um caminho de projeto, a partir dos sufixos.
+ *
+ * A ORDEM DOS SUFIXOS NÃO IMPORTA, e isto foi MEDIDO, não suposto. A primeira
+ * versão ordenava do mais longo para o mais curto, com um comentário dizendo
+ * que `/plan` antes de `/plan/approve` quebraria aprovar plano. A sabotagem que
+ * removeu a ordenação sobreviveu — e sobreviveu porque a afirmação estava
+ * errada: a alternância do regex RETROCEDE. Casar `/plan` deixa `/approve`
+ * sobrando, a âncora `$` falha, e o motor volta para tentar a alternativa
+ * seguinte até uma delas fechar o caminho inteiro. Como os sufixos são
+ * distintos e a expressão é ancorada nas duas pontas, no máximo uma fecha.
+ *
+ * A ordenação saiu em vez de ganhar um teste, porque não havia comportamento
+ * para testar: ela era código morto com um comentário convincente, que é pior
+ * do que nenhum dos dois.
+ * @param sufixos - os sufixos declarados, em qualquer ordem.
+ * @returns a expressão, com o projeto no grupo 1 e o sufixo no grupo 2.
+ */
+export function expressaoDeRota(sufixos: readonly string[]): RegExp {
+  const alternativa = [...new Set(sufixos)]
+    .filter(sufixo => sufixo !== '')
+    .map(sufixo => sufixo.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'))
+    .join('|')
+  return new RegExp(`^/projects/([^/]+)(${alternativa})?$`, 'u')
+}
+
+/**
+ * A expressão que reconhece um caminho de projeto, DERIVADA do contrato.
+ *
+ * Ela era escrita à mão, com os sufixos repetidos um a um, e as duas listas
+ * discordaram em silêncio: `POST /projects/:projectId/revise` entrou no
+ * contrato, ganhou tratamento no despachante e respondeu 404 porque o sufixo
+ * não fora copiado para cá. Um teste que conferisse as duas listas ainda
+ * deixaria duas listas; derivar uma da outra deixa UMA.
+ */
+const ROTA_DE_PROJETO = expressaoDeRota(PROMPT_TO_APP_ROUTE_CONTRACTS
+  .filter(rota => rota.path.startsWith('/projects/:projectId'))
+  .map(rota => rota.path.slice('/projects/:projectId'.length)))
 
 export interface PromptToAppHttpConfig {
   readonly service: PromptToAppService
@@ -246,8 +301,35 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
         const verificationCodes = project.state === 'VERIFIED_PROTOTYPE' && currentRun?.state === 'PASSED'
           ? await capturedVerificationCodes(currentRun.run_directory)
           : []
+        /*
+          A pergunta AINDA SEM RESPOSTA viaja junto do corpo.
+
+          Ela não é um registro novo: `nextIntakeQuestion` a deriva dos turnos
+          já gravados, e é a mesma função que a rota de resposta usa — duas
+          derivações diferentes discordariam na primeira pergunta nova.
+
+          Sem ela aqui, recarregar a página no meio das perguntas devolvia a
+          tarefa sem a pergunta, e a pessoa ficava numa etapa sem saída. A tela
+          contornava isso desistindo de restaurar tarefas sem plano; com a
+          conversa, a pergunta aberta é só mais um lance, e o contorno saiu.
+
+          NÃO há um `if` de estado aqui, e a ausência foi medida: a primeira
+          versão só perguntava quando o projeto estava em `DRAFT`. A sabotagem
+          que removia essa condição SOBREVIVEU — porque `nextIntakeQuestion` já
+          responde "não há o que perguntar" quando tudo foi respondido. Duas
+          condições para o mesmo fato é a segunda verdade de sempre; ficou uma.
+        */
+        const pendente = nextIntakeQuestion(await conversationFor(config.service, actor, projectId))
+        /*
+          Os PEDIDOS DE MUDANÇA da pessoa, para a conversa poder mostrá-los
+          como mensagens dela. São derivados das especificações já gravadas
+          (ver `pedidosDeRevisao`); nada novo é guardado para isto existir.
+        */
+        const revisoes = pedidosDeRevisao(await config.service.specs(actor, projectId))
         return json(response, 200, {
           project,
+          next: pendente ?? null,
+          revisions: revisoes,
           turns: await config.service.intakeTurns(actor, projectId),
           plan: await optionalAsync(async () => config.service.plan(actor, projectId)),
           design: await optionalAsync(async () => config.service.latestDesign(actor, projectId)),
@@ -283,6 +365,14 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
         const input = undoSchema.parse(await readJson(request))
         const undone = await config.service.undoToCheckpoint(actor, projectId, input.run_id)
         return json(response, 200, { project: undone.project, checkpoint: undone.checkpoint })
+      }
+      if (request.method === 'POST' && matched.suffix === '/revise') {
+        // Continuar a MESMA tarefa depois de um resultado. A recusa por estado
+        // e a por texto vêm do serviço com os mesmos códigos das outras rotas,
+        // e não de uma validação repetida aqui.
+        const input = reviseSchema.parse(await readJson(request))
+        const revised = await config.service.reviseProject(actor, projectId, input.request)
+        return json(response, 200, { project: revised.project, spec_id: revised.spec.spec_id })
       }
       if (request.method === 'POST' && matched.suffix === '/intake/answer') {
         return await answerIntake(request, response, config, actor, projectId)
@@ -469,9 +559,25 @@ async function authenticatedActor(request: IncomingMessage, config: PromptToAppH
   return { ...authorization, sessionId: session.session_id }
 }
 
-function matchRoute(method: string | undefined, path: string): { readonly projectId?: string; readonly suffix: string } | undefined {
+/**
+ * Que rota este pedido é, ou nenhuma.
+ *
+ * EXPORTADA, e o motivo é um defeito encontrado: a rota de revisão foi
+ * declarada no contrato, ganhou tratamento no despachante e respondia 404,
+ * porque o sufixo dela não estava nesta expressão. Duas listas descrevendo o
+ * mesmo conjunto discordaram em silêncio — o defeito mais caro deste
+ * repositório, na sua forma mais simples.
+ *
+ * Com ela visível, o teste consegue perguntar ao contrato e ao casador a MESMA
+ * pergunta e comparar as respostas, em vez de exercitar uma rota por vez e
+ * torcer para ninguém esquecer a próxima.
+ * @param method - o método do pedido.
+ * @param path - o caminho, já sem o prefixo da API.
+ * @returns o projeto e o sufixo, ou `undefined` quando não é rota daqui.
+ */
+export function matchRoute(method: string | undefined, path: string): { readonly projectId?: string; readonly suffix: string } | undefined {
   if ((method === 'GET' && (path === '/health' || path === '/projects')) || (method === 'POST' && path === '/projects')) return { suffix: path }
-  const match = /^\/projects\/([^/]+)(\/intake\/answer|\/design\/logo|\/design|\/plan\/approve|\/plan\/change|\/plan\/edit|\/plan|\/generate\/cancel|\/generate|\/checkpoints|\/undo|\/report)?$/u.exec(path)
+  const match = ROTA_DE_PROJETO.exec(path)
   if (match === null) return undefined
   const suffix = match[2] ?? ''
   // `/report` e `/checkpoints` só LEEM, e são as únicas leituras com sufixo. A

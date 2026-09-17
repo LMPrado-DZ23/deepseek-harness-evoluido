@@ -1,0 +1,127 @@
+/*
+  As telas de destino — Biblioteca e Agendado.
+
+  Habilidades e Plugins usam a folha do Hub, porque usam o componente do Hub.
+  Estas duas são próprias, e seguem a mesma densidade do resto: coluna legível,
+  cartões com borda fina, nada de painel grande colorido.
+*/
+
+.dz-destino {
+  max-width: var(--dz-content-max);
+  margin-inline: auto;
+  padding: var(--dz-6) var(--dz-5) var(--dz-8);
+}
+
+.dz-destino-topo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dz-3);
+  margin-bottom: var(--dz-6);
+}
+
+.dz-destino-topo h1 { margin: 0 0 var(--dz-2); font-size: 1.75rem; }
+.dz-destino-topo p { margin: 0; color: var(--dz-text-secondary); }
+
+.dz-destino-voltar {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dz-2);
+  color: var(--dz-text-secondary);
+  text-decoration: none;
+  align-self: flex-start;
+}
+
+.dz-destino-voltar:hover { color: var(--dz-text); }
+.dz-destino-voltar svg { width: 18px; height: 18px; }
+
+.dz-destino-filtro {
+  display: inline-flex;
+  flex-direction: column;
+  gap: var(--dz-2);
+  margin-bottom: var(--dz-5);
+  color: var(--dz-text-secondary);
+  font-size: 0.875rem;
+}
+
+.dz-destino-filtro select {
+  background: var(--dz-surface);
+  color: var(--dz-text);
+  border: 1px solid var(--dz-border);
+  border-radius: var(--dz-radius);
+  padding: var(--dz-2) var(--dz-3);
+  font: inherit;
+}
+
+.dz-destino-vazio { color: var(--dz-text-secondary); }
+
+.dz-acervo {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--dz-4);
+}
+
+.dz-acervo-item {
+  border: 1px solid var(--dz-border);
+  border-radius: var(--dz-radius);
+  background: var(--dz-surface);
+  padding: var(--dz-4);
+}
+
+.dz-acervo-tarefa { margin: var(--dz-1) 0 var(--dz-3); color: var(--dz-text-secondary); font-size: 0.875rem; }
+
+.dz-acervo-fatos {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--dz-3);
+  margin: 0 0 var(--dz-3);
+}
+
+.dz-acervo-fatos div { min-width: 0; }
+.dz-acervo-fatos dt { color: var(--dz-text-secondary); font-size: 0.8125rem; }
+.dz-acervo-fatos dd { margin: var(--dz-1) 0 0; }
+
+/* O resumo é longo e é código: monoespaçada, e quebrando em vez de estourar. */
+.dz-acervo-fatos code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+.dz-acervo-baixar {
+  display: inline-block;
+  border: 1px solid var(--dz-border);
+  border-radius: var(--dz-radius-pill);
+  padding: var(--dz-2) var(--dz-4);
+  color: var(--dz-text);
+  text-decoration: none;
+  background: var(--dz-surface-active);
+}
+
+.dz-acervo-baixar:hover { background: var(--dz-border); }
+
+/*
+  A tela de pendência. Sem cor de alarme e sem cor de sucesso: o que ela diz
+  não é um erro nem uma conquista, é uma ausência.
+*/
+.dz-destino-pendente {
+  border: 1px solid var(--dz-border);
+  border-radius: var(--dz-radius);
+  background: var(--dz-surface);
+  padding: var(--dz-5);
+}
+
+.dz-destino-estado {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--dz-3);
+  margin: 0 0 var(--dz-5);
+  line-height: 1.6;
+}
+
+.dz-destino-estado svg { width: 20px; height: 20px; flex: none; margin-top: 2px; color: var(--dz-warning); }
+
+.dz-destino-pendente h2 { margin: 0 0 var(--dz-3); font-size: 1rem; }
+.dz-destino-pendente ul { margin: 0 0 var(--dz-5); padding-left: var(--dz-5); color: var(--dz-text-secondary); }
+.dz-destino-pendente li + li { margin-top: var(--dz-2); }

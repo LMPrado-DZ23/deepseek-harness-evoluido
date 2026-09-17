@@ -1,6 +1,7 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 import { INTAKE_ANSWERS, answerIntake } from './answering'
+import { abrirDetalhamento, esperarResultado, fecharDetalhamento } from './resultado'
 
 // O Studio instala um service worker, e requisição que passa por ele NÃO é
 // interceptada por `page.route`: foi assim que a primeira versão deste teste
@@ -63,16 +64,21 @@ test('depois de recarregar, o resultado da criação continua na tela', async ({
   await page.getByRole('button', { name: 'Montar meu plano' }).click()
   await page.getByRole('button', { name: 'Aprovar este plano' }).click()
   await page.getByRole('button', { name: 'Iniciar criação' }).click()
-  await expect(page.getByText('As verificações declaradas passaram neste computador.')).toBeVisible({ timeout: 40_000 })
+  await esperarResultado(page)
   expect(new URL(page.url()).searchParams.get('projeto')).not.toBeNull()
 
   await page.reload()
 
-  await expect(page.getByText('As verificações declaradas passaram neste computador.')).toBeVisible({ timeout: 20_000 })
+  // Depois de recarregar, a CONVERSA INTEIRA volta — e não só o resultado: o
+  // pedido, as respostas e o plano continuam lá, porque a tela lê o corpo
+  // inteiro da tarefa em vez de três campos dele.
+  await esperarResultado(page, 20_000)
+  await expect(page.getByText(INTAKE_ANSWERS[0]!).first()).toBeVisible()
   await expect(page.getByRole('button', { name: 'Ver meu protótipo' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'O que aconteceu na criação' })).toBeVisible({ timeout: 20_000 })
+  await abrirDetalhamento(page)
   await expect(page.getByRole('heading', { name: 'Pontos para onde você pode voltar' })).toBeVisible()
   await expect(page.getByText('A página Início existe: Passou')).toBeVisible()
+  await fecharDetalhamento(page)
 })
 
 /**

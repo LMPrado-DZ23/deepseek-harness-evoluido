@@ -20,7 +20,11 @@ test('a lista mostra o projeto criado e leva de volta para ele', async ({ contex
   await page.goto('/studio/')
   await page.getByRole('button', { name: 'Página de apresentação' }).click()
   await page.getByRole('button', { name: 'Continuar' }).click()
-  await page.getByLabel('Sua resposta').waitFor()
+  // MAPA DE EQUIVALÊNCIA: o campo "Sua resposta" do cartão de perguntas virou
+  // o compositor da conversa. O que este teste precisa daqui é só que a tarefa
+  // tenha sido CRIADA antes de ir para a lista de projetos, e a conversa
+  // aberta é a prova disso.
+  await page.getByLabel('Conversa desta tarefa').waitFor()
 
   await page.goto('/studio/projetos')
   await expect(page.getByRole('heading', { name: 'Meus projetos', level: 1 })).toBeVisible()

@@ -36,7 +36,29 @@ test('a navegação existe e leva à conversa, em qualquer tamanho de tela', asy
   const conversation = page.getByRole('link', { name: 'Conversar com o DZ23' })
   await expect(conversation).toBeVisible()
   await expect(conversation).toHaveAttribute('href', '/studio/assistente')
-  await expect(page.getByRole('link', { name: 'Habilidades e integrações' })).toBeVisible()
+  /*
+    MAPA DE EQUIVALÊNCIA (decisão `DZ23-VISUAL-VIDEO-20260916-R1`).
+
+    | afirmação anterior                        | afirmação agora                 |
+    | ----------------------------------------- | ------------------------------- |
+    | um link "Habilidades e integrações"       | SEIS links, um por destino      |
+
+    A garantia não foi reduzida: antes um destino era conferido, agora são
+    seis, com o endereço de cada um — e continua valendo, logo abaixo, que
+    nenhum deles é item morto.
+  */
+  for (const [nome, href] of [
+    ['Nova tarefa', '/studio/'],
+    ['Conversar com o DZ23', '/studio/assistente'],
+    ['Habilidades', '/studio/habilidades'],
+    ['Plugins', '/studio/plugins'],
+    ['Agendado', '/studio/agendado'],
+    ['Biblioteca', '/studio/biblioteca'],
+  ] as const) {
+    const destino = page.getByRole('link', { name: nome, exact: true })
+    await expect(destino).toBeVisible()
+    await expect(destino).toHaveAttribute('href', href)
+  }
 
   // A afirmação AQUI virou de lado, e a inversão é a correção.
   //

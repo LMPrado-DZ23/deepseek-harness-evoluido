@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import t from '../i18n/hub.pt-BR.json'
-import { actionLabel, canInstallSkillBody, skillBodyMessages, skillBodyState, approvalNote, approvalPrompt, confirmStep, enableExplanation, exportable, fill, formatBytes, isHubPath, kindLabel, outcomeLabel, tierLabel, verificationLabel, type PolicyTier } from './presentation'
+import { actionLabel, canInstallSkillBody, skillBodyMessages, skillBodyState, approvalNote, approvalPrompt, confirmStep, enableExplanation, exportable, fill, formatBytes, isHubPath, kindLabel, outcomeLabel, tierLabel, verificationLabel, type PolicyTier, tiposDaConsulta } from './presentation'
 
 describe('hub presentation', () => {
   it('opens the hub only at /studio/hub (with or without slash)', () => {
@@ -180,5 +180,31 @@ describe('skillBodyState — o texto de uma habilidade, decidido FORA da tela (T
     // Um Studio mais antigo nao publica `skill_body_installed`. Ausente nao e
     // `false`: e "nao sei", e as duas frases mandam fazer coisas diferentes.
     expect(skillBodyState(skill, '')).toMatchObject({ installed: false })
+  })
+})
+
+describe('o escopo da tela limita o catálogo, e o filtro só estreita', () => {
+  it('sem escopo e sem filtro, não há limite nenhum', () => {
+    expect(tiposDaConsulta(undefined, 'all')).toBeUndefined()
+    expect(tiposDaConsulta(undefined, undefined)).toBeUndefined()
+  })
+
+  it('sem escopo, o filtro escolhido é o limite', () => {
+    expect(tiposDaConsulta(undefined, 'mcp')).toEqual(['mcp'])
+  })
+
+  it('com escopo e filtro em "todos", o limite é o escopo', () => {
+    // "Todos" dentro de Habilidades significa todas as HABILIDADES. Deixá-lo
+    // significar "todo o catálogo" funde os dois destinos, que é o que a
+    // decisão de produto recusa em palavras.
+    expect(tiposDaConsulta(['skill'], 'all')).toEqual(['skill'])
+  })
+
+  it('o filtro ESTREITA o escopo quando cabe nele', () => {
+    expect(tiposDaConsulta(['mcp', 'webhook', 'smtp'], 'webhook')).toEqual(['webhook'])
+  })
+
+  it('o filtro NÃO amplia o escopo: pedir conector dentro de Habilidades não traz conector', () => {
+    expect(tiposDaConsulta(['skill'], 'mcp')).toEqual(['skill'])
   })
 })

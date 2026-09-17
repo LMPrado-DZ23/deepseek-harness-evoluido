@@ -21,7 +21,19 @@ export default defineConfig({
   // recuo e cujo aviso de consumo parcial precisam continuar legíveis e
   // acessíveis num telefone.
   projects: [
-    { name: 'mesa', use: { ...devices['Desktop Chrome'] } },
+    { name: 'mesa', testIgnore: /capturas\.spec\.ts$/u, use: { ...devices['Desktop Chrome'] } },
+    /*
+      A GRAVAÇÃO da navegação, exigida pela decisão visual: "grave uma
+      navegação: home → pedido → conversa → continuar pedido → abrir/fechar
+      artefato ou preview → habilidades → plugins → biblioteca → preferências".
+
+      Ela é um projeto separado, e não uma opção do `mesa`, porque gravar vídeo
+      de 120 testes gastaria minutos e disco por nada. Aqui roda UM teste, o que
+      percorre a jornada inteira, e o vídeo sai do mesmo build e do mesmo
+      servidor de teste que a suíte usa — que é o que impede reaproveitar
+      gravação antiga como prova de versão nova.
+    */
+    { name: 'gravacao', testMatch: /capturas\.spec\.ts$/u, use: { ...devices['Desktop Chrome'], video: { mode: 'on', size: { width: 1280, height: 800 } } } },
     { name: 'tablet', testMatch: /(mobile-nav|team-panel|accessibility|mission)\.spec\.ts$/u, use: { ...devices['Desktop Chrome'], viewport: { width: 800, height: 1180 }, hasTouch: true } },
     { name: 'celular', testMatch: /(mobile-nav|team-panel|accessibility|mission)\.spec\.ts$/u, use: { ...devices['Pixel 5'] } },
     // 900px: a FAIXA CEGA. O layout vira coluna abaixo de 820px e o grid de duas

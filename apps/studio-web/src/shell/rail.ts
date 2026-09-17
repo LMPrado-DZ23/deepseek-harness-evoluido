@@ -1,30 +1,27 @@
 /**
- * A barra lateral do workspace aprovado — e por que ela não copia a imagem.
+ * A barra lateral do workspace aprovado — agora com os SEIS destinos.
  *
- * A referência (`referencias/ref-home.png`) mostra oito linhas: Nova tarefa,
- * Agente, Habilidades, Plugins, Agendado, Biblioteca, Projetos e Tarefas. A
- * especificação que veio com ela, porém, tem uma seção inteira — "Elementos
- * ilustrativos que NÃO viram constantes" — cuja regra é: **sem cliques sem
- * resultado**. E a decisão do Prado repete: "a navegação leva a funcionalidades
- * reais".
+ * A versão anterior deste arquivo tinha três linhas e uma justificativa escrita
+ * para as ausências: Agendado e Biblioteca não entravam porque "não existe
+ * acervo" e "o produto não tem agendamento", e Habilidades e Plugins eram uma
+ * linha só porque abriam a mesma tela. A decisão de produto
+ * `DZ23-VISUAL-VIDEO-20260916-R1` respondeu às duas coisas:
  *
- * Então a ESTRUTURA é a da imagem — um trilho com ações no topo, uma seção de
- * projetos, uma seção de tarefas, conta no rodapé — e cada linha aponta para
- * uma tela que existe neste produto. Duas linhas da imagem não têm destino
- * real aqui e por isso NÃO estão nesta lista:
+ * - "Ausência de função significa implementar e manter a pendência; não remover
+ *   o requisito para chamar o visual de completo." Então Agendado tem destino
+ *   real e a tela dele diz o que falta, sem botão mudo e sem lista encenada.
+ * - "Biblioteca não é um apelido para Projetos." Ela lista os PACOTES que as
+ *   tarefas produziram — o acervo existia, sem porta própria.
+ * - "Habilidades e Plugins podem compartilhar componentes e serviços, mas
+ *   precisam de vistas próprias úteis." Compartilham o Hub; mostram recortes
+ *   que não se encontram.
  *
- * - **Agendado**: o produto não tem agendamento de tarefa. Desenhar a linha e
- *   deixá-la muda é a etiqueta "em breve" que já foi removida uma vez deste
- *   arquivo, pelo motivo certo: um produto que anuncia o que não faz está
- *   dizendo que não está pronto.
- * - **Biblioteca**: não existe acervo. "Meus projetos" é o que a pessoa
- *   procura quando quer voltar a algo, e duplicá-lo com outro nome dá duas
- *   portas para a mesma sala.
- *
- * Quando as duas existirem, entram aqui — com destino, como todas as outras.
+ * O princípio antigo continua valendo e não foi enfraquecido: cada linha leva a
+ * uma tela que existe. O que mudou é que a resposta a "não existe" deixou de
+ * ser apagar a linha e passou a ser construir o destino e declarar o que falta.
  */
 import { ASSISTANT_PATH } from '../assistant/AssistantEntry'
-import { HUB_PATH } from '../hub/presentation'
+import { AGENDADO_PATH, BIBLIOTECA_PATH, HABILIDADES_PATH, PLUGINS_PATH } from '../destinos/destinos'
 import { HELP_PATH } from '../help/HelpScreen'
 import { MISSION_PATH } from '../mission/missionApi'
 import { PROJECTS_PATH } from '../projects/ProjectsScreen'
@@ -43,7 +40,7 @@ export const RAIL_ID = 'dz-rail'
 /** Os ícones vêm do conjunto que o produto já usa; o nome é o do `lucide-react`. */
 export type RailIcone =
   | 'SquarePen' | 'Bot' | 'Zap' | 'Blocks' | 'FolderOpen'
-  | 'ListChecks' | 'Target' | 'CircleHelp'
+  | 'ListChecks' | 'Target' | 'CircleHelp' | 'Clock' | 'Library'
 
 export interface RailItem {
   readonly id: string
@@ -72,10 +69,13 @@ export function railSecoes(): readonly RailSecao[] {
         // "Nova tarefa" é a home: é onde se descreve o que se quer criar.
         { id: 'nova', label: rail.novaTarefa, href: STUDIO_HOME_PATH, icone: 'SquarePen' },
         { id: 'agente', label: rail.agente, href: ASSISTANT_PATH, icone: 'Bot' },
-        // "Habilidades" e "Plugins" são a MESMA tela neste produto — o Hub
-        // guarda as duas coisas. Uma linha só, com o nome que descreve as duas,
-        // em vez de duas linhas que abrem a mesma página.
-        { id: 'integracoes', label: rail.integracoes, href: HUB_PATH, icone: 'Blocks' },
+        { id: 'habilidades', label: rail.habilidades, href: HABILIDADES_PATH, icone: 'Zap' },
+        { id: 'plugins', label: rail.plugins, href: PLUGINS_PATH, icone: 'Blocks' },
+        // Agendado leva a uma tela que diz que a função não existe ainda. Isso
+        // não conta como capacidade entregue — `DISPONIBILIDADE` marca a
+        // pendência onde um teste alcança.
+        { id: 'agendado', label: rail.agendado, href: AGENDADO_PATH, icone: 'Clock' },
+        { id: 'biblioteca', label: rail.biblioteca, href: BIBLIOTECA_PATH, icone: 'Library' },
       ],
     },
     {

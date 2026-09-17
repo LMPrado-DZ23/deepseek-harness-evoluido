@@ -5,7 +5,8 @@ import { describe, expect, it } from 'vitest'
 import { Rail } from './Rail'
 import { RAIL_ID, railAtivo, railItens } from './rail'
 import { ASSISTANT_PATH } from '../assistant/AssistantEntry'
-import { HUB_PATH } from '../hub/presentation'
+import { AGENDADO_PATH, BIBLIOTECA_PATH, DISPONIBILIDADE, HABILIDADES_PATH, PLUGINS_PATH } from '../destinos/destinos'
+import rail from '../i18n/rail.pt-BR.json'
 
 /*
   ESTE ARQUIVO SUBSTITUI `Navigation.spec.tsx`, que cobria a barra lateral
@@ -27,6 +28,25 @@ import { HUB_PATH } from '../hub/presentation'
   Nada foi afrouxado no caminho: o que mudou foram os seletores e o corte do
   celular (820px → 1024px), porque o trilho novo é mais largo e a decisão manda
   cortar pelo conteúdo.
+
+  SEGUNDA ATUALIZAÇÃO, pela decisão `DZ23-VISUAL-VIDEO-20260916-R1`. Três testes
+  aqui afirmavam a decisão ANTERIOR sobre as ausências — que Agendado e
+  Biblioteca ficassem fora do trilho, e que Habilidades e Plugins fossem uma
+  linha só. A decisão nova inverte a regra: "Ausência de função significa
+  implementar e manter a pendência; não remover o requisito". O mapa de
+  equivalência:
+
+  | o que era afirmado antes                  | o que é afirmado agora                      |
+  | ----------------------------------------- | ------------------------------------------- |
+  | `integracoes` aponta para o Hub           | `habilidades` e `plugins`, destinos próprios|
+  | "Agendado" NÃO aparece no trilho          | aparece, com destino real e pendência declarada |
+  | "Biblioteca" NÃO aparece no trilho        | aparece, com destino próprio ≠ Projetos     |
+  | nenhum item morto                         | idem, e agora sobre SEIS itens              |
+
+  A garantia que importava — nenhum clique sem resultado — não foi reduzida: ela
+  continua sendo conferida item por item, sobre o dobro de itens, e ganhou uma
+  conferência que antes não existia (a pendência de Agendado precisa estar
+  DECLARADA, e não escondida atrás de um rótulo na tela).
 */
 const render = (props: Partial<Parameters<typeof Rail>[0]> = {}) =>
   renderToStaticMarkup(createElement(Rail, { ativo: 'nova', aberto: false, aoFechar: () => {}, ...props }))
@@ -36,24 +56,41 @@ describe('o trilho do workspace', () => {
     const hrefs = new Map(railItens().map(item => [item.id, item.href]))
     expect(hrefs.get('nova')).toBe('/studio/')
     expect(hrefs.get('agente')).toBe(ASSISTANT_PATH)
-    expect(hrefs.get('integracoes')).toBe(HUB_PATH)
+    expect(hrefs.get('habilidades')).toBe(HABILIDADES_PATH)
+    expect(hrefs.get('plugins')).toBe(PLUGINS_PATH)
+    expect(hrefs.get('agendado')).toBe(AGENDADO_PATH)
+    expect(hrefs.get('biblioteca')).toBe(BIBLIOTECA_PATH)
     // A conversa (e portanto as confirmações) tem link: no celular o trilho
     // vira gaveta, e um destino que só existisse lá dentro dependeria de
     // alguém digitar o endereço.
     expect(render()).toContain(`href="${ASSISTANT_PATH}"`)
   })
 
+  it('os SEIS destinos da referência estão no trilho, e cada um é distinto', () => {
+    // A referência desenha Nova tarefa, Agente, Habilidades, Plugins, Agendado
+    // e Biblioteca. Dois deles eram omitidos porque a capacidade não existia;
+    // agora todos têm endereço, e nenhum endereço se repete.
+    const hrefs = railItens().map(item => item.href)
+    expect(new Set(hrefs).size).toBe(hrefs.length)
+    const html = render()
+    for (const rotulo of [rail.novaTarefa, rail.agente, rail.habilidades, rail.plugins, rail.agendado, rail.biblioteca]) {
+      expect(html).toContain(rotulo)
+    }
+  })
+
+  it('a pendência de Agendado é DECLARADA, e não um rótulo na tela', () => {
+    // "Em breve" no trilho é o que já foi removido daqui uma vez, e continua
+    // proibido. O lugar da pendência é o registro que um teste alcança — a
+    // tela do destino diz o que falta, com todas as letras, quando alguém abre.
+    expect(DISPONIBILIDADE.agendado).toBe('pendente')
+    expect(render()).not.toContain('em breve')
+  })
+
   it('não tem item morto: nenhum "em breve", nenhum botão desabilitado', () => {
-    // A referência desenha "Agendado" e "Biblioteca". Nenhuma das duas tem tela
-    // neste produto, e por isso elas NÃO estão no trilho: copiar a imagem
-    // traria de volta exatamente a etiqueta "em breve" que já foi removida
-    // daqui uma vez, com o motivo certo.
     const html = render()
     expect(railItens().every(item => item.href.startsWith('/'))).toBe(true)
     expect(html).not.toContain('disabled')
     expect(html).not.toContain('em breve')
-    expect(html).not.toContain('Agendado')
-    expect(html).not.toContain('Biblioteca')
     // Cada item é um <a> com destino — e não um <button>, que não abre em outra
     // aba e não anuncia navegação para quem usa leitor de tela.
     expect(html.match(/<a href="\//gu) ?? []).toHaveLength(railItens().length)
@@ -80,7 +117,10 @@ describe('o trilho do workspace', () => {
     expect(railAtivo('/studio/')).toBe('nova')
     expect(railAtivo('/studio')).toBe('nova')
     expect(railAtivo(ASSISTANT_PATH)).toBe('agente')
-    expect(railAtivo(HUB_PATH)).toBe('integracoes')
+    expect(railAtivo(HABILIDADES_PATH)).toBe('habilidades')
+    expect(railAtivo(PLUGINS_PATH)).toBe('plugins')
+    expect(railAtivo(AGENDADO_PATH)).toBe('agendado')
+    expect(railAtivo(BIBLIOTECA_PATH)).toBe('biblioteca')
     expect(railAtivo('/algo/que/nao/e/do/studio')).toBe(null)
   })
 })

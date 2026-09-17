@@ -1,0 +1,345 @@
+import { ArrowUp, CircleCheck, CircleSlash, FileText, Loader, TriangleAlert, X } from 'lucide-react'
+import { BuildSteps } from '../BuildSteps'
+import { hasBuildSteps } from '../buildSteps'
+import { attemptSentence, stageSentence } from '../creationProgress'
+import { useEffect, useRef, useState } from 'react'
+import tarefa from '../i18n/tarefa.pt-BR.json'
+import { destinoDoEnvio, envioDisponivel, type Destino } from './compositor'
+import { transcricaoDaTarefa, type DetalhesDaTarefa, type Lance } from './transcricao'
+
+/**
+ * A tarefa como CONVERSA, que é a estrutura principal do workspace aprovado.
+ *
+ * A tela que esta substitui punha um relatório no meio e um trilho de cinco
+ * caixas na direita, e o proprietário a recusou por isso — não pela cor. O que
+ * muda aqui não é o tema: é onde as coisas moram. O histórico da tarefa ocupa a
+ * coluna central, o compositor fica embaixo e alinhado com ela, e tudo o que
+ * antes era painel permanente virou detalhe recolhível ou painel sob demanda.
+ *
+ * O pipeline de cinco fases continua INTEIRO por baixo. Perguntas de admissão,
+ * plano, tentativas e critérios são os mesmos registros, com os mesmos estados
+ * e as mesmas autorizações; o que mudou foi que eles são lidos por
+ * `transcricaoDaTarefa` e apresentados em ordem, em vez de desenhados como
+ * cinco etapas fixas. O detalhamento antigo não sumiu: ele abre no painel
+ * lateral, que é o que a decisão chama de "visualização diagnóstica secundária".
+ *
+ * Esta é a casca da conversa. Ela NÃO chama o servidor: as ações chegam por
+ * propriedade, do `App`, que continua sendo quem fala com a API e quem guarda o
+ * estado da tarefa. Manter a chamada fora daqui é o que permite montar a
+ * conversa inteira no teste sem servidor nenhum.
+ */
+
+export interface TaskScreenProps {
+  readonly detalhes: DetalhesDaTarefa
+  /** O que a pessoa está escrevendo. Mora no `App` para sobreviver a abrir e fechar painel. */
+  readonly rascunho: string
+  setRascunho(valor: string): void
+  /** Responde à pergunta de admissão aberta. */
+  responder(texto: string): Promise<void>
+  /** Pede mudança no plano — mesma tarefa, revisão nova. */
+  mudarPlano(texto: string): Promise<void>
+  /** Pede um ajuste depois de um resultado. Continua na MESMA tarefa. */
+  ajustar(texto: string): Promise<void>
+  /** O painel contextual aberto, ou `null` quando a conversa está sozinha. */
+  readonly painel: PainelAberto | null
+  abrirPainel(painel: PainelAberto): void
+  fecharPainel(): void
+  /** O conteúdo do painel, montado pelo `App` (resultado, prévia, diagnóstico). */
+  readonly conteudoDoPainel?: React.ReactNode
+  /** As ações que só existem em certos estados: aprovar plano, criar, cancelar. */
+  readonly acoesDoEstado?: React.ReactNode
+}
+
+export type PainelAberto =
+  | { readonly tipo: 'artefato'; readonly runId: string }
+  | { readonly tipo: 'preview' }
+  | { readonly tipo: 'diagnostico' }
+
+/**
+ * A pergunta de admissão ainda sem resposta, se houver.
+ * @param detalhes - o corpo da tarefa.
+ * @returns o nome da pergunta aberta, ou `null`.
+ */
+export function perguntaAbertaDe(detalhes: DetalhesDaTarefa): string | null {
+  return detalhes.next?.id ?? null
+}
+
+export function TaskScreen(props: TaskScreenProps) {
+  const lances = transcricaoDaTarefa(props.detalhes)
+  const destino = destinoDoEnvio({
+    estado: props.detalhes.project.state,
+    perguntaAberta: perguntaAbertaDe(props.detalhes),
+  })
+  const [enviando, setEnviando] = useState(false)
+  const fim = useRef<HTMLLIElement | null>(null)
+  const podeEnviar = envioDisponivel(destino, props.rascunho) && !enviando
+
+  /*
+    A conversa desce sozinha quando um lance novo chega — e SÓ então. Descer a
+    cada render roubaria a rolagem de quem subiu para reler o plano enquanto a
+    tentativa corre, que é justamente quando alguém sobe.
+  */
+  useEffect(() => { fim.current?.scrollIntoView({ block: 'end' }) }, [lances.length])
+
+  async function enviar(evento: React.FormEvent) {
+    evento.preventDefault()
+    if (!podeEnviar) return
+    const texto = props.rascunho
+    setEnviando(true)
+    try {
+      await despachar(destino, texto, props)
+      // O rascunho só é limpo DEPOIS que o envio deu certo: limpar antes
+      // apagaria o texto de quem perdeu a rede, e reescrever é o que ninguém
+      // faz — a pessoa desiste.
+      props.setRascunho('')
+    } finally { setEnviando(false) }
+  }
+
+  const aviso = destino.tipo === 'aguardar'
+    ? destino.motivo === 'execucao' ? tarefa.aguardandoTrabalho : tarefa.aguardandoAprovacao
+    : null
+
+  return <div className={props.painel === null ? 'dz-tarefa' : 'dz-tarefa dz-tarefa-com-painel'}>
+    {/*
+      `<main>` e não `<div>`: a página precisa de UM marco principal, e o axe
+      reprovou as duas coisas que faltavam — `landmark-one-main`, porque a
+      conversa não era marco nenhum, e `region`, porque o conteúdo dela ficava
+      fora de qualquer região. A tela antiga tinha `<main className="canvas">`
+      e a garantia veio junto com ela; recriá-la aqui é devolver o que a troca
+      de estrutura levou.
+    */}
+    <main className="dz-tarefa-conversa">
+      {/*
+        O `<h1>` é o NOME DA TAREFA, e ele existe por `page-has-heading-one`:
+        uma página sem título de primeiro nível deixa quem navega por títulos
+        sem ponto de partida.
+
+        Ele é `sr-only` porque o nome da tarefa JÁ está visível, no cabeçalho
+        da casca. Desenhá-lo outra vez aqui punha a mesma frase duas vezes,
+        uma embaixo da outra — e a referência não tem título sobre a conversa.
+        Escondê-lo com `display: none` o tiraria também do leitor de tela, que
+        é justamente quem precisa dele; `sr-only` o mantém no documento.
+      */}
+      <h1 className="sr-only">{props.detalhes.project.name.trim() === '' ? tarefa.semTitulo : props.detalhes.project.name}</h1>
+      {/*
+        `tabIndex={0}` porque a conversa ROLA. Uma região que rola e não recebe
+        foco é inalcançável por teclado: quem não usa mouse não consegue subir
+        para reler o plano. O axe apanhou isto (`scrollable-region-focusable`)
+        no primeiro fluxo completo — a lista antiga não rolava sozinha, então a
+        regra nunca tinha valido aqui.
+      */}
+      <ol className="dz-conversa" tabIndex={0} aria-label={tarefa.conversaRotulo}>
+        {lances.map(lance => <li key={lance.id} className={`dz-lance dz-lance-${lance.autor}`}>
+          <LanceView lance={lance} abrir={props.abrirPainel} />
+        </li>)}
+        {/*
+          A marca do fim mora DENTRO da lista que rola, e isso não é detalhe:
+          `scrollIntoView` rola o ancestral que tem rolagem. Com a marca fora
+          do `<ol>`, quem rolava era a página — e a conversa ficava parada no
+          primeiro lance enquanto novos chegavam embaixo, sem ninguém ver.
+        */}
+        <li ref={fim} className="dz-fim" aria-hidden="true" />
+      </ol>
+      {props.acoesDoEstado === undefined ? null : <div className="dz-tarefa-acoes">{props.acoesDoEstado}</div>}
+
+      {/*
+        O compositor fica ABAIXO da conversa e reserva espaço real, em vez de
+        flutuar sobre ela: na referência o último conteúdo continua legível com
+        o compositor na tela, e uma caixa sobreposta esconde exatamente a última
+        mensagem, que é a que interessa.
+      */}
+      <form className="dz-compositor dz-compositor-inferior" onSubmit={event => void enviar(event)}>
+        {aviso === null ? null : <p className="dz-compositor-aviso" role="status">{aviso}</p>}
+        <label className="sr-only" htmlFor="dz-continuar">{tarefa.compositorRotulo}</label>
+        <textarea id="dz-continuar" rows={2} value={props.rascunho} maxLength={2000}
+          placeholder={tarefa.compositorPlaceholder}
+          onChange={evento => props.setRascunho(evento.target.value)} />
+        <div className="dz-compositor-rodape">
+          <span className="dz-contador" aria-live="polite">{props.rascunho.length}</span>
+          <button type="submit" className="dz-enviar" disabled={!podeEnviar} aria-busy={enviando}>
+            <span>{enviando ? tarefa.enviando : tarefa.enviar}</span>
+            <ArrowUp aria-hidden="true" />
+          </button>
+        </div>
+      </form>
+    </main>
+
+    {props.painel === null ? null : <aside className="dz-painel" aria-label={tarefa.painelRotulo}>
+      <header className="dz-painel-topo">
+        <h2>{tituloDoPainel(props.painel)}</h2>
+        <button type="button" className="dz-painel-fechar" onClick={props.fecharPainel}
+          aria-label={tarefa.painelFechar}><X aria-hidden="true" /></button>
+      </header>
+      <div className="dz-painel-corpo">{props.conteudoDoPainel}</div>
+    </aside>}
+  </div>
+}
+
+/**
+ * Manda o texto para onde o destino disse, e para lugar nenhum além.
+ *
+ * O `switch` é exaustivo de propósito: um destino novo sem tratamento aqui
+ * vira erro de tipo, e não um envio silencioso que não faz nada.
+ * @param destino - o destino calculado pelo compositor.
+ * @param texto - o que a pessoa escreveu.
+ * @param props - as ações da tela.
+ */
+async function despachar(destino: Destino, texto: string, props: TaskScreenProps): Promise<void> {
+  if (destino.tipo === 'responder') return props.responder(texto)
+  if (destino.tipo === 'mudar-plano') return props.mudarPlano(texto)
+  if (destino.tipo === 'ajustar') return props.ajustar(texto)
+  // `aguardar` e `abrir-tarefa` não chegam aqui: o primeiro é barrado por
+  // `envioDisponivel` e o segundo só existe quando não há tarefa — e sem tarefa
+  // esta tela não é montada.
+}
+
+/**
+ * Junta nomes de classe, ignorando os ausentes.
+ *
+ * Existe por causa do portão de idioma, e o motivo dele é bom: um literal com
+ * espaço e palavra em português é, quase sempre, texto que deveria estar no
+ * catálogo. Um nome de classe não é — e escrevê-lo em pedaços deixa o portão
+ * olhar só o que ele precisa olhar, sem uma dispensa aberta no portão.
+ * @param nomes - os nomes, com `null` para os que não se aplicam.
+ * @returns a lista de classes.
+ */
+/**
+ * A etapa em curso, na forma que as frases da criação esperam.
+ * @param etapa - a etapa gravada na tentativa.
+ * @param tentativa - o número da tentativa.
+ * @returns o par que `stageSentence` e `attemptSentence` leem.
+ */
+function etapaCorrente(etapa: string, tentativa: number): { readonly stage: string; readonly attempt: number } {
+  return { stage: etapa, attempt: tentativa }
+}
+
+function classes(...nomes: readonly (string | null)[]): string {
+  return nomes.filter(nome => nome !== null).join(' ')
+}
+
+function tituloDoPainel(painel: PainelAberto): string {
+  if (painel.tipo === 'preview') return tarefa.painelPreview
+  if (painel.tipo === 'diagnostico') return tarefa.painelDiagnostico
+  return tarefa.painelResultado
+}
+
+/** Os rótulos de estado, do catálogo, sem inventar um para o que não conhecemos. */
+const ESTADO_LABEL: Readonly<Record<string, string>> = {
+  PASSED: tarefa.estadoPASSED, FAILED: tarefa.estadoFAILED,
+  BLOCKED_EXTERNAL: tarefa.estadoBLOCKED_EXTERNAL, BUDGET_EXCEEDED: tarefa.estadoBUDGET_EXCEEDED,
+  CANCELLED: tarefa.estadoCANCELLED, RUNNING: tarefa.estadoRUNNING, PENDING: tarefa.estadoPENDING,
+}
+const ETAPA_LABEL: Readonly<Record<string, string>> = {
+  generate: tarefa.etapaGenerate, build: tarefa.etapaBuild,
+  test: tarefa.etapaTest, verify: tarefa.etapaVerify,
+}
+
+/**
+ * O rótulo de um estado de tentativa.
+ *
+ * Um estado que este produto não conhece sai como ele mesmo, e não como uma
+ * frase amigável escolhida no chute: dizer "tudo certo" sobre algo que não
+ * sabemos ler é a certificação vazia que o aceite VIS-12 recusa.
+ * @param estado - o estado gravado pelo servidor.
+ * @returns a frase do catálogo, ou o próprio estado.
+ */
+export function rotuloDoEstado(estado: string): string {
+  return ESTADO_LABEL[estado] ?? estado
+}
+
+function LanceView({ lance, abrir }: { lance: Lance; abrir(painel: PainelAberto): void }) {
+  if (lance.tipo === 'pedido' || lance.tipo === 'resposta') {
+    return <>
+      <p className="dz-lance-autor">{tarefa.vocePediu}</p>
+      <p className="dz-lance-texto">{lance.texto}</p>
+      {lance.tipo === 'resposta' && lance.recomendada ? <p className="dz-lance-nota">{tarefa.recomendada}</p> : null}
+    </>
+  }
+  if (lance.tipo === 'pergunta') {
+    return <>
+      <p className="dz-lance-autor">{tarefa.estudioRespondeu}</p>
+      <p className="dz-lance-texto">{lance.texto}</p>
+    </>
+  }
+  if (lance.tipo === 'plano') {
+    const estado = lance.status === 'APPROVED' ? tarefa.planoAprovado
+      : lance.status === 'CHANGE_REQUESTED' ? tarefa.planoMudancaPedida : tarefa.planoTitulo
+    return <>
+      <p className="dz-lance-autor">{tarefa.estudioRespondeu}</p>
+      <details className={classes('dz-bloco', 'dz-bloco-plano')}>
+        <summary>{estado} · {tarefa.planoRevisao} {lance.revisao}</summary>
+        {lance.escritoPelaPessoa ? <p className="dz-lance-nota">{tarefa.planoEscritoPelaPessoa}</p> : null}
+        <ol className="dz-plano-fatias">{lance.fatias.map(fatiaDoPlano => <li key={fatiaDoPlano.slice_id}>
+          <strong>{fatiaDoPlano.title}</strong>
+          <p>{fatiaDoPlano.description}</p>
+          <p className="dz-lance-nota">{tarefa.planoCriterios}</p>
+          <ul>{fatiaDoPlano.acceptance_criteria.map(criterio => <li key={criterio}>{criterio}</li>)}</ul>
+        </li>)}</ol>
+      </details>
+    </>
+  }
+  if (lance.tipo === 'execucao') {
+    return <>
+      <p className="dz-lance-autor">{tarefa.estudioRespondeu}</p>
+      <div className="dz-bloco dz-bloco-trabalho">
+        <p className="dz-trabalho-linha">
+          {lance.emCurso ? <Loader aria-hidden="true" className="dz-girando" /> : <CircleCheck aria-hidden="true" />}
+          <span>{ETAPA_LABEL[lance.etapa] ?? lance.etapa} · {tarefa.trabalhoTentativa} {lance.tentativa}</span>
+          <span className="dz-lance-nota">{lance.emCurso ? tarefa.trabalhoEmCurso : rotuloDoEstado(lance.estado)}</span>
+        </p>
+        {/*
+          A FRASE DA ETAPA veio da tela antiga, e veio inteira — mesma função,
+          mesmas palavras, mesmo `aria-live`. Ela é a única coisa que separa
+          "trabalhando" de "travado" quando a execução não tem passos
+          registrados, que é o caso de todo servidor anterior ao campo `steps`.
+          Ela ficava desenhada ao lado da linha do tempo, e as duas juntas
+          repetiam a mesma palavra duas vezes na tela: aqui a frase aparece
+          SÓ quando não há passos, como já era a regra.
+        */}
+        {!lance.emCurso || hasBuildSteps(lance.passos) ? null : <p className="creation-stage" aria-live="polite">
+          <span className="creation-spinner" aria-hidden="true" />{stageSentence(etapaCorrente(lance.etapa, lance.tentativa))}
+          {attemptSentence(etapaCorrente(lance.etapa, lance.tentativa)) === null ? null
+            : <small>{attemptSentence(etapaCorrente(lance.etapa, lance.tentativa))}</small>}
+        </p>}
+        {/*
+          A linha do tempo do construtor é a que já existe: os mesmos quatro
+          passos, as mesmas frases, o mesmo tratamento para passo desconhecido.
+
+          Ela vem ABERTA enquanto a tentativa corre e RECOLHIDA depois. As duas
+          coisas são pedidos diferentes e os dois valem: "a ideia desse projeto
+          é ver a construção em tempo real" é o motivo de ela existir, e é nos
+          minutos da espera que ela informa; terminada a tentativa, ela vira
+          histórico, e a decisão visual pede progresso compacto com detalhe
+          recolhível. Deixá-la sempre aberta encheria a conversa de listas de
+          quatro linhas a cada tentativa.
+        */}
+        {hasBuildSteps(lance.passos) ? <details className="dz-passos" open={lance.emCurso}>
+          <summary>{ETAPA_LABEL[lance.etapa] ?? lance.etapa}</summary>
+          <BuildSteps steps={lance.passos} finished={!lance.emCurso} />
+        </details> : null}
+      </div>
+    </>
+  }
+  const bom = lance.estado === 'PASSED'
+  return <>
+    <p className="dz-lance-autor">{tarefa.estudioRespondeu}</p>
+    <div className={classes('dz-bloco', 'dz-artefato', bom ? null : 'dz-artefato-atencao')}>
+      <p className="dz-artefato-linha">
+        {bom ? <CircleCheck aria-hidden="true" /> : lance.estado === 'CANCELLED' ? <CircleSlash aria-hidden="true" /> : <TriangleAlert aria-hidden="true" />}
+        <span>{tarefa.artefatoTitulo} · {tarefa.trabalhoTentativa} {lance.tentativa}</span>
+      </p>
+      {/*
+        O ESTADO da tentativa, com todas as letras. Não há selo genérico aqui:
+        "passou nas conferências desta tentativa" é o que se pode afirmar, e é
+        diferente de "está pronto".
+      */}
+      <p className="dz-lance-texto">{rotuloDoEstado(lance.estado)}</p>
+      <p className="dz-artefato-provas">
+        <FileText aria-hidden="true" />
+        {lance.evidencias.length === 0 ? tarefa.artefatoSemEvidencia : `${tarefa.artefatoEvidencias}: ${lance.evidencias.length}`}
+      </p>
+      <button type="button" className="dz-artefato-abrir"
+        onClick={() => abrir({ tipo: 'artefato', runId: lance.runId })}>{tarefa.artefatoAbrir}</button>
+    </div>
+  </>
+}

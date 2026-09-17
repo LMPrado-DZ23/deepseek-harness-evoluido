@@ -5,8 +5,6 @@ import { PendingButton } from './PendingButton'
 import { STUDIO_CATEGORIES, type Category } from './categories'
 import t from './i18n/pt-BR.json'
 import { categoryGuess, type CategoryGuess } from './categorySuggestion'
-import { attemptSentence, stageSentence, type RunningStage } from './creationProgress'
-import { BuildSteps } from './BuildSteps'
 import type { RunStepRecord } from './buildSteps'
 import { projectNameFromBrief } from './projectName'
 import { intencaoDeEnvio, type IntencaoDeCriacao } from './creationIntent'
@@ -23,11 +21,13 @@ import { currentSessionMode } from './session/currentSession'
 import { PlanEditor, type ConsultedView } from './plan/PlanEditor'
 import { WorkspaceShell } from './shell/WorkspaceShell'
 import { HomeScreen } from './home/HomeScreen'
+import { TaskScreen, type PainelAberto } from './tarefa/TaskScreen'
+import tarefaCopy from './i18n/tarefa.pt-BR.json'
 import type { CategoryBasis, DesignPreset } from './home/opcoes'
 import type { PlanEditRequest } from './plan/planEdit'
 
 type Question = { id: 'audience' | 'goal' | 'content' | 'sensitive-confirmation'; text: string }
-type Plan = { revision?: number; edited_by_person?: boolean; slices: Array<{ slice_id: string; title: string; description: string; acceptance_criteria: string[] }> }
+type Plan = { plan_id: string; status: string; updated_at: string; revision?: number; edited_by_person?: boolean; slices: Array<{ slice_id: string; title: string; description: string; acceptance_criteria: string[] }> }
 // `label` é o identificador de máquina (`page:Início`); `title` é a mesma
 // conferência em português. A tela lê o título e mantém o identificador ao lado,
 // pequeno, porque é ele que se cola num pedido de ajuda.
@@ -36,7 +36,25 @@ type VerificationCode = { email: string; code: string; expires_at: string }
 // O estado final vem do MESMO tipo que a frase usa: duas listas separadas foi
 // como `BUDGET_EXCEEDED` acabou sem frase própria.
 type PipelineResult = { state: PipelineResultState; attempts: number; message: string; notice?: string; checks?: AcceptanceCheck[]; verificationCodes?: VerificationCode[]; resumed?: boolean }
-type ProjectDetails = { project: { state: ProjectUiState }; plan?: Plan | null; current_run: null | { operation_id: string; state: 'PENDING' | 'RUNNING' | 'PASSED' | 'FAILED' | 'BLOCKED_EXTERNAL' | 'BUDGET_EXCEEDED' | 'CANCELLED'; stage: string; attempt: number; steps?: RunStepRecord[]; resumed_from_run_id?: string; failure_code: string | null; acceptance_checks: AcceptanceCheck[]; verification_codes?: VerificationCode[] } }
+type RunDetails = { run_id: string; operation_id: string; state: 'PENDING' | 'RUNNING' | 'PASSED' | 'FAILED' | 'BLOCKED_EXTERNAL' | 'BUDGET_EXCEEDED' | 'CANCELLED'; stage: string; attempt: number; started_at: string; finished_at?: string | null; steps?: RunStepRecord[]; resumed_from_run_id?: string; failure_code: string | null; acceptance_checks: AcceptanceCheck[]; verification_codes?: VerificationCode[] }
+/*
+  O CORPO da tarefa, como `GET /projects/:id` já o devolve.
+
+  Ele cresceu, e o que cresceu não é campo novo no servidor: são os campos que
+  a rota sempre mandou e que esta tela descartava — `turns`, `runs`, `evidence`
+  e os dados do próprio projeto. Declarar só três deles foi o que fez a
+  conversa parecer impossível sem um diário à parte.
+*/
+type ProjectDetails = {
+  project: { project_id: string; name: string; state: ProjectUiState; original_brief: string; created_at?: string }
+  turns?: Array<{ turn_id: string; question_id: string; question: string; answer: string; recommended: boolean; created_at: string }>
+  plan?: Plan | null
+  runs?: RunDetails[]
+  current_run: null | RunDetails
+  evidence?: Array<{ evidence_id: string; run_id: string; kind: string; relative_path: string; size_bytes: number }>
+  next?: Question | null
+  revisions?: Array<{ spec_id: string; request: string; created_at: string }>
+}
 type Preview = { preview_id: string; state: 'REQUESTED' | 'STARTING' | 'READY' | 'STOPPING' | 'STOPPED' | 'FAILED' | 'EXPIRED'; health: 'PENDING' | 'OK' | 'DOWN'; url: string; expires_at: string }
 /**
  * O acesso do botão de emergência à rota, criado UMA vez fora do componente.
@@ -69,16 +87,10 @@ export function App() {
   // pessoa corrigir o tipo à mão é a mesma mentira dos outros casos, com o
   // agravante de que ela sabe que não foi assim.
   const [categoryBasis, setCategoryBasis] = useState<CategoryBasis>('none')
-  // A etapa da execução em curso, lida do mesmo laço que já acompanha o estado.
-  const [running, setRunning] = useState<RunningStage | null>(null)
-  // Os passos do construtor da execucao em curso, redesenhados a cada volta
-  // da consulta. E isto que transforma a espera em algo que se ACOMPANHA.
-  const [runSteps, setRunSteps] = useState<readonly RunStepRecord[] | null>(null)
   const [route, setRoute] = useState<string | null>(null)
   const [projectId, setProjectId] = useState<string | null>(null)
   const [projectState, setProjectState] = useState<ProjectUiState | null>(null)
   const [question, setQuestion] = useState<Question | null>(null)
-  const [answer, setAnswer] = useState('')
   const [plan, setPlan] = useState<Plan | null>(null)
   const [consulted, setConsulted] = useState<ConsultedView | undefined>(undefined)
   const [changeReason, setChangeReason] = useState('')
@@ -97,6 +109,16 @@ export function App() {
   // A gaveta do celular mora na `WorkspaceShell` — foco, `Escape` e trava de
   // rolagem junto com ela, em vez de repetidos em cada tela.
   const [atalhosAbertos, setAtalhosAbertos] = useState(false)
+  /*
+    O CORPO INTEIRO da tarefa, como o servidor o devolve.
+    A tela lia três campos dele e jogava fora `turns`, `runs` e `evidence` —
+    que é exatamente o histórico que faltava para existir uma conversa. Guardar
+    o corpo inteiro não cria armazenamento novo: é a mesma leitura, sem descarte.
+  */
+  const [detalhes, setDetalhes] = useState<ProjectDetails | null>(null)
+  /* O rascunho do compositor mora AQUI para sobreviver a abrir e fechar painel. */
+  const [rascunho, setRascunho] = useState('')
+  const [painel, setPainel] = useState<PainelAberto | null>(null)
   useEffect(() => {
     let active = true
     void currentSessionMode().then(mode => { if (active) setAuthenticatedSession(mode === 'authenticated') })
@@ -123,10 +145,23 @@ export function App() {
     void api<ProjectDetails>(`/projects/${saved}`).then(details => {
       if (!active) return
       const plan = details.plan ?? null
-      if (plan === null && details.current_run === null) { forgetSavedProject(); return }
+      /*
+        A restauração deixou de ser parcial.
+
+        Ela desistia quando não havia plano nem tentativa, e o comentário
+        original explicava por quê: sem a próxima pergunta, a tela ficava presa
+        numa etapa sem saída. Isso valia para o wizard. Na conversa a pergunta
+        aberta VEM no corpo (`next`) e vira um lance como qualquer outro — quem
+        recarrega no meio das perguntas volta a vê-las, e quem não tem pergunta
+        nenhuma volta a ver o próprio pedido. Não há mais etapa sem saída para
+        proteger, e desistir aqui apagaria a tarefa da vista pelo motivo errado.
+      */
       setProjectId(saved)
       setProjectState(details.project.state)
       setPlan(plan)
+      // O corpo inteiro, e não três campos dele: recarregar a página precisa
+      // devolver a CONVERSA, e a conversa é o histórico.
+      setDetalhes(details)
       // E o RESULTADO, quando a execução já terminou: sem isto, recarregar
       // depois da criação devolvia uma coluna vazia — sem os critérios, sem o
       // relato, sem os pontos seguros e sem o botão de ver o protótipo —
@@ -227,21 +262,96 @@ export function App() {
       // com o primeiro.
       intencao.current = null
       setProjectId(created.project.project_id); rememberProject(created.project.project_id); setProjectState(created.project.state); setQuestion(created.next)
+      /*
+        ENVIAR ABRE A CONVERSA. Não há passo intermediário e não há wizard: a
+        tarefa existe, e o que a pessoa escreveu já é o primeiro lance dela. A
+        conversa é montada com o que a resposta da criação traz — o pedido e a
+        primeira pergunta — e completada pela leitura seguinte. Esperar a
+        leitura para desenhar qualquer coisa deixaria a tela vazia no instante
+        em que a pessoa mais precisa ver que o pedido chegou.
+      */
+      setDetalhes({
+        project: {
+          project_id: created.project.project_id, name: pedido.name,
+          state: created.project.state, original_brief: pedido.original_brief,
+        },
+        current_run: null, next: created.next,
+      })
+      setRascunho(''); setPainel(null)
       await api(`/projects/${created.project.project_id}/design`, {
         method: 'POST', body: JSON.stringify({ preset: designPreset, ...(designPreset === 'brand' ? { primary: hexToHsl(brandColor) } : {}), font, radius, density, tone }),
       })
       if (logo !== null) await api(`/projects/${created.project.project_id}/design/logo`, { method: 'POST', body: logo, headers: { 'content-type': logo.type } })
+      await refreshDetalhes(created.project.project_id)
     })
   }
-  async function submitAnswer(recommend: boolean, confirmSensitive?: boolean) {
+  /**
+   * Responde a pergunta de admissão aberta.
+   *
+   * O texto chega por PARÂMETRO, e não de um estado desta tela.
+   *
+   * Ele vinha de um `answer` próprio, alimentado pelo campo do cartão de
+   * perguntas. Esse cartão saiu — a resposta agora é escrita no compositor de
+   * baixo, como tudo o mais — e guardar uma segunda cópia do texto aqui seria
+   * ter dois lugares onde a resposta mora, com um deles sempre atrasado.
+   *
+   * Sem texto e sem `recommend`, o servidor recusa: é ele quem decide o que é
+   * resposta vazia, e não esta tela.
+   */
+  async function submitAnswer(recommend: boolean, confirmSensitive?: boolean, texto?: string) {
     if (projectId === null) return
     await safely(async () => {
       const response = await api<{ next?: Question | null; spec?: unknown; blocked?: boolean; message?: string }>(`/projects/${projectId}/intake/answer`, {
-        method: 'POST', body: JSON.stringify({ answer, recommend, ...(confirmSensitive === undefined ? {} : { confirm_sensitive: confirmSensitive }) }),
+        method: 'POST', body: JSON.stringify({ answer: texto ?? '', recommend, ...(confirmSensitive === undefined ? {} : { confirm_sensitive: confirmSensitive }) }),
       })
       if (response.blocked === true) { setError(response.message ?? t.health.attention); return }
-      setAnswer(''); setQuestion(response.next ?? null)
+      setQuestion(response.next ?? null)
       if (response.next == null) setProjectState('SPEC_READY')
+      await refreshDetalhes()
+    })
+  }
+  /**
+   * Relê o corpo da tarefa e reconstrói a conversa a partir dele.
+   *
+   * Todas as ações passam por aqui depois de escrever. O motivo é o de sempre:
+   * uma tela que atualiza pedaços do próprio estado depois de cada chamada
+   * acaba com uma segunda verdade sobre a tarefa — e ela diverge no primeiro
+   * conserto de uma das duas. A conversa é desenhada a partir do que o servidor
+   * diz, e de nada mais.
+   */
+  async function refreshDetalhes(id: string | null = projectId) {
+    if (id === null) return
+    try {
+      const lido = await api<ProjectDetails>(`/projects/${id}`)
+      setDetalhes(lido)
+      setProjectState(lido.project.state)
+      setPlan(lido.plan ?? null)
+      setQuestion(lido.next ?? null)
+    } catch { /* A falha de leitura aparece na próxima ação explícita; a conversa fica como estava. */ }
+  }
+  /**
+   * Pede uma alteração depois de um resultado — na MESMA tarefa.
+   *
+   * É a rota `revise`, que existe justamente para este caminho. Ela devolve a
+   * tarefa a `SPEC_READY`, com o pedido já dentro da especificação, e o
+   * histórico inteiro continua no lugar. Nenhuma tarefa nova é criada aqui, e é
+   * isso que o aceite VIS-03 confere.
+   */
+  async function ajustar(texto: string) {
+    if (projectId === null) return
+    await safely(async () => {
+      await api(`/projects/${projectId}/revise`, { method: 'POST', body: JSON.stringify({ request: texto }) })
+      setResult(null); setRunReport(null); setCheckpoints(null)
+      await refreshDetalhes()
+    })
+  }
+  /** Pede mudança no plano proposto, com o texto do compositor. */
+  async function mudarPlanoPelaConversa(texto: string) {
+    if (projectId === null) return
+    await safely(async () => {
+      await api(`/projects/${projectId}/plan/change`, { method: 'POST', body: JSON.stringify({ reason: texto.trim() }) })
+      setPlan(null)
+      await refreshDetalhes()
     })
   }
   async function preparePlan() {
@@ -253,6 +363,7 @@ export function App() {
       // depois leria o estado do planejador já usado por outro pedido.
       setConsulted(response.consulted)
       setProjectState('PLAN_PROPOSED')
+      await refreshDetalhes()
     })
   }
   /** E-03: manda UMA alteração e adota o plano que voltou, com a revisão nova. */
@@ -261,6 +372,7 @@ export function App() {
     await safely(async () => {
       const response = await api<{ plan: Plan }>(`/projects/${projectId}/plan/edit`, { method: 'POST', body: JSON.stringify(edit) })
       setPlan(response.plan)
+      await refreshDetalhes()
     })
   }
   /** E-03: a pessoa descreve o que falta; o planejador escreve a etapa. */
@@ -269,17 +381,19 @@ export function App() {
     await safely(async () => {
       const response = await api<{ plan: Plan }>(`/projects/${projectId}/plan/slice`, { method: 'POST', body: JSON.stringify({ reason: request }) })
       setPlan(response.plan)
+      await refreshDetalhes()
     })
   }
   async function approvePlan() {
     if (projectId === null) return
-    await safely(async () => { await api(`/projects/${projectId}/plan/approve`, { method: 'POST', body: '{}' }); setProjectState('PLAN_APPROVED') })
+    await safely(async () => { await api(`/projects/${projectId}/plan/approve`, { method: 'POST', body: '{}' }); setProjectState('PLAN_APPROVED'); await refreshDetalhes() })
   }
   async function requestPlanChange() {
     if (projectId === null || changeReason.trim().length < 3) return
     await safely(async () => {
       await api(`/projects/${projectId}/plan/change`, { method: 'POST', body: JSON.stringify({ reason: changeReason.trim() }) })
       setPlan(null); setChangeReason('')
+      await refreshDetalhes()
     })
   }
   async function generate() {
@@ -337,8 +451,13 @@ export function App() {
         continue
       }
       setProjectState(details.project.state)
-      setRunning(current === null ? null : { stage: current.stage, attempt: current.attempt })
-      setRunSteps(current?.steps ?? null)
+      setDetalhes(details)
+      /*
+        A etapa e os passos NÃO são mais copiados para estado próprio: eles
+        vivem em `current_run`, dentro do corpo que acabou de ser guardado, e a
+        conversa os lê de lá. Duas cópias do mesmo fato é como a tela e o
+        registro passam a discordar.
+      */
       if (current?.operation_id === runId && ['PASSED', 'FAILED', 'BLOCKED_EXTERNAL', 'BUDGET_EXCEEDED', 'CANCELLED'].includes(current.state)) {
         const finished = resultOfRun(details)!
         const state = finished.state
@@ -385,6 +504,7 @@ export function App() {
       setConfirmingUndo(null)
       setProjectState(undone.project.state)
       await refreshCheckpoints()
+      await refreshDetalhes()
     })
   }
   async function cancelGeneration() {
@@ -396,6 +516,11 @@ export function App() {
     await safely(async () => {
       const started = await api<{ preview: Preview; admission: { ticket: string } }>(`/projects/${projectId}/previews`, { method: 'POST', body: '{}' })
       setPreview(started.preview)
+      // A prévia ABRE o painel contextual, que é o que a decisão de produto
+      // pede: "abrir arquivos, preview, testes ou computador cria um
+      // painel/modal contextual". Ligar a prévia sem mostrá-la deixaria a
+      // pessoa esperando por uma tela que já estava pronta e escondida.
+      setPainel({ tipo: 'preview' })
       setAdmissionTicket(started.admission.ticket)
       setPreviewCodes([])
     })
@@ -461,82 +586,188 @@ export function App() {
     como painel de contexto quando existe uma tarefa, que é onde ela informa
     alguma coisa.
   */
-  const emTarefa = projectState !== null
-  return <WorkspaceShell {...(emTarefa ? { titulo: t.progress.title } : {})} acoes={<>
+  const emTarefa = projectState !== null && detalhes !== null
+
+  /*
+    O BLOCO DA PRÉVIA continua o mesmo — ele só mudou de lugar. Antes ficava
+    empilhado no fim da coluna, junto com o relatório e os pontos seguros;
+    agora abre no painel contextual, ao lado da conversa, e fechar devolve a
+    conversa com a rolagem e o rascunho onde estavam.
+  */
+  const blocoDaPrevia = preview?.state === 'READY'
+    ? <section className="preview-card"><div className="preview-heading"><div><h2>{t.preview.title}</h2><p>{t.preview.localOnly}</p></div><PendingButton className="secondary compact" label={t.preview.stop} busyLabel={t.preview.stopBusy} action={stopPreview} /></div><p className="truth">{t.preview.notPublished}</p>{previewCodes.length === 0 ? null : <section className="preview-codes" aria-live="polite"><h3>{t.preview.accessCodes}</h3><p>{t.preview.accessCodesHelp}</p><ul>{previewCodes.map(item => <li key={`${item.email}-${item.expires_at}-${item.code}`}><strong>{item.email}</strong>: <code>{item.code}</code></li>)}</ul></section>}<iframe ref={previewFrame} title={t.preview.frameTitle} src={`${preview.url}/__dz23/admission`} sandbox="allow-scripts allow-forms allow-same-origin" referrerPolicy="no-referrer" /></section>
+    : preview !== null && ['FAILED', 'EXPIRED', 'STOPPED'].includes(preview.state) ? <p className="context-note">{t.preview.closed}</p>
+      : null
+
+  /*
+    O DETALHAMENTO ANTIGO, inteiro, no painel.
+
+    Nada foi removido: o resultado com os critérios, o relato da tentativa, os
+    pontos seguros e o trilho de cinco etapas continuam existindo, com os
+    mesmos componentes e as mesmas frases. O que mudou é que eles deixaram de
+    ser o layout padrão — que é exatamente a correção pedida: "o detalhamento
+    antigo pode existir numa visualização diagnóstica secundária, nunca como a
+    estrutura dominante padrão".
+  */
+  const blocoDiagnostico = <>
+    {result !== null ? <Verification result={result} /> : null}
+    {runReport === null ? null : <RunReport report={runReport} />}
+    {checkpoints === null ? null : <Checkpoints list={checkpoints} projectState={projectState} confirmingRunId={confirmingUndo}
+      askConfirm={setConfirmingUndo} cancelConfirm={() => setConfirmingUndo(null)}
+      undo={runId => void undoToCheckpoint(runId)}
+      {...(result === null || result.state === 'VERIFIED_PROTOTYPE' ? {} : { restart: () => void generate() })} />}
+    <Progress state={projectState} />
+  </>
+
+  const conteudoDoPainel = painel === null ? null
+    : painel.tipo === 'preview' ? blocoDaPrevia
+      : blocoDiagnostico
+
+  /*
+    As AÇÕES DE ESTADO — aprovar plano, criar, cancelar, abrir a prévia.
+
+    Elas ficam abaixo da conversa e acima do compositor, que é onde a
+    referência põe as ações de uma resposta. O que elas fazem não mudou: são as
+    mesmas chamadas, com as mesmas autorizações. O `PlanEditor` continua aqui
+    inteiro porque editar um plano é trabalho de formulário e não cabe numa
+    mensagem — mas ele aparece SÓ quando há plano proposto, e não como a
+    moldura permanente da tela.
+  */
+  const acoesDoEstado = <>
+    {projectState === 'DRAFT' && question !== null ? <AcoesDaPergunta question={question} submit={submitAnswer} /> : null}
+    {projectState === 'SPEC_READY' ? <Action title={t.plan.title} detail={t.progress.planDetail} button={t.plan.prepare} busyButton={t.plan.prepareBusy} action={preparePlan} /> : null}
+    {/*
+      Qual das duas ações aparece é decidido pelo STATUS DO PLANO, e não por um
+      `null` que esta tela guardava sozinha.
+
+      Guardar `null` funcionava enquanto a tela era a única a saber o que tinha
+      acontecido. Agora ela relê o corpo da tarefa depois de cada gravação — e o
+      servidor devolve o plano com `CHANGE_REQUESTED`, não a ausência dele. O
+      `null` era apagado na releitura seguinte, e a tarefa ficava oferecendo
+      editar um plano que já tinha sido devolvido para revisão.
+    */}
+    {projectState === 'PLAN_PROPOSED' && plan !== null && plan.status !== 'CHANGE_REQUESTED' ? <PlanEditor plan={plan} submit={editPlan} approve={approvePlan} reason={changeReason} setReason={setChangeReason} requestChange={requestPlanChange} addSlice={addPlanSlice} {...(consulted === undefined ? {} : { consulted })} /> : null}
+    {projectState === 'PLAN_PROPOSED' && (plan === null || plan.status === 'CHANGE_REQUESTED') ? <Action title={t.plan.title} detail={t.progress.planDetail} button={t.plan.revision} busyButton={t.plan.revisionBusy} action={preparePlan} /> : null}
+    {projectState === 'PLAN_APPROVED' ? <Action title={t.creation.title} detail={t.truth.creation} button={t.creation.start} busyButton={t.creation.startBusy} action={generate} /> : null}
+    {/* A linha do tempo do construtor NÃO é repetida aqui: ela é um lance da
+        conversa, com a etapa e a tentativa. Desenhá-la nos dois lugares punha a
+        mesma informação duas vezes na tela e fazia o seletor `.build-steps`
+        casar com dois elementos — foi assim que o e2e apanhou a duplicata. */}
+    {projectState === 'GENERATING' || projectState === 'BUILD_OK' || projectState === 'TESTS_OK' ? <Action title={t.creation.title} detail={t.creation.working} button={t.creation.cancel} busyButton={t.creation.cancelBusy} action={cancelGeneration} /> : null}
+    {/* Os botões soltos ficam numa LINHA, com a largura do texto de cada um.
+        Esticados, um "Ver o detalhamento técnico" virava uma barra do tamanho
+        da conversa e competia com a própria conversa pela atenção. */}
+    <div className="dz-acao-linha">
+      {result?.state === 'VERIFIED_PROTOTYPE' && preview?.state !== 'READY' ? <PendingButton className="dz-acao-botao" label={t.preview.open} busyLabel={t.preview.openBusy} action={startPreview} /> : null}
+      {/* Tentar de novo é AÇÃO, e por isso está aqui e não no relato: ele
+          também oferecia o botão, e a mesma ação em dois lugares faz a pessoa
+          procurar qual dos dois é o de verdade. */}
+      {result?.state === 'INTERRUPTED' ? <PendingButton className="dz-acao-botao-secundario" label={t.creation.retry} busyLabel={t.creation.retryBusy} action={generate} /> : null}
+      {preview === null ? null : <button type="button" className="dz-acao-botao-secundario" onClick={() => setPainel({ tipo: 'preview' })}>{t.preview.title}</button>}
+      <button type="button" className="dz-acao-botao-secundario" onClick={() => setPainel({ tipo: 'diagnostico' })}>{tarefaCopy.verDiagnostico}</button>
+    </div>
+    {error === '' ? null : <p className="error" role="alert">{error}</p>}
+    {/* O botão de emergência fica VISÍVEL o tempo todo, e não escondido em
+        configurações: quem precisa dele está com pressa. */}
+    <EmergencyStop port={emergencyPort} />
+  </>
+
+  /*
+    A casca é a mesma em TODA tela do produto (`WorkspaceShell`): trilho à
+    esquerda, cabeçalho com o contexto, área de trabalho à direita.
+
+    Home e tarefa são os dois conteúdos dessa casca, e desta vez são de fato
+    uma jornada só: enviar na home cria ou recupera a tarefa e ABRE a conversa,
+    e continuar a tarefa acontece dentro dela, no compositor de baixo. O trilho
+    de cinco etapas deixou de ser a estrutura; ele virou lógica interna, lida
+    pela conversa e visível por inteiro no painel de diagnóstico.
+  */
+  return <WorkspaceShell {...(emTarefa ? { titulo: detalhes.project.name } : {})} acoes={<>
     <Status health={health} />
-    {/* O sino e o boneco eram ÍCONES: sem `button`, sem destino, sem ação. Para
-        quem olha, são o sino e a conta de qualquer aplicativo — e clicar não
-        fazia nada. Saíram; o que existe de verdade continua aqui. */}
     <NotificationOptIn />
     {authenticatedSession ? <button className="signout-button" type="button" disabled={signingOut} aria-busy={signingOut} onClick={() => void signOut()}><LogOut aria-hidden="true" /><span>{signingOut ? t.account.signingOut : t.account.signOut}</span></button> : null}
   </>}>
-    {/*
-      A home NÃO usa `canvas` nem `idea-panel`. As duas classes vêm da folha
-      antiga e trazem junto a moldura arredondada, a grade de duas colunas e a
-      caixa de texto com borda própria — foi assim que o compositor apareceu com
-      DUAS bordas na primeira captura. Dentro da tarefa elas continuam valendo,
-      porque a tarefa ainda é aquela tela.
-    */}
-    <main className={emTarefa ? 'canvas' : 'dz-canvas-home'}>
-      <section className={emTarefa ? 'idea-panel' : 'dz-home-conteudo'}>
-        {emTarefa ? null : <HomeScreen brief={brief} setBrief={updateBrief} privacy={privacy} setPrivacy={setPrivacy} route={route ?? health.route} localRoute={health.local_route} routeReason={health.route_reason_code ?? null} ready={ready} chooseSuggestion={chooseSuggestion} category={category} categoryBasis={categoryBasis} chooseCategory={chooseCategory} create={create}
-          designPreset={designPreset} setDesignPreset={setDesignPreset} brandColor={brandColor} setBrandColor={setBrandColor}
-          font={font} setFont={setFont} radius={radius} setRadius={setRadius} density={density} setDensity={setDensity}
-          tone={tone} setTone={setTone} logo={logo} setLogo={setLogo} showDesignAdvanced={showDesignAdvanced} setShowDesignAdvanced={setShowDesignAdvanced}
-          atalhosAbertos={atalhosAbertos} setAtalhosAbertos={setAtalhosAbertos} />}
-        {projectState === 'DRAFT' && question !== null ? <Questions question={question} answer={answer} setAnswer={setAnswer} submit={submitAnswer} /> : null}
-        {projectState === 'SPEC_READY' ? <Action title={t.plan.title} detail={t.progress.planDetail} button={t.plan.prepare} busyButton={t.plan.prepareBusy} action={preparePlan} /> : null}
-        {projectState === 'PLAN_PROPOSED' && plan !== null ? <PlanEditor plan={plan} submit={editPlan} approve={approvePlan} reason={changeReason} setReason={setChangeReason} requestChange={requestPlanChange} addSlice={addPlanSlice} {...(consulted === undefined ? {} : { consulted })} /> : null}
-        {projectState === 'PLAN_PROPOSED' && plan === null ? <Action title={t.plan.title} detail={t.progress.planDetail} button={t.plan.revision} busyButton={t.plan.revisionBusy} action={preparePlan} /> : null}
-        {projectState === 'PLAN_APPROVED' ? <Action title={t.creation.title} detail={t.truth.creation} button={t.creation.start} busyButton={t.creation.startBusy} action={generate} /> : null}
-        {projectState === 'GENERATING' || projectState === 'BUILD_OK' || projectState === 'TESTS_OK' ? <Action title={t.creation.title} detail={t.creation.working} button={t.creation.cancel} busyButton={t.creation.cancelBusy} action={cancelGeneration} progress={running} steps={runSteps} /> : null}
-        {result !== null ? <Verification result={result} previewActive={preview?.state === 'READY'} startPreview={startPreview} retry={generate} /> : null}
-        {runReport === null ? null : <RunReport report={runReport} />}
-        {checkpoints === null ? null : <Checkpoints list={checkpoints} projectState={projectState} confirmingRunId={confirmingUndo}
-          askConfirm={setConfirmingUndo} cancelConfirm={() => setConfirmingUndo(null)}
-          undo={runId => void undoToCheckpoint(runId)}
-          {...(result === null || result.state === 'VERIFIED_PROTOTYPE' ? {} : { restart: () => void generate() })} />}
-        {preview?.state === 'READY' ? <section className="preview-card"><div className="preview-heading"><div><h2>{t.preview.title}</h2><p>{t.preview.localOnly}</p></div><PendingButton className="secondary compact" label={t.preview.stop} busyLabel={t.preview.stopBusy} action={stopPreview} /></div><p className="truth">{t.preview.notPublished}</p>{previewCodes.length === 0 ? null : <section className="preview-codes" aria-live="polite"><h3>{t.preview.accessCodes}</h3><p>{t.preview.accessCodesHelp}</p><ul>{previewCodes.map(item => <li key={`${item.email}-${item.expires_at}-${item.code}`}><strong>{item.email}</strong>: <code>{item.code}</code></li>)}</ul></section>}<iframe ref={previewFrame} title={t.preview.frameTitle} src={`${preview.url}/__dz23/admission`} sandbox="allow-scripts allow-forms allow-same-origin" referrerPolicy="no-referrer" /></section> : null}
-        {preview !== null && ['FAILED', 'EXPIRED', 'STOPPED'].includes(preview.state) ? <p className="context-note">{t.preview.closed}</p> : null}
-        {error === '' ? null : <p className="error" role="alert">{error}</p>}
-        {/* O botão de emergência fica VISÍVEL o tempo todo, e não escondido em
-            configurações: quem precisa dele está com pressa. */}
-        <EmergencyStop port={emergencyPort} />
-      </section>
-      {emTarefa ? <Progress state={projectState} /> : null}
-    </main>
+    {emTarefa
+      ? <TaskScreen detalhes={detalhes} rascunho={rascunho} setRascunho={setRascunho}
+        responder={async texto => submitAnswer(false, undefined, texto)}
+        mudarPlano={mudarPlanoPelaConversa}
+        ajustar={ajustar}
+        painel={painel} abrirPainel={setPainel} fecharPainel={() => setPainel(null)}
+        conteudoDoPainel={conteudoDoPainel} acoesDoEstado={acoesDoEstado} />
+      : <main className="dz-canvas-home">
+        <section className="dz-home-conteudo">
+          <HomeScreen brief={brief} setBrief={updateBrief} privacy={privacy} setPrivacy={setPrivacy} route={route ?? health.route} localRoute={health.local_route} routeReason={health.route_reason_code ?? null} ready={ready} chooseSuggestion={chooseSuggestion} category={category} categoryBasis={categoryBasis} chooseCategory={chooseCategory} create={create}
+            designPreset={designPreset} setDesignPreset={setDesignPreset} brandColor={brandColor} setBrandColor={setBrandColor}
+            font={font} setFont={setFont} radius={radius} setRadius={setRadius} density={density} setDensity={setDensity}
+            tone={tone} setTone={setTone} logo={logo} setLogo={setLogo} showDesignAdvanced={showDesignAdvanced} setShowDesignAdvanced={setShowDesignAdvanced}
+            atalhosAbertos={atalhosAbertos} setAtalhosAbertos={setAtalhosAbertos} />
+          {error === '' ? null : <p className="error" role="alert">{error}</p>}
+          <EmergencyStop port={emergencyPort} />
+        </section>
+      </main>}
   </WorkspaceShell>
 }
 
-function Questions({ question, answer, setAnswer, submit }: { question: Question; answer: string; setAnswer(v: string): void; submit(recommend: boolean, confirm?: boolean): Promise<void> }) {
-  const sensitive = question.id === 'sensitive-confirmation'
-  return <><div className="heading"><Sparkles/><div><h1>{t.questions.title}</h1><p>{t.questions.subtitle}</p></div></div><section className="task-card"><h2>{question.text}</h2>{sensitive ? <div className="button-row"><PendingButton label={t.questions.confirm} busyLabel={t.questions.confirmBusy} action={() => submit(false, true)} /><PendingButton className="secondary" label={t.questions.reject} busyLabel={t.questions.rejectBusy} action={() => submit(false, false)} /></div> : <><label htmlFor="answer">{t.questions.answer}</label><textarea id="answer" value={answer} onChange={event => setAnswer(event.target.value)} placeholder={t.questions.answerPlaceholder}/><PendingButton label={t.questions.continue} busyLabel={t.questions.continueBusy} disabled={answer.trim() === ''} action={() => submit(false)} /><PendingButton className="secondary" label={t.questions.recommend} busyLabel={t.questions.recommendBusy} action={() => submit(true)} /></>}</section></>
+/**
+ * As ações que sobram numa pergunta de admissão — e só elas.
+ *
+ * A pergunta em si NÃO é desenhada aqui: ela já é um lance da conversa, e a
+ * resposta vai pelo compositor de baixo, como qualquer outra coisa que a
+ * pessoa escreve. Este cartão era a tela inteira de perguntas — herói com
+ * estrela, título grande, caixa azul-marinho, campo próprio — e era
+ * literalmente um dos itens que o proprietário recusou: "tarefa em um
+ * formulário e conversa em outra experiência sem continuidade".
+ *
+ * O que não cabia no compositor ficou: pedir uma recomendação, e confirmar ou
+ * recusar dado sensível. As duas são decisões com botão, não texto digitado.
+ *
+ * Nenhuma classe da folha antiga é usada aqui. `task-card`, `heading` e
+ * `button-row` trazem junto a moldura azul-marinho e o título gigante da tela
+ * que saiu — reusá-las repintaria o wizard em vez de trocá-lo.
+ */
+function AcoesDaPergunta({ question, submit }: { question: Question; submit(recommend: boolean, confirm?: boolean): Promise<void> }) {
+  if (question.id === 'sensitive-confirmation') {
+    return <div className="dz-acao">
+      <PendingButton className="dz-acao-botao" label={t.questions.confirm} busyLabel={t.questions.confirmBusy} action={() => submit(false, true)} />
+      <PendingButton className="dz-acao-botao-secundario" label={t.questions.reject} busyLabel={t.questions.rejectBusy} action={() => submit(false, false)} />
+    </div>
+  }
+  return <div className="dz-acao">
+    <PendingButton className="dz-acao-botao-secundario" label={t.questions.recommend} busyLabel={t.questions.recommendBusy} action={() => submit(true)} />
+  </div>
 }
-function Action({ title, detail, button, busyButton, action, progress, steps }: { title: string; detail: string; button?: string; busyButton?: string; action?: () => Promise<void>; progress?: RunningStage | null; steps?: readonly RunStepRecord[] | null }) {
-  const hasSteps = steps !== null && steps !== undefined && steps.length > 0
-  return <><div className="heading"><Sparkles/><div><h1>{title}</h1><p>{detail}</p></div></div>{/* O que está acontecendo AGORA. O servidor manda a etapa a cada 1,5 s e a
-        tela jogava fora: durante os minutos mais longos do produto a pessoa via
-        um texto imóvel e não tinha como saber se algo estava andando.
-        `aria-live` porque quem ouve a tela precisa do mesmo aviso. */}
-    {/* A linha do tempo VENCE a frase unica da etapa quando existe.
-        Mostrar as duas repetia a MESMA palavra duas vezes na mesma tela -
-        "Montando o aplicativo" no alto e "Montando o aplicativo" em negrito na
-        lista logo abaixo -, e texto repetido faz quem le pensar que perdeu
-        alguma coisa. A linha do tempo diz tudo o que a frase dizia, e mais. */}
-    {hasSteps ? null : stageSentence(progress ?? null) === null ? null : <p className="creation-stage" aria-live="polite">
-      <span className="creation-spinner" aria-hidden="true" />{stageSentence(progress ?? null)}
-      {attemptSentence(progress ?? null) === null ? null : <small>{attemptSentence(progress ?? null)}</small>}
-    </p>}
-    {/* A repeticao SOBREVIVE em qualquer um dos dois caminhos: da segunda
-        tentativa em diante o tempo dobra, e o silencio parece travamento. */}
-    {hasSteps && attemptSentence(progress ?? null) !== null ? <p className="creation-attempt" aria-live="polite">{attemptSentence(progress ?? null)}</p> : null}
-    {/* A linha do tempo da construcao. Ela so aparece quando ha passo
-        registrado: uma lista de quatro coisas "ainda vao acontecer" mostrada
-        antes de qualquer uma comecar nao informa nada e ocupa a tela inteira
-        no celular. */}
-    {hasSteps ? <BuildSteps steps={steps!} finished={false} /> : null}
-    {button === undefined || action === undefined ? null : <PendingButton label={button} busyLabel={busyButton ?? button} action={action} />}</> }
-function Verification({ result, previewActive, startPreview, retry }: { result: PipelineResult; previewActive: boolean; startPreview(): Promise<void>; retry(): Promise<void> }) { const ok = result.state === 'VERIFIED_PROTOTYPE'; const cancelled = result.state === 'CANCELLED'; const interrupted = result.state === 'INTERRUPTED'; return <section className="task-card"><h1>{t.verification.title}</h1><p>{resultSentence(result.state, t.verification)}</p>{result.notice === undefined || result.notice === '' ? null : <p className="truth">{result.notice}</p>}<p>{t.verification.attempts}: {result.attempts}</p>{result.resumed === true ? <p className="truth">{t.verification.resumed}</p> : null}{ok && !previewActive ? <PendingButton label={t.preview.open} busyLabel={t.preview.openBusy} action={startPreview} /> : null}{interrupted ? <PendingButton label={t.creation.retry} busyLabel={t.creation.retryBusy} action={retry} /> : null}{result.verificationCodes === undefined || result.verificationCodes.length === 0 ? null : <section><h2>{t.verification.testCodes}</h2><p>{t.verification.testCodesHelp}</p><ul>{result.verificationCodes.map(item => <li key={`${item.email}-${item.expires_at}-${item.code}`}><strong>{item.email}</strong>: <code>{item.code}</code></li>)}</ul></section>}{result.checks === undefined ? null : <><h2>{t.verification.checks}</h2><ul>{result.checks.map(check => <li key={check.id}>{check.title ?? check.label}: {checkStatus(check.status)}{check.title === undefined || check.title === check.label ? null : <> <span className="check-id"><code>{check.label}</code></span></>}</li>)}</ul></>}<details className="result-technical"><summary>{t.verification.technicalTitle}</summary><p>{t.verification.technicalCode}: <code>{result.state}</code></p>{result.message === '' ? null : <p>{t.verification.technicalFailure}: <code>{result.message}</code></p>}</details></section> }
+
+/**
+ * Uma ação que faz a tarefa avançar: montar plano, criar, cancelar.
+ *
+ * Ela perdeu o herói com estrela e o título de tela, porque não é mais uma
+ * tela: é um botão abaixo da conversa, no mesmo alinhamento dela, como a
+ * referência mostra. A frase explicativa ficou, curta, porque é ela que diz o
+ * que o botão vai fazer — um botão sozinho num produto para quem não programa
+ * é uma adivinhação.
+ *
+ * A linha do tempo da construção e a frase da etapa saíram daqui e foram para
+ * a conversa, onde a tentativa em curso é contada. Desenhá-las nos dois
+ * lugares punha a mesma informação duas vezes na tela.
+ */
+function Action({ title, detail, button, busyButton, action }: { title: string; detail: string; button?: string; busyButton?: string; action?: () => Promise<void> }) {
+  return <div className="dz-acao">
+    <div className="dz-acao-texto"><strong>{title}</strong><span>{detail}</span></div>
+    {button === undefined || action === undefined ? null : <PendingButton className="dz-acao-botao" label={button} busyLabel={busyButton ?? button} action={action} />}
+  </div>
+}
+
+/**
+ * O relato do desfecho, no painel de detalhamento.
+ *
+ * Ele perdeu os BOTÕES — abrir a prévia e tentar de novo —, e não porque
+ * deixaram de existir: eles vivem na linha de ações da conversa, que é onde a
+ * pessoa age. Tê-los nos dois lugares punha o mesmo botão duas vezes na tela,
+ * e o e2e apanhou a duplicata como um seletor que casava com dois elementos.
+ * O que fica aqui é o que se LÊ: a frase do desfecho, as tentativas, os
+ * códigos de teste, os critérios conferidos e o código técnico.
+ */
+function Verification({ result }: { result: PipelineResult }) { return <section className="task-card"><h2>{t.verification.title}</h2><p>{resultSentence(result.state, t.verification)}</p>{result.notice === undefined || result.notice === '' ? null : <p className="truth">{result.notice}</p>}<p>{t.verification.attempts}: {result.attempts}</p>{result.resumed === true ? <p className="truth">{t.verification.resumed}</p> : null}{result.verificationCodes === undefined || result.verificationCodes.length === 0 ? null : <section><h2>{t.verification.testCodes}</h2><p>{t.verification.testCodesHelp}</p><ul>{result.verificationCodes.map(item => <li key={`${item.email}-${item.expires_at}-${item.code}`}><strong>{item.email}</strong>: <code>{item.code}</code></li>)}</ul></section>}{result.checks === undefined ? null : <><h2>{t.verification.checks}</h2><ul>{result.checks.map(check => <li key={check.id}>{check.title ?? check.label}: {checkStatus(check.status)}{check.title === undefined || check.title === check.label ? null : <> <span className="check-id"><code>{check.label}</code></span></>}</li>)}</ul></>}<details className="result-technical"><summary>{t.verification.technicalTitle}</summary><p>{t.verification.technicalCode}: <code>{result.state}</code></p>{result.message === '' ? null : <p>{t.verification.technicalFailure}: <code>{result.message}</code></p>}</details></section> }
 
 function refreshPreviewAdmission(previewUrl: string): void {
   const probe = document.createElement('iframe')
@@ -654,6 +885,21 @@ export function savedProjectOf(href: string): string | null {
 }
 
 /** Os estados em que uma execução ACABOU. */
+/*
+  O que `resultOfRun` REALMENTE lê.
+
+  Ela recebia o corpo inteiro da tarefa, e o corpo cresceu quando a conversa
+  passou a precisar de `turns`, `runs` e `evidence`. Pedir o corpo inteiro para
+  ler seis campos obrigaria todo chamador — e todo teste — a montar um projeto
+  completo só para perguntar como terminou a tentativa. O tipo abaixo diz o que
+  a função usa, e nada além disso.
+*/
+type DesfechoLido = {
+  project: { state: ProjectUiState }
+  current_run: null | (Pick<RunDetails, 'state' | 'stage' | 'attempt' | 'failure_code' | 'acceptance_checks'>
+    & { verification_codes?: VerificationCode[]; resumed_from_run_id?: string })
+}
+
 const TERMINAL_RUN_STATES = ['PASSED', 'FAILED', 'BLOCKED_EXTERNAL', 'BUDGET_EXCEEDED', 'CANCELLED']
 
 /**
@@ -669,7 +915,7 @@ const TERMINAL_RUN_STATES = ['PASSED', 'FAILED', 'BLOCKED_EXTERNAL', 'BUDGET_EXC
  * @param details - o projeto como o servidor devolve.
  * @returns o resultado terminal, ou `null`.
  */
-export function resultOfRun(details: ProjectDetails): PipelineResult | null {
+export function resultOfRun(details: DesfechoLido): PipelineResult | null {
   const current = details.current_run
   if (current === null || !TERMINAL_RUN_STATES.includes(current.state)) return null
   const state: PipelineResultState = details.project.state === 'INTERRUPTED' ? 'INTERRUPTED'

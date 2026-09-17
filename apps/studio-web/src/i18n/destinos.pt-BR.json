@@ -1,0 +1,23 @@
+{
+  "habilidadesTitulo": "Habilidades",
+  "habilidadesSubtitulo": "O que o DZ23 sabe fazer nas suas tarefas, e quem autorizou cada uma.",
+  "pluginsTitulo": "Plugins",
+  "pluginsSubtitulo": "As conexões com serviços de fora: servidores MCP, avisos e envio de e-mail.",
+  "bibliotecaTitulo": "Biblioteca",
+  "bibliotecaSubtitulo": "Os pacotes que as suas tarefas produziram, com tamanho, resumo e data.",
+  "bibliotecaVazia": "Nenhuma tarefa produziu pacote até agora. Ele nasce quando você exporta o resultado de uma tarefa.",
+  "bibliotecaSemTarefa": "Você ainda não tem tarefas, então não há pacote para guardar.",
+  "bibliotecaCarregando": "Lendo o acervo…",
+  "bibliotecaFiltroRotulo": "Mostrar de qual tarefa",
+  "bibliotecaTodas": "Todas as tarefas",
+  "bibliotecaDaTarefa": "Da tarefa",
+  "bibliotecaFalhou": "Não deu para ler o acervo agora.",
+  "agendadoTitulo": "Agendado",
+  "agendadoSubtitulo": "Tarefas que deveriam começar sozinhas, na hora que você marcar.",
+  "agendadoIndisponivel": "Esta função ainda não existe neste produto. Nada aqui está escondido nem desligado: o agendamento de tarefas não foi construído.",
+  "agendadoOQueFalta": "O que falta para ela existir",
+  "agendadoFaltaServidor": "Um serviço que guarde a hora marcada e comece a tarefa sem você estar na frente do computador.",
+  "agendadoFaltaLimite": "A ligação com o controle de gasto, para uma tarefa que começa sozinha não gastar mais do que você autorizou.",
+  "agendadoEnquantoIsso": "Enquanto isso, uma tarefa começa quando você a envia na página inicial.",
+  "voltar": "Voltar para o início"
+}

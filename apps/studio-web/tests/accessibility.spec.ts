@@ -1,6 +1,7 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 import { INTAKE_ANSWERS, answerIntake } from './answering'
+import { abrirDetalhamento, esperarResultado, fecharDetalhamento } from './resultado'
 
 const origin = 'http://studio.dz23.localhost:4179'
 
@@ -47,7 +48,15 @@ test.describe('acessibilidade do fluxo principal', () => {
     await check('ideia-preenchida')
 
     await page.getByRole('button', { name: 'Continuar' }).click()
-    await expect(page.getByRole('heading', { name: 'Só mais alguns detalhes' })).toBeVisible({ timeout: 15_000 })
+    /*
+      MAPA DE EQUIVALÊNCIA: o título "Só mais alguns detalhes" era o herói do
+      CARTÃO DE PERGUNTAS — uma tela própria, com caixa e título grandes, que a
+      decisão de produto listou entre o que não pode voltar. A garantia que ele
+      carregava era "enviar levou a pessoa adiante"; agora ela é afirmada pelo
+      que de fato acontece: a CONVERSA abre, e a pergunta é um lance dela.
+    */
+    await expect(page.getByLabel('Conversa desta tarefa')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Para quem você quer criar este projeto?')).toBeVisible()
     await check('perguntas')
 
     await answerIntake(page, INTAKE_ANSWERS)
@@ -60,10 +69,13 @@ test.describe('acessibilidade do fluxo principal', () => {
     await check('criacao')
 
     await page.getByRole('button', { name: 'Iniciar criação' }).click()
-    await expect(page.getByText('As verificações declaradas passaram neste computador.')).toBeVisible({ timeout: 40_000 })
-    await check('verificacao')
-    await expect(page.getByRole('heading', { name: 'O que aconteceu na criação' })).toBeVisible({ timeout: 20_000 })
-    await check('relato')
+    // O resultado chega na CONVERSA; o detalhamento continua inteiro, atrás do
+    // painel. `tests/resultado.ts` tem o mapa de equivalência.
+    await esperarResultado(page)
+    await check('conversa')
+    await abrirDetalhamento(page)
+    await check('detalhamento')
+    await fecharDetalhamento(page)
 
     expect(violations, violations.join('\n')).toEqual([])
   })
@@ -139,7 +151,15 @@ test.describe('o mesmo fluxo no modo escuro', () => {
     await check('ideia')
     await page.getByRole('button', { name: 'Página de apresentação' }).click()
     await page.getByRole('button', { name: 'Continuar' }).click()
-    await expect(page.getByRole('heading', { name: 'Só mais alguns detalhes' })).toBeVisible({ timeout: 15_000 })
+    /*
+      MAPA DE EQUIVALÊNCIA: o título "Só mais alguns detalhes" era o herói do
+      CARTÃO DE PERGUNTAS — uma tela própria, com caixa e título grandes, que a
+      decisão de produto listou entre o que não pode voltar. A garantia que ele
+      carregava era "enviar levou a pessoa adiante"; agora ela é afirmada pelo
+      que de fato acontece: a CONVERSA abre, e a pergunta é um lance dela.
+    */
+    await expect(page.getByLabel('Conversa desta tarefa')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Para quem você quer criar este projeto?')).toBeVisible()
     await check('perguntas')
     await answerIntake(page, INTAKE_ANSWERS)
     await page.getByRole('button', { name: 'Montar meu plano' }).click()
@@ -152,10 +172,13 @@ test.describe('o mesmo fluxo no modo escuro', () => {
     await expect(page.getByRole('button', { name: 'Iniciar criação' })).toBeVisible()
     await check('criacao')
     await page.getByRole('button', { name: 'Iniciar criação' }).click()
-    await expect(page.getByText('As verificações declaradas passaram neste computador.')).toBeVisible({ timeout: 40_000 })
-    await check('verificacao')
-    await expect(page.getByRole('heading', { name: 'O que aconteceu na criação' })).toBeVisible({ timeout: 20_000 })
-    await check('relato')
+    // O resultado chega na CONVERSA; o detalhamento continua inteiro, atrás do
+    // painel. `tests/resultado.ts` tem o mapa de equivalência.
+    await esperarResultado(page)
+    await check('conversa')
+    await abrirDetalhamento(page)
+    await check('detalhamento')
+    await fecharDetalhamento(page)
 
     await page.goto('/studio/ajuda')
     await expect(page.getByRole('heading', { name: 'Ajuda do DZ23 STUDIO' })).toBeVisible()

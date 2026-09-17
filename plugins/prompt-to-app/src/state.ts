@@ -84,3 +84,57 @@ export class UndoNotAvailableError extends Error {
 export function assertUndoTransition(from: ProjectState, to: ProjectState): void {
   if (!UNDO_TRANSITIONS[from].includes(to)) throw new UndoNotAvailableError(from, to)
 }
+
+/**
+ * Para onde PEDIR UMA MUDANÇA pode levar, e só ele.
+ *
+ * É o terceiro mapa deste arquivo, e pelo mesmo motivo que fez o segundo
+ * existir: alargar `PROJECT_TRANSITIONS` para caber a revisão daria ao pipeline
+ * um caminho de volta de qualquer desfecho para `SPEC_READY`, e uma tentativa
+ * reprovada poderia reentrar no planejamento sozinha, sem ninguém pedir.
+ *
+ * A origem é sempre um desfecho — um estado em que existe resultado para olhar.
+ * `GENERATING`, `BUILD_OK` e `TESTS_OK` NÃO aparecem: pedir mudança no meio de
+ * uma tentativa disputaria o estado com o pipeline que ainda está escrevendo
+ * nele, e é por isso que o compositor da conversa também segura o envio ali.
+ *
+ * O destino é sempre `SPEC_READY`, e nunca um estado mais adiantado: a pessoa
+ * ainda vai ver o plano novo e aprová-lo. A revisão reabre o caminho; ela não
+ * autoriza nada.
+ */
+export const REVISION_TRANSITIONS: Readonly<Record<ProjectState, readonly ProjectState[]>> = {
+  DRAFT: [],
+  SPEC_READY: [],
+  PLAN_PROPOSED: [],
+  PLAN_APPROVED: [],
+  GENERATING: [],
+  BUILD_OK: [],
+  BUILD_FAILED: ['SPEC_READY'],
+  TESTS_OK: [],
+  TESTS_FAILED: ['SPEC_READY'],
+  CANCELLED: ['SPEC_READY'],
+  INTERRUPTED: ['SPEC_READY'],
+  VERIFIED_PROTOTYPE: ['SPEC_READY'],
+}
+
+/**
+ * Se a tarefa aceita um pedido de mudança agora.
+ * @param state - o estado atual do projeto.
+ * @returns `true` quando existe um desfecho sobre o qual pedir mudança.
+ */
+export function canReviseFrom(state: ProjectState): boolean {
+  return REVISION_TRANSITIONS[state].length > 0
+}
+
+export class RevisionNotAvailableError extends Error {
+  readonly code = 'REVISION_NOT_AVAILABLE'
+  constructor(readonly from: ProjectState) { super(t('errors.revisionUnavailable')) }
+}
+
+/**
+ * Recusa um pedido de mudança que sairia do mapa de revisão.
+ * @param from - o estado atual do projeto.
+ */
+export function assertRevisionTransition(from: ProjectState): void {
+  if (!REVISION_TRANSITIONS[from].includes('SPEC_READY')) throw new RevisionNotAvailableError(from)
+}

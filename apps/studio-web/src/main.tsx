@@ -10,6 +10,8 @@ import { MissionScreen } from './mission/MissionScreen'
 import { isMissionPath } from './mission/missionApi'
 import { ProjectsScreen, isProjectsPath } from './projects/ProjectsScreen'
 import { isTeamPath } from './team/teamApi'
+import { AgendadoScreen, BibliotecaScreen, HabilidadesScreen, PluginsScreen } from './destinos/Destinos'
+import { destinoDoCaminho } from './destinos/destinos'
 /*
   O TEMA VEM ANTES da folha antiga, de propósito: `styles.css` ainda tem tokens
   claros no `:root`, e quem vier depois vence. Enquanto a migração acontece, é a
@@ -18,18 +20,30 @@ import { isTeamPath } from './team/teamApi'
 import './theme.css'
 import './shell/shell.css'
 import './home/home.css'
+import './tarefa/tarefa.css'
 import './styles.css'
 import { registerStudioPwa } from './pwa/register'
 import { SessionRevocationBoundary } from './session/SessionRevocationBoundary'
 import { WorkspaceShell } from './shell/WorkspaceShell'
 
-const Screen = window.location.pathname === ASSISTANT_PATH
-  ? AssistantEntry
-  : isHubPath(window.location.pathname) ? HubPanel
-    : isTeamPath(window.location.pathname) ? TeamScreen
-      : isHelpPath(window.location.pathname) ? HelpScreen
-        : isProjectsPath(window.location.pathname) ? ProjectsScreen
-          : isMissionPath(window.location.pathname) ? MissionScreen : App
+/*
+  Os quatro destinos novos vêm ANTES do Hub na escolha, e a ordem é de
+  propósito: `/studio/habilidades` e `/studio/plugins` são endereços próprios, e
+  o endereço antigo do Hub continua existindo com a tela inteira, para quem o
+  tiver guardado.
+*/
+const destino = destinoDoCaminho(window.location.pathname)
+const Screen = destino === 'habilidades' ? HabilidadesScreen
+  : destino === 'plugins' ? PluginsScreen
+    : destino === 'biblioteca' ? BibliotecaScreen
+      : destino === 'agendado' ? AgendadoScreen
+        : window.location.pathname === ASSISTANT_PATH
+          ? AssistantEntry
+          : isHubPath(window.location.pathname) ? HubPanel
+            : isTeamPath(window.location.pathname) ? TeamScreen
+              : isHelpPath(window.location.pathname) ? HelpScreen
+                : isProjectsPath(window.location.pathname) ? ProjectsScreen
+                  : isMissionPath(window.location.pathname) ? MissionScreen : App
 /**
  * A tela inicial já traz a própria casca (ela precisa do estado de saúde, da
  * conta e do aviso de notificação no topo). As demais recebem a casca AQUI —

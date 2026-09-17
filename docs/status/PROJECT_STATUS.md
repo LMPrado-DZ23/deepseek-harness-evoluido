@@ -363,6 +363,67 @@ produto existe para não fazer.
     Seguem abertos, do mesmo parecer: rotulagem de prova, workspace completo,
     Modo Empresa e RLS não ativada.
 
+32. **OS-102 — a tarefa virou CONVERSA, e a home e a tarefa viraram uma jornada
+    só.** O proprietário recusou a tela anterior com uma frase que não é sobre
+    cor: *"ela ainda apresenta o assistente antigo de cinco etapas como
+    estrutura principal"*. O que mudou aqui não é o tema — é onde as coisas
+    moram.
+
+    **A conversa não exigiu armazenamento novo, e essa é a parte que importa.**
+    `GET /projects/:id` já devolvia pedido, turnos de admissão, plano,
+    tentativas e evidências no mesmo corpo; a tela lia três desses campos e
+    jogava fora `turns`, `runs` e `evidence`. Era o descarte, e não a falta de
+    um diário, que fazia a conversa parecer impossível. `transcricao.ts` é uma
+    função pura de corpo-da-tarefa para lances em ordem; `compositor.ts` é uma
+    função pura de estado para destino do envio, e **nenhum estado devolve
+    "abrir outra tarefa"** — é o requisito VIS-03 escrito como teste.
+
+    O pipeline de cinco fases continua **inteiro** por baixo. Ele deixou de ser
+    a moldura da tela e virou lógica interna: perguntas e plano aparecem na
+    conversa, o progresso é compacto, e o detalhamento antigo — resultado,
+    relato, pontos seguros e o trilho numerado — abre no painel lateral, que é
+    a "visualização diagnóstica secundária" que a decisão permite.
+
+    **Um contrato novo:** `POST /projects/:projectId/revise`. Continuar depois
+    de um resultado não tinha onde acontecer (`plan/change` exige plano
+    `PROPOSED`; depois de um desfecho ele está `APPROVED`), e sem ponto de
+    extensão "continuar" teria de criar outro projeto — o defeito recusado. O
+    pedido vira critério de aceite na especificação, com `origin: 'edit'`, que
+    já existia no esquema para este caso. A versão do domínio **não** sobe. E a
+    revisão não aprova nada: a pessoa ainda vê o plano novo e o aprova.
+
+    **Os seis destinos entraram no trilho.** A regra anterior era "sem tela, sem
+    linha"; a decisão inverteu: *"ausência de função significa implementar e
+    manter a pendência"*. Habilidades e Plugins compartilham o Hub e mostram
+    recortes disjuntos; Biblioteca é o acervo de pacotes exportados — não um
+    apelido de Projetos; Agendado tem destino real, diz que a função não existe
+    e o que falta, e está marcado `pendente` onde um teste alcança.
+
+    **Nove achados saíram da execução, nenhum procurado.** Uma rota declarada e
+    inalcançável (o casador de caminhos era uma segunda lista, e virou derivação
+    do contrato). Uma ordenação de sufixos que era código morto — a sabotagem
+    sobreviveu, e medir mostrou que a alternância do regex **retrocede**; o
+    comentário que a justificava estava errado. Uma região que rola sem foco.
+    Uma página sem marco principal e sem título. Um painel que escondia o
+    `<main>` no celular. A mesma informação desenhada duas vezes em três
+    lugares. E um plano devolvido para revisão que continuava editável, porque a
+    tela guardava `null` em vez de ler o status do servidor.
+
+    **Quatro sabotagens sobreviveram na primeira rodada**, e cada uma teve
+    destino declarado: duas eram código morto ou redundância e saíram, duas eram
+    buracos e viraram teste — inclusive um que afirmava uma regra com UMA
+    especificação quando o laço começa na segunda, e por isso nunca a
+    exercitava.
+
+    **O que esta entrega NÃO prova:** semelhança visual é julgamento do
+    proprietário — as capturas e a gravação em `apps/studio-web/capturas/` saem
+    do build entregue e servem para comparar com F01/F16/F17, não para declarar
+    aceite. O estado dos dados é tarefa criada na hora, no servidor de teste,
+    com construtor **dublê**: prova de interface e de integração com o servidor
+    de teste, **não** de geração com IA real nem do perfil Cordis. Os menus do
+    compositor, o modal de preferências, compartilhar, uso e arquivos da tarefa
+    ficam para a etapa seguinte, na ordem que a própria decisão manda.
+
 ## Estado do DAG
 
 **32 DONE, 3 PARCIAL, 2 BLOCKED.** As cinco que restam **não têm engenharia

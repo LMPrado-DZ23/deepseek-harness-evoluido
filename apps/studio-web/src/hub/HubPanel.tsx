@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import t from '../i18n/hub.pt-BR.json'
 import { PendingButton } from '../PendingButton'
 import { createHubApi, HubApiError, type ExportRecord, type HubApi, type HubEvent, type Integration, type IntegrationCatalog, type IntegrationTestResult, type ProjectSummary, type RemovedIntegration, type SmtpState } from './hubApi'
-import { CATALOG_PAGE_SIZE, actionLabel, approvalNote, approvalPrompt, catalogCount, canInstallSkillBody, catalogEmptyMessage, confirmStep, costLabel, enableExplanation, exportable, fill, formatBytes, formatDate, healthCounts, healthLabel, kindLabel, outcomeLabel, skillBodyMessages, skillBodyState, tierLabel, verificationLabel, type ConfirmStepModel, type KindFilter, type StatusFilter } from './presentation'
+import { CATALOG_PAGE_SIZE, actionLabel, approvalNote, approvalPrompt, catalogCount, canInstallSkillBody, catalogEmptyMessage, confirmStep, costLabel, enableExplanation, exportable, fill, formatBytes, formatDate, healthCounts, healthLabel, kindLabel, outcomeLabel, skillBodyMessages, skillBodyState, tierLabel, verificationLabel, type ConfirmStepModel, type IntegrationKind, type KindFilter, type StatusFilter } from './presentation'
 import { WebMcpPanel, useWebMcpSetting } from '../webmcp/WebMcpPanel'
 import { browserModelContext, registerStudioTools } from '../webmcp/tools'
 import { studioPort } from '../webmcp/studioPort'
@@ -59,7 +59,26 @@ function WebMcpSection() {
   return <WebMcpPanel available={context !== undefined} enabled={enabled} setEnabled={setEnabled} port={studioPort} />
 }
 
-export function HubPanel({ api = defaultHubApi, homeHref = '/studio/' }: { api?: HubApi; homeHref?: string }) {
+/**
+ * A tela do Hub, e os dois RECORTES dela.
+ *
+ * `escopo` não é um filtro a mais: é qual destino está aberto. Habilidades e
+ * Plugins compartilham este componente e o serviço por trás dele — o que a
+ * decisão de produto permite em palavras — e mostram listas que não se
+ * encontram: uma habilidade é texto que entra no contexto de um agente, um
+ * plugin é uma conexão com um serviço de fora. Sem `escopo` (o endereço antigo
+ * do Hub) a tela continua mostrando tudo, que é o que ela sempre fez.
+ *
+ * O envio de e-mail só aparece em Plugins: configurar SMTP é conectar um
+ * serviço de fora, e ele não tem o que fazer na tela de habilidades.
+ */
+export function HubPanel({ api = defaultHubApi, homeHref = '/studio/', escopo, titulo, subtitulo }: {
+  api?: HubApi
+  homeHref?: string
+  escopo?: readonly IntegrationKind[]
+  titulo?: string
+  subtitulo?: string
+}) {
   const [smtp, setSmtp] = useState<SmtpState | null>(null)
   const [projects, setProjects] = useState<ProjectSummary[] | null>(null)
   const [events, setEvents] = useState<HubEvent[] | null>(null)
@@ -92,13 +111,17 @@ export function HubPanel({ api = defaultHubApi, homeHref = '/studio/' }: { api?:
   return <main className="hub-page">
     <header className="hub-header">
       <a className="hub-back" href={homeHref}><ArrowLeft aria-hidden="true" /><span>{t.back}</span></a>
-      <div><h1>{t.title}</h1><p>{t.subtitle}</p></div>
+      <div><h1>{titulo ?? t.title}</h1><p>{subtitulo ?? t.subtitle}</p></div>
     </header>
     {notice === null ? null : <p className={`hub-notice ${notice.kind}`} role={notice.kind === 'error' ? 'alert' : 'status'}>{notice.text}</p>}
     <div className="hub-grid">
-      <SmtpSection api={api} state={smtp} onChange={async () => { setSmtp(await api.smtp()); setEvents(await api.events()) }} notify={setNotice} report={report} />
-      <IntegrationsSection api={api} onChange={async () => { setEvents(await api.events()) }} notify={setNotice} report={report} />
-      <ExportsSection api={api} projects={projects} onChange={async () => { setEvents(await api.events()) }} notify={setNotice} report={report} />
+      {escopo !== undefined && !escopo.includes('smtp') ? null
+        : <SmtpSection api={api} state={smtp} onChange={async () => { setSmtp(await api.smtp()); setEvents(await api.events()) }} notify={setNotice} report={report} />}
+      <IntegrationsSection api={api} onChange={async () => { setEvents(await api.events()) }} notify={setNotice} report={report} {...(escopo === undefined ? {} : { escopo })} />
+      {/* A exportação é a porta de entrada da Biblioteca e mora LÁ. Ela fica
+          aqui só no endereço antigo do Hub, que continua sendo a tela única. */}
+      {escopo !== undefined ? null
+        : <ExportsSection api={api} projects={projects} onChange={async () => { setEvents(await api.events()) }} notify={setNotice} report={report} />}
       {/* O WebMCP mora AQUI, e não numa tela de ajustes: o Hub é a tela do "o
           que pode agir em nome deste espaço de trabalho", e o assistente do
           navegador é exatamente mais um desses. */}
@@ -184,7 +207,7 @@ function SmtpSection({ api, state, onChange, notify, report }: SectionProps & { 
  * recebe uma página. Receber tudo e filtrar aqui não seria paginação — seria
  * fingir que é, e o custo cresceria junto com o catálogo de quem tem muitas.
  */
-function IntegrationsSection({ api, onChange, notify, report }: SectionProps) {
+function IntegrationsSection({ api, onChange, notify, report, escopo }: SectionProps & { escopo?: readonly IntegrationKind[] }) {
   const [manifestText, setManifestText] = useState('')
   const [reasons, setReasons] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
@@ -201,10 +224,10 @@ function IntegrationsSection({ api, onChange, notify, report }: SectionProps) {
   const [tests, setTests] = useState<Readonly<Record<string, IntegrationTestResult | 'RUNNING'>>>({})
 
   const load = useCallback(async (next: { search: string; kind: KindFilter; status: StatusFilter }) => {
-    const answer = await api.integrations({ ...next, limit: CATALOG_PAGE_SIZE })
+    const answer = await api.integrations({ ...next, ...(escopo === undefined ? {} : { escopo }), limit: CATALOG_PAGE_SIZE })
     setRows(answer.integrations)
     setPage(answer)
-  }, [api])
+  }, [api, escopo])
 
   useEffect(() => { load(query).catch(report) }, [load, query, report])
 

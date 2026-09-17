@@ -5,7 +5,7 @@ type Details = Parameters<typeof resultOfRun>[0]
 
 const details = (run: Partial<NonNullable<Details['current_run']>> & { state: NonNullable<Details['current_run']>['state'] }, projectState: Details['project']['state'] = 'VERIFIED_PROTOTYPE'): Details => ({
   project: { state: projectState },
-  current_run: { operation_id: 'op', stage: 'verify', attempt: 1, failure_code: null, acceptance_checks: [], ...run },
+  current_run: { stage: 'verify', attempt: 1, failure_code: null, acceptance_checks: [], ...run },
 })
 
 describe('o resultado que a tela mostra', () => {

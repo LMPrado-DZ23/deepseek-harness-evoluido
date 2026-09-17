@@ -8,7 +8,8 @@ import type {
   StudioCreationKey,
   StudioDesignSpecRecord, StudioIntakeTurn, StudioPlan, StudioPlanSlice, StudioProject, StudioProjectCategory, StudioRun,
 } from './model.js'
-import { assertProjectTransition, assertUndoTransition } from './state.js'
+import { assertProjectTransition, assertRevisionTransition, assertUndoTransition, RevisionNotAvailableError } from './state.js'
+import { especificacaoRevisada, RevisionError } from './revision.js'
 import { appendPlanSlice, applyPlanEdit, planRevision, PlanEditError, type PlanEdit } from './plan-edit.js'
 import { listIntakeTurns, putIntakeTurn, type IntakeTurnRecordStore } from './intake-turn-store.js'
 import { listDesignSpecs, putDesignSpec, type DesignSpecRecordStore } from './design-spec-store.js'
@@ -308,6 +309,26 @@ export class PromptToAppService {
     return value
   }
 
+  /**
+   * TODAS as especificações desta tarefa, da mais antiga para a mais recente.
+   *
+   * `latestSpec` responde "qual vale agora"; esta responde "por onde ela
+   * passou", que é outra pergunta — e é a que a conversa faz para mostrar os
+   * pedidos de mudança da pessoa.
+   * @param actor - quem pergunta.
+   * @param projectId - a tarefa.
+   * @returns as especificações, ordenadas pela versão.
+   */
+  async specs(actor: PromptToAppActor, projectId: string): Promise<readonly StudioAppSpecRecord[]> {
+    this.project(actor, projectId)
+    const rows = this.#appSpecStore === undefined
+      ? this.#repository.specs()
+      : await listAppSpecs(this.#appSpecStore, { orgId: actor.orgId, tenantId: actor.tenantId })
+    return rows
+      .filter(candidate => candidate.project_id === projectId && this.#sameScope(actor, candidate))
+      .sort((left, right) => left.version - right.version)
+  }
+
   async saveDesign(actor: PromptToAppActor, projectId: string, input: DesignSelection): Promise<StudioDesignSpecRecord> {
     return this.#saveDesign(actor, projectId, createDesignSpec(input))
   }
@@ -488,6 +509,52 @@ export class PromptToAppService {
     await this.#putPlan(updated)
     await this.#approval(actor, projectId, 'plan', `${updated.plan_id}:r${String(planRevision(updated))}`, 'T1', false)
     return updated
+  }
+
+  /**
+   * Pede uma alteração numa tarefa que já produziu um resultado.
+   *
+   * O pedido entra na especificação como critério de aceite (a regra inteira
+   * está em `revision.ts`, que é função pura) e o projeto volta a `SPEC_READY`
+   * pelo mapa de revisão — que é SEPARADO do mapa normal, pelo mesmo motivo
+   * que o mapa de desfazer é.
+   *
+   * O que ele NÃO faz, e a ausência é o requisito: não propõe plano, não
+   * aprova e não inicia tentativa. Depois daqui a pessoa vê o plano novo e o
+   * aprova, como sempre. Uma revisão que gerasse sozinha seria gasto sem
+   * ninguém olhar.
+   * @param actor - quem pede.
+   * @param projectId - a tarefa, que continua sendo a mesma.
+   * @param pedido - o texto escrito no compositor da conversa.
+   * @returns o projeto de volta em `SPEC_READY` e a especificação nova.
+   */
+  async reviseProject(actor: PromptToAppActor, projectId: string, pedido: string): Promise<{ readonly project: StudioProject; readonly spec: StudioAppSpecRecord }> {
+    this.#authorize(actor, 'project.write')
+    const project = this.project(actor, projectId)
+    // Os dois erros do módulo viram erro DESTE serviço aqui, e não na camada
+    // HTTP: quem chama o serviço direto — o assistente, um teste de domínio —
+    // recebe a mesma recusa que a rota, com o mesmo código.
+    let revisada: AppSpecV1
+    try {
+      assertRevisionTransition(project.state)
+      const anterior = await this.latestSpec(actor, projectId)
+      revisada = especificacaoRevisada(anterior.app_spec, pedido)
+    } catch (error) {
+      // Repetido e fora de hora são os dois "o mundo não está como você
+      // pensou" — 409, e não 400: quem escreveu não errou nada.
+      if (error instanceof RevisionNotAvailableError) throw new PromptToAppError('REPLAY', error.message)
+      if (error instanceof RevisionError) throw new PromptToAppError(error.code === 'DUPLICATE' ? 'REPLAY' : 'INVALID', error.message)
+      throw error
+    }
+    // A especificação é gravada ANTES da transição, e a ordem é a mesma lição
+    // da reserva de criação: com o estado mudado primeiro, uma queda no meio
+    // deixaria a tarefa aberta para planejar sem que o pedido tivesse entrado.
+    const spec = await this.saveSpec(actor, projectId, revisada, 'edit')
+    const atual = this.project(actor, projectId)
+    const updated: StudioProject = { ...atual, state: 'SPEC_READY', updated_at: this.#now().toISOString() }
+    await this.#repository.putProject(updated)
+    await this.#approval(actor, projectId, 'transition', `revise:${spec.spec_id}`, 'T1', false, project.state, 'SPEC_READY')
+    return { project: updated, spec }
   }
 
   async transition(actor: PromptToAppActor, projectId: string, to: ProjectState): Promise<StudioProject> {

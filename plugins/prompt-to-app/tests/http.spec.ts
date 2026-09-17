@@ -8,7 +8,7 @@ import { CSRF_COOKIE, IdentityError, SESSION_COOKIE, type SessionRecord, type St
 import type { StudioTenancyService } from '@dz23-studio/tenancy'
 import type { AppSpecV1 } from '../src/appspec.js'
 import { buildCodeIndex } from '../src/code-intelligence.js'
-import { createPromptToAppHttpHandler, type PromptToAppHttpConfig, registerPromptToAppWorkspaceHttpExtension, PROMPT_TO_APP_ROUTE_CONTRACTS } from '../src/http.js'
+import { createPromptToAppHttpHandler, type PromptToAppHttpConfig, registerPromptToAppWorkspaceHttpExtension, PROMPT_TO_APP_ROUTE_CONTRACTS, expressaoDeRota, matchRoute } from '../src/http.js'
 import { IntakeEngine } from '../src/intake.js'
 import type { StudioCreationKey, StudioApproval, StudioAppSpecRecord, StudioDesignSpecRecord, StudioEvidence, StudioIntakeTurn, StudioPlan, StudioProject, StudioRun } from '../src/model.js'
 import type { PromptToAppJobService } from '../src/jobs.js'
@@ -127,13 +127,151 @@ async function fixture(options: {
   return { request, requestAs, service, repository, identity, tenancy, jobs, planner, allowedHosts, host, lastPlanned: () => planned }
 }
 
+/**
+ * Uma tarefa com especificação pronta e um desfecho, pela rota.
+ *
+ * O caminho até a especificação é o do produto — criar e responder a admissão —
+ * porque é ele que grava a especificação que a revisão vai ler. O desfecho é
+ * escrito direto no repositório, e só ele: rodar o pipeline inteiro aqui
+ * testaria o pipeline, que tem os testes dele, e deixaria este arquivo
+ * dependendo de um construtor para conferir uma rota.
+ * @param f - o fixture.
+ * @returns o identificador da tarefa.
+ */
+async function tarefaComResultado(f: Awaited<ReturnType<typeof fixture>>): Promise<string> {
+  const criada = await (await f.request('/projects', { method: 'POST', body: JSON.stringify({
+    name: 'Site', original_brief: 'Quero apresentar meus serviços.', category: 'landing-page', privacy: 'local-only',
+  }) })).json() as { project: { project_id: string } }
+  const projectId = criada.project.project_id
+  for (const answer of ['Clientes locais', 'Conhecer os serviços', 'Serviços e contato']) {
+    await f.request(`/projects/${projectId}/intake/answer`, { method: 'POST', body: JSON.stringify({ answer, recommend: false }) })
+  }
+  const projeto = f.repository.projectRows.find(row => row.project_id === projectId)!
+  await f.repository.putProject({ ...projeto, state: 'VERIFIED_PROTOTYPE' })
+  return projectId
+}
+
 describe('prompt-to-app HTTP boundary', () => {
   it('declares every route with authorization and no client-owned scope', () => {
     // A contagem sobe DE PROPÓSITO quando uma rota nasce: ela é o que impede
     // uma rota nova de aparecer sem alguém olhar a autorização dela.
-    // 18 desde `POST /projects/:projectId/plan/slice` (E-03).
-    expect(PROMPT_TO_APP_ROUTE_CONTRACTS).toHaveLength(18)
+    // 19 desde `POST /projects/:projectId/revise` (continuar a mesma tarefa
+    // depois de um resultado, decisão `DZ23-VISUAL-VIDEO-20260916-R1`).
+    expect(PROMPT_TO_APP_ROUTE_CONTRACTS).toHaveLength(19)
     expect(PROMPT_TO_APP_ROUTE_CONTRACTS.every(route => route.access === 'authorized' && route.permission !== null)).toBe(true)
+  })
+
+  it('TODA rota declarada no contrato é alcançável pelo casador de caminhos', () => {
+    /*
+      Encontrado medindo, e não supondo: `POST /projects/:projectId/revise`
+      estava no contrato, tinha tratamento no despachante e respondia 404,
+      porque o sufixo não entrara na expressão do casador. As duas listas
+      descrevem o mesmo conjunto e discordaram em silêncio.
+
+      Este teste pergunta às duas e compara. Uma rota nova que entre só numa
+      delas reprova aqui, com o nome dela impresso.
+    */
+    const inalcancaveis = PROMPT_TO_APP_ROUTE_CONTRACTS.filter(rota => {
+      const caminho = rota.path.replace(':projectId', 'proj-1')
+      return matchRoute(rota.method, caminho) === undefined
+    })
+    expect(inalcancaveis.map(rota => `${rota.method} ${rota.path}`)).toEqual([])
+  })
+
+  it('um sufixo LONGO casa inteiro mesmo declarado DEPOIS do curto que o prefixa', () => {
+    /*
+      A ordem em que os sufixos são declarados não pode mudar o resultado, e
+      este teste é o que prova isso — com a ordem invertida de propósito, que é
+      a que o contrato de hoje não produz.
+
+      Uma versão anterior deste arquivo ordenava os sufixos do mais longo para o
+      mais curto para "garantir" isto. A ordenação sobreviveu à sabotagem que a
+      removia, e a medição explicou por quê: a alternância do regex retrocede
+      quando a âncora falha. A ordenação saiu; este teste ficou, porque a
+      propriedade continua valendo a pena afirmar.
+    */
+    const expressao = expressaoDeRota(['/plan', '/plan/approve', '/design', '/design/logo'])
+    expect(expressao.exec('/projects/p1/plan/approve')?.[2]).toBe('/plan/approve')
+    expect(expressao.exec('/projects/p1/design/logo')?.[2]).toBe('/design/logo')
+    expect(expressao.exec('/projects/p1/plan')?.[2]).toBe('/plan')
+  })
+
+  it('a leitura da tarefa traz a pergunta AINDA SEM RESPOSTA, e para de trazer quando não há', async () => {
+    /*
+      Recarregar a página no meio das perguntas devolvia a tarefa sem a
+      pergunta: quem recarregava ficava numa etapa sem saída, e a tela
+      contornava isso desistindo de restaurar a tarefa. Com a pergunta no
+      corpo, ela vira um lance da conversa como qualquer outro.
+
+      A pergunta é DERIVADA dos turnos, pela mesma função que a rota de
+      resposta usa — nada novo é gravado para isto existir.
+    */
+    const f = await fixture()
+    const criada = await (await f.request('/projects', { method: 'POST', body: JSON.stringify({
+      name: 'Site', original_brief: 'Quero apresentar meus serviços.', category: 'landing-page', privacy: 'local-only',
+    }) })).json() as { project: { project_id: string }; next: { id: string } }
+    const projectId = criada.project.project_id
+
+    const primeira = await (await f.request(`/projects/${projectId}`)).json() as { next: { id: string } | null }
+    expect(primeira.next?.id).toBe(criada.next.id)
+
+    for (const answer of ['Clientes locais', 'Conhecer os serviços', 'Serviços e contato']) {
+      await f.request(`/projects/${projectId}/intake/answer`, { method: 'POST', body: JSON.stringify({ answer, recommend: false }) })
+    }
+    // Respondidas todas, a especificação existe e não há mais pergunta aberta.
+    // Devolver uma aqui faria a conversa mostrar uma pergunta já respondida.
+    const depois = await (await f.request(`/projects/${projectId}`)).json() as { next: unknown }
+    expect(depois.next).toBeNull()
+  })
+
+  it('a leitura da tarefa traz os PEDIDOS DE MUDANÇA, para a conversa mostrá-los', async () => {
+    // Sem eles no corpo, o que a pessoa escreveu some da tarefa e reaparece só
+    // como um critério dentro do plano seguinte — que é o oposto de continuar
+    // a conversa.
+    const f = await fixture()
+    const criada = await tarefaComResultado(f)
+    await f.request(`/projects/${criada}/revise`, { method: 'POST', body: JSON.stringify({ request: 'o botão de enviar precisa ficar verde' }) })
+    const lido = await (await f.request(`/projects/${criada}`)).json() as { revisions: { request: string }[] }
+    expect(lido.revisions.map(revisao => revisao.request)).toEqual(['o botão de enviar precisa ficar verde'])
+  })
+
+  it('uma tarefa sem pedido de mudança traz a lista VAZIA, e não ausente', async () => {
+    const f = await fixture()
+    const criada = await tarefaComResultado(f)
+    const lido = await (await f.request(`/projects/${criada}`)).json() as { revisions: unknown[] }
+    expect(lido.revisions).toEqual([])
+  })
+
+  it('a rota de revisão exige ESCRITA no projeto, como as outras que mudam estado', () => {
+    // A contagem acima obriga alguém a olhar a rota nova; este teste é o
+    // "olhar". Uma revisão muda o estado da tarefa e grava especificação: ela
+    // não pode entrar com permissão de leitura nem com escopo do cliente.
+    const revise = PROMPT_TO_APP_ROUTE_CONTRACTS.find(route => route.path === '/projects/:projectId/revise')
+    expect(revise).toMatchObject({ method: 'POST', access: 'authorized', permission: 'project.write', scope: 'project' })
+  })
+
+  it('a revisão pela rota continua na MESMA tarefa e devolve a especificação nova', async () => {
+    const f = await fixture()
+    const criada = await tarefaComResultado(f)
+    const resposta = await f.request(`/projects/${criada}/revise`, {
+      method: 'POST', body: JSON.stringify({ request: 'o botão de enviar precisa ficar verde' }),
+    })
+    expect(resposta.status).toBe(200)
+    const corpo = (await resposta.json()) as { project: { project_id: string; state: string }; spec_id: string }
+    expect(corpo.project.project_id).toBe(criada)
+    expect(corpo.project.state).toBe('SPEC_READY')
+    expect(corpo.spec_id).toEqual(expect.any(String))
+  })
+
+  it('pedir revisão antes de existir resultado é recusado, e não cria tarefa nenhuma', async () => {
+    const f = await fixture()
+    const corpo = { name: 'Meu site', original_brief: 'Quero apresentar meu trabalho.', category: 'landing-page', privacy: 'local-only' }
+    const criada = (await (await f.request('/projects', { method: 'POST', body: JSON.stringify(corpo) })).json()) as { project: { project_id: string } }
+    const recusada = await f.request(`/projects/${criada.project.project_id}/revise`, {
+      method: 'POST', body: JSON.stringify({ request: 'muda o botão de lugar' }),
+    })
+    expect(recusada.status).toBe(409)
+    expect(f.repository.projectRows).toHaveLength(1)
   })
 
 

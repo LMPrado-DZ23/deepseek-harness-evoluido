@@ -29,15 +29,37 @@ import { expect, type Page } from '@playwright/test'
  * passar cedo.
  */
 export async function answerIntake(page: Page, answers: readonly string[]): Promise<void> {
-  const responder = page.getByRole('button', { name: 'Responder e continuar' })
+  /*
+    MAPA DE EQUIVALÊNCIA — decisão `DZ23-VISUAL-VIDEO-20260916-R1`.
+
+    | antes                                   | agora                                  |
+    | --------------------------------------- | -------------------------------------- |
+    | campo "Sua resposta" do cartão de perguntas | o COMPOSITOR inferior da conversa  |
+    | botão "Responder e continuar"           | botão "Enviar" do compositor           |
+
+    O cartão de perguntas era uma tela com título grande e caixa própria, e
+    estava na lista do que o proprietário recusou. A pergunta agora é um lance
+    da conversa e a resposta vai pelo mesmo compositor que continua a tarefa —
+    que é a jornada única que a decisão pede. Este teste passou a exercitar
+    esse caminho, que é o que a pessoa realmente usa.
+
+    A espera continua sendo a mesma ideia, e continua existindo pelo mesmo
+    motivo: o laço original digitava antes de a resposta anterior ser
+    absorvida, e o texto ia embora com a troca de pergunta. Aqui o sinal é o
+    botão "Enviar" desabilitado com `aria-busy="false"` — campo vazio e nada no
+    ar —, que é o único estado em que a próxima resposta pode ser digitada sem
+    corrida.
+  */
+  const enviar = page.getByRole('button', { name: 'Enviar' })
+  const campo = page.getByLabel('Escreva aqui para continuar esta tarefa')
   for (const answer of answers) {
-    await expect(responder).toBeDisabled()
-    await expect(responder).toHaveAttribute('aria-busy', 'false')
-    await page.getByLabel('Sua resposta').fill(answer)
-    await expect(responder).toBeEnabled()
-    await responder.click()
+    await expect(enviar).toBeDisabled()
+    await expect(enviar).toHaveAttribute('aria-busy', 'false')
+    await campo.fill(answer)
+    await expect(enviar).toBeEnabled()
+    await enviar.click()
   }
 }
 
-/** As três respostas usadas pela suíte inteira, para a jornada ser a mesma. */
+/** As três respostas da admissão, iguais em todos os testes que a percorrem. */
 export const INTAKE_ANSWERS = ['Clientes locais', 'Conhecer os serviços', 'Serviços e contato'] as const

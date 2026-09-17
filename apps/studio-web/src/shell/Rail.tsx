@@ -1,4 +1,4 @@
-import { Blocks, Bot, CircleHelp, FolderOpen, ListChecks, SquarePen, Target, X, Zap, type LucideIcon } from 'lucide-react'
+import { Blocks, Bot, CircleHelp, Clock, FolderOpen, Library, ListChecks, SquarePen, Target, X, Zap, type LucideIcon } from 'lucide-react'
 import { RAIL_ID, railSecoes, type RailIcone } from './rail'
 import rail from '../i18n/rail.pt-BR.json'
 
@@ -16,7 +16,7 @@ import rail from '../i18n/rail.pt-BR.json'
  * borrado é o que "extração ruim" parece para quem olha.
  */
 const ICONES: Readonly<Record<RailIcone, LucideIcon>> = {
-  SquarePen, Bot, Zap, Blocks, FolderOpen, ListChecks, Target, CircleHelp,
+  SquarePen, Bot, Zap, Blocks, FolderOpen, ListChecks, Target, CircleHelp, Clock, Library,
 }
 
 export function Rail({ ativo, aberto, aoFechar }: {

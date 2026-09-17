@@ -1,6 +1,7 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, request as apiRequest, test } from '@playwright/test'
 import { INTAKE_ANSWERS, answerIntake } from './answering'
+import { esperarResultado } from './resultado'
 
 test('recusa interface e API sem sessão', async () => {
   const client = await apiRequest.newContext({
@@ -89,11 +90,18 @@ test('o vizinho NAO consegue plantar o nome forte, e por isso nao tranca ninguem
 test('abre o Integration Hub pela navegação autenticada do Studio', async ({ context, page }) => {
   await context.addCookies([{ name: 'dz23_studio_session', value: 'e2e', url: 'http://studio.dz23.localhost:4179' }])
   await page.goto('/studio/')
-  const link = page.getByRole('link', { name: 'Integrações' })
-  await expect(link).toHaveAttribute('href', '/studio/hub')
+  /*
+    MAPA DE EQUIVALÊNCIA: o item único "Integrações" virou dois destinos,
+    "Habilidades" e "Plugins", cada um com a vista própria que a decisão pede.
+    Este teste segue o de PLUGINS, porque é ele que guarda os conectores e o
+    envio de e-mail que o resto do caso confere. O título da tela mudou junto,
+    e é o do destino aberto, não mais o do Hub inteiro.
+  */
+  const link = page.getByRole('link', { name: 'Plugins', exact: true })
+  await expect(link).toHaveAttribute('href', '/studio/plugins')
   await link.click()
-  await expect(page).toHaveURL(/\/studio\/hub$/u)
-  await expect(page.getByRole('heading', { level: 1, name: 'Integrações e pacote do protótipo' })).toBeVisible()
+  await expect(page).toHaveURL(/\/studio\/plugins$/u)
+  await expect(page.getByRole('heading', { level: 1, name: 'Plugins' })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Voltar ao Studio' })).toHaveAttribute('href', '/studio/')
 
   // WebMCP: a seção existe, explica o que ficaria exposto, e NESTE navegador
@@ -215,7 +223,17 @@ test('percorre as cinco etapas, muda privacidade e termina sem alegar publicaç�
   await page.getByRole('button', { name: 'Guardar minha alteração' }).click()
   expect((await editedPromise).status()).toBe(200)
   await expect(page.locator('.plan-list .task-card h2').last()).toContainText('Fale conosco')
-  await expect(page.getByText('O telefone aparece.')).toBeVisible()
+  /*
+    A busca é feita DENTRO do editor de plano, e não na página inteira.
+
+    A conversa também guarda o plano, como um lance recolhível — as duas
+    superfícies falam do mesmo plano, e é assim que tem de ser: uma é o
+    histórico, a outra é onde se edita. Procurar na página inteira encontrava
+    as duas e reprovava por ambiguidade, o que é o teste pedindo que se diga
+    qual das duas se quer conferir. Esta quer conferir o EDITOR.
+  */
+  const editor = page.getByLabel('Confira o plano')
+  await expect(editor.getByText('O telefone aparece.')).toBeVisible()
   await expect(page.getByText('Este plano tem alterações suas.')).toBeVisible()
   // Subir: a parte editada passa a ser a primeira, e o plano continua com duas partes.
   await page.locator('.plan-list .task-card').last().getByRole('button', { name: 'Subir: Fale conosco' }).click()
@@ -244,9 +262,17 @@ test('percorre as cinco etapas, muda privacidade e termina sem alegar publicaç�
   // atrás de "Detalhes técnicos": antes ele era a primeira coisa na tela, em
   // inglês e em caixa alta, para quem não programa.
   if (VERIFIED_JOURNEY_REACHABLE) {
-    await expect(page.getByText('As verificações declaradas passaram neste computador.')).toBeVisible({ timeout: 30_000 })
+    await esperarResultado(page, 30_000)
   } else {
-    await expect(page.getByText('A criação foi interrompida antes de terminar. Nada foi publicado.')).toBeVisible({ timeout: 20_000 })
+    // O desfecho BLOQUEADO também vira lance da conversa, com o estado dele —
+    // e não um selo genérico. É o aceite VIS-12 em caminho real.
+    await expect(page.getByText('Parou por falta de algo fora daqui').first()).toBeVisible({ timeout: 20_000 })
+  }
+  // E-06/E-07: mesmo terminando bloqueada, a criação EXPLICA o que aconteceu.
+  // Antes disto a pessoa terminava com um código em inglês e nada mais. O
+  // relato continua inteiro; ele agora abre no painel, sob demanda.
+  await page.getByRole('button', { name: 'Ver o detalhamento técnico' }).click()
+  if (!VERIFIED_JOURNEY_REACHABLE) {
     // O código técnico continua existindo, mas atrás de "Detalhes técnicos":
     // antes ele era a primeira coisa na tela, em inglês e em caixa alta, para
     // quem não programa.
@@ -254,11 +280,19 @@ test('percorre as cinco etapas, muda privacidade e termina sem alegar publicaç�
     await page.locator('.result-technical > summary').click()
     await expect(page.getByText('ACCEPTANCE_ATTESTATION_UNAVAILABLE')).toBeVisible()
   }
-  // E-06/E-07: mesmo terminando bloqueada, a execução EXPLICA o que aconteceu.
-  // Antes disto a pessoa terminava com um código em inglês e nada mais.
   await expect(page.getByRole('heading', { name: 'O que aconteceu na criação' })).toBeVisible({ timeout: 20_000 })
-  await expect(page.getByText('Preparando as ferramentas do seu aplicativo')).toBeVisible()
-  await expect(page.getByText('Usando o aplicativo como uma pessoa usaria')).toBeVisible()
+  /*
+    As frases são procuradas DENTRO do relato, e não na página inteira.
+
+    A conversa também nomeia os passos do construtor, na linha do tempo do
+    lance da tentativa — as duas superfícies falam do mesmo trabalho, e é
+    assim que tem de ser. Procurar na página inteira encontrava as duas e
+    reprovava por ambiguidade, o que é o teste dizendo "diga qual das duas
+    você quer conferir". Esta quer conferir o RELATO.
+  */
+  const relato = page.getByLabel('O que aconteceu na criação')
+  await expect(relato.getByText('Preparando as ferramentas do seu aplicativo')).toBeVisible()
+  await expect(relato.getByText('Usando o aplicativo como uma pessoa usaria')).toBeVisible()
   await expect(page.getByText('O que foi feito para você')).toBeVisible()
   await expect(page.getByText('escrito pela IA').first()).toBeVisible()
   // O detalhe técnico existe em cada etapa que rodou, e vem FECHADO: a pessoa

@@ -132,9 +132,42 @@ export type StatusFilter = 'all' | 'enabled' | 'disabled'
 export type CatalogQuery = {
   readonly search?: string
   readonly kind?: KindFilter
+  /**
+   * O ESCOPO da tela, que limita o catálogo a certos tipos.
+   *
+   * É diferente do filtro `kind`, e a diferença é quem decide: `kind` é o que a
+   * pessoa escolheu ver agora e ela pode voltar a "todos"; `escopo` é a tela em
+   * que ela está — Habilidades não mostra conectores nem quando o filtro está
+   * em "todos". Somar os dois num campo só faria "todos" significar coisas
+   * diferentes em cada tela.
+   *
+   * O servidor já aceita vários tipos separados por vírgula desde que o
+   * catálogo existe; era o cliente que só sabia mandar um.
+   */
+  readonly escopo?: readonly IntegrationKind[]
   readonly status?: StatusFilter
   readonly limit?: number
   readonly cursor?: string
+}
+
+/**
+ * Os tipos que a consulta deve pedir, combinando escopo e filtro.
+ *
+ * O filtro ESTREITA o escopo; ele nunca o amplia. Sem esta regra, escolher
+ * "conectores" dentro de Habilidades traria conectores para dentro da tela de
+ * habilidades, que é a fusão dos dois destinos que a decisão de produto recusa.
+ * @param escopo - os tipos que a tela mostra, ou `undefined` para todos.
+ * @param kind - o filtro escolhido pela pessoa.
+ * @returns os tipos a pedir, ou `undefined` quando não há limite nenhum.
+ */
+export function tiposDaConsulta(
+  escopo: readonly IntegrationKind[] | undefined,
+  kind: KindFilter | undefined,
+): readonly IntegrationKind[] | undefined {
+  const escolhido = kind === undefined || kind === 'all' ? undefined : kind
+  if (escopo === undefined) return escolhido === undefined ? undefined : [escolhido]
+  if (escolhido === undefined) return escopo
+  return escopo.includes(escolhido) ? [escolhido] : escopo
 }
 
 /** Quantas integrações a tela pede por vez. O resto vem quando a pessoa pede mais. */

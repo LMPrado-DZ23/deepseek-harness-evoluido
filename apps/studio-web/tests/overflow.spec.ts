@@ -27,7 +27,15 @@ test('nenhuma tela do fluxo rola para os lados', async ({ context, page }) => {
   await overflow('ideia')
   await page.getByRole('button', { name: 'Página de apresentação' }).click()
   await page.getByRole('button', { name: 'Continuar' }).click()
-  await expect(page.getByRole('heading', { name: 'Só mais alguns detalhes' })).toBeVisible({ timeout: 15_000 })
+  /*
+    MAPA DE EQUIVALÊNCIA: o título "Só mais alguns detalhes" era o herói do
+    CARTÃO DE PERGUNTAS — uma tela própria, com caixa e título grandes, que a
+    decisão de produto listou entre o que não pode voltar. A garantia que ele
+    carregava era "enviar levou a pessoa adiante"; agora ela é afirmada pelo
+    que de fato acontece: a CONVERSA abre, e a pergunta é um lance dela.
+  */
+  await expect(page.getByLabel('Conversa desta tarefa')).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByText('Para quem você quer criar este projeto?')).toBeVisible()
   await overflow('perguntas')
   await page.goto('/studio/ajuda')
   await expect(page.getByRole('heading', { name: 'Ajuda do DZ23 STUDIO' })).toBeVisible()
