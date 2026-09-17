@@ -384,6 +384,8 @@ declarada.
 
 | T-35-ALCANCE | O alcance REAL do ADENDO de uso e custos, MEDIDO criterio a criterio — e um defeito central do proprio adendo consertado no caminho | Retomada do Prado 17/09/2026 item 3 ("conclua o alcance real de T-35; informe quais criterios ja passaram; verifique eventos duplicados, tentativas distintas, uso desconhecido, precificacao, isolamento, reservas, concorrencia e recuperacao") | v1.0 | BETA | plugins/route-health/tests/alcance-do-adendo.spec.ts (novo), plugins/route-health/src/service.ts (`record`: uso NAO DECLARADO passa a contar como nao precificada; a condicao morta no calculo do custo REMOVIDA), docs/status/T35_ALCANCE.md (novo) | alcance-do-adendo.spec.ts 13, um caso por criterio contra o servico de PRODUCAO; route-health 71; raiz 3970; studio-web 722; e2e 148 passaram / 3 pulados; PostgreSQL 65; 3 sabotagens, DUAS pegas e UMA revelou codigo morto, que foi removido | execucao: ONZE criterios PASSARAM com teste verde — uso desconhecido, parcial, precificacao, rota sem preco, isolamento, os tres vereditos do teto, tentativas distintas, evento de troca e recuperacao. E a medicao achou um defeito no criterio CENTRAL do adendo, dentro do codigo escrito para cumpri-lo: `unpriced_requests` contava so chamada a rota SEM PRECO, e nao a chamada em que o provedor NAO DECLAROU uso — nesse caso os tokens somavam 0, o custo somava 0, e o registro afirmava "medido, custou zero" sobre uma chamada de custo inteiramente desconhecido. Um provedor que nunca declara uso parecia de graca, e o teto de dinheiro nunca disparava por ele. Consertado: as DUAS ausencias contam. A terceira sabotagem SOBREVIVEU porque a mesma condicao repetida no calculo do custo era codigo morto (sem uso, os tokens ja sao zero); ela foi REMOVIDA em vez de ganhar teste que fingisse cobri-la. Sobre CONCORRENCIA eu esperava medir perda de escrita e MEDI O CONTRARIO: as duas contaram, porque o duble resolve de imediato e as gravacoes nao se intercalam — fica registrado como NAO OBSERVADO, que nao e aprovacao | NAO OBSERVADO nao e PASSOU: a corrida entre PROCESSOS continua aberta, e a escrita condicionada que a fecharia NAO existe neste plugin (um caso confere essa ausencia pela assinatura de `putRoute`). AUSENTES, sem codigo em lugar nenhum: reserva de orcamento antes da chamada, conciliacao com o provedor, alertas, cota de assinatura, custo INFORMADO pelo provedor e os demais provedores (fatia D). Nenhuma medicao foi feita contra provedor real — EB-04 segue aberto | T-35 fatias C e D; EB-04 |
 
+| V7-B-2 | A BIBLIOTECA passou a VERSIONAR: cada tarefa numera os pacotes que produziu e diz o que mudou de um para o outro | Retomada do Prado 17/09/2026 item 4 ("selecione a proxima operacao obrigatoria cujos pre-requisitos estejam disponiveis e implemente o caminho completo") | v1.0 | BETA | apps/studio-web/src/destinos/versoes.ts e versoes.spec.ts (novos), Versoes.spec.tsx (novo), Destinos.tsx (`textoDaMudanca`, `ContagemDeConteudos`), biblioteca.ts (a operacao passou a SUPORTADA) e biblioteca.spec.ts, destinos.css, i18n/destinos.pt-BR.json (o rotulo declarado passou a descrever o que ACONTECE), tests/server.ts (segundo pacote com zip proprio), tests/accessibility.spec.ts | versoes.spec.ts 15; Versoes.spec.tsx 8; biblioteca.spec.ts com 2 novos; destinos 55; studio-web 747; raiz 3970; e2e 152 passaram / 3 pulados na suite INTEIRA; PostgreSQL 65; axe ZERO violacoes; 10 sabotagens, DUAS sobreviveram e viraram teste e UMA foi DECLARADA | execucao: a escolha foi por PRE-REQUISITO, como manda a diretriz — MEDI as cinco operacoes que faltavam e versoes foi a unica cujo motor ja estava inteiro: cada pacote ja carrega tentativa, resumo criptografico, tamanho, contagem e instante. Entao versionar aqui e DERIVAR, e nao guardar: uma tabela de versoes seria a segunda contabilidade do mesmo fato. A numeracao e do MAIS ANTIGO para o mais novo porque "a versao 2" precisa continuar sendo a mesma coisa amanha; a LEITURA e a inversa, porque quem abre a Biblioteca procura o que acabou de sair. IDENTICO e dito pelo resumo, e nao por tamanho igual — um pacote troca de conteudo sem mudar de tamanho. A contagem e de CONTEUDOS distintos, e nao de pacotes: duas tentativas com a mesma saida produziram UMA versao do produto. DUAS sabotagens sobreviveram e viraram teste: o valor absoluto do tamanho (o teste olhava o SINAL, e `formatBytes` devolve "0 B" para negativo, entao a frase virava "encolheu 0 B" sem menos nenhum) e a propria DECLARACAO, que podia voltar a dizer "nao suporta" sem teste nenhum acusar — agora ela e conferida no modulo e amarrada ao comportamento na MESMA visita do e2e. E o rotulo declarado prometia "guardar versoes do mesmo pacote", que NAO e o que foi construido; foi corrigido para descrever o que acontece, porque a declaracao e lida como promessa | ENVIAR arquivos, COMPARTILHAR e RETENCAO continuam AUSENTES, e a declaracao continua dizendo isso com o motivo de cada um. APAGAR exige autorizacao do dono e NAO foi concedida. O armazenamento do acervo no servidor de teste e DUBLE; o formato do pacote nao e. O aceite visual e do titular e NAO esta declarado | V7-B (enviar arquivos, compartilhar, retencao); BUS-04..BUS-24; T-35 fatias C e D |
+
 <!-- O livro mestre REGISTRA achados, e o achado da OS-39 e sobre numeros de ADR
      que nomeiam mais de uma decisao: citacao-ambigua-proposital -->
 
@@ -392,16 +394,16 @@ declarada.
 | estado | quantos |
 | --- | --- |
 | `STABLE` | 69 |
-| `BETA` | 170 |
+| `BETA` | 171 |
 | `NOT_PRESENT` | 33 |
 | `NOT_CONFIGURED` | 1 |
 | `NOT_EXECUTED` | 4 |
 | `FAILED` | 2 |
 
-**Total de requisitos rastreados: 279.**
+**Total de requisitos rastreados: 280.**
 
 | versao-alvo | quantos |
 | --- | --- |
-| v1.0 | 243 |
+| v1.0 | 244 |
 | v1.x | 33 |
 | v2 | 3 |

@@ -35,8 +35,14 @@ export function operacoesDaBiblioteca(): readonly OperacaoDaBiblioteca[] {
     { id: 'baixar', suportada: true },
     { id: 'conferir', suportada: true },
     { id: 'preview', suportada: true },
+    /*
+      VERSÕES passou a ser suportada — e, como a prévia antes dela, a escolha
+      foi por PRÉ-REQUISITO: o motor já estava gravado. Cada pacote carrega a
+      tentativa, o resumo criptográfico e o instante, então versionar é DERIVAR
+      o que já existe, e não guardar de novo.
+    */
+    { id: 'versoes', suportada: true },
     { id: 'enviar', suportada: false, motivo: 'semUpload' },
-    { id: 'versoes', suportada: false, motivo: 'semVersao' },
     { id: 'compartilhar', suportada: false, motivo: 'semCompartilhar' },
     { id: 'apagar', suportada: false, motivo: 'semApagar' },
     { id: 'retencao', suportada: false, motivo: 'semRetencao' },

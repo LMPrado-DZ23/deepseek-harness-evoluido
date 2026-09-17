@@ -607,11 +607,35 @@ const server = createServer((request, response) => {
       responde, e a junção do Modo Empresa — que filtra por tarefa — ficava sem
       nada para mostrar por um defeito do dublê, e não do produto.
     */
-    if (listagem !== null) return json(response, 200, { exports: [{ ...E2E_PACOTE, project_id: decodeURIComponent(listagem[1]!) }] })
+    if (listagem !== null) {
+      /*
+        DOIS pacotes, e não um.
+
+        A Biblioteca versiona o que uma tarefa produziu, e com um pacote só a
+        numeração, a marca de "mais recente" e a comparação com a anterior não
+        seriam exercitadas por caso nenhum — o e2e passaria sem tocar na parte
+        que a fatia entregou. O segundo é MAIOR e tem outro resumo, que é o caso
+        comum: a tentativa seguinte produziu outra coisa.
+      */
+      const projeto = decodeURIComponent(listagem[1]!)
+      return json(response, 200, {
+        exports: [
+          { ...E2E_PACOTE, project_id: projeto },
+          {
+            ...E2E_PACOTE, project_id: projeto, export_id: 'exp-e2e-0002', run_id: 'run-e2e-2',
+            sha256: 'b'.repeat(64), size_bytes: E2E_ZIP_2.length, entries: 4,
+            created_at: '2026-09-17T13:00:00.000Z',
+          },
+        ],
+      })
+    }
     const previa = /^\/projects\/([^/]+)\/exports\/([^/]+)\/preview$/u.exec(caminho)
     if (previa !== null) {
-      if (previa[2] !== E2E_PACOTE.export_id) return json(response, 404, { error: 'pacote não encontrado' })
-      return json(response, 200, { entries: listZip(E2E_ZIP) })
+      // Os DOIS pacotes têm prévia: um deles não responder faria o e2e da
+      // prévia depender de qual versão está no topo da lista.
+      if (previa[2] === E2E_PACOTE.export_id) return json(response, 200, { entries: listZip(E2E_ZIP) })
+      if (previa[2] === 'exp-e2e-0002') return json(response, 200, { entries: listZip(E2E_ZIP_2) })
+      return json(response, 404, { error: 'pacote não encontrado' })
     }
     return json(response, 404, { error: 'rota não encontrada' })
   }
@@ -640,6 +664,21 @@ const E2E_ZIP = createZip([
   { name: 'app/estilo.css', data: Buffer.from('body{font-family:system-ui}') },
   { name: 'LEIA-ME.md', data: Buffer.from('# Protótipo exportado') },
 ])
+/*
+  O SEGUNDO pacote da mesma tarefa, para as VERSÕES existirem no e2e.
+
+  Ele tem um arquivo a mais e outro resumo criptográfico, que é o caso comum: a
+  tentativa seguinte produziu outra coisa. E ele tem zip PRÓPRIO porque a
+  prévia lê o arquivo de verdade — devolver o zip do primeiro faria o dublê
+  contradizer os 4 arquivos que o próprio registro declara.
+*/
+const E2E_ZIP_2 = createZip([
+  { name: 'app/index.html', data: Buffer.from('<!doctype html><title>Protótipo revisado</title>') },
+  { name: 'app/estilo.css', data: Buffer.from('body{font-family:system-ui;color:#111}') },
+  { name: 'app/sobre.html', data: Buffer.from('<!doctype html><title>Sobre</title>') },
+  { name: 'LEIA-ME.md', data: Buffer.from('# Protótipo exportado, segunda versão') },
+])
+
 const E2E_PACOTE = {
   export_id: 'exp-e2e-0001', project_id: 'proj-e2e', run_id: 'run-e2e',
   file_name: 'prototipo.zip', sha256: 'a'.repeat(64),

@@ -34,14 +34,13 @@
     "conferir": "conferir tamanho, número de itens, data e resumo SHA-256 de cada pacote",
     "enviar": "receber arquivos que você envie",
     "preview": "abrir a lista do que há dentro, sem baixar",
-    "versoes": "guardar versões do mesmo pacote",
+    "versoes": "numerar as versões que cada tarefa produziu e dizer o que mudou de uma para a outra",
     "compartilhar": "compartilhar um pacote com outra pessoa",
     "apagar": "apagar um pacote por aqui",
     "retencao": "aplicar prazo de retenção ou expiração"
   },
   "bibliotecaMotivos": {
     "semUpload": "Não existe envio de arquivo neste produto. O acervo nasce do que as suas tarefas produzem.",
-    "semVersao": "Cada exportação é um pacote novo, com data e resumo próprios. Não há histórico de versões do mesmo pacote.",
     "semCompartilhar": "Compartilhar é operação de acesso — destinatário, escopo, expiração e revogação — e nada disso existe ainda.",
     "semApagar": "Apagar dado é ação destrutiva e exige decisão explícita do dono do produto. Não foi autorizada.",
     "semRetencao": "Não há política de retenção. O pacote fica enquanto a tarefa existir."
@@ -52,5 +51,14 @@
   "previaTotal": "{quantos} arquivo(s) neste pacote",
   "previaRestantes": "e mais {quantos} — baixe o pacote para ver a lista inteira.",
   "previaFalhou": "Não deu para ler o conteúdo deste pacote agora.",
-  "acervoRestantes": "e mais {quantos} pacote(s) desta tarefa"
+  "acervoRestantes": "e mais {quantos} pacote(s) desta tarefa",
+  "versaoRotulo": "Versão {n}",
+  "versaoVigente": "mais recente",
+  "versaoPrimeira": "primeira versão desta tarefa",
+  "versaoIdentica": "conteúdo idêntico ao da versão anterior",
+  "versaoMaior": "cresceu {bytes} em relação à anterior",
+  "versaoMenor": "encolheu {bytes} em relação à anterior",
+  "versaoMesmoTamanho": "mesmo tamanho da anterior, com conteúdo diferente",
+  "versaoConteudos": "{n} conteúdos diferentes em {total} pacotes",
+  "versaoConteudoUnico": "todos os pacotes têm o mesmo conteúdo"
 }

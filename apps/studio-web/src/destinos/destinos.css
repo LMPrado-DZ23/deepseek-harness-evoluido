@@ -210,3 +210,27 @@
   font-weight: 600;
   list-style-position: inside;
 }
+
+/*
+  As VERSÕES de um pacote. A linha vem ANTES do nome do arquivo de propósito:
+  a pergunta que a pessoa faz ao olhar uma lista de pacotes iguais é "qual é o
+  mais novo, e o que mudou".
+*/
+.dz-acervo-versao {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--dz-2);
+  margin: 0 0 var(--dz-2);
+}
+
+.dz-acervo-vigente {
+  padding: 2px var(--dz-2);
+  border-radius: 999px;
+  border: 1px solid var(--dz-border);
+  color: var(--dz-text-secondary);
+  font-size: 0.75rem;
+}
+
+.dz-acervo-mudanca { color: var(--dz-text-secondary); font-size: 0.8125rem; }
+.dz-acervo-conteudos { margin: 0 0 var(--dz-3); color: var(--dz-text-secondary); font-size: 0.8125rem; }

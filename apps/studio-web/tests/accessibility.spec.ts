@@ -187,6 +187,49 @@ test.describe('acessibilidade do fluxo principal', () => {
     expect(semViolacao.violations.map(violation => violation.id)).toEqual([])
   })
 
+  test('a Biblioteca NUMERA as versões de uma tarefa e diz o que mudou', async ({ page }) => {
+    /*
+      A segunda das seis operações que a declaração dizia faltar. Como a prévia,
+      ela foi escolhida por PRÉ-REQUISITO: o motor já estava gravado — cada
+      pacote carrega tentativa, resumo criptográfico e instante —, então
+      versionar é derivar, e não guardar de novo.
+    */
+    await page.goto('/studio/biblioteca')
+    /*
+      A busca é ESCOPADA ao primeiro grupo porque o acervo tem mais de uma
+      tarefa, e cada uma numera as SUAS versões a partir de 1 — que é o certo:
+      "a versão 2" é uma frase sobre uma tarefa, e não sobre a Biblioteca
+      inteira. Sem o escopo, o caso quebraria por ambiguidade e me faria
+      "consertar" uma numeração que está correta.
+    */
+    /*
+      A DECLARAÇÃO e o COMPORTAMENTO conferidos na mesma visita.
+
+      A declaração da Biblioteca diz o que ela faz, e ela é lida como promessa.
+      Sem esta amarra, o texto podia continuar dizendo "versões: não" enquanto a
+      tela versionava — ou o contrário, que é pior.
+    */
+    await page.locator('#dz-biblioteca-declaracao-titulo').click()
+    await expect(page.locator('.dz-biblioteca-declaracao')).toContainText('numerar as versões')
+
+    const grupo = page.locator('.dz-acervo-grupo').first()
+    // A versão 1 é a MAIS ANTIGA e continua sendo a versão 1 amanhã; a leitura
+    // é da mais nova para a mais antiga.
+    await expect(grupo.getByText('Versão 2', { exact: true })).toBeVisible()
+    await expect(grupo.getByText('Versão 1', { exact: true })).toBeVisible()
+    await expect(grupo.getByText('mais recente', { exact: true })).toHaveCount(1)
+    // E o que mudou de uma para a outra, em palavras.
+    await expect(grupo.getByText('primeira versão desta tarefa')).toBeVisible()
+    await expect(grupo.getByText('cresceu', { exact: false })).toBeVisible()
+    await expect(grupo.getByText('conteúdos diferentes', { exact: false })).toBeVisible()
+    // Nenhum marcador do catálogo vaza para a tela.
+    await expect(page.getByText('{bytes}')).toHaveCount(0)
+    await expect(page.getByText('{n}')).toHaveCount(0)
+
+    const semViolacao = await new AxeBuilder({ page }).analyze()
+    expect(semViolacao.violations.map(violation => violation.id)).toEqual([])
+  })
+
   test('a Biblioteca abre o pacote e mostra o que tem dentro, sem baixar', async ({ page }) => {
     /*
       A operação que a declaração dizia que faltava. O `.zip` deste servidor de
@@ -224,7 +267,18 @@ test.describe('acessibilidade do fluxo principal', () => {
     await abrir.click()
     await expect(abrir).toHaveAttribute('aria-expanded', 'true')
 
-    await expect(page.getByText('3 arquivo(s) neste pacote').first()).toBeVisible()
+    /*
+      A contagem da PRÉVIA tem de bater com a que o cartão declara.
+
+      Esta asserção era um número fixo e quebrou quando a tarefa passou a ter
+      DUAS versões: o botão de cima virou o da versão 2, que tem quatro
+      arquivos. O número fixo estava certo por acidente — o que interessa é que
+      a prévia e o cartão digam a MESMA coisa sobre o mesmo pacote, porque duas
+      contagens divergentes do mesmo arquivo são a segunda verdade de sempre.
+    */
+    const cartao = page.locator('.dz-acervo-item').first()
+    const declarados = (await cartao.locator('.dz-acervo-fatos dd').nth(1).innerText()).trim()
+    await expect(cartao.getByText(`${declarados} arquivo(s) neste pacote`)).toBeVisible()
     await expect(page.getByText('app/index.html').first()).toBeVisible()
     await expect(page.getByText('LEIA-ME.md').first()).toBeVisible()
     // O download continua ali do lado: a prévia não substituiu a operação que

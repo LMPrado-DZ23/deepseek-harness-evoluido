@@ -5,6 +5,7 @@ import hubCopy from '../i18n/hub.pt-BR.json'
 import { HubPanel } from '../hub/HubPanel'
 import { operacoesDaBiblioteca, tiposDaBiblioteca } from './biblioteca'
 import { acervoPorTarefa } from './acervo'
+import { chaveDaMudanca, conteudosDistintos, versoesDaTarefa, type MudancaDaVersao, type VersaoDoPacote } from './versoes'
 import { previaDoPacote, type EntradaDoPacote } from './previa'
 import type { ItemDoAcervo } from './acervo'
 
@@ -195,8 +196,22 @@ export function BibliotecaScreen({ api = clienteDoHub }: { readonly api?: HubApi
                 <h2>{grupo.nome}</h2>
                 <span className="dz-acervo-grupo-instante">{formatDate(grupo.maisRecente)}</span>
               </header>
+              {/*
+                QUANTAS VEZES o produto realmente mudou.
+
+                A contagem é de CONTEÚDOS distintos, e não de pacotes: duas
+                tentativas que devolveram a mesma saída produziram uma versão só
+                do produto, ainda que sejam dois arquivos no disco. Com um
+                pacote só não há o que dizer, e a linha não aparece.
+              */}
+              <ContagemDeConteudos versoes={versoesDaTarefa(grupo.itens)} />
               <ul className="dz-acervo">
-                {grupo.itens.map(item => <li key={item.registro.export_id} className="dz-acervo-item">
+                {versoesDaTarefa(grupo.itens).map(({ item, numero, vigente, mudanca }) => <li key={item.registro.export_id} className="dz-acervo-item">
+              <p className="dz-acervo-versao">
+                <strong>{copy.versaoRotulo.replace('{n}', String(numero))}</strong>
+                {vigente && <span className="dz-acervo-vigente">{copy.versaoVigente}</span>}
+                <span className="dz-acervo-mudanca">{textoDaMudanca(mudanca)}</span>
+              </p>
               <strong>{item.registro.file_name}</strong>
               <dl className="dz-acervo-fatos">
                 <div><dt>{hubCopy.exports.size}</dt><dd>{formatBytes(item.registro.size_bytes)}</dd></div>
@@ -277,6 +292,41 @@ export function AgendadoScreen() {
 
 /** A pendência declarada em `destinos.ts`, reafirmada onde a tela a usa. */
 export const AGENDADO_PENDENTE = DISPONIBILIDADE.agendado === 'pendente'
+
+/**
+ * A frase que descreve a mudança de uma versão para a anterior.
+ *
+ * `chaveDaMudanca` é quem decide QUAL frase, com teste próprio; aqui só entra o
+ * preenchimento do número, e o valor absoluto — o sinal já está na palavra
+ * "encolheu", e repeti-lo com um menos escreveria "encolheu -2 KB".
+ * @param mudanca - o que mudou, ou `null` na primeira versão.
+ * @returns a frase pronta.
+ */
+export function textoDaMudanca(mudanca: MudancaDaVersao | null): string {
+  const chave = chaveDaMudanca(mudanca)
+  if (chave === 'primeira') return copy.versaoPrimeira
+  if (chave === 'identica') return copy.versaoIdentica
+  if (chave === 'mesmoTamanho') return copy.versaoMesmoTamanho
+  const bytes = formatBytes(Math.abs(mudanca!.bytes))
+  return (chave === 'maior' ? copy.versaoMaior : copy.versaoMenor).replace('{bytes}', bytes)
+}
+
+/**
+ * Quantos CONTEÚDOS diferentes esta tarefa produziu.
+ *
+ * Com um pacote só não há o que dizer, e a linha some — uma frase dizendo "1
+ * conteúdo em 1 pacote" é ruído. Quando todos são iguais, ela diz isso em
+ * palavras, porque é o fato mais útil e o menos esperado.
+ */
+export function ContagemDeConteudos({ versoes }: { readonly versoes: readonly VersaoDoPacote[] }) {
+  if (versoes.length < 2) return null
+  const distintos = conteudosDistintos(versoes)
+  return <p className="dz-acervo-conteudos">
+    {distintos === 1
+      ? copy.versaoConteudoUnico
+      : copy.versaoConteudos.replace('{n}', String(distintos)).replace('{total}', String(versoes.length))}
+  </p>
+}
 
 /** A lista do que há dentro de um pacote. */
 function PreviaDoPacote({ previa }: {

@@ -38,8 +38,8 @@ Todos reproduzíveis pelo comando ao lado.
 | typecheck | PASS | `pnpm typecheck` |
 | build | PASS | `pnpm build` |
 | suíte raiz | 3970 testes, 227 arquivos, 0 falha (17/09, após T-35-ALCANCE) | `pnpm -w test` |
-| suíte studio-web | 722 testes (17/09, após V7-C-2) | `cd apps/studio-web && npx vitest run` |
-| e2e navegador | 148 aprovados, 0 reprovados, 3 pulados (17/09, quatro tamanhos) | `cd apps/studio-web && npx playwright test` |
+| suíte studio-web | 747 testes (17/09, após V7-B-2) | `cd apps/studio-web && npx vitest run` |
+| e2e navegador | 152 aprovados, 0 reprovados, 3 pulados (17/09, quatro tamanhos) | `cd apps/studio-web && npx playwright test` |
 | PostgreSQL real | **65 testes, `POSTGRES_GATE=PASS`** (12/09, PostgreSQL 16.13 local) | `pnpm test:postgres` |
 | portões | **26/26 PASS** | ver abaixo |
 
@@ -637,6 +637,19 @@ produto existe para não fazer.
     corrida entre processos segue aberta.
 
     Quadro completo: [`docs/status/T35_ALCANCE.md`](T35_ALCANCE.md).
+
+47. **V7-B-2 — a Biblioteca passou a versionar.**
+
+    Cada tarefa numera os pacotes que produziu e diz o que mudou de um para o
+    outro: cresceu, encolheu, ou é byte a byte o mesmo. Escolhida por
+    pré-requisito — o motor já estava gravado, então versionar é **derivar**, e
+    não guardar de novo.
+
+    Duas sabotagens sobreviveram e viraram teste, e uma delas era a própria
+    **declaração**: ela podia voltar a dizer "não suporta" sem que nada
+    acusasse. E o rótulo declarado prometia *"guardar versões do mesmo pacote"*,
+    que não é o que foi construído — corrigido, porque a declaração é lida como
+    promessa.
 
 
 ## Estado do DAG

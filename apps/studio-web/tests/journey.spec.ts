@@ -642,8 +642,17 @@ test('cria uma tarefa para a empresa, com o plano dentro, e ela aparece na empre
 
   // `BUS-03`: a EVIDÊNCIA da tarefa volta para a empresa — lida de quem já a
   // guarda, e não de uma cópia gravada aqui.
-  await expect(secao.getByRole('link', { name: 'Baixar prototipo.zip' })).toBeVisible()
-  await expect(page.getByText('1 pacote produzido por esta empresa.')).toBeVisible()
+  /*
+    DUAS versões do pacote, e a evidência lista as duas.
+
+    Antes havia uma só, e a asserção era `toBeVisible()`. Com a fatia de
+    VERSÕES o servidor de teste passou a devolver dois pacotes por tarefa — e a
+    contagem é mais forte que a visibilidade: ela prova que a evidência não
+    esconde a versão antiga nem mostra a mesma duas vezes.
+  */
+  await expect(secao.getByRole('link', { name: 'Baixar prototipo.zip' })).toHaveCount(2)
+  await expect(secao.getByRole('link', { name: 'Baixar prototipo.zip' }).first()).toBeVisible()
+  await expect(page.getByText('2 pacotes produzidos por esta empresa.')).toBeVisible()
 
 
   // E a tarefa é uma tarefa DE VERDADE: ela abre na conversa do produto, e o
