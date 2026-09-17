@@ -32,16 +32,65 @@ test('o login HTTP local grava sessão host-only sem enfraquecer o modo de servi
   ]))
   expect(cookies.some(cookie => cookie.name === 'dz23_studio_csrf')).toBe(false)
 
-  // O NOME FORTE TAMBÉM FOI GRAVADO, sem TLS. É ele que fecha o plantio do
-  // vizinho, e este teste existe porque a garantia é do NAVEGADOR e não do
-  // servidor: `*.localhost` é contexto seguro, então o Chromium aceita `Secure`
-  // sobre http — e recusa `__Host-` que traga `Domain`.
+  // O QUE O SERVIDOR EMITE é conferido primeiro, e sem navegador no meio.
   //
+  // Esta parte não depende de versão de nada: a emissão dos DOIS nomes é
+  // decisão do servidor, e é ela que este teste tem de travar. A parte
+  // seguinte, que é a do navegador, só pode ser conferida DEPOIS de saber que
+  // houve o que guardar.
+  const direto = await apiRequest.newContext({
+    baseURL: 'http://127.0.0.1:4179',
+    extraHTTPHeaders: { host: 'studio.dz23.localhost:4179', origin: 'http://studio.dz23.localhost:4179' },
+  })
+  const emissao = await direto.post('/api/studio/identity/magic/verify', {
+    data: { email: 'owner@example.test', code: '123456', device_label: 'Conferência direta' },
+  })
+  expect(emissao.status()).toBe(200)
+  const emitidos = emissao.headersArray().filter(cabecalho => cabecalho.name.toLowerCase() === 'set-cookie').map(cabecalho => cabecalho.value)
+  expect(emitidos.some(valor => valor.startsWith('__Host-dz23_studio_session=') && valor.includes('Secure') && valor.includes('Path=/'))).toBe(true)
+  expect(emitidos.some(valor => valor.startsWith('dz23_studio_session='))).toBe(true)
+  await direto.dispose()
+
+  // E AGORA O NAVEGADOR — com a capacidade dele MEDIDA, não suposta.
+  //
+  // Este teste já afirmou, em comentário e em asserção, que "o Chromium aceita
+  // `Secure` sobre http em `*.localhost` e portanto grava o `__Host-`". A
+  // primeira metade é verdade em toda versão medida; a SEGUNDA não é. Medido
+  // com o mesmo servidor e o mesmo endereço:
+  //
+  // | Chromium | `Secure` sobre http | prefixo `__Host-` sobre http |
+  // | --- | --- | --- |
+  // | 133.0.6943.16 | aceita | **RECUSA** |
+  // | 141.0.7390.37 | aceita | aceita |
+  //
+  // A máquina de quem desenvolve forçava o 141 e a CI instalava o 133 — e foi
+  // essa assimetria, e não o produto, que deixou a asserção antiga passar aqui
+  // e reprovar lá. A consequência de produto está registrada em
+  // `INTERNAL_BLOCKERS.md`: onde o navegador recusa o prefixo, o nome forte
+  // NÃO é a defesa, e sobra a rede de `shadowCookieDeletions`.
+  //
+  // A sonda usa um cookie PRÓPRIO, sem relação com a sessão, porque perguntar
+  // ao navegador se ele gravou o nosso cookie para decidir se ele deveria ter
+  // gravado o nosso cookie não conferiria nada.
+  const aceitaPrefixo = await page.evaluate(() => {
+    document.cookie = '__Host-dz23_sonda=1; Path=/; Secure; SameSite=Lax'
+    return document.cookie.includes('__Host-dz23_sonda=1')
+  })
+
   // A afirmação é sobre o que o navegador ENVIA, e não sobre
   // `context.cookies(url)`: essa consulta filtra por URL e não devolve cookie
   // `Secure` para um endereço `http://`, mesmo estando gravado.
   const enviados = await page.evaluate(async () => (await fetch('/e2e/echo-cookie', { credentials: 'same-origin' })).text())
-  expect(enviados).toContain('__Host-dz23_studio_session=session-token')
+  if (aceitaPrefixo) {
+    // Onde o prefixo é aceito, ele TEM de estar lá: é o que fecha o plantio.
+    expect(enviados).toContain('__Host-dz23_studio_session=session-token')
+  } else {
+    // Onde não é, a exigência continua existindo, do outro lado: a sessão não
+    // pode ficar de fora por causa do nome que o navegador recusou.
+    expect(enviados).not.toContain('__Host-dz23_studio_session=')
+  }
+  // Nos DOIS casos o nome simples é a rede, e ele é sempre conferido.
+  expect(enviados).toContain('dz23_studio_session=session-token')
 })
 
 test('o vizinho NAO consegue plantar o nome forte, e por isso nao tranca ninguem', async ({ context, page }) => {

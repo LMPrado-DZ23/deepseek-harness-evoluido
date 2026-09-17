@@ -115,10 +115,22 @@ export interface IdentityHttpConfig {
  * O modo `loopback-http` só é aceito quando todo endereço permitido é
  * `localhost`, `*.localhost` ou `127.0.0.1` (ver `assertLoopbackHttpCookies`) —
  * exatamente os endereços que o navegador trata como CONTEXTO SEGURO. Ali ele
- * aceita `Secure` sobre http, e aceita o prefixo `__Host-`. Foi medido num
- * Chromium de verdade em `studio.dz23.localhost` sem TLS: `__Host-` sem
- * `Domain` é aceito, `__Host-` COM `Domain` é recusado, e o nome simples com
- * `Domain` é aceito.
+ * aceita `Secure` sobre http.
+ *
+ * ACEITAR `Secure` SOBRE HTTP NÃO É ACEITAR O PREFIXO `__Host-`, e este
+ * comentário já afirmou que sim. Medido nos dois Chromium, mesmo servidor,
+ * mesmo endereço `studio.dz23.localhost` sem TLS:
+ *
+ * | Chromium | `Secure` sobre http | prefixo `__Host-` sobre http |
+ * | --- | --- | --- |
+ * | 133.0.6943.16 | aceita | RECUSA |
+ * | 141.0.7390.37 | aceita | aceita |
+ *
+ * Onde o prefixo é aceito, `__Host-` COM `Domain` é recusado e o nome simples
+ * com `Domain` é aceito — e é essa recusa que fecha o plantio do vizinho.
+ * **Onde o prefixo é recusado, essa defesa não existe**, e sobra
+ * `shadowCookieDeletions`, que a própria `cookies.ts` diz não ser a defesa
+ * porque não alcança `Path=/api`. Está registrado em `INTERNAL_BLOCKERS.md`.
  *
  * Essa última linha é o buraco: em `p-<hex>.dz23.localhost` roda o aplicativo
  * GERADO, que ninguém leu, e uma linha de `document.cookie` dele planta

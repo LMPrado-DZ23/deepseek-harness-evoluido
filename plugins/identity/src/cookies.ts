@@ -13,9 +13,11 @@ export const SESSION_COOKIE = 'dz23_studio_session'
  * próprio dispositivo na conta dele.
  *
  * O nome SEM prefixo continua existindo porque em modo pessoal o Studio serve
- * em `http://127.0.0.1`, e ali o navegador recusaria o `__Host-` (não há
- * `Secure`). Os dois NUNCA são aceitos ao mesmo tempo: aceitar o nome fraco
- * quando há TLS reabriria o buraco inteiro.
+ * sem TLS, e ACEITAR O PREFIXO ALI DEPENDE DA VERSÃO DO NAVEGADOR: medido,
+ * Chromium 133 recusa `__Host-` sobre http mesmo em endereço de contexto
+ * seguro, e Chromium 141 aceita. Emitir só o nome forte trancaria para fora
+ * quem estivesse no navegador mais antigo. Os dois NUNCA são aceitos ao mesmo
+ * tempo quando há TLS: aceitar o nome fraco ali reabriria o buraco inteiro.
  *
  * ESTE COMENTÁRIO JÁ AFIRMOU ALGO FALSO, e a correção fica registrada. Ele
  * dizia que "nesse modo não existe subdomínio irmão de onde atacar". Existe: a

@@ -7,7 +7,7 @@ trabalhar nele é a forma mais comum de esconder trabalho.
 
 Meta: `CRITICAL = 0` e `HIGH = 0`.
 
-Estado em 11/09/2026: **CRITICAL = 0, HIGH = 0.**
+Estado em 17/09/2026: **CRITICAL = 0, HIGH = 0.**
 
 ## Abertos
 
@@ -17,6 +17,7 @@ Estado em 11/09/2026: **CRITICAL = 0, HIGH = 0.**
 | IB-02 | MEDIUM | `scripts/check-rls-coverage.ts` | 19 de 26 domínios não têm RLS no banco. **Não são pendências**: são exclusões estruturais nomeadas na ADR-044, cada uma com citação conferida. Três (`runs`, `projects`, `approvals`) voltam a ser candidatos se a varredura de reinício for redesenhada por inquilino | ABERTO POR DESENHO |
 | IB-03 | LOW | `plugins/agent-team` | O grafo de tarefas tem `depends_on` mas não tem os estados `READY`/`BLOCKED`/`REVIEW`/`DONE`; sem eles, "qual é a próxima tarefa executável" não é uma pergunta que o sistema responda sozinho | ABERTO |
 | IB-04 | LOW | observabilidade | Não existe `trace_id` costurando missão → tarefa → execução de agente → chamada de ferramenta. Cada plugin tem o seu id e ninguém consegue reconstruir uma missão inteira | ABERTO |
+| IB-11 | MEDIUM | `plugins/identity` (modo `loopback-http`) | **A defesa do nome forte depende da versão do navegador, e o comentário afirmava que não.** Medido no mesmo servidor e no mesmo endereço `studio.dz23.localhost` sem TLS: Chromium 133.0.6943.16 aceita `Secure` sobre http e **RECUSA** o prefixo `__Host-`; Chromium 141.0.7390.37 aceita os dois. Onde o prefixo é recusado, o aplicativo GERADO na prévia irmã volta a poder plantar `dz23_studio_session=…; Domain=dz23.localhost; Path=/api`, e `shadowCookieDeletions` não alcança esse caminho — a tranca da dona do Studio reabre. Não é roubo de conta: o servidor continua recusando a ambiguidade | ABERTO — a correção real é topológica (prévia fora do domínio irmão, ADR-012), não cabe nesta fatia |
 ## Fechados nesta iteração
 
 | ID | severidade | o que era | correção |

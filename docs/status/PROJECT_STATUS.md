@@ -479,6 +479,34 @@ produto existe para não fazer.
     erro de tipo sumiu e que `--frozen-lockfile` aceita o lockfile; a execução
     deste commit só existe depois do push.
 
+34. **OS-104 — o teste passava aqui e reprovava lá, e o navegador era outro.**
+
+    Com as duas causas da OS-103 corrigidas, o job Linux passou a rodar 12m18s
+    em vez de morrer aos 4 min — e apareceu a falha que elas mascaravam: o
+    teste de cookie de sessão exigia o nome `__Host-` no cabeçalho enviado.
+
+    Em vez de supor, instalei o Chromium que a CI instala e medi os dois, no
+    mesmo servidor e no mesmo endereço sem TLS: **133.0.6943.16 aceita `Secure`
+    sobre http e RECUSA o prefixo `__Host-`; 141.0.7390.37 aceita os dois.** A
+    diferença não é `*.localhost` ser contexto seguro — isso vale nas duas.
+
+    Três coisas saíram daí. O comentário do produto, que afirmava em texto que
+    o navegador aceita o prefixo, foi **corrigido** — tinha sido medido num
+    navegador só. A consequência de produto virou **`IB-11`**, MEDIUM, ABERTA:
+    onde o prefixo é recusado, o nome forte não é defesa, e a tranca da dona do
+    Studio reabre por `Path=/api`. E a assimetria que escondeu tudo foi
+    fechada: `playwright.config.ts` **recusa** um `DZ23_CHROMIUM_PATH` de
+    compilação diferente da fixada, salvo declaração explícita.
+
+    O teste foi partido em três — o que o servidor emite (sem navegador no
+    meio), a capacidade do navegador (sonda com cookie próprio) e a asserção
+    que corresponde à medida. Cobre os dois ramos, e a sabotagem que remove a
+    emissão do nome forte agora é pega nas **duas** versões.
+
+    O e2e desta entrega rodou no **Chromium da CI**. A CI verde continua sem
+    comprovação até a execução deste commit.
+
+
 ## Estado do DAG
 
 **32 DONE, 3 PARCIAL, 2 BLOCKED.** As cinco que restam **não têm engenharia

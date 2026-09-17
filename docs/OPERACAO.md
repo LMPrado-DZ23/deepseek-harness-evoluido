@@ -70,11 +70,22 @@ npm run build        # obrigatório ANTES do e2e
 
 ```bash
 cd apps/studio-web
-export DZ23_CHROMIUM_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome
+pnpm exec playwright install chromium   # a MESMA compilação que a CI instala
 npx playwright test
 ```
 
-São 117 testes em quatro tamanhos de tela. Se um servidor de teste ficar
+**Não force outro Chromium.** `DZ23_CHROMIUM_PATH` continua existindo, mas a
+configuração recusa um caminho cuja compilação não seja a fixada pelo
+`@playwright/test` desta árvore — que é a que a CI instala. Rodar aqui um
+navegador que a CI não roda foi exatamente o que produziu cinco entregas com
+"verde" local e CI vermelha: Chromium 133 recusa o prefixo `__Host-` sobre
+http e o 141 aceita, e o teste de cookie de sessão dependia disso.
+
+Para MEDIR de propósito a diferença entre navegadores, declare junto
+`DZ23_CHROMIUM_OUTRA_COMPILACAO=sim` — aí está dito em voz alta que o que se
+está medindo é outra coisa.
+
+São 120 testes em quatro tamanhos de tela. Se um servidor de teste ficar
 pendurado, mate-o com a forma em colchete — sem ela o `pkill` casa com o
 próprio comando e mata a si mesmo:
 

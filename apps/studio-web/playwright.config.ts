@@ -1,10 +1,40 @@
 import { defineConfig, devices } from '@playwright/test'
-import { existsSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { existsSync, readFileSync } from 'node:fs'
 import { isAbsolute } from 'node:path'
+
+/*
+  O NAVEGADOR DA MÁQUINA LOCAL TEM DE SER O DA CI, e esta conferência existe
+  porque a diferença entre os dois já custou cinco entregas.
+
+  A CI roda `playwright install chromium`, que instala a compilação que o
+  `@playwright/test` desta árvore fixa. A máquina de quem desenvolve tinha
+  outra compilação à mão e a forçava por `DZ23_CHROMIUM_PATH` — mais nova, e
+  mais permissiva: ela aceita o prefixo `__Host-` sobre http e a da CI recusa.
+  O teste de cookie de sessão passava aqui e reprovava lá, e o verde anunciado
+  era o da máquina errada.
+
+  Forçar outro executável continua permitido — é assim que se MEDE a diferença
+  entre navegadores, como foi medida agora. O que não é permitido é fazer isso
+  em silêncio: o caminho tem de trazer o número da compilação fixada, ou dizer
+  em voz alta que está medindo outra coisa.
+*/
+const exigir = createRequire(import.meta.url)
+const RAIZ_PLAYWRIGHT = exigir.resolve('playwright-core').replace(/playwright-core[\\/].*$/u, 'playwright-core/')
+const REVISAO_FIXADA = (JSON.parse(readFileSync(`${RAIZ_PLAYWRIGHT}browsers.json`, 'utf8')) as {
+  browsers: readonly { readonly name: string, readonly revision: string, readonly browserVersion: string }[]
+}).browsers.find(navegador => navegador.name === 'chromium')!
 
 const chromiumPath = process.env.DZ23_CHROMIUM_PATH?.trim() || undefined
 if (chromiumPath !== undefined && (!isAbsolute(chromiumPath) || !existsSync(chromiumPath))) {
   throw new Error('DZ23_CHROMIUM_PATH deve apontar para um executável Chromium absoluto e existente.')
+}
+if (chromiumPath !== undefined && !chromiumPath.includes(`chromium-${REVISAO_FIXADA.revision}`) && process.env.DZ23_CHROMIUM_OUTRA_COMPILACAO !== 'sim') {
+  throw new Error(
+    `DZ23_CHROMIUM_PATH aponta para uma compilação diferente da fixada (chromium-${REVISAO_FIXADA.revision}, ${REVISAO_FIXADA.browserVersion}), `
+    + 'que é a que a CI instala. Rodar aqui um navegador que a CI não roda produz verde da máquina errada. '
+    + 'Para medir de propósito a diferença entre navegadores, declare DZ23_CHROMIUM_OUTRA_COMPILACAO=sim.',
+  )
 }
 
 export default defineConfig({
