@@ -155,9 +155,11 @@ describe('prompt-to-app HTTP boundary', () => {
   it('declares every route with authorization and no client-owned scope', () => {
     // A contagem sobe DE PROPÓSITO quando uma rota nasce: ela é o que impede
     // uma rota nova de aparecer sem alguém olhar a autorização dela.
-    // 20 desde `POST /projects/:projectId/ask` — PERGUNTAR sobre a tarefa, que
-    // é gesto diferente de pedir alteração e por isso tem rota própria.
-    expect(PROMPT_TO_APP_ROUTE_CONTRACTS).toHaveLength(20)
+    // 21 desde `GET /usage` — o consumo do ESPAÇO DE TRABALHO, que a seção de
+    // Preferências passou a mostrar. Ela é `project.read` e de escopo
+    // `workspace`: quem já vê as tarefas do espaço vê o que elas consumiram, e
+    // nenhuma permissão nova foi inventada para isso.
+    expect(PROMPT_TO_APP_ROUTE_CONTRACTS).toHaveLength(21)
     expect(PROMPT_TO_APP_ROUTE_CONTRACTS.every(route => route.access === 'authorized' && route.permission !== null)).toBe(true)
   })
 

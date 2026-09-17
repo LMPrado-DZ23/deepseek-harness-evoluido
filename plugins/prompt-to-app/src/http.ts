@@ -165,6 +165,16 @@ export interface StudioAppsHealth {
 
 export const PROMPT_TO_APP_ROUTE_CONTRACTS = [
   { method: 'GET', path: '/health', access: 'authorized', permission: 'project.read', scope: 'workspace' },
+  /*
+    O USO do espaço de trabalho — tokens, custo medido, chamadas não
+    precificadas e o veredito do teto, por rota.
+
+    `project.read`, e não uma permissão nova: quem pode ver as tarefas do
+    espaço já vê o que elas consumiram no painel de cada uma. Esta rota mostra o
+    MESMO consumo somado, lido da MESMA autoridade — o adendo proíbe um segundo
+    contador, e não há nenhum aqui.
+  */
+  { method: 'GET', path: '/usage', access: 'authorized', permission: 'project.read', scope: 'workspace' },
   { method: 'GET', path: '/projects', access: 'authorized', permission: 'project.read', scope: 'workspace' },
   { method: 'POST', path: '/projects', access: 'authorized', permission: 'project.write', scope: 'workspace' },
   { method: 'GET', path: '/projects/:projectId', access: 'authorized', permission: 'project.read', scope: 'project' },
@@ -266,6 +276,31 @@ export interface PromptToAppHttpConfig {
    * gerou nada não tem código, e isso não é uma leitura falhada.
    */
   readonly codeContext?: (actor: PromptToAppActor, projectId: string) => Promise<PlannerCodeContext | undefined>
+  /**
+   * O uso e o custo do espaço de trabalho, lidos de quem já os grava.
+   *
+   * OPCIONAL: um perfil sem `route-health` não tem o que responder, e a rota
+   * diz `measured: false` em vez de devolver zeros que seriam lidos como
+   * "não gastou nada".
+   */
+  readonly usage?: (actor: PromptToAppActor) => StudioWorkspaceUsage
+}
+
+/** O consumo somado do espaço de trabalho, como a rota o devolve. */
+export interface StudioWorkspaceUsage {
+  readonly routes: readonly {
+    readonly route: string
+    readonly requests: number
+    readonly input_tokens: number
+    readonly output_tokens: number
+    readonly estimated_cost_usd: number
+    readonly unpriced_requests: number
+  }[]
+  readonly budget: {
+    readonly measuredCostUsd: number
+    readonly unpricedRequests: number
+    readonly verdict: string
+  }
 }
 
 export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
@@ -302,6 +337,13 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
       if (matched === undefined) return json(response, 404, { error: t('errors.routeNotFound') })
 
       if (request.method === 'GET' && route === '/health') return json(response, 200, await config.health(actor))
+      if (request.method === 'GET' && route === '/usage') {
+        config.service.assertAuthorized(actor, 'project.read')
+        // Um Studio montado sem `route-health` responde a AUSÊNCIA, e não um
+        // zero: dizer "custou zero" sobre o que não foi medido é exatamente o
+        // que o adendo proíbe.
+        return json(response, 200, config.usage === undefined ? { measured: false } : { measured: true, ...config.usage(actor) })
+      }
       if (request.method === 'GET' && route === '/projects') return json(response, 200, { projects: config.service.listProjects(actor) })
       if (request.method === 'POST' && route === '/projects') {
         const { request_key: requestKey, ...input } = createProjectSchema.parse(await readJson(request))
@@ -629,7 +671,19 @@ async function authenticatedActor(request: IncomingMessage, config: PromptToAppH
  * @returns o projeto e o sufixo, ou `undefined` quando não é rota daqui.
  */
 export function matchRoute(method: string | undefined, path: string): { readonly projectId?: string; readonly suffix: string } | undefined {
-  if ((method === 'GET' && (path === '/health' || path === '/projects')) || (method === 'POST' && path === '/projects')) return { suffix: path }
+  /*
+    As rotas de ESPAÇO DE TRABALHO, que não vivem debaixo de um projeto.
+
+    A lista é fechada de propósito, e o comentário abaixo já dizia que um
+    sufixo novo precisa entrar em DOIS lugares: aqui e no contrato. Eu fiz só
+    metade ao acrescentar `/usage`, e o e2e cobrou — a rota existia no contrato,
+    o manipulador tinha o caso, e `matchRoute` devolvia `undefined`, então o
+    pedido caía nas extensões e terminava em 404.
+
+    Fica como está: uma lista fechada que o teste de ponta a ponta confere é
+    melhor que uma aberta que aceita qualquer coisa em silêncio.
+  */
+  if ((method === 'GET' && (path === '/health' || path === '/usage' || path === '/projects')) || (method === 'POST' && path === '/projects')) return { suffix: path }
   const match = ROTA_DE_PROJETO.exec(path)
   if (match === null) return undefined
   const suffix = match[2] ?? ''

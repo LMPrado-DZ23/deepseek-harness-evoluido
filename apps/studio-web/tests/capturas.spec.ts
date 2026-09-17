@@ -117,6 +117,11 @@ test('captura a jornada: home → tarefa → resultado → continuação', async
   await page.getByRole('button', { name: 'Preferências', exact: true }).click()
   await expect(page.getByRole('dialog', { name: 'Preferências' })).toBeVisible()
   await tirar('13-preferencias-conta')
+  // O USO E CUSTOS, que deixou de ser pendência: a captura mostra rota medida
+  // com custo real, rota sem preço dizendo "não medido", e a limitação escrita.
+  await page.getByRole('dialog', { name: 'Preferências' }).getByRole('button', { name: 'Uso e custos', exact: true }).click()
+  await expect(page.getByText('Cota de assinatura', { exact: false })).toBeVisible()
+  await tirar('18-preferencias-uso')
   await page.getByRole('dialog', { name: 'Preferências' }).getByRole('button', { name: 'Tema', exact: true }).click()
   await expect(page.getByText('Ainda não disponível')).toBeVisible()
   await tirar('14-preferencias-pendencia')

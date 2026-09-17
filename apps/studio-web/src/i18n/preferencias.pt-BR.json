@@ -28,7 +28,6 @@
     "temaUnico": "Só existe o tema escuro. Ainda há 506 cores fixas fora dos tokens na folha antiga, e um tema claro que pinta metade da tela seria pior do que nenhum. A migração está no plano como V7-K.",
     "idiomaUnico": "O Studio fala português do Brasil, e só ele. Um seletor com um idioma só seria um botão que não faz nada.",
     "semAtalhos": "Ainda não há atalhos de teclado configuráveis. O que existe hoje é a tecla Esc, que fecha painéis e menus.",
-    "semMedicaoDeUso": "A medição de uso, cotas e custos ainda não foi construída. Um número aqui seria inventado. Está no plano como T-35.",
     "semComputador": "Ligar o Studio a uma pasta do seu computador ainda não existe. Está no plano como V7-F.",
     "semControleDeDados": "Exportar e apagar seus dados por aqui ainda não existe. A exportação por projeto está na Biblioteca.",
     "semImplantacao": "Publicar o aplicativo criado ainda não existe neste produto."
@@ -37,5 +36,24 @@
   "contaNome": "Nome",
   "contaSemNome": "Sua sessão não tem nome registrado.",
   "pendenciaRotulo": "Ainda não disponível",
-  "avatarSemNome": "—"
+  "avatarSemNome": "—",
+  "usoLendo": "Lendo o consumo deste espaço de trabalho…",
+  "usoErro": "Não foi possível ler o consumo agora.",
+  "usoSemMedicao": "Este Studio está montado sem o serviço que mede rota, uso e custo. Não há número a mostrar, e inventar um seria pior.",
+  "usoRota": "Rota",
+  "usoChamadas": "Chamadas",
+  "usoTokens": "Tokens",
+  "usoCusto": "Custo estimado",
+  "usoCustoDesconhecido": "não medido",
+  "usoSemPreco": "{n} sem preço",
+  "usoTotal": "Total medido: {custo} em {chamadas} chamada(s).",
+  "usoNaoPrecificadas": "{n} chamada(s) sem preço configurado — o custo delas NÃO está neste total.",
+  "usoVeredito": {
+    "semConsumo": "Nenhuma chamada registrada neste espaço de trabalho ainda.",
+    "dentro": "Dentro do teto configurado.",
+    "custoExcedido": "O teto de custo foi atingido. As rotas externas ficam bloqueadas até o teto ser revisto.",
+    "semPrecoExcedido": "Houve chamadas demais sem preço configurado. Configure o preço das rotas para o teto voltar a medir.",
+    "naoSei": "Não há medição disponível para dizer se este espaço está dentro de algum teto."
+  },
+  "usoLimitacao": "Cota de assinatura e custo informado pelo provedor não existem neste produto. O que está aqui é o consumo que o Studio mediu."
 }

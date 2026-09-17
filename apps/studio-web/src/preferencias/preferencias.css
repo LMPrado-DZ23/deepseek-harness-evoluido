@@ -142,3 +142,26 @@
   color: var(--dz-accent);
   font-size: 0.8125rem;
 }
+
+/* O consumo do espaço de trabalho, nas Preferências. */
+.dz-preferencias-uso { display: grid; gap: var(--dz-3); }
+.dz-preferencias-uso-veredito { margin: 0; }
+
+.dz-preferencias-uso-tabela {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.dz-preferencias-uso-tabela th,
+.dz-preferencias-uso-tabela td {
+  padding: var(--dz-2) var(--dz-3);
+  text-align: left;
+  border-bottom: 1px solid var(--dz-border);
+}
+
+.dz-preferencias-uso-tabela thead th { color: var(--dz-text-secondary); font-weight: 500; }
+.dz-preferencias-uso-tabela tbody th { font-weight: 500; }
+.dz-preferencias-uso-total { margin: 0; }
+.dz-preferencias-uso-aviso { margin: 0; color: var(--dz-warning); font-size: 0.8125rem; }
+.dz-preferencias-uso-limite { margin: 0; color: var(--dz-text-secondary); font-size: 0.8125rem; }

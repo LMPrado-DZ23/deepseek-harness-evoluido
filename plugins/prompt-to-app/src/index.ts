@@ -468,6 +468,28 @@ export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}):
       logos: new SharpLogoProcessor(logoStoreRoot),
       generatorFor: (actor, projectId) => new ModelCodeGenerator(model, actor, service.project(actor, projectId).privacy),
       health: actor => healthFor({ orgId: actor.orgId, tenantId: actor.tenantId }),
+      /*
+        O USO do espaço de trabalho, lido de `route-health`.
+
+        Nenhum contador novo: `list` e `budget` são o que o plugin já grava e já
+        usa para decidir rota. A rota HTTP só apresenta. O adendo de uso e
+        custos proíbe uma segunda contabilidade, e esta linha é a prova de que
+        não há uma — ela não soma nada, ela repassa.
+      */
+      usage: actor => {
+        const escopo = { orgId: actor.orgId, tenantId: actor.tenantId }
+        return {
+          routes: ctx.studioRouteHealth.service.list(escopo).map(registro => ({
+            route: registro.route,
+            requests: registro.requests,
+            input_tokens: registro.input_tokens,
+            output_tokens: registro.output_tokens,
+            estimated_cost_usd: registro.estimated_cost_usd,
+            unpriced_requests: registro.unpriced_requests ?? 0,
+          })),
+          budget: ctx.studioRouteHealth.service.budget(escopo),
+        }
+      },
       // O inventário do código que JÁ existe, lido do diretório da execução
       // mais recente que produziu alguma coisa.
       //

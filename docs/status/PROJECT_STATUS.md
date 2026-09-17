@@ -38,8 +38,8 @@ Todos reproduzíveis pelo comando ao lado.
 | typecheck | PASS | `pnpm typecheck` |
 | build | PASS | `pnpm build` |
 | suíte raiz | 3970 testes, 227 arquivos, 0 falha (17/09, após T-35-ALCANCE) | `pnpm -w test` |
-| suíte studio-web | 747 testes (17/09, após V7-B-2) | `cd apps/studio-web && npx vitest run` |
-| e2e navegador | 152 aprovados, 0 reprovados, 3 pulados (17/09, quatro tamanhos) | `cd apps/studio-web && npx playwright test` |
+| suíte studio-web | 771 testes (17/09, após V7-A-2) | `cd apps/studio-web && npx vitest run` |
+| e2e navegador | 153 aprovados, 0 reprovados, 3 pulados (17/09, quatro tamanhos) | `cd apps/studio-web && npx playwright test` |
 | PostgreSQL real | **65 testes, `POSTGRES_GATE=PASS`** (12/09, PostgreSQL 16.13 local) | `pnpm test:postgres` |
 | portões | **26/26 PASS** | ver abaixo |
 
@@ -650,6 +650,20 @@ produto existe para não fazer.
     acusasse. E o rótulo declarado prometia *"guardar versões do mesmo pacote"*,
     que não é o que foi construído — corrigido, porque a declaração é lida como
     promessa.
+
+48. **V7-A-2 — "Uso e custos" deixou de ser pendência, e a pendência estava errada.**
+
+    Das oito seções pendentes das Preferências, uso foi a única cujo motor já
+    estava inteiro — e a verificação do T-35 tinha acabado de prová-lo. O texto
+    que estava na tela dizia *"a medição de uso ainda não foi construída"*.
+
+    **Uma pendência que descreve errado o produto é uma segunda verdade com
+    outra roupa:** quem a lê constrói de novo o que já existe.
+
+    Nenhum contador novo — a rota repassa o que o `route-health` já grava. E as
+    regras do adendo valem na camada que a pessoa lê: custo desconhecido sai em
+    palavras, zero medido continua zero, e o total diz quantas chamadas ficaram
+    de fora dele.
 
 
 ## Estado do DAG

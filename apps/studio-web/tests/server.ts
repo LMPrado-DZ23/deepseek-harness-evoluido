@@ -355,6 +355,22 @@ const apiHandler = createPromptToAppHttpHandler({
     size_bytes: 100, width: 10, height: 10, extracted_primary: { h: 217, s: 91, l: 50 },
   }) },
   generatorFor: (actor, projectId) => new ModelCodeGenerator(model, actor, service.project(actor, projectId).privacy),
+  /*
+    O USO do espaço de trabalho no e2e.
+
+    Os números são dublê — não há provedor real aqui —, mas a FORMA é a de
+    produção, e ela carrega de propósito os dois casos que a tela precisa
+    distinguir: uma rota medida com custo de verdade, e outra com TODAS as
+    chamadas sem preço, que é onde "ausência vira zero" apareceria.
+  */
+  usage: () => ({
+    routes: [
+      { route: 'ollama', requests: 3, input_tokens: 900, output_tokens: 300, estimated_cost_usd: 0, unpriced_requests: 0 },
+      { route: 'omniroute', requests: 2, input_tokens: 400, output_tokens: 200, estimated_cost_usd: 0.0042, unpriced_requests: 0 },
+      { route: 'deepseek-official', requests: 1, input_tokens: 100, output_tokens: 50, estimated_cost_usd: 0, unpriced_requests: 1 },
+    ],
+    budget: { measuredCostUsd: 0.0042, unpricedRequests: 1, verdict: 'WITHIN' },
+  }),
   health: async () => ({
     state: 'OK', route: 'ollama-local', builder: 'OK', disk: 'OK',
     route_reason: 'A rota local foi escolhida por preferência, e ela está saudável.',

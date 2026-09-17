@@ -51,8 +51,16 @@ describe('as seções das preferências', () => {
 
   it('abre na primeira seção DISPONÍVEL, e não na primeira da lista', () => {
     expect(secaoInicial(secoesDePreferencias(TUDO))).toBe('conta')
-    // Sem sessão e sem notificação, as duas primeiras caem: abre em Habilidades.
-    expect(secaoInicial(secoesDePreferencias({ autenticado: false, notificacoesSuportadas: false }))).toBe('habilidades')
+    /*
+      Sem sessão e sem notificação, as duas primeiras caem — e a primeira que
+      sobra é USO, que passou a ser disponível quando a apresentação do consumo
+      foi construída. Antes desta fatia a resposta era Habilidades, porque tudo
+      entre uma e outra estava pendente.
+
+      O teste muda porque o PRODUTO mudou, e não porque a regra mudou: a regra
+      continua "abre na primeira disponível".
+    */
+    expect(secaoInicial(secoesDePreferencias({ autenticado: false, notificacoesSuportadas: false }))).toBe('uso')
   })
 
   it('sem nenhuma seção disponível, devolve `null` em vez de inventar uma', () => {

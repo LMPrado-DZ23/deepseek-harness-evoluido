@@ -67,7 +67,19 @@ export function secoesDePreferencias(contexto: ContextoDasPreferencias): readonl
     { id: 'tema', grupo: 'configuracoes', disponivel: false, pendencia: 'temaUnico' },
     { id: 'idioma', grupo: 'configuracoes', disponivel: false, pendencia: 'idiomaUnico' },
     { id: 'atalhos', grupo: 'configuracoes', disponivel: false, pendencia: 'semAtalhos' },
-    { id: 'uso', grupo: 'configuracoes', disponivel: false, pendencia: 'semMedicaoDeUso' },
+    /*
+      USO passou a ser DISPONÍVEL, e a pendência que estava aqui estava ERRADA.
+
+      Ela dizia "a medição de uso ainda não foi construída". A verificação do
+      `T-35` provou o contrário, critério a critério: o consumo é gravado por
+      inquilino e por rota, com tokens, custo estimado, chamadas não
+      precificadas e teto com veredito, e sobrevive a reinício. O que faltava
+      era a APRESENTAÇÃO fora da tarefa.
+
+      Uma pendência que descreve errado o produto é uma segunda verdade com
+      outra roupa: quem a lê constrói de novo o que já existe.
+    */
+    { id: 'uso', grupo: 'configuracoes', disponivel: true },
     { id: 'habilidades', grupo: 'capacidades', disponivel: true, href: HABILIDADES_PATH },
     { id: 'plugins', grupo: 'capacidades', disponivel: true, href: PLUGINS_PATH },
     { id: 'computador', grupo: 'capacidades', disponivel: false, pendencia: 'semComputador' },

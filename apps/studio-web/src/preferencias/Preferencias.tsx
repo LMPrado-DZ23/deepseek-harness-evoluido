@@ -3,6 +3,8 @@ import { X } from 'lucide-react'
 import preferencias from '../i18n/preferencias.pt-BR.json'
 import { iniciaisDaConta } from '../shell/tarefasDoTrilho'
 import { podeOperar, secaoInicial, secoesDePreferencias, type ContextoDasPreferencias, type GrupoDePreferencias, type SecaoDePreferencias } from './preferencias'
+import { chaveDoVeredito, contagemEmTexto, custoEmTexto, linhasDeUso, totalDeUso, type LinhaDeUso, type UsoDoEspaco } from './uso'
+import { api } from '../api'
 
 /**
  * As Preferências, como a referência as mostra: um modal com a navegação à
@@ -83,6 +85,85 @@ export function Preferencias({ contexto, aoFechar, conta, notificacao }: {
   </div>
 }
 
+/**
+ * O consumo do espaço de trabalho.
+ *
+ * TRÊS estados, e não dois: ainda lendo, leu, e não deu para ler. Colapsar o
+ * terceiro no segundo mostraria uma tabela vazia para quem tem consumo — que é
+ * a mesma classe de erro que "ausência vira zero", uma camada acima.
+ *
+ * A LIMITAÇÃO fica escrita na própria tela: cota de assinatura e custo
+ * informado pelo provedor não existem neste produto. Sem essa frase, alguém lê
+ * "Uso e custos" e supõe que está vendo a fatura.
+ */
+export function UsoDoEspacoDeTrabalho({ ler = () => api<UsoDoEspaco>('/usage') }: {
+  readonly ler?: () => Promise<UsoDoEspaco>
+} = {}) {
+  const [uso, setUso] = useState<UsoDoEspaco | null>(null)
+  const [erro, setErro] = useState(false)
+
+  useEffect(() => {
+    let vivo = true
+    void ler().then(
+      valor => { if (vivo) setUso(valor) },
+      () => { if (vivo) setErro(true) },
+    )
+    return () => { vivo = false }
+    // `ler` entra na lista porque é ele que define a leitura; o valor padrão é
+    // recriado a cada render, e por isso quem monta em produção não o passa.
+  }, [ler])
+
+  if (erro) return <p className="dz-preferencias-pendencia" role="status">{preferencias.usoErro}</p>
+  if (uso === null) return <p className="dz-preferencias-controle" role="status">{preferencias.usoLendo}</p>
+  if (!uso.measured) return <p className="dz-preferencias-pendencia">{preferencias.usoSemMedicao}</p>
+  return <TabelaDeUso linhas={linhasDeUso(uso.routes ?? [])} veredito={uso.budget?.verdict} />
+}
+
+/** O consumo já lido, desenhado. Separado para ter teste sem rede. */
+export function TabelaDeUso({ linhas, veredito }: {
+  readonly linhas: readonly LinhaDeUso[]
+  readonly veredito: string | undefined
+}) {
+  const total = totalDeUso(linhas)
+  const chave = chaveDoVeredito(veredito, total.chamadas > 0)
+  return <div className="dz-preferencias-uso">
+    <p className="dz-preferencias-uso-veredito" role="status">{preferencias.usoVeredito[chave]}</p>
+    {linhas.length > 0 && <table className="dz-preferencias-uso-tabela">
+      <thead>
+        <tr>
+          <th scope="col">{preferencias.usoRota}</th>
+          <th scope="col">{preferencias.usoChamadas}</th>
+          <th scope="col">{preferencias.usoTokens}</th>
+          <th scope="col">{preferencias.usoCusto}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {linhas.map(linha => <tr key={linha.rota}>
+          <th scope="row">{linha.rota}</th>
+          <td>{contagemEmTexto(linha.chamadas)}</td>
+          <td>{contagemEmTexto(linha.tokens)}</td>
+          <td>
+            {/* Custo desconhecido é dito em palavras. NUNCA "US$ 0,0000". */}
+            {linha.custoUsd === null ? preferencias.usoCustoDesconhecido : custoEmTexto(linha.custoUsd)}
+            {linha.naoPrecificadas > 0 && <span className="dz-preferencias-uso-aviso">
+              {' '}{preferencias.usoSemPreco.replace('{n}', contagemEmTexto(linha.naoPrecificadas))}
+            </span>}
+          </td>
+        </tr>)}
+      </tbody>
+    </table>}
+    <p className="dz-preferencias-uso-total">
+      {preferencias.usoTotal
+        .replace('{custo}', custoEmTexto(total.custoMedidoUsd))
+        .replace('{chamadas}', contagemEmTexto(total.chamadas))}
+    </p>
+    {total.naoPrecificadas > 0 && <p className="dz-preferencias-uso-aviso">
+      {preferencias.usoNaoPrecificadas.replace('{n}', contagemEmTexto(total.naoPrecificadas))}
+    </p>}
+    <p className="dz-preferencias-uso-limite">{preferencias.usoLimitacao}</p>
+  </div>
+}
+
 function Conteudo({ secao, conta, notificacao }: {
   readonly secao: SecaoDePreferencias
   readonly conta: string | null
@@ -101,6 +182,7 @@ function Conteudo({ secao, conta, notificacao }: {
     </dl>
   }
   if (secao.id === 'notificacoes') return <div className="dz-preferencias-controle">{notificacao}</div>
+  if (secao.id === 'uso') return <UsoDoEspacoDeTrabalho />
   // As capacidades que existem são DESTINOS: o link leva ao lugar onde elas já
   // funcionam, em vez de uma segunda cópia da mesma tela dentro do modal.
   return <p className="dz-preferencias-controle">

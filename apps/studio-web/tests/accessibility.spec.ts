@@ -116,6 +116,38 @@ test.describe('acessibilidade do fluxo principal', () => {
     await expect(modal).toBeHidden()
   })
 
+  test('as Preferências mostram o consumo do espaço, sem transformar ausência em zero', async ({ page }) => {
+    /*
+      A seção "Uso e custos" era uma PENDÊNCIA que dizia "a medição ainda
+      não foi construída" — e a verificação do T-35 provou que a frase estava
+      errada. O que faltava era a apresentação fora da tarefa.
+
+      O que este caso guarda é a regra do adendo na camada que a pessoa lê:
+      rota sem preço aparece como NÃO MEDIDA, e rota medida com custo zero
+      continua zero.
+    */
+    await page.goto('/studio/')
+    // Abaixo de 1024px o trilho sai do fluxo e a porta é o botão de menu — o
+    // mesmo caminho do caso das Preferências acima. Sem isto, este teste
+    // provava a seção só na mesa.
+    const menu = page.getByRole('button', { name: 'Abrir o menu', exact: true })
+    if (await menu.isVisible()) await menu.click()
+    await page.getByRole('button', { name: 'Preferências', exact: true }).click()
+    const modal = page.getByRole('dialog', { name: 'Preferências' })
+    await modal.getByRole('button', { name: 'Uso e custos', exact: true }).click()
+
+    // A rota medida de graça continua zero; a sem preço diz que não sabe.
+    await expect(modal.getByRole('row', { name: /ollama/u })).toContainText('US$ 0,0000')
+    await expect(modal.getByRole('row', { name: /deepseek-official/u })).toContainText('não medido')
+    // E o total diz o que ficou de fora dele.
+    await expect(modal.getByText('1 chamada(s) sem preço configurado', { exact: false })).toBeVisible()
+    // A limitação do produto está escrita, e não subentendida.
+    await expect(modal.getByText('Cota de assinatura e custo informado pelo provedor não existem', { exact: false })).toBeVisible()
+
+    const semViolacao = await new AxeBuilder({ page }).analyze()
+    expect(semViolacao.violations.map(violation => violation.id)).toEqual([])
+  })
+
   test('os menus do compositor abrem com o que ESTE Studio tem ligado', async ({ page }) => {
     /*
       F08/F09 mostram os menus ancorados no compositor. O da referência lista as
