@@ -114,6 +114,25 @@ export function citedPaths(cell) {
  * @param tracked - todos os caminhos versionados.
  * @returns as reprovações, uma por arquivo citado e ausente.
  */
+/**
+ * Os caminhos que a própria linha DECLARA apagados.
+ *
+ * Uma linha do livro mestre é histórica: ela registra o que uma entrega mexeu,
+ * e uma entrega posterior pode apagar um arquivo que uma anterior citou. Sem
+ * esta saída, o portão empurraria para o conserto errado — reescrever o
+ * histórico até ele parar de mencionar o que existiu.
+ *
+ * A dispensa é ESTREITA de propósito: vale só para o caminho seguido, ali
+ * mesmo, de `(APAGADO`. Uma linha que queira escapar do portão tem de dizer em
+ * voz alta que o arquivo não existe mais, e isso é exatamente o registro que se
+ * quer ter.
+ * @param cell - o conteúdo da célula.
+ * @returns os caminhos declarados apagados.
+ */
+export function declaredDeletedPaths(cell) {
+  return [...cell.matchAll(/([A-Za-z0-9_.@/-]*[A-Za-z0-9_-]\.[A-Za-z0-9]+)\s*\(APAGADO/gu)].map(achado => achado[1])
+}
+
 export function missingCitedPaths(rows, tracked) {
   const files = [...tracked]
   const findings = []
@@ -123,7 +142,9 @@ export function missingCitedPaths(rows, tracked) {
     // existem") e artefato gerado em tempo de execução (`run-report.json`);
     // reprovar isso ensinaria a escrever prova mais vaga para escapar do portão.
     for (const column of ['arquivos', 'testes']) {
+      const apagados = new Set(declaredDeletedPaths(row[column]))
       for (const path of citedPaths(row[column])) {
+        if (apagados.has(path)) continue
         const suffix = path.startsWith('/') ? path.slice(1) : path
         if (!files.some(file => file === suffix || file.endsWith(`/${suffix}`))) {
           findings.push(`${row.id}: a coluna ${column} cita ${path}, que não existe na árvore`)

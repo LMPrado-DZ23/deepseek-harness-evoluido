@@ -35,12 +35,21 @@
 **A CAPA do projeto foi atualizada em 18/09** (`BR-F09 / APO-01`): README, guias,
 constituição, marcas e `CLAUDE.md` dizem FRIGG; as imagens do README passaram a
 vir de `apps/studio-web/capturas/`, que o e2e produz; e o PIX de doação entrou
-com portão próprio. `scripts/capture-screenshots.mjs` está **declarado superado**
-— ele percorre o assistente de cinco telas e trava. Apagá-lo depende da palavra
-do titular.
+com portão próprio.
 
-**Fora do repositório, e pendente da palavra do titular:** descrição, tópicos e
-imagem social do repositório no GitHub.
+**A PORTA DE ENTRADA foi fechada em 18/09** (`BR-F10`), com a palavra do titular
+("atualize tudo"). `scripts/capture-screenshots.mjs` foi **apagado** — ele
+percorria o assistente de cinco telas e travava, e era uma segunda descrição da
+jornada apodrecendo em ritmo próprio; as dez capturas velhas de `docs/images/`
+foram junto, porque nada as referenciava desde que o README passou a ler
+`apps/studio-web/capturas/`. A **descrição** e os **tópicos** do repositório no
+GitHub foram atualizados e conferidos de volta (`gh repo view`).
+
+**O que continua fora do repositório:** a **imagem social**. O arquivo existe e
+tem portão (`docs/images/social-card.png`, gerado por
+`scripts/build-social-card.mjs`), mas o GitHub não a expõe na API REST nem no
+`gh` — ela é enviada à mão em *Settings → General → Social preview*. O arquivo
+está provado; o efeito, não.
 
 **A próxima fatia, e por que ela é grande.** A cobertura trilíngue é de
 navegação + Preferências. O passo seguinte é migrar as demais superfícies, e a

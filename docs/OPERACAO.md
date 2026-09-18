@@ -108,6 +108,25 @@ próprio comando e mata a si mesmo:
 pkill -9 -f 'tests/serve[r].ts'
 ```
 
+### As duas imagens que NÃO saem de teste nenhum
+
+O QR do PIX e o cartão social do repositório são gerados por roteiro, cada um a
+partir da sua fonte, e ficam versionados. Rode-os quando a fonte mudar:
+
+```bash
+node scripts/build-pix-qr.mjs       # le docs/pix-payload.txt  -> docs/images/pix-qr.png
+node scripts/build-social-card.mjs  # le marca.ts + theme.css  -> docs/images/social-card.png
+```
+
+Os dois precisam de um pacote do Python (`segno` e `pillow`). `gate:pix` confere
+o payload; `gate:marca` confere que o cartão social foi gerado para a marca que
+vale hoje — ele grava a procedência dentro do próprio PNG.
+
+**O cartão social não se publica sozinho.** A imagem social do repositório não
+existe na API do GitHub nem no `gh`: ela é enviada à mão, em
+*Settings → General → Social preview*. O roteiro produz o arquivo; carregá-lo é
+do titular.
+
 ### PostgreSQL real
 
 Sem a variável, a suíte de PostgreSQL é **pulada** — e uma suíte pulada não é

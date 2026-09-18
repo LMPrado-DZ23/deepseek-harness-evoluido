@@ -148,9 +148,67 @@ const ARQUIVOS = [
   'apps/studio-web/public/icons/icon-192.png',
   'apps/studio-web/public/icons/icon-512.png',
   'apps/studio-web/public/icons/maskable-512.png',
+  /*
+    O cartão social NÃO é referenciado pela interface: ele é carregado à mão na
+    página de configurações do repositório, e nada no produto o lê. Ele está
+    nesta lista porque some do mesmo jeito que os outros — e some em silêncio,
+    já que a única coisa que o notaria é alguém colando o link do projeto num
+    lugar que gere prévia, meses depois. `scripts/build-social-card.mjs` o gera.
+  */
+  'docs/images/social-card.png',
 ]
 for (const arquivo of ARQUIVOS) {
   if (!existsSync(resolve(raiz, arquivo))) reprove(arquivo, 'referenciado pela marca e ausente do repositório')
+}
+
+/**
+ * Os pedaços de texto que um PNG carrega em `tEXt`, como chave → valor.
+ *
+ * Um chunk `tEXt` é `tamanho(4) tipo(4) chave\0valor crc(4)`. Ler isto à mão
+ * custa vinte linhas e evita uma dependência de imagem na CI — que é o preço
+ * que `gate:pix` já recusou pagar para decodificar um QR.
+ * @param caminho - o arquivo PNG.
+ * @returns o mapa de chave para valor.
+ */
+export function textoDoPng(caminho) {
+  const bytes = readFileSync(caminho)
+  const mapa = new Map()
+  let posicao = 8
+  while (posicao + 8 <= bytes.length) {
+    const tamanho = bytes.readUInt32BE(posicao)
+    const tipo = bytes.toString('ascii', posicao + 4, posicao + 8)
+    if (tipo === 'IEND') break
+    if (tipo === 'tEXt') {
+      const bruto = bytes.subarray(posicao + 8, posicao + 8 + tamanho)
+      const corte = bruto.indexOf(0)
+      if (corte > 0) mapa.set(bruto.toString('latin1', 0, corte), bruto.toString('latin1', corte + 1))
+    }
+    posicao += 12 + tamanho
+  }
+  return mapa
+}
+
+/*
+  O CARTÃO SOCIAL ainda diz o que a marca diz HOJE?
+
+  Este é o único arquivo de marca que nada regenera sozinho: ele não entra em
+  build nenhum, e trocar o nome do produto sem rodar o gerador deixaria um
+  cartão mentindo — para quem cola o link do projeto, que é justamente a pessoa
+  que ainda não conhece o produto. O gerador grava dentro do PNG as entradas que
+  o desenharam; aqui elas são comparadas com a fonte viva.
+
+  Ele NÃO confere que o cartão foi CARREGADO no GitHub: a imagem social não
+  existe na API REST nem no `gh`, e é enviada à mão na página de configurações.
+  O portão prova o arquivo, não o efeito.
+*/
+const cartao = resolve(raiz, 'docs/images/social-card.png')
+if (existsSync(cartao)) {
+  const gravado = textoDoPng(cartao)
+  if (gravado.get('frigg-marca') === undefined) {
+    reprove('docs/images/social-card.png', 'não diz de que marca foi gerado: rode `node scripts/build-social-card.mjs`')
+  } else if (gravado.get('frigg-marca') !== nomeCaixaAlta) {
+    reprove('docs/images/social-card.png', `foi gerado para ${JSON.stringify(gravado.get('frigg-marca'))} e a marca hoje é ${JSON.stringify(nomeCaixaAlta)}: rode \`node scripts/build-social-card.mjs\``)
+  }
 }
 
 for (const referencia of [...html.matchAll(/(?:href|src)="(\/studio\/(?:brand|icons)\/[^"]+)"/gu)].map(achado => achado[1])) {
