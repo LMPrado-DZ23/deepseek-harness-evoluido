@@ -61,9 +61,18 @@ export function secoesDePreferencias(contexto: ContextoDasPreferencias): readonl
       id: 'notificacoes', grupo: 'configuracoes', disponivel: contexto.notificacoesSuportadas,
       ...(contexto.notificacoesSuportadas ? {} : { pendencia: 'semNotificacao' }),
     },
-    // O tema NÃO entra como controle, e a medida está no comentário do módulo:
-    // 506 cores fixas fora dos tokens em `styles.css`. Um tema claro que só
-    // pinta metade da tela é pior que um tema claro que ainda não existe.
+    /*
+      O tema NÃO entra como controle, e a medida está no livro mestre, com
+      data: em 18/09/2026 havia 688 ocorrências de cor fora dos tokens nas
+      folhas da interface, 511 delas só em `styles.css`. Um tema claro que só
+      pinta metade da tela é pior que um tema claro que ainda não existe.
+
+      O NÚMERO saiu do texto que a pessoa lê, e isso é conserto de um defeito
+      real: a frase dizia "506", o produto tinha 688, e os três catálogos
+      passaram a discordar entre si no dia em que as traduções foram escritas.
+      Uma contagem escrita à mão numa frase de interface não tem como continuar
+      honesta — a medição vive no livro mestre, onde é datada.
+    */
     { id: 'tema', grupo: 'configuracoes', disponivel: false, pendencia: 'temaUnico' },
     /*
       IDIOMA passou a ser disponível quando o produto passou a ter TRÊS.

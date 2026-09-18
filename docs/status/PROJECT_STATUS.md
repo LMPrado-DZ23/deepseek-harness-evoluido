@@ -18,6 +18,54 @@
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c` (zero diff, `gate:upstream-pin` prova)
 - `atualizado_em`: 2026-09-18
 
+## RETOMADA EXATA — 18/09/2026
+
+**Estado:** árvore limpa, `integ`, tudo entregue e enviado. Último commit
+`5793623` (INT-01), CI acompanhada.
+
+**A ordem em que as fatias saíram hoje**, todas com `CONFERE=SIM`:
+
+| commit | fatia | CI |
+| --- | --- | --- |
+| `6932b55` | BR-F — a marca FRIGG, fonte única e `gate:marca` | cancelada pelo push seguinte |
+| `29071fe` | EMP-CORR — colisão de rótulo com a matriz canônica, `gate:bus-matriz` | verde (cobre as duas) |
+| `9ed8866` | EMP-04 — catálogo de ofertas (`BUS-03`) | verde |
+| `5793623` | INT-01 — três idiomas, `gate:idiomas` | acompanhar |
+
+**A próxima fatia, e por que ela é grande.** A cobertura trilíngue é de
+navegação + Preferências. O passo seguinte é migrar as demais superfícies, e a
+medição de hoje diz o tamanho: `pt-BR.json` tem **398 chaves**, `hub` tem 138,
+`empresa` 113, `assistant` 111, `tarefa` 75, `team` 72, `mission` 64, `destinos`
+56, `pwa` 19, `home` 14, `categorySignals` 8, `help` 13 — mais os **19
+catálogos dos plugins**.
+
+Nenhuma superfície é independente das duas maiores: a home e a conversa vivem
+em `pt-BR.json`, e as quatro telas do trilho dependem de `hub`. Migrar meia
+delas produz exatamente a tela meio traduzida que o adendo e este repositório
+proíbem — pela mesma razão que o tema claro está parado.
+
+**Por onde continuar, em ordem:**
+
+1. `pt-BR.json` (398) — desbloqueia home e conversa, que são o produto;
+2. `hub` (138) + `destinos` (56) — desbloqueia as quatro telas do trilho;
+3. `empresa` (113) e `assistant` (111);
+4. o resto, e os catálogos dos plugins.
+
+Cada uma fecha registrando o espaço de nomes em `ESPACOS_TRADUZIDOS`, o que faz
+`gate:idiomas` passar a cobrá-lo — e atualiza a frase `idiomaCobertura` nas três
+línguas, que é onde a pessoa lê o que está e o que não está traduzido.
+
+**Comando de retomada:**
+
+```
+cd /home/claude/integ && git log --oneline -1 && git status --short
+bash /tmp/gates.sh && node scripts/check-constitution.mjs --verdicts /tmp/verdicts.txt
+```
+
+**O que NÃO está autorizado, e continua não estando:** contratar, cobrar, mudar
+DNS, criar aplicativo OAuth em conta externa, publicar, migrar produção,
+`force-push` e merge em `main`.
+
 ## O que este repositório É hoje
 
 **Um Prompt-to-App Studio**, não um Engineering OS. Essa é a distância a

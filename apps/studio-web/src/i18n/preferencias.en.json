@@ -25,7 +25,7 @@
   "pendencias": {
     "semSessao": "Sign in to your account to see this data.",
     "semNotificacao": "This browser does not offer notifications. On one that does, the notice shows up here.",
-    "temaUnico": "Only the dark theme exists. The old stylesheet still has 511 colours outside the tokens, and a light theme that paints half the screen would be worse than none. The migration is planned as V7-K.",
+    "temaUnico": "Only the dark theme exists. The old stylesheet still paints hundreds of colours by hand, outside the tokens, and a light theme that paints half the screen would be worse than none. The migration is planned as V7-K.",
     "semComputador": "Connecting FRIGG to a folder on your computer does not exist yet. It is planned as V7-F.",
     "semImplantacao": "Publishing the app you created does not exist in this product yet."
   },

@@ -25,7 +25,7 @@
   "pendencias": {
     "semSessao": "Inicia sesión en tu cuenta para ver estos datos.",
     "semNotificacao": "Este navegador no ofrece notificaciones. En uno que las ofrezca, el aviso aparece aquí.",
-    "temaUnico": "Solo existe el tema oscuro. La hoja antigua todavía tiene 511 colores fuera de los tokens, y un tema claro que pinte media pantalla sería peor que ninguno. La migración está planificada como V7-K.",
+    "temaUnico": "Solo existe el tema oscuro. La hoja antigua todavía pinta cientos de colores a mano, fuera de los tokens, y un tema claro que pinte media pantalla sería peor que ninguno. La migración está planificada como V7-K.",
     "semComputador": "Conectar FRIGG a una carpeta de tu ordenador todavía no existe. Está planificado como V7-F.",
     "semImplantacao": "Publicar la aplicación creada todavía no existe en este producto."
   },
