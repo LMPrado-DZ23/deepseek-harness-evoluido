@@ -84,7 +84,7 @@
     "dashboardNeedsEntity": "Um painel precisa de ao menos um cadastro para resumir.",
     "sliceDuplicatePaths": "A etapa sugerida mexeria em arquivos que outra etapa já vai criar. Descreva com outras palavras o que falta.",
     "sliceUnusable": "Não deu para transformar esse pedido em uma etapa nova. Tente descrever em uma frase o que falta no plano.",
-    "contextBudget": "O que você descreveu ficou grande demais para caber em um pedido só. Isso não é erro seu: o Studio precisa dividir o trabalho em partes menores, e ainda não sabe fazer isso sozinho para um projeto deste tamanho.",
+    "contextBudget": "O que você descreveu ficou grande demais para caber em um pedido só. Isso não é erro seu: o FRIGG precisa dividir o trabalho em partes menores, e ainda não sabe fazer isso sozinho para um projeto deste tamanho.",
     "skillBodyMismatch": "Uma habilidade entregou um texto diferente do que tinha declarado, então ela não foi usada.",
     "creationKeyFormat": "Não foi possível reconhecer este envio. Recarregue a página e tente de novo.",
     "creationKeyConflict": "Este pedido já foi usado para criar outra tarefa, com um texto diferente. Recarregue a página e envie de novo.",
@@ -103,7 +103,7 @@
     "interrupted": "A criação foi interrompida antes de terminar. Nada foi publicado.",
     "cancelled": "A criação foi cancelada pela pessoa.",
     "cancelledReason": "cancelado pela pessoa",
-    "budgetExceeded": "A criação parou porque o limite de uso desta conta foi alcançado. O que já foi feito está guardado; para continuar, aumente o limite ou fale com quem instalou o Studio.",
+    "budgetExceeded": "A criação parou porque o limite de uso desta conta foi alcançado. O que já foi feito está guardado; para continuar, aumente o limite ou fale com quem instalou o FRIGG.",
     "repeating": "A criação parou antes do limite: a última tentativa escreveu exatamente o mesmo código e falhou exatamente como a tentativa {attempt}. Continuar gastaria o resto do limite na mesma aposta."
   },
   "values": {
@@ -144,9 +144,9 @@
     "planFirst": "A primeira fatia deve criar content/app.json e src/GeneratedApp.tsx. Use somente classes existentes para o visual; não planeje arquivos CSS.",
     "planFormDatabase": "Para a categoria de cadastro e lista, a tela principal deve importar os componentes protegidos de @/src/components/generated/, mostrar os campos, salvar e exibir a lista. O modelo nunca cria banco, migração, repositório ou ação de gravação.",
     "planCrudPanel": "Para o painel de gestão, a tela principal deve importar o painel protegido de @/src/components/generated/. O painel faz login, lista, cria, edita e exclui com confirmação; o modelo nunca cria autenticação, banco ou ações.",
-    "planScheduling": "Para a agenda, a tela principal deve importar SchedulingPanel de @/src/components/generated/scheduling-panel. O Studio já controla autenticação, banco, horários, conflitos e mudanças de situação; o modelo só compõe a apresentação.",
-    "planDashboard": "Para o painel, a tela principal deve importar os painéis somente leitura de @/src/components/generated/dashboards/. O Studio já controla autenticação, banco, contagens, gráficos e tabelas; o modelo só compõe a apresentação.",
-    "planSaas": "Para o aplicativo de equipe, a tela principal deve importar SaasPanel de @/src/components/generated/. O Studio já controla login, autoria, isolamento por pessoa e ações de gravação; o modelo só compõe a apresentação.",
+    "planScheduling": "Para a agenda, a tela principal deve importar SchedulingPanel de @/src/components/generated/scheduling-panel. O FRIGG já controla autenticação, banco, horários, conflitos e mudanças de situação; o modelo só compõe a apresentação.",
+    "planDashboard": "Para o painel, a tela principal deve importar os painéis somente leitura de @/src/components/generated/dashboards/. O FRIGG já controla autenticação, banco, contagens, gráficos e tabelas; o modelo só compõe a apresentação.",
+    "planSaas": "Para o aplicativo de equipe, a tela principal deve importar SaasPanel de @/src/components/generated/. O FRIGG já controla login, autoria, isolamento por pessoa e ações de gravação; o modelo só compõe a apresentação.",
     "changeRequest": "Pedido de mudança da pessoa: {reason}",
     "generateOnly": "Produza somente JSON com files[].path e files[].content.",
     "generateDeclarative": "A tela gerada deve usar somente JSX declarativo com elementos HTML e componentes das fachadas protegidas indicadas no plano. Não use chamadas de função, construtores, componentes locais dinâmicos, atributos espalhados nem acesso dinâmico a propriedades.",
@@ -192,7 +192,7 @@
     "spec": "O que você descreveu",
     "change": "A mudança que você pediu",
     "schema": "O formato da resposta",
-    "rule": "Uma regra do Studio",
+    "rule": "Uma regra do FRIGG",
     "other": "Outra informação",
     "skillDisabled": "A habilidade {skill} não foi usada porque está desligada",
     "skillTooBig": "A habilidade {skill} não foi usada porque é grande demais para caber junto do seu pedido",
@@ -207,7 +207,7 @@
     "notAutomated": "{count} critério(s) que você escreveu não puderam ser conferidos por máquina. Confira você mesmo: ninguém verificou esses."
   },
   "capability": {
-    "CODE_ABSENT": "{id}: esta parte do Studio não está instalada aqui.",
+    "CODE_ABSENT": "{id}: esta parte do FRIGG não está instalada aqui.",
     "NOT_CONFIGURED": "{id}: falta configurar do que ela depende.",
     "NO_PROBE": "{id}: não existe jeito automático de exercitar esta parte, então ninguém pode afirmar que ela funciona agora.",
     "NEVER_PROBED": "{id}: nunca foi exercitada nesta instalação.",
@@ -238,7 +238,7 @@
     "valorCusto": "US$ {valor}",
     "naoRegistrado": "não registrado (e isto não quer dizer zero)",
     "rotuloLimite": "O que esta resposta é",
-    "valorLimite": "Só o que o Studio já registrou sobre a tarefa. Ela não passa por nenhum modelo, então não interpreta a sua pergunta — a pergunta fica guardada na conversa do jeito que você escreveu.",
+    "valorLimite": "Só o que o FRIGG já registrou sobre a tarefa. Ela não passa por nenhum modelo, então não interpreta a sua pergunta — a pergunta fica guardada na conversa do jeito que você escreveu.",
     "estado": {
       "DRAFT": "o pedido foi aberto e ainda está sendo descrito",
       "SPEC_READY": "a descrição foi fechada e falta propor o plano",

@@ -16,7 +16,7 @@
 - `branch`: `integ` (**não é `main`** — confirmar com `git branch --show-current`)
 - `head`: ver `git log --oneline -1`; o último estado registrado aqui é `91c6aa0` + o trabalho desta iteração (T-27: revisão adversarial do portão de prévia)
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c` (zero diff, `gate:upstream-pin` prova)
-- `atualizado_em`: 2026-09-17
+- `atualizado_em`: 2026-09-18
 
 ## O que este repositório É hoje
 
@@ -37,8 +37,8 @@ Todos reproduzíveis pelo comando ao lado.
 | --- | --- | --- |
 | typecheck | PASS | `pnpm typecheck` |
 | build | PASS | `pnpm build` |
-| suíte raiz | 3978 testes, 227 arquivos, 0 falha (17/09, após V7-A-4) | `pnpm -w test` |
-| suíte studio-web | 788 testes (17/09, após V7-A-4) | `cd apps/studio-web && npx vitest run` |
+| suíte raiz | 3978 testes, 227 arquivos, 0 falha (18/09, após BR-F) | `pnpm -w test` |
+| suíte studio-web | 800 testes (18/09, após BR-F) | `cd apps/studio-web && npx vitest run` |
 | e2e navegador | 158 aprovados, 0 reprovados, 3 pulados (17/09, quatro tamanhos) | `cd apps/studio-web && npx playwright test` |
 | PostgreSQL real | **65 testes, `POSTGRES_GATE=PASS`** (12/09, PostgreSQL 16.13 local) | `pnpm test:postgres` |
 | portões | **26/26 PASS** | ver abaixo |
@@ -676,6 +676,19 @@ produto existe para não fazer.
 
     O atalho **não é uma segunda porta**: passa pela mesma condição do botão,
     inclusive o bloqueio de privacidade.
+
+51. **BR-F01..BR-F08 — a marca passou a ser FRIGG, e passou a ter UMA fonte.**
+    A decisão `FRIGG-MARCA-20260917-R1` do titular trocou a marca visível. O
+    nome estava escrito à mão em **onze lugares** que nenhum teste comparava
+    entre si; agora ele mora em `apps/studio-web/src/marca/marca.ts` e
+    `gate:marca` (o 27º portão) reprova qualquer superfície que discorde — e
+    reprova também `id`, `scope` ou `start_url` do manifesto mudando junto,
+    porque trocar a identidade de instalação faz o navegador tratar a PWA já
+    instalada como outro aplicativo. A arte de cada tamanho foi **medida**
+    (`audit/FRIGG_MARCA_R1/comparacao-marca.png`): o emblema sobrevive de 36 px
+    para cima, o micro-F cobre o favicon, e o uso de cada um está declarado.
+    `frigg.ia.br` é constante com `dominioPublicado: false`, e nada de DNS,
+    TLS, cookie, RP ID, callback ou origem de API foi tocado. Ver ADR-052.
 
 50. **V7-A-4 — levar consigo tudo o que é seu.**
 

@@ -18,7 +18,7 @@
     "jsonRequired": "O corpo do pedido precisa ser JSON.",
     "requestTooLarge": "O corpo do pedido é grande demais.",
     "operationFailed": "Não foi possível concluir a operação de staging.",
-    "notConfigured": "O staging ainda não está configurado nesta instalação. Peça a quem administra o Studio para escolher a pasta de publicação."
+    "notConfigured": "O staging ainda não está configurado nesta instalação. Peça a quem administra o FRIGG para escolher a pasta de publicação."
   },
   "source": {
     "noVerifiedRun": "Este projeto ainda não tem uma versão verificada para publicar. Gere e verifique o aplicativo antes.",

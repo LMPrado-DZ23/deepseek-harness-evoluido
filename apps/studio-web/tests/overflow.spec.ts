@@ -38,6 +38,6 @@ test('nenhuma tela do fluxo rola para os lados', async ({ context, page }) => {
   await expect(page.getByText('Para quem você quer criar este projeto?')).toBeVisible()
   await overflow('perguntas')
   await page.goto('/studio/ajuda')
-  await expect(page.getByRole('heading', { name: 'Ajuda do DZ23 STUDIO' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Ajuda do FRIGG' })).toBeVisible()
   await overflow('ajuda')
 })

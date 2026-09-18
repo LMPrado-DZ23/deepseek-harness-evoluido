@@ -33,7 +33,7 @@ test('a navegação existe e leva à conversa, em qualquer tamanho de tela', asy
     await expect(menu).toBeHidden()
   }
 
-  const conversation = page.getByRole('link', { name: 'Conversar com o DZ23' })
+  const conversation = page.getByRole('link', { name: 'Conversar com o FRIGG' })
   await expect(conversation).toBeVisible()
   await expect(conversation).toHaveAttribute('href', '/studio/assistente')
   /*
@@ -49,7 +49,7 @@ test('a navegação existe e leva à conversa, em qualquer tamanho de tela', asy
   */
   for (const [nome, href] of [
     ['Nova tarefa', '/studio/'],
-    ['Conversar com o DZ23', '/studio/assistente'],
+    ['Conversar com o FRIGG', '/studio/assistente'],
     ['Habilidades', '/studio/habilidades'],
     ['Plugins', '/studio/plugins'],
     ['Agendado', '/studio/agendado'],

@@ -236,7 +236,7 @@ describe('X-04 testar a conexão', () => {
     await service.setEnabled(admin, integration.integration_id, true)
     const result = await service.testIntegration(admin, integration.integration_id)
     expect(result.result).toBe('NOT_EXECUTED')
-    expect(result.message).toContain('Studio')
+    expect(result.message).toContain('FRIGG')
     expect(repository.eventRows.at(-1)).toMatchObject({ action: 'integration.tested', detail: 'no-dispatcher' })
   })
 

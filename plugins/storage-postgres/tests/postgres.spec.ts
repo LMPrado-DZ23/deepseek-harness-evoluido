@@ -421,7 +421,7 @@ exec docker exec -i ${JSON.stringify(postgresContainer ?? '')} pg_restore --list
       // Refused even with the loudest flags a person can type.
       for (const schema of [foreign, viewed, typesOnly]) {
         await expect(attempt(schema, ['--force', '--confirm', 'REPLACE_DZ23_STORAGE', '--allow-domain-loss']))
-          .rejects.toThrow('não tem a estrutura do DZ23 STUDIO')
+          .rejects.toThrow('não tem a estrutura do FRIGG')
       }
       // Nothing was touched, and no safety dump was even started.
       expect((await client.query(`SELECT count(*)::int AS n FROM ${quoteIdentifier(foreign)}."important"`)).rows[0].n).toBe(1)

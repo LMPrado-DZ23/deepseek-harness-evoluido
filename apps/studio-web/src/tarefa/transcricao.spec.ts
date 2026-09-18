@@ -177,7 +177,7 @@ function fatia() {
 
 describe('a pergunta DA PESSOA na conversa', () => {
   it('a pergunta é dela e a resposta é do estúdio — a autoria vira', () => {
-    // Sem isto, a pergunta da pessoa apareceria como fala do DZ23 Studio. Este
+    // Sem isto, a pergunta da pessoa apareceria como fala do FRIGG. Este
     // arquivo recusa mensagem inventada; atribuir a fala de alguém a outro é a
     // mesma mentira, com outro nome.
     const lances = transcricaoDaTarefa(detalhes({

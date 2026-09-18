@@ -83,9 +83,9 @@ describePostgres('restore CLI hardening', () => {
       for (const victim of [textSearch, conversion]) {
         // Seen as content, so the layout check runs and refuses — with no flags at all,
         // and again with the loudest flags a person can type.
-        await expect(invoke(input, victim, join(directory, `${victim}.dump`))).rejects.toThrow('não tem a estrutura do DZ23 STUDIO')
+        await expect(invoke(input, victim, join(directory, `${victim}.dump`))).rejects.toThrow('não tem a estrutura do FRIGG')
         await expect(invoke(input, victim, join(directory, `${victim}.dump`), ['--force', '--confirm', 'REPLACE_DZ23_STORAGE', '--allow-domain-loss']))
-          .rejects.toThrow('não tem a estrutura do DZ23 STUDIO')
+          .rejects.toThrow('não tem a estrutura do FRIGG')
       }
       // Both survived, with their contents.
       const survived = await client.query<{ n: number }>(

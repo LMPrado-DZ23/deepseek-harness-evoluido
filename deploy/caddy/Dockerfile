@@ -10,5 +10,5 @@ RUN setcap -r /usr/bin/caddy
 COPY deploy/caddy/DZ23.common.caddy /etc/caddy/DZ23.common.caddy
 COPY deploy/caddy/Caddyfile* /etc/caddy/
 COPY deploy/caddy/public/login /srv/login
-COPY apps/studio-web/public/brand/dz23-studio-logo.jpg /srv/login-assets/dz23-studio-logo.jpg
+COPY apps/studio-web/public/brand/frigg-mark-256.png /srv/login-assets/frigg-mark-256.png
 COPY deploy/caddy/public/assets/login /srv/login-assets

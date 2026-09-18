@@ -1,6 +1,6 @@
 {
   "audit.safeReadAutoAuthorized": "Leitura segura autorizada automaticamente.",
-  "policy.acaoBloqueadaPelaPolitica": "Ação bloqueada pela política do DZ23 STUDIO.",
+  "policy.acaoBloqueadaPelaPolitica": "Ação bloqueada pela política do FRIGG.",
   "policy.acaoSensivelBloqueadaAte": "Ação sensível bloqueada até uma confirmação forte de identidade estar ativa.",
   "policy.acaoTentouAcessarOutra": "A ação tentou acessar outra organização ou espaço de trabalho.",
   "policy.alteracaoReversivelAutorizadaRegistrada": "Alteração reversível autorizada e registrada.",

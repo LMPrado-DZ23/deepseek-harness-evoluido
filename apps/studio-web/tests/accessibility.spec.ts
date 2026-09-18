@@ -148,10 +148,10 @@ test.describe('acessibilidade do fluxo principal', () => {
     expect(semViolacao.violations.map(violation => violation.id)).toEqual([])
   })
 
-  test('os menus do compositor abrem com o que ESTE Studio tem ligado', async ({ page }) => {
+  test('os menus do compositor abrem com o que ESTE FRIGG tem ligado', async ({ page }) => {
     /*
       F08/F09 mostram os menus ancorados no compositor. O da referência lista as
-      contas dela; aqui a lista é a do Hub deste Studio — e quando não há
+      contas dela; aqui a lista é a do Hub deste FRIGG — e quando não há
       nenhuma, o menu DIZ isso em vez de mostrar serviços que ninguém conectou.
     */
     await page.goto('/studio/')
@@ -377,17 +377,17 @@ test.describe('acessibilidade do fluxo principal', () => {
 
   test('a ajuda passa no axe em qualquer tamanho', async ({ page }) => {
     await page.goto('/studio/ajuda')
-    await expect(page.getByRole('heading', { name: 'Ajuda do DZ23 STUDIO' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Ajuda do FRIGG' })).toBeVisible()
     const result = await new AxeBuilder({ page }).analyze()
     expect(result.violations).toEqual([])
   })
 })
 
 /**
- * O estado do Studio era um botão que não fazia nada, e a visita começava com
+ * O estado do FRIGG era um botão que não fazia nada, e a visita começava com
  * um alarme que ninguém tinha medido.
  */
-test('o estado do Studio começa neutro e abre o que está em atenção', async ({ context, page }) => {
+test('o estado do FRIGG começa neutro e abre o que está em atenção', async ({ context, page }) => {
   await context.addCookies([{ name: 'dz23_studio_session', value: 'e2e', url: origin }])
   // Antes de `/health` responder, a tela não pode acusar "Atenção".
   await page.route('**/api/studio/apps/health', async route => {
@@ -402,7 +402,7 @@ test('o estado do Studio começa neutro e abre o que está em atenção', async 
   await expect(status).toHaveAttribute('aria-expanded', 'false', { timeout: 10_000 })
   await status.click()
   await expect(status).toHaveAttribute('aria-expanded', 'true')
-  await expect(page.getByText('O que o Studio está conferindo')).toBeVisible()
+  await expect(page.getByText('O que o FRIGG está conferindo')).toBeVisible()
   await expect(page.getByText(/inteligência artificial:/u)).toBeVisible()
   await expect(page.getByText(/Ambiente isolado de criação:/u)).toBeVisible()
   await expect(page.getByText(/Espaço em disco:/u)).toBeVisible()
@@ -476,7 +476,7 @@ test.describe('o mesmo fluxo no modo escuro', () => {
     await fecharDetalhamento(page)
 
     await page.goto('/studio/ajuda')
-    await expect(page.getByRole('heading', { name: 'Ajuda do DZ23 STUDIO' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Ajuda do FRIGG' })).toBeVisible()
     await check('ajuda')
     // As telas que a primeira versão do tema escuro deixou brancas sobre
     // brancas. Elas ficam AQUI, e não numa lista à parte, porque foi

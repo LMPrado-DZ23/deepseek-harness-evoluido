@@ -64,6 +64,7 @@
     "gate:upstream-pin": "node scripts/check-upstream-pin.mjs --self-test",
     "gate:portability": "node scripts/check-portability.mjs --self-test",
     "gate:i18n": "node scripts/check-i18n.mjs",
+    "gate:marca": "node scripts/check-marca.mjs",
     "gate:vocabulary": "node scripts/check-vocabulary.mjs --self-test && node scripts/check-vocabulary.mjs",
     "gate:memory-map": "node scripts/check-memory-map.mjs --self-test && node scripts/check-memory-map.mjs",
     "gate:constitution": "node scripts/check-constitution.mjs --self-test && node scripts/check-constitution.mjs",

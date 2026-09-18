@@ -34,7 +34,7 @@
     "taskDependencies": "Identificadores das tarefas que precisam estar aplicadas antes desta começar.",
     "resolveUnknown": "Registra que uma pessoa confirmou que o programa externo de uma execução parada realmente terminou. Exige confirmação reforçada e um motivo escrito.",
     "resolveReason": "O que você verificou para concluir que o programa terminou.",
-    "resume": "Retoma um trabalho que parou por causa de um reinício do Studio, aproveitando a cópia isolada que sobreviveu com o que já tinha sido escrito. Não serve para trabalho cancelado, nem para trabalho que pode estar rodando por fora.",
+    "resume": "Retoma um trabalho que parou por causa de um reinício do FRIGG, aproveitando a cópia isolada que sobreviveu com o que já tinha sido escrito. Não serve para trabalho cancelado, nem para trabalho que pode estar rodando por fora.",
     "resumePrompt": "O que o assistente deve fazer a partir do que já está na cópia."
   },
   "errors": {
@@ -45,14 +45,14 @@
     "duplicateRepository": "Existe um repositório duplicado para {scope}.",
     "promptLength": "A instrução deve ter entre 3 e 20.000 caracteres.",
     "providerForbidden": "O provedor pedido não está liberado para este espaço de trabalho.",
-    "externalProviderNotConfigured": "O Codex e o Claude Code ainda não estão liberados no Studio: eles precisam passar por uma verificação de segurança no Windows e no Linux antes. Use o assistente local. Nada foi executado.",
+    "externalProviderNotConfigured": "O Codex e o Claude Code ainda não estão liberados no FRIGG: eles precisam passar por uma verificação de segurança no Windows e no Linux antes. Use o assistente local. Nada foi executado.",
     "pathCount": "Informe entre 1 e {max} caminhos permitidos.",
     "pathForbidden": "A tarefa tentou sair dos caminhos liberados pelo administrador.",
     "cancelOwner": "Somente quem iniciou esta execução pode cancelá-la.",
     "cancelUnavailable": "O controle de cancelamento não sobreviveu ao reinício; a execução foi mantida para reconciliação segura.",
     "sessionRequired": "Esta ferramenta precisa de uma conversa aberta e vinculada a você.",
     "directPresetOnly": "Esta ferramenta só pode ser usada pela conversa principal do preset dz23-assistant.",
-    "identityRequired": "A sessão não está vinculada a uma identidade do DZ23 STUDIO.",
+    "identityRequired": "A sessão não está vinculada a uma identidade do FRIGG.",
     "roleForbidden": "Seu papel não permite esta ação.",
     "repositoryMissing": "Nenhum repositório foi liberado para este espaço de trabalho.",
     "runMissing": "A execução não foi encontrada neste espaço de trabalho.",
@@ -77,17 +77,17 @@
     "invalidPath": "Caminho relativo inválido: {path}",
     "budget": "{field} precisa ser inteiro entre 0 e {max}.",
     "unknownFields": "{label} contém campos desconhecidos: {fields}.",
-    "approvalRequired": "Esta operação precisa da sua confirmação. Abra a confirmação pendente no DZ23 STUDIO, confirme com sua chave de acesso e peça de novo. Nada foi executado.",
+    "approvalRequired": "Esta operação precisa da sua confirmação. Abra a confirmação pendente no FRIGG, confirme com sua chave de acesso e peça de novo. Nada foi executado.",
     "approvalDenied": "Você recusou esta operação. Ela não será executada, e a recusa não pode ser desfeita por uma nova tentativa.",
-    "approvalExhausted": "O Studio pediu sua confirmação várias vezes para esta mesma operação e não conseguiu concluir. Nada foi executado. Peça a operação de novo.",
-    "approvalNotConfigured": "Operações sensíveis estão bloqueadas nesta instalação porque a confirmação por pessoa ainda não foi ativada. Nada foi executado. Peça a quem administra o Studio para ativá-la.",
+    "approvalExhausted": "O FRIGG pediu sua confirmação várias vezes para esta mesma operação e não conseguiu concluir. Nada foi executado. Peça a operação de novo.",
+    "approvalNotConfigured": "Operações sensíveis estão bloqueadas nesta instalação porque a confirmação por pessoa ainda não foi ativada. Nada foi executado. Peça a quem administra o FRIGG para ativá-la.",
     "notUnknown": "Esta execução não está no estado que exige a sua confirmação de encerramento.",
     "resolveReason": "Escreva entre 3 e 500 caracteres explicando o que você verificou antes de encerrar.",
-    "notResumable": "Só dá para retomar um trabalho que o Studio provou que parou por causa de um reinício. Este não é um deles."
+    "notResumable": "Só dá para retomar um trabalho que o FRIGG provou que parou por causa de um reinício. Este não é um deles."
   },
   "runtime": {
     "persona": "Trabalhe somente na cópia isolada e nos caminhos aprovados.",
-    "cancelReason": "Cancelada pela pessoa no DZ23 STUDIO.",
+    "cancelReason": "Cancelada pela pessoa no FRIGG.",
     "cancelBeta": "BETA: o cancelamento ativo é mantido somente neste processo.",
     "cancelReconciled": "A execução já foi encerrada com segurança durante a recuperação do reinício; a cópia de trabalho foi preservada para conferência."
   },

@@ -26,8 +26,8 @@
     "semSessao": "Entre na sua conta para ver estes dados.",
     "semNotificacao": "Este navegador não oferece notificações. Em um que ofereça, o aviso aparece aqui.",
     "temaUnico": "Só existe o tema escuro. Ainda há 506 cores fixas fora dos tokens na folha antiga, e um tema claro que pinta metade da tela seria pior do que nenhum. A migração está no plano como V7-K.",
-    "idiomaUnico": "O Studio fala português do Brasil, e só ele. Um seletor com um idioma só seria um botão que não faz nada.",
-    "semComputador": "Ligar o Studio a uma pasta do seu computador ainda não existe. Está no plano como V7-F.",
+    "idiomaUnico": "O FRIGG fala português do Brasil, e só ele. Um seletor com um idioma só seria um botão que não faz nada.",
+    "semComputador": "Ligar o FRIGG a uma pasta do seu computador ainda não existe. Está no plano como V7-F.",
     "semImplantacao": "Publicar o aplicativo criado ainda não existe neste produto."
   },
   "verDestino": "Abrir",
@@ -37,7 +37,7 @@
   "avatarSemNome": "—",
   "usoLendo": "Lendo o consumo deste espaço de trabalho…",
   "usoErro": "Não foi possível ler o consumo agora.",
-  "usoSemMedicao": "Este Studio está montado sem o serviço que mede rota, uso e custo. Não há número a mostrar, e inventar um seria pior.",
+  "usoSemMedicao": "Este FRIGG está montado sem o serviço que mede rota, uso e custo. Não há número a mostrar, e inventar um seria pior.",
   "usoRota": "Rota",
   "usoChamadas": "Chamadas",
   "usoTokens": "Tokens",
@@ -53,7 +53,7 @@
     "semPrecoExcedido": "Houve chamadas demais sem preço configurado. Configure o preço das rotas para o teto voltar a medir.",
     "naoSei": "Não há medição disponível para dizer se este espaço está dentro de algum teto."
   },
-  "usoLimitacao": "Cota de assinatura e custo informado pelo provedor não existem neste produto. O que está aqui é o consumo que o Studio mediu.",
+  "usoLimitacao": "Cota de assinatura e custo informado pelo provedor não existem neste produto. O que está aqui é o consumo que o FRIGG mediu.",
   "atalhosEscopo": {
     "global": "em qualquer tela",
     "compositor": "escrevendo no compositor"
@@ -70,5 +70,5 @@
   "dadosBaixar": "Baixar tudo o que é meu",
   "dadosExplicacao": "Um arquivo JSON com as suas tarefas, as conversas delas, as descrições, os planos, as tentativas e as provas — tudo do escopo deste espaço de trabalho, e nada de fora dele.",
   "dadosLimitacao": "O código que as tarefas geraram NÃO vai neste arquivo: ele fica na Biblioteca, com resumo criptográfico e download próprio. Apagar dados por aqui não existe — apagar é ação destrutiva e depende de decisão do dono do produto.",
-  "dadosSemSegredo": "Nenhuma senha, chave ou segredo entra no arquivo. O Studio não guarda nenhum deles neste lugar."
+  "dadosSemSegredo": "Nenhuma senha, chave ou segredo entra no arquivo. O FRIGG não guarda nenhum deles neste lugar."
 }

@@ -19,8 +19,8 @@ const dz23Serif = localFont({
 })
 
 export const metadata: Metadata = {
-  title: 'Aplicativo criado no DZ23 STUDIO',
-  description: 'Protótipo verificável criado pelo DZ23 STUDIO.',
+  title: 'Aplicativo criado no FRIGG',
+  description: 'Protótipo verificável criado pelo FRIGG.',
 }
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

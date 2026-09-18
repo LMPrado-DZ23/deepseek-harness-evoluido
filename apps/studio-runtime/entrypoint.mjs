@@ -73,7 +73,7 @@ if (current === undefined) {
   await symlink(managedProfile, profileLink, 'dir')
 } else {
   if (!current.isSymbolicLink()) {
-    throw new Error(`PROFILE_CONFLICT: ${profileLink} precisa ser um link gerenciado pelo DZ23 STUDIO`)
+    throw new Error(`PROFILE_CONFLICT: ${profileLink} precisa ser um link gerenciado pelo FRIGG`)
   }
   const target = resolve(dirname(profileLink), await readlink(profileLink))
   const managedPrefix = `${resolve(managedRoot)}/`

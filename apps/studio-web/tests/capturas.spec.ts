@@ -154,7 +154,7 @@ test('captura a jornada: home → tarefa → resultado → continuação', async
   await expect(page.getByLabel('Tarefas desta empresa').getByRole('link', { name: 'uma página para receber encomendas do bairro' })).toBeVisible()
   await tirar('17-empresa-tarefa')
 
-  // O celular é ADAPTAÇÃO DZ23, e não uma imagem fornecida pela referência:
+  // O celular é ADAPTAÇÃO FRIGG, e não uma imagem fornecida pela referência:
   // o vídeo não demonstra versão móvel.
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto(`/studio/?projeto=${String(projetoAntes)}`)

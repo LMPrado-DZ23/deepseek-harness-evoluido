@@ -202,7 +202,7 @@ export async function apply(ctx: Context, config: IdentityPluginConfig = {}): Pr
     repository,
     passkeys: config.passkeys ?? new SimpleWebAuthnProvider(),
     emailSender: email.sender,
-    rpName: config.rpName ?? 'DZ23 STUDIO',
+    rpName: config.rpName ?? 'FRIGG',
     rpId,
     expectedOrigin: config.expectedOrigin ?? defaultOrigin,
     defaultOrgId: config.defaultOrgId ?? 'org_local',

@@ -96,7 +96,7 @@ test('o login HTTP local grava sessão host-only sem enfraquecer o modo de servi
 test('o vizinho NAO consegue plantar o nome forte, e por isso nao tranca ninguem', async ({ context, page }) => {
   // O aplicativo GERADO roda numa prévia irmã em HTTP claro, e planta o nome
   // simples à vontade. Plantar num CAMINHO que a remoção não alcança —
-  // `Path=/api`, que é onde vive toda a API — deixava a dona do Studio trancada
+  // `Path=/api`, que é onde vive toda a API — deixava a dona do FRIGG trancada
   // para fora PARA SEMPRE, sem gesto de recuperação e sem custo nenhum para
   // quem plantou.
   //
@@ -128,7 +128,7 @@ test('o vizinho NAO consegue plantar o nome forte, e por isso nao tranca ninguem
   // O nome simples chega plantado — é o que antes trancava.
   expect(enviados).toContain('dz23_studio_session=plantado')
 
-  // E o Studio continua respondendo à dona, com o plantio no meio do cabeçalho.
+  // E o FRIGG continua respondendo à dona, com o plantio no meio do cabeçalho.
   const status = await page.evaluate(async () => {
     const response = await fetch('/api/studio/identity/session', { credentials: 'same-origin' })
     return response.status
@@ -136,7 +136,7 @@ test('o vizinho NAO consegue plantar o nome forte, e por isso nao tranca ninguem
   expect(status).toBe(200)
 })
 
-test('abre o Integration Hub pela navegação autenticada do Studio', async ({ context, page }) => {
+test('abre o Integration Hub pela navegação autenticada do FRIGG', async ({ context, page }) => {
   await context.addCookies([{ name: 'dz23_studio_session', value: 'e2e', url: 'http://studio.dz23.localhost:4179' }])
   await page.goto('/studio/')
   /*
@@ -151,7 +151,7 @@ test('abre o Integration Hub pela navegação autenticada do Studio', async ({ c
   await link.click()
   await expect(page).toHaveURL(/\/studio\/plugins$/u)
   await expect(page.getByRole('heading', { level: 1, name: 'Plugins' })).toBeVisible()
-  await expect(page.getByRole('link', { name: 'Voltar ao Studio' })).toHaveAttribute('href', '/studio/')
+  await expect(page.getByRole('link', { name: 'Voltar ao FRIGG' })).toHaveAttribute('href', '/studio/')
 
   // WebMCP: a seção existe, explica o que ficaria exposto, e NESTE navegador
   // diz que o recurso não está disponível — o Chromium deste ambiente não
@@ -161,7 +161,7 @@ test('abre o Integration Hub pela navegação autenticada do Studio', async ({ c
   // X-04: o ciclo de vida esta na TELA, e nao so no servico. Sem integracao
   // registrada a lista fica vazia, entao o que se prova aqui e que a secao
   // existe e que a tela nao promete o que nao pode fazer.
-  await expect(page.getByRole('heading', { name: 'Deixar um agente do navegador usar o Studio' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Deixar um agente do navegador usar o FRIGG' })).toBeVisible()
   await expect(page.getByText('não oferece esse recurso')).toBeVisible()
   await expect(page.getByRole('checkbox')).toHaveCount(0)
   // E o que NUNCA é exposto está escrito na tela, não só no código.
@@ -274,7 +274,7 @@ test('percorre as cinco etapas, muda privacidade e termina sem alegar publicaç�
   // E-03: a pessoa EDITA o plano antes de aprovar, no navegador de verdade e
   // no tamanho de celular. Renomear e reordenar são as duas coisas que ela faz
   // sem precisar explicar nada por escrito.
-  await expect(page.getByText('definidos pelo Studio')).toBeVisible()
+  await expect(page.getByText('definidos pelo FRIGG')).toBeVisible()
   await page.locator('.plan-list .task-card').last().getByRole('button', { name: 'Editar esta parte' }).click()
   await page.getByLabel('Nome desta parte').fill('Fale conosco')
   await page.getByLabel('Como vamos conferir (uma linha por item)').fill('O contato fica visível.\nO telefone aparece.')
@@ -390,7 +390,7 @@ test('percorre as cinco etapas, muda privacidade e termina sem alegar publicaç�
   await expect(page.getByText('A navegação deve ser simples.: Não verificado automaticamente')).toBeVisible()
   await expect.poll(() => page.evaluate(() => (window as unknown as { __dz23Notifications: unknown[] }).__dz23Notifications.length)).toBe(1)
   expect(await page.evaluate(() => (window as unknown as { __dz23Notifications: Array<{ title: string; body: string; tag?: string }> }).__dz23Notifications)).toEqual([
-    { title: 'DZ23 STUDIO', body: 'Seu protótipo foi verificado.', tag: `dz23-generation-${acceptedBody.run_id}` },
+    { title: 'FRIGG', body: 'Seu protótipo foi verificado.', tag: `dz23-generation-${acceptedBody.run_id}` },
   ])
   await page.evaluate(({ runId }) => window.dispatchEvent(new CustomEvent('dz23:generation-finished', { detail: { state: 'VERIFIED_PROTOTYPE', runId } })), { runId: acceptedBody.run_id })
   expect(await page.evaluate(() => (window as unknown as { __dz23Notifications: unknown[] }).__dz23Notifications.length)).toBe(1)
@@ -412,12 +412,12 @@ test('percorre as cinco etapas, muda privacidade e termina sem alegar publicaç�
   //
   // O aplicativo GERADO da prévia grava `dz23_studio_session=shadow;
   // Domain=dz23.localhost` — está no HTML do protótipo de prova, e é o ataque
-  // real: prévia e Studio são subdomínios irmãos em HTTP claro.
+  // real: prévia e FRIGG são subdomínios irmãos em HTTP claro.
   //
   // Este teste exigia que os DOIS cookies sobrevivessem, porque o servidor
   // tolerava a ambiguidade tentando os candidatos um a um. Esse laço era metade
   // de um roubo de conta e foi removido; recusar a ambiguidade, porém, trocou o
-  // roubo por uma TRANCA: a dona do Studio parava de conseguir ler qualquer
+  // roubo por uma TRANCA: a dona do FRIGG parava de conseguir ler qualquer
   // coisa, e foi assim que esta linha ficou vermelha.
   //
   // Agora a recusa vem acompanhada da remoção do cookie do vizinho — que leva

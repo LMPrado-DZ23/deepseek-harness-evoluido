@@ -1,12 +1,12 @@
 {
   "path": "/studio/ajuda",
   "navLabel": "Ajuda",
-  "title": "Ajuda do DZ23 STUDIO",
+  "title": "Ajuda do FRIGG",
   "subtitle": "O que cada palavra desta tela quer dizer, em português comum.",
   "backHome": "Voltar ao início",
   "stepsTitle": "Como funciona, do começo ao fim",
   "steps": [
-    "Você conta com suas palavras o que precisa. O Studio mostra o tipo de aplicativo que entendeu, e você corrige se não for isso.",
+    "Você conta com suas palavras o que precisa. O FRIGG mostra o tipo de aplicativo que entendeu, e você corrige se não for isso.",
     "Ele faz algumas perguntas curtas. Se você não souber responder, pode pedir uma recomendação.",
     "Ele monta um plano em partes. Você lê, edita, pede mudança ou aprova.",
     "Ele cria o aplicativo e roda os testes dentro do seu computador, num espaço separado do resto.",
@@ -24,7 +24,7 @@
     },
     {
       "term": "Verificado",
-      "meaning": "O Studio rodou os testes que ele mesmo declarou e guardou a prova do que passou. Só aparece essa palavra quando existe essa prova."
+      "meaning": "O FRIGG rodou os testes que ele mesmo declarou e guardou a prova do que passou. Só aparece essa palavra quando existe essa prova."
     },
     {
       "term": "Não verificado",
@@ -79,7 +79,7 @@
       "meaning": "O código que a máquina usa para descrever o que houve. Serve para colar num pedido de ajuda; a explicação em português vem sempre antes dele."
     }
   ],
-  "privacyTitle": "O que o Studio nunca faz",
+  "privacyTitle": "O que o FRIGG nunca faz",
   "privacy": [
     "Não publica seu aplicativo na internet. Tudo o que ele cria fica no seu computador.",
     "Não mostra o valor de nenhum segredo na tela, no registro nem nos arquivos que ele gera.",

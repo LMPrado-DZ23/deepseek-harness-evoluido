@@ -33,7 +33,7 @@ export class StudioTenancyService {
         if (!this.#repository.organizations().some(org => org.org_id === user.org_id)) {
             await this.#repository.putOrganization({
                 org_id: user.org_id,
-                name: 'Meu DZ23 STUDIO',
+                name: 'Meu FRIGG',
                 owner_user_id: user.user_id,
                 created_at: now,
             });

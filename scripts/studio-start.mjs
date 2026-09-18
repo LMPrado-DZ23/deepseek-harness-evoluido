@@ -110,7 +110,7 @@ export function principal(argumentos = process.argv.slice(2), base = raiz) {
   }
   if (bloqueios(lista).length > 0) process.exit(1)
 
-  process.stdout.write('\nAbrindo o DZ23 STUDIO. Quando ele terminar de subir, o endereço aparece abaixo.\n')
+  process.stdout.write('\nAbrindo o FRIGG. Quando ele terminar de subir, o endereço aparece abaixo.\n')
   process.stdout.write('Para parar, aperte Ctrl+C.\n\n')
   arrancar(base)
 }

@@ -224,7 +224,7 @@ describe('assistant transcript sanitization', () => {
       ['studio_agent_cancel', 'Interromper o trabalho do assistente'],
       ['studio_agent_apply', 'Aplicar uma proposta ao projeto'],
       ['studio_team_start', 'Coordenar uma equipe de assistentes'],
-      ['studio_echo', 'Executar uma ação do DZ23 STUDIO'],
+      ['studio_echo', 'Executar uma ação do FRIGG'],
       ['foreign', 'Ação do assistente'],
     ] as const
     for (const [name, label] of labels) {

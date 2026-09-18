@@ -3,21 +3,25 @@ import { RAIL_ID, railSecoes, type RailIcone } from './rail'
 import { NOVA_TAREFA_HREF, iniciaisDaConta, type TarefaDoTrilho } from './tarefasDoTrilho'
 import { PROJECTS_PATH } from '../projects/ProjectsScreen'
 import { HELP_PATH } from '../help/HelpScreen'
+import { EMBLEMA, nomeAcessivelDaMarca } from '../marca/marca'
 import rail from '../i18n/rail.pt-BR.json'
 import type { ReactNode } from 'react'
 
 /**
  * O trilho de navegação do workspace aprovado.
  *
- * A marca no topo é a do PROPRIETÁRIO — `dz23-mark-48.png`, derivada do
- * original por corte da margem externa, sem remoção de fundo e sem
- * revetorização. Ao lado dela vai o wordmark em texto, como a referência mostra
- * e como a decisão de marca pede: "ícone compacto e wordmark DZ23 Studio,
- * evitando duplicações enormes".
+ * A marca no topo é a do PROPRIETÁRIO, e ela vem inteira de `marca.ts` — nome,
+ * arquivo, `srcSet` e o rótulo acessível do link. O trilho não escreve marca
+ * nenhuma à mão: era isso que mantinha o nome do produto em onze lugares.
  *
- * O `srcSet` existe porque a especificação manda testar a marca em 1× e 2×: num
- * monitor de alta densidade, um PNG de 48px desenhado a 48px fica borrado, e
- * borrado é o que "extração ruim" parece para quem olha.
+ * A composição é a mesma da referência aprovada, e continua sendo: emblema
+ * compacto ao lado do nome em TEXTO, na tipografia do produto. O lettering
+ * artístico do kit tem brilho e sombreado que somem a 36 px — a comparação está
+ * em `audit/FRIGG_MARCA_R1/comparacao-marca.png` —, e ele não vira a fonte do
+ * aplicativo.
+ *
+ * A imagem fica `aria-hidden` porque o nome já está escrito ao lado dela: sem
+ * isso o leitor de tela diria o nome duas vezes seguidas.
  */
 const ICONES: Readonly<Record<RailIcone, LucideIcon>> = {
   SquarePen, Bot, Zap, Blocks, FolderOpen, ListChecks, Target, CircleHelp, Clock, Library, Building2,
@@ -41,11 +45,11 @@ export function Rail({ ativo, aberto, aoFechar, tarefas, conta, acoesDaConta }: 
   const iniciais = iniciaisDaConta(conta)
   return <nav id={RAIL_ID} className={`dz-rail${aberto ? ' aberto' : ''}`} aria-label={rail.navegacao}>
     <div className="dz-rail-topo">
-    <a className="dz-marca" href="/studio/">
+    <a className="dz-marca" href="/studio/" aria-label={nomeAcessivelDaMarca()}>
       <img
-        src="/studio/brand/dz23-mark-48.png"
-        srcSet="/studio/brand/dz23-mark-48.png 1x, /studio/brand/dz23-mark-96.png 2x"
-        width={36} height={36} alt="" aria-hidden="true"
+        src={EMBLEMA.src}
+        srcSet={EMBLEMA.srcSet}
+        width={EMBLEMA.lado} height={EMBLEMA.lado} alt="" aria-hidden="true"
       />
       <span>{rail.marca}</span>
     </a>

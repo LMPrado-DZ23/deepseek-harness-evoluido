@@ -8,7 +8,7 @@ import { expect, test, type BrowserContext, type Page } from '@playwright/test'
 /**
  * Playwright's offline emulation never reaches fetches made by a service
  * worker, so this proof puts a tiny TCP-level proxy between the browser and
- * the Studio test server. Killing the proxy (server closed, sockets destroyed)
+ * the FRIGG test server. Killing the proxy (server closed, sockets destroyed)
  * makes the network really disappear for page AND worker; the worker's
  * fallback is then the only way the shell can appear.
  */
@@ -84,7 +84,7 @@ test('publica manifesto instalável com ícones reais, escopo /studio/ e worker 
   const manifest = await page.request.get('/studio/manifest.json')
   expect(manifest.status()).toBe(200)
   const body = await manifest.json() as { name: string; start_url: string; scope: string; display: string; icons: Array<{ src: string; sizes: string; purpose: string }> }
-  expect(body).toMatchObject({ name: 'DZ23 STUDIO', start_url: '/studio/', scope: '/studio/', display: 'standalone' })
+  expect(body).toMatchObject({ name: 'FRIGG', start_url: '/studio/', scope: '/studio/', display: 'standalone' })
   expect(body.icons.map(icon => icon.sizes)).toEqual(expect.arrayContaining(['192x192', '512x512']))
   expect(body.icons.some(icon => icon.purpose === 'maskable')).toBe(true)
   for (const icon of body.icons) {
@@ -97,7 +97,7 @@ test('publica manifesto instalável com ícones reais, escopo /studio/ e worker 
   const cdp = await context.newCDPSession(page)
   const appManifest = await cdp.send('Page.getAppManifest') as { url: string; errors: unknown[]; data?: string }
   expect(appManifest.errors).toEqual([])
-  expect(JSON.parse(appManifest.data ?? '{}')).toMatchObject({ name: 'DZ23 STUDIO' })
+  expect(JSON.parse(appManifest.data ?? '{}')).toMatchObject({ name: 'FRIGG' })
   const worker = await page.request.get('/studio/sw.js')
   expect(worker.headers()['content-type']).toContain('text/javascript')
   const source = await worker.text()
@@ -108,13 +108,13 @@ test('publica manifesto instalável com ícones reais, escopo /studio/ e worker 
 test('serve a casca com o servidor fora do ar, sem nunca ter dados de projeto no cache', async ({ context, page }) => {
   await signIn(context)
   await page.goto('/studio/')
-  // The Studio CSP has no 'unsafe-eval', so polling goes through evaluate(function), never waitForFunction(string).
+  // The FRIGG CSP has no 'unsafe-eval', so polling goes through evaluate(function), never waitForFunction(string).
   await expect.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker?.controller)), { timeout: 15_000 }).toBe(true)
   expect(await page.evaluate(async () => (await navigator.serviceWorker.ready).scope)).toBe(`${origin}/studio/`)
   await page.reload()
   // A marca do proprietário, derivada do original (ADR-050). Ela é procurada
   // pelo ELEMENTO e não pelo texto alternativo: o alternativo virou vazio de
-  // propósito, porque o nome "DZ23 Studio" está escrito ao lado dela em texto
+  // propósito, porque o nome "FRIGG" está escrito ao lado dela em texto
   // real, e um leitor de tela que anuncia os dois diz a marca duas vezes.
   await expect(page.locator('.dz-marca img')).toBeVisible()
   await expect(page.locator('.pwa-offline-banner')).toBeHidden()
@@ -129,7 +129,7 @@ test('serve a casca com o servidor fora do ar, sem nunca ter dados de projeto no
     const response = await fetch('/api/studio/apps/projects')
     return { status: response.status, body: await response.json() as unknown }
   })
-  // The device HAS network; the Studio is what is gone. The two causes are not the same sentence.
+  // The device HAS network; the FRIGG is what is gone. The two causes are not the same sentence.
   expect(offlineApi).toEqual({ status: 503, body: { error: 'SERVICE_UNREACHABLE', offline: false, serviceUnreachable: true } })
   // A MUTATION gets the same treatment as a read: the worker answers POST too, so a blocked action
   // reaches the interface as a code it can turn into a sentence, never as a raw "Failed to fetch".
@@ -173,7 +173,7 @@ test('confirma a instalação sem nunca dizer que está sem internet', async ({ 
   await signIn(context)
   await page.goto('/studio/')
   await page.evaluate(() => window.dispatchEvent(new Event('appinstalled')))
-  await expect(page.locator('.pwa-offline-banner')).toHaveText('O DZ23 STUDIO foi instalado neste aparelho.')
+  await expect(page.locator('.pwa-offline-banner')).toHaveText('O FRIGG foi instalado neste aparelho.')
   await expect(page.locator('.pwa-offline-banner')).toBeHidden({ timeout: 6_000 })
   await expect(page.locator('.pwa-install')).toBeHidden()
 })
@@ -213,7 +213,7 @@ test('mostra notificação local quando a criação termina com a aba em segundo
     window.dispatchEvent(new CustomEvent('dz23:generation-finished', { detail: { state: 'SOMETHING_ELSE' } }))
   })
   const shown = await page.evaluate(() => (window as unknown as { __dz23Notifications: Array<{ title: string; body: string }> }).__dz23Notifications)
-  expect(shown).toEqual([{ title: 'DZ23 STUDIO', body: 'Seu protótipo foi verificado.' }])
+  expect(shown).toEqual([{ title: 'FRIGG', body: 'Seu protótipo foi verificado.' }])
   // The page polls: the same finished run can be seen more than once. One result, one notification —
   // and another run reaching the same state is another result, which must be said.
   await page.evaluate(() => {
@@ -222,8 +222,8 @@ test('mostra notificação local quando a criação termina com a aba em segundo
   })
   const afterRuns = await page.evaluate(() => (window as unknown as { __dz23Notifications: Array<{ title: string; body: string }> }).__dz23Notifications)
   expect(afterRuns.slice(1)).toEqual([
-    { title: 'DZ23 STUDIO', body: pwa.notifications.cancelled },
-    { title: 'DZ23 STUDIO', body: pwa.notifications.cancelled },
+    { title: 'FRIGG', body: pwa.notifications.cancelled },
+    { title: 'FRIGG', body: pwa.notifications.cancelled },
   ])
 })
 
@@ -246,7 +246,7 @@ test('sem rede e sem a copia salva, mostra uma pagina em pt-BR em vez da tela de
   expect(text).toContain(pwa.offline.shellUnavailable.title)
   expect(text).toContain(pwa.offline.shellUnavailable.body)
   expect(text).toContain(pwa.offline.shellUnavailable.retry)
-  // And it is not the Studio pretending to be open: the interface is not there.
+  // And it is not the FRIGG pretending to be open: the interface is not there.
   expect(await page.locator('.brand').count()).toBe(0)
 })
 
@@ -321,7 +321,7 @@ test('uma recarga que passa por cima do worker nao herda o aviso de tela salva d
   await page.reload()
   await expect(page.locator('.dz-marca img')).toBeVisible({ timeout: 20_000 })
 
-  // The session is alive: this screen came from the Studio, not from the device.
+  // The session is alive: this screen came from the FRIGG, not from the device.
   const live = await page.evaluate(async () => (await fetch('/api/studio/apps/projects')).status)
   expect(live).toBe(200)
   // The worker never saw this navigation, and the page knows it: there is no controller to ask.

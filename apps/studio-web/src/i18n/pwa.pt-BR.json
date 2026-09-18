@@ -1,28 +1,28 @@
 {
   "offline": {
-    "banner": "Você está sem internet. O Studio continua aberto para você ver o que já está na tela, mas nada pode ser criado, salvo ou enviado até a conexão voltar.",
+    "banner": "Você está sem internet. O FRIGG continua aberto para você ver o que já está na tela, mas nada pode ser criado, salvo ou enviado até a conexão voltar.",
     "blockedAction": "Esta ação precisa de conexão. O que você digitou continua aqui; tente de novo quando a internet voltar.",
-    "serviceUnreachable": "Você está com internet, mas o Studio não respondeu. Ele pode estar desligado ou reiniciando; tente de novo em instantes.",
+    "serviceUnreachable": "Você está com internet, mas o FRIGG não respondeu. Ele pode estar desligado ou reiniciando; tente de novo em instantes.",
     "cachedShell": "Mostrando a tela salva neste aparelho; entre de novo quando a internet voltar.",
     "shellUnavailable": {
-      "title": "Não foi possível abrir o DZ23 STUDIO",
-      "body": "Este aparelho está sem internet e a cópia do Studio que ficava guardada aqui não está mais neste aparelho.",
-      "retry": "Conecte-se à internet e abra o Studio de novo."
+      "title": "Não foi possível abrir o FRIGG",
+      "body": "Este aparelho está sem internet e a cópia do FRIGG que ficava guardada aqui não está mais neste aparelho.",
+      "retry": "Conecte-se à internet e abra o FRIGG de novo."
     },
     "lastResort": "Não foi possível concluir agora. Nada foi alterado nesta tela. Tente de novo em alguns instantes.",
     "lastResortWithCode": "Não foi possível concluir agora. Nada foi alterado nesta tela. Tente de novo em alguns instantes; se continuar assim, anote este código para pedir ajuda: {codigo}"
   },
   "install": {
-    "prompt": "Instalar o DZ23 STUDIO neste aparelho",
-    "installed": "O DZ23 STUDIO foi instalado neste aparelho."
+    "prompt": "Instalar o FRIGG neste aparelho",
+    "installed": "O FRIGG foi instalado neste aparelho."
   },
   "notifications": {
     "enable": "Avisar quando a criação terminar",
     "verified": "Seu protótipo foi verificado.",
-    "failed": "A criação parou. Abra o Studio para ver o motivo.",
+    "failed": "A criação parou. Abra o FRIGG para ver o motivo.",
     "cancelled": "A criação foi cancelada.",
     "blocked": "O ambiente isolado não está disponível neste computador.",
-    "title": "DZ23 STUDIO",
+    "title": "FRIGG",
     "granted": "Este aparelho vai avisar quando a criação terminar.",
     "denied": "Os avisos estão bloqueados para este site. Se mudar de ideia, libere as notificações nas configurações do navegador."
   }

@@ -2,12 +2,12 @@
   "title": "Integrações e pacote do protótipo",
   "navLabel": "Integrações",
   "subtitle": "Aqui você liga serviços ao seu aplicativo e baixa uma cópia do protótipo verificado. Nada sai deste computador sem a sua ação.",
-  "back": "Voltar ao Studio",
+  "back": "Voltar ao FRIGG",
   "loading": "Carregando…",
-  "offline": "Você está sem internet. Esta tela precisa de conexão com o Studio.",
+  "offline": "Você está sem internet. Esta tela precisa de conexão com o FRIGG.",
   "smtp": {
     "title": "E-mail do aplicativo",
-    "help": "O aplicativo criado precisa de um serviço de e-mail para enviar códigos de acesso. A senha desse serviço NÃO fica aqui: quem cuida da instalação do Studio cadastra a senha no servidor e dá um nome a ela. Peça esse nome e escreva abaixo.",
+    "help": "O aplicativo criado precisa de um serviço de e-mail para enviar códigos de acesso. A senha desse serviço NÃO fica aqui: quem cuida da instalação do FRIGG cadastra a senha no servidor e dá um nome a ela. Peça esse nome e escreva abaixo.",
     "status": "Situação",
     "configured": "Configurado com o nome {ref}.",
     "notConfigured": "Ainda não configurado.",
@@ -21,13 +21,13 @@
     "testNotExecuted": "Teste não executado",
     "testSent": "Teste enviado",
     "tier": "Nível de confiança",
-    "refHelp": "É um nome, não a senha. Se você não tem esse nome, peça a quem instalou o Studio."
+    "refHelp": "É um nome, não a senha. Se você não tem esse nome, peça a quem instalou o FRIGG."
   },
   "integrations": {
     "title": "Integrações",
     "help": "Cada integração traz um documento com quem a publicou e o que ela pode fazer. Sem assinatura reconhecida, ela passa a ser tratada como se falasse com serviços externos — e, na versão estável, não pode ser ligada.",
     "cannotEnable": "Não pode ser ligada nesta versão: falta uma assinatura reconhecida.",
-    "devChannel": "Este Studio está no canal de desenvolvimento: integrações sem assinatura podem ser ligadas aqui. Isso não acontece na versão estável.",
+    "devChannel": "Este FRIGG está no canal de desenvolvimento: integrações sem assinatura podem ser ligadas aqui. Isso não acontece na versão estável.",
     "empty": "Nenhuma integração registrada ainda.",
     "enable": "Ligar",
     "disable": "Desligar",
@@ -48,7 +48,7 @@
       "T3": "Acesso amplo"
     },
     "registerTitle": "Registrar uma integração (avançado)",
-    "registerHelp": "Cole o manifesto que o publicador forneceu. O Studio confere a assinatura e mostra o nível de confiança antes de qualquer coisa ser ligada.",
+    "registerHelp": "Cole o manifesto que o publicador forneceu. O FRIGG confere a assinatura e mostra o nível de confiança antes de qualquer coisa ser ligada.",
     "manifestLabel": "Manifesto da integração",
     "register": "Registrar",
     "registered": "Integração registrada.",
@@ -89,7 +89,7 @@
     "removeDisabledWhileOn": "Desligue antes de remover.",
     "removeConfirm": "Remover \"{name}\"? O registro sai da lista. O histórico do que ela fez continua guardado.",
     "removed": "\"{name}\" foi removida. O histórico do que ela fez continua guardado.",
-    "removedSecret": "A referência de segredo \"{ref}\" deixou de ser usada por ela. O Studio não apaga nada do cofre.",
+    "removedSecret": "A referência de segredo \"{ref}\" deixou de ser usada por ela. O FRIGG não apaga nada do cofre.",
     "skillBodyTitle": "O texto desta habilidade",
     "skillBodyHelp": "Uma habilidade é um texto de instruções que entra no contexto do assistente. Cole aqui o conteúdo do arquivo que veio junto com o manifesto.",
     "skillBodyLabel": "Conteúdo do arquivo da habilidade",
@@ -105,14 +105,14 @@
     "skillBodyTooLarge": "Este texto não passa por esta tela: ela envia até {limit} KB, e o seu tem {size} KB. O manifesto aceita textos maiores, mas ainda não existe caminho para eles — isso está registrado como pendência.",
     "skillBodyNotVerified": "Esta habilidade não está assinada, e o servidor recusa instalar texto em habilidade não verificada. Registre de novo com um manifesto assinado.",
     "skillBodyNotDeclared": "O manifesto desta habilidade não declara o tamanho do texto. Ele é de um formato mais antigo, e por ele não dá para instalar texto.",
-    "skillBodyUnknown": "Este Studio não informa se já há texto instalado.",
+    "skillBodyUnknown": "Este FRIGG não informa se já há texto instalado.",
     "skillBodyOk": "Texto instalado."
   },
   "exports": {
     "title": "Baixar o protótipo",
-    "help": "Só protótipos verificados podem ser baixados. O pacote traz o aplicativo, o relatório da verificação e um guia em linguagem comum — sem os seus dados e sem os arquivos de senha e chave que o Studio reconhece. Dentro do pacote, o arquivo EXCLUIDOS.txt diz o que ficou de fora e o que entrou sem conferência.",
+    "help": "Só protótipos verificados podem ser baixados. O pacote traz o aplicativo, o relatório da verificação e um guia em linguagem comum — sem os seus dados e sem os arquivos de senha e chave que o FRIGG reconhece. Dentro do pacote, o arquivo EXCLUIDOS.txt diz o que ficou de fora e o que entrou sem conferência.",
     "projectLabel": "Projeto",
-    "noProjects": "Nenhum projeto verificado ainda. Crie e verifique um protótipo no Studio primeiro.",
+    "noProjects": "Nenhum projeto verificado ainda. Crie e verifique um protótipo no FRIGG primeiro.",
     "create": "Gerar pacote",
     "created": "Pacote gerado.",
     "empty": "Nenhum pacote gerado para este projeto.",
@@ -149,16 +149,16 @@
   },
   "errors": {
     "generic": "Não foi possível concluir. Tente novamente.",
-    "manifestJson": "O arquivo da integração não está no formato que o Studio entende. Peça a quem enviou o arquivo original."
+    "manifestJson": "O arquivo da integração não está no formato que o FRIGG entende. Peça a quem enviou o arquivo original."
   },
   "confirm": {
     "title": "Confirme antes de continuar",
     "T2": "Esta ação deixa o seu aplicativo falar com um serviço fora deste computador. Continue só se você reconhece o serviço.",
-    "T3": "Esta ação é sensível: dá acesso amplo, inclusive a segredos guardados no cofre. Ela só funciona se você já tiver confirmado com a sua chave de acesso nesta sessão; se ainda não confirmou, o Studio vai recusar e nada será alterado.",
+    "T3": "Esta ação é sensível: dá acesso amplo, inclusive a segredos guardados no cofre. Ela só funciona se você já tiver confirmado com a sua chave de acesso nesta sessão; se ainda não confirmou, o FRIGG vai recusar e nada será alterado.",
     "confirm": "Confirmar",
     "cancel": "Cancelar",
     "smtpSave": "Guardar o nome do segredo liga o envio de e-mail do aplicativo por um serviço externo.",
     "changed": "O que esta ação exige mudou enquanto você lia. Nada foi feito. Confira o novo nível e confirme de novo, se ainda quiser.",
-    "smtpTest": "Se o envio de teste estiver liberado neste servidor, uma mensagem de verdade vai para o endereço informado. Se ainda não estiver, o Studio responde que o teste não foi executado e nada é enviado."
+    "smtpTest": "Se o envio de teste estiver liberado neste servidor, uma mensagem de verdade vai para o endereço informado. Se ainda não estiver, o FRIGG responde que o teste não foi executado e nada é enviado."
   }
 }

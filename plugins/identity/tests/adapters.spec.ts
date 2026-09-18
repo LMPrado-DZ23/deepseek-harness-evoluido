@@ -114,7 +114,7 @@ describe('email adapters', () => {
     expect(createTransport).toHaveBeenCalledWith({
       host: 'smtp.example.com', port: 465, secure: true, auth: { user: 'u', pass: 'p' },
     })
-    expect(sendMail).toHaveBeenCalledWith(expect.objectContaining({ to: 'a@example.com', subject: expect.stringContaining('DZ23 STUDIO') }))
+    expect(sendMail).toHaveBeenCalledWith(expect.objectContaining({ to: 'a@example.com', subject: expect.stringContaining('FRIGG') }))
     await sender.sendInvitation({
       to: 'b@example.com', token: 'invite-token', workspaceName: 'Produto', role: 'viewer', expiresInHours: 72,
     })

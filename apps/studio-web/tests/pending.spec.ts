@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test'
 import { INTAKE_ANSWERS, answerIntake } from './answering'
 import { abrirDetalhamento, esperarResultado, fecharDetalhamento } from './resultado'
 
-// O Studio instala um service worker, e requisição que passa por ele NÃO é
+// O FRIGG instala um service worker, e requisição que passa por ele NÃO é
 // interceptada por `page.route`: foi assim que a primeira versão deste teste
 // mediu zero POSTs e concluiu, errado, que o botão não ficava ocupado.
 test.use({ serviceWorkers: 'block' })
@@ -18,7 +18,7 @@ const origin = 'http://studio.dz23.localhost:4179'
  * de tela, silêncio. Este teste ATRASA a resposta do servidor de propósito,
  * porque o defeito só existe enquanto a chamada está no ar.
  */
-test('enquanto o Studio responde, o botão fica ocupado e o clique duplo não passa', async ({ context, page }) => {
+test('enquanto o FRIGG responde, o botão fica ocupado e o clique duplo não passa', async ({ context, page }) => {
   await context.addCookies([{ name: 'dz23_studio_session', value: 'e2e', url: origin }])
   let posts = 0
   await page.route('**/api/studio/apps/projects', async route => {

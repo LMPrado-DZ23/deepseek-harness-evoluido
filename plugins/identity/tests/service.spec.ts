@@ -97,7 +97,7 @@ function makeHarness(enrollment: EnrollmentMode = 'open', personalModeAllowed = 
     repository,
     emailSender: email,
     passkeys,
-    rpName: 'DZ23 STUDIO',
+    rpName: 'FRIGG',
     rpId: 'localhost',
     expectedOrigin: 'https://localhost',
     defaultOrgId: 'org-a',

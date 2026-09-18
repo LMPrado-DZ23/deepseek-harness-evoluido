@@ -32,7 +32,7 @@ describe('E-03 tela do plano editável', () => {
   })
 
   it('diz que os arquivos criados NÃO são editáveis, em vez de deixar a ausência parecer esquecimento', () => {
-    expect(render(PLAN)).toContain('definidos pelo Studio')
+    expect(render(PLAN)).toContain('definidos pelo FRIGG')
   })
 
   it('a primeira parte não sobe e a última não desce', () => {
@@ -87,7 +87,7 @@ describe('acrescentar uma etapa pela tela', () => {
   })
 })
 
-describe('o painel do que o Studio consultou', () => {
+describe('o painel do que o FRIGG consultou', () => {
   function consultado(over: Partial<ConsultedView> = {}): ConsultedView {
     return { used: [{ label: 'O que você descreveu', source: 'app-spec' }], dropped: [], refusedSkills: [], incompleteCode: false, ...over }
   }
@@ -136,7 +136,7 @@ describe('o painel do que o Studio consultou', () => {
     // Alarme falso sobre duplicata desgasta a linha que precisa ser levada a
     // serio, que e a do que NAO COUBE.
     const html = renderToStaticMarkup(createElement(ConsultedPanel, {
-      consulted: consultado({ dropped: [{ label: 'Uma regra do Studio', source: 'x', reason: 'DUPLICATE' }] }),
+      consulted: consultado({ dropped: [{ label: 'Uma regra do FRIGG', source: 'x', reason: 'DUPLICATE' }] }),
     }))
     expect(html).not.toContain(t.plan.consultedIncomplete)
     // Mas ela ainda aparece na lista, DITA como duplicada.
@@ -173,7 +173,7 @@ describe('o painel do que o Studio consultou', () => {
   })
 
   it('sem o bloco, o painel NAO aparece — em vez de aparecer vazio', () => {
-    // Vazio sugeriria que o Studio nao consultou nada.
+    // Vazio sugeriria que o FRIGG nao consultou nada.
     const html = renderToStaticMarkup(createElement(PlanEditor, {
       plan: PLAN, submit: async () => undefined, approve: async () => undefined,
       reason: '', setReason: () => undefined, requestChange: async () => undefined,

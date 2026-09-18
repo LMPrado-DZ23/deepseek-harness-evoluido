@@ -29,7 +29,7 @@ async function browserState(page: Page) {
   }))
 }
 
-test('revoga a sessão atual antes de limpar somente o estado DZ23 do navegador', async ({ context, page }) => {
+test('revoga a sessão atual antes de limpar somente o estado FRIGG do navegador', async ({ context, page }) => {
   await prepareBrowserState(context, page, 'e2e-logout')
 
   const logoutResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/studio/identity/logout')
@@ -169,7 +169,7 @@ test('preserva um login novo concluído enquanto a confirmação final antiga es
   await expect(browserState(sibling)).resolves.toEqual({
     csrf: 'csrf-e2e',
     // Cache Storage and localStorage are origin-wide, so the initiating tab
-    // already removed its own DZ23 values. The guarded sibling must preserve
+    // already removed its own FRIGG values. The guarded sibling must preserve
     // its tab-scoped CSRF state and screen instead of performing cleanup too.
     selectedSession: null,
     keptSession: 'preservado',

@@ -13,7 +13,7 @@ test('a ajuda abre pela barra de navegação e explica o vocabulário do produto
   await context.addCookies([{ name: 'dz23_studio_session', value: 'e2e', url: origin }])
   await page.goto('/studio/')
   await page.getByRole('link', { name: 'Ajuda' }).click()
-  await expect(page.getByRole('heading', { name: 'Ajuda do DZ23 STUDIO' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Ajuda do FRIGG' })).toBeVisible()
   // As palavras que a interface usa e ninguém explicava.
   for (const term of ['Protótipo', 'Prévia local', 'Ponto seguro', 'Ambiente isolado', 'Perfil de privacidade', 'Limite de gasto']) {
     await expect(page.getByRole('definition').filter({ hasText: '' }).first()).toBeVisible()

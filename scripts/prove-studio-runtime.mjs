@@ -248,7 +248,7 @@ function createReport(image, revision, now) {
 async function pollStudio(runner, container, timeoutMs = START_TIMEOUT_MS) {
   const probe = [
     "const html=await fetch('http://127.0.0.1:3210/studio/').then(async r=>{if(r.status!==200)throw new Error('STUDIO_HTTP_'+r.status);return r.text()});",
-    "if(!html.includes('DZ23 STUDIO'))throw new Error('STUDIO_BRAND_MISSING');",
+    "if(!html.includes('FRIGG'))throw new Error('STUDIO_BRAND_MISSING');",
     "const match=html.match(/(?:src|href)=\"(\\/studio\\/assets\\/[^\"]+)\"/u);if(!match)throw new Error('HASHED_ASSET_MISSING');",
     "const asset=await fetch('http://127.0.0.1:3210'+match[1]);if(asset.status!==200)throw new Error('ASSET_HTTP_'+asset.status);",
     "const bytes=(await asset.arrayBuffer()).byteLength;if(bytes<=0)throw new Error('ASSET_EMPTY');",

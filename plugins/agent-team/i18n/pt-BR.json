@@ -32,8 +32,8 @@
     "attention": "Uma ou mais tarefas precisam de atenção antes de continuar.",
     "completed": "Todas as tarefas foram revisadas e aplicadas pela pessoa.",
     "cancelled": "A equipe foi cancelada; propostas já concluídas continuam disponíveis para revisão.",
-    "cancelReason": "Equipe cancelada pela pessoa no DZ23 STUDIO.",
-    "processLost": "A tarefa foi interrompida pelo reinício do DZ23 STUDIO; a cópia isolada foi preservada para revisão."
+    "cancelReason": "Equipe cancelada pela pessoa no FRIGG.",
+    "processLost": "A tarefa foi interrompida pelo reinício do FRIGG; a cópia isolada foi preservada para revisão."
   },
   "roles": {
     "analyst": "Entenda o que está sendo pedido e o que já existe no projeto. Você NÃO escreve arquivos: o seu produto é o entendimento escrito, com o que ficou claro e o que ficou em aberto.",

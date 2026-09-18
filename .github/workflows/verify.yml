@@ -124,6 +124,12 @@ jobs:
           # portao olhava a montagem.
           pnpm gate:profile-mounts
           pnpm gate:i18n
+          # UMA marca, e ela nao arrasta a identidade de instalacao junto. O
+          # nome do produto estava escrito a mao em onze arquivos que nenhum
+          # teste comparava entre si; e `id`/`scope`/`start_url` do manifesto
+          # mudando por branding fariam o navegador tratar a PWA ja instalada
+          # como outro aplicativo.
+          pnpm gate:marca
           pnpm gate:portability
           pnpm gate:domain-scopes
           pnpm gate:domain-routes

@@ -1,21 +1,21 @@
 {
   "errors": {
-    "spawnFailed": "O Studio não conseguiu iniciar o servidor MCP neste computador. Nada foi chamado.",
+    "spawnFailed": "O FRIGG não conseguiu iniciar o servidor MCP neste computador. Nada foi chamado.",
     "handshakeTimedOut": "O servidor MCP não respondeu à apresentação dentro do tempo máximo. O processo foi encerrado e nada foi chamado.",
-    "callTimedOut": "O Studio parou de esperar a resposta do servidor MCP: passou do tempo máximo. O processo foi encerrado; pode ser que ele tenha recebido o pedido mesmo assim.",
+    "callTimedOut": "O FRIGG parou de esperar a resposta do servidor MCP: passou do tempo máximo. O processo foi encerrado; pode ser que ele tenha recebido o pedido mesmo assim.",
     "aborted": "A chamada ao servidor MCP foi abandonada antes de terminar. O processo foi encerrado.",
-    "messageTooLarge": "O servidor MCP mandou uma mensagem maior do que o limite deste Studio. A conexão foi encerrada sem ler o resto.",
+    "messageTooLarge": "O servidor MCP mandou uma mensagem maior do que o limite deste FRIGG. A conexão foi encerrada sem ler o resto.",
     "protocolViolation": "O servidor MCP respondeu fora do protocolo esperado. A conexão foi encerrada.",
-    "versionUnsupported": "O servidor MCP só fala versões do protocolo que este Studio não conhece. Nada foi chamado.",
-    "tooManyTools": "O servidor MCP anuncia mais ferramentas do que o limite deste Studio. Nada foi chamado.",
+    "versionUnsupported": "O servidor MCP só fala versões do protocolo que este FRIGG não conhece. Nada foi chamado.",
+    "tooManyTools": "O servidor MCP anuncia mais ferramentas do que o limite deste FRIGG. Nada foi chamado.",
     "connectionClosed": "A conexão com o servidor MCP terminou antes da resposta.",
     "toolFailed": "O servidor MCP recusou a ferramenta pedida.",
     "toolNotOffered": "Essa ferramenta não está na lista que o servidor MCP anunciou nesta conexão.",
-    "serverNotRegistered": "Nenhum servidor MCP foi cadastrado neste Studio para essa integração. Quem administra o servidor precisa cadastrá-lo no perfil.",
+    "serverNotRegistered": "Nenhum servidor MCP foi cadastrado neste FRIGG para essa integração. Quem administra o servidor precisa cadastrá-lo no perfil.",
     "commandInvalid": "O cadastro do servidor MCP não está no formato esperado: {detail}",
     "workingDirectoryMissing": "A pasta de trabalho declarada para o servidor MCP não existe neste computador.",
     "environmentNameInvalid": "O nome de variável de ambiente declarado para o servidor MCP não é válido: {name}",
     "environmentValueInvalid": "O valor declarado para a variável de ambiente {name} do servidor MCP contém um caractere que não pode atravessar o limite do processo.",
-    "dispatcherAlreadyInstalled": "Já existe um despachante MCP montado neste Studio. Dois despachantes teriam tetos diferentes; nenhum foi trocado."
+    "dispatcherAlreadyInstalled": "Já existe um despachante MCP montado neste FRIGG. Dois despachantes teriam tetos diferentes; nenhum foi trocado."
   }
 }

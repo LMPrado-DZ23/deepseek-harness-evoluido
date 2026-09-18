@@ -1,7 +1,7 @@
 import { expect, type Page } from '@playwright/test'
 
 /**
- * Responde as perguntas da etapa de intake, uma por vez, ESPERANDO o Studio
+ * Responde as perguntas da etapa de intake, uma por vez, ESPERANDO o FRIGG
  * absorver cada resposta antes de digitar a próxima.
  *
  * Existe por causa de uma corrida real, que reprovou

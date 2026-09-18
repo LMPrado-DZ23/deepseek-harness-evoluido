@@ -25,7 +25,7 @@ describe('WebMCP — o controle da pessoa', () => {
 
   it('chega DESLIGADO, e a tela diz que está desligado em vez de deixar em branco', () => {
     const html = render({ available: true, enabled: false })
-    expect(html).toContain('Nenhuma ação do Studio é oferecida')
+    expect(html).toContain('Nenhuma ação do FRIGG é oferecida')
     expect(html).not.toContain('checked=""')
   })
 

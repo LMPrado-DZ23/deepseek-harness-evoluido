@@ -26,9 +26,9 @@
     "toolCancel": "Interromper o trabalho do assistente",
     "toolApply": "Aplicar uma proposta ao projeto",
     "toolTeam": "Coordenar uma equipe de assistentes",
-    "toolStudio": "Executar uma ação do DZ23 STUDIO",
+    "toolStudio": "Executar uma ação do FRIGG",
     "invalidMessage": "Não consegui entender esta mensagem. Escreva o texto e envie de novo.",
-    "releasedMissing": "o DZ23 STUDIO não encontrou mais esta conversa",
+    "releasedMissing": "o FRIGG não encontrou mais esta conversa",
     "releasedForeign": "esta sessão não é uma conversa do assistente",
     "methodNotAllowed": "Esta ação não é permitida neste endereço.",
     "messageTooLarge": "Esta mensagem é grande demais para uma vez só. Divida em partes menores e envie de novo.",
@@ -45,20 +45,20 @@
     "attachmentInvalidRequest": "Não consegui entender este anexo. Escolha o arquivo de novo."
   },
   "approvals": {
-    "notConfigured": "Confirmações de ações sensíveis ainda não foram liberadas nesta instalação do Studio. Enquanto isso, nenhuma ação sensível é executada. Peça a quem administra o Studio para ativar esse recurso."
+    "notConfigured": "Confirmações de ações sensíveis ainda não foram liberadas nesta instalação do FRIGG. Enquanto isso, nenhuma ação sensível é executada. Peça a quem administra o FRIGG para ativar esse recurso."
   },
   "teamPanel": {
     "methodNotAllowed": "Este endereço não aceita esse método.",
-    "notConfigured": "O Studio ainda não consegue mostrar o trabalho em equipe nesta instalação. Peça a quem administra o Studio para ativar esse recurso.",
+    "notConfigured": "O FRIGG ainda não consegue mostrar o trabalho em equipe nesta instalação. Peça a quem administra o FRIGG para ativar esse recurso.",
     "notFound": "Este trabalho em equipe não existe, ou não é seu.",
     "invalidBody": "O pedido de parada não foi entendido.",
     "reasonTooLong": "O motivo da parada é longo demais.",
     "costNotMeasured": "Nenhuma etapa desta equipe trouxe medida de consumo. Um agente externo roda em outro programa e não informa quanto gastou, e uma etapa que ainda não rodou não gastou nada para informar.",
-    "traceNotConfigured": "Este Studio não está guardando a trilha de decisões, então não há o que mostrar sobre as ferramentas usadas."
+    "traceNotConfigured": "Este FRIGG não está guardando a trilha de decisões, então não há o que mostrar sobre as ferramentas usadas."
   },
   "stuckRuns": {
     "methodNotAllowed": "Este endereço só responde a leitura.",
-    "notConfigured": "O Studio ainda não consegue verificar se há trabalho parado nesta instalação. Peça a quem administra o Studio para ativar esse recurso."
+    "notConfigured": "O FRIGG ainda não consegue verificar se há trabalho parado nesta instalação. Peça a quem administra o FRIGG para ativar esse recurso."
   },
   "http": {
     "methodNotAllowed": "Método não permitido.",

@@ -40,16 +40,16 @@ describe('E-11: o botão está visível e diz o que faz', () => {
     expect(html).toContain('Parada de emergência')
     expect(html).toContain('Parar tudo agora')
     expect(html).toContain('agentes, criações, integrações e filas')
-    expect(html).toContain('O Studio está funcionando')
+    expect(html).toContain('O FRIGG está funcionando')
   })
 
   it('antes da primeira leitura NÃO afirma que está tudo funcionando', () => {
     // Afirmar "nada está parado" sem ter lido nada é mentir sobre segurança
-    // justamente na tela que responde "o Studio está parado?".
+    // justamente na tela que responde "o FRIGG está parado?".
     const html = panel({ state: null })
-    expect(html).toContain('Lendo o estado do Studio')
-    expect(html).not.toContain('O Studio está funcionando')
-    expect(html).not.toContain('O Studio está parado')
+    expect(html).toContain('Lendo o estado do FRIGG')
+    expect(html).not.toContain('O FRIGG está funcionando')
+    expect(html).not.toContain('O FRIGG está parado')
   })
 
   it('parar pede confirmação antes: parar é permitido, mas é grave', () => {
@@ -66,7 +66,7 @@ describe('E-11: o botão está visível e diz o que faz', () => {
 describe('E-11: parado, a tela diz o que não acontece e como retomar', () => {
   it('mostra quem parou, quando e por quê', () => {
     const html = panel({ state: stopped })
-    expect(html).toContain('O Studio está parado')
+    expect(html).toContain('O FRIGG está parado')
     expect(html).toContain('ana@exemplo.com')
     expect(html).toContain('Cobrança disparando em loop.')
     expect(html).toContain('Parado em')
@@ -78,14 +78,14 @@ describe('E-11: parado, a tela diz o que não acontece e como retomar', () => {
     expect(html).toContain('Para retomar')
     expect(html).toContain('chave de acesso')
     expect(html).toContain('motivo escrito')
-    expect(html).toContain('Retomar o Studio')
+    expect(html).toContain('Retomar o FRIGG')
   })
 
   it('sem motivo escrito, o botão de retomar fica desabilitado', () => {
     // A assimetria aparece na tela, e não só no servidor: parar é um clique;
     // voltar exige alguém que assine o porquê.
-    expect(panel({ state: stopped })).toContain('Retomar o Studio</button>')
-    expect(panel({ state: stopped, resumeReason: '' })).toMatch(/disabled=""[^>]*>Retomar o Studio|<button[^>]*disabled=""[^>]*>\s*Retomar o Studio/u)
+    expect(panel({ state: stopped })).toContain('Retomar o FRIGG</button>')
+    expect(panel({ state: stopped, resumeReason: '' })).toMatch(/disabled=""[^>]*>Retomar o FRIGG|<button[^>]*disabled=""[^>]*>\s*Retomar o Studio/u)
     expect(panel({ state: stopped, resumeReason: 'Provedor confirmou a correção.' })).not.toMatch(/disabled=""[^>]*>Retomar o Studio/u)
   })
 
@@ -113,7 +113,7 @@ describe('E-11: a tela separa o que parou do que não pôde ser provado', () => 
     }))
     expect(html).toContain('O que foi interrompido')
     expect(html).toContain('2 interrompidos')
-    expect(html).toContain('O que o Studio não conseguiu provar que parou')
+    expect(html).toContain('O que o FRIGG não conseguiu provar que parou')
     expect(html).toContain('run-7')
     expect(html).toContain('processo externo codex')
     // A superfície sem nada interrompido não aparece na lista do que parou.
@@ -154,9 +154,9 @@ describe('a tela conversa com a rota', () => {
     const port = { read: vi.fn(async () => ({ emergency_stop: stopped })), engage: vi.fn(), release: vi.fn() }
     const html = renderToStaticMarkup(createElement(EmergencyStop, { port }))
     expect(html).toContain('aria-labelledby="emergency-title"')
-    expect(html).toContain('Lendo o estado do Studio')
+    expect(html).toContain('Lendo o estado do FRIGG')
     // A primeira pintura NÃO decide nada sobre segurança sozinha.
-    expect(html).not.toContain('O Studio está funcionando')
+    expect(html).not.toContain('O FRIGG está funcionando')
     expect(html).not.toContain('Parar tudo agora')
   })
 
