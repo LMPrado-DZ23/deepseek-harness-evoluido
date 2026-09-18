@@ -122,6 +122,19 @@ velha e teve de encaixá-lo em `landing-page`, com entidades que só podem ser
 para uma ontologia que não prevê o caso. **A ontologia do produto é a cerca**, e
 o titular autorizou derrubá-la.
 
+**O pacote `FRIGG-EXECUCAO-ADAPTADA-20260918-R1` foi incorporado em 18/09**, uma
+vez, sem novo MASTER. Ele traz 370 seções editoriais — não são 370 tarefas — e
+DUAS ressalvas delimitadas (item 57). As duas persistiam, e as duas foram
+reproduzidas antes do conserto (`REV-ADAPT-A/B`):
+
+- **A.** `pnpm gates` **não rodava no Windows**: `spawnSync('pnpm.cmd', …)`
+  devolve `EINVAL` no Node 24. Reproduzido na máquina do titular. O agregador
+  deixou de usar gerenciador de pacotes — lê o comando no `package.json` e roda
+  `node`/`tsx` com `process.execPath`, sem shell, e recusa em voz alta o que
+  estiver fora desse subconjunto. Provado no Windows dele.
+- **B.** o teste da sonda padrão provava a **constante**, não o **consumo**. A
+  propriedade certa é comportamental, e quem a controla é o `PATH`.
+
 **A próxima fatia, e por que ela é grande.** A cobertura trilíngue é de
 navegação + Preferências. O passo seguinte é migrar as demais superfícies, e a
 medição de hoje diz o tamanho: `pt-BR.json` tem **398 chaves**, `hub` tem 138,

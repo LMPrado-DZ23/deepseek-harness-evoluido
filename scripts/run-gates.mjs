@@ -23,6 +23,22 @@
  *    `gate:licenses:release` nunca rodou localmente em sessão nenhuma, e só a CI
  *    o executava. Uma lista copiada é a segunda verdade de sempre — e a que
  *    diverge em silêncio é justamente a que alguém lê para dizer "rodei tudo".
+ * 3. **Ele não chama `pnpm`, e por isso funciona no Windows.** A primeira versão
+ *    fazia `spawnSync('pnpm.cmd', …)`. Isso falha com `EINVAL` no Windows desde
+ *    que o Node passou a recusar `.cmd` sem `shell: true` — REPRODUZIDO na
+ *    máquina do titular, Node 24: `status=null`, `error=EINVAL`. Ou seja, o
+ *    comando de retomada deste repositório não rodava em metade dos ambientes
+ *    em que ele promete rodar.
+ *
+ *    A saída óbvia, `shell: true`, é pior: o próprio Node a deprecia
+ *    (`DEP0190`) porque os argumentos passam a ser concatenados, não escapados.
+ *    Trocar uma falha visível por uma superfície de injeção não é conserto.
+ *
+ *    Então o agregador não usa gerenciador de pacotes nenhum. Ele LÊ o comando
+ *    do portão no `package.json` e executa o subconjunto que os portões de fato
+ *    usam — `node` e `tsx`, encadeados por `&&` —, sempre com `process.execPath`
+ *    e sem shell. Qualquer coisa fora desse subconjunto ele RECUSA em voz alta,
+ *    em vez de cair num shell para dar um jeito.
  *
  * Uso:
  *   node scripts/run-gates.mjs                    # todos os portões + a constituição
@@ -34,6 +50,7 @@
  * Sai com 0 quando tudo passa, e com 1 quando qualquer coisa falha.
  */
 import { spawnSync } from 'node:child_process'
+import { createRequire } from 'node:module'
 import { mkdirSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -82,6 +99,79 @@ export function opcao(argumentos, nome) {
   return posicao >= 0 && posicao + 1 < argumentos.length ? argumentos[posicao + 1] : null
 }
 
+/**
+ * Os INTERPRETADORES que os portões deste repositório usam, e só eles.
+ *
+ * `node` é o próprio executável em execução. `tsx` é resolvido para o arquivo
+ * JavaScript dele — `tsx/cli` é um `.mjs` de verdade, não um `.cmd` —, o que faz
+ * a chamada ser sempre `process.execPath <arquivo> <args>`: sem shell, sem
+ * concatenação de argumentos e sem depender do `PATH` do sistema.
+ */
+const INTERPRETES = {
+  node: () => [],
+  tsx: () => [createRequire(join(raiz, 'package.json')).resolve('tsx/cli')],
+}
+
+export class ComandoDePortaoNaoSuportado extends Error {
+  code = 'GATE_COMMAND_UNSUPPORTED'
+}
+
+/**
+ * As etapas de um comando de portão.
+ *
+ * O `&&` é o único encadeamento que os portões usam, e ele significa "só siga se
+ * a anterior passou" — `gate:pix` roda o auto-teste antes do portão de verdade.
+ * Interpretar esse pedaço aqui custa cinco linhas e evita um shell inteiro.
+ * @param comando - o texto do script no `package.json`.
+ * @returns as etapas, cada uma já quebrada em palavras.
+ */
+export function etapasDoComando(comando) {
+  return comando.split('&&').map(parte => parte.trim().split(/\s+/u).filter(palavra => palavra !== ''))
+}
+
+/**
+ * Roda um portão, sem gerenciador de pacotes e sem shell.
+ *
+ * Um comando fora do subconjunto conhecido NÃO cai num shell para dar um jeito:
+ * ele lança. Cair no shell transformaria um portão novo com forma diferente numa
+ * execução silenciosamente insegura — e este roteiro existe justamente para o
+ * caso em que ninguém está olhando.
+ * @param manifesto - o `package.json`.
+ * @param portao - o nome, sem o prefixo.
+ * @returns a execução da ÚLTIMA etapa que rodou.
+ */
+export function executarPortao(manifesto, portao) {
+  const comando = manifesto.scripts?.[`gate:${portao}`]
+  if (typeof comando !== 'string') throw new ComandoDePortaoNaoSuportado(`gate:${portao} não existe no package.json`)
+  /*
+    A saída de TODAS as etapas é somada, e não só a da última.
+
+    Isto foi um defeito real desta função, e quem o acusou foi a conferência da
+    constituição: os vereditos caíram de 50 para 32 na primeira versão. O motivo
+    é que `gate:pix` — e outros — rodam o AUTO-TESTE numa etapa e o portão na
+    seguinte, e cada etapa imprime um veredito próprio. Devolvendo só a última,
+    metade dos vereditos sumia em silêncio, e a constituição passaria a reclamar
+    de cláusula sem prova por culpa do agregador, e não do portão.
+  */
+  const saidas = []
+  const erros = []
+  let ultima = { status: 0 }
+  for (const palavras of etapasDoComando(comando)) {
+    const [interprete, ...args] = palavras
+    const prefixo = INTERPRETES[interprete]
+    if (prefixo === undefined) {
+      throw new ComandoDePortaoNaoSuportado(`gate:${portao} usa \`${interprete}\`, que este agregador não executa sem shell`)
+    }
+    ultima = spawnSync(process.execPath, [...prefixo(), ...args], { cwd: raiz, encoding: 'utf8' })
+    saidas.push(ultima.stdout ?? '')
+    erros.push(ultima.stderr ?? '')
+    // `&&`: a etapa seguinte só roda se esta passou. `status` diferente de 0 —
+    // inclusive `null`, quando o processo nem nasceu — para a corrente aqui.
+    if (ultima.status !== 0) break
+  }
+  return { status: ultima.status, stdout: saidas.join(''), stderr: erros.join('') }
+}
+
 const argumentos = process.argv.slice(2)
 const manifesto = JSON.parse(readFileSync(join(raiz, 'package.json'), 'utf8'))
 const apenas = opcao(argumentos, '--apenas')
@@ -105,11 +195,10 @@ const pastaDeLogs = opcao(argumentos, '--logs') ?? join(tmpdir(), 'frigg-gate-lo
 mkdirSync(pastaDeLogs, { recursive: true })
 writeFileSync(destino, '')
 
-const executor = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
 let falharam = 0
 
 for (const portao of portoes) {
-  const execucao = spawnSync(executor, [`gate:${portao}`], { cwd: raiz, encoding: 'utf8' })
+  const execucao = executarPortao(manifesto, portao)
   const saida = `${execucao.stdout ?? ''}${execucao.stderr ?? ''}`
   writeFileSync(join(pastaDeLogs, `gate-${portao.replace(/:/gu, '-')}.log`), saida)
   /*

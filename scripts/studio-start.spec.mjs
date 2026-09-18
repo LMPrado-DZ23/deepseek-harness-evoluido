@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -37,20 +37,52 @@ beforeEach(() => { base = mkdtempSync(resolve(tmpdir(), 'dz23-studio-')) })
 afterEach(() => { rmSync(base, { recursive: true, force: true }) })
 
 describe('a sonda padrão', () => {
-  it('a PRODUÇÃO pergunta ao Docker de verdade', () => {
-    /*
-      Este caso parece trivial e não é: ele é o único lugar que afirma qual sonda
-      o produto usa quando ninguém passa uma. Todos os outros casos deste arquivo
-      injetam a sonda parada — e é isso que os deixa rápidos —, então trocar o
-      padrão por `() => true` passaria por todos eles. Uma sabotagem fez
-      exatamente isso e sobreviveu.
-
-      LIMITE DECLARADO: isto prova a LIGAÇÃO, e não o comportamento da sonda.
-      Que `docker()` responda certo a um daemon parado não é conferido aqui —
-      seria pagar de novo o custo externo que este arquivo acabou de tirar.
-    */
+  it('a constante aponta para a sonda de verdade', () => {
     expect(SONDA_PADRAO.docker).toBe(docker)
   })
+
+  /*
+    O caso abaixo existe porque o de cima NÃO BASTA, e uma revisão externa
+    apontou exatamente isso: a igualdade prova a CONSTANTE, e não que `observar`
+    a consome quando o terceiro argumento é omitido. Uma regressão que troque só
+    o valor padrão do parâmetro — `sonda = { docker: () => true }` — passa pela
+    igualdade sem piscar.
+
+    A propriedade certa é comportamental: com o argumento omitido, `observar`
+    tem de CHAMAR o programa externo. Quem controla isso aqui é a fronteira —
+    o `PATH` —, e não um dublê injetado: um `docker` de mentira que sai com 0
+    faz a resposta ser `true`, e um que sai com 1 faz ser `false`. Se o padrão
+    for trocado por uma constante, os dois casos devolvem o mesmo valor e o
+    teste cai.
+
+    Sem daemon nenhum, e em milissegundos.
+  */
+  const comDockerFalso = (saida) => {
+    const pasta = mkdtempSync(resolve(tmpdir(), 'dz23-docker-'))
+    const alvo = resolve(pasta, 'docker')
+    writeFileSync(alvo, `#!/bin/sh\nexit ${saida}\n`)
+    chmodSync(alvo, 0o755)
+    const anterior = process.env.PATH
+    process.env.PATH = pasta
+    try { return observar(base).docker } finally {
+      process.env.PATH = anterior
+      rmSync(pasta, { recursive: true, force: true })
+    }
+  }
+
+  it.runIf(process.platform !== 'win32')('com o argumento OMITIDO, a sonda padrão é executada de verdade', () => {
+    expect(comDockerFalso(0)).toBe(true)
+    expect(comDockerFalso(1)).toBe(false)
+  })
+
+  /*
+    LIMITE DECLARADO: o caso acima não roda no Windows, onde um `docker` sem
+    extensão não é executável. O que ele prova — que o padrão é consumido — vale
+    para o código, que é o mesmo nos dois sistemas; o que ele NÃO prova é a
+    resolução de executável no Windows. E o comportamento da sonda contra um
+    daemon de verdade continua fora daqui, de propósito: era esse custo externo
+    que tirou este arquivo do orçamento de cinco segundos e derrubou a CI.
+  */
 })
 
 describe('observar — a pasta vazia', () => {
