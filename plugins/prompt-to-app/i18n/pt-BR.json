@@ -94,7 +94,9 @@
     "revisionDuplicate": "Esta mudança já foi pedida nesta tarefa.",
     "revisionFull": "Esta tarefa já acumulou mudanças demais; conclua as atuais antes de pedir outra.",
     "revisionUnavailable": "Só dá para pedir mudança depois que a tarefa produz um resultado.",
-    "perguntaInvalida": "A pergunta precisa ter entre {min} e {max} caracteres."
+    "perguntaInvalida": "A pergunta precisa ter entre {min} e {max} caracteres.",
+    "stateNoReference": "Estado do aplicativo não guarda referência a registro: ele não sobrevive ao recarregamento, e a referência apontaria para algo que já sumiu.",
+    "modelJsonAmbiguous": "A resposta trouxe {quantos} trechos diferentes, e escolher um deles seria adivinhar."
   },
   "pipeline": {
     "verified": "Protótipo verificado — não está publicado nem disponível para outras pessoas",
@@ -174,7 +176,8 @@
     "ruleTags": "NÃO use estas tags: {tags}. Elas são recusadas antes de o código chegar ao disco.",
     "ruleAttributes": "NÃO use estes atributos: {attributes}. Eles são recusados antes de o código chegar ao disco.",
     "ruleGlobals": "NÃO use estes nomes globais nem estas APIs: {globals}. Eles são recusados antes de o código chegar ao disco.",
-    "ruleUrls": "Todo endereço em href, src, action e semelhantes precisa começar com https://, ou ser um caminho interno começando com /."
+    "ruleUrls": "Todo endereço em href, src, action e semelhantes precisa começar com https://, ou ser um caminho interno começando com /.",
+    "planOutro": "Este aplicativo não tem formato predefinido: foi a pessoa que descreveu o que ele faz. Não force sobre ele um formato de página institucional, catálogo, cadastro ou painel. Use `app-state` para o que muda enquanto a pessoa usa e não precisa sobreviver ao recarregamento — tabuleiro, placar, rodada, passo atual, seleção. Use `database` só para o que precisa continuar existindo depois de fechar. Os critérios de aceitação são a única descrição do que ele tem de fazer: escreva-os verificáveis, cada um dizendo uma coisa observável na tela."
   },
   "stages": {
     "install": "Preparando as ferramentas do seu aplicativo",

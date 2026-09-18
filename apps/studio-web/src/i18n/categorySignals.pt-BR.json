@@ -922,5 +922,103 @@
       "oficina mecanica",
       "crud-panel"
     ]
+  ],
+  "outro": [
+    [
+      "jogo",
+      5
+    ],
+    [
+      "jogos",
+      5
+    ],
+    [
+      "jogar",
+      4
+    ],
+    [
+      "jogo da velha",
+      6
+    ],
+    [
+      "quiz",
+      5
+    ],
+    [
+      "perguntas e respostas",
+      5
+    ],
+    [
+      "simulador",
+      5
+    ],
+    [
+      "calculadora",
+      5
+    ],
+    [
+      "cronometro",
+      5
+    ],
+    [
+      "temporizador",
+      5
+    ],
+    [
+      "sorteio",
+      4
+    ],
+    [
+      "sortear",
+      4
+    ],
+    [
+      "conversor",
+      4
+    ],
+    [
+      "gerador",
+      3
+    ],
+    [
+      "ferramenta",
+      3
+    ],
+    [
+      "tabuleiro",
+      5
+    ],
+    [
+      "placar",
+      4
+    ],
+    [
+      "pontuacao",
+      3
+    ],
+    [
+      "contra o computador",
+      5
+    ],
+    [
+      "desenhar",
+      3
+    ],
+    [
+      "editor",
+      3
+    ],
+    [
+      "visualizador",
+      4
+    ],
+    [
+      "mapa interativo",
+      4
+    ],
+    [
+      "quebra-cabeca",
+      5
+    ]
   ]
 }

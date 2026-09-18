@@ -166,5 +166,27 @@ describe('um marcador que ninguem preencheu NAO viaja para o modelo', () => {
   it('preenchido, `prompt` devolve o texto normalmente', () => {
     expect(prompt('errors.generatedOutsidePlan', { path: 'src/X.tsx' })).toContain('src/X.tsx')
   })
+
+  it('chave DENTRO do valor da pessoa NAO e confundida com parametro que falta', () => {
+    /*
+      Este caso guarda um defeito que a PRIMEIRA versao desta guarda introduziu,
+      e que uma revisao externa reproduziu isoladamente: ela procurava marcadores
+      no texto JA montado. Um pedido legitimo — "uma API com rota /clientes/{id}"
+      — virava `PROMPT_PARAM_MISSING:{id}`, e o intake caia por causa do texto da
+      pessoa.
+
+      Transformar conteudo do usuario em falha do produto e pior que o defeito
+      original. A conferencia e sobre o MODELO do catalogo, antes de substituir:
+      o dado passa intacto e a exigencia continua de pe.
+    */
+    const comChaves = 'uma API com rota /clientes/{id} e um contador {contador}'
+    expect(prompt('prompts.idea', { brief: comChaves })).toContain(comChaves)
+  })
+
+  it('e o parametro que falta DE VERDADE continua lancando', () => {
+    // A exigencia nao foi afrouxada para consertar o falso positivo: o que
+    // mudou foi ONDE ela olha.
+    expect(() => prompt('prompts.idea')).toThrow(/PROMPT_PARAM_MISSING:prompts\.idea:brief/u)
+  })
 })
 

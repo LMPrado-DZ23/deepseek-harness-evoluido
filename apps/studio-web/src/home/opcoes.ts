@@ -27,6 +27,14 @@ export const ATALHOS: readonly Atalho[] = [
   { texto: t.idea.scheduling, categoria: 'scheduling', inicial: true },
   { texto: t.idea.dashboard, categoria: 'dashboard', inicial: true },
   { texto: t.idea.saas, categoria: 'saas-authenticated', inicial: true },
+  /*
+    O ÚLTIMO atalho é o que diz que a lista não é a fronteira do produto.
+
+    Sem ele, as sete pílulas são lidas como "isto é tudo que dá para pedir" — e
+    era verdade até 18/09/2026. A medição contra o modelo real mostrou o custo:
+    um jogo da velha tinha de se declarar página de apresentação.
+  */
+  { texto: t.idea.outro, categoria: 'outro', inicial: true },
 ]
 
 /** Quantos atalhos a home mostra antes de "Mais". */

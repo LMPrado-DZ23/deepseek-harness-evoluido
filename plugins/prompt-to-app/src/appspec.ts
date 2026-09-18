@@ -32,6 +32,29 @@ const databaseFieldSchema = z.object({
   }
 })
 
+/**
+ * O QUE UM APLICATIVO PODE TER DENTRO.
+ *
+ * Eram DOIS tipos, e essa era a cerca mais estreita do produto.
+ *
+ * `static-content` guarda uma lista de nomes — um cardápio, uma seção. `database`
+ * guarda registros que sobrevivem ao recarregamento. Entre os dois não havia
+ * lugar para a coisa mais comum de um aplicativo interativo: o ESTADO que muda
+ * enquanto a pessoa usa e não pertence a banco nenhum.
+ *
+ * Isto foi MEDIDO, e não deduzido. Em 18/09/2026 pedi ao modelo do titular um
+ * jogo da velha com placar, com o prompt real do produto. Ele descreveu o
+ * tabuleiro e o placar como `static-content` com campos estruturados — a forma
+ * de `database`. O schema recusou, a rodada de reparo não consertou, e a
+ * jornada parou ali. O modelo não errou por ignorância: um tabuleiro NÃO É
+ * conteúdo estático nem tabela de banco, e ele escolheu a caixa menos errada
+ * de duas que não serviam.
+ *
+ * `app-state` é essa terceira caixa. Ela usa a mesma forma de campo de
+ * `database` — nome, tipo, opções —, porque a diferença não está no formato do
+ * campo: está em SOBREVIVER ao recarregamento. Um tabuleiro, um placar, um
+ * carrinho antes de fechar, o passo de um formulário longo: tudo isso é estado.
+ */
 const entitySchema = z.discriminatedUnion('kind', [
   z.object({
     name: z.string().min(1).max(80),
@@ -43,6 +66,11 @@ const entitySchema = z.discriminatedUnion('kind', [
     kind: z.literal('database'),
     fields: z.array(databaseFieldSchema).min(1).max(30),
     sensitive: z.boolean().default(false),
+  }).strict(),
+  z.object({
+    name: z.string().min(1).max(80),
+    kind: z.literal('app-state'),
+    fields: z.array(databaseFieldSchema).min(1).max(30),
   }).strict(),
 ])
 
@@ -74,6 +102,22 @@ export const appSpecV1Schema = z.object({
 }).strict().superRefine((value, context) => {
   const databaseNames = new Set(value.entities.filter(entity => entity.kind === 'database').map(entity => entity.name.normalize('NFKC').trim().toLocaleLowerCase('pt-BR')))
   value.entities.forEach((entity, entityIndex) => {
+    /*
+      ESTADO não referencia registro.
+
+      Uma chave estrangeira é uma promessa de que o outro lado continua
+      existindo, e estado não sobrevive ao recarregamento — a promessa seria
+      falsa no instante seguinte. Recusar aqui evita um aplicativo que guarda o
+      identificador de algo que já sumiu.
+    */
+    if (entity.kind === 'app-state') {
+      entity.fields.forEach((field, fieldIndex) => {
+        if (field.type === 'reference') {
+          context.addIssue({ code: 'custom', path: ['entities', entityIndex, 'fields', fieldIndex, 'type'], message: t('errors.stateNoReference') })
+        }
+      })
+      return
+    }
     if (entity.kind !== 'database') return
     if (entity.sensitive && (value.sensitive_data.detected.length === 0 || !value.sensitive_data.confirmed_by_user)) {
       context.addIssue({ code: 'custom', path: ['entities', entityIndex, 'sensitive'], message: t('errors.sensitiveSpec') })

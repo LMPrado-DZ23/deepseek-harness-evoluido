@@ -121,6 +121,19 @@ export const CATEGORY_REQUIRES_DATA_MODEL: Readonly<Record<StudioProjectCategory
   scheduling: true,
   dashboard: true,
   'saas-authenticated': true,
+  /*
+    `outro` NÃO exige modelo de dados, e essa é a resposta difícil.
+
+    Ele é a categoria sem forma declarada — um jogo, uma ferramenta, um
+    visualizador, o que a pessoa descreveu e não cabe nas sete. Exigir banco
+    dela obrigaria um jogo da velha a inventar uma tabela; não exigir significa
+    que o produto NÃO promete persistência aqui, e é isso que ele diz.
+
+    O que substitui a garantia de forma são os `acceptance_criteria` do próprio
+    AppSpec, que já viram conferência uma a uma. Em `outro` eles não são
+    enfeite: são a única descrição do que a coisa tem de fazer.
+  */
+  outro: false,
 }
 
 export function assertCategoryCanGenerate(category: StudioProjectCategory, spec: AppSpecV1): void {
@@ -166,6 +179,7 @@ function categoryInstruction(category: StudioProjectCategory): readonly ContextS
     scheduling: 'prompts.planScheduling',
     dashboard: 'prompts.planDashboard',
     'saas-authenticated': 'prompts.planSaas',
+    outro: 'prompts.planOutro',
   }
   const chosen = key[category]
   return chosen === null ? [] : [instruction(`plan.category.${category}`, t(chosen))]

@@ -135,6 +135,24 @@ reproduzidas antes do conserto (`REV-ADAPT-A/B`):
 - **B.** o teste da sonda padrão provava a **constante**, não o **consumo**. A
   propriedade certa é comportamental, e quem a controla é o `PATH`.
 
+**`ONT-01` COMEÇOU em 18/09 e NÃO está concluída** (`ONT-01a`). A especificação
+deixou de ser cerca: existe `app-state` — o estado que muda enquanto a pessoa
+usa e não é banco — e existe a categoria `outro`, com sinais, atalho na home e
+casos de compreensão próprios. A resposta literal que a jornada de hoje recusou
+passa a valer mudando só o discriminante.
+
+**Mas a revisão do titular estava certa: a especificação é a primeira camada.**
+MEDIDO agora: `assertGeneratedSource` recusa `useState`, `onClick` e qualquer
+chamada de função. O tabuleiro que o schema aceita **continua sem poder ser
+escrito**. A política declarativa é deliberada e protege de verdade — o trabalho
+é um perfil interativo em ambiente isolado, sem afrouxá-la para o perfil que já
+funciona. Ele atravessa planejamento, geração, perfil, isolamento e prévia.
+
+**Dois defeitos meus, do mesmo dia, consertados aqui:** o `prompt()` procurava
+marcador DEPOIS de interpolar — quem escrevesse "rota `/clientes/{id}`" derrubava
+o intake —, e o leitor de resposta escolhia em silêncio entre dois blocos, tendo
+escolhido o EXEMPLO num dos casos.
+
 **A próxima fatia, e por que ela é grande.** A cobertura trilíngue é de
 navegação + Preferências. O passo seguinte é migrar as demais superfícies, e a
 medição de hoje diz o tamanho: `pt-BR.json` tem **398 chaves**, `hub` tem 138,

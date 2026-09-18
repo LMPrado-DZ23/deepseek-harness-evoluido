@@ -6,6 +6,7 @@ export const STUDIO_CATEGORIES = [
   'scheduling',
   'dashboard',
   'saas-authenticated',
+  'outro',
 ] as const
 
 export type Category = typeof STUDIO_CATEGORIES[number]

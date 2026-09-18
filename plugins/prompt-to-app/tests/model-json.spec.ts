@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { appSpecV1Schema } from '../src/appspec.js'
 import { generatedOutputSchema } from '../src/pipeline.js'
-import { ModelJsonError, corpoDoBlocoCercado, decodeModelJson, primeiroBlocoBalanceado } from '../src/model-json.js'
+import { ModelJsonAmbiguoError, ModelJsonError, corpoDoBlocoCercado, decodeModelJson, primeiroBlocoBalanceado } from '../src/model-json.js'
 
 /**
  * O QUE UM MODELO DE VERDADE DEVOLVE, e o que o produto fazia com isso.
@@ -119,17 +119,26 @@ describe('as formas que um modelo usa para embrulhar JSON', () => {
       .toEqual({ a: 'fecha } cedo', b: 2 })
   })
 
-  it('a cerca vence um objeto DECOY que aparece antes dela', () => {
+  it('objeto DECOY antes da resposta faz o leitor RECUSAR, e nao escolher', () => {
     /*
-      Este caso discrimina a leitura da cerca do recurso ao bloco balanceado.
+      Este caso ja afirmou o contrario, e a mudanca foi deliberada.
 
-      Sem ele, a sabotagem que faz a cerca sem fechamento devolver `null`
-      sobrevive: o bloco balanceado acha o mesmo JSON e o teste passa. Aqui a
-      prosa traz um objeto ANTES da cerca, entao as duas respostas sao
-      diferentes e so a certa passa.
+      A versao anterior dizia que a cerca "vence" o objeto que aparece antes
+      dela. Isso e uma politica de ESCOLHA, e uma revisao externa apontou o
+      problema: quando a resposta traz um exemplo e depois a resposta, escolher
+      um dos dois e adivinhar — e a escolha errada constroi o aplicativo inteiro
+      a partir do exemplo, sem que ninguem saiba por que.
+
+      Recusar custa uma rodada de reparo. Escolher errado custa um aplicativo.
     */
-    expect(decodeModelJson('Aqui vai {"errado":1}\n```json\n{"certo":2}'))
-      .toEqual({ certo: 2 })
+    expect(() => decodeModelJson('Aqui vai {"errado":1}\n```json\n{"certo":2}'))
+      .toThrow(ModelJsonAmbiguoError)
+  })
+
+  it('dois blocos IGUAIS nao sao ambiguidade', () => {
+    // O texto inteiro e o corpo da cerca sao o mesmo JSON visto de dois jeitos.
+    // Tratar isso como ambiguo faria o leitor recusar toda resposta cercada.
+    expect(decodeModelJson('```json\n{"a":1}\n```')).toEqual({ a: 1 })
   })
 
   it('lista tambem, e nao so objeto', () => {

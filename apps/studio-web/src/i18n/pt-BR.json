@@ -124,7 +124,8 @@
       "crud-panel": "Painel para criar, editar e excluir",
       "scheduling": "Agenda de horários",
       "dashboard": "Painel de acompanhamento (só leitura)",
-      "saas-authenticated": "Área com acesso separado por cliente"
+      "saas-authenticated": "Área com acesso separado por cliente",
+      "outro": "Outra coisa — você descreve"
     },
     "continueBusy": "Enviando sua ideia…",
     "betaBadge": "protótipo inicial",
@@ -132,7 +133,8 @@
     "kindHelpTrade": "Reconhecemos só o seu ramo e começamos por aqui. Não entendemos ainda o que o aplicativo precisa fazer — confira o tipo abaixo, porque é ele que decide o que o FRIGG constrói.",
     "kindHelpChosen": "Você escolheu este tipo. É ele que decide o que o FRIGG constrói, e dá para trocar quando quiser.",
     "kindChoose": "Escolha o tipo",
-    "kindRequired": "Escolha o tipo acima para continuar: é ele que decide o que o FRIGG constrói, e a gente não vai adivinhar."
+    "kindRequired": "Escolha o tipo acima para continuar: é ele que decide o que o FRIGG constrói, e a gente não vai adivinhar.",
+    "outro": "Um jogo, uma ferramenta, outra coisa"
   },
   "design": {
     "title": "Escolha o jeito do seu aplicativo",

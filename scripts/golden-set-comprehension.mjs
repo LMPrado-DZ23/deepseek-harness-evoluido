@@ -136,12 +136,24 @@ export function verdict(rows, byCategory, blind = false) {
   return { ok: met && thin.length === 0, hits, accuracy, confidentErrors, confidentRate, thin }
 }
 
+/*
+  TODA categoria declarada tem conjunto, e nao so as que alguem lembrou.
+
+  O piso por categoria conferia as categorias PRESENTES no conjunto — entao uma
+  categoria nova entrava com ZERO casos e o portao nao notava: ele contava 7 de
+  7 e passava. Aconteceu em 18/09/2026, quando `outro` foi acrescentada e o
+  portao continuou verde sem medir nada dela. Comparar com a lista DECLARADA e o
+  que transforma "ninguem escreveu caso" em falha, em vez de silencio.
+*/
+const { STUDIO_CATEGORIES } = await import(resolve(root, 'apps/studio-web/src/categories.ts'))
+
 let allOk = true
 let blindAccuracy = 1
 const summary = []
 for (const set of SETS) {
   const rows = await measure(set)
   const byCategory = {}
+  for (const categoria of STUDIO_CATEGORIES) byCategory[categoria] = 0
   for (const row of rows) byCategory[row.expected] = (byCategory[row.expected] ?? 0) + 1
   const result = verdict(rows, byCategory, set.name === 'cego')
   allOk = allOk && result.ok
@@ -154,6 +166,7 @@ for (const set of SETS) {
     `casos=${String(rows.length)}`,
     `acerto=${(result.accuracy * 100).toFixed(1)}%`,
     `categorias=${String(Object.keys(byCategory).length)}`,
+    `declaradas=${String(STUDIO_CATEGORIES.length)}`,
     `entendidos=${String(rows.filter(row => row.understood).length)}`,
     `erro_com_confianca=${String(result.confidentErrors)}`,
     `taxa=${(result.confidentRate * 100).toFixed(1)}%`,

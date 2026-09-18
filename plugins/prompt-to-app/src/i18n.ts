@@ -7,16 +7,25 @@ const catalog = JSON.parse(
   readFileSync(new URL('../i18n/pt-BR.json', import.meta.url), 'utf8'),
 ) as CatalogObject
 
-export function t(key: string, params: Readonly<Record<string, string | number>> = {}): string {
+/**
+ * O texto CRU do catálogo, antes de qualquer substituição.
+ * @param key - o caminho no catálogo.
+ * @returns o texto, com os marcadores ainda no lugar.
+ */
+function textoCru(key: string): string {
   const value = key.split('.').reduce<CatalogValue | undefined>((current, part) => {
     return typeof current === 'object' && current !== null ? current[part] : undefined
   }, catalog)
   if (typeof value !== 'string') throw new Error(`I18N_KEY_MISSING:${key}`)
-  return value.replace(/\{([a-zA-Z0-9_]+)\}/gu, (_match, name: string) => String(params[name] ?? `{${name}}`))
+  return value
 }
 
-/** Um marcador que ninguém preencheu: `{assim}`. */
-const MARCADOR_PENDENTE = /\{[a-zA-Z0-9_]+\}/u
+export function t(key: string, params: Readonly<Record<string, string | number>> = {}): string {
+  return textoCru(key).replace(/\{([a-zA-Z0-9_]+)\}/gu, (_match, name: string) => String(params[name] ?? `{${name}}`))
+}
+
+/** Um marcador do MODELO do catálogo: `{assim}`. */
+const MARCADOR = /\{([a-zA-Z0-9_]+)\}/gu
 
 /**
  * Um texto do catálogo que vai para o MODELO, e não para uma pessoa.
@@ -40,9 +49,23 @@ const MARCADOR_PENDENTE = /\{[a-zA-Z0-9_]+\}/u
  * @returns o texto pronto, garantidamente sem marcador pendente.
  */
 export function prompt(key: string, params: Readonly<Record<string, string | number>> = {}): string {
-  const texto = t(key, params)
-  const pendente = MARCADOR_PENDENTE.exec(texto)
-  if (pendente !== null) throw new Error(`PROMPT_PARAM_MISSING:${key}:${pendente[0]}`)
-  return texto
+  /*
+    A conferência é sobre o MODELO, e acontece ANTES da substituição.
+
+    A primeira versão desta função procurava marcadores no texto JÁ montado, e
+    isso estava errado de um jeito que só aparece com conteúdo de verdade: o
+    valor substituído pode conter chaves legitimamente. Quem escrevesse "uma API
+    com rota /clientes/{id}" ou "um contador {contador}" derrubava o intake, com
+    uma mensagem dizendo que faltava um parâmetro que nunca existiu.
+
+    Ou seja: o conserto de hoje transformava texto da pessoa em falha do produto,
+    que é pior que o defeito que ele veio consertar. Olhando o modelo, o dado
+    passa intacto e a exigência continua de pé — o que se cobra é que QUEM CHAMA
+    passe todo marcador que o catálogo declara.
+  */
+  const exigidos = [...textoCru(key).matchAll(MARCADOR)].map(achado => achado[1]!)
+  const faltando = exigidos.filter(nome => params[nome] === undefined)
+  if (faltando.length > 0) throw new Error(`PROMPT_PARAM_MISSING:${key}:${faltando.join(',')}`)
+  return t(key, params)
 }
 

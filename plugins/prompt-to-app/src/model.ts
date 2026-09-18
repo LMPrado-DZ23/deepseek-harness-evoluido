@@ -18,7 +18,7 @@ const scope = {
 const timestamp = z.iso.datetime()
 const sha256 = z.string().regex(/^[a-f0-9]{64}$/)
 
-export const studioProjectCategorySchema = z.enum(['landing-page', 'catalog', 'form-database', 'crud-panel', 'scheduling', 'saas-authenticated', 'dashboard'])
+export const studioProjectCategorySchema = z.enum(['landing-page', 'catalog', 'form-database', 'crud-panel', 'scheduling', 'saas-authenticated', 'dashboard', 'outro'])
 export type StudioProjectCategory = z.infer<typeof studioProjectCategorySchema>
 
 export const studioProjectSchema = z.object({
