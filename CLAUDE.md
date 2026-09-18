@@ -73,6 +73,23 @@ terceiro. `gate:p37` e `gate:vendored-references` provam.
 Prado forneceu explicitamente. Se ele mandou um arquivo, não o substitua por um
 equivalente sem perguntar.
 
+**Continue sem pedir `continue`.** Decisão do Prado, 18/09/2026: checkpoint é
+REGISTRO, e não pedido de permissão. Terminar uma fatia, aprovar uma suíte,
+receber CI verde ou salvar um checkpoint **não** são motivos para encerrar a
+resposta nem para perguntar se pode seguir. O ciclo é: salvar o estado nos
+registros canônicos → escolher a próxima tarefa `READY` → **começar essa tarefa
+nesta mesma resposta**. Anunciar que vai continuar não substitui continuar.
+
+Isso muda a disciplina de trabalho, e **só** ela: não amplia escopo, não remove
+controle de segurança, orçamento nem autorização sensível. As ações que
+continuam exigindo a palavra dele estão logo abaixo, e nenhuma delas foi tocada.
+Bloqueio externo numa frente não paralisa a missão — registre
+`BLOCKED_BY_EXTERNAL_DEPENDENCY`, prepare o que dá para preparar sem ele, e siga
+por outra tarefa independente. Pare só quando o escopo tiver prova, o Prado
+cancelar, o recurso/sessão acabar de verdade, houver incidente, ou quando
+sobrarem **apenas** dependências externas — e aí deixe entrega recuperável e um
+resumo único.
+
 **Nunca declare pronto sem a prova correspondente.** Isso vale para `READY`,
 produção, celular validado, experiência para leigos validada e aplicação
 finalizada. Não esconda falha ambiental, e não troque integração real por

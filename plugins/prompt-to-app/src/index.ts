@@ -46,6 +46,7 @@ import type { DesignSpecRecordStore } from './design-spec-store.js'
 import type { AppSpecRecordStore } from './app-spec-store.js'
 import type { PlanRecordStore } from './plan-store.js'
 import type { EvidenceRecordStore } from './evidence-store.js'
+import { autorizacaoDoAmbiente, perfilEfetivo } from './perfil-de-geracao.js'
 import { ModelCodeGenerator, PromptToAppPipeline } from './pipeline.js'
 import { PlannerEngine } from './planner.js'
 import { HarnessPromptModel } from './ports.js'
@@ -466,7 +467,18 @@ export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}):
       service, identity: ctx.studioIdentity.service, tenancy: ctx.studioTenancy.service,
       intake, planner, jobs, emergencyStop,
       logos: new SharpLogoProcessor(logoStoreRoot),
-      generatorFor: (actor, projectId) => new ModelCodeGenerator(model, actor, service.project(actor, projectId).privacy),
+      generatorFor: (actor, projectId) => {
+        /*
+          O perfil sai do REGISTRO do projeto, cruzado com o que a instalação
+          autoriza. Uma recusa aqui seria tarde demais para ser útil — o
+          pipeline já a produz antes de chamar o modelo —, então aqui o não
+          autorizado cai no declarativo, que é o perfil de tudo o que já
+          funciona, e o pipeline é quem recusa com a frase certa.
+        */
+        const projeto = service.project(actor, projectId)
+        const escolha = perfilEfetivo(projeto.category, autorizacaoDoAmbiente(process.env))
+        return new ModelCodeGenerator(model, actor, projeto.privacy, escolha.tipo === 'AUTORIZADO' ? escolha.perfil : 'declarativo')
+      },
       health: actor => healthFor({ orgId: actor.orgId, tenantId: actor.tenantId }),
       /*
         O USO do espaço de trabalho, lido de `route-health`.

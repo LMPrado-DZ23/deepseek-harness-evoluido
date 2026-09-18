@@ -153,6 +153,21 @@ marcador DEPOIS de interpolar — quem escrevesse "rota `/clientes/{id}`" derrub
 o intake —, e o leitor de resposta escolhia em silêncio entre dois blocos, tendo
 escolhido o EXEMPLO num dos casos.
 
+**`ONT-01b-1` — o perfil de geração existe** (18/09). A política de código
+deixou de ser uma só. O perfil `interativo` libera TRÊS construções — evento,
+chamada e construtor — mais o acesso por índice calculado, que é o que um
+tabuleiro é. **Tudo o mais continua igual**: 17 fugas seguem recusadas no perfil
+novo, e há teste para cada uma. A tela declarativa continua valendo nos dois.
+
+**Categoria exige, instalação permite, e o efetivo é a interseção** — com recusa
+em vez de rebaixamento, porque rebaixar produziria um jogo sem clique. O modelo
+não tem entrada: `perfilEfetivo` recebe dois argumentos, e nenhum vem da
+resposta dele.
+
+**O que falta em `ONT-01b-2`:** a jornada real — pedido na interface, modelo
+real, build, comportamento exercitado no navegador, alteração e retomada. É o
+aceite, e ele não foi alcançado.
+
 **A próxima fatia, e por que ela é grande.** A cobertura trilíngue é de
 navegação + Preferências. O passo seguinte é migrar as demais superfícies, e a
 medição de hoje diz o tamanho: `pt-BR.json` tem **398 chaves**, `hub` tem 138,

@@ -1,4 +1,5 @@
 import { posix } from 'node:path'
+import type { PerfilDeGeracao } from './perfil-de-geracao.js'
 import ts from 'typescript'
 import type { GeneratedFile } from './generator.js'
 import { GeneratedFileRejectedError, validateGeneratedPath } from './generator.js'
@@ -50,7 +51,7 @@ const FIXED_COMPONENT_PATHS = [
   'src/components/ui', 'components/ui',
 ] as const
 
-export function assertGeneratedSource(files: readonly GeneratedFile[]): void {
+export function assertGeneratedSource(files: readonly GeneratedFile[], perfil: PerfilDeGeracao = 'declarativo'): void {
   const validated = files.map(file => ({ ...file, path: validateGeneratedPath(file.path) }))
   const generatedPaths = new Set(validated.map(file => normalizePath(file.path)))
   for (const file of validated) {
@@ -58,7 +59,7 @@ export function assertGeneratedSource(files: readonly GeneratedFile[]): void {
     if (isFixedComponentPath(normalizePath(file.path))) throw rejectedSource(file.path, 'reserved Studio component path')
     const source = ts.createSourceFile(file.path, file.content, ts.ScriptTarget.Latest, true, scriptKind(file.path))
     visitImports(source, moduleName => assertAllowedModule(file.path, moduleName, generatedPaths))
-    assertNoServerOrUnsafeSource(file.path, source, generatedPaths)
+    assertNoServerOrUnsafeSource(file.path, source, generatedPaths, perfil)
   }
 }
 
@@ -78,7 +79,17 @@ function visitImports(source: ts.SourceFile, inspect: (moduleName: string | unde
   walk(source)
 }
 
-function assertNoServerOrUnsafeSource(path: string, source: ts.SourceFile, generatedPaths: ReadonlySet<string>): void {
+function assertNoServerOrUnsafeSource(path: string, source: ts.SourceFile, generatedPaths: ReadonlySet<string>, perfil: PerfilDeGeracao): void {
+  /*
+    As TRÊS construções que o perfil interativo libera, e só elas.
+
+    Tudo o que vem antes e depois neste percurso — globais, rede, `eval`,
+    `import.meta`, acesso dinâmico, `constructor`, fábricas de elemento, tags,
+    `dangerouslySetInnerHTML`, espalhamento, URL — vale igual nos dois perfis.
+    Essas guardas não existem para impedir um clique, e nenhuma delas é
+    afrouxada aqui.
+  */
+  const interativo = perfil === 'interativo'
   const importedJsxBindings = importedBindings(source, generatedPaths)
   const walk = (node: ts.Node): void => {
     if (ts.isExpressionStatement(node) && ts.isStringLiteral(node.expression) && node.expression.text === 'use server') throw rejectedSource(path, 'use server')
@@ -87,7 +98,22 @@ function assertNoServerOrUnsafeSource(path: string, source: ts.SourceFile, gener
     if (ts.isImportSpecifier(node) && FORBIDDEN_ELEMENT_FACTORIES.has((node.propertyName ?? node.name).text)) throw rejectedSource(path, (node.propertyName ?? node.name).text)
     if (ts.isPropertyAccessExpression(node) && FORBIDDEN_NETWORK_APIS.has(node.name.text)) throw rejectedSource(path, node.name.text)
     const elementName = ts.isElementAccessExpression(node) ? staticPropertyName(node.argumentExpression) : undefined
-    if (ts.isElementAccessExpression(node) && elementName === undefined) throw rejectedSource(path, 'dynamic property access')
+    /*
+      ACESSO POR ÍNDICE calculado: proibido no declarativo, permitido no interativo.
+
+      No declarativo ele é desnecessário — não há lógica —, e proibi-lo fecha de
+      graça a família de escapes por chave calculada. No interativo ele é
+      inevitável: `casas[indice]` é o que um tabuleiro é.
+
+      LIMITE DECLARADO, e ele é real: com índice calculado, um aplicativo pode
+      escrever numa chave que a análise estática não vê, incluindo poluição de
+      protótipo do próprio documento dele. Os nomes perigosos escritos
+      literalmente — `constructor`, `__proto__`, `prototype` — continuam
+      recusados nos dois perfis, e o que contém o resto é o ISOLAMENTO da prévia,
+      não esta varredura. Análise estática aqui é camada de defesa, e nunca o
+      lugar onde a contenção mora.
+    */
+    if (ts.isElementAccessExpression(node) && elementName === undefined && !interativo) throw rejectedSource(path, 'dynamic property access')
     if (elementName !== undefined && FORBIDDEN_NETWORK_APIS.has(elementName)) throw rejectedSource(path, elementName)
     if (ts.isPropertyAccessExpression(node) && FORBIDDEN_ELEMENT_FACTORIES.has(node.name.text)) throw rejectedSource(path, node.name.text)
     if (elementName !== undefined && FORBIDDEN_ELEMENT_FACTORIES.has(elementName)) throw rejectedSource(path, elementName)
@@ -98,7 +124,10 @@ function assertNoServerOrUnsafeSource(path: string, source: ts.SourceFile, gener
     if (ts.isJsxAttribute(node)) {
       const name = node.name.getText(source)
       const normalizedName = normalizeJsxAttributeName(name)
-      if (/^on/iu.test(name) || name === 'ref') throw rejectedSource(path, `interactive JSX attribute ${name}`)
+      // `ref` continua proibido nos DOIS perfis: ele é a porta para o DOM cru,
+      // e liberar o clique não é liberar o documento.
+      if (name === 'ref') throw rejectedSource(path, `interactive JSX attribute ${name}`)
+      if (/^on/iu.test(name) && !interativo) throw rejectedSource(path, `interactive JSX attribute ${name}`)
       if (FORBIDDEN_JSX_ATTRIBUTES.has(normalizedName)) throw rejectedSource(path, name)
       if (URL_JSX_ATTRIBUTES.has(normalizedName)) {
         const value = staticJsxAttributeValue(node)
@@ -120,9 +149,11 @@ function assertNoServerOrUnsafeSource(path: string, source: ts.SourceFile, gener
       if (tag !== tag.toLowerCase() && !importedJsxBindings.has(tag)) throw rejectedSource(path, `dynamic JSX tag ${tag}`)
     }
     ts.forEachChild(node, walk)
+    // Modelo com etiqueta continua proibido nos dois: é uma chamada com
+    // analisador próprio, e nenhum aplicativo desta lista precisou dele.
     if (ts.isTaggedTemplateExpression(node)) throw rejectedSource(path, 'tagged template call')
-    if (ts.isCallExpression(node)) throw rejectedSource(path, 'runtime call')
-    if (ts.isNewExpression(node)) throw rejectedSource(path, 'runtime constructor')
+    if (ts.isCallExpression(node) && !interativo) throw rejectedSource(path, 'runtime call')
+    if (ts.isNewExpression(node) && !interativo) throw rejectedSource(path, 'runtime constructor')
   }
   walk(source)
 }
@@ -309,7 +340,7 @@ export function planningRules(): readonly string[] {
   ]
 }
 
-export function generationRules(): readonly string[] {
+export function generationRules(perfil: PerfilDeGeracao = 'declarativo'): readonly string[] {
   const modules = [...ALLOWED_MODULES].sort()
   const prefixes = [...ALLOWED_PREFIXES].sort()
   const tags = [...FORBIDDEN_JSX_TAGS].sort()
@@ -321,5 +352,13 @@ export function generationRules(): readonly string[] {
     prompt('prompts.ruleAttributes', { attributes: attributes.join(', ') }),
     prompt('prompts.ruleGlobals', { globals: globals.join(', ') }),
     prompt('prompts.ruleUrls'),
+    /*
+      A regra do PERFIL sai da mesma fonte que o aplica, como todas as outras
+      deste bloco. Dizer "pode usar estado e evento" num perfil declarativo
+      faria o modelo gastar tentativa escrevendo o que o portão recusa em
+      seguida; calar no interativo o faria escrever JSX parado para um pedido
+      que precisa reagir ao clique.
+    */
+    prompt(perfil === 'interativo' ? 'prompts.ruleInterativo' : 'prompts.ruleDeclarativo'),
   ]
 }

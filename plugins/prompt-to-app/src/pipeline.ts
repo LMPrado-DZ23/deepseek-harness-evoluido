@@ -33,6 +33,7 @@ import { recoveryNoteFor, type ObservedRun } from './learning.js'
 import { generateSaasLayer, writeSaasLayer } from './saas-generator.js'
 import { prompt, t } from './i18n.js'
 import { decodeModelJson } from './model-json.js'
+import { autorizacaoDoAmbiente, perfilEfetivo, type PerfilDeGeracao } from './perfil-de-geracao.js'
 import { diffRunFiles, runReport, RUN_REPORT_FILE, type RunFileAuthor } from './run-report.js'
 import { readResumeMarker, readResumedFiles, writeResumeMarker, type ResumeMarker } from './resume.js'
 import type { StudioPlan, StudioRun, StudioRunStep } from './model.js'
@@ -59,7 +60,16 @@ export interface CodeGenerationResult { readonly files: readonly GeneratedFile[]
 export interface CodeGeneratorPort { generate(spec: AppSpecV1, plan: StudioPlan, diagnostic?: string): Promise<CodeGenerationResult> }
 
 export class ModelCodeGenerator implements CodeGeneratorPort {
-  constructor(private readonly model: PromptModelPort, private readonly actor: PromptToAppActor, private readonly privacy: RoutePrivacy) {}
+  constructor(
+    private readonly model: PromptModelPort, private readonly actor: PromptToAppActor,
+    private readonly privacy: RoutePrivacy,
+    /*
+      O perfil chega pelo CONSTRUTOR, e não por um campo que o modelo possa
+      influenciar: quem monta este gerador é o pipeline, que já leu o registro
+      do projeto e já cruzou com a autorização da instalação.
+    */
+    private readonly perfil: PerfilDeGeracao = 'declarativo',
+  ) {}
   async generate(spec: AppSpecV1, plan: StudioPlan, diagnostic?: string): Promise<CodeGenerationResult> {
     const result = await this.model.complete({ orgId: this.actor.orgId, tenantId: this.actor.tenantId }, 'generate', this.privacy, [
       prompt('prompts.generateOnly'),
@@ -71,7 +81,7 @@ export class ModelCodeGenerator implements CodeGeneratorPort {
       // politica —, e as duas nao conversavam: um modulo novo na lista de
       // permitidos nunca chegava ao prompt, e o gerador continuava chutando e
       // sendo recusado, gastando uma tentativa inteira por chute.
-      ...generationRules(),
+      ...generationRules(this.perfil),
       prompt('prompts.generateSpec', { spec: JSON.stringify(spec) }), prompt('prompts.generatePlan', { plan: JSON.stringify(plan.slices) }),
       ...(diagnostic === undefined ? [] : [prompt('prompts.generateRepair', { diagnostic })]),
     ].join('\n'))
@@ -164,6 +174,19 @@ export class PromptToAppPipeline {
     const ownerSessionId = runOptions.ownerSessionId ?? actor.sessionId ?? 'direct-execution'
     const spec = (await this.options.service.latestSpec(actor, projectId)).app_spec
     assertCategoryCanGenerate(project.category, spec)
+    /*
+      O PERFIL é decidido AQUI, antes de qualquer chamada ao modelo.
+
+      Decidir cedo é o que faz a recusa ser barata e legível: uma instalação
+      trancada no declarativo recusa um pedido que exige comportamento ANTES de
+      gastar uma chamada de modelo, e diz por quê — em vez de gerar um jogo sem
+      clique e deixar a pessoa procurar o defeito que uma decisão causou.
+    */
+    const escolhaDePerfil = perfilEfetivo(project.category, autorizacaoDoAmbiente(process.env))
+    if (escolhaDePerfil.tipo === 'NAO_AUTORIZADO') {
+      throw new PromptToAppError('INVALID', t('errors.perfilNaoAutorizado', { perfil: escolhaDePerfil.exigido }))
+    }
+    const perfilDeGeracao = escolhaDePerfil.perfil
     const specFindings = scanGeneratedContent({ 'appspec.json': JSON.stringify(spec) })
     if (specFindings.length > 0) throw new PromptToAppError('INVALID', t('errors.generatedSensitiveLiteral'))
     const design = await this.options.service.designOrDefault(actor, projectId)
@@ -367,7 +390,14 @@ export class PromptToAppPipeline {
         // convergencia compara, mesmo quando a conferencia recusa em seguida.
         generatedFiles = generated.files.map(file => ({ path: file.path, content: file.content }))
         attemptOutput = [...(attemptOutput ?? []), ...generatedFiles]
-        assertGeneratedSource(generated.files)
+        /*
+          O PERFIL vem do registro do PROJETO, e nunca da resposta do modelo.
+
+          `perfilEfetivo` cruza o que a categoria exige com o que a instalação
+          permite. O modelo não escreve categoria, não recebe campo de perfil e
+          não tem por onde pedir um mais permissivo: esta linha só lê o projeto.
+        */
+        assertGeneratedSource(generated.files, perfilDeGeracao)
         await writeGeneratedFiles(runDirectory, generated.files, {
           plannedPaths: plan.slices.flatMap(slice => slice.planned_files),
           protectedTemplatePaths,
