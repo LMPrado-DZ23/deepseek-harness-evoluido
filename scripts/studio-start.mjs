@@ -30,8 +30,22 @@ const require = createRequire(resolve(raiz, 'package.json'))
  *
  * Toda pergunta aqui é barata e nenhuma delas tem efeito: a conferência não
  * pode ser o que estraga o ambiente que ela veio conferir.
+ *
+ * ## Por que a sonda do Docker é INJETADA
+ *
+ * Porque ela é a única pergunta desta função que sai da máquina, e ela pode
+ * demorar. `docker info` espera até dez segundos por um daemon que não responde
+ * — e o teste que exercita esta função tem cinco. Isso não é instabilidade: é
+ * uma falha garantida sempre que o Docker demorar mais que o orçamento do teste,
+ * e foi assim que a CI reprovou em 18/09/2026, num teste que não tem nada a ver
+ * com Docker.
+ *
+ * O conserto NÃO foi aumentar o limite do teste, que é o conserto que esconde o
+ * problema: com o limite maior, a suíte inteira passa a esperar um daemon
+ * externo. Foi tirar o mundo de dentro do teste — quem mede disco passa uma
+ * sonda que responde na hora, e a produção continua perguntando de verdade.
  */
-export function observar(base = raiz, ambiente = process) {
+export function observar(base = raiz, ambiente = process, sonda = SONDA_PADRAO) {
   const harness = resolve(base, 'third_party', 'deepseek-harness')
   return {
     nodeVersion: ambiente.versions?.node,
@@ -45,7 +59,7 @@ export function observar(base = raiz, ambiente = process) {
     studioInstalado: existsSync(resolve(base, 'node_modules', '@dz23-studio')),
     studioCompilado: existsSync(resolve(base, 'plugins', 'prompt-to-app', 'lib')),
     perfilPresente: existsSync(resolve(base, 'dsh-home', 'profiles', 'studio', 'package.json')),
-    docker: docker(),
+    docker: sonda.docker(),
     // Lida do AMBIENTE, e não do Studio: perguntar ao Studio exigiria que ele
     // já estivesse no ar, e esta conferência existe para o caso em que ele
     // ainda não está.
@@ -66,12 +80,23 @@ function resolvivel(nome) {
  * Falha de qualquer tipo vira `false`, e nunca `undefined`: aqui a pergunta FOI
  * feita, e a resposta foi não.
  */
-function docker() {
+export function docker() {
   try {
     const resultado = spawnSync('docker', ['info'], { stdio: 'ignore', timeout: 10_000 })
     return resultado.status === 0
   } catch { return false }
 }
+
+/**
+ * A sonda que a PRODUÇÃO usa.
+ *
+ * Ela existe como constante exportada, e não como `{ docker }` escrito no valor
+ * padrão do parâmetro, porque um valor padrão não é exercitado por teste nenhum:
+ * trocá-lo por `() => true` faria o produto afirmar que o Docker atende sem ter
+ * perguntado, e nenhuma suíte acusaria. Uma sabotagem provou isso. Sendo uma
+ * constante, o teste consegue afirmar QUEM ela é.
+ */
+export const SONDA_PADRAO = { docker }
 
 /**
  * A partida propriamente dita.

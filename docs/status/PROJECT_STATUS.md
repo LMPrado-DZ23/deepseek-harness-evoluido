@@ -75,6 +75,13 @@ versionado revelou que a lista escrita à mão em `/tmp/gates.sh` tinha **trinta
 nomes enquanto o `package.json` tinha **trinta e um** — `gate:licenses:release`
 nunca rodou localmente em sessão nenhuma.
 
+**A CI de `BR-F11` reprovou, e a causa não era a fatia** (`CI-08`).
+`scripts/studio-start.spec.mjs` — um teste que só confere caminhos de arquivo —
+esperava por `docker info`, que tem dez segundos de espera dentro de um caso com
+cinco. Reprovação garantida sempre que o Docker demorar, escrita no código.
+Reproduzi a falha antes de consertar, e o conserto foi tirar o mundo de dentro
+do teste, e não aumentar o limite dele.
+
 **A próxima fatia, e por que ela é grande.** A cobertura trilíngue é de
 navegação + Preferências. O passo seguinte é migrar as demais superfícies, e a
 medição de hoje diz o tamanho: `pt-BR.json` tem **398 chaves**, `hub` tem 138,
