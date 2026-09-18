@@ -1,5 +1,5 @@
 import ts from 'typescript'
-import { t } from './i18n.js'
+import { prompt, t } from './i18n.js'
 
 /**
  * O que já EXISTE no aplicativo gerado: arquivos, símbolos e quem depende de quem.
@@ -581,30 +581,30 @@ export function codeIndexSummary(
   // seria uma segunda guarda que nenhum caso alcança. Aplicativo sem código
   // nenhum sai daqui com lista vazia porque todos os blocos ficam calados.
   if (lidos.length > 0) {
-    lines.push(t('prompts.codeHeader'))
+    lines.push(prompt('prompts.codeHeader'))
     for (const path of lidos) {
       const nomes = (index.symbols.get(path) ?? []).map(symbol => symbol.name)
       lines.push(nomes.length === 0
-        ? t('prompts.codeNoExports', { path })
-        : t('prompts.codeExports', { path, names: nomes.join(', ') }))
+        ? prompt('prompts.codeNoExports', { path })
+        : prompt('prompts.codeExports', { path, names: nomes.join(', ') }))
     }
   }
 
   const impacto = changed.length === 0 ? [] : impactOf(index, changed)
   if (impacto.length > 0) {
-    lines.push(t('prompts.codeImpact', { files: impacto.join(', ') }))
+    lines.push(prompt('prompts.codeImpact', { files: impacto.join(', ') }))
   }
 
   const ciclos = importCycles(index)
   if (ciclos.length > 0) {
-    lines.push(t('prompts.codeCycles', { cycles: ciclos.map(cycle => cycle.files.join(' -> ')).join('; ') }))
+    lines.push(prompt('prompts.codeCycles', { cycles: ciclos.map(cycle => cycle.files.join(' -> ')).join('; ') }))
   }
 
   // A honestidade sobre o que falta vem POR ÚLTIMO e sempre: é a linha que
   // impede o resto de ser lido como um retrato completo.
   const faltando = [...index.unreadable.map(item => item.path), ...skipped.map(item => item.path)].sort()
   if (faltando.length > 0) {
-    lines.push(t('prompts.codeIncomplete', { files: faltando.join(', ') }))
+    lines.push(prompt('prompts.codeIncomplete', { files: faltando.join(', ') }))
   }
   return lines
 }

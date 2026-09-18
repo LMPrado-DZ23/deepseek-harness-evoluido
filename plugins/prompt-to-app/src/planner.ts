@@ -11,7 +11,7 @@ import {
   loadSkills, selectSkills,
   type SkillCard, type SkillRefusal, type SkillSelection,
 } from './skill-registry.js'
-import { t } from './i18n.js'
+import { prompt, t } from './i18n.js'
 import { decodeModelJson } from './model-json.js'
 
 /**
@@ -267,10 +267,10 @@ export class PlannerEngine {
       ? []
       : codeIndexSummary(code.index, code.changed ?? [], code.skipped ?? [])
     const assembled = assembleContext([
-      instruction('plan.only', t('prompts.planOnly')),
-      instruction('plan.criteria', t('prompts.planCriteria')),
-      instruction('plan.files', t('prompts.planFiles')),
-      instruction('plan.first', t('prompts.planFirst')),
+      instruction('plan.only', prompt('prompts.planOnly')),
+      instruction('plan.criteria', prompt('prompts.planCriteria')),
+      instruction('plan.files', prompt('prompts.planFiles')),
+      instruction('plan.first', prompt('prompts.planFirst')),
       // Os LIMITES do que o aplicativo gerado consegue fazer, vindos da mesma
       // lista que o construtor usa para RECUSAR. Sem eles nada impedia o plano
       // de prometer "busca o endereço pelo CEP": a pessoa aprovava, e só na
@@ -296,11 +296,11 @@ export class PlannerEngine {
         : [{ id: 'plan.code', kind: 'evidence' as const, priority: 110, source: 'code-index', text: codeLines.join('\n') }]),
       // A especificação é EVIDÊNCIA: é sobre ela que o modelo raciocina, e é
       // a única parte que cresce com o tamanho do que a pessoa descreveu.
-      { id: 'plan.spec', kind: 'evidence' as const, priority: 100, source: 'app-spec', text: t('prompts.generateSpec', { spec: JSON.stringify(spec) }) },
+      { id: 'plan.spec', kind: 'evidence' as const, priority: 100, source: 'app-spec', text: prompt('prompts.generateSpec', { spec: JSON.stringify(spec) }) },
       ...(changeRequest === undefined
         ? []
-        : [{ id: 'plan.change', kind: 'evidence' as const, priority: 90, source: 'change-request', text: t('prompts.changeRequest', { reason: changeRequest }) }]),
-      { id: 'plan.schema', kind: 'schema' as const, priority: 0, source: 'planOutputSchema', text: t('prompts.schema', { schema: JSON.stringify(planOutputSchema.toJSONSchema()) }) },
+        : [{ id: 'plan.change', kind: 'evidence' as const, priority: 90, source: 'change-request', text: prompt('prompts.changeRequest', { reason: changeRequest }) }]),
+      { id: 'plan.schema', kind: 'schema' as const, priority: 0, source: 'planOutputSchema', text: prompt('prompts.schema', { schema: JSON.stringify(planOutputSchema.toJSONSchema()) }) },
     ], { budgetChars: this.budgetChars })
     const result = await this.model.complete(scope, 'plan', privacy, assembled.prompt)
     const decoded = decodeModelJson(result.value)
@@ -354,23 +354,23 @@ export class PlannerEngine {
   ): Promise<{ readonly slice: PlanSliceOutput; readonly ledger: ContextLedger }> {
     assertCategoryCanGenerate(category, spec)
     const assembled = assembleContext([
-      instruction('slice.only', t('prompts.sliceOnly')),
-      instruction('slice.criteria', t('prompts.planCriteria')),
-      instruction('slice.files', t('prompts.planFiles')),
-      instruction('slice.sliceFiles', t('prompts.sliceFiles')),
+      instruction('slice.only', prompt('prompts.sliceOnly')),
+      instruction('slice.criteria', prompt('prompts.planCriteria')),
+      instruction('slice.files', prompt('prompts.planFiles')),
+      instruction('slice.sliceFiles', prompt('prompts.sliceFiles')),
       // A etapa ACRESCENTADA à mão é o caminho mais provável de todos para uma
       // promessa impossível: é onde a pessoa escreve, em texto livre, o que
       // ficou faltando — e "mandar por e-mail" é exatamente o que ela escreve.
       ...planningRules().map((text, index) => instruction(`slice.limit${String(index)}`, text)),
       // O PEDIDO da pessoa e o que esta etapa existe para atender: se algo
       // tiver de sair por falta de espaco, nao pode ser ele.
-      { id: 'slice.request', kind: 'evidence' as const, priority: 100, source: 'slice-request', text: t('prompts.sliceRequest', { request }) },
+      { id: 'slice.request', kind: 'evidence' as const, priority: 100, source: 'slice-request', text: prompt('prompts.sliceRequest', { request }) },
       // O plano que ja existe evita que a etapa nova repita o que ja ha. Cair
       // fora piora o plano, mas nao o torna invalido: a colisao de arquivos e
       // conferida em CODIGO depois, e nao confiada a esta instrucao.
-      { id: 'slice.existing', kind: 'evidence' as const, priority: 80, source: 'existing-plan', text: t('prompts.sliceExisting', { slices: JSON.stringify(existing.map(slice => ({ title: slice.title, planned_files: slice.planned_files }))) }) },
-      { id: 'slice.spec', kind: 'evidence' as const, priority: 90, source: 'app-spec', text: t('prompts.generateSpec', { spec: JSON.stringify(spec) }) },
-      { id: 'slice.schema', kind: 'schema' as const, priority: 0, source: 'slice-output-schema', text: t('prompts.schema', { schema: JSON.stringify(sliceOutputSchema.toJSONSchema()) }) },
+      { id: 'slice.existing', kind: 'evidence' as const, priority: 80, source: 'existing-plan', text: prompt('prompts.sliceExisting', { slices: JSON.stringify(existing.map(slice => ({ title: slice.title, planned_files: slice.planned_files }))) }) },
+      { id: 'slice.spec', kind: 'evidence' as const, priority: 90, source: 'app-spec', text: prompt('prompts.generateSpec', { spec: JSON.stringify(spec) }) },
+      { id: 'slice.schema', kind: 'schema' as const, priority: 0, source: 'slice-output-schema', text: prompt('prompts.schema', { schema: JSON.stringify(sliceOutputSchema.toJSONSchema()) }) },
     ], { budgetChars: this.budgetChars })
     const result = await this.model.complete(scope, 'plan', privacy, assembled.prompt)
     const decoded = decodeModelJson(result.value)

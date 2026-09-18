@@ -384,6 +384,34 @@ describe('T-25: intake e etapa nova tambem passam pelo motor de contexto', () =>
     expect(intake.lastLedger!.included.find(item => item.id === 'spec.idea')?.source).toBe('original-brief')
   })
 
+  it('a RODADA DE REPARO leva o contrato de formato E o schema, e nao so os erros', async () => {
+    /*
+      Este caso existe porque a montagem do reparo nao era exercitada por teste
+      nenhum: dava para remover o `schema` da chamada e a suite inteira passava.
+      A licao de sempre — a decisao que importa nao mora na montagem.
+
+      Medido em 18/09/2026 contra o Ollama do titular: sem o contrato de
+      formato, o modelo respondeu em YAML embrulhado em prosa; sem o schema, ele
+      recebeu "expected string, received object" e repetiu o mesmo erro, porque
+      a forma que ele precisava acertar ficou no prompt anterior.
+    */
+    const invalido = JSON.stringify({ schema_version: 1, problem: 'curto' })
+    const complete = vi.fn()
+      .mockResolvedValueOnce({ value: invalido, route: 'ollama', model: 'qwen' })
+      .mockResolvedValueOnce({ value: JSON.stringify(validSpec), route: 'ollama', model: 'qwen' })
+    const intake = new IntakeEngine({ complete })
+    await intake.buildSpec(conversation('Quero um site para a padaria.') as never)
+
+    expect(complete).toHaveBeenCalledTimes(2)
+    const textoDoReparo = complete.mock.calls[1]![3] as string
+    // O contrato de formato: sem ele o modelo sai do JSON.
+    expect(textoDoReparo).toMatch(/somente json/iu)
+    // E a DEFINICAO: `static-content` so existe dentro do schema do AppSpec.
+    expect(textoDoReparo).toContain('static-content')
+    // E nenhum marcador sobrou para viajar ate o modelo.
+    expect(textoDoReparo).not.toMatch(/\{(?:schema|issues|value)\}/u)
+  })
+
   it('a deteccao de dado sensivel e INSTRUCAO: nunca cai por falta de espaco', async () => {
     // Corta-la produziria um aplicativo que trata CPF como campo comum, e a
     // pessoa nao teria como saber que a instrucao existiu e sumiu.

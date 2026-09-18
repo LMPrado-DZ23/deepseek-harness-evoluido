@@ -2,7 +2,7 @@ import { posix } from 'node:path'
 import ts from 'typescript'
 import type { GeneratedFile } from './generator.js'
 import { GeneratedFileRejectedError, validateGeneratedPath } from './generator.js'
-import { t } from './i18n.js'
+import { prompt, t } from './i18n.js'
 
 const ALLOWED_MODULES = new Set([
   'react', 'next/link', 'next/navigation',
@@ -304,8 +304,8 @@ export function planningRules(): readonly string[] {
   // fechar: no dia em que a lista mudar, esta frase muda junto.
   const network = [...FORBIDDEN_NETWORK_APIS].sort()
   return [
-    t('prompts.planNoNetwork', { apis: network.join(', ') }),
-    t('prompts.planLocalOnly'),
+    prompt('prompts.planNoNetwork', { apis: network.join(', ') }),
+    prompt('prompts.planLocalOnly'),
   ]
 }
 
@@ -316,10 +316,10 @@ export function generationRules(): readonly string[] {
   const attributes = [...FORBIDDEN_JSX_ATTRIBUTES].sort()
   const globals = [...FORBIDDEN_GLOBALS, ...FORBIDDEN_NETWORK_APIS].sort()
   return [
-    t('prompts.ruleModules', { modules: modules.join(', '), prefixes: prefixes.join(', ') }),
-    t('prompts.ruleTags', { tags: tags.join(', ') }),
-    t('prompts.ruleAttributes', { attributes: attributes.join(', ') }),
-    t('prompts.ruleGlobals', { globals: globals.join(', ') }),
-    t('prompts.ruleUrls'),
+    prompt('prompts.ruleModules', { modules: modules.join(', '), prefixes: prefixes.join(', ') }),
+    prompt('prompts.ruleTags', { tags: tags.join(', ') }),
+    prompt('prompts.ruleAttributes', { attributes: attributes.join(', ') }),
+    prompt('prompts.ruleGlobals', { globals: globals.join(', ') }),
+    prompt('prompts.ruleUrls'),
   ]
 }

@@ -103,6 +103,25 @@ CPU. Hoje, na mesma máquina, o Ollama carrega o modelo **100% na GPU** (GTX 165
 4 GB) e o prompt de 2.306 caracteres completa em **11 s** — o prompt real de
 geração, em **4,8 s**. Os "45–50 s" eram da máquina sem GPU, e não do modelo.
 
+**A JORNADA REAL foi rodada em 18/09** (`MOD-02`), com o Ollama do titular e o
+prompt do produto. Ela não completou — e o caminho até onde ela parou rendeu
+três defeitos, todos da mesma família: **a rodada de reparo foi escrita como se
+o modelo lembrasse do prompt anterior, e ele não lembra.**
+
+1. O reparo não dizia "produza somente JSON" → o modelo respondeu em **YAML**.
+2. O reparo não levava o schema → o modelo recebia "expected string, received
+   object" sem ter como saber que o conserto era o `kind` da entidade.
+3. Tirar o schema da montagem **não quebrava nada**: `t()` devolve `{schema}`
+   visível quando o valor falta — decisão certa para mensagem de erro que uma
+   pessoa lê, errada para prompt, que só o modelo lê. Nasceu `prompt()`.
+
+**Onde ela parou, e isto é o próximo gargalo.** O modelo descreveu um jogo da
+velha e teve de encaixá-lo em `landing-page`, com entidades que só podem ser
+`static-content` ou `database`. Um tabuleiro não é nenhum dos dois. Ele marcou
+`static-content` e deu campos estruturados — a resposta mais razoável possível
+para uma ontologia que não prevê o caso. **A ontologia do produto é a cerca**, e
+o titular autorizou derrubá-la.
+
 **A próxima fatia, e por que ela é grande.** A cobertura trilíngue é de
 navegação + Preferências. O passo seguinte é migrar as demais superfícies, e a
 medição de hoje diz o tamanho: `pt-BR.json` tem **398 chaves**, `hub` tem 138,

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { t } from './i18n.js'
+import { prompt, t } from './i18n.js'
 import type { ContextSection } from './context.js'
 
 /**
@@ -159,6 +159,6 @@ export function researchSections(notes: readonly ResearchNote[]): readonly Conte
     kind: 'evidence' as const,
     priority: 50,
     source: `${note.source_url} (${note.retrieved_at})`,
-    text: t('prompts.researchNote', { claim: note.claim, excerpt: note.excerpt, url: note.source_url }),
+    text: prompt('prompts.researchNote', { claim: note.claim, excerpt: note.excerpt, url: note.source_url }),
   }))
 }

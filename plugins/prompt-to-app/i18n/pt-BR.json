@@ -137,7 +137,7 @@
     "answers": "Respostas: {answers}",
     "sensitive": "Dados sensíveis: {sensitive}; confirmação: {confirmed}.",
     "schema": "Schema: {schema}",
-    "repair": "Corrija uma única vez este AppSpec. Erros: {issues}. Valor: {value}",
+    "repair": "Corrija uma única vez este AppSpec. Produza SOMENTE JSON válido, no mesmo formato do AppSpec v1: nada de YAML, nada de explicação antes ou depois, nada de comentário. Schema: {schema}. Erros: {issues}. Valor: {value}",
     "planOnly": "Produza somente JSON válido com fatias verticais em linguagem comum.",
     "planCriteria": "Cada fatia precisa de título, descrição e critérios de aceite testáveis.",
     "planFiles": "Cada fatia precisa listar planned_files. Use somente caminhos sob src/ ou content/.",

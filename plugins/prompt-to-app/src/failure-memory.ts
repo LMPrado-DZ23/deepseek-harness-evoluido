@@ -1,4 +1,4 @@
-import { t } from './i18n.js'
+import { prompt, t } from './i18n.js'
 
 /**
  * O que já falhou nesta criação, e quantas vezes.
@@ -106,7 +106,7 @@ export class FailureMemory {
     const raw = this.#raw(diagnostic)
     const times = this.timesSeen(raw)
     if (times < 2) return raw
-    const warning = t('prompts.repeatedFailure', { times: String(times) })
+    const warning = prompt('prompts.repeatedFailure', { times: String(times) })
     this.#warnings.add(warning)
     return `${warning}\n${raw}`
   }
@@ -217,7 +217,7 @@ export function failureHistory(
  */
 export function crossRunWarning(history: FailureHistory): string | undefined {
   if (history.runs.length === 0 || history.lastSeenAt === null) return undefined
-  return t('prompts.failureAcrossRuns', {
+  return prompt('prompts.failureAcrossRuns', {
     runs: String(history.runs.length),
     when: history.lastSeenAt,
   })

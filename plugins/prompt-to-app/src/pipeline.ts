@@ -31,7 +31,7 @@ import { generateSchedulingLayer, writeSchedulingLayer } from './scheduling-gene
 import { assertGeneratedSource, generationRules } from './import-policy.js'
 import { recoveryNoteFor, type ObservedRun } from './learning.js'
 import { generateSaasLayer, writeSaasLayer } from './saas-generator.js'
-import { t } from './i18n.js'
+import { prompt, t } from './i18n.js'
 import { decodeModelJson } from './model-json.js'
 import { diffRunFiles, runReport, RUN_REPORT_FILE, type RunFileAuthor } from './run-report.js'
 import { readResumeMarker, readResumedFiles, writeResumeMarker, type ResumeMarker } from './resume.js'
@@ -62,18 +62,18 @@ export class ModelCodeGenerator implements CodeGeneratorPort {
   constructor(private readonly model: PromptModelPort, private readonly actor: PromptToAppActor, private readonly privacy: RoutePrivacy) {}
   async generate(spec: AppSpecV1, plan: StudioPlan, diagnostic?: string): Promise<CodeGenerationResult> {
     const result = await this.model.complete({ orgId: this.actor.orgId, tenantId: this.actor.tenantId }, 'generate', this.privacy, [
-      t('prompts.generateOnly'),
-      t('prompts.generateDeclarative'),
-      t('prompts.generatePaths'),
-      t('prompts.generatePlanned'),
+      prompt('prompts.generateOnly'),
+      prompt('prompts.generateDeclarative'),
+      prompt('prompts.generatePaths'),
+      prompt('prompts.generatePlanned'),
       // As regras que SERAO aplicadas, ditas a partir da MESMA lista que as
       // aplica. Elas eram escritas duas vezes — prosa no catalogo, constante na
       // politica —, e as duas nao conversavam: um modulo novo na lista de
       // permitidos nunca chegava ao prompt, e o gerador continuava chutando e
       // sendo recusado, gastando uma tentativa inteira por chute.
       ...generationRules(),
-      t('prompts.generateSpec', { spec: JSON.stringify(spec) }), t('prompts.generatePlan', { plan: JSON.stringify(plan.slices) }),
-      ...(diagnostic === undefined ? [] : [t('prompts.generateRepair', { diagnostic })]),
+      prompt('prompts.generateSpec', { spec: JSON.stringify(spec) }), prompt('prompts.generatePlan', { plan: JSON.stringify(plan.slices) }),
+      ...(diagnostic === undefined ? [] : [prompt('prompts.generateRepair', { diagnostic })]),
     ].join('\n'))
     const decoded = decodeModelJson(result.value)
     const output = generatedOutputSchema.parse(decoded)
