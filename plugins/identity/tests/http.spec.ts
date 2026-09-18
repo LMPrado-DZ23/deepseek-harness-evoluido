@@ -8,11 +8,13 @@ import {
   authenticatedMutation,
   CSRF_COOKIE,
   deviceOf,
+  BASE_DA_IDENTIDADE,
   IDENTITY_ROUTE_CONTRACTS,
   parseCookies,
   parseCookieValues,
   requiredSessionToken,
   serializeSessionCookies,
+  CAMINHOS_DA_REMOCAO,
   SECURE_SESSION_COOKIE,
   SESSION_COOKIE,
   SESSION_GENERATION_COOKIE,
@@ -640,9 +642,14 @@ describe('ACHADO: recusar a ambiguidade sozinho virava TRANCA, e nao defesa', ()
     )).rejects.toMatchObject({ code: 'invalid' })
     // A remocao leva `Domain`, e por isso casa SO o cookie de dominio: o
     // host-only, que e o legitimo, nao e alcancado por ela.
-    expect(response.cookies()).toEqual([
-      `${SESSION_COOKIE}=; Domain=dz23.localhost; Path=/; Max-Age=0; SameSite=Lax`,
-    ])
+    /*
+      UMA remoção por CAMINHO alcançado. Enquanto havia só `Path=/`, um
+      `Domain=…; Path=/api` plantado pelo aplicativo gerado sobrevivia a todas
+      elas e continuava trancando a dona do FRIGG — remoção casa por (nome,
+      domínio, caminho), e quem planta escolhe o caminho.
+    */
+    expect(response.cookies()).toEqual(CAMINHOS_DA_REMOCAO.map(caminho =>
+      `${SESSION_COOKIE}=; Domain=dz23.localhost; Path=${caminho}; Max-Age=0; SameSite=Lax`))
     // `Domain=localhost` NAO e emitido: dominio de rotulo unico o navegador
     // recusa, e pedir a remocao dele so encheria o cabecalho.
   })
@@ -663,7 +670,9 @@ describe('ACHADO: recusar a ambiguidade sozinho virava TRANCA, e nao defesa', ()
       response as never,
     )).rejects.toMatchObject({ code: 'invalid' })
     expect(response.cookies()[0]).toBe('outro=1')
-    expect(response.cookies()).toHaveLength(2)
+    // O que já estava escrito continua na frente; as remoções entram DEPOIS,
+    // uma por caminho alcançado.
+    expect(response.cookies()).toHaveLength(1 + CAMINHOS_DA_REMOCAO.length)
   })
 
   it('sem `response`, a recusa continua acontecendo — so nao se cura', () => {
@@ -741,8 +750,17 @@ describe('sair tambem tira o cookie do vizinho', () => {
     // plantou no dominio-pai e mentira: quem estava trancada continuava
     // trancada depois de sair.
     const limpezas = clearSessionCookies(false, 'studio.dz23.localhost:4179')
-    expect(limpezas.filter(cookie => cookie.startsWith(`${SESSION_COOKIE}=`))).toHaveLength(2)
-    expect(limpezas.some(cookie => cookie.includes('Domain=dz23.localhost'))).toBe(true)
+    /*
+      UMA remoção do cookie do próprio host, mais UMA por CAMINHO alcançado no
+      domínio-pai. Os caminhos existem porque remoção casa por (nome, domínio,
+      caminho) e quem planta escolhe o caminho: enquanto só havia `Path=/`, um
+      `Domain=…; Path=/api` sobrevivia a "sair" e continuava trancando.
+    */
+    const doNomeSimples = limpezas.filter(cookie => cookie.startsWith(`${SESSION_COOKIE}=`))
+    expect(doNomeSimples).toHaveLength(1 + CAMINHOS_DA_REMOCAO.length)
+    for (const caminho of CAMINHOS_DA_REMOCAO) {
+      expect(doNomeSimples.some(cookie => cookie.includes(`Domain=dz23.localhost; Path=${caminho};`)), caminho).toBe(true)
+    }
     expect(limpezas.some(cookie => cookie.startsWith(SECURE_SESSION_COOKIE))).toBe(true)
   })
 
@@ -763,8 +781,64 @@ describe('sair tambem tira o cookie do vizinho', () => {
     }
     // E o endereco de forma normal, com tres rotulos, PRODUZ remocao: uma
     // conferencia que recusa tudo nao e conferencia.
-    expect(shadowCookieDeletions('a.b.c', SESSION_COOKIE)).toEqual([
-      `${SESSION_COOKIE}=; Domain=b.c; Path=/; Max-Age=0; SameSite=Lax`,
-    ])
+    expect(shadowCookieDeletions('a.b.c', SESSION_COOKIE)).toEqual(CAMINHOS_DA_REMOCAO.map(caminho =>
+      `${SESSION_COOKIE}=; Domain=b.c; Path=${caminho}; Max-Age=0; SameSite=Lax`))
+  })
+})
+
+describe('a cobertura dos caminhos da remocao', () => {
+  /*
+    ESTE BLOCO EXISTE PORQUE UMA SABOTAGEM SOBREVIVEU.
+
+    A lista de caminhos era escrita à mão, e TODA asserção sobre ela saía dela
+    mesma. Encolher `CAMINHOS_DA_REMOCAO` para `['/']` — exatamente o defeito
+    que `IB-11` nomeia — encolhia junto a expectativa de cada teste, e as 106
+    asserções continuavam verdes. Elas mediam coerência; ninguém media
+    COBERTURA.
+
+    O que mede cobertura é um fato de FORA da lista: os contratos de rota. Um
+    cookie gravado com `Path=P` viaja para um pedido quando `P` é o caminho do
+    pedido ou é prefixo dele numa fronteira de barra — então, para cada rota
+    servida, existe um conjunto fechado de caminhos plantáveis que a alcançam,
+    e a remoção precisa alcançar todos eles. A subida é recalculada AQUI, à
+    mão, e não importada de `caminhosAlcancaveis`: um teste que chama a mesma
+    função que está sob teste volta a medir coerência.
+  */
+  const subidaAteA = (caminho: string): readonly string[] => {
+    const partes = caminho.split('/').filter(parte => parte !== '')
+    const saida = ['/']
+    for (let quantas = 1; quantas <= partes.length; quantas += 1) {
+      saida.push(['', ...partes.slice(0, quantas)].join('/'))
+    }
+    return saida
+  }
+
+  it('alcanca TODO caminho plantavel que atinge alguma rota servida', () => {
+    for (const contrato of IDENTITY_ROUTE_CONTRACTS) {
+      const servida = [BASE_DA_IDENTIDADE, contrato.path].join('')
+      for (const plantavel of subidaAteA(servida)) {
+        // Um plantio aqui é enviado para `servida`, logo ele tranca — logo a
+        // remoção tem de alcançá-lo.
+        expect(CAMINHOS_DA_REMOCAO, plantavel).toContain(plantavel)
+      }
+    }
+  })
+
+  it('nao carrega caminho que nao alcanca rota nenhuma', () => {
+    // A lista escrita à mão trazia `/studio`, que este servidor não atende:
+    // uma remoção que não protege nada, ocupando cabeçalho em toda resposta.
+    const alcancam = new Set(IDENTITY_ROUTE_CONTRACTS.flatMap(contrato =>
+      subidaAteA([BASE_DA_IDENTIDADE, contrato.path].join(''))))
+    for (const caminho of CAMINHOS_DA_REMOCAO) {
+      expect(alcancam.has(caminho), caminho).toBe(true)
+    }
+  })
+
+  it('o cabecalho que isso produz continua de tamanho conhecido', () => {
+    // Cobertura completa custa bytes: uma remoção por (domínio-pai, caminho).
+    // O custo é declarado aqui para nenhuma rota nova o empurrar em silêncio.
+    const emitidas = shadowCookieDeletions('studio.dz23.localhost', SESSION_COOKIE)
+    expect(emitidas).toHaveLength(CAMINHOS_DA_REMOCAO.length)
+    expect(emitidas.join('\n').length).toBeLessThan(4 * 1024)
   })
 })

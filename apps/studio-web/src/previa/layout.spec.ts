@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   DIVISAO_PADRAO, LARGURA_DO_VIEWPORT, MAXIMO_DA_PREVIA, MINIMO_DA_CONVERSA, MODOS, PASSO_DO_DIVISOR, VIEWPORTS,
-  divisaoUtil, faceNoCelular, passoDoDivisor, proximoLayout, type AcaoDeLayout, type EstadoDoPainel,
+  divisaoUtil, faceNoCelular, passoDoDivisor, proximoLayout, refComposto, type AcaoDeLayout, type EstadoDoPainel,
 } from './layout.js'
 
 const inicial: EstadoDoPainel = {
@@ -133,5 +133,57 @@ describe('o divisor responde ao TECLADO, e não só ao arrasto', () => {
     let divisao = DIVISAO_PADRAO
     for (let vez = 0; vez < 10; vez += 1) divisao = divisaoUtil(divisao + passoDoDivisor('ArrowRight'))
     expect(divisao).toBe(MAXIMO_DA_PREVIA)
+  })
+})
+
+describe('o quadro tem DOIS donos, e o de dentro nunca é desligado', () => {
+  /*
+    O defeito que este bloco fixa foi achado por REVISÃO EXTERNA, lendo o
+    código: `ref={refDoQuadro ?? quadro}` desliga o ref de dentro sempre que
+    alguém passa o de fora — e quem monta o painel no produto sempre passa.
+
+    O efeito não aparece na tela. O quadro desenha, o aplicativo carrega, e duas
+    coisas param calladas: a conferência de mensagem passa a comparar contra
+    `undefined` e recusa TODAS as mensagens, e o modo de seleção é enviado para
+    um quadro que o componente não tem — a seleção visual inteira morre no
+    produto montado, funcionando em teste.
+  */
+  const elemento = { nome: 'o quadro' }
+
+  it('o ref de DENTRO é preenchido mesmo quando vem um de fora', () => {
+    const interno: { current: typeof elemento | null } = { current: null }
+    const externo: { current: typeof elemento | null } = { current: null }
+    refComposto(interno, externo)(elemento)
+    expect(interno.current, 'o de dentro ficou vazio: é este o defeito').toBe(elemento)
+    expect(externo.current).toBe(elemento)
+  })
+
+  it('sem ref de fora, o de dentro continua funcionando', () => {
+    const interno: { current: typeof elemento | null } = { current: null }
+    for (const externo of [undefined, null]) {
+      interno.current = null
+      refComposto(interno, externo)(elemento)
+      expect(interno.current).toBe(elemento)
+    }
+  })
+
+  it('um ref de fora em forma de FUNÇÃO também recebe', () => {
+    // React aceita as duas formas, e um painel montado com a forma de função
+    // não pode perder o elemento.
+    const interno: { current: typeof elemento | null } = { current: null }
+    const recebidos: (typeof elemento | null)[] = []
+    refComposto(interno, valor => recebidos.push(valor))(elemento)
+    expect(interno.current).toBe(elemento)
+    expect(recebidos).toEqual([elemento])
+  })
+
+  it('a DESMONTAGEM limpa os dois', () => {
+    // React chama o ref com `null` ao desmontar. Guardar um elemento que saiu
+    // do documento faria a conferência de mensagem aceitar um quadro morto.
+    const interno: { current: typeof elemento | null } = { current: elemento }
+    const externo: { current: typeof elemento | null } = { current: elemento }
+    refComposto(interno, externo)(null)
+    expect(interno.current).toBeNull()
+    expect(externo.current).toBeNull()
   })
 })

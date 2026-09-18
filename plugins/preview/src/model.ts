@@ -5,6 +5,42 @@ const timestamp = z.iso.datetime()
 const sha256 = z.string().regex(/^[a-f0-9]{64}$/u)
 const scope = { org_id: z.string().min(1), tenant_id: z.string().min(1) }
 
+/**
+ * O DOMÍNIO da prévia, num lugar só — e a medição que decidiu qual ele é.
+ *
+ * ## Por que a constante existe
+ *
+ * Este nome estava escrito à mão em QUATRO lugares: o padrão de host deste
+ * modelo, a expressão do portão, a criação do host no serviço e a conferência
+ * de `frame-src` no plugin da interface. Quatro cópias que precisavam
+ * concordar, e nada as obrigava a concordar — a forma mais barata da segunda
+ * verdade mais cara deste repositório. Agora há uma, e as outras três derivam
+ * dela.
+ *
+ * ## Por que ele continua sendo irmão do domínio do FRIGG
+ *
+ * `T-37` e `IB-11` pedem o contrário: enquanto a prévia e o FRIGG são
+ * subdomínios do mesmo domínio registrável, o aplicativo GERADO pode escrever
+ * `Domain=dz23.localhost` e alcançar o FRIGG.
+ *
+ * A separação foi IMPLEMENTADA e MEDIDA em 18/09/2026, e ela quebra a prévia:
+ * o cookie de admissão é `SameSite=Strict`, e um quadro de OUTRO site é
+ * contexto cross-site — o navegador simplesmente não o envia. Medido no
+ * Chromium do Playwright: a troca do bilhete devolve `204`, e o `GET /`
+ * seguinte volta `401`, porque o cookie que acabou de ser gravado não viaja.
+ * `SameSite=None` resolveria, e exige `Secure`, que exige TLS no host da
+ * prévia — e instalar CA raiz é proibido por decisão do titular.
+ *
+ * Então a separação de domínio fica BLOQUEADA em certificado, e não em código:
+ * está registrada assim em `T-37`. O que fecha o buraco sem TLS é alcançar o
+ * `Path` que a remoção do cookie vizinho não alcançava, e é isso que
+ * `shadowCookieDeletions` passou a fazer.
+ */
+export const DOMINIO_DA_PREVIA = 'dz23.localhost'
+
+/** O host de uma prévia: um rótulo aleatório dentro do domínio da prévia. */
+export const PADRAO_DO_HOST_DA_PREVIA = new RegExp(`^p-[a-f0-9]{24}\\.${DOMINIO_DA_PREVIA.replaceAll('.', '\\.')}$`, 'u')
+
 export const previewStateSchema = z.enum([
   'REQUESTED', 'STARTING', 'READY', 'STOPPING', 'STOPPED', 'FAILED', 'EXPIRED',
 ])
@@ -18,7 +54,7 @@ export const previewRecordSchema = z.object({
   artifact_sha256: sha256,
   created_by: z.string().min(1),
   source_session_id: z.string().min(1),
-  hostname: z.string().regex(/^p-[a-f0-9]{24}\.dz23\.localhost$/u),
+  hostname: z.string().regex(PADRAO_DO_HOST_DA_PREVIA),
   state: previewStateSchema,
   created_at: timestamp,
   ready_at: timestamp.nullable(),

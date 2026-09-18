@@ -4,7 +4,7 @@ import {
 } from 'lucide-react'
 import { useCatalogos } from '../i18n/IdiomaProvider'
 import { situacaoDoPainel, type LeituraDoPainel, type SituacaoDoPainel } from './estado'
-import { LARGURA_DO_VIEWPORT, type Modo, type Viewport } from './layout'
+import { LARGURA_DO_VIEWPORT, refComposto, type Modo, type Viewport } from './layout'
 import { ROTA_INICIAL, enderecoDoQuadro, rotaAnunciada, rotaDaPrevia, type RotaRecusada } from './navegacao'
 import { mensagemDaPrevia } from './mensagens'
 import { ABAS, abaEfetiva, abasDoPainel, type Aba, type LeituraDasAbas } from './abas'
@@ -244,7 +244,7 @@ export function PainelDePrevia({
           própria. `allow-same-origin` existe porque a admissão precisa de
           cookie do próprio host da prévia — que é um host só dela.
         */}
-        <iframe key={chave} ref={refDoQuadro ?? quadro} title={previa.quadro} src={enderecoDaCarga}
+        <iframe key={chave} ref={refComposto(quadro, refDoQuadro)} title={previa.quadro} src={enderecoDaCarga}
           sandbox="allow-scripts allow-forms allow-same-origin" referrerPolicy="no-referrer" />
       </div>
       {codigos.length === 0 ? null : <section className="dz-previa-codigos" aria-live="polite">

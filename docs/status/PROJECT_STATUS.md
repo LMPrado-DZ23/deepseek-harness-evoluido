@@ -61,9 +61,72 @@ dá para saber, o arquivo —, e o mapa NÃO inventa arquivo quando não sabe: e
 diz a limitação. A alteração continua sendo pedida pela conversa, com a mesma
 autorização de sempre.
 
-**As próximas são, nesta ordem:** `PRV-01d` (o roteiro de seleção dentro do
-aplicativo gerado), `PLAN-01` (perguntas adaptativas no planejamento) e
-`ONT-01b-2` (a jornada real dentro do painel, que é o que fecha `EB-04`).
+**Chegou o pacote canônico `FRIGG-CANONICO-MANUS-20260918-R1`** (18/09), sobre o
+SHA `f597e629`. Ele é MATERIAL DE PESQUISA: o código canônico continua sendo
+este repositório, e nada do ZIP foi copiado. O que ele trouxe de mais valioso já
+foi aproveitado — um defeito REAL que nenhum teste desta missão pegava.
+
+**`REV-CAN-A` está entregue:** o quadro da prévia usava `ref={refDoQuadro ??
+quadro}`, o que DESLIGA o ref interno sempre que o produto montado passa o
+externo — e o produto montado sempre passa. O efeito era invisível: o quadro
+desenhava, e a conferência de mensagem passava a comparar contra `undefined`,
+recusando todas as mensagens legítimas; o modo de seleção era enviado para um
+quadro que o componente não tinha. Reproduzido no navegador antes do conserto.
+
+**`PRV-01d` está entregue:** a seleção visual passou a ser SERVIDA pelo portão
+da prévia (`/__dz23/selecao.js`), e não copiada para o template — assim toda
+prévia servida hoje recebe o roteiro de hoje, e uma correção vale para todas na
+hora. O roteiro lê etiqueta, texto e rota, confere origem E janela, e não
+alcança nada fora do próprio documento. Limite declarado: ele ainda NÃO foi
+exercitado em navegador de verdade.
+
+**`REV-CAN-T37` está REVALIDADA, e ela NÃO fecha — a razão foi MEDIDA.** Separar
+a prévia de domínio quebra a admissão sobre HTTP: o cookie é `SameSite=Strict`, e
+um quadro de outro site não o envia de volta. Medido no Chromium do Playwright:
+a troca do bilhete devolve `204`, e o `GET /` seguinte volta `401`. `SameSite=None`
+exige `Secure`, que exige TLS, que exige instalar CA raiz — proibido por decisão
+do titular. Fica `BLOCKED_BY_EXTERNAL_DEPENDENCY` em certificado, com a razão
+registrada no código.
+
+**O que DEU para fechar na mesma fatia foi `IB-11`:** enquanto a prévia continua
+irmã de domínio, a rede que sobra é a remoção do cookie sombra — e ela alcançava
+só `Path=/`. Agora ela alcança TODO caminho plantável que atinge alguma rota da
+identidade, DERIVADO dos contratos de rota. A lista escrita à mão, além de não
+ter peso nenhum (a sabotagem `S55` sobrevivia porque toda asserção saía dela
+mesma), estava ERRADA: trazia `/studio`, que o servidor não atende, e não trazia
+`/api/studio/identity`, que ele atende em todo pedido.
+
+**As próximas são, nesta ordem:** `REV-CAN-B` (varrer o repositório atrás do
+mesmo padrão), `REV-CAN-JORNADA` (a primeira jornada real integrada, que fecha
+`EB-04`) e `PLAN-01`.
+
+## DIRETIVA DO TITULAR — 18/09/2026: REAPROVEITAR ANTES DE REIMPLEMENTAR
+
+Antes de desenvolver do zero uma capacidade já aprovada, a ordem de busca é:
+(1) o próprio FRIGG, (2) o upstream fixado, (3) plugins do ecossistema DSH,
+(4) integração externa compatível e autorizada. O catálogo
+`awesome-dsh-plugin` é fonte de CANDIDATOS, e não autoridade de aprovação,
+licença, segurança ou prontidão.
+
+A investigação é orientada à próxima capacidade do DAG — não se examina nem se
+instala a lista inteira antes de voltar a programar. Candidato que não serve à
+tarefa corrente é registrado como candidato DA tarefa correspondente, em
+`docs/CANDIDATES.md` (o registro que já existe), e o trabalho segue.
+
+Candidatos iniciais, associados às frentes que os pedem, e nenhum deles
+homologado: `KasenRi/dsh-browser` (navegador automatizado) → uso de navegador;
+`zzy6-a/vision-use` (captura e interação visual no Windows) → Desktop;
+`xsoc1/dsh-image-vision` (imagens anexadas e modelos visuais) → anexos;
+`STARDUSTLC666/dsh-ppt` (HTML/PPTX) → apresentações.
+
+Condições que nenhuma integração afrouxa: autorização e escopo por pessoa,
+projeto e organização; aprovação das ações sensíveis; orçamento, limites e
+timeouts; cancelamento; auditoria ligada à tarefa; segredos fora de resultado;
+e modo local sem recuo silencioso para nuvem. Não se cria outro backend de
+missão, planner, gateway, memória, identidade ou autoridade de aprovação, e não
+se monta bundle inteiro sem revisar o patch Cordis. Código de terceiro exige
+P37 ANTES. Aceite é a jornada inteira dentro do produto — não é dependência
+instalada, ferramenta listada nem `HTTP 200`.
 
 ## RETOMADA EXATA — 18/09/2026
 

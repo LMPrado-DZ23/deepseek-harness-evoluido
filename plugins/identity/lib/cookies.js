@@ -1,3 +1,4 @@
+import { BASE_DA_IDENTIDADE, IDENTITY_ROUTE_CONTRACTS, caminhosAlcancaveis } from './rotas.js';
 export const SESSION_COOKIE = 'dz23_studio_session';
 /**
  * O nome do cookie de sessão quando há TLS — com o prefixo `__Host-`.
@@ -57,8 +58,14 @@ export const CSRF_COOKIE = 'dz23_studio_csrf';
  * de fora.
  *
  * Emite uma remoção por domínio-pai possível: quem planta pode estar num irmão
- * (`p-x.dz23.localhost` → `dz23.localhost`) ou num primo mais acima. Domínio
- * que o navegador recusar é simplesmente ignorado por ele.
+ * ou num primo mais acima. Domínio que o navegador recusar é simplesmente
+ * ignorado por ele.
+ *
+ * A prévia CONTINUA irmã, e isso foi medido: separá-la de domínio quebra a
+ * admissão sobre HTTP, porque o cookie dela é `SameSite=Strict` e um quadro de
+ * outro site não o recebe de volta. Enquanto `T-37` estiver bloqueada em
+ * certificado, esta limpeza é a defesa que sobra — e é por isso que ela passou
+ * a alcançar mais de um `Path`.
  *
  * O QUE ELA NÃO ALCANÇA, e por isso não é a defesa principal: remoção de cookie
  * casa por (nome, domínio, CAMINHO), e o caminho aqui é `/`. Quem planta
@@ -89,10 +96,50 @@ export function shadowCookieDeletions(host, name) {
     const labels = bare.split('.').filter(label => label !== '');
     const deletions = [];
     for (let index = 1; index + 1 < labels.length; index += 1) {
-        deletions.push(`${name}=; Domain=${labels.slice(index).join('.')}; Path=/; Max-Age=0; SameSite=Lax`);
+        const dominio = labels.slice(index).join('.');
+        /*
+          UM `Set-Cookie` por (domínio, CAMINHO), e não por domínio.
+    
+          Remoção de cookie casa por (nome, domínio, caminho), e quem planta ESCOLHE
+          o caminho. Enquanto isto emitia só `Path=/`, um `Domain=…; Path=/api`
+          plantado pelo aplicativo gerado sobrevivia a todas as remoções e viajava
+          em todo pedido de API — a dona do FRIGG ficava trancada para fora e nada
+          que ela fizesse a destrancava. `IB-11` nomeia exatamente isso.
+    
+          A lista de caminhos é FECHADA, e curta de propósito: são os prefixos que
+          este servidor atende. Varrer todo caminho possível é impossível — eles são
+          infinitos —, então o que existe aqui é a cobertura do que o produto serve,
+          declarada, e não uma promessa de alcançar qualquer plantio.
+        */
+        for (const caminho of CAMINHOS_DA_REMOCAO) {
+            deletions.push(`${name}=; Domain=${dominio}; Path=${caminho}; Max-Age=0; SameSite=Lax`);
+        }
     }
     return deletions;
 }
+/**
+ * Os CAMINHOS que a remoção alcança.
+ *
+ * Remoção de cookie casa por (nome, domínio, caminho), e quem planta escolhe o
+ * caminho. Parece infinito, e não é: um cookie gravado com `Path=P` só viaja
+ * para um pedido quando `P` é o caminho do pedido ou é prefixo dele numa
+ * fronteira de barra. O conjunto de caminhos que ALCANÇAM alguma rota desta
+ * identidade é, portanto, fechado — e é ele, inteiro, que esta lista tem.
+ *
+ * Ela é DERIVADA dos contratos de rota, e não escrita à mão, porque a versão
+ * escrita à mão sobreviveu à sabotagem: toda asserção saía da própria lista,
+ * então encolhê-la encolhia junto a expectativa, e os testes mediam coerência
+ * onde deviam medir COBERTURA. A lista escrita à mão também estava ERRADA —
+ * trazia `/studio`, que este servidor não atende, e não trazia
+ * `/api/studio/identity`, que ele atende em todo pedido.
+ *
+ * LIMITE DECLARADO: a cobertura é das rotas DESTA identidade, que é quem
+ * recusa a ambiguidade (`parseCookieValues` não é lido em nenhum outro
+ * plugin). Um plantio em caminho de outro serviço continua fora do alcance —
+ * ele não tranca ninguém para fora da identidade, e é só disso que esta rede
+ * trata. A defesa principal continua sendo o nome com prefixo `__Host-`.
+ */
+export const CAMINHOS_DA_REMOCAO = caminhosAlcancaveis(BASE_DA_IDENTIDADE, IDENTITY_ROUTE_CONTRACTS.map(contrato => contrato.path));
 export function parseCookieValues(header, name) {
     if (header === undefined)
         return [];

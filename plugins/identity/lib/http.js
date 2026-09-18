@@ -3,8 +3,8 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { truncateIp } from './crypto.js';
 import { IdentityError } from './service.js';
-import { assertRouteContracts } from '@dz23-studio/policy';
 import { CSRF_COOKIE, parseCookies, parseCookieValues, SECURE_SESSION_COOKIE, SESSION_COOKIE, SESSION_GENERATION_COOKIE, sessionCookieName, shadowCookieDeletions } from './cookies.js';
+import { BASE_DA_IDENTIDADE, IDENTITY_ROUTE_CONTRACTS } from './rotas.js';
 import { InMemoryIdentityRateLimiter, edgeForwardedAddress, estadoDaBorda, rateLimitBuckets, rateLimitKey } from './rate-limit.js';
 const JSON_LIMIT = 64 * 1024;
 export const COOKIE_HEADER_LIMIT_BYTES = 8 * 1024;
@@ -14,7 +14,7 @@ class IdentityHttpInputError extends Error {
 }
 class CookieHeaderBudgetError extends Error {
 }
-export { CSRF_COOKIE, parseCookies, parseCookieValues, SECURE_SESSION_COOKIE, SESSION_COOKIE, SESSION_GENERATION_COOKIE, sessionCookieName, shadowCookieDeletions } from './cookies.js';
+export { CAMINHOS_DA_REMOCAO, CSRF_COOKIE, parseCookies, parseCookieValues, SECURE_SESSION_COOKIE, SESSION_COOKIE, SESSION_GENERATION_COOKIE, sessionCookieName, shadowCookieDeletions } from './cookies.js';
 const emailSchema = z.object({ email: z.email() }).strict();
 const magicStartSchema = emailSchema;
 const magicVerifySchema = emailSchema.extend({
@@ -24,24 +24,7 @@ const magicVerifySchema = emailSchema.extend({
 const challengeSchema = z.object({ challenge_id: z.string().min(1), response: z.unknown() }).strict();
 const registerVerifySchema = challengeSchema.extend({ device_label: z.string().min(1).max(100) }).strict();
 const revokeSchema = z.object({ session_id: z.string().min(1) }).strict();
-export const IDENTITY_ROUTE_CONTRACTS = [
-    { method: 'POST', path: '/magic/start', access: 'public', permission: null, scope: 'none' },
-    { method: 'POST', path: '/magic/verify', access: 'public', permission: null, scope: 'none' },
-    { method: 'POST', path: '/passkey/login/options', access: 'public', permission: null, scope: 'none' },
-    { method: 'POST', path: '/passkey/login/verify', access: 'public', permission: null, scope: 'none' },
-    { method: 'GET', path: '/session', access: 'public', permission: null, scope: 'identity' },
-    { method: 'GET', path: '/csrf', access: 'authorized', permission: 'identity.self', scope: 'identity' },
-    { method: 'GET', path: '/harness/session', access: 'authorized', permission: 'identity.self', scope: 'identity' },
-    { method: 'POST', path: '/logout', access: 'public', permission: null, scope: 'identity' },
-    { method: 'POST', path: '/passkey/register/options', access: 'authorized', permission: 'identity.self', scope: 'identity' },
-    { method: 'POST', path: '/passkey/register/verify', access: 'authorized', permission: 'identity.self', scope: 'identity' },
-    { method: 'POST', path: '/passkey/step-up/options', access: 'authorized', permission: 'identity.self', scope: 'identity' },
-    { method: 'POST', path: '/passkey/step-up/verify', access: 'authorized', permission: 'identity.self', scope: 'identity' },
-    { method: 'GET', path: '/devices', access: 'authorized', permission: 'identity.self', scope: 'identity' },
-    { method: 'POST', path: '/devices/revoke', access: 'authorized', permission: 'identity.self', scope: 'identity' },
-    { method: 'POST', path: '/devices/revoke-all', access: 'authorized', permission: 'identity.self', scope: 'identity' },
-];
-assertRouteContracts(IDENTITY_ROUTE_CONTRACTS);
+export { BASE_DA_IDENTIDADE, IDENTITY_ROUTE_CONTRACTS, caminhosAlcancaveis } from './rotas.js';
 /**
  * Os cookies de uma sessão recém-emitida.
  *
@@ -71,6 +54,15 @@ assertRouteContracts(IDENTITY_ROUTE_CONTRACTS);
  * GERADO, que ninguém leu, e uma linha de `document.cookie` dele planta
  * `dz23_studio_session=<qualquer coisa>; Domain=dz23.localhost`. O nome com
  * prefixo é o único que ele NÃO consegue escrever.
+ *
+ * SEPARAR OS DOMÍNIOS foi implementado e MEDIDO em 18/09/2026, e não serve
+ * enquanto a prévia for HTTP: o cookie de admissão dela é `SameSite=Strict`, e
+ * um quadro de outro site é contexto cross-site — o navegador não o envia, a
+ * troca do bilhete devolve `204` e o `GET /` seguinte volta `401`. `SameSite=None`
+ * exige `Secure`, que exige TLS no host da prévia, e instalar CA raiz é
+ * proibido. A separação está registrada em `T-37` como bloqueada em
+ * certificado, e o que fecha o buraco sem TLS é a remoção alcançar o `Path`
+ * que ela não alcançava.
  *
  * Emitir os dois, em vez de trocar de nome, é o que torna isto seguro de
  * aplicar: onde o navegador aceitar o `__Host-`, ele passa a ser o que vale e o
@@ -139,7 +131,7 @@ export function createIdentityHttpHandler(config) {
             assertRequestTrust(request, config);
             /* v8 ignore next -- node:http always supplies a URL for server requests. */
             const path = new URL(request.url ?? '/', 'http://local').pathname;
-            const route = path.slice('/api/studio/identity'.length);
+            const route = path.slice(BASE_DA_IDENTIDADE.length);
             if (!IDENTITY_ROUTE_CONTRACTS.some(contract => contract.method === request.method && contract.path === route)) {
                 json(response, 404, { error: t('http.routeNotFound') });
                 return;

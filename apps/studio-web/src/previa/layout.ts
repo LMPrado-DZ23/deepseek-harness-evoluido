@@ -147,3 +147,38 @@ export type FaceNoCelular = 'conversa' | 'previa'
 export function faceNoCelular(modo: Modo): FaceNoCelular {
   return modo === 'fechado' ? 'conversa' : 'previa'
 }
+
+/**
+ * UM elemento, DOIS donos: o ref de dentro e o de fora.
+ *
+ * ## O defeito que esta função existe para consertar
+ *
+ * O quadro da prévia tinha `ref={refDoQuadro ?? quadro}`. Lido rápido, parece
+ * razoável: "use o de fora quando houver um". O que ele faz de verdade é
+ * DESLIGAR o de dentro sempre que alguém passa o de fora — e quem monta o
+ * painel no produto sempre passa.
+ *
+ * O efeito não é visível: o quadro aparece, o aplicativo carrega, e duas coisas
+ * silenciosamente param de funcionar. A conferência de mensagem compara
+ * `evento.source` com `quadro.current?.contentWindow`, que vira `undefined`, e
+ * passa a recusar TODAS as mensagens — inclusive as legítimas. E o modo de
+ * seleção é enviado por `quadro.current`, que não existe, então a seleção
+ * visual inteira fica morta no produto montado, funcionando em teste.
+ *
+ * Uma revisão externa achou isto lendo o código, e nenhum teste desta missão
+ * pegou — porque todos exercitavam a função, e o defeito estava na MONTAGEM.
+ * @param interno - o ref que o componente usa para falar com o quadro.
+ * @param externo - o ref que o dono do bilhete passou, quando passou.
+ * @returns o ref a pôr no elemento.
+ */
+export function refComposto<T>(
+  interno: { current: T | null },
+  externo?: ((valor: T | null) => void) | { current: T | null } | null,
+): (valor: T | null) => void {
+  return (valor: T | null) => {
+    // O INTERNO é preenchido SEMPRE. Ele é o que o componente usa para viver.
+    interno.current = valor
+    if (typeof externo === 'function') externo(valor)
+    else if (externo !== null && externo !== undefined) externo.current = valor
+  }
+}

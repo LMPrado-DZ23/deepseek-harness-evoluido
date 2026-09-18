@@ -8,6 +8,7 @@ import {
 } from '@dz23-studio/runtime-governor'
 import { describe, expect, it, vi } from 'vitest'
 import type { PreviewAdmission, PreviewRecord } from '../src/model.ts'
+import { PADRAO_DO_HOST_DA_PREVIA } from '../src/model.js'
 import {
   StudioPreviewService,
   type PreviewActor,
@@ -358,7 +359,14 @@ describe('StudioPreviewService lifecycle and isolation', () => {
     expect(serialized).not.toContain('/verified/artifact-only')
     expect(serialized).not.toContain('admissionTicket')
     expect(serialized).not.toContain('cookie')
-    expect(preview.url).toMatch(/^http:\/\/p-[a-f0-9]{24}\.dz23\.localhost$/u)
+    /*
+      O host da prévia sai do PADRÃO do modelo, e não de uma cópia escrita aqui.
+
+      Quando o domínio mudou de `dz23.localhost` para `dz23.localhost` —
+      a correção topológica de `IB-11`/`T-37` —, esta linha era a terceira cópia
+      do host, e foi a única que não acompanhou. Ler o padrão remove a cópia.
+    */
+    expect(preview.url).toMatch(new RegExp(`^http://${PADRAO_DO_HOST_DA_PREVIA.source.slice(1)}`, 'u'))
   })
 
   it('marks a failed runtime start as FAILED without issuing admission', async () => {

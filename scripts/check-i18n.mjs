@@ -129,7 +129,18 @@ const grandfatheredHits = []
  * pessoa lê no aplicativo gerado continua saindo do catálogo e sendo
  * interpolada (veja `generated.requireOneField`), e crescer aqui reprova.
  */
-const GENERATED_SOURCE_CEILING = { 'plugins/prompt-to-app/src/data-generator.ts': 1 }
+/*
+  Arquivos cujo literal de template carrega CÓDIGO, e não texto de pessoa.
+
+  `plugins/preview/src/selecao.ts` monta o roteiro que a prévia serve para o
+  aplicativo gerado: ele tem `function`, `if` e nomes de variável em português,
+  e nada ali é lido por ninguém — é o corpo de uma resposta JavaScript. O teto
+  existe para o arquivo não virar a porta por onde frase de tela entra escondida.
+*/
+const GENERATED_SOURCE_CEILING = {
+  'plugins/prompt-to-app/src/data-generator.ts': 1,
+  'plugins/preview/src/selecao.ts': 1,
+}
 const generatedSourceHits = {}
 for (const sourceRoot of sourceRoots) for (const file of walk(sourceRoot.path)) scanSource(file, sourceRoot.strict, sourceRoot.path.includes(`${sep}plugins${sep}`) ? PLUGIN_BASELINES : undefined)
 if (directText.length > 0) failures.push(`texto pt-BR fora do catálogo: ${directText.join(' | ')}`)

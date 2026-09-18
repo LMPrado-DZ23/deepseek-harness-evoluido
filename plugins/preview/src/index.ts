@@ -10,6 +10,7 @@ import { createPreviewProjectHttpExtension } from './http.js'
 import { createPreviewGatewayHttpHandler } from './gateway.js'
 import { t } from './i18n.js'
 import {
+  DOMINIO_DA_PREVIA,
   studioPreviewAdmissionsDomainSpec,
   studioPreviewsDomainSpec,
   type PreviewAdmission,
@@ -215,5 +216,5 @@ function requiredSecret(reference: string): string {
 
 export function localPreviewFrameSource(publicPort: number): string {
   if (!Number.isInteger(publicPort) || publicPort < 1 || publicPort > 65_535) throw new Error(t('plugin.invalidPublicPort'))
-  return `http://*.dz23.localhost${publicPort === 80 ? '' : `:${publicPort}`}`
+  return `http://*.${DOMINIO_DA_PREVIA}${publicPort === 80 ? '' : `:${publicPort}`}`
 }

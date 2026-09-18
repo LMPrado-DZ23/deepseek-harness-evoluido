@@ -12,7 +12,7 @@ import {
   type LeaseReference,
 } from '@dz23-studio/runtime-governor'
 import { z } from 'zod'
-import { previewAdmissionSchema, previewRecordSchema, type PreviewAdmission, type PreviewRecord } from './model.js'
+import { DOMINIO_DA_PREVIA, previewAdmissionSchema, previewRecordSchema, type PreviewAdmission, type PreviewRecord } from './model.js'
 import { KeyedMutex } from './mutex.js'
 import { Semaphore, SemaphoreFullError } from './semaphore.js'
 import { t } from './i18n.js'
@@ -252,7 +252,7 @@ export class StudioPreviewService {
 
       const now = this.#now()
       const previewId = this.#createId()
-      const hostname = `p-${randomBytes(12).toString('hex')}.dz23.localhost`
+      const hostname = `p-${randomBytes(12).toString('hex')}.${DOMINIO_DA_PREVIA}`
       const initial = previewRecordSchema.parse({
         preview_id: previewId, org_id: actor.orgId, tenant_id: actor.tenantId,
         project_id: projectId, run_id: artifact.runId, artifact_sha256: artifact.artifactSha256,

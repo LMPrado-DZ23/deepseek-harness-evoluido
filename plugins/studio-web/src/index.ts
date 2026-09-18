@@ -10,7 +10,7 @@ import {
   routeApproval,
   type StudioActionApprovalService,
 } from '@dz23-studio/action-approval'
-import type {} from '@dz23-studio/preview'
+import { DOMINIO_DA_PREVIA } from '@dz23-studio/preview'
 import type {} from '@dz23-studio/tenancy'
 import {
   IdentityError,
@@ -357,7 +357,19 @@ function securityHeaders(type: string, frameSources: readonly string[]): Record<
 
 function normalizePreviewFrameSources(values: readonly string[]): readonly string[] {
   return [...new Set(values.map(value => {
-    const local = /^http:\/\/\*\.dz23\.localhost(?::([1-9]\d{0,4}))?$/u.exec(value)
+    /*
+      O domínio da prévia vem do plugin da PRÉVIA, e não de uma cópia aqui.
+
+      Esta era a quarta cópia dele no repositório — modelo, portão, serviço e
+      esta. A quarta foi descoberta ao MEDIR a separação de domínio que `T-37`
+      pede: com o domínio trocado num lugar só, foi esta cópia que recusou o
+      endereço que o serviço passou a criar — o produto subia e a prévia não
+      abria, com uma mensagem que falava do formato e não do domínio.
+
+      A separação acabou revertida por outro motivo (cookie `SameSite` sobre
+      HTTP; ver `T-37`), e a remoção das cópias ficou: ela vale por si.
+    */
+    const local = new RegExp(`^http://\\*\\.${DOMINIO_DA_PREVIA.replaceAll('.', '\\.')}(?::([1-9]\\d{0,4}))?$`, 'u').exec(value)
     if (local !== null && (local[1] === undefined || Number(local[1]) <= 65_535)) return value
     const hosted = /^https:\/\/\*\.preview\.([a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)$/u.exec(value)
     if (hosted !== null && hosted[1]!.includes('.') && !hosted[1]!.includes('..')) return value

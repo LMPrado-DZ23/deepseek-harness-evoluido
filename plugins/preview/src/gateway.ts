@@ -1,10 +1,20 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { StudioPreviewService } from './service.js'
+import { DOMINIO_DA_PREVIA, PADRAO_DO_HOST_DA_PREVIA } from './model.js'
 import { t } from './i18n.js'
+import { CAMINHO_DO_ROTEIRO, comRoteiroDeSelecao, scriptDeSelecao } from './selecao.js'
 
 export const PREVIEW_COOKIE = 'dz23_preview_admission'
 export const SECURE_PREVIEW_COOKIE = '__Host-dz23_preview_admission'
-const HOST_PATTERN = /^p-[a-f0-9]{24}\.dz23\.localhost(?::\d+)?$/u
+/*
+  DERIVADO do padrão do modelo, e não escrito de novo.
+
+  Esta era a SEGUNDA cópia do host da prévia: o modelo tinha a dele e o portão
+  tinha esta, e trocar o domínio num só lugar produziria um portão que recusa
+  todo host que o serviço cria. É a segunda verdade mais barata de evitar — uma
+  linha — e a mais cara de descobrir depois.
+*/
+const HOST_PATTERN = new RegExp(PADRAO_DO_HOST_DA_PREVIA.source.replace(/\$$/u, '(?::\\d+)?$'), 'u')
 const BODY_LIMIT = 8 * 1024
 const FORWARD_BODY_LIMIT = 2 * 1024 * 1024
 const RESPONSE_BODY_LIMIT = 8 * 1024 * 1024
@@ -52,6 +62,22 @@ export function createPreviewGatewayHttpHandler(options: PreviewGatewayOptions) 
     }
     if (request.method === 'GET' && pathname === '/__dz23/admission.js') {
       return javascript(response, 200, admissionScript(studioOrigin), headers)
+    }
+    /*
+      O roteiro da SELEÇÃO VISUAL é servido, e não copiado para o template.
+
+      Um roteiro dentro do template ficaria congelado na versão do dia em que o
+      aplicativo nasceu, e a próxima correção só alcançaria os criados depois —
+      os que já existem ficariam com a versão velha para sempre. Servido, ele é
+      UM. É também o único jeito de a origem do FRIGG entrar nele: o template
+      não a conhece, e não deve conhecer.
+
+      Ele NÃO exige admissão, e isso é deliberado: é um arquivo de texto sem
+      segredo nenhum, igual ao `admission.js` logo acima, e exigir o cookie
+      criaria uma dependência de ordem entre carregar a página e ter a sessão.
+    */
+    if (request.method === 'GET' && pathname === CAMINHO_DO_ROTEIRO) {
+      return javascript(response, 200, scriptDeSelecao(studioOrigin), headers)
     }
     if (request.method === 'POST' && pathname === '/__dz23/admission') {
       if (singleHeader(request.headers.origin) !== origin) return plain(response, 403, t('gateway.invalidOrigin'), headers)
@@ -124,7 +150,7 @@ function validPreviewHost(host: string): boolean {
   if (!HOST_PATTERN.test(host)) return false
   try {
     const parsed = new URL(`http://${host}`)
-    return parsed.hostname.endsWith('.dz23.localhost') && (parsed.port === '' || (Number(parsed.port) >= 1 && Number(parsed.port) <= 65_535))
+    return parsed.hostname.endsWith(`.${DOMINIO_DA_PREVIA}`) && (parsed.port === '' || (Number(parsed.port) >= 1 && Number(parsed.port) <= 65_535))
   } catch { return false }
 }
 
@@ -180,9 +206,15 @@ function writeForwardedResponse(
 ): void {
   const status = Number.isInteger(forwarded.status) && forwarded.status >= 200 && forwarded.status <= 599 ? forwarded.status : 502
   const validBody = Buffer.isBuffer(forwarded.body) && forwarded.body.byteLength <= RESPONSE_BODY_LIMIT
-  const body = validBody ? forwarded.body : Buffer.from(t('gateway.invalidResponse'), 'utf8')
-  const safe: Record<string, string | readonly string[]> = {}
   const contentType = singleResponseHeader(forwarded.headers?.['content-type'])
+  /*
+    A etiqueta do roteiro entra SÓ em página HTML, e só quando ela tem corpo
+    para fechar. Reescrever bytes de uma resposta que não pediu para ser
+    reescrita quebra o aplicativo de um jeito que ninguém depura: o
+    código-fonte está certo e o navegador mostra outra coisa.
+  */
+  const body = validBody ? comRoteiroDeSelecao(forwarded.body, contentType) : Buffer.from(t('gateway.invalidResponse'), 'utf8')
+  const safe: Record<string, string | readonly string[]> = {}
   if (contentType !== undefined && contentType.length <= 200) safe['content-type'] = contentType
   const etag = singleResponseHeader(forwarded.headers?.etag)
   if (etag !== undefined && etag.length <= 200) safe.etag = etag

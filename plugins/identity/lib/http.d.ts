@@ -3,98 +3,8 @@ import type { SessionRecord } from './model.js';
 import { type StudioIdentityService } from './service.js';
 import { InMemoryIdentityRateLimiter } from './rate-limit.js';
 export declare const COOKIE_HEADER_LIMIT_BYTES: number;
-export { CSRF_COOKIE, parseCookies, parseCookieValues, SECURE_SESSION_COOKIE, SESSION_COOKIE, SESSION_GENERATION_COOKIE, sessionCookieName, shadowCookieDeletions } from './cookies.js';
-export declare const IDENTITY_ROUTE_CONTRACTS: readonly [{
-    readonly method: "POST";
-    readonly path: "/magic/start";
-    readonly access: "public";
-    readonly permission: null;
-    readonly scope: "none";
-}, {
-    readonly method: "POST";
-    readonly path: "/magic/verify";
-    readonly access: "public";
-    readonly permission: null;
-    readonly scope: "none";
-}, {
-    readonly method: "POST";
-    readonly path: "/passkey/login/options";
-    readonly access: "public";
-    readonly permission: null;
-    readonly scope: "none";
-}, {
-    readonly method: "POST";
-    readonly path: "/passkey/login/verify";
-    readonly access: "public";
-    readonly permission: null;
-    readonly scope: "none";
-}, {
-    readonly method: "GET";
-    readonly path: "/session";
-    readonly access: "public";
-    readonly permission: null;
-    readonly scope: "identity";
-}, {
-    readonly method: "GET";
-    readonly path: "/csrf";
-    readonly access: "authorized";
-    readonly permission: "identity.self";
-    readonly scope: "identity";
-}, {
-    readonly method: "GET";
-    readonly path: "/harness/session";
-    readonly access: "authorized";
-    readonly permission: "identity.self";
-    readonly scope: "identity";
-}, {
-    readonly method: "POST";
-    readonly path: "/logout";
-    readonly access: "public";
-    readonly permission: null;
-    readonly scope: "identity";
-}, {
-    readonly method: "POST";
-    readonly path: "/passkey/register/options";
-    readonly access: "authorized";
-    readonly permission: "identity.self";
-    readonly scope: "identity";
-}, {
-    readonly method: "POST";
-    readonly path: "/passkey/register/verify";
-    readonly access: "authorized";
-    readonly permission: "identity.self";
-    readonly scope: "identity";
-}, {
-    readonly method: "POST";
-    readonly path: "/passkey/step-up/options";
-    readonly access: "authorized";
-    readonly permission: "identity.self";
-    readonly scope: "identity";
-}, {
-    readonly method: "POST";
-    readonly path: "/passkey/step-up/verify";
-    readonly access: "authorized";
-    readonly permission: "identity.self";
-    readonly scope: "identity";
-}, {
-    readonly method: "GET";
-    readonly path: "/devices";
-    readonly access: "authorized";
-    readonly permission: "identity.self";
-    readonly scope: "identity";
-}, {
-    readonly method: "POST";
-    readonly path: "/devices/revoke";
-    readonly access: "authorized";
-    readonly permission: "identity.self";
-    readonly scope: "identity";
-}, {
-    readonly method: "POST";
-    readonly path: "/devices/revoke-all";
-    readonly access: "authorized";
-    readonly permission: "identity.self";
-    readonly scope: "identity";
-}];
+export { CAMINHOS_DA_REMOCAO, CSRF_COOKIE, parseCookies, parseCookieValues, SECURE_SESSION_COOKIE, SESSION_COOKIE, SESSION_GENERATION_COOKIE, sessionCookieName, shadowCookieDeletions } from './cookies.js';
+export { BASE_DA_IDENTIDADE, IDENTITY_ROUTE_CONTRACTS, caminhosAlcancaveis } from './rotas.js';
 export interface IdentityHttpConfig {
     readonly service: StudioIdentityService;
     readonly bindHost: '127.0.0.1' | '0.0.0.0';
@@ -136,6 +46,15 @@ export interface IdentityHttpConfig {
  * GERADO, que ninguém leu, e uma linha de `document.cookie` dele planta
  * `dz23_studio_session=<qualquer coisa>; Domain=dz23.localhost`. O nome com
  * prefixo é o único que ele NÃO consegue escrever.
+ *
+ * SEPARAR OS DOMÍNIOS foi implementado e MEDIDO em 18/09/2026, e não serve
+ * enquanto a prévia for HTTP: o cookie de admissão dela é `SameSite=Strict`, e
+ * um quadro de outro site é contexto cross-site — o navegador não o envia, a
+ * troca do bilhete devolve `204` e o `GET /` seguinte volta `401`. `SameSite=None`
+ * exige `Secure`, que exige TLS no host da prévia, e instalar CA raiz é
+ * proibido. A separação está registrada em `T-37` como bloqueada em
+ * certificado, e o que fecha o buraco sem TLS é a remoção alcançar o `Path`
+ * que ela não alcançava.
  *
  * Emitir os dois, em vez de trocar de nome, é o que torna isto seguro de
  * aplicar: onde o navegador aceitar o `__Host-`, ele passa a ser o que vale e o

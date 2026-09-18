@@ -467,6 +467,37 @@ test('percorre as cinco etapas, muda privacidade e termina sem alegar publicaç�
   await expect(page.locator('.dz-previa-situacao strong')).toHaveText('Disponível')
   await expect(page.getByText('Só páginas do seu aplicativo. Este campo não abre outros endereços.')).toBeVisible()
 
+  /*
+    A MENSAGEM DO QUADRO CHEGA — e esta é a prova de MONTAGEM que faltava.
+
+    Uma revisão externa achou, lendo o código, que o painel usava
+    `ref={refDoQuadro ?? quadro}`: com o ref de fora passado pelo `App`, o de
+    dentro ficava nulo, a conferência comparava `evento.source` com `undefined`
+    e TODAS as mensagens do quadro eram recusadas — inclusive as legítimas.
+
+    Nenhum teste de função pegava isso, porque o defeito não estava na função.
+    Este caso monta o produto inteiro e manda a mensagem do quadro DE VERDADE.
+  */
+  await expect(page.getByLabel('Página')).toHaveValue('/')
+  await page.evaluate(previewOrigin => {
+    const frame = document.querySelector<HTMLIFrameElement>('iframe[title="Seu aplicativo rodando, isolado"]')
+    if (frame?.contentWindow == null) throw new Error('preview frame missing')
+    window.dispatchEvent(new MessageEvent('message', {
+      origin: previewOrigin, source: frame.contentWindow, data: { type: 'DZ23_PREVIEW_ROUTE', path: '/placar' },
+    }))
+  }, frameUrl.origin)
+  await expect(page.getByLabel('Página')).toHaveValue('/placar')
+
+  // E a mesma mensagem de OUTRA janela continua sendo ignorada: consertar a
+  // ligação não pode afrouxar a conferência.
+  await page.evaluate(previewOrigin => {
+    window.dispatchEvent(new MessageEvent('message', {
+      origin: previewOrigin, source: window, data: { type: 'DZ23_PREVIEW_ROUTE', path: '/forjada' },
+    }))
+  }, frameUrl.origin)
+  await page.waitForTimeout(100)
+  await expect(page.getByLabel('Página')).toHaveValue('/placar')
+
   // O COMPOSITOR continua alcançável com o painel aberto, e o que a pessoa
   // escreveu nele é o que tem de sobreviver ao resto deste bloco.
   const compositor = page.getByRole('textbox', { name: /mensagem|pedido|escreva/iu }).first()

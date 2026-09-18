@@ -1,3 +1,4 @@
+import { BASE_DA_IDENTIDADE } from './rotas.js'
 import type { Context } from '@deepseek-ai/cordis'
 import { t } from './i18n.js'
 import type {} from '@deepseek-ai/dsh-agent'
@@ -237,7 +238,7 @@ export async function apply(ctx: Context, config: IdentityPluginConfig = {}): Pr
   ctx.effect(() => unsetResolver, 'dz23-studio-identity.policyResolver')
   ctx.effect(() => ctx.webServer.register({
     kind: 'prefix',
-    path: '/api/studio/identity',
+    path: BASE_DA_IDENTIDADE,
     handler: createIdentityHttpHandler({
       service,
       bindHost: ctx.webServer.host,
