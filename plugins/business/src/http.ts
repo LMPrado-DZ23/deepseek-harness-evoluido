@@ -26,6 +26,39 @@ const criarSchema = z.object({
 const revisarSchema = z.object({ plano: planoSchema }).strict()
 
 /**
+ * A OFERTA que chega pelo pedido.
+ *
+ * Ele repete a forma do esquema do domínio em vez de importá-lo porque a
+ * fronteira HTTP e o domínio respondem a perguntas diferentes: aqui o que se
+ * decide é o que um cliente pode MANDAR, e lá o que pode ser GRAVADO. Quando os
+ * dois divergirem — e vão, no dia em que um campo virar opcional na gravação —,
+ * divergir na fronteira é o comportamento certo, e não um defeito.
+ */
+const ofertaSchemaHttp = z.object({
+  nome: z.string().min(2).max(120),
+  entrega: z.string().min(10).max(2_000),
+  publico: z.string().min(3).max(500),
+  preco: z.number().positive().nullable(),
+  moeda: z.string().length(3).regex(/^[A-Z]{3}$/u),
+  capacidade: z.object({
+    quantidade: z.number().int().nonnegative(),
+    periodo: z.enum(['dia', 'semana', 'mes']),
+  }).strict(),
+  condicoes: z.array(z.string().min(3).max(300)).max(30),
+  custos: z.array(z.object({
+    nome: z.string().min(2).max(120),
+    // `null` é o custo declarado SEM valor, e ele é o motivo de a margem ter
+    // três estados. Tirar o `nullable` daqui faria a fronteira exigir um
+    // número que a pessoa não tem, e o zero que ela digitasse mentiria.
+    valor: z.number().nonnegative().nullable(),
+  }).strict()).max(30),
+}).strict()
+
+const criarOfertaSchema = z.object({ oferta: ofertaSchemaHttp }).strict()
+const revisarOfertaSchema = z.object({ offer_key: z.string().min(1), oferta: ofertaSchemaHttp }).strict()
+const aprovarOfertaSchema = z.object({ offer_version_id: z.string().min(1) }).strict()
+
+/**
  * O pedido de uma tarefa criada a partir da empresa.
  *
  * `request_key` atravessa INTEIRA para o serviço de tarefas, que já sabe tratá-la
@@ -63,12 +96,15 @@ export const BUSINESS_ROUTE_CONTRACTS = [
   { method: 'POST', path: '/businesses/:businessId/archive', access: 'authorized', permission: 'project.write', scope: 'workspace' },
   { method: 'GET', path: '/businesses/:businessId/tasks', access: 'authorized', permission: 'project.read', scope: 'workspace' },
   { method: 'POST', path: '/businesses/:businessId/tasks', access: 'authorized', permission: 'project.write', scope: 'workspace' },
+  { method: 'GET', path: '/businesses/:businessId/offers', access: 'authorized', permission: 'project.read', scope: 'workspace' },
+  { method: 'POST', path: '/businesses/:businessId/offers', access: 'authorized', permission: 'project.write', scope: 'workspace' },
+  { method: 'POST', path: '/businesses/:businessId/offers/approve', access: 'authorized', permission: 'project.write', scope: 'workspace' },
 ] as const satisfies readonly StudioRouteContract[]
 
 assertRouteContracts(BUSINESS_ROUTE_CONTRACTS)
 
 /** O sufixo de uma rota de empresa, quando é uma. */
-const ROTA = /^\/businesses(?:\/([^/]+)(?:\/(plan|archive|tasks))?)?$/u
+const ROTA = /^\/businesses(?:\/([^/]+)(?:\/(plan|archive|tasks|offers|offers\/approve))?)?$/u
 
 /**
  * As rotas do Modo Empresa, registradas como fatia do Studio.
@@ -118,6 +154,32 @@ export function createBusinessHttpExtension(service: BusinessService): PromptToA
         const { request_key: requestKey, ...corpo } = criarTarefaSchema.parse(await lerJson(input))
         const criada = await service.criarTarefa(input.actor, businessId, corpo, requestKey)
         return responder(input.response, 201, { task: criada.tarefa, link: criada.vinculo })
+      }
+      if (input.request.method === 'GET' && businessId !== undefined && acao === 'offers') {
+        // O CATÁLOGO e as VERSÕES no mesmo corpo seria caro à toa: o catálogo é
+        // o que a tela abre, e o histórico de uma oferta só é pedido quando
+        // alguém clica nela. Aqui vai o catálogo.
+        return responder(input.response, 200, { offers: service.catalogo(input.actor, businessId) })
+      }
+      if (input.request.method === 'POST' && businessId !== undefined && acao === 'offers') {
+        const corpo = await lerJson(input)
+        // Com `offer_key`, é REVISÃO de uma oferta que existe; sem, é oferta
+        // nova. Duas rotas para isso diriam a mesma coisa duas vezes, e a
+        // diferença entre elas é exatamente um campo do corpo.
+        const revisao = revisarOfertaSchema.safeParse(corpo)
+        if (revisao.success) {
+          return responder(input.response, 201, {
+            offer: await service.revisarOferta(input.actor, businessId, revisao.data.offer_key, revisao.data.oferta),
+          })
+        }
+        const nova = criarOfertaSchema.parse(corpo)
+        return responder(input.response, 201, { offer: await service.criarOferta(input.actor, businessId, nova.oferta) })
+      }
+      if (input.request.method === 'POST' && businessId !== undefined && acao === 'offers/approve') {
+        const corpo = aprovarOfertaSchema.parse(await lerJson(input))
+        return responder(input.response, 200, {
+          offer: await service.aprovarOferta(input.actor, businessId, corpo.offer_version_id),
+        })
       }
       return responder(input.response, 404, { error: t('errors.routeNotFound') })
     } catch (erro) {

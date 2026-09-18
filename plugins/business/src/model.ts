@@ -124,9 +124,102 @@ export const vinculoDeTarefaSchema = z.object({
 
 export type VinculoDeTarefa = z.infer<typeof vinculoDeTarefaSchema>
 
+/**
+ * Um CUSTO declarado da oferta.
+ *
+ * `valor` é anulável de propósito, e essa é a parte que o aceite de `BUS-03`
+ * exige: "margem estimada declara custos ausentes". Um custo que a pessoa sabe
+ * existir e não sabe quanto é — frete, taxa da maquininha, hora de alguém — é
+ * um fato diferente de "não há esse custo". Forçá-la a escrever zero faria a
+ * margem mentir para cima, e é exatamente a mentira que a regra proíbe.
+ */
+export const custoSchema = z.object({
+  nome: z.string().min(2).max(120),
+  /** `null` quando a pessoa declarou o custo e ainda não sabe o valor. */
+  valor: z.number().nonnegative().nullable(),
+}).strict()
+
+export type Custo = z.infer<typeof custoSchema>
+
+/** A capacidade de entrega: quanto, em quanto tempo. */
+export const capacidadeSchema = z.object({
+  quantidade: z.number().int().nonnegative(),
+  periodo: z.enum(['dia', 'semana', 'mes']),
+}).strict()
+
+export type Capacidade = z.infer<typeof capacidadeSchema>
+
+/**
+ * A OFERTA de UMA versão. Ela nunca é editada no lugar.
+ *
+ * Os campos são os do aceite mínimo de `BUS-03`, um a um: entrega, público,
+ * preço e moeda, capacidade e condições. `preco` é anulável porque um rascunho
+ * sem preço é um estado legítimo do trabalho — o que não é legítimo é aprovar
+ * sem ele, e quem recusa isso é `recusaDeAprovacao`.
+ */
+export const ofertaSchema = z.object({
+  nome: z.string().min(2).max(120),
+  /** O que a empresa entrega. */
+  entrega: z.string().min(10).max(2_000),
+  /** Para quem. */
+  publico: z.string().min(3).max(500),
+  /** Quanto custa para quem compra. `null` enquanto ninguém decidiu. */
+  preco: z.number().positive().nullable(),
+  /**
+   * A moeda, em ISO 4217. É OBRIGATÓRIA mesmo sem preço: um número sem moeda é
+   * ambíguo no primeiro dia em que alguém vender para fora do país, e um padrão
+   * silencioso é a segunda verdade que só aparece quando já custou dinheiro.
+   */
+  moeda: z.string().length(3).regex(/^[A-Z]{3}$/u),
+  capacidade: capacidadeSchema,
+  /**
+   * As condições — prazo, garantia, o que não está incluído.
+   *
+   * Lista, e não parágrafo, pela mesma razão dos limites do plano: cada
+   * condição é conferida sozinha depois, e um texto com cinco condições dentro
+   * não é conferível.
+   */
+  condicoes: z.array(z.string().min(3).max(300)).max(30),
+  /** Os custos declarados, que a margem usa e cuja ausência ela declara. */
+  custos: z.array(custoSchema).max(30),
+}).strict()
+
+export type Oferta = z.infer<typeof ofertaSchema>
+
+export const registroDeOfertaSchema = z.object({
+  offer_version_id: z.string().min(1),
+  /**
+   * Qual oferta do catálogo é esta. Ela sobrevive às revisões: renomear a
+   * oferta na versão 4 não a transforma em outra oferta, e é por isso que a
+   * identidade não é o nome.
+   */
+  offer_key: z.string().min(1),
+  business_id: z.string().min(1),
+  org_id: z.string().min(1),
+  tenant_id: z.string().min(1),
+  /** 1 na primeira, e sempre a anterior mais um, POR OFERTA. */
+  version: z.number().int().positive(),
+  oferta: ofertaSchema,
+  created_by: z.string().min(1),
+  created_at: z.iso.datetime(),
+  /**
+   * Quando esta versão foi APROVADA, e por quem. `null` é rascunho.
+   *
+   * A aprovação fica na VERSÃO, e não na oferta, porque é isso que "condições
+   * aprovadas" quer dizer: as condições que estavam escritas quando alguém
+   * aprovou. Guardar a aprovação na oferta faria uma revisão posterior herdar
+   * a aprovação de um texto que ninguém leu.
+   */
+  approved_at: z.iso.datetime().nullable(),
+  approved_by: z.string().min(1).nullable(),
+}).strict()
+
+export type RegistroDeOferta = z.infer<typeof registroDeOfertaSchema>
+
 export const STUDIO_BUSINESS_DOMAIN = 'studio_businesses'
 export const STUDIO_BUSINESS_PLANS_DOMAIN = 'studio_business_plans'
 export const STUDIO_BUSINESS_TASKS_DOMAIN = 'studio_business_tasks'
+export const STUDIO_BUSINESS_OFFERS_DOMAIN = 'studio_business_offers'
 
 export const studioBusinessDomainSpec = defineDomain({
   name: STUDIO_BUSINESS_DOMAIN,
@@ -149,8 +242,15 @@ export const studioBusinessTasksDomainSpec = defineDomain({
   tables: { links: domainTable<BusinessKey, VinculoDeTarefa>(vinculoDeTarefaSchema) },
 })
 
+export const studioBusinessOffersDomainSpec = defineDomain({
+  name: STUDIO_BUSINESS_OFFERS_DOMAIN,
+  version: 1,
+  tables: { offers: domainTable<BusinessKey, RegistroDeOferta>(registroDeOfertaSchema) },
+})
+
 export const BUSINESS_DOMAIN_SPECS = [
   studioBusinessDomainSpec,
   studioBusinessPlansDomainSpec,
   studioBusinessTasksDomainSpec,
+  studioBusinessOffersDomainSpec,
 ] as const

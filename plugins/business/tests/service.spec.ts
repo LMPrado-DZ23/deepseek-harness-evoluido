@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { BusinessError, BusinessService, type BusinessActor, type BusinessRepository } from '../src/service.js'
-import type { Empresa, PlanoDeNegocio, RegistroDePlano, VinculoDeTarefa } from '../src/model.js'
+import type { Empresa, Oferta, PlanoDeNegocio, RegistroDeOferta, RegistroDePlano, VinculoDeTarefa } from '../src/model.js'
 
 /**
  * O serviço de empresas — `BUS-01`, a porta do Modo Empresa.
@@ -22,6 +22,11 @@ class MemoryRepository implements BusinessRepository {
   links = () => this.linkRows
   putLink = async (value: VinculoDeTarefa) => {
     this.linkRows = [...this.linkRows.filter(linha => linha.project_id !== value.project_id), value]
+  }
+  offerRows: RegistroDeOferta[] = []
+  offers = () => this.offerRows
+  putOffer = async (value: RegistroDeOferta) => {
+    this.offerRows = [...this.offerRows.filter(linha => linha.offer_version_id !== value.offer_version_id), value]
   }
 }
 
@@ -328,5 +333,173 @@ describe('criar tarefa PARA a empresa', () => {
     })
     expect(service.tarefas(ana, criada.empresa.business_id)).toHaveLength(1)
     expect(() => service.tarefas(deOutraEmpresa, criada.empresa.business_id)).toThrow(BusinessError)
+  })
+})
+
+const OFERTA: Oferta = {
+  nome: 'Bolo de aniversário',
+  entrega: 'Um bolo de dois quilos, decorado, entregue no endereço da pessoa.',
+  publico: 'Famílias do bairro',
+  preco: 200,
+  moeda: 'BRL',
+  capacidade: { quantidade: 4, periodo: 'semana' },
+  condicoes: ['Encomenda com três dias de antecedência'],
+  custos: [{ nome: 'Ingredientes', valor: 60 }],
+}
+
+async function comEmpresa() {
+  const contexto = fixture()
+  const criada = await contexto.service.create(ana, { nome: 'Bolos da Ana', origem: 'criada', plano: PLANO })
+  return { ...contexto, businessId: criada.empresa.business_id }
+}
+
+describe('o catálogo de ofertas', () => {
+  it('a oferta nasce na versão 1 e em RASCUNHO, mesmo chegando completa', async () => {
+    // Aprovar é um ato de quem responde pela empresa. Fazê-lo acontecer junto
+    // da criação tiraria dessa pessoa a única decisão que o aceite pede que
+    // seja dela.
+    const { service, businessId, repository } = await comEmpresa()
+    const registro = await service.criarOferta(ana, businessId, OFERTA)
+    expect(registro.version).toBe(1)
+    expect(registro.approved_at).toBeNull()
+    expect(registro.approved_by).toBeNull()
+    expect(repository.offerRows).toHaveLength(1)
+  })
+
+  it('o preço gravado é o que a PESSOA escreveu — a sugestão não vira preço sozinha', async () => {
+    // É a metade do aceite que diz "preço sugerido não publicado
+    // automaticamente". Um rascunho com custos e sem preço fica SEM preço.
+    const { service, businessId } = await comEmpresa()
+    const registro = await service.criarOferta(ana, businessId, { ...OFERTA, preco: null })
+    expect(registro.oferta.preco).toBeNull()
+  })
+
+  it('a REVISÃO cria versão nova e não apaga a anterior', async () => {
+    const { service, businessId, repository } = await comEmpresa()
+    const primeira = await service.criarOferta(ana, businessId, OFERTA)
+    const segunda = await service.revisarOferta(ana, businessId, primeira.offer_key, { ...OFERTA, preco: 240 })
+    expect(segunda.version).toBe(2)
+    expect(segunda.offer_key).toBe(primeira.offer_key)
+    expect(repository.offerRows).toHaveLength(2)
+    expect(service.versoesDaOferta(ana, businessId, primeira.offer_key).map(item => item.version)).toEqual([2, 1])
+  })
+
+  it('a revisão de uma oferta APROVADA nasce em rascunho de novo', async () => {
+    // Herdar a aprovação faria condições que ninguém leu virarem "condições
+    // aprovadas" — exatamente o que o aceite proíbe.
+    const { service, businessId } = await comEmpresa()
+    const primeira = await service.criarOferta(ana, businessId, OFERTA)
+    await service.aprovarOferta(ana, businessId, primeira.offer_version_id)
+    const segunda = await service.revisarOferta(ana, businessId, primeira.offer_key, { ...OFERTA, preco: 240 })
+    expect(segunda.approved_at).toBeNull()
+  })
+
+  it('revisão IDÊNTICA à vigente é recusada', async () => {
+    const { service, businessId, repository } = await comEmpresa()
+    const primeira = await service.criarOferta(ana, businessId, OFERTA)
+    await expect(service.revisarOferta(ana, businessId, primeira.offer_key, OFERTA)).rejects.toThrow(BusinessError)
+    expect(repository.offerRows).toHaveLength(1)
+  })
+
+  it('revisar uma oferta que não existe é NÃO ENCONTRADA, e não cria uma nova', async () => {
+    const { service, businessId, repository } = await comEmpresa()
+    await expect(service.revisarOferta(ana, businessId, 'of-inexistente', OFERTA)).rejects.toThrow(BusinessError)
+    expect(repository.offerRows).toHaveLength(0)
+  })
+
+  it('DUAS ofertas diferentes têm numeração independente', async () => {
+    const { service, businessId } = await comEmpresa()
+    const bolo = await service.criarOferta(ana, businessId, OFERTA)
+    await service.revisarOferta(ana, businessId, bolo.offer_key, { ...OFERTA, preco: 240 })
+    const torta = await service.criarOferta(ana, businessId, { ...OFERTA, nome: 'Torta salgada' })
+    expect(torta.version).toBe(1)
+    expect(service.catalogo(ana, businessId).map(item => [item.oferta.nome, item.version]))
+      .toEqual([['Bolo de aniversário', 2], ['Torta salgada', 1]])
+  })
+
+  it('empresa ARQUIVADA não recebe oferta nova', async () => {
+    const { service, businessId, repository } = await comEmpresa()
+    await service.arquivar(ana, businessId)
+    await expect(service.criarOferta(ana, businessId, OFERTA)).rejects.toThrow(BusinessError)
+    expect(repository.offerRows).toHaveLength(0)
+  })
+})
+
+describe('aprovar a oferta', () => {
+  it('grava QUEM aprovou e QUANDO', async () => {
+    const { service, businessId } = await comEmpresa()
+    const registro = await service.criarOferta(ana, businessId, OFERTA)
+    const aprovada = await service.aprovarOferta(ana, businessId, registro.offer_version_id)
+    expect(aprovada.approved_by).toBe('user-a')
+    expect(aprovada.approved_at).toBe('2026-09-17T12:00:00.000Z')
+  })
+
+  it('aprovar NÃO cria versão nova: é a mesma versão, com a decisão dentro', async () => {
+    // "Condições aprovadas" são as condições que estavam escritas quando
+    // alguém aprovou. Uma versão nova mudaria o texto que foi aprovado.
+    const { service, businessId, repository } = await comEmpresa()
+    const registro = await service.criarOferta(ana, businessId, OFERTA)
+    const aprovada = await service.aprovarOferta(ana, businessId, registro.offer_version_id)
+    expect(repository.offerRows).toHaveLength(1)
+    expect(aprovada.offer_version_id).toBe(registro.offer_version_id)
+    expect(aprovada.oferta).toEqual(registro.oferta)
+  })
+
+  it('sem PREÇO, recusa em vez de aprovar', async () => {
+    const { service, businessId, repository } = await comEmpresa()
+    const registro = await service.criarOferta(ana, businessId, { ...OFERTA, preco: null })
+    await expect(service.aprovarOferta(ana, businessId, registro.offer_version_id)).rejects.toThrow(BusinessError)
+    expect(repository.offerRows[0]!.approved_at).toBeNull()
+  })
+
+  it('sem CAPACIDADE, recusa', async () => {
+    const { service, businessId } = await comEmpresa()
+    const registro = await service.criarOferta(ana, businessId, { ...OFERTA, capacidade: { quantidade: 0, periodo: 'mes' } })
+    await expect(service.aprovarOferta(ana, businessId, registro.offer_version_id)).rejects.toThrow(BusinessError)
+  })
+
+  it('sem CONDIÇÃO escrita, recusa', async () => {
+    const { service, businessId } = await comEmpresa()
+    const registro = await service.criarOferta(ana, businessId, { ...OFERTA, condicoes: [] })
+    await expect(service.aprovarOferta(ana, businessId, registro.offer_version_id)).rejects.toThrow(BusinessError)
+  })
+
+  it('aprovar duas vezes a mesma versão é recusado', async () => {
+    const { service, businessId } = await comEmpresa()
+    const registro = await service.criarOferta(ana, businessId, OFERTA)
+    await service.aprovarOferta(ana, businessId, registro.offer_version_id)
+    await expect(service.aprovarOferta(ana, businessId, registro.offer_version_id)).rejects.toThrow(BusinessError)
+  })
+
+  it('quem só pode LER não aprova', async () => {
+    const { service, businessId, repository } = await comEmpresa()
+    const registro = await service.criarOferta(ana, businessId, OFERTA)
+    await expect(service.aprovarOferta(leitor, businessId, registro.offer_version_id)).rejects.toThrow(BusinessError)
+    expect(repository.offerRows[0]!.approved_at).toBeNull()
+  })
+})
+
+describe('o isolamento do catálogo', () => {
+  it('a oferta de um inquilino NÃO aparece para o outro', async () => {
+    const { service, businessId } = await comEmpresa()
+    await service.criarOferta(ana, businessId, OFERTA)
+    expect(service.catalogo(ana, businessId)).toHaveLength(1)
+    expect(() => service.catalogo(deOutraEmpresa, businessId)).toThrow(BusinessError)
+  })
+
+  it('o vizinho NÃO aprova a oferta da empresa alheia, e recebe NÃO ENCONTRADA', async () => {
+    // Dizer "proibido" confirmaria para quem perguntou que a empresa existe.
+    const { service, businessId, repository } = await comEmpresa()
+    const registro = await service.criarOferta(ana, businessId, OFERTA)
+    await expect(service.aprovarOferta(deOutraEmpresa, businessId, registro.offer_version_id)).rejects.toThrow(BusinessError)
+    expect(repository.offerRows[0]!.approved_at).toBeNull()
+  })
+
+  it('o vizinho NÃO revisa a oferta da empresa alheia', async () => {
+    const { service, businessId, repository } = await comEmpresa()
+    const registro = await service.criarOferta(ana, businessId, OFERTA)
+    await expect(service.revisarOferta(deOutraEmpresa, businessId, registro.offer_key, { ...OFERTA, preco: 300 }))
+      .rejects.toThrow(BusinessError)
+    expect(repository.offerRows).toHaveLength(1)
   })
 })

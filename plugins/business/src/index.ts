@@ -7,7 +7,9 @@ import {
   studioBusinessPlansDomainSpec,
   type BusinessKey,
   studioBusinessTasksDomainSpec,
+  studioBusinessOffersDomainSpec,
   type Empresa,
+  type RegistroDeOferta,
   type RegistroDePlano,
   type VinculoDeTarefa,
 } from './model.js'
@@ -15,6 +17,7 @@ import { BusinessService, type BusinessRepository } from './service.js'
 
 export * from './http.js'
 export * from './model.js'
+export * from './oferta.js'
 export * from './regras.js'
 export * from './service.js'
 
@@ -55,6 +58,7 @@ export class DomainBusinessRepository implements BusinessRepository {
     private readonly businessTable: KvTable<BusinessKey, Empresa>,
     private readonly planTable: KvTable<BusinessKey, RegistroDePlano>,
     private readonly linkTable: KvTable<BusinessKey, VinculoDeTarefa>,
+    private readonly offerTable: KvTable<BusinessKey, RegistroDeOferta>,
   ) {}
 
   businesses = (): readonly Empresa[] => [...this.businessTable.entries()].map(([, valor]) => valor)
@@ -80,6 +84,19 @@ export class DomainBusinessRepository implements BusinessRepository {
   putLink = async (value: VinculoDeTarefa): Promise<void> => {
     await this.linkTable.put(value.project_id as BusinessKey, value)
   }
+
+  offers = (): readonly RegistroDeOferta[] => [...this.offerTable.entries()].map(([, valor]) => valor)
+
+  /*
+    A chave é a VERSÃO da oferta, e não a oferta.
+
+    O catálogo guarda o histórico inteiro: com a `offer_key` na chave, gravar a
+    versão 2 apagaria a 1, e "sob que condições este pedido foi aceito?" ficaria
+    sem resposta no primeiro reajuste de preço.
+  */
+  putOffer = async (value: RegistroDeOferta): Promise<void> => {
+    await this.offerTable.put(value.offer_version_id as BusinessKey, value)
+  }
 }
 
 export async function apply(ctx: Context): Promise<void> {
@@ -89,7 +106,11 @@ export async function apply(ctx: Context): Promise<void> {
   ctx.effect(() => () => plans.close(), 'studio-business.plansDomainClose')
   const tasks: Domain<typeof studioBusinessTasksDomainSpec> = await ctx.storageDomain.open(studioBusinessTasksDomainSpec)
   ctx.effect(() => () => tasks.close(), 'studio-business.tasksDomainClose')
-  const repository = new DomainBusinessRepository(businesses.table('businesses'), plans.table('plans'), tasks.table('links'))
+  const offers: Domain<typeof studioBusinessOffersDomainSpec> = await ctx.storageDomain.open(studioBusinessOffersDomainSpec)
+  ctx.effect(() => () => offers.close(), 'studio-business.offersDomainClose')
+  const repository = new DomainBusinessRepository(
+    businesses.table('businesses'), plans.table('plans'), tasks.table('links'), offers.table('offers'),
+  )
   /*
     A porta de tarefas é resolvida NO MOMENTO DO USO, e não guardada aqui.
 

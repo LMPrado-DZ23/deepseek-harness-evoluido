@@ -164,3 +164,59 @@
 .dz-empresa-evidencia { margin: var(--dz-2) 0 0; padding-left: var(--dz-5); }
 .dz-empresa-evidencia li + li { margin-top: var(--dz-1); }
 .dz-empresa-evidencia a { color: var(--dz-accent); }
+
+/*
+  O CATÁLOGO de ofertas — BUS-03.
+
+  Ele reaproveita `dz-empresa-plano` para a leitura de campos porque é a mesma
+  coisa visual: um par rótulo/valor numa lista de definição. Duas folhas
+  dizendo a mesma medida divergiriam no primeiro ajuste de uma delas.
+*/
+.dz-empresa-ofertas { list-style: none; margin: 0; padding: 0; display: grid; gap: 16px; }
+.dz-empresa-ofertas > li { border: 1px solid var(--dz-border); border-radius: 10px; padding: 12px 14px; }
+.dz-empresa-oferta-topo { margin: 0 0 8px; display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+
+/*
+  Rascunho e aprovada NUNCA se distinguem só pela cor: cada um carrega a palavra
+  em texto, e a cor é reforço. Uma distinção só por cor não existe para quem não
+  a enxerga, e é a decisão que este produto já tomou nas outras telas.
+*/
+.dz-empresa-rascunho,
+.dz-empresa-aprovada {
+  font-size: 12px; border-radius: 999px; padding: 2px 10px; border: 1px solid var(--dz-border);
+}
+.dz-empresa-aprovada { color: #7ee2b8; border-color: #2f6b57; }
+.dz-empresa-rascunho { color: #9aa4b2; }
+
+.dz-empresa-margem { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--dz-border); }
+.dz-empresa-margem p { margin: 0 0 4px; }
+
+.dz-empresa-sugestao {
+  margin: 12px 0; padding: 12px; border: 1px dashed var(--dz-border); border-radius: 10px;
+}
+.dz-empresa-sugestao p { margin: 0 0 6px; }
+
+.dz-empresa-custos { border: 1px solid var(--dz-border); border-radius: 10px; padding: 12px; margin: 12px 0; }
+.dz-empresa-custos legend { padding: 0 6px; font-weight: 600; }
+
+/*
+  Os dois campos de um custo ficam lado a lado e QUEBRAM juntos: numa tela
+  estreita, um nome espremido ao lado de um valor espremido não é legível em
+  nenhum dos dois.
+*/
+.dz-empresa-custo { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 8px; }
+.dz-empresa-custo input { flex: 1 1 140px; min-width: 0; }
+.dz-empresa-custo button { flex: 0 0 auto; }
+
+/*
+  O rótulo que só o leitor de tela lê.
+
+  Os campos de custo mostram a função pelo `placeholder`, que some quando a
+  pessoa digita e não é anunciado como rótulo por todos os leitores. O `label`
+  existe de verdade, fora da tela — e não com `display: none`, que o tiraria da
+  árvore de acessibilidade junto.
+*/
+.dz-empresa-oculto {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap;
+}

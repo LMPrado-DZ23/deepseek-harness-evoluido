@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { Readable } from 'node:stream'
 import { describe, expect, it } from 'vitest'
 import { BUSINESS_ROUTE_CONTRACTS, createBusinessHttpExtension } from '../src/http.ts'
-import type { Empresa, RegistroDePlano, VinculoDeTarefa } from '../src/model.ts'
+import type { Empresa, RegistroDeOferta, RegistroDePlano, VinculoDeTarefa } from '../src/model.ts'
 import { BusinessService, type BusinessRepository } from '../src/service.ts'
 
 /**
@@ -24,6 +24,11 @@ class MemoryRepository implements BusinessRepository {
   links = () => this.linkRows
   putLink = async (value: VinculoDeTarefa) => {
     this.linkRows = [...this.linkRows.filter(linha => linha.project_id !== value.project_id), value]
+  }
+  offerRows: RegistroDeOferta[] = []
+  offers = () => this.offerRows
+  putOffer = async (value: RegistroDeOferta) => {
+    this.offerRows = [...this.offerRows.filter(linha => linha.offer_version_id !== value.offer_version_id), value]
   }
 }
 
@@ -105,6 +110,9 @@ describe('os contratos das rotas de empresa', () => {
       'POST /businesses/:businessId/archive project.write',
       'GET /businesses/:businessId/tasks project.read',
       'POST /businesses/:businessId/tasks project.write',
+      'GET /businesses/:businessId/offers project.read',
+      'POST /businesses/:businessId/offers project.write',
+      'POST /businesses/:businessId/offers/approve project.write',
     ])
   })
 })
@@ -281,5 +289,120 @@ describe('as rotas de tarefa da empresa', () => {
     })
     expect(resposta.status).toBe(409)
     expect(String(resposta.body['error'])).toContain('serviço de tarefas')
+  })
+})
+
+const OFERTA = {
+  nome: 'Bolo de aniversário',
+  entrega: 'Um bolo de dois quilos, decorado, entregue no endereço da pessoa.',
+  publico: 'Famílias do bairro',
+  preco: 200,
+  moeda: 'BRL',
+  capacidade: { quantidade: 4, periodo: 'dia' },
+  condicoes: ['Encomenda com três dias de antecedência'],
+  custos: [{ nome: 'Ingredientes', valor: 60 }],
+}
+
+async function comEmpresa() {
+  const f = fixture()
+  const criada = await call(f, '/businesses', 'POST', { nome: 'Bolos da Ana', origem: 'criada', plano: PLANO })
+  return { f, businessId: (criada.body.business as { business_id: string }).business_id }
+}
+
+describe('as rotas da oferta', () => {
+  it('criar devolve 201 com a primeira versão, em rascunho', async () => {
+    const { f, businessId } = await comEmpresa()
+    const criada = await call(f, `/businesses/${businessId}/offers`, 'POST', { oferta: OFERTA })
+    expect(criada.status).toBe(201)
+    expect(criada.body.offer).toMatchObject({ version: 1, approved_at: null })
+  })
+
+  it('o corpo COM `offer_key` é revisão, e sem ele é oferta nova', async () => {
+    // A diferença entre criar e revisar é exatamente um campo do corpo; duas
+    // rotas para isso diriam a mesma coisa duas vezes.
+    const { f, businessId } = await comEmpresa()
+    const primeira = await call(f, `/businesses/${businessId}/offers`, 'POST', { oferta: OFERTA })
+    const chave = (primeira.body.offer as { offer_key: string }).offer_key
+    const revisada = await call(f, `/businesses/${businessId}/offers`, 'POST', {
+      offer_key: chave, oferta: { ...OFERTA, preco: 240 },
+    })
+    expect(revisada.status).toBe(201)
+    expect(revisada.body.offer).toMatchObject({ version: 2, offer_key: chave })
+    const outra = await call(f, `/businesses/${businessId}/offers`, 'POST', { oferta: { ...OFERTA, nome: 'Torta' } })
+    expect((outra.body.offer as { offer_key: string }).offer_key).not.toBe(chave)
+  })
+
+  it('o catálogo traz UMA entrada por oferta, com a versão que vale', async () => {
+    const { f, businessId } = await comEmpresa()
+    const primeira = await call(f, `/businesses/${businessId}/offers`, 'POST', { oferta: OFERTA })
+    await call(f, `/businesses/${businessId}/offers`, 'POST', {
+      offer_key: (primeira.body.offer as { offer_key: string }).offer_key, oferta: { ...OFERTA, preco: 240 },
+    })
+    const catalogo = await call(f, `/businesses/${businessId}/offers`, 'GET')
+    expect(catalogo.status).toBe(200)
+    expect(catalogo.body.offers).toHaveLength(1)
+    expect((catalogo.body.offers as { version: number }[])[0]!.version).toBe(2)
+  })
+
+  it('aprovar devolve 200 com a MESMA versão, agora com a decisão dentro', async () => {
+    const { f, businessId } = await comEmpresa()
+    const criada = await call(f, `/businesses/${businessId}/offers`, 'POST', { oferta: OFERTA })
+    const id = (criada.body.offer as { offer_version_id: string }).offer_version_id
+    const aprovada = await call(f, `/businesses/${businessId}/offers/approve`, 'POST', { offer_version_id: id })
+    expect(aprovada.status).toBe(200)
+    expect(aprovada.body.offer).toMatchObject({ offer_version_id: id, approved_by: 'user-a' })
+  })
+
+  it('aprovar sem preço é 409 — conflito com o estado, e não pedido malformado', async () => {
+    const { f, businessId } = await comEmpresa()
+    const criada = await call(f, `/businesses/${businessId}/offers`, 'POST', { oferta: { ...OFERTA, preco: null } })
+    const id = (criada.body.offer as { offer_version_id: string }).offer_version_id
+    const recusa = await call(f, `/businesses/${businessId}/offers/approve`, 'POST', { offer_version_id: id })
+    expect(recusa.status).toBe(409)
+  })
+
+  it('custo SEM valor atravessa a fronteira: é o que declara o que falta saber', async () => {
+    // Exigir um número aqui faria a pessoa digitar zero, e o zero mentiria
+    // para cima na margem.
+    const { f, businessId } = await comEmpresa()
+    const criada = await call(f, `/businesses/${businessId}/offers`, 'POST', {
+      oferta: { ...OFERTA, custos: [{ nome: 'Frete', valor: null }] },
+    })
+    expect(criada.status).toBe(201)
+    expect((criada.body.offer as { oferta: { custos: unknown[] } }).oferta.custos).toEqual([{ nome: 'Frete', valor: null }])
+  })
+
+  it('moeda fora de ISO 4217 é 400', async () => {
+    const { f, businessId } = await comEmpresa()
+    expect((await call(f, `/businesses/${businessId}/offers`, 'POST', { oferta: { ...OFERTA, moeda: 'reais' } })).status).toBe(400)
+    expect((await call(f, `/businesses/${businessId}/offers`, 'POST', { oferta: { ...OFERTA, moeda: 'brl' } })).status).toBe(400)
+  })
+
+  it('campo desconhecido no corpo da oferta é 400, e não é ignorado em silêncio', async () => {
+    const { f, businessId } = await comEmpresa()
+    const resposta = await call(f, `/businesses/${businessId}/offers`, 'POST', {
+      oferta: { ...OFERTA, aprovada: true },
+    })
+    expect(resposta.status).toBe(400)
+  })
+
+  it('o vizinho recebe 404 no catálogo da empresa alheia, e não 403', async () => {
+    const { f, businessId } = await comEmpresa()
+    await call(f, `/businesses/${businessId}/offers`, 'POST', { oferta: OFERTA })
+    expect((await call(f, `/businesses/${businessId}/offers`, 'GET', undefined, deOutraEmpresa)).status).toBe(404)
+  })
+
+  it('quem só pode LER recebe 403 ao criar e ao aprovar', async () => {
+    const { f, businessId } = await comEmpresa()
+    expect((await call(f, `/businesses/${businessId}/offers`, 'POST', { oferta: OFERTA }, leitor)).status).toBe(403)
+    const criada = await call(f, `/businesses/${businessId}/offers`, 'POST', { oferta: OFERTA })
+    const id = (criada.body.offer as { offer_version_id: string }).offer_version_id
+    expect((await call(f, `/businesses/${businessId}/offers/approve`, 'POST', { offer_version_id: id }, leitor)).status).toBe(403)
+  })
+
+  it('o escopo NÃO vem do corpo: mandar `org_id` é 400', async () => {
+    const { f, businessId } = await comEmpresa()
+    const resposta = await call(f, `/businesses/${businessId}/offers`, 'POST', { oferta: OFERTA, org_id: 'org-b' })
+    expect(resposta.status).toBe(400)
   })
 })

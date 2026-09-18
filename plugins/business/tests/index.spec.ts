@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { DomainBusinessRepository, apply, inject, type StudioBusinessRuntime } from '../src/index.ts'
-import type { BusinessKey, Empresa, RegistroDePlano, VinculoDeTarefa } from '../src/model.ts'
+import type { BusinessKey, Empresa, RegistroDeOferta, RegistroDePlano, VinculoDeTarefa } from '../src/model.ts'
 
 /**
  * A MONTAGEM do Modo Empresa.
@@ -41,19 +41,20 @@ function contexto() {
   const empresas = tabela<Empresa>()
   const planos = tabela<RegistroDePlano>()
   const vinculos = tabela<VinculoDeTarefa>()
+  const ofertas = tabela<RegistroDeOferta>()
   const close = vi.fn(() => Promise.resolve())
   let runtime!: StudioBusinessRuntime
   const ctx = {
     storageDomain: {
       open: vi.fn((spec: { name: string }) => Promise.resolve({
-        table: () => (spec.name === 'studio_businesses' ? empresas : spec.name === 'studio_business_plans' ? planos : vinculos),
+        table: () => (spec.name === 'studio_businesses' ? empresas : spec.name === 'studio_business_plans' ? planos : spec.name === 'studio_business_tasks' ? vinculos : ofertas),
         close,
       })),
     },
     effect: vi.fn((factory: () => unknown) => factory()),
     provide: vi.fn((_nome: string, valor: StudioBusinessRuntime) => { runtime = valor }),
   }
-  return { ctx, empresas, planos, vinculos, close, runtime: () => runtime }
+  return { ctx, empresas, planos, vinculos, ofertas, close, runtime: () => runtime }
 }
 
 describe('a montagem do Modo Empresa', () => {
@@ -63,10 +64,13 @@ describe('a montagem do Modo Empresa', () => {
     expect(inject).toEqual(['storageDomain', 'promptToApp'])
   })
 
-  it('abre os TRÊS domínios e entrega um serviço que grava nas tabelas', async () => {
+  it('abre os QUATRO domínios e entrega um serviço que grava nas tabelas', async () => {
     const { ctx, empresas, planos, runtime } = contexto()
     await apply(ctx as never)
-    expect(ctx.storageDomain.open).toHaveBeenCalledTimes(3)
+    // A contagem é literal de propósito: um domínio novo declarado no modelo e
+    // esquecido no `apply` é código que existe e não executa — o defeito que
+    // `gate:profile-mounts` nasceu para pegar, uma camada acima.
+    expect(ctx.storageDomain.open).toHaveBeenCalledTimes(4)
     await runtime().service.create(ana, { nome: 'Bolos da Ana', origem: 'criada', plano: PLANO })
     expect(empresas.registros.size).toBe(1)
     expect(planos.registros.size).toBe(1)
@@ -90,7 +94,7 @@ describe('o repositório sobre as tabelas', () => {
   it('a empresa gravada é lida de volta pela CHAVE dela', async () => {
     const empresas = tabela<Empresa>()
     const planos = tabela<RegistroDePlano>()
-    const repositorio = new DomainBusinessRepository(empresas as never, planos as never, tabela<VinculoDeTarefa>() as never)
+    const repositorio = new DomainBusinessRepository(empresas as never, planos as never, tabela<VinculoDeTarefa>() as never, tabela<RegistroDeOferta>() as never)
     const empresa: Empresa = {
       business_id: 'emp-1', org_id: 'org-a', tenant_id: 'tenant-a', nome: 'Bolos da Ana',
       origem: 'criada', identidade_juridica_declarada: null, created_by: 'user-a',
@@ -106,7 +110,7 @@ describe('o repositório sobre as tabelas', () => {
     // e o histórico que o produto promete guardar sumiria em silêncio.
     const empresas = tabela<Empresa>()
     const planos = tabela<RegistroDePlano>()
-    const repositorio = new DomainBusinessRepository(empresas as never, planos as never, tabela<VinculoDeTarefa>() as never)
+    const repositorio = new DomainBusinessRepository(empresas as never, planos as never, tabela<VinculoDeTarefa>() as never, tabela<RegistroDeOferta>() as never)
     const base = {
       business_id: 'emp-1', org_id: 'org-a', tenant_id: 'tenant-a', plano: PLANO,
       created_by: 'user-a', created_at: '2026-09-17T12:00:00.000Z',
@@ -121,7 +125,7 @@ describe('o repositório sobre as tabelas', () => {
     // Com o `link_id` na chave, dois vínculos para o mesmo projeto conviveriam,
     // e a pergunta "de quem é esta tarefa?" teria duas respostas.
     const vinculos = tabela<VinculoDeTarefa>()
-    const repositorio = new DomainBusinessRepository(tabela<Empresa>() as never, tabela<RegistroDePlano>() as never, vinculos as never)
+    const repositorio = new DomainBusinessRepository(tabela<Empresa>() as never, tabela<RegistroDePlano>() as never, vinculos as never, tabela<RegistroDeOferta>() as never)
     const base = {
       business_id: 'emp-1', project_id: 'proj-1', org_id: 'org-a', tenant_id: 'tenant-a',
       plan_version: 1, created_by: 'user-a', created_at: '2026-09-17T12:00:00.000Z',
@@ -136,9 +140,45 @@ describe('o repositório sobre as tabelas', () => {
     // Uma cópia em memória ao lado da tabela seria uma segunda verdade, e
     // divergiria na primeira escrita que não passasse por este repositório.
     const empresas = tabela<Empresa>()
-    const repositorio = new DomainBusinessRepository(empresas as never, tabela<RegistroDePlano>() as never, tabela<VinculoDeTarefa>() as never)
+    const repositorio = new DomainBusinessRepository(empresas as never, tabela<RegistroDePlano>() as never, tabela<VinculoDeTarefa>() as never, tabela<RegistroDeOferta>() as never)
     expect(repositorio.businesses()).toHaveLength(0)
     empresas.registros.set('emp-9', { business_id: 'emp-9' } as Empresa)
     expect(repositorio.businesses()).toHaveLength(1)
+  })
+})
+
+describe('o repositório de ofertas', () => {
+  it('a oferta é gravada pela VERSÃO, e não pela oferta', async () => {
+    // Com a `offer_key` na chave, gravar a versão 2 apagaria a 1, e "sob que
+    // condições este pedido foi aceito?" ficaria sem resposta no primeiro
+    // reajuste de preço.
+    const ofertas = tabela<RegistroDeOferta>()
+    const repositorio = new DomainBusinessRepository(
+      tabela<Empresa>() as never, tabela<RegistroDePlano>() as never, tabela<VinculoDeTarefa>() as never, ofertas as never,
+    )
+    const base = {
+      offer_key: 'of-1', business_id: 'emp-1', org_id: 'org-a', tenant_id: 'tenant-a',
+      oferta: {
+        nome: 'Bolo', entrega: 'Um bolo de dois quilos, decorado.', publico: 'Famílias',
+        preco: 200, moeda: 'BRL', capacidade: { quantidade: 4, periodo: 'semana' as const },
+        condicoes: [], custos: [],
+      },
+      created_by: 'user-a', created_at: '2026-09-18T12:00:00.000Z',
+      approved_at: null, approved_by: null,
+    }
+    await repositorio.putOffer({ ...base, offer_version_id: 'ov-1', version: 1 })
+    await repositorio.putOffer({ ...base, offer_version_id: 'ov-2', version: 2 })
+    expect([...ofertas.registros.keys()]).toEqual(['ov-1', 'ov-2'])
+    expect(repositorio.offers().map(registro => registro.version)).toEqual([1, 2])
+  })
+
+  it('a leitura das ofertas também vê o que outra escrita gravou', async () => {
+    const ofertas = tabela<RegistroDeOferta>()
+    const repositorio = new DomainBusinessRepository(
+      tabela<Empresa>() as never, tabela<RegistroDePlano>() as never, tabela<VinculoDeTarefa>() as never, ofertas as never,
+    )
+    expect(repositorio.offers()).toHaveLength(0)
+    ofertas.registros.set('ov-9', { offer_version_id: 'ov-9' } as RegistroDeOferta)
+    expect(repositorio.offers()).toHaveLength(1)
   })
 })

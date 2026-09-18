@@ -677,6 +677,15 @@ produto existe para não fazer.
     O atalho **não é uma segunda porta**: passa pela mesma condição do botão,
     inclusive o bloqueio de privacidade.
 
+53. **EMP-04 — o catálogo de ofertas (`BUS-03`), com a margem dizendo o que não sabe.**
+    A empresa passou a dizer o que entrega, para quem, por quanto, com que
+    capacidade e sob que condições — versionado, com a aprovação dentro da
+    versão. As duas frases do fim do aceite viraram regra com nome próprio: a
+    sugestão de preço devolve `aplicado: false` e **nunca** vira o preço, e a
+    margem tem **três** estados (DESCONHECIDA, TETO, ESTIMADA), nenhum deles
+    zero. A conferência da captura achou o rótulo em negrito dizendo "Margem
+    estimada" sobre um teto; o rótulo passou a sair do mesmo estado.
+
 52. **EMP-CORR — a colisão de rótulo com a matriz canônica, corrigida.**
     Três fatias do Modo Empresa saíram rotuladas `BUS-01..03`. Na matriz,
     `BUS-02` é pesquisa de mercado e `BUS-03` é oferta/catálogo/preço — quem

@@ -37,6 +37,7 @@
       studio_businesses: postgres
       studio_business_plans: postgres
       studio_business_tasks: postgres
+      studio_business_offers: postgres
       studio_previews: postgres
       studio_preview_admissions: postgres
       studio_projects: postgres

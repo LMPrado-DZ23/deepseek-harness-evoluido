@@ -24,7 +24,7 @@ import { PromptToAppService, type PromptToAppActor, type PromptToAppRepository }
 import { createZip, listZip } from '../../../plugins/integration-hub/src/zip.js'
 import { createBusinessHttpExtension } from '../../../plugins/business/src/http.js'
 import { BusinessService, type BusinessRepository } from '../../../plugins/business/src/service.js'
-import type { Empresa, RegistroDePlano, VinculoDeTarefa } from '../../../plugins/business/src/model.js'
+import type { Empresa, RegistroDeOferta, RegistroDePlano, VinculoDeTarefa } from '../../../plugins/business/src/model.js'
 import { createPreviewGatewayHttpHandler, type PreviewForwardPort } from '../../../plugins/preview/src/gateway.js'
 import { createPreviewProjectHttpExtension } from '../../../plugins/preview/src/http.js'
 import type { PreviewAdmission, PreviewRecord } from '../../../plugins/preview/src/model.js'
@@ -338,6 +338,11 @@ class MemoryBusinessRepository implements BusinessRepository {
   putLink = async (value: VinculoDeTarefa) => {
     this.linkRows = [...this.linkRows.filter(linha => linha.project_id !== value.project_id), value]
   }
+  offerRows: RegistroDeOferta[] = []
+  offers = () => this.offerRows
+  putOffer = async (value: RegistroDeOferta) => {
+    this.offerRows = [...this.offerRows.filter(linha => linha.offer_version_id !== value.offer_version_id), value]
+  }
 }
 const businessRepository = new MemoryBusinessRepository()
 let businessSequence = 0
@@ -591,6 +596,7 @@ const server = createServer((request, response) => {
     businessRepository.businessRows = []
     businessRepository.planRows = []
     businessRepository.linkRows = []
+    businessRepository.offerRows = []
     return plain(response, 200, 'ok')
   }
   // Planta um objetivo SEM a tela saber — é o que outra pessoa (ou outra aba)

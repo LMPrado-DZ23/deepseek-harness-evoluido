@@ -1,8 +1,9 @@
 import { roleAllows, type StudioRole } from '@dz23-studio/policy'
 import type { StudioProject } from '@dz23-studio/prompt-to-app'
 import { t } from './i18n.js'
-import type { Empresa, PlanoDeNegocio, RegistroDePlano, VinculoDeTarefa } from './model.js'
+import type { Empresa, Oferta, PlanoDeNegocio, RegistroDeOferta, RegistroDePlano, VinculoDeTarefa } from './model.js'
 import { briefingDaEmpresa, nomeDaTarefa, planoNormalizado, planoVigente, proximaVersao, recusaDePlano, textoNormalizado } from './regras.js'
+import { catalogoVigente, proximaVersaoDaOferta, recusaDeAprovacao, recusaDeOferta } from './oferta.js'
 
 /** Quem age. O escopo vem daqui, e nunca do corpo do pedido. */
 export interface BusinessActor {
@@ -26,6 +27,8 @@ export interface BusinessRepository {
   putPlan(value: RegistroDePlano): Promise<void>
   links(): readonly VinculoDeTarefa[]
   putLink(value: VinculoDeTarefa): Promise<void>
+  offers(): readonly RegistroDeOferta[]
+  putOffer(value: RegistroDeOferta): Promise<void>
 }
 
 /** Uma tarefa, no pouco que o Modo Empresa precisa saber sobre ela. */
@@ -297,6 +300,132 @@ export class BusinessService {
     }
     await this.#repository.putLink(vinculo)
     return { tarefa, vinculo }
+  }
+
+  /**
+   * O CATÁLOGO da empresa: a versão que vale de cada oferta — `BUS-03`.
+   *
+   * Vale a versão de maior número, aprovada ou não. Mostrar só as aprovadas
+   * faria uma revisão em andamento sumir da tela de quem a escreveu, e quem
+   * precisa da distinção lê `approved_at`, que vem junto.
+   * @param actor - quem lê.
+   * @param businessId - a empresa.
+   * @returns uma entrada por oferta, em ordem alfabética.
+   */
+  catalogo(actor: BusinessActor, businessId: string): readonly RegistroDeOferta[] {
+    this.get(actor, businessId)
+    return catalogoVigente(this.#ofertasDaEmpresa(actor, businessId))
+  }
+
+  /**
+   * Todas as versões de UMA oferta, da mais nova para a mais antiga.
+   * @param actor - quem lê.
+   * @param businessId - a empresa.
+   * @param offerKey - a oferta.
+   * @returns as versões.
+   */
+  versoesDaOferta(actor: BusinessActor, businessId: string, offerKey: string): readonly RegistroDeOferta[] {
+    this.get(actor, businessId)
+    return this.#ofertasDaEmpresa(actor, businessId)
+      .filter(registro => registro.offer_key === offerKey)
+      .sort((esquerda, direita) => direita.version - esquerda.version)
+  }
+
+  /**
+   * Cria uma oferta NOVA no catálogo — sempre na versão 1, sempre rascunho.
+   *
+   * Ela nasce NÃO APROVADA mesmo quando chega completa. Aprovar é um ato de
+   * quem responde pela empresa, e fazê-lo acontecer junto da criação tiraria
+   * dessa pessoa a única decisão que o aceite pede que seja dela.
+   * @param actor - quem cria.
+   * @param businessId - a empresa.
+   * @param oferta - a oferta proposta.
+   * @returns a primeira versão.
+   */
+  async criarOferta(actor: BusinessActor, businessId: string, oferta: Oferta): Promise<RegistroDeOferta> {
+    this.#autorizar(actor, 'project.write')
+    const empresa = this.get(actor, businessId)
+    if (empresa.archived_at !== null) throw new BusinessError('CONFLICT', t('errors.businessArchived'))
+    return this.#gravarOferta(actor, empresa, this.#createId(), oferta)
+  }
+
+  /**
+   * Grava uma versão NOVA de uma oferta que já existe.
+   *
+   * A oferta nunca é editada no lugar, pela mesma razão do plano: um pedido
+   * aceito sob as condições de ontem precisa continuar legível depois de as
+   * condições virarem outras.
+   * @param actor - quem escreve.
+   * @param businessId - a empresa.
+   * @param offerKey - a oferta.
+   * @param oferta - a versão proposta.
+   * @returns a versão gravada.
+   */
+  async revisarOferta(actor: BusinessActor, businessId: string, offerKey: string, oferta: Oferta): Promise<RegistroDeOferta> {
+    this.#autorizar(actor, 'project.write')
+    const empresa = this.get(actor, businessId)
+    const existe = this.#ofertasDaEmpresa(actor, businessId).some(registro => registro.offer_key === offerKey)
+    if (!existe) throw new BusinessError('NOT_FOUND', t('errors.offerNotFound'))
+    return this.#gravarOferta(actor, empresa, offerKey, oferta)
+  }
+
+  /**
+   * APROVA uma versão da oferta.
+   *
+   * A aprovação fica na versão, e é isso que "condições aprovadas" quer dizer:
+   * as condições que estavam escritas quando alguém aprovou. Ela NÃO publica
+   * nada — não cria página, catálogo público, cobrança nem anúncio em lugar
+   * nenhum, e o aceite de `BUS-03` é explícito sobre isso.
+   * @param actor - quem aprova.
+   * @param businessId - a empresa.
+   * @param offerVersionId - a versão.
+   * @returns a versão aprovada.
+   */
+  async aprovarOferta(actor: BusinessActor, businessId: string, offerVersionId: string): Promise<RegistroDeOferta> {
+    this.#autorizar(actor, 'project.write')
+    const empresa = this.get(actor, businessId)
+    if (empresa.archived_at !== null) throw new BusinessError('CONFLICT', t('errors.businessArchived'))
+    const registro = this.#ofertasDaEmpresa(actor, businessId).find(valor => valor.offer_version_id === offerVersionId)
+    if (registro === undefined) throw new BusinessError('NOT_FOUND', t('errors.offerNotFound'))
+    const recusa = recusaDeAprovacao(registro)
+    // As chaves ficam LITERAIS, e não montadas: uma chave interpolada não é
+    // encontrável por busca e `gate:i18n` não consegue segui-la.
+    if (recusa === 'ja-aprovada') throw new BusinessError('CONFLICT', t('errors.offerAlreadyApproved'))
+    if (recusa === 'sem-preco') throw new BusinessError('CONFLICT', t('errors.offerPriceRequired'))
+    if (recusa === 'sem-capacidade') throw new BusinessError('CONFLICT', t('errors.offerCapacityRequired'))
+    if (recusa === 'sem-condicoes') throw new BusinessError('CONFLICT', t('errors.offerTermsRequired'))
+    const aprovada: RegistroDeOferta = {
+      ...registro,
+      approved_at: this.#now().toISOString(),
+      approved_by: actor.userId,
+    }
+    await this.#repository.putOffer(aprovada)
+    return aprovada
+  }
+
+  #ofertasDaEmpresa(actor: BusinessActor, businessId: string): readonly RegistroDeOferta[] {
+    return this.#repository.offers()
+      .filter(registro => registro.business_id === businessId && this.#noEscopo(actor, registro))
+  }
+
+  async #gravarOferta(actor: BusinessActor, empresa: Empresa, offerKey: string, proposta: Oferta): Promise<RegistroDeOferta> {
+    const anteriores = this.#ofertasDaEmpresa(actor, empresa.business_id)
+    const vigente = catalogoVigente(anteriores).find(registro => registro.offer_key === offerKey)
+    const recusa = recusaDeOferta(empresa, vigente, proposta)
+    if (recusa === 'arquivada') throw new BusinessError('CONFLICT', t('errors.businessArchived'))
+    if (recusa !== null) throw new BusinessError('CONFLICT', t('errors.offerUnchanged'))
+    const registro: RegistroDeOferta = {
+      offer_version_id: this.#createId(), offer_key: offerKey,
+      business_id: empresa.business_id, org_id: actor.orgId, tenant_id: actor.tenantId,
+      version: proximaVersaoDaOferta(anteriores, offerKey), oferta: proposta,
+      created_by: actor.userId, created_at: this.#now().toISOString(),
+      // Nasce SEMPRE em rascunho, inclusive a revisão de uma oferta aprovada:
+      // herdar a aprovação faria condições que ninguém leu virarem "condições
+      // aprovadas", que é exatamente o que o aceite proíbe.
+      approved_at: null, approved_by: null,
+    }
+    await this.#repository.putOffer(registro)
+    return registro
   }
 
   async #gravarPlano(actor: BusinessActor, empresa: Empresa, proposto: PlanoDeNegocio): Promise<RegistroDePlano> {

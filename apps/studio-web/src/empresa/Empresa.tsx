@@ -2,7 +2,12 @@ import { ArrowLeft, Building2 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import copy from '../i18n/empresa.pt-BR.json'
 import { STUDIO_HOME_PATH } from '../navigation'
-import { createEmpresaApi, type Empresa, type EmpresaApi, type RegistroDePlano, type VinculoDeTarefa } from './empresaApi'
+import { createEmpresaApi, type Empresa, type EmpresaApi, type RegistroDeOferta, type RegistroDePlano, type VinculoDeTarefa } from './empresaApi'
+import {
+  OFERTA_VAZIA, chaveDaMargem, chaveDoEstadoDaOferta, chaveDoRotuloDaMargem, dinheiroEmTexto, margemDaOferta,
+  ofertaDoRascunho, percentualEmTexto, rascunhoDaOferta, recusaDaOferta, recusaDeAprovacaoNaTela,
+  sugestaoDePreco, type RascunhoDaOferta,
+} from './oferta'
 import { STUDIO_CATEGORIES } from '../categories'
 import { createHubApi, HUB_API_PREFIX } from '../hub/hubApi'
 import { formatBytes, formatDate } from '../hub/presentation'
@@ -168,6 +173,199 @@ export function TotalDePacotes({ total }: { readonly total: number }) {
 }
 
 /**
+ * A MARGEM de uma oferta, com o estado do que se sabe — `BUS-03`.
+ *
+ * Três respostas, e nenhuma delas é zero. A frase do estado vem junto do número
+ * de propósito: um "70,0%" sozinho é lido como fato, e o aceite exige que
+ * "margem estimada declara custos ausentes e não é lucro garantido".
+ */
+export function MargemDaOfertaLida({ oferta }: { readonly oferta: RegistroDeOferta['oferta'] }) {
+  const margem = margemDaOferta(oferta)
+  return <div className="dz-empresa-margem">
+    <p>
+      <strong>{copy[chaveDoRotuloDaMargem(margem)]}</strong>
+      {margem.porUnidade !== null && margem.percentual !== null && <>
+        {': '}
+        {dinheiroEmTexto(margem.porUnidade, oferta.moeda)}
+        {' · '}
+        {percentualEmTexto(margem.percentual)}
+      </>}
+    </p>
+    <p className="dz-empresa-ajuda">{copy[chaveDaMargem(margem)]}</p>
+    {margem.custosSemValor.length > 0 && <p className="dz-empresa-ajuda">
+      {copy.margemSemValor.replace('{custos}', margem.custosSemValor.join(', '))}
+    </p>}
+  </div>
+}
+
+/**
+ * UMA versão do catálogo, como a tela a lê.
+ *
+ * O estado — rascunho ou aprovada — vem antes de tudo porque é ele que decide o
+ * que as condições significam: "condições aprovadas" só existem na versão que
+ * alguém aprovou.
+ */
+export function OfertaLida({ registro }: { readonly registro: RegistroDeOferta }) {
+  const { oferta } = registro
+  return <div className="dz-empresa-oferta">
+    <p className="dz-empresa-oferta-topo">
+      <strong>{oferta.nome}</strong>
+      {' '}
+      <span className="dz-empresa-ajuda">{copy.ofertaVersao.replace('{versao}', String(registro.version))}</span>
+      {' '}
+      <span className={registro.approved_at === null ? 'dz-empresa-rascunho' : 'dz-empresa-aprovada'}>
+        {copy[chaveDoEstadoDaOferta(registro)]}
+      </span>
+    </p>
+    <dl className="dz-empresa-plano">
+      <div><dt>{copy.ofertaEntrega}</dt><dd>{oferta.entrega}</dd></div>
+      <div><dt>{copy.ofertaPublico}</dt><dd>{oferta.publico}</dd></div>
+      <div>
+        <dt>{copy.ofertaPreco}</dt>
+        {/* Preço ausente é DITO, e não desenhado como zero nem deixado em branco. */}
+        <dd>{oferta.preco === null ? copy.ofertaSemPreco : dinheiroEmTexto(oferta.preco, oferta.moeda)}</dd>
+      </div>
+      <div>
+        <dt>{copy.ofertaCapacidade}</dt>
+        <dd>{oferta.capacidade.quantidade} / {copy[periodoEmTexto(oferta.capacidade.periodo)]}</dd>
+      </div>
+      <div>
+        <dt>{copy.ofertaCondicoes}</dt>
+        <dd>{oferta.condicoes.length === 0
+          ? copy.semLimites
+          : <ul>{oferta.condicoes.map(condicao => <li key={condicao}>{condicao}</li>)}</ul>}</dd>
+      </div>
+    </dl>
+    <MargemDaOfertaLida oferta={oferta} />
+  </div>
+}
+
+/**
+ * A chave do texto de um período.
+ *
+ * Existe como função porque um `periodo === 'dia' ? … : …` dentro do JSX não é
+ * exercitado por teste nenhum, e porque um período novo no domínio tem de
+ * quebrar o tipo aqui em vez de aparecer como chave indefinida na tela.
+ * @param periodo - o período da capacidade.
+ * @returns a chave do catálogo.
+ */
+export function periodoEmTexto(periodo: 'dia' | 'semana' | 'mes'): 'ofertaPeriodoDia' | 'ofertaPeriodoSemana' | 'ofertaPeriodoMes' {
+  if (periodo === 'dia') return 'ofertaPeriodoDia'
+  return periodo === 'semana' ? 'ofertaPeriodoSemana' : 'ofertaPeriodoMes'
+}
+
+/**
+ * O preço SUGERIDO, mostrado e nunca aplicado.
+ *
+ * O texto de ajuda diz, com todas as letras, que ele não foi aplicado. Um
+ * número sozinho ao lado de um campo de preço é lido como preenchimento, e o
+ * aceite é explícito: "preço sugerido não publicado automaticamente".
+ */
+export function SugestaoDePreco({ rascunho, margemDesejada, aoMudarMargem }: {
+  readonly rascunho: RascunhoDaOferta
+  readonly margemDesejada: string
+  readonly aoMudarMargem: (valor: string) => void
+}) {
+  const desejada = Number(margemDesejada.replace(',', '.'))
+  const sugerido = sugestaoDePreco(ofertaDoRascunho(rascunho), desejada)
+  return <div className="dz-empresa-sugestao">
+    <p className="dz-empresa-campo">
+      <label htmlFor="dz-empresa-margem-desejada">{copy.sugestaoMargem}</label>
+      <input id="dz-empresa-margem-desejada" type="text" inputMode="decimal" value={margemDesejada}
+        onChange={evento => aoMudarMargem(evento.target.value)} />
+    </p>
+    <p>
+      <strong>{copy.sugestao}</strong>
+      {': '}
+      {sugerido === null
+        ? copy.sugestaoSemCusto
+        : dinheiroEmTexto(sugerido, ofertaDoRascunho(rascunho).moeda)}
+    </p>
+    <p className="dz-empresa-ajuda">{copy.sugestaoAjuda}</p>
+  </div>
+}
+
+/** Os campos de uma oferta em edição. */
+export function CamposDaOferta({ rascunho, aoMudar }: {
+  readonly rascunho: RascunhoDaOferta
+  readonly aoMudar: (parcial: Partial<RascunhoDaOferta>) => void
+}) {
+  return <>
+    <p className="dz-empresa-campo">
+      <label htmlFor="dz-oferta-nome">{copy.ofertaNome}</label>
+      <input id="dz-oferta-nome" type="text" value={rascunho.nome}
+        onChange={evento => aoMudar({ nome: evento.target.value })} />
+    </p>
+    <p className="dz-empresa-campo">
+      <label htmlFor="dz-oferta-entrega">{copy.ofertaEntrega}</label>
+      <textarea id="dz-oferta-entrega" rows={3} value={rascunho.entrega}
+        onChange={evento => aoMudar({ entrega: evento.target.value })} />
+      <span className="dz-empresa-ajuda">{copy.ofertaEntregaAjuda}</span>
+    </p>
+    <p className="dz-empresa-campo">
+      <label htmlFor="dz-oferta-publico">{copy.ofertaPublico}</label>
+      <input id="dz-oferta-publico" type="text" value={rascunho.publico}
+        onChange={evento => aoMudar({ publico: evento.target.value })} />
+    </p>
+    <p className="dz-empresa-campo">
+      <label htmlFor="dz-oferta-preco">{copy.ofertaPreco}</label>
+      <input id="dz-oferta-preco" type="text" inputMode="decimal" value={rascunho.preco}
+        onChange={evento => aoMudar({ preco: evento.target.value })} />
+      <span className="dz-empresa-ajuda">{copy.ofertaPrecoAjuda}</span>
+    </p>
+    <p className="dz-empresa-campo">
+      <label htmlFor="dz-oferta-moeda">{copy.ofertaMoeda}</label>
+      <input id="dz-oferta-moeda" type="text" maxLength={3} value={rascunho.moeda}
+        onChange={evento => aoMudar({ moeda: evento.target.value })} />
+      <span className="dz-empresa-ajuda">{copy.ofertaMoedaAjuda}</span>
+    </p>
+    <p className="dz-empresa-campo">
+      <label htmlFor="dz-oferta-quantidade">{copy.ofertaCapacidade}</label>
+      <input id="dz-oferta-quantidade" type="text" inputMode="numeric" value={rascunho.quantidade}
+        onChange={evento => aoMudar({ quantidade: evento.target.value })} />
+    </p>
+    <p className="dz-empresa-campo">
+      <label htmlFor="dz-oferta-periodo">{copy.ofertaPeriodo}</label>
+      <select id="dz-oferta-periodo" value={rascunho.periodo}
+        onChange={evento => aoMudar({ periodo: evento.target.value as RascunhoDaOferta['periodo'] })}>
+        <option value="dia">{copy.ofertaPeriodoDia}</option>
+        <option value="semana">{copy.ofertaPeriodoSemana}</option>
+        <option value="mes">{copy.ofertaPeriodoMes}</option>
+      </select>
+    </p>
+    <p className="dz-empresa-campo">
+      <label htmlFor="dz-oferta-condicoes">{copy.ofertaCondicoes}</label>
+      <textarea id="dz-oferta-condicoes" rows={3} value={rascunho.condicoes}
+        onChange={evento => aoMudar({ condicoes: evento.target.value })} />
+      <span className="dz-empresa-ajuda">{copy.ofertaCondicoesAjuda}</span>
+    </p>
+    <fieldset className="dz-empresa-custos">
+      <legend>{copy.ofertaCustos}</legend>
+      <p className="dz-empresa-ajuda">{copy.ofertaCustosAjuda}</p>
+      {rascunho.custos.map((custo, indice) => <p key={indice} className="dz-empresa-custo">
+        <label htmlFor={`dz-oferta-custo-nome-${indice}`} className="dz-empresa-oculto">{copy.ofertaCustoNome}</label>
+        <input id={`dz-oferta-custo-nome-${indice}`} type="text" placeholder={copy.ofertaCustoNome} value={custo.nome}
+          onChange={evento => aoMudar({
+            custos: rascunho.custos.map((item, posicao) => (posicao === indice ? { ...item, nome: evento.target.value } : item)),
+          })} />
+        <label htmlFor={`dz-oferta-custo-valor-${indice}`} className="dz-empresa-oculto">{copy.ofertaCustoValor}</label>
+        <input id={`dz-oferta-custo-valor-${indice}`} type="text" inputMode="decimal" placeholder={copy.ofertaCustoValor} value={custo.valor}
+          onChange={evento => aoMudar({
+            custos: rascunho.custos.map((item, posicao) => (posicao === indice ? { ...item, valor: evento.target.value } : item)),
+          })} />
+        <button type="button" aria-label={copy.ofertaCustoRemover}
+          onClick={() => aoMudar({ custos: rascunho.custos.filter((_, posicao) => posicao !== indice) })}>×</button>
+      </p>)}
+      <p className="dz-empresa-acoes">
+        <button type="button" onClick={() => aoMudar({ custos: [...rascunho.custos, { nome: '', valor: '' }] })}>
+          {copy.ofertaCustoAdicionar}
+        </button>
+      </p>
+    </fieldset>
+  </>
+}
+
+/**
  * A tela das empresas — `BUS-01`, a porta do Modo Empresa.
  *
  * A ação NOVA que ela entrega, inteira: cadastrar uma empresa com objetivo,
@@ -193,6 +391,17 @@ export function EmpresaScreen({ api = cliente }: { readonly api?: EmpresaApi } =
   /* `null` é "ainda lendo", que é diferente de "não produziu nada". */
   const [pacotes, setPacotes] = useState<readonly PacoteDaTarefa[] | null>(null)
   const [novaTarefa, setNovaTarefa] = useState<RascunhoDaTarefa | null>(null)
+  /* `null` é "ainda lendo", e é diferente de "esta empresa não tem oferta". */
+  const [ofertas, setOfertas] = useState<readonly RegistroDeOferta[] | null>(null)
+  /*
+    A oferta em edição, e QUAL oferta ela revisa.
+
+    `offerKey: null` é oferta NOVA. Guardar as duas coisas juntas evita o estado
+    impossível de estar editando sem saber se é criação ou revisão — que é
+    exatamente onde uma revisão viraria uma oferta duplicada no catálogo.
+  */
+  const [ofertaEmEdicao, setOfertaEmEdicao] = useState<{ readonly offerKey: string | null; readonly rascunho: RascunhoDaOferta } | null>(null)
+  const [margemDesejada, setMargemDesejada] = useState('50')
   /*
     A chave de intenção vive num `ref`, e não no estado: ela precisa sobreviver
     ao render sem causar outro, e precisa ser a MESMA em cada tentativa do mesmo
@@ -226,6 +435,9 @@ export function EmpresaScreen({ api = cliente }: { readonly api?: EmpresaApi } =
       setPacotes(null)
       setPacotes(await lerPacotes(vinculos))
       setNovaTarefa(null)
+      setOfertaEmEdicao(null)
+      setOfertas(null)
+      setOfertas(await api.ofertas(businessId))
     } catch (causa) {
       setErro(causa instanceof Error ? causa.message : copy.erroLeitura)
     }
@@ -266,6 +478,42 @@ export function EmpresaScreen({ api = cliente }: { readonly api?: EmpresaApi } =
       await api.revisarPlano(aberta.empresa.business_id, planoDoRascunho(revisao))
       setRevisao(null)
       setAviso(copy.revisada)
+      await abrir(aberta.empresa.business_id)
+    } catch (causa) {
+      setErro(causa instanceof Error ? causa.message : copy.erroLeitura)
+    } finally {
+      setEnviando(false)
+    }
+  }
+
+  const recusaDoCatalogo = ofertaEmEdicao === null ? null : recusaDaOferta(ofertaEmEdicao.rascunho)
+
+  async function gravarOferta() {
+    if (aberta === null || ofertaEmEdicao === null || recusaDoCatalogo !== null) return
+    setEnviando(true)
+    try {
+      const enviada = ofertaDoRascunho(ofertaEmEdicao.rascunho)
+      // A MESMA rota; a diferença entre criar e revisar é a chave da oferta, e
+      // ela vem do estado — nunca do nome digitado, que muda entre versões.
+      if (ofertaEmEdicao.offerKey === null) {
+        await api.criarOferta(aberta.empresa.business_id, enviada)
+      } else {
+        await api.revisarOferta(aberta.empresa.business_id, ofertaEmEdicao.offerKey, enviada)
+      }
+      setOfertaEmEdicao(null)
+      await abrir(aberta.empresa.business_id)
+    } catch (causa) {
+      setErro(causa instanceof Error ? causa.message : copy.erroLeitura)
+    } finally {
+      setEnviando(false)
+    }
+  }
+
+  async function aprovarOferta(offerVersionId: string) {
+    if (aberta === null) return
+    setEnviando(true)
+    try {
+      await api.aprovarOferta(aberta.empresa.business_id, offerVersionId)
       await abrir(aberta.empresa.business_id)
     } catch (causa) {
       setErro(causa instanceof Error ? causa.message : copy.erroLeitura)
@@ -417,6 +665,62 @@ export function EmpresaScreen({ api = cliente }: { readonly api?: EmpresaApi } =
                   <PlanoLido registro={registro} />
                 </section>)}
               </details>}
+              <section className="dz-empresa-catalogo" aria-labelledby={`dz-empresa-catalogo-${empresa.business_id}`}>
+                <h4 id={`dz-empresa-catalogo-${empresa.business_id}`}>{copy.catalogo}</h4>
+                <p className="dz-empresa-ajuda">{copy.catalogoAjuda}</p>
+                {/*
+                  TRÊS estados, e não dois: ainda lendo, leu e não há nenhuma,
+                  leu e tem. Dizer "não tem oferta" enquanto a leitura está em
+                  voo é afirmar sem ter olhado.
+                */}
+                {ofertas === null
+                  ? <p className="dz-empresa-ajuda">{copy.catalogoLendo}</p>
+                  : ofertas.length === 0
+                    ? <p className="dz-destino-vazio">{copy.catalogoVazio}</p>
+                    : <ul className="dz-empresa-ofertas">
+                      {ofertas.map(registro => <li key={registro.offer_key}>
+                        <OfertaLida registro={registro} />
+                        <p className="dz-empresa-acoes">
+                          <button type="button" disabled={enviando}
+                            onClick={() => setOfertaEmEdicao({ offerKey: registro.offer_key, rascunho: rascunhoDaOferta(registro.oferta) })}>
+                            {copy.revisarOferta}
+                          </button>
+                          {/*
+                            O botão de aprovar só aparece onde aprovar é
+                            possível, e o que impede está escrito ao lado — um
+                            botão ligado que recusa depois ensina a pessoa a
+                            desconfiar do produto.
+                          */}
+                          {registro.approved_at === null && recusaDeAprovacaoNaTela(registro.oferta) === null && <button
+                            type="button" className="dz-empresa-primario" disabled={enviando}
+                            onClick={() => void aprovarOferta(registro.offer_version_id)}>
+                            {enviando ? copy.aprovando : copy.aprovarOferta}
+                          </button>}
+                        </p>
+                        {registro.approved_at === null && recusaDeAprovacaoNaTela(registro.oferta) !== null && <p className="dz-empresa-recusa" role="status">
+                          {frase(recusaDeAprovacaoNaTela(registro.oferta)!)}
+                        </p>}
+                      </li>)}
+                    </ul>}
+                {ofertaEmEdicao === null
+                  ? <p className="dz-empresa-acoes">
+                    <button type="button" onClick={() => setOfertaEmEdicao({ offerKey: null, rascunho: OFERTA_VAZIA })}>
+                      {copy.novaOferta}
+                    </button>
+                    <span className="dz-empresa-ajuda">{copy.ofertaNaoPublica}</span>
+                  </p>
+                  : <div className="dz-empresa-nova-oferta">
+                    <CamposDaOferta rascunho={ofertaEmEdicao.rascunho}
+                      aoMudar={parcial => setOfertaEmEdicao({ ...ofertaEmEdicao, rascunho: { ...ofertaEmEdicao.rascunho, ...parcial } })} />
+                    <SugestaoDePreco rascunho={ofertaEmEdicao.rascunho} margemDesejada={margemDesejada} aoMudarMargem={setMargemDesejada} />
+                    {recusaDoCatalogo !== null && <p className="dz-empresa-recusa" role="status">{frase(recusaDoCatalogo)}</p>}
+                    <p className="dz-empresa-acoes">
+                      <button type="button" className="dz-empresa-primario" disabled={recusaDoCatalogo !== null || enviando}
+                        onClick={() => void gravarOferta()}>{enviando ? copy.salvando : copy.salvar}</button>
+                      <button type="button" onClick={() => setOfertaEmEdicao(null)}>{copy.cancelar}</button>
+                    </p>
+                  </div>}
+              </section>
               <section className="dz-empresa-tarefas" aria-labelledby={`dz-empresa-tarefas-${empresa.business_id}`}>
                 <h4 id={`dz-empresa-tarefas-${empresa.business_id}`}>{copy.tarefas}</h4>
                 {tarefas.length === 0

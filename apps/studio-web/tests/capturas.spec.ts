@@ -154,6 +154,31 @@ test('captura a jornada: home → tarefa → resultado → continuação', async
   await expect(page.getByLabel('Tarefas desta empresa').getByRole('link', { name: 'uma página para receber encomendas do bairro' })).toBeVisible()
   await tirar('17-empresa-tarefa')
 
+  /*
+    O CATÁLOGO da empresa (BUS-03), e a captura escolhe deliberadamente o estado
+    mais difícil: uma oferta com custo SEM valor. É nele que a margem tem de
+    dizer que é um TETO e nomear o que falta saber — se ela escrever "70%" ali,
+    a captura mostra o defeito que nenhum número sozinho denunciaria.
+  */
+  await page.getByRole('button', { name: 'Cadastrar oferta' }).click()
+  await page.getByLabel('Nome da oferta').fill('Bolo de aniversário')
+  await page.getByLabel('O que a empresa entrega').fill('Um bolo de dois quilos, decorado, entregue no endereço da pessoa.')
+  await page.getByLabel('Para quem', { exact: true }).last().fill('Famílias do bairro')
+  await page.getByLabel('Preço', { exact: true }).fill('200')
+  await page.getByLabel('Quanto consegue entregar').fill('4')
+  await page.getByLabel('Condições').fill('Encomenda com três dias de antecedência')
+  await page.getByRole('button', { name: 'Adicionar custo' }).click()
+  await page.getByLabel('Custo', { exact: true }).fill('Ingredientes')
+  await page.getByLabel('Valor', { exact: true }).fill('60')
+  await page.getByRole('button', { name: 'Adicionar custo' }).click()
+  await page.getByLabel('Custo', { exact: true }).last().fill('Frete')
+  await page.getByRole('button', { name: 'Salvar' }).last().click()
+  await expect(page.getByText('Sem valor: Frete')).toBeVisible()
+  // O rótulo em negrito TEM de acompanhar o estado — foi a conferência desta
+  // captura que achou o contrário, e é ela que o segura daqui em diante.
+  await expect(page.getByText('Margem no máximo')).toBeVisible()
+  await tirar('19-empresa-catalogo')
+
   // O celular é ADAPTAÇÃO FRIGG, e não uma imagem fornecida pela referência:
   // o vídeo não demonstra versão móvel.
   await page.setViewportSize({ width: 390, height: 844 })

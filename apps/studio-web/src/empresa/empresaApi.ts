@@ -13,6 +13,7 @@
  */
 import pwa from '../i18n/pwa.pt-BR.json'
 import { APPS_API_PREFIX, HubApiError, csrfFromCookie, type HubTransport } from '../hub/hubApi'
+import type { OfertaEnviada } from './oferta'
 
 export interface Empresa {
   readonly business_id: string
@@ -65,6 +66,19 @@ export interface NovaEmpresa {
   readonly plano: PlanoDeNegocio
 }
 
+/** Uma versão de oferta, como o servidor a devolve. */
+export interface RegistroDeOferta {
+  readonly offer_version_id: string
+  readonly offer_key: string
+  readonly business_id: string
+  readonly version: number
+  readonly oferta: OfertaEnviada
+  readonly created_by: string
+  readonly created_at: string
+  readonly approved_at: string | null
+  readonly approved_by: string | null
+}
+
 const transporteDoNavegador: HubTransport = {
   fetch: (input, init) => fetch(input, init),
   cookie: () => (typeof document === 'undefined' ? '' : document.cookie),
@@ -107,6 +121,26 @@ export function createEmpresaApi(transport: HubTransport = transporteDoNavegador
       call<{ tasks: VinculoDeTarefa[] }>(`/businesses/${encodeURIComponent(businessId)}/tasks`).then(valor => valor.tasks),
     criarTarefa: (businessId: string, entrada: { readonly pedido: string; readonly category: string; readonly privacy: string; readonly request_key: string }) =>
       call<{ task: TarefaCriada; link: VinculoDeTarefa }>(`/businesses/${encodeURIComponent(businessId)}/tasks`, { method: 'POST', body: JSON.stringify(entrada) }),
+    /** O catálogo: a versão que vale de cada oferta. */
+    ofertas: (businessId: string) =>
+      call<{ offers: RegistroDeOferta[] }>(`/businesses/${encodeURIComponent(businessId)}/offers`).then(valor => valor.offers),
+    /*
+      Criar e revisar são a MESMA rota, e a diferença é um campo do corpo.
+      Duas funções aqui porque quem chama sabe qual das duas coisas está
+      fazendo, e passar `undefined` como chave seria a forma de errar.
+    */
+    criarOferta: (businessId: string, oferta: OfertaEnviada) =>
+      call<{ offer: RegistroDeOferta }>(`/businesses/${encodeURIComponent(businessId)}/offers`, {
+        method: 'POST', body: JSON.stringify({ oferta }),
+      }).then(valor => valor.offer),
+    revisarOferta: (businessId: string, offerKey: string, oferta: OfertaEnviada) =>
+      call<{ offer: RegistroDeOferta }>(`/businesses/${encodeURIComponent(businessId)}/offers`, {
+        method: 'POST', body: JSON.stringify({ offer_key: offerKey, oferta }),
+      }).then(valor => valor.offer),
+    aprovarOferta: (businessId: string, offerVersionId: string) =>
+      call<{ offer: RegistroDeOferta }>(`/businesses/${encodeURIComponent(businessId)}/offers/approve`, {
+        method: 'POST', body: JSON.stringify({ offer_version_id: offerVersionId }),
+      }).then(valor => valor.offer),
     arquivar: (businessId: string) =>
       call<{ business: Empresa }>(`/businesses/${encodeURIComponent(businessId)}/archive`, { method: 'POST', body: '{}' }).then(valor => valor.business),
   }

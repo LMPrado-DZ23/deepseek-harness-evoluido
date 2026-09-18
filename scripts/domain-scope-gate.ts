@@ -139,6 +139,12 @@ export const STUDIO_DOMAIN_SCOPES: readonly DomainScopeEntry[] = [
     },
   },
   {
+    source: 'plugins/business/src/model.ts', exportName: 'studioBusinessOffersDomainSpec', physicalName: 'studio_business_offers',
+    tables: {
+      offers: { scope: 'org-tenant', requiredFields: ['org_id', 'tenant_id'], reason: 'Cada versão de oferta carrega o escopo da empresa a que pertence: preço, capacidade e condições de um inquilino nunca aparecem no catálogo de outro.' },
+    },
+  },
+  {
     source: 'plugins/emergency-stop/src/model.ts', exportName: 'studioEmergencyStopDomainSpec', physicalName: 'studio_emergency_stop',
     tables: {
       stops: { scope: 'org-tenant', requiredFields: ['org_id', 'tenant_id'], reason: 'Uma parada de emergência vale para uma organização e um inquilino; a parada de um nunca segura o trabalho de outro.' },

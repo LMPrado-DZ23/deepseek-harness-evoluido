@@ -689,7 +689,18 @@ test('responder e pedir alteração no plano: o reenvio não duplica nem devolve
   await page.getByRole('button', { name: 'Página de apresentação' }).click()
   await page.getByRole('button', { name: 'Continuar' }).click()
 
+  /*
+    ESPERA o endereço trazer o projeto antes de ler dele.
+
+    Sem isto o caso ficava FLAKY na suíte inteira e passava sozinho: quando a
+    navegação ainda não tinha atualizado o endereço, `projeto` saía `null`, a
+    rota virava `/projects/null/intake/answer` e o 404 acusava a leitura, e não
+    o comportamento sob teste. `expect.poll` é a espera; a asserção de que o
+    identificador existe é o que transforma o resto num erro legível.
+  */
+  await expect.poll(() => page.evaluate(() => new URL(window.location.href).searchParams.get('projeto'))).not.toBeNull()
   const projeto = await page.evaluate(() => new URL(window.location.href).searchParams.get('projeto'))
+  expect(projeto).not.toBeNull()
   const postar = async (rota: string, corpo: Record<string, unknown>) => page.evaluate(async ([id, caminho, body]) => {
     const resposta = await fetch(`/api/studio/apps/projects/${String(id)}/${String(caminho)}`, {
       method: 'POST',
@@ -818,4 +829,71 @@ test('dá para baixar tudo o que é meu, e o arquivo tem a tarefa dentro', async
   expect(corpo.exported_by).toBeTruthy()
   // A tarefa que acabou de nascer está lá dentro.
   expect(corpo.projects.length).toBeGreaterThan(0)
+})
+
+test('cadastra a oferta da empresa, vê a margem dizer o que não sabe, e aprova', async ({ context, page }) => {
+  await context.addCookies([
+    { name: 'dz23_studio_session', value: 'e2e', url: 'http://studio.dz23.localhost:4179' },
+    { name: 'dz23_studio_csrf', value: 'csrf-e2e', url: 'http://studio.dz23.localhost:4179' },
+  ])
+  // Pré-condição EXPLÍCITA, pela lição da causa de CI número sete: o
+  // armazenamento deste servidor é um só para a execução inteira do Playwright.
+  await page.request.get('http://127.0.0.1:4179/e2e/reset-business')
+  await page.goto('/studio/empresas')
+  await page.getByRole('button', { name: 'Cadastrar empresa' }).click()
+  await page.getByLabel('Nome da empresa').fill('Bolos da Ana')
+  await page.getByLabel('O que a empresa se propõe a fazer').fill('vender bolos caseiros por encomenda no bairro')
+  await page.getByLabel('Para quem').fill('moradores do bairro')
+  await page.getByLabel('O que ela entrega').fill('bolo de 1kg com 2 dias de antecedência')
+  await page.getByRole('button', { name: 'Salvar empresa' }).click()
+  await expect(page.getByRole('heading', { level: 2, name: 'Bolos da Ana' })).toBeVisible()
+
+  // A empresa nasce SEM catálogo, e a tela diz isso em vez de ficar em branco.
+  await expect(page.getByText('Esta empresa ainda não tem oferta cadastrada.')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Cadastrar oferta' }).click()
+  await page.getByLabel('Nome da oferta').fill('Bolo de aniversário')
+  await page.getByLabel('O que a empresa entrega').fill('Um bolo de dois quilos, decorado, entregue no endereço.')
+  await page.getByLabel('Para quem', { exact: true }).last().fill('Famílias do bairro')
+
+  // PRIMEIRO sem preço e sem custo: a margem tem de dizer que NÃO SABE, e a
+  // sugestão tem de dizer que não há de onde sugerir. É o caso que separa
+  // "não sei" de "lucro puro", e é o coração do aceite de BUS-03.
+  await expect(page.getByText('Sem custo com valor declarado, não há de onde sugerir.')).toBeVisible()
+  await page.getByRole('button', { name: 'Salvar' }).last().click()
+  await expect(page.getByText('Preço ainda não decidido')).toBeVisible()
+  await expect(page.getByText('Não dá para estimar: falta o preço ou não há custo declarado.')).toBeVisible()
+  // Sem preço, o botão de aprovar NÃO existe, e a tela diz o que falta.
+  await expect(page.getByRole('button', { name: 'Aprovar esta versão' })).toHaveCount(0)
+  await expect(page.getByText('Escreva o preço antes de aprovar.')).toBeVisible()
+
+  // Agora a revisão: preço, capacidade, condição e DOIS custos, um deles sem
+  // valor. A margem passa a ser um TETO, e nomeia o custo que falta saber.
+  await page.getByRole('button', { name: 'Revisar esta oferta' }).click()
+  await page.getByLabel('Preço', { exact: true }).fill('200')
+  await page.getByLabel('Quanto consegue entregar').fill('4')
+  await page.getByLabel('Condições').fill('Encomenda com três dias de antecedência')
+  await page.getByRole('button', { name: 'Adicionar custo' }).click()
+  await page.getByLabel('Custo', { exact: true }).fill('Ingredientes')
+  await page.getByLabel('Valor', { exact: true }).fill('60')
+  await page.getByRole('button', { name: 'Adicionar custo' }).click()
+  await page.getByLabel('Custo', { exact: true }).last().fill('Frete')
+  // O segundo custo fica SEM valor de propósito: vazio não é zero.
+  await page.getByRole('button', { name: 'Salvar' }).last().click()
+
+  await expect(page.getByText('Versão 2')).toBeVisible()
+  await expect(page.getByText('É um teto, e não uma estimativa')).toBeVisible()
+  await expect(page.getByText('Sem valor: Frete')).toBeVisible()
+
+  // Aprovar registra a decisão NESTA versão, e a tela passa a dizer "Aprovada".
+  await page.getByRole('button', { name: 'Aprovar esta versão' }).click()
+  await expect(page.getByText('Aprovada')).toBeVisible()
+
+  // E a revisão de uma oferta APROVADA nasce em rascunho de novo: herdar a
+  // aprovação faria condições que ninguém leu virarem "condições aprovadas".
+  await page.getByRole('button', { name: 'Revisar esta oferta' }).click()
+  await page.getByLabel('Preço', { exact: true }).fill('240')
+  await page.getByRole('button', { name: 'Salvar' }).last().click()
+  await expect(page.getByText('Versão 3')).toBeVisible()
+  await expect(page.getByText('Rascunho')).toBeVisible()
 })
