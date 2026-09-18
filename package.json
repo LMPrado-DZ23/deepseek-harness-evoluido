@@ -92,6 +92,7 @@
     "gate:vendored-references": "node scripts/check-vendored-references.mjs --self-test && node scripts/check-vendored-references.mjs",
     "gate:licenses": "node scripts/check-release-licenses.mjs --self-test && node scripts/check-release-licenses.mjs",
     "gate:licenses:release": "node scripts/check-release-licenses.mjs --release",
+    "gates": "node scripts/run-gates.mjs",
     "sbom:cyclonedx": "pnpm sbom --sbom-format cyclonedx --lockfile-only > sbom.cdx.json"
   },
   "devDependencies": {

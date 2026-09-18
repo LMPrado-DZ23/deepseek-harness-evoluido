@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, extname, join, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -274,16 +275,55 @@ $mixedMachinePath = '\\server/share/artifact.json'
   }
 }
 
+/**
+ * Os defeitos do COMANDO DE RETOMADA, que é a promessa mais frágil deste
+ * repositório.
+ *
+ * O resto deste portão olha arquivos executáveis, e com razão: um documento
+ * pode citar um caminho num exemplo sem que isso quebre ninguém. O comando de
+ * retomada é a exceção — ele não é exemplo, é a instrução que alguém executa
+ * numa máquina nova, depois de um contexto perdido. Uma revisão externa achou
+ * exatamente isto: a retomada chamava um roteiro em `/tmp` que o repositório
+ * não tem, e partia de um diretório que só existia numa máquina.
+ *
+ * A regra é estreita de propósito: vale SÓ para o bloco de código que segue o
+ * título do comando de retomada, e não para o documento inteiro.
+ * @param conteudo - o `PROJECT_STATUS.md`.
+ * @returns as reprovações.
+ */
+export function achadosDaRetomada(conteudo) {
+  const bloco = /(?:##+|\*\*)\s*Comando de retomada[^\n]*\n+```[a-z]*\n([\s\S]*?)```/iu.exec(conteudo)
+  if (bloco === null) return [{ file: 'docs/status/PROJECT_STATUS.md', line: 0, rule: 'RETOMADA_AUSENTE', value: 'não há bloco de comando de retomada' }]
+  const comandos = bloco[1]
+  const achados = []
+  for (const { id, pattern } of MACHINE_PATH_RULES) {
+    for (const encontrado of comandos.matchAll(new RegExp(pattern.source, pattern.flags))) {
+      achados.push({ file: 'docs/status/PROJECT_STATUS.md', line: 0, rule: `RETOMADA_${id}`, value: encontrado[0] })
+    }
+  }
+  /*
+    Um programa em pasta temporária não é um programa: ele some no reinício, não
+    está no histórico, e ninguém pode ler o que ele fazia. Citar um ARQUIVO de
+    saída temporário continua permitido — é saída, não é o programa.
+  */
+  for (const encontrado of comandos.matchAll(/(?:bash|sh|source|\.)\s+(\/tmp\/\S+|%TEMP%\S*)/giu)) {
+    achados.push({ file: 'docs/status/PROJECT_STATUS.md', line: 0, rule: 'RETOMADA_PROGRAMA_TEMPORARIO', value: encontrado[1] })
+  }
+  return achados
+}
+
 export async function main(argv = process.argv.slice(2)) {
   if (argv.includes('--self-test')) await selfTest()
   const rootIndex = argv.indexOf('--root')
   const root = resolve(rootIndex >= 0 ? argv[rootIndex + 1] : process.cwd())
   const suppliedFiles = argv.includes('--all-files') ? await allSourceFiles(root) : undefined
   const findings = await scanPortableSources(root, suppliedFiles)
+  const statusPath = resolve(root, 'docs/status/PROJECT_STATUS.md')
+  if (existsSync(statusPath)) findings.push(...achadosDaRetomada(await readFile(statusPath, 'utf8')))
   if (findings.length) {
     for (const finding of findings) {
       process.stderr.write(
-        `${finding.file}:${finding.line}: ${finding.rule}: caminho de máquina proibido (${finding.value})\n`,
+        `${finding.file}:${finding.line}: ${finding.rule}: ${finding.rule.startsWith('RETOMADA') ? 'a retomada depende de algo que não é do repositório' : 'caminho de máquina proibido'} (${finding.value})\n`,
       )
     }
     throw new Error(`${findings.length} referência(s) não portáteis`)

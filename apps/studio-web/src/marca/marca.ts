@@ -25,6 +25,12 @@
  * lugares concordam com esta fonte é `gate:marca`, que compara todos eles com
  * o que está escrito abaixo e falha quando UM diverge.
  *
+ * **A exceção, e ela é uma só:** `rail.marcaAcao`, o rótulo acessível do
+ * logotipo. Ali a frase NÃO existe inteira no catálogo, e isso é deliberado —
+ * ela junta um nome que não se traduz a uma ação que se traduz, e a ordem das
+ * duas coisas muda de língua para língua. Ver `nomeAcessivelDaMarca` no fim
+ * deste arquivo.
+ *
  * ## O que esta decisão NÃO autoriza
  *
  * Renomear pacote, plugin, serviço Cordis, tabela, domínio de dados, variável
@@ -33,6 +39,7 @@
  * deltas diferentes. `gate:marca` também guarda ESSE lado: ele falha se a
  * identidade do manifesto mudar junto com o nome.
  */
+import { comValores } from '../i18n/texto'
 
 /** A marca, como o produto a exibe. */
 export const MARCA = {
@@ -95,10 +102,24 @@ export function tituloDaPagina(secao?: string | null): string {
  * o logo é botão, o nome acessível indica a AÇÃO, não o arquivo. E como o nome
  * da marca já está escrito em texto ao lado, a imagem fica `aria-hidden` — sem
  * isso o leitor de tela diria "FRIGG FRIGG".
+ *
+ * ## Por que o modelo vem de fora, e a marca de dentro
+ *
+ * A marca é a mesma em toda língua; a AÇÃO não é. Até 18/09/2026 esta função
+ * devolvia `ir para a tela inicial` fixo, e o trilho a usava no `aria-label`
+ * mesmo com `rail.en` ou `rail.es` escolhidos — ou seja, a navegação anunciada
+ * como migrada tinha uma frase em português dita em voz alta a quem usa leitor
+ * de tela, e só a quem usa leitor de tela. Uma revisão externa achou; nenhuma
+ * varredura de texto acharia, porque a frase não estava num literal da tela:
+ * estava dentro de uma função.
+ *
+ * O modelo traz `{marca}` em vez de a função concatenar nome e ação, porque a
+ * ordem das palavras é decisão do tradutor. Quem chama passa `rail.marcaAcao`.
+ * @param modelo - o texto do catálogo, com o marcador `{marca}`.
  * @returns o rótulo do link.
  */
-export function nomeAcessivelDaMarca(): string {
-  return `${MARCA.nome}: ir para a tela inicial`
+export function nomeAcessivelDaMarca(modelo: string): string {
+  return comValores(modelo, { marca: MARCA.nome })
 }
 
 /**

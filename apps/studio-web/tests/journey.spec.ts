@@ -927,6 +927,17 @@ test('troca o idioma da interface, e a escolha sobrevive ao recarregamento sem m
   */
   await expect(page.locator('html')).toHaveAttribute('lang', 'en')
   await expect(page.getByRole('link', { name: 'New task' })).toBeVisible()
+  /*
+    O NOME ACESSÍVEL DO LOGOTIPO, que é o defeito que a revisão de 18/09/2026
+    achou lendo o código: ele saía `FRIGG: ir para a tela inicial` em qualquer
+    idioma, porque vinha de uma função com a frase fixa dentro.
+
+    Ele é conferido AQUI, por papel e nome acessível, e não por um seletor de
+    classe: quem lê este rótulo é um leitor de tela, e o que o leitor de tela usa
+    é exatamente o que `getByRole` resolve. Um teste que procurasse a string no
+    arquivo passaria com o defeito de volta.
+  */
+  await expect(page.getByRole('link', { name: 'FRIGG: go to the home screen' })).toBeVisible()
 
   /*
     O RASCUNHO fica escrito ANTES da troca.
@@ -950,6 +961,9 @@ test('troca o idioma da interface, e a escolha sobrevive ao recarregamento sem m
   // E a tela DIZ que a cobertura é parcial, em vez de fingir que tudo traduziu.
   await expect(page.getByText('as demais telas', { exact: false })).toBeVisible()
 
+  // E o rótulo do logotipo acompanhou a troca, junto com o resto da navegação.
+  await expect(page.getByRole('link', { name: 'FRIGG: ir para a tela inicial' })).toBeVisible()
+
   await page.getByRole('button', { name: 'Fechar as preferências' }).click()
   // O rascunho continua inteiro: a troca é de apresentação, e só.
   await expect(page.getByRole('textbox').first()).toHaveValue(rascunho)
@@ -968,6 +982,7 @@ test('troca o idioma da interface, e a escolha sobrevive ao recarregamento sem m
   await page.getByRole('button', { name: 'Idioma' }).click()
   await page.getByRole('radio', { name: 'Español' }).check()
   await expect(page.getByRole('link', { name: 'Nueva tarea' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'FRIGG: ir a la pantalla de inicio' })).toBeVisible()
   await expect(page.locator('html')).toHaveAttribute('lang', 'es')
 })
 })

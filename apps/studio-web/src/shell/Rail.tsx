@@ -4,7 +4,7 @@ import { NOVA_TAREFA_HREF, iniciaisDaConta, type TarefaDoTrilho } from './tarefa
 import { PROJECTS_PATH } from '../projects/ProjectsScreen'
 import { HELP_PATH } from '../help/HelpScreen'
 import { EMBLEMA, nomeAcessivelDaMarca } from '../marca/marca'
-import { useCatalogos } from '../i18n/IdiomaProvider'
+import { useCatalogos, useIdioma } from '../i18n/IdiomaProvider'
 import type { ReactNode } from 'react'
 
 /**
@@ -43,10 +43,11 @@ export function Rail({ ativo, aberto, aoFechar, tarefas, conta, acoesDaConta }: 
   readonly acoesDaConta?: ReactNode
 }) {
   const { rail } = useCatalogos()
-  const iniciais = iniciaisDaConta(conta)
+  const { idioma } = useIdioma()
+  const iniciais = iniciaisDaConta(conta, idioma)
   return <nav id={RAIL_ID} className={`dz-rail${aberto ? ' aberto' : ''}`} aria-label={rail.navegacao}>
     <div className="dz-rail-topo">
-    <a className="dz-marca" href="/studio/" aria-label={nomeAcessivelDaMarca()}>
+    <a className="dz-marca" href="/studio/" aria-label={nomeAcessivelDaMarca(rail.marcaAcao)}>
       <img
         src={EMBLEMA.src}
         srcSet={EMBLEMA.srcSet}

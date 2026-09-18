@@ -71,6 +71,25 @@ export function catalogosDe(idioma: Idioma): Catalogos {
 export const ESPACOS_TRADUZIDOS: readonly EspacoDeNomes[] = ['rail', 'preferencias']
 
 /**
+ * A TELA de cada espaço de nomes traduzido, a partir de `apps/studio-web/src`.
+ *
+ * Existe porque um catálogo traduzido não prova uma tela traduzida. A revisão de
+ * 18/09/2026 achou o contrário disto: `rail` estava nos três idiomas e o rótulo
+ * acessível do logotipo saía em português, porque vinha de uma FUNÇÃO — e uma
+ * função não aparece em varredura de texto nem em conferência de catálogo.
+ *
+ * `gate:idiomas` percorre o grafo de importações a partir daqui e cobra, nos
+ * módulos alcançados, o que nenhum catálogo consegue cobrar: idioma fixo escrito
+ * no código. Declarar a tela junto do espaço de nomes faz a cobertura CRESCER
+ * sozinha — migrar um espaço obriga a apontar a tela dele, e a tela entra na
+ * varredura no mesmo dia.
+ */
+export const TELAS_TRADUZIDAS: Readonly<Record<EspacoDeNomes, readonly string[]>> = {
+  rail: ['shell/Rail.tsx'],
+  preferencias: ['preferencias/Preferencias.tsx'],
+}
+
+/**
  * Quantos idiomas o produto serve de verdade.
  *
  * Existe como função para que a tela nunca escreva "3" à mão: um idioma novo

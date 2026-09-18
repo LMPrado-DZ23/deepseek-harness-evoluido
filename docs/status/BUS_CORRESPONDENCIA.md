@@ -45,7 +45,26 @@ existe o que não existe.
 ## O que isto NÃO muda
 
 Nenhuma das 24 obrigações canônicas passa a estar fechada por causa deste
-arquivo. `BUS-02` e `BUS-03` continuam **AUSENTES**, com zero linha de código:
-não existe pesquisa de mercado, nem oferta, catálogo ou precificação em lugar
-nenhum do produto. As outras vinte e uma também continuam como a matriz as
-descreve.
+arquivo. A tabela acima diz o que cada entrega TOCA, e tocar não é fechar.
+
+- `BUS-02` (pesquisa, validação e hipóteses de mercado) continua **AUSENTE**,
+  com zero linha de código. Nenhuma das entregas do Modo Empresa a toca.
+- `BUS-03` (oferta, catálogo e precificação revisáveis) está **PARCIAL** desde
+  `EMP-04`. Existe oferta: entrega, público, preço e moeda, capacidade,
+  condições, custos declarados, versões e aprovação por versão — em
+  `plugins/business/src/oferta.ts`, `plugins/business/src/model.ts` e
+  `apps/studio-web/src/empresa/oferta.ts`. O que falta é o CATÁLOGO como coisa
+  publicável: não há vitrine, link nem página que mostre a oferta a quem não é
+  da empresa, e essa ausência é deliberada enquanto não houver decisão de
+  publicação.
+
+As outras vinte e duas continuam como a matriz as descreve.
+
+> **Histórico, e não estado.** Até o instantâneo `a04b0d6` (18/09/2026) este
+> parágrafo dizia que `BUS-02` **e** `BUS-03` estavam ausentes, com zero linha,
+> e que não havia oferta nem precificação em lugar nenhum do produto. Isso ficou
+> falso quando `EMP-04` entrou, e a tabela acima — no mesmo arquivo — já dizia o
+> contrário. Uma revisão externa achou a contradição. O conserto é do parágrafo:
+> o código de `EMP-04` está entregue e provado, e não se refaz porque uma frase
+> envelheceu. `gate:bus-matriz` passou a conferir que a conclusão e a tabela
+> falam da mesma coisa.

@@ -9,46 +9,37 @@ arquivo é para quem vai **mexer no código**.
 
 ---
 
-## Os 24 portões
+## Os portões
 
-Rodam em qualquer ordem, e todos precisam sair com `EXIT=0`:
-
-```
-typecheck      lib-freshness
-domain-scopes  domain-routes  assistant-tools  team-role-tools  rls-coverage
-upstream-pin   portability    i18n             comprehension    vocabulary
-memory-map     constitution   tracked-lib      image-lock
-decision-record  requirements-ledger  secrets   no-caveman      p37
-candidates     vendored-references  licenses
-```
-
-Um de cada vez é `pnpm gate:<nome>`. Todos de uma vez, guardando os vereditos
-que a constituição depois confere:
+**Todos de uma vez**, que é como uma entrega termina:
 
 ```bash
-G=(typecheck lib-freshness domain-scopes domain-routes assistant-tools team-role-tools
-   rls-coverage upstream-pin portability i18n comprehension vocabulary memory-map
-   constitution tracked-lib image-lock decision-record requirements-ledger
-   secrets no-caveman p37 candidates vendored-references licenses)
-FAIL=0
-: > /tmp/verdicts.txt
-for g in "${G[@]}"; do
-  if pnpm "gate:$g" > "/tmp/gate-$g.log" 2>&1; then echo "OK   $g"
-  else echo "FAIL $g"; FAIL=1; fi
-  grep -E '^[A-Z_]+=(PASS|FAIL)' "/tmp/gate-$g.log" >> /tmp/verdicts.txt
-done
-echo "GATES_FAIL=$FAIL"
+pnpm gates
 ```
 
-Depois, **sempre**, a conferência da constituição — ela lê os vereditos que o
-laço acima acabou de gravar, e sem o arquivo ela não tem o que conferir:
+Ele descobre a lista no `package.json` — não há lista escrita à mão em lugar
+nenhum —, roda cada portão, grava os vereditos e termina executando a
+constituição sobre eles. Sai com `GATES_FAIL=0` e `CONSTITUTION=PASS` quando
+está tudo certo, e com código 1 quando não está.
 
 ```bash
-node scripts/check-constitution.mjs --verdicts /tmp/verdicts.txt
+pnpm gates --listar              # diz o que rodaria, sem rodar nada
+pnpm gates --apenas marca,pix    # só estes
+pnpm gates --verdicts /caminho   # onde gravar os vereditos
 ```
 
-Saída esperada: `CONSTITUTION=PASS clausulas=14 PORTÃO=9 CÓDIGO=1
-NÃO_AUTOMATIZADO=4 vereditos_conferidos=33`.
+Um de cada vez continua sendo `pnpm gate:<nome>`.
+
+> **Por que não há uma lista aqui.** Até 18/09/2026 este arquivo trazia os nomes
+> dos portões escritos à mão, e um laço de shell que os repetia. Eram vinte e
+> quatro aqui, trinta num `/tmp/gates.sh` que cada sessão recriava, e trinta e um
+> no `package.json` — `gate:licenses:release` existia e nenhuma sessão o
+> executava. Três listas do mesmo fato, e a que estava certa não era a que se
+> lia. `scripts/run-gates.mjs` lê a única que o `pnpm` obedece.
+
+Ele acha a raiz do repositório sozinho, então funciona de qualquer diretório e
+em qualquer máquina. Os vereditos e o registro de cada portão vão para o
+temporário do sistema, e o caminho sai impresso na última linha.
 
 ---
 

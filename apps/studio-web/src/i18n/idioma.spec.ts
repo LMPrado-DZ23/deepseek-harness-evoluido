@@ -80,17 +80,57 @@ describe('a precedência do idioma efetivo', () => {
     expect(idiomaEfetivo({ local: { idioma: 'en', em: 1 }, doNavegador: 'es' })).toBe('en')
   })
 
-  it('a escolha MAIS RECENTE vence — e é assim que a conta não apaga a da pessoa', () => {
-    // É o defeito que o adendo manda tratar por escrito: a preferência da conta
-    // viaja por rede e chega DEPOIS de a pessoa já ter escolhido na tela.
-    // Deixá-la vencer por ter chegado por último faria a escolha piscar e voltar.
-    expect(idiomaEfetivo({ local: { idioma: 'en', em: 200 }, daConta: { idioma: 'es', em: 100 } })).toBe('en')
-    expect(idiomaEfetivo({ local: { idioma: 'en', em: 100 }, daConta: { idioma: 'es', em: 200 } })).toBe('es')
+  it('a troca DESTA sessão vence a conta, por atrasada que a resposta chegue', () => {
+    /*
+      É o contrato do adendo, e o primeiro degrau da precedência: a pessoa trocou
+      o idioma na frente da tela. A preferência da conta viaja por rede e chega
+      depois; deixá-la vencer faria a tela mudar de idioma sozinha.
+
+      Repare que este caso NÃO tem instante nenhum de um lado — é de propósito.
+      Antes de 18/09/2026 a decisão dependia de comparar dois relógios, e era
+      isso o defeito.
+    */
+    expect(idiomaEfetivo({ daSessao: 'en', daConta: { idioma: 'es', em: 9_999_999 } })).toBe('en')
+    expect(idiomaEfetivo({ daSessao: 'en', local: { idioma: 'pt-BR', em: 1 }, daConta: { idioma: 'es', em: 9_999_999, versao: 900 } })).toBe('en')
   })
 
-  it('empate no instante fica com a escolha LOCAL', () => {
-    // Quem está na frente da tela é quem acabou de decidir.
-    expect(idiomaEfetivo({ local: { idioma: 'en', em: 100 }, daConta: { idioma: 'es', em: 100 } })).toBe('en')
+  it('entre as duas GUARDADAS vence a de maior versão, e não a de relógio maior', () => {
+    // A guardada local é mais nova pela versão, e o relógio dela está ATRASADO
+    // um dia inteiro. Com a comparação antiga, a conta venceria e a preferência
+    // nova da pessoa seria descartada por causa do relógio do aparelho.
+    expect(idiomaEfetivo({
+      local: { idioma: 'en', em: 1_000, versao: 5 },
+      daConta: { idioma: 'es', em: 90_000_000, versao: 4 },
+    })).toBe('en')
+    // E o simétrico: relógio ADIANTADO não faz uma preferência velha vencer.
+    expect(idiomaEfetivo({
+      local: { idioma: 'en', em: 90_000_000, versao: 2 },
+      daConta: { idioma: 'es', em: 1_000, versao: 7 },
+    })).toBe('es')
+  })
+
+  it('empate de versão fica com a CONTA, para dois aparelhos convergirem', () => {
+    // Mesma versão é a mesma verdade. Insistir na cópia local faria cada
+    // aparelho ficar com a sua para sempre.
+    expect(idiomaEfetivo({ local: { idioma: 'en', em: 100, versao: 3 }, daConta: { idioma: 'es', em: 100, versao: 3 } })).toBe('es')
+  })
+
+  it('guardada sem versão vale ZERO, e não "a mais nova"', () => {
+    // As escolhas gravadas antes de o contador existir não sabem quantas vezes
+    // foram reescritas. Tratá-las como recentes faria uma preferência antiga do
+    // aparelho vencer a da conta para sempre.
+    expect(idiomaEfetivo({ local: { idioma: 'en', em: 9_999_999 }, daConta: { idioma: 'es', em: 1, versao: 1 } })).toBe('es')
+  })
+
+  it('a versão CRESCE a cada gravação, sem consultar relógio', () => {
+    // Duas abas gravando: a segunda gravação tem de ser distinguível da
+    // primeira, e é o armazém que diz qual foi a última.
+    let guardado: string | null = null
+    const disco = { getItem: () => guardado, setItem: (_: string, valor: string) => { guardado = valor } }
+    guardarEscolha(disco, { idioma: 'en', em: 1 })
+    expect(escolhaGuardada(disco)?.versao).toBe(1)
+    guardarEscolha(disco, { idioma: 'es', em: 1 })
+    expect(escolhaGuardada(disco)?.versao).toBe(2)
   })
 
   it('só a da conta, sem local, vale', () => {
@@ -118,7 +158,9 @@ describe('a escolha guardada neste navegador', () => {
   it('guarda e lê de volta', () => {
     const a = armazem(null)
     expect(guardarEscolha(a, { idioma: 'es', em: 7 })).toBe(true)
-    expect(escolhaGuardada(a)).toEqual({ idioma: 'es', em: 7 })
+    // A versão entra na gravação: é ela, e não `em`, que decide qual cópia é a
+    // mais nova quando a preferência da conta existir.
+    expect(escolhaGuardada(a)).toEqual({ idioma: 'es', em: 7, versao: 1 })
   })
 
   it('sem armazenamento — servidor, janela anônima — devolve `null` em vez de explodir', () => {
@@ -134,7 +176,7 @@ describe('a escolha guardada neste navegador', () => {
   })
 
   it('armazenamento que LANÇA ao escrever devolve `false`, e a escolha continua valendo', () => {
-    const explode = { setItem: () => { throw new Error('cheio') } }
+    const explode = { getItem: () => null, setItem: () => { throw new Error('cheio') } }
     expect(guardarEscolha(explode, { idioma: 'en', em: 1 })).toBe(false)
   })
 

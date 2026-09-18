@@ -95,33 +95,88 @@ export function idiomaNegociado(tags: readonly string[]): Idioma | null {
   return null
 }
 
-/** Uma escolha de idioma, com o instante em que foi feita. */
+/**
+ * Uma escolha de idioma guardada, com a VERSÃO dela.
+ *
+ * `em` é o instante em que foi feita, e serve para dizer à pessoa desde quando
+ * vale. Ele **não decide nada** — ver `idiomaEfetivo`.
+ */
 export interface EscolhaDeIdioma {
   readonly idioma: Idioma
-  /** Milissegundos desde a época. É o que decide a corrida. */
+  /** Milissegundos desde a época, e só para efeito informativo. */
   readonly em: number
+  /**
+   * Quantas vezes a preferência foi gravada. Cresce de um em um, e é isto que
+   * decide qual de duas cópias guardadas é a mais nova. Ausente nas escolhas
+   * gravadas antes de 18/09/2026, e aí vale zero.
+   */
+  readonly versao?: number
 }
 
 /**
  * O idioma que VALE agora.
  *
- * A corrida entre a escolha local e a da conta é resolvida pelo INSTANTE, e não
- * pela ordem de chegada: a preferência da conta viaja por rede e chega depois,
- * e deixá-la vencer por ter chegado por último faria a escolha da pessoa piscar
- * na tela e voltar ao que era.
+ * ## Por que relógio não decide mais nada aqui
+ *
+ * Até 18/09/2026 esta função comparava `local.em` com `daConta.em` — dois
+ * instantes medidos em MÁQUINAS DIFERENTES. Uma revisão externa apontou o
+ * problema antes de ele acontecer, e ele é real: o relógio do aparelho da pessoa
+ * pode estar meia hora adiantado ou um dia atrasado em relação ao servidor, e
+ * nesse caso a comparação não responde "qual é a mais nova" — responde "qual
+ * máquina acha que é mais tarde". Com o relógio adiantado, uma preferência
+ * antiga do aparelho venceria para sempre a preferência nova da conta; com ele
+ * atrasado, a escolha que a pessoa acabou de fazer perderia para a resposta da
+ * conta e a tela voltaria de idioma sozinha, na frente dela.
+ *
+ * ## A precedência, e ela não tem empate
+ *
+ * 1. **A escolha DESTA sessão.** Se a pessoa trocou o idioma agora, nenhuma
+ *    resposta de rede, por mais atrasada que chegue, desfaz isso. Este degrau é
+ *    o que garante o contrato do adendo — trocar de idioma não pisca nem volta.
+ * 2. **Entre as duas GUARDADAS, a de maior `versao`.** É um contador que cresce
+ *    a cada gravação, não um relógio: ele não depende de máquina nenhuma estar
+ *    com a hora certa.
+ * 3. **Empate de versão: a CONTA.** Duas cópias com a mesma versão são a mesma
+ *    verdade; ficar com a da conta é o que faz dois aparelhos convergirem em vez
+ *    de cada um insistir na sua.
+ * 4. A negociação do navegador, e por último o padrão.
+ *
+ * **DECISÃO ASSUMIDA:** versão monotônica por gravação, e não relógio lógico
+ * completo nem CRDT. Justificativa: o dado é UMA preferência de apresentação
+ * cujo pior desfecho é a tela abrir na língua errada até a próxima troca. Um
+ * protocolo de sincronização distribuída aqui seria mais caro de manter do que o
+ * defeito que evita — e a revisão pediu explicitamente para não inventar um.
  * @param entrada - as origens conhecidas.
  * @returns o idioma efetivo.
  */
 export function idiomaEfetivo(entrada: {
+  /** A troca feita nesta sessão, em frente à pessoa. Vence tudo. */
+  readonly daSessao?: Idioma | null
   readonly local?: EscolhaDeIdioma | null
   readonly daConta?: EscolhaDeIdioma | null
   readonly doNavegador?: Idioma | null
 }): Idioma {
-  const { local, daConta, doNavegador } = entrada
-  if (local != null && daConta != null) return (local.em >= daConta.em ? local : daConta).idioma
+  const { daSessao, local, daConta, doNavegador } = entrada
+  if (daSessao != null) return daSessao
+  if (local != null && daConta != null) {
+    return (versaoDa(local) > versaoDa(daConta) ? local : daConta).idioma
+  }
   if (local != null) return local.idioma
   if (daConta != null) return daConta.idioma
   return doNavegador ?? IDIOMA_PADRAO
+}
+
+/**
+ * A versão de uma escolha guardada.
+ *
+ * Ausente vale ZERO, e não "a mais nova": uma escolha gravada antes de o
+ * contador existir não sabe quantas vezes foi reescrita, e tratá-la como recente
+ * faria uma preferência antiga do aparelho vencer a da conta.
+ * @param escolha - a escolha.
+ * @returns a versão.
+ */
+export function versaoDa(escolha: EscolhaDeIdioma): number {
+  return typeof escolha.versao === 'number' && Number.isFinite(escolha.versao) ? escolha.versao : 0
 }
 
 /**
@@ -155,9 +210,10 @@ export function escolhaGuardada(armazem: Pick<Storage, 'getItem'> | undefined): 
   try {
     const cru = armazem.getItem(CHAVE_DO_IDIOMA)
     if (cru === null) return null
-    const valor = JSON.parse(cru) as { idioma?: unknown, em?: unknown }
+    const valor = JSON.parse(cru) as { idioma?: unknown, em?: unknown, versao?: unknown }
     if (!ehIdioma(valor.idioma) || typeof valor.em !== 'number' || !Number.isFinite(valor.em)) return null
-    return { idioma: valor.idioma, em: valor.em }
+    const versao = typeof valor.versao === 'number' && Number.isFinite(valor.versao) ? valor.versao : 0
+    return { idioma: valor.idioma, em: valor.em, versao }
   } catch {
     // Guardado ilegível é o mesmo que não guardado: a pessoa cai na negociação
     // do navegador, que é um estado honesto, em vez de numa tela quebrada.
@@ -171,10 +227,19 @@ export function escolhaGuardada(armazem: Pick<Storage, 'getItem'> | undefined): 
  * @param escolha - a escolha a guardar.
  * @returns `true` quando foi guardada de verdade.
  */
-export function guardarEscolha(armazem: Pick<Storage, 'setItem'> | undefined, escolha: EscolhaDeIdioma): boolean {
+export function guardarEscolha(armazem: Pick<Storage, 'setItem' | 'getItem'> | undefined, escolha: EscolhaDeIdioma): boolean {
   if (armazem === undefined) return false
   try {
-    armazem.setItem(CHAVE_DO_IDIOMA, JSON.stringify(escolha))
+    /*
+      A versão vem do que JÁ ESTAVA guardado, mais um.
+
+      Ela não pode vir de quem chama: duas abas abertas gravariam a mesma versão
+      e a segunda ficaria indistinguível da primeira. Lendo aqui, a última
+      gravação é sempre a de maior versão, sem consultar relógio nenhum.
+    */
+    const anterior = escolhaGuardada(armazem)
+    const versao = (anterior === null ? 0 : versaoDa(anterior)) + 1
+    armazem.setItem(CHAVE_DO_IDIOMA, JSON.stringify({ ...escolha, versao }))
     return true
   } catch {
     // Não deu para guardar. A escolha continua valendo NESTA sessão — perder a

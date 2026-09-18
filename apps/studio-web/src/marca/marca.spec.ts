@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { EMBLEMA, MARCA, nomeAcessivelDaMarca, podeAnunciarDominio, tituloDaPagina } from './marca'
+import { catalogosDe } from '../i18n/catalogos'
+import { IDIOMAS } from '../i18n/idioma'
+import { marcadoresPendentes } from '../i18n/texto'
 
 describe('a marca de apresentação', () => {
   it('é FRIGG, e o DZ23 continua como ORIGEM — não como concorrente', () => {
@@ -56,8 +59,27 @@ describe('o nome acessível do logotipo', () => {
   it('diz a AÇÃO, e não o nome do arquivo', () => {
     // O logotipo é um link. "frigg-mark-48.png" não diz a ninguém para onde se
     // vai ao ativá-lo.
-    expect(nomeAcessivelDaMarca()).toBe('FRIGG: ir para a tela inicial')
-    expect(nomeAcessivelDaMarca()).toContain('inicial')
+    expect(nomeAcessivelDaMarca(catalogosDe('pt-BR').rail.marcaAcao)).toBe('FRIGG: ir para a tela inicial')
+  })
+
+  it('a MARCA é a mesma nos três idiomas, e a AÇÃO não é', () => {
+    /*
+      Este é o teste que faltava quando a função devolvia português fixo.
+
+      Ele percorre os idiomas DECLARADOS, e não três nomes escritos aqui: um
+      quarto idioma entra em `IDIOMAS` e passa a ser cobrado sozinho. E ele
+      compara a ação entre pares, em vez de conferir uma frase esperada por
+      idioma — uma tradução que fosse cópia do português passaria na segunda
+      forma e não passa nesta.
+    */
+    const rotulos = IDIOMAS.map(idioma => nomeAcessivelDaMarca(catalogosDe(idioma).rail.marcaAcao))
+    for (const rotulo of rotulos) {
+      expect(rotulo).toContain(MARCA.nome)
+      expect(marcadoresPendentes(rotulo)).toEqual([])
+      // A marca não é a frase inteira: sem ação, o link não diz o que faz.
+      expect(rotulo.replace(MARCA.nome, '').trim().length).toBeGreaterThan(3)
+    }
+    expect(new Set(rotulos).size).toBe(IDIOMAS.length)
   })
 })
 

@@ -24,6 +24,7 @@
  * - **o teto sem configuração não vira bloqueio.** Sem teto, o veredito é
  *   "dentro", e a tela não inventa um limite que ninguém definiu.
  */
+import { IDIOMA_PADRAO, type Idioma } from '../i18n/idioma'
 
 /** Uma rota, como o servidor a devolve. */
 export interface RotaDeUso {
@@ -142,25 +143,35 @@ export function chaveDoVeredito(veredito: string | undefined, houveConsumo: bool
 /**
  * Um valor em dólares, escrito como quem lê escreve.
  *
- * `toFixed` devolve `0.0042`, com PONTO decimal — e este produto é inteiro em
- * português do Brasil, onde o separador é vírgula. A divergência apareceu na
- * conferência da captura de entrega, e não em teste nenhum: a tela estava certa
- * em tudo, menos na língua em que escrevia número.
+ * `toFixed` devolve `0.0042`, com PONTO decimal — e onde o separador é vírgula
+ * isso é a língua errada. A divergência apareceu na conferência da captura de
+ * entrega, e não em teste nenhum: a tela estava certa em tudo, menos na língua
+ * em que escrevia número.
+ *
+ * O separador segue o IDIOMA, e a MOEDA não: o adendo internacional é explícito
+ * que trocar de idioma não muda moeda nem preço. `US$ 0,0042` e `US$ 0.0042`
+ * são a mesma quantia de dólares escrita para dois leitores diferentes.
  *
  * Quatro casas porque o custo de uma chamada é da ordem de milésimos de dólar;
  * com duas, quase todo consumo real apareceria como `US$ 0,00`.
  * @param valor - o custo em dólares.
  * @returns o texto, com o símbolo.
  */
-export function custoEmTexto(valor: number): string {
-  return `US$ ${valor.toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}`
+export function custoEmTexto(valor: number, idioma: Idioma = IDIOMA_PADRAO): string {
+  return `US$ ${valor.toLocaleString(idioma, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}`
 }
 
 /**
  * Uma contagem grande, com o separador de milhar de quem lê.
+ *
+ * O separador segue o IDIOMA DA INTERFACE, e não uma língua fixa: em inglês
+ * `1.234` significa mil duzentos e trinta e quatro vírgula nada, e em português
+ * significa mil duzentos e trinta e quatro. Um número escrito na convenção
+ * errada não parece errado — parece outro número.
  * @param valor - a contagem.
+ * @param idioma - o idioma da interface.
  * @returns o texto.
  */
-export function contagemEmTexto(valor: number): string {
-  return valor.toLocaleString('pt-BR')
+export function contagemEmTexto(valor: number, idioma: Idioma = IDIOMA_PADRAO): string {
+  return valor.toLocaleString(idioma)
 }

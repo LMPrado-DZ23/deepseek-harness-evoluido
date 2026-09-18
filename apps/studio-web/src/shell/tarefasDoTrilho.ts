@@ -13,6 +13,7 @@ import { STUDIO_HOME_PATH } from '../navigation'
  * decisão dentro de um JSX não é exercitada por teste nenhum — a lição que este
  * repositório já pagou mais de dez vezes.
  */
+import type { Idioma } from '../i18n/idioma'
 
 export interface TarefaDoServidor {
   readonly project_id: string
@@ -79,9 +80,10 @@ export const NOVA_TAREFA_HREF = STUDIO_HOME_PATH
  * Duas letras no máximo, e NUNCA uma inicial inventada: sem nome, o avatar
  * mostra um símbolo neutro em vez de uma letra que não é de ninguém.
  * @param nome - o nome ou endereço de quem está na sessão.
+ * @param idioma - o idioma da interface, quando há um escolhido.
  * @returns as iniciais, ou `null` quando não há nome.
  */
-export function iniciaisDaConta(nome: string | null | undefined): string | null {
+export function iniciaisDaConta(nome: string | null | undefined, idioma: Idioma | undefined = undefined): string | null {
   if (nome === null || nome === undefined) return null
   const limpo = nome.trim()
   if (limpo === '') return null
@@ -92,5 +94,12 @@ export function iniciaisDaConta(nome: string | null | undefined): string | null 
   if (partes.length === 0) return null
   const primeira = partes[0]![0]!
   const segunda = partes.length > 1 ? partes.at(-1)![0]! : ''
-  return (primeira + segunda).toLocaleUpperCase('pt-BR')
+  /*
+    Maiúscula tem língua, e não é detalhe: em turco o `i` maiúsculo é `İ`, e em
+    lituano um acento sobrevive à conversão. Escrever a etiqueta à mão aqui
+    congelaria a regra do português para todo mundo. Sem idioma, `toUpperCase`
+    usa a regra neutra, que é a resposta certa quando ninguém disse qual é a
+    língua — e não a regra de uma língua escolhida por acidente.
+  */
+  return (primeira + segunda).toLocaleUpperCase(idioma)
 }

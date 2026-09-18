@@ -48,6 +48,16 @@ const Contexto = createContext<ContextoDeIdioma>({
 /** O que o provedor precisa saber do mundo. Injetável para o teste não depender do navegador. */
 export interface AmbienteDoIdioma {
   readonly armazem?: Pick<Storage, 'getItem' | 'setItem'> | undefined
+  /**
+   * A preferência que veio da CONTA, quando houver conta ligada.
+   *
+   * Hoje ela é sempre ausente: a fonte da conta não está conectada a este
+   * provedor, e o adendo internacional ainda não decidiu o gateway. Ela está
+   * declarada aqui — e coberta por teste — porque a precedência tinha de ser
+   * resolvida ANTES de a fonte existir, e não depois, quando o defeito já
+   * estaria na frente de alguém.
+   */
+  readonly daConta?: EscolhaDeIdioma | null
   readonly tagsDoNavegador?: readonly string[]
   readonly agora?: () => number
   /** Onde o `lang` é escrito. Ausente em servidor. */
@@ -97,15 +107,29 @@ export function IdiomaProvider({ children, ambiente = ambienteDoNavegador() }: {
     trocar de língua na frente dela.
   */
   const [escolha, setEscolha] = useState<EscolhaDeIdioma | null>(() => escolhaGuardada(ambiente.armazem))
+  /*
+    A troca feita NESTA sessão é guardada separada da preferência lida do disco.
+
+    As duas são "a escolha da pessoa", mas não têm a mesma força. Uma revisão
+    externa apontou, antes de a preferência da conta existir, que comparar as
+    duas por relógio deixaria a resposta atrasada da conta desfazer a troca que
+    a pessoa acabou de fazer — a tela mudaria de idioma sozinha, na frente dela.
+    Separando-as, esse caso deixa de depender de relógio: o que a pessoa fez
+    agora vence, e ponto.
+  */
+  const [daSessao, setDaSessao] = useState<Idioma | null>(null)
   const [guardado, setGuardado] = useState(true)
 
   const idioma = idiomaEfetivo({
+    daSessao,
     local: escolha,
+    daConta: ambiente.daConta ?? null,
     doNavegador: idiomaNegociado(ambiente.tagsDoNavegador ?? []),
   })
 
   const escolher = useCallback((novo: Idioma) => {
     const feita: EscolhaDeIdioma = { idioma: novo, em: agora() }
+    setDaSessao(novo)
     setEscolha(feita)
     // A escolha vale MESMO se não der para guardar: perder a troca no instante
     // em que a pessoa a fez seria pior que esquecê-la no próximo carregamento.

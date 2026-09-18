@@ -57,6 +57,24 @@ tem portão (`docs/images/social-card.png`, gerado por
 `gh` — ela é enviada à mão em *Settings → General → Social preview*. O arquivo
 está provado; o efeito, não.
 
+**A REVISÃO EXTERNA de `a04b0d6` foi respondida em 18/09** (`REV-A04`,
+identificador `FRIGG-REVISAO-A04B0D6-20260918-R1`). Os quatro achados foram
+revalidados no HEAD antes de qualquer conserto, e os quatro persistiam:
+
+| achado | o que era | onde está agora |
+| --- | --- | --- |
+| R-A04-01 | `nomeAcessivelDaMarca()` devolvia português fixo, e o trilho o usava no `aria-label` em qualquer idioma | a ação vem de `rail.marcaAcao` nos três catálogos, com `{marca}` interpolado; teste de tela nos três idiomas e asserção no e2e |
+| R-A04-02 | a tabela dizia `BUS-03` PARCIAL e a conclusão, doze linhas abaixo, dizia AUSENTE | conclusão corrigida por significado, ausência antiga preservada como citação histórica datada, e `gate:bus-matriz` passou a conferir uma contra a outra |
+| R-A04-03 | a retomada chamava `bash /tmp/gates.sh`, um programa fora do repositório | `pnpm gates` (`scripts/run-gates.mjs`), que descobre a raiz e a lista de portões sozinho; `gate:portability` confere o bloco de retomada |
+| R-A04-04 | `idiomaEfetivo` comparava relógios de máquinas diferentes | precedência sem relógio: a troca desta sessão vence tudo, e entre as guardadas vence a de maior `versao` |
+
+**O que o conserto encontrou, e a revisão não podia ver.** Ao medir a família do
+primeiro achado em vez do caso, apareceram mais dois irmãos calados nas mesmas
+Preferências: dois formatadores de número fixos em `pt-BR`. E o agregador
+versionado revelou que a lista escrita à mão em `/tmp/gates.sh` tinha **trinta**
+nomes enquanto o `package.json` tinha **trinta e um** — `gate:licenses:release`
+nunca rodou localmente em sessão nenhuma.
+
 **A próxima fatia, e por que ela é grande.** A cobertura trilíngue é de
 navegação + Preferências. O passo seguinte é migrar as demais superfícies, e a
 medição de hoje diz o tamanho: `pt-BR.json` tem **398 chaves**, `hub` tem 138,
@@ -83,9 +101,20 @@ línguas, que é onde a pessoa lê o que está e o que não está traduzido.
 **Comando de retomada:**
 
 ```
-cd /home/claude/integ && git log --oneline -1 && git status --short
-bash /tmp/gates.sh && node scripts/check-constitution.mjs --verdicts /tmp/verdicts.txt
+git log --oneline -1 && git status --short && git branch --show-current
+pnpm gates
 ```
+
+`pnpm gates` roda **todos** os portões que o `package.json` declara — a lista é
+descoberta, e não transcrita — e termina executando a constituição sobre os
+vereditos que acabou de coletar. Ele acha a raiz do repositório sozinho, então
+funciona de qualquer diretório e em qualquer máquina; os vereditos e os registros
+de cada portão vão para o temporário do sistema, e o caminho sai impresso na
+última linha. `pnpm gates --listar` diz o que ele rodaria sem rodar nada.
+
+Isto substituiu um `/tmp/gates.sh` escrito à mão, que sumia a cada reinício e
+trazia a lista de portões copiada — ela estava um portão atrás do
+`package.json`. `gate:portability` passou a conferir este bloco.
 
 **O que NÃO está autorizado, e continua não estando:** contratar, cobrar, mudar
 DNS, criar aplicativo OAuth em conta externa, publicar, migrar produção,

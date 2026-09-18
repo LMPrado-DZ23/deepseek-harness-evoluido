@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { X } from 'lucide-react'
 import { useCatalogos, useIdioma } from '../i18n/IdiomaProvider'
 import { IDIOMAS, NOME_DO_IDIOMA } from '../i18n/idioma'
+import { comValores } from '../i18n/texto'
 import { iniciaisDaConta } from '../shell/tarefasDoTrilho'
 import { podeOperar, secaoInicial, secoesDePreferencias, type ContextoDasPreferencias, type GrupoDePreferencias, type SecaoDePreferencias } from './preferencias'
 import { chaveDoVeredito, contagemEmTexto, custoEmTexto, linhasDeUso, totalDeUso, type LinhaDeUso, type UsoDoEspaco } from './uso'
@@ -49,6 +50,7 @@ export function Preferencias({ contexto, aoFechar, conta, notificacao }: {
 
   const grupos: readonly GrupoDePreferencias[] = ['configuracoes', 'capacidades', 'dados']
   const selecionada = secoes.find(secao => secao.id === aberta) ?? null
+  const { idioma } = useIdioma()
 
   return <div className="dz-preferencias-fundo" onClick={evento => { if (evento.target === evento.currentTarget) aoFechar() }}>
     <div className="dz-preferencias" role="dialog" aria-modal="true" aria-label={preferencias.titulo} tabIndex={-1} ref={dialogo}>
@@ -59,7 +61,7 @@ export function Preferencias({ contexto, aoFechar, conta, notificacao }: {
           um campo que não busca é o botão mudo que a decisão proíbe.
         */}
         <p className="dz-preferencias-conta-topo">
-          <span className="dz-preferencias-avatar" aria-hidden="true">{iniciaisDaConta(conta ?? null) ?? preferencias.avatarSemNome}</span>
+          <span className="dz-preferencias-avatar" aria-hidden="true">{iniciaisDaConta(conta ?? null, idioma) ?? preferencias.avatarSemNome}</span>
           <span>{conta === null || conta === undefined || conta.trim() === '' ? preferencias.contaSemNome : conta}</span>
         </p>
         {grupos.map(grupo => <div key={grupo} className="dz-preferencias-grupo">
@@ -190,6 +192,16 @@ export function TabelaDeUso({ linhas, veredito }: {
   readonly veredito: string | undefined
 }) {
   const { preferencias } = useCatalogos()
+  /*
+    O idioma entra AQUI porque número tem língua.
+
+    Até 18/09/2026 esta tabela escrevia todo número na convenção do português —
+    `1.234` — inclusive com a interface em inglês, onde isso se lê como mil
+    duzentos e trinta e quatro vírgula nada. Um número na convenção errada não
+    parece errado: parece OUTRO número. A moeda continua sendo o dólar, porque
+    trocar de idioma não muda preço nem moeda.
+  */
+  const { idioma } = useIdioma()
   const total = totalDeUso(linhas)
   const chave = chaveDoVeredito(veredito, total.chamadas > 0)
   return <div className="dz-preferencias-uso">
@@ -206,25 +218,26 @@ export function TabelaDeUso({ linhas, veredito }: {
       <tbody>
         {linhas.map(linha => <tr key={linha.rota}>
           <th scope="row">{linha.rota}</th>
-          <td>{contagemEmTexto(linha.chamadas)}</td>
-          <td>{contagemEmTexto(linha.tokens)}</td>
+          <td>{contagemEmTexto(linha.chamadas, idioma)}</td>
+          <td>{contagemEmTexto(linha.tokens, idioma)}</td>
           <td>
             {/* Custo desconhecido é dito em palavras. NUNCA "US$ 0,0000". */}
-            {linha.custoUsd === null ? preferencias.usoCustoDesconhecido : custoEmTexto(linha.custoUsd)}
+            {linha.custoUsd === null ? preferencias.usoCustoDesconhecido : custoEmTexto(linha.custoUsd, idioma)}
             {linha.naoPrecificadas > 0 && <span className="dz-preferencias-uso-aviso">
-              {' '}{preferencias.usoSemPreco.replace('{n}', contagemEmTexto(linha.naoPrecificadas))}
+              {' '}{comValores(preferencias.usoSemPreco, { n: contagemEmTexto(linha.naoPrecificadas, idioma) })}
             </span>}
           </td>
         </tr>)}
       </tbody>
     </table>}
     <p className="dz-preferencias-uso-total">
-      {preferencias.usoTotal
-        .replace('{custo}', custoEmTexto(total.custoMedidoUsd))
-        .replace('{chamadas}', contagemEmTexto(total.chamadas))}
+      {comValores(preferencias.usoTotal, {
+        custo: custoEmTexto(total.custoMedidoUsd, idioma),
+        chamadas: contagemEmTexto(total.chamadas, idioma),
+      })}
     </p>
     {total.naoPrecificadas > 0 && <p className="dz-preferencias-uso-aviso">
-      {preferencias.usoNaoPrecificadas.replace('{n}', contagemEmTexto(total.naoPrecificadas))}
+      {comValores(preferencias.usoNaoPrecificadas, { n: contagemEmTexto(total.naoPrecificadas, idioma) })}
     </p>}
     <p className="dz-preferencias-uso-limite">{preferencias.usoLimitacao}</p>
   </div>

@@ -95,6 +95,59 @@ export function linhasDaPonte(texto) {
  * @param idsDoLivro - a coluna de identificador do livro mestre.
  * @returns os achados.
  */
+/**
+ * As obrigações que a CONCLUSÃO do documento chama de ausentes, contra o que a
+ * TABELA do mesmo documento diz.
+ *
+ * ## Por que isto existe
+ *
+ * Porque aconteceu. Até `a04b0d6`, a tabela registrava `EMP-04` tocando
+ * `BUS-03` com estado PARCIAL, e o parágrafo de fecho, doze linhas abaixo,
+ * afirmava que `BUS-03` estava AUSENTE com zero linha de código. Os dois no
+ * mesmo arquivo. Uma revisão externa achou; nenhum portão achava, porque este
+ * conferia a tabela e ninguém conferia a prosa contra ela.
+ *
+ * A regra é uma só, e é a que o caso pedia: uma obrigação que a tabela declara
+ * tocada não pode ser chamada de AUSENTE pela conclusão. O contrário —
+ * conclusão dizendo PARCIAL sobre algo que a tabela não toca — não é conferido
+ * aqui, porque uma obrigação pode estar parcial por trabalho que não veio do
+ * Modo Empresa, e cobrar isso obrigaria a inventar linha de tabela.
+ *
+ * ## O que ele NÃO faz
+ *
+ * Não lê o resto da prosa. Este não é um portão de texto: é uma conferência de
+ * UMA afirmação, a que já se contradisse. Transformar isto numa infraestrutura
+ * de gates de prosa para consertar um parágrafo seria trocar um defeito por um
+ * peso permanente, e a própria revisão pediu para não fazer isso.
+ * @param texto - o documento da ponte.
+ * @param linhas - as linhas da tabela.
+ * @returns as reprovações.
+ */
+export function contradicoesDaConclusao(texto, linhas) {
+  const tocadas = new Map()
+  for (const linha of linhas) {
+    const id = linha.toca.replaceAll('`', '').trim()
+    if (/^BUS-\d+$/u.test(id)) tocadas.set(id, linha)
+  }
+  const conclusao = /##\s*O que isto NÃO muda\n([\s\S]*?)(?:\n##\s|$)/u.exec(texto)?.[1] ?? ''
+  const lista = []
+  /*
+    A citação HISTÓRICA é reconhecida, e não proibida: o documento precisa poder
+    dizer "até tal instantâneo, isto aqui afirmava outra coisa". O que a
+    distingue é estar dentro de uma citação em bloco (`>`), que é como este
+    repositório marca passado.
+  */
+  const atual = conclusao.split('\n').filter(linha => !linha.trimStart().startsWith('>')).join('\n')
+  for (const [id, linha] of tocadas) {
+    const afirmaAusente = new RegExp(`\`${id}\`[^.\n]*\\*\\*AUSENTE`, 'u').test(atual)
+      || new RegExp(`\`${id}\`[^.\n]*(?:e|,)[^.\n]*\`BUS-\\d+\`[^.\n]*\\*\\*AUSENTE`, 'u').test(atual)
+    if (afirmaAusente) {
+      lista.push({ onde: PONTE, motivo: `a conclusão chama ${id} de AUSENTE e a tabela registra ${linha.entrega} tocando-a com estado ${linha.estado}` })
+    }
+  }
+  return lista
+}
+
 export function achados(matriz, ponte, idsDoLivro) {
   const lista = []
   const reprove = (onde, motivo) => lista.push({ onde, motivo })
@@ -143,14 +196,26 @@ if (process.argv.includes('--self-test')) {
   check(achados(matrizFake, [{ entrega: '`EMP-01`', toca: '`BUS-01`', estado: 'PARCIAL', falta: '—' }], ['EMP-01']).length === 1, 'aceitou PARCIAL sem resto')
   check(achados(matrizFake, [{ entrega: '`EMP-01`', toca: '`BUS-01`', estado: 'PARCIAL', falta: 'z' }], ['EMP-01']).length === 0, 'reprovou linha correta')
   check(achados(new Map(), [], []).length === 2, 'matriz vazia e ponte vazia nao reprovaram')
+  // A CONTRADICAO que a revisao de 18/09/2026 achou: tabela toca, conclusao chama de ausente.
+  const tocaBus03 = [{ entrega: '`EMP-04`', toca: '`BUS-03`', estado: 'PARCIAL', falta: 'vitrine' }]
+  check(contradicoesDaConclusao('## O que isto NÃO muda\n\n`BUS-03` continua **AUSENTE**, com zero linha.\n', tocaBus03).length === 1,
+    'aceitou a conclusao chamando de AUSENTE o que a tabela toca')
+  check(contradicoesDaConclusao('## O que isto NÃO muda\n\n`BUS-02` e `BUS-03` continuam **AUSENTES**.\n', tocaBus03).length === 1,
+    'aceitou a forma com dois identificadores numa frase so')
+  check(contradicoesDaConclusao('## O que isto NÃO muda\n\n`BUS-03` está **PARCIAL** desde EMP-04.\n', tocaBus03).length === 0,
+    'reprovou uma conclusao que concorda com a tabela')
+  // O passado fica: dentro de citacao em bloco, a frase antiga nao e afirmacao atual.
+  check(contradicoesDaConclusao('## O que isto NÃO muda\n\n`BUS-03` está **PARCIAL**.\n\n> Até a04b0d6 isto dizia que `BUS-03` estava **AUSENTE**.\n', tocaBus03).length === 0,
+    'reprovou a citacao historica em bloco')
   process.stdout.write(`BUS_MATRIZ_SELF_TEST=PASS casos=${casos}\n`)
   process.exit(0)
 }
 
+const textoDaPonte = readFileSync(resolve(raiz, PONTE), 'utf8')
 const matriz = obrigacoes(JSON.parse(readFileSync(resolve(raiz, MATRIZ), 'utf8')))
-const ponte = linhasDaPonte(readFileSync(resolve(raiz, PONTE), 'utf8'))
+const ponte = linhasDaPonte(textoDaPonte)
 const idsDoLivro = identificadoresDoLivro(readFileSync(resolve(raiz, LIVRO), 'utf8'))
-const lista = achados(matriz, ponte, idsDoLivro)
+const lista = [...achados(matriz, ponte, idsDoLivro), ...contradicoesDaConclusao(textoDaPonte, ponte)]
 for (const { onde, motivo } of lista) process.stdout.write(`  ${onde}: ${motivo}\n`)
 process.stdout.write(`BUS_MATRIZ=${lista.length === 0 ? 'PASS' : 'FAIL'} obrigacoes=${matriz.size} correspondencias=${ponte.length} entregas_no_livro=${idsDoLivro.length} achados=${lista.length}\n`)
 process.exitCode = lista.length === 0 ? 0 : 1
