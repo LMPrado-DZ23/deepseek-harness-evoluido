@@ -12,6 +12,7 @@ import {
 } from '@dz23-studio/action-approval'
 import { DOMINIO_DA_PREVIA } from '@dz23-studio/preview'
 import type {} from '@dz23-studio/tenancy'
+import { acessoDaInterface } from './acesso.js'
 import {
   IdentityError,
   authenticatedMutation,
@@ -78,6 +79,15 @@ export interface StudioWebConfig {
 export function createStudioWebHandler(config: {
   readonly distDirectory: string
   readonly identity: StudioIdentityService
+  /**
+   * O endereço em que o servidor escuta.
+   *
+   * Ele entra porque a porta do MODO PESSOAL depende dele — e o padrão é o
+   * endereço local de propósito: um dublê de teste que não o declare não ganha
+   * uma porta mais larga do que declarou, ganha a mesma que a instalação
+   * pessoal tem.
+   */
+  readonly bindHost?: '127.0.0.1' | '0.0.0.0'
   readonly allowedHosts: readonly string[]
   readonly allowedOrigins: readonly string[]
   readonly previewFrameSources?: readonly string[]
@@ -186,7 +196,10 @@ export function createStudioWebHandler(config: {
         return sendJson(response, 200, launched, frameSources)
       }
       if (request.method !== 'GET' && request.method !== 'HEAD') return send(response, 405, t('http.methodNotAllowed'), frameSources)
-      await authenticatedMutation(request, config.identity, response)
+      // A interface abre com cookie OU em modo pessoal — a mesma regra que
+      // `GET /session` aplica. Ver `acesso.ts`: exigir cookie aqui deixava a
+      // instalação pessoal sem porta nenhuma para o produto.
+      await acessoDaInterface(request, config.identity, config.bindHost ?? '127.0.0.1', response)
       const root = await realpath(config.distDirectory)
       const requested = pathname === '/studio' || pathname === '/studio/' ? 'index.html' : decodeURIComponent(pathname.slice('/studio/'.length))
       const candidate = safeTarget(root, requested)
@@ -291,7 +304,7 @@ export async function apply(ctx: Context, config: StudioWebConfig = {}): Promise
   ctx.effect(() => ctx.webServer.register({
     kind: 'prefix', path: '/studio',
     handler: createStudioWebHandler({
-      distDirectory, identity: ctx.studioIdentity.service,
+      distDirectory, identity: ctx.studioIdentity.service, bindHost: ctx.webServer.host,
       assistantConversations,
       allowedHosts: config.allowedHosts ?? [defaultHost, `localhost:${port}`],
       allowedOrigins: config.allowedOrigins ?? defaultOrigins,

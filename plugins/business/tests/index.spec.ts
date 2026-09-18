@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import { DomainBusinessRepository, apply, inject, type StudioBusinessRuntime } from '../src/index.ts'
 import type { BusinessKey, Empresa, RegistroDeOferta, RegistroDePlano, VinculoDeTarefa } from '../src/model.ts'
@@ -59,9 +60,31 @@ function contexto() {
 
 describe('a montagem do Modo Empresa', () => {
   it('`inject` pede SÓ o que o plugin não sabe viver sem', () => {
-    // `promptToApp` entra porque as rotas da empresa são registradas no
-    // manipulador de workspace dele: sem ele, elas não existem em lugar nenhum.
-    expect(inject).toEqual(['storageDomain', 'promptToApp'])
+    // O serviço do `prompt-to-app` entra porque as rotas da empresa são
+    // registradas no manipulador de workspace dele: sem ele, elas não existem
+    // em lugar nenhum.
+    expect(inject).toEqual(['storageDomain', 'studioPromptToApp'])
+  })
+
+  it('o nome pedido e o nome que o prompt-to-app OFERECE', () => {
+    /*
+      ESTE CASO EXISTE PORQUE O ANTERIOR CONGELOU UM DEFEITO.
+
+      Ele afirmava `promptToApp`, que é o que o código dizia — e o código estava
+      errado. Os dois concordavam, o teste passava, e o produto NÃO ABRIA: o
+      Cordis espera por um serviço que ninguém oferece, e a árvore inteira
+      falha em `pending (waiting for service: promptToApp)`.
+
+      A asserção que dá peso não compara com um literal: compara com a FONTE do
+      outro lado. Se o `prompt-to-app` renomear o serviço, este caso reprova.
+    */
+    const fonte = readFileSync(new URL('../../prompt-to-app/src/index.ts', import.meta.url), 'utf8')
+    const oferecidos = [...fonte.matchAll(/ctx\.provide\(\s*'([A-Za-z][A-Za-z0-9_]*)'/gu)].map(achado => achado[1])
+    expect(oferecidos).toContain('studioPromptToApp')
+    for (const pedido of inject) {
+      if (pedido === 'storageDomain') continue
+      expect(oferecidos, pedido).toContain(pedido)
+    }
   })
 
   it('abre os QUATRO domínios e entrega um serviço que grava nas tabelas', async () => {

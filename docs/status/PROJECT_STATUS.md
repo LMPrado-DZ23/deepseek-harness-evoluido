@@ -101,8 +101,42 @@ padrão. O que fica não é o resultado da varredura — é o `gate:refs`, porqu
 hoje não é zero amanhã e o defeito é invisível: nada quebra, duas coisas param
 caladas.
 
-**As próximas são, nesta ordem:** `REV-CAN-JORNADA` (a primeira jornada real
-integrada, que fecha `EB-04`) e `PLAN-01`.
+## O PRODUTO ABRIU — 18/09/2026, noite
+
+**Pela primeira vez na missão, o FRIGG montado subiu e a interface abriu.**
+`pnpm studio` no contêiner desta sessão, com Docker respondendo e Ollama local
+configurado: dez linhas `ok` no conferidor, `GET /studio` devolvendo `200` com
+`<title>FRIGG</title>`, e a identidade respondendo `{"mode":"personal"}`.
+
+Foram **três defeitos**, e nenhum deles era sutil — todos moravam na MONTAGEM,
+que é a lição mais repetida daqui, e todos atravessaram a missão inteira porque
+ninguém tinha aberto o produto:
+
+1. **o `dsh` era chamado sem `--profile`**, e ele recusa subir assim. O
+   conferidor dizia tudo `ok`, o texto dizia "Abrindo o FRIGG", e o que aparecia
+   era `error: --profile <name> is required`;
+2. **`@dz23-studio/business` pedia o serviço `promptToApp`**, que ninguém
+   oferece — o nome é `studioPromptToApp`, que é o que os outros quatro
+   consumidores pedem. O Cordis não inventa serviço: ele espera. A árvore
+   inteira ficava `pending` e o processo morria. O teste do plugin comparava com
+   a mesma string errada, então ele CONGELAVA o defeito;
+3. **a página da interface exigia cookie de sessão numa instalação PESSOAL**,
+   onde entrar não existe porque não há ninguém para entrar como.
+
+`gate:profile-mounts` passou a ter uma segunda família de achados: todo nome
+pedido em `inject` tem de ser oferecido por alguém — por um plugin nosso ou pelo
+Harness fixado, cuja lista é LIDA do submódulo.
+
+**O que ainda NÃO está provado, e é o próximo passo:** as rotas de trabalho
+(`/api/studio/apps/*`) continuam recusando em modo pessoal, porque são
+`access: 'authorized'`. O produto abre e ainda não CRIA sem sessão registrada —
+e numa instalação local não há como ler o código do primeiro acesso, porque o
+remetente de e-mail em memória não o mostra a ninguém. É o mesmo buraco de
+`EB-02`, agora com endereço.
+
+**As próximas são, nesta ordem:** fazer o modo pessoal valer nas rotas de
+trabalho, `REV-CAN-JORNADA` (a primeira jornada real integrada, que fecha
+`EB-04`) e `PLAN-01`.
 
 ## DIRETIVA DO TITULAR — 18/09/2026: REAPROVEITAR ANTES DE REIMPLEMENTAR
 

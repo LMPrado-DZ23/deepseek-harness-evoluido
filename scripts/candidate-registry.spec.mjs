@@ -142,8 +142,13 @@ describe('AT-114 — candidato incompatível é recusado SEM perder a capacidade
 describe('o registro REAL desta árvore', () => {
   const registro = JSON.parse(readFileSync(new URL('../docs/inventory/candidatos-v6.json', import.meta.url), 'utf8'))
 
-  it('os quinze candidatos do pacote V6 estão registrados', () => {
-    expect(registro.candidatos).toHaveLength(15)
+  it('os candidatos registrados sao os quinze do pacote V6 mais os do ecossistema DSH', () => {
+    // A contagem é literal de propósito: um candidato que entre sem linha aqui
+    // é um candidato que ninguém reviu. Os quatro últimos vieram da diretiva do
+    // titular de 18/09 — procurar no ecossistema DSH antes de reimplementar.
+    const doEcossistema = registro.candidatos.filter(item => item.id.startsWith('CAND-DSH-') || item.id === 'CAND-VISION-USE')
+    expect(doEcossistema).toHaveLength(4)
+    expect(registro.candidatos).toHaveLength(19)
   })
 
   it('nenhum está operacional, e NENHUMA capacidade foi perdida', () => {
@@ -184,11 +189,13 @@ describe('o registro REAL desta árvore', () => {
     }
   })
 
-  it('os dois EM_ESTUDO têm plano de saída escrito ANTES do estudo', () => {
+  it('todo EM_ESTUDO tem plano de saída escrito ANTES do estudo', () => {
     // Entrar sem saber sair é decisão só de ida, e o §46 exige a estratégia de
     // saída como campo do registro, não como promessa futura.
     const estudo = registro.candidatos.filter(item => item.decisao === 'EM_ESTUDO')
-    expect(estudo.map(item => item.id).sort()).toEqual(['CAND-LEMONADE', 'CAND-OD'])
+    expect(estudo.map(item => item.id).sort()).toEqual([
+      'CAND-DSH-BROWSER', 'CAND-DSH-IMAGE-VISION', 'CAND-DSH-PPT', 'CAND-LEMONADE', 'CAND-OD', 'CAND-VISION-USE',
+    ])
     for (const candidato of estudo) expect(candidato.plano_saida, candidato.id).toContain('Obrigatório')
   })
 })

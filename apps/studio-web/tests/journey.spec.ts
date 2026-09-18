@@ -3,12 +3,32 @@ import { expect, request as apiRequest, test } from '@playwright/test'
 import { INTAKE_ANSWERS, answerIntake } from './answering'
 import { esperarResultado } from './resultado'
 
-test('recusa interface e API sem sessão', async () => {
+test('sem sessão: a API recusa, e a interface abre porque ESTA instalação é pessoal', async () => {
+  /*
+    ESTE TESTE MUDOU EM 18/09/2026, e a mudança registra uma CONTRADIÇÃO do
+    produto em vez de escondê-la.
+
+    Ele dizia que a interface recusa sem sessão. O dublê deste servidor, porém,
+    declara modo pessoal ABERTO — `personalPrincipal` devolve um principal —, e
+    numa instalação pessoal ENTRAR não existe: não há ninguém para entrar como.
+    Exigir cookie ali deixava quem baixou o produto olhando `401 Entre para
+    continuar.`, que foi o terceiro defeito medido quando o FRIGG montado subiu
+    pela primeira vez.
+
+    O que este caso fixa agora é o estado REAL, com a contradição no meio: a
+    interface abre, e as rotas de trabalho continuam recusando, porque são
+    `access: 'authorized'` e não conhecem o principal pessoal. O produto abre e
+    não cria. `ABRIR-02` é a tarefa que fecha isso, e quando fechar é AQUI que
+    a mudança aparece.
+
+    A recusa da interface numa instalação COM gente registrada — que é o caso
+    de servidor — tem casos próprios em `plugins/studio-web/tests/acesso.spec.ts`.
+  */
   const client = await apiRequest.newContext({
     baseURL: 'http://127.0.0.1:4179',
     extraHTTPHeaders: { host: 'studio.dz23.localhost:4179' },
   })
-  expect((await client.get('/studio')).status()).toBe(401)
+  expect((await client.get('/studio')).status()).toBe(200)
   expect((await client.get('/api/studio/apps/health')).status()).toBe(401)
   await client.dispose()
 })

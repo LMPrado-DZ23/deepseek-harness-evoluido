@@ -24,6 +24,10 @@ async function fixture(previewFrameSources: readonly string[] = [], options: {
     })),
     validateCsrfToken: vi.fn(),
     assertRequestTrust: vi.fn(),
+    // Esta instalação TEM gente registrada: `personalPrincipal` devolve
+    // `undefined`, e a porta do modo pessoal fica fechada. É o que faz as
+    // recusas abaixo continuarem sendo recusas.
+    personalPrincipal: vi.fn(() => undefined),
   }
   const allowedHosts: string[] = []
   const allowedOrigins: string[] = []

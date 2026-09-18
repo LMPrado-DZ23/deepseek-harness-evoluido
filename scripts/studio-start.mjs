@@ -107,9 +107,32 @@ export const SONDA_PADRAO = { docker }
  * de alguém que só quer experimentar o produto seria cobrar um preço que ela
  * não concordou em pagar.
  */
+/** O nome do perfil que o FRIGG abre. É o diretório em `dsh-home/profiles/`. */
+export const PERFIL = 'studio'
+
+/**
+ * Os argumentos com que o `dsh` é chamado.
+ *
+ * ELE EXISTE PORQUE A OMISSÃO NÃO TINHA PESO. O `dsh` recusa subir sem
+ * `--profile <nome>` — ele hospeda vários perfis e não adivinha qual —, e esta
+ * função chamava o binário SEM argumento nenhum. O conferidor dizia as dez
+ * linhas `ok`, escrevia "Abrindo o FRIGG", e o que aparecia em seguida era
+ * `error: --profile <name> is required`. Medido em 18/09/2026, neste
+ * repositório, no caminho que o `COMECAR.md` manda usar para abrir o produto.
+ *
+ * Nenhum teste podia pegar: a decisão morava dentro de `arrancar`, que é
+ * montagem — a lição mais repetida deste repositório. Agora ela é função
+ * exportada, e tem caso.
+ * @param bin - o caminho do binário do `dsh`.
+ * @returns a lista de argumentos, na ordem.
+ */
+export function argumentosDaPartida(bin) {
+  return [bin, '--profile', PERFIL]
+}
+
 function arrancar(base) {
   const bin = require.resolve('@deepseek-ai/dsh/lib/bin.js')
-  const filho = spawn(process.execPath, [bin], {
+  const filho = spawn(process.execPath, argumentosDaPartida(bin), {
     cwd: base,
     stdio: 'inherit',
     env: { ...process.env, DSH_HOME: resolve(base, 'dsh-home') },

@@ -91,6 +91,29 @@ export * from './template-policy.js'
 export const name = 'dz23-studio-prompt-to-app'
 export const inject = ['agents', 'jobs', 'llm', 'storageDomain', 'studioIdentity', 'studioRouteHealth', 'studioTenancy', 'webServer']
 
+/** O modelo padrão da rota local, quando ninguém configurou outro. */
+export const MODELO_LOCAL_PADRAO = 'qwen2.5-coder:7b'
+
+/**
+ * O modelo que a rota local vai PEDIR.
+ *
+ * Ele sai da MESMA variável que o perfil usa para registrar o modelo do
+ * provedor (`DZ23_OLLAMA_MODEL`), e isso conserta um defeito silencioso: o
+ * perfil já lia a variável, e este lado estava fixo em `qwen2.5-coder:7b`.
+ * Quem configurasse a variável fazia o provedor registrar um modelo e o plugin
+ * pedir OUTRO — o pedido nomeia um modelo que o provedor não tem, e a falha
+ * aparece longe da causa, na geração.
+ *
+ * Um valor em branco é tratado como ausente: variável de ambiente vazia é a
+ * forma mais comum de "não configurei", e aceitá-la pediria um modelo sem nome.
+ * @param ambiente - as variáveis de ambiente.
+ * @returns o identificador do modelo.
+ */
+export function modeloLocal(ambiente: Readonly<Record<string, string | undefined>>): string {
+  const declarado = ambiente.DZ23_OLLAMA_MODEL?.trim()
+  return declarado === undefined || declarado === '' ? MODELO_LOCAL_PADRAO : declarado
+}
+
 export interface PromptToAppPluginConfig {
   readonly allowedHosts?: readonly string[]
   readonly allowedOrigins?: readonly string[]
@@ -364,7 +387,7 @@ export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}):
     markEstruturada: (options, purpose, route) =>
       desvioLigado && purpose === 'generate' && route === ROTA_LOCAL ? marcarEstruturada(options) : options,
     modelByRoute: config.modelByRoute ?? {
-      ollama: 'qwen2.5-coder:7b', omniroute: 'deepseek-v3.2', 'deepseek-official': 'deepseek-chat',
+      ollama: modeloLocal(process.env), omniroute: 'deepseek-v3.2', 'deepseek-official': 'deepseek-chat',
     },
   })
   const runsRoot = resolve(config.runsRoot ?? resolve(homedir(), '.dz23-studio', 'generated-runs'))

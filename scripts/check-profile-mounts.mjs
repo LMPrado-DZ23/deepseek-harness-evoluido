@@ -21,7 +21,7 @@
  *
  * Uso: node scripts/check-profile-mounts.mjs [--self-test]
  */
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -124,6 +124,133 @@ export function achados(dependencias, textos) {
   return resultado
 }
 
+
+/**
+ * OS NOMES DE SERVIÇO QUE CADA PLUGIN PEDE, e quem os oferece.
+ *
+ * Esta segunda família de achados existe por um defeito medido em 18/09/2026,
+ * e ele era o pior tipo: o produto NÃO ABRIA. `@dz23-studio/business` declarava
+ * `inject = ['storageDomain', 'promptToApp']`, e nenhum plugin oferece
+ * `promptToApp` — o nome real é `studioPromptToApp`, que é o que os outros
+ * quatro consumidores pedem. O Cordis não inventa serviço: ele espera. A
+ * entrada ficava `pending (waiting for service: promptToApp)`, o carregamento
+ * da árvore falhava, e o `pnpm studio` morria depois de imprimir o endereço.
+ *
+ * Nada acusava. Os testes do plugin montam o que o plugin precisa; o portão de
+ * montagem conferia que a LINHA existe no perfil, e ela existia; e o e2e usa
+ * servidor próprio. O defeito morava no espaço entre "está montado" e "sobe" —
+ * o mesmo espaço do artefato versionado desatualizado, e o próprio comentário
+ * deste portão dizia que essa prova faltava.
+ *
+ * A prova aqui é ESTÁTICA, e continua não sendo a composição resolvida: um
+ * nome pedido tem de ser oferecido por ALGUÉM — por um plugin nosso, com
+ * `ctx.provide('<nome>')`, ou pelo Harness fixado, cuja lista é LIDA do
+ * submódulo e não escrita à mão aqui. O que ela não prova é ordem de montagem.
+ */
+
+/**
+ * Os nomes que um arquivo oferece com `provide`.
+ * @param conteudo - o texto do arquivo.
+ * @returns os nomes, sem repetição.
+ */
+export function nomesOferecidos(conteudo) {
+  // DUAS formas, porque o Cordis tem duas. `provide('nome')` é a explícita; um
+  // serviço de classe se registra em `super(ctx, 'nome')`, e é assim que o
+  // Harness oferece `tools`, `storage` e `sessionController`. Ler só a primeira
+  // fazia o portão acusar seis serviços que existem — e um portão que grita sem
+  // razão é desligado, que é como um portão morre.
+  const formas = [
+    /provide\(\s*['"]([A-Za-z][A-Za-z0-9_.]*)['"]/gu,
+    /super\(\s*[A-Za-z_$][A-Za-z0-9_$]*\s*,\s*['"]([A-Za-z][A-Za-z0-9_.]*)['"]/gu,
+  ]
+  const nomes = []
+  for (const forma of formas) {
+    for (const achado of conteudo.matchAll(forma)) nomes.push(achado[1])
+  }
+  return [...new Set(nomes)]
+}
+
+/**
+ * Os nomes que um arquivo PEDE na sua lista `inject`.
+ *
+ * Só a forma literal conta — `export const inject = ['a', 'b']`. Uma lista
+ * montada em tempo de execução não é lida aqui, e isso é limite declarado: o
+ * portão prefere não ver a pedir que alguém escreva a lista de outro jeito para
+ * escapar dele.
+ * @param conteudo - o texto do arquivo.
+ * @returns os nomes pedidos.
+ */
+export function nomesPedidos(conteudo) {
+  const bloco = /export const inject\s*=\s*\[([^\]]*)\]/u.exec(conteudo)
+  if (bloco === null) return []
+  return (bloco[1].match(/['"]([A-Za-z][A-Za-z0-9_.]*)['"]/gu) ?? [])
+    .map(trecho => trecho.slice(1, -1))
+}
+
+/**
+ * Os achados de serviço pedido e não oferecido.
+ * @param pedidos - pares [rótulo do plugin, nomes pedidos].
+ * @param oferecidos - todos os nomes oferecidos por alguém.
+ * @returns um achado por nome pedido que ninguém oferece.
+ */
+export function achadosDeServico(pedidos, oferecidos) {
+  const conjunto = new Set(oferecidos)
+  const resultado = []
+  for (const [plugin, nomes] of pedidos) {
+    for (const nome of nomes) {
+      if (conjunto.has(nome)) continue
+      resultado.push(`${plugin}: pede o serviço \`${nome}\`, e NINGUÉM o oferece — a entrada fica pendente e a árvore inteira não sobe`)
+    }
+  }
+  return resultado
+}
+
+/** Lê o disco: o que cada plugin nosso pede, e tudo que existe para oferecer. */
+function servicosDoDisco() {
+  const pedidos = []
+  const oferecidos = []
+  const pluginsDir = resolve(root, 'plugins')
+  for (const nome of readdirSync(pluginsDir)) {
+    const indice = resolve(pluginsDir, nome, 'src', 'index.ts')
+    if (!existsSync(indice)) continue
+    const conteudo = readFileSync(indice, 'utf8')
+    pedidos.push([`plugins/${nome}`, nomesPedidos(conteudo)])
+  }
+  // O que NOSSOS plugins oferecem: a varredura é da pasta inteira, porque um
+  // `provide` não precisa morar no `index.ts`.
+  for (const nome of readdirSync(pluginsDir)) {
+    const src = resolve(pluginsDir, nome, 'src')
+    if (!existsSync(src)) continue
+    for (const arquivo of readdirSync(src)) {
+      if (!arquivo.endsWith('.ts')) continue
+      oferecidos.push(...nomesOferecidos(readFileSync(resolve(src, arquivo), 'utf8')))
+    }
+  }
+  // E o que o HARNESS oferece, LIDO do submódulo fixado: escrever a lista aqui
+  // seria uma segunda verdade sobre um upstream que não é nosso.
+  oferecidos.push(...nomesDoHarness(resolve(root, 'third_party/deepseek-harness/packages'), 0))
+  return { pedidos, oferecidos }
+}
+
+/**
+ * Varre o Harness fixado atrás dos nomes que ele oferece.
+ * @param dir - a pasta a varrer.
+ * @param profundidade - o nível atual.
+ * @returns os nomes encontrados.
+ */
+export function nomesDoHarness(dir, profundidade) {
+  if (profundidade > 5 || !existsSync(dir)) return []
+  const saida = []
+  for (const entrada of readdirSync(dir, { withFileTypes: true })) {
+    if (entrada.name === 'node_modules') continue
+    const caminho = resolve(dir, entrada.name)
+    if (entrada.isDirectory()) { saida.push(...nomesDoHarness(caminho, profundidade + 1)); continue }
+    if (!/\.(?:ts|js)$/u.test(entrada.name)) continue
+    saida.push(...nomesOferecidos(readFileSync(caminho, 'utf8')))
+  }
+  return saida
+}
+
 function textos() {
   return MOUNT_FILES.map(([rotulo, caminho]) => {
     try { return [rotulo, readFileSync(resolve(root, caminho), 'utf8')] }
@@ -151,12 +278,27 @@ if (process.argv.includes('--self-test')) {
   // Uma dependência que não é nossa não é problema deste portão.
   const alheia = achados({ '@deepseek-ai/dsh-base': 'workspace:*' }, [['perfil', '']])
   if (alheia.length !== 0) { process.stderr.write('self-test: reclamou de pacote de terceiro\n'); process.exit(1) }
-  process.stdout.write('PROFILE_MOUNTS_SELF_TEST=PASS checks=6\n')
+  // A SEGUNDA FAMÍLIA: o defeito medido — nome pedido que ninguém oferece.
+  const servicoAusente = achadosDeServico([['plugins/business', ['storageDomain', 'promptToApp']]], ['storageDomain', 'studioPromptToApp'])
+  if (servicoAusente.length !== 1) { process.stderr.write('self-test: nao pegou o servico pedido e nao oferecido\n'); process.exit(1) }
+  const servicoPresente = achadosDeServico([['plugins/business', ['storageDomain', 'studioPromptToApp']]], ['storageDomain', 'studioPromptToApp'])
+  if (servicoPresente.length !== 0) { process.stderr.write('self-test: reprovou um servico oferecido\n'); process.exit(1) }
+  const leitura = nomesPedidos("export const inject = ['a', \"b\"]\n")
+  if (leitura.join(',') !== 'a,b') { process.stderr.write('self-test: nao leu a lista inject\n'); process.exit(1) }
+  const semLista = nomesPedidos('export const name = "x"')
+  if (semLista.length !== 0) { process.stderr.write('self-test: inventou lista inject\n'); process.exit(1) }
+  const oferta = nomesOferecidos("ctx.provide('studioPromptToApp', algo)\nprovide( \"outro\" )")
+  if (oferta.join(',') !== 'studioPromptToApp,outro') { process.stderr.write('self-test: nao leu os provides\n'); process.exit(1) }
+  // A segunda forma do Cordis: serviço de classe.
+  const ofertaDeClasse = nomesOferecidos("class T extends Service {\n  constructor(ctx) { super(ctx, 'tools') }\n}")
+  if (ofertaDeClasse.join(',') !== 'tools') { process.stderr.write('self-test: nao leu o servico de classe\n'); process.exit(1) }
+  process.stdout.write('PROFILE_MOUNTS_SELF_TEST=PASS checks=12\n')
   process.exit(0)
 }
 
 const pkg = JSON.parse(readFileSync(resolve(root, 'dsh-home/profiles/studio/package.json'), 'utf8'))
-const encontrados = achados(pkg.dependencies ?? {}, textos())
+const servicos = servicosDoDisco()
+const encontrados = [...achados(pkg.dependencies ?? {}, textos()), ...achadosDeServico(servicos.pedidos, servicos.oferecidos)]
 for (const linha of encontrados) process.stdout.write(`${linha}\n`)
 const total = Object.keys(pkg.dependencies ?? {}).filter(nome => nome.startsWith('@dz23-studio/')).length
 process.stdout.write(`PROFILE_MOUNTS=${encontrados.length === 0 ? 'PASS' : 'FAIL'} plugins=${String(total)} excecoes=${String(Object.keys(NAO_MONTADOS).length)} achados=${String(encontrados.length)}\n`)

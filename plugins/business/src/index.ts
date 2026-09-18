@@ -30,8 +30,17 @@ export const name = 'dz23-studio-business'
  * workspace dele — sem ele, as rotas da empresa não existem em lugar nenhum, e
  * um plugin que sobe sem rota é exatamente o defeito que `gate:profile-mounts`
  * nasceu para pegar.
+ *
+ * O NOME AQUI JÁ ESTEVE ERRADO, e o erro derrubava o produto inteiro. Dizia
+ * `promptToApp`; o serviço se chama `studioPromptToApp`, que é o que os outros
+ * quatro consumidores pedem e o que `ctx.provide` oferece. O Cordis não inventa
+ * serviço: ele ESPERA. A entrada ficava `pending (waiting for service:
+ * promptToApp)`, o carregamento da árvore falhava, e `pnpm studio` morria logo
+ * depois de imprimir o endereço. Medido em 18/09/2026, na primeira vez que
+ * alguém subiu o produto montado nesta missão. `gate:profile-mounts` passou a
+ * conferir que todo nome pedido é oferecido por alguém.
  */
-export const inject = ['storageDomain', 'promptToApp']
+export const inject = ['storageDomain', 'studioPromptToApp']
 
 export interface StudioBusinessRuntime {
   readonly service: BusinessService

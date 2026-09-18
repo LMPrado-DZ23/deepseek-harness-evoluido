@@ -1,9 +1,12 @@
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, resolve } from 'node:path'
+
+/** A raiz do repositório, a partir deste arquivo em `scripts/`. */
+const RAIZ_DO_REPOSITORIO = resolve(dirname(new URL(import.meta.url).pathname), '..')
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { SONDA_PADRAO, docker, observar } from './studio-start.mjs'
+import { PERFIL, SONDA_PADRAO, argumentosDaPartida, docker, observar } from './studio-start.mjs'
 import { bloqueios, conferencias } from './studio-doctor.mjs'
 
 /**
@@ -178,5 +181,28 @@ describe('o comando existe de verdade', () => {
     const pacote = JSON.parse(await import('node:fs/promises').then(fs => fs.readFile(new URL('../package.json', import.meta.url), 'utf8')))
     expect(pacote.scripts.studio).toBe('node scripts/studio-start.mjs')
     expect(pacote.scripts['studio:doctor']).toBe('node scripts/studio-start.mjs --conferir')
+  })
+})
+
+describe('a partida chama o `dsh` com o perfil', () => {
+  /*
+    O DEFEITO QUE ISTO FECHA: o `dsh` era chamado sem argumento nenhum, e ele
+    RECUSA subir sem `--profile`. O conferidor dizia dez linhas `ok`, o texto
+    dizia "Abrindo o FRIGG", e o produto não abria — `error: --profile <name>
+    is required`. A decisão morava dentro da montagem, e por isso atravessou a
+    missão inteira sem um teste.
+  */
+  it('o perfil vai na linha de comando, e e o que existe em dsh-home/profiles', () => {
+    const argumentos = argumentosDaPartida('/caminho/bin.js')
+    expect(argumentos[0]).toBe('/caminho/bin.js')
+    expect(argumentos).toContain('--profile')
+    expect(argumentos[argumentos.indexOf('--profile') + 1]).toBe(PERFIL)
+    // O nome não é escolhido aqui: ele é o diretório do perfil no disco.
+    expect(existsSync(resolve(RAIZ_DO_REPOSITORIO, 'dsh-home', 'profiles', PERFIL, 'cordis.patch.yml'))).toBe(true)
+  })
+
+  it('o binario vem primeiro — node <bin> <flags>, e nao o contrario', () => {
+    // Trocar a ordem faz o Node tratar `--profile` como flag DELE.
+    expect(argumentosDaPartida('/b.js').indexOf('/b.js')).toBe(0)
   })
 })
