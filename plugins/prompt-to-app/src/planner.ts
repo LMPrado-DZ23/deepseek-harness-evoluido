@@ -12,6 +12,7 @@ import {
   type SkillCard, type SkillRefusal, type SkillSelection,
 } from './skill-registry.js'
 import { t } from './i18n.js'
+import { decodeModelJson } from './model-json.js'
 
 /**
  * De onde as habilidades vêm, quando vêm.
@@ -302,7 +303,7 @@ export class PlannerEngine {
       { id: 'plan.schema', kind: 'schema' as const, priority: 0, source: 'planOutputSchema', text: t('prompts.schema', { schema: JSON.stringify(planOutputSchema.toJSONSchema()) }) },
     ], { budgetChars: this.budgetChars })
     const result = await this.model.complete(scope, 'plan', privacy, assembled.prompt)
-    const decoded = typeof result.value === 'string' ? JSON.parse(result.value) : result.value
+    const decoded = decodeModelJson(result.value)
     const output = planOutputSchema.parse(decoded)
     if (CATEGORY_REQUIRES_DATA_MODEL[category] !== false && !output.slices.some(slice => slice.planned_files.includes('src/GeneratedApp.tsx'))) {
       throw new FormCategoryCapabilityError('FORM_ENTRY_FILE_REQUIRED', t('errors.formEntryFileRequired'))
@@ -372,7 +373,7 @@ export class PlannerEngine {
       { id: 'slice.schema', kind: 'schema' as const, priority: 0, source: 'slice-output-schema', text: t('prompts.schema', { schema: JSON.stringify(sliceOutputSchema.toJSONSchema()) }) },
     ], { budgetChars: this.budgetChars })
     const result = await this.model.complete(scope, 'plan', privacy, assembled.prompt)
-    const decoded = typeof result.value === 'string' ? JSON.parse(result.value) : result.value
+    const decoded = decodeModelJson(result.value)
     // O registro sai DEVOLVIDO, pelo mesmo motivo de `plan`: guardado no motor,
     // ele pertenceria ao ultimo pedido que passou por aqui, e nao a este.
     return { slice: sliceOutputSchema.parse(decoded).slice, ledger: assembled.ledger }

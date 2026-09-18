@@ -82,6 +82,27 @@ cinco. Reprovação garantida sempre que o Docker demorar, escrita no código.
 Reproduzi a falha antes de consertar, e o conserto foi tirar o mundo de dentro
 do teste, e não aumentar o limite dele.
 
+**O GARGALO REAL foi encontrado em 18/09** (`MOD-01`), e não era nenhuma das
+duas coisas que o titular perguntou. Ele perguntou por anexo e por construir
+jogos; a medição foi atrás do que impedia QUALQUER aplicativo de ser gerado por
+modelo real, e achou:
+
+- os quatro sítios que leem saída de modelo — geração, plano (duas vezes) e
+  AppSpec — faziam **`JSON.parse` cru**;
+- o `qwen2.5:3b` na máquina do titular devolve o JSON **dentro de cerca
+  markdown**, e o JSON lá dentro é válido e bate com o schema campo por campo;
+- logo, toda tentativa de geração morria antes de começar, e as três tentativas
+  morriam igual, porque a causa não era aleatória.
+
+Isso atravessou a missão inteira porque **o dublê sempre responde no formato
+exato**. Segunda amostra, minutos depois: o MESMO modelo respondeu **sem** cerca.
+Não existe prompt que garanta a forma — a tolerância tem de estar no leitor.
+
+**E a GPU derrubou o número que sustentava `EB-04`.** A medição de 12/09 foi em
+CPU. Hoje, na mesma máquina, o Ollama carrega o modelo **100% na GPU** (GTX 1650,
+4 GB) e o prompt de 2.306 caracteres completa em **11 s** — o prompt real de
+geração, em **4,8 s**. Os "45–50 s" eram da máquina sem GPU, e não do modelo.
+
 **A próxima fatia, e por que ela é grande.** A cobertura trilíngue é de
 navegação + Preferências. O passo seguinte é migrar as demais superfícies, e a
 medição de hoje diz o tamanho: `pt-BR.json` tem **398 chaves**, `hub` tem 138,

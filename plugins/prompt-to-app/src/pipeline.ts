@@ -32,6 +32,7 @@ import { assertGeneratedSource, generationRules } from './import-policy.js'
 import { recoveryNoteFor, type ObservedRun } from './learning.js'
 import { generateSaasLayer, writeSaasLayer } from './saas-generator.js'
 import { t } from './i18n.js'
+import { decodeModelJson } from './model-json.js'
 import { diffRunFiles, runReport, RUN_REPORT_FILE, type RunFileAuthor } from './run-report.js'
 import { readResumeMarker, readResumedFiles, writeResumeMarker, type ResumeMarker } from './resume.js'
 import type { StudioPlan, StudioRun, StudioRunStep } from './model.js'
@@ -44,7 +45,15 @@ import { PromptToAppError, type PromptToAppActor, type PromptToAppService } from
 import type { EmergencyStopGuard } from './jobs.js'
 import { canStartGeneration } from './state.js'
 
-const generatedOutputSchema = z.object({ files: z.array(generatedFileSchema).min(1).max(80) }).strict()
+/**
+ * O CONTRATO de saída do gerador: o que o modelo tem de devolver.
+ *
+ * Exportado para poder ser exercitado por teste contra a resposta de um modelo
+ * REAL. Enquanto ele morava fechado aqui dentro, a única coisa que o conferia
+ * era o dublê — que sempre responde certo, e portanto nunca o conferiu de
+ * verdade.
+ */
+export const generatedOutputSchema = z.object({ files: z.array(generatedFileSchema).min(1).max(80) }).strict()
 const FRAMEWORK_GENERATED_MUTABLE_PATHS = new Set(['next-env.d.ts'])
 export interface CodeGenerationResult { readonly files: readonly GeneratedFile[]; readonly route: string; readonly model: string; readonly inputTokens?: number; readonly outputTokens?: number }
 export interface CodeGeneratorPort { generate(spec: AppSpecV1, plan: StudioPlan, diagnostic?: string): Promise<CodeGenerationResult> }
@@ -66,7 +75,7 @@ export class ModelCodeGenerator implements CodeGeneratorPort {
       t('prompts.generateSpec', { spec: JSON.stringify(spec) }), t('prompts.generatePlan', { plan: JSON.stringify(plan.slices) }),
       ...(diagnostic === undefined ? [] : [t('prompts.generateRepair', { diagnostic })]),
     ].join('\n'))
-    const decoded = typeof result.value === 'string' ? JSON.parse(result.value) : result.value
+    const decoded = decodeModelJson(result.value)
     const output = generatedOutputSchema.parse(decoded)
     return { files: output.files, route: result.route, model: result.model, ...(result.usage === undefined ? {} : { inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens }) }
   }

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
 import { t } from './i18n.js'
+import { decodeModelJson } from './model-json.js'
 
 export const sensitiveDataKindSchema = z.enum(['cpf', 'health', 'financial', 'minors'])
 export type SensitiveDataKind = z.infer<typeof sensitiveDataKindSchema>
@@ -124,8 +125,7 @@ export class AppSpecClarificationRequired extends Error {
 }
 
 function decode(value: unknown): unknown {
-  if (typeof value !== 'string') return value
-  return JSON.parse(value)
+  return decodeModelJson(value)
 }
 
 export async function parseAppSpecWithSingleRepair(
