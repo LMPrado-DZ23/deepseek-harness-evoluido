@@ -124,6 +124,10 @@ jobs:
           # portao olhava a montagem.
           pnpm gate:profile-mounts
           pnpm gate:i18n
+          # TRES idiomas de verdade: chave faltando ou a mais, traducao que e
+          # copia do portugues, interpolacao perdida e catalogo orfao. Nenhuma
+          # delas e pega por `gate:i18n`, que confere outra coisa.
+          pnpm gate:idiomas
           # UMA marca, e ela nao arrasta a identidade de instalacao junto. O
           # nome do produto estava escrito a mao em onze arquivos que nenhum
           # teste comparava entre si; e `id`/`scope`/`start_url` do manifesto

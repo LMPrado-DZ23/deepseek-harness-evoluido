@@ -27,7 +27,16 @@ import { MISSION_PATH } from '../mission/missionApi'
 import { PROJECTS_PATH } from '../projects/ProjectsScreen'
 import { TEAM_PATH } from '../team/teamApi'
 import { STUDIO_HOME_PATH } from '../navigation'
-import rail from '../i18n/rail.pt-BR.json'
+import railPadrao from '../i18n/rail.pt-BR.json'
+
+/**
+ * O catálogo do trilho, em qualquer idioma.
+ *
+ * O tipo é o do português porque ele é a referência: uma chave que falte em
+ * outro idioma vira erro de compilação, e não a palavra "undefined" no meio de
+ * um item de navegação.
+ */
+export type CatalogoDoTrilho = typeof railPadrao
 
 /**
  * O identificador do painel de navegação, usado pelo `aria-controls` do botão
@@ -58,9 +67,15 @@ export interface RailSecao {
 
 /**
  * As seções do trilho, na ordem da referência.
+ *
+ * O catálogo entra por PARÂMETRO, e não por importação fixa: este módulo é
+ * função pura e não tem como ler o contexto do React, e quem conhece o idioma
+ * vivo é quem desenha. O padrão em português mantém quem só quer a ESTRUTURA —
+ * `railAtivo` compara endereços e não lê rótulo nenhum.
+ * @param rail - o catálogo do idioma em uso.
  * @returns as seções, com todos os destinos reais.
  */
-export function railSecoes(): readonly RailSecao[] {
+export function railSecoes(rail: CatalogoDoTrilho = railPadrao): readonly RailSecao[] {
   return [
     {
       id: 'acoes',

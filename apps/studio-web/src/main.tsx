@@ -28,6 +28,7 @@ import './empresa/empresa.css'
 import './styles.css'
 import { registerStudioPwa } from './pwa/register'
 import { SessionRevocationBoundary } from './session/SessionRevocationBoundary'
+import { IdiomaProvider } from './i18n/IdiomaProvider'
 import { WorkspaceShell } from './shell/WorkspaceShell'
 
 /*
@@ -65,6 +66,14 @@ const rendered = Screen === App
 */
 document.documentElement.classList.add('dz23')
 ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode><SessionRevocationBoundary>{rendered}</SessionRevocationBoundary></React.StrictMode>,
+  /*
+    O IDIOMA envolve TUDO, e por fora da fronteira de sessão.
+
+    Por fora de propósito: a tela que aparece quando a sessão é revogada também
+    tem de sair no idioma da pessoa, e o adendo pede seleção "na tela de
+    entrada, antes do login". Um provedor por dentro deixaria justamente as
+    telas de fora da sessão em português.
+  */
+  <React.StrictMode><IdiomaProvider><SessionRevocationBoundary>{rendered}</SessionRevocationBoundary></IdiomaProvider></React.StrictMode>,
 )
 registerStudioPwa()

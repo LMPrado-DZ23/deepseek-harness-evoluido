@@ -165,3 +165,25 @@
 .dz-preferencias-uso-total { margin: 0; }
 .dz-preferencias-uso-aviso { margin: 0; color: var(--dz-warning); font-size: 0.8125rem; }
 .dz-preferencias-uso-limite { margin: 0; color: var(--dz-text-secondary); font-size: 0.8125rem; }
+
+/*
+  O SELETOR DE IDIOMA.
+
+  Rádio, e não `select`: com três opções, a lista fechada esconde duas delas
+  atrás de um clique, e quem procura o próprio idioma numa interface que não lê
+  precisa VER os nomes. A partir de umas seis opções a conta se inverte, e aí a
+  decisão muda junto.
+*/
+.dz-preferencias-idioma fieldset { border: 0; margin: 0; padding: 0; display: grid; gap: var(--dz-2); }
+.dz-preferencias-idioma legend { padding: 0; font-weight: 600; margin-bottom: var(--dz-2); }
+.dz-preferencias-idioma label { display: flex; align-items: center; gap: var(--dz-2); min-height: 40px; }
+
+/*
+  As DUAS frases de ajuda do idioma precisam de ar entre elas.
+
+  A conferência da captura mostrou as duas coladas, lidas como um parágrafo só —
+  e a primeira delas é a que importa: "trocar o idioma não muda moeda, preço,
+  permissões, tarefas, histórico nem horário". Enterrada no meio de um bloco de
+  texto pequeno, ela não é lida por ninguém.
+*/
+.dz-preferencias-idioma .dz-preferencias-uso-limite { margin: var(--dz-3) 0 0; }

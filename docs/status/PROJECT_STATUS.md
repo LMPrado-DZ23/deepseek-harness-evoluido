@@ -677,6 +677,16 @@ produto existe para não fazer.
     O atalho **não é uma segunda porta**: passa pela mesma condição do botão,
     inclusive o bloqueio de privacidade.
 
+54. **INT-01 — três idiomas de verdade (adendo internacional R2).**
+    Revalidei o diagnóstico no HEAD: 14 catálogos de interface e 19 de plugin,
+    todos pt-BR, e **50 importações estáticas** — base de externalização, não
+    seleção trilíngue. A camada existente foi expandida (contexto + catálogos
+    estáticos), **sem** instalar biblioteca de i18n. Precedência de quatro
+    degraus, com a corrida conta × escolha local resolvida pelo **instante**.
+    `gate:idiomas` (29º portão) pega chave faltando/sobrando, tradução que é
+    cópia, interpolação perdida e catálogo órfão. **Cobertura parcial e
+    declarada na tela:** navegação e Preferências. Ver ADR-053.
+
 53. **EMP-04 — o catálogo de ofertas (`BUS-03`), com a margem dizendo o que não sabe.**
     A empresa passou a dizer o que entrega, para quem, por quanto, com que
     capacidade e sob que condições — versionado, com a aprovação dentro da

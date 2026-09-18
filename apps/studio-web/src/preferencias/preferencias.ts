@@ -65,7 +65,20 @@ export function secoesDePreferencias(contexto: ContextoDasPreferencias): readonl
     // 506 cores fixas fora dos tokens em `styles.css`. Um tema claro que só
     // pinta metade da tela é pior que um tema claro que ainda não existe.
     { id: 'tema', grupo: 'configuracoes', disponivel: false, pendencia: 'temaUnico' },
-    { id: 'idioma', grupo: 'configuracoes', disponivel: false, pendencia: 'idiomaUnico' },
+    /*
+      IDIOMA passou a ser disponível quando o produto passou a ter TRÊS.
+
+      A pendência anterior dizia que o produto falava só português, e ela estava
+      certa enquanto foi escrita: um seletor com um idioma só é um botão que não
+      faz nada. O adendo `FRIGG-CONTA-APOIADOR-INTERNACIONAL-R2` trouxe inglês e
+      espanhol de verdade — com catálogo, seleção e persistência —, e a partir
+      daí a pendência passaria a descrever errado o produto, que é o defeito que
+      este repositório trata como segunda verdade.
+
+      A COBERTURA ainda é parcial, e a tela diz isso em vez de fingir: navegação
+      e Preferências nos três idiomas; as demais telas, por enquanto, não.
+    */
+    { id: 'idioma', grupo: 'configuracoes', disponivel: true },
     /*
       ATALHOS passou a ser disponível quando o produto passou a TER um.
 

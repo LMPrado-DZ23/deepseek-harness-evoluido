@@ -76,6 +76,21 @@ export default defineConfig({
   outputDir: process.env.CI === 'true' ? '/tmp/dz23-studio-web-test-results' : './test-results',
   use: {
     baseURL: 'http://studio.dz23.localhost:4179', trace: 'retain-on-failure',
+    /*
+      O IDIOMA DO NAVEGADOR é DECLARADO, e não herdado de quem roda a suíte.
+
+      Até esta linha existir, a suíte dependia em silêncio do idioma da máquina:
+      o Chromium do Playwright anuncia `en-US`, e enquanto o produto falava só
+      português isso não tinha efeito nenhum. No dia em que ele passou a
+      NEGOCIAR o idioma, dezenas de casos que afirmam rótulos em português
+      passaram a reprovar — e a causa não era o produto, era uma dependência
+      ambiental que nunca tinha sido escrita.
+
+      `pt-BR` porque é o idioma dos casos existentes e do público do produto.
+      Quem quiser provar a negociação declara outro com `test.use`, que é o que
+      o caso de idiomas faz.
+    */
+    locale: 'pt-BR',
     ...(chromiumPath === undefined ? {} : { launchOptions: { executablePath: chromiumPath } }),
   },
   webServer: {

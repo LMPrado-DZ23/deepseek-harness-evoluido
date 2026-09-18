@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { X } from 'lucide-react'
-import preferencias from '../i18n/preferencias.pt-BR.json'
+import { useCatalogos, useIdioma } from '../i18n/IdiomaProvider'
+import { IDIOMAS, NOME_DO_IDIOMA } from '../i18n/idioma'
 import { iniciaisDaConta } from '../shell/tarefasDoTrilho'
 import { podeOperar, secaoInicial, secoesDePreferencias, type ContextoDasPreferencias, type GrupoDePreferencias, type SecaoDePreferencias } from './preferencias'
 import { chaveDoVeredito, contagemEmTexto, custoEmTexto, linhasDeUso, totalDeUso, type LinhaDeUso, type UsoDoEspaco } from './uso'
@@ -28,6 +29,7 @@ export function Preferencias({ contexto, aoFechar, conta, notificacao }: {
   /** O controle real de notificação, montado por quem tem a porta do navegador. */
   readonly notificacao?: ReactNode
 }) {
+  const { preferencias } = useCatalogos()
   const secoes = secoesDePreferencias(contexto)
   const [aberta, setAberta] = useState<string | null>(() => secaoInicial(secoes))
   const dialogo = useRef<HTMLDivElement | null>(null)
@@ -100,6 +102,7 @@ export function Preferencias({ contexto, aoFechar, conta, notificacao }: {
 export function UsoDoEspacoDeTrabalho({ ler = () => api<UsoDoEspaco>('/usage') }: {
   readonly ler?: () => Promise<UsoDoEspaco>
 } = {}) {
+  const { preferencias } = useCatalogos()
   const [uso, setUso] = useState<UsoDoEspaco | null>(null)
   const [erro, setErro] = useState(false)
 
@@ -133,6 +136,7 @@ export function UsoDoEspacoDeTrabalho({ ler = () => api<UsoDoEspaco>('/usage') }
  * é ação destrutiva e depende de decisão do dono do produto.
  */
 export function ControlesDeDados() {
+  const { preferencias } = useCatalogos()
   return <div className="dz-preferencias-uso">
     <p>{preferencias.dadosExplicacao}</p>
     <p className="dz-preferencias-controle">
@@ -154,6 +158,7 @@ export function ControlesDeDados() {
  * teclas —, porque uma lista sem essa frase parece um painel de configuração.
  */
 export function ListaDeAtalhos() {
+  const { preferencias } = useCatalogos()
   return <div className="dz-preferencias-uso">
     <table className="dz-preferencias-uso-tabela">
       <thead>
@@ -184,6 +189,7 @@ export function TabelaDeUso({ linhas, veredito }: {
   readonly linhas: readonly LinhaDeUso[]
   readonly veredito: string | undefined
 }) {
+  const { preferencias } = useCatalogos()
   const total = totalDeUso(linhas)
   const chave = chaveDoVeredito(veredito, total.chamadas > 0)
   return <div className="dz-preferencias-uso">
@@ -224,11 +230,52 @@ export function TabelaDeUso({ linhas, veredito }: {
   </div>
 }
 
+/**
+ * O SELETOR DE IDIOMA — a seção que o adendo internacional pede.
+ *
+ * Nomes próprios, e não bandeiras: bandeira é país, e a do Brasil não
+ * representa quem fala português em Portugal, nem a da Espanha quem fala
+ * espanhol no México. Nome próprio é o que a pessoa reconhece mesmo quando a
+ * interface está numa língua que ela não lê — que é exatamente a situação de
+ * quem veio procurar este controle.
+ *
+ * A COBERTURA é dita em voz alta. Só a navegação e esta tela estão nos três
+ * idiomas; afirmar o contrário faria a pessoa escolher inglês e encontrar
+ * português três telas adiante sem ter sido avisada.
+ */
+export function SeletorDeIdioma() {
+  const { preferencias } = useCatalogos()
+  const { idioma, escolher, guardado } = useIdioma()
+  return <div className="dz-preferencias-controle dz-preferencias-idioma">
+    <fieldset>
+      <legend>{preferencias.idiomaTitulo}</legend>
+      {IDIOMAS.map(codigo => <label key={codigo}>
+        <input
+          type="radio" name="dz-idioma" value={codigo} checked={idioma === codigo}
+          onChange={() => escolher(codigo)}
+        />
+        {/*
+          `lang` no rótulo: sem ele, o leitor de tela pronuncia "Español" com a
+          fonética portuguesa, e quem depende dele não reconhece o próprio
+          idioma na lista.
+        */}
+        <span lang={codigo}>{NOME_DO_IDIOMA[codigo]}</span>
+      </label>)}
+    </fieldset>
+    <p className="dz-preferencias-uso-limite">{preferencias.idiomaAjuda}</p>
+    <p className="dz-preferencias-uso-limite">{preferencias.idiomaCobertura}</p>
+    {/* A escolha vale MESMO sem ter sido guardada — e a tela avisa, em vez de
+        deixar a pessoa descobrir no próximo carregamento. */}
+    {!guardado && <p className="dz-preferencias-uso-limite" role="status">{preferencias.idiomaNaoGuardado}</p>}
+  </div>
+}
+
 function Conteudo({ secao, conta, notificacao }: {
   readonly secao: SecaoDePreferencias
   readonly conta: string | null
   readonly notificacao?: ReactNode
 }) {
+  const { preferencias } = useCatalogos()
   if (!podeOperar(secao)) {
     return <p className="dz-preferencias-pendencia">
       <strong>{preferencias.pendenciaRotulo}</strong>
@@ -245,6 +292,7 @@ function Conteudo({ secao, conta, notificacao }: {
   if (secao.id === 'uso') return <UsoDoEspacoDeTrabalho />
   if (secao.id === 'atalhos') return <ListaDeAtalhos />
   if (secao.id === 'privacidade') return <ControlesDeDados />
+  if (secao.id === 'idioma') return <SeletorDeIdioma />
   // As capacidades que existem são DESTINOS: o link leva ao lugar onde elas já
   // funcionam, em vez de uma segunda cópia da mesma tela dentro do modal.
   return <p className="dz-preferencias-controle">

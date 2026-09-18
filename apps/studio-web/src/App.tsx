@@ -26,7 +26,7 @@ import { createHubApi } from './hub/hubApi'
 import type { IntegracaoDoMenu } from './tarefa/menusDoCompositor'
 import { UsoDaTarefa } from './tarefa/UsoDaTarefa'
 import { Preferencias } from './preferencias/Preferencias'
-import preferenciasTexto from './i18n/preferencias.pt-BR.json'
+import { useCatalogos } from './i18n/IdiomaProvider'
 import { iniciaisDaConta } from './shell/tarefasDoTrilho'
 import tarefaCopy from './i18n/tarefa.pt-BR.json'
 import type { CategoryBasis, DesignPreset } from './home/opcoes'
@@ -78,6 +78,7 @@ const steps = [
 ] as const
 
 export function App() {
+  const { preferencias: preferenciasTexto } = useCatalogos()
   const [brief, setBrief] = useState('')
   const [category, setCategory] = useState<Category>('landing-page')
   const [privacy, setPrivacy] = useState<PrivacyProfile>('privado-local')

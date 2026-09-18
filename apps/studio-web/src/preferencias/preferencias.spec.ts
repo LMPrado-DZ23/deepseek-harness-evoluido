@@ -56,12 +56,14 @@ describe('as seções das preferências', () => {
       sobra é ATALHOS, que vem antes de Uso na ordem da referência e passou a
       ser disponível quando o produto passou a ter um atalho de verdade.
 
-      Esta expectativa já mudou duas vezes, e as duas por FATIA ENTREGUE: era
-      Habilidades quando tudo entre uma e outra estava pendente, virou Uso, e
-      agora é Atalhos. A regra nunca mudou — "abre na primeira disponível" —, e
-      é por isso que o teste é sobre ela, e não sobre um identificador fixo.
+      Esta expectativa já mudou TRÊS vezes, e as três por FATIA ENTREGUE: era
+      Habilidades quando tudo entre uma e outra estava pendente, virou Uso,
+      virou Atalhos, e agora é IDIOMA — que vem antes de Atalhos na ordem da
+      referência e passou a ser disponível quando o produto passou a ter três
+      idiomas de verdade. A regra nunca mudou — "abre na primeira disponível" —,
+      e é por isso que o teste é sobre ela, e não sobre um identificador fixo.
     */
-    expect(secaoInicial(secoesDePreferencias({ autenticado: false, notificacoesSuportadas: false }))).toBe('atalhos')
+    expect(secaoInicial(secoesDePreferencias({ autenticado: false, notificacoesSuportadas: false }))).toBe('idioma')
   })
 
   it('sem nenhuma seção disponível, devolve `null` em vez de inventar uma', () => {

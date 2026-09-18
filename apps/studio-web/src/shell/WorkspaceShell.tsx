@@ -5,7 +5,7 @@ import { RAIL_ID, railAtivo } from './rail'
 import { tarefasDoTrilho, type TarefaDoServidor, type TarefaDoTrilho } from './tarefasDoTrilho'
 import { api } from '../api'
 import { savedProjectOf } from '../App'
-import rail from '../i18n/rail.pt-BR.json'
+import { useCatalogos } from '../i18n/IdiomaProvider'
 
 /**
  * A casca do workspace aprovado.
@@ -40,6 +40,7 @@ export function WorkspaceShell({ titulo, contexto, acoes, conta, acoesDaConta, c
   readonly acoesDaConta?: ReactNode
   readonly children: ReactNode
 }) {
+  const { rail } = useCatalogos()
   const [aberto, setAberto] = useState(false)
   const botao = useRef<HTMLButtonElement>(null)
   /*

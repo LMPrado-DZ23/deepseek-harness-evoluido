@@ -179,6 +179,20 @@ test('captura a jornada: home → tarefa → resultado → continuação', async
   await expect(page.getByText('Margem no máximo')).toBeVisible()
   await tirar('19-empresa-catalogo')
 
+  /*
+    O SELETOR DE IDIOMA (adendo internacional R2).
+
+    A captura é do estado que importa conferir: os três nomes próprios visíveis
+    ao mesmo tempo, o idioma em uso marcado, e as duas frases — a que diz o que
+    a troca NÃO muda e a que declara a cobertura parcial. Um seletor bonito que
+    esconde a cobertura seria a promessa falsa que o adendo proíbe.
+  */
+  await page.goto('/studio/')
+  await page.getByRole('button', { name: 'Preferências', exact: true }).click()
+  await page.getByRole('button', { name: 'Idioma', exact: true }).click()
+  await expect(page.getByRole('radio', { name: 'Español' })).toBeVisible()
+  await tirar('20-preferencias-idioma')
+
   // O celular é ADAPTAÇÃO FRIGG, e não uma imagem fornecida pela referência:
   // o vídeo não demonstra versão móvel.
   await page.setViewportSize({ width: 390, height: 844 })

@@ -4,7 +4,7 @@ import { NOVA_TAREFA_HREF, iniciaisDaConta, type TarefaDoTrilho } from './tarefa
 import { PROJECTS_PATH } from '../projects/ProjectsScreen'
 import { HELP_PATH } from '../help/HelpScreen'
 import { EMBLEMA, nomeAcessivelDaMarca } from '../marca/marca'
-import rail from '../i18n/rail.pt-BR.json'
+import { useCatalogos } from '../i18n/IdiomaProvider'
 import type { ReactNode } from 'react'
 
 /**
@@ -42,6 +42,7 @@ export function Rail({ ativo, aberto, aoFechar, tarefas, conta, acoesDaConta }: 
   /** O que a conta oferece no rodapé — sair, avisos. Montado por quem sabe. */
   readonly acoesDaConta?: ReactNode
 }) {
+  const { rail } = useCatalogos()
   const iniciais = iniciaisDaConta(conta)
   return <nav id={RAIL_ID} className={`dz-rail${aberto ? ' aberto' : ''}`} aria-label={rail.navegacao}>
     <div className="dz-rail-topo">
@@ -63,7 +64,7 @@ export function Rail({ ativo, aberto, aoFechar, tarefas, conta, acoesDaConta }: 
     </button>
     </div>
 
-    {railSecoes().map(secao => <div key={secao.id} className="dz-rail-secao">
+    {railSecoes(rail).map(secao => <div key={secao.id} className="dz-rail-secao">
       {/*
         O cabeçalho da seção leva a AÇÃO dela, como na referência: "Projetos"
         tem o "+" que cria um, "Tarefas" leva à lista inteira. Um título solto

@@ -897,3 +897,77 @@ test('cadastra a oferta da empresa, vê a margem dizer o que não sabe, e aprova
   await expect(page.getByText('Versão 3')).toBeVisible()
   await expect(page.getByText('Rascunho')).toBeVisible()
 })
+
+/*
+  ESTE caso — e só ele — roda com o navegador em INGLÊS.
+
+  A negociação BCP 47 não é provável com o navegador em português: seria o
+  mesmo idioma dos dois lados, e o teste passaria sem exercitar nada. Declarar
+  o idioma aqui é o que torna o primeiro degrau da precedência verificável.
+*/
+test.describe(() => {
+  test.use({ locale: 'en-US' })
+
+test('troca o idioma da interface, e a escolha sobrevive ao recarregamento sem mexer no rascunho', async ({ context, page }) => {
+  const origin = 'http://studio.dz23.localhost:4179'
+  await context.addCookies([
+    { name: 'dz23_studio_session', value: 'e2e', url: origin },
+    { name: 'dz23_studio_csrf', value: 'csrf-e2e', url: origin },
+  ])
+  await page.goto('/studio/')
+
+  /*
+    A NEGOCIAÇÃO do navegador, provada antes de qualquer escolha.
+
+    O Chromium do Playwright roda em `en-US`, e é por isso que este caso começa
+    em inglês: sem escolha guardada, o produto atende o idioma que a pessoa
+    configurou no navegador. Escrevi este caso esperando português e ele
+    reprovou — a expectativa é que estava errada, não o produto, e é este
+    parágrafo que impede a próxima pessoa de "consertar" a negociação.
+  */
+  await expect(page.locator('html')).toHaveAttribute('lang', 'en')
+  await expect(page.getByRole('link', { name: 'New task' })).toBeVisible()
+
+  /*
+    O RASCUNHO fica escrito ANTES da troca.
+
+    O adendo é explícito: trocar de idioma não pode criar tarefa, cancelar
+    execução, refazer login nem perder rascunho. Escrever antes e conferir
+    depois é a única forma de provar isso — e não a ausência de um erro.
+  */
+  const rascunho = 'uma loja para vender bolos no bairro'
+  await page.getByRole('textbox').first().fill(rascunho)
+
+  // A ESCOLHA EXPLÍCITA vence a negociação — é o primeiro degrau da precedência.
+  await page.getByRole('button', { name: 'Preferences' }).click()
+  await page.getByRole('button', { name: 'Language' }).click()
+  await page.getByRole('radio', { name: 'Português (Brasil)' }).check()
+
+  // A navegação e a tela de Preferências trocam na hora, sem recarregar.
+  await expect(page.getByRole('link', { name: 'Nova tarefa' })).toBeVisible()
+  await expect(page.getByText('Idioma da interface')).toBeVisible()
+  await expect(page.locator('html')).toHaveAttribute('lang', 'pt-BR')
+  // E a tela DIZ que a cobertura é parcial, em vez de fingir que tudo traduziu.
+  await expect(page.getByText('as demais telas', { exact: false })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Fechar as preferências' }).click()
+  // O rascunho continua inteiro: a troca é de apresentação, e só.
+  await expect(page.getByRole('textbox').first()).toHaveValue(rascunho)
+
+  /*
+    A escolha SOBREVIVE ao recarregamento, e continua vencendo a negociação do
+    navegador — que continua dizendo inglês. É o que separa um seletor de um
+    botão que muda a tela e esquece.
+  */
+  await page.reload()
+  await expect(page.getByRole('link', { name: 'Nova tarefa' })).toBeVisible()
+  await expect(page.locator('html')).toHaveAttribute('lang', 'pt-BR')
+
+  // E o espanhol também é um idioma de verdade, e não um arquivo no disco.
+  await page.getByRole('button', { name: 'Preferências' }).click()
+  await page.getByRole('button', { name: 'Idioma' }).click()
+  await page.getByRole('radio', { name: 'Español' }).check()
+  await expect(page.getByRole('link', { name: 'Nueva tarea' })).toBeVisible()
+  await expect(page.locator('html')).toHaveAttribute('lang', 'es')
+})
+})
