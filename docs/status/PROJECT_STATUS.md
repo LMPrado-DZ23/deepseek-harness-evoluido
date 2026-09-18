@@ -134,9 +134,31 @@ e numa instalação local não há como ler o código do primeiro acesso, porque
 remetente de e-mail em memória não o mostra a ninguém. É o mesmo buraco de
 `EB-02`, agora com endereço.
 
-**As próximas são, nesta ordem:** fazer o modo pessoal valer nas rotas de
-trabalho, `REV-CAN-JORNADA` (a primeira jornada real integrada, que fecha
-`EB-04`) e `PLAN-01`.
+**`ABRIR-02` está entregue:** o modo pessoal passou a valer nas rotas de
+trabalho, no ponto único (`authenticatedMutation`), e a locação responde pelo
+escopo pessoal. Medido: `POST /api/studio/apps/projects` devolve `201`.
+
+**A JORNADA REAL COMEÇOU, e ela já pagou dois becos** (`ABRIR-04`):
+
+1. a **síntese da especificação** roda depois da última resposta e chama o
+   modelo; quando essa chamada falhava, o turno ficava gravado, a especificação
+   não existia e as três saídas recusavam — um beco de onde a tarefa não saía.
+   Agora ela é refazível;
+2. a **rota local sem alternativa** ficava `DOWN` para sempre depois de UMA
+   falha, porque o único caminho de volta é um sucesso e nenhum sucesso era
+   tentado. A meia-abertura já existia para os outros perfis; faltava no único
+   onde não há para onde desviar.
+
+Depois dos dois consertos, **o modelo real escreveu a especificação pelo
+produto**: `201` em 100 s, com o `qwen2.5-coder:3b` local.
+
+**Onde a jornada está agora:** o plano (`POST /plan`) está rodando contra o
+modelo real e já passou de trinta minutos — o prompt do planejador é grande e a
+máquina desta sessão tem dois núcleos e nenhuma GPU. Isso é MEDIÇÃO, e não
+falha: na máquina do titular, com GPU, a geração levava de 268 s a 430 s.
+
+**As próximas são, nesta ordem:** terminar a jornada (plano → aprovação →
+geração → construção → prévia), `PLAN-01` e `ABRIR-03`.
 
 ## DIRETIVA DO TITULAR — 18/09/2026: REAPROVEITAR ANTES DE REIMPLEMENTAR
 

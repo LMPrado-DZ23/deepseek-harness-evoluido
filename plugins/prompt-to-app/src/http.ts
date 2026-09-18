@@ -657,7 +657,27 @@ async function answerIntake(
   const input = answerSchema.parse(await readJson(request))
   const conversation = await conversationFor(config.service, actor, projectId)
   const question = nextIntakeQuestion(conversation)
-  if (question === undefined) throw new PromptToAppError('REPLAY', t('errors.questionsAnswered'))
+  if (question === undefined) {
+    /*
+      AS PERGUNTAS ACABARAM — E ISSO NÃO QUER DIZER QUE A TAREFA ESTÁ PRONTA.
+
+      A síntese da especificação acontece DEPOIS da última resposta, e ela
+      chama o modelo. Quando essa chamada falha, o turno já está gravado: as
+      perguntas ficam respondidas, a especificação não existe, e toda rota
+      seguinte recusa — `/plan` diz que a especificação não existe, `/revise`
+      diz que ainda não houve resultado, e responder de novo dizia que as
+      perguntas já foram respondidas. Um beco: a tarefa não anda e não dá para
+      recomeçá-la. Medido em 18/09/2026, com o Ollama local devolvendo falha de
+      conexão na última resposta.
+
+      A saída honesta é REFAZER a síntese, e não recusar para sempre. Nenhuma
+      resposta é pedida de novo: o que faltou não foi a pessoa, foi o modelo.
+    */
+    if (await temEspecificacao(config.service, actor, projectId)) {
+      throw new PromptToAppError('REPLAY', t('errors.questionsAnswered'))
+    }
+    return await sintetizarEspecificacao(response, config, actor, projectId, conversation)
+  }
   if (question.id === 'sensitive-confirmation') {
     if (input.confirm_sensitive === undefined) throw new PromptToAppError('INVALID', t('errors.sensitiveConfirmation'))
     const resposta = input.confirm_sensitive ? t('values.confirmed') : t('values.notConfirmed')
@@ -696,7 +716,51 @@ async function answerIntake(
   const updated = await conversationFor(config.service, actor, projectId)
   const next = nextIntakeQuestion(updated)
   if (next !== undefined) return json(response, 200, { next })
-  const built = await config.intake.buildSpec(updated)
+  return await sintetizarEspecificacao(response, config, actor, projectId, updated)
+}
+
+/**
+ * A especificação desta tarefa já existe?
+ *
+ * `NOT_FOUND` aqui quer dizer "ainda não há", e não erro — a mesma leitura que
+ * `#perguntar` faz do plano. Qualquer outra falha sobe: tratar um erro de
+ * leitura como ausência faria a síntese rodar de novo por cima de uma
+ * especificação que existe.
+ * @param service - o serviço.
+ * @param actor - quem pergunta.
+ * @param projectId - a tarefa.
+ * @returns se existe.
+ */
+async function temEspecificacao(service: PromptToAppService, actor: PromptToAppActor, projectId: string): Promise<boolean> {
+  try {
+    await service.latestSpec(actor, projectId)
+    return true
+  } catch (erro) {
+    if (erro instanceof PromptToAppError && erro.code === 'NOT_FOUND') return false
+    throw erro
+  }
+}
+
+/**
+ * A síntese da especificação a partir do questionário respondido.
+ *
+ * Ela existe como função porque é chamada de DOIS lugares: ao fim da última
+ * resposta, e de novo quando a pessoa volta a uma tarefa cuja síntese falhou.
+ * Duas cópias divergiriam no primeiro conserto de uma delas.
+ * @param response - a resposta HTTP.
+ * @param config - a configuração do manipulador.
+ * @param actor - quem pede.
+ * @param projectId - a tarefa.
+ * @param conversation - o questionário já respondido.
+ */
+async function sintetizarEspecificacao(
+  response: ServerResponse,
+  config: PromptToAppHttpConfig,
+  actor: PromptToAppActor,
+  projectId: string,
+  conversation: IntakeConversation,
+): Promise<void> {
+  const built = await config.intake.buildSpec(conversation)
   const spec = await config.service.saveSpec(actor, projectId, built.spec, 'intake')
   return json(response, 201, { spec, next: null })
 }

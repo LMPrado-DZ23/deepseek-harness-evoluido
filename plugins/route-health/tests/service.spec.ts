@@ -874,3 +874,45 @@ describe('M-03 — o que cada rota sabe fazer, e o que ela NÃO diz', () => {
     expect([...repository.routeMap.values()][0]!.context_window_tokens).toBe(64_000)
   })
 })
+
+describe('a rota local sem alternativa', () => {
+  /*
+    O BECO QUE ISTO FECHA, medido no produto montado em 18/09/2026: uma única
+    falha na rota local — a credencial que ainda não tinha sido guardada —
+    deixava `state: DOWN` com o circuito FECHADO, e no perfil `privado-local`
+    toda tentativa seguinte era recusada antes de sair. Nenhum gesto da pessoa
+    trazia a rota de volta, porque o único jeito de voltar a `OK` é um sucesso,
+    e nenhum sucesso era possível. A instalação local ficava sem IA para sempre.
+
+    `state` é taxa de erro e serve para APRESENTAR saúde; quem manda parar de
+    chamar é o CIRCUITO. Os outros perfis já tinham a meia-abertura; faltava
+    aqui, onde não há segunda rota.
+  */
+  it('caida mas com circuito fechado, ela GANHA a chamada', async () => {
+    const h = service()
+    await h.service.initialize(scope, new Set(['ollama', 'omniroute', 'deepseek-official']))
+    await collect(h.service.streamWithFallback(scope, { ...options, provider: 'ollama' },
+      () => chunks(error()), () => chunks(), true))
+    expect(h.service.list(scope).find(record => record.route === 'ollama')?.state).toBe('DOWN')
+    await expect(h.service.chooseRoute(scope, 'T0', { privacy: 'local-only' }))
+      .resolves.toMatchObject({ route: 'ollama', reasonCode: 'HALF_OPEN' })
+  })
+
+  it('DESLIGADA pela pessoa, continua desligada', async () => {
+    // Desligar é decisão de quem opera, e não sintoma.
+    const h = service()
+    await h.service.initialize(scope, new Set(['ollama', 'omniroute', 'deepseek-official']))
+    await collect(h.service.streamWithFallback(scope, { ...options, provider: 'ollama' },
+      () => chunks(error()), () => chunks(), true))
+    await h.service.setRouteEnabled(scope, 'ollama', false)
+    await expect(h.service.chooseRoute(scope, 'T0', { privacy: 'local-only' }))
+      .resolves.toMatchObject({ route: undefined, reasonCode: 'LOCAL_BLOCKED' })
+  })
+
+  it('NAO CONFIGURADA nao e rota que caiu, e continua recusada', async () => {
+    const h = service()
+    await h.service.initialize(scope, new Set(['omniroute', 'deepseek-official']))
+    await expect(h.service.chooseRoute(scope, 'T0', { privacy: 'local-only' }))
+      .resolves.toMatchObject({ route: undefined, reasonCode: 'LOCAL_BLOCKED' })
+  })
+})

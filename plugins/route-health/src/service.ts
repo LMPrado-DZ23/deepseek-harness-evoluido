@@ -334,10 +334,38 @@ export class StudioRouteHealthService {
     // é uma decisão de quem opera, e ignorá-la para a rota local seria justamente
     // mandar trabalho para onde alguém pediu que não fosse.
     const localUsable = local?.state === 'OK' && this.enabled(scope, this.config.localRoute)
+    /*
+      A ROTA LOCAL SEM ALTERNATIVA MERECE UMA CHAMADA, e isto conserta um beco.
+
+      `state` é taxa de erro, e serve para APRESENTAR saúde; quem manda parar de
+      chamar é o CIRCUITO — está escrito em `RouteCircuitConfig`, logo acima.
+      No perfil `privado-local` não existe para onde desviar, então recusar por
+      `state` abandonava a rota até um sucesso que ela nunca teria chance de
+      ter: uma única falha (por exemplo, a credencial que ainda não tinha sido
+      guardada) deixava a instalação local sem IA PARA SEMPRE, e nenhum gesto da
+      pessoa a trazia de volta. Medido em 18/09/2026, no produto montado: uma
+      falha em uma requisição, `state: DOWN`, circuito FECHADO, e toda tentativa
+      seguinte recusada antes de sair.
+
+      Os outros perfis já tinham essa saída — a meia-abertura, algumas linhas
+      abaixo, com o comentário que diz exatamente isto. O que faltava era ela
+      aqui, onde não há segunda rota.
+
+      O desligamento continua valendo: ele é decisão de quem opera, e não
+      sintoma. O circuito ABERTO também: ali a espera existe para não gastar o
+      tempo de quem chega depois. E rota NÃO CONFIGURADA não é rota que caiu:
+      não há o que tentar, e tentar produziria um erro pior que a recusa.
+    */
+    const localTentavel = local !== undefined && local.state !== 'NOT_CONFIGURED'
+      && this.enabled(scope, this.config.localRoute)
+      && this.circuit(scope, this.config.localRoute) !== 'OPEN'
     if (profile === 'privado-local') {
       const localSelected = options.explicitRoute === undefined || options.explicitRoute === this.config.localRoute
       if (localSelected && localUsable) {
         return { route: this.config.localRoute, explicit: options.explicitRoute !== undefined, reason: t('reasons.privateLocalOnly'), reasonCode: 'PRIVATE_LOCAL' }
+      }
+      if (localSelected && localTentavel) {
+        return { route: this.config.localRoute, explicit: options.explicitRoute !== undefined, reason: HALF_OPEN_REASON, reasonCode: 'HALF_OPEN' }
       }
       const reason = LOCAL_BLOCKED_REASON
       await this.auditSwitch(scope, options.explicitRoute ?? this.config.localRoute, 'blocked', reason, options.explicitRoute !== undefined)
