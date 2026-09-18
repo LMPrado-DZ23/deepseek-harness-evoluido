@@ -48,6 +48,13 @@ export class IdentityError extends Error {
         this.code = code;
     }
 }
+/**
+ * O lugar dos campos de hash da sessão pessoal.
+ *
+ * Zeros, e não um valor aleatório: um hash aleatório PARECERIA segredo, e a
+ * próxima pessoa a ler teria de descobrir sozinha que ele não protege nada.
+ */
+const SEM_SEGREDO = '0'.repeat(64);
 export class StudioIdentityService {
     /**
      * Os endereços que a borda aceita, para conferir Host e Origin.
@@ -318,6 +325,7 @@ export class StudioIdentityService {
      * precisa cair no lado seguro: errar para o nome forte custa uma entrada
      * recusada em desenvolvimento; errar para o fraco custa uma conta.
      */
+    #bindHost = '0.0.0.0';
     #secureCookies = true;
     /**
      * Declara se os cookies levam `Secure`. O plugin chama isto ao montar.
@@ -325,6 +333,57 @@ export class StudioIdentityService {
      */
     setCookieSecurity(secure) {
         this.#secureCookies = secure;
+    }
+    /**
+     * O endereço em que o servidor escuta, declarado na montagem.
+     *
+     * Ele existe porque o MODO PESSOAL depende dele e `personalSession()` é
+     * chamada de dentro de `authenticatedMutation`, que recebe o pedido e o
+     * serviço — e não o perfil. O padrão é `0.0.0.0`, que é o endereço que FECHA
+     * a porta: uma instalação que esqueça de declarar não ganha a porta larga,
+     * ganha a estreita.
+     */
+    setBindHost(host) {
+        this.#bindHost = host;
+    }
+    /**
+     * A SESSÃO SINTÉTICA do modo pessoal, ou nenhuma.
+     *
+     * Ela não é gravada, não tem token e não é revogável: é o principal local
+     * vestido de sessão, para que todo consumidor continue lendo `user_id`,
+     * `org_id`, `tenant_id` e `session_id` como sempre leu. Os dois campos de
+     * hash existem porque o esquema os exige, e são zeros — nenhum segredo, e
+     * nada que case com um segredo de verdade.
+     *
+     * A porta fecha sozinha: basta uma pessoa registrada, ou a borda obrigatória,
+     * ou o servidor escutando fora do endereço local.
+     * @returns a sessão pessoal, ou `undefined`.
+     */
+    personalSession() {
+        const principal = this.personalPrincipal(this.#bindHost);
+        if (principal === undefined)
+            return undefined;
+        const agora = new Date().toISOString();
+        return {
+            session_id: principal.sessionId,
+            user_id: principal.userId,
+            org_id: principal.orgId,
+            tenant_id: principal.tenantId,
+            token_hash: SEM_SEGREDO,
+            csrf_hash: SEM_SEGREDO,
+            device_label: 'local',
+            user_agent: '',
+            ip_truncated: '',
+            created_at: agora,
+            last_seen_at: agora,
+            expires_sliding_at: agora,
+            expires_absolute_at: agora,
+            last_strong_auth_at: null,
+            last_strong_auth_method: null,
+            revoked_at: null,
+            revoked_reason: null,
+            harness_session_ids: [],
+        };
     }
     /** Se os cookies desta instalação levam `Secure`. */
     get cookiesAreSecure() { return this.#secureCookies; }

@@ -103,6 +103,30 @@ export declare class StudioIdentityService {
      * @param secure - `false` somente no modo pessoal, em `http://127.0.0.1`.
      */
     setCookieSecurity(secure: boolean): void;
+    /**
+     * O endereço em que o servidor escuta, declarado na montagem.
+     *
+     * Ele existe porque o MODO PESSOAL depende dele e `personalSession()` é
+     * chamada de dentro de `authenticatedMutation`, que recebe o pedido e o
+     * serviço — e não o perfil. O padrão é `0.0.0.0`, que é o endereço que FECHA
+     * a porta: uma instalação que esqueça de declarar não ganha a porta larga,
+     * ganha a estreita.
+     */
+    setBindHost(host: '127.0.0.1' | '0.0.0.0'): void;
+    /**
+     * A SESSÃO SINTÉTICA do modo pessoal, ou nenhuma.
+     *
+     * Ela não é gravada, não tem token e não é revogável: é o principal local
+     * vestido de sessão, para que todo consumidor continue lendo `user_id`,
+     * `org_id`, `tenant_id` e `session_id` como sempre leu. Os dois campos de
+     * hash existem porque o esquema os exige, e são zeros — nenhum segredo, e
+     * nada que case com um segredo de verdade.
+     *
+     * A porta fecha sozinha: basta uma pessoa registrada, ou a borda obrigatória,
+     * ou o servidor escutando fora do endereço local.
+     * @returns a sessão pessoal, ou `undefined`.
+     */
+    personalSession(): SessionRecord | undefined;
     /** Se os cookies desta instalação levam `Secure`. */
     get cookiesAreSecure(): boolean;
     /**

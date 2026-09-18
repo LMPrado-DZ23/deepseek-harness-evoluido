@@ -385,6 +385,36 @@ export async function authenticatedMutation(
   // Host e Origin, para TODA rota autenticada — e não só para as da identidade.
   const mutating = request.method !== 'GET' && request.method !== 'HEAD'
   service.assertRequestTrust(singleHeader(request.headers.host), singleHeader(request.headers.origin), mutating)
+  /*
+    A PORTA DO MODO PESSOAL, e ela fica AQUI porque aqui é o lugar único.
+
+    O FRIGG baixado e aberto não tem ninguém registrado: `COMECAR.md` não tem
+    passo de login, e `GET /session` já respondia `{"mode":"personal"}`. As
+    rotas de trabalho, porém, passavam por esta função e exigiam cookie — então
+    o produto ABRIA e não CRIAVA. Medido em 18/09/2026, no primeiro dia em que
+    o produto montado subiu.
+
+    Espalhar a decisão pelos onze chamadores faria uma segunda verdade sobre
+    quem pode trabalhar, e ela divergiria no primeiro conserto de um deles.
+
+    O QUE PROTEGE, já que não há CSRF para conferir: a conferência de `Host` e
+    `Origin` logo acima, que roda ANTES desta porta e vale para todo método
+    mutante. Um site qualquer no navegador da pessoa não consegue forjar
+    `Origin`, e é exatamente esse o ataque que o token CSRF existe para barrar
+    numa sessão de cookie. Sem cookie não há sessão a que prender um token, e
+    inventar um seria teatro.
+
+    A porta fecha sozinha assim que alguém se registra — `personalSession` volta
+    a ser `undefined` e esta função recusa como sempre recusou.
+  */
+  // A chamada é OPCIONAL de propósito: um serviço que não ofereça o método —
+  // um dublê de teste antigo, por exemplo — simplesmente não tem porta pessoal.
+  // A ausência falha na direção SEGURA, que é a única direção em que a
+  // tolerância se justifica.
+  const pessoal = service.personalSession?.()
+  if (pessoal !== undefined && singleSessionToken(request.headers.cookie, service.cookiesAreSecure, request, response) === undefined) {
+    return pessoal
+  }
   const { session } = await authenticateCookieRequest(request, service, service.cookiesAreSecure, response)
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     const header = singleHeader(request.headers['x-dz23-csrf'])

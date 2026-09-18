@@ -224,6 +224,11 @@ export async function apply(ctx: Context, config: IdentityPluginConfig = {}): Pr
   // servico fica no padrao seguro (`__Host-`) e o modo pessoal em http nao
   // entraria: falha na direcao certa, mas falha.
   service.setCookieSecurity(cookieSecurity === 'secure')
+  // O endereço vai para o SERVIÇO porque é ele que decide o modo pessoal, e
+  // `authenticatedMutation` — que é onde a porta pessoal abre — recebe o
+  // serviço, e não o perfil. Sem esta linha o padrão é `0.0.0.0`, que fecha a
+  // porta: a instalação local ficaria sem produto de novo.
+  service.setBindHost(ctx.webServer.host)
   ctx.provide('studioIdentity', {
     service,
     ...(email.capture === undefined ? {} : { developmentEmailCapture: email.capture }),

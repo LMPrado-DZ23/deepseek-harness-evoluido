@@ -3,32 +3,27 @@ import { expect, request as apiRequest, test } from '@playwright/test'
 import { INTAKE_ANSWERS, answerIntake } from './answering'
 import { esperarResultado } from './resultado'
 
-test('sem sessão: a API recusa, e a interface abre porque ESTA instalação é pessoal', async () => {
+test('recusa interface e API sem sessão', async () => {
   /*
-    ESTE TESTE MUDOU EM 18/09/2026, e a mudança registra uma CONTRADIÇÃO do
-    produto em vez de escondê-la.
+    ESTE SERVIDOR DE TESTE É UMA INSTALAÇÃO DE SERVIDOR, e o que faz dele uma é
+    a AUSÊNCIA de `personalSession` no dublê de identidade.
 
-    Ele dizia que a interface recusa sem sessão. O dublê deste servidor, porém,
-    declara modo pessoal ABERTO — `personalPrincipal` devolve um principal —, e
-    numa instalação pessoal ENTRAR não existe: não há ninguém para entrar como.
-    Exigir cookie ali deixava quem baixou o produto olhando `401 Entre para
-    continuar.`, que foi o terceiro defeito medido quando o FRIGG montado subiu
-    pela primeira vez.
+    A porta do modo pessoal existe desde 18/09/2026 e mora num lugar só,
+    `authenticatedMutation`. Ela abre quando a identidade oferece uma sessão
+    pessoal — instalação local, presa a `127.0.0.1`, sem ninguém registrado. Um
+    serviço que não ofereça o método não ganha porta nenhuma, e é isso que faz
+    as duas recusas abaixo continuarem sendo recusas: aqui há dona, e ela entra
+    com cookie no teste seguinte.
 
-    O que este caso fixa agora é o estado REAL, com a contradição no meio: a
-    interface abre, e as rotas de trabalho continuam recusando, porque são
-    `access: 'authorized'` e não conhecem o principal pessoal. O produto abre e
-    não cria. `ABRIR-02` é a tarefa que fecha isso, e quando fechar é AQUI que
-    a mudança aparece.
-
-    A recusa da interface numa instalação COM gente registrada — que é o caso
-    de servidor — tem casos próprios em `plugins/studio-web/tests/acesso.spec.ts`.
+    A instalação PESSOAL, que é a de quem acabou de baixar o produto, tem casos
+    próprios em `plugins/identity/tests/http.spec.ts` e foi medida contra o
+    produto montado (`ABRIR-02` no livro mestre).
   */
   const client = await apiRequest.newContext({
     baseURL: 'http://127.0.0.1:4179',
     extraHTTPHeaders: { host: 'studio.dz23.localhost:4179' },
   })
-  expect((await client.get('/studio')).status()).toBe(200)
+  expect((await client.get('/studio')).status()).toBe(401)
   expect((await client.get('/api/studio/apps/health')).status()).toBe(401)
   await client.dispose()
 })

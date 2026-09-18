@@ -842,3 +842,80 @@ describe('a cobertura dos caminhos da remocao', () => {
     expect(emitidas.join('\n').length).toBeLessThan(4 * 1024)
   })
 })
+
+describe('a porta do modo pessoal', () => {
+  /*
+    ELA MORA EM `authenticatedMutation`, E É POR ISSO QUE ESTES CASOS ESTÃO AQUI.
+
+    O FRIGG baixado e aberto não tem ninguém registrado — `COMECAR.md` não tem
+    passo de login. `GET /session` já respondia `{"mode":"personal"}`, e as
+    rotas de TRABALHO recusavam, porque passavam por esta função e exigiam
+    cookie. O produto abria e não criava. Medido em 18/09/2026, no primeiro dia
+    em que o produto montado subiu.
+
+    Houve uma versão desta porta dentro do `studio-web`, e ela durou uma fatia:
+    abria a página e deixava as rotas fechadas, que é abrir o produto sem poder
+    usá-lo. Onze chamadores decidindo cada um por si seriam onze verdades sobre
+    quem pode trabalhar.
+  */
+  const pedidoBruto = (options: { readonly cookie?: string; readonly method?: string }) => ({
+    headers: { host: '127.0.0.1:3080', ...(options.cookie === undefined ? {} : { cookie: options.cookie }) },
+    method: options.method ?? 'GET',
+  } as never)
+
+  const sessaoPessoal = {
+    session_id: 'session_local', user_id: 'user_local', org_id: 'org_local', tenant_id: 'tenant_local',
+  }
+
+  const servico = (options: { readonly pessoalAberta: boolean; readonly cookieVale?: boolean }) => ({
+    cookiesAreSecure: false,
+    assertRequestTrust: vi.fn(),
+    validateCsrfToken: vi.fn(),
+    personalSession: vi.fn(() => (options.pessoalAberta ? sessaoPessoal : undefined)),
+    authenticate: vi.fn(() => (options.cookieVale === true
+      ? Promise.resolve({ session_id: 'de-cookie', user_id: 'u', org_id: 'o', tenant_id: 't' })
+      : Promise.reject(new IdentityError('invalid', 'Entre para continuar.')))),
+  } as never)
+
+  it('sem cookie, a instalacao pessoal TRABALHA — e nao so abre a tela', async () => {
+    const sessao = await authenticatedMutation(pedidoBruto({ method: 'POST' }), servico({ pessoalAberta: true }))
+    expect(sessao.session_id).toBe('session_local')
+  })
+
+  it('com cookie, quem manda e o cookie', async () => {
+    const sessao = await authenticatedMutation(
+      pedidoBruto({ cookie: `${SESSION_COOKIE}=abc` }), servico({ pessoalAberta: true, cookieVale: true }),
+    )
+    expect(sessao.session_id).toBe('de-cookie')
+  })
+
+  it('sem modo pessoal, a recusa CONTINUA', async () => {
+    await expect(authenticatedMutation(pedidoBruto({}), servico({ pessoalAberta: false })))
+      .rejects.toBeInstanceOf(IdentityError)
+  })
+
+  it('`Host` e `Origin` sao conferidos ANTES da porta — e e isso que substitui o CSRF', async () => {
+    /*
+      Sem cookie não há sessão a que prender um token CSRF, e inventar um seria
+      teatro. O que barra o ataque que o CSRF existe para barrar é a conferência
+      de origem, que roda antes e que o navegador não deixa um site forjar.
+    */
+    const alvo = servico({ pessoalAberta: true })
+    const recusa = new IdentityError('invalid', 'origem')
+    ;(alvo as unknown as { assertRequestTrust: { mockImplementation: (f: () => never) => void } })
+      .assertRequestTrust.mockImplementation(() => { throw recusa })
+    await expect(authenticatedMutation(pedidoBruto({ method: 'POST' }), alvo)).rejects.toBe(recusa)
+  })
+
+  it('um servico SEM o metodo nao ganha porta nenhuma', async () => {
+    // A ausência falha na direção segura, que é a única em que a tolerância se
+    // justifica.
+    const antigo = {
+      cookiesAreSecure: false,
+      assertRequestTrust: vi.fn(),
+      validateCsrfToken: vi.fn(),
+      authenticate: vi.fn(() => Promise.reject(new IdentityError('invalid', 'Entre para continuar.'))),
+    } as never
+    await expect(authenticatedMutation(pedidoBruto({}), antigo)).rejects.toBeInstanceOf(IdentityError)
+  })
+})

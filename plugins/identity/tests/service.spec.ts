@@ -865,3 +865,38 @@ describe('ACHADO: a conferência do código não conta quem tem conta', () => {
     expect(dispositivos[0]).toMatchObject({ session_id: issued.session.session_id })
   })
 })
+
+describe('a sessao sintetica do modo pessoal', () => {
+  /*
+    O ENDEREÇO PADRÃO É O QUE FECHA A PORTA, e isto tem caso porque a sabotagem
+    que o trocava por `127.0.0.1` sobreviveu a tudo.
+
+    `personalSession()` é chamada de dentro de `authenticatedMutation`, que
+    recebe o pedido e o serviço — nunca o perfil. O endereço, então, é
+    declarado na montagem por `setBindHost`. Uma instalação que ESQUEÇA de
+    declará-lo não pode ganhar a porta larga por omissão: ela ganha a estreita,
+    e alguém descobre o esquecimento tendo de entrar, e não servindo o produto
+    inteiro a quem alcançar a porta.
+  */
+  it('sem `setBindHost`, NAO ha sessao pessoal — nem com ninguem registrado', () => {
+    const { service } = makeHarness()
+    expect(service.personalSession()).toBeUndefined()
+  })
+
+  it('declarado o endereco local, a sessao pessoal existe e e sintetica', () => {
+    const { service } = makeHarness()
+    service.setBindHost('127.0.0.1')
+    const sessao = service.personalSession()
+    expect(sessao?.user_id).toBe('user_local')
+    expect(sessao?.session_id).toBe('session_local')
+    // Sem segredo nenhum: os campos de hash existem porque o esquema os exige.
+    expect(sessao?.token_hash).toBe('0'.repeat(64))
+    expect(sessao?.csrf_hash).toBe('0'.repeat(64))
+  })
+
+  it('declarado o endereco aberto, a porta continua fechada', () => {
+    const { service } = makeHarness()
+    service.setBindHost('0.0.0.0')
+    expect(service.personalSession()).toBeUndefined()
+  })
+})

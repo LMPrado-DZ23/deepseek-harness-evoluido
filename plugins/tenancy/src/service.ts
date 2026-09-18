@@ -150,7 +150,29 @@ export class StudioTenancyService {
   authorizationFor(userId: string, orgId: string, tenantId: string): TenancyAuthorization | undefined {
     const membership = this.#repository.memberships().find(candidate => candidate.user_id === userId
       && candidate.org_id === orgId && candidate.workspace_id === tenantId)
-    return membership === undefined ? undefined : { userId, orgId, tenantId, role: membership.role }
+    if (membership !== undefined) return { userId, orgId, tenantId, role: membership.role }
+    /*
+      O ESCOPO PESSOAL, que não tem convite porque não tem a quem convidar.
+
+      Numa instalação local recém-baixada não existe ninguém registrado, e
+      portanto não existe participação gravada em tabela nenhuma. Sem esta
+      resposta, a pessoa que acabou de abrir o FRIGG recebe "Você não participa
+      deste espaço de trabalho" no próprio computador dela — medido em
+      18/09/2026, logo depois de a porta pessoal da identidade abrir.
+
+      Quem decide se o modo pessoal existe continua sendo a IDENTIDADE, e não
+      este serviço: pergunta-se a ela, e os identificadores conferidos são os
+      DELA. Assim que alguém se registra, `personalSession()` devolve
+      `undefined` e esta resposta some junto — o escopo pessoal deixa de existir
+      no mesmo instante em que passa a haver a quem convidar.
+
+      `owner` porque é o computador da pessoa: qualquer papel menor seria uma
+      instalação em que a dona não pode fazer o que baixou o produto para fazer.
+    */
+    const pessoal = this.#identity.personalSession?.()
+    if (pessoal === undefined) return undefined
+    if (pessoal.user_id !== userId || pessoal.org_id !== orgId || pessoal.tenant_id !== tenantId) return undefined
+    return { userId, orgId, tenantId, role: 'owner' }
   }
 
   actorFromSession(session: SessionRecord): TenancyActor {
