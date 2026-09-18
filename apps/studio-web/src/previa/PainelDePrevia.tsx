@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode, type Ref } from 'react'
 import {
-  ExternalLink, Home, Maximize2, Minimize2, Monitor, RefreshCw, Smartphone,
+  ExternalLink, Home, Maximize2, Minimize2, Monitor, MousePointerClick, RefreshCw, Smartphone,
 } from 'lucide-react'
 import { useCatalogos } from '../i18n/IdiomaProvider'
 import { situacaoDoPainel, type LeituraDoPainel, type SituacaoDoPainel } from './estado'
@@ -8,6 +8,7 @@ import { LARGURA_DO_VIEWPORT, type Modo, type Viewport } from './layout'
 import { ROTA_INICIAL, enderecoDoQuadro, rotaAnunciada, rotaDaPrevia, type RotaRecusada } from './navegacao'
 import { mensagemDaPrevia } from './mensagens'
 import { ABAS, abaEfetiva, abasDoPainel, type Aba, type LeituraDasAbas } from './abas'
+import { contextoParaOCompositor, elementoSelecionado, origemDoElemento } from './selecao'
 
 /**
  * O PAINEL DE PRÉVIA: o aplicativo da pessoa, ao lado da conversa dela.
@@ -34,6 +35,7 @@ import { ABAS, abaEfetiva, abasDoPainel, type Aba, type LeituraDasAbas } from '.
 export function PainelDePrevia({
   leitura, base, modo, viewport, aoExpandir, aoRestaurar, aoTrocarViewport, aoEncerrar, aoRecarregar,
   entrada, refDoQuadro, codigos = [], leituraDasAbas, arquivos, testes, historico,
+  aoSelecionar, arquivosDaVersao = [],
 }: {
   readonly leitura: LeituraDoPainel
   /** O endereço da prévia, quando ela existe. */
@@ -73,6 +75,16 @@ export function PainelDePrevia({
   readonly arquivos?: ReactNode
   readonly testes?: ReactNode
   readonly historico?: ReactNode
+  /**
+   * A SELEÇÃO VISUAL: o que fazer com o contexto de um pedaço clicado.
+   *
+   * O painel não altera nada. Ele entrega o contexto a quem detém o compositor,
+   * e a alteração continua sendo pedida pela conversa — mesma autorização,
+   * mesma concorrência, mesma idempotência. Ausente, a seleção não é oferecida.
+   */
+  aoSelecionar?: (contexto: string) => void
+  /** Os arquivos da versão, para o mapa de origem. */
+  readonly arquivosDaVersao?: readonly { readonly path: string }[]
 }) {
   const { previa } = useCatalogos()
   const situacao: SituacaoDoPainel = situacaoDoPainel(leitura)
@@ -88,6 +100,7 @@ export function PainelDePrevia({
     alcançar o documento de dentro — que é justamente o que o isolamento impede.
   */
   const [geracao, setGeracao] = useState(0)
+  const [selecionando, setSelecionando] = useState(false)
   const quadro = useRef<HTMLIFrameElement>(null)
 
   useEffect(() => {
@@ -99,6 +112,21 @@ export function PainelDePrevia({
       const mensagem = mensagemDaPrevia(evento.data)
       if (mensagem === null) return
       if (mensagem.tipo === 'ERRO') setErroDoAplicativo(mensagem.mensagem)
+      if (mensagem.tipo === 'SELECIONOU') {
+        const elemento = elementoSelecionado(mensagem.corpo)
+        if (elemento === null) return
+        /*
+          O mapa NÃO inventa arquivo. Quando ele é parcial ou ausente, o texto
+          diz a limitação em vez de apontar um arquivo escolhido no escuro —
+          quem leria o aviso "pode não ser exatamente aqui" é justamente quem
+          não tem como julgar.
+        */
+        aoSelecionar?.(contextoParaOCompositor(elemento, origemDoElemento(arquivosDaVersao), {
+          noElemento: previa.noElemento, naRota: previa.naRota,
+          noArquivo: previa.noArquivo, semArquivo: previa.semArquivo,
+        }))
+        setSelecionando(false)
+      }
       if (mensagem.tipo === 'MUDOU_DE_ROTA') {
         // A rota ANUNCIADA passa pela mesma conferência da digitada: um
         // aplicativo que anuncie outro site não move o quadro para fora.
@@ -108,7 +136,7 @@ export function PainelDePrevia({
     }
     window.addEventListener('message', ouvir)
     return () => { window.removeEventListener('message', ouvir) }
-  }, [base])
+  }, [base, aoSelecionar, arquivosDaVersao, previa])
 
   function irPara(caminho: string) {
     const escolhida = rotaDaPrevia(caminho)
@@ -189,6 +217,17 @@ export function PainelDePrevia({
         <a className="dz-previa-separado" href={enderecoDoQuadro(base, rota)} target="_blank" rel="noreferrer noopener">
           <ExternalLink aria-hidden="true" /><span>{previa.abrirSeparado}</span>
         </a>
+        {aoSelecionar === undefined ? null : <button type="button" aria-pressed={selecionando}
+          onClick={() => {
+            const proximo = !selecionando
+            setSelecionando(proximo)
+            // O quadro é AVISADO do modo; quem desenha o realce é o aplicativo
+            // gerado, do lado de lá, porque daqui não se alcança o documento
+            // dele — e é isso que o isolamento quer dizer.
+            quadro.current?.contentWindow?.postMessage({ type: 'DZ23_PREVIEW_SELECT_MODE', on: proximo }, new URL(base).origin)
+          }}>
+          <MousePointerClick aria-hidden="true" /><span>{selecionando ? previa.selecionarAtivo : previa.selecionar}</span>
+        </button>}
         <button type="button" onClick={modo === 'expandido' ? aoRestaurar : aoExpandir}
           aria-label={modo === 'expandido' ? previa.restaurar : previa.expandir}>
           {modo === 'expandido' ? <Minimize2 aria-hidden="true" /> : <Maximize2 aria-hidden="true" />}
@@ -197,6 +236,7 @@ export function PainelDePrevia({
       <p id="dz-previa-rota-ajuda" className="dz-previa-ajuda">{previa.rotaAjuda}</p>
       {recusa === null ? null : <p className="dz-previa-recusa" role="alert">{previa.rotaRecusada[recusa]}</p>}
       {viewport === 'celular' ? <p className="dz-previa-ajuda">{previa.celularAviso}</p> : null}
+      {aoSelecionar === undefined ? null : <p className="dz-previa-ajuda">{previa.selecionarAjuda}</p>}
       <div className="dz-previa-quadro" style={largura === null ? undefined : { maxWidth: `${largura}px` }}>
         {/*
           `sandbox` sem `allow-top-navigation` e sem `allow-popups`: o que roda

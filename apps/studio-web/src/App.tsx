@@ -726,6 +726,16 @@ export function App() {
     entrada={preview === null ? null : `${preview.url}/__dz23/admission`}
     refDoQuadro={previewFrame}
     codigos={previewCodes}
+    arquivosDaVersao={runReport?.files ?? []}
+    aoSelecionar={contexto => {
+      /*
+        A SELEÇÃO não altera nada: ela põe o contexto no compositor, e a pessoa
+        completa o pedido com as próprias palavras. A alteração continua saindo
+        pela conversa, com a mesma autorização e a mesma idempotência — e é por
+        isso que ela cabe numa linha aqui.
+      */
+      setRascunho(atual => `${atual === '' ? '' : `${atual}\n`}${contexto}`)
+    }}
     leituraDasAbas={{
       temPrevia: preview?.state === 'READY',
       arquivos: runReport?.files.length ?? 0,

@@ -68,5 +68,12 @@
   "autorStudio": "Escrito por FRIGG",
   "mudouAdicionado": "Nuevo",
   "mudouAlterado": "Cambiado",
-  "mudouIgual": "Sin cambios"
+  "mudouIgual": "Sin cambios",
+  "selecionar": "Seleccionar una parte",
+  "selecionarAtivo": "Haz clic en una parte de la aplicación",
+  "selecionarAjuda": "Hacer clic en una parte pone el contexto en el compositor. El cambio se sigue pidiendo en la conversación.",
+  "noElemento": "En el elemento",
+  "naRota": "En la página",
+  "noArquivo": "En el archivo",
+  "semArquivo": "No pude determinar en qué archivo se escribió esta parte; pídelo en la conversación y yo investigo el código."
 }

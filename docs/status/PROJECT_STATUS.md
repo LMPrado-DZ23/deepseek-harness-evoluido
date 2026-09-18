@@ -55,9 +55,15 @@ arquivos, testes e histórico —, e a de arquivos abre o CÓDIGO de verdade de 
 arquivo da versão. A lista do que pode ser lido vem do relato daquela tentativa,
 e não de uma conferência de caminho: nenhum `..` inventa uma entrada numa lista.
 
-**As próximas são, nesta ordem:** `PRV-01c` (edição visual), `PLAN-01`
-(perguntas adaptativas no planejamento) e `ONT-01b-2` (a jornada real dentro do
-painel, que é o que fecha `EB-04`).
+**`PRV-01c` está entregue no lado da interface:** clicar num pedaço do
+aplicativo põe o contexto verificável no compositor — elemento, rota e, quando
+dá para saber, o arquivo —, e o mapa NÃO inventa arquivo quando não sabe: ele
+diz a limitação. A alteração continua sendo pedida pela conversa, com a mesma
+autorização de sempre.
+
+**As próximas são, nesta ordem:** `PRV-01d` (o roteiro de seleção dentro do
+aplicativo gerado), `PLAN-01` (perguntas adaptativas no planejamento) e
+`ONT-01b-2` (a jornada real dentro do painel, que é o que fecha `EB-04`).
 
 ## RETOMADA EXATA — 18/09/2026
 

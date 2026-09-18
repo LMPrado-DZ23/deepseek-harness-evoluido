@@ -24,6 +24,14 @@ export type MensagemDaPrevia =
   | { readonly tipo: 'PEDIU_ADMISSAO' }
   | { readonly tipo: 'MUDOU_DE_ROTA'; readonly caminho: string }
   | { readonly tipo: 'ERRO'; readonly mensagem: string }
+  /**
+   * A pessoa clicou num pedaço do aplicativo com a seleção ligada.
+   *
+   * O corpo vem CRU de propósito: quem sabe o que é um elemento é
+   * `selecao.ts`, e ele tem a própria lista fechada. Decodificar aqui
+   * espalharia o vocabulário do elemento por dois arquivos.
+   */
+  | { readonly tipo: 'SELECIONOU'; readonly corpo: unknown }
 
 /** Quanto texto de erro a interface aceita mostrar. */
 export const LIMITE_DO_ERRO = 500
@@ -47,6 +55,7 @@ export function mensagemDaPrevia(corpo: unknown): MensagemDaPrevia | null {
     */
     return typeof caminho === 'string' ? { tipo: 'MUDOU_DE_ROTA', caminho } : null
   }
+  if (tipo === 'DZ23_PREVIEW_SELECT') return { tipo: 'SELECIONOU', corpo }
   if (tipo === 'DZ23_PREVIEW_ERROR') {
     const mensagem = (corpo as { message?: unknown }).message
     if (typeof mensagem !== 'string') return null

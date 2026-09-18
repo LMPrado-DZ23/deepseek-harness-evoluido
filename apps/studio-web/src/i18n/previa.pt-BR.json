@@ -68,5 +68,12 @@
   "autorStudio": "Escrito pelo FRIGG",
   "mudouAdicionado": "Novo",
   "mudouAlterado": "Alterado",
-  "mudouIgual": "Sem mudança"
+  "mudouIgual": "Sem mudança",
+  "selecionar": "Selecionar um pedaço",
+  "selecionarAtivo": "Clique num pedaço do aplicativo",
+  "selecionarAjuda": "Clicar num pedaço põe o contexto no compositor. A alteração continua sendo pedida pela conversa.",
+  "noElemento": "No elemento",
+  "naRota": "Na página",
+  "noArquivo": "No arquivo",
+  "semArquivo": "Não consegui determinar em qual arquivo este pedaço foi escrito; peça na conversa e eu investigo o código."
 }

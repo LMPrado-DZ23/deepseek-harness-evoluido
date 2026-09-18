@@ -36,13 +36,27 @@ describe('o que vem da prévia é DADO, nunca instrução', () => {
     }
   })
 
-  it('o vocabulário inteiro tem TRÊS tipos, e nenhum deles autoriza nada', () => {
+  it('o vocabulário inteiro tem QUATRO tipos, e nenhum deles autoriza nada', () => {
     const reconhecidas = [
       mensagemDaPrevia({ type: 'DZ23_PREVIEW_READY' }),
       mensagemDaPrevia({ type: 'DZ23_PREVIEW_ROUTE', path: '/jogo' }),
       mensagemDaPrevia({ type: 'DZ23_PREVIEW_ERROR', message: 'quebrou' }),
+      mensagemDaPrevia({ type: 'DZ23_PREVIEW_SELECT', tag: 'button', text: 'x', path: '/' }),
     ]
-    expect(reconhecidas.map(item => item?.tipo)).toEqual(['PEDIU_ADMISSAO', 'MUDOU_DE_ROTA', 'ERRO'])
+    expect(reconhecidas.map(item => item?.tipo)).toEqual(['PEDIU_ADMISSAO', 'MUDOU_DE_ROTA', 'ERRO', 'SELECIONOU'])
+    // Nenhum deles escreve, executa, publica ou amplia acesso: os quatro
+    // contam alguma coisa, e contar não é mandar.
+    expect(reconhecidas.every(item => item !== null)).toBe(true)
+  })
+
+  it('a SELEÇÃO entrega o corpo cru — quem sabe o que é um elemento é `selecao.ts`', () => {
+    /*
+      Decodificar o elemento aqui espalharia o vocabulário dele por dois
+      arquivos, e é o segundo que fica para trás quando um campo muda.
+    */
+    const lida = mensagemDaPrevia({ type: 'DZ23_PREVIEW_SELECT', tag: 'button', text: 'Reiniciar', path: '/jogo' })
+    expect(lida?.tipo).toBe('SELECIONOU')
+    expect(lida?.tipo === 'SELECIONOU' ? lida.corpo : null).toMatchObject({ tag: 'button' })
   })
 })
 

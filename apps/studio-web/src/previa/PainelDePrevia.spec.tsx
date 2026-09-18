@@ -251,3 +251,29 @@ describe('as abas existem, e nenhuma some', () => {
     expect(html).toContain('>Testes<')
   })
 })
+
+describe('a seleção visual é oferecida, e ela não altera nada', () => {
+  const comSelecao = (extra: Record<string, unknown> = {}) =>
+    renderToStaticMarkup(createElement(IdiomaProvider, {
+      ambiente: { armazem: { getItem: () => JSON.stringify({ idioma: 'pt-BR', em: 1 }), setItem: () => undefined }, tagsDoNavegador: [] },
+      children: createElement(PainelDePrevia, {
+        leitura: { previa: { state: 'READY', health: 'OK' }, execucao: null },
+        base: BASE, modo: 'dividido', viewport: 'desktop',
+        aoExpandir: () => undefined, aoRestaurar: () => undefined, aoTrocarViewport: () => undefined,
+        ...extra,
+      }),
+    }))
+
+  it('sem quem receba o contexto, a seleção não é oferecida', () => {
+    // Um botão que não leva a lugar nenhum é pior que botão nenhum.
+    expect(comSelecao()).not.toContain('Selecionar um pedaço')
+  })
+
+  it('com quem receba, o botão aparece e a tela DIZ o que ele faz', () => {
+    const html = comSelecao({ aoSelecionar: () => undefined })
+    expect(html).toContain('Selecionar um pedaço')
+    // A frase é a fronteira: o painel entrega contexto, e quem pede a alteração
+    // continua sendo a conversa.
+    expect(html).toContain('A alteração continua sendo pedida pela conversa.')
+  })
+})

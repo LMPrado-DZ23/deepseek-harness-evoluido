@@ -68,5 +68,12 @@
   "autorStudio": "Written by FRIGG",
   "mudouAdicionado": "New",
   "mudouAlterado": "Changed",
-  "mudouIgual": "Unchanged"
+  "mudouIgual": "Unchanged",
+  "selecionar": "Select a piece",
+  "selecionarAtivo": "Click a piece of the app",
+  "selecionarAjuda": "Clicking a piece puts the context in the composer. The change is still requested in the conversation.",
+  "noElemento": "On the element",
+  "naRota": "On the page",
+  "noArquivo": "In the file",
+  "semArquivo": "I could not determine which file this piece was written in; ask in the conversation and I will investigate the code."
 }
