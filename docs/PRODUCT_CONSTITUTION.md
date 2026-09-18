@@ -1,15 +1,23 @@
-# Constituição do produto — DZ23 STUDIO
+# Constituição do produto — FRIGG
 
 O que está aqui não se decide de novo a cada fatia. Uma linha só sai daqui por
 decisão explícita do Prado, registrada em ADR.
 
 ## 1. Identidade
 
-1. O nome público é **DZ23 STUDIO**. "DeepSeek Harness Studio" é histórico.
+1. O nome público é **FRIGG** (ADR-052). "DZ23 STUDIO" e "DeepSeek Harness
+   Studio" são históricos, e os documentos que os citam **não são reescritos**:
+   eles registram o que aconteceu com o nome que a coisa tinha na época. DZ23
+   permanece como origem e ecossistema.
 2. O logo oficial é o versionado; o original nunca é sobrescrito (ADR-003).
-3. O produto é **open source e sem cobrança**: nada de assinatura, plano pago,
-   crédito vendido, paywall, comissão, Stripe, checkout ou tela de upgrade
-   (ADR-009).
+3. O produto é **open source e sem PEDÁGIO** (ADR-009, alterada pela ADR-054).
+   Apoio voluntário — doação de valor livre, e um plano de apoio opcional com
+   preço declarado — é permitido. O que continua proibido é condicionar:
+   funcionalidade local atrás de pagamento, limite, cota, marca d'água ou
+   degradação que só saia pagando, tela de upgrade ou pedido de pagamento no
+   caminho de quem só quer usar o produto, e cobrança automática. **O teste:**
+   desligar o apoio, cancelar ou nunca ter doado não pode mudar nada do que a
+   instalação local faz.
 4. Provedor externo pago entra **somente por BYOK** contratado pela própria
    pessoa. Ollama e local-first são opção de primeira classe.
 5. A licença OSI ainda é **decisão do Prado**. Enquanto não houver decisão, o

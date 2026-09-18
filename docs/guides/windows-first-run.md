@@ -1,6 +1,6 @@
 # Primeiro acesso seguro no Windows
 
-Este assistente prepara o arquivo de configuração inicial do DZ23 STUDIO sem
+Este assistente prepara o arquivo de configuração inicial do FRIGG sem
 ligar o Docker, abrir portas ou mudar o Windows. Ele não instala programas, não
 usa privilégios de administrador e não altera certificados, DNS, `hosts`,
 firewall ou regras do Tailscale.

@@ -32,6 +32,16 @@
 | `9ed8866` | EMP-04 — catálogo de ofertas (`BUS-03`) | verde |
 | `5793623` | INT-01 — três idiomas, `gate:idiomas` | acompanhar |
 
+**A CAPA do projeto foi atualizada em 18/09** (`BR-F09 / APO-01`): README, guias,
+constituição, marcas e `CLAUDE.md` dizem FRIGG; as imagens do README passaram a
+vir de `apps/studio-web/capturas/`, que o e2e produz; e o PIX de doação entrou
+com portão próprio. `scripts/capture-screenshots.mjs` está **declarado superado**
+— ele percorre o assistente de cinco telas e trava. Apagá-lo depende da palavra
+do titular.
+
+**Fora do repositório, e pendente da palavra do titular:** descrição, tópicos e
+imagem social do repositório no GitHub.
+
 **A próxima fatia, e por que ela é grande.** A cobertura trilíngue é de
 navegação + Preferências. O passo seguinte é migrar as demais superfícies, e a
 medição de hoje diz o tamanho: `pt-BR.json` tem **398 chaves**, `hub` tem 138,

@@ -16,7 +16,7 @@ deveria ter acontecido, e o caminho mínimo para reproduzir.
 
 ## Escopo
 
-O DZ23 STUDIO **executa código gerado por modelo** e **constrói projetos de
+O FRIGG **executa código gerado por modelo** e **constrói projetos de
 terceiros**. As fronteiras que mais nos interessam:
 
 | fronteira | o que deveria valer |

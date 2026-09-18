@@ -1,4 +1,4 @@
-# Instalar o DZ23 STUDIO no celular ou no computador — guia em linguagem comum (M4)
+# Instalar o FRIGG no celular ou no computador — guia em linguagem comum (M4)
 
 O Studio pode ser **instalado** como um aplicativo a partir do navegador (é um PWA). Ele
 continua rodando no seu computador ou servidor; o que fica no celular é só a "casca" da
@@ -7,7 +7,7 @@ de testes; ainda **não** foi testado em um aparelho físico (ver `docs/CAPABILI
 
 ## O que você vê
 
-- Um botão **"Instalar o DZ23 STUDIO neste aparelho"** aparece quando o navegador permite
+- Um botão **"Instalar o FRIGG neste aparelho"** aparece quando o navegador permite
   instalar (Chrome e Edge no Android e no computador; no iPhone use "Compartilhar → Adicionar à
   Tela de Início"). Depois de instalado, a interface confirma em palavras.
 - **Sem internet**, a tela do Studio ainda abre e uma faixa avisa: "Você está sem internet. O

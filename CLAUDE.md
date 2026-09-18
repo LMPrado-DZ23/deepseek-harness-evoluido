@@ -1,8 +1,10 @@
 # CLAUDE.md — leia isto antes de qualquer coisa
 
-Você está no **DZ23 STUDIO**. Este arquivo é lido automaticamente no início de
-toda sessão do Claude Code neste repositório. Ele não é documentação: é a
-instrução de trabalho.
+Você está no **FRIGG** (ADR-052; o produto se chamou DZ23 STUDIO até 18/09/2026,
+e os documentos históricos continuam dizendo isso de propósito — eles registram
+o que aconteceu com o nome que a coisa tinha na época). Este arquivo é lido
+automaticamente no início de toda sessão do Claude Code neste repositório. Ele
+não é documentação: é a instrução de trabalho.
 
 **Quem decide o produto é o Prado.** Ele não escreve código. Ele dirige
 ferramentas de IA, decide arquitetura e produto, e trabalha em português do

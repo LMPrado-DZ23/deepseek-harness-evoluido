@@ -1,6 +1,6 @@
 # Da ideia ao protótipo verificado
 
-O DZ23 STUDIO pede que você conte sua ideia com palavras comuns. Depois faz uma
+O FRIGG pede que você conte sua ideia com palavras comuns. Depois faz uma
 pergunta por vez, mostra um plano e só começa a criação quando você aprova.
 
 Durante a criação, o Studio trabalha dentro de um espaço isolado e sem internet.

@@ -162,6 +162,70 @@ for (const icone of manifesto.icons) {
   if (!existsSync(resolve(raiz, arquivo))) reprove(manifestoCaminho, `ícone ${icone.src} não existe`)
 }
 
+
+/**
+ * A CAMADA DE APRESENTAÇÃO: o que alguém lê antes de instalar.
+ *
+ * O portão nasceu olhando as superfícies do produto, e isso deixou de fora
+ * justamente a porta de entrada: o README, os guias e a constituição
+ * continuaram dizendo o nome anterior depois de o produto inteiro já dizer o
+ * novo. Quem abria o repositório via um projeto que não existe mais — com
+ * capturas de uma interface que também não existe.
+ *
+ * Documentos HISTÓRICOS ficam de fora de propósito e não entram nesta lista:
+ * ADRs, livro mestre, relatórios de auditoria e `docs/inventory` registram o
+ * que aconteceu com o nome que a coisa tinha na época, e reescrevê-los seria
+ * apagar o registro para fazer o passado combinar com o presente.
+ */
+const APRESENTACAO = [
+  'README.md', 'CLAUDE.md', 'CONTRIBUTING.md', 'SECURITY.md', 'TRADEMARKS.md',
+  'docs/PRODUCT_CONSTITUTION.md',
+  ...readdirSync(resolve(raiz, 'docs/guides')).filter(nome => nome.endsWith('.md')).map(nome => join('docs/guides', nome)),
+]
+
+/**
+ * As citações da marca ANTERIOR que podem ficar, uma a uma, com motivo.
+ *
+ * Um portão sem dispensa é contornado no primeiro falso positivo; uma dispensa
+ * aberta deixa de ser portão. Cada entrada nomeia o ARQUIVO, o número de
+ * ocorrências e o porquê — e o número importa: uma citação nova entra sem que
+ * ninguém decida se ele for aberto.
+ */
+const CITACOES_HISTORICAS = [
+  { arquivo: 'CLAUDE.md', quantas: 1, motivo: 'diz em que data o produto mudou de nome, para quem chega não achar que os documentos antigos estão errados' },
+  { arquivo: 'docs/PRODUCT_CONSTITUTION.md', quantas: 1, motivo: 'a cláusula 1.1 nomeia o que virou histórico ao declarar o nome novo' },
+]
+
+const MARCA_ANTERIOR = /DZ23\s+STUDIO|DZ23\s+Studio/gu
+
+for (const caminho of APRESENTACAO) {
+  const conteudo = readFileSync(resolve(raiz, caminho), 'utf8')
+  const quantas = [...conteudo.matchAll(MARCA_ANTERIOR)].length
+  const permitidas = CITACOES_HISTORICAS.find(entrada => entrada.arquivo === caminho)?.quantas ?? 0
+  if (quantas > permitidas) {
+    reprove(caminho, `cita a marca anterior ${quantas}× e só ${permitidas} está declarada como histórica`)
+  }
+  if (quantas < permitidas) {
+    // Dispensa que sobra é dispensa que ninguém conferiu: ela passaria a
+    // cobrir uma citação NOVA no dia em que alguém escrevesse uma.
+    reprove(caminho, `tem ${permitidas} citação histórica declarada e só ${quantas} existe: a dispensa sobrando cobriria uma citação nova`)
+  }
+}
+
+/*
+  As IMAGENS que o README aponta existem?
+
+  Um caminho quebrado no README não falha em teste nenhum: o GitHub desenha o
+  ícone de imagem partida, e quem vê conclui que o projeto está abandonado.
+*/
+const readme = readFileSync(resolve(raiz, 'README.md'), 'utf8')
+for (const achado of readme.matchAll(/!\[[^\]]*\]\((\.\/[^)]+)\)|<img src="(\.\/[^"]+)"/gu)) {
+  const referencia = achado[1] ?? achado[2] ?? ''
+  if (!existsSync(resolve(raiz, referencia.replace(/^\.\//u, '')))) {
+    reprove('README.md', `aponta para a imagem ${referencia}, que não existe`)
+  }
+}
+
 // ------------------------------------------------------------------ o veredito
 for (const { onde, motivo } of achados) process.stdout.write(`  ${onde}: ${motivo}\n`)
 process.stdout.write(`MARCA=${achados.length === 0 ? 'PASS' : 'FAIL'} fonte=${fonteCaminho} nome=${nome} dominio=${dominio} publicado=${publicado} catalogos=${catalogos().length} achados=${achados.length}\n`)

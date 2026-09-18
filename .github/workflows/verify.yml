@@ -134,6 +134,10 @@ jobs:
           # mudando por branding fariam o navegador tratar a PWA ja instalada
           # como outro aplicativo.
           pnpm gate:marca
+          # O CODIGO DE DOACAO. Um BR Code errado nao falha barulhento: falha na
+          # mao de quem quis doar, no aplicativo do banco. O portao confere o
+          # CRC-16 e que o README cite a fonte byte a byte.
+          pnpm gate:pix
           # Obrigacao canonica NAO fecha por coincidencia de numero. Tres
           # fatias sairam rotuladas BUS-01..03 e duas dessas obrigacoes
           # significam outra coisa na matriz; quem lesse os dois lados

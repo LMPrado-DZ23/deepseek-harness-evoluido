@@ -1,8 +1,8 @@
 <div align="center">
 
-# DZ23 STUDIO
+# FRIGG
 
-**Descreva o aplicativo que você precisa. Em português, com as suas palavras.**
+**Descreva o aplicativo que você precisa. Com as suas palavras.**
 
 Um produto de código aberto que transforma uma ideia escrita por quem **não programa**
 em um aplicativo real — planejado, construído e conferido no seu próprio computador.
@@ -11,10 +11,10 @@ Construído **sobre** o [DeepSeek Harness](https://github.com/deepseek-ai/deepse
 sem alterar uma linha dele.
 
 [![licença](https://img.shields.io/badge/licen%C3%A7a-Apache--2.0-blue)](./LICENSE)
-[![idioma](https://img.shields.io/badge/interface-portugu%C3%AAs%20do%20Brasil-green)](./docs/guides)
+[![idiomas](https://img.shields.io/badge/interface-portugu%C3%AAs%20%C2%B7%20english%20%C2%B7%20espa%C3%B1ol-green)](./docs/guides)
 [![estado](https://img.shields.io/badge/vers%C3%A3o-1.0%20candidata-orange)](./docs/MASTER_REQUIREMENTS_LEDGER.md)
 
-![A primeira tela: a pessoa escreve a ideia com as próprias palavras](./docs/images/01-ideia.png)
+![A tela inicial do FRIGG: uma pergunta, um compositor, e a navegação à esquerda](./apps/studio-web/capturas/01-home.png)
 
 </div>
 
@@ -24,7 +24,7 @@ sem alterar uma linha dele.
 
 A maioria das ferramentas de "IA que programa" foi feita para quem programa. Elas
 pedem um *prompt*, devolvem código, e quando algo dá errado mostram um *stack
-trace*. O DZ23 STUDIO parte de outro lugar: **a pessoa que precisa do aplicativo
+trace*. O FRIGG parte de outro lugar: **a pessoa que precisa do aplicativo
 não sabe, e não precisa saber, o que é um build**.
 
 Você entra e há **uma coisa a fazer**: dizer o que precisa. O tipo, a aparência
@@ -32,12 +32,15 @@ e a privacidade ficam à mão, um nível abaixo, em "Ajustes desta tarefa" — p
 a home que cobra sete decisões antes da primeira palavra não é uma home, é um
 formulário.
 
-A partir daí a tarefa tem cinco etapas, e cada uma é uma tela que qualquer
-pessoa lê:
+A partir daí **a tarefa é uma conversa** (ADR-051), e não um assistente de cinco
+telas: a pergunta chega como um lance, a resposta vai pelo mesmo compositor de
+baixo, e continuar a tarefa depois é escrever no mesmo lugar. As cinco etapas
+continuam existindo — elas são o que acontece —, mas ninguém precisa navegar
+entre telas para atravessá-las:
 
 | | etapa | o que acontece |
 |---|---|---|
-| 1 | **Ideia** | Você escreve o que precisa. O Studio adivinha o tipo de aplicativo pelo texto — e **diz quando não entendeu**, em vez de fingir. |
+| 1 | **Ideia** | Você escreve o que precisa. O FRIGG adivinha o tipo de aplicativo pelo texto — e **diz quando não entendeu**, em vez de fingir. |
 | 2 | **Perguntas** | Uma pergunta por vez, sem termo técnico. Dado sensível (CPF, saúde, dados de crianças) é apontado e você decide. |
 | 3 | **Plano** | O que será criado, em partes que você pode aprovar, editar, remover ou reordenar. **Nada é construído antes da sua aprovação.** |
 | 4 | **Criação** | O aplicativo é gerado e construído em um contêiner **sem rede**, sistema de arquivos somente leitura e nenhuma permissão de sistema. |
@@ -45,30 +48,25 @@ pessoa lê:
 
 <table>
 <tr>
-<td width="50%"><img src="./docs/images/02-perguntas.png" alt="Uma pergunta por vez, sem termo técnico"></td>
-<td width="50%"><img src="./docs/images/03-plano.png" alt="O plano, aprovável e editável antes de qualquer criação"></td>
+<td width="50%"><img src="./apps/studio-web/capturas/02-conversa-inicio.png" alt="A tarefa como conversa: a primeira pergunta chega como um lance, e a resposta vai pelo mesmo compositor"></td>
+<td width="50%"><img src="./apps/studio-web/capturas/03-conversa-plano.png" alt="O plano chega na conversa, aprovável antes de qualquer criação"></td>
 </tr>
 <tr>
-<td colspan="2"><img src="./docs/images/04-construcao.png" alt="A construção acontecendo: os quatro passos do construtor, o que já terminou com o tempo que levou, o que está em andamento e o que ainda vai acontecer"></td>
-</tr>
-<tr>
-<td colspan="2"><img src="./docs/images/05-verificacao.png" alt="Resultado da verificação, com os critérios conferidos um a um"></td>
+<td width="50%"><img src="./apps/studio-web/capturas/04-conversa-resultado.png" alt="O resultado da criação, na mesma conversa"></td>
+<td width="50%"><img src="./apps/studio-web/capturas/05-painel-detalhamento.png" alt="O painel lateral com o detalhamento técnico do que foi feito"></td>
 </tr>
 </table>
 
-A imagem do meio é a que costuma faltar. Durante a criação o Studio mostra os
-**quatro passos do construtor** enquanto eles acontecem: o que já terminou, com
-o tempo que levou; o que está em andamento; e o que ainda vai acontecer. Numa
-tela onde nada muda, "trabalhando" e "travado" têm a mesma aparência — e quem
-não programa não tem como distinguir os dois.
+Durante a criação o FRIGG mostra os **passos do construtor** enquanto eles
+acontecem: o que já terminou, com o tempo que levou; o que está em andamento; e
+o que ainda vai acontecer. Numa tela onde nada muda, "trabalhando" e "travado"
+têm a mesma aparência — e quem não programa não tem como distinguir os dois.
 
 O estado nunca é só cor: a palavra fica ao lado do ponto, porque
 verde-e-vermelho desaparece para quem não distingue os dois.
 
-E você volta para qualquer projeto quando quiser — a situação de cada um
-aparece em português, nunca como código de máquina:
-
-![A lista de projetos, com a situação de cada um em português](./docs/images/07-projetos.png)
+E você volta para qualquer tarefa quando quiser, pelo trilho da esquerda — a
+situação de cada uma aparece em palavras, nunca como código de máquina.
 
 ### Sete tipos de aplicativo
 
@@ -136,7 +134,7 @@ Rotas local (Ollama), OmniRoute e provedor oficial, com um perfil
 **"privado-local"** em que a criação simplesmente não acontece se a rota local
 não estiver disponível — em vez de cair silenciosamente para um provedor externo.
 
-### 8. Interface instalável e acessível, no tema grafite
+### 8. Interface instalável e acessível, no tema grafite, em três idiomas
 PWA instalável, quatro tamanhos de tela testados (mesa, tablet, celular e a faixa
 de 900px), varredura de acessibilidade **axe no fluxo inteiro**, e botões que
 avisam que estão trabalhando em vez de deixar a pessoa clicando duas vezes.
@@ -146,10 +144,17 @@ direção visual aprovada pelo proprietário (ADR-050). Abaixo de 1024px a
 navegação vira gaveta — com botão de fechar visível, `Escape`, toque fora e o
 foco devolvido ao botão que a abriu.
 
+A interface tem **português do Brasil, inglês e espanhol** (ADR-053), com
+seleção em Preferências, negociação pelo idioma do navegador e persistência.
+Trocar de idioma não muda moeda, preço, permissões, tarefas, histórico nem o
+horário dos agendamentos. **A cobertura ainda é parcial** — navegação e
+Preferências —, e a própria tela diz isso nos três idiomas em vez de fingir o
+contrário.
+
 <table>
 <tr>
-<td width="50%"><img src="./docs/images/09-gaveta.png" alt="A navegação no celular, aberta como gaveta"></td>
-<td width="50%"><img src="./docs/images/08-ajuda.png" alt="A ajuda, com glossário e o que o Studio nunca faz"></td>
+<td width="50%"><img src="./apps/studio-web/capturas/10-biblioteca.png" alt="A Biblioteca: os pacotes que cada tarefa produziu, com versão e o que mudou"></td>
+<td width="50%"><img src="./apps/studio-web/capturas/19-empresa-catalogo.png" alt="O Modo Empresa: a oferta com preço, capacidade, condições e a margem dizendo o que não sabe"></td>
 </tr>
 </table>
 
@@ -161,7 +166,7 @@ código:
   verdadeiro (`STABLE`, `BETA`, `NOT_EXECUTED`, `FAILED`…). **Nenhuma linha usa
   "pronto" ou "funciona".** Onde só existe teste sobre dado simulado, o estado é
   `NOT_EXECUTED`, não `BETA`.
-- **38 portões e provas** (`pnpm gate:*`, `pnpm prove:*`), quase todos com
+- **30 portões e 22 provas** (`pnpm gate:*`, `pnpm prove:*`), quase todos com
   *self-test* que sabota o próprio portão para confirmar que ele reprova.
 - **`audit/`** — quatro rodadas de auditoria independente por agentes que
   **atacam** o código: refazem mutações, escrevem testes próprios e usam o
@@ -177,11 +182,11 @@ está, tem o motivo escrito.
 
 | | |
 |---|---|
-| suíte de unidade e integração | **3.751 testes** (213 arquivos) |
-| interface | **525 testes** |
-| navegador (Chromium real) | **119 testes** em 4 tamanhos, com varredura axe |
+| suíte de unidade e integração | **4.049 testes** (228 arquivos) |
+| interface | **881 testes** |
+| navegador (Chromium real) | **160 testes** em 4 tamanhos, com varredura axe |
 | PostgreSQL 16 real | **65/65** em banco de verdade |
-| portões estáticos | **25/25** |
+| portões estáticos | **30/30** |
 | diff no Harness | **zero** |
 
 Os números acima são de uma execução completa das quatro suítes, e não de uma
@@ -200,7 +205,7 @@ pulados.
   provado contra dobro. Há uma medição com Ollama real registrada em `EB-04`: o
   código que um modelo pequeno devolveu **passa** nas guardas, mas o prompt real
   não completa em tempo utilizável em CPU.
-- **147 dos 256 requisitos estão em `BETA`**: construídos e provados **neste
+- **178 dos 287 requisitos estão em `BETA`**: construídos e provados **neste
   ambiente**, não na vida real. 69 estão em `STABLE`, e o resto tem o motivo
   escrito, um por um.
 
@@ -219,7 +224,7 @@ comandos: cada portão, cada suíte, e o roteiro de falsificação.
 
 ## Instalação
 
-> **Não é um aplicativo de desktop.** Não há `.exe` nem `.dmg`. O DZ23 STUDIO é
+> **Não é um aplicativo de desktop.** Não há `.exe` nem `.dmg`. O FRIGG é
 > um servidor que roda no seu computador e abre no navegador — e o navegador
 > instala a interface como aplicativo (PWA), que é o mais perto de um ícone na
 > área de trabalho.
@@ -264,7 +269,7 @@ um README que descreve uma instalação que ninguém executa é pior que nenhum.
 
 ```bash
 pnpm studio:doctor   # confere o ambiente e diz o que falta, um passo por vez
-pnpm studio          # sobe o Studio; o endereço aparece no terminal
+pnpm studio          # sobe o FRIGG; o endereço aparece no terminal
 ```
 
 O procedimento completo e a ordem obrigatória estão em
@@ -302,7 +307,7 @@ agora usa o caminho de desenvolvimento acima.
 └───────────────────────────┬──────────────────────────────────┘
                             │  composição, sem patch
 ┌───────────────────────────▼──────────────────────────────────┐
-│  20 plugins do Studio                                        │
+│  22 plugins do FRIGG                                        │
 │                                                              │
 │  confiança   identity · tenancy · policy · action-approval   │
 │  criação     prompt-to-app · builder-supervisor · staging    │
@@ -322,11 +327,44 @@ agora usa o caminho de desenvolvimento acima.
 └──────────────────┘                    └────────────────────┘
 ```
 
-As decisões estão registradas em **44 ADRs** em [`docs/adr/`](./docs/adr/).
+As decisões estão registradas em **58 ADRs** em [`docs/adr/`](./docs/adr/).
 
 <div align="center">
-<img src="./docs/images/10-celular.png" alt="A mesma jornada no celular" width="320">
+<img src="./apps/studio-web/capturas/12-conversa-celular.png" alt="A mesma conversa no celular" width="320">
 </div>
+
+---
+
+## Apoiar o projeto
+
+O FRIGG é de graça e continua sendo. Isto aqui é **doação voluntária** — de valor
+livre, sem contrapartida, sem plano e sem nada destravado por ela. Se o projeto
+te serviu e você quiser ajudar a mantê-lo, obrigado.
+
+<table>
+<tr>
+<td width="220" align="center">
+<img src="./docs/images/pix-qr.png" alt="QR Code do PIX para doação ao FRIGG" width="200"><br>
+<sub>Aponte a câmera do<br>seu banco</sub>
+</td>
+<td>
+
+**PIX copia e cola** — o botão de copiar fica no canto do bloco:
+
+```
+00020126430014br.gov.bcb.pix0121picpay@lmprado.cim.br5204000053039865802BR5920LEANDRO MARCOS PRADO6009Sao Paulo62290525REC6AAD02EE810997651615676304CC1E
+```
+
+Chave: `picpay@lmprado.cim.br` · **LEANDRO MARCOS PRADO** · valor livre
+
+</td>
+</tr>
+</table>
+
+O código acima é gerado de `docs/pix-payload.txt`, que é a única fonte dele, e
+`gate:pix` confere o CRC-16 do BR Code e que este bloco cite a fonte byte a
+byte. Um caractere trocado aqui não daria erro barulhento — daria um pagamento
+perdido na mão de quem quis ajudar.
 
 ---
 
@@ -349,20 +387,21 @@ Código sob **[Apache-2.0](./LICENSE)**. A escolha está registrada na
 [estudo C-05](./docs/plans/C-05-decisao-de-licenca.md): a concessão explícita de
 patente importa porque este projeto **gera aplicativos para terceiros**.
 
-As marcas "DZ23" e "DZ23 STUDIO" e os logotipos **não** são licenciados pela
+As marcas "FRIGG" e "DZ23" e os logotipos **não** são licenciados pela
 licença do software — veja [`TRADEMARKS.md`](./TRADEMARKS.md). Versões
 modificadas devem circular com outro nome.
 
-O Studio **não tem cobrança, assinatura, créditos nem paywall**, por decisão
-registrada na ADR-009. Não há código de faturamento no repositório, e um portão
-impede que ele volte.
+O FRIGG **não tem pedágio**: nenhuma funcionalidade fica atrás de pagamento, não
+há limite, cota, marca d'água, tela de upgrade nem pedido de pagamento no
+caminho de quem só quer usar o produto (ADR-009, alterada pela ADR-054). O teste
+é de uma linha: **nunca ter doado não muda nada do que a sua instalação faz.**
 
 ---
 
 <div align="center">
 <sub>
 
-DZ23 STUDIO é um produto da **LEANDRO MARCOS PRADO LTDA** (DZ23), Brasília, Brasil.<br>
+FRIGG é um produto da **LEANDRO MARCOS PRADO LTDA** (DZ23), Brasília, Brasil.<br>
 DeepSeek Harness é um projeto da DeepSeek e é usado aqui **sem modificação**, pelas suas costuras públicas.
 
 </sub>

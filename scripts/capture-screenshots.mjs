@@ -1,4 +1,22 @@
 /**
+ * ⚠️ SUPERADO, E QUEBRADO CONTRA O PRODUTO ATUAL — 18/09/2026.
+ *
+ * Este roteiro percorre o assistente de CINCO TELAS, que deixou de existir com a
+ * ADR-051: a tarefa virou uma conversa, e o campo "Sua resposta" que ele espera
+ * na linha 123 nunca aparece. Rodá-lo hoje trava esperando um elemento que o
+ * produto não desenha mais — foi o que aconteceu ao regenerar as imagens do
+ * README, e custou uma captura pela metade.
+ *
+ * As imagens do README passaram a vir de `apps/studio-web/capturas/`, que o
+ * próprio e2e produz (`DZ23_CAPTURAS=sim`) percorrendo a jornada de verdade.
+ * Isso mata a segunda verdade que este arquivo era: DUAS descrições da mesma
+ * jornada, apodrecendo em ritmos diferentes.
+ *
+ * Ele continua aqui porque APAGAR exige a palavra do proprietário, e ela não
+ * foi pedida ainda. Não o conserte sem decidir antes se ele deve existir.
+ *
+ * ---
+ *
  * As imagens do README, capturadas do produto REAL.
  *
  * Existe porque um README de projeto aberto sem imagem obriga quem chega a

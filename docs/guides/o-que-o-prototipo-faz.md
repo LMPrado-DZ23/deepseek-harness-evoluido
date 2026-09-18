@@ -1,6 +1,6 @@
 # O que o seu protótipo já faz — e o que ainda não faz
 
-O DZ23 STUDIO já consegue criar e conferir sete tipos de protótipo em estado
+O FRIGG já consegue criar e conferir sete tipos de protótipo em estado
 BETA técnico:
 
 - página de apresentação;

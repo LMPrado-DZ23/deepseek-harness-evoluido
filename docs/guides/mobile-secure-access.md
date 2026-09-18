@@ -1,4 +1,4 @@
-# Como abrir o DZ23 STUDIO no celular com segurança
+# Como abrir o FRIGG no celular com segurança
 
 ## Opção recomendada: Tailscale
 
@@ -29,7 +29,7 @@ Ao usar `tls internal`, o Caddy cria uma autoridade certificadora no volume
 privada”. Isso não significa automaticamente que alguém invadiu o sistema; significa
 que o aparelho ainda não confia naquele emissor local.
 
-O DZ23 STUDIO não instala essa CA automaticamente. A instalação manual de uma CA
+O FRIGG não instala essa CA automaticamente. A instalação manual de uma CA
 afeta a confiança do aparelho inteiro e só deve ser feita por quem entende o efeito.
 Para pessoas leigas, use Tailscale com HTTPS válido.
 

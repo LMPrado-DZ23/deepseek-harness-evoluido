@@ -1,4 +1,4 @@
-# Cópia de segurança e restauração do DZ23 STUDIO
+# Cópia de segurança e restauração do FRIGG
 
 Este guia é para quem opera o Studio em um servidor com PostgreSQL. Ele não
 usa jargão além do necessário; cada comando diz o que faz.

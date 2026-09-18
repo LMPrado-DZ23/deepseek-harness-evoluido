@@ -66,6 +66,7 @@
     "gate:i18n": "node scripts/check-i18n.mjs",
     "gate:idiomas": "node scripts/check-idiomas.mjs --self-test && node scripts/check-idiomas.mjs",
     "gate:marca": "node scripts/check-marca.mjs",
+    "gate:pix": "node scripts/check-pix.mjs --self-test && node scripts/check-pix.mjs",
     "gate:bus-matriz": "node scripts/check-bus-matriz.mjs --self-test && node scripts/check-bus-matriz.mjs",
     "gate:vocabulary": "node scripts/check-vocabulary.mjs --self-test && node scripts/check-vocabulary.mjs",
     "gate:memory-map": "node scripts/check-memory-map.mjs --self-test && node scripts/check-memory-map.mjs",

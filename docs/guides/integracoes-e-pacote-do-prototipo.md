@@ -1,6 +1,6 @@
 # Integrações e pacote do protótipo — guia em linguagem comum (M5)
 
-Este guia explica a tela **Integrações** (`/studio/hub`) do DZ23 STUDIO para quem usa o
+Este guia explica a tela **Integrações** (`/studio/hub`) do FRIGG para quem usa o
 Studio e, no fim, como um publicador assina uma integração. Nada aqui é "pronto para o
 público": o Hub está em estado **BETA** (ver `docs/CAPABILITY_MATRIX.md`).
 

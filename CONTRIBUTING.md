@@ -1,4 +1,4 @@
-# Como contribuir com o DZ23 STUDIO
+# Como contribuir com o FRIGG
 
 Obrigado pelo interesse. Este projeto tem um jeito de trabalhar bastante
 específico, e ele existe por um motivo: **o risco maior deste código nunca foi o

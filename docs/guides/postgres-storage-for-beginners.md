@@ -1,6 +1,6 @@
-# PostgreSQL do DZ23 STUDIO — guia simples e seguro
+# PostgreSQL do FRIGG — guia simples e seguro
 
-Este recurso guarda os dados próprios do DZ23 STUDIO num PostgreSQL. Ele ainda é
+Este recurso guarda os dados próprios do FRIGG num PostgreSQL. Ele ainda é
 BETA. Conversas e dados internos do Harness continuam onde já estavam.
 
 ## Para testar sem instalar PostgreSQL manualmente
@@ -40,7 +40,7 @@ permissão de dono e nunca sobrescreve outro arquivo.
 
 ## Importar no PostgreSQL
 
-Pare o DZ23 STUDIO no servidor antes de importar. A ferramenta também verifica
+Pare o FRIGG no servidor antes de importar. A ferramenta também verifica
 as travas e recusa continuar se encontrar uma unidade ainda aberta.
 
 Coloque a DSN numa variável de ambiente, por exemplo `DZ23_POSTGRES_DSN`. Nunca

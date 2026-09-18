@@ -17,7 +17,7 @@ Estados possíveis, e só estes três:
 
 | cláusula | o que ela proíbe ou exige | estado | quem obriga |
 | --- | --- | --- | --- |
-| 1.3 | sem cobrança, paywall, checkout | NÃO AUTOMATIZADO | nenhum portão procura por Stripe, checkout ou tela de upgrade no produto |
+| 1.3 | sem PEDÁGIO: apoio voluntário pode, condicionar funcionalidade não | NÃO AUTOMATIZADO | nenhum portão procura por paywall, tela de upgrade ou cobrança no caminho de uma tarefa. O portão do PIX confere o payload da doação, e isso é outra coisa: um código de doação correto não prova que ninguém pôs um pedágio |
 | 2 | autoridade única por domínio | NÃO AUTOMATIZADO | a lista é arquitetural; não há como um portão saber que uma segunda autoridade nasceu |
 | 3 | diff zero no Harness | PORTÃO | `gate:upstream-pin` |
 | 4.2 | 9Router e OmniRoute nunca juntos | NÃO AUTOMATIZADO | depende do perfil montado em execução, e não da árvore |
