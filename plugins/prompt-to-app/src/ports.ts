@@ -28,6 +28,18 @@ export interface HarnessModelPortOptions {
    * externa assim que ela falhasse.
    */
   readonly markPrivacy?: (options: GenerateOptions, privacy: RoutePrivacy) => GenerateOptions
+  /**
+   * Marca a requisição que pode ir pelo caminho de SAÍDA ESTRUTURADA.
+   *
+   * A decisão não é do modelo nem do prompt: é de quem sabe QUE PEDIDO este é
+   * (`generate` devolve JSON; `intake` conversa) e PARA ONDE ele vai (só o
+   * servidor local aceita o campo `format`). Ambas as respostas moram aqui, e
+   * nenhuma delas cabe dentro de `saida-estruturada.ts`, que é lógica pura.
+   *
+   * Ausente, nada é marcado e tudo segue pelo adaptador normal — que é o que
+   * acontece em teste e em qualquer perfil que não tenha ligado o desvio.
+   */
+  readonly markEstruturada?: (options: GenerateOptions, purpose: 'intake' | 'plan' | 'generate', route: string) => GenerateOptions
 }
 
 export class ModelRouteUnavailableError extends Error {
@@ -50,7 +62,8 @@ export class HarnessPromptModel implements PromptModelPort {
       temperature: 0,
     }
     const scoped = this.options.markScope?.(options, scope) ?? options
-    const marked = this.options.markPrivacy?.(scoped, privacy) ?? scoped
+    const privado = this.options.markPrivacy?.(scoped, privacy) ?? scoped
+    const marked = this.options.markEstruturada?.(privado, purpose, selected.route) ?? privado
     for await (const chunk of this.options.llm.stream(marked)) assembler.push(chunk)
     if (assembler.finish.kind === 'error' || assembler.finish.kind === 'aborted') {
       throw new ModelRouteUnavailableError(assembler.finish.failure.message)

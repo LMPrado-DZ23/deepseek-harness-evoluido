@@ -805,12 +805,33 @@ describe('Prompt-to-App pipeline', () => {
     expect(failures.every(run => run.artifact_sha256 == null)).toBe(true)
   })
 
+  it('a rodada de reparo leva os ARQUIVOS da tentativa recusada, e não só a causa', async () => {
+    /*
+      Medido em 18/09/2026 contra o Ollama do titular: a primeira tentativa
+      devolveu um jogo da velha completo, recusado por um único atributo
+      `style`; o reparo recebeu só a causa e o modelo escreveu outro do zero —
+      o `style` sumiu e o jogo sumiu junto.
+
+      O que o reparo precisa consertar é o que o modelo ESCREVEU, inclusive
+      quando a política recusou antes de gravar no disco.
+    */
+    const f = await fixture()
+    const recusado = [{ path: 'src/GeneratedApp.tsx', content: "export function A() { return <div style={{ a: 1 }} /> }" }]
+    const generate: CodeGeneratorPort['generate'] = vi.fn(async () => ({ files: recusado, route: 'ollama', model: 'm' }))
+    await f.pipeline.run(actor, 'project', { generate })
+    const chamadas = vi.mocked(generate).mock.calls
+    expect(chamadas[1]?.[3]).toEqual(recusado)
+  })
+
   it('retries rejected model output with the prior diagnostic and closes as build failed', async () => {
     const f = await fixture()
     const generator: CodeGeneratorPort = { generate: vi.fn(async (_spec, _plan, diagnostic) => { throw new Error(diagnostic === undefined ? 'JSON inválido' : diagnostic) }) }
     const result = await f.pipeline.run(actor, 'project', generator)
     expect(result).toMatchObject({ state: 'BUILD_FAILED', attempts: 3, message: 'JSON inválido' })
-    expect(generator.generate).toHaveBeenNthCalledWith(2, spec, plan, 'JSON inválido')
+    // Sem arquivos: a geração LANÇOU, então não existe artefato anterior para
+    // consertar — e `undefined` diz isso, enquanto uma lista vazia diria que a
+    // tentativa produziu nada, que é outra afirmação.
+    expect(generator.generate).toHaveBeenNthCalledWith(2, spec, plan, 'JSON inválido', undefined)
     expect(f.execute).not.toHaveBeenCalled()
     const failures = f.runs.filter(run => run.state === 'FAILED')
     expect(failures).toHaveLength(3)

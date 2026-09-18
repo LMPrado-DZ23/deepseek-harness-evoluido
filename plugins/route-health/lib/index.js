@@ -1,6 +1,6 @@
 import { authenticatedMutation } from '@dz23-studio/identity';
 import { studioRouteHealthDomainSpec, } from './model.js';
-import { StudioRouteHealthService } from './service.js';
+import { ROTA_LOCAL, StudioRouteHealthService } from './service.js';
 import { t } from './i18n.js';
 export * from './model.js';
 export * from './service.js';
@@ -29,8 +29,8 @@ export async function apply(ctx) {
     ctx.effect(() => () => domain.close(), 'studio-route-health.domainClose');
     const repository = new DomainRouteRepository(domain.table('routes'), domain.table('events'));
     const service = new StudioRouteHealthService(repository, {
-        routes: ['ollama', 'omniroute', 'deepseek-official'],
-        fallbackRoute: 'deepseek-official', fallbackModel: 'deepseek-v4-flash', localRoute: 'ollama',
+        routes: [ROTA_LOCAL, 'omniroute', 'deepseek-official'],
+        fallbackRoute: 'deepseek-official', fallbackModel: 'deepseek-v4-flash', localRoute: ROTA_LOCAL,
     });
     const configured = new Set(ctx.llm.listProviders().map(provider => provider.id));
     await service.initialize({ orgId: 'studio-system', tenantId: 'studio-system' }, configured);

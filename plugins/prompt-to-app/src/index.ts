@@ -5,7 +5,7 @@ import type { JobId, JobStart } from '@deepseek-ai/dsh-jobs'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { Domain, KvTable } from '@deepseek-ai/dsh-storage-domain'
 import type {} from '@dz23-studio/identity'
-import type {} from '@dz23-studio/route-health'
+import { ROTA_LOCAL } from '@dz23-studio/route-health'
 import type {} from '@dz23-studio/tenancy'
 import { PRODUCTION_BUILDER_ROOT_POLICY, builderRuntimeRegistryPath, type BuilderSupervisorRootPolicy } from '@dz23-studio/builder-supervisor'
 import { mkdir, readFile, statfs } from 'node:fs/promises'
@@ -37,6 +37,8 @@ import {
   type StudioProject,
   type StudioRun,
 } from './model.js'
+import { t } from './i18n.js'
+import { desvioEstruturado, marcarEstruturada } from './saida-estruturada.js'
 import { IntakeEngine } from './intake.js'
 import { appCodeContext } from './code-intelligence.js'
 import { listTreeFiles } from './runner.js'
@@ -93,6 +95,17 @@ export interface PromptToAppPluginConfig {
   readonly allowedHosts?: readonly string[]
   readonly allowedOrigins?: readonly string[]
   readonly modelByRoute?: Readonly<Record<string, string>>
+  /**
+   * O endereço da rota local, para a SAÍDA ESTRUTURADA.
+   *
+   * Ausente, o desvio não existe e tudo segue pelo adaptador — que é o que
+   * acontece em teste e em qualquer instalação sem servidor local. Ele é lido
+   * da mesma variável que o `studio-doctor` já confere, para não haver duas
+   * verdades sobre onde o servidor local mora.
+   */
+  readonly enderecoLocal?: string
+  /** Desliga o desvio mesmo com endereço configurado. */
+  readonly desvioEstruturadoLigado?: boolean
   readonly runsRoot?: string
   /**
    * Teto de tokens de UMA criação, somando as três tentativas.
@@ -313,11 +326,43 @@ export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}):
   )
   const service = new PromptToAppService({ repository, ...intakeTurnStoreOption(ctx, config), ...designSpecStoreOption(ctx, config), ...appSpecStoreOption(ctx, config), ...planStoreOption(ctx, config), ...evidenceStoreOption(ctx, config) })
   await service.reconcileInterruptedExecutions()
+  /*
+    A SAÍDA ESTRUTURADA, ligada no ponto de extensão que o harness documenta.
+
+    Medido em 18/09/2026 contra o Ollama do titular, mesmo prompt e mesmo
+    modelo: sem o schema, a resposta do `qwen2.5:3b` tinha quebra de linha crua
+    dentro da string e o decodificador recusava; com ele, o servidor restringe a
+    gramática e a resposta sai válida — e ainda foi 38% mais rápida no
+    `qwen2.5-coder:7b` (268 s contra 432 s), porque o modelo não gasta tokens
+    escrevendo invólucro.
+
+    A validação semântica NÃO muda: `decodeModelJson`, `generatedOutputSchema`,
+    `assertGeneratedSource` e a varredura de segurança continuam na mesma ordem
+    depois daqui. A gramática garante a FORMA, e nada mais — a mesma medição
+    devolveu um jogo bem formado cujas funções tinham o corpo vazio.
+  */
+  const enderecoLocal = config.enderecoLocal ?? process.env.DZ23_OLLAMA_BASE_URL
+  const desvioLigado = (config.desvioEstruturadoLigado ?? true) && enderecoLocal !== undefined
+  if (desvioLigado) {
+    ctx.on('llm/stream', desvioEstruturado({
+      enderecoLocal,
+      rotaLocal: ROTA_LOCAL,
+      buscar: async (entrada, inicio) => fetch(entrada, inicio),
+      avisar: motivo => { ctx.logger.warn(t('avisos.saidaEstruturada', { motivo })) },
+    }))
+  }
   const model = new HarnessPromptModel({
     llm: ctx.llm,
     routes: ctx.studioRouteHealth.service,
     markScope: (options, scope) => ctx.studioRouteHealth.markScope(options, scope),
     markPrivacy: (options, privacy) => ctx.studioRouteHealth.markPrivacy(options, privacy),
+    /*
+      Só `generate` é marcado. `intake` e `plan` conversam com a pessoa e com o
+      planejador; prendê-los à gramática do arquivo gerado transformaria uma
+      pergunta em um aplicativo vazio.
+    */
+    markEstruturada: (options, purpose, route) =>
+      desvioLigado && purpose === 'generate' && route === ROTA_LOCAL ? marcarEstruturada(options) : options,
     modelByRoute: config.modelByRoute ?? {
       ollama: 'qwen2.5-coder:7b', omniroute: 'deepseek-v3.2', 'deepseek-official': 'deepseek-chat',
     },

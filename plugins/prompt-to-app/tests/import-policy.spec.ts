@@ -476,3 +476,72 @@ describe('as regras DITAS a quem PLANEJA saem da mesma lista que as aplica', () 
     expect(planningRules()).toEqual(planningRules())
   })
 })
+
+describe('a recusa diz ONDE, porque ela é o diagnóstico que volta ao modelo', () => {
+  it('a construção recusada vem com linha e coluna', () => {
+    /*
+      Medido em 18/09/2026 contra o Ollama do titular: com o diagnóstico antigo
+      — "o arquivo X tentou usar uma construção não permitida: style" — a rodada
+      de reparo devolveu o MESMO arquivo, byte a byte, com o `style` no lugar.
+      Um rótulo sem endereço não diz o que mudar.
+    */
+    const fonte = `export function A() {
+  return <div style={{ display: 'grid' }} />
+}
+`
+    try {
+      assertGeneratedSource([{ path: 'src/A.tsx', content: fonte }], 'interativo')
+      expect.unreachable('deveria ter recusado')
+    } catch (erro) {
+      const mensagem = (erro as Error).message
+      expect(mensagem).toContain('style')
+      expect(mensagem).toContain('linha 2')
+      expect(mensagem).toMatch(/coluna \d+/u)
+    }
+  })
+
+  it('e a recusa MANDA trocar, em vez de só nomear', () => {
+    // "Não é permitido" informa; "troque essa construção" instrui. Quem lê é um
+    // modelo que só tem esta frase para decidir o próximo passo.
+    try {
+      assertGeneratedSource([{ path: 'src/A.tsx', content: `export const A = () => <div srcDoc='x' />` }], 'interativo')
+      expect.unreachable('deveria ter recusado')
+    } catch (erro) {
+      expect((erro as Error).message).toMatch(/troque/iu)
+    }
+  })
+})
+
+describe('a recusa diz o que USAR no lugar, quando existe um lugar', () => {
+  const recusa = (fonte: string) => {
+    try {
+      assertGeneratedSource([{ path: 'src/A.tsx', content: fonte }], 'interativo')
+      return ''
+    } catch (erro) { return (erro as Error).message }
+  }
+
+  it('`style` aponta para `className`', () => {
+    /*
+      Medido em 18/09/2026: sem alternativa, o `qwen2.5-coder:7b` devolveu o
+      MESMO arquivo byte a byte em TRÊS rodadas de reparo — sem o artefato
+      anterior, com ele, e com temperatura 0,4. `style` era o único jeito que
+      ele conhecia de posicionar um tabuleiro.
+    */
+    expect(recusa(`export const A = () => <div style={{ display: 'grid' }} />`)).toContain('className')
+  })
+
+  it('rede e armazenamento apontam para o estado da própria tela', () => {
+    expect(recusa(`export const A = () => <button onClick={() => fetch('https://x.com')}>i</button>`)).toMatch(/não acessa a rede/iu)
+    expect(recusa(`export const A = () => <button onClick={() => localStorage.clear()}>i</button>`)).toMatch(/useState/u)
+  })
+
+  it('onde NÃO existe substituto, a recusa cala — e isso é deliberado', () => {
+    /*
+      Inventar uma alternativa que não existe é pior que calar: manda o modelo
+      gastar a tentativa seguinte atrás dela.
+    */
+    const mensagem = recusa(`export const A = () => <button onClick={() => eval('1')}>i</button>`)
+    expect(mensagem).toContain('eval')
+    expect(mensagem).not.toMatch(/No lugar de/u)
+  })
+})

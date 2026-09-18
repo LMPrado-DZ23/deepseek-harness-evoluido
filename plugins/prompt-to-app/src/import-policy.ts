@@ -1,4 +1,5 @@
 import { posix } from 'node:path'
+import { assertSemEsboco } from './esboco.js'
 import type { PerfilDeGeracao } from './perfil-de-geracao.js'
 import ts from 'typescript'
 import type { GeneratedFile } from './generator.js'
@@ -60,6 +61,13 @@ export function assertGeneratedSource(files: readonly GeneratedFile[], perfil: P
     const source = ts.createSourceFile(file.path, file.content, ts.ScriptTarget.Latest, true, scriptKind(file.path))
     visitImports(source, moduleName => assertAllowedModule(file.path, moduleName, generatedPaths))
     assertNoServerOrUnsafeSource(file.path, source, generatedPaths, perfil)
+    /*
+      A última pergunta é a que nenhuma das outras faz. Todas elas perguntam "o
+      que este código pode fazer de errado?", e um corpo de função vazio não
+      pode fazer nada — que é exatamente o defeito. Só vale no perfil
+      interativo: uma tela declarativa não tem corpo de função para preencher.
+    */
+    if (perfil === 'interativo') assertSemEsboco(file.path, source)
   }
 }
 
@@ -92,11 +100,14 @@ function assertNoServerOrUnsafeSource(path: string, source: ts.SourceFile, gener
   const interativo = perfil === 'interativo'
   const importedJsxBindings = importedBindings(source, generatedPaths)
   const walk = (node: ts.Node): void => {
-    if (ts.isExpressionStatement(node) && ts.isStringLiteral(node.expression) && node.expression.text === 'use server') throw rejectedSource(path, 'use server')
-    if (ts.isIdentifier(node) && !isPropertyLabel(node) && (FORBIDDEN_GLOBALS.has(node.text) || FORBIDDEN_NETWORK_APIS.has(node.text))) throw rejectedSource(path, node.text)
-    if (ts.isIdentifier(node) && FORBIDDEN_ELEMENT_FACTORIES.has(node.text) && !isPropertyLabel(node)) throw rejectedSource(path, node.text)
-    if (ts.isImportSpecifier(node) && FORBIDDEN_ELEMENT_FACTORIES.has((node.propertyName ?? node.name).text)) throw rejectedSource(path, (node.propertyName ?? node.name).text)
-    if (ts.isPropertyAccessExpression(node) && FORBIDDEN_NETWORK_APIS.has(node.name.text)) throw rejectedSource(path, node.name.text)
+    // O atalho carrega a POSIÇÃO do nó em que o percurso está: cada recusa
+    // daqui para baixo passa a dizer onde, sem repetir o argumento 26 vezes.
+    const recusar = (construct: string): GeneratedFileRejectedError => rejectedSource(path, construct, source, node)
+    if (ts.isExpressionStatement(node) && ts.isStringLiteral(node.expression) && node.expression.text === 'use server') throw recusar('use server')
+    if (ts.isIdentifier(node) && !isPropertyLabel(node) && (FORBIDDEN_GLOBALS.has(node.text) || FORBIDDEN_NETWORK_APIS.has(node.text))) throw recusar(node.text)
+    if (ts.isIdentifier(node) && FORBIDDEN_ELEMENT_FACTORIES.has(node.text) && !isPropertyLabel(node)) throw recusar(node.text)
+    if (ts.isImportSpecifier(node) && FORBIDDEN_ELEMENT_FACTORIES.has((node.propertyName ?? node.name).text)) throw recusar((node.propertyName ?? node.name).text)
+    if (ts.isPropertyAccessExpression(node) && FORBIDDEN_NETWORK_APIS.has(node.name.text)) throw recusar(node.name.text)
     const elementName = ts.isElementAccessExpression(node) ? staticPropertyName(node.argumentExpression) : undefined
     /*
       ACESSO POR ÍNDICE calculado: proibido no declarativo, permitido no interativo.
@@ -113,47 +124,47 @@ function assertNoServerOrUnsafeSource(path: string, source: ts.SourceFile, gener
       não esta varredura. Análise estática aqui é camada de defesa, e nunca o
       lugar onde a contenção mora.
     */
-    if (ts.isElementAccessExpression(node) && elementName === undefined && !interativo) throw rejectedSource(path, 'dynamic property access')
-    if (elementName !== undefined && FORBIDDEN_NETWORK_APIS.has(elementName)) throw rejectedSource(path, elementName)
-    if (ts.isPropertyAccessExpression(node) && FORBIDDEN_ELEMENT_FACTORIES.has(node.name.text)) throw rejectedSource(path, node.name.text)
-    if (elementName !== undefined && FORBIDDEN_ELEMENT_FACTORIES.has(elementName)) throw rejectedSource(path, elementName)
-    if (ts.isPropertyAccessExpression(node) && FORBIDDEN_ESCAPE_PROPERTIES.has(node.name.text)) throw rejectedSource(path, node.name.text)
-    if (elementName !== undefined && FORBIDDEN_ESCAPE_PROPERTIES.has(elementName)) throw rejectedSource(path, elementName)
-    if (ts.isMetaProperty(node) && node.keywordToken === ts.SyntaxKind.ImportKeyword) throw rejectedSource(path, 'import.meta')
-    if (ts.isCallExpression(node) && factoryName(node.expression) !== undefined && FORBIDDEN_ELEMENT_FACTORIES.has(factoryName(node.expression)!)) throw rejectedSource(path, factoryName(node.expression)!)
+    if (ts.isElementAccessExpression(node) && elementName === undefined && !interativo) throw recusar('dynamic property access')
+    if (elementName !== undefined && FORBIDDEN_NETWORK_APIS.has(elementName)) throw recusar(elementName)
+    if (ts.isPropertyAccessExpression(node) && FORBIDDEN_ELEMENT_FACTORIES.has(node.name.text)) throw recusar(node.name.text)
+    if (elementName !== undefined && FORBIDDEN_ELEMENT_FACTORIES.has(elementName)) throw recusar(elementName)
+    if (ts.isPropertyAccessExpression(node) && FORBIDDEN_ESCAPE_PROPERTIES.has(node.name.text)) throw recusar(node.name.text)
+    if (elementName !== undefined && FORBIDDEN_ESCAPE_PROPERTIES.has(elementName)) throw recusar(elementName)
+    if (ts.isMetaProperty(node) && node.keywordToken === ts.SyntaxKind.ImportKeyword) throw recusar('import.meta')
+    if (ts.isCallExpression(node) && factoryName(node.expression) !== undefined && FORBIDDEN_ELEMENT_FACTORIES.has(factoryName(node.expression)!)) throw recusar(factoryName(node.expression)!)
     if (ts.isJsxAttribute(node)) {
       const name = node.name.getText(source)
       const normalizedName = normalizeJsxAttributeName(name)
       // `ref` continua proibido nos DOIS perfis: ele é a porta para o DOM cru,
       // e liberar o clique não é liberar o documento.
-      if (name === 'ref') throw rejectedSource(path, `interactive JSX attribute ${name}`)
-      if (/^on/iu.test(name) && !interativo) throw rejectedSource(path, `interactive JSX attribute ${name}`)
-      if (FORBIDDEN_JSX_ATTRIBUTES.has(normalizedName)) throw rejectedSource(path, name)
+      if (name === 'ref') throw recusar(`interactive JSX attribute ${name}`)
+      if (/^on/iu.test(name) && !interativo) throw recusar(`interactive JSX attribute ${name}`)
+      if (FORBIDDEN_JSX_ATTRIBUTES.has(normalizedName)) throw recusar(name)
       if (URL_JSX_ATTRIBUTES.has(normalizedName)) {
         const value = staticJsxAttributeValue(node)
-        if (value === undefined) throw rejectedSource(path, `dynamic URL attribute ${name}`)
+        if (value === undefined) throw recusar(`dynamic URL attribute ${name}`)
         const candidates = URL_CANDIDATE_LIST_ATTRIBUTES.has(normalizedName)
           ? splitCandidateList(value)
           : URL_WHITESPACE_LIST_ATTRIBUTES.has(normalizedName) ? splitWhitespaceList(value) : [value]
         for (const candidate of candidates) {
-          if (!isSafeStaticUrl(candidate)) throw rejectedSource(path, `unsafe URL attribute ${name}`)
+          if (!isSafeStaticUrl(candidate)) throw recusar(`unsafe URL attribute ${name}`)
         }
       }
     }
-    if (ts.isJsxSpreadAttribute(node)) throw rejectedSource(path, 'JSX spread attribute')
+    if (ts.isJsxSpreadAttribute(node)) throw recusar('JSX spread attribute')
     if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
       const tag = node.tagName.getText(source)
-      if (!ts.isIdentifier(node.tagName)) throw rejectedSource(path, `compound JSX tag ${tag}`)
-      if (FORBIDDEN_JSX_TAGS.has(tag)) throw rejectedSource(path, `<${tag}>`)
-      if (tag === tag.toLowerCase() && !SAFE_INTRINSIC_JSX_TAGS.has(tag)) throw rejectedSource(path, `unknown JSX tag ${tag}`)
-      if (tag !== tag.toLowerCase() && !importedJsxBindings.has(tag)) throw rejectedSource(path, `dynamic JSX tag ${tag}`)
+      if (!ts.isIdentifier(node.tagName)) throw recusar(`compound JSX tag ${tag}`)
+      if (FORBIDDEN_JSX_TAGS.has(tag)) throw recusar(`<${tag}>`)
+      if (tag === tag.toLowerCase() && !SAFE_INTRINSIC_JSX_TAGS.has(tag)) throw recusar(`unknown JSX tag ${tag}`)
+      if (tag !== tag.toLowerCase() && !importedJsxBindings.has(tag)) throw recusar(`dynamic JSX tag ${tag}`)
     }
     ts.forEachChild(node, walk)
     // Modelo com etiqueta continua proibido nos dois: é uma chamada com
     // analisador próprio, e nenhum aplicativo desta lista precisou dele.
-    if (ts.isTaggedTemplateExpression(node)) throw rejectedSource(path, 'tagged template call')
-    if (ts.isCallExpression(node) && !interativo) throw rejectedSource(path, 'runtime call')
-    if (ts.isNewExpression(node) && !interativo) throw rejectedSource(path, 'runtime constructor')
+    if (ts.isTaggedTemplateExpression(node)) throw recusar('tagged template call')
+    if (ts.isCallExpression(node) && !interativo) throw recusar('runtime call')
+    if (ts.isNewExpression(node) && !interativo) throw recusar('runtime constructor')
   }
   walk(source)
 }
@@ -270,8 +281,54 @@ function rejected(path: string, moduleName: string): GeneratedFileRejectedError 
   return new GeneratedFileRejectedError(t('errors.generatedImport', { path, module: moduleName }))
 }
 
-function rejectedSource(path: string, construct: string): GeneratedFileRejectedError {
-  return new GeneratedFileRejectedError(t('errors.generatedSource', { path, construct }))
+/**
+ * A recusa, com o LUGAR quando ele é conhecido.
+ *
+ * A linha não é enfeite: este texto é o diagnóstico que volta ao modelo na
+ * rodada de reparo. Medido em 18/09/2026 contra o Ollama do titular — "o
+ * arquivo X tentou usar uma construção não permitida: style" fez o modelo
+ * devolver o MESMO arquivo, byte a byte, com o `style` no lugar. Um rótulo sem
+ * endereço não diz o que mudar, e o que não se sabe mudar não se muda.
+ * @param path - o arquivo gerado.
+ * @param construct - a construção recusada.
+ * @param source - o arquivo analisado, quando a recusa veio do percurso.
+ * @param node - o nó exato, quando ele é conhecido.
+ * @returns o erro pronto para ser lançado.
+ */
+/**
+ * O que USAR no lugar, quando existe um lugar.
+ *
+ * Medido em 18/09/2026 contra o Ollama do titular: com a recusa dizendo apenas
+ * "construção não permitida: style", o `qwen2.5-coder:7b` devolveu o MESMO
+ * arquivo byte a byte em TRÊS rodadas de reparo — sem o artefato anterior, com
+ * ele, e com temperatura 0,4. Não era teimosia nem temperatura: `style` é o
+ * único jeito que o modelo conhecia de posicionar um tabuleiro, e uma proibição
+ * sem alternativa não deixa nada a fazer além de repetir.
+ *
+ * A tabela cobre as famílias em que existe SUBSTITUTO dentro do que o perfil
+ * permite. Onde não existe — `eval`, `use server` —, não há linha, e a recusa
+ * continua só nomeando: inventar uma alternativa que não existe seria pior que
+ * calar, porque mandaria o modelo gastar a tentativa seguinte atrás dela.
+ * @param construct - a construção recusada.
+ * @returns a frase do remédio, ou vazio quando não há um.
+ */
+function remedioPara(construct: string): string {
+  const nome = construct.toLowerCase()
+  if (nome.includes('style')) return t('errors.remedioStyle')
+  if (/^<(?:svg|path|circle|ellipse|line|polygon|polyline|rect|g|text)>$/u.test(nome)) return t('errors.remedioSvg')
+  if (['fetch', 'xmlhttprequest', 'websocket', 'eventsource'].includes(nome)) return t('errors.remedioRede')
+  if (['localstorage', 'sessionstorage', 'indexeddb', 'caches'].includes(nome)) return t('errors.remedioArmazenamento')
+  return ''
+}
+
+function rejectedSource(path: string, construct: string, source?: ts.SourceFile, node?: ts.Node): GeneratedFileRejectedError {
+  if (source === undefined || node === undefined) {
+    return new GeneratedFileRejectedError(t('errors.generatedSource', { path, construct }))
+  }
+  const { line, character } = source.getLineAndCharacterOfPosition(node.getStart(source))
+  return new GeneratedFileRejectedError(t('errors.generatedSourceNaLinha', {
+    path, construct, linha: String(line + 1), coluna: String(character + 1), remedio: remedioPara(construct),
+  }))
 }
 
 function normalizePath(path: string): string {
@@ -360,5 +417,12 @@ export function generationRules(perfil: PerfilDeGeracao = 'declarativo'): readon
       que precisa reagir ao clique.
     */
     prompt(perfil === 'interativo' ? 'prompts.ruleInterativo' : 'prompts.ruleDeclarativo'),
+    /*
+      E, no interativo, a regra que nasceu de uma recusa medida: o primeiro
+      jogo que um modelo real escreveu aqui tinha nove botões, um `onClick` em
+      cada um e o corpo das funções vazio com um comentário dentro. Dizer isto
+      ao modelo custa uma linha; descobrir depois custa uma tentativa inteira.
+    */
+    ...(perfil === 'interativo' ? [prompt('prompts.ruleSemEsboco')] : []),
   ]
 }

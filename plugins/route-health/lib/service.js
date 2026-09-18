@@ -40,6 +40,14 @@ export function enforceRoutePrivacy(profile, localRoute, selection, blockedReaso
         return selection;
     return { route: undefined, explicit: selection.explicit, reason: blockedReason, reasonCode: 'LOCAL_BLOCKED' };
 }
+/**
+ * A ROTA DA IA LOCAL, num lugar só.
+ *
+ * Ela era escrita à mão em cada consumidor. Quem precisa dela não precisa de
+ * uma cópia do nome: precisa DESTE nome — e um nome copiado é a segunda verdade
+ * que diverge no primeiro conserto de uma das cópias.
+ */
+export const ROTA_LOCAL = 'ollama';
 function recordId(scope, route) {
     return `${scope.orgId}:${scope.tenantId}:${route}`;
 }

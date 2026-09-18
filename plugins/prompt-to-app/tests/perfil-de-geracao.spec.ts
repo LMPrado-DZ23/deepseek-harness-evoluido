@@ -144,8 +144,12 @@ describe('categoria descreve o pedido; ela não concede privilégio', () => {
 })
 
 describe('as regras que o modelo recebe saem do perfil que o recusa', () => {
-  it('o declarativo MANDA não escrever lógica', () => {
-    expect(generationRules('declarativo').join(' ')).toMatch(/não escreva lógica/iu)
+  it('o declarativo PROÍBE o que faz um aplicativo reagir', () => {
+    const regras = generationRules('declarativo').join(' ')
+    expect(regras).toMatch(/somente JSX declarativo/iu)
+    expect(regras).toMatch(/atributos de evento/iu)
+    // E não pede comportamento: a regra do esboço só existe no interativo.
+    expect(regras).not.toMatch(/critério de aceitação/iu)
   })
 
   it('o interativo PERMITE estado e evento, e repete o que continua proibido', () => {
@@ -156,6 +160,14 @@ describe('as regras que o modelo recebe saem do perfil que o recusa', () => {
     // "pode ter comportamento" faz o modelo gastar tentativa com `fetch`.
     expect(regras).toMatch(/\bref\b/u)
     expect(regras).toMatch(/eval/u)
+  })
+
+  it('e o interativo EXIGE corpo de função — a regra nasceu de uma recusa medida', () => {
+    // O primeiro jogo que um modelo real escreveu aqui tinha nove botões, um
+    // `onClick` em cada um, e o corpo das funções vazio com comentário dentro.
+    const regras = generationRules('interativo').join(' ')
+    expect(regras).toMatch(/corpo/iu)
+    expect(regras).toMatch(/critério de aceitação/iu)
   })
 
   it('as duas listas continuam vindo da MESMA fonte que recusa', () => {

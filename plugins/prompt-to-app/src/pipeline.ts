@@ -57,7 +57,27 @@ import { canStartGeneration } from './state.js'
 export const generatedOutputSchema = z.object({ files: z.array(generatedFileSchema).min(1).max(80) }).strict()
 const FRAMEWORK_GENERATED_MUTABLE_PATHS = new Set(['next-env.d.ts'])
 export interface CodeGenerationResult { readonly files: readonly GeneratedFile[]; readonly route: string; readonly model: string; readonly inputTokens?: number; readonly outputTokens?: number }
-export interface CodeGeneratorPort { generate(spec: AppSpecV1, plan: StudioPlan, diagnostic?: string): Promise<CodeGenerationResult> }
+export interface CodeGeneratorPort {
+  /**
+   * @param spec - a especificação aprovada.
+   * @param plan - o plano com as fatias e os arquivos previstos.
+   * @param diagnostic - a causa que a tentativa anterior colheu, quando houve uma.
+   * @param anteriores - os arquivos que a tentativa anterior produziu.
+   *
+   * `anteriores` existe por uma REGRESSÃO medida em 18/09/2026 contra o Ollama
+   * do titular. A primeira tentativa devolveu um jogo da velha COMPLETO —
+   * alternância, casa ocupada, vitória nas oito linhas, empate e reinício — e
+   * foi recusada por um único atributo `style`. A rodada de reparo recebeu a
+   * causa, e só ela; o modelo não tinha o arquivo anterior para consertar,
+   * então escreveu outro do zero. O `style` sumiu e o jogo inteiro sumiu junto:
+   * a segunda resposta tinha o corpo da jogada vazio.
+   *
+   * Reparo sem o artefato não é reparo: é uma segunda geração com uma
+   * instrução extra, e o que ela preserva é sorte.
+   * @returns os arquivos, a rota e o modelo.
+   */
+  generate(spec: AppSpecV1, plan: StudioPlan, diagnostic?: string, anteriores?: readonly GeneratedFile[]): Promise<CodeGenerationResult>
+}
 
 export class ModelCodeGenerator implements CodeGeneratorPort {
   constructor(
@@ -70,10 +90,20 @@ export class ModelCodeGenerator implements CodeGeneratorPort {
     */
     private readonly perfil: PerfilDeGeracao = 'declarativo',
   ) {}
-  async generate(spec: AppSpecV1, plan: StudioPlan, diagnostic?: string): Promise<CodeGenerationResult> {
+  async generate(spec: AppSpecV1, plan: StudioPlan, diagnostic?: string, anteriores?: readonly GeneratedFile[]): Promise<CodeGenerationResult> {
     const result = await this.model.complete({ orgId: this.actor.orgId, tenantId: this.actor.tenantId }, 'generate', this.privacy, [
       prompt('prompts.generateOnly'),
-      prompt('prompts.generateDeclarative'),
+      /*
+        `generateDeclarative` saiu daqui e virou a regra `ruleDeclarativo`, que
+        `generationRules` escolhe pelo PERFIL.
+
+        Enquanto ela era incondicional, o prompt do perfil interativo dizia as
+        duas coisas: "não use chamada de função nem componente dinâmico" na
+        linha de cima, e "pode usar `useState` e `onClick`" na de baixo. Um
+        modelo que recebe instruções contrárias obedece uma delas, e a escolha é
+        dele — o que transforma a política do produto em sorteio. Achei isto
+        montando o prompt REAL para a jornada do jogo.
+      */
       prompt('prompts.generatePaths'),
       prompt('prompts.generatePlanned'),
       // As regras que SERAO aplicadas, ditas a partir da MESMA lista que as
@@ -84,6 +114,17 @@ export class ModelCodeGenerator implements CodeGeneratorPort {
       ...generationRules(this.perfil),
       prompt('prompts.generateSpec', { spec: JSON.stringify(spec) }), prompt('prompts.generatePlan', { plan: JSON.stringify(plan.slices) }),
       ...(diagnostic === undefined ? [] : [prompt('prompts.generateRepair', { diagnostic })]),
+      /*
+        E os ARQUIVOS da tentativa anterior, junto com a causa. Sem eles o
+        modelo não tem o que consertar: ele recebe "corrija o atributo style" e
+        um pedido inteiro, e escreve um aplicativo novo — medido, e o novo veio
+        pior. Só entram quando existem: uma lista vazia diria ao modelo que a
+        tentativa anterior não produziu nada, o que é diferente de não haver
+        tentativa anterior.
+      */
+      ...(diagnostic === undefined || anteriores === undefined || anteriores.length === 0
+        ? []
+        : [prompt('prompts.generateRepairFiles', { files: JSON.stringify(anteriores.map(arquivo => ({ path: arquivo.path, content: arquivo.content }))) })]),
     ].join('\n'))
     const decoded = decodeModelJson(result.value)
     const output = generatedOutputSchema.parse(decoded)
@@ -252,6 +293,16 @@ export class PromptToAppPipeline {
     // sobreviveu a conferencia, e o que separa "o modelo repetiu" de "o modelo
     // tentou outra coisa e foi recusado de novo".
     let attemptOutput: readonly { readonly path: string; readonly content: string }[] | undefined
+    /*
+      O que a tentativa anterior ESCREVEU, para a rodada de reparo consertar.
+
+      É diferente de `previousAttemptFiles`, que guarda o que chegou ao DISCO:
+      uma saída recusada pela política nunca é gravada, e é exatamente essa que
+      o reparo precisa ter na mão. Medido em 18/09/2026: sem isto, o reparo
+      recebia só a causa, o modelo escrevia um aplicativo novo do zero, e o jogo
+      da velha completo da primeira tentativa voltou como esqueleto vazio.
+    */
+    let arquivosDaTentativaAnterior: readonly GeneratedFile[] | undefined
       // De onde retomar, quando houver de onde.
       //
       // SÓ para execução CANCELADA ou INTERROMPIDA. Uma execução que REPROVOU
@@ -383,13 +434,17 @@ export class PromptToAppPipeline {
         // abordagem ja foi tentada e deu no mesmo. Sem isto, a terceira
         // tentativa pedia exatamente a mesma correcao da segunda - mesma
         // falha, mesma estrategia, e a unica coisa garantida era o gasto.
-        generated = await generator.generate(spec, plan, failureMemory.correctionFor(previousDiagnostic))
+        generated = await generator.generate(spec, plan, failureMemory.correctionFor(previousDiagnostic), arquivosDaTentativaAnterior)
         spentTokens += (generated.inputTokens ?? 0) + (generated.outputTokens ?? 0)
         diagnostic = undefined
         // ANTES da conferencia, de proposito: o que o modelo escreveu e o que a
         // convergencia compara, mesmo quando a conferencia recusa em seguida.
         generatedFiles = generated.files.map(file => ({ path: file.path, content: file.content }))
         attemptOutput = [...(attemptOutput ?? []), ...generatedFiles]
+        // Guardado ANTES de qualquer conferência, pelo mesmo motivo de
+        // `attemptOutput`: o que o reparo precisa consertar é o que o modelo
+        // escreveu, inclusive — e principalmente — quando foi recusado.
+        arquivosDaTentativaAnterior = generated.files
         /*
           O PERFIL vem do registro do PROJETO, e nunca da resposta do modelo.
 

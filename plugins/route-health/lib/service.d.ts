@@ -116,6 +116,14 @@ export interface RouteBudgetConfig {
     readonly maxCostUsd: number;
     readonly maxUnpricedRequests: number;
 }
+/**
+ * A ROTA DA IA LOCAL, num lugar só.
+ *
+ * Ela era escrita à mão em cada consumidor. Quem precisa dela não precisa de
+ * uma cópia do nome: precisa DESTE nome — e um nome copiado é a segunda verdade
+ * que diverge no primeiro conserto de uma das cópias.
+ */
+export declare const ROTA_LOCAL = "ollama";
 export interface RouteHealthConfig {
     readonly routes: readonly string[];
     readonly fallbackRoute: string;

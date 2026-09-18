@@ -18,6 +18,37 @@
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c` (zero diff, `gate:upstream-pin` prova)
 - `atualizado_em`: 2026-09-18
 
+## O QUE ACABOU DE ACONTECER — 18/09/2026, fim da tarde
+
+**Um modelo real escreveu um aplicativo aqui, e ele passou em tudo.** Primeira
+vez na missão. O `qwen2.5-coder:7b`, no Ollama da máquina do titular, recebeu o
+prompt que o PRÓPRIO produto monta e devolveu um jogo da velha com alternância,
+casa ocupada, as oito linhas de vitória, empate e reinício — e a resposta
+atravessou o decodificador, o contrato de saída, a política de imports e a
+guarda de esboço.
+
+Foram SETE medições até lá, e as três correções que elas obrigaram estão em
+`ONT-01b-2a` no livro mestre. O resumo:
+
+1. **saída estruturada** no servidor local elimina o JSON inválido na origem —
+   o adaptador pi-ai não tem campo para isso e o upstream é fixado, então o
+   desvio entrou pelo waterfall `llm/stream`, que é o ponto de extensão
+   documentado;
+2. **a guarda de esboço** recusa função com corpo vazio no perfil interativo —
+   ela nasceu porque o modelo devolveu nove botões com `onClick` e nenhum corpo;
+3. **a rodada de reparo** passou a levar o ARTEFATO anterior, e a recusa passou
+   a dizer ONDE e O QUE USAR no lugar — sem as três, o reparo consertava a causa
+   e destruía o jogo, ou devolvia o arquivo idêntico byte a byte.
+
+**O que continua por provar:** o jogo nunca foi construído nem jogado no
+navegador. `EB-04` continua aberto por isso, e é o que `PRV-01` e `ONT-01b-2`
+vão fechar.
+
+**A próxima tarefa é `PRV-01`** — a prévia integrada, delta do titular de 18/09
+com referência visual aprovada. Ela REUTILIZA `plugins/preview`, `App.tsx`,
+`TaskScreen.tsx` e o módulo de edição visual; não cria outro servidor de prévia,
+outro histórico de tarefas, outra autenticação nem outro harness.
+
 ## RETOMADA EXATA — 18/09/2026
 
 **Estado:** árvore limpa, `integ`, tudo entregue e enviado. Último commit

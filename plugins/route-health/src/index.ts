@@ -11,7 +11,7 @@ import {
   type RouteHealthRecord,
   type RouteSwitchEvent,
 } from './model.js'
-import { StudioRouteHealthService, type RoutePrivacy, type RouteHealthRepository, type RouteScope } from './service.js'
+import { ROTA_LOCAL, StudioRouteHealthService, type RoutePrivacy, type RouteHealthRepository, type RouteScope } from './service.js'
 import { t } from './i18n.js'
 
 export * from './model.js'
@@ -62,8 +62,8 @@ export async function apply(ctx: Context): Promise<void> {
   ctx.effect(() => () => domain.close(), 'studio-route-health.domainClose')
   const repository = new DomainRouteRepository(domain.table('routes'), domain.table('events'))
   const service = new StudioRouteHealthService(repository, {
-    routes: ['ollama', 'omniroute', 'deepseek-official'],
-    fallbackRoute: 'deepseek-official', fallbackModel: 'deepseek-v4-flash', localRoute: 'ollama',
+    routes: [ROTA_LOCAL, 'omniroute', 'deepseek-official'],
+    fallbackRoute: 'deepseek-official', fallbackModel: 'deepseek-v4-flash', localRoute: ROTA_LOCAL,
   })
   const configured = new Set(ctx.llm.listProviders().map(provider => provider.id))
   await service.initialize({ orgId: 'studio-system', tenantId: 'studio-system' }, configured)

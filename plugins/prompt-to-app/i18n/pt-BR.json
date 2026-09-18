@@ -97,7 +97,15 @@
     "perguntaInvalida": "A pergunta precisa ter entre {min} e {max} caracteres.",
     "stateNoReference": "Estado do aplicativo não guarda referência a registro: ele não sobrevive ao recarregamento, e a referência apontaria para algo que já sumiu.",
     "modelJsonAmbiguous": "A resposta trouxe {quantos} trechos diferentes, e escolher um deles seria adivinhar.",
-    "perfilNaoAutorizado": "Este pedido precisa do perfil de geração `{perfil}`, e esta instalação não o autoriza."
+    "perfilNaoAutorizado": "Este pedido precisa do perfil de geração `{perfil}`, e esta instalação não o autoriza.",
+    "esbocoEncontrado": "O arquivo {caminho} promete comportamento e não o escreve: {nomes}",
+    "funcaoAnonima": "função sem nome",
+    "esbocoLinha": "{nome} (linha {linha})",
+    "generatedSourceNaLinha": "O arquivo {path} tentou usar uma construção não permitida na linha {linha}, coluna {coluna}: {construct}. Troque essa construção; não a repita na resposta.{remedio}",
+    "remedioStyle": " No lugar de `style`, use `className` com classes utilitárias.",
+    "remedioSvg": " No lugar de desenho vetorial, use elementos HTML comuns com `className`.",
+    "remedioRede": " Este aplicativo não acessa a rede: mantenha os dados no estado da própria tela.",
+    "remedioArmazenamento": " Este aplicativo não guarda dados no navegador: use `useState`, que basta para uma sessão."
   },
   "pipeline": {
     "verified": "Protótipo verificado — não está publicado nem disponível para outras pessoas",
@@ -179,8 +187,10 @@
     "ruleGlobals": "NÃO use estes nomes globais nem estas APIs: {globals}. Eles são recusados antes de o código chegar ao disco.",
     "ruleUrls": "Todo endereço em href, src, action e semelhantes precisa começar com https://, ou ser um caminho interno começando com /.",
     "planOutro": "Este aplicativo não tem formato predefinido: foi a pessoa que descreveu o que ele faz. Não force sobre ele um formato de página institucional, catálogo, cadastro ou painel. Use `app-state` para o que muda enquanto a pessoa usa e não precisa sobreviver ao recarregamento — tabuleiro, placar, rodada, passo atual, seleção. Use `database` só para o que precisa continuar existindo depois de fechar. Os critérios de aceitação são a única descrição do que ele tem de fazer: escreva-os verificáveis, cada um dizendo uma coisa observável na tela.",
-    "ruleDeclarativo": "Não escreva lógica: sem chamada de função, sem construtor, sem atributo de evento (`onClick` e afins) e sem acesso a propriedade por índice calculado. A tela é JSX declarativo sobre os componentes indicados no plano.",
-    "ruleInterativo": "Este aplicativo PODE ter comportamento: estado com `useState`/`useReducer`, funções próprias, cálculos, atributos de evento como `onClick` e acesso a vetor por índice calculado. Continua proibido: `ref`, modelo com etiqueta, e tudo o que sai do aplicativo — rede, armazenamento do navegador, `eval`, `Function`, `document`, `window` e as demais listas acima. O estado vive na memória da tela e não precisa sobreviver ao recarregamento, salvo se o pedido disser o contrário."
+    "ruleDeclarativo": "A tela gerada deve usar somente JSX declarativo com elementos HTML e componentes das fachadas protegidas indicadas no plano. Não use chamadas de função, construtores, componentes locais dinâmicos, atributos espalhados, atributos de evento (`onClick` e afins) nem acesso a propriedade por índice calculado.",
+    "ruleInterativo": "Este aplicativo PODE ter comportamento: estado com `useState`/`useReducer`, funções próprias, cálculos, atributos de evento como `onClick` e acesso a vetor por índice calculado. Continua proibido: `ref`, modelo com etiqueta, e tudo o que sai do aplicativo — rede, armazenamento do navegador, `eval`, `Function`, `document`, `window` e as demais listas acima. O estado vive na memória da tela e não precisa sobreviver ao recarregamento, salvo se o pedido disser o contrário.",
+    "ruleSemEsboco": "Escreva o corpo de toda função que você criar. Função com corpo vazio, ou só com comentário dizendo o que ela faria, é recusada antes de o código chegar ao disco. Implemente cada critério de aceitação da especificação como comportamento de verdade, e não como lugar reservado.",
+    "generateRepairFiles": "Estes são os arquivos que você produziu na tentativa anterior. Devolva-os INTEIROS, com a causa acima corrigida e o resto preservado. Não recomece do zero, não remova comportamento que já estava escrito e não troque a abordagem: {files}"
   },
   "stages": {
     "install": "Preparando as ferramentas do seu aplicativo",
@@ -274,5 +284,8 @@
       "BUDGET_EXCEEDED": "parou no limite de gasto",
       "CANCELLED": "foi cancelada"
     }
+  },
+  "avisos": {
+    "saidaEstruturada": "Saída estruturada indisponível nesta requisição: {motivo}"
   }
 }
