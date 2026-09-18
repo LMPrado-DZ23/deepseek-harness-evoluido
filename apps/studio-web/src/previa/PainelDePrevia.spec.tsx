@@ -7,6 +7,7 @@ import { catalogosDe } from '../i18n/catalogos'
 import { PainelDePrevia } from './PainelDePrevia'
 import type { LeituraDoPainel } from './estado'
 import type { Modo, Viewport } from './layout'
+import type { abasDoPainel } from './abas'
 
 /*
   O PAINEL DESENHADO, e não o painel descrito.
@@ -216,4 +217,37 @@ describe('os três idiomas desenham a mesma tela', () => {
       expect(html).toContain(catalogo.abrirSeparado)
     })
   }
+})
+
+describe('as abas existem, e nenhuma some', () => {
+  const comAbas = (leitura: Parameters<typeof abasDoPainel>[0], extra: Record<string, unknown> = {}) =>
+    renderToStaticMarkup(createElement(IdiomaProvider, {
+      ambiente: { armazem: { getItem: () => JSON.stringify({ idioma: 'pt-BR', em: 1 }), setItem: () => undefined }, tagsDoNavegador: [] },
+      children: createElement(PainelDePrevia, {
+        leitura: { previa: { state: 'READY', health: 'OK' }, execucao: null },
+        base: BASE, modo: 'dividido', viewport: 'desktop', leituraDasAbas: leitura,
+        aoExpandir: () => undefined, aoRestaurar: () => undefined, aoTrocarViewport: () => undefined,
+        ...extra,
+      }),
+    }))
+
+  const cheio = { temPrevia: true, arquivos: 2, etapas: 4, checkpoints: 1, relatoLido: true }
+
+  it('as quatro aparecem, com a prévia escolhida', () => {
+    const html = comAbas(cheio)
+    for (const rotulo of ['Prévia', 'Arquivos', 'Testes', 'Histórico']) expect(html).toContain(`>${rotulo}<`)
+    expect(html).toContain('role="tablist"')
+  })
+
+  it('sem leitura das abas, o painel continua sendo SÓ a prévia', () => {
+    // Uma barra de abas vazia seria pior que nenhuma: ela promete seções que
+    // ninguém ligou.
+    expect(desenhar({ previa: { state: 'READY', health: 'OK' }, execucao: null })).not.toContain('role="tablist"')
+  })
+
+  it('uma aba indisponível EXPLICA a dependência em vez de sumir ou ficar muda', () => {
+    const html = comAbas({ ...cheio, relatoLido: false, arquivos: 0, etapas: 0 })
+    expect(html).toContain('>Arquivos<')
+    expect(html).toContain('>Testes<')
+  })
 })

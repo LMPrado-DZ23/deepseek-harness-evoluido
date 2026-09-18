@@ -51,5 +51,22 @@
   "verPrevia": "Vista previa",
   "erroDoAplicativo": "La aplicación informó un error",
   "codigos": "Código de acceso de la vista previa",
-  "codigosAjuda": "Usa este código solo dentro de tu aplicación. No se envió por correo."
+  "codigosAjuda": "Usa este código solo dentro de tu aplicación. No se envió por correo.",
+  "abas": "Secciones de la vista previa",
+  "abaPrevia": "Vista previa",
+  "abaArquivos": "Archivos",
+  "abaTestes": "Pruebas",
+  "abaHistorico": "Historial",
+  "indisponivel": {
+    "SEM_RELATO": "Todavía no recibí el informe de esta construcción. Esto se abre cuando termine.",
+    "VAZIO": "Esta construcción no produjo nada aquí.",
+    "SEM_PREVIA": "No hay vista previa funcionando ahora. Abre una para ver la aplicación."
+  },
+  "arquivoGrande": "Este archivo es demasiado grande para abrirlo aquí. Está en el paquete de la versión.",
+  "arquivoRecusado": "Este archivo no forma parte de la versión que se muestra.",
+  "autorModelo": "Escrito por el modelo",
+  "autorStudio": "Escrito por FRIGG",
+  "mudouAdicionado": "Nuevo",
+  "mudouAlterado": "Cambiado",
+  "mudouIgual": "Sin cambios"
 }

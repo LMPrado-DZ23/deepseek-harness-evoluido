@@ -33,6 +33,7 @@ import type { CategoryBasis, DesignPreset } from './home/opcoes'
 import type { PlanEditRequest } from './plan/planEdit'
 import { PainelDePrevia } from './previa/PainelDePrevia'
 import { DIVISAO_PADRAO, proximoLayout, type EstadoDoPainel } from './previa/layout'
+import { Arquivos } from './previa/Arquivos'
 
 /** O cliente do Hub, criado UMA vez: um por render refaria a leitura a cada estado novo. */
 const hubApi = createHubApi()
@@ -725,6 +726,20 @@ export function App() {
     entrada={preview === null ? null : `${preview.url}/__dz23/admission`}
     refDoQuadro={previewFrame}
     codigos={previewCodes}
+    leituraDasAbas={{
+      temPrevia: preview?.state === 'READY',
+      arquivos: runReport?.files.length ?? 0,
+      etapas: runReport?.stages.length ?? 0,
+      checkpoints: checkpoints?.checkpoints.length ?? 0,
+      // `relatoLido` é o que separa "ainda não perguntei" de "não tem nada": sem
+      // ele, a aba de arquivos afirmaria zero antes de a resposta chegar.
+      relatoLido: runReport !== null,
+    }}
+    arquivos={projectId === null || runReport === null ? null : <Arquivos projectId={projectId} arquivos={runReport.files} />}
+    testes={runReport === null ? null : <RunReport report={runReport} />}
+    historico={checkpoints === null ? null : <Checkpoints list={checkpoints} projectState={projectState} confirmingRunId={confirmingUndo}
+      askConfirm={setConfirmingUndo} cancelConfirm={() => setConfirmingUndo(null)}
+      undo={runId => void undoToCheckpoint(runId)} />}
     modo={layout.modo}
     viewport={layout.viewport}
     aoExpandir={() => { setLayout(atual => proximoLayout(atual, { tipo: 'expandir' })) }}

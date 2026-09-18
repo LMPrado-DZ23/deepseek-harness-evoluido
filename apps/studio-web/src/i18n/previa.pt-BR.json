@@ -51,5 +51,22 @@
   "verPrevia": "Prévia",
   "erroDoAplicativo": "O aplicativo relatou um erro",
   "codigos": "Código de acesso da prévia",
-  "codigosAjuda": "Use este código somente dentro do seu aplicativo. Ele não foi enviado por e-mail."
+  "codigosAjuda": "Use este código somente dentro do seu aplicativo. Ele não foi enviado por e-mail.",
+  "abas": "Seções da prévia",
+  "abaPrevia": "Prévia",
+  "abaArquivos": "Arquivos",
+  "abaTestes": "Testes",
+  "abaHistorico": "Histórico",
+  "indisponivel": {
+    "SEM_RELATO": "Ainda não recebi o relato desta construção. Quando ela terminar, isto abre.",
+    "VAZIO": "Esta construção não produziu nada aqui.",
+    "SEM_PREVIA": "Não há prévia rodando agora. Abra uma para ver o aplicativo."
+  },
+  "arquivoGrande": "Este arquivo é grande demais para abrir aqui. Ele está no pacote da versão.",
+  "arquivoRecusado": "Este arquivo não faz parte da versão que está sendo mostrada.",
+  "autorModelo": "Escrito pelo modelo",
+  "autorStudio": "Escrito pelo FRIGG",
+  "mudouAdicionado": "Novo",
+  "mudouAlterado": "Alterado",
+  "mudouIgual": "Sem mudança"
 }

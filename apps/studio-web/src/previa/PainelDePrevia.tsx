@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type Ref } from 'react'
+import { useEffect, useRef, useState, type ReactNode, type Ref } from 'react'
 import {
   ExternalLink, Home, Maximize2, Minimize2, Monitor, RefreshCw, Smartphone,
 } from 'lucide-react'
@@ -7,6 +7,7 @@ import { situacaoDoPainel, type LeituraDoPainel, type SituacaoDoPainel } from '.
 import { LARGURA_DO_VIEWPORT, type Modo, type Viewport } from './layout'
 import { ROTA_INICIAL, enderecoDoQuadro, rotaAnunciada, rotaDaPrevia, type RotaRecusada } from './navegacao'
 import { mensagemDaPrevia } from './mensagens'
+import { ABAS, abaEfetiva, abasDoPainel, type Aba, type LeituraDasAbas } from './abas'
 
 /**
  * O PAINEL DE PRÉVIA: o aplicativo da pessoa, ao lado da conversa dela.
@@ -32,7 +33,7 @@ import { mensagemDaPrevia } from './mensagens'
  */
 export function PainelDePrevia({
   leitura, base, modo, viewport, aoExpandir, aoRestaurar, aoTrocarViewport, aoEncerrar, aoRecarregar,
-  entrada, refDoQuadro, codigos = [],
+  entrada, refDoQuadro, codigos = [], leituraDasAbas, arquivos, testes, historico,
 }: {
   readonly leitura: LeituraDoPainel
   /** O endereço da prévia, quando ela existe. */
@@ -66,6 +67,12 @@ export function PainelDePrevia({
    * diz que ele NÃO foi enviado por e-mail, para ninguém procurar na caixa.
    */
   readonly codigos?: readonly { readonly email: string; readonly code: string; readonly expires_at: string }[]
+  /** O que o painel sabe para decidir quais abas abrem. */
+  readonly leituraDasAbas?: LeituraDasAbas
+  /** O conteúdo de cada aba, montado por quem tem acesso aos dados. */
+  readonly arquivos?: ReactNode
+  readonly testes?: ReactNode
+  readonly historico?: ReactNode
 }) {
   const { previa } = useCatalogos()
   const situacao: SituacaoDoPainel = situacaoDoPainel(leitura)
@@ -112,6 +119,17 @@ export function PainelDePrevia({
     setNavegou(true)
   }
 
+  const [abaEscolhida, setAbaEscolhida] = useState<Aba>('previa')
+  /*
+    Sem leitura das abas, o painel é SÓ a prévia — que é como ele nasceu e como
+    ele continua para quem o monta sem passar os dados. Uma barra de abas vazia
+    seria pior que nenhuma: ela promete seções que ninguém ligou.
+  */
+  const estadosDasAbas = leituraDasAbas === undefined ? null : abasDoPainel(leituraDasAbas)
+  const aba = estadosDasAbas === null ? 'previa' : abaEfetiva(estadosDasAbas, abaEscolhida)
+  const estadoDaAbaAtual = estadosDasAbas?.find(item => item.aba === aba) ?? null
+  const conteudoDaAba: Readonly<Record<Aba, ReactNode>> = { previa: null, arquivos, testes, historico }
+
   const largura = LARGURA_DO_VIEWPORT[viewport]
   const chave = `${situacao.situacao}-${geracao}`
   const enderecoDaCarga = !navegou && entrada != null ? entrada : enderecoDoQuadro(base ?? '', rota)
@@ -127,6 +145,25 @@ export function PainelDePrevia({
         : null}
     </header>
 
+    {estadosDasAbas === null ? null : <div className="dz-previa-abas" role="tablist" aria-label={previa.abas}>
+      {estadosDasAbas.map(estado => <button key={estado.aba} type="button" role="tab"
+        id={`dz-previa-aba-${estado.aba}`} aria-controls="dz-previa-conteudo"
+        aria-selected={estado.aba === aba} onClick={() => { setAbaEscolhida(estado.aba) }}>
+        {previa[`aba${estado.aba.charAt(0).toUpperCase()}${estado.aba.slice(1)}` as 'abaPrevia']}
+      </button>)}
+    </div>}
+
+    <div id="dz-previa-conteudo" role="tabpanel" aria-labelledby={`dz-previa-aba-${aba}`} className="dz-previa-conteudo">
+    {/*
+      Um controle indisponível EXPLICA a dependência. Sumir faz a pessoa
+      procurar o que não existe; ficar mudo faz ela clicar, nada acontecer, e
+      concluir que o produto quebrou.
+    */}
+    {estadoDaAbaAtual !== null && !estadoDaAbaAtual.disponivel && estadoDaAbaAtual.motivo !== null
+      ? <p className="dz-previa-ajuda">{previa.indisponivel[estadoDaAbaAtual.motivo]}</p>
+      : aba !== 'previa' ? conteudoDaAba[aba] : null}
+
+    {aba !== 'previa' ? null : <>
     {situacao.mostraAplicativo && base !== null ? <>
       <div className="dz-previa-controles">
         <button type="button" onClick={() => { irPara(ROTA_INICIAL) }} aria-label={previa.inicio}><Home aria-hidden="true" /></button>
@@ -180,6 +217,8 @@ export function PainelDePrevia({
       {erroDoAplicativo === null ? null
         : <p className="dz-previa-erro" role="alert"><strong>{previa.erroDoAplicativo}</strong> <code>{erroDoAplicativo}</code></p>}
     </> : null}
+    </>}
+    </div>
 
     <footer className="dz-previa-rodape">
       <p className="truth">{previa.naoPublicado}</p>

@@ -50,10 +50,14 @@ troca de tamanho de tela que encolhe o quadro de verdade, divisão
 redimensionável por arrasto e por seta, e as três operações separadas — fechar o
 painel, encerrar a prévia e cancelar a tarefa.
 
-**As próximas são, nesta ordem:** `PRV-01b` (código, arquivos, diffs, testes,
-logs e histórico no painel), `PRV-01c` (edição visual), `PLAN-01` (perguntas
-adaptativas no planejamento) e `ONT-01b-2` (a jornada real dentro do painel, que
-é o que fecha `EB-04`).
+**`PRV-01b` está entregue:** o painel tem quatro abas que nunca somem — prévia,
+arquivos, testes e histórico —, e a de arquivos abre o CÓDIGO de verdade de cada
+arquivo da versão. A lista do que pode ser lido vem do relato daquela tentativa,
+e não de uma conferência de caminho: nenhum `..` inventa uma entrada numa lista.
+
+**As próximas são, nesta ordem:** `PRV-01c` (edição visual), `PLAN-01`
+(perguntas adaptativas no planejamento) e `ONT-01b-2` (a jornada real dentro do
+painel, que é o que fecha `EB-04`).
 
 ## RETOMADA EXATA — 18/09/2026
 

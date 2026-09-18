@@ -747,3 +747,54 @@
 
   .dz-painel-divisor { display: none; }
 }
+
+/* As ABAS do painel de prévia. */
+.dz-previa-abas {
+  display: flex;
+  gap: var(--dz-1);
+  border-bottom: 1px solid var(--dz-border);
+}
+
+.dz-previa-abas button {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--dz-text-secondary);
+  cursor: pointer;
+  padding: var(--dz-2) var(--dz-3);
+  font-size: 0.875rem;
+}
+
+.dz-previa-abas button[aria-selected='true'] {
+  color: var(--dz-text);
+  border-bottom-color: currentColor;
+}
+
+.dz-previa-conteudo { display: flex; flex-direction: column; gap: var(--dz-3); min-height: 0; flex: 1 1 auto; }
+
+.dz-previa-arquivos { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--dz-2); }
+.dz-previa-arquivos > li > button {
+  display: flex;
+  align-items: baseline;
+  gap: var(--dz-2);
+  width: 100%;
+  background: none;
+  border: 1px solid var(--dz-border);
+  border-radius: var(--dz-radius, 8px);
+  color: inherit;
+  cursor: pointer;
+  padding: var(--dz-2) var(--dz-3);
+  text-align: start;
+}
+
+.dz-previa-arquivos small { color: var(--dz-text-secondary); font-size: 0.75rem; }
+
+.dz-previa-codigo {
+  margin: var(--dz-2) 0 0;
+  padding: var(--dz-3);
+  border: 1px solid var(--dz-border);
+  border-radius: var(--dz-radius, 8px);
+  overflow: auto;
+  max-height: 24rem;
+  font-size: 0.8125rem;
+}

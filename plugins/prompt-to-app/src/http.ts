@@ -19,6 +19,7 @@ import { respostasDoQuestionario } from './pergunta.js'
 import type { CodeGeneratorPort } from './pipeline.js'
 import type { EmergencyStopGuard, PromptToAppJobService } from './jobs.js'
 import { RUN_REPORT_FILE } from './run-report.js'
+import { FonteNaoServida, conteudoQueCabe, fonteAServir } from './fonte-do-artefato.js'
 import { FormCategoryCapabilityError, type PlannerCodeContext, type PlannerEngine } from './planner.js'
 import { consultedView } from './plan-consulted.js'
 import { routePrivacySchema } from '@dz23-studio/route-health'
@@ -187,6 +188,17 @@ export const PROMPT_TO_APP_ROUTE_CONTRACTS = [
   { method: 'POST', path: '/projects', access: 'authorized', permission: 'project.write', scope: 'workspace' },
   { method: 'GET', path: '/projects/:projectId', access: 'authorized', permission: 'project.read', scope: 'project' },
   { method: 'GET', path: '/projects/:projectId/report', access: 'authorized', permission: 'project.read', scope: 'project' },
+  /*
+    O CÓDIGO de UM arquivo da versão mais recente.
+
+    `project.read`, e não uma permissão nova: quem pode ler a tarefa já vê o
+    nome, o tamanho e o autor de cada arquivo no relato — esta rota mostra o
+    conteúdo do mesmo arquivo, para a mesma pessoa, com a mesma autoridade.
+
+    O que pode ser lido vem do RELATO daquela tentativa, e não de uma
+    conferência de caminho; `fonte-do-artefato.ts` explica por quê.
+  */
+  { method: 'GET', path: '/projects/:projectId/source', access: 'authorized', permission: 'project.read', scope: 'project' },
   { method: 'POST', path: '/projects/:projectId/intake/answer', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'POST', path: '/projects/:projectId/design', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'POST', path: '/projects/:projectId/design/logo', access: 'authorized', permission: 'project.write', scope: 'project' },
@@ -443,6 +455,34 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
           ? null
           : await readRunReport(latest.run_directory)
         return json(response, 200, { report })
+      }
+      if (request.method === 'GET' && matched.suffix === '/source') {
+        /*
+          O CÓDIGO da versão, para o painel de prévia mostrar o que foi escrito.
+
+          A lista do que pode ser lido vem do RELATO daquela tentativa, e não de
+          uma conferência de caminho: um caminho que o produto não gravou não é
+          servido, por mais bem formado que seja. `fonte-do-artefato.ts` explica
+          por que a lista branca ganha da normalização, e tem a falsificação.
+
+          Só a tentativa MAIS RECENTE. Servir uma antiga exigiria a mesma
+          conferência contra o relato dela, e misturar as duas listas é
+          exatamente como um arquivo de uma execução vaza para outra.
+        */
+        config.service.assertAuthorized(actor, 'project.read')
+        config.service.project(actor, projectId)
+        const pedido = new URL(request.url ?? '/', 'http://local').searchParams.get('path') ?? ''
+        const latest = config.service.runs(actor, projectId).at(-1)
+        if (latest === undefined || latest.run_directory === 'not-created') return json(response, 404, { error: 'RUN_NOT_FOUND' })
+        const relato = await readRunReport(latest.run_directory)
+        try {
+          const caminho = fonteAServir(relato, pedido)
+          const conteudo = conteudoQueCabe(await readFile(resolve(latest.run_directory, caminho), 'utf8'))
+          return json(response, 200, { path: caminho, content: conteudo, run_id: latest.run_id })
+        } catch (erro) {
+          if (erro instanceof FonteNaoServida) return json(response, 404, { error: erro.code })
+          throw erro
+        }
       }
       if (request.method === 'GET' && matched.suffix === '/checkpoints') {
         // Os pontos aos quais a pessoa pode voltar. Quando não há nenhum, o
@@ -717,7 +757,7 @@ export function matchRoute(method: string | undefined, path: string): { readonly
   // `/report` e `/checkpoints` só LEEM, e são as únicas leituras com sufixo. A
   // lista continua fechada: um sufixo novo precisa entrar aqui E no contrato de
   // rotas.
-  const readOnlySuffixes = new Set(['/report', '/checkpoints'])
+  const readOnlySuffixes = new Set(['/report', '/checkpoints', '/source'])
   const allowed = (method === 'GET' && (suffix === '' || readOnlySuffixes.has(suffix)))
     || (method === 'DELETE' && suffix === '')
     || (method === 'POST' && suffix !== '' && !readOnlySuffixes.has(suffix))

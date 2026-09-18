@@ -51,5 +51,22 @@
   "verPrevia": "Preview",
   "erroDoAplicativo": "The app reported an error",
   "codigos": "Preview access code",
-  "codigosAjuda": "Use this code only inside your app. It was not sent by email."
+  "codigosAjuda": "Use this code only inside your app. It was not sent by email.",
+  "abas": "Preview sections",
+  "abaPrevia": "Preview",
+  "abaArquivos": "Files",
+  "abaTestes": "Tests",
+  "abaHistorico": "History",
+  "indisponivel": {
+    "SEM_RELATO": "I have not received this build report yet. This opens when the build finishes.",
+    "VAZIO": "This build produced nothing here.",
+    "SEM_PREVIA": "No preview is running right now. Open one to see the app."
+  },
+  "arquivoGrande": "This file is too large to open here. It is in the version package.",
+  "arquivoRecusado": "This file is not part of the version being shown.",
+  "autorModelo": "Written by the model",
+  "autorStudio": "Written by FRIGG",
+  "mudouAdicionado": "New",
+  "mudouAlterado": "Changed",
+  "mudouIgual": "Unchanged"
 }
