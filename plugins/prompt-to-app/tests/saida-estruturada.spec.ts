@@ -1,3 +1,5 @@
+import { ROTA_LOCAL } from '@dz23-studio/route-health'
+import { esquemaDoPedido, marcaDoPedido } from '../src/index.ts'
 import { describe, expect, it } from 'vitest'
 import {
   SaidaEstruturadaIndisponivel, TETO_DE_SAIDA,
@@ -64,7 +66,7 @@ describe('o schema que desce é o MESMO que confere na volta', () => {
   })
 
   it('o corpo leva o schema, não estrutura livre, e não pede fluxo', () => {
-    const corpo = corpoEstruturado('qwen2.5-coder:7b', 'gere', 0)
+    const corpo = corpoEstruturado('qwen2.5-coder:7b', 'gere', esquemaJsonDaSaida(), 0)
     expect(corpo.stream).toBe(false)
     expect(corpo.format).toEqual(esquemaJsonDaSaida())
     expect(corpo.options.temperature).toBe(0)
@@ -76,7 +78,7 @@ describe('o schema que desce é o MESMO que confere na volta', () => {
       pela metade — e o servidor FECHOU o JSON por cima do corte. Resposta
       válida e incompleta é pior que inválida: ela passa no schema.
     */
-    expect(corpoEstruturado('m', 'p').options.num_predict).toBe(TETO_DE_SAIDA)
+    expect(corpoEstruturado('m', 'p', esquemaJsonDaSaida()).options.num_predict).toBe(TETO_DE_SAIDA)
     expect(TETO_DE_SAIDA).toBeGreaterThan(2000)
   })
 })
@@ -122,21 +124,21 @@ describe('a marca vive fora do objeto, e é consumida', () => {
   const requisicao = () => ({ provider: 'ollama', model: 'm', messages: [] }) as never
 
   it('quem não foi marcado não é desviado', () => {
-    expect(consumirMarca(requisicao())).toBe(false)
+    expect(consumirMarca(requisicao())).toBeUndefined()
   })
 
   it('quem foi marcado é desviado UMA vez', () => {
     const pedido = requisicao()
-    marcarEstruturada(pedido)
-    expect(consumirMarca(pedido)).toBe(true)
+    marcarEstruturada(pedido, esquemaJsonDaSaida())
+    expect(consumirMarca(pedido)).toBeDefined()
     // Consumir evita que um repetidor herde a decisão de outra requisição.
-    expect(consumirMarca(pedido)).toBe(false)
+    expect(consumirMarca(pedido)).toBeUndefined()
   })
 
   it('a marca NÃO escreve no objeto — ele chega congelado do laço de agente', () => {
     const pedido = Object.freeze(requisicao())
-    expect(() => marcarEstruturada(pedido)).not.toThrow()
-    expect(consumirMarca(pedido)).toBe(true)
+    expect(() => marcarEstruturada(pedido, esquemaJsonDaSaida())).not.toThrow()
+    expect(consumirMarca(pedido)).toBeDefined()
   })
 })
 
@@ -198,7 +200,7 @@ describe('a geração estruturada contra o servidor', () => {
 
   it('envia o schema e devolve o texto', async () => {
     const alvo = servidor({ response: '{"files":[]}', prompt_eval_count: 2, eval_count: 3 })
-    const lido = await gerarEstruturado(alvo, 'qwen2.5-coder:7b', 'gere')
+    const lido = await gerarEstruturado(alvo, 'qwen2.5-coder:7b', 'gere', esquemaJsonDaSaida())
     expect(lido.texto).toBe('{"files":[]}')
     expect(JSON.parse(alvo.enviado[0] ?? '{}')).toMatchObject({ model: 'qwen2.5-coder:7b', stream: false })
     expect(JSON.parse(alvo.enviado[0] ?? '{}').format).toEqual(esquemaJsonDaSaida())
@@ -213,7 +215,7 @@ describe('a geração estruturada contra o servidor', () => {
       código de status sabe que deu errado.
     */
     const plausivel = { response: '{"files":[{"path":"src/A.tsx","content":"x"}]}' }
-    await expect(gerarEstruturado(servidor(plausivel, false), 'm', 'p')).rejects.toThrow(SaidaEstruturadaIndisponivel)
+    await expect(gerarEstruturado(servidor(plausivel, false), 'm', 'p', esquemaJsonDaSaida())).rejects.toThrow(SaidaEstruturadaIndisponivel)
   })
 })
 
@@ -241,7 +243,7 @@ describe('o DESVIO: quem ele atende, e quem ele deixa passar', () => {
 
   it('uma requisição MARCADA para a rota local vai pelo caminho estruturado', async () => {
     const { chamadas, ouvinte, normal } = montar()
-    const lidos = await juntar(ouvinte(marcarEstruturada(pedido()), normal))
+    const lidos = await juntar(ouvinte(marcarEstruturada(pedido(), esquemaJsonDaSaida()), normal))
     expect(chamadas).toEqual({ desvio: 1, normal: 0 })
     expect(lidos.map(pedaco => (pedaco as { type: string }).type)).toContain('block-end')
   })
@@ -254,7 +256,7 @@ describe('o DESVIO: quem ele atende, e quem ele deixa passar', () => {
 
   it('outra rota passa direto, mesmo marcada — só o servidor local aceita `format`', async () => {
     const { chamadas, ouvinte, normal } = montar()
-    await juntar(ouvinte(marcarEstruturada(pedido('deepseek-official')), normal))
+    await juntar(ouvinte(marcarEstruturada(pedido('deepseek-official'), esquemaJsonDaSaida()), normal))
     expect(chamadas).toEqual({ desvio: 0, normal: 1 })
   })
 
@@ -262,9 +264,9 @@ describe('o DESVIO: quem ele atende, e quem ele deixa passar', () => {
     // Deixá-la para trás faria a próxima requisição que reutilizasse o objeto
     // herdar uma decisão que não é dela.
     const { ouvinte, normal } = montar()
-    const requisicao = marcarEstruturada(pedido('deepseek-official'))
+    const requisicao = marcarEstruturada(pedido('deepseek-official'), esquemaJsonDaSaida())
     await juntar(ouvinte(requisicao, normal))
-    expect(consumirMarca(requisicao)).toBe(false)
+    expect(consumirMarca(requisicao)).toBeUndefined()
   })
 
   it('servidor fora do ar VOLTA para o adaptador, e AVISA', async () => {
@@ -276,7 +278,7 @@ describe('o DESVIO: quem ele atende, e quem ele deixa passar', () => {
       avisar: motivo => avisos.push(motivo),
     })
     const normal = async function* () { chamadas.normal += 1; yield { type: 'text-delta', index: 0, text: 'x' } as never }
-    await juntar(ouvinte(marcarEstruturada(pedido()), normal))
+    await juntar(ouvinte(marcarEstruturada(pedido(), esquemaJsonDaSaida()), normal))
     expect(chamadas.normal).toBe(1)
     // Um desvio que silenciosamente para de funcionar vira regressão invisível:
     // o resultado continua saindo, só que pior.
@@ -292,7 +294,7 @@ describe('o DESVIO: quem ele atende, e quem ele deixa passar', () => {
       avisar: motivo => avisos.push(motivo),
     })
     const normal = async function* () { chamadas.normal += 1; yield { type: 'text-delta', index: 0, text: 'x' } as never }
-    await juntar(ouvinte(marcarEstruturada(pedido()), normal))
+    await juntar(ouvinte(marcarEstruturada(pedido(), esquemaJsonDaSaida()), normal))
     expect(chamadas.normal).toBe(1)
     expect(avisos).toEqual(['SAIDA_ESTRUTURADA_CORTADA'])
   })
@@ -304,7 +306,44 @@ describe('o DESVIO: quem ele atende, e quem ele deixa passar', () => {
       buscar: async () => { chamadas.desvio += 1; return { ok: true, status: 200, json: async () => RESPOSTA } },
     })
     const normal = async function* () { chamadas.normal += 1; yield { type: 'text-delta', index: 0, text: 'x' } as never }
-    await juntar(ouvinte(marcarEstruturada(pedido()), normal))
+    await juntar(ouvinte(marcarEstruturada(pedido(), esquemaJsonDaSaida()), normal))
     expect(chamadas).toEqual({ desvio: 0, normal: 1 })
+  })
+})
+
+describe('a gramatica de cada tipo de pedido', () => {
+  /*
+    MEDIDO em 18/09/2026, contra o produto montado: sem gramática, o
+    `qwen2.5-coder:3b` passou de 9.700 tokens escrevendo plano e NÃO PAROU — a
+    requisição ficou meia hora aberta e nada voltou. O prompt do planejador já
+    mandava o schema como TEXTO: texto é pedido, e gramática é limite.
+
+    A geração já tinha a dela desde `ONT-01b-2a`, e foi o que fez a primeira
+    resposta válida de um modelo real acontecer. O plano faltava.
+  */
+  it('geracao e plano tem gramatica, e sao gramaticas DIFERENTES', () => {
+    const geracao = esquemaDoPedido('generate')
+    const plano = esquemaDoPedido('plan')
+    expect(geracao).toBeDefined()
+    expect(plano).toBeDefined()
+    expect(JSON.stringify(plano)).not.toBe(JSON.stringify(geracao))
+    // Cada uma nomeia o campo do seu próprio contrato.
+    expect(JSON.stringify(geracao)).toContain('files')
+    expect(JSON.stringify(plano)).toContain('slices')
+  })
+
+  it('o questionario NAO tem gramatica, e a razao e que ele responde em portugues', () => {
+    // O mesmo propósito serve à síntese da especificação (JSON) e à resposta
+    // recomendada (uma frase). Obrigar forma ali devolveria objeto vazio no
+    // lugar da frase.
+    expect(esquemaDoPedido('intake')).toBeUndefined()
+  })
+
+  it('so a rota local e marcada, e so com o desvio ligado', () => {
+    const requisicao = () => ({ provider: 'x', model: 'm', messages: [], temperature: 0 } as never)
+    expect(consumirMarca(marcaDoPedido(true, 'plan', ROTA_LOCAL, requisicao()))).toBeDefined()
+    expect(consumirMarca(marcaDoPedido(false, 'plan', ROTA_LOCAL, requisicao()))).toBeUndefined()
+    expect(consumirMarca(marcaDoPedido(true, 'plan', 'deepseek-official', requisicao()))).toBeUndefined()
+    expect(consumirMarca(marcaDoPedido(true, 'intake', ROTA_LOCAL, requisicao()))).toBeUndefined()
   })
 })

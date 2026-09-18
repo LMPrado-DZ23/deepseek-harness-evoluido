@@ -78,15 +78,16 @@ export const TETO_DE_SAIDA = 8192
  * O corpo da requisição estruturada.
  * @param modelo - o identificador do modelo no servidor local.
  * @param texto - o prompt já montado pelo gerador.
+ * @param esquema - a gramática que a resposta tem de obedecer.
  * @param temperatura - a temperatura da requisição original.
  * @returns o corpo pronto para virar JSON.
  */
-export function corpoEstruturado(modelo: string, texto: string, temperatura = 0): CorpoEstruturado {
+export function corpoEstruturado(modelo: string, texto: string, esquema: Record<string, unknown>, temperatura = 0): CorpoEstruturado {
   return {
     model: modelo,
     prompt: texto,
     stream: false,
-    format: esquemaJsonDaSaida(),
+    format: esquema,
     /*
       O teto é ALTO de propósito. A primeira medição estruturada parou em 1.133
       tokens com o aplicativo pela metade, e o servidor fechou o JSON por cima
@@ -159,15 +160,15 @@ export function pedacosDaResposta(texto: string, uso?: TokenUsage): readonly Str
  * O `route-health` já marca escopo e privacidade deste mesmo jeito, pelo mesmo
  * motivo; este arquivo segue o padrão que já existe em vez de inventar um.
  */
-const requisicoesEstruturadas = new WeakSet<GenerateOptions>()
+const requisicoesEstruturadas = new WeakMap<GenerateOptions, Record<string, unknown>>()
 
 /**
  * Marca a requisição.
  * @param options - a requisição.
  * @returns a mesma requisição, para encadear.
  */
-export function marcarEstruturada(options: GenerateOptions): GenerateOptions {
-  requisicoesEstruturadas.add(options)
+export function marcarEstruturada(options: GenerateOptions, esquema: Record<string, unknown>): GenerateOptions {
+  requisicoesEstruturadas.set(options, esquema)
   return options
 }
 
@@ -179,8 +180,10 @@ export function marcarEstruturada(options: GenerateOptions): GenerateOptions {
  * @param options - a requisição.
  * @returns verdadeiro quando ela estava marcada.
  */
-export function consumirMarca(options: GenerateOptions): boolean {
-  return requisicoesEstruturadas.delete(options)
+export function consumirMarca(options: GenerateOptions): Record<string, unknown> | undefined {
+  const esquema = requisicoesEstruturadas.get(options)
+  requisicoesEstruturadas.delete(options)
+  return esquema
 }
 
 /**
@@ -242,12 +245,12 @@ export interface ServidorLocal {
  * @returns o texto, o uso e se a resposta foi cortada por teto.
  */
 export async function gerarEstruturado(
-  servidor: ServidorLocal, modelo: string, texto: string, temperatura = 0, signal?: AbortSignal,
+  servidor: ServidorLocal, modelo: string, texto: string, esquema: Record<string, unknown>, temperatura = 0, signal?: AbortSignal,
 ): Promise<{ readonly texto: string; readonly uso?: TokenUsage; readonly cortado: boolean }> {
   const resposta = await servidor.buscar(servidor.endereco, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(corpoEstruturado(modelo, texto, temperatura)),
+    body: JSON.stringify(corpoEstruturado(modelo, texto, esquema, temperatura)),
     ...(signal === undefined ? {} : { signal }),
   })
   if (!resposta.ok) throw new SaidaEstruturadaIndisponivel(t('errors.routeModel'))
@@ -296,14 +299,14 @@ export function desvioEstruturado(opcoes: OpcoesDoDesvio) {
       Deixá-la para trás faria a próxima requisição que reutilizasse este objeto
       herdar uma decisão que não é dela.
     */
-    const marcada = consumirMarca(options)
-    if (!marcada || endereco === undefined || options.provider !== opcoes.rotaLocal) return next()
+    const esquema = consumirMarca(options)
+    if (esquema === undefined || endereco === undefined || options.provider !== opcoes.rotaLocal) return next()
     const texto = textoDeUmaMensagem(options)
     if (texto === undefined) return next()
     return (async function* () {
       let lido: Awaited<ReturnType<typeof gerarEstruturado>>
       try {
-        lido = await gerarEstruturado({ endereco, buscar: opcoes.buscar }, options.model, texto, options.temperature ?? 0, options.signal)
+        lido = await gerarEstruturado({ endereco, buscar: opcoes.buscar }, options.model, texto, esquema, options.temperature ?? 0, options.signal)
       } catch (erro) {
         opcoes.avisar?.((erro as Error).message)
         yield* next()

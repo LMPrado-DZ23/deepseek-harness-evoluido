@@ -81,6 +81,24 @@ export interface PlannerSkillReport {
 }
 
 const planOutputSchema = z.object({ slices: z.array(planSliceSchema).min(1).max(6) }).strict()
+
+/**
+ * O JSON Schema do PLANO, para o servidor local obrigar a forma.
+ *
+ * Ele é derivado do mesmo schema que valida a resposta depois, pelo mesmo
+ * motivo que o da geração: escrevê-lo à mão criaria duas gramáticas para a
+ * mesma coisa, e a divergência só apareceria quando alguém acrescentasse um
+ * campo em uma delas.
+ *
+ * MEDIDO em 18/09/2026, e é por isso que ele existe: sem gramática, o
+ * `qwen2.5-coder:3b` passou de 9.700 tokens gerando plano e não parou — a
+ * requisição ficou meia hora aberta e nada voltou. O prompt já trazia o
+ * schema como TEXTO; texto é pedido, e gramática é limite.
+ * @returns o JSON Schema do plano.
+ */
+export function esquemaJsonDoPlano(): Record<string, unknown> {
+  return planOutputSchema.toJSONSchema() as Record<string, unknown>
+}
 export type PlanOutput = z.infer<typeof planOutputSchema>
 
 /** Uma fatia só, para acrescentar a um plano que a pessoa já editou. */

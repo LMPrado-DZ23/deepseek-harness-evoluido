@@ -152,13 +152,21 @@ escopo pessoal. Medido: `POST /api/studio/apps/projects` devolve `201`.
 Depois dos dois consertos, **o modelo real escreveu a especificação pelo
 produto**: `201` em 100 s, com o `qwen2.5-coder:3b` local.
 
-**Onde a jornada está agora:** o plano (`POST /plan`) está rodando contra o
-modelo real e já passou de trinta minutos — o prompt do planejador é grande e a
-máquina desta sessão tem dois núcleos e nenhuma GPU. Isso é MEDIÇÃO, e não
-falha: na máquina do titular, com GPU, a geração levava de 268 s a 430 s.
+**O planejamento não terminava, e a causa foi medida** (`PLAN-02`): sem
+gramática, o `qwen2.5-coder:3b` passou de 9.741 tokens escrevendo plano e não
+parou — mais de trinta minutos, nada de volta. O prompt já mandava o JSON
+Schema como TEXTO, e texto é pedido: gramática é limite. A saída estruturada,
+que existia só para a geração, passou a valer para o plano — e o mesmo pedido
+voltou em **157 s, com seis fatias e critérios de aceite**. O plano foi
+**aprovado** pelo produto (`200`).
 
-**As próximas são, nesta ordem:** terminar a jornada (plano → aprovação →
-geração → construção → prévia), `PLAN-01` e `ABRIR-03`.
+**Onde a jornada para agora:** `POST /generate` devolve `202`, e a execução vai
+a `BLOCKED_EXTERNAL` no passo `build` em zero milissegundo — antes de chamar o
+modelo. O supervisor de construção não está provisionado nesta instalação
+(`/etc/dz23-studio/builder`, socket próprio, imagem do construtor). É `ABRIR-05`.
+
+**As próximas são, nesta ordem:** `ABRIR-05` (provisionar o construtor),
+terminar a jornada, `PLAN-01` e `ABRIR-03`.
 
 ## DIRETIVA DO TITULAR — 18/09/2026: REAPROVEITAR ANTES DE REIMPLEMENTAR
 

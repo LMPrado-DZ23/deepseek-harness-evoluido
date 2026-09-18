@@ -38,7 +38,8 @@ import {
   type StudioRun,
 } from './model.js'
 import { t } from './i18n.js'
-import { desvioEstruturado, marcarEstruturada } from './saida-estruturada.js'
+import type { GenerateOptions } from '@deepseek-ai/dsh-llm'
+import { desvioEstruturado, esquemaJsonDaSaida, marcarEstruturada } from './saida-estruturada.js'
 import { IntakeEngine } from './intake.js'
 import { appCodeContext } from './code-intelligence.js'
 import { listTreeFiles } from './runner.js'
@@ -50,7 +51,7 @@ import type { PlanRecordStore } from './plan-store.js'
 import type { EvidenceRecordStore } from './evidence-store.js'
 import { autorizacaoDoAmbiente, perfilEfetivo } from './perfil-de-geracao.js'
 import { ModelCodeGenerator, PromptToAppPipeline } from './pipeline.js'
-import { PlannerEngine } from './planner.js'
+import { PlannerEngine, esquemaJsonDoPlano } from './planner.js'
 import { HarnessPromptModel } from './ports.js'
 import { ManagedBuilderLifecycleResolver } from './builder-resolver.js'
 import { PromptToAppService, type PromptToAppActor, type PromptToAppRepository } from './service.js'
@@ -112,6 +113,43 @@ export const MODELO_LOCAL_PADRAO = 'qwen2.5-coder:7b'
 export function modeloLocal(ambiente: Readonly<Record<string, string | undefined>>): string {
   const declarado = ambiente.DZ23_OLLAMA_MODEL?.trim()
   return declarado === undefined || declarado === '' ? MODELO_LOCAL_PADRAO : declarado
+}
+
+/**
+ * A GRAMÁTICA que cada tipo de pedido deve obedecer no servidor local.
+ *
+ * `generate` devolve os arquivos; `plan` devolve as fatias. Os dois têm forma
+ * fechada, e o servidor local sabe obrigá-la. `intake` NÃO entra: aquele mesmo
+ * propósito serve tanto para a síntese da especificação, que é JSON, quanto
+ * para a resposta recomendada, que é uma frase em português — obrigar uma
+ * gramática ali transformaria a recomendação em objeto vazio.
+ *
+ * O plano entrou depois da geração, e por uma medição: sem gramática, o
+ * `qwen2.5-coder:3b` passou de 9.700 tokens escrevendo plano e não parou. O
+ * prompt já mandava o schema como texto; texto é pedido, gramática é limite.
+ * @param purpose - o tipo do pedido.
+ * @returns o JSON Schema, ou `undefined` quando este pedido não tem forma fechada.
+ */
+export function esquemaDoPedido(purpose: 'intake' | 'plan' | 'generate'): Record<string, unknown> | undefined {
+  if (purpose === 'generate') return esquemaJsonDaSaida()
+  if (purpose === 'plan') return esquemaJsonDoPlano()
+  return undefined
+}
+
+/**
+ * Marca a requisição quando ela pode ir pelo caminho estruturado.
+ * @param ligado - se o desvio está ligado nesta instalação.
+ * @param purpose - o tipo do pedido.
+ * @param route - a rota escolhida.
+ * @param options - a requisição.
+ * @returns a requisição, marcada ou não.
+ */
+export function marcaDoPedido(
+  ligado: boolean, purpose: 'intake' | 'plan' | 'generate', route: string, options: GenerateOptions,
+): GenerateOptions {
+  if (!ligado || route !== ROTA_LOCAL) return options
+  const esquema = esquemaDoPedido(purpose)
+  return esquema === undefined ? options : marcarEstruturada(options, esquema)
 }
 
 export interface PromptToAppPluginConfig {
@@ -385,7 +423,7 @@ export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}):
       pergunta em um aplicativo vazio.
     */
     markEstruturada: (options, purpose, route) =>
-      desvioLigado && purpose === 'generate' && route === ROTA_LOCAL ? marcarEstruturada(options) : options,
+      marcaDoPedido(desvioLigado, purpose, route, options),
     modelByRoute: config.modelByRoute ?? {
       ollama: modeloLocal(process.env), omniroute: 'deepseek-v3.2', 'deepseek-official': 'deepseek-chat',
     },
