@@ -165,8 +165,18 @@ a `BLOCKED_EXTERNAL` no passo `build` em zero milissegundo — antes de chamar o
 modelo. O supervisor de construção não está provisionado nesta instalação
 (`/etc/dz23-studio/builder`, socket próprio, imagem do construtor). É `ABRIR-05`.
 
-**As próximas são, nesta ordem:** `ABRIR-05` (provisionar o construtor),
-terminar a jornada, `PLAN-01` e `ABRIR-03`.
+**`ABRIR-05` está BLOQUEADA POR DISCO neste ambiente**, e nada foi apagado para
+contornar: provisionar o construtor exige a imagem de `deploy/builder/Dockerfile`
+(base Playwright), e sobram 4,5 GB — o Ollama e o modelo local ocupam 4,1 GB.
+`CLAUDE.md` proíbe limpar disco, `node_modules` e worktrees sem a palavra do
+titular, e as três árvores em `/home/claude/gate*` somam 5 GB. **É decisão do
+Prado:** liberar espaço aqui, ou rodar a perna de construção na máquina dele,
+onde há Docker e 880 GB livres no WSL2.
+
+**As próximas são, nesta ordem:** `PLAN-01` (perguntas adaptativas — a decisão
+de desenho já está escrita no DAG, para a próxima sessão executar e não
+decidir), `ABRIR-03` e, assim que houver disco ou máquina, `ABRIR-05` e o resto
+da jornada.
 
 ## DIRETIVA DO TITULAR — 18/09/2026: REAPROVEITAR ANTES DE REIMPLEMENTAR
 
