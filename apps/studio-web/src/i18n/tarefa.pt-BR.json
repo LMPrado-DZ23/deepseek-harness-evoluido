@@ -73,5 +73,6 @@
   "usoModelos": "Modelos usados",
   "usoNaoRegistrado": "não registrado",
   "usoSemRegistro": "{quantas} tentativa(s) rodaram sem consumo registrado. Os números acima são parciais.",
-  "usoLimite": "Custo ESTIMADO pelo preço configurado aqui. Não é a fatura do provedor, e não há cota de assinatura medida neste produto ainda."
+  "usoLimite": "Custo ESTIMADO pelo preço configurado aqui. Não é a fatura do provedor, e não há cota de assinatura medida neste produto ainda.",
+  "painelDivisor": "Ajustar a largura da conversa e do painel"
 }

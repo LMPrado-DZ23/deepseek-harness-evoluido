@@ -44,10 +44,16 @@ Foram SETE medições até lá, e as três correções que elas obrigaram estão
 navegador. `EB-04` continua aberto por isso, e é o que `PRV-01` e `ONT-01b-2`
 vão fechar.
 
-**A próxima tarefa é `PRV-01`** — a prévia integrada, delta do titular de 18/09
-com referência visual aprovada. Ela REUTILIZA `plugins/preview`, `App.tsx`,
-`TaskScreen.tsx` e o módulo de edição visual; não cria outro servidor de prévia,
-outro histórico de tarefas, outra autenticação nem outro harness.
+**`PRV-01a` está entregue:** o painel de prévia tem estados honestos (nove, e
+nenhum deles é "carregando"), barra de rota que recusa endereço de outro site,
+troca de tamanho de tela que encolhe o quadro de verdade, divisão
+redimensionável por arrasto e por seta, e as três operações separadas — fechar o
+painel, encerrar a prévia e cancelar a tarefa.
+
+**As próximas são, nesta ordem:** `PRV-01b` (código, arquivos, diffs, testes,
+logs e histórico no painel), `PRV-01c` (edição visual), `PLAN-01` (perguntas
+adaptativas no planejamento) e `ONT-01b-2` (a jornada real dentro do painel, que
+é o que fecha `EB-04`).
 
 ## RETOMADA EXATA — 18/09/2026
 

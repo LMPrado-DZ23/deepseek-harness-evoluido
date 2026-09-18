@@ -7,6 +7,7 @@ import { IDIOMAS, type Idioma } from './idioma'
 import { marcadoresPendentes } from './texto'
 import { Rail } from '../shell/Rail'
 import { Preferencias } from '../preferencias/Preferencias'
+import { PainelDePrevia } from '../previa/PainelDePrevia'
 
 /*
   AS TELAS DECLARADAS TRADUZIDAS, DESENHADAS NOS TRÊS IDIOMAS.
@@ -43,6 +44,15 @@ const TELAS: Readonly<Record<string, () => ReactElement>> = {
   'preferencias/Preferencias.tsx': () => createElement(Preferencias, {
     contexto: { autenticado: true, notificacoesSuportadas: false },
     aoFechar: () => {}, conta: 'Leandro Prado',
+  }),
+  // A prévia é desenhada no estado DISPONÍVEL: é o único em que o painel
+  // inteiro aparece — controles, quadro, rodapé —, então é o que expõe mais
+  // texto à conferência.
+  'previa/PainelDePrevia.tsx': () => createElement(PainelDePrevia, {
+    leitura: { previa: { state: 'READY', health: 'OK' }, execucao: null },
+    base: 'http://p-0123456789abcdef01234567.dz23.localhost:7711',
+    modo: 'dividido', viewport: 'celular',
+    aoExpandir: () => {}, aoRestaurar: () => {}, aoTrocarViewport: () => {}, aoEncerrar: () => {},
   }),
 }
 

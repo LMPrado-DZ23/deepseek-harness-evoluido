@@ -399,11 +399,11 @@ test('percorre as cinco etapas, muda privacidade e termina sem alegar publicaç�
   const openPreview = page.getByRole('button', { name: 'Ver meu protótipo' })
   await expect(openPreview).toBeVisible()
   await openPreview.click()
-  const previewFrameElement = page.getByTitle('Prévia isolada do protótipo')
+  const previewFrameElement = page.getByTitle('Seu aplicativo rodando, isolado')
   await expect(previewFrameElement).toHaveAttribute('sandbox', 'allow-scripts allow-forms allow-same-origin')
-  await expect(page.getByText('Isto é uma prévia local. Seu aplicativo não foi publicado na internet.')).toHaveCount(1)
+  await expect(page.getByText('Isto roda no seu computador. Seu aplicativo não foi publicado na internet.')).toHaveCount(1)
   await expect(page.getByRole('button', { name: 'Ver meu protótipo' })).toHaveCount(0)
-  const previewFrame = page.frameLocator('iframe[title="Prévia isolada do protótipo"]')
+  const previewFrame = page.frameLocator('iframe[title="Seu aplicativo rodando, isolado"]')
   await expect(previewFrame.getByRole('heading', { name: 'Protótipo E2E carregado' })).toBeVisible({ timeout: 10_000 })
   await expect(page.getByText('cliente@preview.local')).toBeVisible()
   await expect(page.getByText('482901')).toBeVisible()
@@ -444,7 +444,7 @@ test('percorre as cinco etapas, muda privacidade e termina sem alegar publicaç�
 
   const beforeForgery = admissionPosts.length
   await page.evaluate(previewOrigin => {
-    const frame = document.querySelector<HTMLIFrameElement>('iframe[title="Prévia isolada do protótipo"]')
+    const frame = document.querySelector<HTMLIFrameElement>('iframe[title="Seu aplicativo rodando, isolado"]')
     if (frame?.contentWindow == null) throw new Error('preview frame missing')
     window.dispatchEvent(new MessageEvent('message', {
       origin: 'http://attacker.example', source: frame.contentWindow, data: { type: 'DZ23_PREVIEW_READY' },
@@ -456,9 +456,50 @@ test('percorre as cinco etapas, muda privacidade e termina sem alegar publicaç�
   await page.waitForTimeout(100)
   expect(admissionPosts).toHaveLength(beforeForgery)
 
-  await page.getByRole('button', { name: 'Encerrar prévia' }).click()
+  /*
+    O PAINEL DE PRÉVIA, exercitado no navegador de verdade.
+
+    A decisão de o que mostrar, a conferência de rota e as transições de layout
+    têm teste de unidade próprio. O que SÓ o navegador responde é se a coisa
+    está ligada: se o quadro muda de largura, se a conversa continua ali, e se o
+    rascunho que a pessoa escreveu sobrevive a abrir e fechar o painel.
+  */
+  await expect(page.locator('.dz-previa-situacao strong')).toHaveText('Disponível')
+  await expect(page.getByText('Só páginas do seu aplicativo. Este campo não abre outros endereços.')).toBeVisible()
+
+  // O COMPOSITOR continua alcançável com o painel aberto, e o que a pessoa
+  // escreveu nele é o que tem de sobreviver ao resto deste bloco.
+  const compositor = page.getByRole('textbox', { name: /mensagem|pedido|escreva/iu }).first()
+  await compositor.fill('quero uma casa a mais no tabuleiro')
+
+  // DESKTOP → CELULAR muda a largura do quadro de verdade, e não desenha uma
+  // moldura de telefone.
+  const moldura = page.locator('.dz-previa-quadro')
+  const larguraNoDesktop = await moldura.evaluate(elemento => elemento.getBoundingClientRect().width)
+  await page.getByRole('button', { name: 'Celular' }).click()
+  await expect(page.getByText('Isto muda a largura da tela. Não é um aplicativo Android ou iPhone.')).toBeVisible()
+  await expect.poll(() => moldura.evaluate(elemento => elemento.getBoundingClientRect().width)).toBeLessThanOrEqual(390)
+  await page.getByRole('button', { name: 'Computador' }).click()
+  await expect.poll(() => moldura.evaluate(elemento => elemento.getBoundingClientRect().width)).toBe(larguraNoDesktop)
+
+  // EXPANDIR e RESTAURAR: a conversa continua no documento — é lá que moram o
+  // marco principal e o título da página.
+  await page.getByRole('button', { name: 'Expandir a prévia' }).click()
+  await expect(page.locator('main.dz-tarefa-conversa')).toHaveCount(1)
+  await page.getByRole('button', { name: 'Voltar ao modo dividido' }).click()
+
+  // FECHAR O PAINEL não encerra a prévia nem perde o rascunho.
+  await expect(page.getByText('Fechar o painel não interrompe a construção nem encerra a prévia.')).toBeVisible()
+  await page.getByRole('button', { name: 'Fechar o painel' }).first().click()
+  await expect(page.locator('.dz-previa-quadro')).toHaveCount(0)
+  await expect(compositor).toHaveValue('quero uma casa a mais no tabuleiro')
+  await page.getByRole('button', { name: 'Seu protótipo local' }).click()
+  await expect(page.locator('.dz-previa-quadro')).toHaveCount(1)
+  await expect(compositor).toHaveValue('quero uma casa a mais no tabuleiro')
+
+  await page.getByRole('button', { name: 'Encerrar a prévia' }).click()
   await expect(previewFrameElement).toHaveCount(0)
-  await expect(page.getByText('A prévia foi encerrada. O protótipo continua salvo no projeto.')).toBeVisible()
+  await expect(page.getByText('Você encerrou a prévia. A tarefa e os arquivos continuam salvos.')).toBeVisible()
   const accessibility = await new AxeBuilder({ page }).analyze()
   expect(accessibility.violations).toEqual([])
 })

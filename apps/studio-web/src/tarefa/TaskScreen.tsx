@@ -9,6 +9,7 @@ import { MenuDoCompositor } from './MenuDoCompositor'
 import type { IntegracaoDoMenu } from './menusDoCompositor'
 import { destinoDoEnvio, envioDisponivel, intencaoPadrao, type Destino, type Intencao } from './compositor'
 import { transcricaoDaTarefa, type DetalhesDaTarefa, type Lance } from './transcricao'
+import { DIVISAO_PADRAO, MAXIMO_DA_PREVIA, MINIMO_DA_CONVERSA, passoDoDivisor, type Modo } from '../previa/layout'
 
 /**
  * A tarefa como CONVERSA, que é a estrutura principal do workspace aprovado.
@@ -49,6 +50,11 @@ export interface TaskScreenProps {
   readonly painel: PainelAberto | null
   abrirPainel(painel: PainelAberto): void
   fecharPainel(): void
+  /** Como o painel está disposto. Vem do `App`, que guarda o layout inteiro. */
+  readonly modoDoPainel?: Modo
+  /** A fração de largura da prévia, já dentro dos limites úteis. */
+  readonly divisaoDoPainel?: number
+  aoRedimensionarPainel?: (divisao: number) => void
   /** O conteúdo do painel, montado pelo `App` (resultado, prévia, diagnóstico). */
   readonly conteudoDoPainel?: React.ReactNode
   /** As ações que só existem em certos estados: aprovar plano, criar, cancelar. */
@@ -148,7 +154,21 @@ export function TaskScreen(props: TaskScreenProps) {
     : destino.tipo === 'ajustar' ? tarefa.avisoAjuste
       : null
 
-  return <div className={props.painel === null ? 'dz-tarefa' : 'dz-tarefa dz-tarefa-com-painel'}>
+  /*
+    A LARGURA da prévia é uma variável de folha de estilo no contêiner, e não um
+    `flex-basis` no painel: o arranjo é uma grade de três colunas — conversa,
+    divisor, painel —, e num contêiner de grade o filho não escolhe a própria
+    largura. Expandido zera a coluna da conversa em vez de escondê-la, para o
+    marco principal e o título continuarem no documento: escondê-los com
+    `display: none` foi exatamente o que o axe reprovou no tamanho de celular.
+  */
+  const estiloDaGrade = props.painel === null || props.divisaoDoPainel === undefined
+    ? undefined
+    : { ['--dz-previa-largura' as string]: `${String(Math.round(props.divisaoDoPainel * 100))}%` }
+
+  return <div style={estiloDaGrade}
+    className={classes('dz-tarefa', props.painel === null ? null : 'dz-tarefa-com-painel',
+      props.modoDoPainel === 'expandido' ? 'dz-tarefa-expandida' : null)}>
     {/*
       `<main>` e não `<div>`: a página precisa de UM marco principal, e o axe
       reprovou as duas coisas que faltavam — `landmark-one-main`, porque a
@@ -264,6 +284,27 @@ export function TaskScreen(props: TaskScreenProps) {
     </main>
 
     {props.painel === null ? null : <aside className="dz-painel" aria-label={tarefa.painelRotulo}>
+      {/*
+        O DIVISOR entre a conversa e o painel mora DENTRO do painel, e não
+        entre as duas colunas. Não é gosto: o axe reprovou `region` quando ele
+        era irmão dos dois — um elemento com papel, fora de qualquer marco, é
+        conteúdo que leitor de tela nenhum consegue alcançar por navegação de
+        região. Dentro do `<aside>`, ele está no marco complementar, e a
+        posição vira trabalho da folha de estilo.
+
+        Ele responde às SETAS. Arrastar não pode ser a única forma de mexer
+        nele, porque quem navega por teclado não arrasta.
+      */}
+      {props.aoRedimensionarPainel === undefined ? null : <div className="dz-painel-divisor" role="separator"
+        tabIndex={0} aria-orientation="vertical" aria-label={tarefa.painelDivisor}
+        aria-valuenow={Math.round((props.divisaoDoPainel ?? DIVISAO_PADRAO) * 100)}
+        aria-valuemin={Math.round(MINIMO_DA_CONVERSA * 100)} aria-valuemax={Math.round(MAXIMO_DA_PREVIA * 100)}
+        onKeyDown={evento => {
+          const passo = passoDoDivisor(evento.key)
+          if (passo === 0) return
+          evento.preventDefault()
+          props.aoRedimensionarPainel?.((props.divisaoDoPainel ?? DIVISAO_PADRAO) + passo)
+        }} />}
       <header className="dz-painel-topo">
         <h2>{tituloDoPainel(props.painel)}</h2>
         <button type="button" className="dz-painel-fechar" onClick={props.fecharPainel}

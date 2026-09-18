@@ -31,6 +31,8 @@ import { iniciaisDaConta } from './shell/tarefasDoTrilho'
 import tarefaCopy from './i18n/tarefa.pt-BR.json'
 import type { CategoryBasis, DesignPreset } from './home/opcoes'
 import type { PlanEditRequest } from './plan/planEdit'
+import { PainelDePrevia } from './previa/PainelDePrevia'
+import { DIVISAO_PADRAO, proximoLayout, type EstadoDoPainel } from './previa/layout'
 
 /** O cliente do Hub, criado UMA vez: um por render refaria a leitura a cada estado novo. */
 const hubApi = createHubApi()
@@ -151,6 +153,17 @@ export function App() {
     return () => { vivo = false }
   }, [])
   const [painel, setPainel] = useState<PainelAberto | null>(null)
+  /*
+    O LAYOUT do painel mora aqui, junto com o rascunho, pelo mesmo motivo: ele
+    tem de sobreviver a abrir, fechar, expandir e trocar de painel. As
+    transições passam por `proximoLayout`, que tem teste próprio e que, por
+    construção, não alcança execução nem prévia — fechar o painel não pode
+    interromper a construção nem encerrar a prévia.
+  */
+  const [layout, setLayout] = useState<EstadoDoPainel>({
+    modo: 'fechado', tarefaId: null, rascunho: '', posicaoDeLeitura: 0,
+    divisao: DIVISAO_PADRAO, viewport: 'desktop',
+  })
   useEffect(() => {
     let active = true
     void currentSessionMode().then(mode => { if (active) setAuthenticatedSession(mode === 'authenticated') })
@@ -629,6 +642,7 @@ export function App() {
       // painel/modal contextual". Ligar a prévia sem mostrá-la deixaria a
       // pessoa esperando por uma tela que já estava pronta e escondida.
       setPainel({ tipo: 'preview' })
+      setLayout(atual => proximoLayout({ ...atual, tarefaId: projectId }, { tipo: 'abrir' }))
       setAdmissionTicket(started.admission.ticket)
       setPreviewCodes([])
     })
@@ -702,10 +716,21 @@ export function App() {
     agora abre no painel contextual, ao lado da conversa, e fechar devolve a
     conversa com a rolagem e o rascunho onde estavam.
   */
-  const blocoDaPrevia = preview?.state === 'READY'
-    ? <section className="preview-card"><div className="preview-heading"><div><h2>{t.preview.title}</h2><p>{t.preview.localOnly}</p></div><PendingButton className="secondary compact" label={t.preview.stop} busyLabel={t.preview.stopBusy} action={stopPreview} /></div><p className="truth">{t.preview.notPublished}</p>{previewCodes.length === 0 ? null : <section className="preview-codes" aria-live="polite"><h3>{t.preview.accessCodes}</h3><p>{t.preview.accessCodesHelp}</p><ul>{previewCodes.map(item => <li key={`${item.email}-${item.expires_at}-${item.code}`}><strong>{item.email}</strong>: <code>{item.code}</code></li>)}</ul></section>}<iframe ref={previewFrame} title={t.preview.frameTitle} src={`${preview.url}/__dz23/admission`} sandbox="allow-scripts allow-forms allow-same-origin" referrerPolicy="no-referrer" /></section>
-    : preview !== null && ['FAILED', 'EXPIRED', 'STOPPED'].includes(preview.state) ? <p className="context-note">{t.preview.closed}</p>
-      : null
+  const blocoDaPrevia = <PainelDePrevia
+    leitura={{
+      previa: preview === null ? null : { state: preview.state, health: preview.health },
+      execucao: detalhes?.current_run == null ? null : { state: detalhes.current_run.state, stage: detalhes.current_run.stage },
+    }}
+    base={preview?.url ?? null}
+    entrada={preview === null ? null : `${preview.url}/__dz23/admission`}
+    refDoQuadro={previewFrame}
+    codigos={previewCodes}
+    modo={layout.modo}
+    viewport={layout.viewport}
+    aoExpandir={() => { setLayout(atual => proximoLayout(atual, { tipo: 'expandir' })) }}
+    aoRestaurar={() => { setLayout(atual => proximoLayout(atual, { tipo: 'restaurar' })) }}
+    aoTrocarViewport={viewport => { setLayout(atual => proximoLayout(atual, { tipo: 'viewport', viewport })) }}
+    aoEncerrar={() => { void stopPreview() }} />
 
   /*
     O DETALHAMENTO ANTIGO, inteiro, no painel.
@@ -772,7 +797,7 @@ export function App() {
           também oferecia o botão, e a mesma ação em dois lugares faz a pessoa
           procurar qual dos dois é o de verdade. */}
       {result?.state === 'INTERRUPTED' ? <PendingButton className="dz-acao-botao-secundario" label={t.creation.retry} busyLabel={t.creation.retryBusy} action={generate} /> : null}
-      {preview === null ? null : <button type="button" className="dz-acao-botao-secundario" onClick={() => setPainel({ tipo: 'preview' })}>{t.preview.title}</button>}
+      {preview === null ? null : <button type="button" className="dz-acao-botao-secundario" onClick={() => { setPainel({ tipo: 'preview' }); setLayout(atual => proximoLayout(atual, { tipo: 'abrir' })) }}>{t.preview.title}</button>}
       <button type="button" className="dz-acao-botao-secundario" onClick={() => setPainel({ tipo: 'uso' })}>{tarefaCopy.verUso}</button>
       <button type="button" className="dz-acao-botao-secundario" onClick={() => setPainel({ tipo: 'diagnostico' })}>{tarefaCopy.verDiagnostico}</button>
     </div>
@@ -820,7 +845,19 @@ export function App() {
         perguntar={perguntar}
         integracoes={integracoes}
         iniciais={iniciaisDaConta(sessionName)}
-        painel={painel} abrirPainel={setPainel} fecharPainel={() => setPainel(null)}
+        painel={painel} abrirPainel={setPainel}
+        fecharPainel={() => {
+          /*
+            FECHAR O PAINEL é só isto: some a visão. A prévia continua servida,
+            a construção continua correndo e a conversa continua onde estava —
+            e a garantia é estrutural, porque `proximoLayout` não recebe
+            nenhuma das duas.
+          */
+          setPainel(null)
+          setLayout(atual => proximoLayout(atual, { tipo: 'fechar' }))
+        }}
+        modoDoPainel={layout.modo} divisaoDoPainel={layout.divisao}
+        aoRedimensionarPainel={divisao => { setLayout(atual => proximoLayout(atual, { tipo: 'redimensionar', divisao })) }}
         conteudoDoPainel={conteudoDoPainel} acoesDoEstado={acoesDoEstado} />
       : <main className="dz-canvas-home">
         <section className="dz-home-conteudo">

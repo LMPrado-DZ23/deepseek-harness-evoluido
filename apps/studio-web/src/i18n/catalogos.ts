@@ -4,6 +4,9 @@ import esRail from './rail.es.json'
 import ptPreferencias from './preferencias.pt-BR.json'
 import enPreferencias from './preferencias.en.json'
 import esPreferencias from './preferencias.es.json'
+import ptPrevia from './previa.pt-BR.json'
+import enPrevia from './previa.en.json'
+import esPrevia from './previa.es.json'
 import { IDIOMA_PADRAO, IDIOMAS, type Idioma } from './idioma'
 
 /**
@@ -37,12 +40,13 @@ import { IDIOMA_PADRAO, IDIOMAS, type Idioma } from './idioma'
  */
 
 /** Um espaço de nomes traduzido, com os três idiomas. */
-export type EspacoDeNomes = 'rail' | 'preferencias'
+export type EspacoDeNomes = 'rail' | 'preferencias' | 'previa'
 
 /** A forma de um catálogo: o do português é a referência. */
 export interface Catalogos {
   readonly rail: typeof ptRail
   readonly preferencias: typeof ptPreferencias
+  readonly previa: typeof ptPrevia
 }
 
 /*
@@ -53,9 +57,9 @@ export interface Catalogos {
   botão. `gate:i18n` confere o resto — chaves a mais, interpolação e plural.
 */
 const REGISTRO: Readonly<Record<Idioma, Catalogos>> = {
-  'pt-BR': { rail: ptRail, preferencias: ptPreferencias },
-  en: { rail: enRail, preferencias: enPreferencias },
-  es: { rail: esRail, preferencias: esPreferencias },
+  'pt-BR': { rail: ptRail, preferencias: ptPreferencias, previa: ptPrevia },
+  en: { rail: enRail, preferencias: enPreferencias, previa: enPrevia },
+  es: { rail: esRail, preferencias: esPreferencias, previa: esPrevia },
 }
 
 /**
@@ -68,7 +72,7 @@ export function catalogosDe(idioma: Idioma): Catalogos {
 }
 
 /** Os espaços de nomes que já estão nos três idiomas. */
-export const ESPACOS_TRADUZIDOS: readonly EspacoDeNomes[] = ['rail', 'preferencias']
+export const ESPACOS_TRADUZIDOS: readonly EspacoDeNomes[] = ['rail', 'preferencias', 'previa']
 
 /**
  * A TELA de cada espaço de nomes traduzido, a partir de `apps/studio-web/src`.
@@ -87,6 +91,7 @@ export const ESPACOS_TRADUZIDOS: readonly EspacoDeNomes[] = ['rail', 'preferenci
 export const TELAS_TRADUZIDAS: Readonly<Record<EspacoDeNomes, readonly string[]>> = {
   rail: ['shell/Rail.tsx'],
   preferencias: ['preferencias/Preferencias.tsx'],
+  previa: ['previa/PainelDePrevia.tsx'],
 }
 
 /**
