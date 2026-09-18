@@ -65,6 +65,7 @@
     "gate:portability": "node scripts/check-portability.mjs --self-test",
     "gate:i18n": "node scripts/check-i18n.mjs",
     "gate:marca": "node scripts/check-marca.mjs",
+    "gate:bus-matriz": "node scripts/check-bus-matriz.mjs --self-test && node scripts/check-bus-matriz.mjs",
     "gate:vocabulary": "node scripts/check-vocabulary.mjs --self-test && node scripts/check-vocabulary.mjs",
     "gate:memory-map": "node scripts/check-memory-map.mjs --self-test && node scripts/check-memory-map.mjs",
     "gate:constitution": "node scripts/check-constitution.mjs --self-test && node scripts/check-constitution.mjs",

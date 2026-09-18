@@ -677,6 +677,15 @@ produto existe para não fazer.
     O atalho **não é uma segunda porta**: passa pela mesma condição do botão,
     inclusive o bloqueio de privacidade.
 
+52. **EMP-CORR — a colisão de rótulo com a matriz canônica, corrigida.**
+    Três fatias do Modo Empresa saíram rotuladas `BUS-01..03`. Na matriz,
+    `BUS-02` é pesquisa de mercado e `BUS-03` é oferta/catálogo/preço — quem
+    lesse os dois lados concluiria que fecharam, e as duas continuam **sem uma
+    linha de código**. A matriz **não** foi renumerada; o livro mestre passou a
+    usar identificadores locais (`EMP-NN`) e
+    `docs/status/BUS_CORRESPONDENCIA.md` diz por significado o que cada entrega
+    toca e o que falta. `gate:bus-matriz` (o 28º portão) impede a volta.
+
 51. **BR-F01..BR-F08 — a marca passou a ser FRIGG, e passou a ter UMA fonte.**
     A decisão `FRIGG-MARCA-20260917-R1` do titular trocou a marca visível. O
     nome estava escrito à mão em **onze lugares** que nenhum teste comparava

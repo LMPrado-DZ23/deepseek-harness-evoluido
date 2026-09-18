@@ -130,6 +130,11 @@ jobs:
           # mudando por branding fariam o navegador tratar a PWA ja instalada
           # como outro aplicativo.
           pnpm gate:marca
+          # Obrigacao canonica NAO fecha por coincidencia de numero. Tres
+          # fatias sairam rotuladas BUS-01..03 e duas dessas obrigacoes
+          # significam outra coisa na matriz; quem lesse os dois lados
+          # concluiria que fecharam, e elas nao tem uma linha de codigo.
+          pnpm gate:bus-matriz
           pnpm gate:portability
           pnpm gate:domain-scopes
           pnpm gate:domain-routes
