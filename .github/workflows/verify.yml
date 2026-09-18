@@ -1,4 +1,4 @@
-name: Verify DZ23 STUDIO
+name: Verify FRIGG
 
 on:
   pull_request:
@@ -100,7 +100,7 @@ jobs:
           pnpm --dir third_party/deepseek-harness install --frozen-lockfile
           pnpm --dir third_party/deepseek-harness build:official
 
-      - name: Install and build Studio
+      - name: Install and build the web interface
         run: |
           pnpm install --frozen-lockfile --filter '@dz23-studio/*...'
           pnpm build
@@ -212,7 +212,7 @@ jobs:
           # passaria — que e o modo de falhar que ela existe para impedir.
           pnpm gate:constitution
           # P-07: o conjunto de briefs leigos, medido no ponto que dá para medir
-          # sem LLM e sem construtor — o Studio entendeu o que a pessoa
+          # sem LLM e sem construtor — o FRIGG entendeu o que a pessoa
           # escreveu? Dois conjuntos: um onde o vocabulário foi ajustado, e um
           # CEGO, escrito depois e nunca usado para ajustar. O portão reprova
           # por ERRO COM CONFIANÇA no cego, e não por acerto: exigir acerto às
@@ -258,14 +258,14 @@ jobs:
           path: sbom.cdx.json
           if-no-files-found: error
 
-      - name: Studio web interface suite
+      - name: Web interface suite
         # A tela por onde a pessoa autoriza uma ação sensível tem vitest
         # próprio: o da raiz não alcança `apps/`, e sem esta etapa a peça
         # central do portão humano ficava sem cobertura na CI.
         working-directory: apps/studio-web
         run: pnpm exec vitest run
 
-      - name: Studio browser suite
+      - name: Browser suite
         # O Playwright NUNCA rodou aqui, e por isso duas provas de navegador
         # ficaram vermelhas em silêncio: a jornada principal desde 575ccc0 e a
         # rotação de cookie da prévia. Um teste de navegador que ninguém executa

@@ -1,2 +1,9 @@
-# O DZ23 STUDIO não tem cobrança, assinatura, créditos nem paywall (ADR-009).
-# Este arquivo existe para dizer isso, e não para pedir dinheiro.
+# O FRIGG não tem cobrança, assinatura, créditos nem paywall: o que a instalação
+# local faz, ela faz sem conta e sem apoio (ADR-054, que substituiu a proibição
+# de COBRANÇA da ADR-009 pela proibição de PEDÁGIO).
+#
+# Este arquivo existe para dizer isso e para apontar o caminho de quem QUISER
+# doar — nunca para condicionar nada. Nenhum dos serviços de patrocínio que o
+# GitHub lista está configurado: o único caminho é o PIX, que mora no README com
+# o QR e a chave copiável, e cuja fonte é `docs/pix-payload.txt` (`gate:pix`).
+custom: ['https://github.com/LMPrado-DZ23/deepseek-harness-evoluido#apoiar-o-projeto']

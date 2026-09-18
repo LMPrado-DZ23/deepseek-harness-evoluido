@@ -45,6 +45,12 @@ foram junto, porque nada as referenciava desde que o README passou a ler
 `apps/studio-web/capturas/`. A **descrição** e os **tópicos** do repositório no
 GitHub foram atualizados e conferidos de volta (`gh repo view`).
 
+**Duas superfícies do GitHub foram corrigidas em seguida** (`BR-F11`): o nome
+do fluxo de CI ainda dizia `Verify DZ23 STUDIO` — apareceu na saída de
+`gh run list`, enquanto eu conferia a CI da fatia anterior — e o `.github/FUNDING.yml`
+negava pedir dinheiro citando uma cláusula que a ADR-054 já tinha substituído.
+`gate:marca` passou a olhar o valor de cada `name:` do fluxo.
+
 **O que continua fora do repositório:** a **imagem social**. O arquivo existe e
 tem portão (`docs/images/social-card.png`, gerado por
 `scripts/build-social-card.mjs`), mas o GitHub não a expõe na API REST nem no

@@ -238,6 +238,18 @@ for (const icone of manifesto.icons) {
 const APRESENTACAO = [
   'README.md', 'CLAUDE.md', 'CONTRIBUTING.md', 'SECURITY.md', 'TRADEMARKS.md',
   'docs/PRODUCT_CONSTITUTION.md',
+  /*
+    Os dois arquivos que o GITHUB lê e exibe sozinho, sem ninguém abrir.
+
+    O nome do fluxo de CI aparece em toda aba Actions e em todo check de pull
+    request; o `FUNDING.yml` vira o botão "Sponsor" no topo da página. Eles
+    ficaram com a marca anterior por cinco entregas de marca inteiras, e a razão
+    é a mesma de sempre: eu conferi o que abro, e não o que a plataforma mostra
+    por mim. Os arquivos de `deploy/` NÃO entram nesta lista — ali `Dz23` é
+    nome de módulo, de serviço e de segredo, ou seja, IDENTIDADE de instalação,
+    e trocá-lo quebraria quem já instalou.
+  */
+  '.github/workflows/verify.yml', '.github/FUNDING.yml',
   ...readdirSync(resolve(raiz, 'docs/guides')).filter(nome => nome.endsWith('.md')).map(nome => join('docs/guides', nome)),
 ]
 
@@ -267,6 +279,27 @@ for (const caminho of APRESENTACAO) {
     // Dispensa que sobra é dispensa que ninguém conferiu: ela passaria a
     // cobrir uma citação NOVA no dia em que alguém escrevesse uma.
     reprove(caminho, `tem ${permitidas} citação histórica declarada e só ${quantas} existe: a dispensa sobrando cobriria uma citação nova`)
+  }
+}
+
+/*
+  Os RÓTULOS que a plataforma exibe sozinha.
+
+  `MARCA_ANTERIOR` acima procura só o nome por extenso, porque na prosa o nome
+  sozinho aparece legitimamente — "o Studio de então", um caminho, um trecho
+  citado. Num `name:` de fluxo, não: ele é um rótulo curto que aparece na aba
+  Actions e em todo check de pull request, e `Verify Studio` é exatamente a
+  meia-renomeação que a busca-e-substitui apressada produz. Por isso a régua
+  aqui é a dos catálogos de tradução, e não a dos documentos — e ela se aplica
+  ao VALOR do `name:`, não ao arquivo inteiro, que tem comentário e prosa.
+*/
+for (const caminho of ['.github/workflows/verify.yml']) {
+  const conteudo = readFileSync(resolve(raiz, caminho), 'utf8')
+  for (const achado of conteudo.matchAll(/^\s*-?\s*name:\s*(.+)$/gmu)) {
+    for (const { padrao, motivo } of CONCORRENTES) {
+      const quantos = [...achado[1].matchAll(padrao)].length
+      if (quantos > 0) reprove(caminho, `o rótulo ${JSON.stringify(achado[1].trim())} traz ${quantos}× ${motivo}`)
+    }
   }
 }
 
