@@ -168,6 +168,11 @@ jobs:
           # O lock de release ficava defasado em silêncio: o portão só conferia
           # topologia, e quatro plugins simplesmente não entravam na imagem.
           pnpm gate:image-lock
+          # `ref={a ?? b}` desliga o ref de dentro sempre que o de fora chega,
+          # e o produto montado sempre passa o de fora. O defeito veio de
+          # revisão externa, foi reproduzido em navegador e era invisível: o
+          # quadro desenhava e duas coisas paravam caladas.
+          pnpm gate:refs
           # O ledger e a fonte unica de "o que falta". Sem este portao, um
           # requisito aceito pode sumir ou virar STABLE sem prova.
           pnpm gate:requirements-ledger

@@ -84,6 +84,7 @@
     "gate:lib-freshness": "node scripts/check-lib-freshness.mjs --self-test && node scripts/check-lib-freshness.mjs",
     "gate:image-lock": "node scripts/check-image-lock.mjs",
     "gate:decision-record": "node scripts/check-decision-record.mjs --self-test && node scripts/check-decision-record.mjs",
+    "gate:refs": "node scripts/check-refs.mjs --self-test && node scripts/check-refs.mjs",
     "gate:requirements-ledger": "node scripts/check-requirements-ledger.mjs --self-test && node scripts/check-requirements-ledger.mjs",
     "gate:secrets": "node scripts/check-secrets.mjs --self-test && node scripts/check-secrets.mjs",
     "gate:no-caveman": "node scripts/check-no-caveman.mjs --self-test && node scripts/check-no-caveman.mjs",

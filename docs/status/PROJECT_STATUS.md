@@ -96,9 +96,13 @@ ter peso nenhum (a sabotagem `S55` sobrevivia porque toda asserção saía dela
 mesma), estava ERRADA: trazia `/studio`, que o servidor não atende, e não trazia
 `/api/studio/identity`, que ele atende em todo pedido.
 
-**As próximas são, nesta ordem:** `REV-CAN-B` (varrer o repositório atrás do
-mesmo padrão), `REV-CAN-JORNADA` (a primeira jornada real integrada, que fecha
-`EB-04`) e `PLAN-01`.
+**`REV-CAN-B` está entregue:** 716 arquivos varridos, ZERO outras ocorrências do
+padrão. O que fica não é o resultado da varredura — é o `gate:refs`, porque zero
+hoje não é zero amanhã e o defeito é invisível: nada quebra, duas coisas param
+caladas.
+
+**As próximas são, nesta ordem:** `REV-CAN-JORNADA` (a primeira jornada real
+integrada, que fecha `EB-04`) e `PLAN-01`.
 
 ## DIRETIVA DO TITULAR — 18/09/2026: REAPROVEITAR ANTES DE REIMPLEMENTAR
 
