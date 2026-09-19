@@ -50,7 +50,6 @@ async function fixture(options: {
   readonly sharedHarnessClientAllowed?: boolean
   readonly releaseFails?: boolean
   readonly workspaceRoot?: string
-  readonly pessoal?: boolean
 } = {}) {
   const binds: string[] = []
   const releases: string[] = []
@@ -71,7 +70,6 @@ async function fixture(options: {
         if (options.releaseFails === true) throw new Error('auditoria indisponível')
       },
       isSharedHarnessClientAllowed: () => options.sharedHarnessClientAllowed !== false,
-      ...(options.pessoal === undefined ? {} : { ehSessaoPessoal: () => options.pessoal === true }),
     },
     tenancy: {
       authorizationFor: () => options.authorization === false ? undefined : ({
@@ -243,22 +241,3 @@ describe('a pasta de trabalho PESSOAL: o agente geral sem repositório configura
   })
 })
 
-describe('o modo PESSOAL: a sessão sintética não recebe vínculo, e a conversa abre mesmo assim', () => {
-  it('abre e reaproveita sem chamar bindHarnessSession', async () => {
-    const raiz = await mkdtemp(join(tmpdir(), 'frigg-espacos-')); roots.push(raiz)
-    const f = await fixture({ repositories: [], workspaceRoot: raiz, pessoal: true })
-    const primeira = await f.launcher.launch(identitySession())
-    f.inspect.mockResolvedValue({ meta: { cwd: await realpath(pastaDoEspaco(raiz, 'org-1', 'tenant-1')), agentPreset: ASSISTANT_AGENT_PRESET } })
-    const segunda = await f.launcher.launch(identitySession())
-    expect(primeira.reused).toBe(false)
-    expect(segunda).toMatchObject({ session_id: primeira.session_id, reused: true })
-    expect(f.binds).toEqual([])
-  })
-
-  it('fora do modo pessoal, o vínculo continua obrigatório', async () => {
-    const raiz = await mkdtemp(join(tmpdir(), 'frigg-espacos-')); roots.push(raiz)
-    const f = await fixture({ repositories: [], workspaceRoot: raiz, pessoal: false })
-    await f.launcher.launch(identitySession())
-    expect(f.binds).toEqual(['assistant-new'])
-  })
-})

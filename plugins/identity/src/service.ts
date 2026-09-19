@@ -682,8 +682,18 @@ export class StudioIdentityService {
     })))
   }
 
+  /**
+   * As conversas da sessão PESSOAL, em memória: ela é sintética, não é gravada
+   * e não pode carregar `harness_session_ids`. Sem isto a conversa governada
+   * nunca abria na instalação pessoal — medido em 19/09/2026: "Sessão
+   * inválida" ao abrir, e depois "Conversa não encontrada" a cada mensagem.
+   * Reiniciar o FRIGG esquece os vínculos; as conversas continuam no Harness.
+   */
+  readonly #conversasPessoais = new Set<string>()
+
   async bindHarnessSession(session: SessionRecord, harnessSessionId: string): Promise<void> {
     if (harnessSessionId.trim() === '') throw new IdentityError('invalid', t('auth.invalidAgentSession'))
+    if (this.ehSessaoPessoal(session)) { this.#conversasPessoais.add(harnessSessionId); return }
     await this.#mutex.run('harness-session-bindings', () => this.#mutex.run(`session:${session.session_id}`, async () => {
       const sessions = this.#repository.sessions()
       const current = sessions.find(candidate => candidate.session_id === session.session_id)
@@ -722,6 +732,7 @@ export class StudioIdentityService {
    */
   async releaseHarnessSession(session: SessionRecord, harnessSessionId: string, reason: string): Promise<void> {
     if (harnessSessionId.trim() === '') throw new IdentityError('invalid', t('auth.invalidAgentSession'))
+    if (this.ehSessaoPessoal(session)) { this.#conversasPessoais.delete(harnessSessionId); return }
     await this.#mutex.run('harness-session-bindings', () => this.#mutex.run(`session:${session.session_id}`, async () => {
       const current = this.#repository.sessions().find(candidate => candidate.session_id === session.session_id)
       if (current === undefined) throw new IdentityError('invalid', t('auth.invalidSession'))
@@ -747,6 +758,7 @@ export class StudioIdentityService {
 
   ownsHarnessSession(session: SessionRecord, harnessSessionId: string): boolean {
     if (harnessSessionId.trim() === '') return false
+    if (this.ehSessaoPessoal(session)) return this.#conversasPessoais.has(harnessSessionId)
     const bindings = this.#repository.sessions().filter(candidate => candidate.harness_session_ids.includes(harnessSessionId))
     if (bindings.length !== 1 || bindings[0]?.session_id !== session.session_id) return false
     try {

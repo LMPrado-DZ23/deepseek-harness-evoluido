@@ -909,6 +909,20 @@ describe('a sessao sintetica do modo pessoal', () => {
     service.setBindHost('0.0.0.0')
     expect(service.ehSessaoPessoal(sessao)).toBe(false)
   })
+
+  it('a sessao pessoal vincula e reconhece a PROPRIA conversa, em memoria', async () => {
+    const { service } = makeHarness()
+    service.setBindHost('127.0.0.1')
+    const sessao = service.personalSession()!
+    expect(service.ownsHarnessSession(sessao, 'conversa-1')).toBe(false)
+    await service.bindHarnessSession(sessao, 'conversa-1')
+    expect(service.ownsHarnessSession(sessao, 'conversa-1')).toBe(true)
+    expect(service.ownsHarnessSession(sessao, 'conversa-2')).toBe(false)
+    // Outra sessao (gravada) nao herda a conversa pessoal.
+    expect(service.ownsHarnessSession({ ...sessao, token_hash: 'a'.repeat(64) }, 'conversa-1')).toBe(false)
+    await service.releaseHarnessSession(sessao, 'conversa-1', 'fim')
+    expect(service.ownsHarnessSession(sessao, 'conversa-1')).toBe(false)
+  })
 })
 
 describe('a porta pessoal fecha quando existe gente', () => {

@@ -44,7 +44,7 @@ export class AssistantSessionLaunchError extends Error {
 }
 
 export interface AssistantSessionLauncherOptions {
-  readonly identity: Pick<StudioIdentityService, 'bindHarnessSession' | 'isSharedHarnessClientAllowed' | 'releaseHarnessSession'> & Partial<Pick<StudioIdentityService, 'ehSessaoPessoal'>>
+  readonly identity: Pick<StudioIdentityService, 'bindHarnessSession' | 'isSharedHarnessClientAllowed' | 'releaseHarnessSession'>
   readonly tenancy: Pick<StudioTenancyService, 'authorizationFor'>
   readonly sessions: AssistantSessionControllerPort
   readonly repositories: readonly AssistantRepositoryLaunchConfig[]
@@ -120,7 +120,7 @@ export class AssistantSessionLauncher {
 
     const existing = await this.#existingSession(identitySession, cwd)
     if (existing !== undefined) {
-      await this.#vincular(identitySession, existing)
+      await this.options.identity.bindHarnessSession(identitySession, existing)
       return { session_id: existing, reused: true, preset: ASSISTANT_AGENT_PRESET }
     }
 
@@ -143,7 +143,7 @@ export class AssistantSessionLauncher {
         t('assistant.presetConflict'),
       )
     }
-    await this.#vincular(identitySession, String(created.sessionId))
+    await this.options.identity.bindHarnessSession(identitySession, String(created.sessionId))
     this.#activeByIdentitySession.set(identitySession.session_id, String(created.sessionId))
     return {
       session_id: String(created.sessionId),
@@ -165,16 +165,6 @@ export class AssistantSessionLauncher {
     } catch (error) {
       this.options.reportFailure?.('inspect', error)
     }
-  }
-
-  /**
-   * Vincula a conversa à sessão da pessoa — salvo na sessão SINTÉTICA do modo
-   * pessoal, que não é gravada e não pode receber vínculo (ver
-   * `ehSessaoPessoal`). Lá, quem lembra a conversa é este processo.
-   */
-  async #vincular(identitySession: SessionRecord, harnessSessionId: string): Promise<void> {
-    if (this.options.identity.ehSessaoPessoal?.(identitySession) === true) return
-    await this.options.identity.bindHarnessSession(identitySession, harnessSessionId)
   }
 
   /** A pasta do espaço, criada na primeira vez; `undefined` sem raiz configurada. */
