@@ -83,19 +83,36 @@ describe('o modelo padrão da conversa (19/09/2026: sem chave, a conversa parava
   })
 })
 
-describe('os modelos locais declarados: o das criações e o do agente', () => {
-  const inicio = perfil.indexOf('      ollama:')
+describe('as rotas declaradas no perfil', () => {
+  const inicio = perfil.indexOf('    providers: !!js >-')
   const trecho = perfil.slice(inicio, perfil.indexOf('\n- ', inicio))
-  const expressao = /models: !!js >-\n((?: {10}.*\n)+)/u.exec(trecho)![1]!.split('\n').map(linha => linha.trim()).join(' ')
-  const avaliar = (env: Record<string, string>) => new Function('process', `return (${expressao})`)({ env }) as { id: string }[]
+  const expressao = /providers: !!js >-\n((?: {6}.*\n?)+)/u.exec(trecho)![1]!.split('\n').map(linha => linha.trim()).join(' ')
+  type Rota = { apiKeyEnv: string, baseURL: string, models: { id: string }[] }
+  const avaliar = (env: Record<string, string>) => new Function('process', `return (${expressao})`)({ env }) as Record<string, Rota>
+  const modelosLocais = (env: Record<string, string>) => avaliar(env).ollama!.models.map(m => m.id)
 
   it('sem modelo do agente, só o das criações', () => {
-    expect(avaliar({ DZ23_OLLAMA_MODEL: 'qwen2.5-coder:7b' }).map(m => m.id)).toEqual(['qwen2.5-coder:7b'])
+    expect(modelosLocais({ DZ23_OLLAMA_MODEL: 'qwen2.5-coder:7b' })).toEqual(['qwen2.5-coder:7b'])
   })
 
   it('com modelo do agente, os dois, sem repetir', () => {
-    expect(avaliar({ DZ23_OLLAMA_MODEL: 'qwen2.5-coder:7b', DZ23_AGENT_MODEL: 'frigg-qwen3' }).map(m => m.id)).toEqual(['qwen2.5-coder:7b', 'frigg-qwen3'])
-    expect(avaliar({ DZ23_OLLAMA_MODEL: 'x', DZ23_AGENT_MODEL: 'x' }).map(m => m.id)).toEqual(['x'])
+    expect(modelosLocais({ DZ23_OLLAMA_MODEL: 'qwen2.5-coder:7b', DZ23_AGENT_MODEL: 'frigg-qwen3' })).toEqual(['qwen2.5-coder:7b', 'frigg-qwen3'])
+    expect(modelosLocais({ DZ23_OLLAMA_MODEL: 'x', DZ23_AGENT_MODEL: 'x' })).toEqual(['x'])
+  })
+
+  it('o modelo do agente só entra na rota local quando o agente usa a local', () => {
+    expect(modelosLocais({ DZ23_OLLAMA_MODEL: 'x', DZ23_AGENT_PROVIDER: 'chave-gemini', DZ23_AGENT_MODEL: 'gemini-2.5-flash' })).toEqual(['x'])
+    expect(modelosLocais({ DZ23_OLLAMA_MODEL: 'x', DZ23_AGENT_PROVIDER: 'ollama', DZ23_AGENT_MODEL: 'y' })).toEqual(['x', 'y'])
+  })
+
+  it('uma rota por chave só existe quando a chave existe, e nomeia a variável e não o valor', () => {
+    expect(Object.keys(avaliar({})).sort()).toEqual(['ollama', 'omniroute'])
+    expect(Object.keys(avaliar({ MISTRAL_API_KEY: '   ' })).sort()).toEqual(['ollama', 'omniroute'])
+    const com = avaliar({ MISTRAL_API_KEY: 'segredo-m', GROQ_API_KEY: 'segredo-g', GEMINI_API_KEY: 'segredo-x' })
+    expect(Object.keys(com).sort()).toEqual(['chave-gemini', 'chave-groq', 'chave-mistral', 'ollama', 'omniroute'])
+    expect(com['chave-mistral']).toMatchObject({ apiKeyEnv: 'MISTRAL_API_KEY', baseURL: 'https://api.mistral.ai/v1' })
+    expect(com['chave-mistral']!.models[0]!.id).toBe('codestral-latest')
+    expect(JSON.stringify(com)).not.toContain('segredo-')
   })
 })
 

@@ -70,40 +70,46 @@
       name: '@deepseek-ai/dsh-schedule'
 
 # The official DeepSeek route is already supplied by dsh-base under its
-# physical id `deepseek-official`. These two declared OpenAI-compatible routes
-# add no second gateway and resolve every credential by reference.
+# physical id `deepseek-official`. The routes below are declared
+# OpenAI-compatible routes: no second gateway, every credential by reference.
+#
+# ROTAS POR CHAVE (`chave-*`, pedido do titular em 19/09/2026: "usa as API").
+# Cada uma só é DECLARADA quando a variável da chave existe no ambiente — uma
+# rota sem chave falharia em toda criação e poluiria a lista de conexões com
+# uma linha que ninguém pode consertar pela tela. O nome da variável aparece
+# uma vez só, aqui; o valor nunca passa por este arquivo. O primeiro modelo de
+# cada rota é o que as criações pedem (`modelosPorRota`).
 - id: llm-pi-ai
   config:
-    providers:
-      omniroute:
-        displayName: OmniRoute (externo opcional)
-        api: openai-completions
-        baseURL: !!js process.env.DZ23_OMNIROUTE_BASE_URL ?? 'http://127.0.0.1:20128/v1'
-        apiKeyEnv: DZ23_OMNIROUTE_KEY
-        retryPolicy:
-          mode: normal
-          maxRetries: 0
-        models:
-          - id: auto
-            name: OmniRoute Auto
-            contextWindow: 262144
-            maxTokens: 32768
-      ollama:
-        displayName: Ollama local
-        api: openai-completions
-        baseURL: !!js process.env.DZ23_OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434/v1'
-        apiKeyEnv: DZ23_OLLAMA_PLACEHOLDER
-        retryPolicy:
-          mode: normal
-          maxRetries: 0
-        # O modelo das CRIAÇÕES (`DZ23_OLLAMA_MODEL`) e, quando é outro, o do
-        # AGENTE GERAL (`DZ23_AGENT_MODEL`): o agente precisa de um modelo bom
-        # em chamar ferramentas, e o qwen2.5-coder:7b não é (medido em
-        # 19/09/2026: escreveu a chamada como texto em vez de fazê-la).
-        models: !!js >-
-          [process.env.DZ23_OLLAMA_MODEL ?? 'qwen3-coder', process.env.DZ23_AGENT_MODEL]
+    providers: !!js >-
+      Object.assign({
+        omniroute: {
+          displayName: 'OmniRoute (externo opcional)', api: 'openai-completions',
+          baseURL: process.env.DZ23_OMNIROUTE_BASE_URL ?? 'http://127.0.0.1:20128/v1',
+          apiKeyEnv: 'DZ23_OMNIROUTE_KEY', retryPolicy: { mode: 'normal', maxRetries: 0 },
+          models: [{ id: 'auto', name: 'OmniRoute Auto', contextWindow: 262144, maxTokens: 32768 }],
+        },
+        ollama: {
+          displayName: 'Ollama local', api: 'openai-completions',
+          baseURL: process.env.DZ23_OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434/v1',
+          apiKeyEnv: 'DZ23_OLLAMA_PLACEHOLDER', retryPolicy: { mode: 'normal', maxRetries: 0 },
+          models: [process.env.DZ23_OLLAMA_MODEL ?? 'qwen3-coder',
+              (process.env.DZ23_AGENT_PROVIDER ?? 'ollama') === 'ollama' ? process.env.DZ23_AGENT_MODEL : undefined]
             .filter((id, i, all) => typeof id === 'string' && id !== '' && all.indexOf(id) === i)
-            .map((id, i) => ({ id, name: i === 0 ? 'Modelo local configurado' : 'Modelo local do agente', contextWindow: 131072, maxTokens: 32768 }))
+            .map((id, i) => ({ id, name: i === 0 ? 'Modelo local configurado' : 'Modelo local do agente', contextWindow: 131072, maxTokens: 32768 })),
+        },
+      }, Object.fromEntries([
+        ['chave-mistral', 'Mistral (chave)', 'https://api.mistral.ai/v1', 'MISTRAL_API_KEY',
+          [['codestral-latest', 'Codestral', 256000, 16384], ['mistral-small-latest', 'Mistral Small', 131072, 16384]]],
+        ['chave-groq', 'Groq (chave)', 'https://api.groq.com/openai/v1', 'GROQ_API_KEY',
+          [['openai/gpt-oss-120b', 'GPT-OSS 120B', 131072, 32768]]],
+        ['chave-gemini', 'Google Gemini (chave)', 'https://generativelanguage.googleapis.com/v1beta/openai', 'GEMINI_API_KEY',
+          [['gemini-2.5-flash', 'Gemini 2.5 Flash', 1048576, 65536]]],
+      ].filter(([, , , chave]) => (process.env[chave] ?? '').trim() !== '')
+        .map(([id, displayName, baseURL, apiKeyEnv, modelos]) => [id, {
+          displayName, api: 'openai-completions', baseURL, apiKeyEnv, retryPolicy: { mode: 'normal', maxRetries: 0 },
+          models: modelos.map(([mid, name, contextWindow, maxTokens]) => ({ id: mid, name, contextWindow, maxTokens })),
+        }])))
 
 - insert:
     # Providers are registered but never exposed through the generic

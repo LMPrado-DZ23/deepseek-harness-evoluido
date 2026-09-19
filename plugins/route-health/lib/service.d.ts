@@ -127,11 +127,19 @@ export declare const ROTA_LOCAL = "ollama";
 /** O prefixo das rotas da conexão pela linha de comando (`@dz23-studio/llm-cli`). */
 export declare const PREFIXO_DE_LINHA = "cli-";
 /**
+ * O prefixo das rotas POR CHAVE declaradas no perfil (`chave-mistral`,
+ * `chave-groq`, `chave-gemini`). O perfil só declara uma delas quando a chave
+ * existe no ambiente, então estar registrada já quer dizer "tem chave".
+ */
+export declare const PREFIXO_DE_CHAVE = "chave-";
+/**
  * As rotas que o serviço considera, na ordem em que a primeira saudável ganha.
  *
  * A IA local vem primeiro (não cobra e não manda dado para fora). As
  * ferramentas de linha de comando vêm em seguida, antes das rotas por chave:
- * quem instalou uma delas já paga a assinatura, e a chave é o gasto novo. Só
+ * quem instalou uma delas já paga a assinatura, e a chave é o gasto novo. As
+ * por chave declaradas no perfil (`chave-*`) vêm antes das duas de sempre:
+ * elas só existem quando a pessoa deu a chave. Só
  * entram as que o adaptador REGISTROU — uma ferramenta que não está instalada
  * não é rota que caiu.
  * @param registradas - as rotas que o runtime de modelos conhece.

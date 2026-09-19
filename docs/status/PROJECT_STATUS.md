@@ -18,6 +18,23 @@
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c` (zero diff, `gate:upstream-pin` prova)
 - `atualizado_em`: 2026-09-19
 
+## IA POR CHAVE NO COMPUTADOR DO TITULAR — 19/09/2026, 20h15 (LLM-CHAVE-01)
+
+O titular mandou usar as chaves de API dele. O WSL2 não sai para a internet
+(o adaptador "Topaz Loopback" do módulo bancário quebra o NAT), e mexer em
+firewall ou no Topaz está fora de questão. A saída é a **ponte**
+(`scripts/ponte/`): escuta só no loopback do WSL, o lado Windows disca para
+fora, só uma lista fechada de provedores e só a porta 443. Medido pela ponte:
+Mistral codestral, Groq e Gemini respondem; a DeepSeek responde 402 (conta sem
+saldo). As rotas `chave-mistral`, `chave-groq` e `chave-gemini` só existem
+quando a chave está em `~/.frigg/segredos.env` (600). O agente geral passa a
+usar o Gemini quando a chave existe. **O titular deve trocar as chaves**: elas
+foram coladas na conversa.
+
+Scripts novos no Downloads: `frigg-ponte.sh` (lado WSL), `frigg-ponte-windows.ps1`
+(lado Windows), `frigg-segredos.sh` (monta o arquivo de chaves sem imprimir
+valor), `frigg-ponte-teste.sh` e `frigg-ponte-chat.sh` (provas).
+
 ## ONDE A JORNADA DO APLICATIVO PAROU — 19/09/2026, 19h45 (horário de Brasília)
 
 Contador de copos, projeto `0709b65c…`, qwen2.5-coder:7b no WSL2 do titular:

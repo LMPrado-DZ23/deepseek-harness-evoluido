@@ -40,4 +40,32 @@ describe('modelosPorRota', () => {
       ollama: 'm', omniroute: 'deepseek-v3.2', 'deepseek-official': 'deepseek-chat', 'cli-claude': 'padrao',
     })
   })
+
+  it('as rotas por chave usam o primeiro modelo que o perfil declarou; sem modelo, ficam de fora', async () => {
+    const { modelosPorRota } = await import('../src/index.ts')
+    const modelos = [
+      { provider: 'ollama', id: 'x' }, { provider: 'chave-mistral', id: 'codestral-latest' },
+      { provider: 'chave-mistral', id: 'outro' }, { provider: 'chave-groq', id: 'openai/gpt-oss-120b' },
+    ]
+    expect(modelosPorRota({}, ['ollama', 'chave-mistral', 'chave-groq', 'chave-vazia'], modelos)).toEqual({
+      ollama: 'qwen2.5-coder:7b', omniroute: 'deepseek-v3.2', 'deepseek-official': 'deepseek-chat',
+      'chave-mistral': 'codestral-latest', 'chave-groq': 'openai/gpt-oss-120b',
+    })
+  })
+})
+
+describe('modelosDasRotasPorChave', () => {
+  it('lê só as rotas por chave, e uma que falha fica sem modelo', async () => {
+    const { modelosDasRotasPorChave } = await import('../src/index.ts')
+    const pedidas: string[] = []
+    const llm = {
+      async listModels(rota: string) {
+        pedidas.push(rota)
+        if (rota === 'chave-quebrada') throw new Error('fora do ar')
+        return [{ provider: rota, id: `${rota}-m` }]
+      },
+    }
+    expect(await modelosDasRotasPorChave(llm, ['ollama', 'chave-a', 'chave-quebrada', 'cli-x'])).toEqual([{ provider: 'chave-a', id: 'chave-a-m' }])
+    expect(pedidas).toEqual(['chave-a', 'chave-quebrada'])
+  })
 })

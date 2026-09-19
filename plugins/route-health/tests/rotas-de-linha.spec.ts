@@ -7,6 +7,11 @@ describe('as rotas da linha de comando entram na escolha', () => {
       .toEqual(['ollama', 'cli-claude', 'cli-qwen', 'omniroute', 'deepseek-official'])
   })
 
+  it('as por chave declaradas vêm depois das de linha e antes das de sempre', () => {
+    expect(rotasDoServico(new Set(['chave-mistral', 'cli-qwen', 'chave-gemini', 'ollama'])))
+      .toEqual(['ollama', 'cli-qwen', 'chave-gemini', 'chave-mistral', 'omniroute', 'deepseek-official'])
+  })
+
   it('sem ferramenta instalada, a lista é a de sempre', () => {
     expect(rotasDoServico(new Set())).toEqual(['ollama', 'omniroute', 'deepseek-official'])
   })

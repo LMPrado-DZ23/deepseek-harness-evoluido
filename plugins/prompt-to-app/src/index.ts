@@ -5,7 +5,7 @@ import type { JobId, JobStart } from '@deepseek-ai/dsh-jobs'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { Domain } from '@deepseek-ai/dsh-storage-domain'
 import type {} from '@dz23-studio/identity'
-import { PREFIXO_DE_LINHA, ROTA_LOCAL } from '@dz23-studio/route-health'
+import { PREFIXO_DE_CHAVE, PREFIXO_DE_LINHA, ROTA_LOCAL } from '@dz23-studio/route-health'
 import type {} from '@dz23-studio/tenancy'
 import { PRODUCTION_BUILDER_ROOT_POLICY, builderRuntimeRegistryPath, type BuilderSupervisorRootPolicy } from '@dz23-studio/builder-supervisor'
 import { mkdir, readFile, statfs } from 'node:fs/promises'
@@ -122,14 +122,43 @@ export function modeloLocal(ambiente: Readonly<Record<string, string | undefined
 
 /**
  * O modelo de cada rota. As rotas da linha de comando usam o modelo que a
- * própria ferramenta já usa (`padrao`): o FRIGG não escolhe por ela.
+ * própria ferramenta já usa (`padrao`): o FRIGG não escolhe por ela. As rotas
+ * por chave (`chave-*`) usam o PRIMEIRO modelo que o perfil declarou para
+ * elas — o perfil é o único lugar onde esse nome mora; uma rota por chave sem
+ * modelo declarado fica de fora, em vez de pedir um nome inventado.
  * @param ambiente - o ambiente do processo.
  * @param rotas - as rotas que o runtime de modelos conhece.
+ * @param modelos - os modelos que o runtime conhece, com a rota de cada um.
  * @returns rota → modelo.
  */
-export function modelosPorRota(ambiente: Readonly<Record<string, string | undefined>>, rotas: readonly string[]): Readonly<Record<string, string>> {
+export function modelosPorRota(
+  ambiente: Readonly<Record<string, string | undefined>>,
+  rotas: readonly string[],
+  modelos: readonly { readonly provider: string, readonly id: string }[] = [],
+): Readonly<Record<string, string>> {
   const deLinha = rotas.filter(rota => rota.startsWith(PREFIXO_DE_LINHA)).map(rota => [rota, 'padrao'] as const)
-  return { ollama: modeloLocal(ambiente), omniroute: 'deepseek-v3.2', 'deepseek-official': 'deepseek-chat', ...Object.fromEntries(deLinha) }
+  const deChave = rotas.filter(rota => rota.startsWith(PREFIXO_DE_CHAVE))
+    .flatMap(rota => { const primeiro = modelos.find(modelo => modelo.provider === rota); return primeiro === undefined ? [] : [[rota, primeiro.id] as const] })
+  return { ollama: modeloLocal(ambiente), omniroute: 'deepseek-v3.2', 'deepseek-official': 'deepseek-chat', ...Object.fromEntries(deLinha), ...Object.fromEntries(deChave) }
+}
+
+/**
+ * Os modelos das rotas por chave, lidos do runtime.
+ *
+ * Uma rota que não responde a listagem fica sem modelo — e por isso fora das
+ * criações (`modelosPorRota`) — em vez de derrubar a montagem do plugin.
+ * @param llm - o runtime de modelos.
+ * @param llm.listModels - a listagem de uma rota.
+ * @param rotas - as rotas registradas.
+ * @returns os modelos, com a rota de cada um.
+ */
+export async function modelosDasRotasPorChave(
+  llm: { listModels(provider: string): Promise<readonly { readonly provider: string, readonly id: string }[]> },
+  rotas: readonly string[],
+): Promise<readonly { readonly provider: string, readonly id: string }[]> {
+  const listas = await Promise.all(rotas.filter(rota => rota.startsWith(PREFIXO_DE_CHAVE))
+    .map(rota => llm.listModels(rota).catch(() => [])))
+  return listas.flat()
 }
 
 /**
@@ -393,6 +422,8 @@ export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}):
       avisar: motivo => { ctx.logger.warn(t('avisos.saidaEstruturada', { motivo })) },
     }))
   }
+  const rotasRegistradas = ctx.llm.listProviders().map(provider => provider.id)
+  const modelosDeChave = config.modelByRoute === undefined ? await modelosDasRotasPorChave(ctx.llm, rotasRegistradas) : []
   const model = new HarnessPromptModel({
     llm: ctx.llm,
     routes: ctx.studioRouteHealth.service,
@@ -405,7 +436,7 @@ export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}):
     */
     markEstruturada: (options, purpose, route) =>
       marcaDoPedido(desvioLigado, purpose, route, options),
-    modelByRoute: config.modelByRoute ?? modelosPorRota(process.env, ctx.llm.listProviders().map(provider => provider.id)),
+    modelByRoute: config.modelByRoute ?? modelosPorRota(process.env, rotasRegistradas, modelosDeChave),
   })
   const runsRoot = resolve(config.runsRoot ?? resolve(homedir(), '.dz23-studio', 'generated-runs'))
   const logoStoreRoot = resolve(config.logoStoreRoot ?? resolve(homedir(), '.dz23-studio', 'assets'))
