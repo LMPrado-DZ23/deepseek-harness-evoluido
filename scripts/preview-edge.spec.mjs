@@ -1,6 +1,6 @@
 import { createServer, request } from 'node:http'
 import { afterEach, describe, expect, it } from 'vitest'
-import { cabecalhosParaOHarness, iniciarBorda, rotaDaBorda, segredoValido } from './preview-edge.mjs'
+import { cabecalhosParaOHarness, destinoDoConvite, iniciarBorda, rotaDaBorda, segredoValido } from './preview-edge.mjs'
 
 const PREVIA = `p-${'a1'.repeat(12)}.dz23.localhost`
 const SEGREDO = 's'.repeat(40)
@@ -89,5 +89,37 @@ describe('a borda de verdade, contra um harness de mentira', () => {
       { url: '/__dz23/preview-gateway/app', edge: SEGREDO, host: `${PREVIA}:${porta}` },
       { url: '/studio/', edge: undefined, host: `studio.dz23.localhost:${porta}` },
     ])
+  })
+})
+
+describe('o convite leva ao FRIGG, e não à tela do harness', () => {
+  it('só o redirecionamento do convite, só no Studio', () => {
+    expect(destinoDoConvite('studio', '/?token=abc', 302, '/')).toBe('/studio/')
+    expect(destinoDoConvite('studio', '/?token=abc', 200, '/')).toBeUndefined()
+    expect(destinoDoConvite('studio', '/?token=abc', 302, '/outro')).toBeUndefined()
+    expect(destinoDoConvite('studio', '/', 302, '/')).toBeUndefined()
+    expect(destinoDoConvite('studio', '/x?token=a', 302, '/')).toBeUndefined()
+    expect(destinoDoConvite('previa', '/?token=abc', 302, '/')).toBeUndefined()
+  })
+
+  it('a borda troca o Location do convite de verdade', async () => {
+    const harness = createServer((pedido, resposta) => {
+      resposta.writeHead(302, { location: '/', 'set-cookie': 'dsh-auth-x=1' }); resposta.end()
+    })
+    await new Promise(resolver => harness.listen(0, '127.0.0.1', resolver))
+    const borda = await iniciarBorda({ porta: 0, harnessHost: '127.0.0.1', harnessPorta: harness.address().port, segredo: SEGREDO })
+    try {
+      const porta = borda.address().port
+      const resposta = await new Promise((resolver, rejeitar) => {
+        const pedido = request({ host: '127.0.0.1', port: porta, path: '/?token=abc', headers: { host: `studio.dz23.localhost:${porta}` } }, resolver)
+        pedido.on('error', rejeitar); pedido.end()
+      })
+      expect(resposta.statusCode).toBe(302)
+      expect(resposta.headers.location).toBe('/studio/')
+      expect(resposta.headers['set-cookie']).toEqual(['dsh-auth-x=1'])
+      resposta.resume()
+    } finally {
+      await new Promise(resolver => borda.close(resolver)); await new Promise(resolver => harness.close(resolver))
+    }
   })
 })

@@ -47,3 +47,12 @@ describe('lista de tarefas e plano viram itens da conversa', () => {
     expect(sanitizeAssistantEvent(evento('tool/call', 6, { callId: 'c4', name: 'web_search', arguments: { queries: ['frigg'] } }))).toMatchObject({ type: 'tool.state', label: 'Pesquisando na internet: frigg', state: 'running' })
   })
 })
+
+describe('cada subagente diz qual trabalho recebeu', () => {
+  it('a descrição da delegação entra no rótulo; sem ela, o rótulo genérico', () => {
+    expect(rotuloDoAgenteGeral('subagent', { description: 'Pesquisar concorrentes', prompt: 'x' })).toBe('Delegando trabalho a um subagente: Pesquisar concorrentes')
+    expect(rotuloDoAgenteGeral('subagent_fork', '{"description":"Resumir o PDF"}')).toBe('Delegando trabalho a um subagente: Resumir o PDF')
+    expect(rotuloDoAgenteGeral('subagent', {})).toBe('Delegando trabalho a um subagente')
+    expect(rotuloDoAgenteGeral('list_agents', { description: 'ignorado' })).toBe('Delegando trabalho a um subagente')
+  })
+})

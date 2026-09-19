@@ -234,3 +234,22 @@
 
 .dz-acervo-mudanca { color: var(--dz-text-secondary); font-size: 0.8125rem; }
 .dz-acervo-conteudos { margin: 0 0 var(--dz-3); color: var(--dz-text-secondary); font-size: 0.8125rem; }
+
+.dz-lembretes {
+  border: 1px solid var(--dz-border);
+  border-radius: var(--dz-radius);
+  background: var(--dz-surface);
+  padding: var(--dz-5);
+  margin-bottom: var(--dz-5);
+}
+.dz-lembretes h2 { margin: 0 0 var(--dz-3); font-size: 1rem; }
+.dz-lembretes-lista { list-style: none; margin: 0 0 var(--dz-4); padding: 0; display: grid; gap: var(--dz-3); }
+.dz-lembretes-lista li { border-top: 1px solid var(--dz-border); padding-top: var(--dz-3); }
+.dz-lembretes-texto { margin: 0 0 var(--dz-1); color: var(--dz-text); overflow-wrap: anywhere; }
+.dz-lembretes-quando { margin: 0 0 var(--dz-2); color: var(--dz-text-secondary); font-size: 0.875rem; }
+.dz-destino-botao {
+  min-height: 44px; padding: 0 var(--dz-4); border-radius: var(--dz-radius);
+  border: 1px solid var(--dz-border); background: var(--dz-surface-active); color: var(--dz-text); cursor: pointer;
+}
+.dz-destino-botao:focus-visible { outline: 2px solid var(--dz-focus); outline-offset: 2px; }
+.dz-lembretes-aviso { color: var(--dz-text-secondary); }

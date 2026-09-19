@@ -6,6 +6,7 @@ import type {
   SessionRequestId,
 } from '@deepseek-ai/dsh-api-session-controller/types'
 import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
+import { lembretesDaConversa, type LeituraDosLembretes } from './assistant-schedules.js'
 import type { SessionRecord, StudioIdentityService } from '@dz23-studio/identity'
 import { roleAllows } from '@dz23-studio/policy'
 import type { StudioTenancyService } from '@dz23-studio/tenancy'
@@ -114,6 +115,8 @@ export interface AssistantConversationServiceOptions {
    */
   readonly attachments?: AssistantAttachmentStore
   readonly createRequestId?: () => string
+  /** O relógio da leitura de lembretes (atrasado ou não). */
+  readonly now?: () => number
 }
 
 export class AssistantConversationError extends Error {
@@ -157,6 +160,28 @@ export class AssistantConversationService {
       // e ainda tiraria dela o botão de tentar de novo.
       throw new AssistantConversationError('SESSION_UNAVAILABLE', t('assistant.readUnavailable'))
     }
+  }
+
+  /**
+   * Os LEMBRETES ativos da conversa, para a tela Agendado.
+   *
+   * Lidos do registro pela mesma dobra que o Harness usa para disparar. Não há
+   * cancelamento aqui: cancelar é a ferramenta `schedule_delete` do próprio
+   * agente, dentro da transação dele, e a tela pede isso pela conversa.
+   * @param identitySession - a sessão de quem pediu.
+   * @param conversationId - a conversa.
+   * @param signal - cancelamento da requisição.
+   * @returns a leitura dos lembretes.
+   */
+  async lembretes(identitySession: SessionRecord, conversationId: string, signal?: AbortSignal): Promise<LeituraDosLembretes> {
+    this.#assertOwned(identitySession, conversationId, 'project.read')
+    let events
+    try {
+      events = (await this.options.sessions.inspect(conversationId as SessionId, signal)).events
+    } catch {
+      throw new AssistantConversationError('SESSION_UNAVAILABLE', t('assistant.readUnavailable'))
+    }
+    return lembretesDaConversa(events, (this.options.now ?? Date.now)())
   }
 
   /**

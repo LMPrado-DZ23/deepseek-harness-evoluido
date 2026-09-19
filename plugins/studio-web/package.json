@@ -26,6 +26,7 @@
     "@deepseek-ai/cordis": "workspace:*",
     "@deepseek-ai/dsh-api-session-controller": "workspace:*",
     "@deepseek-ai/dsh-host-webserver": "workspace:*",
+    "@deepseek-ai/dsh-schedule": "workspace:*",
     "@deepseek-ai/dsh-session": "workspace:*",
     "@deepseek-ai/dsh-storage-domain": "workspace:*",
     "@dz23-studio/action-approval": "workspace:*",

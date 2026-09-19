@@ -97,6 +97,9 @@ export const inject = ['agents', 'jobs', 'llm', 'storageDomain', 'studioIdentity
 /** O modelo padrão da rota local, quando ninguém configurou outro. */
 export const MODELO_LOCAL_PADRAO = 'qwen2.5-coder:7b'
 
+/** Quanto a conferência de saúde espera o construtor responder. */
+export const TETO_DA_CONFERENCIA_DO_CONSTRUTOR_MS = 8_000
+
 /**
  * O modelo que a rota local vai PEDIR.
  *
@@ -484,7 +487,10 @@ export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}):
     // precisa responder ANTES de a pessoa escolher o perfil.
     const localSelected = await ctx.studioRouteHealth.service.chooseRoute(scope, 'plan', { privacy: 'privado-local' })
     const [builderHealth, disk] = await Promise.all([
-      builder.forActor({ userId: 'studio-health', orgId: scope.orgId, tenantId: scope.tenantId, role: 'owner' }).then(session => session.preflight()).catch(() => ({ state: 'BLOCKED_EXTERNAL' as const })),
+      // Com TETO curto: sem ele a conferência herdava os 240 s de uma chamada de
+      // construção, e a tela inteira esperava. Medido em 19/09/2026 no WSL2 do
+      // titular: `/health` sem resposta por mais de 90 s com o gerente ocupado.
+      builder.forActor({ userId: 'studio-health', orgId: scope.orgId, tenantId: scope.tenantId, role: 'owner' }).then(session => session.preflight(AbortSignal.timeout(TETO_DA_CONFERENCIA_DO_CONSTRUTOR_MS))).catch(() => ({ state: 'BLOCKED_EXTERNAL' as const })),
       diskState(runsRoot),
     ])
     const state = route !== null && builderHealth.state === 'OK' && disk === 'OK' ? 'OK' : 'ATTENTION'

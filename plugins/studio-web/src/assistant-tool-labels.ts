@@ -56,7 +56,11 @@ export function rotuloDoAgenteGeral(nome: string, argumentos: unknown): string |
     case 'glob': case 'grep': return comDetalhe('tools.search', trechoSeguro(a.pattern))
     case 'bash': return comDetalhe('tools.bash', trechoSeguro(typeof a.description === 'string' && a.description.trim() !== '' ? a.description : a.command))
     case 'skill': return comDetalhe('tools.skill', trechoSeguro(a.skill_name ?? a.name))
-    case 'subagent': case 'subagent_fork': case 'send_message': case 'interrupt_agent': case 'list_agents': case 'list_subagent_models':
+    // Cada subagente vira UMA linha com o próprio estado (rodando, terminou,
+    // falhou), e a linha diz qual trabalho foi delegado: com dois em paralelo,
+    // "Delegando trabalho" duas vezes não deixava saber qual era qual.
+    case 'subagent': case 'subagent_fork': return comDetalhe('tools.delegation', trechoSeguro(a.description))
+    case 'send_message': case 'interrupt_agent': case 'list_agents': case 'list_subagent_models':
       return t('tools.delegation')
     case 'workflow': case 'ralph': return t('tools.workflow')
     case 'job_list': case 'job_output': case 'job_kill': return t('tools.jobs')

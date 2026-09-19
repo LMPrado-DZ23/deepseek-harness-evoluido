@@ -450,3 +450,16 @@ describe('anexos pela borda HTTP', () => {
     expect(await inesperado.text()).not.toContain('/var/lib/studio')
   })
 })
+
+describe('os lembretes pela rota da conversa', () => {
+  it('sem leitor montado, 503; com ele, a leitura volta como está', async () => {
+    const f = await fixture()
+    const sem = await f.request(`${ASSISTANT_CONVERSATION_PREFIX}/conversa-1/schedules`)
+    expect(sem.status).toBe(503)
+    const leitura = { estado: 'ok', lembretes: [{ id: 'schedule-1', tipo: 'uma-vez', proximo: '2026-09-19T11:00:00.000Z', atrasado: false, texto: 'x' }] }
+    Object.assign(f.conversations, { lembretes: vi.fn(async () => leitura) })
+    const com = await f.request(`${ASSISTANT_CONVERSATION_PREFIX}/conversa-1/schedules`)
+    expect(com.status).toBe(200)
+    expect(await com.json()).toEqual(leitura)
+  })
+})

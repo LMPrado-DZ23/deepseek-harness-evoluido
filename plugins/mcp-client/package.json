@@ -24,7 +24,10 @@
   },
   "dependencies": {
     "@deepseek-ai/cordis": "workspace:*",
+    "@deepseek-ai/dsh-tools": "workspace:*",
+    "@dz23-studio/identity": "workspace:*",
     "@dz23-studio/integration-hub": "workspace:*",
+    "@dz23-studio/tenancy": "workspace:*",
     "zod": "4.4.3"
   },
   "devDependencies": {

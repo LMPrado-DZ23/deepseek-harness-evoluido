@@ -8,6 +8,8 @@ import { acervoPorTarefa } from './acervo'
 import { chaveDaMudanca, conteudosDistintos, versoesDaTarefa, type MudancaDaVersao, type VersaoDoPacote } from './versoes'
 import { previaDoPacote, type EntradaDoPacote } from './previa'
 import type { ItemDoAcervo } from './acervo'
+import { intervaloEmTexto, lerLembretes, pedidoDeCancelamento, type LeituraDosLembretes } from './lembretes'
+import { openConversation, sendConversationMessage } from '../assistant/conversationApi'
 
 /*
   O cliente do Hub, criado UMA VEZ.
@@ -261,13 +263,12 @@ export function BibliotecaScreen({ api = clienteDoHub }: { readonly api?: HubApi
 }
 
 /**
- * Agendado: um destino real para uma função que ainda não existe.
+ * Agendado: os LEMBRETES que existem, e a tarefa agendada que ainda não existe.
  *
- * A decisão de produto autoriza exatamente isto durante a migração — "uma
- * página de indisponibilidade/diagnóstico verdadeira é permitida" — e diz na
- * mesma frase que ela NÃO satisfaz o aceite funcional. Então esta tela não tem
- * botão mudo, não mostra lista vazia como se fosse um agendamento sem itens, e
- * nomeia o que falta para a função existir.
+ * Os lembretes vêm do registro da conversa, dobrado pela mesma função que o
+ * Harness usa para dispará-los. A tarefa que começa sozinha numa conversa nova
+ * continua sem servidor, e a tela continua dizendo isso — o destino é real,
+ * a pendência também.
  */
 export function AgendadoScreen() {
   return <main className="dz-destino">
@@ -275,6 +276,7 @@ export function AgendadoScreen() {
       <a className="dz-destino-voltar" href={STUDIO_HOME_PATH}><ArrowLeft aria-hidden="true" /><span>{copy.voltar}</span></a>
       <div><h1>{copy.agendadoTitulo}</h1><p>{copy.agendadoSubtitulo}</p></div>
     </header>
+    <LembretesDaConversa />
     <section className="dz-destino-pendente" aria-labelledby="dz-agendado-estado">
       <p id="dz-agendado-estado" className="dz-destino-estado">
         <Clock aria-hidden="true" />
@@ -285,9 +287,73 @@ export function AgendadoScreen() {
         <li>{copy.agendadoFaltaServidor}</li>
         <li>{copy.agendadoFaltaLimite}</li>
       </ul>
-      <p className="dz-destino-vazio">{copy.agendadoEnquantoIsso}</p>
     </section>
   </main>
+}
+
+type EstadoDosLembretes = { readonly fase: 'lendo' } | { readonly fase: 'erro' } | { readonly fase: 'leu'; readonly conversa: string; readonly leitura: LeituraDosLembretes }
+
+// Fora do componente: recriado a cada desenho, o leitor padrão mudaria a
+// dependência do efeito e a leitura se repetiria sem fim (achado nas Preferências).
+const LER_DA_CONVERSA = async (): Promise<{ conversa: string; leitura: LeituraDosLembretes }> => {
+  const conversa = (await openConversation()).session_id
+  return { conversa, leitura: await lerLembretes(conversa) }
+}
+const PEDIR_CANCELAMENTO = async (conversa: string, id: string): Promise<void> => {
+  await sendConversationMessage(conversa, pedidoDeCancelamento(id, copy.lembretesPedido))
+}
+
+export function LembretesDaConversa({ ler = LER_DA_CONVERSA, pedir = PEDIR_CANCELAMENTO }: {
+  readonly ler?: () => Promise<{ conversa: string; leitura: LeituraDosLembretes }>
+  readonly pedir?: (conversa: string, id: string) => Promise<void>
+} = {}) {
+  const [estado, setEstado] = useState<EstadoDosLembretes>({ fase: 'lendo' })
+  const [aviso, setAviso] = useState<string | null>(null)
+  const [vez, setVez] = useState(0)
+  useEffect(() => {
+    let vivo = true
+    void ler().then(valor => { if (vivo) setEstado({ fase: 'leu', ...valor }) }, () => { if (vivo) setEstado({ fase: 'erro' }) })
+    return () => { vivo = false }
+  }, [ler, vez])
+  const cancelar = (conversa: string, id: string) => {
+    setAviso(null)
+    void pedir(conversa, id).then(() => { setAviso(copy.lembretesPedidoEnviado) }, () => { setAviso(copy.lembretesPedidoFalhou) })
+  }
+  return <ListaDeLembretes estado={estado} aviso={aviso} aoCancelar={cancelar} aoAtualizar={() => { setVez(valor => valor + 1) }} />
+}
+
+/** A lista desenhada. Separada para ter teste sem rede. */
+export function ListaDeLembretes({ estado, aviso, aoCancelar, aoAtualizar }: {
+  readonly estado: EstadoDosLembretes
+  readonly aviso: string | null
+  readonly aoCancelar: (conversa: string, id: string) => void
+  readonly aoAtualizar: () => void
+}) {
+  const intervalos = { minutos: copy.lembretesMinutos, horas: copy.lembretesHoras, dias: copy.lembretesDias }
+  return <section className="dz-lembretes" aria-labelledby="dz-lembretes-titulo">
+    <h2 id="dz-lembretes-titulo">{copy.lembretesTitulo}</h2>
+    {estado.fase === 'lendo' && <p role="status">{copy.lembretesLendo}</p>}
+    {estado.fase === 'erro' && <p role="status">{copy.lembretesErro}</p>}
+    {estado.fase === 'leu' && estado.leitura.estado === 'ilegivel' && <p role="status">{copy.lembretesIlegivel}</p>}
+    {estado.fase === 'leu' && estado.leitura.estado === 'ok' && estado.leitura.lembretes.length === 0 && <p>{copy.lembretesVazio}</p>}
+    {estado.fase === 'leu' && estado.leitura.estado === 'ok' && estado.leitura.lembretes.length > 0 && <ul className="dz-lembretes-lista">
+      {estado.leitura.lembretes.map(lembrete => <li key={lembrete.id}>
+        <p className="dz-lembretes-texto">{lembrete.texto}</p>
+        <p className="dz-lembretes-quando">
+          {lembrete.tipo === 'repetido' && lembrete.intervaloSegundos !== undefined
+            ? copy.lembretesACada.replace('{intervalo}', intervaloEmTexto(lembrete.intervaloSegundos, intervalos))
+            : copy.lembretesUmaVez}
+          {' · '}
+          {lembrete.atrasado ? copy.lembretesAtrasado : copy.lembretesProximo.replace('{quando}', new Date(lembrete.proximo).toLocaleString('pt-BR'))}
+        </p>
+        <button type="button" className="dz-destino-botao" aria-label={copy.lembretesCancelarRotulo.replace('{id}', lembrete.id)}
+          onClick={() => { aoCancelar(estado.conversa, lembrete.id) }}>{copy.lembretesCancelar}</button>
+      </li>)}
+    </ul>}
+    {aviso !== null && <p role="status" className="dz-lembretes-aviso">{aviso}</p>}
+    {estado.fase !== 'lendo' && <button type="button" className="dz-destino-botao" onClick={aoAtualizar}>{copy.lembretesAtualizar}</button>}
+    <p className="dz-destino-vazio">{copy.lembretesSemPausa}</p>
+  </section>
 }
 
 /** A pendência declarada em `destinos.ts`, reafirmada onde a tela a usa. */

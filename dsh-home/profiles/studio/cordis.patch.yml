@@ -358,6 +358,28 @@
             sandboxMode: workspace-write
             requiredPermission: project.write
             scope: project
+          # CONECTORES na conversa (plugins/mcp-client/src/agent-tools.ts): toda
+          # chamada passa pelo Hub (assinatura, teto, parada, auditoria). Listar
+          # lê; perguntar as ferramentas sobe o servidor sem executar nada;
+          # chamar executa e a pessoa confirma.
+          studio_connector_list:
+            source: { kind: studio, external: false, stableChannel: true }
+            inferredTier: T0
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          studio_connector_tools:
+            source: { kind: studio, external: false, stableChannel: true }
+            inferredTier: T1
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          studio_connector_call:
+            source: { kind: studio, external: false, stableChannel: true }
+            inferredTier: T2
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
           studio_agent_list:
             source: { kind: studio, external: false, stableChannel: true }
             inferredTier: T0

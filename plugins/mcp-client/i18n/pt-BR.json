@@ -17,5 +17,15 @@
     "environmentNameInvalid": "O nome de variável de ambiente declarado para o servidor MCP não é válido: {name}",
     "environmentValueInvalid": "O valor declarado para a variável de ambiente {name} do servidor MCP contém um caractere que não pode atravessar o limite do processo.",
     "dispatcherAlreadyInstalled": "Já existe um despachante MCP montado neste FRIGG. Dois despachantes teriam tetos diferentes; nenhum foi trocado."
+  },
+  "agente": {
+    "listar": "Lista os conectores (servidores MCP) ligados neste espaço de trabalho, com o integration_id de cada um. Use antes de chamar um conector.",
+    "ferramentas": "Pergunta a um conector ligado quais ferramentas ele oferece. Sobe o servidor do conector, lê a lista e fecha; não executa nenhuma ferramenta.",
+    "chamar": "Chama UMA ferramenta de um conector ligado, com os argumentos dela. A pessoa confirma antes. Use os nomes exatos que studio_connector_tools devolveu.",
+    "idDoConector": "O integration_id do conector, como studio_connector_list devolveu.",
+    "nomeDaFerramenta": "O nome exato da ferramenta do conector.",
+    "argumentos": "Os argumentos da ferramenta, como um objeto.",
+    "nenhum": "Nenhum conector ligado. A pessoa liga conectores em Plugins; só conectores com manifesto assinado podem ser usados.",
+    "semDono": "Esta conversa não tem um dono conhecido; o conector não foi chamado."
   }
 }

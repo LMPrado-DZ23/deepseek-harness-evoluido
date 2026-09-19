@@ -448,9 +448,18 @@ importers:
       '@deepseek-ai/cordis':
         specifier: workspace:*
         version: link:../../third_party/deepseek-harness/vendor/cordis
+      '@deepseek-ai/dsh-tools':
+        specifier: workspace:*
+        version: link:../../third_party/deepseek-harness/packages/core/tools
+      '@dz23-studio/identity':
+        specifier: workspace:*
+        version: link:../identity
       '@dz23-studio/integration-hub':
         specifier: workspace:*
         version: link:../integration-hub
+      '@dz23-studio/tenancy':
+        specifier: workspace:*
+        version: link:../tenancy
       zod:
         specifier: 4.4.3
         version: 4.4.3
@@ -682,6 +691,9 @@ importers:
       '@deepseek-ai/dsh-host-webserver':
         specifier: workspace:*
         version: link:../../third_party/deepseek-harness/packages/host/webserver
+      '@deepseek-ai/dsh-schedule':
+        specifier: workspace:*
+        version: link:../../third_party/deepseek-harness/packages/schedule/schedule
       '@deepseek-ai/dsh-session':
         specifier: workspace:*
         version: link:../../third_party/deepseek-harness/packages/core/session

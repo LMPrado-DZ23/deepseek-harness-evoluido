@@ -41,6 +41,7 @@ export type AssistantConversationRoute =
   | { readonly kind: 'stream'; readonly conversationId: string }
   | { readonly kind: 'cancel'; readonly conversationId: string }
   | { readonly kind: 'compact'; readonly conversationId: string }
+  | { readonly kind: 'schedules'; readonly conversationId: string }
   | { readonly kind: 'method-not-allowed' }
   | { readonly kind: 'not-found' }
 
@@ -85,13 +86,14 @@ export function routeAssistantConversation(
   if (action === 'attachments') return method === 'POST' ? { kind: 'attach', conversationId } : { kind: 'method-not-allowed' }
   if (action === 'cancel') return method === 'POST' ? { kind: 'cancel', conversationId } : { kind: 'method-not-allowed' }
   if (action === 'compact') return method === 'POST' ? { kind: 'compact', conversationId } : { kind: 'method-not-allowed' }
+  if (action === 'schedules') return method === 'GET' ? { kind: 'schedules', conversationId } : { kind: 'method-not-allowed' }
   return { kind: 'not-found' }
 }
 
 export interface AssistantConversationHttpConfig {
   readonly identity: StudioIdentityService
   readonly conversations?: Pick<AssistantConversationService, 'open' | 'snapshot' | 'send' | 'cancel' | 'compact'>
-    & Partial<Pick<AssistantConversationService, 'attach'>>
+    & Partial<Pick<AssistantConversationService, 'attach' | 'lembretes'>>
   /** Deadline per request. Injectable so the abort itself is provable by test. */
   readonly deadlineMs?: number
 }
@@ -151,6 +153,10 @@ export async function handleAssistantConversation(
     }
     if (route.kind === 'compact') {
       return { status: 202, body: await conversations.compact(identitySession, route.conversationId, controller.signal) }
+    }
+    if (route.kind === 'schedules') {
+      if (conversations.lembretes === undefined) return { status: 503, body: { error: t('assistant.serviceNotConfigured') } }
+      return { status: 200, body: await conversations.lembretes(identitySession, route.conversationId, controller.signal) }
     }
     return { status: 202, body: conversations.cancel(identitySession, route.conversationId) }
   } finally {

@@ -55,6 +55,27 @@ export function rotaDaBorda(host, url, porta) {
 }
 
 /**
+ * Para onde o CONVITE leva depois de entrar.
+ *
+ * O endereço que o `pnpm studio` imprime é o convite do harness
+ * (`/?token=…`), que grava o cookie e manda para `/` — a tela do HARNESS, e
+ * não a do FRIGG. Medido em 19/09/2026: quem abria o endereço impresso caía
+ * em "DeepSeek Harness · Choose workspace". Só esse redirecionamento, e só no
+ * host do Studio, passa a levar para `/studio/`; o resto da tela do harness
+ * continua onde está (a página de modelos mora lá).
+ * @param {'studio' | 'previa'} destino - o destino do pedido.
+ * @param {string} caminho - o caminho pedido.
+ * @param {number} status - o status que o harness devolveu.
+ * @param {string | string[] | undefined} local - o cabeçalho Location.
+ * @returns {string | undefined} o Location novo, ou `undefined` para manter.
+ */
+export function destinoDoConvite(destino, caminho, status, local) {
+  if (destino !== 'studio' || status < 300 || status > 399 || local !== '/') return undefined
+  const url = new URL(caminho, 'http://borda.invalid')
+  return url.pathname === '/' && url.searchParams.has('token') ? '/studio/' : undefined
+}
+
+/**
  * Os cabeçalhos que seguem para o harness.
  * @param {'studio' | 'previa'} destino - o destino.
  * @param {Record<string, string | string[] | undefined>} cabecalhos - os do cliente.
@@ -102,7 +123,8 @@ export function iniciarBorda({ porta, harnessHost, harnessPorta, segredo }) {
       host: harnessHost, port: harnessPorta, method: pedido.method, path: rota.caminho,
       headers: cabecalhosParaOHarness(rota.destino, pedido.headers, segredo),
     }, recebida => {
-      resposta.writeHead(recebida.statusCode ?? 502, recebida.headers)
+      const convite = destinoDoConvite(rota.destino, rota.caminho, recebida.statusCode ?? 0, recebida.headers.location)
+      resposta.writeHead(recebida.statusCode ?? 502, convite === undefined ? recebida.headers : { ...recebida.headers, location: convite })
       recebida.pipe(resposta)
     })
     saida.on('error', () => {

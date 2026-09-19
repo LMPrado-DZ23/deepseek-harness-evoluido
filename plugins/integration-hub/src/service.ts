@@ -1246,8 +1246,36 @@ export class IntegrationHubService {
    */
   async callMcpTool(actor: HubActor, integrationId: string, request: McpToolCallRequest): Promise<IntegrationCallResult<McpCallOutcome>> {
     this.#authorize(actor, 'project.write')
-    const record = await this.#integration(actor, integrationId)
     const operation = auditOperation(`mcp.${request.tool}`)
+    const { manifest, dispatcher } = await this.#mcpPreflight(actor, integrationId, operation)
+    return this.callIntegration<McpCallOutcome>(
+      actor, integrationId,
+      { operation, idempotent: request.idempotent, priceUsd: request.priceUsd },
+      signal => dispatcher.call({ integrationId, manifest, tool: request.tool, arguments: request.arguments ?? {}, signal }),
+    )
+  }
+
+  /**
+   * As FERRAMENTAS que um servidor MCP ligado anuncia, para o agente saber o
+   * que pode pedir.
+   *
+   * É a mesma sondagem do teste de conexão (sobe, cumprimenta, lê o catálogo,
+   * fecha) e passa pelas mesmas três recusas e pelo mesmo `callIntegration`
+   * de uma chamada: nenhuma ferramenta do servidor é executada aqui.
+   * @param actor - quem pergunta; ler o projeto basta.
+   * @param integrationId - a integração ligada, do tipo `mcp`.
+   * @returns o desfecho da sondagem, com os nomes das ferramentas.
+   */
+  async mcpTools(actor: HubActor, integrationId: string): Promise<IntegrationCallResult<McpProbeOutcome>> {
+    this.#authorize(actor, 'project.read')
+    const { manifest, dispatcher } = await this.#mcpPreflight(actor, integrationId, auditOperation('tools/list'))
+    return this.callIntegration<McpProbeOutcome>(actor, integrationId, { operation: 'tools/list', idempotent: true },
+      signal => dispatcher.probe({ integrationId, manifest, signal }))
+  }
+
+  /** As três recusas de uma operação MCP, antes de qualquer processo subir (ver `callMcpTool`). */
+  async #mcpPreflight(actor: HubActor, integrationId: string, operation: string): Promise<{ readonly manifest: IntegrationManifest; readonly dispatcher: McpDispatchPort }> {
+    const record = await this.#integration(actor, integrationId)
     if (record.kind !== 'mcp') {
       await this.#audit(actor, 'integration.called', integrationId, 'not-executed', `${operation} not-mcp`)
       throw new HubError('INVALID', t('errors.integrationNotMcp'))
@@ -1262,12 +1290,7 @@ export class IntegrationHubService {
       await this.#audit(actor, 'integration.called', integrationId, 'not-executed', `${operation} no-dispatcher`)
       throw new HubError('NOT_EXECUTED', t('errors.mcpDispatcherMissing'))
     }
-    const manifest = evaluation.manifest
-    return this.callIntegration<McpCallOutcome>(
-      actor, integrationId,
-      { operation, idempotent: request.idempotent, priceUsd: request.priceUsd },
-      signal => dispatcher.call({ integrationId, manifest, tool: request.tool, arguments: request.arguments ?? {}, signal }),
-    )
+    return { manifest: evaluation.manifest, dispatcher }
   }
 
   /**

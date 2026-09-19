@@ -59,7 +59,31 @@ o código pode existir, mas ainda não foi validado com pessoas leigas.
 | Catálogo de ferramentas do preset `dz23-assistant` | BETA | M70/M71: preset expõe exatamente treze ferramentas (seis individuais + sete de equipe); M71 confirmou as treze no Agent de uma sessão real e o pacote exige isolamento por sessão | revisão independente e jornada com modelo real |
 | Conversas do Assistente em instalação multiusuário | BETA | M74-A/M74-B: o vínculo de sessão do Harness deixou de ter porta pública (`POST /bind-agent` removida) e ganhou teto por dispositivo com liberação só comprovada; a conversa passou a ter transporte próprio em `/studio/assistant/conversation` com sessão do servidor e CSRF, e uma tela do Studio que não entrega o navegador ao cliente compartilhado do Harness (`M74A_6e51a19_PARECER_ADVERSARIAL.md`, `docs/proofs/M91-chat-compaction-proof.md`). O cliente do Harness continua `NOT_SUPPORTED` para várias pessoas — quem passou a servir a conversa é o Studio | E2E em navegador real com duas pessoas simultâneas, e prova de isolamento no servidor de verdade |
 | Cancelamento de delegação após reinício | BETA | M75: três processos separados provaram que o boot transforma `RUNNING` órfão em `FAILED`, libera leases, converge a equipe e preserva a cópia; cancelar depois disso informa `already-finished`; run ainda ativa sem handle continua bloqueada | reinício real no Windows, operação prolongada e backend distribuído; não existe retomada do agente **M75-B/C: execução de CLI externa que sobrevive ao reinício vira `UNKNOWN` e a reserva de arquivos NÃO é liberada. A saída desse estado agora existe: ferramenta `studio_agent_resolve_unknown` (T3), que exige confirmação humana com passkey e um motivo escrito de 3 a 500 caracteres, gravado no registro. O encerramento ativo (`shutdown`) passou a ser chamado no descarte do plugin, antes de fechar os domínios (`docs/proofs/M75C-unknown-closure-and-shutdown-proof.md`). Falta uma tela dedicada para "esta execução está parada": hoje o pedido aparece na lista geral de confirmações** |
-| MCP e skills dentro da conversa do Assistente | NOT_PRESENT | P36 não monta MCP nem skills no preset mínimo | catálogo assinado, permissões por integração e adaptação explícita sem autoridade global |
+| MCP e skills dentro da conversa do Assistente | BETA (MCP) | MCP-CONVERSA-01 (19/09): conectores MCP pelo Hub; skills pelo `tool-skill` do preset (AGENTE-GERAL-02) | catálogo assinado, permissões por integração e adaptação explícita sem autoridade global |
 | Codex CLI como subagente do Assistente | NOT_CONFIGURED | O provider global da fase 3 não foi removido, mas a ponte P36 recusa Codex no boot, no schema e em chamada direta; o E2E real está `NOT_EXECUTED` | provar em Windows e Linux que symlink/junction não alcança arquivo externo; só então habilitação administrativa explícita |
 | Claude Code como subagente do Assistente | NOT_CONFIGURED | O provider global da fase 3 não foi removido, mas a ponte P36 recusa Claude Code no boot, no schema e em chamada direta; o E2E real está `NOT_EXECUTED` | provar em Windows e Linux que symlink/junction não alcança arquivo externo; só então habilitação administrativa explícita |
 | Hermes Agent | NOT_PRESENT | prova 7.6 somente leitura | adapter JSON-RPC v1.x e auditoria de segurança |
+
+## A jornada comparável ao Manus Desktop — estado em 19/09/2026
+
+Direção do titular (19/09, noite): fechar esta jornada, no computador dele e com
+modelo real, antes de qualquer frente nova. Cada linha diz o que EXISTE e o que
+foi MEDIDO; "existe no código" não é "funciona para a pessoa".
+
+| Passo da jornada | Estado | Evidência | Falta |
+| --- | --- | --- | --- |
+| 1. Abrir por um atalho simples | BETA | UX-CONVITE-01: o endereço impresso abre o FRIGG (`/studio/`), e não a tela do Harness | atalho de área de trabalho; aplicativo nativo (`.exe`) NÃO existe — é PWA no navegador |
+| 2. Conversa geral | BETA | AGENTE-GERAL-01..04: conversa na instalação pessoal, no Ollama, com o motivo da falha na tela | modelo local lento demais (0,66 token/s medido); IA mais rápida depende de rede/conta |
+| 3. Anexar qualquer arquivo | BETA | UX-ANEXO-01 + AGENTE-GERAL-03: texto no pedido; qualquer arquivo até 50 MB na pasta de trabalho | medido no navegador do titular só em parte |
+| 4. Plano e tarefas visíveis | BETA | AGENTE-GERAL-04: lista de tarefas e plano renderizados | não medido com modelo real fazendo plano |
+| 5. Pesquisar na internet | BLOCKED_BY_EXTERNAL_DEPENDENCY | ferramentas `web_search`/`web_fetch` montadas com regra de política | o WSL2 do titular NÃO alcança a internet (medido: curl sem resposta em 20 s) |
+| 5b. Navegador visual supervisionável | NOT_PRESENT | — | operador de navegador com observação e tomada manual |
+| 6. Arquivos e comandos só na pasta autorizada | BETA | AGENTE-GERAL-02/03: `bash`/`fs` com raiz na pasta do espaço (0700) e T2 para escrita | medido com modelo real |
+| 7. Confirmação para ação sensível | BETA | T2/T3 (linha acima, M90) | — |
+| 8. Dois subagentes com estado na tela | BETA | MCP-CONVERSA-01: cada subagente é uma linha com estado e a descrição do trabalho | não medido com modelo real |
+| 9. Arquivo real para baixar | BETA | AGENTE-GERAL-03: download da pasta de trabalho como anexo | medido com modelo real produzindo o arquivo |
+| 10. Sobreviver a reinício | BETA | conversa e lembretes são registro do Harness; criação retoma (ABRIR-08) | medido na jornada inteira |
+| 11. Agendamento numa tela, cancelável | BETA (parcial) | AGENDADO-01: lembretes listados e cancelados pela conversa | PAUSAR não existe no Harness; tarefa que começa sozinha numa conversa NOVA não existe |
+| 12. Prompt-to-App até prévia aberta | NOT_EXECUTED | EB-04: o modelo real escreveu, compilou, parou na checagem de tipos; o conserto (ABRIR-08k) está no código | rodar até build, verificação e prévia no WSL2 |
+| Conexões de IA (local, chave, linha de comando) | BETA | LLM-CLI-01 + UX-CONEXOES-01 | linha de comando no WSL2 do titular depende de rede |
+| MCP e conectores dentro da conversa | BETA | MCP-CONVERSA-01: listar/perguntar/chamar pelo Hub, contra servidor MCP real | ligar conector exige manifesto assinado (chave de publicador vazia por padrão) |

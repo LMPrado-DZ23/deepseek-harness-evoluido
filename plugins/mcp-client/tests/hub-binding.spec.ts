@@ -21,6 +21,7 @@ import {
 } from '../../integration-hub/src/service.ts'
 import { createMcpDispatcher, mcpLimitsFromCallPolicy, parseServerCatalog } from '../src/dispatch.ts'
 import { killAllMcpChildren, liveMcpChildCount } from '../src/transport.ts'
+import { desfechoParaOAgente, ferramentasDeConector, MAXIMO_DO_RESULTADO } from '../src/agent-tools.ts'
 
 const EVERYTHING = createRequire(import.meta.url).resolve('@modelcontextprotocol/server-everything/dist/index.js')
 
@@ -96,7 +97,7 @@ function signedManifest(overrides: Partial<IntegrationManifest> = {}): Integrati
   return { ...value, signature: sign(null, canonicalManifestBytes(value), privateKey).toString('base64') }
 }
 
-async function build(options: { readonly timeoutMs?: number; readonly registerServer?: boolean } = {}) {
+async function build(options: { readonly timeoutMs?: number; readonly registerServer?: boolean; readonly semDespachante?: boolean } = {}) {
   const root = await scratchRoot()
   const repository = new MemoryRepository()
   let sequence = 0
@@ -110,10 +111,12 @@ async function build(options: { readonly timeoutMs?: number; readonly registerSe
   const catalog = parseServerCatalog(options.registerServer === false ? {} : {
     [MANIFEST_ID]: { command: process.execPath, args: [EVERYTHING, 'stdio'], cwd: root, env: {} },
   })
-  service.useMcpDispatcher(createMcpDispatcher({
-    catalog,
-    limits: () => mcpLimitsFromCallPolicy(service.callPolicy),
-  }))
+  if (options.semDespachante !== true) {
+    service.useMcpDispatcher(createMcpDispatcher({
+      catalog,
+      limits: () => mcpLimitsFromCallPolicy(service.callPolicy),
+    }))
+  }
   return { service, repository }
 }
 
@@ -206,5 +209,75 @@ describe('Hub chamando um servidor MCP real', () => {
     expect(repository.eventRows.at(-1)).toMatchObject({ action: 'integration.called', outcome: 'not-executed', detail: 'mcp.echo unsigned' })
     expect((await service.health(admin, id)).calls).toBe(0)
     expect(liveMcpChildCount()).toBe(0)
+  })
+})
+
+describe('os conectores na conversa do agente, contra o servidor real', () => {
+  const exec = (agent: unknown) => ({ agent, signal: new AbortController().signal }) as never
+  const porNome = (tools: ReturnType<typeof ferramentasDeConector>, nome: string) => tools.find(tool => tool.name === nome)!
+
+  it('listar mostra só os MCP ligados; perguntar traz as ferramentas; chamar executa e o Hub conta', async () => {
+    const { service, repository } = await build()
+    const id = await enabled(service)
+    const desligado = (await service.register(admin, signedManifest({ id: 'outro-mcp', name: 'Outro' }))).integration.integration_id
+    const tools = ferramentasDeConector(service, agent => agent === 'agente-do-admin' ? admin : undefined)
+    expect(tools.map(tool => tool.name)).toEqual(['studio_connector_list', 'studio_connector_tools', 'studio_connector_call'])
+
+    const lista = JSON.parse((await porNome(tools, 'studio_connector_list').execute({}, exec('agente-do-admin')) as { json: string }).json)
+    expect(lista).toEqual({ conectores: [{ integration_id: id, name: 'Agenda MCP' }] })
+    expect(JSON.stringify(lista)).not.toContain(desligado)
+
+    const ferramentas = JSON.parse((await porNome(tools, 'studio_connector_tools').execute({ integration_id: id }, exec('agente-do-admin')) as { json: string }).json)
+    expect(ferramentas.ok).toBe(true)
+    expect(ferramentas.ferramentas).toContain('echo')
+
+    const chamada = JSON.parse((await porNome(tools, 'studio_connector_call').execute({ integration_id: id, tool: 'echo', arguments: { message: 'FRIGG' } }, exec('agente-do-admin')) as { json: string }).json)
+    expect(chamada).toMatchObject({ ok: true, erro_da_ferramenta: false, conteudo: 'Echo: FRIGG' })
+    // O Hub auditou as duas operações que subiram o servidor, e só elas.
+    expect(repository.eventRows.filter(row => row.action === 'integration.called').map(row => row.detail)).toEqual([
+      'tools-list OK attempts=1 cost=UNKNOWN', 'mcp.echo OK attempts=1 cost=UNKNOWN',
+    ])
+  })
+
+  it('sem dono conhecido, nada sobe; sem conector ligado, o aviso diz por quê', async () => {
+    const { service } = await build()
+    const tools = ferramentasDeConector(service, () => undefined)
+    await expect(porNome(tools, 'studio_connector_list').execute({}, exec('estranho'))).rejects.toThrow('não tem um dono conhecido')
+    await expect(porNome(tools, 'studio_connector_call').execute({ integration_id: 'x', tool: 'echo' }, exec('estranho'))).rejects.toThrow('não tem um dono conhecido')
+    const comDono = ferramentasDeConector(service, () => admin)
+    const vazia = JSON.parse((await porNome(comDono, 'studio_connector_list').execute({}, exec('a')) as { json: string }).json)
+    expect(vazia.conectores).toEqual([])
+    expect(vazia.aviso).toMatch(/manifesto assinado/u)
+  })
+
+  it('desfecho que não deu certo vai com o estado e o motivo; texto grande é cortado', () => {
+    expect(JSON.parse(desfechoParaOAgente({ state: 'TIMEOUT', message: 'demorou', attempts: 1, retried: false, latencyMs: 1, cost: {} as never }, () => ({})))).toEqual({ ok: false, estado: 'TIMEOUT', motivo: 'demorou' })
+    const grande = desfechoParaOAgente({ state: 'OK', value: 'x'.repeat(MAXIMO_DO_RESULTADO * 2), attempts: 1, retried: false, latencyMs: 1, cost: {} as never }, valor => ({ valor }))
+    expect(grande.length).toBe(MAXIMO_DO_RESULTADO)
+    expect(grande.endsWith('\u2026')).toBe(true)
+  })
+})
+
+describe('os limites da porta do agente', () => {
+  const exec = { agent: 'a', signal: new AbortController().signal } as never
+
+  it('a chamada do agente NUNCA se declara repetível: o Hub só repete o que foi declarado assim', async () => {
+    const pedidos: unknown[] = []
+    const hub = {
+      list: async () => [], mcpTools: async () => { throw new Error('não usado') },
+      callMcpTool: async (_actor: unknown, _id: string, pedido: unknown) => { pedidos.push(pedido); return { state: 'FAILED' as const, message: 'x', attempts: 1, retried: false, latencyMs: 1, cost: {} as never } },
+    }
+    const call = ferramentasDeConector(hub as never, () => admin).find(tool => tool.name === 'studio_connector_call')!
+    await call.execute({ integration_id: 'i', tool: 'enviar' }, exec)
+    expect(pedidos).toEqual([{ tool: 'enviar', arguments: {}, idempotent: false }])
+  })
+
+  it('perguntar as ferramentas passa pelas mesmas recusas da chamada, antes de subir qualquer processo', async () => {
+    const { service, repository } = await build({ semDespachante: true })
+    const id = await enabled(service)
+    await expect(service.mcpTools(admin, id)).rejects.toMatchObject({ code: 'NOT_EXECUTED' })
+    expect(repository.eventRows.filter(row => row.action === 'integration.called').map(row => row.detail)).toEqual(['tools-list no-dispatcher'])
+    const leitor: HubActor = { ...admin, role: 'viewer' }
+    await expect(service.mcpTools(leitor, id)).rejects.toMatchObject({ code: 'NOT_EXECUTED' })
   })
 })
