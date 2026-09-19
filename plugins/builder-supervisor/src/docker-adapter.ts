@@ -53,6 +53,18 @@ export interface DockerBuilderAdapterOptions {
  * daqui protege. Os builds montam o volume SÓ LEITURA.
  */
 export const STORE_REVERIFY_MS = 15 * 60_000
+/** O prazo de UMA conferência completa do store, independente de quem pergunta. */
+export const STORE_VERIFY_TIMEOUT_MS = 20 * 60_000
+
+/** Espera a promessa até o sinal desistir, sem cancelar o trabalho dela. */
+function esperar<T>(promessa: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason)
+  return new Promise<T>((resolve, reject) => {
+    const desistir = (): void => { reject(signal.reason) }
+    signal.addEventListener('abort', desistir, { once: true })
+    promessa.then(valor => { signal.removeEventListener('abort', desistir); resolve(valor) }, erro => { signal.removeEventListener('abort', desistir); reject(erro) })
+  })
+}
 export interface PreparedArtifact {
   readonly archivePath: string
   readonly archiveHandle?: FileHandle
@@ -153,9 +165,19 @@ export class DockerBuilderAdapter implements BuilderExecutionPort {
   }
 
   /**
-   * O store está íntegro? Conferência completa na primeira vez, quando o volume
-   * mudou ou quando a última passou de `STORE_REVERIFY_MS`; e uma conferência
-   * completa por vez — duas consultas simultâneas esperam a mesma.
+   * O store está íntegro? Conferência completa na primeira vez e quando o
+   * volume mudou; depois de `STORE_REVERIFY_MS`, a reconferência roda POR TRÁS
+   * e a resposta de agora é a última confirmada para o MESMO volume.
+   *
+   * Medido em 19/09/2026 no WSL2 do titular: a conferência completa leva
+   * minutos, e ela corria presa ao sinal de QUEM perguntou — a tela de saúde
+   * (8 s) ou o início de uma criação. O sinal curto cancelava a conferência
+   * inteira, ela nunca terminava, e o construtor ficava "indisponível" para
+   * sempre depois de 15 min: a criação parava em `BUILDER_UNAVAILABLE` com o
+   * gerente de pé. Agora a conferência tem o PRÓPRIO prazo
+   * (`STORE_VERIFY_TIMEOUT_MS`); quem pergunta só espera por ela, e desistir
+   * de esperar não a cancela. Uma reconferência que reprova derruba a próxima
+   * resposta: o que se ganha é não bloquear, e não deixar de conferir.
    */
   async #storeIsValid(signal: AbortSignal): Promise<boolean> {
     const now = this.options.now ?? Date.now
@@ -165,12 +187,24 @@ export class DockerBuilderAdapter implements BuilderExecutionPort {
     // Sem a data de criação não há como saber se é o MESMO volume: não se
     // guarda nada, e a conferência completa roda toda vez.
     const cached = this.#storeVerified
-    if (createdAt !== undefined && cached !== undefined && cached.createdAt === createdAt && now() - cached.at < STORE_REVERIFY_MS) return true
-    this.#storeVerification ??= verifyTemplateStoreVolume({ engine: this.options.engine, imageDigest: this.options.imageDigest, installationId: this.options.installationId, scopeId: this.options.scopeId, version: this.options.templateStoreVersion, treeSha256: this.options.templateStoreSha256, volumeName: this.#templateStoreVolume }, signal)
+    const mesmoVolume = createdAt !== undefined && cached !== undefined && cached.createdAt === createdAt
+    if (mesmoVolume && now() - cached.at < STORE_REVERIFY_MS) return true
+    const conferencia = this.#conferirStore(createdAt)
+    if (mesmoVolume) return true
+    return esperar(conferencia, signal)
+  }
+
+  /** Uma conferência completa por vez, com prazo próprio, gravando o resultado para o volume dela. */
+  #conferirStore(createdAt: string | undefined): Promise<boolean> {
+    const now = this.options.now ?? Date.now
+    this.#storeVerification ??= verifyTemplateStoreVolume({ engine: this.options.engine, imageDigest: this.options.imageDigest, installationId: this.options.installationId, scopeId: this.options.scopeId, version: this.options.templateStoreVersion, treeSha256: this.options.templateStoreSha256, volumeName: this.#templateStoreVolume }, AbortSignal.timeout(STORE_VERIFY_TIMEOUT_MS))
+      .catch(() => false)
+      .then(valid => {
+        this.#storeVerified = valid && createdAt !== undefined ? { createdAt, at: now() } : undefined
+        return valid
+      })
       .finally(() => { this.#storeVerification = undefined })
-    const valid = await this.#storeVerification
-    this.#storeVerified = valid && createdAt !== undefined ? { createdAt, at: now() } : undefined
-    return valid
+    return this.#storeVerification
   }
 
   async reconcile(expected: readonly RecoveredBuild[], signal: AbortSignal): Promise<readonly RecoveredBuild[]> {

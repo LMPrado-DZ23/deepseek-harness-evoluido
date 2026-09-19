@@ -123,10 +123,12 @@ describe('server-authoritative Docker builder adapter', () => {
     expect(primeira).toBeGreaterThan(0)
     await expect(adapter.preflight(signal)).resolves.toMatchObject({ state: 'OK' })
     expect(downloads.mock.calls.length).toBe(primeira)
-    // Passou a janela: conferência completa de novo.
+    // Passou a janela: a resposta é a última confirmada do MESMO volume, e a
+    // conferência completa roda por trás (não bloqueia quem perguntou).
     agora += STORE_REVERIFY_MS
-    await adapter.preflight(signal)
-    expect(downloads.mock.calls.length).toBe(primeira * 2)
+    await expect(adapter.preflight(signal)).resolves.toMatchObject({ state: 'OK' })
+    await vi.waitFor(() => { expect(downloads.mock.calls.length).toBe(primeira * 2) })
+    await new Promise(resolve => setTimeout(resolve, 10))
     // Volume recriado (outra data): conferência na hora, mesmo dentro da janela.
     ;(engine.volumes[0] as Record<string, unknown>).CreatedAt = '2026-09-19T06:00:00Z'
     await adapter.preflight(signal)
@@ -136,6 +138,23 @@ describe('server-authoritative Docker builder adapter', () => {
     await expect(adapter.preflight(signal)).resolves.toMatchObject({ state: 'BLOCKED_EXTERNAL' })
     await expect(adapter.preflight(signal)).resolves.toMatchObject({ state: 'BLOCKED_EXTERNAL' })
     expect(downloads.mock.calls.length).toBe(primeira * 5)
+  })
+
+  it('quem desiste de esperar NÃO cancela a conferência; e uma reconferência que reprova derruba a próxima resposta', async () => {
+    const engine = new FakeEngine()
+    ;(engine.volumes[0] as Record<string, unknown>).CreatedAt = '2026-09-19T05:00:00Z'
+    let agora = 1_000_000
+    const adapter = new DockerBuilderAdapter({ engine, imageDigest: image, installationId, scopeId, exportRoot: join(tmpdir(), 'dz23-builder-exports'), templateStoreVersion: templateVersion, templateStoreSha256, now: () => agora })
+    // Medido no WSL2 do titular: a tela de saúde (8 s) desistia, e o sinal dela
+    // cancelava a conferência inteira — que nunca terminava.
+    await expect(adapter.preflight(AbortSignal.abort())).resolves.toMatchObject({ state: 'BLOCKED_EXTERNAL' })
+    await vi.waitFor(async () => { await expect(adapter.preflight(AbortSignal.abort())).resolves.toMatchObject({ state: 'OK' }) })
+    // O conteúdo muda sem recriar o volume; passada a janela, a reconferência
+    // por trás reprova, e a resposta seguinte já é recusa.
+    engine.templateDigest = 'e'.repeat(64)
+    agora += STORE_REVERIFY_MS
+    await expect(adapter.preflight(new AbortController().signal)).resolves.toMatchObject({ state: 'OK' })
+    await vi.waitFor(async () => { await expect(adapter.preflight(new AbortController().signal)).resolves.toMatchObject({ state: 'BLOCKED_EXTERNAL' }) })
   })
 
   it('returns BLOCKED_EXTERNAL for missing/mismatched images without accepting another image', async () => {
