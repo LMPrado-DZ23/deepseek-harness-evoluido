@@ -1,5 +1,6 @@
 import { routePrivacyProfile } from '@dz23-studio/route-health'
 import { describe, expect, it, vi } from 'vitest'
+import { conferido } from './registro-conferido.js'
 import type { AppSpecV1 } from '../src/appspec.js'
 import { IntakeEngine, nextIntakeQuestion } from '../src/intake.js'
 import type { StudioApproval, StudioAppSpecRecord, StudioDesignSpecRecord, StudioEvidence, StudioIntakeTurn, StudioPlan, StudioProject, StudioRun } from '../src/model.js'
@@ -15,14 +16,14 @@ class MemoryRepository implements PromptToAppRepository {
   planRows: StudioPlan[] = []; runRows: StudioRun[] = []; evidenceRows: StudioEvidence[] = []; approvalRows: StudioApproval[] = []
   projects = () => this.projectRows; specs = () => this.specRows; designs = () => this.designRows; turns = () => this.turnRows; plans = () => this.planRows
   runs = () => this.runRows; evidence = () => this.evidenceRows; approvals = () => this.approvalRows
-  putProject = async (v: StudioProject) => { this.projectRows = upsert(this.projectRows, v, 'project_id') }
-  putSpec = async (v: StudioAppSpecRecord) => { this.specRows = upsert(this.specRows, v, 'spec_id') }
-  putDesign = async (v: StudioDesignSpecRecord) => { this.designRows = upsert(this.designRows, v, 'design_id') }
-  putTurn = async (v: StudioIntakeTurn) => { this.turnRows = upsert(this.turnRows, v, 'turn_id') }
-  putPlan = async (v: StudioPlan) => { this.planRows = upsert(this.planRows, v, 'plan_id') }
-  putRun = async (v: StudioRun) => { this.runRows = upsert(this.runRows, v, 'run_id') }
-  putEvidence = async (v: StudioEvidence) => { this.evidenceRows = upsert(this.evidenceRows, v, 'evidence_id') }
-  putApproval = async (v: StudioApproval) => { this.approvalRows = upsert(this.approvalRows, v, 'approval_id') }
+  putProject = async (v: StudioProject) => { this.projectRows = upsert(this.projectRows, conferido(v, 'project_id'), 'project_id') }
+  putSpec = async (v: StudioAppSpecRecord) => { this.specRows = upsert(this.specRows, conferido(v, 'spec_id'), 'spec_id') }
+  putDesign = async (v: StudioDesignSpecRecord) => { this.designRows = upsert(this.designRows, conferido(v, 'design_id'), 'design_id') }
+  putTurn = async (v: StudioIntakeTurn) => { this.turnRows = upsert(this.turnRows, conferido(v, 'turn_id'), 'turn_id') }
+  putPlan = async (v: StudioPlan) => { this.planRows = upsert(this.planRows, conferido(v, 'plan_id'), 'plan_id') }
+  putRun = async (v: StudioRun) => { this.runRows = upsert(this.runRows, conferido(v, 'run_id'), 'run_id') }
+  putEvidence = async (v: StudioEvidence) => { this.evidenceRows = upsert(this.evidenceRows, conferido(v, 'evidence_id'), 'evidence_id') }
+  putApproval = async (v: StudioApproval) => { this.approvalRows = upsert(this.approvalRows, conferido(v, 'approval_id'), 'approval_id') }
 }
 
 function upsert<T, K extends keyof T>(rows: T[], value: T, key: K): T[] { return [...rows.filter(row => row[key] !== value[key]), value] }
@@ -739,6 +740,7 @@ describe('runsInScope — UMA leitura do histórico (T-22)', () => {
         await repository.putRun({
           project_id: created.project_id, org_id: ownerA.orgId, tenant_id: ownerA.tenantId,
           run_id: `${created.project_id}-r${String(r)}`, plan_id: 'plan', operation_id: `op-${String(p)}-${String(r)}`,
+          owner_session_id: 'session', sandbox: 'full', route: null, model: null, input_tokens: null, output_tokens: null, estimated_cost_usd: null, run_directory: '/runs/x', acceptance_checks: [],
           stage: 'build', attempt: 1, state: r % 2 === 0 ? 'PASSED' : 'FAILED',
           artifact_sha256: null, failure_code: null,
           started_at: '2026-09-01T00:00:00.000Z', finished_at: '2026-09-01T00:01:00.000Z',
@@ -783,7 +785,8 @@ describe('runsInScope — UMA leitura do histórico (T-22)', () => {
     await repository.putRun({
       project_id: ids[0]!, org_id: 'org-invasora', tenant_id: 'ws-invasor',
       run_id: 'execucao-de-outro-inquilino', plan_id: 'plan', operation_id: 'op-x',
-      stage: 'build', attempt: 1, state: 'PASSED', artifact_sha256: null, failure_code: null,
+      owner_session_id: 'session', sandbox: 'full', route: null, model: null, input_tokens: null, output_tokens: null, estimated_cost_usd: null, run_directory: '/runs/x', acceptance_checks: [],
+          stage: 'build', attempt: 1, state: 'PASSED', artifact_sha256: null, failure_code: null,
       started_at: '2026-09-01T00:00:00.000Z', finished_at: '2026-09-01T00:01:00.000Z',
     } as never)
     const vistos = service.runsInScope(ownerA).map(run => run.run_id)

@@ -3,7 +3,7 @@ import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { JobId, JobStart } from '@deepseek-ai/dsh-jobs'
 import { SessionId } from '@deepseek-ai/dsh-session'
-import type { Domain, KvTable } from '@deepseek-ai/dsh-storage-domain'
+import type { Domain } from '@deepseek-ai/dsh-storage-domain'
 import type {} from '@dz23-studio/identity'
 import { ROTA_LOCAL } from '@dz23-studio/route-health'
 import type {} from '@dz23-studio/tenancy'
@@ -11,7 +11,7 @@ import { PRODUCTION_BUILDER_ROOT_POLICY, builderRuntimeRegistryPath, type Builde
 import { mkdir, readFile, statfs } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
-import { chaveArmazenada } from './creation-key.js'
+import { DomainPromptToAppRepository } from './domain-repository.js'
 import { healthCapabilities, storageProbe } from './capability-registry.js'
 import { createPromptToAppHttpHandler, type StudioAppsHealth } from './http.js'
 import { PromptToAppJobService, type EmergencyStopGuard, type PromptToAppJobRegistry } from './jobs.js'
@@ -228,44 +228,6 @@ declare module '@deepseek-ai/cordis' {
   interface Context { studioPromptToApp: StudioPromptToAppRuntime }
 }
 
-class DomainPromptToAppRepository implements PromptToAppRepository {
-  constructor(
-    private readonly projectTable: KvTable<PromptToAppKey, StudioProject>,
-    private readonly specTable: KvTable<PromptToAppKey, StudioAppSpecRecord>,
-    private readonly designTable: KvTable<PromptToAppKey, StudioDesignSpecRecord>,
-    private readonly turnTable: KvTable<PromptToAppKey, StudioIntakeTurn>,
-    private readonly planTable: KvTable<PromptToAppKey, StudioPlan>,
-    private readonly runTable: KvTable<PromptToAppKey, StudioRun>,
-    private readonly evidenceTable: KvTable<PromptToAppKey, StudioEvidence>,
-    private readonly approvalTable: KvTable<PromptToAppKey, StudioApproval>,
-    private readonly creationKeyTable: KvTable<PromptToAppKey, StudioCreationKey>,
-  ) {}
-  projects() { return tableValues(this.projectTable) }
-  putProject(value: StudioProject) { return this.projectTable.put(value.project_id as PromptToAppKey, value) }
-  specs() { return tableValues(this.specTable) }
-  putSpec(value: StudioAppSpecRecord) { return this.specTable.put(value.spec_id as PromptToAppKey, value) }
-  designs() { return tableValues(this.designTable) }
-  putDesign(value: StudioDesignSpecRecord) { return this.designTable.put(value.design_id as PromptToAppKey, value) }
-  turns() { return tableValues(this.turnTable) }
-  putTurn(value: StudioIntakeTurn) { return this.turnTable.put(value.turn_id as PromptToAppKey, value) }
-  plans() { return tableValues(this.planTable) }
-  putPlan(value: StudioPlan) { return this.planTable.put(value.plan_id as PromptToAppKey, value) }
-  runs() { return tableValues(this.runTable) }
-  putRun(value: StudioRun) { return this.runTable.put(value.run_id as PromptToAppKey, value) }
-  evidence() { return tableValues(this.evidenceTable) }
-  putEvidence(value: StudioEvidence) { return this.evidenceTable.put(value.evidence_id as PromptToAppKey, value) }
-  approvals() { return tableValues(this.approvalTable) }
-  putApproval(value: StudioApproval) { return this.approvalTable.put(value.approval_id as PromptToAppKey, value) }
-  creationKeys() { return tableValues(this.creationKeyTable) }
-  putCreationKey(value: StudioCreationKey) {
-    // A chave de armazenamento leva o escopo junto, e nao so a chave do
-    // cliente: duas pessoas podem escolher a mesma, e a segunda nao pode
-    // sobrescrever a reserva da primeira.
-    return this.creationKeyTable.put(chaveArmazenada({ orgId: value.org_id, tenantId: value.tenant_id, userId: value.user_id }, value.request_key) as PromptToAppKey, value)
-  }
-}
-
-function tableValues<T>(table: KvTable<PromptToAppKey, T>): T[] { return [...table.entries()].map(([, value]) => value) }
 
 /**
  * O armazenamento por inquilino das respostas, quando ele foi PEDIDO e existe.

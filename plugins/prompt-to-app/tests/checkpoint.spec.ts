@@ -2,6 +2,7 @@ import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { conferido } from './registro-conferido.js'
 import { latestGreenCheckpoint, noGreenReason, runCheckpoints } from '../src/checkpoint.js'
 import type { ProjectState, StudioApproval, StudioAppSpecRecord, StudioDesignSpecRecord, StudioEvidence, StudioIntakeTurn, StudioPlan, StudioProject, StudioRun } from '../src/model.js'
 import { studioProjectSchema, studioRunSchema } from '../src/model.js'
@@ -13,14 +14,14 @@ class MemoryRepository implements PromptToAppRepository {
   planRows: StudioPlan[] = []; runRows: StudioRun[] = []; evidenceRows: StudioEvidence[] = []; approvalRows: StudioApproval[] = []
   projects = () => this.projectRows; specs = () => this.specRows; designs = () => this.designRows; turns = () => this.turnRows; plans = () => this.planRows
   runs = () => this.runRows; evidence = () => this.evidenceRows; approvals = () => this.approvalRows
-  putProject = async (v: StudioProject) => { this.projectRows = upsert(this.projectRows, v, 'project_id') }
-  putSpec = async (v: StudioAppSpecRecord) => { this.specRows = upsert(this.specRows, v, 'spec_id') }
-  putDesign = async (v: StudioDesignSpecRecord) => { this.designRows = upsert(this.designRows, v, 'design_id') }
-  putTurn = async (v: StudioIntakeTurn) => { this.turnRows = upsert(this.turnRows, v, 'turn_id') }
-  putPlan = async (v: StudioPlan) => { this.planRows = upsert(this.planRows, v, 'plan_id') }
-  putRun = async (v: StudioRun) => { this.runRows = upsert(this.runRows, v, 'run_id') }
-  putEvidence = async (v: StudioEvidence) => { this.evidenceRows = upsert(this.evidenceRows, v, 'evidence_id') }
-  putApproval = async (v: StudioApproval) => { this.approvalRows = upsert(this.approvalRows, v, 'approval_id') }
+  putProject = async (v: StudioProject) => { this.projectRows = upsert(this.projectRows, conferido(v, 'project_id'), 'project_id') }
+  putSpec = async (v: StudioAppSpecRecord) => { this.specRows = upsert(this.specRows, conferido(v, 'spec_id'), 'spec_id') }
+  putDesign = async (v: StudioDesignSpecRecord) => { this.designRows = upsert(this.designRows, conferido(v, 'design_id'), 'design_id') }
+  putTurn = async (v: StudioIntakeTurn) => { this.turnRows = upsert(this.turnRows, conferido(v, 'turn_id'), 'turn_id') }
+  putPlan = async (v: StudioPlan) => { this.planRows = upsert(this.planRows, conferido(v, 'plan_id'), 'plan_id') }
+  putRun = async (v: StudioRun) => { this.runRows = upsert(this.runRows, conferido(v, 'run_id'), 'run_id') }
+  putEvidence = async (v: StudioEvidence) => { this.evidenceRows = upsert(this.evidenceRows, conferido(v, 'evidence_id'), 'evidence_id') }
+  putApproval = async (v: StudioApproval) => { this.approvalRows = upsert(this.approvalRows, conferido(v, 'approval_id'), 'approval_id') }
 }
 function upsert<T, K extends keyof T>(rows: T[], value: T, key: K): T[] { return [...rows.filter(row => row[key] !== value[key]), value] }
 

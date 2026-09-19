@@ -1,6 +1,7 @@
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { conferido } from './registro-conferido.js'
 import { CSRF_COOKIE, SESSION_COOKIE, type SessionRecord, type StudioIdentityService } from '@dz23-studio/identity'
 import type { StudioTenancyService } from '@dz23-studio/tenancy'
 import type { AppSpecV1 } from '../src/appspec.js'
@@ -25,14 +26,14 @@ class MemoryRepository implements PromptToAppRepository {
   keyRows: StudioCreationKey[] = []
   projects = () => this.projectRows; specs = () => this.specRows; designs = () => this.designRows; turns = () => this.turnRows; plans = () => this.planRows
   runs = () => this.runRows; evidence = () => this.evidenceRows; approvals = () => this.approvalRows; creationKeys = () => this.keyRows
-  putProject = async (v: StudioProject) => { this.projectRows = up(this.projectRows, v, 'project_id') }
-  putSpec = async (v: StudioAppSpecRecord) => { this.specRows = up(this.specRows, v, 'spec_id') }
-  putDesign = async (v: StudioDesignSpecRecord) => { this.designRows = up(this.designRows, v, 'design_id') }
-  putTurn = async (v: StudioIntakeTurn) => { this.turnRows = up(this.turnRows, v, 'turn_id') }
-  putPlan = async (v: StudioPlan) => { this.planRows = up(this.planRows, v, 'plan_id') }
-  putRun = async (v: StudioRun) => { this.runRows = up(this.runRows, v, 'run_id') }
-  putEvidence = async (v: StudioEvidence) => { this.evidenceRows = up(this.evidenceRows, v, 'evidence_id') }
-  putApproval = async (v: StudioApproval) => { this.approvalRows = up(this.approvalRows, v, 'approval_id') }
+  putProject = async (v: StudioProject) => { this.projectRows = up(this.projectRows, conferido(v, 'project_id'), 'project_id') }
+  putSpec = async (v: StudioAppSpecRecord) => { this.specRows = up(this.specRows, conferido(v, 'spec_id'), 'spec_id') }
+  putDesign = async (v: StudioDesignSpecRecord) => { this.designRows = up(this.designRows, conferido(v, 'design_id'), 'design_id') }
+  putTurn = async (v: StudioIntakeTurn) => { this.turnRows = up(this.turnRows, conferido(v, 'turn_id'), 'turn_id') }
+  putPlan = async (v: StudioPlan) => { this.planRows = up(this.planRows, conferido(v, 'plan_id'), 'plan_id') }
+  putRun = async (v: StudioRun) => { this.runRows = up(this.runRows, conferido(v, 'run_id'), 'run_id') }
+  putEvidence = async (v: StudioEvidence) => { this.evidenceRows = up(this.evidenceRows, conferido(v, 'evidence_id'), 'evidence_id') }
+  putApproval = async (v: StudioApproval) => { this.approvalRows = up(this.approvalRows, conferido(v, 'approval_id'), 'approval_id') }
   putCreationKey = async (v: StudioCreationKey) => { this.keyRows = [...this.keyRows.filter(r => r.request_key !== v.request_key), v] }
 }
 function up<T, K extends keyof T>(rows: T[], value: T, key: K): T[] { return [...rows.filter(row => row[key] !== value[key]), value] }

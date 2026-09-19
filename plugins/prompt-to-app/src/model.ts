@@ -188,10 +188,17 @@ export const studioRunSchema = z.object({
   failure_code: z.string().nullable(),
   acceptance_checks: z.array(z.object({
     id: z.string().min(1), label: z.string().min(1),
+    // A frase em português que a tela mostra (`acceptance.ts`). Ela entrou lá
+    // em 09/09 e faltou aqui: toda execução gravada desde então era recusada na
+    // reabertura, e o FRIGG não subia mais. Opcional: execuções antigas não têm.
+    title: z.string().min(1).max(2_000).optional(),
     kind: z.enum(['language', 'title', 'page', 'section', 'entity', 'criterion', 'flow', 'auth', 'crud', 'scheduling', 'dashboard', 'saas']),
     expected: z.string().optional(),
     flow: z.object({
-      form_test_id: z.string().min(1), list_test_id: z.string().min(1), marker_field: z.string().min(1),
+      // Vazios de propósito na conferência do painel (`addDashboardCheck`), que
+      // não tem formulário nem lista. O `min(1)` que havia aqui recusava na
+      // reabertura toda execução de um painel — o mesmo defeito do `title`.
+      form_test_id: z.string(), list_test_id: z.string(), marker_field: z.string().min(1),
       // Legacy runs used requires_auth. Keep it readable while every new run
       // writes the two explicit boundaries below.
       requires_auth: z.boolean().optional(),
