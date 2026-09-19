@@ -8,6 +8,8 @@ export type ConversationEvent =
   | { readonly type: 'message.assistant'; readonly seq: number; readonly at: number; readonly id: string; readonly text: string; readonly interrupted: boolean; readonly truncated: boolean }
   | { readonly type: 'turn.state'; readonly seq: number; readonly at: number; readonly state: 'working' | 'idle' }
   | { readonly type: 'turn.failed'; readonly seq: number; readonly at: number; readonly reason: string }
+  | { readonly type: 'todo.state'; readonly seq: number; readonly at: number; readonly items: readonly { readonly content: string; readonly status: 'pending' | 'in_progress' | 'completed' }[] }
+  | { readonly type: 'plan.proposed'; readonly seq: number; readonly at: number; readonly text: string }
   | { readonly type: 'tool.state'; readonly seq: number; readonly at: number; readonly call_id: string; readonly label: string; readonly state: 'running' | 'succeeded' | 'failed' }
   | { readonly type: 'approval.requested'; readonly seq: number; readonly at: number; readonly request_id: string; readonly tool_label: string; readonly explanation: string }
   | { readonly type: 'approval.resolved'; readonly seq: number; readonly at: number; readonly request_id: string; readonly outcome: 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable' }
@@ -295,6 +297,11 @@ export function isConversationEvent(value: unknown): value is ConversationEvent 
   if (value.type === 'compaction.checkpoint') return typeof value.id === 'string' && typeof value.text === 'string'
   if (value.type === 'turn.state') return value.state === 'working' || value.state === 'idle'
   if (value.type === 'turn.failed') return typeof value.reason === 'string'
+  if (value.type === 'plan.proposed') return typeof value.text === 'string'
+  if (value.type === 'todo.state') {
+    return Array.isArray(value.items) && value.items.every(item => isRecord(item) && typeof item.content === 'string'
+      && (item.status === 'pending' || item.status === 'in_progress' || item.status === 'completed'))
+  }
   if (value.type === 'tool.state') {
     return typeof value.call_id === 'string' && typeof value.label === 'string'
       && (value.state === 'running' || value.state === 'succeeded' || value.state === 'failed')

@@ -81,3 +81,18 @@ describe('o modelo padrão da conversa (19/09/2026: sem chave, a conversa parava
     expect(avaliar('model', env)).toBe('auto')
   })
 })
+
+describe('os modelos locais declarados: o das criações e o do agente', () => {
+  const trecho = perfil.slice(perfil.indexOf('      ollama:'), perfil.indexOf('- insert:'))
+  const expressao = /models: !!js >-\n((?: {10}.*\n)+)/u.exec(trecho)![1]!.split('\n').map(linha => linha.trim()).join(' ')
+  const avaliar = (env: Record<string, string>) => new Function('process', `return (${expressao})`)({ env }) as { id: string }[]
+
+  it('sem modelo do agente, só o das criações', () => {
+    expect(avaliar({ DZ23_OLLAMA_MODEL: 'qwen2.5-coder:7b' }).map(m => m.id)).toEqual(['qwen2.5-coder:7b'])
+  })
+
+  it('com modelo do agente, os dois, sem repetir', () => {
+    expect(avaliar({ DZ23_OLLAMA_MODEL: 'qwen2.5-coder:7b', DZ23_AGENT_MODEL: 'frigg-qwen3' }).map(m => m.id)).toEqual(['qwen2.5-coder:7b', 'frigg-qwen3'])
+    expect(avaliar({ DZ23_OLLAMA_MODEL: 'x', DZ23_AGENT_MODEL: 'x' }).map(m => m.id)).toEqual(['x'])
+  })
+})

@@ -17,6 +17,7 @@ import type {
 import { MAX_ATTACHMENTS_PER_MESSAGE } from './assistant-attachments.js'
 import type { AssistantSessionLaunch, AssistantSessionLauncher } from './assistant-session.js'
 import { t } from './i18n.js'
+import { listaDeTarefas, planoApresentado, rotuloDoAgenteGeral, type ItemDaLista } from './assistant-tool-labels.js'
 
 const MAX_PROMPT_BYTES = 32 * 1024
 const MAX_PUBLIC_EVENTS = 500
@@ -40,6 +41,10 @@ export type AssistantPublicEvent =
   | { readonly type: 'turn.state'; readonly seq: number; readonly at: number; readonly state: 'working' | 'idle' }
   /** O turno TERMINOU EM ERRO. Antes ele virava só `idle`, e a pessoa ficava sem resposta e sem motivo. */
   | { readonly type: 'turn.failed'; readonly seq: number; readonly at: number; readonly reason: string }
+  /** A lista de tarefas do agente, inteira, cada vez que ele a reescreve. */
+  | { readonly type: 'todo.state'; readonly seq: number; readonly at: number; readonly items: readonly ItemDaLista[] }
+  /** O plano que o agente apresentou para aprovação, em markdown. */
+  | { readonly type: 'plan.proposed'; readonly seq: number; readonly at: number; readonly text: string }
   | { readonly type: 'tool.state'; readonly seq: number; readonly at: number; readonly call_id: string; readonly label: string; readonly state: 'running' | 'succeeded' | 'failed' }
   | { readonly type: 'approval.requested'; readonly seq: number; readonly at: number; readonly request_id: string; readonly tool_label: string; readonly explanation: string }
   | { readonly type: 'approval.resolved'; readonly seq: number; readonly at: number; readonly request_id: string; readonly outcome: 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable' }
@@ -367,9 +372,21 @@ export function sanitizeAssistantEvent(value: unknown): AssistantPublicEvent | u
   if (type === 'tool/call') {
     const callId = safeIdentifier(data.callId)
     if (callId === undefined) return undefined
+    const name = typeof data.name === 'string' ? data.name : ''
+    // A lista de tarefas e o plano são o que a pessoa mais precisa ver de um
+    // agente trabalhando: eles viram itens próprios da conversa, e não uma
+    // linha "atualizando a lista".
+    if (name === 'todo_write') {
+      const items = listaDeTarefas(data.arguments)
+      if (items !== undefined) return { type: 'todo.state', seq, at, items }
+    }
+    if (name === 'exit_plan_mode') {
+      const text = planoApresentado(data.arguments)
+      if (text !== undefined) return { type: 'plan.proposed', seq, at, text }
+    }
     return {
       type: 'tool.state', seq, at, call_id: callId,
-      label: publicToolLabel(typeof data.name === 'string' ? data.name : ''),
+      label: rotuloDoAgenteGeral(name, data.arguments) ?? publicToolLabel(name),
       state: 'running',
     }
   }
@@ -390,7 +407,7 @@ export function sanitizeAssistantEvent(value: unknown): AssistantPublicEvent | u
     if (requestId === undefined) return undefined
     return {
       type: 'approval.requested', seq, at, request_id: requestId,
-      tool_label: publicToolLabel(typeof data.toolName === 'string' ? data.toolName : ''),
+      tool_label: rotuloDoAgenteGeral(typeof data.toolName === 'string' ? data.toolName : '', data.arguments ?? data.input) ?? publicToolLabel(typeof data.toolName === 'string' ? data.toolName : ''),
       explanation: t('assistant.approvalExplanation'),
     }
   }

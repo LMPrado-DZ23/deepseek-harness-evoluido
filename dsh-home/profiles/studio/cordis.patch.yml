@@ -84,11 +84,14 @@
         retryPolicy:
           mode: normal
           maxRetries: 0
-        models:
-          - id: !!js process.env.DZ23_OLLAMA_MODEL ?? 'qwen3-coder'
-            name: Modelo local configurado
-            contextWindow: 131072
-            maxTokens: 32768
+        # O modelo das CRIAÇÕES (`DZ23_OLLAMA_MODEL`) e, quando é outro, o do
+        # AGENTE GERAL (`DZ23_AGENT_MODEL`): o agente precisa de um modelo bom
+        # em chamar ferramentas, e o qwen2.5-coder:7b não é (medido em
+        # 19/09/2026: escreveu a chamada como texto em vez de fazê-la).
+        models: !!js >-
+          [process.env.DZ23_OLLAMA_MODEL ?? 'qwen3-coder', process.env.DZ23_AGENT_MODEL]
+            .filter((id, i, all) => typeof id === 'string' && id !== '' && all.indexOf(id) === i)
+            .map((id, i) => ({ id, name: i === 0 ? 'Modelo local configurado' : 'Modelo local do agente', contextWindow: 131072, maxTokens: 32768 }))
 
 - insert:
     # Providers are registered but never exposed through the generic

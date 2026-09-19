@@ -72,5 +72,22 @@
     "symlinkNotServed": "Links simbólicos não são servidos.",
     "fileNotFound": "Arquivo não encontrado.",
     "interfaceNotBuilt": "Interface ainda não foi compilada."
+  },
+  "tools": {
+    "webSearch": "Pesquisando na internet",
+    "webFetch": "Lendo a página",
+    "read": "Lendo o arquivo",
+    "write": "Escrevendo o arquivo",
+    "edit": "Editando o arquivo",
+    "search": "Procurando nos arquivos",
+    "bash": "Rodando um comando",
+    "skill": "Abrindo a habilidade",
+    "delegation": "Delegando trabalho a um subagente",
+    "workflow": "Conduzindo uma tarefa longa em etapas",
+    "jobs": "Acompanhando um trabalho em segundo plano",
+    "goal": "Atualizando o objetivo",
+    "ask": "Fazendo uma pergunta a você",
+    "todo": "Atualizando a lista de tarefas",
+    "plan": "Apresentando o plano"
   }
 }

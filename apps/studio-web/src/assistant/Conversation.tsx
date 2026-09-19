@@ -456,6 +456,19 @@ export function ConversationItem({ event }: { readonly event: ConversationEvent 
     return <><strong>{copy.approvalPending}</strong><p>{event.tool_label}: {event.explanation}</p></>
   }
   if (event.type === 'turn.failed') return <p className="conversation-failed" role="alert">{event.reason}</p>
+  if (event.type === 'plan.proposed') {
+    return <><strong>{copy.planProposed}</strong><Markdown text={event.text} /></>
+  }
+  if (event.type === 'todo.state') {
+    return <><strong>{copy.todoTitle}</strong>
+      <ul className="todo-list">
+        {event.items.map(item => <li key={item.content} className={`todo-${item.status}`}>
+          <span aria-hidden="true">{item.status === 'completed' ? '✓' : item.status === 'in_progress' ? '▸' : '○'}</span>
+          <span>{item.content}</span>
+          <span className="sr-only">{item.status === 'completed' ? copy.todoDone : item.status === 'in_progress' ? copy.todoDoing : copy.todoPending}</span>
+        </li>)}
+      </ul></>
+  }
   /* c8 ignore next -- turn.state never reaches here: isRenderable filters it. */
   if (event.type !== 'approval.resolved') return null
   const outcome = event.outcome === 'allowed-once' ? copy.approvalAllowed

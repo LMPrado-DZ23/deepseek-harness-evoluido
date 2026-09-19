@@ -126,5 +126,10 @@
   "pastaEnviado": "Arquivo enviado: {caminho}. Peça ao FRIGG para lê-lo pelo nome.",
   "pastaFalhou": "Não consegui enviar o arquivo.",
   "pastaIndisponivel": "A pasta de trabalho não está disponível.",
-  "pastaBaixar": "Baixar {caminho}"
+  "pastaBaixar": "Baixar {caminho}",
+  "planProposed": "Plano proposto",
+  "todoTitle": "Lista de tarefas",
+  "todoDone": "(feito)",
+  "todoDoing": "(fazendo agora)",
+  "todoPending": "(a fazer)"
 }
